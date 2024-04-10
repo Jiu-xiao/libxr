@@ -1,5 +1,3 @@
-#pragma once
-
 #include <errno.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -13,6 +11,7 @@ using namespace LibXR;
 ErrorCode Signal::Action(Thread &thread, int signal) {
   signal += SIGRTMIN;
   ASSERT(signal >= SIGRTMIN && signal <= SIGRTMAX);
+
   if (pthread_kill(thread, signal) == 0) {
     return NO_ERR;
   } else {

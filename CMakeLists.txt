@@ -79,6 +79,6 @@ if(LIBXR_TEST_BUILD)
 
   target_include_directories(
       test
-      PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+      PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
   )
 endif()
