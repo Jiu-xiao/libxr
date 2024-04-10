@@ -14,4 +14,5 @@ public:
 private:
   libxr_mutex_handle mutex_handle_;
 };
+
 } // namespace LibXR
