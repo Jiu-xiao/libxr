@@ -1,11 +1,14 @@
-#include "libxr.hpp"
+#pragma once
+
 #include "libxr_def.hpp"
 #include "thread.hpp"
+#include <cstdint>
 
 namespace LibXR {
 class Signal {
 public:
   static ErrorCode Action(Thread &thread, int signal);
-  static ErrorCode Wait(int signal, uint32_t timeout);
+  static ErrorCode ActionFromCallback(Thread &thread, int signal, bool in_isr);
+  static ErrorCode Wait(int signal, uint32_t timeout = UINT32_MAX);
 };
 } // namespace LibXR

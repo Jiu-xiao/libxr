@@ -40,20 +40,24 @@ private:
   OperationBlock<Args...> *block_;
 };
 
-typedef size_t (*WriteFunction)(const RawData &data, Operation<ErrorCode> &op);
-typedef size_t (*ReadFunction)(RawData &data,
-                               Operation<ErrorCode, const RawData &> &op);
+typedef ErrorCode (*WriteFunction)(const RawData &data,
+                                   Operation<ErrorCode> &op);
+typedef ErrorCode (*ReadFunction)(RawData &data,
+                                  Operation<ErrorCode, const RawData &> &op);
 
 class ReadPort {
 public:
-  ReadFunction *read;
-  OperationBlock<ErrorCode, const RawData &> *operation;
+  ReadFunction read;
 };
 
 class WritePort {
 public:
-  WriteFunction *write;
-  OperationBlock<ErrorCode> *operation;
+  WriteFunction write;
 };
 
-static class : public ReadPort, public WritePort { } STDIO; } // namespace LibXR
+class STDIO {
+public:
+  static ReadFunction read;
+  static WriteFunction write;
+};
+} // namespace LibXR
