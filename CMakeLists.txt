@@ -38,7 +38,7 @@ file(
   GLOB ${PROJECT_NAME}_SYSTEM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 file(
-  GLOB ${PROJECT_NAME}_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+  GLOB ${PROJECT_NAME}_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*.cpp")
   
   
 
@@ -57,19 +57,28 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM})
 
 
+set(LIBXR_TEST_BUILD True)
 
-project(example)
+if(LIBXR_TEST_BUILD)
+  if(PLATFORM MATCHES "Linux")
+    message("LibXR union test build.")
+  else()
+    message(FATAL_ERROR "Only linux can build union test.")
+  endif()
 
-add_executable(example main.cpp)
-  
-add_dependencies(example xr)
+  project(test)
 
-target_link_libraries(
-    example
-    PUBLIC xr
-)
+  add_executable(test main.cpp)
+    
+  add_dependencies(test xr)
 
-target_include_directories(
-    example
-    PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-)
+  target_link_libraries(
+      test
+      PUBLIC xr
+  )
+
+  target_include_directories(
+      test
+      PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+  )
+endif()

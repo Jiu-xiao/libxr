@@ -1,5 +1,6 @@
-#include "libxr.hpp"
-#include "libxr_platform_def.hpp"
+#pragma once
+
+#include "libxr_platform.hpp"
 #include "libxr_time.hpp"
 
 namespace LibXR {
@@ -16,16 +17,20 @@ public:
   Thread(libxr_thread_handle handle) : thread_handle_(handle){};
 
   template <typename ArgType>
-  static Thread Create(ArgType arg, Callback<void>, const char *name,
-                       size_t stack_depth, Priority priority);
+  Thread Create(ArgType arg, void (*function)(ArgType arg), const char *name,
+                size_t stack_depth, Priority priority);
 
-  static Thread Current(void) { return Thread(pthread_self()); }
+  static Thread Current(void);
 
-  static void Sleep(uint32_t millisecond);
+  static uint32_t GetTime();
 
-  static void SleepUntil(TimestampMS millisecond);
+  static void Sleep(uint32_t milliseconds);
 
-  void Yield();
+  static void SleepUntil(TimestampMS milliseconds);
+
+  static void Yield();
+
+  operator libxr_thread_handle() { return thread_handle_; }
 
 private:
   libxr_thread_handle thread_handle_;
