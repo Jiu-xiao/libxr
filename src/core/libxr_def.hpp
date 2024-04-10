@@ -52,21 +52,21 @@
 #endif
 
 typedef enum {
-  NO_ERR,
-  ERR_FAIL,
-  ERR_MEM,
-  ERR_ARG,
-  ERR_STATE,
-  ERR_SIZE,
-  ERR_NOT_FOUND,
-  ERR_NOT_SUPPORT,
-  ERR_TIMEOUT,
-  ERR_NO_REPONSE,
-  ERR_CHECK,
-  ERR_BUSY,
-  ERR_INIT,
-  ERR_EMPTY,
-  ERR_FULL,
+  NO_ERR = 0,
+  ERR_FAIL = -1,
+  ERR_MEM = -2,
+  ERR_ARG = -3,
+  ERR_STATE = -4,
+  ERR_SIZE = -5,
+  ERR_NOT_FOUND = -6,
+  ERR_NOT_SUPPORT = -7,
+  ERR_TIMEOUT = -8,
+  ERR_NO_REPONSE = -9,
+  ERR_CHECK = -10,
+  ERR_BUSY = -11,
+  ERR_INIT = -12,
+  ERR_EMPTY = -13,
+  ERR_FULL = -14,
 } ErrorCode;
 
 #ifdef ASSERT

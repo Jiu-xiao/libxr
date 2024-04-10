@@ -16,7 +16,10 @@ public:
 
   class TimeDiffUS {
   public:
-    TimeDiffUS(uint64_t diff) : diff_(diff) { ASSERT(diff_ > UINT64_MAX / 2); }
+    TimeDiffUS(uint64_t diff) : diff_(diff) {
+      /* diff should not be negative */
+      ASSERT(diff_ < UINT64_MAX / 2);
+    }
 
     operator uint64_t() { return diff_; }
 
@@ -45,7 +48,10 @@ public:
 
   class TimeDiffMS {
   public:
-    TimeDiffMS(uint32_t diff) : diff_(diff) { ASSERT(diff_ > UINT32_MAX / 2); }
+    TimeDiffMS(uint32_t diff) : diff_(diff) {
+      /* diff should not be negative */
+      ASSERT(diff_ < UINT32_MAX / 2);
+    }
 
     operator uint32_t() { return diff_; }
 
@@ -57,7 +63,7 @@ public:
     uint32_t diff_;
   };
 
-  TimeDiffMS operator-(TimeDiffMS &old_millisecond) {
+  TimeDiffMS operator-(TimestampMS &old_millisecond) {
     return TimeDiffMS(millisecond_ - old_millisecond);
   }
 

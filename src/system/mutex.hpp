@@ -1,5 +1,7 @@
-#include "libxr.hpp"
-#include "libxr_platform_def.hpp"
+#pragma once
+
+#include "libxr_def.hpp"
+#include "libxr_platform.hpp"
 
 namespace LibXR {
 class Mutex {
