@@ -11,7 +11,8 @@ public:
     PRIORITY_LOW,
     PRIORITY_MEDIUM,
     PRIORITY_HIGH,
-    PRIORITY_REALTIME
+    PRIORITY_REALTIME,
+    PRIORITY_NUMBER,
   } Priority;
 
   Thread(){};
@@ -68,7 +69,7 @@ public:
 
   static void Sleep(uint32_t milliseconds);
 
-  static void SleepUntil(TimestampMS milliseconds);
+  static void SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep);
 
   static void Yield();
 

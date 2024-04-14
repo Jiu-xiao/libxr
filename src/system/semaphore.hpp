@@ -1,5 +1,6 @@
 #pragma once
 
+#include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "libxr_platform.hpp"
 
@@ -7,6 +8,8 @@ namespace LibXR {
 class Semaphore {
 public:
   Semaphore(uint32_t init_count = 0);
+
+  ~Semaphore();
 
   void Post();
 
