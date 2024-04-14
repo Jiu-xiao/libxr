@@ -1,9 +1,12 @@
 #include "mutex.hpp"
 #include "libxr_platform.hpp"
+#include <pthread.h>
 
 using namespace LibXR;
 
 Mutex::Mutex() : mutex_handle_(PTHREAD_MUTEX_INITIALIZER) {}
+
+Mutex::~Mutex() { pthread_mutex_destroy(&mutex_handle_); }
 
 ErrorCode Mutex::Lock() {
   if (pthread_mutex_lock(&mutex_handle_) != 0) {

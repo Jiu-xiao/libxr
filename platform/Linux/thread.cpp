@@ -6,6 +6,7 @@
 using namespace LibXR;
 
 extern struct timeval _libxr_linux_start_time;
+extern struct timespec _libxr_linux_start_time_spec;
 
 Thread Thread::Current(void) { return Thread(pthread_self()); }
 
@@ -16,18 +17,20 @@ void Thread::Sleep(uint32_t milliseconds) {
   clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
 }
 
-void Thread::SleepUntil(TimestampMS millisecond) {
-  struct timespec ts;
+void Thread::SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep) {
+  last_waskup_time = last_waskup_time + time_to_sleep;
+
+  struct timespec ts = _libxr_linux_start_time_spec;
   uint32_t add = 0;
-  uint32_t secs = millisecond / 1000;
-  long raw_time = millisecond * 1000U * 1000U + ts.tv_nsec;
+  uint32_t secs = last_waskup_time / 1000;
+  long raw_time = last_waskup_time * 1000U * 1000U;
   add = raw_time / (1000U * 1000U * 1000U);
   ts.tv_sec += (add + secs);
   ts.tv_nsec = raw_time % (1000U * 1000U * 1000U);
 
   while (clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, &ts) &&
-         errno == EINTR)
-    ;
+         errno == EINTR) {
+  }
 }
 
 uint32_t Thread::GetTime() {

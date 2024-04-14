@@ -1,12 +1,15 @@
 #include "semaphore.hpp"
 #include "libxr_def.hpp"
 #include "libxr_platform.hpp"
+#include <semaphore.h>
 
 using namespace LibXR;
 
 Semaphore::Semaphore(uint32_t init_count) {
   sem_init(&semaphore_handle_, 0, init_count);
 }
+
+Semaphore::~Semaphore() { sem_destroy(&semaphore_handle_); }
 
 void Semaphore::Post() { sem_post(&semaphore_handle_); }
 

@@ -10,6 +10,9 @@ namespace LibXR {
 template <typename Data, unsigned int Length> class Queue {
 public:
   Queue() {}
+
+  ~Queue() {}
+
   ErrorCode Push(const Data &data) {
     queue_handle_.mutex.Lock();
     if (queue_handle_.is_full) {
