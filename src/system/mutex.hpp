@@ -1,5 +1,6 @@
 #pragma once
 
+#include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "libxr_platform.hpp"
 
@@ -7,6 +8,8 @@ namespace LibXR {
 class Mutex {
 public:
   Mutex();
+  ~Mutex();
+
   ErrorCode Lock();
   ErrorCode TryLock();
   void UnLock();

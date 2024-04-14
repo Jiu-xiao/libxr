@@ -17,3 +17,7 @@
 #include "timer.hpp"
 
 #include "queue.hpp"
+
+namespace LibXR {
+void LibXR_Init();
+}
