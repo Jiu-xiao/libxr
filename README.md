@@ -15,16 +15,19 @@ Standardized compatibility layer for operating systems and peripheral devices wr
 
 ## System Layer
 
-We set several preconditions:
-
 1. The application will never exit unless it reboot or enter into low-power mode.
 1. All memory is only allocated during initializtion and will never be released.
 1. The minimum Non-blocking delay is 1us, minimum blocking delay is 1ms.
+1. All unused functions will not be linked.
 
 ## Data structure
 
 1. Except list and tree, the memory of other data structures are determined before construction.
 2. No blocking APIs except Queue. If you want one, use Semaphore.
+
+## Middleware
+
+A collection of commonly used software.
 
 ## Periheral Layer
 
@@ -36,22 +39,23 @@ Some useful tools for debugging, robotics, and communication.
 
 ## Support
 
-`System`|Thread|Timer|Semaphore|Mutex|Signal|
-|-|-|-|-|-|-|
-None|❌|❌|❌|❌|❌|
-FreeRTOS|❌|❌|❌|❌|❌|
-RT-Thread|❌|❌|❌|❌|❌|
-ThreadX|❌|❌|❌|❌|❌|
-Linux|✅|✅|✅|✅|✅|
+`System`|Thread|Timer|Semaphore|Mutex|Signal|ConditionVar|Queue|
+|-|-|-|-|-|-|-|-|
+|None|❌|❌|❌|❌|❌|❌|❌|
+|FreeRTOS|❌|❌|❌|❌|❌|❌|❌|
+|RT-Thread|❌|❌|❌|❌|❌|❌|❌|
+|ThreadX|❌|❌|❌|❌|❌|❌|❌|
+|PX5|❌|❌|❌|❌|❌|❌|❌|
+|Linux|✅|✅|✅|✅|✅|✅|✅|
 
 
-|`Structure`|List|Queue|LockFreeQueue|RBTree|Stack|
-|-|-|-|-|-|-|
-|None|❌|❌|❌|❌|❌|
-|FreeRTOS|❌|❌|❌|❌|❌|
-|RT-Thread|❌|❌|❌|❌|❌|
-|ThreadX|❌|❌|❌|❌|❌|
-|Linux|✅|✅|✅|✅|✅|
+|`Structure`|List|Stack|RBTree|LockFreeQueue|
+|-|-|-|-|-|
+||✅|✅|✅|✅|
+
+|`Middleware`|Event|Message|Ramfs|Terminal|
+|-|-|-|-|-|
+||✅|✅|❌|❌|
 
 |`Peripheral`|POWER|GPIO|PWM|UART|SPI|I2C|WDG|CAN/CANFD|TCP/UDP|
 |-|-|-|-|-|-|-|-|-|-|
@@ -64,6 +68,6 @@ Linux|✅|✅|✅|✅|✅|
 |HPM|❌|❌|❌|❌|❌|❌|❌|❌|❌|
 
 
-|`Utils`|RamFS|Terminal|Message|CRC8/16/32|PID|Filter|CycleValue|FunctionGen|Rotation|Triangle|
-|-|-|-|-|-|-|-|-|-|-|-|
-||❌|❌|❌|✅|❌|❌|❌|❌|
+|`Utils`|CRC8/16/32|PID|Filter|CycleValue|FunctionGen|Rotation|Triangle|
+|-|-|-|-|-|-|-|-|
+||✅|❌|❌|❌|❌|❌|❌|

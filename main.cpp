@@ -1,7 +1,13 @@
+#include "condition_var.hpp"
 #include "crc.hpp"
+#include "event.hpp"
 #include "libxr.hpp"
+#include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_time.hpp"
+#include "libxr_type.hpp"
+#include "lockfree_queue.hpp"
+#include "messgae.hpp"
 #include "queue.hpp"
 #include "rbt.hpp"
 #include "semaphore.hpp"
@@ -9,7 +15,7 @@
 #include "stack.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
-#include <cstdint>
+#include <cstddef>
 
 const char *TEST_NAME = NULL;
 
@@ -26,8 +32,15 @@ int main() {
   /* --------------------------------------------------------------- */
   TEST_STEP("Register Error Callback");
 
-  auto err_cb_fun = [](void *arg, const char *file, uint32_t line) {
+  auto err_cb_fun = [](bool in_isr, void *arg, const char *file,
+                       uint32_t line) {
+    UNUSED(in_isr);
+    UNUSED(arg);
+    UNUSED(file);
+    UNUSED(line);
+
     printf("Error:Union test failed at step [%s].\r\n", TEST_NAME);
+    *(volatile long long *)(NULL) = 0;
     exit(-1);
   };
 
@@ -82,9 +95,44 @@ int main() {
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Queue Test");
+  auto lock_free_queue = LibXR::LockFreeQueue<float, 3>();
+
+  void (*lock_free_queue_test_fun)(LibXR::LockFreeQueue<float, 3> *) =
+      [](LibXR::LockFreeQueue<float, 3> *queue) {
+        queue->Push(1.2f);
+        queue->Push(3.8f);
+        LibXR::Thread::Sleep(150);
+        queue->Push(100.f);
+        queue->Push(0.0f);
+        queue->Push(2.1f);
+        return;
+      };
+
+  thread.Create<LibXR::LockFreeQueue<float, 3> *>(
+      &lock_free_queue, lock_free_queue_test_fun, "test_task", 512,
+      LibXR::Thread::PRIORITY_REALTIME);
+  float tmp = 0.0f;
+
+  LibXR::Thread::Sleep(100);
+  lock_free_queue.Pop(tmp);
+  ASSERT(tmp == 1.2f);
+  lock_free_queue.Pop(tmp);
+  ASSERT(tmp == 3.8f);
+  LibXR::Thread::Sleep(100);
+  lock_free_queue.Pop(tmp);
+  ASSERT(tmp == 100.f);
+  lock_free_queue.Pop(tmp);
+  ASSERT(tmp == 0.0f);
+  lock_free_queue.Pop(tmp);
+  ASSERT(tmp == 2.1f);
+
+  lock_free_queue.Pop(tmp);
+  ASSERT(tmp == 2.1f);
+
   auto queue = LibXR::Queue<float, 3>();
 
   void (*queue_test_fun)(LibXR::Queue<float, 3> *) =
+
       [](LibXR::Queue<float, 3> *queue) {
         LibXR::Thread::Sleep(100);
         queue->Push(1.2f);
@@ -102,7 +150,7 @@ int main() {
   thread.Create<LibXR::Queue<float, 3> *>(&queue, queue_test_fun, "test_task",
                                           512,
                                           LibXR::Thread::PRIORITY_REALTIME);
-  float tmp = 0.0f;
+  tmp = 0.0f;
 
   queue.Pop(tmp, 200);
   ASSERT(tmp == 1.2f);
@@ -143,6 +191,87 @@ int main() {
   UNUSED(timer_arg);
 
   /* --------------------------------------------------------------- */
+  TEST_STEP("Condition Var Test");
+  static LibXR::Semaphore sem_cv(0);
+  LibXR::ConditionVar cv;
+
+  void (*cv_fun1)(LibXR::ConditionVar *) = [](LibXR::ConditionVar *cv) {
+    cv->Wait(100);
+    sem_cv.Post();
+    return;
+  };
+
+  void (*cv_fun2)(LibXR::ConditionVar *) = [](LibXR::ConditionVar *cv) {
+    cv->Wait(100);
+    sem_cv.Post();
+    return;
+  };
+
+  thread.Create<LibXR::ConditionVar *>(&cv, cv_fun1, "cv_fun1", 512,
+                                       LibXR::Thread::PRIORITY_REALTIME);
+  thread.Create<LibXR::ConditionVar *>(&cv, cv_fun2, "cv_fun2", 512,
+                                       LibXR::Thread::PRIORITY_REALTIME);
+
+  LibXR::Thread::Sleep(80);
+  cv.Broadcast();
+  ASSERT(sem_cv.Wait(20) == NO_ERR);
+  ASSERT(sem_cv.Wait(20) == NO_ERR);
+
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Event Test");
+  static int event_arg = 0;
+  void (*event_fun)(bool in_isr, int *, uint32_t) = [](bool in_isr, int *arg,
+                                                       uint32_t event) {
+    UNUSED(in_isr);
+    *arg = *arg + 1;
+    ASSERT(event == 0x1234);
+  };
+
+  auto event_cb =
+      LibXR::Callback<void, uint32_t>::Create(event_fun, &event_arg);
+
+  LibXR::Event event, event_bind;
+
+  event.Register(0x1234, event_cb);
+  event.Active(0x1234);
+  ASSERT(event_arg == 1);
+  for (int i = 0; i <= 0x1234; i++) {
+    event.Active(i);
+  }
+  ASSERT(event_arg == 2);
+  event.Bind(event_bind, 0x4321, 0x1234);
+  event_bind.Active(0x4321);
+  ASSERT(event_arg == 3);
+
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Message Test");
+  auto domain = LibXR::Topic::Domain("test_domain");
+  auto topic =
+      LibXR::Topic::CreateTopic<double>("test_tp", &domain, false, true);
+  static double msg[4];
+  auto sync_suber =
+      LibXR::Topic::SyncSubscriber<double>("test_tp", msg[1], &domain);
+  LibXR::Queue<double, 10> msg_queue;
+  auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
+
+  void (*msg_cb_fun)(bool, void *, LibXR::RawData &) =
+      [](bool, void *, LibXR::RawData &data) {
+        msg[3] = *reinterpret_cast<const double *>(data.addr_);
+      };
+  auto msg_cb =
+      LibXR::Callback<void, LibXR::RawData &>::Create(msg_cb_fun, (void *)(0));
+  topic.RegisterCallback(msg_cb);
+
+  msg[0] = 16.16;
+  topic.Publish(msg[0]);
+  ASSERT(sync_suber.Wait(10) == NO_ERR);
+  ASSERT(msg[1] == msg[0]);
+  ASSERT(msg_queue.Size() == 1);
+  msg_queue.Pop(msg[2], 0);
+  ASSERT(msg[2] == msg[0]);
+  ASSERT(msg[3] == msg[0]);
+
+  /* --------------------------------------------------------------- */
   TEST_STEP("Stack Test");
   LibXR::Stack<int, 10> stack;
   for (int i = 0; i < 10; i++) {
@@ -168,35 +297,35 @@ int main() {
 
   LibXR::RBTree<int> rbtree(compare_fun);
 
-  LibXR::RBTree<int>::Node nodes[100];
+  LibXR::RBTree<int>::Node<int> nodes[100];
 
   for (int i = 0; i < 100; i++) {
     nodes[i] = i;
-    rbtree.Insert(nodes[i]);
+    rbtree.Insert(nodes[i], i);
   }
 
-  LibXR::RBTree<int>::Node *node_pos = NULL;
+  LibXR::RBTree<int>::Node<int> *node_pos = NULL;
   for (int i = 0; i < 100; i++) {
     node_pos = rbtree.ForeachDisc(node_pos);
-    ASSERT(node_pos->key == i);
+    ASSERT(*node_pos == i);
   }
 
   ASSERT(rbtree.GetNum() == 100);
 
   static int rbt_arg = 0;
 
-  ErrorCode (*rbt_fun)(LibXR::RBTree<int>::Node &,
-                       int *) = [](LibXR::RBTree<int>::Node &node, int *arg) {
-    *arg = *arg + 1;
-    ASSERT(*arg == node.key + 1);
-    return NO_ERR;
-  };
+  ErrorCode (*rbt_fun)(LibXR::RBTree<int>::Node<int> &, int *) =
+      [](LibXR::RBTree<int>::Node<int> &node, int *arg) {
+        *arg = *arg + 1;
+        ASSERT(*arg == node + 1);
+        return NO_ERR;
+      };
 
-  rbtree.Foreach<int *>(rbt_fun, &rbt_arg);
+  rbtree.Foreach<int, int *>(rbt_fun, &rbt_arg);
 
   for (int i = 0; i < 100; i++) {
-    nodes[i] = i;
     rbtree.Delete(nodes[i]);
+    ASSERT(rbtree.GetNum() == 99 - i)
   }
 
   ASSERT(rbtree.GetNum() == 0);

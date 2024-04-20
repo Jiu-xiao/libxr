@@ -1,46 +1,63 @@
+#pragma once
+
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "mutex.hpp"
+#include <cstring>
 
 namespace LibXR {
-template <typename Data> class RBTree {
+template <typename Key> class RBTree {
 public:
   enum RBTColor { RBT_COLOR_RED, RBT_COLOR_BLACK };
 
-  class Node {
+  class BaseNode {
   public:
-    Data key;
+    Key key;
     RBTColor color;
-    Node *left;
-    Node *right;
-    Node *parent;
+    BaseNode *left = NULL;
+    BaseNode *right = NULL;
+    BaseNode *parent = NULL;
+    size_t size;
 
-    const Data &operator=(const Data &data) {
-      key = data;
-      return key;
-    }
+  protected:
+    BaseNode(size_t size) : size(size) {}
   };
 
-  RBTree(int (*compare_fun_)(const Data &, const Data &))
+  template <typename Data> class Node : public BaseNode {
+  public:
+    Node() : BaseNode(sizeof(Data)) {}
+    Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
+
+    operator Data &() { return data_; }
+
+    const Data &operator=(const Data &data) {
+      data_ = data;
+      return data_;
+    }
+
+    Data data_;
+  };
+
+  RBTree(int (*compare_fun_)(const Key &, const Key &))
       : root_(NULL), compare_fun_(compare_fun_) {
     ASSERT(compare_fun_);
   }
 
-  Node &Search(const Data &key) {
+  template <typename Data> Node<Data> *Search(const Key &key) {
     mutex_.Lock();
     auto ans = _Search(root_, key);
     mutex_.UnLock();
-    return ans;
+    return ToDerivedType<Data>(ans);
   }
 
-  void Delete(Node &node) {
+  void Delete(BaseNode &node) {
     mutex_.Lock();
 
-    Node *child, *parent;
+    BaseNode *child, *parent;
     RBTColor color;
 
     if ((node.left != NULL) && (node.right != NULL)) {
-      Node *replace = &node;
+      BaseNode *replace = &node;
 
       replace = replace->right;
       while (replace->left != NULL)
@@ -105,17 +122,28 @@ public:
     mutex_.UnLock();
   }
 
-  bool Insert(Node &node) {
+  void Insert(BaseNode &node, Key &&key) {
     node.left = NULL;
     node.right = NULL;
     node.parent = NULL;
     node.color = RBT_COLOR_BLACK;
+    node.key = key;
 
     mutex_.Lock();
     RbtreeInsert(node);
     mutex_.UnLock();
+  }
 
-    return true;
+  void Insert(BaseNode &node, Key &key) {
+    node.left = NULL;
+    node.right = NULL;
+    node.parent = NULL;
+    node.color = RBT_COLOR_BLACK;
+    node.key = key;
+
+    mutex_.Lock();
+    RbtreeInsert(node);
+    mutex_.UnLock();
   }
 
   uint32_t GetNum() {
@@ -126,29 +154,44 @@ public:
     return num;
   }
 
-  template <typename ArgType>
-  ErrorCode Foreach(ErrorCode (*fun)(Node &node, ArgType arg), ArgType arg) {
+  template <typename Data, typename ArgType>
+  ErrorCode Foreach(ErrorCode (*fun)(Node<Data> &node, ArgType arg),
+                    ArgType arg) {
+
+    typedef struct {
+      ErrorCode (*fun_)(Node<Data> &node, ArgType arg);
+      ArgType arg_;
+    } Block;
+
+    Block block = {.fun_ = fun, .arg_ = arg};
+
+    ErrorCode (*foreach_fun)(BaseNode & node, void *arg) = [](BaseNode &node,
+                                                              void *raw) {
+      Block *block = reinterpret_cast<Block *>(raw);
+      return block->fun_(ToDerivedType<Data>(node), block->arg_);
+    };
+
     mutex_.Lock();
-    auto ans = RbtreeForeach(root_, fun, arg);
+    auto ans = RbtreeForeach(root_, foreach_fun, &block);
     mutex_.UnLock();
     return ans;
   }
 
-  Node *ForeachDisc(Node *node) {
+  template <typename Data> Node<Data> *ForeachDisc(Node<Data> *node) {
     mutex_.Lock();
     if (node == NULL) {
-      node = root_;
+      node = ToDerivedType<Data>(root_);
       while (node->left != NULL) {
-        node = node->left;
+        node = ToDerivedType<Data>(node->left);
       }
       mutex_.UnLock();
       return node;
     }
 
     if (node->right != NULL) {
-      node = node->right;
+      node = ToDerivedType<Data>(node->right);
       while (node->left != NULL) {
-        node = node->left;
+        node = ToDerivedType<Data>(node->left);
       }
       mutex_.UnLock();
       return node;
@@ -157,13 +200,13 @@ public:
     if (node->parent != NULL) {
       if (node == node->parent->left) {
         mutex_.UnLock();
-        return node->parent;
+        return ToDerivedType<Data>(node->parent);
       } else {
         while (node->parent != NULL && node == node->parent->right) {
-          node = node->parent;
+          node = ToDerivedType<Data>(node->parent);
         }
         mutex_.UnLock();
-        return node->parent;
+        return ToDerivedType<Data>(node->parent);
       }
     }
 
@@ -172,23 +215,36 @@ public:
   }
 
 private:
-  Node *GetParent(Node *node) { return node->parent; }
+  BaseNode *GetParent(BaseNode *node) { return node->parent; }
 
-  RBTColor GetColor(Node *node) { return node->color; }
+  RBTColor GetColor(BaseNode *node) { return node->color; }
 
-  bool IsRed(Node *node) { return node->color == RBT_COLOR_RED; }
+  bool IsRed(BaseNode *node) { return node->color == RBT_COLOR_RED; }
 
-  bool IsBlack(Node *node) { return node->color == RBT_COLOR_BLACK; }
+  bool IsBlack(BaseNode *node) { return node->color == RBT_COLOR_BLACK; }
 
-  void SetBlack(Node *node) { node->color = RBT_COLOR_BLACK; }
+  void SetBlack(BaseNode *node) { node->color = RBT_COLOR_BLACK; }
 
-  void SetRed(Node *node) { node->color = RBT_COLOR_RED; }
+  void SetRed(BaseNode *node) { node->color = RBT_COLOR_RED; }
 
-  void SetParent(Node *node, Node *parent) { node->parent = parent; }
+  void SetParent(BaseNode *node, BaseNode *parent) { node->parent = parent; }
 
-  void SetColor(Node *node, RBTColor color) { node->color = color; }
+  void SetColor(BaseNode *node, RBTColor color) { node->color = color; }
 
-  Node *_Search(Node *x, const Data &key) {
+  template <typename Data> static Node<Data> *ToDerivedType(BaseNode *node) {
+    if (node) {
+      ASSERT(node->size == sizeof(Data));
+    }
+    return reinterpret_cast<Node<Data> *>(node);
+  }
+
+  template <typename Data> static Node<Data> &ToDerivedType(BaseNode &node) {
+    if (&node != NULL) {
+      ASSERT(node.size == sizeof(Data));
+    }
+    return *reinterpret_cast<Node<Data> *>(&node);
+  }
+  BaseNode *_Search(BaseNode *x, const Key &key) {
     if (x == NULL)
       return NULL;
 
@@ -202,8 +258,8 @@ private:
       return _Search(x->right, key);
   }
 
-  void RbtreeDeleteFixup(Node *node, Node *parent) {
-    Node *other;
+  void RbtreeDeleteFixup(BaseNode *node, BaseNode *parent) {
+    BaseNode *other;
 
     while ((!node || IsBlack(node)) && node != root_) {
       if (parent->left == node) {
@@ -266,9 +322,9 @@ private:
       SetBlack(node);
   }
 
-  void RbtreeInsert(Node &node) {
-    Node *y = NULL;
-    Node *x = root_;
+  void RbtreeInsert(BaseNode &node) {
+    BaseNode *y = NULL;
+    BaseNode *x = root_;
 
     while (x != NULL) {
       y = x;
@@ -293,7 +349,7 @@ private:
     RbtreeInsertFixup(&node);
   }
 
-  void _RbtreeGetNum(Node *node, uint32_t *num) {
+  void _RbtreeGetNum(BaseNode *node, uint32_t *num) {
     if (node == NULL)
       return;
 
@@ -303,15 +359,15 @@ private:
     _RbtreeGetNum(node->right, num);
   }
 
-  void RbtreeInsertFixup(Node *node) {
-    Node *parent, *gparent;
+  void RbtreeInsertFixup(BaseNode *node) {
+    BaseNode *parent, *gparent;
 
     while ((parent = GetParent(node)) && IsRed(parent)) {
       gparent = GetParent(parent);
 
       if (parent == gparent->left) {
         {
-          Node *uncle = gparent->right;
+          BaseNode *uncle = gparent->right;
           if (uncle && IsRed(uncle)) {
             SetBlack(uncle);
             SetBlack(parent);
@@ -322,7 +378,7 @@ private:
         }
 
         if (parent->right == node) {
-          Node *tmp;
+          BaseNode *tmp;
           RbtreeLeftRotate(parent);
           tmp = parent;
           parent = node;
@@ -334,7 +390,7 @@ private:
         RbtreeRightRotate(gparent);
       } else {
         {
-          Node *uncle = gparent->left;
+          BaseNode *uncle = gparent->left;
           if (uncle && IsRed(uncle)) {
             SetBlack(uncle);
             SetBlack(parent);
@@ -345,7 +401,7 @@ private:
         }
 
         if (parent->left == node) {
-          Node *tmp;
+          BaseNode *tmp;
           RbtreeRightRotate(parent);
           tmp = parent;
           parent = node;
@@ -361,8 +417,8 @@ private:
     SetBlack(root_);
   }
 
-  void RbtreeLeftRotate(Node *x) {
-    Node *y = x->right;
+  void RbtreeLeftRotate(BaseNode *x) {
+    BaseNode *y = x->right;
 
     x->right = y->left;
     if (y->left != NULL)
@@ -383,8 +439,8 @@ private:
     x->parent = y;
   }
 
-  void RbtreeRightRotate(Node *y) {
-    Node *x = y->left;
+  void RbtreeRightRotate(BaseNode *y) {
+    BaseNode *x = y->left;
 
     y->left = x->right;
     if (x->right != NULL)
@@ -405,9 +461,9 @@ private:
     y->parent = x;
   }
 
-  template <typename ArgType>
-  ErrorCode RbtreeForeach(Node *node, ErrorCode (*fun)(Node &node, ArgType arg),
-                          ArgType arg) {
+  ErrorCode RbtreeForeach(BaseNode *node,
+                          ErrorCode (*fun)(BaseNode &node, void *arg),
+                          void *arg) {
     if (node == NULL) {
       return NO_ERR;
     }
@@ -420,10 +476,10 @@ private:
     return NO_ERR;
   }
 
-  Node *root_;
+  BaseNode *root_;
 
   LibXR::Mutex mutex_;
 
-  int (*compare_fun_)(const Data &, const Data &);
+  int (*compare_fun_)(const Key &, const Key &);
 };
 } // namespace LibXR

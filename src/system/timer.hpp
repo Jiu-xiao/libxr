@@ -4,6 +4,7 @@
 #include "libxr_def.hpp"
 #include "list.hpp"
 #include "thread.hpp"
+#include <utility>
 
 namespace LibXR {
 class Timer {
@@ -20,7 +21,7 @@ public:
     Thread::Priority priority;
   };
 
-  typedef LibXR::List<ControlBlock>::Node *TimerHandle;
+  typedef LibXR::List::Node<ControlBlock> *TimerHandle;
 
   template <typename ArgType>
   static TimerHandle CreatetTask(void (*fun)(ArgType), ArgType arg,
@@ -29,7 +30,7 @@ public:
     ASSERT(cycle > 0);
 
     typedef struct {
-      LibXR::List<ControlBlock>::Node ctrl_block;
+      LibXR::List::Node<ControlBlock> ctrl_block;
       ArgType arg;
       void (*fun)(ArgType);
     } Data;
@@ -73,16 +74,17 @@ public:
 
   static void Remove(TimerHandle handle) {
     ASSERT(handle->next_);
-    list_[handle->data_.priority].Delete(*handle);
+    list_[handle->data_.priority]->Delete(*handle);
   }
 
   static void Add(TimerHandle handle) {
     ASSERT(!handle->next_);
-    list_[handle->data_.priority].Add(*handle);
+    list_[handle->data_.priority]->Add(*handle);
   }
 
   static void Refresh(Thread::Priority priority) {
-    auto fun = [](ControlBlock &block, void *) {
+    ErrorCode (*fun)(ControlBlock & block, void *&) = [](ControlBlock &block,
+                                                         void *&) {
       if (!block.enable_) {
         return NO_ERR;
       }
@@ -97,10 +99,12 @@ public:
       return NO_ERR;
     };
 
-    list_[priority].Foreach<void *>(fun, (void *)0);
+    static void *empty = NULL;
+
+    list_[priority]->Foreach<ControlBlock, void *>(fun, empty);
   }
 
-  static LibXR::List<ControlBlock> list_[Thread::PRIORITY_NUMBER];
+  static LibXR::List *list_[Thread::PRIORITY_NUMBER];
 };
 
 } // namespace LibXR

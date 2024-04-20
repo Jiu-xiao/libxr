@@ -17,5 +17,10 @@ typedef pthread_t libxr_thread_handle;
     Semaphore sem;                                                             \
   }
 
+typedef struct {
+  pthread_mutex_t mutex;
+  pthread_cond_t cond;
+} condition_var_handle;
+
 void PlatformInit();
 } // namespace LibXR
