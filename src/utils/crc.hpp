@@ -1,6 +1,7 @@
+#pragma once
+
 #include "libxr_assert.hpp"
-#include <cstdint>
-#include <sys/types.h>
+#include "libxr_type.hpp"
 
 namespace LibXR {
 class CRC8 {
@@ -88,7 +89,7 @@ public:
     inited = true;
   }
 
-  static uint8_t Calculate(const void *raw, size_t len) {
+  static uint16_t Calculate(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
     if (!inited) {
       GenerateTable();
@@ -143,7 +144,7 @@ public:
     inited = true;
   }
 
-  static uint8_t Calculate(const void *raw, size_t len) {
+  static uint32_t Calculate(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
     if (!inited) {
       GenerateTable();

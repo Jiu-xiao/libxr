@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <utility>
 
 #include "libxr_def.hpp"
 
@@ -8,12 +9,12 @@ namespace LibXR {
 template <typename ResultType, typename ArgType, typename... Args>
 class CallbackBlock {
 public:
-  CallbackBlock(ResultType (*fun)(ArgType, Args... args), ArgType arg)
+  CallbackBlock(ResultType (*fun)(bool, ArgType, Args... args), ArgType arg)
       : fun_(fun), arg_(arg) {}
 
   bool InISR() { return in_isr_; }
 
-  ResultType (*fun_)(ArgType, Args... args);
+  ResultType (*fun_)(bool, ArgType, Args... args);
   ArgType arg_;
   bool in_isr_;
 };
@@ -23,7 +24,7 @@ public:
   template <typename FunType, typename ArgType>
   static Callback Create(FunType fun, ArgType arg) {
     /* Check the type of fun */
-    ResultType (*fun_ptr)(ArgType, Args...) = fun;
+    ResultType (*fun_ptr)(bool, ArgType, Args...) = fun;
 
     auto cb_block =
         new CallbackBlock<ResultType, ArgType, Args...>(fun_ptr, arg);
@@ -32,7 +33,7 @@ public:
           static_cast<CallbackBlock<ResultType, ArgType, Args...> *>(cb_block);
       cb->in_isr_ = in_isr;
       if (cb->fun_) {
-        return cb->fun_(cb->arg_, args...);
+        return cb->fun_(in_isr, cb->arg_, args...);
       }
     };
 
@@ -41,20 +42,23 @@ public:
 
   Callback() : cb_block_(NULL), cb_fun_(NULL) {}
 
-  Callback(Callback &cb) = default;
+  Callback(const Callback &cb) = default;
 
-  ResultType RunFromUser(Args... args) {
+  const Callback operator=(const Callback &cb) {
+    memcpy(this, &cb, sizeof(cb));
+    return *this;
+  }
+
+  ResultType RunFromUser(Args... args) const {
     return cb_fun_(false, cb_block_, args...);
   }
 
-  ResultType RunFromISR(Args... args) {
+  ResultType RunFromISR(Args... args) const {
     return cb_fun_(true, cb_block_, args...);
   }
 
-  bool Empty() { return (cb_block_ == NULL) || (cb_fun_ == NULL); }
-
-  void *cb_block_;
-  ResultType (*cb_fun_)(bool, void *, Args...);
+  void *const cb_block_;
+  ResultType (*const cb_fun_)(bool, void *, Args...);
 
 private:
   Callback(void *cb_block, ResultType (*cb_fun)(bool, void *, Args...))
