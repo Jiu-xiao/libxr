@@ -7,24 +7,21 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
+#include "semaphore.hpp"
 
 namespace LibXR {
 
 template <typename... Args> class OperationBlock {
   union {
-    uint32_t timeout;
-    Callback<void, Args...> callback;
+    const uint32_t timeout;
+    const Callback<void, Args...> callback;
   } Data;
 
-  bool sync;
+  const bool sync;
 
-  OperationBlock(uint32_t timeout) {
-    sync = true;
-    Data = timeout;
-  }
+  OperationBlock(uint32_t timeout) { Data = timeout; }
 
-  OperationBlock(Callback<void, Args...> callback) {
-    sync = true;
+  OperationBlock(const Callback<void, Args...> &callback) : sync(false) {
     Data = callback;
   }
 };
@@ -37,10 +34,10 @@ public:
   }
 
 private:
-  OperationBlock<Args...> *block_;
+  OperationBlock<Args...> *const block_;
 };
 
-typedef ErrorCode (*WriteFunction)(const RawData &data,
+typedef ErrorCode (*WriteFunction)(ConstRawData &data,
                                    Operation<ErrorCode> &op);
 typedef ErrorCode (*ReadFunction)(RawData &data,
                                   Operation<ErrorCode, const RawData &> &op);

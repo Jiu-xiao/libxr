@@ -1,5 +1,8 @@
 #include "libxr_platform.hpp"
+#include "libxr_assert.hpp"
+#include "libxr_def.hpp"
 #include "libxr_rw.hpp"
+#include "libxr_type.hpp"
 #include "list.hpp"
 #include "semaphore.hpp"
 #include "thread.hpp"
@@ -10,7 +13,7 @@ struct timeval _libxr_linux_start_time;
 struct timespec _libxr_linux_start_time_spec;
 
 void LibXR::PlatformInit() {
-  LibXR::WriteFunction write_fun = [](const RawData &data,
+  LibXR::WriteFunction write_fun = [](ConstRawData &data,
                                       Operation<ErrorCode> &op) {
     auto count = fwrite(data.addr_, sizeof(char), data.size_, stdout);
     if (count == data.size_) {
@@ -25,9 +28,6 @@ void LibXR::PlatformInit() {
     data.size_ = fread(data.addr_, sizeof(char), data.size_, stdin);
     return NO_ERR;
   };
-
-  LibXR::STDIO::write = write_fun;
-  LibXR::STDIO::read = read_fun;
 
   gettimeofday(&_libxr_linux_start_time, NULL);
   clock_gettime(CLOCK_REALTIME, &_libxr_linux_start_time_spec);
@@ -44,6 +44,7 @@ void LibXR::PlatformInit() {
   };
 
   for (int i = 0; i < Thread::Priority::PRIORITY_NUMBER; i++) {
+    LibXR::Timer::list_[i] = new LibXR::List;
     auto thread_handle = new Thread;
     thread_handle->Create((Thread::Priority)i, thread_fun, "libxr_timer_task",
                           512, Thread::PRIORITY_HIGH);
