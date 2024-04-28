@@ -12,11 +12,12 @@
 #include "timer.hpp"
 #include <cstddef>
 
-const LibXR::Callback<void, const char *, uint32_t>
+const LibXR::Callback<const char *, uint32_t>
     *LibXR::Assert::libxr_fatal_error_callback;
 
-LibXR::ReadFunction LibXR::STDIO::read = NULL;
-LibXR::WriteFunction LibXR::STDIO::write = NULL;
+LibXR::ReadPort LibXR::STDIO::read = NULL;
+LibXR::WritePort LibXR::STDIO::write = NULL;
+void (*LibXR::STDIO::error)(const char *log) = NULL;
 LibXR::List *LibXR::Timer::list_[LibXR::Thread::PRIORITY_NUMBER];
 uint8_t LibXR::CRC8::tab[256];
 bool LibXR::CRC8::inited = false;

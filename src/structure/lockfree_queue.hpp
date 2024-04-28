@@ -6,9 +6,13 @@
 #include <stdio.h>
 
 namespace LibXR {
-template <typename Data, unsigned int Length> class LockFreeQueue {
+template <typename Data> class LockFreeQueue {
 public:
-  LockFreeQueue() : head_(0), tail_(0) {}
+  LockFreeQueue(size_t length) : head_(0), tail_(0), length_(length) {
+    queue_handle_ = new Data[length + 1];
+  }
+
+  ~LockFreeQueue() { delete queue_handle_; }
 
   ErrorCode Push(const Data &item) {
     const auto current_tail = tail_.load(std::memory_order_relaxed);
@@ -42,18 +46,19 @@ public:
     const auto current_tail = tail_.load(std::memory_order_relaxed);
     return (current_tail >= current_head)
                ? (current_tail - current_head)
-               : (Length - current_head + current_tail);
+               : (length_ - current_head + current_tail);
   }
 
-  size_t EmptySize() { return (Length + 1) - Size(); }
+  size_t EmptySize() { return (length_ + 1) - Size(); }
 
 private:
-  std::array<Data, Length + 1> queue_handle_;
+  Data *queue_handle_;
   std::atomic<unsigned int> head_;
   std::atomic<unsigned int> tail_;
+  size_t length_;
 
   unsigned int increment(unsigned int index) const {
-    return (index + 1) % (Length + 1);
+    return (index + 1) % (length_ + 1);
   }
 };
 } // namespace LibXR

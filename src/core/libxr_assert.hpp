@@ -11,8 +11,8 @@
 namespace LibXR {
 class Assert {
 public:
-  static void RegisterFatalErrorCB(
-      const LibXR::Callback<void, const char *, uint32_t> &cb) {
+  static void
+  RegisterFatalErrorCB(const LibXR::Callback<const char *, uint32_t> &cb) {
     libxr_fatal_error_callback = &cb;
   }
 
@@ -29,7 +29,7 @@ public:
   }
 
 private:
-  static const LibXR::Callback<void, const char *, uint32_t>
+  static const LibXR::Callback<const char *, uint32_t>
       *libxr_fatal_error_callback;
 };
 } // namespace LibXR

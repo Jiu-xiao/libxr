@@ -11,50 +11,53 @@
 
 namespace LibXR {
 
-template <typename... Args> class OperationBlock {
-  union {
-    const uint32_t timeout;
-    const Callback<void, Args...> callback;
-  } Data;
-
-  const bool sync;
-
-  OperationBlock(uint32_t timeout) { Data = timeout; }
-
-  OperationBlock(const Callback<void, Args...> &callback) : sync(false) {
-    Data = callback;
-  }
-};
-
 template <typename... Args> class Operation {
 public:
-  Operation(uint32_t timeout) { block_ = new OperationBlock<Args...>(timeout); }
-  Operation(Callback<void, Args...> callback) {
-    block_ = new OperationBlock(callback);
+  typedef enum {
+    OP_TYPE_CALLBACK,
+    OP_TYPE_BLOCK,
+    OP_TYPE_POLLING
+  } OperationType;
+
+  typedef enum { OP_READY, OP_RUNNING, OP_DONE } OperationPollingStatus;
+
+  Operation() {
+    data.status = OP_READY;
+    type = OP_TYPE_POLLING;
   }
 
-private:
-  OperationBlock<Args...> *const block_;
+  void operator=(Operation &op) { memcpy(this, &op, sizeof(op)); }
+
+  Operation(uint32_t timeout) {
+    data.timeout = timeout;
+    type = OP_TYPE_BLOCK;
+  }
+
+  Operation(Callback<Args...> callback) {
+    data.callback = callback;
+    type = OP_TYPE_CALLBACK;
+  }
+
+  Operation(Operation &op) { memcpy(this, &op, sizeof(op)); }
+
+  union {
+    Callback<Args...> callback = Callback<Args...>();
+    uint32_t timeout;
+    OperationPollingStatus status;
+  } data;
+
+  OperationType type;
 };
 
-typedef ErrorCode (*WriteFunction)(ConstRawData &data,
-                                   Operation<ErrorCode> &op);
-typedef ErrorCode (*ReadFunction)(RawData &data,
-                                  Operation<ErrorCode, const RawData &> &op);
+typedef ErrorCode (*WritePort)(Operation<ErrorCode> &op, ConstRawData data);
 
-class ReadPort {
-public:
-  ReadFunction read;
-};
-
-class WritePort {
-public:
-  WriteFunction write;
-};
+typedef ErrorCode (*ReadPort)(Operation<ErrorCode, RawData &> &op,
+                              RawData data);
 
 class STDIO {
 public:
-  static ReadFunction read;
-  static WriteFunction write;
+  static ReadPort read;
+  static WritePort write;
+  static void (*error)(const char *log);
 };
 } // namespace LibXR
