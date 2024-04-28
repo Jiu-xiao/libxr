@@ -1,6 +1,6 @@
 # libxr
 
-Standardized compatibility layer for operating systems and peripheral devices written in C++. Can run on different platforms.
+Standardized compatibility layer for operating systems and peripheral devices written in C++. No function will be compiled into the firmware before it is called by the user.
 
 <p align="center">
   <img src="doc/image/XRobot.jpeg" alt="XRobot logo"  height="100"/>
@@ -57,15 +57,21 @@ Some useful tools for debugging, robotics, and communication.
 |-|-|-|-|-|
 ||✅|✅|❌|❌|
 
-|`Peripheral`|POWER|GPIO|PWM|UART|SPI|I2C|WDG|CAN/CANFD|TCP/UDP|
-|-|-|-|-|-|-|-|-|-|-|
-|STM32|❌|❌|❌|❌|❌|❌|❌|❌|❌|
-|ESP32|❌|❌|❌|❌|❌|❌|❌|❌|❌|
-|Linux|❌|❌|❌|❌|❌|❌|❌|❌|❌|
-|GD32|❌|❌|❌|❌|❌|❌|❌|❌|❌|
-|HC32|❌|❌|❌|❌|❌|❌|❌|❌|❌|
-|WCH32|❌|❌|❌|❌|❌|❌|❌|❌|❌|
-|HPM|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+|`Peripheral`|POWER|GPIO|WDG|PWM|ADC|DAC|UART|SPI|I2C|WDG|CAN/CANFD|USB-CDC|
+|-|-|-|-|-|-|-|-|-|-|-|-|-|
+|STM32|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+|ESP32|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+|Linux|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+|GD32|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+|HC32|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+|WCH32|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+|HPM|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|❌|
+
+|`Network`|TCP/UDP|WIFI|Bluetooth|SmartConfig|
+|-|-|-|-|-|
+|Linux|❌|❌|❌|❌|
+|ESP32|❌|❌|❌|❌|
+|STM32|❌|❌|❌|❌|
 
 
 |`Utils`|CRC8/16/32|PID|Filter|CycleValue|FunctionGen|Rotation|Triangle|

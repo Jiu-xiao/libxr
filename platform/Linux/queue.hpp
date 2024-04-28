@@ -7,11 +7,13 @@
 #include <array>
 
 namespace LibXR {
-template <typename Data, unsigned int Length> class Queue {
+template <typename Data> class Queue {
 public:
-  Queue() {}
+  Queue(size_t length) : length_(length) {
+    queue_handle_.data = new Data[length];
+  }
 
-  ~Queue() {}
+  ~Queue() { delete queue_handle_.data; }
 
   ErrorCode Push(const Data &data) {
     queue_handle_.mutex.Lock();
@@ -20,7 +22,7 @@ public:
       return ERR_FULL;
     }
     queue_handle_.data[queue_handle_.tail] = data;
-    queue_handle_.tail = (queue_handle_.tail + 1) % Length;
+    queue_handle_.tail = (queue_handle_.tail + 1) % length_;
     if (queue_handle_.head == queue_handle_.tail) {
       queue_handle_.is_full = true;
     }
@@ -34,7 +36,7 @@ public:
     if (queue_handle_.sem.Wait(timeout) == NO_ERR) {
       queue_handle_.mutex.Lock();
       data = queue_handle_.data[queue_handle_.head];
-      queue_handle_.head = (queue_handle_.head + 1) % Length;
+      queue_handle_.head = (queue_handle_.head + 1) % length_;
       queue_handle_.is_full = false;
       queue_handle_.mutex.UnLock();
       return NO_ERR;
@@ -53,7 +55,7 @@ public:
     queue_handle_.is_full = false;
 
     queue_handle_.data[queue_handle_.tail] = data;
-    queue_handle_.tail = (queue_handle_.tail + 1) % Length;
+    queue_handle_.tail = (queue_handle_.tail + 1) % length_;
     if (queue_handle_.head == queue_handle_.tail) {
       queue_handle_.is_full = true;
     }
@@ -88,19 +90,20 @@ public:
 
     if (queue_handle_.is_full) {
       queue_handle_.mutex.UnLock();
-      return Length;
+      return length_;
     } else if (queue_handle_.tail >= queue_handle_.head) {
       queue_handle_.mutex.UnLock();
       return queue_handle_.tail - queue_handle_.head;
     } else {
       queue_handle_.mutex.UnLock();
-      return Length + queue_handle_.tail - queue_handle_.head;
+      return length_ + queue_handle_.tail - queue_handle_.head;
     }
   }
 
-  size_t EmptySize() { return Length - Size(); }
+  size_t EmptySize() { return length_ - Size(); }
 
 private:
   libxr_queue_handle queue_handle_;
+  size_t length_;
 };
 } // namespace LibXR

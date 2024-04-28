@@ -101,13 +101,13 @@ public:
   class QueuedSubscriber {
   public:
     template <typename Data, uint32_t Length>
-    QueuedSubscriber(const char *name, LockFreeQueue<Data, Length> &queue,
+    QueuedSubscriber(const char *name, LockFreeQueue<Data> &queue,
                      Domain *domain = NULL) {
       *this = QueuedSubscriber(WaitTopic(name, domain), queue);
     }
 
-    template <typename Data, uint32_t Length>
-    QueuedSubscriber(Topic topic, LockFreeQueue<Data, Length> &queue) {
+    template <typename Data>
+    QueuedSubscriber(Topic topic, LockFreeQueue<Data> &queue) {
       if (topic.block_->data_.check_length) {
         ASSERT(topic.block_->data_.max_length == sizeof(Data));
       } else {
@@ -117,22 +117,20 @@ public:
       auto node = new List::Node<QueueBlock>;
       node->data_.queue = &queue;
       node->data_.fun = [](RawData &data, void *arg) {
-        LockFreeQueue<Data, Length> *queue =
-            reinterpret_cast<LockFreeQueue<Data, Length>>(arg);
+        LockFreeQueue<Data> *queue = reinterpret_cast<LockFreeQueue<Data>>(arg);
         queue->Push(reinterpret_cast<Data>(data.addr_));
       };
 
       topic.block_->data_.queue_subers.Add(*node);
     }
 
-    template <typename Data, uint32_t Length>
-    QueuedSubscriber(const char *name, Queue<Data, Length> &queue,
+    template <typename Data>
+    QueuedSubscriber(const char *name, Queue<Data> &queue,
                      Domain *domain = NULL) {
       *this = QueuedSubscriber(WaitTopic(name, domain), queue);
     }
 
-    template <typename Data, uint32_t Length>
-    QueuedSubscriber(Topic topic, Queue<Data, Length> &queue) {
+    template <typename Data> QueuedSubscriber(Topic topic, Queue<Data> &queue) {
       if (topic.block_->data_.check_length) {
         ASSERT(topic.block_->data_.max_length == sizeof(Data));
       } else {
@@ -142,8 +140,7 @@ public:
       auto node = new List::Node<QueueBlock>;
       node->data_.queue = &queue;
       node->data_.fun = [](RawData &data, void *arg) {
-        Queue<Data, Length> *queue =
-            reinterpret_cast<Queue<Data, Length> *>(arg);
+        Queue<Data> *queue = reinterpret_cast<Queue<Data> *>(arg);
         queue->Push(*reinterpret_cast<const Data *>(data.addr_));
       };
 
@@ -151,8 +148,8 @@ public:
     }
   };
 
-  void RegisterCallback(Callback<void, RawData &> &cb) {
-    auto node = new List::Node<Callback<void, RawData &>>(cb);
+  void RegisterCallback(Callback<RawData &> &cb) {
+    auto node = new List::Node<Callback<RawData &>>(cb);
     block_->data_.callbacks.Add(*node);
   }
 
@@ -263,14 +260,13 @@ public:
     block_->data_.queue_subers.Foreach<QueueBlock, RawData>(queue_foreach_fun,
                                                             block_->data_.data);
 
-    ErrorCode (*cb_foreach_fun)(Callback<void, RawData &> & cb,
-                                RawData & data) =
-        [](Callback<void, RawData &> &cb, RawData &data) {
+    ErrorCode (*cb_foreach_fun)(Callback<RawData &> & cb, RawData & data) =
+        [](Callback<RawData &> &cb, RawData &data) {
           cb.RunFromUser(data);
           return NO_ERR;
         };
 
-    block_->data_.callbacks.Foreach<Callback<void, RawData &>, RawData>(
+    block_->data_.callbacks.Foreach<Callback<RawData &>, RawData>(
         cb_foreach_fun, block_->data_.data);
 
     block_->data_.mutex.UnLock();

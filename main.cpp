@@ -44,8 +44,8 @@ int main() {
     exit(-1);
   };
 
-  auto err_cb = LibXR::Callback<void, const char *, uint32_t>::Create(
-      err_cb_fun, (void *)(0));
+  auto err_cb =
+      LibXR::Callback<const char *, uint32_t>::Create(err_cb_fun, (void *)(0));
 
   LibXR::Assert::RegisterFatalErrorCB(err_cb);
 
@@ -95,10 +95,10 @@ int main() {
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Queue Test");
-  auto lock_free_queue = LibXR::LockFreeQueue<float, 3>();
+  auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
 
-  void (*lock_free_queue_test_fun)(LibXR::LockFreeQueue<float, 3> *) =
-      [](LibXR::LockFreeQueue<float, 3> *queue) {
+  void (*lock_free_queue_test_fun)(LibXR::LockFreeQueue<float> *) =
+      [](LibXR::LockFreeQueue<float> *queue) {
         queue->Push(1.2f);
         queue->Push(3.8f);
         LibXR::Thread::Sleep(150);
@@ -108,7 +108,7 @@ int main() {
         return;
       };
 
-  thread.Create<LibXR::LockFreeQueue<float, 3> *>(
+  thread.Create<LibXR::LockFreeQueue<float> *>(
       &lock_free_queue, lock_free_queue_test_fun, "test_task", 512,
       LibXR::Thread::PRIORITY_REALTIME);
   float tmp = 0.0f;
@@ -129,11 +129,11 @@ int main() {
   lock_free_queue.Pop(tmp);
   ASSERT(tmp == 2.1f);
 
-  auto queue = LibXR::Queue<float, 3>();
+  auto queue = LibXR::Queue<float>(3);
 
-  void (*queue_test_fun)(LibXR::Queue<float, 3> *) =
+  void (*queue_test_fun)(LibXR::Queue<float> *) =
 
-      [](LibXR::Queue<float, 3> *queue) {
+      [](LibXR::Queue<float> *queue) {
         LibXR::Thread::Sleep(100);
         queue->Push(1.2f);
         LibXR::Thread::Sleep(10);
@@ -147,9 +147,8 @@ int main() {
         return;
       };
 
-  thread.Create<LibXR::Queue<float, 3> *>(&queue, queue_test_fun, "test_task",
-                                          512,
-                                          LibXR::Thread::PRIORITY_REALTIME);
+  thread.Create<LibXR::Queue<float> *>(&queue, queue_test_fun, "test_task", 512,
+                                       LibXR::Thread::PRIORITY_REALTIME);
   tmp = 0.0f;
 
   queue.Pop(tmp, 200);
@@ -227,8 +226,7 @@ int main() {
     ASSERT(event == 0x1234);
   };
 
-  auto event_cb =
-      LibXR::Callback<void, uint32_t>::Create(event_fun, &event_arg);
+  auto event_cb = LibXR::Callback<uint32_t>::Create(event_fun, &event_arg);
 
   LibXR::Event event, event_bind;
 
@@ -251,7 +249,7 @@ int main() {
   static double msg[4];
   auto sync_suber =
       LibXR::Topic::SyncSubscriber<double>("test_tp", msg[1], &domain);
-  LibXR::Queue<double, 10> msg_queue;
+  LibXR::Queue<double> msg_queue(10);
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
 
   void (*msg_cb_fun)(bool, void *, LibXR::RawData &) =
@@ -259,7 +257,7 @@ int main() {
         msg[3] = *reinterpret_cast<const double *>(data.addr_);
       };
   auto msg_cb =
-      LibXR::Callback<void, LibXR::RawData &>::Create(msg_cb_fun, (void *)(0));
+      LibXR::Callback<LibXR::RawData &>::Create(msg_cb_fun, (void *)(0));
   topic.RegisterCallback(msg_cb);
 
   msg[0] = 16.16;
