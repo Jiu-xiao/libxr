@@ -14,7 +14,7 @@ public:
   Event()
       : rbt_([](const uint32_t &a, const uint32_t &b) { return int(a - b); }) {}
 
-  void Register(uint32_t event, const Callback<void, uint32_t> &cb) {
+  void Register(uint32_t event, const Callback<uint32_t> &cb) {
 
     auto list = rbt_.Search<List>(event);
 
@@ -86,7 +86,7 @@ public:
           block->target->Active(block->event);
         };
 
-    auto cb = Callback<void, uint32_t>::Create(bind_fun, block);
+    auto cb = Callback<uint32_t>::Create(bind_fun, block);
 
     sources.Register(source_event, cb);
   }
@@ -94,7 +94,7 @@ public:
 private:
   typedef struct {
     uint32_t event;
-    Callback<void, uint32_t> cb;
+    Callback<uint32_t> cb;
   } Block;
 
   RBTree<uint32_t> rbt_;
