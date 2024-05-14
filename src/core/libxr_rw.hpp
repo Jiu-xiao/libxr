@@ -49,10 +49,12 @@ public:
   OperationType type;
 };
 
-typedef ErrorCode (*WritePort)(Operation<ErrorCode> &op, ConstRawData data);
+typedef Operation<ErrorCode, RawData &> ReadOperation;
+typedef Operation<ErrorCode> WriteOperation;
 
-typedef ErrorCode (*ReadPort)(Operation<ErrorCode, RawData &> &op,
-                              RawData data);
+typedef ErrorCode (*WritePort)(WriteOperation &op, ConstRawData data);
+
+typedef ErrorCode (*ReadPort)(ReadOperation &op, RawData data);
 
 class STDIO {
 public:

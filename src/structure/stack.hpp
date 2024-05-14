@@ -18,11 +18,11 @@ public:
     mutex_.Lock();
 
     if (top >= Depth) {
-      mutex_.UnLock();
+      mutex_.Unlock();
       return ERR_FULL;
     }
     stack_[top++] = data;
-    mutex_.UnLock();
+    mutex_.Unlock();
     return NO_ERR;
   }
 
@@ -30,11 +30,11 @@ public:
     mutex_.Lock();
 
     if (top == 0) {
-      mutex_.UnLock();
+      mutex_.Unlock();
       return ERR_EMPTY;
     }
     data = stack_[--top];
-    mutex_.UnLock();
+    mutex_.Unlock();
     return NO_ERR;
   }
 
@@ -42,12 +42,12 @@ public:
     mutex_.Lock();
 
     if (top == 0) {
-      mutex_.UnLock();
+      mutex_.Unlock();
 
       return ERR_EMPTY;
     }
     data = stack_[top - 1];
-    mutex_.UnLock();
+    mutex_.Unlock();
 
     return NO_ERR;
   }
