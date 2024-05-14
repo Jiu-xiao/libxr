@@ -10,7 +10,6 @@
 #include "timer.hpp"
 #include <bits/types/FILE.h>
 #include <cstdint>
-#include <liburing.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
@@ -23,18 +22,18 @@ struct timespec _libxr_linux_start_time_spec;
 
 void LibXR::PlatformInit() {
 
-  ErrorCode (*write_fun)(Operation<ErrorCode> & op, ConstRawData data) =
-      [](Operation<ErrorCode> &op, ConstRawData data) {
+  ErrorCode (*write_fun)(WriteOperation & op, ConstRawData data) =
+      [](WriteOperation &op, ConstRawData data) {
         auto ans = fwrite(data.addr_, 1, data.size_, stdout);
 
         switch (op.type) {
-        case Operation<ErrorCode>::OP_TYPE_BLOCK:
+        case WriteOperation::OP_TYPE_BLOCK:
           break;
-        case Operation<ErrorCode>::OP_TYPE_CALLBACK:
+        case WriteOperation::OP_TYPE_CALLBACK:
           op.data.callback.RunFromUser(ans == data.size_ ? NO_ERR : ERR_FAIL);
           break;
-        case Operation<ErrorCode>::OP_TYPE_POLLING:
-          op.data.status = Operation<ErrorCode>::OP_DONE;
+        case WriteOperation::OP_TYPE_POLLING:
+          op.data.status = WriteOperation::OP_DONE;
           break;
         }
 

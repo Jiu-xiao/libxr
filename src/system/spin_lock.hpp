@@ -16,6 +16,6 @@ public:
     }
   }
 
-  void UnLock() noexcept { atomic_flag.clear(std::memory_order_release); }
+  void Unlock() noexcept { atomic_flag.clear(std::memory_order_release); }
 };
 } // namespace LibXR

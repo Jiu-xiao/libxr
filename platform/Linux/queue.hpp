@@ -18,7 +18,7 @@ public:
   ErrorCode Push(const Data &data) {
     queue_handle_.mutex.Lock();
     if (queue_handle_.is_full) {
-      queue_handle_.mutex.UnLock();
+      queue_handle_.mutex.Unlock();
       return ERR_FULL;
     }
     queue_handle_.data[queue_handle_.tail] = data;
@@ -26,7 +26,7 @@ public:
     if (queue_handle_.head == queue_handle_.tail) {
       queue_handle_.is_full = true;
     }
-    queue_handle_.mutex.UnLock();
+    queue_handle_.mutex.Unlock();
     queue_handle_.sem.Post();
 
     return NO_ERR;
@@ -38,7 +38,7 @@ public:
       data = queue_handle_.data[queue_handle_.head];
       queue_handle_.head = (queue_handle_.head + 1) % length_;
       queue_handle_.is_full = false;
-      queue_handle_.mutex.UnLock();
+      queue_handle_.mutex.Unlock();
       return NO_ERR;
     } else {
       return ERR_EMPTY;
@@ -59,7 +59,7 @@ public:
     if (queue_handle_.head == queue_handle_.tail) {
       queue_handle_.is_full = true;
     }
-    queue_handle_.mutex.UnLock();
+    queue_handle_.mutex.Unlock();
 
     return NO_ERR;
   }
@@ -82,20 +82,20 @@ public:
     }
     queue_handle_.head = queue_handle_.tail = 0;
     queue_handle_.is_full = false;
-    queue_handle_.mutex.UnLock();
+    queue_handle_.mutex.Unlock();
   }
 
   size_t Size() {
     queue_handle_.mutex.Lock();
 
     if (queue_handle_.is_full) {
-      queue_handle_.mutex.UnLock();
+      queue_handle_.mutex.Unlock();
       return length_;
     } else if (queue_handle_.tail >= queue_handle_.head) {
-      queue_handle_.mutex.UnLock();
+      queue_handle_.mutex.Unlock();
       return queue_handle_.tail - queue_handle_.head;
     } else {
-      queue_handle_.mutex.UnLock();
+      queue_handle_.mutex.Unlock();
       return length_ + queue_handle_.tail - queue_handle_.head;
     }
   }
