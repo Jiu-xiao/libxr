@@ -12,7 +12,7 @@ public:
 
   ErrorCode Lock();
   ErrorCode TryLock();
-  void UnLock();
+  void Unlock();
 
 private:
   libxr_mutex_handle mutex_handle_;

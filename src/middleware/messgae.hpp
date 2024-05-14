@@ -25,8 +25,34 @@ public:
     RawData data;
     bool cache;
     bool check_length;
-    List sync_subers, queue_subers, callbacks;
+    List subers;
   } Block;
+
+  typedef struct __attribute__((packed)) {
+    uint8_t prefix;
+    uint32_t topic_name_crc32;
+    uint32_t data_len : 24;
+    uint8_t pack_header_crc8;
+  } RemoteDataHeader;
+
+  template <typename Data> class __attribute__((packed)) RemoteData {
+  public:
+    struct __attribute__((packed)) {
+      RemoteDataHeader header;
+      Data data_;
+    } raw;
+
+    uint8_t crc8_;
+
+    const Data &operator=(const Data &data) {
+      raw.data_ = data;
+      crc8_ = CRC8::Calculate(&raw, sizeof(raw));
+    }
+
+    operator Data &() { return raw.data_; }
+
+    Data &GetData() { return raw.data_; }
+  };
 
   typedef RBTree<uint32_t>::Node<Block> *TopicHandle;
 
@@ -39,7 +65,7 @@ public:
           domain_ = new RBTree<uint32_t>(
               [](const uint32_t &a, const uint32_t &b) { return int(a - b); });
         }
-        domain_lock_.UnLock();
+        domain_lock_.Unlock();
       }
 
       auto crc32 = CRC32::Calculate(name, strlen(name));
@@ -61,7 +87,18 @@ public:
     RBTree<uint32_t>::Node<RBTree<uint32_t>> *node_;
   };
 
+  typedef enum {
+    SUBER_TYPE_SYNC,
+    SUBER_TYPE_ASYNC,
+    SUBER_TYPE_QUEUE,
+    SUBER_TYPE_CALLBACK,
+  } SuberType;
+
   typedef struct {
+    SuberType type;
+  } SuberBlock;
+
+  typedef struct SyncBlock : public SuberBlock {
     RawData buff;
     Semaphore sem;
   } SyncBlock;
@@ -69,7 +106,7 @@ public:
   template <typename Data> class SyncSubscriber {
   public:
     SyncSubscriber(const char *name, Data &data, Domain *domain = NULL) {
-      *this = SyncSubscriber(WaitTopic(name, domain), data);
+      *this = SyncSubscriber(WaitTopic(name, UINT32_MAX, domain), data);
     }
 
     SyncSubscriber(Topic topic, Data &data) {
@@ -79,11 +116,10 @@ public:
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      topic.block_->data_.mutex.Lock();
       block_ = new List::Node<SyncBlock>;
+      block_->data_.type = SUBER_TYPE_SYNC;
       block_->data_.buff = RawData(data);
-      topic.block_->data_.sync_subers.Add(*block_);
-      topic.block_->data_.mutex.UnLock();
+      topic.block_->data_.subers.Add(*block_);
     }
 
     ErrorCode Wait(uint32_t timeout = UINT32_MAX) {
@@ -93,7 +129,38 @@ public:
     List::Node<SyncBlock> *block_;
   };
 
-  typedef struct {
+  typedef struct ASyncBlock : public SuberBlock {
+    RawData buff;
+    bool data_ready;
+  } ASyncBlock;
+
+  template <typename Data> class ASyncSubscriber {
+  public:
+    ASyncSubscriber(const char *name, Data &data, Domain *domain = NULL) {
+      *this = ASyncSubscriber(WaitTopic(name, UINT32_MAX, domain), data);
+    }
+
+    ASyncSubscriber(Topic topic) {
+      if (topic.block_->data_.check_length) {
+        ASSERT(topic.block_->data_.max_length == sizeof(Data));
+      } else {
+        ASSERT(topic.block_->data_.max_length <= sizeof(Data));
+      }
+
+      block_ = new List::Node<SyncBlock>;
+      block_->data_.type = SUBER_TYPE_ASYNC;
+      block_->data_.buff = *(new Data);
+      topic.block_->data_.subers.Add(*block_);
+    }
+
+    ErrorCode Wait(uint32_t timeout = UINT32_MAX) {
+      return block_->data_.sem.Wait(timeout);
+    }
+
+    List::Node<SyncBlock> *block_;
+  };
+
+  typedef struct QueueBlock : public SuberBlock {
     void *queue;
     void (*fun)(RawData &, void *);
   } QueueBlock;
@@ -103,7 +170,7 @@ public:
     template <typename Data, uint32_t Length>
     QueuedSubscriber(const char *name, LockFreeQueue<Data> &queue,
                      Domain *domain = NULL) {
-      *this = QueuedSubscriber(WaitTopic(name, domain), queue);
+      *this = QueuedSubscriber(WaitTopic(name, UINT32_MAX, domain), queue);
     }
 
     template <typename Data>
@@ -114,20 +181,21 @@ public:
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      auto node = new List::Node<QueueBlock>;
-      node->data_.queue = &queue;
-      node->data_.fun = [](RawData &data, void *arg) {
+      auto block = new List::Node<QueueBlock>;
+      block->data_.type = SUBER_TYPE_QUEUE;
+      block->data_.queue = &queue;
+      block->data_.fun = [](RawData &data, void *arg) {
         LockFreeQueue<Data> *queue = reinterpret_cast<LockFreeQueue<Data>>(arg);
         queue->Push(reinterpret_cast<Data>(data.addr_));
       };
 
-      topic.block_->data_.queue_subers.Add(*node);
+      topic.block_->data_.subers.Add(*block);
     }
 
     template <typename Data>
     QueuedSubscriber(const char *name, Queue<Data> &queue,
                      Domain *domain = NULL) {
-      *this = QueuedSubscriber(WaitTopic(name, domain), queue);
+      *this = QueuedSubscriber(WaitTopic(name, UINT32_MAX, domain), queue);
     }
 
     template <typename Data> QueuedSubscriber(Topic topic, Queue<Data> &queue) {
@@ -137,20 +205,28 @@ public:
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      auto node = new List::Node<QueueBlock>;
-      node->data_.queue = &queue;
-      node->data_.fun = [](RawData &data, void *arg) {
+      auto block = new List::Node<QueueBlock>;
+      block->data_.type = SUBER_TYPE_QUEUE;
+      block->data_.queue = &queue;
+      block->data_.fun = [](RawData &data, void *arg) {
         Queue<Data> *queue = reinterpret_cast<Queue<Data> *>(arg);
         queue->Push(*reinterpret_cast<const Data *>(data.addr_));
       };
 
-      topic.block_->data_.queue_subers.Add(*node);
+      topic.block_->data_.subers.Add(*block);
     }
   };
 
+  typedef struct CallbackBlock : public SuberBlock {
+    Callback<RawData &> cb;
+  } CallbackBlock;
+
   void RegisterCallback(Callback<RawData &> &cb) {
-    auto node = new List::Node<Callback<RawData &>>(cb);
-    block_->data_.callbacks.Add(*node);
+    CallbackBlock block;
+    block.cb = cb;
+    block.type = SUBER_TYPE_CALLBACK;
+    auto node = new List::Node<CallbackBlock>(block);
+    block_->data_.subers.Add(*node);
   }
 
   Topic(const char *name, uint32_t max_length, Domain *domain = NULL,
@@ -164,7 +240,7 @@ public:
       if (!def_domain_) {
         def_domain_ = new Domain("libxr_def_domain");
       }
-      domain_lock_.UnLock();
+      domain_lock_.Unlock();
     }
 
     if (domain == NULL) {
@@ -220,7 +296,7 @@ public:
       block_->data_.cache = true;
       block_->data_.data.addr_ = new uint8_t[block_->data_.max_length];
     }
-    block_->data_.mutex.UnLock();
+    block_->data_.mutex.Unlock();
   }
 
   template <typename Data> void Publish(Data &data) {
@@ -238,51 +314,80 @@ public:
       block_->data_.data = data;
     }
 
-    ErrorCode (*sync_foreach_fun)(SyncBlock & block, Topic & topic) =
-        [](SyncBlock &block, Topic &topic) {
-          memcpy(block.buff.addr_, topic.block_->data_.data.addr_,
-                 topic.block_->data_.data.size_);
-          block.sem.Post();
-
+    ErrorCode (*foreach_fun)(SuberBlock & block, RawData & data) =
+        [](SuberBlock &block, RawData &data) {
+          switch (block.type) {
+          case SUBER_TYPE_SYNC: {
+            auto sync = reinterpret_cast<SyncBlock *>(&block);
+            memcpy(sync->buff.addr_, data.addr_, data.size_);
+            sync->sem.Post();
+            break;
+          }
+          case SUBER_TYPE_ASYNC: {
+            auto async = reinterpret_cast<ASyncBlock *>(&block);
+            memcpy(async->buff.addr_, data.addr_, data.size_);
+            async->data_ready = true;
+            break;
+          }
+          case SUBER_TYPE_QUEUE: {
+            auto queue_block = reinterpret_cast<QueueBlock *>(&block);
+            queue_block->fun(data, queue_block->queue);
+            break;
+          }
+          case SUBER_TYPE_CALLBACK: {
+            auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
+            cb_block->cb.RunFromUser(data);
+            break;
+          }
+          }
           return NO_ERR;
         };
 
-    block_->data_.sync_subers.Foreach<SyncBlock, Topic>(sync_foreach_fun,
-                                                        *this);
+    block_->data_.mutex.Unlock();
+  }
 
-    ErrorCode (*queue_foreach_fun)(QueueBlock & block, RawData & data) =
-        [](QueueBlock &block, RawData &data) {
-          block.fun(data, block.queue);
+  template <typename Data> void DumpData(Data &data) {
+    if (block_->data_.data.addr_ != NULL) {
+      if (block_->data_.check_length) {
+        ASSERT(sizeof(Data) == block_->data_.data.size_);
+      } else {
+        ASSERT(sizeof(Data) >= block_->data_.data.size_);
+      }
 
-          return NO_ERR;
-        };
+      block_->data_.mutex.Lock();
+      data = *reinterpret_cast<Data *>(block_->data_.data.addr_);
+      block_->data_.mutex.Unlock();
+    }
+  }
 
-    block_->data_.queue_subers.Foreach<QueueBlock, RawData>(queue_foreach_fun,
-                                                            block_->data_.data);
-
-    ErrorCode (*cb_foreach_fun)(Callback<RawData &> & cb, RawData & data) =
-        [](Callback<RawData &> &cb, RawData &data) {
-          cb.RunFromUser(data);
-          return NO_ERR;
-        };
-
-    block_->data_.callbacks.Foreach<Callback<RawData &>, RawData>(
-        cb_foreach_fun, block_->data_.data);
-
-    block_->data_.mutex.UnLock();
+  template <typename Data> void DumpData(RemoteData<Data> &data) {
+    if (block_->data_.data.addr_ != NULL) {
+      if (block_->data_.check_length) {
+        ASSERT(sizeof(Data) == block_->data_.data.size_);
+      } else {
+        ASSERT(sizeof(Data) >= block_->data_.data.size_);
+      }
+      block_->data_.mutex.Lock();
+      data = *reinterpret_cast<Data *>(block_->data_.data.addr_);
+      block_->data_.mutex.Unlock();
+    }
   }
 
 private:
-  static Topic WaitTopic(const char *name, Domain *domain = NULL) {
+  static TopicHandle WaitTopic(const char *name, uint32_t timeout = UINT32_MAX,
+                               Domain *domain = NULL) {
     TopicHandle topic = NULL;
     do {
       topic = Find(name, domain);
       if (topic == NULL) {
+        if (timeout <= Thread::GetTime()) {
+          return NULL;
+        }
         Thread::Sleep(1);
       }
     } while (topic == NULL);
 
-    return Topic(topic);
+    return topic;
   }
 
   TopicHandle block_ = NULL;

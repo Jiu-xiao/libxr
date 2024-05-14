@@ -22,7 +22,7 @@ public:
 
   template <typename Data> class Node : public BaseNode {
   public:
-    Node() : BaseNode(sizeof(Data)) {}
+    Node() : BaseNode(sizeof(Data)), data_() {}
 
     Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
 
@@ -30,6 +30,8 @@ public:
       data_ = data;
       return data_;
     }
+
+    Data &GetData() { return data_; }
 
     operator Data &() { return data_; }
 
@@ -51,7 +53,7 @@ public:
     mutex_.Lock();
     data.next_ = head_.next_;
     head_.next_ = &data;
-    mutex_.UnLock();
+    mutex_.Unlock();
   }
 
   uint32_t Size() {
@@ -60,7 +62,7 @@ public:
     for (BaseNode *pos = head_.next_; pos != &head_; pos = pos->next_) {
       size++;
     }
-    mutex_.UnLock();
+    mutex_.Unlock();
 
     return size;
   }
@@ -71,11 +73,11 @@ public:
       if (pos->next_ == &data) {
         pos->next_ = data.next_;
         data.next_ = NULL;
-        mutex_.UnLock();
+        mutex_.Unlock();
         return NO_ERR;
       }
     }
-    mutex_.UnLock();
+    mutex_.Unlock();
 
     return ERR_NOT_FOUND;
   }
@@ -87,11 +89,11 @@ public:
       ASSERT(pos->size_ == sizeof(Data));
       auto res = func(reinterpret_cast<Node<Data> *>(pos)->data_, arg);
       if (res != NO_ERR) {
-        mutex_.UnLock();
+        mutex_.Unlock();
         return res;
       }
     }
-    mutex_.UnLock();
+    mutex_.Unlock();
 
     return NO_ERR;
   }

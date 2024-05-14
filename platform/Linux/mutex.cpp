@@ -22,4 +22,4 @@ ErrorCode Mutex::TryLock() {
   return ErrorCode::NO_ERR;
 }
 
-void Mutex::UnLock() { pthread_mutex_unlock(&mutex_handle_); }
+void Mutex::Unlock() { pthread_mutex_unlock(&mutex_handle_); }
