@@ -25,7 +25,7 @@ public:
 
   template <typename Data> class Node : public BaseNode {
   public:
-    Node() : BaseNode(sizeof(Data)) {}
+    Node() : BaseNode(sizeof(Data)), data_() {}
     Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
 
     operator Data &() { return data_; }
@@ -34,6 +34,8 @@ public:
       data_ = data;
       return data_;
     }
+
+    Data &GetData() { return data_; }
 
     Data data_;
   };
@@ -46,7 +48,7 @@ public:
   template <typename Data> Node<Data> *Search(const Key &key) {
     mutex_.Lock();
     auto ans = _Search(root_, key);
-    mutex_.UnLock();
+    mutex_.Unlock();
     return ToDerivedType<Data>(ans);
   }
 
@@ -93,7 +95,7 @@ public:
 
       if (color == RBT_COLOR_BLACK)
         RbtreeDeleteFixup(child, parent);
-      mutex_.UnLock();
+      mutex_.Unlock();
       return;
     }
 
@@ -119,7 +121,7 @@ public:
     if (color == RBT_COLOR_BLACK)
       RbtreeDeleteFixup(child, parent);
 
-    mutex_.UnLock();
+    mutex_.Unlock();
   }
 
   void Insert(BaseNode &node, Key &&key) {
@@ -131,7 +133,7 @@ public:
 
     mutex_.Lock();
     RbtreeInsert(node);
-    mutex_.UnLock();
+    mutex_.Unlock();
   }
 
   void Insert(BaseNode &node, Key &key) {
@@ -143,14 +145,14 @@ public:
 
     mutex_.Lock();
     RbtreeInsert(node);
-    mutex_.UnLock();
+    mutex_.Unlock();
   }
 
   uint32_t GetNum() {
     uint32_t num = 0;
     mutex_.Lock();
     _RbtreeGetNum(root_, &num);
-    mutex_.UnLock();
+    mutex_.Unlock();
     return num;
   }
 
@@ -168,12 +170,12 @@ public:
     ErrorCode (*foreach_fun)(BaseNode & node, void *arg) = [](BaseNode &node,
                                                               void *raw) {
       Block *block = reinterpret_cast<Block *>(raw);
-      return block->fun_(ToDerivedType<Data>(node), block->arg_);
+      return block->fun_(*ToDerivedType<Data>(&node), block->arg_);
     };
 
     mutex_.Lock();
     auto ans = RbtreeForeach(root_, foreach_fun, &block);
-    mutex_.UnLock();
+    mutex_.Unlock();
     return ans;
   }
 
@@ -184,7 +186,7 @@ public:
       while (node->left != NULL) {
         node = ToDerivedType<Data>(node->left);
       }
-      mutex_.UnLock();
+      mutex_.Unlock();
       return node;
     }
 
@@ -193,24 +195,24 @@ public:
       while (node->left != NULL) {
         node = ToDerivedType<Data>(node->left);
       }
-      mutex_.UnLock();
+      mutex_.Unlock();
       return node;
     }
 
     if (node->parent != NULL) {
       if (node == node->parent->left) {
-        mutex_.UnLock();
+        mutex_.Unlock();
         return ToDerivedType<Data>(node->parent);
       } else {
         while (node->parent != NULL && node == node->parent->right) {
           node = ToDerivedType<Data>(node->parent);
         }
-        mutex_.UnLock();
+        mutex_.Unlock();
         return ToDerivedType<Data>(node->parent);
       }
     }
 
-    mutex_.UnLock();
+    mutex_.Unlock();
     return NULL;
   }
 
@@ -238,12 +240,6 @@ private:
     return reinterpret_cast<Node<Data> *>(node);
   }
 
-  template <typename Data> static Node<Data> &ToDerivedType(BaseNode &node) {
-    if (&node != NULL) {
-      ASSERT(node.size == sizeof(Data));
-    }
-    return *reinterpret_cast<Node<Data> *>(&node);
-  }
   BaseNode *_Search(BaseNode *x, const Key &key) {
     if (x == NULL)
       return NULL;

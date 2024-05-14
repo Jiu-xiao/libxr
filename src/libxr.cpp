@@ -8,9 +8,9 @@
 #include "list.hpp"
 #include "messgae.hpp"
 #include "mutex.hpp"
+#include "ramfs.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
-#include <cstddef>
 
 const LibXR::Callback<const char *, uint32_t>
     *LibXR::Assert::libxr_fatal_error_callback;

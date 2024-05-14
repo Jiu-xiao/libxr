@@ -67,6 +67,7 @@ typedef enum {
   ERR_INIT = -12,
   ERR_EMPTY = -13,
   ERR_FULL = -14,
+  ERR_NULL = -15,
 } ErrorCode;
 
 #ifdef ASSERT
