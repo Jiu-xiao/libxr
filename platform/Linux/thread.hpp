@@ -6,14 +6,14 @@
 namespace LibXR {
 class Thread {
 public:
-  typedef enum {
-    PRIORITY_IDLE,
-    PRIORITY_LOW,
-    PRIORITY_MEDIUM,
-    PRIORITY_HIGH,
-    PRIORITY_REALTIME,
-    PRIORITY_NUMBER,
-  } Priority;
+  enum class Priority {
+    IDLE,
+    LOW,
+    MEDIUM,
+    HIGH,
+    REALTIME,
+    NUMBER,
+  };
 
   Thread(){};
 
@@ -55,10 +55,11 @@ public:
     pthread_create(&this->thread_handle_, &attr, block->Port, block);
 
     if (sched_get_priority_max(SCHED_RR) - sched_get_priority_min(SCHED_RR) >=
-        PRIORITY_REALTIME) {
+        static_cast<size_t>(Priority::REALTIME)) {
       struct sched_param sp;
       bzero((void *)&sp, sizeof(sp));
-      sp.sched_priority = sched_get_priority_min(SCHED_RR) + priority;
+      sp.sched_priority =
+          sched_get_priority_min(SCHED_RR) + static_cast<int>(priority);
       pthread_setschedparam(pthread_self(), SCHED_RR, &sp);
     }
   }

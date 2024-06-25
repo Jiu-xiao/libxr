@@ -13,29 +13,25 @@ namespace LibXR {
 
 template <typename... Args> class Operation {
 public:
-  typedef enum {
-    OP_TYPE_CALLBACK,
-    OP_TYPE_BLOCK,
-    OP_TYPE_POLLING
-  } OperationType;
+  enum class OperationType { CALLBACK, BLOCK, POLLING };
 
-  typedef enum { OP_READY, OP_RUNNING, OP_DONE } OperationPollingStatus;
+  enum class OperationPollingStatus { READY, RUNNING, DONE };
 
   Operation() {
-    data.status = OP_READY;
-    type = OP_TYPE_POLLING;
+    data.status = OperationPollingStatus::READY;
+    type = OperationType::POLLING;
   }
 
   void operator=(Operation &op) { memcpy(this, &op, sizeof(op)); }
 
   Operation(uint32_t timeout) {
     data.timeout = timeout;
-    type = OP_TYPE_BLOCK;
+    type = OperationType::BLOCK;
   }
 
   Operation(Callback<Args...> callback) {
     data.callback = callback;
-    type = OP_TYPE_CALLBACK;
+    type = OperationType::CALLBACK;
   }
 
   Operation(Operation &op) { memcpy(this, &op, sizeof(op)); }

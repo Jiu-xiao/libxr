@@ -19,7 +19,7 @@ public:
     queue_handle_.mutex.Lock();
     if (queue_handle_.is_full) {
       queue_handle_.mutex.Unlock();
-      return ERR_FULL;
+      return ErrorCode::FULL;
     }
     queue_handle_.data[queue_handle_.tail] = data;
     queue_handle_.tail = (queue_handle_.tail + 1) % length_;
@@ -29,26 +29,26 @@ public:
     queue_handle_.mutex.Unlock();
     queue_handle_.sem.Post();
 
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
   ErrorCode Pop(Data &data, uint32_t timeout) {
-    if (queue_handle_.sem.Wait(timeout) == NO_ERR) {
+    if (queue_handle_.sem.Wait(timeout) == ErrorCode::OK) {
       queue_handle_.mutex.Lock();
       data = queue_handle_.data[queue_handle_.head];
       queue_handle_.head = (queue_handle_.head + 1) % length_;
       queue_handle_.is_full = false;
       queue_handle_.mutex.Unlock();
-      return NO_ERR;
+      return ErrorCode::OK;
     } else {
-      return ERR_EMPTY;
+      return ErrorCode::EMPTY;
     }
   }
 
   ErrorCode Overwrite(const Data &data) {
     queue_handle_.mutex.Lock();
     if (Size() > 0) {
-      while (queue_handle_.sem.Wait(0) == NO_ERR) {
+      while (queue_handle_.sem.Wait(0) == ErrorCode::OK) {
       }
     }
     queue_handle_.head = queue_handle_.tail = 0;
@@ -61,7 +61,7 @@ public:
     }
     queue_handle_.mutex.Unlock();
 
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
   ErrorCode PushFromCallback(const Data &data, bool in_isr) {
@@ -77,7 +77,7 @@ public:
   void Reset() {
     queue_handle_.mutex.Lock();
     if (Size() > 0) {
-      while (queue_handle_.sem.Wait(0) == NO_ERR) {
+      while (queue_handle_.sem.Wait(0) == ErrorCode::OK) {
       }
     }
     queue_handle_.head = queue_handle_.tail = 0;

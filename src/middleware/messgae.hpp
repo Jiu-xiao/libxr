@@ -87,12 +87,12 @@ public:
     RBTree<uint32_t>::Node<RBTree<uint32_t>> *node_;
   };
 
-  typedef enum {
-    SUBER_TYPE_SYNC,
-    SUBER_TYPE_ASYNC,
-    SUBER_TYPE_QUEUE,
-    SUBER_TYPE_CALLBACK,
-  } SuberType;
+  enum class SuberType {
+    SYNC,
+    ASYNC,
+    QUEUE,
+    CALLBACK,
+  };
 
   typedef struct {
     SuberType type;
@@ -117,7 +117,7 @@ public:
       }
 
       block_ = new List::Node<SyncBlock>;
-      block_->data_.type = SUBER_TYPE_SYNC;
+      block_->data_.type = SuberType::SYNC;
       block_->data_.buff = RawData(data);
       topic.block_->data_.subers.Add(*block_);
     }
@@ -148,7 +148,7 @@ public:
       }
 
       block_ = new List::Node<SyncBlock>;
-      block_->data_.type = SUBER_TYPE_ASYNC;
+      block_->data_.type = SuberType::ASYNC;
       block_->data_.buff = *(new Data);
       topic.block_->data_.subers.Add(*block_);
     }
@@ -182,7 +182,7 @@ public:
       }
 
       auto block = new List::Node<QueueBlock>;
-      block->data_.type = SUBER_TYPE_QUEUE;
+      block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
       block->data_.fun = [](RawData &data, void *arg) {
         LockFreeQueue<Data> *queue = reinterpret_cast<LockFreeQueue<Data>>(arg);
@@ -206,7 +206,7 @@ public:
       }
 
       auto block = new List::Node<QueueBlock>;
-      block->data_.type = SUBER_TYPE_QUEUE;
+      block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
       block->data_.fun = [](RawData &data, void *arg) {
         Queue<Data> *queue = reinterpret_cast<Queue<Data> *>(arg);
@@ -224,7 +224,7 @@ public:
   void RegisterCallback(Callback<RawData &> &cb) {
     CallbackBlock block;
     block.cb = cb;
-    block.type = SUBER_TYPE_CALLBACK;
+    block.type = SuberType::CALLBACK;
     auto node = new List::Node<CallbackBlock>(block);
     block_->data_.subers.Add(*node);
   }
@@ -314,34 +314,36 @@ public:
       block_->data_.data = data;
     }
 
-    ErrorCode (*foreach_fun)(SuberBlock & block, RawData & data) =
-        [](SuberBlock &block, RawData &data) {
-          switch (block.type) {
-          case SUBER_TYPE_SYNC: {
-            auto sync = reinterpret_cast<SyncBlock *>(&block);
-            memcpy(sync->buff.addr_, data.addr_, data.size_);
-            sync->sem.Post();
-            break;
-          }
-          case SUBER_TYPE_ASYNC: {
-            auto async = reinterpret_cast<ASyncBlock *>(&block);
-            memcpy(async->buff.addr_, data.addr_, data.size_);
-            async->data_ready = true;
-            break;
-          }
-          case SUBER_TYPE_QUEUE: {
-            auto queue_block = reinterpret_cast<QueueBlock *>(&block);
-            queue_block->fun(data, queue_block->queue);
-            break;
-          }
-          case SUBER_TYPE_CALLBACK: {
-            auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
-            cb_block->cb.RunFromUser(data);
-            break;
-          }
-          }
-          return NO_ERR;
-        };
+    auto foreach_fun = [](SuberBlock &block, RawData &data) {
+      switch (block.type) {
+      case SuberType::SYNC: {
+        auto sync = reinterpret_cast<SyncBlock *>(&block);
+        memcpy(sync->buff.addr_, data.addr_, data.size_);
+        sync->sem.Post();
+        break;
+      }
+      case SuberType::ASYNC: {
+        auto async = reinterpret_cast<ASyncBlock *>(&block);
+        memcpy(async->buff.addr_, data.addr_, data.size_);
+        async->data_ready = true;
+        break;
+      }
+      case SuberType::QUEUE: {
+        auto queue_block = reinterpret_cast<QueueBlock *>(&block);
+        queue_block->fun(data, queue_block->queue);
+        break;
+      }
+      case SuberType::CALLBACK: {
+        auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
+        cb_block->cb.RunFromUser(data);
+        break;
+      }
+      }
+      return ErrorCode::OK;
+    };
+
+    block_->data_.subers.Foreach<SuberBlock, RawData>(foreach_fun,
+                                                      block_->data_.data);
 
     block_->data_.mutex.Unlock();
   }

@@ -22,49 +22,49 @@ struct timespec _libxr_linux_start_time_spec;
 
 void LibXR::PlatformInit() {
 
-  ErrorCode (*write_fun)(WriteOperation & op, ConstRawData data) =
-      [](WriteOperation &op, ConstRawData data) {
-        auto ans = fwrite(data.addr_, 1, data.size_, stdout);
+  auto write_fun = [](WriteOperation &op, ConstRawData data) {
+    auto ans = fwrite(data.addr_, 1, data.size_, stdout);
 
-        switch (op.type) {
-        case WriteOperation::OP_TYPE_BLOCK:
-          break;
-        case WriteOperation::OP_TYPE_CALLBACK:
-          op.data.callback.RunFromUser(ans == data.size_ ? NO_ERR : ERR_FAIL);
-          break;
-        case WriteOperation::OP_TYPE_POLLING:
-          op.data.status = WriteOperation::OP_DONE;
-          break;
-        }
+    switch (op.type) {
+    case WriteOperation::OperationType::BLOCK:
+      break;
+    case WriteOperation::OperationType::CALLBACK:
+      op.data.callback.RunFromUser(ans == data.size_ ? ErrorCode::OK
+                                                     : ErrorCode::FAILED);
+      break;
+    case WriteOperation::OperationType::POLLING:
+      op.data.status = WriteOperation::OperationPollingStatus::DONE;
+      break;
+    }
 
-        return NO_ERR;
-      };
+    return ErrorCode::OK;
+  };
 
   LibXR::STDIO::write = write_fun;
 
-  ErrorCode (*read_fun)(Operation<ErrorCode, RawData &> &,
-                        RawData) = [](Operation<ErrorCode, RawData &> &op,
-                                      RawData buff) {
+  auto read_fun = [](Operation<ErrorCode, RawData &> &op, RawData buff) {
     auto need_read = buff.size_;
     buff.size_ = fread(buff.addr_, sizeof(char), buff.size_, stdin);
 
     switch (op.type) {
-    case Operation<ErrorCode, RawData &>::OP_TYPE_BLOCK:
+    case Operation<ErrorCode, RawData &>::OperationType::BLOCK:
       break;
-    case Operation<ErrorCode, RawData &>::OP_TYPE_CALLBACK:
-      op.data.callback.RunFromUser(buff.size_ > 0 ? NO_ERR : ERR_FAIL, buff);
+    case Operation<ErrorCode, RawData &>::OperationType::CALLBACK:
+      op.data.callback.RunFromUser(
+          buff.size_ > 0 ? ErrorCode::OK : ErrorCode::FAILED, buff);
       break;
-    case Operation<ErrorCode, RawData &>::OP_TYPE_POLLING:
-      op.data.status = Operation<ErrorCode, RawData &>::OP_DONE;
+    case Operation<ErrorCode, RawData &>::OperationType::POLLING:
+      op.data.status =
+          Operation<ErrorCode, RawData &>::OperationPollingStatus::DONE;
       break;
     }
-    return NO_ERR;
+    return ErrorCode::OK;
   };
 
   LibXR::STDIO::read = read_fun;
 
-  void (*err_fun)(const char *log) = [](const char *log) {
-    static char prase_buff[1024];
+  auto err_fun = [](const char *log) {
+    static char prase_buff[4096];
     printf("Error:%s\r\n", log);
   };
 
@@ -75,7 +75,7 @@ void LibXR::PlatformInit() {
 
   static Semaphore sem(0);
 
-  void (*thread_fun)(Thread::Priority) = [](Thread::Priority priority) {
+  auto thread_fun = [](Thread::Priority priority) {
     sem.Post();
     TimestampMS time = Thread::GetTime();
     while (true) {
@@ -84,11 +84,12 @@ void LibXR::PlatformInit() {
     }
   };
 
-  for (int i = 0; i < Thread::Priority::PRIORITY_NUMBER; i++) {
+  for (int i = 0; i < static_cast<size_t>(Thread::Priority::NUMBER); i++) {
     LibXR::Timer::list_[i] = new LibXR::List;
     auto thread_handle = new Thread;
-    thread_handle->Create((Thread::Priority)i, thread_fun, "libxr_timer_task",
-                          512, Thread::PRIORITY_HIGH);
+    thread_handle->Create<Thread::Priority>((Thread::Priority)i, thread_fun,
+                                            "libxr_timer_task", 512,
+                                            Thread::Priority::HIGH);
     sem.Wait();
   }
 }

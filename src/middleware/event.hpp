@@ -36,13 +36,12 @@ public:
       return;
     }
 
-    ErrorCode (*foreach_fun)(Block &, uint32_t &) = [](Block &block,
-                                                       uint32_t &event) {
+    auto foreach_fun = [](Block &block, uint32_t &event) {
       block.cb.RunFromUser(event);
-      return NO_ERR;
+      return ErrorCode::OK;
     };
 
-    list->data_.Foreach(foreach_fun, event);
+    list->data_.Foreach<LibXR::Event::Block, uint32_t>(foreach_fun, event);
   }
 
   void ActiveFromCallback(uint32_t event, bool in_isr) {
@@ -51,22 +50,20 @@ public:
       return;
     }
 
-    ErrorCode (*foreach_fun)(Block &, uint32_t &) = [](Block &block,
-                                                       uint32_t &event) {
+    auto foreach_fun = [](Block &block, uint32_t &event) {
       block.cb.RunFromUser(event);
-      return NO_ERR;
+      return ErrorCode::OK;
     };
 
-    ErrorCode (*foreach_fun_isr)(Block &, uint32_t &) = [](Block &block,
-                                                           uint32_t &event) {
+    auto foreach_fun_isr = [](Block &block, uint32_t &event) {
       block.cb.RunFromISR(event);
-      return NO_ERR;
+      return ErrorCode::OK;
     };
 
     if (in_isr) {
-      list->data_.Foreach(foreach_fun, event);
+      list->data_.Foreach<Block, uint32_t>(foreach_fun, event);
     } else {
-      list->data_.Foreach(foreach_fun_isr, event);
+      list->data_.Foreach<Block, uint32_t>(foreach_fun_isr, event);
     }
   }
 
@@ -80,11 +77,9 @@ public:
     block->event = target_event;
     block->target = this;
 
-    void (*bind_fun)(bool in_isr, Block *target, uint32_t event) =
-        [](bool in_isr, Block *block, uint32_t event) {
-          UNUSED(event);
-          block->target->Active(block->event);
-        };
+    auto bind_fun = [](bool in_isr, Block *block, uint32_t event) {
+      block->target->Active(block->event);
+    };
 
     auto cb = Callback<uint32_t>::Create(bind_fun, block);
 
