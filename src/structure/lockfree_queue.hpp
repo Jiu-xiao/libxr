@@ -18,21 +18,21 @@ public:
     const auto current_tail = tail_.load(std::memory_order_relaxed);
     const auto next_tail = increment(current_tail);
     if (next_tail == head_.load(std::memory_order_acquire)) {
-      return ERR_FULL;
+      return ErrorCode::FULL;
     }
     queue_handle_[current_tail] = item;
     tail_.store(next_tail, std::memory_order_release);
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
   ErrorCode Pop(Data &item) {
     const auto current_head = head_.load(std::memory_order_relaxed);
     if (current_head == tail_.load(std::memory_order_acquire)) {
-      return ERR_EMPTY;
+      return ErrorCode::EMPTY;
     }
     item = queue_handle_[current_head];
     head_.store(increment(current_head), std::memory_order_release);
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
   void Reset() {

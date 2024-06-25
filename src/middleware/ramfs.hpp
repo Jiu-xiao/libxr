@@ -16,19 +16,19 @@ public:
     return strcmp(a, b);
   }
 
-  typedef enum {
-    NODE_TYPE_FILE,
-    NODE_TYPE_DIR,
-    NODE_TYPE_DEVICE,
-    NODE_TYPE_STORAGE,
-    NODE_TYPE_ANY,
-  } NodeType;
+  enum class NodeType {
+    FILE,
+    DIR,
+    DEVICE,
+    STORAGE,
+    UNKNOW,
+  };
 
-  typedef enum {
-    FILE_READ_ONLY,
-    FILE_READ_WRITE,
-    FILE_EXEC,
-  } FileType;
+  enum class FileType {
+    READ_ONLY,
+    READ_WRITE,
+    EXEC,
+  };
 
   class Node {
   public:
@@ -88,7 +88,7 @@ public:
         data_.read_op = op;
         return data_.read(data_.read_op, data);
       } else {
-        return ERR_NOT_SUPPORT;
+        return ErrorCode::NOT_SUPPORT;
       }
     }
 
@@ -97,7 +97,7 @@ public:
         data_.write_op = op;
         return data_.write(data_.write_op, data);
       } else {
-        return ERR_NOT_SUPPORT;
+        return ErrorCode::NOT_SUPPORT;
       }
     }
 
@@ -117,10 +117,10 @@ public:
     file.data_.name = name_buff;
 
     if (std::is_const<FileType>()) {
-      file.data_.type = FILE_READ_ONLY;
+      file.data_.type = FileType::READ_ONLY;
       file.data_.addr_const = raw;
     } else {
-      file.data_.type = FILE_READ_WRITE;
+      file.data_.type = FileType::READ_WRITE;
       file.data_.addr = raw;
     }
 
@@ -149,7 +149,7 @@ public:
     block->exec_fun = exec;
     file.data_.arg = block;
 
-    int (*fun)(void *, int, char **) = [](void *arg, int argc, char **argv) {
+    auto fun = [](void *arg, int argc, char **argv) {
       auto block = reinterpret_cast<FileBlock *>(arg);
       block->exec_fun(block->arg, argc, argv);
     };
