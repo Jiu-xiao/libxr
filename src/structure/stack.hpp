@@ -19,11 +19,11 @@ public:
 
     if (top >= Depth) {
       mutex_.Unlock();
-      return ERR_FULL;
+      return ErrorCode::FULL;
     }
     stack_[top++] = data;
     mutex_.Unlock();
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
   ErrorCode Pop(Data &data) {
@@ -31,11 +31,11 @@ public:
 
     if (top == 0) {
       mutex_.Unlock();
-      return ERR_EMPTY;
+      return ErrorCode::EMPTY;
     }
     data = stack_[--top];
     mutex_.Unlock();
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
   ErrorCode Peek(Data &data) {
@@ -44,12 +44,12 @@ public:
     if (top == 0) {
       mutex_.Unlock();
 
-      return ERR_EMPTY;
+      return ErrorCode::EMPTY;
     }
     data = stack_[top - 1];
     mutex_.Unlock();
 
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 };
 } // namespace LibXR

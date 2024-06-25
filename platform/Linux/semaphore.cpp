@@ -26,9 +26,9 @@ ErrorCode Semaphore::Wait(uint32_t timeout) {
   ts.tv_nsec = raw_time % (1000U * 1000U * 1000U);
 
   if (sem_timedwait(&semaphore_handle_, &ts) == 0) {
-    return NO_ERR;
+    return ErrorCode::OK;
   } else {
-    return ERR_TIMEOUT;
+    return ErrorCode::TIMEOUT;
   }
 }
 

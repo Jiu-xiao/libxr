@@ -28,6 +28,30 @@ public:
     }
   }
 
+#ifdef LIBXR_DEBUG_BUILD
+  static void SizeLimitCheck(size_t limit, size_t size, SizeLimitMode mode) {
+    switch (mode) {
+    case SizeLimitMode::NONE:
+      break;
+    case SizeLimitMode::EQUAL:
+      ASSERT(limit == size);
+      break;
+    case SizeLimitMode::MORE:
+      ASSERT(limit <= size);
+      break;
+    case SizeLimitMode::LESS:
+      ASSERT(limit >= size);
+      break;
+    }
+  }
+#else
+  static void SizeLimitCheck(size_t limit, size_t size, SizeLimitMode mode) {
+    UNUSED(limit);
+    UNUSED(size);
+    UNUSED(mode);
+  };
+#endif
+
 private:
   static const LibXR::Callback<const char *, uint32_t>
       *libxr_fatal_error_callback;

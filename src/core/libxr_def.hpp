@@ -51,24 +51,26 @@
   })
 #endif
 
-typedef enum {
-  NO_ERR = 0,
-  ERR_FAIL = -1,
-  ERR_MEM = -2,
-  ERR_ARG = -3,
-  ERR_STATE = -4,
-  ERR_SIZE = -5,
-  ERR_NOT_FOUND = -6,
-  ERR_NOT_SUPPORT = -7,
-  ERR_TIMEOUT = -8,
-  ERR_NO_REPONSE = -9,
-  ERR_CHECK = -10,
-  ERR_BUSY = -11,
-  ERR_INIT = -12,
-  ERR_EMPTY = -13,
-  ERR_FULL = -14,
-  ERR_NULL = -15,
-} ErrorCode;
+enum class ErrorCode {
+  OK = 0,
+  FAILED = -1,
+  NO_MEM = -2,
+  ARG_ERR = -3,
+  STATE_ERR = -4,
+  SIZE_ERR = -5,
+  NOT_FOUND = -6,
+  NOT_SUPPORT = -7,
+  TIMEOUT = -8,
+  NO_REPONSE = -9,
+  CHECK_ERR = -10,
+  BUSY = -11,
+  INIT_ERR = -12,
+  EMPTY = -13,
+  FULL = -14,
+  PTR_NULL = -15,
+};
+
+enum class SizeLimitMode { EQUAL = 0, LESS = 1, MORE = 2, NONE = 3 };
 
 #ifdef ASSERT
 #undef ASSERT

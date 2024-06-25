@@ -13,9 +13,9 @@ ErrorCode Signal::Action(Thread &thread, int signal) {
   ASSERT(signal >= SIGRTMIN && signal <= SIGRTMAX);
 
   if (pthread_kill(thread, signal) == 0) {
-    return NO_ERR;
+    return ErrorCode::OK;
   } else {
-    return ERR_FAIL;
+    return ErrorCode::FAILED;
   }
 }
 
@@ -35,11 +35,11 @@ ErrorCode Signal::Wait(int signal, uint32_t timeout) {
   pthread_sigmask(SIG_BLOCK, &oldset, NULL);
   if (res == -1) {
     if (errno == EAGAIN) {
-      return ERR_TIMEOUT;
+      return ErrorCode::TIMEOUT;
     } else {
-      return ERR_FAIL;
+      return ErrorCode::FAILED;
     }
   } else {
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 }

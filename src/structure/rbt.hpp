@@ -8,7 +8,7 @@
 namespace LibXR {
 template <typename Key> class RBTree {
 public:
-  enum RBTColor { RBT_COLOR_RED, RBT_COLOR_BLACK };
+  enum class RBTColor { RED, BLACK };
 
   class BaseNode {
   public:
@@ -93,7 +93,7 @@ public:
       replace->left = node.left;
       node.left->parent = replace;
 
-      if (color == RBT_COLOR_BLACK)
+      if (color == RBTColor::BLACK)
         RbtreeDeleteFixup(child, parent);
       mutex_.Unlock();
       return;
@@ -118,7 +118,7 @@ public:
     } else
       root_ = child;
 
-    if (color == RBT_COLOR_BLACK)
+    if (color == RBTColor::BLACK)
       RbtreeDeleteFixup(child, parent);
 
     mutex_.Unlock();
@@ -128,7 +128,7 @@ public:
     node.left = NULL;
     node.right = NULL;
     node.parent = NULL;
-    node.color = RBT_COLOR_BLACK;
+    node.color = RBTColor::BLACK;
     node.key = key;
 
     mutex_.Lock();
@@ -140,7 +140,7 @@ public:
     node.left = NULL;
     node.right = NULL;
     node.parent = NULL;
-    node.color = RBT_COLOR_BLACK;
+    node.color = RBTColor::BLACK;
     node.key = key;
 
     mutex_.Lock();
@@ -158,18 +158,20 @@ public:
 
   template <typename Data, typename ArgType>
   ErrorCode Foreach(ErrorCode (*fun)(Node<Data> &node, ArgType arg),
-                    ArgType arg) {
+                    ArgType arg,
+                    SizeLimitMode limit_mode = SizeLimitMode::MORE) {
 
     typedef struct {
       ErrorCode (*fun_)(Node<Data> &node, ArgType arg);
       ArgType arg_;
+      SizeLimitMode limit_mode_;
     } Block;
 
-    Block block = {.fun_ = fun, .arg_ = arg};
+    Block block = {.fun_ = fun, .arg_ = arg, .limit_mode_ = limit_mode};
 
-    ErrorCode (*foreach_fun)(BaseNode & node, void *arg) = [](BaseNode &node,
-                                                              void *raw) {
+    auto foreach_fun = [](BaseNode &node, void *raw) {
       Block *block = reinterpret_cast<Block *>(raw);
+      Assert::SizeLimitCheck(sizeof(Data), node.size, block->limit_mode_);
       return block->fun_(*ToDerivedType<Data>(&node), block->arg_);
     };
 
@@ -221,13 +223,13 @@ private:
 
   RBTColor GetColor(BaseNode *node) { return node->color; }
 
-  bool IsRed(BaseNode *node) { return node->color == RBT_COLOR_RED; }
+  bool IsRed(BaseNode *node) { return node->color == RBTColor::RED; }
 
-  bool IsBlack(BaseNode *node) { return node->color == RBT_COLOR_BLACK; }
+  bool IsBlack(BaseNode *node) { return node->color == RBTColor::BLACK; }
 
-  void SetBlack(BaseNode *node) { node->color = RBT_COLOR_BLACK; }
+  void SetBlack(BaseNode *node) { node->color = RBTColor::BLACK; }
 
-  void SetRed(BaseNode *node) { node->color = RBT_COLOR_RED; }
+  void SetRed(BaseNode *node) { node->color = RBTColor::RED; }
 
   void SetParent(BaseNode *node, BaseNode *parent) { node->parent = parent; }
 
@@ -340,7 +342,7 @@ private:
       root_ = &node;
     }
 
-    node.color = RBT_COLOR_RED;
+    node.color = RBTColor::RED;
 
     RbtreeInsertFixup(&node);
   }
@@ -461,15 +463,15 @@ private:
                           ErrorCode (*fun)(BaseNode &node, void *arg),
                           void *arg) {
     if (node == NULL) {
-      return NO_ERR;
+      return ErrorCode::OK;
     }
 
-    if (RbtreeForeach(node->left, fun, arg) == NO_ERR &&
-        fun(*node, arg) == NO_ERR) {
+    if (RbtreeForeach(node->left, fun, arg) == ErrorCode::OK &&
+        fun(*node, arg) == ErrorCode::OK) {
       return RbtreeForeach(node->right, fun, arg);
     }
 
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
   BaseNode *root_;

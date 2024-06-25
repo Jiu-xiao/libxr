@@ -1,5 +1,6 @@
 #pragma once
 
+#include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "mutex.hpp"
 #include <utility>
@@ -74,28 +75,29 @@ public:
         pos->next_ = data.next_;
         data.next_ = NULL;
         mutex_.Unlock();
-        return NO_ERR;
+        return ErrorCode::OK;
       }
     }
     mutex_.Unlock();
 
-    return ERR_NOT_FOUND;
+    return ErrorCode::NOT_FOUND;
   }
 
   template <typename Data, typename ArgType>
-  ErrorCode Foreach(ErrorCode (*func)(Data &, ArgType &), ArgType &arg) {
+  ErrorCode Foreach(ErrorCode (*func)(Data &, ArgType &), ArgType &arg,
+                    SizeLimitMode limit_mode = SizeLimitMode::MORE) {
     mutex_.Lock();
     for (BaseNode *pos = head_.next_; pos != &head_; pos = pos->next_) {
-      ASSERT(pos->size_ == sizeof(Data));
+      Assert::SizeLimitCheck(sizeof(Data), pos->size_, limit_mode);
       auto res = func(reinterpret_cast<Node<Data> *>(pos)->data_, arg);
-      if (res != NO_ERR) {
+      if (res != ErrorCode::OK) {
         mutex_.Unlock();
         return res;
       }
     }
     mutex_.Unlock();
 
-    return NO_ERR;
+    return ErrorCode::OK;
   }
 
 private:

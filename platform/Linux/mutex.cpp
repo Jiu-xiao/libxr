@@ -10,16 +10,16 @@ Mutex::~Mutex() { pthread_mutex_destroy(&mutex_handle_); }
 
 ErrorCode Mutex::Lock() {
   if (pthread_mutex_lock(&mutex_handle_) != 0) {
-    return ERR_BUSY;
+    return ErrorCode::BUSY;
   }
-  return ErrorCode::NO_ERR;
+  return ErrorCode::OK;
 }
 
 ErrorCode Mutex::TryLock() {
   if (pthread_mutex_trylock(&mutex_handle_) != 0) {
-    return ErrorCode::ERR_BUSY;
+    return ErrorCode::BUSY;
   }
-  return ErrorCode::NO_ERR;
+  return ErrorCode::OK;
 }
 
 void Mutex::Unlock() { pthread_mutex_unlock(&mutex_handle_); }
