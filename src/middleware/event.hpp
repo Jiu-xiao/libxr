@@ -12,7 +12,9 @@ namespace LibXR {
 class Event {
 public:
   Event()
-      : rbt_([](const uint32_t &a, const uint32_t &b) { return int(a - b); }) {}
+      : rbt_([](const uint32_t &a, const uint32_t &b) {
+          return int(a) - int(b);
+        }) {}
 
   void Register(uint32_t event, const Callback<uint32_t> &cb) {
 

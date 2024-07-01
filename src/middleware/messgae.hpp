@@ -6,6 +6,7 @@
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "list.hpp"
+#include "lock_queue.hpp"
 #include "lockfree_queue.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"
@@ -14,6 +15,7 @@
 #include "spin_lock.hpp"
 #include "thread.hpp"
 #include <cstdint>
+#include <sys/types.h>
 
 namespace LibXR {
 class Topic {
@@ -33,12 +35,12 @@ public:
     uint32_t topic_name_crc32;
     uint32_t data_len : 24;
     uint8_t pack_header_crc8;
-  } RemoteDataHeader;
+  } PackedDataHeader;
 
-  template <typename Data> class __attribute__((packed)) RemoteData {
+  template <typename Data> class __attribute__((packed)) PackedData {
   public:
     struct __attribute__((packed)) {
-      RemoteDataHeader header;
+      PackedDataHeader header;
       Data data_;
     } raw;
 
@@ -47,6 +49,7 @@ public:
     const Data &operator=(const Data &data) {
       raw.data_ = data;
       crc8_ = CRC8::Calculate(&raw, sizeof(raw));
+      return data;
     }
 
     operator Data &() { return raw.data_; }
@@ -62,8 +65,10 @@ public:
       if (!domain_) {
         domain_lock_.Lock();
         if (!domain_) {
-          domain_ = new RBTree<uint32_t>(
-              [](const uint32_t &a, const uint32_t &b) { return int(a - b); });
+          domain_ =
+              new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b) {
+                return int(a) - int(b);
+              });
         }
         domain_lock_.Unlock();
       }
@@ -78,8 +83,9 @@ public:
       }
 
       node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
-          RBTree<uint32_t>(
-              [](const uint32_t &a, const uint32_t &b) { return int(a - b); }));
+          RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b) {
+            return int(a) - int(b);
+          }));
 
       domain_->Insert(*node_, crc32);
     }
@@ -193,12 +199,13 @@ public:
     }
 
     template <typename Data>
-    QueuedSubscriber(const char *name, Queue<Data> &queue,
+    QueuedSubscriber(const char *name, LockQueue<Data> &queue,
                      Domain *domain = NULL) {
       *this = QueuedSubscriber(WaitTopic(name, UINT32_MAX, domain), queue);
     }
 
-    template <typename Data> QueuedSubscriber(Topic topic, Queue<Data> &queue) {
+    template <typename Data>
+    QueuedSubscriber(Topic topic, LockQueue<Data> &queue) {
       if (topic.block_->data_.check_length) {
         ASSERT(topic.block_->data_.max_length == sizeof(Data));
       } else {
@@ -209,7 +216,7 @@ public:
       block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
       block->data_.fun = [](RawData &data, void *arg) {
-        Queue<Data> *queue = reinterpret_cast<Queue<Data> *>(arg);
+        LockQueue<Data> *queue = reinterpret_cast<LockQueue<Data> *>(arg);
         queue->Push(*reinterpret_cast<const Data *>(data.addr_));
       };
 
@@ -234,8 +241,10 @@ public:
     if (!def_domain_) {
       domain_lock_.Lock();
       if (!domain_) {
-        domain_ = new RBTree<uint32_t>(
-            [](const uint32_t &a, const uint32_t &b) { return int(a - b); });
+        domain_ =
+            new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b) {
+              return int(a) - int(b);
+            });
       }
       if (!def_domain_) {
         def_domain_ = new Domain("libxr_def_domain");
@@ -298,20 +307,24 @@ public:
     }
     block_->data_.mutex.Unlock();
   }
-
   template <typename Data> void Publish(Data &data) {
+    Publish(&data, sizeof(Data));
+  }
+
+  void Publish(void *addr, uint32_t size) {
     block_->data_.mutex.Lock();
     if (block_->data_.check_length) {
-      ASSERT(sizeof(Data) == block_->data_.max_length);
+      ASSERT(size == block_->data_.max_length);
     } else {
-      ASSERT(sizeof(Data) <= block_->data_.max_length);
+      ASSERT(size <= block_->data_.max_length);
     }
 
     if (block_->data_.cache) {
-      memcpy(block_->data_.data.addr_, &data, sizeof(Data));
-      block_->data_.data.size_ = sizeof(Data);
+      memcpy(block_->data_.data.addr_, addr, size);
+      block_->data_.data.size_ = size;
     } else {
-      block_->data_.data = data;
+      block_->data_.data.addr_ = addr;
+      block_->data_.data.size_ = size;
     }
 
     auto foreach_fun = [](SuberBlock &block, RawData &data) {
@@ -348,6 +361,27 @@ public:
     block_->data_.mutex.Unlock();
   }
 
+  template <typename Data> void DumpData(PackedData<Data> &data) {
+    if (block_->data_.data.addr_ != NULL) {
+      if (block_->data_.check_length) {
+        ASSERT(sizeof(Data) == block_->data_.data.size_);
+      } else {
+        ASSERT(sizeof(Data) >= block_->data_.data.size_);
+      }
+
+      block_->data_.mutex.Lock();
+      data = *reinterpret_cast<Data *>(block_->data_.data.addr_);
+      block_->data_.mutex.Unlock();
+      data.raw.header.prefix = 0xa5;
+      data.raw.header.topic_name_crc32 = block_->data_.crc32;
+      data.raw.header.data_len = block_->data_.data.size_;
+      data.raw.header.pack_header_crc8 =
+          CRC8::Calculate(&data, sizeof(PackedDataHeader) - sizeof(uint8_t));
+      data.crc8_ =
+          CRC8::Calculate(&data, sizeof(PackedData<Data>) - sizeof(uint8_t));
+    }
+  }
+
   template <typename Data> void DumpData(Data &data) {
     if (block_->data_.data.addr_ != NULL) {
       if (block_->data_.check_length) {
@@ -355,27 +389,12 @@ public:
       } else {
         ASSERT(sizeof(Data) >= block_->data_.data.size_);
       }
-
       block_->data_.mutex.Lock();
       data = *reinterpret_cast<Data *>(block_->data_.data.addr_);
       block_->data_.mutex.Unlock();
     }
   }
 
-  template <typename Data> void DumpData(RemoteData<Data> &data) {
-    if (block_->data_.data.addr_ != NULL) {
-      if (block_->data_.check_length) {
-        ASSERT(sizeof(Data) == block_->data_.data.size_);
-      } else {
-        ASSERT(sizeof(Data) >= block_->data_.data.size_);
-      }
-      block_->data_.mutex.Lock();
-      data = *reinterpret_cast<Data *>(block_->data_.data.addr_);
-      block_->data_.mutex.Unlock();
-    }
-  }
-
-private:
   static TopicHandle WaitTopic(const char *name, uint32_t timeout = UINT32_MAX,
                                Domain *domain = NULL) {
     TopicHandle topic = NULL;
@@ -392,6 +411,131 @@ private:
     return topic;
   }
 
+  operator TopicHandle() { return block_; }
+
+  class Server {
+  public:
+    enum class Status { WAIT_START, WAIT_TOPIC, WAIT_DATA_CRC };
+
+    Server(size_t buffer_length)
+        : queue_(1, buffer_length),
+          topic_map_([](const uint32_t &a, const uint32_t &b) {
+            return int(a) - int(b);
+          }) {
+
+      /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
+      ASSERT(buffer_length >= sizeof(PackedData<uint8_t>));
+      prase_buff_.size_ = buffer_length;
+      prase_buff_.addr_ = new uint8_t[buffer_length];
+    }
+
+    void Register(TopicHandle topic) {
+      auto node = new RBTree<uint32_t>::Node<TopicHandle>(topic);
+      topic_map_.Insert(*node, topic->key);
+    }
+
+    ErrorCode PraseData(ConstRawData data) {
+      auto raw = reinterpret_cast<const uint8_t *>(data.addr_);
+
+      queue_.PushBatch(data.addr_, data.size_);
+
+    check_start:
+      /* 1. Check prefix */
+      if (status_ == Status::WAIT_START) {
+        /* Check start frame */
+        auto queue_size = queue_.Size();
+        for (uint32_t i = 0; i < queue_size; i++) {
+          uint8_t prefix = 0;
+          queue_.Peek(&prefix);
+          if (prefix == 0xa5) {
+            status_ = Status::WAIT_TOPIC;
+            break;
+          }
+          queue_.Pop();
+        }
+        /* Not found */
+        if (status_ == Status::WAIT_START) {
+          return ErrorCode::NOT_FOUND;
+        }
+      }
+
+      /* 2. Get topic info */
+      if (status_ == Status::WAIT_TOPIC) {
+        /* Check size&crc*/
+        if (queue_.Size() >= sizeof(PackedDataHeader)) {
+          queue_.PeekBatch(prase_buff_.addr_, sizeof(PackedDataHeader));
+          if (CRC8::Verify(prase_buff_.addr_, sizeof(PackedDataHeader))) {
+            auto header =
+                reinterpret_cast<PackedDataHeader *>(prase_buff_.addr_);
+            /* Check buffer size */
+            if (header->data_len >= queue_.EmptySize()) {
+              queue_.PopBatch(sizeof(PackedDataHeader));
+              status_ = Status::WAIT_START;
+              goto check_start;
+            }
+
+            /* Find topic */
+            auto node =
+                topic_map_.Search<TopicHandle>(header->topic_name_crc32);
+            if (node) {
+              data_len_ = header->data_len;
+              current_topic_ = node->GetData();
+              status_ = Status::WAIT_DATA_CRC;
+            } else {
+              queue_.PopBatch(sizeof(PackedDataHeader));
+              status_ = Status::WAIT_START;
+              goto check_start;
+            }
+          } else {
+            queue_.PopBatch(sizeof(PackedDataHeader));
+            status_ = Status::WAIT_START;
+            goto check_start;
+          }
+        } else {
+          queue_.PushBatch(raw, data.size_);
+          return ErrorCode::NOT_FOUND;
+        }
+      }
+
+      if (status_ == Status::WAIT_DATA_CRC) {
+        /* Check size&crc */
+        if (queue_.Size() > data_len_ + sizeof(PackedDataHeader)) {
+          queue_.PopBatch(prase_buff_.addr_, data_len_ +
+                                                 sizeof(PackedDataHeader) +
+                                                 sizeof(uint8_t));
+          if (CRC8::Verify(prase_buff_.addr_, data_len_ +
+                                                  sizeof(PackedDataHeader) +
+                                                  sizeof(uint8_t))) {
+            status_ = Status::WAIT_START;
+            auto data = reinterpret_cast<uint8_t *>(prase_buff_.addr_) +
+                        sizeof(PackedDataHeader);
+
+            Topic(current_topic_).Publish(data, data_len_);
+
+            goto check_start;
+          } else {
+            queue_.PopBatch(data_len_ + sizeof(PackedDataHeader) +
+                            sizeof(uint8_t));
+            goto check_start;
+          }
+        } else {
+          return ErrorCode::NOT_FOUND;
+        }
+      }
+
+      return ErrorCode::FAILED;
+    }
+
+  private:
+    Status status_ = Status::WAIT_START;
+    uint32_t data_len_ = 0;
+    RBTree<uint32_t> topic_map_;
+    BaseQueue queue_;
+    RawData prase_buff_;
+    TopicHandle current_topic_ = NULL;
+  };
+
+private:
   TopicHandle block_ = NULL;
   static RBTree<uint32_t> *domain_;
   static SpinLock domain_lock_;

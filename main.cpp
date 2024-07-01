@@ -16,6 +16,7 @@
 #include "thread.hpp"
 #include "timer.hpp"
 #include <cstddef>
+#include <cstdint>
 
 const char *TEST_NAME = NULL;
 
@@ -128,9 +129,9 @@ int main() {
   lock_free_queue.Pop(tmp);
   ASSERT(tmp == 2.1f);
 
-  auto queue = LibXR::Queue<float>(3);
+  auto queue = LibXR::LockQueue<float>(3);
 
-  auto queue_test_fun = [](LibXR::Queue<float> *queue) {
+  auto queue_test_fun = [](LibXR::LockQueue<float> *queue) {
     LibXR::Thread::Sleep(100);
     queue->Push(1.2f);
     LibXR::Thread::Sleep(10);
@@ -144,8 +145,9 @@ int main() {
     return;
   };
 
-  thread.Create<LibXR::Queue<float> *>(&queue, queue_test_fun, "test_task", 512,
-                                       LibXR::Thread::Priority::REALTIME);
+  thread.Create<LibXR::LockQueue<float> *>(&queue, queue_test_fun, "test_task",
+                                           512,
+                                           LibXR::Thread::Priority::REALTIME);
   tmp = 0.0f;
 
   queue.Pop(tmp, 200);
@@ -246,7 +248,7 @@ int main() {
   static double msg[4];
   auto sync_suber =
       LibXR::Topic::SyncSubscriber<double>("test_tp", msg[1], &domain);
-  LibXR::Queue<double> msg_queue(10);
+  LibXR::LockQueue<double> msg_queue(10);
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
 
   auto msg_cb_fun = [](bool, void *, LibXR::RawData &data) {
@@ -264,6 +266,40 @@ int main() {
   msg_queue.Pop(msg[2], 0);
   ASSERT(msg[2] == msg[0]);
   ASSERT(msg[3] == msg[0]);
+
+  topic.Publish(msg[0]);
+  msg[1] = 0.0f;
+  LibXR::Topic::PackedData<double> packed_data;
+  LibXR::Topic::Server topic_server(512);
+
+  topic.DumpData(packed_data);
+  topic_server.Register(topic);
+
+  topic_server.PraseData(LibXR::ConstRawData(packed_data));
+
+  ASSERT(msg[1] == msg[0]);
+
+  for (int i = 0; i < 1000; i++) {
+    msg[0] = i * 0.1;
+    topic.Publish(msg[0]);
+    topic.DumpData(packed_data);
+    topic_server.PraseData(LibXR::ConstRawData(packed_data));
+    ASSERT(msg[1] == msg[0]);
+  }
+
+  for (int i = 0; i < 1000; i++) {
+    msg[0] = i * 0.1;
+    topic.Publish(msg[0]);
+    topic.DumpData(packed_data);
+    for (uint8_t j = 0; j < 255; j++) {
+      topic_server.PraseData(LibXR::ConstRawData(j));
+    }
+    for (int j = 0; j < sizeof(packed_data); j++) {
+      auto tmp = reinterpret_cast<uint8_t *>(&packed_data);
+      topic_server.PraseData(LibXR::ConstRawData(tmp[j]));
+    }
+    ASSERT(msg[1] == msg[0]);
+  }
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Stack Test");
