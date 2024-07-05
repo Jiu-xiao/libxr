@@ -9,6 +9,7 @@
 #include "lockfree_queue.hpp"
 #include "messgae.hpp"
 #include "queue.hpp"
+#include "ramfs.hpp"
 #include "rbt.hpp"
 #include "semaphore.hpp"
 #include "signal.hpp"
@@ -239,6 +240,33 @@ int main() {
   event.Bind(event_bind, 0x4321, 0x1234);
   event_bind.Active(0x4321);
   ASSERT(event_arg == 3);
+
+  /* --------------------------------------------------------------- */
+  TEST_STEP("RamFS Test");
+
+  auto ramfs = LibXR::RamFS();
+
+  auto file = LibXR::RamFS::CreateFile("test_file", ramfs);
+
+  auto dir = LibXR::RamFS::CreateDir("test_dir");
+
+  auto dev = LibXR::RamFS::Device("test_dev");
+
+  ramfs.Add(dir);
+  dir.Add(file);
+  dir.Add(dev);
+
+  ASSERT(ramfs.FindDir("test") == NULL);
+  ASSERT(ramfs.FindFile("test") == NULL);
+  ASSERT(ramfs.FindDevice("test") == NULL);
+  ASSERT(dir.FindDevice("test") == NULL);
+  ASSERT(dir.FindFile("test") == NULL);
+
+  ASSERT(ramfs.FindDir("test_dir") == &dir);
+  ASSERT(ramfs.FindFile("test_file") == &file);
+  ASSERT(ramfs.FindDevice("test_dev") == &dev);
+  ASSERT(dir.FindDevice("test_dev") == &dev);
+  ASSERT(dir.FindFile("test_file") == &file);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Message Test");
