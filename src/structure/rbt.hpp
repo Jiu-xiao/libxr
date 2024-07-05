@@ -45,11 +45,17 @@ public:
     ASSERT(compare_fun_);
   }
 
-  template <typename Data> Node<Data> *Search(const Key &key) {
+  template <typename Data>
+  Node<Data> *Search(const Key &key,
+                     SizeLimitMode limit_mode = SizeLimitMode::MORE) {
     mutex_.Lock();
+    if (root_ == NULL) {
+      mutex_.Unlock();
+      return NULL;
+    }
     auto ans = _Search(root_, key);
     mutex_.Unlock();
-    return ToDerivedType<Data>(ans);
+    return ToDerivedType<Data>(ans, limit_mode);
   }
 
   void Delete(BaseNode &node) {
@@ -235,16 +241,20 @@ private:
 
   void SetColor(BaseNode *node, RBTColor color) { node->color = color; }
 
-  template <typename Data> static Node<Data> *ToDerivedType(BaseNode *node) {
+  template <typename Data>
+  static Node<Data> *
+  ToDerivedType(BaseNode *node,
+                SizeLimitMode limit_mode = SizeLimitMode::MORE) {
     if (node) {
-      ASSERT(node->size == sizeof(Data));
+      Assert::SizeLimitCheck(sizeof(Data), node->size, limit_mode);
     }
     return reinterpret_cast<Node<Data> *>(node);
   }
 
   BaseNode *_Search(BaseNode *x, const Key &key) {
-    if (x == NULL)
+    if (x == NULL) {
       return NULL;
+    }
 
     int ans = compare_fun_(key, x->key);
 
