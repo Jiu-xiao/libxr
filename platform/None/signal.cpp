@@ -1,6 +1,7 @@
 #include "signal.hpp"
+
 #include "libxr_def.hpp"
-#include <cstdint>
+#include "timer.hpp"
 
 using namespace LibXR;
 
@@ -32,6 +33,8 @@ ErrorCode Signal::Wait(int signal, uint32_t timeout) {
       sig &= ~flag;
       return ErrorCode::OK;
     }
+
+    Timer::RefreshTimerInIdle();
   }
   return ErrorCode::TIMEOUT;
 }

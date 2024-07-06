@@ -1,12 +1,13 @@
 #include "condition_var.hpp"
+
 #include "libxr_def.hpp"
 #include "libxr_platform.hpp"
-#include <cstdint>
-#include <time.h>
+#include "thread.hpp"
+#include "timer.hpp"
 
 using namespace LibXR;
 
-ConditionVar::ConditionVar() { handle_ = 0; }
+ConditionVar::ConditionVar() : handle_(0) {}
 
 ConditionVar::~ConditionVar() {}
 
@@ -24,15 +25,12 @@ ErrorCode ConditionVar::Wait(uint32_t timeout) {
     if (handle_) {
       return ErrorCode::OK;
     }
+    Timer::RefreshTimerInIdle();
   }
 
   return ErrorCode::TIMEOUT;
 }
 
-void ConditionVar::Signal() {
-  handle_ = 1;
-}
+void ConditionVar::Signal() { handle_ = 1; }
 
-void ConditionVar::Broadcast() {
-  handle_ = 1;
-}
+void ConditionVar::Broadcast() { handle_ = 1; }

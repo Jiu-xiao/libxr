@@ -1,12 +1,12 @@
 #include "semaphore.hpp"
+
 #include "libxr_def.hpp"
 #include "libxr_platform.hpp"
-#include <stdint.h>
-#include <stdio.h>
+#include "timer.hpp"
 
 using namespace LibXR;
 
-Semaphore::Semaphore(uint32_t init_count) { semaphore_handle_ = init_count; }
+Semaphore::Semaphore(uint32_t init_count) : semaphore_handle_(init_count) {}
 
 Semaphore::~Semaphore() {}
 
@@ -27,6 +27,7 @@ ErrorCode Semaphore::Wait(uint32_t timeout) {
       semaphore_handle_--;
       return ErrorCode::OK;
     }
+    Timer::RefreshTimerInIdle();
   }
   return ErrorCode::TIMEOUT;
 }

@@ -1,6 +1,8 @@
 #include "mutex.hpp"
+
 #include "libxr_platform.hpp"
-#include <pthread.h>
+#include "thread.hpp"
+#include "timer.hpp"
 
 using namespace LibXR;
 
@@ -10,6 +12,7 @@ Mutex::~Mutex() {}
 
 ErrorCode Mutex::Lock() {
   while (mutex_handle_ < 1) {
+    Timer::RefreshTimerInIdle();
   }
   mutex_handle_ = 0;
   return ErrorCode::OK;
