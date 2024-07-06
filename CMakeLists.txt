@@ -7,7 +7,7 @@ add_compile_definitions(LIBXR_DEBUG_BUILD)
 
 # Detect platform
 if(CMAKE_CROSSCOMPILING)
-  Set(PLATFORM "CrossCompiling")
+  message("Cross compiling.")
 else()
   if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
     Set(PLATFORM "Linux")
@@ -16,6 +16,10 @@ else()
   elseif()
     message(FATAL_ERROR, "Unkonw platform.")
   endif()
+endif()
+
+if(NOT PLATFORM)
+  message(FATAL_ERROR, "Unkonw platform.")
 endif()
 
 message("-- Platfrom: ${PLATFORM}")
@@ -71,8 +75,6 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/middleware
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM})
 
-
-set(LIBXR_TEST_BUILD True)
 
 if(LIBXR_TEST_BUILD)
   if(PLATFORM MATCHES "Linux")

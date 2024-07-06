@@ -11,7 +11,7 @@ public:
 
   ~ConditionVar();
 
-  void Wait(uint32_t timeout);
+  ErrorCode Wait(uint32_t timeout);
 
   void Signal();
 

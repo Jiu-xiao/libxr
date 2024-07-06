@@ -196,13 +196,13 @@ int main() {
   LibXR::ConditionVar cv;
 
   auto cv_fun1 = [](LibXR::ConditionVar *cv) {
-    cv->Wait(100);
+    ASSERT(cv->Wait(100) == ErrorCode::OK);
     sem_cv.Post();
     return;
   };
 
   auto cv_fun2 = [](LibXR::ConditionVar *cv) {
-    cv->Wait(100);
+    ASSERT(cv->Wait(100) == ErrorCode::OK);
     sem_cv.Post();
     return;
   };
