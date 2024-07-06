@@ -1,17 +1,18 @@
 #pragma once
 
+#include <cstring>
+#include <type_traits>
+#include <utility>
+
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "rbt.hpp"
-#include <cstring>
-#include <type_traits>
-#include <utility>
 
 namespace LibXR {
 class RamFS {
-public:
+ public:
   RamFS(const char *name = "ramfs") : root_(CreateDir(name)) {}
 
   static int _str_compare(const char *const &a, const char *const &b) {
@@ -33,13 +34,13 @@ public:
   };
 
   class FsNode {
-  public:
+   public:
     const char *name;
     FsNodeType type;
   };
 
   typedef class _File : public FsNode {
-  public:
+   public:
     union {
       void *addr;
       const void *addr_const;
@@ -67,7 +68,7 @@ public:
   };
 
   class Device : public RBTree<const char *>::Node<_Device> {
-  public:
+   public:
     Device(const char *name, ReadPort read_port = NULL,
            WritePort write_port = NULL) {
       char *name_buff = new char[strlen(name) + 1];
@@ -78,7 +79,7 @@ public:
       data_.type = FsNodeType::DEVICE;
     }
 
-    ErrorCode Read(ReadOperation &op, ConstRawData data) {
+    ErrorCode Read(ReadOperation &op, RawData data) {
       if (data_.read) {
         data_.read_op = op;
         return data_.read(data_.read_op, data);
@@ -87,7 +88,7 @@ public:
       }
     }
 
-    ErrorCode Write(WriteOperation &op, RawData data) {
+    ErrorCode Write(WriteOperation &op, ConstRawData data) {
       if (data_.write) {
         data_.write_op = op;
         return data_.write(data_.write_op, data);
@@ -105,7 +106,7 @@ public:
   } StorageBlock;
 
   class _Dir : public FsNode {
-  public:
+   public:
     _Dir() : rbt(RBTree<const char *>(_str_compare)) {}
 
     void Add(File &file) { rbt.Insert(file, file.GetData().name); }
@@ -114,7 +115,7 @@ public:
   };
 
   class Dir : public RBTree<const char *>::Node<_Dir> {
-  public:
+   public:
     void Add(File &file) { this->GetData().Add(file); }
     void Add(Dir &dir) { this->GetData().rbt.Insert(dir, dir.GetData().name); }
     void Add(Device &dev) {
@@ -161,7 +162,6 @@ public:
     };
 
     File *FindFileRec(const char *name) {
-
       _FindFileRecBlock block;
 
       block.name = name;
@@ -344,4 +344,4 @@ public:
 
   Dir root_;
 };
-} // namespace LibXR
+}  // namespace LibXR
