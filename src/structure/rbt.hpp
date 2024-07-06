@@ -173,7 +173,10 @@ public:
       SizeLimitMode limit_mode_;
     } Block;
 
-    Block block = {.fun_ = fun, .arg_ = arg, .limit_mode_ = limit_mode};
+    Block block;
+    block.fun_ = fun;
+    block.arg_ = arg;
+    block.limit_mode_ = limit_mode;
 
     auto foreach_fun = [](BaseNode &node, void *raw) {
       Block *block = reinterpret_cast<Block *>(raw);
