@@ -1,10 +1,11 @@
+#include "signal.hpp"
+
 #include <errno.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include "libxr_def.hpp"
-#include "signal.hpp"
 
 using namespace LibXR;
 
@@ -17,6 +18,11 @@ ErrorCode Signal::Action(Thread &thread, int signal) {
   } else {
     return ErrorCode::FAILED;
   }
+}
+
+ErrorCode Signal::ActionFromCallback(Thread &thread, int signal, bool in_isr) {
+  UNUSED(in_isr);
+  return Action(thread, signal);
 }
 
 ErrorCode Signal::Wait(int signal, uint32_t timeout) {

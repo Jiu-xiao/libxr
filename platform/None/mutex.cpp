@@ -6,7 +6,7 @@
 
 using namespace LibXR;
 
-Mutex::Mutex() : mutex_handle_(0) {}
+Mutex::Mutex() : mutex_handle_(1) {}
 
 Mutex::~Mutex() {}
 

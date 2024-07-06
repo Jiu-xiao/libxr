@@ -22,6 +22,12 @@ if(NOT PLATFORM)
   message(FATAL_ERROR "No platform.")
 endif()
 
+add_compile_definitions(LIBXR_PLATFORM ${PLATFORM})
+
+if("${PLATFORM}" STREQUAL "None")
+  add_compile_definitions(LIBXR_NOT_SUPPORT_MUTI_THREAD)
+endif()
+
 message("-- Platfrom: ${PLATFORM}")
 
 # Share/Static
@@ -75,25 +81,5 @@ target_include_directories(
 
 
 if(LIBXR_TEST_BUILD)
-  if(PLATFORM MATCHES "Linux")
-    message("LibXR union test build.")
-  else()
-    message(FATAL_ERROR "Only linux can build union test.")
-  endif()
-
-  project(test)
-
-  add_executable(test main.cpp)
-
-  add_dependencies(test xr)
-
-  target_link_libraries(
-      test
-      PUBLIC xr
-  )
-
-  target_include_directories(
-      test
-      PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-  )
+  include(CMake/test.cmake)
 endif()

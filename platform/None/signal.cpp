@@ -15,6 +15,11 @@ ErrorCode Signal::Action(Thread &thread, int signal) {
   return ErrorCode::OK;
 }
 
+ErrorCode Signal::ActionFromCallback(Thread &thread, int signal, bool in_isr) {
+  UNUSED(in_isr);
+  return Action(thread, signal);
+}
+
 ErrorCode Signal::Wait(int signal, uint32_t timeout) {
   ASSERT(signal > 0 && signal < 32);
   uint32_t flag = (1 << signal);
