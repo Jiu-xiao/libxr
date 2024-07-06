@@ -1,4 +1,5 @@
 #include "condition_var.hpp"
+#include "libxr_def.hpp"
 #include <time.h>
 
 using namespace LibXR;
@@ -13,7 +14,7 @@ ConditionVar::~ConditionVar() {
   pthread_cond_destroy(&handle_.cond);
 }
 
-void ConditionVar::Wait(uint32_t timeout) {
+ErrorCode ConditionVar::Wait(uint32_t timeout) {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
   ts.tv_sec += timeout / 1000;
@@ -24,8 +25,14 @@ void ConditionVar::Wait(uint32_t timeout) {
   }
 
   pthread_mutex_lock(&handle_.mutex);
-  pthread_cond_timedwait(&handle_.cond, &handle_.mutex, &ts);
+  auto ans = pthread_cond_timedwait(&handle_.cond, &handle_.mutex, &ts);
   pthread_mutex_unlock(&handle_.mutex);
+
+  if(ans==0){
+    return ErrorCode::OK;
+  }else{
+    return ErrorCode::TIMEOUT;
+  }
 }
 
 void ConditionVar::Signal() {
