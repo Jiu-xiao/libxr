@@ -41,8 +41,8 @@ Some useful tools for debugging, robotics, and communication.
 
 | `System` | Thread | Timer | Semaphore | Mutex | Signal | ConditionVar | Queue |
 | ---------- | ------ | ----- | --------- | ----- | ------ | ------------ | ----- |
-| None       | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |
-| FreeRTOS   | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |
+| None       | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅    |
+| FreeRTOS   | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅    |
 | RT-Thread  | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |
 | ThreadX    | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |
 | PX5        | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |

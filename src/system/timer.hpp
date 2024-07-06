@@ -71,17 +71,50 @@ class Timer {
     }
   }
 
+  static void RefreshThreadFunction(Thread::Priority priority) {
+    TimestampMS time = Thread::GetTime();
+    while (true) {
+      Timer::Refresh(priority);
+      Thread::SleepUntil(time, 1);
+    }
+  }
+
   static void Remove(TimerHandle handle) {
     ASSERT(handle->next_);
+
     list_[static_cast<size_t>(handle->data_.priority)]->Delete(*handle);
   }
 
   static void Add(TimerHandle handle) {
     ASSERT(!handle->next_);
+
+    if (!LibXR::Timer::list_[static_cast<uint32_t>(handle->data_.priority)]) {
+      LibXR::Timer::list_[static_cast<uint32_t>(handle->data_.priority)] =
+          new LibXR::List;
+#ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
+#else
+      auto thread_handle = Thread();
+      thread_handle.Create<Thread::Priority>(
+          handle->data_.priority, RefreshThreadFunction, "libxr_timer_task",
+          512, Thread::Priority::HIGH);
+#endif
+    }
     list_[static_cast<size_t>(handle->data_.priority)]->Add(*handle);
   }
 
   static void Refresh(Thread::Priority priority) {
+    if (!LibXR::Timer::list_[static_cast<uint32_t>(priority)]) {
+      LibXR::Timer::list_[static_cast<uint32_t>(priority)] = new LibXR::List;
+
+#ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
+#else
+      auto thread_handle = Thread();
+      thread_handle.Create<Thread::Priority>(priority, RefreshThreadFunction,
+                                             "libxr_timer_task", 512,
+                                             Thread::Priority::HIGH);
+#endif
+    }
+
     auto fun = [](ControlBlock &block, void *&) {
       if (!block.enable_) {
         return ErrorCode::OK;
