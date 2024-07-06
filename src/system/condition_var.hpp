@@ -17,4 +17,4 @@ public:
 
   void Broadcast();
 };
-}; // namespace LibXR
+} // namespace LibXR

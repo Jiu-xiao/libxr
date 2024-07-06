@@ -7,7 +7,7 @@
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_queue.hpp"
-#include "messgae.hpp"
+#include "message.hpp"
 #include "queue.hpp"
 #include "ramfs.hpp"
 #include "rbt.hpp"

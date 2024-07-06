@@ -80,7 +80,8 @@ public:
     block->target = this;
 
     auto bind_fun = [](bool in_isr, Block *block, uint32_t event) {
-      block->target->Active(block->event);
+      UNUSED(event);
+      block->target->ActiveFromCallback(block->event, in_isr);
     };
 
     auto cb = Callback<uint32_t>::Create(bind_fun, block);

@@ -1,0 +1,37 @@
+#include "signal.hpp"
+#include "libxr_def.hpp"
+#include <cstdint>
+
+using namespace LibXR;
+
+static uint32_t sig;
+
+ErrorCode Signal::Action(Thread &thread, int signal) {
+  UNUSED(thread);
+  ASSERT(signal > 0 && signal < 32);
+
+  sig |= 1 << signal;
+  return ErrorCode::OK;
+}
+
+ErrorCode Signal::Wait(int signal, uint32_t timeout) {
+  ASSERT(signal > 0 && signal < 32);
+  uint32_t flag = (1 << signal);
+
+  if ((sig | flag) == flag) {
+    sig &= ~flag;
+    return ErrorCode::OK;
+  } else if (timeout == 0) {
+    return ErrorCode::TIMEOUT;
+  }
+
+  uint32_t now = libxr_get_time_ms();
+
+  while (libxr_get_time_ms() - now < timeout) {
+    if ((sig | flag) == flag) {
+      sig &= ~flag;
+      return ErrorCode::OK;
+    }
+  }
+  return ErrorCode::TIMEOUT;
+}

@@ -162,7 +162,9 @@ public:
 
     File *FindFileRec(const char *name) {
 
-      _FindFileRecBlock block = {.name = name};
+      _FindFileRecBlock block;
+
+      block.name = name;
 
       block.ans = FindFile(name);
       if (block.ans == NULL) {
@@ -210,7 +212,8 @@ public:
     }
 
     Dir *FindDirRec(const char *name) {
-      _FindDirRecBlock block = {.name = name};
+      _FindDirRecBlock block;
+      block.name = name;
 
       block.ans = FindDir(name);
       if (block.ans == NULL) {
@@ -250,7 +253,8 @@ public:
     }
 
     Device *FindDeviceRec(const char *name) {
-      _FindDevRecBlock block = {.name = name};
+      _FindDevRecBlock block;
+      block.name = name;
       block.ans = FindDevice(name);
       if (block.ans == NULL) {
         data_.rbt.Foreach<FsNode>(_FindDevRec, &block, SizeLimitMode::MORE);
