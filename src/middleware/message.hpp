@@ -418,10 +418,10 @@ public:
     enum class Status { WAIT_START, WAIT_TOPIC, WAIT_DATA_CRC };
 
     Server(size_t buffer_length)
-        : queue_(1, buffer_length),
-          topic_map_([](const uint32_t &a, const uint32_t &b) {
+        : topic_map_([](const uint32_t &a, const uint32_t &b) {
             return int(a) - int(b);
-          }) {
+          }),
+          queue_(1, buffer_length) {
 
       /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
       ASSERT(buffer_length >= sizeof(PackedData<uint8_t>));

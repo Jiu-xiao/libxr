@@ -6,7 +6,7 @@
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "list.hpp"
-#include "messgae.hpp"
+#include "message.hpp"
 #include "mutex.hpp"
 #include "ramfs.hpp"
 #include "thread.hpp"
