@@ -10,7 +10,7 @@ namespace LibXR {
 class BaseQueue {
 public:
   BaseQueue(size_t element_size, size_t length)
-      : length_(length), element_size_(element_size) {
+      : element_size_(element_size), length_(length) {
     queue_array_ = new uint8_t[length * element_size];
   }
 

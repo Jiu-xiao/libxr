@@ -10,12 +10,14 @@
 
 #include "libxr_platform.hpp"
 
+#include "message.hpp"
 #include "mutex.hpp"
 #include "semaphore.hpp"
 #include "signal.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
 
+#include "lock_queue.hpp"
 #include "queue.hpp"
 
 namespace LibXR {

@@ -22,7 +22,20 @@ public:
     type = OperationType::POLLING;
   }
 
-  void operator=(Operation &op) { memcpy(this, &op, sizeof(op)); }
+  void operator=(Operation &op) {
+    type = op.type;
+    switch (type) {
+    case OperationType::BLOCK:
+      data.callback = op.data.callback;
+      break;
+    case OperationType::CALLBACK:
+      data.timeout = op.data.timeout;
+      break;
+    case OperationType::POLLING:
+      data.status = op.data.status;
+      break;
+    }
+  }
 
   Operation(uint32_t timeout) {
     data.timeout = timeout;
