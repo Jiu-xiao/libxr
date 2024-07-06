@@ -52,10 +52,8 @@ file(
 
 file(
   GLOB ${PROJECT_NAME}_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*.cpp")
-  
-  
 
-target_sources(${PROJECT_NAME} 
+target_sources(${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_SOURCES}
   PRIVATE ${${PROJECT_NAME}_CORE_SOURCES}
   PRIVATE ${${PROJECT_NAME}_SYSTEM_SOURCES}
@@ -86,7 +84,7 @@ if(LIBXR_TEST_BUILD)
   project(test)
 
   add_executable(test main.cpp)
-    
+
   add_dependencies(test xr)
 
   target_link_libraries(

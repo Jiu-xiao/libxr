@@ -6,14 +6,14 @@
 
 namespace LibXR {
 class Thread {
-public:
+ public:
   enum class Priority {
-    IDLE,
-    LOW,
-    MEDIUM,
-    HIGH,
-    REALTIME,
-    NUMBER,
+    IDLE = 0,
+    LOW = 0,
+    MEDIUM = 0,
+    HIGH = 0,
+    REALTIME = 0,
+    NUMBER = 1,
   };
 
   Thread(){};
@@ -28,8 +28,9 @@ public:
     UNUSED(priority);
 
     static bool created = false;
-    ASSERT(created==false);
+    ASSERT(created == false);
     created = true;
+    UNUSED(created);
 
     function(arg);
   }
@@ -46,7 +47,8 @@ public:
 
   operator libxr_thread_handle() { return thread_handle_; }
 
-private:
+ private:
   libxr_thread_handle thread_handle_;
 };
-} // namespace LibXR
+
+}  // namespace LibXR

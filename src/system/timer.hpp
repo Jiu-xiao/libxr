@@ -4,13 +4,12 @@
 #include "libxr_def.hpp"
 #include "list.hpp"
 #include "thread.hpp"
-#include <utility>
 
 namespace LibXR {
 class Timer {
-public:
+ public:
   class ControlBlock {
-  public:
+   public:
     void Run() { fun_(handle); }
 
     void (*fun_)(void *);
@@ -104,7 +103,9 @@ public:
                                                                         empty);
   }
 
+  static void RefreshTimerInIdle();
+
   static LibXR::List *list_[static_cast<size_t>(Thread::Priority::NUMBER)];
 };
 
-} // namespace LibXR
+}  // namespace LibXR
