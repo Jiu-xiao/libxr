@@ -1,60 +1,54 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
+
 #include "libxr_def.hpp"
 #include "libxr_platform.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"
 #include "semaphore.hpp"
-#include <array>
-#include <cstdint>
 
 namespace LibXR {
-template <typename Data> class LockQueue {
-public:
-  LockQueue(size_t length) : queue_handle_(length) {}
+template <typename Data>
+class LockQueue {
+ public:
+  LockQueue(size_t length)
+      : queue_handle_(xQueueCreate(length, sizeof(Data))), length_(length) {}
 
-  ~LockQueue() {}
+  ~LockQueue() { vQueueDelete(queue_handle_); }
 
   ErrorCode Push(const Data &data) {
-    mutex_.Lock();
-    auto ans = queue_handle_.Push(data);
-    if (ans == ErrorCode::OK) {
-      semaphore_handle_.Post();
+    auto ans = xQueueSend(queue_handle_, &data, 0);
+    if (ans == pdTRUE) {
+      return ErrorCode::OK;
+    } else {
+      return ErrorCode::FULL;
     }
-    mutex_.Unlock();
-    return ans;
   }
 
   ErrorCode Pop(Data &data, uint32_t timeout) {
-    if (semaphore_handle_.Wait(timeout) == ErrorCode::OK) {
-      mutex_.Lock();
-      auto ans = queue_handle_.Pop(data);
-      mutex_.Unlock();
-      return ans;
+    auto ans = xQueueReceive(queue_handle_, &data, timeout);
+    if (ans == pdTRUE) {
+      return ErrorCode::OK;
     } else {
-      return ErrorCode::TIMEOUT;
+      return ErrorCode::EMPTY;
     }
   }
 
   ErrorCode Pop(uint32_t timeout) {
-    if (semaphore_handle_.Wait(timeout) == ErrorCode::OK) {
-      mutex_.Lock();
-      auto ans = queue_handle_.Pop();
-      mutex_.Unlock();
-      return ans;
+    Data data;
+    auto ans = xQueueReceive(queue_handle_, &data, timeout);
+    if (ans == pdTRUE) {
+      return ErrorCode::OK;
     } else {
-      return ErrorCode::TIMEOUT;
+      return ErrorCode::EMPTY;
     }
   }
 
   ErrorCode Overwrite(const Data &data) {
-    mutex_.Lock();
-    while (semaphore_handle_.Wait(0) != ErrorCode::OK) {
-    }
-    auto ans = queue_handle_.Overwrite(data);
-    semaphore_handle_.Post();
-    mutex_.Unlock();
-    return ans;
+    xQueueReset(queue_handle_);
+    return Push(data);
   }
 
   ErrorCode PushFromCallback(const Data &data, bool in_isr) {
@@ -67,31 +61,14 @@ public:
     return Overwrite(data);
   }
 
-  void Reset() {
-    mutex_.Lock();
-    while (semaphore_handle_.Wait(0) != ErrorCode::OK) {
-    };
-    queue_handle_.Reset();
-    mutex_.Unlock();
-  }
+  void Reset() { xQueueReset(queue_handle_); }
 
-  size_t Size() {
-    mutex_.Lock();
-    auto ans = queue_handle_.Size();
-    mutex_.Unlock();
-    return ans;
-  }
+  size_t Size() { return length_ - EmptySize(); }
 
-  size_t EmptySize() {
-    mutex_.Lock();
-    auto ans = queue_handle_.EmptySize();
-    mutex_.Unlock();
-    return ans;
-  }
+  size_t EmptySize() { return uxQueueSpacesAvailable(queue_handle_); }
 
-private:
-  Queue<Data> queue_handle_;
-  Mutex mutex_;
-  Semaphore semaphore_handle_;
+ private:
+  QueueHandle_t queue_handle_;
+  uint32_t length_;
 };
-} // namespace LibXR
+}  // namespace LibXR
