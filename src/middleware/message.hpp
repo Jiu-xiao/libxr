@@ -14,8 +14,6 @@
 #include "semaphore.hpp"
 #include "spin_lock.hpp"
 #include "thread.hpp"
-#include <cstdint>
-#include <sys/types.h>
 
 namespace LibXR {
 class Topic {
@@ -77,7 +75,7 @@ public:
 
       auto domain = domain_->Search<RBTree<uint32_t>>(crc32);
 
-      if (domain != NULL) {
+      if (domain != nullptr) {
         node_ = domain;
         return;
       }
@@ -111,7 +109,7 @@ public:
 
   template <typename Data> class SyncSubscriber {
   public:
-    SyncSubscriber(const char *name, Data &data, Domain *domain = NULL) {
+    SyncSubscriber(const char *name, Data &data, Domain *domain = nullptr) {
       *this = SyncSubscriber(WaitTopic(name, UINT32_MAX, domain), data);
     }
 
@@ -142,7 +140,7 @@ public:
 
   template <typename Data> class ASyncSubscriber {
   public:
-    ASyncSubscriber(const char *name, Data &data, Domain *domain = NULL) {
+    ASyncSubscriber(const char *name, Data &data, Domain *domain = nullptr) {
       *this = ASyncSubscriber(WaitTopic(name, UINT32_MAX, domain), data);
     }
 
@@ -175,7 +173,7 @@ public:
   public:
     template <typename Data, uint32_t Length>
     QueuedSubscriber(const char *name, LockFreeQueue<Data> &queue,
-                     Domain *domain = NULL) {
+                     Domain *domain = nullptr) {
       *this = QueuedSubscriber(WaitTopic(name, UINT32_MAX, domain), queue);
     }
 
@@ -200,7 +198,7 @@ public:
 
     template <typename Data>
     QueuedSubscriber(const char *name, LockQueue<Data> &queue,
-                     Domain *domain = NULL) {
+                     Domain *domain = nullptr) {
       *this = QueuedSubscriber(WaitTopic(name, UINT32_MAX, domain), queue);
     }
 
@@ -236,7 +234,7 @@ public:
     block_->data_.subers.Add(*node);
   }
 
-  Topic(const char *name, uint32_t max_length, Domain *domain = NULL,
+  Topic(const char *name, uint32_t max_length, Domain *domain = nullptr,
         bool cache = false, bool check_length = false) {
     if (!def_domain_) {
       domain_lock_.Lock();
@@ -252,7 +250,7 @@ public:
       domain_lock_.Unlock();
     }
 
-    if (domain == NULL) {
+    if (domain == nullptr) {
       domain = def_domain_;
     }
 
@@ -269,7 +267,7 @@ public:
       block_ = new RBTree<uint32_t>::Node<Block>;
       block_->data_.max_length = max_length;
       block_->data_.crc32 = crc32;
-      block_->data_.data.addr_ = NULL;
+      block_->data_.data.addr_ = nullptr;
       block_->data_.cache = false;
       block_->data_.check_length = check_length;
 
@@ -282,15 +280,15 @@ public:
   }
 
   template <typename Data>
-  static Topic CreateTopic(const char *name, Domain *domain = NULL,
+  static Topic CreateTopic(const char *name, Domain *domain = nullptr,
                            bool cache = false, bool check_length = true) {
     return Topic(name, sizeof(Data), domain, cache, check_length);
   }
 
   Topic(TopicHandle topic) : block_(topic) {}
 
-  static TopicHandle Find(const char *name, Domain *domain = NULL) {
-    if (domain == NULL) {
+  static TopicHandle Find(const char *name, Domain *domain = nullptr) {
+    if (domain == nullptr) {
       domain = def_domain_;
     }
 
@@ -362,7 +360,7 @@ public:
   }
 
   template <typename Data> void DumpData(PackedData<Data> &data) {
-    if (block_->data_.data.addr_ != NULL) {
+    if (block_->data_.data.addr_ != nullptr) {
       if (block_->data_.check_length) {
         ASSERT(sizeof(Data) == block_->data_.data.size_);
       } else {
@@ -383,7 +381,7 @@ public:
   }
 
   template <typename Data> void DumpData(Data &data) {
-    if (block_->data_.data.addr_ != NULL) {
+    if (block_->data_.data.addr_ != nullptr) {
       if (block_->data_.check_length) {
         ASSERT(sizeof(Data) == block_->data_.data.size_);
       } else {
@@ -396,17 +394,17 @@ public:
   }
 
   static TopicHandle WaitTopic(const char *name, uint32_t timeout = UINT32_MAX,
-                               Domain *domain = NULL) {
-    TopicHandle topic = NULL;
+                               Domain *domain = nullptr) {
+    TopicHandle topic = nullptr;
     do {
       topic = Find(name, domain);
-      if (topic == NULL) {
+      if (topic == nullptr) {
         if (timeout <= Thread::GetTime()) {
-          return NULL;
+          return nullptr;
         }
         Thread::Sleep(1);
       }
-    } while (topic == NULL);
+    } while (topic == nullptr);
 
     return topic;
   }
@@ -532,11 +530,11 @@ public:
     RBTree<uint32_t> topic_map_;
     BaseQueue queue_;
     RawData prase_buff_;
-    TopicHandle current_topic_ = NULL;
+    TopicHandle current_topic_ = nullptr;
   };
 
 private:
-  TopicHandle block_ = NULL;
+  TopicHandle block_ = nullptr;
   static RBTree<uint32_t> *domain_;
   static SpinLock domain_lock_;
   static Domain *def_domain_;

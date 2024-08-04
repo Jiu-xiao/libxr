@@ -5,15 +5,13 @@
 #include "list.hpp"
 #include "mutex.hpp"
 #include "rbt.hpp"
-#include <cstdint>
-#include <utility>
 
 namespace LibXR {
 class Event {
 public:
   Event()
       : rbt_([](const uint32_t &a, const uint32_t &b) {
-          return int(a) - int(b);
+          return static_cast<int>(a) - static_cast<int>(b);
         }) {}
 
   void Register(uint32_t event, const Callback<uint32_t> &cb) {
@@ -70,16 +68,14 @@ public:
   }
 
   void Bind(Event &sources, uint32_t source_event, uint32_t target_event) {
-    typedef struct {
+    struct BindBlock {
       Event *target;
       uint32_t event;
-    } Block;
+    };
 
-    auto block = new Block;
-    block->event = target_event;
-    block->target = this;
+    auto block = new BindBlock{this, target_event};
 
-    auto bind_fun = [](bool in_isr, Block *block, uint32_t event) {
+    auto bind_fun = [](bool in_isr, BindBlock *block, uint32_t event) {
       UNUSED(event);
       block->target->ActiveFromCallback(block->event, in_isr);
     };
@@ -90,10 +86,10 @@ public:
   }
 
 private:
-  typedef struct {
+  struct Block {
     uint32_t event;
     Callback<uint32_t> cb;
-  } Block;
+  };
 
   RBTree<uint32_t> rbt_;
 };
