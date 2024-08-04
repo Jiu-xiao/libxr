@@ -10,11 +10,11 @@ class List {
 public:
   class BaseNode {
   public:
-    BaseNode(size_t size) : next_(NULL), size_(size) {}
+    BaseNode(size_t size) : next_(nullptr), size_(size) {}
 
     ~BaseNode() {
       /* Should never be deconstructed in the list */
-      ASSERT(next_ == NULL);
+      ASSERT(next_ == nullptr);
     }
 
     BaseNode *next_;
@@ -29,7 +29,7 @@ public:
 
     const Node &operator=(const Data &data) {
       data_ = data;
-      return data_;
+      return *this;
     }
 
     Data &GetData() { return data_; }
@@ -44,10 +44,10 @@ public:
   ~List() {
     for (BaseNode *pos = head_.next_; pos != &head_;) {
       auto tmp = pos->next_;
-      pos->next_ = NULL;
+      pos->next_ = nullptr;
       pos = tmp;
     }
-    head_.next_ = NULL;
+    head_.next_ = nullptr;
   }
 
   void Add(BaseNode &data) {
@@ -61,7 +61,7 @@ public:
     uint32_t size = 0;
     mutex_.Lock();
     for (BaseNode *pos = head_.next_; pos != &head_; pos = pos->next_) {
-      size++;
+      ++size;
     }
     mutex_.Unlock();
 
@@ -73,7 +73,7 @@ public:
     for (BaseNode *pos = &head_; pos->next_ != &head_; pos = pos->next_) {
       if (pos->next_ == &data) {
         pos->next_ = data.next_;
-        data.next_ = NULL;
+        data.next_ = nullptr;
         mutex_.Unlock();
         return ErrorCode::OK;
       }

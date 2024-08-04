@@ -12,7 +12,7 @@ class ConstRawData;
 class RawData {
 public:
   RawData(void *addr, size_t size) : addr_(addr), size_(size) {}
-  RawData() : addr_(NULL), size_(0){};
+  RawData() : addr_(nullptr), size_(0){};
   template <typename DataType>
   RawData(DataType &data) : addr_(&data), size_(sizeof(DataType)) {}
   RawData(RawData &data) = default;
@@ -24,7 +24,7 @@ public:
 class ConstRawData {
 public:
   ConstRawData(const void *addr, size_t size) : addr_(addr), size_(size) {}
-  ConstRawData() : addr_(NULL), size_(0){};
+  ConstRawData() : addr_(nullptr), size_(0){};
   template <typename DataType>
   ConstRawData(const DataType &data) : addr_(&data), size_(sizeof(DataType)) {}
   ConstRawData(ConstRawData &data) = default;

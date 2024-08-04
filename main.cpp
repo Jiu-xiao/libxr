@@ -19,7 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 
-const char *TEST_NAME = NULL;
+const char *TEST_NAME = nullptr;
 
 #define TEST_STEP(_arg)                                                        \
   if (TEST_NAME)                                                               \
@@ -42,7 +42,7 @@ int main() {
     UNUSED(line);
 
     printf("Error:Union test failed at step [%s].\r\n", TEST_NAME);
-    *(volatile long long *)(NULL) = 0;
+    *(volatile long long *)(nullptr) = 0;
     exit(-1);
   };
 
@@ -256,11 +256,11 @@ int main() {
   dir.Add(file);
   dir.Add(dev);
 
-  ASSERT(ramfs.FindDir("test") == NULL);
-  ASSERT(ramfs.FindFile("test") == NULL);
-  ASSERT(ramfs.FindDevice("test") == NULL);
-  ASSERT(dir.FindDevice("test") == NULL);
-  ASSERT(dir.FindFile("test") == NULL);
+  ASSERT(ramfs.FindDir("test") == nullptr);
+  ASSERT(ramfs.FindFile("test") == nullptr);
+  ASSERT(ramfs.FindDevice("test") == nullptr);
+  ASSERT(dir.FindDevice("test") == nullptr);
+  ASSERT(dir.FindFile("test") == nullptr);
 
   ASSERT(ramfs.FindDir("test_dir") == &dir);
   ASSERT(ramfs.FindFile("test_file") == &file);
@@ -361,7 +361,7 @@ int main() {
     rbtree.Insert(nodes[i], i);
   }
 
-  LibXR::RBTree<int>::Node<int> *node_pos = NULL;
+  LibXR::RBTree<int>::Node<int> *node_pos = nullptr;
   for (int i = 0; i < 100; i++) {
     node_pos = rbtree.ForeachDisc(node_pos);
     ASSERT(*node_pos == i);

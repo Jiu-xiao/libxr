@@ -37,8 +37,8 @@ ErrorCode Signal::Wait(int signal, uint32_t timeout) {
   struct timespec ts;
   ts.tv_sec = timeout / 1000;
   ts.tv_nsec = (timeout % 1000) * 1000000;
-  int res = sigtimedwait(&waitset, NULL, &ts);
-  pthread_sigmask(SIG_BLOCK, &oldset, NULL);
+  int res = sigtimedwait(&waitset, nullptr, &ts);
+  pthread_sigmask(SIG_BLOCK, &oldset, nullptr);
   if (res == -1) {
     if (errno == EAGAIN) {
       return ErrorCode::TIMEOUT;

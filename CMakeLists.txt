@@ -2,8 +2,7 @@ cmake_minimum_required(VERSION 3.11)
 project(xr LANGUAGES C CXX ASM)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-add_compile_definitions(LIBXR_DEBUG_BUILD)
+set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build)
 
 # Detect platform
 if(CMAKE_CROSSCOMPILING)
@@ -35,6 +34,10 @@ if(LIBXR_SHARED_BUILD)
   add_library(${PROJECT_NAME} SHARED)
 else()
   add_library(${PROJECT_NAME} STATIC)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_compile_definitions(LIBXR_DEBUG_BUILD)
 endif()
 
 # Source File
@@ -78,7 +81,6 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/structure
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/middleware
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM})
-
 
 if(LIBXR_TEST_BUILD)
   include(CMake/test.cmake)

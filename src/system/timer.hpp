@@ -7,9 +7,9 @@
 
 namespace LibXR {
 class Timer {
- public:
+public:
   class ControlBlock {
-   public:
+  public:
     void Run() { fun_(handle); }
 
     void (*fun_)(void *);
@@ -130,7 +130,7 @@ class Timer {
       return ErrorCode::OK;
     };
 
-    static void *empty = NULL;
+    static void *empty = nullptr;
 
     list_[static_cast<size_t>(priority)]->Foreach<ControlBlock, void *>(fun,
                                                                         empty);
@@ -141,4 +141,4 @@ class Timer {
   static LibXR::List *list_[static_cast<size_t>(Thread::Priority::NUMBER)];
 };
 
-}  // namespace LibXR
+} // namespace LibXR

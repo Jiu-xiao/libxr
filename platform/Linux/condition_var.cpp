@@ -5,8 +5,8 @@
 using namespace LibXR;
 
 ConditionVar::ConditionVar() {
-  pthread_mutex_init(&handle_.mutex, NULL);
-  pthread_cond_init(&handle_.cond, NULL);
+  pthread_mutex_init(&handle_.mutex, nullptr);
+  pthread_cond_init(&handle_.cond, nullptr);
 }
 
 ConditionVar::~ConditionVar() {
@@ -28,9 +28,9 @@ ErrorCode ConditionVar::Wait(uint32_t timeout) {
   auto ans = pthread_cond_timedwait(&handle_.cond, &handle_.mutex, &ts);
   pthread_mutex_unlock(&handle_.mutex);
 
-  if(ans==0){
+  if (ans == 0) {
     return ErrorCode::OK;
-  }else{
+  } else {
     return ErrorCode::TIMEOUT;
   }
 }
