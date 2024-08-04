@@ -1,19 +1,39 @@
 #pragma once
 
 #include <array>
+#include <cstring>
 #include <utility>
 
 #include "libxr_def.hpp"
 
 namespace LibXR {
+
 template <typename ArgType, typename... Args> class CallbackBlock {
 public:
-  CallbackBlock(void (*fun)(bool, ArgType, Args... args), ArgType arg)
-      : fun_(fun), arg_(arg) {}
+  CallbackBlock(void (*fun)(bool, ArgType, Args...), ArgType arg)
+      : fun_(fun), arg_(arg), in_isr_(false) {}
 
-  bool InISR() { return in_isr_; }
+  void Call(bool in_isr, Args &&...args) {
+    in_isr_ = in_isr;
+    if (fun_) {
+      fun_(in_isr, arg_, std::forward<Args>(args)...);
+    }
+  }
 
-  void (*fun_)(bool, ArgType, Args... args);
+  CallbackBlock(const CallbackBlock &other)
+      : fun_(other.fun_), arg_(other.arg_), in_isr_(other.in_isr_) {}
+
+  CallbackBlock &operator=(const CallbackBlock &other) {
+    if (this != &other) {
+      fun_ = other.fun_;
+      arg_ = other.arg_;
+      in_isr_ = other.in_isr_;
+    }
+    return *this;
+  }
+
+private:
+  void (*fun_)(bool, ArgType, Args...);
   ArgType arg_;
   bool in_isr_;
 };
@@ -22,7 +42,6 @@ template <typename... Args> class Callback {
 public:
   template <typename FunType, typename ArgType>
   static Callback Create(FunType fun, ArgType arg) {
-    /* Check the type of fun */
     void (*fun_ptr)(bool, ArgType, Args...) = fun;
 
     auto cb_block = new CallbackBlock<ArgType, Args...>(fun_ptr, arg);
@@ -30,34 +49,48 @@ public:
     auto cb_fun = [](bool in_isr, void *cb_block, Args... args) {
       CallbackBlock<ArgType, Args...> *cb =
           static_cast<CallbackBlock<ArgType, Args...> *>(cb_block);
-      cb->in_isr_ = in_isr;
-      if (cb->fun_) {
-        return cb->fun_(in_isr, cb->arg_, args...);
-      }
+      cb->Call(in_isr, std::forward<Args>(args)...);
     };
 
     return Callback(cb_block, cb_fun);
   }
 
-  Callback() : cb_block_(NULL), cb_fun_(NULL) {}
+  Callback() : cb_block_(nullptr), cb_fun_(nullptr) {}
 
-  Callback(const Callback &cb) = default;
+  Callback(const Callback &) = default;
 
-  const Callback operator=(const Callback &cb) {
-    memcpy(this, &cb, sizeof(cb));
+  Callback(Callback &&other)
+      : cb_block_(other.cb_block_), cb_fun_(other.cb_fun_) {
+    other.cb_block_ = nullptr;
+    other.cb_fun_ = nullptr;
+  }
+
+  Callback &operator=(Callback &&other) {
+    if (this != &other) {
+      cb_block_ = other.cb_block_;
+      cb_fun_ = other.cb_fun_;
+      other.cb_block_ = nullptr;
+      other.cb_fun_ = nullptr;
+    }
     return *this;
   }
 
-  void RunFromUser(Args... args) const { cb_fun_(false, cb_block_, args...); }
+  Callback &operator=(const Callback &) = default;
 
-  void RunFromISR(Args... args) const { cb_fun_(true, cb_block_, args...); }
+  template <typename... PassArgs> void RunFromUser(PassArgs &&...args) const {
+    cb_fun_(false, cb_block_, std::forward<PassArgs>(args)...);
+  }
 
-  void *const cb_block_;
-  void (*const cb_fun_)(bool, void *, Args...);
+  template <typename... PassArgs> void RunFromISR(PassArgs &...args) const {
+    cb_fun_(true, cb_block_, std::forward<Args>(args)...);
+  }
 
 private:
   Callback(void *cb_block, void (*cb_fun)(bool, void *, Args...))
       : cb_block_(cb_block), cb_fun_(cb_fun) {}
+
+  void *cb_block_;
+  void (*cb_fun_)(bool, void *, Args...);
 };
 
 } // namespace LibXR

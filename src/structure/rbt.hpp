@@ -14,9 +14,9 @@ public:
   public:
     Key key;
     RBTColor color;
-    BaseNode *left = NULL;
-    BaseNode *right = NULL;
-    BaseNode *parent = NULL;
+    BaseNode *left = nullptr;
+    BaseNode *right = nullptr;
+    BaseNode *parent = nullptr;
     size_t size;
 
   protected:
@@ -41,7 +41,7 @@ public:
   };
 
   RBTree(int (*compare_fun_)(const Key &, const Key &))
-      : root_(NULL), compare_fun_(compare_fun_) {
+      : root_(nullptr), compare_fun_(compare_fun_) {
     ASSERT(compare_fun_);
   }
 
@@ -49,9 +49,9 @@ public:
   Node<Data> *Search(const Key &key,
                      SizeLimitMode limit_mode = SizeLimitMode::MORE) {
     mutex_.Lock();
-    if (root_ == NULL) {
+    if (root_ == nullptr) {
       mutex_.Unlock();
-      return NULL;
+      return nullptr;
     }
     auto ans = _Search(root_, key);
     mutex_.Unlock();
@@ -64,11 +64,11 @@ public:
     BaseNode *child, *parent;
     RBTColor color;
 
-    if ((node.left != NULL) && (node.right != NULL)) {
+    if ((node.left != nullptr) && (node.right != nullptr)) {
       BaseNode *replace = &node;
 
       replace = replace->right;
-      while (replace->left != NULL)
+      while (replace->left != nullptr)
         replace = replace->left;
 
       if (GetParent(&node)) {
@@ -105,7 +105,7 @@ public:
       return;
     }
 
-    if (node.left != NULL)
+    if (node.left != nullptr)
       child = node.left;
     else
       child = node.right;
@@ -131,9 +131,9 @@ public:
   }
 
   void Insert(BaseNode &node, Key &&key) {
-    node.left = NULL;
-    node.right = NULL;
-    node.parent = NULL;
+    node.left = nullptr;
+    node.right = nullptr;
+    node.parent = nullptr;
     node.color = RBTColor::BLACK;
     node.key = key;
 
@@ -143,9 +143,9 @@ public:
   }
 
   void Insert(BaseNode &node, Key &key) {
-    node.left = NULL;
-    node.right = NULL;
-    node.parent = NULL;
+    node.left = nullptr;
+    node.right = nullptr;
+    node.parent = nullptr;
     node.color = RBTColor::BLACK;
     node.key = key;
 
@@ -192,30 +192,30 @@ public:
 
   template <typename Data> Node<Data> *ForeachDisc(Node<Data> *node) {
     mutex_.Lock();
-    if (node == NULL) {
+    if (node == nullptr) {
       node = ToDerivedType<Data>(root_);
-      while (node->left != NULL) {
+      while (node->left != nullptr) {
         node = ToDerivedType<Data>(node->left);
       }
       mutex_.Unlock();
       return node;
     }
 
-    if (node->right != NULL) {
+    if (node->right != nullptr) {
       node = ToDerivedType<Data>(node->right);
-      while (node->left != NULL) {
+      while (node->left != nullptr) {
         node = ToDerivedType<Data>(node->left);
       }
       mutex_.Unlock();
       return node;
     }
 
-    if (node->parent != NULL) {
+    if (node->parent != nullptr) {
       if (node == node->parent->left) {
         mutex_.Unlock();
         return ToDerivedType<Data>(node->parent);
       } else {
-        while (node->parent != NULL && node == node->parent->right) {
+        while (node->parent != nullptr && node == node->parent->right) {
           node = ToDerivedType<Data>(node->parent);
         }
         mutex_.Unlock();
@@ -224,7 +224,7 @@ public:
     }
 
     mutex_.Unlock();
-    return NULL;
+    return nullptr;
   }
 
 private:
@@ -255,8 +255,8 @@ private:
   }
 
   BaseNode *_Search(BaseNode *x, const Key &key) {
-    if (x == NULL) {
-      return NULL;
+    if (x == nullptr) {
+      return nullptr;
     }
 
     int ans = compare_fun_(key, x->key);
@@ -334,10 +334,10 @@ private:
   }
 
   void RbtreeInsert(BaseNode &node) {
-    BaseNode *y = NULL;
+    BaseNode *y = nullptr;
     BaseNode *x = root_;
 
-    while (x != NULL) {
+    while (x != nullptr) {
       y = x;
       if (compare_fun_(node.key, x->key) < 0)
         x = x->left;
@@ -346,7 +346,7 @@ private:
     }
     node.parent = y;
 
-    if (y != NULL) {
+    if (y != nullptr) {
       if (compare_fun_(node.key, y->key) < 0)
         y->left = &node;
       else
@@ -361,7 +361,7 @@ private:
   }
 
   void _RbtreeGetNum(BaseNode *node, uint32_t *num) {
-    if (node == NULL)
+    if (node == nullptr)
       return;
 
     (*num)++;
@@ -432,12 +432,12 @@ private:
     BaseNode *y = x->right;
 
     x->right = y->left;
-    if (y->left != NULL)
+    if (y->left != nullptr)
       y->left->parent = x;
 
     y->parent = x->parent;
 
-    if (x->parent == NULL) {
+    if (x->parent == nullptr) {
       root_ = y;
     } else {
       if (x->parent->left == x)
@@ -454,12 +454,12 @@ private:
     BaseNode *x = y->left;
 
     y->left = x->right;
-    if (x->right != NULL)
+    if (x->right != nullptr)
       x->right->parent = y;
 
     x->parent = y->parent;
 
-    if (y->parent == NULL) {
+    if (y->parent == nullptr) {
       root_ = x;
     } else {
       if (y == y->parent->right)
@@ -475,7 +475,7 @@ private:
   ErrorCode RbtreeForeach(BaseNode *node,
                           ErrorCode (*fun)(BaseNode &node, void *arg),
                           void *arg) {
-    if (node == NULL) {
+    if (node == nullptr) {
       return ErrorCode::OK;
     }
 
