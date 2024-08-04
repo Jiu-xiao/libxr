@@ -14,7 +14,7 @@ void Thread::Sleep(uint32_t milliseconds) {
   struct timespec ts;
   ts.tv_sec = milliseconds / 1000;
   ts.tv_nsec = (milliseconds % 1000) * 1000000;
-  clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
+  clock_nanosleep(CLOCK_REALTIME, 0, &ts, nullptr);
 }
 
 void Thread::SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep) {
@@ -35,7 +35,7 @@ void Thread::SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep) {
 
 uint32_t Thread::GetTime() {
   struct timeval tv;
-  gettimeofday(&tv, NULL);
+  gettimeofday(&tv, nullptr);
   return ((tv.tv_sec - _libxr_linux_start_time.tv_sec) * 1000 +
           (tv.tv_usec - _libxr_linux_start_time.tv_usec) / 1000) %
          UINT32_MAX;

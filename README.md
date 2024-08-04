@@ -39,14 +39,14 @@ Some useful tools for debugging, robotics, and communication.
 
 ## Support
 
-| `System` | Thread | Timer | Semaphore | Mutex | Signal | ConditionVar | Queue |
-| ---------- | ------ | ----- | --------- | ----- | ------ | ------------ | ----- |
-| None       | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅    |
-| FreeRTOS   | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅    |
-| RT-Thread  | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |
-| ThreadX    | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |
-| PX5        | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌    |
-| Linux      | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅    |
+| `System` | Thread | Timer | Semaphore | Mutex | Signal | ConditionVar | Queue| ASync |
+| ---------- | ------ | ----- | --------- | ----- | ------ | ------------ | -------- |-------- |
+| None       | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅       |✅       |
+| FreeRTOS   | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅       |✅       |
+| RT-Thread  | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌       |❌       |
+| ThreadX    | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌       |❌       |
+| PX5        | ❌     | ❌    | ❌        | ❌    | ❌     | ❌           | ❌       |❌       |
+| Linux      | ✅     | ✅    | ✅        | ✅    | ✅     | ✅           | ✅       |✅       |
 
 | `Structure` | List | Stack | RBTree | LockFreeQueue |
 | ------------- | ---- | ----- | ------ | ------------- |

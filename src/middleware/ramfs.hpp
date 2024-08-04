@@ -1,9 +1,5 @@
 #pragma once
 
-#include <cstring>
-#include <type_traits>
-#include <utility>
-
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -12,7 +8,7 @@
 
 namespace LibXR {
 class RamFS {
- public:
+public:
   RamFS(const char *name = "ramfs") : root_(CreateDir(name)) {}
 
   static int _str_compare(const char *const &a, const char *const &b) {
@@ -34,13 +30,13 @@ class RamFS {
   };
 
   class FsNode {
-   public:
+  public:
     const char *name;
     FsNodeType type;
   };
 
   typedef class _File : public FsNode {
-   public:
+  public:
     union {
       void *addr;
       const void *addr_const;
@@ -68,9 +64,9 @@ class RamFS {
   };
 
   class Device : public RBTree<const char *>::Node<_Device> {
-   public:
-    Device(const char *name, ReadPort read_port = NULL,
-           WritePort write_port = NULL) {
+  public:
+    Device(const char *name, ReadPort read_port = nullptr,
+           WritePort write_port = nullptr) {
       char *name_buff = new char[strlen(name) + 1];
       strcpy(name_buff, name);
       data_.name = name_buff;
@@ -106,7 +102,7 @@ class RamFS {
   } StorageBlock;
 
   class _Dir : public FsNode {
-   public:
+  public:
     _Dir() : rbt(RBTree<const char *>(_str_compare)) {}
 
     void Add(File &file) { rbt.Insert(file, file.GetData().name); }
@@ -115,7 +111,7 @@ class RamFS {
   };
 
   class Dir : public RBTree<const char *>::Node<_Dir> {
-   public:
+  public:
     void Add(File &file) { this->GetData().Add(file); }
     void Add(Dir &dir) { this->GetData().rbt.Insert(dir, dir.GetData().name); }
     void Add(Device &dev) {
@@ -127,12 +123,12 @@ class RamFS {
       if (ans && ans->data_.type == FsNodeType::FILE) {
         return reinterpret_cast<File *>(ans);
       } else {
-        return NULL;
+        return nullptr;
       }
     }
 
     typedef struct _FindFileRecBlock {
-      File *ans = NULL;
+      File *ans = nullptr;
       const char *name;
     } _FindFileRecBlock;
 
@@ -167,7 +163,7 @@ class RamFS {
       block.name = name;
 
       block.ans = FindFile(name);
-      if (block.ans == NULL) {
+      if (block.ans == nullptr) {
         data_.rbt.Foreach<FsNode>(_FindFileRec, &block, SizeLimitMode::MORE);
       }
 
@@ -175,7 +171,7 @@ class RamFS {
     }
 
     typedef struct _FindDirRecBlock {
-      Dir *ans = NULL;
+      Dir *ans = nullptr;
       const char *name;
     } _FindDirRecBlock;
 
@@ -207,7 +203,7 @@ class RamFS {
       if (ans && ans->GetData().type == FsNodeType::DIR) {
         return reinterpret_cast<Dir *>(ans);
       } else {
-        return NULL;
+        return nullptr;
       }
     }
 
@@ -216,7 +212,7 @@ class RamFS {
       block.name = name;
 
       block.ans = FindDir(name);
-      if (block.ans == NULL) {
+      if (block.ans == nullptr) {
         data_.rbt.Foreach<FsNode>(_FindDirRec, &block, SizeLimitMode::MORE);
       }
 
@@ -224,7 +220,7 @@ class RamFS {
     }
 
     typedef struct _FindDevRecBlock {
-      Device *ans = NULL;
+      Device *ans = nullptr;
       const char *name;
     } _FindDevRecBlock;
 
@@ -256,7 +252,7 @@ class RamFS {
       _FindDevRecBlock block;
       block.name = name;
       block.ans = FindDevice(name);
-      if (block.ans == NULL) {
+      if (block.ans == nullptr) {
         data_.rbt.Foreach<FsNode>(_FindDevRec, &block, SizeLimitMode::MORE);
       }
       return block.ans;
@@ -267,7 +263,7 @@ class RamFS {
       if (ans && ans->data_.type == FsNodeType::DEVICE) {
         return reinterpret_cast<Device *>(ans);
       } else {
-        return NULL;
+        return nullptr;
       }
     }
   };
@@ -344,4 +340,4 @@ class RamFS {
 
   Dir root_;
 };
-}  // namespace LibXR
+} // namespace LibXR

@@ -28,15 +28,15 @@ void LibXR::PlatformInit() {
     auto ans = fwrite(data.addr_, 1, data.size_, stdout);
 
     switch (op.type) {
-      case WriteOperation::OperationType::BLOCK:
-        break;
-      case WriteOperation::OperationType::CALLBACK:
-        op.data.callback.RunFromUser(ans == data.size_ ? ErrorCode::OK
-                                                       : ErrorCode::FAILED);
-        break;
-      case WriteOperation::OperationType::POLLING:
-        op.data.status = WriteOperation::OperationPollingStatus::DONE;
-        break;
+    case WriteOperation::OperationType::BLOCK:
+      break;
+    case WriteOperation::OperationType::CALLBACK:
+      op.data.callback.RunFromUser(ans == data.size_ ? ErrorCode::OK
+                                                     : ErrorCode::FAILED);
+      break;
+    case WriteOperation::OperationType::POLLING:
+      op.data.status = WriteOperation::OperationPollingStatus::DONE;
+      break;
     }
 
     return ErrorCode::OK;
@@ -49,16 +49,16 @@ void LibXR::PlatformInit() {
     buff.size_ = fread(buff.addr_, sizeof(char), buff.size_, stdin);
 
     switch (op.type) {
-      case Operation<ErrorCode, RawData &>::OperationType::BLOCK:
-        break;
-      case Operation<ErrorCode, RawData &>::OperationType::CALLBACK:
-        op.data.callback.RunFromUser(
-            buff.size_ > 0 ? ErrorCode::OK : ErrorCode::FAILED, buff);
-        break;
-      case Operation<ErrorCode, RawData &>::OperationType::POLLING:
-        op.data.status =
-            Operation<ErrorCode, RawData &>::OperationPollingStatus::DONE;
-        break;
+    case Operation<ErrorCode, RawData &>::OperationType::BLOCK:
+      break;
+    case Operation<ErrorCode, RawData &>::OperationType::CALLBACK:
+      op.data.callback.RunFromUser(
+          buff.size_ > 0 ? ErrorCode::OK : ErrorCode::FAILED, buff);
+      break;
+    case Operation<ErrorCode, RawData &>::OperationType::POLLING:
+      op.data.status =
+          Operation<ErrorCode, RawData &>::OperationPollingStatus::DONE;
+      break;
     }
     return ErrorCode::OK;
   };
@@ -72,6 +72,6 @@ void LibXR::PlatformInit() {
 
   LibXR::STDIO::error = err_fun;
 
-  gettimeofday(&_libxr_linux_start_time, NULL);
+  gettimeofday(&_libxr_linux_start_time, nullptr);
   clock_gettime(CLOCK_REALTIME, &_libxr_linux_start_time_spec);
 }
