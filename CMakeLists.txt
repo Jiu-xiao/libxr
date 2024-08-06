@@ -4,6 +4,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build)
 
+include(CMake/config.cmake)
+
 # Detect platform
 if(CMAKE_CROSSCOMPILING)
   message("Cross compiling.")

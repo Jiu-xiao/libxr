@@ -348,7 +348,7 @@ public:
       }
       case SuberType::CALLBACK: {
         auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
-        cb_block->cb.RunFromUser(data);
+        cb_block->cb.Run(false, data);
         break;
       }
       }

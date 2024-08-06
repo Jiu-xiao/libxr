@@ -166,8 +166,7 @@ int main() {
   int timer_arg = 0;
 
   auto handle = LibXR::Timer::CreatetTask<int *>(
-      [](int *arg) { *arg = *arg + 1; }, &timer_arg, 10,
-      LibXR::Thread::Priority::REALTIME);
+      [](int *arg) { *arg = *arg + 1; }, &timer_arg, 10);
 
   LibXR::Timer::Add(handle);
   LibXR::Timer::Start(handle);

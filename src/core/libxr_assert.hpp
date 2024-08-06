@@ -16,14 +16,14 @@ public:
     libxr_fatal_error_callback = &cb;
   }
 
-  static void FatalError(const char *file, uint32_t line) {
+  static void FatalError(const char *file, uint32_t line, bool in_isr) {
     while (1) {
       if (LibXR::STDIO::write) {
         printf("Fatal error at %s:%d\r\n", file, int(line));
       }
 
       if (libxr_fatal_error_callback) {
-        libxr_fatal_error_callback->RunFromUser(file, line);
+        libxr_fatal_error_callback->Run(in_isr, file, line);
       }
     }
   }

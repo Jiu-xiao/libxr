@@ -22,8 +22,7 @@ LibXR::WritePort LibXR::STDIO::write = nullptr;
 void (*LibXR::STDIO::error)(const char *log) = nullptr;
 
 /* timer */
-LibXR::List
-    *LibXR::Timer::list_[static_cast<size_t>(LibXR::Thread::Priority::NUMBER)];
+LibXR::List *LibXR::Timer::list_;
 
 /* crc */
 uint8_t LibXR::CRC8::tab[256];

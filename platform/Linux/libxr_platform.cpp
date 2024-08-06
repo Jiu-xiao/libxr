@@ -31,8 +31,8 @@ void LibXR::PlatformInit() {
     case WriteOperation::OperationType::BLOCK:
       break;
     case WriteOperation::OperationType::CALLBACK:
-      op.data.callback.RunFromUser(ans == data.size_ ? ErrorCode::OK
-                                                     : ErrorCode::FAILED);
+      op.data.callback.Run(false, ans == data.size_ ? ErrorCode::OK
+                                                    : ErrorCode::FAILED);
       break;
     case WriteOperation::OperationType::POLLING:
       op.data.status = WriteOperation::OperationPollingStatus::DONE;
@@ -52,8 +52,8 @@ void LibXR::PlatformInit() {
     case Operation<ErrorCode, RawData &>::OperationType::BLOCK:
       break;
     case Operation<ErrorCode, RawData &>::OperationType::CALLBACK:
-      op.data.callback.RunFromUser(
-          buff.size_ > 0 ? ErrorCode::OK : ErrorCode::FAILED, buff);
+      op.data.callback.Run(
+          false, buff.size_ > 0 ? ErrorCode::OK : ErrorCode::FAILED, buff);
       break;
     case Operation<ErrorCode, RawData &>::OperationType::POLLING:
       op.data.status =
