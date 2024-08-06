@@ -17,15 +17,13 @@ public:
     uint32_t cycle_;
     uint32_t count_;
     bool enable_;
-    Thread::Priority priority;
   };
 
   typedef LibXR::List::Node<ControlBlock> *TimerHandle;
 
   template <typename ArgType>
   static TimerHandle CreatetTask(void (*fun)(ArgType), ArgType arg,
-                                 uint32_t cycle, Thread::Priority priority) {
-    ASSERT(priority < Thread::Priority::NUMBER);
+                                 uint32_t cycle) {
     ASSERT(cycle > 0);
 
     typedef struct {
@@ -46,7 +44,6 @@ public:
     data->ctrl_block.data_.count_ = 0;
     data->ctrl_block.data_.cycle_ = cycle;
     data->ctrl_block.data_.enable_ = false;
-    data->ctrl_block.data_.priority = priority;
 
     return &data->ctrl_block;
   }
@@ -59,22 +56,10 @@ public:
     handle->data_.cycle_ = cycle;
   }
 
-  static void SetPriority(TimerHandle handle, Thread::Priority priority) {
-    ASSERT(priority < Thread::Priority::NUMBER);
-
-    if (handle->next_) {
-      Remove(handle);
-      handle->data_.priority = priority;
-      Add(handle);
-    } else {
-      handle->data_.priority = priority;
-    }
-  }
-
-  static void RefreshThreadFunction(Thread::Priority priority) {
+  static void RefreshThreadFunction(void *) {
     TimestampMS time = Thread::GetTime();
     while (true) {
-      Timer::Refresh(priority);
+      Timer::Refresh();
       Thread::SleepUntil(time, 1);
     }
   }
@@ -82,36 +67,36 @@ public:
   static void Remove(TimerHandle handle) {
     ASSERT(handle->next_);
 
-    list_[static_cast<size_t>(handle->data_.priority)]->Delete(*handle);
+    list_->Delete(*handle);
   }
 
   static void Add(TimerHandle handle) {
     ASSERT(!handle->next_);
 
-    if (!LibXR::Timer::list_[static_cast<uint32_t>(handle->data_.priority)]) {
-      LibXR::Timer::list_[static_cast<uint32_t>(handle->data_.priority)] =
-          new LibXR::List;
+    if (!LibXR::Timer::list_) {
+      LibXR::Timer::list_ = new LibXR::List();
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
 #else
       auto thread_handle = Thread();
-      thread_handle.Create<Thread::Priority>(
-          handle->data_.priority, RefreshThreadFunction, "libxr_timer_task",
-          512, Thread::Priority::HIGH);
+      thread_handle.Create<void *>(NULL, RefreshThreadFunction,
+                                   "libxr_timer_task", 512,
+                                   LIBXR_TIMER_PRIORITY);
 #endif
     }
-    list_[static_cast<size_t>(handle->data_.priority)]->Add(*handle);
+    list_->Add(*handle);
   }
 
-  static void Refresh(Thread::Priority priority) {
-    if (!LibXR::Timer::list_[static_cast<uint32_t>(priority)]) {
-      LibXR::Timer::list_[static_cast<uint32_t>(priority)] = new LibXR::List;
+  static void Refresh() {
+    if (!LibXR::Timer::list_) {
+      LibXR::Timer::list_ = new LibXR::List();
 
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
+      UNUSED(priority);
 #else
       auto thread_handle = Thread();
-      thread_handle.Create<Thread::Priority>(priority, RefreshThreadFunction,
-                                             "libxr_timer_task", 512,
-                                             Thread::Priority::HIGH);
+      thread_handle.Create<void *>(NULL, RefreshThreadFunction,
+                                   "libxr_timer_task", 512,
+                                   Thread::Priority::HIGH);
 #endif
     }
 
@@ -132,13 +117,12 @@ public:
 
     static void *empty = nullptr;
 
-    list_[static_cast<size_t>(priority)]->Foreach<ControlBlock, void *>(fun,
-                                                                        empty);
+    list_->Foreach<ControlBlock, void *>(fun, empty);
   }
 
   static void RefreshTimerInIdle();
 
-  static LibXR::List *list_[static_cast<size_t>(Thread::Priority::NUMBER)];
+  static LibXR::List *list_;
 };
 
 } // namespace LibXR
