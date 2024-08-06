@@ -75,8 +75,14 @@ enum class SizeLimitMode { EQUAL = 0, LESS = 1, MORE = 2, NONE = 3 };
 #ifdef LIBXR_DEBUG_BUILD
 #define ASSERT(arg)                                                            \
   if (!(arg)) {                                                                \
-    LibXR::Assert::FatalError(__FILE__, __LINE__);                             \
+    LibXR::Assert::FatalError(__FILE__, __LINE__, false);                      \
+  }
+
+#define ASSERT_ISR(arg)                                                        \
+  if (!(arg)) {                                                                \
+    LibXR::Assert::FatalError(__FILE__, __LINE__, true);                       \
   }
 #else
 #define ASSERT(arg) (void)0;
+#define ASSERT_ISR(arg) (void)0;
 #endif

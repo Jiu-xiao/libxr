@@ -10,7 +10,6 @@
 #include "semaphore.hpp"
 
 namespace LibXR {
-
 template <typename... Args> class Operation {
 public:
   enum class OperationType { CALLBACK, BLOCK, POLLING };
@@ -25,10 +24,10 @@ public:
   void operator=(Operation &op) {
     type = op.type;
     switch (type) {
-    case OperationType::BLOCK:
+    case OperationType::CALLBACK:
       data.callback = op.data.callback;
       break;
-    case OperationType::CALLBACK:
+    case OperationType::BLOCK:
       data.timeout = op.data.timeout;
       break;
     case OperationType::POLLING:
@@ -48,6 +47,20 @@ public:
   }
 
   Operation(Operation &op) { memcpy(this, &op, sizeof(op)); }
+
+  void Update(bool in_isr, LibXR::Semaphore &sem, Args &&...args) {
+    switch (type) {
+    case OperationType::CALLBACK:
+      data.callback.Run(in_isr, std::forward<Args>(args)...);
+      break;
+    case OperationType::BLOCK:
+      sem.PostFromCallback(in_isr);
+      break;
+    case OperationType::POLLING:
+      data.status = OperationPollingStatus::DONE;
+      break;
+    }
+  }
 
   union {
     Callback<Args...> callback = Callback<Args...>();

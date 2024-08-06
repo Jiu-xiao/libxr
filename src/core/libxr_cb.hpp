@@ -77,12 +77,9 @@ public:
 
   Callback &operator=(const Callback &) = default;
 
-  template <typename... PassArgs> void RunFromUser(PassArgs &&...args) const {
-    cb_fun_(false, cb_block_, std::forward<PassArgs>(args)...);
-  }
-
-  template <typename... PassArgs> void RunFromISR(PassArgs &&...args) const {
-    cb_fun_(true, cb_block_, std::forward<Args>(args)...);
+  template <typename... PassArgs>
+  void Run(bool in_isr, PassArgs &&...args) const {
+    cb_fun_(in_isr, cb_block_, std::forward<PassArgs>(args)...);
   }
 
 private:
