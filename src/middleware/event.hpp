@@ -37,7 +37,7 @@ public:
     }
 
     auto foreach_fun = [](Block &block, uint32_t &event) {
-      block.cb.RunFromUser(event);
+      block.cb.Run(false, event);
       return ErrorCode::OK;
     };
 
@@ -51,12 +51,12 @@ public:
     }
 
     auto foreach_fun = [](Block &block, uint32_t &event) {
-      block.cb.RunFromUser(event);
+      block.cb.Run(false, event);
       return ErrorCode::OK;
     };
 
     auto foreach_fun_isr = [](Block &block, uint32_t &event) {
-      block.cb.RunFromISR(event);
+      block.cb.Run(false, event);
       return ErrorCode::OK;
     };
 

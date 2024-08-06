@@ -1,9 +1,7 @@
 #pragma once
 
-#include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "libxr_platform.hpp"
-#include "libxr_rw.hpp"
 
 namespace LibXR {
 class Semaphore {

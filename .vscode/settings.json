@@ -1,4 +1,10 @@
 {
     "files.autoSave": "onFocusChange",
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "cmake.configureSettings": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+    },
+    "cmake.configureArgs": [
+        "-DLIBXR_TEST_BUILD=True"
+    ],
 }
