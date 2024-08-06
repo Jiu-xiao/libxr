@@ -183,8 +183,8 @@ int main() {
       break;
     }
   }
+
   ASSERT(timer_arg == 20);
-  UNUSED(timer_arg);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Condition Var Test");
@@ -244,11 +244,28 @@ int main() {
 
   auto ramfs = LibXR::RamFS();
 
-  auto file = LibXR::RamFS::CreateFile("test_file", ramfs);
+  int ramfs_arg = 0;
+
+  auto file = LibXR::RamFS::CreateFile<int *>(
+      "test_file",
+      [](int *&arg, int argc, char **argv) {
+        UNUSED(argc);
+        UNUSED(argv);
+        *arg = *arg + 1;
+        return 0;
+      },
+      &ramfs_arg);
+
+  auto file_1 = LibXR::RamFS::CreateFile("test_file1", ramfs_arg);
 
   auto dir = LibXR::RamFS::CreateDir("test_dir");
 
   auto dev = LibXR::RamFS::Device("test_dev");
+  file_1->size = 4;
+  for (int i = 1; i < 10; i++) {
+    file->Run(0, nullptr);
+    ASSERT(file_1->GetData<int>() == i);
+  }
 
   ramfs.Add(dir);
   dir.Add(file);

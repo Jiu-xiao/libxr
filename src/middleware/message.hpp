@@ -52,7 +52,9 @@ public:
 
     operator Data &() { return raw.data_; }
 
-    Data &GetData() { return raw.data_; }
+    Data *operator->() { return &(raw.data_); }
+
+    const Data *operator->() const { return &(raw.data_); }
   };
 
   typedef RBTree<uint32_t>::Node<Block> *TopicHandle;
@@ -477,7 +479,7 @@ public:
                 topic_map_.Search<TopicHandle>(header->topic_name_crc32);
             if (node) {
               data_len_ = header->data_len;
-              current_topic_ = node->GetData();
+              current_topic_ = *node;
               status_ = Status::WAIT_DATA_CRC;
             } else {
               queue_.PopBatch(sizeof(PackedDataHeader));

@@ -81,7 +81,7 @@ public:
     cb_fun_(false, cb_block_, std::forward<PassArgs>(args)...);
   }
 
-  template <typename... PassArgs> void RunFromISR(PassArgs &...args) const {
+  template <typename... PassArgs> void RunFromISR(PassArgs &&...args) const {
     cb_fun_(true, cb_block_, std::forward<Args>(args)...);
   }
 
