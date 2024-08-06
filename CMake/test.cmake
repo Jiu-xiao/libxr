@@ -6,7 +6,9 @@ endif()
 
 project(test)
 
-add_executable(test main.cpp)
+add_compile_options(-g)
+
+add_executable(test test.cpp)
 
 add_dependencies(test xr)
 
