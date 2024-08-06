@@ -35,7 +35,11 @@ public:
       return data_;
     }
 
-    Data &GetData() { return data_; }
+    Data *operator->() { return &data_; }
+
+    const Data *operator->() const { return &data_; }
+
+    Data &operator*() { return data_; }
 
     Data data_;
   };

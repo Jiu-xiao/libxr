@@ -32,7 +32,11 @@ public:
       return *this;
     }
 
-    Data &GetData() { return data_; }
+    Data *operator->() { return &data_; }
+
+    const Data *operator->() const { return &data_; }
+
+    Data &operator*() { return data_; }
 
     operator Data &() { return data_; }
 

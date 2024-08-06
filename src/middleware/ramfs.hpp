@@ -1,10 +1,12 @@
 #pragma once
 
+#include "libxr_assert.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "rbt.hpp"
+#include <utility>
 
 namespace LibXR {
 class RamFS {
@@ -51,6 +53,25 @@ public:
     FileType type;
 
     const char *name;
+
+    int Run(int argc, char **argv) {
+      ASSERT(type == FileType::EXEC);
+      return exec(arg, argc, argv);
+    }
+
+    template <typename DataType>
+    const DataType &
+    GetData(SizeLimitMode size_limit_mode = SizeLimitMode::MORE) {
+      LibXR::Assert::SizeLimitCheck(sizeof(DataType), size, size_limit_mode);
+      if (type == FileType::READ_WRITE) {
+        return *reinterpret_cast<DataType *>(addr);
+      } else if (type == FileType::READ_ONLY) {
+        return *reinterpret_cast<const DataType *>(addr_const);
+      } else {
+        ASSERT(false);
+        return *reinterpret_cast<const DataType *>(NULL);
+      }
+    }
   } _File;
 
   typedef RBTree<const char *>::Node<_File> File;
@@ -105,21 +126,17 @@ public:
   public:
     _Dir() : rbt(RBTree<const char *>(_str_compare)) {}
 
-    void Add(File &file) { rbt.Insert(file, file.GetData().name); }
-
     RBTree<const char *> rbt;
   };
 
   class Dir : public RBTree<const char *>::Node<_Dir> {
   public:
-    void Add(File &file) { this->GetData().Add(file); }
-    void Add(Dir &dir) { this->GetData().rbt.Insert(dir, dir.GetData().name); }
-    void Add(Device &dev) {
-      this->GetData().rbt.Insert(dev, dev.GetData().name);
-    }
+    void Add(File &file) { (*this)->rbt.Insert(file, file->name); }
+    void Add(Dir &dir) { (*this)->rbt.Insert(dir, dir->name); }
+    void Add(Device &dev) { (*this)->rbt.Insert(dev, dev->name); }
 
     File *FindFile(const char *name) {
-      auto ans = GetData().rbt.Search<FsNode>(name);
+      auto ans = (*this)->rbt.Search<FsNode>(name);
       if (ans && ans->data_.type == FsNodeType::FILE) {
         return reinterpret_cast<File *>(ans);
       } else {
@@ -134,7 +151,7 @@ public:
 
     static ErrorCode _FindFileRec(RBTree<const char *>::Node<FsNode> &item,
                                   _FindFileRecBlock *block) {
-      FsNode &node = item.GetData();
+      FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
 
@@ -177,7 +194,7 @@ public:
 
     static ErrorCode _FindDirRec(RBTree<const char *>::Node<FsNode> &item,
                                  _FindDirRecBlock *block) {
-      FsNode &node = item.GetData();
+      FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
         if (strcmp(dir->data_.name, block->name) == 0) {
@@ -199,8 +216,8 @@ public:
     }
 
     Dir *FindDir(const char *name) {
-      auto ans = GetData().rbt.Search<RamFS::FsNode>(name);
-      if (ans && ans->GetData().type == FsNodeType::DIR) {
+      auto ans = (*this)->rbt.Search<RamFS::FsNode>(name);
+      if (ans && (*ans)->type == FsNodeType::DIR) {
         return reinterpret_cast<Dir *>(ans);
       } else {
         return nullptr;
@@ -226,7 +243,7 @@ public:
 
     static ErrorCode _FindDevRec(RBTree<const char *>::Node<FsNode> &item,
                                  _FindDevRecBlock *block) {
-      FsNode &node = item.GetData();
+      FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
 
@@ -259,7 +276,7 @@ public:
     }
 
     Device *FindDevice(const char *name) {
-      auto ans = GetData().rbt.Search<FsNode>(name);
+      auto ans = (*this)->rbt.Search<FsNode>(name);
       if (ans && ans->data_.type == FsNodeType::DEVICE) {
         return reinterpret_cast<Device *>(ans);
       } else {
@@ -273,17 +290,17 @@ public:
     File file;
     char *name_buff = new char[strlen(name) + 1];
     strcpy(name_buff, name);
-    file.data_.name = name_buff;
+    file->name = name_buff;
 
     if (std::is_const<DataType>()) {
-      file.data_.type = FileType::READ_ONLY;
-      file.data_.addr_const = &raw;
+      file->type = FileType::READ_ONLY;
+      file->addr_const = &raw;
     } else {
-      file.data_.type = FileType::READ_WRITE;
-      file.data_.addr = &raw;
+      file->type = FileType::READ_WRITE;
+      file->addr = &raw;
     }
 
-    file.size = sizeof(raw);
+    file->size = sizeof(DataType);
 
     return file;
   }
@@ -291,7 +308,7 @@ public:
   template <typename ArgType>
   static File CreateFile(const char *name,
                          int (*exec)(ArgType &arg, int argc, char **argv),
-                         ArgType arg) {
+                         ArgType &&arg) {
     typedef struct {
       ArgType arg;
       typeof(exec) exec_fun;
@@ -301,20 +318,20 @@ public:
 
     char *name_buff = new char[strlen(name) + 1];
     strcpy(name_buff, name);
-    file.data_.name = name_buff;
-    file.data_.type = FileType::EXEC;
+    file->name = name_buff;
+    file->type = FileType::EXEC;
 
     auto block = new FileBlock;
-    block->arg = arg;
+    block->arg = std::forward<ArgType>(arg);
     block->exec_fun = exec;
-    file.data_.arg = block;
+    file->arg = block;
 
     auto fun = [](void *arg, int argc, char **argv) {
       auto block = reinterpret_cast<FileBlock *>(arg);
-      block->exec_fun(block->arg, argc, argv);
+      return block->exec_fun(block->arg, argc, argv);
     };
 
-    file.data_.exec = fun;
+    file->exec = fun;
 
     return file;
   }
@@ -324,8 +341,8 @@ public:
 
     char *name_buff = new char[strlen(name) + 1];
     strcpy(name_buff, name);
-    dir.data_.name = name_buff;
-    dir.data_.type = FsNodeType::DIR;
+    dir->name = name_buff;
+    dir->type = FsNodeType::DIR;
 
     return dir;
   }
