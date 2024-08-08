@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
@@ -71,12 +72,74 @@ public:
   OperationType type;
 };
 
+class ReadPort;
+class WritePort;
+
 typedef Operation<ErrorCode, RawData &> ReadOperation;
 typedef Operation<ErrorCode> WriteOperation;
 
-typedef ErrorCode (*WritePort)(WriteOperation &op, ConstRawData data);
+typedef ErrorCode (*WriteFun)(WriteOperation &op, ConstRawData data,
+                              WritePort &port);
 
-typedef ErrorCode (*ReadPort)(ReadOperation &op, RawData data);
+typedef ErrorCode (*ReadFun)(ReadOperation &op, RawData data, ReadPort &port);
+
+class ReadPort {
+public:
+  ReadFun read_fun_ = nullptr;
+  ReadOperation read_op_;
+  Semaphore read_sem_;
+  RawData data_;
+
+  bool Readable() { return read_fun_ != nullptr; }
+
+  ReadPort &operator=(ReadFun fun) {
+    read_fun_ = fun;
+    return *this;
+  }
+
+  void Update(bool in_isr, ErrorCode ans) {
+    read_op_.Update(in_isr, read_sem_, std::forward<ErrorCode>(ans), data_);
+  }
+
+  ErrorCode operator()(ReadOperation &op, RawData &data) {
+    if (Readable()) {
+      read_op_ = op;
+      data_ = data;
+      return read_fun_(read_op_, data_, *this);
+    } else {
+      return ErrorCode::NOT_SUPPORT;
+    }
+  }
+};
+
+class WritePort {
+public:
+  WriteFun write_fun_ = nullptr;
+  WriteOperation write_op_;
+  Semaphore write_sem_;
+  ConstRawData data_;
+
+  bool Writable() { return write_fun_ != nullptr; }
+
+  WritePort &operator=(WriteFun fun) {
+    write_fun_ = fun;
+    return *this;
+  }
+
+  void Update(bool in_isr, ErrorCode ans) {
+    write_op_.Update(in_isr, write_sem_, std::forward<ErrorCode>(ans));
+  }
+
+  ErrorCode operator()(WriteOperation &op, ConstRawData data) {
+    if (Writable()) {
+      write_op_ = op;
+      data_ = data;
+      return write_fun_(write_op_, data_, *this);
+    } else {
+      return ErrorCode::NOT_SUPPORT;
+    }
+  }
+};
 
 class STDIO {
 public:
