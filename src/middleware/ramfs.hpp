@@ -77,8 +77,8 @@ public:
   typedef RBTree<const char *>::Node<_File> File;
 
   struct _Device : public FsNode {
-    ReadPort read;
-    WritePort write;
+    ReadPort read_port;
+    WritePort write_port;
 
     ReadOperation read_op;
     WriteOperation write_op;
@@ -86,32 +86,22 @@ public:
 
   class Device : public RBTree<const char *>::Node<_Device> {
   public:
-    Device(const char *name, ReadPort read_port = nullptr,
-           WritePort write_port = nullptr) {
+    Device(const char *name, ReadPort read_port = ReadPort(),
+           WritePort write_port = WritePort()) {
       char *name_buff = new char[strlen(name) + 1];
       strcpy(name_buff, name);
       data_.name = name_buff;
-      data_.write = write_port;
-      data_.read = read_port;
+      data_.write_port = write_port;
+      data_.read_port = read_port;
       data_.type = FsNodeType::DEVICE;
     }
 
     ErrorCode Read(ReadOperation &op, RawData data) {
-      if (data_.read) {
-        data_.read_op = op;
-        return data_.read(data_.read_op, data);
-      } else {
-        return ErrorCode::NOT_SUPPORT;
-      }
+      return data_.read_port(data_.read_op, data);
     }
 
     ErrorCode Write(WriteOperation &op, ConstRawData data) {
-      if (data_.write) {
-        data_.write_op = op;
-        return data_.write(data_.write_op, data);
-      } else {
-        return ErrorCode::NOT_SUPPORT;
-      }
+      return data_.write_port(data_.write_op, data);
     }
 
     uint32_t device_type;
