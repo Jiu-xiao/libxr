@@ -24,42 +24,22 @@ struct timeval _libxr_linux_start_time;
 struct timespec _libxr_linux_start_time_spec;
 
 void LibXR::PlatformInit() {
-  auto write_fun = [](WriteOperation &op, ConstRawData data) {
+  auto write_fun = [](WriteOperation &op, ConstRawData data, WritePort &port) {
     auto ans = fwrite(data.addr_, 1, data.size_, stdout);
 
-    switch (op.type) {
-    case WriteOperation::OperationType::BLOCK:
-      break;
-    case WriteOperation::OperationType::CALLBACK:
-      op.data.callback.Run(false, ans == data.size_ ? ErrorCode::OK
-                                                    : ErrorCode::FAILED);
-      break;
-    case WriteOperation::OperationType::POLLING:
-      op.data.status = WriteOperation::OperationPollingStatus::DONE;
-      break;
-    }
+    port.Update(false, ErrorCode::OK);
 
     return ErrorCode::OK;
   };
 
   LibXR::STDIO::write = write_fun;
 
-  auto read_fun = [](Operation<ErrorCode, RawData &> &op, RawData buff) {
+  auto read_fun = [](Operation<ErrorCode, RawData &> &op, RawData buff,
+                     ReadPort &port) {
     auto need_read = buff.size_;
     buff.size_ = fread(buff.addr_, sizeof(char), buff.size_, stdin);
 
-    switch (op.type) {
-    case Operation<ErrorCode, RawData &>::OperationType::BLOCK:
-      break;
-    case Operation<ErrorCode, RawData &>::OperationType::CALLBACK:
-      op.data.callback.Run(
-          false, buff.size_ > 0 ? ErrorCode::OK : ErrorCode::FAILED, buff);
-      break;
-    case Operation<ErrorCode, RawData &>::OperationType::POLLING:
-      op.data.status =
-          Operation<ErrorCode, RawData &>::OperationPollingStatus::DONE;
-      break;
-    }
+    port.Update(false, ErrorCode::OK);
     return ErrorCode::OK;
   };
 

@@ -17,8 +17,8 @@ const LibXR::Callback<const char *, uint32_t>
     *LibXR::Assert::libxr_fatal_error_callback;
 
 /* stdio */
-LibXR::ReadPort LibXR::STDIO::read = nullptr;
-LibXR::WritePort LibXR::STDIO::write = nullptr;
+LibXR::ReadPort LibXR::STDIO::read;
+LibXR::WritePort LibXR::STDIO::write;
 void (*LibXR::STDIO::error)(const char *log) = nullptr;
 
 /* timer */
