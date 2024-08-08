@@ -17,7 +17,7 @@ public:
   }
 
   static void FatalError(const char *file, uint32_t line, bool in_isr) {
-    while (1) {
+    while (true) {
       if (LibXR::STDIO::write) {
         printf("Fatal error at %s:%d\r\n", file, int(line));
       }
