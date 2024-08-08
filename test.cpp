@@ -1,3 +1,4 @@
+#include "async.hpp"
 #include "condition_var.hpp"
 #include "crc.hpp"
 #include "event.hpp"
@@ -18,6 +19,7 @@
 #include "timer.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 const char *TEST_NAME = nullptr;
 
@@ -237,6 +239,32 @@ int main() {
   event.Bind(event_bind, 0x4321, 0x1234);
   event_bind.Active(0x4321);
   ASSERT(event_arg == 3);
+
+  /* --------------------------------------------------------------- */
+  TEST_STEP("ASync Test");
+
+  int async_arg = 0;
+  auto async_cb = LibXR::Callback<LibXR::ASync *>::Create(
+      [](bool in_isr, int *arg, LibXR::ASync *async) {
+        ASSERT(in_isr == false);
+        LibXR::Thread::Sleep(10);
+        *arg = *arg + 1;
+      },
+      &async_arg);
+
+  LibXR::ASync async(512, LibXR::Thread::Priority::REALTIME);
+  for (int i = 0; i < 10; i++) {
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::REDAY);
+    async.AssignJob(async_cb);
+
+    ASSERT(async_arg == i);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::BUSY);
+    LibXR::Thread::Sleep(20);
+
+    ASSERT(async_arg == i + 1);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::DONE);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::REDAY);
+  }
 
   /* --------------------------------------------------------------- */
   TEST_STEP("RamFS Test");
