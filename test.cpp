@@ -15,6 +15,7 @@
 #include "semaphore.hpp"
 #include "signal.hpp"
 #include "stack.hpp"
+#include "terminal.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
 #include <cstddef>
@@ -374,7 +375,7 @@ int main() {
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Stack Test");
-  LibXR::Stack<int, 10> stack;
+  LibXR::Stack<int> stack(10);
   for (int i = 0; i < 10; i++) {
     stack.Push(i);
   }
@@ -460,6 +461,14 @@ int main() {
   ASSERT(LibXR::CRC16::Verify(&TestCRC16, sizeof(TestCRC16)));
   ASSERT(LibXR::CRC32::Verify(&TestCRC32, sizeof(TestCRC32)));
 
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Terminal");
+  LibXR::Terminal terminal(ramfs);
+  LibXR::Thread term_thread;
+  term_thread.Create(&terminal, terminal.ThreadFun, "terminal", 512,
+                     LibXR::Thread::Priority::MEDIUM);
+  LibXR::Thread::Sleep(5000);
+  printf("\n");
   /* --------------------------------------------------------------- */
   TEST_STEP("End");
 

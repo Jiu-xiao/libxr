@@ -54,4 +54,7 @@ void LibXR::PlatformInit() {
 
   gettimeofday(&_libxr_linux_start_time, nullptr);
   clock_gettime(CLOCK_REALTIME, &_libxr_linux_start_time_spec);
+
+  system("stty -icanon");
+  system("stty -echo");
 }
