@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
