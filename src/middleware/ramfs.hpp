@@ -6,6 +6,7 @@
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "rbt.hpp"
+#include <cstddef>
 #include <utility>
 
 namespace LibXR {
@@ -69,7 +70,8 @@ public:
         return *reinterpret_cast<const DataType *>(addr_const);
       } else {
         ASSERT(false);
-        return *reinterpret_cast<const DataType *>(NULL);
+        const void *addr = NULL;
+        return *reinterpret_cast<const DataType *>(addr);
       }
     }
   } _File;
@@ -91,8 +93,6 @@ public:
       char *name_buff = new char[strlen(name) + 1];
       strcpy(name_buff, name);
       data_.name = name_buff;
-      data_.write_port = write_port;
-      data_.read_port = read_port;
       data_.type = FsNodeType::DEVICE;
     }
 
