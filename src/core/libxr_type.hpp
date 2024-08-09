@@ -1,9 +1,5 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
-
 #include "libxr_def.hpp"
 
 namespace LibXR {

@@ -1,10 +1,7 @@
 #pragma once
 
-#include <array>
 #include <cstring>
 #include <utility>
-
-#include "libxr_def.hpp"
 
 namespace LibXR {
 

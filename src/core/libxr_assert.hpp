@@ -6,7 +6,6 @@
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-#include "libxr_type.hpp"
 
 namespace LibXR {
 class Assert {
