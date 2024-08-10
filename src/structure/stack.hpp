@@ -33,7 +33,7 @@ public:
 
   uint32_t EmptySize() const { return (depth_ - top_); }
 
-  ErrorCode Push(Data const &data) {
+  ErrorCode Push(const Data &data) {
     mutex_.Lock();
 
     if (top_ >= depth_) {
@@ -80,6 +80,45 @@ public:
     data = stack_[top_ - 1];
     mutex_.Unlock();
 
+    return ErrorCode::OK;
+  }
+
+  ErrorCode Insert(const Data &data, uint32_t index) {
+    mutex_.Lock();
+    if (top_ >= depth_) {
+      mutex_.Unlock();
+      return ErrorCode::FULL;
+    }
+
+    if (index > top_) {
+      mutex_.Unlock();
+      return ErrorCode::OUT_OF_RANGE;
+    }
+
+    for (uint32_t i = top_ + 1; i > index; i--) {
+      stack_[i] = stack_[i - 1];
+    }
+
+    stack_[index] = data;
+    top_++;
+
+    mutex_.Unlock();
+
+    return ErrorCode::OK;
+  }
+
+  ErrorCode Delete(uint32_t index) {
+    mutex_.Lock();
+    if (index >= top_) {
+      mutex_.Unlock();
+      return ErrorCode::OUT_OF_RANGE;
+    }
+
+    for (uint32_t i = index; i < top_ - 1; i++) {
+      stack_[i] = stack_[i + 1];
+    }
+    top_--;
+    mutex_.Unlock();
     return ErrorCode::OK;
   }
 
