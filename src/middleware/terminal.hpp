@@ -6,7 +6,9 @@
 #include "ramfs.hpp"
 #include "stack.hpp"
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace LibXR {
 class Terminal {
@@ -14,22 +16,25 @@ public:
   enum class Mode { CRLF = 0, LF = 1, CR = 2, NONE = 3 };
 
   template <Mode MODE = Mode::CRLF, int READ_BUFF_SIZE = 32,
-            int WRITE_BUFF_SIZE = 128, int MAX_LINE_SIZE = READ_BUFF_SIZE>
+            int WRITE_BUFF_SIZE = 128, int MAX_LINE_SIZE = READ_BUFF_SIZE,
+            int MAX_ARG_NUMBER = 5>
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = NULL,
            WriteOperation write_op = WriteOperation(),
            ReadPort &read_port = STDIO::read,
            WritePort &write_port = STDIO::write)
       : mode_(MODE), ramfs_(ramfs), write_op_(write_op), read_(read_port),
         write_(write_port), input_line_(MAX_LINE_SIZE),
-        read_buff_size_(READ_BUFF_SIZE), write_buff_size_(WRITE_BUFF_SIZE) {
+        read_buff_size_(READ_BUFF_SIZE), write_buff_size_(WRITE_BUFF_SIZE),
+        max_arg_number_(MAX_ARG_NUMBER) {
     read_buff_ = *(new char[READ_BUFF_SIZE]);
     write_buff_ = *(new char[WRITE_BUFF_SIZE]);
     if (current_dir == NULL) {
       current_dir_ = &ramfs_.root_;
     }
+    arg_tab_ = new char *[max_arg_number_];
   }
 
-  Mode mode_;
+  const Mode mode_;
   WriteOperation write_op_;
   ReadPort &read_;
   WritePort &write_;
@@ -38,10 +43,12 @@ public:
   const size_t read_buff_size_;
   RawData write_buff_;
   const size_t write_buff_size_;
-  Stack<uint8_t> input_line_;
+  Stack<char> input_line_;
+  const size_t max_arg_number_;
+  char **arg_tab_;
+  size_t arg_number_;
 
   RamFS::Dir *current_dir_;
-
   uint8_t flag_ansi = 1;
 
   void LineFeed() {
@@ -58,7 +65,8 @@ public:
   }
 
   void DisplayChar(char data) {
-    if (input_line_.Push(data) == ErrorCode::OK) {
+    if (input_line_.EmptySize() > 1) {
+      input_line_.Push(data);
       write_(write_op_, ConstRawData(data));
     }
   }
@@ -89,6 +97,88 @@ public:
     _ShowHeader(dir);
 
     write_(write_op_, ConstRawData("$ ", 2));
+  }
+
+  void GetArgs() {
+    input_line_.Push('\0');
+    auto max_len = input_line_.Size();
+    size_t index = 0;
+    arg_number_ = 0;
+
+    for (int i = 0; i < max_len; i++) {
+      if (input_line_[i] == ' ') {
+        input_line_[i] = '\0';
+      }
+    }
+
+    while (index < max_len && arg_number_ < max_arg_number_) {
+      if (input_line_[index] == '\0') {
+        index++;
+        continue;
+      } else {
+        arg_tab_[arg_number_++] = &input_line_[index];
+        index += strnlen(&input_line_[index], max_len - index);
+        continue;
+      }
+    }
+  }
+
+  RamFS::Dir *Path2Dir() {
+    // TODO:
+    return current_dir_;
+  }
+
+  RamFS::File *Path2File(char *path) {
+    auto len = strlen(path);
+    size_t index = 0;
+    RamFS::Dir *dir = current_dir_;
+    RamFS::File *file;
+
+    if (*path == '/') {
+      index++;
+      dir = &ramfs_.root_;
+    }
+
+    while (index < len) {
+      size_t dir_name_index = index;
+      while (path[dir_name_index] != '/') {
+        if (path[dir_name_index] == '\0') {
+          return dir->FindFile(&path[index]);
+        }
+        dir_name_index++;
+      }
+
+      path[dir_name_index] = '\0';
+      dir = dir->FindDir(&path[index]);
+      if (!dir) {
+        return NULL;
+      }
+
+      index = dir_name_index + 1;
+    }
+
+    return NULL;
+  }
+
+  void RunCommand() {
+    if (arg_number_ < 1 || arg_number_ > max_arg_number_) {
+      return;
+    }
+
+    auto ans = Path2File(arg_tab_[0]);
+    if (ans == nullptr) {
+      write_(write_op_, ConstRawData("Command not found."));
+      LineFeed();
+      return;
+    }
+
+    if ((*ans)->type != RamFS::FileType::EXEC) {
+      write_(write_op_, ConstRawData("Not an executable file."));
+      LineFeed();
+      return;
+    }
+
+    (*ans)->Run(arg_number_, arg_tab_);
   }
 
   void Prase(RawData &raw_data) {
@@ -128,16 +218,17 @@ public:
       switch (data) {
       case '\n':
         if (mode_ == Mode::CRLF || mode_ == Mode::LF) {
+        prase_data:
           LineFeed();
+          GetArgs();
+          RunCommand();
           ShowHeader();
           input_line_.Reset();
         }
         break;
       case '\r':
         if (mode_ == Mode::LF) {
-          LineFeed();
-          ShowHeader();
-          input_line_.Reset();
+          goto prase_data;
         }
         break;
       case 0x7f:
