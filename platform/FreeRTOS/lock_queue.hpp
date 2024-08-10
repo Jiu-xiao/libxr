@@ -10,9 +10,8 @@
 #include "semaphore.hpp"
 
 namespace LibXR {
-template <typename Data>
-class LockQueue {
- public:
+template <typename Data> class LockQueue {
+public:
   LockQueue(size_t length)
       : queue_handle_(xQueueCreate(length, sizeof(Data))), length_(length) {}
 
@@ -67,8 +66,8 @@ class LockQueue {
 
   size_t EmptySize() { return uxQueueSpacesAvailable(queue_handle_); }
 
- private:
+private:
   QueueHandle_t queue_handle_;
   uint32_t length_;
 };
-}  // namespace LibXR
+} // namespace LibXR

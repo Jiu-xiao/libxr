@@ -479,7 +479,7 @@ int main() {
   LibXR::Thread term_thread;
   term_thread.Create(&terminal, terminal.ThreadFun, "terminal", 512,
                      LibXR::Thread::Priority::MEDIUM);
-  LibXR::Thread::Sleep(100000);
+  LibXR::Thread::Sleep(10000);
   printf("\n");
   /* --------------------------------------------------------------- */
   TEST_STEP("End");

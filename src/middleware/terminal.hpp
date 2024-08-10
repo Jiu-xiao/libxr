@@ -2,9 +2,12 @@
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
+#include "libxr_string.hpp"
 #include "libxr_type.hpp"
+#include "queue.hpp"
 #include "ramfs.hpp"
 #include "stack.hpp"
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -19,27 +22,23 @@ static const char KEY_SAVE[] = "\033[s";
 static const char KEY_LOAD[] = "\033[u";
 
 namespace LibXR {
+template <int READ_BUFF_SIZE = 32, int WRITE_BUFF_SIZE = 128,
+          int MAX_LINE_SIZE = READ_BUFF_SIZE, int MAX_ARG_NUMBER = 5,
+          int MAX_HISTORY_NUMBER = 5>
 class Terminal {
 public:
   enum class Mode { CRLF = 0, LF = 1, CR = 2, NONE = 3 };
 
-  template <Mode MODE = Mode::CRLF, int READ_BUFF_SIZE = 32,
-            int WRITE_BUFF_SIZE = 128, int MAX_LINE_SIZE = READ_BUFF_SIZE,
-            int MAX_ARG_NUMBER = 5>
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = NULL,
            WriteOperation write_op = WriteOperation(),
            ReadPort &read_port = STDIO::read,
-           WritePort &write_port = STDIO::write)
+           WritePort &write_port = STDIO::write, Mode MODE = Mode::CRLF)
       : mode_(MODE), ramfs_(ramfs), write_op_(write_op), read_(read_port),
-        write_(write_port), input_line_(MAX_LINE_SIZE),
-        read_buff_size_(READ_BUFF_SIZE), write_buff_size_(WRITE_BUFF_SIZE),
-        max_arg_number_(MAX_ARG_NUMBER) {
-    read_buff_ = *(new char[READ_BUFF_SIZE]);
-    write_buff_ = *(new char[WRITE_BUFF_SIZE]);
+        write_(write_port), input_line_(MAX_LINE_SIZE + 1),
+        history_(MAX_HISTORY_NUMBER) {
     if (current_dir == NULL) {
       current_dir_ = &ramfs_.root_;
     }
-    arg_tab_ = new char *[max_arg_number_];
   }
 
   const Mode mode_;
@@ -47,18 +46,17 @@ public:
   ReadPort &read_;
   WritePort &write_;
   RamFS &ramfs_;
-  RawData read_buff_;
-  const size_t read_buff_size_;
-  RawData write_buff_;
-  const size_t write_buff_size_;
+  char read_buff_[READ_BUFF_SIZE];
+  char write_buff_[WRITE_BUFF_SIZE];
   Stack<char> input_line_;
-  const size_t max_arg_number_;
-  char **arg_tab_;
+  char *arg_tab_[MAX_ARG_NUMBER];
   size_t arg_number_;
-  int offset_ = 0;
+  Queue<LibXR::String<MAX_LINE_SIZE>> history_;
+  int history_index_ = -1;
 
   RamFS::Dir *current_dir_;
   uint8_t flag_ansi = 1;
+  int offset_ = 0;
 
   void LineFeed() {
     switch (mode_) {
@@ -82,6 +80,11 @@ public:
   }
 
   void DisplayChar(char data) {
+    if (history_index_ >= 0) {
+      ApplyHistory();
+      ShowHistory();
+    }
+
     if (input_line_.EmptySize() > 1) {
       write_(write_op_, ConstRawData(data));
       if (offset_ == 0) {
@@ -94,7 +97,12 @@ public:
   }
 
   void DeleteChar() {
-    if (input_line_.Size() > 0) {
+    if (history_index_ >= 0) {
+      ApplyHistory();
+      ShowHistory();
+    }
+
+    if (input_line_.Size() + offset_ > 0) {
       write_(write_op_, ConstRawData("\b \b", 3));
       if (offset_ == 0) {
         input_line_.Pop();
@@ -127,8 +135,43 @@ public:
     write_(write_op_, ConstRawData("$ ", 2));
   }
 
+  void ClearLine() {
+    write_(write_op_, ConstRawData(CLEAR_LINE, sizeof(CLEAR_LINE) - 1));
+  }
+
+  void Clear() {
+    write_(write_op_, ConstRawData(CLEAR_ALL, sizeof(CLEAR_ALL) - 1));
+  }
+
+  void ShowHistory() {
+    ClearLine();
+    ShowHeader();
+    offset_ = 0;
+    if (history_index_ >= 0) {
+      write_(write_op_, ConstRawData(history_[-history_index_ - 1].Raw(),
+                                     history_[-history_index_ - 1].Length()));
+    } else {
+      write_(write_op_, ConstRawData(&input_line_[0], input_line_.Size()));
+    }
+  }
+
+  void ApplyHistory() {
+    input_line_.Reset();
+    for (int i = 0; i < history_[-history_index_ - 1].Length(); i++) {
+      input_line_.Push(history_[-history_index_ - 1][i]);
+    }
+    history_index_ = -1;
+    offset_ = 0;
+  }
+
   void GetArgs() {
     input_line_.Push('\0');
+
+    if (history_.EmptySize() == 0) {
+      history_.Pop();
+    }
+    history_.Push(*reinterpret_cast<String<MAX_LINE_SIZE> *>(&input_line_[0]));
+
     auto max_len = input_line_.Size();
     size_t index = 0;
     arg_number_ = 0;
@@ -139,7 +182,7 @@ public:
       }
     }
 
-    while (index < max_len && arg_number_ < max_arg_number_) {
+    while (index < max_len && arg_number_ < MAX_ARG_NUMBER) {
       if (input_line_[index] == '\0') {
         index++;
         continue;
@@ -189,7 +232,7 @@ public:
   }
 
   void RunCommand() {
-    if (arg_number_ < 1 || arg_number_ > max_arg_number_) {
+    if (arg_number_ < 1 || arg_number_ > MAX_ARG_NUMBER) {
       return;
     }
 
@@ -227,10 +270,21 @@ public:
       } else if (flag_ansi == 2) {
         switch (data) {
         case 'A':
+          if (history_index_ < int(history_.Size()) - 1) {
+            history_index_++;
+            ShowHistory();
+          }
           break;
         case 'B':
-          break;
+          if (history_index_ >= 0) {
+            history_index_--;
+            ShowHistory();
+          }
         case 'C':
+          if (history_index_ >= 0) {
+            ApplyHistory();
+            ShowHistory();
+          }
           if (offset_ < 0) {
             offset_++;
             write_(write_op_, ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1));
@@ -238,6 +292,10 @@ public:
 
           break;
         case 'D':
+          if (history_index_ >= 0) {
+            ApplyHistory();
+            ShowHistory();
+          }
           if (offset_ + input_line_.Size() > 0) {
             offset_--;
             write_(write_op_, ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1));
@@ -256,6 +314,9 @@ public:
       case '\n':
         if (mode_ == Mode::CRLF || mode_ == Mode::LF) {
         prase_data:
+          if (history_index_ >= 0) {
+            ApplyHistory();
+          }
           LineFeed();
           GetArgs();
           RunCommand();
@@ -285,7 +346,7 @@ public:
 
   static void ThreadFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = MIN(MAX(1, term->read_.Size()), term->read_buff_size_);
+    buff.size_ = MIN(MAX(1, term->read_.Size()), READ_BUFF_SIZE);
     static ReadOperation op(UINT32_MAX);
     while (true) {
       if (term->read_(op, buff) == ErrorCode::OK) {
@@ -296,7 +357,7 @@ public:
 
   static void TaskFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = MIN(MAX(1, term->read_.Size()), term->read_buff_size_);
+    buff.size_ = MIN(MAX(1, term->read_.Size()), term->READ_BUFF_SIZE);
 
     static ReadOperation op(UINT32_MAX);
   check_status:
