@@ -64,6 +64,7 @@ enum class ErrorCode {
   FULL = -14,
   BUSY = -15,
   PTR_NULL = -16,
+  OUT_OF_RANGE = -17,
 };
 
 enum class SizeLimitMode { EQUAL = 0, LESS = 1, MORE = 2, NONE = 3 };

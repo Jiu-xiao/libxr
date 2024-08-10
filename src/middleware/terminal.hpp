@@ -10,6 +10,14 @@
 #include <cstdio>
 #include <cstring>
 
+static const char CLEAR_ALL[] = "\033[2J\033[1H";
+static const char CLEAR_LINE[] = "\033[2K\r";
+static const char CLEAR_BEHIND[] = "\033[K";
+static const char KEY_RIGHT[] = "\033[C";
+static const char KEY_LEFT[] = "\033[D";
+static const char KEY_SAVE[] = "\033[s";
+static const char KEY_LOAD[] = "\033[u";
+
 namespace LibXR {
 class Terminal {
 public:
@@ -47,6 +55,7 @@ public:
   const size_t max_arg_number_;
   char **arg_tab_;
   size_t arg_number_;
+  int offset_ = 0;
 
   RamFS::Dir *current_dir_;
   uint8_t flag_ansi = 1;
@@ -64,16 +73,35 @@ public:
     }
   }
 
+  void RefreshOffset() {
+    write_(write_op_, ConstRawData(KEY_SAVE, sizeof(KEY_SAVE) - 1));
+    write_(write_op_, ConstRawData(CLEAR_BEHIND, sizeof(CLEAR_BEHIND) - 1));
+    write_(write_op_,
+           ConstRawData(&input_line_[input_line_.Size() + offset_], -offset_));
+    write_(write_op_, ConstRawData(KEY_LOAD, sizeof(KEY_LOAD) - 1));
+  }
+
   void DisplayChar(char data) {
     if (input_line_.EmptySize() > 1) {
-      input_line_.Push(data);
       write_(write_op_, ConstRawData(data));
+      if (offset_ == 0) {
+        input_line_.Push(data);
+      } else {
+        input_line_.Insert(data, input_line_.Size() + offset_);
+        RefreshOffset();
+      }
     }
   }
 
   void DeleteChar() {
-    if (input_line_.Pop() == ErrorCode::OK) {
+    if (input_line_.Size() > 0) {
       write_(write_op_, ConstRawData("\b \b", 3));
+      if (offset_ == 0) {
+        input_line_.Pop();
+      } else {
+        input_line_.Delete(input_line_.Size() + offset_ - 1);
+        RefreshOffset();
+      }
     }
   }
 
@@ -203,8 +231,17 @@ public:
         case 'B':
           break;
         case 'C':
+          if (offset_ < 0) {
+            offset_++;
+            write_(write_op_, ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1));
+          }
+
           break;
         case 'D':
+          if (offset_ + input_line_.Size() > 0) {
+            offset_--;
+            write_(write_op_, ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1));
+          }
           break;
         default:
           break;
@@ -224,6 +261,7 @@ public:
           RunCommand();
           ShowHeader();
           input_line_.Reset();
+          offset_ = 0;
         }
         break;
       case '\r':
