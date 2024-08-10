@@ -389,9 +389,20 @@ int main() {
     ASSERT(tmp == 9 - i);
   }
 
-  int tmp_int = 0;
+  ASSERT(stack.Pop() == ErrorCode::EMPTY);
 
-  ASSERT(stack.Pop(tmp_int) == ErrorCode::EMPTY);
+  for (int i = 0; i <= 5; i++) {
+    stack.Push(i);
+  }
+
+  stack.Insert(10, 2);
+  ASSERT(stack[2] == 10);
+  ASSERT(stack[3] == 2);
+  ASSERT(stack.Size() == 7);
+  stack.Delete(2);
+  ASSERT(stack[2] == 2);
+  ASSERT(stack[3] == 3);
+  ASSERT(stack.Size() == 6);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("RedBlackTree Test");
