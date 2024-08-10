@@ -16,6 +16,15 @@ public:
 
   ~BaseQueue() { delete queue_array_; }
 
+  void *operator[](int32_t index) {
+    if (index > 0) {
+      index = (head_ + index) % length_;
+    } else {
+      index = (head_ + length_ + index) % length_;
+    }
+    return &queue_array_[index * element_size_];
+  }
+
   ErrorCode Push(const void *data) {
     if (is_full_) {
       return ErrorCode::FULL;
@@ -169,7 +178,6 @@ public:
 
   size_t EmptySize() { return length_ - Size(); }
 
-private:
   uint8_t *queue_array_;
   const size_t element_size_;
   size_t head_ = 0;
@@ -182,9 +190,21 @@ template <typename Data> class Queue : public BaseQueue {
 public:
   Queue(size_t length) : BaseQueue(sizeof(Data), length) {}
 
+  Data &operator[](int32_t index) {
+    if (index >= 0) {
+      index = (head_ + index) % length_;
+    } else {
+      index = (tail_ + index + length_) % length_;
+    }
+
+    return *reinterpret_cast<Data *>(&queue_array_[index * element_size_]);
+  }
+
   ErrorCode Push(const Data &data) { return BaseQueue::Push(&data); }
 
   ErrorCode Pop(Data &data) { return BaseQueue::Pop(&data); }
+
+  ErrorCode Pop() { return BaseQueue::Pop(); }
 
   ErrorCode Peek(Data &data) { return BaseQueue::Peek(&data); }
 
