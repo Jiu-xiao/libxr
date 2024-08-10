@@ -296,6 +296,7 @@ int main() {
   }
 
   ramfs.Add(dir);
+  ramfs.Add(file_1);
   dir.Add(file);
   dir.Add(dev);
 
@@ -467,7 +468,7 @@ int main() {
   LibXR::Thread term_thread;
   term_thread.Create(&terminal, terminal.ThreadFun, "terminal", 512,
                      LibXR::Thread::Priority::MEDIUM);
-  LibXR::Thread::Sleep(5000);
+  LibXR::Thread::Sleep(100000);
   printf("\n");
   /* --------------------------------------------------------------- */
   TEST_STEP("End");

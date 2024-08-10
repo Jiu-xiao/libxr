@@ -24,7 +24,7 @@ public:
     }
   }
 
-  Data operator[](uint32_t index) {
+  Data &operator[](uint32_t index) {
     ASSERT(index < top_);
     return stack_[index];
   }
