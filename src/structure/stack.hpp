@@ -24,9 +24,14 @@ public:
     }
   }
 
-  Data &operator[](uint32_t index) {
-    ASSERT(index < top_);
-    return stack_[index];
+  Data &operator[](int32_t index) {
+    if (index >= 0) {
+      ASSERT(index < depth_);
+      return stack_[index];
+    } else {
+      ASSERT(depth_ + index >= 0);
+      return stack_[top_ + index];
+    }
   }
 
   uint32_t Size() const { return top_; }
