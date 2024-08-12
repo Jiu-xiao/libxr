@@ -12,7 +12,11 @@
 namespace LibXR {
 class RamFS {
 public:
-  RamFS(const char *name = "ramfs") : root_(CreateDir(name)) {}
+  RamFS(const char *name = "ramfs")
+      : root_(CreateDir(name)), bin_(CreateDir("bin")), dev_(CreateDir("dev")) {
+    root_.Add(bin_);
+    root_.Add(dev_);
+  }
 
   static int _str_compare(const char *const &a, const char *const &b) {
     return strcmp(a, b);
@@ -32,10 +36,13 @@ public:
     EXEC,
   };
 
+  class Dir;
+
   class FsNode {
   public:
     const char *name;
     FsNodeType type;
+    Dir *parent;
   };
 
   typedef class _File : public FsNode {
@@ -52,8 +59,6 @@ public:
     };
 
     FileType type;
-
-    const char *name;
 
     int Run(int argc, char **argv) {
       ASSERT(type == FileType::EXEC);
@@ -121,9 +126,18 @@ public:
 
   class Dir : public RBTree<const char *>::Node<_Dir> {
   public:
-    void Add(File &file) { (*this)->rbt.Insert(file, file->name); }
-    void Add(Dir &dir) { (*this)->rbt.Insert(dir, dir->name); }
-    void Add(Device &dev) { (*this)->rbt.Insert(dev, dev->name); }
+    void Add(File &file) {
+      (*this)->rbt.Insert(file, file->name);
+      file->parent = this;
+    }
+    void Add(Dir &dir) {
+      (*this)->rbt.Insert(dir, dir->name);
+      dir->parent = this;
+    }
+    void Add(Device &dev) {
+      (*this)->rbt.Insert(dev, dev->name);
+      dev->parent = this;
+    }
 
     File *FindFile(const char *name) {
       auto ans = (*this)->rbt.Search<FsNode>(name);
@@ -206,7 +220,16 @@ public:
     }
 
     Dir *FindDir(const char *name) {
+      if (name[0] == '.' && name[1] == '\0') {
+        return this;
+      }
+
+      if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+        return reinterpret_cast<Dir *>(data_.parent);
+      }
+
       auto ans = (*this)->rbt.Search<RamFS::FsNode>(name);
+
       if (ans && (*ans)->type == FsNodeType::DIR) {
         return reinterpret_cast<Dir *>(ans);
       } else {
@@ -345,6 +368,6 @@ public:
   Dir *FindDir(const char *name) { return root_.FindDirRec(name); }
   Device *FindDevice(const char *name) { return root_.FindDeviceRec(name); }
 
-  Dir root_;
+  Dir root_, bin_, dev_;
 };
 } // namespace LibXR
