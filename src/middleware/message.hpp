@@ -425,8 +425,8 @@ public:
 
       /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
       ASSERT(buffer_length >= sizeof(PackedData<uint8_t>));
-      prase_buff_.size_ = buffer_length;
-      prase_buff_.addr_ = new uint8_t[buffer_length];
+      parse_buff_.size_ = buffer_length;
+      parse_buff_.addr_ = new uint8_t[buffer_length];
     }
 
     void Register(TopicHandle topic) {
@@ -434,7 +434,7 @@ public:
       topic_map_.Insert(*node, topic->key);
     }
 
-    ErrorCode PraseData(ConstRawData data) {
+    ErrorCode ParseData(ConstRawData data) {
       auto raw = reinterpret_cast<const uint8_t *>(data.addr_);
 
       queue_.PushBatch(data.addr_, data.size_);
@@ -463,10 +463,10 @@ public:
       if (status_ == Status::WAIT_TOPIC) {
         /* Check size&crc*/
         if (queue_.Size() >= sizeof(PackedDataHeader)) {
-          queue_.PeekBatch(prase_buff_.addr_, sizeof(PackedDataHeader));
-          if (CRC8::Verify(prase_buff_.addr_, sizeof(PackedDataHeader))) {
+          queue_.PeekBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
+          if (CRC8::Verify(parse_buff_.addr_, sizeof(PackedDataHeader))) {
             auto header =
-                reinterpret_cast<PackedDataHeader *>(prase_buff_.addr_);
+                reinterpret_cast<PackedDataHeader *>(parse_buff_.addr_);
             /* Check buffer size */
             if (header->data_len >= queue_.EmptySize()) {
               queue_.PopBatch(sizeof(PackedDataHeader));
@@ -500,14 +500,14 @@ public:
       if (status_ == Status::WAIT_DATA_CRC) {
         /* Check size&crc */
         if (queue_.Size() > data_len_ + sizeof(PackedDataHeader)) {
-          queue_.PopBatch(prase_buff_.addr_, data_len_ +
+          queue_.PopBatch(parse_buff_.addr_, data_len_ +
                                                  sizeof(PackedDataHeader) +
                                                  sizeof(uint8_t));
-          if (CRC8::Verify(prase_buff_.addr_, data_len_ +
+          if (CRC8::Verify(parse_buff_.addr_, data_len_ +
                                                   sizeof(PackedDataHeader) +
                                                   sizeof(uint8_t))) {
             status_ = Status::WAIT_START;
-            auto data = reinterpret_cast<uint8_t *>(prase_buff_.addr_) +
+            auto data = reinterpret_cast<uint8_t *>(parse_buff_.addr_) +
                         sizeof(PackedDataHeader);
 
             Topic(current_topic_).Publish(data, data_len_);
@@ -531,7 +531,7 @@ public:
     uint32_t data_len_ = 0;
     RBTree<uint32_t> topic_map_;
     BaseQueue queue_;
-    RawData prase_buff_;
+    RawData parse_buff_;
     TopicHandle current_topic_ = nullptr;
   };
 
