@@ -46,7 +46,7 @@ void LibXR::PlatformInit() {
   LibXR::STDIO::read = read_fun;
 
   auto err_fun = [](const char *log) {
-    static char prase_buff[4096];
+    static char parse_buff[4096];
     printf("Error:%s\r\n", log);
   };
 
