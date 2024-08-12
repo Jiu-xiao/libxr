@@ -348,7 +348,7 @@ int main() {
   topic.DumpData(packed_data);
   topic_server.Register(topic);
 
-  topic_server.PraseData(LibXR::ConstRawData(packed_data));
+  topic_server.ParseData(LibXR::ConstRawData(packed_data));
 
   ASSERT(msg[1] == msg[0]);
 
@@ -356,7 +356,7 @@ int main() {
     msg[0] = i * 0.1;
     topic.Publish(msg[0]);
     topic.DumpData(packed_data);
-    topic_server.PraseData(LibXR::ConstRawData(packed_data));
+    topic_server.ParseData(LibXR::ConstRawData(packed_data));
     ASSERT(msg[1] == msg[0]);
   }
 
@@ -365,11 +365,11 @@ int main() {
     topic.Publish(msg[0]);
     topic.DumpData(packed_data);
     for (uint8_t j = 0; j < 255; j++) {
-      topic_server.PraseData(LibXR::ConstRawData(j));
+      topic_server.ParseData(LibXR::ConstRawData(j));
     }
     for (int j = 0; j < sizeof(packed_data); j++) {
       auto tmp = reinterpret_cast<uint8_t *>(&packed_data);
-      topic_server.PraseData(LibXR::ConstRawData(tmp[j]));
+      topic_server.ParseData(LibXR::ConstRawData(tmp[j]));
     }
     ASSERT(msg[1] == msg[0]);
   }
