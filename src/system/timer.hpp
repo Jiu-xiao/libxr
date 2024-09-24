@@ -5,6 +5,10 @@
 #include "list.hpp"
 #include "thread.hpp"
 
+#ifndef LIBXR_TIMER_PRIORITY
+#define LIBXR_TIMER_PRIORITY Thread::Priority::MEDIUM
+#endif
+
 namespace LibXR {
 class Timer {
 public:
