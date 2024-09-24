@@ -1,5 +1,5 @@
 #include "libxr_def.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 
 namespace LibXR {
 class ConditionVar {

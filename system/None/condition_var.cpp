@@ -1,7 +1,7 @@
 #include "condition_var.hpp"
 
 #include "libxr_def.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
 

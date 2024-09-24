@@ -6,30 +6,30 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build)
 
 include(CMake/config.cmake)
 
-# Detect platform
+# Detect system
 if(CMAKE_CROSSCOMPILING)
   message("Cross compiling.")
 else()
   if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
-    Set(PLATFORM "Linux")
+    Set(SYSTEM "Linux")
   elseif(CMAKE_HOST_SYSTEM_NAME MATCHES "Windows")
-    Set(PLATFORM "Windows")
+    Set(SYSTEM "Windows")
   elseif()
-    message(FATAL_ERROR "Unkonw platform.")
+    message(FATAL_ERROR "Unkonw system.")
   endif()
 endif()
 
-if(NOT PLATFORM)
-  message(FATAL_ERROR "No platform.")
+if(NOT SYSTEM)
+  message(FATAL_ERROR "No system.")
 endif()
 
-add_compile_definitions(LIBXR_PLATFORM ${PLATFORM})
+add_compile_definitions(LIBXR_SYSTEM ${SYSTEM})
 
-if("${PLATFORM}" STREQUAL "None")
+if("${SYSTEM}" STREQUAL "None")
   add_compile_definitions(LIBXR_NOT_SUPPORT_MUTI_THREAD)
 endif()
 
-message("-- Platfrom: ${PLATFORM}")
+message("-- Platfrom: ${SYSTEM}")
 
 # Share/Static
 if(LIBXR_SHARED_BUILD)
@@ -62,7 +62,7 @@ file(
   GLOB ${PROJECT_NAME}_MIDDLEWARE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/middleware/*.cpp")
 
 file(
-  GLOB ${PROJECT_NAME}_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*.cpp")
+  GLOB ${PROJECT_NAME}_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/system/${SYSTEM}/*.cpp")
 
 target_sources(${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_SOURCES}
@@ -82,7 +82,7 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/structure
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/middleware
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM})
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/system/${SYSTEM})
 
 if(LIBXR_TEST_BUILD)
   include(CMake/test.cmake)

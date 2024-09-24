@@ -1,13 +1,13 @@
 #pragma once
 
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include "libxr_time.hpp"
 
 #define LIBXR_PRIORITY_STEP ((configMAX_PRIORITIES - 1) / 5)
 
 namespace LibXR {
 class Thread {
- public:
+public:
   enum class Priority {
     IDLE = 0,
     LOW = LIBXR_PRIORITY_STEP * 1,
@@ -27,7 +27,7 @@ class Thread {
     ASSERT(configMAX_PRIORITIES >= 6);
 
     class ThreadBlock {
-     public:
+    public:
       ThreadBlock(typeof(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
 
       static void Port(void *arg) {
@@ -56,7 +56,7 @@ class Thread {
 
   operator libxr_thread_handle() { return thread_handle_; }
 
- private:
+private:
   libxr_thread_handle thread_handle_;
 };
-}  // namespace LibXR
+} // namespace LibXR

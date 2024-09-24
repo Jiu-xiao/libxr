@@ -2,7 +2,7 @@
 #include "crc.hpp"
 #include "event.hpp"
 #include "libxr_def.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "list.hpp"
