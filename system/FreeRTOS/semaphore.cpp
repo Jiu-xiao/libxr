@@ -1,7 +1,7 @@
 #include "semaphore.hpp"
 
 #include "libxr_def.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 
 using namespace LibXR;
 

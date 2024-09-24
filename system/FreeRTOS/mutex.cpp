@@ -2,7 +2,7 @@
 
 #include <pthread.h>
 
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 
 using namespace LibXR;
 

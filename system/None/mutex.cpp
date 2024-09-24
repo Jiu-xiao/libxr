@@ -1,6 +1,6 @@
 #include "mutex.hpp"
 
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "libxr_def.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"
 #include "semaphore.hpp"

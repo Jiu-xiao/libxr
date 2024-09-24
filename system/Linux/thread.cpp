@@ -1,5 +1,5 @@
 #include "thread.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include <errno.h>
 #include <sys/time.h>
 

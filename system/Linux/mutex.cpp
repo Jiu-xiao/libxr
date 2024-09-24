@@ -1,5 +1,5 @@
 #include "mutex.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include <pthread.h>
 
 using namespace LibXR;

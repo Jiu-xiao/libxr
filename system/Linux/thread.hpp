@@ -1,6 +1,6 @@
 #pragma once
 
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include "libxr_time.hpp"
 
 namespace LibXR {

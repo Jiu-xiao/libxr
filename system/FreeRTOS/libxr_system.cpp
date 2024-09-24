@@ -1,4 +1,4 @@
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"

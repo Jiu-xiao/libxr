@@ -1,4 +1,4 @@
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 
 #include <bits/types/FILE.h>
 #include <stdio.h>

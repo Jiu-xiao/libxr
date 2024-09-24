@@ -1,12 +1,12 @@
 #pragma once
 
 #include "libxr_def.hpp"
-#include "libxr_platform.hpp"
+#include "libxr_system.hpp"
 #include "libxr_time.hpp"
 
 namespace LibXR {
 class Thread {
- public:
+public:
   enum class Priority {
     IDLE = 0,
     LOW = 0,
@@ -47,8 +47,8 @@ class Thread {
 
   operator libxr_thread_handle() { return thread_handle_; }
 
- private:
+private:
   libxr_thread_handle thread_handle_;
 };
 
-}  // namespace LibXR
+} // namespace LibXR
