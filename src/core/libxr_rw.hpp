@@ -11,8 +11,9 @@
 #include "semaphore.hpp"
 
 namespace LibXR {
-template <typename... Args> class Operation {
-public:
+template <typename... Args>
+class Operation {
+ public:
   enum class OperationType { CALLBACK, BLOCK, POLLING };
 
   enum class OperationPollingStatus { READY, RUNNING, DONE };
@@ -35,44 +36,44 @@ public:
   void operator=(Operation &op) {
     type = op.type;
     switch (type) {
-    case OperationType::CALLBACK:
-      data.callback = op.data.callback;
-      break;
-    case OperationType::BLOCK:
-      data.timeout = op.data.timeout;
-      break;
-    case OperationType::POLLING:
-      data.status = op.data.status;
-      break;
+      case OperationType::CALLBACK:
+        data.callback = op.data.callback;
+        break;
+      case OperationType::BLOCK:
+        data.timeout = op.data.timeout;
+        break;
+      case OperationType::POLLING:
+        data.status = op.data.status;
+        break;
     }
   }
 
   Operation(Operation &op) {
     type = op.type;
     switch (type) {
-    case OperationType::CALLBACK:
-      data.callback = op.data.callback;
-      break;
-    case OperationType::BLOCK:
-      data.timeout = op.data.timeout;
-      break;
-    case OperationType::POLLING:
-      data.status = op.data.status;
-      break;
+      case OperationType::CALLBACK:
+        data.callback = op.data.callback;
+        break;
+      case OperationType::BLOCK:
+        data.timeout = op.data.timeout;
+        break;
+      case OperationType::POLLING:
+        data.status = op.data.status;
+        break;
     }
   }
 
   void UpdateStatus(bool in_isr, LibXR::Semaphore &sem, Args &&...args) {
     switch (type) {
-    case OperationType::CALLBACK:
-      data.callback.Run(in_isr, std::forward<Args>(args)...);
-      break;
-    case OperationType::BLOCK:
-      sem.PostFromCallback(in_isr);
-      break;
-    case OperationType::POLLING:
-      data.status = OperationPollingStatus::DONE;
-      break;
+      case OperationType::CALLBACK:
+        data.callback.Run(in_isr, std::forward<Args>(args)...);
+        break;
+      case OperationType::BLOCK:
+        sem.PostFromCallback(in_isr);
+        break;
+      case OperationType::POLLING:
+        data.status = OperationPollingStatus::DONE;
+        break;
     }
   }
 
@@ -113,7 +114,7 @@ typedef struct {
 } WriteInfoBlock;
 
 class ReadPort {
-public:
+ public:
   ReadFun read_fun_ = nullptr;
   Semaphore *read_sem_;
   LockFreeQueue<ReadInfoBlock> *queue_;
@@ -167,7 +168,7 @@ public:
 };
 
 class WritePort {
-public:
+ public:
   WriteFun write_fun_ = nullptr;
   Semaphore *write_sem_;
   LockFreeQueue<WriteInfoBlock> *queue_;
@@ -224,9 +225,8 @@ public:
 };
 
 class STDIO {
-public:
+ public:
   static ReadPort *read;
   static WritePort *write;
-  static void (*error)(const char *log);
 };
-} // namespace LibXR
+}  // namespace LibXR
