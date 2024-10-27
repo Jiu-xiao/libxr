@@ -6,8 +6,6 @@
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "rbt.hpp"
-#include <cstddef>
-#include <utility>
 
 namespace LibXR {
 class RamFS {
@@ -86,9 +84,6 @@ public:
   struct _Device : public FsNode {
     ReadPort read_port;
     WritePort write_port;
-
-    ReadOperation read_op;
-    WriteOperation write_op;
   };
 
   class Device : public RBTree<const char *>::Node<_Device> {
@@ -101,12 +96,14 @@ public:
       data_.type = FsNodeType::DEVICE;
     }
 
-    ErrorCode Read(ReadOperation &op, RawData data) {
-      return data_.read_port(data_.read_op, data);
+    template <typename ReadOperation>
+    ErrorCode Read(ReadOperation &&op, RawData data) {
+      return data_.read_port(data, std::forward<ReadOperation>(op));
     }
 
-    ErrorCode Write(WriteOperation &op, ConstRawData data) {
-      return data_.write_port(data_.write_op, data);
+    template <typename WriteOperation>
+    ErrorCode Write(WriteOperation &&op, ConstRawData data) {
+      return data_.write_port(data, std::forward<WriteOperation>(op));
     }
 
     uint32_t device_type;

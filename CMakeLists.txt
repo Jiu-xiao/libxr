@@ -11,25 +11,31 @@ if(CMAKE_CROSSCOMPILING)
   message("Cross compiling.")
 else()
   if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
-    Set(SYSTEM "Linux")
+    Set(LIBXR_SYSTEM "Linux")
+    Set(LIBXR_DRIVER "Linux")
   elseif(CMAKE_HOST_SYSTEM_NAME MATCHES "Windows")
-    Set(SYSTEM "Windows")
+    Set(LIBXR_SYSTEM "Windows")
+    Set(LIBXR_DRIVER "Windows")
   elseif()
     message(FATAL_ERROR "Unkonw system.")
   endif()
 endif()
 
-if(NOT SYSTEM)
-  message(FATAL_ERROR "No system.")
+if(NOT LIBXR_SYSTEM)
+  message(FATAL_ERROR "No system select.")
 endif()
 
-add_compile_definitions(LIBXR_SYSTEM ${SYSTEM})
+if(NOT LIBXR_DRIVER)
+  message(WARNING "No driver select.")
+endif()
 
-if("${SYSTEM}" STREQUAL "None")
+add_compile_definitions(LIBXR_SYSTEM ${LIBXR_SYSTEM})
+
+if("${LIBXR_SYSTEM}" STREQUAL "None")
   add_compile_definitions(LIBXR_NOT_SUPPORT_MUTI_THREAD)
 endif()
 
-message("-- Platfrom: ${SYSTEM}")
+message("-- Platfrom: ${LIBXR_SYSTEM}")
 
 # Share/Static
 if(LIBXR_SHARED_BUILD)
@@ -62,14 +68,17 @@ file(
   GLOB ${PROJECT_NAME}_MIDDLEWARE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/middleware/*.cpp")
 
 file(
-  GLOB ${PROJECT_NAME}_PLATFORM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/system/${SYSTEM}/*.cpp")
+  GLOB ${PROJECT_NAME}_SYSTEM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/system/${LIBXR_SYSTEM}/*.cpp")
+
+file(
+  GLOB ${PROJECT_NAME}_DRIVER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/driver/${LIBXR_DRIVER}/*.cpp")
 
 target_sources(${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_SOURCES}
   PRIVATE ${${PROJECT_NAME}_CORE_SOURCES}
   PRIVATE ${${PROJECT_NAME}_SYSTEM_SOURCES}
   PRIVATE ${${PROJECT_NAME}_UTILS_SOURCES}
-  PRIVATE ${${PROJECT_NAME}_PLATFORM_SOURCES}
+  PRIVATE ${${PROJECT_NAME}_SYSTEM_SOURCES}
   PRIVATE ${${PROJECT_NAME}_STRUCTURE_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SOURCES}
 )
@@ -82,7 +91,20 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/structure
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/middleware
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/system/${SYSTEM})
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/driver
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/system/${LIBXR_SYSTEM}
+)
+
+if(LIBXR_DRIVER)
+target_sources(${PROJECT_NAME}
+  PRIVATE ${${PROJECT_NAME}_DRIVER_SOURCES}
+)
+
+target_include_directories(
+  ${PROJECT_NAME}
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/driver/${LIBXR_DRIVER}
+)
+endif()
 
 if(LIBXR_TEST_BUILD)
   include(CMake/test.cmake)

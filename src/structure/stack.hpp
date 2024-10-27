@@ -2,8 +2,6 @@
 
 #include "libxr_def.hpp"
 #include "mutex.hpp"
-#include <cstdint>
-#include <sys/types.h>
 
 namespace LibXR {
 template <typename Data> class Stack {
@@ -14,7 +12,7 @@ private:
   LibXR::Mutex mutex_;
 
 public:
-  Stack(uint32_t depth) : stack_(new Data[depth]), depth_(depth), top_(0) {}
+  Stack(uint32_t depth) : stack_(new Data[depth]), top_(0), depth_(depth) {}
 
   Data *operator&() {
     if (Size() > 0) {
