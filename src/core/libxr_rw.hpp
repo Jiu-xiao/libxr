@@ -47,9 +47,22 @@ public:
     }
   }
 
-  Operation(Operation &op) { memcpy(this, &op, sizeof(op)); }
+  Operation(Operation &op) {
+    type = op.type;
+    switch (type) {
+    case OperationType::CALLBACK:
+      data.callback = op.data.callback;
+      break;
+    case OperationType::BLOCK:
+      data.timeout = op.data.timeout;
+      break;
+    case OperationType::POLLING:
+      data.status = op.data.status;
+      break;
+    }
+  }
 
-  void Update(bool in_isr, LibXR::Semaphore &sem, Args &&...args) {
+  void UpdateStatus(bool in_isr, LibXR::Semaphore &sem, Args &&...args) {
     switch (type) {
     case OperationType::CALLBACK:
       data.callback.Run(in_isr, std::forward<Args>(args)...);
@@ -60,6 +73,12 @@ public:
     case OperationType::POLLING:
       data.status = OperationPollingStatus::DONE;
       break;
+    }
+  }
+
+  void UpdateStatus() {
+    if (type == OperationType::POLLING) {
+      data.status = OperationPollingStatus::RUNNING;
     }
   }
 
@@ -83,17 +102,26 @@ typedef ErrorCode (*WriteFun)(WriteOperation &op, ConstRawData data,
 
 typedef ErrorCode (*ReadFun)(ReadOperation &op, RawData data, ReadPort &port);
 
+typedef struct {
+  RawData data;
+  ReadOperation op;
+} ReadInfoBlock;
+
+typedef struct {
+  ConstRawData data;
+  WriteOperation op;
+} WriteInfoBlock;
+
 class ReadPort {
 public:
   ReadFun read_fun_ = nullptr;
-  ReadOperation read_op_;
   Semaphore *read_sem_;
-  RawData data_;
-  LockFreeQueue<uint8_t> *queue_;
+  LockFreeQueue<ReadInfoBlock> *queue_;
+  ReadInfoBlock info_;
 
-  ReadPort(size_t queue_size = 128)
+  ReadPort(size_t queue_size = 3)
       : read_sem_(new Semaphore()),
-        queue_(new LockFreeQueue<uint8_t>(queue_size)) {}
+        queue_(new LockFreeQueue<ReadInfoBlock>(queue_size)) {}
 
   size_t EmptySize() { return queue_->EmptySize(); }
   size_t Size() { return queue_->Size(); }
@@ -105,26 +133,35 @@ public:
     return *this;
   }
 
-  void Update(bool in_isr, ErrorCode ans) {
-    read_op_.Update(in_isr, *read_sem_, std::forward<ErrorCode>(ans), data_);
+  void UpdateStatus(bool in_isr, ErrorCode ans) {
+    info_.op.UpdateStatus(in_isr, *read_sem_, std::forward<ErrorCode>(ans),
+                          info_.data);
   }
 
-  ErrorCode operator()(ReadOperation &op, RawData &data) {
+  void UpdateStatus() { info_.op.UpdateStatus(); }
+
+  template <typename ReadOperation>
+  ErrorCode operator()(RawData data, ReadOperation &&op) {
     if (Readable()) {
-      read_op_ = op;
-      data_ = data;
-      return read_fun_(read_op_, data_, *this);
+      info_.op = op;
+      info_.data = data;
+      return read_fun_(info_.op, info_.data, *this);
     } else {
       return ErrorCode::NOT_SUPPORT;
     }
   }
 
+  ErrorCode operator()(RawData data) {
+    static auto default_op = ReadOperation();
+    return operator()(data, default_op);
+  }
+
   ReadOperation::OperationPollingStatus GetStatus() {
-    if (read_op_.data.status == ReadOperation::OperationPollingStatus::DONE) {
-      read_op_.data.status = ReadOperation::OperationPollingStatus::READY;
+    if (info_.op.data.status == ReadOperation::OperationPollingStatus::DONE) {
+      info_.op.data.status = ReadOperation::OperationPollingStatus::READY;
       return ReadOperation::OperationPollingStatus::DONE;
     } else {
-      return read_op_.data.status;
+      return info_.op.data.status;
     }
   }
 };
@@ -132,14 +169,13 @@ public:
 class WritePort {
 public:
   WriteFun write_fun_ = nullptr;
-  WriteOperation write_op_;
   Semaphore *write_sem_;
-  ConstRawData data_;
-  LockFreeQueue<uint8_t> *queue_;
+  LockFreeQueue<WriteInfoBlock> *queue_;
+  WriteInfoBlock info_;
 
-  WritePort(size_t queue_size = 128)
+  WritePort(size_t queue_size = 3)
       : write_sem_(new Semaphore()),
-        queue_(new LockFreeQueue<uint8_t>(queue_size)) {}
+        queue_(new LockFreeQueue<WriteInfoBlock>(queue_size)) {}
 
   size_t EmptySize() { return queue_->EmptySize(); }
   size_t Size() { return queue_->Size(); }
@@ -151,34 +187,46 @@ public:
     return *this;
   }
 
-  void Update(bool in_isr, ErrorCode ans) {
-    write_op_.Update(in_isr, *write_sem_, std::forward<ErrorCode>(ans));
+  void UpdateStatus(bool in_isr, ErrorCode ans) {
+    info_.op.UpdateStatus(in_isr, *write_sem_, std::forward<ErrorCode>(ans));
   }
 
-  ErrorCode operator()(WriteOperation &op, ConstRawData data) {
+  void UpdateStatus() { info_.op.UpdateStatus(); }
+
+  ErrorCode operator()(ConstRawData data, WriteOperation &op) {
+    return operator()(data, std::forward<WriteOperation>(op));
+  }
+
+  template <typename WriteOperation>
+  ErrorCode operator()(ConstRawData data, WriteOperation &&op) {
     if (Writable()) {
-      write_op_ = op;
-      data_ = data;
-      return write_fun_(write_op_, data_, *this);
+      info_.op = op;
+      info_.data = data;
+      return write_fun_(info_.op, info_.data, *this);
     } else {
       return ErrorCode::NOT_SUPPORT;
     }
   }
 
+  ErrorCode operator()(ConstRawData data) {
+    static auto default_op = WriteOperation();
+    return operator()(data, default_op);
+  }
+
   WriteOperation::OperationPollingStatus GetStatus() {
-    if (write_op_.data.status == WriteOperation::OperationPollingStatus::DONE) {
-      write_op_.data.status = WriteOperation::OperationPollingStatus::READY;
+    if (info_.op.data.status == WriteOperation::OperationPollingStatus::DONE) {
+      info_.op.data.status = WriteOperation::OperationPollingStatus::READY;
       return WriteOperation::OperationPollingStatus::DONE;
     } else {
-      return write_op_.data.status;
+      return info_.op.data.status;
     }
   }
 };
 
 class STDIO {
 public:
-  static ReadPort read;
-  static WritePort write;
+  static ReadPort *read;
+  static WritePort *write;
   static void (*error)(const char *log);
 };
 } // namespace LibXR

@@ -1,4 +1,4 @@
-if(SYSTEM MATCHES "Linux")
+if(LIBXR_SYSTEM MATCHES "Linux")
 message("LibXR union test build.")
 else()
 message(FATAL_ERROR "Only linux can build union test.")

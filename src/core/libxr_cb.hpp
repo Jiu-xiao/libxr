@@ -56,13 +56,10 @@ public:
 
   Callback(const Callback &) = default;
 
-  Callback(Callback &&other)
-      : cb_block_(other.cb_block_), cb_fun_(other.cb_fun_) {
-    other.cb_block_ = nullptr;
-    other.cb_fun_ = nullptr;
-  }
+  Callback(Callback &other)
+      : cb_block_(other.cb_block_), cb_fun_(other.cb_fun_) {}
 
-  Callback &operator=(Callback &&other) {
+  Callback &operator=(Callback &other) {
     if (this != &other) {
       cb_block_ = other.cb_block_;
       cb_fun_ = other.cb_fun_;

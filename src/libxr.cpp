@@ -1,4 +1,5 @@
 #include "libxr.hpp"
+
 #include "crc.hpp"
 #include "event.hpp"
 #include "libxr_def.hpp"
@@ -17,8 +18,8 @@ const LibXR::Callback<const char *, uint32_t>
     *LibXR::Assert::libxr_fatal_error_callback;
 
 /* stdio */
-LibXR::ReadPort LibXR::STDIO::read;
-LibXR::WritePort LibXR::STDIO::write;
+LibXR::ReadPort *LibXR::STDIO::read = NULL;
+LibXR::WritePort *LibXR::STDIO::write = NULL;
 void (*LibXR::STDIO::error)(const char *log) = nullptr;
 
 /* timer */
