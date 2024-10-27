@@ -27,6 +27,9 @@ void LibXR::PlatformInit() {
   auto write_fun = [](WriteOperation &op, ConstRawData data, WritePort &port) {
     auto ans = fwrite(data.addr_, 1, data.size_, stdout);
 
+    UNUSED(op);
+    UNUSED(ans);
+
     port.UpdateStatus(false, ErrorCode::OK);
 
     return ErrorCode::OK;
@@ -39,6 +42,10 @@ void LibXR::PlatformInit() {
   auto read_fun = [](Operation<ErrorCode, RawData &> &op, RawData buff,
                      ReadPort &port) {
     auto need_read = buff.size_;
+
+    UNUSED(op);
+    UNUSED(need_read);
+
     buff.size_ = fread(buff.addr_, sizeof(char), buff.size_, stdin);
 
     port.UpdateStatus(false, ErrorCode::OK);
@@ -49,10 +56,7 @@ void LibXR::PlatformInit() {
 
   *LibXR::STDIO::read = read_fun;
 
-  auto err_fun = [](const char *log) {
-    static char parse_buff[4096];
-    printf("Error:%s\r\n", log);
-  };
+  auto err_fun = [](const char *log) { printf("Error:%s\r\n", log); };
 
   LibXR::STDIO::error = err_fun;
 

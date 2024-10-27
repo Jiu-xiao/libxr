@@ -94,6 +94,9 @@ public:
       strcpy(name_buff, name);
       data_.name = name_buff;
       data_.type = FsNodeType::DEVICE;
+
+      UNUSED(read_port);
+      UNUSED(write_port);
     }
 
     template <typename ReadOperation>
