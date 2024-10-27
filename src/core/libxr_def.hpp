@@ -7,18 +7,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
 #ifndef MIN
-#define MIN(a, b)                                                              \
-  ({                                                                           \
-    __typeof__(a) _a = (a);                                                    \
-    __typeof__(b) _b = (b);                                                    \
-    _a < _b ? _a : _b;                                                         \
-  })
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
 #ifndef DEF2STR
@@ -38,13 +34,10 @@
 #define MEMBER_SIZE_OF(type, member) (sizeof(typeof(((type *)0)->member)))
 #endif
 
-#ifndef CONTAINER_OF
+#include <type_traits>
+
 #define CONTAINER_OF(ptr, type, member)                                        \
-  ({                                                                           \
-    const typeof(((type *)0)->member) *__mptr = (ptr);                         \
-    (type *)((char *)__mptr - ms_offset_of(type, member));                     \
-  })
-#endif
+  ((type *)((char *)(ptr) - OFFSET_OF(type, member)))
 
 enum class ErrorCode {
   OK = 0,

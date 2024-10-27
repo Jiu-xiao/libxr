@@ -15,6 +15,7 @@
 #include "ramfs.hpp"
 #include "semaphore.hpp"
 #include "signal.hpp"
+#include "terminal.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
 

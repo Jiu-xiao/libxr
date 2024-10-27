@@ -1,5 +1,11 @@
 #pragma once
 
+#include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_string.hpp"
@@ -7,11 +13,6 @@
 #include "queue.hpp"
 #include "ramfs.hpp"
 #include "stack.hpp"
-#include <cctype>
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
 
 namespace LibXR {
 template <int READ_BUFF_SIZE = 32, int MAX_LINE_SIZE = READ_BUFF_SIZE,
@@ -42,20 +43,16 @@ public:
 
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = NULL,
            WriteOperation write_op = WriteOperation(),
-           ReadPort &read_port = STDIO::read,
-           WritePort &write_port = STDIO::write, Mode MODE = Mode::CRLF)
-      : mode_(MODE), ramfs_(ramfs), write_op_(write_op), read_(read_port),
-        write_(write_port), input_line_(MAX_LINE_SIZE + 1),
-        history_(MAX_HISTORY_NUMBER) {
-    if (current_dir == NULL) {
-      current_dir_ = &ramfs_.root_;
-    }
-  }
+           ReadPort *read_port = STDIO::read,
+           WritePort *write_port = STDIO::write, Mode MODE = Mode::CRLF)
+      : mode_(MODE), write_op_(write_op), read_(read_port), write_(write_port),
+        ramfs_(ramfs), current_dir_(current_dir ? current_dir : &ramfs_.root_),
+        input_line_(MAX_LINE_SIZE + 1), history_(MAX_HISTORY_NUMBER) {}
 
   const Mode mode_;
   WriteOperation write_op_;
-  ReadPort &read_;
-  WritePort &write_;
+  ReadPort *read_;
+  WritePort *write_;
   RamFS &ramfs_;
   char read_buff_[READ_BUFF_SIZE];
 
@@ -67,23 +64,25 @@ public:
   size_t arg_number_ = 0;
   Queue<LibXR::String<MAX_LINE_SIZE>> history_;
   int history_index_ = -1;
+  bool linefeed_flag_ = false;
 
   void LineFeed() {
     if (mode_ == Mode::CRLF) {
-      write_(write_op_, ConstRawData("\r\n"));
+      (*write_)(ConstRawData("\r\n"), write_op_);
     } else if (mode_ == Mode::LF) {
-      write_(write_op_, ConstRawData('\n'));
+      (*write_)(ConstRawData('\n'), write_op_);
     } else if (mode_ == Mode::CR) {
-      write_(write_op_, ConstRawData('\r'));
+      (*write_)(ConstRawData('\r'), write_op_);
     }
   }
 
   void UpdateDisplayPosition() {
-    write_(write_op_, ConstRawData(KEY_SAVE, sizeof(KEY_SAVE) - 1));
-    write_(write_op_, ConstRawData(CLEAR_BEHIND, sizeof(CLEAR_BEHIND) - 1));
-    write_(write_op_,
-           ConstRawData(&input_line_[input_line_.Size() + offset_], -offset_));
-    write_(write_op_, ConstRawData(KEY_LOAD, sizeof(KEY_LOAD) - 1));
+    (*write_)(ConstRawData(KEY_SAVE), write_op_);
+    (*write_)(ConstRawData(CLEAR_BEHIND), write_op_);
+    (*write_)(
+        ConstRawData(&input_line_[input_line_.Size() + offset_], -offset_),
+        write_op_);
+    (*write_)(ConstRawData(KEY_LOAD), write_op_);
   }
 
   bool CanDisplayChar() { return input_line_.EmptySize() > 1; }
@@ -101,7 +100,7 @@ public:
 
   void DisplayChar(char data) {
     if (CanDisplayChar()) {
-      write_(write_op_, ConstRawData(data));
+      (*write_)(ConstRawData(data), write_op_);
       AddCharToInputLine(data);
     }
   }
@@ -122,7 +121,7 @@ public:
       ShowHistory();
     }
     if (CanDeleteChar()) {
-      write_(write_op_, ConstRawData(DELECT_CHAR, sizeof(DELECT_CHAR) - 1));
+      (*write_)(ConstRawData(DELECT_CHAR), write_op_);
       RemoveCharFromInputLine();
     }
   }
@@ -132,46 +131,44 @@ public:
       ShowHeaderRecursively(reinterpret_cast<RamFS::Dir *>(dir->parent));
     }
     if (dir != &ramfs_.root_) {
-      write_(write_op_, ConstRawData(dir->data_.name, strlen(dir->data_.name)));
-      write_(write_op_, ConstRawData('/'));
+      (*write_)(ConstRawData(dir->data_.name, strlen(dir->data_.name)),
+                write_op_);
+      (*write_)(ConstRawData('/'), write_op_);
     }
   }
 
   void ShowHeader() {
     RamFS::Dir *dir = current_dir_;
 
-    write_(write_op_,
-           ConstRawData(ramfs_.root_->name, strlen(ramfs_.root_->name)));
-    write_(write_op_, ConstRawData(":/", 2));
+    (*write_)(ConstRawData(ramfs_.root_->name, strlen(ramfs_.root_->name)),
+              write_op_);
+    (*write_)(ConstRawData(":/"), write_op_);
 
     ShowHeaderRecursively(dir);
 
-    write_(write_op_, ConstRawData("$ ", 2));
+    (*write_)(ConstRawData("$ "), write_op_);
   }
 
-  void ClearLine() {
-    write_(write_op_, ConstRawData(CLEAR_LINE, sizeof(CLEAR_LINE) - 1));
-  }
+  void ClearLine() { (*write_)(ConstRawData(CLEAR_LINE), write_op_); }
 
-  void Clear() {
-    write_(write_op_, ConstRawData(CLEAR_ALL, sizeof(CLEAR_ALL) - 1));
-  }
+  void Clear() { (*write_)(ConstRawData(CLEAR_ALL), write_op_); }
 
   void ShowHistory() {
     ClearLine();
     ShowHeader();
     offset_ = 0;
     if (history_index_ >= 0) {
-      write_(write_op_, ConstRawData(history_[-history_index_ - 1].Raw(),
-                                     history_[-history_index_ - 1].Length()));
+      (*write_)(ConstRawData(history_[-history_index_ - 1].Raw(),
+                             history_[-history_index_ - 1].Length()),
+                write_op_);
     } else {
-      write_(write_op_, ConstRawData(&input_line_[0], input_line_.Size()));
+      (*write_)(ConstRawData(&input_line_[0], input_line_.Size()), write_op_);
     }
   }
 
   void CopyHistoryToInputLine() {
     input_line_.Reset();
-    for (int i = 0; i < history_[-history_index_ - 1].Length(); i++) {
+    for (size_t i = 0; i < history_[-history_index_ - 1].Length(); i++) {
       input_line_.Push(history_[-history_index_ - 1][i]);
     }
     history_index_ = -1;
@@ -201,10 +198,8 @@ public:
   }
 
   RamFS::Dir *Path2Dir(char *path) {
-    auto len = strlen(path);
     size_t index = 0;
     RamFS::Dir *dir = current_dir_;
-    RamFS::File *file;
 
     if (*path == '/') {
       index++;
@@ -222,7 +217,7 @@ public:
         dir = dir->FindDir(path + index);
         tmp[0] = '/';
         index += tmp - path + 1;
-        if (path[index] == '\0') {
+        if (path[index] == '\0' || dir == NULL) {
           return dir;
         }
       }
@@ -261,13 +256,13 @@ public:
 
     auto ans = Path2File(arg_tab_[0]);
     if (ans == nullptr) {
-      write_(write_op_, ConstRawData("Command not found."));
+      (*write_)(ConstRawData("Command not found."), write_op_);
       LineFeed();
       return;
     }
 
     if ((*ans)->type != RamFS::FileType::EXEC) {
-      write_(write_op_, ConstRawData("Not an executable file."));
+      (*write_)(ConstRawData("Not an executable file."), write_op_);
       LineFeed();
       return;
     }
@@ -277,7 +272,7 @@ public:
 
   void Parse(RawData &raw_data) {
     char *buff = static_cast<char *>(raw_data.addr_);
-    for (int i = 0; i < raw_data.size_; i++) {
+    for (size_t i = 0; i < raw_data.size_; i++) {
       HandleCharacter(buff[i]);
     }
   }
@@ -310,7 +305,7 @@ public:
         }
         if (offset_ < 0) {
           offset_++;
-          write_(write_op_, ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1));
+          (*write_)(ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1), write_op_);
         }
 
         break;
@@ -321,7 +316,7 @@ public:
         }
         if (offset_ + input_line_.Size() > 0) {
           offset_--;
-          write_(write_op_, ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1));
+          (*write_)(ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1), write_op_);
         }
         break;
       default:
@@ -350,7 +345,8 @@ public:
     }
 
     /* return if not need complete */
-    if (tmp - &input_line_[0] != input_line_.Size() + offset_) {
+    if (tmp - &input_line_[0] !=
+        static_cast<int>(input_line_.Size() + offset_)) {
       return;
     }
 
@@ -407,8 +403,8 @@ public:
                                MatchResult *result) {
       if (strncmp(node->name, result->prefix, result->prefix_len) == 0) {
         auto name_len = strlen(node->name);
-        result->terminal->write_(result->terminal->write_op_,
-                                 ConstRawData(node->name, name_len));
+        (*result->terminal->write_)(ConstRawData(node->name, name_len),
+                                    result->terminal->write_op_);
         result->terminal->LineFeed();
         if (result->node == NULL) {
           result->node = &node;
@@ -416,7 +412,7 @@ public:
           return ErrorCode::OK;
         }
 
-        for (int i = 0; i < name_len; i++) {
+        for (size_t i = 0; i < name_len; i++) {
           if (node->name[i] != result->node->data_.name[i]) {
             result->same_char_number = i;
             break;
@@ -440,7 +436,7 @@ public:
       return;
     } else if (res.number == 1) {
       auto name_len = strlen(res.node->data_.name);
-      for (int i = 0; i < name_len - res.prefix_len; i++) {
+      for (size_t i = 0; i < name_len - res.prefix_len; i++) {
         DisplayChar(res.node->data_.name[i + res.prefix_len]);
       }
     } else {
@@ -449,38 +445,39 @@ public:
       (*dir)->rbt.Foreach<RamFS::FsNode, MatchResult *>(foreach_fun_show, &res);
 
       ShowHeader();
-      write_(write_op_, ConstRawData(&input_line_[0], input_line_.Size()));
+      (*write_)(ConstRawData(&input_line_[0], input_line_.Size()), write_op_);
 
-      for (int i = 0; i < res.same_char_number - res.prefix_len; i++) {
+      for (size_t i = 0; i < res.same_char_number - res.prefix_len; i++) {
         DisplayChar(res.node->data_.name[i + res.prefix_len]);
       }
     }
   }
 
   void HandleControlCharacter(char data) {
+    if (data != '\r' && data != '\n') {
+      linefeed_flag_ = false;
+    }
+
     switch (data) {
     case '\n':
-      if (mode_ == Mode::CRLF || mode_ == Mode::LF) {
-      parse_data:
-        if (history_index_ >= 0) {
-          CopyHistoryToInputLine();
-        }
-        LineFeed();
-        if (input_line_.Size() > 0) {
-          GetArgs();
-          ExecuteCommand();
-          arg_number_ = 0;
-        }
-        ShowHeader();
-        input_line_.Reset();
-        input_line_[0] = '\0';
-        offset_ = 0;
-      }
-      break;
     case '\r':
-      if (mode_ == Mode::LF) {
-        goto parse_data;
+      if (linefeed_flag_) {
+        linefeed_flag_ = false;
+        return;
       }
+      if (history_index_ >= 0) {
+        CopyHistoryToInputLine();
+      }
+      LineFeed();
+      if (input_line_.Size() > 0) {
+        GetArgs();
+        ExecuteCommand();
+        arg_number_ = 0;
+      }
+      ShowHeader();
+      input_line_.Reset();
+      input_line_[0] = '\0';
+      offset_ = 0;
       break;
     case 0x7f:
       DeleteChar();
@@ -508,10 +505,10 @@ public:
 
   static void ThreadFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = MIN(MAX(1, term->read_.Size()), READ_BUFF_SIZE);
+    buff.size_ = MIN(MAX(1, term->read_->Size()), READ_BUFF_SIZE);
     static ReadOperation op(UINT32_MAX);
     while (true) {
-      if (term->read_(op, buff) == ErrorCode::OK) {
+      if ((*term->read_)(buff, op) == ErrorCode::OK) {
         term->Parse(buff);
       }
     }
@@ -519,13 +516,13 @@ public:
 
   static void TaskFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = MIN(MAX(1, term->read_.Size()), term->READ_BUFF_SIZE);
+    buff.size_ = MIN(MAX(1, term->read_->Size()), READ_BUFF_SIZE);
 
-    static ReadOperation op(UINT32_MAX);
+    static ReadOperation op;
   check_status:
-    switch (term->read_.GetStatus()) {
+    switch (term->read_->GetStatus()) {
     case ReadOperation::OperationPollingStatus::READY:
-      term->read_(op, buff);
+      (*term->read_)(buff, op);
       goto check_status;
     case ReadOperation::OperationPollingStatus::RUNNING:
       break;
