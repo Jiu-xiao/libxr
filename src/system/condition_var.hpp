@@ -1,12 +1,14 @@
+#pragma once
+
 #include "libxr_def.hpp"
 #include "libxr_system.hpp"
 
 namespace LibXR {
 class ConditionVar {
-private:
+ private:
   condition_var_handle handle_;
 
-public:
+ public:
   ConditionVar();
 
   ~ConditionVar();
@@ -17,4 +19,4 @@ public:
 
   void Broadcast();
 };
-} // namespace LibXR
+}  // namespace LibXR

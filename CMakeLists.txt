@@ -11,8 +11,13 @@ if(CMAKE_CROSSCOMPILING)
   message("Cross compiling.")
 else()
   if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
-    Set(LIBXR_SYSTEM "Linux")
-    Set(LIBXR_DRIVER "Linux")
+    if(WEBOTS_HOME)
+      Set(LIBXR_SYSTEM "Webots")
+      Set(LIBXR_DRIVER "Webots")
+    else()
+      Set(LIBXR_SYSTEM "Linux")
+      Set(LIBXR_DRIVER "Linux")
+    endif()
   elseif(CMAKE_HOST_SYSTEM_NAME MATCHES "Windows")
     Set(LIBXR_SYSTEM "Windows")
     Set(LIBXR_DRIVER "Windows")
@@ -104,6 +109,28 @@ target_include_directories(
   ${PROJECT_NAME}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/driver/${LIBXR_DRIVER}
 )
+endif()
+
+if(LIBXR_SYSTEM MATCHES "Webots")
+  target_link_directories(
+    ${PROJECT_NAME}
+    PUBLIC ${WEBOTS_HOME}/lib/controller
+  )
+
+  target_link_libraries(
+    ${PROJECT_NAME}
+    PUBLIC ${LIBRARIES}
+    PUBLIC ${CMAKE_SHARED_LIBRARY_PREFIX}Controller${CMAKE_SHARED_LIBRARY_SUFFIX}
+    PUBLIC ${CMAKE_SHARED_LIBRARY_PREFIX}CppController${CMAKE_SHARED_LIBRARY_SUFFIX}
+  )
+
+  target_include_directories(
+    ${PROJECT_NAME}
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+    PUBLIC ${WEBOTS_HOME}/include/controller/c
+    PUBLIC ${WEBOTS_HOME}/include/controller/cpp
+    PUBLIC ${WEBOTS_HOME}/lib/controller
+  )
 endif()
 
 if(LIBXR_TEST_BUILD)

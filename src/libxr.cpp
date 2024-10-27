@@ -20,7 +20,6 @@ const LibXR::Callback<const char *, uint32_t>
 /* stdio */
 LibXR::ReadPort *LibXR::STDIO::read = NULL;
 LibXR::WritePort *LibXR::STDIO::write = NULL;
-void (*LibXR::STDIO::error)(const char *log) = nullptr;
 
 /* timer */
 LibXR::List *LibXR::Timer::list_;
