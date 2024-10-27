@@ -5,7 +5,7 @@
 
 namespace LibXR {
 class Thread {
-public:
+ public:
   enum class Priority {
     IDLE,
     LOW,
@@ -15,9 +15,9 @@ public:
     NUMBER,
   };
 
-  Thread(){};
+  Thread() {};
 
-  Thread(libxr_thread_handle handle) : thread_handle_(handle){};
+  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
 
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
@@ -31,9 +31,10 @@ public:
     }
 
     class ThreadBlock {
-    public:
+     public:
       ThreadBlock(typeof(function) fun, ArgType arg, const char *name)
-          : fun_(fun), arg_(arg),
+          : fun_(fun),
+            arg_(arg),
             name_(reinterpret_cast<char *>(malloc(strlen(name) + 1))) {
         strcpy(name_, name);
       }
@@ -42,12 +43,15 @@ public:
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
         const char *thread_name = block->name_;
         block->fun_(block->arg_);
+
+        UNUSED(thread_name);
+
         return (void *)0;
       }
 
-      char *name_;
       typeof(function) fun_;
       ArgType arg_;
+      char *name_;
     };
 
     auto block = new ThreadBlock(function, arg, name);
@@ -55,7 +59,7 @@ public:
     pthread_create(&this->thread_handle_, &attr, block->Port, block);
 
     if (sched_get_priority_max(SCHED_RR) - sched_get_priority_min(SCHED_RR) >=
-        static_cast<size_t>(Priority::REALTIME)) {
+        static_cast<int>(Priority::REALTIME)) {
       struct sched_param sp;
       bzero((void *)&sp, sizeof(sp));
       sp.sched_priority =
@@ -76,7 +80,7 @@ public:
 
   operator libxr_thread_handle() { return thread_handle_; }
 
-private:
+ private:
   libxr_thread_handle thread_handle_;
 };
-} // namespace LibXR
+}  // namespace LibXR
