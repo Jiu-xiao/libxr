@@ -13,31 +13,14 @@ Standardized compatibility layer for operating systems and peripheral devices wr
 * Finish the entire project quickly and reliably.
 * Don't want to care about the differences in APIs.
 
+## Support
+
 ## System Layer
 
 1. The application will never exit unless it reboot or enter into low-power mode.
 2. All memory is only allocated during initializtion and will never be released.
 3. The minimum Non-blocking delay is 1us, minimum blocking delay is 1ms.
 4. All unused functions will not be linked.
-
-## Data structure
-
-1. Except list and tree, the memory of other data structures are determined before construction.
-2. No blocking APIs except Queue. If you want one, use Semaphore.
-
-## Middleware
-
-A collection of commonly used software.
-
-## Periheral Layer
-
-Only have virtual class, you can find the drivers in `Platfrom` folder. For example class `STM32Uart` based on the virtual class `Uart`.
-
-## Utils
-
-Some useful tools for debugging, robotics, and communication.
-
-## Support
 
 | `System`      | Thread | Timer | Semaphore | Mutex | Signal | ConditionVar | Queue | ASync |
 | ------------- | ------ | ----- | --------- | ----- | ------ | ------------ | ----- | ----- |
@@ -49,17 +32,30 @@ Some useful tools for debugging, robotics, and communication.
 | Linux         | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
 | Webots(Linux) | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
 
+## Data structure
+
+1. Except list and tree, the memory of other data structures are determined before construction.
+2. No blocking APIs except Queue. If you want one, use Semaphore.
+
 | `Structure` | List | Stack | RBTree | LockFreeQueue |
 | ----------- | ---- | ----- | ------ | ------------- |
 |             | ✅    | ✅     | ✅      | ✅             |
 
-| `Middleware` | Event | Message | Ramfs | Terminal |
-| ------------ | ----- | ------- | ----- | -------- |
-|              | ✅     | ✅       | ✅     | ❌        |
+## Middleware
+
+A collection of commonly used software.
+
+| `Middleware` | Event | Message | Ramfs | Terminal | Log |
+| ------------ | ----- | ------- | ----- | -------- | --- |
+|              | ✅     | ✅       | ✅     | ✅        | ❌   |
+
+## Periheral Layer
+
+Only have virtual class, you can find the drivers in `Platfrom` folder. For example class `STM32Uart` based on the virtual class `Uart`.
 
 | `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | WDG | CAN/CANFD | USB-CDC |
 | ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --- | --------- | ------- |
-| STM32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
+| STM32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ✅    | ❌   | ❌   | ❌   | ❌         | ❌       |
 | ESP32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
 | Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
 | GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
@@ -73,6 +69,28 @@ Some useful tools for debugging, robotics, and communication.
 | ESP32     | ❌       | ❌    | ❌         | ❌           |
 | STM32     | ❌       | ❌    | ❌         | ❌           |
 
-| `Utils` | CRC8/16/32 | PID | Filter | CycleValue | FunctionGen | Rotation | Triangle |
-| ------- | ---------- | --- | ------ | ---------- | ----------- | -------- | -------- |
-|         | ✅          | ❌   | ❌      | ❌          | ❌           | ❌        | ❌        |
+## Utils
+
+Some useful tools for debugging, robotics, and communication.
+
+| Kinematics | Forward-Kinematics | Inverse-Kinematics | Coordinate | Pose and Position |
+| ---------- | ------------------ | ------------------ | ---------- | ----------------- |
+|            | ❌                  | ❌                  | ❌          | ❌                 |
+
+| Dynamics | Inertia | Torque | G-Compensation |
+| -------- | ------- | ------ | -------------- |
+|          | ❌       | ❌      | ❌              |
+
+| Control | PID | LQR | MPC |
+| ------- | --- | --- | --- |
+|         | ❌   | ❌   | ❌   |
+
+| Signal | LP Filter | Kalman Filter | FFT | FunctionGen |
+| ------ | --------- | ------------- | --- | ----------- |
+|        | ❌         | ❌             | ❌   | ❌           |
+
+| Math | CycleValue | CRC8/16/32 | Triangle |
+| ---- | ---------- | ---------- | -------- |
+|      | ❌          | ✅          | ❌        |
+
+
