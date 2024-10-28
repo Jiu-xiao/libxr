@@ -94,14 +94,10 @@ public:
     if (!LibXR::Timer::list_) {
       LibXR::Timer::list_ = new LibXR::List();
 
-#ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
-      UNUSED(priority);
-#else
       auto thread_handle = Thread();
       thread_handle.Create<void *>(NULL, RefreshThreadFunction,
                                    "libxr_timer_task", 512,
                                    Thread::Priority::HIGH);
-#endif
     }
 
     auto fun = [](ControlBlock &block, void *&) {

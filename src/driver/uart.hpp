@@ -4,7 +4,7 @@
 namespace LibXR {
 class UART {
 public:
-  enum class Parity { None = 0, Even = 1, Odd = 2 };
+  enum class Parity { NoParity = 0, Even = 1, Odd = 2 };
 
   struct Configuration {
     uint32_t baudrate;
@@ -19,6 +19,6 @@ public:
   WritePort write_port_;
 
   UART(ReadPort read_port = ReadPort(), WritePort write_port = WritePort())
-      : read_port_(read_port), write_port_(write_port) {}
+        : read_port_(read_port), write_port_(write_port) {}
 };
 } // namespace LibXR

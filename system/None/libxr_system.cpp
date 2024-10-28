@@ -26,6 +26,6 @@ void LibXR::Timer::RefreshTimerInIdle() {
 
   in_timer = true;
   last_refresh_time++;
-  Timer::Refresh(Thread::Priority::IDLE);
+  Timer::Refresh();
   in_timer = false;
 }
