@@ -11,3 +11,8 @@
 #include "timer.hpp"
 
 void LibXR::PlatformInit() {}
+
+void *operator new(std::size_t size) { return pvPortMalloc(size); }
+
+void operator delete(void *ptr) noexcept { vPortFree(ptr); }
+void operator delete(void *ptr, std::size_t size) noexcept { vPortFree(ptr); }
