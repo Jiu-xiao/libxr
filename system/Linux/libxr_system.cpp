@@ -24,10 +24,9 @@ struct timeval _libxr_linux_start_time;
 struct timespec _libxr_linux_start_time_spec;
 
 void LibXR::PlatformInit() {
-  auto write_fun = [](WriteOperation &op, ConstRawData data, WritePort &port) {
-    auto ans = fwrite(data.addr_, 1, data.size_, stdout);
+  auto write_fun = [](WritePort &port) {
+    auto ans = fwrite(port.info_.data.addr_, 1, port.info_.data.size_, stdout);
 
-    UNUSED(op);
     UNUSED(ans);
 
     port.UpdateStatus(false, ErrorCode::OK);
@@ -39,14 +38,13 @@ void LibXR::PlatformInit() {
 
   *LibXR::STDIO::write = write_fun;
 
-  auto read_fun = [](Operation<ErrorCode, RawData &> &op, RawData buff,
-                     ReadPort &port) {
-    auto need_read = buff.size_;
+  auto read_fun = [](ReadPort &port) {
+    auto need_read = port.info_.data.size_;
 
-    UNUSED(op);
     UNUSED(need_read);
 
-    buff.size_ = fread(buff.addr_, sizeof(char), buff.size_, stdin);
+    port.info_.data.size_ = fread(port.info_.data.addr_, sizeof(char),
+                                  port.info_.data.size_, stdin);
 
     port.UpdateStatus(false, ErrorCode::OK);
     return ErrorCode::OK;

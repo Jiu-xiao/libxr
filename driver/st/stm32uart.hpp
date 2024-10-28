@@ -6,31 +6,30 @@
 namespace LibXR {
 class STM32UART : public UART {
 public:
-  static ErrorCode write_fun(WriteOperation &op, ConstRawData data,
-                             WritePort &port) {
+  static ErrorCode write_fun(WritePort &port) {
     STM32UART *uart = CONTAINER_OF(&port, STM32UART, write_port_);
     if (uart->uart_handle_->gState == HAL_UART_STATE_READY) {
-      uart->dma_buff_tx_ = data;
+      uart->dma_buff_tx_ = port.info_.data;
       HAL_UART_Transmit_DMA(uart->uart_handle_, (uint8_t *)(uart->dma_buff_tx_),
                             uart->dma_buff_tx_.Used());
       port.UpdateStatus();
 
     } else {
-      WriteInfoBlock block = {data, op};
+      WriteInfoBlock block = port.info_;
       return port.queue_->Push(block);
     }
 
     return ErrorCode::OK;
   }
 
-  static ErrorCode read_fun(ReadOperation &op, RawData buff, ReadPort &port) {
+  static ErrorCode read_fun(ReadPort &port) {
     STM32UART *uart = CONTAINER_OF(&port, STM32UART, read_port_);
-    if (uart->rx_queue_->Size() > buff.size_) {
-      uart->rx_queue_->PopBatch(buff.addr_, buff.size_);
+    if (uart->rx_queue_->Size() >= port.info_.data.size_) {
+      uart->rx_queue_->PopBatch(port.info_.data.addr_, port.info_.data.size_);
       port.UpdateStatus(false, ErrorCode::OK);
       return ErrorCode::OK;
     } else {
-      ReadInfoBlock block = {buff, op};
+      ReadInfoBlock block = port.info_;
       uart->read_port_.UpdateStatus();
       return port.queue_->Push(block);
     }
@@ -79,9 +78,6 @@ public:
   stm32_uart_id_t id_ = STM32_UART_ID_ERROR;
 
   BaseQueue *rx_queue_ = nullptr;
-
-  ReadPort read_port_;
-  WritePort write_port_;
 
   static STM32UART *map[STM32_UART_NUMBER];
 };
