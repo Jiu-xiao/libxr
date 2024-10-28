@@ -39,7 +39,7 @@ private:
   }
 
 public:
-  enum class Mode { CRLF = 0, LF = 1, CR = 2, NONE = 3 };
+  enum class Mode { CRLF = 0, LF = 1, CR = 2 };
 
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = NULL,
            WriteOperation write_op = WriteOperation(),
@@ -57,7 +57,7 @@ public:
   char read_buff_[READ_BUFF_SIZE];
 
   RamFS::Dir *current_dir_;
-  uint8_t flag_ansi_ = 1;
+  uint8_t flag_ansi_ = 0;
   int offset_ = 0;
   Stack<char> input_line_;
   char *arg_tab_[MAX_ARG_NUMBER];
@@ -99,9 +99,20 @@ public:
   }
 
   void DisplayChar(char data) {
+    bool use_history = false;
+
+    if (history_index_ >= 0) {
+      CopyHistoryToInputLine();
+      use_history = true;
+    }
+
     if (CanDisplayChar()) {
-      (*write_)(ConstRawData(data), write_op_);
       AddCharToInputLine(data);
+      if (use_history) {
+        ShowHistory();
+      } else {
+        (*write_)(ConstRawData(input_line_[input_line_.Size() - 1]), write_op_);
+      }
     }
   }
 
@@ -116,13 +127,20 @@ public:
   }
 
   void DeleteChar() {
+    bool use_history = false;
+
     if (history_index_ >= 0) {
       CopyHistoryToInputLine();
-      ShowHistory();
+      use_history = true;
     }
+
     if (CanDeleteChar()) {
-      (*write_)(ConstRawData(DELECT_CHAR), write_op_);
       RemoveCharFromInputLine();
+      if (use_history) {
+        ShowHistory();
+      } else {
+        (*write_)(ConstRawData(DELECT_CHAR), write_op_);
+      }
     }
   }
 
