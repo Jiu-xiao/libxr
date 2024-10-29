@@ -18,6 +18,7 @@
 #include "terminal.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
+#include "transform.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -28,6 +29,8 @@ const char *TEST_NAME = nullptr;
   if (TEST_NAME)                                                               \
     printf("Test [%s] Passed.\n", TEST_NAME);                                  \
   TEST_NAME = _arg
+
+static bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
 int main() {
   LibXR::LibXR_Init();
@@ -472,6 +475,81 @@ int main() {
   ASSERT(LibXR::CRC8::Verify(&TestCRC8, sizeof(TestCRC8)));
   ASSERT(LibXR::CRC16::Verify(&TestCRC16, sizeof(TestCRC16)));
   ASSERT(LibXR::CRC32::Verify(&TestCRC32, sizeof(TestCRC32)));
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Transfromation");
+  LibXR::Position pos;
+  LibXR::EulerAngle eulr = {M_PI / 12, M_PI / 6, M_PI / 4};
+  LibXR::RotationMatrix rot;
+  LibXR::EulerAngle eulr_new;
+
+  rot = eulr.toRotationMatrixZYX();
+  ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.5915064) &&
+         equal(rot(0, 2), 0.5245190) && equal(rot(1, 0), 0.6123725) &&
+         equal(rot(1, 1), 0.7745190) && equal(rot(1, 2), 0.1584937) &&
+         equal(rot(2, 0), -0.5000000) && equal(rot(2, 1), 0.2241439) &&
+         equal(rot(2, 2), 0.8365163));
+  eulr_new = rot.toEulerAngleZYX();
+
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  rot = eulr.toRotationMatrixZXY();
+  ASSERT(equal(rot(0, 0), 0.5208661) && equal(rot(0, 1), -0.6830127) &&
+         equal(rot(0, 2), 0.5120471) && equal(rot(1, 0), 0.7038788) &&
+         equal(rot(1, 1), 0.6830127) && equal(rot(1, 2), 0.1950597) &&
+         equal(rot(2, 0), -0.4829629) && equal(rot(2, 1), 0.2588190) &&
+         equal(rot(2, 2), 0.8365163));
+  eulr_new = rot.toEulerAngleZXY();
+
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  rot = eulr.toRotationMatrixYXZ();
+  ASSERT(equal(rot(0, 0), 0.7038788) && equal(rot(0, 1), -0.5208661) &&
+         equal(rot(0, 2), 0.4829629) && equal(rot(1, 0), 0.6830127) &&
+         equal(rot(1, 1), 0.6830127) && equal(rot(1, 2), -0.2588190) &&
+         equal(rot(2, 0), -0.1950597) && equal(rot(2, 1), 0.5120471) &&
+         equal(rot(2, 2), 0.8365163));
+  eulr_new = rot.toEulerAngleYXZ();
+
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  rot = eulr.toRotationMatrixXYZ();
+  ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.6123725) &&
+         equal(rot(0, 2), 0.5000000) && equal(rot(1, 0), 0.7745190) &&
+         equal(rot(1, 1), 0.5915064) && equal(rot(1, 2), -0.2241439) &&
+         equal(rot(2, 0), -0.1584937) && equal(rot(2, 1), 0.5245190) &&
+         equal(rot(2, 2), 0.8365163));
+
+  eulr_new = rot.toEulerAngleXYZ();
+
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  rot = eulr.toRotationMatrixXZY();
+  ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.7071068) &&
+         equal(rot(0, 2), 0.3535534) && equal(rot(1, 0), 0.7209159) &&
+         equal(rot(1, 1), 0.6830127) && equal(rot(1, 2), 0.1173625) &&
+         equal(rot(2, 0), -0.3244693) && equal(rot(2, 1), 0.1830127) &&
+         equal(rot(2, 2), 0.9280227));
+
+  eulr_new = rot.toEulerAngleXZY();
+
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  rot = eulr.toRotationMatrixYZX();
+  ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.4620968) &&
+         equal(rot(0, 2), 0.6414565) && equal(rot(1, 0), 0.7071068) &&
+         equal(rot(1, 1), 0.6830127) && equal(rot(1, 2), -0.1830127) &&
+         equal(rot(2, 0), -0.3535534) && equal(rot(2, 1), 0.5656502) &&
+         equal(rot(2, 2), 0.7450100));
+
+  eulr_new = rot.toEulerAngleYZX();
+
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Terminal");
