@@ -88,6 +88,7 @@ target_sources(${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SOURCES}
 )
 
+# Header File
 target_include_directories(
   ${PROJECT_NAME}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -100,6 +101,7 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/system/${LIBXR_SYSTEM}
 )
 
+# Driver
 if(LIBXR_DRIVER)
 target_sources(${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_DRIVER_SOURCES}
@@ -111,6 +113,7 @@ target_include_directories(
 )
 endif()
 
+# Webots
 if(LIBXR_SYSTEM MATCHES "Webots")
   target_link_directories(
     ${PROJECT_NAME}
@@ -133,6 +136,18 @@ if(LIBXR_SYSTEM MATCHES "Webots")
   )
 endif()
 
+# Eigen
+add_subdirectory(lib/Eigen)
+
+target_include_directories(${PROJECT_NAME} 
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/Eigen
+)
+
+add_compile_definitions(EIGEN_NO_MALLOC)
+
+
+
+# Test
 if(LIBXR_TEST_BUILD)
   include(CMake/test.cmake)
 endif()
