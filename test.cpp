@@ -477,44 +477,137 @@ int main() {
   ASSERT(LibXR::CRC32::Verify(&TestCRC32, sizeof(TestCRC32)));
   /* --------------------------------------------------------------- */
   TEST_STEP("Transfromation");
-  LibXR::Position pos;
-  LibXR::EulerAngle eulr = {M_PI / 12, M_PI / 6, M_PI / 4};
-  LibXR::RotationMatrix rot;
-  LibXR::EulerAngle eulr_new;
+  LibXR::Position pos(1., 8., 0.3);
+  LibXR::Position pos_new;
+  LibXR::EulerAngle eulr = {M_PI / 12, M_PI / 6, M_PI / 4}, eulr_new;
+  LibXR::RotationMatrix rot, rot_new;
+  LibXR::Quaternion quat, quat_new;
 
+  /* Position */
+  rot = eulr.toRotationMatrix();
+  quat = LibXR::Quaternion(rot);
+
+  pos_new = pos * quat;
+  pos_new = pos_new * -rot;
+  ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&
+         equal(pos_new(2), pos(2)));
+
+  pos_new /= quat;
+  pos_new *= rot;
+  ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&
+         equal(pos_new(2), pos(2)));
+
+  pos_new = (pos - pos_new) * 2.;
+  pos_new *= 2;
+  pos_new /= 4;
+  ASSERT(equal(pos_new(0), 0.) && equal(pos_new(1), 0.) &&
+         equal(pos_new(2), 0.));
+
+  pos_new = pos + pos_new;
+  ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&
+         equal(pos_new(2), pos(2)));
+
+  pos_new -= pos;
+
+  ASSERT(equal(pos_new(0), 0.) && equal(pos_new(1), 0.) &&
+         equal(pos_new(2), 0.));
+
+  pos_new += pos;
+  ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&
+         equal(pos_new(2), pos(2)));
+
+  /* Rotation */
+  quat_new = quat;
+  quat_new = quat - quat_new;
+  quat_new = quat + quat_new;
+  ASSERT(equal(quat_new(0), quat(0)) && equal(quat_new(1), quat(1)) &&
+         equal(quat_new(2), quat(2)) && equal(quat_new(3), quat(3)));
+
+  /* ZYX Order */
   rot = eulr.toRotationMatrixZYX();
   ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.5915064) &&
          equal(rot(0, 2), 0.5245190) && equal(rot(1, 0), 0.6123725) &&
          equal(rot(1, 1), 0.7745190) && equal(rot(1, 2), 0.1584937) &&
          equal(rot(2, 0), -0.5000000) && equal(rot(2, 1), 0.2241439) &&
          equal(rot(2, 2), 0.8365163));
-  eulr_new = rot.toEulerAngleZYX();
 
+  eulr_new = rot.toEulerAngleZYX();
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
 
+  quat = LibXR::Quaternion(rot);
+  quat_new = eulr.toQuaternionZYX();
+  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
+         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+
+  rot_new = quat.toRotationMatrix();
+  ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
+         equal(rot_new(0, 2), rot(0, 2)) && equal(rot_new(1, 0), rot(1, 0)) &&
+         equal(rot_new(1, 1), rot(1, 1)) && equal(rot_new(1, 2), rot(1, 2)) &&
+         equal(rot_new(2, 0), rot(2, 0)) && equal(rot_new(2, 1), rot(2, 1)) &&
+         equal(rot_new(2, 2), rot(2, 2)));
+
+  eulr_new = quat.toEulerAngleZYX();
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  /* ZXY Order */
   rot = eulr.toRotationMatrixZXY();
   ASSERT(equal(rot(0, 0), 0.5208661) && equal(rot(0, 1), -0.6830127) &&
          equal(rot(0, 2), 0.5120471) && equal(rot(1, 0), 0.7038788) &&
          equal(rot(1, 1), 0.6830127) && equal(rot(1, 2), 0.1950597) &&
          equal(rot(2, 0), -0.4829629) && equal(rot(2, 1), 0.2588190) &&
          equal(rot(2, 2), 0.8365163));
-  eulr_new = rot.toEulerAngleZXY();
 
+  eulr_new = rot.toEulerAngleZXY();
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
 
+  quat = LibXR::Quaternion(rot);
+  quat_new = eulr.toQuaternionZXY();
+  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
+         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+
+  rot_new = quat.toRotationMatrix();
+  ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
+         equal(rot_new(0, 2), rot(0, 2)) && equal(rot_new(1, 0), rot(1, 0)) &&
+         equal(rot_new(1, 1), rot(1, 1)) && equal(rot_new(1, 2), rot(1, 2)) &&
+         equal(rot_new(2, 0), rot(2, 0)) && equal(rot_new(2, 1), rot(2, 1)) &&
+         equal(rot_new(2, 2), rot(2, 2)));
+
+  eulr_new = quat.toEulerAngleZXY();
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  /* YXZ Order */
   rot = eulr.toRotationMatrixYXZ();
   ASSERT(equal(rot(0, 0), 0.7038788) && equal(rot(0, 1), -0.5208661) &&
          equal(rot(0, 2), 0.4829629) && equal(rot(1, 0), 0.6830127) &&
          equal(rot(1, 1), 0.6830127) && equal(rot(1, 2), -0.2588190) &&
          equal(rot(2, 0), -0.1950597) && equal(rot(2, 1), 0.5120471) &&
          equal(rot(2, 2), 0.8365163));
-  eulr_new = rot.toEulerAngleYXZ();
 
+  eulr_new = rot.toEulerAngleYXZ();
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
 
+  quat = LibXR::Quaternion(rot);
+  quat_new = eulr.toQuaternionYXZ();
+  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
+         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+
+  rot_new = quat.toRotationMatrix();
+  ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
+         equal(rot_new(0, 2), rot(0, 2)) && equal(rot_new(1, 0), rot(1, 0)) &&
+         equal(rot_new(1, 1), rot(1, 1)) && equal(rot_new(1, 2), rot(1, 2)) &&
+         equal(rot_new(2, 0), rot(2, 0)) && equal(rot_new(2, 1), rot(2, 1)) &&
+         equal(rot_new(2, 2), rot(2, 2)));
+
+  eulr_new = quat.toEulerAngleYXZ();
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  /* XYZ Order */
   rot = eulr.toRotationMatrixXYZ();
   ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.6123725) &&
          equal(rot(0, 2), 0.5000000) && equal(rot(1, 0), 0.7745190) &&
@@ -523,10 +616,26 @@ int main() {
          equal(rot(2, 2), 0.8365163));
 
   eulr_new = rot.toEulerAngleXYZ();
-
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
 
+  quat = LibXR::Quaternion(rot);
+  quat_new = eulr.toQuaternionXYZ();
+  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
+         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+
+  rot_new = quat.toRotationMatrix();
+  ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
+         equal(rot_new(0, 2), rot(0, 2)) && equal(rot_new(1, 0), rot(1, 0)) &&
+         equal(rot_new(1, 1), rot(1, 1)) && equal(rot_new(1, 2), rot(1, 2)) &&
+         equal(rot_new(2, 0), rot(2, 0)) && equal(rot_new(2, 1), rot(2, 1)) &&
+         equal(rot_new(2, 2), rot(2, 2)));
+
+  eulr_new = quat.toEulerAngleXYZ();
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  /* XZY Order */
   rot = eulr.toRotationMatrixXZY();
   ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.7071068) &&
          equal(rot(0, 2), 0.3535534) && equal(rot(1, 0), 0.7209159) &&
@@ -535,10 +644,26 @@ int main() {
          equal(rot(2, 2), 0.9280227));
 
   eulr_new = rot.toEulerAngleXZY();
-
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
 
+  quat = LibXR::Quaternion(rot);
+  quat_new = eulr.toQuaternionXZY();
+  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
+         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+
+  rot_new = quat.toRotationMatrix();
+  ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
+         equal(rot_new(0, 2), rot(0, 2)) && equal(rot_new(1, 0), rot(1, 0)) &&
+         equal(rot_new(1, 1), rot(1, 1)) && equal(rot_new(1, 2), rot(1, 2)) &&
+         equal(rot_new(2, 0), rot(2, 0)) && equal(rot_new(2, 1), rot(2, 1)) &&
+         equal(rot_new(2, 2), rot(2, 2)));
+
+  eulr_new = quat.toEulerAngleXZY();
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
+
+  /* YZX Order */
   rot = eulr.toRotationMatrixYZX();
   ASSERT(equal(rot(0, 0), 0.6123725) && equal(rot(0, 1), -0.4620968) &&
          equal(rot(0, 2), 0.6414565) && equal(rot(1, 0), 0.7071068) &&
@@ -547,7 +672,22 @@ int main() {
          equal(rot(2, 2), 0.7450100));
 
   eulr_new = rot.toEulerAngleYZX();
+  ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
+         equal(eulr_new(2), eulr(2)));
 
+  quat = LibXR::Quaternion(rot);
+  quat_new = eulr.toQuaternionYZX();
+  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
+         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+
+  rot_new = quat.toRotationMatrix();
+  ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
+         equal(rot_new(0, 2), rot(0, 2)) && equal(rot_new(1, 0), rot(1, 0)) &&
+         equal(rot_new(1, 1), rot(1, 1)) && equal(rot_new(1, 2), rot(1, 2)) &&
+         equal(rot_new(2, 0), rot(2, 0)) && equal(rot_new(2, 1), rot(2, 1)) &&
+         equal(rot_new(2, 2), rot(2, 2)));
+
+  eulr_new = quat.toEulerAngleYZX();
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
 
