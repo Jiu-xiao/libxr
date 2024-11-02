@@ -75,11 +75,11 @@ Some useful tools for debugging, robotics, and communication.
 
 | Kinematics | Forward-Kinematics | Inverse-Kinematics | Coordinate | Pose and Position |
 | ---------- | ------------------ | ------------------ | ---------- | ----------------- |
-|            | ❌                  | ❌                  | ❌          | ❌                 |
+|            | ✅                  | ✅                  | ❌          | ✅                 |
 
 | Dynamics | Inertia | Torque | G-Compensation |
 | -------- | ------- | ------ | -------------- |
-|          | ❌       | ❌      | ❌              |
+|          | ✅       | ❌      | ❌              |
 
 | Control | PID | LQR | MPC |
 | ------- | --- | --- | --- |
