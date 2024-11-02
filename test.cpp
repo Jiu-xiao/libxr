@@ -2,6 +2,8 @@
 #include "condition_var.hpp"
 #include "crc.hpp"
 #include "event.hpp"
+#include "inertia.hpp"
+#include "kinematic.hpp"
 #include "libxr.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
@@ -19,9 +21,11 @@
 #include "thread.hpp"
 #include "timer.hpp"
 #include "transform.hpp"
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <iostream>
 
 const char *TEST_NAME = nullptr;
 
@@ -488,7 +492,9 @@ int main() {
   quat = LibXR::Quaternion(rot);
 
   pos_new = pos * quat;
-  pos_new = pos_new * -rot;
+  quat_new = pos_new / pos;
+  rot_new = quat_new.toRotationMatrix();
+  pos_new = pos_new / rot_new;
   ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&
          equal(pos_new(2), pos(2)));
 
@@ -537,8 +543,8 @@ int main() {
 
   quat = LibXR::Quaternion(rot);
   quat_new = eulr.toQuaternionZYX();
-  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
-         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+  ASSERT(equal(quat_new.w(), quat.w()) && equal(quat_new.x(), quat.x()) &&
+         equal(quat_new.y(), quat.y()) && equal(quat_new.z(), quat.z()));
 
   rot_new = quat.toRotationMatrix();
   ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
@@ -565,8 +571,8 @@ int main() {
 
   quat = LibXR::Quaternion(rot);
   quat_new = eulr.toQuaternionZXY();
-  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
-         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+  ASSERT(equal(quat_new.w(), quat.w()) && equal(quat_new.x(), quat.x()) &&
+         equal(quat_new.y(), quat.y()) && equal(quat_new.z(), quat.z()));
 
   rot_new = quat.toRotationMatrix();
   ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
@@ -593,8 +599,8 @@ int main() {
 
   quat = LibXR::Quaternion(rot);
   quat_new = eulr.toQuaternionYXZ();
-  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
-         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+  ASSERT(equal(quat_new.w(), quat.w()) && equal(quat_new.x(), quat.x()) &&
+         equal(quat_new.y(), quat.y()) && equal(quat_new.z(), quat.z()));
 
   rot_new = quat.toRotationMatrix();
   ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
@@ -621,8 +627,8 @@ int main() {
 
   quat = LibXR::Quaternion(rot);
   quat_new = eulr.toQuaternionXYZ();
-  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
-         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+  ASSERT(equal(quat_new.w(), quat.w()) && equal(quat_new.x(), quat.x()) &&
+         equal(quat_new.y(), quat.y()) && equal(quat_new.z(), quat.z()));
 
   rot_new = quat.toRotationMatrix();
   ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
@@ -649,8 +655,8 @@ int main() {
 
   quat = LibXR::Quaternion(rot);
   quat_new = eulr.toQuaternionXZY();
-  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
-         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+  ASSERT(equal(quat_new.w(), quat.w()) && equal(quat_new.x(), quat.x()) &&
+         equal(quat_new.y(), quat.y()) && equal(quat_new.z(), quat.z()));
 
   rot_new = quat.toRotationMatrix();
   ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
@@ -677,8 +683,8 @@ int main() {
 
   quat = LibXR::Quaternion(rot);
   quat_new = eulr.toQuaternionYZX();
-  ASSERT(equal(quat_new.w_, quat.w_) && equal(quat_new.x_, quat.x_) &&
-         equal(quat_new.y_, quat.y_) && equal(quat_new.z_, quat.z_));
+  ASSERT(equal(quat_new.w(), quat.w()) && equal(quat_new.x(), quat.x()) &&
+         equal(quat_new.y(), quat.y()) && equal(quat_new.z(), quat.z()));
 
   rot_new = quat.toRotationMatrix();
   ASSERT(equal(rot_new(0, 0), rot(0, 0)) && equal(rot_new(0, 1), rot(0, 1)) &&
@@ -690,6 +696,98 @@ int main() {
   eulr_new = quat.toEulerAngleYZX();
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
+
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Interia");
+  double Ixx = 1., Iyy = 1., Izz = 1., Ixy = 0., Ixz = 0., Iyz = 0.;
+  pos = LibXR::Position(std::sqrt(0.5), std::sqrt(0.5), 0.);
+  eulr = LibXR::EulerAngle(0., 0., M_PI / 4);
+
+  LibXR::Inertia inertia(0.1, Ixx, Iyy, Izz, Ixy, Ixz, Iyz);
+
+  auto inertia_new = inertia.Translate(pos);
+  inertia_new = inertia_new.Rotate(eulr.toQuaternion());
+
+  ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
+         equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
+         equal(inertia_new(1, 1), 1.) && equal(inertia_new(1, 2), 0.) &&
+         equal(inertia_new(2, 0), 0.) && equal(inertia_new(2, 1), 0.) &&
+         equal(inertia_new(2, 2), 1.1));
+
+  inertia_new = inertia.Translate(pos);
+  inertia_new = inertia_new.Rotate(eulr.toRotationMatrix());
+
+  ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
+         equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
+         equal(inertia_new(1, 1), 1.) && equal(inertia_new(1, 2), 0.) &&
+         equal(inertia_new(2, 0), 0.) && equal(inertia_new(2, 1), 0.) &&
+         equal(inertia_new(2, 2), 1.1));
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Kinematics");
+  LibXR::Inertia inertia_endpoint(1.0, 0.1, 0.1, 0.1, 0., 0., 0.);
+  LibXR::Inertia inertia_midpoint(1.0, 0.1, 0.1, 0.1, 0., 0., 0.);
+  LibXR::Inertia inertia_startpoint(1000., 100., 100., 100., 0., 0., 0.);
+
+  LibXR::Position pos_startpoint(0., 0., 1.);
+  LibXR::Quaternion quat_startpoint =
+      LibXR::EulerAngle(0., 0., 0.).toQuaternion();
+
+  LibXR::Position pos_startpoint2joint(0., 0.0, 0.5);
+  LibXR::Position pos_joint2midpoint(1.0, 0.0, 0.0);
+  LibXR::Position pos_midpoint2joint(1.0, 0.0, 0.0);
+  LibXR::Position pos_joint2endpoint(0.5, 0.0, 0.0);
+
+  LibXR::Quaternion quat_startpoint2joint(1., 0., 0., 0.);
+  LibXR::Quaternion quat_joint2midpoint(1., 0., 0., 0.);
+  LibXR::Quaternion quat_midpoint2joint(1., 0., 0., 0.);
+  LibXR::Quaternion quat_joint2endpoint(1., 0., 0., 0.);
+
+  LibXR::Transform t_startpoint2joint(quat_startpoint2joint,
+                                      pos_startpoint2joint);
+  LibXR::Transform t_joint2midpoint(quat_joint2midpoint, pos_joint2midpoint);
+  LibXR::Transform t_midpoint2joint(quat_midpoint2joint, pos_midpoint2joint);
+  LibXR::Transform t_joint2endpoint(quat_joint2endpoint, pos_joint2endpoint);
+
+  LibXR::Kinematic::EndPoint object_endpoint(inertia_endpoint);
+  LibXR::Kinematic::Object object_midpoint(inertia_midpoint);
+  LibXR::Kinematic::StartPoint object_startpoint(inertia_startpoint);
+
+  object_startpoint.SetPosition(pos_startpoint);
+  object_startpoint.SetQuaternion(quat_startpoint);
+
+  LibXR::Kinematic::Joint joint_midpoint(LibXR::Axis<>::Y(), &object_startpoint,
+                                         t_startpoint2joint, &object_midpoint,
+                                         t_joint2midpoint);
+
+  LibXR::Kinematic::Joint joint_endpoint(LibXR::Axis<>::Y(), &object_midpoint,
+                                         t_midpoint2joint, &object_endpoint,
+                                         t_joint2endpoint);
+
+  joint_endpoint.SetState(0.);
+  joint_midpoint.SetState(M_PI / 2);
+
+  LibXR::Quaternion target_quat(0.7071068, 0., -0.7071068, 0.);
+  LibXR::Position target_pos(0., 0., 4.);
+
+  object_endpoint.SetTargetQuaternion(target_quat);
+  object_endpoint.SetTargetPosition(target_pos);
+
+  object_startpoint.CalcForward();
+  object_startpoint.CalcInertia();
+
+  object_endpoint.CalcBackward(100, 0.1, 1.0);
+
+  ASSERT(std::abs(std::abs(object_endpoint.target_pos_(0)) -
+                  std::abs(object_endpoint.runtime_.target.translation(0))) <
+         0.01);
+
+  ASSERT(std::abs(std::abs(object_endpoint.target_pos_(1)) -
+                  std::abs(object_endpoint.runtime_.target.translation(1))) <
+         0.01);
+
+  ASSERT(std::abs(std::abs(object_endpoint.target_pos_(2)) -
+                  std::abs(object_endpoint.runtime_.target.translation(2))) <
+         0.01);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Terminal");
