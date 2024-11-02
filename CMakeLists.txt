@@ -143,9 +143,13 @@ target_include_directories(${PROJECT_NAME}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/Eigen
 )
 
-add_compile_definitions(EIGEN_NO_MALLOC)
+# add_compile_definitions(EIGEN_NO_MALLOC)
 
+if(NOT LIBXR_DEFAULT_SCALAR)
+  set(LIBXR_DEFAULT_SCALAR "double")
+endif()
 
+add_compile_definitions(LIBXR_DEFAULT_SCALAR=${LIBXR_DEFAULT_SCALAR})
 
 # Test
 if(LIBXR_TEST_BUILD)
