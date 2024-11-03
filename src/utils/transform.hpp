@@ -3,7 +3,7 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <cmath>
-#include <type_traits>
+
 namespace LibXR {
 
 template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Position;
@@ -21,6 +21,8 @@ public:
 
   Position(const Eigen::Matrix<Scalar, 3, 1> &p)
       : Eigen::Matrix<Scalar, 3, 1>(p) {}
+
+  Position(const Position &p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
 
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
@@ -106,6 +108,8 @@ public:
   Axis() : Eigen::Matrix<Scalar, 3, 1>(0, 0, 0) {}
 
   Axis(Scalar x, Scalar y, Scalar z) : Eigen::Matrix<Scalar, 3, 1>(x, y, z) {}
+
+  Axis(const Axis &p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
 
   static Axis X() { return Axis(1., 0., 0.); }
   static Axis Y() { return Axis(0., 1., 0.); }
@@ -620,7 +624,8 @@ public:
 
   Transform() = default;
 
-  Transform(Quaternion<Scalar> rotation, Position<Scalar> translation)
+  Transform(const Quaternion<Scalar> &rotation,
+            const Position<Scalar> &translation)
       : rotation(rotation), translation(translation) {}
 
   const Transform &operator=(const Quaternion<Scalar> &q) {
