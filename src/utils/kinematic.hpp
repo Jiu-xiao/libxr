@@ -3,12 +3,9 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 
-#include "Eigen/src/Geometry/AngleAxis.h"
-#include "Eigen/src/Geometry/Quaternion.h"
 #include "inertia.hpp"
 #include "list.hpp"
 #include "transform.hpp"
-#include <iostream>
 
 namespace LibXR {
 
@@ -24,6 +21,7 @@ public:
     Transform<Scalar> parent2this;
     Transform<Scalar> this2child;
     Axis<Scalar> axis;
+    Scalar ik_mult;
   } Param;
 
   typedef struct Runtime {
@@ -39,16 +37,17 @@ public:
     Transform<Scalar> target;
   } Runtime;
 
-  Param param_;
   Runtime runtime_;
 
   Object<Scalar> *parent = nullptr;
   Object<Scalar> *child = nullptr;
+  Param param_;
 
   Joint(Axis<Scalar> axis, Object<Scalar> *parent,
         Transform<Scalar> &parent2this, Object<Scalar> *child,
         Transform<Scalar> &this2child)
-      : parent(parent), child(child), param_({parent2this, this2child, axis}) {
+      : parent(parent), child(child),
+        param_({parent2this, this2child, axis, 1.0}) {
     runtime_.inertia = Eigen::Matrix<Scalar, 3, 3>::Zero();
     auto link = new typename Object<Scalar>::Link(this);
     parent->joints.Add(*link);
@@ -76,6 +75,8 @@ public:
     runtime_.target_angle.angle() = target;
     runtime_.target_angle.axis() = param_.axis;
   }
+
+  void SetBackwardMult(Scalar mult) { param_.ik_mult = mult; }
 };
 
 template <typename Scalar> class Object {
@@ -111,6 +112,8 @@ template <typename Scalar> class EndPoint : public Object<Scalar> {
 private:
   Eigen::Matrix<Scalar, 6, Eigen::Dynamic> *J = nullptr;
   Eigen::Matrix<Scalar, Eigen::Dynamic, 1> *delta_theta = nullptr;
+  Eigen::Matrix<Scalar, 6, 1> err_weight =
+      Eigen::Matrix<Scalar, 6, 1>::Constant(1);
   int joint_num = 0;
 
 public:
@@ -124,6 +127,10 @@ public:
   }
 
   void SetTargetPosition(const Position<Scalar> &pos) { target_pos_ = pos; }
+
+  void SetErrorWeight(const Eigen::Matrix<Scalar, 6, 1> &weight) {
+    err_weight = weight;
+  }
 
   Eigen::Matrix<Scalar, 6, 1> CalcBackward(int max_step = 10,
                                            Scalar max_err = 1e-3,
@@ -156,6 +163,8 @@ public:
                .conjugate() *
            target_quat_)
               .vec();
+
+      error = err_weight.array() * error.array();
 
       auto err_norm = error.norm();
 
@@ -190,7 +199,6 @@ public:
         Joint<Scalar> *joint = this->parent;
 
         for (int joint_index = 0; joint_index < joint_num; joint_index++) {
-
           Eigen::AngleAxis<Scalar> target_angle_axis_delta(
               (*delta_theta)(joint_index), joint->runtime_.target_axis);
 
@@ -200,7 +208,7 @@ public:
               joint->runtime_.target.rotation;
 
           joint->SetTarget(joint->runtime_.target_angle.angle() +
-                           (*delta_theta)(joint_index));
+                           (*delta_theta)(joint_index)*joint->param_.ik_mult);
 
           joint = joint->parent->parent;
         }
@@ -269,7 +277,6 @@ public:
 
   static ErrorCode _InertiaForeachFun(Joint<Scalar> *&joint,
                                       Joint<Scalar> *&parent) {
-
     auto new_inertia = joint->child->param_.inertia
                            .Translate(parent->runtime_.state.translation -
                                       joint->child->runtime_.state.translation)
