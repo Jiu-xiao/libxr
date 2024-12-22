@@ -66,16 +66,22 @@ void LibXR::PlatformInit() {
   time_step = _libxr_webots_robot_handle->getBasicTimeStep();
 
   if (time_step >= 2.0f) {
-    printf(
-        "webots basic time step should be less than 2ms, but now it is "
-        "%.3f ms.\n",
-        time_step);
+    printf("webots basic time step should be less than 2ms, but now it is "
+           "%.3f ms.\n",
+           time_step);
+    exit(-1);
+  }
+
+  if (_libxr_webots_robot_handle == NULL) {
+    printf("webots robot handle is null.\n");
     exit(-1);
   }
 
   _libxr_webots_time_notify = new LibXR::ConditionVar();
 
   auto webots_timebase_thread_fun = [](void *) {
+    poll(NULL, 0, 100);
+
     while (true) {
       poll(NULL, 0, 1);
       _libxr_webots_robot_handle->step(time_step);
