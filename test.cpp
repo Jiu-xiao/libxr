@@ -19,6 +19,7 @@
 #include "stack.hpp"
 #include "terminal.hpp"
 #include "thread.hpp"
+#include "timebase.hpp"
 #include "timer.hpp"
 #include "transform.hpp"
 #include <cmath>
@@ -80,6 +81,18 @@ int main() {
   LibXR::TimestampUS t3(1000), t4(2005);
   ASSERT(t4 - t3 == 1005);
   ASSERT(fabs((t4 - t3).to_secondf() - 0.001005) < 0.0000001);
+
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Timebase Test");
+
+  t1 = LibXR::Timebase::GetMilliseconds();
+  t3 = LibXR::Timebase::GetMicroseconds();
+  LibXR::Thread::Sleep(100);
+  t4 = LibXR::Timebase::GetMicroseconds();
+  t2 = LibXR::Timebase::GetMilliseconds();
+
+  ASSERT(fabs(t2 - t1 - 100) < 2);
+  ASSERT(fabs(t4 - t3 - 100000) < 2000);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Thread Test");

@@ -10,7 +10,19 @@
 #include "thread.hpp"
 #include "timer.hpp"
 
-void LibXR::PlatformInit() {}
+void LibXR::PlatformInit() {
+  if (Timebase::timebase == NULL) {
+    /* You should initialize Timebase first */
+    ASSERT(false);
+  }
+
+  uint32_t time_need_to_catch_up =
+      Timebase::GetMilliseconds() - xTaskGetTickCount();
+
+  if (time_need_to_catch_up > 0) {
+    xTaskCatchUpTicks(time_need_to_catch_up);
+  }
+}
 
 void *operator new(std::size_t size) { return pvPortMalloc(size); }
 
