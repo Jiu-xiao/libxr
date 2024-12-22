@@ -5,7 +5,7 @@
 
 namespace LibXR {
 class Thread {
- public:
+public:
   enum class Priority {
     IDLE,
     LOW,
@@ -15,9 +15,9 @@ class Thread {
     NUMBER,
   };
 
-  Thread() {};
+  Thread(){};
 
-  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
+  Thread(libxr_thread_handle handle) : thread_handle_(handle){};
 
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
@@ -31,10 +31,9 @@ class Thread {
     }
 
     class ThreadBlock {
-     public:
+    public:
       ThreadBlock(typeof(function) fun, ArgType arg, const char *name)
-          : fun_(fun),
-            arg_(arg),
+          : fun_(fun), arg_(arg),
             name_(reinterpret_cast<char *>(malloc(strlen(name) + 1))) {
         strcpy(name_, name);
       }
@@ -66,6 +65,8 @@ class Thread {
           sched_get_priority_min(SCHED_RR) + static_cast<int>(priority);
       pthread_setschedparam(pthread_self(), SCHED_RR, &sp);
     }
+
+    Thread::Sleep(1);
   }
 
   static Thread Current(void);
@@ -80,7 +81,7 @@ class Thread {
 
   operator libxr_thread_handle() { return thread_handle_; }
 
- private:
+private:
   libxr_thread_handle thread_handle_;
 };
-}  // namespace LibXR
+} // namespace LibXR
