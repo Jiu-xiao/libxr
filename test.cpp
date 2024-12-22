@@ -775,7 +775,7 @@ int main() {
   object_startpoint.CalcForward();
   object_startpoint.CalcInertia();
 
-  object_endpoint.CalcBackward(100, 0.1, 1.0);
+  object_endpoint.CalcBackward(0, 1000, 0.01, 0.1);
 
   ASSERT(std::abs(std::abs(object_endpoint.target_pos_(0)) -
                   std::abs(object_endpoint.runtime_.target.translation(0))) <
