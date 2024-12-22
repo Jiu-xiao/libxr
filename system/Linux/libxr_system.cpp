@@ -14,6 +14,7 @@
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
+#include "linux_timebase.hpp"
 #include "list.hpp"
 #include "queue.hpp"
 #include "semaphore.hpp"
@@ -22,6 +23,8 @@
 
 struct timeval _libxr_linux_start_time;
 struct timespec _libxr_linux_start_time_spec;
+
+static LibXR::LinuxTimebase _libxr_linux_timebase;
 
 void LibXR::PlatformInit() {
   auto write_fun = [](WritePort &port) {
