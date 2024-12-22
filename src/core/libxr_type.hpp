@@ -46,6 +46,8 @@ public:
 
   ConstRawData(char *data) : addr_(data), size_(strlen(data)) {}
 
+  ConstRawData(const char *data) : addr_(data), size_(strlen(data)) {}
+
   template <size_t N>
   ConstRawData(const char (&data)[N]) : addr_(data), size_(N - 1) {}
 
@@ -57,15 +59,15 @@ public:
 
 class Buffer {
 public:
-  Buffer(size_t size) : size_(size), used_(0), buffer(new uint8_t[size]) {}
+  Buffer(size_t size) : size_(size), used_(0), raw_(new uint8_t[size]) {}
   Buffer(RawData data)
       : size_(data.size_), used_(0),
-        buffer(reinterpret_cast<uint8_t *>(data.addr_)) {}
+        raw_(reinterpret_cast<uint8_t *>(data.addr_)) {}
 
-  uint8_t operator[](size_t index) { return buffer[index]; }
+  uint8_t operator[](size_t index) { return raw_[index]; }
 
   template <typename Data> Data toData(size_t index) {
-    return reinterpret_cast<Data &>(buffer[index]);
+    return reinterpret_cast<Data &>(raw_[index]);
   }
 
   ErrorCode operator=(const ConstRawData data) {
@@ -73,7 +75,7 @@ public:
       return ErrorCode::SIZE_ERR;
     }
 
-    memccpy(buffer, data.addr_, 0, data.size_);
+    memccpy(raw_, data.addr_, 0, data.size_);
     used_ = data.size_;
 
     return ErrorCode::OK;
@@ -81,18 +83,16 @@ public:
 
   ErrorCode operator=(RawData data) { return *this = ConstRawData(data); }
 
-  operator uint8_t *() { return buffer; }
+  operator uint8_t *() { return raw_; }
 
-  operator void *() { return buffer; }
+  operator void *() { return raw_; }
 
   size_t Size() const { return size_; }
 
   size_t Used() const { return used_; }
 
   uint32_t size_, used_;
-  uint8_t *buffer;
+  uint8_t *raw_;
 };
-
-
 
 } // namespace LibXR

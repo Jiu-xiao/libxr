@@ -6,13 +6,13 @@
 #include <cstdio>
 #include <cstring>
 
-#include "libxr_def.hpp"
-#include "libxr_rw.hpp"
-#include "libxr_string.hpp"
-#include "libxr_type.hpp"
+#include "libxr.hpp"
 #include "queue.hpp"
 #include "ramfs.hpp"
 #include "stack.hpp"
+#include "timebase.hpp"
+
+volatile static uint64_t time_before, time_diff;
 
 namespace LibXR {
 template <int READ_BUFF_SIZE = 32, int MAX_LINE_SIZE = READ_BUFF_SIZE,
@@ -144,25 +144,15 @@ public:
     }
   }
 
-  void ShowHeaderRecursively(RamFS::Dir *dir) {
-    if (dir != current_dir_) {
-      ShowHeaderRecursively(reinterpret_cast<RamFS::Dir *>(dir->parent));
-    }
-    if (dir != &ramfs_.root_) {
-      (*write_)(ConstRawData(dir->data_.name, strlen(dir->data_.name)),
-                write_op_);
-      (*write_)(ConstRawData('/'), write_op_);
-    }
-  }
-
   void ShowHeader() {
-    RamFS::Dir *dir = current_dir_;
-
     (*write_)(ConstRawData(ramfs_.root_->name, strlen(ramfs_.root_->name)),
               write_op_);
-    (*write_)(ConstRawData(":/"), write_op_);
-
-    ShowHeaderRecursively(dir);
+    if (current_dir_ == &ramfs_.root_) {
+      (*write_)(ConstRawData(":/"), write_op_);
+    } else {
+      (*write_)(ConstRawData(":"), write_op_);
+      (*write_)(ConstRawData(current_dir_->data_.name), write_op_);
+    }
 
     (*write_)(ConstRawData("$ "), write_op_);
   }
@@ -271,6 +261,46 @@ public:
     }
 
     AddHistory();
+
+    if (strcmp(arg_tab_[0], "cd") == 0) {
+      RamFS::Dir *dir = Path2Dir(arg_tab_[1]);
+      if (dir != NULL) {
+        current_dir_ = dir;
+      }
+      LineFeed();
+      return;
+    }
+
+    if (strcmp(arg_tab_[0], "ls") == 0) {
+      ErrorCode (*ls_fun)(RBTree<const char *>::Node<RamFS::FsNode> &,
+                          Terminal *) =
+          [](RBTree<const char *>::Node<RamFS::FsNode> &item, Terminal *term) {
+            switch (item->type) {
+            case RamFS::FsNodeType::DIR:
+              (*(term->write_))(ConstRawData("d "), term->write_op_);
+              break;
+            case RamFS::FsNodeType::FILE:
+              (*(term->write_))(ConstRawData("f "), term->write_op_);
+              break;
+            case RamFS::FsNodeType::DEVICE:
+              (*(term->write_))(ConstRawData("c "), term->write_op_);
+              break;
+            case RamFS::FsNodeType::STORAGE:
+              (*(term->write_))(ConstRawData("b "), term->write_op_);
+              break;
+            default:
+              (*(term->write_))(ConstRawData("? "), term->write_op_);
+              break;
+            }
+            (*(term->write_))(ConstRawData(item.data_.name), term->write_op_);
+            term->LineFeed();
+            return ErrorCode::OK;
+          };
+
+      current_dir_->data_.rbt.Foreach<RamFS::FsNode>(ls_fun, this,
+                                                     SizeLimitMode::MORE);
+      return;
+    }
 
     auto ans = Path2File(arg_tab_[0]);
     if (ans == nullptr) {
