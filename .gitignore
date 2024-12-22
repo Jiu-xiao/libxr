@@ -1,3 +1,16 @@
 .history/**
 build/
 .cache/**
+CMakeFiles/cmake.check_cache
+CMakeFiles/CMakeConfigureLog.yaml
+CMakeFiles/3.28.3/CMakeASMCompiler.cmake
+CMakeFiles/3.28.3/CMakeCCompiler.cmake
+CMakeFiles/3.28.3/CMakeCXXCompiler.cmake
+CMakeFiles/3.28.3/CMakeDetermineCompilerABI_C.bin
+CMakeFiles/3.28.3/CMakeDetermineCompilerABI_CXX.bin
+CMakeFiles/3.28.3/CMakeSystem.cmake
+CMakeFiles/3.28.3/CompilerIdC/a.out
+CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c
+CMakeFiles/3.28.3/CompilerIdCXX/a.out
+CMakeFiles/3.28.3/CompilerIdCXX/CMakeCXXCompilerId.cpp
+CMakeCache.txt

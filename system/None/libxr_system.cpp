@@ -18,9 +18,9 @@ void LibXR::Timer::RefreshTimerInIdle() {
     return;
   }
 
-  static auto last_refresh_time = libxr_get_time_ms();
+  static auto last_refresh_time = Timebase::GetMilliseconds();
 
-  if (last_refresh_time == libxr_get_time_ms()) {
+  if (last_refresh_time == Timebase::GetMilliseconds()) {
     return;
   }
 
