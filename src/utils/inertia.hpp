@@ -10,18 +10,18 @@ namespace LibXR {
 
 template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Inertia {
 public:
-  Scalar raw_data_[9];
+  Scalar data[9];
 
-  Scalar m_;
+  Scalar mass;
 
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
                                              std::is_same<T, double>::value,
                                          int> = 0>
-  explicit Inertia(Scalar m, const T (&data)[9]) : m_(m) {
+  explicit Inertia(Scalar m, const T (&data)[9]) : mass(m) {
     for (int i = 0; i < 3; i++) {
       for (int j = 0; j < 3; j++) {
-        raw_data_[i * 3 + j] = static_cast<Scalar>(data[i + j + 3]);
+        data[i * 3 + j] = static_cast<Scalar>(data[i + j + 3]);
       }
     }
   }
@@ -30,41 +30,41 @@ public:
                                              std::is_same<T, float>::value ||
                                              std::is_same<T, double>::value,
                                          int> = 0>
-  explicit Inertia(Scalar m, const T (&data)[3][3]) : m_(m) {
+  explicit Inertia(Scalar m, const T (&data)[3][3]) : mass(m) {
     for (int i = 0; i < 3; i++) {
       for (int j = 0; j < 3; j++) {
-        raw_data_[i * 3 + j] = static_cast<Scalar>(data[j][i]);
+        data[i * 3 + j] = static_cast<Scalar>(data[j][i]);
       }
     }
   }
 
-  Inertia() : m_(0) { memset(raw_data_, 0, sizeof(raw_data_)); }
+  Inertia() : mass(0) { memset(data, 0, sizeof(data)); }
 
   template <typename T, std::enable_if_t<std::is_same<T, float>::value ||
                                              std::is_same<T, double>::value,
                                          int> = 0>
   explicit Inertia(Scalar m, const T (&data)[6])
-      : raw_data_{data[0],  -data[3], -data[5], -data[3], data[2],
-                  -data[4], -data[5], -data[4], data[2]},
-        m_(m) {}
+      : data{data[0],  -data[3], -data[5], -data[3], data[2],
+             -data[4], -data[5], -data[4], data[2]},
+        mass(m) {}
 
   Inertia(Scalar m, Scalar xx, Scalar yy, Scalar zz, Scalar xy, Scalar yz,
           Scalar xz)
-      : raw_data_{xx, -xy, -xz, -xy, yy, -yz, -xz, -yz, zz}, m_(m) {}
+      : data{xx, -xy, -xz, -xy, yy, -yz, -xz, -yz, zz}, mass(m) {}
 
-  Inertia(Scalar m, const Eigen::Matrix<Scalar, 3, 3> &R) : m_(m) {
-    memcpy(raw_data_, R.data(), 9 * sizeof(Scalar));
+  Inertia(Scalar m, const Eigen::Matrix<Scalar, 3, 3> &R) : mass(m) {
+    memcpy(data, R.data(), 9 * sizeof(Scalar));
   }
 
   operator Eigen::Matrix<Scalar, 3, 3>() const {
-    return Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(raw_data_);
+    return Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data);
   }
 
-  Scalar operator()(int i, int j) const { return raw_data_[i + j * 3]; }
+  Scalar operator()(int i, int j) const { return data[i + j * 3]; }
 
   Eigen::Matrix<Scalar, 3, 3>
   operator+(const Eigen::Matrix<Scalar, 3, 3> &R) const {
-    return Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(raw_data_) + R;
+    return Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) + R;
   }
 
   Inertia Translate(const Eigen::Matrix<Scalar, 3, 1> &p) const {
@@ -73,15 +73,14 @@ public:
     translationMatrix << dy * dy + dz * dz, -dx * dy, -dx * dz, -dx * dy,
         dx * dx + dz * dz, -dy * dz, -dx * dz, -dy * dz, dx * dx + dy * dy;
 
-    return Inertia(m_,
-                   Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(raw_data_) +
-                       m_ * translationMatrix);
+    return Inertia(mass, Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) +
+                             mass * translationMatrix);
   }
 
   Inertia Rotate(const Eigen::Matrix<Scalar, 3, 3> &R) const {
-    return Inertia(
-        m_, R * Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(raw_data_) *
-                R.transpose());
+    return Inertia(mass,
+                   R * Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) *
+                       R.transpose());
   }
 
   Inertia Rotate(const RotationMatrix<Scalar> &R) const {
@@ -89,9 +88,9 @@ public:
   }
 
   Inertia Rotate(const Eigen::Quaternion<Scalar> &q) const {
-    return Inertia(
-        m_, q * Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(raw_data_) *
-                q.conjugate());
+    return Inertia(mass,
+                   q * Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) *
+                       q.conjugate());
   }
 
   static Eigen::Matrix<Scalar, 3, 3>
@@ -102,6 +101,43 @@ public:
 
   Inertia Rotate(const Quaternion<Scalar> &q) const {
     return Rotate(Eigen::Quaternion<Scalar>(q));
+  }
+};
+
+template <typename Scalar = LIBXR_DEFAULT_SCALAR> class CenterOfMass {
+public:
+  Eigen::Matrix<Scalar, 3, 1> position;
+  Scalar mass;
+
+  CenterOfMass() : position(0., 0., 0.), mass(0.) {}
+
+  CenterOfMass(Scalar m, const LibXR::Position<Scalar> &p) {
+    mass = m;
+    position = p;
+  }
+
+  CenterOfMass(Scalar m, const Eigen::Matrix<Scalar, 3, 1> &p) {
+    mass = m;
+    position = p;
+  }
+
+  CenterOfMass(const Inertia<Scalar> &m, const Transform<Scalar> &p) {
+    mass = m.mass;
+    position = p.translation;
+  }
+
+  CenterOfMass operator+(const CenterOfMass &m) const {
+    Scalar newMass = mass + m.mass;
+    return CenterOfMass(
+        newMass, Position<Scalar>(
+                     (position(0) * mass + m.position(0) * m.mass) / newMass,
+                     (position(1) * mass + m.position(1) * m.mass) / newMass,
+                     (position(2) * mass + m.position(2) * m.mass) / newMass));
+  }
+
+  CenterOfMass &operator+=(const CenterOfMass &m) {
+    *this = *this + m;
+    return *this;
   }
 };
 
