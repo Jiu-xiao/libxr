@@ -120,6 +120,7 @@ int main() {
   /* --------------------------------------------------------------- */
   TEST_STEP("Queue Test");
   auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
+  lock_free_queue.Reset();
 
   thread.Create<LibXR::LockFreeQueue<float> *>(
       &lock_free_queue,
@@ -152,6 +153,7 @@ int main() {
   ASSERT(tmp == 2.1f);
 
   auto queue = LibXR::LockQueue<float>(3);
+  queue.Reset();
 
   thread.Create<LibXR::LockQueue<float> *>(
       &queue,
@@ -184,6 +186,35 @@ int main() {
 
   queue.Pop(tmp, 20);
   ASSERT(tmp == 2.1f);
+
+  auto chunked_queue = LibXR::ChunkedQueue(10, 10);
+
+  uint16_t tmp_u16 = 0;
+
+  for (int i = 0; i < 30; i++) {
+    tmp_u16 = i;
+    chunked_queue.PushPartial(&tmp_u16, sizeof(tmp_u16));
+  }
+
+  for (int i = 0; i < 6; i++) {
+    uint16_t tmp[5];
+    uint16_t size;
+    chunked_queue.Pop(&size, tmp);
+    ASSERT(size == 10);
+    for (int j = 0; j < 5; j++) {
+      ASSERT(tmp[j] == i * 5 + j);
+    }
+  }
+
+  for (int i = 0; i < 10; i++) {
+    double tmp = i;
+    uint16_t size;
+    chunked_queue.PushPartial(&tmp, sizeof(tmp));
+    chunked_queue.Pop(&size, &tmp);
+    ASSERT(fabs(tmp - double(i)) < 0.01);
+  }
+
+  ASSERT(chunked_queue.Size() == 0);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Timer Test");
