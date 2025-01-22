@@ -18,5 +18,5 @@ typedef struct {
   pthread_cond_t cond;
 } condition_var_handle;
 
-void PlatformInit();
-}  // namespace LibXR
+void PlatformInit(webots::Robot *robot);
+} // namespace LibXR

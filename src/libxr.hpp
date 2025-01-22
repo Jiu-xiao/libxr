@@ -18,7 +18,3 @@
 #include "terminal.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
-
-namespace LibXR {
-void LibXR_Init();
-}
