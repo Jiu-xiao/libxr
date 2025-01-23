@@ -7,7 +7,6 @@
 #include "inertia.hpp"
 #include "list.hpp"
 #include "transform.hpp"
-#include <iostream>
 
 namespace LibXR {
 
