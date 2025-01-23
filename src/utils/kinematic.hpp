@@ -163,8 +163,8 @@ public:
     }
 
     /* Apply Limition */
-    Position<Scalar> target_pos;
-    Quaternion<Scalar> target_quat;
+    Position<Scalar> target_pos = target_pos_;
+    Quaternion<Scalar> target_quat = target_quat_;
     if (max_line_velocity > 0 && max_angular_velocity > 0) {
       Scalar max_pos_delta = max_angular_velocity * dt;
       Scalar max_angle_delta = max_line_velocity * dt;

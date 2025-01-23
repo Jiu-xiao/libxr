@@ -19,9 +19,9 @@ ErrorCode ConditionVar::Wait(uint32_t timeout) {
     return ErrorCode::TIMEOUT;
   }
 
-  uint32_t now = libxr_get_time_ms();
+  uint32_t now = Timebase::GetMilliseconds();
 
-  while (libxr_get_time_ms() - now < timeout) {
+  while (Timebase::GetMilliseconds() - now < timeout) {
     if (handle_) {
       return ErrorCode::OK;
     }

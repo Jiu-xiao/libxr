@@ -7,6 +7,7 @@
 #include "libxr.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
+#include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_queue.hpp"
@@ -19,6 +20,7 @@
 #include "stack.hpp"
 #include "terminal.hpp"
 #include "thread.hpp"
+#include "timebase.hpp"
 #include "timer.hpp"
 #include "transform.hpp"
 #include <cmath>
@@ -37,7 +39,7 @@ const char *TEST_NAME = nullptr;
 static bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
 int main() {
-  LibXR::LibXR_Init();
+  LibXR::PlatformInit();
 
   LibXR::Thread::Sleep(1000);
 
@@ -80,6 +82,18 @@ int main() {
   LibXR::TimestampUS t3(1000), t4(2005);
   ASSERT(t4 - t3 == 1005);
   ASSERT(fabs((t4 - t3).to_secondf() - 0.001005) < 0.0000001);
+
+  /* --------------------------------------------------------------- */
+  TEST_STEP("Timebase Test");
+
+  t1 = LibXR::Timebase::GetMilliseconds();
+  t3 = LibXR::Timebase::GetMicroseconds();
+  LibXR::Thread::Sleep(100);
+  t4 = LibXR::Timebase::GetMicroseconds();
+  t2 = LibXR::Timebase::GetMilliseconds();
+
+  ASSERT(fabs(t2 - t1 - 100) < 2);
+  ASSERT(fabs(t4 - t3 - 100000) < 2000);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Thread Test");
@@ -775,7 +789,7 @@ int main() {
   object_startpoint.CalcForward();
   object_startpoint.CalcInertia();
 
-  object_endpoint.CalcBackward(100, 0.1, 1.0);
+  object_endpoint.CalcBackward(0, 1000, 0.01, 0.1);
 
   ASSERT(std::abs(std::abs(object_endpoint.target_pos_(0)) -
                   std::abs(object_endpoint.runtime_.target.translation(0))) <

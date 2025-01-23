@@ -11,6 +11,7 @@
 #include "mutex.hpp"
 #include "ramfs.hpp"
 #include "thread.hpp"
+#include "timebase.hpp"
 #include "timer.hpp"
 
 /* error callback */
@@ -36,3 +37,6 @@ bool LibXR::CRC32::inited = false;
 LibXR::RBTree<uint32_t> *LibXR::Topic::domain_;
 LibXR::SpinLock LibXR::Topic::domain_lock_;
 LibXR::Topic::Domain *LibXR::Topic::def_domain_;
+
+/* timebase */
+LibXR::Timebase *LibXR::Timebase::timebase = nullptr;

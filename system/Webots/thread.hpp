@@ -18,9 +18,9 @@ public:
     NUMBER,
   };
 
-  Thread() {};
+  Thread(){};
 
-  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
+  Thread(libxr_thread_handle handle) : thread_handle_(handle){};
 
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
@@ -70,6 +70,8 @@ public:
           sched_get_priority_min(SCHED_RR) + static_cast<int>(priority);
       pthread_setschedparam(pthread_self(), SCHED_RR, &sp);
     }
+
+    Thread::Sleep(1);
   }
 
   static Thread Current(void);

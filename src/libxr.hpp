@@ -17,4 +17,5 @@
 #include "signal.hpp"
 #include "terminal.hpp"
 #include "thread.hpp"
+#include "timebase.hpp"
 #include "timer.hpp"
