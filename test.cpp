@@ -7,6 +7,7 @@
 #include "libxr.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
+#include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_queue.hpp"
@@ -38,7 +39,7 @@ const char *TEST_NAME = nullptr;
 static bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
 int main() {
-  LibXR::LibXR_Init();
+  LibXR::PlatformInit();
 
   LibXR::Thread::Sleep(1000);
 

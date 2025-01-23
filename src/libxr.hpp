@@ -19,7 +19,3 @@
 #include "thread.hpp"
 #include "timebase.hpp"
 #include "timer.hpp"
-
-namespace LibXR {
-void LibXR_Init();
-}
