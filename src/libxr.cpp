@@ -40,5 +40,3 @@ LibXR::Topic::Domain *LibXR::Topic::def_domain_;
 
 /* timebase */
 LibXR::Timebase *LibXR::Timebase::timebase = nullptr;
-
-void LibXR::LibXR_Init() { PlatformInit(); }
