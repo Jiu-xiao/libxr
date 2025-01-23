@@ -1,7 +1,10 @@
 #pragma once
 
+#include "condition_var.hpp"
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
+
+extern LibXR::ConditionVar *_libxr_webots_time_notify;
 
 namespace LibXR {
 class Thread {
@@ -15,9 +18,9 @@ public:
     NUMBER,
   };
 
-  Thread(){};
+  Thread() {};
 
-  Thread(libxr_thread_handle handle) : thread_handle_(handle){};
+  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
 
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
@@ -39,6 +42,8 @@ public:
       }
 
       static void *Port(void *arg) {
+        while (_libxr_webots_time_notify == NULL) {
+        }
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
         const char *thread_name = block->name_;
         block->fun_(block->arg_);
@@ -66,7 +71,7 @@ public:
       pthread_setschedparam(pthread_self(), SCHED_RR, &sp);
     }
 
-    Thread::Sleep(1);
+    Thread::Yield();
   }
 
   static Thread Current(void);

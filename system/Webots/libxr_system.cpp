@@ -21,13 +21,14 @@
 #include "semaphore.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
+#include "webots/Robot.hpp"
 
 uint64_t _libxr_webots_time_count = 0;
 webots::Robot *_libxr_webots_robot_handle = NULL;
 static float time_step = 0.0f;
 LibXR::ConditionVar *_libxr_webots_time_notify = NULL;
 
-void LibXR::PlatformInit() {
+void LibXR::PlatformInit(webots::Robot *robot = NULL) {
   auto write_fun = [](WritePort &port) {
     auto ans = fwrite(port.info_.data.addr_, 1, port.info_.data.size_, stdout);
 
@@ -61,16 +62,13 @@ void LibXR::PlatformInit() {
   system("stty -icanon");
   system("stty -echo");
 
-  _libxr_webots_robot_handle = new webots::Robot();
+  if (robot == NULL) {
+    _libxr_webots_robot_handle = new webots::Robot();
+  } else {
+    _libxr_webots_robot_handle = robot;
+  }
 
   time_step = _libxr_webots_robot_handle->getBasicTimeStep();
-
-  if (time_step >= 2.0f) {
-    printf("webots basic time step should be less than 2ms, but now it is "
-           "%.3f ms.\n",
-           time_step);
-    exit(-1);
-  }
 
   if (_libxr_webots_robot_handle == NULL) {
     printf("webots robot handle is null.\n");

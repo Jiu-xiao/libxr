@@ -9,6 +9,18 @@
 #include <string.h>
 #include <string>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
+
+#ifndef M_2PI
+#define M_2PI 6.28318530717958647692f
+#endif
+
+#ifndef M_1G
+#define M_1G 9.80665f
+#endif
+
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #endif
@@ -27,7 +39,7 @@
 #endif
 
 #ifndef OFFSET_OF
-#define OFFSET_OF(type, member) ((size_t) & ((type *)0)->member)
+#define OFFSET_OF(type, member) ((size_t)&((type *)0)->member)
 #endif
 
 #ifndef MEMBER_SIZE_OF
