@@ -236,6 +236,8 @@ public:
     block_->data_.subers.Add(*node);
   }
 
+  Topic() {}
+
   Topic(const char *name, uint32_t max_length, Domain *domain = nullptr,
         bool cache = false, bool check_length = false) {
     if (!def_domain_) {
@@ -422,7 +424,6 @@ public:
             return int(a) - int(b);
           }),
           queue_(1, buffer_length) {
-
       /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
       ASSERT(buffer_length >= sizeof(PackedData<uint8_t>));
       parse_buff_.size_ = buffer_length;
