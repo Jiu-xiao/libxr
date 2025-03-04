@@ -49,9 +49,8 @@ public:
     ASSERT(compare_fun_);
   }
 
-  template <typename Data>
-  Node<Data> *Search(const Key &key,
-                     SizeLimitMode limit_mode = SizeLimitMode::MORE) {
+  template <typename Data, SizeLimitMode LimitMode = SizeLimitMode::MORE>
+  Node<Data> *Search(const Key &key) {
     mutex_.Lock();
     if (root_ == nullptr) {
       mutex_.Unlock();
@@ -59,7 +58,7 @@ public:
     }
     auto ans = _Search(root_, key);
     mutex_.Unlock();
-    return ToDerivedType<Data>(ans, limit_mode);
+    return ToDerivedType<Data, LimitMode>(ans);
   }
 
   void Delete(BaseNode &node) {
@@ -166,10 +165,10 @@ public:
     return num;
   }
 
-  template <typename Data, typename ArgType>
+  template <typename Data, typename ArgType,
+            SizeLimitMode LimitMode = SizeLimitMode::MORE>
   ErrorCode Foreach(ErrorCode (*fun)(Node<Data> &node, ArgType arg),
-                    ArgType arg,
-                    SizeLimitMode limit_mode = SizeLimitMode::MORE) {
+                    ArgType arg) {
 
     typedef struct {
       ErrorCode (*fun_)(Node<Data> &node, ArgType arg);
@@ -180,11 +179,11 @@ public:
     Block block;
     block.fun_ = fun;
     block.arg_ = arg;
-    block.limit_mode_ = limit_mode;
+    block.limit_mode_ = LimitMode;
 
     auto foreach_fun = [](BaseNode &node, void *raw) {
       Block *block = reinterpret_cast<Block *>(raw);
-      Assert::SizeLimitCheck(sizeof(Data), node.size, block->limit_mode_);
+      Assert::SizeLimitCheck<LimitMode>(sizeof(Data), node.size);
       return block->fun_(*ToDerivedType<Data>(&node), block->arg_);
     };
 
@@ -248,12 +247,10 @@ private:
 
   void SetColor(BaseNode *node, RBTColor color) { node->color = color; }
 
-  template <typename Data>
-  static Node<Data> *
-  ToDerivedType(BaseNode *node,
-                SizeLimitMode limit_mode = SizeLimitMode::MORE) {
+  template <typename Data, SizeLimitMode LimitMode = SizeLimitMode::MORE>
+  static Node<Data> *ToDerivedType(BaseNode *node) {
     if (node) {
-      Assert::SizeLimitCheck(sizeof(Data), node->size, limit_mode);
+      Assert::SizeLimitCheck<LimitMode>(sizeof(Data), node->size);
     }
     return reinterpret_cast<Node<Data> *>(node);
   }

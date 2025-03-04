@@ -1,32 +1,19 @@
 #pragma once
 
-#include <math.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cmath>
+#include <cstdint>
 #include <string>
 
 #ifndef M_PI
-#define M_PI 3.14159265358979323846f
+#define M_PI 3.14159265358979323846
 #endif
 
 #ifndef M_2PI
-#define M_2PI 6.28318530717958647692f
+#define M_2PI (2.0 * M_PI)
 #endif
 
 #ifndef M_1G
-#define M_1G 9.80665f
-#endif
-
-#ifndef MAX
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#endif
-
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+constexpr double M_1G = 9.80665;
 #endif
 
 #ifndef DEF2STR
@@ -47,7 +34,7 @@
 #endif
 
 #ifndef MEMBER_SIZE_OF
-#define MEMBER_SIZE_OF(type, member) (sizeof(typeof(((type *)0)->member)))
+#define MEMBER_SIZE_OF(type, member) (sizeof(decltype(((type *)0)->member)))
 #endif
 
 #define CONTAINER_OF(ptr, type, member)                                        \
@@ -82,15 +69,31 @@ enum class SizeLimitMode { EQUAL = 0, LESS = 1, MORE = 2, NONE = 3 };
 
 #ifdef LIBXR_DEBUG_BUILD
 #define ASSERT(arg)                                                            \
-  if (!(arg)) {                                                                \
-    LibXR::Assert::FatalError(__FILE__, __LINE__, false);                      \
-  }
+  do {                                                                         \
+    if (!(arg)) {                                                              \
+      LibXR::Assert::FatalError(__FILE__, __LINE__, false);                    \
+    }                                                                          \
+  } while (0)
 
 #define ASSERT_ISR(arg)                                                        \
-  if (!(arg)) {                                                                \
-    LibXR::Assert::FatalError(__FILE__, __LINE__, true);                       \
-  }
+  do {                                                                         \
+    if (!(arg)) {                                                              \
+      LibXR::Assert::FatalError(__FILE__, __LINE__, true);                     \
+    }                                                                          \
+  } while (0)
 #else
-#define ASSERT(arg) (void)0;
-#define ASSERT_ISR(arg) (void)0;
+#define ASSERT(arg) ((void)0)
+#define ASSERT_ISR(arg) ((void)0)
 #endif
+
+namespace LibXR {
+template <typename T1, typename T2>
+constexpr auto MAX(T1 a, T2 b) -> typename std::common_type<T1, T2>::type {
+  return (a > b) ? a : b;
+}
+
+template <typename T1, typename T2>
+constexpr auto MIN(T1 a, T2 b) -> typename std::common_type<T1, T2>::type {
+  return (a < b) ? a : b;
+}
+} // namespace LibXR

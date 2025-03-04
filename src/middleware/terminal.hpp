@@ -299,8 +299,7 @@ public:
             return ErrorCode::OK;
           };
 
-      current_dir_->data_.rbt.Foreach<RamFS::FsNode>(ls_fun, this,
-                                                     SizeLimitMode::MORE);
+      current_dir_->data_.rbt.Foreach<RamFS::FsNode>(ls_fun, this);
       return;
     }
 
@@ -554,7 +553,7 @@ public:
 
   static void ThreadFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = MIN(MAX(1, term->read_->Size()), READ_BUFF_SIZE);
+    buff.size_ = LibXR::MIN(LibXR::MAX(1, term->read_->Size()), READ_BUFF_SIZE);
     static ReadOperation op(UINT32_MAX);
     while (true) {
       if ((*term->read_)(buff, op) == ErrorCode::OK) {
@@ -565,7 +564,7 @@ public:
 
   static void TaskFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = MIN(MAX(1, term->read_->Size()), READ_BUFF_SIZE);
+    buff.size_ = LibXR::MIN(LibXR::MAX(1, term->read_->Size()), READ_BUFF_SIZE);
 
     static ReadOperation op;
   check_status:
