@@ -35,13 +35,13 @@ private:
         return str + i;
       }
     }
-    return NULL;
+    return nullptr;
   }
 
 public:
   enum class Mode { CRLF = 0, LF = 1, CR = 2 };
 
-  Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = NULL,
+  Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = nullptr,
            WriteOperation write_op = WriteOperation(),
            ReadPort *read_port = STDIO::read,
            WritePort *write_port = STDIO::write, Mode MODE = Mode::CRLF)
@@ -216,42 +216,42 @@ public:
 
     for (int i = 0; i < MAX_LINE_SIZE; i++) {
       auto tmp = strchr(path + index, '/');
-      if (tmp == NULL) {
+      if (tmp == nullptr) {
         return dir->FindDir(path + index);
       } else if (tmp == path + index) {
-        return NULL;
+        return nullptr;
       } else {
         tmp[0] = '\0';
         dir = dir->FindDir(path + index);
         tmp[0] = '/';
         index += tmp - path + 1;
-        if (path[index] == '\0' || dir == NULL) {
+        if (path[index] == '\0' || dir == nullptr) {
           return dir;
         }
       }
     }
 
-    return NULL;
+    return nullptr;
   }
 
   RamFS::File *Path2File(char *path) {
     auto name = strchr_rev(path, '/');
 
-    if (name == NULL) {
+    if (name == nullptr) {
       return current_dir_->FindFile(path);
     }
 
     if (name[1] == '\0') {
-      return NULL;
+      return nullptr;
     }
 
     *name = '\0';
     RamFS::Dir *dir = Path2Dir(path);
     *name = '/';
-    if (dir != NULL) {
+    if (dir != nullptr) {
       return dir->FindFile(name + 1);
     } else {
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -266,7 +266,7 @@ public:
 
     if (strcmp(arg_tab_[0], "cd") == 0) {
       RamFS::Dir *dir = Path2Dir(arg_tab_[1]);
-      if (dir != NULL) {
+      if (dir != nullptr) {
         current_dir_ = dir;
       }
       LineFeed();
@@ -401,8 +401,8 @@ public:
     }
 
     /* get start of prefix */
-    char *prefix_start = NULL;
-    RamFS::Dir *dir = NULL;
+    char *prefix_start = nullptr;
+    RamFS::Dir *dir = nullptr;
 
     if (path_end == path) {
       dir = current_dir_;
@@ -412,11 +412,11 @@ public:
     }
 
     /* find dir*/
-    if (dir == NULL) {
+    if (dir == nullptr) {
       *path_end = '\0';
       dir = Path2Dir(path);
       *path_end = '/';
-      if (dir == NULL) {
+      if (dir == nullptr) {
         return;
       }
     }
@@ -437,7 +437,7 @@ public:
 
     int prefix_len = tmp - prefix_start;
 
-    MatchResult res = {NULL, 0, prefix_start, prefix_len, this, 0};
+    MatchResult res = {nullptr, 0, prefix_start, prefix_len, this, 0};
 
     auto foreach_fun_find = [](RBTree<const char *>::Node<RamFS::FsNode> &node,
                                MatchResult *result) {
@@ -456,7 +456,7 @@ public:
         (*result->terminal->write_)(ConstRawData(node->name, name_len),
                                     result->terminal->write_op_);
         result->terminal->LineFeed();
-        if (result->node == NULL) {
+        if (result->node == nullptr) {
           result->node = &node;
           result->same_char_number = name_len;
           return ErrorCode::OK;
@@ -490,7 +490,7 @@ public:
         DisplayChar(res.node->data_.name[i + res.prefix_len]);
       }
     } else {
-      res.node = NULL;
+      res.node = nullptr;
       LineFeed();
       (*dir)->rbt.Foreach<RamFS::FsNode, MatchResult *>(foreach_fun_show, &res);
 

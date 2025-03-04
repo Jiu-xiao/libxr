@@ -73,7 +73,7 @@ public:
         return *reinterpret_cast<const DataType *>(addr_const);
       } else {
         ASSERT(false);
-        const void *addr = NULL;
+        const void *addr = nullptr;
         return *reinterpret_cast<const DataType *>(addr);
       }
     }
