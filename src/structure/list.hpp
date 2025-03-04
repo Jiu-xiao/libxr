@@ -87,12 +87,12 @@ public:
     return ErrorCode::NOT_FOUND;
   }
 
-  template <typename Data, typename ArgType>
-  ErrorCode Foreach(ErrorCode (*func)(Data &, ArgType &), ArgType &arg,
-                    SizeLimitMode limit_mode = SizeLimitMode::MORE) {
+  template <typename Data, typename ArgType,
+            SizeLimitMode LimitMode = SizeLimitMode::MORE>
+  ErrorCode Foreach(ErrorCode (*func)(Data &, ArgType &), ArgType &arg) {
     mutex_.Lock();
     for (BaseNode *pos = head_.next_; pos != &head_; pos = pos->next_) {
-      Assert::SizeLimitCheck(sizeof(Data), pos->size_, limit_mode);
+      Assert::SizeLimitCheck<LimitMode>(sizeof(Data), pos->size_);
       auto res = func(reinterpret_cast<Node<Data> *>(pos)->data_, arg);
       if (res != ErrorCode::OK) {
         mutex_.Unlock();

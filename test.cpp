@@ -77,11 +77,11 @@ int main() {
 
   LibXR::TimestampMS t1(1000), t2(2005);
   ASSERT(t2 - t1 == 1005);
-  ASSERT(fabs((t2 - t1).to_secondf() - 1.005) < 0.0001);
+  ASSERT(std::abs((t2 - t1).to_secondf() - 1.005) < 0.0001);
 
   LibXR::TimestampUS t3(1000), t4(2005);
   ASSERT(t4 - t3 == 1005);
-  ASSERT(fabs((t4 - t3).to_secondf() - 0.001005) < 0.0000001);
+  ASSERT(std::abs((t4 - t3).to_secondf() - 0.001005) < 0.0000001);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Timebase Test");
@@ -92,8 +92,8 @@ int main() {
   t4 = LibXR::Timebase::GetMicroseconds();
   t2 = LibXR::Timebase::GetMilliseconds();
 
-  ASSERT(fabs(t2 - t1 - 100) < 2);
-  ASSERT(fabs(t4 - t3 - 100000) < 2000);
+  ASSERT(std::abs((t2 - t1).to_millisecond() - 100.0) < 2.0);
+  ASSERT(std::abs((t4 - t3).to_microsecond() - 100000.0) < 2000.0);
 
   /* --------------------------------------------------------------- */
   TEST_STEP("Thread Test");
@@ -211,7 +211,7 @@ int main() {
     uint16_t size;
     chunked_queue.PushPartial(&tmp, sizeof(tmp));
     chunked_queue.Pop(&size, &tmp);
-    ASSERT(fabs(tmp - double(i)) < 0.01);
+    ASSERT(std::abs(tmp - double(i)) < 0.01);
   }
 
   ASSERT(chunked_queue.Size() == 0);
@@ -488,7 +488,7 @@ int main() {
 
   for (int i = 0; i < 100; i++) {
     rbtree.Delete(nodes[i]);
-    ASSERT(rbtree.GetNum() == 99 - i)
+    ASSERT(rbtree.GetNum() == 99 - i);
   }
 
   ASSERT(rbtree.GetNum() == 0);

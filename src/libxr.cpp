@@ -15,8 +15,8 @@
 #include "timer.hpp"
 
 /* error callback */
-const LibXR::Callback<const char *, uint32_t>
-    *LibXR::Assert::libxr_fatal_error_callback;
+std::optional<LibXR::Callback<const char *, uint32_t>>
+    LibXR::Assert::libxr_fatal_error_callback;
 
 /* stdio */
 LibXR::ReadPort *LibXR::STDIO::read = nullptr;

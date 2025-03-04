@@ -32,7 +32,43 @@ public:
     type = OperationType::CALLBACK;
   }
 
-  void operator=(Operation &op) {
+  Operation &operator=(const Operation &op) {
+    if (this != &op) {
+      type = op.type;
+      switch (type) {
+      case OperationType::CALLBACK:
+        data.callback = op.data.callback;
+        break;
+      case OperationType::BLOCK:
+        data.timeout = op.data.timeout;
+        break;
+      case OperationType::POLLING:
+        data.status = op.data.status;
+        break;
+      }
+    }
+    return *this;
+  }
+
+  Operation &operator=(Operation &&op) noexcept {
+    if (this != &op) {
+      type = op.type;
+      switch (type) {
+      case OperationType::CALLBACK:
+        data.callback = std::move(op.data.callback);
+        break;
+      case OperationType::BLOCK:
+        data.timeout = op.data.timeout;
+        break;
+      case OperationType::POLLING:
+        data.status = op.data.status;
+        break;
+      }
+    }
+    return *this;
+  }
+
+  Operation(const Operation &op) {
     type = op.type;
     switch (type) {
     case OperationType::CALLBACK:
@@ -47,11 +83,11 @@ public:
     }
   }
 
-  Operation(Operation &op) {
+  Operation(Operation &&op) noexcept {
     type = op.type;
     switch (type) {
     case OperationType::CALLBACK:
-      data.callback = op.data.callback;
+      data.callback = std::move(op.data.callback);
       break;
     case OperationType::BLOCK:
       data.timeout = op.data.timeout;
@@ -133,8 +169,7 @@ public:
   }
 
   void UpdateStatus(bool in_isr, ErrorCode ans) {
-    info_.op.UpdateStatus(in_isr, *read_sem_, std::forward<ErrorCode>(ans),
-                          info_.data);
+    info_.op.UpdateStatus(in_isr, *read_sem_, std::move(ans), info_.data);
   }
 
   void UpdateStatus() { info_.op.UpdateStatus(); }
@@ -142,7 +177,7 @@ public:
   template <typename ReadOperation>
   ErrorCode operator()(RawData data, ReadOperation &&op) {
     if (Readable()) {
-      info_.op = op;
+      info_.op = std::forward<ReadOperation>(op);
       info_.data = data;
       return read_fun_(*this);
     } else {
@@ -187,7 +222,7 @@ public:
   }
 
   void UpdateStatus(bool in_isr, ErrorCode ans) {
-    info_.op.UpdateStatus(in_isr, *write_sem_, std::forward<ErrorCode>(ans));
+    info_.op.UpdateStatus(in_isr, *write_sem_, std::move(ans));
   }
 
   void UpdateStatus() { info_.op.UpdateStatus(); }
@@ -199,7 +234,7 @@ public:
   template <typename WriteOperation>
   ErrorCode operator()(ConstRawData data, WriteOperation &&op) {
     if (Writable()) {
-      info_.op = op;
+      info_.op = std::forward<WriteOperation>(op);
       info_.data = data;
       return write_fun_(*this);
     } else {
