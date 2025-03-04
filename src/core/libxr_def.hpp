@@ -38,6 +38,10 @@
 #define UNUSED(_x) ((void)(_x))
 #endif
 
+#ifndef typeof
+#define typeof __typeof__
+#endif
+
 #ifndef OFFSET_OF
 #define OFFSET_OF(type, member) ((size_t)&((type *)0)->member)
 #endif
@@ -45,8 +49,6 @@
 #ifndef MEMBER_SIZE_OF
 #define MEMBER_SIZE_OF(type, member) (sizeof(typeof(((type *)0)->member)))
 #endif
-
-#include <type_traits>
 
 #define CONTAINER_OF(ptr, type, member)                                        \
   ((type *)((char *)(ptr) - OFFSET_OF(type, member)))

@@ -256,11 +256,13 @@ public:
   }
 
   void ExecuteCommand() {
+    AddHistory();
+
+    GetArgs();
+
     if (arg_number_ < 1 || arg_number_ > MAX_ARG_NUMBER) {
       return;
     }
-
-    AddHistory();
 
     if (strcmp(arg_tab_[0], "cd") == 0) {
       RamFS::Dir *dir = Path2Dir(arg_tab_[1]);
@@ -518,7 +520,6 @@ public:
       }
       LineFeed();
       if (input_line_.Size() > 0) {
-        GetArgs();
         ExecuteCommand();
         arg_number_ = 0;
       }
