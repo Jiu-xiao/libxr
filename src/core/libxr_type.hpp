@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstring>
+
 #include "libxr_def.hpp"
 
 namespace LibXR {
@@ -17,7 +19,7 @@ public:
 
   RawData(const RawData &data) = default;
 
-  RawData(char *data) : addr_(data), size_(strlen(data)) {}
+  RawData(char *data) : addr_(data), size_(data ? strlen(data) : 0) {}
 
   template <size_t N>
   RawData(const char (&data)[N]) : addr_(&data), size_(N - 1) {}
@@ -26,7 +28,6 @@ public:
       : addr_(const_cast<char *>(data.data())), size_(data.size()) {}
 
   RawData &operator=(const RawData &data) = default;
-  RawData &operator=(RawData &data) = default;
 
   void *addr_;
   size_t size_;
@@ -44,9 +45,10 @@ public:
   ConstRawData(const ConstRawData &data) = default;
   ConstRawData(const RawData &data) : addr_(data.addr_), size_(data.size_) {}
 
-  ConstRawData(char *data) : addr_(data), size_(strlen(data)) {}
+  ConstRawData(char *data) : addr_(data), size_(data ? strlen(data) : 0) {}
 
-  ConstRawData(const char *data) : addr_(data), size_(strlen(data)) {}
+  ConstRawData(const char *data)
+      : addr_(data), size_(data ? strlen(data) : 0) {}
 
   template <size_t N>
   ConstRawData(const char (&data)[N]) : addr_(data), size_(N - 1) {}
@@ -60,9 +62,9 @@ public:
 class Buffer {
 public:
   Buffer(size_t size) : size_(size), used_(0), raw_(new uint8_t[size]) {}
-  Buffer(RawData data)
+  Buffer(const RawData &data)
       : size_(data.size_), used_(0),
-        raw_(reinterpret_cast<uint8_t *>(data.addr_)) {}
+        raw_(data.addr_ ? static_cast<uint8_t *>(data.addr_) : nullptr) {}
 
   uint8_t operator[](size_t index) { return raw_[index]; }
 
@@ -75,7 +77,7 @@ public:
       return ErrorCode::SIZE_ERR;
     }
 
-    memccpy(raw_, data.addr_, 0, data.size_);
+    std::memcpy(raw_, data.addr_, data.size_);
     used_ = data.size_;
 
     return ErrorCode::OK;
@@ -83,9 +85,9 @@ public:
 
   ErrorCode operator=(RawData data) { return *this = ConstRawData(data); }
 
-  operator uint8_t *() { return raw_; }
+  explicit operator uint8_t *() { return raw_; }
 
-  operator void *() { return raw_; }
+  explicit operator void *() { return raw_; }
 
   size_t Size() const { return size_; }
 

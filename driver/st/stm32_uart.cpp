@@ -179,7 +179,7 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id) {
   auto need_send = uart->tx_queue_->Size();
   while (true) {
     if (need_send > 0) {
-      need_send = MIN(need_send, uart->dma_buff_tx_.Size());
+      need_send = LibXR::MIN(need_send, uart->dma_buff_tx_.Size());
       uart->tx_queue_->PopBatch(uart->dma_buff_tx_.raw_, need_send);
       uart->dma_buff_tx_.used_ = need_send;
       HAL_UART_Transmit_DMA(uart->uart_handle_, (uint8_t *)(uart->dma_buff_tx_),
