@@ -46,14 +46,14 @@ ErrorCode Signal::Wait(int signal, uint32_t timeout) {
   ts.tv_sec += add;
   ts.tv_nsec = raw_time % (1000U * 1000U * 1000U);
 
-  int res = sigtimedwait(&waitset, NULL, &ts);
+  int res = sigtimedwait(&waitset, nullptr, &ts);
 
   while (_libxr_webots_time_count - start_time < timeout) {
-    res = !sigtimedwait(&waitset, NULL, &ts);
+    res = !sigtimedwait(&waitset, nullptr, &ts);
     if (res) {
       return ErrorCode::OK;
     }
   }
-  pthread_sigmask(SIG_BLOCK, &oldset, NULL);
+  pthread_sigmask(SIG_BLOCK, &oldset, nullptr);
   return res == signal ? ErrorCode::OK : ErrorCode::TIMEOUT;
 }

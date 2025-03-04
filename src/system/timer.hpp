@@ -82,7 +82,7 @@ public:
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
 #else
       auto thread_handle = Thread();
-      thread_handle.Create<void *>(NULL, RefreshThreadFunction,
+      thread_handle.Create<void *>(nullptr, RefreshThreadFunction,
                                    "libxr_timer_task", 512,
                                    LIBXR_TIMER_PRIORITY);
 #endif
@@ -95,7 +95,7 @@ public:
       LibXR::Timer::list_ = new LibXR::List();
 
       auto thread_handle = Thread();
-      thread_handle.Create<void *>(NULL, RefreshThreadFunction,
+      thread_handle.Create<void *>(nullptr, RefreshThreadFunction,
                                    "libxr_timer_task", 512,
                                    Thread::Priority::HIGH);
     }
