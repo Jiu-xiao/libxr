@@ -18,7 +18,7 @@ public:
     if (Size() > 0) {
       return stack_;
     } else {
-      return NULL;
+      return nullptr;
     }
   }
 

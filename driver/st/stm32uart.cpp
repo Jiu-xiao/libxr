@@ -5,7 +5,7 @@ using namespace LibXR;
 STM32UART *STM32UART::map[STM32_UART_NUMBER];
 
 stm32_uart_id_t STM32_UART_GetID(USART_TypeDef *addr) {
-  if (addr == NULL) {
+  if (addr == nullptr) {
     return stm32_uart_id_t::STM32_UART_ID_ERROR;
   }
 #ifdef USART1

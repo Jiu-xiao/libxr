@@ -8,7 +8,7 @@ class LinuxTimebase : public Timebase {
 public:
   TimestampUS _get_microseconds() {
     struct timeval tv;
-    gettimeofday(&tv, NULL);
+    gettimeofday(&tv, nullptr);
     return ((tv.tv_sec - _libxr_linux_start_time.tv_sec) * 1000000 +
             (tv.tv_usec - _libxr_linux_start_time.tv_usec)) %
            UINT32_MAX;
@@ -16,7 +16,7 @@ public:
 
   TimestampMS _get_milliseconds() {
     struct timeval tv;
-    gettimeofday(&tv, NULL);
+    gettimeofday(&tv, nullptr);
     return ((tv.tv_sec - _libxr_linux_start_time.tv_sec) * 1000 +
             (tv.tv_usec - _libxr_linux_start_time.tv_usec) / 1000) %
            UINT32_MAX;
