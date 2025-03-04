@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -12,11 +13,17 @@ class Assert {
 public:
   static void
   RegisterFatalErrorCB(const LibXR::Callback<const char *, uint32_t> &cb) {
-    libxr_fatal_error_callback = &cb;
+    libxr_fatal_error_callback = cb;
+  }
+
+  static void
+  RegisterFatalErrorCB(LibXR::Callback<const char *, uint32_t> &&cb) {
+    libxr_fatal_error_callback = std::move(cb);
   }
 
   static void FatalError(const char *file, uint32_t line, bool in_isr) {
-    while (true) {
+    volatile bool stop = false;
+    while (!stop) {
       if (LibXR::STDIO::write && LibXR::STDIO::write->Writable()) {
         printf("Fatal error at %s:%d\r\n", file, int(line));
       }
@@ -28,19 +35,14 @@ public:
   }
 
 #ifdef LIBXR_DEBUG_BUILD
-  static void SizeLimitCheck(size_t limit, size_t size, SizeLimitMode mode) {
-    switch (mode) {
-    case SizeLimitMode::NONE:
-      break;
-    case SizeLimitMode::EQUAL:
+  template <SizeLimitMode mode>
+  static void SizeLimitCheck(size_t limit, size_t size) {
+    if constexpr (mode == SizeLimitMode::EQUAL) {
       ASSERT(limit == size);
-      break;
-    case SizeLimitMode::MORE:
+    } else if constexpr (mode == SizeLimitMode::MORE) {
       ASSERT(limit <= size);
-      break;
-    case SizeLimitMode::LESS:
+    } else if constexpr (mode == SizeLimitMode::LESS) {
       ASSERT(limit >= size);
-      break;
     }
   }
 #else
@@ -52,7 +54,7 @@ public:
 #endif
 
 private:
-  static const LibXR::Callback<const char *, uint32_t>
-      *libxr_fatal_error_callback;
+  static std::optional<LibXR::Callback<const char *, uint32_t>>
+      libxr_fatal_error_callback;
 };
 } // namespace LibXR

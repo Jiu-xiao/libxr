@@ -63,10 +63,9 @@ public:
       return exec(arg, argc, argv);
     }
 
-    template <typename DataType>
-    const DataType &
-    GetData(SizeLimitMode size_limit_mode = SizeLimitMode::MORE) {
-      LibXR::Assert::SizeLimitCheck(sizeof(DataType), size, size_limit_mode);
+    template <typename DataType, SizeLimitMode LimitMode = SizeLimitMode::MORE>
+    const DataType &GetData() {
+      LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(DataType), size);
       if (type == FileType::READ_WRITE) {
         return *reinterpret_cast<DataType *>(addr);
       } else if (type == FileType::READ_ONLY) {
@@ -165,8 +164,7 @@ public:
           return ErrorCode::FAILED;
         }
 
-        dir->data_.rbt.Foreach<FsNode>(_FindFileRec, block,
-                                       SizeLimitMode::MORE);
+        dir->data_.rbt.Foreach<FsNode>(_FindFileRec, block);
 
         if (block->ans) {
           return ErrorCode::FAILED;
@@ -185,7 +183,7 @@ public:
 
       block.ans = FindFile(name);
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindFileRec, &block, SizeLimitMode::MORE);
+        data_.rbt.Foreach<FsNode>(_FindFileRec, &block);
       }
 
       return block.ans;
@@ -205,8 +203,7 @@ public:
           block->ans = dir;
           return ErrorCode::OK;
         } else {
-          dir->data_.rbt.Foreach<FsNode>(_FindDirRec, block,
-                                         SizeLimitMode::MORE);
+          dir->data_.rbt.Foreach<FsNode>(_FindDirRec, block);
 
           if (block->ans) {
             return ErrorCode::FAILED;
@@ -243,7 +240,7 @@ public:
 
       block.ans = FindDir(name);
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindDirRec, &block, SizeLimitMode::MORE);
+        data_.rbt.Foreach<FsNode>(_FindDirRec, &block);
       }
 
       return block.ans;
@@ -266,7 +263,7 @@ public:
           return ErrorCode::FAILED;
         }
 
-        dir->data_.rbt.Foreach<FsNode>(_FindDevRec, block, SizeLimitMode::MORE);
+        dir->data_.rbt.Foreach<FsNode>(_FindDevRec, block);
 
         if (block->ans) {
           return ErrorCode::FAILED;
@@ -283,7 +280,7 @@ public:
       block.name = name;
       block.ans = FindDevice(name);
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindDevRec, &block, SizeLimitMode::MORE);
+        data_.rbt.Foreach<FsNode>(_FindDevRec, &block);
       }
       return block.ans;
     }
