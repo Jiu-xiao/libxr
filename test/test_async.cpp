@@ -26,4 +26,7 @@ void test_async() {
     ASSERT(async.GetStatus() == LibXR::ASync::Status::DONE);
     ASSERT(async.GetStatus() == LibXR::ASync::Status::REDAY);
   }
+
+  pthread_cancel(async.thread_handle_);
+  pthread_join(async.thread_handle_, nullptr);
 }

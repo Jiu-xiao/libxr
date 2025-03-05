@@ -82,10 +82,9 @@ class Timer {
       LibXR::Timer::list_ = new LibXR::List();
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
 #else
-      auto thread_handle = Thread();
-      thread_handle.Create<void *>(nullptr, RefreshThreadFunction,
-                                   "libxr_timer_task", 512,
-                                   LIBXR_TIMER_PRIORITY);
+      thread_handle_.Create<void *>(nullptr, RefreshThreadFunction,
+                                    "libxr_timer_task", 512,
+                                    LIBXR_TIMER_PRIORITY);
 #endif
     }
     list_->Add(*handle);
@@ -124,6 +123,8 @@ class Timer {
   static void RefreshTimerInIdle();
 
   static LibXR::List *list_;
+
+  static Thread thread_handle_;
 };
 
 }  // namespace LibXR
