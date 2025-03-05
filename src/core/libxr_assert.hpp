@@ -1,12 +1,15 @@
 #pragma once
 
+#include "libxr_def.hpp"
+#include "libxr_rw.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 
-#include "libxr_def.hpp"
-#include "libxr_rw.hpp"
+void _LibXR_FatalError(const char *file, uint32_t line, bool in_isr);
 
 namespace LibXR {
 class Assert {
@@ -19,19 +22,6 @@ public:
   static void
   RegisterFatalErrorCB(LibXR::Callback<const char *, uint32_t> &&cb) {
     libxr_fatal_error_callback = std::move(cb);
-  }
-
-  static void FatalError(const char *file, uint32_t line, bool in_isr) {
-    volatile bool stop = false;
-    while (!stop) {
-      if (LibXR::STDIO::write && LibXR::STDIO::write->Writable()) {
-        printf("Fatal error at %s:%d\r\n", file, int(line));
-      }
-
-      if (libxr_fatal_error_callback) {
-        libxr_fatal_error_callback->Run(in_isr, file, line);
-      }
-    }
   }
 
 #ifdef LIBXR_DEBUG_BUILD
@@ -53,7 +43,6 @@ public:
   };
 #endif
 
-private:
   static std::optional<LibXR::Callback<const char *, uint32_t>>
       libxr_fatal_error_callback;
 };

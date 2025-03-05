@@ -71,20 +71,22 @@ enum class SizeLimitMode { EQUAL = 0, LESS = 1, MORE = 2, NONE = 3 };
 #define ASSERT(arg)                                                            \
   do {                                                                         \
     if (!(arg)) {                                                              \
-      LibXR::Assert::FatalError(__FILE__, __LINE__, false);                    \
+      _LibXR_FatalError(__FILE__, __LINE__, false);                            \
     }                                                                          \
   } while (0)
 
 #define ASSERT_ISR(arg)                                                        \
   do {                                                                         \
     if (!(arg)) {                                                              \
-      LibXR::Assert::FatalError(__FILE__, __LINE__, true);                     \
+      _LibXR_FatalError(__FILE__, __LINE__, true);                             \
     }                                                                          \
   } while (0)
 #else
 #define ASSERT(arg) ((void)0)
 #define ASSERT_ISR(arg) ((void)0)
 #endif
+
+extern void _LibXR_FatalError(const char *file, uint32_t line, bool in_isr);
 
 namespace LibXR {
 template <typename T1, typename T2>
