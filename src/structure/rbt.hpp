@@ -1,17 +1,19 @@
 #pragma once
 
+#include <cstring>
+
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "mutex.hpp"
-#include <cstring>
 
 namespace LibXR {
-template <typename Key> class RBTree {
-public:
+template <typename Key>
+class RBTree {
+ public:
   enum class RBTColor { RED, BLACK };
 
   class BaseNode {
-  public:
+   public:
     Key key;
     RBTColor color;
     BaseNode *left = nullptr;
@@ -19,12 +21,13 @@ public:
     BaseNode *parent = nullptr;
     size_t size;
 
-  protected:
+   protected:
     BaseNode(size_t size) : size(size) {}
   };
 
-  template <typename Data> class Node : public BaseNode {
-  public:
+  template <typename Data>
+  class Node : public BaseNode {
+   public:
     Node() : BaseNode(sizeof(Data)), data_() {}
     Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
 
@@ -71,8 +74,7 @@ public:
       BaseNode *replace = &node;
 
       replace = replace->right;
-      while (replace->left != nullptr)
-        replace = replace->left;
+      while (replace->left != nullptr) replace = replace->left;
 
       if (GetParent(&node)) {
         if (GetParent(&node)->left == &node)
@@ -89,8 +91,7 @@ public:
       if (parent == &node) {
         parent = replace;
       } else {
-        if (child)
-          SetParent(child, parent);
+        if (child) SetParent(child, parent);
         parent->left = child;
 
         replace->right = node.right;
@@ -102,8 +103,7 @@ public:
       replace->left = node.left;
       node.left->parent = replace;
 
-      if (color == RBTColor::BLACK)
-        RbtreeDeleteFixup(child, parent);
+      if (color == RBTColor::BLACK) RbtreeDeleteFixup(child, parent);
       mutex_.Unlock();
       return;
     }
@@ -116,8 +116,7 @@ public:
     parent = node.parent;
     color = node.color;
 
-    if (child)
-      child->parent = parent;
+    if (child) child->parent = parent;
 
     if (parent) {
       if (parent->left == &node)
@@ -127,8 +126,7 @@ public:
     } else
       root_ = child;
 
-    if (color == RBTColor::BLACK)
-      RbtreeDeleteFixup(child, parent);
+    if (color == RBTColor::BLACK) RbtreeDeleteFixup(child, parent);
 
     mutex_.Unlock();
   }
@@ -167,22 +165,27 @@ public:
 
   template <typename Data, typename ArgType,
             SizeLimitMode LimitMode = SizeLimitMode::MORE>
+  struct ForeachBlock {
+    ErrorCode (*fun_)(Node<Data> &node, ArgType);
+    ArgType arg_;  // 存储一个非引用的类型
+    SizeLimitMode limit_mode_;
+
+    // 显式使用模板参数确保 arg_ 存储的类型正确
+    template <typename T>
+    ForeachBlock(ErrorCode (*f)(Node<Data> &, T), T &&a)
+        : fun_(f), arg_(std::forward<T>(a)), limit_mode_(LimitMode) {}
+  };
+
+  template <typename Data, typename ArgType,
+            SizeLimitMode LimitMode = SizeLimitMode::MORE>
   ErrorCode Foreach(ErrorCode (*fun)(Node<Data> &node, ArgType arg),
                     ArgType arg) {
-
-    typedef struct {
-      ErrorCode (*fun_)(Node<Data> &node, ArgType arg);
-      ArgType arg_;
-      SizeLimitMode limit_mode_;
-    } Block;
-
-    Block block;
-    block.fun_ = fun;
-    block.arg_ = arg;
-    block.limit_mode_ = LimitMode;
+    ForeachBlock<Data, ArgType, LimitMode> block(fun,
+                                                 std::forward<ArgType>(arg));
 
     auto foreach_fun = [](BaseNode &node, void *raw) {
-      Block *block = reinterpret_cast<Block *>(raw);
+      auto *block =
+          reinterpret_cast<ForeachBlock<Data, ArgType, LimitMode> *>(raw);
       Assert::SizeLimitCheck<LimitMode>(sizeof(Data), node.size);
       return block->fun_(*ToDerivedType<Data>(&node), block->arg_);
     };
@@ -193,7 +196,8 @@ public:
     return ans;
   }
 
-  template <typename Data> Node<Data> *ForeachDisc(Node<Data> *node) {
+  template <typename Data>
+  Node<Data> *ForeachDisc(Node<Data> *node) {
     mutex_.Lock();
     if (node == nullptr) {
       node = ToDerivedType<Data>(root_);
@@ -230,7 +234,7 @@ public:
     return nullptr;
   }
 
-private:
+ private:
   BaseNode *GetParent(BaseNode *node) { return node->parent; }
 
   RBTColor GetColor(BaseNode *node) { return node->color; }
@@ -330,8 +334,7 @@ private:
         }
       }
     }
-    if (node)
-      SetBlack(node);
+    if (node) SetBlack(node);
   }
 
   void RbtreeInsert(BaseNode &node) {
@@ -362,8 +365,7 @@ private:
   }
 
   void _RbtreeGetNum(BaseNode *node, uint32_t *num) {
-    if (node == nullptr)
-      return;
+    if (node == nullptr) return;
 
     (*num)++;
 
@@ -433,8 +435,7 @@ private:
     BaseNode *y = x->right;
 
     x->right = y->left;
-    if (y->left != nullptr)
-      y->left->parent = x;
+    if (y->left != nullptr) y->left->parent = x;
 
     y->parent = x->parent;
 
@@ -455,8 +456,7 @@ private:
     BaseNode *x = y->left;
 
     y->left = x->right;
-    if (x->right != nullptr)
-      x->right->parent = y;
+    if (x->right != nullptr) x->right->parent = y;
 
     x->parent = y->parent;
 
@@ -494,4 +494,4 @@ private:
 
   int (*compare_fun_)(const Key &, const Key &);
 };
-} // namespace LibXR
+}  // namespace LibXR

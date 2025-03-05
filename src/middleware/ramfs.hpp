@@ -9,7 +9,7 @@
 
 namespace LibXR {
 class RamFS {
-public:
+ public:
   RamFS(const char *name = "ramfs")
       : root_(CreateDir(name)), bin_(CreateDir("bin")), dev_(CreateDir("dev")) {
     root_.Add(bin_);
@@ -37,14 +37,14 @@ public:
   class Dir;
 
   class FsNode {
-  public:
+   public:
     const char *name;
     FsNodeType type;
     Dir *parent;
   };
 
   typedef class _File : public FsNode {
-  public:
+   public:
     union {
       void *addr;
       const void *addr_const;
@@ -86,7 +86,7 @@ public:
   };
 
   class Device : public RBTree<const char *>::Node<_Device> {
-  public:
+   public:
     Device(const char *name, ReadPort read_port = ReadPort(),
            WritePort write_port = WritePort()) {
       char *name_buff = new char[strlen(name) + 1];
@@ -117,14 +117,14 @@ public:
   } StorageBlock;
 
   class _Dir : public FsNode {
-  public:
+   public:
     _Dir() : rbt(RBTree<const char *>(_str_compare)) {}
 
     RBTree<const char *> rbt;
   };
 
   class Dir : public RBTree<const char *>::Node<_Dir> {
-  public:
+   public:
     void Add(File &file) {
       (*this)->rbt.Insert(file, file->name);
       file->parent = this;
@@ -159,31 +159,24 @@ public:
         Dir *dir = reinterpret_cast<Dir *>(&item);
 
         block->ans = dir->FindFile(block->name);
-
         if (block->ans) {
           return ErrorCode::FAILED;
         }
 
-        dir->data_.rbt.Foreach<FsNode>(_FindFileRec, block);
+        dir->data_.rbt.Foreach<FsNode>(
+            _FindFileRec, std::forward<_FindFileRecBlock *>(block));
 
-        if (block->ans) {
-          return ErrorCode::FAILED;
-        } else {
-          return ErrorCode::OK;
-        }
-      } else {
-        return ErrorCode::OK;
+        return block->ans ? ErrorCode::FAILED : ErrorCode::OK;
       }
-    };
+      return ErrorCode::OK;
+    }
 
     File *FindFileRec(const char *name) {
-      _FindFileRecBlock block;
-
-      block.name = name;
-
+      _FindFileRecBlock block{.name = name};
       block.ans = FindFile(name);
+
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindFileRec, &block);
+        data_.rbt.Foreach<FsNode, _FindFileRecBlock *>(_FindFileRec, &block);
       }
 
       return block.ans;
@@ -203,7 +196,8 @@ public:
           block->ans = dir;
           return ErrorCode::OK;
         } else {
-          dir->data_.rbt.Foreach<FsNode>(_FindDirRec, block);
+          dir->data_.rbt.Foreach<FsNode, _FindDirRecBlock *>(_FindDirRec,
+                                                             block);
 
           if (block->ans) {
             return ErrorCode::FAILED;
@@ -367,4 +361,4 @@ public:
 
   Dir root_, bin_, dev_;
 };
-} // namespace LibXR
+}  // namespace LibXR

@@ -1,15 +1,16 @@
 #pragma once
 
+#include <utility>
+
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "mutex.hpp"
-#include <utility>
 
 namespace LibXR {
 class List {
-public:
+ public:
   class BaseNode {
-  public:
+   public:
     BaseNode(size_t size) : next_(nullptr), size_(size) {}
 
     ~BaseNode() {
@@ -21,8 +22,9 @@ public:
     size_t size_;
   };
 
-  template <typename Data> class Node : public BaseNode {
-  public:
+  template <typename Data>
+  class Node : public BaseNode {
+   public:
     Node() : BaseNode(sizeof(Data)), data_() {}
 
     Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
@@ -89,11 +91,12 @@ public:
 
   template <typename Data, typename ArgType,
             SizeLimitMode LimitMode = SizeLimitMode::MORE>
-  ErrorCode Foreach(ErrorCode (*func)(Data &, ArgType &), ArgType &arg) {
+  ErrorCode Foreach(ErrorCode (*func)(Data &, ArgType), ArgType &&arg) {
     mutex_.Lock();
     for (BaseNode *pos = head_.next_; pos != &head_; pos = pos->next_) {
       Assert::SizeLimitCheck<LimitMode>(sizeof(Data), pos->size_);
-      auto res = func(reinterpret_cast<Node<Data> *>(pos)->data_, arg);
+      auto res = func(reinterpret_cast<Node<Data> *>(pos)->data_,
+                      std::forward<ArgType>(arg));
       if (res != ErrorCode::OK) {
         mutex_.Unlock();
         return res;
@@ -104,8 +107,8 @@ public:
     return ErrorCode::OK;
   }
 
-private:
+ private:
   BaseNode head_;
   LibXR::Mutex mutex_;
 };
-} // namespace LibXR
+}  // namespace LibXR

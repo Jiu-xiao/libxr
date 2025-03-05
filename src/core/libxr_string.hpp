@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstring>
 
-#include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 
 namespace LibXR {

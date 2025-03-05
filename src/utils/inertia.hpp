@@ -8,8 +8,9 @@
 
 namespace LibXR {
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Inertia {
-public:
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class Inertia {
+ public:
   Scalar data[9];
 
   Scalar mass;
@@ -62,8 +63,8 @@ public:
 
   Scalar operator()(int i, int j) const { return data[i + j * 3]; }
 
-  Eigen::Matrix<Scalar, 3, 3>
-  operator+(const Eigen::Matrix<Scalar, 3, 3> &R) const {
+  Eigen::Matrix<Scalar, 3, 3> operator+(
+      const Eigen::Matrix<Scalar, 3, 3> &R) const {
     return Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) + R;
   }
 
@@ -93,9 +94,9 @@ public:
                        q.conjugate());
   }
 
-  static Eigen::Matrix<Scalar, 3, 3>
-  Rotate(const Eigen::Matrix<Scalar, 3, 3> &R,
-         const Eigen::Quaternion<Scalar> &q) {
+  static Eigen::Matrix<Scalar, 3, 3> Rotate(
+      const Eigen::Matrix<Scalar, 3, 3> &R,
+      const Eigen::Quaternion<Scalar> &q) {
     return q * R * q.conjugate();
   }
 
@@ -104,8 +105,9 @@ public:
   }
 };
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class CenterOfMass {
-public:
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class CenterOfMass {
+ public:
   Eigen::Matrix<Scalar, 3, 1> position;
   Scalar mass;
 
@@ -141,4 +143,4 @@ public:
   }
 };
 
-} // namespace LibXR
+}  // namespace LibXR
