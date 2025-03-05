@@ -1,3 +1,5 @@
+#include <pthread.h>
+
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
@@ -11,12 +13,15 @@ void test_signal() {
       [](void*) {
         LibXR::Signal::Wait(5);
         signal_received = true;
+        return;
       },
       "signal_thread", 512, LibXR::Thread::Priority::REALTIME);
 
   LibXR::Thread::Sleep(50);
   LibXR::Signal::Action(thread, 5);
   LibXR::Thread::Sleep(50);
+
+  pthread_join(thread, nullptr);
 
   ASSERT(signal_received);
 }
