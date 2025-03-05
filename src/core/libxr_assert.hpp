@@ -1,27 +1,26 @@
 #pragma once
 
-#include "libxr_def.hpp"
-#include "libxr_rw.hpp"
-
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <optional>
 
-void _LibXR_FatalError(const char *file, uint32_t line, bool in_isr);
+#include "libxr_cb.hpp"
+#include "libxr_def.hpp"
+
+void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
 
 namespace LibXR {
 class Assert {
-public:
-  static void
-  RegisterFatalErrorCB(const LibXR::Callback<const char *, uint32_t> &cb) {
-    libxr_fatal_error_callback = cb;
+ public:
+  static void RegisterFatalErrorCB(
+      const LibXR::Callback<const char *, uint32_t> &cb) {
+    libxr_fatal_error_callback_ = cb;
   }
 
-  static void
-  RegisterFatalErrorCB(LibXR::Callback<const char *, uint32_t> &&cb) {
-    libxr_fatal_error_callback = std::move(cb);
+  static void RegisterFatalErrorCB(
+      LibXR::Callback<const char *, uint32_t> &&cb) {
+    libxr_fatal_error_callback_ = std::move(cb);
   }
 
 #ifdef LIBXR_DEBUG_BUILD
@@ -44,6 +43,6 @@ public:
 #endif
 
   static std::optional<LibXR::Callback<const char *, uint32_t>>
-      libxr_fatal_error_callback;
+      libxr_fatal_error_callback_;
 };
-} // namespace LibXR
+}  // namespace LibXR

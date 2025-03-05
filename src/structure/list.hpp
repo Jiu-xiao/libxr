@@ -11,72 +11,67 @@ class List {
  public:
   class BaseNode {
    public:
-    BaseNode(size_t size) : next_(nullptr), size_(size) {}
+    BaseNode(size_t size) : size_(size) {}
 
-    ~BaseNode() {
-      /* Should never be deconstructed in the list */
-      ASSERT(next_ == nullptr);
-    }
+    ~BaseNode() { ASSERT(next_ == nullptr); }
 
-    BaseNode *next_;
+    BaseNode* next_ = nullptr;
     size_t size_;
   };
 
   template <typename Data>
   class Node : public BaseNode {
    public:
-    Node() : BaseNode(sizeof(Data)), data_() {}
+    Node() : BaseNode(sizeof(Data)) {}
+    explicit Node(const Data& data) : BaseNode(sizeof(Data)), data_(data) {}
 
-    Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
-
-    const Node &operator=(const Data &data) {
+    Node& operator=(const Data& data) {
       data_ = data;
       return *this;
     }
 
-    Data *operator->() { return &data_; }
-
-    const Data *operator->() const { return &data_; }
-
-    Data &operator*() { return data_; }
-
-    operator Data &() { return data_; }
+    Data* operator->() noexcept { return &data_; }
+    const Data* operator->() const noexcept { return &data_; }
+    Data& operator*() noexcept { return data_; }
+    operator Data&() noexcept { return data_; }
 
     Data data_;
   };
 
-  List() : head_(0) { head_.next_ = &head_; }
+  List() noexcept : head_(0) { head_.next_ = &head_; }
 
   ~List() {
-    for (BaseNode *pos = head_.next_; pos != &head_;) {
+    for (auto pos = head_.next_; pos != &head_;) {
       auto tmp = pos->next_;
       pos->next_ = nullptr;
       pos = tmp;
     }
+
     head_.next_ = nullptr;
   }
 
-  void Add(BaseNode &data) {
+  void Add(BaseNode& data) {
     mutex_.Lock();
     data.next_ = head_.next_;
     head_.next_ = &data;
     mutex_.Unlock();
   }
 
-  uint32_t Size() {
+  uint32_t Size() noexcept {
     uint32_t size = 0;
     mutex_.Lock();
-    for (BaseNode *pos = head_.next_; pos != &head_; pos = pos->next_) {
+
+    for (auto pos = head_.next_; pos != &head_; pos = pos->next_) {
       ++size;
     }
-    mutex_.Unlock();
 
+    mutex_.Unlock();
     return size;
   }
 
-  ErrorCode Delete(BaseNode &data) {
+  ErrorCode Delete(BaseNode& data) noexcept {
     mutex_.Lock();
-    for (BaseNode *pos = &head_; pos->next_ != &head_; pos = pos->next_) {
+    for (auto pos = &head_; pos->next_ != &head_; pos = pos->next_) {
       if (pos->next_ == &data) {
         pos->next_ = data.next_;
         data.next_ = nullptr;
@@ -91,13 +86,13 @@ class List {
 
   template <typename Data, typename ArgType,
             SizeLimitMode LimitMode = SizeLimitMode::MORE>
-  ErrorCode Foreach(ErrorCode (*func)(Data &, ArgType), ArgType &&arg) {
+  ErrorCode Foreach(ErrorCode (*func)(Data&, ArgType), ArgType&& arg) {
     mutex_.Lock();
-    for (BaseNode *pos = head_.next_; pos != &head_; pos = pos->next_) {
+    for (auto pos = head_.next_; pos != &head_; pos = pos->next_) {
       Assert::SizeLimitCheck<LimitMode>(sizeof(Data), pos->size_);
-      auto res = func(reinterpret_cast<Node<Data> *>(pos)->data_,
-                      std::forward<ArgType>(arg));
-      if (res != ErrorCode::OK) {
+      if (auto res = func(static_cast<Node<Data>*>(pos)->data_,
+                          std::forward<ArgType>(arg));
+          res != ErrorCode::OK) {
         mutex_.Unlock();
         return res;
       }

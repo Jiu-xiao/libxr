@@ -17,7 +17,6 @@ void test_list() {
   LibXR::List::Node<int> node2(20);
   LibXR::List::Node<int> node3(30);
 
-  // Test adding nodes
   list.Add(node1);
   list.Add(node2);
   list.Add(node3);
@@ -26,7 +25,6 @@ void test_list() {
 
   list.Foreach<int, void *>(node_foreach_fn, static_cast<void *>(NULL));
 
-  // Test deleting nodes
   ASSERT(list.Delete(node2) == ErrorCode::OK);
   ASSERT(list.Size() == 2);
 

@@ -6,14 +6,20 @@
 
 namespace LibXR {
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Position;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Axis;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class RotationMatrix;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class EulerAngle;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Quaternion;
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class Position;
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class Axis;
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class RotationMatrix;
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class EulerAngle;
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class Quaternion;
 
-template <typename Scalar> class Position : public Eigen::Matrix<Scalar, 3, 1> {
-public:
+template <typename Scalar>
+class Position : public Eigen::Matrix<Scalar, 3, 1> {
+ public:
   Position() : Eigen::Matrix<Scalar, 3, 1>(0, 0, 0) {}
 
   Position(Scalar x, Scalar y, Scalar z)
@@ -30,13 +36,16 @@ public:
                                          int> = 0>
   Position(const T (&data)[3]) : Eigen::Matrix<Scalar, 3, 1>(data) {}
 
-  const Position &operator=(const Eigen::Matrix<Scalar, 3, 1> &p) {
+  Position &operator=(const Eigen::Matrix<Scalar, 3, 1> &p) {
     memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
     return *this;
   }
 
-  const Position &operator=(const Position &p) {
-    memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+  Position &operator=(const Position &p) {
+    if (this != &p) {
+      memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+    }
+
     return *this;
   }
 
@@ -103,8 +112,9 @@ public:
   }
 };
 
-template <typename Scalar> class Axis : public Eigen::Matrix<Scalar, 3, 1> {
-public:
+template <typename Scalar>
+class Axis : public Eigen::Matrix<Scalar, 3, 1> {
+ public:
   Axis() : Eigen::Matrix<Scalar, 3, 1>(0, 0, 0) {}
 
   Axis(Scalar x, Scalar y, Scalar z) : Eigen::Matrix<Scalar, 3, 1>(x, y, z) {}
@@ -115,20 +125,22 @@ public:
   static Axis Y() { return Axis(0., 1., 0.); }
   static Axis Z() { return Axis(0., 0., 1.); }
 
-  const Eigen::Matrix<Scalar, 3, 1> &
-  operator=(const Eigen::Matrix<Scalar, 3, 1> &p) {
+  Axis<Scalar> &operator=(const Eigen::Matrix<Scalar, 3, 1> &p) {
     memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
     return *this;
   }
 
-  const Axis &operator=(const Axis &p) {
-    memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+  Axis<Scalar> &operator=(const Axis &p) {
+    if (this != &p) {
+      memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+    }
     return *this;
   }
 };
 
-template <typename Scalar> class EulerAngle {
-public:
+template <typename Scalar>
+class EulerAngle {
+ public:
   Scalar data_[3];
 
   Scalar &roll_ = data_[0];
@@ -156,23 +168,25 @@ public:
 
   Scalar operator()(int i) const { return data_[i]; }
 
-  const EulerAngle &operator=(const Eigen::Matrix<Scalar, 3, 1> &p) {
+  EulerAngle &operator=(const Eigen::Matrix<Scalar, 3, 1> &p) {
     data_[0] = p(0);
     data_[1] = p(1);
     data_[2] = p(2);
     return *this;
   }
 
-  const EulerAngle &operator=(const EulerAngle &p) {
-    memcpy(data_, p.data_, 3 * sizeof(Scalar));
+  EulerAngle &operator=(const EulerAngle &p) {
+    if (this != &p) {
+      memcpy(data_, p.data_, 3 * sizeof(Scalar));
+    }
     return *this;
   }
 
-  Eigen::Matrix<Scalar, 3, 3> toRotationMatrix() const {
-    return toRotationMatrixZYX();
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrix() const {
+    return ToRotationMatrixZYX();
   }
 
-  Eigen::Matrix<Scalar, 3, 3> toRotationMatrixZYX() const {
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixZYX() const {
     Scalar ca = std::cos(yaw_), cb = std::cos(pitch_), cc = std::cos(roll_);
     Scalar sa = std::sin(yaw_), sb = std::sin(pitch_), sc = std::sin(roll_);
 
@@ -182,7 +196,7 @@ public:
         .finished();
   }
 
-  Eigen::Matrix<Scalar, 3, 3> toRotationMatrixZXY() const {
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixZXY() const {
     Scalar ca = std::cos(yaw_), cb = std::cos(roll_), cc = std::cos(pitch_);
     Scalar sa = std::sin(yaw_), sb = std::sin(roll_), sc = std::sin(pitch_);
 
@@ -192,7 +206,7 @@ public:
         .finished();
   }
 
-  Eigen::Matrix<Scalar, 3, 3> toRotationMatrixYXZ() const {
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixYXZ() const {
     Scalar ca = std::cos(pitch_), cb = std::cos(roll_), cc = std::cos(yaw_);
     Scalar sa = std::sin(pitch_), sb = std::sin(roll_), sc = std::sin(yaw_);
 
@@ -202,7 +216,7 @@ public:
         .finished();
   }
 
-  Eigen::Matrix<Scalar, 3, 3> toRotationMatrixYZX() const {
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixYZX() const {
     Scalar ca = std::cos(pitch_), cb = std::cos(yaw_), cc = std::cos(roll_);
     Scalar sa = std::sin(pitch_), sb = std::sin(yaw_), sc = std::sin(roll_);
 
@@ -212,7 +226,7 @@ public:
         .finished();
   }
 
-  Eigen::Matrix<Scalar, 3, 3> toRotationMatrixXYZ() const {
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixXYZ() const {
     Scalar ca = std::cos(roll_), cb = std::cos(pitch_), cc = std::cos(yaw_);
     Scalar sa = std::sin(roll_), sb = std::sin(pitch_), sc = std::sin(yaw_);
 
@@ -222,7 +236,7 @@ public:
         .finished();
   }
 
-  Eigen::Matrix<Scalar, 3, 3> toRotationMatrixXZY() const {
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixXZY() const {
     Scalar ca = std::cos(roll_), cb = std::cos(yaw_), cc = std::cos(pitch_);
     Scalar sa = std::sin(roll_), sb = std::sin(yaw_), sc = std::sin(pitch_);
 
@@ -232,45 +246,45 @@ public:
         .finished();
   }
 
-  Eigen::Quaternion<Scalar> toQuaternion() const { return toQuaternionZYX(); }
+  Eigen::Quaternion<Scalar> ToQuaternion() const { return ToQuaternionZYX(); }
 
 #if 0
-  Eigen::Quaternion<Scalar> toQuaternionXYZ() const {
+  Eigen::Quaternion<Scalar> ToQuaternionXYZ() const {
     Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
     Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
     Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
     return rollAngle * pitchAngle * yawAngle;
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionXZY() const {
+  Eigen::Quaternion<Scalar> ToQuaternionXZY() const {
     Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
     Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
     Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
     return rollAngle * yawAngle * pitchAngle;
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionYXZ() const {
+  Eigen::Quaternion<Scalar> ToQuaternionYXZ() const {
     Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
     Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
     Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
     return pitchAngle * rollAngle * yawAngle;
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionYZX() const {
+  Eigen::Quaternion<Scalar> ToQuaternionYZX() const {
     Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
     Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
     Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
     return pitchAngle * yawAngle * rollAngle;
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionZXY() const {
+  Eigen::Quaternion<Scalar> ToQuaternionZXY() const {
     Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
     Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
     Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
     return yawAngle * rollAngle * pitchAngle;
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionZYX() const {
+  Eigen::Quaternion<Scalar> ToQuaternionZYX() const {
     Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
     Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
     Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
@@ -278,34 +292,34 @@ public:
   }
 #endif
 
-  Eigen::Quaternion<Scalar> toQuaternionXYZ() const {
-    return Eigen::Quaternion<Scalar>(toRotationMatrixXYZ());
+  Eigen::Quaternion<Scalar> ToQuaternionXYZ() const {
+    return Eigen::Quaternion<Scalar>(ToRotationMatrixXYZ());
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionXZY() const {
-    return Eigen::Quaternion<Scalar>(toRotationMatrixXZY());
+  Eigen::Quaternion<Scalar> ToQuaternionXZY() const {
+    return Eigen::Quaternion<Scalar>(ToRotationMatrixXZY());
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionYXZ() const {
-    return Eigen::Quaternion<Scalar>(toRotationMatrixYXZ());
+  Eigen::Quaternion<Scalar> ToQuaternionYXZ() const {
+    return Eigen::Quaternion<Scalar>(ToRotationMatrixYXZ());
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionYZX() const {
-    return Eigen::Quaternion<Scalar>(toRotationMatrixYZX());
+  Eigen::Quaternion<Scalar> ToQuaternionYZX() const {
+    return Eigen::Quaternion<Scalar>(ToRotationMatrixYZX());
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionZXY() const {
-    return Eigen::Quaternion<Scalar>(toRotationMatrixZXY());
+  Eigen::Quaternion<Scalar> ToQuaternionZXY() const {
+    return Eigen::Quaternion<Scalar>(ToRotationMatrixZXY());
   }
 
-  Eigen::Quaternion<Scalar> toQuaternionZYX() const {
-    return Eigen::Quaternion<Scalar>(toRotationMatrixZYX());
+  Eigen::Quaternion<Scalar> ToQuaternionZYX() const {
+    return Eigen::Quaternion<Scalar>(ToRotationMatrixZYX());
   }
 };
 
 template <typename Scalar>
 class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3> {
-public:
+ public:
   RotationMatrix() : Eigen::Matrix<Scalar, 3, 3>() {
     (*this) << 1, 0, 0, 0, 1, 0, 0, 0, 1;
   }
@@ -320,9 +334,9 @@ public:
       : Eigen::Matrix<Scalar, 3, 3>{R} {}
 
   RotationMatrix(const Eigen::Quaternion<Scalar> &q)
-      : Eigen::Matrix<Scalar, 3, 3>{q.toRotationMatrix()} {}
+      : Eigen::Matrix<Scalar, 3, 3>{q.ToRotationMatrix()} {}
 
-  RotationMatrix(const Quaternion<Scalar> &q) { *this = q.toRotationMatrix(); }
+  RotationMatrix(const Quaternion<Scalar> &q) { *this = q.ToRotationMatrix(); }
 
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
@@ -344,23 +358,25 @@ public:
 
   Eigen::Matrix<Scalar, 3, 3> operator-() const { return this->transpose(); }
 
-  const RotationMatrix &operator=(const RotationMatrix &R) {
+  RotationMatrix &operator=(const RotationMatrix &R) {
+    if (this != &R) {
+      memcpy(this->data(), R.data(), 9 * sizeof(Scalar));
+    }
+    return *this;
+  }
+
+  RotationMatrix &operator=(const Eigen::Matrix<Scalar, 3, 3> &R) {
     memcpy(this->data(), R.data(), 9 * sizeof(Scalar));
     return *this;
   }
 
-  const RotationMatrix &operator=(const Eigen::Matrix<Scalar, 3, 3> &R) {
-    memcpy(this->data(), R.data(), 9 * sizeof(Scalar));
+  RotationMatrix &operator=(const Eigen::Quaternion<Scalar> &q) {
+    *this = q.ToRotationMatrix();
     return *this;
   }
 
-  const RotationMatrix &operator=(const Eigen::Quaternion<Scalar> &q) {
-    *this = q.toRotationMatrix();
-    return *this;
-  }
-
-  const RotationMatrix &operator=(const Quaternion<Scalar> &q) {
-    *this = q.toRotationMatrix();
+  RotationMatrix &operator=(const Quaternion<Scalar> &q) {
+    *this = q.ToRotationMatrix();
     return *this;
   }
 
@@ -368,76 +384,77 @@ public:
     return Position<Scalar>((*this) * Eigen::Matrix<Scalar, 3, 1>(p));
   }
 
-  Eigen::Matrix<Scalar, 3, 1>
-  operator*(const Eigen::Matrix<Scalar, 3, 1> &p) const {
-    return (Eigen::Matrix<Scalar, 3, 3>)(*this) * p;
+  Eigen::Matrix<Scalar, 3, 1> operator*(
+      const Eigen::Matrix<Scalar, 3, 1> &p) const {
+    return static_cast<Eigen::Matrix<Scalar, 3, 3>>(*this) * p;
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngle() const { return toEulerAngleZYX(); }
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngle() const { return ToEulerAngleZYX(); }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleZYX() const {
-    const Eigen::Matrix<Scalar, 3, 3> &R = (*this);
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleZYX() const {
+    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
 
-    Scalar roll = std::atan2(R(2, 1), R(2, 2));
-    Scalar yaw = std::atan2(R(1, 0), R(0, 0));
-    Scalar pitch = std::asin(-R(2, 0));
+    Scalar roll = std::atan2(r(2, 1), r(2, 2));
+    Scalar yaw = std::atan2(r(1, 0), r(0, 0));
+    Scalar pitch = std::asin(-r(2, 0));
 
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleXZY() const {
-    const Eigen::Matrix<Scalar, 3, 3> &R = (*this);
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleXZY() const {
+    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
 
-    Scalar roll = std::atan2(R(2, 1), R(1, 1));
-    Scalar yaw = std::asin(-R(0, 1));
-    Scalar pitch = std::atan2(R(0, 2), R(0, 0));
-
-    return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
-  }
-
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleYZX() const {
-    const Eigen::Matrix<Scalar, 3, 3> &R = (*this);
-
-    Scalar pitch = std::atan2(-R(2, 0), R(0, 0));
-    Scalar yaw = std::asin(R(1, 0));
-    Scalar roll = std::atan2(-R(1, 2), R(1, 1));
+    Scalar roll = std::atan2(r(2, 1), r(1, 1));
+    Scalar yaw = std::asin(-r(0, 1));
+    Scalar pitch = std::atan2(r(0, 2), r(0, 0));
 
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleYXZ() const {
-    const Eigen::Matrix<Scalar, 3, 3> &R = (*this);
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleYZX() const {
+    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
 
-    Scalar pitch = std::atan2(R(0, 2), R(2, 2));
-    Scalar roll = std::asin(-R(1, 2));
-    Scalar yaw = std::atan2(R(1, 0), R(1, 1));
-
-    return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
-  }
-
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleZXY() const {
-    const Eigen::Matrix<Scalar, 3, 3> &R = (*this);
-
-    Scalar roll = std::asin(R(2, 1));
-    Scalar yaw = std::atan2(R(1, 1), -R(0, 1));
-    Scalar pitch = std::atan2(-R(2, 0), R(2, 2));
+    Scalar pitch = std::atan2(-r(2, 0), r(0, 0));
+    Scalar yaw = std::asin(r(1, 0));
+    Scalar roll = std::atan2(-r(1, 2), r(1, 1));
 
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleXYZ() const {
-    const Eigen::Matrix<Scalar, 3, 3> &R = (*this);
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleYXZ() const {
+    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
 
-    Scalar yaw = std::atan2(-R(0, 1), R(0, 0));
-    Scalar pitch = std::asin(R(0, 2));
-    Scalar roll = std::atan2(-R(1, 2), R(2, 2));
+    Scalar pitch = std::atan2(r(0, 2), r(2, 2));
+    Scalar roll = std::asin(-r(1, 2));
+    Scalar yaw = std::atan2(r(1, 0), r(1, 1));
+
+    return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
+  }
+
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleZXY() const {
+    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+
+    Scalar roll = std::asin(r(2, 1));
+    Scalar yaw = std::atan2(r(1, 1), -r(0, 1));
+    Scalar pitch = std::atan2(-r(2, 0), r(2, 2));
+
+    return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
+  }
+
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleXYZ() const {
+    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+
+    Scalar yaw = std::atan2(-r(0, 1), r(0, 0));
+    Scalar pitch = std::asin(r(0, 2));
+    Scalar roll = std::atan2(-r(1, 2), r(2, 2));
 
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 };
 
-template <typename Scalar> class Quaternion : public Eigen::Quaternion<Scalar> {
-public:
+template <typename Scalar>
+class Quaternion : public Eigen::Quaternion<Scalar> {
+ public:
   Quaternion() : Eigen::Quaternion<Scalar>(1, 0, 0, 0) {}
 
   Quaternion(Scalar w, Scalar x, Scalar y, Scalar z)
@@ -447,12 +464,12 @@ public:
       : Eigen::Quaternion<Scalar>(q) {}
 
   Quaternion(const RotationMatrix<Scalar> &R)
-      : Eigen::Quaternion<Scalar>(
-            Eigen::Quaternion<Scalar>((Eigen::Matrix<Scalar, 3, 3>)(R))) {}
+      : Eigen::Quaternion<Scalar>(Eigen::Quaternion<Scalar>(
+            static_cast<Eigen::Matrix<Scalar, 3, 3>>(R))) {}
 
   Quaternion(const Eigen::Matrix<Scalar, 3, 3> R)
-      : Eigen::Quaternion<Scalar>(
-            Eigen::Quaternion<Scalar>((Eigen::Matrix<Scalar, 3, 3>)(R))) {}
+      : Eigen::Quaternion<Scalar>(Eigen::Quaternion<Scalar>(
+            static_cast<Eigen::Matrix<Scalar, 3, 3>>(R))) {}
 
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
@@ -462,21 +479,22 @@ public:
 
   Scalar operator()(int i) const {
     switch (i) {
-    case 3:
-      return this->w();
-    case 0:
-      return this->x();
-    case 1:
-      return this->y();
-    case 2:
-      return this->z();
-    default:
-      return 0;
+      case 3:
+        return this->w();
+      case 0:
+        return this->x();
+      case 1:
+        return this->y();
+      case 2:
+        return this->z();
+      default:
+        return 0;
     }
   }
 
-  const Quaternion &operator=(const Eigen::Quaternion<Scalar> &q) {
-    return *this = Quaternion(q);
+  Quaternion &operator=(const Eigen::Quaternion<Scalar> &q) {
+    *this = Quaternion(q);
+    return *this;
   }
 
   Quaternion operator-() const { return Quaternion((*this).conjugate()); }
@@ -539,14 +557,14 @@ public:
     return Eigen::Quaternion<Scalar>(*this) * Eigen::Matrix<Scalar, 3, 1>(p);
   }
 
-  Eigen::Matrix<Scalar, 3, 1>
-  operator*(const Eigen::Matrix<Scalar, 3, 1> &p) const {
+  Eigen::Matrix<Scalar, 3, 1> operator*(
+      const Eigen::Matrix<Scalar, 3, 1> &p) const {
     return Eigen::Quaternion<Scalar>(*this) * p;
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngle() const { return toEulerAngleZYX(); }
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngle() const { return ToEulerAngleZYX(); }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleYZX() const {
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleYZX() const {
     Scalar roll =
         std::atan2(2 * this->w() * this->x() - 2 * this->y() * this->z(),
                    1 - 2 * (this->x() * this->x() + this->z() * this->z()));
@@ -557,7 +575,7 @@ public:
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleZYX() const {
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleZYX() const {
     Scalar yaw =
         std::atan2(2 * (this->w() * this->z() + this->x() * this->y()),
                    1 - 2 * (this->z() * this->z() + this->y() * this->y()));
@@ -569,7 +587,7 @@ public:
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleYXZ() const {
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleYXZ() const {
     Scalar roll =
         std::asin(2 * (this->w() * this->x() - this->y() * this->z()));
     Scalar yaw =
@@ -581,7 +599,7 @@ public:
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleZXY() const {
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleZXY() const {
     Scalar pitch =
         std::atan2(-2 * (this->x() * this->z() - this->w() * this->y()),
                    1 - 2 * (this->y() * this->y() + this->x() * this->x()));
@@ -593,7 +611,7 @@ public:
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleXZY() const {
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleXZY() const {
     Scalar pitch =
         std::atan2(2 * (this->w() * this->y() + this->x() * this->z()),
                    1 - 2 * (this->z() * this->z() + this->y() * this->y()));
@@ -604,7 +622,7 @@ public:
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
 
-  Eigen::Matrix<Scalar, 3, 1> toEulerAngleXYZ() const {
+  Eigen::Matrix<Scalar, 3, 1> ToEulerAngleXYZ() const {
     Scalar yaw =
         std::atan2(-2 * (this->x() * this->y() - this->w() * this->z()),
                    1 - 2 * (this->z() * this->z() + this->y() * this->y()));
@@ -615,10 +633,15 @@ public:
                    1 - 2 * (this->y() * this->y() + this->x() * this->x()));
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
   }
+
+  Eigen::Matrix<Scalar, 3, 3> ToRotationMatrix() const {
+    return Eigen::Matrix<Scalar, 3, 3>(*this);
+  }
 };
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Transform {
-public:
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class Transform {
+ public:
   Quaternion<Scalar> rotation;
   Position<Scalar> translation;
 
@@ -628,17 +651,17 @@ public:
             const Position<Scalar> &translation)
       : rotation(rotation), translation(translation) {}
 
-  const Transform &operator=(const Quaternion<Scalar> &q) {
+  Transform &operator=(const Quaternion<Scalar> &q) {
     rotation = q;
     return *this;
   }
 
-  const Transform &operator=(const Eigen::AngleAxis<Scalar> &a) {
+  Transform &operator=(const Eigen::AngleAxis<Scalar> &a) {
     rotation = a;
     return *this;
   }
 
-  const Transform &operator=(const Position<Scalar> &p) {
+  Transform &operator=(const Position<Scalar> &p) {
     translation = p;
     return *this;
   }
@@ -653,4 +676,4 @@ public:
     return Transform(rotation / t.rotation, translation - t.translation);
   }
 };
-} // namespace LibXR
+}  // namespace LibXR

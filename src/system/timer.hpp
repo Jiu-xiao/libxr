@@ -1,6 +1,7 @@
 #pragma once
 
-#include "libxr.hpp"
+#include <utility>
+
 #include "libxr_def.hpp"
 #include "list.hpp"
 #include "thread.hpp"
@@ -117,7 +118,7 @@ class Timer {
 
     static void *empty = nullptr;
 
-    list_->Foreach<ControlBlock, void *>(fun, std::move(empty));
+    list_->Foreach<ControlBlock, void *>(fun, std::forward<void *>(empty));
   }
 
   static void RefreshTimerInIdle();

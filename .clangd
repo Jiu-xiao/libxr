@@ -54,7 +54,7 @@ Diagnostics:
       readability-identifier-naming.PrivateMemberSuffix: _
       readability-identifier-naming.ProtectedMemberCase: lower_case
       readability-identifier-naming.ProtectedMemberSuffix: _
-      readability-identifier-naming.EnumCase: UPPER_CASE
+      readability-identifier-naming.EnumCase: CamelCase
       readability-identifier-naming.EnumConstantCase: UPPER_CASE
       readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
       readability-identifier-naming.ConstantCase: UPPER_CASE

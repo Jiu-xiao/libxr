@@ -8,8 +8,9 @@
 
 namespace LibXR {
 
-template <unsigned int MaxLength> class String {
-public:
+template <unsigned int MaxLength>
+class String {
+ public:
   String() : raw_string_() {}
 
   String(const char *str) {
@@ -18,9 +19,9 @@ public:
   }
 
   String(const char *str, size_t len) {
-    size_t copy_len = LibXR::MIN(MaxLength, len);
+    size_t copy_len = LibXR::min(MaxLength, len);
     std::strncpy(&raw_string_[0], str, copy_len);
-    raw_string_[copy_len] = '\0'; // 确保字符串终止
+    raw_string_[copy_len] = '\0';  // 确保字符串终止
   }
 
   const char *Raw() const { return &raw_string_[0]; }
@@ -46,8 +47,9 @@ public:
   }
 
   int Find(const char *str) const {
-    if (!str)
+    if (!str) {
       return -1;
+    }
     const char *result = std::strstr(this->Raw(), str);
     return result ? static_cast<int>(result - this->Raw()) : -1;
   }
@@ -90,10 +92,10 @@ public:
   String<SubStrLength> Substr(size_t pos) const {
     ASSERT(pos < MaxLength);
     return String<SubStrLength>(&raw_string_[pos],
-                                LibXR::MIN(SubStrLength, MaxLength - pos));
+                                LibXR::min(SubStrLength, MaxLength - pos));
   }
 
-private:
+ private:
   std::array<char, MaxLength + 1> raw_string_;
 };
-} // namespace LibXR
+}  // namespace LibXR
