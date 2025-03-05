@@ -7,72 +7,104 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "lockfree_queue.hpp"
+#include "queue.hpp"
 #include "semaphore.hpp"
 
 namespace LibXR {
-template <typename... Args> class Operation {
-public:
-  enum class OperationType { CALLBACK, BLOCK, POLLING };
+template <typename... Args>
+class Operation {
+ public:
+  enum class OperationType : uint8_t { CALLBACK, BLOCK, POLLING };
 
-  enum class OperationPollingStatus { READY, RUNNING, DONE };
+  enum class OperationPollingStatus : uint8_t { READY, RUNNING, DONE };
 
-  Operation() {
+  Operation() : type(OperationType::POLLING) {
     data.status = OperationPollingStatus::READY;
-    type = OperationType::POLLING;
   }
 
-  Operation(uint32_t timeout) {
+  Operation(uint32_t timeout) : type(OperationType::BLOCK) {
     data.timeout = timeout;
-    type = OperationType::BLOCK;
   }
 
-  Operation(Callback<Args...> callback) {
+  Operation(Callback<Args...> callback) : type(OperationType::CALLBACK) {
     data.callback = callback;
-    type = OperationType::CALLBACK;
   }
 
-  void operator=(Operation &op) {
-    type = op.type;
+  Operation &operator=(const Operation &op) {
+    if (this != &op) {
+      type = op.type;
+      switch (type) {
+        case OperationType::CALLBACK:
+          data.callback = op.data.callback;
+          break;
+        case OperationType::BLOCK:
+          data.timeout = op.data.timeout;
+          break;
+        case OperationType::POLLING:
+          data.status = op.data.status;
+          break;
+      }
+    }
+    return *this;
+  }
+
+  Operation &operator=(Operation &&op) noexcept {
+    if (this != &op) {
+      type = op.type;
+      switch (type) {
+        case OperationType::CALLBACK:
+          data.callback = std::move(op.data.callback);
+          break;
+        case OperationType::BLOCK:
+          data.timeout = op.data.timeout;
+          break;
+        case OperationType::POLLING:
+          data.status = op.data.status;
+          break;
+      }
+    }
+    return *this;
+  }
+
+  Operation(const Operation &op) : type(op.type) {
     switch (type) {
-    case OperationType::CALLBACK:
-      data.callback = op.data.callback;
-      break;
-    case OperationType::BLOCK:
-      data.timeout = op.data.timeout;
-      break;
-    case OperationType::POLLING:
-      data.status = op.data.status;
-      break;
+      case OperationType::CALLBACK:
+        data.callback = op.data.callback;
+        break;
+      case OperationType::BLOCK:
+        data.timeout = op.data.timeout;
+        break;
+      case OperationType::POLLING:
+        data.status = op.data.status;
+        break;
     }
   }
 
-  Operation(Operation &op) {
-    type = op.type;
+  Operation(Operation &&op) noexcept : type(op.type) {
     switch (type) {
-    case OperationType::CALLBACK:
-      data.callback = op.data.callback;
-      break;
-    case OperationType::BLOCK:
-      data.timeout = op.data.timeout;
-      break;
-    case OperationType::POLLING:
-      data.status = op.data.status;
-      break;
+      case OperationType::CALLBACK:
+        data.callback = std::move(op.data.callback);
+        break;
+      case OperationType::BLOCK:
+        data.timeout = op.data.timeout;
+        break;
+      case OperationType::POLLING:
+        data.status = op.data.status;
+        break;
     }
   }
 
   void UpdateStatus(bool in_isr, LibXR::Semaphore &sem, Args &&...args) {
     switch (type) {
-    case OperationType::CALLBACK:
-      data.callback.Run(in_isr, std::forward<Args>(args)...);
-      break;
-    case OperationType::BLOCK:
-      sem.PostFromCallback(in_isr);
-      break;
-    case OperationType::POLLING:
-      data.status = OperationPollingStatus::DONE;
-      break;
+      case OperationType::CALLBACK:
+        data.callback.Run(in_isr, std::forward<Args>(args)...);
+        break;
+      case OperationType::BLOCK:
+        sem.PostFromCallback(in_isr);
+        break;
+      case OperationType::POLLING:
+        data.status = OperationPollingStatus::DONE;
+        break;
     }
   }
 
@@ -112,15 +144,15 @@ typedef struct {
 } WriteInfoBlock;
 
 class ReadPort {
-public:
+ public:
   ReadFun read_fun_ = nullptr;
   Semaphore *read_sem_;
-  LockFreeQueue<ReadInfoBlock> *queue_;
+  ChunkManager *queue_;
   ReadInfoBlock info_;
 
-  ReadPort(size_t queue_size = 3)
+  ReadPort(size_t queue_size = 3, size_t block_size = 128)
       : read_sem_(new Semaphore()),
-        queue_(new LockFreeQueue<ReadInfoBlock>(queue_size)) {}
+        queue_(new ChunkManager(queue_size, block_size)) {}
 
   size_t EmptySize() { return queue_->EmptySize(); }
   size_t Size() { return queue_->Size(); }
@@ -142,7 +174,7 @@ public:
   template <typename ReadOperation>
   ErrorCode operator()(RawData data, ReadOperation &&op) {
     if (Readable()) {
-      info_.op = op;
+      info_.op = std::forward<ReadOperation>(op);
       info_.data = data;
       return read_fun_(*this);
     } else {
@@ -166,15 +198,15 @@ public:
 };
 
 class WritePort {
-public:
+ public:
   WriteFun write_fun_ = nullptr;
   Semaphore *write_sem_;
-  LockFreeQueue<WriteInfoBlock> *queue_;
+  ChunkManager *queue_;
   WriteInfoBlock info_;
 
-  WritePort(size_t queue_size = 3)
+  WritePort(size_t queue_size = 3, size_t block_size = 128)
       : write_sem_(new Semaphore()),
-        queue_(new LockFreeQueue<WriteInfoBlock>(queue_size)) {}
+        queue_(new ChunkManager(queue_size, block_size)) {}
 
   size_t EmptySize() { return queue_->EmptySize(); }
   size_t Size() { return queue_->Size(); }
@@ -199,7 +231,7 @@ public:
   template <typename WriteOperation>
   ErrorCode operator()(ConstRawData data, WriteOperation &&op) {
     if (Writable()) {
-      info_.op = op;
+      info_.op = std::forward<WriteOperation>(op);
       info_.data = data;
       return write_fun_(*this);
     } else {
@@ -223,8 +255,8 @@ public:
 };
 
 class STDIO {
-public:
-  static ReadPort *read;
-  static WritePort *write;
+ public:
+  static ReadPort *read_;
+  static WritePort *write_;
 };
-} // namespace LibXR
+}  // namespace LibXR

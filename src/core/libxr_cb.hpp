@@ -5,10 +5,14 @@
 
 namespace LibXR {
 
-template <typename ArgType, typename... Args> class CallbackBlock {
-public:
-  CallbackBlock(void (*fun)(bool, ArgType, Args...), ArgType arg)
-      : fun_(fun), arg_(arg), in_isr_(false) {}
+template <typename ArgType, typename... Args>
+class CallbackBlock {
+ public:
+  using FunctionType = void (*)(bool, ArgType, Args...);
+
+  template <typename FunType, typename ArgT>
+  CallbackBlock(FunType fun, ArgT &&arg)
+      : fun_(fun), arg_(std::forward<ArgT>(arg)) {}
 
   void Call(bool in_isr, Args &&...args) {
     in_isr_ = in_isr;
@@ -17,35 +21,39 @@ public:
     }
   }
 
-  CallbackBlock(const CallbackBlock &other)
-      : fun_(other.fun_), arg_(other.arg_), in_isr_(other.in_isr_) {}
+  CallbackBlock(const CallbackBlock &other) = delete;
+  CallbackBlock &operator=(const CallbackBlock &other) = delete;
 
-  CallbackBlock &operator=(const CallbackBlock &other) {
+  CallbackBlock(CallbackBlock &&other) noexcept
+      : fun_(std::exchange(other.fun_, nullptr)),
+        arg_(std::move(other.arg_)),
+        in_isr_(other.in_isr_) {}
+
+  CallbackBlock &operator=(CallbackBlock &&other) noexcept {
     if (this != &other) {
-      fun_ = other.fun_;
-      arg_ = other.arg_;
+      fun_ = std::exchange(other.fun_, nullptr);
+      arg_ = std::move(other.arg_);
       in_isr_ = other.in_isr_;
     }
     return *this;
   }
 
-private:
+ private:
   void (*fun_)(bool, ArgType, Args...);
   ArgType arg_;
-  bool in_isr_;
+  bool in_isr_ = false;
 };
 
-template <typename... Args> class Callback {
-public:
+template <typename... Args>
+class Callback {
+ public:
   template <typename FunType, typename ArgType>
   static Callback Create(FunType fun, ArgType arg) {
     void (*fun_ptr)(bool, ArgType, Args...) = fun;
-
     auto cb_block = new CallbackBlock<ArgType, Args...>(fun_ptr, arg);
 
     auto cb_fun = [](bool in_isr, void *cb_block, Args... args) {
-      CallbackBlock<ArgType, Args...> *cb =
-          static_cast<CallbackBlock<ArgType, Args...> *>(cb_block);
+      auto *cb = static_cast<CallbackBlock<ArgType, Args...> *>(cb_block);
       cb->Call(in_isr, std::forward<Args>(args)...);
     };
 
@@ -55,28 +63,28 @@ public:
   Callback() : cb_block_(nullptr), cb_fun_(nullptr) {}
 
   Callback(const Callback &) = default;
+  Callback &operator=(const Callback &) = default;
 
-  Callback(Callback &other)
-      : cb_block_(other.cb_block_), cb_fun_(other.cb_fun_) {}
+  Callback(Callback &&other) noexcept
+      : cb_block_(std::exchange(other.cb_block_, nullptr)),
+        cb_fun_(std::exchange(other.cb_fun_, nullptr)) {}
 
-  Callback &operator=(Callback &other) {
+  Callback &operator=(Callback &&other) noexcept {
     if (this != &other) {
-      cb_block_ = other.cb_block_;
-      cb_fun_ = other.cb_fun_;
-      other.cb_block_ = nullptr;
-      other.cb_fun_ = nullptr;
+      cb_block_ = std::exchange(other.cb_block_, nullptr);
+      cb_fun_ = std::exchange(other.cb_fun_, nullptr);
     }
     return *this;
   }
 
-  Callback &operator=(const Callback &) = default;
-
   template <typename... PassArgs>
   void Run(bool in_isr, PassArgs &&...args) const {
-    cb_fun_(in_isr, cb_block_, std::forward<PassArgs>(args)...);
+    if (cb_fun_) {
+      cb_fun_(in_isr, cb_block_, std::forward<PassArgs>(args)...);
+    }
   }
 
-private:
+ private:
   Callback(void *cb_block, void (*cb_fun)(bool, void *, Args...))
       : cb_block_(cb_block), cb_fun_(cb_fun) {}
 
@@ -84,4 +92,4 @@ private:
   void (*cb_fun_)(bool, void *, Args...);
 };
 
-} // namespace LibXR
+}  // namespace LibXR

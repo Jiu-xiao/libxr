@@ -8,8 +8,9 @@
 
 namespace LibXR {
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class Inertia {
-public:
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class Inertia {
+ public:
   Scalar data[9];
 
   Scalar mass;
@@ -62,19 +63,19 @@ public:
 
   Scalar operator()(int i, int j) const { return data[i + j * 3]; }
 
-  Eigen::Matrix<Scalar, 3, 3>
-  operator+(const Eigen::Matrix<Scalar, 3, 3> &R) const {
+  Eigen::Matrix<Scalar, 3, 3> operator+(
+      const Eigen::Matrix<Scalar, 3, 3> &R) const {
     return Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) + R;
   }
 
   Inertia Translate(const Eigen::Matrix<Scalar, 3, 1> &p) const {
     Scalar dx = p(0), dy = p(1), dz = p(2);
-    Eigen::Matrix<Scalar, 3, 3> translationMatrix;
-    translationMatrix << dy * dy + dz * dz, -dx * dy, -dx * dz, -dx * dy,
+    Eigen::Matrix<Scalar, 3, 3> translation_matrix;
+    translation_matrix << dy * dy + dz * dz, -dx * dy, -dx * dz, -dx * dy,
         dx * dx + dz * dz, -dy * dz, -dx * dz, -dy * dz, dx * dx + dy * dy;
 
     return Inertia(mass, Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) +
-                             mass * translationMatrix);
+                             mass * translation_matrix);
   }
 
   Inertia Rotate(const Eigen::Matrix<Scalar, 3, 3> &R) const {
@@ -93,9 +94,9 @@ public:
                        q.conjugate());
   }
 
-  static Eigen::Matrix<Scalar, 3, 3>
-  Rotate(const Eigen::Matrix<Scalar, 3, 3> &R,
-         const Eigen::Quaternion<Scalar> &q) {
+  static Eigen::Matrix<Scalar, 3, 3> Rotate(
+      const Eigen::Matrix<Scalar, 3, 3> &R,
+      const Eigen::Quaternion<Scalar> &q) {
     return q * R * q.conjugate();
   }
 
@@ -104,35 +105,31 @@ public:
   }
 };
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class CenterOfMass {
-public:
+template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+class CenterOfMass {
+ public:
   Eigen::Matrix<Scalar, 3, 1> position;
   Scalar mass;
 
   CenterOfMass() : position(0., 0., 0.), mass(0.) {}
 
-  CenterOfMass(Scalar m, const LibXR::Position<Scalar> &p) {
-    mass = m;
-    position = p;
-  }
+  CenterOfMass(Scalar m, const LibXR::Position<Scalar> &p)
+      : position(p), mass(m) {}
 
-  CenterOfMass(Scalar m, const Eigen::Matrix<Scalar, 3, 1> &p) {
-    mass = m;
-    position = p;
-  }
+  CenterOfMass(Scalar m, const Eigen::Matrix<Scalar, 3, 1> &p)
+      : position(p), mass(m) {}
 
-  CenterOfMass(const Inertia<Scalar> &m, const Transform<Scalar> &p) {
-    mass = m.mass;
-    position = p.translation;
-  }
+  CenterOfMass(const Inertia<Scalar> &m, const Transform<Scalar> &p)
+      : position(p.translation), mass(m.mass) {}
 
   CenterOfMass operator+(const CenterOfMass &m) const {
-    Scalar newMass = mass + m.mass;
+    Scalar new_mass = mass + m.mass;
     return CenterOfMass(
-        newMass, Position<Scalar>(
-                     (position(0) * mass + m.position(0) * m.mass) / newMass,
-                     (position(1) * mass + m.position(1) * m.mass) / newMass,
-                     (position(2) * mass + m.position(2) * m.mass) / newMass));
+        new_mass,
+        Position<Scalar>(
+            (position(0) * mass + m.position(0) * m.mass) / new_mass,
+            (position(1) * mass + m.position(1) * m.mass) / new_mass,
+            (position(2) * mass + m.position(2) * m.mass) / new_mass));
   }
 
   CenterOfMass &operator+=(const CenterOfMass &m) {
@@ -141,4 +138,4 @@ public:
   }
 };
 
-} // namespace LibXR
+}  // namespace LibXR

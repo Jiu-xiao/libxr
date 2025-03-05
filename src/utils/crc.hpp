@@ -1,50 +1,50 @@
 #pragma once
 
-#include "libxr_assert.hpp"
-#include "libxr_type.hpp"
+#include <cstdint>
+#include <cstdio>
 
 namespace LibXR {
 class CRC8 {
-private:
+ private:
   static const uint8_t INIT = 0xFF;
 
-public:
-  static uint8_t tab[256];
-  static bool inited;
+ public:
+  static uint8_t tab_[256];
+  static bool inited_;
   CRC8() {}
 
   static void GenerateTable() {
     uint8_t crc = 0;
 
     for (int i = 0; i < 256; i++) {
-      tab[i] = i;
+      tab_[i] = i;
     }
 
     for (int i = 0; i < 256; i++) {
       for (int j = 7; j >= 0; j--) {
-        crc = tab[i] & 0x01;
+        crc = tab_[i] & 0x01;
 
         if (crc) {
-          tab[i] = tab[i] >> 1;
-          tab[i] ^= 0x8c;
+          tab_[i] = tab_[i] >> 1;
+          tab_[i] ^= 0x8c;
         } else {
-          tab[i] = tab[i] >> 1;
+          tab_[i] = tab_[i] >> 1;
         }
       }
     }
-    inited = true;
+    inited_ = true;
   }
 
   static uint8_t Calculate(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
-    if (!inited) {
+    if (!inited_) {
       GenerateTable();
     }
 
     uint8_t crc = INIT;
 
     while (len-- > 0) {
-      crc = tab[(crc ^ *buf++) & 0xff];
+      crc = tab_[(crc ^ *buf++) & 0xff];
     }
 
     return crc;
@@ -52,7 +52,7 @@ public:
 
   static bool Verify(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
-    if (!inited) {
+    if (!inited_) {
       GenerateTable();
     }
 
@@ -65,12 +65,12 @@ public:
 };
 
 class CRC16 {
-private:
+ private:
   static const uint16_t INIT = 0xFFFF;
 
-public:
-  static uint16_t tab[256];
-  static bool inited;
+ public:
+  static uint16_t tab_[256];
+  static bool inited_;
   CRC16() {}
 
   static void GenerateTable() {
@@ -84,47 +84,47 @@ public:
           crc >>= 1;
         }
       }
-      tab[i] = crc;
+      tab_[i] = crc;
     }
-    inited = true;
+    inited_ = true;
   }
 
   static uint16_t Calculate(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
-    if (!inited) {
+    if (!inited_) {
       GenerateTable();
     }
 
     uint16_t crc = INIT;
     while (len--) {
-      crc = tab[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
+      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
     }
     return crc;
   }
 
   static bool Verify(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
-    if (!inited) {
+    if (!inited_) {
       GenerateTable();
     }
 
-    if (len < 2)
+    if (len < 2) {
       return false;
+    }
 
     uint16_t expected = Calculate(buf, len - sizeof(uint16_t));
-    return expected ==
-           ((const uint16_t *)((const uint8_t *)buf +
-                               (len % 2)))[len / sizeof(uint16_t) - 1];
+    return expected == (reinterpret_cast<const uint16_t *>(
+                           buf + (len % 2)))[len / sizeof(uint16_t) - 1];
   }
 };
 
 class CRC32 {
-private:
+ private:
   static const uint32_t INIT = 0xFFFFFFFF;
 
-public:
-  static uint32_t tab[256];
-  static bool inited;
+ public:
+  static uint32_t tab_[256];
+  static bool inited_;
 
   CRC32() {}
 
@@ -139,37 +139,37 @@ public:
           crc >>= 1;
         }
       }
-      tab[i] = crc;
+      tab_[i] = crc;
     }
-    inited = true;
+    inited_ = true;
   }
 
   static uint32_t Calculate(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
-    if (!inited) {
+    if (!inited_) {
       GenerateTable();
     }
 
     uint32_t crc = INIT;
     while (len--) {
-      crc = tab[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
+      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
     }
     return crc;
   }
 
   static bool Verify(const void *raw, size_t len) {
     const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
-    if (!inited) {
+    if (!inited_) {
       GenerateTable();
     }
 
-    if (len < 2)
+    if (len < 2) {
       return false;
+    }
 
     uint32_t expected = Calculate(buf, len - sizeof(uint32_t));
-    return expected ==
-           ((const uint32_t *)((const uint8_t *)buf +
-                               (len % 4)))[len / sizeof(uint32_t) - 1];
+    return expected == (reinterpret_cast<const uint32_t *>(
+                           buf + (len % 4)))[len / sizeof(uint32_t) - 1];
   }
 };
-} // namespace LibXR
+}  // namespace LibXR

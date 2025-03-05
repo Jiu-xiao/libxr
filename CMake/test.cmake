@@ -8,7 +8,11 @@ project(test)
 
 add_compile_options(-g)
 
-add_executable(test test.cpp)
+file(
+  GLOB TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp")
+
+
+add_executable(test ${TEST_SOURCES})
 
 add_dependencies(test xr)
 
@@ -19,5 +23,6 @@ target_link_libraries(
 
 target_include_directories(
     test
-    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>/test
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/Eigen
 )
