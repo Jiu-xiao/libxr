@@ -11,8 +11,11 @@ void test_semaphore() {
       [](LibXR::Semaphore *sem) {
         LibXR::Thread::Sleep(50);
         sem->Post();
+        return;
       },
       "semaphore_thread", 512, LibXR::Thread::Priority::REALTIME);
 
   ASSERT(sem.Wait(100) == ErrorCode::OK);
+
+  pthread_join(thread, nullptr);
 }

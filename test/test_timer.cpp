@@ -1,6 +1,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "timer.hpp"
 
 void test_timer() {
   int timer_arg = 0;
@@ -24,4 +25,7 @@ void test_timer() {
   }
 
   ASSERT(timer_arg == 20);
+
+  pthread_cancel(LibXR::Timer::thread_handle_);
+  pthread_join(LibXR::Timer::thread_handle_, nullptr);
 }

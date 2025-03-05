@@ -17,6 +17,7 @@ LibXR::WritePort *LibXR::STDIO::write_ = nullptr;
 
 /* timer */
 LibXR::List *LibXR::Timer::list_;
+LibXR::Thread LibXR::Timer::thread_handle_;
 
 /* crc */
 uint8_t LibXR::CRC8::tab_[256];
