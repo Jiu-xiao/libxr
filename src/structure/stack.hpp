@@ -4,23 +4,16 @@
 #include "mutex.hpp"
 
 namespace LibXR {
-template <typename Data> class Stack {
-private:
+template <typename Data>
+class Stack {
+ private:
   Data *stack_;
-  uint32_t top_;
+  uint32_t top_ = 0;
   uint32_t depth_;
   LibXR::Mutex mutex_;
 
-public:
-  Stack(uint32_t depth) : stack_(new Data[depth]), top_(0), depth_(depth) {}
-
-  Data *operator&() {
-    if (Size() > 0) {
-      return stack_;
-    } else {
-      return NULL;
-    }
-  }
+ public:
+  Stack(uint32_t depth) : stack_(new Data[depth]), depth_(depth) {}
 
   Data &operator[](int32_t index) {
     if (index >= 0) {
@@ -131,4 +124,4 @@ public:
     mutex_.Unlock();
   }
 };
-} // namespace LibXR
+}  // namespace LibXR

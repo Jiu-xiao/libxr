@@ -1,7 +1,10 @@
 #include "semaphore.hpp"
-#include "libxr_def.hpp"
-#include "libxr_system.hpp"
+
 #include <semaphore.h>
+
+#include <cstddef>
+
+#include "libxr_def.hpp"
 
 using namespace LibXR;
 
@@ -15,15 +18,16 @@ void Semaphore::Post() { sem_post(&semaphore_handle_); }
 
 ErrorCode Semaphore::Wait(uint32_t timeout) {
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  UNUSED(clock_gettime(CLOCK_REALTIME, &ts));
   uint32_t secs = timeout / 1000;
   timeout = timeout % 1000;
 
   uint32_t add = 0;
-  long raw_time = timeout * 1000U * 1000U + ts.tv_nsec;
-  add = raw_time / (1000U * 1000U * 1000U);
+  int64_t raw_time =
+      static_cast<__syscall_slong_t>(timeout * 1000U * 1000U) + ts.tv_nsec;
+  add = raw_time / (static_cast<int64_t>(1000U * 1000U * 1000U));
   ts.tv_sec += (add + secs);
-  ts.tv_nsec = raw_time % (1000U * 1000U * 1000U);
+  ts.tv_nsec = raw_time % (static_cast<int64_t>(1000U * 1000U * 1000U));
 
   if (sem_timedwait(&semaphore_handle_, &ts) == 0) {
     return ErrorCode::OK;

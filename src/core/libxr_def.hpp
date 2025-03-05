@@ -1,36 +1,22 @@
 #pragma once
 
-#include <math.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string>
+#include <cmath>
+#include <cstdint>
 
 #ifndef M_PI
-#define M_PI 3.14159265358979323846f
+#define M_PI 3.14159265358979323846
 #endif
 
 #ifndef M_2PI
-#define M_2PI 6.28318530717958647692f
+#define M_2PI (2.0 * M_PI)
 #endif
 
 #ifndef M_1G
-#define M_1G 9.80665f
-#endif
-
-#ifndef MAX
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#endif
-
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+constexpr double M_1G = 9.80665;
 #endif
 
 #ifndef DEF2STR
-#define _XR_TO_STR(_arg) #_arg
+#define XR_TO_STR(_arg) #_arg
 #define DEF2STR(_arg) _XR_TO_STR(_arg)
 #endif
 
@@ -43,15 +29,13 @@
 #endif
 
 #ifndef MEMBER_SIZE_OF
-#define MEMBER_SIZE_OF(type, member) (sizeof(typeof(((type *)0)->member)))
+#define MEMBER_SIZE_OF(type, member) (sizeof(decltype(((type *)0)->member)))
 #endif
 
-#include <type_traits>
-
-#define CONTAINER_OF(ptr, type, member)                                        \
+#define CONTAINER_OF(ptr, type, member) \
   ((type *)((char *)(ptr) - OFFSET_OF(type, member)))
 
-enum class ErrorCode {
+enum class ErrorCode : int8_t {
   OK = 0,
   FAILED = -1,
   INIT_ERR = -2,
@@ -72,23 +56,41 @@ enum class ErrorCode {
   OUT_OF_RANGE = -17,
 };
 
-enum class SizeLimitMode { EQUAL = 0, LESS = 1, MORE = 2, NONE = 3 };
+enum class SizeLimitMode : uint8_t { EQUAL = 0, LESS = 1, MORE = 2, NONE = 3 };
 
 #ifdef ASSERT
 #undef ASSERT
 #endif
 
 #ifdef LIBXR_DEBUG_BUILD
-#define ASSERT(arg)                                                            \
-  if (!(arg)) {                                                                \
-    LibXR::Assert::FatalError(__FILE__, __LINE__, false);                      \
-  }
+#define ASSERT(arg)                                 \
+  do {                                              \
+    if (!(arg)) {                                   \
+      libxr_fatal_error(__FILE__, __LINE__, false); \
+    }                                               \
+  } while (0)
 
-#define ASSERT_ISR(arg)                                                        \
-  if (!(arg)) {                                                                \
-    LibXR::Assert::FatalError(__FILE__, __LINE__, true);                       \
-  }
+#define ASSERT_ISR(arg)                            \
+  do {                                             \
+    if (!(arg)) {                                  \
+      libxr_fatal_error(__FILE__, __LINE__, true); \
+    }                                              \
+  } while (0)
 #else
-#define ASSERT(arg) (void)0;
-#define ASSERT_ISR(arg) (void)0;
+#define ASSERT(arg) ((void)0)
+#define ASSERT_ISR(arg) ((void)0)
 #endif
+
+extern void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
+
+namespace LibXR {
+template <typename T1, typename T2>
+constexpr auto max(T1 a, T2 b) -> typename std::common_type<T1, T2>::type {
+  return (a > b) ? a : b;
+}
+
+template <typename T1, typename T2>
+constexpr auto min(T1 a, T2 b) -> typename std::common_type<T1, T2>::type {
+  return (a < b) ? a : b;
+}
+}  // namespace LibXR

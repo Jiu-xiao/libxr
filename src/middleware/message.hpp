@@ -17,7 +17,7 @@
 
 namespace LibXR {
 class Topic {
-public:
+ public:
   typedef struct {
     uint32_t max_length;
     uint32_t crc32;
@@ -35,8 +35,9 @@ public:
     uint8_t pack_header_crc8;
   } PackedDataHeader;
 
-  template <typename Data> class __attribute__((packed)) PackedData {
-  public:
+  template <typename Data>
+  class __attribute__((packed)) PackedData {
+   public:
     struct __attribute__((packed)) {
       PackedDataHeader header;
       Data data_;
@@ -60,7 +61,7 @@ public:
   typedef RBTree<uint32_t>::Node<Block> *TopicHandle;
 
   class Domain {
-  public:
+   public:
     Domain(const char *name) {
       if (!domain_) {
         domain_lock_.Lock();
@@ -109,8 +110,9 @@ public:
     Semaphore sem;
   } SyncBlock;
 
-  template <typename Data> class SyncSubscriber {
-  public:
+  template <typename Data>
+  class SyncSubscriber {
+   public:
     SyncSubscriber(const char *name, Data &data, Domain *domain = nullptr) {
       *this = SyncSubscriber(WaitTopic(name, UINT32_MAX, domain), data);
     }
@@ -140,8 +142,9 @@ public:
     bool data_ready;
   } ASyncBlock;
 
-  template <typename Data> class ASyncSubscriber {
-  public:
+  template <typename Data>
+  class ASyncSubscriber {
+   public:
     ASyncSubscriber(const char *name, Data &data, Domain *domain = nullptr) {
       *this = ASyncSubscriber(WaitTopic(name, UINT32_MAX, domain), data);
     }
@@ -172,7 +175,7 @@ public:
   } QueueBlock;
 
   class QueuedSubscriber {
-  public:
+   public:
     template <typename Data, uint32_t Length>
     QueuedSubscriber(const char *name, LockFreeQueue<Data> &queue,
                      Domain *domain = nullptr) {
@@ -235,6 +238,8 @@ public:
     auto node = new List::Node<CallbackBlock>(block);
     block_->data_.subers.Add(*node);
   }
+
+  Topic() {}
 
   Topic(const char *name, uint32_t max_length, Domain *domain = nullptr,
         bool cache = false, bool check_length = false) {
@@ -307,7 +312,8 @@ public:
     }
     block_->data_.mutex.Unlock();
   }
-  template <typename Data> void Publish(Data &data) {
+  template <typename Data>
+  void Publish(Data &data) {
     Publish(&data, sizeof(Data));
   }
 
@@ -329,39 +335,40 @@ public:
 
     auto foreach_fun = [](SuberBlock &block, RawData &data) {
       switch (block.type) {
-      case SuberType::SYNC: {
-        auto sync = reinterpret_cast<SyncBlock *>(&block);
-        memcpy(sync->buff.addr_, data.addr_, data.size_);
-        sync->sem.Post();
-        break;
-      }
-      case SuberType::ASYNC: {
-        auto async = reinterpret_cast<ASyncBlock *>(&block);
-        memcpy(async->buff.addr_, data.addr_, data.size_);
-        async->data_ready = true;
-        break;
-      }
-      case SuberType::QUEUE: {
-        auto queue_block = reinterpret_cast<QueueBlock *>(&block);
-        queue_block->fun(data, queue_block->queue);
-        break;
-      }
-      case SuberType::CALLBACK: {
-        auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
-        cb_block->cb.Run(false, data);
-        break;
-      }
+        case SuberType::SYNC: {
+          auto sync = reinterpret_cast<SyncBlock *>(&block);
+          memcpy(sync->buff.addr_, data.addr_, data.size_);
+          sync->sem.Post();
+          break;
+        }
+        case SuberType::ASYNC: {
+          auto async = reinterpret_cast<ASyncBlock *>(&block);
+          memcpy(async->buff.addr_, data.addr_, data.size_);
+          async->data_ready = true;
+          break;
+        }
+        case SuberType::QUEUE: {
+          auto queue_block = reinterpret_cast<QueueBlock *>(&block);
+          queue_block->fun(data, queue_block->queue);
+          break;
+        }
+        case SuberType::CALLBACK: {
+          auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
+          cb_block->cb.Run(false, data);
+          break;
+        }
       }
       return ErrorCode::OK;
     };
 
-    block_->data_.subers.Foreach<SuberBlock, RawData>(foreach_fun,
-                                                      block_->data_.data);
+    block_->data_.subers.Foreach<SuberBlock, RawData &>(foreach_fun,
+                                                        block_->data_.data);
 
     block_->data_.mutex.Unlock();
   }
 
-  template <typename Data> void DumpData(PackedData<Data> &data) {
+  template <typename Data>
+  void DumpData(PackedData<Data> &data) {
     if (block_->data_.data.addr_ != nullptr) {
       if (block_->data_.check_length) {
         ASSERT(sizeof(Data) == block_->data_.data.size_);
@@ -382,7 +389,8 @@ public:
     }
   }
 
-  template <typename Data> void DumpData(Data &data) {
+  template <typename Data>
+  void DumpData(Data &data) {
     if (block_->data_.data.addr_ != nullptr) {
       if (block_->data_.check_length) {
         ASSERT(sizeof(Data) == block_->data_.data.size_);
@@ -414,7 +422,7 @@ public:
   operator TopicHandle() { return block_; }
 
   class Server {
-  public:
+   public:
     enum class Status { WAIT_START, WAIT_TOPIC, WAIT_DATA_CRC };
 
     Server(size_t buffer_length)
@@ -422,7 +430,6 @@ public:
             return int(a) - int(b);
           }),
           queue_(1, buffer_length) {
-
       /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
       ASSERT(buffer_length >= sizeof(PackedData<uint8_t>));
       parse_buff_.size_ = buffer_length;
@@ -500,12 +507,12 @@ public:
       if (status_ == Status::WAIT_DATA_CRC) {
         /* Check size&crc */
         if (queue_.Size() > data_len_ + sizeof(PackedDataHeader)) {
-          queue_.PopBatch(parse_buff_.addr_, data_len_ +
-                                                 sizeof(PackedDataHeader) +
-                                                 sizeof(uint8_t));
-          if (CRC8::Verify(parse_buff_.addr_, data_len_ +
-                                                  sizeof(PackedDataHeader) +
-                                                  sizeof(uint8_t))) {
+          queue_.PopBatch(
+              parse_buff_.addr_,
+              data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t));
+          if (CRC8::Verify(
+                  parse_buff_.addr_,
+                  data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t))) {
             status_ = Status::WAIT_START;
             auto data = reinterpret_cast<uint8_t *>(parse_buff_.addr_) +
                         sizeof(PackedDataHeader);
@@ -526,7 +533,7 @@ public:
       return ErrorCode::FAILED;
     }
 
-  private:
+   private:
     Status status_ = Status::WAIT_START;
     uint32_t data_len_ = 0;
     RBTree<uint32_t> topic_map_;
@@ -535,10 +542,10 @@ public:
     TopicHandle current_topic_ = nullptr;
   };
 
-private:
+ private:
   TopicHandle block_ = nullptr;
   static RBTree<uint32_t> *domain_;
   static SpinLock domain_lock_;
   static Domain *def_domain_;
 };
-} // namespace LibXR
+}  // namespace LibXR

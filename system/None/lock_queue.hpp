@@ -69,7 +69,7 @@ public:
 
   void Reset() {
     mutex_.Lock();
-    while (semaphore_handle_.Wait(0) != ErrorCode::OK) {
+    while (semaphore_handle_.Wait(0) == ErrorCode::OK) {
     };
     queue_handle_.Reset();
     mutex_.Unlock();
