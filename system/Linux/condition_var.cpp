@@ -1,6 +1,6 @@
 #include "condition_var.hpp"
+
 #include "libxr_def.hpp"
-#include <time.h>
 
 using namespace LibXR;
 
@@ -16,9 +16,9 @@ ConditionVar::~ConditionVar() {
 
 ErrorCode ConditionVar::Wait(uint32_t timeout) {
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  UNUSED(clock_gettime(CLOCK_REALTIME, &ts));
   ts.tv_sec += timeout / 1000;
-  ts.tv_nsec += (timeout % 1000) * 1000000;
+  ts.tv_nsec += static_cast<__syscall_slong_t>((timeout % 1000) * 1000000);
   if (ts.tv_nsec >= 1000000000) {
     ts.tv_sec++;
     ts.tv_nsec -= 1000000000;

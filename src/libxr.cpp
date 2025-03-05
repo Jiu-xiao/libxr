@@ -1,37 +1,30 @@
 #include "libxr.hpp"
 
 #include "crc.hpp"
-#include "event.hpp"
 #include "libxr_def.hpp"
-#include "libxr_system.hpp"
-#include "libxr_time.hpp"
-#include "libxr_type.hpp"
 #include "list.hpp"
 #include "message.hpp"
-#include "mutex.hpp"
-#include "ramfs.hpp"
-#include "thread.hpp"
 #include "timebase.hpp"
 #include "timer.hpp"
 
 /* error callback */
 std::optional<LibXR::Callback<const char *, uint32_t>>
-    LibXR::Assert::libxr_fatal_error_callback;
+    LibXR::Assert::libxr_fatal_error_callback_;
 
 /* stdio */
-LibXR::ReadPort *LibXR::STDIO::read = nullptr;
-LibXR::WritePort *LibXR::STDIO::write = nullptr;
+LibXR::ReadPort *LibXR::STDIO::read_ = nullptr;
+LibXR::WritePort *LibXR::STDIO::write_ = nullptr;
 
 /* timer */
 LibXR::List *LibXR::Timer::list_;
 
 /* crc */
-uint8_t LibXR::CRC8::tab[256];
-bool LibXR::CRC8::inited = false;
-uint16_t LibXR::CRC16::tab[256];
-bool LibXR::CRC16::inited = false;
-uint32_t LibXR::CRC32::tab[256];
-bool LibXR::CRC32::inited = false;
+uint8_t LibXR::CRC8::tab_[256];
+bool LibXR::CRC8::inited_ = false;
+uint16_t LibXR::CRC16::tab_[256];
+bool LibXR::CRC16::inited_ = false;
+uint32_t LibXR::CRC32::tab_[256];
+bool LibXR::CRC32::inited_ = false;
 
 /* topic */
 LibXR::RBTree<uint32_t> *LibXR::Topic::domain_;
@@ -41,15 +34,15 @@ LibXR::Topic::Domain *LibXR::Topic::def_domain_;
 /* timebase */
 LibXR::Timebase *LibXR::Timebase::timebase = nullptr;
 
-void _LibXR_FatalError(const char *file, uint32_t line, bool in_isr) {
+void libxr_fatal_error(const char *file, uint32_t line, bool in_isr) {
   volatile bool stop = false;
   while (!stop) {
-    if (LibXR::STDIO::write && LibXR::STDIO::write->Writable()) {
-      printf("Fatal error at %s:%d\r\n", file, int(line));
+    if (LibXR::STDIO::write_ && LibXR::STDIO::write_->Writable()) {
+      printf("Fatal error at %s:%d\r\n", file, static_cast<int>(line));
     }
 
-    if (LibXR::Assert::libxr_fatal_error_callback) {
-      LibXR::Assert::libxr_fatal_error_callback->Run(in_isr, file, line);
+    if (LibXR::Assert::libxr_fatal_error_callback_) {
+      LibXR::Assert::libxr_fatal_error_callback_->Run(in_isr, file, line);
     }
   }
 }

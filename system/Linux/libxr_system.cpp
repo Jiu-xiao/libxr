@@ -8,23 +8,16 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cstdint>
-
-#include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "linux_timebase.hpp"
-#include "list.hpp"
-#include "queue.hpp"
-#include "semaphore.hpp"
-#include "thread.hpp"
-#include "timer.hpp"
 
-struct timeval _libxr_linux_start_time;
-struct timespec _libxr_linux_start_time_spec;
+struct timeval libxr_linux_start_time;
 
-static LibXR::LinuxTimebase _libxr_linux_timebase;
+struct timespec libxr_linux_start_time_spec;
+
+static LibXR::LinuxTimebase libxr_linux_timebase;
 
 void LibXR::PlatformInit() {
   auto write_fun = [](WritePort &port) {
@@ -37,9 +30,9 @@ void LibXR::PlatformInit() {
     return ErrorCode::OK;
   };
 
-  LibXR::STDIO::write = new LibXR::WritePort();
+  LibXR::STDIO::write_ = new LibXR::WritePort();
 
-  *LibXR::STDIO::write = write_fun;
+  *LibXR::STDIO::write_ = write_fun;
 
   auto read_fun = [](ReadPort &port) {
     auto need_read = port.info_.data.size_;
@@ -53,12 +46,12 @@ void LibXR::PlatformInit() {
     return ErrorCode::OK;
   };
 
-  LibXR::STDIO::read = new LibXR::ReadPort();
+  LibXR::STDIO::read_ = new LibXR::ReadPort();
 
-  *LibXR::STDIO::read = read_fun;
+  *LibXR::STDIO::read_ = read_fun;
 
-  gettimeofday(&_libxr_linux_start_time, nullptr);
-  clock_gettime(CLOCK_REALTIME, &_libxr_linux_start_time_spec);
+  gettimeofday(&libxr_linux_start_time, nullptr);
+  UNUSED(clock_gettime(CLOCK_REALTIME, &libxr_linux_start_time_spec));
 
   system("stty -icanon");
   system("stty -echo");
