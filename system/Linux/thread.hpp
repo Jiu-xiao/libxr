@@ -41,7 +41,7 @@ class Thread {
 
       static void *Port(void *arg) {
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
-        const char *thread_name = block->name_;
+        volatile const char *thread_name = block->name_;
         block->fun_(block->arg_);
 
         UNUSED(thread_name);

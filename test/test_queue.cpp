@@ -3,10 +3,10 @@
 #include "test.hpp"
 
 void test_queue() {
-  LibXR::Thread thread;
+  LibXR::Thread thread1, thread2;
   auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
 
-  thread.Create<LibXR::LockFreeQueue<float> *>(
+  thread1.Create<LibXR::LockFreeQueue<float> *>(
       &lock_free_queue,
       [](LibXR::LockFreeQueue<float> *queue) {
         queue->Push(1.2f);
@@ -38,7 +38,7 @@ void test_queue() {
 
   auto queue = LibXR::LockQueue<float>(3);
 
-  thread.Create<LibXR::LockQueue<float> *>(
+  thread2.Create<LibXR::LockQueue<float> *>(
       &queue,
       [](LibXR::LockQueue<float> *queue) {
         LibXR::Thread::Sleep(100);
@@ -69,4 +69,7 @@ void test_queue() {
 
   queue.Pop(tmp, 20);
   ASSERT(tmp == 2.1f);
+
+  pthread_join(thread1, nullptr);
+  pthread_join(thread2, nullptr);
 }

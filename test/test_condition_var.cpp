@@ -9,11 +9,13 @@ void test_condition_var() {
   void (*func1)(LibXR::ConditionVar *) = [](LibXR::ConditionVar *cv) {
     ASSERT(cv->Wait(100) == ErrorCode::OK);
     sem.Post();
+    return;
   };
 
   void (*func2)(LibXR::ConditionVar *) = [](LibXR::ConditionVar *cv) {
     ASSERT(cv->Wait(100) == ErrorCode::OK);
     sem.Post();
+    return;
   };
 
   LibXR::Thread thread1, thread2;
@@ -27,4 +29,7 @@ void test_condition_var() {
   cv.Broadcast();
   ASSERT(sem.Wait(20) == ErrorCode::OK);
   ASSERT(sem.Wait(20) == ErrorCode::OK);
+
+  pthread_join(thread1, nullptr);
+  pthread_join(thread2, nullptr);
 }
