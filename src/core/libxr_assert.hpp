@@ -35,10 +35,10 @@ class Assert {
     }
   }
 #else
-  static void SizeLimitCheck(size_t limit, size_t size, SizeLimitMode mode) {
+  template <SizeLimitMode mode>
+  static void SizeLimitCheck(size_t limit, size_t size) {
     UNUSED(limit);
     UNUSED(size);
-    UNUSED(mode);
   };
 #endif
 
