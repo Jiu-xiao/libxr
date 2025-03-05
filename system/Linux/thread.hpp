@@ -6,7 +6,7 @@
 namespace LibXR {
 class Thread {
  public:
-  enum class Priority {
+  enum class Priority : uint8_t {
     IDLE,
     LOW,
     MEDIUM,
@@ -46,7 +46,7 @@ class Thread {
 
         UNUSED(thread_name);
 
-        return (void *)0;
+        return static_cast<void *>(0);
       }
 
       typeof(function) fun_;
@@ -61,7 +61,7 @@ class Thread {
     if (sched_get_priority_max(SCHED_RR) - sched_get_priority_min(SCHED_RR) >=
         static_cast<int>(Priority::REALTIME)) {
       struct sched_param sp;
-      bzero((void *)&sp, sizeof(sp));
+      memset(&sp, 0, sizeof(sp));
       sp.sched_priority =
           sched_get_priority_min(SCHED_RR) + static_cast<int>(priority);
       pthread_setschedparam(pthread_self(), SCHED_RR, &sp);

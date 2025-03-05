@@ -1,9 +1,10 @@
 #include "signal.hpp"
 
-#include <errno.h>
-#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <csignal>
 
 #include "libxr_def.hpp"
 
@@ -36,7 +37,7 @@ ErrorCode Signal::Wait(int signal, uint32_t timeout) {
 
   struct timespec ts;
   ts.tv_sec = timeout / 1000;
-  ts.tv_nsec = (timeout % 1000) * 1000000;
+  ts.tv_nsec = static_cast<__syscall_slong_t>((timeout % 1000) * 1000000);
   int res = sigtimedwait(&waitset, nullptr, &ts);
   pthread_sigmask(SIG_BLOCK, &oldset, nullptr);
   if (res == -1) {

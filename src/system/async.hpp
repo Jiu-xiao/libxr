@@ -1,16 +1,12 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
-#include "libxr_rw.hpp"
-#include "list.hpp"
-#include "mutex.hpp"
-#include "rbt.hpp"
 #include "semaphore.hpp"
 #include "thread.hpp"
 
 namespace LibXR {
 class ASync {
-public:
-  enum class Status {
+ public:
+  enum class Status : uint8_t {
     REDAY,
     BUSY,
     DONE,
@@ -18,7 +14,7 @@ public:
 
   ASync(size_t stack_depth, Thread::Priority priority);
 
-  static void thread_fun(ASync *async) {
+  static void ThreadFun(ASync *async) {
     while (true) {
       if (async->sem_.Wait() == ErrorCode::OK) {
         async->job_.Run(false, async);
@@ -51,4 +47,4 @@ public:
 
   Thread thread_handle_;
 };
-} // namespace LibXR
+}  // namespace LibXR

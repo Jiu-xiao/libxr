@@ -1,5 +1,10 @@
 #pragma once
 
+#include "async.hpp"
+#include "condition_var.hpp"
+#include "event.hpp"
+#include "inertia.hpp"
+#include "kinematic.hpp"
 #include "libxr_assert.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
@@ -8,6 +13,7 @@
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
+#include "list.hpp"
 #include "lock_queue.hpp"
 #include "message.hpp"
 #include "mutex.hpp"
@@ -19,3 +25,4 @@
 #include "thread.hpp"
 #include "timebase.hpp"
 #include "timer.hpp"
+#include "transform.hpp"
