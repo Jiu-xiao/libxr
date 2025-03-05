@@ -16,7 +16,7 @@ void test_inertia() {
   LibXR::Inertia inertia(0.1, i_xx, i_yy, i_zz, i_xy, i_xz, i_yz);
 
   auto inertia_new = inertia.Translate(pos);
-  inertia_new = inertia_new.Rotate(eulr.toQuaternion());
+  inertia_new = inertia_new.Rotate(eulr.ToQuaternion());
 
   ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
          equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
@@ -25,7 +25,7 @@ void test_inertia() {
          equal(inertia_new(2, 2), 1.1));
 
   inertia_new = inertia.Translate(pos);
-  inertia_new = inertia_new.Rotate(eulr.toRotationMatrix());
+  inertia_new = inertia_new.Rotate(eulr.ToRotationMatrix());
 
   ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
          equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&

@@ -1,21 +1,20 @@
-#include "libxr_def.hpp"
 #include <atomic>
 
 namespace LibXR {
 class SpinLock {
-private:
-  std::atomic_flag atomic_flag = ATOMIC_FLAG_INIT;
+ private:
+  std::atomic_flag atomic_flag_ = ATOMIC_FLAG_INIT;
 
-public:
+ public:
   bool TryLock() noexcept {
-    return !atomic_flag.test_and_set(std::memory_order_acquire);
+    return !atomic_flag_.test_and_set(std::memory_order_acquire);
   }
 
   void Lock() noexcept {
-    while (atomic_flag.test_and_set(std::memory_order_acquire)) {
+    while (atomic_flag_.test_and_set(std::memory_order_acquire)) {
     }
   }
 
-  void Unlock() noexcept { atomic_flag.clear(std::memory_order_release); }
+  void Unlock() noexcept { atomic_flag_.clear(std::memory_order_release); }
 };
-} // namespace LibXR
+}  // namespace LibXR
