@@ -7,7 +7,8 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "lockfree_queue.hpp"
+#include "queue.hpp"
+
 #include "semaphore.hpp"
 
 namespace LibXR {
@@ -151,12 +152,12 @@ class ReadPort {
 public:
   ReadFun read_fun_ = nullptr;
   Semaphore *read_sem_;
-  LockFreeQueue<ReadInfoBlock> *queue_;
+  ChunkManager *queue_;
   ReadInfoBlock info_;
 
-  ReadPort(size_t queue_size = 3)
+  ReadPort(size_t queue_size = 3, size_t block_size = 128)
       : read_sem_(new Semaphore()),
-        queue_(new LockFreeQueue<ReadInfoBlock>(queue_size)) {}
+        queue_(new ChunkManager(queue_size, block_size)) {}
 
   size_t EmptySize() { return queue_->EmptySize(); }
   size_t Size() { return queue_->Size(); }
@@ -204,12 +205,12 @@ class WritePort {
 public:
   WriteFun write_fun_ = nullptr;
   Semaphore *write_sem_;
-  LockFreeQueue<WriteInfoBlock> *queue_;
+  ChunkManager *queue_;
   WriteInfoBlock info_;
 
-  WritePort(size_t queue_size = 3)
+  WritePort(size_t queue_size = 3, size_t block_size = 128)
       : write_sem_(new Semaphore()),
-        queue_(new LockFreeQueue<WriteInfoBlock>(queue_size)) {}
+        queue_(new ChunkManager(queue_size, block_size)) {}
 
   size_t EmptySize() { return queue_->EmptySize(); }
   size_t Size() { return queue_->Size(); }

@@ -11,9 +11,9 @@
 
 namespace LibXR {
 class Timer {
-public:
+ public:
   class ControlBlock {
-  public:
+   public:
     void Run() { fun_(handle); }
 
     void (*fun_)(void *);
@@ -100,7 +100,7 @@ public:
                                    Thread::Priority::HIGH);
     }
 
-    auto fun = [](ControlBlock &block, void *&) {
+    auto fun = [](ControlBlock &block, void *) {
       if (!block.enable_) {
         return ErrorCode::OK;
       }
@@ -117,7 +117,7 @@ public:
 
     static void *empty = nullptr;
 
-    list_->Foreach<ControlBlock, void *>(fun, empty);
+    list_->Foreach<ControlBlock, void *>(fun, std::move(empty));
   }
 
   static void RefreshTimerInIdle();
@@ -125,4 +125,4 @@ public:
   static LibXR::List *list_;
 };
 
-} // namespace LibXR
+}  // namespace LibXR
