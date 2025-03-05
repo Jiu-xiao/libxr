@@ -9,7 +9,7 @@ void test_kinematic() {
 
   LibXR::Position pos_startpoint(0., 0., 1.);
   LibXR::Quaternion quat_startpoint =
-      LibXR::EulerAngle(0., 0., 0.).toQuaternion();
+      LibXR::EulerAngle(0., 0., 0.).ToQuaternion();
 
   LibXR::Position pos_startpoint2joint(0., 0.0, 0.5);
   LibXR::Position pos_joint2midpoint(1.0, 0.0, 0.0);
@@ -56,15 +56,11 @@ void test_kinematic() {
 
   object_endpoint.CalcBackward(0, 1000, 0.01, 0.1);
 
-  ASSERT(std::abs(std::abs(object_endpoint.target_pos_(0)) -
-                  std::abs(object_endpoint.runtime_.target.translation(0))) <
-         0.01);
+  auto error_pos = object_endpoint.GetPositionError();
+  auto error_quat = object_endpoint.GetQuaternionError();
 
-  ASSERT(std::abs(std::abs(object_endpoint.target_pos_(1)) -
-                  std::abs(object_endpoint.runtime_.target.translation(1))) <
-         0.01);
-
-  ASSERT(std::abs(std::abs(object_endpoint.target_pos_(2)) -
-                  std::abs(object_endpoint.runtime_.target.translation(2))) <
-         0.01);
+  ASSERT(error_pos.norm() < 1e-3);
+  ASSERT(std::abs(error_quat.x()) < 1e-2 && std::abs(error_quat.y()) < 1e-2 &&
+         std::abs(error_quat.z()) < 1e-2 &&
+         std::abs(error_quat.w() - 1.0) < 1e-2);
 }

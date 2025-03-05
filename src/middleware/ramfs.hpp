@@ -1,7 +1,6 @@
 #pragma once
 
 #include "libxr_assert.hpp"
-#include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
@@ -16,11 +15,11 @@ class RamFS {
     root_.Add(dev_);
   }
 
-  static int _str_compare(const char *const &a, const char *const &b) {
+  static int CompareStr(const char *const &a, const char *const &b) {
     return strcmp(a, b);
   }
 
-  enum class FsNodeType {
+  enum class FsNodeType : uint8_t {
     FILE,
     DIR,
     DEVICE,
@@ -28,7 +27,7 @@ class RamFS {
     UNKNOW,
   };
 
-  enum class FileType {
+  enum class FileType : uint8_t {
     READ_ONLY,
     READ_WRITE,
     EXEC,
@@ -43,7 +42,7 @@ class RamFS {
     Dir *parent;
   };
 
-  typedef class _File : public FsNode {
+  typedef class FileNode : public FsNode {
    public:
     union {
       void *addr;
@@ -76,19 +75,19 @@ class RamFS {
         return *reinterpret_cast<const DataType *>(addr);
       }
     }
-  } _File;
+  } FileNode;
 
-  typedef RBTree<const char *>::Node<_File> File;
+  typedef RBTree<const char *>::Node<FileNode> File;
 
-  struct _Device : public FsNode {
+  struct DeviceNode : public FsNode {
     ReadPort read_port;
     WritePort write_port;
   };
 
-  class Device : public RBTree<const char *>::Node<_Device> {
+  class Device : public RBTree<const char *>::Node<DeviceNode> {
    public:
-    Device(const char *name, ReadPort read_port = ReadPort(),
-           WritePort write_port = WritePort()) {
+    Device(const char *name, const ReadPort &read_port = ReadPort(),
+           const WritePort &write_port = WritePort()) {
       char *name_buff = new char[strlen(name) + 1];
       strcpy(name_buff, name);
       data_.name = name_buff;
@@ -116,14 +115,14 @@ class RamFS {
     uint32_t res;
   } StorageBlock;
 
-  class _Dir : public FsNode {
+  class DirNode : public FsNode {
    public:
-    _Dir() : rbt(RBTree<const char *>(_str_compare)) {}
+    DirNode() : rbt(RBTree<const char *>(CompareStr)) {}
 
     RBTree<const char *> rbt;
   };
 
-  class Dir : public RBTree<const char *>::Node<_Dir> {
+  class Dir : public RBTree<const char *>::Node<DirNode> {
    public:
     void Add(File &file) {
       (*this)->rbt.Insert(file, file->name);
@@ -147,13 +146,13 @@ class RamFS {
       }
     }
 
-    typedef struct _FindFileRecBlock {
+    typedef struct FindFileRecBlock {
       File *ans = nullptr;
       const char *name;
-    } _FindFileRecBlock;
+    } FindFileRecBlock;
 
-    static ErrorCode _FindFileRec(RBTree<const char *>::Node<FsNode> &item,
-                                  _FindFileRecBlock *block) {
+    static ErrorCode FindFileRevLoop(RBTree<const char *>::Node<FsNode> &item,
+                                     FindFileRecBlock *block) {
       FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
@@ -163,32 +162,32 @@ class RamFS {
           return ErrorCode::FAILED;
         }
 
-        dir->data_.rbt.Foreach<FsNode>(
-            _FindFileRec, std::forward<_FindFileRecBlock *>(block));
+        dir->data_.rbt.Foreach<FsNode>(FindFileRevLoop,
+                                       std::forward<FindFileRecBlock *>(block));
 
         return block->ans ? ErrorCode::FAILED : ErrorCode::OK;
       }
       return ErrorCode::OK;
     }
 
-    File *FindFileRec(const char *name) {
-      _FindFileRecBlock block{.name = name};
+    File *FindFileRev(const char *name) {
+      FindFileRecBlock block{.name = name};
       block.ans = FindFile(name);
 
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode, _FindFileRecBlock *>(_FindFileRec, &block);
+        data_.rbt.Foreach<FsNode, FindFileRecBlock *>(FindFileRevLoop, &block);
       }
 
       return block.ans;
     }
 
-    typedef struct _FindDirRecBlock {
+    typedef struct FindDirRecBlock {
       Dir *ans = nullptr;
       const char *name;
-    } _FindDirRecBlock;
+    } FindDirRecBlock;
 
-    static ErrorCode _FindDirRec(RBTree<const char *>::Node<FsNode> &item,
-                                 _FindDirRecBlock *block) {
+    static ErrorCode FindDirRevLoop(RBTree<const char *>::Node<FsNode> &item,
+                                    FindDirRecBlock *block) {
       FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
@@ -196,8 +195,8 @@ class RamFS {
           block->ans = dir;
           return ErrorCode::OK;
         } else {
-          dir->data_.rbt.Foreach<FsNode, _FindDirRecBlock *>(_FindDirRec,
-                                                             block);
+          dir->data_.rbt.Foreach<FsNode, FindDirRecBlock *>(FindDirRevLoop,
+                                                            block);
 
           if (block->ans) {
             return ErrorCode::FAILED;
@@ -228,25 +227,25 @@ class RamFS {
       }
     }
 
-    Dir *FindDirRec(const char *name) {
-      _FindDirRecBlock block;
+    Dir *FindDirRev(const char *name) {
+      FindDirRecBlock block;
       block.name = name;
 
       block.ans = FindDir(name);
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindDirRec, &block);
+        data_.rbt.Foreach<FsNode>(FindDirRevLoop, &block);
       }
 
       return block.ans;
     }
 
-    typedef struct _FindDevRecBlock {
+    typedef struct FindDevRecBlock {
       Device *ans = nullptr;
       const char *name;
-    } _FindDevRecBlock;
+    } FindDevRecBlock;
 
-    static ErrorCode _FindDevRec(RBTree<const char *>::Node<FsNode> &item,
-                                 _FindDevRecBlock *block) {
+    static ErrorCode FindDevRevLoop(RBTree<const char *>::Node<FsNode> &item,
+                                    FindDevRecBlock *block) {
       FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
@@ -257,7 +256,7 @@ class RamFS {
           return ErrorCode::FAILED;
         }
 
-        dir->data_.rbt.Foreach<FsNode>(_FindDevRec, block);
+        dir->data_.rbt.Foreach<FsNode>(FindDevRevLoop, block);
 
         if (block->ans) {
           return ErrorCode::FAILED;
@@ -269,12 +268,12 @@ class RamFS {
       }
     }
 
-    Device *FindDeviceRec(const char *name) {
-      _FindDevRecBlock block;
+    Device *FindDeviceRev(const char *name) {
+      FindDevRecBlock block;
       block.name = name;
       block.ans = FindDevice(name);
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindDevRec, &block);
+        data_.rbt.Foreach<FsNode>(FindDevRevLoop, &block);
       }
       return block.ans;
     }
@@ -355,9 +354,9 @@ class RamFS {
   void Add(Dir &dir) { root_.Add(dir); }
   void Add(Device &dev) { root_.Add(dev); }
 
-  File *FindFile(const char *name) { return root_.FindFileRec(name); }
-  Dir *FindDir(const char *name) { return root_.FindDirRec(name); }
-  Device *FindDevice(const char *name) { return root_.FindDeviceRec(name); }
+  File *FindFile(const char *name) { return root_.FindFileRev(name); }
+  Dir *FindDir(const char *name) { return root_.FindDirRev(name); }
+  Device *FindDevice(const char *name) { return root_.FindDeviceRev(name); }
 
   Dir root_, bin_, dev_;
 };

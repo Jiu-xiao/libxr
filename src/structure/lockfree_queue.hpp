@@ -1,57 +1,61 @@
 #pragma once
 
-#include <array>
 #include <atomic>
 
 #include "libxr_def.hpp"
 
 namespace LibXR {
-template <typename Data> class LockFreeQueue {
-public:
-  LockFreeQueue(size_t length) : head_(0), tail_(0), length_(length) {
-    queue_handle_ = new Data[length + 1];
-  }
+template <typename Data>
+class LockFreeQueue {
+ public:
+  LockFreeQueue(size_t length)
+      : queue_handle_(new Data[length + 1]),
+        head_(0),
+        tail_(0),
+        length_(length) {}
 
   ~LockFreeQueue() { delete[] queue_handle_; }
 
-  template <typename _Data = Data> ErrorCode Push(_Data &&item) {
-    const auto current_tail = tail_.load(std::memory_order_relaxed);
-    const auto next_tail = increment(current_tail);
-    if (next_tail == head_.load(std::memory_order_acquire)) {
+  template <typename ElementData = Data>
+  ErrorCode Push(ElementData &&item) {
+    const auto CURRENT_TAIL = tail_.load(std::memory_order_relaxed);
+    const auto NEXT_TAIL = Increment(CURRENT_TAIL);
+    if (NEXT_TAIL == head_.load(std::memory_order_acquire)) {
       return ErrorCode::FULL;
     }
-    queue_handle_[current_tail] = item;
-    tail_.store(next_tail, std::memory_order_release);
+    queue_handle_[CURRENT_TAIL] = std::forward<ElementData>(item);
+    tail_.store(NEXT_TAIL, std::memory_order_release);
     return ErrorCode::OK;
   }
 
-  template <typename _Data = Data> ErrorCode Pop(_Data &&item) {
-    const auto current_head = head_.load(std::memory_order_relaxed);
-    if (current_head == tail_.load(std::memory_order_acquire)) {
+  template <typename ElementData = Data>
+  ErrorCode Pop(ElementData &item) {
+    const auto CURRENT_HEAD = head_.load(std::memory_order_relaxed);
+    if (CURRENT_HEAD == tail_.load(std::memory_order_acquire)) {
       return ErrorCode::EMPTY;
     }
-    item = queue_handle_[current_head];
-    head_.store(increment(current_head), std::memory_order_release);
+    item = queue_handle_[CURRENT_HEAD];
+    head_.store(Increment(CURRENT_HEAD), std::memory_order_release);
     return ErrorCode::OK;
   }
 
   ErrorCode Pop() {
-    const auto current_head = head_.load(std::memory_order_relaxed);
-    if (current_head == tail_.load(std::memory_order_acquire)) {
+    const auto CURRENT_HEAD = head_.load(std::memory_order_relaxed);
+    if (CURRENT_HEAD == tail_.load(std::memory_order_acquire)) {
       return ErrorCode::EMPTY;
     }
-    head_.store(increment(current_head), std::memory_order_release);
+    head_.store(Increment(CURRENT_HEAD), std::memory_order_release);
     return ErrorCode::OK;
   }
 
   ErrorCode Peek(Data &item) {
-    const auto current_head = head_.load(std::memory_order_relaxed);
-    if (current_head == tail_.load(std::memory_order_acquire)) {
+    const auto CURRENT_HEAD = head_.load(std::memory_order_relaxed);
+    if (CURRENT_HEAD == tail_.load(std::memory_order_acquire)) {
       return ErrorCode::EMPTY;
     }
 
-    item = queue_handle_[current_head];
-    return ErrorCode::OK; // 成功
+    item = queue_handle_[CURRENT_HEAD];
+    return ErrorCode::OK;  // 成功
   }
 
   void Reset() {
@@ -61,23 +65,23 @@ public:
 
   // Get the current size of the queue
   size_t Size() const {
-    const auto current_head = head_.load(std::memory_order_relaxed);
-    const auto current_tail = tail_.load(std::memory_order_relaxed);
-    return (current_tail >= current_head)
-               ? (current_tail - current_head)
-               : (length_ - current_head + current_tail);
+    const auto CURRENT_HEAD = head_.load(std::memory_order_relaxed);
+    const auto CURRENT_TAIL = tail_.load(std::memory_order_relaxed);
+    return (CURRENT_TAIL >= CURRENT_HEAD)
+               ? (CURRENT_TAIL - CURRENT_HEAD)
+               : (length_ - CURRENT_HEAD + CURRENT_TAIL);
   }
 
   size_t EmptySize() { return (length_ + 1) - Size(); }
 
-private:
+ private:
   Data *queue_handle_;
   std::atomic<unsigned int> head_;
   std::atomic<unsigned int> tail_;
   size_t length_;
 
-  unsigned int increment(unsigned int index) const {
+  unsigned int Increment(unsigned int index) const {
     return (index + 1) % (length_ + 1);
   }
 };
-} // namespace LibXR
+}  // namespace LibXR

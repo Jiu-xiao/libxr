@@ -5,12 +5,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
-#include "libxr.hpp"
-#include "queue.hpp"
+#include "libxr_string.hpp"
 #include "ramfs.hpp"
 #include "stack.hpp"
-#include "timebase.hpp"
 
 volatile static uint64_t time_before, time_diff;
 
@@ -18,7 +17,7 @@ namespace LibXR {
 template <int READ_BUFF_SIZE = 32, int MAX_LINE_SIZE = READ_BUFF_SIZE,
           int MAX_ARG_NUMBER = 5, int MAX_HISTORY_NUMBER = 5>
 class Terminal {
-private:
+ private:
   static constexpr char CLEAR_ALL[] = "\033[2J\033[1H";
   static constexpr char CLEAR_LINE[] = "\033[2K\r";
   static constexpr char CLEAR_BEHIND[] = "\033[K";
@@ -28,9 +27,9 @@ private:
   static constexpr char KEY_LOAD[] = "\033[u";
   static constexpr char DELECT_CHAR[] = "\b \b";
 
-  char *strchr_rev(char *str, char c) {
+  char *StrchrRev(char *str, char c) {
     auto len = strlen(str);
-    for (int i = len - 1; i >= 0; i--) {
+    for (size_t i = len - 1; i >= 0; i--) {
       if (str[i] == c) {
         return str + i;
       }
@@ -38,18 +37,23 @@ private:
     return nullptr;
   }
 
-public:
-  enum class Mode { CRLF = 0, LF = 1, CR = 2 };
+ public:
+  enum class Mode : uint8_t { CRLF = 0, LF = 1, CR = 2 };
 
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = nullptr,
            WriteOperation write_op = WriteOperation(),
-           ReadPort *read_port = STDIO::read,
-           WritePort *write_port = STDIO::write, Mode MODE = Mode::CRLF)
-      : mode_(MODE), write_op_(write_op), read_(read_port), write_(write_port),
-        ramfs_(ramfs), current_dir_(current_dir ? current_dir : &ramfs_.root_),
-        input_line_(MAX_LINE_SIZE + 1), history_(MAX_HISTORY_NUMBER) {}
+           ReadPort *read_port = STDIO::read_,
+           WritePort *write_port = STDIO::write_, Mode MODE = Mode::CRLF)
+      : MODE(MODE),
+        write_op_(std::move(write_op)),
+        read_(read_port),
+        write_(write_port),
+        ramfs_(ramfs),
+        current_dir_(current_dir ? current_dir : &ramfs_.root_),
+        input_line_(MAX_LINE_SIZE + 1),
+        history_(MAX_HISTORY_NUMBER) {}
 
-  const Mode mode_;
+  const Mode MODE;
   WriteOperation write_op_;
   ReadPort *read_;
   WritePort *write_;
@@ -67,11 +71,11 @@ public:
   bool linefeed_flag_ = false;
 
   void LineFeed() {
-    if (mode_ == Mode::CRLF) {
+    if (MODE == Mode::CRLF) {
       (*write_)(ConstRawData("\r\n"), write_op_);
-    } else if (mode_ == Mode::LF) {
+    } else if (MODE == Mode::LF) {
       (*write_)(ConstRawData('\n'), write_op_);
-    } else if (mode_ == Mode::CR) {
+    } else if (MODE == Mode::CR) {
       (*write_)(ConstRawData('\r'), write_op_);
     }
   }
@@ -235,7 +239,7 @@ public:
   }
 
   RamFS::File *Path2File(char *path) {
-    auto name = strchr_rev(path, '/');
+    auto name = StrchrRev(path, '/');
 
     if (name == nullptr) {
       return current_dir_->FindFile(path);
@@ -278,21 +282,21 @@ public:
                           Terminal *) =
           [](RBTree<const char *>::Node<RamFS::FsNode> &item, Terminal *term) {
             switch (item->type) {
-            case RamFS::FsNodeType::DIR:
-              (*(term->write_))(ConstRawData("d "), term->write_op_);
-              break;
-            case RamFS::FsNodeType::FILE:
-              (*(term->write_))(ConstRawData("f "), term->write_op_);
-              break;
-            case RamFS::FsNodeType::DEVICE:
-              (*(term->write_))(ConstRawData("c "), term->write_op_);
-              break;
-            case RamFS::FsNodeType::STORAGE:
-              (*(term->write_))(ConstRawData("b "), term->write_op_);
-              break;
-            default:
-              (*(term->write_))(ConstRawData("? "), term->write_op_);
-              break;
+              case RamFS::FsNodeType::DIR:
+                (*(term->write_))(ConstRawData("d "), term->write_op_);
+                break;
+              case RamFS::FsNodeType::FILE:
+                (*(term->write_))(ConstRawData("f "), term->write_op_);
+                break;
+              case RamFS::FsNodeType::DEVICE:
+                (*(term->write_))(ConstRawData("c "), term->write_op_);
+                break;
+              case RamFS::FsNodeType::STORAGE:
+                (*(term->write_))(ConstRawData("b "), term->write_op_);
+                break;
+              default:
+                (*(term->write_))(ConstRawData("? "), term->write_op_);
+                break;
             }
             (*(term->write_))(ConstRawData(item.data_.name), term->write_op_);
             term->LineFeed();
@@ -335,41 +339,42 @@ public:
       }
     } else if (flag_ansi_ == 2) {
       switch (data) {
-      case 'A':
-        if (history_index_ < int(history_.Size()) - 1) {
-          history_index_++;
-          ShowHistory();
-        }
-        break;
-      case 'B':
-        if (history_index_ >= 0) {
-          history_index_--;
-          ShowHistory();
-        }
-        break;
-      case 'C':
-        if (history_index_ >= 0) {
-          CopyHistoryToInputLine();
-          ShowHistory();
-        }
-        if (offset_ < 0) {
-          offset_++;
-          (*write_)(ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1), write_op_);
-        }
+        case 'A':
+          if (history_index_ < int(history_.Size()) - 1) {
+            history_index_++;
+            ShowHistory();
+          }
+          break;
+        case 'B':
+          if (history_index_ >= 0) {
+            history_index_--;
+            ShowHistory();
+          }
+          break;
+        case 'C':
+          if (history_index_ >= 0) {
+            CopyHistoryToInputLine();
+            ShowHistory();
+          }
+          if (offset_ < 0) {
+            offset_++;
+            (*write_)(ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1),
+                      write_op_);
+          }
 
-        break;
-      case 'D':
-        if (history_index_ >= 0) {
-          CopyHistoryToInputLine();
-          ShowHistory();
-        }
-        if (offset_ + input_line_.Size() > 0) {
-          offset_--;
-          (*write_)(ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1), write_op_);
-        }
-        break;
-      default:
-        break;
+          break;
+        case 'D':
+          if (history_index_ >= 0) {
+            CopyHistoryToInputLine();
+            ShowHistory();
+          }
+          if (offset_ + input_line_.Size() > 0) {
+            offset_--;
+            (*write_)(ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1), write_op_);
+          }
+          break;
+        default:
+          break;
       }
 
       flag_ansi_ = 0;
@@ -379,7 +384,7 @@ public:
   void AutoComplete() {
     /* skip space */
     char *path = &input_line_[0];
-    while (*path == ' ' && *path != '\0') {
+    while (*path == ' ') {
       path++;
     }
 
@@ -434,7 +439,7 @@ public:
       prefix_start++;
     }
 
-    int prefix_len = tmp - prefix_start;
+    int prefix_len = static_cast<int>(tmp - prefix_start);
 
     MatchResult res = {nullptr, 0, prefix_start, prefix_len, this, 0};
 
@@ -508,36 +513,36 @@ public:
     }
 
     switch (data) {
-    case '\n':
-    case '\r':
-      if (linefeed_flag_) {
-        linefeed_flag_ = false;
-        return;
-      }
-      if (history_index_ >= 0) {
-        CopyHistoryToInputLine();
-      }
-      LineFeed();
-      if (input_line_.Size() > 0) {
-        ExecuteCommand();
-        arg_number_ = 0;
-      }
-      ShowHeader();
-      input_line_.Reset();
-      input_line_[0] = '\0';
-      offset_ = 0;
-      break;
-    case 0x7f:
-      DeleteChar();
-      break;
-    case '\t':
-      AutoComplete();
-      break;
-    case '\033':
-      flag_ansi_ = 1;
-      break;
-    default:
-      break;
+      case '\n':
+      case '\r':
+        if (linefeed_flag_) {
+          linefeed_flag_ = false;
+          return;
+        }
+        if (history_index_ >= 0) {
+          CopyHistoryToInputLine();
+        }
+        LineFeed();
+        if (input_line_.Size() > 0) {
+          ExecuteCommand();
+          arg_number_ = 0;
+        }
+        ShowHeader();
+        input_line_.Reset();
+        input_line_[0] = '\0';
+        offset_ = 0;
+        break;
+      case 0x7f:
+        DeleteChar();
+        break;
+      case '\t':
+        AutoComplete();
+        break;
+      case '\033':
+        flag_ansi_ = 1;
+        break;
+      default:
+        break;
     }
   }
 
@@ -553,7 +558,7 @@ public:
 
   static void ThreadFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = LibXR::MIN(LibXR::MAX(1, term->read_->Size()), READ_BUFF_SIZE);
+    buff.size_ = LibXR::min(LibXR::max(1, term->read_->Size()), READ_BUFF_SIZE);
     static ReadOperation op(UINT32_MAX);
     while (true) {
       if ((*term->read_)(buff, op) == ErrorCode::OK) {
@@ -564,20 +569,22 @@ public:
 
   static void TaskFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = LibXR::MIN(LibXR::MAX(1, term->read_->Size()), READ_BUFF_SIZE);
+    buff.size_ = LibXR::min(LibXR::max(1, term->read_->Size()), READ_BUFF_SIZE);
 
     static ReadOperation op;
-  check_status:
-    switch (term->read_->GetStatus()) {
-    case ReadOperation::OperationPollingStatus::READY:
-      (*term->read_)(buff, op);
-      goto check_status;
-    case ReadOperation::OperationPollingStatus::RUNNING:
-      break;
-    case ReadOperation::OperationPollingStatus::DONE:
-      term->Parse(buff);
-      break;
+
+    while (true) {
+      switch (term->read_->GetStatus()) {
+        case ReadOperation::OperationPollingStatus::READY:
+          (*term->read_)(buff, op);
+          continue;
+        case ReadOperation::OperationPollingStatus::RUNNING:
+          return;
+        case ReadOperation::OperationPollingStatus::DONE:
+          term->Parse(buff);
+          return;
+      }
     }
   }
 };
-} // namespace LibXR
+}  // namespace LibXR
