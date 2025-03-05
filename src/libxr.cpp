@@ -40,3 +40,16 @@ LibXR::Topic::Domain *LibXR::Topic::def_domain_;
 
 /* timebase */
 LibXR::Timebase *LibXR::Timebase::timebase = nullptr;
+
+void _LibXR_FatalError(const char *file, uint32_t line, bool in_isr) {
+  volatile bool stop = false;
+  while (!stop) {
+    if (LibXR::STDIO::write && LibXR::STDIO::write->Writable()) {
+      printf("Fatal error at %s:%d\r\n", file, int(line));
+    }
+
+    if (LibXR::Assert::libxr_fatal_error_callback) {
+      LibXR::Assert::libxr_fatal_error_callback->Run(in_isr, file, line);
+    }
+  }
+}

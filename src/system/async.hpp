@@ -9,7 +9,7 @@
 
 namespace LibXR {
 class ASync {
-public:
+ public:
   enum class Status {
     REDAY,
     BUSY,
@@ -51,4 +51,4 @@ public:
 
   Thread thread_handle_;
 };
-} // namespace LibXR
+}  // namespace LibXR
