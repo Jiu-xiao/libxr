@@ -1,7 +1,6 @@
 #pragma once
 
 #include "libxr_assert.hpp"
-#include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
@@ -9,18 +8,18 @@
 
 namespace LibXR {
 class RamFS {
-public:
+ public:
   RamFS(const char *name = "ramfs")
       : root_(CreateDir(name)), bin_(CreateDir("bin")), dev_(CreateDir("dev")) {
     root_.Add(bin_);
     root_.Add(dev_);
   }
 
-  static int _str_compare(const char *const &a, const char *const &b) {
+  static int CompareStr(const char *const &a, const char *const &b) {
     return strcmp(a, b);
   }
 
-  enum class FsNodeType {
+  enum class FsNodeType : uint8_t {
     FILE,
     DIR,
     DEVICE,
@@ -28,7 +27,7 @@ public:
     UNKNOW,
   };
 
-  enum class FileType {
+  enum class FileType : uint8_t {
     READ_ONLY,
     READ_WRITE,
     EXEC,
@@ -37,14 +36,14 @@ public:
   class Dir;
 
   class FsNode {
-  public:
+   public:
     const char *name;
     FsNodeType type;
     Dir *parent;
   };
 
-  typedef class _File : public FsNode {
-  public:
+  typedef class FileNode : public FsNode {
+   public:
     union {
       void *addr;
       const void *addr_const;
@@ -63,33 +62,32 @@ public:
       return exec(arg, argc, argv);
     }
 
-    template <typename DataType>
-    const DataType &
-    GetData(SizeLimitMode size_limit_mode = SizeLimitMode::MORE) {
-      LibXR::Assert::SizeLimitCheck(sizeof(DataType), size, size_limit_mode);
+    template <typename DataType, SizeLimitMode LimitMode = SizeLimitMode::MORE>
+    const DataType &GetData() {
+      LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(DataType), size);
       if (type == FileType::READ_WRITE) {
         return *reinterpret_cast<DataType *>(addr);
       } else if (type == FileType::READ_ONLY) {
         return *reinterpret_cast<const DataType *>(addr_const);
       } else {
         ASSERT(false);
-        const void *addr = NULL;
+        const void *addr = nullptr;
         return *reinterpret_cast<const DataType *>(addr);
       }
     }
-  } _File;
+  } FileNode;
 
-  typedef RBTree<const char *>::Node<_File> File;
+  typedef RBTree<const char *>::Node<FileNode> File;
 
-  struct _Device : public FsNode {
+  struct DeviceNode : public FsNode {
     ReadPort read_port;
     WritePort write_port;
   };
 
-  class Device : public RBTree<const char *>::Node<_Device> {
-  public:
-    Device(const char *name, ReadPort read_port = ReadPort(),
-           WritePort write_port = WritePort()) {
+  class Device : public RBTree<const char *>::Node<DeviceNode> {
+   public:
+    Device(const char *name, const ReadPort &read_port = ReadPort(),
+           const WritePort &write_port = WritePort()) {
       char *name_buff = new char[strlen(name) + 1];
       strcpy(name_buff, name);
       data_.name = name_buff;
@@ -117,15 +115,15 @@ public:
     uint32_t res;
   } StorageBlock;
 
-  class _Dir : public FsNode {
-  public:
-    _Dir() : rbt(RBTree<const char *>(_str_compare)) {}
+  class DirNode : public FsNode {
+   public:
+    DirNode() : rbt(RBTree<const char *>(CompareStr)) {}
 
     RBTree<const char *> rbt;
   };
 
-  class Dir : public RBTree<const char *>::Node<_Dir> {
-  public:
+  class Dir : public RBTree<const char *>::Node<DirNode> {
+   public:
     void Add(File &file) {
       (*this)->rbt.Insert(file, file->name);
       file->parent = this;
@@ -148,56 +146,48 @@ public:
       }
     }
 
-    typedef struct _FindFileRecBlock {
+    typedef struct FindFileRecBlock {
       File *ans = nullptr;
       const char *name;
-    } _FindFileRecBlock;
+    } FindFileRecBlock;
 
-    static ErrorCode _FindFileRec(RBTree<const char *>::Node<FsNode> &item,
-                                  _FindFileRecBlock *block) {
+    static ErrorCode FindFileRevLoop(RBTree<const char *>::Node<FsNode> &item,
+                                     FindFileRecBlock *block) {
       FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
 
         block->ans = dir->FindFile(block->name);
-
         if (block->ans) {
           return ErrorCode::FAILED;
         }
 
-        dir->data_.rbt.Foreach<FsNode>(_FindFileRec, block,
-                                       SizeLimitMode::MORE);
+        dir->data_.rbt.Foreach<FsNode>(FindFileRevLoop,
+                                       std::forward<FindFileRecBlock *>(block));
 
-        if (block->ans) {
-          return ErrorCode::FAILED;
-        } else {
-          return ErrorCode::OK;
-        }
-      } else {
-        return ErrorCode::OK;
+        return block->ans ? ErrorCode::FAILED : ErrorCode::OK;
       }
-    };
+      return ErrorCode::OK;
+    }
 
-    File *FindFileRec(const char *name) {
-      _FindFileRecBlock block;
-
-      block.name = name;
-
+    File *FindFileRev(const char *name) {
+      FindFileRecBlock block{.name = name};
       block.ans = FindFile(name);
+
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindFileRec, &block, SizeLimitMode::MORE);
+        data_.rbt.Foreach<FsNode, FindFileRecBlock *>(FindFileRevLoop, &block);
       }
 
       return block.ans;
     }
 
-    typedef struct _FindDirRecBlock {
+    typedef struct FindDirRecBlock {
       Dir *ans = nullptr;
       const char *name;
-    } _FindDirRecBlock;
+    } FindDirRecBlock;
 
-    static ErrorCode _FindDirRec(RBTree<const char *>::Node<FsNode> &item,
-                                 _FindDirRecBlock *block) {
+    static ErrorCode FindDirRevLoop(RBTree<const char *>::Node<FsNode> &item,
+                                    FindDirRecBlock *block) {
       FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
@@ -205,8 +195,8 @@ public:
           block->ans = dir;
           return ErrorCode::OK;
         } else {
-          dir->data_.rbt.Foreach<FsNode>(_FindDirRec, block,
-                                         SizeLimitMode::MORE);
+          dir->data_.rbt.Foreach<FsNode, FindDirRecBlock *>(FindDirRevLoop,
+                                                            block);
 
           if (block->ans) {
             return ErrorCode::FAILED;
@@ -237,25 +227,25 @@ public:
       }
     }
 
-    Dir *FindDirRec(const char *name) {
-      _FindDirRecBlock block;
+    Dir *FindDirRev(const char *name) {
+      FindDirRecBlock block;
       block.name = name;
 
       block.ans = FindDir(name);
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindDirRec, &block, SizeLimitMode::MORE);
+        data_.rbt.Foreach<FsNode>(FindDirRevLoop, &block);
       }
 
       return block.ans;
     }
 
-    typedef struct _FindDevRecBlock {
+    typedef struct FindDevRecBlock {
       Device *ans = nullptr;
       const char *name;
-    } _FindDevRecBlock;
+    } FindDevRecBlock;
 
-    static ErrorCode _FindDevRec(RBTree<const char *>::Node<FsNode> &item,
-                                 _FindDevRecBlock *block) {
+    static ErrorCode FindDevRevLoop(RBTree<const char *>::Node<FsNode> &item,
+                                    FindDevRecBlock *block) {
       FsNode &node = item;
       if (node.type == FsNodeType::DIR) {
         Dir *dir = reinterpret_cast<Dir *>(&item);
@@ -266,7 +256,7 @@ public:
           return ErrorCode::FAILED;
         }
 
-        dir->data_.rbt.Foreach<FsNode>(_FindDevRec, block, SizeLimitMode::MORE);
+        dir->data_.rbt.Foreach<FsNode>(FindDevRevLoop, block);
 
         if (block->ans) {
           return ErrorCode::FAILED;
@@ -278,12 +268,12 @@ public:
       }
     }
 
-    Device *FindDeviceRec(const char *name) {
-      _FindDevRecBlock block;
+    Device *FindDeviceRev(const char *name) {
+      FindDevRecBlock block;
       block.name = name;
       block.ans = FindDevice(name);
       if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(_FindDevRec, &block, SizeLimitMode::MORE);
+        data_.rbt.Foreach<FsNode>(FindDevRevLoop, &block);
       }
       return block.ans;
     }
@@ -364,10 +354,10 @@ public:
   void Add(Dir &dir) { root_.Add(dir); }
   void Add(Device &dev) { root_.Add(dev); }
 
-  File *FindFile(const char *name) { return root_.FindFileRec(name); }
-  Dir *FindDir(const char *name) { return root_.FindDirRec(name); }
-  Device *FindDevice(const char *name) { return root_.FindDeviceRec(name); }
+  File *FindFile(const char *name) { return root_.FindFileRev(name); }
+  Dir *FindDir(const char *name) { return root_.FindDirRev(name); }
+  Device *FindDevice(const char *name) { return root_.FindDeviceRev(name); }
 
   Dir root_, bin_, dev_;
 };
-} // namespace LibXR
+}  // namespace LibXR

@@ -11,7 +11,7 @@
 #include "timer.hpp"
 
 void LibXR::PlatformInit() {
-  if (Timebase::timebase == NULL) {
+  if (Timebase::timebase == nullptr) {
     /* You should initialize Timebase first */
     ASSERT(false);
   }

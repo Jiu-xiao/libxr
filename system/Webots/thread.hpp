@@ -42,7 +42,7 @@ public:
       }
 
       static void *Port(void *arg) {
-        while (_libxr_webots_time_notify == NULL) {
+        while (_libxr_webots_time_notify == nullptr) {
         }
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
         const char *thread_name = block->name_;

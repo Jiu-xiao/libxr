@@ -8,14 +8,13 @@
 
 namespace LibXR {
 class Event {
-public:
+ public:
   Event()
       : rbt_([](const uint32_t &a, const uint32_t &b) {
           return static_cast<int>(a) - static_cast<int>(b);
         }) {}
 
   void Register(uint32_t event, const Callback<uint32_t> &cb) {
-
     auto list = rbt_.Search<List>(event);
 
     if (!list) {
@@ -41,7 +40,7 @@ public:
       return ErrorCode::OK;
     };
 
-    list->data_.Foreach<LibXR::Event::Block, uint32_t>(foreach_fun, event);
+    list->data_.Foreach<LibXR::Event::Block, uint32_t &>(foreach_fun, event);
   }
 
   void ActiveFromCallback(uint32_t event, bool in_isr) {
@@ -61,9 +60,9 @@ public:
     };
 
     if (in_isr) {
-      list->data_.Foreach<Block, uint32_t>(foreach_fun, event);
+      list->data_.Foreach<Block, uint32_t &>(foreach_fun, event);
     } else {
-      list->data_.Foreach<Block, uint32_t>(foreach_fun_isr, event);
+      list->data_.Foreach<Block, uint32_t &>(foreach_fun_isr, event);
     }
   }
 
@@ -85,7 +84,7 @@ public:
     sources.Register(source_event, cb);
   }
 
-private:
+ private:
   struct Block {
     uint32_t event;
     Callback<uint32_t> cb;
@@ -93,4 +92,4 @@ private:
 
   RBTree<uint32_t> rbt_;
 };
-} // namespace LibXR
+}  // namespace LibXR

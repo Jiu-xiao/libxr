@@ -1,16 +1,16 @@
 #pragma once
 
+#include <cstdint>
+
 #include "libxr_def.hpp"
-#include "libxr_system.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"
 #include "semaphore.hpp"
-#include <array>
-#include <cstdint>
 
 namespace LibXR {
-template <typename Data> class LockQueue {
-public:
+template <typename Data>
+class LockQueue {
+ public:
   LockQueue(size_t length) : queue_handle_(length) {}
 
   ~LockQueue() {}
@@ -69,7 +69,7 @@ public:
 
   void Reset() {
     mutex_.Lock();
-    while (semaphore_handle_.Wait(0) != ErrorCode::OK) {
+    while (semaphore_handle_.Wait(0) == ErrorCode::OK) {
     };
     queue_handle_.Reset();
     mutex_.Unlock();
@@ -89,9 +89,9 @@ public:
     return ans;
   }
 
-private:
+ private:
   Queue<Data> queue_handle_;
   Mutex mutex_;
   Semaphore semaphore_handle_;
 };
-} // namespace LibXR
+}  // namespace LibXR

@@ -24,11 +24,11 @@
 #include "webots/Robot.hpp"
 
 uint64_t _libxr_webots_time_count = 0;
-webots::Robot *_libxr_webots_robot_handle = NULL;
+webots::Robot *_libxr_webots_robot_handle = nullptr;
 static float time_step = 0.0f;
-LibXR::ConditionVar *_libxr_webots_time_notify = NULL;
+LibXR::ConditionVar *_libxr_webots_time_notify = nullptr;
 
-void LibXR::PlatformInit(webots::Robot *robot = NULL) {
+void LibXR::PlatformInit(webots::Robot *robot = nullptr) {
   auto write_fun = [](WritePort &port) {
     auto ans = fwrite(port.info_.data.addr_, 1, port.info_.data.size_, stdout);
 
@@ -62,7 +62,7 @@ void LibXR::PlatformInit(webots::Robot *robot = NULL) {
   system("stty -icanon");
   system("stty -echo");
 
-  if (robot == NULL) {
+  if (robot == nullptr) {
     _libxr_webots_robot_handle = new webots::Robot();
   } else {
     _libxr_webots_robot_handle = robot;
@@ -70,7 +70,7 @@ void LibXR::PlatformInit(webots::Robot *robot = NULL) {
 
   time_step = _libxr_webots_robot_handle->getBasicTimeStep();
 
-  if (_libxr_webots_robot_handle == NULL) {
+  if (_libxr_webots_robot_handle == nullptr) {
     printf("webots robot handle is null.\n");
     exit(-1);
   }
@@ -78,10 +78,10 @@ void LibXR::PlatformInit(webots::Robot *robot = NULL) {
   _libxr_webots_time_notify = new LibXR::ConditionVar();
 
   auto webots_timebase_thread_fun = [](void *) {
-    poll(NULL, 0, 100);
+    poll(nullptr, 0, 100);
 
     while (true) {
-      poll(NULL, 0, 1);
+      poll(nullptr, 0, 1);
       _libxr_webots_robot_handle->step(time_step);
       _libxr_webots_time_count++;
       _libxr_webots_time_notify->Broadcast();

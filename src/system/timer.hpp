@@ -1,6 +1,7 @@
 #pragma once
 
-#include "libxr.hpp"
+#include <utility>
+
 #include "libxr_def.hpp"
 #include "list.hpp"
 #include "thread.hpp"
@@ -11,9 +12,9 @@
 
 namespace LibXR {
 class Timer {
-public:
+ public:
   class ControlBlock {
-  public:
+   public:
     void Run() { fun_(handle); }
 
     void (*fun_)(void *);
@@ -82,7 +83,7 @@ public:
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
 #else
       auto thread_handle = Thread();
-      thread_handle.Create<void *>(NULL, RefreshThreadFunction,
+      thread_handle.Create<void *>(nullptr, RefreshThreadFunction,
                                    "libxr_timer_task", 512,
                                    LIBXR_TIMER_PRIORITY);
 #endif
@@ -95,12 +96,12 @@ public:
       LibXR::Timer::list_ = new LibXR::List();
 
       auto thread_handle = Thread();
-      thread_handle.Create<void *>(NULL, RefreshThreadFunction,
+      thread_handle.Create<void *>(nullptr, RefreshThreadFunction,
                                    "libxr_timer_task", 512,
                                    Thread::Priority::HIGH);
     }
 
-    auto fun = [](ControlBlock &block, void *&) {
+    auto fun = [](ControlBlock &block, void *) {
       if (!block.enable_) {
         return ErrorCode::OK;
       }
@@ -117,7 +118,7 @@ public:
 
     static void *empty = nullptr;
 
-    list_->Foreach<ControlBlock, void *>(fun, empty);
+    list_->Foreach<ControlBlock, void *>(fun, std::forward<void *>(empty));
   }
 
   static void RefreshTimerInIdle();
@@ -125,4 +126,4 @@ public:
   static LibXR::List *list_;
 };
 
-} // namespace LibXR
+}  // namespace LibXR
