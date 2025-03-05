@@ -1,6 +1,7 @@
 #include "test.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 
 #include "libxr.hpp"
@@ -115,6 +116,8 @@ int main() {
   LibXR::Thread::Sleep(1000);
 
   run_libxr_tests();
+
+  exit(0);
 
   return 0;
 }
