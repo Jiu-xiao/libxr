@@ -15,4 +15,4 @@ void Thread::SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep) {
 
 uint32_t Thread::GetTime() { return xTaskGetTickCount(); }
 
-void Thread::Yield() { portYIELD(); }
+void Thread::Yield() { portYIELD(); }  // NOLINT

@@ -7,15 +7,17 @@
 #include <cstring>
 #include <utility>
 
+#include "libxr_rw.hpp"
 #include "libxr_string.hpp"
 #include "ramfs.hpp"
+#include "semaphore.hpp"
 #include "stack.hpp"
 
 volatile static uint64_t time_before, time_diff;
 
 namespace LibXR {
-template <int READ_BUFF_SIZE = 32, int MAX_LINE_SIZE = READ_BUFF_SIZE,
-          int MAX_ARG_NUMBER = 5, int MAX_HISTORY_NUMBER = 5>
+template <size_t READ_BUFF_SIZE = 32, size_t MAX_LINE_SIZE = READ_BUFF_SIZE,
+          size_t MAX_ARG_NUMBER = 5, size_t MAX_HISTORY_NUMBER = 5>
 class Terminal {
  private:
   static constexpr char CLEAR_ALL[] = "\033[2J\033[1H";
@@ -29,7 +31,7 @@ class Terminal {
 
   char *StrchrRev(char *str, char c) {
     auto len = strlen(str);
-    for (size_t i = len - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(len - 1); i >= 0; i--) {
       if (str[i] == c) {
         return str + i;
       }
@@ -41,11 +43,10 @@ class Terminal {
   enum class Mode : uint8_t { CRLF = 0, LF = 1, CR = 2 };
 
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = nullptr,
-           WriteOperation write_op = WriteOperation(),
            ReadPort *read_port = STDIO::read_,
            WritePort *write_port = STDIO::write_, Mode MODE = Mode::CRLF)
       : MODE(MODE),
-        write_op_(std::move(write_op)),
+        write_op_(write_status_),
         read_(read_port),
         write_(write_port),
         ramfs_(ramfs),
@@ -69,6 +70,11 @@ class Terminal {
   Queue<LibXR::String<MAX_LINE_SIZE>> history_;
   int history_index_ = -1;
   bool linefeed_flag_ = false;
+
+  ReadOperation::OperationPollingStatus read_status_ =
+      ReadOperation::OperationPollingStatus::READY;
+  WriteOperation::OperationPollingStatus write_status_ =
+      WriteOperation::OperationPollingStatus::READY;
 
   void LineFeed() {
     if (MODE == Mode::CRLF) {
@@ -218,7 +224,7 @@ class Terminal {
       dir = &ramfs_.root_;
     }
 
-    for (int i = 0; i < MAX_LINE_SIZE; i++) {
+    for (size_t i = 0; i < MAX_LINE_SIZE; i++) {
       auto tmp = strchr(path + index, '/');
       if (tmp == nullptr) {
         return dir->FindDir(path + index);
@@ -558,10 +564,17 @@ class Terminal {
 
   static void ThreadFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = LibXR::min(LibXR::max(1, term->read_->Size()), READ_BUFF_SIZE);
-    static ReadOperation op(UINT32_MAX);
+    buff.size_ =
+        LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
+
+    Semaphore sem;
+    ReadOperation op(sem);
+
     while (true) {
+      buff.size_ =
+          LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
       if ((*term->read_)(buff, op) == ErrorCode::OK) {
+        buff.size_ = term->read_->read_size_;
         term->Parse(buff);
       }
     }
@@ -569,19 +582,26 @@ class Terminal {
 
   static void TaskFun(Terminal *term) {
     RawData buff = term->read_buff_;
-    buff.size_ = LibXR::min(LibXR::max(1, term->read_->Size()), READ_BUFF_SIZE);
+    buff.size_ =
+        LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
 
-    static ReadOperation op;
+    ReadOperation op(term->read_status_);
 
     while (true) {
-      switch (term->read_->GetStatus()) {
+      switch (term->read_status_) {
         case ReadOperation::OperationPollingStatus::READY:
+          buff.size_ =
+              LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
           (*term->read_)(buff, op);
           continue;
         case ReadOperation::OperationPollingStatus::RUNNING:
           return;
         case ReadOperation::OperationPollingStatus::DONE:
+          buff.size_ = term->read_->read_size_;
           term->Parse(buff);
+          buff.size_ =
+              LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
+          (*term->read_)(buff, op);
           return;
       }
     }

@@ -1,6 +1,5 @@
 #include "thread.hpp"
 
-#include <errno.h>
 #include <sys/time.h>
 #include <webots/robot.h>
 

@@ -4,8 +4,11 @@
 
 namespace LibXR {
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR> class CycleValue {
-public:
+using DefaultScalar = LIBXR_DEFAULT_SCALAR;
+
+template <typename Scalar = DefaultScalar>
+class CycleValue {
+ public:
   CycleValue &operator=(const CycleValue &) = default;
 
   static Scalar Calculate(Scalar value) {
@@ -118,8 +121,8 @@ public:
 
   Scalar Value() { return value_; }
 
-private:
+ private:
   Scalar value_;
 };
 
-} // namespace LibXR
+}  // namespace LibXR

@@ -4,30 +4,36 @@
 #include <cstdint>
 #include <utility>
 
+#include "chunk_queue.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "queue.hpp"
+#include "lock_queue.hpp"
+#include "lockfree_queue.hpp"
 #include "semaphore.hpp"
 
 namespace LibXR {
 template <typename... Args>
 class Operation {
  public:
-  enum class OperationType : uint8_t { CALLBACK, BLOCK, POLLING };
+  enum class OperationType : uint8_t { CALLBACK, BLOCK, POLLING, NONE };
 
   enum class OperationPollingStatus : uint8_t { READY, RUNNING, DONE };
 
-  Operation() : type(OperationType::POLLING) {
-    data.status = OperationPollingStatus::READY;
-  }
+  Operation() : type(OperationType::NONE) {}
 
-  Operation(uint32_t timeout) : type(OperationType::BLOCK) {
+  Operation(Semaphore &sem, uint32_t timeout = UINT32_MAX)
+      : type(OperationType::BLOCK) {
+    data.sem = &sem;
     data.timeout = timeout;
   }
 
-  Operation(Callback<Args...> callback) : type(OperationType::CALLBACK) {
-    data.callback = callback;
+  Operation(Callback<Args...> &callback) : type(OperationType::CALLBACK) {
+    data.callback = &callback;
+  }
+
+  Operation(OperationPollingStatus &status) : type(OperationType::POLLING) {
+    data.status = &status;
   }
 
   Operation &operator=(const Operation &op) {
@@ -38,11 +44,14 @@ class Operation {
           data.callback = op.data.callback;
           break;
         case OperationType::BLOCK:
+          data.sem = op.data.sem;
           data.timeout = op.data.timeout;
           break;
         case OperationType::POLLING:
           data.status = op.data.status;
           break;
+        case OperationType::NONE:
+          ASSERT(false);
       }
     }
     return *this;
@@ -53,14 +62,17 @@ class Operation {
       type = op.type;
       switch (type) {
         case OperationType::CALLBACK:
-          data.callback = std::move(op.data.callback);
+          data.callback = op.data.callback;
           break;
         case OperationType::BLOCK:
+          data.sem = op.data.sem;
           data.timeout = op.data.timeout;
           break;
         case OperationType::POLLING:
           data.status = op.data.status;
           break;
+        case OperationType::NONE:
+          ASSERT(false);
       }
     }
     return *this;
@@ -72,6 +84,7 @@ class Operation {
         data.callback = op.data.callback;
         break;
       case OperationType::BLOCK:
+        data.sem = op.data.sem;
         data.timeout = op.data.timeout;
         break;
       case OperationType::POLLING:
@@ -83,41 +96,49 @@ class Operation {
   Operation(Operation &&op) noexcept : type(op.type) {
     switch (type) {
       case OperationType::CALLBACK:
-        data.callback = std::move(op.data.callback);
+        data.callback = op.data.callback;
         break;
       case OperationType::BLOCK:
+        data.sem = op.data.sem;
         data.timeout = op.data.timeout;
         break;
       case OperationType::POLLING:
         data.status = op.data.status;
         break;
+      case OperationType::NONE:
+        ASSERT(false);
     }
   }
 
-  void UpdateStatus(bool in_isr, LibXR::Semaphore &sem, Args &&...args) {
+  void UpdateStatus(bool in_isr, Args &&...args) {
     switch (type) {
       case OperationType::CALLBACK:
-        data.callback.Run(in_isr, std::forward<Args>(args)...);
+        data.callback->Run(in_isr, std::forward<Args>(args)...);
         break;
       case OperationType::BLOCK:
-        sem.PostFromCallback(in_isr);
+        data.sem->PostFromCallback(in_isr);
         break;
       case OperationType::POLLING:
-        data.status = OperationPollingStatus::DONE;
+        *data.status = OperationPollingStatus::DONE;
         break;
+      case OperationType::NONE:
+        ASSERT(false);
     }
   }
 
-  void UpdateStatus() {
+  void MarkAsRunning() {
     if (type == OperationType::POLLING) {
-      data.status = OperationPollingStatus::RUNNING;
+      *data.status = OperationPollingStatus::RUNNING;
     }
   }
 
   union {
-    Callback<Args...> callback = Callback<Args...>();
-    uint32_t timeout;
-    OperationPollingStatus status;
+    Callback<Args...> *callback;
+    struct {
+      Semaphore *sem;
+      uint32_t timeout;
+    };
+    OperationPollingStatus *status;
   } data;
 
   OperationType type;
@@ -126,36 +147,38 @@ class Operation {
 class ReadPort;
 class WritePort;
 
-typedef Operation<ErrorCode, RawData &> ReadOperation;
+typedef Operation<ErrorCode> ReadOperation;
 typedef Operation<ErrorCode> WriteOperation;
 
 typedef ErrorCode (*WriteFun)(WritePort &port);
 
 typedef ErrorCode (*ReadFun)(ReadPort &port);
 
-typedef struct {
-  RawData data;
-  ReadOperation op;
-} ReadInfoBlock;
+class ReadInfoBlock {
+ public:
+  RawData data_;
+  ReadOperation op_;
 
-typedef struct {
-  ConstRawData data;
-  WriteOperation op;
-} WriteInfoBlock;
+  ReadInfoBlock(RawData data, ReadOperation &&op)
+      : data_(data), op_(std::move(op)) {}
+
+  ReadInfoBlock() : data_(), op_() {}
+};
 
 class ReadPort {
  public:
   ReadFun read_fun_ = nullptr;
-  Semaphore *read_sem_;
-  ChunkManager *queue_;
-  ReadInfoBlock info_;
+  LockFreeQueue<ReadInfoBlock> *queue_block_ = nullptr;
+  BaseQueue *queue_data_ = nullptr;
 
-  ReadPort(size_t queue_size = 3, size_t block_size = 128)
-      : read_sem_(new Semaphore()),
-        queue_(new ChunkManager(queue_size, block_size)) {}
+  size_t read_size_ = 0;
 
-  size_t EmptySize() { return queue_->EmptySize(); }
-  size_t Size() { return queue_->Size(); }
+  ReadPort(size_t queue_size = 3, size_t buffer_size = 128)
+      : queue_block_(new LockFreeQueue<ReadInfoBlock>(queue_size)),
+        queue_data_(new BaseQueue(1, buffer_size)) {}
+
+  size_t EmptySize() { return queue_block_->EmptySize(); }
+  size_t Size() { return queue_block_->Size(); }
 
   bool Readable() { return read_fun_ != nullptr; }
 
@@ -164,52 +187,54 @@ class ReadPort {
     return *this;
   }
 
-  void UpdateStatus(bool in_isr, ErrorCode ans) {
-    info_.op.UpdateStatus(in_isr, *read_sem_, std::forward<ErrorCode>(ans),
-                          info_.data);
+  void UpdateStatus(bool in_isr, ErrorCode ans, ReadInfoBlock &info,
+                    uint32_t size) {
+    read_size_ = size;
+    info.op_.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
   }
 
-  void UpdateStatus() { info_.op.UpdateStatus(); }
+  void UpdateStatus(ReadInfoBlock &info) { info.op_.MarkAsRunning(); }
 
   template <typename ReadOperation>
-  ErrorCode operator()(RawData data, ReadOperation &&op) {
+  ErrorCode operator()(RawData &data, ReadOperation &op) {
     if (Readable()) {
-      info_.op = std::forward<ReadOperation>(op);
-      info_.data = data;
-      return read_fun_(*this);
+      ReadInfoBlock block = {data, std::move(op)};
+      if (queue_block_->Push(block) != ErrorCode::OK) {
+        return ErrorCode::FULL;
+      }
+
+      auto ans = read_fun_(*this);
+      if (op.type == ReadOperation::OperationType::BLOCK) {
+        return op.data.sem->Wait(op.data.timeout);
+      } else {
+        return ans;
+      }
     } else {
       return ErrorCode::NOT_SUPPORT;
     }
   }
 
-  ErrorCode operator()(RawData data) {
-    static auto default_op = ReadOperation();
-    return operator()(data, default_op);
-  }
-
-  ReadOperation::OperationPollingStatus GetStatus() {
-    if (info_.op.data.status == ReadOperation::OperationPollingStatus::DONE) {
-      info_.op.data.status = ReadOperation::OperationPollingStatus::READY;
-      return ReadOperation::OperationPollingStatus::DONE;
-    } else {
-      return info_.op.data.status;
-    }
+  void Reset() {
+    queue_block_->Reset();
+    queue_data_->Reset();
+    read_size_ = 0;
   }
 };
 
 class WritePort {
  public:
   WriteFun write_fun_ = nullptr;
-  Semaphore *write_sem_;
-  ChunkManager *queue_;
-  WriteInfoBlock info_;
+  LockFreeQueue<WriteOperation> *queue_op_;
+  ChunkQueue *queue_data_;
+
+  size_t write_size_ = 0;
 
   WritePort(size_t queue_size = 3, size_t block_size = 128)
-      : write_sem_(new Semaphore()),
-        queue_(new ChunkManager(queue_size, block_size)) {}
+      : queue_op_(new LockFreeQueue<WriteOperation>(queue_size)),
+        queue_data_(new ChunkQueue(queue_size, block_size)) {}
 
-  size_t EmptySize() { return queue_->EmptySize(); }
-  size_t Size() { return queue_->Size(); }
+  size_t EmptySize() { return queue_data_->EmptySize(); }
+  size_t Size() { return queue_data_->Size(); }
 
   bool Writable() { return write_fun_ != nullptr; }
 
@@ -218,39 +243,40 @@ class WritePort {
     return *this;
   }
 
-  void UpdateStatus(bool in_isr, ErrorCode ans) {
-    info_.op.UpdateStatus(in_isr, *write_sem_, std::forward<ErrorCode>(ans));
+  void UpdateStatus(bool in_isr, ErrorCode ans, WriteOperation &op,
+                    uint32_t size) {
+    write_size_ = size;
+    op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
   }
 
-  void UpdateStatus() { info_.op.UpdateStatus(); }
+  void UpdateStatus(WriteOperation &op) { op.MarkAsRunning(); }
 
   ErrorCode operator()(ConstRawData data, WriteOperation &op) {
-    return operator()(data, std::forward<WriteOperation>(op));
-  }
-
-  template <typename WriteOperation>
-  ErrorCode operator()(ConstRawData data, WriteOperation &&op) {
     if (Writable()) {
-      info_.op = std::forward<WriteOperation>(op);
-      info_.data = data;
-      return write_fun_(*this);
+      if (queue_data_->EmptySize() < data.size_ || queue_op_->EmptySize() < 1) {
+        return ErrorCode::FULL;
+      }
+
+      queue_data_->AppendToCurrentBlock(data.addr_, data.size_);
+      queue_op_->Push(std::forward<WriteOperation>(op));
+
+      auto ans = write_fun_(*this);
+      if (op.type == WriteOperation::OperationType::BLOCK) {
+        return op.data.sem->Wait(op.data.timeout);
+      } else {
+        return ans;
+      }
     } else {
       return ErrorCode::NOT_SUPPORT;
     }
   }
 
-  ErrorCode operator()(ConstRawData data) {
-    static auto default_op = WriteOperation();
-    return operator()(data, default_op);
-  }
+  void Flush() { queue_data_->CreateNewBlock(); }
 
-  WriteOperation::OperationPollingStatus GetStatus() {
-    if (info_.op.data.status == WriteOperation::OperationPollingStatus::DONE) {
-      info_.op.data.status = WriteOperation::OperationPollingStatus::READY;
-      return WriteOperation::OperationPollingStatus::DONE;
-    } else {
-      return info_.op.data.status;
-    }
+  void Reset() {
+    queue_op_->Reset();
+    queue_data_->Reset();
+    write_size_ = 0;
   }
 };
 

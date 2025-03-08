@@ -1,5 +1,6 @@
 #include "thread.hpp"
 
+#include "timebase.hpp"
 #include "timer.hpp"
 
 using namespace LibXR;

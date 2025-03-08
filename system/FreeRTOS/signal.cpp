@@ -20,7 +20,7 @@ ErrorCode Signal::ActionFromCallback(Thread &thread, int signal, bool in_isr) {
         xTaskNotifyFromISR(libxr_thread_handle(thread), 1 << signal, eSetBits,
                            &px_higher_priority_task_woken);
     if (px_higher_priority_task_woken != pdFALSE) {
-      portYIELD();
+      portYIELD();  // NOLINT
     }
     if (ans == pdPASS) {
       return ErrorCode::OK;

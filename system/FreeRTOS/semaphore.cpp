@@ -25,7 +25,7 @@ void Semaphore::PostFromCallback(bool in_isr) {
     BaseType_t px_higher_priority_task_woken = 0;
     xSemaphoreGiveFromISR(semaphore_handle_, &px_higher_priority_task_woken);
     if (px_higher_priority_task_woken != pdFALSE) {
-      portYIELD();
+      portYIELD();  // NOLINT
     }
   } else {
     Post();
@@ -33,6 +33,6 @@ void Semaphore::PostFromCallback(bool in_isr) {
 }
 
 size_t Semaphore::Value() {
-  uint32_t value = uxSemaphoreGetCount(&semaphore_handle_);
+  uint32_t value = uxSemaphoreGetCount(&semaphore_handle_);  // NOLINT
   return value;
 }

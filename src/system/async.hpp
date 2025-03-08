@@ -1,3 +1,5 @@
+#pragma once
+
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "semaphore.hpp"

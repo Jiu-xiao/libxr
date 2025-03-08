@@ -27,3 +27,13 @@ ErrorCode Mutex::TryLock() {
 }
 
 void Mutex::Unlock() { mutex_handle_ = 1; }
+
+ErrorCode Mutex::TryLockInCallback(bool in_isr) {
+  UNUSED(in_isr);
+  return TryLock();
+}
+
+void Mutex::UnlockInCallback(bool in_isr) {
+  UNUSED(in_isr);
+  Unlock();
+}

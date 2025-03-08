@@ -1,13 +1,13 @@
 #include "signal.hpp"
 
-#include <errno.h>
-#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include "libxr_def.hpp"
 
 using namespace LibXR;
+
+extern uint64_t _libxr_webots_time_count;  // NOLINT
 
 ErrorCode Signal::Action(Thread &thread, int signal) {
   signal += SIGRTMIN;
@@ -37,14 +37,15 @@ ErrorCode Signal::Wait(int signal, uint32_t timeout) {
   pthread_sigmask(SIG_BLOCK, &waitset, &oldset);
 
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  UNUSED(clock_gettime(CLOCK_REALTIME, &ts));
 
   uint32_t add = 0;
-  long raw_time = 1U * 1000U * 1000U + ts.tv_nsec;
-  add = raw_time / (1000U * 1000U * 1000U);
+  int64_t raw_time =
+      static_cast<__syscall_slong_t>(1U * 1000U * 1000U) + ts.tv_nsec;
+  add = raw_time / (static_cast<int64_t>(1000U * 1000U * 1000U));
 
   ts.tv_sec += add;
-  ts.tv_nsec = raw_time % (1000U * 1000U * 1000U);
+  ts.tv_nsec = raw_time % (static_cast<int64_t>(1000U * 1000U * 1000U));
 
   int res = sigtimedwait(&waitset, nullptr, &ts);
 

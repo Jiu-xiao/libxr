@@ -1,7 +1,7 @@
 #include "semaphore.hpp"
 
+#include "libxr.hpp"
 #include "libxr_def.hpp"
-#include "libxr_system.hpp"
 #include "timer.hpp"
 
 using namespace LibXR;
