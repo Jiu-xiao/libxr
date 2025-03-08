@@ -1,7 +1,5 @@
 #include "condition_var.hpp"
 
-#include <time.h>
-
 #include "libxr_def.hpp"
 
 using namespace LibXR;

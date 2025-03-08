@@ -3,7 +3,6 @@
 #include "crc.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
-#include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "list.hpp"
 #include "lock_queue.hpp"
@@ -45,7 +44,7 @@ class Topic {
 
     uint8_t crc8_;
 
-    const Data &operator=(const Data &data) {
+    const Data &operator=(const Data &data) {  // NOLINT
       raw.data_ = data;
       crc8_ = CRC8::Calculate(&raw, sizeof(raw));
       return data;
@@ -68,7 +67,7 @@ class Topic {
         if (!domain_) {
           domain_ =
               new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b) {
-                return int(a) - int(b);
+                return static_cast<int>(a) - static_cast<int>(b);
               });
         }
         domain_lock_.Unlock();
@@ -85,7 +84,7 @@ class Topic {
 
       node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
           RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b) {
-            return int(a) - int(b);
+            return static_cast<int>(a) - static_cast<int>(b);
           }));
 
       domain_->Insert(*node_, crc32);
@@ -94,7 +93,7 @@ class Topic {
     RBTree<uint32_t>::Node<RBTree<uint32_t>> *node_;
   };
 
-  enum class SuberType {
+  enum class SuberType : uint8_t {
     SYNC,
     ASYNC,
     QUEUE,
@@ -248,7 +247,7 @@ class Topic {
       if (!domain_) {
         domain_ =
             new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b) {
-              return int(a) - int(b);
+              return static_cast<int>(a) - static_cast<int>(b);
             });
       }
       if (!def_domain_) {
@@ -423,11 +422,11 @@ class Topic {
 
   class Server {
    public:
-    enum class Status { WAIT_START, WAIT_TOPIC, WAIT_DATA_CRC };
+    enum class Status : uint8_t { WAIT_START, WAIT_TOPIC, WAIT_DATA_CRC };
 
     Server(size_t buffer_length)
         : topic_map_([](const uint32_t &a, const uint32_t &b) {
-            return int(a) - int(b);
+            return static_cast<int>(a) - static_cast<int>(b);
           }),
           queue_(1, buffer_length) {
       /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
@@ -476,9 +475,9 @@ class Topic {
                 reinterpret_cast<PackedDataHeader *>(parse_buff_.addr_);
             /* Check buffer size */
             if (header->data_len >= queue_.EmptySize()) {
-              queue_.PopBatch(sizeof(PackedDataHeader));
+              queue_.PopBatch(nullptr, sizeof(PackedDataHeader));
               status_ = Status::WAIT_START;
-              goto check_start;
+              goto check_start;  // NOLINT
             }
 
             /* Find topic */
@@ -489,14 +488,14 @@ class Topic {
               current_topic_ = *node;
               status_ = Status::WAIT_DATA_CRC;
             } else {
-              queue_.PopBatch(sizeof(PackedDataHeader));
+              queue_.PopBatch(nullptr, sizeof(PackedDataHeader));
               status_ = Status::WAIT_START;
-              goto check_start;
+              goto check_start;  // NOLINT
             }
           } else {
-            queue_.PopBatch(sizeof(PackedDataHeader));
+            queue_.PopBatch(nullptr, sizeof(PackedDataHeader));
             status_ = Status::WAIT_START;
-            goto check_start;
+            goto check_start;  // NOLINT
           }
         } else {
           queue_.PushBatch(raw, data.size_);
@@ -519,11 +518,11 @@ class Topic {
 
             Topic(current_topic_).Publish(data, data_len_);
 
-            goto check_start;
+            goto check_start;  // NOLINT
           } else {
-            queue_.PopBatch(data_len_ + sizeof(PackedDataHeader) +
-                            sizeof(uint8_t));
-            goto check_start;
+            queue_.PopBatch(nullptr, data_len_ + sizeof(PackedDataHeader) +
+                                         sizeof(uint8_t));
+            goto check_start;  // NOLINT
           }
         } else {
           return ErrorCode::NOT_FOUND;

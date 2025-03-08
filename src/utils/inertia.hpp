@@ -8,7 +8,9 @@
 
 namespace LibXR {
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+using DefaultScalar = LIBXR_DEFAULT_SCALAR;
+
+template <typename Scalar = DefaultScalar>
 class Inertia {
  public:
   Scalar data[9];
@@ -105,7 +107,7 @@ class Inertia {
   }
 };
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class CenterOfMass {
  public:
   Eigen::Matrix<Scalar, 3, 1> position;

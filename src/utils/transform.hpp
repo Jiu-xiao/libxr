@@ -6,15 +6,17 @@
 
 namespace LibXR {
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+using DefaultScalar = LIBXR_DEFAULT_SCALAR;
+
+template <typename Scalar = DefaultScalar>
 class Position;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class Axis;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class RotationMatrix;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class EulerAngle;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class Quaternion;
 
 template <typename Scalar>
@@ -639,7 +641,7 @@ class Quaternion : public Eigen::Quaternion<Scalar> {
   }
 };
 
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class Transform {
  public:
   Quaternion<Scalar> rotation;

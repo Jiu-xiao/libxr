@@ -4,12 +4,12 @@
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
 
-extern LibXR::ConditionVar *_libxr_webots_time_notify;
+extern LibXR::ConditionVar *_libxr_webots_time_notify;  // NOLINT
 
 namespace LibXR {
 class Thread {
-public:
-  enum class Priority {
+ public:
+  enum class Priority : uint8_t {
     IDLE,
     LOW,
     MEDIUM,
@@ -34,9 +34,10 @@ public:
     }
 
     class ThreadBlock {
-    public:
+     public:
       ThreadBlock(typeof(function) fun, ArgType arg, const char *name)
-          : fun_(fun), arg_(arg),
+          : fun_(fun),
+            arg_(arg),
             name_(reinterpret_cast<char *>(malloc(strlen(name) + 1))) {
         strcpy(name_, name);
       }
@@ -50,7 +51,7 @@ public:
 
         UNUSED(thread_name);
 
-        return (void *)0;
+        return reinterpret_cast<void *>(0);
       }
 
       typeof(function) fun_;
@@ -65,7 +66,7 @@ public:
     if (sched_get_priority_max(SCHED_RR) - sched_get_priority_min(SCHED_RR) >=
         static_cast<int>(Priority::REALTIME)) {
       struct sched_param sp;
-      bzero((void *)&sp, sizeof(sp));
+      memset(&sp, 0, sizeof(sp));
       sp.sched_priority =
           sched_get_priority_min(SCHED_RR) + static_cast<int>(priority);
       pthread_setschedparam(pthread_self(), SCHED_RR, &sp);
@@ -86,7 +87,7 @@ public:
 
   operator libxr_thread_handle() { return thread_handle_; }
 
-private:
+ private:
   libxr_thread_handle thread_handle_;
 };
-} // namespace LibXR
+}  // namespace LibXR

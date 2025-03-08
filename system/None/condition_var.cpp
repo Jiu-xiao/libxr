@@ -2,7 +2,7 @@
 
 #include "libxr_def.hpp"
 #include "libxr_system.hpp"
-#include "thread.hpp"
+#include "timebase.hpp"
 #include "timer.hpp"
 
 using namespace LibXR;

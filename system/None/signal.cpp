@@ -1,6 +1,7 @@
 #include "signal.hpp"
 
 #include "libxr_def.hpp"
+#include "timebase.hpp"
 #include "timer.hpp"
 
 using namespace LibXR;
