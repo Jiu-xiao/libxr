@@ -8,6 +8,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <cstddef>
+
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
@@ -15,17 +17,23 @@
 
 struct timeval libxr_linux_start_time;
 
-struct timespec libxr_linux_start_time_spec;
+struct timespec libxr_linux_start_time_spec;  // NOLINT
 
 static LibXR::LinuxTimebase libxr_linux_timebase;
 
 void LibXR::PlatformInit() {
   auto write_fun = [](WritePort &port) {
-    auto ans = fwrite(port.info_.data.addr_, 1, port.info_.data.size_, stdout);
+    static uint8_t write_buff[1024];
+    size_t size = 0;
+    port.queue_data_->PopBlock(write_buff, &size);
+    auto ans = fwrite(write_buff, 1, size, stdout);
 
     UNUSED(ans);
 
-    port.UpdateStatus(false, ErrorCode::OK);
+    WriteOperation op;
+    port.queue_op_->Pop(op);
+
+    port.UpdateStatus(false, ErrorCode::OK, op, size);
 
     return ErrorCode::OK;
   };
@@ -35,14 +43,13 @@ void LibXR::PlatformInit() {
   *LibXR::STDIO::write_ = write_fun;
 
   auto read_fun = [](ReadPort &port) {
-    auto need_read = port.info_.data.size_;
+    ReadInfoBlock info;
+    port.queue_block_->Pop(info);
 
-    UNUSED(need_read);
+    auto need_read = info.data_.size_;
 
-    port.info_.data.size_ = fread(port.info_.data.addr_, sizeof(char),
-                                  port.info_.data.size_, stdin);
-
-    port.UpdateStatus(false, ErrorCode::OK);
+    port.read_size_ = fread(info.data_.addr_, sizeof(char), need_read, stdin);
+    port.UpdateStatus(false, ErrorCode::OK, info, need_read);
     return ErrorCode::OK;
   };
 

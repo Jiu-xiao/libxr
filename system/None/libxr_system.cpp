@@ -8,6 +8,7 @@
 #include "queue.hpp"
 #include "semaphore.hpp"
 #include "thread.hpp"
+#include "timebase.hpp"
 #include "timer.hpp"
 
 void LibXR::PlatformInit() {}
@@ -25,7 +26,7 @@ void LibXR::Timer::RefreshTimerInIdle() {
   }
 
   in_timer = true;
-  last_refresh_time++;
+  last_refresh_time = (last_refresh_time + 1);
   Timer::Refresh();
   in_timer = false;
 }

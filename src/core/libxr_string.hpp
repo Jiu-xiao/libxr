@@ -31,7 +31,7 @@ class String {
     return raw_string_[i];
   }
 
-  const char operator[](unsigned int i) const {
+  char operator[](unsigned int i) const {
     ASSERT(i < MaxLength);
     return raw_string_[i];
   }

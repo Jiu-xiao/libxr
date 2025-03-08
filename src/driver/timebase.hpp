@@ -1,10 +1,10 @@
 #pragma once
 
-#include "libxr.hpp"
+#include "libxr_time.hpp"
 
 namespace LibXR {
 class Timebase {
-public:
+ public:
   Timebase() { timebase = this; }
 
   static TimestampUS GetMicroseconds() { return timebase->_get_microseconds(); }
@@ -15,4 +15,4 @@ public:
 
   static Timebase *timebase;
 };
-} // namespace LibXR
+}  // namespace LibXR

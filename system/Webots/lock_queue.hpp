@@ -1,16 +1,16 @@
 #pragma once
 
+#include <cstdint>
+
 #include "libxr_def.hpp"
-#include "libxr_system.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"
 #include "semaphore.hpp"
-#include <array>
-#include <cstdint>
 
 namespace LibXR {
-template <typename Data> class LockQueue {
-public:
+template <typename Data>
+class LockQueue {
+ public:
   LockQueue(size_t length) : queue_handle_(length) {}
 
   ~LockQueue() {}
@@ -34,6 +34,18 @@ public:
     } else {
       return ErrorCode::TIMEOUT;
     }
+  }
+
+  ErrorCode Pop() {
+    mutex_.Lock();
+    auto ans = queue_handle_.Pop();
+    mutex_.Unlock();
+    return ans;
+  }
+
+  ErrorCode PopFromCallback(bool in_isr) {
+    UNUSED(in_isr);
+    return Pop();
   }
 
   ErrorCode Pop(uint32_t timeout) {
@@ -62,9 +74,26 @@ public:
     return Push(data);
   }
 
+  ErrorCode PopFromCallback(Data &data, bool in_isr) {
+    UNUSED(in_isr);
+    return Pop(data, 0);
+  }
+
   ErrorCode OverwriteFromCallback(const Data &data, bool in_isr) {
     UNUSED(in_isr);
     return Overwrite(data);
+  }
+
+  ErrorCode Peek(Data &item) {
+    mutex_.Lock();
+    auto ans = queue_handle_.Peek(item);
+    mutex_.Unlock();
+    return ans;
+  }
+
+  ErrorCode PeekFromCallback(Data &item, bool in_isr) {
+    UNUSED(in_isr);
+    return Peek(item);
   }
 
   void Reset() {
@@ -89,9 +118,19 @@ public:
     return ans;
   }
 
-private:
+  size_t SizeFromCallback(bool in_isr) {
+    UNUSED(in_isr);
+    return Size();
+  }
+
+  size_t EmptySizeFromCallback(bool in_isr) {
+    UNUSED(in_isr);
+    return EmptySize();
+  }
+
+ private:
   Queue<Data> queue_handle_;
   Mutex mutex_;
   Semaphore semaphore_handle_;
 };
-} // namespace LibXR
+}  // namespace LibXR

@@ -11,14 +11,16 @@
 
 namespace LibXR {
 
+using DefaultScalar = LIBXR_DEFAULT_SCALAR;
+
 namespace Kinematic {
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class Joint;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class Object;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class EndPoint;
-template <typename Scalar = LIBXR_DEFAULT_SCALAR>
+template <typename Scalar = DefaultScalar>
 class StartPoint;
 
 template <typename Scalar>

@@ -36,6 +36,18 @@ class LockQueue {
     }
   }
 
+  ErrorCode Pop() {
+    mutex_.Lock();
+    auto ans = queue_handle_.Pop();
+    mutex_.Unlock();
+    return ans;
+  }
+
+  ErrorCode PopFromCallback(bool in_isr) {
+    UNUSED(in_isr);
+    return Pop();
+  }
+
   ErrorCode Pop(uint32_t timeout) {
     if (semaphore_handle_.Wait(timeout) == ErrorCode::OK) {
       mutex_.Lock();
@@ -62,9 +74,26 @@ class LockQueue {
     return Push(data);
   }
 
+  ErrorCode PopFromCallback(Data &data, bool in_isr) {
+    UNUSED(in_isr);
+    return Pop(data, 0);
+  }
+
   ErrorCode OverwriteFromCallback(const Data &data, bool in_isr) {
     UNUSED(in_isr);
     return Overwrite(data);
+  }
+
+  ErrorCode Peek(Data &item) {
+    mutex_.Lock();
+    auto ans = queue_handle_.Peek(item);
+    mutex_.Unlock();
+    return ans;
+  }
+
+  ErrorCode PeekFromCallback(Data &item, bool in_isr) {
+    UNUSED(in_isr);
+    return Peek(item);
   }
 
   void Reset() {
@@ -87,6 +116,16 @@ class LockQueue {
     auto ans = queue_handle_.EmptySize();
     mutex_.Unlock();
     return ans;
+  }
+
+  size_t SizeFromCallback(bool in_isr) {
+    UNUSED(in_isr);
+    return Size();
+  }
+
+  size_t EmptySizeFromCallback(bool in_isr) {
+    UNUSED(in_isr);
+    return EmptySize();
   }
 
  private:
