@@ -2,62 +2,62 @@
 
 #include <bits/types/FILE.h>
 #include <poll.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 #include "condition_var.hpp"
-#include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
-#include "list.hpp"
-#include "queue.hpp"
-#include "semaphore.hpp"
 #include "thread.hpp"
-#include "timer.hpp"
 #include "webots/Robot.hpp"
 
 uint64_t _libxr_webots_time_count = 0;
-webots::Robot *_libxr_webots_robot_handle = nullptr;
+webots::Robot *_libxr_webots_robot_handle = nullptr;  // NOLINT
 static float time_step = 0.0f;
 LibXR::ConditionVar *_libxr_webots_time_notify = nullptr;
 
-void LibXR::PlatformInit(webots::Robot *robot = nullptr) {
+void LibXR::PlatformInit(webots::Robot *robot = nullptr) {  // NOLINT
   auto write_fun = [](WritePort &port) {
-    auto ans = fwrite(port.info_.data.addr_, 1, port.info_.data.size_, stdout);
+    static uint8_t write_buff[1024];
+    size_t size = 0;
+    port.queue_data_->PopBlock(write_buff, &size);
+    auto ans = fwrite(write_buff, 1, size, stdout);
 
     UNUSED(ans);
 
-    port.UpdateStatus(false, ErrorCode::OK);
+    WriteOperation op;
+    port.queue_op_->Pop(op);
+
+    port.UpdateStatus(false, ErrorCode::OK, op, size);
 
     return ErrorCode::OK;
   };
 
-  LibXR::STDIO::write = new LibXR::WritePort();
+  LibXR::STDIO::write_ = new LibXR::WritePort();
 
-  *LibXR::STDIO::write = write_fun;
+  *LibXR::STDIO::write_ = write_fun;
 
   auto read_fun = [](ReadPort &port) {
-    auto need_read = port.info_.data.size_;
+    ReadInfoBlock info;
+    port.queue_block_->Pop(info);
 
-    UNUSED(need_read);
+    auto need_read = info.data_.size_;
 
-    port.info_.data.size_ = fread(port.info_.data.addr_, sizeof(char),
-                                  port.info_.data.size_, stdin);
-
-    port.UpdateStatus(false, ErrorCode::OK);
+    port.read_size_ = fread(info.data_.addr_, sizeof(char), need_read, stdin);
+    port.UpdateStatus(false, ErrorCode::OK, info, need_read);
     return ErrorCode::OK;
   };
 
-  LibXR::STDIO::read = new LibXR::ReadPort();
+  LibXR::STDIO::read_ = new LibXR::ReadPort();
 
-  *LibXR::STDIO::read = read_fun;
+  *LibXR::STDIO::read_ = read_fun;
 
   system("stty -icanon");
   system("stty -echo");
@@ -89,7 +89,7 @@ void LibXR::PlatformInit(webots::Robot *robot = nullptr) {
   };
 
   LibXR::Thread webots_timebase_thread;
-  webots_timebase_thread.Create<void *>((void *)(0), webots_timebase_thread_fun,
-                                        "webots_timebase_thread", 1024,
-                                        Thread::Priority::REALTIME);
+  webots_timebase_thread.Create<void *>(
+      reinterpret_cast<void *>(0), webots_timebase_thread_fun,
+      "webots_timebase_thread", 1024, Thread::Priority::REALTIME);
 }

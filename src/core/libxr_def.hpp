@@ -3,6 +3,10 @@
 #include <cmath>
 #include <cstdint>
 
+#ifndef LIBXR_DEFAULT_SCALAR
+#define LIBXR_DEFAULT_SCALAR double
+#endif
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -33,7 +37,7 @@ constexpr double M_1G = 9.80665;
 #endif
 
 #define CONTAINER_OF(ptr, type, member) \
-  ((type *)((char *)(ptr) - OFFSET_OF(type, member)))
+  ((type *)((char *)(ptr) - OFFSET_OF(type, member)))  // NOLINT
 
 enum class ErrorCode : int8_t {
   OK = 0,

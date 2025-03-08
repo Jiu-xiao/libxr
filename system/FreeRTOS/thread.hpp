@@ -7,8 +7,8 @@
 
 namespace LibXR {
 class Thread {
-public:
-  enum class Priority {
+ public:
+  enum class Priority : uint8_t {
     IDLE = 0,
     LOW = LIBXR_PRIORITY_STEP * 1,
     MEDIUM = LIBXR_PRIORITY_STEP * 2,
@@ -17,9 +17,9 @@ public:
     NUMBER = 5,
   };
 
-  Thread(){};
+  Thread() {};
 
-  Thread(libxr_thread_handle handle) : thread_handle_(handle){};
+  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
 
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
@@ -27,7 +27,7 @@ public:
     ASSERT(configMAX_PRIORITIES >= 6);
 
     class ThreadBlock {
-    public:
+     public:
       ThreadBlock(typeof(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
 
       static void Port(void *arg) {
@@ -56,7 +56,7 @@ public:
 
   operator libxr_thread_handle() { return thread_handle_; }
 
-private:
+ private:
   libxr_thread_handle thread_handle_;
 };
-} // namespace LibXR
+}  // namespace LibXR

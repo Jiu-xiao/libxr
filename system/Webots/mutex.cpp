@@ -1,6 +1,9 @@
 #include "mutex.hpp"
-#include "libxr_system.hpp"
+
 #include <pthread.h>
+
+#include "libxr_def.hpp"
+#include "libxr_system.hpp"
 
 using namespace LibXR;
 
@@ -23,3 +26,13 @@ ErrorCode Mutex::TryLock() {
 }
 
 void Mutex::Unlock() { pthread_mutex_unlock(&mutex_handle_); }
+
+ErrorCode Mutex::TryLockInCallback(bool in_isr) {
+  UNUSED(in_isr);
+  return TryLock();
+}
+
+void Mutex::UnlockInCallback(bool in_isr) {
+  UNUSED(in_isr);
+  Unlock();
+}

@@ -17,15 +17,12 @@ class BaseQueue {
   ~BaseQueue() { delete[] queue_array_; }
 
   void *operator[](uint32_t index) {
-    if (index > 0) {
-      index = (head_ + index) % length_;
-    } else {
-      index = (head_ + length_ + index) % length_;
-    }
-    return &queue_array_[static_cast<ptrdiff_t>(index * ELEMENT_SIZE)];
+    return &queue_array_[static_cast<size_t>(index * ELEMENT_SIZE)];
   }
 
   ErrorCode Push(const void *data) {
+    ASSERT(data != nullptr);
+
     if (is_full_) {
       return ErrorCode::FULL;
     }
@@ -41,6 +38,8 @@ class BaseQueue {
   }
 
   ErrorCode Peek(void *data) {
+    ASSERT(data != nullptr);
+
     if (Size() > 0) {
       memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
       return ErrorCode::OK;
@@ -49,9 +48,11 @@ class BaseQueue {
     }
   }
 
-  ErrorCode Pop(void *data) {
+  ErrorCode Pop(void *data = nullptr) {
     if (Size() > 0) {
-      memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
+      if (data != nullptr) {
+        memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
+      }
       head_ = (head_ + 1) % length_;
       is_full_ = false;
       return ErrorCode::OK;
@@ -60,25 +61,25 @@ class BaseQueue {
     }
   }
 
-  ErrorCode Pop() {
+  int GetLastElementIndex() {
     if (Size() > 0) {
-      head_ = (head_ + 1) % length_;
-      is_full_ = false;
-      return ErrorCode::OK;
+      return static_cast<int>((tail_ + length_ - 1) % length_);
     } else {
-      return ErrorCode::EMPTY;
+      return -1;
     }
   }
 
-  void *GetLastElement() {
+  int GetFirstElementIndex() {
     if (Size() > 0) {
-      return &queue_array_[(tail_ - 1) * ELEMENT_SIZE];
+      return static_cast<int>(head_);
     } else {
-      return nullptr;
+      return -1;
     }
   }
 
   ErrorCode PushBatch(const void *data, size_t size) {
+    ASSERT(data != nullptr);
+
     auto avail = EmptySize();
     if (avail < size) {
       return ErrorCode::FULL;
@@ -112,26 +113,10 @@ class BaseQueue {
     auto tmp = reinterpret_cast<uint8_t *>(data);
 
     for (size_t i = 0; i < size; i++) {
-      memcpy(&tmp[i * ELEMENT_SIZE], &queue_array_[head_ * ELEMENT_SIZE],
-             ELEMENT_SIZE);
-      head_ = (head_ + 1) % length_;
-    }
-
-    return ErrorCode::OK;
-  }
-
-  ErrorCode PopBatch(size_t size) {
-    if (Size() < size) {
-      return ErrorCode::EMPTY;
-    }
-
-    if (size > 0) {
-      is_full_ = false;
-    } else {
-      return ErrorCode::OK;
-    }
-
-    for (size_t i = 0; i < size; i++) {
+      if (data != nullptr) {
+        memcpy(&tmp[i * ELEMENT_SIZE], &queue_array_[head_ * ELEMENT_SIZE],
+               ELEMENT_SIZE);
+      }
       head_ = (head_ + 1) % length_;
     }
 
@@ -139,6 +124,8 @@ class BaseQueue {
   }
 
   ErrorCode PeekBatch(void *data, size_t size) {
+    ASSERT(data != nullptr);
+
     if (Size() < size) {
       return ErrorCode::EMPTY;
     }
@@ -157,6 +144,8 @@ class BaseQueue {
   }
 
   ErrorCode Overwrite(const void *data) {
+    ASSERT(data != nullptr);
+
     head_ = tail_ = 0;
     is_full_ = false;
 
@@ -201,104 +190,6 @@ class BaseQueue {
   size_t length_;
 };
 
-class ChunkManager {
- public:
-  struct BlockInfo {
-    uint16_t start_offset;
-    uint16_t size;
-  };
-
-  ChunkManager(size_t max_blocks, size_t data_buffer_size)
-      : block_queue_(sizeof(BlockInfo), max_blocks),
-        data_queue_(sizeof(uint8_t), data_buffer_size) {}
-
-  ErrorCode CreateNewBlock() {
-    if (block_queue_.Size() >= max_blocks_) {
-      return ErrorCode::FULL;
-    }
-    BlockInfo new_block{static_cast<uint16_t>(data_queue_.tail_), 0};
-    return block_queue_.Push(&new_block);
-  }
-
-  ErrorCode AppendToCurrentBlock(const void *data, size_t size) {
-    if (!data) {
-      return ErrorCode::PTR_NULL;
-    }
-    if (size == 0) {
-      return ErrorCode::ARG_ERR;
-    }
-    if (block_queue_.Size() == 0) {
-      if (CreateNewBlock() != ErrorCode::OK) {
-        return ErrorCode::FULL;
-      }
-    }
-    BlockInfo *last_block =
-        static_cast<BlockInfo *>(block_queue_.GetLastElement());
-    if (!last_block) {
-      return ErrorCode::EMPTY;
-    }
-    if (size > data_queue_.EmptySize()) {
-      return ErrorCode::NO_BUFF;
-    }
-
-    if (data_queue_.PushBatch(reinterpret_cast<const uint8_t *>(data), size) !=
-        ErrorCode::OK) {
-      return ErrorCode::FULL;
-    }
-
-    last_block->size += size;
-    return ErrorCode::OK;
-  }
-
-  ErrorCode ReadBlock(size_t block_index, void *buffer, size_t *out_size) {
-    if (!buffer || !out_size) {
-      return ErrorCode::PTR_NULL;
-    }
-    if (block_index >= block_queue_.Size()) {
-      return ErrorCode::OUT_OF_RANGE;
-    }
-    BlockInfo block;
-    if (block_queue_.Pop(&block) != ErrorCode::OK) {
-      return ErrorCode::NOT_FOUND;
-    }
-
-    if (data_queue_.PopBatch(buffer, block.size) != ErrorCode::OK) {
-      return ErrorCode::CHECK_ERR;
-    }
-    *out_size = block.size;
-    return ErrorCode::OK;
-  }
-
-  ErrorCode PopBlock() { return block_queue_.Pop(); }
-
-  void Reset() {
-    block_queue_.Reset();
-    data_queue_.Reset();
-  }
-
-  size_t Size() { return data_queue_.Size(); }
-
-  size_t EmptySize() {
-    if (block_queue_.Size() > 0) {
-      return data_queue_.EmptySize();
-    } else {
-      return 0;
-    }
-  }
-
-  ChunkManager(const ChunkManager &) = delete;
-  ChunkManager operator=(const ChunkManager &) = delete;
-  ChunkManager operator=(ChunkManager &) = delete;
-  ChunkManager operator=(const ChunkManager &&) = delete;
-  ChunkManager operator=(ChunkManager &&) = delete;
-
- private:
-  BaseQueue block_queue_;
-  BaseQueue data_queue_;
-  size_t &max_blocks_ = block_queue_.length_;
-  size_t &data_buffer_size_ = data_queue_.length_;
-};
-
 template <typename Data>
 class Queue : public BaseQueue {
  public:
@@ -336,4 +227,5 @@ class Queue : public BaseQueue {
 
   ErrorCode Overwrite(const Data &data) { return BaseQueue::Overwrite(&data); }
 };
+
 }  // namespace LibXR
