@@ -55,7 +55,7 @@ stm32_spi_id_t STM32_SPI_GetID(SPI_TypeDef *addr) {
   }
 }
 
-void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi) {
+extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi) {
   STM32SPI *spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
 
   memcpy(spi->read_buff_.addr_, spi->dma_buff_rx_.addr_, spi->read_buff_.size_);

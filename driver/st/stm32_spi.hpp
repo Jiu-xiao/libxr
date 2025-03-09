@@ -43,9 +43,8 @@ namespace LibXR {
 class STM32SPI : public SPI {
  public:
   STM32SPI(SPI_HandleTypeDef *spi_handle, RawData dma_buff_rx,
-           RawData dma_buff_tx, uint32_t queue_size = 5,
-           uint32_t dma_enable_min_size = 3)
-      : SPI(static_cast<size_t>(queue_size), 32),
+           RawData dma_buff_tx, uint32_t dma_enable_min_size = 3)
+      : SPI(),
         dma_buff_rx_(dma_buff_rx),
         dma_buff_tx_(dma_buff_tx),
         spi_handle_(spi_handle),

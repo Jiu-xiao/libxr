@@ -21,7 +21,7 @@ stm32_gpio_exti_t STM32_GPIO_EXTI_GetID(uint16_t pin) {  // NOLINT
   return STM32_GPIO_EXTI_NUMBER;
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   auto id = STM32_GPIO_EXTI_GetID(GPIO_Pin);
   auto gpio = STM32GPIO::map[id];
 

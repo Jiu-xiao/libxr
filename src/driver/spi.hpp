@@ -21,13 +21,7 @@ class SPI {
     OperationRW op;
   };
 
-  SPI(size_t queue_size = 3, size_t buffer_size = 128)
-      : queue_block_(new LockFreeQueue<ReadInfoBlock>(queue_size)),
-        queue_data_(new BaseQueue(1, buffer_size)) {}
-
-  LockFreeQueue<ReadInfoBlock> *queue_block_ = nullptr;
-
-  BaseQueue *queue_data_ = nullptr;
+  SPI() {}
 
   virtual ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data,
                                  OperationRW &op) = 0;
