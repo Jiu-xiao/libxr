@@ -1,6 +1,6 @@
 #include "stm32_usb.hpp"
 
-#include "libxr_def.hpp"
+#ifdef HAL_PCD_MODULE_ENABLED
 
 using namespace LibXR;
 
@@ -28,7 +28,7 @@ int8_t libxr_stm32_virtual_uart_receive(uint8_t *pbuf, uint32_t *Len) {
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
   uart->read_port_.queue_data_->PushBatch(pbuf, *Len);
-  uart->CheckReceive();
+  uart->read_port_.ProcessPendingReads();
 
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
 
@@ -67,3 +67,5 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len,
 
   return (USBD_OK);
 }
+
+#endif

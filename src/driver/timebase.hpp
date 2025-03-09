@@ -10,9 +10,9 @@ class Timebase {
   static TimestampUS GetMicroseconds() { return timebase->_get_microseconds(); }
   static TimestampMS GetMilliseconds() { return timebase->_get_milliseconds(); }
 
-  virtual TimestampUS _get_microseconds() = 0;
-  virtual TimestampMS _get_milliseconds() = 0;
+  virtual TimestampUS _get_microseconds() = 0;  // NOLINT
+  virtual TimestampMS _get_milliseconds() = 0;  // NOLINT
 
-  static Timebase *timebase;
+  static Timebase *timebase;  // NOLINT
 };
 }  // namespace LibXR

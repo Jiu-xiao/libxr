@@ -195,9 +195,13 @@ class ReadPort {
 
   void UpdateStatus(ReadInfoBlock &info) { info.op_.MarkAsRunning(); }
 
-  template <typename ReadOperation>
-  ErrorCode operator()(RawData &data, ReadOperation &op) {
+  ErrorCode operator()(RawData data, ReadOperation &op) {
     if (Readable()) {
+      if (data.size_ == 0) {
+        op.UpdateStatus(false, ErrorCode::OK);
+        return ErrorCode::OK;
+      }
+
       ReadInfoBlock block = {data, std::move(op)};
       if (queue_block_->Push(block) != ErrorCode::OK) {
         return ErrorCode::FULL;
@@ -211,6 +215,20 @@ class ReadPort {
       }
     } else {
       return ErrorCode::NOT_SUPPORT;
+    }
+  }
+
+  void ProcessPendingReads() {
+    ReadInfoBlock block;
+    while (queue_block_->Peek(block) == ErrorCode::OK) {
+      if (queue_data_->Size() >= block.data_.size_) {
+        queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
+        read_size_ = block.data_.size_;
+        block.op_.UpdateStatus(true, ErrorCode::OK);
+        queue_block_->Pop();
+      } else {
+        break;
+      }
     }
   }
 
@@ -253,12 +271,18 @@ class WritePort {
 
   ErrorCode operator()(ConstRawData data, WriteOperation &op) {
     if (Writable()) {
+      if (data.size_ == 0) {
+        op.UpdateStatus(false, ErrorCode::OK);
+        return ErrorCode::OK;
+      }
+
       if (queue_data_->EmptySize() < data.size_ || queue_op_->EmptySize() < 1) {
         return ErrorCode::FULL;
       }
 
-      queue_data_->AppendToCurrentBlock(data.addr_, data.size_);
       queue_op_->Push(std::forward<WriteOperation>(op));
+      Flush();
+      queue_data_->AppendToCurrentBlock(data.addr_, data.size_);
 
       auto ans = write_fun_(*this);
       if (op.type == WriteOperation::OperationType::BLOCK) {

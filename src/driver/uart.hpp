@@ -1,10 +1,12 @@
+#pragma once
+
 #include "libxr.hpp"
 #include "libxr_rw.hpp"
 
 namespace LibXR {
 class UART {
  public:
-  enum class Parity { NoParity = 0, Even = 1, Odd = 2 };
+  enum class Parity : uint8_t { NO_PARITY = 0, EVEN = 1, ODD = 2 };
 
   struct Configuration {
     uint32_t baudrate;
@@ -12,8 +14,6 @@ class UART {
     uint8_t data_bits;
     uint8_t stop_bits;
   };
-
-  Configuration config_;
 
   ReadPort read_port_;
   WritePort write_port_;

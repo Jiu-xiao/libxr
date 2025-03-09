@@ -1,6 +1,11 @@
+#pragma once
+
+#include "main.h"
+
+#ifdef HAL_PCD_MODULE_ENABLED
+
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-#include "stm32_uart_def.h"
 #include "uart.hpp"
 #include "usbd_cdc.h"
 #include "usbd_cdc_if.h"
@@ -89,20 +94,6 @@ class STM32VirtualUART : public UART {
     USBD_CDC_ReceivePacket(usb_handle_);
   }
 
-  void CheckReceive() {
-    ReadInfoBlock block;
-    while (read_port_.queue_block_->Peek(block) == ErrorCode::OK) {
-      if (read_port_.queue_data_->Size() >= block.data_.size_) {
-        read_port_.queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
-        read_port_.read_size_ = block.data_.size_;
-        block.op_.UpdateStatus(true, ErrorCode::OK);
-        read_port_.queue_block_->Pop();
-      } else {
-        break;
-      }
-    }
-  }
-
   ErrorCode SetConfig(UART::Configuration config) {
     UNUSED(config);
     return ErrorCode::OK;
@@ -114,3 +105,5 @@ class STM32VirtualUART : public UART {
 };
 
 }  // namespace LibXR
+
+#endif
