@@ -4,6 +4,10 @@
 
 #ifdef HAL_UART_MODULE_ENABLED
 
+#ifdef UART
+#undef UART
+#endif
+
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "uart.hpp"

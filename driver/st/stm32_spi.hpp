@@ -4,6 +4,10 @@
 
 #ifdef HAL_SPI_MODULE_ENABLED
 
+#ifdef SPI
+#undef SPI
+#endif
+
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "spi.hpp"

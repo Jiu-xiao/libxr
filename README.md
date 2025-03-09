@@ -53,15 +53,15 @@ A collection of commonly used software.
 
 Only have virtual class, you can find the drivers in `Platfrom` folder. For example class `STM32Uart` based on the virtual class `Uart`.
 
-| `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | WDG | CAN/CANFD | USB-CDC |
-| ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --- | --------- | ------- |
-| STM32        | ❌     | ✅    | ❌   | ✅   | ❌   | ❌   | ✅    | ✅   | ❌   | ❌   | ❌         | ✅       |
-| ESP32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
-| Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
-| GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
-| HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
-| WCH32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
-| HPM          | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
+| `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | CAN/CANFD | USB-CDC |
+| ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --------- | ------- |
+| STM32        | ✅     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ✅   | ✅   | ❌         | ✅       |
+| ESP32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       |
+| Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       |
+| GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       |
+| HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       |
+| WCH32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       |
+| HPM          | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       |
 
 | `Network` | TCP/UDP | WIFI | Bluetooth | SmartConfig |
 | --------- | ------- | ---- | --------- | ----------- |

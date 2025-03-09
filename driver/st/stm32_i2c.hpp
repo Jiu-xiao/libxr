@@ -4,6 +4,10 @@
 
 #ifdef HAL_I2C_MODULE_ENABLED
 
+#ifdef I2C
+#undef I2C
+#endif
+
 #include "i2c.hpp"
 #include "libxr.hpp"
 
