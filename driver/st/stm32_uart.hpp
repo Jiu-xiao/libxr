@@ -9,25 +9,21 @@ class STM32UART : public UART {
  public:
   static ErrorCode WriteFun(WritePort &port) {
     STM32UART *uart = CONTAINER_OF(&port, STM32UART, write_port_);
-    __disable_irq();
     if (uart->uart_handle_->gState == HAL_UART_STATE_READY) {
       size_t need_write = 0;
       port.Flush();
       if (port.queue_data_->PopBlock(uart->dma_buff_tx_.addr_, &need_write) !=
           ErrorCode::OK) {
-        __enable_irq();
         return ErrorCode::EMPTY;
       }
 
       HAL_UART_Transmit_DMA(uart->uart_handle_,
                             static_cast<uint8_t *>(uart->dma_buff_tx_.addr_),
                             need_write);
-      __enable_irq();
       WriteOperation op;
       port.queue_op_->Peek(op);
       op.MarkAsRunning();
     } else {
-      __enable_irq();
     }
 
     return ErrorCode::OK;
@@ -38,10 +34,7 @@ class STM32UART : public UART {
     UNUSED(uart);
     ReadInfoBlock block;
 
-    __disable_irq();
-
     if (port.queue_block_->Peek(block) != ErrorCode::OK) {
-      __enable_irq();
       return ErrorCode::EMPTY;
     }
 
@@ -50,12 +43,10 @@ class STM32UART : public UART {
     if (port.queue_data_->Size() >= block.data_.size_) {
       port.queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
       port.queue_block_->Pop();
-      __enable_irq();
       port.read_size_ = block.data_.size_;
       block.op_.UpdateStatus(false, ErrorCode::OK);
       return ErrorCode::OK;
     } else {
-      __enable_irq();
       return ErrorCode::EMPTY;
     }
   }
@@ -99,6 +90,43 @@ class STM32UART : public UART {
         break;
       }
     }
+  }
+
+  ErrorCode SetConfig(UART::Configuration config) {
+    uart_handle_->Init.BaudRate = config.baudrate;
+
+    switch (config.parity) {
+      case UART::Parity::NoParity:
+        uart_handle_->Init.Parity = UART_PARITY_NONE;
+        uart_handle_->Init.WordLength = UART_WORDLENGTH_8B;
+        break;
+      case UART::Parity::Even:
+        uart_handle_->Init.Parity = UART_PARITY_EVEN;
+        uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
+        break;
+      case UART::Parity::Odd:
+        uart_handle_->Init.Parity = UART_PARITY_ODD;
+        uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
+        break;
+      default:
+        ASSERT(false);
+    }
+
+    switch (config.stop_bits) {
+      case 1:
+        uart_handle_->Init.StopBits = UART_STOPBITS_1;
+        break;
+      case 2:
+        uart_handle_->Init.StopBits = UART_STOPBITS_2;
+        break;
+      default:
+        ASSERT(false);
+    }
+
+    if (HAL_UART_Init(uart_handle_) != HAL_OK) {
+      return ErrorCode::INIT_ERR;
+    }
+    return ErrorCode::OK;
   }
 
   RawData dma_buff_rx_, dma_buff_tx_;

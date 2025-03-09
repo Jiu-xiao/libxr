@@ -37,9 +37,9 @@ Standardized compatibility layer for operating systems and peripheral devices wr
 1. Except list and tree, the memory of other data structures are determined before construction.
 2. No blocking APIs except Queue. If you want one, use Semaphore.
 
-| `Structure` | List | Stack | RBTree | LockFreeQueue |
-| ----------- | ---- | ----- | ------ | ------------- |
-|             | ✅    | ✅     | ✅      | ✅             |
+| `Structure` | List | Stack | RBTree | LockFreeQueue | ChunkQueue |
+| ----------- | ---- | ----- | ------ | ------------- | ---------- |
+|             | ✅    | ✅     | ✅      | ✅             | ✅          |
 
 ## Middleware
 
@@ -55,7 +55,7 @@ Only have virtual class, you can find the drivers in `Platfrom` folder. For exam
 
 | `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | WDG | CAN/CANFD | USB-CDC |
 | ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --- | --------- | ------- |
-| STM32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ✅    | ❌   | ❌   | ❌   | ❌         | ❌       |
+| STM32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ✅    | ❌   | ❌   | ❌   | ❌         | ✅       |
 | ESP32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
 | Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
 | GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌   | ❌         | ❌       |
@@ -91,6 +91,6 @@ Some useful tools for debugging, robotics, and communication.
 
 | Math | CycleValue | CRC8/16/32 | Triangle |
 | ---- | ---------- | ---------- | -------- |
-|      | ❌          | ✅          | ❌        |
+|      | ✅          | ✅          | ❌        |
 
 
