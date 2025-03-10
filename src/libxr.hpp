@@ -3,6 +3,7 @@
 #include "async.hpp"
 #include "chunk_queue.hpp"
 #include "condition_var.hpp"
+#include "database.hpp"
 #include "event.hpp"
 #include "inertia.hpp"
 #include "kinematic.hpp"
