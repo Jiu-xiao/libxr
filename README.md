@@ -45,9 +45,9 @@ Standardized compatibility layer for operating systems and peripheral devices wr
 
 A collection of commonly used software.
 
-| `Middleware` | Event | Message | Ramfs | Terminal | Log |
-| ------------ | ----- | ------- | ----- | -------- | --- |
-|              | ✅     | ✅       | ✅     | ✅        | ❌   |
+| `Middleware` | Event | Message | Ramfs | Terminal | Database | Log |
+| ------------ | ----- | ------- | ----- | -------- | -------- | --- |
+|              | ✅     | ✅       | ✅     | ✅        | ✅        | ❌   |
 
 ## Periheral Layer
 

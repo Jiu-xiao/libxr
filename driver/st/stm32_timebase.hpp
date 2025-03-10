@@ -6,6 +6,8 @@
 namespace LibXR {
 class STM32Timebase : public Timebase {
  public:
+  STM32Timebase() {}
+
   TimestampUS _get_microseconds() {
     uint32_t ms_old = HAL_GetTick();
     uint32_t tick_value_old = SysTick->VAL;
@@ -32,4 +34,5 @@ class STM32Timebase : public Timebase {
 
   TimestampMS _get_milliseconds() { return HAL_GetTick(); }
 };
+
 }  // namespace LibXR

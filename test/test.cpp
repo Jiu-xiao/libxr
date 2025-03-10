@@ -58,10 +58,9 @@ static void run_libxr_tests() {
   };
 
   TestCase system_tests[] = {
-      {"ramfs", test_ramfs},
+      {"ramfs", test_ramfs},       {"event", test_event},
+      {"message", test_message},   {"database", test_database},
       {"terminal", test_terminal},
-      {"event", test_event},
-      {"message", test_message},
   };
 
   struct {
