@@ -1,6 +1,6 @@
 #include "stm32_uart.hpp"
 
-#include "libxr_def.hpp"
+#ifdef HAL_UART_MODULE_ENABLED
 
 using namespace LibXR;
 
@@ -172,7 +172,7 @@ extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *uart_handle) {
 
     HAL_UART_AbortReceive_IT(uart_handle);
     uart->read_port_.queue_data_->PushBatch(uart->dma_buff_rx_.addr_, len);
-    uart->CheckReceive();
+    uart->read_port_.ProcessPendingReads();
     HAL_UART_Receive_DMA(uart_handle,
                          reinterpret_cast<uint8_t *>(uart->dma_buff_rx_.addr_),
                          uart->dma_buff_rx_.size_);
@@ -218,7 +218,7 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
       static_cast<uint8_t *>(huart->pRxBuffPtr),
       min(uart->read_port_.queue_data_->Size(), len));
   HAL_UART_Receive_DMA(huart, huart->pRxBuffPtr, len);
-  uart->CheckReceive();
+  uart->read_port_.ProcessPendingReads();
 }
 
 extern "C" void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {}
@@ -248,3 +248,5 @@ extern "C" void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart) {
       huart, huart->pRxBuffPtr,
       STM32UART::map[STM32_UART_GetID(huart->Instance)]->dma_buff_rx_.size_);
 }
+
+#endif
