@@ -13,7 +13,7 @@ class Mutex {
   ErrorCode TryLock();
   void Unlock();
   ErrorCode TryLockInCallback(bool in_isr);
-  void UnlockInCallback(bool in_isr);
+  void UnlockFromCallback(bool in_isr);
 
   class LockGuardInCallback;
 
@@ -35,7 +35,7 @@ class Mutex {
 
     ~LockGuardInCallback() {
       if (success_ == ErrorCode::OK) {
-        mutex_.UnlockInCallback(in_isr_);
+        mutex_.UnlockFromCallback(in_isr_);
       }
     }
 

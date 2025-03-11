@@ -84,20 +84,39 @@ class List {
     return ErrorCode::NOT_FOUND;
   }
 
-  template <typename Data, typename ArgType,
+  template <typename Data, typename Func,
             SizeLimitMode LimitMode = SizeLimitMode::MORE>
-  ErrorCode Foreach(ErrorCode (*func)(Data&, ArgType), ArgType&& arg) {
+  ErrorCode Foreach(Func func) {
     mutex_.Lock();
     for (auto pos = head_.next_; pos != &head_; pos = pos->next_) {
       Assert::SizeLimitCheck<LimitMode>(sizeof(Data), pos->size_);
-      if (auto res = func(static_cast<Node<Data>*>(pos)->data_,
-                          std::forward<ArgType>(arg));
+      if (auto res = func(static_cast<Node<Data>*>(pos)->data_);
           res != ErrorCode::OK) {
         mutex_.Unlock();
         return res;
       }
     }
     mutex_.Unlock();
+
+    return ErrorCode::OK;
+  }
+
+  template <typename Data, typename Func,
+            SizeLimitMode LimitMode = SizeLimitMode::MORE>
+  ErrorCode ForeachFromCallback(Func func, bool in_isr) {
+    if (mutex_.TryLockInCallback(in_isr) != ErrorCode::OK) {
+      return ErrorCode::BUSY;
+    }
+
+    for (auto pos = head_.next_; pos != &head_; pos = pos->next_) {
+      Assert::SizeLimitCheck<LimitMode>(sizeof(Data), pos->size_);
+      if (auto res = func(static_cast<Node<Data>*>(pos)->data_);
+          res != ErrorCode::OK) {
+        mutex_.UnlockFromCallback(in_isr);
+        return res;
+      }
+    }
+    mutex_.UnlockFromCallback(in_isr);
 
     return ErrorCode::OK;
   }

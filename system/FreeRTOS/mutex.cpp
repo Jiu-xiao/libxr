@@ -46,7 +46,7 @@ ErrorCode Mutex::TryLockInCallback(bool in_isr) {
   }
 }
 
-void Mutex::UnlockInCallback(bool in_isr) {
+void Mutex::UnlockFromCallback(bool in_isr) {
   if (in_isr) {
     BaseType_t px_higher_priority_task_woken = 0;
     xSemaphoreGiveFromISR(mutex_handle_, &px_higher_priority_task_woken);

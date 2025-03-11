@@ -28,7 +28,7 @@ class RBTree {
   template <typename Data>
   class Node : public BaseNode {
    public:
-    Node() : BaseNode(sizeof(Data)), data_() {}
+    Node() : BaseNode(sizeof(Data)), data_{} {}
     explicit Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
 
     operator Data &() { return data_; }
@@ -90,9 +90,15 @@ class RBTree {
         if (child) {
           child->parent = parent;
         }
-        parent->left = child;
-        replace->right = node.right;
-        node.right->parent = replace;
+
+        if (parent) {
+          parent->left = child;
+        }
+
+        if (node.right) {
+          replace->right = node.right;
+          node.right->parent = replace;
+        }
       }
 
       replace->parent = node.parent;
@@ -127,24 +133,16 @@ class RBTree {
     mutex_.Unlock();
   }
 
-  void Insert(BaseNode &node, Key &&key) {
-    mutex_.Lock();
-    node.left = nullptr;
-    node.right = nullptr;
-    node.parent = nullptr;
-    node.color = RbtColor::RED;
-    node.key = std::move(key);
-    RbtreeInsert(node);
-    mutex_.Unlock();
-  }
-
-  void Insert(BaseNode &node, const Key &key) {
+  template <typename KeyType>
+  void Insert(BaseNode &node, KeyType &&key) {
     mutex_.Lock();
     node.left = nullptr;
     node.right = nullptr;
     node.parent = nullptr;
     node.color = RbtColor::RED;
     node.key = key;
+    node.color = RbtColor::RED;
+    node.key = std::forward<KeyType>(key);
     RbtreeInsert(node);
     mutex_.Unlock();
   }
@@ -157,22 +155,11 @@ class RBTree {
     return count;
   }
 
-  template <typename Data, typename ArgType,
+  template <typename Data, typename Func,
             SizeLimitMode LimitMode = SizeLimitMode::MORE>
-  ErrorCode Foreach(ErrorCode (*func)(Node<Data> &, ArgType), ArgType arg) {
-    struct Block {
-      ErrorCode (*func_)(Node<Data> &, ArgType);
-      ArgType arg_;
-
-      static ErrorCode Wrapper(BaseNode &node, void *ctx) {
-        auto *b = static_cast<Block *>(ctx);
-        Assert::SizeLimitCheck<LimitMode>(sizeof(Data), node.size);
-        return b->func_(*static_cast<Node<Data> *>(&node), b->arg_);
-      }
-    } block{func, arg};
-
+  ErrorCode Foreach(Func func) {
     mutex_.Lock();
-    ErrorCode result = RbtreeForeach(root_, &Block::Wrapper, &block);
+    ErrorCode result = RbtreeForeachStart<Data>(root_, func);
     mutex_.Unlock();
     return result;
   }
@@ -188,7 +175,7 @@ class RBTree {
       }
     } else if (node->right) {
       result = static_cast<Node<Data> *>(node->right);
-      while (result->left) {
+      while (result && result->left) {
         result = static_cast<Node<Data> *>(result->left);
       }
     } else if (node->parent) {
@@ -277,6 +264,10 @@ class RBTree {
   }
 
   void RbtreeLeftRotate(BaseNode *x) {
+    if (!x || !x->right) {
+      return;
+    }
+
     BaseNode *y = x->right;
     x->right = y->left;
     if (y->left) {
@@ -300,6 +291,10 @@ class RBTree {
   }
 
   void RbtreeRightRotate(BaseNode *y) {
+    if (!y || !y->left) {
+      return;
+    }
+
     BaseNode *x = y->left;
     y->left = x->right;
     if (x->right) {
@@ -387,22 +382,46 @@ class RBTree {
     }
   }
 
-  ErrorCode RbtreeForeach(BaseNode *node, ErrorCode (*func)(BaseNode &, void *),
-                          void *arg) {
+  template <typename Data, typename Func>
+  ErrorCode RbtreeForeachStart(BaseNode *node, Func func) {
     if (!node) {
       return ErrorCode::OK;
     }
 
-    if (ErrorCode code = RbtreeForeach(node->left, func, arg);
+    if (ErrorCode code = RbtreeForeach<Data, Func>(
+            reinterpret_cast<Node<Data> *>(node->left), func);
         code != ErrorCode::OK) {
       return code;
     }
 
-    if (ErrorCode code = func(*node, arg); code != ErrorCode::OK) {
+    if (ErrorCode code = func(*reinterpret_cast<Node<Data> *>(node));
+        code != ErrorCode::OK) {
       return code;
     }
 
-    return RbtreeForeach(node->right, func, arg);
+    return RbtreeForeach<Data, Func>(
+        reinterpret_cast<Node<Data> *>(node->right), func);
+  }
+
+  template <typename Data, typename Func>
+  ErrorCode RbtreeForeach(BaseNode *node, Func func) {
+    if (!node) {
+      return ErrorCode::OK;
+    }
+
+    if (ErrorCode code = RbtreeForeach<Data, Func>(
+            reinterpret_cast<Node<Data> *>(node->left), func);
+        code != ErrorCode::OK) {
+      return code;
+    }
+
+    if (ErrorCode code = func(*reinterpret_cast<Node<Data> *>(node));
+        code != ErrorCode::OK) {
+      return code;
+    }
+
+    return RbtreeForeach<Data, Func>(
+        reinterpret_cast<Node<Data> *>(node->right), func);
   }
 
   void RbtreeGetNum(BaseNode *node, uint32_t *count) {
