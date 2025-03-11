@@ -32,7 +32,7 @@ ErrorCode Mutex::TryLockInCallback(bool in_isr) {
   return TryLock();
 }
 
-void Mutex::UnlockInCallback(bool in_isr) {
+void Mutex::UnlockFromCallback(bool in_isr) {
   UNUSED(in_isr);
   Unlock();
 }

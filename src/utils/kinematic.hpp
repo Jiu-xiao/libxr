@@ -301,17 +301,26 @@ class StartPoint : public Object<Scalar> {
 
   void CalcForward() {
     this->runtime_.target = this->runtime_.state;
-    this->joints.Foreach(ForwardForeachFunLoop, *this);
+    auto fun = [&](Joint<Scalar> *&joint) {
+      return ForwardForeachFunLoop(joint, *this);
+    };
+    this->joints.template Foreach<Joint<Scalar> *>(fun);
   }
 
   void CalcTargetForward() {
     this->runtime_.target = this->runtime_.state;
-    this->joints.Foreach(TargetForwardForeachFunLoop, *this);
+    auto fun = [&](Joint<Scalar> *&joint) {
+      return TargetForwardForeachFunLoop(joint, *this);
+    };
+    this->joints.template Foreach<Joint<Scalar> *>(fun);
   }
 
   void CalcInertia() {
     Joint<Scalar> *res = nullptr;
-    this->joints.Foreach(InertiaForeachFunLoopStart, res);
+    auto fun = [&](Joint<Scalar> *&joint) {
+      return InertiaForeachFunLoopStart(joint, res);
+    };
+    this->joints.template Foreach<Joint<Scalar> *>(fun);
   }
 
   void CalcCenterOfMass() {
@@ -334,9 +343,16 @@ class StartPoint : public Object<Scalar> {
         joint->runtime_.inertia,
         Eigen::Quaternion<Scalar>(joint->runtime_.state_angle));
 
-    joint->child->joints.Foreach(InertiaForeachFunLoop, joint);
+    auto fun_loop = [&](Joint<Scalar> *&child_joint) {
+      return InertiaForeachFunLoop(child_joint, joint);
+    };
 
-    joint->child->joints.Foreach(InertiaForeachFunLoopStart, joint);
+    auto fun_start = [&](Joint<Scalar> *&child_joint) {
+      return InertiaForeachFunLoopStart(child_joint, joint);
+    };
+
+    joint->child->joints.template Foreach<Joint<Scalar> *>(fun_loop);
+    joint->child->joints.template Foreach<Joint<Scalar> *>(fun_start);
 
     return ErrorCode::OK;
   }
@@ -351,7 +367,11 @@ class StartPoint : public Object<Scalar> {
 
     parent->runtime_.inertia = new_inertia + parent->runtime_.inertia;
 
-    joint->child->joints.Foreach(InertiaForeachFunLoop, parent);
+    auto fun_loop = [&](Joint<Scalar> *&child_joint) {
+      return InertiaForeachFunLoop(child_joint, joint);
+    };
+
+    joint->child->joints.template Foreach<Joint<Scalar> *>(fun_loop);
 
     return ErrorCode::OK;
   }
@@ -378,7 +398,11 @@ class StartPoint : public Object<Scalar> {
     joint->runtime_.target_angle = joint->runtime_.state_angle;
     joint->child->runtime_.target = joint->child->runtime_.state;
 
-    joint->child->joints.Foreach(ForwardForeachFunLoop, start);
+    auto fun = [&](Joint<Scalar> *&child_joint) {
+      return ForwardForeachFunLoop(child_joint, start);
+    };
+
+    joint->child->joints.template Foreach<Joint<Scalar> *>(fun);
 
     return ErrorCode::OK;
   }
@@ -400,7 +424,11 @@ class StartPoint : public Object<Scalar> {
     joint->runtime_.target_axis =
         joint->runtime_.target.rotation * joint->param_.axis;
 
-    joint->child->joints.Foreach(TargetForwardForeachFunLoop, start);
+    auto fun = [&](Joint<Scalar> *&child_joint) {
+      return TargetForwardForeachFunLoop(child_joint, start);
+    };
+
+    joint->child->joints.template Foreach<Joint<Scalar> *>(fun);
 
     return ErrorCode::OK;
   }
