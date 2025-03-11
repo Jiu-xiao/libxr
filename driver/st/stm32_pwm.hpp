@@ -20,7 +20,12 @@ class STM32PWM : public PWM {
 
     uint32_t pulse = static_cast<uint32_t>(
         static_cast<float>(htim_->Init.Period + 1) * value);
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-volatile"
     __HAL_TIM_SET_COMPARE(htim_, channel_, pulse);
+#pragma GCC diagnostic pop
+
     return ErrorCode::OK;
   }
 
