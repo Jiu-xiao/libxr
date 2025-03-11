@@ -146,67 +146,38 @@ class RamFS {
       }
     }
 
-    typedef struct FindFileRecBlock {
-      File *ans = nullptr;
-      const char *name;
-    } FindFileRecBlock;
-
-    static ErrorCode FindFileRevLoop(RBTree<const char *>::Node<FsNode> &item,
-                                     FindFileRecBlock *block) {
-      FsNode &node = item;
-      if (node.type == FsNodeType::DIR) {
-        Dir *dir = reinterpret_cast<Dir *>(&item);
-
-        block->ans = dir->FindFile(block->name);
-        if (block->ans) {
-          return ErrorCode::FAILED;
-        }
-
-        dir->data_.rbt.Foreach<FsNode>(FindFileRevLoop,
-                                       std::forward<FindFileRecBlock *>(block));
-
-        return block->ans ? ErrorCode::FAILED : ErrorCode::OK;
-      }
-      return ErrorCode::OK;
-    }
-
     File *FindFileRev(const char *name) {
-      FindFileRecBlock block{.name = name};
-      block.ans = FindFile(name);
+      auto ans = FindFile(name);
 
-      if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode, FindFileRecBlock *>(FindFileRevLoop, &block);
-      }
+      auto fun = [&]<typename T>(T &self,
+                                 RBTree<const char *>::Node<FsNode> &item) {
+        FsNode &node = item;
+        if (node.type == FsNodeType::DIR) {
+          Dir *dir = reinterpret_cast<Dir *>(&item);
 
-      return block.ans;
-    }
-
-    typedef struct FindDirRecBlock {
-      Dir *ans = nullptr;
-      const char *name;
-    } FindDirRecBlock;
-
-    static ErrorCode FindDirRevLoop(RBTree<const char *>::Node<FsNode> &item,
-                                    FindDirRecBlock *block) {
-      FsNode &node = item;
-      if (node.type == FsNodeType::DIR) {
-        Dir *dir = reinterpret_cast<Dir *>(&item);
-        if (strcmp(dir->data_.name, block->name) == 0) {
-          block->ans = dir;
-          return ErrorCode::OK;
-        } else {
-          dir->data_.rbt.Foreach<FsNode, FindDirRecBlock *>(FindDirRevLoop,
-                                                            block);
-
-          if (block->ans) {
+          ans = dir->FindFile(name);
+          if (ans) {
             return ErrorCode::FAILED;
-          } else {
-            return ErrorCode::OK;
           }
+
+          dir->data_.rbt.Foreach<FsNode>(
+              [&](RBTree<const char *>::Node<FsNode> &item) {
+                return self(self, item);
+              });
+
+          return ans ? ErrorCode::FAILED : ErrorCode::OK;
         }
-      } else {
         return ErrorCode::OK;
+      };
+
+      if (ans == nullptr) {
+        data_.rbt.Foreach<FsNode>(
+            [&](RBTree<const char *>::Node<FsNode> &item) {
+              return fun(fun, item);
+            });
       }
+
+      return ans;
     }
 
     Dir *FindDir(const char *name) {
@@ -228,54 +199,80 @@ class RamFS {
     }
 
     Dir *FindDirRev(const char *name) {
-      FindDirRecBlock block;
-      block.name = name;
+      auto ans = FindDir(name);
 
-      block.ans = FindDir(name);
-      if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(FindDirRevLoop, &block);
-      }
+      auto fun = [&]<typename T>(T &self,
+                                 RBTree<const char *>::Node<FsNode> &item) {
+        FsNode &node = item;
+        if (node.type == FsNodeType::DIR) {
+          Dir *dir = reinterpret_cast<Dir *>(&item);
+          if (strcmp(dir->data_.name, name) == 0) {
+            ans = dir;
+            return ErrorCode::OK;
+          } else {
+            dir->data_.rbt.Foreach<FsNode>(
+                [&](RBTree<const char *>::Node<FsNode> &item) {
+                  return self(self, item);
+                });
 
-      return block.ans;
-    }
-
-    typedef struct FindDevRecBlock {
-      Device *ans = nullptr;
-      const char *name;
-    } FindDevRecBlock;
-
-    static ErrorCode FindDevRevLoop(RBTree<const char *>::Node<FsNode> &item,
-                                    FindDevRecBlock *block) {
-      FsNode &node = item;
-      if (node.type == FsNodeType::DIR) {
-        Dir *dir = reinterpret_cast<Dir *>(&item);
-
-        block->ans = dir->FindDevice(block->name);
-
-        if (block->ans) {
-          return ErrorCode::FAILED;
-        }
-
-        dir->data_.rbt.Foreach<FsNode>(FindDevRevLoop, block);
-
-        if (block->ans) {
-          return ErrorCode::FAILED;
+            if (ans) {
+              return ErrorCode::FAILED;
+            } else {
+              return ErrorCode::OK;
+            }
+          }
         } else {
           return ErrorCode::OK;
         }
-      } else {
-        return ErrorCode::OK;
+      };
+
+      if (ans == nullptr) {
+        data_.rbt.Foreach<FsNode>(
+            [&](RBTree<const char *>::Node<FsNode> &item) {
+              return fun(fun, item);
+            });
       }
+
+      return ans;
     }
 
     Device *FindDeviceRev(const char *name) {
-      FindDevRecBlock block;
-      block.name = name;
-      block.ans = FindDevice(name);
-      if (block.ans == nullptr) {
-        data_.rbt.Foreach<FsNode>(FindDevRevLoop, &block);
+      auto ans = FindDevice(name);
+
+      auto fun = [&]<typename T>(T &self,
+                                 RBTree<const char *>::Node<FsNode> &item) {
+        FsNode &node = item;
+        if (node.type == FsNodeType::DIR) {
+          Dir *dir = reinterpret_cast<Dir *>(&item);
+
+          ans = dir->FindDevice(name);
+
+          if (ans) {
+            return ErrorCode::FAILED;
+          }
+
+          dir->data_.rbt.Foreach<FsNode>(
+              [&](RBTree<const char *>::Node<FsNode> &item) {
+                return self(self, item);
+              });
+
+          if (ans) {
+            return ErrorCode::FAILED;
+          } else {
+            return ErrorCode::OK;
+          }
+        } else {
+          return ErrorCode::OK;
+        }
+      };
+
+      if (ans == nullptr) {
+        data_.rbt.Foreach<FsNode>(
+            [&](RBTree<const char *>::Node<FsNode> &item) {
+              return fun(fun, item);
+            });
       }
-      return block.ans;
+      return ans;
     }
 
     Device *FindDevice(const char *name) {
