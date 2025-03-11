@@ -35,12 +35,12 @@ class Event {
       return;
     }
 
-    auto foreach_fun = [](Block &block, uint32_t &event) {
+    auto foreach_fun = [=](Block &block) {
       block.cb.Run(false, event);
       return ErrorCode::OK;
     };
 
-    list->data_.Foreach<LibXR::Event::Block, uint32_t &>(foreach_fun, event);
+    list->data_.Foreach<LibXR::Event::Block>(foreach_fun);
   }
 
   void ActiveFromCallback(uint32_t event, bool in_isr) {
@@ -49,21 +49,12 @@ class Event {
       return;
     }
 
-    auto foreach_fun = [](Block &block, uint32_t &event) {
-      block.cb.Run(false, event);
+    auto foreach_fun = [=](Block &block) {
+      block.cb.Run(in_isr, event);
       return ErrorCode::OK;
     };
 
-    auto foreach_fun_isr = [](Block &block, uint32_t &event) {
-      block.cb.Run(false, event);
-      return ErrorCode::OK;
-    };
-
-    if (in_isr) {
-      list->data_.Foreach<Block, uint32_t &>(foreach_fun, event);
-    } else {
-      list->data_.Foreach<Block, uint32_t &>(foreach_fun_isr, event);
-    }
+    list->data_.Foreach<Block>(foreach_fun);
   }
 
   void Bind(Event &sources, uint32_t source_event, uint32_t target_event) {

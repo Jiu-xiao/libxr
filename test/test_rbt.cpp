@@ -22,13 +22,11 @@ void test_rbt() {
 
   static int rbt_arg = 0;
 
-  rbtree.Foreach<int, int *>(
-      [](LibXR::RBTree<int>::Node<int> &node, int *arg) {
-        *arg = *arg + 1;
-        ASSERT(*arg == node + 1);
-        return ErrorCode::OK;
-      },
-      &rbt_arg);
+  rbtree.Foreach<int>([&](LibXR::RBTree<int>::Node<int> &node) {
+    rbt_arg = rbt_arg + 1;
+    ASSERT(rbt_arg == node + 1);
+    return ErrorCode::OK;
+  });
 
   for (int i = 0; i < 100; i++) {
     rbtree.Delete(nodes[i]);
