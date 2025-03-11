@@ -87,7 +87,7 @@ class Timer {
                                    Thread::Priority::HIGH);
     }
 
-    auto fun = [](ControlBlock &block, void *) {
+    auto fun = [](ControlBlock &block) {
       if (!block.enable_) {
         return ErrorCode::OK;
       }
@@ -102,9 +102,7 @@ class Timer {
       return ErrorCode::OK;
     };
 
-    static void *empty = nullptr;
-
-    list_->Foreach<ControlBlock, void *>(fun, std::forward<void *>(empty));
+    list_->Foreach<ControlBlock>(fun);
   }
 
   static void RefreshTimerInIdle();

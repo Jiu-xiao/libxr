@@ -284,32 +284,30 @@ class Terminal {
     }
 
     if (strcmp(arg_tab_[0], "ls") == 0) {
-      ErrorCode (*ls_fun)(RBTree<const char *>::Node<RamFS::FsNode> &,
-                          Terminal *) =
-          [](RBTree<const char *>::Node<RamFS::FsNode> &item, Terminal *term) {
-            switch (item->type) {
-              case RamFS::FsNodeType::DIR:
-                (*(term->write_))(ConstRawData("d "), term->write_op_);
-                break;
-              case RamFS::FsNodeType::FILE:
-                (*(term->write_))(ConstRawData("f "), term->write_op_);
-                break;
-              case RamFS::FsNodeType::DEVICE:
-                (*(term->write_))(ConstRawData("c "), term->write_op_);
-                break;
-              case RamFS::FsNodeType::STORAGE:
-                (*(term->write_))(ConstRawData("b "), term->write_op_);
-                break;
-              default:
-                (*(term->write_))(ConstRawData("? "), term->write_op_);
-                break;
-            }
-            (*(term->write_))(ConstRawData(item.data_.name), term->write_op_);
-            term->LineFeed();
-            return ErrorCode::OK;
-          };
+      auto ls_fun = [&](RBTree<const char *>::Node<RamFS::FsNode> &item) {
+        switch (item->type) {
+          case RamFS::FsNodeType::DIR:
+            (*(this->write_))(ConstRawData("d "), this->write_op_);
+            break;
+          case RamFS::FsNodeType::FILE:
+            (*(this->write_))(ConstRawData("f "), this->write_op_);
+            break;
+          case RamFS::FsNodeType::DEVICE:
+            (*(this->write_))(ConstRawData("c "), this->write_op_);
+            break;
+          case RamFS::FsNodeType::STORAGE:
+            (*(this->write_))(ConstRawData("b "), this->write_op_);
+            break;
+          default:
+            (*(this->write_))(ConstRawData("? "), this->write_op_);
+            break;
+        }
+        (*(this->write_))(ConstRawData(item.data_.name), this->write_op_);
+        this->LineFeed();
+        return ErrorCode::OK;
+      };
 
-      current_dir_->data_.rbt.Foreach<RamFS::FsNode>(ls_fun, this);
+      current_dir_->data_.rbt.Foreach<RamFS::FsNode>(ls_fun);
       return;
     }
 
@@ -432,14 +430,9 @@ class Terminal {
     }
 
     /* prepre for match */
-    typedef struct {
-      RBTree<const char *>::Node<RamFS::FsNode> *node;
-      uint32_t number;
-      char *prefix;
-      int prefix_len;
-      Terminal *terminal;
-      size_t same_char_number;
-    } MatchResult;
+    RBTree<const char *>::Node<RamFS::FsNode> *ans_node = nullptr;
+    uint32_t number = 0;
+    size_t same_char_number = 0;
 
     if (*prefix_start == '/') {
       prefix_start++;
@@ -447,68 +440,67 @@ class Terminal {
 
     int prefix_len = static_cast<int>(tmp - prefix_start);
 
-    MatchResult res = {nullptr, 0, prefix_start, prefix_len, this, 0};
-
-    auto foreach_fun_find = [](RBTree<const char *>::Node<RamFS::FsNode> &node,
-                               MatchResult *result) {
-      if (strncmp(node->name, result->prefix, result->prefix_len) == 0) {
-        result->node = &node;
-        result->number++;
-      }
-
-      return ErrorCode::OK;
-    };
-
-    auto foreach_fun_show = [](RBTree<const char *>::Node<RamFS::FsNode> &node,
-                               MatchResult *result) {
-      if (strncmp(node->name, result->prefix, result->prefix_len) == 0) {
-        auto name_len = strlen(node->name);
-        (*result->terminal->write_)(ConstRawData(node->name, name_len),
-                                    result->terminal->write_op_);
-        result->terminal->LineFeed();
-        if (result->node == nullptr) {
-          result->node = &node;
-          result->same_char_number = name_len;
-          return ErrorCode::OK;
-        }
-
-        for (size_t i = 0; i < name_len; i++) {
-          if (node->name[i] != result->node->data_.name[i]) {
-            result->same_char_number = i;
-            break;
+    auto foreach_fun_find =
+        [&](RBTree<const char *>::Node<RamFS::FsNode> &node) {
+          if (strncmp(node->name, prefix_start, prefix_len) == 0) {
+            ans_node = &node;
+            number++;
           }
-        }
 
-        if (result->same_char_number > name_len) {
-          name_len = result->same_char_number;
-        }
-
-        result->node = &node;
-      }
-
-      return ErrorCode::OK;
-    };
+          return ErrorCode::OK;
+        };
 
     /* start match */
-    (*dir)->rbt.Foreach<RamFS::FsNode, MatchResult *>(foreach_fun_find, &res);
+    (*dir)->rbt.Foreach<RamFS::FsNode>(foreach_fun_find);
 
-    if (res.number == 0) {
+    if (number == 0) {
       return;
-    } else if (res.number == 1) {
-      auto name_len = strlen(res.node->data_.name);
-      for (size_t i = 0; i < name_len - res.prefix_len; i++) {
-        DisplayChar(res.node->data_.name[i + res.prefix_len]);
+    } else if (number == 1) {
+      auto name_len = strlen(ans_node->data_.name);
+      for (size_t i = 0; i < name_len - prefix_len; i++) {
+        DisplayChar(ans_node->data_.name[i + prefix_len]);
       }
     } else {
-      res.node = nullptr;
+      ans_node = nullptr;
       LineFeed();
-      (*dir)->rbt.Foreach<RamFS::FsNode, MatchResult *>(foreach_fun_show, &res);
+
+      auto foreach_fun_show =
+          [&](RBTree<const char *>::Node<RamFS::FsNode> &node) {
+            if (strncmp(node->name, prefix_start, prefix_len) == 0) {
+              auto name_len = strlen(node->name);
+              (*this->write_)(ConstRawData(node->name, name_len),
+                              this->write_op_);
+              this->LineFeed();
+              if (ans_node == nullptr) {
+                ans_node = &node;
+                same_char_number = name_len;
+                return ErrorCode::OK;
+              }
+
+              for (size_t i = 0; i < name_len; i++) {
+                if (node->name[i] != ans_node->data_.name[i]) {
+                  same_char_number = i;
+                  break;
+                }
+              }
+
+              if (same_char_number > name_len) {
+                name_len = same_char_number;
+              }
+
+              ans_node = &node;
+            }
+
+            return ErrorCode::OK;
+          };
+
+      (*dir)->rbt.Foreach<RamFS::FsNode>(foreach_fun_show);
 
       ShowHeader();
       (*write_)(ConstRawData(&input_line_[0], input_line_.Size()), write_op_);
 
-      for (size_t i = 0; i < res.same_char_number - res.prefix_len; i++) {
-        DisplayChar(res.node->data_.name[i + res.prefix_len]);
+      for (size_t i = 0; i < same_char_number - prefix_len; i++) {
+        DisplayChar(ans_node->data_.name[i + prefix_len]);
       }
     }
   }

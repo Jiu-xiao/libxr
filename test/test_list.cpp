@@ -4,13 +4,6 @@
 
 static uint32_t counter = 0;
 
-static ErrorCode node_foreach_fn(int &data, void *arg) {
-  UNUSED(arg);
-  UNUSED(data);
-  counter++;
-  return ErrorCode::OK;
-}
-
 void test_list() {
   LibXR::List list;
   LibXR::List::Node<int> node1(10);
@@ -23,7 +16,14 @@ void test_list() {
 
   ASSERT(list.Size() == 3);
 
-  list.Foreach<int, void *>(node_foreach_fn, static_cast<void *>(NULL));
+  auto node_foreach_fn = [](int &node) {
+    UNUSED(node);
+
+    counter++;
+    return ErrorCode::OK;
+  };
+
+  list.Foreach<int>(node_foreach_fn);
 
   ASSERT(list.Delete(node2) == ErrorCode::OK);
   ASSERT(list.Size() == 2);
