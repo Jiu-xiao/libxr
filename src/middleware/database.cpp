@@ -1,5 +1,8 @@
 #include "database.hpp"
 
+#include <cstddef>
+#include <cstdint>
+
 #include "libxr_def.hpp"
 
 using namespace LibXR;
@@ -32,17 +35,13 @@ void DatabaseRawSequential::Init() {
     InitBlock(info_backup_);
   }
 
-  if (!IsBlockInited(info_main_)) {
-    InitBlock(info_main_);
-  }
-
   if (IsBlockError(info_main_)) {
     if (IsBlockEmpty(info_backup_)) {
       InitBlock(info_main_);
     } else {
+      flash_.Erase(0, block_size_);
       flash_.Write(
-          reinterpret_cast<size_t>(info_main_),
-          {reinterpret_cast<uint8_t*>(info_backup_), max_buffer_size_});
+          0, {reinterpret_cast<uint8_t*>(info_backup_), max_buffer_size_});
     }
   }
 
@@ -50,11 +49,11 @@ void DatabaseRawSequential::Init() {
 }
 
 void DatabaseRawSequential::Save() {
-  flash_.Erase(block_size_, max_buffer_size_);
+  flash_.Erase(block_size_, block_size_);
   flash_.Write(block_size_,
                {reinterpret_cast<uint8_t*>(info_main_), max_buffer_size_});
 
-  flash_.Erase(0, max_buffer_size_);
+  flash_.Erase(0, block_size_);
   flash_.Write(0, {data_buffer_, max_buffer_size_});
 }
 
@@ -70,10 +69,10 @@ void DatabaseRawSequential::Restore() {
 void DatabaseRawSequential::InitBlock(FlashInfo* block) {
   flash_.Erase(reinterpret_cast<size_t>(block) -
                    reinterpret_cast<size_t>(flash_.flash_area_.addr_),
-               max_buffer_size_);
+               block_size_);
   flash_.Write(reinterpret_cast<size_t>(block) -
                    reinterpret_cast<size_t>(flash_.flash_area_.addr_),
-               {data_buffer_, max_buffer_size_});
+               {data_buffer_, block_size_});
 }
 
 bool DatabaseRawSequential::IsBlockInited(FlashInfo* block) {
@@ -85,7 +84,8 @@ bool DatabaseRawSequential::IsBlockEmpty(FlashInfo* block) {
 }
 
 bool DatabaseRawSequential::IsBlockError(FlashInfo* block) {
-  return reinterpret_cast<uint8_t*>(block)[max_buffer_size_ - 1] !=
+  return reinterpret_cast<uint32_t*>(
+             block)[max_buffer_size_ / sizeof(CHECKSUM_BYTE) - 1] !=
          CHECKSUM_BYTE;
 }
 
@@ -112,7 +112,7 @@ DatabaseRawSequential::KeyInfo* DatabaseRawSequential::GetLastKey(
   return key;
 }
 
-ErrorCode DatabaseRawSequential::AddKey(const char* name, void* data,
+ErrorCode DatabaseRawSequential::AddKey(const char* name, const void* data,
                                         size_t size) {
   if (auto ans = SearchKey(name)) {
     return SetKey(ans, data, size);
