@@ -40,8 +40,12 @@ class Thread {
     };
 
     auto block = new ThreadBlock(function, arg);
-    xTaskCreate(block->Port, name, stack_depth, block,
-                static_cast<uint32_t>(priority), &(this->thread_handle_));
+
+    UNUSED(block);
+
+    ASSERT(xTaskCreate(block->Port, name, stack_depth, block,
+                       static_cast<uint32_t>(priority),
+                       &(this->thread_handle_)) == pdPASS);
   }
 
   static Thread Current(void);

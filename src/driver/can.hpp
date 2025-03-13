@@ -10,7 +10,8 @@ class CAN {
   enum class Type : uint8_t {
     STANDARD = 0,
     EXTENDED = 1,
-    REMOTE = 2,
+    REMOTE_STANDARD = 2,
+    REMOTE_EXTENDED = 3
   };
 
   CAN(const char *name_tp = "can", Topic::Domain *domain = nullptr)
@@ -19,6 +20,7 @@ class CAN {
   typedef union {
     struct __attribute__((packed)) {
       uint32_t id;
+      Type type;
       uint8_t data[8];
     };
 
@@ -27,7 +29,7 @@ class CAN {
 
   Topic classic_tp_;
 
-  virtual ErrorCode AddMessage(const ClassicPack &pack, Type type) = 0;
+  virtual ErrorCode AddMessage(const ClassicPack &pack) = 0;
 };
 
 class FDCAN : public CAN {
@@ -40,14 +42,17 @@ class FDCAN : public CAN {
   typedef union {
     struct __attribute__((packed)) {
       uint32_t id;
+      Type type;
       uint8_t len;
       uint8_t data[64];
     };
 
-    uint8_t raw[69];
+    uint8_t raw[70];
   } FDPack;
 
-  virtual ErrorCode AddMessage(const FDPack &pack, Type type) = 0;
+  using CAN::AddMessage;
+
+  virtual ErrorCode AddMessage(const FDPack &pack) = 0;
 
   Topic fd_tp_;
 };
