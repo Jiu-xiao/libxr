@@ -25,7 +25,9 @@ extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   auto id = STM32_GPIO_EXTI_GetID(GPIO_Pin);
   auto gpio = STM32GPIO::map[id];
 
-  gpio->callback_.Run(true);
+  if (gpio) {
+    gpio->callback_.Run(true);
+  }
 }
 
 #endif
