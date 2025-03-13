@@ -33,14 +33,39 @@ stm32_can_id_t STM32_CAN_GetID(CAN_TypeDef* addr) {
 extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan) {
   STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
   if (can) {
-    can->ProcessInterrupt();
+    can->ProcessRxInterrupt();
   }
 }
 
 extern "C" void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef* hcan) {
   STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
   if (can) {
-    can->ProcessInterrupt();
+    can->ProcessRxInterrupt();
+  }
+}
+
+extern "C" void HAL_CAN_ErrorCallback(CAN_HandleTypeDef* hcan) {
+  HAL_CAN_ResetError(hcan);
+}
+
+extern "C" void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef* hcan) {
+  STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
+  if (can) {
+    can->ProcessTxInterrupt();
+  }
+}
+
+extern "C" void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef* hcan) {
+  STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
+  if (can) {
+    can->ProcessTxInterrupt();
+  }
+}
+
+extern "C" void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef* hcan) {
+  STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
+  if (can) {
+    can->ProcessTxInterrupt();
   }
 }
 
