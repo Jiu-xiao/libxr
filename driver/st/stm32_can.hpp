@@ -112,8 +112,25 @@ class STM32CAN : public CAN {
     CAN_TxHeaderTypeDef txHeader;  // NOLINT
 
     txHeader.DLC = sizeof(pack.data);
-    txHeader.IDE = (pack.type == Type::EXTENDED) ? CAN_ID_EXT : CAN_ID_STD;
-    txHeader.RTR = (pack.type == Type::REMOTE) ? CAN_RTR_REMOTE : CAN_RTR_DATA;
+
+    switch (pack.type) {
+      case Type::STANDARD:
+        txHeader.IDE = CAN_ID_STD;
+        txHeader.RTR = CAN_RTR_DATA;
+        break;
+      case Type::EXTENDED:
+        txHeader.IDE = CAN_ID_EXT;
+        txHeader.RTR = CAN_RTR_DATA;
+        break;
+      case Type::REMOTE_STANDARD:
+        txHeader.IDE = CAN_ID_STD;
+        txHeader.RTR = CAN_RTR_REMOTE;
+        break;
+      case Type::REMOTE_EXTENDED:
+        txHeader.IDE = CAN_ID_EXT;
+        txHeader.RTR = CAN_RTR_REMOTE;
+        break;
+    }
     txHeader.StdId = (pack.type == Type::EXTENDED) ? 0 : pack.id;
     txHeader.ExtId = (pack.type == Type::EXTENDED) ? pack.id : 0;
     txHeader.TransmitGlobalTime = DISABLE;
@@ -130,7 +147,7 @@ class STM32CAN : public CAN {
 
   void ProcessRxInterrupt() {
     while (HAL_CAN_GetRxMessage(hcan_, fifo_, &rx_buff_.header,
-                                rx_buff_.data) == HAL_OK) {
+                                rx_buff_.pack.data) == HAL_OK) {
       if (rx_buff_.header.IDE == CAN_ID_STD) {
         rx_buff_.pack.id = rx_buff_.header.StdId;
         rx_buff_.pack.type = Type::STANDARD;
@@ -140,10 +157,12 @@ class STM32CAN : public CAN {
       }
 
       if (rx_buff_.header.RTR == CAN_RTR_REMOTE) {
-        rx_buff_.pack.type = Type::REMOTE;
+        if (rx_buff_.pack.type == Type::STANDARD) {
+          rx_buff_.pack.type = Type::REMOTE_STANDARD;
+        } else {
+          rx_buff_.pack.type = Type::REMOTE_EXTENDED;
+        }
       }
-
-      memcpy(rx_buff_.pack.data, rx_buff_.data, sizeof(rx_buff_.pack.data));
 
       classic_tp_.PublishFromCallback(rx_buff_.pack, true);
     }
@@ -152,10 +171,24 @@ class STM32CAN : public CAN {
   void ProcessTxInterrupt() {
     if (tx_queue_.Peek(tx_buff_.pack) == ErrorCode::OK) {
       tx_buff_.header.DLC = sizeof(tx_buff_.pack.data);
-      tx_buff_.header.IDE =
-          (tx_buff_.pack.type == Type::EXTENDED) ? CAN_ID_EXT : CAN_ID_STD;
-      tx_buff_.header.RTR =
-          (tx_buff_.pack.type == Type::REMOTE) ? CAN_RTR_REMOTE : CAN_RTR_DATA;
+      switch (tx_buff_.pack.type) {
+        case Type::STANDARD:
+          tx_buff_.header.IDE = CAN_ID_STD;
+          tx_buff_.header.RTR = CAN_RTR_DATA;
+          break;
+        case Type::EXTENDED:
+          tx_buff_.header.IDE = CAN_ID_EXT;
+          tx_buff_.header.RTR = CAN_RTR_DATA;
+          break;
+        case Type::REMOTE_STANDARD:
+          tx_buff_.header.IDE = CAN_ID_STD;
+          tx_buff_.header.RTR = CAN_RTR_REMOTE;
+          break;
+        case Type::REMOTE_EXTENDED:
+          tx_buff_.header.IDE = CAN_ID_EXT;
+          tx_buff_.header.RTR = CAN_RTR_REMOTE;
+          break;
+      }
       tx_buff_.header.StdId =
           (tx_buff_.pack.type == Type::EXTENDED) ? 0 : tx_buff_.pack.id;
       tx_buff_.header.ExtId =
@@ -178,13 +211,11 @@ class STM32CAN : public CAN {
 
   struct {
     CAN_RxHeaderTypeDef header;
-    uint8_t data[8];
     ClassicPack pack;
   } rx_buff_;
 
   struct {
     CAN_TxHeaderTypeDef header;
-    uint8_t data[8];
     ClassicPack pack;
   } tx_buff_;
 
