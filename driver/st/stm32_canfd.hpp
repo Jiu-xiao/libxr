@@ -27,8 +27,6 @@ typedef enum {
 
 stm32_fdcan_id_t STM32_FDCAN_GetID(FDCAN_GlobalTypeDef* addr);  // NOLINT
 
-static uint32_t counter = 0;
-
 namespace LibXR {
 class STM32CANFD : public FDCAN {
  public:
@@ -211,7 +209,6 @@ class STM32CANFD : public FDCAN {
   void ProcessRxInterrupt(uint32_t fifo) {
     if (HAL_FDCAN_GetRxMessage(hcan_, fifo, &rx_buff_.header,
                                rx_buff_.pack.data) == HAL_OK) {
-      counter++;
       if (rx_buff_.header.FDFormat == FDCAN_FD_CAN) {
         rx_buff_.pack_fd.id = rx_buff_.header.Identifier;
         rx_buff_.pack_fd.type = (rx_buff_.header.IdType == FDCAN_EXTENDED_ID)
