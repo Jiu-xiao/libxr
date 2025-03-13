@@ -19,6 +19,7 @@ class CAN {
   typedef union {
     struct __attribute__((packed)) {
       uint32_t id;
+      Type type;
       uint8_t data[8];
     };
 
@@ -27,7 +28,7 @@ class CAN {
 
   Topic classic_tp_;
 
-  virtual ErrorCode AddMessage(const ClassicPack &pack, Type type) = 0;
+  virtual ErrorCode AddMessage(const ClassicPack &pack) = 0;
 };
 
 class FDCAN : public CAN {
@@ -47,7 +48,9 @@ class FDCAN : public CAN {
     uint8_t raw[69];
   } FDPack;
 
-  virtual ErrorCode AddMessage(const FDPack &pack, Type type) = 0;
+  using CAN::AddMessage;
+
+  virtual ErrorCode AddMessage(const FDPack &pack) = 0;
 
   Topic fd_tp_;
 };
