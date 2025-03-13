@@ -83,9 +83,9 @@ class Topic {
       }
 
       node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
-          RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b) {
+          [](const uint32_t &a, const uint32_t &b) {
             return static_cast<int>(a) - static_cast<int>(b);
-          }));
+          });
 
       domain_->Insert(*node_, crc32);
     }
