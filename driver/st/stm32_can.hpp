@@ -61,6 +61,7 @@ class STM32CAN : public CAN {
       fifo_ = CAN_RX_FIFO0;
     } else if (id_ == STM32_CAN3) {
       can_filter.FilterBank = 3;
+      fifo_ = CAN_RX_FIFO1;
     }
 #else
 #ifdef CAN2
