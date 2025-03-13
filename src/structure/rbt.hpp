@@ -30,6 +30,8 @@ class RBTree {
    public:
     Node() : BaseNode(sizeof(Data)), data_{} {}
     explicit Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
+    template <typename... Args>
+    explicit Node(Args... args) : BaseNode(sizeof(Data)), data_{args...} {}
 
     operator Data &() { return data_; }
     Node &operator=(const Data &data) {
