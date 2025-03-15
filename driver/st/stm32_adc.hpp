@@ -75,9 +75,15 @@ class STM32ADC {
                               static_cast<float>(filter_size_));
     }
 
-    // NOLINTNEXTLINE
+#ifdef ADC_SAMPLETIME_15CYCLES
     ADC_ChannelConfTypeDef sConfig = {channels_[channel].ch_, 1,
                                       ADC_SAMPLETIME_15CYCLES, 0};
+#else
+#ifdef ADC_SAMPLETIME_16CYCLES_5
+    ADC_ChannelConfTypeDef sConfig = {channels_[channel].ch_, 1,
+                                      ADC_SAMPLETIME_16CYCLES_5, 0};
+#endif
+#endif
     HAL_ADC_ConfigChannel(hadc_, &sConfig);
 
     uint32_t sum = 0;

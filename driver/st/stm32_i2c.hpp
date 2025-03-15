@@ -108,14 +108,36 @@ class STM32I2C : public I2C {
     }
   }
 
+  template <typename, typename = void>
+  struct SetClockSpeed : std::false_type {
+    static void apply(auto &i2c_handle, const auto &config) {
+      UNUSED(i2c_handle);
+      UNUSED(config);
+    }
+  };
+
+  template <typename T>
+  struct SetClockSpeed<
+      T, std::void_t<
+             decltype(std::declval<std::remove_pointer_t<T>>().ClockSpeed)>>
+      : std::true_type {
+    static void apply(auto &i2c_handle, const auto &config) {
+      i2c_handle->Init.ClockSpeed = config.clock_speed;
+    }
+  };
+
   ErrorCode SetConfig(Configuration config) override {
-    i2c_handle_->Init.ClockSpeed = config.clock_speed;
+    if constexpr (SetClockSpeed<decltype(i2c_handle_)>::value) {
+      SetClockSpeed<decltype(i2c_handle_)>::apply(i2c_handle_, config);
+    } else {
+      return ErrorCode::NOT_SUPPORT;
+    }
+
     if (HAL_I2C_Init(i2c_handle_) != HAL_OK) {
       return ErrorCode::INIT_ERR;
     }
     return ErrorCode::OK;
   }
-
   stm32_i2c_id_t id_;
   I2C_HandleTypeDef *i2c_handle_;
   uint32_t dma_enable_min_size_;
