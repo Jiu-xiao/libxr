@@ -1,5 +1,8 @@
 #include "timer.hpp"
 
+LibXR::Thread::Priority LibXR::Timer::priority;
+uint32_t LibXR::Timer::stack_depth;
+
 void LibXR::Timer::Add(TimerHandle handle) {
   ASSERT(!handle->next_);
 
@@ -8,8 +11,7 @@ void LibXR::Timer::Add(TimerHandle handle) {
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
 #else
     thread_handle_.Create<void *>(nullptr, RefreshThreadFunction,
-                                  "libxr_timer_task", 512,
-                                  LIBXR_TIMER_PRIORITY);
+                                  "libxr_timer_task", stack_depth, priority);
 #endif
   }
   list_->Add(*handle);

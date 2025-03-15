@@ -10,5 +10,6 @@ typedef SemaphoreHandle_t libxr_semaphore_handle;
 typedef TaskHandle_t libxr_thread_handle;
 typedef SemaphoreHandle_t condition_var_handle;
 
-void PlatformInit();  // NOLINT
+void PlatformInit(uint32_t timer_pri = 2,
+                  uint32_t timer_stack_depth = 512);  // NOLINT
 }  // namespace LibXR
