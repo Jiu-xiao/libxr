@@ -151,6 +151,10 @@ class STM32CANFD : public FDCAN {
       FDCAN_DLC_BYTES_64,
   };
 
+  static constexpr uint32_t FDCAN_PACK_LEN_TO_INT_MAP[16] = {
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64,
+  };
+
   ErrorCode AddMessage(const FDPack& pack) override {
     FDCAN_TxHeaderTypeDef header;
     ASSERT(pack.len <= 64);
@@ -224,6 +228,13 @@ class STM32CANFD : public FDCAN {
         }
 
         rx_buff_.pack_fd.len = rx_buff_.header.DataLength;
+
+        for (uint32_t i = 0; i < 16; i++) {
+          if (rx_buff_.pack_fd.len == FDCAN_PACK_LEN_MAP[i]) {
+            rx_buff_.pack_fd.len = FDCAN_PACK_LEN_TO_INT_MAP[i];
+            break;
+          }
+        }
 
         fd_tp_.PublishFromCallback(rx_buff_.pack_fd, true);
       } else {
