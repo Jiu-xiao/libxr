@@ -4,13 +4,13 @@
 
 using namespace LibXR;
 
-extern USBD_HandleTypeDef hUsbDeviceFS;  // NOLINT
-
 STM32VirtualUART *STM32VirtualUART::map[1];
 
 int8_t libxr_stm32_virtual_uart_init(void) {
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
+  STM32VirtualUART *uart = STM32VirtualUART::map[0];
+  USBD_CDC_SetTxBuffer(STM32VirtualUART::map[0]->usb_handle_, uart->tx_buffer_,
+                       0);
+  USBD_CDC_SetRxBuffer(STM32VirtualUART::map[0]->usb_handle_, uart->rx_buffer_);
   return (USBD_OK);
 }
 
@@ -30,7 +30,7 @@ int8_t libxr_stm32_virtual_uart_receive(uint8_t *pbuf, uint32_t *Len) {
   uart->read_port_.queue_data_->PushBatch(pbuf, *Len);
   uart->read_port_.ProcessPendingReads();
 
-  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+  USBD_CDC_ReceivePacket(STM32VirtualUART::map[0]->usb_handle_);
 
   return (USBD_OK);
 }
@@ -53,13 +53,13 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len,
   size_t size = 0;
 
   if (uart->write_port_.queue_data_->PopBlockFromCallback(
-          UserTxBufferFS, &size, true) != ErrorCode::OK) {
+          uart->tx_buffer_, &size, true) != ErrorCode::OK) {
     return USBD_OK;
   }
 
   ASSERT(size > 0);
 
-  USBD_CDC_SetTxBuffer(uart->usb_handle_, UserTxBufferFS, size);
+  USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, size);
   USBD_CDC_TransmitPacket(uart->usb_handle_);
 
   uart->write_port_.queue_op_->Peek(op);

@@ -14,9 +14,6 @@
 #include "usbd_cdc.h"
 #include "usbd_cdc_if.h"
 
-extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];  // NOLINT
-extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];  // NOLINT
-
 int8_t libxr_stm32_virtual_uart_init(void);
 
 int8_t libxr_stm32_virtual_uart_deinit(void);
@@ -40,12 +37,12 @@ class STM32VirtualUART : public UART {
     if (p_data_class->TxState == 0) {
       size_t need_write = 0;
       port.Flush();
-      if (port.queue_data_->PopBlock(UserTxBufferFS, &need_write) !=
+      if (port.queue_data_->PopBlock(uart->tx_buffer_, &need_write) !=
           ErrorCode::OK) {
         return ErrorCode::EMPTY;
       }
 
-      USBD_CDC_SetTxBuffer(uart->usb_handle_, UserTxBufferFS, need_write);
+      USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, need_write);
       USBD_CDC_TransmitPacket(uart->usb_handle_);
 
       WriteOperation op;
@@ -77,11 +74,14 @@ class STM32VirtualUART : public UART {
     }
   }
 
-  STM32VirtualUART(USBD_HandleTypeDef &usb_handle, uint32_t rx_queue_size = 5,
+  STM32VirtualUART(USBD_HandleTypeDef &usb_handle, uint8_t *tx_buffer,
+                   uint8_t *rx_buffer, uint32_t rx_queue_size = 5,
                    uint32_t tx_queue_size = 5)
       : UART(ReadPort(rx_queue_size, APP_RX_DATA_SIZE),
              WritePort(tx_queue_size, APP_TX_DATA_SIZE)),
-        usb_handle_(&usb_handle) {
+        usb_handle_(&usb_handle),
+        tx_buffer_(tx_buffer),
+        rx_buffer_(rx_buffer) {
     map[0] = this;
 
     static USBD_CDC_ItfTypeDef usbd_cdc_itf = {
@@ -106,6 +106,8 @@ class STM32VirtualUART : public UART {
   static STM32VirtualUART *map[1];  // NOLINT
 
   USBD_HandleTypeDef *usb_handle_ = nullptr;
+  uint8_t *tx_buffer_ = nullptr;
+  uint8_t *rx_buffer_ = nullptr;
 };
 
 }  // namespace LibXR
