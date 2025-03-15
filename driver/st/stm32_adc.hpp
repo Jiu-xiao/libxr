@@ -16,7 +16,10 @@ namespace LibXR {
 class STM32ADC {
   template <typename, typename = void>
   struct GetADCResolution {
-    float Get() { return 4095.0f; }
+    float Get(ADC_HandleTypeDef* hadc) {
+      UNUSED(hadc);
+      return 4095.0f;
+    }
   };
 
   template <typename T>
@@ -75,7 +78,7 @@ class STM32ADC {
         filter_size_(dma_buff.size_ / NumChannels / 2),
         use_dma_(hadc_->DMA_Handle != nullptr),
         dma_buffer_(dma_buff),
-        resolution_(GetADCResolution<ADC_HandleTypeDef>{}.Get()),
+        resolution_(GetADCResolution<ADC_HandleTypeDef>{}.Get(hadc)),
         channels_(new Channel[NumChannels]),
         vref_(vref) {
     for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
