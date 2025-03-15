@@ -14,6 +14,42 @@
 namespace LibXR {
 
 class STM32ADC {
+  template <typename, typename = void>
+  struct GetADCResolution {
+    float Get() { return 4095.0f; }
+  };
+
+  template <typename T>
+  struct GetADCResolution<
+      T, std::void_t<decltype(std::declval<T>().Init.Resolution)>> {
+    float Get(T* hadc) {
+      switch (hadc->Init.Resolution) {
+#ifdef ADC_RESOLUTION_16B
+        case ADC_RESOLUTION_16B:
+          return 65535.0f;
+#endif
+#ifdef ADC_RESOLUTION_12B
+        case ADC_RESOLUTION_12B:
+          return 4095.0f;
+#endif
+#ifdef ADC_RESOLUTION_10B
+        case ADC_RESOLUTION_10B:
+          return 1023.0f;
+#endif
+#ifdef ADC_RESOLUTION_8B
+        case ADC_RESOLUTION_8B:
+          return 255.0f;
+#endif
+#ifdef ADC_RESOLUTION_6B
+        case ADC_RESOLUTION_6B:
+          return 63.0f;
+#endif
+        default:
+          return 4095.0f;
+      }
+    }
+  };
+
  public:
   class Channel {
    public:
@@ -39,7 +75,7 @@ class STM32ADC {
         filter_size_(dma_buff.size_ / NumChannels / 2),
         use_dma_(hadc_->DMA_Handle != nullptr),
         dma_buffer_(dma_buff),
-        resolution_(GetADCResolution()),
+        resolution_(GetADCResolution<ADC_HandleTypeDef>{}.Get()),
         channels_(new Channel[NumChannels]),
         vref_(vref) {
     for (uint8_t i = 0; i < NUM_CHANNELS; ++i) {
@@ -75,15 +111,15 @@ class STM32ADC {
                               static_cast<float>(filter_size_));
     }
 
+    ADC_ChannelConfTypeDef sConfig = {};
 #ifdef ADC_SAMPLETIME_15CYCLES
-    ADC_ChannelConfTypeDef sConfig = {channels_[channel].ch_, 1,
-                                      ADC_SAMPLETIME_15CYCLES, 0};
-#else
-#ifdef ADC_SAMPLETIME_16CYCLES_5
-    ADC_ChannelConfTypeDef sConfig = {channels_[channel].ch_, 1,
-                                      ADC_SAMPLETIME_16CYCLES_5, 0};
+    sConfig = {channels_[channel].ch_, 1, ADC_SAMPLETIME_15CYCLES};
+#elif defined(ADC_SAMPLETIME_16CYCLES_5)
+    sConfig = {channels_[channel].ch_, 1, ADC_SAMPLETIME_16CYCLES_5};
+#elif defined(ADC_SAMPLETIME_13CYCLES_5)
+    sConfig = {channels_[channel].ch_, 1, ADC_SAMPLETIME_13CYCLES_5};
 #endif
-#endif
+
     HAL_ADC_ConfigChannel(hadc_, &sConfig);
 
     uint32_t sum = 0;
@@ -106,27 +142,6 @@ class STM32ADC {
   float resolution_;
   Channel* channels_;
   float vref_;
-
-  float GetADCResolution() {
-    switch (hadc_->Init.Resolution) {
-#ifdef ADC_RESOLUTION_16B
-      case ADC_RESOLUTION_16B:
-        return 65535.0f;
-#endif
-#ifdef ADC_RESOLUTION_12B
-      case ADC_RESOLUTION_12B:
-        return 4095.0f;
-#endif
-      case ADC_RESOLUTION_10B:
-        return 1023.0f;
-      case ADC_RESOLUTION_8B:
-        return 255.0f;
-      case ADC_RESOLUTION_6B:
-        return 63.0f;
-      default:
-        return 4095.0f;
-    }
-  }
 
   float ConvertToVoltage(float adc_value) {
     return adc_value * vref_ / resolution_;

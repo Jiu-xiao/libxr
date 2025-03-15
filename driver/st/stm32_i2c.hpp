@@ -109,8 +109,8 @@ class STM32I2C : public I2C {
   }
 
   template <typename, typename = void>
-  struct SetClockSpeed : std::false_type {
-    static void apply(auto &i2c_handle, const auto &config) {
+  struct SetClockSpeed {
+    static void Apply(auto &i2c_handle, const auto &config) {
       UNUSED(i2c_handle);
       UNUSED(config);
     }
@@ -119,19 +119,14 @@ class STM32I2C : public I2C {
   template <typename T>
   struct SetClockSpeed<
       T, std::void_t<
-             decltype(std::declval<std::remove_pointer_t<T>>().ClockSpeed)>>
-      : std::true_type {
-    static void apply(auto &i2c_handle, const auto &config) {
+             decltype(std::declval<std::remove_pointer_t<T>>().ClockSpeed)>> {
+    static void Apply(auto &i2c_handle, const auto &config) {
       i2c_handle->Init.ClockSpeed = config.clock_speed;
     }
   };
 
   ErrorCode SetConfig(Configuration config) override {
-    if constexpr (SetClockSpeed<decltype(i2c_handle_)>::value) {
-      SetClockSpeed<decltype(i2c_handle_)>::apply(i2c_handle_, config);
-    } else {
-      return ErrorCode::NOT_SUPPORT;
-    }
+    SetClockSpeed<decltype(i2c_handle_)>::Apply(i2c_handle_, config);
 
     if (HAL_I2C_Init(i2c_handle_) != HAL_OK) {
       return ErrorCode::INIT_ERR;
