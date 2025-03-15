@@ -153,27 +153,27 @@ class STM32UART : public UART {
     }
   }
 
-  STM32UART(UART_HandleTypeDef &uart_handle, RawData dma_buff_rx,
+  STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx,
             RawData dma_buff_tx, uint32_t rx_queue_size = 5,
             uint32_t tx_queue_size = 5)
       : UART(ReadPort(rx_queue_size, dma_buff_rx.size_),
              WritePort(tx_queue_size, dma_buff_tx.size_)),
         dma_buff_rx_(dma_buff_rx),
         dma_buff_tx_(dma_buff_tx),
-        uart_handle_(&uart_handle),
+        uart_handle_(uart_handle),
         id_(STM32_UART_GetID(uart_handle_->Instance)) {
     ASSERT(id_ != STM32_UART_ID_ERROR);
 
     map[id_] = this;
 
-    if ((uart_handle.Init.Mode & UART_MODE_TX) == UART_MODE_TX) {
+    if ((uart_handle->Init.Mode & UART_MODE_TX) == UART_MODE_TX) {
       write_port_ = WriteFun;
     }
 
-    if ((uart_handle.Init.Mode & UART_MODE_RX) == UART_MODE_RX) {
-      __HAL_UART_ENABLE_IT(&uart_handle, UART_IT_IDLE);
+    if ((uart_handle->Init.Mode & UART_MODE_RX) == UART_MODE_RX) {
+      __HAL_UART_ENABLE_IT(uart_handle, UART_IT_IDLE);
 
-      HAL_UART_Receive_DMA(&uart_handle,
+      HAL_UART_Receive_DMA(uart_handle,
                            reinterpret_cast<uint8_t *>(dma_buff_rx_.addr_),
                            dma_buff_rx_.size_);
       read_port_ = ReadFun;

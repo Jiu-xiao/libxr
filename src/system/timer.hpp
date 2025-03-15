@@ -6,10 +6,6 @@
 #include "list.hpp"
 #include "thread.hpp"
 
-#ifndef LIBXR_TIMER_PRIORITY
-#define LIBXR_TIMER_PRIORITY Thread::Priority::MEDIUM
-#endif
-
 namespace LibXR {
 class Timer {
  public:
@@ -110,6 +106,9 @@ class Timer {
   static LibXR::List *list_;
 
   static Thread thread_handle_;
+
+  static LibXR::Thread::Priority priority;
+  static uint32_t stack_depth;
 };
 
 }  // namespace LibXR
