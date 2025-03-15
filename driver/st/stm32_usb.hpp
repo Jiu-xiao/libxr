@@ -29,28 +29,71 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len,
 namespace LibXR {
 class STM32VirtualUART : public UART {
  public:
+  template <typename, typename = void>
+  struct SetInterface : std::false_type {
+    static USBD_CDC_ItfTypeDef Apply() {
+      return {libxr_stm32_virtual_uart_init, libxr_stm32_virtual_uart_deinit,
+              libxr_stm32_virtual_uart_control,
+              libxr_stm32_virtual_uart_receive};
+    }
+  };
+
+  template <typename T>
+  struct SetInterface<T, std::void_t<decltype(std::declval<T>().TransmitCplt)>>
+      : std::true_type {
+    static T Apply() {
+      return {libxr_stm32_virtual_uart_init, libxr_stm32_virtual_uart_deinit,
+              libxr_stm32_virtual_uart_control,
+              libxr_stm32_virtual_uart_receive,
+              libxr_stm32_virtual_uart_transmit};
+    }
+  };
+
   static ErrorCode WriteFun(WritePort &port) {
     STM32VirtualUART *uart = CONTAINER_OF(&port, STM32VirtualUART, write_port_);
     auto p_data_class = reinterpret_cast<USBD_CDC_HandleTypeDef *>(
         uart->usb_handle_->pClassData);
 
-    if (p_data_class->TxState == 0) {
-      size_t need_write = 0;
-      port.Flush();
-      if (port.queue_data_->PopBlock(uart->tx_buffer_, &need_write) !=
-          ErrorCode::OK) {
-        return ErrorCode::EMPTY;
+    if (SetInterface<USBD_CDC_ItfTypeDef>::value) {
+      if (p_data_class->TxState == 0) {
+        size_t need_write = 0;
+        port.Flush();
+        if (port.queue_data_->PopBlock(uart->tx_buffer_, &need_write) !=
+            ErrorCode::OK) {
+          return ErrorCode::EMPTY;
+        }
+
+        USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, need_write);
+        USBD_CDC_TransmitPacket(uart->usb_handle_);
+
+        WriteOperation op;
+        port.queue_op_->Peek(op);
+        op.MarkAsRunning();
       }
-
-      USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, need_write);
-      USBD_CDC_TransmitPacket(uart->usb_handle_);
-
-      WriteOperation op;
-      port.queue_op_->Peek(op);
-      op.MarkAsRunning();
     } else {
+      if (p_data_class->TxState == 0) {
+        size_t need_write = 0;
+        port.Flush();
+        if (port.queue_data_->PopBlock(uart->tx_buffer_, &need_write) !=
+            ErrorCode::OK) {
+          return ErrorCode::EMPTY;
+        }
+
+        USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, need_write);
+        USBD_CDC_TransmitPacket(uart->usb_handle_);
+
+        WriteOperation op;
+        port.queue_op_->Pop(op);
+        op.UpdateStatus(false, ErrorCode::OK);
+      } else {
+        WriteOperation op;
+        port.queue_op_->Pop(op);
+        op.UpdateStatus(false, ErrorCode::BUSY);
+        port.queue_data_->Reset();
+        return ErrorCode::BUSY;
+      }
+      return ErrorCode::OK;
     }
-    return ErrorCode::OK;
   }
 
   static ErrorCode ReadFun(ReadPort &port) {
@@ -84,11 +127,8 @@ class STM32VirtualUART : public UART {
         rx_buffer_(rx_buffer) {
     map[0] = this;
 
-    static USBD_CDC_ItfTypeDef usbd_cdc_itf = {
-        libxr_stm32_virtual_uart_init,     libxr_stm32_virtual_uart_deinit,
-        libxr_stm32_virtual_uart_control,  libxr_stm32_virtual_uart_receive,
-        libxr_stm32_virtual_uart_transmit,
-    };
+    static USBD_CDC_ItfTypeDef usbd_cdc_itf =
+        SetInterface<USBD_CDC_ItfTypeDef>::Apply();
 
     USBD_CDC_RegisterInterface(usb_handle_, &usbd_cdc_itf);
 

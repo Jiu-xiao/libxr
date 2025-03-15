@@ -167,10 +167,12 @@ class STM32UART : public UART {
     map[id_] = this;
 
     if ((uart_handle->Init.Mode & UART_MODE_TX) == UART_MODE_TX) {
+      ASSERT(uart_handle_->hdmatx != NULL);
       write_port_ = WriteFun;
     }
 
     if ((uart_handle->Init.Mode & UART_MODE_RX) == UART_MODE_RX) {
+      ASSERT(uart_handle->hdmarx != NULL);
       __HAL_UART_ENABLE_IT(uart_handle, UART_IT_IDLE);
 
       HAL_UART_Receive_DMA(uart_handle,
