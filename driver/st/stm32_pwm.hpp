@@ -34,7 +34,11 @@ class STM32PWM : public PWM {
     }
 
     uint32_t clock_freq;                                       // NOLINT
+#ifdef TIM8
     if (htim_->Instance == TIM1 || htim_->Instance == TIM8) {  // NOLINT
+#else
+    if (htim_->Instance == TIM1) {  // NOLINT
+    #endif
       clock_freq = HAL_RCC_GetPCLK2Freq();
     } else {
       clock_freq = HAL_RCC_GetPCLK1Freq();
