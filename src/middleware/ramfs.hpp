@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -149,8 +151,9 @@ class RamFS {
     File *FindFileRev(const char *name) {
       auto ans = FindFile(name);
 
-      auto fun = [&]<typename T>(T &self,
-                                 RBTree<const char *>::Node<FsNode> &item) {
+      std::function<ErrorCode(RBTree<const char *>::Node<FsNode> &)> fun;
+
+      fun = [&](RBTree<const char *>::Node<FsNode> &item) -> ErrorCode {
         FsNode &node = item;
         if (node.type == FsNodeType::DIR) {
           Dir *dir = reinterpret_cast<Dir *>(&item);
@@ -161,8 +164,8 @@ class RamFS {
           }
 
           dir->data_.rbt.Foreach<FsNode>(
-              [&](RBTree<const char *>::Node<FsNode> &item) {
-                return self(self, item);
+              [&](RBTree<const char *>::Node<FsNode> &child) {
+                return fun(child);
               });
 
           return ans ? ErrorCode::FAILED : ErrorCode::OK;
@@ -173,7 +176,7 @@ class RamFS {
       if (ans == nullptr) {
         data_.rbt.Foreach<FsNode>(
             [&](RBTree<const char *>::Node<FsNode> &item) {
-              return fun(fun, item);
+              return fun(item);
             });
       }
 
@@ -201,8 +204,9 @@ class RamFS {
     Dir *FindDirRev(const char *name) {
       auto ans = FindDir(name);
 
-      auto fun = [&]<typename T>(T &self,
-                                 RBTree<const char *>::Node<FsNode> &item) {
+      std::function<ErrorCode(RBTree<const char *>::Node<FsNode> &)> fun;
+
+      fun = [&](RBTree<const char *>::Node<FsNode> &item) -> ErrorCode {
         FsNode &node = item;
         if (node.type == FsNodeType::DIR) {
           Dir *dir = reinterpret_cast<Dir *>(&item);
@@ -211,25 +215,20 @@ class RamFS {
             return ErrorCode::OK;
           } else {
             dir->data_.rbt.Foreach<FsNode>(
-                [&](RBTree<const char *>::Node<FsNode> &item) {
-                  return self(self, item);
+                [&](RBTree<const char *>::Node<FsNode> &child) {
+                  return fun(child);
                 });
 
-            if (ans) {
-              return ErrorCode::FAILED;
-            } else {
-              return ErrorCode::OK;
-            }
+            return ans ? ErrorCode::FAILED : ErrorCode::OK;
           }
-        } else {
-          return ErrorCode::OK;
         }
+        return ErrorCode::OK;
       };
 
       if (ans == nullptr) {
         data_.rbt.Foreach<FsNode>(
             [&](RBTree<const char *>::Node<FsNode> &item) {
-              return fun(fun, item);
+              return fun(item);
             });
       }
 
@@ -239,37 +238,32 @@ class RamFS {
     Device *FindDeviceRev(const char *name) {
       auto ans = FindDevice(name);
 
-      auto fun = [&]<typename T>(T &self,
-                                 RBTree<const char *>::Node<FsNode> &item) {
+      std::function<ErrorCode(RBTree<const char *>::Node<FsNode> &)> fun;
+
+      fun = [&](RBTree<const char *>::Node<FsNode> &item) -> ErrorCode {
         FsNode &node = item;
         if (node.type == FsNodeType::DIR) {
           Dir *dir = reinterpret_cast<Dir *>(&item);
 
           ans = dir->FindDevice(name);
-
           if (ans) {
             return ErrorCode::FAILED;
           }
 
           dir->data_.rbt.Foreach<FsNode>(
-              [&](RBTree<const char *>::Node<FsNode> &item) {
-                return self(self, item);
+              [&](RBTree<const char *>::Node<FsNode> &child) {
+                return fun(child);
               });
 
-          if (ans) {
-            return ErrorCode::FAILED;
-          } else {
-            return ErrorCode::OK;
-          }
-        } else {
-          return ErrorCode::OK;
+          return ans ? ErrorCode::FAILED : ErrorCode::OK;
         }
+        return ErrorCode::OK;
       };
 
       if (ans == nullptr) {
         data_.rbt.Foreach<FsNode>(
             [&](RBTree<const char *>::Node<FsNode> &item) {
-              return fun(fun, item);
+              return fun(item);
             });
       }
       return ans;

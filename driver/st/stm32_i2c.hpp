@@ -109,30 +109,36 @@ class STM32I2C : public I2C {
   }
 
   template <typename, typename = void>
-  struct SetClockSpeed {
-    static void Apply(auto &i2c_handle, const auto &config) {
-      UNUSED(i2c_handle);
-      UNUSED(config);
-    }
-  };
+  struct HasClockSpeed : std::false_type {};
 
   template <typename T>
-  struct SetClockSpeed<
-      T, std::void_t<
-             decltype(std::declval<std::remove_pointer_t<T>>().ClockSpeed)>> {
-    static void Apply(auto &i2c_handle, const auto &config) {
-      i2c_handle->Init.ClockSpeed = config.clock_speed;
-    }
-  };
+  struct HasClockSpeed<
+      T, std::void_t<decltype(std::declval<T>()->Init.ClockSpeed)>>
+      : std::true_type {};
+
+  template <typename T>
+  typename std::enable_if<!HasClockSpeed<T>::value>::type SetClockSpeed(
+      T &, const Configuration &) {}
+
+  template <typename T>
+  typename std::enable_if<HasClockSpeed<T>::value>::type SetClockSpeed(
+      T &i2c_handle, const Configuration &config) {
+    i2c_handle->Init.ClockSpeed = config.clock_speed;
+  }
 
   ErrorCode SetConfig(Configuration config) override {
-    SetClockSpeed<decltype(i2c_handle_)>::Apply(i2c_handle_, config);
+    if (HasClockSpeed<decltype(i2c_handle_)>::value) {
+      SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
+    } else {
+      return ErrorCode::NOT_SUPPORT;
+    }
 
     if (HAL_I2C_Init(i2c_handle_) != HAL_OK) {
       return ErrorCode::INIT_ERR;
     }
     return ErrorCode::OK;
   }
+
   stm32_i2c_id_t id_;
   I2C_HandleTypeDef *i2c_handle_;
   uint32_t dma_enable_min_size_;

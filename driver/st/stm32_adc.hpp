@@ -114,16 +114,23 @@ class STM32ADC {
                               static_cast<float>(filter_size_));
     }
 
-    ADC_ChannelConfTypeDef sConfig = {};
+    ADC_ChannelConfTypeDef config = {};
+    uint32_t time = 0;
 #ifdef ADC_SAMPLETIME_15CYCLES
-    sConfig = {channels_[channel].ch_, 1, ADC_SAMPLETIME_15CYCLES};
+    time = ADC_SAMPLETIME_15CYCLES;
 #elif defined(ADC_SAMPLETIME_16CYCLES_5)
-    sConfig = {channels_[channel].ch_, 1, ADC_SAMPLETIME_16CYCLES_5};
+    time = ADC_SAMPLETIME_16CYCLES_5;
 #elif defined(ADC_SAMPLETIME_13CYCLES_5)
-    sConfig = {channels_[channel].ch_, 1, ADC_SAMPLETIME_13CYCLES_5};
+    time = ADC_SAMPLETIME_13CYCLES_5;
+#else
+#error "Unsupported sample time"
 #endif
 
-    HAL_ADC_ConfigChannel(hadc_, &sConfig);
+    config.Channel = channels_[channel].ch_;
+    config.Rank = 1;
+    config.SamplingTime = time;
+
+    HAL_ADC_ConfigChannel(hadc_, &config);
 
     uint32_t sum = 0;
     for (uint8_t i = 0; i < filter_size_; ++i) {
