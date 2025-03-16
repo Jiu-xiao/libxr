@@ -66,7 +66,10 @@ class STM32VirtualUART : public UART {
     auto p_data_class = reinterpret_cast<USBD_CDC_HandleTypeDef *>(
         uart->usb_handle_->pClassData);
 
-    if (p_data_class->TxState == 0) {
+    while (true) {
+      if(p_data_class->TxState != 0) {
+        continue;
+      }
       size_t need_write = 0;
       port.Flush();
 
@@ -82,12 +85,6 @@ class STM32VirtualUART : public UART {
       port.queue_op_->Pop(op);
       op.UpdateStatus(false, ErrorCode::OK);
       return ErrorCode::OK;
-    } else {
-      WriteOperation op;
-      port.queue_op_->Pop(op);
-      op.UpdateStatus(false, ErrorCode::BUSY);
-      port.queue_data_->Reset();
-      return ErrorCode::BUSY;
     }
   }
 
@@ -117,7 +114,7 @@ class STM32VirtualUART : public UART {
       }
       return ErrorCode::OK;
     }
-    return ErrorCode::BUSY;
+    return ErrorCode::OK;
   }
 
   static ErrorCode ReadFun(ReadPort &port) {
