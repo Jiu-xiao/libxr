@@ -1,3 +1,5 @@
 Language: Cpp
 BasedOnStyle: Google
 IncludeBlocks: Regroup
+ColumnLimit: 90
+BreakBeforeBraces: Allman

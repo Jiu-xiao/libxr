@@ -3,7 +3,7 @@
 Standardized compatibility layer for operating systems and peripheral devices written in C++. No function will be compiled into the firmware before it is called by the user.
 
 <p align="center">
-  <img src="doc/image/XRobot.jpeg" alt="XRobot logo"  height="100"/>
+<img src="https://github.com/Jiu-xiao/LibXR_CppCodeGenerator/raw/main/imgs/XRobot.jpeg" width="300">
 </p>
 
 ## Who is this library for
@@ -92,3 +92,9 @@ Some useful tools for debugging, robotics, and communication.
 | Math | CycleValue | CRC8/16/32 | Triangle |
 | ---- | ---------- | ---------- | -------- |
 |      | ✅          | ✅          | ❌        |
+
+## Others
+
+### STM32 C++ Code Generator
+
+[libxr-python-package](https://pypi.org/project/libxr/)

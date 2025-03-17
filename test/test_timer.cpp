@@ -3,23 +3,26 @@
 #include "test.hpp"
 #include "timer.hpp"
 
-void test_timer() {
+void test_timer()
+{
   int timer_arg = 0;
 
-  auto handle = LibXR::Timer::CreatetTask<int *>(
-      [](int *arg) { *arg = *arg + 1; }, &timer_arg, 10);
+  auto handle =
+      LibXR::Timer::CreateTask<int *>([](int *arg) { *arg = *arg + 1; }, &timer_arg, 10);
 
   LibXR::Timer::Add(handle);
   LibXR::Timer::Start(handle);
 
   LibXR::Thread::Sleep(205);
   LibXR::Timer::Stop(handle);
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 10; i++)
+  {
     timer_arg = 0;
     LibXR::Timer::Start(handle);
     LibXR::Thread::Sleep(205);
     LibXR::Timer::Stop(handle);
-    if (timer_arg == 20) {
+    if (timer_arg == 20)
+    {
       break;
     }
   }
