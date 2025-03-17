@@ -36,5 +36,5 @@ PREDEFINED = __DOXYGEN__
 HAVE_DOT = YES
 CLASS_DIAGRAMS = YES
 SORT_GROUP_NAMES = YES
-PROJECT_BRIEF = "项目仓库: <a href=\"https://github.com/Jiu-xiao/libxr\">GitHub</a>"
-USE_MDFILE_AS_MAINPAGE =README.md
+PROJECT_BRIEF = "Want to be the best embedded framework"
+USE_MDFILE_AS_MAINPAGE = README.md
