@@ -1,5 +1,12 @@
 # libxr
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://jiu-xiao.github.io/libxr/)
+[![GitHub Issues](https://img.shields.io/github/issues/Jiu-xiao/libxr)](https://github.com/Jiu-xiao/libxr/issues)
+[![C/C++ CI](https://github.com/Jiu-xiao/libxr/actions/workflows/check.yml/badge.svg)](https://github.com/Jiu-xiao/libxr/actions/workflows/check.yml)
+[![Generate and Deploy Doxygen Docs](https://github.com/Jiu-xiao/libxr/actions/workflows/doxygen.yml/badge.svg)](https://github.com/Jiu-xiao/libxr/actions/workflows/doxygen.yml)
+[![CI/CD - Python Package](https://github.com/Jiu-xiao/LibXR_CppCodeGenerator/actions/workflows/python-publish.yml/badge.svg)](https://github.com/Jiu-xiao/LibXR_CppCodeGenerator/actions/workflows/python-publish.yml)
+
 Standardized compatibility layer for operating systems and peripheral devices written in C++. No function will be compiled into the firmware before it is called by the user.
 
 <p align="center">
@@ -92,6 +99,26 @@ Some useful tools for debugging, robotics, and communication.
 | Math | CycleValue | CRC8/16/32 | Triangle |
 | ---- | ---------- | ---------- | -------- |
 |      | ✅          | ✅          | ❌        |
+
+## Usage
+
+```sh
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# LibXR
+set(LIBXR_SYSTEM FreeRTOS) # None/Linux/FreeRTOS
+set(LIBXR_DRIVER st)       # st/Linux/empty
+add_subdirectory(path_to_libxr)
+
+target_link_libraries(${CMAKE_PROJECT_NAME}
+    xr
+)
+
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+)
+```
 
 ## Others
 
