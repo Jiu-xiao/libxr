@@ -8,92 +8,240 @@
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 
-namespace LibXR {
-class Database {
+namespace LibXR
+{
+/**
+ * @brief 数据库接口，提供键值存储和管理功能 (Database interface providing key-value
+ * storage and management).
+ */
+class Database
+{
  public:
-  class KeyBase {
+  /**
+   * @brief 键的基类，存储键名及其数据 (Base class for keys, storing key name and
+   * associated data).
+   */
+  class KeyBase
+  {
    public:
-    const char* name_;
-    RawData raw_data_;
+    const char* name_;  ///< 键名 (Key name).
+    RawData raw_data_;  ///< 原始数据 (Raw data associated with the key).
 
-    KeyBase(const char* name, RawData raw_data)
-        : name_(name), raw_data_(raw_data) {}
+    /**
+     * @brief 构造函数，初始化键名和原始数据 (Constructor to initialize key name and raw
+     * data).
+     * @param name 键名 (Key name).
+     * @param raw_data 关联的原始数据 (Raw data associated with the key).
+     */
+    KeyBase(const char* name, RawData raw_data) : name_(name), raw_data_(raw_data) {}
   };
 
+  /**
+   * @brief 模板类，表示数据库中的具体键 (Template class representing a specific key in
+   * the database).
+   * @tparam Data 存储的数据类型 (The type of data stored).
+   */
   template <typename Data>
-  class Key : public KeyBase {
+  class Key : public KeyBase
+  {
    public:
-    Data data_;
-    Database& database_;
+    Data data_;           ///< 键存储的数据 (The data stored in the key).
+    Database& database_;  ///< 关联的数据库对象 (Reference to the associated database).
 
+    /**
+     * @brief 构造函数，初始化键并从数据库加载数据 (Constructor to initialize key and load
+     * data from the database).
+     *
+     * If the key does not exist in the database, it is initialized with the provided
+     * value. 如果键在数据库中不存在，则使用提供的值进行初始化。
+     *
+     * @param database 关联的数据库对象 (Reference to the associated database).
+     * @param name 键名 (Key name).
+     * @param init_value 初始化值 (Initial value for the key).
+     */
     Key(Database& database, const char* name, Data init_value)
-        : KeyBase(name, RawData(data_)), database_(database) {
-      if (database.Get(*this) == ErrorCode::NOT_FOUND) {
+        : KeyBase(name, RawData(data_)), database_(database)
+    {
+      if (database.Get(*this) == ErrorCode::NOT_FOUND)
+      {
         data_ = init_value;
         database.Add(*this);
       }
     }
 
+    /**
+     * @brief 构造函数，初始化键，并在数据库不存在时赋默认值 (Constructor to initialize
+     * key, assigning default value if not found in the database).
+     *
+     * If the key does not exist in the database, it is initialized with zero.
+     * 如果键在数据库中不存在，则初始化为零。
+     *
+     * @param database 关联的数据库对象 (Reference to the associated database).
+     * @param name 键名 (Key name).
+     */
     Key(Database& database, const char* name)
-        : KeyBase(name, RawData(data_)), database_(database) {
-      if (database.Get(*this) == ErrorCode::NOT_FOUND) {
+        : KeyBase(name, RawData(data_)), database_(database)
+    {
+      if (database.Get(*this) == ErrorCode::NOT_FOUND)
+      {
         data_ = memset(&data_, 0, sizeof(Data));
         database.Add(*this);
       }
     }
 
+    /**
+     * @brief 类型转换运算符，返回存储的数据 (Type conversion operator returning stored
+     * data).
+     * @return 存储的数据 (Stored data).
+     */
     operator Data() { return data_; }
 
+    /**
+     * @brief 设置键的值并更新数据库 (Set the key's value and update the database).
+     * @param data 需要存储的新值 (New value to store).
+     * @return 操作结果 (Operation result).
+     */
     ErrorCode Set(Data data) { return database_.Set(*this, RawData(data)); }
 
+    /**
+     * @brief 从数据库加载键的值 (Load the key's value from the database).
+     * @return 操作结果 (Operation result).
+     */
     ErrorCode Load() { return database_.Get(*this); }
 
+    /**
+     * @brief 赋值运算符，设置键的值 (Assignment operator to set the key's value).
+     * @param data 需要存储的新值 (New value to store).
+     * @return 操作结果 (Operation result).
+     */
     ErrorCode operator=(Data data) { return Set(data); }  // NOLINT
   };
 
  private:
+  /**
+   * @brief 从数据库获取键的值 (Retrieve the key's value from the database).
+   * @param key 需要获取的键 (Key to retrieve).
+   * @return 操作结果 (Operation result).
+   */
   virtual ErrorCode Get(KeyBase& key) = 0;
+
+  /**
+   * @brief 设置数据库中的键值 (Set the key's value in the database).
+   * @param key 目标键 (Target key).
+   * @param data 需要存储的新值 (New value to store).
+   * @return 操作结果 (Operation result).
+   */
   virtual ErrorCode Set(KeyBase& key, RawData data) = 0;
+
+  /**
+   * @brief 添加新键到数据库 (Add a new key to the database).
+   * @param key 需要添加的键 (Key to add).
+   * @return 操作结果 (Operation result).
+   */
   virtual ErrorCode Add(KeyBase& key) = 0;
 };
 
-class DatabaseRawSequential : public Database {
+/**
+ * @brief 适用于不支持逆序写入的 Flash 存储的数据库实现
+ *        (Database implementation for Flash storage that does not support reverse
+ * writing).
+ *
+ * This class manages key-value storage in a Flash memory region where
+ * data can only be written sequentially. It maintains a backup system
+ * to prevent data corruption.
+ * 此类管理 Flash 内存区域中的键值存储，其中数据只能顺序写入。
+ * 它维护一个备份系统，以防止数据损坏。
+ */
+class DatabaseRawSequential : public Database
+{
  public:
+  /**
+   * @brief 构造函数，初始化 Flash 存储和缓冲区
+   *        (Constructor initializing Flash storage and buffer).
+   *
+   * @param flash 目标 Flash 存储设备 (Target Flash storage device).
+   * @param max_buffer_size 最大缓冲区大小，默认 256 字节 (Maximum buffer size, default is
+   * 256 bytes).
+   */
   explicit DatabaseRawSequential(Flash& flash, size_t max_buffer_size = 256);
+
+  /**
+   * @brief 初始化数据库存储区，确保主备块正确
+   *        (Initialize database storage, ensuring main and backup blocks are valid).
+   */
   void Init();
+
+  /**
+   * @brief 保存当前缓冲区内容到 Flash
+   *        (Save the current buffer content to Flash).
+   */
   void Save();
+
+  /**
+   * @brief 从 Flash 加载数据到缓冲区
+   *        (Load data from Flash into the buffer).
+   */
   void Load();
+
+  /**
+   * @brief 还原存储数据，清空 Flash 区域
+   *        (Restore storage data, clearing Flash memory area).
+   */
   void Restore();
 
  private:
-  typedef struct __attribute__((packed)) {
-    uint8_t nextKey : 1;
-    uint32_t nameLength : 7;
-    size_t dataSize : 24;
+  /**
+   * @brief 键信息结构，存储键的元数据
+   *        (Structure containing key metadata).
+   */
+  typedef struct __attribute__((packed))
+  {
+    uint8_t nextKey : 1;      ///< 是否有下一个键 (Indicates if there is a next key).
+    uint32_t nameLength : 7;  ///< 键名长度 (Length of the key name).
+    size_t dataSize : 24;     ///< 数据大小 (Size of the stored data).
   } KeyInfo;
 
-  struct FlashInfo {
-    uint32_t header;
-    KeyInfo key;
+  /**
+   * @brief Flash 存储的块信息结构
+   *        (Structure representing a Flash storage block).
+   */
+  struct FlashInfo
+  {
+    uint32_t header;  ///< Flash 块头标识 (Flash block header identifier).
+    KeyInfo key;      ///< 该块的键信息 (Key metadata in this block).
   };
 
   ErrorCode AddKey(const char* name, const void* data, size_t size);
   ErrorCode SetKey(const char* name, const void* data, size_t size);
   ErrorCode SetKey(KeyInfo* key, const void* data, size_t size);
 
+  /**
+   * @brief 获取指定键的数据信息
+   *        (Retrieve the data associated with a key).
+   * @param key 目标键 (Key to retrieve data from).
+   * @return 指向数据的指针 (Pointer to the key's data).
+   */
   uint8_t* GetKeyData(KeyInfo* key);
+
+  /**
+   * @brief 获取键的名称
+   *        (Retrieve the name of a key).
+   * @param key 目标键 (Key to retrieve the name from).
+   * @return 指向键名的指针 (Pointer to the key name).
+   */
   const char* GetKeyName(KeyInfo* key);
 
-  static constexpr uint32_t FLASH_HEADER = 0x12345678;
-  static constexpr uint8_t CHECKSUM_BYTE = 0x56;
+  static constexpr uint32_t FLASH_HEADER =
+      0x12345678;  ///< Flash 头部标识 (Flash header identifier).
+  static constexpr uint8_t CHECKSUM_BYTE = 0x56;  ///< 校验字节 (Checksum byte).
 
-  Flash& flash_;
-  uint8_t* data_buffer_;
-  FlashInfo* flash_data_;
-  FlashInfo* info_main_;
-  FlashInfo* info_backup_;
-  uint32_t block_size_;
-  uint32_t max_buffer_size_;
+  Flash& flash_;              ///< 目标 Flash 存储设备 (Target Flash storage device).
+  uint8_t* data_buffer_;      ///< 数据缓冲区 (Data buffer).
+  FlashInfo* flash_data_;     ///< Flash 数据存储区 (Pointer to the Flash data storage).
+  FlashInfo* info_main_;      ///< 主存储区信息 (Main storage block information).
+  FlashInfo* info_backup_;    ///< 备份存储区信息 (Backup storage block information).
+  uint32_t block_size_;       ///< Flash 块大小 (Flash block size).
+  uint32_t max_buffer_size_;  ///< 最大缓冲区大小 (Maximum buffer size).
 
   void InitBlock(FlashInfo* block);
   bool IsBlockInited(FlashInfo* block);
@@ -104,18 +252,36 @@ class DatabaseRawSequential : public Database {
   KeyInfo* GetLastKey(FlashInfo* block);
   KeyInfo* SearchKey(const char* name);
 
-  ErrorCode Add(KeyBase& key) override {
+  /**
+   * @brief 添加新键到数据库
+   *        (Add a new key to the database).
+   * @param key 需要添加的键 (Key to add).
+   * @return 操作结果 (Operation result).
+   */
+  ErrorCode Add(KeyBase& key) override
+  {
     return AddKey(key.name_, key.raw_data_.addr_, key.raw_data_.size_);
   }
 
  public:
-  ErrorCode Get(Database::KeyBase& key) override {
+  /**
+   * @brief 获取数据库中的键值
+   *        (Retrieve the key's value from the database).
+   * @param key 需要获取的键 (Key to retrieve).
+   * @return 操作结果，如果找到则返回 `ErrorCode::OK`，否则返回 `ErrorCode::NOT_FOUND`
+   *         (Operation result, returns `ErrorCode::OK` if found, otherwise
+   * `ErrorCode::NOT_FOUND`).
+   */
+  ErrorCode Get(Database::KeyBase& key) override
+  {
     auto ans = SearchKey(key.name_);
-    if (!ans) {
+    if (!ans)
+    {
       return ErrorCode::NOT_FOUND;
     }
 
-    if (key.raw_data_.size_ != ans->dataSize) {
+    if (key.raw_data_.size_ != ans->dataSize)
+    {
       return ErrorCode::FAILED;
     }
 
@@ -124,20 +290,47 @@ class DatabaseRawSequential : public Database {
     return ErrorCode::OK;
   }
 
-  ErrorCode Set(KeyBase& key, RawData data) override {
+  /**
+   * @brief 设置数据库中的键值
+   *        (Set the key's value in the database).
+   * @param key 目标键 (Target key).
+   * @param data 需要存储的新值 (New value to store).
+   * @return 操作结果 (Operation result).
+   */
+  ErrorCode Set(KeyBase& key, RawData data) override
+  {
     return SetKey(key.name_, data.addr_, data.size_);
   }
 };
 
+/**
+ * @brief 适用于最小写入单元受限的 Flash 存储的数据库实现
+ *        (Database implementation for Flash storage with minimum write unit
+ * restrictions).
+ *
+ * This class provides key-value storage management for Flash memory that
+ * requires data to be written in fixed-size blocks.
+ * 此类提供适用于 Flash 存储的键值存储管理，该存储要求数据以固定大小块写入。
+ *
+ * @tparam MinWriteSize Flash 的最小写入单元大小 (Minimum write unit size for Flash
+ * storage).
+ */
 template <size_t MinWriteSize>
-class DatabaseRaw : public Database {
+class DatabaseRaw : public Database
+{
  public:
+  /**
+   * @brief 构造函数，初始化 Flash 存储和缓冲区
+   *        (Constructor to initialize Flash storage and buffer).
+   *
+   * @param flash 目标 Flash 存储设备 (Target Flash storage device).
+   */
   explicit DatabaseRaw(Flash& flash)
-      : flash_(flash), write_buffer_(new uint8_t[flash_.min_write_size_]) {
+      : flash_(flash), write_buffer_(new uint8_t[flash_.min_write_size_])
+  {
     ASSERT(flash.min_erase_size_ * 2 <= flash.flash_area_.size_);
     ASSERT(flash_.min_write_size_ == MinWriteSize);
-    auto block_num =
-        static_cast<size_t>(flash.flash_area_.size_ / flash.min_erase_size_);
+    auto block_num = static_cast<size_t>(flash.flash_area_.size_ / flash.min_erase_size_);
     block_size_ = block_num / 2 * flash.min_erase_size_;
     info_main_ = reinterpret_cast<FlashInfo*>(flash.flash_area_.addr_);
     info_backup_ = reinterpret_cast<FlashInfo*>(
@@ -145,41 +338,72 @@ class DatabaseRaw : public Database {
     Init();
   }
 
-  void Init() {
-    if (!IsBlockInited(info_backup_) || IsBlockError(info_backup_)) {
+  /**
+   * @brief 初始化数据库存储区，确保主备块正确
+   *        (Initialize database storage, ensuring main and backup blocks are valid).
+   */
+  void Init()
+  {
+    if (!IsBlockInited(info_backup_) || IsBlockError(info_backup_))
+    {
       InitBlock(info_backup_);
     }
 
-    if (IsBlockError(info_main_)) {
-      if (IsBlockEmpty(info_backup_)) {
+    if (IsBlockError(info_main_))
+    {
+      if (IsBlockEmpty(info_backup_))
+      {
         InitBlock(info_main_);
-      } else {
+      }
+      else
+      {
         flash_.Erase(0, block_size_);
         Write(0, {reinterpret_cast<uint8_t*>(info_backup_), block_size_});
       }
-    } else if (!IsBlockEmpty(info_backup_)) {
+    }
+    else if (!IsBlockEmpty(info_backup_))
+    {
       InitBlock(info_backup_);
     }
 
     KeyInfo* key = &info_main_->key;
-    while (!key->no_next_key) {
+    while (!key->no_next_key)
+    {
       key = GetNextKey(key);
-      if (key->uninit) {
+      if (key->uninit)
+      {
         InitBlock(info_main_);
         break;
       }
     }
   }
 
+  /**
+   * @brief 还原存储数据，清空 Flash 区域
+   *        (Restore storage data, clearing Flash memory area).
+   */
   void Restore() {}
-  ErrorCode Recycle() {
-    if (IsBlockEmpty(info_main_)) {
+
+  /**
+   * @brief 回收 Flash 空间，整理数据
+   *        (Recycle Flash storage space and organize data).
+   *
+   * Moves valid keys from the main block to the backup block and erases the main block.
+   * 将主存储块中的有效键移动到备份块，并擦除主存储块。
+   *
+   * @return 操作结果 (Operation result).
+   */
+  ErrorCode Recycle()
+  {
+    if (IsBlockEmpty(info_main_))
+    {
       return ErrorCode::OK;
     }
 
     KeyInfo* key = &info_main_->key;
 
-    if (!IsBlockEmpty(info_backup_)) {
+    if (!IsBlockEmpty(info_backup_))
+    {
       ASSERT(false);
       return ErrorCode::FAILED;
     }
@@ -187,20 +411,20 @@ class DatabaseRaw : public Database {
     uint8_t* write_buff = reinterpret_cast<uint8_t*>(&info_backup_->key);
 
     auto new_key = KeyInfo{0, false, 0, 0, 0};
-    Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
-          new_key);
+    Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_), new_key);
 
     write_buff += GetKeySize(&info_backup_->key);
 
-    do {
+    do
+    {
       key = GetNextKey(key);
 
-      if (!key->available_flag) {
+      if (!key->available_flag)
+      {
         continue;
       }
 
-      Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
-            *key);
+      Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_), *key);
       write_buff += AlignSize(sizeof(KeyInfo));
       Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
             {GetKeyName(key), key->nameLength});
@@ -218,38 +442,53 @@ class DatabaseRaw : public Database {
   }
 
  private:
-  typedef struct __attribute__((packed)) {
-    uint8_t no_next_key : 1;
-    uint8_t available_flag : 1;
-    uint8_t uninit : 1;
-    uint32_t nameLength : 6;
-    size_t dataSize : 23;
+  /**
+   * @brief 键信息结构，存储键的元数据
+   *        (Structure containing key metadata).
+   */
+  typedef struct __attribute__((packed))
+  {
+    uint8_t no_next_key : 1;  ///< 是否是最后一个键 (Indicates if this is the last key).
+    uint8_t available_flag : 1;  ///< 该键是否有效 (Indicates if this key is available).
+    uint8_t uninit : 1;  ///< 该键是否未初始化 (Indicates if this key is uninitialized).
+    uint32_t nameLength : 6;  ///< 键名长度 (Length of the key name).
+    size_t dataSize : 23;     ///< 数据大小 (Size of the stored data).
   } KeyInfo;
 
-  struct FlashInfo {
+  /**
+   * @brief Flash 存储的块信息结构
+   *        (Structure representing a Flash storage block).
+   */
+  struct FlashInfo
+  {
    private:
     static constexpr size_t BASE_SIZE = sizeof(uint32_t);
-    // NOLINTNEXTLINE
     static constexpr size_t ALIGNED_SIZE =
         (BASE_SIZE + MinWriteSize - 1) / MinWriteSize * MinWriteSize;
-    // NOLINTNEXTLINE
     static constexpr size_t PADDING_SIZE = ALIGNED_SIZE - BASE_SIZE;
 
    public:
-    uint32_t header;
-    uint8_t res[PADDING_SIZE];
-    KeyInfo key;
-
+    uint32_t header;            ///< Flash 头部标识 (Flash block header identifier).
+    uint8_t res[PADDING_SIZE];  ///< 用于对齐的填充字节 (Padding bytes for alignment).
+    KeyInfo key;                ///< 该块的键信息 (Key metadata in this block).
   } __attribute__((packed));
 
-  size_t AvailableSize() {
+  /**
+   * @brief 计算可用的存储空间大小
+   *        (Calculate the available storage size).
+   * @return 剩余的可用字节数 (Remaining available bytes).
+   */
+  size_t AvailableSize()
+  {
     return block_size_ - sizeof(CHECKSUM_BYTE) -
            (reinterpret_cast<uint8_t*>(GetNextKey(GetLastKey(info_main_))) -
             reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_));
   }
 
-  ErrorCode AddKey(const char* name, const void* data, size_t size) {
-    if (auto ans = SearchKey(name)) {
+  ErrorCode AddKey(const char* name, const void* data, size_t size)
+  {
+    if (auto ans = SearchKey(name))
+    {
       return SetKey(name, data, size);
     }
 
@@ -260,27 +499,35 @@ class DatabaseRaw : public Database {
     KeyInfo* last_key = GetLastKey(info_main_);
     KeyInfo* key_buf = nullptr;
 
-    if (!last_key) {
+    if (!last_key)
+    {
       auto flash_info = FlashInfo{FLASH_HEADER, {}, KeyInfo{0, false, 0, 0, 0}};
       Write(0, flash_info);
       key_buf = GetNextKey(&info_main_->key);
-    } else {
+    }
+    else
+    {
       key_buf = GetNextKey(last_key);
     }
 
     if (AvailableSize() <
-        AlignSize(sizeof(KeyInfo)) + AlignSize(NAME_LEN) + AlignSize(size)) {
-      if (!recycle) {
+        AlignSize(sizeof(KeyInfo)) + AlignSize(NAME_LEN) + AlignSize(size))
+    {
+      if (!recycle)
+      {
         Recycle();
         recycle = true;
         goto add_again;  // NOLINT
-      } else {
+      }
+      else
+      {
         ASSERT(false);
         return ErrorCode::FULL;
       }
     }
 
-    if (last_key) {
+    if (last_key)
+    {
       KeyInfo new_last_key = {0, last_key->available_flag, last_key->uninit,
                               last_key->nameLength, last_key->dataSize};
       Write(reinterpret_cast<uint8_t*>(last_key) -
@@ -306,24 +553,32 @@ class DatabaseRaw : public Database {
 
     return ErrorCode::OK;
   }
-  ErrorCode SetKey(const char* name, const void* data, size_t size,
-                   bool recycle = true) {
-    if (KeyInfo* key = SearchKey(name)) {
-      if (key->dataSize == size) {
-        if (memcmp(GetKeyData(key), data, size) != 0) {
-          if (AvailableSize() < AlignSize(size) + AlignSize(sizeof(KeyInfo)) +
-                                    AlignSize(key->nameLength)) {
-            if (recycle) {
+
+  ErrorCode SetKey(const char* name, const void* data, size_t size, bool recycle = true)
+  {
+    if (KeyInfo* key = SearchKey(name))
+    {
+      if (key->dataSize == size)
+      {
+        if (memcmp(GetKeyData(key), data, size) != 0)
+        {
+          if (AvailableSize() <
+              AlignSize(size) + AlignSize(sizeof(KeyInfo)) + AlignSize(key->nameLength))
+          {
+            if (recycle)
+            {
               Recycle();
               return SetKey(name, data, size, false);
-            } else {
+            }
+            else
+            {
               ASSERT(false);
               return ErrorCode::FULL;
             }
           }
 
-          KeyInfo new_key = {key->no_next_key, false, key->uninit,
-                             key->nameLength, key->dataSize};
+          KeyInfo new_key = {key->no_next_key, false, key->uninit, key->nameLength,
+                             key->dataSize};
           Write(reinterpret_cast<uint8_t*>(key) -
                     reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
                 new_key);
@@ -336,24 +591,41 @@ class DatabaseRaw : public Database {
     return ErrorCode::FAILED;
   }
 
-  uint8_t* GetKeyData(KeyInfo* key) {
+  /**
+   * @brief 获取指定键的数据信息
+   *        (Retrieve the data associated with a key).
+   * @param key 目标键 (Key to retrieve data from).
+   * @return 指向数据的指针 (Pointer to the key's data).
+   */
+  uint8_t* GetKeyData(KeyInfo* key)
+  {
     return reinterpret_cast<uint8_t*>(key) + AlignSize(sizeof(KeyInfo)) +
            AlignSize(key->nameLength);
   }
-  const char* GetKeyName(KeyInfo* key) {
+
+  /**
+   * @brief 获取键的名称
+   *        (Retrieve the name of a key).
+   * @param key 目标键 (Key to retrieve the name from).
+   * @return 指向键名的指针 (Pointer to the key name).
+   */
+  const char* GetKeyName(KeyInfo* key)
+  {
     return reinterpret_cast<const char*>(key) + AlignSize(sizeof(KeyInfo));
   }
 
-  static constexpr uint32_t FLASH_HEADER = 0x12345678;
-  static constexpr uint32_t CHECKSUM_BYTE = 0x9abcedf0;
+  static constexpr uint32_t FLASH_HEADER =
+      0x12345678;  ///< Flash 头部标识 (Flash header identifier).
+  static constexpr uint32_t CHECKSUM_BYTE = 0x9abcedf0;  ///< 校验字节 (Checksum byte).
 
-  Flash& flash_;
-  FlashInfo* info_main_;
-  FlashInfo* info_backup_;
-  uint32_t block_size_;
-  uint8_t* write_buffer_;
+  Flash& flash_;            ///< 目标 Flash 存储设备 (Target Flash storage device).
+  FlashInfo* info_main_;    ///< 主存储区信息 (Main storage block information).
+  FlashInfo* info_backup_;  ///< 备份存储区信息 (Backup storage block information).
+  uint32_t block_size_;     ///< Flash 块大小 (Flash block size).
+  uint8_t* write_buffer_;   ///< 写入缓冲区 (Write buffer).
 
-  void InitBlock(FlashInfo* block) {
+  void InitBlock(FlashInfo* block)
+  {
     flash_.Erase(reinterpret_cast<uint8_t*>(block) -
                      reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
                  block_size_);
@@ -362,54 +634,65 @@ class DatabaseRaw : public Database {
               reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
           {reinterpret_cast<uint8_t*>(&info), sizeof(FlashInfo)});
     Write(reinterpret_cast<uint8_t*>(block) -
-              reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_) +
-              block_size_ - AlignSize(sizeof(CHECKSUM_BYTE)),
+              reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_) + block_size_ -
+              AlignSize(sizeof(CHECKSUM_BYTE)),
           {&CHECKSUM_BYTE, sizeof(CHECKSUM_BYTE)});
   }
 
   bool IsBlockInited(FlashInfo* block) { return block->header == FLASH_HEADER; }
   bool IsBlockEmpty(FlashInfo* block) { return block->key.available_flag == 1; }
-  bool IsBlockError(FlashInfo* block) {
+  bool IsBlockError(FlashInfo* block)
+  {
     auto checksum_byte_addr = reinterpret_cast<uint8_t*>(block) + block_size_ -
                               AlignSize(sizeof(CHECKSUM_BYTE));
     return *reinterpret_cast<uint32_t*>(checksum_byte_addr) != CHECKSUM_BYTE;
   }
-  size_t GetKeySize(KeyInfo* key) {
+  size_t GetKeySize(KeyInfo* key)
+  {
     return AlignSize(sizeof(KeyInfo)) + AlignSize(key->nameLength) +
            AlignSize(key->dataSize);
   }
-  KeyInfo* GetNextKey(KeyInfo* key) {
-    return reinterpret_cast<KeyInfo*>(reinterpret_cast<uint8_t*>(key) +
-                                      GetKeySize(key));
+  KeyInfo* GetNextKey(KeyInfo* key)
+  {
+    return reinterpret_cast<KeyInfo*>(reinterpret_cast<uint8_t*>(key) + GetKeySize(key));
   }
-  KeyInfo* GetLastKey(FlashInfo* block) {
-    if (IsBlockEmpty(block)) {
+  KeyInfo* GetLastKey(FlashInfo* block)
+  {
+    if (IsBlockEmpty(block))
+    {
       return nullptr;
     }
 
     KeyInfo* key = &block->key;
-    while (!key->no_next_key) {
+    while (!key->no_next_key)
+    {
       key = GetNextKey(key);
     }
     return key;
   }
-  KeyInfo* SearchKey(const char* name) {
-    if (IsBlockEmpty(info_main_)) {
+  KeyInfo* SearchKey(const char* name)
+  {
+    if (IsBlockEmpty(info_main_))
+    {
       return nullptr;
     }
 
     KeyInfo* key = &info_main_->key;
 
-    while (true) {
-      if (!key->available_flag) {
+    while (true)
+    {
+      if (!key->available_flag)
+      {
         key = GetNextKey(key);
         continue;
       }
 
-      if (strcmp(name, GetKeyName(key)) == 0) {
+      if (strcmp(name, GetKeyName(key)) == 0)
+      {
         return key;
       }
-      if (key->no_next_key) {
+      if (key->no_next_key)
+      {
         break;
       }
 
@@ -419,44 +702,74 @@ class DatabaseRaw : public Database {
     return nullptr;
   }
 
-  ErrorCode Add(KeyBase& key) override {
+  ErrorCode Add(KeyBase& key) override
+  {
     return AddKey(key.name_, key.raw_data_.addr_, key.raw_data_.size_);
   }
 
-  size_t AlignSize(size_t size) {
-    return static_cast<size_t>((size + MinWriteSize - 1) / MinWriteSize) *
-           MinWriteSize;
+  /**
+   * @brief 计算对齐后的大小
+   *        (Calculate the aligned size).
+   * @param size 需要对齐的大小 (Size to align).
+   * @return 对齐后的大小 (Aligned size).
+   */
+  size_t AlignSize(size_t size)
+  {
+    return static_cast<size_t>((size + MinWriteSize - 1) / MinWriteSize) * MinWriteSize;
   }
 
-  ErrorCode Write(size_t offset, ConstRawData data) {
-    if (data.size_ == 0) {
+  /**
+   * @brief 以最小写入单元对齐的方式写入数据
+   *        (Write data aligned to the minimum write unit).
+   * @param offset 写入偏移量 (Write offset).
+   * @param data 要写入的数据 (Data to write).
+   * @return 操作结果 (Operation result).
+   */
+  ErrorCode Write(size_t offset, ConstRawData data)
+  {
+    if (data.size_ == 0)
+    {
       return ErrorCode::OK;
     }
 
-    if (data.size_ % MinWriteSize == 0) {
+    if (data.size_ % MinWriteSize == 0)
+    {
       return flash_.Write(offset, data);
-    } else {
+    }
+    else
+    {
       auto final_block_index = data.size_ - data.size_ % MinWriteSize;
-      if (final_block_index != 0) {
+      if (final_block_index != 0)
+      {
         flash_.Write(offset, {data.addr_, final_block_index});
       }
       memset(write_buffer_, 0xff, MinWriteSize);
       memcpy(write_buffer_,
              reinterpret_cast<const uint8_t*>(data.addr_) + final_block_index,
              data.size_ % MinWriteSize);
-      return flash_.Write(offset + final_block_index,
-                          {write_buffer_, MinWriteSize});
+      return flash_.Write(offset + final_block_index, {write_buffer_, MinWriteSize});
     }
   }
 
  public:
-  ErrorCode Get(Database::KeyBase& key) override {
+  /**
+   * @brief 获取数据库中的键值
+   *        (Retrieve the key's value from the database).
+   * @param key 需要获取的键 (Key to retrieve).
+   * @return 操作结果，如果找到则返回 `ErrorCode::OK`，否则返回 `ErrorCode::NOT_FOUND`
+   *         (Operation result, returns `ErrorCode::OK` if found, otherwise
+   * `ErrorCode::NOT_FOUND`).
+   */
+  ErrorCode Get(Database::KeyBase& key) override
+  {
     auto ans = SearchKey(key.name_);
-    if (!ans) {
+    if (!ans)
+    {
       return ErrorCode::NOT_FOUND;
     }
 
-    if (key.raw_data_.size_ != ans->dataSize) {
+    if (key.raw_data_.size_ != ans->dataSize)
+    {
       return ErrorCode::FAILED;
     }
 
@@ -465,7 +778,15 @@ class DatabaseRaw : public Database {
     return ErrorCode::OK;
   }
 
-  ErrorCode Set(KeyBase& key, RawData data) override {
+  /**
+   * @brief 设置数据库中的键值
+   *        (Set the key's value in the database).
+   * @param key 目标键 (Target key).
+   * @param data 需要存储的新值 (New value to store).
+   * @return 操作结果 (Operation result).
+   */
+  ErrorCode Set(KeyBase& key, RawData data) override
+  {
     memcpy(key.raw_data_.addr_, data.addr_, data.size_);
     return SetKey(key.name_, data.addr_, data.size_);
   }
