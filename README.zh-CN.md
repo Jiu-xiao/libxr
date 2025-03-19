@@ -1,10 +1,11 @@
+
 # LibXR
 
 <div align="center">
 
 <img src="https://github.com/Jiu-xiao/LibXR_CppCodeGenerator/raw/main/imgs/XRobot.jpeg" width="300">
 
-Want to be the best embedded framework
+致力于成为最佳的嵌入式开发框架
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 [![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://jiu-xiao.github.io/libxr/)
@@ -17,21 +18,19 @@ Want to be the best embedded framework
 
 [English](https://github.com/Jiu-xiao/libxr/blob/main/README.md) | [中文](https://github.com/Jiu-xiao/libxr/blob/main/README.zh-CN.md)
 
-## Who is this library for
+## 本库适用于哪些人
 
-* People who do not require desktop and web applications.
-* Realtime and high performance.
-* Finish the entire project quickly and reliably.
-* Don't want to care about the differences in APIs.
+* 不需要桌面或网页应用。
+* 需要实时性与高性能。
+* 希望快速且可靠地完成整个项目。
+* 不想关心 API 差异。
 
-## Support
+## 系统层支持
 
-## System Layer
-
-1. The application will never exit unless it reboot or enter into low-power mode.
-2. All memory is only allocated during initializtion and will never be released.
-3. The minimum Non-blocking delay is 1us, minimum blocking delay is 1ms.
-4. All unused functions will not be linked.
+1. 应用程序除非重启或进入低功耗模式，否则永不退出。
+2. 所有内存仅在初始化时分配，不会动态释放。
+3. 最小非阻塞延迟为 1 微秒，最小阻塞延迟为 1 毫秒。
+4. 所有未使用函数不会被链接进最终程序。
 
 | `System`      | Thread | Timer | Semaphore | Mutex | Signal | ConditionVar | Queue | ASync |
 | ------------- | ------ | ----- | --------- | ----- | ------ | ------------ | ----- | ----- |
@@ -43,16 +42,16 @@ Want to be the best embedded framework
 | Linux         | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
 | Webots(Linux) | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
 
-## Data structure
+## 数据结构支持
 
-1. Except list and tree, the memory of other data structures are determined before construction.
-2. No blocking APIs except Queue. If you want one, use Semaphore.
+1. 除了链表和红黑树外，其它数据结构内存大小在构造前确定。
+2. 除队列外，所有数据结构均不包含阻塞 API；若需要阻塞功能，请使用信号量。
 
 | `Structure` | List | Stack | RBTree | LockFreeQueue | ChunkQueue |
 | ----------- | ---- | ----- | ------ | ------------- | ---------- |
 |             | ✅    | ✅     | ✅      | ✅             | ✅          |
 
-## Middleware
+## 中间件支持
 
 A collection of commonly used software.
 
@@ -60,7 +59,7 @@ A collection of commonly used software.
 | ------------ | ----- | ------- | ----- | -------- | -------- | --- |
 |              | ✅     | ✅       | ✅     | ✅        | ✅        | ❌   |
 
-## Periheral Layer
+## 外设抽象层支持
 
 Only have virtual class, you can find the drivers in `Platfrom` folder. For example class `STM32Uart` based on the virtual class `Uart`.
 
@@ -80,9 +79,9 @@ Only have virtual class, you can find the drivers in `Platfrom` folder. For exam
 | ESP32     | ❌       | ❌    | ❌         | ❌           |
 | STM32     | ❌       | ❌    | ❌         | ❌           |
 
-## Utils
+## 实用工具
 
-Some useful tools for debugging, robotics, and communication.
+用于调试、机器人学和通信的一些有用工具。
 
 | Kinematics | Forward-Kinematics | Inverse-Kinematics | Coordinate | Pose and Position |
 | ---------- | ------------------ | ------------------ | ---------- | ----------------- |
@@ -104,13 +103,13 @@ Some useful tools for debugging, robotics, and communication.
 | ---- | ---------- | ---------- | -------- |
 |      | ✅          | ✅          | ❌        |
 
-## Usage
+## 使用方法示例
 
 ```sh
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# LibXR
+# 配置 LibXR
 set(LIBXR_SYSTEM FreeRTOS) # None/Linux/FreeRTOS
 set(LIBXR_DRIVER st)       # st/Linux/empty
 add_subdirectory(path_to_libxr)
@@ -124,12 +123,12 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
 ```
 
-## Others
+## 其他工具
 
-### STM32 C++ Code Generator
+### STM32 C++ 代码自动生成器
 
-[libxr-python-package](https://pypi.org/project/libxr/)
+[libxr-python-package (PyPI)](https://pypi.org/project/libxr/)
 
-## Video Tutorial
+## 视频教程
 
-[Bilibili](https://www.bilibili.com/video/BV1c8XVYLERR/)
+[Bilibili 视频教程](https://www.bilibili.com/video/BV1c8XVYLERR/)
