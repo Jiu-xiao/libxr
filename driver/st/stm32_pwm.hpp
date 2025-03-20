@@ -100,9 +100,9 @@ class STM32PWM : public PWM
         htim_->Instance == TIM13 ||
 #endif
 #if defined(TIM14)
-        htim_->Instance == TIM14
+        htim_->Instance == TIM14 ||
 #endif
-    )
+    false)
     {
       clock_freq = HAL_RCC_GetPCLK1Freq();  // APB1 上定时器
     }
