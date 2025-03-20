@@ -41,9 +41,9 @@ class Timer
 
     void (*fun_)(void *);  ///< 任务执行函数 Function pointer to the task
     void *handle;          ///< 任务句柄 Handle to the task
-    uint32_t cycle_;       ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
-    uint32_t count_;       ///< 计数器 Counter
-    bool enable_;          ///< 任务是否启用 Flag indicating whether the task is enabled
+    uint32_t cycle_;  ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
+    uint32_t count_;  ///< 计数器 Counter
+    bool enable_;     ///< 任务是否启用 Flag indicating whether the task is enabled
   };
 
   typedef LibXR::List::Node<ControlBlock>
@@ -186,9 +186,12 @@ class Timer
     {
       LibXR::Timer::list_ = new LibXR::List();
 
+#ifndef LIBXR_NOT_SUPPORT_MUTI_THREAD
+
       auto thread_handle = Thread();
       thread_handle.Create<void *>(nullptr, RefreshThreadFunction, "libxr_timer_task",
                                    512, Thread::Priority::HIGH);
+#endif
     }
 
     auto fun = [](ControlBlock &block)
