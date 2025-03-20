@@ -46,7 +46,7 @@ class CAN
       Type type;        ///< 消息类型 (Message type).
       uint8_t data[8];  ///< 数据载荷，最大 8 字节 (Data payload, max 8 bytes).
     };
-    uint8_t raw[12];  ///< 原始字节数组表示 (Raw byte array representation).
+    uint8_t raw[13];  ///< 原始字节数组表示 (Raw byte array representation).
   } ClassicPack;
 
   Topic classic_tp_;  ///< 经典 CAN 消息的主题 (Topic for classic CAN messages).
@@ -87,9 +87,9 @@ class FDCAN : public CAN
   {
     struct __attribute__((packed))
     {
-      uint32_t id;       ///< 消息 ID (Message ID).
-      Type type;         ///< 消息类型 (Message type).
-      uint8_t len;       ///< 数据长度，最大 64 字节 (Data length, up to 64 bytes).
+      uint32_t id;  ///< 消息 ID (Message ID).
+      Type type;    ///< 消息类型 (Message type).
+      uint8_t len;  ///< 数据长度，最大 64 字节 (Data length, up to 64 bytes).
       uint8_t data[64];  ///< 数据载荷 (Data payload).
     };
     uint8_t raw[70];  ///< 原始字节数组表示 (Raw byte array representation).
