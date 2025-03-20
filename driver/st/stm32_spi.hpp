@@ -12,7 +12,8 @@
 #include "libxr_rw.hpp"
 #include "spi.hpp"
 
-typedef enum {
+typedef enum
+{
 #ifdef SPI1
   STM32_SPI1,
 #endif
@@ -43,50 +44,55 @@ typedef enum {
 
 stm32_spi_id_t STM32_SPI_GetID(SPI_TypeDef *addr);  // NOLINT
 
-namespace LibXR {
-class STM32SPI : public SPI {
+namespace LibXR
+{
+class STM32SPI : public SPI
+{
  public:
-  STM32SPI(SPI_HandleTypeDef *spi_handle, RawData dma_buff_rx,
-           RawData dma_buff_tx, uint32_t dma_enable_min_size = 3)
+  STM32SPI(SPI_HandleTypeDef *spi_handle, RawData dma_buff_rx, RawData dma_buff_tx,
+           uint32_t dma_enable_min_size = 3)
       : SPI(),
         dma_buff_rx_(dma_buff_rx),
         dma_buff_tx_(dma_buff_tx),
         spi_handle_(spi_handle),
         id_(STM32_SPI_GetID(spi_handle_->Instance)),
-        dma_enable_min_size_(dma_enable_min_size) {
+        dma_enable_min_size_(dma_enable_min_size)
+  {
     ASSERT(id_ != STM32_SPI_ID_ERROR);
 
     map[id_] = this;
   }
 
-  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data,
-                         OperationRW &op) {
+  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data, OperationRW &op)
+  {
     uint32_t need_write = max(write_data.size_, read_data.size_);
 
-    if (spi_handle_->State != HAL_SPI_STATE_READY) {
+    if (spi_handle_->State != HAL_SPI_STATE_READY)
+    {
       return ErrorCode::BUSY;
     }
 
-    if (need_write > dma_enable_min_size_) {
+    if (need_write > dma_enable_min_size_)
+    {
       memcpy(dma_buff_tx_.addr_, write_data.addr_, write_data.size_);
       memset(dma_buff_rx_.addr_, 0, write_data.size_);
       rw_op_ = op;
       read_buff_ = read_data;
 
-      HAL_SPI_TransmitReceive_DMA(
-          spi_handle_, static_cast<const uint8_t *>(dma_buff_tx_.addr_),
-          static_cast<uint8_t *>(dma_buff_rx_.addr_), need_write);
+      HAL_SPI_TransmitReceive_DMA(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
+                                  static_cast<uint8_t *>(dma_buff_rx_.addr_), need_write);
 
       op.MarkAsRunning();
       return ErrorCode::OK;
-    } else {
+    }
+    else
+    {
       memcpy(dma_buff_tx_.addr_, write_data.addr_, write_data.size_);
       memset(dma_buff_rx_.addr_, 0, write_data.size_);
       ErrorCode ans =
-          HAL_SPI_TransmitReceive(
-              spi_handle_, static_cast<const uint8_t *>(dma_buff_tx_.addr_),
-              static_cast<uint8_t *>(dma_buff_rx_.addr_), need_write,
-              HAL_MAX_DELAY) == HAL_OK
+          HAL_SPI_TransmitReceive(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
+                                  static_cast<uint8_t *>(dma_buff_rx_.addr_), need_write,
+                                  HAL_MAX_DELAY) == HAL_OK
               ? ErrorCode::OK
               : ErrorCode::BUSY;
 
@@ -98,8 +104,10 @@ class STM32SPI : public SPI {
     }
   }
 
-  ErrorCode SetConfig(SPI::Configuration config) {
-    switch (config.clock_polarity) {
+  ErrorCode SetConfig(SPI::Configuration config)
+  {
+    switch (config.clock_polarity)
+    {
       case SPI::ClockPolarity::LOW:
         spi_handle_->Init.CLKPolarity = SPI_POLARITY_LOW;
         break;
@@ -108,7 +116,8 @@ class STM32SPI : public SPI {
         break;
     }
 
-    switch (config.clock_phase) {
+    switch (config.clock_phase)
+    {
       case SPI::ClockPhase::EDGE_1:
         spi_handle_->Init.CLKPhase = SPI_PHASE_1EDGE;
         break;
@@ -117,8 +126,7 @@ class STM32SPI : public SPI {
         break;
     }
 
-    return HAL_SPI_Init(spi_handle_) == HAL_OK ? ErrorCode::OK
-                                               : ErrorCode::BUSY;
+    return HAL_SPI_Init(spi_handle_) == HAL_OK ? ErrorCode::OK : ErrorCode::BUSY;
   }
 
   RawData dma_buff_rx_, dma_buff_tx_;
