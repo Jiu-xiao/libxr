@@ -3,7 +3,7 @@
 
 #include "main.h"
 
-#if defined(STM32F0) || defined(STM32G0)
+#if defined(STM32F0) || defined(STM32G0) || defined(STM32L0)
 
 /**
  * @brief  模拟实现 __atomic_compare_exchange_4 函数 / Simulate the __atomic_compare_exchange_4 function
