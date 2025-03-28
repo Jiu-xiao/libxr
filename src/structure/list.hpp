@@ -75,6 +75,16 @@ class List
     explicit Node(const Data& data) : BaseNode(sizeof(Data)), data_(data) {}
 
     /**
+     * @brief 通过参数列表构造节点 (Constructor initializing a node using arguments list).
+     * @tparam Args 参数类型 (Types of arguments for data initialization).
+     * @param args 数据构造参数 (Arguments used for constructing the data).
+     */
+    template <typename... Args>
+    explicit Node(Args... args) : BaseNode(sizeof(Data)), data_{args...}
+    {
+    }
+
+    /**
      * @brief 赋值运算符重载，允许直接对节点赋值。
      *        Overloaded assignment operator for assigning values to the node.
      *
