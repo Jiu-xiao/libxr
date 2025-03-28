@@ -33,8 +33,8 @@ class STM32PWM : public PWM
   {
     uint32_t clock_freq = 0;  // NOLINT
 
-#if defined(STM32F0)
-    // STM32F0 没有 PCLK1/PCLK2，使用 HCLK 作为参考频率
+#if defined(STM32F0) || defined(STM32G0)
+    // STM32F0 and STM32 G0 do not have PCLK1/PCLK2，use HCLK as reference clock
     clock_freq = HAL_RCC_GetHCLKFreq();
 #else
     uint32_t& target_freq = config.frequency;
@@ -72,7 +72,7 @@ class STM32PWM : public PWM
 #endif
         false)
     {
-      clock_freq = HAL_RCC_GetPCLK2Freq();  // APB2 上的其他定时器
+      clock_freq = HAL_RCC_GetPCLK2Freq();
     }
     else if (
 #if defined(TIM2)
@@ -102,19 +102,19 @@ class STM32PWM : public PWM
 #if defined(TIM14)
         htim_->Instance == TIM14 ||
 #endif
-    false)
+        false)
     {
-      clock_freq = HAL_RCC_GetPCLK1Freq();  // APB1 上定时器
+      clock_freq = HAL_RCC_GetPCLK1Freq();
     }
     else
     {
-      return ErrorCode::NOT_SUPPORT;  // 如果不在已知定时器中
+      return ErrorCode::NOT_SUPPORT;
     }
 #endif
 
     if (clock_freq == 0)
     {
-      return ErrorCode::INIT_ERR;  // 防止后续除零错误
+      return ErrorCode::INIT_ERR;
     }
 
     uint32_t prescaler = (clock_freq / (config.frequency * 65536)) + 1;
