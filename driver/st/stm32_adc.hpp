@@ -116,6 +116,7 @@ class STM32ADC {
 
     ADC_ChannelConfTypeDef config = {};
     uint32_t time = 0;
+    UNUSED(time);
 #if defined(ADC_SAMPLETIME_16CYCLES)
     time = ADC_SAMPLETIME_16CYCLES;
 #elif defined(ADC_SAMPLETIME_16CYCLES_5)
@@ -189,7 +190,9 @@ class STM32ADC {
 
     config.Channel = channels_[channel].ch_;
     config.Rank = 1;
+#if !defined(STM32L0)
     config.SamplingTime = time;
+#endif
 
     HAL_ADC_ConfigChannel(hadc_, &config);
 
