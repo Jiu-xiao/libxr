@@ -211,8 +211,30 @@ class ConstRawData
   ConstRawData &operator=(const ConstRawData &data) = default;
 
   const void
-      *addr_;    ///< 数据存储地址（常量）。 The storage address of the data (constant).
+      *addr_;  ///< 数据存储地址（常量）。 The storage address of the data (constant).
   size_t size_;  ///< 数据大小（字节）。 The size of the data (in bytes).
 };
 
 }  // namespace LibXR
+
+/**
+ * @brief 类型标识符生成器，替代 typeid
+ * @brief Type identifier generator (RTTI-free)
+ */
+class TypeID
+{
+ public:
+  using ID = const void *;
+  /**
+   * @brief 获取类型的唯一标识符
+   * @brief Get unique identifier for type T
+   * @tparam T 目标类型 / Target type
+   * @return 类型唯一标识符指针 / Unique type identifier pointer
+   */
+  template <typename T>
+  static ID GetID()
+  {
+    static char id;  // NOLINT
+    return &id;
+  }
+};
