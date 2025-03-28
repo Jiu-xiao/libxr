@@ -59,6 +59,8 @@ class STM32Timebase : public Timebase
   TimestampMS _get_milliseconds() { return HAL_GetTick(); }
 };
 
+#ifdef HAL_TIM_MODULE_ENABLED
+
 /**
  * @class STM32TimerTimebase
  * @brief 基于硬件定时器的时间基准类 / Provides a timebase using hardware timer (TIM)
@@ -119,5 +121,7 @@ class STM32TimerTimebase : public Timebase
    */
   static TIM_HandleTypeDef* htim;
 };
+
+#endif
 
 }  // namespace LibXR
