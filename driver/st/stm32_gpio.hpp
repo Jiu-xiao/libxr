@@ -5,7 +5,16 @@
 
 #ifdef HAL_GPIO_MODULE_ENABLED
 
-typedef enum {
+typedef enum
+{
+#if defined(STM32F0) || defined(STM32G0) || defined(STM32L0)
+  STM32_GPIO_EXTI_0_1,
+  STM32_GPIO_EXTI_2_3,
+  STM32_GPIO_EXTI_4_15,
+#elif defined(STM32WB0)
+  STM32_GPIO_EXTI_GPIOA,
+  STM32_GPIO_EXTI_GPIOB,
+#else
   STM32_GPIO_EXTI_0,
   STM32_GPIO_EXTI_1,
   STM32_GPIO_EXTI_2,
@@ -13,49 +22,58 @@ typedef enum {
   STM32_GPIO_EXTI_4,
   STM32_GPIO_EXTI_5_9,
   STM32_GPIO_EXTI_10_15,
+#endif
   STM32_GPIO_EXTI_NUMBER
 } stm32_gpio_exti_t;
 
 stm32_gpio_exti_t STM32_GPIO_EXTI_GetID(uint16_t pin);  // NOLINT
 
-namespace LibXR {
-class STM32GPIO : public GPIO {
+namespace LibXR
+{
+class STM32GPIO : public GPIO
+{
  public:
-  STM32GPIO(GPIO_TypeDef* port, uint16_t pin,
-            IRQn_Type irq = NonMaskableInt_IRQn)
-      : port_(port), pin_(pin), irq_(irq) {
-    if (irq_ != NonMaskableInt_IRQn) {
+  STM32GPIO(GPIO_TypeDef* port, uint16_t pin, IRQn_Type irq = NonMaskableInt_IRQn)
+      : port_(port), pin_(pin), irq_(irq)
+  {
+    if (irq_ != NonMaskableInt_IRQn)
+    {
       map[STM32_GPIO_EXTI_GetID(pin)] = this;
     }
   }
 
   bool Read() { return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET; }
 
-  ErrorCode Write(bool value) {
+  ErrorCode Write(bool value)
+  {
     HAL_GPIO_WritePin(port_, pin_, value ? GPIO_PIN_SET : GPIO_PIN_RESET);
     return ErrorCode::OK;
   }
 
-  ErrorCode EnableInterrupt() {
+  ErrorCode EnableInterrupt()
+  {
     ASSERT(irq_ != NonMaskableInt_IRQn);
     HAL_NVIC_EnableIRQ(irq_);
     return ErrorCode::OK;
   }
 
-  ErrorCode DisableInterrupt() {
+  ErrorCode DisableInterrupt()
+  {
     ASSERT(irq_ != NonMaskableInt_IRQn);
     HAL_NVIC_DisableIRQ(irq_);
     return ErrorCode::OK;
   }
 
-  ErrorCode SetConfig(Configuration config) {
+  ErrorCode SetConfig(Configuration config)
+  {
     GPIO_InitTypeDef gpio_init = {};
 
     HAL_GPIO_DeInit(port_, pin_);
 
     gpio_init.Pin = pin_;
 
-    switch (config.direction) {
+    switch (config.direction)
+    {
       case Direction::INPUT:
         gpio_init.Mode = GPIO_MODE_INPUT;
         break;
@@ -76,7 +94,8 @@ class STM32GPIO : public GPIO {
         break;
     }
 
-    switch (config.pull) {
+    switch (config.pull)
+    {
       case Pull::NONE:
         gpio_init.Pull = GPIO_NOPULL;
         break;
