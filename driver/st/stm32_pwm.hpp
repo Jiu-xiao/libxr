@@ -16,7 +16,7 @@ class STM32PWM : public PWM
 
   ErrorCode SetDutyCycle(float value) override
   {
-    if (value < 0.0f || value > 100.0f)
+    if (value < 0.0f || value > 1.0f)
     {
       return ErrorCode::ARG_ERR;
     }
@@ -73,6 +73,10 @@ class STM32PWM : public PWM
         false)
     {
       clock_freq = HAL_RCC_GetPCLK2Freq();
+      if ((RCC->CFGR & RCC_CFGR_PPRE2) != RCC_CFGR_PPRE2_DIV1)
+      {
+        clock_freq *= 2;
+      }
     }
     else if (
 #if defined(TIM2)
@@ -105,6 +109,10 @@ class STM32PWM : public PWM
         false)
     {
       clock_freq = HAL_RCC_GetPCLK1Freq();
+      if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1)
+      {
+        clock_freq *= 2;
+      }
     }
     else
     {
@@ -117,11 +125,29 @@ class STM32PWM : public PWM
       return ErrorCode::INIT_ERR;
     }
 
-    uint32_t prescaler = (clock_freq / (config.frequency * 65536)) + 1;
-    uint32_t period = (clock_freq / (prescaler * config.frequency)) - 1;
+    bool found = false;
+
+    uint32_t prescaler = 1;
+    uint32_t period = 0;
+
+    for (prescaler = 1; prescaler <= 0xFFFF; ++prescaler)
+    {
+      uint32_t temp_period = clock_freq / (prescaler * config.frequency);
+      if (temp_period <= 0x10000)
+      {
+        period = temp_period;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found || period == 0)
+    {
+      return ErrorCode::INIT_ERR;
+    }
 
     htim_->Init.Prescaler = prescaler - 1;
-    htim_->Init.Period = period;
+    htim_->Init.Period = period - 1;
 
     if (HAL_TIM_PWM_Init(htim_) != HAL_OK)
     {
