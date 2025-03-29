@@ -2,14 +2,16 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
-void test_ramfs() {
+void test_ramfs()
+{
   auto ramfs = LibXR::RamFS();
 
   int ramfs_arg = 0;
 
   auto file = LibXR::RamFS::CreateFile<int *>(
       "test_file",
-      [](int *&arg, int argc, char **argv) {
+      [](int *arg, int argc, char **argv)
+      {
         UNUSED(argc);
         UNUSED(argv);
         *arg = *arg + 1;
@@ -23,7 +25,8 @@ void test_ramfs() {
 
   auto dev = LibXR::RamFS::Device("test_dev");
   file_1->size = 4;
-  for (int i = 1; i < 10; i++) {
+  for (int i = 1; i < 10; i++)
+  {
     file->Run(0, nullptr);
     ASSERT(file_1->GetData<int>() == i);
   }

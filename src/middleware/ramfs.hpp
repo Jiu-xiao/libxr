@@ -524,7 +524,7 @@ class RamFS
    */
   template <typename ArgType>
   static File CreateFile(const char *name,
-                         int (*exec)(ArgType &arg, int argc, char **argv), ArgType &&arg)
+                         int (*exec)(ArgType arg, int argc, char **argv), ArgType &&arg)
   {
     typedef struct
     {
