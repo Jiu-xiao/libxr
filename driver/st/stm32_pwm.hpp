@@ -73,10 +73,12 @@ class STM32PWM : public PWM
         false)
     {
       clock_freq = HAL_RCC_GetPCLK2Freq();
+#ifdef RCC_CFGR_PPRE2
       if ((RCC->CFGR & RCC_CFGR_PPRE2) != RCC_CFGR_PPRE2_DIV1)
       {
         clock_freq *= 2;
       }
+#endif
     }
     else if (
 #if defined(TIM2)
@@ -109,10 +111,12 @@ class STM32PWM : public PWM
         false)
     {
       clock_freq = HAL_RCC_GetPCLK1Freq();
+#ifdef RCC_CFGR_PPRE1
       if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1)
       {
         clock_freq *= 2;
       }
+#endif
     }
     else
     {
