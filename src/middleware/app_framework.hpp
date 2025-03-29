@@ -95,17 +95,16 @@ class HardwareContainer
   }
 
   /**
-   * 遍历所有别名条目 / Visit all alias entries
+   * @brief 手动注册一个设备条目（及其别名）
+   * @brief Manually register a device entry and its aliases
+   *
+   * @tparam T 设备类型 / Device type
+   * @param entry 设备条目 / Device entry with aliases
    */
-  template <typename Callback>
-  void RegisterAll(Callback cb) const
+  template <typename T>
+  void Register(const Entry<T>& entry)
   {
-    alias_list_.Foreach<AliasEntry>(
-        [&](const AliasEntry& entry)
-        {
-          cb(entry);
-          return ErrorCode::OK;
-        });
+    RegisterAliases(entry);
   }
 
  private:
