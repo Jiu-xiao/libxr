@@ -713,7 +713,7 @@ class STDIO
     ConstRawData data = {reinterpret_cast<const uint8_t *>(STDIO::printf_buff_),
                          static_cast<size_t>(len)};
 
-    static WriteOperation op(sem);  // NOLINT
+    static WriteOperation op(sem, LIBXR_PRINTF_TIMEOUT);  // NOLINT
     return static_cast<int>(STDIO::write_->operator()(data, op));
   }
 };
