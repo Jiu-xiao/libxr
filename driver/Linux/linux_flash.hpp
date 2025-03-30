@@ -22,7 +22,7 @@ class LinuxBinaryFileFlash : public Flash {
                        bool write_order_check = false,
                        bool write_as_one_check = false)
       : Flash(min_erase_size, min_write_size,
-              RawData(flash_area_.data(), flash_area_.size())),
+              RawData(&flash_area_, sizeof(flash_area_))),
         file_path_(file_path),
         write_order_check_(write_order_check),
         write_as_one_check_(write_as_one_check) {

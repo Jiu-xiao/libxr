@@ -131,7 +131,7 @@ bool DatabaseRawSequential::IsBlockEmpty(FlashInfo* block)
  */
 bool DatabaseRawSequential::IsBlockError(FlashInfo* block)
 {
-  return reinterpret_cast<uint32_t*>(
+  return reinterpret_cast<uint8_t*>(
              block)[max_buffer_size_ / sizeof(CHECKSUM_BYTE) - 1] != CHECKSUM_BYTE;
 }
 
