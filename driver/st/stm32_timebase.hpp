@@ -90,16 +90,15 @@ class STM32TimerTimebase : public Timebase
     uint32_t ms_new = HAL_GetTick();
     uint32_t tick_value_new = __HAL_TIM_GET_COUNTER(htim);
 
-    auto time_diff = ms_new - ms_old;
-    switch (time_diff)
+    uint32_t autoreload = __HAL_TIM_GET_AUTORELOAD(htim) + 1;
+
+    uint32_t delta_ms = ms_new - ms_old;
+    switch (delta_ms)
     {
       case 0:
-        return ms_new * 1000 + 1000 -
-               tick_value_old * 1000 / (__HAL_TIM_GET_AUTORELOAD(htim) + 1);
+        return ms_new * 1000 + tick_value_old * 1000 / autoreload;
       case 1:
-        /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return ms_new * 1000 + 1000 -
-               tick_value_new * 1000 / (__HAL_TIM_GET_AUTORELOAD(htim) + 1);
+        return ms_new * 1000 + tick_value_new * 1000 / autoreload;
       default:
         /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
          * 1ms, an error case */
