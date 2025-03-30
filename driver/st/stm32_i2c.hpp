@@ -87,6 +87,10 @@ class STM32I2C : public I2C
                      ? ErrorCode::OK
                      : ErrorCode::BUSY;
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+      if (op.type == ReadOperation::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
       return ans;
     }
   }

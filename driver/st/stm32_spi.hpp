@@ -104,6 +104,11 @@ class STM32SPI : public SPI
 
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
 
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+
       return ans;
     }
   }
