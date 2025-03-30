@@ -10,6 +10,12 @@ else()
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_BUFFER_SIZE=128)
 endif()
 
+if(LIBXR_PRINTF_TIMEOUT)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_TIMEOUT=${LIBXR_PRINTF_TIMEOUT})
+else()
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_TIMEOUT=10)
+endif()
+
 # Detect system
 if(CMAKE_CROSSCOMPILING)
   message("Cross compiling.")
