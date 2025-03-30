@@ -1,5 +1,13 @@
 if(LIBXR_DEFAULT_SCALAR)
-  add_compile_definitions(LIBXR_DEFAULT_SCALAR=${LIBXR_DEFAULT_SCALAR})
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEFAULT_SCALAR=${LIBXR_DEFAULT_SCALAR})
+else()
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEFAULT_SCALAR=double)
+endif()
+
+if(LIBXR_PRINTF_BUFFER_SIZE)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_BUFFER_SIZE=${LIBXR_PRINTF_BUFFER_SIZE})
+else()
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_BUFFER_SIZE=128)
 endif()
 
 # Detect system

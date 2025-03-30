@@ -3,10 +3,6 @@
 #include <cmath>
 #include <cstdint>
 
-#ifndef LIBXR_DEFAULT_SCALAR
-#define LIBXR_DEFAULT_SCALAR double
-#endif
-
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -35,7 +31,7 @@ constexpr double M_1G = 9.80665;
 #ifndef OFFSET_OF
 /// \brief 计算结构体成员在结构体中的偏移量
 /// \brief Computes the offset of a member within a struct
-#define OFFSET_OF(type, member) ((size_t)&((type *)0)->member)
+#define OFFSET_OF(type, member) ((size_t) & ((type *)0)->member)
 #endif
 
 #ifndef MEMBER_SIZE_OF
