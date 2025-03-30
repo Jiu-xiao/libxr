@@ -94,7 +94,7 @@ Some useful tools for debugging, robotics, and communication.
 
 | Control | PID | LQR | MPC |
 | ------- | --- | --- | --- |
-|         | ❌   | ❌   | ❌   |
+|         | ✅   | ❌   | ❌   |
 
 | Signal | LP Filter | Kalman Filter | FFT | FunctionGen |
 | ------ | --------- | ------------- | --- | ----------- |
