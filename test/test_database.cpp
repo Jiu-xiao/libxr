@@ -13,7 +13,7 @@ using namespace LibXR;
 
 void test_database() {
   constexpr size_t FLASH_SIZE = 2048;
-  LinuxBinaryFileFlash<FLASH_SIZE> flash("/tmp/flash_test.bin", 512, 4, true,
+  LinuxBinaryFileFlash<FLASH_SIZE> flash("/tmp/flash_test.bin", 512, 8, true,
                                          true);
   DatabaseRawSequential db(flash);
 
