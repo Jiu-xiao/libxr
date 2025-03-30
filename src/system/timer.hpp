@@ -132,7 +132,7 @@ class Timer
    * and ensuring timely task execution.
    * `Thread::SleepUntil` is used for precise scheduling.
    */
-  static void RefreshThreadFunction(void *unused)
+  static void RefreshThreadFunction(void *)
   {
     TimestampMS time = Thread::GetTime();
     while (true)
