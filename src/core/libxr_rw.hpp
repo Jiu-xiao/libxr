@@ -693,6 +693,8 @@ class STDIO
       return -1;
     }
 
+    static LibXR::Semaphore sem;  // NOLINT
+
     va_list args;
     va_start(args, fmt);
     int len = vsnprintf(STDIO::printf_buff_, LIBXR_PRINTF_BUFFER_SIZE, fmt, args);
@@ -711,7 +713,7 @@ class STDIO
     ConstRawData data = {reinterpret_cast<const uint8_t *>(STDIO::printf_buff_),
                          static_cast<size_t>(len)};
 
-    WriteOperation op;
+    static WriteOperation op(sem);  // NOLINT
     return static_cast<int>(STDIO::write_->operator()(data, op));
   }
 };
