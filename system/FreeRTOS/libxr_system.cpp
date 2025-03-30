@@ -24,7 +24,7 @@ void *operator new(std::size_t size)
 {
   if (size == 0)
   {
-    return nullptr; // NOLINT
+    return pvPortMalloc(size);
   }
   auto ans = pvPortMalloc(size);
   ASSERT(ans != nullptr);
