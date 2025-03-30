@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.11)
 
-include(CMake/config.cmake)
-
 project(xr LANGUAGES C CXX ASM)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build)
@@ -13,6 +12,8 @@ if(LIBXR_SHARED_BUILD)
 else()
   add_library(${PROJECT_NAME} STATIC)
 endif()
+
+include(CMake/config.cmake)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_compile_definitions(LIBXR_DEBUG_BUILD)

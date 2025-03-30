@@ -14,6 +14,7 @@ std::optional<LibXR::Callback<const char *, uint32_t>>
 /* stdio */
 LibXR::ReadPort *LibXR::STDIO::read_ = nullptr;
 LibXR::WritePort *LibXR::STDIO::write_ = nullptr;
+char LibXR::STDIO::printf_buff_[LIBXR_PRINTF_BUFFER_SIZE];
 
 /* timer */
 LibXR::List *LibXR::Timer::list_;
@@ -35,14 +36,18 @@ LibXR::Topic::Domain *LibXR::Topic::def_domain_;
 /* timebase */
 LibXR::Timebase *LibXR::Timebase::timebase = nullptr;
 
-void libxr_fatal_error(const char *file, uint32_t line, bool in_isr) {
+void libxr_fatal_error(const char *file, uint32_t line, bool in_isr)
+{
   volatile bool stop = false;
-  while (!stop) {
-    if (LibXR::STDIO::write_ && LibXR::STDIO::write_->Writable()) {
+  while (!stop)
+  {
+    if (LibXR::STDIO::write_ && LibXR::STDIO::write_->Writable())
+    {
       printf("Fatal error at %s:%d\r\n", file, static_cast<int>(line));
     }
 
-    if (LibXR::Assert::libxr_fatal_error_callback_) {
+    if (LibXR::Assert::libxr_fatal_error_callback_)
+    {
       LibXR::Assert::libxr_fatal_error_callback_->Run(in_isr, file, line);
     }
   }
