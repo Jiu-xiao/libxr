@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <utility>
 
 #include "chunk_queue.hpp"
@@ -661,11 +663,56 @@ class WritePort
   }
 };
 
+/**
+ * @brief STDIO interface for read/write ports.
+ * @brief 提供静态全局的输入输出接口绑定与缓冲区管理。
+ */
 class STDIO
 {
  public:
-  static ReadPort *read_;
-  static WritePort *write_;
-};
+  // NOLINTBEGIN
+  static ReadPort *read_;    ///< Read port instance. 读取端口。
+  static WritePort *write_;  ///< Write port instance. 写入端口。
+  static char printf_buff_[LIBXR_PRINTF_BUFFER_SIZE];  ///< Print buffer. 打印缓冲区。
 
+  // NOLINTEND
+
+  /**
+   * @brief Prints a formatted string to the write port (like printf).
+   * @brief 将格式化字符串发送至写入端口，类似 printf。
+   *
+   * @param fmt The format string. 格式化字符串。
+   * @param ... Variable arguments to be formatted. 需要格式化的参数。
+   * @return Number of characters written, or negative on error.
+   *         成功返回写入的字符数，失败返回负数。
+   */
+  static int Printf(const char *fmt, ...)
+  {
+    if (!STDIO::write_ || !STDIO::write_->Writable())
+    {
+      return -1;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(STDIO::printf_buff_, LIBXR_PRINTF_BUFFER_SIZE, fmt, args);
+    va_end(args);
+
+    // Check result and limit length
+    if (len < 0)
+    {
+      return -1;
+    }
+    if (static_cast<size_t>(len) >= LIBXR_PRINTF_BUFFER_SIZE)
+    {
+      len = LIBXR_PRINTF_BUFFER_SIZE - 1;
+    }
+
+    ConstRawData data = {reinterpret_cast<const uint8_t *>(STDIO::printf_buff_),
+                         static_cast<size_t>(len)};
+
+    WriteOperation op;
+    return static_cast<int>(STDIO::write_->operator()(data, op));
+  }
+};
 }  // namespace LibXR
