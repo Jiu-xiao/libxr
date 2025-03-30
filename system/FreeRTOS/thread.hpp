@@ -83,11 +83,11 @@ class Thread
 
     auto block = new ThreadBlock(function, arg);
 
+    auto ans = xTaskCreate(block->Port, name, stack_depth, block,
+                           static_cast<uint32_t>(priority), &(this->thread_handle_));
+    UNUSED(ans);
     UNUSED(block);
-
-    ASSERT(xTaskCreate(block->Port, name, stack_depth, block,
-                       static_cast<uint32_t>(priority),
-                       &(this->thread_handle_)) == pdPASS);
+    ASSERT(ans == pdPASS);
   }
 
   /**
