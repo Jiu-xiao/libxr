@@ -74,8 +74,8 @@ class STM32SPI : public SPI
 
     if (need_write > dma_enable_min_size_)
     {
-      memcpy(dma_buff_tx_.addr_, write_data.addr_, write_data.size_);
-      memset(dma_buff_rx_.addr_, 0, write_data.size_);
+      memcpy(dma_buff_tx_.addr_, write_data.addr_, need_write);
+      memset(dma_buff_rx_.addr_, 0, need_write);
       rw_op_ = op;
       read_buff_ = read_data;
 
@@ -83,6 +83,10 @@ class STM32SPI : public SPI
                                   static_cast<uint8_t *>(dma_buff_rx_.addr_), need_write);
 
       op.MarkAsRunning();
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
       return ErrorCode::OK;
     }
     else
