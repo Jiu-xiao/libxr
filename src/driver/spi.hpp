@@ -29,7 +29,7 @@ class SPI
   enum class ClockPhase : uint8_t
   {
     EDGE_1 = 0,  ///< 在第一个时钟边沿采样数据。Data sampled on the first clock edge.
-    EDGE_2 = 1   ///< 在第二个时钟边沿采样数据。Data sampled on the second clock edge.
+    EDGE_2 = 1  ///< 在第二个时钟边沿采样数据。Data sampled on the second clock edge.
   };
 
   /**
@@ -55,7 +55,7 @@ class SPI
    */
   struct ReadWriteInfo
   {
-    RawData read_data;        ///< 读取的数据缓冲区。Buffer for storing read data.
+    RawData read_data;  ///< 读取的数据缓冲区。Buffer for storing read data.
     ConstRawData write_data;  ///< 待写入的数据缓冲区。Buffer for data to be written.
     OperationRW op;           ///< 读写操作类型。Type of read/write operation.
   };
@@ -103,6 +103,28 @@ class SPI
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
+
+  /**
+   * @brief 向 SPI 设备的寄存器写入数据。
+   *        Writes data to a specific register of the SPI device.
+   *
+   * @param reg 寄存器地址。Register address.
+   * @param write_data 写入的数据缓冲区。Buffer containing data to write.
+   * @param op 操作类型（同步/异步）。Operation mode (sync/async).
+   * @return 操作结果的错误码。Error code indicating success or failure.
+   */
+  virtual ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op) = 0;
+
+  /**
+   * @brief 从 SPI 设备的寄存器读取数据。
+   *        Reads data from a specific register of the SPI device.
+   *
+   * @param reg 寄存器地址。Register address.
+   * @param read_data 读取的数据缓冲区。Buffer to store read data.
+   * @param op 操作类型（同步/异步）。Operation mode (sync/async).
+   * @return 操作结果的错误码。Error code indicating success or failure.
+   */
+  virtual ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW &op) = 0;
 };
 
 }  // namespace LibXR

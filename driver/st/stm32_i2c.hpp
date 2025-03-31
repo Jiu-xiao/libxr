@@ -65,6 +65,8 @@ class STM32I2C : public I2C
       return ErrorCode::BUSY;
     }
 
+    read_ = true;
+
     if (read_data.size_ > dma_enable_min_size_)
     {
       read_op_ = op;
@@ -103,6 +105,8 @@ class STM32I2C : public I2C
       return ErrorCode::BUSY;
     }
 
+    read_ = false;
+
     memcpy(dma_buff_.addr_, write_data.addr_, write_data.size_);
 
     if (write_data.size_ > dma_enable_min_size_)
@@ -125,6 +129,98 @@ class STM32I2C : public I2C
                                          write_data.size_, 20) == HAL_OK
                      ? ErrorCode::OK
                      : ErrorCode::BUSY;
+      op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+      if (op.type == WriteOperation::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+      return ans;
+    }
+  }
+
+  ErrorCode MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
+                    ReadOperation &op, MemAddrLength mem_addr_size) override
+  {
+    if (i2c_handle_->State != HAL_I2C_STATE_READY)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    read_ = true;
+
+    if (read_data.size_ > dma_enable_min_size_)
+    {
+      read_op_ = op;
+      HAL_I2C_Mem_Read_DMA(i2c_handle_, slave_addr, mem_addr,
+                           mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
+                                                                  : I2C_MEMADD_SIZE_16BIT,
+                           reinterpret_cast<uint8_t *>(dma_buff_.addr_), read_data.size_);
+      read_buff_ = read_data;
+      op.MarkAsRunning();
+      if (op.type == ReadOperation::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+      return ErrorCode::OK;
+    }
+    else
+    {
+      auto ans =
+          HAL_I2C_Mem_Read(i2c_handle_, slave_addr, mem_addr,
+                           mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
+                                                                  : I2C_MEMADD_SIZE_16BIT,
+                           reinterpret_cast<uint8_t *>(read_data.addr_), read_data.size_,
+                           20) == HAL_OK
+              ? ErrorCode::OK
+              : ErrorCode::BUSY;
+
+      op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+      if (op.type == ReadOperation::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+      return ans;
+    }
+  }
+
+  ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr, ConstRawData write_data,
+                     WriteOperation &op, MemAddrLength mem_addr_size) override
+  {
+    if (i2c_handle_->State != HAL_I2C_STATE_READY)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    read_ = false;
+
+    memcpy(dma_buff_.addr_, write_data.addr_, write_data.size_);
+
+    if (write_data.size_ > dma_enable_min_size_)
+    {
+      write_op_ = op;
+      HAL_I2C_Mem_Write_DMA(
+          i2c_handle_, slave_addr, mem_addr,
+          mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
+                                                 : I2C_MEMADD_SIZE_16BIT,
+          reinterpret_cast<uint8_t *>(dma_buff_.addr_), write_data.size_);
+      op.MarkAsRunning();
+      if (op.type == WriteOperation::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+      return ErrorCode::OK;
+    }
+    else
+    {
+      auto ans = HAL_I2C_Mem_Write(i2c_handle_, slave_addr, mem_addr,
+                                   mem_addr_size == MemAddrLength::BYTE_8
+                                       ? I2C_MEMADD_SIZE_8BIT
+                                       : I2C_MEMADD_SIZE_16BIT,
+                                   reinterpret_cast<uint8_t *>(dma_buff_.addr_),
+                                   write_data.size_, 20) == HAL_OK
+                     ? ErrorCode::OK
+                     : ErrorCode::BUSY;
+
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
@@ -185,6 +281,8 @@ class STM32I2C : public I2C
   ReadOperation read_op_;
   WriteOperation write_op_;
   RawData read_buff_;
+
+  bool read_ = false;
 
   static STM32I2C *map[STM32_I2C_NUMBER];  // NOLINT
 };
