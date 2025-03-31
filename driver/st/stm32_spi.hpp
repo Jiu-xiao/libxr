@@ -67,6 +67,7 @@ class STM32SPI : public SPI
                          OperationRW &op) override
   {
     uint32_t need_write = max(write_data.size_, read_data.size_);
+    ASSERT(need_write <= dma_buff_rx_.size_ && need_write <= dma_buff_tx_.size_);
 
     if (spi_handle_->State != HAL_SPI_STATE_READY)
     {
