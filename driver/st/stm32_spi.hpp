@@ -96,7 +96,7 @@ class STM32SPI : public SPI
       ErrorCode ans =
           HAL_SPI_TransmitReceive(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
                                   static_cast<uint8_t *>(dma_buff_rx_.addr_), need_write,
-                                  HAL_MAX_DELAY) == HAL_OK
+                                  20) == HAL_OK
               ? ErrorCode::OK
               : ErrorCode::BUSY;
 
