@@ -63,7 +63,8 @@ class STM32SPI : public SPI
     map[id_] = this;
   }
 
-  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data, OperationRW &op)
+  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data,
+                         OperationRW &op) override
   {
     uint32_t need_write = max(write_data.size_, read_data.size_);
 
@@ -71,6 +72,8 @@ class STM32SPI : public SPI
     {
       return ErrorCode::BUSY;
     }
+
+    mem_read_ = false;
 
     if (need_write > dma_enable_min_size_)
     {
@@ -113,7 +116,7 @@ class STM32SPI : public SPI
     }
   }
 
-  ErrorCode SetConfig(SPI::Configuration config)
+  ErrorCode SetConfig(SPI::Configuration config) override
   {
     switch (config.clock_polarity)
     {
@@ -138,6 +141,120 @@ class STM32SPI : public SPI
     return HAL_SPI_Init(spi_handle_) == HAL_OK ? ErrorCode::OK : ErrorCode::BUSY;
   }
 
+  ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW &op) override
+  {
+    uint32_t need_read = read_data.size_;
+
+    if (spi_handle_->State != HAL_SPI_STATE_READY)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    mem_read_ = false;
+
+    uint8_t *dma_buffer_rx = reinterpret_cast<uint8_t *>(dma_buff_rx_.addr_);
+    uint8_t *dma_buffer_tx = reinterpret_cast<uint8_t *>(dma_buff_tx_.addr_);
+
+    if (need_read + 1 > dma_enable_min_size_)
+    {
+      memset(dma_buff_rx_.addr_, 0, need_read + 1);
+      memset(dma_buff_tx_.addr_, 0, need_read + 1);
+      dma_buffer_tx[0] = reg | 0x80;
+      rw_op_ = op;
+      read_buff_ = read_data;
+
+      mem_read_ = true;
+
+      HAL_SPI_TransmitReceive_DMA(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
+                                  static_cast<uint8_t *>(dma_buff_rx_.addr_),
+                                  need_read + 1);
+
+      op.MarkAsRunning();
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+      return ErrorCode::OK;
+    }
+    else
+    {
+      memset(dma_buff_rx_.addr_, 0, need_read + 1);
+      memset(dma_buff_tx_.addr_, 0, need_read + 1);
+      dma_buffer_tx[0] = reg | 0x80;
+      ErrorCode ans =
+          HAL_SPI_TransmitReceive(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
+                                  static_cast<uint8_t *>(dma_buff_rx_.addr_),
+                                  need_read + 1, 20) == HAL_OK
+              ? ErrorCode::OK
+              : ErrorCode::BUSY;
+
+      memcpy(read_data.addr_, dma_buffer_rx + 1, read_data.size_);
+
+      op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+
+      return ans;
+    }
+  }
+
+  ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op) override
+  {
+    uint32_t need_write = write_data.size_;
+
+    if (spi_handle_->State != HAL_SPI_STATE_READY)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    mem_read_ = false;
+
+    uint8_t *dma_buffer_tx = reinterpret_cast<uint8_t *>(dma_buff_tx_.addr_);
+
+    if (need_write + 1 > dma_enable_min_size_)
+    {
+      memcpy(dma_buffer_tx + 1, write_data.addr_, need_write);
+      *dma_buffer_tx = reg & 0x7f;
+
+      rw_op_ = op;
+      read_buff_ = {nullptr, 0};
+
+      HAL_SPI_TransmitReceive_DMA(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
+                                  static_cast<uint8_t *>(dma_buff_rx_.addr_),
+                                  need_write + 1);
+
+      op.MarkAsRunning();
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+      return ErrorCode::OK;
+    }
+    else
+    {
+      memcpy(dma_buffer_tx + 1, write_data.addr_, need_write);
+      *dma_buffer_tx = reg & 0x7f;
+      ErrorCode ans =
+          HAL_SPI_TransmitReceive(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
+                                  static_cast<uint8_t *>(dma_buff_rx_.addr_),
+                                  need_write + 1, 20) == HAL_OK
+              ? ErrorCode::OK
+              : ErrorCode::BUSY;
+
+      op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        return op.data.sem->Wait(op.data.timeout);
+      }
+
+      return ans;
+    }
+  }
+
   RawData dma_buff_rx_, dma_buff_tx_;
 
   SPI_HandleTypeDef *spi_handle_;
@@ -149,6 +266,8 @@ class STM32SPI : public SPI
   OperationRW rw_op_;
 
   RawData read_buff_;
+
+  bool mem_read_ = false;
 
   static STM32SPI *map[STM32_SPI_NUMBER];  // NOLINT
 };
