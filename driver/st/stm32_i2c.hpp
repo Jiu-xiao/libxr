@@ -141,6 +141,8 @@ class STM32I2C : public I2C
   ErrorCode MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
                     ReadOperation &op, MemAddrLength mem_addr_size) override
   {
+    ASSERT(read_data.size_ <= dma_buff_.size_);
+
     if (i2c_handle_->State != HAL_I2C_STATE_READY)
     {
       return ErrorCode::BUSY;
@@ -186,6 +188,8 @@ class STM32I2C : public I2C
   ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr, ConstRawData write_data,
                      WriteOperation &op, MemAddrLength mem_addr_size) override
   {
+    ASSERT(write_data.size_ <= dma_buff_.size_);
+
     if (i2c_handle_->State != HAL_I2C_STATE_READY)
     {
       return ErrorCode::BUSY;
