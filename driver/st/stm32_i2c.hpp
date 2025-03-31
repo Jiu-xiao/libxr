@@ -83,7 +83,7 @@ class STM32I2C : public I2C
     {
       auto ans = HAL_I2C_Master_Receive(i2c_handle_, slave_addr,
                                         reinterpret_cast<uint8_t *>(read_data.addr_),
-                                        read_data.size_, HAL_MAX_DELAY) == HAL_OK
+                                        read_data.size_, 20) == HAL_OK
                      ? ErrorCode::OK
                      : ErrorCode::BUSY;
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
@@ -122,7 +122,7 @@ class STM32I2C : public I2C
     {
       auto ans = HAL_I2C_Master_Transmit(i2c_handle_, slave_addr,
                                          reinterpret_cast<uint8_t *>(dma_buff_.addr_),
-                                         write_data.size_, HAL_MAX_DELAY) == HAL_OK
+                                         write_data.size_, 20) == HAL_OK
                      ? ErrorCode::OK
                      : ErrorCode::BUSY;
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
