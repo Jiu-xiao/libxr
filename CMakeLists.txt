@@ -16,7 +16,7 @@ endif()
 include(CMake/config.cmake)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_compile_definitions(LIBXR_DEBUG_BUILD)
+  target_compile_definitions(xr PUBLIC LIBXR_DEBUG_BUILD)
 endif()
 
 # Source File
