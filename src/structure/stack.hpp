@@ -42,7 +42,7 @@ class Stack
   {
     if (index >= 0)
     {
-      ASSERT(index < depth_);
+      ASSERT(static_cast<uint32_t>(index) < depth_);
       return stack_[index];
     }
     else
