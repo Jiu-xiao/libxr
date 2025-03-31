@@ -213,7 +213,7 @@ class STM32ADC
     for (uint8_t i = 0; i < filter_size_; ++i)
     {
       HAL_ADC_Start(hadc_);
-      HAL_ADC_PollForConversion(hadc_, HAL_MAX_DELAY);
+      HAL_ADC_PollForConversion(hadc_, 20);
       buffer[channel + i * NUM_CHANNELS] = HAL_ADC_GetValue(hadc_);
       sum += buffer[channel + i * NUM_CHANNELS];
     }
