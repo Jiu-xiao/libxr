@@ -53,6 +53,7 @@ class PID
   /**
    * @brief 使用反馈值计算 PID 输出。
    *        Compute output from feedback only.
+   *        out = k(p*err + i*∫err*dt - d*(fb-last_fb)/dt)
    *
    * @param sp 期望值 Setpoint
    * @param fb 反馈值 Feedback
@@ -71,6 +72,7 @@ class PID
     Scalar k_err = err * param_.k;
 
     // Derivative from feedback change
+    fb *= param_.k;
     Scalar d = (fb - last_fb_) / dt;
     if (!std::isfinite(d))
     {
@@ -110,6 +112,7 @@ class PID
   /**
    * @brief 使用外部导数计算 PID 输出。
    *        Compute output using external feedback derivative.
+   *        out = k(p*err + i*∫err*dt - d*fb_dot*dt)
    *
    * @param sp 期望值 Setpoint
    * @param fb 反馈值 Feedback
