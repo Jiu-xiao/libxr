@@ -16,9 +16,13 @@ class STM32PWM : public PWM
 
   ErrorCode SetDutyCycle(float value) override
   {
-    if (value < 0.0f || value > 1.0f)
+    if (value < 0.0f)
     {
-      return ErrorCode::ARG_ERR;
+      value = 0.0f;
+    }
+    else if (value > 1.0f)
+    {
+      value = 1.0f;
     }
 
     uint32_t pulse =
