@@ -150,6 +150,19 @@ class ChunkQueue
   }
 
   /**
+   * @brief  获取当前数据块数量
+   *         Gets the current number of data blocks
+   *
+   * @return 当前数据块数量 Current number of data blocks
+   */
+  size_t BlockSize()
+  {
+    Mutex::LockGuard lock_guard(mutex_);
+
+    return block_queue_.Size();
+  }
+
+  /**
    * @brief  从 ISR 中获取当前数据大小
    *         Gets the current data size from an ISR
    * @param  in_isr 是否在 ISR 中调用 Whether it is called from an ISR
@@ -165,6 +178,25 @@ class ChunkQueue
     }
 
     return data_queue_.Size();
+  }
+
+  /**
+   * @brief  从 ISR 中获取当前数据块数量
+   *         Gets the current number of data blocks from an ISR
+   *
+   * @param in_isr 是否在 ISR 中调用 Whether it is called from an ISR
+   * @return size_t 当前数据块数量 Current number of data blocks
+   */
+  size_t BlockSizeFromCallback(bool in_isr)
+  {
+    Mutex::LockGuardInCallback lock_guard(mutex_, in_isr);
+
+    if (!lock_guard.Locked())
+    {
+      return 0;
+    }
+
+    return block_queue_.Size();
   }
 
   /**
@@ -193,6 +225,18 @@ class ChunkQueue
     {
       return 0;
     }
+  }
+
+  /**
+   * @brief 获取块信息的剩余可用空间（线程安全）
+   *        Gets the remaining available space in the block information (thread-safe)
+   *
+   * @return size_t
+   */
+  size_t EmptyBlockSize()
+  {
+    Mutex::LockGuard lock_guard(mutex_);
+    return block_queue_.EmptySize();
   }
 
   /**
@@ -228,6 +272,26 @@ class ChunkQueue
     {
       return 0;
     }
+  }
+
+  /**
+   * @brief  从 ISR（中断服务例程）中获取块信息的剩余可用空间
+   *         Gets the remaining available space in the block information from an ISR
+   *         (Interrupt Service Routine)
+   * @param  in_isr 是否在 ISR 中调用 Whether it is called from an ISR
+   *
+   * @return size_t 剩余可用空间 The remaining available space
+   */
+  size_t EmptyBlockSizeFromCallback(bool in_isr)
+  {
+    Mutex::LockGuardInCallback lock_guard(mutex_, in_isr);
+
+    if (!lock_guard.Locked())
+    {
+      return 0;
+    }
+
+    return block_queue_.EmptySize();
   }
 
   ChunkQueue(const ChunkQueue &) = delete;
