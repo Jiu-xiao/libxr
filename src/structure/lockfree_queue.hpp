@@ -269,13 +269,13 @@ class LockFreeQueue
     const auto CURRENT_HEAD = head_.load(std::memory_order_acquire);
     const auto CURRENT_TAIL = tail_.load(std::memory_order_acquire);
     return (CURRENT_TAIL >= CURRENT_HEAD) ? (CURRENT_TAIL - CURRENT_HEAD)
-                                          : (length_ - CURRENT_HEAD + CURRENT_TAIL);
+                                          : ((length_ + 1) - CURRENT_HEAD + CURRENT_TAIL);
   }
 
   /**
    * @brief 计算队列剩余可用空间 / Calculates the remaining available space in the queue
    */
-  size_t EmptySize() { return (length_ + 1) - Size(); }
+  size_t EmptySize() { return length_ - Size(); }
 
  private:
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<unsigned int> head_;
