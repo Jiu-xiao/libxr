@@ -428,6 +428,10 @@ class ReadPort
       if (data.size_ == 0)
       {
         op.UpdateStatus(false, ErrorCode::OK);
+        if (op.type == ReadOperation::OperationType::BLOCK)
+        {
+          return op.data.sem->Wait(op.data.timeout);
+        }
         return ErrorCode::OK;
       }
 
@@ -621,10 +625,15 @@ class WritePort
       if (data.size_ == 0)
       {
         op.UpdateStatus(false, ErrorCode::OK);
+        if (op.type == WriteOperation::OperationType::BLOCK)
+        {
+          return op.data.sem->Wait(op.data.timeout);
+        }
         return ErrorCode::OK;
       }
 
-      if (queue_data_->EmptySize() < data.size_ || queue_op_->EmptySize() < 1)
+      if (queue_data_->EmptySize() < data.size_ || queue_data_->EmptyBlockSize() < 1 ||
+          queue_op_->EmptySize() < 1)
       {
         return ErrorCode::FULL;
       }
