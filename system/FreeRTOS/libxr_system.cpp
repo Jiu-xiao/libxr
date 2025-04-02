@@ -1,6 +1,14 @@
 #include "libxr.hpp"
 #include "timer.hpp"
 
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+  static volatile const char *task_name = pcTaskName;
+  UNUSED(task_name);
+  UNUSED(xTask);
+  ASSERT(false);
+}
+
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
   if (Timebase::timebase == nullptr)
