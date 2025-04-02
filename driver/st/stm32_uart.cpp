@@ -258,7 +258,10 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   uart->read_port_.ProcessPendingReads();
 }
 
-extern "C" void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) { UNUSED(huart); }
+extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  HAL_UART_Abort_IT(huart);
+}
 
 extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
 {
