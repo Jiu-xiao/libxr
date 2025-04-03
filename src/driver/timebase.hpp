@@ -27,7 +27,12 @@ class Timebase
    * when an instance is created, allowing static methods to access the specific timebase
    * instance.
    */
-  Timebase() { timebase = this; }
+  Timebase(uint64_t max_valid_us = UINT64_MAX, uint32_t max_valid_ms = UINT32_MAX)
+  {
+    libxr_timebase_max_valid_ms = max_valid_ms;
+    libxr_timebase_max_valid_us = max_valid_us;
+    timebase = this;
+  }
 
   /**
    * @brief 获取当前时间的微秒级时间戳。

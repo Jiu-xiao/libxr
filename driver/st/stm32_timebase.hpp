@@ -16,7 +16,9 @@ class STM32Timebase : public Timebase
   /**
    * @brief 默认构造函数 / Default constructor
    */
-  STM32Timebase() {}
+  STM32Timebase() : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
+  {
+  }
 
   /**
    * @brief 获取当前时间（微秒级） / Get current time in microseconds
@@ -35,13 +37,16 @@ class STM32Timebase : public Timebase
     uint32_t tick_value_new = SysTick->VAL;
 
     auto time_diff = ms_new - ms_old;
+    uint32_t tick_load = SysTick->LOAD + 1;
     switch (time_diff)
     {
       case 0:
-        return ms_new * 1000 + 1000 - tick_value_old * 1000 / (SysTick->LOAD + 1);
+        return TimestampUS(static_cast<uint64_t>(ms_new) * 1000 + 1000 -
+                           static_cast<uint64_t>(tick_value_old) * 1000 / tick_load);
       case 1:
         /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return ms_new * 1000 + 1000 - tick_value_new * 1000 / (SysTick->LOAD + 1);
+        return TimestampUS(static_cast<uint64_t>(ms_new) * 1000 + 1000 -
+                           static_cast<uint64_t>(tick_value_new) * 1000 / tick_load);
       default:
         /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
          * 1ms, an error case */
@@ -72,7 +77,11 @@ class STM32TimerTimebase : public Timebase
    * @brief 构造函数 / Constructor
    * @param timer 定时器句柄指针 / Pointer to hardware timer handle
    */
-  STM32TimerTimebase(TIM_HandleTypeDef* timer) { htim = timer; }
+  STM32TimerTimebase(TIM_HandleTypeDef* timer)
+      : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
+  {
+    htim = timer;
+  }
 
   /**
    * @brief 获取当前时间（微秒级） / Get current time in microseconds
@@ -96,9 +105,12 @@ class STM32TimerTimebase : public Timebase
     switch (delta_ms)
     {
       case 0:
-        return ms_new * 1000 + tick_value_old * 1000 / autoreload;
+        return TimestampUS(static_cast<uint64_t>(ms_new) * 1000 +
+                           static_cast<uint64_t>(tick_value_old) * 1000 / autoreload);
       case 1:
-        return ms_new * 1000 + tick_value_new * 1000 / autoreload;
+        /* 中断发生在两次读取之间 / Interrupt happened between two reads */
+        return TimestampUS(static_cast<uint64_t>(ms_new) * 1000 +
+                           static_cast<uint64_t>(tick_value_new) * 1000 / autoreload);
       default:
         /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
          * 1ms, an error case */
@@ -118,7 +130,7 @@ class STM32TimerTimebase : public Timebase
   /**
    * @brief 硬件定时器句柄指针 / Static pointer to hardware timer handle
    */
-  static TIM_HandleTypeDef* htim;
+  static TIM_HandleTypeDef* htim;  // NOLINT
 };
 
 #endif

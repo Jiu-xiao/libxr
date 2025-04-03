@@ -5,6 +5,9 @@
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 
+extern uint64_t libxr_timebase_max_valid_us;  // NOLINT
+extern uint32_t libxr_timebase_max_valid_ms;  // NOLINT
+
 namespace LibXR
 {
 
@@ -76,7 +79,7 @@ class TimestampUS
      * @brief 以毫秒返回时间差。
      * Returns the time difference in milliseconds.
      */
-    uint64_t to_millisecond() const { return diff_ / 1000u; }
+    uint32_t to_millisecond() const { return diff_ / 1000u; }
 
    private:
     uint64_t diff_;  ///< 存储时间差（微秒）。Time difference stored in microseconds.
@@ -90,8 +93,20 @@ class TimestampUS
    */
   TimeDiffUS operator-(const TimestampUS &old_microsecond) const
   {
-    ASSERT(microsecond_ >= old_microsecond.microsecond_);
-    return TimeDiffUS(microsecond_ - old_microsecond.microsecond_);
+    uint64_t diff;  // NOLINT
+
+    if (microsecond_ >= old_microsecond.microsecond_)
+    {
+      diff = microsecond_ - old_microsecond.microsecond_;
+    }
+    else
+    {
+      diff = microsecond_ + (libxr_timebase_max_valid_us - old_microsecond.microsecond_);
+    }
+
+    ASSERT(diff <= libxr_timebase_max_valid_us);
+
+    return TimeDiffUS(diff);
   }
 
   /**
@@ -166,7 +181,7 @@ class TimestampMS
      * @brief 以微秒返回时间差。
      * Returns the time difference in microseconds.
      */
-    uint32_t to_microsecond() const { return diff_ * 1000u; }
+    uint64_t to_microsecond() const { return diff_ * 1000u; }
 
    private:
     uint32_t diff_;  ///< 存储时间差（毫秒）。Time difference stored in milliseconds.
@@ -180,8 +195,20 @@ class TimestampMS
    */
   TimeDiffMS operator-(TimestampMS &old_millisecond)
   {
-    ASSERT(millisecond_ >= old_millisecond);
-    return TimeDiffMS(millisecond_ - old_millisecond);
+    uint32_t diff;  // NOLINT
+
+    if (millisecond_ >= old_millisecond.millisecond_)
+    {
+      diff = millisecond_ - old_millisecond.millisecond_;
+    }
+    else
+    {
+      diff = millisecond_ + (libxr_timebase_max_valid_ms - old_millisecond.millisecond_);
+    }
+
+    ASSERT(diff <= libxr_timebase_max_valid_ms);
+
+    return TimeDiffMS(diff);
   }
 
  private:
