@@ -97,6 +97,7 @@ class PID
 
     // Apply output limits
     output += i_out;
+    output += feed_forward_;
     if (std::isfinite(output) && param_.out_limit > PID_SIGMA)
     {
       output = std::clamp(output, -param_.out_limit, param_.out_limit);
@@ -106,6 +107,7 @@ class PID
     last_err_ = err;
     last_fb_ = fb;
     last_out_ = output;
+    last_der_ = d;
     return output;
   }
 
@@ -157,6 +159,7 @@ class PID
 
     // Apply output limits
     output += i_out;
+    output += feed_forward_;
     if (std::isfinite(output) && param_.out_limit > PID_SIGMA)
     {
       output = std::clamp(output, -param_.out_limit, param_.out_limit);
@@ -166,20 +169,43 @@ class PID
     last_err_ = err;
     last_fb_ = fb;
     last_out_ = output;
+    last_der_ = d;
     return output;
   }
 
-  /// 设置全局比例系数
+  /// 设置全局比例系数 Set global proportional gain
   void SetK(Scalar k) { param_.k = k; }
-  /// 设置 P 项系数
+  /// 设置 P 项系数 Set proportional gain
   void SetP(Scalar p) { param_.p = p; }
-  /// 设置 I 项系数
+  /// 设置 I 项系数 Set integral gain
   void SetI(Scalar i) { param_.i = i; }
-  /// 设置 D 项系数
+  /// 设置 D 项系数 Set derivative gain
   void SetD(Scalar d) { param_.d = d; }
+  /// 设置积分限幅 Set integral limit
+  void SetILimit(Scalar limit) { param_.i_limit = limit; }
+  /// 设置输出限幅 Set output limit
+  void SetOutLimit(Scalar limit) { param_.out_limit = limit; }
 
-  /// 获取上一次误差
+  /// 获取全局比例系数 Get global proportional gain
+  Scalar K() const { return param_.k; }
+  /// 获取 P 项系数 Get proportional gain
+  Scalar P() const { return param_.p; }
+  /// 获取 I 项系数 Get integral gain
+  Scalar I() const { return param_.i; }
+  /// 获取 D 项系数 Get derivative gain
+  Scalar D() const { return param_.d; }
+  /// 获取积分限幅 Get integral limit
+  Scalar ILimit() const { return param_.i_limit; }
+  /// 获取输出限幅 Get output limit
+  Scalar OutLimit() const { return param_.out_limit; }
+  /// 获取上一次误差 Get last error
   Scalar LastError() const { return last_err_; }
+  /// 获取上一次反馈值 Get last feedback
+  Scalar LastFeedback() const { return last_fb_; }
+  /// 获取上一次输出 Get last output
+  Scalar LastOutput() const { return last_out_; }
+  /// 获取上一次导数 Get last derivative
+  Scalar LastDerivative() const { return last_der_; }
 
   /**
    * @brief 重置控制器状态。
@@ -193,12 +219,43 @@ class PID
     last_out_ = 0;
   }
 
+  /**
+   * @brief 设置累计误差 Set integral error
+   *
+   * @param err 累计误差 Integral error
+   */
+  void SetIntegralError(Scalar err) { i_ = err; }
+
+  /**
+   * @brief 获取累计误差 Get integral error
+   *
+   * @return 累计误差 Integral error
+   */
+  Scalar GetIntegralError() const { return i_; }
+
+  /**
+   * @brief 设置前馈项 Set feedforward
+   *
+   * @param feed_forward 前馈项 Feedforward
+   */
+  void SetFeedForward(Scalar feed_forward) { feed_forward_ = feed_forward; }
+
+  /**
+   * @brief 获取前馈项 Get feedforward
+   *
+   * @return 前馈项 Feedforward
+   *
+   */
+  Scalar GetFeedForward() const { return feed_forward_; }
+
  private:
-  Param param_;          ///< PID 参数 PID parameter set
-  Scalar i_ = 0;         ///< 积分状态 Integral state
-  Scalar last_err_ = 0;  ///< 上次误差 Last error
-  Scalar last_fb_ = 0;   ///< 上次反馈 Last feedback
-  Scalar last_out_ = 0;  ///< 上次输出 Last output
+  Param param_;              ///< PID 参数 PID parameter set
+  Scalar i_ = 0;             ///< 积分状态 Integral state
+  Scalar last_err_ = 0;      ///< 上次误差 Last error
+  Scalar last_fb_ = 0;       ///< 上次反馈 Last feedback
+  Scalar last_der_ = 0;      ///< 上次导数 Last derivative
+  Scalar last_out_ = 0;      ///< 上次输出 Last output
+  Scalar feed_forward_ = 0;  ///< 前馈项 Feedforward term
 };
 
 }  // namespace LibXR
