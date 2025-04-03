@@ -35,6 +35,8 @@ LibXR::Topic::Domain *LibXR::Topic::def_domain_;
 
 /* timebase */
 LibXR::Timebase *LibXR::Timebase::timebase = nullptr;
+uint64_t libxr_timebase_max_valid_us = UINT64_MAX;
+uint32_t libxr_timebase_max_valid_ms = UINT32_MAX;
 
 void libxr_fatal_error(const char *file, uint32_t line, bool in_isr)
 {
