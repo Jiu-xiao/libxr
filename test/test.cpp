@@ -9,9 +9,11 @@
 const static char *test_name = nullptr;
 
 #define TEST_STEP(_arg)                           \
-  do {                                            \
+  do                                              \
+  {                                               \
     test_name = _arg;                             \
-    if (test_name) {                              \
+    if (test_name)                                \
+    {                                             \
       printf("\tTest [%s] Passed.\n", test_name); \
     }                                             \
                                                   \
@@ -19,12 +21,14 @@ const static char *test_name = nullptr;
 
 bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
-struct TestCase {
+struct TestCase
+{
   const char *name;
   void (*function)();
 };
 
-static void run_libxr_tests() {
+static void run_libxr_tests()
+{
   std::cout << "Running LibXR Tests...\n";
 
   TestCase synchronization_tests[] = {
@@ -36,6 +40,7 @@ static void run_libxr_tests() {
 
   TestCase utility_tests[] = {
       {"crc", test_crc},
+      {"encoder", test_float_encoder},
   };
 
   TestCase data_structure_tests[] = {
@@ -58,12 +63,12 @@ static void run_libxr_tests() {
   };
 
   TestCase system_tests[] = {
-      {"ramfs", test_ramfs},       {"event", test_event},
-      {"message", test_message},   {"database", test_database},
-      {"terminal", test_terminal},
+      {"ramfs", test_ramfs},       {"event", test_event},       {"message", test_message},
+      {"database", test_database}, {"terminal", test_terminal},
   };
 
-  struct {
+  struct
+  {
     TestCase *tests;
     const char *name;
   } test_groups[] = {{synchronization_tests, "synchronization_tests"},
@@ -84,9 +89,11 @@ static void run_libxr_tests() {
 
   size_t num_groups = sizeof(test_groups) / sizeof(test_groups[0]);
 
-  for (size_t g = 0; g < num_groups; ++g) {
+  for (size_t g = 0; g < num_groups; ++g)
+  {
     std::cout << "Test Group [" << test_groups[g].name << "]\n";
-    for (size_t i = 0; i < group_sizes[g]; ++i) {
+    for (size_t i = 0; i < group_sizes[g]; ++i)
+    {
       TEST_STEP(test_groups[g].tests[i].name);
       test_groups[g].tests[i].function();
     }
@@ -95,11 +102,13 @@ static void run_libxr_tests() {
   std::cout << "All tests completed.\n";
 }
 
-int main() {
+int main()
+{
   LibXR::PlatformInit();
 
   auto err_cb = LibXR::Callback<const char *, uint32_t>::Create(
-      [](bool in_isr, void *arg, const char *file, uint32_t line) {
+      [](bool in_isr, void *arg, const char *file, uint32_t line)
+      {
         UNUSED(in_isr);
         UNUSED(arg);
         UNUSED(file);

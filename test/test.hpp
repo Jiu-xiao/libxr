@@ -1,6 +1,7 @@
 void test_async();
 void test_condition_var();
 void test_crc();
+void test_float_encoder();
 void test_event();
 void test_inertia();
 void test_list();
