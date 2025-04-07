@@ -120,7 +120,7 @@ class Assert
   {
     UNUSED(limit);
     UNUSED(size);
-  };
+  }
 #endif
 
   /**
