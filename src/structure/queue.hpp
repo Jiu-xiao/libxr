@@ -23,6 +23,17 @@ class BaseQueue
    * @brief 构造函数，初始化队列 (Constructor to initialize the queue).
    * @param element_size 队列中每个元素的大小 (Size of each element in the queue).
    * @param length 队列的最大容量 (Maximum capacity of the queue).
+   * @param buffer 指向缓冲区的指针 (Pointer to the buffer).
+   */
+  BaseQueue(uint16_t element_size, size_t length, uint8_t *buffer)
+      : queue_array_(buffer), ELEMENT_SIZE(element_size), length_(length)
+  {
+  }
+
+  /**
+   * @brief 构造函数，初始化队列 (Constructor to initialize the queue).
+   * @param element_size 队列中每个元素的大小 (Size of each element in the queue).
+   * @param length 队列的最大容量 (Maximum capacity of the queue).
    */
   BaseQueue(uint16_t element_size, size_t length)
       : queue_array_(new uint8_t[length * element_size]),
@@ -348,6 +359,14 @@ class Queue : public BaseQueue
    * @param length 队列的最大容量 (Maximum capacity of the queue).
    */
   Queue(size_t length) : BaseQueue(sizeof(Data), length) {}
+
+  /**
+   * @brief 构造函数，初始化队列
+   *        (Constructor to initialize the queue).
+   * @param length 队列的最大容量 (Maximum capacity of the queue).
+   * @param buffer 指向缓冲区的指针 (Pointer to the buffer).
+   */
+  Queue(size_t length, uint8_t *buffer) : BaseQueue(sizeof(Data), length, buffer) {}
 
   /**
    * @brief 访问队列中的元素
