@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "flash.hpp"
+#include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "main.h"
 
@@ -16,6 +17,34 @@ struct FlashSector
   uint32_t address;
   uint32_t size;
 };
+
+template <typename, typename = void>
+struct HasFlashPage : std::false_type
+{
+};
+
+template <typename T>
+struct HasFlashPage<T, std::void_t<decltype(std::declval<T>().Page)>> : std::true_type
+{
+};
+
+template <typename T>
+// NOLINTNEXTLINE
+typename std::enable_if<!HasFlashPage<T>::value>::type SetNbPages(T& init, uint32_t addr,
+                                                                  uint32_t page)
+{
+  UNUSED(page);
+  init.PageAddress = addr;
+}
+
+template <typename T>
+// NOLINTNEXTLINE
+typename std::enable_if<HasFlashPage<T>::value>::type SetNbPages(T& init, uint32_t addr,
+                                                                 uint32_t page)
+{
+  UNUSED(addr);
+  init.Page = page;
+}
 
 /**
  * @brief STM32Flash 通用类，构造时传入扇区列表，自动判断编程粒度。
@@ -62,9 +91,9 @@ class STM32Flash : public Flash
       }
       FLASH_EraseInitTypeDef erase_init = {};
 
-#if defined(FLASH_TYPEERASE_PAGES)  // STM32F1/G4... series
+#if defined(FLASH_TYPEERASE_PAGES) && defined(FLASH_PAGE_SIZE)  // STM32F1/G4... series
       erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
-      erase_init.Page = i;
+      SetNbPages(erase_init, sector.address, i);
       erase_init.NbPages = 1;
       erase_init.Banks = FLASH_BANK_1;
 #elif defined(FLASH_TYPEERASE_SECTORS)  // STM32F4/F7/H7... series
