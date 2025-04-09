@@ -141,6 +141,8 @@ class STM32Flash : public Flash
     return FLASH_TYPEPROGRAM_WORD;
 #elif defined(FLASH_TYPEPROGRAM_DOUBLEWORD)
     return FLASH_TYPEPROGRAM_DOUBLEWORD;
+#elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
+    return FLASH_TYPEPROGRAM_FLASHWORD;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif
@@ -156,6 +158,8 @@ class STM32Flash : public Flash
     return 4;
 #elif defined(FLASH_TYPEPROGRAM_DOUBLEWORD)
     return 8;
+#elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
+    return 32;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif
