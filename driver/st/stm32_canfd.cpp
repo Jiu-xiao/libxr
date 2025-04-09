@@ -6,6 +6,12 @@ using namespace LibXR;
 
 STM32CANFD* STM32CANFD::map[STM32_FDCAN_NUMBER] = {nullptr};
 
+/**
+ * @brief 获取 FDCAN ID Get FDCAN ID
+ *
+ * @param addr FDCAN外设地址 FDCAN device address
+ * @return stm32_fdcan_id_t
+ */
 stm32_fdcan_id_t STM32_FDCAN_GetID(FDCAN_GlobalTypeDef* addr)
 {
   if (addr == nullptr)

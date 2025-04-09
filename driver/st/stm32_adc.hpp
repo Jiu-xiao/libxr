@@ -14,8 +14,19 @@
 namespace LibXR
 {
 
+/**
+ * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32 ADC
+ * channels.
+ *
+ */
 class STM32ADC
 {
+  /**
+   * @brief 获取 ADC 分辨率 Get ADC resolution
+   *
+   * @tparam typename
+   * @tparam typename
+   */
   template <typename, typename = void>
   struct GetADCResolution
   {
@@ -26,6 +37,11 @@ class STM32ADC
     }
   };
 
+  /**
+   * @brief 获取 ADC 分辨率 Get ADC resolution
+   *
+   * @tparam T
+   */
   template <typename T>
   struct GetADCResolution<T, std::void_t<decltype(std::declval<T>().Init.Resolution)>>
   {
@@ -60,13 +76,31 @@ class STM32ADC
   };
 
  public:
+  /**
+   * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32 ADC
+   *
+   */
   class Channel : public ADC
   {
    public:
+    /**
+     * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32
+     * ADC
+     *
+     * @param adc STM32ADC对象 ADC object
+     * @param index 通道索引 Channel index
+     * @param ch 通道号 Channel number
+     */
     Channel(STM32ADC* adc, uint8_t index, uint32_t ch) : adc_(adc), index_(index), ch_(ch)
     {
     }
 
+    /**
+     * @brief 读取 ADC 值
+     * @brief Reads the ADC value
+     *
+     * @return float
+     */
     float Read() override { return adc_->ReadChannel(index_); }
 
    private:
@@ -78,6 +112,15 @@ class STM32ADC
     friend class STM32ADC;
   };
 
+  /**
+   * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32
+   *
+   * @tparam NumChannels 通道数量 Number of channels
+   * @param hadc ADC外设 ADC device
+   * @param dma_buff DMA缓冲区 DMA buffer
+   * @param channels 通道号 Channel number
+   * @param vref 参考电压 Reference voltage
+   */
   template <size_t NumChannels>
   STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
            const std::array<uint32_t, NumChannels>& channels, float vref = 3.3f)
@@ -106,8 +149,20 @@ class STM32ADC
     delete[] channels_;
   }
 
+  /**
+   * @brief 获取 ADC 通道对象 Get ADC channel object
+   *
+   * @param index 通道索引 Channel index
+   * @return Channel& 通道对象 Channel object
+   */
   Channel& GetChannel(uint8_t index) { return channels_[index]; }
 
+  /**
+   * @brief 读取 ADC 值
+   *
+   * @param channel 通道号 Channel number
+   * @return float
+   */
   float ReadChannel(uint8_t channel)
   {
     if (channel >= NUM_CHANNELS)

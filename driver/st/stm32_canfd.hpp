@@ -30,9 +30,22 @@ stm32_fdcan_id_t STM32_FDCAN_GetID(FDCAN_GlobalTypeDef* addr);  // NOLINT
 
 namespace LibXR
 {
+/**
+ * @brief STM32CANFD 类，用于处理 STM32 系统的 CANFD 通道。 Provides handling for STM32
+ * CANFD
+ *
+ */
 class STM32CANFD : public FDCAN
 {
  public:
+  /**
+   * @brief STM32CANFD 类，用于处理 STM32 系统的 CANFD 通道。 Provides handling for STM32
+   * CANFD
+   *
+   * @param hcan STM32CANFD对象 CAN object
+   * @param tp_name 话题名称 Topic name
+   * @param queue_size 发送队列大小 Send queue size
+   */
   STM32CANFD(FDCAN_HandleTypeDef* hcan, const char* tp_name, uint32_t queue_size)
       : FDCAN(tp_name),
         hcan_(hcan),
@@ -44,6 +57,11 @@ class STM32CANFD : public FDCAN
     Init();
   }
 
+  /**
+   * @brief 初始化
+   *
+   * @return ErrorCode
+   */
   ErrorCode Init(void)
   {
     FDCAN_FilterTypeDef can_filter = {};
@@ -243,6 +261,11 @@ class STM32CANFD : public FDCAN
     return ErrorCode::OK;
   }
 
+  /**
+   * @brief 处理接收中断
+   *
+   * @param fifo 接收缓冲区号 Receive buffer number
+   */
   void ProcessRxInterrupt(uint32_t fifo)
   {
     if (HAL_FDCAN_GetRxMessage(hcan_, fifo, &rx_buff_.header, rx_buff_.pack_fd.data) ==
@@ -306,6 +329,10 @@ class STM32CANFD : public FDCAN
     }
   }
 
+  /**
+   * @brief 处理发送中断
+   *
+   */
   void ProcessTxInterrupt()
   {
     if (tx_queue_fd_.Peek(tx_buff_.pack_fd) == ErrorCode::OK)
