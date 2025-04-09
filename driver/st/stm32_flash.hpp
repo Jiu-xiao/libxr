@@ -23,8 +23,18 @@ struct HasFlashPage : std::false_type
 {
 };
 
+template <typename, typename = void>
+struct HasFlashBank : std::false_type
+{
+};
+
 template <typename T>
 struct HasFlashPage<T, std::void_t<decltype(std::declval<T>().Page)>> : std::true_type
+{
+};
+
+template <typename T>
+struct HasFlashBank<T, std::void_t<decltype(std::declval<T>().Banks)>> : std::true_type
 {
 };
 
@@ -44,6 +54,20 @@ typename std::enable_if<HasFlashPage<T>::value>::type SetNbPages(T& init, uint32
 {
   UNUSED(addr);
   init.Page = page;
+}
+
+template <typename T>
+// NOLINTNEXTLINE
+typename std::enable_if<!HasFlashBank<T>::value>::type SetBanks(T& init)
+{
+  UNUSED(init);
+}
+
+template <typename T>
+// NOLINTNEXTLINE
+typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init)
+{
+  init.Banks = 1;
 }
 
 /**
@@ -95,7 +119,7 @@ class STM32Flash : public Flash
       erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
       SetNbPages(erase_init, sector.address, i);
       erase_init.NbPages = 1;
-      erase_init.Banks = FLASH_BANK_1;
+      SetBanks(erase_init);
 #elif defined(FLASH_TYPEERASE_SECTORS)  // STM32F4/F7/H7... series
       erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
       erase_init.Sector = static_cast<uint32_t>(i);
