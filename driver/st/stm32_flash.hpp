@@ -62,17 +62,17 @@ class STM32Flash : public Flash
       }
       FLASH_EraseInitTypeDef erase_init = {};
 
-#if defined(FLASH_TYPEERASE_PAGES)  // STM32F1 series
+#if defined(FLASH_TYPEERASE_PAGES)  // STM32F1/G4... series
       erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
-      erase_init.Page = addr / FLASH_PAGE_SIZE;
+      erase_init.Page = i;
       erase_init.NbPages = 1;
       erase_init.Banks = FLASH_BANK_1;
-#elif defined(FLASH_TYPEERASE_SECTORS)  // STM32F4/F7/H7 series
+#elif defined(FLASH_TYPEERASE_SECTORS)  // STM32F4/F7/H7... series
       erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
       erase_init.Sector = static_cast<uint32_t>(i);
       erase_init.NbSectors = 1;
       erase_init.Banks = FLASH_BANK_1;
-#else                                   // Default case for other STM32 series
+#else
       return ErrorCode::NOT_SUPPORT;
 #endif
 
