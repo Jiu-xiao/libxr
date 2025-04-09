@@ -329,7 +329,7 @@ class DatabaseRaw : public Database
       : flash_(flash), write_buffer_(new uint8_t[flash_.min_write_size_])
   {
     ASSERT(flash.min_erase_size_ * 2 <= flash.flash_area_.size_);
-    ASSERT(flash_.min_write_size_ == MinWriteSize);
+    ASSERT(flash_.min_write_size_ <= MinWriteSize);
     auto block_num = static_cast<size_t>(flash.flash_area_.size_ / flash.min_erase_size_);
     block_size_ = block_num / 2 * flash.min_erase_size_;
     info_main_ = reinterpret_cast<FlashInfo*>(flash.flash_area_.addr_);
