@@ -6,6 +6,12 @@ using namespace LibXR;
 
 STM32GPIO *STM32GPIO::map[STM32_GPIO_EXTI_NUMBER] = {nullptr};
 
+/**
+ * @brief 获取 GPIO 扩展中断号
+ *
+ * @param pin 引脚
+ * @return stm32_gpio_exti_t 中断号 Interrupt number
+ */
 stm32_gpio_exti_t STM32_GPIO_EXTI_GetID(uint16_t pin)
 {  // NOLINT
   uint8_t pin_num = __builtin_ctz(pin);

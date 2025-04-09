@@ -12,6 +12,10 @@
 namespace LibXR
 {
 
+/**
+ * @brief STM32Flash 通用类，构造时传入扇区列表，自动判断编程粒度。
+ *
+ */
 struct FlashSector
 {
   uint32_t address;
@@ -79,6 +83,11 @@ template <size_t SECTOR_COUNT, size_t START_SECTOR>
 class STM32Flash : public Flash
 {
  public:
+  /**
+   * @brief STM32Flash 类，构造时传入扇区列表，自动判断编程粒度。
+   * @param sectors 扇区列表
+   *
+   */
   STM32Flash(const FlashSector (&sectors)[SECTOR_COUNT])
       : Flash(sectors[START_SECTOR - 1].size, DetermineMinWriteSize(),
               {reinterpret_cast<void*>(sectors[START_SECTOR - 1].address),
