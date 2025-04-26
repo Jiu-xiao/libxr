@@ -12,7 +12,6 @@ void Thread::Sleep(uint32_t milliseconds)
   uint32_t now = Timebase::GetMilliseconds();
   while (Timebase::GetMilliseconds() - now < milliseconds)
   {
-    volatile auto error = Timebase::GetMilliseconds() - now < milliseconds;
     Timer::RefreshTimerInIdle();
   }
 }
