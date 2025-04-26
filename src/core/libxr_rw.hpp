@@ -59,8 +59,8 @@ class Operation
    */
   Operation(Semaphore &sem, uint32_t timeout = UINT32_MAX) : type(OperationType::BLOCK)
   {
-    data.sem = &sem;
-    data.timeout = timeout;
+    data.sem_info.sem = &sem;
+    data.sem_info.timeout = timeout;
   }
 
   /**
@@ -100,8 +100,8 @@ class Operation
           data.callback = op.data.callback;
           break;
         case OperationType::BLOCK:
-          data.sem = op.data.sem;
-          data.timeout = op.data.timeout;
+          data.sem_info.sem = op.data.sem_info.sem;
+          data.sem_info.timeout = op.data.sem_info.timeout;
           break;
         case OperationType::POLLING:
           data.status = op.data.status;
@@ -130,8 +130,8 @@ class Operation
           data.callback = op.data.callback;
           break;
         case OperationType::BLOCK:
-          data.sem = op.data.sem;
-          data.timeout = op.data.timeout;
+          data.sem_info.sem = op.data.sem_info.sem;
+          data.sem_info.timeout = op.data.sem_info.timeout;
           break;
         case OperationType::POLLING:
           data.status = op.data.status;
@@ -183,8 +183,8 @@ class Operation
         data.callback = op.data.callback;
         break;
       case OperationType::BLOCK:
-        data.sem = op.data.sem;
-        data.timeout = op.data.timeout;
+        data.sem_info.sem = op.data.sem_info.sem;
+        data.sem_info.timeout = op.data.sem_info.timeout;
         break;
       case OperationType::POLLING:
         data.status = op.data.status;
@@ -208,7 +208,7 @@ class Operation
         data.callback->Run(in_isr, std::forward<Args>(args)...);
         break;
       case OperationType::BLOCK:
-        data.sem->PostFromCallback(in_isr);
+        data.sem_info.sem->PostFromCallback(in_isr);
         break;
       case OperationType::POLLING:
         *data.status = OperationPollingStatus::DONE;
@@ -248,7 +248,7 @@ class Operation
     {
       Semaphore *sem;
       uint32_t timeout;
-    };
+    } sem_info;
     OperationPollingStatus *status;
   } data;
 
@@ -430,7 +430,7 @@ class ReadPort
         op.UpdateStatus(false, ErrorCode::OK);
         if (op.type == ReadOperation::OperationType::BLOCK)
         {
-          return op.data.sem->Wait(op.data.timeout);
+          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
         }
         return ErrorCode::OK;
       }
@@ -444,7 +444,7 @@ class ReadPort
       auto ans = read_fun_(*this);
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       else
       {
@@ -627,7 +627,7 @@ class WritePort
         op.UpdateStatus(false, ErrorCode::OK);
         if (op.type == WriteOperation::OperationType::BLOCK)
         {
-          return op.data.sem->Wait(op.data.timeout);
+          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
         }
         return ErrorCode::OK;
       }
@@ -645,7 +645,7 @@ class WritePort
       auto ans = write_fun_(*this);
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       else
       {
