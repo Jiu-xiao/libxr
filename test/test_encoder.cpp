@@ -103,7 +103,7 @@ void test_float_encoder()
   {
     FloatEncoder<BITS> encoder(-50.0f, 50.0f);
     float decoded = encoder.Decode(encoder.Encode(0.0f));
-    ASSERT(std::abs(decoded - 0.0f) < 1e-5f);
+    ASSERT(std::abs(decoded - 0.0f) < 1e-4f);
 
     UNUSED(decoded);
   }

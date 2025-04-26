@@ -90,7 +90,9 @@ class Terminal
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = nullptr,
            ReadPort *read_port = STDIO::read_, WritePort *write_port = STDIO::write_,
            Mode MODE = Mode::CRLF)
-      : MODE(MODE),
+      : read_status_(ReadOperation::OperationPollingStatus::READY),
+        write_status_(WriteOperation::OperationPollingStatus::READY),
+        MODE(MODE),
         write_op_(write_status_),
         read_(read_port),
         write_(write_port),
@@ -100,6 +102,9 @@ class Terminal
         history_(MAX_HISTORY_NUMBER)
   {
   }
+
+  ReadOperation::OperationPollingStatus read_status_;
+  WriteOperation::OperationPollingStatus write_status_;
 
   const Mode MODE;                  ///< 终端换行模式 Terminal line feed mode
   WriteOperation write_op_;         ///< 终端写操作 Terminal write operation
@@ -117,11 +122,6 @@ class Terminal
   Queue<LibXR::String<MAX_LINE_SIZE>> history_;  ///< 历史命令 History of commands
   int history_index_ = -1;                       ///< 当前历史索引 Current history index
   bool linefeed_flag_ = false;                   ///< 换行标志 Line feed flag
-
-  ReadOperation::OperationPollingStatus read_status_ =
-      ReadOperation::OperationPollingStatus::READY;
-  WriteOperation::OperationPollingStatus write_status_ =
-      WriteOperation::OperationPollingStatus::READY;
 
   /**
    * @brief  执行换行操作
