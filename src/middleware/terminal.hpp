@@ -184,7 +184,6 @@ class Terminal
     else
     {
       input_line_.Insert(data, input_line_.Size() + offset_);
-      UpdateDisplayPosition();
     }
     input_line_[input_line_.Size()] = '\0';
   }
@@ -214,7 +213,11 @@ class Terminal
       }
       else
       {
-        (*write_)(ConstRawData(input_line_[input_line_.Size() - 1]), write_op_);
+        (*write_)(ConstRawData(input_line_[input_line_.Size() - 1 + offset_]), write_op_);
+      }
+      if (offset_ != 0)
+      {
+        UpdateDisplayPosition();
       }
     }
   }
@@ -233,7 +236,6 @@ class Terminal
     else
     {
       input_line_.Delete(input_line_.Size() + offset_ - 1);
-      UpdateDisplayPosition();
     }
     input_line_[input_line_.Size()] = '\0';
   }
@@ -263,6 +265,11 @@ class Terminal
       else
       {
         (*write_)(ConstRawData(DELETE_CHAR), write_op_);
+      }
+
+      if (offset_ != 0)
+      {
+        UpdateDisplayPosition();
       }
     }
   }
