@@ -171,8 +171,16 @@ class STM32Flash : public Flash
 
     while (written < data.size_)
     {
-      uint64_t word = 0xFFFFFFFFFFFFFFFF;
       size_t chunk_size = std::min<size_t>(min_write_size_, data.size_ - written);
+
+      if (memcmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
+                 chunk_size) == 0)
+      {
+        written += chunk_size;
+        continue;
+      }
+
+      uint64_t word = 0xFFFFFFFFFFFFFFFF;
       std::memcpy(&word, src + written, chunk_size);
 
       if (HAL_FLASH_Program(program_type_, addr + written, word) != HAL_OK)
