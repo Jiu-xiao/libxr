@@ -17,6 +17,7 @@
 #include "libxr_type.hpp"
 #include "list.hpp"
 #include "lock_queue.hpp"
+#include "logger.hpp"
 #include "message.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"

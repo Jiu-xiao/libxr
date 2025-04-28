@@ -5,8 +5,8 @@
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 
-extern uint64_t libxr_timebase_max_valid_us;  // NOLINT
-extern uint32_t libxr_timebase_max_valid_ms;  // NOLINT
+static inline uint64_t libxr_timebase_max_valid_us = UINT64_MAX;  // NOLINT
+static inline uint32_t libxr_timebase_max_valid_ms = UINT32_MAX;  // NOLINT
 
 namespace LibXR
 {

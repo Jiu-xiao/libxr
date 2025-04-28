@@ -1066,18 +1066,18 @@ class Topic
    * @brief  主题域的红黑树结构，存储不同的主题
    *         Red-Black Tree structure for storing different topics in the domain
    */
-  static RBTree<uint32_t> *domain_;
+  static inline RBTree<uint32_t> *domain_ = nullptr;
 
   /**
    * @brief  主题域访问的自旋锁，确保多线程安全
    *         SpinLock for domain access to ensure thread safety
    */
-  static SpinLock domain_lock_;
+  static inline SpinLock domain_lock_;
 
   /**
    * @brief  默认的主题域，所有未指定域的主题都会归入此域
    *         Default domain where all topics without a specified domain are assigned
    */
-  static Domain *def_domain_;
+  static inline Domain *def_domain_ = nullptr;
 };
 }  // namespace LibXR

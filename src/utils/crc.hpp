@@ -19,8 +19,9 @@ class CRC8
   static const uint8_t INIT = 0xFF;  ///< CRC8 初始值 / CRC8 initial value
 
  public:
-  static uint8_t tab_[256];  ///< CRC8 查找表 / CRC8 lookup table
-  static bool inited_;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
+  static inline uint8_t tab_[256];  ///< CRC8 查找表 / CRC8 lookup table
+  static inline bool inited_ =
+      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
 
   CRC8() {}
 
@@ -118,8 +119,9 @@ class CRC16
   static const uint16_t INIT = 0xFFFF;  ///< CRC16 初始值 / CRC16 initial value
 
  public:
-  static uint16_t tab_[256];  ///< CRC16 查找表 / CRC16 lookup table
-  static bool inited_;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
+  static inline uint16_t tab_[256];  ///< CRC16 查找表 / CRC16 lookup table
+  static inline bool inited_ =
+      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
   CRC16() {}
 
   /**
@@ -209,8 +211,9 @@ class CRC32
   static const uint32_t INIT = 0xFFFFFFFF;  ///< CRC32 初始值 / CRC32 initial value
 
  public:
-  static uint32_t tab_[256];  ///< CRC32 查找表 / CRC32 lookup table
-  static bool inited_;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
+  static inline uint32_t tab_[256];  ///< CRC32 查找表 / CRC32 lookup table
+  static inline bool inited_ =
+      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
 
   CRC32() {}
 
