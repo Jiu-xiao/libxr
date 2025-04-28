@@ -57,7 +57,7 @@ A collection of commonly used software.
 
 | `Middleware` | Event | Message | Ramfs | Terminal | Database | Log |
 | ------------ | ----- | ------- | ----- | -------- | -------- | --- |
-|              | ✅     | ✅       | ✅     | ✅        | ✅        | ❌   |
+|              | ✅     | ✅       | ✅     | ✅        | ✅        | ✅   |
 
 ## 外设抽象层支持
 

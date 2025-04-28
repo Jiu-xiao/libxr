@@ -58,7 +58,7 @@ A collection of commonly used software.
 
 | `Middleware` | Event | Message | Ramfs | Terminal | Database | Log |
 | ------------ | ----- | ------- | ----- | -------- | -------- | --- |
-|              | ✅     | ✅       | ✅     | ✅        | ✅        | ❌   |
+|              | ✅     | ✅       | ✅     | ✅        | ✅        | ✅   |
 
 ## Periheral Layer
 

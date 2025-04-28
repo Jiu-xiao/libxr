@@ -16,6 +16,18 @@ else()
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_TIMEOUT=10)
 endif()
 
+if(NOT LIBXR_LOG_OUTPUT)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_LOG_OUTPUT=4)
+else()
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_LOG_OUTPUT=${LIBXR_LOG_OUTPUT})
+endif()
+
+if(NOT XR_LOG_MESSAGE_MAX_LEN)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC XR_LOG_MESSAGE_MAX_LEN=32)
+else()
+  target_compile_definitions(${PROJECT_NAME} PUBLIC XR_LOG_MESSAGE_MAX_LEN=${XR_LOG_MESSAGE_MAX_LEN})
+endif()
+
 # Detect system
 if(CMAKE_CROSSCOMPILING)
   message("Cross compiling.")
@@ -47,7 +59,7 @@ endif()
 add_compile_definitions(LIBXR_SYSTEM ${LIBXR_SYSTEM})
 
 if("${LIBXR_SYSTEM}" STREQUAL "None")
-  add_compile_definitions(LIBXR_NOT_SUPPORT_MUTI_THREAD=1)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_NOT_SUPPORT_MUTI_THREAD=1)
   message("Not support multi thread.")
 endif()
 
