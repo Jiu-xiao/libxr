@@ -43,36 +43,36 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
 
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
-  WriteOperation op;
-  if (uart->write_port_.queue_op_->Pop(op) != ErrorCode::OK)
+  WritePort::WriteInfo info;
+  if (uart->write_port_.queue_op_->Pop(info) != ErrorCode::OK)
   {
     return USBD_OK;
   }
 
   uart->write_port_.write_size_ = *Len;
-  op.UpdateStatus(true, ErrorCode::OK);
+  info.op.UpdateStatus(true, ErrorCode::OK);
 
-  size_t size = 0;
-
-  if (uart->write_port_.queue_data_->PopBlockFromCallback(uart->tx_buffer_, &size,
-                                                          true) != ErrorCode::OK)
+  if (uart->write_port_.queue_op_->Peek(info) != ErrorCode::OK)
   {
     return USBD_OK;
   }
 
-  ASSERT(size > 0);
+  if (uart->write_port_.queue_data_->PopBatch(uart->tx_buffer_, info.size) !=
+      ErrorCode::OK)
+  {
+    ASSERT(false);
+    return USBD_OK;
+  }
 
 #if defined(STM32F1)
-  uart->write_size_ = size;
+  uart->write_size_ = info.size;
   uart->writing_ = true;
 #endif
 
-  USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, size);
+  USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, info.size);
   USBD_CDC_TransmitPacket(uart->usb_handle_);
 
-  auto ans = uart->write_port_.queue_op_->Peek(op);
-  ASSERT(ans == ErrorCode::OK);
-  op.MarkAsRunning();
+  info.op.MarkAsRunning();
 
   return (USBD_OK);
 }
@@ -80,8 +80,14 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
 #if defined(STM32F1)
 extern "C" void libxr_stm32_transmit_complete_check(void)
 {
+  if (STM32VirtualUART::map[0] == nullptr)
+  {
+    return;
+  }
+
   auto p_data_class = reinterpret_cast<USBD_CDC_HandleTypeDef *>(
       STM32VirtualUART::map[0]->usb_handle_->pClassData);
+
   if (p_data_class == nullptr)
   {
     return;

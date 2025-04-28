@@ -497,9 +497,14 @@ class ReadPort
 class WritePort
 {
  public:
+  typedef struct
+  {
+    WriteOperation op;
+    uint32_t size;
+  } WriteInfo;
   WriteFun write_fun_ = nullptr;
-  LockFreeQueue<WriteOperation> *queue_op_;
-  ChunkQueue *queue_data_;
+  LockFreeQueue<WriteInfo> *queue_op_;
+  LockFreeQueue<uint8_t> *queue_data_;
   size_t write_size_ = 0;
 
   /**
@@ -512,12 +517,12 @@ class WritePort
    *
    * @param queue_size 队列的大小，默认为 3。
    *                   The size of the queue, default is 3.
-   * @param block_size 每个数据块的大小，默认为 128。
-   *                   The size of each data block, default is 128.
+   * @param block_size 缓存的数据的最大大小，默认为 128。
+   *                   The maximum size of cached data, default is 128.
    */
   WritePort(size_t queue_size = 3, size_t block_size = 128)
-      : queue_op_(new LockFreeQueue<WriteOperation>(queue_size)),
-        queue_data_(new ChunkQueue(queue_size, block_size))
+      : queue_op_(new LockFreeQueue<WriteInfo>(queue_size)),
+        queue_data_(new LockFreeQueue<uint8_t>(block_size))
   {
   }
 
@@ -632,15 +637,13 @@ class WritePort
         return ErrorCode::OK;
       }
 
-      if (queue_data_->EmptySize() < data.size_ || queue_data_->EmptyBlockSize() < 1 ||
-          queue_op_->EmptySize() < 1)
+      if (queue_data_->EmptySize() < data.size_ || queue_op_->EmptySize() < 1)
       {
         return ErrorCode::FULL;
       }
 
-      queue_op_->Push(std::forward<WriteOperation>(op));
-      Flush();
-      queue_data_->AppendToCurrentBlock(data.addr_, data.size_);
+      queue_data_->PushBatch(reinterpret_cast<const uint8_t *>(data.addr_), data.size_);
+      queue_op_->Push(WriteInfo{std::forward<WriteOperation>(op), data.size_});
 
       auto ans = write_fun_(*this);
       if (op.type == WriteOperation::OperationType::BLOCK)
@@ -657,10 +660,6 @@ class WritePort
       return ErrorCode::NOT_SUPPORT;
     }
   }
-
-  /// @brief Flushes pending write operations.
-  /// @brief 刷新挂起的写入操作。
-  void Flush() { queue_data_->CreateNewBlock(); }
 
   /// @brief Resets the WritePort.
   /// @brief 重置WritePort。
