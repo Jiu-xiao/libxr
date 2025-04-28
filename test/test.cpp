@@ -5,18 +5,19 @@
 #include <iostream>
 
 #include "libxr.hpp"
+#include "logger.hpp"
 
 const static char *test_name = nullptr;
 
-#define TEST_STEP(_arg)                           \
-  do                                              \
-  {                                               \
-    test_name = _arg;                             \
-    if (test_name)                                \
-    {                                             \
-      printf("\tTest [%s] Passed.\n", test_name); \
-    }                                             \
-                                                  \
+#define TEST_STEP(_arg)                                \
+  do                                                   \
+  {                                                    \
+    test_name = _arg;                                  \
+    if (test_name)                                     \
+    {                                                  \
+      XR_LOG_PASS("\tTest [%s] Passed.\n", test_name); \
+    }                                                  \
+                                                       \
   } while (0)
 
 bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
@@ -29,7 +30,7 @@ struct TestCase
 
 static void run_libxr_tests()
 {
-  std::cout << "Running LibXR Tests...\n";
+  XR_LOG_INFO("Running LibXR Tests...\n");
 
   TestCase synchronization_tests[] = {
       {"semaphore", test_semaphore},
@@ -91,7 +92,7 @@ static void run_libxr_tests()
 
   for (size_t g = 0; g < num_groups; ++g)
   {
-    std::cout << "Test Group [" << test_groups[g].name << "]\n";
+    XR_LOG_INFO("Test Group [%s]\n", test_groups[g].name);
     for (size_t i = 0; i < group_sizes[g]; ++i)
     {
       TEST_STEP(test_groups[g].tests[i].name);
@@ -99,7 +100,7 @@ static void run_libxr_tests()
     }
   }
 
-  std::cout << "All tests completed.\n";
+  XR_LOG_INFO("All tests completed.\n");
 }
 
 int main()
@@ -114,7 +115,8 @@ int main()
         UNUSED(file);
         UNUSED(line);
 
-        printf("Error: Union test failed at step [%s].\r\n", test_name);
+        XR_LOG_ERROR("Error: Union test failed at step [%s].\r\n", test_name);
+        // NOLINTNEXTLINE
         *(volatile long long *)(nullptr) = 0;
         exit(-1);
       },
