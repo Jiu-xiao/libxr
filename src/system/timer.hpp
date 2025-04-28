@@ -166,7 +166,21 @@ class Timer
    *         Adds a periodic task
    * @param  handle 任务句柄 Timer handle to add
    */
-  static void Add(TimerHandle handle);
+  static void Add(TimerHandle handle)
+  {
+    ASSERT(!handle->next_);
+
+    if (!LibXR::Timer::list_)
+    {
+      LibXR::Timer::list_ = new LibXR::List();
+#ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
+#else
+      thread_handle_.Create<void *>(nullptr, RefreshThreadFunction, "libxr_timer_task",
+                                    stack_depth_, priority_);
+#endif
+    }
+    list_->Add(*handle);
+  }
 
   /**
    * @brief  刷新定时任务状态
@@ -221,12 +235,12 @@ class Timer
    */
   static void RefreshTimerInIdle();
 
-  static LibXR::List *list_;  ///< 定时任务列表 List of registered tasks
+  static inline LibXR::List *list_ = nullptr;  ///< 定时任务列表 List of registered tasks
 
-  static Thread thread_handle_;  ///< 定时器管理线程 Timer management thread
+  static inline Thread thread_handle_;  ///< 定时器管理线程 Timer management thread
 
-  static LibXR::Thread::Priority priority;  ///< 线程优先级 Thread priority
-  static uint32_t stack_depth;              ///< 线程栈深度 Thread stack depth
+  static inline LibXR::Thread::Priority priority_;  ///< 线程优先级 Thread priority
+  static inline uint32_t stack_depth_;  ///< 线程栈深度 Thread stack depth
 };
 
 }  // namespace LibXR

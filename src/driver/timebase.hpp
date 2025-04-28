@@ -98,7 +98,7 @@ class Timebase
    * This pointer refers to the currently active `Timebase` instance,
    * and all static time functions access the actual implementation through this pointer.
    */
-  static Timebase *timebase;  // NOLINT
+  static inline Timebase *timebase = nullptr;  // NOLINT
 };
 
 }  // namespace LibXR

@@ -10,8 +10,8 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "lock_queue.hpp"
 #include "lockfree_queue.hpp"
+#include "mutex.hpp"
 #include "semaphore.hpp"
 
 namespace LibXR
@@ -680,10 +680,12 @@ class STDIO
 {
  public:
   // NOLINTBEGIN
-  static ReadPort *read_;    ///< Read port instance. 读取端口。
-  static WritePort *write_;  ///< Write port instance. 写入端口。
-  static char printf_buff_[LIBXR_PRINTF_BUFFER_SIZE];  ///< Print buffer. 打印缓冲区。
-
+  static inline ReadPort *read_ = nullptr;    ///< Read port instance. 读取端口。
+  static inline WritePort *write_ = nullptr;  ///< Write port instance. 写入端口。
+#if LIBXR_PRINTF_BUFFER_SIZE > 0
+  static inline char
+      printf_buff_[LIBXR_PRINTF_BUFFER_SIZE];  ///< Print buffer. 打印缓冲区。
+#endif
   // NOLINTEND
 
   /**
@@ -695,14 +697,18 @@ class STDIO
    * @return Number of characters written, or negative on error.
    *         成功返回写入的字符数，失败返回负数。
    */
-  static int Printf(const char *fmt, ...)
+  static int Printf(const char *fmt, ...)  // NOLINT
   {
+#if LIBXR_PRINTF_BUFFER_SIZE > 0
     if (!STDIO::write_ || !STDIO::write_->Writable())
     {
       return -1;
     }
 
     static LibXR::Semaphore sem;  // NOLINT
+    static LibXR::Mutex mutex;    // NOLINT
+
+    LibXR::Mutex::LockGuard lock_guard(mutex);
 
     va_list args;
     va_start(args, fmt);
@@ -724,6 +730,10 @@ class STDIO
 
     static WriteOperation op(sem, LIBXR_PRINTF_TIMEOUT);  // NOLINT
     return static_cast<int>(STDIO::write_->operator()(data, op));
+#else
+    UNUSED(fmt);
+    return 0;
+#endif
   }
 };
 }  // namespace LibXR

@@ -130,7 +130,7 @@ class Assert
    * 该可选回调函数用于处理致命错误，如果未注册，则为空。
    * This optional callback is used to handle fatal errors if registered.
    */
-  static std::optional<LibXR::Callback<const char *, uint32_t>>
+  static inline std::optional<LibXR::Callback<const char *, uint32_t>>
       libxr_fatal_error_callback_;
 };
 }  // namespace LibXR
