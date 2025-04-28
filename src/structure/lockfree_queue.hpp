@@ -206,7 +206,7 @@ class LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::FULL` if
    * the queue is full
    */
-  ErrorCode PushBatch(Data *data, size_t size)
+  ErrorCode PushBatch(const Data *data, size_t size)
   {
     if (EmptySize() < size)
     {
