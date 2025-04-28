@@ -70,11 +70,10 @@ class STM32VirtualUART : public UART
 
     if (p_data_class == nullptr)
     {
-      size_t need_write = 0;
-      port.queue_data_->PopBlock(uart->tx_buffer_, &need_write);
-      WriteOperation op;
-      port.queue_op_->Pop(op);
-      op.UpdateStatus(false, ErrorCode::INIT_ERR);
+      WritePort::WriteInfo info;
+      port.queue_op_->Pop(info);
+      port.queue_data_->PopBatch(uart->tx_buffer_, info.size);
+      info.op.UpdateStatus(false, ErrorCode::INIT_ERR);
       return ErrorCode::INIT_ERR;
     }
 
@@ -84,25 +83,28 @@ class STM32VirtualUART : public UART
     if (p_data_class->TxState == 0)
 #endif
     {
-      size_t need_write = 0;
-      port.Flush();
+      WritePort::WriteInfo info;
+      auto ans = port.queue_op_->Peek(info);
 
-      if (port.queue_data_->PopBlock(uart->tx_buffer_, &need_write) != ErrorCode::OK)
+      if (ans != ErrorCode::OK)
       {
         return ErrorCode::EMPTY;
       }
+
+      if (port.queue_data_->PopBatch(uart->tx_buffer_, info.size) != ErrorCode::OK)
+      {
+        ASSERT(false);
+        return ErrorCode::EMPTY;
+      }
 #if defined(STM32F1)
-      uart->write_size_ = need_write;
+      uart->write_size_ = info.size;
       uart->writing_ = true;
 #endif
 
-      USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, need_write);
+      USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, info.size);
       USBD_CDC_TransmitPacket(uart->usb_handle_);
 
-      WriteOperation op;
-
-      port.queue_op_->Peek(op);
-      op.MarkAsRunning();
+      info.op.MarkAsRunning();
 
       return ErrorCode::OK;
     }
