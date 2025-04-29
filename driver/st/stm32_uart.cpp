@@ -199,7 +199,6 @@ extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *uart_handle)
   {
     __HAL_UART_CLEAR_IDLEFLAG(uart_handle);
     size_t len = uart_handle->RxXferSize - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);
-    ASSERT(len >= 0);  // NOLINT
 
     auto uart = STM32UART::map[STM32_UART_GetID(uart_handle->Instance)];
 
@@ -216,30 +215,33 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 {  // NOLINT
   auto uart = STM32UART::map[id];
 
-  WriteOperation op;
-  if (uart->write_port_.queue_op_->Pop(op) != ErrorCode::OK)
+  WritePort::WriteInfo info;
+  if (uart->write_port_.queue_info_->Pop(info) != ErrorCode::OK)
   {
+    ASSERT(false);
     return;
   }
 
   uart->write_port_.write_size_ = uart->uart_handle_->TxXferSize;
-  op.UpdateStatus(true, ErrorCode::OK);
+  info.op.UpdateStatus(true, ErrorCode::OK);
 
-  size_t size = 0;
-
-  if (uart->write_port_.queue_data_->PopBlockFromCallback(uart->dma_buff_tx_.addr_, &size,
-                                                          true) != ErrorCode::OK)
+  if (uart->write_port_.queue_info_->Peek(info) != ErrorCode::OK)
   {
     return;
   }
 
-  ASSERT(size > 0);
+  if (uart->write_port_.queue_data_->PopBatch(
+          reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.addr_), info.size) !=
+      ErrorCode::OK)
+  {
+    ASSERT(false);
+    return;
+  }
 
   HAL_UART_Transmit_DMA(uart->uart_handle_,
-                        static_cast<uint8_t *>(uart->dma_buff_tx_.addr_), size);
+                        static_cast<uint8_t *>(uart->dma_buff_tx_.addr_), info.size);
 
-  uart->write_port_.queue_op_->Peek(op);
-  op.MarkAsRunning();
+  info.op.MarkAsRunning();
 }
 
 extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
@@ -267,10 +269,10 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
 {
   auto uart = STM32UART::map[STM32_UART_GetID(huart->Instance)];
   HAL_UART_Receive_DMA(huart, huart->pRxBuffPtr, uart->dma_buff_rx_.size_);
-  WriteOperation op;
-  if (uart->write_port_.queue_op_->Peek(op) == ErrorCode::OK)
+  WritePort::WriteInfo info;
+  if (uart->write_port_.queue_info_->Peek(info) == ErrorCode::OK)
   {
-    op.UpdateStatus(true, ErrorCode::FAILED);
+    info.op.UpdateStatus(true, ErrorCode::FAILED);
   }
   uart->read_port_.Reset();
   uart->write_port_.Reset();
@@ -279,10 +281,10 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
 extern "C" void HAL_UART_AbortTransmitCpltCallback(UART_HandleTypeDef *huart)
 {
   auto uart = STM32UART::map[STM32_UART_GetID(huart->Instance)];
-  WriteOperation op;
-  if (uart->write_port_.queue_op_->Peek(op) == ErrorCode::OK)
+  WritePort::WriteInfo info;
+  if (uart->write_port_.queue_info_->Peek(info) == ErrorCode::OK)
   {
-    op.UpdateStatus(true, ErrorCode::FAILED);
+    info.op.UpdateStatus(true, ErrorCode::FAILED);
   }
   uart->write_port_.Reset();
 }

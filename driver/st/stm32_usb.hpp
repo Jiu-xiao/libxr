@@ -71,7 +71,7 @@ class STM32VirtualUART : public UART
     if (p_data_class == nullptr)
     {
       WritePort::WriteInfo info;
-      port.queue_op_->Pop(info);
+      port.queue_info_->Pop(info);
       port.queue_data_->PopBatch(uart->tx_buffer_, info.size);
       info.op.UpdateStatus(false, ErrorCode::INIT_ERR);
       return ErrorCode::INIT_ERR;
@@ -84,7 +84,7 @@ class STM32VirtualUART : public UART
 #endif
     {
       WritePort::WriteInfo info;
-      auto ans = port.queue_op_->Peek(info);
+      auto ans = port.queue_info_->Peek(info);
 
       if (ans != ErrorCode::OK)
       {
