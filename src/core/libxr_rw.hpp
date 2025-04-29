@@ -503,7 +503,7 @@ class WritePort
     uint32_t size;
   } WriteInfo;
   WriteFun write_fun_ = nullptr;
-  LockFreeQueue<WriteInfo> *queue_op_;
+  LockFreeQueue<WriteInfo> *queue_info_;
   LockFreeQueue<uint8_t> *queue_data_;
   size_t write_size_ = 0;
 
@@ -511,8 +511,8 @@ class WritePort
    * @brief 构造一个新的 WritePort 对象。
    *        Constructs a new WritePort object.
    *
-   * 该构造函数初始化无锁操作队列 `queue_op_` 和数据块队列 `queue_data_`。
-   * This constructor initializes the lock-free operation queue `queue_op_` and the data
+   * 该构造函数初始化无锁操作队列 `queue_info_` 和数据块队列 `queue_data_`。
+   * This constructor initializes the lock-free operation queue `queue_info_` and the data
    * block queue `queue_data_`.
    *
    * @param queue_size 队列的大小，默认为 3。
@@ -521,7 +521,7 @@ class WritePort
    *                   The maximum size of cached data, default is 128.
    */
   WritePort(size_t queue_size = 3, size_t block_size = 128)
-      : queue_op_(new LockFreeQueue<WriteInfo>(queue_size)),
+      : queue_info_(new LockFreeQueue<WriteInfo>(queue_size)),
         queue_data_(new LockFreeQueue<uint8_t>(block_size))
   {
   }
@@ -637,13 +637,13 @@ class WritePort
         return ErrorCode::OK;
       }
 
-      if (queue_data_->EmptySize() < data.size_ || queue_op_->EmptySize() < 1)
+      if (queue_data_->EmptySize() < data.size_ || queue_info_->EmptySize() < 1)
       {
         return ErrorCode::FULL;
       }
 
       queue_data_->PushBatch(reinterpret_cast<const uint8_t *>(data.addr_), data.size_);
-      queue_op_->Push(WriteInfo{std::forward<WriteOperation>(op), data.size_});
+      queue_info_->Push(WriteInfo{std::forward<WriteOperation>(op), data.size_});
 
       auto ans = write_fun_(*this);
       if (op.type == WriteOperation::OperationType::BLOCK)
@@ -665,7 +665,7 @@ class WritePort
   /// @brief 重置WritePort。
   void Reset()
   {
-    queue_op_->Reset();
+    queue_info_->Reset();
     queue_data_->Reset();
     write_size_ = 0;
   }

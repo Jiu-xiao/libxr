@@ -117,26 +117,30 @@ class STM32UART : public UART
     STM32UART *uart = CONTAINER_OF(&port, STM32UART, write_port_);
     if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
     {
-      size_t need_write = 0;
-      port.Flush();
-      ErrorCode err = port.queue_data_->PopBlock(uart->dma_buff_tx_.addr_, &need_write);
-      if (err != ErrorCode::OK)
+      WritePort::WriteInfo info;
+      if (port.queue_info_->Peek(info) != ErrorCode::OK)
       {
-        return ErrorCode::OK;
+        return ErrorCode::EMPTY;
+      }
+
+      if (port.queue_data_->PopBatch(
+              reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.addr_), info.size) !=
+          ErrorCode::OK)
+      {
+        ASSERT(false);
+        return ErrorCode::EMPTY;
       }
 
       auto ans = HAL_UART_Transmit_DMA(uart->uart_handle_,
                                        static_cast<uint8_t *>(uart->dma_buff_tx_.addr_),
-                                       need_write);
-      WriteOperation op;
+                                       info.size);
       if (ans != HAL_OK)
       {
-        port.queue_op_->Pop(op);
-        op.UpdateStatus(false, ErrorCode::FAILED);
+        port.queue_info_->Pop(info);
+        info.op.UpdateStatus(false, ErrorCode::FAILED);
         return ErrorCode::FAILED;
       }
-      port.queue_op_->Peek(op);
-      op.MarkAsRunning();
+      info.op.MarkAsRunning();
     }
     else
     {
