@@ -193,6 +193,7 @@ __attribute__((weak, used)) void __atomic_store_1(volatile void *ptr, uint8_t va
  * @param  memorder 内存顺序标志（忽略） / Memory order (ignored)
  * @retval 返回之前的值 / Returns the previous value (0 or 1)
  */
+#if !defined(__clang__)
 __attribute__((weak, used)) bool __atomic_test_and_set(volatile void *ptr, int memorder)
 {
   UNUSED(memorder);
@@ -207,5 +208,6 @@ __attribute__((weak, used)) bool __atomic_test_and_set(volatile void *ptr, int m
 
   return old_val;
 }
+#endif
 
 #endif
