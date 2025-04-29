@@ -89,7 +89,7 @@ class STM32SPI : public SPI
       op.MarkAsRunning();
       if (op.type == OperationRW::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ErrorCode::OK;
     }
@@ -110,7 +110,7 @@ class STM32SPI : public SPI
 
       if (op.type == OperationRW::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
 
       return ans;
@@ -173,7 +173,7 @@ class STM32SPI : public SPI
       op.MarkAsRunning();
       if (op.type == OperationRW::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ErrorCode::OK;
     }
@@ -195,7 +195,7 @@ class STM32SPI : public SPI
 
       if (op.type == OperationRW::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
 
       return ans;
@@ -230,7 +230,7 @@ class STM32SPI : public SPI
       op.MarkAsRunning();
       if (op.type == OperationRW::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ErrorCode::OK;
     }
@@ -249,7 +249,7 @@ class STM32SPI : public SPI
 
       if (op.type == OperationRW::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
 
       return ans;
