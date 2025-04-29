@@ -169,6 +169,34 @@ class STM32Flash : public Flash
     const uint8_t* src = reinterpret_cast<const uint8_t*>(data.addr_);
     size_t written = 0;
 
+#if defined(STM32H7) || defined(STM32H5)
+    alignas(32) uint32_t flash_word_buffer[8] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                                                 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                                                 0xFFFFFFFFu, 0xFFFFFFFFu};
+    while (written < data.size_)
+    {
+      size_t chunk_size = std::min<size_t>(min_write_size_, data.size_ - written);
+
+      std::memcpy(flash_word_buffer, src + written, chunk_size);
+
+      if (memcmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
+                 chunk_size) == 0)
+      {
+        written += chunk_size;
+        continue;
+      }
+
+      if (HAL_FLASH_Program(program_type_, addr + written,
+                            reinterpret_cast<uint32_t>(flash_word_buffer)) != HAL_OK)
+      {
+        HAL_FLASH_Lock();
+        return ErrorCode::FAILED;
+      }
+
+      written += chunk_size;
+    }
+
+#else
     while (written < data.size_)
     {
       size_t chunk_size = std::min<size_t>(min_write_size_, data.size_ - written);
@@ -191,6 +219,7 @@ class STM32Flash : public Flash
 
       written += chunk_size;
     }
+#endif
 
     HAL_FLASH_Lock();
     return ErrorCode::OK;
@@ -229,7 +258,7 @@ class STM32Flash : public Flash
 #elif defined(FLASH_TYPEPROGRAM_DOUBLEWORD)
     return 8;
 #elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
-    return 32;
+    return FLASH_NB_32BITWORD_IN_FLASHWORD * 4;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif
