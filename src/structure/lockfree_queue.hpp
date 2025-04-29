@@ -208,18 +208,25 @@ class LockFreeQueue
    */
   ErrorCode PushBatch(const Data *data, size_t size)
   {
-    if (EmptySize() < size)
+    auto current_tail = tail_.load(std::memory_order_relaxed);
+    auto current_head = head_.load(std::memory_order_acquire);
+
+    size_t capacity = length_ + 1;
+    size_t free_space = (current_tail >= current_head)
+                            ? (capacity - (current_tail - current_head) - 1)
+                            : (current_head - current_tail - 1);
+
+    if (free_space < size)
     {
       return ErrorCode::FULL;
     }
 
     for (size_t i = 0; i < size; ++i)
     {
-      if (Push(data[i]) != ErrorCode::OK)
-      {
-        return ErrorCode::FULL;
-      }
+      queue_handle_[(current_tail + i) % capacity] = data[i];
     }
+
+    tail_.store((current_tail + size) % capacity, std::memory_order_release);
     return ErrorCode::OK;
   }
 
@@ -231,21 +238,37 @@ class LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
    * the queue is empty
    */
-  ErrorCode PopBatch(Data *data, size_t size)
+  ErrorCode PopBatch(Data *data, size_t batch_size)
   {
-    if (Size() < size)
-    {
-      return ErrorCode::EMPTY;
-    }
+    size_t capacity = length_ + 1;
 
-    for (size_t i = 0; i < size; ++i)
+    while (true)
     {
-      if (Pop(data[i]) != ErrorCode::OK)
+      auto current_head = head_.load(std::memory_order_relaxed);
+      auto current_tail = tail_.load(std::memory_order_acquire);
+
+      size_t available = (current_tail >= current_head)
+                             ? (current_tail - current_head)
+                             : (capacity - current_head + current_tail);
+
+      if (available < batch_size)
       {
         return ErrorCode::EMPTY;
       }
+
+      for (size_t i = 0; i < batch_size; ++i)
+      {
+        data[i] = queue_handle_[(current_head + i) % capacity];
+      }
+
+      auto next_head = (current_head + batch_size) % capacity;
+
+      if (head_.compare_exchange_weak(current_head, next_head, std::memory_order_acquire,
+                                      std::memory_order_relaxed))
+      {
+        return ErrorCode::OK;
+      }
     }
-    return ErrorCode::OK;
   }
 
   /**
