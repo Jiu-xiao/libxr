@@ -77,7 +77,7 @@ class STM32I2C : public I2C
       op.MarkAsRunning();
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ErrorCode::OK;
     }
@@ -91,7 +91,7 @@ class STM32I2C : public I2C
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ans;
     }
@@ -118,7 +118,7 @@ class STM32I2C : public I2C
       op.MarkAsRunning();
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ErrorCode::OK;
     }
@@ -132,7 +132,7 @@ class STM32I2C : public I2C
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ans;
     }
@@ -161,7 +161,7 @@ class STM32I2C : public I2C
       op.MarkAsRunning();
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ErrorCode::OK;
     }
@@ -179,7 +179,7 @@ class STM32I2C : public I2C
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ans;
     }
@@ -210,7 +210,7 @@ class STM32I2C : public I2C
       op.MarkAsRunning();
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ErrorCode::OK;
     }
@@ -228,7 +228,7 @@ class STM32I2C : public I2C
       op.UpdateStatus(false, std::forward<ErrorCode>(ans));
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
-        return op.data.sem->Wait(op.data.timeout);
+        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       return ans;
     }
