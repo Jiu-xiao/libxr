@@ -8,8 +8,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cstddef>
-
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
@@ -24,16 +22,18 @@ static LibXR::LinuxTimebase libxr_linux_timebase;
 void LibXR::PlatformInit() {
   auto write_fun = [](WritePort &port) {
     static uint8_t write_buff[1024];
-    size_t size = 0;
-    port.queue_data_->PopBlock(write_buff, &size);
-    auto ans = fwrite(write_buff, 1, size, stdout);
+    WritePort::WriteInfo info;
+    if (port.queue_info_->Pop(info) != ErrorCode::OK) {
+      return ErrorCode::OK;
+    }
+
+    port.queue_data_->PopBatch(write_buff, info.size);
+    auto ans = fwrite(write_buff, 1, info.size, stdout);
 
     UNUSED(ans);
+    port.queue_info_->Pop(info);
 
-    WriteOperation op;
-    port.queue_info_->Pop(op);
-
-    port.UpdateStatus(false, ErrorCode::OK, op, size);
+    port.UpdateStatus(false, ErrorCode::OK, info.op, info.size);
 
     return ErrorCode::OK;
   };
