@@ -31,7 +31,7 @@ void LibXR::PlatformInit() {
     UNUSED(ans);
 
     WriteOperation op;
-    port.queue_op_->Pop(op);
+    port.queue_info_->Pop(op);
 
     port.UpdateStatus(false, ErrorCode::OK, op, size);
 
