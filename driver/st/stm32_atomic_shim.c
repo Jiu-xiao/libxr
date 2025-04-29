@@ -186,4 +186,26 @@ __attribute__((weak, used)) void __atomic_store_1(volatile void *ptr, uint8_t va
   __enable_irq();
 }
 
+/**
+ * @brief  模拟实现 __atomic_test_and_set 函数 / Simulate the __atomic_test_and_set
+ * function
+ * @param  ptr 指向原子标志位的指针 / Pointer to the atomic flag variable
+ * @param  memorder 内存顺序标志（忽略） / Memory order (ignored)
+ * @retval 返回之前的值 / Returns the previous value (0 or 1)
+ */
+__attribute__((weak, used)) bool __atomic_test_and_set(volatile void *ptr, int memorder)
+{
+  UNUSED(memorder);
+
+  volatile uint8_t *addr = (volatile uint8_t *)ptr;
+  bool old_val;
+
+  __disable_irq();
+  old_val = *addr;
+  *addr = 1;  // 设置为1
+  __enable_irq();
+
+  return old_val;
+}
+
 #endif
