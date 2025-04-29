@@ -643,7 +643,7 @@ class WritePort
       }
 
       queue_data_->PushBatch(reinterpret_cast<const uint8_t *>(data.addr_), data.size_);
-      queue_info_->Push(WriteInfo{std::forward<WriteOperation>(op), data.size_});
+      queue_info_->Push(WriteInfo{std::forward<WriteOperation>(op), static_cast<uint32_t>(data.size_)});
 
       auto ans = write_fun_(*this);
       if (op.type == WriteOperation::OperationType::BLOCK)

@@ -78,7 +78,7 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
 }
 
 #if defined(STM32F1)
-extern "C" void libxr_stm32_transmit_complete_check(void)
+extern "C" void STM32_USB_ISR_Handler_F1(void)
 {
   if (STM32VirtualUART::map[0] == nullptr)
   {

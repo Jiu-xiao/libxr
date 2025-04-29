@@ -23,19 +23,24 @@ webots::Robot *_libxr_webots_robot_handle = nullptr;  // NOLINT
 static float time_step = 0.0f;
 LibXR::ConditionVar *_libxr_webots_time_notify = nullptr;
 
-void LibXR::PlatformInit(webots::Robot *robot = nullptr) {  // NOLINT
-  auto write_fun = [](WritePort &port) {
+void LibXR::PlatformInit(webots::Robot *robot = nullptr)
+{  // NOLINT
+  auto write_fun = [](WritePort &port)
+  {
     static uint8_t write_buff[1024];
-    size_t size = 0;
-    port.queue_data_->PopBlock(write_buff, &size);
-    auto ans = fwrite(write_buff, 1, size, stdout);
+    WritePort::WriteInfo info;
+    if (port.queue_info_->Pop(info) != ErrorCode::OK)
+    {
+      return ErrorCode::OK;
+    }
+
+    port.queue_data_->PopBatch(write_buff, info.size);
+    auto ans = fwrite(write_buff, 1, info.size, stdout);
 
     UNUSED(ans);
+    port.queue_info_->Pop(info);
 
-    WriteOperation op;
-    port.queue_info_->Pop(op);
-
-    port.UpdateStatus(false, ErrorCode::OK, op, size);
+    port.UpdateStatus(false, ErrorCode::OK, info.op, info.size);
 
     return ErrorCode::OK;
   };
@@ -44,7 +49,8 @@ void LibXR::PlatformInit(webots::Robot *robot = nullptr) {  // NOLINT
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort &port) {
+  auto read_fun = [](ReadPort &port)
+  {
     ReadInfoBlock info;
     port.queue_block_->Pop(info);
 
@@ -62,25 +68,31 @@ void LibXR::PlatformInit(webots::Robot *robot = nullptr) {  // NOLINT
   system("stty -icanon");
   system("stty -echo");
 
-  if (robot == nullptr) {
+  if (robot == nullptr)
+  {
     _libxr_webots_robot_handle = new webots::Robot();
-  } else {
+  }
+  else
+  {
     _libxr_webots_robot_handle = robot;
   }
 
   time_step = _libxr_webots_robot_handle->getBasicTimeStep();
 
-  if (_libxr_webots_robot_handle == nullptr) {
+  if (_libxr_webots_robot_handle == nullptr)
+  {
     printf("webots robot handle is null.\n");
     exit(-1);
   }
 
   _libxr_webots_time_notify = new LibXR::ConditionVar();
 
-  auto webots_timebase_thread_fun = [](void *) {
+  auto webots_timebase_thread_fun = [](void *)
+  {
     poll(nullptr, 0, 100);
 
-    while (true) {
+    while (true)
+    {
       poll(nullptr, 0, 1);
       _libxr_webots_robot_handle->step(time_step);
       _libxr_webots_time_count++;
@@ -90,6 +102,6 @@ void LibXR::PlatformInit(webots::Robot *robot = nullptr) {  // NOLINT
 
   LibXR::Thread webots_timebase_thread;
   webots_timebase_thread.Create<void *>(
-      reinterpret_cast<void *>(0), webots_timebase_thread_fun,
-      "webots_timebase_thread", 1024, Thread::Priority::REALTIME);
+      reinterpret_cast<void *>(0), webots_timebase_thread_fun, "webots_timebase_thread",
+      1024, Thread::Priority::REALTIME);
 }
