@@ -17,8 +17,8 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
     ASSERT(false);
   }
 
-  LibXR::Timer::priority = static_cast<LibXR::Thread::Priority>(timer_pri);
-  LibXR::Timer::stack_depth = timer_stack_depth;
+  LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
+  LibXR::Timer::stack_depth_ = timer_stack_depth;
 
   uint32_t time_need_to_catch_up = Timebase::GetMilliseconds() - xTaskGetTickCount();
 
