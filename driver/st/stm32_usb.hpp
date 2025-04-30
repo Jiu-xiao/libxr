@@ -140,8 +140,7 @@ class STM32VirtualUART : public UART
   STM32VirtualUART(USBD_HandleTypeDef &usb_handle, uint8_t *tx_buffer = UserTxBufferFS,
                    uint8_t *rx_buffer = UserRxBufferFS, uint32_t rx_queue_size = 5,
                    uint32_t tx_queue_size = 5)
-      : UART(ReadPort(rx_queue_size, APP_RX_DATA_SIZE),
-             WritePort(tx_queue_size, APP_TX_DATA_SIZE)),
+      : UART(rx_queue_size, APP_RX_DATA_SIZE, tx_queue_size, APP_TX_DATA_SIZE),
         usb_handle_(&usb_handle),
         tx_buffer_(tx_buffer),
         rx_buffer_(rx_buffer)
