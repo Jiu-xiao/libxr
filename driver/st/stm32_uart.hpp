@@ -178,8 +178,7 @@ class STM32UART : public UART
 
   STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx, RawData dma_buff_tx,
             uint32_t rx_queue_size = 5, uint32_t tx_queue_size = 5)
-      : UART(ReadPort(rx_queue_size, dma_buff_rx.size_),
-             WritePort(tx_queue_size, dma_buff_tx.size_)),
+      : UART(rx_queue_size, dma_buff_rx.size_, tx_queue_size, dma_buff_tx.size_),
         dma_buff_rx_(dma_buff_rx),
         dma_buff_tx_(dma_buff_tx),
         uart_handle_(uart_handle),
