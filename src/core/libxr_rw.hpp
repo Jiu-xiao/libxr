@@ -310,6 +310,7 @@ class ReadPort
   LockFreeQueue<ReadInfoBlock> *queue_block_ = nullptr;
   BaseQueue *queue_data_ = nullptr;
   size_t read_size_ = 0;
+  Mutex mutex_;
 
   /**
    * @brief Constructs a ReadPort with queue sizes.
@@ -435,6 +436,8 @@ class ReadPort
         return ErrorCode::OK;
       }
 
+      Mutex::LockGuard lock_guard(mutex_);
+
       ReadInfoBlock block = {data, std::move(op)};
       if (queue_block_->Push(block) != ErrorCode::OK)
       {
@@ -505,6 +508,7 @@ class WritePort
   WriteFun write_fun_ = nullptr;
   LockFreeQueue<WriteInfo> *queue_info_;
   LockFreeQueue<uint8_t> *queue_data_;
+  Mutex mutex_;
   size_t write_size_ = 0;
 
   /**
@@ -637,15 +641,20 @@ class WritePort
         return ErrorCode::OK;
       }
 
+      Mutex::LockGuard lock_guard(mutex_);
+
       if (queue_data_->EmptySize() < data.size_ || queue_info_->EmptySize() < 1)
       {
         return ErrorCode::FULL;
       }
 
-      queue_data_->PushBatch(reinterpret_cast<const uint8_t *>(data.addr_), data.size_);
-      queue_info_->Push(WriteInfo{std::forward<WriteOperation>(op), static_cast<uint32_t>(data.size_)});
+      auto ans = queue_data_->PushBatch(reinterpret_cast<const uint8_t *>(data.addr_),
+                                        data.size_);
 
-      auto ans = write_fun_(*this);
+      ans = queue_info_->Push(
+          WriteInfo{std::forward<WriteOperation>(op), static_cast<uint32_t>(data.size_)});
+
+      ans = write_fun_(*this);
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
         return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);

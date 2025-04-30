@@ -53,15 +53,18 @@ class UART
 
   /**
    * @brief UART 构造函数 / UART constructor
-   * @param read_port 读取端口（默认值为 `ReadPort()`）/ Read port (default: `ReadPort()`)
-   * @param write_port 写入端口（默认值为 `WritePort()`）/ Write port (default:
-   * `WritePort()`)
+   * @param rx_queue_size 接收队列大小 / Receive queue size
+   * @param rx_buffer_size 接收缓冲区大小 / Receive buffer size
+   * @param tx_queue_size 发送队列大小 / Transmit queue size
+   * @param tx_buffer_size 发送缓冲区大小 / Transmit buffer size
    *
    * 该构造函数初始化 UART 的读取和写入端口。
    * This constructor initializes the read and write ports of the UART.
    */
-  UART(ReadPort read_port = ReadPort(), WritePort write_port = WritePort())
-      : read_port_(read_port), write_port_(write_port)
+  UART(size_t rx_queue_size, size_t rx_buffer_size, size_t tx_queue_size,
+       size_t tx_buffer_size)
+      : read_port_(rx_queue_size, rx_buffer_size),
+        write_port_(tx_queue_size, tx_buffer_size)
   {
   }
 
