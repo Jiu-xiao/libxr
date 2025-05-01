@@ -84,7 +84,8 @@ class Logger
     log_topic_.Publish(data);
 
 #if LIBXR_PRINTF_BUFFER_SIZE > 0
-    if (STDIO::write_->Writable())
+    if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(level) &&
+        STDIO::write_->Writable())
     {
       PrintToTerminal(data);
     }
@@ -156,12 +157,12 @@ class Logger
   }
 
   static inline Topic log_topic_;  ///< 日志发布主题 / Log publish topic
-  static inline bool initialized_ = false;
+  static inline std::atomic<bool> initialized_ = false;
 };
 
 }  // namespace LibXR
 
-#if LIBXR_LOG_OUTPUT >= 4
+#if LIBXR_LOG_LEVEL >= 4
 /**
  * @brief 输出调试日志 / Output debug log
  */
@@ -172,7 +173,7 @@ class Logger
 #define XR_LOG_DEBUG(...)
 #endif
 
-#if LIBXR_LOG_OUTPUT >= 3
+#if LIBXR_LOG_LEVEL >= 3
 /**
  * @brief 输出一般信息日志 / Output info log
  */
@@ -183,7 +184,7 @@ class Logger
 #define XR_LOG_INFO(...)
 #endif
 
-#if LIBXR_LOG_OUTPUT >= 2
+#if LIBXR_LOG_LEVEL >= 2
 /**
  * @brief 输出通过测试日志 / Output pass log
  */
@@ -194,7 +195,7 @@ class Logger
 #define XR_LOG_PASS(...)
 #endif
 
-#if LIBXR_LOG_OUTPUT >= 1
+#if LIBXR_LOG_LEVEL >= 1
 /**
  * @brief 输出警告日志 / Output warning log
  */
@@ -205,7 +206,7 @@ class Logger
 #define XR_LOG_WARN(...)
 #endif
 
-#if LIBXR_LOG_OUTPUT >= 0
+#if LIBXR_LOG_LEVEL >= 0
 /**
  * @brief 输出错误日志 / Output error log
  */
