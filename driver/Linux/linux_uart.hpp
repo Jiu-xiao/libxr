@@ -213,7 +213,9 @@ class LinuxUART : public UART
 
   static ErrorCode ReadFun(ReadPort &port)
   {
-    UNUSED(port);
+    auto uart = CONTAINER_OF(&port, LinuxUART, write_port_);
+    Mutex::LockGuard guard(uart->read_mutex_);
+    port.ProcessPendingReads();
     return ErrorCode::OK;
   }
 
@@ -255,6 +257,7 @@ class LinuxUART : public UART
       if (n > 0)
       {
         read_port_.queue_data_->PushBatch(rx_buff_, n);
+        Mutex::LockGuard guard(read_mutex_);
         read_port_.ProcessPendingReads();
       }
       else
@@ -310,6 +313,7 @@ class LinuxUART : public UART
   uint8_t *tx_buff_ = nullptr;
   size_t buff_size_ = 0;
   Semaphore write_sem_;
+  Mutex read_mutex_;
 };
 
 }  // namespace LibXR
