@@ -1,12 +1,13 @@
 #include "libxr_system.hpp"
 
 #include <bits/types/FILE.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <termios.h>
 #include <unistd.h>
+
+#include <cstddef>
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -19,30 +20,37 @@ struct timespec libxr_linux_start_time_spec;  // NOLINT
 
 static LibXR::LinuxTimebase libxr_linux_timebase;
 
-void LibXR::PlatformInit() {
-  auto write_fun = [](WritePort &port) {
+void LibXR::PlatformInit()
+{
+  auto write_fun = [](WritePort &port)
+  {
     static uint8_t write_buff[1024];
     WritePort::WriteInfo info;
-    if (port.queue_info_->Pop(info) != ErrorCode::OK) {
-      return ErrorCode::OK;
+    while (true)
+    {
+      if (port.queue_info_->Pop(info) != ErrorCode::OK)
+      {
+        return ErrorCode::OK;
+      }
+
+      port.queue_data_->PopBatch(write_buff, info.size);
+      auto ans = fwrite(write_buff, 1, info.size, stdout);
+      UNUSED(ans);
+      port.queue_info_->Pop(info);
+
+      port.UpdateStatus(false, ErrorCode::OK, info.op, info.size);
     }
-
-    port.queue_data_->PopBatch(write_buff, info.size);
-    auto ans = fwrite(write_buff, 1, info.size, stdout);
-
-    UNUSED(ans);
-    port.queue_info_->Pop(info);
-
-    port.UpdateStatus(false, ErrorCode::OK, info.op, info.size);
 
     return ErrorCode::OK;
   };
 
-  LibXR::STDIO::write_ = new LibXR::WritePort();
+  LibXR::STDIO::write_ =
+      new LibXR::WritePort(32, static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort &port) {
+  auto read_fun = [](ReadPort &port)
+  {
     ReadInfoBlock info;
     port.queue_block_->Pop(info);
 
@@ -53,15 +61,16 @@ void LibXR::PlatformInit() {
     return ErrorCode::OK;
   };
 
-  LibXR::STDIO::read_ = new LibXR::ReadPort();
+  LibXR::STDIO::read_ =
+      new LibXR::ReadPort(32, static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
 
   *LibXR::STDIO::read_ = read_fun;
 
   gettimeofday(&libxr_linux_start_time, nullptr);
   UNUSED(clock_gettime(CLOCK_REALTIME, &libxr_linux_start_time_spec));
 
-  int res = 0;
-  res = system("stty -icanon");
-  res = system("stty -echo");
-  UNUSED(res);
+  struct termios tty;
+  tcgetattr(STDIN_FILENO, &tty);           // 获取当前终端属性
+  tty.c_lflag &= ~(ICANON | ECHO);         // 禁用规范模式和回显
+  tcsetattr(STDIN_FILENO, TCSANOW, &tty);  // 立即生效
 }
