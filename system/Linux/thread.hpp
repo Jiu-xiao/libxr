@@ -2,10 +2,10 @@
 
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
+#include "logger.hpp"
 
 namespace LibXR
 {
-
 /**
  * @brief  线程管理类，封装 POSIX 线程创建和调度
  *         Thread management class encapsulating POSIX thread creation and scheduling
@@ -123,17 +123,53 @@ class Thread
 
     auto block = new ThreadBlock(function, arg, name);
 
-    pthread_create(&this->thread_handle_, &attr, block->Port, block);
+    // 优先尝试设置 SCHED_FIFO 和线程优先级
+    int min_priority = sched_get_priority_min(SCHED_FIFO);
+    int max_priority = sched_get_priority_max(SCHED_FIFO);
+    bool scheduling_set = false;
 
-    // 设定线程优先级（如果支持 `SCHED_RR`）
-    if (sched_get_priority_max(SCHED_RR) - sched_get_priority_min(SCHED_RR) >=
-        static_cast<int>(Priority::REALTIME))
+    if (max_priority - min_priority >= static_cast<int>(Priority::REALTIME))
     {
+      pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+      pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+
       struct sched_param sp;
       memset(&sp, 0, sizeof(sp));
-      sp.sched_priority = sched_get_priority_min(SCHED_RR) + static_cast<int>(priority);
-      pthread_setschedparam(pthread_self(), SCHED_RR, &sp);
+      sp.sched_priority = min_priority + static_cast<int>(priority);
+
+      if (pthread_attr_setschedparam(&attr, &sp) == 0)
+      {
+        scheduling_set = true;
+      }
+      else
+      {
+        XR_LOG_WARN("Failed to set thread priority. Falling back to default policy.");
+        pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
+        pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
+      }
     }
+    else
+    {
+      XR_LOG_WARN(
+          "SCHED_FIFO not supported or insufficient range. Using default policy.");
+      pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
+    }
+
+    // 创建线程
+    if (auto ans = pthread_create(&this->thread_handle_, &attr, block->Port, block) != 0)
+    {
+      XR_LOG_WARN("Failed to create thread: %s (%s), Falling back to default policy.",
+                  name, strerror(ans));
+      pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
+      pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
+      if (auto ans =
+              pthread_create(&this->thread_handle_, &attr, block->Port, block) != 0)
+      {
+        XR_LOG_ERROR("Failed to create thread: %s (%s)", ans);
+      }
+    }
+
+    pthread_attr_destroy(&attr);
   }
 
   /**
