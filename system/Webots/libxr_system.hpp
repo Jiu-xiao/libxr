@@ -31,7 +31,7 @@ typedef pthread_mutex_t libxr_mutex_handle;
  * @brief  信号量句柄类型定义
  *         Semaphore handle type definition
  */
-typedef sem_t libxr_semaphore_handle;
+typedef sem_t *libxr_semaphore_handle;
 
 /**
  * @brief  线程句柄类型定义
