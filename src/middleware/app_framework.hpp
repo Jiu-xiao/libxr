@@ -23,28 +23,18 @@ struct Entry
 
 /**
  * 硬件容器类 / Hardware container
- * @tparam Entries 所有设备条目类型 / All device entry types
  */
-template <typename... Entries>
 class HardwareContainer
 {
  public:
   /**
    * 构造并注册所有别名 / Construct and register aliases
+   * @param entries 硬件条目列表 / Hardware entry list
    */
+  template <typename... Entries>
   constexpr HardwareContainer(Entries&&... entries)
-      : devices_(std::forward<Entries>(entries)...)
   {
     (RegisterAliases(entries), ...);
-  }
-
-  /**
-   * 按索引获取条目 / Get entry by index
-   */
-  template <std::size_t Index>
-  auto& Get()
-  {
-    return std::get<Index>(devices_);
   }
 
   /**
@@ -115,7 +105,6 @@ class HardwareContainer
     TypeID::ID id;
   };
 
-  std::tuple<Entries...> devices_;
   mutable LibXR::List alias_list_;
 
   template <typename T>
