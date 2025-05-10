@@ -37,7 +37,7 @@ class LinuxUART : public UART
   {
     if (std::filesystem::exists(dev_path) == false)
     {
-      XR_LOG_ERROR("Cannot find UART device: {}", dev_path);
+      XR_LOG_ERROR("Cannot find UART device: %s", dev_path);
       ASSERT(false);
     }
 
@@ -213,7 +213,7 @@ class LinuxUART : public UART
 
   static ErrorCode ReadFun(ReadPort &port)
   {
-    auto uart = CONTAINER_OF(&port, LinuxUART, write_port_);
+    auto uart = CONTAINER_OF(&port, LinuxUART, read_port_);
     Mutex::LockGuard guard(uart->read_mutex_);
     port.ProcessPendingReads();
     return ErrorCode::OK;
@@ -287,7 +287,7 @@ class LinuxUART : public UART
           auto written = write(fd_, tx_buff_, info.size);
           if (written < 0)
           {
-            XR_LOG_WARN("Cannot write UART device: {}", device_path_.c_str());
+            XR_LOG_WARN("Cannot write UART device: %s", device_path_.c_str());
             connected_ = false;
           }
           info.op.UpdateStatus(false, (written == static_cast<int>(info.size))
