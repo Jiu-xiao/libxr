@@ -598,6 +598,29 @@ class Topic
   }
 
   /**
+   * @brief  在指定域中查找或创建主题
+   *         Finds or creates a topic in the specified domain
+   * 
+   * @tparam Data 数据类型 Data type
+   * @param name 话题名称 Topic name
+   * @param domain 可选的域指针 Optional domain pointer (default: nullptr)
+   * @param cache  可选的缓存标志位 Optional cache flag (default: false)
+   * @param check_length 可选的数据长度检查标志位 Optional data length check flag (default: true)
+   * @return TopicHandle 主题句柄 Topic handle
+   */
+  template <typename Data>
+  static TopicHandle FindOrCreate(const char *name, Domain *domain = nullptr,
+                                  bool cache = false, bool check_length = true)
+  {
+    auto topic = Find(name, domain);
+    if (topic == nullptr)
+    {
+      topic = CreateTopic<Data>(name, domain, cache, check_length).block_;
+    }
+    return topic;
+  }
+
+  /**
    * @brief  启用主题的缓存功能
    *         Enables caching for the topic
    */
@@ -932,11 +955,13 @@ class Topic
      * @brief  解析接收到的数据
      *         Parses received data
      * @param  data 接收到的原始数据 Received raw data
-     * @return ErrorCode 操作的错误码 Error code of the operation
+     * @return 接收到的话题数量 Received topic count
      */
-    ErrorCode ParseData(ConstRawData data)
+    size_t ParseData(ConstRawData data)
     {
       auto raw = reinterpret_cast<const uint8_t *>(data.addr_);
+
+      size_t count = 0;
 
       queue_.PushBatch(data.addr_, data.size_);
 
@@ -960,7 +985,7 @@ class Topic
         /* Not found */
         if (status_ == Status::WAIT_START)
         {
-          return ErrorCode::NOT_FOUND;
+          return count;
         }
       }
 
@@ -1007,7 +1032,7 @@ class Topic
         else
         {
           queue_.PushBatch(raw, data.size_);
-          return ErrorCode::NOT_FOUND;
+          return count;
         }
       }
 
@@ -1027,6 +1052,8 @@ class Topic
 
             Topic(current_topic_).Publish(data, data_len_);
 
+            count++;
+
             goto check_start;  // NOLINT
           }
           else
@@ -1038,20 +1065,20 @@ class Topic
         }
         else
         {
-          return ErrorCode::NOT_FOUND;
+          return count;
         }
       }
 
-      return ErrorCode::FAILED;
+      return count;
     }
 
    private:
     Status status_ =
         Status::WAIT_START;  ///< 服务器的当前解析状态 Current parsing state of the server
-    uint32_t data_len_ = 0;       ///< 当前数据长度 Current data length
-    RBTree<uint32_t> topic_map_;  ///< 主题映射表 Topic mapping table
-    BaseQueue queue_;             ///< 数据队列 Data queue
-    RawData parse_buff_;          ///< 解析数据缓冲区 Data buffer for parsing
+    uint32_t data_len_ = 0;  ///< 当前数据长度 Current data length
+    RBTree<uint32_t> topic_map_;           ///< 主题映射表 Topic mapping table
+    BaseQueue queue_;                      ///< 数据队列 Data queue
+    RawData parse_buff_;                   ///< 解析数据缓冲区 Data buffer for parsing
     TopicHandle current_topic_ = nullptr;  ///< 当前主题句柄 Current topic handle
   };
 
