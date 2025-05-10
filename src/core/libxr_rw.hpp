@@ -107,7 +107,7 @@ class Operation
           data.status = op.data.status;
           break;
         case OperationType::NONE:
-          ASSERT(false);
+          break;
       }
     }
     return *this;
@@ -137,7 +137,7 @@ class Operation
           data.status = op.data.status;
           break;
         case OperationType::NONE:
-          ASSERT(false);
+          break;
       }
     }
     return *this;
@@ -156,6 +156,8 @@ class Operation
         break;
       case OperationType::POLLING:
         data.status = op.data.status;
+        break;
+      case OperationType::NONE:
         break;
     }
   }
@@ -190,7 +192,7 @@ class Operation
         data.status = op.data.status;
         break;
       case OperationType::NONE:
-        ASSERT(false);
+        break;
     }
   }
 
@@ -214,7 +216,7 @@ class Operation
         *data.status = OperationPollingStatus::DONE;
         break;
       case OperationType::NONE:
-        ASSERT(false);
+        break;
     }
   }
 
@@ -334,7 +336,7 @@ class ReadPort
    * @return 返回队列的空闲大小（单位：字节）。
    *         Returns the empty size of the queue (in bytes).
    */
-  size_t EmptySize() { return queue_block_->EmptySize(); }
+  size_t EmptySize() { return queue_data_->EmptySize(); }
 
   /**
    * @brief 获取当前队列的已使用大小。
@@ -346,7 +348,7 @@ class ReadPort
    * @return 返回队列的已使用大小（单位：字节）。
    *         Returns the used size of the queue (in bytes).
    */
-  size_t Size() { return queue_block_->Size(); }
+  size_t Size() { return queue_data_->Size(); }
 
   /// @brief Checks if read operations are supported.
   /// @brief 检查是否支持读取操作。
