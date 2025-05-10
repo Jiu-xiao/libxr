@@ -996,8 +996,6 @@ class Topic
      */
     size_t ParseData(ConstRawData data)
     {
-      auto raw = reinterpret_cast<const uint8_t *>(data.addr_);
-
       size_t count = 0;
 
       queue_.PushBatch(data.addr_, data.size_);
