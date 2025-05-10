@@ -812,45 +812,16 @@ class Topic
   }
 
   /**
-   * @brief  转储数据到 PackedData
-   *         Dumps data into PackedData format
-   * @tparam Data 数据类型 Data type
-   * @param  data 存储数据的 PackedData 结构 PackedData structure to store data
+   * @brief 转储数据
+   *        Dump data
+   *
+   * @tparam Mode 数据大小检查模式 Size limit check mode
+   * @param data  需要转储的数据 Data to be dumped
+   * @param pack  是否打包数据 Pack data
+   * @return ErrorCode
    */
-  template <typename Data>
-  ErrorCode DumpData(PackedData<Data> &data)
-  {
-    if (block_->data_.data.addr_ == nullptr)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    ASSERT(sizeof(Data) == block_->data_.data.size_);
-
-    return DumpData<SizeLimitMode::NONE>(data, true);
-  }
-
-  /**
-   * @brief  转储数据到普通数据结构
-   *         Dumps data into a normal data structure
-   * @tparam Data 数据类型 Data type
-   * @param  data 存储数据的变量 Variable to store the data
-   */
-  template <typename Data>
-  ErrorCode DumpData(Data &data)
-  {
-    if (block_->data_.data.addr_ == nullptr)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    ASSERT(sizeof(Data) == block_->data_.data.size_);
-
-    return DumpData<SizeLimitMode::NONE>(data, false);
-  }
-
   template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpData(RawData &data, bool pack = false)
+  ErrorCode DumpData(RawData data, bool pack = false)
   {
     if (block_->data_.data.addr_ == nullptr)
     {
@@ -872,6 +843,8 @@ class Topic
       PackData(block_->data_.crc32, data, block_->data_.data);
       block_->data_.mutex.Unlock();
     }
+
+    return ErrorCode::OK;
   }
 
   static void PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
@@ -889,6 +862,44 @@ class Topic
         reinterpret_cast<uint8_t *>(reinterpret_cast<uint8_t *>(pack) + PACK_BASE_SIZE +
                                     source.size_ - sizeof(uint8_t));
     *crc8_pack = CRC8::Calculate(pack, PACK_BASE_SIZE - sizeof(uint8_t) + source.size_);
+  }
+
+  /**
+   * @brief  转储数据到 PackedData
+   *         Dumps data into PackedData format
+   * @tparam Data 数据类型 Data type
+   * @param  data 存储数据的 PackedData 结构 PackedData structure to store data
+   */
+  template <typename Data>
+  ErrorCode DumpData(PackedData<Data> &data)
+  {
+    if (block_->data_.data.addr_ == nullptr)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    ASSERT(sizeof(Data) == block_->data_.data.size_);
+
+    return DumpData<SizeLimitMode::NONE>(RawData(data), true);
+  }
+
+  /**
+   * @brief  转储数据到普通数据结构
+   *         Dumps data into a normal data structure
+   * @tparam Data 数据类型 Data type
+   * @param  data 存储数据的变量 Variable to store the data
+   */
+  template <typename Data>
+  ErrorCode DumpData(Data &data)
+  {
+    if (block_->data_.data.addr_ == nullptr)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    ASSERT(sizeof(Data) == block_->data_.data.size_);
+
+    return DumpData<SizeLimitMode::NONE>(data, false);
   }
 
   /**
