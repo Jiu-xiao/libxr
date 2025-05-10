@@ -113,6 +113,8 @@ class Topic
     const Data *operator->() const { return &(raw.data_); }
   };
 
+  static constexpr size_t PACK_BASE_SIZE = sizeof(PackedData<uint8_t>) - 1;
+
 #endif
 
   /**
@@ -816,29 +818,16 @@ class Topic
    * @param  data 存储数据的 PackedData 结构 PackedData structure to store data
    */
   template <typename Data>
-  void DumpData(PackedData<Data> &data)
+  ErrorCode DumpData(PackedData<Data> &data)
   {
-    if (block_->data_.data.addr_ != nullptr)
+    if (block_->data_.data.addr_ == nullptr)
     {
-      if (block_->data_.check_length)
-      {
-        ASSERT(sizeof(Data) == block_->data_.data.size_);
-      }
-      else
-      {
-        ASSERT(sizeof(Data) >= block_->data_.data.size_);
-      }
-
-      block_->data_.mutex.Lock();
-      data = *reinterpret_cast<Data *>(block_->data_.data.addr_);
-      block_->data_.mutex.Unlock();
-      data.raw.header.prefix = 0xa5;
-      data.raw.header.topic_name_crc32 = block_->data_.crc32;
-      data.raw.header.data_len = block_->data_.data.size_;
-      data.raw.header.pack_header_crc8 =
-          CRC8::Calculate(&data, sizeof(PackedDataHeader) - sizeof(uint8_t));
-      data.crc8_ = CRC8::Calculate(&data, sizeof(PackedData<Data>) - sizeof(uint8_t));
+      return ErrorCode::EMPTY;
     }
+
+    ASSERT(sizeof(Data) == block_->data_.data.size_);
+
+    return DumpData<SizeLimitMode::NONE>(data, true);
   }
 
   /**
@@ -848,22 +837,58 @@ class Topic
    * @param  data 存储数据的变量 Variable to store the data
    */
   template <typename Data>
-  void DumpData(Data &data)
+  ErrorCode DumpData(Data &data)
   {
-    if (block_->data_.data.addr_ != nullptr)
+    if (block_->data_.data.addr_ == nullptr)
     {
-      if (block_->data_.check_length)
-      {
-        ASSERT(sizeof(Data) == block_->data_.data.size_);
-      }
-      else
-      {
-        ASSERT(sizeof(Data) >= block_->data_.data.size_);
-      }
+      return ErrorCode::EMPTY;
+    }
+
+    ASSERT(sizeof(Data) == block_->data_.data.size_);
+
+    return DumpData<SizeLimitMode::NONE>(data, false);
+  }
+
+  template <SizeLimitMode Mode = SizeLimitMode::MORE>
+  ErrorCode DumpData(RawData &data, bool pack = false)
+  {
+    if (block_->data_.data.addr_ == nullptr)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    if (!pack)
+    {
+      Assert::SizeLimitCheck<Mode>(block_->data_.data.size_, data.size_);
       block_->data_.mutex.Lock();
-      data = *reinterpret_cast<Data *>(block_->data_.data.addr_);
+      memcpy(data.addr_, block_->data_.data.addr_, block_->data_.data.size_);
       block_->data_.mutex.Unlock();
     }
+    else
+    {
+      Assert::SizeLimitCheck<Mode>(PACK_BASE_SIZE + block_->data_.data.size_, data.size_);
+
+      block_->data_.mutex.Lock();
+      PackData(block_->data_.crc32, data, block_->data_.data);
+      block_->data_.mutex.Unlock();
+    }
+  }
+
+  static void PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
+  {
+    PackedData<uint8_t> *pack = reinterpret_cast<PackedData<uint8_t> *>(buffer.addr_);
+
+    memcpy(&pack->raw.data_, source.addr_, source.size_);
+
+    pack->raw.header.prefix = 0xa5;
+    pack->raw.header.topic_name_crc32 = topic_name_crc32;
+    pack->raw.header.data_len = source.size_;
+    pack->raw.header.pack_header_crc8 =
+        CRC8::Calculate(&pack->raw, sizeof(PackedDataHeader) - sizeof(uint8_t));
+    uint8_t *crc8_pack =
+        reinterpret_cast<uint8_t *>(reinterpret_cast<uint8_t *>(pack) + PACK_BASE_SIZE +
+                                    source.size_ - sizeof(uint8_t));
+    *crc8_pack = CRC8::Calculate(pack, PACK_BASE_SIZE - sizeof(uint8_t) + source.size_);
   }
 
   /**
@@ -936,7 +961,7 @@ class Topic
           queue_(1, buffer_length)
     {
       /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
-      ASSERT(buffer_length >= sizeof(PackedData<uint8_t>));
+      ASSERT(buffer_length >= PACK_BASE_SIZE);
       parse_buff_.size_ = buffer_length;
       parse_buff_.addr_ = new uint8_t[buffer_length];
     }
