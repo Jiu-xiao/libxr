@@ -251,6 +251,7 @@ class LinuxUART : public UART
         {
           SetConfig(config_);
           XR_LOG_PASS("Reopen UART device: %s", device_path_.c_str());
+          connected_ = true;
         }
       }
       auto n = read(fd_, rx_buff_, buff_size_);
