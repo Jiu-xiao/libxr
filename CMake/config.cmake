@@ -51,12 +51,6 @@ else()
   endif()
 endif()
 
-if(LIBXR_PRINTF_TIMEOUT)
-  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_TIMEOUT=${LIBXR_PRINTF_TIMEOUT})
-else()
-  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_TIMEOUT=10)
-endif()
-
 if(NOT LIBXR_LOG_LEVEL)
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_LOG_LEVEL=4)
 else()
