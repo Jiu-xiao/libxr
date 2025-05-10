@@ -340,12 +340,6 @@ class EulerAngle
 {
  public:
   Scalar data_[3];  ///< 存储欧拉角的数组。Array storing Euler angles.
-  Scalar &roll_ =
-      data_[0];  ///< 绕 X 轴旋转角度 (翻滚角)。Rotation about the X-axis (roll).
-  Scalar &pitch_ =
-      data_[1];  ///< 绕 Y 轴旋转角度 (俯仰角)。Rotation about the Y-axis (pitch).
-  Scalar &yaw_ =
-      data_[2];  ///< 绕 Z 轴旋转角度 (偏航角)。Rotation about the Z-axis (yaw).
 
   /// @brief 默认构造函数，初始化所有角度为零。Default constructor initializing all angles
   /// to zero.
@@ -371,7 +365,11 @@ class EulerAngle
    * @brief 拷贝构造函数。Copy constructor.
    * @param p 另一个 EulerAngle 对象。Another EulerAngle object.
    */
-  EulerAngle(const EulerAngle &p) : data_{p.roll_, p.pitch_, p.yaw_} {}
+  EulerAngle(const EulerAngle &p) : data_{p.data_[0], p.data_[1], p.data_[2]} {}
+
+  const Scalar &Roll() const { return data_[0]; }
+  const Scalar &Pitch() const { return data_[1]; }
+  const Scalar &Yaw() const { return data_[2]; }
 
   /**
    * @brief 通过 3 元素数组构造欧拉角对象。Constructs an Euler angle object using a
@@ -424,8 +422,8 @@ class EulerAngle
 
   Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixZYX() const
   {
-    Scalar ca = std::cos(yaw_), cb = std::cos(pitch_), cc = std::cos(roll_);
-    Scalar sa = std::sin(yaw_), sb = std::sin(pitch_), sc = std::sin(roll_);
+    Scalar ca = std::cos(Yaw()), cb = std::cos(Pitch()), cc = std::cos(Roll());
+    Scalar sa = std::sin(Yaw()), sb = std::sin(Pitch()), sc = std::sin(Roll());
 
     return (Eigen::Matrix<Scalar, 3, 3>() << ca * cb, ca * sb * sc - cc * sa,
             sa * sc + ca * cc * sb, cb * sa, ca * cc + sa * sb * sc,
@@ -435,8 +433,8 @@ class EulerAngle
 
   Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixZXY() const
   {
-    Scalar ca = std::cos(yaw_), cb = std::cos(roll_), cc = std::cos(pitch_);
-    Scalar sa = std::sin(yaw_), sb = std::sin(roll_), sc = std::sin(pitch_);
+    Scalar ca = std::cos(Yaw()), cb = std::cos(Roll()), cc = std::cos(Pitch());
+    Scalar sa = std::sin(Yaw()), sb = std::sin(Roll()), sc = std::sin(Pitch());
 
     return (Eigen::Matrix<Scalar, 3, 3>() << ca * cc - sa * sb * sc, -cb * sa,
             ca * sc + cc * sa * sb, cc * sa + ca * sb * sc, ca * cb,
@@ -446,8 +444,8 @@ class EulerAngle
 
   Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixYXZ() const
   {
-    Scalar ca = std::cos(pitch_), cb = std::cos(roll_), cc = std::cos(yaw_);
-    Scalar sa = std::sin(pitch_), sb = std::sin(roll_), sc = std::sin(yaw_);
+    Scalar ca = std::cos(Pitch()), cb = std::cos(Roll()), cc = std::cos(Yaw());
+    Scalar sa = std::sin(Pitch()), sb = std::sin(Roll()), sc = std::sin(Yaw());
 
     return (Eigen::Matrix<Scalar, 3, 3>() << ca * cc + sa * sb * sc,
             cc * sa * sb - ca * sc, cb * sa, cb * sc, cb * cc, -sb,
@@ -457,8 +455,8 @@ class EulerAngle
 
   Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixYZX() const
   {
-    Scalar ca = std::cos(pitch_), cb = std::cos(yaw_), cc = std::cos(roll_);
-    Scalar sa = std::sin(pitch_), sb = std::sin(yaw_), sc = std::sin(roll_);
+    Scalar ca = std::cos(Pitch()), cb = std::cos(Yaw()), cc = std::cos(Roll());
+    Scalar sa = std::sin(Pitch()), sb = std::sin(Yaw()), sc = std::sin(Roll());
 
     return (Eigen::Matrix<Scalar, 3, 3>() << ca * cb, sa * sc - ca * cc * sb,
             cc * sa + ca * sb * sc, sb, cb * cc, -cb * sc, -cb * sa,
@@ -468,8 +466,8 @@ class EulerAngle
 
   Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixXYZ() const
   {
-    Scalar ca = std::cos(roll_), cb = std::cos(pitch_), cc = std::cos(yaw_);
-    Scalar sa = std::sin(roll_), sb = std::sin(pitch_), sc = std::sin(yaw_);
+    Scalar ca = std::cos(Roll()), cb = std::cos(Pitch()), cc = std::cos(Yaw());
+    Scalar sa = std::sin(Roll()), sb = std::sin(Pitch()), sc = std::sin(Yaw());
 
     return (Eigen::Matrix<Scalar, 3, 3>() << cb * cc, -cb * sc, sb,
             ca * sc + cc * sa * sb, ca * cc - sa * sb * sc, -cb * sa,
@@ -479,8 +477,8 @@ class EulerAngle
 
   Eigen::Matrix<Scalar, 3, 3> ToRotationMatrixXZY() const
   {
-    Scalar ca = std::cos(roll_), cb = std::cos(yaw_), cc = std::cos(pitch_);
-    Scalar sa = std::sin(roll_), sb = std::sin(yaw_), sc = std::sin(pitch_);
+    Scalar ca = std::cos(Roll()), cb = std::cos(Yaw()), cc = std::cos(Pitch());
+    Scalar sa = std::sin(Roll()), sb = std::sin(Yaw()), sc = std::sin(Pitch());
 
     return (Eigen::Matrix<Scalar, 3, 3>() << cb * cc, -sb, cb * sc,
             sa * sc + ca * cc * sb, ca * cb, ca * sb * sc - cc * sa,
@@ -492,44 +490,44 @@ class EulerAngle
 
 #if 0
   Eigen::Quaternion<Scalar> ToQuaternionXYZ() const {
-    Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd rollAngle(Roll(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(Pitch(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(Yaw(), Eigen::Vector3d::UnitZ());
     return rollAngle * pitchAngle * yawAngle;
   }
 
   Eigen::Quaternion<Scalar> ToQuaternionXZY() const {
-    Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
-    Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd rollAngle(Roll(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd yawAngle(Yaw(), Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd pitchAngle(Pitch(), Eigen::Vector3d::UnitY());
     return rollAngle * yawAngle * pitchAngle;
   }
 
   Eigen::Quaternion<Scalar> ToQuaternionYXZ() const {
-    Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd pitchAngle(Pitch(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd rollAngle(Roll(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd yawAngle(Yaw(), Eigen::Vector3d::UnitZ());
     return pitchAngle * rollAngle * yawAngle;
   }
 
   Eigen::Quaternion<Scalar> ToQuaternionYZX() const {
-    Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
-    Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(Pitch(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(Yaw(), Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd rollAngle(Roll(), Eigen::Vector3d::UnitX());
     return pitchAngle * yawAngle * rollAngle;
   }
 
   Eigen::Quaternion<Scalar> ToQuaternionZXY() const {
-    Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
-    Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(Yaw(), Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd rollAngle(Roll(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(Pitch(), Eigen::Vector3d::UnitY());
     return yawAngle * rollAngle * pitchAngle;
   }
 
   Eigen::Quaternion<Scalar> ToQuaternionZYX() const {
-    Eigen::AngleAxisd yawAngle(yaw_, Eigen::Vector3d::UnitZ());
-    Eigen::AngleAxisd pitchAngle(pitch_, Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd rollAngle(roll_, Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd yawAngle(Yaw(), Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd pitchAngle(Pitch(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd rollAngle(Roll(), Eigen::Vector3d::UnitX());
     return yawAngle * pitchAngle * rollAngle;
   }
 #endif
