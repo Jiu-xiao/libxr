@@ -23,6 +23,6 @@ target_link_libraries(
 
 target_include_directories(
     test
-    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>/test
+    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/Eigen
 )
