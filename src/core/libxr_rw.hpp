@@ -715,8 +715,7 @@ class STDIO
       return -1;
     }
 
-    static LibXR::Semaphore sem;  // NOLINT
-    static LibXR::Mutex mutex;    // NOLINT
+    static LibXR::Mutex mutex;  // NOLINT
 
     LibXR::Mutex::LockGuard lock_guard(mutex);
 
@@ -738,7 +737,7 @@ class STDIO
     ConstRawData data = {reinterpret_cast<const uint8_t *>(STDIO::printf_buff_),
                          static_cast<size_t>(len)};
 
-    static WriteOperation op(sem, LIBXR_PRINTF_TIMEOUT);  // NOLINT
+    static WriteOperation op;  // NOLINT
     return static_cast<int>(STDIO::write_->operator()(data, op));
 #else
     UNUSED(fmt);
