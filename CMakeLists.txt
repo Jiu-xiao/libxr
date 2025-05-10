@@ -13,6 +13,8 @@ else()
   add_library(${PROJECT_NAME} STATIC)
 endif()
 
+add_compile_options(-Wno-psabi)
+
 include(CMake/config.cmake)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
