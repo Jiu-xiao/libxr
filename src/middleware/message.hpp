@@ -35,12 +35,12 @@ class Topic
   struct Block
   {
     uint32_t max_length;  ///< 数据的最大长度。Maximum length of data.
-    uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex mutex;     ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;  ///< 存储的数据。Stored data.
-    bool cache;  ///< 是否启用数据缓存。Indicates whether data caching is enabled.
+    uint32_t crc32;       ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
+    Mutex mutex;          ///< 线程同步互斥锁。Mutex for thread synchronization.
+    RawData data;         ///< 存储的数据。Stored data.
+    bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
-    List subers;  ///< 订阅者列表。List of subscribers.
+    List subers;        ///< 订阅者列表。List of subscribers.
   };
 #ifndef __DOXYGEN__
   /**
@@ -52,7 +52,7 @@ class Topic
     uint8_t prefix;  ///< 数据包前缀（固定为 0xA5）。Packet prefix (fixed at 0xA5).
     uint32_t
         topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint32_t data_len : 24;  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
+    uint32_t data_len : 24;    ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
   };
 
@@ -199,7 +199,7 @@ class Topic
    */
   struct SyncBlock : public SuberBlock
   {
-    RawData buff;  ///< 存储的数据缓冲区。Data buffer.
+    RawData buff;   ///< 存储的数据缓冲区。Data buffer.
     Semaphore sem;  ///< 信号量，用于同步等待数据。Semaphore for data synchronization.
   };
 
@@ -600,12 +600,13 @@ class Topic
   /**
    * @brief  在指定域中查找或创建主题
    *         Finds or creates a topic in the specified domain
-   * 
+   *
    * @tparam Data 数据类型 Data type
    * @param name 话题名称 Topic name
    * @param domain 可选的域指针 Optional domain pointer (default: nullptr)
    * @param cache  可选的缓存标志位 Optional cache flag (default: false)
-   * @param check_length 可选的数据长度检查标志位 Optional data length check flag (default: true)
+   * @param check_length 可选的数据长度检查标志位 Optional data length check flag
+   * (default: true)
    * @return TopicHandle 主题句柄 Topic handle
    */
   template <typename Data>
@@ -992,21 +993,13 @@ class Topic
       /* 2. Get topic info */
       if (status_ == Status::WAIT_TOPIC)
       {
-        /* Check size&crc*/
+        /* Check size&crc */
         if (queue_.Size() >= sizeof(PackedDataHeader))
         {
-          queue_.PeekBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
+          queue_.PopBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
           if (CRC8::Verify(parse_buff_.addr_, sizeof(PackedDataHeader)))
           {
             auto header = reinterpret_cast<PackedDataHeader *>(parse_buff_.addr_);
-            /* Check buffer size */
-            if (header->data_len >= queue_.EmptySize())
-            {
-              queue_.PopBatch(nullptr, sizeof(PackedDataHeader));
-              status_ = Status::WAIT_START;
-              goto check_start;  // NOLINT
-            }
-
             /* Find topic */
             auto node = topic_map_.Search<TopicHandle>(header->topic_name_crc32);
             if (node)
@@ -1017,21 +1010,18 @@ class Topic
             }
             else
             {
-              queue_.PopBatch(nullptr, sizeof(PackedDataHeader));
               status_ = Status::WAIT_START;
               goto check_start;  // NOLINT
             }
           }
           else
           {
-            queue_.PopBatch(nullptr, sizeof(PackedDataHeader));
             status_ = Status::WAIT_START;
             goto check_start;  // NOLINT
           }
         }
         else
         {
-          queue_.PushBatch(raw, data.size_);
           return count;
         }
       }
@@ -1039,10 +1029,11 @@ class Topic
       if (status_ == Status::WAIT_DATA_CRC)
       {
         /* Check size&crc */
-        if (queue_.Size() > data_len_ + sizeof(PackedDataHeader))
+        if (queue_.Size() >= data_len_ + sizeof(uint8_t))
         {
-          queue_.PopBatch(parse_buff_.addr_,
-                          data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t));
+          uint8_t *data =
+              reinterpret_cast<uint8_t *>(parse_buff_.addr_) + sizeof(PackedDataHeader);
+          queue_.PopBatch(data, data_len_ + sizeof(uint8_t));
           if (CRC8::Verify(parse_buff_.addr_,
                            data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t)))
           {
@@ -1058,8 +1049,6 @@ class Topic
           }
           else
           {
-            queue_.PopBatch(nullptr,
-                            data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t));
             goto check_start;  // NOLINT
           }
         }
