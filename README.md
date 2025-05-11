@@ -33,15 +33,16 @@ Want to be the best embedded framework
 3. The minimum Non-blocking delay is 1us, minimum blocking delay is 1ms.
 4. All unused functions will not be linked.
 
-| `System`      | Thread | Timer | Semaphore | Mutex | Signal | ConditionVar | Queue | ASync |
-| ------------- | ------ | ----- | --------- | ----- | ------ | ------------ | ----- | ----- |
-| None          | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
-| FreeRTOS      | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
-| RT-Thread     | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
-| ThreadX       | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
-| PX5           | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
-| Linux         | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
-| Webots(Linux) | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
+| `System`                  | Thread | Timer | Semaphore | Mutex | Signal | ConditionVar | Queue | ASync |
+| ------------------------- | ------ | ----- | --------- | ----- | ------ | ------------ | ----- | ----- |
+| None                      | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
+| FreeRTOS                  | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
+| Linux                     | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
+| Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
+| WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
+| RT-Thread                 | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
+| ThreadX                   | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
+| PX5                       | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
 
 ## Data structure
 

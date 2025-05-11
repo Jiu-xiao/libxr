@@ -28,7 +28,7 @@ endif()
 
 add_compile_definitions(LIBXR_SYSTEM ${LIBXR_SYSTEM})
 
-if("${LIBXR_SYSTEM}" STREQUAL "None")
+if("${LIBXR_SYSTEM}" STREQUAL "None" OR "${LIBXR_SYSTEM}" STREQUAL "WebAsm")
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_NOT_SUPPORT_MUTI_THREAD=1)
   message("Not support multi thread.")
 endif()

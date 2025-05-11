@@ -906,7 +906,10 @@ class Terminal
           return;
         case ReadOperation::OperationPollingStatus::DONE:
           buff.size_ = term->read_->read_size_;
-          term->Parse(buff);
+          if (buff.size_ > 0)
+          {
+            term->Parse(buff);
+          }
           buff.size_ = LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
           (*term->read_)(buff, op);
           return;
