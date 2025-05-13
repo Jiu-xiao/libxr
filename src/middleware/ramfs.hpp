@@ -529,7 +529,7 @@ class RamFS
     typedef struct
     {
       ArgType arg;
-      typeof(exec) exec_fun;
+      decltype(exec) exec_fun;
     } FileBlock;
 
     File file;
