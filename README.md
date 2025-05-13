@@ -40,9 +40,15 @@ Want to be the best embedded framework
 | Linux                     | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
 | Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
 | WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅      | ✅            | ✅     | ✅     |
-| RT-Thread                 | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
-| ThreadX                   | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
-| PX5                       | ❌      | ❌     | ❌         | ❌     | ❌      | ❌            | ❌     | ❌     |
+
+### Compatibility Requirements for Target RTOS
+
+* Per-thread notify bits (e.g. xTaskNotify equivalent)
+* Allow setting notifications from ISR (xTaskNotifyFromISR)
+* Supports binary semaphores (usable as mutex)
+* Supports semaphore **give and take** from ISR (xSemaphoreGiveFromISR, xSemaphoreTakeFromISR)
+* Queue APIs are safe to use in ISR context (e.g. xQueueSendFromISR, xQueueReceiveFromISR)
+* Supports task wakeup/yield from ISR (portYIELD_FROM_ISR or automatic scheduling)
 
 ## Data structure
 
