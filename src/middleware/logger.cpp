@@ -31,7 +31,7 @@ void Logger::Init()
     }
   };
 
-  auto log_cb = LibXR::Callback<LibXR::RawData &>::Create(log_cb_fun, log_topic);
+  auto log_cb = LibXR::Topic::Callback::Create(log_cb_fun, log_topic);
   log_topic.RegisterCallback(log_cb);
 #endif
 

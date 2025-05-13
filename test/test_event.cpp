@@ -5,7 +5,7 @@
 void test_event() {
   static int event_arg = 0;
 
-  auto event_cb = LibXR::Callback<uint32_t>::Create(
+  auto event_cb = LibXR::Event::Callback::Create(
       [](bool in_isr, int *arg, uint32_t event) {
         UNUSED(in_isr);
         *arg = *arg + 1;

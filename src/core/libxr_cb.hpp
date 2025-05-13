@@ -212,6 +212,15 @@ class Callback
     }
   }
 
+  /**
+   * @brief 检查回调是否为空。
+   *        Checks if the callback is empty.
+   * 
+   * @return true 
+   * @return false 
+   */
+  bool Empty() const { return cb_block_ == nullptr || cb_fun_ == nullptr; }
+
  private:
   /**
    * @brief 私有构造函数，仅用于内部创建回调实例。

@@ -17,6 +17,8 @@ namespace LibXR
 class Event
 {
  public:
+  using Callback = LibXR::Callback<uint32_t>;
+
   /**
    * @brief 构造函数，初始化用于存储事件的红黑树。 Constructs an Event object with an
    * empty red-black tree for event storage.
@@ -33,7 +35,7 @@ class Event
    * @param cb 事件触发时执行的回调函数。 The callback function to be executed when the
    * event occurs.
    */
-  void Register(uint32_t event, const Callback<uint32_t> &cb)
+  void Register(uint32_t event, const Callback &cb)
   {
     auto list = rbt_.Search<List>(event);
 
@@ -122,7 +124,7 @@ class Event
       block->target->ActiveFromCallback(block->event, in_isr);
     };
 
-    auto cb = Callback<uint32_t>::Create(bind_fun, block);
+    auto cb = Callback::Create(bind_fun, block);
 
     sources.Register(source_event, cb);
   }
@@ -135,7 +137,7 @@ class Event
   struct Block
   {
     uint32_t event;  ///< 与该回调关联的事件 ID。 Event ID associated with this callback.
-    Callback<uint32_t>
+    Callback
         cb;  ///< 关联该事件的回调函数。 Callback function associated with this event.
   };
 

@@ -9,7 +9,7 @@ ASync::ASync(size_t stack_depth, Thread::Priority priority) {
   UNUSED(priority);
 }
 
-ErrorCode ASync::AssignJob(Callback<ASync *> job) {
+ErrorCode ASync::AssignJob(Callback job) {
   if (status_ == Status::BUSY) {
     return ErrorCode::BUSY;
   }

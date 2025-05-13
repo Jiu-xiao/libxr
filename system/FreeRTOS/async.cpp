@@ -8,7 +8,7 @@ ASync::ASync(size_t stack_depth, Thread::Priority priority) {
   thread_handle_.Create(this, ThreadFun, "async_job", stack_depth, priority);
 }
 
-ErrorCode ASync::AssignJob(Callback<ASync *> job) {
+ErrorCode ASync::AssignJob(Callback job) {
   if (status_ == Status::BUSY) {
     return ErrorCode::BUSY;
   }
