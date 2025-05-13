@@ -280,7 +280,11 @@ class LinuxUART : public UART
         continue;
       }
 
-      write_sem_.Wait();
+      if (write_sem_.Wait() != ErrorCode::OK)
+      {
+        continue;
+      }
+      
       if (write_port_.queue_info_->Pop(info) == ErrorCode::OK)
       {
         if (write_port_.queue_data_->PopBatch(tx_buff_, info.size) == ErrorCode::OK)

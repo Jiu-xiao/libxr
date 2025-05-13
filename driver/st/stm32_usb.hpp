@@ -133,7 +133,7 @@ class STM32VirtualUART : public UART
     }
     else
     {
-      return ErrorCode::EMPTY;
+      return ErrorCode::OK;
     }
   }
 

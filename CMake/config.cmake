@@ -26,7 +26,7 @@ if(NOT LIBXR_DRIVER)
   message(WARNING "No driver select.")
 endif()
 
-add_compile_definitions(LIBXR_SYSTEM ${LIBXR_SYSTEM})
+target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_SYSTEM_${LIBXR_SYSTEM}=True)
 
 if("${LIBXR_SYSTEM}" STREQUAL "None" OR "${LIBXR_SYSTEM}" STREQUAL "WebAsm")
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_NOT_SUPPORT_MUTI_THREAD=1)
