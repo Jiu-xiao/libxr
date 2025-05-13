@@ -1,9 +1,7 @@
 #include "libxr.hpp"
 #include "timer.hpp"
 
-#if configTICK_RATE_HZ != 1000
-#error "configTICK_RATE_HZ != 1000"
-#endif
+static_assert(configTICK_RATE_HZ == 1000, "configTICK_RATE_HZ must be 1000");
 
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
