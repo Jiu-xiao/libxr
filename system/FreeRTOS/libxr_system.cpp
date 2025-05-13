@@ -28,6 +28,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
   }
 }
 
+#ifndef ESP_PLATFORM
 void *operator new(std::size_t size)
 {
   if (size == 0)
@@ -45,3 +46,4 @@ void operator delete(void *ptr, std::size_t size) noexcept
   UNUSED(size);
   vPortFree(ptr);
 }
+#endif
