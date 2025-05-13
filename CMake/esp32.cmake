@@ -1,0 +1,22 @@
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# LibXR
+set(LIBXR_SYSTEM FreeRTOS)
+set(LIBXR_DRIVER esp)
+
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_BINARY_DIR}/libxr_build)
+
+target_compile_definitions(xr PUBLIC ESP_PLATFORM=1)
+
+target_include_directories(
+  xr
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+  PUBLIC $<TARGET_PROPERTY:idf::freertos,INTERFACE_INCLUDE_DIRECTORIES>
+  PUBLIC $<TARGET_PROPERTY:idf::driver,INTERFACE_INCLUDE_DIRECTORIES>
+  PUBLIC $<TARGET_PROPERTY:idf::esp_timer,INTERFACE_INCLUDE_DIRECTORIES>
+  PUBLIC $ENV{IDF_PATH}/components/freertos/include/freertos
+  PUBLIC $ENV{IDF_PATH}/components/freertos/FreeRTOS-Kernel/include/freertos
+)
+
+target_link_libraries(${COMPONENT_LIB} PUBLIC xr)
