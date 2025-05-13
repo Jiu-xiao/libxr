@@ -84,7 +84,7 @@ Only have virtual class, you can find the drivers in `Platfrom` folder. For exam
 | `Network` | TCP/UDP | WIFI | Bluetooth | SmartConfig |
 | --------- | ------- | ---- | --------- | ----------- |
 | Linux     | ❌       | ❌    | ❌         | ❌           |
-| ESP32     | ❌       | ❌    | ❌         | ❌           |
+| ESP32     | ❌       | ✅    | ❌         | ❌           |
 | STM32     | ❌       | ❌    | ❌         | ❌           |
 
 ## Utils
