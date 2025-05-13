@@ -84,16 +84,11 @@ class HardwareContainer
     return result;
   }
 
- private:
-  struct AliasEntry
-  {
-    const char* name;
-    void* object;
-    TypeID::ID id;
-  };
-
-  mutable LibXR::List alias_list_;
-
+  /**
+   * @brief 注册一个硬件条目
+   * @brief Register a hardware entry
+   *
+   */
   template <typename T>
   void Register(Entry<T>&& entry)
   {
@@ -104,6 +99,16 @@ class HardwareContainer
       alias_list_.Add(*node);
     }
   }
+
+ private:
+  struct AliasEntry
+  {
+    const char* name;
+    void* object;
+    TypeID::ID id;
+  };
+
+  mutable LibXR::List alias_list_;
 };
 
 /**
