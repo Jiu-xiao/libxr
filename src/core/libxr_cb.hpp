@@ -42,7 +42,8 @@ class CallbackBlock
    *        The bound argument value.
    */
   template <typename FunType, typename ArgT>
-  CallbackBlock(FunType fun, ArgT &&arg) : fun_(fun), arg_(std::forward<ArgT>(arg))
+  CallbackBlock(FunType &&fun, ArgT &&arg)
+      : fun_(std::forward<FunType>(fun)), arg_(std::forward<ArgT>(arg))
   {
   }
 
@@ -215,9 +216,9 @@ class Callback
   /**
    * @brief 检查回调是否为空。
    *        Checks if the callback is empty.
-   * 
-   * @return true 
-   * @return false 
+   *
+   * @return true
+   * @return false
    */
   bool Empty() const { return cb_block_ == nullptr || cb_fun_ == nullptr; }
 
