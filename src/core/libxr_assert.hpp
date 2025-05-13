@@ -39,6 +39,7 @@ namespace LibXR
 class Assert
 {
  public:
+  using Callback = LibXR::Callback<const char *, uint32_t>;
   /**
    * @brief 注册致命错误的回调函数。
    *        Registers a fatal error callback.
@@ -48,7 +49,7 @@ class Assert
    *
    * @param cb 要注册的回调函数。 The callback function to be registered.
    */
-  static void RegisterFatalErrorCB(const LibXR::Callback<const char *, uint32_t> &cb)
+  static void RegisterFatalErrorCB(const Callback &cb)
   {
     libxr_fatal_error_callback_ = cb;
   }
@@ -63,7 +64,7 @@ class Assert
    * @param cb 要注册的回调函数（通过移动语义传递）。 The callback function to be
    * registered.
    */
-  static void RegisterFatalErrorCB(LibXR::Callback<const char *, uint32_t> &&cb)
+  static void RegisterFatalErrorCB(Callback &&cb)
   {
     libxr_fatal_error_callback_ = std::move(cb);
   }
@@ -124,13 +125,10 @@ class Assert
 #endif
 
   /**
-   * @brief 存储已注册的致命错误回调函数。
-   *        Stores the registered fatal error callback.
+   * @brief 已注册的致命错误回调函数。
+   *        Registered fatal error callback.
    *
-   * 该可选回调函数用于处理致命错误，如果未注册，则为空。
-   * This optional callback is used to handle fatal errors if registered.
    */
-  static inline std::optional<LibXR::Callback<const char *, uint32_t>>
-      libxr_fatal_error_callback_;
+  static inline Callback libxr_fatal_error_callback_;
 };
 }  // namespace LibXR

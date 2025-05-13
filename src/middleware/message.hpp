@@ -458,6 +458,8 @@ class Topic
     }
   };
 
+  using Callback = LibXR::Callback<LibXR::RawData &>;
+
   /**
    * @struct CallbackBlock
    * @brief  回调订阅块，继承自 SuberBlock
@@ -465,7 +467,7 @@ class Topic
    */
   typedef struct CallbackBlock : public SuberBlock
   {
-    Callback<RawData &> cb;  ///< 订阅的回调函数 Subscribed callback function
+    Callback cb;  ///< 订阅的回调函数 Subscribed callback function
   } CallbackBlock;
 
   /**
@@ -473,7 +475,7 @@ class Topic
    *         Registers a callback function
    * @param  cb 需要注册的回调函数 The callback function to register
    */
-  void RegisterCallback(Callback<RawData &> &cb)
+  void RegisterCallback(Callback &cb)
   {
     CallbackBlock block;
     block.cb = cb;

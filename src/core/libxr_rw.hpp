@@ -28,6 +28,8 @@ template <typename... Args>
 class Operation
 {
  public:
+  using Callback = LibXR::Callback<Args...>;
+
   /// Operation types.
   /// 操作类型。
   enum class OperationType : uint8_t
@@ -68,7 +70,7 @@ class Operation
    * @brief 构造基于回调的操作。
    * @param callback Callback function reference.
    */
-  Operation(Callback<Args...> &callback) : type(OperationType::CALLBACK)
+  Operation(Callback &callback) : type(OperationType::CALLBACK)
   {
     data.callback = &callback;
   }
@@ -245,7 +247,7 @@ class Operation
   /// 存储不同操作类型的数据。
   union
   {
-    Callback<Args...> *callback;
+    Callback *callback;
     struct
     {
       Semaphore *sem;
