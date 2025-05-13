@@ -11,7 +11,7 @@ void test_message()
   LibXR::LockQueue<double> msg_queue(10);
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
 
-  auto msg_cb = LibXR::Callback<LibXR::RawData &>::Create(
+  auto msg_cb = LibXR::Topic::Callback::Create(
       [](bool, void *, LibXR::RawData &data)
       { msg[3] = *reinterpret_cast<const double *>(data.addr_); },
       reinterpret_cast<void *>(0));

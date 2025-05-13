@@ -48,10 +48,12 @@ class GPIO
     Pull pull;            ///< GPIO 上拉/下拉配置。GPIO pull-up/pull-down configuration.
   };
 
+  using Callback = LibXR::Callback<>;
+
   /**
    * @brief GPIO 事件的回调函数。Callback function for GPIO events.
    */
-  Callback<> callback_;
+  Callback callback_;
 
   /**
    * @brief 默认构造函数。Default constructor.
@@ -97,7 +99,7 @@ class GPIO
    * @param callback 要注册的回调函数。The callback function to register.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
-  ErrorCode RegisterCallback(Callback<> callback)
+  ErrorCode RegisterCallback(Callback callback)
   {
     callback_ = callback;
     return ErrorCode::OK;

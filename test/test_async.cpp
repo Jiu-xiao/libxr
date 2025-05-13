@@ -4,7 +4,7 @@
 
 void test_async() {
   int async_arg = 0;
-  auto async_cb = LibXR::Callback<LibXR::ASync *>::Create(
+  auto async_cb = LibXR::ASync::Callback::Create(
       [](bool in_isr, int *arg, LibXR::ASync *async) {
         UNUSED(async);
         ASSERT(in_isr == false);
