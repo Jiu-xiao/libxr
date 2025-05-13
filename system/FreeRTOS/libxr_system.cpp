@@ -1,6 +1,10 @@
 #include "libxr.hpp"
 #include "timer.hpp"
 
+#if configTICK_RATE_HZ != 1000
+#error "configTICK_RATE_HZ != 1000"
+#endif
+
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
   static volatile const char *task_name = pcTaskName;
