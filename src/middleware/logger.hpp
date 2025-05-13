@@ -70,10 +70,9 @@ class Logger
   {
     const char* color = GetColor(data.level);
 
-    STDIO::Printf("%s[%u][%s](%s:%u) %s%s\r\n", color,
-                  static_cast<uint32_t>(data.timestamp), LevelToString(data.level),
-                  data.file, data.line, data.message,
-                  LIBXR_FORMAT_STR[static_cast<uint8_t>(Format::RESET)]);
+    STDIO::Printf("%s%s [%u](%s:%u) %s%s\r\n", color, LevelToString(data.level),
+                  static_cast<uint32_t>(data.timestamp), data.file, data.line,
+                  data.message, LIBXR_FORMAT_STR[static_cast<uint8_t>(Format::RESET)]);
   }
 
   /**
@@ -111,15 +110,15 @@ class Logger
     switch (level)
     {
       case LogLevel::XR_LOG_LEVEL_DEBUG:
-        return "DEBUG";
+        return "D";
       case LogLevel::XR_LOG_LEVEL_INFO:
-        return "INFO";
+        return "I";
       case LogLevel::XR_LOG_LEVEL_PASS:
-        return "PASS";
+        return "P";
       case LogLevel::XR_LOG_LEVEL_WARN:
-        return "WARN";
+        return "W";
       case LogLevel::XR_LOG_LEVEL_ERROR:
-        return "ERROR";
+        return "E";
       default:
         return "UNKNOWN";
     }
