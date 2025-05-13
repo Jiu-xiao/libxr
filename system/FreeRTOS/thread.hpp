@@ -69,7 +69,7 @@ class Thread
     class ThreadBlock
     {
      public:
-      ThreadBlock(typeof(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
+      ThreadBlock(decltype(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
 
       static void Port(void *arg)
       {
@@ -77,7 +77,7 @@ class Thread
         block->fun_(block->arg_);
       }
 
-      typeof(function) fun_;
+      decltype(function) fun_;
       ArgType arg_;
     };
 
