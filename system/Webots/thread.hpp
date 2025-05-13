@@ -92,7 +92,7 @@ class Thread
        * @param  arg 线程参数 Thread argument
        * @param  name 线程名称 Thread name
        */
-      ThreadBlock(typeof(function) fun, ArgType arg, const char *name)
+      ThreadBlock(decltype(function) fun, ArgType arg, const char *name)
           : fun_(fun),
             arg_(arg),
             name_(reinterpret_cast<char *>(malloc(strlen(name) + 1)))
@@ -117,7 +117,7 @@ class Thread
         return static_cast<void *>(nullptr);
       }
 
-      typeof(function) fun_;  ///< 线程执行的函数 Function executed by the thread
+      decltype(function) fun_;  ///< 线程执行的函数 Function executed by the thread
       ArgType arg_;           ///< 线程函数的参数 Argument passed to the thread function
       char *name_;            ///< 线程名称 Thread name
     };
