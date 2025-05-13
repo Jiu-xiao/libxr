@@ -34,7 +34,7 @@ class HardwareContainer
   template <typename... Entries>
   constexpr HardwareContainer(Entries&&... entries)
   {
-    (RegisterAliases(entries), ...);
+    (Register(std::forward<Entries>(entries)), ...);
   }
 
   /**
@@ -84,19 +84,6 @@ class HardwareContainer
     return result;
   }
 
-  /**
-   * @brief 手动注册一个设备条目（及其别名）
-   * @brief Manually register a device entry and its aliases
-   *
-   * @tparam T 设备类型 / Device type
-   * @param entry 设备条目 / Device entry with aliases
-   */
-  template <typename T>
-  void Register(const Entry<T>& entry)
-  {
-    RegisterAliases(entry);
-  }
-
  private:
   struct AliasEntry
   {
@@ -108,7 +95,7 @@ class HardwareContainer
   mutable LibXR::List alias_list_;
 
   template <typename T>
-  void RegisterAliases(const Entry<T>& entry)
+  void Register(Entry<T>&& entry)
   {
     for (const auto& alias : entry.aliases)
     {

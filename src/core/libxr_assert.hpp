@@ -55,18 +55,17 @@ class Assert
   }
 
   /**
-   * @brief 通过移动语义注册致命错误的回调函数。
-   *        Registers a fatal error callback with move semantics.
+   * @brief 注册致命错误的回调函数。
+   *        Registers a fatal error callback
    *
-   * 该重载版本允许通过移动回调对象，提高回调函数注册的效率。
-   * This overload allows for efficient callback assignment by moving the callback object.
-   *
-   * @param cb 要注册的回调函数（通过移动语义传递）。 The callback function to be
+   * @tparam T 回调对象类型 The type of the callback object.
+   * @param cb 要注册的回调函数。The callback function to be
    * registered.
    */
-  static void RegisterFatalErrorCB(Callback &&cb)
+  template <typename T>
+  static void RegisterFatalErrorCB(T &&cb)
   {
-    libxr_fatal_error_callback_ = std::move(cb);
+    libxr_fatal_error_callback_ = std::forward<T>(cb);
   }
 
 #ifdef LIBXR_DEBUG_BUILD
