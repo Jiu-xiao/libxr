@@ -60,6 +60,15 @@ class CAN
     Callback cb;
   } Filter;
 
+  /**
+   * @brief 注册回调函数 Registers a callback function
+   *
+   * @param cb 回调函数 Callback function
+   * @param type 帧类型 Frame type
+   * @param mode 过滤器模式 Filter mode
+   * @param start_id_mask 起始ID/掩码 Starting ID/mask
+   * @param end_id_match 结束ID/匹配 Ending ID/match
+   */
   void Register(Callback cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
                 uint32_t start_id_mask = 0, uint32_t end_id_match = UINT32_MAX)
   {
@@ -70,6 +79,14 @@ class CAN
     subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
   }
 
+  /**
+   * @brief 添加 CAN 消息到系统 (Adds a CAN message to the system).
+   * @param pack 经典 CAN 消息包 (The classic CAN message packet).
+   * @return 操作结果 (ErrorCode indicating success or failure).
+   */
+  virtual ErrorCode AddMessage(const ClassicPack &pack) = 0;
+
+ protected:
   void OnMessage(const ClassicPack &pack, bool in_isr)
   {
     ASSERT(pack.type < Type::TYPE_NUM);
@@ -95,13 +112,6 @@ class CAN
           return ErrorCode::OK;
         });
   }
-
-  /**
-   * @brief 添加 CAN 消息到系统 (Adds a CAN message to the system).
-   * @param pack 经典 CAN 消息包 (The classic CAN message packet).
-   * @return 操作结果 (ErrorCode indicating success or failure).
-   */
-  virtual ErrorCode AddMessage(const ClassicPack &pack) = 0;
 
  private:
   LockFreeList subscriber_list_[static_cast<uint8_t>(Type::TYPE_NUM)];
@@ -150,6 +160,15 @@ class FDCAN : public CAN
     CallbackFD cb;
   } Filter;
 
+  /**
+   * @brief 注册回调函数 Registers a callback function
+   *
+   * @param cb 回调函数 Callback function
+   * @param type 帧类型 Frame type
+   * @param mode 过滤器模式 Filter mode
+   * @param start_id_mask 起始ID/掩码 Starting ID/mask
+   * @param end_id_match 结束ID/匹配 Ending ID/match
+   */
   void Register(CallbackFD cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
                 uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX)
   {
@@ -159,6 +178,14 @@ class FDCAN : public CAN
     subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);
   }
 
+  /**
+   * @brief 添加 FD CAN 消息到系统 (Adds an FD CAN message to the system).
+   * @param pack FD CAN 消息包 (The FD CAN message packet).
+   * @return 操作结果 (ErrorCode indicating success or failure).
+   */
+  virtual ErrorCode AddMessage(const FDPack &pack) = 0;
+
+ protected:
   void OnMessage(const FDPack &pack, bool in_isr)
   {
     ASSERT(pack.type < Type::TYPE_NUM);
@@ -173,13 +200,6 @@ class FDCAN : public CAN
           return ErrorCode::OK;
         });
   }
-
-  /**
-   * @brief 添加 FD CAN 消息到系统 (Adds an FD CAN message to the system).
-   * @param pack FD CAN 消息包 (The FD CAN message packet).
-   * @return 操作结果 (ErrorCode indicating success or failure).
-   */
-  virtual ErrorCode AddMessage(const FDPack &pack) = 0;
 
  private:
   LockFreeList subscriber_list_fd_[static_cast<uint8_t>(Type::TYPE_NUM)];

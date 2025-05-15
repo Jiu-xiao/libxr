@@ -2,7 +2,7 @@
 
 #include "main.h"
 
-#ifndef HAL_FDCAN_MODULE_ENABLED
+#ifdef HAL_FDCAN_MODULE_ENABLED
 
 #ifdef FDCAN
 #undef FDCAN
@@ -161,6 +161,9 @@ class STM32CANFD : public FDCAN
         header.IdType = FDCAN_EXTENDED_ID;
         header.TxFrameType = FDCAN_REMOTE_FRAME;
         break;
+      default:
+        ASSERT(false);
+        return ErrorCode::FAILED;
     }
 
     header.DataLength = FDCAN_DLC_BYTES_8;
@@ -172,7 +175,7 @@ class STM32CANFD : public FDCAN
 
     if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
     {
-      Mutex::LockGuard guard(tx_queue_mutex_);
+      Mutex::LockGuard guard(write_mutex_);
       if (tx_queue_.Push(pack) != ErrorCode::OK)
       {
         return ErrorCode::FAILED;
@@ -221,6 +224,9 @@ class STM32CANFD : public FDCAN
         header.IdType = FDCAN_EXTENDED_ID;
         header.TxFrameType = FDCAN_REMOTE_FRAME;
         break;
+      default:
+        ASSERT(false);
+        return ErrorCode::FAILED;
     }
 
     if (pack.len <= 8)
@@ -252,7 +258,7 @@ class STM32CANFD : public FDCAN
 
     if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
     {
-      Mutex::LockGuard guard(tx_queue_mutex_fd_);
+      Mutex::LockGuard guard(write_mutex_fd_);
       if (tx_queue_fd_.Push(pack) != ErrorCode::OK)
       {
         return ErrorCode::FAILED;
@@ -360,6 +366,9 @@ class STM32CANFD : public FDCAN
           tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
           tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
           break;
+        default:
+          ASSERT(false);
+          return;
       }
       tx_buff_.header.DataLength = tx_buff_.pack_fd.len;
       tx_buff_.header.FDFormat = FDCAN_FD_CAN;
@@ -399,6 +408,9 @@ class STM32CANFD : public FDCAN
           tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
           tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
           break;
+        default:
+          ASSERT(false);
+          return;
       }
       tx_buff_.header.DataLength = 8;
       tx_buff_.header.FDFormat = FDCAN_CLASSIC_CAN;
