@@ -1,6 +1,6 @@
 #include "stm32_usb.hpp"
 
-#ifdef HAL_PCD_MODULE_ENABLED
+#if defined(HAL_PCD_MODULE_ENABLED) && !defined(LIBXR_SYSTEM_ThreadX)
 
 using namespace LibXR;
 
