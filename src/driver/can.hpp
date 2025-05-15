@@ -21,7 +21,8 @@ class CAN
     STANDARD = 0,         ///< 标准 CAN 消息 (Standard CAN message).
     EXTENDED = 1,         ///< 扩展 CAN 消息 (Extended CAN message).
     REMOTE_STANDARD = 2,  ///< 远程标准 CAN 消息 (Remote standard CAN message).
-    REMOTE_EXTENDED = 3   ///< 远程扩展 CAN 消息 (Remote extended CAN message).
+    REMOTE_EXTENDED = 3,  ///< 远程扩展 CAN 消息 (Remote extended CAN message).
+    TYPE_NUM
   };
 
   /**
@@ -30,10 +31,7 @@ class CAN
    * @param name_tp CAN 消息的主题名称 (Topic name for CAN messages).
    * @param domain 可选的通信域 (Optional domain for message communication).
    */
-  CAN(const char *name_tp = "can", Topic::Domain *domain = nullptr)
-      : classic_tp_(name_tp, sizeof(ClassicPack), domain, false, true)
-  {
-  }
+  CAN() {}
 
   /**
    * @brief 经典 CAN 消息结构 (Structure representing a classic CAN message).
@@ -45,7 +43,58 @@ class CAN
     uint8_t data[8];  ///< 数据载荷，最大 8 字节 (Data payload, max 8 bytes).
   } ClassicPack;
 
-  Topic classic_tp_;  ///< 经典 CAN 消息的主题 (Topic for classic CAN messages).
+  using Callback = LibXR::Callback<const ClassicPack &>;
+
+  enum class FilterMode : uint8_t
+  {
+    ID_MASK = 0,
+    ID_RANGE = 1
+  };
+
+  typedef struct
+  {
+    FilterMode mode;
+    uint32_t start_id_mask;
+    uint32_t end_id_match;
+    Type type;
+    Callback cb;
+  } Filter;
+
+  void Register(Callback cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
+                uint32_t start_id_mask = 0, uint32_t end_id_match = UINT32_MAX)
+  {
+    ASSERT(type < Type::TYPE_NUM);
+
+    auto node =
+        new LockFreeList::Node<Filter>({mode, start_id_mask, end_id_match, type, cb});
+    subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
+  }
+
+  void OnMessage(const ClassicPack &pack, bool in_isr)
+  {
+    ASSERT(pack.type < Type::TYPE_NUM);
+    subscriber_list_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
+        [&](Filter &node)
+        {
+          switch (node.mode)
+          {
+            case FilterMode::ID_MASK:
+              if ((pack.id & node.start_id_mask) == node.end_id_match)
+              {
+                node.cb.Run(in_isr, pack);
+              }
+              break;
+            case FilterMode::ID_RANGE:
+              if (pack.id >= node.start_id_mask && pack.id <= node.end_id_match)
+              {
+                node.cb.Run(in_isr, pack);
+              }
+              break;
+          }
+
+          return ErrorCode::OK;
+        });
+  }
 
   /**
    * @brief 添加 CAN 消息到系统 (Adds a CAN message to the system).
@@ -53,6 +102,9 @@ class CAN
    * @return 操作结果 (ErrorCode indicating success or failure).
    */
   virtual ErrorCode AddMessage(const ClassicPack &pack) = 0;
+
+ private:
+  LockFreeList subscriber_list_[static_cast<uint8_t>(Type::TYPE_NUM)];
 };
 
 /**
@@ -70,11 +122,7 @@ class FDCAN : public CAN
    * @param name_fd_tp FD CAN 消息的主题名称 (Topic name for FD CAN messages).
    * @param domain 可选的通信域 (Optional domain for message communication).
    */
-  FDCAN(const char *name_tp = "can", const char *name_fd_tp = "fdcan",
-        Topic::Domain *domain = nullptr)
-      : CAN(name_tp, domain), fd_tp_(name_fd_tp, sizeof(FDPack), domain, false, false)
-  {
-  }
+  FDCAN() {}
 
   /**
    * @brief FD CAN 消息结构 (Structure representing an FD CAN message).
@@ -88,6 +136,43 @@ class FDCAN : public CAN
   } FDPack;
 
   using CAN::AddMessage;
+  using CAN::FilterMode;
+  using CAN::OnMessage;
+
+  using CallbackFD = LibXR::Callback<const FDPack &>;
+
+  typedef struct
+  {
+    FilterMode mode;
+    uint32_t start_id_mask;
+    uint32_t end_id_mask;
+    Type type;
+    CallbackFD cb;
+  } Filter;
+
+  void Register(CallbackFD cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
+                uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX)
+  {
+    ASSERT(type < Type::TYPE_NUM);
+    auto node =
+        new LockFreeList::Node<Filter>({mode, start_id_mask, end_id_mask, type, cb});
+    subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);
+  }
+
+  void OnMessage(const FDPack &pack, bool in_isr)
+  {
+    ASSERT(pack.type < Type::TYPE_NUM);
+    subscriber_list_fd_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
+        [&](Filter &node)
+        {
+          if (pack.id >= node.start_id_mask && pack.id <= node.end_id_mask)
+          {
+            node.cb.Run(in_isr, pack);
+          }
+
+          return ErrorCode::OK;
+        });
+  }
 
   /**
    * @brief 添加 FD CAN 消息到系统 (Adds an FD CAN message to the system).
@@ -96,7 +181,8 @@ class FDCAN : public CAN
    */
   virtual ErrorCode AddMessage(const FDPack &pack) = 0;
 
-  Topic fd_tp_;  ///< FD CAN 消息的主题 (Topic for FD CAN messages).
+ private:
+  LockFreeList subscriber_list_fd_[static_cast<uint8_t>(Type::TYPE_NUM)];
 };
 
 }  // namespace LibXR

@@ -33,13 +33,13 @@ Want to be the best embedded framework
 3. The minimum Non-blocking delay is 1us, minimum blocking delay is 1ms.
 4. All unused functions will not be linked.
 
-| `System`                  | Thread | Timer | Semaphore | Mutex | ConditionVar | Queue | ASync |
-| ------------------------- | ------ | ----- | --------- | ----- | ------------ | ----- | ----- |
-| None                      | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| FreeRTOS                  | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| Linux                     | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
+| `System`                  | Thread | Timer | Semaphore | Mutex | Queue | ASync |
+| ------------------------- | ------ | ----- | --------- | ----- | ----- | ----- |
+| None                      | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| FreeRTOS                  | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| Linux                     | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 
 ### Compatibility Requirements for Target RTOS
 
@@ -55,9 +55,9 @@ Want to be the best embedded framework
 1. Except list and tree, the memory of other data structures are determined before construction.
 2. No blocking APIs except Queue. If you want one, use Semaphore.
 
-| `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList | ChunkQueue |
-| ----------- | ---- | ----- | ------ | ------------- | ------------ | ---------- |
-|             | ✅    | ✅     | ✅      | ✅             | ✅            | ✅          |
+| `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
+| ----------- | ---- | ----- | ------ | ------------- | ------------ |
+|             | ✅    | ✅     | ✅      | ✅             | ✅            |
 
 ## Middleware
 

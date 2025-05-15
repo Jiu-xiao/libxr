@@ -6,10 +6,10 @@
 #include <cstdio>
 #include <utility>
 
-#include "chunk_queue.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
+#include "queue.hpp"
 #include "lockfree_queue.hpp"
 #include "mutex.hpp"
 #include "semaphore.hpp"

@@ -42,14 +42,10 @@ class STM32CAN : public CAN
    * @brief STM32CAN 类，用于处理 STM32 系统的 CAN 通道。 Provides handling for STM32 CAN
    *
    * @param hcan STM32CAN对象 CAN object
-   * @param tp_name 话题名称 Topic name
    * @param queue_size 发送队列大小 Send queue size
    */
-  STM32CAN(CAN_HandleTypeDef* hcan, const char* tp_name, uint32_t queue_size)
-      : CAN(tp_name),
-        hcan_(hcan),
-        id_(STM32_CAN_GetID(hcan->Instance)),
-        tx_queue_(queue_size)
+  STM32CAN(CAN_HandleTypeDef* hcan, uint32_t queue_size)
+      : CAN(), hcan_(hcan), id_(STM32_CAN_GetID(hcan->Instance)), tx_queue_(queue_size)
   {
     map[id_] = this;
     Init();
@@ -169,6 +165,9 @@ class STM32CAN : public CAN
         txHeader.IDE = CAN_ID_EXT;
         txHeader.RTR = CAN_RTR_REMOTE;
         break;
+      default:
+        ASSERT(false);
+        return ErrorCode::FAILED;
     }
     txHeader.StdId = (pack.type == Type::EXTENDED) ? 0 : pack.id;
     txHeader.ExtId = (pack.type == Type::EXTENDED) ? pack.id : 0;
@@ -176,6 +175,7 @@ class STM32CAN : public CAN
 
     if (HAL_CAN_AddTxMessage(hcan_, &txHeader, pack.data, &txMailbox) != HAL_OK)
     {
+      Mutex::LockGuard lock(write_mutex_);
       if (tx_queue_.Push(pack) != ErrorCode::OK)
       {
         return ErrorCode::FULL;
@@ -196,6 +196,10 @@ class STM32CAN : public CAN
     {
       if (rx_buff_.header.IDE == CAN_ID_STD)
       {
+        if (rx_buff_.header.StdId == 2046)
+        {
+          __NOP();
+        }
         rx_buff_.pack.id = rx_buff_.header.StdId;
         rx_buff_.pack.type = Type::STANDARD;
       }
@@ -216,8 +220,7 @@ class STM32CAN : public CAN
           rx_buff_.pack.type = Type::REMOTE_EXTENDED;
         }
       }
-
-      classic_tp_.PublishFromCallback(rx_buff_.pack, true);
+      OnMessage(rx_buff_.pack, true);
     }
   }
 
@@ -248,6 +251,9 @@ class STM32CAN : public CAN
           tx_buff_.header.IDE = CAN_ID_EXT;
           tx_buff_.header.RTR = CAN_RTR_REMOTE;
           break;
+        default:
+          ASSERT(false);
+          return;
       }
       tx_buff_.header.StdId =
           (tx_buff_.pack.type == Type::EXTENDED) ? 0 : tx_buff_.pack.id;
@@ -283,6 +289,7 @@ class STM32CAN : public CAN
   } tx_buff_;
 
   uint32_t txMailbox;
+  Mutex write_mutex_;
 };
 }  // namespace LibXR
 

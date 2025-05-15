@@ -32,13 +32,13 @@
 3. 最小非阻塞延迟为 1 微秒，最小阻塞延迟为 1 毫秒。
 4. 所有未使用函数不会被链接进最终程序。
 
-| `System`                  | Thread | Timer | Semaphore | Mutex | ConditionVar | Queue | ASync |
-| ------------------------- | ------ | ----- | --------- | ----- | ------------ | ----- | ----- |
-| None                      | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| FreeRTOS                  | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| Linux                     | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
-| WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅            | ✅     | ✅     |
+| `System` | Thread | Timer | Semaphore | Mutex | Queue | ASync |
+| -------- | ------ | ----- | --------- | ----- | ----- | ----- ||
+| None                      | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| FreeRTOS                  | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| Linux                     | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 
 ### ✅ 目标 RTOS 的兼容性要求
 
@@ -54,9 +54,9 @@
 1. 除了链表和红黑树外，其它数据结构内存大小在构造前确定。
 2. 除队列外，所有数据结构均不包含阻塞 API；若需要阻塞功能，请使用信号量。
 
-| `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList | ChunkQueue |
-| ----------- | ---- | ----- | ------ | ------------- | ------------ | ---------- |
-|             | ✅    | ✅     | ✅      | ✅             | ✅            | ✅          |
+| `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
+| ----------- | ---- | ----- | ------ | ------------- | ------------ |
+|             | ✅    | ✅     | ✅      | ✅             | ✅            |
 
 ## 中间件支持
 

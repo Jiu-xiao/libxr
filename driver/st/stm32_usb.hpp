@@ -88,7 +88,7 @@ class STM32VirtualUART : public UART
 
       if (ans != ErrorCode::OK)
       {
-        return ErrorCode::EMPTY;
+        return ErrorCode::OK;
       }
 
       if (port.queue_data_->PopBatch(uart->tx_buffer_, info.size) != ErrorCode::OK)
