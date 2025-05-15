@@ -87,18 +87,6 @@ class LockQueue
   }
 
   /**
-   * @brief  从回调函数中弹出数据
-   *         Pops data from the queue in a callback function
-   * @param  in_isr 是否在中断上下文中 Whether the function is called from an ISR
-   * @return 操作结果 ErrorCode indicating success or failure
-   */
-  ErrorCode PopFromCallback(bool in_isr)
-  {
-    UNUSED(in_isr);
-    return Pop();
-  }
-
-  /**
    * @brief  带超时的弹出数据
    *         Pops data from the queue with timeout
    * @param  timeout 超时时间（毫秒） Timeout in milliseconds
@@ -120,24 +108,6 @@ class LockQueue
   }
 
   /**
-   * @brief  覆盖队列中的数据
-   *         Overwrites data in the queue
-   * @param  data 要覆盖写入的数据 The data to overwrite
-   * @return 操作结果 ErrorCode indicating success or failure
-   */
-  ErrorCode Overwrite(const Data &data)
-  {
-    mutex_.Lock();
-    while (semaphore_handle_.Wait(0) != ErrorCode::OK)
-    {
-    }
-    auto ans = queue_handle_.Overwrite(data);
-    semaphore_handle_.Post();
-    mutex_.Unlock();
-    return ans;
-  }
-
-  /**
    * @brief  从回调函数中推送数据
    *         Pushes data into the queue from a callback function
    * @param  data 要推送的数据 The data to be pushed
@@ -148,73 +118,6 @@ class LockQueue
   {
     UNUSED(in_isr);
     return Push(data);
-  }
-
-  /**
-   * @brief  从回调函数中弹出数据
-   *         Pops data from the queue in a callback function
-   * @param  data 存储弹出数据的变量 Variable to store the popped data
-   * @param  in_isr 是否在中断上下文中 Whether the function is called from an ISR
-   * @return 操作结果 ErrorCode indicating success or failure
-   */
-  ErrorCode PopFromCallback(Data &data, bool in_isr)
-  {
-    UNUSED(in_isr);
-    return Pop(data, 0);
-  }
-
-  /**
-   * @brief  从回调函数中覆盖数据
-   *         Overwrites data in the queue from a callback function
-   * @param  data 要覆盖写入的数据 The data to overwrite
-   * @param  in_isr 是否在中断上下文中 Whether the function is called from an ISR
-   * @return 操作结果 ErrorCode indicating success or failure
-   */
-  ErrorCode OverwriteFromCallback(const Data &data, bool in_isr)
-  {
-    UNUSED(in_isr);
-    return Overwrite(data);
-  }
-
-  /**
-   * @brief  查看队列中的数据（不弹出）
-   *         Peeks at the data in the queue without popping it
-   * @param  item 存储查看数据的变量 Variable to store the peeked data
-   * @return 操作结果 ErrorCode indicating success or failure
-   */
-  ErrorCode Peek(Data &item)
-  {
-    mutex_.Lock();
-    auto ans = queue_handle_.Peek(item);
-    mutex_.Unlock();
-    return ans;
-  }
-
-  /**
-   * @brief  从回调函数中查看数据
-   *         Peeks at the data in the queue from a callback function
-   * @param  item 存储查看数据的变量 Variable to store the peeked data
-   * @param  in_isr 是否在中断上下文中 Whether the function is called from an ISR
-   * @return 操作结果 ErrorCode indicating success or failure
-   */
-  ErrorCode PeekFromCallback(Data &item, bool in_isr)
-  {
-    UNUSED(in_isr);
-    return Peek(item);
-  }
-
-  /**
-   * @brief  重置队列
-   *         Resets the queue
-   */
-  void Reset()
-  {
-    mutex_.Lock();
-    while (semaphore_handle_.Wait(0) == ErrorCode::OK)
-    {
-    };
-    queue_handle_.Reset();
-    mutex_.Unlock();
   }
 
   /**
@@ -241,30 +144,6 @@ class LockQueue
     auto ans = queue_handle_.EmptySize();
     mutex_.Unlock();
     return ans;
-  }
-
-  /**
-   * @brief  从回调函数中获取队列大小
-   *         Gets the queue size from a callback function
-   * @param  in_isr 是否在中断上下文中 Whether the function is called from an ISR
-   * @return 当前队列大小 Current queue size
-   */
-  size_t SizeFromCallback(bool in_isr)
-  {
-    UNUSED(in_isr);
-    return Size();
-  }
-
-  /**
-   * @brief  从回调函数中获取队列的剩余容量
-   *         Gets the remaining capacity of the queue from a callback function
-   * @param  in_isr 是否在中断上下文中 Whether the function is called from an ISR
-   * @return 剩余空间大小 Remaining space size
-   */
-  size_t EmptySizeFromCallback(bool in_isr)
-  {
-    UNUSED(in_isr);
-    return EmptySize();
   }
 
  private:

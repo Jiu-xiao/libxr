@@ -7,7 +7,6 @@ namespace LibXR
 typedef uint32_t libxr_mutex_handle;
 typedef uint32_t libxr_semaphore_handle;
 typedef uint32_t libxr_thread_handle;
-typedef uint32_t condition_var_handle;
 
 /**
  * @brief  平台初始化函数，执行必要的系统初始化

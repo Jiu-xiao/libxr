@@ -1,5 +1,4 @@
 void test_async();
-void test_condition_var();
 void test_crc();
 void test_float_encoder();
 void test_event();
@@ -11,7 +10,6 @@ void test_queue();
 void test_rbt();
 void test_ramfs();
 void test_semaphore();
-void test_signal();
 void test_stack();
 void test_terminal();
 void test_thread();

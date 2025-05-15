@@ -9,7 +9,6 @@ namespace LibXR
 typedef SemaphoreHandle_t libxr_mutex_handle;
 typedef SemaphoreHandle_t libxr_semaphore_handle;
 typedef TaskHandle_t libxr_thread_handle;
-typedef SemaphoreHandle_t condition_var_handle;
 
 /**
  * @brief  平台初始化函数
