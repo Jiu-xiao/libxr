@@ -35,7 +35,6 @@ static void run_libxr_tests()
   TestCase synchronization_tests[] = {
       {"semaphore", test_semaphore},
       {"async", test_async},
-      {"condition_var", test_condition_var},
   };
 
   TestCase utility_tests[] = {

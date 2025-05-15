@@ -228,44 +228,6 @@ class List
     return ErrorCode::OK;
   }
 
-  /**
-   * @brief 在回调环境中遍历链表节点，并应用回调函数。
-   *        Iterates over each node in a callback environment and applies a function.
-   *
-   * @tparam Data 存储的数据类型。
-   *             The type of stored data.
-   * @tparam Func 回调函数类型。
-   *              The callback function type.
-   * @tparam LimitMode 大小限制模式，默认为 `MORE`。
-   *                   Size limit mode, default is `MORE`.
-   * @param func 需要应用于每个节点数据的回调函数。
-   *             The callback function to be applied to each node's data.
-   * @param in_isr 指示当前是否在中断服务例程（ISR）中。
-   *               Indicates whether the function is called in an ISR.
-   * @return 返回 `ErrorCode`，指示操作是否成功。
-   *         Returns `ErrorCode`, indicating whether the operation was successful.
-   */
-  template <typename Data, typename Func, SizeLimitMode LimitMode = SizeLimitMode::MORE>
-  ErrorCode ForeachFromCallback(Func func, bool in_isr)
-  {
-    if (mutex_.TryLockInCallback(in_isr) != ErrorCode::OK)
-    {
-      return ErrorCode::BUSY;
-    }
-
-    for (auto pos = head_.next_; pos != &head_; pos = pos->next_)
-    {
-      Assert::SizeLimitCheck<LimitMode>(sizeof(Data), pos->size_);
-      if (auto res = func(static_cast<Node<Data>*>(pos)->data_); res != ErrorCode::OK)
-      {
-        mutex_.UnlockFromCallback(in_isr);
-        return res;
-      }
-    }
-    mutex_.UnlockFromCallback(in_isr);
-    return ErrorCode::OK;
-  }
-
  private:
   BaseNode head_;       ///< 链表头节点。 The head node of the list.
   LibXR::Mutex mutex_;  ///< 线程安全的互斥锁。 Thread-safe mutex.

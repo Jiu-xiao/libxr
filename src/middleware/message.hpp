@@ -642,19 +642,6 @@ class Topic
   }
 
   /**
-   * @brief  从回调函数发布数据
-   *         Publishes data from a callback function
-   * @tparam Data 数据类型 Data type
-   * @param  data 需要发布的数据 Data to be published
-   * @param  in_isr 是否在中断服务程序（ISR）中发布 Whether publishing inside an ISR
-   */
-  template <typename Data>
-  void PublishFromCallback(Data &data, bool in_isr)
-  {
-    PublishFromCallback(&data, sizeof(Data), in_isr);
-  }
-
-  /**
    * @brief  以原始地址和大小发布数据
    *         Publishes data using raw address and size
    * @param  addr 数据的地址 Address of the data
@@ -725,81 +712,6 @@ class Topic
     block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
 
     block_->data_.mutex.Unlock();
-  }
-
-  /**
-   * @brief  从回调函数发布数据
-   *         Publishes data from a callback function
-   * @param  addr 数据的地址 Address of the data
-   * @param  size 数据大小 Size of the data
-   * @param  in_isr 是否在中断服务程序（ISR）中发布 Whether publishing inside an ISR
-   */
-  void PublishFromCallback(void *addr, uint32_t size, bool in_isr)
-  {
-    if (block_->data_.mutex.TryLockInCallback(in_isr) != ErrorCode::OK)
-    {
-      return;
-    }
-
-    if (block_->data_.check_length)
-    {
-      ASSERT(size == block_->data_.max_length);
-    }
-    else
-    {
-      ASSERT(size <= block_->data_.max_length);
-    }
-
-    if (block_->data_.cache)
-    {
-      memcpy(block_->data_.data.addr_, addr, size);
-      block_->data_.data.size_ = size;
-    }
-    else
-    {
-      block_->data_.data.addr_ = addr;
-      block_->data_.data.size_ = size;
-    }
-
-    RawData data = block_->data_.data;
-
-    auto foreach_fun = [&](SuberBlock &block)
-    {
-      switch (block.type)
-      {
-        case SuberType::SYNC:
-        {
-          auto sync = reinterpret_cast<SyncBlock *>(&block);
-          memcpy(sync->buff.addr_, data.addr_, data.size_);
-          sync->sem.PostFromCallback(in_isr);
-          break;
-        }
-        case SuberType::ASYNC:
-        {
-          auto async = reinterpret_cast<ASyncBlock *>(&block);
-          memcpy(async->buff.addr_, data.addr_, data.size_);
-          async->data_ready = true;
-          break;
-        }
-        case SuberType::QUEUE:
-        {
-          auto queue_block = reinterpret_cast<QueueBlock *>(&block);
-          queue_block->fun(data, queue_block->queue, in_isr);
-          break;
-        }
-        case SuberType::CALLBACK:
-        {
-          auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
-          cb_block->cb.Run(in_isr, data);
-          break;
-        }
-      }
-      return ErrorCode::OK;
-    };
-
-    block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
-
-    block_->data_.mutex.UnlockFromCallback(in_isr);
   }
 
   /**

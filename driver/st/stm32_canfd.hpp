@@ -2,7 +2,7 @@
 
 #include "main.h"
 
-#ifdef HAL_FDCAN_MODULE_ENABLED
+#ifndef HAL_FDCAN_MODULE_ENABLED
 
 #ifdef FDCAN
 #undef FDCAN
@@ -43,11 +43,10 @@ class STM32CANFD : public FDCAN
    * CANFD
    *
    * @param hcan STM32CANFD对象 CAN object
-   * @param tp_name 话题名称 Topic name
    * @param queue_size 发送队列大小 Send queue size
    */
-  STM32CANFD(FDCAN_HandleTypeDef* hcan, const char* tp_name, uint32_t queue_size)
-      : FDCAN(tp_name),
+  STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size)
+      : FDCAN(),
         hcan_(hcan),
         id_(STM32_FDCAN_GetID(hcan->Instance)),
         tx_queue_(queue_size),
@@ -173,6 +172,7 @@ class STM32CANFD : public FDCAN
 
     if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
     {
+      Mutex::LockGuard guard(tx_queue_mutex_);
       if (tx_queue_.Push(pack) != ErrorCode::OK)
       {
         return ErrorCode::FAILED;
@@ -252,6 +252,7 @@ class STM32CANFD : public FDCAN
 
     if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
     {
+      Mutex::LockGuard guard(tx_queue_mutex_fd_);
       if (tx_queue_fd_.Push(pack) != ErrorCode::OK)
       {
         return ErrorCode::FAILED;
@@ -301,7 +302,7 @@ class STM32CANFD : public FDCAN
           }
         }
 
-        fd_tp_.PublishFromCallback(rx_buff_.pack_fd, true);
+        OnMessage(rx_buff_.pack_fd, true);
       }
       else
       {
@@ -324,7 +325,7 @@ class STM32CANFD : public FDCAN
 
         memcpy(rx_buff_.pack.data, rx_buff_.pack_fd.data, 8);
 
-        classic_tp_.PublishFromCallback(rx_buff_.pack, true);
+        OnMessage(rx_buff_.pack, true);
       }
     }
   }
@@ -420,6 +421,7 @@ class STM32CANFD : public FDCAN
   stm32_fdcan_id_t id_;
   LockFreeQueue<ClassicPack> tx_queue_;
   LockFreeQueue<FDPack> tx_queue_fd_;
+  Mutex write_mutex_, write_mutex_fd_;
   static STM32CANFD* map[STM32_FDCAN_NUMBER];  // NOLINT
 
   struct
