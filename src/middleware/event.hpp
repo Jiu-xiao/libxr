@@ -2,8 +2,7 @@
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
-#include "list.hpp"
-#include "mutex.hpp"
+#include "lockfree_list.hpp"
 #include "rbt.hpp"
 
 namespace LibXR
@@ -37,15 +36,15 @@ class Event
    */
   void Register(uint32_t event, const Callback &cb)
   {
-    auto list = rbt_.Search<List>(event);
+    auto list = rbt_.Search<LockFreeList>(event);
 
     if (!list)
     {
-      list = new RBTree<uint32_t>::Node<List>;
+      list = new RBTree<uint32_t>::Node<LockFreeList>;
       rbt_.Insert(*list, event);
     }
 
-    List::Node<Block> *node = new List::Node<Block>;
+    LockFreeList::Node<Block> *node = new LockFreeList::Node<Block>;
 
     node->data_.event = event;
     node->data_.cb = cb;
@@ -59,7 +58,7 @@ class Event
    */
   void Active(uint32_t event)
   {
-    auto list = rbt_.Search<List>(event);
+    auto list = rbt_.Search<LockFreeList>(event);
     if (!list)
     {
       return;
@@ -83,7 +82,7 @@ class Event
    */
   void ActiveFromCallback(uint32_t event, bool in_isr)
   {
-    auto list = rbt_.Search<List>(event);
+    auto list = rbt_.Search<LockFreeList>(event);
     if (!list)
     {
       return;

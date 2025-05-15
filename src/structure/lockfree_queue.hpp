@@ -14,11 +14,12 @@ namespace LibXR
  * @class LockFreeQueue
  * @brief 无锁队列实现 / Lock-free queue implementation
  *
- * 该类实现了无锁队列（Lock-Free Queue），支持多线程环境下的高效入队和出队操作，
+ * 该类实现了单生产者多消费者无锁队列（SPMC Lock-Free Queue），支持多线程环境下的高效入队和出队操作，
  * 适用于需要高并发性能的场景，如实时系统和多线程数据处理。
- * This class implements a lock-free queue that supports efficient enqueue and dequeue
- * operations in a multithreaded environment, suitable for high-concurrency applications
- * such as real-time systems and multithreaded data processing.
+ * This class implements a single-producer, multiple-consumer lock-free queue (SPMC Lock-Free Queue)
+ * that supports high-efficiency enqueue and dequeue operations in a multi-threaded environment.
+ * It is suitable for scenarios requiring high concurrency, such as real-time systems and multi-threaded
+ * data processing.
  *
  * @tparam Data 队列存储的数据类型 / The type of data stored in the queue.
  */
