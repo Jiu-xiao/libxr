@@ -2,7 +2,7 @@
 
 #include "main.h"
 
-#ifdef HAL_PCD_MODULE_ENABLED
+#if defined(HAL_PCD_MODULE_ENABLED) && !defined(LIBXR_SYSTEM_ThreadX)
 
 #ifdef UART
 #undef UART
