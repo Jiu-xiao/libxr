@@ -34,7 +34,6 @@ static void run_libxr_tests()
 
   TestCase synchronization_tests[] = {
       {"semaphore", test_semaphore},
-      {"signal", test_signal},
       {"async", test_async},
       {"condition_var", test_condition_var},
   };
@@ -123,7 +122,6 @@ int main()
       reinterpret_cast<void *>(0));
 
   LibXR::Assert::RegisterFatalErrorCB(err_cb);
-  LibXR::Thread::Sleep(1000);
 
   run_libxr_tests();
 

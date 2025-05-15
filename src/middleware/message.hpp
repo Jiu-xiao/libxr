@@ -4,14 +4,13 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "list.hpp"
 #include "lock_queue.hpp"
+#include "lockfree_list.hpp"
 #include "lockfree_queue.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"
 #include "rbt.hpp"
 #include "semaphore.hpp"
-#include "spin_lock.hpp"
 #include "thread.hpp"
 
 namespace LibXR
@@ -35,12 +34,12 @@ class Topic
   struct Block
   {
     uint32_t max_length;  ///< 数据的最大长度。Maximum length of data.
-    uint32_t crc32;       ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex mutex;          ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;         ///< 存储的数据。Stored data.
-    bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
+    uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
+    Mutex mutex;     ///< 线程同步互斥锁。Mutex for thread synchronization.
+    RawData data;  ///< 存储的数据。Stored data.
+    bool cache;  ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
-    List subers;        ///< 订阅者列表。List of subscribers.
+    LockFreeList subers;  ///< 订阅者列表。List of subscribers.
   };
 #ifndef __DOXYGEN__
   /**
@@ -52,7 +51,7 @@ class Topic
     uint8_t prefix;  ///< 数据包前缀（固定为 0xA5）。Packet prefix (fixed at 0xA5).
     uint32_t
         topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint32_t data_len : 24;    ///< 数据长度（最多 16MB）。Data length (up to 16MB).
+    uint32_t data_len : 24;  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
   };
 
@@ -88,11 +87,11 @@ class Topic
      * @param data 要赋值的数据。Data to be assigned.
      * @return 赋值后的数据。The assigned data.
      */
-    const Data &operator=(const Data &data)
+    PackedData &operator=(const Data &data)
     {
       raw.data_ = data;
       crc8_ = CRC8::Calculate(&raw, sizeof(raw));
-      return data;
+      return *this;
     }
 
     /**
@@ -141,14 +140,12 @@ class Topic
     {
       if (!domain_)
       {
-        domain_lock_.Lock();
         if (!domain_)
         {
           domain_ =
               new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b)
                                    { return static_cast<int>(a) - static_cast<int>(b); });
         }
-        domain_lock_.Unlock();
       }
 
       auto crc32 = CRC32::Calculate(name, strlen(name));
@@ -201,7 +198,7 @@ class Topic
    */
   struct SyncBlock : public SuberBlock
   {
-    RawData buff;   ///< 存储的数据缓冲区。Data buffer.
+    RawData buff;  ///< 存储的数据缓冲区。Data buffer.
     Semaphore sem;  ///< 信号量，用于同步等待数据。Semaphore for data synchronization.
   };
 
@@ -244,7 +241,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      block_ = new List::Node<SyncBlock>;
+      block_ = new LockFreeList::Node<SyncBlock>;
       block_->data_.type = SuberType::SYNC;
       block_->data_.buff = RawData(data);
       topic.block_->data_.subers.Add(*block_);
@@ -260,7 +257,7 @@ class Topic
       return block_->data_.sem.Wait(timeout);
     }
 
-    List::Node<SyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
+    LockFreeList::Node<SyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
   };
 
   /**
@@ -312,7 +309,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      block_ = new List::Node<ASyncBlock>;
+      block_ = new LockFreeList::Node<ASyncBlock>;
       block_->data_.type = SuberType::ASYNC;
       block_->data_.buff = *(new Data);
       topic.block_->data_.subers.Add(*block_);
@@ -346,7 +343,7 @@ class Topic
      */
     void StartWaiting() { block_->data_.waiting = true; }
 
-    List::Node<ASyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
+    LockFreeList::Node<ASyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
   };
 
   /**
@@ -399,7 +396,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      auto block = new List::Node<QueueBlock>;
+      auto block = new LockFreeList::Node<QueueBlock>;
       block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
       block->data_.fun = [](RawData &data, void *arg, bool in_isr)
@@ -445,7 +442,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      auto block = new List::Node<QueueBlock>;
+      auto block = new LockFreeList::Node<QueueBlock>;
       block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
       block->data_.fun = [](RawData &data, void *arg, bool in_isr)
@@ -480,7 +477,7 @@ class Topic
     CallbackBlock block;
     block.cb = cb;
     block.type = SuberType::CALLBACK;
-    auto node = new List::Node<CallbackBlock>(block);
+    auto node = new LockFreeList::Node<CallbackBlock>(block);
     block_->data_.subers.Add(*node);
   }
 
@@ -507,18 +504,10 @@ class Topic
   {
     if (!def_domain_)
     {
-      domain_lock_.Lock();
-      if (!domain_)
-      {
-        domain_ =
-            new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b)
-                                 { return static_cast<int>(a) - static_cast<int>(b); });
-      }
       if (!def_domain_)
       {
         def_domain_ = new Domain("libxr_def_domain");
       }
-      domain_lock_.Unlock();
     }
 
     if (domain == nullptr)
@@ -808,7 +797,7 @@ class Topic
       return ErrorCode::OK;
     };
 
-    block_->data_.subers.ForeachFromCallback<SuberBlock>(foreach_fun, in_isr);
+    block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
 
     block_->data_.mutex.UnlockFromCallback(in_isr);
   }
@@ -1100,10 +1089,10 @@ class Topic
    private:
     Status status_ =
         Status::WAIT_START;  ///< 服务器的当前解析状态 Current parsing state of the server
-    uint32_t data_len_ = 0;  ///< 当前数据长度 Current data length
-    RBTree<uint32_t> topic_map_;           ///< 主题映射表 Topic mapping table
-    BaseQueue queue_;                      ///< 数据队列 Data queue
-    RawData parse_buff_;                   ///< 解析数据缓冲区 Data buffer for parsing
+    uint32_t data_len_ = 0;       ///< 当前数据长度 Current data length
+    RBTree<uint32_t> topic_map_;  ///< 主题映射表 Topic mapping table
+    BaseQueue queue_;             ///< 数据队列 Data queue
+    RawData parse_buff_;          ///< 解析数据缓冲区 Data buffer for parsing
     TopicHandle current_topic_ = nullptr;  ///< 当前主题句柄 Current topic handle
   };
 
@@ -1119,12 +1108,6 @@ class Topic
    *         Red-Black Tree structure for storing different topics in the domain
    */
   static inline RBTree<uint32_t> *domain_ = nullptr;
-
-  /**
-   * @brief  主题域访问的自旋锁，确保多线程安全
-   *         SpinLock for domain access to ensure thread safety
-   */
-  static inline SpinLock domain_lock_;
 
   /**
    * @brief  默认的主题域，所有未指定域的主题都会归入此域
