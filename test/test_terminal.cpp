@@ -10,7 +10,7 @@ void test_terminal() {
   LibXR::Thread term_thread;
   term_thread.Create(&terminal, terminal.ThreadFun, "terminal", 512,
                      LibXR::Thread::Priority::MEDIUM);
-  LibXR::Thread::Sleep(10000);
+  LibXR::Thread::Sleep(1000);
   printf("\n");
   pthread_cancel(term_thread);
   pthread_join(term_thread, nullptr);

@@ -6,7 +6,7 @@
 
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "list.hpp"
+#include "lockfree_list.hpp"
 
 namespace LibXR
 {
@@ -94,7 +94,7 @@ class HardwareContainer
   {
     for (const auto& alias : entry.aliases)
     {
-      auto node = new LibXR::List::Node<AliasEntry>{
+      auto node = new LibXR::LockFreeList::Node<AliasEntry>{
           alias, static_cast<void*>(&entry.object), TypeID::GetID<T>()};
       alias_list_.Add(*node);
     }
@@ -108,7 +108,7 @@ class HardwareContainer
     TypeID::ID id;
   };
 
-  mutable LibXR::List alias_list_;
+  mutable LibXR::LockFreeList alias_list_;
 };
 
 /**
@@ -129,7 +129,7 @@ class Application
 class ApplicationManager
 {
  public:
-  LibXR::List app_list_;  ///< 模块链表 / Module list
+  LibXR::LockFreeList app_list_;  ///< 模块链表 / Module list
 
   /**
    * @brief 注册一个应用模块
@@ -139,7 +139,7 @@ class ApplicationManager
    */
   void Register(Application& app)
   {
-    auto node = new LibXR::List::Node<Application*>(&app);
+    auto node = new LibXR::LockFreeList::Node<Application*>(&app);
     app_list_.Add(*node);
   }
 
