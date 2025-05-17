@@ -1,5 +1,9 @@
 #pragma once
 
+#include "main.h"
+
+#if defined(HAL_PCD_MODULE_ENABLED) && defined(LIBXR_SYSTEM_ThreadX)
+
 #include "app_usbx_device.h"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -9,6 +13,7 @@
 #include "ux_api.h"
 #include "ux_device_class_cdc_acm.h"
 #include "ux_device_stack.h"
+#include "tx_api.h"
 
 namespace LibXR
 {
@@ -16,8 +21,8 @@ namespace LibXR
 class STM32VirtualUART : public UART
 {
  public:
-  STM32VirtualUART(ULONG tx_stack_size, UINT tx_priority, ULONG rx_stack_size,
-                   UINT rx_priority, uint32_t rx_queue_size = 5,
+  STM32VirtualUART(PCD_HandleTypeDef *hpcd, ULONG tx_stack_size, UINT tx_priority,
+                   ULONG rx_stack_size, UINT rx_priority, uint32_t rx_queue_size = 5,
                    uint32_t tx_queue_size = 5, size_t buffer_size = 512);
 
   ~STM32VirtualUART();
@@ -56,3 +61,5 @@ class STM32VirtualUART : public UART
 };
 
 }  // namespace LibXR
+
+#endif

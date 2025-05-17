@@ -1,123 +1,114 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 
 #include "libxr_def.hpp"
-#include "mutex.hpp"
-#include "queue.hpp"
-#include "semaphore.hpp"
+#include "libxr_system.hpp"
+#include "tx_api.h"
 
 namespace LibXR
 {
-
 /**
- * @brief  线程安全的锁队列类，提供同步和异步操作支持
- *         Thread-safe lock queue class with synchronous and asynchronous operation
- * support
+ * @brief  线程安全的队列实现，基于 ThreadX 消息队列
+ *         Thread-safe queue implementation based on ThreadX message queue
  * @tparam Data 队列存储的数据类型 The type of data stored in the queue
+ *
+ * @details
+ * 该类封装了 ThreadX 的 `TX_QUEUE`，提供线程安全的 Push、Pop、Peek 操作，
+ * 并支持中断服务例程（ISR）中的数据操作，确保任务间的数据同步与通信。
+ *
+ * This class wraps ThreadX's `TX_QUEUE`, providing thread-safe Push, Pop,
+ * and Peek operations. It also supports operations in Interrupt Service
+ * Routines (ISR) to ensure safe data synchronization and communication
+ * between tasks.
  */
 template <typename Data>
 class LockQueue
 {
  public:
   /**
-   * @brief  构造函数，初始化队列
-   *         Constructor to initialize the queue
-   * @param  length 队列的最大长度 Maximum length of the queue
+   * @brief  构造函数，创建指定长度的队列
+   *         Constructor that creates a queue of specified length
+   * @param  length 队列的最大长度 The maximum length of the queue
    */
-  LockQueue(size_t length) : queue_handle_(length) {}
+  LockQueue(size_t length) : LENGTH(length)
+  {
+    static_assert(sizeof(Data) % sizeof(ULONG) == 0,
+                  "Data must align to ULONG for ThreadX queue");
+
+    // 分配静态内存，单位是 ULONG，大小为 message size * length
+    queue_buffer_ = new ULONG[length * (sizeof(Data) / sizeof(ULONG))];
+
+    tx_queue_create(&queue_handle_, const_cast<char *>("xr_queue"),
+                    sizeof(Data) / sizeof(ULONG), queue_buffer_, length * sizeof(Data));
+  }
 
   /**
-   * @brief  析构函数，释放资源
-   *         Destructor to release resources
+   * @brief  析构函数，删除队列
+   *         Destructor that deletes the queue
    */
-  ~LockQueue() {}
+  ~LockQueue()
+  {
+    tx_queue_delete(&queue_handle_);
+    delete[] queue_buffer_;
+  }
 
   /**
-   * @brief  向队列中推送数据
-   *         Pushes data into the queue
-   * @param  data 要推送的数据 The data to be pushed
+   * @brief  将数据推入队列（非阻塞）
+   *         Pushes data into the queue (non-blocking)
+   * @param  data 需要推入的数据 The data to be pushed
    * @return 操作结果 ErrorCode indicating success or failure
    */
   ErrorCode Push(const Data &data)
   {
-    mutex_.Lock();
-    auto ans = queue_handle_.Push(data);
-    if (ans == ErrorCode::OK)
-    {
-      semaphore_handle_.Post();
-    }
-    mutex_.Unlock();
-    return ans;
+    UINT status = tx_queue_send(&queue_handle_, (void *)&data, TX_NO_WAIT);
+    return (status == TX_SUCCESS) ? ErrorCode::OK : ErrorCode::FULL;
   }
 
   /**
-   * @brief  从队列中弹出数据（带超时）
-   *         Pops data from the queue with timeout
+   * @brief  从队列弹出数据（阻塞）
+   *         Pops data from the queue (blocking)
    * @param  data 存储弹出数据的变量 Variable to store the popped data
-   * @param  timeout 超时时间（毫秒） Timeout in milliseconds
+   * @param  timeout 超时时间（默认值：无限等待） Timeout period (default: infinite wait)
    * @return 操作结果 ErrorCode indicating success or failure
    */
-  ErrorCode Pop(Data &data, uint32_t timeout)
+  ErrorCode Pop(Data &data, uint32_t timeout = UINT32_MAX)
   {
-    if (semaphore_handle_.Wait(timeout) == ErrorCode::OK)
-    {
-      mutex_.Lock();
-      auto ans = queue_handle_.Pop(data);
-      mutex_.Unlock();
-      return ans;
-    }
-    else
-    {
-      return ErrorCode::TIMEOUT;
-    }
+    ULONG tx_timeout = (timeout == UINT32_MAX)
+                           ? TX_WAIT_FOREVER
+                           : timeout * TX_TIMER_TICKS_PER_SECOND / 1000;
+    if (tx_timeout == 0 && timeout > 0) tx_timeout = 1;
+
+    UINT status = tx_queue_receive(&queue_handle_, (void *)&data, tx_timeout);
+    return (status == TX_SUCCESS) ? ErrorCode::OK : ErrorCode::EMPTY;
   }
 
   /**
-   * @brief  无参数弹出数据
-   *         Pops data from the queue without storing it
-   * @return 操作结果 ErrorCode indicating success or failure
-   */
-  ErrorCode Pop()
-  {
-    mutex_.Lock();
-    auto ans = queue_handle_.Pop();
-    mutex_.Unlock();
-    return ans;
-  }
-
-  /**
-   * @brief  带超时的弹出数据
-   *         Pops data from the queue with timeout
-   * @param  timeout 超时时间（毫秒） Timeout in milliseconds
+   * @brief  从队列弹出数据（不关心数据值）
+   *         Pops data from the queue without retrieving its value
+   * @param  timeout 超时时间 Timeout period
    * @return 操作结果 ErrorCode indicating success or failure
    */
   ErrorCode Pop(uint32_t timeout)
   {
-    if (semaphore_handle_.Wait(timeout) == ErrorCode::OK)
-    {
-      mutex_.Lock();
-      auto ans = queue_handle_.Pop();
-      mutex_.Unlock();
-      return ans;
-    }
-    else
-    {
-      return ErrorCode::TIMEOUT;
-    }
+    Data dummy;
+    return Pop(dummy, timeout);
   }
 
   /**
-   * @brief  从回调函数中推送数据
-   *         Pushes data into the queue from a callback function
-   * @param  data 要推送的数据 The data to be pushed
-   * @param  in_isr 是否在中断上下文中 Whether the function is called from an ISR
+   * @brief  从 ISR（中断服务例程）推入数据
+   *         Pushes data into the queue from an ISR (Interrupt Service Routine)
+   * @param  data 需要推入的数据 The data to be pushed
+   * @param  in_isr 是否在 ISR 环境中 Whether it is being called from an ISR
    * @return 操作结果 ErrorCode indicating success or failure
    */
   ErrorCode PushFromCallback(const Data &data, bool in_isr)
   {
+    // ThreadX 不区分 ISR/线程上下文，直接调用即可
     UNUSED(in_isr);
-    return Push(data);
+    UINT status = tx_queue_send(&queue_handle_, (void *)&data, TX_NO_WAIT);
+    return (status == TX_SUCCESS) ? ErrorCode::OK : ErrorCode::FULL;
   }
 
   /**
@@ -127,29 +118,27 @@ class LockQueue
    */
   size_t Size()
   {
-    mutex_.Lock();
-    auto ans = queue_handle_.Size();
-    mutex_.Unlock();
-    return ans;
+    ULONG enqueued;
+    tx_queue_info_get(&queue_handle_, NULL, &enqueued, NULL, NULL, NULL, NULL);
+    return static_cast<size_t>(enqueued);
   }
 
   /**
-   * @brief  获取队列的剩余容量
-   *         Gets the remaining capacity of the queue
-   * @return 剩余空间大小 Remaining space size
+   * @brief  获取队列剩余的可用空间
+   *         Gets the remaining available space in the queue
+   * @return 可用空间大小 Available space size
    */
   size_t EmptySize()
   {
-    mutex_.Lock();
-    auto ans = queue_handle_.EmptySize();
-    mutex_.Unlock();
-    return ans;
+    ULONG available;
+    tx_queue_info_get(&queue_handle_, NULL, NULL, &available, NULL, NULL, NULL);
+    return static_cast<size_t>(available);
   }
 
  private:
-  Queue<Data> queue_handle_;    ///< 底层队列对象 Underlying queue object
-  Mutex mutex_;                 ///< 互斥锁 Mutex for thread safety
-  Semaphore semaphore_handle_;  ///< 信号量 Semaphore for synchronization
+  TX_QUEUE queue_handle_;          ///< ThreadX 队列句柄 ThreadX queue handle
+  ULONG *queue_buffer_ = nullptr;  ///< 队列存储区 Queue storage buffer
+  const size_t LENGTH;             ///< 队列最大长度 Maximum queue length
 };
 
 }  // namespace LibXR
