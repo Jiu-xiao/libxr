@@ -11,22 +11,14 @@
 #include "timebase.hpp"
 #include "timer.hpp"
 
-void LibXR::PlatformInit() {}
-
-void LibXR::Timer::RefreshTimerInIdle() {
-  static bool in_timer = false;
-  if (in_timer) {
-    return;
+void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
+{
+  if (Timebase::timebase == nullptr)
+  {
+    /* You should initialize Timebase first */
+    ASSERT(false);
   }
 
-  static auto last_refresh_time = Timebase::GetMilliseconds();
-
-  if (last_refresh_time == Timebase::GetMilliseconds()) {
-    return;
-  }
-
-  in_timer = true;
-  last_refresh_time = (last_refresh_time + 1);
-  Timer::Refresh();
-  in_timer = false;
+  LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
+  LibXR::Timer::stack_depth_ = timer_stack_depth;
 }

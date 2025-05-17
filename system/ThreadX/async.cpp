@@ -5,8 +5,7 @@
 using namespace LibXR;
 
 ASync::ASync(size_t stack_depth, Thread::Priority priority) {
-  UNUSED(stack_depth);
-  UNUSED(priority);
+  thread_handle_.Create(this, ThreadFun, "async_job", stack_depth, priority);
 }
 
 ErrorCode ASync::AssignJob(Callback job) {
@@ -16,6 +15,8 @@ ErrorCode ASync::AssignJob(Callback job) {
 
   status_ = Status::BUSY;
 
-  job.Run(false, this);
+  job_ = job;
+  sem_.Post();
+
   return ErrorCode::OK;
 }

@@ -1,16 +1,16 @@
 #pragma once
 
-#include "libxr_def.hpp"
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
+#include "tx_api.h"
+
+#define LIBXR_PRIORITY_STEP ((TX_MAX_PRIORITIES - 1) / 5)
 
 namespace LibXR
 {
-
 /**
- * @brief  线程管理类，提供线程的创建、调度和时间管理功能
- *         Thread management class that provides thread creation, scheduling, and time
- * management
+ * @brief  线程管理类，封装 FreeRTOS 任务创建和调度
+ *         Thread management class encapsulating FreeRTOS task creation and scheduling
  */
 class Thread
 {
@@ -19,62 +19,75 @@ class Thread
    * @brief  线程优先级枚举
    *         Enumeration for thread priorities
    */
-  enum class Priority
+  enum class Priority : uint8_t
   {
-    IDLE = 0,      ///< 空闲优先级 Idle priority
-    LOW = 0,       ///< 低优先级 Low priority
-    MEDIUM = 0,    ///< 中等优先级 Medium priority
-    HIGH = 0,      ///< 高优先级 High priority
-    REALTIME = 0,  ///< 实时优先级 Realtime priority
-    NUMBER = 1,    ///< 优先级数量 Number of priority levels
+    IDLE = 1,                            ///< 空闲优先级 Idle priority
+    LOW = LIBXR_PRIORITY_STEP * 1,       ///< 低优先级 Low priority
+    MEDIUM = LIBXR_PRIORITY_STEP * 2,    ///< 中等优先级 Medium priority
+    HIGH = LIBXR_PRIORITY_STEP * 3,      ///< 高优先级 High priority
+    REALTIME = LIBXR_PRIORITY_STEP * 4,  ///< 实时优先级 Realtime priority
+    NUMBER = 5                           ///< 优先级数量 Number of priority levels
   };
 
   /**
-   * @brief  默认构造函数，初始化空线程对象
-   *         Default constructor initializing an empty thread object
+   * @brief  默认构造函数，初始化空线程
+   *         Default constructor initializing an empty thread
    */
-  Thread() {};
+  Thread() : thread_handle_(nullptr) {};
 
   /**
-   * @brief  通过线程句柄创建线程对象
-   *         Constructor to create a thread object from a thread handle
-   * @param  handle 线程句柄 Thread handle
+   * @brief  通过 FreeRTOS 线程句柄创建线程对象
+   *         Constructor to create a thread object from a FreeRTOS thread handle
+   * @param  handle FreeRTOS 线程句柄 FreeRTOS thread handle
    */
-  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
+  Thread(TX_THREAD *handle) : thread_handle_(handle) {};
 
   /**
-   * @brief  创建并执行新线程
-   *         Creates and executes a new thread
+   * @brief  创建新线程
+   *         Creates a new thread
    * @tparam ArgType 线程函数的参数类型 The type of argument for the thread function
    * @param  arg 线程函数的参数 Argument for the thread function
    * @param  function 线程执行的函数 Function executed by the thread
-   * @param  name 线程名称（未使用） Thread name (unused)
-   * @param  stack_depth 线程栈大小（未使用） Stack size of the thread (unused)
-   * @param  priority 线程优先级（未使用） Thread priority (unused)
+   * @param  name 线程名称 Thread name
+   * @param  stack_depth 线程栈大小（字节） Stack size of the thread (bytes)
+   * @param  priority 线程优先级 Thread priority
    *
    * @details
-   * 此函数是一个简化版本的线程创建，仅执行 `function(arg)`，并且只允许创建一次。
-   * 由于 `name`、`stack_depth` 和 `priority` 未实际使用，主要用于测试或占位用途。
+   * 该方法基于 FreeRTOS `xTaskCreate()` 创建新线程，执行 `function` 并传递 `arg`
+   * 作为参数。 线程优先级 `priority` 必须符合 FreeRTOS 配置的 `configMAX_PRIORITIES`
+   * 约束。
    *
-   * This function is a simplified version of thread creation, executing only
-   * `function(arg)`, and it ensures that the thread is created only once. The parameters
-   * `name`, `stack_depth`, and `priority` are unused and mainly serve as placeholders or
-   * for testing purposes.
+   * This method creates a new thread using FreeRTOS `xTaskCreate()`, executing `function`
+   * with `arg` as the argument. The thread priority `priority` must adhere to FreeRTOS
+   * configuration constraints defined by `configMAX_PRIORITIES`.
    */
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
               size_t stack_depth, Thread::Priority priority)
   {
-    UNUSED(name);
-    UNUSED(stack_depth);
-    UNUSED(priority);
+    class ThreadBlock
+    {
+     public:
+      ThreadBlock(decltype(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
+      static void Port(ULONG ptr)
+      {
+        ThreadBlock *block = reinterpret_cast<ThreadBlock *>(ptr);
+        block->fun_(block->arg_);
+        delete block;
+      }
+      decltype(function) fun_;
+      ArgType arg_;
+    };
 
-    static bool created = false;
-    ASSERT(created == false);
-    created = true;
-    UNUSED(created);
+    auto *block = new ThreadBlock(function, arg);
+    auto stack_buffer = new ULONG[stack_depth / sizeof(ULONG)];
+    thread_handle_ = new TX_THREAD;
 
-    function(arg);
+    UINT status = tx_thread_create(
+        thread_handle_, const_cast<char *>(name), ThreadBlock::Port, ULONG(block),
+        stack_buffer, stack_depth, static_cast<UINT>(priority),
+        static_cast<UINT>(priority), TX_NO_TIME_SLICE, TX_AUTO_START);
+    ASSERT(status == TX_SUCCESS);
   }
 
   /**
@@ -82,7 +95,7 @@ class Thread
    *         Gets the current thread object
    * @return 当前线程对象 The current thread object
    */
-  static Thread Current(void);
+  static Thread Current(void) { return Thread(tx_thread_identify()); }
 
   /**
    * @brief  获取当前系统时间（毫秒）
@@ -113,14 +126,13 @@ class Thread
   static void Yield();
 
   /**
-   * @brief  线程对象转换为线程句柄
-   *         Converts the thread object to a thread handle
-   * @return 线程句柄 Thread handle
+   * @brief  线程对象转换为 FreeRTOS 线程句柄
+   *         Converts the thread object to a FreeRTOS thread handle
+   * @return FreeRTOS 线程句柄 FreeRTOS thread handle
    */
-  operator libxr_thread_handle() { return thread_handle_; }
+  operator TX_THREAD *() { return thread_handle_; }
 
  private:
-  libxr_thread_handle thread_handle_;  ///< 线程句柄 Thread handle
+  libxr_thread_handle thread_handle_;
 };
-
 }  // namespace LibXR

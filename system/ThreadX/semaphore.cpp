@@ -3,38 +3,57 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "timer.hpp"
+#include "tx_api.h"
 
 using namespace LibXR;
 
-Semaphore::Semaphore(uint32_t init_count) : semaphore_handle_(init_count) {}
+Semaphore::Semaphore(uint32_t init_count)
+{
+  tx_semaphore_create(&semaphore_handle_, const_cast<char *>("xr_sem"), init_count);
+}
 
-Semaphore::~Semaphore() {}
+Semaphore::~Semaphore() { tx_semaphore_delete(&semaphore_handle_); }
 
-void Semaphore::Post() { semaphore_handle_++; }
+void Semaphore::Post() { tx_semaphore_put(&semaphore_handle_); }
 
-ErrorCode Semaphore::Wait(uint32_t timeout) {
-  if (semaphore_handle_ > 0) {
-    semaphore_handle_--;
+ErrorCode Semaphore::Wait(uint32_t timeout)
+{
+  ULONG tx_timeout;
+
+  if (timeout == 0)
+  {
+    tx_timeout = TX_NO_WAIT;
+  }
+  else
+  {
+    tx_timeout = timeout * TX_TIMER_TICKS_PER_SECOND / 1000;
+    if (tx_timeout == 0) tx_timeout = 1;
+  }
+
+  UINT status = tx_semaphore_get(&semaphore_handle_, tx_timeout);
+
+  if (status == TX_SUCCESS)
+  {
     return ErrorCode::OK;
-  } else if (timeout == 0) {
+  }
+  else if (status == TX_NO_INSTANCE || status == TX_NOT_AVAILABLE ||
+           status == TX_WAIT_ABORTED)
+  {
     return ErrorCode::TIMEOUT;
   }
 
-  uint32_t now = Timebase::GetMilliseconds();
-
-  while (Timebase::GetMilliseconds() - now < timeout) {
-    if (semaphore_handle_ > 0) {
-      semaphore_handle_--;
-      return ErrorCode::OK;
-    }
-    Timer::RefreshTimerInIdle();
-  }
-  return ErrorCode::TIMEOUT;
+  return ErrorCode::FAILED;
 }
 
-void Semaphore::PostFromCallback(bool in_isr) {
+void Semaphore::PostFromCallback(bool in_isr)
+{
   UNUSED(in_isr);
-  Post();
+  tx_semaphore_put(&semaphore_handle_);
 }
 
-size_t Semaphore::Value() { return semaphore_handle_; }
+size_t Semaphore::Value()
+{
+  ULONG count;
+  tx_semaphore_info_get(&semaphore_handle_, NULL, &count, NULL, NULL, NULL);
+  return static_cast<size_t>(count);
+}
