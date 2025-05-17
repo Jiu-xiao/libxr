@@ -12,9 +12,9 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_NOT_SUPPORT_MUTI_THREAD=
 message("Not support multi thread.")
 
 if(NOT LIBXR_PRINTF_BUFFER_SIZE)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_BUFFER_SIZE=1024)
+    set(LIBXR_PRINTF_BUFFER_SIZE 1024)
 endif()
 
 if(NOT XR_LOG_MESSAGE_MAX_LEN)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC XR_LOG_MESSAGE_MAX_LEN=256)
+    set(LIBXR_PRINTF_BUFFER_SIZE 256)
 endif()

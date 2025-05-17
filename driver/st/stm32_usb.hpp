@@ -1,6 +1,7 @@
 #pragma once
 
 #include "main.h"
+#include "stm32_usbx.hpp"
 
 #if defined(HAL_PCD_MODULE_ENABLED) && !defined(LIBXR_SYSTEM_ThreadX)
 
