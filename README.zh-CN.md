@@ -32,22 +32,14 @@
 3. 最小非阻塞延迟为 1 微秒，最小阻塞延迟为 1 毫秒。
 4. 所有未使用函数不会被链接进最终程序。
 
-| `System` | Thread | Timer | Semaphore | Mutex | Queue | ASync |
-| -------- | ------ | ----- | --------- | ----- | ----- | ----- ||
+| `System`                  | Thread | Timer | Semaphore | Mutex | Queue | ASync |
+| ------------------------- | ------ | ----- | --------- | ----- | ----- | ----- |
 | None                      | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | FreeRTOS                  | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| ThreadX                   | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | Linux                     | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
-
-### ✅ 目标 RTOS 的兼容性要求
-
-- 支持每线程的通知位（例如 `xTaskNotify` 等效机制）
-- 支持在中断中设置通知（如 `xTaskNotifyFromISR`）
-- 支持二值信号量（可用作互斥锁）
-- 支持在中断中获取和释放信号量（如 `xSemaphoreGiveFromISR` / `xSemaphoreTakeFromISR`）
-- 队列接口可在中断上下文中安全使用（如 `xQueueSendFromISR` / `xQueueReceiveFromISR`）
-- 支持在中断中唤醒或让出任务（如 `portYIELD_FROM_ISR` 或自动调度机制）
 
 ## 数据结构支持
 
@@ -73,7 +65,7 @@ Only have virtual class, you can find the drivers in `Platfrom` folder. For exam
 | `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | CAN/CANFD | USB-CDC | FLASH |
 | ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --------- | ------- | ----- |
 | STM32        | ✅     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ✅   | ✅   | ✅         | ✅       | ✅     |
-| ESP32        | ❌     | ✅    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ✅       | ❌     |
+| ESP32        | ❌     | ✅    | ❌   | ✅   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ✅       | ❌     |
 | Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ✅     |
 | GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
 | HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
@@ -117,8 +109,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 配置 LibXR
-set(LIBXR_SYSTEM FreeRTOS) # None/Linux/FreeRTOS
-set(LIBXR_DRIVER st)       # st/Linux/empty
+set(LIBXR_SYSTEM FreeRTOS) # None/Linux/FreeRTOS...
+set(LIBXR_DRIVER st)       # st/Linux/...
 add_subdirectory(path_to_libxr)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}

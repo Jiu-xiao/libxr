@@ -37,18 +37,10 @@ Want to be the best embedded framework
 | ------------------------- | ------ | ----- | --------- | ----- | ----- | ----- |
 | None                      | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | FreeRTOS                  | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
+| ThreadX                   | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | Linux                     | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
-
-### Compatibility Requirements for Target RTOS
-
-* Per-thread notify bits (e.g. xTaskNotify equivalent)
-* Allow setting notifications from ISR (xTaskNotifyFromISR)
-* Supports binary semaphores (usable as mutex)
-* Supports semaphore **give and take** from ISR (xSemaphoreGiveFromISR, xSemaphoreTakeFromISR)
-* Queue APIs are safe to use in ISR context (e.g. xQueueSendFromISR, xQueueReceiveFromISR)
-* Supports task wakeup/yield from ISR (portYIELD_FROM_ISR or automatic scheduling)
 
 ## Data structure
 
@@ -74,7 +66,7 @@ Only have virtual class, you can find the drivers in `Platfrom` folder. For exam
 | `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | CAN/CANFD | USB-CDC | FLASH |
 | ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --------- | ------- | ----- |
 | STM32        | ✅     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ✅   | ✅   | ✅         | ✅       | ✅     |
-| ESP32        | ❌     | ✅    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ✅         | ❌       | ❌     |
+| ESP32        | ❌     | ✅    | ❌   | ✅   | ❌   | ❌   | ❌    | ❌   | ❌   | ✅         | ❌       | ❌     |
 | Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ✅     |
 | GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
 | HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
@@ -118,8 +110,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # LibXR
-set(LIBXR_SYSTEM FreeRTOS) # None/Linux/FreeRTOS
-set(LIBXR_DRIVER st)       # st/Linux/empty
+set(LIBXR_SYSTEM FreeRTOS) # None/Linux/FreeRTOS...
+set(LIBXR_DRIVER st)       # st/Linux/...
 add_subdirectory(path_to_libxr)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
