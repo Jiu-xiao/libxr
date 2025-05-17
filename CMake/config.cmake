@@ -30,7 +30,7 @@ else()
   include(${CMAKE_CURRENT_LIST_DIR}/../driver/${LIBXR_DRIVER}/CMakeLists.txt)
 endif()
 
-include(${CMAKE_CURRENT_LIST_DIR}/../System/${LIBXR_SYSTEM}/CMakeLists.txt)
+include(${CMAKE_CURRENT_LIST_DIR}/../system/${LIBXR_SYSTEM}/CMakeLists.txt)
 
 message("-- Platfrom: ${LIBXR_SYSTEM}")
 
