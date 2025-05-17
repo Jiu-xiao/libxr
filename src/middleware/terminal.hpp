@@ -101,6 +101,8 @@ class Terminal
         input_line_(MAX_LINE_SIZE + 1),
         history_(MAX_HISTORY_NUMBER)
   {
+    ASSERT(read_port != nullptr);
+    ASSERT(write_port != nullptr);
   }
 
   ReadOperation::OperationPollingStatus read_status_;
