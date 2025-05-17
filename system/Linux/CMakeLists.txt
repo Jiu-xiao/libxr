@@ -9,9 +9,9 @@ target_include_directories(
     PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 
 if(NOT LIBXR_PRINTF_BUFFER_SIZE)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_PRINTF_BUFFER_SIZE=1024)
+    set(LIBXR_PRINTF_BUFFER_SIZE 1024)
 endif()
 
 if(NOT XR_LOG_MESSAGE_MAX_LEN)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC XR_LOG_MESSAGE_MAX_LEN=256)
+    set(LIBXR_PRINTF_BUFFER_SIZE 256)
 endif()
