@@ -43,7 +43,7 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
 
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
-  WritePort::WriteInfo info;
+  WriteInfoBlock info;
   if (uart->write_port_.queue_info_->Pop(info) != ErrorCode::OK)
   {
     return USBD_OK;

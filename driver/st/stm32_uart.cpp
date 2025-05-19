@@ -215,7 +215,7 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 {  // NOLINT
   auto uart = STM32UART::map[id];
 
-  WritePort::WriteInfo info;
+  WriteInfoBlock info;
   if (uart->write_port_.queue_info_->Pop(info) != ErrorCode::OK)
   {
     ASSERT(false);
@@ -269,7 +269,7 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
 {
   auto uart = STM32UART::map[STM32_UART_GetID(huart->Instance)];
   HAL_UART_Receive_DMA(huart, huart->pRxBuffPtr, uart->dma_buff_rx_.size_);
-  WritePort::WriteInfo info;
+  WriteInfoBlock info;
   if (uart->write_port_.queue_info_->Peek(info) == ErrorCode::OK)
   {
     info.op.UpdateStatus(true, ErrorCode::FAILED);
@@ -281,7 +281,7 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
 extern "C" void HAL_UART_AbortTransmitCpltCallback(UART_HandleTypeDef *huart)
 {
   auto uart = STM32UART::map[STM32_UART_GetID(huart->Instance)];
-  WritePort::WriteInfo info;
+  WriteInfoBlock info;
   if (uart->write_port_.queue_info_->Peek(info) == ErrorCode::OK)
   {
     info.op.UpdateStatus(true, ErrorCode::FAILED);
