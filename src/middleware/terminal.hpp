@@ -861,8 +861,13 @@ class Terminal
     RawData buff = term->read_buff_;
     buff.size_ = LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
 
-    Semaphore sem;
-    ReadOperation op(sem);
+    Semaphore read_sem, write_sem;
+    ReadOperation op(read_sem);
+
+    term->write_op_.type = WriteOperation::OperationType::NONE;
+    term->write_op_.data.sem_info.sem = &write_sem;
+    term->write_op_.data.sem_info.timeout = 10;
+    term->write_op_.type = WriteOperation::OperationType::BLOCK;
 
     while (true)
     {
