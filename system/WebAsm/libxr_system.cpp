@@ -35,7 +35,7 @@ void LibXR::PlatformInit()
   auto write_fun = [](WritePort &port)
   {
     static uint8_t write_buff[1024];
-    WritePort::WriteInfo info;
+    WriteInfoBlock info;
     while (true)
     {
       if (port.queue_info_->Pop(info) != ErrorCode::OK)
