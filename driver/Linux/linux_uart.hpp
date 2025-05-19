@@ -22,19 +22,20 @@
 namespace LibXR
 {
 
-class LinuxUART : public UART
+class LinuxUART : public UART<>
 {
  public:
   LinuxUART(const char *dev_path, unsigned int baudrate = 115200,
             Parity parity = Parity::NO_PARITY, uint8_t data_bits = 8,
-            uint8_t stop_bits = 1, uint32_t rx_queue_size = 5, uint32_t tx_queue_size = 5,
-            size_t buffer_size = 512)
-      : UART(rx_queue_size, buffer_size, tx_queue_size, buffer_size),
+            uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512)
+      : UART<>(buffer_size, tx_queue_size, buffer_size),
         write_sem_(0),
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
         buff_size_(buffer_size)
   {
+    ASSERT(buff_size_ > 0);
+
     if (std::filesystem::exists(dev_path) == false)
     {
       XR_LOG_ERROR("Cannot find UART device: %s", dev_path);
@@ -211,23 +212,11 @@ class LinuxUART : public UART
     return ErrorCode::OK;
   }
 
-  static ErrorCode ReadFun(ReadPort &port)
-  {
-    auto uart = CONTAINER_OF(&port, LinuxUART, read_port_);
-    Mutex::LockGuard guard(uart->read_mutex_);
-    port.ProcessPendingReads();
-    return ErrorCode::OK;
-  }
+  static ErrorCode ReadFun(ReadPort &port) { return ErrorCode::EMPTY; }
 
   static ErrorCode WriteFun(WritePort &port)
   {
     auto uart = CONTAINER_OF(&port, LinuxUART, write_port_);
-    WritePort::WriteInfo info;
-    if (port.queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return ErrorCode::EMPTY;
-    }
-    port.UpdateStatus(info.op);
     uart->write_sem_.Post();
     return ErrorCode::OK;
   }
@@ -271,7 +260,7 @@ class LinuxUART : public UART
 
   void TxLoop()
   {
-    WritePort::WriteInfo info;
+    WriteInfoBlock info;
     while (true)
     {
       if (!connected_)
@@ -284,18 +273,18 @@ class LinuxUART : public UART
       {
         continue;
       }
-      
+
       if (write_port_.queue_info_->Pop(info) == ErrorCode::OK)
       {
-        if (write_port_.queue_data_->PopBatch(tx_buff_, info.size) == ErrorCode::OK)
+        if (write_port_.queue_data_->PopBatch(tx_buff_, info.data.size_) == ErrorCode::OK)
         {
-          auto written = write(fd_, tx_buff_, info.size);
+          auto written = write(fd_, tx_buff_, info.data.size_);
           if (written < 0)
           {
             XR_LOG_WARN("Cannot write UART device: %s", device_path_.c_str());
             connected_ = false;
           }
-          info.op.UpdateStatus(false, (written == static_cast<int>(info.size))
+          info.op.UpdateStatus(false, (written == static_cast<int>(info.data.size_))
                                           ? ErrorCode::OK
                                           : ErrorCode::FAILED);
         }

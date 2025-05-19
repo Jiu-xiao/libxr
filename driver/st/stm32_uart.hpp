@@ -117,7 +117,7 @@ class STM32UART : public UART
     STM32UART *uart = CONTAINER_OF(&port, STM32UART, write_port_);
     if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
     {
-      WritePort::WriteInfo info;
+      WriteInfoBlock info;
       if (port.queue_info_->Peek(info) != ErrorCode::OK)
       {
         return ErrorCode::EMPTY;
