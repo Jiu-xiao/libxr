@@ -114,17 +114,17 @@ class STM32UART : public UART
  public:
   static ErrorCode WriteFun(WritePort &port)
   {
-    STM32UART *uart = CONTAINER_OF(&port, STM32UART, write_port_);
+    STM32UART *uart = CONTAINER_OF(&port, STM32UART, _write_port);
     if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
     {
-      WritePort::WriteInfo info;
+      WriteInfoBlock info;
       if (port.queue_info_->Peek(info) != ErrorCode::OK)
       {
         return ErrorCode::EMPTY;
       }
 
       if (port.queue_data_->PopBatch(
-              reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.addr_), info.size) !=
+              reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.addr_), info.data.size_) !=
           ErrorCode::OK)
       {
         ASSERT(false);
@@ -133,52 +133,33 @@ class STM32UART : public UART
 
       auto ans = HAL_UART_Transmit_DMA(uart->uart_handle_,
                                        static_cast<uint8_t *>(uart->dma_buff_tx_.addr_),
-                                       info.size);
+                                       info.data.size_);
       if (ans != HAL_OK)
       {
         port.queue_info_->Pop(info);
-        info.op.UpdateStatus(false, ErrorCode::FAILED);
+        port.Finish(false, ErrorCode::FAILED, info, 0);
         return ErrorCode::FAILED;
       }
-      info.op.MarkAsRunning();
-    }
-    else
-    {
+
+      return ErrorCode::FAILED;
     }
 
-    return ErrorCode::OK;
+    return ErrorCode::FAILED;
   }
 
   static ErrorCode ReadFun(ReadPort &port)
   {
-    STM32UART *uart = CONTAINER_OF(&port, STM32UART, read_port_);
+    STM32UART *uart = CONTAINER_OF(&port, STM32UART, _read_port);
     UNUSED(uart);
-    ReadInfoBlock block;
 
-    if (port.queue_block_->Peek(block) != ErrorCode::OK)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    block.op_.MarkAsRunning();
-
-    if (port.queue_data_->Size() >= block.data_.size_)
-    {
-      port.queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
-      port.queue_block_->Pop();
-      port.read_size_ = block.data_.size_;
-      block.op_.UpdateStatus(false, ErrorCode::OK);
-      return ErrorCode::OK;
-    }
-    else
-    {
-      return ErrorCode::EMPTY;
-    }
+    return ErrorCode::EMPTY;
   }
 
   STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx, RawData dma_buff_tx,
-            uint32_t rx_queue_size = 5, uint32_t tx_queue_size = 5)
-      : UART(rx_queue_size, dma_buff_rx.size_, tx_queue_size, dma_buff_tx.size_),
+            uint32_t tx_queue_size = 5)
+      : UART(&_read_port, &_write_port),
+        _read_port(dma_buff_rx.size_),
+        _write_port(tx_queue_size, dma_buff_tx.size_),
         dma_buff_rx_(dma_buff_rx),
         dma_buff_tx_(dma_buff_tx),
         uart_handle_(uart_handle),
@@ -191,7 +172,7 @@ class STM32UART : public UART
     if ((uart_handle->Init.Mode & UART_MODE_TX) == UART_MODE_TX)
     {
       ASSERT(uart_handle_->hdmatx != NULL);
-      write_port_ = WriteFun;
+      _write_port = WriteFun;
     }
 
     if ((uart_handle->Init.Mode & UART_MODE_RX) == UART_MODE_RX)
@@ -201,7 +182,7 @@ class STM32UART : public UART
 
       HAL_UART_Receive_DMA(uart_handle, reinterpret_cast<uint8_t *>(dma_buff_rx_.addr_),
                            dma_buff_rx_.size_);
-      read_port_ = ReadFun;
+      _read_port = ReadFun;
     }
   }
 
@@ -245,6 +226,9 @@ class STM32UART : public UART
     }
     return ErrorCode::OK;
   }
+
+  ReadPort _read_port;
+  WritePort _write_port;
 
   RawData dma_buff_rx_, dma_buff_tx_;
 

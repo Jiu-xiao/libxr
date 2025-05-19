@@ -65,7 +65,7 @@ Only have virtual class, you can find the drivers in `Platfrom` folder. For exam
 | `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | CAN/CANFD | USB-CDC | FLASH |
 | ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --------- | ------- | ----- |
 | STM32        | ✅     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ✅   | ✅   | ✅         | ✅       | ✅     |
-| ESP32        | ❌     | ✅    | ❌   | ✅   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ✅       | ❌     |
+| ESP32        | ❌     | ✅    | ❌   | ✅   | ✅   | ❌   | ❌    | ❌   | ❌   | ❌         | ✅       | ❌     |
 | Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ✅     |
 | GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
 | HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |

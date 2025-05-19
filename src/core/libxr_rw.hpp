@@ -9,9 +9,9 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "queue.hpp"
 #include "lockfree_queue.hpp"
 #include "mutex.hpp"
+#include "queue.hpp"
 #include "semaphore.hpp"
 
 namespace LibXR
@@ -145,57 +145,20 @@ class Operation
     return *this;
   }
 
-  Operation(const Operation &op) : type(op.type)
-  {
-    switch (type)
-    {
-      case OperationType::CALLBACK:
-        data.callback = op.data.callback;
-        break;
-      case OperationType::BLOCK:
-        data.sem = op.data.sem;
-        data.timeout = op.data.timeout;
-        break;
-      case OperationType::POLLING:
-        data.status = op.data.status;
-        break;
-      case OperationType::NONE:
-        break;
-    }
-  }
-
   /**
-   * @brief 构造一个新的 Operation 对象（移动构造函数）。
-   *        Constructs a new Operation object (move constructor).
+   * @brief 构造一个新的 Operation 对象（初始化操作）。
+   *        Constructs a new Operation object (initialization operation).
    *
-   * 该构造函数用于移动另一个 Operation 对象，并接管其内部数据。
-   * This constructor moves another Operation object and takes ownership of its internal
-   * data.
-   *
-   * @param op 要移动的 Operation 对象。
-   *           The Operation object to be moved.
-   *
-   * @note 该操作不会动态分配内存，仅仅是移动已有数据成员。
-   *       This operation does not allocate memory dynamically; it merely moves existing
-   * data members.
+   * 该构造函数用于初始化一个 Operation 对象，接收一个初始化操作作为参数。
+   * This constructor initializes an Operation object with an initialization operation as
+   * a parameter.
    */
-  Operation(Operation &&op) noexcept : type(op.type)
+  template <
+      typename InitOperation,
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<InitOperation>, Operation>>>
+  Operation(InitOperation &&op)
   {
-    switch (type)
-    {
-      case OperationType::CALLBACK:
-        data.callback = op.data.callback;
-        break;
-      case OperationType::BLOCK:
-        data.sem_info.sem = op.data.sem_info.sem;
-        data.sem_info.timeout = op.data.sem_info.timeout;
-        break;
-      case OperationType::POLLING:
-        data.status = op.data.status;
-        break;
-      case OperationType::NONE:
-        break;
-    }
+    *this = std::forward<InitOperation>(op);
   }
 
   /**
@@ -204,12 +167,13 @@ class Operation
    * @param in_isr Indicates if executed within an interrupt.
    * @param args Parameters passed to the callback.
    */
-  void UpdateStatus(bool in_isr, Args &&...args)
+  template <typename... Status>
+  void UpdateStatus(bool in_isr, Status &&...status)
   {
     switch (type)
     {
       case OperationType::CALLBACK:
-        data.callback->Run(in_isr, std::forward<Args>(args)...);
+        data.callback->Run(in_isr, std::forward<Args>(status)...);
         break;
       case OperationType::BLOCK:
         data.sem_info.sem->PostFromCallback(in_isr);
@@ -284,24 +248,17 @@ typedef ErrorCode (*ReadFun)(ReadPort &port);
  * @brief Read information block structure.
  * @brief 读取信息块结构。
  */
-class ReadInfoBlock
+typedef struct
 {
- public:
-  RawData data_;      ///< Data buffer. 数据缓冲区。
-  ReadOperation op_;  ///< Read operation instance. 读取操作实例。
+  RawData data;      ///< Data buffer. 数据缓冲区。
+  ReadOperation op;  ///< Read operation instance. 读取操作实例。
+} ReadInfoBlock;
 
-  /**
-   * @brief Constructs a ReadInfoBlock.
-   * @brief 构造一个ReadInfoBlock。
-   * @param data Data buffer.
-   * @param op Read operation instance.
-   */
-  ReadInfoBlock(RawData data, ReadOperation &&op) : data_(data), op_(std::move(op)) {}
-
-  /// @brief Default constructor.
-  /// @brief 默认构造函数。
-  ReadInfoBlock() : data_(), op_() {}
-};
+typedef struct
+{
+  ConstRawData data;
+  WriteOperation op;
+} WriteInfoBlock;
 
 /**
  * @brief ReadPort class for handling read operations.
@@ -311,10 +268,11 @@ class ReadPort
 {
  public:
   ReadFun read_fun_ = nullptr;
-  LockFreeQueue<ReadInfoBlock> *queue_block_ = nullptr;
   BaseQueue *queue_data_ = nullptr;
   size_t read_size_ = 0;
   Mutex mutex_;
+  ReadInfoBlock info_;
+  bool busy_ = false;
 
   /**
    * @brief Constructs a ReadPort with queue sizes.
@@ -322,9 +280,8 @@ class ReadPort
    * @param queue_size Number of queued operations.
    * @param buffer_size Size of each buffer.
    */
-  ReadPort(size_t queue_size = 3, size_t buffer_size = 128)
-      : queue_block_(new LockFreeQueue<ReadInfoBlock>(queue_size)),
-        queue_data_(new BaseQueue(1, buffer_size))
+  ReadPort(size_t buffer_size = 128)
+      : queue_data_(buffer_size > 0 ? new BaseQueue(1, buffer_size) : nullptr)
   {
   }
 
@@ -338,7 +295,11 @@ class ReadPort
    * @return 返回队列的空闲大小（单位：字节）。
    *         Returns the empty size of the queue (in bytes).
    */
-  size_t EmptySize() { return queue_data_->EmptySize(); }
+  virtual size_t EmptySize()
+  {
+    ASSERT(queue_data_ != nullptr);
+    return queue_data_->EmptySize();
+  }
 
   /**
    * @brief 获取当前队列的已使用大小。
@@ -350,7 +311,11 @@ class ReadPort
    * @return 返回队列的已使用大小（单位：字节）。
    *         Returns the used size of the queue (in bytes).
    */
-  size_t Size() { return queue_data_->Size(); }
+  virtual size_t Size()
+  {
+    ASSERT(queue_data_ != nullptr);
+    return queue_data_->Size();
+  }
 
   /// @brief Checks if read operations are supported.
   /// @brief 检查是否支持读取操作。
@@ -392,10 +357,11 @@ class ReadPort
    * @param size 读取的数据大小。
    *             The size of the read data.
    */
-  void UpdateStatus(bool in_isr, ErrorCode ans, ReadInfoBlock &info, uint32_t size)
+  void Finish(bool in_isr, ErrorCode ans, ReadInfoBlock &info, uint32_t size)
   {
     read_size_ = size;
-    info.op_.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
+    busy_ = false;
+    info.op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
   }
 
   /**
@@ -408,7 +374,7 @@ class ReadPort
    * @param info 需要更新状态的 `ReadInfoBlock` 引用。
    *             Reference to the `ReadInfoBlock` whose status needs to be updated.
    */
-  void UpdateStatus(ReadInfoBlock &info) { info.op_.MarkAsRunning(); }
+  void MarkAsRunning(ReadInfoBlock &info) { info.op.MarkAsRunning(); }
 
   /**
    * @brief 读取操作符重载，用于执行读取操作。
@@ -432,30 +398,65 @@ class ReadPort
     {
       if (data.size_ == 0)
       {
-        op.UpdateStatus(false, ErrorCode::OK);
-        if (op.type == ReadOperation::OperationType::BLOCK)
+        read_size_ = 0;
+        if (op.type != ReadOperation::OperationType::BLOCK)
         {
-          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+          op.UpdateStatus(false, ErrorCode::OK);
         }
         return ErrorCode::OK;
       }
 
-      Mutex::LockGuard lock_guard(mutex_);
+      mutex_.Lock();
 
-      ReadInfoBlock block = {data, std::move(op)};
-      if (queue_block_->Push(block) != ErrorCode::OK)
+      if (busy_)
       {
-        return ErrorCode::FULL;
+        mutex_.Unlock();
+        return ErrorCode::BUSY;
       }
 
+      if (queue_data_ && queue_data_->Size() >= data.size_)
+      {
+        auto ans = queue_data_->PopBatch(data.addr_, data.size_);
+        UNUSED(ans);
+        read_size_ = data.size_;
+        ASSERT(ans == ErrorCode::OK);
+        if (op.type != ReadOperation::OperationType::BLOCK)
+        {
+          op.UpdateStatus(false, ErrorCode::OK);
+        }
+        mutex_.Unlock();
+        return ErrorCode::OK;
+      }
+
+      info_ = ReadInfoBlock{data, op};
+
       auto ans = read_fun_(*this);
+
+      if (ans != ErrorCode::OK)
+      {
+        busy_ = true;
+        op.MarkAsRunning();
+      }
+      else
+      {
+        read_size_ = data.size_;
+        if (op.type != ReadOperation::OperationType::BLOCK)
+        {
+          op.UpdateStatus(false, ErrorCode::OK);
+        }
+        mutex_.Unlock();
+        return ErrorCode::OK;
+      }
+
+      mutex_.Unlock();
+
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
         return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       }
       else
       {
-        return ans;
+        return ErrorCode::OK;
       }
     }
     else
@@ -467,31 +468,32 @@ class ReadPort
   /**
    * @brief Processes pending reads.
    * @brief 处理挂起的读取请求。
+   *
+   * @param in_isr 指示是否在中断上下文中执行。
+   *               Indicates whether the operation is executed in an interrupt context.
    */
-  void ProcessPendingReads()
+  virtual void ProcessPendingReads(bool in_isr)
   {
-    ReadInfoBlock block;
-    while (queue_block_->Peek(block) == ErrorCode::OK)
+    ASSERT(queue_data_ != nullptr);
+
+    if (busy_)
     {
-      if (queue_data_->Size() >= block.data_.size_)
+      if (queue_data_->Size() >= info_.data.size_)
       {
-        queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
-        read_size_ = block.data_.size_;
-        block.op_.UpdateStatus(true, ErrorCode::OK);
-        queue_block_->Pop();
-      }
-      else
-      {
-        break;
+        auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
+        UNUSED(ans);
+        ASSERT(ans == ErrorCode::OK);
+        Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
       }
     }
   }
 
   /// @brief Resets the ReadPort.
   /// @brief 重置ReadPort。
-  void Reset()
+  virtual void Reset()
   {
-    queue_block_->Reset();
+    ASSERT(queue_data_ != nullptr);
+    Mutex::LockGuard lock_guard(mutex_);
     queue_data_->Reset();
     read_size_ = 0;
   }
@@ -504,13 +506,8 @@ class ReadPort
 class WritePort
 {
  public:
-  typedef struct
-  {
-    WriteOperation op;
-    uint32_t size;
-  } WriteInfo;
   WriteFun write_fun_ = nullptr;
-  LockFreeQueue<WriteInfo> *queue_info_;
+  LockFreeQueue<WriteInfoBlock> *queue_info_;
   LockFreeQueue<uint8_t> *queue_data_;
   Mutex mutex_;
   size_t write_size_ = 0;
@@ -528,9 +525,9 @@ class WritePort
    * @param block_size 缓存的数据的最大大小，默认为 128。
    *                   The maximum size of cached data, default is 128.
    */
-  WritePort(size_t queue_size = 3, size_t block_size = 128)
-      : queue_info_(new LockFreeQueue<WriteInfo>(queue_size)),
-        queue_data_(new LockFreeQueue<uint8_t>(block_size))
+  WritePort(size_t queue_size = 3, size_t buffer_size = 128)
+      : queue_info_(new LockFreeQueue<WriteInfoBlock>(queue_size)),
+        queue_data_(buffer_size > 0 ? new LockFreeQueue<uint8_t>(buffer_size) : nullptr)
   {
   }
 
@@ -541,7 +538,11 @@ class WritePort
    * @return 返回数据队列的空闲大小。
    *         Returns the empty size of the data queue.
    */
-  size_t EmptySize() { return queue_data_->EmptySize(); }
+  virtual size_t EmptySize()
+  {
+    ASSERT(queue_data_ != nullptr);
+    return queue_data_->EmptySize();
+  }
 
   /**
    * @brief 获取当前数据队列的已使用大小。
@@ -550,7 +551,11 @@ class WritePort
    * @return 返回数据队列的已使用大小。
    *         Returns the size of the data queue.
    */
-  size_t Size() { return queue_data_->Size(); }
+  virtual size_t Size()
+  {
+    ASSERT(queue_data_ != nullptr);
+    return queue_data_->Size();
+  }
 
   /**
    * @brief 判断端口是否可写。
@@ -597,10 +602,10 @@ class WritePort
    * @param size 写入的数据大小。
    *             The size of the written data.
    */
-  void UpdateStatus(bool in_isr, ErrorCode ans, WriteOperation &op, uint32_t size)
+  void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock &info, uint32_t size)
   {
     write_size_ = size;
-    op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
+    info.op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
   }
 
   /**
@@ -613,7 +618,7 @@ class WritePort
    * @param op 需要更新状态的 `WriteOperation` 引用。
    *           Reference to the `WriteOperation` whose status needs to be updated.
    */
-  void UpdateStatus(WriteOperation &op) { op.MarkAsRunning(); }
+  void MarkAsRunning(WriteOperation &op) { op.MarkAsRunning(); }
 
   /**
    * @brief 执行写入操作。
@@ -637,35 +642,94 @@ class WritePort
     {
       if (data.size_ == 0)
       {
-        op.UpdateStatus(false, ErrorCode::OK);
-        if (op.type == WriteOperation::OperationType::BLOCK)
+        write_size_ = 0;
+        if (op.type != WriteOperation::OperationType::BLOCK)
         {
-          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+          op.UpdateStatus(false, ErrorCode::OK);
         }
         return ErrorCode::OK;
       }
 
-      Mutex::LockGuard lock_guard(mutex_);
+      mutex_.Lock();
 
-      if (queue_data_->EmptySize() < data.size_ || queue_info_->EmptySize() < 1)
+      if (queue_info_->EmptySize() < 1)
       {
+        mutex_.Unlock();
         return ErrorCode::FULL;
       }
 
-      auto ans = queue_data_->PushBatch(reinterpret_cast<const uint8_t *>(data.addr_),
-                                        data.size_);
-
-      ans = queue_info_->Push(
-          WriteInfo{std::forward<WriteOperation>(op), static_cast<uint32_t>(data.size_)});
-
-      ans = write_fun_(*this);
-      if (op.type == WriteOperation::OperationType::BLOCK)
+      if (queue_data_)
       {
-        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        if (queue_data_->EmptySize() < data.size_)
+        {
+          mutex_.Unlock();
+          return ErrorCode::FULL;
+        }
+
+        auto ans = queue_data_->PushBatch(reinterpret_cast<const uint8_t *>(data.addr_),
+                                          data.size_);
+        UNUSED(ans);
+        ASSERT(ans == ErrorCode::OK);
+
+        WriteInfoBlock info{data, op};
+        ans = queue_info_->Push(info);
+
+        ASSERT(ans == ErrorCode::OK);
+
+        op.MarkAsRunning();
+
+        ans = write_fun_(*this);
+
+        mutex_.Unlock();
+
+        if (ans == ErrorCode::OK)
+        {
+          write_size_ = data.size_;
+          if (op.type != WriteOperation::OperationType::BLOCK)
+          {
+            op.UpdateStatus(false, ErrorCode::OK);
+          }
+          return ErrorCode::OK;
+        }
+
+        if (op.type == WriteOperation::OperationType::BLOCK)
+        {
+          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        }
+
+        return ErrorCode::OK;
       }
       else
       {
-        return ans;
+        WriteInfoBlock info{data, op};
+        auto ans = queue_info_->Push(info);
+
+        ASSERT(ans == ErrorCode::OK);
+
+        op.MarkAsRunning();
+
+        ans = write_fun_(*this);
+
+        mutex_.Unlock();
+
+        if (ans == ErrorCode::OK)
+        {
+          write_size_ = data.size_;
+          if (op.type != WriteOperation::OperationType::BLOCK)
+          {
+            op.UpdateStatus(false, ErrorCode::OK);
+          }
+          return ErrorCode::OK;
+        }
+
+        if (op.type == WriteOperation::OperationType::BLOCK)
+        {
+          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        }
+        else
+        {
+          return ErrorCode::OK;
+        }
       }
     }
     else
@@ -676,8 +740,10 @@ class WritePort
 
   /// @brief Resets the WritePort.
   /// @brief 重置WritePort。
-  void Reset()
+  virtual void Reset()
   {
+    ASSERT(queue_data_ != nullptr);
+    Mutex::LockGuard lock_guard(mutex_);
     queue_info_->Reset();
     queue_data_->Reset();
     write_size_ = 0;

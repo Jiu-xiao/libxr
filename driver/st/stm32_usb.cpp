@@ -28,8 +28,8 @@ int8_t libxr_stm32_virtual_uart_receive(uint8_t *pbuf, uint32_t *Len)
 {
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
-  uart->read_port_.queue_data_->PushBatch(pbuf, *Len);
-  uart->read_port_.ProcessPendingReads();
+  uart->read_port_->queue_data_->PushBatch(pbuf, *Len);
+  uart->read_port_->ProcessPendingReads(true);
 
   USBD_CDC_ReceivePacket(STM32VirtualUART::map[0]->usb_handle_);
 
@@ -43,21 +43,20 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
 
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
-  WritePort::WriteInfo info;
-  if (uart->write_port_.queue_info_->Pop(info) != ErrorCode::OK)
+  WriteInfoBlock info;
+  if (uart->write_port_->queue_info_->Pop(info) != ErrorCode::OK)
   {
     return USBD_OK;
   }
 
-  uart->write_port_.write_size_ = *Len;
-  info.op.UpdateStatus(true, ErrorCode::OK);
+  uart->write_port_->Finish(true, ErrorCode::OK, info, *Len);
 
-  if (uart->write_port_.queue_info_->Peek(info) != ErrorCode::OK)
+  if (uart->write_port_->queue_info_->Peek(info) != ErrorCode::OK)
   {
     return USBD_OK;
   }
 
-  if (uart->write_port_.queue_data_->PopBatch(uart->tx_buffer_, info.size) !=
+  if (uart->write_port_->queue_data_->PopBatch(uart->tx_buffer_, info.data.size_) !=
       ErrorCode::OK)
   {
     ASSERT(false);
@@ -69,7 +68,7 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
   uart->writing_ = true;
 #endif
 
-  USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, info.size);
+  USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, info.data.size_);
   USBD_CDC_TransmitPacket(uart->usb_handle_);
 
   info.op.MarkAsRunning();
