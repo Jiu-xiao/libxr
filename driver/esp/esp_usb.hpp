@@ -11,13 +11,15 @@
 namespace LibXR
 {
 template <size_t BUFFER_SIZE = 256>
-class ESP32VirtualUART : public UART<>
+class ESP32VirtualUART : public UART
 {
  public:
   ESP32VirtualUART(uint32_t rx_queue_size = 5, uint32_t tx_queue_size = 5,
                    int tx_task_prio = 10, uint32_t tx_stack_depth = 2048,
                    int rx_task_prio = 10, uint32_t rx_stack_depth = 2048)
-      : UART<>(rx_queue_size, BUFFER_SIZE, tx_queue_size)
+      : UART(&_read_port, &_write_port),
+        _read_port(rx_queue_size),
+        _write_port(BUFFER_SIZE, tx_queue_size)
   {
     usb_serial_jtag_driver_config_t cfg = {
         .tx_buffer_size = BUFFER_SIZE,
@@ -25,8 +27,8 @@ class ESP32VirtualUART : public UART<>
     };
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&cfg));
 
-    write_port_ = WriteFun;
-    read_port_ = ReadFun;
+    _write_port = WriteFun;
+    _read_port = ReadFun;
 
     xTaskCreate(TxTaskWrapper, "esp32_vuart_tx", tx_stack_depth, this, tx_task_prio,
                 nullptr);
@@ -56,15 +58,15 @@ class ESP32VirtualUART : public UART<>
       {
         continue;
       }
-      if (uart->write_port_.queue_info_->Pop(info) != ErrorCode::OK)
+      if (uart->write_port_->queue_info_->Pop(info) != ErrorCode::OK)
       {
         continue;
       }
 
-      if (uart->write_port_.queue_data_->PopBatch(uart->tx_buffer_, info.data.size_) !=
+      if (uart->write_port_->queue_data_->PopBatch(uart->tx_buffer_, info.data.size_) !=
           ErrorCode::OK)
       {
-        uart->write_port_.Finish(false, ErrorCode::FAILED, info, info.data.size_);
+        uart->write_port_->Finish(false, ErrorCode::FAILED, info, info.data.size_);
         continue;
       }
 
@@ -72,12 +74,12 @@ class ESP32VirtualUART : public UART<>
           usb_serial_jtag_write_bytes(uart->tx_buffer_, info.data.size_, portMAX_DELAY);
       if (sent == info.data.size_)
       {
-        uart->write_port_.Finish(false, ErrorCode::OK, info, sent);
+        uart->write_port_->Finish(false, ErrorCode::OK, info, sent);
         continue;
       }
       else
       {
-        uart->write_port_.Finish(false, ErrorCode::FAILED, info, sent);
+        uart->write_port_->Finish(false, ErrorCode::FAILED, info, sent);
         continue;
       }
     }
@@ -101,16 +103,16 @@ class ESP32VirtualUART : public UART<>
       }
       if (len > 0)
       {
-        LibXR::Mutex::LockGuard guard(uart->read_port_.mutex_);
-        uart->read_port_.queue_data_->PushBatch(uart->rx_buffer_, len);
-        uart->read_port_.ProcessPendingReads(false);
+        LibXR::Mutex::LockGuard guard(uart->read_port_->mutex_);
+        uart->read_port_->queue_data_->PushBatch(uart->rx_buffer_, len);
+        uart->read_port_->ProcessPendingReads(false);
       }
     }
   }
 
   static ErrorCode WriteFun(WritePort &port)
   {
-    ESP32VirtualUART *uart = CONTAINER_OF(&port, ESP32VirtualUART, write_port_);
+    ESP32VirtualUART *uart = CONTAINER_OF(&port, ESP32VirtualUART, _write_port);
     uart->write_sem_.Post();
 
     return ErrorCode::FAILED;
@@ -140,6 +142,9 @@ class ESP32VirtualUART : public UART<>
   uint8_t rx_buffer_[BUFFER_SIZE];
 
   LibXR::Semaphore write_sem_;
+
+  ReadPort _read_port;
+  WritePort _write_port;
 };
 
 }  // namespace LibXR
