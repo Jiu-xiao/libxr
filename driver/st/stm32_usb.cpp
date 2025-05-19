@@ -64,7 +64,7 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
   }
 
 #if defined(STM32F1)
-  uart->write_size_ = info.size;
+  uart->write_size_ = info.data.size_;
   uart->writing_ = true;
 #endif
 

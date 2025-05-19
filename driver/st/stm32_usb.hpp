@@ -98,7 +98,7 @@ class STM32VirtualUART : public UART
         return ErrorCode::EMPTY;
       }
 #if defined(STM32F1)
-      uart->write_size_ = info.size;
+      uart->write_size_ = info.data.size_;
       uart->writing_ = true;
 #endif
 
