@@ -13,7 +13,7 @@ class ESP32UART;
 class ESP32UARTReadPort : public ReadPort
 {
  public:
-  ESP32UARTReadPort(size_t buffer_size = 128, ESP32UART *uart = nullptr)
+  ESP32UARTReadPort(size_t buffer_size, ESP32UART *uart)
       : ReadPort(buffer_size), uart_(uart)
   {
   }
@@ -35,8 +35,8 @@ class ESP32UARTReadPort : public ReadPort
 class ESP32UARTWritePort : public WritePort
 {
  public:
-  ESP32UARTWritePort(size_t queue_size = 3, size_t buffer_size = 128,
-                     ESP32UART *uart = nullptr)
+  ESP32UARTWritePort(size_t queue_size, size_t buffer_size,
+                     ESP32UART *uart)
       : WritePort(queue_size, buffer_size), uart_(uart)
   {
   }
@@ -53,7 +53,7 @@ class ESP32UARTWritePort : public WritePort
   ESP32UART *uart_;
 };
 
-class ESP32UART : public UART<ESP32UARTReadPort, ESP32UARTWritePort, ESP32UART *>
+class ESP32UART : public UART
 {
  public:
   ESP32UART(uart_port_t port, int tx_pin, int rx_pin, uint32_t buffer_size = 256,
@@ -76,6 +76,9 @@ class ESP32UART : public UART<ESP32UARTReadPort, ESP32UARTWritePort, ESP32UART *
   QueueHandle_t event_queue_;
   RawData rx_buff_;
   RawData tx_buff_;
+
+  ESP32UARTReadPort _read_port;
+  ESP32UARTWritePort _write_port;
 };
 
 }  // namespace LibXR

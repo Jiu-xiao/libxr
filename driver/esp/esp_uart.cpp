@@ -52,10 +52,12 @@ size_t ESP32UARTWritePort::Size()
 
 ESP32UART::ESP32UART(uart_port_t port, int tx_pin, int rx_pin, uint32_t buffer_size,
                      uint32_t rx_thread_stack_depth, uint32_t rx_thread_priority)
-    : UART(0, 1, 0, this),
+    : UART(&_read_port, &_write_port),
       port_(port),
       rx_buff_(new uint8_t[buffer_size], buffer_size),
-      tx_buff_(new uint8_t[buffer_size], buffer_size)
+      tx_buff_(new uint8_t[buffer_size], buffer_size),
+      _read_port(0, this),
+      _write_port(1, 0, this)
 {
   uart_config_t config = {};
   config.baud_rate = 115200;
@@ -71,8 +73,8 @@ ESP32UART::ESP32UART(uart_port_t port, int tx_pin, int rx_pin, uint32_t buffer_s
   ESP_ERROR_CHECK(
       uart_driver_install(port_, rx_buff_.size_, tx_buff_.size_, 20, &event_queue_, 0));
 
-  read_port_ = ReadFun;
-  write_port_ = WriteFun;
+  _read_port = ReadFun;
+  _write_port = WriteFun;
 
   xTaskCreate(RxTask, "uart_rx_task", rx_thread_stack_depth, this, rx_thread_priority,
               nullptr);
@@ -97,8 +99,8 @@ void ESP32UART::HandleEvent(const uart_event_t &event)
   {
     case UART_DATA:
     {
-      LibXR::Mutex::LockGuard guard(read_port_.mutex_);
-      read_port_.ProcessPendingReads(false);
+      LibXR::Mutex::LockGuard guard(read_port_->mutex_);
+      read_port_->ProcessPendingReads(false);
       break;
     }
     case UART_BUFFER_FULL:
@@ -106,15 +108,15 @@ void ESP32UART::HandleEvent(const uart_event_t &event)
     case UART_FRAME_ERR:
     case UART_PARITY_ERR:
     {
-      LibXR::Mutex::LockGuard guard(read_port_.mutex_);
+      LibXR::Mutex::LockGuard guard(read_port_->mutex_);
 
-      if (read_port_.busy_)
+      if (read_port_->busy_)
       {
-        read_port_.info_.op.UpdateStatus(false, ErrorCode::FAILED);
+        read_port_->info_.op.UpdateStatus(false, ErrorCode::FAILED);
       }
       uart_flush_input(port_);
-      read_port_.Reset();
-      write_port_.Reset();
+      read_port_->Reset();
+      write_port_->Reset();
       break;
     }
     default:
@@ -124,7 +126,7 @@ void ESP32UART::HandleEvent(const uart_event_t &event)
 
 ErrorCode ESP32UART::WriteFun(WritePort &port)
 {
-  ESP32UART *self = CONTAINER_OF(&port, ESP32UART, write_port_);
+  ESP32UART *self = CONTAINER_OF(&port, ESP32UART, _write_port);
   WriteInfoBlock info;
   if (port.queue_info_->Pop(info) != ErrorCode::OK)
   {
@@ -147,7 +149,7 @@ ErrorCode ESP32UART::WriteFun(WritePort &port)
 
 ErrorCode ESP32UART::ReadFun(ReadPort &port)
 {
-  ESP32UART *self = CONTAINER_OF(&port, ESP32UART, read_port_);
+  ESP32UART *self = CONTAINER_OF(&port, ESP32UART, _read_port);
   UNUSED(self);
 
   if (port.Size() >= port.info_.data.size_)
