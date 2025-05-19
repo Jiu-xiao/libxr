@@ -250,7 +250,6 @@ typedef ErrorCode (*ReadFun)(ReadPort &port);
  */
 typedef struct
 {
- public:
   RawData data;      ///< Data buffer. 数据缓冲区。
   ReadOperation op;  ///< Read operation instance. 读取操作实例。
 } ReadInfoBlock;
@@ -473,7 +472,7 @@ class ReadPort
    * @param in_isr 指示是否在中断上下文中执行。
    *               Indicates whether the operation is executed in an interrupt context.
    */
-  virtual void ProcessPendingReads(bool in_isr = true)
+  virtual void ProcessPendingReads(bool in_isr)
   {
     ASSERT(queue_data_ != nullptr);
 
