@@ -32,9 +32,9 @@ extern "C" void USBD_CDC_ACM_Deactivate(void *cdc_instance)
 
 STM32VirtualUART::STM32VirtualUART(PCD_HandleTypeDef *hpcd, ULONG tx_stack_size,
                                    UINT tx_priority, ULONG rx_stack_size,
-                                   UINT rx_priority, uint32_t rx_queue_size,
-                                   uint32_t tx_queue_size, size_t buffer_size)
-    : UART(rx_queue_size, buffer_size, tx_queue_size, buffer_size),
+                                   UINT rx_priority, uint32_t tx_queue_size,
+                                   size_t buffer_size)
+    : UART(&_read_port, &_write_port),
       tx_stack_size_(tx_stack_size),
       rx_stack_size_(rx_stack_size),
       tx_priority_(tx_priority),
@@ -42,7 +42,9 @@ STM32VirtualUART::STM32VirtualUART(PCD_HandleTypeDef *hpcd, ULONG tx_stack_size,
       buffer_size_(buffer_size),
       rx_buff_(new uint8_t[buffer_size]),
       tx_buff_(new uint8_t[buffer_size]),
-      write_sem_(0)
+      write_sem_(0),
+      _read_port(buffer_size),
+      _write_port(tx_queue_size, buffer_size)
 {
   // 初始化 USBX 协议栈
   ux_system_initialize(usbx_memory, UX_DEVICE_APP_MEM_POOL_SIZE, UX_NULL, 0);
@@ -73,8 +75,8 @@ STM32VirtualUART::STM32VirtualUART(PCD_HandleTypeDef *hpcd, ULONG tx_stack_size,
 
   ASSERT(tx_stack_mem_ && rx_stack_mem_);
 
-  read_port_ = ReadFun;
-  write_port_ = WriteFun;
+  _read_port = ReadFun;
+  _write_port = WriteFun;
 
   STM32VirtualUART::instance_ = this;
 
@@ -113,41 +115,17 @@ ErrorCode STM32VirtualUART::SetConfig(UART::Configuration config)
 
 ErrorCode STM32VirtualUART::ReadFun(ReadPort &port)
 {
-  ReadInfoBlock block;
+  UNUSED(port);
 
-  if (port.queue_block_->Peek(block) != ErrorCode::OK)
-  {
-    return ErrorCode::EMPTY;
-  }
-
-  block.op_.MarkAsRunning();
-
-  if (port.queue_data_->Size() >= block.data_.size_)
-  {
-    port.queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
-    port.queue_block_->Pop();
-
-    port.read_size_ = block.data_.size_;
-    block.op_.UpdateStatus(false, ErrorCode::OK);
-    return ErrorCode::OK;
-  }
-  else
-  {
-    return ErrorCode::OK;
-  }
+  return ErrorCode::EMPTY;
 }
 
 ErrorCode STM32VirtualUART::WriteFun(WritePort &port)
 {
-  auto *uart = CONTAINER_OF(&port, STM32VirtualUART, write_port_);
-  WriteInfoBlock info;
-  if (port.queue_info_->Peek(info) != ErrorCode::OK)
-  {
-    return ErrorCode::EMPTY;
-  }
-  port.UpdateStatus(info.op);
+  auto *uart = CONTAINER_OF(&port, STM32VirtualUART, _write_port);
+
   uart->write_sem_.Post();
-  return ErrorCode::OK;
+  return ErrorCode::EMPTY;
 }
 
 void STM32VirtualUART::RxLoop()
@@ -164,13 +142,9 @@ void STM32VirtualUART::RxLoop()
         _ux_device_class_cdc_acm_read(cdc_acm_, rx_buff_, buffer_size_, &actual_len);
     if (status == UX_SUCCESS && actual_len > 0)
     {
-      read_port_.queue_data_->PushBatch(rx_buff_, actual_len);
       Mutex::LockGuard guard(read_mutex_);
-      read_port_.ProcessPendingReads();
-    }
-    else
-    {
-      tx_thread_sleep(1);
+      read_port_->queue_data_->PushBatch(rx_buff_, actual_len);
+      read_port_->ProcessPendingReads(false);
     }
   }
 }
@@ -191,16 +165,18 @@ void STM32VirtualUART::TxLoop()
       continue;
     }
 
-    if (write_port_.queue_info_->Pop(info) == ErrorCode::OK)
+    if (write_port_->queue_info_->Pop(info) == ErrorCode::OK)
     {
-      if (write_port_.queue_data_->PopBatch(tx_buff_, info.size) == ErrorCode::OK)
+      if (write_port_->queue_data_->PopBatch(tx_buff_, info.data.size_) == ErrorCode::OK)
       {
         ULONG actual = 0;
         UINT status =
-            _ux_device_class_cdc_acm_write(cdc_acm_, tx_buff_, info.size, &actual);
-        info.op.UpdateStatus(false, (status == UX_SUCCESS && actual == info.size)
-                                        ? ErrorCode::OK
-                                        : ErrorCode::FAILED);
+            _ux_device_class_cdc_acm_write(cdc_acm_, tx_buff_, info.data.size_, &actual);
+        write_port_->Finish(false,
+                            (status == UX_SUCCESS && actual == info.data.size_)
+                                ? ErrorCode::OK
+                                : ErrorCode::FAILED,
+                            info, actual);
       }
       else
       {
