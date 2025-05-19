@@ -805,6 +805,7 @@ class Terminal
         offset_ = 0;
         break;
       case 0x7f:
+      case '\b':
         DeleteChar();
         break;
       case '\t':

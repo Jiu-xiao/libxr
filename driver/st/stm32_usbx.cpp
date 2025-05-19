@@ -140,7 +140,7 @@ ErrorCode STM32VirtualUART::ReadFun(ReadPort &port)
 ErrorCode STM32VirtualUART::WriteFun(WritePort &port)
 {
   auto *uart = CONTAINER_OF(&port, STM32VirtualUART, write_port_);
-  WritePort::WriteInfo info;
+  WriteInfoBlock info;
   if (port.queue_info_->Peek(info) != ErrorCode::OK)
   {
     return ErrorCode::EMPTY;
@@ -177,7 +177,7 @@ void STM32VirtualUART::RxLoop()
 
 void STM32VirtualUART::TxLoop()
 {
-  WritePort::WriteInfo info;
+  WriteInfoBlock info;
   while (true)
   {
     if (!cdc_acm_)
