@@ -22,17 +22,19 @@
 namespace LibXR
 {
 
-class LinuxUART : public UART<>
+class LinuxUART : public UART
 {
  public:
   LinuxUART(const char *dev_path, unsigned int baudrate = 115200,
             Parity parity = Parity::NO_PARITY, uint8_t data_bits = 8,
             uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512)
-      : UART<>(buffer_size, tx_queue_size, buffer_size),
+      : UART(&_read_port, &_write_port),
         write_sem_(0),
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
-        buff_size_(buffer_size)
+        buff_size_(buffer_size),
+        _read_port(buffer_size),
+        _write_port(tx_queue_size, buffer_size)
   {
     ASSERT(buff_size_ > 0);
 
@@ -62,8 +64,8 @@ class LinuxUART : public UART<>
 
     SetConfig(config_);
 
-    read_port_ = ReadFun;
-    write_port_ = WriteFun;
+    _read_port = ReadFun;
+    _write_port = WriteFun;
 
     rx_thread_.Create<LinuxUART *>(
         this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", 8192,
@@ -246,9 +248,9 @@ class LinuxUART : public UART<>
       auto n = read(fd_, rx_buff_, buff_size_);
       if (n > 0)
       {
-        read_port_.queue_data_->PushBatch(rx_buff_, n);
         Mutex::LockGuard guard(read_mutex_);
-        read_port_.ProcessPendingReads();
+        read_port_->queue_data_->PushBatch(rx_buff_, n);
+        read_port_->ProcessPendingReads(false);
       }
       else
       {
@@ -274,9 +276,10 @@ class LinuxUART : public UART<>
         continue;
       }
 
-      if (write_port_.queue_info_->Pop(info) == ErrorCode::OK)
+      if (write_port_->queue_info_->Pop(info) == ErrorCode::OK)
       {
-        if (write_port_.queue_data_->PopBatch(tx_buff_, info.data.size_) == ErrorCode::OK)
+        if (write_port_->queue_data_->PopBatch(tx_buff_, info.data.size_) ==
+            ErrorCode::OK)
         {
           auto written = write(fd_, tx_buff_, info.data.size_);
           if (written < 0)
@@ -284,9 +287,11 @@ class LinuxUART : public UART<>
             XR_LOG_WARN("Cannot write UART device: %s", device_path_.c_str());
             connected_ = false;
           }
-          info.op.UpdateStatus(false, (written == static_cast<int>(info.data.size_))
-                                          ? ErrorCode::OK
-                                          : ErrorCode::FAILED);
+          write_port_->Finish(false,
+                              (written == static_cast<int>(info.data.size_))
+                                  ? ErrorCode::OK
+                                  : ErrorCode::FAILED,
+                              info, written);
         }
         else
         {
@@ -308,6 +313,9 @@ class LinuxUART : public UART<>
   size_t buff_size_ = 0;
   Semaphore write_sem_;
   Mutex read_mutex_;
+
+  ReadPort _read_port;
+  WritePort _write_port;
 };
 
 }  // namespace LibXR
