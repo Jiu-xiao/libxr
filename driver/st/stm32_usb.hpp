@@ -65,7 +65,7 @@ class STM32VirtualUART : public UART
 
   static ErrorCode WriteFun(WritePort &port)
   {
-    STM32VirtualUART *uart = CONTAINER_OF(&port, STM32VirtualUART, write_port_);
+    STM32VirtualUART *uart = CONTAINER_OF(&port, STM32VirtualUART, _write_port);
     auto p_data_class =
         reinterpret_cast<USBD_CDC_HandleTypeDef *>(uart->usb_handle_->pClassData);
 
@@ -73,8 +73,8 @@ class STM32VirtualUART : public UART
     {
       WriteInfoBlock info;
       port.queue_info_->Pop(info);
-      port.queue_data_->PopBatch(uart->tx_buffer_, info.size);
-      info.op.UpdateStatus(false, ErrorCode::INIT_ERR);
+      port.queue_data_->PopBatch(uart->tx_buffer_, info.data.size_);
+      port.Finish(false, ErrorCode::INIT_ERR, info, 0);
       return ErrorCode::INIT_ERR;
     }
 
@@ -92,7 +92,7 @@ class STM32VirtualUART : public UART
         return ErrorCode::OK;
       }
 
-      if (port.queue_data_->PopBatch(uart->tx_buffer_, info.size) != ErrorCode::OK)
+      if (port.queue_data_->PopBatch(uart->tx_buffer_, info.data.size_) != ErrorCode::OK)
       {
         ASSERT(false);
         return ErrorCode::EMPTY;
@@ -102,49 +102,28 @@ class STM32VirtualUART : public UART
       uart->writing_ = true;
 #endif
 
-      USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, info.size);
+      USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_, info.data.size_);
       USBD_CDC_TransmitPacket(uart->usb_handle_);
 
-      info.op.MarkAsRunning();
-
-      return ErrorCode::OK;
+      return ErrorCode::FAILED;
     }
-    return ErrorCode::OK;
+    return ErrorCode::FAILED;
   }
 
   static ErrorCode ReadFun(ReadPort &port)
   {
-    ReadInfoBlock block;
-
-    if (port.queue_block_->Peek(block) != ErrorCode::OK)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    block.op_.MarkAsRunning();
-
-    if (port.queue_data_->Size() >= block.data_.size_)
-    {
-      port.queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
-      port.queue_block_->Pop();
-
-      port.read_size_ = block.data_.size_;
-      block.op_.UpdateStatus(false, ErrorCode::OK);
-      return ErrorCode::OK;
-    }
-    else
-    {
-      return ErrorCode::OK;
-    }
+    UNUSED(port);
+    return ErrorCode::EMPTY;
   }
 
   STM32VirtualUART(USBD_HandleTypeDef &usb_handle, uint8_t *tx_buffer = UserTxBufferFS,
-                   uint8_t *rx_buffer = UserRxBufferFS, uint32_t rx_queue_size = 5,
-                   uint32_t tx_queue_size = 5)
-      : UART(rx_queue_size, APP_RX_DATA_SIZE, tx_queue_size, APP_TX_DATA_SIZE),
+                   uint8_t *rx_buffer = UserRxBufferFS, uint32_t tx_queue_size = 5)
+      : UART(&_read_port, &_write_port),
         usb_handle_(&usb_handle),
         tx_buffer_(tx_buffer),
-        rx_buffer_(rx_buffer)
+        rx_buffer_(rx_buffer),
+        _write_port(tx_queue_size, APP_TX_DATA_SIZE),
+        _read_port(APP_RX_DATA_SIZE)
   {
     map[0] = this;
 
@@ -152,8 +131,8 @@ class STM32VirtualUART : public UART
 
     USBD_CDC_RegisterInterface(usb_handle_, &usbd_cdc_itf);
 
-    write_port_ = WriteFun;
-    read_port_ = ReadFun;
+    _write_port = WriteFun;
+    _read_port = ReadFun;
 
     USBD_CDC_ReceivePacket(usb_handle_);
   }
@@ -169,6 +148,9 @@ class STM32VirtualUART : public UART
   USBD_HandleTypeDef *usb_handle_ = nullptr;
   uint8_t *tx_buffer_ = nullptr;
   uint8_t *rx_buffer_ = nullptr;
+
+  WritePort _write_port;
+  ReadPort _read_port;
 
 #if defined(STM32F1)
   bool writing_ = false;

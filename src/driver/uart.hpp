@@ -15,8 +15,6 @@ namespace LibXR
  * This class defines the basic interface for a UART device, including configuration and
  * data transmission ports.
  */
-template <typename ReadPortType = ReadPort, typename WritePortType = WritePort,
-          typename... Args>
 class UART
 {
  public:
@@ -50,8 +48,8 @@ class UART
     uint8_t stop_bits;  ///< 停止位长度 / Number of stop bits
   };
 
-  ReadPortType read_port_;    ///< 读取端口 / Read port
-  WritePortType write_port_;  ///< 写入端口 / Write port
+  ReadPort* read_port_;    ///< 读取端口 / Read port
+  WritePort* write_port_;  ///< 写入端口 / Write port
 
   /**
    * @brief UART 构造函数 / UART constructor
@@ -62,9 +60,9 @@ class UART
    * 该构造函数初始化 UART 的读取和写入端口。
    * This constructor initializes the read and write ports of the UART.
    */
-  UART(size_t rx_buffer_size, size_t tx_queue_size, size_t tx_buffer_size, Args... args)
-      : read_port_(rx_buffer_size, args...),
-        write_port_(tx_queue_size, tx_buffer_size, args...)
+  template <typename ReadPortType = ReadPort, typename WritePortType = WritePort>
+  UART(ReadPortType* read_port, WritePortType* write_port)
+      : read_port_(read_port), write_port_(write_port)
   {
   }
 
@@ -79,6 +77,20 @@ class UART
    * configuration logic.
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
+
+  template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
+                                        WriteOperation, std::decay_t<OperationType>>>>
+  ErrorCode Write(ConstRawData data, OperationType&& op)
+  {
+    return (*write_port_)(data, std::forward<OperationType>(op));
+  }
+
+  template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
+                                        ReadOperation, std::decay_t<OperationType>>>>
+  ErrorCode Read(RawData data, OperationType&& op)
+  {
+    return (*read_port_)(data, std::forward<OperationType>(op));
+  }
 };
 
 }  // namespace LibXR
