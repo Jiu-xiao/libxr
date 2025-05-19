@@ -9,11 +9,11 @@
 #include "libxr_rw.hpp"
 #include "mutex.hpp"
 #include "semaphore.hpp"
+#include "tx_api.h"
 #include "uart.hpp"
 #include "ux_api.h"
 #include "ux_device_class_cdc_acm.h"
 #include "ux_device_stack.h"
-#include "tx_api.h"
 
 namespace LibXR
 {
@@ -22,8 +22,8 @@ class STM32VirtualUART : public UART
 {
  public:
   STM32VirtualUART(PCD_HandleTypeDef *hpcd, ULONG tx_stack_size, UINT tx_priority,
-                   ULONG rx_stack_size, UINT rx_priority, uint32_t rx_queue_size = 5,
-                   uint32_t tx_queue_size = 5, size_t buffer_size = 512);
+                   ULONG rx_stack_size, UINT rx_priority, uint32_t tx_queue_size = 5,
+                   size_t buffer_size = 512);
 
   ~STM32VirtualUART();
 
@@ -58,6 +58,9 @@ class STM32VirtualUART : public UART
 
   Semaphore write_sem_;
   Mutex read_mutex_;
+
+  ReadPort _read_port;
+  WritePort _write_port;
 };
 
 }  // namespace LibXR
