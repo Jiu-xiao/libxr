@@ -83,7 +83,14 @@ class Thread
 
     auto block = new ThreadBlock(function, arg);
 
-    auto ans = xTaskCreate(block->Port, name, stack_depth, block,
+    uint32_t stack_size = stack_depth / 4;
+
+    if (stack_depth % 4 != 0)
+    {
+      stack_size += 1;
+    }
+
+    auto ans = xTaskCreate(block->Port, name, stack_size, block,
                            static_cast<uint32_t>(priority), &(this->thread_handle_));
     UNUSED(ans);
     UNUSED(block);
