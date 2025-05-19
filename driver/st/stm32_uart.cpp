@@ -273,8 +273,6 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
   {
     uart->write_port_->Finish(true, ErrorCode::FAILED, info, 0);
   }
-  uart->read_port_->Reset();
-  uart->write_port_->Reset();
 }
 
 extern "C" void HAL_UART_AbortTransmitCpltCallback(UART_HandleTypeDef *huart)
@@ -285,7 +283,6 @@ extern "C" void HAL_UART_AbortTransmitCpltCallback(UART_HandleTypeDef *huart)
   {
     uart->write_port_->Finish(true, ErrorCode::FAILED, info, 0);
   }
-  uart->write_port_->Reset();
 }
 
 extern "C" void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart)
