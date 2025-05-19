@@ -48,7 +48,20 @@ class PID
    * @param param PID 参数结构体。
    *              PID parameter struct.
    */
-  PID(const Param PARAM) : param_(std::move(PARAM)) { Reset(); }
+
+  /**
+   * @brief 构造 PID 控制器。
+   *        Construct a PID controller.
+   *
+   * @tparam Param PID 参数结构体。
+   *                PID parameter struct.
+   * @param PARAM
+   */
+  template <typename Param>
+  PID(Param&& PARAM) : param_(std::forward<Param>(PARAM))
+  {
+    Reset();
+  }
 
   /**
    * @brief 使用反馈值计算 PID 输出。
