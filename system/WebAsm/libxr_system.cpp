@@ -23,7 +23,7 @@ extern "C"
     {
       LibXR::STDIO::read_->queue_data_->PushBatch(
           reinterpret_cast<const uint8_t *>(js_input), strlen(js_input));
-      LibXR::STDIO::read_->ProcessPendingReads();
+      LibXR::STDIO::read_->ProcessPendingReads(false);
     }
   }
 }
@@ -43,7 +43,7 @@ void LibXR::PlatformInit()
         return ErrorCode::OK;
       }
 
-      port.queue_data_->PopBatch(write_buff, info.size);
+      port.queue_data_->PopBatch(write_buff, info.data.size_);
       EM_ASM(
           {
             var ptr = $0;
@@ -53,11 +53,11 @@ void LibXR::PlatformInit()
               Module.put_char(String.fromCharCode(HEAPU8[ptr + i]));
             }
           },
-          reinterpret_cast<uintptr_t>(write_buff), info.size);
+          reinterpret_cast<uintptr_t>(write_buff), info.data.size_);
 
       port.queue_info_->Pop(info);
 
-      port.UpdateStatus(false, ErrorCode::OK, info.op, info.size);
+      port.Finish(false, ErrorCode::OK, info, info.data.size_);
     }
 
     return ErrorCode::OK;
@@ -70,32 +70,13 @@ void LibXR::PlatformInit()
 
   auto read_fun = [](ReadPort &port)
   {
-    ReadInfoBlock block;
+    UNUSED(port);
 
-    if (port.queue_block_->Peek(block) != ErrorCode::OK)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    block.op_.MarkAsRunning();
-
-    if (port.queue_data_->Size() >= block.data_.size_)
-    {
-      port.queue_data_->PopBatch(block.data_.addr_, block.data_.size_);
-      port.queue_block_->Pop();
-
-      port.read_size_ = block.data_.size_;
-      block.op_.UpdateStatus(false, ErrorCode::OK);
-      return ErrorCode::OK;
-    }
-    else
-    {
-      return ErrorCode::EMPTY;
-    }
+    return ErrorCode::EMPTY;
   };
 
   LibXR::STDIO::read_ =
-      new LibXR::ReadPort(32, static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
+      new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
 
   *LibXR::STDIO::read_ = read_fun;
 }
