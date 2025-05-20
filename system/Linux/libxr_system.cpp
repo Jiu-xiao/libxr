@@ -26,7 +26,6 @@ static LibXR::Semaphore stdo_sem;
 
 void StdiThread(LibXR::ReadPort *read_port)
 {
-  LibXR::ReadInfoBlock &info = read_port->info_;
   static uint8_t read_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
 
   while (true)
@@ -89,6 +88,7 @@ void LibXR::PlatformInit()
 {
   auto write_fun = [](WritePort &port)
   {
+    UNUSED(port);
     stdo_sem.Post();
     return ErrorCode::FAILED;
   };
@@ -98,7 +98,11 @@ void LibXR::PlatformInit()
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort &port) { return ErrorCode::FAILED; };
+  auto read_fun = [](ReadPort &port)
+  {
+    UNUSED(port);
+    return ErrorCode::FAILED;
+  };
 
   LibXR::STDIO::read_ =
       new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
