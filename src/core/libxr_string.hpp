@@ -106,7 +106,7 @@ class String
   String &operator+=(const char *str)
   {
     auto len = strnlen(this->Raw(), MaxLength);
-    size_t copy_len = std::min(MaxLength - len, std::strlen(str));
+    size_t copy_len = LibXR::min(MaxLength - len, std::strlen(str));
     std::strncat(&raw_string_[0], str, copy_len);
     raw_string_[MaxLength] = '\0';
     return *this;
