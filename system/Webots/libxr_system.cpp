@@ -2,6 +2,7 @@
 
 #include <bits/types/FILE.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -21,49 +22,92 @@
 uint64_t _libxr_webots_time_count = 0;
 webots::Robot *_libxr_webots_robot_handle = nullptr;  // NOLINT
 static float time_step = 0.0f;
-condition_var_handle *_libxr_webots_time_notify = nullptr;
+LibXR::condition_var_handle *_libxr_webots_time_notify = nullptr;
 
-void LibXR::PlatformInit(webots::Robot *robot = nullptr)
-{  // NOLINT
-  auto write_fun = [](WritePort &port)
+static LibXR::Semaphore stdo_sem;
+
+void StdiThread(LibXR::ReadPort *read_port)
+{
+  static uint8_t read_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
+
+  while (true)
   {
-    static uint8_t write_buff[1024];
-    WriteInfoBlock info;
-    while (true)
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+
+    int ret = select(STDIN_FILENO + 1, &rfds, NULL, NULL, NULL);
+
+    if (ret > 0 && FD_ISSET(STDIN_FILENO, &rfds))
     {
-      if (port.queue_info_->Pop(info) != ErrorCode::OK)
+      int ready = 0;
+      if (ioctl(STDIN_FILENO, FIONREAD, &ready) != -1 && ready > 0)
       {
-        return ErrorCode::OK;
+        auto size = fread(read_buff, sizeof(char), ready, stdin);
+        if (size < 1)
+        {
+          continue;
+        }
+        LibXR::Mutex::LockGuard lock(read_port->mutex_);
+        read_port->queue_data_->PushBatch(read_buff, size);
+        read_port->ProcessPendingReads(false);
+      }
+    }
+  }
+}
+
+void StdoThread(LibXR::WritePort *write_port)
+{
+  LibXR::WriteInfoBlock info;
+  static uint8_t write_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
+
+  while (true)
+  {
+    if (stdo_sem.Wait() == ErrorCode::OK)
+    {
+      auto ans = write_port->queue_info_->Pop(info);
+      if (ans != ErrorCode::OK)
+      {
+        continue;
       }
 
-      port.queue_data_->PopBatch(write_buff, info.size);
-      auto ans = fwrite(write_buff, 1, info.size, stdout);
-      UNUSED(ans);
-      port.queue_info_->Pop(info);
+      ans = write_port->queue_data_->PopBatch(write_buff, info.data.size_);
+      if (ans != ErrorCode::OK)
+      {
+        continue;
+      }
 
-      port.UpdateStatus(false, ErrorCode::OK, info.op, info.size);
+      auto write_size = fwrite(info.data.addr_, sizeof(char), info.data.size_, stdout);
+      fflush(stdout);
+      write_port->Finish(
+          false, write_size == info.data.size_ ? ErrorCode::OK : ErrorCode::FAILED, info,
+          write_size);
     }
+  }
+}
 
-    return ErrorCode::OK;
+void LibXR::PlatformInit(webots::Robot *robot)
+{
+  auto write_fun = [](WritePort &port)
+  {
+    UNUSED(port);
+    stdo_sem.Post();
+    return ErrorCode::FAILED;
   };
 
-  LibXR::STDIO::write_ = new LibXR::WritePort(32, 32 * LIBXR_PRINTF_BUFFER_SIZE);
+  LibXR::STDIO::write_ =
+      new LibXR::WritePort(32, static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
 
   *LibXR::STDIO::write_ = write_fun;
 
   auto read_fun = [](ReadPort &port)
   {
-    ReadInfoBlock info;
-    port.queue_block_->Pop(info);
-
-    auto need_read = info.data_.size_;
-
-    port.read_size_ = fread(info.data_.addr_, sizeof(char), need_read, stdin);
-    port.UpdateStatus(false, ErrorCode::OK, info, need_read);
-    return ErrorCode::OK;
+    UNUSED(port);
+    return ErrorCode::FAILED;
   };
 
-  LibXR::STDIO::read_ = new LibXR::ReadPort(32, 32 * LIBXR_PRINTF_BUFFER_SIZE);
+  LibXR::STDIO::read_ =
+      new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
 
   *LibXR::STDIO::read_ = read_fun;
 
@@ -72,6 +116,12 @@ void LibXR::PlatformInit(webots::Robot *robot = nullptr)
   tty.c_lflag &= ~(ICANON | ECHO);         // 禁用规范模式和回显
   tcsetattr(STDIN_FILENO, TCSANOW, &tty);  // 立即生效
 
+  LibXR::Thread stdi_thread, stdo_thread;
+  stdi_thread.Create<LibXR::ReadPort *>(LibXR::STDIO::read_, StdiThread, "STDIO.read_",
+                                        1024, LibXR::Thread::Priority::MEDIUM);
+
+  stdo_thread.Create<LibXR::WritePort *>(LibXR::STDIO::write_, StdoThread, "STDIO.write_",
+                                         1024, LibXR::Thread::Priority::MEDIUM);
   if (robot == nullptr)
   {
     _libxr_webots_robot_handle = new webots::Robot();
@@ -90,8 +140,8 @@ void LibXR::PlatformInit(webots::Robot *robot = nullptr)
   }
 
   _libxr_webots_time_notify = new condition_var_handle;
-  pthread_mutex_init(_libxr_webots_time_notify->mutex, nullptr);
-  pthread_cond_init(_libxr_webots_time_notify->cond, nullptr);
+  pthread_mutex_init(&_libxr_webots_time_notify->mutex, nullptr);
+  pthread_cond_init(&_libxr_webots_time_notify->cond, nullptr);
 
   auto webots_timebase_thread_fun = [](void *)
   {
@@ -102,9 +152,9 @@ void LibXR::PlatformInit(webots::Robot *robot = nullptr)
       poll(nullptr, 0, 1);
       _libxr_webots_robot_handle->step(time_step);
       _libxr_webots_time_count++;
-      pthread_mutex_lock(_libxr_webots_time_notify->mutex);
-      pthread_cond_broadcast(_libxr_webots_time_notify->cond);
-      pthread_mutex_unlock(_libxr_webots_time_notify->mutex);
+      pthread_mutex_lock(&_libxr_webots_time_notify->mutex);
+      pthread_cond_broadcast(&_libxr_webots_time_notify->cond);
+      pthread_mutex_unlock(&_libxr_webots_time_notify->mutex);
     }
   };
 

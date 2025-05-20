@@ -11,7 +11,7 @@ extern condition_var_handle *_libxr_webots_time_notify;
 
 Thread Thread::Current(void) { return Thread(pthread_self()); }
 
-static void ConditionVarWait(uint32_t timeout)
+static ErrorCode ConditionVarWait(uint32_t timeout)
 {
   uint32_t start_time = _libxr_webots_time_count;
 
@@ -27,10 +27,10 @@ static void ConditionVarWait(uint32_t timeout)
 
   while (_libxr_webots_time_count - start_time < timeout)
   {
-    pthread_mutex_lock(_libxr_webots_time_notify->mutex);
-    auto ans = pthread_cond_timedwait(_libxr_webots_time_notify->cond,
-                                      _libxr_webots_time_notify->mutex, &ts);
-    pthread_mutex_unlock(_libxr_webots_time_notify->mutex);
+    pthread_mutex_lock(&_libxr_webots_time_notify->mutex);
+    auto ans = pthread_cond_timedwait(&_libxr_webots_time_notify->cond,
+                                      &_libxr_webots_time_notify->mutex, &ts);
+    pthread_mutex_unlock(&_libxr_webots_time_notify->mutex);
     if (ans == 0)
     {
       return ErrorCode::OK;

@@ -63,6 +63,6 @@ typedef struct
  * the `_libxr_webots_robot_handle` variable and initializing the simulation
  * time counter `_libxr_webots_time_count`.
  */
-void PlatformInit(webots::Robot *robot);  // NOLINT
+void PlatformInit(webots::Robot *robot = nullptr);  // NOLINT
 
 }  // namespace LibXR
