@@ -14,12 +14,13 @@ namespace LibXR
  * @class LockFreeQueue
  * @brief 无锁队列实现 / Lock-free queue implementation
  *
- * 该类实现了单生产者多消费者无锁队列（SPMC Lock-Free Queue），支持多线程环境下的高效入队和出队操作，
+ * 该类实现了单生产者多消费者无锁队列（SPMC Lock-Free
+ * Queue），支持多线程环境下的高效入队和出队操作，
  * 适用于需要高并发性能的场景，如实时系统和多线程数据处理。
- * This class implements a single-producer, multiple-consumer lock-free queue (SPMC Lock-Free Queue)
- * that supports high-efficiency enqueue and dequeue operations in a multi-threaded environment.
- * It is suitable for scenarios requiring high concurrency, such as real-time systems and multi-threaded
- * data processing.
+ * This class implements a single-producer, multiple-consumer lock-free queue (SPMC
+ * Lock-Free Queue) that supports high-efficiency enqueue and dequeue operations in a
+ * multi-threaded environment. It is suitable for scenarios requiring high concurrency,
+ * such as real-time systems and multi-threaded data processing.
  *
  * @tparam Data 队列存储的数据类型 / The type of data stored in the queue.
  */
@@ -35,7 +36,7 @@ class LockFreeQueue
    * Creates a lock-free queue with the specified size and initializes relevant variables.
    */
   LockFreeQueue(size_t length)
-      : head_(0), tail_(0), queue_handle_(new Data[length + 1]), length_(length)
+      : head_(0), tail_(0), queue_handle_(new Data[length + 1]), LENGTH(length)
   {
   }
 
@@ -212,7 +213,7 @@ class LockFreeQueue
     auto current_tail = tail_.load(std::memory_order_relaxed);
     auto current_head = head_.load(std::memory_order_acquire);
 
-    size_t capacity = length_ + 1;
+    size_t capacity = LENGTH + 1;
     size_t free_space = (current_tail >= current_head)
                             ? (capacity - (current_tail - current_head) - 1)
                             : (current_head - current_tail - 1);
@@ -222,9 +223,12 @@ class LockFreeQueue
       return ErrorCode::FULL;
     }
 
-    for (size_t i = 0; i < size; ++i)
+    size_t first_chunk = LibXR::min(size, capacity - current_tail);
+    memcpy(queue_handle_ + current_tail, data, first_chunk * sizeof(Data));
+
+    if (size > first_chunk)
     {
-      queue_handle_[(current_tail + i) % capacity] = data[i];
+      memcpy(queue_handle_, data + first_chunk, (size - first_chunk) * sizeof(Data));
     }
 
     tail_.store((current_tail + size) % capacity, std::memory_order_release);
@@ -241,7 +245,7 @@ class LockFreeQueue
    */
   ErrorCode PopBatch(Data *data, size_t batch_size)
   {
-    size_t capacity = length_ + 1;
+    size_t capacity = LENGTH + 1;
 
     while (true)
     {
@@ -257,14 +261,18 @@ class LockFreeQueue
         return ErrorCode::EMPTY;
       }
 
-      for (size_t i = 0; i < batch_size; ++i)
+      size_t first_chunk = std::min(batch_size, capacity - current_head);
+      memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
+
+      if (batch_size > first_chunk)
       {
-        data[i] = queue_handle_[(current_head + i) % capacity];
+        memcpy(data + first_chunk, queue_handle_,
+               (batch_size - first_chunk) * sizeof(Data));
       }
 
-      auto next_head = (current_head + batch_size) % capacity;
+      size_t new_head = (current_head + batch_size) % capacity;
 
-      if (head_.compare_exchange_weak(current_head, next_head, std::memory_order_acquire,
+      if (head_.compare_exchange_weak(current_head, new_head, std::memory_order_acquire,
                                       std::memory_order_relaxed))
       {
         return ErrorCode::OK;
@@ -293,21 +301,21 @@ class LockFreeQueue
     const auto CURRENT_HEAD = head_.load(std::memory_order_acquire);
     const auto CURRENT_TAIL = tail_.load(std::memory_order_acquire);
     return (CURRENT_TAIL >= CURRENT_HEAD) ? (CURRENT_TAIL - CURRENT_HEAD)
-                                          : ((length_ + 1) - CURRENT_HEAD + CURRENT_TAIL);
+                                          : ((LENGTH + 1) - CURRENT_HEAD + CURRENT_TAIL);
   }
 
   /**
    * @brief 计算队列剩余可用空间 / Calculates the remaining available space in the queue
    */
-  size_t EmptySize() { return length_ - Size(); }
+  size_t EmptySize() { return LENGTH - Size(); }
 
  private:
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<unsigned int> head_;
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<unsigned int> tail_;
   Data *queue_handle_;
-  size_t length_;
+  const size_t LENGTH;
 
-  unsigned int Increment(unsigned int index) const { return (index + 1) % (length_ + 1); }
+  unsigned int Increment(unsigned int index) const { return (index + 1) % (LENGTH + 1); }
 };
 
 }  // namespace LibXR
