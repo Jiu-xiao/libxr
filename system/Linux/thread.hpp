@@ -117,8 +117,8 @@ class Thread
       }
 
       decltype(function) fun_;  ///< 线程执行的函数 Function executed by the thread
-      ArgType arg_;           ///< 线程函数的参数 Argument passed to the thread function
-      char *name_;            ///< 线程名称 Thread name
+      ArgType arg_;             ///< 线程函数的参数 Argument passed to the thread function
+      char *name_;              ///< 线程名称 Thread name
     };
 
     auto block = new ThreadBlock(function, arg, name);
@@ -127,6 +127,8 @@ class Thread
     int min_priority = sched_get_priority_min(SCHED_FIFO);
     int max_priority = sched_get_priority_max(SCHED_FIFO);
     bool scheduling_set = false;
+
+    UNUSED(scheduling_set);
 
     if (max_priority - min_priority >= static_cast<int>(Priority::REALTIME))
     {
