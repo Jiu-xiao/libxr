@@ -4,9 +4,6 @@
 
 #include "libxr_def.hpp"
 
-static constexpr size_t LIBXR_CACHE_LINE_SIZE =
-    (sizeof(std::atomic<size_t>) * 8 > 32) ? 64 : 32;
-
 namespace LibXR
 {
 

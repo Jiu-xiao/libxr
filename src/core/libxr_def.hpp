@@ -45,6 +45,9 @@ constexpr double M_1G = 9.80665;
 #define CONTAINER_OF(ptr, type, member) \
   ((type *)((char *)(ptr) - OFFSET_OF(type, member)))  // NOLINT
 
+/// \brief 缓存行大小
+static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void *) == 8) ? 64 : 32;
+
 /**
  * @enum ErrorCode
  * @brief 定义错误码枚举
