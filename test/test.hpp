@@ -17,5 +17,6 @@ void test_timebase();
 void test_timer();
 void test_database();
 void test_transform();
+void test_double_buffer();
 
 bool equal(double a, double b);
