@@ -18,8 +18,8 @@ class ESP32VirtualUART : public UART
                    int tx_task_prio = 10, uint32_t tx_stack_depth = 2048,
                    int rx_task_prio = 10, uint32_t rx_stack_depth = 2048)
       : UART(&_read_port, &_write_port),
-        _read_port(rx_queue_size),
-        _write_port(BUFFER_SIZE, tx_queue_size)
+        _read_port(BUFFER_SIZE),
+        _write_port(tx_queue_size, BUFFER_SIZE)
   {
     usb_serial_jtag_driver_config_t cfg = {
         .tx_buffer_size = BUFFER_SIZE,
