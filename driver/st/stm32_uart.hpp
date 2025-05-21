@@ -8,6 +8,7 @@
 #undef UART
 #endif
 
+#include "double_buffer.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "uart.hpp"
@@ -115,7 +116,7 @@ class STM32UART : public UART
   static ErrorCode WriteFun(WritePort &port)
   {
     STM32UART *uart = CONTAINER_OF(&port, STM32UART, _write_port);
-    if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
+    if (!uart->dma_buff_tx_.HasPending())
     {
       WriteInfoBlock info;
       if (port.queue_info_->Peek(info) != ErrorCode::OK)
@@ -123,22 +124,48 @@ class STM32UART : public UART
         return ErrorCode::EMPTY;
       }
 
-      if (port.queue_data_->PopBatch(
-              reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.addr_), info.data.size_) !=
-          ErrorCode::OK)
+      uint8_t *buffer = nullptr;
+      bool use_pending = false;
+
+      if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
+      {
+        buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
+      }
+      else
+      {
+        buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.PendingBuffer());
+        use_pending = true;
+      }
+
+      if (port.queue_data_->PopBatch(reinterpret_cast<uint8_t *>(buffer),
+                                     info.data.size_) != ErrorCode::OK)
       {
         ASSERT(false);
         return ErrorCode::EMPTY;
       }
 
-      auto ans = HAL_UART_Transmit_DMA(uart->uart_handle_,
-                                       static_cast<uint8_t *>(uart->dma_buff_tx_.addr_),
-                                       info.data.size_);
+      if (use_pending)
+      {
+        uart->dma_buff_tx_.EnablePending();
+        if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
+        {
+          uart->dma_buff_tx_.Switch();
+        }
+        else
+        {
+          return ErrorCode::FAILED;
+        }
+      }
+
+      port.queue_info_->Pop(uart->write_info_active_);
+
+      auto ans = HAL_UART_Transmit_DMA(
+          uart->uart_handle_, static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
+          info.data.size_);
+
       if (ans != HAL_OK)
       {
-        port.queue_info_->Pop(info);
         port.Finish(false, ErrorCode::FAILED, info, 0);
-        return ErrorCode::FAILED;
       }
 
       return ErrorCode::FAILED;
@@ -159,7 +186,7 @@ class STM32UART : public UART
             uint32_t tx_queue_size = 5)
       : UART(&_read_port, &_write_port),
         _read_port(dma_buff_rx.size_),
-        _write_port(tx_queue_size, dma_buff_tx.size_),
+        _write_port(tx_queue_size, dma_buff_tx.size_ / 2),
         dma_buff_rx_(dma_buff_rx),
         dma_buff_tx_(dma_buff_tx),
         uart_handle_(uart_handle),
@@ -178,6 +205,10 @@ class STM32UART : public UART
     if ((uart_handle->Init.Mode & UART_MODE_RX) == UART_MODE_RX)
     {
       ASSERT(uart_handle->hdmarx != NULL);
+
+      uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
+      HAL_DMA_Init(uart_handle_->hdmarx);
+
       __HAL_UART_ENABLE_IT(uart_handle, UART_IT_IDLE);
 
       HAL_UART_Receive_DMA(uart_handle, reinterpret_cast<uint8_t *>(dma_buff_rx_.addr_),
@@ -230,7 +261,11 @@ class STM32UART : public UART
   ReadPort _read_port;
   WritePort _write_port;
 
-  RawData dma_buff_rx_, dma_buff_tx_;
+  RawData dma_buff_rx_;
+  DoubleBuffer dma_buff_tx_;
+  WriteInfoBlock write_info_active_;
+
+  size_t last_rx_pos_ = 0;
 
   UART_HandleTypeDef *uart_handle_;
 

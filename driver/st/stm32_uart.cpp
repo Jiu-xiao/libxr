@@ -198,13 +198,32 @@ extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *uart_handle)
   if (__HAL_UART_GET_FLAG(uart_handle, UART_FLAG_IDLE))
   {
     __HAL_UART_CLEAR_IDLEFLAG(uart_handle);
-    size_t len = uart_handle->RxXferSize - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);
 
     auto uart = STM32UART::map[STM32_UART_GetID(uart_handle->Instance)];
+    auto rx_buf = static_cast<uint8_t *>(uart->dma_buff_rx_.addr_);
+    size_t dma_size = uart->dma_buff_rx_.size_;
 
-    HAL_UART_AbortReceive_IT(uart_handle);
-    uart->read_port_->queue_data_->PushBatch(uart->dma_buff_rx_.addr_, len);
-    uart->read_port_->ProcessPendingReads(true);
+    size_t curr_pos =
+        dma_size - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);  // 当前 DMA 写入位置
+    size_t last_pos = uart->last_rx_pos_;
+
+    if (curr_pos != last_pos)
+    {
+      if (curr_pos > last_pos)
+      {
+        // 线性接收区
+        uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], curr_pos - last_pos);
+      }
+      else
+      {
+        // 回卷区：last→end，再从0→curr
+        uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], dma_size - last_pos);
+        uart->read_port_->queue_data_->PushBatch(&rx_buf[0], curr_pos);
+      }
+
+      uart->last_rx_pos_ = curr_pos;
+      uart->read_port_->ProcessPendingReads(true);
+    }
   }
 }
 
@@ -212,51 +231,51 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 {  // NOLINT
   auto uart = STM32UART::map[id];
 
-  WriteInfoBlock info;
-  if (uart->write_port_->queue_info_->Pop(info) != ErrorCode::OK)
+  WriteInfoBlock &current_info = uart->write_info_active_;
+
+  uart->write_port_->write_size_ = uart->uart_handle_->TxXferSize;
+  current_info.op.UpdateStatus(true, ErrorCode::OK);
+
+  if (!uart->dma_buff_tx_.HasPending())
+  {
+    return;
+  }
+
+  if (uart->write_port_->queue_info_->Pop(current_info) != ErrorCode::OK)
   {
     ASSERT(false);
     return;
   }
 
-  uart->write_port_->write_size_ = uart->uart_handle_->TxXferSize;
-  info.op.UpdateStatus(true, ErrorCode::OK);
+  uart->dma_buff_tx_.Switch();
 
-  if (uart->write_port_->queue_info_->Peek(info) != ErrorCode::OK)
+  HAL_UART_Transmit_DMA(uart->uart_handle_,
+                        static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
+                        current_info.data.size_);
+
+  current_info.op.MarkAsRunning();
+
+  WriteInfoBlock next_info;
+
+  if (uart->write_port_->queue_info_->Peek(next_info) != ErrorCode::OK)
   {
     return;
   }
 
   if (uart->write_port_->queue_data_->PopBatch(
-          reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.addr_), info.data.size_) !=
-      ErrorCode::OK)
+          reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.PendingBuffer()),
+          next_info.data.size_) != ErrorCode::OK)
   {
     ASSERT(false);
     return;
   }
 
-  HAL_UART_Transmit_DMA(uart->uart_handle_,
-                        static_cast<uint8_t *>(uart->dma_buff_tx_.addr_),
-                        info.data.size_);
-
-  info.op.MarkAsRunning();
+  uart->dma_buff_tx_.EnablePending();
 }
 
 extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
   STM32_UART_ISR_Handler_TX_CPLT(STM32_UART_GetID(huart->Instance));
-}
-
-extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  UNUSED(huart);
-  auto len = huart->RxXferSize;
-  auto uart = STM32UART::map[STM32_UART_GetID(huart->Instance)];
-  uart->read_port_->queue_data_->PushBatch(
-      static_cast<uint8_t *>(huart->pRxBuffPtr),
-      min(uart->read_port_->queue_data_->EmptySize(), len));
-  HAL_UART_Receive_DMA(huart, huart->pRxBuffPtr, len);
-  uart->read_port_->ProcessPendingReads(true);
 }
 
 extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
@@ -268,6 +287,7 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
 {
   auto uart = STM32UART::map[STM32_UART_GetID(huart->Instance)];
   HAL_UART_Receive_DMA(huart, huart->pRxBuffPtr, uart->dma_buff_rx_.size_);
+  uart->last_rx_pos_ = 0;
   WriteInfoBlock info;
   if (uart->write_port_->queue_info_->Peek(info) == ErrorCode::OK)
   {
