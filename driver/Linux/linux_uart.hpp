@@ -218,7 +218,7 @@ class LinuxUART : public UART
 
   static ErrorCode WriteFun(WritePort &port)
   {
-    auto uart = CONTAINER_OF(&port, LinuxUART, write_port_);
+    auto uart = CONTAINER_OF(&port, LinuxUART, _write_port);
     uart->write_sem_.Post();
     return ErrorCode::OK;
   }
