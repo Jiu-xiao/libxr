@@ -1,8 +1,6 @@
 #pragma once
 
-#include <string>
-#include <vector>
-
+#include "net.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 
@@ -10,13 +8,22 @@ namespace LibXR
 {
 
 /**
- * @brief Wifi 客户端接口类 / Interface class for WiFi client management
+ * @class WifiClient
+ * @brief WiFi 客户端接口 / WiFi Client Interface
+ *
+ * 提供对 WiFi 模块的基本控制、连接管理、网络状态查询和扫描等接口，
+ * 同时继承 NetworkInterface，可统一作为网络接口使用。
  */
-class WifiClient
+class WifiClient : public NetworkInterface
 {
  public:
+  // =========================
+  // 类型定义 / Type Definitions
+  // =========================
+
   /**
-   * @brief WiFi 错误码枚举 / Enumeration of WiFi error codes
+   * @enum WifiError
+   * @brief WiFi 错误码 / Enumeration of WiFi error codes
    */
   enum class WifiError
   {
@@ -34,6 +41,7 @@ class WifiClient
   };
 
   /**
+   * @enum Security
    * @brief WiFi 安全类型 / WiFi security types
    */
   enum class Security
@@ -45,107 +53,131 @@ class WifiClient
   };
 
   /**
+   * @struct EnterpriseConfig
    * @brief 企业 WiFi 配置 / Enterprise WiFi configuration
+   *
+   * 包含身份验证相关的配置，如用户名、密码和证书路径。
    */
   struct EnterpriseConfig
   {
-    std::string identity;     ///< EAP 身份标识 / EAP identity
-    std::string username;     ///< 用户名 / Username
-    std::string password;     ///< 密码 / Password
-    std::string ca_cert;      ///< CA 证书路径 / CA certificate path
-    std::string client_cert;  ///< 客户端证书路径 / Client certificate path
-    std::string client_key;   ///< 客户端密钥路径 / Client key path
+    const char* identity;     ///< EAP 身份标识 / EAP identity
+    const char* username;     ///< 用户名 / Username
+    const char* password;     ///< 密码 / Password
+    const char* ca_cert;      ///< CA 证书路径 / CA certificate path
+    const char* client_cert;  ///< 客户端证书路径 / Client certificate path
+    const char* client_key;   ///< 客户端密钥路径 / Client key path
   };
 
   /**
+   * @struct StaticIPConfig
    * @brief 静态 IP 配置 / Static IP configuration
+   *
+   * 包含静态 IP、网关、子网掩码和 DNS 配置。
    */
   struct StaticIPConfig
   {
-    std::string ip;       ///< IP 地址 / IP address
-    std::string gateway;  ///< 网关地址 / Gateway address
-    std::string netmask;  ///< 子网掩码 / Netmask
-    std::string dns;      ///< DNS 服务器 / DNS server
+    IPAddressRaw ip;       ///< IP 地址 / IP address
+    IPAddressRaw gateway;  ///< 网关地址 / Gateway address
+    IPAddressRaw netmask;  ///< 子网掩码 / Netmask
+    IPAddressRaw dns;      ///< DNS 服务器 / DNS server
   };
 
   /**
+   * @struct Config
    * @brief WiFi 连接配置 / WiFi connection configuration
+   *
+   * 包含 SSID、密码、DHCP 使用与可选企业配置/静态 IP 设置。
    */
   struct Config
   {
-    std::string ssid;                        ///< SSID 名称 / SSID name
-    std::string password;                    ///< 密码 / Password
+    const char* ssid;                        ///< SSID 名称 / SSID name
+    const char* password;                    ///< 密码 / Password
     Security security = Security::WPA2_PSK;  ///< 安全类型 / Security type
 
-    EnterpriseConfig* enterprise_config =
-        nullptr;  ///< 企业认证配置（可选） / Enterprise authentication config (optional)
+    const EnterpriseConfig* enterprise_config = nullptr;  ///< 企业认证配置（可选） / Enterprise config (optional)
+    const StaticIPConfig* static_ip_config = nullptr;     ///< 静态 IP 配置（可选） / Static IP config (optional)
 
-    StaticIPConfig* static_ip_config =
-        nullptr;  ///< 静态 IP 配置（可选） / Static IP config (optional)
-
-    bool use_dhcp = true;  ///< 是否使用 DHCP / Whether to use DHCP
+    bool use_dhcp = true;  ///< 是否使用 DHCP / Use DHCP or not
   };
 
   /**
+   * @struct ScanResult
    * @brief WiFi 扫描结果 / WiFi scan result
+   *
+   * 描述每个可用网络的 SSID、信号强度和加密方式。
    */
   struct ScanResult
   {
-    std::string ssid;   ///< 发现的 SSID / Detected SSID
-    int rssi;           ///< 信号强度 / Signal strength (RSSI)
-    Security security;  ///< 安全类型 / Security type
+    char ssid[33]{};       ///< 发现的 SSID / Detected SSID
+    int rssi = 0;          ///< 信号强度 / Signal strength (RSSI)
+    Security security = Security::UNKNOWN; ///< 安全类型 / Security type
   };
 
   /**
-   * @brief WiFi 状态回调 / Callback type for WiFi status
+   * @typedef WifiCallback
+   * @brief WiFi 状态回调类型 / Callback type for WiFi status
    */
   using WifiCallback = LibXR::Callback<WifiError>;
 
+  /**
+   * @brief 析构函数 / Destructor
+   */
   virtual ~WifiClient() = default;
 
   /**
-   * @brief 启用 WiFi 模块 / Enable the WiFi module
+   * @brief 启用网络接口（WiFi） / Enable the network interface
+   * @return true 表示成功 / true if enabled successfully
    */
-  virtual WifiError Enable() = 0;
+  virtual bool Enable() override = 0;
 
   /**
-   * @brief 禁用 WiFi 模块 / Disable the WiFi module
+   * @brief 禁用网络接口（WiFi） / Disable the network interface
    */
-  virtual WifiError Disable() = 0;
+  virtual void Disable() override = 0;
 
   /**
-   * @brief 连接到 WiFi 网络 / Connect to a WiFi network
-   * @param config 配置参数 / Configuration parameters
+   * @brief 检查是否已连接 / Check if currently connected
+   * @return true 如果连接上了 / true if connected
+   */
+  virtual bool IsConnected() const override = 0;
+
+  /**
+   * @brief 获取当前 IP 地址 / Get current IP address
+   * @return 当前 IP 地址（结构形式） / Current IP address in raw form
+   */
+  virtual IPAddressRaw GetIPAddress() const override = 0;
+
+  /**
+   * @brief 获取当前 MAC 地址 / Get MAC address
+   * @return 当前 MAC 地址（结构形式） / Current MAC address in raw form
+   */
+  virtual MACAddressRaw GetMACAddress() const override = 0;
+
+  /**
+   * @brief 连接到指定 WiFi 网络 / Connect to a WiFi network
+   * @param[in] config WiFi 连接配置 / Configuration parameters
+   * @return WifiError 连接结果 / Error code
    */
   virtual WifiError Connect(const Config& config) = 0;
 
   /**
-   * @brief 断开当前 WiFi 连接 / Disconnect from the current WiFi connection
+   * @brief 断开当前 WiFi 连接 / Disconnect from the WiFi network
+   * @return WifiError 断开结果 / Error code
    */
   virtual WifiError Disconnect() = 0;
 
   /**
-   * @brief 检查是否已连接 / Check if currently connected
-   * @return true 表示已连接 / true if connected
+   * @brief 扫描可用网络 / Scan for available WiFi networks
+   * @param[out] out_list 扫描结果数组 / Output list buffer
+   * @param[in] max_count 最大可填入数量 / Max result count
+   * @param[out] out_found 实际找到数量 / Number found
+   * @return WifiError 错误码 / Scan result code
    */
-  virtual bool IsConnected() const = 0;
+  virtual WifiError Scan(ScanResult* out_list, size_t max_count, size_t& out_found) = 0;
 
   /**
-   * @brief 获取当前 IP 地址 / Get the current IP address
-   * @return IP 字符串 / IP address string
-   */
-  virtual const char* GetIPAddress() const = 0;
-
-  /**
-   * @brief 扫描可用 WiFi 网络 / Scan for available WiFi networks
-   * @param results 扫描结果列表 / Output list of scan results
-   */
-  virtual WifiError Scan(std::vector<ScanResult>& results) = 0;
-
-  /**
-   * @brief 获取当前 WiFi 信号强度 / Get the current WiFi signal strength
-   * 
-   * @return int 
+   * @brief 获取当前 WiFi 信号强度（RSSI） / Get current signal strength
+   * @return 信号强度（dBm） / Signal strength in dBm
    */
   virtual int GetRSSI() const = 0;
 };

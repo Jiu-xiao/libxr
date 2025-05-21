@@ -5,7 +5,6 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
@@ -35,9 +34,9 @@ ESP32WifiClient::~ESP32WifiClient()
   }
 }
 
-WifiClient::WifiError ESP32WifiClient::Enable()
+bool ESP32WifiClient::Enable()
 {
-  if (enabled_) return WifiError::ALREADY_ENABLED;
+  if (enabled_) return true;
 
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_start();
@@ -48,17 +47,17 @@ WifiClient::WifiError ESP32WifiClient::Enable()
                              this);
   esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &EventHandler, this);
   esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &EventHandler, this);
-  return WifiError::NONE;
+
+  return true;
 }
 
-WifiClient::WifiError ESP32WifiClient::Disable()
+void ESP32WifiClient::Disable()
 {
-  if (!enabled_) return WifiError::NOT_ENABLED;
+  if (!enabled_) return;
 
   esp_wifi_stop();
   enabled_ = false;
   connected_ = false;
-  return WifiError::NONE;
 }
 
 WifiClient::WifiError ESP32WifiClient::Connect(const Config& config)
@@ -66,9 +65,9 @@ WifiClient::WifiError ESP32WifiClient::Connect(const Config& config)
   if (!enabled_) return WifiError::NOT_ENABLED;
 
   wifi_config_t wifi_config{};
-  std::strncpy(reinterpret_cast<char*>(wifi_config.sta.ssid), config.ssid.c_str(),
+  std::strncpy(reinterpret_cast<char*>(wifi_config.sta.ssid), config.ssid,
                sizeof(wifi_config.sta.ssid));
-  std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password), config.password.c_str(),
+  std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password), config.password,
                sizeof(wifi_config.sta.password));
   esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
   esp_wifi_connect();
@@ -78,43 +77,46 @@ WifiClient::WifiError ESP32WifiClient::Connect(const Config& config)
   }
 
   semaphore_.Wait();
-  if (!connected_)
-  {
-    return WifiError::CONNECTION_TIMEOUT;
-  }
+  if (!connected_) return WifiError::CONNECTION_TIMEOUT;
 
   semaphore_.Wait();
-  if (!got_ip_)
-  {
-    return WifiError::DHCP_FAILED;
-  }
+  if (!got_ip_) return WifiError::DHCP_FAILED;
 
   return WifiError::NONE;
 }
 
 WifiClient::WifiError ESP32WifiClient::Disconnect()
 {
-  if (!enabled_)
-  {
-    return WifiError::NOT_ENABLED;
-  }
-  if (!connected_)
-  {
-    return WifiError::NONE;
-  }
+  if (!enabled_) return WifiError::NOT_ENABLED;
+  if (!connected_) return WifiError::NONE;
+
   while (semaphore_.Wait(0) == ErrorCode::OK)
   {
   }
   esp_wifi_disconnect();
   semaphore_.Wait();
+
   return WifiError::NONE;
 }
 
 bool ESP32WifiClient::IsConnected() const { return connected_; }
 
-const char* ESP32WifiClient::GetIPAddress() const { return ip_str_; }
+IPAddressRaw ESP32WifiClient::GetIPAddress() const
+{
+  return IPAddressRaw::FromString(ip_str_);
+}
 
-WifiClient::WifiError ESP32WifiClient::Scan(std::vector<ScanResult>& results)
+MACAddressRaw ESP32WifiClient::GetMACAddress() const
+{
+  uint8_t mac[6] = {};
+  esp_wifi_get_mac(WIFI_IF_STA, mac);
+  MACAddressRaw result;
+  std::memcpy(result.bytes, mac, 6);
+  return result;
+}
+
+WifiClient::WifiError ESP32WifiClient::Scan(ScanResult* out_list, size_t max_count,
+                                            size_t& out_found)
 {
   wifi_scan_config_t scan_config = {};
   if (esp_wifi_scan_start(&scan_config, true) != ESP_OK)
@@ -124,23 +126,21 @@ WifiClient::WifiError ESP32WifiClient::Scan(std::vector<ScanResult>& results)
 
   uint16_t ap_num = 0;
   esp_wifi_scan_get_ap_num(&ap_num);
+  if (ap_num > max_count) ap_num = max_count;
 
-  std::vector<wifi_ap_record_t> ap_records(ap_num);
-  if (esp_wifi_scan_get_ap_records(&ap_num, ap_records.data()) != ESP_OK)
-  {
-    return WifiError::SCAN_FAILED;
-  }
+  wifi_ap_record_t ap_records[20] = {};
+  esp_wifi_scan_get_ap_records(&ap_num, ap_records);
 
-  results.clear();
-  for (const auto& record : ap_records)
+  out_found = ap_num;
+  for (int i = 0; i < ap_num; ++i)
   {
-    ScanResult r;
-    r.ssid = reinterpret_cast<const char*>(record.ssid);
-    r.rssi = record.rssi;
-    r.security = (record.authmode == WIFI_AUTH_OPEN)       ? Security::OPEN
-                 : (record.authmode == WIFI_AUTH_WPA2_PSK) ? Security::WPA2_PSK
-                                                           : Security::UNKNOWN;
-    results.push_back(r);
+    std::strncpy(out_list[i].ssid, reinterpret_cast<const char*>(ap_records[i].ssid),
+                 sizeof(out_list[i].ssid));
+    out_list[i].rssi = ap_records[i].rssi;
+    out_list[i].security = (ap_records[i].authmode == WIFI_AUTH_OPEN) ? Security::OPEN
+                           : (ap_records[i].authmode == WIFI_AUTH_WPA2_PSK)
+                               ? Security::WPA2_PSK
+                               : Security::UNKNOWN;
   }
 
   return WifiError::NONE;
@@ -181,10 +181,8 @@ void ESP32WifiClient::EventHandler(void* arg, esp_event_base_t event_base,
         break;
       }
       case IP_EVENT_STA_LOST_IP:
-      {
         self->got_ip_ = false;
         break;
-      }
     }
   }
 }
