@@ -42,12 +42,11 @@ static void run_libxr_tests()
       {"encoder", test_float_encoder},
   };
 
-  TestCase data_structure_tests[] = {
-      {"rbt", test_rbt},
-      {"queue", test_queue},
-      {"stack", test_stack},
-      {"list", test_list},
-  };
+  TestCase data_structure_tests[] = {{"rbt", test_rbt},
+                                     {"queue", test_queue},
+                                     {"stack", test_stack},
+                                     {"list", test_list},
+                                     {"double_buffer", test_double_buffer}};
 
   TestCase threading_tests[] = {
       {"thread", test_thread},
