@@ -240,7 +240,7 @@ class LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
    * the queue is empty
    */
-  ErrorCode PopBatch(Data *data, size_t batch_size)
+  ErrorCode PopBatch(Data *data, size_t size)
   {
     size_t capacity = LENGTH + 1;
 
@@ -253,24 +253,68 @@ class LockFreeQueue
                              ? (current_tail - current_head)
                              : (capacity - current_head + current_tail);
 
-      if (available < batch_size)
+      if (available < size)
       {
         return ErrorCode::EMPTY;
       }
 
-      size_t first_chunk = std::min(batch_size, capacity - current_head);
-      memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
-
-      if (batch_size > first_chunk)
+      if (data != nullptr)
       {
-        memcpy(data + first_chunk, queue_handle_,
-               (batch_size - first_chunk) * sizeof(Data));
+        size_t first_chunk = std::min(size, capacity - current_head);
+        memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
+
+        if (size > first_chunk)
+        {
+          memcpy(data + first_chunk, queue_handle_, (size - first_chunk) * sizeof(Data));
+        }
       }
 
-      size_t new_head = (current_head + batch_size) % capacity;
+      size_t new_head = (current_head + size) % capacity;
 
       if (head_.compare_exchange_weak(current_head, new_head, std::memory_order_acquire,
                                       std::memory_order_relaxed))
+      {
+        return ErrorCode::OK;
+      }
+    }
+  }
+
+  /**
+   * @brief 批量查看队列中的数据（不移除） / Peeks multiple elements from the queue
+   * without removing them
+   * @param data 数据存储数组指针 / Pointer to the array to store peeked data
+   * @param size 要查看的元素个数 / Number of elements to peek
+   * @return 操作结果，成功返回 `ErrorCode::OK`，队列中数据不足返回 `ErrorCode::EMPTY` /
+   *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
+   * not enough data is available
+   */
+  ErrorCode PeekBatch(Data *data, size_t size)
+  {
+    size_t capacity = LENGTH + 1;
+
+    while (true)
+    {
+      auto current_head = head_.load(std::memory_order_relaxed);
+      auto current_tail = tail_.load(std::memory_order_acquire);
+
+      size_t available = (current_tail >= current_head)
+                             ? (current_tail - current_head)
+                             : (capacity - current_head + current_tail);
+
+      if (available < size)
+      {
+        return ErrorCode::EMPTY;
+      }
+
+      size_t first_chunk = std::min(size, capacity - current_head);
+      memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
+
+      if (size > first_chunk)
+      {
+        memcpy(data + first_chunk, queue_handle_, (size - first_chunk) * sizeof(Data));
+      }
+
+      if (head_.load(std::memory_order_acquire) == current_head)
       {
         return ErrorCode::OK;
       }
