@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include "net_def.hpp"
 
 namespace LibXR
 {
