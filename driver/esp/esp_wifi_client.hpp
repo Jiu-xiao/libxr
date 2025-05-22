@@ -3,7 +3,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
-#include "wifi_client.hpp"
+#include "net/wifi_client.hpp"
 
 namespace LibXR
 {
