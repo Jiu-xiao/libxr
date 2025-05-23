@@ -120,17 +120,7 @@ class ESP32VirtualUART : public UART
 
   static ErrorCode ReadFun(ReadPort &port)
   {
-    ReadInfoBlock &block = port.info_;
-
-    block.op.MarkAsRunning();
-
-    if (port.queue_data_->Size() >= block.data.size_)
-    {
-      port.queue_data_->PopBatch(block.data.addr_, block.data.size_);
-      port.read_size_ = block.data.size_;
-      block.op.UpdateStatus(false, ErrorCode::OK);
-      return ErrorCode::OK;
-    }
+    UNUSED(port);
 
     return ErrorCode::EMPTY;
   }
