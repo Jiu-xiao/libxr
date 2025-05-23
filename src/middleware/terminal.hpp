@@ -859,7 +859,6 @@ class Terminal
   static void ThreadFun(Terminal *term)
   {
     RawData buff = term->read_buff_;
-    buff.size_ = LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
 
     Semaphore read_sem, write_sem;
     ReadOperation op(read_sem);
@@ -871,11 +870,14 @@ class Terminal
 
     while (true)
     {
-      buff.size_ = LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
+      buff.size_ = LibXR::min(term->read_->Size(), READ_BUFF_SIZE);
       if ((*term->read_)(buff, op) == ErrorCode::OK)
       {
-        buff.size_ = term->read_->read_size_;
-        term->Parse(buff);
+        if (term->read_->read_size_ > 0)
+        {
+          buff.size_ = term->read_->read_size_;
+          term->Parse(buff);
+        }
       }
     }
   }
