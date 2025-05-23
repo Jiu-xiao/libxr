@@ -396,16 +396,6 @@ class ReadPort
   {
     if (Readable())
     {
-      if (data.size_ == 0)
-      {
-        read_size_ = 0;
-        if (op.type != ReadOperation::OperationType::BLOCK)
-        {
-          op.UpdateStatus(false, ErrorCode::OK);
-        }
-        return ErrorCode::OK;
-      }
-
       mutex_.Lock();
 
       if (busy_)
@@ -414,7 +404,9 @@ class ReadPort
         return ErrorCode::BUSY;
       }
 
-      if (queue_data_ && queue_data_->Size() >= data.size_)
+      auto readable_size = queue_data_->Size();
+
+      if (readable_size >= data.size_ && readable_size != 0)
       {
         auto ans = queue_data_->PopBatch(data.addr_, data.size_);
         UNUSED(ans);
@@ -480,9 +472,12 @@ class ReadPort
     {
       if (queue_data_->Size() >= info_.data.size_)
       {
-        auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
-        UNUSED(ans);
-        ASSERT(ans == ErrorCode::OK);
+        if (info_.data.size_ > 0)
+        {
+          auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
+          UNUSED(ans);
+          ASSERT(ans == ErrorCode::OK);
+        }
         Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
       }
     }
