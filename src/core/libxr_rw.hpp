@@ -404,20 +404,23 @@ class ReadPort
         return ErrorCode::BUSY;
       }
 
-      auto readable_size = queue_data_->Size();
-
-      if (readable_size >= data.size_ && readable_size != 0)
+      if (queue_data_ != nullptr)
       {
-        auto ans = queue_data_->PopBatch(data.addr_, data.size_);
-        UNUSED(ans);
-        read_size_ = data.size_;
-        ASSERT(ans == ErrorCode::OK);
-        if (op.type != ReadOperation::OperationType::BLOCK)
+        auto readable_size = queue_data_->Size();
+
+        if (readable_size >= data.size_ && readable_size != 0)
         {
-          op.UpdateStatus(false, ErrorCode::OK);
+          auto ans = queue_data_->PopBatch(data.addr_, data.size_);
+          UNUSED(ans);
+          read_size_ = data.size_;
+          ASSERT(ans == ErrorCode::OK);
+          if (op.type != ReadOperation::OperationType::BLOCK)
+          {
+            op.UpdateStatus(false, ErrorCode::OK);
+          }
+          mutex_.Unlock();
+          return ErrorCode::OK;
         }
-        mutex_.Unlock();
-        return ErrorCode::OK;
       }
 
       info_ = ReadInfoBlock{data, op};
