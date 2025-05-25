@@ -1,8 +1,8 @@
 #pragma once
 
-#include "net.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
+#include "net.hpp"
 
 namespace LibXR
 {
@@ -90,12 +90,14 @@ class WifiClient : public NetworkInterface
    */
   struct Config
   {
-    const char* ssid;                        ///< SSID 名称 / SSID name
-    const char* password;                    ///< 密码 / Password
+    char ssid[33];                           ///< SSID 名称 / SSID name
+    char password[64];                       ///< 密码 / Password
     Security security = Security::WPA2_PSK;  ///< 安全类型 / Security type
 
-    const EnterpriseConfig* enterprise_config = nullptr;  ///< 企业认证配置（可选） / Enterprise config (optional)
-    const StaticIPConfig* static_ip_config = nullptr;     ///< 静态 IP 配置（可选） / Static IP config (optional)
+    const EnterpriseConfig* enterprise_config =
+        nullptr;  ///< 企业认证配置（可选） / Enterprise config (optional)
+    const StaticIPConfig* static_ip_config =
+        nullptr;  ///< 静态 IP 配置（可选） / Static IP config (optional)
 
     bool use_dhcp = true;  ///< 是否使用 DHCP / Use DHCP or not
   };
@@ -108,9 +110,9 @@ class WifiClient : public NetworkInterface
    */
   struct ScanResult
   {
-    char ssid[33]{};       ///< 发现的 SSID / Detected SSID
-    int rssi = 0;          ///< 信号强度 / Signal strength (RSSI)
-    Security security = Security::UNKNOWN; ///< 安全类型 / Security type
+    char ssid[33]{};                        ///< 发现的 SSID / Detected SSID
+    int rssi = 0;                           ///< 信号强度 / Signal strength (RSSI)
+    Security security = Security::UNKNOWN;  ///< 安全类型 / Security type
   };
 
   /**
