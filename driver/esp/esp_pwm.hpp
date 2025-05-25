@@ -19,6 +19,20 @@ class ESP32PWM : public PWM
         resolution_(resolution),
         max_duty_((1 << resolution) - 1)
   {
+    ledc_channel_config_t channel_conf = {};
+    channel_conf.gpio_num = gpio_num_;
+    channel_conf.speed_mode = static_cast<ledc_mode_t>(0);
+    channel_conf.channel = channel_;
+    channel_conf.intr_type = LEDC_INTR_DISABLE;
+    channel_conf.timer_sel = timer_;
+    channel_conf.duty = 0;
+    channel_conf.hpoint = 0;
+
+    auto err = ledc_channel_config(&channel_conf);
+    if (err != ESP_OK)
+    {
+      ASSERT(false);
+    };
   }
 
   ErrorCode SetDutyCycle(float value) override
@@ -55,18 +69,6 @@ class ESP32PWM : public PWM
     timer_conf.clk_cfg = LEDC_AUTO_CLK;
 
     esp_err_t err = ledc_timer_config(&timer_conf);
-    if (err != ESP_OK) return ErrorCode::INIT_ERR;
-
-    ledc_channel_config_t channel_conf = {};
-    channel_conf.gpio_num = gpio_num_;
-    channel_conf.speed_mode = static_cast<ledc_mode_t>(0);
-    channel_conf.channel = channel_;
-    channel_conf.intr_type = LEDC_INTR_DISABLE;
-    channel_conf.timer_sel = timer_;
-    channel_conf.duty = 0;
-    channel_conf.hpoint = 0;
-
-    err = ledc_channel_config(&channel_conf);
     if (err != ESP_OK) return ErrorCode::INIT_ERR;
 
     max_duty_ = (1 << resolution_) - 1;
