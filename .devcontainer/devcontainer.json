@@ -8,7 +8,8 @@
 		"vscode": {
 			"extensions": [
 				"twxs.cmake",
-				"ms-vscode.cpptools"
+				"ms-vscode.cpptools",
+				"ms-vscode.cmake-tools"
 			]
 		}
 	}
