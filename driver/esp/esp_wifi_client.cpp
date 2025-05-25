@@ -39,14 +39,40 @@ bool ESP32WifiClient::Enable()
   if (enabled_) return true;
 
   esp_wifi_set_mode(WIFI_MODE_STA);
-  esp_wifi_start();
-  enabled_ = true;
 
   esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &EventHandler, this);
   esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &EventHandler,
                              this);
   esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &EventHandler, this);
   esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &EventHandler, this);
+
+  esp_wifi_start();
+  enabled_ = true;
+
+  wifi_config_t cfg;
+  esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &cfg);
+  if (err == ESP_OK && cfg.sta.ssid[0] != 0)
+  {
+    esp_wifi_connect();
+    semaphore_.Wait();
+    if (!connected_) return true;
+
+    semaphore_.Wait();
+    if (!got_ip_) return true;
+  }
+
+  wifi_ap_record_t ap_info;
+  if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK)
+  {
+    connected_ = true;
+    got_ip_ = true;
+
+    esp_netif_ip_info_t ip_info;
+    if (esp_netif_get_ip_info(netif_, &ip_info) == ESP_OK)
+    {
+      esp_ip4addr_ntoa(&ip_info.ip, ip_str_, sizeof(ip_str_));
+    }
+  }
 
   return true;
 }
