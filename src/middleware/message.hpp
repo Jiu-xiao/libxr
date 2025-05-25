@@ -34,10 +34,10 @@ class Topic
   struct Block
   {
     uint32_t max_length;  ///< 数据的最大长度。Maximum length of data.
-    uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex mutex;     ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;  ///< 存储的数据。Stored data.
-    bool cache;  ///< 是否启用数据缓存。Indicates whether data caching is enabled.
+    uint32_t crc32;       ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
+    Mutex mutex;          ///< 线程同步互斥锁。Mutex for thread synchronization.
+    RawData data;         ///< 存储的数据。Stored data.
+    bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
     LockFreeList subers;  ///< 订阅者列表。List of subscribers.
   };
@@ -51,7 +51,7 @@ class Topic
     uint8_t prefix;  ///< 数据包前缀（固定为 0xA5）。Packet prefix (fixed at 0xA5).
     uint32_t
         topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint32_t data_len : 24;  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
+    uint32_t data_len : 24;    ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
   };
 
@@ -198,7 +198,7 @@ class Topic
    */
   struct SyncBlock : public SuberBlock
   {
-    RawData buff;  ///< 存储的数据缓冲区。Data buffer.
+    RawData buff;   ///< 存储的数据缓冲区。Data buffer.
     Semaphore sem;  ///< 信号量，用于同步等待数据。Semaphore for data synchronization.
   };
 
@@ -750,6 +750,13 @@ class Topic
     return ErrorCode::OK;
   }
 
+  /**
+   * @brief 打包数据
+   *
+   * @param topic_name_crc32 话题名称的 CRC32 校验码
+   * @param buffer 等待写入的包 Packed data to be written
+   * @param source 需要打包的数据 Data to be packed
+   */
   static void PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
   {
     PackedData<uint8_t> *pack = reinterpret_cast<PackedData<uint8_t> *>(buffer.addr_);
@@ -875,7 +882,7 @@ class Topic
           queue_(1, buffer_length)
     {
       /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
-      ASSERT(buffer_length >= PACK_BASE_SIZE);
+      ASSERT(buffer_length > PACK_BASE_SIZE);
       parse_buff_.size_ = buffer_length;
       parse_buff_.addr_ = new uint8_t[buffer_length];
     }
@@ -903,108 +910,117 @@ class Topic
 
       queue_.PushBatch(data.addr_, data.size_);
 
-    check_start:
-      /* 1. Check prefix */
-      if (status_ == Status::WAIT_START)
-      {
-        /* Check start frame */
-        auto queue_size = queue_.Size();
-        for (uint32_t i = 0; i < queue_size; i++)
-        {
-          uint8_t prefix = 0;
-          queue_.Peek(&prefix);
-          if (prefix == 0xa5)
-          {
-            status_ = Status::WAIT_TOPIC;
-            break;
-          }
-          queue_.Pop();
-        }
-        /* Not found */
+      while (true)
+      { /* 1. Check prefix */
         if (status_ == Status::WAIT_START)
         {
-          return count;
-        }
-      }
-
-      /* 2. Get topic info */
-      if (status_ == Status::WAIT_TOPIC)
-      {
-        /* Check size&crc */
-        if (queue_.Size() >= sizeof(PackedDataHeader))
-        {
-          queue_.PopBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
-          if (CRC8::Verify(parse_buff_.addr_, sizeof(PackedDataHeader)))
+          /* Check start frame */
+          auto queue_size = queue_.Size();
+          for (uint32_t i = 0; i < queue_size; i++)
           {
-            auto header = reinterpret_cast<PackedDataHeader *>(parse_buff_.addr_);
-            /* Find topic */
-            auto node = topic_map_.Search<TopicHandle>(header->topic_name_crc32);
-            if (node)
+            uint8_t prefix = 0;
+            queue_.Peek(&prefix);
+            if (prefix == 0xa5)
             {
-              data_len_ = header->data_len;
-              current_topic_ = *node;
-              status_ = Status::WAIT_DATA_CRC;
+              status_ = Status::WAIT_TOPIC;
+              break;
+            }
+            queue_.Pop();
+          }
+          /* Not found */
+          if (status_ == Status::WAIT_START)
+          {
+            return count;
+          }
+        }
+
+        /* 2. Get topic info */
+        if (status_ == Status::WAIT_TOPIC)
+        {
+          /* Check size&crc */
+          if (queue_.Size() >= sizeof(PackedDataHeader))
+          {
+            queue_.PopBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
+            if (CRC8::Verify(parse_buff_.addr_, sizeof(PackedDataHeader)))
+            {
+              auto header = reinterpret_cast<PackedDataHeader *>(parse_buff_.addr_);
+              /* Find topic */
+              auto node = topic_map_.Search<TopicHandle>(header->topic_name_crc32);
+              if (node)
+              {
+                data_len_ = header->data_len;
+                current_topic_ = *node;
+                if (data_len_ + sizeof(uint8_t) > queue_.EmptySize())
+                {
+                  status_ = Status::WAIT_START;
+                  continue;
+                }
+                status_ = Status::WAIT_DATA_CRC;
+              }
+              else
+              {
+                status_ = Status::WAIT_START;
+                continue;
+              }
             }
             else
             {
               status_ = Status::WAIT_START;
-              goto check_start;  // NOLINT
+              continue;
             }
           }
           else
           {
-            status_ = Status::WAIT_START;
-            goto check_start;  // NOLINT
+            return count;
           }
         }
-        else
-        {
-          return count;
-        }
-      }
 
-      if (status_ == Status::WAIT_DATA_CRC)
-      {
-        /* Check size&crc */
-        if (queue_.Size() >= data_len_ + sizeof(uint8_t))
+        /* 3. Get data */
+        if (status_ == Status::WAIT_DATA_CRC)
         {
-          uint8_t *data =
-              reinterpret_cast<uint8_t *>(parse_buff_.addr_) + sizeof(PackedDataHeader);
-          queue_.PopBatch(data, data_len_ + sizeof(uint8_t));
-          if (CRC8::Verify(parse_buff_.addr_,
-                           data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t)))
+          /* Check size&crc */
+          if (queue_.Size() >= data_len_ + sizeof(uint8_t))
           {
-            status_ = Status::WAIT_START;
-            auto data =
+            uint8_t *data =
                 reinterpret_cast<uint8_t *>(parse_buff_.addr_) + sizeof(PackedDataHeader);
+            queue_.PopBatch(data, data_len_ + sizeof(uint8_t));
+            if (CRC8::Verify(parse_buff_.addr_,
+                             data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t)))
+            {
+              status_ = Status::WAIT_START;
+              auto data = reinterpret_cast<uint8_t *>(parse_buff_.addr_) +
+                          sizeof(PackedDataHeader);
+              if (data_len_ > current_topic_->data_.max_length)
+              {
+                data_len_ = current_topic_->data_.max_length;
+              }
+              Topic(current_topic_).Publish(data, data_len_);
 
-            Topic(current_topic_).Publish(data, data_len_);
+              count++;
 
-            count++;
-
-            goto check_start;  // NOLINT
+              continue;
+            }
+            else
+            {
+              continue;
+            }
           }
           else
           {
-            goto check_start;  // NOLINT
+            return count;
           }
         }
-        else
-        {
-          return count;
-        }
       }
-
       return count;
     }
 
    private:
     Status status_ =
         Status::WAIT_START;  ///< 服务器的当前解析状态 Current parsing state of the server
-    uint32_t data_len_ = 0;       ///< 当前数据长度 Current data length
-    RBTree<uint32_t> topic_map_;  ///< 主题映射表 Topic mapping table
-    BaseQueue queue_;             ///< 数据队列 Data queue
-    RawData parse_buff_;          ///< 解析数据缓冲区 Data buffer for parsing
+    uint32_t data_len_ = 0;  ///< 当前数据长度 Current data length
+    RBTree<uint32_t> topic_map_;           ///< 主题映射表 Topic mapping table
+    BaseQueue queue_;                      ///< 数据队列 Data queue
+    RawData parse_buff_;                   ///< 解析数据缓冲区 Data buffer for parsing
     TopicHandle current_topic_ = nullptr;  ///< 当前主题句柄 Current topic handle
   };
 
