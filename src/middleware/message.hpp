@@ -851,6 +851,24 @@ class Topic
   operator TopicHandle() { return block_; }
 
   /**
+   * @brief  获取主题的键值
+   *         Gets the key value of the topic
+   * 
+   * @return uint32_t 
+   */
+  uint32_t GetKey() const
+  {
+    if (block_)
+    {
+      return block_->key;
+    }
+    else
+    {
+      return 0;
+    }
+  }
+
+  /**
    * @class Server
    * @brief  服务器类，负责解析数据并将其分发到相应的主题
    *         Server class responsible for parsing data and distributing it to
