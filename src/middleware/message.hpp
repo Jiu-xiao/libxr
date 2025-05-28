@@ -75,8 +75,8 @@ class Topic
 
     struct __attribute__((packed))
     {
-      PackedDataHeader header;  ///< 数据包头。Data packet header.
-      Data data_;               ///< 主题数据。Topic data.
+      PackedDataHeader header;      ///< 数据包头。Data packet header.
+      uint8_t data_[sizeof(Data)];  ///< 主题数据。Topic data.
     } raw;
 
     uint8_t crc8_;  ///< 数据包的 CRC8 校验码。CRC8 checksum of the data packet.
@@ -89,7 +89,7 @@ class Topic
      */
     PackedData &operator=(const Data &data)
     {
-      raw.data_ = data;
+      memcpy(raw.data_, &data, sizeof(Data));
       crc8_ = CRC8::Calculate(&raw, sizeof(raw));
       return *this;
     }
@@ -98,18 +98,18 @@ class Topic
      * @brief 类型转换运算符，返回数据内容。Type conversion operator returning the data
      * content.
      */
-    operator Data() { return raw.data_; }
+    operator Data() { return *reinterpret_cast<Data *>(raw.data_); }
 
     /**
      * @brief 指针运算符，访问数据成员。Pointer operator for accessing data members.
      */
-    Data *operator->() { return &(raw.data_); }
+    Data *operator->() { return reinterpret_cast<Data *>(raw.data_); }
 
     /**
      * @brief 指针运算符，访问数据成员（常量版本）。Pointer operator for accessing data
      * members (const version).
      */
-    const Data *operator->() const { return &(raw.data_); }
+    const Data *operator->() const { return reinterpret_cast<const Data *>(raw.data_); }
   };
 
   static constexpr size_t PACK_BASE_SIZE = sizeof(PackedData<uint8_t>) - 1;
@@ -853,8 +853,8 @@ class Topic
   /**
    * @brief  获取主题的键值
    *         Gets the key value of the topic
-   * 
-   * @return uint32_t 
+   *
+   * @return uint32_t
    */
   uint32_t GetKey() const
   {
