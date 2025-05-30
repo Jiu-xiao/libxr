@@ -3,11 +3,6 @@
 
 #include <cstdint>
 
-/**
- * @brief LibXR Color Control Library / LibXR终端颜色控制库
- * @details Provides ANSI escape sequences for setting terminal text styles and colors.
- *          提供基于ANSI转义序列的终端文本样式和颜色设置。
- */
 namespace LibXR
 {
 
