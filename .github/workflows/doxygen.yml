@@ -35,6 +35,10 @@ jobs:
       - name: Install Doxygen
         run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
 
+      - name: Check Doxygen Version
+        run: doxygen --version
+
+
       - name: Generate Documentation
         run: doxygen Doxyfile      
       
