@@ -39,6 +39,7 @@ typedef sem_t *libxr_semaphore_handle;
  */
 typedef pthread_t libxr_thread_handle;
 
+#ifndef __DOXYGEN__
 /**
  * @brief  条件变量结构体定义，包含互斥锁和条件变量
  *         Condition variable structure definition including a mutex and a condition
@@ -49,6 +50,7 @@ typedef struct
   pthread_mutex_t mutex;  ///< 互斥锁 Mutex
   pthread_cond_t cond;    ///< 条件变量 Condition variable
 } condition_var_handle;
+#endif
 
 /**
  * @brief  Webots 平台初始化函数
