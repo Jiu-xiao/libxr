@@ -211,11 +211,9 @@ class ConstRawData
   ConstRawData &operator=(const ConstRawData &data) = default;
 
   const void
-      *addr_;  ///< 数据存储地址（常量）。 The storage address of the data (constant).
+      *addr_;    ///< 数据存储地址（常量）。 The storage address of the data (constant).
   size_t size_;  ///< 数据大小（字节）。 The size of the data (in bytes).
 };
-
-}  // namespace LibXR
 
 /**
  * @brief 类型标识符生成器，替代 typeid
@@ -238,3 +236,5 @@ class TypeID
     return &id;
   }
 };
+
+}  // namespace LibXR

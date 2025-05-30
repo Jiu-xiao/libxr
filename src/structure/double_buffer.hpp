@@ -7,15 +7,16 @@
 
 #include "libxr_type.hpp"  // RawData
 
-/**
- * @class DoubleBuffer
- * @brief 双缓冲区管理类 / Double buffer manager class
- *
- * 该类用于在嵌入式场景中管理双缓冲传输结构，支持主动缓冲、备用缓冲切换与填充。
- * 用于实现无缝 DMA 或 USB 数据流水线发送，提高吞吐效率。
- * This class provides double-buffer control for efficient pipelined transmission
- * such as USB or DMA streaming.
- */
+namespace LibXR
+{ /**
+   * @class DoubleBuffer
+   * @brief 双缓冲区管理类 / Double buffer manager class
+   *
+   * 该类用于在嵌入式场景中管理双缓冲传输结构，支持主动缓冲、备用缓冲切换与填充。
+   * 用于实现无缝 DMA 或 USB 数据流水线发送，提高吞吐效率。
+   * This class provides double-buffer control for efficient pipelined transmission
+   * such as USB or DMA streaming.
+   */
 class DoubleBuffer
 {
  public:
@@ -140,6 +141,7 @@ class DoubleBuffer
   size_t size_;         ///< 单个缓冲区大小 / Size of each buffer
   int active_ = 0;      ///< 当前活动缓冲区编号 / Index of active buffer
   bool pending_valid_ =
-      false;  ///< 标记备用区是否准备好 / Whether pending buffer is ready
+      false;                ///< 标记备用区是否准备好 / Whether pending buffer is ready
   size_t pending_len_ = 0;  ///< 备用缓冲区有效数据长度 / Length of pending data
 };
+}  // namespace LibXR
