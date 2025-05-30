@@ -17,8 +17,8 @@ namespace LibXR
 template <typename T>
 struct Entry
 {
-  T& object;
-  std::initializer_list<const char*> aliases;
+  T& object;                                   ///< 设备对象 / Device object
+  std::initializer_list<const char*> aliases;  ///< 别名列表 / Alias list
 };
 
 /**

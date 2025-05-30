@@ -18,9 +18,11 @@ namespace LibXR
  */
 struct FlashSector
 {
-  uint32_t address;
-  uint32_t size;
+  uint32_t address;  //< 扇区起始地址 / Start address of the sector
+  uint32_t size;     //< 扇区大小 / Size of the sector
 };
+
+#ifndef __DOXYGEN__
 
 template <typename, typename = void>
 struct HasFlashPage : std::false_type
@@ -73,6 +75,8 @@ typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init)
 {
   init.Banks = 1;
 }
+
+#endif
 
 /**
  * @brief STM32Flash 通用类，构造时传入扇区列表，自动判断编程粒度。
