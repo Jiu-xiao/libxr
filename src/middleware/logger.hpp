@@ -39,7 +39,7 @@ struct LogData
 
 /**
  * @class Logger
- * @brief LibXR 日志管理器 / LibXR Logger Manager
+ * @brief 日志管理器 / LibXR Logger Manager
  */
 class Logger
 {
