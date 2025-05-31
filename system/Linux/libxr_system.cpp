@@ -14,6 +14,7 @@
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "linux_timebase.hpp"
+#include "logger.hpp"
 #include "thread.hpp"
 
 struct timeval libxr_linux_start_time;
