@@ -14,7 +14,7 @@ template <size_t BUFFER_SIZE = 256>
 class ESP32VirtualUART : public UART
 {
  public:
-  ESP32VirtualUART(uint32_t rx_queue_size = 5, uint32_t tx_queue_size = 5,
+  ESP32VirtualUART(uint32_t tx_queue_size = 5,
                    int tx_task_prio = 10, uint32_t tx_stack_depth = 2048,
                    int rx_task_prio = 10, uint32_t rx_stack_depth = 2048)
       : UART(&_read_port, &_write_port),
