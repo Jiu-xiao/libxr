@@ -1,17 +1,20 @@
 #pragma once
 
+#include "libxr_def.hpp"
 #if defined(HAVE_WPA_CLIENT)
 
+#include <NetworkManager.h>
 #include <unistd.h>
 #include <wpa_ctrl.h>
 
 #include <cstring>
-#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "logger.hpp"
 #include "net/wifi_client.hpp"
+#include "thread.hpp"
 
 namespace LibXR
 {
@@ -53,7 +56,10 @@ class LinuxWifiClient : public WifiClient
 
   bool Enable() override
   {
-    if (ctrl_) return true;
+    if (ctrl_)
+    {
+      return true;
+    }
     ctrl_ = wpa_ctrl_open(socket_path_.c_str());
     if (ctrl_)
     {
@@ -77,23 +83,31 @@ class LinuxWifiClient : public WifiClient
   bool IsConnected() const override
   {
     std::string out;
-    if (!SendCommand("STATUS", out)) return false;
+    if (!SendCommand("STATUS", out))
+    {
+      return false;
+    }
     return out.find("wpa_state=COMPLETED") != std::string::npos;
   }
 
   IPAddressRaw GetIPAddress() const override
   {
     char cmd[128];
-    snprintf(cmd, sizeof(cmd), "ip -4 addr show %s | grep inet", ifname_cstr_);
+    auto ans = snprintf(cmd, sizeof(cmd), "ip -4 addr show %s | grep inet", ifname_cstr_);
+    UNUSED(ans);
     FILE* fp = popen(cmd, "r");
-    if (!fp) return {};
+    if (!fp)
+    {
+      return {};
+    }
 
     char buf[64] = {};
     IPAddressRaw ip = {};
     if (fgets(buf, sizeof(buf), fp))
     {
       char ip_str[32] = {};
-      sscanf(buf, " inet %[^/]", ip_str);
+      auto ret = sscanf(buf, " inet %[^/]", ip_str);
+      UNUSED(ret);
       ip = IPAddressRaw::FromString(ip_str);
     }
     pclose(fp);
@@ -103,17 +117,23 @@ class LinuxWifiClient : public WifiClient
   MACAddressRaw GetMACAddress() const override
   {
     char path[128];
-    snprintf(path, sizeof(path), "/sys/class/net/%s/address", ifname_cstr_);
+    auto ans = snprintf(path, sizeof(path), "/sys/class/net/%s/address", ifname_cstr_);
+    UNUSED(ans);
     FILE* fp = fopen(path, "r");
-    if (!fp) return {};
+    if (!fp)
+    {
+      return {};
+    }
 
     char mac_str[32] = {};
     if (!fgets(mac_str, sizeof(mac_str), fp))
     {
-      fclose(fp);
+      auto ans = fclose(fp);
+      UNUSED(ans);
       return {};
     }
-    fclose(fp);
+    auto ret = fclose(fp);
+    UNUSED(ret);
     mac_str[strcspn(mac_str, "\n")] = 0;
     return MACAddressRaw::FromString(mac_str);
   }
@@ -168,11 +188,11 @@ class LinuxWifiClient : public WifiClient
     cmd << "SELECT_NETWORK " << netid;
     SendCommand(cmd.str().c_str(), out);
 
-    const int timeout_ms = 30000;
-    const int interval_ms = 300;
+    const int TIMEOUT_MS = 30000;
+    const int INTERVAL_MS = 300;
     int elapsed = 0;
 
-    while (elapsed < timeout_ms)
+    while (elapsed < TIMEOUT_MS)
     {
       std::string status;
       SendCommand("STATUS", status);
@@ -189,8 +209,8 @@ class LinuxWifiClient : public WifiClient
         return WifiError::AUTHENTICATION_FAILED;
       }
 
-      LibXR::Thread::Sleep(interval_ms);
-      elapsed += interval_ms;
+      LibXR::Thread::Sleep(INTERVAL_MS);
+      elapsed += INTERVAL_MS;
     }
 
     XR_LOG_ERROR("Wi-Fi Connection timeout");
@@ -226,7 +246,10 @@ class LinuxWifiClient : public WifiClient
       std::string bssid, freq, signal, flags, ssid;
       ls >> bssid >> freq >> signal >> flags;
       std::getline(ls, ssid);
-      if (!ssid.empty() && ssid[0] == '\t') ssid.erase(0, 1);
+      if (!ssid.empty() && ssid[0] == '\t')
+      {
+        ssid.erase(0, 1);
+      }
 
       auto& r = out_list[out_found++];
       strncpy(r.ssid, ssid.c_str(), sizeof(r.ssid) - 1);
@@ -249,7 +272,10 @@ class LinuxWifiClient : public WifiClient
  private:
   bool SendCommand(const char* cmd, std::string& result) const
   {
-    if (!ctrl_) return false;
+    if (!ctrl_)
+    {
+      return false;
+    }
     char buf[4096];
     size_t len = sizeof(buf);
     int ret = wpa_ctrl_request(ctrl_, cmd, strlen(cmd), buf, &len, nullptr);
@@ -264,20 +290,38 @@ class LinuxWifiClient : public WifiClient
 
   std::string DetectWifiInterface()
   {
-    std::ifstream f("/proc/net/wireless");
-    std::string line;
-    std::getline(f, line);  // header 1
-    std::getline(f, line);  // header 2
-    while (std::getline(f, line))
+    GError* error = nullptr;
+    NMClient* client = nm_client_new(nullptr, &error);
+    if (!client)
     {
-      size_t name_end = line.find(':');
-      if (name_end != std::string::npos)
+      auto ans = fprintf(stderr, "Failed to create NMClient: %s\n",
+                         error ? error->message : "unknown error");
+      UNUSED(ans);
+
+      if (error)
       {
-        std::string iface = line.substr(0, name_end);
-        iface.erase(0, iface.find_first_not_of(" \t"));
-        return iface;
+        g_error_free(error);
+      }
+      return "";
+    }
+
+    const GPtrArray* devices = nm_client_get_devices(client);
+    for (guint i = 0; i < devices->len; ++i)
+    {
+      NMDevice* dev = (NMDevice*)g_ptr_array_index(devices, i);
+      if (NM_IS_DEVICE_WIFI(dev))
+      {
+        const char* ifname = nm_device_get_iface(dev);
+        if (ifname)
+        {
+          std::string iface_str(ifname);
+          g_object_unref(client);
+          return iface_str;
+        }
       }
     }
+
+    g_object_unref(client);
     return "";
   }
 
