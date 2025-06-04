@@ -1,7 +1,7 @@
 # Detect system
 if(CMAKE_CROSSCOMPILING)
   message("Cross compiling.")
-else()
+elseif(NOT LIBXR_SYSTEM)
   if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
     if(WEBOTS_HOME)
       Set(LIBXR_SYSTEM "Webots")

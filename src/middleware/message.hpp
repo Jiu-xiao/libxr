@@ -968,7 +968,7 @@ class Topic
               {
                 data_len_ = header->data_len;
                 current_topic_ = *node;
-                if (data_len_ + sizeof(uint8_t) > queue_.EmptySize())
+                if (data_len_ + PACK_BASE_SIZE >= queue_.length_)
                 {
                   status_ = Status::WAIT_START;
                   continue;
@@ -1020,6 +1020,7 @@ class Topic
             }
             else
             {
+              status_ = Status::WAIT_START;
               continue;
             }
           }

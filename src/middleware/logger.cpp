@@ -24,7 +24,7 @@ void Logger::Init()
 
     auto log = reinterpret_cast<LogData *>(log_data.addr_);
 
-    if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(log->level) &&
+    if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(log->level) && STDIO::write_ &&
         STDIO::write_->Writable())
     {
       PrintToTerminal(*log);
