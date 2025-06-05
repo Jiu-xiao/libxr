@@ -121,7 +121,7 @@ bool DatabaseRawSequential::IsBlockInited(FlashInfo* block)
  */
 bool DatabaseRawSequential::IsBlockEmpty(FlashInfo* block)
 {
-  return block->key.nameLength == 0;
+  return block->key.GetNameLength() == 0;
 }
 
 /**
@@ -142,7 +142,7 @@ bool DatabaseRawSequential::IsBlockError(FlashInfo* block)
  */
 size_t DatabaseRawSequential::GetKeySize(KeyInfo* key)
 {
-  return sizeof(KeyInfo) + key->nameLength + key->dataSize;
+  return sizeof(KeyInfo) + key->GetNameLength() + key->GetDataSize();
 }
 
 /**
@@ -169,7 +169,7 @@ DatabaseRawSequential::KeyInfo* DatabaseRawSequential::GetLastKey(FlashInfo* blo
   }
 
   KeyInfo* key = &block->key;
-  while (key->nextKey)
+  while (key->GetNextKeyExist())
   {
     key = GetNextKey(key);
   }
@@ -205,10 +205,10 @@ ErrorCode DatabaseRawSequential::AddKey(const char* name, const void* data, size
   memcpy(data_ptr, name, NAME_LEN);
   memcpy(data_ptr + NAME_LEN, data, size);
 
-  *key_buf = KeyInfo{0, NAME_LEN, size};
+  *key_buf = KeyInfo{0, static_cast<uint8_t>(NAME_LEN), static_cast<uint32_t>(size)};
   if (last_key)
   {
-    last_key->nextKey = 1;
+    last_key->SetNextKeyExist(1);
   }
 
   Save();
@@ -249,7 +249,7 @@ ErrorCode DatabaseRawSequential::SetKey(KeyInfo* key, const void* data, size_t s
 {
   ASSERT(key != nullptr);
 
-  if (key->dataSize == size)
+  if (key->GetDataSize() == size)
   {
     if (memcmp(GetKeyData(key), data, size) != 0)
     {
@@ -273,7 +273,7 @@ ErrorCode DatabaseRawSequential::SetKey(KeyInfo* key, const void* data, size_t s
  */
 uint8_t* DatabaseRawSequential::GetKeyData(KeyInfo* key)
 {
-  return reinterpret_cast<uint8_t*>(key) + sizeof(KeyInfo) + key->nameLength;
+  return reinterpret_cast<uint8_t*>(key) + sizeof(KeyInfo) + key->GetNameLength();
 }
 
 /**
@@ -310,7 +310,7 @@ DatabaseRawSequential::KeyInfo* DatabaseRawSequential::SearchKey(const char* nam
     {
       return key;
     }
-    if (!key->nextKey)
+    if (!key->GetNextKeyExist())
     {
       break;
     }

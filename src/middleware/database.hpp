@@ -11,7 +11,7 @@
 namespace LibXR
 {
 
-static constexpr uint16_t LIBXR_DATABASE_VERSION = 1;
+static constexpr uint16_t LIBXR_DATABASE_VERSION = 2;
 
 /**
  * @brief 数据库接口，提供键值存储和管理功能 (Database interface providing key-value
@@ -193,16 +193,46 @@ class DatabaseRawSequential : public Database
   void Restore();
 
  private:
+#pragma pack(push, 1)
   /**
    * @brief 键信息结构，存储键的元数据
    *        (Structure containing key metadata).
    */
-  typedef struct __attribute__((packed))
+  struct KeyInfo
   {
-    uint8_t nextKey : 1;      ///< 是否有下一个键 (Indicates if there is a next key).
-    uint32_t nameLength : 7;  ///< 键名长度 (Length of the key name).
-    size_t dataSize : 24;     ///< 数据大小 (Size of the stored data).
-  } KeyInfo;
+    uint32_t raw_data;
+
+    KeyInfo() : raw_data(0xFFFFFFFF) {}
+
+    KeyInfo(bool nextKey, uint8_t nameLength, uint32_t dataSize)
+    {
+      raw_data = 0;
+      SetNextKeyExist(nextKey);
+      SetNameLength(nameLength);
+      SetDataSize(dataSize);
+    }
+
+    void SetNextKeyExist(bool value)
+    {
+      raw_data = (raw_data & 0x7FFFFFFF) | (uint32_t(value & 0x1) << 31);
+    }
+    bool GetNextKeyExist() const { return (raw_data >> 31) & 0x1; }
+
+    void SetNameLength(uint8_t len)
+    {
+      raw_data = (raw_data & 0x80FFFFFF) | (uint32_t(len & 0x7F) << 24);
+    }
+    uint8_t GetNameLength() const { return (raw_data >> 24) & 0x7F; }
+
+    void SetDataSize(uint32_t size)
+    {
+      raw_data = (raw_data & 0xFF000000) | (size & 0x00FFFFFF);
+    }
+    uint32_t GetDataSize() const { return raw_data & 0x00FFFFFF; }
+  };
+
+  static_assert(sizeof(KeyInfo) == 4, "KeyInfo size must be 4 bytes");
+#pragma pack(pop)
 
   /**
    * @brief Flash 存储的块信息结构
@@ -238,12 +268,12 @@ class DatabaseRawSequential : public Database
       0x12345678 + LIBXR_DATABASE_VERSION;  ///< Flash 头部标识 (Flash header identifier).
   static constexpr uint8_t CHECKSUM_BYTE = 0x56;  ///< 校验字节 (Checksum byte).
 
-  Flash& flash_;              ///< 目标 Flash 存储设备 (Target Flash storage device).
-  uint8_t* data_buffer_;      ///< 数据缓冲区 (Data buffer).
-  FlashInfo* flash_data_;     ///< Flash 数据存储区 (Pointer to the Flash data storage).
-  FlashInfo* info_main_;      ///< 主存储区信息 (Main storage block information).
-  FlashInfo* info_backup_;    ///< 备份存储区信息 (Backup storage block information).
-  uint32_t block_size_;       ///< Flash 块大小 (Flash block size).
+  Flash& flash_;           ///< 目标 Flash 存储设备 (Target Flash storage device).
+  uint8_t* data_buffer_;   ///< 数据缓冲区 (Data buffer).
+  FlashInfo* flash_data_;  ///< Flash 数据存储区 (Pointer to the Flash data storage).
+  FlashInfo* info_main_;   ///< 主存储区信息 (Main storage block information).
+  FlashInfo* info_backup_;  ///< 备份存储区信息 (Backup storage block information).
+  uint32_t block_size_;     ///< Flash 块大小 (Flash block size).
   uint32_t max_buffer_size_;  ///< 最大缓冲区大小 (Maximum buffer size).
 
   void InitBlock(FlashInfo* block);
@@ -283,12 +313,12 @@ class DatabaseRawSequential : public Database
       return ErrorCode::NOT_FOUND;
     }
 
-    if (key.raw_data_.size_ != ans->dataSize)
+    if (key.raw_data_.size_ != ans->GetDataSize())
     {
       return ErrorCode::FAILED;
     }
 
-    memcpy(key.raw_data_.addr_, GetKeyData(ans), ans->dataSize);
+    memcpy(key.raw_data_.addr_, GetKeyData(ans), ans->GetDataSize());
 
     return ErrorCode::OK;
   }
@@ -322,11 +352,13 @@ template <size_t MinWriteSize>
 class DatabaseRaw : public Database
 {
  public:
+#pragma pack(push, 1)
   template <size_t BlockSize>
-  struct __attribute__((packed)) BlockBoolData
+  struct BlockBoolData
   {
     uint8_t data[BlockSize];
   };
+#pragma pack(pop)
 
   template <size_t BlockSize>
   class BlockBoolUtil
@@ -470,6 +502,9 @@ class DatabaseRaw : public Database
     uint8_t* write_buff = reinterpret_cast<uint8_t*>(&info_backup_->key);
 
     auto new_key = KeyInfo{};
+    BlockBoolUtil<MinWriteSize>::SetFlag(new_key.uninit, false);
+    BlockBoolUtil<MinWriteSize>::SetFlag(new_key.available_flag, false);
+    BlockBoolUtil<MinWriteSize>::SetFlag(new_key.no_next_key, false);
     Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_), new_key);
 
     write_buff += GetKeySize(&info_backup_->key);
@@ -486,11 +521,11 @@ class DatabaseRaw : public Database
       Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_), *key);
       write_buff += AlignSize(sizeof(KeyInfo));
       Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
-            {GetKeyName(key), key->nameLength});
-      write_buff += AlignSize(key->nameLength);
+            {GetKeyName(key), key->GetNameLength()});
+      write_buff += AlignSize(key->GetNameLength());
       Write(write_buff - reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
-            {GetKeyData(key), key->dataSize});
-      write_buff += AlignSize(key->dataSize);
+            {GetKeyData(key), static_cast<size_t>(key->GetDataSize())});
+      write_buff += AlignSize(key->GetDataSize());
     } while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key->no_next_key));
 
     flash_.Erase(0, block_size_);
@@ -501,31 +536,64 @@ class DatabaseRaw : public Database
   }
 
  private:
+#pragma pack(push, 1)
   /**
    * @brief 键信息结构，存储键的元数据
    *        (Structure containing key metadata).
    */
-  typedef struct __attribute__((packed))
+  struct KeyInfo
   {
-    BlockBoolData<MinWriteSize>
-        no_next_key;  ///< 是否是最后一个键 (Indicates if this is the last key).
-    BlockBoolData<MinWriteSize>
-        available_flag;  ///< 该键是否有效 (Indicates if this key is available).
-    BlockBoolData<MinWriteSize>
-        uninit;  ///< 该键是否未初始化 (Indicates if this key is uninitialized).
-    uint32_t nameLength : 7;  ///< 键名长度 (Length of the key name).
-    size_t dataSize : 25;     ///< 数据大小 (Size of the stored data).
-  } KeyInfo;
+    BlockBoolData<MinWriteSize> no_next_key;     ///< 是否是最后一个键
+    BlockBoolData<MinWriteSize> available_flag;  ///< 该键是否有效
+    BlockBoolData<MinWriteSize> uninit;          ///< 该键是否未初始化
 
+    uint32_t raw_info;  ///< 高7位为 nameLength，低25位为 dataSize
+
+    // 默认构造
+    KeyInfo() : raw_info(0)
+    {
+      BlockBoolUtil<MinWriteSize>::SetFlag(no_next_key, true);
+      BlockBoolUtil<MinWriteSize>::SetFlag(available_flag, true);
+      BlockBoolUtil<MinWriteSize>::SetFlag(uninit, true);
+    }
+
+    void SetNameLength(uint8_t len)
+    {
+      raw_info = (raw_info & 0x01FFFFFF) | ((len & 0x7F) << 25);
+    }
+
+    uint8_t GetNameLength() const { return (raw_info >> 25) & 0x7F; }
+
+    void SetDataSize(uint32_t size)
+    {
+      raw_info = (raw_info & 0xFE000000) | (size & 0x01FFFFFF);
+    }
+
+    uint32_t GetDataSize() const { return raw_info & 0x01FFFFFF; }
+  };
+#pragma pack(pop)
+
+#pragma pack(push, 1)
   /**
    * @brief Flash 存储的块信息结构
    *        (Structure representing a Flash storage block).
    */
   struct FlashInfo
   {
-    uint32_t header;                    ///< Flash block header
-    alignas(MinWriteSize) KeyInfo key;  ///< Align KeyInfo to MinWriteSize
-  } __attribute__((packed));
+    FlashInfo()
+    {
+      header = 0xFFFFFFFF;
+      memset(padding, 0xFF, MinWriteSize);
+    }
+
+    union
+    {
+      uint32_t header;  ///< Flash block header
+      uint8_t padding[MinWriteSize];
+    };
+    KeyInfo key;  ///< Align KeyInfo to MinWriteSize
+  };
+#pragma pack(pop)
 
   /**
    * @brief 计算可用的存储空间大小
@@ -562,8 +630,8 @@ class DatabaseRaw : public Database
       BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.no_next_key, false);
       BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.available_flag, false);
       BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.uninit, false);
-      tmp_key.nameLength = 0;
-      tmp_key.dataSize = 0;
+      tmp_key.SetNameLength(0);
+      tmp_key.SetDataSize(0);
       Write(0, flash_info);
       key_buf = GetNextKey(&info_main_->key);
     }
@@ -597,8 +665,8 @@ class DatabaseRaw : public Database
           BlockBoolUtil<MinWriteSize>::ReadFlag(last_key->available_flag));
       BlockBoolUtil<MinWriteSize>::SetFlag(
           new_last_key.uninit, BlockBoolUtil<MinWriteSize>::ReadFlag(last_key->uninit));
-      new_last_key.nameLength = last_key->nameLength;
-      new_last_key.dataSize = last_key->dataSize;
+      new_last_key.SetNameLength(last_key->GetNameLength());
+      new_last_key.SetDataSize(last_key->GetDataSize());
 
       Write(reinterpret_cast<uint8_t*>(last_key) -
                 reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
@@ -609,8 +677,8 @@ class DatabaseRaw : public Database
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.no_next_key, true);
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.available_flag, true);
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.uninit, true);
-    new_key.nameLength = NAME_LEN;
-    new_key.dataSize = size;
+    new_key.SetNameLength(NAME_LEN);
+    new_key.SetDataSize(size);
 
     Write(reinterpret_cast<uint8_t*>(key_buf) -
               reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
@@ -633,12 +701,12 @@ class DatabaseRaw : public Database
   {
     if (KeyInfo* key = SearchKey(name))
     {
-      if (key->dataSize == size)
+      if (key->GetDataSize() == size)
       {
         if (memcmp(GetKeyData(key), data, size) != 0)
         {
-          if (AvailableSize() <
-              AlignSize(size) + AlignSize(sizeof(KeyInfo)) + AlignSize(key->nameLength))
+          if (AvailableSize() < AlignSize(size) + AlignSize(sizeof(KeyInfo)) +
+                                    AlignSize(key->GetNameLength()))
           {
             if (recycle)
             {
@@ -659,8 +727,8 @@ class DatabaseRaw : public Database
           BlockBoolUtil<MinWriteSize>::SetFlag(new_key.available_flag, false);
           BlockBoolUtil<MinWriteSize>::SetFlag(
               new_key.uninit, BlockBoolUtil<MinWriteSize>::ReadFlag(key->uninit));
-          new_key.nameLength = key->nameLength;
-          new_key.dataSize = size;
+          new_key.SetNameLength(key->GetNameLength());
+          new_key.SetDataSize(size);
           Write(reinterpret_cast<uint8_t*>(key) -
                     reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
                 new_key);
@@ -682,7 +750,7 @@ class DatabaseRaw : public Database
   uint8_t* GetKeyData(KeyInfo* key)
   {
     return reinterpret_cast<uint8_t*>(key) + AlignSize(sizeof(KeyInfo)) +
-           AlignSize(key->nameLength);
+           AlignSize(key->GetNameLength());
   }
 
   /**
@@ -719,8 +787,8 @@ class DatabaseRaw : public Database
     BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.no_next_key, true);
     BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.available_flag, true);
     BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.uninit, false);
-    tmp_key.nameLength = 0;
-    tmp_key.dataSize = 0;
+    tmp_key.SetNameLength(0);
+    tmp_key.SetDataSize(0);
     Write(reinterpret_cast<uint8_t*>(block) -
               reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
           {reinterpret_cast<uint8_t*>(&info), sizeof(FlashInfo)});
@@ -743,8 +811,8 @@ class DatabaseRaw : public Database
   }
   size_t GetKeySize(KeyInfo* key)
   {
-    return AlignSize(sizeof(KeyInfo)) + AlignSize(key->nameLength) +
-           AlignSize(key->dataSize);
+    return AlignSize(sizeof(KeyInfo)) + AlignSize(key->GetNameLength()) +
+           AlignSize(key->GetDataSize());
   }
   KeyInfo* GetNextKey(KeyInfo* key)
   {
@@ -862,12 +930,12 @@ class DatabaseRaw : public Database
       return ErrorCode::NOT_FOUND;
     }
 
-    if (key.raw_data_.size_ != ans->dataSize)
+    if (key.raw_data_.size_ != ans->GetDataSize())
     {
       return ErrorCode::FAILED;
     }
 
-    memcpy(key.raw_data_.addr_, GetKeyData(ans), ans->dataSize);
+    memcpy(key.raw_data_.addr_, GetKeyData(ans), ans->GetDataSize());
 
     return ErrorCode::OK;
   }
