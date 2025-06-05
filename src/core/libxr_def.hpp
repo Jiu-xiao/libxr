@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

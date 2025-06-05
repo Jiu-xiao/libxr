@@ -34,27 +34,45 @@ class Topic
   struct Block
   {
     uint32_t max_length;  ///< 数据的最大长度。Maximum length of data.
-    uint32_t crc32;       ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex mutex;          ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;         ///< 存储的数据。Stored data.
-    bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
+    uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
+    Mutex mutex;     ///< 线程同步互斥锁。Mutex for thread synchronization.
+    RawData data;  ///< 存储的数据。Stored data.
+    bool cache;  ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
     LockFreeList subers;  ///< 订阅者列表。List of subscribers.
   };
 #ifndef __DOXYGEN__
+
+#pragma pack(push, 1)
   /**
    * @struct PackedDataHeader
    * @brief 主题数据包头，用于网络传输。Packed data header for network transmission.
    */
-  struct __attribute__((packed)) PackedDataHeader
+  struct PackedDataHeader
   {
     uint8_t prefix;  ///< 数据包前缀（固定为 0xA5）。Packet prefix (fixed at 0xA5).
     uint32_t
         topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint32_t data_len : 24;    ///< 数据长度（最多 16MB）。Data length (up to 16MB).
+    uint8_t data_len_raw[3];
+    ;  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
-  };
 
+    void SetDataLen(uint32_t len)
+    {
+      data_len_raw[0] = static_cast<uint8_t>(len >> 16);
+      data_len_raw[1] = static_cast<uint8_t>(len >> 8);
+      data_len_raw[2] = static_cast<uint8_t>(len);
+    }
+
+    uint32_t GetDataLen() const
+    {
+      return static_cast<uint32_t>(data_len_raw[0]) << 16 |
+             static_cast<uint32_t>(data_len_raw[1]) << 8 |
+             static_cast<uint32_t>(data_len_raw[2]);
+    }
+  };
+#pragma pack(pop)
+#pragma pack(push, 1)
   /**
    * @class PackedData
    * @brief  主题数据包，包含数据和校验码
@@ -64,22 +82,24 @@ class Topic
    * \addtogroup LibXR
    */
   template <typename Data>
-  class __attribute__((packed)) PackedData
+  class PackedData
   {
    public:
+#pragma pack(push, 1)
     /**
      * @struct raw
      * @brief 内部数据结构，包含数据包头和实际数据。Internal structure containing data
      * header and actual data.
      */
-
-    struct __attribute__((packed))
+    struct
     {
-      PackedDataHeader header;      ///< 数据包头。Data packet header.
+      PackedDataHeader header_;     ///< 数据包头。Data packet header.
       uint8_t data_[sizeof(Data)];  ///< 主题数据。Topic data.
     } raw;
 
     uint8_t crc8_;  ///< 数据包的 CRC8 校验码。CRC8 checksum of the data packet.
+
+#pragma pack(pop)
 
     /**
      * @brief 赋值运算符，设置数据并计算 CRC8 校验值。Assignment operator setting data and
@@ -111,6 +131,7 @@ class Topic
      */
     const Data *operator->() const { return reinterpret_cast<const Data *>(raw.data_); }
   };
+#pragma pack(pop)
 
   static constexpr size_t PACK_BASE_SIZE = sizeof(PackedData<uint8_t>) - 1;
 
@@ -198,7 +219,7 @@ class Topic
    */
   struct SyncBlock : public SuberBlock
   {
-    RawData buff;   ///< 存储的数据缓冲区。Data buffer.
+    RawData buff;  ///< 存储的数据缓冲区。Data buffer.
     Semaphore sem;  ///< 信号量，用于同步等待数据。Semaphore for data synchronization.
   };
 
@@ -221,7 +242,7 @@ class Topic
      */
     SyncSubscriber(const char *name, Data &data, Domain *domain = nullptr)
     {
-      *this = SyncSubscriber(WaitTopic(name, UINT32_MAX, domain), data);
+      *this = SyncSubscriber<Data>(WaitTopic(name, UINT32_MAX, domain), data);
     }
 
     /**
@@ -763,10 +784,10 @@ class Topic
 
     memcpy(&pack->raw.data_, source.addr_, source.size_);
 
-    pack->raw.header.prefix = 0xa5;
-    pack->raw.header.topic_name_crc32 = topic_name_crc32;
-    pack->raw.header.data_len = source.size_;
-    pack->raw.header.pack_header_crc8 =
+    pack->raw.header_.prefix = 0xa5;
+    pack->raw.header_.topic_name_crc32 = topic_name_crc32;
+    pack->raw.header_.SetDataLen(source.size_);
+    pack->raw.header_.pack_header_crc8 =
         CRC8::Calculate(&pack->raw, sizeof(PackedDataHeader) - sizeof(uint8_t));
     uint8_t *crc8_pack =
         reinterpret_cast<uint8_t *>(reinterpret_cast<uint8_t *>(pack) + PACK_BASE_SIZE +
@@ -966,7 +987,7 @@ class Topic
               auto node = topic_map_.Search<TopicHandle>(header->topic_name_crc32);
               if (node)
               {
-                data_len_ = header->data_len;
+                data_len_ = header->GetDataLen();
                 current_topic_ = *node;
                 if (data_len_ + PACK_BASE_SIZE >= queue_.length_)
                 {
@@ -1036,10 +1057,10 @@ class Topic
    private:
     Status status_ =
         Status::WAIT_START;  ///< 服务器的当前解析状态 Current parsing state of the server
-    uint32_t data_len_ = 0;  ///< 当前数据长度 Current data length
-    RBTree<uint32_t> topic_map_;           ///< 主题映射表 Topic mapping table
-    BaseQueue queue_;                      ///< 数据队列 Data queue
-    RawData parse_buff_;                   ///< 解析数据缓冲区 Data buffer for parsing
+    uint32_t data_len_ = 0;       ///< 当前数据长度 Current data length
+    RBTree<uint32_t> topic_map_;  ///< 主题映射表 Topic mapping table
+    BaseQueue queue_;             ///< 数据队列 Data queue
+    RawData parse_buff_;          ///< 解析数据缓冲区 Data buffer for parsing
     TopicHandle current_topic_ = nullptr;  ///< 当前主题句柄 Current topic handle
   };
 

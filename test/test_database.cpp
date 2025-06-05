@@ -11,10 +11,10 @@
 
 using namespace LibXR;
 
-void test_database() {
+void test_database()
+{
   constexpr size_t FLASH_SIZE = 2048;
-  LinuxBinaryFileFlash<FLASH_SIZE> flash("/tmp/flash_test.bin", 512, 8, true,
-                                         true);
+  LinuxBinaryFileFlash<FLASH_SIZE> flash("/tmp/flash_test.bin", 512, 8, true, true);
   DatabaseRawSequential db(flash);
 
   std::array<uint32_t, 1> key1_data = {1};
@@ -43,14 +43,13 @@ void test_database() {
   ASSERT(memcmp(&key3_data[0], &key3.data_[0], sizeof(key3_data)) == 0);
   ASSERT(memcmp(&key4_data[0], &key4.data_[0], sizeof(key4_data)) == 0);
 
-  LinuxBinaryFileFlash<FLASH_SIZE> flash_2("/tmp/flash_test_2.bin", 512, 16,
-                                           false, true);
+  LinuxBinaryFileFlash<FLASH_SIZE> flash_2("/tmp/flash_test_2.bin", 512, 16, false, true);
   DatabaseRaw<16> db_2(flash_2);
 
-  DatabaseRawSequential::Key key1_2(db_2, "key1", key1_data);
-  DatabaseRawSequential::Key key2_2(db_2, "keasdasy2", key2_data);
-  DatabaseRawSequential::Key key3_2(db_2, "keaasdasdy3", key3_data);
-  DatabaseRawSequential::Key key4_2(db_2, "keyaskdhasjh4", key4_data);
+  DatabaseRaw<16>::Key key1_2(db_2, "key1", key1_data);
+  DatabaseRaw<16>::Key key2_2(db_2, "keasdasy2", key2_data);
+  DatabaseRaw<16>::Key key3_2(db_2, "keaasdasdy3", key3_data);
+  DatabaseRaw<16>::Key key4_2(db_2, "keyaskdhasjh4", key4_data);
 
   key4_data[1] = 1234567;
 
@@ -69,20 +68,25 @@ void test_database() {
   ASSERT(memcmp(&key3_data[0], &key3_2.data_[0], sizeof(key3_data)) == 0);
   ASSERT(memcmp(&key4_data[0], &key4_2.data_[0], sizeof(key4_data)) == 0);
 
-  for (size_t i = 0; i < FLASH_SIZE; i++) {
-    for (int j = 0; j < Thread::GetTime() % 3; j++) {
+  for (size_t i = 0; i < FLASH_SIZE; i++)
+  {
+    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    {
       key1_data[0] = j;
       key1_2 = key1_data;
     }
-    for (int j = 0; j < Thread::GetTime() % 3; j++) {
+    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    {
       key2_data[0] = j;
       key2_2 = key2_data;
     }
-    for (int j = 0; j < Thread::GetTime() % 3; j++) {
+    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    {
       key3_data[0] = j;
       key3_2 = key3_data;
     }
-    for (int j = 0; j < Thread::GetTime() % 3; j++) {
+    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    {
       key4_data[0] = j;
       key4_2 = key4_data;
     }
