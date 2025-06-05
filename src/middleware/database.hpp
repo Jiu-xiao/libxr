@@ -87,7 +87,7 @@ class Database
     {
       if (database.Get(*this) == ErrorCode::NOT_FOUND)
       {
-        data_ = memset(&data_, 0, sizeof(Data));
+        memset(&data_, 0, sizeof(Data));
         database.Add(*this);
       }
     }
@@ -523,7 +523,7 @@ class DatabaseRaw : public Database
    */
   struct FlashInfo
   {
-    uint32_t header;  ///< Flash block header
+    uint32_t header;                    ///< Flash block header
     alignas(MinWriteSize) KeyInfo key;  ///< Align KeyInfo to MinWriteSize
   } __attribute__((packed));
 
