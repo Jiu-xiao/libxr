@@ -3,7 +3,7 @@
 
 static_assert(configTICK_RATE_HZ == 1000, "configTICK_RATE_HZ must be 1000");
 
-extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+extern "C"  __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
   static volatile const char *task_name = pcTaskName;
   UNUSED(task_name);
@@ -37,6 +37,13 @@ void *operator new(std::size_t size)
   {
     return pvPortMalloc(size);
   }
+
+#ifdef LIBXR_DEBUG_BUILD
+  static volatile uint32_t free_size = 0;
+  UNUSED(free_size);
+  free_size = xPortGetFreeHeapSize();
+#endif
+
   auto ans = pvPortMalloc(size);
   ASSERT(ans != nullptr);
   return ans;
