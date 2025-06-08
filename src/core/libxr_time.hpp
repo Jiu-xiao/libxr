@@ -61,25 +61,25 @@ class TimestampUS
      * @brief 以秒返回时间差（double 类型）。
      * Returns the time difference in seconds as a double.
      */
-    double to_second() const { return static_cast<double>(diff_) / 1000000.0; }
+    double ToSecond() const { return static_cast<double>(diff_) / 1000000.0; }
 
     /**
      * @brief 以秒返回时间差（float 类型）。
      * Returns the time difference in seconds as a float.
      */
-    float to_secondf() const { return static_cast<float>(diff_) / 1000000.0f; }
+    float ToSecondf() const { return static_cast<float>(diff_) / 1000000.0f; }
 
     /**
      * @brief 以微秒返回时间差。
      * Returns the time difference in microseconds.
      */
-    uint64_t to_microsecond() const { return diff_; }
+    uint64_t ToMicrosecond() const { return diff_; }
 
     /**
      * @brief 以毫秒返回时间差。
      * Returns the time difference in milliseconds.
      */
-    uint32_t to_millisecond() const { return diff_ / 1000u; }
+    uint32_t ToMillisecond() const { return diff_ / 1000u; }
 
    private:
     uint64_t diff_;  ///< 存储时间差（微秒）。Time difference stored in microseconds.
@@ -163,25 +163,25 @@ class TimestampMS
      * @brief 以秒返回时间差（double 类型）。
      * Returns the time difference in seconds as a double.
      */
-    double to_second() { return static_cast<double>(diff_) / 1000.0; }
+    double ToSecond() { return static_cast<double>(diff_) / 1000.0; }
 
     /**
      * @brief 以秒返回时间差（float 类型）。
      * Returns the time difference in seconds as a float.
      */
-    float to_secondf() { return static_cast<float>(diff_) / 1000.0f; }
+    float ToSecondf() { return static_cast<float>(diff_) / 1000.0f; }
 
     /**
      * @brief 以毫秒返回时间差。
      * Returns the time difference in milliseconds.
      */
-    uint32_t to_millisecond() const { return diff_; }
+    uint32_t ToMillisecond() const { return diff_; }
 
     /**
      * @brief 以微秒返回时间差。
      * Returns the time difference in microseconds.
      */
-    uint64_t to_microsecond() const { return diff_ * 1000u; }
+    uint64_t ToMicrosecond() const { return static_cast<uint64_t>(diff_) * 1000u; }
 
    private:
     uint32_t diff_;  ///< 存储时间差（毫秒）。Time difference stored in milliseconds.

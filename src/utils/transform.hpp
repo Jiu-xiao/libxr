@@ -620,7 +620,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    * @param q Eigen 四元数。 The Eigen quaternion.
    */
   RotationMatrix(const Eigen::Quaternion<Scalar> &q)
-      : Eigen::Matrix<Scalar, 3, 3>{q.toRotationMatrix()}
+      : Eigen::Matrix<Scalar, 3, 3>{q.ToRotationMatrix()}
   {
   }
 

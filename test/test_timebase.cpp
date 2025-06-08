@@ -14,6 +14,6 @@ void test_timebase() {
   t4 = LibXR::Timebase::GetMicroseconds();
   t2 = LibXR::Timebase::GetMilliseconds();
 
-  ASSERT(std::fabs((t2 - t1).to_millisecond() - 100.0f) < 2);
-  ASSERT(std::fabs((t4 - t3).to_microsecond() - 100000.0f) < 2000);
+  ASSERT(std::fabs((t2 - t1).ToMillisecond()- 100.0f) < 2);
+  ASSERT(std::fabs((t4 - t3).ToMicrosecond() - 100000.0f) < 2000);
 }
