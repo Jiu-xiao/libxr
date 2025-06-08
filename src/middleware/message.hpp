@@ -53,8 +53,7 @@ class Topic
     uint8_t prefix;  ///< 数据包前缀（固定为 0xA5）。Packet prefix (fixed at 0xA5).
     uint32_t
         topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint8_t data_len_raw[3];
-    ;  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
+    uint8_t data_len_raw[3];  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
 
     void SetDataLen(uint32_t len)
