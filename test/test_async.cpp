@@ -2,10 +2,12 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
-void test_async() {
+void test_async()
+{
   int async_arg = 0;
-  auto async_cb = LibXR::ASync::Callback::Create(
-      [](bool in_isr, int *arg, LibXR::ASync *async) {
+  auto async_cb = LibXR::ASync::Job::Create(
+      [](bool in_isr, int *arg, LibXR::ASync *async)
+      {
         UNUSED(async);
         ASSERT(in_isr == false);
         LibXR::Thread::Sleep(10);
@@ -14,7 +16,8 @@ void test_async() {
       &async_arg);
 
   LibXR::ASync async(512, LibXR::Thread::Priority::REALTIME);
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 10; i++)
+  {
     ASSERT(async.GetStatus() == LibXR::ASync::Status::REDAY);
     async.AssignJob(async_cb);
 
