@@ -67,18 +67,18 @@ Only have virtual class, you can find the drivers in `Platfrom` folder. For exam
 | `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | CAN/CANFD | USB-CDC | FLASH |
 | ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --------- | ------- | ----- |
 | STM32        | ✅     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ✅   | ✅   | ✅         | ✅       | ✅     |
-| ESP32        | ❌     | ✅    | ❌   | ✅   | ✅   | ❌   | ❌    | ❌   | ❌   | ✅         | ❌       | ❌     |
-| Linux        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ✅     |
+| ESP32        | ❌     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ❌   | ❌   | ❌         | ✅       | ✅     |
+| Linux        | ✅     | ❌    | ❌   | ❌   | ❌   | ❌   | ✅    | ❌   | ❌   | ❌         | ❌       | ✅     |
 | GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
 | HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
 | WCH32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
 | HPM          | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌       | ❌     |
 
-| `Network` | TCP/UDP | WIFI | Bluetooth | SmartConfig |
-| --------- | ------- | ---- | --------- | ----------- |
-| Linux     | ❌       | ❌    | ❌         | ❌           |
-| ESP32     | ❌       | ✅    | ❌         | ❌           |
-| STM32     | ❌       | ❌    | ❌         | ❌           |
+| `Network` | WIFI | Bluetooth | SmartConfig |
+| --------- | ---- | --------- | ----------- |
+| Linux     | ✅    | ❌         | ❌           |
+| ESP32     | ✅    | ❌         | ❌           |
+| STM32     | ❌    | ❌         | ❌           |
 
 ## Utils
 
