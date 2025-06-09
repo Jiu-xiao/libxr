@@ -94,7 +94,7 @@ class ASync
     }
   }
 
-  using Callback = LibXR::Callback<ASync *>;
+  using Job = LibXR::Callback<ASync *>;
 
   /**
    * @brief 分配一个异步任务并准备执行。
@@ -108,7 +108,7 @@ class ASync
    * @return 返回 `ErrorCode`，指示操作是否成功。
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
-  ErrorCode AssignJob(Callback job);
+  ErrorCode AssignJob(Job job);
 
   /**
    * @brief 在回调环境中分配任务，并通知任务线程执行。
@@ -126,15 +126,14 @@ class ASync
    *               Indicates whether the function is called within an interrupt service
    * routine.
    */
-  void AssignJobFromCallback(Callback job, bool in_isr)
+  void AssignJobFromCallback(Job job, bool in_isr)
   {
     job_ = job;
     status_ = Status::BUSY;
     sem_.PostFromCallback(in_isr);
   }
 
-  Callback
-      job_;  ///< 存储分配的异步任务回调。 Stores the assigned asynchronous job callback.
+  Job job_;  ///< 存储分配的异步任务回调。 Stores the assigned asynchronous job callback.
   Semaphore sem_;  ///< 控制任务执行的信号量。 Semaphore controlling task execution.
 
   Thread thread_handle_;  ///< 处理异步任务的线程。 Thread handling asynchronous tasks.
