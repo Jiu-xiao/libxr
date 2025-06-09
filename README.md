@@ -134,6 +134,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 [Bilibili](https://www.bilibili.com/video/BV1c8XVYLERR/)
 
-
 ## License
+
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr?ref=badge_large)
