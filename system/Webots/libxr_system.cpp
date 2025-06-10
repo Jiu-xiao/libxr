@@ -77,7 +77,7 @@ void StdoThread(LibXR::WritePort *write_port)
         continue;
       }
 
-      auto write_size = fwrite(info.data.addr_, sizeof(char), info.data.size_, stdout);
+      auto write_size = fwrite(write_buff, sizeof(char), info.data.size_, stdout);
       fflush(stdout);
       write_port->Finish(
           false, write_size == info.data.size_ ? ErrorCode::OK : ErrorCode::FAILED, info,
