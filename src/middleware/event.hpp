@@ -10,8 +10,9 @@ namespace LibXR
 
 /**
  * @class Event
- * @brief 事件管理系统，允许基于事件 ID 注册和触发回调函数。 Event management system that
- * allows registration and triggering of callbacks based on event IDs.
+ * @brief 事件管理系统，允许基于事件 ID 注册和触发回调函数。
+ *        Event management system that allows registration and triggering of callbacks
+ * based on event IDs.
  */
 class Event
 {
@@ -19,8 +20,15 @@ class Event
   using Callback = LibXR::Callback<uint32_t>;
 
   /**
-   * @brief 构造函数，初始化用于存储事件的红黑树。 Constructs an Event object with an
-   * empty red-black tree for event storage.
+   * @brief 回调链表指针类型，用于事件触发时从 ISR 中安全调用。
+   *        Pointer to the callback list, safe to use in ISR after acquired in
+   * non-interrupt context.
+   */
+  using CallbackList = LockFreeList *;
+
+  /**
+   * @brief 构造函数，初始化用于存储事件的红黑树。
+   *        Constructs an Event object with an empty red-black tree for event storage.
    */
   Event()
       : rbt_([](const uint32_t &a, const uint32_t &b)
@@ -29,9 +37,10 @@ class Event
   }
 
   /**
-   * @brief 为特定事件注册回调函数。 Registers a callback function for a specific event.
+   * @brief 为特定事件注册回调函数。
+   *        Registers a callback function for a specific event.
    * @param event 要注册回调的事件 ID。 The event ID to register the callback for.
-   * @param cb 事件触发时执行的回调函数。 The callback function to be executed when the
+   * @param cb    事件触发时执行的回调函数。 The callback function to be executed when the
    * event occurs.
    */
   void Register(uint32_t event, const Callback &cb)
@@ -52,8 +61,9 @@ class Event
   }
 
   /**
-   * @brief 触发与特定事件关联的所有回调函数。 Triggers all callbacks associated with a
-   * specific event.
+   * @brief 触发与特定事件关联的所有回调函数（非中断上下文）。
+   *        Triggers all callbacks associated with a specific event (non-interrupt
+   * context).
    * @param event 要激活的事件 ID。 The event ID to activate.
    */
   void Active(uint32_t event)
@@ -74,15 +84,16 @@ class Event
   }
 
   /**
-   * @brief 在中断服务程序（ISR）上下文中触发事件回调。 Triggers event callbacks from an
-   * interrupt service routine (ISR) context.
+   * @brief 从回调函数中触发与特定事件关联的所有回调函数。
+   *        Triggers all callbacks associated with a specific event (interrupt
+   * context).
+   *
+   * @param list 在非回调函数中获取的事件回调链表指针。 The event callback list pointer
+   * obtained from the non-callback function.
    * @param event 要激活的事件 ID。 The event ID to activate.
-   * @param in_isr 是否从 ISR 调用该函数。 Whether the function is being called from an
-   * ISR.
    */
-  void ActiveFromCallback(uint32_t event, bool in_isr)
+  void ActiveFromCallback(CallbackList list, uint32_t event)
   {
-    auto list = rbt_.Search<LockFreeList>(event);
     if (!list)
     {
       return;
@@ -90,22 +101,40 @@ class Event
 
     auto foreach_fun = [=](Block &block)
     {
-      block.cb.Run(in_isr, event);
+      block.cb.Run(true, event);
       return ErrorCode::OK;
     };
 
-    list->data_.Foreach<Block>(foreach_fun);
+    list->Foreach<Block>(foreach_fun);
   }
 
   /**
-   * @brief 将源事件绑定到当前事件实例中的目标事件。 Binds an event from a source Event
-   * instance to a target event in the current Event instance.
-   * @param sources 包含原始事件的源 Event 实例。 The source Event instance containing the
-   * original event.
-   * @param source_event 源事件实例中的事件 ID。 The event ID in the source Event
+   * @brief 获取指定事件的回调链表指针（必须在非中断上下文中调用）。
+   *        Returns the callback list pointer for the given event (must be called outside
+   * ISR).
+   * @param event 要查询的事件 ID。 The event ID to search.
+   * @return 回调链表指针，如果未注册则主动创建。 The callback list pointer, if not
+   * registered, it is actively created.
+   */
+  CallbackList GetList(uint32_t event)
+  {
+    auto node = rbt_.Search<LockFreeList>(event);
+    if (!node)
+    {
+      auto list = new RBTree<uint32_t>::Node<LockFreeList>;
+      rbt_.Insert(*list, event);
+      node = list;
+    }
+    return &node->data_;
+  }
+
+  /**
+   * @brief 将源事件绑定到当前事件实例中的目标事件。
+   *        Binds an event from a source Event instance to a target event in the current
    * instance.
-   * @param target_event 当前事件实例中的目标事件 ID。 The corresponding event ID in the
-   * current Event instance.
+   * @param sources       包含原始事件的源 Event 实例。 The source Event instance.
+   * @param source_event  源事件实例中的事件 ID。 The source event ID.
+   * @param target_event  当前实例中的目标事件 ID。 The target event ID in this instance.
    */
   void Bind(Event &sources, uint32_t source_event, uint32_t target_event)
   {
@@ -120,7 +149,8 @@ class Event
     auto bind_fun = [](bool in_isr, BindBlock *block, uint32_t event)
     {
       UNUSED(event);
-      block->target->ActiveFromCallback(block->event, in_isr);
+      block->target->ActiveFromCallback(block->target->GetList(block->event),
+                                        block->event);
     };
 
     auto cb = Callback::Create(bind_fun, block);
@@ -131,7 +161,8 @@ class Event
  private:
   /**
    * @struct Block
-   * @brief 用于存储事件回调的数据结构。 Data structure for storing event callbacks.
+   * @brief 用于存储事件回调的数据结构。
+   *        Data structure for storing event callbacks.
    */
   struct Block
   {
