@@ -16,6 +16,4 @@ void test_semaphore() {
       "semaphore_thread", 512, LibXR::Thread::Priority::REALTIME);
 
   ASSERT(sem.Wait(100) == ErrorCode::OK);
-
-  pthread_join(thread, nullptr);
 }

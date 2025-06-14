@@ -13,5 +13,4 @@ void test_terminal() {
   LibXR::Thread::Sleep(1000);
   printf("\n");
   pthread_cancel(term_thread);
-  pthread_join(term_thread, nullptr);
 }

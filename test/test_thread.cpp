@@ -20,6 +20,4 @@ void test_thread() {
   LibXR::Thread::Sleep(100);
 
   ASSERT(sem.Wait(100) == ErrorCode::OK);
-
-  pthread_join(thread, nullptr);
 }

@@ -124,7 +124,7 @@ class Logger
     }
   }
 
-  static inline std::atomic<bool> initialized_ = false;
+  static inline std::atomic<uint32_t> initialized_ = false;
 };
 
 }  // namespace LibXR

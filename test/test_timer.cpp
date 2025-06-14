@@ -30,5 +30,4 @@ void test_timer()
   ASSERT(timer_arg == 20);
 
   pthread_cancel(LibXR::Timer::thread_handle_);
-  pthread_join(LibXR::Timer::thread_handle_, nullptr);
 }
