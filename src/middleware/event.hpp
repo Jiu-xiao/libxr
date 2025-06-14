@@ -149,6 +149,7 @@ class Event
     auto bind_fun = [](bool in_isr, BindBlock *block, uint32_t event)
     {
       UNUSED(event);
+      UNUSED(in_isr);
       block->target->ActiveFromCallback(block->target->GetList(block->event),
                                         block->event);
     };
