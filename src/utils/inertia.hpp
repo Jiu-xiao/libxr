@@ -1,5 +1,7 @@
 #pragma once
 
+#ifndef LIBXR_NO_EIGEN
+
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <type_traits>
@@ -280,3 +282,5 @@ class CenterOfMass
 };
 
 }  // namespace LibXR
+
+#endif

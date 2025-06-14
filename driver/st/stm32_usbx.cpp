@@ -142,7 +142,6 @@ void STM32VirtualUART::RxLoop()
         _ux_device_class_cdc_acm_read(cdc_acm_, rx_buff_, buffer_size_, &actual_len);
     if (status == UX_SUCCESS && actual_len > 0)
     {
-      Mutex::LockGuard guard(read_mutex_);
       read_port_->queue_data_->PushBatch(rx_buff_, actual_len);
       read_port_->ProcessPendingReads(false);
     }

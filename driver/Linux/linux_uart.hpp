@@ -248,7 +248,6 @@ class LinuxUART : public UART
       auto n = read(fd_, rx_buff_, buff_size_);
       if (n > 0)
       {
-        Mutex::LockGuard guard(read_mutex_);
         read_port_->queue_data_->PushBatch(rx_buff_, n);
         read_port_->ProcessPendingReads(false);
       }

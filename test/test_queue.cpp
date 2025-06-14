@@ -72,7 +72,4 @@ void test_queue()
 
   queue.Pop(tmp, 20);
   ASSERT(tmp == 2.1f);
-
-  pthread_join(thread1, nullptr);
-  pthread_join(thread2, nullptr);
 }

@@ -260,7 +260,7 @@ class LockFreeQueue
 
       if (data != nullptr)
       {
-        size_t first_chunk = std::min(size, capacity - current_head);
+        size_t first_chunk = LibXR::min(size, capacity - current_head);
         memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
 
         if (size > first_chunk)
@@ -306,7 +306,7 @@ class LockFreeQueue
         return ErrorCode::EMPTY;
       }
 
-      size_t first_chunk = std::min(size, capacity - current_head);
+      size_t first_chunk = LibXR::min(size, capacity - current_head);
       memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
 
       if (size > first_chunk)
@@ -351,12 +351,12 @@ class LockFreeQueue
   size_t EmptySize() { return LENGTH - Size(); }
 
  private:
-  alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<unsigned int> head_;
-  alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<unsigned int> tail_;
+  alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<uint32_t> head_;
+  alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<uint32_t> tail_;
   Data *queue_handle_;
   const size_t LENGTH;
 
-  unsigned int Increment(unsigned int index) const { return (index + 1) % (LENGTH + 1); }
+  uint32_t Increment(uint32_t index) const { return (index + 1) % (LENGTH + 1); }
 };
 
 }  // namespace LibXR
