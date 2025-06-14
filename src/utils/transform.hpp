@@ -1,5 +1,7 @@
 #pragma once
 
+#ifndef LIBXR_NO_EIGEN
+
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <cmath>
@@ -1172,3 +1174,5 @@ class Transform
 };
 
 }  // namespace LibXR
+
+#endif

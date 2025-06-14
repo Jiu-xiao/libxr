@@ -100,6 +100,9 @@ if(LIBXR_SYSTEM MATCHES "Webots")
 endif()
 
 # Eigen
+if(LIBXR_NO_EIGEN)
+  target_compile_definitions(xr PUBLIC LIBXR_NO_EIGEN)
+else()
 add_subdirectory(lib/Eigen)
 
 target_include_directories(${PROJECT_NAME}
@@ -112,4 +115,5 @@ target_include_directories(${PROJECT_NAME}
 # Test
 if(LIBXR_TEST_BUILD)
   include(CMake/test.cmake)
+endif()
 endif()
