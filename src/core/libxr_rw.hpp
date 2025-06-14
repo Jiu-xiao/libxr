@@ -267,12 +267,19 @@ typedef struct
 class ReadPort
 {
  public:
+  enum class BusyState : uint32_t
+  {
+    Idle = 0,
+    Pending = 1,
+    Event = 2
+  };
+
   ReadFun read_fun_ = nullptr;
   BaseQueue *queue_data_ = nullptr;
   size_t read_size_ = 0;
   Mutex mutex_;
   ReadInfoBlock info_;
-  bool busy_ = false;
+  std::atomic<BusyState> busy_{BusyState::Idle};
 
   /**
    * @brief Constructs a ReadPort with queue sizes.
@@ -360,7 +367,7 @@ class ReadPort
   void Finish(bool in_isr, ErrorCode ans, ReadInfoBlock &info, uint32_t size)
   {
     read_size_ = size;
-    busy_ = false;
+    busy_.store(BusyState::Idle, std::memory_order_release);
     info.op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
   }
 
@@ -398,22 +405,60 @@ class ReadPort
     {
       mutex_.Lock();
 
-      if (busy_)
+      BusyState is_busy = busy_.load(std::memory_order_relaxed);
+
+      if (is_busy == BusyState::Pending)
       {
         mutex_.Unlock();
         return ErrorCode::BUSY;
       }
 
-      if (queue_data_ != nullptr)
+      while (true)
       {
-        auto readable_size = queue_data_->Size();
+        busy_.store(BusyState::Idle, std::memory_order_release);
 
-        if (readable_size >= data.size_ && readable_size != 0)
+        if (queue_data_ != nullptr)
         {
-          auto ans = queue_data_->PopBatch(data.addr_, data.size_);
-          UNUSED(ans);
+          auto readable_size = queue_data_->Size();
+
+          if (readable_size >= data.size_ && readable_size != 0)
+          {
+            auto ans = queue_data_->PopBatch(data.addr_, data.size_);
+            UNUSED(ans);
+            read_size_ = data.size_;
+            ASSERT(ans == ErrorCode::OK);
+            if (op.type != ReadOperation::OperationType::BLOCK)
+            {
+              op.UpdateStatus(false, ErrorCode::OK);
+            }
+            mutex_.Unlock();
+            return ErrorCode::OK;
+          }
+        }
+
+        info_ = ReadInfoBlock{data, op};
+
+        auto ans = read_fun_(*this);
+
+        if (ans != ErrorCode::OK)
+        {
+          BusyState expected = BusyState::Idle;
+          if (busy_.compare_exchange_strong(expected, BusyState::Pending,
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire))
+          {
+            op.MarkAsRunning();
+            break;
+          }
+          else
+          {
+            expected = BusyState::Pending;
+            continue;
+          }
+        }
+        else
+        {
           read_size_ = data.size_;
-          ASSERT(ans == ErrorCode::OK);
           if (op.type != ReadOperation::OperationType::BLOCK)
           {
             op.UpdateStatus(false, ErrorCode::OK);
@@ -421,26 +466,6 @@ class ReadPort
           mutex_.Unlock();
           return ErrorCode::OK;
         }
-      }
-
-      info_ = ReadInfoBlock{data, op};
-
-      auto ans = read_fun_(*this);
-
-      if (ans != ErrorCode::OK)
-      {
-        busy_ = true;
-        op.MarkAsRunning();
-      }
-      else
-      {
-        read_size_ = data.size_;
-        if (op.type != ReadOperation::OperationType::BLOCK)
-        {
-          op.UpdateStatus(false, ErrorCode::OK);
-        }
-        mutex_.Unlock();
-        return ErrorCode::OK;
       }
 
       mutex_.Unlock();
@@ -471,17 +496,43 @@ class ReadPort
   {
     ASSERT(queue_data_ != nullptr);
 
-    if (busy_)
+    if (in_isr)
     {
-      if (queue_data_->Size() >= info_.data.size_)
+      auto is_busy = busy_.load(std::memory_order_relaxed);
+
+      if (is_busy == BusyState::Pending)
       {
-        if (info_.data.size_ > 0)
+        if (queue_data_->Size() >= info_.data.size_)
         {
-          auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
-          UNUSED(ans);
-          ASSERT(ans == ErrorCode::OK);
+          if (info_.data.size_ > 0)
+          {
+            auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
+            UNUSED(ans);
+            ASSERT(ans == ErrorCode::OK);
+          }
+          Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
         }
-        Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
+      }
+      else if (is_busy == BusyState::Idle)
+      {
+        busy_.store(BusyState::Event, std::memory_order_release);
+      }
+    }
+    else
+    {
+      LibXR::Mutex::LockGuard lock_guard(mutex_);
+      if (busy_.load(std::memory_order_relaxed) == BusyState::Pending)
+      {
+        if (queue_data_->Size() >= info_.data.size_)
+        {
+          if (info_.data.size_ > 0)
+          {
+            auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
+            UNUSED(ans);
+            ASSERT(ans == ErrorCode::OK);
+          }
+          Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
+        }
       }
     }
   }
