@@ -438,6 +438,8 @@ class ReadPort
 
         info_ = ReadInfoBlock{data, op};
 
+        op.MarkAsRunning();
+
         auto ans = read_fun_(*this);
 
         if (ans != ErrorCode::OK)
@@ -447,7 +449,6 @@ class ReadPort
                                             std::memory_order_acq_rel,
                                             std::memory_order_acquire))
           {
-            op.MarkAsRunning();
             break;
           }
           else
