@@ -14,9 +14,9 @@ template <size_t BUFFER_SIZE = 256>
 class ESP32VirtualUART : public UART
 {
  public:
-  ESP32VirtualUART(uint32_t tx_queue_size = 5,
-                   int tx_task_prio = 10, uint32_t tx_stack_depth = 2048,
-                   int rx_task_prio = 10, uint32_t rx_stack_depth = 2048)
+  ESP32VirtualUART(uint32_t tx_queue_size = 5, int tx_task_prio = 10,
+                   uint32_t tx_stack_depth = 2048, int rx_task_prio = 10,
+                   uint32_t rx_stack_depth = 2048)
       : UART(&_read_port, &_write_port),
         _read_port(BUFFER_SIZE),
         _write_port(tx_queue_size, BUFFER_SIZE)
@@ -103,7 +103,6 @@ class ESP32VirtualUART : public UART
       }
       if (len > 0)
       {
-        LibXR::Mutex::LockGuard guard(uart->read_port_->mutex_);
         uart->read_port_->queue_data_->PushBatch(uart->rx_buffer_, len);
         uart->read_port_->ProcessPendingReads(false);
       }
