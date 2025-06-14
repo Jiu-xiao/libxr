@@ -31,5 +31,4 @@ void test_async()
   }
 
   pthread_cancel(async.thread_handle_);
-  pthread_join(async.thread_handle_, nullptr);
 }
