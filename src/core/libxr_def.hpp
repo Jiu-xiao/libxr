@@ -20,7 +20,7 @@ constexpr double M_1G = 9.80665;
 
 #ifndef DEF2STR
 #define XR_TO_STR(_arg) #_arg
-#define DEF2STR(_arg) _XR_TO_STR(_arg)
+#define DEF2STR(_arg) XR_TO_STR(_arg)
 #endif
 
 #ifndef UNUSED
