@@ -8,6 +8,7 @@ using namespace LibXR;
  */
 extern "C" void tud_cdc_rx_cb(uint8_t itf)
 {
+  UNUSED(itf);
   if (TinyUSBVirtualUART::self)
   {
     auto &port = TinyUSBVirtualUART::self->_read_port;
