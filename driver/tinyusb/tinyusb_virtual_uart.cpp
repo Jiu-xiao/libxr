@@ -28,7 +28,7 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 size_t TinyUSBUARTReadPort::EmptySize()
 {
   // TinyUSB FIFO最大容量 - 已有数据
-  return uart_->MaxPacketSize() - tud_cdc_available();
+  return CFG_TUD_CDC_RX_BUFSIZE - tud_cdc_available();
 }
 
 /**
@@ -53,9 +53,13 @@ void TinyUSBUARTReadPort::ProcessPendingReads(bool in_isr)
       busy_.store(BusyState::Idle, std::memory_order_release);
 
       if (len == static_cast<int>(info_.data.size_))
+      {
         Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
+      }
       else
+      {
         Finish(in_isr, ErrorCode::EMPTY, info_, len);
+      }
     }
   }
   else if (curr == BusyState::Idle)
@@ -78,7 +82,7 @@ size_t TinyUSBUARTWritePort::EmptySize() { return tud_cdc_write_available(); }
  */
 size_t TinyUSBUARTWritePort::Size()
 {
-  return uart_->MaxPacketSize() - tud_cdc_write_available();
+  return CFG_TUD_CDC_TX_BUFSIZE - tud_cdc_write_available();
 }
 
 // ==================== TinyUSBVirtualUART ====================
@@ -87,11 +91,8 @@ size_t TinyUSBUARTWritePort::Size()
  * @brief TinyUSB虚拟串口构造
  * @param packet_size USB包大小
  */
-TinyUSBVirtualUART::TinyUSBVirtualUART(size_t packet_size)
-    : UART(&_read_port, &_write_port),
-      _read_port(this),
-      _write_port(this),
-      packet_size_(packet_size)
+TinyUSBVirtualUART::TinyUSBVirtualUART()
+    : UART(&_read_port, &_write_port), _read_port(this), _write_port(this)
 {
   self = this;
   _read_port = ReadFun;
