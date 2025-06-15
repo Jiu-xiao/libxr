@@ -47,7 +47,7 @@ class TinyUSBUARTWritePort : public WritePort
 class TinyUSBVirtualUART : public UART
 {
  public:
-  TinyUSBVirtualUART(size_t packet_size = 64);
+  TinyUSBVirtualUART();
 
   static ErrorCode WriteFun(WritePort &port);
   static ErrorCode ReadFun(ReadPort &port);
@@ -56,7 +56,6 @@ class TinyUSBVirtualUART : public UART
   void Poll() { tud_task(); }
   size_t Available() const { return tud_cdc_available(); }
   bool Connected() const { return tud_cdc_connected(); }
-  size_t MaxPacketSize() const { return packet_size_; }
 
   TinyUSBUARTReadPort _read_port;
   TinyUSBUARTWritePort _write_port;
