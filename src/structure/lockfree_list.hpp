@@ -19,7 +19,7 @@ namespace LibXR
  * including adding, deleting nodes, and traversing the list,
  * with thread-safety features.
  */
-class LockFreeList
+class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeList
 {
  public:
   /**
@@ -45,7 +45,7 @@ class LockFreeList
     ~BaseNode() { ASSERT(next_ == nullptr); }
 
     std::atomic<BaseNode*> next_ =
-        nullptr;  ///< 指向下一个节点的原子指针。 Atomic pointer to the next node.
+        nullptr;   ///< 指向下一个节点的原子指针。 Atomic pointer to the next node.
     size_t size_;  ///< 当前节点的数据大小（字节）。 Size of the current node (in bytes).
   };
 
