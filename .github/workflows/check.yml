@@ -13,6 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: setup deps
+      run: sudo apt-get update && sudo apt-get install -y libwpa-client-dev libnm-dev libudev-dev
     - name: configure
       run: mkdir build && cd build && cmake -DLIBXR_TEST_BUILD=True ..
     - name: make
