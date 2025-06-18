@@ -261,8 +261,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      block_ =
-          new (std::align_val_t(LIBXR_CACHE_LINE_SIZE)) LockFreeList::Node<SyncBlock>;
+      block_ = new LockFreeList::Node<SyncBlock>;
       block_->data_.type = SuberType::SYNC;
       block_->data_.buff = RawData(data);
       topic.block_->data_.subers.Add(*block_);
@@ -330,8 +329,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      block_ =
-          new (std::align_val_t(LIBXR_CACHE_LINE_SIZE)) LockFreeList::Node<ASyncBlock>;
+      block_ = new LockFreeList::Node<ASyncBlock>;
       block_->data_.type = SuberType::ASYNC;
       block_->data_.buff = *(new Data);
       topic.block_->data_.subers.Add(*block_);
@@ -418,8 +416,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      auto block =
-          new (std::align_val_t(LIBXR_CACHE_LINE_SIZE)) LockFreeList::Node<QueueBlock>;
+      auto block = new LockFreeList::Node<QueueBlock>;
       block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
       block->data_.fun = [](RawData &data, void *arg, bool in_isr)
@@ -465,8 +462,7 @@ class Topic
         ASSERT(topic.block_->data_.max_length <= sizeof(Data));
       }
 
-      auto block =
-          new (std::align_val_t(LIBXR_CACHE_LINE_SIZE)) LockFreeList::Node<QueueBlock>;
+      auto block = new LockFreeList::Node<QueueBlock>;
       block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
       block->data_.fun = [](RawData &data, void *arg, bool in_isr)
