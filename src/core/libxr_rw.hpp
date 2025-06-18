@@ -275,7 +275,7 @@ class ReadPort
   };
 
   ReadFun read_fun_ = nullptr;
-  BaseQueue *queue_data_ = nullptr;
+  LockFreeQueue<uint8_t> *queue_data_ = nullptr;
   size_t read_size_ = 0;
   Mutex mutex_;
   ReadInfoBlock info_;
@@ -288,7 +288,9 @@ class ReadPort
    * @param buffer_size Size of each buffer.
    */
   ReadPort(size_t buffer_size = 128)
-      : queue_data_(buffer_size > 0 ? new BaseQueue(1, buffer_size) : nullptr)
+      : queue_data_(buffer_size > 0 ? new(std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+                                          LockFreeQueue<uint8_t>(buffer_size)
+                                    : nullptr)
   {
   }
 
@@ -423,7 +425,8 @@ class ReadPort
 
           if (readable_size >= data.size_ && readable_size != 0)
           {
-            auto ans = queue_data_->PopBatch(data.addr_, data.size_);
+            auto ans = queue_data_->PopBatch(reinterpret_cast<uint8_t *>(data.addr_),
+                                             data.size_);
             UNUSED(ans);
             read_size_ = data.size_;
             ASSERT(ans == ErrorCode::OK);
@@ -507,7 +510,8 @@ class ReadPort
         {
           if (info_.data.size_ > 0)
           {
-            auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
+            auto ans = queue_data_->PopBatch(
+                reinterpret_cast<uint8_t *>(info_.data.addr_), info_.data.size_);
             UNUSED(ans);
             ASSERT(ans == ErrorCode::OK);
           }
@@ -528,7 +532,8 @@ class ReadPort
         {
           if (info_.data.size_ > 0)
           {
-            auto ans = queue_data_->PopBatch(info_.data.addr_, info_.data.size_);
+            auto ans = queue_data_->PopBatch(
+                reinterpret_cast<uint8_t *>(info_.data.addr_), info_.data.size_);
             UNUSED(ans);
             ASSERT(ans == ErrorCode::OK);
           }
@@ -576,8 +581,11 @@ class WritePort
    *                   The maximum size of cached data, default is 128.
    */
   WritePort(size_t queue_size = 3, size_t buffer_size = 128)
-      : queue_info_(new LockFreeQueue<WriteInfoBlock>(queue_size)),
-        queue_data_(buffer_size > 0 ? new LockFreeQueue<uint8_t>(buffer_size) : nullptr)
+      : queue_info_(new(std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+                        LockFreeQueue<WriteInfoBlock>(queue_size)),
+        queue_data_(buffer_size > 0 ? new(std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+                                          LockFreeQueue<uint8_t>(buffer_size)
+                                    : nullptr)
   {
   }
 

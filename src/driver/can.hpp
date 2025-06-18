@@ -74,8 +74,9 @@ class CAN
   {
     ASSERT(type < Type::TYPE_NUM);
 
-    auto node =
-        new LockFreeList::Node<Filter>({mode, start_id_mask, end_id_match, type, cb});
+    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))(
+        std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+        LockFreeList::Node<Filter>({mode, start_id_mask, end_id_match, type, cb});
     subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
   }
 
@@ -173,8 +174,8 @@ class FDCAN : public CAN
                 uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX)
   {
     ASSERT(type < Type::TYPE_NUM);
-    auto node =
-        new LockFreeList::Node<Filter>({mode, start_id_mask, end_id_mask, type, cb});
+    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+        LockFreeList::Node<Filter>({mode, start_id_mask, end_id_mask, type, cb});
     subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);
   }
 

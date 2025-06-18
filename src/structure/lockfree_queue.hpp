@@ -22,7 +22,7 @@ namespace LibXR
  * @tparam Data 队列存储的数据类型 / The type of data stored in the queue.
  */
 template <typename Data>
-class LockFreeQueue
+class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
 {
  public:
   /**

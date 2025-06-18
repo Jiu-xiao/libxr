@@ -53,7 +53,8 @@ class Event
       rbt_.Insert(*list, event);
     }
 
-    LockFreeList::Node<Block> *node = new LockFreeList::Node<Block>;
+    LockFreeList::Node<Block> *node =
+        new (std::align_val_t(LIBXR_CACHE_LINE_SIZE)) LockFreeList::Node<Block>;
 
     node->data_.event = event;
     node->data_.cb = cb;
