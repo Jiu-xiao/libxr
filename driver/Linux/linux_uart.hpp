@@ -4,6 +4,7 @@
 #include <asm/termbits.h>
 #undef termios
 #include <fcntl.h>
+#include <libudev.h>
 #include <linux/serial.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
@@ -76,6 +77,65 @@ class LinuxUART : public UART
         Thread::Priority::REALTIME);
   }
 
+  LinuxUART(const std::string &vid, const std::string &pid,
+            unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
+            uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
+            size_t buffer_size = 512)
+      : UART(&_read_port, &_write_port),
+        write_sem_(0),
+        rx_buff_(new uint8_t[buffer_size]),
+        tx_buff_(new uint8_t[buffer_size]),
+        buff_size_(buffer_size),
+        _read_port(buffer_size),
+        _write_port(tx_queue_size, buffer_size)
+  {
+    while (!FindUSBTTYByVidPid(vid, pid, device_path_))
+    {
+      XR_LOG_WARN("Cannot find USB TTY device with VID=%s PID=%s, retrying...",
+                  vid.c_str(), pid.c_str());
+      Thread::Sleep(100);
+    }
+
+    XR_LOG_PASS("Found USB TTY: %s", device_path_.c_str());
+
+    if (std::filesystem::exists(device_path_) == false)
+    {
+      XR_LOG_ERROR("Cannot find UART device: %s", device_path_);
+      ASSERT(false);
+    }
+
+    device_path_ = GetByPathForTTY(device_path_);
+
+    fd_ = open(device_path_.c_str(), O_RDWR | O_NOCTTY);
+    if (fd_ < 0)
+    {
+      XR_LOG_ERROR("Cannot open UART device: %s", device_path_.c_str());
+      ASSERT(false);
+    }
+    else
+    {
+      XR_LOG_PASS("Open UART device: %s", device_path_.c_str());
+    }
+
+    config_ = {.baudrate = baudrate,
+               .parity = parity,
+               .data_bits = data_bits,
+               .stop_bits = stop_bits};
+
+    SetConfig(config_);
+
+    _read_port = ReadFun;
+    _write_port = WriteFun;
+
+    rx_thread_.Create<LinuxUART *>(
+        this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", 8192,
+        Thread::Priority::REALTIME);
+
+    tx_thread_.Create<LinuxUART *>(
+        this, [](LinuxUART *self) { self->TxLoop(); }, "tx_uart", 8192,
+        Thread::Priority::REALTIME);
+  }
+
   std::string GetByPathForTTY(const std::string &tty_name)
   {
     const std::string BASE = "/dev/serial/by-path";
@@ -93,6 +153,59 @@ class LinuxUART : public UART
       }
     }
     return "";  // 没找到
+  }
+
+  static bool FindUSBTTYByVidPid(const std::string &target_vid,
+                                 const std::string &target_pid, std::string &tty_path)
+  {
+    struct udev *udev = udev_new();
+    if (!udev)
+    {
+      XR_LOG_ERROR("Cannot create udev context");
+      return false;
+    }
+
+    struct udev_enumerate *enumerate = udev_enumerate_new(udev);
+    udev_enumerate_add_match_subsystem(enumerate, "tty");
+    udev_enumerate_scan_devices(enumerate);
+
+    struct udev_list_entry *devices = udev_enumerate_get_list_entry(enumerate);
+    struct udev_list_entry *entry;
+    bool found = false;
+
+    udev_list_entry_foreach(entry, devices)
+    {
+      const char *path = udev_list_entry_get_name(entry);
+      struct udev_device *tty_dev = udev_device_new_from_syspath(udev, path);
+      if (!tty_dev) continue;
+
+      struct udev_device *usb_dev =
+          udev_device_get_parent_with_subsystem_devtype(tty_dev, "usb", "usb_device");
+
+      if (usb_dev)
+      {
+        const char *vid = udev_device_get_sysattr_value(usb_dev, "idVendor");
+        const char *pid = udev_device_get_sysattr_value(usb_dev, "idProduct");
+
+        if (vid && pid && target_vid == vid && target_pid == pid)
+        {
+          const char *devnode = udev_device_get_devnode(tty_dev);
+          if (devnode)
+          {
+            tty_path = devnode;
+            found = true;
+            udev_device_unref(tty_dev);
+            break;
+          }
+        }
+      }
+
+      udev_device_unref(tty_dev);
+    }
+
+    udev_enumerate_unref(enumerate);
+    udev_unref(udev);
+    return found;
   }
 
   void SetLowLatency(int fd)

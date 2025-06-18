@@ -9,8 +9,10 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build)
 # Share/Static
 if(LIBXR_SHARED_BUILD)
   add_library(${PROJECT_NAME} SHARED)
-else()
+elif(LIBXR_STATIC_BUILD)
   add_library(${PROJECT_NAME} STATIC)
+else()
+  add_library(${PROJECT_NAME} OBJECT)
 endif()
 
 add_compile_options(-Wno-psabi)

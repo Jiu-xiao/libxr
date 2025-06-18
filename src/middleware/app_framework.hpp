@@ -94,8 +94,9 @@ class HardwareContainer
   {
     for (const auto& alias : entry.aliases)
     {
-      auto node = new LibXR::LockFreeList::Node<AliasEntry>{
-          alias, static_cast<void*>(&entry.object), TypeID::GetID<T>()};
+      auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+          LibXR::LockFreeList::Node<AliasEntry>{alias, static_cast<void*>(&entry.object),
+                                                TypeID::GetID<T>()};
       alias_list_.Add(*node);
     }
   }
@@ -139,7 +140,8 @@ class ApplicationManager
    */
   void Register(Application& app)
   {
-    auto node = new LibXR::LockFreeList::Node<Application*>(&app);
+    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+        LibXR::LockFreeList::Node<Application*>(&app);
     app_list_.Add(*node);
   }
 

@@ -3,5 +3,5 @@ build/
 .cache/**
 CMakeFiles/**
 CMakeCache.txt
-doc/**
+doc/html/**
 doxygen_warnings.log

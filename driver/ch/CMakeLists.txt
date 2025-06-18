@@ -1,3 +1,9 @@
+if(DEFINED LIBXR_CH32_CONFIG_FILE)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_CH32_CONFIG_FILE=${LIBXR_CH32_CONFIG_FILE})
+else()
+    message(FATAL_ERROR "Please set LIBXR_CH32_CONFIG_FILE. e.g. set(LIBXR_CH32_CONFIG_FILE=ch32v30x_conf.h)")
+endif()
+
 file(
     GLOB ${PROJECT_NAME}_DRIVER_CPP_SOURCES "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 
