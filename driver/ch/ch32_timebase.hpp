@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core_riscv.h"
+#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 extern uint32_t SystemCoreClock;
 
@@ -10,8 +10,7 @@ namespace LibXR
 class CH32Timebase : public Timebase
 {
  public:
-  CH32Timebase()
-      : Timebase(UINT64_MAX, UINT32_MAX)
+  CH32Timebase() : Timebase(UINT64_MAX, UINT32_MAX)
   {
     cnt_per_microsec_ = SystemCoreClock / 1000000;
   }

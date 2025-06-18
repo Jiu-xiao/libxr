@@ -103,6 +103,8 @@ class Terminal
   {
     ASSERT(read_port != nullptr);
     ASSERT(write_port != nullptr);
+    ASSERT(read_port->Readable());
+    ASSERT(write_port->Writable());
   }
 
   ReadOperation::OperationPollingStatus read_status_;

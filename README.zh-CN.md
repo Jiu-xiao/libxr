@@ -1,4 +1,3 @@
-
 # LibXR
 
 <div align="center">
@@ -26,6 +25,10 @@
 * 希望快速且可靠地完成整个项目。
 * 不想关心 API 差异。
 
+## 硬件支持
+
+[设备支持列表](./doc/support.md)
+
 ## 系统层支持
 
 1. 应用程序除非重启或进入低功耗模式，否则永不退出。
@@ -44,41 +47,15 @@
 
 ## 数据结构支持
 
-1. 除了链表和红黑树外，其它数据结构内存大小在构造前确定。
-2. 除队列外，所有数据结构均不包含阻塞 API；若需要阻塞功能，请使用信号量。
-
 | `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
 | ----------- | ---- | ----- | ------ | ------------- | ------------ |
 |             | ✅    | ✅     | ✅      | ✅             | ✅            |
 
 ## 中间件支持
 
-A collection of commonly used software.
-
 | `Middleware` | Event | Message | Ramfs | Terminal | Database | Log |
 | ------------ | ----- | ------- | ----- | -------- | -------- | --- |
 |              | ✅     | ✅       | ✅     | ✅        | ✅        | ✅   |
-
-## 外设抽象层支持
-
-Only have virtual class, you can find the drivers in `Platfrom` folder. For example class `STM32Uart` based on the virtual class `Uart`.
-
-| `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | CAN/CANFD | USB-CDC    | FLASH |
-| ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --------- | ---------- | ----- |
-| STM32        | ✅     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ✅   | ✅   | ✅         | ✅          | ✅     |
-| ESP32        | ❌     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ❌   | ❌   | ❌         | ✅          | ✅     |
-| Linux        | ✅     | ❌    | ❌   | ❌   | ❌   | ❌   | ✅    | ❌   | ❌   | ❌         | ❌          | ✅     |
-| CH32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ✅(TinyUSB) | ❌     |
-| GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-| HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-| WCH32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-| HPM          | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-
-| `Network` | WIFI | Bluetooth | SmartConfig |
-| --------- | ---- | --------- | ----------- |
-| Linux     | ✅    | ❌         | ❌           |
-| ESP32     | ✅    | ❌         | ❌           |
-| STM32     | ❌    | ❌         | ❌           |
 
 ## 实用工具
 
@@ -122,6 +99,82 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
 )
+```
+
+## 通用CMake配置
+
+### 系统和驱动平台选择
+
+默认会自动识别宿主系统（Linux、Windows），自动设置 LIBXR_SYSTEM 和 LIBXR_DRIVER。你也可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定，分别对应[system](./system)和[driver](./driver)下的不同文件夹。
+
+```cmake
+# 手动指定系统和驱动
+set(LIBXR_SYSTEM Linux)
+set(LIBXR_DRIVER Linux)
+```
+
+### 编译为共享/静态库
+
+默认编译为object目标，可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定
+
+```cmake
+# 编译为共享库
+set(LIBXR_SHARED_BUILD True)
+
+# 编译为静态库
+set(LIBXR_STATIC_BUILD True)
+```
+
+### 禁用Eigen
+
+此选项禁用 Eigen 库的编译，同时会禁用所有依赖Eigen的代码。适用于某些对C++标准实现不完全的平台。
+
+```cmake
+set(LIBXR_NO_EIGEN True)
+```
+
+### 默认标量类型
+
+默认标量类型为 double，此选项只影响默认构造参数。
+
+```cmake
+set(LIBXR_DEFAULT_SCALAR float)
+```
+
+### 内部Printf缓冲区大小
+
+裸机/RTOS默认为128，Linux下默认为1024。此选项影响了LibXR::STDIO::Printf函数的缓冲区大小，设为0可以禁用所有log打印。
+
+```cmake
+set(LIBXR_PRINTF_BUFFER_SIZE 256)
+```
+
+### 日志消息最大长度
+
+裸机/RTOS默认为64，Linux下默认为256。
+
+```cmake
+set(XR_LOG_MESSAGE_MAX_LEN 256)
+```
+
+### 日志等级
+
+4-0分别对应DEBUG、INFO、PASS、WARNING、ERROR，默认为4。此选项决定了允许发布到话题的最大日志级别。
+
+```cmake
+set(LIBXR_LOG_LEVEL 4)
+```
+
+### 日志打印等级
+
+4-0分别对应DEBUG、INFO、PASS、WARNING、ERROR，默认为4。此选项决定了允许打印到STDIO::write_的最大日志级别。
+
+### 单元测试
+
+开启此选项为Linux平台构建单元测试。
+
+```cmake
+set(LIBXR_TEST_BUILD True)
 ```
 
 ## 其他工具
