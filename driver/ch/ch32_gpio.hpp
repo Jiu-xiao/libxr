@@ -302,12 +302,7 @@ class CH32GPIO : public GPIO
     exti.EXTI_LineCmd = ENABLE;
     EXTI_Init(&exti);
 
-    NVIC_InitTypeDef nvic = {};
-    nvic.NVIC_IRQChannel = irq_;
-    nvic.NVIC_IRQChannelPreemptionPriority = 1;
-    nvic.NVIC_IRQChannelSubPriority = 1;
-    nvic.NVIC_IRQChannelCmd = ENABLE;
-    NVIC_Init(&nvic);
+    NVIC_EnableIRQ(irq_);
   }
 
   static uint8_t GetEXTIID(uint16_t pin) { return __builtin_ctz(pin); }
