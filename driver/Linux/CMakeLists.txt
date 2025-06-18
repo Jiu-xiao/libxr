@@ -23,3 +23,9 @@ else()
     message(WARNING "wpa_client not found.")
     message(WARNING "Use `sudo apt install libwpa-client-dev libnm-dev` to install wpa_client and libnm.")
 endif()
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBUDEV REQUIRED libudev)
+
+target_include_directories(${PROJECT_NAME} PRIVATE ${LIBUDEV_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBUDEV_LIBRARIES})
