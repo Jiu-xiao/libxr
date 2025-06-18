@@ -25,7 +25,9 @@ Want to be the best embedded framework
 * Finish the entire project quickly and reliably.
 * Don't want to care about the differences in APIs.
 
-## Support
+## Hardware Support
+
+[Device support list](./doc/support.md)
 
 ## System Layer
 
@@ -45,41 +47,15 @@ Want to be the best embedded framework
 
 ## Data structure
 
-1. Except list and tree, the memory of other data structures are determined before construction.
-2. No blocking APIs except Queue. If you want one, use Semaphore.
-
 | `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
 | ----------- | ---- | ----- | ------ | ------------- | ------------ |
 |             | ✅    | ✅     | ✅      | ✅             | ✅            |
 
 ## Middleware
 
-A collection of commonly used software.
-
 | `Middleware` | Event | Message | Ramfs | Terminal | Database | Log |
 | ------------ | ----- | ------- | ----- | -------- | -------- | --- |
 |              | ✅     | ✅       | ✅     | ✅        | ✅        | ✅   |
-
-## Periheral Layer
-
-Only have virtual class, you can find the drivers in `Platfrom` folder. For example class `STM32Uart` based on the virtual class `Uart`.
-
-| `Peripheral` | POWER | GPIO | WDG | PWM | ADC | DAC | UART | SPI | I2C | CAN/CANFD | USB-CDC    | FLASH |
-| ------------ | ----- | ---- | --- | --- | --- | --- | ---- | --- | --- | --------- | ---------- | ----- |
-| STM32        | ✅     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ✅   | ✅   | ✅         | ✅          | ✅     |
-| ESP32        | ❌     | ✅    | ❌   | ✅   | ✅   | ❌   | ✅    | ❌   | ❌   | ❌         | ✅          | ✅     |
-| Linux        | ✅     | ❌    | ❌   | ❌   | ❌   | ❌   | ✅    | ❌   | ❌   | ❌         | ❌          | ✅     |
-| CH32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ✅(TinyUSB) | ❌     |
-| GD32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-| HC32         | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-| WCH32        | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-| HPM          | ❌     | ❌    | ❌   | ❌   | ❌   | ❌   | ❌    | ❌   | ❌   | ❌         | ❌          | ❌     |
-
-| `Network` | WIFI | Bluetooth | SmartConfig |
-| --------- | ---- | --------- | ----------- |
-| Linux     | ✅    | ❌         | ❌           |
-| ESP32     | ✅    | ❌         | ❌           |
-| STM32     | ❌    | ❌         | ❌           |
 
 ## Utils
 
@@ -123,6 +99,82 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
 )
+```
+
+## General CMake Configuration
+
+### System and Driver Platform Selection
+
+By default, the host system (Linux, Windows) is automatically detected, and `LIBXR_SYSTEM` and `LIBXR_DRIVER` are set accordingly. You can also manually specify them via the CMake command line or in an external `CMakeLists.txt`, corresponding to the different folders under [system](./system) and [driver](./driver).
+
+```cmake
+# Manually specify system and driver
+set(LIBXR_SYSTEM Linux)
+set(LIBXR_DRIVER Linux)
+```
+
+### Build as Shared/Static Library
+
+By default, the library is built as an object target. You can explicitly set the build type in the CMake command line or your own CMakeLists.txt:
+
+```cmake
+# Build as a shared library
+set(LIBXR_SHARED_BUILD True)
+
+# Build as a static library
+set(LIBXR_STATIC_BUILD True)
+```
+
+### Disable Eigen
+
+This option disables building the Eigen library and will also disable any code depending on Eigen. This is useful for platforms with incomplete C++ standard library support.
+
+```cmake
+set(LIBXR_NO_EIGEN True)
+```
+
+### Default Scalar Type
+
+The default scalar type is `double`. This option only affects the default value for constructors.
+
+```cmake
+set(LIBXR_DEFAULT_SCALAR float)
+```
+
+### Internal Printf Buffer Size
+
+Defaults to 128 for bare-metal/RTOS platforms, and 1024 for Linux. This option sets the buffer size for the `LibXR::STDIO::Printf` function. Setting this to 0 will disable all log printing.
+
+```cmake
+set(LIBXR_PRINTF_BUFFER_SIZE 256)
+```
+
+### Maximum Log Message Length
+
+Defaults to 64 for bare-metal/RTOS, and 256 for Linux.
+
+```cmake
+set(XR_LOG_MESSAGE_MAX_LEN 256)
+```
+
+### Log Level
+
+Levels 4-0 correspond to DEBUG, INFO, PASS, WARNING, and ERROR, with the default set to 4. This option determines the maximum log level allowed to be published to topics.
+
+```cmake
+set(LIBXR_LOG_LEVEL 4)
+```
+
+### Log Print Level
+
+Levels 4-0 correspond to DEBUG, INFO, PASS, WARNING, and ERROR, with the default set to 4. This option determines the maximum log level allowed to be printed to `STDIO::write_`.
+
+### Unit Testing
+
+Enable this option to build unit tests on the Linux platform.
+
+```cmake
+set(LIBXR_TEST_BUILD True)
 ```
 
 ## Others
