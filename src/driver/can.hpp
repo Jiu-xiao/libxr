@@ -74,8 +74,7 @@ class CAN
   {
     ASSERT(type < Type::TYPE_NUM);
 
-    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))(
-        std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
         LockFreeList::Node<Filter>({mode, start_id_mask, end_id_match, type, cb});
     subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
   }
