@@ -1,10 +1,10 @@
-# Support Device List
+# Platform Peripheral Support List
 
-* ✅: 支持 (Supported)
-* ⚙️：仅编译 (Compile Only)
-* 🔄：进行中 (Working)
-* ❌: 未支持 (Not Supported)
-* 🚫：不可用 (Not Available)
+- ✅：已支持（Supported）
+- ⚙️：仅编译（Compile Only）
+- 🔄：开发中（In Progress/Working）
+- ❌：未支持（Not Supported）
+- 🚫：硬件不支持/不可用（Unavailable）
 
 ## Linux Support
 
@@ -46,7 +46,7 @@
 | DAC          | ❌                   | ❌                |
 | PWM          | ✅                   | ⚙️                |
 | USB-CDC      | ✅                   | ⚙️                |
-| WDG          | ❌                   | ❌                |
+| WDG          | ✅                   | ⚙️                |
 
 | `Network`   | STM32 |
 | ----------- | ----- |
