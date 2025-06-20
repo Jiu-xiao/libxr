@@ -74,7 +74,11 @@ class STM32Watchdog : public Watchdog
 
     hiwdg_->Init.Prescaler = best_pr;
     hiwdg_->Init.Reload = best_rlr;
+#if defined(IWDG)
     hiwdg_->Instance = IWDG;  // NOLINT
+#elif defined(IWDG1)
+    hiwdg_->Instance = IWDG1;  // NOLINT
+#endif
 
     return ErrorCode::OK;
   }
