@@ -27,7 +27,7 @@ Want to be the best embedded framework
 
 ## Hardware Support
 
-[Device support list](./doc/support.md)
+[Platform Peripheral Support List](./doc/support.md)
 
 ## System Layer
 
