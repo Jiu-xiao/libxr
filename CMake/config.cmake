@@ -14,7 +14,7 @@ elseif(NOT LIBXR_SYSTEM)
     Set(LIBXR_SYSTEM "Windows")
     Set(LIBXR_DRIVER "Windows")
   elseif()
-    message(FATAL_ERROR "Unkonw system.")
+    message(FATAL_ERROR "Unknown system.")
   endif()
 endif()
 
@@ -32,7 +32,7 @@ endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../system/${LIBXR_SYSTEM}/CMakeLists.txt)
 
-message("-- Platfrom: ${LIBXR_SYSTEM}")
+message("-- Platform: ${LIBXR_SYSTEM}")
 
 if(DEFINED LIBXR_DEFAULT_SCALAR)
   target_compile_definitions(xr PUBLIC LIBXR_DEFAULT_SCALAR=${LIBXR_DEFAULT_SCALAR})

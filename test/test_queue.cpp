@@ -35,7 +35,8 @@ void test_queue()
   lock_free_queue.Pop(tmp);
   ASSERT(tmp == 2.1f);
 
-  lock_free_queue.Pop(tmp);
+  auto ret = lock_free_queue.Pop(tmp);
+  ASSERT(ret == ErrorCode::EMPTY);
   ASSERT(tmp == 2.1f);
 
   auto queue = LibXR::LockQueue<float>(3);
@@ -70,30 +71,31 @@ void test_queue()
   queue.Pop(tmp, 20);
   ASSERT(tmp == 2.1f);
 
-  queue.Pop(tmp, 20);
+  auto ret2 = queue.Pop(tmp, 20);
+  ASSERT(ret2 != ErrorCode::OK);
   ASSERT(tmp == 2.1f);
 
   // Test batch operations on the basic Queue implementation
   LibXR::Queue<int> batch_queue(5);
 
   int initial[5] = {1, 2, 3, 4, 5};
-  ASSERT(batch_queue.PushBatch(initial, 5) == LibXR::ErrorCode::OK);
+  ASSERT(batch_queue.PushBatch(initial, 5) == ErrorCode::OK);
 
   int peek_buffer[5] = {};
-  ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == LibXR::ErrorCode::OK);
+  ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == ErrorCode::OK);
   for (int i = 0; i < 5; ++i)
   {
     ASSERT(peek_buffer[i] == initial[i]);
   }
 
   int dummy[2];
-  ASSERT(batch_queue.PopBatch(dummy, 2) == LibXR::ErrorCode::OK);
+  ASSERT(batch_queue.PopBatch(dummy, 2) == ErrorCode::OK);
 
   int wrap[2] = {6, 7};
-  ASSERT(batch_queue.PushBatch(wrap, 2) == LibXR::ErrorCode::OK);
+  ASSERT(batch_queue.PushBatch(wrap, 2) == ErrorCode::OK);
 
   int expected[5] = {3, 4, 5, 6, 7};
-  ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == LibXR::ErrorCode::OK);
+  ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == ErrorCode::OK);
   for (int i = 0; i < 5; ++i)
   {
     ASSERT(peek_buffer[i] == expected[i]);
