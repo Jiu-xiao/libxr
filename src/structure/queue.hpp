@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -255,11 +256,13 @@ class BaseQueue
 
     auto tmp = reinterpret_cast<uint8_t *>(data);
 
-    for (size_t i = 0; i < size; i++)
+    size_t first_part = std::min(size, length_ - index);
+    memcpy(tmp, &queue_array_[index * ELEMENT_SIZE], first_part * ELEMENT_SIZE);
+
+    if (first_part < size)
     {
-      memcpy(&tmp[i * ELEMENT_SIZE], &queue_array_[index * ELEMENT_SIZE],
-             ELEMENT_SIZE);
-      index = (index + 1) % length_;
+      memcpy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
+             (size - first_part) * ELEMENT_SIZE);
     }
 
     return ErrorCode::OK;
