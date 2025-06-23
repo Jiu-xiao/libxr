@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -256,7 +255,7 @@ class BaseQueue
 
     auto tmp = reinterpret_cast<uint8_t *>(data);
 
-    size_t first_part = std::min(size, length_ - index);
+    size_t first_part = LibXR::min(size, length_ - index);
     memcpy(tmp, &queue_array_[index * ELEMENT_SIZE], first_part * ELEMENT_SIZE);
 
     if (first_part < size)
