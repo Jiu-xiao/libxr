@@ -5,7 +5,7 @@
 void test_queue()
 {
   LibXR::Thread thread1, thread2;
-  auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
+  static auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
 
   thread1.Create<LibXR::LockFreeQueue<float> *>(
       &lock_free_queue,
@@ -39,7 +39,7 @@ void test_queue()
   ASSERT(ret == ErrorCode::EMPTY);
   ASSERT(tmp == 2.1f);
 
-  auto queue = LibXR::LockQueue<float>(3);
+  static auto queue = LibXR::LockQueue<float>(3);
 
   thread2.Create<LibXR::LockQueue<float> *>(
       &queue,
