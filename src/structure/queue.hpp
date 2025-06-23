@@ -257,7 +257,7 @@ class BaseQueue
 
     for (size_t i = 0; i < size; i++)
     {
-      memcpy(&tmp[index * ELEMENT_SIZE], &queue_array_[index * ELEMENT_SIZE],
+      memcpy(&tmp[i * ELEMENT_SIZE], &queue_array_[index * ELEMENT_SIZE],
              ELEMENT_SIZE);
       index = (index + 1) % length_;
     }
