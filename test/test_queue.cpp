@@ -35,7 +35,8 @@ void test_queue()
   lock_free_queue.Pop(tmp);
   ASSERT(tmp == 2.1f);
 
-  lock_free_queue.Pop(tmp);
+  auto ret = lock_free_queue.Pop(tmp);
+  ASSERT(ret == LibXR::ErrorCode::EMPTY);
   ASSERT(tmp == 2.1f);
 
   auto queue = LibXR::LockQueue<float>(3);
@@ -70,6 +71,7 @@ void test_queue()
   queue.Pop(tmp, 20);
   ASSERT(tmp == 2.1f);
 
-  queue.Pop(tmp, 20);
+  auto ret2 = queue.Pop(tmp, 20);
+  ASSERT(ret2 == LibXR::ErrorCode::EMPTY);
   ASSERT(tmp == 2.1f);
 }
