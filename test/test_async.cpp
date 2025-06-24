@@ -18,7 +18,7 @@ void test_async()
   static LibXR::ASync async(512, LibXR::Thread::Priority::REALTIME);
   for (int i = 0; i < 10; i++)
   {
-    ASSERT(async.GetStatus() == LibXR::ASync::Status::REDAY);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::READY);
     async.AssignJob(async_cb);
 
     ASSERT(async_arg == i);
@@ -27,7 +27,7 @@ void test_async()
 
     ASSERT(async_arg == i + 1);
     ASSERT(async.GetStatus() == LibXR::ASync::Status::DONE);
-    ASSERT(async.GetStatus() == LibXR::ASync::Status::REDAY);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::READY);
   }
 
   pthread_cancel(async.thread_handle_);
