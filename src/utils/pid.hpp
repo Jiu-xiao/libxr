@@ -230,6 +230,7 @@ class PID
     last_err_ = 0;
     last_fb_ = 0;
     last_out_ = 0;
+    last_der_ = 0;
   }
 
   /**

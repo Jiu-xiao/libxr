@@ -40,13 +40,13 @@ class Inertia
                                              std::is_same<T, float>::value ||
                                              std::is_same<T, double>::value,
                                          int> = 0>
-  explicit Inertia(Scalar m, const T (&data)[9]) : mass(m)
+  explicit Inertia(Scalar m, const T (&values)[9]) : mass(m)
   {
     for (int i = 0; i < 3; i++)
     {
       for (int j = 0; j < 3; j++)
       {
-        data[i * 3 + j] = static_cast<Scalar>(data[i + j + 3]);
+        data[i * 3 + j] = static_cast<Scalar>(values[i * 3 + j]);
       }
     }
   }
@@ -63,13 +63,13 @@ class Inertia
                                              std::is_same<T, float>::value ||
                                              std::is_same<T, double>::value,
                                          int> = 0>
-  explicit Inertia(Scalar m, const T (&data)[3][3]) : mass(m)
+  explicit Inertia(Scalar m, const T (&matrix)[3][3]) : mass(m)
   {
     for (int i = 0; i < 3; i++)
     {
       for (int j = 0; j < 3; j++)
       {
-        data[i * 3 + j] = static_cast<Scalar>(data[j][i]);
+        data[i * 3 + j] = static_cast<Scalar>(matrix[i][j]);
       }
     }
   }
@@ -90,9 +90,9 @@ class Inertia
   template <typename T,
             std::enable_if_t<
                 std::is_same<T, float>::value || std::is_same<T, double>::value, int> = 0>
-  explicit Inertia(Scalar m, const T (&data)[6])
-      : data{data[0],  -data[3], -data[5], -data[3], data[2],
-             -data[4], -data[5], -data[4], data[2]},
+  explicit Inertia(Scalar m, const T (&arr)[6])
+      : data{arr[0], -arr[3], -arr[5], -arr[3], arr[1],
+             -arr[4], -arr[5], -arr[4], arr[2]},
         mass(m)
   {
   }

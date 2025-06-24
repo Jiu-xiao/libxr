@@ -47,7 +47,7 @@ class CycleValue
    * @return 归一化后的角度值。
    *         The normalized angle value.
    */
-  static Scalar Calculate(Scalar value)
+  static constexpr Scalar Calculate(Scalar value)
   {
     value = std::fmod(value, M_2PI);
     if (value < 0)
@@ -101,9 +101,9 @@ class CycleValue
    * @return 返回新的 `CycleValue` 对象。
    *         Returns a new `CycleValue` object.
    */
-  CycleValue operator+(const Scalar &value) { return CycleValue(value + value_); }
+  CycleValue operator+(const Scalar &value) const { return CycleValue(value + value_); }
 
-  CycleValue operator+(const CycleValue &value)
+  CycleValue operator+(const CycleValue &value) const
   {
     return CycleValue(value.value_ + value_);
   }
@@ -117,13 +117,13 @@ class CycleValue
    * @return 返回自身的引用。
    *         Returns a reference to itself.
    */
-  CycleValue operator+=(const Scalar &value)
+  CycleValue &operator+=(const Scalar &value)
   {
     value_ = Calculate(value + value_);
     return *this;
   }
 
-  CycleValue operator+=(const CycleValue &value)
+  CycleValue &operator+=(const CycleValue &value)
   {
     Scalar ans = value.value_ + value_;
     while (ans >= M_2PI)
@@ -150,7 +150,7 @@ class CycleValue
    * @return 归一化后的角度差值。
    *         The normalized angle difference.
    */
-  Scalar operator-(const Scalar &raw_value)
+  Scalar operator-(const Scalar &raw_value) const
   {
     Scalar value = Calculate(raw_value);
     Scalar ans = value_ - value;
@@ -167,7 +167,7 @@ class CycleValue
     return ans;
   }
 
-  Scalar operator-(const CycleValue &value)
+  Scalar operator-(const CycleValue &value) const
   {
     Scalar ans = value_ - value.value_;
     while (ans >= M_PI)
@@ -192,13 +192,13 @@ class CycleValue
    * @return 返回自身的引用。
    *         Returns a reference to itself.
    */
-  CycleValue operator-=(const Scalar &value)
+  CycleValue &operator-=(const Scalar &value)
   {
     value_ = Calculate(value_ - value);
     return *this;
   }
 
-  CycleValue operator-=(const CycleValue &value)
+  CycleValue &operator-=(const CycleValue &value)
   {
     Scalar ans = value_ - value.value_;
     while (ans >= M_2PI)
@@ -222,7 +222,7 @@ class CycleValue
    * @return 返回取反后的 `CycleValue`。
    *         Returns the negated `CycleValue`.
    */
-  CycleValue operator-() { return CycleValue(M_2PI - value_); }
+  CycleValue operator-() const { return CycleValue(M_2PI - value_); }
 
   /**
    * @brief 类型转换操作符，将 `CycleValue` 转换为 `Scalar`。
@@ -231,7 +231,7 @@ class CycleValue
    * @return 以 `Scalar` 形式返回角度值。
    *         Returns the angle value as `Scalar`.
    */
-  operator Scalar() { return this->value_; }
+  operator Scalar() const { return this->value_; }
 
   /**
    * @brief 赋值运算符重载，更新角度值并归一化。
@@ -255,7 +255,7 @@ class CycleValue
    * @return 角度值。
    *         The angle value.
    */
-  Scalar Value() { return value_; }
+  Scalar Value() const { return value_; }
 
  private:
   Scalar value_;  ///< 存储的角度值。 The stored angle value.
