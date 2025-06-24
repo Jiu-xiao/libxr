@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "semaphore.hpp"
@@ -66,8 +68,7 @@ class ASync
     }
   }
 
-  Status status_ =
-      Status::READY;  ///< 当前异步任务状态。 The current status of the asynchronous task.
+  std::atomic<Status> status_ = Status::READY;  ///< 当前异步任务状态
 
   /**
    * @brief 获取当前异步任务的状态。
@@ -81,17 +82,15 @@ class ASync
    * @return 返回当前任务状态。
    *         Returns the current task status.
    */
-  Status GetStatus()
+  [[nodiscard]] Status GetStatus()
   {
-    if (status_ != Status::DONE)
+    Status cur = status_.load();
+    if (cur != Status::DONE)
     {
-      return status_;
+      return cur;
     }
-    else
-    {
-      status_ = Status::READY;
-      return Status::DONE;
-    }
+    status_ = Status::READY;
+    return Status::DONE;
   }
 
   using Job = LibXR::Callback<ASync *>;
@@ -129,7 +128,7 @@ class ASync
   void AssignJobFromCallback(Job job, bool in_isr)
   {
     job_ = job;
-    status_ = Status::BUSY;
+    status_.store(Status::BUSY);
     sem_.PostFromCallback(in_isr);
   }
 

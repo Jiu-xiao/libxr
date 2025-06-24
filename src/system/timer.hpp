@@ -41,9 +41,9 @@ class Timer
 
     void (*fun_)(void *);  ///< 任务执行函数 Function pointer to the task
     void *handle;          ///< 任务句柄 Handle to the task
-    uint32_t cycle_;  ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
-    uint32_t count_;  ///< 计数器 Counter
-    bool enable_;     ///< 任务是否启用 Flag indicating whether the task is enabled
+    uint32_t cycle_;       ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
+    uint32_t count_;       ///< 计数器 Counter
+    bool enable_;          ///< 任务是否启用 Flag indicating whether the task is enabled
   };
 
   typedef LibXR::List::Node<ControlBlock>
@@ -66,7 +66,8 @@ class Timer
    * If `cycle` is less than or equal to 0, it triggers an `ASSERT` assertion.
    */
   template <typename ArgType>
-  static TimerHandle CreateTask(void (*fun)(ArgType), ArgType arg, uint32_t cycle)
+  [[nodiscard]] static TimerHandle CreateTask(void (*fun)(ArgType), ArgType arg,
+                                              uint32_t cycle)
   {
     ASSERT(cycle > 0);
 
@@ -116,6 +117,7 @@ class Timer
    */
   static void SetCycle(TimerHandle handle, uint32_t cycle)
   {
+    ASSERT(cycle > 0);
     handle->data_.cycle_ = cycle;
   }
 
@@ -240,7 +242,7 @@ class Timer
   static inline Thread thread_handle_;  ///< 定时器管理线程 Timer management thread
 
   static inline LibXR::Thread::Priority priority_;  ///< 线程优先级 Thread priority
-  static inline uint32_t stack_depth_;  ///< 线程栈深度 Thread stack depth
+  static inline uint32_t stack_depth_;              ///< 线程栈深度 Thread stack depth
 };
 
 }  // namespace LibXR
