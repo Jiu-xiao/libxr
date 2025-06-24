@@ -120,7 +120,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
                            std::is_same<Rotation, Quaternion<Scalar>>::value ||
                            std::is_same<Rotation, Eigen::Quaternion<Scalar>>::value,
                        int> = 0>
-  Eigen::Matrix<Scalar, 3, 1> operator*(const Rotation &R)
+  Eigen::Matrix<Scalar, 3, 1> operator*(const Rotation &R) const
   {
     return R * (*this);
   }
@@ -150,7 +150,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param R 旋转矩阵 / Rotation matrix
    * @return 变换后的向量 / Transformed vector
    */
-  Eigen::Matrix<Scalar, 3, 1> operator/(const RotationMatrix<Scalar> &R)
+  Eigen::Matrix<Scalar, 3, 1> operator/(const RotationMatrix<Scalar> &R) const
   {
     return (-R) * (*this);
   }
