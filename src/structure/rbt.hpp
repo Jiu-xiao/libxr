@@ -241,8 +241,6 @@ class RBTree
     node.right = nullptr;
     node.parent = nullptr;
     node.color = RbtColor::RED;
-    node.key = key;
-    node.color = RbtColor::RED;
     node.key = std::forward<KeyType>(key);
     RbtreeInsert(node);
     mutex_.Unlock();

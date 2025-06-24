@@ -15,7 +15,7 @@ void test_async()
       },
       &async_arg);
 
-  LibXR::ASync async(512, LibXR::Thread::Priority::REALTIME);
+  static LibXR::ASync async(512, LibXR::Thread::Priority::REALTIME);
   for (int i = 0; i < 10; i++)
   {
     ASSERT(async.GetStatus() == LibXR::ASync::Status::REDAY);
