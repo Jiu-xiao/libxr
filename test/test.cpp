@@ -40,13 +40,15 @@ static void run_libxr_tests()
   TestCase utility_tests[] = {
       {"crc", test_crc},
       {"encoder", test_float_encoder},
+      {"cycle_value", test_cycle_value},
   };
 
   TestCase data_structure_tests[] = {{"rbt", test_rbt},
                                      {"queue", test_queue},
                                      {"stack", test_stack},
                                      {"list", test_list},
-                                     {"double_buffer", test_double_buffer}};
+                                     {"double_buffer", test_double_buffer},
+                                     {"string", test_string}};
 
   TestCase threading_tests[] = {
       {"thread", test_thread},
@@ -58,6 +60,10 @@ static void run_libxr_tests()
       {"inertia", test_inertia},
       {"kinematic", test_kinematic},
       {"transform", test_transform},
+  };
+
+  TestCase control_tests[] = {
+      {"pid", test_pid},
   };
 
   TestCase system_tests[] = {
@@ -74,6 +80,7 @@ static void run_libxr_tests()
                      {data_structure_tests, "data_structure_tests"},
                      {threading_tests, "threading_tests"},
                      {motion_tests, "motion_tests"},
+                     {control_tests, "control_tests"},
                      {system_tests, "system_tests"}};
 
   size_t group_sizes[] = {
@@ -82,6 +89,7 @@ static void run_libxr_tests()
       sizeof(data_structure_tests) / sizeof(TestCase),
       sizeof(threading_tests) / sizeof(TestCase),
       sizeof(motion_tests) / sizeof(TestCase),
+      sizeof(control_tests) / sizeof(TestCase),
       sizeof(system_tests) / sizeof(TestCase),
   };
 
