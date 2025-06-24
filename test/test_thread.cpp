@@ -5,7 +5,7 @@
 void test_thread() {
   LibXR::Thread thread;
 
-  LibXR::Semaphore sem(0);
+  static LibXR::Semaphore sem(0);
 
   ASSERT(sem.Wait(0) != ErrorCode::OK);
 

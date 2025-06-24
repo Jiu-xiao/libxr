@@ -3,7 +3,7 @@
 #include "test.hpp"
 
 void test_semaphore() {
-  LibXR::Semaphore sem(0);
+  static LibXR::Semaphore sem(0);
   LibXR::Thread thread;
 
   thread.Create<LibXR::Semaphore *>(
