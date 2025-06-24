@@ -623,8 +623,7 @@ class DatabaseRaw : public Database
 
     if (!last_key)
     {
-      FlashInfo flash_info;
-      memset(&flash_info, 0xff, sizeof(FlashInfo));
+      FlashInfo flash_info;  // constructor fills padding with 0xFF
       flash_info.header = FLASH_HEADER;
       KeyInfo& tmp_key = flash_info.key;
       BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.no_next_key, false);
@@ -780,8 +779,7 @@ class DatabaseRaw : public Database
                      reinterpret_cast<uint8_t*>(flash_.flash_area_.addr_),
                  block_size_);
 
-    FlashInfo info;
-    memset(&info, 0xff, sizeof(FlashInfo));
+    FlashInfo info;  // padding filled with 0xFF by constructor
     info.header = FLASH_HEADER;
     KeyInfo& tmp_key = info.key;
     BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.no_next_key, true);

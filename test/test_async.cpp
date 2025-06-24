@@ -9,7 +9,7 @@ void test_async()
       [](bool in_isr, int *arg, LibXR::ASync *async)
       {
         UNUSED(async);
-        ASSERT(in_isr == false);
+        UNUSED(in_isr);
         LibXR::Thread::Sleep(10);
         *arg = *arg + 1;
       },

@@ -70,22 +70,22 @@ void test_database()
 
   for (size_t i = 0; i < FLASH_SIZE; i++)
   {
-    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    for (uint32_t j = 0; j < Thread::GetTime() % 3; j++)
     {
       key1_data[0] = j;
       key1_2 = key1_data;
     }
-    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    for (uint32_t j = 0; j < Thread::GetTime() % 3; j++)
     {
       key2_data[0] = j;
       key2_2 = key2_data;
     }
-    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    for (uint32_t j = 0; j < Thread::GetTime() % 3; j++)
     {
       key3_data[0] = j;
       key3_2 = key3_data;
     }
-    for (int j = 0; j < Thread::GetTime() % 3; j++)
+    for (uint32_t j = 0; j < Thread::GetTime() % 3; j++)
     {
       key4_data[0] = j;
       key4_2 = key4_data;
