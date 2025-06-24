@@ -25,7 +25,7 @@ class ASync
    */
   enum class Status : uint8_t
   {
-    REDAY,  ///< 任务已准备就绪。 Task is ready.
+    READY,  ///< 任务已准备就绪。 Task is ready.
     BUSY,   ///< 任务正在执行中。 Task is currently running.
     DONE    ///< 任务已完成。 Task is completed.
   };
@@ -67,16 +67,16 @@ class ASync
   }
 
   Status status_ =
-      Status::REDAY;  ///< 当前异步任务状态。 The current status of the asynchronous task.
+      Status::READY;  ///< 当前异步任务状态。 The current status of the asynchronous task.
 
   /**
    * @brief 获取当前异步任务的状态。
    *        Retrieves the current status of the asynchronous task.
    *
    * 如果任务尚未完成，则返回当前 `status_`。
-   * 如果任务已完成，则返回 `DONE` 并重置状态为 `REDAY`。
+   * 如果任务已完成，则返回 `DONE` 并重置状态为 `READY`。
    * If the task is not yet completed, it returns the current `status_`.
-   * If the task is completed, it returns `DONE` and resets the status to `REDAY`.
+   * If the task is completed, it returns `DONE` and resets the status to `READY`.
    *
    * @return 返回当前任务状态。
    *         Returns the current task status.
@@ -89,7 +89,7 @@ class ASync
     }
     else
     {
-      status_ = Status::REDAY;
+      status_ = Status::READY;
       return Status::DONE;
     }
   }
