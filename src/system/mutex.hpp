@@ -45,7 +45,7 @@ class Mutex
    *         - `ErrorCode::BUSY` 表示锁已被占用 (`ErrorCode::BUSY` if the mutex is already
    * locked).
    */
-  ErrorCode TryLock();
+  [[nodiscard]] ErrorCode TryLock();
 
   /**
    * @brief 解锁互斥锁

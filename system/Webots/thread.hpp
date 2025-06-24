@@ -68,15 +68,9 @@ class Thread
     pthread_attr_t attr;
     pthread_attr_init(&attr);
 
-    // 线程栈大小设定，确保不小于 1
-    if (stack_depth > 256)
-    {
-      pthread_attr_setstacksize(&attr, stack_depth / 1024 * 4);
-    }
-    else
-    {
-      pthread_attr_setstacksize(&attr, 1);
-    }
+    // 线程栈大小设定，至少满足 PTHREAD_STACK_MIN
+    size_t stack_size = LibXR::max(static_cast<size_t>(PTHREAD_STACK_MIN), stack_depth);
+    pthread_attr_setstacksize(&attr, stack_size);
 
     /**
      * @brief  线程数据封装类
@@ -100,6 +94,8 @@ class Thread
         strcpy(name_, name);
       }
 
+      ~ThreadBlock() { free(name_); }
+
       /**
        * @brief  线程入口函数，执行用户定义的线程函数
        *         Thread entry function that executes the user-defined function
@@ -114,6 +110,7 @@ class Thread
         block->fun_(block->arg_);
 
         UNUSED(thread_name);
+        delete block;
         return static_cast<void *>(nullptr);
       }
 
@@ -159,16 +156,18 @@ class Thread
     }
 
     // 创建线程
-    if (auto ans = pthread_create(&this->thread_handle_, &attr, block->Port, block) != 0)
+    int ans = pthread_create(&this->thread_handle_, &attr, block->Port, block);
+    if (ans != 0)
     {
       XR_LOG_WARN("Failed to create thread: %s (%s), Falling back to default policy.",
                   name, strerror(ans));
       pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
       pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
-      if (auto ans =
-              pthread_create(&this->thread_handle_, &attr, block->Port, block) != 0)
+      ans = pthread_create(&this->thread_handle_, &attr, block->Port, block);
+      if (ans != 0)
       {
-        XR_LOG_ERROR("Failed to create thread: %s (%s)", ans);
+        XR_LOG_ERROR("Failed to create thread: %s (%s)", name, strerror(ans));
+        delete block;
       }
     }
 

@@ -26,7 +26,10 @@ class BaseQueue
    * @param buffer 指向缓冲区的指针 (Pointer to the buffer).
    */
   BaseQueue(uint16_t element_size, size_t length, uint8_t *buffer)
-      : queue_array_(buffer), ELEMENT_SIZE(element_size), length_(length)
+      : queue_array_(buffer),
+        ELEMENT_SIZE(element_size),
+        length_(length),
+        own_buffer_(false)
   {
   }
 
@@ -38,21 +41,28 @@ class BaseQueue
   BaseQueue(uint16_t element_size, size_t length)
       : queue_array_(new uint8_t[length * element_size]),
         ELEMENT_SIZE(element_size),
-        length_(length)
+        length_(length),
+        own_buffer_(true)
   {
   }
 
   /**
    * @brief 析构函数，释放队列内存 (Destructor to free queue memory).
    */
-  ~BaseQueue() { delete[] queue_array_; }
+  ~BaseQueue()
+  {
+    if (own_buffer_)
+    {
+      delete[] queue_array_;
+    }
+  }
 
   /**
    * @brief 访问指定索引的元素 (Access an element at a specified index).
    * @param index 目标索引 (Target index).
    * @return 指向该索引处元素的指针 (Pointer to the element at the specified index).
    */
-  void *operator[](uint32_t index)
+  [[nodiscard]] void *operator[](uint32_t index)
   {
     return &queue_array_[static_cast<size_t>(index * ELEMENT_SIZE)];
   }
@@ -113,20 +123,18 @@ class BaseQueue
    */
   ErrorCode Pop(void *data = nullptr)
   {
-    if (Size() > 0)
-    {
-      if (data != nullptr)
-      {
-        memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
-      }
-      head_ = (head_ + 1) % length_;
-      is_full_ = false;
-      return ErrorCode::OK;
-    }
-    else
+    if (Size() == 0)
     {
       return ErrorCode::EMPTY;
     }
+
+    if (data != nullptr)
+    {
+      memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
+    }
+    head_ = (head_ + 1) % length_;
+    is_full_ = false;
+    return ErrorCode::OK;
   }
 
   /**
@@ -135,16 +143,13 @@ class BaseQueue
    *         (Returns the index of the last element if the queue is not empty, otherwise
    * -1).
    */
-  int GetLastElementIndex()
+  int GetLastElementIndex() const
   {
-    if (Size() > 0)
-    {
-      return static_cast<int>((tail_ + length_ - 1) % length_);
-    }
-    else
+    if (Size() == 0)
     {
       return -1;
     }
+    return static_cast<int>((tail_ + length_ - 1) % length_);
   }
 
   /**
@@ -153,16 +158,13 @@ class BaseQueue
    *         (Returns the index of the first element if the queue is not empty, otherwise
    * -1).
    */
-  int GetFirstElementIndex()
+  int GetFirstElementIndex() const
   {
-    if (Size() > 0)
-    {
-      return static_cast<int>(head_);
-    }
-    else
+    if (Size() == 0)
     {
       return -1;
     }
+    return static_cast<int>(head_);
   }
 
   /**
@@ -184,12 +186,16 @@ class BaseQueue
 
     auto tmp = reinterpret_cast<const uint8_t *>(data);
 
-    for (size_t i = 0; i < size; i++)
+    size_t first_part = LibXR::min(size, length_ - tail_);
+    memcpy(&queue_array_[tail_ * ELEMENT_SIZE], tmp, first_part * ELEMENT_SIZE);
+
+    if (size > first_part)
     {
-      memcpy(&queue_array_[tail_ * ELEMENT_SIZE], &tmp[i * ELEMENT_SIZE], ELEMENT_SIZE);
-      tail_ = (tail_ + 1) % length_;
+      memcpy(queue_array_, &tmp[first_part * ELEMENT_SIZE],
+             (size - first_part) * ELEMENT_SIZE);
     }
 
+    tail_ = (tail_ + size) % length_;
     if (head_ == tail_)
     {
       is_full_ = true;
@@ -212,26 +218,25 @@ class BaseQueue
       return ErrorCode::EMPTY;
     }
 
-    if (size > 0)
-    {
-      is_full_ = false;
-    }
-    else
+    if (size == 0)
     {
       return ErrorCode::OK;
     }
+    is_full_ = false;
 
-    auto tmp = reinterpret_cast<uint8_t *>(data);
-
-    for (size_t i = 0; i < size; i++)
+    size_t first_part = LibXR::min(size, length_ - head_);
+    if (data != nullptr)
     {
-      if (data != nullptr)
+      auto tmp = reinterpret_cast<uint8_t *>(data);
+      memcpy(tmp, &queue_array_[head_ * ELEMENT_SIZE], first_part * ELEMENT_SIZE);
+      if (size > first_part)
       {
-        memcpy(&tmp[i * ELEMENT_SIZE], &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
+        memcpy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
+               (size - first_part) * ELEMENT_SIZE);
       }
-      head_ = (head_ + 1) % length_;
     }
 
+    head_ = (head_ + size) % length_;
     return ErrorCode::OK;
   }
 
@@ -304,7 +309,7 @@ class BaseQueue
    * @brief 获取队列中的元素个数 (Get the number of elements in the queue).
    * @return 当前队列中的元素个数 (Current number of elements in the queue).
    */
-  size_t Size()
+  [[nodiscard]] size_t Size() const
   {
     if (is_full_)
     {
@@ -324,13 +329,13 @@ class BaseQueue
    * @brief 获取队列的空闲空间 (Get the available space in the queue).
    * @return 队列中可存储的元素个数 (Number of available slots in the queue).
    */
-  size_t EmptySize() { return length_ - Size(); }
+  [[nodiscard]] size_t EmptySize() const { return length_ - Size(); }
 
   BaseQueue(const BaseQueue &) = delete;
-  BaseQueue operator=(const BaseQueue &) = delete;
-  BaseQueue operator=(BaseQueue &) = delete;
-  BaseQueue operator=(const BaseQueue &&) = delete;
-  BaseQueue operator=(BaseQueue &&) = delete;
+  BaseQueue &operator=(const BaseQueue &) = delete;
+  BaseQueue &operator=(BaseQueue &) = delete;
+  BaseQueue &operator=(const BaseQueue &&) = delete;
+  BaseQueue &operator=(BaseQueue &&) = delete;
 
   uint8_t *queue_array_;        ///< 存储队列数据的数组 (Array storing queue data).
   const uint16_t ELEMENT_SIZE;  ///< 每个元素的大小 (Size of each element).
@@ -338,6 +343,7 @@ class BaseQueue
   size_t tail_ = 0;             ///< 尾部索引 (Tail index).
   bool is_full_ = false;        ///< 队列是否已满 (Indicates if the queue is full).
   size_t length_;               ///< 队列最大容量 (Maximum queue capacity).
+  bool own_buffer_ = false;     ///< 是否由队列自己管理缓冲区 (Owns buffer memory).
 };
 
 /**

@@ -75,6 +75,7 @@ class Thread
       {
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
         block->fun_(block->arg_);
+        delete block;
       }
 
       decltype(function) fun_;
