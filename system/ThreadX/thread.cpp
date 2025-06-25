@@ -13,7 +13,7 @@ void Thread::Sleep(uint32_t milliseconds)
 
 void Thread::SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep)
 {
-  TimestampMS target = last_waskup_time + time_to_sleep;
+  uint32_t target = last_waskup_time + time_to_sleep;
   uint32_t now = Timebase::GetMilliseconds();
   if (target > now)
   {
