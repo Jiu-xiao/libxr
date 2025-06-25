@@ -11,9 +11,9 @@ void test_inertia()
   using LibXR::Transform;
 
   /* Constructor checks */
-  double data9[9] = {1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  double data33[3][3] = {{1., 2., 3.}, {4., 5., 6.}, {7., 8., 9.}};
-  double data6[6] = {1., 2., 3., 4., 5., 6.};
+  double data9[9] = {1, -4, -6, -4, 2, -5, -6, -5, 3};
+  double data33[3][3] = {{1, -4, -6}, {-4, 2, -5}, {-6, -5, 3}};
+  double data6[6] = {1, 2, 3, 4, 5, 6};
 
   Inertia from_arr9(0.1, data9);
   Inertia from_mat(0.1, data33);
@@ -42,13 +42,19 @@ void test_inertia()
   /* Translation and rotation checks */
   Position pos(std::sqrt(0.5), std::sqrt(0.5), 0.);
   auto translated = from_vals.Translate(pos);
-  ASSERT(equal(translated(0, 0), 1.05) && equal(translated(0, 1), -0.05) &&
-         equal(translated(1, 0), -0.05) && equal(translated(1, 1), 2.05) &&
-         equal(translated(2, 2), 3.1));
+  ASSERT(equal(translated.data[0], 1.05));
+  ASSERT(equal(translated.data[1], -4.05));
+  ASSERT(equal(translated.data[2], -6.0));
+  ASSERT(equal(translated.data[3], -4.05));
+  ASSERT(equal(translated.data[4], 2.05));
+  ASSERT(equal(translated.data[5], -5.0));
+  ASSERT(equal(translated.data[6], -6.0));
+  ASSERT(equal(translated.data[7], -5.0));
+  ASSERT(equal(translated.data[8], 3.1));
 
   auto rotated_q = translated.Rotate(Quaternion<>(0.9238795, 0., 0., 0.3826834));
-  auto rotated_m = translated.Rotate(
-      Quaternion<>(0.9238795, 0., 0., 0.3826834).ToRotationMatrix());
+  auto rotated_m =
+      translated.Rotate(Quaternion<>(0.9238795, 0., 0., 0.3826834).ToRotationMatrix());
 
   for (int i = 0; i < 3; ++i)
   {
