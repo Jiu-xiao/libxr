@@ -115,6 +115,10 @@ class STM32VirtualUART : public UART
 
       USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_.ActiveBuffer(),
                            info.data.size_);
+#if __DCACHE_PRESENT
+      SCB_CleanDCache_by_Addr(
+          reinterpret_cast<uint32_t *>(uart->tx_buffer_.ActiveBuffer()), info.data.size_);
+#endif
       USBD_CDC_TransmitPacket(uart->usb_handle_);
 
       info.op.MarkAsRunning();

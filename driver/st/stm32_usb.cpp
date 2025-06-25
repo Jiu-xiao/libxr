@@ -30,6 +30,10 @@ int8_t libxr_stm32_virtual_uart_receive(uint8_t *pbuf, uint32_t *Len)
 {
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
+#if __DCACHE_PRESENT
+  SCB_InvalidateDCache_by_Addr(pbuf, *Len);
+#endif
+
   uart->read_port_->queue_data_->PushBatch(pbuf, *Len);
   uart->read_port_->ProcessPendingReads(true);
 
@@ -69,6 +73,9 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
 
   USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_.ActiveBuffer(),
                        current_info.data.size_);
+#if __DCACHE_PRESENT
+  SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->tx_buffer_.ActiveBuffer()), *Len);
+#endif
   USBD_CDC_TransmitPacket(uart->usb_handle_);
 
   current_info.op.MarkAsRunning();
