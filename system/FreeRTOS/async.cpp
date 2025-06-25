@@ -11,12 +11,11 @@ ASync::ASync(size_t stack_depth, Thread::Priority priority)
 
 ErrorCode ASync::AssignJob(Job job)
 {
-  if (status_ == Status::BUSY)
+  Status expected = Status::READY;
+  if (!status_.compare_exchange_strong(expected, Status::BUSY))
   {
     return ErrorCode::BUSY;
   }
-
-  status_ = Status::BUSY;
 
   job_ = job;
   sem_.Post();

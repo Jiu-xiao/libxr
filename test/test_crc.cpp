@@ -7,19 +7,19 @@ void test_crc() {
     double a;
     char b;
     uint8_t crc;
-  } test_crc8 = {.a = M_PI, .b = 'X'};
+  } test_crc8 = {.a = M_PI, .b = 'X', .crc = 0};
 
   struct __attribute__((packed)) {
     double a;
     char b;
     uint16_t crc;
-  } test_crc16 = {.a = M_PI * 2, .b = 'X'};
+  } test_crc16 = {.a = M_PI * 2, .b = 'X', .crc = 0};
 
   struct __attribute__((packed)) {
     double a;
     char b;
     uint32_t crc;
-  } test_crc32 = {.a = M_PI * 3, .b = 'X'};
+  } test_crc32 = {.a = M_PI * 3, .b = 'X', .crc = 0};
 
   test_crc8.crc =
       LibXR::CRC8::Calculate(&test_crc8, sizeof(test_crc8) - sizeof(uint8_t));

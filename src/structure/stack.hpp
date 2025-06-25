@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstring>
+
 #include "libxr_def.hpp"
 #include "mutex.hpp"
 
@@ -55,12 +57,12 @@ class Stack
   /**
    * @brief 获取栈中当前元素数量 / Returns the number of elements currently in the stack
    */
-  uint32_t Size() const { return top_; }
+  [[nodiscard]] uint32_t Size() const { return top_; }
 
   /**
    * @brief 获取栈的剩余可用空间 / Returns the remaining available space in the stack
    */
-  uint32_t EmptySize() const { return (depth_ - top_); }
+  [[nodiscard]] uint32_t EmptySize() const { return depth_ - top_; }
 
   /**
    * @brief 向栈中推入数据 / Pushes data onto the stack
@@ -172,10 +174,7 @@ class Stack
       return ErrorCode::OUT_OF_RANGE;
     }
 
-    for (uint32_t i = top_ + 1; i > index; i--)
-    {
-      stack_[i] = stack_[i - 1];
-    }
+    memmove(&stack_[index + 1], &stack_[index], (top_ - index) * sizeof(Data));
 
     stack_[index] = data;
     top_++;
