@@ -70,14 +70,20 @@ extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   STM32SPI *spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
 
-  if (!spi->mem_read_)
+  if (spi->read_buff_.size_ > 0)
   {
-    memcpy(spi->read_buff_.addr_, spi->dma_buff_rx_.addr_, spi->read_buff_.size_);
-  }
-  else
-  {
-    uint8_t *rx_dma_buff = reinterpret_cast<uint8_t *>(spi->dma_buff_rx_.addr_);
-    memcpy(spi->read_buff_.addr_, rx_dma_buff + 1, spi->read_buff_.size_);
+#if __DCACHE_PRESENT
+    SCB_InvalidateDCache_by_Addr(spi->dma_buff_rx_.addr_, spi->read_buff_.size_);
+#endif
+    if (!spi->mem_read_)
+    {
+      memcpy(spi->read_buff_.addr_, spi->dma_buff_rx_.addr_, spi->read_buff_.size_);
+    }
+    else
+    {
+      uint8_t *rx_dma_buff = reinterpret_cast<uint8_t *>(spi->dma_buff_rx_.addr_);
+      memcpy(spi->read_buff_.addr_, rx_dma_buff + 1, spi->read_buff_.size_);
+    }
   }
 
   spi->rw_op_.UpdateStatus(true, ErrorCode::OK);

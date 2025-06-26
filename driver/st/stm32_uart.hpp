@@ -159,6 +159,11 @@ class STM32UART : public UART
 
       port.queue_info_->Pop(uart->write_info_active_);
 
+#if __DCACHE_PRESENT
+      SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->dma_buff_tx_.ActiveBuffer()),
+                              info.data.size_);
+#endif
+
       auto ans = HAL_UART_Transmit_DMA(
           uart->uart_handle_, static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
           info.data.size_);

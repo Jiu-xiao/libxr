@@ -112,6 +112,9 @@ class STM32I2C : public I2C
     if (write_data.size_ > dma_enable_min_size_)
     {
       write_op_ = op;
+#if __DCACHE_PRESENT
+      SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(dma_buff_.addr_), write_data.size_);
+#endif
       HAL_I2C_Master_Transmit_DMA(i2c_handle_, slave_addr,
                                   reinterpret_cast<uint8_t *>(dma_buff_.addr_),
                                   write_data.size_);
@@ -202,6 +205,9 @@ class STM32I2C : public I2C
     if (write_data.size_ > dma_enable_min_size_)
     {
       write_op_ = op;
+#if __DCACHE_PRESENT
+      SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(dma_buff_.addr_), write_data.size_);
+#endif
       HAL_I2C_Mem_Write_DMA(
           i2c_handle_, slave_addr, mem_addr,
           mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
