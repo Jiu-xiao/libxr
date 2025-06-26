@@ -83,6 +83,14 @@ class STM32SPI : public SPI
       rw_op_ = op;
       read_buff_ = read_data;
 
+#if __DCACHE_PRESENT
+      if (write_data.size_ > 0)
+      {
+        SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(dma_buff_tx_.addr_),
+                                write_data.size_);
+      }
+#endif
+
       HAL_SPI_TransmitReceive_DMA(spi_handle_, static_cast<uint8_t *>(dma_buff_tx_.addr_),
                                   static_cast<uint8_t *>(dma_buff_rx_.addr_), need_write);
 

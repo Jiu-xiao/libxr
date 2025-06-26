@@ -207,6 +207,10 @@ extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *uart_handle)
         dma_size - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);  // 当前 DMA 写入位置
     size_t last_pos = uart->last_rx_pos_;
 
+#if __DCACHE_PRESENT
+    SCB_InvalidateDCache_by_Addr(rx_buf, dma_size);
+#endif
+
     if (curr_pos != last_pos)
     {
       if (curr_pos > last_pos)
@@ -248,6 +252,11 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
   }
 
   uart->dma_buff_tx_.Switch();
+
+#if __DCACHE_PRESENT
+  SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->dma_buff_tx_.ActiveBuffer()),
+                          current_info.data.size_);
+#endif
 
   HAL_UART_Transmit_DMA(uart->uart_handle_,
                         static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),

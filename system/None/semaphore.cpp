@@ -22,7 +22,7 @@ ErrorCode Semaphore::Wait(uint32_t timeout) {
 
   uint32_t now = Timebase::GetMilliseconds();
 
-  while (Timebase::GetMilliseconds() - now < timeout) {
+  while (uint32_t(Timebase::GetMilliseconds()) - now < timeout) {
     if (semaphore_handle_ > 0) {
       semaphore_handle_--;
       return ErrorCode::OK;

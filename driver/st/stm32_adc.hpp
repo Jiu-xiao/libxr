@@ -174,6 +174,9 @@ class STM32ADC
     uint16_t* buffer = reinterpret_cast<uint16_t*>(dma_buffer_.addr_);
     if (use_dma_)
     {
+#if __DCACHE_PRESENT
+      SCB_InvalidateDCache_by_Addr(buffer, filter_size_ * NUM_CHANNELS * 2);
+#endif
       uint32_t sum = 0;
       for (uint8_t i = 0; i < filter_size_; ++i)
       {
