@@ -32,7 +32,7 @@
 
 ## STM32 Support
 
-| `Peripheral` | STM32F0/F1/F4/G0/G4 | STM32H7/L0/L1/L4 |
+| `Peripheral` | STM32F0/F1/F4/G0/G4/H7 | STM32L0/L1/L4 |
 | ------------ | ------------------- | ---------------- |
 | POWER        | ✅                   | ⚙️                |
 | GPIO         | ✅                   | ⚙️                |
