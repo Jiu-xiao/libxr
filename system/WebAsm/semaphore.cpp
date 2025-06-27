@@ -12,18 +12,24 @@ Semaphore::~Semaphore() {}
 
 void Semaphore::Post() { semaphore_handle_++; }
 
-ErrorCode Semaphore::Wait(uint32_t timeout) {
-  if (semaphore_handle_ > 0) {
+ErrorCode Semaphore::Wait(uint32_t timeout)
+{
+  if (semaphore_handle_ > 0)
+  {
     semaphore_handle_--;
     return ErrorCode::OK;
-  } else if (timeout == 0) {
+  }
+  else if (timeout == 0)
+  {
     return ErrorCode::TIMEOUT;
   }
 
   uint32_t now = Timebase::GetMilliseconds();
 
-  while (Timebase::GetMilliseconds() - now < timeout) {
-    if (semaphore_handle_ > 0) {
+  while (uint32_t(Timebase::GetMilliseconds()) - now < timeout)
+  {
+    if (semaphore_handle_ > 0)
+    {
       semaphore_handle_--;
       return ErrorCode::OK;
     }
@@ -32,7 +38,8 @@ ErrorCode Semaphore::Wait(uint32_t timeout) {
   return ErrorCode::TIMEOUT;
 }
 
-void Semaphore::PostFromCallback(bool in_isr) {
+void Semaphore::PostFromCallback(bool in_isr)
+{
   UNUSED(in_isr);
   Post();
 }
