@@ -4,11 +4,11 @@ OUTPUT_DIRECTORY = "./doc"
 GENERATE_HTML = YES
 GENERATE_LATEX = NO
 GENERATE_XML = NO
-INPUT = "driver" "system" "src"
+INPUT = "driver" "system" "src" "doc" "lib\doxygen-awesome-css"
 FILE_PATTERNS = "*.cpp" "*.hpp" "*.h"
 RECURSIVE = YES
 EXCLUDE = "CMake" "CMakeLists.txt" "LICENSE" "log.txt"
-EXCLUDE_PATTERNS = "*/CMake/*" "*/doc/*" "*/log/*" "*/test/*"
+EXCLUDE_PATTERNS = "*/CMake/*" "*/doc/html/*" "*/log/*" "*/test/*"
 IMAGE_PATH = "./"
 OUTPUT_LANGUAGE = English
 INPUT_ENCODING = UTF-8
@@ -44,6 +44,32 @@ PREDEFINED = "__DOXYGEN__" \
     "HAL_PCD_MODULE_ENABLED" \
     "LIBXR_DEFAULT_SCALAR=double"
 HAVE_DOT = YES
+DOT_IMAGE_FORMAT = svg
+DOT_TRANSPARENT = YES
 CLASS_DIAGRAMS = YES
 SORT_GROUP_NAMES = YES
 PROJECT_BRIEF = "Want to be the best embedded framework"
+DISABLE_INDEX = NO
+FULL_SIDEBAR = NO
+
+GENERATE_TODOLIST      = NO
+GENERATE_TESTLIST      = NO
+GENERATE_BUGLIST       = NO
+GENERATE_DEPRECATEDLIST= NO
+
+HTML_EXTRA_STYLESHEET  = lib/doxygen-awesome-css/doxygen-awesome.css \
+                         lib/doxygen-awesome-css/doxygen-awesome-sidebar-only.css \
+                         lib/doxygen-awesome-css/doxygen-awesome-sidebar-only-darkmode-toggle.css \
+                         lib/doxygen-awesome-css/doxygen-custom/custom.css \
+                         lib/doxygen-awesome-css/doxygen-custom/custom-alternative.css
+
+HTML_EXTRA_FILES       = lib/doxygen-awesome-css/doxygen-awesome-darkmode-toggle.js \
+                         lib/doxygen-awesome-css/doxygen-awesome-fragment-copy-button.js \
+                         lib/doxygen-awesome-css/doxygen-awesome-paragraph-link.js \
+                         lib/doxygen-awesome-css/doxygen-custom/toggle-alternative-theme.js \
+                         lib/doxygen-awesome-css/doxygen-awesome-interactive-toc.js \
+                         lib/doxygen-awesome-css/doxygen-awesome-tabs.js \
+                         lib/doxygen-awesome-css/doxygen-custom/toggle-alternative-theme.js
+
+HTML_COLORSTYLE        = LIGHT
+HTML_HEADER            = doc/header.html
