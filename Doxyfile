@@ -57,12 +57,12 @@ FULL_SIDEBAR = NO
 GENERATE_TODOLIST      = NO
 GENERATE_TESTLIST      = NO
 GENERATE_BUGLIST       = NO
-GENERATE_DEPRECATEDLIST= NO
+GENERATE_DEPRECATEDLIST = NO
 
 HTML_EXTRA_STYLESHEET  = lib/doxygen-awesome-css/doxygen-awesome.css \
+                         lib/doxygen-awesome-css/doxygen-custom/custom.css \
                          lib/doxygen-awesome-css/doxygen-awesome-sidebar-only.css \
                          lib/doxygen-awesome-css/doxygen-awesome-sidebar-only-darkmode-toggle.css \
-                         lib/doxygen-awesome-css/doxygen-custom/custom.css \
                          lib/doxygen-awesome-css/doxygen-custom/custom-alternative.css
 
 HTML_EXTRA_FILES       = lib/doxygen-awesome-css/doxygen-awesome-darkmode-toggle.js \
@@ -70,8 +70,11 @@ HTML_EXTRA_FILES       = lib/doxygen-awesome-css/doxygen-awesome-darkmode-toggle
                          lib/doxygen-awesome-css/doxygen-awesome-paragraph-link.js \
                          lib/doxygen-awesome-css/doxygen-custom/toggle-alternative-theme.js \
                          lib/doxygen-awesome-css/doxygen-awesome-interactive-toc.js \
-                         lib/doxygen-awesome-css/doxygen-awesome-tabs.js \
-                         lib/doxygen-awesome-css/doxygen-custom/toggle-alternative-theme.js
+                         lib/doxygen-awesome-css/doxygen-awesome-tabs.js
 
 HTML_COLORSTYLE        = LIGHT
 HTML_HEADER            = doc/header.html
+
+HTML_COLORSTYLE_HUE    = 209
+HTML_COLORSTYLE_SAT    = 255
+HTML_COLORSTYLE_GAMMA  = 113
