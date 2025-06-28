@@ -1,5 +1,8 @@
 #include "stm32_spi.hpp"
 
+#include "libxr_def.hpp"
+
+
 #ifdef HAL_SPI_MODULE_ENABLED
 
 using namespace LibXR;
@@ -66,7 +69,13 @@ stm32_spi_id_t STM32_SPI_GetID(SPI_TypeDef *addr)
   }
 }
 
-extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+extern "C" void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  STM32SPI *spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
+  spi->rw_op_.UpdateStatus(true, ErrorCode::OK);
+}
+
+extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   STM32SPI *spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
 
@@ -87,6 +96,11 @@ extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
   }
 
   spi->rw_op_.UpdateStatus(true, ErrorCode::OK);
+}
+
+extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  HAL_SPI_RxCpltCallback(hspi);
 }
 
 extern "C" void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)

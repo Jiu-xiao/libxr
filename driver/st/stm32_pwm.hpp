@@ -12,7 +12,10 @@ namespace LibXR
 class STM32PWM : public PWM
 {
  public:
-  STM32PWM(TIM_HandleTypeDef* htim, uint32_t channel) : htim_(htim), channel_(channel) {}
+  STM32PWM(TIM_HandleTypeDef* htim, uint32_t channel, bool complementary = false)
+      : htim_(htim), channel_(channel), complementary_(complementary)
+  {
+  }
 
   ErrorCode SetDutyCycle(float value) override
   {
@@ -167,18 +170,38 @@ class STM32PWM : public PWM
 
   ErrorCode Enable() override
   {
-    if (HAL_TIM_PWM_Start(htim_, channel_) != HAL_OK)
+    if (!complementary_)
     {
-      return ErrorCode::FAILED;
+      if (HAL_TIM_PWM_Start(htim_, channel_) != HAL_OK)
+      {
+        return ErrorCode::FAILED;
+      }
+    }
+    else
+    {
+      if (HAL_TIMEx_PWMN_Start(htim_, channel_) != HAL_OK)
+      {
+        return ErrorCode::FAILED;
+      }
     }
     return ErrorCode::OK;
   }
 
   ErrorCode Disable() override
   {
-    if (HAL_TIM_PWM_Stop(htim_, channel_) != HAL_OK)
+    if (!complementary_)
     {
-      return ErrorCode::FAILED;
+      if (HAL_TIM_PWM_Stop(htim_, channel_) != HAL_OK)
+      {
+        return ErrorCode::FAILED;
+      }
+    }
+    else
+    {
+      if (HAL_TIMEx_PWMN_Stop(htim_, channel_) != HAL_OK)
+      {
+        return ErrorCode::FAILED;
+      }
     }
     return ErrorCode::OK;
   }
@@ -186,6 +209,7 @@ class STM32PWM : public PWM
  private:
   TIM_HandleTypeDef* htim_;
   uint32_t channel_;
+  bool complementary_;
 };
 
 }  // namespace LibXR
