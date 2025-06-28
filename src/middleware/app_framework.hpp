@@ -2,7 +2,6 @@
 
 #include <cstring>
 #include <initializer_list>
-#include <tuple>
 
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
@@ -90,7 +89,7 @@ class HardwareContainer
    *
    */
   template <typename T>
-  void Register(Entry<T>&& entry)
+  void Register(const Entry<T>& entry)
   {
     for (const auto& alias : entry.aliases)
     {
@@ -101,7 +100,7 @@ class HardwareContainer
     }
   }
 
- private:
+ protected:
   struct AliasEntry
   {
     const char* name;
