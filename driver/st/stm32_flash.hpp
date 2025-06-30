@@ -179,7 +179,7 @@ class STM32Flash : public Flash
                                                  0xFFFFFFFFu, 0xFFFFFFFFu};
     while (written < data.size_)
     {
-      size_t chunk_size = LibXR::min<size_t>(min_write_size_, data.size_ - written);
+      size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);
 
       std::memcpy(flash_word_buffer, src + written, chunk_size);
 
@@ -203,7 +203,7 @@ class STM32Flash : public Flash
 #else
     while (written < data.size_)
     {
-      size_t chunk_size = LibXR::min<size_t>(min_write_size_, data.size_ - written);
+      size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);
 
       if (memcmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
                  chunk_size) == 0)

@@ -70,7 +70,7 @@ class STM32Watchdog : public Watchdog
     }
 
     timeout_ms_ = config.timeout_ms;
-    feed_ms_ = config.feed_ms;
+    auto_feed_interval_ms = config.feed_ms;
 
     hiwdg_->Init.Prescaler = best_pr;
     hiwdg_->Init.Reload = best_rlr;

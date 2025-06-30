@@ -30,7 +30,7 @@ enum class LogLevel : uint8_t
  */
 struct LogData
 {
-  TimestampMS timestamp;                 ///< 时间戳 / Timestamp
+  MillisecondTimestamp timestamp;        ///< 时间戳 / Timestamp
   LogLevel level;                        ///< 日志级别 / Log level
   const char* file;                      ///< 文件名指针 / Source file name pointer
   uint32_t line;                         ///< 行号 / Line number

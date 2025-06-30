@@ -200,7 +200,7 @@ class Thread
    * @param  last_waskup_time 上次唤醒时间 Last wake-up time
    * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
    */
-  static void SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(MillisecondTimestamp &last_waskup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程

@@ -44,6 +44,13 @@ class PowerManager
    * operations, such as cutting off power or entering a low-power mode.
    */
   virtual void Shutdown() = 0;
+
+  /**
+   * @brief 跳转到启动加载器 / Jumps to the bootloader
+   *
+   *
+   */
+  virtual void JumpToBootloader() { Reset(); }
 };
 
 }  // namespace LibXR

@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 
+#include "libxr_def.hpp"
+#include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 
 namespace LibXR
@@ -31,13 +34,6 @@ class Flash
   {
   }
 
-  size_t min_erase_size_ =
-      0;  ///< Minimum erasable block size in bytes. 最小可擦除块大小（字节）。
-  size_t min_write_size_ =
-      0;  ///< Minimum writable block size in bytes. 最小可写块大小（字节）。
-  RawData flash_area_;  ///< Memory area allocated for flash operations.
-                        ///< 用于闪存操作的存储区域。
-
   /**
    * @brief Erases a section of the flash memory. 擦除闪存的指定区域。
    * @param offset The starting offset of the section to erase. 要擦除的起始偏移地址。
@@ -53,6 +49,50 @@ class Flash
    * @return ErrorCode indicating success or failure. 返回操作结果的错误码。
    */
   virtual ErrorCode Write(size_t offset, ConstRawData data) = 0;
+
+  virtual ErrorCode Read(size_t offset, RawData data)
+  {
+    ASSERT(offset + data.size_ <= flash_area_.size_);
+    memcpy(data.addr_, reinterpret_cast<const uint8_t*>(flash_area_.addr_) + offset,
+           data.size_);
+
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief Returns the minimum erasable block size in bytes.
+   * 获取最小可擦除块大小（字节）。
+   *
+   * @return size_t Minimum erasable block size in bytes.
+   * 最小可擦除块大小（字节）。
+   */
+  size_t MinEraseSize() const { return min_erase_size_; }
+
+  /**
+   * @brief Returns the minimum writable block size in bytes.
+   * 获取最小可写块大小（字节）。
+   *
+   * @return size_t Minimum writable block size in bytes.
+   * 最小可写块大小（字节）。
+   */
+  size_t MinWriteSize() const { return min_write_size_; }
+
+  /**
+   * @brief Returns the memory area allocated for flash operations.
+   * 获取用于闪存操作的存储区域。
+   *
+   * @return const RawData& The memory area allocated for flash operations.
+   * 用于闪存操作的存储区域。
+   */
+  size_t Size() const { return flash_area_.size_; }
+
+ private:
+  size_t min_erase_size_ =
+      0;  ///< Minimum erasable block size in bytes. 最小可擦除块大小（字节）。
+  size_t min_write_size_ =
+      0;  ///< Minimum writable block size in bytes. 最小可写块大小（字节）。
+  RawData flash_area_;  ///< Memory area allocated for flash operations.
+                        ///< 用于闪存操作的存储区域。
 };
 
 }  // namespace LibXR
