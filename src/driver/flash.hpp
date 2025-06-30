@@ -50,6 +50,13 @@ class Flash
    */
   virtual ErrorCode Write(size_t offset, ConstRawData data) = 0;
 
+  /**
+   * @brief Reads data from the flash memory. 从闪存中读取数据。
+   *
+   * @param offset The starting offset to read data. 数据读取的起始偏移地址。
+   * @param data Data buffer to store the read data. 存储读取数据的缓冲区。
+   * @return ErrorCode indicating success or failure. 返回操作结果的错误码。
+   */
   virtual ErrorCode Read(size_t offset, RawData data)
   {
     ASSERT(offset + data.size_ <= flash_area_.size_);
@@ -78,11 +85,11 @@ class Flash
   size_t MinWriteSize() const { return min_write_size_; }
 
   /**
-   * @brief Returns the memory area allocated for flash operations.
-   * 获取用于闪存操作的存储区域。
+   * @brief Returns the size of the flash memory area.
+   * 获取闪存存储区域的大小。
    *
-   * @return const RawData& The memory area allocated for flash operations.
-   * 用于闪存操作的存储区域。
+   * @return size_t Size of the flash memory area.
+   * 闪存存储区域的大小。
    */
   size_t Size() const { return flash_area_.size_; }
 
