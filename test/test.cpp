@@ -100,8 +100,8 @@ static void run_libxr_tests()
     XR_LOG_INFO("Test Group [%s]\n", test_groups[g].name);
     for (size_t i = 0; i < group_sizes[g]; ++i)
     {
-      TEST_STEP(test_groups[g].tests[i].name);
       test_groups[g].tests[i].function();
+      TEST_STEP(test_groups[g].tests[i].name);
     }
   }
 
@@ -127,7 +127,7 @@ int main()
       },
       reinterpret_cast<void *>(0));
 
-  LibXR::Assert::RegisterFatalErrorCB(err_cb);
+  LibXR::Assert::RegisterFatalErrorCallback(err_cb);
 
   run_libxr_tests();
 

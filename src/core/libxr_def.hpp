@@ -32,7 +32,7 @@ constexpr double M_1G = 9.80665;
 #ifndef OFFSET_OF
 /// \brief 计算结构体成员在结构体中的偏移量
 /// \brief Computes the offset of a member within a struct
-#define OFFSET_OF(type, member) ((size_t) & ((type *)0)->member)
+#define OFFSET_OF(type, member) ((size_t)&((type *)0)->member)
 #endif
 
 #ifndef MEMBER_SIZE_OF
@@ -41,10 +41,12 @@ constexpr double M_1G = 9.80665;
 #define MEMBER_SIZE_OF(type, member) (sizeof(decltype(((type *)0)->member)))
 #endif
 
+#ifndef CONTAINER_OF
 /// \brief 通过成员指针获取包含该成员的结构体指针
 /// \brief Retrieve the pointer to the containing structure from a member pointer
 #define CONTAINER_OF(ptr, type, member) \
   ((type *)((char *)(ptr) - OFFSET_OF(type, member)))  // NOLINT
+#endif
 
 /// \brief 缓存行大小
 static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void *) == 8) ? 64 : 32;
@@ -65,7 +67,7 @@ enum class ErrorCode : int8_t
   CHECK_ERR = -6,     ///< 校验错误 | Check error
   NOT_SUPPORT = -7,   ///< 不支持 | Not supported
   NOT_FOUND = -8,     ///< 未找到 | Not found
-  NO_REPONSE = -9,    ///< 无响应 | No response
+  NO_RESPONSE = -9,   ///< 无响应 | No response
   NO_MEM = -10,       ///< 内存不足 | Insufficient memory
   NO_BUFF = -11,      ///< 缓冲区不足 | Insufficient buffer
   TIMEOUT = -12,      ///< 超时 | Timeout
@@ -137,6 +139,9 @@ extern void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {
+using ErrorCode = ErrorCode;
+using SizeLimitMode = SizeLimitMode;
+
 /**
  * @brief 计算两个数的最大值
  * @brief Computes the maximum of two numbers

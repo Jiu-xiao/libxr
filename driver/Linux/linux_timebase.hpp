@@ -17,9 +17,9 @@ class LinuxTimebase : public Timebase
   /**
    * @brief 获取当前时间戳（微秒级）。Returns the current timestamp in microseconds.
    *
-   * @return TimestampUS
+   * @return MicrosecondTimestamp
    */
-  TimestampUS _get_microseconds()
+  MicrosecondTimestamp _get_microseconds()
   {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
@@ -31,9 +31,9 @@ class LinuxTimebase : public Timebase
   /**
    * @brief 获取当前时间戳（毫秒级）
    *
-   * @return TimestampMS
+   * @return MillisecondTimestamp
    */
-  TimestampMS _get_milliseconds()
+  MillisecondTimestamp _get_milliseconds()
   {
     struct timeval tv;
     gettimeofday(&tv, nullptr);

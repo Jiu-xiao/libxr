@@ -10,13 +10,13 @@ Thread Thread::Current(void) { return Thread(); }
 void Thread::Sleep(uint32_t milliseconds)
 {
   uint32_t now = Timebase::GetMilliseconds();
-  while (uint32_t(Timebase::GetMilliseconds() )- now < milliseconds)
+  while (uint32_t(Timebase::GetMilliseconds()) - now < milliseconds)
   {
     Timer::RefreshTimerInIdle();
   }
 }
 
-void Thread::SleepUntil(TimestampMS &last_waskup_time, uint32_t time_to_sleep)
+void Thread::SleepUntil(MillisecondTimestamp &last_waskup_time, uint32_t time_to_sleep)
 {
   while (uint32_t(Timebase::GetMilliseconds()) - last_waskup_time < time_to_sleep)
   {

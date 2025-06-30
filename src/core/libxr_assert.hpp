@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <optional>
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
@@ -40,19 +39,6 @@ class Assert
 {
  public:
   using Callback = LibXR::Callback<const char *, uint32_t>;
-  /**
-   * @brief 注册致命错误的回调函数。
-   *        Registers a fatal error callback.
-   *
-   * 该回调函数会在发生致命错误时被触发，用于执行相应的错误处理逻辑。
-   * This callback will be triggered when a fatal error occurs.
-   *
-   * @param cb 要注册的回调函数。 The callback function to be registered.
-   */
-  static void RegisterFatalErrorCB(const Callback &cb)
-  {
-    libxr_fatal_error_callback_ = cb;
-  }
 
   /**
    * @brief 注册致命错误的回调函数。
@@ -63,7 +49,7 @@ class Assert
    * registered.
    */
   template <typename T>
-  static void RegisterFatalErrorCB(T &&cb)
+  static void RegisterFatalErrorCallback(T &&cb)
   {
     libxr_fatal_error_callback_ = std::forward<T>(cb);
   }
@@ -128,6 +114,6 @@ class Assert
    *        Registered fatal error callback.
    *
    */
-  static inline Callback libxr_fatal_error_callback_;
+  static inline Callback libxr_fatal_error_callback_;  // NOLINT
 };
 }  // namespace LibXR

@@ -47,7 +47,7 @@ void Logger::Publish(LogLevel level, const char *file, uint32_t line, const char
     Init();
   }
   LogData data;
-  data.timestamp = TimestampMS(Thread::GetTime());
+  data.timestamp = MillisecondTimestamp(Thread::GetTime());
   data.level = level;
   data.file = file;
   data.line = line;

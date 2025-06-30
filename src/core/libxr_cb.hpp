@@ -99,7 +99,6 @@ class CallbackBlock
     {
       fun_ = std::exchange(other.fun_, nullptr);
       arg_ = std::move(other.arg_);
-      in_isr_ = other.in_isr_;
     }
     return *this;
   }
