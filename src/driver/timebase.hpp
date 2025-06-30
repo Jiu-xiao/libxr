@@ -46,7 +46,7 @@ class Timebase
    * @return 返回当前的时间戳（单位：微秒）。
    *         Returns the current timestamp (in microseconds).
    */
-  static TimestampUS GetMicroseconds() { return timebase->_get_microseconds(); }
+  static MicrosecondTimestamp GetMicroseconds() { return timebase->_get_microseconds(); }
 
   /**
    * @brief 获取当前时间的毫秒级时间戳。
@@ -60,7 +60,7 @@ class Timebase
    * @return 返回当前的时间戳（单位：毫秒）。
    *         Returns the current timestamp (in milliseconds).
    */
-  static TimestampMS GetMilliseconds() { return timebase->_get_milliseconds(); }
+  static MillisecondTimestamp GetMilliseconds() { return timebase->_get_milliseconds(); }
 
   /**
    * @brief 纯虚函数，获取当前时间的微秒级时间戳（由派生类实现）。
@@ -74,7 +74,7 @@ class Timebase
    * @return 返回当前的时间戳（单位：微秒）。
    *         Returns the current timestamp (in microseconds).
    */
-  virtual TimestampUS _get_microseconds() = 0;  // NOLINT
+  virtual MicrosecondTimestamp _get_microseconds() = 0;  // NOLINT
 
   /**
    * @brief 纯虚函数，获取当前时间的毫秒级时间戳（由派生类实现）。
@@ -88,7 +88,7 @@ class Timebase
    * @return 返回当前的时间戳（单位：毫秒）。
    *         Returns the current timestamp (in milliseconds).
    */
-  virtual TimestampMS _get_milliseconds() = 0;  // NOLINT
+  virtual MillisecondTimestamp _get_milliseconds() = 0;  // NOLINT
 
   /**
    * @brief 静态指针，用于存储全局时间基对象。

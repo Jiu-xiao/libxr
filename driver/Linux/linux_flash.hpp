@@ -59,8 +59,8 @@ class LinuxBinaryFileFlash : public Flash
    */
   ErrorCode Erase(size_t offset, size_t size) override
   {
-    ASSERT(offset % min_erase_size_ == 0);
-    ASSERT(size % min_erase_size_ == 0);
+    ASSERT(offset % MinEraseSize() == 0);
+    ASSERT(size % MinEraseSize() == 0);
 
     if ((offset + size) > flash_area_.size())
     {
@@ -86,7 +86,7 @@ class LinuxBinaryFileFlash : public Flash
       return ErrorCode::OUT_OF_RANGE;
     }
 
-    if (offset % min_write_size_ != 0 || data.size_ % min_write_size_ != 0)
+    if (offset % MinWriteSize() != 0 || data.size_ % MinWriteSize() != 0)
     {
       ASSERT(false);
       return ErrorCode::FAILED;
@@ -94,7 +94,7 @@ class LinuxBinaryFileFlash : public Flash
 
     if (write_order_check_)
     {
-      ASSERT(offset % min_erase_size_ == 0);
+      ASSERT(offset % MinEraseSize() == 0);
     }
 
     uint8_t* dst = flash_area_.data() + offset;

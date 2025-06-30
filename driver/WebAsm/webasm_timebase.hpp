@@ -22,26 +22,26 @@ class WebAsmTimebase : public Timebase
 
   /**
    * @brief 获取当前时间戳（微秒级）
-   * @return TimestampUS
+   * @return MicrosecondTimestamp
    */
-  TimestampUS _get_microseconds() override
+  MicrosecondTimestamp _get_microseconds() override
   {
     auto now = std::chrono::system_clock::now();
     auto us =
         std::chrono::duration_cast<std::chrono::microseconds>(now - start_time_).count();
-    return static_cast<TimestampUS>(us % UINT32_MAX);
+    return static_cast<MicrosecondTimestamp>(us % UINT32_MAX);
   }
 
   /**
    * @brief 获取当前时间戳（毫秒级）
-   * @return TimestampMS
+   * @return MillisecondTimestamp
    */
-  TimestampMS _get_milliseconds() override
+  MillisecondTimestamp _get_milliseconds() override
   {
     auto now = std::chrono::system_clock::now();
     auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time_).count();
-    return static_cast<TimestampMS>(ms % UINT32_MAX);
+    return static_cast<MillisecondTimestamp>(ms % UINT32_MAX);
   }
 
  private:

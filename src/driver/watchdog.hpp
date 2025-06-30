@@ -83,7 +83,7 @@ class Watchdog
       {
         wdg->Feed();
       }
-      LibXR::Thread::Sleep(wdg->feed_ms_);
+      LibXR::Thread::Sleep(wdg->auto_feed_interval_ms);
     }
   }
 
@@ -106,9 +106,9 @@ class Watchdog
     }
   }
 
-  uint32_t timeout_ms_ = 3000;  ///< 溢出时间
-  uint32_t feed_ms_ = 1000;     ///< 自动喂狗间隔
-  bool auto_feed_ = false;      ///< 是否自动喂狗
+  uint32_t timeout_ms_ = 3000;            ///< 溢出时间
+  uint32_t auto_feed_interval_ms = 1000;  ///< 自动喂狗间隔
+  bool auto_feed_ = false;                ///< 是否自动喂狗
 };
 
 }  // namespace LibXR
