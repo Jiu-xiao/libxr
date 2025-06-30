@@ -963,6 +963,7 @@ class DatabaseRaw : public Database
    *        (Constructor to initialize Flash storage and buffer).
    *
    * @param flash 目标 Flash 存储设备 (Target Flash storage device).
+   * @param recycle_threshold 回收阈值 (Recycle threshold).
    */
   explicit DatabaseRaw(Flash& flash, size_t recycle_threshold = 128)
       : recycle_threshold_(recycle_threshold),
@@ -1039,7 +1040,11 @@ class DatabaseRaw : public Database
    * @brief 还原存储数据，清空 Flash 区域
    *        (Restore storage data, clearing Flash memory area).
    */
-  void Restore() {}
+  void Restore()
+  {
+    InitBlock(BlockType::MAIN);
+    InitBlock(BlockType::BACKUP);
+  }
 
   /**
    * @brief 回收 Flash 空间，整理数据
