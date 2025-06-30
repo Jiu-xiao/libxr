@@ -136,7 +136,7 @@ class Timer
    */
   static void RefreshThreadFunction(void *)
   {
-    TimestampMS time = Thread::GetTime();
+    MillisecondTimestamp time = Thread::GetTime();
     while (true)
     {
       Timer::Refresh();

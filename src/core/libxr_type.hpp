@@ -83,7 +83,7 @@ class RawData
    *             The character array to be stored.
    */
   template <size_t N>
-  RawData(const char (&data)[N]) : addr_(&data), size_(N - 1)
+  RawData(const char (&data)[N]) : addr_(reinterpret_cast<void *>(data)), size_(N - 1)
   {
   }
 
@@ -95,7 +95,7 @@ class RawData
    * @param data `std::string` 类型数据。
    *             A `std::string` object.
    */
-  RawData(const std::string &data)
+  explicit RawData(const std::string &data)
       : addr_(const_cast<char *>(data.data())), size_(data.size())
   {
   }
@@ -157,7 +157,7 @@ class ConstRawData
    */
   template <typename DataType>
   ConstRawData(const DataType &data)
-      : addr_(const_cast<DataType *>(&data)), size_(sizeof(DataType))
+      : addr_(reinterpret_cast<const DataType *>(&data)), size_(sizeof(DataType))
   {
   }
 
@@ -198,6 +198,22 @@ class ConstRawData
    *             A C-style string pointer.
    */
   ConstRawData(const char *data) : addr_(data), size_(data ? strlen(data) : 0) {}
+
+  /**
+   * @brief 从字符数组构造 `ConstRawData`，数据大小为数组长度减 1（不含 `\0`）。
+   *        Constructs `ConstRawData` from a character array,
+   *        with size set to array length minus 1 (excluding `\0`).
+   *
+   * @tparam N 数组大小。
+   *           The array size.
+   * @param data 需要存储的字符数组。
+   *             The character array to be stored.
+   */
+  template <size_t N>
+  ConstRawData(const char (&data)[N])
+      : addr_(reinterpret_cast<const void *>(data)), size_(N - 1)
+  {
+  }
 
   /**
    * @brief 赋值运算符重载。

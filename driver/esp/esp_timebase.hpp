@@ -1,7 +1,7 @@
 #pragma once
 
-#include "timebase.hpp"
 #include "esp_timer.h"
+#include "timebase.hpp"
 
 namespace LibXR
 {
@@ -24,20 +24,20 @@ class ESP32Timebase : public Timebase
 
   /**
    * @brief 获取当前时间（微秒）
-   * @return TimestampUS 当前时间（微秒）
+   * @return MicrosecondTimestamp 当前时间（微秒）
    */
-  TimestampUS _get_microseconds() override
+  MicrosecondTimestamp _get_microseconds() override
   {
     return esp_timer_get_time();  // 返回自启动以来的微秒数
   }
 
   /**
    * @brief 获取当前时间（毫秒）
-   * @return TimestampMS 当前时间（毫秒）
+   * @return MillisecondTimestamp 当前时间（毫秒）
    */
-  TimestampMS _get_milliseconds() override
+  MillisecondTimestamp _get_milliseconds() override
   {
-    return static_cast<TimestampMS>(esp_timer_get_time() / 1000) % UINT32_MAX;
+    return static_cast<MillisecondTimestamp>(esp_timer_get_time() / 1000) % UINT32_MAX;
   }
 };
 

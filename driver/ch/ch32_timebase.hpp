@@ -15,13 +15,13 @@ class CH32Timebase : public Timebase
     cnt_per_microsec_ = SystemCoreClock / 1000000;
   }
 
-  TimestampUS _get_microseconds() override
+  MicrosecondTimestamp _get_microseconds() override
   {
     uint64_t cnt = SysTick->CNT;
-    return TimestampUS(cnt / cnt_per_microsec_);
+    return MicrosecondTimestamp(cnt / cnt_per_microsec_);
   }
 
-  TimestampMS _get_milliseconds() override { return cnt_per_microsec_ / 1000; }
+  MillisecondTimestamp _get_milliseconds() override { return cnt_per_microsec_ / 1000; }
 
   static inline uint32_t cnt_per_microsec_;
 };

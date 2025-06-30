@@ -12,24 +12,24 @@ namespace LibXR
 {
 
 /**
- * @class TimestampUS
+ * @class MicrosecondTimestamp
  * @brief 表示微秒级时间戳的类。Class representing a timestamp in microseconds.
  */
-class TimestampUS
+class MicrosecondTimestamp
 {
  public:
   /**
    * @brief 默认构造函数，初始化时间戳为 0。
    * Default constructor initializing the timestamp to 0.
    */
-  TimestampUS() : microsecond_(0) {}
+  MicrosecondTimestamp() : microsecond_(0) {}
 
   /**
    * @brief 以给定的微秒值构造时间戳。
    * Constructor initializing the timestamp with a given microsecond value.
    * @param microsecond 以微秒表示的时间值。Time value in microseconds.
    */
-  TimestampUS(uint64_t microsecond) : microsecond_(microsecond) {}
+  MicrosecondTimestamp(uint64_t microsecond) : microsecond_(microsecond) {}
 
   /**
    * @brief 转换运算符，将时间戳转换为 uint64_t。
@@ -38,10 +38,10 @@ class TimestampUS
   operator uint64_t() const { return microsecond_; }
 
   /**
-   * @class TimeDiffUS
+   * @class Duration
    * @brief 表示微秒级时间差的类。Class representing a time difference in microseconds.
    */
-  class TimeDiffUS
+  class Duration
   {
    public:
     /**
@@ -49,7 +49,7 @@ class TimestampUS
      * Constructor initializing the time difference.
      * @param diff 以微秒表示的时间差。Time difference in microseconds.
      */
-    TimeDiffUS(uint64_t diff) : diff_(diff) {}
+    Duration(uint64_t diff) : diff_(diff) {}
 
     /**
      * @brief 转换运算符，将时间差转换为 uint64_t。
@@ -95,9 +95,9 @@ class TimestampUS
    * @brief 计算两个时间戳之间的时间差。
    * Computes the time difference between two timestamps.
    * @param old_microsecond 旧的时间戳。The older timestamp.
-   * @return TimeDiffUS 计算得到的时间差。Computed time difference.
+   * @return Duration 计算得到的时间差。Computed time difference.
    */
-  TimeDiffUS operator-(const TimestampUS &old_microsecond) const
+  Duration operator-(const MicrosecondTimestamp &old_microsecond) const
   {
     uint64_t diff;  // NOLINT
 
@@ -112,16 +112,16 @@ class TimestampUS
 
     ASSERT(diff <= libxr_timebase_max_valid_us);
 
-    return TimeDiffUS(diff);
+    return Duration(diff);
   }
 
   /**
    * @brief 赋值运算符重载。
    * Assignment operator overload.
-   * @param other 另一个 TimestampUS 对象。Another TimestampUS object.
+   * @param other 另一个 MicrosecondTimestamp 对象。Another MicrosecondTimestamp object.
    * @return 返回当前对象的引用。Returns a reference to the current object.
    */
-  TimestampUS &operator=(const TimestampUS &other)
+  MicrosecondTimestamp &operator=(const MicrosecondTimestamp &other)
   {
     if (this != &other)
     {
@@ -135,21 +135,21 @@ class TimestampUS
 };
 
 /**
- * @class TimestampMS
+ * @class MillisecondTimestamp
  * @brief 表示毫秒级时间戳的类。Class representing a timestamp in milliseconds.
  */
-class TimestampMS
+class MillisecondTimestamp
 {
  public:
-  TimestampMS() : millisecond_(0) {}
-  TimestampMS(uint32_t millisecond) : millisecond_(millisecond) {}
+  MillisecondTimestamp() : millisecond_(0) {}
+  MillisecondTimestamp(uint32_t millisecond) : millisecond_(millisecond) {}
   operator uint32_t() const { return millisecond_; }
 
   /**
-   * @class TimeDiffMS
+   * @class Duration
    * @brief 表示毫秒级时间差的类。Class representing a time difference in milliseconds.
    */
-  class TimeDiffMS
+  class Duration
   {
    public:
     /**
@@ -157,7 +157,7 @@ class TimestampMS
      * Constructor initializing the time difference.
      * @param diff 以毫秒表示的时间差。Time difference in milliseconds.
      */
-    TimeDiffMS(uint32_t diff) : diff_(diff) {}
+    Duration(uint32_t diff) : diff_(diff) {}
 
     /**
      * @brief 转换运算符，将时间差转换为 uint32_t。
@@ -200,9 +200,9 @@ class TimestampMS
    * @brief 计算两个时间戳之间的时间差。
    * Computes the time difference between two timestamps.
    * @param old_millisecond 旧的时间戳。The older timestamp.
-   * @return TimeDiffMS 计算得到的时间差。Computed time difference.
+   * @return Duration 计算得到的时间差。Computed time difference.
    */
-  [[nodiscard]] TimeDiffMS operator-(const TimestampMS &old_millisecond) const
+  [[nodiscard]] Duration operator-(const MillisecondTimestamp &old_millisecond) const
   {
     uint32_t diff;  // NOLINT
 
@@ -217,7 +217,7 @@ class TimestampMS
 
     ASSERT(diff <= libxr_timebase_max_valid_ms);
 
-    return TimeDiffMS(diff);
+    return Duration(diff);
   }
 
  private:
