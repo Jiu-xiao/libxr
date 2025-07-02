@@ -5,8 +5,8 @@
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 
-static inline uint64_t libxr_timebase_max_valid_us = UINT64_MAX;  // NOLINT
-static inline uint32_t libxr_timebase_max_valid_ms = UINT32_MAX;  // NOLINT
+extern uint64_t libxr_timebase_max_valid_us;  // NOLINT
+extern uint32_t libxr_timebase_max_valid_ms;  // NOLINT
 
 namespace LibXR
 {
@@ -22,20 +22,20 @@ class MicrosecondTimestamp
    * @brief 默认构造函数，初始化时间戳为 0。
    * Default constructor initializing the timestamp to 0.
    */
-  MicrosecondTimestamp() : microsecond_(0) {}
+  MicrosecondTimestamp();
 
   /**
    * @brief 以给定的微秒值构造时间戳。
    * Constructor initializing the timestamp with a given microsecond value.
    * @param microsecond 以微秒表示的时间值。Time value in microseconds.
    */
-  MicrosecondTimestamp(uint64_t microsecond) : microsecond_(microsecond) {}
+  MicrosecondTimestamp(uint64_t microsecond);
 
   /**
    * @brief 转换运算符，将时间戳转换为 uint64_t。
    * Conversion operator to uint64_t.
    */
-  operator uint64_t() const { return microsecond_; }
+  operator uint64_t() const;
 
   /**
    * @class Duration
@@ -49,43 +49,37 @@ class MicrosecondTimestamp
      * Constructor initializing the time difference.
      * @param diff 以微秒表示的时间差。Time difference in microseconds.
      */
-    Duration(uint64_t diff) : diff_(diff) {}
+    Duration(uint64_t diff);
 
     /**
      * @brief 转换运算符，将时间差转换为 uint64_t。
      * Conversion operator to uint64_t.
      */
-    operator uint64_t() const { return diff_; }
+    operator uint64_t() const;
 
     /**
      * @brief 以秒返回时间差（double 类型）。
      * Returns the time difference in seconds as a double.
      */
-    [[nodiscard]] double ToSecond() const
-    {
-      return static_cast<double>(diff_) / 1000000.0;
-    }
+    [[nodiscard]] double ToSecond() const;
 
     /**
      * @brief 以秒返回时间差（float 类型）。
      * Returns the time difference in seconds as a float.
      */
-    [[nodiscard]] float ToSecondf() const
-    {
-      return static_cast<float>(diff_) / 1000000.0f;
-    }
+    [[nodiscard]] float ToSecondf() const;
 
     /**
      * @brief 以微秒返回时间差。
      * Returns the time difference in microseconds.
      */
-    [[nodiscard]] uint64_t ToMicrosecond() const { return diff_; }
+    [[nodiscard]] uint64_t ToMicrosecond() const;
 
     /**
      * @brief 以毫秒返回时间差。
      * Returns the time difference in milliseconds.
      */
-    [[nodiscard]] uint32_t ToMillisecond() const { return diff_ / 1000u; }
+    [[nodiscard]] uint32_t ToMillisecond() const;
 
    private:
     uint64_t diff_;  ///< 存储时间差（微秒）。Time difference stored in microseconds.
@@ -97,23 +91,7 @@ class MicrosecondTimestamp
    * @param old_microsecond 旧的时间戳。The older timestamp.
    * @return Duration 计算得到的时间差。Computed time difference.
    */
-  Duration operator-(const MicrosecondTimestamp &old_microsecond) const
-  {
-    uint64_t diff;  // NOLINT
-
-    if (microsecond_ >= old_microsecond.microsecond_)
-    {
-      diff = microsecond_ - old_microsecond.microsecond_;
-    }
-    else
-    {
-      diff = microsecond_ + (libxr_timebase_max_valid_us - old_microsecond.microsecond_);
-    }
-
-    ASSERT(diff <= libxr_timebase_max_valid_us);
-
-    return Duration(diff);
-  }
+  Duration operator-(const MicrosecondTimestamp &old_microsecond) const;
 
   /**
    * @brief 赋值运算符重载。
@@ -121,14 +99,7 @@ class MicrosecondTimestamp
    * @param other 另一个 MicrosecondTimestamp 对象。Another MicrosecondTimestamp object.
    * @return 返回当前对象的引用。Returns a reference to the current object.
    */
-  MicrosecondTimestamp &operator=(const MicrosecondTimestamp &other)
-  {
-    if (this != &other)
-    {
-      microsecond_ = other.microsecond_;
-    }
-    return *this;
-  }
+  MicrosecondTimestamp &operator=(const MicrosecondTimestamp &other);
 
  private:
   uint64_t microsecond_;  ///< 以微秒存储的时间戳。Timestamp stored in microseconds.
@@ -141,9 +112,9 @@ class MicrosecondTimestamp
 class MillisecondTimestamp
 {
  public:
-  MillisecondTimestamp() : millisecond_(0) {}
-  MillisecondTimestamp(uint32_t millisecond) : millisecond_(millisecond) {}
-  operator uint32_t() const { return millisecond_; }
+  MillisecondTimestamp();
+  MillisecondTimestamp(uint32_t millisecond);
+  operator uint32_t() const;
 
   /**
    * @class Duration
@@ -157,40 +128,37 @@ class MillisecondTimestamp
      * Constructor initializing the time difference.
      * @param diff 以毫秒表示的时间差。Time difference in milliseconds.
      */
-    Duration(uint32_t diff) : diff_(diff) {}
+    Duration(uint32_t diff);
 
     /**
      * @brief 转换运算符，将时间差转换为 uint32_t。
      * Conversion operator to uint32_t.
      */
-    operator uint32_t() const { return diff_; }
+    operator uint32_t() const;
 
     /**
      * @brief 以秒返回时间差（double 类型）。
      * Returns the time difference in seconds as a double.
      */
-    [[nodiscard]] double ToSecond() const { return static_cast<double>(diff_) / 1000.0; }
+    [[nodiscard]] double ToSecond() const;
 
     /**
      * @brief 以秒返回时间差（float 类型）。
      * Returns the time difference in seconds as a float.
      */
-    [[nodiscard]] float ToSecondf() const { return static_cast<float>(diff_) / 1000.0f; }
+    [[nodiscard]] float ToSecondf() const;
 
     /**
      * @brief 以毫秒返回时间差。
      * Returns the time difference in milliseconds.
      */
-    [[nodiscard]] uint32_t ToMillisecond() const { return diff_; }
+    [[nodiscard]] uint32_t ToMillisecond() const;
 
     /**
      * @brief 以微秒返回时间差。
      * Returns the time difference in microseconds.
      */
-    [[nodiscard]] uint64_t ToMicrosecond() const
-    {
-      return static_cast<uint64_t>(diff_) * 1000u;
-    }
+    [[nodiscard]] uint64_t ToMicrosecond() const;
 
    private:
     uint32_t diff_;  ///< 存储时间差（毫秒）。Time difference stored in milliseconds.
@@ -202,23 +170,7 @@ class MillisecondTimestamp
    * @param old_millisecond 旧的时间戳。The older timestamp.
    * @return Duration 计算得到的时间差。Computed time difference.
    */
-  [[nodiscard]] Duration operator-(const MillisecondTimestamp &old_millisecond) const
-  {
-    uint32_t diff;  // NOLINT
-
-    if (millisecond_ >= old_millisecond.millisecond_)
-    {
-      diff = millisecond_ - old_millisecond.millisecond_;
-    }
-    else
-    {
-      diff = millisecond_ + (libxr_timebase_max_valid_ms - old_millisecond.millisecond_);
-    }
-
-    ASSERT(diff <= libxr_timebase_max_valid_ms);
-
-    return Duration(diff);
-  }
+  [[nodiscard]] Duration operator-(const MillisecondTimestamp &old_millisecond) const;
 
  private:
   uint32_t millisecond_;  ///< 以毫秒存储的时间戳。Timestamp stored in milliseconds.

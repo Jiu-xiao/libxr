@@ -6,15 +6,17 @@
 
 extern void __NVIC_SystemReset(void);
 
-namespace LibXR {
+namespace LibXR
+{
 
-class STM32PowerManager : public PowerManager {
+class STM32PowerManager : public PowerManager
+{
  public:
-  explicit STM32PowerManager() {}
+  explicit STM32PowerManager();
 
-  void Reset() override { NVIC_SystemReset(); }
+  void Reset() override;
 
-  void Shutdown() override { HAL_PWR_EnterSTANDBYMode(); }
+  void Shutdown() override;
 };
 
 }  // namespace LibXR

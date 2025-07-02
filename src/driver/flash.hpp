@@ -27,12 +27,7 @@ class Flash
    * @param flash_area Memory area allocated for flash operations.
    * 用于闪存操作的存储区域。
    */
-  Flash(size_t min_erase_size, size_t min_write_size, RawData flash_area)
-      : min_erase_size_(min_erase_size),
-        min_write_size_(min_write_size),
-        flash_area_(flash_area)
-  {
-  }
+  Flash(size_t min_erase_size, size_t min_write_size, RawData flash_area);
 
   /**
    * @brief Erases a section of the flash memory. 擦除闪存的指定区域。
@@ -57,14 +52,7 @@ class Flash
    * @param data Data buffer to store the read data. 存储读取数据的缓冲区。
    * @return ErrorCode indicating success or failure. 返回操作结果的错误码。
    */
-  virtual ErrorCode Read(size_t offset, RawData data)
-  {
-    ASSERT(offset + data.size_ <= flash_area_.size_);
-    memcpy(data.addr_, reinterpret_cast<const uint8_t*>(flash_area_.addr_) + offset,
-           data.size_);
-
-    return ErrorCode::OK;
-  }
+  virtual ErrorCode Read(size_t offset, RawData data);
 
   /**
    * @brief Returns the minimum erasable block size in bytes.
