@@ -2,10 +2,6 @@
 
 using namespace LibXR;
 
-#ifdef HAL_TIM_MODULE_ENABLED
-
-TIM_HandleTypeDef* STM32TimerTimebase::htim = nullptr;
-
 STM32Timebase::STM32Timebase()
     : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
 {
@@ -41,6 +37,10 @@ MicrosecondTimestamp STM32Timebase::_get_microseconds()
 }
 
 MillisecondTimestamp STM32Timebase::_get_milliseconds() { return HAL_GetTick(); }
+
+#ifdef HAL_TIM_MODULE_ENABLED
+
+TIM_HandleTypeDef* STM32TimerTimebase::htim = nullptr;
 
 STM32TimerTimebase::STM32TimerTimebase(TIM_HandleTypeDef* timer)
     : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
