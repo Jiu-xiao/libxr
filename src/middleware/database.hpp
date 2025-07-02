@@ -455,7 +455,7 @@ class DatabaseRaw : public Database
   size_t recycle_threshold_ = 0;  ///< 回收阈值 (Recycle threshold).
   Flash& flash_;                  ///< 目标 Flash 存储设备 (Target Flash storage device).
   uint32_t block_size_;           ///< Flash 块大小 (Flash block size).
-  uint8_t* write_buffer_;         ///< 写入缓冲区 (Write buffer).
+  uint8_t write_buffer_[MinWriteSize];  ///< 写入缓冲区 (Write buffer).
 
   /**
    * @brief 计算可用的存储空间大小
@@ -966,9 +966,7 @@ class DatabaseRaw : public Database
    * @param recycle_threshold 回收阈值 (Recycle threshold).
    */
   explicit DatabaseRaw(Flash& flash, size_t recycle_threshold = 128)
-      : recycle_threshold_(recycle_threshold),
-        flash_(flash),
-        write_buffer_(new uint8_t[flash_.MinWriteSize()])
+      : recycle_threshold_(recycle_threshold), flash_(flash)
   {
     ASSERT(flash.MinEraseSize() * 2 <= flash_.Size());
     ASSERT(flash_.MinWriteSize() <= MinWriteSize);
