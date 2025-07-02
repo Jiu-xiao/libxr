@@ -56,19 +56,9 @@ class Topic
     uint8_t data_len_raw[3];   ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
 
-    void SetDataLen(uint32_t len)
-    {
-      data_len_raw[0] = static_cast<uint8_t>(len >> 16);
-      data_len_raw[1] = static_cast<uint8_t>(len >> 8);
-      data_len_raw[2] = static_cast<uint8_t>(len);
-    }
+    void SetDataLen(uint32_t len);
 
-    uint32_t GetDataLen() const
-    {
-      return static_cast<uint32_t>(data_len_raw[0]) << 16 |
-             static_cast<uint32_t>(data_len_raw[1]) << 8 |
-             static_cast<uint32_t>(data_len_raw[2]);
-    }
+    uint32_t GetDataLen() const;
   };
 #pragma pack(pop)
 #pragma pack(push, 1)
@@ -156,34 +146,7 @@ class Topic
      * up a domain by name.
      * @param name 主题域的名称。Name of the domain.
      */
-    Domain(const char *name)
-    {
-      if (!domain_)
-      {
-        if (!domain_)
-        {
-          domain_ =
-              new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b)
-                                   { return static_cast<int>(a) - static_cast<int>(b); });
-        }
-      }
-
-      auto crc32 = CRC32::Calculate(name, strlen(name));
-
-      auto domain = domain_->Search<RBTree<uint32_t>>(crc32);
-
-      if (domain != nullptr)
-      {
-        node_ = domain;
-        return;
-      }
-
-      node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
-          [](const uint32_t &a, const uint32_t &b)
-          { return static_cast<int>(a) - static_cast<int>(b); });
-
-      domain_->Insert(*node_, crc32);
-    }
+    Domain(const char *name);
 
     /**
      * @brief 指向该域的根节点。Pointer to the root node of the domain.
@@ -492,21 +455,13 @@ class Topic
    *         Registers a callback function
    * @param  cb 需要注册的回调函数 The callback function to register
    */
-  void RegisterCallback(Callback &cb)
-  {
-    CallbackBlock block;
-    block.cb = cb;
-    block.type = SuberType::CALLBACK;
-    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
-        LockFreeList::Node<CallbackBlock>(block);
-    block_->data_.subers.Add(*node);
-  }
+  void RegisterCallback(Callback &cb);
 
   /**
    * @brief  默认构造函数，创建一个空的 Topic 实例
    *         Default constructor, creates an empty Topic instance
    */
-  Topic() {}
+  Topic();
 
   /**
    * @brief  构造函数，使用指定名称、最大长度、域及其他选项初始化主题
@@ -521,49 +476,7 @@ class Topic
    * (default: false)
    */
   Topic(const char *name, uint32_t max_length, Domain *domain = nullptr,
-        bool cache = false, bool check_length = false)
-  {
-    if (!def_domain_)
-    {
-      if (!def_domain_)
-      {
-        def_domain_ = new Domain("libxr_def_domain");
-      }
-    }
-
-    if (domain == nullptr)
-    {
-      domain = def_domain_;
-    }
-
-    auto crc32 = CRC32::Calculate(name, strlen(name));
-
-    auto topic = domain->node_->data_.Search<Block>(crc32);
-
-    if (topic)
-    {
-      ASSERT(topic->data_.max_length == max_length);
-      ASSERT(topic->data_.check_length == check_length);
-
-      block_ = topic;
-    }
-    else
-    {
-      block_ = new RBTree<uint32_t>::Node<Block>;
-      block_->data_.max_length = max_length;
-      block_->data_.crc32 = crc32;
-      block_->data_.data.addr_ = nullptr;
-      block_->data_.cache = false;
-      block_->data_.check_length = check_length;
-
-      domain->node_->data_.Insert(*block_, crc32);
-    }
-
-    if (cache && !block_->data_.cache)
-    {
-      EnableCache();
-    }
-  }
+        bool cache = false, bool check_length = false);
 
   /**
    * @brief  创建一个新的主题
@@ -589,7 +502,7 @@ class Topic
    *         Constructs a topic from a topic handle
    * @param  topic 主题句柄 Topic handle
    */
-  Topic(TopicHandle topic) : block_(topic) {}
+  Topic(TopicHandle topic);
 
   /**
    * @brief  在指定域中查找主题
@@ -599,17 +512,7 @@ class Topic
    * @return 主题句柄，如果找到则返回对应的句柄，否则返回 nullptr
    *         Topic handle if found, otherwise returns nullptr
    */
-  static TopicHandle Find(const char *name, Domain *domain = nullptr)
-  {
-    if (domain == nullptr)
-    {
-      domain = def_domain_;
-    }
-
-    auto crc32 = CRC32::Calculate(name, strlen(name));
-
-    return domain->node_->data_.Search<Block>(crc32);
-  }
+  static TopicHandle Find(const char *name, Domain *domain = nullptr);
 
   /**
    * @brief  在指定域中查找或创建主题
@@ -639,16 +542,7 @@ class Topic
    * @brief  启用主题的缓存功能
    *         Enables caching for the topic
    */
-  void EnableCache()
-  {
-    block_->data_.mutex.Lock();
-    if (!block_->data_.cache)
-    {
-      block_->data_.cache = true;
-      block_->data_.data.addr_ = new uint8_t[block_->data_.max_length];
-    }
-    block_->data_.mutex.Unlock();
-  }
+  void EnableCache();
 
   /**
    * @brief  发布数据
@@ -668,72 +562,7 @@ class Topic
    * @param  addr 数据的地址 Address of the data
    * @param  size 数据大小 Size of the data
    */
-  void Publish(void *addr, uint32_t size)
-  {
-    block_->data_.mutex.Lock();
-    if (block_->data_.check_length)
-    {
-      ASSERT(size == block_->data_.max_length);
-    }
-    else
-    {
-      ASSERT(size <= block_->data_.max_length);
-    }
-
-    if (block_->data_.cache)
-    {
-      memcpy(block_->data_.data.addr_, addr, size);
-      block_->data_.data.size_ = size;
-    }
-    else
-    {
-      block_->data_.data.addr_ = addr;
-      block_->data_.data.size_ = size;
-    }
-
-    RawData data = block_->data_.data;
-
-    auto foreach_fun = [&](SuberBlock &block)
-    {
-      switch (block.type)
-      {
-        case SuberType::SYNC:
-        {
-          auto sync = reinterpret_cast<SyncBlock *>(&block);
-          memcpy(sync->buff.addr_, data.addr_, data.size_);
-          sync->sem.Post();
-          break;
-        }
-        case SuberType::ASYNC:
-        {
-          auto async = reinterpret_cast<ASyncBlock *>(&block);
-          if (async->waiting)
-          {
-            memcpy(async->buff.addr_, data.addr_, data.size_);
-            async->data_ready = true;
-          }
-          break;
-        }
-        case SuberType::QUEUE:
-        {
-          auto queue_block = reinterpret_cast<QueueBlock *>(&block);
-          queue_block->fun(data, queue_block->queue, false);
-          break;
-        }
-        case SuberType::CALLBACK:
-        {
-          auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
-          cb_block->cb.Run(false, data);
-          break;
-        }
-      }
-      return ErrorCode::OK;
-    };
-
-    block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
-
-    block_->data_.mutex.Unlock();
-  }
+  void Publish(void *addr, uint32_t size);
 
   /**
    * @brief 转储数据
@@ -778,22 +607,7 @@ class Topic
    * @param buffer 等待写入的包 Packed data to be written
    * @param source 需要打包的数据 Data to be packed
    */
-  static void PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
-  {
-    PackedData<uint8_t> *pack = reinterpret_cast<PackedData<uint8_t> *>(buffer.addr_);
-
-    memcpy(&pack->raw.data_, source.addr_, source.size_);
-
-    pack->raw.header_.prefix = 0xa5;
-    pack->raw.header_.topic_name_crc32 = topic_name_crc32;
-    pack->raw.header_.SetDataLen(source.size_);
-    pack->raw.header_.pack_header_crc8 =
-        CRC8::Calculate(&pack->raw, sizeof(PackedDataHeader) - sizeof(uint8_t));
-    uint8_t *crc8_pack =
-        reinterpret_cast<uint8_t *>(reinterpret_cast<uint8_t *>(pack) + PACK_BASE_SIZE +
-                                    source.size_ - sizeof(uint8_t));
-    *crc8_pack = CRC8::Calculate(pack, PACK_BASE_SIZE - sizeof(uint8_t) + source.size_);
-  }
+  static void PackData(uint32_t topic_name_crc32, RawData buffer, RawData source);
 
   /**
    * @brief  转储数据到 PackedData
@@ -845,24 +659,7 @@ class Topic
    *         TopicHandle if the topic is found, otherwise returns nullptr
    */
   static TopicHandle WaitTopic(const char *name, uint32_t timeout = UINT32_MAX,
-                               Domain *domain = nullptr)
-  {
-    TopicHandle topic = nullptr;
-    do
-    {
-      topic = Find(name, domain);
-      if (topic == nullptr)
-      {
-        if (timeout <= Thread::GetTime())
-        {
-          return nullptr;
-        }
-        Thread::Sleep(1);
-      }
-    } while (topic == nullptr);
-
-    return topic;
-  }
+                               Domain *domain = nullptr);
 
   /**
    * @brief  将 Topic 转换为 TopicHandle
@@ -877,17 +674,7 @@ class Topic
    *
    * @return uint32_t
    */
-  uint32_t GetKey() const
-  {
-    if (block_)
-    {
-      return block_->key;
-    }
-    else
-    {
-      return 0;
-    }
-  }
+  uint32_t GetKey() const;
 
   /**
    * @class Server
@@ -915,27 +702,14 @@ class Topic
      *         Constructor to initialize the server and allocate buffer
      * @param  buffer_length 缓冲区长度 Buffer length
      */
-    Server(size_t buffer_length)
-        : topic_map_([](const uint32_t &a, const uint32_t &b)
-                     { return static_cast<int>(a) - static_cast<int>(b); }),
-          queue_(1, buffer_length)
-    {
-      /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
-      ASSERT(buffer_length > PACK_BASE_SIZE);
-      parse_buff_.size_ = buffer_length;
-      parse_buff_.addr_ = new uint8_t[buffer_length];
-    }
+    Server(size_t buffer_length);
 
     /**
      * @brief  注册一个主题
      *         Registers a topic
      * @param  topic 需要注册的主题句柄 The topic handle to register
      */
-    void Register(TopicHandle topic)
-    {
-      auto node = new RBTree<uint32_t>::Node<TopicHandle>(topic);
-      topic_map_.Insert(*node, topic->key);
-    }
+    void Register(TopicHandle topic);
 
     /**
      * @brief  解析接收到的数据
@@ -943,116 +717,7 @@ class Topic
      * @param  data 接收到的原始数据 Received raw data
      * @return 接收到的话题数量 Received topic count
      */
-    size_t ParseData(ConstRawData data)
-    {
-      size_t count = 0;
-
-      queue_.PushBatch(data.addr_, data.size_);
-
-      while (true)
-      { /* 1. Check prefix */
-        if (status_ == Status::WAIT_START)
-        {
-          /* Check start frame */
-          auto queue_size = queue_.Size();
-          for (uint32_t i = 0; i < queue_size; i++)
-          {
-            uint8_t prefix = 0;
-            queue_.Peek(&prefix);
-            if (prefix == 0xa5)
-            {
-              status_ = Status::WAIT_TOPIC;
-              break;
-            }
-            queue_.Pop();
-          }
-          /* Not found */
-          if (status_ == Status::WAIT_START)
-          {
-            return count;
-          }
-        }
-
-        /* 2. Get topic info */
-        if (status_ == Status::WAIT_TOPIC)
-        {
-          /* Check size&crc */
-          if (queue_.Size() >= sizeof(PackedDataHeader))
-          {
-            queue_.PopBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
-            if (CRC8::Verify(parse_buff_.addr_, sizeof(PackedDataHeader)))
-            {
-              auto header = reinterpret_cast<PackedDataHeader *>(parse_buff_.addr_);
-              /* Find topic */
-              auto node = topic_map_.Search<TopicHandle>(header->topic_name_crc32);
-              if (node)
-              {
-                data_len_ = header->GetDataLen();
-                current_topic_ = *node;
-                if (data_len_ + PACK_BASE_SIZE >= queue_.length_)
-                {
-                  status_ = Status::WAIT_START;
-                  continue;
-                }
-                status_ = Status::WAIT_DATA_CRC;
-              }
-              else
-              {
-                status_ = Status::WAIT_START;
-                continue;
-              }
-            }
-            else
-            {
-              status_ = Status::WAIT_START;
-              continue;
-            }
-          }
-          else
-          {
-            return count;
-          }
-        }
-
-        /* 3. Get data */
-        if (status_ == Status::WAIT_DATA_CRC)
-        {
-          /* Check size&crc */
-          if (queue_.Size() >= data_len_ + sizeof(uint8_t))
-          {
-            uint8_t *data =
-                reinterpret_cast<uint8_t *>(parse_buff_.addr_) + sizeof(PackedDataHeader);
-            queue_.PopBatch(data, data_len_ + sizeof(uint8_t));
-            if (CRC8::Verify(parse_buff_.addr_,
-                             data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t)))
-            {
-              status_ = Status::WAIT_START;
-              auto data = reinterpret_cast<uint8_t *>(parse_buff_.addr_) +
-                          sizeof(PackedDataHeader);
-              if (data_len_ > current_topic_->data_.max_length)
-              {
-                data_len_ = current_topic_->data_.max_length;
-              }
-              Topic(current_topic_).Publish(data, data_len_);
-
-              count++;
-
-              continue;
-            }
-            else
-            {
-              status_ = Status::WAIT_START;
-              continue;
-            }
-          }
-          else
-          {
-            return count;
-          }
-        }
-      }
-      return count;
-    }
+    size_t ParseData(ConstRawData data);
 
    private:
     Status status_ =

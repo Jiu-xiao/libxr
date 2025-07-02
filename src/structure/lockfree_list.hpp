@@ -36,13 +36,13 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeList
      * @param size 节点所占用的字节数。
      *             The size of the node in bytes.
      */
-    BaseNode(size_t size) : size_(size) {}
+    BaseNode(size_t size);
 
     /**
      * @brief 析构函数，确保节点不会在列表中残留。
      *        Destructor ensuring the node does not remain in the list.
      */
-    ~BaseNode() { ASSERT(next_ == nullptr); }
+    ~BaseNode();
 
     std::atomic<BaseNode*> next_ =
         nullptr;   ///< 指向下一个节点的原子指针。 Atomic pointer to the next node.
@@ -117,27 +117,13 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeList
    * @brief 默认构造函数，初始化链表头节点。
    *        Default constructor initializing the linked list head node.
    */
-  LockFreeList() noexcept : head_(0)
-  {
-    head_.next_.store(&head_, std::memory_order_relaxed);
-  }
+  LockFreeList() noexcept;
 
   /**
    * @brief 析构函数，释放所有节点。
    *        Destructor releasing all nodes.
    */
-  ~LockFreeList()
-  {
-    for (auto pos = head_.next_.load(); pos != &head_;)
-    {
-      auto tmp = pos->next_.load();
-      pos->next_.store(nullptr);
-      pos = tmp;
-    }
-
-    head_.next_.store(nullptr);
-  }
-
+  ~LockFreeList();
   /**
    * @brief 向链表添加一个节点。
    *        Adds a node to the linked list.
@@ -145,16 +131,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeList
    * @param data 要添加的 `BaseNode` 节点。
    *             The `BaseNode` node to be added.
    */
-  void Add(BaseNode& data)
-  {
-    BaseNode* current_head = nullptr;
-    do
-    {
-      current_head = head_.next_.load(std::memory_order_acquire);
-      data.next_.store(current_head, std::memory_order_relaxed);
-    } while (!head_.next_.compare_exchange_weak(
-        current_head, &data, std::memory_order_release, std::memory_order_acquire));
-  }
+  void Add(BaseNode& data);
 
   /**
    * @brief 获取链表中的节点数量。
@@ -163,16 +140,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeList
    * @return 返回链表中节点的数量。
    *         Returns the number of nodes in the list.
    */
-  uint32_t Size() noexcept
-  {
-    uint32_t size = 0;
-    for (auto pos = head_.next_.load(std::memory_order_acquire); pos != &head_;
-         pos = pos->next_.load(std::memory_order_relaxed))
-    {
-      ++size;
-    }
-    return size;
-  }
+  uint32_t Size() noexcept;
 
   /**
    * @brief 遍历链表中的每个节点，并应用回调函数。

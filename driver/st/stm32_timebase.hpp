@@ -16,9 +16,7 @@ class STM32Timebase : public Timebase
   /**
    * @brief 默认构造函数 / Default constructor
    */
-  STM32Timebase() : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
-  {
-  }
+  STM32Timebase();
 
   /**
    * @brief 获取当前时间（微秒级） / Get current time in microseconds
@@ -29,41 +27,14 @@ class STM32Timebase : public Timebase
    *
    * @return MicrosecondTimestamp 当前时间（微秒） / Current timestamp in microseconds
    */
-  MicrosecondTimestamp _get_microseconds()
-  {
-    uint32_t ms_old = HAL_GetTick();
-    uint32_t tick_value_old = SysTick->VAL;
-    uint32_t ms_new = HAL_GetTick();
-    uint32_t tick_value_new = SysTick->VAL;
-
-    auto time_diff = ms_new - ms_old;
-    uint32_t tick_load = SysTick->LOAD + 1;
-    switch (time_diff)
-    {
-      case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(ms_new) * 1000 + 1000 -
-                                    static_cast<uint64_t>(tick_value_old) * 1000 /
-                                        tick_load);
-      case 1:
-        /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return MicrosecondTimestamp(static_cast<uint64_t>(ms_new) * 1000 + 1000 -
-                                    static_cast<uint64_t>(tick_value_new) * 1000 /
-                                        tick_load);
-      default:
-        /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
-         * 1ms, an error case */
-        ASSERT(false);
-    }
-
-    return 0;
-  }
+  MicrosecondTimestamp _get_microseconds();
 
   /**
    * @brief 获取当前时间（毫秒级） / Get current time in milliseconds
    *
    * @return MillisecondTimestamp 当前时间（毫秒） / Current timestamp in milliseconds
    */
-  MillisecondTimestamp _get_milliseconds() { return HAL_GetTick(); }
+  MillisecondTimestamp _get_milliseconds();
 };
 
 #ifdef HAL_TIM_MODULE_ENABLED
@@ -79,11 +50,7 @@ class STM32TimerTimebase : public Timebase
    * @brief 构造函数 / Constructor
    * @param timer 定时器句柄指针 / Pointer to hardware timer handle
    */
-  STM32TimerTimebase(TIM_HandleTypeDef* timer)
-      : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
-  {
-    htim = timer;
-  }
+  STM32TimerTimebase(TIM_HandleTypeDef* timer);
 
   /**
    * @brief 获取当前时间（微秒级） / Get current time in microseconds
@@ -94,42 +61,14 @@ class STM32TimerTimebase : public Timebase
    *
    * @return MicrosecondTimestamp 当前时间（微秒） / Current timestamp in microseconds
    */
-  MicrosecondTimestamp _get_microseconds()
-  {
-    uint32_t ms_old = HAL_GetTick();
-    uint32_t tick_value_old = __HAL_TIM_GET_COUNTER(htim);
-    uint32_t ms_new = HAL_GetTick();
-    uint32_t tick_value_new = __HAL_TIM_GET_COUNTER(htim);
-
-    uint32_t autoreload = __HAL_TIM_GET_AUTORELOAD(htim) + 1;
-
-    uint32_t delta_ms = ms_new - ms_old;
-    switch (delta_ms)
-    {
-      case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(ms_new) * 1000 +
-                                    static_cast<uint64_t>(tick_value_old) * 1000 /
-                                        autoreload);
-      case 1:
-        /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return MicrosecondTimestamp(static_cast<uint64_t>(ms_new) * 1000 +
-                                    static_cast<uint64_t>(tick_value_new) * 1000 /
-                                        autoreload);
-      default:
-        /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
-         * 1ms, an error case */
-        ASSERT(false);
-    }
-
-    return 0;
-  }
+  MicrosecondTimestamp _get_microseconds();
 
   /**
    * @brief 获取当前时间（毫秒级） / Get current time in milliseconds
    *
    * @return MillisecondTimestamp 当前时间（毫秒） / Current timestamp in milliseconds
    */
-  MillisecondTimestamp _get_milliseconds() { return HAL_GetTick(); }
+  MillisecondTimestamp _get_milliseconds();
 
   /**
    * @brief 硬件定时器句柄指针 / Static pointer to hardware timer handle

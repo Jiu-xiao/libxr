@@ -70,14 +70,7 @@ class CAN
    * @param end_id_match 结束ID/匹配 Ending ID/match
    */
   void Register(Callback cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
-                uint32_t start_id_mask = 0, uint32_t end_id_match = UINT32_MAX)
-  {
-    ASSERT(type < Type::TYPE_NUM);
-
-    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
-        LockFreeList::Node<Filter>({mode, start_id_mask, end_id_match, type, cb});
-    subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
-  }
+                uint32_t start_id_mask = 0, uint32_t end_id_match = UINT32_MAX);
 
   /**
    * @brief 添加 CAN 消息到系统 (Adds a CAN message to the system).
@@ -87,31 +80,7 @@ class CAN
   virtual ErrorCode AddMessage(const ClassicPack &pack) = 0;
 
  protected:
-  void OnMessage(const ClassicPack &pack, bool in_isr)
-  {
-    ASSERT(pack.type < Type::TYPE_NUM);
-    subscriber_list_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
-        [&](Filter &node)
-        {
-          switch (node.mode)
-          {
-            case FilterMode::ID_MASK:
-              if ((pack.id & node.start_id_mask) == node.end_id_match)
-              {
-                node.cb.Run(in_isr, pack);
-              }
-              break;
-            case FilterMode::ID_RANGE:
-              if (pack.id >= node.start_id_mask && pack.id <= node.end_id_match)
-              {
-                node.cb.Run(in_isr, pack);
-              }
-              break;
-          }
-
-          return ErrorCode::OK;
-        });
-  }
+  void OnMessage(const ClassicPack &pack, bool in_isr);
 
  private:
   LockFreeList subscriber_list_[static_cast<uint8_t>(Type::TYPE_NUM)];
@@ -170,13 +139,7 @@ class FDCAN : public CAN
    * @param end_id_match 结束ID/匹配 Ending ID/match
    */
   void Register(CallbackFD cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
-                uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX)
-  {
-    ASSERT(type < Type::TYPE_NUM);
-    auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
-        LockFreeList::Node<Filter>({mode, start_id_mask, end_id_mask, type, cb});
-    subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);
-  }
+                uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX);
 
   /**
    * @brief 添加 FD CAN 消息到系统 (Adds an FD CAN message to the system).
@@ -186,20 +149,7 @@ class FDCAN : public CAN
   virtual ErrorCode AddMessage(const FDPack &pack) = 0;
 
  protected:
-  void OnMessage(const FDPack &pack, bool in_isr)
-  {
-    ASSERT(pack.type < Type::TYPE_NUM);
-    subscriber_list_fd_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
-        [&](Filter &node)
-        {
-          if (pack.id >= node.start_id_mask && pack.id <= node.end_id_mask)
-          {
-            node.cb.Run(in_isr, pack);
-          }
-
-          return ErrorCode::OK;
-        });
-  }
+  void OnMessage(const FDPack &pack, bool in_isr);
 
  private:
   LockFreeList subscriber_list_fd_[static_cast<uint8_t>(Type::TYPE_NUM)];

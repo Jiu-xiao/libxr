@@ -36,13 +36,13 @@ class List
      * @param size 节点所占用的字节数。
      *             The size of the node in bytes.
      */
-    BaseNode(size_t size) : size_(size) {}
+    BaseNode(size_t size);
 
     /**
      * @brief 析构函数，确保节点不会在列表中残留。
      *        Destructor ensuring the node does not remain in the list.
      */
-    ~BaseNode() { ASSERT(next_ == nullptr); }
+    ~BaseNode();
 
     BaseNode* next_ = nullptr;  ///< 指向下一个节点的指针。 Pointer to the next node.
     size_t size_;  ///< 当前节点的数据大小（字节）。 Size of the current node (in bytes).
@@ -116,23 +116,13 @@ class List
    * @brief 默认构造函数，初始化链表头节点。
    *        Default constructor initializing the linked list head node.
    */
-  List() noexcept : head_(0) { head_.next_ = &head_; }
+  List() noexcept;
 
   /**
    * @brief 析构函数，释放所有节点。
    *        Destructor releasing all nodes.
    */
-  ~List()
-  {
-    for (auto pos = head_.next_; pos != &head_;)
-    {
-      auto tmp = pos->next_;
-      pos->next_ = nullptr;
-      pos = tmp;
-    }
-
-    head_.next_ = nullptr;
-  }
+  ~List();
 
   /**
    * @brief 向链表添加一个节点。
@@ -141,13 +131,7 @@ class List
    * @param data 要添加的 `BaseNode` 节点。
    *             The `BaseNode` node to be added.
    */
-  void Add(BaseNode& data)
-  {
-    mutex_.Lock();
-    data.next_ = head_.next_;
-    head_.next_ = &data;
-    mutex_.Unlock();
-  }
+  void Add(BaseNode& data);
 
   /**
    * @brief 获取链表中的节点数量。
@@ -156,19 +140,7 @@ class List
    * @return 返回链表中节点的数量。
    *         Returns the number of nodes in the list.
    */
-  uint32_t Size() noexcept
-  {
-    uint32_t size = 0;
-    mutex_.Lock();
-
-    for (auto pos = head_.next_; pos != &head_; pos = pos->next_)
-    {
-      ++size;
-    }
-
-    mutex_.Unlock();
-    return size;
-  }
+  uint32_t Size() noexcept;
 
   /**
    * @brief 从链表中删除指定的节点。
@@ -179,22 +151,7 @@ class List
    * @return 返回 `ErrorCode`，指示操作是否成功。
    *         Returns `ErrorCode`, indicating whether the operation was successful.
    */
-  ErrorCode Delete(BaseNode& data) noexcept
-  {
-    mutex_.Lock();
-    for (auto pos = &head_; pos->next_ != &head_; pos = pos->next_)
-    {
-      if (pos->next_ == &data)
-      {
-        pos->next_ = data.next_;
-        data.next_ = nullptr;
-        mutex_.Unlock();
-        return ErrorCode::OK;
-      }
-    }
-    mutex_.Unlock();
-    return ErrorCode::NOT_FOUND;
-  }
+  ErrorCode Delete(BaseNode& data) noexcept;
 
   /**
    * @brief 遍历链表中的每个节点，并应用回调函数。
