@@ -74,7 +74,8 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
   USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_.ActiveBuffer(),
                        current_info.data.size_);
 #if __DCACHE_PRESENT
-  SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->tx_buffer_.ActiveBuffer()), *Len);
+  SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->tx_buffer_.ActiveBuffer()),
+                          *Len);
 #endif
   USBD_CDC_TransmitPacket(uart->usb_handle_);
 
@@ -123,5 +124,102 @@ extern "C" void STM32_USB_ISR_Handler_F1(void)
   }
 }
 #endif
+
+ErrorCode STM32VirtualUART::WriteFun(WritePort &port)
+{
+  STM32VirtualUART *uart = CONTAINER_OF(&port, STM32VirtualUART, _write_port);
+  auto p_data_class =
+      reinterpret_cast<USBD_CDC_HandleTypeDef *>(uart->usb_handle_->pClassData);
+
+  WriteInfoBlock info;
+
+  if (p_data_class == nullptr)
+  {
+    port.queue_info_->Pop(info);
+    port.queue_data_->PopBatch(uart->tx_buffer_.PendingBuffer(), info.data.size_);
+    port.Finish(false, ErrorCode::INIT_ERR, info, 0);
+    return ErrorCode::INIT_ERR;
+  }
+
+  if (uart->tx_buffer_.HasPending())
+  {
+    return ErrorCode::FULL;
+  }
+
+  if (port.queue_info_->Peek(info) != ErrorCode::OK)
+  {
+    return ErrorCode::EMPTY;
+  }
+
+  if (port.queue_data_->PopBatch(uart->tx_buffer_.PendingBuffer(), info.data.size_) !=
+      ErrorCode::OK)
+  {
+    ASSERT(false);
+    return ErrorCode::EMPTY;
+  }
+
+  uart->tx_buffer_.EnablePending();
+
+#if defined(STM32F1)
+  if (!uart->writing_ && p_data_class->TxState == 0)
+#else
+  if (p_data_class->TxState == 0)
+#endif
+  {
+    uart->tx_buffer_.Switch();
+    port.queue_info_->Pop(uart->write_info_active_);
+
+#if defined(STM32F1)
+    uart->write_size_ = info.data.size_;
+    uart->writing_ = true;
+#endif
+
+    USBD_CDC_SetTxBuffer(uart->usb_handle_, uart->tx_buffer_.ActiveBuffer(),
+                         info.data.size_);
+#if __DCACHE_PRESENT
+    SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->tx_buffer_.ActiveBuffer()),
+                            info.data.size_);
+#endif
+    USBD_CDC_TransmitPacket(uart->usb_handle_);
+
+    info.op.MarkAsRunning();
+
+    return ErrorCode::FAILED;
+  }
+  return ErrorCode::FAILED;
+}
+
+ErrorCode STM32VirtualUART::ReadFun(ReadPort &port)
+{
+  UNUSED(port);
+  return ErrorCode::EMPTY;
+}
+
+STM32VirtualUART::STM32VirtualUART(USBD_HandleTypeDef &usb_handle, uint8_t *tx_buffer,
+                                   uint8_t *rx_buffer, uint32_t tx_queue_size)
+    : UART(&_read_port, &_write_port),
+      usb_handle_(&usb_handle),
+      tx_buffer_(RawData(tx_buffer, APP_TX_DATA_SIZE)),
+      rx_buffer_(RawData(rx_buffer, APP_RX_DATA_SIZE)),
+      _write_port(tx_queue_size, APP_TX_DATA_SIZE),
+      _read_port(APP_RX_DATA_SIZE)
+{
+  map[0] = this;
+
+  static USBD_CDC_ItfTypeDef usbd_cdc_itf = Apply<USBD_CDC_ItfTypeDef>();
+
+  USBD_CDC_RegisterInterface(usb_handle_, &usbd_cdc_itf);
+
+  _write_port = WriteFun;
+  _read_port = ReadFun;
+
+  USBD_CDC_ReceivePacket(usb_handle_);
+}
+
+ErrorCode STM32VirtualUART::SetConfig(UART::Configuration config)
+{
+  UNUSED(config);
+  return ErrorCode::OK;
+}
 
 #endif

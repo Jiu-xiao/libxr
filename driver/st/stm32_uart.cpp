@@ -192,6 +192,156 @@ stm32_uart_id_t STM32_UART_GetID(USART_TypeDef *addr)
   }
 }
 
+ErrorCode STM32UART::WriteFun(WritePort &port)
+{
+  STM32UART *uart = CONTAINER_OF(&port, STM32UART, _write_port);
+  if (!uart->dma_buff_tx_.HasPending())
+  {
+    WriteInfoBlock info;
+    if (port.queue_info_->Peek(info) != ErrorCode::OK)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    uint8_t *buffer = nullptr;
+    bool use_pending = false;
+
+    if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
+    {
+      buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
+    }
+    else
+    {
+      buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.PendingBuffer());
+      use_pending = true;
+    }
+
+    if (port.queue_data_->PopBatch(reinterpret_cast<uint8_t *>(buffer),
+                                   info.data.size_) != ErrorCode::OK)
+    {
+      ASSERT(false);
+      return ErrorCode::EMPTY;
+    }
+
+    if (use_pending)
+    {
+      uart->dma_buff_tx_.EnablePending();
+      if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
+      {
+        uart->dma_buff_tx_.Switch();
+      }
+      else
+      {
+        return ErrorCode::FAILED;
+      }
+    }
+
+    port.queue_info_->Pop(uart->write_info_active_);
+
+#if __DCACHE_PRESENT
+    SCB_CleanDCache_by_Addr(
+        reinterpret_cast<uint32_t *>(uart->dma_buff_tx_.ActiveBuffer()), info.data.size_);
+#endif
+
+    auto ans = HAL_UART_Transmit_DMA(
+        uart->uart_handle_, static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
+        info.data.size_);
+
+    if (ans != HAL_OK)
+    {
+      port.Finish(false, ErrorCode::FAILED, info, 0);
+    }
+
+    return ErrorCode::FAILED;
+  }
+
+  return ErrorCode::FAILED;
+}
+
+ErrorCode STM32UART::ReadFun(ReadPort &port)
+{
+  STM32UART *uart = CONTAINER_OF(&port, STM32UART, _read_port);
+  UNUSED(uart);
+
+  return ErrorCode::EMPTY;
+}
+
+STM32UART::STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx,
+                     RawData dma_buff_tx, uint32_t tx_queue_size)
+    : UART(&_read_port, &_write_port),
+      _read_port(dma_buff_rx.size_),
+      _write_port(tx_queue_size, dma_buff_tx.size_ / 2),
+      dma_buff_rx_(dma_buff_rx),
+      dma_buff_tx_(dma_buff_tx),
+      uart_handle_(uart_handle),
+      id_(STM32_UART_GetID(uart_handle_->Instance))
+{
+  ASSERT(id_ != STM32_UART_ID_ERROR);
+
+  map[id_] = this;
+
+  if ((uart_handle->Init.Mode & UART_MODE_TX) == UART_MODE_TX)
+  {
+    ASSERT(uart_handle_->hdmatx != NULL);
+    _write_port = WriteFun;
+  }
+
+  if ((uart_handle->Init.Mode & UART_MODE_RX) == UART_MODE_RX)
+  {
+    ASSERT(uart_handle->hdmarx != NULL);
+
+    uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
+    HAL_DMA_Init(uart_handle_->hdmarx);
+
+    __HAL_UART_ENABLE_IT(uart_handle, UART_IT_IDLE);
+
+    HAL_UART_Receive_DMA(uart_handle, reinterpret_cast<uint8_t *>(dma_buff_rx_.addr_),
+                         dma_buff_rx_.size_);
+    _read_port = ReadFun;
+  }
+}
+
+ErrorCode STM32UART::SetConfig(UART::Configuration config)
+{
+  uart_handle_->Init.BaudRate = config.baudrate;
+
+  switch (config.parity)
+  {
+    case UART::Parity::NO_PARITY:
+      uart_handle_->Init.Parity = UART_PARITY_NONE;
+      uart_handle_->Init.WordLength = UART_WORDLENGTH_8B;
+      break;
+    case UART::Parity::EVEN:
+      uart_handle_->Init.Parity = UART_PARITY_EVEN;
+      uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
+      break;
+    case UART::Parity::ODD:
+      uart_handle_->Init.Parity = UART_PARITY_ODD;
+      uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
+      break;
+    default:
+      ASSERT(false);
+  }
+
+  switch (config.stop_bits)
+  {
+    case 1:
+      uart_handle_->Init.StopBits = UART_STOPBITS_1;
+      break;
+    case 2:
+      uart_handle_->Init.StopBits = UART_STOPBITS_2;
+      break;
+    default:
+      ASSERT(false);
+  }
+
+  if (HAL_UART_Init(uart_handle_) != HAL_OK)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  return ErrorCode::OK;
+}
+
 // NOLINTNEXTLINE
 extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *uart_handle)
 {

@@ -25,47 +25,26 @@ class BaseQueue
    * @param length 队列的最大容量 (Maximum capacity of the queue).
    * @param buffer 指向缓冲区的指针 (Pointer to the buffer).
    */
-  BaseQueue(uint16_t element_size, size_t length, uint8_t *buffer)
-      : queue_array_(buffer),
-        ELEMENT_SIZE(element_size),
-        length_(length),
-        own_buffer_(false)
-  {
-  }
+  BaseQueue(uint16_t element_size, size_t length, uint8_t *buffer);
 
   /**
    * @brief 构造函数，初始化队列 (Constructor to initialize the queue).
    * @param element_size 队列中每个元素的大小 (Size of each element in the queue).
    * @param length 队列的最大容量 (Maximum capacity of the queue).
    */
-  BaseQueue(uint16_t element_size, size_t length)
-      : queue_array_(new uint8_t[length * element_size]),
-        ELEMENT_SIZE(element_size),
-        length_(length),
-        own_buffer_(true)
-  {
-  }
+  BaseQueue(uint16_t element_size, size_t length);
 
   /**
    * @brief 析构函数，释放队列内存 (Destructor to free queue memory).
    */
-  ~BaseQueue()
-  {
-    if (own_buffer_)
-    {
-      delete[] queue_array_;
-    }
-  }
+  ~BaseQueue();
 
   /**
    * @brief 访问指定索引的元素 (Access an element at a specified index).
    * @param index 目标索引 (Target index).
    * @return 指向该索引处元素的指针 (Pointer to the element at the specified index).
    */
-  [[nodiscard]] void *operator[](uint32_t index)
-  {
-    return &queue_array_[static_cast<size_t>(index * ELEMENT_SIZE)];
-  }
+  [[nodiscard]] void *operator[](uint32_t index);
 
   /**
    * @brief 向队列中添加一个元素 (Push an element into the queue).
@@ -73,25 +52,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列满时返回 `ErrorCode::FULL`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::FULL` if full).
    */
-  ErrorCode Push(const void *data)
-  {
-    ASSERT(data != nullptr);
-
-    if (is_full_)
-    {
-      return ErrorCode::FULL;
-    }
-
-    memcpy(&queue_array_[tail_ * ELEMENT_SIZE], data, ELEMENT_SIZE);
-
-    tail_ = (tail_ + 1) % length_;
-    if (head_ == tail_)
-    {
-      is_full_ = true;
-    }
-
-    return ErrorCode::OK;
-  }
+  ErrorCode Push(const void *data);
 
   /**
    * @brief 获取队列头部的元素但不移除 (Peek at the front element without removing it).
@@ -99,20 +60,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode Peek(void *data)
-  {
-    ASSERT(data != nullptr);
-
-    if (Size() > 0)
-    {
-      memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
-      return ErrorCode::OK;
-    }
-    else
-    {
-      return ErrorCode::EMPTY;
-    }
-  }
+  ErrorCode Peek(void *data);
 
   /**
    * @brief 移除队列头部的元素 (Pop the front element from the queue).
@@ -121,21 +69,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode Pop(void *data = nullptr)
-  {
-    if (Size() == 0)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    if (data != nullptr)
-    {
-      memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
-    }
-    head_ = (head_ + 1) % length_;
-    is_full_ = false;
-    return ErrorCode::OK;
-  }
+  ErrorCode Pop(void *data = nullptr);
 
   /**
    * @brief 获取队列中最后一个元素的索引 (Get the index of the last element in the queue).
@@ -143,14 +77,7 @@ class BaseQueue
    *         (Returns the index of the last element if the queue is not empty, otherwise
    * -1).
    */
-  int GetLastElementIndex() const
-  {
-    if (Size() == 0)
-    {
-      return -1;
-    }
-    return static_cast<int>((tail_ + length_ - 1) % length_);
-  }
+  int GetLastElementIndex() const;
 
   /**
    * @brief 获取队列中第一个元素的索引 (Get the index of the first element in the queue).
@@ -158,14 +85,7 @@ class BaseQueue
    *         (Returns the index of the first element if the queue is not empty, otherwise
    * -1).
    */
-  int GetFirstElementIndex() const
-  {
-    if (Size() == 0)
-    {
-      return -1;
-    }
-    return static_cast<int>(head_);
-  }
+  int GetFirstElementIndex() const;
 
   /**
    * @brief 批量推入多个元素 (Push multiple elements into the queue).
@@ -174,34 +94,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列满时返回 `ErrorCode::FULL`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::FULL` if full).
    */
-  ErrorCode PushBatch(const void *data, size_t size)
-  {
-    ASSERT(data != nullptr);
-
-    auto avail = EmptySize();
-    if (avail < size)
-    {
-      return ErrorCode::FULL;
-    }
-
-    auto tmp = reinterpret_cast<const uint8_t *>(data);
-
-    size_t first_part = LibXR::min(size, length_ - tail_);
-    memcpy(&queue_array_[tail_ * ELEMENT_SIZE], tmp, first_part * ELEMENT_SIZE);
-
-    if (size > first_part)
-    {
-      memcpy(queue_array_, &tmp[first_part * ELEMENT_SIZE],
-             (size - first_part) * ELEMENT_SIZE);
-    }
-
-    tail_ = (tail_ + size) % length_;
-    if (head_ == tail_)
-    {
-      is_full_ = true;
-    }
-    return ErrorCode::OK;
-  }
+  ErrorCode PushBatch(const void *data, size_t size);
 
   /**
    * @brief 批量移除多个元素 (Pop multiple elements from the queue).
@@ -211,34 +104,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode PopBatch(void *data, size_t size)
-  {
-    if (Size() < size)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    if (size == 0)
-    {
-      return ErrorCode::OK;
-    }
-    is_full_ = false;
-
-    size_t first_part = LibXR::min(size, length_ - head_);
-    if (data != nullptr)
-    {
-      auto tmp = reinterpret_cast<uint8_t *>(data);
-      memcpy(tmp, &queue_array_[head_ * ELEMENT_SIZE], first_part * ELEMENT_SIZE);
-      if (size > first_part)
-      {
-        memcpy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
-               (size - first_part) * ELEMENT_SIZE);
-      }
-    }
-
-    head_ = (head_ + size) % length_;
-    return ErrorCode::OK;
-  }
+  ErrorCode PopBatch(void *data, size_t size);
 
   /**
    * @brief 批量获取多个元素但不移除 (Peek at multiple elements without removing them).
@@ -247,30 +113,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode PeekBatch(void *data, size_t size)
-  {
-    ASSERT(data != nullptr);
-
-    if (Size() < size)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    auto index = head_;
-
-    auto tmp = reinterpret_cast<uint8_t *>(data);
-
-    size_t first_part = LibXR::min(size, length_ - index);
-    memcpy(tmp, &queue_array_[index * ELEMENT_SIZE], first_part * ELEMENT_SIZE);
-
-    if (first_part < size)
-    {
-      memcpy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
-             (size - first_part) * ELEMENT_SIZE);
-    }
-
-    return ErrorCode::OK;
-  }
+  ErrorCode PeekBatch(void *data, size_t size);
 
   /**
    * @brief 覆盖队列中的数据 (Overwrite the queue with new data).
@@ -278,58 +121,24 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`
    *         (Operation result: `ErrorCode::OK` on success).
    */
-  ErrorCode Overwrite(const void *data)
-  {
-    ASSERT(data != nullptr);
-
-    head_ = tail_ = 0;
-    is_full_ = false;
-
-    memcpy(queue_array_, data, ELEMENT_SIZE * length_);
-
-    tail_ = (tail_ + 1) % length_;
-    if (head_ == tail_)
-    {
-      is_full_ = true;
-    }
-
-    return ErrorCode::OK;
-  }
+  ErrorCode Overwrite(const void *data);
 
   /**
    * @brief 重置队列，清空所有数据 (Reset the queue and clear all data).
    */
-  void Reset()
-  {
-    head_ = tail_ = 0;
-    is_full_ = false;
-  }
+  void Reset();
 
   /**
    * @brief 获取队列中的元素个数 (Get the number of elements in the queue).
    * @return 当前队列中的元素个数 (Current number of elements in the queue).
    */
-  [[nodiscard]] size_t Size() const
-  {
-    if (is_full_)
-    {
-      return length_;
-    }
-    else if (tail_ >= head_)
-    {
-      return tail_ - head_;
-    }
-    else
-    {
-      return length_ + tail_ - head_;
-    }
-  }
+  [[nodiscard]] size_t Size() const;
 
   /**
    * @brief 获取队列的空闲空间 (Get the available space in the queue).
    * @return 队列中可存储的元素个数 (Number of available slots in the queue).
    */
-  [[nodiscard]] size_t EmptySize() const { return length_ - Size(); }
+  [[nodiscard]] size_t EmptySize() const;
 
   BaseQueue(const BaseQueue &) = delete;
   BaseQueue &operator=(const BaseQueue &) = delete;
