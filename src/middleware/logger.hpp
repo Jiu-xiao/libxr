@@ -66,65 +66,23 @@ class Logger
    * @brief 打印日志到终端 / Print log to terminal
    * @param data 日志数据 / Log data
    */
-  static void PrintToTerminal(const LogData& data)
-  {
-    const char* color = GetColor(data.level);
-
-    STDIO::Printf("%s%s [%u](%s:%u) %s%s\r\n", color, LevelToString(data.level),
-                  static_cast<uint32_t>(data.timestamp), data.file, data.line,
-                  data.message, LIBXR_FORMAT_STR[static_cast<uint8_t>(Format::RESET)]);
-  }
+  static void PrintToTerminal(const LogData& data);
 
   /**
    * @brief 根据日志级别获取显示颜色 / Get color code based on log level
    * @param level 日志级别 / Log level
    * @return 颜色字符串 / Color string
    */
-  static const char* GetColor(LogLevel level)
-  {
-    using namespace LibXR;
-    switch (level)
-    {
-      case LogLevel::XR_LOG_LEVEL_DEBUG:
-        return LIBXR_FONT_STR[static_cast<uint8_t>(Font::MAGENTA)];
-      case LogLevel::XR_LOG_LEVEL_INFO:
-        return LIBXR_FONT_STR[static_cast<uint8_t>(Font::CYAN)];
-      case LogLevel::XR_LOG_LEVEL_PASS:
-        return LIBXR_FONT_STR[static_cast<uint8_t>(Font::GREEN)];
-      case LogLevel::XR_LOG_LEVEL_WARN:
-        return LIBXR_FONT_STR[static_cast<uint8_t>(Font::YELLOW)];
-      case LogLevel::XR_LOG_LEVEL_ERROR:
-        return LIBXR_FONT_STR[static_cast<uint8_t>(Font::RED)];
-      default:
-        return "";
-    }
-  }
+  static const char* GetColor(LogLevel level);
 
   /**
    * @brief 将日志级别转换为字符串 / Convert log level to string
    * @param level 日志级别 / Log level
    * @return 日志级别字符串 / Log level string
    */
-  static const char* LevelToString(LogLevel level)
-  {
-    switch (level)
-    {
-      case LogLevel::XR_LOG_LEVEL_DEBUG:
-        return "D";
-      case LogLevel::XR_LOG_LEVEL_INFO:
-        return "I";
-      case LogLevel::XR_LOG_LEVEL_PASS:
-        return "P";
-      case LogLevel::XR_LOG_LEVEL_WARN:
-        return "W";
-      case LogLevel::XR_LOG_LEVEL_ERROR:
-        return "E";
-      default:
-        return "UNKNOWN";
-    }
-  }
+  static const char* LevelToString(LogLevel level);
 
-  static inline std::atomic<uint32_t> initialized_ = false;
+  static inline bool initialized_ = false;
 };
 
 }  // namespace LibXR

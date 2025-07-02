@@ -100,14 +100,14 @@ class Timer
    *         Starts a periodic task
    * @param  handle 任务句柄 Timer handle to start
    */
-  static void Start(TimerHandle handle) { handle->data_.enable_ = true; }
+  static void Start(TimerHandle handle);
 
   /**
    * @brief  停止定时任务
    *         Stops a periodic task
    * @param  handle 任务句柄 Timer handle to stop
    */
-  static void Stop(TimerHandle handle) { handle->data_.enable_ = false; }
+  static void Stop(TimerHandle handle);
 
   /**
    * @brief  设置定时任务的周期
@@ -115,11 +115,7 @@ class Timer
    * @param  handle 任务句柄 Timer handle to modify
    * @param  cycle 任务周期（毫秒） New cycle time (milliseconds)
    */
-  static void SetCycle(TimerHandle handle, uint32_t cycle)
-  {
-    ASSERT(cycle > 0);
-    handle->data_.cycle_ = cycle;
-  }
+  static void SetCycle(TimerHandle handle, uint32_t cycle);
 
   /**
    * @brief  定时器管理线程函数
@@ -134,15 +130,7 @@ class Timer
    * and ensuring timely task execution.
    * `Thread::SleepUntil` is used for precise scheduling.
    */
-  static void RefreshThreadFunction(void *)
-  {
-    MillisecondTimestamp time = Thread::GetTime();
-    while (true)
-    {
-      Timer::Refresh();
-      Thread::SleepUntil(time, 1);
-    }
-  }
+  static void RefreshThreadFunction(void *);
 
   /**
    * @brief  删除定时任务
@@ -157,32 +145,14 @@ class Timer
    * the integrity of the task list.
    * If `handle->next_` is null, it triggers an `ASSERT` assertion.
    */
-  static void Remove(TimerHandle handle)
-  {
-    ASSERT(handle->next_);
-    list_->Delete(*handle);
-  }
+  static void Remove(TimerHandle handle);
 
   /**
    * @brief  添加定时任务
    *         Adds a periodic task
    * @param  handle 任务句柄 Timer handle to add
    */
-  static void Add(TimerHandle handle)
-  {
-    ASSERT(!handle->next_);
-
-    if (!LibXR::Timer::list_)
-    {
-      LibXR::Timer::list_ = new LibXR::List();
-#ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
-#else
-      thread_handle_.Create<void *>(nullptr, RefreshThreadFunction, "libxr_timer_task",
-                                    stack_depth_, priority_);
-#endif
-    }
-    list_->Add(*handle);
-  }
+  static void Add(TimerHandle handle);
 
   /**
    * @brief  刷新定时任务状态
@@ -196,41 +166,7 @@ class Timer
    * If a task is enabled and its `count_` reaches `cycle_`, the task is executed and the
    * counter is reset.
    */
-  static void Refresh()
-  {
-    if (!LibXR::Timer::list_)
-    {
-      LibXR::Timer::list_ = new LibXR::List();
-
-#ifndef LIBXR_NOT_SUPPORT_MUTI_THREAD
-
-      auto thread_handle = Thread();
-      thread_handle.Create<void *>(nullptr, RefreshThreadFunction, "libxr_timer_task",
-                                   512, Thread::Priority::HIGH);
-#endif
-    }
-
-    auto fun = [](ControlBlock &block)
-    {
-      if (!block.enable_)
-      {
-        return ErrorCode::OK;
-      }
-
-      block.count_++;
-
-      if (block.count_ >= block.cycle_)
-      {
-        block.count_ = 0;
-        block.Run();
-      }
-
-      return ErrorCode::OK;
-    };
-
-    list_->Foreach<ControlBlock>(fun);
-  }
-
+  static void Refresh();
   /**
    * @brief  在空闲时刷新定时器
    *         Refreshes the timer during idle time

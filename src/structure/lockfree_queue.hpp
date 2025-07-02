@@ -221,11 +221,14 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     }
 
     size_t first_chunk = LibXR::min(size, capacity - current_tail);
-    memcpy(queue_handle_ + current_tail, data, first_chunk * sizeof(Data));
+    memcpy(reinterpret_cast<void *>(queue_handle_ + current_tail),
+           reinterpret_cast<const void *>(data), first_chunk * sizeof(Data));
 
     if (size > first_chunk)
     {
-      memcpy(queue_handle_, data + first_chunk, (size - first_chunk) * sizeof(Data));
+      memcpy(reinterpret_cast<void *>(queue_handle_),
+             reinterpret_cast<const void *>(data + first_chunk),
+             (size - first_chunk) * sizeof(Data));
     }
 
     tail_.store((current_tail + size) % capacity, std::memory_order_release);
@@ -261,11 +264,15 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
       if (data != nullptr)
       {
         size_t first_chunk = LibXR::min(size, capacity - current_head);
-        memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
+        memcpy(reinterpret_cast<void *>(data),
+               reinterpret_cast<const void *>(queue_handle_ + current_head),
+               first_chunk * sizeof(Data));
 
         if (size > first_chunk)
         {
-          memcpy(data + first_chunk, queue_handle_, (size - first_chunk) * sizeof(Data));
+          memcpy(reinterpret_cast<void *>(data + first_chunk),
+                 reinterpret_cast<const void *>(queue_handle_),
+                 (size - first_chunk) * sizeof(Data));
         }
       }
 
@@ -307,11 +314,15 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
       }
 
       size_t first_chunk = LibXR::min(size, capacity - current_head);
-      memcpy(data, queue_handle_ + current_head, first_chunk * sizeof(Data));
+      memcpy(reinterpret_cast<void *>(data),
+             reinterpret_cast<const void *>(queue_handle_ + current_head),
+             first_chunk * sizeof(Data));
 
       if (size > first_chunk)
       {
-        memcpy(data + first_chunk, queue_handle_, (size - first_chunk) * sizeof(Data));
+        memcpy(reinterpret_cast<void *>(data + first_chunk),
+               reinterpret_cast<const void *>(queue_handle_),
+               (size - first_chunk) * sizeof(Data));
       }
 
       if (head_.load(std::memory_order_acquire) == current_head)

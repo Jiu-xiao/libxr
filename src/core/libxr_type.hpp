@@ -29,13 +29,13 @@ class RawData
    * @param size 数据的大小（字节）。
    *             The size of the data (in bytes).
    */
-  RawData(void *addr, size_t size) : addr_(addr), size_(size) {}
+  RawData(void *addr, size_t size);
 
   /**
    * @brief 默认构造函数，初始化为空数据。
    *        Default constructor initializing to empty data.
    */
-  RawData() : addr_(nullptr), size_(0) {}
+  RawData();
 
   /**
    * @brief 使用任意数据类型构造 `RawData`，数据地址指向该对象，大小为该类型的字节大小。
@@ -70,7 +70,7 @@ class RawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  RawData(char *data) : addr_(data), size_(data ? strlen(data) : 0) {}
+  RawData(char *data);
 
   /**
    * @brief 从字符数组构造 `RawData`，数据大小为数组长度减 1（不含 `\0`）。
@@ -95,10 +95,7 @@ class RawData
    * @param data `std::string` 类型数据。
    *             A `std::string` object.
    */
-  explicit RawData(const std::string &data)
-      : addr_(const_cast<char *>(data.data())), size_(data.size())
-  {
-  }
+  explicit RawData(const std::string &data);
 
   /**
    * @brief 赋值运算符重载。
@@ -136,13 +133,13 @@ class ConstRawData
    * @param size 数据的大小（字节）。
    *             The size of the data (in bytes).
    */
-  ConstRawData(const void *addr, size_t size) : addr_(addr), size_(size) {}
+  ConstRawData(const void *addr, size_t size);
 
   /**
    * @brief 默认构造函数，初始化为空数据。
    *        Default constructor initializing to empty data.
    */
-  ConstRawData() : addr_(nullptr), size_(0) {}
+  ConstRawData();
 
   /**
    * @brief 使用任意数据类型构造
@@ -178,7 +175,7 @@ class ConstRawData
    * @param data `RawData` 对象。
    *             A `RawData` object.
    */
-  ConstRawData(const RawData &data) : addr_(data.addr_), size_(data.size_) {}
+  ConstRawData(const RawData &data);
 
   /**
    * @brief 从 `char *` 指针构造 `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
@@ -188,7 +185,7 @@ class ConstRawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  ConstRawData(char *data) : addr_(data), size_(data ? strlen(data) : 0) {}
+  ConstRawData(char *data);
 
   /**
    * @brief 从 `char *` 指针构造 `ConstRawData`（常量版本）。
@@ -197,7 +194,7 @@ class ConstRawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  ConstRawData(const char *data) : addr_(data), size_(data ? strlen(data) : 0) {}
+  ConstRawData(const char *data);
 
   /**
    * @brief 从字符数组构造 `ConstRawData`，数据大小为数组长度减 1（不含 `\0`）。

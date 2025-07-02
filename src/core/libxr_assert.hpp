@@ -41,18 +41,22 @@ class Assert
   using Callback = LibXR::Callback<const char *, uint32_t>;
 
   /**
-   * @brief 注册致命错误的回调函数。
-   *        Registers a fatal error callback
+   * @brief 注册致命错误的回调函数（左值引用版本）。
+   *        Register a fatal error callback (lvalue reference version).
    *
-   * @tparam T 回调对象类型 The type of the callback object.
-   * @param cb 要注册的回调函数。The callback function to be
-   * registered.
+   * @param cb 要注册的回调函数（左值引用）。The callback function to register (lvalue
+   * reference).
    */
-  template <typename T>
-  static void RegisterFatalErrorCallback(T &&cb)
-  {
-    libxr_fatal_error_callback_ = std::forward<T>(cb);
-  }
+  static void RegisterFatalErrorCallback(const Callback &cb);
+
+  /**
+   * @brief 注册致命错误的回调函数（右值引用版本）。
+   *        Register a fatal error callback (rvalue reference version).
+   *
+   * @param cb 要注册的回调函数（右值引用）。The callback function to register (rvalue
+   * reference).
+   */
+  static void RegisterFatalErrorCallback(Callback &&cb);
 
 #ifdef LIBXR_DEBUG_BUILD
   /**

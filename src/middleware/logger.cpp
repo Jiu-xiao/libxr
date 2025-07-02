@@ -60,3 +60,50 @@ void Logger::Publish(LogLevel level, const char *file, uint32_t line, const char
 
   log_topic.Publish(data);
 }
+
+void Logger::PrintToTerminal(const LogData &data)
+{
+  const char *color = GetColor(data.level);
+
+  STDIO::Printf("%s%s [%u](%s:%u) %s%s\r\n", color, LevelToString(data.level),
+                static_cast<uint32_t>(data.timestamp), data.file, data.line, data.message,
+                LIBXR_FORMAT_STR[static_cast<uint8_t>(Format::RESET)]);
+}
+
+const char *Logger::GetColor(LogLevel level)
+{
+  switch (level)
+  {
+    case LogLevel::XR_LOG_LEVEL_DEBUG:
+      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::MAGENTA)];
+    case LogLevel::XR_LOG_LEVEL_INFO:
+      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::CYAN)];
+    case LogLevel::XR_LOG_LEVEL_PASS:
+      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::GREEN)];
+    case LogLevel::XR_LOG_LEVEL_WARN:
+      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::YELLOW)];
+    case LogLevel::XR_LOG_LEVEL_ERROR:
+      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::RED)];
+    default:
+      return "";
+  }
+}
+
+const char *Logger::LevelToString(LogLevel level)
+{
+  switch (level)
+  {
+    case LogLevel::XR_LOG_LEVEL_DEBUG:
+      return "D";
+    case LogLevel::XR_LOG_LEVEL_INFO:
+      return "I";
+    case LogLevel::XR_LOG_LEVEL_PASS:
+      return "P";
+    case LogLevel::XR_LOG_LEVEL_WARN:
+      return "W";
+    case LogLevel::XR_LOG_LEVEL_ERROR:
+      return "E";
+    default:
+      return "UNKNOWN";
+  }
+}
