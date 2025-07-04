@@ -44,7 +44,8 @@ void CAN::OnMessage(const ClassicPack &pack, bool in_isr)
 void FDCAN::Register(CallbackFD cb, Type type, FilterMode mode, uint32_t start_id_mask,
                      uint32_t end_id_mask)
 {
-  ASSERT(type < Type::TYPE_NUM);
+  ASSERT(type < Type::REMOTE_STANDARD);
+
   auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
       LockFreeList::Node<Filter>({mode, start_id_mask, end_id_mask, type, cb});
   subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);

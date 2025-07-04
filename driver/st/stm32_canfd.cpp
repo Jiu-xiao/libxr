@@ -60,38 +60,33 @@ ErrorCode STM32CANFD::Init(void)
   can_filter.FilterType = FDCAN_FILTER_MASK;
   can_filter.FilterID1 = 0x0000;
   can_filter.FilterID2 = 0x0000;
+  can_filter.FilterIndex = 0;
 
 #ifdef FDCAN3
   if (id_ == STM32_FDCAN1)
   {
-    can_filter.FilterConfig = FDCAN_RX_FIFO0;
-    can_filter.FilterIndex = 0;
+    can_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
   }
   else if (id_ == STM32_FDCAN2)
   {
-    can_filter.FilterConfig = FDCAN_RX_FIFO0;
-    can_filter.FilterIndex = 1;
+    can_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
   }
   else if (id_ == STM32_FDCAN3)
   {
-    can_filter.FilterConfig = FDCAN_RX_FIFO1;
-    can_filter.FilterIndex = 2;
+    can_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
   }
 #else
 #ifdef FDCAN2
   if (id_ == STM32_FDCAN1)
   {
-    can_filter.FilterConfig = FDCAN_RX_FIFO0;
-    can_filter.FilterIndex = 0;
+    can_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
   }
   else if (id_ == STM32_FDCAN2)
   {
-    can_filter.FilterConfig = FDCAN_RX_FIFO1;
-    can_filter.FilterIndex = 1;
+    can_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
   }
 #else
-  can_filter.FilterConfig = FDCAN_RX_FIFO0;
-  can_filter.FilterIndex = 0;
+  can_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
 #endif
 #endif
 
@@ -112,7 +107,7 @@ ErrorCode STM32CANFD::Init(void)
     return ErrorCode::FAILED;
   }
 
-  if (can_filter.FilterConfig == FDCAN_RX_FIFO0)
+  if (can_filter.FilterConfig == FDCAN_FILTER_TO_RXFIFO0)
   {
     HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
   }
@@ -135,21 +130,25 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
   switch (pack.type)
   {
     case Type::STANDARD:
+      ASSERT(pack.id <= 0x7FF);
       header.IdType = FDCAN_STANDARD_ID;
       header.TxFrameType = FDCAN_DATA_FRAME;
       break;
 
     case Type::EXTENDED:
+      ASSERT(pack.id <= 0x1FFFFFFF);
       header.IdType = FDCAN_EXTENDED_ID;
       header.TxFrameType = FDCAN_DATA_FRAME;
       break;
 
     case Type::REMOTE_STANDARD:
+      ASSERT(pack.id <= 0x7FF);
       header.IdType = FDCAN_STANDARD_ID;
       header.TxFrameType = FDCAN_REMOTE_FRAME;
       break;
 
     case Type::REMOTE_EXTENDED:
+      ASSERT(pack.id <= 0x1FFFFFFF);
       header.IdType = FDCAN_EXTENDED_ID;
       header.TxFrameType = FDCAN_REMOTE_FRAME;
       break;
@@ -187,24 +186,19 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
   switch (pack.type)
   {
     case Type::STANDARD:
+      ASSERT(pack.id <= 0x7FF);
       header.IdType = FDCAN_STANDARD_ID;
       header.TxFrameType = FDCAN_DATA_FRAME;
       break;
 
     case Type::EXTENDED:
+      ASSERT(pack.id <= 0x1FFFFFFF);
       header.IdType = FDCAN_EXTENDED_ID;
       header.TxFrameType = FDCAN_DATA_FRAME;
       break;
 
     case Type::REMOTE_STANDARD:
-      header.IdType = FDCAN_STANDARD_ID;
-      header.TxFrameType = FDCAN_REMOTE_FRAME;
-      break;
-
     case Type::REMOTE_EXTENDED:
-      header.IdType = FDCAN_EXTENDED_ID;
-      header.TxFrameType = FDCAN_REMOTE_FRAME;
-      break;
     default:
       ASSERT(false);
       return ErrorCode::FAILED;
@@ -302,8 +296,10 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
           rx_buff_.pack.type = Type::REMOTE_EXTENDED;
         }
       }
-
-      memcpy(rx_buff_.pack.data, rx_buff_.pack_fd.data, 8);
+      else
+      {
+        memcpy(rx_buff_.pack.data, rx_buff_.pack_fd.data, 8);
+      }
 
       OnMessage(rx_buff_.pack, true);
     }
@@ -341,12 +337,11 @@ void STM32CANFD::ProcessTxInterrupt()
         return;
     }
     tx_buff_.header.DataLength = tx_buff_.pack_fd.len;
-    tx_buff_.header.FDFormat = FDCAN_FD_CAN;
-    tx_buff_.header.TxFrameType = FDCAN_DATA_FRAME;
-    tx_buff_.header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-    tx_buff_.header.MessageMarker = 0x00;
     tx_buff_.header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
     tx_buff_.header.BitRateSwitch = FDCAN_BRS_ON;
+    tx_buff_.header.FDFormat = FDCAN_FD_CAN;
+    tx_buff_.header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+    tx_buff_.header.MessageMarker = 0x00;
 
     if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack_fd.data) ==
         HAL_OK)
