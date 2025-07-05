@@ -30,14 +30,27 @@ int8_t libxr_stm32_virtual_uart_receive(uint8_t *pbuf, uint32_t *Len)
 {
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
+  uint8_t *buffer = nullptr;
+
+  if (pbuf == uart->rx_buffer_.ActiveBuffer())
+  {
+    buffer = uart->rx_buffer_.PendingBuffer();
+  }
+  else
+  {
+    buffer = uart->rx_buffer_.ActiveBuffer();
+  }
+
+  USBD_CDC_SetRxBuffer(STM32VirtualUART::map[0]->usb_handle_, buffer);
+
+  USBD_CDC_ReceivePacket(STM32VirtualUART::map[0]->usb_handle_);
+
 #if __DCACHE_PRESENT
   SCB_InvalidateDCache_by_Addr(pbuf, *Len);
 #endif
 
   uart->read_port_->queue_data_->PushBatch(pbuf, *Len);
   uart->read_port_->ProcessPendingReads(true);
-
-  USBD_CDC_ReceivePacket(STM32VirtualUART::map[0]->usb_handle_);
 
   return (USBD_OK);
 }
@@ -46,12 +59,11 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
 {
   UNUSED(epnum);
   UNUSED(pbuf);
+  UNUSED(Len);
 
   STM32VirtualUART *uart = STM32VirtualUART::map[0];
 
   WriteInfoBlock &current_info = uart->write_info_active_;
-
-  uart->write_port_->Finish(true, ErrorCode::OK, current_info, *Len);
 
   if (!uart->tx_buffer_.HasPending())
   {
@@ -77,9 +89,12 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
   SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->tx_buffer_.ActiveBuffer()),
                           *Len);
 #endif
-  USBD_CDC_TransmitPacket(uart->usb_handle_);
 
-  current_info.op.MarkAsRunning();
+  uart->write_port_->write_size_ = current_info.data.size_;
+
+  auto ans = USBD_CDC_TransmitPacket(uart->usb_handle_);
+
+  current_info.op.UpdateStatus(true, ans == USBD_OK ? ErrorCode::OK : ErrorCode::BUSY);
 
   WriteInfoBlock next_info;
 
@@ -94,6 +109,8 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
     ASSERT(false);
     return USBD_OK;
   }
+
+  next_info.op.MarkAsRunning();
 
   uart->tx_buffer_.EnablePending();
 
@@ -180,12 +197,18 @@ ErrorCode STM32VirtualUART::WriteFun(WritePort &port)
     SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->tx_buffer_.ActiveBuffer()),
                             info.data.size_);
 #endif
-    USBD_CDC_TransmitPacket(uart->usb_handle_);
 
-    info.op.MarkAsRunning();
+    port.write_size_ = info.data.size_;
+
+    auto ans = USBD_CDC_TransmitPacket(uart->usb_handle_);
+
+    info.op.UpdateStatus(true, ans == USBD_OK ? ErrorCode::OK : ErrorCode::BUSY);
 
     return ErrorCode::FAILED;
   }
+
+  info.op.MarkAsRunning();
+
   return ErrorCode::FAILED;
 }
 

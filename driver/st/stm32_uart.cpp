@@ -232,6 +232,7 @@ ErrorCode STM32UART::WriteFun(WritePort &port)
       }
       else
       {
+        info.op.MarkAsRunning();
         return ErrorCode::FAILED;
       }
     }
@@ -243,14 +244,13 @@ ErrorCode STM32UART::WriteFun(WritePort &port)
         reinterpret_cast<uint32_t *>(uart->dma_buff_tx_.ActiveBuffer()), info.data.size_);
 #endif
 
+    uart->write_port_->write_size_ = uart->write_info_active_.data.size_;
+
     auto ans = HAL_UART_Transmit_DMA(
         uart->uart_handle_, static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
         info.data.size_);
 
-    if (ans != HAL_OK)
-    {
-      port.Finish(false, ErrorCode::FAILED, info, 0);
-    }
+    port.Finish(false, ans == HAL_OK ? ErrorCode::OK : ErrorCode::FAILED, info, 0);
 
     return ErrorCode::FAILED;
   }
@@ -387,9 +387,6 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 
   WriteInfoBlock &current_info = uart->write_info_active_;
 
-  uart->write_port_->write_size_ = uart->uart_handle_->TxXferSize;
-  current_info.op.UpdateStatus(true, ErrorCode::OK);
-
   if (!uart->dma_buff_tx_.HasPending())
   {
     return;
@@ -408,11 +405,13 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
                           current_info.data.size_);
 #endif
 
-  HAL_UART_Transmit_DMA(uart->uart_handle_,
-                        static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
-                        current_info.data.size_);
+  uart->write_port_->write_size_ = uart->write_info_active_.data.size_;
 
-  current_info.op.MarkAsRunning();
+  auto ans = HAL_UART_Transmit_DMA(
+      uart->uart_handle_, static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
+      current_info.data.size_);
+
+  current_info.op.UpdateStatus(true, ans == HAL_OK ? ErrorCode::OK : ErrorCode::BUSY);
 
   WriteInfoBlock next_info;
 
@@ -428,6 +427,8 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
     ASSERT(false);
     return;
   }
+
+  next_info.op.MarkAsRunning();
 
   uart->dma_buff_tx_.EnablePending();
 }

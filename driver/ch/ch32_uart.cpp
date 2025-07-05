@@ -247,6 +247,7 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
       }
       else
       {
+        uart->write_info_active_.op.MarkAsRunning();
         return ErrorCode::FAILED;
       }
     }
@@ -257,7 +258,10 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
     uart->dma_tx_channel_->MADDR =
         reinterpret_cast<uint32_t>(uart->dma_buff_tx_.ActiveBuffer());
     uart->dma_tx_channel_->CNTR = info.data.size_;
+    uart->_write_port.write_size_ = info.data.size_;
     DMA_Cmd(uart->dma_tx_channel_, ENABLE);
+
+    uart->write_info_active_.op.UpdateStatus(false, ErrorCode::OK);
 
     return ErrorCode::FAILED;  // 实际是发起传输成功，但等待DMA完成
   }
@@ -324,8 +328,6 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id]);
 
   WriteInfoBlock &current_info = uart->write_info_active_;
-  uart->_write_port.write_size_ = current_info.data.size_;  // 标记已发送
-  current_info.op.UpdateStatus(true, ErrorCode::OK);        // 标记操作完成
 
   if (!uart->dma_buff_tx_.HasPending())
   {
@@ -344,9 +346,10 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
   DMA_Cmd(uart->dma_tx_channel_, DISABLE);
   uart->dma_tx_channel_->MADDR = (uint32_t)buf;
   uart->dma_tx_channel_->CNTR = current_info.data.size_;
+  uart->_write_port.write_size_ = current_info.data.size_;
   DMA_Cmd(uart->dma_tx_channel_, ENABLE);
 
-  current_info.op.MarkAsRunning();
+  uart->write_info_active_.op.UpdateStatus(true, ErrorCode::OK);
 
   // 预装pending区
   WriteInfoBlock next_info;
@@ -362,6 +365,9 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
     ASSERT(false);
     return;
   }
+
+  next_info.op.MarkAsRunning();
+
   uart->dma_buff_tx_.EnablePending();
 }
 
