@@ -21,12 +21,12 @@ size_t ESP32UARTReadPort::Size()
 void ESP32UARTReadPort::ProcessPendingReads(bool in_isr)
 {
   LibXR::Mutex::LockGuard guard(mutex_);
-  if (busy_.load(std::memory_order_relaxed) == BusyState::Pending)
+  if (busy_.load(std::memory_order_relaxed) == BusyState::PENDING)
   {
     if (Size() >= info_.data.size_)
     {
       int len = uart_read_bytes(uart_->port_, info_.data.addr_, info_.data.size_, 0);
-      busy_.store(BusyState::Idle, std::memory_order_relaxed);
+      busy_.store(BusyState::IDLE, std::memory_order_relaxed);
       if (len == info_.data.size_)
       {
         Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
@@ -110,10 +110,10 @@ void ESP32UART::HandleEvent(const uart_event_t &event)
     case UART_FRAME_ERR:
     case UART_PARITY_ERR:
     {
-      LibXR::Mutex::LockGuard guard(read_port_->mutex_);
+      LibXR::Mutex::LockGuard guard(_read_port.mutex_);
 
       if (read_port_->busy_.load(std::memory_order_relaxed) ==
-          LibXR::ReadPort::BusyState::Pending)
+          LibXR::ReadPort::BusyState::PENDING)
       {
         read_port_->info_.op.UpdateStatus(false, ErrorCode::FAILED);
       }

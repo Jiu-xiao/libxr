@@ -25,11 +25,11 @@ class ASync
    * @brief 异步任务的状态枚举。
    *        Enumeration of asynchronous task statuses.
    */
-  enum class Status : uint8_t
+  enum class Status : uint32_t
   {
-    READY,  ///< 任务已准备就绪。 Task is ready.
-    BUSY,   ///< 任务正在执行中。 Task is currently running.
-    DONE    ///< 任务已完成。 Task is completed.
+    READY = 0,         ///< 任务已准备就绪。 Task is ready.
+    BUSY = 1,          ///< 任务正在执行中。 Task is currently running.
+    DONE = UINT32_MAX  ///< 任务已完成。 Task is completed.
   };
 
   /**

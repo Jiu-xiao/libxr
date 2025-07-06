@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
@@ -10,8 +11,6 @@
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_queue.hpp"
-#include "mutex.hpp"
-#include "queue.hpp"
 #include "semaphore.hpp"
 
 namespace LibXR
@@ -269,17 +268,16 @@ class ReadPort
  public:
   enum class BusyState : uint32_t
   {
-    Idle = 0,
-    Pending = 1,
-    Event = 2
+    IDLE = 0,
+    PENDING = 1,
+    EVENT = UINT32_MAX
   };
 
   ReadFun read_fun_ = nullptr;
   LockFreeQueue<uint8_t> *queue_data_ = nullptr;
   size_t read_size_ = 0;
-  Mutex mutex_;
   ReadInfoBlock info_;
-  std::atomic<BusyState> busy_{BusyState::Idle};
+  std::atomic<BusyState> busy_{BusyState::IDLE};
 
   /**
    * @brief Constructs a ReadPort with queue sizes.
@@ -402,10 +400,16 @@ class ReadPort
 class WritePort
 {
  public:
+  enum class LockState : uint32_t
+  {
+    LOCKED = 0,
+    UNLOCKED = UINT32_MAX
+  };
+
   WriteFun write_fun_ = nullptr;
   LockFreeQueue<WriteInfoBlock> *queue_info_;
   LockFreeQueue<uint8_t> *queue_data_;
-  Mutex mutex_;
+  std::atomic<LockState> lock_{LockState::UNLOCKED};
   size_t write_size_ = 0;
 
   /**

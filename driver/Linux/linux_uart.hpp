@@ -407,7 +407,6 @@ class LinuxUART : public UART
         }
         else
         {
-          ASSERT(false);
           info.op.UpdateStatus(false, ErrorCode::FAILED);
         }
       }
