@@ -225,8 +225,10 @@ ErrorCode STM32UART::WriteFun(WritePort &port)
 
     if (use_pending)
     {
+      uart->dma_buff_tx_.SetPendingSize(info.data.size_);
       uart->dma_buff_tx_.EnablePending();
-      if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
+      if (uart->uart_handle_->gState == HAL_UART_STATE_READY &&
+          uart->dma_buff_tx_.HasPending())
       {
         uart->dma_buff_tx_.Switch();
       }
@@ -250,9 +252,12 @@ ErrorCode STM32UART::WriteFun(WritePort &port)
     if (ans != HAL_OK)
     {
       port.Finish(false, ErrorCode::FAILED, info, 0);
+      return ErrorCode::FAILED;
     }
-
-    return ErrorCode::FAILED;
+    else
+    {
+      return ErrorCode::OK;
+    }
   }
 
   return ErrorCode::FAILED;
@@ -342,42 +347,36 @@ ErrorCode STM32UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
-// NOLINTNEXTLINE
-extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *uart_handle)
+static void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef *uart_handle)
 {
-  if (__HAL_UART_GET_FLAG(uart_handle, UART_FLAG_IDLE))
-  {
-    __HAL_UART_CLEAR_IDLEFLAG(uart_handle);
+  auto uart = STM32UART::map[STM32_UART_GetID(uart_handle->Instance)];
+  auto rx_buf = static_cast<uint8_t *>(uart->dma_buff_rx_.addr_);
+  size_t dma_size = uart->dma_buff_rx_.size_;
 
-    auto uart = STM32UART::map[STM32_UART_GetID(uart_handle->Instance)];
-    auto rx_buf = static_cast<uint8_t *>(uart->dma_buff_rx_.addr_);
-    size_t dma_size = uart->dma_buff_rx_.size_;
-
-    size_t curr_pos =
-        dma_size - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);  // 当前 DMA 写入位置
-    size_t last_pos = uart->last_rx_pos_;
+  size_t curr_pos =
+      dma_size - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);  // 当前 DMA 写入位置
+  size_t last_pos = uart->last_rx_pos_;
 
 #if __DCACHE_PRESENT
-    SCB_InvalidateDCache_by_Addr(rx_buf, dma_size);
+  SCB_InvalidateDCache_by_Addr(rx_buf, dma_size);
 #endif
 
-    if (curr_pos != last_pos)
+  if (curr_pos != last_pos)
+  {
+    if (curr_pos > last_pos)
     {
-      if (curr_pos > last_pos)
-      {
-        // 线性接收区
-        uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], curr_pos - last_pos);
-      }
-      else
-      {
-        // 回卷区：last→end，再从0→curr
-        uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], dma_size - last_pos);
-        uart->read_port_->queue_data_->PushBatch(&rx_buf[0], curr_pos);
-      }
-
-      uart->last_rx_pos_ = curr_pos;
-      uart->read_port_->ProcessPendingReads(true);
+      // 线性接收区
+      uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], curr_pos - last_pos);
     }
+    else
+    {
+      // 回卷区：last→end，再从0→curr
+      uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], dma_size - last_pos);
+      uart->read_port_->queue_data_->PushBatch(&rx_buf[0], curr_pos);
+    }
+
+    uart->last_rx_pos_ = curr_pos;
+    uart->read_port_->ProcessPendingReads(true);
   }
 }
 
@@ -385,19 +384,10 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 {  // NOLINT
   auto uart = STM32UART::map[id];
 
-  WriteInfoBlock &current_info = uart->write_info_active_;
+  size_t pending_len = uart->dma_buff_tx_.PendingLength();
 
-  uart->write_port_->write_size_ = uart->uart_handle_->TxXferSize;
-  current_info.op.UpdateStatus(true, ErrorCode::OK);
-
-  if (!uart->dma_buff_tx_.HasPending())
+  if (pending_len == 0)
   {
-    return;
-  }
-
-  if (uart->write_port_->queue_info_->Pop(current_info) != ErrorCode::OK)
-  {
-    ASSERT(false);
     return;
   }
 
@@ -405,14 +395,25 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 
 #if __DCACHE_PRESENT
   SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(uart->dma_buff_tx_.ActiveBuffer()),
-                          current_info.data.size_);
+                          pending_len);
 #endif
 
-  HAL_UART_Transmit_DMA(uart->uart_handle_,
-                        static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
-                        current_info.data.size_);
+  auto ans = HAL_UART_Transmit_DMA(
+      uart->uart_handle_, static_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer()),
+      pending_len);
 
-  current_info.op.MarkAsRunning();
+  ASSERT(ans == HAL_OK);
+
+  WriteInfoBlock &current_info = uart->write_info_active_;
+
+  if (uart->write_port_->queue_info_->Pop(current_info) != ErrorCode::OK)
+  {
+    ASSERT(false);
+    return;
+  }
+
+  uart->write_port_->Finish(true, ans == HAL_OK ? ErrorCode::OK : ErrorCode::BUSY,
+                            current_info, current_info.data.size_);
 
   WriteInfoBlock next_info;
 
@@ -429,7 +430,30 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
     return;
   }
 
+  uart->dma_buff_tx_.SetPendingSize(next_info.data.size_);
+
   uart->dma_buff_tx_.EnablePending();
+}
+
+// NOLINTNEXTLINE
+extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *huart)
+{
+  if (__HAL_UART_GET_FLAG(huart, UART_FLAG_IDLE))
+  {
+    __HAL_UART_CLEAR_IDLEFLAG(huart);
+
+    STM32_UART_RX_ISR_Handler(huart);
+  }
+}
+
+extern "C" void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
+{
+  STM32_UART_RX_ISR_Handler(huart);
+}
+
+extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  STM32_UART_RX_ISR_Handler(huart);
 }
 
 extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)

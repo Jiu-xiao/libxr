@@ -1,4 +1,5 @@
 #include "timer.hpp"
+#include "lockfree_list.hpp"
 
 using namespace LibXR;
 
@@ -22,19 +23,13 @@ void Timer::RefreshThreadFunction(void *)
   }
 }
 
-void Timer::Remove(TimerHandle handle)
-{
-  ASSERT(handle->next_);
-  list_->Delete(*handle);
-}
-
 void Timer::Add(TimerHandle handle)
 {
   ASSERT(!handle->next_);
 
   if (!LibXR::Timer::list_)
   {
-    LibXR::Timer::list_ = new LibXR::List();
+    LibXR::Timer::list_ = new LibXR::LockFreeList();
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
 #else
     thread_handle_.Create<void *>(nullptr, RefreshThreadFunction, "libxr_timer_task",
@@ -48,7 +43,7 @@ void Timer::Refresh()
 {
   if (!LibXR::Timer::list_)
   {
-    LibXR::Timer::list_ = new LibXR::List();
+    LibXR::Timer::list_ = new LibXR::LockFreeList();
 
 #ifndef LIBXR_NOT_SUPPORT_MUTI_THREAD
 

@@ -1,9 +1,7 @@
 #pragma once
 
-#include <utility>
-
 #include "libxr_def.hpp"
-#include "list.hpp"
+#include "lockfree_list.hpp"
 #include "thread.hpp"
 
 namespace LibXR
@@ -46,7 +44,7 @@ class Timer
     bool enable_;          ///< 任务是否启用 Flag indicating whether the task is enabled
   };
 
-  typedef LibXR::List::Node<ControlBlock>
+  typedef LibXR::LockFreeList::Node<ControlBlock>
       *TimerHandle;  ///< 定时器任务句柄 Timer task handle
 
   /**
@@ -73,7 +71,7 @@ class Timer
 
     typedef struct
     {
-      LibXR::List::Node<ControlBlock> ctrl_block;
+      LibXR::LockFreeList::Node<ControlBlock> ctrl_block;
       ArgType arg;
       void (*fun)(ArgType);
     } Data;
@@ -133,21 +131,6 @@ class Timer
   static void RefreshThreadFunction(void *);
 
   /**
-   * @brief  删除定时任务
-   *         Removes a periodic task
-   * @param  handle 任务句柄 Timer handle to remove
-   *
-   * @details
-   * 该方法删除已注册的定时任务，并确保任务列表完整性。
-   * 若 `handle->next_` 为空，则会触发 `ASSERT` 断言。
-   *
-   * This method removes a registered periodic task while ensuring
-   * the integrity of the task list.
-   * If `handle->next_` is null, it triggers an `ASSERT` assertion.
-   */
-  static void Remove(TimerHandle handle);
-
-  /**
    * @brief  添加定时任务
    *         Adds a periodic task
    * @param  handle 任务句柄 Timer handle to add
@@ -173,7 +156,7 @@ class Timer
    */
   static void RefreshTimerInIdle();
 
-  static inline LibXR::List *list_ = nullptr;  ///< 定时任务列表 List of registered tasks
+  static inline LibXR::LockFreeList *list_ = nullptr;  ///< 定时任务列表 List of registered tasks
 
   static inline Thread thread_handle_;  ///< 定时器管理线程 Timer management thread
 

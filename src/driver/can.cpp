@@ -11,7 +11,7 @@ void CAN::Register(Callback cb, Type type, FilterMode mode, uint32_t start_id_ma
   ASSERT(type < Type::TYPE_NUM);
 
   auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
-      LockFreeList::Node<Filter>({mode, start_id_mask, end_id_match, type, cb});
+      LockFreeList::Node<Filter>(Filter{mode, start_id_mask, end_id_match, type, cb});
   subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
 }
 
@@ -47,7 +47,7 @@ void FDCAN::Register(CallbackFD cb, Type type, FilterMode mode, uint32_t start_i
   ASSERT(type < Type::REMOTE_STANDARD);
 
   auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
-      LockFreeList::Node<Filter>({mode, start_id_mask, end_id_mask, type, cb});
+      LockFreeList::Node<Filter>(Filter{mode, start_id_mask, end_id_mask, type, cb});
   subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);
 }
 
