@@ -48,7 +48,6 @@ void StdiThread(LibXR::ReadPort *read_port)
         {
           continue;
         }
-        LibXR::Mutex::LockGuard lock(read_port->mutex_);
         read_port->queue_data_->PushBatch(read_buff, size);
         read_port->ProcessPendingReads(false);
       }

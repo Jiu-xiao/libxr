@@ -124,6 +124,8 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     dma_init.DMA_BufferSize = dma_buff_rx_.size_;
     DMA_Init(dma_rx_channel_, &dma_init);
     DMA_Cmd(dma_rx_channel_, ENABLE);
+    DMA_ITConfig(dma_rx_channel_, DMA_IT_TC, ENABLE);
+    DMA_ITConfig(dma_rx_channel_, DMA_IT_HT, ENABLE);
     USART_DMACmd(instance_, USART_DMAReq_Rx, ENABLE);
   }
 
@@ -146,6 +148,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   if (rx_enable)
   {
     USART_ITConfig(instance_, USART_IT_IDLE, ENABLE);
+    NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[CH32_DMA_GetID(dma_rx_channel_)]);
   }
 
   if (tx_enable)
@@ -247,6 +250,7 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
       }
       else
       {
+        uart->write_info_active_.op.MarkAsRunning();
         return ErrorCode::FAILED;
       }
     }
@@ -257,7 +261,10 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
     uart->dma_tx_channel_->MADDR =
         reinterpret_cast<uint32_t>(uart->dma_buff_tx_.ActiveBuffer());
     uart->dma_tx_channel_->CNTR = info.data.size_;
+    uart->_write_port.write_size_ = info.data.size_;
     DMA_Cmd(uart->dma_tx_channel_, ENABLE);
+
+    uart->write_info_active_.op.UpdateStatus(false, ErrorCode::OK);
 
     return ErrorCode::FAILED;  // 实际是发起传输成功，但等待DMA完成
   }
@@ -272,23 +279,8 @@ ErrorCode CH32UART::ReadFun(ReadPort &port)
   return ErrorCode::EMPTY;
 }
 
-// === USART IDLE中断服务 ===
-extern "C" void CH32_UART_ISR_Handler_IDLE(ch32_uart_id_t id)
+void CH32_UART_RX_ISR_Handler(LibXR::CH32UART *uart)
 {
-  auto uart = CH32UART::map[id];
-  if (!uart)
-  {
-    return;
-  }
-
-  // 检查和清除IDLE标志
-  if (!USART_GetITStatus(uart->instance_, USART_IT_IDLE))
-  {
-    return;
-  }
-
-  USART_ReceiveData(uart->instance_);
-
   auto rx_buf = static_cast<uint8_t *>(uart->dma_buff_rx_.addr_);
   size_t dma_size = uart->dma_buff_rx_.size_;
   size_t curr_pos = dma_size - uart->dma_rx_channel_->CNTR;
@@ -312,6 +304,26 @@ extern "C" void CH32_UART_ISR_Handler_IDLE(ch32_uart_id_t id)
   }
 }
 
+// === USART IDLE中断服务 ===
+extern "C" void CH32_UART_ISR_Handler_IDLE(ch32_uart_id_t id)
+{
+  auto uart = CH32UART::map[id];
+  if (!uart)
+  {
+    return;
+  }
+
+  // 检查和清除IDLE标志
+  if (!USART_GetITStatus(uart->instance_, USART_IT_IDLE))
+  {
+    return;
+  }
+
+  USART_ReceiveData(uart->instance_);
+
+  CH32_UART_RX_ISR_Handler(uart);
+}
+
 // === DMA TX完成中断服务 ===
 extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
 {
@@ -324,8 +336,6 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id]);
 
   WriteInfoBlock &current_info = uart->write_info_active_;
-  uart->_write_port.write_size_ = current_info.data.size_;  // 标记已发送
-  current_info.op.UpdateStatus(true, ErrorCode::OK);        // 标记操作完成
 
   if (!uart->dma_buff_tx_.HasPending())
   {
@@ -344,9 +354,10 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
   DMA_Cmd(uart->dma_tx_channel_, DISABLE);
   uart->dma_tx_channel_->MADDR = (uint32_t)buf;
   uart->dma_tx_channel_->CNTR = current_info.data.size_;
+  uart->_write_port.write_size_ = current_info.data.size_;
   DMA_Cmd(uart->dma_tx_channel_, ENABLE);
 
-  current_info.op.MarkAsRunning();
+  uart->write_info_active_.op.UpdateStatus(true, ErrorCode::OK);
 
   // 预装pending区
   WriteInfoBlock next_info;
@@ -362,15 +373,37 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
     ASSERT(false);
     return;
   }
+
+  next_info.op.MarkAsRunning();
+
   uart->dma_buff_tx_.EnablePending();
 }
 
 // === DMA 通道中断回调 ===
-void CH32UART::DmaIRQHandler(DMA_Channel_TypeDef *channel, ch32_uart_id_t id)
+void CH32UART::TxDmaIRQHandler(DMA_Channel_TypeDef *channel, ch32_uart_id_t id)
 {
   if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id]) == RESET) return;
 
   if (channel->CNTR == 0) CH32_UART_ISR_Handler_TX_CPLT(id);
+}
+
+void CH32UART::RxDmaIRQHandler(DMA_Channel_TypeDef *channel, ch32_uart_id_t id)
+{
+  UNUSED(channel);
+  auto uart = CH32UART::map[id];
+  if (!uart) return;
+
+  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id]) == SET)
+  {
+    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id]);
+    CH32_UART_RX_ISR_Handler(uart);
+  }
+
+  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id]) == SET)
+  {
+    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id]);
+    CH32_UART_RX_ISR_Handler(uart);
+  }
 }
 
 // === 各类串口中断入口适配 ===

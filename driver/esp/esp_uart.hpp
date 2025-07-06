@@ -28,15 +28,14 @@ class ESP32UARTReadPort : public ReadPort
 
   using ReadPort::operator=;
 
- private:
+  LibXR::Mutex mutex_;
   ESP32UART *uart_;
 };
 
 class ESP32UARTWritePort : public WritePort
 {
  public:
-  ESP32UARTWritePort(size_t queue_size, size_t buffer_size,
-                     ESP32UART *uart)
+  ESP32UARTWritePort(size_t queue_size, size_t buffer_size, ESP32UART *uart)
       : WritePort(queue_size, buffer_size), uart_(uart)
   {
   }

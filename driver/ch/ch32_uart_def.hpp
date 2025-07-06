@@ -261,6 +261,108 @@ static constexpr uint32_t CH32_UART_TX_DMA_IT_MAP[] = {
 #endif
 };
 
+static constexpr uint32_t CH32_UART_RX_DMA_IT_TC_MAP[] = {
+#if defined(USART1)
+    DMA1_IT_TC5,
+#endif
+#if defined(USART2)
+    DMA1_IT_TC6,
+#endif
+#if defined(USART3)
+    DMA1_IT_TC3,
+#endif
+#if defined(USART4)
+    0,
+#endif
+#if defined(USART5)
+    0,
+#endif
+#if defined(USART6)
+    0,
+#endif
+#if defined(USART7)
+    0,
+#endif
+#if defined(USART8)
+    0,
+#endif
+#if defined(UART1)
+    0,
+#endif
+#if defined(UART2)
+    0,
+#endif
+#if defined(UART3)
+    0,
+#endif
+#if defined(UART4)
+    DMA2_IT_TC3,
+#endif
+#if defined(UART5)
+    DMA2_IT_TC2,
+#endif
+#if defined(UART6)
+    DMA2_IT_TC7,
+#endif
+#if defined(UART7)
+    DMA2_IT_TC9,
+#endif
+#if defined(UART8)
+    DMA2_IT_TC11,
+#endif
+};
+
+static constexpr uint32_t CH32_UART_RX_DMA_IT_HT_MAP[] = {
+#if defined(USART1)
+    DMA1_IT_HT5,
+#endif
+#if defined(USART2)
+    DMA1_IT_HT6,
+#endif
+#if defined(USART3)
+    DMA1_IT_HT3,
+#endif
+#if defined(USART4)
+    0,
+#endif
+#if defined(USART5)
+    0,
+#endif
+#if defined(USART6)
+    0,
+#endif
+#if defined(USART7)
+    0,
+#endif
+#if defined(USART8)
+    0,
+#endif
+#if defined(UART1)
+    0,
+#endif
+#if defined(UART2)
+    0,
+#endif
+#if defined(UART3)
+    0,
+#endif
+#if defined(UART4)
+    DMA2_IT_HT3,
+#endif
+#if defined(UART5)
+    DMA2_IT_HT2,
+#endif
+#if defined(UART6)
+    DMA2_IT_HT7,
+#endif
+#if defined(UART7)
+    DMA2_IT_HT9,
+#endif
+#if defined(UART8)
+    DMA2_IT_HT11,
+#endif
+};
+
 static constexpr DMA_Channel_TypeDef *CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)
     DMA1_Channel4,

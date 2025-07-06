@@ -1,5 +1,7 @@
 #include "libxr_rw.hpp"
 
+#include "mutex.hpp"
+
 using namespace LibXR;
 
 template class LibXR::LockFreeQueue<WriteInfoBlock>;
@@ -35,7 +37,7 @@ ReadPort& ReadPort::operator=(ReadFun fun)
 void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info, uint32_t size)
 {
   read_size_ = size;
-  busy_.store(BusyState::Idle, std::memory_order_release);
+  busy_.store(BusyState::IDLE, std::memory_order_release);
   info.op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
 }
 
@@ -45,19 +47,16 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
 {
   if (Readable())
   {
-    mutex_.Lock();
-
     BusyState is_busy = busy_.load(std::memory_order_relaxed);
 
-    if (is_busy == BusyState::Pending)
+    if (is_busy == BusyState::PENDING)
     {
-      mutex_.Unlock();
       return ErrorCode::BUSY;
     }
 
     while (true)
     {
-      busy_.store(BusyState::Idle, std::memory_order_release);
+      busy_.store(BusyState::IDLE, std::memory_order_release);
 
       if (queue_data_ != nullptr)
       {
@@ -74,7 +73,6 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
           {
             op.UpdateStatus(false, ErrorCode::OK);
           }
-          mutex_.Unlock();
           return ErrorCode::OK;
         }
       }
@@ -87,8 +85,8 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
 
       if (ans != ErrorCode::OK)
       {
-        BusyState expected = BusyState::Idle;
-        if (busy_.compare_exchange_strong(expected, BusyState::Pending,
+        BusyState expected = BusyState::IDLE;
+        if (busy_.compare_exchange_strong(expected, BusyState::PENDING,
                                           std::memory_order_acq_rel,
                                           std::memory_order_acquire))
         {
@@ -96,7 +94,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
         }
         else
         {
-          expected = BusyState::Pending;
+          expected = BusyState::PENDING;
           continue;
         }
       }
@@ -107,12 +105,9 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
         {
           op.UpdateStatus(false, ErrorCode::OK);
         }
-        mutex_.Unlock();
         return ErrorCode::OK;
       }
     }
-
-    mutex_.Unlock();
 
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
@@ -137,7 +132,7 @@ void ReadPort::ProcessPendingReads(bool in_isr)
   {
     auto is_busy = busy_.load(std::memory_order_relaxed);
 
-    if (is_busy == BusyState::Pending)
+    if (is_busy == BusyState::PENDING)
     {
       if (queue_data_->Size() >= info_.data.size_)
       {
@@ -151,15 +146,14 @@ void ReadPort::ProcessPendingReads(bool in_isr)
         Finish(in_isr, ErrorCode::OK, info_, info_.data.size_);
       }
     }
-    else if (is_busy == BusyState::Idle)
+    else if (is_busy == BusyState::IDLE)
     {
-      busy_.store(BusyState::Event, std::memory_order_release);
+      busy_.store(BusyState::EVENT, std::memory_order_release);
     }
   }
   else
   {
-    LibXR::Mutex::LockGuard lock_guard(mutex_);
-    if (busy_.load(std::memory_order_relaxed) == BusyState::Pending)
+    if (busy_.load(std::memory_order_relaxed) == BusyState::PENDING)
     {
       if (queue_data_->Size() >= info_.data.size_)
       {
@@ -179,9 +173,7 @@ void ReadPort::ProcessPendingReads(bool in_isr)
 void ReadPort::Reset()
 {
   ASSERT(queue_data_ != nullptr);
-  Mutex::LockGuard lock_guard(mutex_);
   queue_data_->Reset();
-  read_size_ = 0;
 }
 
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
@@ -235,11 +227,15 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
       return ErrorCode::OK;
     }
 
-    mutex_.Lock();
+    LockState expected = LockState::UNLOCKED;
+    if (!lock_.compare_exchange_strong(expected, LockState::LOCKED))
+    {
+      return ErrorCode::BUSY;
+    }
 
     if (queue_info_->EmptySize() < 1)
     {
-      mutex_.Unlock();
+      lock_.store(LockState::UNLOCKED, std::memory_order_release);
       return ErrorCode::FULL;
     }
 
@@ -247,7 +243,7 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
     {
       if (queue_data_->EmptySize() < data.size_)
       {
-        mutex_.Unlock();
+        lock_.store(LockState::UNLOCKED, std::memory_order_release);
         return ErrorCode::FULL;
       }
 
@@ -265,7 +261,7 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
 
       ans = write_fun_(*this);
 
-      mutex_.Unlock();
+      lock_.store(LockState::UNLOCKED, std::memory_order_release);
 
       if (ans == ErrorCode::OK)
       {
@@ -295,7 +291,7 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
 
       ans = write_fun_(*this);
 
-      mutex_.Unlock();
+      lock_.store(LockState::UNLOCKED, std::memory_order_release);
 
       if (ans == ErrorCode::OK)
       {
@@ -326,12 +322,11 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
 void WritePort::Reset()
 {
   ASSERT(queue_data_ != nullptr);
-  Mutex::LockGuard lock_guard(mutex_);
-  queue_info_->Reset();
   queue_data_->Reset();
-  write_size_ = 0;
+  queue_info_->Reset();
 }
 
+// NOLINTNEXTLINE
 int STDIO::Printf(const char* fmt, ...)
 {
 #if LIBXR_PRINTF_BUFFER_SIZE > 0
