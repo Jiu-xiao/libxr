@@ -2,7 +2,7 @@
 
 #include "ch32_uart.hpp"
 
-extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id);
+/* UART/USART TX DMA */
 
 extern "C" void DMA1_Channel4_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA1_Channel7_IRQHandler(void) __attribute__((interrupt));
@@ -15,42 +15,93 @@ extern "C" void DMA2_Channel10_IRQHandler(void) __attribute__((interrupt));
 
 extern "C" void DMA1_Channel4_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA1_Channel4, ch32_uart_id_t::CH32_USART1);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel4, ch32_uart_id_t::CH32_USART1);
 }
 
 extern "C" void DMA1_Channel7_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA1_Channel7, ch32_uart_id_t::CH32_USART2);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel7, ch32_uart_id_t::CH32_USART2);
 }
 
 extern "C" void DMA1_Channel2_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA1_Channel2, ch32_uart_id_t::CH32_USART3);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel2, ch32_uart_id_t::CH32_USART3);
 }
 
 extern "C" void DMA2_Channel5_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA2_Channel5, ch32_uart_id_t::CH32_UART4);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel5, ch32_uart_id_t::CH32_UART4);
 }
 
 extern "C" void DMA2_Channel4_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA2_Channel4, ch32_uart_id_t::CH32_UART5);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel4, ch32_uart_id_t::CH32_UART5);
 }
 
 extern "C" void DMA2_Channel6_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA2_Channel6, ch32_uart_id_t::CH32_UART6);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel6, ch32_uart_id_t::CH32_UART6);
 }
 
 extern "C" void DMA2_Channel8_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA2_Channel8, ch32_uart_id_t::CH32_UART7);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel8, ch32_uart_id_t::CH32_UART7);
 }
 
 extern "C" void DMA2_Channel10_IRQHandler(void)
 {
-  LibXR::CH32UART::DmaIRQHandler(DMA2_Channel10, ch32_uart_id_t::CH32_UART8);
+  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel10, ch32_uart_id_t::CH32_UART8);
+}
+
+/* UART/USART RX DMA */
+
+extern "C" void DMA1_Channel5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel7_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel9_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel11_IRQHandler(void) __attribute__((interrupt));
+
+extern "C" void DMA1_Channel5_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel5, ch32_uart_id_t::CH32_USART1);
+}
+
+extern "C" void DMA1_Channel6_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel6, ch32_uart_id_t::CH32_USART2);
+}
+
+extern "C" void DMA1_Channel3_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel3, ch32_uart_id_t::CH32_USART3);
+}
+
+extern "C" void DMA2_Channel3_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel3, ch32_uart_id_t::CH32_UART4);
+}
+
+extern "C" void DMA2_Channel2_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel2, ch32_uart_id_t::CH32_UART5);
+}
+
+extern "C" void DMA2_Channel7_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel7, ch32_uart_id_t::CH32_UART6);
+}
+
+extern "C" void DMA2_Channel9_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel9, ch32_uart_id_t::CH32_UART7);
+}
+
+extern "C" void DMA2_Channel11_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel11, ch32_uart_id_t::CH32_UART8);
 }
 
 ch32_dma_channel_t CH32_DMA_GetID(DMA_Channel_TypeDef *channel)

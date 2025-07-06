@@ -46,12 +46,12 @@ void TinyUSBUARTReadPort::ProcessPendingReads(bool in_isr)
 {
   BusyState curr = busy_.load(std::memory_order_relaxed);
 
-  if (curr == BusyState::Pending)
+  if (curr == BusyState::PENDING)
   {
     if (Size() >= info_.data.size_)
     {
       int len = tud_cdc_read(static_cast<uint8_t *>(info_.data.addr_), info_.data.size_);
-      busy_.store(BusyState::Idle, std::memory_order_release);
+      busy_.store(BusyState::IDLE, std::memory_order_release);
 
       if (len == static_cast<int>(info_.data.size_))
       {
@@ -63,9 +63,9 @@ void TinyUSBUARTReadPort::ProcessPendingReads(bool in_isr)
       }
     }
   }
-  else if (curr == BusyState::Idle)
+  else if (curr == BusyState::IDLE)
   {
-    busy_.store(BusyState::Event, std::memory_order_release);
+    busy_.store(BusyState::EVENT, std::memory_order_release);
   }
 }
 
@@ -111,6 +111,12 @@ ErrorCode TinyUSBVirtualUART::WriteFun(WritePort &port)
   WriteInfoBlock info;
   if (port.queue_info_->Pop(info) != ErrorCode::OK) return ErrorCode::EMPTY;
 
+  if (!tud_cdc_connected())
+  {
+    port.Finish(false, ErrorCode::FAILED, info, 0);
+    return ErrorCode::INIT_ERR;
+  }
+
   size_t space = tud_cdc_write_available();
   if (space < info.data.size_) return ErrorCode::FULL;
 
@@ -137,6 +143,12 @@ ErrorCode TinyUSBVirtualUART::WriteFun(WritePort &port)
  */
 ErrorCode TinyUSBVirtualUART::ReadFun(ReadPort &port)
 {
+  if (!tud_cdc_connected())
+  {
+    port.Finish(false, ErrorCode::FAILED, port.info_, 0);
+    return ErrorCode::INIT_ERR;
+  }
+
   if (tud_cdc_available() >= port.info_.data.size_)
   {
     int len = tud_cdc_read(static_cast<uint8_t *>(port.info_.data.addr_),
