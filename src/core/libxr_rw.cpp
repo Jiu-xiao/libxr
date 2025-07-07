@@ -233,13 +233,26 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
       return ErrorCode::BUSY;
     }
 
-    if (queue_info_->EmptySize() < 1)
-    {
-      lock_.store(LockState::UNLOCKED, std::memory_order_release);
-      return ErrorCode::FULL;
-    }
+    return CommitWrite(data, op);
+  }
+  else
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+}
 
-    if (queue_data_)
+ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool pushed)
+{
+  if (!pushed && queue_info_->EmptySize() < 1)
+  {
+    lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    return ErrorCode::FULL;
+  }
+
+  if (queue_data_)
+  {
+    ErrorCode ans = ErrorCode::OK;
+    if (!pushed)
     {
       if (queue_data_->EmptySize() < data.size_)
       {
@@ -247,8 +260,8 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
         return ErrorCode::FULL;
       }
 
-      auto ans = queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                        data.size_);
+      ans = queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
+                                   data.size_);
       UNUSED(ans);
       ASSERT(ans == ErrorCode::OK);
 
@@ -256,66 +269,62 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
       ans = queue_info_->Push(info);
 
       ASSERT(ans == ErrorCode::OK);
+    }
 
-      op.MarkAsRunning();
+    op.MarkAsRunning();
 
-      ans = write_fun_(*this);
+    ans = write_fun_(*this);
 
-      lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    lock_.store(LockState::UNLOCKED, std::memory_order_release);
 
-      if (ans == ErrorCode::OK)
+    if (ans == ErrorCode::OK)
+    {
+      write_size_ = data.size_;
+      if (op.type != WriteOperation::OperationType::BLOCK)
       {
-        write_size_ = data.size_;
-        if (op.type != WriteOperation::OperationType::BLOCK)
-        {
-          op.UpdateStatus(false, ErrorCode::OK);
-        }
-        return ErrorCode::OK;
+        op.UpdateStatus(false, ErrorCode::OK);
       }
-
-      if (op.type == WriteOperation::OperationType::BLOCK)
-      {
-        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-      }
-
       return ErrorCode::OK;
     }
-    else
+
+    if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      WriteInfoBlock info{data, op};
-      auto ans = queue_info_->Push(info);
-
-      ASSERT(ans == ErrorCode::OK);
-
-      op.MarkAsRunning();
-
-      ans = write_fun_(*this);
-
-      lock_.store(LockState::UNLOCKED, std::memory_order_release);
-
-      if (ans == ErrorCode::OK)
-      {
-        write_size_ = data.size_;
-        if (op.type != WriteOperation::OperationType::BLOCK)
-        {
-          op.UpdateStatus(false, ErrorCode::OK);
-        }
-        return ErrorCode::OK;
-      }
-
-      if (op.type == WriteOperation::OperationType::BLOCK)
-      {
-        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-      }
-      else
-      {
-        return ErrorCode::OK;
-      }
+      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
     }
+
+    return ErrorCode::OK;
   }
   else
   {
-    return ErrorCode::NOT_SUPPORT;
+    WriteInfoBlock info{data, op};
+    auto ans = queue_info_->Push(info);
+
+    ASSERT(ans == ErrorCode::OK);
+
+    op.MarkAsRunning();
+
+    ans = write_fun_(*this);
+
+    lock_.store(LockState::UNLOCKED, std::memory_order_release);
+
+    if (ans == ErrorCode::OK)
+    {
+      write_size_ = data.size_;
+      if (op.type != WriteOperation::OperationType::BLOCK)
+      {
+        op.UpdateStatus(false, ErrorCode::OK);
+      }
+      return ErrorCode::OK;
+    }
+
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    }
+    else
+    {
+      return ErrorCode::OK;
+    }
   }
 }
 
@@ -324,6 +333,96 @@ void WritePort::Reset()
   ASSERT(queue_data_ != nullptr);
   queue_data_->Reset();
   queue_info_->Reset();
+}
+
+WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
+    : port_(port), op_(op)
+{
+  if (!port->queue_data_ || !port->Writable())
+  {
+    fallback_to_normal_write_ = true;
+    return;
+  }
+  LockState expected = LockState::UNLOCKED;
+  if (port_->lock_.compare_exchange_strong(expected, LockState::LOCKED))
+  {
+    if (port_->queue_info_->EmptySize() < 1)
+    {
+      locked_ = false;
+      port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
+      return;
+    }
+    locked_ = true;
+    cap_ = port_->queue_data_->EmptySize();
+  }
+}
+
+WritePort::Stream::~Stream()
+{
+  if (locked_ && size_ > 0)
+  {
+    port_->queue_info_->Push(WriteInfoBlock{RawData{nullptr, size_}, op_});
+    port_->CommitWrite({nullptr, size_}, op_, true);
+    port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
+  }
+}
+
+WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
+{
+  if (fallback_to_normal_write_)
+  {
+    (*port_)(data, op_);
+  }
+  else
+  {
+    if (!locked_)
+    {
+      LockState expected = LockState::UNLOCKED;
+      if (port_->lock_.compare_exchange_strong(expected, LockState::LOCKED))
+      {
+        locked_ = true;
+        cap_ = port_->queue_data_->EmptySize();
+      }
+      else
+      {
+        return *this;
+      }
+    }
+    if (size_ + data.size_ <= cap_)
+    {
+      port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
+                                    data.size_);
+      size_ += data.size_;
+    }
+  }
+
+  return *this;
+}
+
+ErrorCode WritePort::Stream::Commit()
+{
+  auto ans = ErrorCode::OK;
+  if (!fallback_to_normal_write_)
+  {
+    if (locked_ && size_ > 0)
+    {
+      port_->queue_info_->Push(WriteInfoBlock{RawData{nullptr, size_}, op_});
+      ans = port_->CommitWrite({nullptr, size_}, op_, true);
+      size_ = 0;
+    }
+
+    if (port_->queue_info_->EmptySize() < 1)
+    {
+      locked_ = false;
+      port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    }
+    else
+    {
+      cap_ = port_->queue_data_->EmptySize();
+    }
+  }
+
+  return ans;
 }
 
 // NOLINTNEXTLINE
@@ -335,9 +434,12 @@ int STDIO::Printf(const char* fmt, ...)
     return -1;
   }
 
-  static LibXR::Mutex mutex;  // NOLINT
+  if (!write_mutex_)
+  {
+    write_mutex_ = new LibXR::Mutex();
+  }
 
-  LibXR::Mutex::LockGuard lock_guard(mutex);
+  LibXR::Mutex::LockGuard lock_guard(*write_mutex_);
 
   va_list args;
   va_start(args, fmt);
@@ -358,7 +460,15 @@ int STDIO::Printf(const char* fmt, ...)
                        static_cast<size_t>(len)};
 
   static WriteOperation op;  // NOLINT
-  return static_cast<int>(STDIO::write_->operator()(data, op));
+  if (write_stream_ == nullptr)
+  {
+    return static_cast<int>(STDIO::write_->operator()(data, op));
+  }
+  else
+  {
+    (*write_stream_) << data;
+    return static_cast<int>(write_stream_->Commit());
+  }
 #else
   UNUSED(fmt);
   return 0;

@@ -110,8 +110,6 @@ int8_t libxr_stm32_virtual_uart_transmit(uint8_t *pbuf, uint32_t *Len, uint8_t e
     return USBD_OK;
   }
 
-  next_info.op.MarkAsRunning();
-
   uart->tx_buffer_.EnablePending();
 
   return (USBD_OK);
@@ -135,7 +133,7 @@ extern "C" void STM32_USB_ISR_Handler_F1(void)
 
   static uint32_t last_tx_state = 0;
 
-  if (last_tx_state !=0 && p_data_class->TxState == 0 &&
+  if (last_tx_state != 0 && p_data_class->TxState == 0 &&
       STM32VirtualUART::map[0]->writing_)
   {
     STM32VirtualUART::map[0]->writing_ = false;
@@ -211,8 +209,6 @@ ErrorCode STM32VirtualUART::WriteFun(WritePort &port)
 
     return ErrorCode::FAILED;
   }
-
-  info.op.MarkAsRunning();
 
   return ErrorCode::FAILED;
 }
