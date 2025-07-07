@@ -94,8 +94,9 @@ class Terminal
         write_status_(WriteOperation::OperationPollingStatus::READY),
         MODE(MODE),
         write_op_(write_status_),
-        read_(read_port),
-        write_(write_port),
+        read_port_(read_port),
+        write_port_(write_port),
+        write_stream_(write_port_, write_op_),
         ramfs_(ramfs),
         current_dir_(current_dir ? current_dir : &ramfs_.root_),
         input_line_(MAX_LINE_SIZE + 1),
@@ -105,6 +106,21 @@ class Terminal
     ASSERT(write_port != nullptr);
     ASSERT(read_port->Readable());
     ASSERT(write_port->Writable());
+
+    if (write_port == STDIO::write_)
+    {
+      if (STDIO::write_mutex_ == nullptr)
+      {
+        STDIO::write_mutex_ = new LibXR::Mutex();
+      }
+
+      write_mutex_ = STDIO::write_mutex_;
+      STDIO::write_stream_ = &write_stream_;
+    }
+    else
+    {
+      write_mutex_ = new LibXR::Mutex();
+    }
   }
 
   ReadOperation::OperationPollingStatus read_status_;
@@ -112,8 +128,12 @@ class Terminal
 
   const Mode MODE;                  ///< 终端换行模式 Terminal line feed mode
   WriteOperation write_op_;         ///< 终端写操作 Terminal write operation
-  ReadPort *read_;                  ///< 读取端口 Read port
-  WritePort *write_;                ///< 写入端口 Write port
+  ReadPort *read_port_;             ///< 读取端口 Read port
+  WritePort *write_port_;           ///< 写入端口 Write port
+  WritePort::Stream write_stream_;  ///< 写入流 Write stream
+
+  LibXR::Mutex *write_mutex_ = nullptr;  ///< 写入端口互斥锁 Write port mutex
+
   RamFS &ramfs_;                    ///< 关联的文件系统 Associated file system
   char read_buff_[READ_BUFF_SIZE];  ///< 读取缓冲区 Read buffer
 
@@ -135,15 +155,15 @@ class Terminal
   {
     if (MODE == Mode::CRLF)
     {
-      (*write_)(ConstRawData("\r\n"), write_op_);
+      write_stream_ << ConstRawData("\r\n");
     }
     else if (MODE == Mode::LF)
     {
-      (*write_)(ConstRawData('\n'), write_op_);
+      write_stream_ << ConstRawData('\n');
     }
     else if (MODE == Mode::CR)
     {
-      (*write_)(ConstRawData('\r'), write_op_);
+      write_stream_ << ConstRawData('\r');
     }
   }
 
@@ -153,11 +173,9 @@ class Terminal
    */
   void UpdateDisplayPosition()
   {
-    (*write_)(ConstRawData(KEY_SAVE), write_op_);
-    (*write_)(ConstRawData(CLEAR_BEHIND), write_op_);
-    (*write_)(ConstRawData(&input_line_[input_line_.Size() + offset_], -offset_),
-              write_op_);
-    (*write_)(ConstRawData(KEY_LOAD), write_op_);
+    write_stream_ << ConstRawData(KEY_SAVE) << ConstRawData(CLEAR_BEHIND)
+                  << ConstRawData(&input_line_[input_line_.Size() + offset_], -offset_)
+                  << ConstRawData(KEY_LOAD);
   }
 
   /**
@@ -217,7 +235,7 @@ class Terminal
       }
       else
       {
-        (*write_)(ConstRawData(input_line_[input_line_.Size() - 1 + offset_]), write_op_);
+        write_stream_ << ConstRawData(input_line_[input_line_.Size() - 1 + offset_]);
       }
       if (offset_ != 0)
       {
@@ -268,7 +286,7 @@ class Terminal
       }
       else
       {
-        (*write_)(ConstRawData(DELETE_CHAR), write_op_);
+        write_stream_ << ConstRawData(DELETE_CHAR);
       }
 
       if (offset_ != 0)
@@ -284,31 +302,30 @@ class Terminal
    */
   void ShowHeader()
   {
-    (*write_)(ConstRawData(ramfs_.root_->name, strlen(ramfs_.root_->name)), write_op_);
+    write_stream_ << ConstRawData(ramfs_.root_->name, strlen(ramfs_.root_->name));
     if (current_dir_ == &ramfs_.root_)
     {
-      (*write_)(ConstRawData(":/"), write_op_);
+      write_stream_ << ConstRawData(":/");
     }
     else
     {
-      (*write_)(ConstRawData(":"), write_op_);
-      (*write_)(ConstRawData(current_dir_->data_.name), write_op_);
+      write_stream_ << ConstRawData(":") << ConstRawData(current_dir_->data_.name);
     }
 
-    (*write_)(ConstRawData("$ "), write_op_);
+    write_stream_ << ConstRawData("$ ");
   }
 
   /**
    * @brief  清除当前行
    *         Clears the current line
    */
-  void ClearLine() { (*write_)(ConstRawData(CLEAR_LINE), write_op_); }
+  void ClearLine() { write_stream_ << ConstRawData(CLEAR_LINE); }
 
   /**
    * @brief  清除整个终端屏幕
    *         Clears the entire terminal screen
    */
-  void Clear() { (*write_)(ConstRawData(CLEAR_ALL), write_op_); }
+  void Clear() { write_stream_ << ConstRawData(CLEAR_ALL); }
 
   /**
    * @brief  显示历史记录中的输入行，更新终端显示
@@ -321,13 +338,12 @@ class Terminal
     offset_ = 0;
     if (history_index_ >= 0)
     {
-      (*write_)(ConstRawData(history_[-history_index_ - 1].Raw(),
-                             history_[-history_index_ - 1].Length()),
-                write_op_);
+      write_stream_ << ConstRawData(history_[-history_index_ - 1].Raw(),
+                                    history_[-history_index_ - 1].Length());
     }
     else
     {
-      (*write_)(ConstRawData(&input_line_[0], input_line_.Size()), write_op_);
+      write_stream_ << ConstRawData(&input_line_[0], input_line_.Size());
     }
   }
 
@@ -497,22 +513,22 @@ class Terminal
         switch (item->type)
         {
           case RamFS::FsNodeType::DIR:
-            (*(this->write_))(ConstRawData("d "), this->write_op_);
+            write_stream_ << ConstRawData("d ");
             break;
           case RamFS::FsNodeType::FILE:
-            (*(this->write_))(ConstRawData("f "), this->write_op_);
+            write_stream_ << ConstRawData("f ");
             break;
           case RamFS::FsNodeType::DEVICE:
-            (*(this->write_))(ConstRawData("c "), this->write_op_);
+            write_stream_ << ConstRawData("c ");
             break;
           case RamFS::FsNodeType::STORAGE:
-            (*(this->write_))(ConstRawData("b "), this->write_op_);
+            write_stream_ << ConstRawData("b ");
             break;
           default:
-            (*(this->write_))(ConstRawData("? "), this->write_op_);
+            write_stream_ << ConstRawData("? ");
             break;
         }
-        (*(this->write_))(ConstRawData(item.data_.name), this->write_op_);
+        write_stream_ << ConstRawData(item.data_.name);
         this->LineFeed();
         return ErrorCode::OK;
       };
@@ -524,19 +540,21 @@ class Terminal
     auto ans = Path2File(arg_tab_[0]);
     if (ans == nullptr)
     {
-      (*write_)(ConstRawData("Command not found."), write_op_);
+      write_stream_ << ConstRawData("Command not found.");
       LineFeed();
       return;
     }
 
     if ((*ans)->type != RamFS::FileType::EXEC)
     {
-      (*write_)(ConstRawData("Not an executable file."), write_op_);
+      write_stream_ << ConstRawData("Not an executable file.");
       LineFeed();
       return;
     }
 
+    write_mutex_->Unlock();
     (*ans)->Run(arg_number_, arg_tab_);
+    write_mutex_->Lock();
   }
 
   /**
@@ -600,7 +618,7 @@ class Terminal
           if (offset_ < 0)
           {
             offset_++;
-            (*write_)(ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1), write_op_);
+            write_stream_ << ConstRawData(KEY_RIGHT, sizeof(KEY_RIGHT) - 1);
           }
 
           break;
@@ -613,7 +631,7 @@ class Terminal
           if (offset_ + input_line_.Size() > 0)
           {
             offset_--;
-            (*write_)(ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1), write_op_);
+            write_stream_ << ConstRawData(KEY_LEFT, sizeof(KEY_LEFT) - 1);
           }
           break;
         default:
@@ -729,7 +747,7 @@ class Terminal
         if (strncmp(node->name, prefix_start, prefix_len) == 0)
         {
           auto name_len = strlen(node->name);
-          (*this->write_)(ConstRawData(node->name, name_len), this->write_op_);
+          write_stream_ << ConstRawData(node->name, name_len);
           this->LineFeed();
           if (ans_node == nullptr)
           {
@@ -761,7 +779,7 @@ class Terminal
       (*dir)->rbt.Foreach<RamFS::FsNode>(foreach_fun_show);
 
       ShowHeader();
-      (*write_)(ConstRawData(&input_line_[0], input_line_.Size()), write_op_);
+      write_stream_ << ConstRawData(&input_line_[0], input_line_.Size());
 
       for (size_t i = 0; i < same_char_number - prefix_len; i++)
       {
@@ -872,13 +890,16 @@ class Terminal
 
     while (true)
     {
-      buff.size_ = LibXR::min(term->read_->Size(), READ_BUFF_SIZE);
-      if ((*term->read_)(buff, op) == ErrorCode::OK)
+      buff.size_ = LibXR::min(term->read_port_->Size(), READ_BUFF_SIZE);
+      if ((*term->read_port_)(buff, op) == ErrorCode::OK)
       {
-        if (term->read_->read_size_ > 0)
+        if (term->read_port_->read_size_ > 0)
         {
-          buff.size_ = term->read_->read_size_;
+          buff.size_ = term->read_port_->read_size_;
+          term->write_mutex_->Lock();
           term->Parse(buff);
+          term->write_stream_.Commit();
+          term->write_mutex_->Unlock();
         }
       }
     }
@@ -902,7 +923,7 @@ class Terminal
   static void TaskFun(Terminal *term)
   {
     RawData buff = term->read_buff_;
-    buff.size_ = LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
+    buff.size_ = LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
 
     ReadOperation op(term->read_status_);
 
@@ -911,19 +932,24 @@ class Terminal
       switch (term->read_status_)
       {
         case ReadOperation::OperationPollingStatus::READY:
-          buff.size_ = LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
-          (*term->read_)(buff, op);
+          buff.size_ =
+              LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
+          (*term->read_port_)(buff, op);
           continue;
         case ReadOperation::OperationPollingStatus::RUNNING:
           return;
         case ReadOperation::OperationPollingStatus::DONE:
-          buff.size_ = term->read_->read_size_;
+          buff.size_ = term->read_port_->read_size_;
           if (buff.size_ > 0)
           {
+            term->write_mutex_->Lock();
             term->Parse(buff);
+            term->write_stream_.Commit();
+            term->write_mutex_->Unlock();
           }
-          buff.size_ = LibXR::min(LibXR::max(1u, term->read_->Size()), READ_BUFF_SIZE);
-          (*term->read_)(buff, op);
+          buff.size_ =
+              LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
+          (*term->read_port_)(buff, op);
           return;
       }
     }
