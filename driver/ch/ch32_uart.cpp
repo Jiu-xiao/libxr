@@ -241,6 +241,7 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
 
     if (use_pending)
     {
+      uart->dma_buff_tx_.SetPendingSize(info.data.size_);
       uart->dma_buff_tx_.EnablePending();
       // 检查当前DMA是否可切换
       bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
@@ -250,7 +251,6 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
       }
       else
       {
-        uart->write_info_active_.op.MarkAsRunning();
         return ErrorCode::FAILED;
       }
     }
@@ -335,12 +335,23 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
 
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id]);
 
-  WriteInfoBlock &current_info = uart->write_info_active_;
+  size_t pending_len = uart->dma_buff_tx_.PendingLength();
 
-  if (!uart->dma_buff_tx_.HasPending())
+  if (pending_len == 0)
   {
     return;
   }
+
+  uart->dma_buff_tx_.Switch();
+
+  auto *buf = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
+  DMA_Cmd(uart->dma_tx_channel_, DISABLE);
+  uart->dma_tx_channel_->MADDR = (uint32_t)buf;
+  uart->dma_tx_channel_->CNTR = pending_len;
+  uart->_write_port.write_size_ = pending_len;
+  DMA_Cmd(uart->dma_tx_channel_, ENABLE);
+
+  WriteInfoBlock &current_info = uart->write_info_active_;
 
   // 有pending包，继续取下一包
   if (uart->_write_port.queue_info_->Pop(current_info) != ErrorCode::OK)
@@ -348,16 +359,8 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
     ASSERT(false);
     return;
   }
-  uart->dma_buff_tx_.Switch();
 
-  auto *buf = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
-  DMA_Cmd(uart->dma_tx_channel_, DISABLE);
-  uart->dma_tx_channel_->MADDR = (uint32_t)buf;
-  uart->dma_tx_channel_->CNTR = current_info.data.size_;
-  uart->_write_port.write_size_ = current_info.data.size_;
-  DMA_Cmd(uart->dma_tx_channel_, ENABLE);
-
-  uart->write_info_active_.op.UpdateStatus(true, ErrorCode::OK);
+  current_info.op.UpdateStatus(true, ErrorCode::OK);
 
   // 预装pending区
   WriteInfoBlock next_info;
@@ -374,7 +377,7 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
     return;
   }
 
-  next_info.op.MarkAsRunning();
+  uart->dma_buff_tx_.SetPendingSize(next_info.data.size_);
 
   uart->dma_buff_tx_.EnablePending();
 }
