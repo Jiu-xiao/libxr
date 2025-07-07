@@ -11,6 +11,7 @@
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_queue.hpp"
+#include "mutex.hpp"
 #include "semaphore.hpp"
 
 namespace LibXR
@@ -413,6 +414,66 @@ class WritePort
   size_t write_size_ = 0;
 
   /**
+   * @brief WritePort 的流式写入操作器，支持链式 << 操作和批量提交。
+   * @brief Stream-like writer for WritePort, supporting chainable << operations and batch
+   * commit.
+   *
+   * @endcode
+   *
+   * 构造时会尝试锁定 WritePort，并批量写入，减少碎片化写操作和队列压力。
+   * Automatically acquires the WritePort lock (if possible), enabling batch writes to
+   * reduce fragmented write operations and queue pressure.
+   */
+  class Stream
+  {
+   public:
+    /**
+     * @brief 构造流写入对象，并尝试锁定端口。
+     * @brief Constructs a Stream object and tries to acquire WritePort lock.
+     * @param port 指向 WritePort 的指针 Pointer to WritePort.
+     * @param op 写操作对象（可重用）Write operation object (can be reused).
+     */
+    Stream(LibXR::WritePort *port, LibXR::WriteOperation op);
+
+    /**
+     * @brief 析构时自动提交已累积的数据并释放锁。
+     * @brief Destructor: automatically commits any accumulated data and releases the
+     * lock.
+     */
+    ~Stream();
+
+    /**
+     * @brief 追加写入数据，支持链式调用。
+     * @brief Appends data for writing, supporting chain calls.
+     * @param data 要写入的数据 Data to write.
+     * @return 返回自身引用 Enables chainable call.
+     */
+    Stream &operator<<(const ConstRawData &data);
+
+    /**
+     * @brief 手动提交已写入的数据到队列，并尝试续锁。
+     * @brief Manually commit accumulated data to the queue, and try to extend the lock.
+     *
+     * 调用后已写入数据会立即入队，size 计数归零。适合周期性手动 flush。
+     * After calling, written data is enqueued, size counter reset. Suitable for periodic
+     * manual flush.
+     *
+     * @return 返回操作的 `ErrorCode`，指示操作结果。
+     *         Returns an `ErrorCode` indicating the result of the operation.
+     */
+    ErrorCode Commit();
+
+   private:
+    LibXR::WritePort *port_;    ///< 写端口指针 Pointer to the WritePort
+    LibXR::WriteOperation op_;  ///< 写操作对象 Write operation object
+    size_t cap_;                ///< 当前队列容量 Current queue capacity
+    size_t size_ = 0;  ///< 当前已写入但未提交的字节数 Bytes written but not yet committed
+    bool locked_ = false;                    ///< 是否持有写锁 Whether write lock is held
+    bool fallback_to_normal_write_ = false;  ///< 回退为普通写模式（不可批量） Fallback to
+                                             ///< normal write (if batch not supported)
+  };
+
+  /**
    * @brief 构造一个新的 WritePort 对象。
    *        Constructs a new WritePort object.
    *
@@ -521,6 +582,9 @@ class WritePort
   /// @brief Resets the WritePort.
   /// @brief 重置WritePort。
   virtual void Reset();
+
+ private:
+  ErrorCode CommitWrite(ConstRawData data, WriteOperation &op, bool pushed = false);
 };
 
 /**
@@ -533,6 +597,9 @@ class STDIO
   // NOLINTBEGIN
   static inline ReadPort *read_ = nullptr;    ///< Read port instance. 读取端口。
   static inline WritePort *write_ = nullptr;  ///< Write port instance. 写入端口。
+  static inline LibXR::Mutex *write_mutex_ =
+      nullptr;  ///< Write port mutex. 写入端口互斥锁。
+  static inline LibXR::WritePort::Stream *write_stream_ = nullptr;
 #if LIBXR_PRINTF_BUFFER_SIZE > 0
   static inline char
       printf_buff_[LIBXR_PRINTF_BUFFER_SIZE];  ///< Print buffer. 打印缓冲区。
