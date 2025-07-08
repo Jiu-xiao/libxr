@@ -105,7 +105,7 @@ class DoubleBuffer
    *
    * @return 准备好的长度 / Valid pending buffer data length
    */
-  size_t PendingLength() const;
+  size_t GetPendingLength() const;
 
   /**
    * @brief 设置备用缓冲区的数据长度
@@ -113,7 +113,7 @@ class DoubleBuffer
    *
    * @param size 数据长度（字节） / Data length in bytes
    */
-  void SetPendingSize(size_t size) { pending_len_ = size; }
+  void SetPendingLength(size_t size) { pending_len_ = size; }
 
  private:
   uint8_t* buffer_[2];  ///< 双缓冲区指针 / Double buffer pointers
