@@ -225,7 +225,7 @@ ErrorCode STM32UART::WriteFun(WritePort &port)
 
     if (use_pending)
     {
-      uart->dma_buff_tx_.SetPendingSize(info.data.size_);
+      uart->dma_buff_tx_.SetPendingLength(info.data.size_);
       uart->dma_buff_tx_.EnablePending();
       if (uart->uart_handle_->gState == HAL_UART_STATE_READY &&
           uart->dma_buff_tx_.HasPending())
@@ -384,7 +384,7 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 {  // NOLINT
   auto uart = STM32UART::map[id];
 
-  size_t pending_len = uart->dma_buff_tx_.PendingLength();
+  size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
 
   if (pending_len == 0)
   {
@@ -430,7 +430,7 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
     return;
   }
 
-  uart->dma_buff_tx_.SetPendingSize(next_info.data.size_);
+  uart->dma_buff_tx_.SetPendingLength(next_info.data.size_);
 
   uart->dma_buff_tx_.EnablePending();
 }

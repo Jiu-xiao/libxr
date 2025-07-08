@@ -241,7 +241,7 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
 
     if (use_pending)
     {
-      uart->dma_buff_tx_.SetPendingSize(info.data.size_);
+      uart->dma_buff_tx_.SetPendingLength(info.data.size_);
       uart->dma_buff_tx_.EnablePending();
       // 检查当前DMA是否可切换
       bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
@@ -335,7 +335,7 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
 
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id]);
 
-  size_t pending_len = uart->dma_buff_tx_.PendingLength();
+  size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
 
   if (pending_len == 0)
   {
@@ -377,7 +377,7 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
     return;
   }
 
-  uart->dma_buff_tx_.SetPendingSize(next_info.data.size_);
+  uart->dma_buff_tx_.SetPendingLength(next_info.data.size_);
 
   uart->dma_buff_tx_.EnablePending();
 }
