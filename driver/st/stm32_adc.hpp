@@ -115,7 +115,8 @@ class STM32ADC
    *
    * @param hadc ADC外设 ADC device
    * @param dma_buff DMA缓冲区 DMA buffer
-   * @param channels 通道号 Channel number
+   * @param channels 包含通道号的数组 Array of channel numbers
+   * @param num_channels 通道数 Channel number
    * @param vref 参考电压 Reference voltage
    */
   STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff, const uint32_t* channels,
