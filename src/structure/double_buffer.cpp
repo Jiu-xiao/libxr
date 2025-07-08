@@ -49,4 +49,4 @@ bool DoubleBuffer::FillActive(const uint8_t* data, size_t len)
 
 void DoubleBuffer::EnablePending() { pending_valid_ = true; }
 
-size_t DoubleBuffer::PendingLength() const { return pending_valid_ ? pending_len_ : 0; }
+size_t DoubleBuffer::GetPendingLength() const { return pending_valid_ ? pending_len_ : 0; }
