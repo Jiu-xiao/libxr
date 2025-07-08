@@ -26,7 +26,7 @@ STM32DAC::STM32DAC(DAC_HandleTypeDef* hadc, uint32_t channel, float init_voltage
 
 ErrorCode STM32DAC::Write(float voltage)
 {
-  std::clamp(voltage, 0.0f, vref_);
+  voltage = std::clamp(voltage, 0.0f, vref_);
   return HAL_DAC_SetValue(
              hdac_, channel_, align_,
              static_cast<uint16_t>(voltage / vref_ * static_cast<float>(resolution_))) ==
