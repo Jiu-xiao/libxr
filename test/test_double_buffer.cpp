@@ -21,7 +21,7 @@ void test_double_buffer()
 
   ASSERT(buffer.FillPending(test_data, 16) == true);
   ASSERT(buffer.HasPending() == true);
-  ASSERT(buffer.PendingLength() == 16);
+  ASSERT(buffer.GetPendingLength() == 16);
   ASSERT(std::memcmp(buffer.PendingBuffer(), test_data, 16) == 0);
 
   // 3. 禁止重复填充未发送的 buffer
