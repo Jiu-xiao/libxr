@@ -440,8 +440,8 @@ class Topic
       block->data_.fun = [](RawData &data, void *arg, bool in_isr)
       {
         UNUSED(in_isr);
-        LockFreeQueue<Data> *queue = reinterpret_cast<LockFreeQueue<Data>>(arg);
-        queue->Push(reinterpret_cast<Data>(data.addr_));
+        LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(arg);
+        queue->Push(*reinterpret_cast<Data*>(data.addr_));
       };
 
       topic.block_->data_.subers.Add(*block);
