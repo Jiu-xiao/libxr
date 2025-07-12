@@ -1,5 +1,11 @@
 #include "message.hpp"
 
+#include <atomic>
+
+#include "libxr_def.hpp"
+#include "logger.hpp"
+#include "mutex.hpp"
+
 using namespace LibXR;
 
 template class LibXR::RBTree<uint32_t>;
@@ -17,6 +23,36 @@ uint32_t Topic::PackedDataHeader::GetDataLen() const
   return static_cast<uint32_t>(data_len_raw[0]) << 16 |
          static_cast<uint32_t>(data_len_raw[1]) << 8 |
          static_cast<uint32_t>(data_len_raw[2]);
+}
+
+void Topic::Lock(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    topic->data_.mutex->Lock();
+  }
+  else
+  {
+    LockState expected = LockState::UNLOCKED;
+    if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
+    {
+      /* Multiple threads are trying to lock the same topic */
+      ASSERT(false);
+      return;
+    }
+  }
+}
+
+void Topic::Unlock(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    topic->data_.mutex->Unlock();
+  }
+  else
+  {
+    topic->data_.busy.store(LockState::UNLOCKED, std::memory_order_release);
+  }
 }
 
 Topic::Domain::Domain(const char *name)
@@ -60,8 +96,8 @@ void LibXR::Topic::RegisterCallback(Callback &cb)
 
 Topic::Topic() {}
 
-Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool cache,
-             bool check_length)
+Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool multi_publisher,
+             bool cache, bool check_length)
 {
   if (!def_domain_)
   {
@@ -85,6 +121,11 @@ Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool cache,
     ASSERT(topic->data_.max_length == max_length);
     ASSERT(topic->data_.check_length == check_length);
 
+    if (multi_publisher && !topic->data_.mutex)
+    {
+      ASSERT(false);
+    }
+
     block_ = topic;
   }
   else
@@ -95,6 +136,17 @@ Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool cache,
     block_->data_.data.addr_ = nullptr;
     block_->data_.cache = false;
     block_->data_.check_length = check_length;
+
+    if (multi_publisher)
+    {
+      block_->data_.mutex = new Mutex();
+      block_->data_.busy.store(LockState::USE_MUTEX, std::memory_order_release);
+    }
+    else
+    {
+      block_->data_.mutex = nullptr;
+      block_->data_.busy.store(LockState::UNLOCKED, std::memory_order_release);
+    }
 
     domain->node_->data_.Insert(*block_, crc32);
   }
@@ -121,18 +173,20 @@ Topic::TopicHandle Topic::Find(const char *name, Domain *domain)
 
 void Topic::EnableCache()
 {
-  block_->data_.mutex.Lock();
+  Lock(block_);
+
   if (!block_->data_.cache)
   {
     block_->data_.cache = true;
     block_->data_.data.addr_ = new uint8_t[block_->data_.max_length];
   }
-  block_->data_.mutex.Unlock();
+
+  Unlock(block_);
 }
 
 void Topic::Publish(void *addr, uint32_t size)
 {
-  block_->data_.mutex.Lock();
+  Lock(block_);
   if (block_->data_.check_length)
   {
     ASSERT(size == block_->data_.max_length);
@@ -194,7 +248,7 @@ void Topic::Publish(void *addr, uint32_t size)
 
   block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
 
-  block_->data_.mutex.Unlock();
+  Unlock(block_);
 }
 
 void Topic::PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)

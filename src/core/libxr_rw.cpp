@@ -86,9 +86,9 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
       if (ans != ErrorCode::OK)
       {
         BusyState expected = BusyState::IDLE;
-        if (busy_.compare_exchange_strong(expected, BusyState::PENDING,
-                                          std::memory_order_acq_rel,
-                                          std::memory_order_acquire))
+        if (busy_.compare_exchange_weak(expected, BusyState::PENDING,
+                                        std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
         {
           break;
         }
