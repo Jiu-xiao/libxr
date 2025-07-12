@@ -144,9 +144,35 @@ class Topic
    */
   typedef RBTree<uint32_t>::Node<Block> *TopicHandle;
 
+  /**
+   * @brief 锁定主题，防止其被多个订阅者同时访问。Lock the topic to prevent it from being
+   * accessed by multiple subscribers at the same time.
+   *
+   * @param topic 要锁定的主题。Topic to be locked.
+   */
   static void Lock(TopicHandle topic);
 
+  /**
+   * @brief 解锁主题。Unlock the topic.
+   *
+   * @param topic 要解锁的主题。Topic to be unlocked.
+   */
   static void Unlock(TopicHandle topic);
+
+  /**
+   * @brief 从回调中锁定主题，防止其被多个订阅者同时访问。Lock the topic from a callback
+   * to prevent it from being accessed by multiple subscribers at the same time.
+   *
+   * @param topic 要锁定的主题。Topic to be locked.
+   */
+  static void LockFromCallback(TopicHandle topic);
+
+  /**
+   * @brief 从回调中解锁主题。Unlock the topic from a callback.
+   *
+   * @param topic 要解锁的主题。Topic to be unlocked.
+   */
+  static void UnlockFromCallback(TopicHandle topic);
 
   /**
    * @class Domain
@@ -252,10 +278,18 @@ class Topic
      */
     ErrorCode Wait(uint32_t timeout = UINT32_MAX)
     {
+      // TODO: Reset sem
       return block_->data_.sem.Wait(timeout);
     }
 
     LockFreeList::Node<SyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
+  };
+
+  enum class ASyncSubscriberState : uint32_t
+  {
+    IDLE = 0,
+    WAITING = 1,
+    DATA_READY = UINT32_MAX
   };
 
   /**
@@ -265,9 +299,8 @@ class Topic
    */
   typedef struct ASyncBlock : public SuberBlock
   {
-    RawData buff;     ///< 缓冲区数据 Buffer data
-    bool data_ready;  ///< 数据就绪标志 Data ready flag
-    bool waiting;     ///< 等待中标志 Waiting flag
+    RawData buff;                             ///< 缓冲区数据 Buffer data
+    std::atomic<ASyncSubscriberState> state;  ///< 订阅者状态 Subscriber state
   } ASyncBlock;
 
   /**
@@ -321,7 +354,11 @@ class Topic
      * @return false 如果数据不可用，则返回 false
      *         false if data is not available
      */
-    bool Available() { return block_->data_.data_ready; }
+    bool Available()
+    {
+      return block_->data_.state.load(std::memory_order_acquire) ==
+             ASyncSubscriberState::DATA_READY;
+    }
 
     /**
      * @brief  获取当前数据
@@ -331,7 +368,7 @@ class Topic
      */
     Data &GetData()
     {
-      block_->data_.data_ready = false;
+      block_->data_.state.store(ASyncSubscriberState::IDLE, std::memory_order_release);
       return *reinterpret_cast<Data *>(block_->data_.buff.addr_);
     }
 
@@ -339,7 +376,10 @@ class Topic
      * @brief  开始等待数据更新
      *         Starts waiting for data update
      */
-    void StartWaiting() { block_->data_.waiting = true; }
+    void StartWaiting()
+    {
+      block_->data_.state.store(ASyncSubscriberState::WAITING, std::memory_order_release);
+    }
 
     LockFreeList::Node<ASyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
   };
@@ -402,51 +442,6 @@ class Topic
         UNUSED(in_isr);
         LockFreeQueue<Data> *queue = reinterpret_cast<LockFreeQueue<Data>>(arg);
         queue->Push(reinterpret_cast<Data>(data.addr_));
-      };
-
-      topic.block_->data_.subers.Add(*block);
-    }
-
-    /**
-     * @brief  构造函数，使用名称和带锁队列进行初始化
-     *         Constructor using a name and a locked queue
-     * @tparam Data 队列存储的数据类型 Data type stored in the queue
-     * @param  name 订阅的主题名称 Name of the subscribed topic
-     * @param  queue 订阅的数据队列 Subscribed data queue
-     * @param  domain 可选的域指针 Optional domain pointer (default: nullptr)
-     */
-    template <typename Data>
-    QueuedSubscriber(const char *name, LockQueue<Data> &queue, Domain *domain = nullptr)
-    {
-      *this = QueuedSubscriber(WaitTopic(name, UINT32_MAX, domain), queue);
-    }
-
-    /**
-     * @brief  构造函数，使用 Topic 和带锁队列进行初始化
-     *         Constructor using a Topic and a locked queue
-     * @tparam Data 队列存储的数据类型 Data type stored in the queue
-     * @param  topic 订阅的主题 Subscribed topic
-     * @param  queue 订阅的数据队列 Subscribed data queue
-     */
-    template <typename Data>
-    QueuedSubscriber(Topic topic, LockQueue<Data> &queue)
-    {
-      if (topic.block_->data_.check_length)
-      {
-        ASSERT(topic.block_->data_.max_length == sizeof(Data));
-      }
-      else
-      {
-        ASSERT(topic.block_->data_.max_length <= sizeof(Data));
-      }
-
-      auto block = new LockFreeList::Node<QueueBlock>;
-      block->data_.type = SuberType::QUEUE;
-      block->data_.queue = &queue;
-      block->data_.fun = [](RawData &data, void *arg, bool in_isr)
-      {
-        LockQueue<Data> *queue = reinterpret_cast<LockQueue<Data> *>(arg);
-        queue->PushFromCallback(*reinterpret_cast<const Data *>(data.addr_), in_isr);
       };
 
       topic.block_->data_.subers.Add(*block);
@@ -583,6 +578,28 @@ class Topic
    * @param  size 数据大小 Size of the data
    */
   void Publish(void *addr, uint32_t size);
+
+  /**
+   * @brief  在回调函数中发布数据
+   *         Publishes data in a callback
+   * @tparam Data 数据类型 Data type
+   * @param  data 需要发布的数据 Data to be published
+   * @param  in_isr 是否在中断中发布数据 Whether to publish data in an interrupt
+   */
+  template <typename Data>
+  void PublishFromCallback(Data &data, bool in_isr)
+  {
+    PublishFromCallback(&data, sizeof(Data), in_isr);
+  }
+
+  /**
+   * @brief  在回调函数中以原始地址和大小发布数据
+   *         Publishes data using raw address and size in a callback
+   * @param  addr 数据的地址 Address of the data
+   * @param  size 数据大小 Size of the data
+   * @param  in_isr 是否在中断中发布数据 Whether to publish data in an interrupt
+   */
+  void PublishFromCallback(void *addr, uint32_t size, bool in_isr);
 
   /**
    * @brief 转储数据
