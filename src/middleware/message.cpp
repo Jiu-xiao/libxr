@@ -55,6 +55,36 @@ void Topic::Unlock(Topic::TopicHandle topic)
   }
 }
 
+void Topic::LockFromCallback(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    ASSERT(false);
+  }
+  else
+  {
+    LockState expected = LockState::UNLOCKED;
+    if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
+    {
+      /* Multiple threads are trying to lock the same topic */
+      ASSERT(false);
+      return;
+    }
+  }
+}
+
+void Topic::UnlockFromCallback(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    ASSERT(false);
+  }
+  else
+  {
+    topic->data_.busy.store(LockState::UNLOCKED, std::memory_order_release);
+  }
+}
+
 Topic::Domain::Domain(const char *name)
 {
   if (!domain_)
@@ -223,10 +253,10 @@ void Topic::Publish(void *addr, uint32_t size)
       case SuberType::ASYNC:
       {
         auto async = reinterpret_cast<ASyncBlock *>(&block);
-        if (async->waiting)
+        if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
         {
           memcpy(async->buff.addr_, data.addr_, data.size_);
-          async->data_ready = true;
+          async->state.store(ASyncSubscriberState::DATA_READY, std::memory_order_release);
         }
         break;
       }
@@ -249,6 +279,73 @@ void Topic::Publish(void *addr, uint32_t size)
   block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
 
   Unlock(block_);
+}
+
+void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
+{
+  LockFromCallback(block_);
+  if (block_->data_.check_length)
+  {
+    ASSERT(size == block_->data_.max_length);
+  }
+  else
+  {
+    ASSERT(size <= block_->data_.max_length);
+  }
+
+  if (block_->data_.cache)
+  {
+    memcpy(block_->data_.data.addr_, addr, size);
+    block_->data_.data.size_ = size;
+  }
+  else
+  {
+    block_->data_.data.addr_ = addr;
+    block_->data_.data.size_ = size;
+  }
+
+  RawData data = block_->data_.data;
+
+  auto foreach_fun = [&](SuberBlock &block)
+  {
+    switch (block.type)
+    {
+      case SuberType::SYNC:
+      {
+        auto sync = reinterpret_cast<SyncBlock *>(&block);
+        memcpy(sync->buff.addr_, data.addr_, data.size_);
+        sync->sem.PostFromCallback(in_isr);
+        break;
+      }
+      case SuberType::ASYNC:
+      {
+        auto async = reinterpret_cast<ASyncBlock *>(&block);
+        if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
+        {
+          memcpy(async->buff.addr_, data.addr_, data.size_);
+          async->state.store(ASyncSubscriberState::DATA_READY, std::memory_order_release);
+        }
+        break;
+      }
+      case SuberType::QUEUE:
+      {
+        auto queue_block = reinterpret_cast<QueueBlock *>(&block);
+        queue_block->fun(data, queue_block->queue, false);
+        break;
+      }
+      case SuberType::CALLBACK:
+      {
+        auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
+        cb_block->cb.Run(in_isr, data);
+        break;
+      }
+    }
+    return ErrorCode::OK;
+  };
+
+  block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
+
+  UnlockFromCallback(block_);
 }
 
 void Topic::PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
