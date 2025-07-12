@@ -19,7 +19,7 @@ namespace LibXR
  * including adding, deleting nodes, and traversing the list,
  * with thread-safety features.
  */
-class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeList
+class LockFreeList
 {
  public:
   /**

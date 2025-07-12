@@ -1,5 +1,11 @@
 #include "message.hpp"
 
+#include <atomic>
+
+#include "libxr_def.hpp"
+#include "logger.hpp"
+#include "mutex.hpp"
+
 using namespace LibXR;
 
 template class LibXR::RBTree<uint32_t>;
@@ -17,6 +23,66 @@ uint32_t Topic::PackedDataHeader::GetDataLen() const
   return static_cast<uint32_t>(data_len_raw[0]) << 16 |
          static_cast<uint32_t>(data_len_raw[1]) << 8 |
          static_cast<uint32_t>(data_len_raw[2]);
+}
+
+void Topic::Lock(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    topic->data_.mutex->Lock();
+  }
+  else
+  {
+    LockState expected = LockState::UNLOCKED;
+    if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
+    {
+      /* Multiple threads are trying to lock the same topic */
+      ASSERT(false);
+      return;
+    }
+  }
+}
+
+void Topic::Unlock(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    topic->data_.mutex->Unlock();
+  }
+  else
+  {
+    topic->data_.busy.store(LockState::UNLOCKED, std::memory_order_release);
+  }
+}
+
+void Topic::LockFromCallback(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    ASSERT(false);
+  }
+  else
+  {
+    LockState expected = LockState::UNLOCKED;
+    if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
+    {
+      /* Multiple threads are trying to lock the same topic */
+      ASSERT(false);
+      return;
+    }
+  }
+}
+
+void Topic::UnlockFromCallback(Topic::TopicHandle topic)
+{
+  if (topic->data_.mutex)
+  {
+    ASSERT(false);
+  }
+  else
+  {
+    topic->data_.busy.store(LockState::UNLOCKED, std::memory_order_release);
+  }
 }
 
 Topic::Domain::Domain(const char *name)
@@ -60,8 +126,8 @@ void LibXR::Topic::RegisterCallback(Callback &cb)
 
 Topic::Topic() {}
 
-Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool cache,
-             bool check_length)
+Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool multi_publisher,
+             bool cache, bool check_length)
 {
   if (!def_domain_)
   {
@@ -85,6 +151,11 @@ Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool cache,
     ASSERT(topic->data_.max_length == max_length);
     ASSERT(topic->data_.check_length == check_length);
 
+    if (multi_publisher && !topic->data_.mutex)
+    {
+      ASSERT(false);
+    }
+
     block_ = topic;
   }
   else
@@ -95,6 +166,17 @@ Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool cache,
     block_->data_.data.addr_ = nullptr;
     block_->data_.cache = false;
     block_->data_.check_length = check_length;
+
+    if (multi_publisher)
+    {
+      block_->data_.mutex = new Mutex();
+      block_->data_.busy.store(LockState::USE_MUTEX, std::memory_order_release);
+    }
+    else
+    {
+      block_->data_.mutex = nullptr;
+      block_->data_.busy.store(LockState::UNLOCKED, std::memory_order_release);
+    }
 
     domain->node_->data_.Insert(*block_, crc32);
   }
@@ -121,18 +203,20 @@ Topic::TopicHandle Topic::Find(const char *name, Domain *domain)
 
 void Topic::EnableCache()
 {
-  block_->data_.mutex.Lock();
+  Lock(block_);
+
   if (!block_->data_.cache)
   {
     block_->data_.cache = true;
     block_->data_.data.addr_ = new uint8_t[block_->data_.max_length];
   }
-  block_->data_.mutex.Unlock();
+
+  Unlock(block_);
 }
 
 void Topic::Publish(void *addr, uint32_t size)
 {
-  block_->data_.mutex.Lock();
+  Lock(block_);
   if (block_->data_.check_length)
   {
     ASSERT(size == block_->data_.max_length);
@@ -169,10 +253,10 @@ void Topic::Publish(void *addr, uint32_t size)
       case SuberType::ASYNC:
       {
         auto async = reinterpret_cast<ASyncBlock *>(&block);
-        if (async->waiting)
+        if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
         {
           memcpy(async->buff.addr_, data.addr_, data.size_);
-          async->data_ready = true;
+          async->state.store(ASyncSubscriberState::DATA_READY, std::memory_order_release);
         }
         break;
       }
@@ -194,7 +278,74 @@ void Topic::Publish(void *addr, uint32_t size)
 
   block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
 
-  block_->data_.mutex.Unlock();
+  Unlock(block_);
+}
+
+void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
+{
+  LockFromCallback(block_);
+  if (block_->data_.check_length)
+  {
+    ASSERT(size == block_->data_.max_length);
+  }
+  else
+  {
+    ASSERT(size <= block_->data_.max_length);
+  }
+
+  if (block_->data_.cache)
+  {
+    memcpy(block_->data_.data.addr_, addr, size);
+    block_->data_.data.size_ = size;
+  }
+  else
+  {
+    block_->data_.data.addr_ = addr;
+    block_->data_.data.size_ = size;
+  }
+
+  RawData data = block_->data_.data;
+
+  auto foreach_fun = [&](SuberBlock &block)
+  {
+    switch (block.type)
+    {
+      case SuberType::SYNC:
+      {
+        auto sync = reinterpret_cast<SyncBlock *>(&block);
+        memcpy(sync->buff.addr_, data.addr_, data.size_);
+        sync->sem.PostFromCallback(in_isr);
+        break;
+      }
+      case SuberType::ASYNC:
+      {
+        auto async = reinterpret_cast<ASyncBlock *>(&block);
+        if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
+        {
+          memcpy(async->buff.addr_, data.addr_, data.size_);
+          async->state.store(ASyncSubscriberState::DATA_READY, std::memory_order_release);
+        }
+        break;
+      }
+      case SuberType::QUEUE:
+      {
+        auto queue_block = reinterpret_cast<QueueBlock *>(&block);
+        queue_block->fun(data, queue_block->queue, false);
+        break;
+      }
+      case SuberType::CALLBACK:
+      {
+        auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
+        cb_block->cb.Run(in_isr, data);
+        break;
+      }
+    }
+    return ErrorCode::OK;
+  };
+
+  block_->data_.subers.Foreach<SuberBlock>(foreach_fun);
+
+  UnlockFromCallback(block_);
 }
 
 void Topic::PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)

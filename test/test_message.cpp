@@ -8,7 +8,7 @@ void test_message()
   auto topic = LibXR::Topic::CreateTopic<double>("test_tp", &domain, false, true);
   static double msg[4];
   auto sync_suber = LibXR::Topic::SyncSubscriber<double>("test_tp", msg[1], &domain);
-  LibXR::LockQueue<double> msg_queue(10);
+  LibXR::LockFreeQueue<double> msg_queue(10);
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
 
   auto msg_cb = LibXR::Topic::Callback::Create(
@@ -23,7 +23,7 @@ void test_message()
   ASSERT(sync_suber.Wait(10) == ErrorCode::OK);
   ASSERT(msg[1] == msg[0]);
   ASSERT(msg_queue.Size() == 1);
-  msg_queue.Pop(msg[2], 0);
+  msg_queue.Pop(msg[2]);
   ASSERT(msg[2] == msg[0]);
   ASSERT(msg[3] == msg[0]);
 
