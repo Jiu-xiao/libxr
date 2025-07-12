@@ -1,5 +1,8 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+
 #include "crc.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
@@ -26,20 +29,28 @@ namespace LibXR
  */
 class Topic
 {
+  enum class LockState : uint32_t
+  {
+    UNLOCKED = 0,
+    LOCKED = 1,
+    USE_MUTEX = UINT32_MAX,
+  };
+
+ public:
   /**
    * @struct Block
    * @brief 存储主题（Topic）数据的结构体。Structure storing topic data.
    */
- public:
   struct Block
   {
-    uint32_t max_length;  ///< 数据的最大长度。Maximum length of data.
-    uint32_t crc32;       ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex mutex;          ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;         ///< 存储的数据。Stored data.
+    std::atomic<LockState> busy;  ///< 是否忙碌。Indicates whether it is busy.
+    LockFreeList subers;          ///< 订阅者列表。List of subscribers.
+    uint32_t max_length;          ///< 数据的最大长度。Maximum length of data.
+    uint32_t crc32;     ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
+    Mutex *mutex;       ///< 线程同步互斥锁。Mutex for thread synchronization.
+    RawData data;       ///< 存储的数据。Stored data.
     bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
-    LockFreeList subers;  ///< 订阅者列表。List of subscribers.
   };
 #ifndef __DOXYGEN__
 
@@ -132,6 +143,10 @@ class Topic
    * storing data.
    */
   typedef RBTree<uint32_t>::Node<Block> *TopicHandle;
+
+  static void Lock(TopicHandle topic);
+
+  static void Unlock(TopicHandle topic);
 
   /**
    * @class Domain
@@ -471,12 +486,14 @@ class Topic
    * @param  max_length 数据的最大长度 Maximum length of data
    * @param  domain 主题所属的域（默认为 nullptr）Domain to which the topic belongs
    * (default: nullptr)
+   * @param  multi_publisher 是否允许多个订阅者（默认为 false）Whether to allow multiple
+   * subscribers (default: false)
    * @param  cache 是否启用缓存（默认为 false）Whether to enable caching (default: false)
    * @param  check_length 是否检查数据长度（默认为 false）Whether to check data length
    * (default: false)
    */
   Topic(const char *name, uint32_t max_length, Domain *domain = nullptr,
-        bool cache = false, bool check_length = false);
+        bool multi_publisher = false, bool cache = false, bool check_length = false);
 
   /**
    * @brief  创建一个新的主题
@@ -485,16 +502,19 @@ class Topic
    * @param  name 主题名称 Topic name
    * @param  domain 主题所属的域（默认为 nullptr）Domain to which the topic belongs
    * (default: nullptr)
+   * @param  multi_publisher 是否允许多个订阅者（默认为 false）Whether to allow multiple
+   * subscribers (default: false)
    * @param  cache 是否启用缓存（默认为 false）Whether to enable caching (default: false)
    * @param  check_length 是否检查数据长度（默认为 true）Whether to check data length
    * (default: true)
    * @return 创建的 Topic 实例 The created Topic instance
    */
   template <typename Data>
-  static Topic CreateTopic(const char *name, Domain *domain = nullptr, bool cache = false,
+  static Topic CreateTopic(const char *name, Domain *domain = nullptr,
+                           bool multi_publisher = false, bool cache = false,
                            bool check_length = true)
   {
-    return Topic(name, sizeof(Data), domain, cache, check_length);
+    return Topic(name, sizeof(Data), domain, multi_publisher, cache, check_length);
   }
 
   /**
@@ -584,17 +604,17 @@ class Topic
     if (!pack)
     {
       Assert::SizeLimitCheck<Mode>(block_->data_.data.size_, data.size_);
-      block_->data_.mutex.Lock();
+      Lock(block_);
       memcpy(data.addr_, block_->data_.data.addr_, block_->data_.data.size_);
-      block_->data_.mutex.Unlock();
+      Unlock(block_);
     }
     else
     {
       Assert::SizeLimitCheck<Mode>(PACK_BASE_SIZE + block_->data_.data.size_, data.size_);
 
-      block_->data_.mutex.Lock();
+      Lock(block_);
       PackData(block_->data_.crc32, data, block_->data_.data);
-      block_->data_.mutex.Unlock();
+      Unlock(block_);
     }
 
     return ErrorCode::OK;
