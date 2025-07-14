@@ -15,7 +15,7 @@ else()
   add_library(${PROJECT_NAME} OBJECT)
 endif()
 
-target_compile_options(xr 
+target_compile_options(xr
   PUBLIC -Wno-psabi
   PUBLIC -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.
 )
@@ -118,8 +118,7 @@ target_include_directories(${PROJECT_NAME}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/Eigen
 )
 
-# add_compile_definitions(EIGEN_NO_MALLOC)
-
+target_compile_definitions(xr PUBLIC EIGEN_NO_IO)
 
 # Test
 if(LIBXR_TEST_BUILD)
