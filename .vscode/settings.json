@@ -7,4 +7,5 @@
     "cmake.configureArgs": [
         "-DLIBXR_TEST_BUILD=True"
     ],
+    "cmake.cmakePath": "cmake",
 }
