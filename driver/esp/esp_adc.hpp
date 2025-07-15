@@ -110,7 +110,7 @@ class ESP32ADC
   {
     m_patterns_ = new adc_digi_pattern_config_t[m_num_channels_];
     m_channels_ = new Channel[m_num_channels_];
-    m_latest_values_ = new std::atomic<float>[m_num_channels_];
+    m_latest_values_ = new float[m_num_channels_];
     m_sum_buf_ = new int[m_num_channels_];
     m_cnt_buf_ = new int[m_num_channels_];
 
@@ -121,7 +121,7 @@ class ESP32ADC
       m_patterns_[i].unit = static_cast<uint8_t>(m_unit_);
       m_patterns_[i].bit_width = static_cast<uint8_t>(m_bitwidth_);
       m_channels_[i] = Channel(this, i, channels[i]);
-      m_latest_values_[i].store(0.f, std::memory_order_relaxed);
+      m_latest_values_[i] = 0.f;
     }
 
     adc_continuous_handle_cfg_t adc_config = {
@@ -184,10 +184,7 @@ class ESP32ADC
    * @param idx 逻辑通道索引 / Channel index
    * @return 电压值（V）/ Voltage value (V)
    */
-  float ReadChannel(uint8_t idx)
-  {
-    return m_latest_values_[idx].load(std::memory_order_relaxed);
-  }
+  float ReadChannel(uint8_t idx) { return m_latest_values_[idx]; }
 
  private:
   /**
@@ -242,7 +239,7 @@ class ESP32ADC
       if (m_cnt_buf_[idx] > 0)
       {
         float avg = Normalize(static_cast<float>(m_sum_buf_[idx]) / m_cnt_buf_[idx]);
-        m_latest_values_[idx].store(avg, std::memory_order_relaxed);
+        m_latest_values_[idx] = avg;
       }
     }
   }
@@ -261,10 +258,9 @@ class ESP32ADC
 
   adc_digi_pattern_config_t *m_patterns_;  ///< ADC采样模式数组 / Pattern config array
   Channel *m_channels_;                    ///< 通道对象数组 / Channel objects array
-  std::atomic<float>
-      *m_latest_values_;  ///< 最新均值（每通道）/ Latest average value (per channel)
-  int *m_sum_buf_;        ///< 求和缓冲 / Accumulation buffer
-  int *m_cnt_buf_;        ///< 计数缓冲 / Count buffer
+  float *m_latest_values_;  ///< 最新均值（每通道）/ Latest average value (per channel)
+  int *m_sum_buf_;          ///< 求和缓冲 / Accumulation buffer
+  int *m_cnt_buf_;          ///< 计数缓冲 / Count buffer
 
   adc_unit_t m_unit_;                           ///< ADC单元 / ADC unit
   uint8_t m_num_channels_;                      ///< 通道数 / Number of channels
