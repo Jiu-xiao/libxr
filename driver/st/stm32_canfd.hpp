@@ -85,9 +85,9 @@ class STM32CANFD : public FDCAN
   FDCAN_HandleTypeDef* hcan_;
 
   stm32_fdcan_id_t id_;
-  LockFreeQueue<ClassicPack> tx_queue_;
-  LockFreeQueue<FDPack> tx_queue_fd_;
-  Mutex write_mutex_, write_mutex_fd_;
+  LockFreePool<ClassicPack> tx_pool_;
+  LockFreePool<FDPack> tx_pool_fd_;
+
   static STM32CANFD* map[STM32_FDCAN_NUMBER];  // NOLINT
 
   struct
@@ -105,6 +105,8 @@ class STM32CANFD : public FDCAN
   } tx_buff_;
 
   uint32_t txMailbox;
+
+  std::atomic<uint32_t> bus_busy_ = 0;
 };
 }  // namespace LibXR
 

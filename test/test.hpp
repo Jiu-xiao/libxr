@@ -7,6 +7,7 @@ void test_list();
 void test_kinematic();
 void test_message();
 void test_queue();
+void test_lock_free_pool();
 void test_rbt();
 void test_ramfs();
 void test_semaphore();

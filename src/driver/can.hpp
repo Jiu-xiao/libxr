@@ -117,6 +117,7 @@ class FDCAN : public CAN
   using CAN::AddMessage;
   using CAN::FilterMode;
   using CAN::OnMessage;
+  using CAN::Register;
 
   using CallbackFD = LibXR::Callback<const FDPack &>;
 
