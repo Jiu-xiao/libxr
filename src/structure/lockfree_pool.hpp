@@ -78,7 +78,23 @@ class LockFreePool
    */
   ErrorCode Put(const Data &data)
   {
-    for (uint32_t index = 0; index < SLOT_COUNT; index++)
+    uint32_t start_index = 0;
+    return Put(data, start_index);
+  }
+
+  /**
+   * @brief 向池中放入一个元素，返回起始槽索引 / Put an element into the pool and return
+   * the starting slot index
+   *
+   * @param data 要存储的数据 / Data to store
+   * @param start_index 起始槽索引 / Starting slot index
+   * @return ErrorCode 操作结果 / Operation result:
+   *         - `ErrorCode::OK`：成功放入 / Successfully put
+   *         - `ErrorCode::FULL`：池满，无法放入 / Pool full, cannot put
+   */
+  ErrorCode Put(const Data &data, uint32_t &start_index)
+  {
+    for (uint32_t index = start_index; index < SLOT_COUNT; index++)
     {
       auto expected = slots_[index].slot.state.load(std::memory_order_relaxed);
       if (expected == SlotState::FREE || expected == SlotState::RECYCLE)
@@ -89,8 +105,35 @@ class LockFreePool
         {
           slots_[index].slot.data = data;
           slots_[index].slot.state.store(SlotState::READY, std::memory_order_release);
+          start_index = index;
           return ErrorCode::OK;
         }
+      }
+    }
+    return ErrorCode::FULL;
+  }
+
+  /**
+   * @brief 向指定槽放入一个元素 / Put an element into a specific slot
+   *
+   * @param data 要存储的数据 / Data to store
+   * @param index 槽索引 / Slot index
+   * @return ErrorCode 操作结果 / Operation result:
+   *         - `ErrorCode::OK`：成功放入 / Successfully put
+   *         - `ErrorCode::FULL`：池满，无法放入 / Pool full, cannot put
+   */
+  ErrorCode PutToSlot(const Data &data, uint32_t index)
+  {
+    auto expected = slots_[index].slot.state.load(std::memory_order_relaxed);
+    if (expected == SlotState::FREE || expected == SlotState::RECYCLE)
+    {
+      if (slots_[index].slot.state.compare_exchange_strong(expected, SlotState::BUSY,
+                                                           std::memory_order_release,
+                                                           std::memory_order_relaxed))
+      {
+        slots_[index].slot.data = data;
+        slots_[index].slot.state.store(SlotState::READY, std::memory_order_release);
+        return ErrorCode::OK;
       }
     }
     return ErrorCode::FULL;
@@ -146,6 +189,55 @@ class LockFreePool
     }
 
     start_index = 0;
+    return ErrorCode::EMPTY;
+  }
+
+  /**
+   * @brief 从指定槽位开始，取出一个元素 / Retrieve an element from the pool
+   *
+   * @param data 获取到的数据 / Variable to store the retrieved data
+   * @param index 槽索引 / Slot index
+   * @return ErrorCode 操作结果 / Operation result:
+   *         - `ErrorCode::OK`：成功取出 / Successfully retrieved
+   *         - `ErrorCode::EMPTY`：池空，无可取元素 / Pool empty, no available element
+   */
+  ErrorCode GetFromSlot(Data &data, uint32_t index)
+  {
+    auto expected = slots_[index].slot.state.load(std::memory_order_acquire);
+    if (expected == SlotState::READY)
+    {
+      if (slots_[index].slot.state.compare_exchange_strong(expected, SlotState::BUSY,
+                                                           std::memory_order_acquire,
+                                                           std::memory_order_relaxed))
+      {
+        data = slots_[index].slot.data;
+        slots_[index].slot.state.store(SlotState::RECYCLE, std::memory_order_release);
+        return ErrorCode::OK;
+      }
+    }
+    return ErrorCode::EMPTY;
+  }
+
+  /**
+   * @brief 回收指定槽位 / Recycle a slot
+   *
+   * @param index 槽索引 / Slot index
+   * @return ErrorCode 操作结果 / Operation result:
+   *         - `ErrorCode::OK`：成功回收 / Successfully recycled
+   *         - `ErrorCode::EMPTY`：池空，无可回收元素 / Pool empty, no available element
+   */
+  ErrorCode RecycleSlot(uint32_t index)
+  {
+    auto expected = slots_[index].slot.state.load(std::memory_order_relaxed);
+    if (expected == SlotState::READY)
+    {
+      if (slots_[index].slot.state.compare_exchange_strong(expected, SlotState::RECYCLE,
+                                                           std::memory_order_release,
+                                                           std::memory_order_relaxed))
+      {
+        return ErrorCode::OK;
+      }
+    }
     return ErrorCode::EMPTY;
   }
 
