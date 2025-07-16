@@ -14,6 +14,7 @@ STM32CAN* STM32CAN::map[STM32_CAN_NUMBER] = {nullptr};
  */
 stm32_can_id_t STM32_CAN_GetID(CAN_TypeDef* addr)
 {
+  // NOLINTBEGIN
   if (addr == nullptr)
   {  // NOLINT
     return stm32_can_id_t::STM32_CAN_ID_ERROR;
@@ -40,10 +41,11 @@ stm32_can_id_t STM32_CAN_GetID(CAN_TypeDef* addr)
   {
     return stm32_can_id_t::STM32_CAN_ID_ERROR;
   }
+  // NOLINTEND
 }
 
-STM32CAN::STM32CAN(CAN_HandleTypeDef* hcan, uint32_t queue_size)
-    : CAN(), hcan_(hcan), id_(STM32_CAN_GetID(hcan->Instance)), tx_queue_(queue_size)
+STM32CAN::STM32CAN(CAN_HandleTypeDef* hcan, uint32_t pool_size)
+    : CAN(), hcan_(hcan), id_(STM32_CAN_GetID(hcan->Instance)), tx_pool_(pool_size)
 {
   map[id_] = this;
   Init();
@@ -166,16 +168,32 @@ ErrorCode STM32CAN::AddMessage(const ClassicPack& pack)
   txHeader.ExtId = (pack.type == Type::EXTENDED) ? pack.id : 0;
   txHeader.TransmitGlobalTime = DISABLE;
 
-  if (HAL_CAN_AddTxMessage(hcan_, &txHeader, pack.data, &txMailbox) != HAL_OK)
+  while (true)
   {
-    Mutex::LockGuard lock(write_mutex_);
-    if (tx_queue_.Push(pack) != ErrorCode::OK)
+    uint32_t slot = 0;
+
+    if (HAL_CAN_AddTxMessage(hcan_, &txHeader, pack.data, &txMailbox) != HAL_OK)
     {
-      return ErrorCode::FULL;
+      if (tx_pool_.Put(pack, slot) != ErrorCode::OK)
+      {
+        return ErrorCode::FULL;
+      }
+    }
+    else
+    {
+      return ErrorCode::OK;
+    }
+
+    if (bus_busy_.load(std::memory_order_acquire) == 0 &&
+        tx_pool_.RecycleSlot(slot) == ErrorCode::OK)
+    {
+      continue;
+    }
+    else
+    {
+      return ErrorCode::OK;
     }
   }
-
-  return ErrorCode::OK;
 }
 
 void STM32CAN::ProcessRxInterrupt()
@@ -215,7 +233,7 @@ void STM32CAN::ProcessRxInterrupt()
 
 void STM32CAN::ProcessTxInterrupt()
 {
-  if (tx_queue_.Peek(tx_buff_.pack) == ErrorCode::OK)
+  if (tx_pool_.Get(tx_buff_.pack) == ErrorCode::OK)
   {
     tx_buff_.header.DLC = sizeof(tx_buff_.pack.data);
     switch (tx_buff_.pack.type)
@@ -244,10 +262,22 @@ void STM32CAN::ProcessTxInterrupt()
     tx_buff_.header.ExtId = (tx_buff_.pack.type == Type::EXTENDED) ? tx_buff_.pack.id : 0;
     tx_buff_.header.TransmitGlobalTime = DISABLE;
 
-    if (HAL_CAN_AddTxMessage(hcan_, &tx_buff_.header, tx_buff_.pack.data, &txMailbox) ==
-        HAL_OK)
+    HAL_CAN_AddTxMessage(hcan_, &tx_buff_.header, tx_buff_.pack.data, &txMailbox);
+
+    bus_busy_.store(UINT32_MAX, std::memory_order_release);
+  }
+  else
+  {
+    uint32_t tsr = READ_REG(hcan_->Instance->TSR);
+
+    if (((tsr & CAN_TSR_TME0) != 0U) && ((tsr & CAN_TSR_TME1) != 0U) &&
+        ((tsr & CAN_TSR_TME2) != 0U))
     {
-      tx_queue_.Pop();
+      bus_busy_.store(0, std::memory_order_release);
+    }
+    else
+    {
+      bus_busy_.store(UINT32_MAX, std::memory_order_release);
     }
   }
 }

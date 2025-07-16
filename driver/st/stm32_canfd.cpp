@@ -46,8 +46,8 @@ STM32CANFD::STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size)
     : FDCAN(),
       hcan_(hcan),
       id_(STM32_FDCAN_GetID(hcan->Instance)),
-      tx_queue_(queue_size),
-      tx_queue_fd_(queue_size)
+      tx_pool_(queue_size),
+      tx_pool_fd_(queue_size)
 {
   map[id_] = this;
   Init();
@@ -164,16 +164,32 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
   header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
   header.MessageMarker = 0x01;
 
-  if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
+  while (true)
   {
-    Mutex::LockGuard guard(write_mutex_);
-    if (tx_queue_.Push(pack) != ErrorCode::OK)
+    uint32_t slot = 0;
+
+    if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
     {
-      return ErrorCode::FAILED;
+      if (tx_pool_.Put(pack, slot) != ErrorCode::OK)
+      {
+        return ErrorCode::FAILED;
+      }
+    }
+    else
+    {
+      return ErrorCode::OK;
+    }
+
+    if (bus_busy_.load(std::memory_order_acquire) == 0 &&
+        tx_pool_.RecycleSlot(slot) == ErrorCode::OK)
+    {
+      continue;
+    }
+    else
+    {
+      return ErrorCode::OK;
     }
   }
-
-  return ErrorCode::OK;
 }
 
 ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
@@ -231,16 +247,32 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
   header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
   header.MessageMarker = 0x00;
 
-  if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
+  while (true)
   {
-    Mutex::LockGuard guard(write_mutex_fd_);
-    if (tx_queue_fd_.Push(pack) != ErrorCode::OK)
+    uint32_t slot = 0;
+
+    if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
     {
-      return ErrorCode::FAILED;
+      if (tx_pool_fd_.Put(pack, slot) != ErrorCode::OK)
+      {
+        return ErrorCode::FAILED;
+      }
+    }
+    else
+    {
+      return ErrorCode::OK;
+    }
+
+    if (bus_busy_.load(std::memory_order_acquire) == 0 &&
+        tx_pool_fd_.RecycleSlot(slot) == ErrorCode::OK)
+    {
+      continue;
+    }
+    else
+    {
+      return ErrorCode::OK;
     }
   }
-
-  return ErrorCode::OK;
 }
 
 void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
@@ -308,7 +340,7 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
 
 void STM32CANFD::ProcessTxInterrupt()
 {
-  if (tx_queue_fd_.Peek(tx_buff_.pack_fd) == ErrorCode::OK)
+  if (tx_pool_fd_.Get(tx_buff_.pack_fd) == ErrorCode::OK)
   {
     tx_buff_.header.Identifier = tx_buff_.pack_fd.id;
     switch (tx_buff_.pack_fd.type)
@@ -343,13 +375,10 @@ void STM32CANFD::ProcessTxInterrupt()
     tx_buff_.header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_buff_.header.MessageMarker = 0x00;
 
-    if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack_fd.data) ==
-        HAL_OK)
-    {
-      tx_queue_fd_.Pop();
-    }
+    HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack_fd.data);
+    bus_busy_.store(UINT32_MAX, std::memory_order_release);
   }
-  else if (tx_queue_.Peek(tx_buff_.pack) == ErrorCode::OK)
+  else if (tx_pool_.Get(tx_buff_.pack) == ErrorCode::OK)
   {
     tx_buff_.header.Identifier = tx_buff_.pack.id;
     switch (tx_buff_.pack.type)
@@ -385,11 +414,13 @@ void STM32CANFD::ProcessTxInterrupt()
     tx_buff_.header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
     tx_buff_.header.BitRateSwitch = FDCAN_BRS_OFF;
 
-    if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack.data) ==
-        HAL_OK)
-    {
-      tx_queue_.Pop();
-    }
+    HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack.data);
+    bus_busy_.store(UINT32_MAX, std::memory_order_release);
+  }
+
+  if (hcan_->Init.TxFifoQueueElmtsNbr - HAL_FDCAN_GetTxFifoFreeLevel(hcan_) == 0)
+  {
+    bus_busy_.store(0, std::memory_order_release);
   }
 }
 
