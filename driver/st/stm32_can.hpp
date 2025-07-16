@@ -42,9 +42,9 @@ class STM32CAN : public CAN
    * @brief STM32CAN 类，用于处理 STM32 系统的 CAN 通道。 Provides handling for STM32 CAN
    *
    * @param hcan STM32CAN对象 CAN object
-   * @param queue_size 发送队列大小 Send queue size
+   * @param pool_size 发送池大小 Send pool size
    */
-  STM32CAN(CAN_HandleTypeDef* hcan, uint32_t queue_size);
+  STM32CAN(CAN_HandleTypeDef* hcan, uint32_t pool_size);
 
   /**
    * @brief 初始化
@@ -70,7 +70,6 @@ class STM32CAN : public CAN
   CAN_HandleTypeDef* hcan_;
 
   stm32_can_id_t id_;
-  LockFreeQueue<ClassicPack> tx_queue_;
   uint32_t fifo_;
   static STM32CAN* map[STM32_CAN_NUMBER];  // NOLINT
 
@@ -87,7 +86,10 @@ class STM32CAN : public CAN
   } tx_buff_;
 
   uint32_t txMailbox;
-  Mutex write_mutex_;
+
+  LockFreePool<ClassicPack> tx_pool_;
+
+  std::atomic<uint32_t> bus_busy_ = 0;
 };
 }  // namespace LibXR
 
