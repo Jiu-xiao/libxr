@@ -276,6 +276,23 @@ class LockFreePool
     return size;
   }
 
+  /**
+   * @brief 获取槽总数 / Get the total number of slots in the pool
+   *
+   * @return uint32_t 槽总数
+   */
+  uint32_t SlotCount() const { return SLOT_COUNT; }
+
+ protected:
+  Slot &operator[](uint32_t index)
+  {
+    if (index >= SLOT_COUNT)
+    {
+      ASSERT(false);
+    }
+    return slots_[index];
+  }
+
  private:
   const uint32_t SLOT_COUNT;  ///< 槽总数 / Number of slots
   Slot *slots_;               ///< 槽数组指针 / Array of slots
