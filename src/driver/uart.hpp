@@ -43,8 +43,10 @@ class UART
   struct Configuration
   {
     uint32_t baudrate;  ///< 波特率 / Baud rate
+    // TODO: Mark, Space
     Parity parity;      ///< 校验模式 / Parity mode
     uint8_t data_bits;  ///< 数据位长度 / Number of data bits
+    // TODO: 0.5 1.5
     uint8_t stop_bits;  ///< 停止位长度 / Number of stop bits
   };
 
