@@ -60,9 +60,9 @@ class HardwareContainer
    * 查找设备（多个别名） / Find device with fallback aliases
    */
   template <typename T>
-  T* Find(std::initializer_list<const char*> aliases) const
+  T* Find(const std::initializer_list<const char*> ALIASES) const
   {
-    for (const auto& alias : aliases)
+    for (const auto& alias : ALIASES)
     {
       if (T* obj = Find<T>(alias))
       {

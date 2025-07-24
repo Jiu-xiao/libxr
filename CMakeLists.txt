@@ -85,6 +85,11 @@ target_include_directories(
 )
 endif()
 
+# XRUSB
+if(LIBXR_DRIVER)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/driver/usb/CMakeLists.txt)
+endif()
+
 # Webots
 if(LIBXR_SYSTEM MATCHES "Webots")
   target_link_directories(
