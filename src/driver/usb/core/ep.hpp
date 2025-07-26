@@ -363,7 +363,10 @@ class Endpoint
     ConstRawData data;
     if (UseDoubleBuffer())
     {
-      data = ConstRawData(double_buffer_.PendingBuffer(), actual_transfer_size);
+      data =
+          ConstRawData(GetDirection() == Direction::OUT ? double_buffer_.ActiveBuffer()
+                                                        : double_buffer_.PendingBuffer(),
+                       actual_transfer_size);
     }
     else
     {

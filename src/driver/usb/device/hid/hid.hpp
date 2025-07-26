@@ -126,7 +126,7 @@ class HID : public DeviceClass
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 接口号起始 / Starting interface number
    */
-  void Init(EndpointPool& endpoint_pool, size_t start_itf_num) override
+  void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
   {
     inited_ = false;
     itf_num_ = start_itf_num;

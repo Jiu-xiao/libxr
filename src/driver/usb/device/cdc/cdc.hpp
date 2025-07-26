@@ -249,7 +249,7 @@ class CDC : public DeviceClass, public LibXR::UART
    * @param endpoint_pool 端点资源池 / Endpoint resource pool
    * @param start_itf_num 起始接口号 / Starting interface number
    */
-  void Init(EndpointPool& endpoint_pool, size_t start_itf_num) override
+  void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
   {
     control_line_state_ = 0;
     // 获取并配置数据IN端点
@@ -278,7 +278,7 @@ class CDC : public DeviceClass, public LibXR::UART
     // IAD描述符（关联接口）
     desc_block_.iad = {8,
                        static_cast<uint8_t>(DescriptorType::IAD),
-                       COMM_INTERFACE,
+                       static_cast<uint8_t>(COMM_INTERFACE + start_itf_num),
                        2,
                        static_cast<uint8_t>(Class::COMM),
                        static_cast<uint8_t>(Subclass::ABSTRACT_CONTROL_MODEL),
@@ -288,7 +288,7 @@ class CDC : public DeviceClass, public LibXR::UART
     // 通信接口描述符
     desc_block_.comm_intf = {9,
                              static_cast<uint8_t>(DescriptorType::INTERFACE),
-                             COMM_INTERFACE,
+                             static_cast<uint8_t>(COMM_INTERFACE + start_itf_num),
                              0,
                              1,
                              static_cast<uint8_t>(Class::COMM),
@@ -301,10 +301,10 @@ class CDC : public DeviceClass, public LibXR::UART
                               0x0110};  // CDC规范版本1.10
 
     // 呼叫管理功能描述符
-    desc_block_.cdc_callmgmt = {5, DescriptorType::CS_INTERFACE,
-                                DescriptorSubtype::CALL_MANAGEMENT,
-                                0x00,             // 无呼叫管理能力
-                                DATA_INTERFACE};  // 数据接口号
+    desc_block_.cdc_callmgmt = {
+        5, DescriptorType::CS_INTERFACE, DescriptorSubtype::CALL_MANAGEMENT,
+        0x00,                                                   // 无呼叫管理能力
+        static_cast<uint8_t>(DATA_INTERFACE + start_itf_num)};  // 数据接口号
 
     // ACM功能描述符
     desc_block_.cdc_acm = {4, DescriptorType::CS_INTERFACE, DescriptorSubtype::ACM,
@@ -312,12 +312,13 @@ class CDC : public DeviceClass, public LibXR::UART
 
     // 联合功能描述符
     desc_block_.cdc_union = {5, DescriptorType::CS_INTERFACE, DescriptorSubtype::UNION,
-                             COMM_INTERFACE, DATA_INTERFACE};
+                             static_cast<uint8_t>(COMM_INTERFACE + start_itf_num),
+                             static_cast<uint8_t>(DATA_INTERFACE + start_itf_num)};
 
     // 数据接口描述符
     desc_block_.data_intf = {9,
                              static_cast<uint8_t>(DescriptorType::INTERFACE),
-                             DATA_INTERFACE,
+                             static_cast<uint8_t>(DATA_INTERFACE + start_itf_num),
                              0,
                              2,
                              static_cast<uint8_t>(Class::DATA),

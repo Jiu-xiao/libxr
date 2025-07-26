@@ -24,10 +24,11 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS)
+          CONFIGS,
+      USB::Speed speed = USB::Speed::FULL, USB::USBSpec spec = USB::USBSpec::USB_2_0)
       : LibXR::USB::EndpointPool(max_ep_num),
-        LibXR::USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::FULL,
-                               packet_size, vid, pid, bcd, LANG_LIST, CONFIGS),
+        LibXR::USB::DeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
+                               CONFIGS),
         hpcd_(hpcd),
         id_(id)
   {
@@ -70,6 +71,28 @@ class STM32USBDeviceOtgFS : public STM32USBDevice
   };
 
   STM32USBDeviceOtgFS(
+      PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
+      const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
+      const std::initializer_list<EPInConfig> TX_EP_CFGS,
+      USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
+      uint16_t bcd,
+      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
+          CONFIGS);
+
+  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+};
+
+class STM32USBDeviceOtgHS : public STM32USBDevice
+{
+ public:
+  struct EPInConfig
+  {
+    LibXR::RawData buffer;
+    size_t fifo_size;
+  };
+
+  STM32USBDeviceOtgHS(
       PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
       const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
       const std::initializer_list<EPInConfig> TX_EP_CFGS,

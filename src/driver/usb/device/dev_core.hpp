@@ -288,6 +288,24 @@ class DeviceCore
   virtual ErrorCode SetAddress(uint8_t address, Context state) = 0;
 
   /**
+   * @brief 启用远程唤醒功能（SetFeature: DEVICE_REMOTE_WAKEUP）
+   *        Enable remote wakeup (via SetFeature)
+   */
+  virtual void EnableRemoteWakeup() {}
+
+  /**
+   * @brief 禁用远程唤醒功能（ClearFeature: DEVICE_REMOTE_WAKEUP）
+   *        Disable remote wakeup (via ClearFeature)
+   */
+  virtual void DisableRemoteWakeup() {}
+
+  /**
+   * @brief 判断当前是否允许远程唤醒
+   *        Query if remote wakeup is enabled
+   */
+  virtual bool IsRemoteWakeupEnabled() const { return false; }
+
+  /**
    * @brief 获取当前 USB 速度 / Get current USB speed
    * @return Speed 当前速度枚举 / Current speed
    */
