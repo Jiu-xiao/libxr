@@ -336,11 +336,59 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket *&se
     case StandardRequest::SET_CONFIGURATION:
       // 设置当前配置（切换Config描述符索引）
       ans = SwitchConfiguration(setup->wValue);
+      if (ans == ErrorCode::OK)
+      {
+        WriteZLP();
+      }
       break;
     case StandardRequest::GET_INTERFACE:
-      // TODO: 获取接口AltSetting
+    {
+      if (recipient != Recipient::INTERFACE)
+      {
+        ans = ErrorCode::ARG_ERR;
+        break;
+      }
+
+      uint8_t interface_index = static_cast<uint8_t>(setup->wIndex & 0xFF);
+
+      uint8_t alt = 0;
+      auto item = config_desc_.GetItemByInterfaceNum(interface_index);
+
+      if (item != nullptr)
+      {
+        item->GetAltSetting(interface_index, alt);
+      }
+      else
+      {
+        ans = ErrorCode::NOT_FOUND;
+        break;
+      }
+
+      DevWriteEP0Data(LibXR::ConstRawData(&alt, 1), endpoint_.in0->MaxTransferSize(), 1);
+
+      return ErrorCode::OK;
+    }
     case StandardRequest::SET_INTERFACE:
-      // TODO: 设置接口AltSetting
+    {
+      if (recipient != Recipient::INTERFACE)
+      {
+        ans = ErrorCode::ARG_ERR;
+        break;
+      }
+
+      uint8_t interface_index = static_cast<uint8_t>(setup->wIndex & 0xFF);
+      uint8_t alt_setting = static_cast<uint8_t>(setup->wValue);
+
+      auto item = config_desc_.GetItemByInterfaceNum(interface_index);
+      if (item == nullptr)
+      {
+        ans = ErrorCode::NOT_FOUND;
+        break;
+      }
+
+      ans = item->SetAltSetting(interface_index, alt_setting);
+      break;
+    }
     case StandardRequest::SYNCH_FRAME:
       // TODO: 一般仅用于同步端点
       ans = ErrorCode::NOT_SUPPORT;
@@ -430,7 +478,7 @@ ErrorCode DeviceCore::ClearFeature(const SetupPacket *setup, Recipient recipient
       // 可选：处理Remote Wakeup等设备级特性
       if (setup->wValue == 1)  // 1 = DEVICE_REMOTE_WAKEUP
       {
-        // TODO: 处理remote_wakeup标志位
+        DisableRemoteWakeup();
         WriteZLP();
       }
       else
@@ -477,7 +525,7 @@ ErrorCode DeviceCore::ApplyFeature(const SetupPacket *setup, Recipient recipient
     case Recipient::DEVICE:
       if (setup->wValue == 1)  // 1 = DEVICE_REMOTE_WAKEUP
       {
-        // TODO: 远程唤醒
+        EnableRemoteWakeup();
         WriteZLP();
       }
       else

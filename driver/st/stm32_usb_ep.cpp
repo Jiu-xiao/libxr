@@ -9,17 +9,27 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
                              LibXR::RawData buffer)
     : Endpoint(ep_num, dir, buffer), hpcd_(hpcd), fifo_size_(fifo_size), id_(id)
 {
-  ASSERT(fifo_size >= 8);
-  ASSERT(is_power_of_two(fifo_size));
-  ASSERT(is_power_of_two(buffer.size_));
+  ASSERT(fifo_size >= 64);
+  ASSERT(is_power_of_two(fifo_size) || fifo_size % 64 == 0);
+  ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 64 == 0);
 
-  map_[id][EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
+#if defined(USB_OTG_HS)
+  if (id == STM32_USB_OTG_HS)
+  {
+    map_hs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
+  }
+#endif
+#if defined(USB_OTG_FS)
+  if (id == STM32_USB_OTG_FS)
+  {
+    map_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
+  }
+#endif
 
   if (dir == Direction::IN)
   {
     HAL_PCDEx_SetTxFiFo(hpcd_, EPNumberToInt8(GetNumber()), fifo_size / 4);
   }
-
   else if (dir == Direction::OUT && ep_num == USB::Endpoint::EPNumber::EP0)
   {
     HAL_PCDEx_SetRxFiFo(hpcd_, fifo_size / 4);
@@ -230,6 +240,24 @@ size_t STM32Endpoint::MaxTransferSize() const
 }
 
 // --- HAL C 回调桥接 ---
+// NOLINTNEXTLINE
+static STM32Endpoint* GetEndpoint(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool is_in)
+{
+  auto id = STM32USBDeviceGetID(hpcd);
+#if defined(USB_OTG_HS)
+  if (id == STM32_USB_OTG_HS)
+  {
+    return STM32Endpoint::map_hs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
+  }
+#endif
+#if defined(USB_OTG_FS)
+  if (id == STM32_USB_OTG_FS)
+  {
+    return STM32Endpoint::map_fs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
+  }
+#endif
+  return nullptr;
+}
 
 extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
 {
@@ -237,24 +265,16 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
 
   ASSERT(id < STM32_USB_DEV_ID_NUM);
 
-  STM32Endpoint* ep_class =
-      STM32Endpoint::map_[id][epnum & 0x7F]
-                         [static_cast<uint8_t>(USB::Endpoint::Direction::IN)];
+  auto ep = GetEndpoint(hpcd, epnum, true);
 
-  if (!ep_class || ep_class->hpcd_ != hpcd)
+  if (!ep || ep->hpcd_ != hpcd)
   {
     return;
   }
 
-  auto ep_addr =
-      USB::Endpoint::EPNumberToAddr(ep_class->GetNumber(), ep_class->GetDirection());
-
-  PCD_EPTypeDef* ep_handle = &hpcd->IN_ep[ep_addr & EP_ADDR_MSK];
+  PCD_EPTypeDef* ep_handle = &hpcd->IN_ep[epnum & EP_ADDR_MSK];
 
   size_t actual_transfer_size = ep_handle->xfer_count;
-
-  auto ep = STM32Endpoint::map_[id][epnum & 0x7F]
-                               [static_cast<uint8_t>(USB::Endpoint::Direction::IN)];
 
   ep->OnTransferCompleteISR(true, actual_transfer_size);
 }
@@ -265,24 +285,16 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   ASSERT(id < STM32_USB_DEV_ID_NUM);
 
-  STM32Endpoint* ep_class =
-      STM32Endpoint::map_[id][epnum & 0x7F]
-                         [static_cast<uint8_t>(USB::Endpoint::Direction::OUT)];
+  auto ep = GetEndpoint(hpcd, epnum, false);
 
-  if (!ep_class || ep_class->hpcd_ != hpcd)
+  if (!ep || ep->hpcd_ != hpcd)
   {
     return;
   }
 
-  auto ep_addr =
-      USB::Endpoint::EPNumberToAddr(ep_class->GetNumber(), ep_class->GetDirection());
-
-  PCD_EPTypeDef* ep_handle = &hpcd->OUT_ep[ep_addr & EP_ADDR_MSK];
+  PCD_EPTypeDef* ep_handle = &hpcd->OUT_ep[epnum & EP_ADDR_MSK];
 
   size_t actual_transfer_size = ep_handle->xfer_count;
-
-  auto ep = STM32Endpoint::map_[id][epnum & 0x7F]
-                               [static_cast<uint8_t>(USB::Endpoint::Direction::OUT)];
 
   ep->OnTransferCompleteISR(true, actual_transfer_size);
 }

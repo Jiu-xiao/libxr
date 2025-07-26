@@ -103,7 +103,7 @@ class ConfigDescriptorItem
    * @brief USB配置描述符初始化，派生类在此处申请端点
    *
    */
-  virtual void Init(EndpointPool& endpoint_pool, size_t start_itf_num) = 0;
+  virtual void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) = 0;
 
   /**
    * @brief USB配置描述符反初始化，派生类在此处释放端点
@@ -120,6 +120,39 @@ class ConfigDescriptorItem
   virtual ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header)
   {
     UNUSED(header);
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  /**
+   * @brief 设置接口的备用设置
+   *        Set the alternate setting of an interface
+   *
+   * @param itf 接口号 / Interface number
+   * @param alt 备用设置号 / Alternate setting
+   * @return ErrorCode
+   */
+  virtual ErrorCode SetAltSetting(uint8_t itf, uint8_t alt)
+  {
+    UNUSED(itf);
+    if (alt == 0)
+    {
+      return ErrorCode::OK;
+    }
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  /**
+   * @brief 获取接口的备用设置
+   *        Get the alternate setting of an interface
+   *
+   * @param itf 接口号 / Interface number
+   * @param alt 备用设置号 / Alternate setting
+   * @return ErrorCode
+   */
+  virtual ErrorCode GetAltSetting(uint8_t itf, uint8_t& alt)
+  {
+    UNUSED(itf);
+    UNUSED(alt);
     return ErrorCode::NOT_SUPPORT;
   }
 
