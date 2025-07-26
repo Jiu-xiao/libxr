@@ -9,7 +9,7 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
                              LibXR::RawData buffer)
     : Endpoint(ep_num, dir, buffer), hpcd_(hpcd), fifo_size_(fifo_size), id_(id)
 {
-  ASSERT(fifo_size >= 0x40);
+  ASSERT(fifo_size >= 8);
   ASSERT(is_power_of_two(fifo_size));
   ASSERT(is_power_of_two(buffer.size_));
 
@@ -17,15 +17,12 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
 
   if (dir == Direction::IN)
   {
-    // IN端点需要指定FIFO大小
-    ASSERT(fifo_size > 0);
-    HAL_PCDEx_SetTxFiFo(hpcd_, EPNumberToInt8(GetNumber()), fifo_size);
+    HAL_PCDEx_SetTxFiFo(hpcd_, EPNumberToInt8(GetNumber()), fifo_size / 4);
   }
 
   else if (dir == Direction::OUT && ep_num == USB::Endpoint::EPNumber::EP0)
   {
-    // OUT端点不需要FIFO大小
-    HAL_PCDEx_SetRxFiFo(hpcd_, fifo_size);
+    HAL_PCDEx_SetRxFiFo(hpcd_, fifo_size / 4);
   }
 }
 
@@ -103,9 +100,13 @@ bool STM32Endpoint::Configure(const Config& cfg)
 
   ep_cfg.max_packet_size = max_packet_size;
 
+  if (max_packet_size < 8)
+  {
+    max_packet_size = 8;
+  }
+
   ASSERT(is_power_of_two(max_packet_size) && max_packet_size >= 8);
 
-  // 调用HAL底层API打开端点
   if (HAL_PCD_EP_Open(hpcd_, addr, max_packet_size, type) == HAL_OK)
   {
     SetState(State::IDLE);
@@ -144,7 +145,7 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
 
   ep->xfer_buff = reinterpret_cast<uint8_t*>(buffer.addr_);
 
-  if (GetDirection() == Direction::IN && size > 0)
+  if (UseDoubleBuffer() && GetDirection() == Direction::IN && size > 0)
   {
     SwitchBuffer();
   }

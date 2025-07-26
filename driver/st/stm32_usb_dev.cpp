@@ -62,13 +62,13 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
   auto rx_cfgs_itr = RX_EP_CFGS.begin();
   auto tx_cfgs_itr = TX_EP_CFGS.begin();
 
-  auto ep0_in =
-      new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
-                        USB::Endpoint::Direction::IN, rx_fifo_size, (*rx_cfgs_itr));
+  auto ep0_in = new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
+                                  USB::Endpoint::Direction::IN, (*tx_cfgs_itr).fifo_size,
+                                  (*tx_cfgs_itr).buffer);
 
-  auto ep0_out = new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
-                                   USB::Endpoint::Direction::OUT,
-                                   (*tx_cfgs_itr).fifo_size, (*tx_cfgs_itr).buffer);
+  auto ep0_out =
+      new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
+                        USB::Endpoint::Direction::OUT, rx_fifo_size, (*rx_cfgs_itr));
 
   USB::EndpointPool::SetEndpoint0(ep0_in, ep0_out);
 
@@ -77,9 +77,11 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
 
   USB::Endpoint::EPNumber rx_ep_index = USB::Endpoint::EPNumber::EP1;
 
+  size_t fifo_used_size = rx_fifo_size;
+
   for (; rx_cfgs_itr != RX_EP_CFGS.end(); rx_cfgs_itr++)
   {
-    auto ep = new STM32Endpoint(rx_ep_index, id_, hpcd_, USB::Endpoint::Direction::IN,
+    auto ep = new STM32Endpoint(rx_ep_index, id_, hpcd_, USB::Endpoint::Direction::OUT,
                                 rx_fifo_size, (*rx_cfgs_itr));
     USB::EndpointPool::Put(ep);
     rx_ep_index = USB::Endpoint::NextEPNumber(rx_ep_index);
@@ -89,10 +91,16 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
 
   for (; tx_cfgs_itr != TX_EP_CFGS.end(); tx_cfgs_itr++)
   {
-    auto ep = new STM32Endpoint(tx_ep_index, id_, hpcd_, USB::Endpoint::Direction::OUT,
+    auto ep = new STM32Endpoint(tx_ep_index, id_, hpcd_, USB::Endpoint::Direction::IN,
                                 (*tx_cfgs_itr).fifo_size, (*tx_cfgs_itr).buffer);
     USB::EndpointPool::Put(ep);
     tx_ep_index = USB::Endpoint::NextEPNumber(tx_ep_index);
+    fifo_used_size += (*tx_cfgs_itr).fifo_size;
+  }
+
+  if (fifo_used_size > USB_OTG_FS_TOTAL_FIFO_SIZE)
+  {
+    ASSERT(false);
   }
 }
 

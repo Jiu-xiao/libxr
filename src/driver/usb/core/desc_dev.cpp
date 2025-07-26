@@ -7,7 +7,7 @@ DeviceDescriptor::DeviceDescriptor(USBSpec spec, PacketSize0 packet_size, uint16
     : data_{DEVICE_DESC_LENGTH,
             DescriptorType::DEVICE,
             spec,
-            DeviceClass::MISCELLANEOUS,
+            ClassID::MISCELLANEOUS,
             0x02,
             0x01,
             packet_size,

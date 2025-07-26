@@ -370,7 +370,7 @@ class Endpoint
       data = ConstRawData(buffer_.addr_, actual_transfer_size);
     }
 
-    if (GetDirection() == Direction::OUT)
+    if (UseDoubleBuffer() && GetDirection() == Direction::OUT)
     {
       SwitchBuffer();
     }

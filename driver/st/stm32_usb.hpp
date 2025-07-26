@@ -2,8 +2,8 @@
 
 #include "double_buffer.hpp"
 #include "main.h"
-#include "usb/dev_core.hpp"
-#include "usb/ep_pool.hpp"
+#include "usb/core/ep_pool.hpp"
+#include "usb/device/dev_core.hpp"
 
 #if defined(HAL_PCD_MODULE_ENABLED)
 

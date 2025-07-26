@@ -4,8 +4,8 @@
 #include "main.h"
 #include "stm32_usb.hpp"
 #include "stm32_usb_ep.hpp"
-#include "usb/dev_core.hpp"
-#include "usb/ep_pool.hpp"
+#include "usb/core/ep_pool.hpp"
+#include "usb/device/dev_core.hpp"
 
 #if defined(HAL_PCD_MODULE_ENABLED)
 
