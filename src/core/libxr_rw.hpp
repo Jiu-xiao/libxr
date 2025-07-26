@@ -218,6 +218,7 @@ class Operation
       uint32_t timeout;
     } sem_info;
     OperationPollingStatus *status;
+    // TODO: state
   } data;
 
   /// Operation type.

@@ -18,6 +18,8 @@ constexpr uint8_t CFG_BUS_POWERED = 0x80;    ///< 总线供电 / Bus powered
 constexpr uint8_t CFG_SELF_POWERED = 0x40;   ///< 自供电 / Self powered
 constexpr uint8_t CFG_REMOTE_WAKEUP = 0x20;  ///< 支持远程唤醒 / Remote wakeup supported
 
+class ConfigDescriptor;
+
 /**
  * @brief USB 配置项接口类
  *        USB configuration item base class
@@ -115,14 +117,11 @@ class ConfigDescriptorItem
    * @param header 设备描述符 / Device descriptor
    * @return 错误码 / Error code
    */
-  virtual ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) = 0;
-
-  /**
-   * @brief 获取本配置项描述符的二进制数据
-   *        Get the binary data of this configuration item
-   * @return RawData 结构体 / RawData struct
-   */
-  RawData GetData();
+  virtual ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header)
+  {
+    UNUSED(header);
+    return ErrorCode::NOT_SUPPORT;
+  }
 
   /**
    * @brief 获取该配置项的最大描述符长度
@@ -139,6 +138,34 @@ class ConfigDescriptorItem
    */
   virtual size_t GetInterfaceNum() = 0;
 
+  /**
+   * @brief 判断是否包含IAD
+   *        Check if this configuration item contains IAD
+   *
+   * @return true
+   * @return false
+   */
+  virtual bool HasIAD() = 0;
+
+ protected:
+  /**
+   * @brief 获取本配置项描述符的二进制数据
+   *        Get the binary data of this configuration item
+   * @return RawData 结构体 / RawData struct
+   */
+  RawData GetData();
+
+  /**
+   * @brief 设置配置项数据
+   *        Set configuration item data
+   *
+   * @param data 配置项数据 / Configuration item data
+   */
+  void SetData(RawData data) { data_ = data; }
+
+  friend class ConfigDescriptor;
+
+ private:
   RawData data_;  ///< 存储本配置项序列化后描述符数据 / Serialized descriptor data for
                   ///< this item
 };

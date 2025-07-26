@@ -4,7 +4,7 @@
 #include "main.h"
 #include "stm32_usb.hpp"
 #include "stm32_usb_dev.hpp"
-#include "usb/ep.hpp"
+#include "usb/core/ep.hpp"
 
 namespace LibXR
 {

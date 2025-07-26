@@ -22,7 +22,7 @@ bool ConfigDescriptor::IsCompositeConfig(
     }
     for (const auto& item : group)
     {
-      if (item->GetInterfaceNum() > 1)
+      if (item->HasIAD())
       {
         return true;
       }
@@ -132,7 +132,7 @@ ErrorCode ConfigDescriptor::Generate()
 
   auto config = items_[current_cfg_];
 
-  for (size_t i = 0; i < CFG_NUM; ++i)
+  for (size_t i = 0; i < config.item_num; ++i)
   {
     auto data = config.items[i]->GetData();
 
@@ -153,7 +153,7 @@ bool ConfigDescriptor::IsComposite() const { return COMPOSITE; }
 
 ErrorCode ConfigDescriptor::OverrideDeviceDescriptor(DeviceDescriptor& descriptor)
 {
-  if (COMPOSITE || CFG_NUM != 1)
+  if (COMPOSITE || items_[current_cfg_].item_num != 1)
   {
     return ErrorCode::NOT_SUPPORT;
   }
@@ -187,7 +187,7 @@ ConfigDescriptorItem* ConfigDescriptor::GetItemByInterfaceNum(size_t index) cons
   for (size_t i = 0; i < config.item_num; ++i)
   {
     interface_index += config.items[i]->GetInterfaceNum();
-    if (interface_index > index)
+    if (interface_index >= index)
     {
       return config.items[i];
     }

@@ -36,7 +36,7 @@ enum class DescriptorType : uint8_t
 class DeviceDescriptor
 {
  public:
-  enum class DeviceClass : uint8_t
+  enum class ClassID : uint8_t
   {
     PER_INTERFACE = 0x00,         ///< 每个接口自定义类 / Per-interface
     AUDIO = 0x01,                 ///< 音频类 / Audio
@@ -87,7 +87,7 @@ class DeviceDescriptor
     DescriptorType bDescriptorType;  ///< 描述符类型（0x01，设备描述符）/ Descriptor type
                                      ///< (0x01, device)
     USBSpec bcdUSB;  ///< USB协议版本 / USB specification release (e.g. 0x0200 for USB2.0)
-    DeviceClass bDeviceClass;     ///< 设备类代码 / Device class code
+    ClassID bDeviceClass;         ///< 设备类代码 / Device class code
     uint8_t bDeviceSubClass;      ///< 设备子类代码 / Device subclass code
     uint8_t bDeviceProtocol;      ///< 协议代码 / Protocol code
     PacketSize0 bMaxPacketSize0;  ///< 控制端点0最大包长 / Max packet size for endpoint 0

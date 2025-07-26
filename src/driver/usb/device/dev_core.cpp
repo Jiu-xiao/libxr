@@ -324,7 +324,7 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket *&se
       break;
     case StandardRequest::GET_DESCRIPTOR:
       // 返回设备/配置/字符串等描述符
-      ans = SendDescriptor(setup);
+      ans = SendDescriptor(in_isr, setup, recipient);
       break;
     case StandardRequest::SET_DESCRIPTOR:
       // TODO: 很少用，可选实现
@@ -492,7 +492,8 @@ ErrorCode DeviceCore::ApplyFeature(const SetupPacket *setup, Recipient recipient
   return ErrorCode::OK;
 }
 
-ErrorCode DeviceCore::SendDescriptor(const SetupPacket *setup)
+ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket *setup,
+                                     Recipient recipient)
 {
   uint8_t desc_type = (setup->wValue >> 8) & 0xFF;
   uint8_t desc_idx = (setup->wValue) & 0xFF;
@@ -501,6 +502,10 @@ ErrorCode DeviceCore::SendDescriptor(const SetupPacket *setup)
   {
     case 0x01:  // DEVICE
       data = device_desc_.GetData();
+      if (!config_desc_.IsComposite())
+      {
+        config_desc_.OverrideDeviceDescriptor(device_desc_);
+      }
       break;
     case 0x02:  // CONFIGURATION
       config_desc_.Generate();
@@ -531,7 +536,30 @@ ErrorCode DeviceCore::SendDescriptor(const SetupPacket *setup)
     case 0x07:  // Other Speed Configurations
       return ErrorCode::NOT_SUPPORT;
     default:
-      return ErrorCode::ARG_ERR;
+    {
+      uint8_t intf_num = 0;
+
+      if (recipient == Recipient::INTERFACE)
+      {
+        intf_num = setup->wIndex & 0xFF;
+      }
+      else
+      {
+        return ErrorCode::ARG_ERR;
+      }
+
+      auto *item =
+          reinterpret_cast<DeviceClass *>(config_desc_.GetItemByInterfaceNum(intf_num));
+      if (item && item->OnGetDescriptor(in_isr, setup->bRequest, setup->wValue,
+                                        setup->wLength, data) == ErrorCode::OK)
+      {
+        break;  // 成功处理
+      }
+      else
+      {
+        return ErrorCode::ARG_ERR;
+      }
+    }
   }
 
   DevWriteEP0Data(data, endpoint_.in0->MaxTransferSize(), setup->wLength);
