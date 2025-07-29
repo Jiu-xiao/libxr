@@ -86,7 +86,10 @@ ErrorCode ConfigDescriptor::SwitchConfig(size_t index)
 
 void ConfigDescriptor::AssignEndpoints()
 {
-  ASSERT(!ep_assigned_);
+  if (ep_assigned_)
+  {
+    return;
+  }
   ep_assigned_ = true;
 
   auto config = items_[current_cfg_];
@@ -102,7 +105,10 @@ void ConfigDescriptor::AssignEndpoints()
 
 void ConfigDescriptor::ReleaseEndpoints()
 {
-  ASSERT(ep_assigned_);
+  if (!ep_assigned_)
+  {
+    return;
+  }
   ep_assigned_ = false;
 
   auto config = items_[current_cfg_];

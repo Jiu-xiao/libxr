@@ -344,6 +344,11 @@ class Endpoint
 
   void OnTransferCompleteISR(bool in_isr, size_t actual_transfer_size)
   {
+    if (GetState() != State::BUSY)
+    {
+      return;
+    }
+
     SetState(State::IDLE);
 
     if (bulk_need_zlp_)

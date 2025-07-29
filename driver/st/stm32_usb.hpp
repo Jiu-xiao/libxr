@@ -2,6 +2,9 @@
 
 #include "double_buffer.hpp"
 #include "main.h"
+
+#undef USB
+
 #include "usb/core/ep_pool.hpp"
 #include "usb/device/dev_core.hpp"
 

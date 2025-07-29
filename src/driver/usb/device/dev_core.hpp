@@ -147,6 +147,12 @@ class DeviceCore
   virtual void Init();
 
   /**
+   * @brief 反初始化 USB 设备 / Deinitialize USB device
+   *
+   */
+  virtual void Deinit();
+
+  /**
    * @brief 处理主机发送的 SETUP 包
    *        Handle USB setup packet from host
    * @param in_isr 是否在中断中 / In ISR
@@ -188,13 +194,15 @@ class DeviceCore
 
   /**
    * @brief 接收 0 长度包 / Receive zero-length packet (ZLP)
+   * @param context 传输上下文 / Transfer context
    */
-  void ReadZLP();
+  void ReadZLP(Context context = Context::ZLP);
 
   /**
    * @brief 发送 0 长度包 / Send zero-length packet (ZLP)
+   * @param context 传输上下文 / Transfer context
    */
-  void WriteZLP();
+  void WriteZLP(Context context = Context::ZLP);
 
   /**
    * @brief 向主机发送 EP0 数据包
@@ -321,6 +329,8 @@ class DeviceCore
     EndpointPool &pool;        ///< 端点池 / Endpoint pool
     Endpoint *in0 = nullptr;   ///< 控制 IN 端点指针 / Control IN endpoint
     Endpoint *out0 = nullptr;  ///< 控制 OUT 端点指针 / Control OUT endpoint
+    LibXR::Callback<LibXR::ConstRawData &> ep0_in_cb;  ///< EP0 IN 回调 / EP0 IN callback
+    LibXR::Callback<LibXR::ConstRawData &> ep0_out_cb;  ///< EP0 OUT 回调 / EP0 OUT callback
   } endpoint_;
 
   struct

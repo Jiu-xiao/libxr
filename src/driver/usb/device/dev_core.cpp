@@ -15,6 +15,12 @@ DeviceCore::DeviceCore(
       state_({speed, Context::UNKNOW, Context::UNKNOW, 0xFF, nullptr, false})
 {
   ASSERT(IsValidUSBCombination(spec, speed, packet_size));
+
+  endpoint_.ep0_in_cb =
+      LibXR::Callback<LibXR::ConstRawData &>::Create(OnEP0InCompleteStatic, this);
+
+  endpoint_.ep0_out_cb =
+      LibXR::Callback<LibXR::ConstRawData &>::Create(OnEP0OutCompleteStatic, this);
 }
 
 void DeviceCore::OnEP0OutCompleteStatic(bool in_isr, DeviceCore *self,
@@ -65,16 +71,16 @@ bool DeviceCore::IsValidUSBCombination(USBSpec spec, Speed speed,
   }
 }
 
-void DeviceCore::ReadZLP()
+void DeviceCore::ReadZLP(Context context)
 {
+  state_.out0 = context;
   endpoint_.out0->TransferZLP();
-  state_.out0 = Context::ZLP;
 }
 
-void DeviceCore::WriteZLP()
+void DeviceCore::WriteZLP(Context context)
 {
+  state_.in0 = context;
   endpoint_.in0->TransferZLP();
-  state_.in0 = Context::ZLP;
 }
 
 void DeviceCore::Init()
@@ -85,12 +91,16 @@ void DeviceCore::Init()
   endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
   endpoint_.out0->Configure({Endpoint::Direction::OUT, Endpoint::Type::CONTROL, 64});
 
-  endpoint_.in0->SetOnTransferCompleteCallback(
-      LibXR::Callback<LibXR::ConstRawData &>::Create(OnEP0InCompleteStatic, this));
-  endpoint_.out0->SetOnTransferCompleteCallback(
-      LibXR::Callback<LibXR::ConstRawData &>::Create(OnEP0OutCompleteStatic, this));
+  endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
+  endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
 
   config_desc_.AssignEndpoints();
+}
+
+void DeviceCore::Deinit()
+{
+  endpoint_.in0->Close();
+  endpoint_.out0->Close();
 }
 
 void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData &data)
@@ -159,8 +169,8 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData &data)
       else if (state_.need_write_zlp)
       {
         state_.need_write_zlp = false;
-        WriteZLP();
         ReadZLP();
+        WriteZLP();
       }
       else if (class_req_.write)
       {
@@ -214,13 +224,13 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
   ASSERT(buffer.size_ >= data.size_);
   memcpy(buffer.addr_, data.addr_, data.size_);
 
-  endpoint_.in0->Transfer(data.size_);
-
   // 如果一次就能结束，并且不需要 ZLP，直接准备状态阶段 OUT
   if (!has_more && !state_.need_write_zlp)
   {
     ReadZLP();
   }
+
+  endpoint_.in0->Transfer(data.size_);
 }
 
 void DeviceCore::DevReadEP0Data(LibXR::RawData data, size_t packet_max_length)
@@ -618,9 +628,8 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket *setup,
 ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
 {
   state_.pending_addr = static_cast<uint8_t>(address & 0x7F);
-  state_.in0 = Context::STATUS_IN;
 
-  WriteZLP();
+  WriteZLP(Context::STATUS_IN);
   return SetAddress(address, Context::SETUP);
 }
 
