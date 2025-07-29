@@ -4,12 +4,13 @@ using namespace LibXR;
 
 static inline bool is_power_of_two(unsigned int n) { return n > 0 && (n & (n - 1)) == 0; }
 
+#if defined(USB_OTG_HS) || defined(USB_OTG_FS)
 STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
                              PCD_HandleTypeDef* hpcd, Direction dir, size_t fifo_size,
                              LibXR::RawData buffer)
     : Endpoint(ep_num, dir, buffer), hpcd_(hpcd), fifo_size_(fifo_size), id_(id)
 {
-  ASSERT(fifo_size >= 64);
+  ASSERT(fifo_size >= 8);
   ASSERT(is_power_of_two(fifo_size) || fifo_size % 64 == 0);
   ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 64 == 0);
 
@@ -35,6 +36,37 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
     HAL_PCDEx_SetRxFiFo(hpcd_, fifo_size / 4);
   }
 }
+#endif
+
+#if defined(USB_BASE)
+STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
+                             PCD_HandleTypeDef* hpcd, Direction dir,
+                             size_t hw_buffer_offset, size_t hw_buffer_size,
+                             bool double_hw_buffer, LibXR::RawData buffer)
+    : Endpoint(ep_num, dir, buffer),
+      hpcd_(hpcd),
+      hw_buffer_size_(hw_buffer_size),
+      double_hw_buffer_(double_hw_buffer),
+      id_(id)
+{
+  ASSERT(hw_buffer_size >= 8);
+
+  ASSERT(is_power_of_two(hw_buffer_size));
+  ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 64 == 0);
+
+  map_dev_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
+
+  size_t buffer_offset = hw_buffer_offset;
+
+  if (double_hw_buffer)
+  {
+    buffer_offset |= ((hw_buffer_offset + hw_buffer_size) << 16);
+  }
+
+  HAL_PCDEx_PMAConfig(hpcd_, EPNumberToAddr(GetNumber(), dir),
+                      double_hw_buffer ? PCD_DBL_BUF : PCD_SNG_BUF, buffer_offset);
+}
+#endif
 
 bool STM32Endpoint::Configure(const Config& cfg)
 {
@@ -50,8 +82,12 @@ bool STM32Endpoint::Configure(const Config& cfg)
   switch (cfg.type)
   {
     case Type::BULK:
+#if defined(PCD_SPEED_HIGH_IN_FULL)
       if (hpcd_->Init.speed == PCD_SPEED_FULL ||
           hpcd_->Init.speed == PCD_SPEED_HIGH_IN_FULL)
+#else
+      if (hpcd_->Init.speed == PCD_SPEED_FULL)
+#endif
       {
         packet_size_limit = 64;
       }
@@ -61,8 +97,12 @@ bool STM32Endpoint::Configure(const Config& cfg)
       }
       break;
     case Type::INTERRUPT:
+#if defined(PCD_SPEED_HIGH_IN_FULL)
       if (hpcd_->Init.speed == PCD_SPEED_FULL ||
           hpcd_->Init.speed == PCD_SPEED_HIGH_IN_FULL)
+#else
+      if (hpcd_->Init.speed == PCD_SPEED_FULL)
+#endif
       {
         packet_size_limit = 64;
       }
@@ -72,8 +112,12 @@ bool STM32Endpoint::Configure(const Config& cfg)
       }
       break;
     case Type::ISOCHRONOUS:
+#if defined(PCD_SPEED_HIGH_IN_FULL)
       if (hpcd_->Init.speed == PCD_SPEED_FULL ||
           hpcd_->Init.speed == PCD_SPEED_HIGH_IN_FULL)
+#else
+      if (hpcd_->Init.speed == PCD_SPEED_FULL)
+#endif
       {
         packet_size_limit = 1023;
       }
@@ -89,10 +133,19 @@ bool STM32Endpoint::Configure(const Config& cfg)
       break;
   }
 
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   if (packet_size_limit > fifo_size_)
   {
     packet_size_limit = fifo_size_;
   }
+#endif
+
+#if defined(USB_BASE)
+  if (packet_size_limit > hw_buffer_size_)
+  {
+    packet_size_limit = hw_buffer_size_;
+  }
+#endif
 
   auto buffer = GetBuffer();
 
@@ -165,16 +218,35 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   ep->is_in = is_in ? 1U : 0U;
   ep->num = ep_addr & EP_ADDR_MSK;
 
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   if (hpcd_->Init.dma_enable == 1U)
   {
     ep->dma_addr = reinterpret_cast<uint32_t>(ep->xfer_buff);
   }
+#endif
+
+#if defined(USB_BASE)
+  if (is_in)
+  {
+    ep->xfer_fill_db = 1U;
+    ep->xfer_len_db = size;
+  }
+#endif
 
   SetLastTransferSize(size);
 
   SetState(State::BUSY);
 
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   auto ans = USB_EPStartXfer(hpcd_->Instance, ep, hpcd_->Init.dma_enable);
+#else
+  auto ans = USB_EPStartXfer(hpcd_->Instance, ep);
+  if (size == 0 && GetNumber() == USB::Endpoint::EPNumber::EP0 &&
+      GetDirection() == Direction::OUT)
+  {
+    OnTransferCompleteISR(false, 0);
+  }
+#endif
 
   if (ans == HAL_OK)
   {
@@ -215,6 +287,13 @@ ErrorCode STM32Endpoint::ClearStall()
   }
 
   uint8_t addr = EPNumberToAddr(GetNumber(), GetDirection());
+
+  if (GetNumber() == USB::Endpoint::EPNumber::EP0)
+  {
+    SetState(State::IDLE);
+    return ErrorCode::OK;
+  }
+
   if (HAL_PCD_EP_ClrStall(hpcd_, addr) == HAL_OK)
   {
     SetState(State::IDLE);
@@ -254,6 +333,12 @@ static STM32Endpoint* GetEndpoint(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool i
   if (id == STM32_USB_OTG_FS)
   {
     return STM32Endpoint::map_fs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
+  }
+#endif
+#if defined(USB_BASE)
+  if (id == STM32_USB_FS_DEV)
+  {
+    return STM32Endpoint::map_dev_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
   }
 #endif
   return nullptr;
