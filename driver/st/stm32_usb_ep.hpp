@@ -22,7 +22,7 @@ class STM32Endpoint : public USB::Endpoint
                 bool double_hw_buffer, LibXR::RawData buffer);
 #endif
 
-  bool Configure(const Config& cfg) override;
+  void Configure(const Config& cfg) override;
   void Close() override;
   ErrorCode Transfer(size_t size) override;
 

@@ -68,7 +68,7 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
 }
 #endif
 
-bool STM32Endpoint::Configure(const Config& cfg)
+void STM32Endpoint::Configure(const Config& cfg)
 {
   ASSERT(cfg.direction == Direction::IN || cfg.direction == Direction::OUT);
 
@@ -173,10 +173,8 @@ bool STM32Endpoint::Configure(const Config& cfg)
   if (HAL_PCD_EP_Open(hpcd_, addr, max_packet_size, type) == HAL_OK)
   {
     SetState(State::IDLE);
-    return true;
   }
   SetState(State::ERROR);
-  return false;
 }
 
 void STM32Endpoint::Close()
@@ -244,7 +242,7 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   if (size == 0 && GetNumber() == USB::Endpoint::EPNumber::EP0 &&
       GetDirection() == Direction::OUT)
   {
-    OnTransferCompleteISR(false, 0);
+    OnTransferCompleteCallback(false, 0);
   }
 #endif
 
@@ -361,7 +359,7 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
 
   size_t actual_transfer_size = ep_handle->xfer_count;
 
-  ep->OnTransferCompleteISR(true, actual_transfer_size);
+  ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }
 
 extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
@@ -381,5 +379,5 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   size_t actual_transfer_size = ep_handle->xfer_count;
 
-  ep->OnTransferCompleteISR(true, actual_transfer_size);
+  ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }

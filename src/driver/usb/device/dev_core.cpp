@@ -11,8 +11,8 @@ DeviceCore::DeviceCore(
     : config_desc_(ep_pool, configs),
       device_desc_(spec, packet_size, vid, pid, bcd, config_desc_.GetConfigNum()),
       strings_(lang_list),
-      endpoint_({ep_pool, nullptr, nullptr}),
-      state_({speed, Context::UNKNOW, Context::UNKNOW, 0xFF, nullptr, false})
+      endpoint_({ep_pool, nullptr, nullptr, {}, {}}),
+      state_({false, speed, Context::UNKNOW, Context::UNKNOW, 0xFF, nullptr, false})
 {
   ASSERT(IsValidUSBCombination(spec, speed, packet_size));
 
@@ -95,16 +95,24 @@ void DeviceCore::Init()
   endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
 
   config_desc_.AssignEndpoints();
+
+  state_.inited = true;
 }
 
 void DeviceCore::Deinit()
 {
+  state_.inited = false;
+  config_desc_.ReleaseEndpoints();
   endpoint_.in0->Close();
   endpoint_.out0->Close();
 }
 
 void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData &data)
 {
+  if (!state_.inited)
+  {
+    return;
+  }
   auto status = this->state_.out0;
   state_.out0 = Context::UNKNOW;
 
@@ -143,6 +151,10 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData &data)
 
 void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData &data)
 {
+  if (!state_.inited)
+  {
+    return;
+  }
   UNUSED(in_isr);
   UNUSED(data);
 
@@ -263,6 +275,10 @@ void DeviceCore::DevReadEP0Data(LibXR::RawData data, size_t packet_max_length)
 
 void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket *setup)
 {
+  if (!state_.inited)
+  {
+    return;
+  }
   RequestDirection direction =
       static_cast<RequestDirection>(setup->bmRequestType & REQ_DIRECTION_MASK);
   RequestType type = static_cast<RequestType>(setup->bmRequestType & REQ_TYPE_MASK);
@@ -346,10 +362,6 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket *&se
     case StandardRequest::SET_CONFIGURATION:
       // 设置当前配置（切换Config描述符索引）
       ans = SwitchConfiguration(setup->wValue);
-      if (ans == ErrorCode::OK)
-      {
-        WriteZLP();
-      }
       break;
     case StandardRequest::GET_INTERFACE:
     {

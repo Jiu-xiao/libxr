@@ -39,8 +39,8 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
 
   void Deinit() override { LibXR::USB::DeviceCore::Deinit(); }
 
-  void Start() { HAL_PCD_Start(hpcd_); }
-  void Stop() { HAL_PCD_Stop(hpcd_); }
+  void Start() override { HAL_PCD_Start(hpcd_); }
+  void Stop() override { HAL_PCD_Stop(hpcd_); }
 
   PCD_HandleTypeDef* hpcd_;
   stm32_usb_dev_id_t id_;
@@ -117,8 +117,8 @@ class STM32USBDeviceDevFs : public STM32USBDevice
     {
     }
 
-    EPConfig(LibXR::RawData buffer_in, LibXR::RawData buffer_out, size_t hw_buffer_size_in,
-             size_t hw_buffer_size_out)
+    EPConfig(LibXR::RawData buffer_in, LibXR::RawData buffer_out,
+             size_t hw_buffer_size_in, size_t hw_buffer_size_out)
         : buffer1(buffer_in),
           buffer2(buffer_out),
           hw_buffer_size1(hw_buffer_size_in),
