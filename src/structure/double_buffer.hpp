@@ -131,6 +131,14 @@ class DoubleBuffer
    */
   void SetActiveLength(size_t length) { active_len_ = length; }
 
+  /**
+   * @brief 设置当前活动缓冲区
+   *        Sets the active buffer
+   *
+   * @param block true 表示使用第二个缓冲区，false 表示使用第一个缓冲区
+   */
+  void SetActiveBlock(bool block) { active_ = block ? 1 : 0; }
+
  private:
   uint8_t* buffer_[2];  ///< 双缓冲区指针 / Double buffer pointers
   const size_t SIZE;    ///< 单个缓冲区大小 / Size of each buffer

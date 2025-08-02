@@ -153,6 +153,18 @@ class DeviceCore
   virtual void Deinit();
 
   /**
+   * @brief 启动 USB 设备 / Start USB device
+   *
+   */
+  virtual void Start() = 0;
+
+  /**
+   * @brief 停止 USB 设备 / Stop USB device
+   *
+   */
+  virtual void Stop() = 0;
+
+  /**
    * @brief 处理主机发送的 SETUP 包
    *        Handle USB setup packet from host
    * @param in_isr 是否在中断中 / In ISR
@@ -335,6 +347,7 @@ class DeviceCore
 
   struct
   {
+    bool inited = false;             ///< 是否初始化 / Initialized
     Speed speed = Speed::FULL;       ///< 当前速度 / Current speed
     Context in0;                     ///< IN0 状态 / IN0 context
     Context out0;                    ///< OUT0 状态 / OUT0 context

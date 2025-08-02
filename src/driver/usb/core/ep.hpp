@@ -284,7 +284,7 @@ class Endpoint
    * @brief 二次初始化/配置端点协议参数（由Pool/Manager分配后调用）
    *        Configure endpoint protocol parameters (call after pool allocation)
    */
-  virtual bool Configure(const Config& cfg) = 0;
+  virtual void Configure(const Config& cfg) = 0;
 
   /**
    * @brief 关闭端点（软禁用/资源复位）
@@ -331,6 +331,7 @@ class Endpoint
     {
       MarkNeedZLP();
     }
+    SetActiveLength(0);
     return Transfer(size);
   }
 
@@ -342,7 +343,7 @@ class Endpoint
    */
   virtual ErrorCode TransferZLP() { return Transfer(0); }
 
-  void OnTransferCompleteISR(bool in_isr, size_t actual_transfer_size)
+  void OnTransferCompleteCallback(bool in_isr, size_t actual_transfer_size)
   {
     if (GetState() != State::BUSY)
     {
@@ -351,17 +352,18 @@ class Endpoint
 
     SetState(State::IDLE);
 
-    if (bulk_need_zlp_)
+    if (bulk_need_zlp_ == 1)
     {
-      bulk_need_zlp_ = false;
+      bulk_need_zlp_ = 2;
       if (actual_transfer_size == last_transfer_size_)
       {
         TransferZLP();
         return;
       }
     }
-    else if (actual_transfer_size == 0 && GetType() == Type::BULK)
+    else if (bulk_need_zlp_ == 2 && GetType() == Type::BULK)
     {
+      bulk_need_zlp_ = 0;
       actual_transfer_size = last_transfer_size_;
     }
 
@@ -406,11 +408,22 @@ class Endpoint
    *        Switch buffer
    *
    */
-  void SwitchBuffer()
+  virtual void SwitchBuffer()
   {
     double_buffer_.EnablePending();
     double_buffer_.Switch();
-    double_buffer_.SetActiveLength(0);
+  }
+
+  /**
+   * @brief 设置当前活动缓冲区
+   *        Set active buffer
+   *
+   * @param active_block true 表示使用第二个缓冲区，false 表示使用第一个缓冲区
+   */
+  virtual void SetActiveBlock(bool active_block)
+  {
+    double_buffer_.SetActiveBlock(active_block);
+    double_buffer_.EnablePending();
   }
 
   /**
@@ -428,11 +441,19 @@ class Endpoint
   }
 
   /**
+   * @brief 获取上次传输的长度
+   *        Get last transfer size
+   *
+   * @return size_t 传输长度
+   */
+  size_t GetLastTransferSize() const { return last_transfer_size_; }
+
+  /**
    * @brief 标记需要传输空包
    *        Mark need to transfer ZLP
    *
    */
-  void MarkNeedZLP() { bulk_need_zlp_ = true; }
+  void MarkNeedZLP() { bulk_need_zlp_ = 1; }
 
  private:
   /// 传输完成回调 / Called when transfer completes
@@ -444,7 +465,7 @@ class Endpoint
   State state_ = State::DISABLED;      ///< 当前状态 / Endpoint status
   LibXR::RawData buffer_;              ///< 端点缓冲区 / Endpoint buffer
   LibXR::DoubleBuffer double_buffer_;  ///< 双缓冲区 / Double buffer
-  bool bulk_need_zlp_ = false;         ///< 是否需要传输空包 / Need to transfer ZLP
+  uint8_t bulk_need_zlp_ = 0;          ///< 是否需要传输空包 / Need to transfer ZLP
   size_t last_transfer_size_ = 0;      ///< 上次传输的长度 / Last transfered length
 };  // namespace LibXR::USB
 
