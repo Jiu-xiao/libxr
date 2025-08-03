@@ -26,6 +26,8 @@ class CH32Endpoint : public USB::Endpoint
   uint8_t dev_id_;
   bool tog_ = false;
 
+  RawData dma_buffer_;
+
 #if defined(USBFSD)
   static constexpr uint8_t EP_DEV_FS_MAX_SIZE = 8;
   static inline CH32Endpoint* map_dev_[EP_DEV_FS_MAX_SIZE][2] = {};

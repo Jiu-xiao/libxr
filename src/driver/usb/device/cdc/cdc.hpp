@@ -41,8 +41,8 @@ class CDC : public DeviceClass, public LibXR::UART
   /// CDC协议代码 / CDC protocol codes
   enum class Protocol : uint8_t
   {
-    AT_COMMAND =
-        0x01,  ///< AT命令协议（虚拟串口常用）| AT Command protocol (common for VCP)
+    NONE = 0x00,        ///< 无协议 / No protocol
+    AT_COMMAND = 0x01,  ///< AT命令协议| AT Command protocol
   };
 
   /// CDC子类代码 / CDC subclass codes
@@ -284,7 +284,7 @@ class CDC : public DeviceClass, public LibXR::UART
                        2,
                        static_cast<uint8_t>(Class::COMM),
                        static_cast<uint8_t>(Subclass::ABSTRACT_CONTROL_MODEL),
-                       static_cast<uint8_t>(Protocol::AT_COMMAND),
+                       static_cast<uint8_t>(Protocol::NONE),
                        0};
 
     // 通信接口描述符
@@ -295,7 +295,7 @@ class CDC : public DeviceClass, public LibXR::UART
                              1,
                              static_cast<uint8_t>(Class::COMM),
                              static_cast<uint8_t>(Subclass::ABSTRACT_CONTROL_MODEL),
-                             static_cast<uint8_t>(Protocol::AT_COMMAND),
+                             static_cast<uint8_t>(Protocol::NONE),
                              0};
 
     // CDC头功能描述符
