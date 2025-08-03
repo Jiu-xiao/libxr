@@ -263,23 +263,39 @@ static void DisableRx(USB::Endpoint::EPNumber ep_num)
 }
 // NOLINTEND
 
+static LibXR::RawData SelectBuffer(USB::Endpoint::EPNumber ep_num,
+                                   USB::Endpoint::Direction dir,
+                                   const LibXR::RawData& buffer)
+{
+  if (ep_num == USB::Endpoint::EPNumber::EP0)
+  {
+    return buffer;
+  }
+  else
+  {
+    if (dir == USB::Endpoint::Direction::OUT)
+    {
+      return LibXR::RawData(buffer.addr_, 128);
+    }
+    else
+    {
+      return LibXR::RawData(reinterpret_cast<uint8_t*>(buffer.addr_) + 128, 128);
+    }
+  }
+}
+
 CH32Endpoint::CH32Endpoint(EPNumber ep_num, ch32_usb_dev_id_t dev_id, Direction dir,
                            LibXR::RawData buffer)
-    : Endpoint(ep_num, dir,
-               ep_num == EPNumber::EP0
-                   ? buffer
-                   : (dir == Direction::OUT
-                          ? LibXR::RawData(buffer.addr_, 128)
-                          : LibXR::RawData(reinterpret_cast<uint8_t*>(buffer.addr_) + 128,
-                                           128))),
-      dev_id_(dev_id)
+    : Endpoint(ep_num, dir, SelectBuffer(ep_num, dir, buffer)),
+      dev_id_(dev_id),
+      dma_buffer_(buffer)
 {
 #if defined(USBFSD)
   if (dev_id == CH32_USB_FS_DEV)
   {
     map_dev_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
-    SetDmaBuffer(GetNumber(), GetBuffer().addr_);
+    SetDmaBuffer(GetNumber(), dma_buffer_.addr_);
 
     if (dir == Direction::IN)
     {
@@ -300,10 +316,6 @@ void CH32Endpoint::Configure(const Config& cfg)
   ep_cfg = cfg;
   ep_cfg.max_packet_size = 64;
 
-  ep_cfg.double_buffer = false;
-
-  SetDmaBuffer(GetNumber(), GetBuffer().addr_);
-
   if (GetNumber() != EPNumber::EP0)
   {
     ep_cfg.double_buffer = true;
@@ -313,13 +325,14 @@ void CH32Endpoint::Configure(const Config& cfg)
     ep_cfg.double_buffer = false;
   }
 
-  *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_ACK | USBFS_UEP_R_AUTO_TOG;
+  *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
   *GetTxControlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
 
   SetTxLen(GetNumber(), 0);
 
   EnableTx(GetNumber());
   EnableRx(GetNumber());
+  SetDmaBuffer(GetNumber(), dma_buffer_.addr_);
 
   SetState(State::IDLE);
 }
