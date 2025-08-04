@@ -10,7 +10,10 @@ namespace LibXR
 typedef enum : uint8_t
 {
 #if defined(USBFSD)
-  CH32_USB_FS_DEV,
+  CH32_USB_OTG_FS,
+#endif
+#if defined(USBHSD)
+  CH32_USB_OTG_HS,
 #endif
   // CH32_USB_HS_DEV, // 如需支持HS/OTG可补充
   CH32_USB_DEV_ID_NUM

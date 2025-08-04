@@ -7,11 +7,35 @@
 namespace LibXR
 {
 
-class CH32Endpoint : public USB::Endpoint
+class CH32EndpointOtgFs : public USB::Endpoint
 {
  public:
-  CH32Endpoint(EPNumber ep_num, ch32_usb_dev_id_t dev_id, Direction dir,
-               LibXR::RawData buffer);
+  CH32EndpointOtgFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer);
+
+  void Configure(const Config& cfg) override;
+  void Close() override;
+  ErrorCode Transfer(size_t size) override;
+
+  void TransferComplete(size_t size);
+  ErrorCode Stall() override;
+  ErrorCode ClearStall() override;
+
+  void SwitchBuffer() override;
+
+  bool tog_ = false;
+
+  RawData dma_buffer_;
+
+#if defined(USBFSD)
+  static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
+  static inline CH32EndpointOtgFs* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
+#endif
+};
+
+class CH32EndpointOtgHs : public USB::Endpoint
+{
+ public:
+  CH32EndpointOtgHs(EPNumber ep_num, Direction dir, LibXR::RawData buffer);
 
   void Configure(const Config& cfg) override;
   void Close() override;
@@ -29,8 +53,8 @@ class CH32Endpoint : public USB::Endpoint
   RawData dma_buffer_;
 
 #if defined(USBFSD)
-  static constexpr uint8_t EP_DEV_FS_MAX_SIZE = 8;
-  static inline CH32Endpoint* map_dev_[EP_DEV_FS_MAX_SIZE][2] = {};
+  static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 16;
+  static inline CH32EndpointOtgFs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
 #endif
 };
 

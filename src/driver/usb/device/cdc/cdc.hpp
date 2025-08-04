@@ -431,7 +431,7 @@ class CDC : public DeviceClass, public LibXR::UART
     auto buffer = cdc->ep_data_in_->GetBuffer();
 
     // 检查当前是否有传输正在进行
-    if (cdc->ep_data_in_->GetActiveLength() > 0)
+    if (cdc->ep_data_in_->GetActiveLength() > 0 || cdc->need_write_zlp_)
     {
       return ErrorCode::FAILED;
     }
@@ -497,19 +497,25 @@ class CDC : public DeviceClass, public LibXR::UART
     if (!muti_transfer)
     {
       auto ans = port.queue_info_->Pop();
-
       ASSERT(ans == ErrorCode::OK);
+
+      if (info.data.size_ % cdc->ep_data_in_->MaxTransferSize() == 0)
+      {
+        cdc->need_write_zlp_ = true;
+      }
     }
 
     // 启动传输
     auto ans = ErrorCode::OK;
 
-    if (!muti_transfer)
+    if (info.data.size_ % cdc->ep_data_in_->MaxTransferSize() == 0 && !muti_transfer)
     {
+      cdc->need_write_zlp_ = true;
       ans = cdc->ep_data_in_->TransferBulk(info.data.size_);
     }
     else
     {
+      cdc->ep_data_in_->SetActiveLength(0);
       ans = cdc->ep_data_in_->Transfer(info.data.size_);
     }
 
@@ -575,7 +581,7 @@ class CDC : public DeviceClass, public LibXR::UART
    * 接收数据并放入接收缓冲区，然后重新启动传输
    * Receives data into receive buffer and restarts transfer
    */
-  void OnDataOutComplete(bool in_isr, ConstRawData& data)
+  inline void OnDataOutComplete(bool in_isr, ConstRawData& data)
   {
     // 重启OUT端点传输
     ep_data_out_->Transfer(ep_data_out_->MaxTransferSize());
@@ -597,52 +603,65 @@ class CDC : public DeviceClass, public LibXR::UART
    * 完成发送操作并处理发送队列中的下一个数据包
    * Completes transmission and processes next packet in send queue
    */
-  void OnDataInComplete(bool in_isr, ConstRawData& data)
+  inline void OnDataInComplete(bool in_isr, ConstRawData& data)
   {
     UNUSED(in_isr);
     UNUSED(data);
 
-    size_t pending_len = ep_data_in_->GetActiveLength();
-
-    if (pending_len == 0)
+    if (!need_write_zlp_)
     {
-      return;
-    }
+      size_t pending_len = ep_data_in_->GetActiveLength();
 
-    ep_data_in_->SetActiveLength(0);
-
-    auto ans = ErrorCode::OK;
-    if (write_remain_ == 0)
-    {
-      ans = ep_data_in_->TransferBulk(pending_len);
-    }
-    else
-    {
-      ans = ep_data_in_->Transfer(pending_len);
-    }
-
-    if (write_remain_ != 0)
-    {
-      auto buffer = ep_data_in_->GetBuffer();
-      size_t len = 0;
-      if (write_remain_ > buffer.size_)
+      if (pending_len == 0)
       {
-        len = buffer.size_;
-        write_remain_ = write_remain_ - buffer.size_;
+        return;
+      }
+
+      auto ans = ErrorCode::OK;
+      if (write_remain_ == 0 && pending_len % ep_data_in_->MaxTransferSize() == 0 &&
+          write_port_cdc_.Size() == 0)
+      {
+        need_write_zlp_ = true;
+        ans = ep_data_in_->TransferBulk(pending_len);
+        return;
       }
       else
       {
-        len = write_remain_;
-        write_remain_ = 0;
+        ep_data_in_->SetActiveLength(0);
+        ans = ep_data_in_->Transfer(pending_len);
       }
 
-      auto ans = write_port_cdc_.queue_data_->PopBatch(
-          reinterpret_cast<uint8_t*>(buffer.addr_), len);
-      ASSERT(ans == ErrorCode::OK);
+      UNUSED(ans);
 
-      ep_data_in_->SetActiveLength(len);
-      return;
+      if (write_remain_ != 0)
+      {
+        auto buffer = ep_data_in_->GetBuffer();
+        size_t len = 0;
+        if (write_remain_ > buffer.size_)
+        {
+          len = buffer.size_;
+          write_remain_ = write_remain_ - buffer.size_;
+        }
+        else
+        {
+          len = write_remain_;
+          write_remain_ = 0;
+        }
+
+        auto ans = write_port_cdc_.queue_data_->PopBatch(
+            reinterpret_cast<uint8_t*>(buffer.addr_), len);
+        ASSERT(ans == ErrorCode::OK);
+
+        ep_data_in_->SetActiveLength(len);
+        return;
+      }
     }
+    else
+    {
+      need_write_zlp_ = false;
+    }
+
+    auto ans = ErrorCode::OK;
 
     WriteInfoBlock info;
 
@@ -958,6 +977,7 @@ class CDC : public DeviceClass, public LibXR::UART
   // 状态标志
   bool inited_ = false;           ///< 初始化标志 / Initialization flag
   bool ep_comm_in_busy_ = false;  ///< 通信端点忙标志 / Communication endpoint busy flag
+  bool need_write_zlp_ = false;   ///< 需要写入ZLP标志 / Need to write ZLP flag
   size_t write_remain_;           ///< 写入剩余数据 / Remaining data to be written
   size_t write_total_;            ///< 写入总字节数 / Total number of bytes written
 

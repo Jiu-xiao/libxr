@@ -53,8 +53,8 @@ class STM32Endpoint : public USB::Endpoint
   static inline STM32Endpoint* map_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 #endif
 #if defined(USB_BASE)
-  static constexpr uint8_t EP_DEV_FS_MAX_SIZE = 8;
-  static inline STM32Endpoint* map_dev_[EP_DEV_FS_MAX_SIZE][2] = {};
+  static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
+  static inline STM32Endpoint* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 #endif
 };
 

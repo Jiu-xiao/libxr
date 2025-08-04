@@ -94,7 +94,6 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
         }
         else
         {
-          expected = BusyState::PENDING;
           continue;
         }
       }
