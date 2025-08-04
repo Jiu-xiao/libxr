@@ -54,7 +54,7 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
   ASSERT(is_power_of_two(hw_buffer_size));
   ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 64 == 0);
 
-  map_dev_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
+  map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
   size_t buffer_offset = hw_buffer_offset;
 
@@ -336,7 +336,7 @@ static STM32Endpoint* GetEndpoint(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool i
 #if defined(USB_BASE)
   if (id == STM32_USB_FS_DEV)
   {
-    return STM32Endpoint::map_dev_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
+    return STM32Endpoint::map_otg_fs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
   }
 #endif
   return nullptr;

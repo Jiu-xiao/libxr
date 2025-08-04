@@ -358,7 +358,6 @@ class Endpoint
       if (actual_transfer_size == last_transfer_size_)
       {
         TransferZLP();
-        return;
       }
     }
     else if (bulk_need_zlp_ == 2 && GetType() == Type::BULK)

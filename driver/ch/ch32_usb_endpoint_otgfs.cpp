@@ -1,7 +1,6 @@
-#include "ch32_usb_endpoint.hpp"
-
 #include <cstdint>
 
+#include "ch32_usb_endpoint.hpp"
 #include "ch32v30x.h"
 #include "ch32v30x_usb.h"
 #include "ep.hpp"
@@ -263,6 +262,7 @@ static void DisableRx(USB::Endpoint::EPNumber ep_num)
 }
 // NOLINTEND
 
+// NOLINTNEXTLINE
 static LibXR::RawData SelectBuffer(USB::Endpoint::EPNumber ep_num,
                                    USB::Endpoint::Direction dir,
                                    const LibXR::RawData& buffer)
@@ -284,33 +284,26 @@ static LibXR::RawData SelectBuffer(USB::Endpoint::EPNumber ep_num,
   }
 }
 
-CH32Endpoint::CH32Endpoint(EPNumber ep_num, ch32_usb_dev_id_t dev_id, Direction dir,
-                           LibXR::RawData buffer)
-    : Endpoint(ep_num, dir, SelectBuffer(ep_num, dir, buffer)),
-      dev_id_(dev_id),
-      dma_buffer_(buffer)
+CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
+                                     LibXR::RawData buffer)
+    : Endpoint(ep_num, dir, SelectBuffer(ep_num, dir, buffer)), dma_buffer_(buffer)
 {
-#if defined(USBFSD)
-  if (dev_id == CH32_USB_FS_DEV)
+  map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
+
+  SetDmaBuffer(GetNumber(), dma_buffer_.addr_);
+
+  if (dir == Direction::IN)
   {
-    map_dev_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
-
-    SetDmaBuffer(GetNumber(), dma_buffer_.addr_);
-
-    if (dir == Direction::IN)
-    {
-      SetTxLen(GetNumber(), 0);
-      *GetTxControlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
-    }
-    else
-    {
-      *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
-    }
+    SetTxLen(GetNumber(), 0);
+    *GetTxControlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
   }
-#endif
+  else
+  {
+    *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+  }
 }
 
-void CH32Endpoint::Configure(const Config& cfg)
+void CH32EndpointOtgFs::Configure(const Config& cfg)
 {
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
@@ -337,7 +330,7 @@ void CH32Endpoint::Configure(const Config& cfg)
   SetState(State::IDLE);
 }
 
-void CH32Endpoint::Close()
+void CH32EndpointOtgFs::Close()
 {
   DisableTx(GetNumber());
   DisableRx(GetNumber());
@@ -348,7 +341,7 @@ void CH32Endpoint::Close()
   SetState(State::DISABLED);
 }
 
-ErrorCode CH32Endpoint::Transfer(size_t size)
+ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
 {
   if (GetState() == State::BUSY)
   {
@@ -362,6 +355,11 @@ ErrorCode CH32Endpoint::Transfer(size_t size)
   }
 
   bool is_in = (GetDirection() == Direction::IN);
+
+  if (is_in && UseDoubleBuffer())
+  {
+    SwitchBuffer();
+  }
 
   if (is_in)
   {
@@ -396,17 +394,12 @@ ErrorCode CH32Endpoint::Transfer(size_t size)
     tog_ = !tog_;
   }
 
-  if (is_in && UseDoubleBuffer())
-  {
-    SwitchBuffer();
-  }
-
   SetLastTransferSize(size);
   SetState(State::BUSY);
   return ErrorCode::OK;
 }
 
-ErrorCode CH32Endpoint::Stall()
+ErrorCode CH32EndpointOtgFs::Stall()
 {
   if (GetState() != State::IDLE)
   {
@@ -426,7 +419,7 @@ ErrorCode CH32Endpoint::Stall()
   return ErrorCode::OK;
 }
 
-ErrorCode CH32Endpoint::ClearStall()
+ErrorCode CH32EndpointOtgFs::ClearStall()
 {
   if (GetState() != State::STALLED)
   {
@@ -446,13 +439,14 @@ ErrorCode CH32Endpoint::ClearStall()
   return ErrorCode::OK;
 }
 
-void CH32Endpoint::TransferComplete(size_t size)
+void CH32EndpointOtgFs::TransferComplete(size_t size)
 {
   if (GetDirection() == Direction::IN)
   {
     size = GetLastTransferSize();
   }
 
+  // NOLINTNEXTLINE
   if ((USBFSD->INT_FG & USBFS_U_TOG_OK) != USBFS_U_TOG_OK)
   {
     return;
@@ -471,7 +465,7 @@ void CH32Endpoint::TransferComplete(size_t size)
   OnTransferCompleteCallback(false, size);
 }
 
-void CH32Endpoint::SwitchBuffer()
+void CH32EndpointOtgFs::SwitchBuffer()
 {
   if (GetDirection() == Direction::IN)
   {
