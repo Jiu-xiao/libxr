@@ -418,7 +418,7 @@ void STM32CANFD::ProcessTxInterrupt()
     bus_busy_.store(UINT32_MAX, std::memory_order_release);
   }
 
-  if (hcan_->Init.TxFifoQueueElmtsNbr - HAL_FDCAN_GetTxFifoFreeLevel(hcan_) == 0)
+  if (GetTxFifoTotalElements(hcan_) - HAL_FDCAN_GetTxFifoFreeLevel(hcan_) == 0)
   {
     bus_busy_.store(0, std::memory_order_release);
   }
