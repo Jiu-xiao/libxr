@@ -2,6 +2,8 @@
 
 using namespace LibXR;
 
+#if HAL_PCD_MODULE_ENABLED
+
 static inline bool is_power_of_two(unsigned int n) { return n > 0 && (n & (n - 1)) == 0; }
 
 #if defined(USB_OTG_HS) || defined(USB_OTG_FS)
@@ -381,3 +383,5 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }
+
+#endif
