@@ -180,8 +180,7 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
       return ErrorCode::OK;
     }
 
-    if (bus_busy_.load(std::memory_order_acquire) == 0 &&
-        tx_pool_.RecycleSlot(slot) == ErrorCode::OK)
+    if (HardwareTxQueueEmptySize() != 0 && tx_pool_.RecycleSlot(slot) == ErrorCode::OK)
     {
       continue;
     }
@@ -263,8 +262,7 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
       return ErrorCode::OK;
     }
 
-    if (bus_busy_.load(std::memory_order_acquire) == 0 &&
-        tx_pool_fd_.RecycleSlot(slot) == ErrorCode::OK)
+    if (HardwareTxQueueEmptySize() != 0 && tx_pool_fd_.RecycleSlot(slot) == ErrorCode::OK)
     {
       continue;
     }
@@ -376,7 +374,6 @@ void STM32CANFD::ProcessTxInterrupt()
     tx_buff_.header.MessageMarker = 0x00;
 
     HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack_fd.data);
-    bus_busy_.store(UINT32_MAX, std::memory_order_release);
   }
   else if (tx_pool_.Get(tx_buff_.pack) == ErrorCode::OK)
   {
@@ -415,12 +412,6 @@ void STM32CANFD::ProcessTxInterrupt()
     tx_buff_.header.BitRateSwitch = FDCAN_BRS_OFF;
 
     HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack.data);
-    bus_busy_.store(UINT32_MAX, std::memory_order_release);
-  }
-
-  if (GetTxFifoTotalElements(hcan_) - HAL_FDCAN_GetTxFifoFreeLevel(hcan_) == 0)
-  {
-    bus_busy_.store(0, std::memory_order_release);
   }
 }
 
