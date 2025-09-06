@@ -35,7 +35,8 @@ class CH32EndpointOtgFs : public USB::Endpoint
 class CH32EndpointOtgHs : public USB::Endpoint
 {
  public:
-  CH32EndpointOtgHs(EPNumber ep_num, Direction dir, LibXR::RawData buffer);
+  CH32EndpointOtgHs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
+                    bool double_buffer);
 
   void Configure(const Config& cfg) override;
   void Close() override;
@@ -48,13 +49,15 @@ class CH32EndpointOtgHs : public USB::Endpoint
   void SwitchBuffer() override;
 
   uint8_t dev_id_;
-  bool tog_ = false;
+  bool tog0_ = false;
+  bool tog1_ = false;
+  bool hw_double_buffer_ = false;
 
   RawData dma_buffer_;
 
 #if defined(USBFSD)
   static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 16;
-  static inline CH32EndpointOtgFs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
+  static inline CH32EndpointOtgHs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
 #endif
 };
 
