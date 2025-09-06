@@ -496,12 +496,14 @@ class CDC : public DeviceClass, public LibXR::UART
 
     if (!muti_transfer)
     {
-      auto ans = port.queue_info_->Pop();
-      ASSERT(ans == ErrorCode::OK);
-
       if (info.data.size_ % cdc->ep_data_in_->MaxTransferSize() == 0)
       {
         cdc->need_write_zlp_ = true;
+      }
+      else
+      {
+        auto ans = port.queue_info_->Pop();
+        ASSERT(ans == ErrorCode::OK);
       }
     }
 

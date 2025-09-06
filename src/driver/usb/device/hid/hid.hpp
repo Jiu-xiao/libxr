@@ -222,9 +222,17 @@ class HID : public DeviceClass
     self->OnDataInComplete(in_isr, data);
   }
 
-  virtual void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data) {}
+  virtual void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
+  {
+    UNUSED(in_isr);
+    UNUSED(data);
+  }
 
-  virtual void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data) {}
+  virtual void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data)
+  {
+    UNUSED(in_isr);
+    UNUSED(data);
+  }
 
   /**
    * @brief 反初始化 HID 设备

@@ -8,7 +8,7 @@
 using namespace LibXR;
 
 // NOLINTBEGIN
-static volatile inline uint8_t* GetTxControlAddr(USB::Endpoint::EPNumber ep_num)
+static volatile uint8_t* GetTxControlAddr(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
@@ -34,7 +34,7 @@ static volatile inline uint8_t* GetTxControlAddr(USB::Endpoint::EPNumber ep_num)
   return nullptr;
 }
 
-static inline volatile uint8_t* GetRxControlAddr(USB::Endpoint::EPNumber ep_num)
+static volatile uint8_t* GetRxControlAddr(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
@@ -446,11 +446,15 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     size = GetLastTransferSize();
   }
 
-  // NOLINTNEXTLINE
-  if ((USBFSD->INT_FG & USBFS_U_TOG_OK) != USBFS_U_TOG_OK)
+  std::atomic_signal_fence(std::memory_order_seq_cst);
+
+  if (GetDirection() == Direction::OUT &&
+      (USBFSD->INT_FG & USBFS_U_TOG_OK) != USBFS_U_TOG_OK)  // NOLINT
   {
     return;
   }
+
+  std::atomic_signal_fence(std::memory_order_seq_cst);
 
   if (GetNumber() == EPNumber::EP0 && GetDirection() == Direction::OUT)
   {

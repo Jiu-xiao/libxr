@@ -36,7 +36,7 @@ ErrorCode EndpointPool::Get(Endpoint*& ep_info, Endpoint::Direction direction,
 
 ErrorCode EndpointPool::Release(Endpoint* ep_info)
 {
-  for (int i = 0; i < SlotCount(); ++i)
+  for (uint32_t i = 0; i < SlotCount(); ++i)
   {
     auto& slot = (*this)[i];
     auto state = slot.slot.state.load(std::memory_order_acquire);

@@ -94,7 +94,7 @@ void ConfigDescriptor::AssignEndpoints()
 
   auto config = items_[current_cfg_];
 
-  size_t start_itf = 1;
+  size_t start_itf = 0;
 
   for (size_t i = 0; i < config.item_num; ++i)
   {
