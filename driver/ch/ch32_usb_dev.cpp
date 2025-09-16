@@ -28,19 +28,20 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
     {
       switch (token)
       {
-        // --- SETUP阶段：只分发SETUP包到上层处理 ---
         case USBFS_UIS_TOKEN_SETUP:
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-          USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;  // NOLINT
+          USBFSD->UEP0_RX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
           LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->tog_ = true;
           LibXR::CH32EndpointOtgFs::map_otg_fs_[0][1]->tog_ = true;
-          // 分发EP0 SETUP事件
+
+          map[0][0]->SetState(Endpoint::State::IDLE);
+          map[0][1]->SetState(Endpoint::State::IDLE);
+
           LibXR::CH32USBDeviceFS::self_->OnSetupPacket(
               true, reinterpret_cast<const SetupPacket *>(
                         LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->GetBuffer().addr_));
           break;
 
-        // --- DATA阶段 ---
         case USBFS_UIS_TOKEN_OUT:
         {
           uint16_t len = USBFSD->RX_LEN;  // NOLINT
@@ -67,8 +68,10 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
     LibXR::CH32USBDeviceFS::self_->Init();
     LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->tog_ = true;
     LibXR::CH32EndpointOtgFs::map_otg_fs_[0][1]->tog_ = true;
+    map[0][0]->SetState(Endpoint::State::IDLE);
+    map[0][1]->SetState(Endpoint::State::IDLE);
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-    USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;  // NOLINT
+    USBFSD->UEP0_RX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
   }
   else if (intflag & USBFS_UIF_SUSPEND)
   {
@@ -77,12 +80,13 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
     LibXR::CH32USBDeviceFS::self_->Init();
     LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->tog_ = true;
     LibXR::CH32EndpointOtgFs::map_otg_fs_[0][1]->tog_ = true;
+    map[0][0]->SetState(Endpoint::State::IDLE);
+    map[0][1]->SetState(Endpoint::State::IDLE);
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-    USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;  // NOLINT
+    USBFSD->UEP0_RX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
   }
   else
   {
-    // 其他事件，直接清除
     USBFSD->INT_FG = intflag;  // NOLINT
   }
 }
@@ -157,6 +161,8 @@ void CH32USBDeviceFS::Stop()
   NVIC_DisableIRQ(USBFS_IRQn);
 }
 
+#endif
+#if defined(USBHSD)
 // NOLINTNEXTLINE
 extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 {
@@ -165,59 +171,61 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 
   auto &map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 
-  // --- 传输事件（IN/OUT/SETUP/SOF等） ---
   if (intflag & USBHS_UIF_TRANSFER)
   {
     uint8_t token = intst & USBHS_UIS_TOKEN_MASK;
     uint8_t epnum = intst & USBHS_UIS_ENDP_MASK;
 
     auto ep = map[epnum];
-    USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
 
     if (ep)
     {
       switch (token)
       {
-        case USBHS_UIS_TOKEN_SETUP:  // SETUP 阶段，分发 SETUP 包
-          // EP0 必须 NAK，toggle reset
+        case USBHS_UIS_TOKEN_SETUP:
+          USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
+
           USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_DATA1;  // NOLINT
-          USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_RES_ACK | USBHS_UEP_R_TOG_DATA1;  // NOLINT
+          USBHSD->UEP0_RX_CTRL = USBHS_UEP_T_RES_NAK | USBHS_UEP_R_TOG_DATA1;  // NOLINT
+          map[0][0]->SetState(Endpoint::State::IDLE);
+          map[0][1]->SetState(Endpoint::State::IDLE);
 
           LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog0_ = true;
           LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog0_ = true;
           LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog1_ = false;
           LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
 
-          // 这里假设你的 SETUP buffer 地址为 ep[OUT]->GetBuffer().addr_
           LibXR::CH32USBDeviceHS::self_->OnSetupPacket(
               true, reinterpret_cast<const SetupPacket *>(
                         LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->GetBuffer().addr_));
           break;
 
-        case USBHS_UIS_TOKEN_OUT:  // OUT 方向数据
+        case USBHS_UIS_TOKEN_OUT:
         {
+          USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
+
           uint16_t len = USBHSD->RX_LEN;  // NOLINT
           ep[static_cast<uint8_t>(Endpoint::Direction::OUT)]->TransferComplete(len);
           break;
         }
-        case USBHS_UIS_TOKEN_IN:  // IN 方向数据
+        case USBHS_UIS_TOKEN_IN:
         {
           ep[static_cast<uint8_t>(Endpoint::Direction::IN)]->TransferComplete(0);
           break;
         }
-        // SOF 只需清标志
         case USBHS_UIS_TOKEN_SOF:
         default:
           break;
       }
     }
   }
-  // --- SETUP 包事件（USBHS 有单独 SETUP_ACT 标志） ---
   else if (intflag & USBHS_UIF_SETUP_ACT)
   {
-    // EP0 进入 SETUP 阶段，收 SETUP 包，toggle reset
     USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
-    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
+    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
+
+    map[0][0]->SetState(Endpoint::State::IDLE);
+    map[0][1]->SetState(Endpoint::State::IDLE);
 
     LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog0_ = true;
     LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog0_ = true;
@@ -229,7 +237,6 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
                   LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->GetBuffer().addr_));
     USBHSD->INT_FG = USBHS_UIF_SETUP_ACT;  // NOLINT
   }
-  // --- 总线复位 ---
   else if (intflag & USBHS_UIF_BUS_RST)
   {
     USBHSD->INT_FG = USBHS_UIF_BUS_RST;  // NOLINT
@@ -241,9 +248,11 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
     LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog1_ = false;
     LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
     USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
-    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_ACK;  // NOLINT
+    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
+
+    map[0][0]->SetState(Endpoint::State::IDLE);
+    map[0][1]->SetState(Endpoint::State::IDLE);
   }
-  // --- 挂起 ---
   else if (intflag & USBHS_UIF_SUSPEND)
   {
     USBHSD->INT_FG = USBHS_UIF_SUSPEND;  // NOLINT
@@ -254,9 +263,11 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
     LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog1_ = false;
     LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
     USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
-    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_ACK;  // NOLINT
+    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
+
+    map[0][0]->SetState(Endpoint::State::IDLE);
+    map[0][1]->SetState(Endpoint::State::IDLE);
   }
-  // --- 其他中断 ---
   else
   {
     USBHSD->INT_FG = intflag;  // NOLINT
@@ -314,7 +325,6 @@ CH32USBDeviceHS::CH32USBDeviceHS(
           cfgs_itr->buffer_tx, true);
       USB::EndpointPool::Put(ep);
     }
-    ep_index = USB::Endpoint::NextEPNumber(ep_index);
   }
 }
 

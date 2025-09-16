@@ -7,92 +7,51 @@
 
 using namespace LibXR;
 
-// NOLINTBEGIN
-static volatile uint8_t* GetTxControlAddr(USB::Endpoint::EPNumber ep_num)
-{
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      return &(USBFSD->UEP0_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP1:
-      return &(USBFSD->UEP1_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP2:
-      return &(USBFSD->UEP2_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP3:
-      return &(USBFSD->UEP3_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP4:
-      return &(USBFSD->UEP4_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP5:
-      return &(USBFSD->UEP5_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP6:
-      return &(USBFSD->UEP6_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP7:
-      return &(USBFSD->UEP7_TX_CTRL);
-    default:
-      break;
-  }
-  return nullptr;
-}
+#if defined(USBFSD)
 
-static volatile uint8_t* GetRxControlAddr(USB::Endpoint::EPNumber ep_num)
+// NOLINTBEGIN
+
+static inline volatile uint8_t* GetTxCtrlAddr(USB::Endpoint::EPNumber ep)
 {
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      return &(USBFSD->UEP0_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP1:
-      return &(USBFSD->UEP1_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP2:
-      return &(USBFSD->UEP2_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP3:
-      return &(USBFSD->UEP3_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP4:
-      return &(USBFSD->UEP4_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP5:
-      return &(USBFSD->UEP5_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP6:
-      return &(USBFSD->UEP6_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP7:
-      return &(USBFSD->UEP7_RX_CTRL);
-    default:
-      break;
-  }
-  return nullptr;
+  return &USBFSD->UEP0_TX_CTRL + 4 * (USB::Endpoint::EPNumberToInt8(ep));
+}
+static inline volatile uint8_t* GetRxCtrlAddr(USB::Endpoint::EPNumber ep)
+{
+  return &USBFSD->UEP0_RX_CTRL + 4 * (USB::Endpoint::EPNumberToInt8(ep));
+}
+static inline volatile uint16_t* GetTxLenAddr(USB::Endpoint::EPNumber ep)
+{
+  return &USBFSD->UEP0_TX_LEN + 2 * (USB::Endpoint::EPNumberToInt8(ep));
+}
+static inline volatile uint32_t* GetDmaAddr(USB::Endpoint::EPNumber ep)
+{
+  return &USBFSD->UEP0_DMA + USB::Endpoint::EPNumberToInt8(ep);
 }
 
 static void SetDmaBuffer(USB::Endpoint::EPNumber ep_num, void* value)
 {
+  *GetDmaAddr(ep_num) = (uint32_t)value;
   switch (ep_num)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      USBFSD->UEP0_DMA = (uint32_t)value;
-      break;
     case USB::Endpoint::EPNumber::EP1:
-      USBFSD->UEP1_DMA = (uint32_t)value;
       USBFSD->UEP4_1_MOD |= USBFS_UEP1_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP2:
-      USBFSD->UEP2_DMA = (uint32_t)value;
       USBFSD->UEP2_3_MOD |= USBFS_UEP2_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP3:
-      USBFSD->UEP3_DMA = (uint32_t)value;
       USBFSD->UEP2_3_MOD |= USBFS_UEP3_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP4:
-      USBFSD->UEP4_DMA = (uint32_t)value;
       USBFSD->UEP4_1_MOD |= USBFS_UEP4_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP5:
-      USBFSD->UEP5_DMA = (uint32_t)value;
       USBFSD->UEP5_6_MOD |= USBFS_UEP5_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP6:
-      USBFSD->UEP6_DMA = (uint32_t)value;
       USBFSD->UEP5_6_MOD |= USBFS_UEP6_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP7:
-      USBFSD->UEP7_DMA = (uint32_t)value;
       USBFSD->UEP7_MOD |= USBFS_UEP7_BUF_MOD;
       break;
     default:
@@ -102,43 +61,13 @@ static void SetDmaBuffer(USB::Endpoint::EPNumber ep_num, void* value)
 
 static void SetTxLen(USB::Endpoint::EPNumber ep_num, uint32_t value)
 {
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      USBFSD->UEP0_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBFSD->UEP1_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBFSD->UEP2_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBFSD->UEP3_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBFSD->UEP4_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBFSD->UEP5_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBFSD->UEP6_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBFSD->UEP7_TX_LEN = value;
-      break;
-    default:
-      break;
-  }
+  *GetTxLenAddr(ep_num) = value;
 }
 
 static void EnableTx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      break;
     case USB::Endpoint::EPNumber::EP1:
       USBFSD->UEP4_1_MOD |= USBFS_UEP1_TX_EN;
       break;
@@ -164,13 +93,10 @@ static void EnableTx(USB::Endpoint::EPNumber ep_num)
       break;
   }
 }
-
 static void DisableTx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      break;
     case USB::Endpoint::EPNumber::EP1:
       USBFSD->UEP4_1_MOD &= ~USBFS_UEP1_TX_EN;
       break;
@@ -196,13 +122,10 @@ static void DisableTx(USB::Endpoint::EPNumber ep_num)
       break;
   }
 }
-
 static void EnableRx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      break;
     case USB::Endpoint::EPNumber::EP1:
       USBFSD->UEP4_1_MOD |= USBFS_UEP1_RX_EN;
       break;
@@ -228,13 +151,10 @@ static void EnableRx(USB::Endpoint::EPNumber ep_num)
       break;
   }
 }
-
 static void DisableRx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      break;
     case USB::Endpoint::EPNumber::EP1:
       USBFSD->UEP4_1_MOD &= ~USBFS_UEP1_RX_EN;
       break;
@@ -295,11 +215,11 @@ CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
   if (dir == Direction::IN)
   {
     SetTxLen(GetNumber(), 0);
-    *GetTxControlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
   }
   else
   {
-    *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
   }
 }
 
@@ -318,8 +238,8 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
     ep_cfg.double_buffer = false;
   }
 
-  *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
-  *GetTxControlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
+  *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
+  *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
 
   SetTxLen(GetNumber(), 0);
 
@@ -335,8 +255,8 @@ void CH32EndpointOtgFs::Close()
   DisableTx(GetNumber());
   DisableRx(GetNumber());
 
-  *GetTxControlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
-  *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+  *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+  *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
 
   SetState(State::DISABLED);
 }
@@ -364,7 +284,7 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
   if (is_in)
   {
     SetTxLen(GetNumber(), size);
-    auto addr = GetTxControlAddr(GetNumber());
+    auto addr = GetTxCtrlAddr(GetNumber());
 
     if (GetNumber() != EPNumber::EP0)
     {
@@ -377,7 +297,7 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
   }
   else
   {
-    auto addr = GetRxControlAddr(GetNumber());
+    auto addr = GetRxCtrlAddr(GetNumber());
 
     if (GetNumber() != EPNumber::EP0)
     {
@@ -409,11 +329,11 @@ ErrorCode CH32EndpointOtgFs::Stall()
   bool is_in = (GetDirection() == Direction::IN);
   if (is_in)
   {
-    *GetTxControlAddr(GetNumber()) |= USBFS_UEP_T_RES_STALL;
+    *GetTxCtrlAddr(GetNumber()) |= USBFS_UEP_T_RES_STALL;
   }
   else
   {
-    *GetRxControlAddr(GetNumber()) |= USBFS_UEP_R_RES_STALL;
+    *GetRxCtrlAddr(GetNumber()) |= USBFS_UEP_R_RES_STALL;
   }
   SetState(State::STALLED);
   return ErrorCode::OK;
@@ -429,11 +349,11 @@ ErrorCode CH32EndpointOtgFs::ClearStall()
   bool is_in = (GetDirection() == Direction::IN);
   if (is_in)
   {
-    *GetTxControlAddr(GetNumber()) &= ~USBFS_UEP_T_RES_STALL;
+    *GetTxCtrlAddr(GetNumber()) &= ~USBFS_UEP_T_RES_STALL;
   }
   else
   {
-    *GetRxControlAddr(GetNumber()) &= ~USBFS_UEP_R_RES_STALL;
+    *GetRxCtrlAddr(GetNumber()) &= ~USBFS_UEP_R_RES_STALL;
   }
   SetState(State::IDLE);
   return ErrorCode::OK;
@@ -446,26 +366,25 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     size = GetLastTransferSize();
   }
 
-  std::atomic_signal_fence(std::memory_order_seq_cst);
-
   if (GetDirection() == Direction::OUT &&
       (USBFSD->INT_FG & USBFS_U_TOG_OK) != USBFS_U_TOG_OK)  // NOLINT
   {
     return;
   }
 
-  std::atomic_signal_fence(std::memory_order_seq_cst);
-
   if (GetNumber() == EPNumber::EP0 && GetDirection() == Direction::OUT)
   {
     tog_ = true;
-    *GetRxControlAddr(GetNumber()) = USBFS_UEP_R_RES_ACK;
+    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_ACK;
   }
+
   if (GetDirection() == Direction::IN)
   {
-    *GetTxControlAddr(GetNumber()) =
-        (*GetTxControlAddr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
+    *GetTxCtrlAddr(GetNumber()) =
+        (*GetTxCtrlAddr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
+    USBFSD->INT_FG = USBFS_UIF_TRANSFER;  // NOLINT
   }
+
   OnTransferCompleteCallback(false, size);
 }
 
@@ -473,12 +392,14 @@ void CH32EndpointOtgFs::SwitchBuffer()
 {
   if (GetDirection() == Direction::IN)
   {
-    tog_ = (*GetTxControlAddr(GetNumber()) & USBFS_UEP_T_TOG) == USBFS_UEP_T_TOG;
+    tog_ = (*GetTxCtrlAddr(GetNumber()) & USBFS_UEP_T_TOG) == USBFS_UEP_T_TOG;
     SetActiveBlock(!tog_);
   }
   else
   {
-    tog_ = (*GetRxControlAddr(GetNumber()) & USBFS_UEP_R_TOG) == USBFS_UEP_R_TOG;
+    tog_ = (*GetRxCtrlAddr(GetNumber()) & USBFS_UEP_R_TOG) == USBFS_UEP_R_TOG;
     SetActiveBlock(tog_);
   }
 }
+
+#endif

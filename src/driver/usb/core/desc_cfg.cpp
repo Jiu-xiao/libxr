@@ -189,11 +189,11 @@ uint16_t ConfigDescriptor::GetDeviceStatus() const
 ConfigDescriptorItem* ConfigDescriptor::GetItemByInterfaceNum(size_t index) const
 {
   auto config = items_[current_cfg_];
-  size_t interface_index = 0;
+  int interface_index = -1;
   for (size_t i = 0; i < config.item_num; ++i)
   {
     interface_index += config.items[i]->GetInterfaceNum();
-    if (interface_index >= index)
+    if (interface_index >= static_cast<int>(index))
     {
       return config.items[i];
     }
