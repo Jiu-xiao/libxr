@@ -9,24 +9,23 @@ STM32ADC::Channel::Channel(STM32ADC* adc, uint8_t index, uint32_t ch)
 {
 }
 
-STM32ADC::Channel::Channel() {}
-
 float STM32ADC::Channel::Read() { return adc_->ReadChannel(index_); }
 
-STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff, const uint32_t* channels,
-                   uint8_t num_channels, float vref)
+STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
+                   std::initializer_list<uint32_t> channels, float vref)
     : hadc_(hadc),
-      NUM_CHANNELS(num_channels),
-      filter_size_(dma_buff.size_ / num_channels / 2),
+      NUM_CHANNELS(channels.size()),
+      filter_size_(dma_buff.size_ / NUM_CHANNELS / 2),
       use_dma_(hadc_->DMA_Handle != nullptr),
       dma_buffer_(dma_buff),
       resolution_(GetADCResolution<ADC_HandleTypeDef>{}.Get(hadc)),
-      channels_(new Channel[num_channels]),
+      channels_(new Channel*[NUM_CHANNELS]),
       vref_(vref)
 {
+  auto it = channels.begin();
   for (uint8_t i = 0; i < NUM_CHANNELS; ++i)
   {
-    channels_[i] = Channel(this, i, channels[i]);
+    channels_[i] = new Channel(this, i, *it++);
   }
 
   use_dma_ ? HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
@@ -37,10 +36,14 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff, const uint32_t* ch
 STM32ADC::~STM32ADC()
 {
   use_dma_ ? HAL_ADC_Stop_DMA(hadc_) : HAL_ADC_Stop(hadc_);
+  for (uint8_t i = 0; i < NUM_CHANNELS; ++i)
+  {
+    delete channels_[i];
+  }
   delete[] channels_;
 }
 
-STM32ADC::Channel& STM32ADC::GetChannel(uint8_t index) { return channels_[index]; }
+STM32ADC::Channel& STM32ADC::GetChannel(uint8_t index) { return *channels_[index]; }
 
 float STM32ADC::ReadChannel(uint8_t channel)
 {
@@ -138,7 +141,7 @@ float STM32ADC::ReadChannel(uint8_t channel)
 #error "Unsupported sample time"
 #endif
 
-  config.Channel = channels_[channel].ch_;
+  config.Channel = channels_[channel]->ch_;
   config.Rank = 1;
 #if !defined(STM32L0)
   config.SamplingTime = time;
