@@ -142,7 +142,7 @@ ErrorCode ConfigDescriptor::Generate()
   {
     auto data = config.items[i]->GetData();
 
-    memcpy(&buffer[offset], data.addr_, data.size_);
+    LibXR::Memory::FastCopy(&buffer[offset], data.addr_, data.size_);
     offset += data.size_;
 
     total_interfaces += config.items[i]->GetInterfaceNum();

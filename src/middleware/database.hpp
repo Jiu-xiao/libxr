@@ -903,9 +903,9 @@ class DatabaseRaw : public Database
         flash_.Write(offset, {data.addr_, final_block_index});
       }
       memset(write_buffer_, 0xff, MinWriteSize);
-      memcpy(write_buffer_,
-             reinterpret_cast<const uint8_t*>(data.addr_) + final_block_index,
-             data.size_ % MinWriteSize);
+      LibXR::Memory::FastCopy(
+          write_buffer_, reinterpret_cast<const uint8_t*>(data.addr_) + final_block_index,
+          data.size_ % MinWriteSize);
       return flash_.Write(offset + final_block_index, {write_buffer_, MinWriteSize});
     }
   }
@@ -949,7 +949,7 @@ class DatabaseRaw : public Database
    */
   ErrorCode Set(KeyBase& key, RawData data) override
   {
-    memcpy(key.raw_data_.addr_, data.addr_, data.size_);
+    LibXR::Memory::FastCopy(key.raw_data_.addr_, data.addr_, data.size_);
     return SetKey(key.name_, data.addr_, data.size_);
   }
 

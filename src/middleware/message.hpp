@@ -109,7 +109,7 @@ class Topic
      */
     PackedData &operator=(const Data &data)
     {
-      memcpy(raw.data_, &data, sizeof(Data));
+      LibXR::Memory::FastCopy(raw.data_, &data, sizeof(Data));
       crc8_ = CRC8::Calculate(&raw, sizeof(raw));
       return *this;
     }
@@ -440,8 +440,8 @@ class Topic
       block->data_.fun = [](RawData &data, void *arg, bool in_isr)
       {
         UNUSED(in_isr);
-        LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(arg);
-        queue->Push(*reinterpret_cast<Data*>(data.addr_));
+        LockFreeQueue<Data> *queue = reinterpret_cast<LockFreeQueue<Data> *>(arg);
+        queue->Push(*reinterpret_cast<Data *>(data.addr_));
       };
 
       topic.block_->data_.subers.Add(*block);
@@ -622,7 +622,8 @@ class Topic
     {
       Assert::SizeLimitCheck<Mode>(block_->data_.data.size_, data.size_);
       Lock(block_);
-      memcpy(data.addr_, block_->data_.data.addr_, block_->data_.data.size_);
+      LibXR::Memory::FastCopy(data.addr_, block_->data_.data.addr_,
+                              block_->data_.data.size_);
       Unlock(block_);
     }
     else

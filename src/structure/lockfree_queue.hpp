@@ -24,6 +24,11 @@ namespace LibXR
 template <typename Data>
 class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
 {
+  inline constexpr size_t AlignUp(size_t size, size_t align)
+  {
+    return ((size + align - 1) / align) * align;
+  }
+
  public:
   /**
    * @brief 构造函数 / Constructor
@@ -33,7 +38,10 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    * Creates a lock-free queue with the specified size and initializes relevant variables.
    */
   LockFreeQueue(size_t length)
-      : head_(0), tail_(0), queue_handle_(new Data[length + 1]), LENGTH(length)
+      : head_(0),
+        tail_(0),
+        LENGTH(AlignUp(length, LIBXR_ALIGN_SIZE) - 1),
+        queue_handle_(new Data[LENGTH + 1])
   {
   }
 
@@ -221,14 +229,15 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     }
 
     size_t first_chunk = LibXR::min(size, capacity - current_tail);
-    memcpy(reinterpret_cast<void *>(queue_handle_ + current_tail),
-           reinterpret_cast<const void *>(data), first_chunk * sizeof(Data));
+    LibXR::Memory::FastCopy(reinterpret_cast<void *>(queue_handle_ + current_tail),
+                            reinterpret_cast<const void *>(data),
+                            first_chunk * sizeof(Data));
 
     if (size > first_chunk)
     {
-      memcpy(reinterpret_cast<void *>(queue_handle_),
-             reinterpret_cast<const void *>(data + first_chunk),
-             (size - first_chunk) * sizeof(Data));
+      LibXR::Memory::FastCopy(reinterpret_cast<void *>(queue_handle_),
+                              reinterpret_cast<const void *>(data + first_chunk),
+                              (size - first_chunk) * sizeof(Data));
     }
 
     tail_.store((current_tail + size) % capacity, std::memory_order_release);
@@ -264,15 +273,16 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
       if (data != nullptr)
       {
         size_t first_chunk = LibXR::min(size, capacity - current_head);
-        memcpy(reinterpret_cast<void *>(data),
-               reinterpret_cast<const void *>(queue_handle_ + current_head),
-               first_chunk * sizeof(Data));
+        LibXR::Memory::FastCopy(
+            reinterpret_cast<void *>(data),
+            reinterpret_cast<const void *>(queue_handle_ + current_head),
+            first_chunk * sizeof(Data));
 
         if (size > first_chunk)
         {
-          memcpy(reinterpret_cast<void *>(data + first_chunk),
-                 reinterpret_cast<const void *>(queue_handle_),
-                 (size - first_chunk) * sizeof(Data));
+          LibXR::Memory::FastCopy(reinterpret_cast<void *>(data + first_chunk),
+                                  reinterpret_cast<const void *>(queue_handle_),
+                                  (size - first_chunk) * sizeof(Data));
         }
       }
 
@@ -314,15 +324,16 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
       }
 
       size_t first_chunk = LibXR::min(size, capacity - current_head);
-      memcpy(reinterpret_cast<void *>(data),
-             reinterpret_cast<const void *>(queue_handle_ + current_head),
-             first_chunk * sizeof(Data));
+      LibXR::Memory::FastCopy(
+          reinterpret_cast<void *>(data),
+          reinterpret_cast<const void *>(queue_handle_ + current_head),
+          first_chunk * sizeof(Data));
 
       if (size > first_chunk)
       {
-        memcpy(reinterpret_cast<void *>(data + first_chunk),
-               reinterpret_cast<const void *>(queue_handle_),
-               (size - first_chunk) * sizeof(Data));
+        LibXR::Memory::FastCopy(reinterpret_cast<void *>(data + first_chunk),
+                                reinterpret_cast<const void *>(queue_handle_),
+                                (size - first_chunk) * sizeof(Data));
       }
 
       if (head_.load(std::memory_order_acquire) == current_head)
@@ -364,8 +375,8 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
  private:
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<uint32_t> head_;
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<uint32_t> tail_;
-  Data *queue_handle_;
   const size_t LENGTH;
+  Data *queue_handle_;
 
   uint32_t Increment(uint32_t index) const { return (index + 1) % (LENGTH + 1); }
 };
