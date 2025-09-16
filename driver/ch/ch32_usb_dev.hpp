@@ -35,6 +35,8 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   uint8_t id_;
 };
 
+#if defined(USBFSD)
+
 class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
 {
  public:
@@ -55,6 +57,10 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
 
   static inline CH32USBDeviceFS *self_ = nullptr;
 };
+
+#endif
+
+#if defined(USBHSD)
 
 class CH32USBDeviceHS : public USB::EndpointPool, public USB::DeviceCore
 {
@@ -98,4 +104,6 @@ class CH32USBDeviceHS : public USB::EndpointPool, public USB::DeviceCore
 
   static inline CH32USBDeviceHS *self_ = nullptr;
 };
+#endif
+
 }  // namespace LibXR

@@ -128,7 +128,7 @@ class Endpoint
    */
   static constexpr EPNumber NextEPNumber(EPNumber ep)
   {
-    ASSERT(ep < EPNumber::EP15);
+    ASSERT(ep <= EPNumber::EP15);
     return static_cast<EPNumber>(EPNumberToInt8(ep) + 1);
   }
 
@@ -210,6 +210,14 @@ class Endpoint
    *        Get endpoint state
    */
   State GetState() const { return state_; }
+
+  /**
+   * @brief 设置端点状态
+   *        Set endpoint state
+   *
+   * @param state 状态 / State
+   */
+  void SetState(State state) { state_ = state; }
 
   /**
    * @brief 获取端点类型
@@ -393,14 +401,6 @@ class Endpoint
    *        Get endpoint config
    */
   Config& GetConfig() { return config_; }
-
-  /**
-   * @brief 设置端点状态
-   *        Set endpoint state
-   *
-   * @param state 状态 / State
-   */
-  void SetState(State state) { state_ = state; }
 
   /**
    * @brief 切换缓冲区

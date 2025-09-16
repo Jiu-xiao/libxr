@@ -145,9 +145,7 @@ class CDC : public DeviceClass, public LibXR::UART
         write_port_cdc_(tx_queue_size, tx_buffer_size),
         data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
-        comm_ep_num_(comm_ep_num),
-        write_remain_(0),
-        write_total_(0)
+        comm_ep_num_(comm_ep_num)
   {
     // 初始化端口读写函数
     read_port_cdc_ = ReadFun;    // NOLINT
@@ -380,8 +378,6 @@ class CDC : public DeviceClass, public LibXR::UART
   {
     inited_ = false;
     control_line_state_ = 0;
-    write_remain_ = 0;
-    write_total_ = 0;
     ep_data_in_->Close();
     ep_data_out_->Close();
     ep_comm_in_->Close();
@@ -418,120 +414,89 @@ class CDC : public DeviceClass, public LibXR::UART
       WriteInfoBlock info;
       if (port.queue_info_->Pop(info) == ErrorCode::OK)
       {
-        port.queue_data_->PopBatch(nullptr, info.data.size_);
+        port.queue_data_->PopBatch(nullptr, info.data.size_ - cdc->written_);
         port.Finish(false, ErrorCode::NO_BUFF, info, 0);
+        cdc->written_ = 0;
       }
       port.Reset();
       return ErrorCode::FAILED;
     }
 
-    size_t count = 0;
+    size_t dequeued = 0;
 
-  cdc_write:
-    auto buffer = cdc->ep_data_in_->GetBuffer();
-
-    // 检查当前是否有传输正在进行
-    if (cdc->ep_data_in_->GetActiveLength() > 0 || cdc->need_write_zlp_)
+    while (port.queue_info_->Size() > 0)
     {
-      return ErrorCode::FAILED;
-    }
-
-    WriteInfoBlock info;
-    bool muti_transfer = false;
-
-    // 获取队列中的写操作信息
-    if (port.queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    if (cdc->write_total_ == 0)
-    {
-      cdc->write_total_ = info.data.size_;
-    }
-    else
-    {
-      if (count != 0)
+      // 检查当前是否有传输正在进行
+      if (cdc->ep_data_in_->GetActiveLength() > 0 || cdc->need_write_zlp_)
       {
-        info.data.size_ = cdc->write_remain_;
+        return ErrorCode::FAILED;
       }
-    }
 
-    // 检查数据大小是否超出缓冲区
-    if (info.data.size_ > buffer.size_)
-    {
-      muti_transfer = true;
-      cdc->write_remain_ = info.data.size_ - buffer.size_;
-      info.data.size_ = buffer.size_;
-    }
-    else
-    {
-      cdc->write_remain_ = 0;
-    }
+      auto buffer = cdc->ep_data_in_->GetBuffer();
 
-    // 从队列获取数据
-    if (port.queue_data_->PopBatch(reinterpret_cast<uint8_t*>(buffer.addr_),
-                                   info.data.size_) != ErrorCode::OK)
-    {
-      ASSERT(false);
-      return ErrorCode::EMPTY;
-    }
+      WriteInfoBlock info;
 
-    cdc->ep_data_in_->SetActiveLength(info.data.size_);
-
-    // 如果端点空闲且有数据待发送
-    if (cdc->ep_data_in_->GetState() == Endpoint::State::IDLE &&
-        cdc->ep_data_in_->GetActiveLength() != 0)
-    {
-      /* 可以立即发送 */
-    }
-    else
-    {
-      if (count == 0)
+      // 获取队列中的写操作信息
+      if (port.queue_info_->Peek(info) != ErrorCode::OK)
       {
-        return ErrorCode::BUSY;
+        return ErrorCode::EMPTY;
       }
-      return ErrorCode::FAILED;
-    }
 
-    if (!muti_transfer)
-    {
-      if (info.data.size_ % cdc->ep_data_in_->MaxTransferSize() == 0)
+      size_t need_write = info.data.size_ - dequeued;
+
+      if (need_write == 0)
       {
-        cdc->need_write_zlp_ = true;
+        return ErrorCode::OK;
+      }
+
+      // 检查数据大小是否超出缓冲区
+      if (need_write > buffer.size_)
+      {
+        need_write = buffer.size_;
+      }
+
+      // 从队列获取数据
+      if (port.queue_data_->PopBatch(reinterpret_cast<uint8_t*>(buffer.addr_),
+                                     need_write) != ErrorCode::OK)
+      {
+        ASSERT(false);
+        return ErrorCode::EMPTY;
+      }
+
+      dequeued += need_write;
+
+      cdc->written_ += need_write;
+
+      if (cdc->written_ >= info.data.size_)
+      {
+        port.queue_info_->Pop();
+        port.Finish(false, ErrorCode::OK, info, info.data.size_);
+        cdc->written_ -= info.data.size_;
+      }
+
+      cdc->ep_data_in_->SetActiveLength(need_write);
+
+      std::atomic_signal_fence(std::memory_order_seq_cst);
+
+      // 如果端点空闲且有数据待发送
+      if (cdc->ep_data_in_->GetState() == Endpoint::State::IDLE &&
+          cdc->ep_data_in_->GetActiveLength() != 0)
+      {
+        /* 可以立即发送 */
       }
       else
       {
-        auto ans = port.queue_info_->Pop();
-        ASSERT(ans == ErrorCode::OK);
+        return ErrorCode::FAILED;
       }
-    }
 
-    // 启动传输
-    auto ans = ErrorCode::OK;
+      // 启动传输
+      auto ans = ErrorCode::OK;
 
-    if (info.data.size_ % cdc->ep_data_in_->MaxTransferSize() == 0 && !muti_transfer)
-    {
-      cdc->need_write_zlp_ = true;
-      ans = cdc->ep_data_in_->TransferBulk(info.data.size_);
-    }
-    else
-    {
       cdc->ep_data_in_->SetActiveLength(0);
-      ans = cdc->ep_data_in_->Transfer(info.data.size_);
-    }
 
-    if (ans != ErrorCode::OK)
-    {
-      cdc->write_port_cdc_.Reset();
-      port.Finish(false, ErrorCode::FAILED, info, 0);
-      return ErrorCode::FAILED;
-    }
+      ans = cdc->ep_data_in_->Transfer(need_write);
 
-    if (muti_transfer)
-    {
-      count++;
-      goto cdc_write;  // NOLINT
+      ASSERT(ans == ErrorCode::OK);
     }
 
     return ErrorCode::OK;
@@ -605,109 +570,53 @@ class CDC : public DeviceClass, public LibXR::UART
    * 完成发送操作并处理发送队列中的下一个数据包
    * Completes transmission and processes next packet in send queue
    */
-  inline void OnDataInComplete(bool in_isr, ConstRawData& data)
+  void OnDataInComplete(bool in_isr, ConstRawData& data)
   {
     UNUSED(in_isr);
     UNUSED(data);
 
-    if (!need_write_zlp_)
+    size_t pending_len = ep_data_in_->GetActiveLength();
+
+    if (pending_len == 0)
     {
-      size_t pending_len = ep_data_in_->GetActiveLength();
-
-      if (pending_len == 0)
-      {
-        return;
-      }
-
-      auto ans = ErrorCode::OK;
-      if (write_remain_ == 0 && pending_len % ep_data_in_->MaxTransferSize() == 0 &&
-          write_port_cdc_.Size() == 0)
-      {
-        need_write_zlp_ = true;
-        ans = ep_data_in_->TransferBulk(pending_len);
-        return;
-      }
-      else
-      {
-        ep_data_in_->SetActiveLength(0);
-        ans = ep_data_in_->Transfer(pending_len);
-      }
-
-      UNUSED(ans);
-
-      if (write_remain_ != 0)
-      {
-        auto buffer = ep_data_in_->GetBuffer();
-        size_t len = 0;
-        if (write_remain_ > buffer.size_)
-        {
-          len = buffer.size_;
-          write_remain_ = write_remain_ - buffer.size_;
-        }
-        else
-        {
-          len = write_remain_;
-          write_remain_ = 0;
-        }
-
-        auto ans = write_port_cdc_.queue_data_->PopBatch(
-            reinterpret_cast<uint8_t*>(buffer.addr_), len);
-        ASSERT(ans == ErrorCode::OK);
-
-        ep_data_in_->SetActiveLength(len);
-        return;
-      }
-    }
-    else
-    {
-      need_write_zlp_ = false;
-    }
-
-    auto ans = ErrorCode::OK;
-
-    WriteInfoBlock info;
-
-    write_total_ = 0;
-
-    if (write_port_cdc_.queue_info_->Pop(info) != ErrorCode::OK)
-    {
-      ASSERT(false);
+      // TODO: zlp check
       return;
     }
 
-    // 完成当前写操作
-    write_port_cdc_.Finish(in_isr, ans, info, write_total_);
+    ep_data_in_->SetActiveLength(0);
+    auto ans = ep_data_in_->Transfer(pending_len);
+    ASSERT(ans == ErrorCode::OK);
 
-    // 检查队列中是否有待发送数据
+    LibXR::WriteInfoBlock info;
+
     if (write_port_cdc_.queue_info_->Peek(info) != ErrorCode::OK)
     {
       return;
     }
 
-    auto buffer = ep_data_in_->GetBuffer();
+    auto need_write = info.data.size_ - written_;
 
-    write_total_ = info.data.size_;
-
-    size_t len = 0;
-
-    // 检查缓冲区大小是否足够
-    if (info.data.size_ > buffer.size_)
+    if (need_write > 0)
     {
-      len = buffer.size_;
-      write_remain_ = info.data.size_ - buffer.size_;
+      auto buffer = ep_data_in_->GetBuffer();
+      if (buffer.size_ < need_write)
+      {
+        need_write = buffer.size_;
+      }
+
+      write_port_cdc_.queue_data_->PopBatch(reinterpret_cast<uint8_t*>(buffer.addr_),
+                                            need_write);
+      ep_data_in_->SetActiveLength(need_write);
+      written_ += need_write;
+
+      if (written_ >= info.data.size_)
+      {
+        write_port_cdc_.queue_info_->Pop(info);
+        write_port_cdc_.Finish(true, ErrorCode::OK, info, info.data.size_);
+        written_ -= info.data.size_;
+        ASSERT(written_ == 0);
+      }
     }
-    else
-    {
-      len = info.data.size_;
-      write_remain_ = 0;
-    }
-
-    ans = write_port_cdc_.queue_data_->PopBatch(reinterpret_cast<uint8_t*>(buffer.addr_),
-                                                len);
-
-    ASSERT(ans == ErrorCode::OK);
-
-    ep_data_in_->SetActiveLength(len);
   }
 
   /**
@@ -980,8 +889,7 @@ class CDC : public DeviceClass, public LibXR::UART
   bool inited_ = false;           ///< 初始化标志 / Initialization flag
   bool ep_comm_in_busy_ = false;  ///< 通信端点忙标志 / Communication endpoint busy flag
   bool need_write_zlp_ = false;   ///< 需要写入ZLP标志 / Need to write ZLP flag
-  size_t write_remain_;           ///< 写入剩余数据 / Remaining data to be written
-  size_t write_total_;            ///< 写入总字节数 / Total number of bytes written
+  size_t written_ = 0;            ///< 已写入字节数 / Number of bytes written
 
   // 接口信息
   size_t itf_comm_in_num_;  ///< 通信接口号 / Communication interface number

@@ -9,165 +9,66 @@
 
 using namespace LibXR;
 
+#if defined(USBHSD)
+
 // NOLINTBEGIN
-static volatile inline uint8_t* GetTxControlAddr(USB::Endpoint::EPNumber ep_num)
+static inline volatile uint8_t* GetTxControlAddr(USB::Endpoint::EPNumber ep_num)
 {
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      return &(USBHSD->UEP0_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP1:
-      return &(USBHSD->UEP1_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP2:
-      return &(USBHSD->UEP2_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP3:
-      return &(USBHSD->UEP3_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP4:
-      return &(USBHSD->UEP4_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP5:
-      return &(USBHSD->UEP5_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP6:
-      return &(USBHSD->UEP6_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP7:
-      return &(USBHSD->UEP7_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP8:
-      return &(USBHSD->UEP8_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP9:
-      return &(USBHSD->UEP9_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP10:
-      return &(USBHSD->UEP10_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP11:
-      return &(USBHSD->UEP11_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP12:
-      return &(USBHSD->UEP12_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP13:
-      return &(USBHSD->UEP13_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP14:
-      return &(USBHSD->UEP14_TX_CTRL);
-    case USB::Endpoint::EPNumber::EP15:
-      return &(USBHSD->UEP15_TX_CTRL);
-    default:
-      break;
-  }
-  return nullptr;
+  return reinterpret_cast<volatile uint8_t*>(
+      reinterpret_cast<volatile uint8_t*>(&USBHSD->UEP0_TX_CTRL) +
+      static_cast<int>(ep_num) * 4);
 }
 
 static inline volatile uint8_t* GetRxControlAddr(USB::Endpoint::EPNumber ep_num)
 {
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      return &(USBHSD->UEP0_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP1:
-      return &(USBHSD->UEP1_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP2:
-      return &(USBHSD->UEP2_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP3:
-      return &(USBHSD->UEP3_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP4:
-      return &(USBHSD->UEP4_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP5:
-      return &(USBHSD->UEP5_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP6:
-      return &(USBHSD->UEP6_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP7:
-      return &(USBHSD->UEP7_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP8:
-      return &(USBHSD->UEP8_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP9:
-      return &(USBHSD->UEP9_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP10:
-      return &(USBHSD->UEP10_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP11:
-      return &(USBHSD->UEP11_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP12:
-      return &(USBHSD->UEP12_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP13:
-      return &(USBHSD->UEP13_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP14:
-      return &(USBHSD->UEP14_RX_CTRL);
-    case USB::Endpoint::EPNumber::EP15:
-      return &(USBHSD->UEP15_RX_CTRL);
-    default:
-      break;
-  }
-  return nullptr;
+  return reinterpret_cast<volatile uint8_t*>(
+      reinterpret_cast<volatile uint8_t*>(&USBHSD->UEP0_TX_CTRL) +
+      static_cast<int>(ep_num) * 4 + 1);
 }
 
-// IN端点配置（主buffer=TX_DMA，备用buffer=RX_DMA）
+static inline volatile uint16_t* GetTxLenAddr(USB::Endpoint::EPNumber ep_num)
+{
+  return reinterpret_cast<volatile uint16_t*>(
+      reinterpret_cast<volatile uint8_t*>(&USBHSD->UEP0_TX_LEN) +
+      static_cast<int>(ep_num) * 4);
+}
+
+static inline volatile uint32_t* GetTxDmaAddr(USB::Endpoint::EPNumber ep_num)
+{
+  if (ep_num == USB::Endpoint::EPNumber::EP0) return &USBHSD->UEP0_DMA;
+  return reinterpret_cast<volatile uint32_t*>(
+      reinterpret_cast<volatile uint32_t*>(&USBHSD->UEP1_TX_DMA) +
+      (static_cast<int>(ep_num) - 1));
+}
+
+static inline volatile uint32_t* GetRxDmaAddr(USB::Endpoint::EPNumber ep_num)
+{
+  if (ep_num == USB::Endpoint::EPNumber::EP0) return &USBHSD->UEP0_DMA;
+  return reinterpret_cast<volatile uint32_t*>(
+      reinterpret_cast<volatile uint32_t*>(&USBHSD->UEP1_RX_DMA) +
+      (static_cast<int>(ep_num) - 1));
+}
+
+static void SetTxLen(USB::Endpoint::EPNumber ep_num, uint32_t value)
+{
+  *GetTxLenAddr(ep_num) = value;
+}
+
 static void SetTxDmaBuffer(USB::Endpoint::EPNumber ep_num, void* buffer,
                            uint32_t buffer_size, bool double_buffer)
 {
   uint8_t* buf_base = reinterpret_cast<uint8_t*>(buffer);
   uint8_t* buf_alt = buf_base + buffer_size / 2;
 
-  switch (ep_num)
+  // EP0 特殊
+  if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      USBHSD->UEP0_DMA = (uint32_t)buf_base;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBHSD->UEP1_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP1_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBHSD->UEP2_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP2_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBHSD->UEP3_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP3_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBHSD->UEP4_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP4_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBHSD->UEP5_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP5_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBHSD->UEP6_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP6_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBHSD->UEP7_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP7_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP8:
-      USBHSD->UEP8_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP8_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP9:
-      USBHSD->UEP9_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP9_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP10:
-      USBHSD->UEP10_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP10_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP11:
-      USBHSD->UEP11_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP11_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP12:
-      USBHSD->UEP12_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP12_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP13:
-      USBHSD->UEP13_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP13_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP14:
-      USBHSD->UEP14_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP14_RX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP15:
-      USBHSD->UEP15_TX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP15_RX_DMA = (uint32_t)buf_alt;
-      break;
-    default:
-      break;
+    USBHSD->UEP0_DMA = (uint32_t)buf_base;
+  }
+  else
+  {
+    *GetTxDmaAddr(ep_num) = (uint32_t)buf_base;
+    if (double_buffer) *GetRxDmaAddr(ep_num) = (uint32_t)buf_alt;
   }
 
   int idx = static_cast<int>(ep_num);
@@ -177,80 +78,20 @@ static void SetTxDmaBuffer(USB::Endpoint::EPNumber ep_num, void* buffer,
     USBHSD->BUF_MODE &= ~(1 << idx);
 }
 
-// OUT端点配置（主buffer=RX_DMA，备用buffer=TX_DMA）
 static void SetRxDmaBuffer(USB::Endpoint::EPNumber ep_num, void* buffer,
                            uint32_t buffer_size, bool double_buffer)
 {
   uint8_t* buf_base = reinterpret_cast<uint8_t*>(buffer);
   uint8_t* buf_alt = buf_base + buffer_size / 2;
 
-  switch (ep_num)
+  if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      USBHSD->UEP0_DMA = (uint32_t)buf_base;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBHSD->UEP1_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP1_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBHSD->UEP2_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP2_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBHSD->UEP3_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP3_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBHSD->UEP4_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP4_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBHSD->UEP5_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP5_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBHSD->UEP6_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP6_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBHSD->UEP7_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP7_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP8:
-      USBHSD->UEP8_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP8_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP9:
-      USBHSD->UEP9_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP9_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP10:
-      USBHSD->UEP10_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP10_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP11:
-      USBHSD->UEP11_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP11_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP12:
-      USBHSD->UEP12_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP12_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP13:
-      USBHSD->UEP13_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP13_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP14:
-      USBHSD->UEP14_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP14_TX_DMA = (uint32_t)buf_alt;
-      break;
-    case USB::Endpoint::EPNumber::EP15:
-      USBHSD->UEP15_RX_DMA = (uint32_t)buf_base;
-      if (double_buffer) USBHSD->UEP15_TX_DMA = (uint32_t)buf_alt;
-      break;
-    default:
-      break;
+    USBHSD->UEP0_DMA = (uint32_t)buf_base;
+  }
+  else
+  {
+    *GetRxDmaAddr(ep_num) = (uint32_t)buf_base;
+    if (double_buffer) *GetTxDmaAddr(ep_num) = (uint32_t)buf_alt;
   }
 
   int idx = static_cast<int>(ep_num);
@@ -258,63 +99,6 @@ static void SetRxDmaBuffer(USB::Endpoint::EPNumber ep_num, void* buffer,
     USBHSD->BUF_MODE |= (1 << idx);
   else
     USBHSD->BUF_MODE &= ~(1 << idx);
-}
-
-static void SetTxLen(USB::Endpoint::EPNumber ep_num, uint32_t value)
-{
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      USBHSD->UEP0_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBHSD->UEP1_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBHSD->UEP2_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBHSD->UEP3_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBHSD->UEP4_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBHSD->UEP5_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBHSD->UEP6_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBHSD->UEP7_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP8:
-      USBHSD->UEP8_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP9:
-      USBHSD->UEP9_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP10:
-      USBHSD->UEP10_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP11:
-      USBHSD->UEP11_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP12:
-      USBHSD->UEP12_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP13:
-      USBHSD->UEP13_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP14:
-      USBHSD->UEP14_TX_LEN = value;
-      break;
-    case USB::Endpoint::EPNumber::EP15:
-      USBHSD->UEP15_TX_LEN = value;
-      break;
-    default:
-      break;
-  }
 }
 
 static void EnableTx(USB::Endpoint::EPNumber ep_num)
@@ -648,15 +432,17 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
     SwitchBuffer();
   }
 
-  SetLastTransferSize(size);
-  SetState(State::BUSY);
-
-  auto tog0 = tog0_;
-
   if (GetNumber() == EPNumber::EP0)
   {
-    tog0_ = !tog0_;
+    if (size == 0)
+    {
+      tog0_ = true;
+      tog1_ = false;
+    }
   }
+
+  SetLastTransferSize(size);
+  SetState(State::BUSY);
 
   if (is_in)
   {
@@ -665,7 +451,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
     *addr = USBHS_UEP_T_RES_ACK |
             (*addr & (~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MDATA))) |
-            (tog0 ? USBHS_UEP_T_TOG_DATA1 : 0);
+            (tog0_ ? USBHS_UEP_T_TOG_DATA1 : 0);
   }
   else
   {
@@ -673,7 +459,12 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
     *addr = USBHS_UEP_R_RES_ACK |
             (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
-            (tog0 ? USBHS_UEP_R_TOG_DATA1 : 0);
+            (tog0_ ? USBHS_UEP_R_TOG_DATA1 : 0);
+  }
+
+  if (GetNumber() == EPNumber::EP0)
+  {
+    tog0_ = !tog0_;
   }
 
   return ErrorCode::OK;
@@ -728,11 +519,11 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
 
   if (GetDirection() == Direction::IN)
   {
-    if (GetNumber() != EPNumber::EP0)
-    {
-      *GetTxControlAddr(GetNumber()) =
-          (*GetTxControlAddr(GetNumber()) & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
-    }
+    *GetTxControlAddr(GetNumber()) =
+        (*GetTxControlAddr(GetNumber()) & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
+
+    USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
+
     size = GetLastTransferSize();
   }
 
@@ -749,7 +540,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     *GetRxControlAddr(GetNumber()) = USBHS_UEP_R_RES_ACK;
   }
 
-  OnTransferCompleteCallback(false, size);
+  OnTransferCompleteCallback(true, size);
 }
 
 void CH32EndpointOtgHs::SwitchBuffer()
@@ -763,3 +554,5 @@ void CH32EndpointOtgHs::SwitchBuffer()
     SetActiveBlock(tog0_);
   }
 }
+
+#endif
