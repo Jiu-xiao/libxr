@@ -381,6 +381,9 @@ class CDC : public DeviceClass, public LibXR::UART
     ep_data_in_->Close();
     ep_data_out_->Close();
     ep_comm_in_->Close();
+    ep_data_in_->SetActiveLength(0);
+    ep_data_out_->SetActiveLength(0);
+    ep_comm_in_->SetActiveLength(0);
     endpoint_pool.Release(ep_data_in_);
     endpoint_pool.Release(ep_data_out_);
     endpoint_pool.Release(ep_comm_in_);
@@ -410,7 +413,6 @@ class CDC : public DeviceClass, public LibXR::UART
     // 检查是否已初始化且DTR已设置
     if (!cdc->inited_ || !cdc->IsDtrSet() || cdc->ep_comm_in_busy_)
     {
-      cdc->ep_data_in_->SetActiveLength(0);
       WriteInfoBlock info;
       if (port.queue_info_->Pop(info) == ErrorCode::OK)
       {
