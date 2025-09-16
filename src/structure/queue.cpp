@@ -40,7 +40,7 @@ ErrorCode BaseQueue::Push(const void *data)
     return ErrorCode::FULL;
   }
 
-  memcpy(&queue_array_[tail_ * ELEMENT_SIZE], data, ELEMENT_SIZE);
+  LibXR::Memory::FastCopy(&queue_array_[tail_ * ELEMENT_SIZE], data, ELEMENT_SIZE);
 
   tail_ = (tail_ + 1) % length_;
   if (head_ == tail_)
@@ -57,7 +57,7 @@ ErrorCode BaseQueue::Peek(void *data)
 
   if (Size() > 0)
   {
-    memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
+    LibXR::Memory::FastCopy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
     return ErrorCode::OK;
   }
   else
@@ -75,7 +75,7 @@ ErrorCode BaseQueue::Pop(void *data)
 
   if (data != nullptr)
   {
-    memcpy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
+    LibXR::Memory::FastCopy(data, &queue_array_[head_ * ELEMENT_SIZE], ELEMENT_SIZE);
   }
   head_ = (head_ + 1) % length_;
   is_full_ = false;
@@ -113,12 +113,13 @@ ErrorCode BaseQueue::PushBatch(const void *data, size_t size)
   auto tmp = reinterpret_cast<const uint8_t *>(data);
 
   size_t first_part = LibXR::min(size, length_ - tail_);
-  memcpy(&queue_array_[tail_ * ELEMENT_SIZE], tmp, first_part * ELEMENT_SIZE);
+  LibXR::Memory::FastCopy(&queue_array_[tail_ * ELEMENT_SIZE], tmp,
+                          first_part * ELEMENT_SIZE);
 
   if (size > first_part)
   {
-    memcpy(queue_array_, &tmp[first_part * ELEMENT_SIZE],
-           (size - first_part) * ELEMENT_SIZE);
+    LibXR::Memory::FastCopy(queue_array_, &tmp[first_part * ELEMENT_SIZE],
+                            (size - first_part) * ELEMENT_SIZE);
   }
 
   tail_ = (tail_ + size) % length_;
@@ -146,11 +147,12 @@ ErrorCode BaseQueue::PopBatch(void *data, size_t size)
   if (data != nullptr)
   {
     auto tmp = reinterpret_cast<uint8_t *>(data);
-    memcpy(tmp, &queue_array_[head_ * ELEMENT_SIZE], first_part * ELEMENT_SIZE);
+    LibXR::Memory::FastCopy(tmp, &queue_array_[head_ * ELEMENT_SIZE],
+                            first_part * ELEMENT_SIZE);
     if (size > first_part)
     {
-      memcpy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
-             (size - first_part) * ELEMENT_SIZE);
+      LibXR::Memory::FastCopy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
+                              (size - first_part) * ELEMENT_SIZE);
     }
   }
 
@@ -172,12 +174,13 @@ ErrorCode BaseQueue::PeekBatch(void *data, size_t size)
   auto tmp = reinterpret_cast<uint8_t *>(data);
 
   size_t first_part = LibXR::min(size, length_ - index);
-  memcpy(tmp, &queue_array_[index * ELEMENT_SIZE], first_part * ELEMENT_SIZE);
+  LibXR::Memory::FastCopy(tmp, &queue_array_[index * ELEMENT_SIZE],
+                          first_part * ELEMENT_SIZE);
 
   if (first_part < size)
   {
-    memcpy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
-           (size - first_part) * ELEMENT_SIZE);
+    LibXR::Memory::FastCopy(&tmp[first_part * ELEMENT_SIZE], queue_array_,
+                            (size - first_part) * ELEMENT_SIZE);
   }
 
   return ErrorCode::OK;
@@ -190,7 +193,7 @@ ErrorCode BaseQueue::Overwrite(const void *data)
   head_ = tail_ = 0;
   is_full_ = false;
 
-  memcpy(queue_array_, data, ELEMENT_SIZE * length_);
+  LibXR::Memory::FastCopy(queue_array_, data, ELEMENT_SIZE * length_);
 
   tail_ = (tail_ + 1) % length_;
   if (head_ == tail_)

@@ -203,7 +203,7 @@ void DatabaseRawSequential::SetNestKeyExist(size_t offset, bool exist)
   KeyInfo key;
   flash_.Read(offset, key);
   key.SetNextKeyExist(exist);
-  memcpy(buffer_ + offset, &key, sizeof(KeyInfo));
+  LibXR::Memory::FastCopy(buffer_ + offset, &key, sizeof(KeyInfo));
 }
 
 bool DatabaseRawSequential::KeyDataCompare(size_t offset, const void* data, size_t size)
@@ -258,11 +258,11 @@ ErrorCode DatabaseRawSequential::AddKey(const char* name, const void* data, size
   }
 
   size_t data_ptr_offset = key_buf_offset + sizeof(KeyInfo);
-  memcpy(buffer_ + data_ptr_offset, name, NAME_LEN);
-  memcpy(buffer_ + data_ptr_offset + NAME_LEN, data, size);
+  LibXR::Memory::FastCopy(buffer_ + data_ptr_offset, name, NAME_LEN);
+  LibXR::Memory::FastCopy(buffer_ + data_ptr_offset + NAME_LEN, data, size);
 
   KeyInfo key_buf = {0, static_cast<uint8_t>(NAME_LEN), static_cast<uint32_t>(size)};
-  memcpy(buffer_ + key_buf_offset, &key_buf, sizeof(KeyInfo));
+  LibXR::Memory::FastCopy(buffer_ + key_buf_offset, &key_buf, sizeof(KeyInfo));
   if (last_key_offset)
   {
     SetNestKeyExist(last_key_offset, 1);
@@ -292,7 +292,8 @@ ErrorCode DatabaseRawSequential::SetKey(size_t offset, const void* data, size_t 
   {
     if (KeyDataCompare(offset, data, size))
     {
-      memcpy(buffer_ + offset + sizeof(KeyInfo) + key.GetNameLength(), data, size);
+      LibXR::Memory::FastCopy(buffer_ + offset + sizeof(KeyInfo) + key.GetNameLength(),
+                              data, size);
       Save();
     }
     return ErrorCode::OK;

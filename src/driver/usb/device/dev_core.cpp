@@ -124,7 +124,7 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData &data)
     case Context::DATA_OUT:
       if (data.size_ > 0)
       {
-        memcpy(state_.out0_buffer, data.addr_, data.size_);
+        LibXR::Memory::FastCopy(state_.out0_buffer, data.addr_, data.size_);
       }
 
       if (state_.read_remain.size_ > 0)
@@ -234,7 +234,7 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
 
   auto buffer = endpoint_.in0->GetBuffer();
   ASSERT(buffer.size_ >= data.size_);
-  memcpy(buffer.addr_, data.addr_, data.size_);
+  LibXR::Memory::FastCopy(buffer.addr_, data.addr_, data.size_);
 
   // 如果一次就能结束，并且不需要 ZLP，直接准备状态阶段 OUT
   if (!has_more && !state_.need_write_zlp)

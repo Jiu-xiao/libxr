@@ -31,7 +31,7 @@ bool DoubleBuffer::FillPending(const uint8_t* data, size_t len)
   {
     return false;
   }
-  std::memcpy(PendingBuffer(), data, len);
+  LibXR::Memory::FastCopy(PendingBuffer(), data, len);
   pending_len_ = len;
   pending_valid_ = true;
   return true;
@@ -43,7 +43,7 @@ bool DoubleBuffer::FillActive(const uint8_t* data, size_t len)
   {
     return false;
   }
-  std::memcpy(ActiveBuffer(), data, len);
+  LibXR::Memory::FastCopy(ActiveBuffer(), data, len);
   return true;
 }
 

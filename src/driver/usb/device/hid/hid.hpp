@@ -580,7 +580,7 @@ class HID : public DeviceClass
       return ErrorCode::NO_BUFF;
     }
 
-    std::memcpy(buf.addr_, report.addr_, report.size_);
+    LibXR::Memory::FastCopy(buf.addr_, report.addr_, report.size_);
 
     // 启动端点传输
     return ep_in_->Transfer(report.size_);

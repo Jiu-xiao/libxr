@@ -87,7 +87,9 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    */
   Position &operator=(const Eigen::Matrix<Scalar, 3, 1> &p)
   {
-    memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+    this->data()[0] = p[0];
+    this->data()[1] = p[1];
+    this->data()[2] = p[2];
     return *this;
   }
 
@@ -101,7 +103,9 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
   {
     if (this != &p)
     {
-      memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+      this->data()[0] = p[0];
+      this->data()[1] = p[1];
+      this->data()[2] = p[2];
     }
 
     return *this;
@@ -307,7 +311,9 @@ class Axis : public Eigen::Matrix<Scalar, 3, 1>
    */
   Axis<Scalar> &operator=(const Eigen::Matrix<Scalar, 3, 1> &p)
   {
-    memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+    this->data()[0] = p[0];
+    this->data()[1] = p[1];
+    this->data()[2] = p[2];
     return *this;
   }
 
@@ -326,7 +332,9 @@ class Axis : public Eigen::Matrix<Scalar, 3, 1>
   {
     if (this != &p)
     {
-      memcpy(this->data(), p.data(), 3 * sizeof(Scalar));
+      this->data()[0] = p[0];
+      this->data()[1] = p[1];
+      this->data()[2] = p[2];
     }
     return *this;
   }
@@ -413,7 +421,9 @@ class EulerAngle
   {
     if (this != &p)
     {
-      memcpy(data_, p.data_, 3 * sizeof(Scalar));
+      data_[0] = p.data_[0];
+      data_[1] = p.data_[1];
+      data_[2] = p.data_[2];
     }
     return *this;
   }
@@ -675,14 +685,30 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
   {
     if (this != &R)
     {
-      memcpy(this->data(), R.data(), 9 * sizeof(Scalar));
+      this->data()[0] = R.data()[0];
+      this->data()[1] = R.data()[1];
+      this->data()[2] = R.data()[2];
+      this->data()[3] = R.data()[3];
+      this->data()[4] = R.data()[4];
+      this->data()[5] = R.data()[5];
+      this->data()[6] = R.data()[6];
+      this->data()[7] = R.data()[7];
+      this->data()[8] = R.data()[8];
     }
     return *this;
   }
 
   RotationMatrix &operator=(const Eigen::Matrix<Scalar, 3, 3> &R)
   {
-    memcpy(this->data(), R.data(), 9 * sizeof(Scalar));
+    this->data()[0] = R.data()[0];
+    this->data()[1] = R.data()[1];
+    this->data()[2] = R.data()[2];
+    this->data()[3] = R.data()[3];
+    this->data()[4] = R.data()[4];
+    this->data()[5] = R.data()[5];
+    this->data()[6] = R.data()[6];
+    this->data()[7] = R.data()[7];
+    this->data()[8] = R.data()[8];
     return *this;
   }
 
