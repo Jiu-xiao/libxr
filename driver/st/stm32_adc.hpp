@@ -1,5 +1,7 @@
 #pragma once
 
+#include <initializer_list>
+
 #include "main.h"
 
 #ifdef HAL_ADC_MODULE_ENABLED
@@ -115,12 +117,11 @@ class STM32ADC
    *
    * @param hadc ADC外设 ADC device
    * @param dma_buff DMA缓冲区 DMA buffer
-   * @param channels 包含通道号的数组 Array of channel numbers
-   * @param num_channels 通道数 Channel number
+   * @param channels ADC通道列表 List of ADC channels
    * @param vref 参考电压 Reference voltage
    */
-  STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff, const uint32_t* channels,
-           uint8_t num_channels, float vref);
+  STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
+           std::initializer_list<uint32_t> channels, float vref);
 
   /**
    * @brief 析构函数 Destructor
@@ -150,7 +151,7 @@ class STM32ADC
   bool use_dma_;
   RawData dma_buffer_;
   float resolution_;
-  Channel* channels_;
+  Channel** channels_;
   float vref_;
 
   float ConvertToVoltage(float adc_value);

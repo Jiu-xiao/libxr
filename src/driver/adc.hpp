@@ -24,6 +24,12 @@ class ADC
   ADC() = default;
 
   /**
+   * @brief 虚析构函数
+   * @brief Virtual destructor
+   */
+  virtual ~ADC() = default;
+
+  /**
    * @brief 读取 ADC 值
    * @brief Reads the ADC value
    * @return 读取的模拟电压值（范围通常由硬件决定，例如 0-3.3V）
