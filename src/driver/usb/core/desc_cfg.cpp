@@ -125,7 +125,8 @@ ErrorCode ConfigDescriptor::Generate()
   Header* header = reinterpret_cast<Header*>(buffer);
 
   // 填充默认或已设定的 header 信息
-  memset(header, 0, sizeof(Header));
+  *header = Header{};
+
   header->bLength = 9;
   header->bDescriptorType = 0x02;
   header->bConfigurationValue = this->current_cfg_ + 1;
