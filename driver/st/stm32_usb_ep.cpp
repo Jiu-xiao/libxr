@@ -2,7 +2,7 @@
 
 using namespace LibXR;
 
-#if HAL_PCD_MODULE_ENABLED
+#if defined(HAL_PCD_MODULE_ENABLED)
 
 static inline bool is_power_of_two(unsigned int n) { return n > 0 && (n & (n - 1)) == 0; }
 
@@ -176,7 +176,10 @@ void STM32Endpoint::Configure(const Config& cfg)
   {
     SetState(State::IDLE);
   }
-  SetState(State::ERROR);
+  else
+  {
+    SetState(State::ERROR);
+  }
 }
 
 void STM32Endpoint::Close()
