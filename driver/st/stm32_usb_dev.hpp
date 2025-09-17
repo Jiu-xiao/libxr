@@ -47,7 +47,14 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
   static inline STM32USBDevice* map_[STM32_USB_DEV_ID_NUM] = {};
 };
 
-#if (defined(USB_OTG_FS))
+#if defined(USB_OTG_FS)
+#if !defined(USB_OTG_FS_TOTAL_FIFO_SIZE)
+#if defined(STM32H7) || defined(STM32N6)
+#define USB_OTG_FS_TOTAL_FIFO_SIZE 4096
+#else
+#define USB_OTG_FS_TOTAL_FIFO_SIZE 1280
+#endif
+#endif
 class STM32USBDeviceOtgFS : public STM32USBDevice
 {
  public:
@@ -72,7 +79,10 @@ class STM32USBDeviceOtgFS : public STM32USBDevice
 
 #endif
 
-#if (defined(USB_OTG_HS))
+#if defined(USB_OTG_HS)
+#if !defined(USB_OTG_HS_TOTAL_FIFO_SIZE)
+#define USB_OTG_HS_TOTAL_FIFO_SIZE 4096
+#endif
 class STM32USBDeviceOtgHS : public STM32USBDevice
 {
  public:
