@@ -6,7 +6,7 @@
 #include "stm32_usb_dev.hpp"
 #include "usb/core/ep.hpp"
 
-#if HAL_PCD_MODULE_ENABLED
+#if defined(HAL_PCD_MODULE_ENABLED)
 
 namespace LibXR
 {

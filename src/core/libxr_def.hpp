@@ -126,8 +126,8 @@ enum class SizeLimitMode : uint8_t
     }                                              \
   } while (0)
 #else
-#define ASSERT(arg) ((void)0)
-#define ASSERT_ISR(arg) ((void)0)
+#define ASSERT(arg) (void(arg), (void)0)
+#define ASSERT_ISR(arg) (void(arg), (void)0)
 #endif
 
 /**
