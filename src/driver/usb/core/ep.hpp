@@ -326,24 +326,6 @@ class Endpoint
   virtual ErrorCode Transfer(size_t size) = 0;
 
   /**
-   * @brief 批量传输
-   *        Bulk transfer
-   *
-   * @param size 传输大小 / Transfer size
-   * @return ErrorCode
-   */
-  virtual ErrorCode TransferBulk(size_t size)
-  {
-    ASSERT(GetType() == Type::BULK);
-    if (size % MaxPacketSize() == 0)
-    {
-      MarkNeedZLP();
-    }
-    SetActiveLength(0);
-    return Transfer(size);
-  }
-
-  /**
    * @brief 传输空包
    *        Transfer zero length packet
    *
@@ -360,32 +342,12 @@ class Endpoint
 
     SetState(State::IDLE);
 
-    if (bulk_need_zlp_ == 1)
-    {
-      bulk_need_zlp_ = 2;
-      if (actual_transfer_size == last_transfer_size_)
-      {
-        TransferZLP();
-      }
-    }
-    else if (bulk_need_zlp_ == 2 && GetType() == Type::BULK)
-    {
-      bulk_need_zlp_ = 0;
-      actual_transfer_size = last_transfer_size_;
-    }
-
-    ConstRawData data;
-    if (UseDoubleBuffer())
-    {
-      data =
-          ConstRawData(GetDirection() == Direction::OUT ? double_buffer_.ActiveBuffer()
-                                                        : double_buffer_.PendingBuffer(),
-                       actual_transfer_size);
-    }
-    else
-    {
-      data = ConstRawData(buffer_.addr_, actual_transfer_size);
-    }
+    ConstRawData data = UseDoubleBuffer()
+                            ? ConstRawData(GetDirection() == Direction::OUT
+                                               ? double_buffer_.ActiveBuffer()
+                                               : double_buffer_.PendingBuffer(),
+                                           actual_transfer_size)
+                            : ConstRawData(buffer_.addr_, actual_transfer_size);
 
     if (UseDoubleBuffer() && GetDirection() == Direction::OUT)
     {
@@ -425,35 +387,6 @@ class Endpoint
     double_buffer_.EnablePending();
   }
 
-  /**
-   * @brief 设置上次传输的长度
-   *        Set last transfer size
-   *
-   * @param size 传输长度 / Transfer size
-   */
-  void SetLastTransferSize(size_t size)
-  {
-    if (size > 0)
-    {
-      last_transfer_size_ = size;
-    }
-  }
-
-  /**
-   * @brief 获取上次传输的长度
-   *        Get last transfer size
-   *
-   * @return size_t 传输长度
-   */
-  size_t GetLastTransferSize() const { return last_transfer_size_; }
-
-  /**
-   * @brief 标记需要传输空包
-   *        Mark need to transfer ZLP
-   *
-   */
-  void MarkNeedZLP() { bulk_need_zlp_ = 1; }
-
  private:
   /// 传输完成回调 / Called when transfer completes
   LibXR::Callback<LibXR::ConstRawData&> on_transfer_complete_;
@@ -464,8 +397,6 @@ class Endpoint
   State state_ = State::DISABLED;      ///< 当前状态 / Endpoint status
   LibXR::RawData buffer_;              ///< 端点缓冲区 / Endpoint buffer
   LibXR::DoubleBuffer double_buffer_;  ///< 双缓冲区 / Double buffer
-  uint8_t bulk_need_zlp_ = 0;          ///< 是否需要传输空包 / Need to transfer ZLP
-  size_t last_transfer_size_ = 0;      ///< 上次传输的长度 / Last transfered length
 };  // namespace LibXR::USB
 
 }  // namespace LibXR::USB
