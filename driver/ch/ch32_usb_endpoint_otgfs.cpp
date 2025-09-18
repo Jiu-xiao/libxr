@@ -314,7 +314,7 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
     tog_ = !tog_;
   }
 
-  SetLastTransferSize(size);
+  last_transfer_size_ = size;
   SetState(State::BUSY);
   return ErrorCode::OK;
 }
@@ -363,7 +363,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
 {
   if (GetDirection() == Direction::IN)
   {
-    size = GetLastTransferSize();
+    size = last_transfer_size_;
   }
 
   if (GetDirection() == Direction::OUT &&

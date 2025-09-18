@@ -441,7 +441,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
     }
   }
 
-  SetLastTransferSize(size);
+  last_transfer_size_ = size;
   SetState(State::BUSY);
 
   if (is_in)
@@ -524,7 +524,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
 
     USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
 
-    size = GetLastTransferSize();
+    size = last_transfer_size_;
   }
 
   if (GetDirection() == Direction::OUT &&
