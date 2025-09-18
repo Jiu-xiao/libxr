@@ -24,6 +24,8 @@ class CH32EndpointOtgFs : public USB::Endpoint
 
   bool tog_ = false;
 
+  size_t last_transfer_size_ = 0;
+
   RawData dma_buffer_;
 
 #if defined(USBFSD)
@@ -52,6 +54,8 @@ class CH32EndpointOtgHs : public USB::Endpoint
   bool tog0_ = false;
   bool tog1_ = false;
   bool hw_double_buffer_ = false;
+
+  size_t last_transfer_size_ = 0;
 
   RawData dma_buffer_;
 
