@@ -195,6 +195,7 @@ stm32_uart_id_t STM32_UART_GetID(USART_TypeDef *addr)
 ErrorCode STM32UART::WriteFun(WritePort &port)
 {
   STM32UART *uart = CONTAINER_OF(&port, STM32UART, _write_port);
+
   if (!uart->dma_buff_tx_.HasPending())
   {
     WriteInfoBlock info;

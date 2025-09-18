@@ -363,7 +363,7 @@ static constexpr uint32_t CH32_UART_RX_DMA_IT_HT_MAP[] = {
 #endif
 };
 
-static constexpr DMA_Channel_TypeDef *CH32_UART_TX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef *const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)
     DMA1_Channel4,
 #endif
@@ -414,7 +414,7 @@ static constexpr DMA_Channel_TypeDef *CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #endif
 };
 
-static constexpr DMA_Channel_TypeDef *CH32_UART_RX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef *const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)
     DMA1_Channel5,
 #endif

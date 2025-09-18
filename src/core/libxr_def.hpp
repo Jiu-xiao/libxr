@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <libxr_mem.hpp>
 #include <type_traits>
 
 #ifndef M_PI
@@ -50,6 +51,7 @@ constexpr double M_1G = 9.80665;
 
 /// \brief 缓存行大小
 static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void *) == 8) ? 64 : 32;
+static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void *));
 
 /**
  * @enum ErrorCode
@@ -124,8 +126,8 @@ enum class SizeLimitMode : uint8_t
     }                                              \
   } while (0)
 #else
-#define ASSERT(arg) ((void)0)
-#define ASSERT_ISR(arg) ((void)0)
+#define ASSERT(arg) (void(arg), (void)0)
+#define ASSERT_ISR(arg) (void(arg), (void)0)
 #endif
 
 /**

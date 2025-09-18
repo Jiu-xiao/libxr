@@ -18,7 +18,11 @@ class CH32Timebase : public Timebase
 
   MillisecondTimestamp _get_milliseconds() override;
 
-  static inline uint32_t cnt_per_microsec_;
+  static inline void OnSysTickInterrupt();
+
+  void Sync(uint32_t ticks);
+
+  static inline volatile uint32_t sys_tick_ms = 0;
 };
 
 }  // namespace LibXR

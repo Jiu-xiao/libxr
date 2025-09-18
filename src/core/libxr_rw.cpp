@@ -94,7 +94,6 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op)
         }
         else
         {
-          expected = BusyState::PENDING;
           continue;
         }
       }
@@ -241,9 +240,9 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op)
   }
 }
 
-ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool pushed)
+ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool meta_pushed)
 {
-  if (!pushed && queue_info_->EmptySize() < 1)
+  if (!meta_pushed && queue_info_->EmptySize() < 1)
   {
     lock_.store(LockState::UNLOCKED, std::memory_order_release);
     return ErrorCode::FULL;
@@ -252,7 +251,7 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool pus
   if (queue_data_)
   {
     ErrorCode ans = ErrorCode::OK;
-    if (!pushed)
+    if (!meta_pushed)
     {
       if (queue_data_->EmptySize() < data.size_)
       {
@@ -275,7 +274,10 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool pus
 
     ans = write_fun_(*this);
 
-    lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    if (!meta_pushed)
+    {
+      lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    }
 
     if (ans == ErrorCode::OK)
     {
@@ -363,6 +365,10 @@ WritePort::Stream::~Stream()
   {
     port_->queue_info_->Push(WriteInfoBlock{RawData{nullptr, size_}, op_});
     port_->CommitWrite({nullptr, size_}, op_, true);
+  }
+
+  if (locked_)
+  {
     port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
   }
 }
@@ -380,8 +386,17 @@ WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
       LockState expected = LockState::UNLOCKED;
       if (port_->lock_.compare_exchange_strong(expected, LockState::LOCKED))
       {
-        locked_ = true;
-        cap_ = port_->queue_data_->EmptySize();
+        if (port_->queue_info_->EmptySize() < 1)
+        {
+          locked_ = false;
+          port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
+          return *this;
+        }
+        else
+        {
+          locked_ = true;
+          cap_ = port_->queue_data_->EmptySize();
+        }
       }
       else
       {
@@ -406,8 +421,10 @@ ErrorCode WritePort::Stream::Commit()
   {
     if (locked_ && size_ > 0)
     {
-      port_->queue_info_->Push(WriteInfoBlock{RawData{nullptr, size_}, op_});
+      ans = port_->queue_info_->Push(WriteInfoBlock{RawData{nullptr, size_}, op_});
+      ASSERT(ans == ErrorCode::OK);
       ans = port_->CommitWrite({nullptr, size_}, op_, true);
+      ASSERT(ans == ErrorCode::OK);
       size_ = 0;
     }
 

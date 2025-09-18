@@ -34,7 +34,7 @@ class DoubleBuffer
    *
    * @return 指向活动缓冲区的指针 / Pointer to the active buffer
    */
-  uint8_t* ActiveBuffer();
+  uint8_t* ActiveBuffer() const;
 
   /**
    * @brief 获取备用缓冲区的指针
@@ -42,7 +42,7 @@ class DoubleBuffer
    *
    * @return 指向备用缓冲区的指针 / Pointer to the pending buffer
    */
-  uint8_t* PendingBuffer();
+  uint8_t* PendingBuffer() const;
 
   /**
    * @brief 获取每个缓冲区的大小（单位：字节）
@@ -108,19 +108,44 @@ class DoubleBuffer
   size_t GetPendingLength() const;
 
   /**
+   * @brief 获取当前活动缓冲区中准备好的数据长度
+   *        Gets the size of valid data in active buffer
+   *
+   * @return 准备好的长度 / Valid active buffer data length
+   */
+  size_t GetActiveLength() const { return active_len_; }
+
+  /**
    * @brief 设置备用缓冲区的数据长度
    *        Sets the size of the pending buffer
    *
-   * @param size 数据长度（字节） / Data length in bytes
+   * @param length 数据长度（字节） / Data length in bytes
    */
-  void SetPendingLength(size_t size) { pending_len_ = size; }
+  void SetPendingLength(size_t length) { pending_len_ = length; }
+
+  /**
+   * @brief 设置当前活动缓冲区的数据长度
+   *        Sets the size of the active buffer
+   *
+   * @param length 数据长度（字节） / Data length in bytes
+   */
+  void SetActiveLength(size_t length) { active_len_ = length; }
+
+  /**
+   * @brief 设置当前活动缓冲区
+   *        Sets the active buffer
+   *
+   * @param block true 表示使用第二个缓冲区，false 表示使用第一个缓冲区
+   */
+  void SetActiveBlock(bool block) { active_ = block ? 1 : 0; }
 
  private:
   uint8_t* buffer_[2];  ///< 双缓冲区指针 / Double buffer pointers
-  size_t size_;         ///< 单个缓冲区大小 / Size of each buffer
+  const size_t SIZE;    ///< 单个缓冲区大小 / Size of each buffer
   int active_ = 0;      ///< 当前活动缓冲区编号 / Index of active buffer
   bool pending_valid_ =
       false;                ///< 标记备用区是否准备好 / Whether pending buffer is ready
+  size_t active_len_ = 0;   ///< 当前活动缓冲区有效数据长度 / Length of active data
   size_t pending_len_ = 0;  ///< 备用缓冲区有效数据长度 / Length of pending data
 };
 }  // namespace LibXR
