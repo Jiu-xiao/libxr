@@ -218,6 +218,7 @@ class Operation
       uint32_t timeout;
     } sem_info;
     OperationPollingStatus *status;
+    // TODO: state
   } data;
 
   /// Operation type.
@@ -256,8 +257,8 @@ typedef struct
 
 typedef struct
 {
-  ConstRawData data;
-  WriteOperation op;
+  ConstRawData data;  ///< Data buffer. 数据缓冲区。
+  WriteOperation op;  ///< Write operation instance. 写入操作实例。
 } WriteInfoBlock;
 
 /**

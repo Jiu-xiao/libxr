@@ -91,7 +91,7 @@ class Inertia
             std::enable_if_t<
                 std::is_same<T, float>::value || std::is_same<T, double>::value, int> = 0>
   explicit Inertia(Scalar m, const T (&arr)[6])
-      : data{arr[0], -arr[3], -arr[5], -arr[3], arr[1],
+      : data{arr[0],  -arr[3], -arr[5], -arr[3], arr[1],
              -arr[4], -arr[5], -arr[4], arr[2]},
         mass(m)
   {
@@ -117,7 +117,15 @@ class Inertia
    */
   Inertia(Scalar m, const Eigen::Matrix<Scalar, 3, 3> &R) : mass(m)
   {
-    memcpy(data, R.data(), 9 * sizeof(Scalar));
+    data[0] = R.data()[0];
+    data[1] = R.data()[1];
+    data[2] = R.data()[2];
+    data[3] = R.data()[3];
+    data[4] = R.data()[4];
+    data[5] = R.data()[5];
+    data[6] = R.data()[6];
+    data[7] = R.data()[7];
+    data[8] = R.data()[8];
   }
 
   /// @brief 转换为 Eigen 3x3 矩阵。Converts to an Eigen 3x3 matrix.

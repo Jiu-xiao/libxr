@@ -228,7 +228,7 @@ void Topic::Publish(void *addr, uint32_t size)
 
   if (block_->data_.cache)
   {
-    memcpy(block_->data_.data.addr_, addr, size);
+    LibXR::Memory::FastCopy(block_->data_.data.addr_, addr, size);
     block_->data_.data.size_ = size;
   }
   else
@@ -246,7 +246,7 @@ void Topic::Publish(void *addr, uint32_t size)
       case SuberType::SYNC:
       {
         auto sync = reinterpret_cast<SyncBlock *>(&block);
-        memcpy(sync->buff.addr_, data.addr_, data.size_);
+        LibXR::Memory::FastCopy(sync->buff.addr_, data.addr_, data.size_);
         sync->sem.Post();
         break;
       }
@@ -255,7 +255,7 @@ void Topic::Publish(void *addr, uint32_t size)
         auto async = reinterpret_cast<ASyncBlock *>(&block);
         if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
         {
-          memcpy(async->buff.addr_, data.addr_, data.size_);
+          LibXR::Memory::FastCopy(async->buff.addr_, data.addr_, data.size_);
           async->state.store(ASyncSubscriberState::DATA_READY, std::memory_order_release);
         }
         break;
@@ -295,7 +295,7 @@ void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
 
   if (block_->data_.cache)
   {
-    memcpy(block_->data_.data.addr_, addr, size);
+    LibXR::Memory::FastCopy(block_->data_.data.addr_, addr, size);
     block_->data_.data.size_ = size;
   }
   else
@@ -313,7 +313,7 @@ void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
       case SuberType::SYNC:
       {
         auto sync = reinterpret_cast<SyncBlock *>(&block);
-        memcpy(sync->buff.addr_, data.addr_, data.size_);
+        LibXR::Memory::FastCopy(sync->buff.addr_, data.addr_, data.size_);
         sync->sem.PostFromCallback(in_isr);
         break;
       }
@@ -322,7 +322,7 @@ void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
         auto async = reinterpret_cast<ASyncBlock *>(&block);
         if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
         {
-          memcpy(async->buff.addr_, data.addr_, data.size_);
+          LibXR::Memory::FastCopy(async->buff.addr_, data.addr_, data.size_);
           async->state.store(ASyncSubscriberState::DATA_READY, std::memory_order_release);
         }
         break;
@@ -352,7 +352,7 @@ void Topic::PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
 {
   PackedData<uint8_t> *pack = reinterpret_cast<PackedData<uint8_t> *>(buffer.addr_);
 
-  memcpy(&pack->raw.data_, source.addr_, source.size_);
+  LibXR::Memory::FastCopy(&pack->raw.data_, source.addr_, source.size_);
 
   pack->raw.header_.prefix = 0xa5;
   pack->raw.header_.topic_name_crc32 = topic_name_crc32;

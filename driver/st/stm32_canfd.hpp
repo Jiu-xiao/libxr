@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 #include "main.h"
 
 #ifdef HAL_FDCAN_MODULE_ENABLED
@@ -11,7 +13,7 @@
 #include "can.hpp"
 #include "libxr.hpp"
 
-typedef enum
+typedef enum : uint8_t
 {
 #ifdef FDCAN1
   STM32_FDCAN1,
@@ -27,6 +29,35 @@ typedef enum
 } stm32_fdcan_id_t;
 
 stm32_fdcan_id_t STM32_FDCAN_GetID(FDCAN_GlobalTypeDef* addr);  // NOLINT
+
+template <typename, typename = void>
+struct HasTxFifoQueueElmtsNbr : std::false_type
+{
+};
+
+template <typename T>
+struct HasTxFifoQueueElmtsNbr<
+    T, std::void_t<decltype(std::declval<T>()->Init.TxFifoQueueElmtsNbr)>>
+    : std::true_type
+{
+};
+
+// 当没有TxFifoQueueElmtsNbr成员时的处理函数
+template <typename T>
+typename std::enable_if<!HasTxFifoQueueElmtsNbr<T>::value, uint32_t>::type
+GetTxFifoTotalElements(T& hcan)  // NOLINT
+{
+  UNUSED(hcan);
+  return 3;
+}
+
+// 当有TxFifoQueueElmtsNbr成员时的处理函数
+template <typename T>
+typename std::enable_if<HasTxFifoQueueElmtsNbr<T>::value, uint32_t>::type
+GetTxFifoTotalElements(T& hcan)  // NOLINT
+{
+  return hcan->Init.TxFifoQueueElmtsNbr;
+}
 
 namespace LibXR
 {
@@ -82,6 +113,17 @@ class STM32CANFD : public FDCAN
    */
   void ProcessTxInterrupt();
 
+  /**
+   * @brief 获取硬件发送队列空闲大小
+   *
+   * @return size_t 硬件发送队列空闲大小
+   */
+  size_t HardwareTxQueueEmptySize()
+  {
+    auto free = HAL_FDCAN_GetTxFifoFreeLevel(hcan_);
+    return free;
+  }
+
   FDCAN_HandleTypeDef* hcan_;
 
   stm32_fdcan_id_t id_;
@@ -105,8 +147,6 @@ class STM32CANFD : public FDCAN
   } tx_buff_;
 
   uint32_t txMailbox;
-
-  std::atomic<uint32_t> bus_busy_ = 0;
 };
 }  // namespace LibXR
 

@@ -551,7 +551,7 @@ class Terminal
       LineFeed();
       return;
     }
-
+    write_stream_.Commit();
     write_mutex_->Unlock();
     (*ans)->Run(arg_number_, arg_tab_);
     write_mutex_->Lock();

@@ -139,7 +139,7 @@ class Callback
    *         The created Callback instance.
    */
   template <typename FunType, typename ArgType>
-  static Callback Create(FunType fun, ArgType arg)
+  [[nodiscard]] static Callback Create(FunType fun, ArgType arg)
   {
     void (*fun_ptr)(bool, ArgType, Args...) = fun;
     auto cb_block = new CallbackBlock<ArgType, Args...>(fun_ptr, arg);
