@@ -236,8 +236,6 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   }
 #endif
 
-  SetLastTransferSize(size);
-
   SetState(State::BUSY);
 
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
