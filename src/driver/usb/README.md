@@ -55,6 +55,6 @@ TODO
 | CH32     | USB_OTG_FS    | Supported (Device) | CH32V307            |
 | CH32     | USB_HS        | Supported          | CH32V307            |
 
-## 文档
+## Documentation
 
 Released together with the LibXR documentation.
