@@ -29,6 +29,10 @@
 
 [平台外设支持列表](./doc/support.md)
 
+## USB 协议栈支持
+
+请参阅 [XRUSB](https://github.com/Jiu-xiao/XRUSB)
+
 ## 系统层支持
 
 1. 应用程序除非重启或进入低功耗模式，否则永不退出。

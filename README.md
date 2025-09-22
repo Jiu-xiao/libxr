@@ -29,6 +29,10 @@ Want to be the best embedded framework
 
 [Platform Peripheral Support List](./doc/support.md)
 
+## USB Stack Support
+
+See [XRUSB](https://github.com/Jiu-xiao/XRUSB)
+
 ## System Layer
 
 1. The application will never exit unless it reboot or enter into low-power mode.
