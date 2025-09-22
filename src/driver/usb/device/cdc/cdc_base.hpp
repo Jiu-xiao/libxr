@@ -13,13 +13,13 @@ namespace LibXR::USB
  *        USB CDC ACM (Abstract Control Model) device class implementation
  *
  * 实现USB CDC ACM规范定义的虚拟串口功能，提供完整的USB设备描述符配置、
- * 类请求处理和数据传输机制。继承自DeviceClass和UART接口。
+ * 类请求处理和数据传输机制。继承自DeviceClass。
  *
  * Implements virtual serial port functionality as defined by USB CDC ACM specification,
  * providing complete USB descriptor configuration, class request handling, and data
- * transfer mechanisms. Inherits from DeviceClass and UART interface.
+ * transfer mechanisms. Inherits from DeviceClass.
  */
-class CDC : public DeviceClass, public LibXR::UART
+class CDCBase : public DeviceClass
 {
   /// CDC功能描述符子类型定义 / CDC functional descriptor subtypes
   enum class DescriptorSubtype : uint8_t
@@ -42,7 +42,7 @@ class CDC : public DeviceClass, public LibXR::UART
   enum class Protocol : uint8_t
   {
     NONE = 0x00,        ///< 无协议 / No protocol
-    AT_COMMAND = 0x01,  ///< AT命令协议| AT Command protocol
+    AT_COMMAND = 0x01,  ///< AT命令协议 / AT Command protocol
   };
 
   /// CDC子类代码 / CDC subclass codes
@@ -119,105 +119,21 @@ class CDC : public DeviceClass, public LibXR::UART
   static constexpr uint16_t CDC_CONTROL_LINE_RTS = 0x02;  ///< RTS控制位 / RTS control bit
 
  public:
-  // 公开UART接口的读写方法
-  using LibXR::UART::Read;
-  using LibXR::UART::read_port_;
-  using LibXR::UART::Write;
-  using LibXR::UART::write_port_;
-
   /**
    * @brief CDC构造函数
    *        CDC constructor
    *
-   * @param rx_buffer_size 接收缓冲区大小 / Receive buffer size
-   * @param tx_buffer_size 发送缓冲区大小 / Transmit buffer size
-   * @param tx_queue_size 发送队列大小 / Transmit queue size
    * @param data_in_ep_num 数据输入端点号 / Data IN endpoint number
    * @param data_out_ep_num 数据输出端点号 / Data OUT endpoint number
    * @param comm_ep_num 通信端点号 / Communication endpoint number
    */
-  CDC(size_t rx_buffer_size = 128, size_t tx_buffer_size = 128, size_t tx_queue_size = 5,
-      Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO)
-      : LibXR::UART(&read_port_cdc_, &write_port_cdc_),
-        read_port_cdc_(rx_buffer_size),
-        write_port_cdc_(tx_queue_size, tx_buffer_size),
-        data_in_ep_num_(data_in_ep_num),
+  CDCBase(Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
+          Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
+          Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO)
+      : data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
         comm_ep_num_(comm_ep_num)
   {
-    // 初始化端口读写函数
-    read_port_cdc_ = ReadFun;    // NOLINT
-    write_port_cdc_ = WriteFun;  // NOLINT
-  }
-
-  /**
-   * @brief 设置UART配置
-   *        Set UART configuration
-   *
-   * 将UART配置转换为CDC线路编码参数
-   * Converts UART configuration to CDC line coding parameters
-   */
-  ErrorCode SetConfig(UART::Configuration cfg) override
-  {
-    // 设置停止位
-    switch (cfg.stop_bits)
-    {
-      case 1:
-        line_coding_.bCharFormat = 0;
-        break;
-      case 2:
-        line_coding_.bCharFormat = 2;
-        break;
-      default:
-        return ErrorCode::ARG_ERR;
-    }
-
-    // 设置校验位
-    switch (cfg.parity)
-    {
-      case UART::Parity::NO_PARITY:
-        line_coding_.bParityType = 0;
-        break;
-      case UART::Parity::EVEN:
-        line_coding_.bParityType = 1;
-        break;
-      case UART::Parity::ODD:
-        line_coding_.bParityType = 2;
-        break;
-      default:
-        return ErrorCode::ARG_ERR;
-    }
-
-    // 设置数据位
-    switch (cfg.data_bits)
-    {
-      case 5:
-        line_coding_.bDataBits = 5;
-        break;
-      case 6:
-        line_coding_.bDataBits = 6;
-        break;
-      case 7:
-        line_coding_.bDataBits = 7;
-        break;
-      case 8:
-        line_coding_.bDataBits = 8;
-        break;
-      case 16:
-        line_coding_.bDataBits = 16;
-        break;
-      default:
-        return ErrorCode::ARG_ERR;
-    }
-
-    // 设置波特率
-    line_coding_.dwDTERate = cfg.baudrate;
-
-    SendSerialState();
-
-    return ErrorCode::OK;
   }
 
   /**
@@ -238,6 +154,65 @@ class CDC : public DeviceClass, public LibXR::UART
    */
   bool IsRtsSet() const { return (control_line_state_ & CDC_CONTROL_LINE_RTS) != 0; }
 
+  /**
+   * @brief 发送串行状态通知
+   *        Send serial state notification
+   *
+   * 通过中断端点向主机报告当前串行端口状态
+   * Reports current serial port state to host via interrupt endpoint
+   */
+  ErrorCode SendSerialState()
+  {
+    if (ep_comm_in_->GetState() == Endpoint::State::BUSY)
+    {
+      return ErrorCode::BUSY;
+    }
+    auto buffer = ep_comm_in_->GetBuffer();
+    ASSERT(buffer.size_ >= sizeof(SerialStateNotification));
+    SerialStateNotification* notification =
+        reinterpret_cast<SerialStateNotification*>(buffer.addr_);
+    notification->wIndex = itf_comm_in_num_;
+
+    // 设置串行状态位
+    if (IsDtrSet())
+    {
+      // DTR有效时报告载波检测(DCD)和数据集就绪(DSR)
+      notification->serialState = 0x03;  // DCD / DSR
+    }
+    else
+    {
+      notification->serialState = 0x00;  // 无状态
+    }
+
+    // 填充固定字段
+    notification->bmRequestType = 0xA1;  // 设备到主机，类，接口
+    notification->bNotification = static_cast<uint8_t>(CDCNotification::SERIAL_STATE);
+    notification->wValue = 0;
+    notification->wLength = 2;
+
+    ep_comm_in_->Transfer(sizeof(SerialStateNotification));
+
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 设置控制线路状态变更回调
+   *        Set control line state change callback
+   */
+  void SetOnSetControlLineStateCallback(LibXR::Callback<bool, bool> cb)
+  {
+    on_set_control_line_state_cb_ = cb;
+  }
+
+  /**
+   * @brief 设置线路编码变更回调
+   *        Set line coding change callback
+   */
+  void SetOnSetLineCodingCallback(LibXR::Callback<LibXR::UART::Configuration> cb)
+  {
+    on_set_line_coding_cb_ = cb;
+  }
+
  protected:
   /**
    * @brief 初始化CDC设备
@@ -249,7 +224,7 @@ class CDC : public DeviceClass, public LibXR::UART
    * @param endpoint_pool 端点资源池 / Endpoint resource pool
    * @param start_itf_num 起始接口号 / Starting interface number
    */
-  void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  virtual void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
   {
     control_line_state_ = 0;
     // 获取并配置数据IN端点
@@ -269,7 +244,7 @@ class CDC : public DeviceClass, public LibXR::UART
         {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
     ep_data_out_->Configure(
         {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, true});
-    ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 8});
+    ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16});
 
     // === 填充CDC描述符块 ===
     static constexpr uint8_t COMM_INTERFACE = 0;  // 通信接口号
@@ -346,10 +321,10 @@ class CDC : public DeviceClass, public LibXR::UART
     desc_block_.comm_ep = {
         7,
         static_cast<uint8_t>(DescriptorType::ENDPOINT),
-        static_cast<uint8_t>(ep_comm_in_->GetAddress() | 0x80),  // IN端点地址
+        static_cast<uint8_t>(ep_comm_in_->GetAddress()),  // IN端点地址
         static_cast<uint8_t>(Endpoint::Type::INTERRUPT),
-        8,    // 8字节最大包大小
-        0x10  // 轮询间隔16ms
+        16,   // 16字节最大包大小
+        0x04  // 轮询间隔FS-4ms HS-1ms
     };
 
     itf_comm_in_num_ = start_itf_num;
@@ -374,7 +349,7 @@ class CDC : public DeviceClass, public LibXR::UART
    * 释放所有占用的资源
    * Releases all allocated resources
    */
-  void Deinit(EndpointPool& endpoint_pool) override
+  virtual void Deinit(EndpointPool& endpoint_pool) override
   {
     inited_ = false;
     control_line_state_ = 0;
@@ -390,138 +365,13 @@ class CDC : public DeviceClass, public LibXR::UART
     ep_data_in_ = nullptr;
     ep_data_out_ = nullptr;
     ep_comm_in_ = nullptr;
-    LibXR::WriteInfoBlock info;
-    while (write_port_cdc_.queue_info_->Pop(info) == ErrorCode::OK)
-    {
-      write_port_cdc_.queue_data_->PopBatch(nullptr, info.data.size_);
-      write_port_cdc_.Finish(true, ErrorCode::INIT_ERR, info, 0);
-    }
-    write_port_cdc_.Reset();
-  }
-
-  /**
-   * @brief 写端口功能实现
-   *        Write port function implementation
-   *
-   * 处理UART写操作，将数据通过USB端点发送
-   * Handles UART write operations by sending data through USB endpoint
-   */
-  static ErrorCode WriteFun(WritePort& port)
-  {
-    CDC* cdc = CONTAINER_OF(&port, CDC, write_port_cdc_);
-
-    // 检查是否已初始化且DTR已设置
-    if (!cdc->inited_ || !cdc->IsDtrSet() || cdc->ep_comm_in_busy_)
-    {
-      WriteInfoBlock info;
-      if (port.queue_info_->Pop(info) == ErrorCode::OK)
-      {
-        port.queue_data_->PopBatch(nullptr, info.data.size_ - cdc->written_);
-        port.Finish(false, ErrorCode::NO_BUFF, info, 0);
-        cdc->written_ = 0;
-      }
-      port.Reset();
-      return ErrorCode::FAILED;
-    }
-
-    size_t dequeued = 0;
-
-    while (port.queue_info_->Size() > 0)
-    {
-      // 检查当前是否有传输正在进行
-      if (cdc->ep_data_in_->GetActiveLength() > 0 || cdc->need_write_zlp_)
-      {
-        return ErrorCode::FAILED;
-      }
-
-      auto buffer = cdc->ep_data_in_->GetBuffer();
-
-      WriteInfoBlock info;
-
-      // 获取队列中的写操作信息
-      if (port.queue_info_->Peek(info) != ErrorCode::OK)
-      {
-        return ErrorCode::EMPTY;
-      }
-
-      size_t need_write = info.data.size_ - dequeued;
-
-      if (need_write == 0)
-      {
-        return ErrorCode::OK;
-      }
-
-      // 检查数据大小是否超出缓冲区
-      if (need_write > buffer.size_)
-      {
-        need_write = buffer.size_;
-      }
-
-      // 从队列获取数据
-      if (port.queue_data_->PopBatch(reinterpret_cast<uint8_t*>(buffer.addr_),
-                                     need_write) != ErrorCode::OK)
-      {
-        ASSERT(false);
-        return ErrorCode::EMPTY;
-      }
-
-      dequeued += need_write;
-
-      cdc->written_ += need_write;
-
-      if (cdc->written_ >= info.data.size_)
-      {
-        port.queue_info_->Pop();
-        port.Finish(false, ErrorCode::OK, info, info.data.size_);
-        cdc->written_ -= info.data.size_;
-      }
-
-      cdc->ep_data_in_->SetActiveLength(need_write);
-
-      std::atomic_signal_fence(std::memory_order_seq_cst);
-
-      // 如果端点空闲且有数据待发送
-      if (cdc->ep_data_in_->GetState() == Endpoint::State::IDLE &&
-          cdc->ep_data_in_->GetActiveLength() != 0)
-      {
-        /* 可以立即发送 */
-      }
-      else
-      {
-        return ErrorCode::FAILED;
-      }
-
-      // 启动传输
-      auto ans = ErrorCode::OK;
-
-      cdc->ep_data_in_->SetActiveLength(0);
-
-      ans = cdc->ep_data_in_->Transfer(need_write);
-
-      ASSERT(ans == ErrorCode::OK);
-    }
-
-    return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 读端口功能实现
-   *        Read port function implementation
-   *
-   * 占位实现，实际读取在OnDataOutComplete中处理
-   * Placeholder implementation, actual reading handled in OnDataOutComplete
-   */
-  static ErrorCode ReadFun(ReadPort& port)
-  {
-    UNUSED(port);
-    return ErrorCode::EMPTY;
   }
 
   /**
    * @brief 数据OUT端点传输完成静态回调
    *        Static callback for data OUT endpoint transfer completion
    */
-  static void OnDataOutCompleteStatic(bool in_isr, CDC* self, ConstRawData& data)
+  static void OnDataOutCompleteStatic(bool in_isr, CDCBase* self, ConstRawData& data)
   {
     if (!self->inited_)
     {
@@ -534,7 +384,7 @@ class CDC : public DeviceClass, public LibXR::UART
    * @brief 数据IN端点传输完成静态回调
    *        Static callback for data IN endpoint transfer completion
    */
-  static void OnDataInCompleteStatic(bool in_isr, CDC* self, ConstRawData& data)
+  static void OnDataInCompleteStatic(bool in_isr, CDCBase* self, ConstRawData& data)
   {
     if (!self->inited_)
     {
@@ -550,20 +400,7 @@ class CDC : public DeviceClass, public LibXR::UART
    * 接收数据并放入接收缓冲区，然后重新启动传输
    * Receives data into receive buffer and restarts transfer
    */
-  inline void OnDataOutComplete(bool in_isr, ConstRawData& data)
-  {
-    // 重启OUT端点传输
-    ep_data_out_->Transfer(ep_data_out_->MaxTransferSize());
-
-    if (data.size_ > 0)
-    {
-      // 将接收到的数据推入接收缓冲区
-      read_port_cdc_.queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                            data.size_);
-      // 处理待处理的读取操作
-      read_port_cdc_.ProcessPendingReads(in_isr);
-    }
-  }
+  virtual void OnDataOutComplete(bool in_isr, ConstRawData& data) = 0;
 
   /**
    * @brief 数据IN端点传输完成处理
@@ -572,54 +409,7 @@ class CDC : public DeviceClass, public LibXR::UART
    * 完成发送操作并处理发送队列中的下一个数据包
    * Completes transmission and processes next packet in send queue
    */
-  void OnDataInComplete(bool in_isr, ConstRawData& data)
-  {
-    UNUSED(in_isr);
-    UNUSED(data);
-
-    size_t pending_len = ep_data_in_->GetActiveLength();
-
-    if (pending_len == 0)
-    {
-      // TODO: zlp check
-      return;
-    }
-
-    ep_data_in_->SetActiveLength(0);
-    auto ans = ep_data_in_->Transfer(pending_len);
-    ASSERT(ans == ErrorCode::OK);
-
-    LibXR::WriteInfoBlock info;
-
-    if (write_port_cdc_.queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return;
-    }
-
-    auto need_write = info.data.size_ - written_;
-
-    if (need_write > 0)
-    {
-      auto buffer = ep_data_in_->GetBuffer();
-      if (buffer.size_ < need_write)
-      {
-        need_write = buffer.size_;
-      }
-
-      write_port_cdc_.queue_data_->PopBatch(reinterpret_cast<uint8_t*>(buffer.addr_),
-                                            need_write);
-      ep_data_in_->SetActiveLength(need_write);
-      written_ += need_write;
-
-      if (written_ >= info.data.size_)
-      {
-        write_port_cdc_.queue_info_->Pop(info);
-        write_port_cdc_.Finish(true, ErrorCode::OK, info, info.data.size_);
-        written_ -= info.data.size_;
-        ASSERT(written_ == 0);
-      }
-    }
-  }
+  virtual void OnDataInComplete(bool in_isr, ConstRawData& data) = 0;
 
   /**
    * @brief 获取接口数量
@@ -678,15 +468,14 @@ class CDC : public DeviceClass, public LibXR::UART
 
         result.write_data = ConstRawData{reinterpret_cast<const uint8_t*>(&line_coding_),
                                          sizeof(line_coding_)};
-        SendSerialState();
         return ErrorCode::OK;
 
       case ClassRequest::SET_CONTROL_LINE_STATE:
         // 设置DTR/RTS状态
         control_line_state_ = wValue;
-        on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
         result.write_zlp = true;
         SendSerialState();
+        on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
         return ErrorCode::OK;
 
       case ClassRequest::SEND_BREAK:
@@ -719,6 +508,7 @@ class CDC : public DeviceClass, public LibXR::UART
           case 0:
             cfg.stop_bits = 1;
             break;
+          //TODO: 1.5
           case 2:
             cfg.stop_bits = 2;
             break;
@@ -728,10 +518,10 @@ class CDC : public DeviceClass, public LibXR::UART
         switch (line_coding_.bParityType)
         {
           case 1:
-            cfg.parity = LibXR::UART::Parity::EVEN;
+            cfg.parity = LibXR::UART::Parity::ODD;
             break;
           case 2:
-            cfg.parity = LibXR::UART::Parity::ODD;
+            cfg.parity = LibXR::UART::Parity::EVEN;
             break;
           default:
             cfg.parity = LibXR::UART::Parity::NO_PARITY;
@@ -745,62 +535,6 @@ class CDC : public DeviceClass, public LibXR::UART
     }
   }
 
-  /**
-   * @brief 发送串行状态通知
-   *        Send serial state notification
-   *
-   * 通过中断端点向主机报告当前串行端口状态
-   * Reports current serial port state to host via interrupt endpoint
-   */
-  ErrorCode SendSerialState()
-  {
-    ep_comm_in_busy_ = true;
-    auto buffer = ep_comm_in_->GetBuffer();
-    SerialStateNotification* notification =
-        reinterpret_cast<SerialStateNotification*>(buffer.addr_);
-    notification->wIndex = itf_comm_in_num_;
-
-    // 设置串行状态位
-    if (IsDtrSet())
-    {
-      // DTR有效时报告载波检测(DCD)和数据集就绪(DSR)
-      notification->serialState = 0x03;  // DCD / DSR
-    }
-    else
-    {
-      notification->serialState = 0x00;  // 无状态
-    }
-
-    // 填充固定字段
-    notification->bmRequestType = 0xA1;  // 设备到主机，类，接口
-    notification->bNotification = static_cast<uint8_t>(CDCNotification::SERIAL_STATE);
-    notification->wValue = 0;
-    notification->wLength = 2;
-
-    ep_comm_in_busy_ = false;
-
-    return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 设置控制线路状态变更回调
-   *        Set control line state change callback
-   */
-  void SetOnSetControlLineStateCallback(LibXR::Callback<bool, bool> cb)
-  {
-    on_set_control_line_state_cb_ = cb;
-  }
-
-  /**
-   * @brief 设置线路编码变更回调
-   *        Set line coding change callback
-   */
-  void SetOnSetLineCodingCallback(LibXR::Callback<LibXR::UART::Configuration> cb)
-  {
-    on_set_line_coding_cb_ = cb;
-  }
-
- private:
 #pragma pack(push, 1)
   /**
    * @brief CDC描述符块结构
@@ -859,10 +593,18 @@ class CDC : public DeviceClass, public LibXR::UART
   } desc_block_;
 #pragma pack(pop)
 
-  // 端口对象
-  LibXR::ReadPort read_port_cdc_;    ///< 读取端口 / Read port
-  LibXR::WritePort write_port_cdc_;  ///< 写入端口 / Write port
+ protected:
+  CDCLineCoding& GetLineCoding() { return line_coding_; }
 
+  bool Inited() { return inited_; }
+
+  Endpoint* GetDataInEndpoint() { return ep_data_in_; }
+
+  Endpoint* GetDataOutEndpoint() { return ep_data_out_; }
+
+  Endpoint* GetCommInEndpoint() { return ep_comm_in_; }
+
+ private:
   // 端点号
   Endpoint::EPNumber data_in_ep_num_;   ///< 数据IN端点号 / Data IN endpoint number
   Endpoint::EPNumber data_out_ep_num_;  ///< 数据OUT端点号 / Data OUT endpoint number
@@ -888,13 +630,10 @@ class CDC : public DeviceClass, public LibXR::UART
       on_set_line_coding_cb_;  ///< 线路编码变更回调 / Line coding change callback
 
   // 状态标志
-  bool inited_ = false;           ///< 初始化标志 / Initialization flag
-  bool ep_comm_in_busy_ = false;  ///< 通信端点忙标志 / Communication endpoint busy flag
-  bool need_write_zlp_ = false;   ///< 需要写入ZLP标志 / Need to write ZLP flag
-  size_t written_ = 0;            ///< 已写入字节数 / Number of bytes written
+  bool inited_ = false;  ///< 初始化标志 / Initialization flag
 
   // 接口信息
-  size_t itf_comm_in_num_;  ///< 通信接口号 / Communication interface number
+  uint8_t itf_comm_in_num_;  ///< 通信接口号 / Communication interface number
 
   // CDC参数
   CDCLineCoding line_coding_ = {115200, 0, 0, 8};  ///< 当前线路编码 / Current line coding
