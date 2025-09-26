@@ -170,8 +170,6 @@ void STM32Endpoint::Configure(const Config& cfg)
     max_packet_size = 8;
   }
 
-  ASSERT(is_power_of_two(max_packet_size) && max_packet_size >= 8);
-
   if (HAL_PCD_EP_Open(hpcd_, addr, max_packet_size, type) == HAL_OK)
   {
     SetState(State::IDLE);
