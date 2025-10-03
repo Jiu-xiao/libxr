@@ -88,15 +88,14 @@ class STM32CANFD : public FDCAN
   };
 
   template <typename T>
-  typename std::enable_if<!HasMessageRAMOffset<T>::value, int>::type
+  typename std::enable_if<!HasMessageRAMOffset<T>::value, void>::type
   CheckMessageRAMOffset(T&, uint32_t = FDCAN_MESSAGE_RAM_WORDS_MAX)
   {
-    return 0;
   }
 
   template <typename T>
-  typename std::enable_if<HasMessageRAMOffset<T>::value, int>::type CheckMessageRAMOffset(
-      T& fdcan_handle, uint32_t max_words = FDCAN_MESSAGE_RAM_WORDS_MAX)
+  typename std::enable_if<HasMessageRAMOffset<T>::value, void>::type
+  CheckMessageRAMOffset(T& fdcan_handle, uint32_t max_words = FDCAN_MESSAGE_RAM_WORDS_MAX)
   {
     // NOLINTNEXTLINE
     static const auto FDCAN_ElmtWords = [](uint32_t sz) -> uint32_t
@@ -174,7 +173,6 @@ class STM32CANFD : public FDCAN
     }
 
     offset_map[id].inited = true;
-    return 0;
   }
 
   /**

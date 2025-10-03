@@ -31,6 +31,11 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
     return;
   }
 
+#if __DCACHE_PRESENT
+  SCB_InvalidateDCache_by_Addr(hpcd->Setup,
+                               static_cast<int32_t>(sizeof(USB::SetupPacket)));
+#endif
+
   usb->OnSetupPacket(true, reinterpret_cast<USB::SetupPacket *>(hpcd->Setup));
 }
 
