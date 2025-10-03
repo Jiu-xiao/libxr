@@ -26,6 +26,9 @@ typedef enum
 #if defined(DMA1_Channel7)
   CH32_DMA1_CHANNEL7,
 #endif
+#if defined(DMA1_Channel8)
+  CH32_DMA1_CHANNEL8,
+#endif
 #if defined(DMA2_Channel1)
   CH32_DMA2_CHANNEL1,
 #endif

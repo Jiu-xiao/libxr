@@ -27,22 +27,6 @@ uint32_t LibXR::CH32GetGPIOPeriph(GPIO_TypeDef* port)
   else if (port == GPIOE)
     return RCC_APB2Periph_GPIOE;
 #endif
-#if defined(GPIOF)
-  else if (port == GPIOF)
-    return RCC_APB2Periph_GPIOF;
-#endif
-#if defined(GPIOG)
-  else if (port == GPIOG)
-    return RCC_APB2Periph_GPIOG;
-#endif
-#if defined(GPIOH)
-  else if (port == GPIOH)
-    return RCC_APB2Periph_GPIOH;
-#endif
-#if defined(GPIOI)
-  else if (port == GPIOI)
-    return RCC_APB2Periph_GPIOI;
-#endif
   return 0;
 }
 

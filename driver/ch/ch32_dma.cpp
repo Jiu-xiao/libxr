@@ -7,11 +7,6 @@
 extern "C" void DMA1_Channel4_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA1_Channel7_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel5_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel4_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel6_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel8_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel10_IRQHandler(void) __attribute__((interrupt));
 
 extern "C" void DMA1_Channel4_IRQHandler(void)
 {
@@ -27,6 +22,28 @@ extern "C" void DMA1_Channel2_IRQHandler(void)
 {
   LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel2, ch32_uart_id_t::CH32_USART3);
 }
+
+#if !defined(DMA2_BASE)
+extern "C" void DMA1_Channel8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel8_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel8, ch32_uart_id_t::CH32_UART4);
+}
+
+extern "C" void DMA1_Channel1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel1_IRQHandler(void)
+{
+  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel1, ch32_uart_id_t::CH32_UART4);
+}
+#endif
+
+#if defined(DMA2_BASE)
+
+extern "C" void DMA2_Channel5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel10_IRQHandler(void) __attribute__((interrupt));
 
 extern "C" void DMA2_Channel5_IRQHandler(void)
 {
@@ -55,29 +72,11 @@ extern "C" void DMA2_Channel10_IRQHandler(void)
 
 /* UART/USART RX DMA */
 
-extern "C" void DMA1_Channel5_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel6_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA2_Channel3_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA2_Channel2_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA2_Channel7_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA2_Channel9_IRQHandler(void) __attribute__((interrupt));
 extern "C" void DMA2_Channel11_IRQHandler(void) __attribute__((interrupt));
-
-extern "C" void DMA1_Channel5_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel5, ch32_uart_id_t::CH32_USART1);
-}
-
-extern "C" void DMA1_Channel6_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel6, ch32_uart_id_t::CH32_USART2);
-}
-
-extern "C" void DMA1_Channel3_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel3, ch32_uart_id_t::CH32_USART3);
-}
 
 extern "C" void DMA2_Channel3_IRQHandler(void)
 {
@@ -102,6 +101,27 @@ extern "C" void DMA2_Channel9_IRQHandler(void)
 extern "C" void DMA2_Channel11_IRQHandler(void)
 {
   LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel11, ch32_uart_id_t::CH32_UART8);
+}
+
+#endif
+
+extern "C" void DMA1_Channel5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt));
+
+extern "C" void DMA1_Channel5_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel5, ch32_uart_id_t::CH32_USART1);
+}
+
+extern "C" void DMA1_Channel6_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel6, ch32_uart_id_t::CH32_USART2);
+}
+
+extern "C" void DMA1_Channel3_IRQHandler(void)
+{
+  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel3, ch32_uart_id_t::CH32_USART3);
 }
 
 ch32_dma_channel_t CH32_DMA_GetID(DMA_Channel_TypeDef *channel)
@@ -152,6 +172,13 @@ ch32_dma_channel_t CH32_DMA_GetID(DMA_Channel_TypeDef *channel)
   if (channel == DMA1_Channel7)
   {
     return CH32_DMA1_CHANNEL7;
+  }
+#endif
+
+#if defined(DMA1_Channel8)
+  if (channel == DMA1_Channel8)
+  {
+    return CH32_DMA1_CHANNEL8;
   }
 #endif
 
