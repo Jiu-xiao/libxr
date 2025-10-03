@@ -118,6 +118,7 @@ STM32CANFD::STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size)
       tx_pool_(queue_size),
       tx_pool_fd_(queue_size)
 {
+  CheckMessageRAMOffset(hcan);
   map[id_] = this;
   Init();
 }
