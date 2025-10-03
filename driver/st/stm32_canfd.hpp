@@ -87,17 +87,6 @@ class STM32CANFD : public FDCAN
 
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
-  static constexpr uint32_t FDCAN_PACK_LEN_MAP[16] = {
-      FDCAN_DLC_BYTES_0,  FDCAN_DLC_BYTES_1,  FDCAN_DLC_BYTES_2,  FDCAN_DLC_BYTES_3,
-      FDCAN_DLC_BYTES_4,  FDCAN_DLC_BYTES_5,  FDCAN_DLC_BYTES_6,  FDCAN_DLC_BYTES_7,
-      FDCAN_DLC_BYTES_8,  FDCAN_DLC_BYTES_12, FDCAN_DLC_BYTES_16, FDCAN_DLC_BYTES_20,
-      FDCAN_DLC_BYTES_24, FDCAN_DLC_BYTES_32, FDCAN_DLC_BYTES_48, FDCAN_DLC_BYTES_64,
-  };
-
-  static constexpr uint32_t FDCAN_PACK_LEN_TO_INT_MAP[16] = {
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64,
-  };
-
   ErrorCode AddMessage(const FDPack& pack) override;
 
   /**
