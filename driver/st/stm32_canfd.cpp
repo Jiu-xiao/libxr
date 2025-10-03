@@ -42,6 +42,75 @@ stm32_fdcan_id_t STM32_FDCAN_GetID(FDCAN_GlobalTypeDef* addr)
   }
 }
 
+static inline uint32_t BytesToDlc(uint32_t n)
+{
+  if (n <= 8U)
+  {
+    return n;
+  }  // FDCAN_DLC_BYTES_0..8 == 0..8
+  if (n <= 12U)
+  {
+    return FDCAN_DLC_BYTES_12;
+  }
+  if (n <= 16U)
+  {
+    return FDCAN_DLC_BYTES_16;
+  }
+  if (n <= 20U)
+  {
+    return FDCAN_DLC_BYTES_20;
+  }
+  if (n <= 24U)
+  {
+    return FDCAN_DLC_BYTES_24;
+  }
+  if (n <= 32U)
+  {
+    return FDCAN_DLC_BYTES_32;
+  }
+  if (n <= 48U)
+  {
+    return FDCAN_DLC_BYTES_48;
+  }
+  return FDCAN_DLC_BYTES_64;  // n >= 49 → 64
+}
+
+static inline uint32_t DlcToBytes(uint32_t dlc)
+{
+  if (dlc <= FDCAN_DLC_BYTES_8)
+  {  // 0..8 → 0..8
+    return dlc;
+  }
+  else if (dlc == FDCAN_DLC_BYTES_12)
+  {
+    return 12U;
+  }
+  else if (dlc == FDCAN_DLC_BYTES_16)
+  {
+    return 16U;
+  }
+  else if (dlc == FDCAN_DLC_BYTES_20)
+  {
+    return 20U;
+  }
+  else if (dlc == FDCAN_DLC_BYTES_24)
+  {
+    return 24U;
+  }
+  else if (dlc == FDCAN_DLC_BYTES_32)
+  {
+    return 32U;
+  }
+  else if (dlc == FDCAN_DLC_BYTES_48)
+  {
+    return 48U;
+  }
+  else
+  {  // FDCAN_DLC_BYTES_64 或其它非法值
+    return 64U;
+  }
+}
+
 STM32CANFD::STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size)
     : FDCAN(),
       hcan_(hcan),
@@ -219,26 +288,7 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
       return ErrorCode::FAILED;
   }
 
-  if (pack.len <= 8)
-  {
-    header.DataLength = FDCAN_PACK_LEN_MAP[pack.len];
-  }
-  else if (pack.len <= 24)
-  {
-    header.DataLength = FDCAN_PACK_LEN_MAP[(pack.len - 9) / 4 + 1 + 8];
-  }
-  else if (pack.len < 32)
-  {
-    header.DataLength = FDCAN_DLC_BYTES_32;
-  }
-  else if (pack.len < 48)
-  {
-    header.DataLength = FDCAN_DLC_BYTES_48;
-  }
-  else
-  {
-    header.DataLength = FDCAN_DLC_BYTES_64;
-  }
+  header.DataLength = BytesToDlc(pack.len);
 
   header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
   header.BitRateSwitch = FDCAN_BRS_ON;
@@ -296,16 +346,7 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
         }
       }
 
-      rx_buff_.pack_fd.len = rx_buff_.header.DataLength;
-
-      for (uint32_t i = 0; i < 16; i++)
-      {
-        if (rx_buff_.pack_fd.len == FDCAN_PACK_LEN_MAP[i])
-        {
-          rx_buff_.pack_fd.len = FDCAN_PACK_LEN_TO_INT_MAP[i];
-          break;
-        }
-      }
+      rx_buff_.pack_fd.len = DlcToBytes(rx_buff_.header.DataLength);
 
       OnMessage(rx_buff_.pack_fd, true);
     }
@@ -366,7 +407,7 @@ void STM32CANFD::ProcessTxInterrupt()
         ASSERT(false);
         return;
     }
-    tx_buff_.header.DataLength = tx_buff_.pack_fd.len;
+    tx_buff_.header.DataLength = BytesToDlc(tx_buff_.pack_fd.len);
     tx_buff_.header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
     tx_buff_.header.BitRateSwitch = FDCAN_BRS_ON;
     tx_buff_.header.FDFormat = FDCAN_FD_CAN;
@@ -405,7 +446,6 @@ void STM32CANFD::ProcessTxInterrupt()
     }
     tx_buff_.header.DataLength = 8;
     tx_buff_.header.FDFormat = FDCAN_CLASSIC_CAN;
-    tx_buff_.header.TxFrameType = FDCAN_DATA_FRAME;
     tx_buff_.header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_buff_.header.MessageMarker = 0x00;
     tx_buff_.header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
