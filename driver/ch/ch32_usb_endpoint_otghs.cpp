@@ -1,8 +1,6 @@
 #include <cstdint>
 
 #include "ch32_usb_endpoint.hpp"
-#include "ch32v30x.h"
-#include "ch32v30x_usb.h"
 #include "ep.hpp"
 #include "libxr_time.hpp"
 #include "timebase.hpp"

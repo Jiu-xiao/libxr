@@ -3,6 +3,11 @@
 
 static_assert(configTICK_RATE_HZ == 1000, "configTICK_RATE_HZ must be 1000");
 
+#if defined(configUSE_TIMERS) && (configUSE_TIMERS + 0)
+#warning \
+    "It is recommended to set configUSE_TIMERS to 0 to reduce resource usage unless software timers are strictly required."
+#endif
+
 // NOLINTNEXTLINE
 extern "C" __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t xTask,
                                                                     char *pcTaskName)
