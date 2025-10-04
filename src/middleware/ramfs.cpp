@@ -45,36 +45,37 @@ RamFS::File *RamFS::Dir::FindFile(const char *name)
 RamFS::File *RamFS::Dir::FindFileRev(const char *name)
 {
   auto ans = FindFile(name);
-
-  std::function<ErrorCode(RBTree<const char *>::Node<FsNode> &)> fun;
-
-  fun = [&](RBTree<const char *>::Node<FsNode> &item) -> ErrorCode
+  if (ans)
   {
-    FsNode &node = item;
-    if (node.type == FsNodeType::DIR)
-    {
-      Dir *dir = reinterpret_cast<Dir *>(&item);
-
-      ans = dir->FindFile(name);
-      if (ans)
-      {
-        return ErrorCode::FAILED;
-      }
-
-      dir->data_.rbt.Foreach<FsNode>([&](RBTree<const char *>::Node<FsNode> &child)
-                                     { return fun(child); });
-
-      return ans ? ErrorCode::FAILED : ErrorCode::OK;
-    }
-    return ErrorCode::OK;
-  };
-
-  if (ans == nullptr)
-  {
-    data_.rbt.Foreach<FsNode>([&](RBTree<const char *>::Node<FsNode> &item)
-                              { return fun(item); });
+    return ans;
   }
 
+  struct FindFileRevFn
+  {
+    const char *name;
+    RamFS::File *&ans;
+    ErrorCode operator()(RBTree<const char *>::Node<RamFS::FsNode> &item) const
+    {
+      RamFS::FsNode &node = item;
+      if (node.type == FsNodeType::DIR)
+      {
+        auto *dir = reinterpret_cast<RamFS::Dir *>(&item);
+
+        auto f = dir->FindFile(name);
+        if (f)
+        {
+          ans = f;
+          return ErrorCode::FAILED;
+        }
+
+        dir->data_.rbt.Foreach<RamFS::FsNode>(FindFileRevFn{name, ans});
+        return ans ? ErrorCode::FAILED : ErrorCode::OK;
+      }
+      return ErrorCode::OK;
+    }
+  };
+
+  data_.rbt.Foreach<FsNode>(FindFileRevFn{name, ans});
   return ans;
 }
 
@@ -105,72 +106,72 @@ RamFS::Dir *RamFS::Dir::FindDir(const char *name)
 RamFS::Dir *RamFS::Dir::FindDirRev(const char *name)
 {
   auto ans = FindDir(name);
-
-  std::function<ErrorCode(RBTree<const char *>::Node<FsNode> &)> fun;
-
-  fun = [&](RBTree<const char *>::Node<FsNode> &item) -> ErrorCode
+  if (ans)
   {
-    FsNode &node = item;
-    if (node.type == FsNodeType::DIR)
-    {
-      Dir *dir = reinterpret_cast<Dir *>(&item);
-      if (strcmp(dir->data_.name, name) == 0)
-      {
-        ans = dir;
-        return ErrorCode::OK;
-      }
-      else
-      {
-        dir->data_.rbt.Foreach<FsNode>([&](RBTree<const char *>::Node<FsNode> &child)
-                                       { return fun(child); });
-
-        return ans ? ErrorCode::FAILED : ErrorCode::OK;
-      }
-    }
-    return ErrorCode::OK;
-  };
-
-  if (ans == nullptr)
-  {
-    data_.rbt.Foreach<FsNode>([&](RBTree<const char *>::Node<FsNode> &item)
-                              { return fun(item); });
+    return ans;
   }
 
+  struct FindDirRevFn
+  {
+    const char *name;
+    RamFS::Dir *&ans;
+    ErrorCode operator()(RBTree<const char *>::Node<RamFS::FsNode> &item) const
+    {
+      RamFS::FsNode &node = item;
+      if (node.type == FsNodeType::DIR)
+      {
+        auto *dir = reinterpret_cast<RamFS::Dir *>(&item);
+        if (strcmp(dir->data_.name, name) == 0)
+        {
+          ans = dir;
+          return ErrorCode::FAILED;
+        }
+
+        dir->data_.rbt.Foreach<RamFS::FsNode>(FindDirRevFn{name, ans});
+        return ans ? ErrorCode::FAILED : ErrorCode::OK;
+      }
+      return ErrorCode::OK;
+    }
+  };
+
+  data_.rbt.Foreach<FsNode>(FindDirRevFn{name, ans});
   return ans;
 }
 
 RamFS::Device *RamFS::Dir::FindDeviceRev(const char *name)
 {
   auto ans = FindDevice(name);
-
-  std::function<ErrorCode(RBTree<const char *>::Node<FsNode> &)> fun;
-
-  fun = [&](RBTree<const char *>::Node<FsNode> &item) -> ErrorCode
+  if (ans)
   {
-    FsNode &node = item;
-    if (node.type == FsNodeType::DIR)
+    return ans;
+  }
+
+  struct FindDevRevFn
+  {
+    const char *name;
+    RamFS::Device *&ans;
+    ErrorCode operator()(RBTree<const char *>::Node<RamFS::FsNode> &item) const
     {
-      Dir *dir = reinterpret_cast<Dir *>(&item);
-
-      ans = dir->FindDevice(name);
-      if (ans)
+      RamFS::FsNode &node = item;
+      if (node.type == FsNodeType::DIR)
       {
-        return ErrorCode::FAILED;
+        auto *dir = reinterpret_cast<RamFS::Dir *>(&item);
+
+        auto d = dir->FindDevice(name);
+        if (d)
+        {
+          ans = d;
+          return ErrorCode::FAILED;
+        }
+
+        dir->data_.rbt.Foreach<RamFS::FsNode>(FindDevRevFn{name, ans});
+        return ans ? ErrorCode::FAILED : ErrorCode::OK;
       }
-
-      dir->data_.rbt.Foreach<FsNode>([&](RBTree<const char *>::Node<FsNode> &child)
-                                     { return fun(child); });
-
-      return ans ? ErrorCode::FAILED : ErrorCode::OK;
+      return ErrorCode::OK;
     }
-    return ErrorCode::OK;
   };
 
-  if (ans == nullptr)
-  {
-    data_.rbt.Foreach<FsNode>([&](RBTree<const char *>::Node<FsNode> &item)
-                              { return fun(item); });
-  }
+  data_.rbt.Foreach<FsNode>(FindDevRevFn{name, ans});
   return ans;
 }
 
