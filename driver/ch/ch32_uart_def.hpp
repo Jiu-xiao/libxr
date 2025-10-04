@@ -245,7 +245,11 @@ static constexpr uint32_t CH32_UART_TX_DMA_IT_MAP[] = {
     0,
 #endif
 #if defined(UART4)
+#if defined(DMA2_IT_TC5)
     DMA2_IT_TC5,
+#else
+    DMA1_IT_TC1
+#endif
 #endif
 #if defined(UART5)
     DMA2_IT_TC4,
@@ -296,7 +300,11 @@ static constexpr uint32_t CH32_UART_RX_DMA_IT_TC_MAP[] = {
     0,
 #endif
 #if defined(UART4)
+#if defined(DMA2_IT_TC3)
     DMA2_IT_TC3,
+#else
+    DMA1_IT_TC8
+#endif
 #endif
 #if defined(UART5)
     DMA2_IT_TC2,
@@ -347,7 +355,11 @@ static constexpr uint32_t CH32_UART_RX_DMA_IT_HT_MAP[] = {
     0,
 #endif
 #if defined(UART4)
+#if defined(DMA2_IT_HT3)
     DMA2_IT_HT3,
+#else
+    DMA1_IT_HT8
+#endif
 #endif
 #if defined(UART5)
     DMA2_IT_HT2,
@@ -398,7 +410,11 @@ static DMA_Channel_TypeDef *const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
     NULL,
 #endif
 #if defined(UART4)
+#if defined(DMA2_Channel5)
     DMA2_Channel5,
+#else
+    DMA1_Channel1
+#endif
 #endif
 #if defined(UART5)
     DMA2_Channel4,
@@ -449,7 +465,11 @@ static DMA_Channel_TypeDef *const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
     NULL,
 #endif
 #if defined(UART4)
+#if defined(DMA2_Channel3)
     DMA2_Channel3,
+#else
+    DMA1_Channel8
+#endif
 #endif
 #if defined(UART5)
     DMA2_Channel2,

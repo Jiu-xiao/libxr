@@ -100,8 +100,9 @@ class LinuxUART : public UART
 
     if (std::filesystem::exists(device_path_) == false)
     {
-      XR_LOG_ERROR("Cannot find UART device: %s", device_path_);
+      XR_LOG_ERROR("Cannot find UART device: %s", device_path_.c_str());
       ASSERT(false);
+      return;
     }
 
     device_path_ = GetByPathForTTY(device_path_);
@@ -223,7 +224,9 @@ class LinuxUART : public UART
       config_ = config;
     }
 
-    struct termios2 tio{};
+    struct termios2 tio
+    {
+    };
     if (ioctl(fd_, TCGETS2, &tio) != 0)
     {
       return ErrorCode::INIT_ERR;

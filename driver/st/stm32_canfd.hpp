@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cstdint>
 #include <type_traits>
+#include <utility>
 
+#include "libxr_def.hpp"
 #include "main.h"
 
 #ifdef HAL_FDCAN_MODULE_ENABLED
@@ -12,6 +15,10 @@
 
 #include "can.hpp"
 #include "libxr.hpp"
+
+#ifndef FDCAN_MESSAGE_RAM_WORDS_MAX
+#define FDCAN_MESSAGE_RAM_WORDS_MAX 2560u
+#endif
 
 typedef enum : uint8_t
 {
@@ -69,6 +76,113 @@ namespace LibXR
 class STM32CANFD : public FDCAN
 {
  public:
+  template <typename, typename = void>
+  struct HasMessageRAMOffset : std::false_type
+  {
+  };
+
+  template <typename T>
+  struct HasMessageRAMOffset<
+      T, std::void_t<decltype(std::declval<T>()->Init.MessageRAMOffset)>> : std::true_type
+  {
+  };
+
+  template <typename T>
+  typename std::enable_if<!HasMessageRAMOffset<T>::value, void>::type
+  CheckMessageRAMOffset(T&, uint32_t = FDCAN_MESSAGE_RAM_WORDS_MAX)
+  {
+  }
+
+  template <typename T>
+  typename std::enable_if<HasMessageRAMOffset<T>::value, void>::type
+  CheckMessageRAMOffset(T& fdcan_handle, uint32_t max_words = FDCAN_MESSAGE_RAM_WORDS_MAX)
+  {
+  using HandleT = std::remove_reference_t<decltype(*fdcan_handle)>;
+  using InitT   = decltype(HandleT{}.Init);
+
+    // NOLINTNEXTLINE
+    static const auto FDCAN_ElmtWords = [](uint32_t sz) -> uint32_t
+    {
+#if defined(FDCAN_DATA_BYTES_8)
+      switch (sz)
+      {
+        case FDCAN_DATA_BYTES_8:
+          return 4;  // 2 words header + 2 words data(0..8B)
+        case FDCAN_DATA_BYTES_12:
+          return 5;
+        case FDCAN_DATA_BYTES_16:
+          return 6;
+        case FDCAN_DATA_BYTES_20:
+          return 7;
+        case FDCAN_DATA_BYTES_24:
+          return 8;
+        case FDCAN_DATA_BYTES_32:
+          return 10;
+        case FDCAN_DATA_BYTES_48:
+          return 14;
+        case FDCAN_DATA_BYTES_64:
+          return 18;
+        default:
+          return 4;
+      }
+#else
+      ASSERT(false);
+      return 4;
+#endif
+    };
+
+    const uint32_t TX_FIFO_ELEMS =
+        HasTxFifoQueueElmtsNbr<T>::value ? fdcan_handle->Init.TxFifoQueueElmtsNbr : 0u;
+
+    // NOLINTNEXTLINE
+    const auto FDCAN_MessageRAMWords = [&](const InitT& c) -> uint32_t
+    {
+      return c.StdFiltersNbr * 1u + c.ExtFiltersNbr * 2u +
+             c.RxFifo0ElmtsNbr * FDCAN_ElmtWords(c.RxFifo0ElmtSize) +
+             c.RxFifo1ElmtsNbr * FDCAN_ElmtWords(c.RxFifo1ElmtSize) +
+             c.RxBuffersNbr * FDCAN_ElmtWords(c.RxBufferSize) + c.TxEventsNbr * 2u +
+             (c.TxBuffersNbr + TX_FIFO_ELEMS) * FDCAN_ElmtWords(c.TxElmtSize);
+    };
+
+    static struct
+    {
+      bool inited;
+      uint32_t offset;
+      uint32_t size;
+    } offset_map[STM32_FDCAN_NUMBER] = {};  // NOLINT
+
+    auto id = STM32_FDCAN_GetID(fdcan_handle->Instance);
+    ASSERT(id >= 0 && id < STM32_FDCAN_NUMBER);
+
+    offset_map[id].offset = fdcan_handle->Init.MessageRAMOffset;
+    offset_map[id].size = FDCAN_MessageRAMWords(fdcan_handle->Init);
+
+    const uint32_t START = offset_map[id].offset;
+    const uint32_t END = START + offset_map[id].size;
+
+    /* 内存越界 */
+    ASSERT(START <= max_words);
+    ASSERT(END <= max_words);
+
+    for (auto& it : offset_map)
+    {
+      if (!it.inited)
+      {
+        continue;
+      }
+
+      const uint32_t A0 = it.offset, A1 = it.offset + it.size;
+      const uint32_t B0 = START, B1 = END;
+      if (A0 < B1 && B0 < A1)
+      {
+        /* 内存区域重叠 */
+        ASSERT(false);
+      }
+    }
+
+    offset_map[id].inited = true;
+  }
+
   /**
    * @brief STM32CANFD 类，用于处理 STM32 系统的 CANFD 通道。 Provides handling for STM32
    * CANFD
@@ -86,17 +200,6 @@ class STM32CANFD : public FDCAN
   ErrorCode Init(void);
 
   ErrorCode AddMessage(const ClassicPack& pack) override;
-
-  static constexpr uint32_t FDCAN_PACK_LEN_MAP[16] = {
-      FDCAN_DLC_BYTES_0,  FDCAN_DLC_BYTES_1,  FDCAN_DLC_BYTES_2,  FDCAN_DLC_BYTES_3,
-      FDCAN_DLC_BYTES_4,  FDCAN_DLC_BYTES_5,  FDCAN_DLC_BYTES_6,  FDCAN_DLC_BYTES_7,
-      FDCAN_DLC_BYTES_8,  FDCAN_DLC_BYTES_12, FDCAN_DLC_BYTES_16, FDCAN_DLC_BYTES_20,
-      FDCAN_DLC_BYTES_24, FDCAN_DLC_BYTES_32, FDCAN_DLC_BYTES_48, FDCAN_DLC_BYTES_64,
-  };
-
-  static constexpr uint32_t FDCAN_PACK_LEN_TO_INT_MAP[16] = {
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64,
-  };
 
   ErrorCode AddMessage(const FDPack& pack) override;
 

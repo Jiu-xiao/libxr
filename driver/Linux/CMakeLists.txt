@@ -27,5 +27,5 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUDEV REQUIRED libudev)
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${LIBUDEV_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBUDEV_LIBRARIES})
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LIBUDEV_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBUDEV_LIBRARIES})
