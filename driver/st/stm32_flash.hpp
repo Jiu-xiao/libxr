@@ -22,6 +22,24 @@ struct FlashSector
   uint32_t size;     //< 扇区大小 / Size of the sector
 };
 
+#if defined(FLASH_BANK_2) && defined(FLASH_BANK_1)
+// NOLINTNEXTLINE
+inline uint32_t STM32FlashBankOf(uint32_t addr)
+{
+#if !defined(FLASH_BANK2_BASE)
+  // NOLINTNEXTLINE
+  const auto FLASH_BANK2_BASE = FLASH_BANK_SIZE + FLASH_BASE;
+#endif
+  return (addr >= FLASH_BANK2_BASE) ? FLASH_BANK_2 : FLASH_BANK_1;
+}
+#elif defined(FLASH_BANK_1)
+// NOLINTNEXTLINE
+inline uint32_t STM32FlashBankOf(uint32_t) { return FLASH_BANK_1; }
+#else
+// NOLINTNEXTLINE
+inline uint32_t STM32FlashBankOf(uint32_t) { return 1; }
+#endif
+
 #ifndef __DOXYGEN__
 
 template <typename, typename = void>
@@ -64,16 +82,15 @@ typename std::enable_if<HasFlashPage<T>::value>::type SetNbPages(T& init, uint32
 
 template <typename T>
 // NOLINTNEXTLINE
-typename std::enable_if<!HasFlashBank<T>::value>::type SetBanks(T& init)
+typename std::enable_if<!HasFlashBank<T>::value>::type SetBanks(T&, uint32_t)
 {
-  UNUSED(init);
 }
 
 template <typename T>
 // NOLINTNEXTLINE
-typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init)
+typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init, uint32_t addr)
 {
-  init.Banks = 1;
+  init.Banks = STM32FlashBankOf(addr);
 }
 
 #endif
