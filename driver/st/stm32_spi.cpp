@@ -112,7 +112,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     {
       memcpy(dma_buff_tx_.addr_, write_data.addr_, need_write);
 
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
       SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(dma_buff_tx_.addr_),
                               static_cast<int32_t>(write_data.size_));
 #endif
@@ -353,7 +353,7 @@ extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 
   if (spi->read_buff_.size_ > 0)
   {
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(spi->dma_buff_rx_.addr_, spi->read_buff_.size_);
 #endif
     if (!spi->mem_read_)

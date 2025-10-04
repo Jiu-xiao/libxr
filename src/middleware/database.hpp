@@ -1015,7 +1015,15 @@ class DatabaseRaw : public Database
     while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key))
     {
       key_offset = GetNextKey(key_offset);
+
+      if (key_offset + sizeof(key) >= flash_.Size())
+      {
+        InitBlock(BlockType::MAIN);
+        break;
+      }
+
       flash_.Read(key_offset, key);
+
       // TODO: 恢复损坏数据
       if (BlockBoolUtil<MinWriteSize>::ReadFlag(key.uninit))
       {
@@ -1067,8 +1075,7 @@ class DatabaseRaw : public Database
 
     if (!IsBlockEmpty(BlockType::BACKUP))
     {
-      ASSERT(false);
-      return ErrorCode::FAILED;
+      InitBlock(BlockType::BACKUP);
     }
 
     size_t write_buff_offset = OFFSET_OF(FlashInfo, key) + block_size_;

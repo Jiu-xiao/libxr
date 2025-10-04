@@ -128,7 +128,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
   if (write_data.size_ > dma_enable_min_size_)
   {
     write_op_ = op;
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(dma_buff_.addr_),
                             write_data.size_);
 #endif
@@ -223,7 +223,7 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   if (write_data.size_ > dma_enable_min_size_)
   {
     write_op_ = op;
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(dma_buff_.addr_),
                             write_data.size_);
 #endif
@@ -281,7 +281,7 @@ extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
   STM32I2C *i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
   if (i2c)
   {
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
     memcpy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
@@ -312,7 +312,7 @@ extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
   STM32I2C *i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
   if (i2c)
   {
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
     memcpy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);

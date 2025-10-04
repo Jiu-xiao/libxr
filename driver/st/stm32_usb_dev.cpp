@@ -31,7 +31,7 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
     return;
   }
 
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
   SCB_InvalidateDCache_by_Addr(hpcd->Setup,
                                static_cast<int32_t>(sizeof(USB::SetupPacket)));
 #endif
