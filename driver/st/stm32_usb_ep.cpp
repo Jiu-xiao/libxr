@@ -224,7 +224,7 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   {
     ep->dma_addr = reinterpret_cast<uint32_t>(ep->xfer_buff);
 
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     if (is_in == true)
     {
       SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(buffer.addr_),
@@ -388,7 +388,7 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   size_t actual_transfer_size = ep_handle->xfer_count;
 
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
   SCB_InvalidateDCache_by_Addr(ep->GetBuffer().addr_,
                                static_cast<int32_t>(actual_transfer_size));
 #endif
