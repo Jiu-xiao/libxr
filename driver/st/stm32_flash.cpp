@@ -44,12 +44,17 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
     erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
     SetNbPages(erase_init, sector.address, i);
     erase_init.NbPages = 1;
-    SetBanks(erase_init);
+    SetBanks(erase_init, sector.address);
 #elif defined(FLASH_TYPEERASE_SECTORS)  // STM32F4/F7/H7... series
     erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
-    erase_init.Sector = static_cast<uint32_t>(i);
+    erase_init.Sector = static_cast<uint32_t>(i) % FLASH_SECTOR_TOTAL;
     erase_init.NbSectors = 1;
-    erase_init.Banks = FLASH_BANK_1;
+#if defined(FLASH_BANK_1)
+    erase_init.Banks = STM32FlashBankOf(sector.address);
+#endif
+#if defined(FLASH_CR_PSIZE)
+    erase_init.VoltageRange = FLASH_VOLTAGE_RANGE_1;
+#endif
 #else
     return ErrorCode::NOT_SUPPORT;
 #endif
@@ -93,6 +98,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
   {
     size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);
 
+    std::memset(flash_word_buffer, 0xFF, sizeof(flash_word_buffer));
     std::memcpy(flash_word_buffer, src + written, chunk_size);
 
     if (memcmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
@@ -143,14 +149,9 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
 
 bool STM32Flash::IsInRange(uint32_t addr, size_t size) const
 {
-  uint32_t end = addr + size;
-  for (size_t i = 0; i < sector_count_; ++i)
-  {
-    const auto& s = sectors_[i];
-    if (addr >= s.address && end <= s.address + s.size)
-    {
-      return true;
-    }
-  }
-  return false;
+  const uint32_t BEGIN = base_address_;
+  const uint32_t LIMIT =
+      sectors_[sector_count_ - 1].address + sectors_[sector_count_ - 1].size;
+  const uint32_t END = addr + size;
+  return (addr >= BEGIN) && (END <= LIMIT) && (END >= addr);  // 最后一项防溢出
 }

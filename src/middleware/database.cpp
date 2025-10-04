@@ -49,11 +49,6 @@ void DatabaseRawSequential::Init()
     }
   }
 
-  if (!IsBlockEmpty(BlockType::BACKUP))
-  {
-    InitBlock(BlockType::BACKUP);
-  }
-
   Load();
 }
 
