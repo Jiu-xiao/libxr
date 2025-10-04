@@ -25,6 +25,22 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
   uint32_t start_addr = base_address_ + offset;
   uint32_t end_addr = start_addr + size;
 
+#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
+  bool i_cache_enabled = ((SCB->CCR & SCB_CCR_IC_Msk) != 0U);
+  if (i_cache_enabled)
+  {
+    SCB_DisableICache();
+  }
+#endif
+
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+  bool d_cache_enabled = ((SCB->CCR & SCB_CCR_DC_Msk) != 0U);
+  if (d_cache_enabled)
+  {
+    SCB_DisableDCache();
+  }
+#endif
+
   HAL_FLASH_Unlock();
 
   for (size_t i = 0; i < sector_count_; ++i)
@@ -69,6 +85,22 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
   }
 
   HAL_FLASH_Lock();
+
+#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
+  if (i_cache_enabled)
+  {
+    SCB_EnableICache();
+  }
+#endif
+
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+
+  if (d_cache_enabled)
+  {
+    SCB_EnableDCache();
+  }
+#endif
+
   return ErrorCode::OK;
 }
 
@@ -84,6 +116,22 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
   {
     return ErrorCode::OUT_OF_RANGE;
   }
+
+#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
+  bool i_cache_enabled = ((SCB->CCR & SCB_CCR_IC_Msk) != 0U);
+  if (i_cache_enabled)
+  {
+    SCB_DisableICache();
+  }
+#endif
+
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+  bool d_cache_enabled = ((SCB->CCR & SCB_CCR_DC_Msk) != 0U);
+  if (d_cache_enabled)
+  {
+    SCB_DisableDCache();
+  }
+#endif
 
   HAL_FLASH_Unlock();
 
@@ -144,6 +192,21 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
 #endif
 
   HAL_FLASH_Lock();
+
+#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
+  if (i_cache_enabled)
+  {
+    SCB_EnableICache();
+  }
+#endif
+
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+  if (d_cache_enabled)
+  {
+    SCB_EnableDCache();
+  }
+#endif
+
   return ErrorCode::OK;
 }
 

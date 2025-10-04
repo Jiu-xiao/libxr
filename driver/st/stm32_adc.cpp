@@ -56,7 +56,7 @@ float STM32ADC::ReadChannel(uint8_t channel)
   uint16_t* buffer = reinterpret_cast<uint16_t*>(dma_buffer_.addr_);
   if (use_dma_)
   {
-#if __DCACHE_PRESENT
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(buffer, filter_size_ * NUM_CHANNELS * 2);
 #endif
     uint32_t sum = 0;
