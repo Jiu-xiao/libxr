@@ -97,9 +97,13 @@ class STM32CANFD : public FDCAN
   typename std::enable_if<HasMessageRAMOffset<T>::value, void>::type
   CheckMessageRAMOffset(T& fdcan_handle, uint32_t max_words = FDCAN_MESSAGE_RAM_WORDS_MAX)
   {
+  using HandleT = std::remove_reference_t<decltype(*fdcan_handle)>;
+  using InitT   = decltype(HandleT{}.Init);
+
     // NOLINTNEXTLINE
     static const auto FDCAN_ElmtWords = [](uint32_t sz) -> uint32_t
     {
+#if defined(FDCAN_DATA_BYTES_8)
       switch (sz)
       {
         case FDCAN_DATA_BYTES_8:
@@ -121,13 +125,17 @@ class STM32CANFD : public FDCAN
         default:
           return 4;
       }
+#else
+      ASSERT(false);
+      return 4;
+#endif
     };
 
     const uint32_t TX_FIFO_ELEMS =
         HasTxFifoQueueElmtsNbr<T>::value ? fdcan_handle->Init.TxFifoQueueElmtsNbr : 0u;
 
     // NOLINTNEXTLINE
-    const auto FDCAN_MessageRAMWords = [&](const FDCAN_InitTypeDef& c) -> uint32_t
+    const auto FDCAN_MessageRAMWords = [&](const InitT& c) -> uint32_t
     {
       return c.StdFiltersNbr * 1u + c.ExtFiltersNbr * 2u +
              c.RxFifo0ElmtsNbr * FDCAN_ElmtWords(c.RxFifo0ElmtSize) +
