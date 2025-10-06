@@ -536,6 +536,7 @@ class Topic
    * @tparam Data 数据类型 Data type
    * @param name 话题名称 Topic name
    * @param domain 可选的域指针 Optional domain pointer (default: nullptr)
+   * @param multi_publisher 可选的多发布标志位 Optional multi-publisher flag
    * @param cache  可选的缓存标志位 Optional cache flag (default: false)
    * @param check_length 可选的数据长度检查标志位 Optional data length check flag
    * (default: true)
@@ -543,12 +544,14 @@ class Topic
    */
   template <typename Data>
   static TopicHandle FindOrCreate(const char *name, Domain *domain = nullptr,
-                                  bool cache = false, bool check_length = true)
+                                  bool multi_publisher = false, bool cache = false,
+                                  bool check_length = true)
   {
     auto topic = Find(name, domain);
     if (topic == nullptr)
     {
-      topic = CreateTopic<Data>(name, domain, cache, check_length).block_;
+      topic =
+          CreateTopic<Data>(name, domain, multi_publisher, cache, check_length).block_;
     }
     return topic;
   }
