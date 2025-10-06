@@ -30,7 +30,6 @@ class LinuxUART : public UART
             Parity parity = Parity::NO_PARITY, uint8_t data_bits = 8,
             uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512)
       : UART(&_read_port, &_write_port),
-        write_sem_(0),
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
         buff_size_(buffer_size),
@@ -82,7 +81,6 @@ class LinuxUART : public UART
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
             size_t buffer_size = 512)
       : UART(&_read_port, &_write_port),
-        write_sem_(0),
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
         buff_size_(buffer_size),
