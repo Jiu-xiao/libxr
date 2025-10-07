@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.12)
 
 project(xr LANGUAGES C CXX ASM)
 
@@ -123,9 +123,29 @@ target_include_directories(${PROJECT_NAME}
 )
 
 target_compile_definitions(xr PUBLIC EIGEN_NO_IO)
+endif()
+
+# XRobot Module Deps
+if(XROBOT_MODULES_DIR)
+  file(GLOB MODULE_DIRS RELATIVE ${XROBOT_MODULES_DIR} ${XROBOT_MODULES_DIR}/*)
+
+  foreach(MOD ${MODULE_DIRS})
+      if(IS_DIRECTORY "${XROBOT_MODULES_DIR}/${MOD}")
+          if(EXISTS "${XROBOT_MODULES_DIR}/${MOD}/CMakeLists.txt")
+              message(STATUS "[XRobot] Including module: ${MOD}")
+              include("${XROBOT_MODULES_DIR}/${MOD}/CMakeLists.txt")
+          endif()
+      endif()
+  endforeach()
+
+  get_property(_module_deps GLOBAL PROPERTY XR_MODULE_DEPS)
+  if(_module_deps)
+    list(REMOVE_DUPLICATES _module_deps)
+    target_link_libraries(${PROJECT_NAME} PUBLIC ${_module_deps})
+  endif()
+endif()
 
 # Test
 if(LIBXR_TEST_BUILD)
   include(CMake/test.cmake)
-endif()
 endif()
