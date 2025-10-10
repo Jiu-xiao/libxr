@@ -32,6 +32,10 @@ static void run_libxr_tests()
 {
   XR_LOG_INFO("Running LibXR Tests...\n");
 
+  TestCase core_tests[] = {
+      {"pipe", test_pipe},
+  };
+
   TestCase synchronization_tests[] = {
       {"semaphore", test_semaphore},
       {"async", test_async},
@@ -76,7 +80,8 @@ static void run_libxr_tests()
   {
     TestCase *tests;
     const char *name;
-  } test_groups[] = {{synchronization_tests, "synchronization_tests"},
+  } test_groups[] = {{core_tests, "core_tests"},
+                     {synchronization_tests, "synchronization_tests"},
                      {utility_tests, "utility_tests"},
                      {data_structure_tests, "data_structure_tests"},
                      {threading_tests, "threading_tests"},
@@ -85,6 +90,7 @@ static void run_libxr_tests()
                      {system_tests, "system_tests"}};
 
   size_t group_sizes[] = {
+      sizeof(core_tests) / sizeof(TestCase),
       sizeof(synchronization_tests) / sizeof(TestCase),
       sizeof(utility_tests) / sizeof(TestCase),
       sizeof(data_structure_tests) / sizeof(TestCase),
