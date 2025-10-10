@@ -18,6 +18,7 @@
 #include "libxr_type.hpp"
 #include "thread.hpp"
 #include "webots/Robot.hpp"
+#include "webots_timebase.hpp"
 
 uint64_t _libxr_webots_time_count = 0;
 webots::Robot *_libxr_webots_robot_handle = nullptr;  // NOLINT
@@ -161,4 +162,6 @@ void LibXR::PlatformInit(webots::Robot *robot)
   webots_timebase_thread.Create<void *>(
       reinterpret_cast<void *>(0), webots_timebase_thread_fun, "webots_timebase_thread",
       1024, Thread::Priority::REALTIME);
+
+  static LibXR::WebotsTimebase timebase;
 }
