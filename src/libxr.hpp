@@ -11,6 +11,7 @@
 #include "libxr_cb.hpp"
 #include "libxr_color.hpp"
 #include "libxr_def.hpp"
+#include "libxr_pipe.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_string.hpp"
 #include "libxr_system.hpp"
