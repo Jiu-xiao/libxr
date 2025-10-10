@@ -17,11 +17,11 @@ namespace LibXR
  */
 enum class LogLevel : uint8_t
 {
-  XR_LOG_LEVEL_DEBUG = 0,  ///< 调试信息 / Debug message
-  XR_LOG_LEVEL_INFO,       ///< 一般信息 / Informational message
-  XR_LOG_LEVEL_PASS,       ///< 通过信息 / Pass message
-  XR_LOG_LEVEL_WARN,       ///< 警告信息 / Warning message
-  XR_LOG_LEVEL_ERROR,      ///< 错误信息 / Error message
+  XR_LOG_LEVEL_ERROR = 0,  ///< 错误信息 / Error message
+  XR_LOG_LEVEL_WARN = 1,   ///< 警告信息 / Warning message
+  XR_LOG_LEVEL_PASS = 2,   ///< 通过信息 / Pass message
+  XR_LOG_LEVEL_INFO = 3,   ///< 一般信息 / Informational message
+  XR_LOG_LEVEL_DEBUG = 4,  ///< 调试信息 / Debug message
 };
 
 /**
