@@ -363,7 +363,7 @@ WritePort::Stream::~Stream()
 {
   if (locked_ && size_ > 0)
   {
-    port_->queue_info_->Push(WriteInfoBlock{RawData{nullptr, size_}, op_});
+    port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
     port_->CommitWrite({nullptr, size_}, op_, true);
   }
 
@@ -421,7 +421,7 @@ ErrorCode WritePort::Stream::Commit()
   {
     if (locked_ && size_ > 0)
     {
-      ans = port_->queue_info_->Push(WriteInfoBlock{RawData{nullptr, size_}, op_});
+      ans = port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
       ASSERT(ans == ErrorCode::OK);
       ans = port_->CommitWrite({nullptr, size_}, op_, true);
       ASSERT(ans == ErrorCode::OK);
@@ -477,15 +477,26 @@ int STDIO::Printf(const char* fmt, ...)
                        static_cast<size_t>(len)};
 
   static WriteOperation op;  // NOLINT
+  auto ans = ErrorCode::OK;
   if (write_stream_ == nullptr)
   {
-    return static_cast<int>(STDIO::write_->operator()(data, op));
+    ans = STDIO::write_->operator()(data, op);
   }
   else
   {
     (*write_stream_) << data;
-    return static_cast<int>(write_stream_->Commit());
+    ans = write_stream_->Commit();
   }
+
+  if (ans == ErrorCode::OK)
+  {
+    return len;
+  }
+  else
+  {
+    return -1;
+  }
+
 #else
   UNUSED(fmt);
   return 0;
