@@ -14,7 +14,7 @@ static Topic log_topic;  ///< 日志发布主题 / Log publish topic
 
 void Logger::Init()
 {
-  log_topic = Topic::CreateTopic<LogData>("/xr/log", nullptr, true, false, true);
+  log_topic = Topic::CreateTopic<LogData>("/xr/log", nullptr, true, false, false);
 
 #if LIBXR_PRINTF_BUFFER_SIZE > 0
   void (*log_cb_fun)(bool in_isr, Topic, RawData &log_data) =

@@ -46,10 +46,10 @@ class Topic
     std::atomic<LockState> busy;  ///< 是否忙碌。Indicates whether it is busy.
     LockFreeList subers;          ///< 订阅者列表。List of subscribers.
     uint32_t max_length;          ///< 数据的最大长度。Maximum length of data.
-    uint32_t crc32;     ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex *mutex;       ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;       ///< 存储的数据。Stored data.
-    bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
+    uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
+    Mutex *mutex;  ///< 线程同步互斥锁。Mutex for thread synchronization.
+    RawData data;  ///< 存储的数据。Stored data.
+    bool cache;  ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
   };
 #ifndef __DOXYGEN__
@@ -64,7 +64,7 @@ class Topic
     uint8_t prefix;  ///< 数据包前缀（固定为 0xA5）。Packet prefix (fixed at 0xA5).
     uint32_t
         topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint8_t data_len_raw[3];   ///< 数据长度（最多 16MB）。Data length (up to 16MB).
+    uint8_t data_len_raw[3];  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
 
     void SetDataLen(uint32_t len);
@@ -222,7 +222,7 @@ class Topic
    */
   struct SyncBlock : public SuberBlock
   {
-    RawData buff;   ///< 存储的数据缓冲区。Data buffer.
+    RawData buff;  ///< 存储的数据缓冲区。Data buffer.
     Semaphore sem;  ///< 信号量，用于同步等待数据。Semaphore for data synchronization.
   };
 
@@ -500,14 +500,14 @@ class Topic
    * @param  multi_publisher 是否允许多个订阅者（默认为 false）Whether to allow multiple
    * subscribers (default: false)
    * @param  cache 是否启用缓存（默认为 false）Whether to enable caching (default: false)
-   * @param  check_length 是否检查数据长度（默认为 true）Whether to check data length
-   * (default: true)
+   * @param  check_length 是否检查数据长度（默认为 false）Whether to check data length
+   * (default: false)
    * @return 创建的 Topic 实例 The created Topic instance
    */
   template <typename Data>
   static Topic CreateTopic(const char *name, Domain *domain = nullptr,
                            bool multi_publisher = false, bool cache = false,
-                           bool check_length = true)
+                           bool check_length = false)
   {
     return Topic(name, sizeof(Data), domain, multi_publisher, cache, check_length);
   }
@@ -539,13 +539,13 @@ class Topic
    * @param multi_publisher 可选的多发布标志位 Optional multi-publisher flag
    * @param cache  可选的缓存标志位 Optional cache flag (default: false)
    * @param check_length 可选的数据长度检查标志位 Optional data length check flag
-   * (default: true)
+   * (default: false)
    * @return TopicHandle 主题句柄 Topic handle
    */
   template <typename Data>
   static TopicHandle FindOrCreate(const char *name, Domain *domain = nullptr,
                                   bool multi_publisher = false, bool cache = false,
-                                  bool check_length = true)
+                                  bool check_length = false)
   {
     auto topic = Find(name, domain);
     if (topic == nullptr)
@@ -763,10 +763,10 @@ class Topic
    private:
     Status status_ =
         Status::WAIT_START;  ///< 服务器的当前解析状态 Current parsing state of the server
-    uint32_t data_len_ = 0;  ///< 当前数据长度 Current data length
-    RBTree<uint32_t> topic_map_;           ///< 主题映射表 Topic mapping table
-    BaseQueue queue_;                      ///< 数据队列 Data queue
-    RawData parse_buff_;                   ///< 解析数据缓冲区 Data buffer for parsing
+    uint32_t data_len_ = 0;       ///< 当前数据长度 Current data length
+    RBTree<uint32_t> topic_map_;  ///< 主题映射表 Topic mapping table
+    BaseQueue queue_;             ///< 数据队列 Data queue
+    RawData parse_buff_;          ///< 解析数据缓冲区 Data buffer for parsing
     TopicHandle current_topic_ = nullptr;  ///< 当前主题句柄 Current topic handle
   };
 
