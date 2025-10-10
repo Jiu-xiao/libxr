@@ -377,9 +377,12 @@ class EulerAngle
    */
   EulerAngle(const EulerAngle &p) : data_{p.data_[0], p.data_[1], p.data_[2]} {}
 
-  const Scalar &Roll() const { return data_[0]; }
-  const Scalar &Pitch() const { return data_[1]; }
-  const Scalar &Yaw() const { return data_[2]; }
+  Scalar &Roll() noexcept { return data_[0]; }
+  const Scalar &Roll() const noexcept { return data_[0]; }
+  Scalar &Pitch() noexcept { return data_[1]; }
+  const Scalar &Pitch() const noexcept { return data_[1]; }
+  Scalar &Yaw() noexcept { return data_[2]; }
+  const Scalar &Yaw() const noexcept { return data_[2]; }
 
   /**
    * @brief 通过 3 元素数组构造欧拉角对象。Constructs an Euler angle object using a
@@ -1119,8 +1122,8 @@ template <typename Scalar = DefaultScalar>
 class Transform
 {
  public:
-  Quaternion<Scalar> rotation;   ///< 旋转部分，使用四元数表示。Rotation component
-                                 ///< represented by a quaternion.
+  Quaternion<Scalar> rotation;  ///< 旋转部分，使用四元数表示。Rotation component
+                                ///< represented by a quaternion.
   Position<Scalar> translation;  ///< 平移部分，使用三维向量表示。Translation component
                                  ///< represented by a 3D vector.
 
