@@ -745,6 +745,22 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
   }
 
   /**
+   * @brief 计算两个旋转矩阵的乘积。
+   *        Computes the product of two rotation matrices.
+   *
+   * @param rhs 另一个旋转矩阵。 The second rotation matrix.
+   * @return 两个旋转矩阵的乘积。 The product of the two rotation matrices.
+   */
+  RotationMatrix operator*(const RotationMatrix &rhs) const
+  {
+    const Eigen::Matrix<Scalar, 3, 3> &a =
+        static_cast<const Eigen::Matrix<Scalar, 3, 3> &>(*this);
+    const Eigen::Matrix<Scalar, 3, 3> &b =
+        static_cast<const Eigen::Matrix<Scalar, 3, 3> &>(rhs);
+    return RotationMatrix(a * b);
+  }
+
+  /**
    * @brief 将旋转矩阵转换为欧拉角（默认使用 ZYX 顺序）。
    *        Converts the rotation matrix to Euler angles (default ZYX order).
    *
