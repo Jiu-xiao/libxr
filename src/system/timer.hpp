@@ -39,9 +39,9 @@ class Timer
 
     void (*fun_)(void *);  ///< 任务执行函数 Function pointer to the task
     void *handle;          ///< 任务句柄 Handle to the task
-    uint32_t cycle_;       ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
-    uint32_t count_;       ///< 计数器 Counter
-    bool enable_;          ///< 任务是否启用 Flag indicating whether the task is enabled
+    uint32_t cycle_;  ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
+    uint32_t count_;  ///< 计数器 Counter
+    bool enable_;     ///< 任务是否启用 Flag indicating whether the task is enabled
   };
 
   typedef LibXR::LockFreeList::Node<ControlBlock>
@@ -156,12 +156,14 @@ class Timer
    */
   static void RefreshTimerInIdle();
 
-  static inline LibXR::LockFreeList *list_ = nullptr;  ///< 定时任务列表 List of registered tasks
+  static inline LibXR::LockFreeList *list_ =
+      nullptr;  ///< 定时任务列表 List of registered tasks
 
   static inline Thread thread_handle_;  ///< 定时器管理线程 Timer management thread
 
-  static inline LibXR::Thread::Priority priority_;  ///< 线程优先级 Thread priority
-  static inline uint32_t stack_depth_;              ///< 线程栈深度 Thread stack depth
+  static inline LibXR::Thread::Priority priority_ =
+      LibXR::Thread::Priority::MEDIUM;        ///< 线程优先级 Thread priority
+  static inline uint32_t stack_depth_ = 512;  ///< 线程栈深度 Thread stack depth
 };
 
 }  // namespace LibXR
