@@ -1,127 +1,16 @@
 #include "ch32_dma.hpp"
 
-#include "ch32_uart.hpp"
-
-/* UART/USART TX DMA */
-
-extern "C" void DMA1_Channel4_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel7_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt));
-
-extern "C" void DMA1_Channel4_IRQHandler(void)
+static struct
 {
-  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel4, ch32_uart_id_t::CH32_USART1);
-}
+  ch32_dma_callback_t fun;
+  void *arg;
+} ch32_dma_callback_map[CH32_DMA_CHANNEL_NUMBER] = {};
 
-extern "C" void DMA1_Channel7_IRQHandler(void)
+void CH32_DMA_RegisterCallback(ch32_dma_channel_t id, ch32_dma_callback_t callback,
+                               void *arg)
 {
-  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel7, ch32_uart_id_t::CH32_USART2);
-}
-
-extern "C" void DMA1_Channel2_IRQHandler(void)
-{
-  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel2, ch32_uart_id_t::CH32_USART3);
-}
-
-#if !defined(DMA2_BASE)
-extern "C" void DMA1_Channel8_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel8_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel8, ch32_uart_id_t::CH32_UART4);
-}
-
-extern "C" void DMA1_Channel1_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel1_IRQHandler(void)
-{
-  LibXR::CH32UART::TxDmaIRQHandler(DMA1_Channel1, ch32_uart_id_t::CH32_UART4);
-}
-#endif
-
-#if defined(DMA2_BASE)
-
-extern "C" void DMA2_Channel5_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel4_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel6_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel8_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel10_IRQHandler(void) __attribute__((interrupt));
-
-extern "C" void DMA2_Channel5_IRQHandler(void)
-{
-  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel5, ch32_uart_id_t::CH32_UART4);
-}
-
-extern "C" void DMA2_Channel4_IRQHandler(void)
-{
-  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel4, ch32_uart_id_t::CH32_UART5);
-}
-
-extern "C" void DMA2_Channel6_IRQHandler(void)
-{
-  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel6, ch32_uart_id_t::CH32_UART6);
-}
-
-extern "C" void DMA2_Channel8_IRQHandler(void)
-{
-  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel8, ch32_uart_id_t::CH32_UART7);
-}
-
-extern "C" void DMA2_Channel10_IRQHandler(void)
-{
-  LibXR::CH32UART::TxDmaIRQHandler(DMA2_Channel10, ch32_uart_id_t::CH32_UART8);
-}
-
-/* UART/USART RX DMA */
-
-extern "C" void DMA2_Channel3_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel2_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel7_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel9_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA2_Channel11_IRQHandler(void) __attribute__((interrupt));
-
-extern "C" void DMA2_Channel3_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel3, ch32_uart_id_t::CH32_UART4);
-}
-
-extern "C" void DMA2_Channel2_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel2, ch32_uart_id_t::CH32_UART5);
-}
-
-extern "C" void DMA2_Channel7_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel7, ch32_uart_id_t::CH32_UART6);
-}
-
-extern "C" void DMA2_Channel9_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel9, ch32_uart_id_t::CH32_UART7);
-}
-
-extern "C" void DMA2_Channel11_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA2_Channel11, ch32_uart_id_t::CH32_UART8);
-}
-
-#endif
-
-extern "C" void DMA1_Channel5_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel6_IRQHandler(void) __attribute__((interrupt));
-extern "C" void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt));
-
-extern "C" void DMA1_Channel5_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel5, ch32_uart_id_t::CH32_USART1);
-}
-
-extern "C" void DMA1_Channel6_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel6, ch32_uart_id_t::CH32_USART2);
-}
-
-extern "C" void DMA1_Channel3_IRQHandler(void)
-{
-  LibXR::CH32UART::RxDmaIRQHandler(DMA1_Channel3, ch32_uart_id_t::CH32_USART3);
+  ASSERT(id < CH32_DMA_CHANNEL_NUMBER);
+  ch32_dma_callback_map[id] = {callback, arg};
 }
 
 ch32_dma_channel_t CH32_DMA_GetID(DMA_Channel_TypeDef *channel)
@@ -392,3 +281,231 @@ DMA_Channel_TypeDef *CH32_DMA_GetChannel(ch32_dma_channel_t id)
 
   return NULL;
 }
+
+#if defined(DMA1_Channel1)
+extern "C" void DMA1_Channel1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel1_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL1].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL1].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL1].arg);
+  }
+}
+#endif
+
+#if defined(DMA1_Channel2)
+extern "C" void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel2_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL2].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL2].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL2].arg);
+  }
+}
+#endif
+
+#if defined(DMA1_Channel3)
+extern "C" void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel3_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL3].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL3].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL3].arg);
+  }
+}
+#endif
+
+#if defined(DMA1_Channel4)
+extern "C" void DMA1_Channel4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel4_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL4].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL4].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL4].arg);
+  }
+}
+#endif
+
+#if defined(DMA1_Channel5)
+extern "C" void DMA1_Channel5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel5_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL5].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL5].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL5].arg);
+  }
+}
+#endif
+
+#if defined(DMA1_Channel6)
+extern "C" void DMA1_Channel6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel6_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL6].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL6].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL6].arg);
+  }
+}
+#endif
+
+#if defined(DMA1_Channel7)
+extern "C" void DMA1_Channel7_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel7_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL7].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL7].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL7].arg);
+  }
+}
+#endif
+
+#if defined(DMA1_Channel8)
+extern "C" void DMA1_Channel8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel8_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA1_CHANNEL8].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA1_CHANNEL8].fun(
+        ch32_dma_callback_map[CH32_DMA1_CHANNEL8].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel1)
+extern "C" void DMA2_Channel1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel1_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL1].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL1].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL1].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel2)
+extern "C" void DMA2_Channel2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel2_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL2].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL2].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL2].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel3)
+extern "C" void DMA2_Channel3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel3_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL3].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL3].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL3].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel4)
+extern "C" void DMA2_Channel4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel4_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL4].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL4].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL4].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel5)
+extern "C" void DMA2_Channel5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel5_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL5].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL5].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL5].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel6)
+extern "C" void DMA2_Channel6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel6_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL6].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL6].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL6].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel7)
+extern "C" void DMA2_Channel7_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel7_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL7].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL7].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL7].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel8)
+extern "C" void DMA2_Channel8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel8_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL8].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL8].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL8].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel9)
+extern "C" void DMA2_Channel9_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel9_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL9].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL9].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL9].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel10)
+extern "C" void DMA2_Channel10_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel10_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL10].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL10].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL10].arg);
+  }
+}
+#endif
+
+#if defined(DMA2_Channel11)
+extern "C" void DMA2_Channel11_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel11_IRQHandler(void)
+{
+  if (ch32_dma_callback_map[CH32_DMA2_CHANNEL11].fun != nullptr)
+  {
+    ch32_dma_callback_map[CH32_DMA2_CHANNEL11].fun(
+        ch32_dma_callback_map[CH32_DMA2_CHANNEL11].arg);
+  }
+}
+#endif

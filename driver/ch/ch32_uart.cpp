@@ -38,20 +38,20 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (tx_enable)
   {
-    (*write_port_) = WriteFun;
+    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(tx_gpio_port), ENABLE);
     gpio_init.GPIO_Pin = tx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_Init(tx_gpio_port, &gpio_init);
-    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(tx_gpio_port), ENABLE);
+    (*write_port_) = WriteFun;
   }
 
   if (rx_enable)
   {
-    (*read_port_) = ReadFun;
+    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(rx_gpio_port), ENABLE);
     gpio_init.GPIO_Pin = rx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(rx_gpio_port, &gpio_init);
-    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(rx_gpio_port), ENABLE);
+    (*read_port_) = ReadFun;
   }
 
   /* 可选：引脚重映射 */
@@ -116,6 +116,12 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (rx_enable)
   {
+    ch32_dma_callback_t rx_cb_fun = [](void *arg)
+    { reinterpret_cast<CH32UART *>(arg)->RxDmaIRQHandler(); };
+
+    CH32_DMA_RegisterCallback(CH32_DMA_GetID(CH32_UART_RX_DMA_CHANNEL_MAP[id]), rx_cb_fun,
+                              this);
+
     DMA_DeInit(dma_rx_channel_);
     dma_init.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
     dma_init.DMA_MemoryBaseAddr = (uint32_t)dma_buff_rx_.addr_;
@@ -131,6 +137,11 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (tx_enable)
   {
+    ch32_dma_callback_t tx_cb_fun = [](void *arg)
+    { reinterpret_cast<CH32UART *>(arg)->TxDmaIRQHandler(); };
+
+    CH32_DMA_RegisterCallback(CH32_DMA_GetID(CH32_UART_TX_DMA_CHANNEL_MAP[id]), tx_cb_fun,
+                              this);
     DMA_DeInit(dma_tx_channel_);
     dma_init.DMA_PeripheralBaseAddr = (u32)(&instance_->DATAR);
     dma_init.DMA_MemoryBaseAddr = 0;
@@ -325,15 +336,9 @@ extern "C" void CH32_UART_ISR_Handler_IDLE(ch32_uart_id_t id)
 }
 
 // === DMA TX完成中断服务 ===
-extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
+extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
 {
-  auto uart = CH32UART::map[id];
-  if (!uart)
-  {
-    return;
-  }
-
-  DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id]);
+  DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
 
   size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
 
@@ -383,29 +388,33 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(ch32_uart_id_t id)
 }
 
 // === DMA 通道中断回调 ===
-void CH32UART::TxDmaIRQHandler(DMA_Channel_TypeDef *channel, ch32_uart_id_t id)
+void CH32UART::TxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id]) == RESET) return;
+  if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET) return;
 
-  if (channel->CNTR == 0) CH32_UART_ISR_Handler_TX_CPLT(id);
+  if (dma_tx_channel_->CNTR == 0) CH32_UART_ISR_Handler_TX_CPLT(this);
 }
 
-void CH32UART::RxDmaIRQHandler(DMA_Channel_TypeDef *channel, ch32_uart_id_t id)
+/**
+ * @brief  DMA中断处理函数
+ *
+ * 如果DMA中断触发，且中断状态为半满或传输完成，清除中断标志，
+ * 并调用对应的中断处理函数
+ *
+ * @param[in] id  UART的ID
+ */
+void CH32UART::RxDmaIRQHandler()
 {
-  UNUSED(channel);
-  auto uart = CH32UART::map[id];
-  if (!uart) return;
-
-  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id]) == SET)
+  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET)
   {
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id]);
-    CH32_UART_RX_ISR_Handler(uart);
+    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
+    CH32_UART_RX_ISR_Handler(this);
   }
 
-  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id]) == SET)
+  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) == SET)
   {
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id]);
-    CH32_UART_RX_ISR_Handler(uart);
+    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
+    CH32_UART_RX_ISR_Handler(this);
   }
 }
 

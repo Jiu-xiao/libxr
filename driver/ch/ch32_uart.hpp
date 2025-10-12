@@ -26,8 +26,8 @@ class CH32UART : public UART
   static ErrorCode WriteFun(WritePort &port);
   static ErrorCode ReadFun(ReadPort &port);
 
-  static void TxDmaIRQHandler(DMA_Channel_TypeDef *channel, ch32_uart_id_t id);
-  static void RxDmaIRQHandler(DMA_Channel_TypeDef *channel, ch32_uart_id_t id);
+  void TxDmaIRQHandler();
+  void RxDmaIRQHandler();
 
   ch32_uart_id_t id_;
   uint16_t uart_mode_;
