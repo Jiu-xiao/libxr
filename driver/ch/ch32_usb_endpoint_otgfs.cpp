@@ -225,7 +225,6 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
 {
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
-  ep_cfg.max_packet_size = 64;
 
   if (GetNumber() != EPNumber::EP0)
   {
@@ -235,6 +234,8 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
   {
     ep_cfg.double_buffer = false;
   }
+
+  ep_cfg.max_packet_size = GetBuffer().size_;
 
   *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
   *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;

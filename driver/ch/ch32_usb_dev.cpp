@@ -107,9 +107,6 @@ CH32USBDeviceFS::CH32USBDeviceFS(
 
   auto cfgs_itr = EP_CFGS.begin();
 
-  // EP0 必须 IN+OUT 共用同一个缓冲（64 Byte）
-  ASSERT(cfgs_itr->size_ == 64);
-
   auto ep0_out = new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0,
                                        USB::Endpoint::Direction::OUT, *cfgs_itr);
   auto ep0_in = new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0,
@@ -122,8 +119,6 @@ CH32USBDeviceFS::CH32USBDeviceFS(
   for (++cfgs_itr, ep_index = USB::Endpoint::EPNumber::EP1; cfgs_itr != EP_CFGS.end();
        ++cfgs_itr, ep_index = USB::Endpoint::NextEPNumber(ep_index))
   {
-    ASSERT(cfgs_itr->size_ == 256);
-
     auto ep_out =
         new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::OUT, *cfgs_itr);
     USB::EndpointPool::Put(ep_out);

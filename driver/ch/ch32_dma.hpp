@@ -3,6 +3,8 @@
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
+typedef void (*ch32_dma_callback_t)(void *);
+
 typedef enum
 {
 #if defined(DMA1_Channel1)
@@ -127,3 +129,6 @@ static constexpr IRQn_Type CH32_DMA_IRQ_MAP[] = {
 ch32_dma_channel_t CH32_DMA_GetID(DMA_Channel_TypeDef *channel);
 
 DMA_Channel_TypeDef *CH32_DMA_GetChannel(ch32_dma_channel_t id);
+
+void CH32_DMA_RegisterCallback(ch32_dma_channel_t id, ch32_dma_callback_t callback,
+                               void *arg);
