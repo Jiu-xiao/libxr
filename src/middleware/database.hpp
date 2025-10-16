@@ -475,6 +475,23 @@ class DatabaseRaw : public Database
     size_t last_key_offset = GetLastKey(BlockType::MAIN);
     key_buf_offset = 0;
 
+    if (AvailableSize() <
+        AlignSize(sizeof(KeyInfo)) + AlignSize(name_len) + AlignSize(size))
+    {
+      if (!recycle)
+      {
+        Recycle();
+        recycle = true;
+        // NOLINTNEXTLINE
+        goto add_again;
+      }
+      else
+      {
+        ASSERT(false);
+        return ErrorCode::FULL;
+      }
+    }
+
     if (last_key_offset == 0)
     {
       FlashInfo flash_info;
@@ -491,23 +508,6 @@ class DatabaseRaw : public Database
     else
     {
       key_buf_offset = GetNextKey(last_key_offset);
-    }
-
-    if (AvailableSize() <
-        AlignSize(sizeof(KeyInfo)) + AlignSize(name_len) + AlignSize(size))
-    {
-      if (!recycle)
-      {
-        Recycle();
-        recycle = true;
-        // NOLINTNEXTLINE
-        goto add_again;
-      }
-      else
-      {
-        ASSERT(false);
-        return ErrorCode::FULL;
-      }
     }
 
     KeyInfo new_key = {};

@@ -8,6 +8,7 @@ using namespace LibXR;
 Semaphore::Semaphore(uint32_t init_count)
     : semaphore_handle_(xSemaphoreCreateCounting(UINT32_MAX, init_count))
 {
+  ASSERT(semaphore_handle_ != nullptr);
 }
 
 Semaphore::~Semaphore() { vSemaphoreDelete(semaphore_handle_); }

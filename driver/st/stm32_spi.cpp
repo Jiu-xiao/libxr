@@ -194,12 +194,12 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     memcpy(read_data.addr_, dma_buff_rx_.addr_, read_data.size_);
 
-    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
-
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return ec;
     }
+
+    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
 
     return ans;
   }
@@ -278,12 +278,12 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op)
 
     memcpy(read_data.addr_, dma_buffer_rx + 1, read_data.size_);
 
-    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
-
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return ec;
     }
+
+    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
 
     return ans;
   }
@@ -330,12 +330,12 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW 
             ? ErrorCode::OK
             : ErrorCode::BUSY;
 
-    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
-
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return ans;
     }
+
+    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
 
     return ans;
   }
