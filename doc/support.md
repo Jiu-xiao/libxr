@@ -80,21 +80,21 @@
 
 ## CH32 Support
 
-| `Peripheral` | CH32V307         |
-| ------------ | ---------------- |
-| POWER        | ✅                |
-| GPIO         | ✅                |
-| FLASH        | ❌                |
-| UART         | ✅                |
-| SPI          | ❌                |
-| I2C          | ❌                |
-| CAN          | ❌                |
-| CANFD        | 🚫                |
-| ADC          | ❌                |
-| DAC          | ❌                |
-| PWM          | ❌                |
-| USB-CDC      | ✅(using TinyUSB) |
-| WDG          | ❌                |
+| `Peripheral` | CH32V307/CH32V203 |
+| ------------ | ----------------- |
+| POWER        | ✅                 |
+| GPIO         | ✅                 |
+| FLASH        | ✅                 |
+| UART         | ✅                 |
+| SPI          | ✅                 |
+| I2C          | ❌                 |
+| CAN          | ❌                 |
+| CANFD        | 🚫                 |
+| ADC          | ❌                 |
+| DAC          | ❌                 |
+| PWM          | ✅                 |
+| USB-CDC      | ✅                 |
+| WDG          | ❌                 |
 
 | `Network`   | CH32V307 |
 | ----------- | -------- |

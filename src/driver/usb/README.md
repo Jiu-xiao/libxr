@@ -52,7 +52,7 @@ TODO
 | STM32    | USB_DRV_FS    | Supported (Device) | STM32G431           |
 | STM32    | USB_OTG_FS    | Supported (Device) | STM32F407           |
 | STM32    | USB_OTG_HS    | Supported (Device) | STM32F407/STM32H750 |
-| CH32     | USB_OTG_FS    | Supported (Device) | CH32V307            |
+| CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203   |
 | CH32     | USB_HS        | Supported          | CH32V307            |
 
 ## Documentation
