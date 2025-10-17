@@ -196,7 +196,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return ec;
+      return ans;
     }
 
     op.UpdateStatus(false, std::forward<ErrorCode>(ans));
@@ -280,7 +280,7 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op)
 
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return ec;
+      return ans;
     }
 
     op.UpdateStatus(false, std::forward<ErrorCode>(ans));
