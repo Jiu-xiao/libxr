@@ -143,7 +143,7 @@ float STM32ADC::ReadChannel(uint8_t channel)
 
   config.Channel = channels_[channel]->ch_;
   config.Rank = 1;
-#if defined(ADC_SINGLE_ENDED)
+#if defined(ADC_SINGLE_ENDED) && !defined(STM32L0)
   config.SingleDiff = ADC_SINGLE_ENDED;
 #endif
 #if defined(ADC_OFFSET_NONE)
