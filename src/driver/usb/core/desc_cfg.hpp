@@ -19,6 +19,7 @@ constexpr uint8_t CFG_SELF_POWERED = 0x40;   ///< 自供电 / Self powered
 constexpr uint8_t CFG_REMOTE_WAKEUP = 0x20;  ///< 支持远程唤醒 / Remote wakeup supported
 
 class ConfigDescriptor;
+class DeviceCore;
 
 /**
  * @brief USB 配置项接口类
@@ -154,6 +155,20 @@ class ConfigDescriptorItem
     UNUSED(itf);
     UNUSED(alt);
     return ErrorCode::NOT_SUPPORT;
+  }
+
+  /**
+   * @brief 判断是否拥有该端点
+   *        Check if this configuration item owns this endpoint
+   *
+   * @param ep_addr 端点地址 / Endpoint address
+   * @return true
+   * @return false
+   */
+  virtual bool OwnsEndpoint(uint8_t ep_addr) const
+  {
+    UNUSED(ep_addr);
+    return false;
   }
 
   /**
@@ -311,6 +326,14 @@ class ConfigDescriptor
    * @return ConfigDescriptorItem*
    */
   ConfigDescriptorItem* GetItemByInterfaceNum(size_t index) const;
+
+  /**
+   * @brief 获取指定端点的配置项 / Get the configuration item by endpoint address
+   *
+   * @param addr 端点地址 / Endpoint address
+   * @return ConfigDescriptorItem*
+   */
+  ConfigDescriptorItem* GetItemByEndpointAddr(uint8_t addr) const;
 
  private:
   bool ep_assigned_ = false;  ///< 端点是否已分配 / Is endpoint assigned

@@ -7,14 +7,15 @@ using namespace LibXR;
 static inline bool is_power_of_two(unsigned int n) { return n > 0 && (n & (n - 1)) == 0; }
 
 #if defined(USB_OTG_HS) || defined(USB_OTG_FS)
+
 STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
                              PCD_HandleTypeDef* hpcd, Direction dir, size_t fifo_size,
                              LibXR::RawData buffer)
     : Endpoint(ep_num, dir, buffer), hpcd_(hpcd), fifo_size_(fifo_size), id_(id)
 {
   ASSERT(fifo_size >= 8);
-  ASSERT(is_power_of_two(fifo_size) || fifo_size % 64 == 0);
-  ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 64 == 0);
+  ASSERT(is_power_of_two(fifo_size) || fifo_size % 4 == 0);
+  ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 4 == 0);
 
 #if defined(USB_OTG_HS)
   if (id == STM32_USB_OTG_HS)
@@ -54,7 +55,7 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
   ASSERT(hw_buffer_size >= 8);
 
   ASSERT(is_power_of_two(hw_buffer_size));
-  ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 64 == 0);
+  ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 4 == 0);
 
   map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
@@ -396,4 +397,35 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
   ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }
 
+extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
+{
+  auto id = STM32USBDeviceGetID(hpcd);
+
+  ASSERT(id < STM32_USB_DEV_ID_NUM);
+
+  auto ep = GetEndpoint(hpcd, epnum, true);
+
+  if (!ep || ep->hpcd_ != hpcd)
+  {
+    return;
+  }
+
+  ep->OnTransferCompleteCallback(true, 0);
+}
+
+extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
+{
+  auto id = STM32USBDeviceGetID(hpcd);
+
+  ASSERT(id < STM32_USB_DEV_ID_NUM);
+
+  auto ep = GetEndpoint(hpcd, epnum, false);
+
+  if (!ep || ep->hpcd_ != hpcd)
+  {
+    return;
+  }
+
+  ep->OnTransferCompleteCallback(true, 0);
+}
 #endif

@@ -201,3 +201,16 @@ ConfigDescriptorItem* ConfigDescriptor::GetItemByInterfaceNum(size_t index) cons
   }
   return nullptr;
 }
+
+ConfigDescriptorItem* ConfigDescriptor::GetItemByEndpointAddr(uint8_t addr) const
+{
+  auto config = items_[current_cfg_];
+  for (size_t i = 0; i < config.item_num; ++i)
+  {
+    if (config.items[i]->OwnsEndpoint(addr))
+    {
+      return config.items[i];
+    }
+  }
+  return nullptr;
+}

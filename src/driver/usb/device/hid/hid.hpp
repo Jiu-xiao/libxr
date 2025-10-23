@@ -272,6 +272,17 @@ class HID : public DeviceClass
    */
   bool HasIAD() override { return false; }
 
+  bool OwnsEndpoint(uint8_t ep_addr) const override
+  {
+    if (!inited_)
+    {
+      return false;
+    }
+
+    return ep_in_->GetAddress() == ep_addr ||
+           (enable_out_endpoint_ && ep_out_->GetAddress() == ep_addr);
+  }
+
   /**
    * @brief 获取最大配置描述符块长度
    * Get max config descriptor size.
@@ -339,9 +350,11 @@ class HID : public DeviceClass
    * @return ErrorCode 错误码 / Error code
    */
   ErrorCode OnClassRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
-                           uint16_t wLength, DeviceClass::RequestResult& result) override
+                           uint16_t wLength, uint16_t wIndex,
+                           DeviceClass::RequestResult& result) override
   {
     UNUSED(in_isr);
+    UNUSED(wIndex);
 
     uint8_t report_id = wValue & 0xFF;
 
