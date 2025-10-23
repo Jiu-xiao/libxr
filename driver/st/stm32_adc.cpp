@@ -4,6 +4,17 @@
 
 using namespace LibXR;
 
+#if defined(HAL_ADC_MODULE_ENABLED) && !defined(ADC_CALIB_OFFSET_AND_LINEARITY) && \
+    !defined(ADC_CALIB_OFFSET_LINEARITY) && !defined(ADC_CALIB_OFFSET) &&          \
+    !defined(ADC_SINGLE_ENDED)
+extern "C" HAL_StatusTypeDef __attribute__((weak)) HAL_ADCEx_Calibration_Start(
+    ADC_HandleTypeDef* hadc)
+{
+  (void)hadc;
+  return HAL_OK;
+}
+#endif
+
 STM32ADC::Channel::Channel(STM32ADC* adc, uint8_t index, uint32_t ch)
     : adc_(adc), index_(index), ch_(ch)
 {
@@ -27,6 +38,18 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
   {
     channels_[i] = new Channel(this, i, *it++);
   }
+
+#if defined(ADC_CALIB_OFFSET_AND_LINEARITY) && defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_CALIB_OFFSET_AND_LINEARITY, ADC_SINGLE_ENDED);
+#elif defined(ADC_CALIB_OFFSET_LINEARITY) && defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_CALIB_OFFSET_LINEARITY, ADC_SINGLE_ENDED);
+#elif defined(ADC_CALIB_OFFSET) && defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+#elif defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_SINGLE_ENDED);
+#else
+  HAL_ADCEx_Calibration_Start(hadc);
+#endif
 
   use_dma_ ? HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
                                NUM_CHANNELS * filter_size_)
