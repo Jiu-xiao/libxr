@@ -11,8 +11,8 @@ class DeviceCore;
 /**
  * @class DeviceClass
  * @brief USB 设备类接口基类，所有自定义 USB 类（如 HID、CDC、MSC）都需派生自本类。
- *        USB device class base interface, all custom device classes (HID, CDC, MSC, etc.)
- * should derive from this.
+ *        USB device class base interface, all custom device classes (HID, CDC, MSC,
+ * etc.) should derive from this.
  *
  * @note 仅供 DeviceCore 内部驱动和派生类扩展，普通用户无需直接使用。
  *       Only for internal drivers and derived classes, users do not need to use it
@@ -65,12 +65,14 @@ class DeviceClass : public ConfigDescriptorItem
    * @return ErrorCode 错误码 / Error code
    */
   virtual ErrorCode OnClassRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
-                                   uint16_t wLength, RequestResult &result)
+                                   uint16_t wLength, uint16_t wIndex,
+                                   RequestResult &result)
   {
     UNUSED(in_isr);
     UNUSED(bRequest);
     UNUSED(wValue);
     UNUSED(wLength);
+    UNUSED(wIndex);
     UNUSED(result);
     return ErrorCode::NOT_SUPPORT;
   }
@@ -342,7 +344,8 @@ class DeviceCore
     Endpoint *in0 = nullptr;   ///< 控制 IN 端点指针 / Control IN endpoint
     Endpoint *out0 = nullptr;  ///< 控制 OUT 端点指针 / Control OUT endpoint
     LibXR::Callback<LibXR::ConstRawData &> ep0_in_cb;  ///< EP0 IN 回调 / EP0 IN callback
-    LibXR::Callback<LibXR::ConstRawData &> ep0_out_cb;  ///< EP0 OUT 回调 / EP0 OUT callback
+    LibXR::Callback<LibXR::ConstRawData &>
+        ep0_out_cb;  ///< EP0 OUT 回调 / EP0 OUT callback
   } endpoint_;
 
   struct
