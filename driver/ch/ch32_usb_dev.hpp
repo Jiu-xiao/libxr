@@ -17,9 +17,8 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
       ch32_usb_dev_id_t id, size_t max_ep_num,
       USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
       uint16_t bcd,
-      const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-      const std::initializer_list<
-          const std::initializer_list<USB::ConfigDescriptorItem *>>
+      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
           CONFIGS,
       USB::Speed speed = USB::Speed::FULL, USB::USBSpec spec = USB::USBSpec::USB_2_0)
       : USB::EndpointPool(max_ep_num),
@@ -40,13 +39,23 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
 class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
 {
  public:
+  struct EPConfig
+  {
+    LibXR::RawData buffer;
+    int8_t is_in;
+
+    EPConfig(LibXR::RawData buffer) : buffer(buffer), is_in(-1) {}
+
+    // isochronous endpoint
+    EPConfig(LibXR::RawData buffer, bool is_in) : buffer(buffer), is_in(is_in ? 1 : 0) {}
+  };
+
   CH32USBDeviceFS(
-      const std::initializer_list<LibXR::RawData> EP_CFGS,
+      const std::initializer_list<EPConfig> EP_CFGS,
       USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
       uint16_t bcd,
-      const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-      const std::initializer_list<
-          const std::initializer_list<USB::ConfigDescriptorItem *>>
+      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
           CONFIGS);
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
@@ -55,7 +64,7 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
 
   void Stop() override;
 
-  static inline CH32USBDeviceFS *self_ = nullptr;
+  static inline CH32USBDeviceFS* self_ = nullptr;
 };
 
 #endif
@@ -91,9 +100,8 @@ class CH32USBDeviceHS : public USB::EndpointPool, public USB::DeviceCore
   CH32USBDeviceHS(
       const std::initializer_list<EPConfig> EP_CFGS, uint16_t vid, uint16_t pid,
       uint16_t bcd,
-      const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-      const std::initializer_list<
-          const std::initializer_list<USB::ConfigDescriptorItem *>>
+      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
           CONFIGS);
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
@@ -102,7 +110,7 @@ class CH32USBDeviceHS : public USB::EndpointPool, public USB::DeviceCore
 
   void Stop() override;
 
-  static inline CH32USBDeviceHS *self_ = nullptr;
+  static inline CH32USBDeviceHS* self_ = nullptr;
 };
 #endif
 

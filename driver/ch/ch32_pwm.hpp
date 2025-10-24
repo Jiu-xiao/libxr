@@ -10,7 +10,7 @@ class CH32PWM : public PWM
 {
  public:
   CH32PWM(TIM_TypeDef* tim, uint16_t channel, bool active_high, GPIO_TypeDef* gpio,
-          uint16_t pin, uint32_t pin_remap, bool complementary = false);
+          uint16_t pin, uint32_t pin_remap = 0, bool complementary = false);
 
   ErrorCode SetDutyCycle(float value) override;
   ErrorCode SetConfig(Configuration config) override;
