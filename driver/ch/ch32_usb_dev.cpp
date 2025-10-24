@@ -14,7 +14,7 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
   uint8_t intflag = USBFSD->INT_FG;  // NOLINT
   uint8_t intst = USBFSD->INT_ST;    // NOLINT
 
-  auto &map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
+  auto& map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
 
   if (intflag & USBFS_UIF_TRANSFER)
   {
@@ -30,7 +30,7 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
       {
         case USBFS_UIS_TOKEN_SETUP:
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-          USBFSD->UEP0_RX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
+          USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
           LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->tog_ = true;
           LibXR::CH32EndpointOtgFs::map_otg_fs_[0][1]->tog_ = true;
 
@@ -38,7 +38,7 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
           map[0][1]->SetState(Endpoint::State::IDLE);
 
           LibXR::CH32USBDeviceFS::self_->OnSetupPacket(
-              true, reinterpret_cast<const SetupPacket *>(
+              true, reinterpret_cast<const SetupPacket*>(
                         LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->GetBuffer().addr_));
           break;
 
@@ -71,7 +71,7 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
     map[0][0]->SetState(Endpoint::State::IDLE);
     map[0][1]->SetState(Endpoint::State::IDLE);
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-    USBFSD->UEP0_RX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
+    USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
   }
   else if (intflag & USBFS_UIF_SUSPEND)
   {
@@ -83,7 +83,7 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
     map[0][0]->SetState(Endpoint::State::IDLE);
     map[0][1]->SetState(Endpoint::State::IDLE);
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-    USBFSD->UEP0_RX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
+    USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
   }
   else
   {
@@ -92,11 +92,11 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
 }
 
 CH32USBDeviceFS::CH32USBDeviceFS(
-    const std::initializer_list<LibXR::RawData> EP_CFGS,
+    const std::initializer_list<EPConfig> EP_CFGS,
     USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
     uint16_t bcd,
-    const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
+    const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS)
     : USB::EndpointPool(EP_CFGS.size() * 2),
       USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::FULL, packet_size, vid,
@@ -107,10 +107,12 @@ CH32USBDeviceFS::CH32USBDeviceFS(
 
   auto cfgs_itr = EP_CFGS.begin();
 
-  auto ep0_out = new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0,
-                                       USB::Endpoint::Direction::OUT, *cfgs_itr);
-  auto ep0_in = new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0,
-                                      USB::Endpoint::Direction::IN, *cfgs_itr);
+  auto ep0_out =
+      new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0, USB::Endpoint::Direction::OUT,
+                            cfgs_itr->buffer, false);
+  auto ep0_in =
+      new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0, USB::Endpoint::Direction::IN,
+                            cfgs_itr->buffer, false);
 
   USB::EndpointPool::SetEndpoint0(ep0_in, ep0_out);
 
@@ -119,12 +121,24 @@ CH32USBDeviceFS::CH32USBDeviceFS(
   for (++cfgs_itr, ep_index = USB::Endpoint::EPNumber::EP1; cfgs_itr != EP_CFGS.end();
        ++cfgs_itr, ep_index = USB::Endpoint::NextEPNumber(ep_index))
   {
-    auto ep_out =
-        new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::OUT, *cfgs_itr);
-    USB::EndpointPool::Put(ep_out);
+    if (cfgs_itr->is_in == -1)
+    {
+      auto ep_out = new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::OUT,
+                                          cfgs_itr->buffer, false);
+      USB::EndpointPool::Put(ep_out);
 
-    auto ep_in = new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::IN, *cfgs_itr);
-    USB::EndpointPool::Put(ep_in);
+      auto ep_in = new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::IN,
+                                         cfgs_itr->buffer, false);
+      USB::EndpointPool::Put(ep_in);
+    }
+    else
+    {
+      auto ep = new CH32EndpointOtgFs(
+          ep_index,
+          cfgs_itr->is_in ? USB::Endpoint::Direction::IN : USB::Endpoint::Direction::OUT,
+          cfgs_itr->buffer, true);
+      USB::EndpointPool::Put(ep);
+    }
   }
 }
 
@@ -164,7 +178,7 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
   uint8_t intflag = USBHSD->INT_FG;  // NOLINT
   uint8_t intst = USBHSD->INT_ST;    // NOLINT
 
-  auto &map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
+  auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 
   if (intflag & USBHS_UIF_TRANSFER)
   {
@@ -191,7 +205,7 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
           LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
 
           LibXR::CH32USBDeviceHS::self_->OnSetupPacket(
-              true, reinterpret_cast<const SetupPacket *>(
+              true, reinterpret_cast<const SetupPacket*>(
                         LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->GetBuffer().addr_));
           break;
 
@@ -228,7 +242,7 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
     LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
 
     LibXR::CH32USBDeviceHS::self_->OnSetupPacket(
-        true, reinterpret_cast<const SetupPacket *>(
+        true, reinterpret_cast<const SetupPacket*>(
                   LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->GetBuffer().addr_));
     USBHSD->INT_FG = USBHS_UIF_SETUP_ACT;  // NOLINT
   }
@@ -272,8 +286,8 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 CH32USBDeviceHS::CH32USBDeviceHS(
     const std::initializer_list<CH32USBDeviceHS::EPConfig> EP_CFGS, uint16_t vid,
     uint16_t pid, uint16_t bcd,
-    const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
+    const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS)
     : USB::EndpointPool(EP_CFGS.size() * 2),
       USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::HIGH,
