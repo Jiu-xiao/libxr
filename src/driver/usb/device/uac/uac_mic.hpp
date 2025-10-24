@@ -385,10 +385,8 @@ class UAC1MicrophoneQ : public DeviceClass
     desc_block_.ep_in.bRefresh = 0x00;
     desc_block_.ep_in.bSynchAddress = 0x00;
 
-    // 类特定端点（General）— 按原行为：覆盖为 0x00
     desc_block_.ep_cs = {};
-    desc_block_.ep_cs.bmAttributes = 0x00;  // 保持与原实现一致 / keep original behavior
-
+    desc_block_.ep_cs.bmAttributes = 0x00;
     // IN 传输完成回调 → 继续投下一帧
     ep_iso_in_->SetOnTransferCompleteCallback(on_in_complete_cb_);
 
