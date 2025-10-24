@@ -2,6 +2,7 @@
 #include <cstring>
 
 #include "dev_core.hpp"
+#include "libxr_def.hpp"
 #include "uart.hpp"
 #include "usb/core/desc_cfg.hpp"
 
@@ -428,6 +429,17 @@ class CDCBase : public DeviceClass
    */
   bool HasIAD() override { return true; }
 
+  bool OwnsEndpoint(uint8_t ep_addr) const override
+  {
+    if (!inited_)
+    {
+      return false;
+    }
+
+    return ep_data_in_->GetAddress() == ep_addr ||
+           ep_data_out_->GetAddress() == ep_addr || ep_comm_in_->GetAddress() == ep_addr;
+  }
+
   /**
    * @brief 获取最大配置描述符大小
    *        Get maximum configuration descriptor size
@@ -444,9 +456,12 @@ class CDCBase : public DeviceClass
    * Implements standard requests defined by CDC ACM specification
    */
   ErrorCode OnClassRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
-                           uint16_t wLength, DeviceClass::RequestResult& result) override
+                           uint16_t wLength, uint16_t wIndex,
+                           DeviceClass::RequestResult& result) override
   {
     UNUSED(in_isr);
+    UNUSED(wIndex);
+
     switch (static_cast<ClassRequest>(bRequest))
     {
       case ClassRequest::SET_LINE_CODING:
@@ -508,7 +523,7 @@ class CDCBase : public DeviceClass
           case 0:
             cfg.stop_bits = 1;
             break;
-          //TODO: 1.5
+          // TODO: 1.5
           case 2:
             cfg.stop_bits = 2;
             break;

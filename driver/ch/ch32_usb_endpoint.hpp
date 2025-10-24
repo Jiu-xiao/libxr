@@ -6,11 +6,12 @@
 
 namespace LibXR
 {
-
+#if defined(USBFSD)
 class CH32EndpointOtgFs : public USB::Endpoint
 {
  public:
-  CH32EndpointOtgFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer);
+  CH32EndpointOtgFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
+                    bool is_isochronous);
 
   void Configure(const Config& cfg) override;
   void Close() override;
@@ -23,17 +24,18 @@ class CH32EndpointOtgFs : public USB::Endpoint
   void SwitchBuffer() override;
 
   bool tog_ = false;
+  bool is_isochronous_ = false;
 
   size_t last_transfer_size_ = 0;
 
   RawData dma_buffer_;
 
-#if defined(USBFSD)
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
   static inline CH32EndpointOtgFs* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
-#endif
 };
+#endif
 
+#if defined(USBHSD)
 class CH32EndpointOtgHs : public USB::Endpoint
 {
  public:
@@ -59,10 +61,8 @@ class CH32EndpointOtgHs : public USB::Endpoint
 
   RawData dma_buffer_;
 
-#if defined(USBFSD)
   static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 16;
   static inline CH32EndpointOtgHs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
-#endif
 };
-
+#endif
 }  // namespace LibXR

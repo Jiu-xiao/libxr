@@ -409,6 +409,10 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket *&se
       }
 
       ans = item->SetAltSetting(interface_index, alt_setting);
+      if (ans == ErrorCode::OK)
+      {
+        WriteZLP();
+      }
       break;
     }
     case StandardRequest::SYNCH_FRAME:
@@ -685,57 +689,103 @@ void DeviceCore::ClearControlEndpointStall()
 }
 
 ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket *setup,
-                                          RequestDirection direction, Recipient recipient)
+                                          RequestDirection /*direction*/,
+                                          Recipient recipient)
 {
-  UNUSED(direction);
-
-  if (recipient != Recipient::INTERFACE)
+  // 只处理 Class 请求（bmRequestType bits[6:5] == 01）
+  if ((setup->bmRequestType & 0x60) != 0x20)
   {
     return ErrorCode::NOT_SUPPORT;
   }
 
-  uint8_t intf_num = setup->wIndex & 0xFF;
+  DeviceClass *item = nullptr;
 
-  auto *item =
-      reinterpret_cast<DeviceClass *>(config_desc_.GetItemByInterfaceNum(intf_num));
+  switch (recipient)
+  {
+    case Recipient::INTERFACE:
+    {
+      // 低字节 = 接口号
+      uint8_t if_num = static_cast<uint8_t>(setup->wIndex & 0xFF);
+      item = reinterpret_cast<DeviceClass *>(config_desc_.GetItemByInterfaceNum(if_num));
+      break;
+    }
+    case Recipient::ENDPOINT:
+    {
+      // 低字节 = 端点地址（含 0x80 方向位）
+      uint8_t ep_addr = static_cast<uint8_t>(setup->wIndex & 0xFF);
+      item = reinterpret_cast<DeviceClass *>(config_desc_.GetItemByEndpointAddr(ep_addr));
+      break;
+    }
+    default:
+      return ErrorCode::NOT_SUPPORT;  // Device/Other 一般不在这里处理
+  }
+
   if (!item)
   {
     return ErrorCode::NOT_FOUND;
   }
 
-  DeviceClass::RequestResult result;
-
-  auto ans = item->OnClassRequest(in_isr, setup->bRequest, setup->wValue, setup->wLength,
-                                  result);
-
-  if (ans != ErrorCode::OK)
+  DeviceClass::RequestResult result{};
+  auto ec = item->OnClassRequest(in_isr, setup->bRequest, setup->wValue, setup->wLength,
+                                 setup->wIndex, result);
+  if (ec != ErrorCode::OK)
   {
-    return ans;
+    return ec;
   }
 
-  if (result.read_data.size_ > 0)
+  // 不允许同时提供读写缓冲
+  const bool HAS_READ_BUF = (result.read_data.size_ > 0);
+  const bool HAS_WRITE_BUFF = (result.write_data.size_ > 0);
+  if (HAS_READ_BUF && HAS_WRITE_BUFF)
   {
+    return ErrorCode::ARG_ERR;
+  }
+
+  // Host->Device（OUT）类请求通常需要设备“读入”主机数据：read_data
+  if (HAS_READ_BUF)
+  {
+    if (setup->wLength == 0 || result.read_data.size_ < setup->wLength)
+    {
+      return ErrorCode::ARG_ERR;  // 长度不匹配
+    }
+
     class_req_.read = true;
     class_req_.class_ptr = item;
     class_req_.b_request = setup->bRequest;
+
     DevReadEP0Data(result.read_data, endpoint_.in0->MaxTransferSize());
+    return ErrorCode::OK;
   }
-  else if (result.write_data.size_ > 0)
+
+  // Device->Host（IN）类请求需要设备“写出”数据给主机：write_data
+  if (HAS_WRITE_BUFF)
   {
+    if (setup->wLength == 0)
+    {
+      return ErrorCode::ARG_ERR;  // 长度不匹配
+    }
+
     class_req_.write = true;
     class_req_.class_ptr = item;
     class_req_.b_request = setup->bRequest;
+
     DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize());
-  }
-  else if (result.read_zlp)
-  {
-    ReadZLP();
-  }
-  else if (result.write_zlp)
-  {
-    WriteZLP();
+    return ErrorCode::OK;
   }
 
+  // 无数据阶段：按类的意愿发送/接收 ZLP（如果有）
+  if (result.read_zlp)
+  {
+    ReadZLP();
+    return ErrorCode::OK;
+  }
+  if (result.write_zlp)
+  {
+    WriteZLP();
+    return ErrorCode::OK;
+  }
+
+  // 既无缓冲也无 ZLP：认为类已处理并不需要数据阶段（状态阶段由底层完成）
   return ErrorCode::OK;
 }
 

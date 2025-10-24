@@ -31,6 +31,13 @@ static inline volatile uint16_t* GetTxLenAddr(USB::Endpoint::EPNumber ep_num)
       static_cast<int>(ep_num) * 4);
 }
 
+static inline volatile uint16_t* GetRxMaxLenAddr(USB::Endpoint::EPNumber ep_num)
+{
+  return reinterpret_cast<volatile uint16_t*>(
+      reinterpret_cast<volatile uint8_t*>(&USBHSD->UEP0_MAX_LEN) +
+      static_cast<int>(ep_num) * 2);
+}
+
 static inline volatile uint32_t* GetTxDmaAddr(USB::Endpoint::EPNumber ep_num)
 {
   if (ep_num == USB::Endpoint::EPNumber::EP0) return &USBHSD->UEP0_DMA;
@@ -58,7 +65,6 @@ static void SetTxDmaBuffer(USB::Endpoint::EPNumber ep_num, void* buffer,
   uint8_t* buf_base = reinterpret_cast<uint8_t*>(buffer);
   uint8_t* buf_alt = buf_base + buffer_size / 2;
 
-  // EP0 特殊
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
     USBHSD->UEP0_DMA = (uint32_t)buf_base;
@@ -367,7 +373,6 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   {
     if (ep_cfg.double_buffer)
     {
-      // Please enable double buffer for this endpoint
       ASSERT(false);
     }
     ep_cfg.double_buffer = false;
@@ -383,9 +388,34 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
 
   SetTxLen(GetNumber(), 0);
 
+  {
+    const int idx = static_cast<int>(GetNumber());
+    if (GetDirection() == Direction::IN)
+    {
+      if (GetType() == Type::ISOCHRONOUS)
+        USBHSD->ENDP_TYPE |= (USBHS_UEP0_T_TYPE << idx);
+      else
+        USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_T_TYPE << idx);
+    }
+    else
+    {
+      if (GetType() == Type::ISOCHRONOUS)
+        USBHSD->ENDP_TYPE |= (USBHS_UEP0_R_TYPE << idx);
+      else
+        USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_R_TYPE << idx);
+    }
+  }
+
   if (GetDirection() == Direction::IN)
   {
-    EnableTx(GetNumber());
+    if (GetType() != Type::ISOCHRONOUS)
+    {
+      EnableTx(GetNumber());
+    }
+    else
+    {
+      DisableTx(GetNumber());
+    }
     DisableRx(GetNumber());
     SetTxDmaBuffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, hw_double_buffer_);
   }
@@ -394,6 +424,11 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
     DisableTx(GetNumber());
     EnableRx(GetNumber());
     SetRxDmaBuffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, hw_double_buffer_);
+
+    if (GetType() == Type::ISOCHRONOUS)
+    {
+      *GetRxMaxLenAddr(GetNumber()) = ep_cfg.max_packet_size;
+    }
   }
 
   SetState(State::IDLE);
@@ -425,7 +460,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
   bool is_in = (GetDirection() == Direction::IN);
 
-  if (is_in && UseDoubleBuffer())
+  if (is_in && UseDoubleBuffer() && GetType() != Type::ISOCHRONOUS)
   {
     SwitchBuffer();
   }
@@ -444,20 +479,41 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
   if (is_in)
   {
+    if (GetType() == Type::ISOCHRONOUS)
+    {
+      EnableTx(GetNumber());
+    }
+
     SetTxLen(GetNumber(), size);
     auto addr = GetTxControlAddr(GetNumber());
 
-    *addr = USBHS_UEP_T_RES_ACK |
-            (*addr & (~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MDATA))) |
-            (tog0_ ? USBHS_UEP_T_TOG_DATA1 : 0);
+    if (GetType() != Type::ISOCHRONOUS)
+    {
+      *addr = USBHS_UEP_T_RES_ACK |
+              (*addr & (~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MDATA))) |
+              (tog0_ ? USBHS_UEP_T_TOG_DATA1 : 0);
+    }
+    else
+    {
+      *addr = (uint8_t)((*addr & ~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MASK)) |
+                        USBHS_UEP_T_TOG_AUTO);
+    }
   }
   else
   {
     auto addr = GetRxControlAddr(GetNumber());
 
-    *addr = USBHS_UEP_R_RES_ACK |
-            (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
-            (tog0_ ? USBHS_UEP_R_TOG_DATA1 : 0);
+    if (GetType() != Type::ISOCHRONOUS)
+    {
+      *addr = USBHS_UEP_R_RES_ACK |
+              (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
+              (tog0_ ? USBHS_UEP_R_TOG_DATA1 : 0);
+    }
+    else
+    {
+      *addr = USBHS_UEP_R_RES_ACK |
+              (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA)));
+    }
   }
 
   if (GetNumber() == EPNumber::EP0)
@@ -510,7 +566,8 @@ ErrorCode CH32EndpointOtgHs::ClearStall()
 
 void CH32EndpointOtgHs::TransferComplete(size_t size)
 {
-  if (GetState() == State::BUSY && GetNumber() != EPNumber::EP0)
+  if (GetState() == State::BUSY && GetNumber() != EPNumber::EP0 &&
+      GetType() != Type::ISOCHRONOUS)
   {
     tog0_ = !tog0_;
   }
@@ -520,9 +577,15 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     *GetTxControlAddr(GetNumber()) =
         (*GetTxControlAddr(GetNumber()) & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
 
-    USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
+    USBHSD->INT_FG = USBHS_UIF_ISO_ACT | USBHS_UIF_TRANSFER;  // NOLINT
 
     size = last_transfer_size_;
+
+    if (GetType() == Type::ISOCHRONOUS)
+    {
+      SetTxLen(GetNumber(), 0);
+      DisableTx(GetNumber());
+    }
   }
 
   if (GetDirection() == Direction::OUT &&

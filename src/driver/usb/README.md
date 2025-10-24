@@ -35,10 +35,11 @@ This repository only contains platform-independent stack code. For platform-spec
 
 ### Device Stack
 
-| Protocol | Status    | Notes                                          |
-| -------- | --------- | ---------------------------------------------- |
-| CDC-ACM  | Supported | Implemented as LibXR’s UART class              |
-| HID      | Supported | Standard keyboard/mouse only, extend as needed |
+| Protocol | Status    | Notes                                                                                          |
+| -------- | --------- | ---------------------------------------------------------------------------------------------- |
+| CDC-ACM  | Supported | Implemented as LibXR’s UART class                                                              |
+| HID      | Supported | Only standard keyboard/mouse and remote controller; other types require you to derive your own |
+| UAC      | Supported | Currently implements a UAC 1.0 microphone only                                                 |
 
 ### Host Stack
 
@@ -46,15 +47,15 @@ TODO
 
 ### Platform Support
 
-| Platform | Phy           | Status             | Test Device         |
-| -------- | ------------- | ------------------ | ------------------- |
-| STM32    | USB_DEVICE_FS | Supported          | STM32F103           |
-| STM32    | USB_DRV_FS    | Supported (Device) | STM32G431           |
-| STM32    | USB_OTG_FS    | Supported (Device) | STM32F407           |
-| STM32    | USB_OTG_HS    | Supported (Device) | STM32F407/STM32H750 |
-| CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203   |
-| CH32     | USB_HS        | Supported          | CH32V307            |
+| Platform | Phy           | Status             | Test Device                |
+| -------- | ------------- | ------------------ | -------------------------- |
+| STM32    | USB_DEVICE_FS | Supported          | STM32F103                  |
+| STM32    | USB_DRV_FS    | Supported (Device) | STM32G431                  |
+| STM32    | USB_OTG_FS    | Supported (Device) | STM32F407                  |
+| STM32    | USB_OTG_HS    | Supported (Device) | STM32F407/STM32H750        |
+| CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203/CH32V208 |
+| CH32     | USB_HS        | Supported          | CH32V307                   |
 
 ## Documentation
 
-Released together with the LibXR documentation.
+Released together with the [LibXR documentation](https://xrobot-org.github.io/en/docs/xrusb).
