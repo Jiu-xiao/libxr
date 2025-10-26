@@ -145,6 +145,7 @@ class STM32ADC
   float ReadChannel(uint8_t channel);
 
  private:
+  alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<bool> locked_ = false;
   ADC_HandleTypeDef* hadc_;
   const uint8_t NUM_CHANNELS;
   uint8_t filter_size_;
