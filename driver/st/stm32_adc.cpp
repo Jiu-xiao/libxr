@@ -165,7 +165,11 @@ float STM32ADC::ReadChannel(uint8_t channel)
 #endif
 
   config.Channel = channels_[channel]->ch_;
+#if defined(ADC_REGULAR_RANK_1)
+  config.Rank = ADC_REGULAR_RANK_1;
+#else
   config.Rank = 1;
+#endif
 #if defined(ADC_SINGLE_ENDED) && !defined(STM32L0)
   config.SingleDiff = ADC_SINGLE_ENDED;
 #endif
@@ -177,6 +181,17 @@ float STM32ADC::ReadChannel(uint8_t channel)
   config.SamplingTime = time;
 #endif
 
+  auto expected = false;
+
+  if (!locked_.compare_exchange_strong(expected, true, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+  {
+    // Multiple threads are working on the same adc peripheral
+    // Please use dma mode
+    ASSERT(false);
+    return 0.0f;
+  }
+
   HAL_ADC_ConfigChannel(hadc_, &config);
 
   uint32_t sum = 0;
@@ -187,6 +202,9 @@ float STM32ADC::ReadChannel(uint8_t channel)
     buffer[channel + i * NUM_CHANNELS] = HAL_ADC_GetValue(hadc_);
     sum += buffer[channel + i * NUM_CHANNELS];
   }
+
+  locked_.store(false, std::memory_order_release);
+
   return ConvertToVoltage(static_cast<float>(sum) / static_cast<float>(filter_size_));
 }
 
