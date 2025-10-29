@@ -189,9 +189,9 @@ float STM32ADC::ReadChannel(uint8_t channel)
   config.SamplingTime = time;
 #endif
 
-  auto expected = false;
+  uint32_t expected = 0U;
 
-  if (!locked_.compare_exchange_strong(expected, true, std::memory_order_acquire,
+  if (!locked_.compare_exchange_strong(expected, 0xF0F0F0F0U, std::memory_order_acquire,
                                        std::memory_order_relaxed))
   {
     // Multiple threads are working on the same adc peripheral
@@ -211,7 +211,7 @@ float STM32ADC::ReadChannel(uint8_t channel)
     sum += buffer[channel + i * NUM_CHANNELS];
   }
 
-  locked_.store(false, std::memory_order_release);
+  locked_.store(0, std::memory_order_release);
 
   return ConvertToVoltage(static_cast<float>(sum) / static_cast<float>(filter_size_));
 }
