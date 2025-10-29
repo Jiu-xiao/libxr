@@ -102,11 +102,12 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
         return ErrorCode::EMPTY;
       }
 
+      item = queue_handle_[current_head];
+
       if (head_.compare_exchange_weak(current_head, Increment(current_head),
-                                      std::memory_order_acquire,
+                                      std::memory_order_acq_rel,
                                       std::memory_order_relaxed))
       {
-        item = queue_handle_[current_head];
         return ErrorCode::OK;
       }
     }
@@ -129,10 +130,6 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    * successfully removed and retrieved).
    *         - `ErrorCode::EMPTY` 表示队列为空 (`ErrorCode::EMPTY` if the queue is empty).
    *
-   * @note 使用 `std::atomic_thread_fence(std::memory_order_acquire)` 确保正确读取数据，
-   *       防止 CPU 乱序执行带来的数据读取问题。
-   *       (Uses `std::atomic_thread_fence(std::memory_order_acquire)` to ensure proper
-   * data reading and prevent CPU reordering issues).
    */
   ErrorCode Pop(Data &item)
   {
@@ -145,15 +142,14 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
         return ErrorCode::EMPTY;
       }
 
+      item = queue_handle_[current_head];
+
       if (head_.compare_exchange_weak(current_head, Increment(current_head),
-                                      std::memory_order_acquire,
+                                      std::memory_order_acq_rel,
                                       std::memory_order_relaxed))
       {
-        std::atomic_thread_fence(std::memory_order_acquire);
-        item = queue_handle_[current_head];
         return ErrorCode::OK;
       }
-      current_head = head_.load(std::memory_order_relaxed);
     }
   }
 
@@ -176,12 +172,11 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
       }
 
       if (head_.compare_exchange_weak(current_head, Increment(current_head),
-                                      std::memory_order_acquire,
+                                      std::memory_order_acq_rel,
                                       std::memory_order_relaxed))
       {
         return ErrorCode::OK;
       }
-      current_head = head_.load(std::memory_order_relaxed);
     }
   }
 
@@ -195,14 +190,21 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    */
   ErrorCode Peek(Data &item)
   {
-    const auto CURRENT_HEAD = head_.load(std::memory_order_acquire);
-    if (CURRENT_HEAD == tail_.load(std::memory_order_acquire))
+    while (true)
     {
-      return ErrorCode::EMPTY;
-    }
+      auto current_head = head_.load(std::memory_order_relaxed);
+      if (current_head == tail_.load(std::memory_order_acquire))
+      {
+        return ErrorCode::EMPTY;
+      }
 
-    item = queue_handle_[CURRENT_HEAD];
-    return ErrorCode::OK;
+      item = queue_handle_[current_head];
+
+      if (head_.load(std::memory_order_acquire) == current_head)
+      {
+        return ErrorCode::OK;
+      }
+    }
   }
 
   /**
@@ -288,7 +290,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
 
       size_t new_head = (current_head + size) % capacity;
 
-      if (head_.compare_exchange_weak(current_head, new_head, std::memory_order_acquire,
+      if (head_.compare_exchange_weak(current_head, new_head, std::memory_order_acq_rel,
                                       std::memory_order_relaxed))
       {
         return ErrorCode::OK;
@@ -307,7 +309,12 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    */
   ErrorCode PeekBatch(Data *data, size_t size)
   {
-    size_t capacity = LENGTH + 1;
+    if (size == 0)
+    {
+      return ErrorCode::OK;
+    }
+
+    const size_t CAPACITY = LENGTH + 1;
 
     while (true)
     {
@@ -316,24 +323,27 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
 
       size_t available = (current_tail >= current_head)
                              ? (current_tail - current_head)
-                             : (capacity - current_head + current_tail);
+                             : (CAPACITY - current_head + current_tail);
 
       if (available < size)
       {
         return ErrorCode::EMPTY;
       }
 
-      size_t first_chunk = LibXR::min(size, capacity - current_head);
-      LibXR::Memory::FastCopy(
-          reinterpret_cast<void *>(data),
-          reinterpret_cast<const void *>(queue_handle_ + current_head),
-          first_chunk * sizeof(Data));
-
-      if (size > first_chunk)
+      if (data != nullptr)
       {
-        LibXR::Memory::FastCopy(reinterpret_cast<void *>(data + first_chunk),
-                                reinterpret_cast<const void *>(queue_handle_),
-                                (size - first_chunk) * sizeof(Data));
+        size_t first_chunk = LibXR::min(size, CAPACITY - current_head);
+        LibXR::Memory::FastCopy(
+            reinterpret_cast<void *>(data),
+            reinterpret_cast<const void *>(queue_handle_ + current_head),
+            first_chunk * sizeof(Data));
+
+        if (size > first_chunk)
+        {
+          LibXR::Memory::FastCopy(reinterpret_cast<void *>(data + first_chunk),
+                                  reinterpret_cast<const void *>(queue_handle_),
+                                  (size - first_chunk) * sizeof(Data));
+        }
       }
 
       if (head_.load(std::memory_order_acquire) == current_head)
