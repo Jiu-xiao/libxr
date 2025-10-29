@@ -4,6 +4,17 @@
 
 using namespace LibXR;
 
+#if defined(HAL_ADC_MODULE_ENABLED) && !defined(ADC_CALIB_OFFSET_AND_LINEARITY) && \
+    !defined(ADC_CALIB_OFFSET_LINEARITY) && !defined(ADC_CALIB_OFFSET) &&          \
+    !defined(ADC_SINGLE_ENDED)
+extern "C" HAL_StatusTypeDef __attribute__((weak)) HAL_ADCEx_Calibration_Start(
+    ADC_HandleTypeDef* hadc)
+{
+  (void)hadc;
+  return HAL_OK;
+}
+#endif
+
 STM32ADC::Channel::Channel(STM32ADC* adc, uint8_t index, uint32_t ch)
     : adc_(adc), index_(index), ch_(ch)
 {
@@ -28,9 +39,29 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
     channels_[i] = new Channel(this, i, *it++);
   }
 
-  use_dma_ ? HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
-                               NUM_CHANNELS * filter_size_)
-           : HAL_ADC_Start(hadc_);
+#if defined(ADC_CALIB_OFFSET_AND_LINEARITY) && defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_CALIB_OFFSET_AND_LINEARITY, ADC_SINGLE_ENDED);
+#elif defined(ADC_CALIB_OFFSET_LINEARITY) && defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_CALIB_OFFSET_LINEARITY, ADC_SINGLE_ENDED);
+#elif defined(ADC_CALIB_OFFSET) && defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+#elif defined(ADC_SINGLE_ENDED)
+  HAL_ADCEx_Calibration_Start(hadc, ADC_SINGLE_ENDED);
+#else
+  HAL_ADCEx_Calibration_Start(hadc);
+#endif
+
+  if (use_dma_)
+  {
+    /* DMA must be in circular mode */
+    ASSERT(hadc_->DMA_Handle->Init.Mode == DMA_CIRCULAR);
+    HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
+                      NUM_CHANNELS * filter_size_);
+  }
+  else
+  {
+    HAL_ADC_Start(hadc_);
+  }
 }
 
 STM32ADC::~STM32ADC()
@@ -142,10 +173,32 @@ float STM32ADC::ReadChannel(uint8_t channel)
 #endif
 
   config.Channel = channels_[channel]->ch_;
+#if defined(ADC_REGULAR_RANK_1)
+  config.Rank = ADC_REGULAR_RANK_1;
+#else
   config.Rank = 1;
+#endif
+#if defined(ADC_SINGLE_ENDED) && !defined(STM32L0)
+  config.SingleDiff = ADC_SINGLE_ENDED;
+#endif
+#if defined(ADC_OFFSET_NONE)
+  config.OffsetNumber = ADC_OFFSET_NONE;
+  config.Offset = 0;
+#endif
 #if !defined(STM32L0)
   config.SamplingTime = time;
 #endif
+
+  auto expected = false;
+
+  if (!locked_.compare_exchange_strong(expected, true, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+  {
+    // Multiple threads are working on the same adc peripheral
+    // Please use dma mode
+    ASSERT(false);
+    return 0.0f;
+  }
 
   HAL_ADC_ConfigChannel(hadc_, &config);
 
@@ -157,6 +210,9 @@ float STM32ADC::ReadChannel(uint8_t channel)
     buffer[channel + i * NUM_CHANNELS] = HAL_ADC_GetValue(hadc_);
     sum += buffer[channel + i * NUM_CHANNELS];
   }
+
+  locked_.store(false, std::memory_order_release);
+
   return ConvertToVoltage(static_cast<float>(sum) / static_cast<float>(filter_size_));
 }
 
