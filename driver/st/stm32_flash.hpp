@@ -27,8 +27,12 @@ struct FlashSector
 inline uint32_t STM32FlashBankOf(uint32_t addr)
 {
 #if !defined(FLASH_BANK2_BASE)
-  // NOLINTNEXTLINE
+// NOLINTNEXTLINE
+#if defined(FLASH_BANK_SIZE)
   const auto FLASH_BANK2_BASE = FLASH_BANK_SIZE + FLASH_BASE;
+#else
+  const auto FLASH_BANK2_BASE = 0x100000 + FLASH_BASE;
+#endif
 #endif
   return (addr >= FLASH_BANK2_BASE) ? FLASH_BANK_2 : FLASH_BANK_1;
 }
