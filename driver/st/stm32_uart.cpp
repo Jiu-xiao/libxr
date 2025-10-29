@@ -299,10 +299,8 @@ STM32UART::STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx,
     uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
     HAL_DMA_Init(uart_handle_->hdmarx);
 
-    __HAL_UART_ENABLE_IT(uart_handle, UART_IT_IDLE);
-
-    HAL_UART_Receive_DMA(uart_handle, reinterpret_cast<uint8_t *>(dma_buff_rx_.addr_),
-                         dma_buff_rx_.size_);
+    HAL_UARTEx_ReceiveToIdle_DMA(
+        uart_handle, reinterpret_cast<uint8_t *>(dma_buff_rx_.addr_), dma_buff_rx_.size_);
     _read_port = ReadFun;
   }
 }
@@ -348,7 +346,8 @@ ErrorCode STM32UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
-static void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef *uart_handle)
+// NOLINTNEXTLINE
+static inline void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef *uart_handle)
 {
   auto uart = STM32UART::map[STM32_UART_GetID(uart_handle->Instance)];
   auto rx_buf = static_cast<uint8_t *>(uart->dma_buff_rx_.addr_);
@@ -381,8 +380,9 @@ static void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef *uart_handle)
   }
 }
 
+// NOLINTNEXTLINE
 void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
-{  // NOLINT
+{
   auto uart = STM32UART::map[id];
 
   size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
@@ -436,23 +436,7 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
   uart->dma_buff_tx_.EnablePending();
 }
 
-// NOLINTNEXTLINE
-extern "C" void STM32_UART_ISR_Handler_IDLE(UART_HandleTypeDef *huart)
-{
-  if (__HAL_UART_GET_FLAG(huart, UART_FLAG_IDLE))
-  {
-    __HAL_UART_CLEAR_IDLEFLAG(huart);
-
-    STM32_UART_RX_ISR_Handler(huart);
-  }
-}
-
-extern "C" void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
-{
-  STM32_UART_RX_ISR_Handler(huart);
-}
-
-extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t)
 {
   STM32_UART_RX_ISR_Handler(huart);
 }
@@ -470,7 +454,7 @@ extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef 
 extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
 {
   auto uart = STM32UART::map[STM32_UART_GetID(huart->Instance)];
-  HAL_UART_Receive_DMA(huart, huart->pRxBuffPtr, uart->dma_buff_rx_.size_);
+  HAL_UARTEx_ReceiveToIdle_DMA(huart, huart->pRxBuffPtr, uart->dma_buff_rx_.size_);
   uart->last_rx_pos_ = 0;
   WriteInfoBlock info;
   if (uart->write_port_->queue_info_->Peek(info) == ErrorCode::OK)
@@ -491,7 +475,7 @@ extern "C" void HAL_UART_AbortTransmitCpltCallback(UART_HandleTypeDef *huart)
 
 extern "C" void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart)
 {
-  HAL_UART_Receive_DMA(
+  HAL_UARTEx_ReceiveToIdle_DMA(
       huart, huart->pRxBuffPtr,
       STM32UART::map[STM32_UART_GetID(huart->Instance)]->dma_buff_rx_.size_);
 }
