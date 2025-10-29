@@ -51,9 +51,17 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
   HAL_ADCEx_Calibration_Start(hadc);
 #endif
 
-  use_dma_ ? HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
-                               NUM_CHANNELS * filter_size_)
-           : HAL_ADC_Start(hadc_);
+  if (use_dma_)
+  {
+    /* DMA must be in circular mode */
+    ASSERT(hadc_->DMA_Handle->Init.Mode == DMA_CIRCULAR);
+    HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
+                      NUM_CHANNELS * filter_size_);
+  }
+  else
+  {
+    HAL_ADC_Start(hadc_);
+  }
 }
 
 STM32ADC::~STM32ADC()
