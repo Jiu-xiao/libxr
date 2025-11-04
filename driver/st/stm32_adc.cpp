@@ -1,9 +1,12 @@
 #include "stm32_adc.hpp"
+
 #include "libxr_def.hpp"
 
 #ifdef HAL_ADC_MODULE_ENABLED
 
 using namespace LibXR;
+
+using H = ADC_HandleTypeDef*;
 
 #if defined(HAL_ADC_MODULE_ENABLED) && !defined(ADC_CALIB_OFFSET_AND_LINEARITY) && \
     !defined(ADC_CALIB_OFFSET_LINEARITY) && !defined(ADC_CALIB_OFFSET) &&          \
@@ -55,17 +58,17 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
   if (use_dma_)
   {
     /* DMA must be in circular mode */
-    ASSERT(hadc_->Init.ContinuousConvMode == ENABLE);
-    ASSERT(hadc_->Init.DMAContinuousRequests == ENABLE);
-    ASSERT(hadc_->DMA_Handle->Init.Mode == DMA_CIRCULAR);
-    ASSERT(hadc_->Init.NbrOfConversion == NUM_CHANNELS);
+    AssertContinuousConvModeEnabled<H>(hadc_);
+    AssertDMAContReqEnabled<H>(hadc_);
+    AssertDMACircular<H>(hadc_);
+    AssertNbrOfConvEq<H>(hadc_, NUM_CHANNELS);
     HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
                       NUM_CHANNELS * filter_size_);
   }
   else
   {
-    ASSERT(hadc_->Init.NbrOfConversion == 1);
-    ASSERT(hadc_->Init.ContinuousConvMode == DISABLE);
+    AssertNbrOfConvEq<H>(hadc_, 1);
+    AssertContinuousConvModeDisabled<H>(hadc_);
     HAL_ADC_Start(hadc_);
   }
 }
