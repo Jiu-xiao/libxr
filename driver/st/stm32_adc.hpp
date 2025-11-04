@@ -77,6 +77,108 @@ class STM32ADC
     }
   };
 
+  template <typename T, typename = void>
+  struct HasContinuousConvMode : std::false_type
+  {
+  };
+  template <typename T>
+  struct HasContinuousConvMode<
+      T, std::void_t<decltype(std::declval<T>()->Init.ContinuousConvMode)>>
+      : std::true_type
+  {
+  };
+
+  template <typename T, typename = void>
+  struct HasDMAContinuousRequests : std::false_type
+  {
+  };
+  template <typename T>
+  struct HasDMAContinuousRequests<
+      T, std::void_t<decltype(std::declval<T>()->Init.DMAContinuousRequests)>>
+      : std::true_type
+  {
+  };
+
+  template <typename T, typename = void>
+  struct HasNbrOfConversion : std::false_type
+  {
+  };
+  template <typename T>
+  struct HasNbrOfConversion<
+      T, std::void_t<decltype(std::declval<T>()->Init.NbrOfConversion)>> : std::true_type
+  {
+  };
+
+  template <typename T, typename = void>
+  struct HasDMACircularMode : std::false_type
+  {
+  };
+  template <typename T>
+  struct HasDMACircularMode<
+      T, std::void_t<decltype(std::declval<T>()->DMA_Handle->Init.Mode)>> : std::true_type
+  {
+  };
+
+  template <typename T>
+  static typename std::enable_if<HasContinuousConvMode<T>::value>::type
+  AssertContinuousConvModeEnabled(T hadc)
+  {
+    ASSERT(hadc->Init.ContinuousConvMode == ENABLE);
+  }
+  template <typename T>
+  static typename std::enable_if<!HasContinuousConvMode<T>::value>::type
+  AssertContinuousConvModeEnabled(T)
+  {
+  }
+
+  template <typename T>
+  static typename std::enable_if<HasContinuousConvMode<T>::value>::type
+  AssertContinuousConvModeDisabled(T hadc)
+  {
+    ASSERT(hadc->Init.ContinuousConvMode == DISABLE);
+  }
+  template <typename T>
+  static typename std::enable_if<!HasContinuousConvMode<T>::value>::type
+  AssertContinuousConvModeDisabled(T)
+  {
+  }
+
+  template <typename T>
+  static typename std::enable_if<HasDMAContinuousRequests<T>::value>::type
+  AssertDMAContReqEnabled(T hadc)
+  {
+    ASSERT(hadc->Init.DMAContinuousRequests == ENABLE);
+  }
+  template <typename T>
+  static typename std::enable_if<!HasDMAContinuousRequests<T>::value>::type
+  AssertDMAContReqEnabled(T)
+  {
+  }
+
+  template <typename T>
+  static typename std::enable_if<HasNbrOfConversion<T>::value>::type AssertNbrOfConvEq(
+      T hadc, uint32_t n)
+  {
+    ASSERT(hadc->Init.NbrOfConversion == n);
+  }
+  template <typename T>
+  static typename std::enable_if<!HasNbrOfConversion<T>::value>::type AssertNbrOfConvEq(
+      T, uint32_t)
+  {
+  }
+
+  template <typename T>
+  static typename std::enable_if<HasDMACircularMode<T>::value>::type AssertDMACircular(
+      T hadc)
+  {
+    ASSERT(hadc->DMA_Handle != nullptr);
+    ASSERT(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
+  }
+  template <typename T>
+  static typename std::enable_if<!HasDMACircularMode<T>::value>::type AssertDMACircular(T)
+  {
+  }
+
  public:
   /**
    * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32 ADC
