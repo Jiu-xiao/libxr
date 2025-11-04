@@ -63,7 +63,11 @@ class STM32SPI : public SPI
 
   ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op) override;
 
-  RawData dma_buff_rx_, dma_buff_tx_;
+  uint32_t GetMaxBusSpeed() const override;
+
+  Prescaler GetMaxPrescaler() const override;
+
+  ErrorCode Transfer(size_t size, OperationRW &op) override;
 
   SPI_HandleTypeDef *spi_handle_;
 
