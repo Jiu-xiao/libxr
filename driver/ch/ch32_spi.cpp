@@ -271,13 +271,13 @@ ErrorCode CH32SPI::PollingTransfer(uint8_t* rx, const uint8_t* tx, uint32_t len)
     while (SPI_I2S_GetFlagStatus(instance_, SPI_I2S_FLAG_TXE) == RESET)
     {
     }
-    SPI_I2S_SendData(instance_, tx ? tx[i] : 0xFF);
+    SPI_I2S_SendData(instance_, tx ? tx[i] : 0x00);
 
     while (SPI_I2S_GetFlagStatus(instance_, SPI_I2S_FLAG_RXNE) == RESET)
     {
     }
     uint16_t d = SPI_I2S_ReceiveData(instance_);
-    if (rx) rx[i] = static_cast<uint8_t>(d & 0xFF);
+    if (rx) rx[i] = static_cast<uint8_t>(d & 0xff);
   }
   return ErrorCode::OK;
 }
@@ -332,11 +332,11 @@ ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     if (wsz)
     {
       memcpy(txp, write_data.addr_, wsz);
-      if (need > wsz) memset(txp + wsz, 0xFF, need - wsz);
+      if (need > wsz) memset(txp + wsz, 0x00, need - wsz);
     }
     else
     {
-      memset(txp, 0xFF, need);
+      memset(txp, 0x00, need);
     }
 
     ErrorCode ec = PollingTransfer(rxp, txp, need);
@@ -377,7 +377,7 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op)
   {
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg | 0x80);
-    memset(txp + 1, 0xFF, n);
+    memset(txp + 1, 0x00, n);
 
     mem_read_ = true;
     read_buff_ = read_data;
@@ -399,7 +399,7 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op)
     uint8_t* rxp = static_cast<uint8_t*>(rx.addr_);
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg | 0x80);
-    memset(txp + 1, 0xFF, n);
+    memset(txp + 1, 0x00, n);
 
     ErrorCode ec = PollingTransfer(rxp, txp, total);
     memcpy(read_data.addr_, rxp + 1, n);

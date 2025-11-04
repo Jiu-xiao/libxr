@@ -53,7 +53,7 @@ class CH32SPI : public SPI
   void StopDma();
 
   void PrepareTxBuffer(ConstRawData write_data, uint32_t need_len, uint32_t prefix = 0,
-                       uint8_t dummy = 0xFF);
+                       uint8_t dummy = 0x00);
 
   static SPI::Prescaler MapCH32PrescalerToEnum(uint16_t p);
   static bool MapEnumToCH32Prescaler(SPI::Prescaler p, uint16_t& out);
