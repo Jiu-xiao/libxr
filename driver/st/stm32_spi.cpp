@@ -112,8 +112,12 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     if (write_data.size_ > 0 && read_data.size_ > 0)
     {
-      memset(tx.addr_, 0, need_write);
       memcpy(tx.addr_, write_data.addr_, write_data.size_);
+      if (write_data.size_ < need_write)
+      {
+        memset(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
+               need_write - write_data.size_);
+      }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
       SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
                               static_cast<int32_t>(need_write));
@@ -126,14 +130,19 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     else if (write_data.size_ > 0)
     {
       memcpy(tx.addr_, write_data.addr_, write_data.size_);
+      if (write_data.size_ < need_write)
+      {
+        memset(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
+               need_write - write_data.size_);
+      }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
       SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
-                              static_cast<int32_t>(write_data.size_));
+                              static_cast<int32_t>(need_write));
 #endif
       read_buff_ = {nullptr, 0};
 
-      st = HAL_SPI_Transmit_DMA(spi_handle_, static_cast<uint8_t *>(tx.addr_),
-                                write_data.size_);
+      st =
+          HAL_SPI_Transmit_DMA(spi_handle_, static_cast<uint8_t *>(tx.addr_), need_write);
     }
     else if (read_data.size_ > 0)
     {
@@ -168,8 +177,12 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
   if (write_data.size_ > 0 && read_data.size_ > 0)
   {
-    memset(tx.addr_, 0, need_write);
     memcpy(tx.addr_, write_data.addr_, write_data.size_);
+    if (write_data.size_ < need_write)
+    {
+      memset(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
+             need_write - write_data.size_);
+    }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
                             static_cast<int32_t>(need_write));
@@ -204,7 +217,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     memcpy(tx.addr_, write_data.addr_, write_data.size_);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
-                            static_cast<int32_t>(write_data.size_));
+                            static_cast<int32_t>(need_write));
 #endif
     ans = (HAL_SPI_Transmit(spi_handle_, static_cast<uint8_t *>(tx.addr_),
                             write_data.size_, 20) == HAL_OK)
@@ -658,13 +671,22 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW &op)
   RawData rx = GetRxBuffer();
   RawData tx = GetTxBuffer();
 
+  const uint16_t xfer = static_cast<uint16_t>(size);
+
   if (size > dma_enable_min_size_)
   {
     rw_op_ = op;
 
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+    SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
+                            static_cast<int32_t>(xfer));
+    SCB_InvalidateDCache_by_Addr(static_cast<uint32_t *>(rx.addr_),
+                                 static_cast<int32_t>(xfer));
+#endif
+
     HAL_StatusTypeDef st =
         HAL_SPI_TransmitReceive_DMA(spi_handle_, static_cast<uint8_t *>(tx.addr_),
-                                    static_cast<uint8_t *>(rx.addr_), size);
+                                    static_cast<uint8_t *>(rx.addr_), xfer);
 
     if (st != HAL_OK)
     {
@@ -681,9 +703,14 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW &op)
 
   ErrorCode ans =
       (HAL_SPI_TransmitReceive(spi_handle_, static_cast<uint8_t *>(tx.addr_),
-                               static_cast<uint8_t *>(rx.addr_), size, 20) == HAL_OK)
+                               static_cast<uint8_t *>(rx.addr_), xfer, 20) == HAL_OK)
           ? ErrorCode::OK
           : ErrorCode::BUSY;
+
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+  SCB_InvalidateDCache_by_Addr(static_cast<uint32_t *>(rx.addr_),
+                               static_cast<int32_t>(xfer));
+#endif
 
   SwitchBuffer();
 
