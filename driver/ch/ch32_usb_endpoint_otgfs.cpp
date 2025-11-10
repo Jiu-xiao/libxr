@@ -410,7 +410,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     USBFSD->INT_FG = USBFS_UIF_TRANSFER;  // NOLINT
   }
 
-  OnTransferCompleteCallback(false, size);
+  OnTransferCompleteCallback(true, size);
 }
 
 void CH32EndpointOtgFs::SwitchBuffer()
