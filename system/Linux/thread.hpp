@@ -155,14 +155,18 @@ class Thread
     }
 
     // 创建线程
-    int ans = pthread_create(&this->thread_handle_, &attr, block->Port, block);
+    int ans = pthread_create(&this->thread_handle_, &attr, ThreadBlock::Port, block);
+
+    pthread_attr_destroy(&attr);
+
     if (ans != 0)
     {
-      XR_LOG_WARN("Failed to create thread: %s (%s), Falling back to default policy.",
+      XR_LOG_WARN("Failed to create thread: %s (%s), retrying with default attributes.",
                   name, strerror(ans));
-      pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
-      pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
-      ans = pthread_create(&this->thread_handle_, &attr, block->Port, block);
+
+      // 完全使用系统默认属性（attr = nullptr）
+      ans = pthread_create(&this->thread_handle_, nullptr, ThreadBlock::Port, block);
+
       if (ans != 0)
       {
         XR_LOG_ERROR("Failed to create thread: %s (%s)", name, strerror(ans));
