@@ -328,11 +328,11 @@ extern "C" void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
   {
     if (i2c->read_)
     {
-      i2c->read_op_.UpdateStatus(false, ErrorCode::FAILED);
+      i2c->read_op_.UpdateStatus(true, ErrorCode::FAILED);
     }
     else
     {
-      i2c->write_op_.UpdateStatus(false, ErrorCode::FAILED);
+      i2c->write_op_.UpdateStatus(true, ErrorCode::FAILED);
     }
   }
 }
