@@ -17,6 +17,7 @@
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "thread.hpp"
+#include "timer.hpp"
 #include "webots/Robot.hpp"
 #include "webots_timebase.hpp"
 
@@ -86,8 +87,11 @@ void StdoThread(LibXR::WritePort *write_port)
   }
 }
 
-void LibXR::PlatformInit(webots::Robot *robot)
+void LibXR::PlatformInit(webots::Robot *robot, uint32_t timer_pri,
+                         uint32_t timer_stack_depth)
 {
+  LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
+  LibXR::Timer::stack_depth_ = timer_stack_depth;
   auto write_fun = [](WritePort &port)
   {
     UNUSED(port);

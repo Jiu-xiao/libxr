@@ -56,6 +56,10 @@ typedef struct
  * @brief  Webots 平台初始化函数
  *         Webots platform initialization function
  * @param  robot Webots 机器人对象指针 Webots robot object pointer
+ * @param  timer_pri  定时器任务的优先级（默认值 2）
+ *                    Timer task priority (default: 2)
+ * @param  timer_stack_depth  定时器任务的栈深度（默认值 65536）
+ *                            Timer task stack depth (default: 65536)
  *
  * @details
  * 此函数用于初始化 Webots 仿真环境，设置 `_libxr_webots_robot_handle` 变量，
@@ -65,6 +69,7 @@ typedef struct
  * the `_libxr_webots_robot_handle` variable and initializing the simulation
  * time counter `_libxr_webots_time_count`.
  */
-void PlatformInit(webots::Robot *robot = nullptr);  // NOLINT
+void PlatformInit(webots::Robot *robot = nullptr, uint32_t timer_pri = 2,
+                  uint32_t timer_stack_depth = 65536);  // NOLINT
 
 }  // namespace LibXR

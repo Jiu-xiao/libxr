@@ -16,6 +16,7 @@
 #include "linux_timebase.hpp"
 #include "logger.hpp"
 #include "thread.hpp"
+#include "timer.hpp"
 
 struct timeval libxr_linux_start_time;
 
@@ -84,8 +85,10 @@ void StdoThread(LibXR::WritePort *write_port)
   }
 }
 
-void LibXR::PlatformInit()
+void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
+  LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
+  LibXR::Timer::stack_depth_ = timer_stack_depth;
   auto write_fun = [](WritePort &port)
   {
     UNUSED(port);
