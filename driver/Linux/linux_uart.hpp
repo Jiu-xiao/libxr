@@ -28,7 +28,8 @@ class LinuxUART : public UART
  public:
   LinuxUART(const char *dev_path, unsigned int baudrate = 115200,
             Parity parity = Parity::NO_PARITY, uint8_t data_bits = 8,
-            uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512)
+            uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512,
+            size_t thread_stack_size = 65536)
       : UART(&_read_port, &_write_port),
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
@@ -38,10 +39,10 @@ class LinuxUART : public UART
   {
     ASSERT(buff_size_ > 0);
 
-    if (std::filesystem::exists(dev_path) == false)
+    while (!std::filesystem::exists(dev_path))
     {
-      XR_LOG_ERROR("Cannot find UART device: %s", dev_path);
-      ASSERT(false);
+      XR_LOG_WARN("Cannot find UART device: %s, retrying...", dev_path);
+      Thread::Sleep(100);
     }
 
     device_path_ = GetByPathForTTY(dev_path);
@@ -68,18 +69,18 @@ class LinuxUART : public UART
     _write_port = WriteFun;
 
     rx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", 8192,
+        this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
 
     tx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->TxLoop(); }, "tx_uart", 8192,
+        this, [](LinuxUART *self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
   }
 
   LinuxUART(const std::string &vid, const std::string &pid,
             unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
-            size_t buffer_size = 512)
+            size_t buffer_size = 512, size_t thread_stack_size = 65536)
       : UART(&_read_port, &_write_port),
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
@@ -127,11 +128,11 @@ class LinuxUART : public UART
     _write_port = WriteFun;
 
     rx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", 8192,
+        this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
 
     tx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->TxLoop(); }, "tx_uart", 8192,
+        this, [](LinuxUART *self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
   }
 
@@ -169,14 +170,17 @@ class LinuxUART : public UART
     udev_enumerate_scan_devices(enumerate);
 
     struct udev_list_entry *devices = udev_enumerate_get_list_entry(enumerate);
-    struct udev_list_entry *entry;
+    struct udev_list_entry *entry = nullptr;
     bool found = false;
 
     udev_list_entry_foreach(entry, devices)
     {
       const char *path = udev_list_entry_get_name(entry);
       struct udev_device *tty_dev = udev_device_new_from_syspath(udev, path);
-      if (!tty_dev) continue;
+      if (!tty_dev)
+      {
+        continue;
+      }
 
       struct udev_device *usb_dev =
           udev_device_get_parent_with_subsystem_devtype(tty_dev, "usb", "usb_device");
@@ -328,7 +332,7 @@ class LinuxUART : public UART
     return ErrorCode::OK;
   }
 
-  static ErrorCode ReadFun(ReadPort &port) { return ErrorCode::EMPTY; }
+  static ErrorCode ReadFun(ReadPort &) { return ErrorCode::EMPTY; }
 
   static ErrorCode WriteFun(WritePort &port)
   {
@@ -426,8 +430,8 @@ class LinuxUART : public UART
   Semaphore write_sem_;
   Mutex read_mutex_;
 
-  ReadPort _read_port;
-  WritePort _write_port;
+  ReadPort _read_port;    // NOLINT
+  WritePort _write_port;  // NOLINT
 };
 
 }  // namespace LibXR
