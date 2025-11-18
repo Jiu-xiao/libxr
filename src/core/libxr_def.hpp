@@ -113,21 +113,28 @@ enum class SizeLimitMode : uint8_t
   } while (0)
 
 /**
- * @brief 中断服务例程（ISR）环境下的断言宏
- * @brief Assertion macro for use in ISR (Interrupt Service Routine)
- * @param arg 要检查的条件 | Condition to check
+ * @brief 回调环境下使用的断言宏（可来自中断或线程）
+ * @brief Assertion macro for callbacks (may run in ISR or thread context).
+ *
+ * @param arg    要检查的条件 | Condition to check
+ * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
  */
-#define ASSERT_ISR(arg)                            \
-  do                                               \
-  {                                                \
-    if (!(arg))                                    \
-    {                                              \
-      libxr_fatal_error(__FILE__, __LINE__, true); \
-    }                                              \
+#define ASSERT_FROM_CALLBACK(arg, in_isr)              \
+  do                                                   \
+  {                                                    \
+    if (!(arg))                                        \
+    {                                                  \
+      libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
+    }                                                  \
   } while (0)
 #else
 #define ASSERT(arg) (void(arg), (void)0)
-#define ASSERT_ISR(arg) (void(arg), (void)0)
+#define ASSERT_FROM_CALLBACK(arg, in_isr) \
+  do                                      \
+  {                                       \
+    (void)(arg);                          \
+    (void)(in_isr);                       \
+  } while (0)
 #endif
 
 /**
