@@ -275,9 +275,7 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
     uart->_write_port.write_size_ = info.data.size_;
     DMA_Cmd(uart->dma_tx_channel_, ENABLE);
 
-    uart->write_info_active_.op.UpdateStatus(false, ErrorCode::OK);
-
-    return ErrorCode::FAILED;  // 实际是发起传输成功，但等待DMA完成
+    return ErrorCode::OK;
   }
   return ErrorCode::FAILED;
 }

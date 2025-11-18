@@ -766,7 +766,7 @@ extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 extern "C" void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
   STM32SPI *spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
-  spi->rw_op_.UpdateStatus(false, ErrorCode::FAILED);
+  spi->rw_op_.UpdateStatus(true, ErrorCode::FAILED);
 }
 
 #endif
