@@ -30,6 +30,15 @@ void StdiThread(LibXR::ReadPort *read_port)
 {
   static uint8_t read_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
 
+  if (!isatty(STDIN_FILENO))
+  {
+    XR_LOG_WARN("STDIO.read_: stdin is not a TTY, parking thread forever");
+    while (true)
+    {
+      LibXR::Thread::Sleep(UINT32_MAX);
+    }
+  }
+
   while (true)
   {
     fd_set rfds;

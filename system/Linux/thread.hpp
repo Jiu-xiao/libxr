@@ -105,6 +105,15 @@ class Thread
       static void *Port(void *arg)
       {
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
+
+        if (block->name_ && block->name_[0] != '\0')
+        {
+          char name_buf[16];
+          std::strncpy(name_buf, block->name_, sizeof(name_buf) - 1);
+          name_buf[sizeof(name_buf) - 1] = '\0';
+          pthread_setname_np(pthread_self(), name_buf);
+        }
+
         volatile const char *thread_name = block->name_;
         block->fun_(block->arg_);
 
