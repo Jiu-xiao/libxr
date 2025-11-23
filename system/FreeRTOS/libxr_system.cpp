@@ -19,10 +19,9 @@ extern "C" __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t
 }
 
 // NOLINTNEXTLINE
-extern "C" __attribute__((weak)) BaseType_t xTaskCatchUpTicks(TickType_t xTicksToCatchUp)
+extern "C" __attribute__((weak)) BaseType_t xTaskCatchUpTicks(TickType_t)
 {
-  vTaskStepTick(xTicksToCatchUp);
-  return pdPASS;
+  return pdFALSE;
 }
 
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
