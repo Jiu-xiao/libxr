@@ -165,6 +165,9 @@ class DatabaseRawSequential : public Database
    * @param flash 目标 Flash 存储设备 (Target Flash storage device).
    * @param max_buffer_size 最大缓冲区大小，默认 256 字节 (Maximum buffer size, default is
    * 256 bytes).
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   explicit DatabaseRawSequential(Flash& flash, size_t max_buffer_size = 256);
 

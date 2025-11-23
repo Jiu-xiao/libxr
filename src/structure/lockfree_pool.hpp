@@ -52,6 +52,9 @@ class LockFreePool
   /**
    * @brief 构造对象池 / Constructor for the pool
    * @param slot_count 槽数量 / Number of slots in the pool
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   LockFreePool(uint32_t slot_count)
       : SLOT_COUNT(slot_count),

@@ -38,6 +38,9 @@ class Event
    * @param event 要注册回调的事件 ID。 The event ID to register the callback for.
    * @param cb    事件触发时执行的回调函数。 The callback function to be executed when the
    * event occurs.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   void Register(uint32_t event, const Callback &cb);
 
@@ -77,6 +80,9 @@ class Event
    * @param sources       包含原始事件的源 Event 实例。 The source Event instance.
    * @param source_event  源事件实例中的事件 ID。 The source event ID.
    * @param target_event  当前实例中的目标事件 ID。 The target event ID in this instance.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   void Bind(Event &sources, uint32_t source_event, uint32_t target_event);
 

@@ -39,9 +39,9 @@ class Timer
 
     void (*fun_)(void *);  ///< 任务执行函数 Function pointer to the task
     void *handle;          ///< 任务句柄 Handle to the task
-    uint32_t cycle_;  ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
-    uint32_t count_;  ///< 计数器 Counter
-    bool enable_;     ///< 任务是否启用 Flag indicating whether the task is enabled
+    uint32_t cycle_;       ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
+    uint32_t count_;       ///< 计数器 Counter
+    bool enable_;          ///< 任务是否启用 Flag indicating whether the task is enabled
   };
 
   typedef LibXR::LockFreeList::Node<ControlBlock>
@@ -134,6 +134,9 @@ class Timer
    * @brief  添加定时任务
    *         Adds a periodic task
    * @param  handle 任务句柄 Timer handle to add
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   static void Add(TimerHandle handle);
 

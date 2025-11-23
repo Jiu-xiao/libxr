@@ -36,6 +36,9 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    *
    * 创建一个指定大小的无锁队列，并初始化相关变量。
    * Creates a lock-free queue with the specified size and initializes relevant variables.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   LockFreeQueue(size_t length)
       : head_(0),

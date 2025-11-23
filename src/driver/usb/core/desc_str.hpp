@@ -98,6 +98,9 @@ class DescriptorStrings
    *        USB descriptor string manager constructor
    *
    * @param lang_list 全局/静态LanguagePack对象指针表 / Pointers to static LanguagePack
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   DescriptorStrings(const std::initializer_list<const LanguagePack*>& lang_list);
 

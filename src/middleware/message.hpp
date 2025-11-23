@@ -46,10 +46,10 @@ class Topic
     std::atomic<LockState> busy;  ///< 是否忙碌。Indicates whether it is busy.
     LockFreeList subers;          ///< 订阅者列表。List of subscribers.
     uint32_t max_length;          ///< 数据的最大长度。Maximum length of data.
-    uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex *mutex;  ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;  ///< 存储的数据。Stored data.
-    bool cache;  ///< 是否启用数据缓存。Indicates whether data caching is enabled.
+    uint32_t crc32;     ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
+    Mutex *mutex;       ///< 线程同步互斥锁。Mutex for thread synchronization.
+    RawData data;       ///< 存储的数据。Stored data.
+    bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
   };
 #ifndef __DOXYGEN__
@@ -64,7 +64,7 @@ class Topic
     uint8_t prefix;  ///< 数据包前缀（固定为 0xA5）。Packet prefix (fixed at 0xA5).
     uint32_t
         topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint8_t data_len_raw[3];  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
+    uint8_t data_len_raw[3];   ///< 数据长度（最多 16MB）。Data length (up to 16MB).
     uint8_t pack_header_crc8;  ///< 头部 CRC8 校验码。CRC8 checksum of the header.
 
     void SetDataLen(uint32_t len);
@@ -186,6 +186,9 @@ class Topic
      * @brief 构造函数，初始化或查找指定名称的主题域。Constructor initializing or looking
      * up a domain by name.
      * @param name 主题域的名称。Name of the domain.
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     Domain(const char *name);
 
@@ -222,7 +225,7 @@ class Topic
    */
   struct SyncBlock : public SuberBlock
   {
-    RawData buff;  ///< 存储的数据缓冲区。Data buffer.
+    RawData buff;   ///< 存储的数据缓冲区。Data buffer.
     Semaphore sem;  ///< 信号量，用于同步等待数据。Semaphore for data synchronization.
   };
 
@@ -242,6 +245,9 @@ class Topic
      * @param name 主题名称。Topic name.
      * @param data 存储接收数据的变量。Variable to store received data.
      * @param domain 可选的主题域。Optional topic domain.
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     SyncSubscriber(const char *name, Data &data, Domain *domain = nullptr)
     {
@@ -253,6 +259,9 @@ class Topic
      * `Topic` handle.
      * @param topic 订阅的主题。Topic being subscribed to.
      * @param data 存储接收数据的变量。Variable to store received data.
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     SyncSubscriber(Topic topic, Data &data)
     {
@@ -318,6 +327,9 @@ class Topic
      *         Constructor to create a subscriber with a name and data
      * @param  name 订阅的主题名称 Name of the subscribed topic
      * @param  domain 可选的域指针 Optional domain pointer (default: nullptr)
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     ASyncSubscriber(const char *name, Domain *domain = nullptr)
     {
@@ -328,6 +340,9 @@ class Topic
      * @brief  构造函数，使用 Topic 进行初始化
      *         Constructor using a Topic for initialization
      * @param  topic 订阅的主题 Subscribed topic
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     ASyncSubscriber(Topic topic)
     {
@@ -396,18 +411,21 @@ class Topic
                 bool);  ///< 处理数据的回调函数 Callback function to handle data
   } QueueBlock;
 
-  /**
-   * @brief  构造函数，使用名称和无锁队列进行初始化
-   *         Constructor using a name and a lock-free queue
-   * @tparam Data 队列存储的数据类型 Data type stored in the queue
-   * @tparam Length 队列长度 Queue length
-   * @param  name 订阅的主题名称 Name of the subscribed topic
-   * @param  queue 订阅的数据队列 Subscribed data queue
-   * @param  domain 可选的域指针 Optional domain pointer (default: nullptr)
-   */
   class QueuedSubscriber
   {
    public:
+    /**
+     * @brief 构造函数，自动创建队列
+     *
+     * @tparam Data 队列存储的数据类型 Data type stored in the queue
+     * @tparam Length 队列长度 Queue length
+     * @param name 订阅的主题名称 Name of the subscribed topic
+     * @param queue 订阅的数据队列 Subscribed data queue
+     * @param domain 可选的域指针 Optional domain pointer (default: nullptr)
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
+     */
     template <typename Data, uint32_t Length>
     QueuedSubscriber(const char *name, LockFreeQueue<Data> &queue,
                      Domain *domain = nullptr)
@@ -421,6 +439,9 @@ class Topic
      * @tparam Data 队列存储的数据类型 Data type stored in the queue
      * @param  topic 订阅的主题 Subscribed topic
      * @param  queue 订阅的数据队列 Subscribed data queue
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     template <typename Data>
     QueuedSubscriber(Topic topic, LockFreeQueue<Data> &queue)
@@ -464,6 +485,9 @@ class Topic
    * @brief  注册回调函数
    *         Registers a callback function
    * @param  cb 需要注册的回调函数 The callback function to register
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   void RegisterCallback(Callback &cb);
 
@@ -486,6 +510,9 @@ class Topic
    * @param  cache 是否启用缓存（默认为 false）Whether to enable caching (default: false)
    * @param  check_length 是否检查数据长度（默认为 false）Whether to check data length
    * (default: false)
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   Topic(const char *name, uint32_t max_length, Domain *domain = nullptr,
         bool multi_publisher = false, bool cache = false, bool check_length = false);
@@ -503,6 +530,9 @@ class Topic
    * @param  check_length 是否检查数据长度（默认为 false）Whether to check data length
    * (default: false)
    * @return 创建的 Topic 实例 The created Topic instance
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   template <typename Data>
   static Topic CreateTopic(const char *name, Domain *domain = nullptr,
@@ -541,6 +571,9 @@ class Topic
    * @param check_length 可选的数据长度检查标志位 Optional data length check flag
    * (default: false)
    * @return TopicHandle 主题句柄 Topic handle
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   template <typename Data>
   static TopicHandle FindOrCreate(const char *name, Domain *domain = nullptr,
@@ -559,6 +592,9 @@ class Topic
   /**
    * @brief  启用主题的缓存功能
    *         Enables caching for the topic
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   void EnableCache();
 
@@ -742,6 +778,9 @@ class Topic
      * @brief  构造函数，初始化服务器并分配缓冲区
      *         Constructor to initialize the server and allocate buffer
      * @param  buffer_length 缓冲区长度 Buffer length
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     Server(size_t buffer_length);
 
@@ -749,6 +788,9 @@ class Topic
      * @brief  注册一个主题
      *         Registers a topic
      * @param  topic 需要注册的主题句柄 The topic handle to register
+     *
+     * @note 包含动态内存分配。
+     *       Contains dynamic memory allocation.
      */
     void Register(TopicHandle topic);
 
@@ -763,10 +805,10 @@ class Topic
    private:
     Status status_ =
         Status::WAIT_START;  ///< 服务器的当前解析状态 Current parsing state of the server
-    uint32_t data_len_ = 0;       ///< 当前数据长度 Current data length
-    RBTree<uint32_t> topic_map_;  ///< 主题映射表 Topic mapping table
-    BaseQueue queue_;             ///< 数据队列 Data queue
-    RawData parse_buff_;          ///< 解析数据缓冲区 Data buffer for parsing
+    uint32_t data_len_ = 0;  ///< 当前数据长度 Current data length
+    RBTree<uint32_t> topic_map_;           ///< 主题映射表 Topic mapping table
+    BaseQueue queue_;                      ///< 数据队列 Data queue
+    RawData parse_buff_;                   ///< 解析数据缓冲区 Data buffer for parsing
     TopicHandle current_topic_ = nullptr;  ///< 当前主题句柄 Current topic handle
   };
 

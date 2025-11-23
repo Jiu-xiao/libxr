@@ -137,6 +137,9 @@ class Callback
    *        The bound argument value.
    * @return 生成的 Callback 实例。
    *         The created Callback instance.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   template <typename FunType, typename ArgType>
   [[nodiscard]] static Callback Create(FunType fun, ArgType arg)

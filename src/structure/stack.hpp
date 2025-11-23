@@ -31,6 +31,9 @@ class Stack
   /**
    * @brief 栈的构造函数 / Stack constructor
    * @param depth 栈的最大容量 / Maximum capacity of the stack
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   Stack(uint32_t depth) : stack_(new Data[depth]), depth_(depth) {}
 

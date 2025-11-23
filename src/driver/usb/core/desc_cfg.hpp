@@ -247,6 +247,9 @@ class ConfigDescriptor
    * bus powered)
    * @param bMaxPower 最大电流（2mA 单位，默认 50=100mA）/ Max power (unit: 2mA, default:
    * 50 = 100mA)
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   ConfigDescriptor(
       EndpointPool& endpoint_pool,

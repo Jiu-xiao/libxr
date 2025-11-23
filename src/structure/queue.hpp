@@ -31,6 +31,9 @@ class BaseQueue
    * @brief 构造函数，初始化队列 (Constructor to initialize the queue).
    * @param element_size 队列中每个元素的大小 (Size of each element in the queue).
    * @param length 队列的最大容量 (Maximum capacity of the queue).
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   BaseQueue(uint16_t element_size, size_t length);
 

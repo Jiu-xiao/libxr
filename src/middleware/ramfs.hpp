@@ -321,6 +321,9 @@ class RamFS
    * @param  name 文件名 The name of the file
    * @param  raw 文件存储的数据 Data stored in the file
    * @return File 创建的文件对象 The created file object
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   template <typename DataType>
   static File CreateFile(const char *name, DataType &raw)
@@ -354,6 +357,9 @@ class RamFS
    * @param  exec 可执行函数 The executable function
    * @param  arg 可执行文件的参数 The argument for the executable file
    * @return File 创建的可执行文件对象 The created executable file object
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   template <typename ArgType>
   static File CreateFile(const char *name,
@@ -393,6 +399,9 @@ class RamFS
    *         Creates a new directory
    * @param  name 目录名称 The name of the directory
    * @return Dir 创建的目录对象 The created directory object
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   static Dir CreateDir(const char *name)
   {

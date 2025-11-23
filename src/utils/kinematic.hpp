@@ -50,9 +50,9 @@ class Joint
   {
     Transform<Scalar> parent2this;  ///< 父坐标系到当前关节的变换。 Transform from the
                                     ///< parent frame to the current joint.
-    Transform<Scalar> this2child;  ///< 当前关节到子坐标系的变换。 Transform from the
-                                   ///< current joint to the child frame.
-    Axis<Scalar> axis;  ///< 关节旋转轴。 Rotation axis of the joint.
+    Transform<Scalar> this2child;   ///< 当前关节到子坐标系的变换。 Transform from the
+                                    ///< current joint to the child frame.
+    Axis<Scalar> axis;              ///< 关节旋转轴。 Rotation axis of the joint.
     Scalar
         ik_mult;  ///< 逆向运动学步长系数。 Step size coefficient for inverse kinematics.
   } Param;
@@ -83,8 +83,8 @@ class Joint
   Runtime runtime_;  ///< 关节的运行时数据。 Runtime data of the joint.
 
   Object<Scalar> *parent = nullptr;  ///< 指向父物体的指针。 Pointer to the parent object.
-  Object<Scalar> *child = nullptr;  ///< 指向子物体的指针。 Pointer to the child object.
-  Param param_;                     ///< 关节的参数配置。 Parameters of the joint.
+  Object<Scalar> *child = nullptr;   ///< 指向子物体的指针。 Pointer to the child object.
+  Param param_;                      ///< 关节的参数配置。 Parameters of the joint.
 
   /**
    * @brief 构造 `Joint` 关节对象。
@@ -97,6 +97,9 @@ class Joint
    * @param child 关节的子对象。 Child object of the joint.
    * @param this2child 该关节到子坐标系的变换。 Transform from this joint to the child
    * frame.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   Joint(Axis<Scalar> axis, Object<Scalar> *parent, Transform<Scalar> &parent2this,
         Object<Scalar> *child, Transform<Scalar> &this2child)
@@ -278,7 +281,7 @@ class EndPoint : public Object<Scalar>
                        ///< effector to the base.
 
   Quaternion<Scalar> target_quat_;  ///< 目标四元数方向。 Target quaternion orientation.
-  Position<Scalar> target_pos_;  ///< 目标位置。 Target position.
+  Position<Scalar> target_pos_;     ///< 目标位置。 Target position.
   Scalar max_angular_velocity_ =
       -1.0;  ///< 最大角速度（若小于 0 则无约束）。 Maximum angular velocity (negative
              ///< value means no limit).
@@ -389,6 +392,9 @@ class EndPoint : public Object<Scalar>
    * @param max_err 允许的最大误差。 Maximum allowable error.
    * @param step_size 逆运动学步长。 Step size for inverse kinematics.
    * @return 计算后的误差向量。 The computed error vector.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   Eigen::Matrix<Scalar, 6, 1> CalcBackward(Scalar dt, int max_step = 10,
                                            Scalar max_err = 1e-3, Scalar step_size = 1.0)

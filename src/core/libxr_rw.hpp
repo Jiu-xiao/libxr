@@ -286,6 +286,9 @@ class ReadPort
    * @brief 以指定队列大小构造ReadPort。
    * @param queue_size Number of queued operations.
    * @param buffer_size Size of each buffer.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   ReadPort(size_t buffer_size = 128);
 
@@ -486,6 +489,9 @@ class WritePort
    *                   The size of the queue, default is 3.
    * @param block_size 缓存的数据的最大大小，默认为 128。
    *                   The maximum size of cached data, default is 128.
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   WritePort(size_t queue_size = 3, size_t buffer_size = 128);
 

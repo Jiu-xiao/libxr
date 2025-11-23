@@ -86,6 +86,9 @@ class Terminal
    * @param  read_port 读取端口（默认使用标准输入）Read port (default: standard input)
    * @param  write_port 写入端口（默认使用标准输出）Write port (default: standard output)
    * @param  MODE 终端换行模式（默认 CRLF）Terminal line feed mode (default: CRLF)
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = nullptr,
            ReadPort *read_port = STDIO::read_, WritePort *write_port = STDIO::write_,

@@ -87,6 +87,8 @@ class HardwareContainer
    * @brief 注册一个硬件条目
    * @brief Register a hardware entry
    *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   template <typename T>
   void Register(const Entry<T>& entry)
@@ -136,6 +138,9 @@ class ApplicationManager
    * @brief Register an application module
    *
    * @param app 模块实例引用 / Reference to an Application instance
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   void Register(Application& app)
   {

@@ -68,6 +68,9 @@ class CAN
    * @param mode 过滤器模式 Filter mode
    * @param start_id_mask 起始ID/掩码 Starting ID/mask
    * @param end_id_match 结束ID/匹配 Ending ID/match
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   void Register(Callback cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
                 uint32_t start_id_mask = 0, uint32_t end_id_match = UINT32_MAX);
@@ -138,6 +141,9 @@ class FDCAN : public CAN
    * @param mode 过滤器模式 Filter mode
    * @param start_id_mask 起始ID/掩码 Starting ID/mask
    * @param end_id_match 结束ID/匹配 Ending ID/match
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   void Register(CallbackFD cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
                 uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX);
