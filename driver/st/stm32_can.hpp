@@ -5,6 +5,9 @@
 #ifdef HAL_CAN_MODULE_ENABLED
 
 #ifdef CAN
+#if !defined(CAN1)
+#define CAN1 ((CAN_TypeDef*)CAN_BASE)
+#endif
 #undef CAN
 #endif
 
@@ -25,6 +28,8 @@ typedef enum
   STM32_CAN_NUMBER,
   STM32_CAN_ID_ERROR
 } stm32_can_id_t;
+
+static_assert(STM32_CAN_NUMBER >= 1, "No CAN instance detected for this MCU");
 
 stm32_can_id_t STM32_CAN_GetID(CAN_TypeDef* addr);  // NOLINT
 
