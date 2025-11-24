@@ -81,6 +81,7 @@ class STM32ADC
   struct HasContinuousConvMode : std::false_type
   {
   };
+
   template <typename T>
   struct HasContinuousConvMode<
       T, std::void_t<decltype(std::declval<T>()->Init.ContinuousConvMode)>>
@@ -92,6 +93,7 @@ class STM32ADC
   struct HasDMAContinuousRequests : std::false_type
   {
   };
+
   template <typename T>
   struct HasDMAContinuousRequests<
       T, std::void_t<decltype(std::declval<T>()->Init.DMAContinuousRequests)>>
@@ -103,6 +105,7 @@ class STM32ADC
   struct HasNbrOfConversion : std::false_type
   {
   };
+
   template <typename T>
   struct HasNbrOfConversion<
       T, std::void_t<decltype(std::declval<T>()->Init.NbrOfConversion)>> : std::true_type
@@ -113,9 +116,22 @@ class STM32ADC
   struct HasDMACircularMode : std::false_type
   {
   };
+
   template <typename T>
   struct HasDMACircularMode<
       T, std::void_t<decltype(std::declval<T>()->DMA_Handle->Init.Mode)>> : std::true_type
+  {
+  };
+
+  template <typename T, typename = void>
+  struct HasConversionDataManagement : std::false_type
+  {
+  };
+
+  template <typename T>
+  struct HasConversionDataManagement<
+      T, std::void_t<decltype(std::declval<T>()->Init.ConversionDataManagement)>>
+      : std::true_type
   {
   };
 
@@ -125,6 +141,7 @@ class STM32ADC
   {
     ASSERT(hadc->Init.ContinuousConvMode == ENABLE);
   }
+
   template <typename T>
   static typename std::enable_if<!HasContinuousConvMode<T>::value>::type
   AssertContinuousConvModeEnabled(T)
@@ -137,20 +154,38 @@ class STM32ADC
   {
     ASSERT(hadc->Init.ContinuousConvMode == DISABLE);
   }
+
   template <typename T>
   static typename std::enable_if<!HasContinuousConvMode<T>::value>::type
   AssertContinuousConvModeDisabled(T)
   {
   }
 
+  // 有 ConversionDataManagement 的时候，只看 ConversionDataManagement ==
+  // ADC_CONVERSIONDATA_DMA_CIRCULAR
   template <typename T>
-  static typename std::enable_if<HasDMAContinuousRequests<T>::value>::type
+  static typename std::enable_if<HasConversionDataManagement<T>::value>::type
+  AssertDMAContReqEnabled(T hadc)
+  {
+#ifdef ADC_CONVERSIONDATA_DMA_CIRCULAR
+    ASSERT(hadc->Init.ConversionDataManagement == ADC_CONVERSIONDATA_DMA_CIRCULAR);
+#else
+    UNUSED(hadc);
+#endif
+  }
+
+  // 没有 ConversionDataManagement，但有 DMAContinuousRequests => 维持原有检查
+  template <typename T>
+  static typename std::enable_if<!HasConversionDataManagement<T>::value &&
+                                 HasDMAContinuousRequests<T>::value>::type
   AssertDMAContReqEnabled(T hadc)
   {
     ASSERT(hadc->Init.DMAContinuousRequests == ENABLE);
   }
+
   template <typename T>
-  static typename std::enable_if<!HasDMAContinuousRequests<T>::value>::type
+  static typename std::enable_if<!HasConversionDataManagement<T>::value &&
+                                 !HasDMAContinuousRequests<T>::value>::type
   AssertDMAContReqEnabled(T)
   {
   }
@@ -161,6 +196,7 @@ class STM32ADC
   {
     ASSERT(hadc->Init.NbrOfConversion == n);
   }
+
   template <typename T>
   static typename std::enable_if<!HasNbrOfConversion<T>::value>::type AssertNbrOfConvEq(
       T, uint32_t)
@@ -174,6 +210,7 @@ class STM32ADC
     ASSERT(hadc->DMA_Handle != nullptr);
     ASSERT(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
   }
+
   template <typename T>
   static typename std::enable_if<!HasDMACircularMode<T>::value>::type AssertDMACircular(T)
   {
