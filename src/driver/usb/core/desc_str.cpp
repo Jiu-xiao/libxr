@@ -3,28 +3,56 @@
 using namespace LibXR::USB;
 
 DescriptorStrings::DescriptorStrings(
-    const std::initializer_list<const LanguagePack*>& lang_list)
+    const std::initializer_list<const LanguagePack*>& lang_list, const uint8_t* uid,
+    size_t uid_len)
     : LANG_NUM(lang_list.size()),
       header_(new uint16_t[LANG_NUM + 1]),
       land_id_(header_ + 1),
       string_list_(new const LanguagePack*[LANG_NUM])
 {
   ASSERT(LANG_NUM > 0);
+  ASSERT(uid != nullptr || uid_len == 0);
+
   auto lang = lang_list.begin();
   size_t max_str_len = 0;
+
+  // 每个字节 -> 2个HEX字符 -> 每字符2字节UTF-16LE => 每字节4字节UTF-16LE
+  const size_t EXTRA_SERIAL_UTF16 = uid ? uid_len * 4 : 0;
+
   for (size_t i = 0; i < LANG_NUM; i++)
   {
     land_id_[i] = static_cast<uint16_t>((*lang)->lang_id);
     string_list_[i] = *lang;
-    if (max_str_len < (*lang)->max_string_length)
+
+    size_t lang_max = (*lang)->max_string_length;
+
+    if (EXTRA_SERIAL_UTF16 != 0)
     {
-      max_str_len = (*lang)->max_string_length;
+      const size_t IDX_SERIAL = static_cast<size_t>(Index::SERIAL_NUMBER_STRING) - 1;
+      size_t serial_prefix_len = (*lang)->string_lens[IDX_SERIAL];
+      size_t serial_total_len = serial_prefix_len + EXTRA_SERIAL_UTF16;
+      if (serial_total_len > lang_max)
+      {
+        lang_max = serial_total_len;
+      }
     }
+
+    if (max_str_len < lang_max)
+    {
+      max_str_len = lang_max;
+    }
+
     ++lang;
   }
+
   *header_ = (static_cast<uint16_t>(LANG_NUM * 2 + 2)) | (0x03 << 8);
   buffer_.addr_ = new uint8_t[max_str_len + 2];
   buffer_.size_ = max_str_len + 2;
+
+  ASSERT(max_str_len + 2 <= 255);
+
+  serial_uid_ = uid;
+  serial_uid_len_ = uid_len;
 }
 
 ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
@@ -51,10 +79,57 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
   }
 
   uint8_t* buffer = reinterpret_cast<uint8_t*>(buffer_.addr_);
+
+  // 有 UID 且请求的是 Serial：前缀 + UID 的十六进制字符串
+  if (index == Index::SERIAL_NUMBER_STRING && serial_uid_ != nullptr)
+  {
+    const LanguagePack* pack = string_list_[ans];
+    constexpr size_t IDX = static_cast<size_t>(Index::SERIAL_NUMBER_STRING) - 1;
+
+    const char* const SERIAL_PREFIX = pack->strings[IDX];
+    const size_t PREFIX_UTF16_LEN = pack->string_lens[IDX];
+
+    const uint8_t DATA_LEN =
+        static_cast<uint8_t>(PREFIX_UTF16_LEN + serial_uid_len_ * 4 + 2);
+
+    ASSERT(PREFIX_UTF16_LEN + serial_uid_len_ * 4 + 2 <= 255);
+
+    buffer[1] = 0x03;
+    buffer[0] = DATA_LEN;
+
+    uint8_t* out = buffer + 2;
+
+    // 先写前缀（UTF-8 -> UTF-16LE）
+    ToUTF16LE(SERIAL_PREFIX, out);
+    out += PREFIX_UTF16_LEN;  // 前缀的 UTF-16LE 字节数
+
+    // 再写 UID 的十六进制（ASCII 0-9 A-F）
+    static const char HEX[16] = {'0', '1', '2', '3', '4', '5', '6', '7',
+                                 '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+
+    for (size_t i = 0; i < serial_uid_len_; ++i)
+    {
+      uint8_t b = serial_uid_[i];
+      char hi = HEX[(b >> 4) & 0x0F];
+      char lo = HEX[b & 0x0F];
+
+      // hi
+      *out++ = static_cast<uint8_t>(hi);
+      *out++ = 0x00;
+
+      // lo
+      *out++ = static_cast<uint8_t>(lo);
+      *out++ = 0x00;
+    }
+
+    return ErrorCode::OK;
+  }
+
+  // 其它字符串：走原来的逻辑
   auto data_len = string_list_[ans]->string_lens[static_cast<size_t>(index) - 1] + 2;
 
   buffer[1] = 0x03;
-  buffer[0] = data_len;
+  buffer[0] = static_cast<uint8_t>(data_len);
   const char* str = string_list_[ans]->strings[static_cast<size_t>(index) - 1];
   ToUTF16LE(str, buffer + 2);
   return ErrorCode::OK;

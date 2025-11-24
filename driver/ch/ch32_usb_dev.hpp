@@ -56,7 +56,8 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS);
+          CONFIGS,
+      ConstRawData uid = {nullptr, 0});
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 
@@ -102,7 +103,8 @@ class CH32USBDeviceHS : public USB::EndpointPool, public USB::DeviceCore
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS);
+          CONFIGS,
+      ConstRawData uid = {nullptr, 0});
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 

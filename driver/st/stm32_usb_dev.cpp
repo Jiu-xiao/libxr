@@ -100,9 +100,10 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
     uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
-        CONFIGS)
+        CONFIGS,
+    ConstRawData uid)
     : STM32USBDevice(hpcd, STM32_USB_OTG_FS, RX_EP_CFGS.size() + TX_EP_CFGS.size(),
-                     packet_size, vid, pid, bcd, LANG_LIST, CONFIGS)
+                     packet_size, vid, pid, bcd, LANG_LIST, CONFIGS, uid)
 {
   ASSERT(RX_EP_CFGS.size() > 0 && RX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_FS_MAX_SIZE);
   ASSERT(TX_EP_CFGS.size() > 0 && TX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_FS_MAX_SIZE);
@@ -177,10 +178,11 @@ STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
     uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
-        CONFIGS)
+        CONFIGS,
+    ConstRawData uid)
     : STM32USBDevice(
           hpcd, STM32_USB_OTG_HS, RX_EP_CFGS.size() + TX_EP_CFGS.size(), packet_size, vid,
-          pid, bcd, LANG_LIST, CONFIGS,
+          pid, bcd, LANG_LIST, CONFIGS, uid,
           hpcd->Init.speed == PCD_SPEED_HIGH ? USB::Speed::HIGH : USB::Speed::FULL)
 {
   ASSERT(RX_EP_CFGS.size() > 0 && RX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_HS_MAX_SIZE);
@@ -253,9 +255,9 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
     uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
-        CONFIGS)
+        CONFIGS, ConstRawData uid)
     : STM32USBDevice(hpcd, STM32_USB_FS_DEV, EP_CFGS.size() * 2, packet_size, vid, pid,
-                     bcd, LANG_LIST, CONFIGS)
+                     bcd, LANG_LIST, CONFIGS, uid)
 {
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= hpcd->Init.dev_endpoints);
 

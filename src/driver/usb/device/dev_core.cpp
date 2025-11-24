@@ -7,10 +7,11 @@ DeviceCore::DeviceCore(
     DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
     const std::initializer_list<const DescriptorStrings::LanguagePack *> &lang_list,
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem *>>
-        &configs)
+        &configs,
+    ConstRawData uid)
     : config_desc_(ep_pool, configs),
       device_desc_(spec, packet_size, vid, pid, bcd, config_desc_.GetConfigNum()),
-      strings_(lang_list),
+      strings_(lang_list, reinterpret_cast<const uint8_t*>(uid.addr_), uid.size_),
       endpoint_({ep_pool, nullptr, nullptr, {}, {}}),
       state_({false, speed, Context::UNKNOW, Context::UNKNOW, 0xFF, nullptr, false})
 {

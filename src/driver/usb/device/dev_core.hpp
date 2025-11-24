@@ -134,13 +134,15 @@ class DeviceCore
    * @param bcd 设备版本号 / Device version (BCD)
    * @param lang_list 语言包列表 / Language packs
    * @param configs 配置描述符列表 / Config descriptor items
+   * @param uid UID / Unique ID
    */
   DeviceCore(
       EndpointPool &ep_pool, USBSpec spec, Speed speed,
       DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
       const std::initializer_list<const DescriptorStrings::LanguagePack *> &lang_list,
       const std::initializer_list<const std::initializer_list<ConfigDescriptorItem *>>
-          &configs);
+          &configs,
+      ConstRawData uid = {nullptr, 0});
 
   /**
    * @brief 初始化 USB 设备 / Initialize USB device

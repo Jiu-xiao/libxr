@@ -97,12 +97,15 @@ class DescriptorStrings
    * @brief USB 描述符字符串管理器构造函数
    *        USB descriptor string manager constructor
    *
-   * @param lang_list 全局/静态LanguagePack对象指针表 / Pointers to static LanguagePack
    *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * @param lang_list 全局/静态LanguagePack对象指针表 / Pointer table of LanguagePack
+   * @param uid       UID字节数组（可选） / UID byte array (optional)
+   * @param uid_len   UID长度（单位字节，可选）/ UID length (in bytes, optional)
+   *
+   * @note Serial = SERIAL_NUMBER_STRING+UID
    */
-  DescriptorStrings(const std::initializer_list<const LanguagePack*>& lang_list);
+  DescriptorStrings(const std::initializer_list<const LanguagePack*>& lang_list,
+                    const uint8_t* uid = nullptr, size_t uid_len = 0);
 
   /**
    * @brief 生成指定语言和索引的字符串描述符
@@ -165,5 +168,8 @@ class DescriptorStrings
   uint16_t* land_id_;                 ///< 语言ID数组 / LangID array
   const LanguagePack** string_list_;  ///< 多语言包指针表 / LanguagePack pointer table
   RawData buffer_;                    ///< 临时描述符缓冲区 / Temp descriptor buffer
+
+  const uint8_t* serial_uid_;  ///< 序列号后缀 UID （原始字节） / Serial number suffix UID (original bytes)
+  size_t serial_uid_len_;      ///< UID 字节数 / UID byte count
 };
 }  // namespace LibXR::USB

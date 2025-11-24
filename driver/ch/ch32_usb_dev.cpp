@@ -97,10 +97,11 @@ CH32USBDeviceFS::CH32USBDeviceFS(
     uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-        CONFIGS)
+        CONFIGS,
+    ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
       USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::FULL, packet_size, vid,
-                      pid, bcd, LANG_LIST, CONFIGS)
+                      pid, bcd, LANG_LIST, CONFIGS, uid)
 {
   self_ = this;
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgFs::EP_OTG_FS_MAX_SIZE);
@@ -288,11 +289,12 @@ CH32USBDeviceHS::CH32USBDeviceHS(
     uint16_t pid, uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-        CONFIGS)
+        CONFIGS,
+    ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
       USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::HIGH,
                       USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd,
-                      LANG_LIST, CONFIGS)
+                      LANG_LIST, CONFIGS, uid)
 {
   self_ = this;
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);

@@ -25,10 +25,11 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
           CONFIGS,
-      USB::Speed speed = USB::Speed::FULL, USB::USBSpec spec = USB::USBSpec::USB_2_0)
+      ConstRawData uid = {nullptr, 0}, USB::Speed speed = USB::Speed::FULL,
+      USB::USBSpec spec = USB::USBSpec::USB_2_0)
       : LibXR::USB::EndpointPool(max_ep_num),
         LibXR::USB::DeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
-                               CONFIGS),
+                               CONFIGS, uid),
         hpcd_(hpcd),
         id_(id)
   {
@@ -72,7 +73,8 @@ class STM32USBDeviceOtgFS : public STM32USBDevice
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS);
+          CONFIGS,
+      ConstRawData uid = {nullptr, 0});
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 };
@@ -100,7 +102,8 @@ class STM32USBDeviceOtgHS : public STM32USBDevice
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS);
+          CONFIGS,
+      ConstRawData uid = {nullptr, 0});
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 };
@@ -145,7 +148,8 @@ class STM32USBDeviceDevFs : public STM32USBDevice
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS);
+          CONFIGS,
+      ConstRawData uid = {nullptr, 0});
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 };
