@@ -59,11 +59,11 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
 
   map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
-  size_t buffer_offset = hw_buffer_offset;
+  size_t buffer_offset = hw_buffer_offset / 2;
 
   if (double_hw_buffer)
   {
-    buffer_offset |= ((hw_buffer_offset + hw_buffer_size) << 16);
+    buffer_offset |= ((buffer_offset + hw_buffer_size / 2) << 16);
   }
 
   HAL_PCDEx_PMAConfig(hpcd_, EPNumberToAddr(GetNumber(), dir),
