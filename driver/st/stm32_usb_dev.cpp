@@ -255,7 +255,8 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
     uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
-        CONFIGS, ConstRawData uid)
+        CONFIGS,
+    ConstRawData uid)
     : STM32USBDevice(hpcd, STM32_USB_FS_DEV, EP_CFGS.size() * 2, packet_size, vid, pid,
                      bcd, LANG_LIST, CONFIGS, uid)
 {
@@ -265,7 +266,7 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
 
   ASSERT(cfgs_itr->double_buffer == false);
 
-  size_t buffer_offset = 0x20;
+  size_t buffer_offset = (BTABLE_ADDRESS + hpcd_->Init.dev_endpoints * 8U) * 2;  // 字节
 
   auto ep0_out = new STM32Endpoint(
       USB::Endpoint::EPNumber::EP0, id_, hpcd_, USB::Endpoint::Direction::OUT,
@@ -287,7 +288,7 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
 
   while (cfgs_itr != EP_CFGS.end())
   {
-    if (cfgs_itr->double_buffer)
+    if (cfgs_itr->hw_buffer_size2 == 0)
     {
       ASSERT(cfgs_itr->buffer1.size_ % 2 == 0);
       auto ep =
@@ -322,7 +323,7 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
   }
 
   ASSERT(USB::Endpoint::EPNumberToInt8(ep_index) <= hpcd->Init.dev_endpoints);
-  ASSERT(buffer_offset <= 512);
+  ASSERT(buffer_offset <= LIBXR_STM32_USB_PMA_SIZE);
 }
 
 ErrorCode STM32USBDeviceDevFs::SetAddress(uint8_t address,
