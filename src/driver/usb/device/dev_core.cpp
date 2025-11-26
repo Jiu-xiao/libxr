@@ -11,7 +11,7 @@ DeviceCore::DeviceCore(
     ConstRawData uid)
     : config_desc_(ep_pool, configs),
       device_desc_(spec, packet_size, vid, pid, bcd, config_desc_.GetConfigNum()),
-      strings_(lang_list, reinterpret_cast<const uint8_t*>(uid.addr_), uid.size_),
+      strings_(lang_list, reinterpret_cast<const uint8_t *>(uid.addr_), uid.size_),
       endpoint_({ep_pool, nullptr, nullptr, {}, {}}),
       state_({false, speed, Context::UNKNOW, Context::UNKNOW, 0xFF, nullptr, false})
 {
@@ -120,6 +120,14 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData &data)
   switch (status)
   {
     case Context::ZLP:
+      // 主机中断in操作后，重新配置控制端点
+      if (endpoint_.in0->GetState() == Endpoint::State::BUSY)
+      {
+        endpoint_.in0->Close();
+        endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
+        state_.in0 = Context::ZLP;
+        state_.write_remain = {nullptr, 0};
+      }
     case Context::STATUS_OUT:
       break;
     case Context::DATA_OUT:
@@ -198,7 +206,7 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData &data)
 }
 
 void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_length,
-                                 size_t request_size)
+                                 size_t request_size, bool early_read_zlp)
 {
   state_.in0 = Context::DATA_IN;
 
@@ -237,8 +245,8 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
   ASSERT(buffer.size_ >= data.size_);
   LibXR::Memory::FastCopy(buffer.addr_, data.addr_, data.size_);
 
-  // 如果一次就能结束，并且不需要 ZLP，直接准备状态阶段 OUT
-  if (!has_more && !state_.need_write_zlp)
+  // early_read_zlp 防止主机实际读取小于wLength，提前进入DataOut阶段
+  if (early_read_zlp || (!has_more && !state_.need_write_zlp))
   {
     ReadZLP();
   }
@@ -573,6 +581,9 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket *setup,
   uint8_t desc_type = (setup->wValue >> 8) & 0xFF;
   uint8_t desc_idx = (setup->wValue) & 0xFF;
   ConstRawData data = {nullptr, 0};
+
+  bool early_read_zlp = false;
+
   switch (desc_type)
   {
     case 0x01:  // DEVICE
@@ -581,6 +592,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket *setup,
       {
         config_desc_.OverrideDeviceDescriptor(device_desc_);
       }
+      early_read_zlp = true;
       break;
     case 0x02:  // CONFIGURATION
       config_desc_.Generate();
@@ -637,7 +649,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket *setup,
     }
   }
 
-  DevWriteEP0Data(data, endpoint_.in0->MaxTransferSize(), setup->wLength);
+  DevWriteEP0Data(data, endpoint_.in0->MaxTransferSize(), setup->wLength, early_read_zlp);
 
   return ErrorCode::OK;
 }

@@ -226,9 +226,10 @@ class DeviceCore
    * @param data 数据指针和长度 / Data and length
    * @param packet_max_length 最大包长度 / Max packet size
    * @param request_size 请求长度（可选）/ Request size (optional)
+   * @param early_read_zlp 是否提前读取 ZLP（可选）/ Read ZLP early (optional)
    */
   void DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_length,
-                       size_t request_size = 0);
+                       size_t request_size = 0, bool early_read_zlp = false);
 
   /**
    * @brief 接收主机发送的 EP0 数据包
