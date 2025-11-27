@@ -110,8 +110,11 @@ class STM32USBDeviceOtgHS : public STM32USBDevice
 #endif
 
 #if defined(USB_BASE)
+
+#if defined (PMA_END_ADDR)
+#define LIBXR_STM32_USB_PMA_SIZE PMA_END_ADDR
 // --- F0: USB FS Device, PMA = 1024B (dedicated) -------------------------
-#if defined(STM32F0)
+#elif defined(STM32F0)
 #define LIBXR_STM32_USB_PMA_SIZE 1024u
 
 // --- F1: F102/F103 USB FS Device, PMA = 512B，与 CAN 共用，不能并行使用 ---

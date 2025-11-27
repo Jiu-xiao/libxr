@@ -266,7 +266,11 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
 
   ASSERT(cfgs_itr->double_buffer == false);
 
+#if defined(PMA_START_ADDR)
+  size_t buffer_offset = PMA_START_ADDR;
+#else
   size_t buffer_offset = (BTABLE_ADDRESS + hpcd_->Init.dev_endpoints * 8U) * 2;  // 字节
+#endif
 
   auto ep0_out = new STM32Endpoint(
       USB::Endpoint::EPNumber::EP0, id_, hpcd_, USB::Endpoint::Direction::OUT,
