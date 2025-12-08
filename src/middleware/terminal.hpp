@@ -413,6 +413,11 @@ class Terminal
    */
   RamFS::Dir *Path2Dir(char *path)
   {
+    if (path == nullptr)
+    {
+      return nullptr;
+    }
+
     size_t index = 0;
     RamFS::Dir *dir = current_dir_;
 
@@ -458,6 +463,11 @@ class Terminal
    */
   RamFS::File *Path2File(char *path)
   {
+    if (path == nullptr)
+    {
+      return nullptr;
+    }
+
     auto name = StrchrRev(path, '/');
 
     if (name == nullptr)
