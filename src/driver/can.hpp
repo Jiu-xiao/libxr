@@ -260,7 +260,7 @@ class FDCAN : public CAN
    * @param cfg CAN 配置。CAN configuration.
    * @return ErrorCode 操作结果。Error code.
    */
-  virtual ErrorCode SetConfig(const CAN::Configuration &cfg);
+  virtual ErrorCode SetConfig(const CAN::Configuration &cfg) = 0;
 
   /**
    * @brief 设置 FDCAN 配置。

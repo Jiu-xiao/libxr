@@ -261,6 +261,356 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
   }
 }
 
+ErrorCode STM32CANFD::SetConfig(const CAN::Configuration& cfg)
+{
+  // 兼容接口：只用仲裁相位参数，FD 数据相位保持不动
+  FDCAN::Configuration fd_cfg{};
+  fd_cfg.bitrate = cfg.bitrate;
+  fd_cfg.sample_point = cfg.sample_point;
+  fd_cfg.bit_timing = cfg.bit_timing;
+  fd_cfg.mode = cfg.mode;
+  // data_timing / fd_mode 全部置 0 → “保持原值”
+  return SetConfig(fd_cfg);
+}
+
+ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
+{
+  if (hcan_ == nullptr || hcan_->Instance == nullptr)
+  {
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
+  }
+
+  FDCAN_GlobalTypeDef* can = hcan_->Instance;
+
+  // 先关通知：只关本驱动用到的这些
+  uint32_t it_mask = 0u;
+
+#ifdef FDCAN_IT_RX_FIFO0_NEW_MESSAGE
+  it_mask |= FDCAN_IT_RX_FIFO0_NEW_MESSAGE;
+#endif
+#ifdef FDCAN_IT_RX_FIFO1_NEW_MESSAGE
+  it_mask |= FDCAN_IT_RX_FIFO1_NEW_MESSAGE;
+#endif
+#ifdef FDCAN_IT_TX_FIFO_EMPTY
+  it_mask |= FDCAN_IT_TX_FIFO_EMPTY;
+#endif
+
+  if (it_mask != 0u)
+  {
+    HAL_FDCAN_DeactivateNotification(hcan_, it_mask);
+  }
+
+  // 停止 FDCAN，进入 INIT / CCE 配置状态
+  if (HAL_FDCAN_Stop(hcan_) != HAL_OK)
+  {
+    return ErrorCode::FAILED;
+  }
+
+#ifdef FDCAN_CCCR_INIT
+  SET_BIT(can->CCCR, FDCAN_CCCR_INIT);
+#endif
+#ifdef FDCAN_CCCR_CCE
+  SET_BIT(can->CCCR, FDCAN_CCCR_CCE);
+#endif
+
+  // ===== 模式相关：one-shot / loopback / listen-only =====
+#ifdef FDCAN_CCCR_DAR
+  if (cfg.mode.one_shot)
+  {
+    // 禁用自动重发
+    SET_BIT(can->CCCR, FDCAN_CCCR_DAR);
+  }
+  else
+  {
+    CLEAR_BIT(can->CCCR, FDCAN_CCCR_DAR);
+  }
+#endif
+
+  // triple_sampling 对 FDCAN 没意义，这里直接忽略
+  (void)cfg.mode.triple_sampling;
+
+#ifdef FDCAN_CCCR_TEST
+#ifdef FDCAN_TEST_LBCK
+  if (cfg.mode.loopback)
+  {
+    // 内部回环
+    SET_BIT(can->CCCR, FDCAN_CCCR_TEST);
+    SET_BIT(can->TEST, FDCAN_TEST_LBCK);
+  }
+  else
+  {
+    CLEAR_BIT(can->TEST, FDCAN_TEST_LBCK);
+    CLEAR_BIT(can->CCCR, FDCAN_CCCR_TEST);
+  }
+#endif
+#endif
+
+#ifdef FDCAN_CCCR_MON
+  if (cfg.mode.listen_only)
+  {
+    // 总线监控（只听）
+    SET_BIT(can->CCCR, FDCAN_CCCR_MON);
+  }
+  else
+  {
+    CLEAR_BIT(can->CCCR, FDCAN_CCCR_MON);
+  }
+#endif
+
+  // ===== 仲裁相位 bit timing 范围校验 + 写 NBTP =====
+  const auto& bt = cfg.bit_timing;
+
+  // 用掩码算出字段最大值，避免硬编码
+#ifdef FDCAN_NBTP_NBRP_Msk
+  constexpr uint32_t NBRP_FIELD_MAX = (FDCAN_NBTP_NBRP_Msk >> FDCAN_NBTP_NBRP_Pos);
+  constexpr uint32_t NTSEG1_FIELD_MAX = (FDCAN_NBTP_NTSEG1_Msk >> FDCAN_NBTP_NTSEG1_Pos);
+  constexpr uint32_t NTSEG2_FIELD_MAX = (FDCAN_NBTP_NTSEG2_Msk >> FDCAN_NBTP_NTSEG2_Pos);
+  constexpr uint32_t NSJW_FIELD_MAX = (FDCAN_NBTP_NSJW_Msk >> FDCAN_NBTP_NSJW_Pos);
+
+  constexpr uint32_t NBRP_MAX = NBRP_FIELD_MAX + 1u;
+  constexpr uint32_t NTSEG1_MAX = NTSEG1_FIELD_MAX + 1u;
+  constexpr uint32_t NTSEG2_MAX = NTSEG2_FIELD_MAX + 1u;
+  constexpr uint32_t NSJW_MAX = NSJW_FIELD_MAX + 1u;
+
+  // 0 = 保持原值，非 0 做范围检查
+  if (bt.brp != 0u)
+  {
+    if (bt.brp < 1u || bt.brp > NBRP_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  uint32_t tseg1 = bt.prop_seg + bt.phase_seg1;
+  if (bt.prop_seg != 0u || bt.phase_seg1 != 0u)
+  {
+    if (tseg1 < 1u || tseg1 > NTSEG1_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  if (bt.phase_seg2 != 0u)
+  {
+    if (bt.phase_seg2 < 1u || bt.phase_seg2 > NTSEG2_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  if (bt.sjw != 0u)
+  {
+    if (bt.sjw < 1u || bt.sjw > NSJW_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+    if (bt.phase_seg2 != 0u && bt.sjw > bt.phase_seg2)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  uint32_t nbtp_old = can->NBTP;
+  uint32_t nbtp_new = nbtp_old;
+  uint32_t nbtp_mask = 0u;
+
+  // NBRP
+  if (bt.brp != 0u)
+  {
+    uint32_t nbrp = (bt.brp - 1u) & NBRP_FIELD_MAX;
+    uint32_t mask = FDCAN_NBTP_NBRP_Msk;
+    nbtp_mask |= mask;
+    nbtp_new &= ~mask;
+    nbtp_new |= (nbrp << FDCAN_NBTP_NBRP_Pos);
+  }
+
+  // NTSEG1 = PROP_SEG + PHASE_SEG1
+  if (bt.prop_seg != 0u || bt.phase_seg1 != 0u)
+  {
+    uint32_t ntseg1 = (tseg1 - 1u) & NTSEG1_FIELD_MAX;
+    uint32_t mask = FDCAN_NBTP_NTSEG1_Msk;
+    nbtp_mask |= mask;
+    nbtp_new &= ~mask;
+    nbtp_new |= (ntseg1 << FDCAN_NBTP_NTSEG1_Pos);
+  }
+
+  // NTSEG2 = PHASE_SEG2
+  if (bt.phase_seg2 != 0u)
+  {
+    uint32_t ntseg2 = (bt.phase_seg2 - 1u) & NTSEG2_FIELD_MAX;
+    uint32_t mask = FDCAN_NBTP_NTSEG2_Msk;
+    nbtp_mask |= mask;
+    nbtp_new &= ~mask;
+    nbtp_new |= (ntseg2 << FDCAN_NBTP_NTSEG2_Pos);
+  }
+
+  // NSJW
+  if (bt.sjw != 0u)
+  {
+    uint32_t nsjw = (bt.sjw - 1u) & NSJW_FIELD_MAX;
+    uint32_t mask = FDCAN_NBTP_NSJW_Msk;
+    nbtp_mask |= mask;
+    nbtp_new &= ~mask;
+    nbtp_new |= (nsjw << FDCAN_NBTP_NSJW_Pos);
+  }
+
+  if (nbtp_mask != 0u)
+  {
+    nbtp_old &= ~nbtp_mask;
+    nbtp_old |= (nbtp_new & nbtp_mask);
+    can->NBTP = nbtp_old;
+  }
+#endif  // FDCAN_NBTP_NBRP_Msk
+
+  // ===== 数据相位 bit timing（CAN FD 才用），写 DBTP =====
+  const auto& dbt = cfg.data_timing;
+
+#ifdef FDCAN_DBTP_DBRP_Msk
+  constexpr uint32_t DBRP_FIELD_MAX = (FDCAN_DBTP_DBRP_Msk >> FDCAN_DBTP_DBRP_Pos);
+  constexpr uint32_t DTSEG1_FIELD_MAX = (FDCAN_DBTP_DTSEG1_Msk >> FDCAN_DBTP_DTSEG1_Pos);
+  constexpr uint32_t DTSEG2_FIELD_MAX = (FDCAN_DBTP_DTSEG2_Msk >> FDCAN_DBTP_DTSEG2_Pos);
+  constexpr uint32_t DSJW_FIELD_MAX = (FDCAN_DBTP_DSJW_Msk >> FDCAN_DBTP_DSJW_Pos);
+
+  constexpr uint32_t DBRP_MAX = DBRP_FIELD_MAX + 1u;
+  constexpr uint32_t DTSEG1_MAX = DTSEG1_FIELD_MAX + 1u;
+  constexpr uint32_t DTSEG2_MAX = DTSEG2_FIELD_MAX + 1u;
+  constexpr uint32_t DSJW_MAX = DSJW_FIELD_MAX + 1u;
+
+  if (dbt.brp != 0u)
+  {
+    if (dbt.brp < 1u || dbt.brp > DBRP_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  uint32_t dtseg1 = dbt.prop_seg + dbt.phase_seg1;
+  if (dbt.prop_seg != 0u || dbt.phase_seg1 != 0u)
+  {
+    if (dtseg1 < 1u || dtseg1 > DTSEG1_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  if (dbt.phase_seg2 != 0u)
+  {
+    if (dbt.phase_seg2 < 1u || dbt.phase_seg2 > DTSEG2_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  if (dbt.sjw != 0u)
+  {
+    if (dbt.sjw < 1u || dbt.sjw > DSJW_MAX)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+    if (dbt.phase_seg2 != 0u && dbt.sjw > dbt.phase_seg2)
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+  }
+
+  uint32_t dbtp_old = can->DBTP;
+  uint32_t dbtp_new = dbtp_old;
+  uint32_t dbtp_mask = 0u;
+
+  if (dbt.brp != 0u)
+  {
+    uint32_t dbrp = (dbt.brp - 1u) & DBRP_FIELD_MAX;
+    uint32_t mask = FDCAN_DBTP_DBRP_Msk;
+    dbtp_mask |= mask;
+    dbtp_new &= ~mask;
+    dbtp_new |= (dbrp << FDCAN_DBTP_DBRP_Pos);
+  }
+
+  if (dbt.prop_seg != 0u || dbt.phase_seg1 != 0u)
+  {
+    uint32_t dt1 = (dtseg1 - 1u) & DTSEG1_FIELD_MAX;
+    uint32_t mask = FDCAN_DBTP_DTSEG1_Msk;
+    dbtp_mask |= mask;
+    dbtp_new &= ~mask;
+    dbtp_new |= (dt1 << FDCAN_DBTP_DTSEG1_Pos);
+  }
+
+  if (dbt.phase_seg2 != 0u)
+  {
+    uint32_t dt2 = (dbt.phase_seg2 - 1u) & DTSEG2_FIELD_MAX;
+    uint32_t mask = FDCAN_DBTP_DTSEG2_Msk;
+    dbtp_mask |= mask;
+    dbtp_new &= ~mask;
+    dbtp_new |= (dt2 << FDCAN_DBTP_DTSEG2_Pos);
+  }
+
+  if (dbt.sjw != 0u)
+  {
+    uint32_t dsjw = (dbt.sjw - 1u) & DSJW_FIELD_MAX;
+    uint32_t mask = FDCAN_DBTP_DSJW_Msk;
+    dbtp_mask |= mask;
+    dbtp_new &= ~mask;
+    dbtp_new |= (dsjw << FDCAN_DBTP_DSJW_Pos);
+  }
+
+  if (dbtp_mask != 0u)
+  {
+    dbtp_old &= ~dbtp_mask;
+    dbtp_old |= (dbtp_new & dbtp_mask);
+    can->DBTP = dbtp_old;
+  }
+#else
+  (void)dbt;
+#endif  // FDCAN_DBTP_DBRP_Msk
+
+  // 数据相位 FDMode：这里不动寄存器，只保留在上层语义中使用
+  (void)cfg.fd_mode;
+
+  // 重新启动 FDCAN
+  if (HAL_FDCAN_Start(hcan_) != HAL_OK)
+  {
+    return ErrorCode::FAILED;
+  }
+
+  // 恢复通知：简单起见，两个 FIFO 都打开 + TX FIFO empty
+#ifdef FDCAN_IT_RX_FIFO0_NEW_MESSAGE
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+#endif
+#ifdef FDCAN_IT_RX_FIFO1_NEW_MESSAGE
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO1_NEW_MESSAGE, 0);
+#endif
+#ifdef FDCAN_IT_TX_FIFO_EMPTY
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_FIFO_EMPTY, 0);
+#endif
+
+  return ErrorCode::OK;
+}
+
+uint32_t STM32CANFD::GetClockFreq() const
+{
+  // 所有带 FDCAN 的 STM32 都通过 RCCEx 提供核时钟查询
+#if defined(RCC_PERIPHCLK_FDCAN)
+  return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_FDCAN);
+#elif defined(RCC_PERIPHCLK_FDCAN1)
+  return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_FDCAN1);
+#else
+  // 理论上不会走到这里，有就说明 HAL/RCC 宏不一致
+  ASSERT(false);
+  return 0u;
+#endif
+}
+
 ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
 {
   FDCAN_TxHeaderTypeDef header;

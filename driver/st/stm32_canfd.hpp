@@ -199,6 +199,28 @@ class STM32CANFD : public FDCAN
    */
   ErrorCode Init(void);
 
+  /**
+   * @brief 设置 CAN/FDCAN 配置。Set CAN/FDCAN configuration.
+   *
+   * @param cfg 仲裁相位配置。Nominal (arbitration) configuration.
+   * @return ErrorCode 操作结果。Operation result.
+   */
+  ErrorCode SetConfig(const CAN::Configuration& cfg) override;
+
+  /**
+   * @brief 设置 FDCAN 配置（仲裁相位 + 数据相位）。
+   *        Set full FDCAN configuration (nominal + data phase).
+   *
+   * @param cfg FDCAN 配置参数。FDCAN configuration.
+   * @return ErrorCode 操作结果。Operation result.
+   */
+  ErrorCode SetConfig(const FDCAN::Configuration& cfg) override;
+
+  /**
+   * @brief 获取 FDCAN 外设时钟（Hz）。Get FDCAN kernel clock (Hz).
+   */
+  uint32_t GetClockFreq() const override;
+
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
   ErrorCode AddMessage(const FDPack& pack) override;
