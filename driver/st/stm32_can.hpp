@@ -58,6 +58,16 @@ class STM32CAN : public CAN
    */
   ErrorCode Init(void);
 
+  /**
+   * @brief 设置 CAN 配置。Set CAN configuration.
+   *
+   * @param cfg CAN 配置参数。CAN configuration.
+   * @return ErrorCode 操作结果。Operation result.
+   */
+  ErrorCode SetConfig(const CAN::Configuration& cfg) override;
+
+  uint32_t GetClockFreq() const override;
+
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
   /**
