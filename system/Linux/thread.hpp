@@ -1,5 +1,7 @@
 #pragma once
 
+#include <climits>
+
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "logger.hpp"
@@ -31,14 +33,14 @@ class Thread
    * @brief  默认构造函数，初始化空线程
    *         Default constructor initializing an empty thread
    */
-  Thread() {};
+  Thread(){};
 
   /**
    * @brief  通过 POSIX 线程句柄创建线程对象
    *         Constructor to create a thread object from a POSIX thread handle
    * @param  handle POSIX 线程句柄 POSIX thread handle
    */
-  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
+  Thread(libxr_thread_handle handle) : thread_handle_(handle){};
 
   /**
    * @brief  创建新线程
@@ -123,8 +125,8 @@ class Thread
       }
 
       decltype(function) fun_;  ///< 线程执行的函数 Function executed by the thread
-      ArgType arg_;             ///< 线程函数的参数 Argument passed to the thread function
-      char *name_;              ///< 线程名称 Thread name
+      ArgType arg_;  ///< 线程函数的参数 Argument passed to the thread function
+      char *name_;   ///< 线程名称 Thread name
     };
 
     auto block = new ThreadBlock(function, arg, name);
