@@ -906,6 +906,35 @@ void STM32CANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
   OnMessage(pack, true);
 }
 
+ErrorCode STM32CANFD::GetErrorState(CAN::ErrorState& state) const
+{
+  if (hcan_ == nullptr || hcan_->Instance == nullptr)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  FDCAN_ErrorCountersTypeDef counters{};
+  if (HAL_FDCAN_GetErrorCounters(hcan_, &counters) != HAL_OK)
+  {
+    return ErrorCode::FAILED;
+  }
+
+  FDCAN_ProtocolStatusTypeDef proto{};
+  if (HAL_FDCAN_GetProtocolStatus(hcan_, &proto) != HAL_OK)
+  {
+    return ErrorCode::FAILED;
+  }
+
+  state.tx_error_counter = counters.TxErrorCnt;
+  state.rx_error_counter = counters.RxErrorCnt;
+
+  state.bus_off = (proto.BusOff != 0u);
+  state.error_passive = (proto.ErrorPassive != 0u);
+  state.error_warning = (proto.Warning != 0u);
+
+  return ErrorCode::OK;
+}
+
 extern "C" void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef* hcan)
 {
   hcan->ErrorCode = HAL_FDCAN_ERROR_NONE;

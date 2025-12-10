@@ -623,6 +623,28 @@ void STM32CAN::ProcessErrorInterrupt()
   OnMessage(pack, true);
 }
 
+ErrorCode STM32CAN::GetErrorState(CAN::ErrorState& state) const
+{
+  if (hcan_ == nullptr || hcan_->Instance == nullptr)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  // 直接读取 bxCAN 的错误状态寄存器 ESR
+  uint32_t esr = hcan_->Instance->ESR;
+
+  // TEC: bits 23:16, REC: bits 31:24（参考 RM & CAN_ESR 描述）
+  state.tx_error_counter = static_cast<uint8_t>((esr >> 16) & 0xFFu);
+  state.rx_error_counter = static_cast<uint8_t>((esr >> 24) & 0xFFu);
+
+  // 状态位：BOFF / EPVF / EWGF
+  state.bus_off = (esr & CAN_ESR_BOFF) != 0u;
+  state.error_passive = (esr & CAN_ESR_EPVF) != 0u;
+  state.error_warning = (esr & CAN_ESR_EWGF) != 0u;
+
+  return ErrorCode::OK;
+}
+
 extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 {
   STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];

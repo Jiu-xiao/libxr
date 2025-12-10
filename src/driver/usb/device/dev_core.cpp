@@ -152,7 +152,7 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData &data)
       else if (class_req_.read)
       {
         class_req_.read = false;
-        class_req_.class_ptr->OnClassData(in_isr, class_req_.b_request, data);
+        class_req_.class_ptr->OnClassData(in_isr, class_req_.b_request, class_req_.data);
         WriteZLP();
       }
       else
@@ -773,6 +773,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket *setup,
     class_req_.read = true;
     class_req_.class_ptr = item;
     class_req_.b_request = setup->bRequest;
+    class_req_.data = result.read_data;
 
     DevReadEP0Data(result.read_data, endpoint_.in0->MaxTransferSize());
     return ErrorCode::OK;
@@ -789,6 +790,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket *setup,
     class_req_.write = true;
     class_req_.class_ptr = item;
     class_req_.b_request = setup->bRequest;
+    class_req_.data = result.write_data;
 
     DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize());
     return ErrorCode::OK;
@@ -878,6 +880,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket *&setu
     class_req_.write = false;
     class_req_.class_ptr = item;
     class_req_.b_request = setup->bRequest;
+    class_req_.data = result.read_data;
 
     // 如果你想严格按 wLength 收，可以在这里改 size_ = wLength
     // result.read_data.size_ = setup->wLength;
@@ -898,6 +901,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket *&setu
     class_req_.read = false;
     class_req_.class_ptr = item;
     class_req_.b_request = setup->bRequest;
+    class_req_.data = result.write_data;
 
     // 用 wLength 限制最大返回长度（DevWriteEP0Data 会 min(request_size, data.size_)）
     DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize(), setup->wLength);

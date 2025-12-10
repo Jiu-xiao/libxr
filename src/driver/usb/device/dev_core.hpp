@@ -1,6 +1,7 @@
 #pragma once
 #include <cstring>
 
+#include "libxr_type.hpp"
 #include "usb/core/core.hpp"
 #include "usb/core/desc_cfg.hpp"
 #include "usb/core/ep_pool.hpp"
@@ -395,6 +396,7 @@ class DeviceCore
     bool read = false;                 ///< 是否读操作 / Read operation
     DeviceClass *class_ptr = nullptr;  ///< 当前类指针 / Current device class pointer
     uint8_t b_request = 0;             ///< 当前请求码 / Current request code
+    ConstRawData data;                 ///< 当前数据 / Current data
   } class_req_;
 };
 }  // namespace LibXR::USB

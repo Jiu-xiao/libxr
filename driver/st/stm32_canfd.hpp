@@ -226,6 +226,12 @@ class STM32CANFD : public FDCAN
   ErrorCode AddMessage(const FDPack& pack) override;
 
   /**
+   * @brief 查询当前错误状态（快照）。
+   *        Query current FDCAN error state (snapshot).
+   */
+  ErrorCode GetErrorState(CAN::ErrorState& state) const override;
+
+  /**
    * @brief 处理接收中断
    *
    * @param fifo 接收缓冲区号 Receive buffer number

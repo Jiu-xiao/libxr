@@ -81,6 +81,37 @@ class CAN
   virtual uint32_t GetClockFreq() const = 0;
 
   /**
+   * @struct ErrorState
+   * @brief CAN 当前错误状态快照（来自硬件计数器/状态机）。
+   *        Snapshot of current CAN controller error state (from HW counters/state).
+   */
+  struct ErrorState
+  {
+    uint8_t tx_error_counter = 0;  ///< 发送错误计数 TEC。Transmit error counter (TEC).
+    uint8_t rx_error_counter = 0;  ///< 接收错误计数 REC。Receive error counter (REC).
+
+    bool bus_off = false;        ///< 是否处于 BUS-OFF。True if controller is bus-off.
+    bool error_passive = false;  ///< 是否处于 Error Passive。True if error-passive.
+    bool error_warning = false;  ///< 是否处于 Error Warning。True if error-warning.
+  };
+
+  /**
+   * @brief 查询当前错误状态（快照）。
+   *        Query current CAN controller error state (snapshot).
+   *
+   * 默认实现返回 ErrorCode::NOT_SUPPORT；具体实现（如 bxCAN/FDCAN）可重载，
+   * 从硬件寄存器读取 TEC/REC 及状态位，并填充 ErrorState。
+   *
+   * @param state 输出参数，用于返回当前错误状态。
+   * @return ErrorCode 操作结果；若未实现则返回 ErrorCode::NOT_SUPPORT。
+   */
+  virtual ErrorCode GetErrorState(ErrorState &state) const
+  {
+    (void)state;
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  /**
    * @brief 构造函数。Constructor.
    */
   CAN() = default;

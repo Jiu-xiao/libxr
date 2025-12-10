@@ -8,6 +8,9 @@
 namespace LibXR::USB
 {
 
+// 静态 RX 聚合缓冲区：用于 BULK OUT 多包（host->device）接收 gs_host_frame
+static uint8_t g_gsusb_rx_buf[GsUsb::HOST_FRAME_FD_TS_SIZE];
+
 // ============ DLC <-> len ============
 
 uint8_t GsUsbClass::DlcToLen(uint8_t dlc)
@@ -24,80 +27,54 @@ uint8_t GsUsbClass::LenToDlc(uint8_t len)
   {
     return len;
   }
-  if (len <= 12) return 9;
-  if (len <= 16) return 10;
-  if (len <= 20) return 11;
-  if (len <= 24) return 12;
-  if (len <= 32) return 13;
-  if (len <= 48) return 14;
+  if (len <= 12)
+  {
+    return 9;
+  }
+  if (len <= 16)
+  {
+    return 10;
+  }
+  if (len <= 20)
+  {
+    return 11;
+  }
+  if (len <= 24)
+  {
+    return 12;
+  }
+  if (len <= 32)
+  {
+    return 13;
+  }
+  if (len <= 48)
+  {
+    return 14;
+  }
   return 15;
 }
 
 // ============ 构造 ============
-
-GsUsbClass::GsUsbClass(LibXR::CAN& can, Endpoint::EPNumber data_in_ep_num,
-                       Endpoint::EPNumber data_out_ep_num, LibXR::GPIO* identify_gpio)
-    : data_in_ep_num_(data_in_ep_num),
-      data_out_ep_num_(data_out_ep_num),
-      identify_gpio_(identify_gpio)
-{
-  fd_supported_ = false;
-
-  can_count_ = 1;
-  cans_[0] = &can;
-
-  // DeviceConfig
-  dev_cfg_.reserved1 = 0;
-  dev_cfg_.reserved2 = 0;
-  dev_cfg_.reserved3 = 0;
-  dev_cfg_.icount = static_cast<uint8_t>(can_count_ - 1);
-  dev_cfg_.sw_version = 2;
-  dev_cfg_.hw_version = 1;
-
-  // Nominal BT const（用 ch0 的时钟）
-  const uint32_t fclk = cans_[0]->GetClockFreq();
-  bt_const_.feature = GsUsb::CAN_FEAT_LISTEN_ONLY | GsUsb::CAN_FEAT_LOOP_BACK |
-                      GsUsb::CAN_FEAT_TRIPLE_SAMPLE | GsUsb::CAN_FEAT_ONE_SHOT |
-                      GsUsb::CAN_FEAT_HW_TIMESTAMP | GsUsb::CAN_FEAT_IDENTIFY |
-                      GsUsb::CAN_FEAT_PAD_PKTS_TO_MAX_PKT_SIZE |
-                      GsUsb::CAN_FEAT_BERR_REPORTING;
-  bt_const_.fclk_can = fclk;
-  bt_const_.btc.tseg1_min = 1;
-  bt_const_.btc.tseg1_max = 16;
-  bt_const_.btc.tseg2_min = 1;
-  bt_const_.btc.tseg2_max = 8;
-  bt_const_.btc.sjw_max = 4;
-  bt_const_.btc.brp_min = 1;
-  bt_const_.btc.brp_max = 1024;
-  bt_const_.btc.brp_inc = 1;
-
-  // Extended BT const（经典 CAN 模式下也可以回复，只是 FD 能力标志关掉）
-  bt_const_ext_.feature = bt_const_.feature;  // FD 能力位后面在 FDCAN 构造里开
-  bt_const_ext_.fclk_can = fclk;
-  bt_const_ext_.btc = bt_const_.btc;
-  bt_const_ext_.dbtc = bt_const_.btc;  // 数据相位暂时等同仲裁相位（后面可细化）
-
-  std::memset(config_, 0, sizeof(config_));
-  std::memset(fd_config_, 0, sizeof(fd_config_));
-}
-
-GsUsbClass::GsUsbClass(std::initializer_list<LibXR::CAN*> cans,
+GsUsbClass::GsUsbClass(std::initializer_list<LibXR::CAN *> cans,
                        Endpoint::EPNumber data_in_ep_num,
-                       Endpoint::EPNumber data_out_ep_num, LibXR::GPIO* identify_gpio)
+                       Endpoint::EPNumber data_out_ep_num, LibXR::GPIO *identify_gpio,
+                       LibXR::GPIO *termination_gpio)
     : data_in_ep_num_(data_in_ep_num),
       data_out_ep_num_(data_out_ep_num),
-      identify_gpio_(identify_gpio)
+      identify_gpio_(identify_gpio),
+      termination_gpio_(termination_gpio)
 {
-  fd_supported_ = false;
-
   can_count_ =
       static_cast<uint8_t>(std::min(cans.size(), static_cast<size_t>(MAX_CAN_CH)));
   ASSERT(can_count_ > 0);
 
   size_t i = 0;
-  for (auto* p : cans)
+  for (auto *p : cans)
   {
-    if (i >= can_count_) break;
+    if (i >= can_count_)
+    {
+      break;
+    }
     cans_[i] = p;
     ++i;
   }
@@ -136,23 +113,27 @@ GsUsbClass::GsUsbClass(std::initializer_list<LibXR::CAN*> cans,
   std::memset(fd_config_, 0, sizeof(fd_config_));
 }
 
-GsUsbClass::GsUsbClass(std::initializer_list<LibXR::FDCAN*> fd_cans,
+GsUsbClass::GsUsbClass(std::initializer_list<LibXR::FDCAN *> fd_cans,
                        Endpoint::EPNumber data_in_ep_num,
-                       Endpoint::EPNumber data_out_ep_num, LibXR::GPIO* identify_gpio)
-    : data_in_ep_num_(data_in_ep_num),
+                       Endpoint::EPNumber data_out_ep_num, LibXR::GPIO *identify_gpio,
+                       LibXR::GPIO *termination_gpio)
+    : fd_supported_(true),
+      data_in_ep_num_(data_in_ep_num),
       data_out_ep_num_(data_out_ep_num),
-      identify_gpio_(identify_gpio)
+      identify_gpio_(identify_gpio),
+      termination_gpio_(termination_gpio)
 {
-  fd_supported_ = true;
-
   can_count_ =
       static_cast<uint8_t>(std::min(fd_cans.size(), static_cast<size_t>(MAX_CAN_CH)));
   ASSERT(can_count_ > 0);
 
   size_t i = 0;
-  for (auto* p : fd_cans)
+  for (auto *p : fd_cans)
   {
-    if (i >= can_count_) break;
+    if (i >= can_count_)
+    {
+      break;
+    }
     fdcans_[i] = p;
     cans_[i] = p;  // 向上转成 CAN*
     ++i;
@@ -194,7 +175,7 @@ GsUsbClass::GsUsbClass(std::initializer_list<LibXR::FDCAN*> fd_cans,
 
 // ================= ConfigDescriptorItem =================
 
-void GsUsbClass::Init(EndpointPool& endpoint_pool, uint8_t start_itf_num)
+void GsUsbClass::Init(EndpointPool &endpoint_pool, uint8_t start_itf_num)
 {
   inited_ = false;
   interface_num_ = start_itf_num;
@@ -234,7 +215,7 @@ void GsUsbClass::Init(EndpointPool& endpoint_pool, uint8_t start_itf_num)
                        ep_data_in_->MaxPacketSize(),
                        0};
 
-  SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
+  SetData(RawData{reinterpret_cast<uint8_t *>(&desc_block_), sizeof(desc_block_)});
 
   ep_data_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
   ep_data_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
@@ -259,16 +240,21 @@ void GsUsbClass::Init(EndpointPool& endpoint_pool, uint8_t start_itf_num)
   {
     for (uint8_t ch = 0; ch < can_count_; ++ch)
     {
-      if (!cans_[ch]) continue;
+      if (!cans_[ch])
+      {
+        continue;
+      }
 
       can_rx_ctx_[ch].self = this;
       can_rx_ctx_[ch].ch = ch;
       can_rx_cb_[ch] = LibXR::CAN::Callback::Create(OnCanRxStatic, &can_rx_ctx_[ch]);
 
+      // 所有经典帧 + ERROR 帧都订阅
       cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::STANDARD);
       cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::EXTENDED);
       cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_STANDARD);
       cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_EXTENDED);
+      cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::ERROR);
     }
     can_rx_registered_ = true;
   }
@@ -277,7 +263,10 @@ void GsUsbClass::Init(EndpointPool& endpoint_pool, uint8_t start_itf_num)
   {
     for (uint8_t ch = 0; ch < can_count_; ++ch)
     {
-      if (!fdcans_[ch]) continue;
+      if (!fdcans_[ch])
+      {
+        continue;
+      }
 
       fd_can_rx_ctx_[ch].self = this;
       fd_can_rx_ctx_[ch].ch = ch;
@@ -288,17 +277,19 @@ void GsUsbClass::Init(EndpointPool& endpoint_pool, uint8_t start_itf_num)
       fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::EXTENDED);
       fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_STANDARD);
       fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_EXTENDED);
+      // ERROR 帧仍然通过 CAN::Register 分发，这里不用再注册
     }
     fd_can_rx_registered_ = true;
   }
 
   inited_ = true;
 
-  // 预留最大一帧（FD + timestamp）
-  ep_data_out_->Transfer(static_cast<uint16_t>(GsUsb::HOST_FRAME_FD_TS_SIZE));
+  // 预留最大一帧（FD + timestamp），使用新的多包 BULK OUT API
+  RawData rx_raw{g_gsusb_rx_buf, static_cast<size_t>(GsUsb::HOST_FRAME_FD_TS_SIZE)};
+  ep_data_out_->TransferMultiBulk(rx_raw);
 }
 
-void GsUsbClass::Deinit(EndpointPool& endpoint_pool)
+void GsUsbClass::Deinit(EndpointPool &endpoint_pool)
 {
   inited_ = false;
   host_format_ok_ = false;
@@ -314,6 +305,8 @@ void GsUsbClass::Deinit(EndpointPool& endpoint_pool)
   }
 
   tx_in_progress_.store(false, std::memory_order_release);
+  tx_put_index_ = 0;
+  tx_get_index_ = 0;
 
   if (ep_data_in_)
   {
@@ -334,7 +327,10 @@ void GsUsbClass::Deinit(EndpointPool& endpoint_pool)
 
 bool GsUsbClass::OwnsEndpoint(uint8_t ep_addr) const
 {
-  if (!inited_) return false;
+  if (!inited_)
+  {
+    return false;
+  }
 
   return (ep_data_in_ && ep_data_in_->GetAddress() == ep_addr) ||
          (ep_data_out_ && ep_data_out_->GetAddress() == ep_addr);
@@ -344,7 +340,7 @@ bool GsUsbClass::OwnsEndpoint(uint8_t ep_addr) const
 
 ErrorCode GsUsbClass::OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
                                       uint16_t wLength, uint16_t wIndex,
-                                      DeviceClass::RequestResult& result)
+                                      DeviceClass::RequestResult &result)
 {
   UNUSED(in_isr);
   UNUSED(wIndex);  // interface number，一般只有 0
@@ -356,30 +352,42 @@ ErrorCode GsUsbClass::OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wV
     // ===== Device -> Host =====
     case GsUsb::BReq::BT_CONST:
     {
-      if (wLength < sizeof(bt_const_)) return ErrorCode::ARG_ERR;
+      if (wLength < sizeof(bt_const_))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       result.write_data =
-          ConstRawData{reinterpret_cast<const uint8_t*>(&bt_const_), sizeof(bt_const_)};
+          ConstRawData{reinterpret_cast<const uint8_t *>(&bt_const_), sizeof(bt_const_)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::BT_CONST_EXT:
     {
-      if (!fd_supported_) return ErrorCode::NOT_SUPPORT;
+      if (!fd_supported_)
+      {
+        return ErrorCode::NOT_SUPPORT;
+      }
 
-      if (wLength < sizeof(bt_const_ext_)) return ErrorCode::ARG_ERR;
+      if (wLength < sizeof(bt_const_ext_))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
-      result.write_data = ConstRawData{reinterpret_cast<const uint8_t*>(&bt_const_ext_),
+      result.write_data = ConstRawData{reinterpret_cast<const uint8_t *>(&bt_const_ext_),
                                        sizeof(bt_const_ext_)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::DEVICE_CONFIG:
     {
-      if (wLength < sizeof(dev_cfg_)) return ErrorCode::ARG_ERR;
+      if (wLength < sizeof(dev_cfg_))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       result.write_data =
-          ConstRawData{reinterpret_cast<const uint8_t*>(&dev_cfg_), sizeof(dev_cfg_)};
+          ConstRawData{reinterpret_cast<const uint8_t *>(&dev_cfg_), sizeof(dev_cfg_)};
       return ErrorCode::OK;
     }
 
@@ -392,40 +400,87 @@ ErrorCode GsUsbClass::OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wV
       }
       ctrl_buf_.timestamp_us = ts;
 
-      if (wLength < sizeof(ctrl_buf_.timestamp_us)) return ErrorCode::ARG_ERR;
+      if (wLength < sizeof(ctrl_buf_.timestamp_us))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       result.write_data =
-          ConstRawData{reinterpret_cast<const uint8_t*>(&ctrl_buf_.timestamp_us),
+          ConstRawData{reinterpret_cast<const uint8_t *>(&ctrl_buf_.timestamp_us),
                        sizeof(ctrl_buf_.timestamp_us)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::GET_TERMINATION:
     {
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       ctrl_buf_.term.state = static_cast<uint32_t>(term_state_[wValue]);
 
-      if (wLength < sizeof(ctrl_buf_.term)) return ErrorCode::ARG_ERR;
+      if (wLength < sizeof(ctrl_buf_.term))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
-      result.write_data = ConstRawData{reinterpret_cast<const uint8_t*>(&ctrl_buf_.term),
+      result.write_data = ConstRawData{reinterpret_cast<const uint8_t *>(&ctrl_buf_.term),
                                        sizeof(ctrl_buf_.term)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::GET_STATE:
     {
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
-      // TODO: 如有底层错误计数器，这里可从底层读取
-      ctrl_buf_.dev_state.state = static_cast<uint32_t>(GsUsb::CanState::ERROR_ACTIVE);
-      ctrl_buf_.dev_state.rxerr = 0;
-      ctrl_buf_.dev_state.txerr = 0;
+      // 使用底层 CAN::GetErrorState，如果没实现则回退到默认
+      GsUsb::CanState st = GsUsb::CanState::ERROR_ACTIVE;
+      uint32_t rxerr = 0;
+      uint32_t txerr = 0;
 
-      if (wLength < sizeof(ctrl_buf_.dev_state)) return ErrorCode::ARG_ERR;
+      auto *can = cans_[wValue];
+      if (can != nullptr)
+      {
+        LibXR::CAN::ErrorState es{};
+        if (can->GetErrorState(es) == ErrorCode::OK)
+        {
+          if (es.bus_off)
+          {
+            st = GsUsb::CanState::BUS_OFF;
+          }
+          else if (es.error_passive)
+          {
+            st = GsUsb::CanState::ERROR_PASSIVE;
+          }
+          else if (es.error_warning)
+          {
+            st = GsUsb::CanState::ERROR_WARNING;
+          }
+          else
+          {
+            st = GsUsb::CanState::ERROR_ACTIVE;
+          }
+
+          rxerr = es.rx_error_counter;
+          txerr = es.tx_error_counter;
+        }
+      }
+
+      ctrl_buf_.dev_state.state = static_cast<uint32_t>(st);
+      ctrl_buf_.dev_state.rxerr = rxerr;
+      ctrl_buf_.dev_state.txerr = txerr;
+
+      if (wLength < sizeof(ctrl_buf_.dev_state))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       result.write_data =
-          ConstRawData{reinterpret_cast<const uint8_t*>(&ctrl_buf_.dev_state),
+          ConstRawData{reinterpret_cast<const uint8_t *>(&ctrl_buf_.dev_state),
                        sizeof(ctrl_buf_.dev_state)};
       return ErrorCode::OK;
     }
@@ -434,10 +489,13 @@ ErrorCode GsUsbClass::OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wV
     {
       ctrl_buf_.user_id = 0;  // 当前简单返回 0
 
-      if (wLength < sizeof(ctrl_buf_.user_id)) return ErrorCode::ARG_ERR;
+      if (wLength < sizeof(ctrl_buf_.user_id))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       result.write_data =
-          ConstRawData{reinterpret_cast<const uint8_t*>(&ctrl_buf_.user_id),
+          ConstRawData{reinterpret_cast<const uint8_t *>(&ctrl_buf_.user_id),
                        sizeof(ctrl_buf_.user_id)};
       return ErrorCode::OK;
     }
@@ -446,86 +504,131 @@ ErrorCode GsUsbClass::OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wV
 
     case GsUsb::BReq::HOST_FORMAT:
     {
-      if (wLength != sizeof(GsUsb::HostConfig)) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(GsUsb::HostConfig))
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
-      result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.host_cfg),
+      result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.host_cfg),
                                  sizeof(GsUsb::HostConfig)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::BITTIMING:
     {
-      if (wLength != sizeof(GsUsb::DeviceBitTiming)) return ErrorCode::ARG_ERR;
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(GsUsb::DeviceBitTiming))
+      {
+        return ErrorCode::ARG_ERR;
+      }
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-      result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.bt),
+      result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.bt),
                                  sizeof(GsUsb::DeviceBitTiming)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::DATA_BITTIMING:
     {
-      if (!fd_supported_) return ErrorCode::NOT_SUPPORT;
+      if (!fd_supported_)
+      {
+        return ErrorCode::NOT_SUPPORT;
+      }
 
-      if (wLength != sizeof(GsUsb::DeviceBitTiming)) return ErrorCode::ARG_ERR;
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(GsUsb::DeviceBitTiming))
+      {
+        return ErrorCode::ARG_ERR;
+      }
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-      result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.bt),
+      result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.bt),
                                  sizeof(GsUsb::DeviceBitTiming)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::MODE:
     {
-      if (wLength != sizeof(GsUsb::DeviceMode)) return ErrorCode::ARG_ERR;
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(GsUsb::DeviceMode))
+      {
+        return ErrorCode::ARG_ERR;
+      }
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-      result.read_data =
-          RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.mode), sizeof(GsUsb::DeviceMode)};
+      result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.mode),
+                                 sizeof(GsUsb::DeviceMode)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::BERR:
     {
-      if (wLength != sizeof(uint32_t)) return ErrorCode::ARG_ERR;
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(uint32_t))
+      {
+        return ErrorCode::ARG_ERR;
+      }
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       ctrl_target_channel_ = static_cast<uint8_t>(wValue);
       result.read_data =
-          RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.berr_on), sizeof(uint32_t)};
+          RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.berr_on), sizeof(uint32_t)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::IDENTIFY:
     {
-      if (wLength != sizeof(GsUsb::Identify)) return ErrorCode::ARG_ERR;
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(GsUsb::Identify))
+      {
+        return ErrorCode::ARG_ERR;
+      }
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-      result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.identify),
+      result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.identify),
                                  sizeof(GsUsb::Identify)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::SET_TERMINATION:
     {
-      if (wLength != sizeof(GsUsb::DeviceTerminationState)) return ErrorCode::ARG_ERR;
-      if (wValue >= can_count_) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(GsUsb::DeviceTerminationState))
+      {
+        return ErrorCode::ARG_ERR;
+      }
+      if (wValue >= can_count_)
+      {
+        return ErrorCode::ARG_ERR;
+      }
 
       ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-      result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.term),
+      result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.term),
                                  sizeof(GsUsb::DeviceTerminationState)};
       return ErrorCode::OK;
     }
 
     case GsUsb::BReq::SET_USER_ID:
     {
-      if (wLength != sizeof(uint32_t)) return ErrorCode::ARG_ERR;
+      if (wLength != sizeof(uint32_t))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       result.read_data =
-          RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.user_id), sizeof(uint32_t)};
+          RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.user_id), sizeof(uint32_t)};
       return ErrorCode::OK;
     }
 
@@ -537,7 +640,7 @@ ErrorCode GsUsbClass::OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wV
 // ================= DATA 阶段 =================
 
 ErrorCode GsUsbClass::OnClassData(bool in_isr, uint8_t bRequest,
-                                  LibXR::ConstRawData& data)
+                                  LibXR::ConstRawData &data)
 {
   UNUSED(in_isr);
 
@@ -546,36 +649,63 @@ ErrorCode GsUsbClass::OnClassData(bool in_isr, uint8_t bRequest,
   switch (req)
   {
     case GsUsb::BReq::HOST_FORMAT:
-      if (data.size_ != sizeof(GsUsb::HostConfig)) return ErrorCode::ARG_ERR;
+      if (data.size_ != sizeof(GsUsb::HostConfig))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       return HandleHostFormat(ctrl_buf_.host_cfg);
 
     case GsUsb::BReq::BITTIMING:
-      if (data.size_ != sizeof(GsUsb::DeviceBitTiming)) return ErrorCode::ARG_ERR;
+      if (data.size_ != sizeof(GsUsb::DeviceBitTiming))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       return HandleBitTiming(ctrl_target_channel_, ctrl_buf_.bt);
 
     case GsUsb::BReq::DATA_BITTIMING:
-      if (!fd_supported_) return ErrorCode::NOT_SUPPORT;
-      if (data.size_ != sizeof(GsUsb::DeviceBitTiming)) return ErrorCode::ARG_ERR;
+      if (!fd_supported_)
+      {
+        return ErrorCode::NOT_SUPPORT;
+      }
+      if (data.size_ != sizeof(GsUsb::DeviceBitTiming))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       return HandleDataBitTiming(ctrl_target_channel_, ctrl_buf_.bt);
 
     case GsUsb::BReq::MODE:
-      if (data.size_ != sizeof(GsUsb::DeviceMode)) return ErrorCode::ARG_ERR;
+      if (data.size_ != sizeof(GsUsb::DeviceMode))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       return HandleMode(ctrl_target_channel_, ctrl_buf_.mode);
 
     case GsUsb::BReq::BERR:
-      if (data.size_ != sizeof(uint32_t)) return ErrorCode::ARG_ERR;
+      if (data.size_ != sizeof(uint32_t))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       return HandleBerr(ctrl_target_channel_, ctrl_buf_.berr_on);
 
     case GsUsb::BReq::IDENTIFY:
-      if (data.size_ != sizeof(GsUsb::Identify)) return ErrorCode::ARG_ERR;
+      if (data.size_ != sizeof(GsUsb::Identify))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       return HandleIdentify(ctrl_target_channel_, ctrl_buf_.identify);
 
     case GsUsb::BReq::SET_TERMINATION:
-      if (data.size_ != sizeof(GsUsb::DeviceTerminationState)) return ErrorCode::ARG_ERR;
+      if (data.size_ != sizeof(GsUsb::DeviceTerminationState))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       return HandleSetTermination(ctrl_target_channel_, ctrl_buf_.term);
 
     case GsUsb::BReq::SET_USER_ID:
-      if (data.size_ != sizeof(uint32_t)) return ErrorCode::ARG_ERR;
+      if (data.size_ != sizeof(uint32_t))
+      {
+        return ErrorCode::ARG_ERR;
+      }
       // TODO: 实际存储 user_id（持久化）
       return ErrorCode::OK;
 
@@ -596,26 +726,38 @@ ErrorCode GsUsbClass::OnClassData(bool in_isr, uint8_t bRequest,
 
 // ================= Vendor 具体逻辑 =================
 
-ErrorCode GsUsbClass::HandleHostFormat(const GsUsb::HostConfig& cfg)
+ErrorCode GsUsbClass::HandleHostFormat(const GsUsb::HostConfig &cfg)
 {
   host_format_ok_ = (cfg.byte_order == 0x0000beefu);
   return ErrorCode::OK;
 }
 
-ErrorCode GsUsbClass::HandleBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming& bt)
+ErrorCode GsUsbClass::HandleBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming &bt)
 {
-  if (!host_format_ok_) return ErrorCode::ARG_ERR;
-  if (ch >= can_count_ || !cans_[ch]) return ErrorCode::ARG_ERR;
-  if (bt.brp == 0) return ErrorCode::ARG_ERR;
+  if (!host_format_ok_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (ch >= can_count_ || !cans_[ch])
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (bt.brp == 0)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   const uint32_t tseg1 = bt.prop_seg + bt.phase_seg1;
   const uint32_t tseg2 = bt.phase_seg2;
   const uint32_t tq_num = 1u + tseg1 + tseg2;
-  if (tq_num == 0) return ErrorCode::ARG_ERR;
+  if (tq_num == 0)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   const uint32_t fclk = cans_[ch]->GetClockFreq();
 
-  auto& cfg = config_[ch];
+  auto &cfg = config_[ch];
   cfg.bit_timing.brp = bt.brp;
   cfg.bit_timing.prop_seg = bt.prop_seg;
   cfg.bit_timing.phase_seg1 = bt.phase_seg1;
@@ -628,29 +770,38 @@ ErrorCode GsUsbClass::HandleBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming& 
   // FD 模式下，同步 nominal 部分到 fd_config_
   if (fd_supported_ && fdcans_[ch])
   {
-    auto& fd_cfg = fd_config_[ch];
-    static_cast<CAN::Configuration&>(fd_cfg) = cfg;
+    auto &fd_cfg = fd_config_[ch];
+    static_cast<CAN::Configuration &>(fd_cfg) = cfg;
     // data 部分在 DATA_BITTIMING 里配置
   }
 
   return cans_[ch]->SetConfig(cfg);
 }
 
-ErrorCode GsUsbClass::HandleDataBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming& bt)
+ErrorCode GsUsbClass::HandleDataBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming &bt)
 {
-  if (!fd_supported_ || ch >= can_count_ || !fdcans_[ch]) return ErrorCode::NOT_SUPPORT;
-  if (bt.brp == 0) return ErrorCode::ARG_ERR;
+  if (!fd_supported_ || ch >= can_count_ || !fdcans_[ch])
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+  if (bt.brp == 0)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   const uint32_t tseg1 = bt.prop_seg + bt.phase_seg1;
   const uint32_t tseg2 = bt.phase_seg2;
   const uint32_t tq_num = 1u + tseg1 + tseg2;
-  if (tq_num == 0) return ErrorCode::ARG_ERR;
+  if (tq_num == 0)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   const uint32_t fclk = fdcans_[ch]->GetClockFreq();
 
-  auto& fd_cfg = fd_config_[ch];
+  auto &fd_cfg = fd_config_[ch];
   // 确保 nominal 部分有值：如果没配过，就使用 config_[ch]
-  static_cast<CAN::Configuration&>(fd_cfg) = config_[ch];
+  static_cast<CAN::Configuration &>(fd_cfg) = config_[ch];
 
   fd_cfg.data_timing.brp = bt.brp;
   fd_cfg.data_timing.prop_seg = bt.prop_seg;
@@ -664,10 +815,16 @@ ErrorCode GsUsbClass::HandleDataBitTiming(uint8_t ch, const GsUsb::DeviceBitTimi
   return fdcans_[ch]->SetConfig(fd_cfg);
 }
 
-ErrorCode GsUsbClass::HandleMode(uint8_t ch, const GsUsb::DeviceMode& mode)
+ErrorCode GsUsbClass::HandleMode(uint8_t ch, const GsUsb::DeviceMode &mode)
 {
-  if (!host_format_ok_) return ErrorCode::ARG_ERR;
-  if (ch >= can_count_ || !cans_[ch]) return ErrorCode::ARG_ERR;
+  if (!host_format_ok_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (ch >= can_count_ || !cans_[ch])
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   switch (static_cast<GsUsb::CanMode>(mode.mode))
   {
@@ -688,7 +845,7 @@ ErrorCode GsUsbClass::HandleMode(uint8_t ch, const GsUsb::DeviceMode& mode)
       return ErrorCode::ARG_ERR;
   }
 
-  auto& cfg = config_[ch];
+  auto &cfg = config_[ch];
   cfg.mode.loopback = (mode.flags & GsUsb::GSCAN_MODE_LOOP_BACK) != 0;
   cfg.mode.listen_only = (mode.flags & GsUsb::GSCAN_MODE_LISTEN_ONLY) != 0;
   cfg.mode.triple_sampling = (mode.flags & GsUsb::GSCAN_MODE_TRIPLE_SAMPLE) != 0;
@@ -704,8 +861,8 @@ ErrorCode GsUsbClass::HandleMode(uint8_t ch, const GsUsb::DeviceMode& mode)
 
   if (fd_supported_ && fdcans_[ch])
   {
-    auto& fd_cfg = fd_config_[ch];
-    static_cast<CAN::Configuration&>(fd_cfg) = cfg;
+    auto &fd_cfg = fd_config_[ch];
+    static_cast<CAN::Configuration &>(fd_cfg) = cfg;
     fd_cfg.fd_mode.fd_enabled = (mode.flags & GsUsb::GSCAN_MODE_FD) != 0;
 
     // 如果已经配置过数据相位，可以下发 FDCAN 配置
@@ -717,14 +874,17 @@ ErrorCode GsUsbClass::HandleMode(uint8_t ch, const GsUsb::DeviceMode& mode)
 
 ErrorCode GsUsbClass::HandleBerr(uint8_t ch, uint32_t berr_on)
 {
-  if (ch >= can_count_) return ErrorCode::ARG_ERR;
+  if (ch >= can_count_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   berr_enabled_[ch] = (berr_on != 0);
-  // TODO：结合底层 CAN 错误状态，生成 CAN_ERR_* 错误帧上报
+  // 具体错误帧发送逻辑在 OnCanRx(Type::ERROR) 里实现
   return ErrorCode::OK;
 }
 
-ErrorCode GsUsbClass::HandleIdentify(uint8_t ch, const GsUsb::Identify& id)
+ErrorCode GsUsbClass::HandleIdentify(uint8_t ch, const GsUsb::Identify &id)
 {
   UNUSED(ch);
 
@@ -739,32 +899,44 @@ ErrorCode GsUsbClass::HandleIdentify(uint8_t ch, const GsUsb::Identify& id)
 }
 
 ErrorCode GsUsbClass::HandleSetTermination(uint8_t ch,
-                                           const GsUsb::DeviceTerminationState& st)
+                                           const GsUsb::DeviceTerminationState &st)
 {
-  if (ch >= can_count_) return ErrorCode::ARG_ERR;
+  if (ch >= can_count_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   term_state_[ch] = static_cast<GsUsb::TerminationState>(
       st.state != 0 ? static_cast<uint32_t>(GsUsb::TerminationState::ON)
                     : static_cast<uint32_t>(GsUsb::TerminationState::OFF));
-  // TODO：如果有硬件终端电阻控制（GPIO / I2C 等），在这里操作
+
+  // 如果有一个全局终端电阻 GPIO，则根据任一通道最新状态控制它
+  if (termination_gpio_)
+  {
+    bool on = (term_state_[ch] == GsUsb::TerminationState::ON);
+    (void)termination_gpio_->Write(on);
+  }
+
   return ErrorCode::OK;
 }
 
 ErrorCode GsUsbClass::HandleGetState(uint8_t ch)
 {
   UNUSED(ch);
-  // 已经在 OnVendorRequest 里直接填充 ctrl_buf_.dev_state 了
+  // 实际逻辑已经在 OnVendorRequest(GET_STATE) 中完成
   return ErrorCode::OK;
 }
 
 // ================= HostFrame <-> ClassicPack =================
 
-void GsUsbClass::HostFrameToClassicPack(const GsUsb::HostFrame& hf,
-                                        LibXR::CAN::ClassicPack& pack)
+void GsUsbClass::HostFrameToClassicPack(const GsUsb::HostFrame &hf,
+                                        LibXR::CAN::ClassicPack &pack)
 {
   uint32_t cid = hf.can_id;
   bool is_eff = (cid & GsUsb::CAN_EFF_FLAG) != 0;
   bool is_rtr = (cid & GsUsb::CAN_RTR_FLAG) != 0;
+
+  // 这里故意忽略 CAN_ERR_FLAG：主机不应该通过 OUT 发送错误帧到总线
 
   if (is_eff)
   {
@@ -777,13 +949,24 @@ void GsUsbClass::HostFrameToClassicPack(const GsUsb::HostFrame& hf,
     pack.type = is_rtr ? LibXR::CAN::Type::REMOTE_STANDARD : LibXR::CAN::Type::STANDARD;
   }
 
-  // ClassicPack 没有 dlc，只能按 8 字节处理
-  std::memcpy(pack.data, hf.data, sizeof(pack.data));
+  // ClassicPack 支持 dlc：0..8
+  uint8_t dlc = hf.can_dlc;
+  if (dlc > 8u)
+  {
+    dlc = 8u;
+  }
+  pack.dlc = dlc;
+
+  if (dlc > 0u)
+  {
+    std::memcpy(pack.data, hf.data, dlc);
+  }
 }
 
-void GsUsbClass::ClassicPackToHostFrame(const LibXR::CAN::ClassicPack& pack,
-                                        GsUsb::HostFrame& hf)
+void GsUsbClass::ClassicPackToHostFrame(const LibXR::CAN::ClassicPack &pack,
+                                        GsUsb::HostFrame &hf)
 {
+  // ERROR 类型单独在 OnCanRx 里处理，这里只处理数据/远程帧
   uint32_t cid = 0;
   switch (pack.type)
   {
@@ -806,12 +989,22 @@ void GsUsbClass::ClassicPackToHostFrame(const LibXR::CAN::ClassicPack& pack,
 
   hf.echo_id = GsUsb::ECHO_ID_INVALID;
   hf.can_id = cid;
-  hf.can_dlc = 8;  // classic 固定 8
+
+  uint8_t dlc = (pack.dlc <= 8u) ? pack.dlc : 8u;
+  hf.can_dlc = dlc;  // classic DLC 0..8 与长度一致
+
   hf.channel = 0;
   hf.flags = 0;
   hf.reserved = 0;
 
-  std::memcpy(hf.data, pack.data, 8);
+  if (dlc > 0u)
+  {
+    std::memcpy(hf.data, pack.data, dlc);
+  }
+  if (dlc < 8u)
+  {
+    std::memset(hf.data + dlc, 0, 8u - dlc);  // padding
+  }
 
   uint32_t ts = 0;
   if (timestamps_enabled_ && LibXR::Timebase::timebase != nullptr)
@@ -823,7 +1016,7 @@ void GsUsbClass::ClassicPackToHostFrame(const LibXR::CAN::ClassicPack& pack,
 
 // ================= HostFrame <-> FDPack =================
 
-void GsUsbClass::HostFrameToFdPack(const GsUsb::HostFrame& hf, LibXR::FDCAN::FDPack& pack)
+void GsUsbClass::HostFrameToFdPack(const GsUsb::HostFrame &hf, LibXR::FDCAN::FDPack &pack)
 {
   uint32_t cid = hf.can_id;
   bool is_eff = (cid & GsUsb::CAN_EFF_FLAG) != 0;
@@ -841,13 +1034,19 @@ void GsUsbClass::HostFrameToFdPack(const GsUsb::HostFrame& hf, LibXR::FDCAN::FDP
   }
 
   uint8_t len = DlcToLen(hf.can_dlc);
-  if (len > 64) len = 64;
+  if (len > 64)
+  {
+    len = 64;
+  }
 
   pack.len = len;
-  std::memcpy(pack.data, hf.data, len);
+  if (len > 0u)
+  {
+    std::memcpy(pack.data, hf.data, len);
+  }
 }
 
-void GsUsbClass::FdPackToHostFrame(const LibXR::FDCAN::FDPack& pack, GsUsb::HostFrame& hf)
+void GsUsbClass::FdPackToHostFrame(const LibXR::FDCAN::FDPack &pack, GsUsb::HostFrame &hf)
 {
   uint32_t cid = 0;
   switch (pack.type)
@@ -876,7 +1075,10 @@ void GsUsbClass::FdPackToHostFrame(const LibXR::FDCAN::FDPack& pack, GsUsb::Host
   hf.flags = GsUsb::CAN_FLAG_FD;
   hf.reserved = 0;
 
-  std::memcpy(hf.data, pack.data, pack.len);
+  if (pack.len > 0u)
+  {
+    std::memcpy(hf.data, pack.data, pack.len);
+  }
 
   uint32_t ts = 0;
   if (timestamps_enabled_ && LibXR::Timebase::timebase != nullptr)
@@ -886,13 +1088,105 @@ void GsUsbClass::FdPackToHostFrame(const LibXR::FDCAN::FDPack& pack, GsUsb::Host
   hf.timestamp_us = ts;
 }
 
+// ================= CAN 错误帧映射 =================
+
+bool GsUsbClass::ErrorPackToHostErrorFrame(uint8_t ch,
+                                           const LibXR::CAN::ClassicPack &err_pack,
+                                           GsUsb::HostFrame &hf)
+{
+  if (ch >= can_count_)
+  {
+    return false;
+  }
+  if (!berr_enabled_[ch])
+  {
+    return false;
+  }
+
+  // pack.id 在 STM32 驱动里是 ErrorID
+  if (!LibXR::CAN::IsErrorId(err_pack.id))
+  {
+    return false;
+  }
+
+  auto eid = LibXR::CAN::ToErrorID(err_pack.id);
+
+  uint32_t cid = GsUsb::CAN_ERR_FLAG;
+
+  switch (eid)
+  {
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_BUS_OFF:
+      cid |= GsUsb::CAN_ERR_BUSOFF;
+      break;
+
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING:
+      cid |= GsUsb::CAN_ERR_CRTL;
+      break;
+
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_ACK:
+      cid |= GsUsb::CAN_ERR_ACK;
+      break;
+
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_STUFF:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_FORM:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_BIT0:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_BIT1:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_CRC:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_PROTOCOL:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_GENERIC:
+    case LibXR::CAN::ErrorID::CAN_ERROR_ID_OTHER:
+    default:
+      cid |= GsUsb::CAN_ERR_PROT;
+      break;
+  }
+
+  hf.echo_id = GsUsb::ECHO_ID_INVALID;
+  hf.can_id = cid;
+  hf.can_dlc = GsUsb::CAN_ERR_DLC;  // 固定 8
+  hf.channel = ch;
+  hf.flags = 0;
+  hf.reserved = 0;
+
+  // 简化版：data[0..7] 全 0；只依赖 can_id 的错误类别
+  std::memset(hf.data, 0, sizeof(hf.data));
+
+  uint32_t ts = 0;
+  if (timestamps_enabled_ && LibXR::Timebase::timebase != nullptr)
+  {
+    ts = static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
+  }
+  hf.timestamp_us = ts;
+
+  return true;
+}
+
 // ================= CAN RX 回调 & BULK IN =================
 
-void GsUsbClass::OnCanRx(bool in_isr, uint8_t ch, const LibXR::CAN::ClassicPack& pack)
+void GsUsbClass::OnCanRx(bool in_isr, uint8_t ch, const LibXR::CAN::ClassicPack &pack)
 {
   UNUSED(in_isr);
 
-  if (ch >= can_count_ || !can_enabled_[ch] || !ep_data_in_) return;
+  if (ch >= can_count_ || !ep_data_in_)
+  {
+    return;
+  }
+
+  if (pack.type == LibXR::CAN::Type::ERROR)
+  {
+    // 错误帧 → Linux CAN_ERR_* HostFrame（仅在 berr_enabled_ 时）
+    GsUsb::HostFrame hf{};
+    if (ErrorPackToHostErrorFrame(ch, pack, hf))
+    {
+      EnqueueHostFrame(hf, in_isr);
+    }
+    return;
+  }
+
+  if (!can_enabled_[ch])
+  {
+    return;
+  }
 
   GsUsb::HostFrame hf{};
   ClassicPackToHostFrame(pack, hf);
@@ -901,25 +1195,34 @@ void GsUsbClass::OnCanRx(bool in_isr, uint8_t ch, const LibXR::CAN::ClassicPack&
   EnqueueHostFrame(hf, in_isr);
 }
 
-void GsUsbClass::OnFdCanRx(bool in_isr, uint8_t ch, const LibXR::FDCAN::FDPack& pack)
+void GsUsbClass::OnFdCanRx(bool in_isr, uint8_t ch, const LibXR::FDCAN::FDPack &pack)
 {
   UNUSED(in_isr);
 
-  if (!fd_supported_ || ch >= can_count_ || !fd_enabled_[ch] || !ep_data_in_) return;
+  if (!fd_supported_ || ch >= can_count_ || !fd_enabled_[ch] || !ep_data_in_)
+  {
+    return;
+  }
 
   GsUsb::HostFrame hf{};
   FdPackToHostFrame(pack, hf);
   hf.channel = ch;
 
   // BRS / ESI 按 FD 配置粗略设置（没有 per-frame 信息）
-  const auto& fd_cfg = fd_config_[ch];
-  if (fd_cfg.fd_mode.brs) hf.flags |= GsUsb::CAN_FLAG_BRS;
-  if (fd_cfg.fd_mode.esi) hf.flags |= GsUsb::CAN_FLAG_ESI;
+  const auto &fd_cfg = fd_config_[ch];
+  if (fd_cfg.fd_mode.brs)
+  {
+    hf.flags |= GsUsb::CAN_FLAG_BRS;
+  }
+  if (fd_cfg.fd_mode.esi)
+  {
+    hf.flags |= GsUsb::CAN_FLAG_ESI;
+  }
 
   EnqueueHostFrame(hf, in_isr);
 }
 
-bool GsUsbClass::EnqueueHostFrame(const GsUsb::HostFrame& hf, bool in_isr)
+bool GsUsbClass::EnqueueHostFrame(const GsUsb::HostFrame &hf, bool in_isr)
 {
   UNUSED(in_isr);
 
@@ -927,7 +1230,7 @@ bool GsUsbClass::EnqueueHostFrame(const GsUsb::HostFrame& hf, bool in_isr)
   auto ec = tx_pool_.Put(copy, tx_put_index_);
   if (ec != ErrorCode::OK)
   {
-    // pool 满，丢帧；TODO: 可以设置 CAN_FLAG_OVERFLOW 错误计数
+    // pool 满，丢帧；TODO: 统计 overflow
     return false;
   }
 
@@ -940,7 +1243,10 @@ void GsUsbClass::TryKickTx(bool in_isr)
 {
   UNUSED(in_isr);
 
-  if (!ep_data_in_) return;
+  if (!ep_data_in_)
+  {
+    return;
+  }
 
   bool expected = false;
   if (!tx_in_progress_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
@@ -974,7 +1280,7 @@ void GsUsbClass::TryKickTx(bool in_isr)
 
   // padding 模式：仅对非 FD 帧用 MaxPacketSize 对齐（与参考实现一致）
   uint8_t tmp_buf[256];  // 足够放下 1 帧（<=80 字节）
-  uint8_t* send_ptr = reinterpret_cast<uint8_t*>(&hf);
+  uint8_t *send_ptr = reinterpret_cast<uint8_t *>(&hf);
   uint16_t send_len = static_cast<uint16_t>(len);
 
   const uint16_t mps = ep_data_in_->MaxPacketSize();
@@ -990,26 +1296,35 @@ void GsUsbClass::TryKickTx(bool in_isr)
   ep_data_in_->Transfer(send_len);
 }
 
-void GsUsbClass::OnDataOutComplete(bool in_isr, ConstRawData& data)
-{
-  UNUSED(in_isr);
+// ================= BULK OUT（host -> device）回调 =================
 
-  if (!ep_data_out_) return;
+void GsUsbClass::OnDataOutComplete(bool in_isr, ConstRawData &data)
+{
+  if (!ep_data_out_)
+  {
+    return;
+  }
+
+  auto ReArmOutTransfer = [this]()
+  {
+    RawData rx_raw{g_gsusb_rx_buf, static_cast<size_t>(GsUsb::HOST_FRAME_FD_TS_SIZE)};
+    ep_data_out_->TransferMultiBulk(rx_raw);
+  };
 
   const std::size_t rxlen = data.size_;
   if (rxlen < GsUsb::HOST_FRAME_CLASSIC_SIZE)
   {
     // 长度不够一个基本 classic 帧，忽略并重新接收
-    ep_data_out_->Transfer(static_cast<uint16_t>(GsUsb::HOST_FRAME_FD_TS_SIZE));
+    ReArmOutTransfer();
     return;
   }
 
-  const auto* hf = reinterpret_cast<const GsUsb::HostFrame*>(data.addr_);
+  const auto *hf = reinterpret_cast<const GsUsb::HostFrame *>(data.addr_);
 
   const uint8_t ch = hf->channel;
-  if (ch >= can_count_ || !can_enabled_[ch] || !cans_[ch])
+  if (ch >= can_count_ || !cans_[ch])
   {
-    ep_data_out_->Transfer(static_cast<uint16_t>(GsUsb::HOST_FRAME_FD_TS_SIZE));
+    ReArmOutTransfer();
     return;
   }
 
@@ -1020,60 +1335,53 @@ void GsUsbClass::OnDataOutComplete(bool in_isr, ConstRawData& data)
     if (!fd_supported_ || !fdcans_[ch] || !fd_enabled_[ch])
     {
       // 不支持 FD，丢弃
-      ep_data_out_->Transfer(static_cast<uint16_t>(GsUsb::HOST_FRAME_FD_TS_SIZE));
+      ReArmOutTransfer();
       return;
     }
 
     if (rxlen < GsUsb::HOST_FRAME_FD_SIZE)
     {
       // 长度不够 FD 帧基本数据
-      ep_data_out_->Transfer(static_cast<uint16_t>(GsUsb::HOST_FRAME_FD_TS_SIZE));
+      ReArmOutTransfer();
       return;
     }
 
     LibXR::FDCAN::FDPack pack{};
     HostFrameToFdPack(*hf, pack);
-
     (void)fdcans_[ch]->AddMessage(pack);
-
-    // echo
-    if (hf->echo_id != GsUsb::ECHO_ID_INVALID)
-    {
-      GsUsb::HostFrame echo = *hf;
-      if (timestamps_enabled_ && LibXR::Timebase::timebase != nullptr)
-      {
-        echo.timestamp_us =
-            static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
-      }
-      EnqueueHostFrame(echo, in_isr);
-    }
   }
   else
   {
-    // Classic CAN
+    if (!can_enabled_[ch])
+    {
+      ReArmOutTransfer();
+      return;
+    }
+
+    // Classic CAN：注意 HostFrameToClassicPack 会忽略 CAN_ERR_FLAG，
+    // 所以 host 不会通过 OUT 注入错误帧到总线
     LibXR::CAN::ClassicPack pack{};
     HostFrameToClassicPack(*hf, pack);
     (void)cans_[ch]->AddMessage(pack);
-
-    if (hf->echo_id != GsUsb::ECHO_ID_INVALID)
-    {
-      GsUsb::HostFrame echo = *hf;
-      if (timestamps_enabled_ && LibXR::Timebase::timebase != nullptr)
-      {
-        echo.timestamp_us =
-            static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
-      }
-      EnqueueHostFrame(echo, in_isr);
-    }
   }
 
-  // TODO: 若底层 CAN 控制器可以上报错误中断，这里可结合 berr_enabled_[ch]
-  //       生成 CAN_ERR_* 错误帧上报到 host（设置 can_id 的 CAN_ERR_FLAG）。
+  // TX echo：Host 通过 echo_id 跟踪 TX buffer，需要设备回送才能释放
+  if (hf->echo_id != GsUsb::ECHO_ID_INVALID)
+  {
+    GsUsb::HostFrame echo = *hf;
+    if (timestamps_enabled_ && LibXR::Timebase::timebase != nullptr)
+    {
+      echo.timestamp_us =
+          static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
+    }
+    EnqueueHostFrame(echo, in_isr);
+  }
 
-  ep_data_out_->Transfer(static_cast<uint16_t>(GsUsb::HOST_FRAME_FD_TS_SIZE));
+  // 继续为下一帧预备多包接收
+  ReArmOutTransfer();
 }
 
-void GsUsbClass::OnDataInComplete(bool in_isr, ConstRawData& data)
+void GsUsbClass::OnDataInComplete(bool in_isr, ConstRawData &data)
 {
   UNUSED(in_isr);
   UNUSED(data);

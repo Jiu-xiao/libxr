@@ -8,11 +8,9 @@
 
 #include "can.hpp"  // 里面有 CAN & FDCAN 抽象
 #include "dev_core.hpp"
+#include "gpio.hpp"  // 提供 LibXR::GPIO
 #include "gs_usb_protocol.hpp"
 #include "usb/core/desc_cfg.hpp"
-
-// 下面三个头文件名按你工程实际改：
-#include "gpio.hpp"  // 提供 LibXR::GPIO
 
 namespace LibXR::USB
 {
@@ -26,23 +24,19 @@ class GsUsbClass : public DeviceClass
  public:
   // ============== 构造 ==============
 
-  /// 经典 CAN：单通道
-  GsUsbClass(LibXR::CAN &can,
-             Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-             Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-             LibXR::GPIO *identify_gpio = nullptr);
-
   /// 经典 CAN：多通道
   GsUsbClass(std::initializer_list<LibXR::CAN *> cans,
              Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
              Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-             LibXR::GPIO *identify_gpio = nullptr);
+             LibXR::GPIO *identify_gpio = nullptr,
+             LibXR::GPIO *termination_gpio = nullptr);
 
-  /// FDCAN：多通道（全部通道都是 FDCAN）
+  /// FDCAN：多通道
   GsUsbClass(std::initializer_list<LibXR::FDCAN *> fd_cans,
              Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
              Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-             LibXR::GPIO *identify_gpio = nullptr);
+             LibXR::GPIO *identify_gpio = nullptr,
+             LibXR::GPIO *termination_gpio = nullptr);
 
   /// 当前 Host 是否已完成 endian 握手（HOST_FORMAT）
   bool IsHostFormatOK() const { return host_format_ok_; }
@@ -107,7 +101,7 @@ class GsUsbClass : public DeviceClass
   // 最多支持的 CAN 通道数（USB 协议上）
   static constexpr uint8_t MAX_CAN_CH = 4;
 
-  // TX Pool 槽数（HostFrame 个数）
+  // TX pool 槽数（HostFrame 个数）
   static constexpr uint8_t TX_POOL_SIZE = 32;
 
   // ================= 成员 =================
@@ -129,7 +123,8 @@ class GsUsbClass : public DeviceClass
   bool inited_ = false;
   uint8_t interface_num_ = 0;
 
-  LibXR::GPIO *identify_gpio_ = nullptr;  // Identify LED
+  LibXR::GPIO *identify_gpio_ = nullptr;     // Identify LED（可空）
+  LibXR::GPIO *termination_gpio_ = nullptr;  // 终端电阻控制 GPIO（可空，全局）
 
   // EP 回调
   LibXR::Callback<LibXR::ConstRawData &> on_data_out_cb_ =
@@ -233,13 +228,13 @@ class GsUsbClass : public DeviceClass
   void OnCanRx(bool in_isr, uint8_t ch, const LibXR::CAN::ClassicPack &pack);
   void OnFdCanRx(bool in_isr, uint8_t ch, const LibXR::FDCAN::FDPack &pack);
 
-  // TX 使用你的 LockFreePool
+  // TX 使用 LockFreePool
   LibXR::LockFreePool<GsUsb::HostFrame> tx_pool_{TX_POOL_SIZE};
   std::atomic<bool> tx_in_progress_{false};
   uint32_t tx_put_index_ = 0;
   uint32_t tx_get_index_ = 0;
 
-  /// 入队一个要发给 Host 的 HostFrame（CAN RX / TX echo 都共用）
+  /// 入队一个要发给 Host 的 HostFrame（CAN RX / 错误帧 / TX echo 共用）
   bool EnqueueHostFrame(const GsUsb::HostFrame &hf, bool in_isr);
 
   /// 尝试启动下一次 BULK IN 传输
@@ -262,6 +257,10 @@ class GsUsbClass : public DeviceClass
 
   void HostFrameToFdPack(const GsUsb::HostFrame &hf, LibXR::FDCAN::FDPack &pack);
   void FdPackToHostFrame(const LibXR::FDCAN::FDPack &pack, GsUsb::HostFrame &hf);
+
+  // CAN 错误帧映射：ClassicPack(Type::ERROR) -> Linux 风格错误帧 HostFrame
+  bool ErrorPackToHostErrorFrame(uint8_t ch, const LibXR::CAN::ClassicPack &err_pack,
+                                 GsUsb::HostFrame &hf);
 
   // DLC <-> 长度 映射（CAN FD）
   static uint8_t DlcToLen(uint8_t dlc);

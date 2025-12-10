@@ -70,6 +70,8 @@ class STM32CAN : public CAN
 
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
+  ErrorCode GetErrorState(CAN::ErrorState& state) const override;
+
   /**
    * @brief 处理接收中断
    *

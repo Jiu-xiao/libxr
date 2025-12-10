@@ -325,6 +325,61 @@ class Endpoint
    */
   virtual ErrorCode Transfer(size_t size) = 0;
 
+  virtual ErrorCode TransferMultiBulk(RawData& data)
+  {
+    auto ep_buf = GetBuffer();
+    size_t max_chunk = MaxTransferSize();
+
+    if (max_chunk == 0)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    // 单包就能搞定的情况：不进入 multi-bulk 状态机，保持原有行为
+    if (data.size_ <= max_chunk)
+    {
+      multi_bulk_ = false;
+      multi_bulk_remain_ = 0;
+      multi_bulk_data_ = {nullptr, 0};
+
+      if (GetDirection() == Direction::IN)
+      {
+        // IN：发送，先把应用 buffer 拷到 EP buffer，再一次性 Transfer
+        auto src = static_cast<const uint8_t*>(data.addr_);
+        auto dst = static_cast<uint8_t*>(ep_buf.addr_);
+        Memory::FastCopy(dst, src, data.size_);
+      }
+      // OUT：接收，OUT 方向不预拷贝，直接启动一次接收即可
+
+      return Transfer(data.size_);
+    }
+
+    // 需要多包处理的情况
+    multi_bulk_ = true;
+    multi_bulk_data_ = data;          // 应用层 buffer 指针 + 最大容量 / 逻辑总长
+    multi_bulk_remain_ = data.size_;  // IN: 剩余待发送；OUT: 剩余可写容量
+
+    // 第一包大小
+    size_t first = max_chunk;
+    if (first > multi_bulk_remain_)
+    {
+      first = multi_bulk_remain_;
+    }
+
+    if (GetDirection() == Direction::IN)
+    {
+      // IN：发送时，先把第一 chunk 拷到 EP buffer
+      auto src = static_cast<const uint8_t*>(multi_bulk_data_.addr_);
+      auto dst = static_cast<uint8_t*>(ep_buf.addr_);
+      Memory::FastCopy(dst, src, first);
+
+      multi_bulk_remain_ -= first;  // 已经准备好 first 字节要发
+    }
+    // OUT：接收时，先启动一次接收，稍后在回调里拷贝到 multi_bulk_data_
+
+    return Transfer(first);
+  }
+
   /**
    * @brief 传输空包
    *        Transfer zero length packet
@@ -340,18 +395,126 @@ class Endpoint
       return;
     }
 
+    bool callback_uses_app_buffer = false;  // 是否用 multi_bulk_data_ 作为回调数据
+    const Direction dir = GetDirection();
+    const size_t max_chunk = MaxTransferSize();
+
+    if (multi_bulk_)
+    {
+      if (dir == Direction::IN)
+      {
+        // ========= IN 方向：device -> host，多包发送 =========
+        if (multi_bulk_remain_ > 0)
+        {
+          // 还有剩余没发送的字节，准备下一包
+          auto ep_buf = GetBuffer();
+
+          // 已经拷贝出去的字节数 = 总长 - 剩余
+          const size_t sent = multi_bulk_data_.size_ - multi_bulk_remain_;
+
+          size_t chunk = max_chunk;
+          if (chunk > multi_bulk_remain_)
+          {
+            chunk = multi_bulk_remain_;
+          }
+
+          auto src = static_cast<const uint8_t*>(multi_bulk_data_.addr_) + sent;
+          auto dst = static_cast<uint8_t*>(ep_buf.addr_);
+
+          Memory::FastCopy(dst, src, chunk);
+          multi_bulk_remain_ -= chunk;
+
+          // 启动下一次传输（中间过程不回调上层）
+          SetState(State::IDLE);
+          (void)Transfer(chunk);
+          return;
+        }
+        else
+        {
+          // 已经没有剩余需要发送了，这是最后一包完成
+          multi_bulk_ = false;
+          // 对 TX 来说，上层一般只关心“发完了”，data 内容用不用无所谓，下面走公共尾部
+        }
+      }
+      else
+      {
+        // ========= OUT 方向：host -> device，多包接收 =========
+        auto ep_buf = GetBuffer();
+
+        size_t prev_remain = multi_bulk_remain_;
+        size_t recvd = actual_transfer_size;
+
+        // 理论上 recvd 不会超过我们这次要求的长度，但这里做个保护
+        if (recvd > prev_remain)
+        {
+          recvd = prev_remain;
+        }
+
+        // 已写入应用 buffer 的偏移 = 总长 - 之前剩余
+        const size_t offset = multi_bulk_data_.size_ - prev_remain;
+
+        auto dst = static_cast<uint8_t*>(multi_bulk_data_.addr_) + offset;
+        auto src = static_cast<const uint8_t*>(ep_buf.addr_);
+
+        // 把本次收到的数据拷到应用层 buffer
+        Memory::FastCopy(dst, src, recvd);
+
+        // 更新剩余可写容量
+        multi_bulk_remain_ = prev_remain - recvd;
+
+        const bool short_packet = (recvd < max_chunk);
+        const bool buffer_full = (multi_bulk_remain_ == 0);
+
+        if (!short_packet && !buffer_full)
+        {
+          // 还没结束：既没有 short packet，应用 buffer 也还有空间
+          size_t chunk = max_chunk;
+          if (chunk > multi_bulk_remain_)
+          {
+            chunk = multi_bulk_remain_;
+          }
+
+          SetState(State::IDLE);
+          (void)Transfer(chunk);
+          return;  // 中间过程不回调上层
+        }
+
+        // 否则：收到了 short packet 或 buffer 填满 -> 结束 multi-bulk
+        multi_bulk_ = false;
+        callback_uses_app_buffer = true;
+
+        // 对上层报告的实际总长度 = 已经写入应用 buffer 的字节数
+        actual_transfer_size = multi_bulk_data_.size_ - multi_bulk_remain_;
+      }
+    }
+
+    // ========= 走到这里：
+    // 1）不是 multi-bulk 的普通传输，或
+    // 2）multi-bulk（IN/OUT）已经完成，准备回调上层 =========
+
     SetState(State::IDLE);
 
-    ConstRawData data = UseDoubleBuffer()
-                            ? ConstRawData(GetDirection() == Direction::OUT
-                                               ? double_buffer_.ActiveBuffer()
-                                               : double_buffer_.PendingBuffer(),
-                                           actual_transfer_size)
-                            : ConstRawData(buffer_.addr_, actual_transfer_size);
+    ConstRawData data;
 
-    if (UseDoubleBuffer() && GetDirection() == Direction::OUT)
+    if (callback_uses_app_buffer)
     {
-      SwitchBuffer();
+      // multi-bulk OUT：回调给上层的是应用层的 buffer
+      data = ConstRawData(multi_bulk_data_.addr_, actual_transfer_size);
+    }
+    else
+    {
+      // 普通情况或 multi-bulk IN：保持原有逻辑
+      data = UseDoubleBuffer()
+                 ? ConstRawData(dir == Direction::OUT ? double_buffer_.ActiveBuffer()
+                                                      : double_buffer_.PendingBuffer(),
+                                actual_transfer_size)
+                 : ConstRawData(buffer_.addr_, actual_transfer_size);
+
+      if (UseDoubleBuffer() && dir == Direction::OUT)
+      {
+        // 原有 OUT 方向的双缓冲切换策略
+        SwitchBuffer();
+      }
     }
 
     on_transfer_complete_.Run(in_isr, data);
@@ -397,6 +560,9 @@ class Endpoint
   State state_ = State::DISABLED;      ///< 当前状态 / Endpoint status
   LibXR::RawData buffer_;              ///< 端点缓冲区 / Endpoint buffer
   LibXR::DoubleBuffer double_buffer_;  ///< 双缓冲区 / Double buffer
+  bool multi_bulk_ = false;             ///< 当前是否处于多包 bulk 发送过程
+  RawData multi_bulk_data_{};     ///< 应用层整体 buffer（addr = 起始地址，size_ = 总长度）
+  size_t multi_bulk_remain_ = 0;  ///< 剩余尚未发送的字节数
 };  // namespace LibXR::USB
 
 }  // namespace LibXR::USB
