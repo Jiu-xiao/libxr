@@ -25,7 +25,8 @@ class CAN
     EXTENDED = 1,         ///< 扩展数据帧（29-bit ID）。Extended data frame (29-bit ID).
     REMOTE_STANDARD = 2,  ///< 标准远程帧。Standard remote frame.
     REMOTE_EXTENDED = 3,  ///< 扩展远程帧。Extended remote frame.
-    TYPE_NUM = 4          ///< 类型数量上界。Number of frame types.
+    ERROR = 4,            ///< 错误帧（虚拟事件）。Error frame (virtual event).
+    TYPE_NUM = 5          ///< 类型数量上界。Number of frame types.
   };
 
   /**
@@ -59,8 +60,8 @@ class CAN
    */
   struct Configuration
   {
-    uint32_t bitrate = 0;       ///< 目标仲裁波特率。Target nominal bitrate.
-    float sample_point = 0.0f;  ///< 目标采样点（0~1）。Target sample point (0~1).
+    uint32_t bitrate = 0;       ///< 仲裁相位目标波特率。Target nominal bitrate.
+    float sample_point = 0.0f;  ///< 仲裁相位采样点（0~1）。Nominal sample point (0–1).
 
     BitTiming bit_timing{};  ///< 位时序配置。Bit timing configuration.
     Mode mode{};             ///< 工作模式。Operating mode.
@@ -74,7 +75,7 @@ class CAN
   virtual ErrorCode SetConfig(const CAN::Configuration &cfg) = 0;
 
   /**
-   * @brief 获取 CAN 外设时钟频率（单位 Hz）。
+   * @brief 获取 CAN 外设时钟频率（Hz）。
    *        Get CAN peripheral clock frequency in Hz.
    */
   virtual uint32_t GetClockFreq() const = 0;
@@ -95,10 +96,53 @@ class CAN
    */
   struct __attribute__((packed)) ClassicPack
   {
-    uint32_t id;      ///< CAN ID（11 或 29 bit）。CAN ID (11 or 29 bits).
+    uint32_t id;      ///< CAN ID（11/29 bit 或 ErrorID）。CAN ID (11/29 bits or ErrorID).
     Type type;        ///< 帧类型。Frame type.
-    uint8_t data[8];  ///< 数据载荷（最多 8 字节）。Data payload (up to 8 bytes).
+    uint8_t dlc;      ///< 有效数据长度（0~8）。Data length code (0–8).
+    uint8_t data[8];  ///< 数据载荷。Data payload (up to 8 bytes).
   };
+
+  /// 错误 ID 前缀 Error ID prefix.
+  static constexpr uint32_t CAN_ERROR_ID_PREFIX = 0xFFFF0000u;
+
+  /**
+   * @enum ErrorID
+   * @brief ClassicPack::type == Type::ERROR 时使用的虚拟 ID。
+   *        Virtual IDs used when ClassicPack::type == Type::ERROR.
+   */
+  enum class ErrorID : uint32_t
+  {
+    CAN_ERROR_ID_GENERIC = CAN_ERROR_ID_PREFIX,
+    CAN_ERROR_ID_BUS_OFF = CAN_ERROR_ID_PREFIX + 1,
+    CAN_ERROR_ID_ERROR_PASSIVE = CAN_ERROR_ID_PREFIX + 2,
+    CAN_ERROR_ID_ERROR_WARNING = CAN_ERROR_ID_PREFIX + 3,
+    CAN_ERROR_ID_PROTOCOL = CAN_ERROR_ID_PREFIX + 4,
+    CAN_ERROR_ID_ACK = CAN_ERROR_ID_PREFIX + 5,
+    CAN_ERROR_ID_STUFF = CAN_ERROR_ID_PREFIX + 6,
+    CAN_ERROR_ID_FORM = CAN_ERROR_ID_PREFIX + 7,
+    CAN_ERROR_ID_BIT0 = CAN_ERROR_ID_PREFIX + 8,
+    CAN_ERROR_ID_BIT1 = CAN_ERROR_ID_PREFIX + 9,
+    CAN_ERROR_ID_CRC = CAN_ERROR_ID_PREFIX + 10,
+    CAN_ERROR_ID_OTHER = CAN_ERROR_ID_PREFIX + 11
+  };
+
+  /// 将 ErrorID 转为 id。Convert ErrorID to ClassicPack::id.
+  static constexpr uint32_t FromErrorID(ErrorID e) noexcept
+  {
+    return static_cast<uint32_t>(e);
+  }
+
+  /// 判断 id 是否处于错误 ID 空间。Check if id is in error ID space.
+  static constexpr bool IsErrorId(uint32_t id) noexcept
+  {
+    return (id & 0xFFFF0000u) == CAN_ERROR_ID_PREFIX;
+  }
+
+  /// 将 id 解释为 ErrorID（调用前建议先用 IsErrorId 检查）。Interpret id as ErrorID.
+  static constexpr ErrorID ToErrorID(uint32_t id) noexcept
+  {
+    return static_cast<ErrorID>(id);
+  }
 
   /// 回调类型。Callback type.
   using Callback = LibXR::Callback<const ClassicPack &>;
@@ -188,7 +232,7 @@ class FDCAN : public CAN
   {
     uint32_t id;       ///< CAN ID。CAN ID.
     Type type;         ///< 帧类型。Frame type.
-    uint8_t len;       ///< 数据长度，最大 64 字节。Data length, up to 64 bytes.
+    uint8_t len;       ///< 数据长度（0~64）。Data length (0–64 bytes).
     uint8_t data[64];  ///< 数据载荷。Data payload.
   };
 
@@ -244,7 +288,7 @@ class FDCAN : public CAN
    */
   struct Configuration : public CAN::Configuration
   {
-    uint32_t data_bitrate = 0;       ///< 数据相位目标波特率。Target data-phase bitrate.
+    uint32_t data_bitrate = 0;       ///< 数据相位波特率。Data-phase bitrate.
     float data_sample_point = 0.0f;  ///< 数据相位采样点。Data-phase sample point.
 
     DataBitTiming data_timing{};  ///< 数据相位位时序。Data-phase bit timing.

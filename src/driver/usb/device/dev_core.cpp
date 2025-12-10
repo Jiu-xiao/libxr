@@ -13,7 +13,15 @@ DeviceCore::DeviceCore(
       device_desc_(spec, packet_size, vid, pid, bcd, config_desc_.GetConfigNum()),
       strings_(lang_list, reinterpret_cast<const uint8_t *>(uid.addr_), uid.size_),
       endpoint_({ep_pool, nullptr, nullptr, {}, {}}),
-      state_({false, speed, Context::UNKNOW, Context::UNKNOW, 0xFF, nullptr, false})
+      state_({false,
+              speed,
+              Context::UNKNOW,
+              Context::UNKNOW,
+              {nullptr, 0},
+              {nullptr, 0},
+              0xff,
+              nullptr,
+              false})
 {
   ASSERT(IsValidUSBCombination(spec, speed, packet_size));
 
@@ -803,16 +811,113 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket *setup,
 }
 
 ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket *&setup,
-                                           RequestDirection direction,
+                                           RequestDirection /*direction*/,
                                            Recipient recipient)
 {
-  UNUSED(in_isr);
-  UNUSED(setup);
-  UNUSED(direction);
-  UNUSED(recipient);
+  // 只处理 Vendor 请求（bmRequestType bits[6:5] == 10）
+  if ((setup->bmRequestType & 0x60) != 0x40)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
 
-  // TODO: 处理厂商自定义请求
-  return ErrorCode::NOT_SUPPORT;
+  DeviceClass *item = nullptr;
+
+  switch (recipient)
+  {
+    case Recipient::INTERFACE:
+    {
+      // 低字节 = 接口号
+      uint8_t if_num = static_cast<uint8_t>(setup->wIndex & 0xFF);
+      item = reinterpret_cast<DeviceClass *>(config_desc_.GetItemByInterfaceNum(if_num));
+      break;
+    }
+    case Recipient::ENDPOINT:
+    {
+      // 低字节 = 端点地址（含 0x80 方向位）
+      uint8_t ep_addr = static_cast<uint8_t>(setup->wIndex & 0xFF);
+      item = reinterpret_cast<DeviceClass *>(config_desc_.GetItemByEndpointAddr(ep_addr));
+      break;
+    }
+    default:
+      // 先不处理 DEVICE/OTHER 级别的 Vendor 请求，有需要可以后来加专用回调
+      return ErrorCode::NOT_SUPPORT;
+  }
+
+  if (!item)
+  {
+    return ErrorCode::NOT_FOUND;
+  }
+
+  DeviceClass::RequestResult result{};
+  auto ec = item->OnVendorRequest(in_isr, setup->bRequest, setup->wValue, setup->wLength,
+                                  setup->wIndex, result);
+  if (ec != ErrorCode::OK)
+  {
+    return ec;
+  }
+
+  const bool HAS_READ_BUF = (result.read_data.size_ > 0);
+  const bool HAS_WRITE_BUF = (result.write_data.size_ > 0);
+
+  // 不允许同时提供读写缓冲
+  if (HAS_READ_BUF && HAS_WRITE_BUF)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  // ---- Host -> Device（OUT）路径：从主机读数据进 read_data ----
+  if (HAS_READ_BUF)
+  {
+    // 要求缓冲区至少容得下 wLength
+    if (setup->wLength == 0 || result.read_data.size_ < setup->wLength)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    class_req_.read = true;
+    class_req_.write = false;
+    class_req_.class_ptr = item;
+    class_req_.b_request = setup->bRequest;
+
+    // 如果你想严格按 wLength 收，可以在这里改 size_ = wLength
+    // result.read_data.size_ = setup->wLength;
+
+    DevReadEP0Data(result.read_data, endpoint_.in0->MaxTransferSize());
+    return ErrorCode::OK;
+  }
+
+  // ---- Device -> Host（IN）路径：从 write_data 发数据给主机 ----
+  if (HAS_WRITE_BUF)
+  {
+    if (setup->wLength == 0)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    class_req_.write = true;
+    class_req_.read = false;
+    class_req_.class_ptr = item;
+    class_req_.b_request = setup->bRequest;
+
+    // 用 wLength 限制最大返回长度（DevWriteEP0Data 会 min(request_size, data.size_)）
+    DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize(), setup->wLength);
+    return ErrorCode::OK;
+  }
+
+  // ---- 无数据阶段，只需要 ZLP 的情况 ----
+  if (result.read_zlp)
+  {
+    ReadZLP();
+    return ErrorCode::OK;
+  }
+  if (result.write_zlp)
+  {
+    WriteZLP();
+    return ErrorCode::OK;
+  }
+
+  // 既没有缓冲也没有 ZLP：认为类已经处理完，不需要数据阶段
+  return ErrorCode::OK;
 }
 
 Speed DeviceCore::GetSpeed() const { return state_.speed; }

@@ -399,9 +399,16 @@ uint32_t STM32CAN::GetClockFreq() const
 
 ErrorCode STM32CAN::AddMessage(const ClassicPack& pack)
 {
+  // 错误帧由底层生成，不允许通过发送接口主动发
+  if (pack.type == Type::ERROR)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
   CAN_TxHeaderTypeDef txHeader;  // NOLINT
 
-  txHeader.DLC = sizeof(pack.data);
+  uint8_t dlc = (pack.dlc <= 8u) ? pack.dlc : 8u;
+  txHeader.DLC = dlc;
 
   switch (pack.type)
   {
@@ -425,8 +432,9 @@ ErrorCode STM32CAN::AddMessage(const ClassicPack& pack)
       ASSERT(false);
       return ErrorCode::FAILED;
   }
-  txHeader.StdId = (pack.type == Type::EXTENDED) ? 0 : pack.id;
-  txHeader.ExtId = (pack.type == Type::EXTENDED) ? pack.id : 0;
+
+  txHeader.StdId = (pack.type == Type::EXTENDED) ? 0u : pack.id;
+  txHeader.ExtId = (pack.type == Type::EXTENDED) ? pack.id : 0u;
   txHeader.TransmitGlobalTime = DISABLE;
 
   while (true)
@@ -488,6 +496,10 @@ void STM32CAN::ProcessRxInterrupt()
         rx_buff_.pack.type = Type::REMOTE_EXTENDED;
       }
     }
+
+    uint8_t dlc = (rx_buff_.header.DLC <= 8u) ? rx_buff_.header.DLC : 8u;
+    rx_buff_.pack.dlc = dlc;
+
     OnMessage(rx_buff_.pack, true);
   }
 }
@@ -496,7 +508,9 @@ void STM32CAN::ProcessTxInterrupt()
 {
   if (tx_pool_.Get(tx_buff_.pack) == ErrorCode::OK)
   {
-    tx_buff_.header.DLC = sizeof(tx_buff_.pack.data);
+    uint8_t dlc = (tx_buff_.pack.dlc <= 8u) ? tx_buff_.pack.dlc : 8u;
+    tx_buff_.header.DLC = dlc;
+
     switch (tx_buff_.pack.type)
     {
       case Type::STANDARD:
@@ -519,8 +533,11 @@ void STM32CAN::ProcessTxInterrupt()
         ASSERT(false);
         return;
     }
-    tx_buff_.header.StdId = (tx_buff_.pack.type == Type::EXTENDED) ? 0 : tx_buff_.pack.id;
-    tx_buff_.header.ExtId = (tx_buff_.pack.type == Type::EXTENDED) ? tx_buff_.pack.id : 0;
+
+    tx_buff_.header.StdId =
+        (tx_buff_.pack.type == Type::EXTENDED) ? 0u : tx_buff_.pack.id;
+    tx_buff_.header.ExtId =
+        (tx_buff_.pack.type == Type::EXTENDED) ? tx_buff_.pack.id : 0u;
     tx_buff_.header.TransmitGlobalTime = DISABLE;
 
     HAL_CAN_AddTxMessage(hcan_, &tx_buff_.header, tx_buff_.pack.data, &txMailbox);
@@ -543,6 +560,69 @@ void STM32CAN::ProcessTxInterrupt()
   }
 }
 
+void STM32CAN::ProcessErrorInterrupt()
+{
+  if (hcan_ == nullptr || hcan_->Instance == nullptr)
+  {
+    return;
+  }
+
+  uint32_t esr = hcan_->Instance->ESR;
+
+  CAN::ClassicPack pack{};
+  pack.type = CAN::Type::ERROR;
+  pack.dlc = 0;
+
+  CAN::ErrorID eid = CAN::ErrorID::CAN_ERROR_ID_GENERIC;
+
+  if (esr & CAN_ESR_BOFF)
+  {
+    eid = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
+  }
+  else if (esr & CAN_ESR_EPVF)
+  {
+    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
+  }
+  else if (esr & CAN_ESR_EWGF)
+  {
+    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
+  }
+  else
+  {
+    uint32_t lec = (esr >> 4) & 0x7u;
+
+    switch (lec)
+    {
+      case 0x01:
+        eid = CAN::ErrorID::CAN_ERROR_ID_STUFF;
+        break;
+      case 0x02:
+        eid = CAN::ErrorID::CAN_ERROR_ID_FORM;
+        break;
+      case 0x03:
+        eid = CAN::ErrorID::CAN_ERROR_ID_ACK;
+        break;
+      case 0x04:
+        eid = CAN::ErrorID::CAN_ERROR_ID_BIT1;
+        break;
+      case 0x05:
+        eid = CAN::ErrorID::CAN_ERROR_ID_BIT0;
+        break;
+      case 0x06:
+        eid = CAN::ErrorID::CAN_ERROR_ID_CRC;
+        break;
+      default:
+        eid = CAN::ErrorID::CAN_ERROR_ID_OTHER;
+        break;
+    }
+  }
+
+  pack.id = static_cast<uint32_t>(eid);
+
+  // 在中断上下文中分发错误帧
+  OnMessage(pack, true);
+}
+
 extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan)
 {
   STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
@@ -563,6 +643,12 @@ extern "C" void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef* hcan)
 
 extern "C" void HAL_CAN_ErrorCallback(CAN_HandleTypeDef* hcan)
 {
+  STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
+  if (can)
+  {
+    can->ProcessErrorInterrupt();
+  }
+
   HAL_CAN_ResetError(hcan);
 }
 

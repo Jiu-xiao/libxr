@@ -82,6 +82,12 @@ class STM32CAN : public CAN
    */
   void ProcessTxInterrupt();
 
+  /**
+   * @brief 处理错误中断
+   *
+   */
+  void ProcessErrorInterrupt();
+
   CAN_HandleTypeDef* hcan_;
 
   stm32_can_id_t id_;

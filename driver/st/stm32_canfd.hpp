@@ -97,8 +97,8 @@ class STM32CANFD : public FDCAN
   typename std::enable_if<HasMessageRAMOffset<T>::value, void>::type
   CheckMessageRAMOffset(T& fdcan_handle, uint32_t max_words = FDCAN_MESSAGE_RAM_WORDS_MAX)
   {
-  using HandleT = std::remove_reference_t<decltype(*fdcan_handle)>;
-  using InitT   = decltype(HandleT{}.Init);
+    using HandleT = std::remove_reference_t<decltype(*fdcan_handle)>;
+    using InitT = decltype(HandleT{}.Init);
 
     // NOLINTNEXTLINE
     static const auto FDCAN_ElmtWords = [](uint32_t sz) -> uint32_t
@@ -237,6 +237,13 @@ class STM32CANFD : public FDCAN
    *
    */
   void ProcessTxInterrupt();
+
+  /**
+   * @brief 处理错误状态中断
+   *
+   * @param error_status_its 错误状态标志 Error status flags
+   */
+  void ProcessErrorStatusInterrupt(uint32_t error_status_its);
 
   /**
    * @brief 获取硬件发送队列空闲大小

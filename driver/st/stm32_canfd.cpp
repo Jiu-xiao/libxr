@@ -193,6 +193,12 @@ ErrorCode STM32CANFD::Init(void)
 
 ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
 {
+  // 错误帧由底层生成，不允许通过发送接口主动发
+  if (pack.type == Type::ERROR)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
   FDCAN_TxHeaderTypeDef header;  // NOLINT
 
   header.Identifier = pack.id;
@@ -222,12 +228,14 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
       header.IdType = FDCAN_EXTENDED_ID;
       header.TxFrameType = FDCAN_REMOTE_FRAME;
       break;
+
     default:
       ASSERT(false);
       return ErrorCode::FAILED;
   }
 
-  header.DataLength = FDCAN_DLC_BYTES_8;
+  uint8_t dlc = (pack.dlc <= 8u) ? pack.dlc : 8u;
+  header.DataLength = BytesToDlc(dlc);
   header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
   header.BitRateSwitch = FDCAN_BRS_OFF;
   header.FDFormat = FDCAN_CLASSIC_CAN;
@@ -613,6 +621,12 @@ uint32_t STM32CANFD::GetClockFreq() const
 
 ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
 {
+  // 错误帧同样不通过发送接口发出
+  if (pack.type == Type::ERROR)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
   FDCAN_TxHeaderTypeDef header;
   ASSERT(pack.len <= 64);
 
@@ -707,6 +721,12 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
       rx_buff_.pack.type =
           (rx_buff_.header.IdType == FDCAN_EXTENDED_ID) ? Type::EXTENDED : Type::STANDARD;
 
+      uint32_t bytes = DlcToBytes(rx_buff_.header.DataLength);
+      if (bytes > 8u)
+      {
+        bytes = 8u;
+      }
+
       if (rx_buff_.header.RxFrameType != FDCAN_DATA_FRAME)
       {
         if (rx_buff_.pack.type == Type::STANDARD)
@@ -717,10 +737,15 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
         {
           rx_buff_.pack.type = Type::REMOTE_EXTENDED;
         }
+        rx_buff_.pack.dlc = static_cast<uint8_t>(bytes);
       }
       else
       {
-        memcpy(rx_buff_.pack.data, rx_buff_.pack_fd.data, 8);
+        rx_buff_.pack.dlc = static_cast<uint8_t>(bytes);
+        if (bytes > 0u)
+        {
+          memcpy(rx_buff_.pack.data, rx_buff_.pack_fd.data, bytes);
+        }
       }
 
       OnMessage(rx_buff_.pack, true);
@@ -754,6 +779,7 @@ void STM32CANFD::ProcessTxInterrupt()
         tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
         tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
         break;
+
       default:
         ASSERT(false);
         return;
@@ -791,11 +817,14 @@ void STM32CANFD::ProcessTxInterrupt()
         tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
         tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
         break;
+
       default:
         ASSERT(false);
         return;
     }
-    tx_buff_.header.DataLength = 8;
+
+    uint8_t dlc = (tx_buff_.pack.dlc <= 8u) ? tx_buff_.pack.dlc : 8u;
+    tx_buff_.header.DataLength = BytesToDlc(dlc);
     tx_buff_.header.FDFormat = FDCAN_CLASSIC_CAN;
     tx_buff_.header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_buff_.header.MessageMarker = 0x00;
@@ -804,6 +833,77 @@ void STM32CANFD::ProcessTxInterrupt()
 
     HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack.data);
   }
+}
+
+void STM32CANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
+{
+  FDCAN_ProtocolStatusTypeDef protocol_status = {};
+  HAL_FDCAN_GetProtocolStatus(hcan_, &protocol_status);
+
+#ifdef FDCAN_IT_BUS_OFF
+#ifdef FDCAN_CCCR_INIT
+  if ((error_status_its & FDCAN_IT_BUS_OFF) != 0u && protocol_status.BusOff != 0u)
+  {
+    CLEAR_BIT(hcan_->Instance->CCCR, FDCAN_CCCR_INIT);
+  }
+#endif
+#endif
+
+  CAN::ClassicPack pack{};
+  pack.type = CAN::Type::ERROR;
+  pack.dlc = 0;
+
+  CAN::ErrorID eid = CAN::ErrorID::CAN_ERROR_ID_GENERIC;
+
+  if (protocol_status.BusOff != 0u)
+  {
+    eid = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
+  }
+  else if (protocol_status.ErrorPassive != 0u)
+  {
+    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
+  }
+  else if (protocol_status.Warning != 0u)
+  {
+    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
+  }
+  else
+  {
+    uint32_t lec = protocol_status.LastErrorCode & 0x7u;
+    if (lec == 0u)
+    {
+      lec = protocol_status.DataLastErrorCode & 0x7u;
+    }
+
+    switch (lec)
+    {
+      case 0x01u:
+        eid = CAN::ErrorID::CAN_ERROR_ID_STUFF;
+        break;
+      case 0x02u:
+        eid = CAN::ErrorID::CAN_ERROR_ID_FORM;
+        break;
+      case 0x03u:
+        eid = CAN::ErrorID::CAN_ERROR_ID_ACK;
+        break;
+      case 0x04u:
+        eid = CAN::ErrorID::CAN_ERROR_ID_BIT1;
+        break;
+      case 0x05u:
+        eid = CAN::ErrorID::CAN_ERROR_ID_BIT0;
+        break;
+      case 0x06u:
+        eid = CAN::ErrorID::CAN_ERROR_ID_CRC;
+        break;
+      default:
+        eid = CAN::ErrorID::CAN_ERROR_ID_OTHER;
+        break;
+    }
+  }
+
+  pack.id = static_cast<uint32_t>(eid);
+
+  OnMessage(pack, true);
 }
 
 extern "C" void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef* hcan)
@@ -819,19 +919,10 @@ extern "C" void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef* hcan)
 extern "C" void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef* hfdcan,
                                               uint32_t ErrorStatusITs)
 {
-  if ((ErrorStatusITs & FDCAN_IT_BUS_OFF) != RESET)
-  {
-    FDCAN_ProtocolStatusTypeDef protocol_status = {};
-    HAL_FDCAN_GetProtocolStatus(hfdcan, &protocol_status);
-    if (protocol_status.BusOff)
-    {
-      CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
-    }
-  }
-
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hfdcan->Instance)];
   if (can)
   {
+    can->ProcessErrorStatusInterrupt(ErrorStatusITs);
     can->ProcessTxInterrupt();
   }
 }
