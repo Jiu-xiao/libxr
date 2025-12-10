@@ -1,5 +1,7 @@
 #pragma once
 
+#include <climits>
+
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "logger.hpp"
