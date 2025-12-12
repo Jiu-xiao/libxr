@@ -1,19 +1,5 @@
 #include "libxr_def.hpp"
 
-/**
- * @brief Fast memory copy routine optimized for alignment and burst copying.
- *
- * This function copies memory from @p src to @p dst, using different strategies based on
- * the alignment of the pointers and the address difference. If both pointers have the
- * same alignment offset, it performs head alignment, then burst copies in 8- or 4-byte
- * words (depending on @c LIBXR_ALIGN_SIZE). If alignment differs, it tries to use the
- * largest possible word copy, falling back to 4-byte or 2-byte copying if possible, or
- * byte copy otherwise.
- *
- * @param dst   Destination buffer pointer.
- * @param src   Source buffer pointer.
- * @param size  Number of bytes to copy.
- */
 void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
 {
   uint8_t* d = static_cast<uint8_t*>(dst);
@@ -109,7 +95,7 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
 
 #if LIBXR_ALIGN_SIZE == 8
     /// If address difference is a multiple of 4, use 4-byte copying.
-    if ((addr_diff & 3) == 0)
+    if ((addr_diff & 3) == 0 && size > 0)
     {
       while ((reinterpret_cast<uintptr_t>(d) & 3) && size)
       {
@@ -145,7 +131,7 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
     /// If address difference is even, use 2-byte copying.
     else
 #endif
-        if ((addr_diff & 1) == 0)
+        if ((addr_diff & 1) == 0 && size > 0)
     {
       if (reinterpret_cast<uintptr_t>(d) & 1)
       {
@@ -186,4 +172,297 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
   {
     *d++ = *s++;
   }
+}
+
+void LibXR::Memory::FastSet(void* dst, uint8_t value, size_t size)
+{
+  if (size == 0)
+  {
+    return;
+  }
+
+  uint8_t* d = static_cast<uint8_t*>(dst);
+
+  uintptr_t d_offset = reinterpret_cast<uintptr_t>(d) & (LIBXR_ALIGN_SIZE - 1);
+
+  // 先处理头部到对齐
+  if (d_offset)
+  {
+    size_t head = LIBXR_ALIGN_SIZE - d_offset;
+    if (head > size)
+    {
+      head = size;
+    }
+    while (head--)
+    {
+      *d++ = value;
+      --size;
+    }
+  }
+
+#if LIBXR_ALIGN_SIZE == 8
+  // 8-byte pattern
+  uint64_t pat = value;
+  pat |= pat << 8;
+  pat |= pat << 16;
+  pat |= pat << 32;
+
+  auto* dw = reinterpret_cast<uint64_t*>(d);
+
+  while (size >= 64)
+  {
+    dw[0] = pat;
+    dw[1] = pat;
+    dw[2] = pat;
+    dw[3] = pat;
+    dw[4] = pat;
+    dw[5] = pat;
+    dw[6] = pat;
+    dw[7] = pat;
+    dw += 8;
+    size -= 64;
+  }
+  while (size >= 8)
+  {
+    *dw++ = pat;
+    size -= 8;
+  }
+
+  d = reinterpret_cast<uint8_t*>(dw);
+#else
+  // 4-byte pattern
+  uint32_t pat = value;
+  pat |= pat << 8;
+  pat |= pat << 16;
+
+  auto* dw = reinterpret_cast<uint32_t*>(d);
+
+  while (size >= 32)
+  {
+    dw[0] = pat;
+    dw[1] = pat;
+    dw[2] = pat;
+    dw[3] = pat;
+    dw[4] = pat;
+    dw[5] = pat;
+    dw[6] = pat;
+    dw[7] = pat;
+    dw += 8;
+    size -= 32;
+  }
+  while (size >= 4)
+  {
+    *dw++ = pat;
+    size -= 4;
+  }
+
+  d = reinterpret_cast<uint8_t*>(dw);
+#endif
+
+  // 尾巴
+  while (size--)
+  {
+    *d++ = value;
+  }
+}
+
+int LibXR::Memory::FastCmp(const void* a, const void* b, size_t size)
+{
+  const uint8_t* p = static_cast<const uint8_t*>(a);
+  const uint8_t* q = static_cast<const uint8_t*>(b);
+
+  if ((size == 0) || (p == q))
+  {
+    return 0;
+  }
+
+  auto byte_cmp = [](const uint8_t* x, const uint8_t* y, size_t n) -> int
+  {
+    for (size_t i = 0; i < n; ++i)
+    {
+      int diff = static_cast<int>(x[i]) - static_cast<int>(y[i]);
+      if (diff != 0)
+      {
+        return diff;
+      }
+    }
+    return 0;
+  };
+
+  uintptr_t p_off = reinterpret_cast<uintptr_t>(p) & (LIBXR_ALIGN_SIZE - 1);
+  uintptr_t q_off = reinterpret_cast<uintptr_t>(q) & (LIBXR_ALIGN_SIZE - 1);
+
+  // 若同相位：先补齐到 LIBXR_ALIGN_SIZE 对齐再做宽比较
+  if ((p_off == q_off) && (p_off != 0))
+  {
+    size_t head = LIBXR_ALIGN_SIZE - p_off;
+    if (head > size)
+    {
+      head = size;
+    }
+
+    while (head--)
+    {
+      int diff = static_cast<int>(*p++) - static_cast<int>(*q++);
+      if (diff != 0)
+      {
+        return diff;
+      }
+      --size;
+    }
+  }
+
+#if LIBXR_ALIGN_SIZE == 8
+  // 8-byte compare（仅在两者均 8 对齐时才安全/快）
+  if ((((reinterpret_cast<uintptr_t>(p) | reinterpret_cast<uintptr_t>(q)) & 7u) == 0u))
+  {
+    auto* pw = reinterpret_cast<const uint64_t*>(p);
+    auto* qw = reinterpret_cast<const uint64_t*>(q);
+
+    while (size >= 64)
+    {
+      if (pw[0] != qw[0])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 0),
+                        reinterpret_cast<const uint8_t*>(qw + 0), 8);
+      }
+      if (pw[1] != qw[1])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 1),
+                        reinterpret_cast<const uint8_t*>(qw + 1), 8);
+      }
+      if (pw[2] != qw[2])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 2),
+                        reinterpret_cast<const uint8_t*>(qw + 2), 8);
+      }
+      if (pw[3] != qw[3])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 3),
+                        reinterpret_cast<const uint8_t*>(qw + 3), 8);
+      }
+      if (pw[4] != qw[4])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 4),
+                        reinterpret_cast<const uint8_t*>(qw + 4), 8);
+      }
+      if (pw[5] != qw[5])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 5),
+                        reinterpret_cast<const uint8_t*>(qw + 5), 8);
+      }
+      if (pw[6] != qw[6])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 6),
+                        reinterpret_cast<const uint8_t*>(qw + 6), 8);
+      }
+      if (pw[7] != qw[7])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 7),
+                        reinterpret_cast<const uint8_t*>(qw + 7), 8);
+      }
+
+      pw += 8;
+      qw += 8;
+      size -= 64;
+    }
+
+    while (size >= 8)
+    {
+      if (*pw != *qw)
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw),
+                        reinterpret_cast<const uint8_t*>(qw), 8);
+      }
+      ++pw;
+      ++qw;
+      size -= 8;
+    }
+
+    p = reinterpret_cast<const uint8_t*>(pw);
+    q = reinterpret_cast<const uint8_t*>(qw);
+  }
+#else
+  // 4-byte compare（两者均 4 对齐）
+  if ((((reinterpret_cast<uintptr_t>(p) | reinterpret_cast<uintptr_t>(q)) & 3u) == 0u))
+  {
+    auto* pw = reinterpret_cast<const uint32_t*>(p);
+    auto* qw = reinterpret_cast<const uint32_t*>(q);
+
+    while (size >= 32)
+    {
+      if (pw[0] != qw[0])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 0),
+                        reinterpret_cast<const uint8_t*>(qw + 0), 4);
+      }
+      if (pw[1] != qw[1])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 1),
+                        reinterpret_cast<const uint8_t*>(qw + 1), 4);
+      }
+      if (pw[2] != qw[2])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 2),
+                        reinterpret_cast<const uint8_t*>(qw + 2), 4);
+      }
+      if (pw[3] != qw[3])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 3),
+                        reinterpret_cast<const uint8_t*>(qw + 3), 4);
+      }
+      if (pw[4] != qw[4])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 4),
+                        reinterpret_cast<const uint8_t*>(qw + 4), 4);
+      }
+      if (pw[5] != qw[5])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 5),
+                        reinterpret_cast<const uint8_t*>(qw + 5), 4);
+      }
+      if (pw[6] != qw[6])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 6),
+                        reinterpret_cast<const uint8_t*>(qw + 6), 4);
+      }
+      if (pw[7] != qw[7])
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 7),
+                        reinterpret_cast<const uint8_t*>(qw + 7), 4);
+      }
+
+      pw += 8;
+      qw += 8;
+      size -= 32;
+    }
+
+    while (size >= 4)
+    {
+      if (*pw != *qw)
+      {
+        return byte_cmp(reinterpret_cast<const uint8_t*>(pw),
+                        reinterpret_cast<const uint8_t*>(qw), 4);
+      }
+      ++pw;
+      ++qw;
+      size -= 4;
+    }
+
+    p = reinterpret_cast<const uint8_t*>(pw);
+    q = reinterpret_cast<const uint8_t*>(qw);
+  }
+#endif
+
+  // tail byte compare（包括：未满足宽比较对齐条件的情况）
+  while (size--)
+  {
+    int diff = static_cast<int>(*p++) - static_cast<int>(*q++);
+    if (diff != 0)
+    {
+      return diff;
+    }
+  }
+
+  return 0;
 }

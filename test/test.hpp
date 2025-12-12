@@ -23,5 +23,6 @@ void test_string();
 void test_cycle_value();
 void test_pid();
 void test_pipe();
+void test_memory();
 
 bool equal(double a, double b);

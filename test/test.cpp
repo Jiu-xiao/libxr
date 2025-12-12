@@ -34,6 +34,7 @@ static void run_libxr_tests()
 
   TestCase core_tests[] = {
       {"pipe", test_pipe},
+      {"memory", test_memory},
   };
 
   TestCase synchronization_tests[] = {
