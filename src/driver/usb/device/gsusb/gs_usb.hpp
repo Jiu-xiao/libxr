@@ -34,8 +34,8 @@ class GsUsbClass : public DeviceClass
  public:
   // ============== 构造：经典 CAN ==============
   GsUsbClass(std::initializer_list<LibXR::CAN *> cans,
-             Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-             Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
+             Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP1,
+             Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP2,
              LibXR::GPIO *identify_gpio = nullptr,
              LibXR::GPIO *termination_gpio = nullptr, DatabaseType *database = nullptr)
       : data_in_ep_num_(data_in_ep_num),
@@ -1004,13 +1004,13 @@ class GsUsbClass : public DeviceClass
 
     if (pad_pkts_to_max_pkt_size_ && !is_fd && len < mps)
     {
-      std::memcpy(tmp_buf, &hf, len);
-      std::memset(tmp_buf + len, 0, mps - len);
+      Memory::FastCopy(tmp_buf, &hf, len);
+      Memory::FastSet(tmp_buf + len, 0, mps - len);
       send_ptr = tmp_buf;
       send_len = mps;
     }
 
-    std::memcpy(buffer.addr_, send_ptr, send_len);
+    Memory::FastCopy(buffer.addr_, send_ptr, send_len);
     ep_data_in_->Transfer(send_len);
 
     // 出队后空余增大，有机会恢复 host 的 OUT 传输
@@ -1085,8 +1085,8 @@ class GsUsbClass : public DeviceClass
     bt_const_ext_.btc = bt_const_.btc;
     bt_const_ext_.dbtc = bt_const_.btc;
 
-    std::memset(config_.data(), 0, sizeof(config_));
-    std::memset(fd_config_.data(), 0, sizeof(fd_config_));
+    Memory::FastSet(config_.data(), 0, sizeof(config_));
+    Memory::FastSet(fd_config_.data(), 0, sizeof(fd_config_));
   }
 
   void InitDeviceConfigFd()
@@ -1125,8 +1125,8 @@ class GsUsbClass : public DeviceClass
     bt_const_ext_.btc = bt_const_.btc;
     bt_const_ext_.dbtc = bt_const_.btc;  // TODO: 真正 FD 数据相位参数
 
-    std::memset(config_.data(), 0, sizeof(config_));
-    std::memset(fd_config_.data(), 0, sizeof(fd_config_));
+    Memory::FastSet(config_.data(), 0, sizeof(config_));
+    Memory::FastSet(fd_config_.data(), 0, sizeof(fd_config_));
   }
 
   ErrorCode HandleHostFormat(const GsUsb::HostConfig &cfg)
@@ -1357,7 +1357,7 @@ class GsUsbClass : public DeviceClass
 
     if (dlc > 0u)
     {
-      std::memcpy(pack.data, hf.data, dlc);
+      Memory::FastCopy(pack.data, hf.data, dlc);
     }
   }
 
@@ -1396,11 +1396,11 @@ class GsUsbClass : public DeviceClass
 
     if (dlc > 0u)
     {
-      std::memcpy(hf.data, pack.data, dlc);
+      Memory::FastCopy(hf.data, pack.data, dlc);
     }
     if (dlc < 8u)
     {
-      std::memset(hf.data + dlc, 0, 8u - dlc);  // padding
+      Memory::FastSet(hf.data + dlc, 0, 8u - dlc);  // padding
     }
 
     hf.timestamp_us = MakeTimestampUs();
@@ -1432,7 +1432,7 @@ class GsUsbClass : public DeviceClass
     pack.len = len;
     if (len > 0u)
     {
-      std::memcpy(pack.data, hf.data, len);
+      Memory::FastCopy(pack.data, hf.data, len);
     }
   }
 
@@ -1467,7 +1467,7 @@ class GsUsbClass : public DeviceClass
 
     if (pack.len > 0u)
     {
-      std::memcpy(hf.data, pack.data, pack.len);
+      Memory::FastCopy(hf.data, pack.data, pack.len);
     }
 
     hf.timestamp_us = MakeTimestampUs();
@@ -1532,7 +1532,7 @@ class GsUsbClass : public DeviceClass
     hf.reserved = 0;
 
     // 简化版：data[0..7] 全 0；只依赖 can_id 的错误类别
-    std::memset(hf.data, 0, sizeof(hf.data));
+    Memory::FastSet(hf.data, 0, sizeof(hf.data));
 
     hf.timestamp_us = MakeTimestampUs();
 

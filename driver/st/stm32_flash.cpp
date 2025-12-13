@@ -146,10 +146,10 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
   {
     size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);
 
-    std::memset(flash_word_buffer, 0xFF, sizeof(flash_word_buffer));
-    std::memcpy(flash_word_buffer, src + written, chunk_size);
+    Memory::FastSet(flash_word_buffer, 0xFF, sizeof(flash_word_buffer));
+    Memory::FastCopy(flash_word_buffer, src + written, chunk_size);
 
-    if (memcmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
+    if (Memory::FastCmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
                chunk_size) == 0)
     {
       written += chunk_size;
@@ -171,7 +171,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
   {
     size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);
 
-    if (memcmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
+    if (Memory::FastCmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
                chunk_size) == 0)
     {
       written += chunk_size;
@@ -179,7 +179,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
     }
 
     uint64_t word = 0xFFFFFFFFFFFFFFFF;
-    std::memcpy(&word, src + written, chunk_size);
+    Memory::FastCopy(&word, src + written, chunk_size);
 
     if (HAL_FLASH_Program(program_type_, addr + written, word) != HAL_OK)
     {

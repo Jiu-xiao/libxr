@@ -123,7 +123,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
 
   read_ = false;
 
-  memcpy(dma_buff_.addr_, write_data.addr_, write_data.size_);
+  Memory::FastCopy(dma_buff_.addr_, write_data.addr_, write_data.size_);
 
   if (write_data.size_ > dma_enable_min_size_)
   {
@@ -218,7 +218,7 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
   read_ = false;
 
-  memcpy(dma_buff_.addr_, write_data.addr_, write_data.size_);
+  Memory::FastCopy(dma_buff_.addr_, write_data.addr_, write_data.size_);
 
   if (write_data.size_ > dma_enable_min_size_)
   {
@@ -284,7 +284,7 @@ extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
-    memcpy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
+    Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
     i2c->read_op_.UpdateStatus(true, ErrorCode::OK);
   }
 }
@@ -315,7 +315,7 @@ extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
-    memcpy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
+    Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
     i2c->read_op_.UpdateStatus(true, ErrorCode::OK);
   }
 }

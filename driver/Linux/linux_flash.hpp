@@ -67,7 +67,7 @@ class LinuxBinaryFileFlash : public Flash
       return ErrorCode::OUT_OF_RANGE;
     }
 
-    std::memset(flash_area_.data() + offset, 0xFF, size);
+    Memory::FastSet(flash_area_.data() + offset, 0xFF, size);
 
     return SyncToFile();
   }
@@ -112,7 +112,7 @@ class LinuxBinaryFileFlash : public Flash
       }
     }
 
-    std::memcpy(dst, src, data.size_);
+    Memory::FastCopy(dst, src, data.size_);
     return SyncToFile();
   }
 

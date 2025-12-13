@@ -63,6 +63,7 @@ ErrorCode STM32CAN::Init(void)
   can_filter.FilterMaskIdLow = 0;
   can_filter.FilterFIFOAssignment = fifo_;
   can_filter.FilterActivation = ENABLE;
+
 #ifdef CAN3
   if (id_ == STM32_CAN1)
   {
@@ -109,6 +110,7 @@ ErrorCode STM32CAN::Init(void)
     ASSERT(false);
     return ErrorCode::FAILED;
   }
+
   can_filter.FilterFIFOAssignment = fifo_;
 
   if (HAL_CAN_ConfigFilter(hcan_, &can_filter) != HAL_OK)
@@ -397,72 +399,106 @@ uint32_t STM32CAN::GetClockFreq() const
   return HAL_RCC_GetPCLK1Freq();
 }
 
+inline void STM32CAN::BuildTxHeader(const ClassicPack& p, CAN_TxHeaderTypeDef& h)
+{
+  const bool IS_EXT = (p.type == Type::EXTENDED) || (p.type == Type::REMOTE_EXTENDED);
+  const bool IS_RTR =
+      (p.type == Type::REMOTE_STANDARD) || (p.type == Type::REMOTE_EXTENDED);
+
+  h.DLC = (p.dlc <= 8u) ? p.dlc : 8u;
+  h.IDE = IS_EXT ? CAN_ID_EXT : CAN_ID_STD;
+  h.RTR = IS_RTR ? CAN_RTR_REMOTE : CAN_RTR_DATA;
+
+  h.StdId = IS_EXT ? 0u : (p.id & 0x7FFu);
+  h.ExtId = IS_EXT ? (p.id & 0x1FFFFFFFu) : 0u;
+
+  h.TransmitGlobalTime = DISABLE;
+}
+
+void STM32CAN::TxService()
+{
+  if (hcan_ == nullptr || hcan_->Instance == nullptr)
+  {
+    return;
+  }
+
+  // 标记：需要一次 TX 服务（无论本次是否抢到锁）
+  tx_pend_.store(1u, std::memory_order_release);
+
+  // 尝试抢占服务锁：0 -> 1
+  uint32_t expected = 0u;
+  if (!tx_lock_.compare_exchange_strong(expected, 1u, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
+  {
+    // 有别的上下文在服务；PEND 已置位，它会在结束时看到并再服务
+    return;
+  }
+
+  constexpr uint32_t TME_MASK = (CAN_TSR_TME0 | CAN_TSR_TME1 | CAN_TSR_TME2);
+
+  for (;;)
+  {
+    // 本轮服务开始：消费掉 pend（期间如有新 kick，会再次置 1）
+    tx_pend_.store(0u, std::memory_order_release);
+
+    // 尽可能把空 mailbox 填满：一直到队列空或者 AddTxMessage 失败（邮箱满/忙）
+    while ((hcan_->Instance->TSR & TME_MASK) != 0u)
+    {
+      ClassicPack p{};
+      if (tx_pool_.Get(p) != ErrorCode::OK)
+      {
+        break;  // 队列空
+      }
+
+      CAN_TxHeaderTypeDef hdr{};
+      BuildTxHeader(p, hdr);
+
+      uint32_t mailbox = 0u;
+      if (HAL_CAN_AddTxMessage(hcan_, &hdr, p.data, &mailbox) != HAL_OK)
+      {
+        // 发送失败：回队列，不做任何兜底/处理
+        (void)tx_pool_.Put(p);
+        break;
+      }
+
+      txMailbox = mailbox;
+    }
+
+    // 按你的要求：先解锁
+    tx_lock_.store(0u, std::memory_order_release);
+
+    // 再看是否还有 pend：若没有，直接退出
+    if (tx_pend_.load(std::memory_order_acquire) == 0u)
+    {
+      return;
+    }
+
+    // 允许出现 PEND=1, LOCK=0 的“无人服务”状态：尝试重新加锁再服务（失败就不管）
+    expected = 0u;
+    if (!tx_lock_.compare_exchange_strong(expected, 1u, std::memory_order_acquire,
+                                          std::memory_order_relaxed))
+    {
+      return;
+    }
+  }
+}
+
 ErrorCode STM32CAN::AddMessage(const ClassicPack& pack)
 {
-  // 错误帧由底层生成，不允许通过发送接口主动发
   if (pack.type == Type::ERROR)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  CAN_TxHeaderTypeDef txHeader;  // NOLINT
-
-  uint8_t dlc = (pack.dlc <= 8u) ? pack.dlc : 8u;
-  txHeader.DLC = dlc;
-
-  switch (pack.type)
+  // 池满直接返回 FULL，不做补救
+  if (tx_pool_.Put(pack) != ErrorCode::OK)
   {
-    case Type::STANDARD:
-      txHeader.IDE = CAN_ID_STD;
-      txHeader.RTR = CAN_RTR_DATA;
-      break;
-    case Type::EXTENDED:
-      txHeader.IDE = CAN_ID_EXT;
-      txHeader.RTR = CAN_RTR_DATA;
-      break;
-    case Type::REMOTE_STANDARD:
-      txHeader.IDE = CAN_ID_STD;
-      txHeader.RTR = CAN_RTR_REMOTE;
-      break;
-    case Type::REMOTE_EXTENDED:
-      txHeader.IDE = CAN_ID_EXT;
-      txHeader.RTR = CAN_RTR_REMOTE;
-      break;
-    default:
-      ASSERT(false);
-      return ErrorCode::FAILED;
+    return ErrorCode::FULL;
   }
 
-  txHeader.StdId = (pack.type == Type::EXTENDED) ? 0u : pack.id;
-  txHeader.ExtId = (pack.type == Type::EXTENDED) ? pack.id : 0u;
-  txHeader.TransmitGlobalTime = DISABLE;
-
-  while (true)
-  {
-    uint32_t slot = 0;
-
-    if (HAL_CAN_AddTxMessage(hcan_, &txHeader, pack.data, &txMailbox) != HAL_OK)
-    {
-      if (tx_pool_.Put(pack, slot) != ErrorCode::OK)
-      {
-        return ErrorCode::FULL;
-      }
-    }
-    else
-    {
-      return ErrorCode::OK;
-    }
-
-    if (bus_busy_.load(std::memory_order_acquire) == 0 &&
-        tx_pool_.RecycleSlot(slot) == ErrorCode::OK)
-    {
-      continue;
-    }
-    else
-    {
-      return ErrorCode::OK;
-    }
-  }
+  // kick
+  TxService();
+  return ErrorCode::OK;
 }
 
 void STM32CAN::ProcessRxInterrupt()
@@ -472,10 +508,6 @@ void STM32CAN::ProcessRxInterrupt()
   {
     if (rx_buff_.header.IDE == CAN_ID_STD)
     {
-      if (rx_buff_.header.StdId == 2046)
-      {
-        __NOP();
-      }
       rx_buff_.pack.id = rx_buff_.header.StdId;
       rx_buff_.pack.type = Type::STANDARD;
     }
@@ -501,62 +533,6 @@ void STM32CAN::ProcessRxInterrupt()
     rx_buff_.pack.dlc = dlc;
 
     OnMessage(rx_buff_.pack, true);
-  }
-}
-
-void STM32CAN::ProcessTxInterrupt()
-{
-  if (tx_pool_.Get(tx_buff_.pack) == ErrorCode::OK)
-  {
-    uint8_t dlc = (tx_buff_.pack.dlc <= 8u) ? tx_buff_.pack.dlc : 8u;
-    tx_buff_.header.DLC = dlc;
-
-    switch (tx_buff_.pack.type)
-    {
-      case Type::STANDARD:
-        tx_buff_.header.IDE = CAN_ID_STD;
-        tx_buff_.header.RTR = CAN_RTR_DATA;
-        break;
-      case Type::EXTENDED:
-        tx_buff_.header.IDE = CAN_ID_EXT;
-        tx_buff_.header.RTR = CAN_RTR_DATA;
-        break;
-      case Type::REMOTE_STANDARD:
-        tx_buff_.header.IDE = CAN_ID_STD;
-        tx_buff_.header.RTR = CAN_RTR_REMOTE;
-        break;
-      case Type::REMOTE_EXTENDED:
-        tx_buff_.header.IDE = CAN_ID_EXT;
-        tx_buff_.header.RTR = CAN_RTR_REMOTE;
-        break;
-      default:
-        ASSERT(false);
-        return;
-    }
-
-    tx_buff_.header.StdId =
-        (tx_buff_.pack.type == Type::EXTENDED) ? 0u : tx_buff_.pack.id;
-    tx_buff_.header.ExtId =
-        (tx_buff_.pack.type == Type::EXTENDED) ? tx_buff_.pack.id : 0u;
-    tx_buff_.header.TransmitGlobalTime = DISABLE;
-
-    HAL_CAN_AddTxMessage(hcan_, &tx_buff_.header, tx_buff_.pack.data, &txMailbox);
-
-    bus_busy_.store(UINT32_MAX, std::memory_order_release);
-  }
-  else
-  {
-    uint32_t tsr = READ_REG(hcan_->Instance->TSR);
-
-    if (((tsr & CAN_TSR_TME0) != 0U) && ((tsr & CAN_TSR_TME1) != 0U) &&
-        ((tsr & CAN_TSR_TME2) != 0U))
-    {
-      bus_busy_.store(0, std::memory_order_release);
-    }
-    else
-    {
-      bus_busy_.store(UINT32_MAX, std::memory_order_release);
-    }
   }
 }
 
@@ -679,7 +655,7 @@ extern "C" void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef* hcan)
   STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessTxInterrupt();
+    can->TxService();
   }
 }
 
@@ -688,7 +664,7 @@ extern "C" void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef* hcan)
   STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessTxInterrupt();
+    can->TxService();
   }
 }
 
@@ -697,7 +673,7 @@ extern "C" void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef* hcan)
   STM32CAN* can = STM32CAN::map[STM32_CAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessTxInterrupt();
+    can->TxService();
   }
 }
 

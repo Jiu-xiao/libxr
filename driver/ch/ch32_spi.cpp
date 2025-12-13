@@ -331,19 +331,19 @@ ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     // 准备 tx
     if (wsz)
     {
-      memcpy(txp, write_data.addr_, wsz);
-      if (need > wsz) memset(txp + wsz, 0x00, need - wsz);
+      Memory::FastCopy(txp, write_data.addr_, wsz);
+      if (need > wsz) Memory::FastSet(txp + wsz, 0x00, need - wsz);
     }
     else
     {
-      memset(txp, 0x00, need);
+      Memory::FastSet(txp, 0x00, need);
     }
 
     ErrorCode ec = PollingTransfer(rxp, txp, need);
 
     if (rsz)
     {
-      memcpy(read_data.addr_, rxp, rsz);
+      Memory::FastCopy(read_data.addr_, rxp, rsz);
     }
 
     SwitchBuffer();
@@ -377,7 +377,7 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op)
   {
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg | 0x80);
-    memset(txp + 1, 0x00, n);
+    Memory::FastSet(txp + 1, 0x00, n);
 
     mem_read_ = true;
     read_buff_ = read_data;
@@ -399,10 +399,10 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op)
     uint8_t* rxp = static_cast<uint8_t*>(rx.addr_);
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg | 0x80);
-    memset(txp + 1, 0x00, n);
+    Memory::FastSet(txp + 1, 0x00, n);
 
     ErrorCode ec = PollingTransfer(rxp, txp, total);
-    memcpy(read_data.addr_, rxp + 1, n);
+    Memory::FastCopy(read_data.addr_, rxp + 1, n);
 
     SwitchBuffer();
 
@@ -435,7 +435,7 @@ ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& 
   {
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg & 0x7F);
-    memcpy(txp + 1, write_data.addr_, n);
+    Memory::FastCopy(txp + 1, write_data.addr_, n);
 
     mem_read_ = false;
     read_buff_ = {nullptr, 0};
@@ -457,7 +457,7 @@ ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& 
     uint8_t* rxp = static_cast<uint8_t*>(rx.addr_);
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg & 0x7F);
-    memcpy(txp + 1, write_data.addr_, n);
+    Memory::FastCopy(txp + 1, write_data.addr_, n);
 
     ErrorCode ec = PollingTransfer(rxp, txp, total);
 
@@ -478,15 +478,15 @@ void CH32SPI::PrepareTxBuffer(ConstRawData write_data, uint32_t need_len, uint32
   {
     const uint32_t copy =
         (write_data.size_ > need_len - prefix) ? (need_len - prefix) : write_data.size_;
-    memcpy(txp + prefix, write_data.addr_, copy);
+    Memory::FastCopy(txp + prefix, write_data.addr_, copy);
     if (prefix + copy < need_len)
     {
-      memset(txp + prefix + copy, dummy, need_len - prefix - copy);
+      Memory::FastSet(txp + prefix + copy, dummy, need_len - prefix - copy);
     }
   }
   else
   {
-    memset(txp + prefix, dummy, need_len - prefix);
+    Memory::FastSet(txp + prefix, dummy, need_len - prefix);
   }
 }
 
@@ -530,11 +530,11 @@ void CH32SPI::RxDmaIRQHandler()
     uint8_t* rxp = static_cast<uint8_t*>(rx.addr_);
     if (mem_read_)
     {
-      memcpy(read_buff_.addr_, rxp + 1, read_buff_.size_);
+      Memory::FastCopy(read_buff_.addr_, rxp + 1, read_buff_.size_);
     }
     else
     {
-      memcpy(read_buff_.addr_, rxp, read_buff_.size_);
+      Memory::FastCopy(read_buff_.addr_, rxp, read_buff_.size_);
     }
     read_buff_.size_ = 0;
   }

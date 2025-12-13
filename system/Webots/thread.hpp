@@ -134,7 +134,7 @@ class Thread
       pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
 
       struct sched_param sp;
-      memset(&sp, 0, sizeof(sp));
+      Memory::FastSet(&sp, 0, sizeof(sp));
       sp.sched_priority = min_priority + static_cast<int>(priority);
 
       if (pthread_attr_setschedparam(&attr, &sp) == 0)

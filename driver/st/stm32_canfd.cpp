@@ -111,6 +111,59 @@ static inline uint32_t DlcToBytes(uint32_t dlc)
   }
 }
 
+inline void STM32CANFD::BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h)
+{
+  const bool is_ext = (p.type == Type::EXTENDED) || (p.type == Type::REMOTE_EXTENDED);
+  const bool is_rtr =
+      (p.type == Type::REMOTE_STANDARD) || (p.type == Type::REMOTE_EXTENDED);
+
+  h.Identifier = p.id;
+  h.IdType = is_ext ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
+  h.TxFrameType = is_rtr ? FDCAN_REMOTE_FRAME : FDCAN_DATA_FRAME;
+
+  uint32_t bytes = (p.dlc <= 8u) ? p.dlc : 8u;
+  h.DataLength = BytesToDlc(bytes);
+
+  h.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
+  h.BitRateSwitch = FDCAN_BRS_OFF;
+  h.FDFormat = FDCAN_CLASSIC_CAN;
+
+  h.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  h.MessageMarker = 0x01;
+}
+
+inline void STM32CANFD::BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h)
+{
+  h.Identifier = p.id;
+
+  switch (p.type)
+  {
+    case Type::STANDARD:
+      h.IdType = FDCAN_STANDARD_ID;
+      h.TxFrameType = FDCAN_DATA_FRAME;
+      break;
+
+    case Type::EXTENDED:
+      h.IdType = FDCAN_EXTENDED_ID;
+      h.TxFrameType = FDCAN_DATA_FRAME;
+      break;
+
+    default:
+      ASSERT(false);
+      return;
+  }
+
+  ASSERT(p.len <= 64u);
+  h.DataLength = BytesToDlc(p.len);
+
+  h.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
+  h.BitRateSwitch = FDCAN_BRS_ON;
+  h.FDFormat = FDCAN_FD_CAN;
+
+  h.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  h.MessageMarker = 0x00;
+}
+
 STM32CANFD::STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size)
     : FDCAN(),
       hcan_(hcan),
@@ -193,80 +246,23 @@ ErrorCode STM32CANFD::Init(void)
 
 ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
 {
-  // 错误帧由底层生成，不允许通过发送接口主动发
   if (pack.type == Type::ERROR)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  FDCAN_TxHeaderTypeDef header;  // NOLINT
-
-  header.Identifier = pack.id;
-
-  switch (pack.type)
+  // 先入池；满则先服务一次再 Put 一次
+  if (tx_pool_.Put(pack) != ErrorCode::OK)
   {
-    case Type::STANDARD:
-      ASSERT(pack.id <= 0x7FF);
-      header.IdType = FDCAN_STANDARD_ID;
-      header.TxFrameType = FDCAN_DATA_FRAME;
-      break;
-
-    case Type::EXTENDED:
-      ASSERT(pack.id <= 0x1FFFFFFF);
-      header.IdType = FDCAN_EXTENDED_ID;
-      header.TxFrameType = FDCAN_DATA_FRAME;
-      break;
-
-    case Type::REMOTE_STANDARD:
-      ASSERT(pack.id <= 0x7FF);
-      header.IdType = FDCAN_STANDARD_ID;
-      header.TxFrameType = FDCAN_REMOTE_FRAME;
-      break;
-
-    case Type::REMOTE_EXTENDED:
-      ASSERT(pack.id <= 0x1FFFFFFF);
-      header.IdType = FDCAN_EXTENDED_ID;
-      header.TxFrameType = FDCAN_REMOTE_FRAME;
-      break;
-
-    default:
-      ASSERT(false);
-      return ErrorCode::FAILED;
+    TxService();
+    if (tx_pool_.Put(pack) != ErrorCode::OK)
+    {
+      return ErrorCode::FULL;
+    }
   }
 
-  uint8_t dlc = (pack.dlc <= 8u) ? pack.dlc : 8u;
-  header.DataLength = BytesToDlc(dlc);
-  header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-  header.BitRateSwitch = FDCAN_BRS_OFF;
-  header.FDFormat = FDCAN_CLASSIC_CAN;
-  header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-  header.MessageMarker = 0x01;
-
-  while (true)
-  {
-    uint32_t slot = 0;
-
-    if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
-    {
-      if (tx_pool_.Put(pack, slot) != ErrorCode::OK)
-      {
-        return ErrorCode::FAILED;
-      }
-    }
-    else
-    {
-      return ErrorCode::OK;
-    }
-
-    if (HardwareTxQueueEmptySize() != 0 && tx_pool_.RecycleSlot(slot) == ErrorCode::OK)
-    {
-      continue;
-    }
-    else
-    {
-      return ErrorCode::OK;
-    }
-  }
+  TxService();
+  return ErrorCode::OK;
 }
 
 ErrorCode STM32CANFD::SetConfig(const CAN::Configuration& cfg)
@@ -621,71 +617,30 @@ uint32_t STM32CANFD::GetClockFreq() const
 
 ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
 {
-  // 错误帧同样不通过发送接口发出
   if (pack.type == Type::ERROR)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  FDCAN_TxHeaderTypeDef header;
-  ASSERT(pack.len <= 64);
-
-  header.Identifier = pack.id;
-
-  switch (pack.type)
+  ASSERT(pack.len <= 64u);
+  if (pack.type != Type::STANDARD && pack.type != Type::EXTENDED)
   {
-    case Type::STANDARD:
-      ASSERT(pack.id <= 0x7FF);
-      header.IdType = FDCAN_STANDARD_ID;
-      header.TxFrameType = FDCAN_DATA_FRAME;
-      break;
-
-    case Type::EXTENDED:
-      ASSERT(pack.id <= 0x1FFFFFFF);
-      header.IdType = FDCAN_EXTENDED_ID;
-      header.TxFrameType = FDCAN_DATA_FRAME;
-      break;
-
-    case Type::REMOTE_STANDARD:
-    case Type::REMOTE_EXTENDED:
-    default:
-      ASSERT(false);
-      return ErrorCode::FAILED;
+    ASSERT(false);
+    return ErrorCode::FAILED;
   }
 
-  header.DataLength = BytesToDlc(pack.len);
-
-  header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-  header.BitRateSwitch = FDCAN_BRS_ON;
-  header.FDFormat = FDCAN_FD_CAN;
-  header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-  header.MessageMarker = 0x00;
-
-  while (true)
+  // 先入池；满则先服务一次再 Put 一次
+  if (tx_pool_fd_.Put(pack) != ErrorCode::OK)
   {
-    uint32_t slot = 0;
-
-    if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &header, pack.data) != HAL_OK)
+    TxService();
+    if (tx_pool_fd_.Put(pack) != ErrorCode::OK)
     {
-      if (tx_pool_fd_.Put(pack, slot) != ErrorCode::OK)
-      {
-        return ErrorCode::FAILED;
-      }
-    }
-    else
-    {
-      return ErrorCode::OK;
-    }
-
-    if (HardwareTxQueueEmptySize() != 0 && tx_pool_fd_.RecycleSlot(slot) == ErrorCode::OK)
-    {
-      continue;
-    }
-    else
-    {
-      return ErrorCode::OK;
+      return ErrorCode::FULL;
     }
   }
+
+  TxService();
+  return ErrorCode::OK;
 }
 
 void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
@@ -744,7 +699,7 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
         rx_buff_.pack.dlc = static_cast<uint8_t>(bytes);
         if (bytes > 0u)
         {
-          memcpy(rx_buff_.pack.data, rx_buff_.pack_fd.data, bytes);
+          Memory::FastCopy(rx_buff_.pack.data, rx_buff_.pack_fd.data, bytes);
         }
       }
 
@@ -753,85 +708,81 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
   }
 }
 
-void STM32CANFD::ProcessTxInterrupt()
+void STM32CANFD::TxService()
 {
-  if (tx_pool_fd_.Get(tx_buff_.pack_fd) == ErrorCode::OK)
+  if (hcan_ == nullptr || hcan_->Instance == nullptr)
   {
-    tx_buff_.header.Identifier = tx_buff_.pack_fd.id;
-    switch (tx_buff_.pack_fd.type)
-    {
-      case Type::STANDARD:
-        tx_buff_.header.IdType = FDCAN_STANDARD_ID;
-        tx_buff_.header.TxFrameType = FDCAN_DATA_FRAME;
-        break;
-
-      case Type::EXTENDED:
-        tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
-        tx_buff_.header.TxFrameType = FDCAN_DATA_FRAME;
-        break;
-
-      case Type::REMOTE_STANDARD:
-        tx_buff_.header.IdType = FDCAN_STANDARD_ID;
-        tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
-        break;
-
-      case Type::REMOTE_EXTENDED:
-        tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
-        tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
-        break;
-
-      default:
-        ASSERT(false);
-        return;
-    }
-    tx_buff_.header.DataLength = BytesToDlc(tx_buff_.pack_fd.len);
-    tx_buff_.header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-    tx_buff_.header.BitRateSwitch = FDCAN_BRS_ON;
-    tx_buff_.header.FDFormat = FDCAN_FD_CAN;
-    tx_buff_.header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-    tx_buff_.header.MessageMarker = 0x00;
-
-    HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack_fd.data);
+    return;
   }
-  else if (tx_pool_.Get(tx_buff_.pack) == ErrorCode::OK)
+
+  tx_pend_.store(1u, std::memory_order_release);
+
+  uint32_t expected = 0u;
+  if (!tx_lock_.compare_exchange_strong(expected, 1u, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
   {
-    tx_buff_.header.Identifier = tx_buff_.pack.id;
-    switch (tx_buff_.pack.type)
+    return;
+  }
+
+  for (;;)
+  {
+    tx_pend_.store(0u, std::memory_order_release);
+
+    while (HardwareTxQueueEmptySize() != 0u)
     {
-      case Type::STANDARD:
-        tx_buff_.header.IdType = FDCAN_STANDARD_ID;
-        tx_buff_.header.TxFrameType = FDCAN_DATA_FRAME;
-        break;
+      // FD 优先
+      FDPack pfd{};
+      if (tx_pool_fd_.Get(pfd) == ErrorCode::OK)
+      {
+        FDCAN_TxHeaderTypeDef hdr{};
+        BuildTxHeader(pfd, hdr);
 
-      case Type::EXTENDED:
-        tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
-        tx_buff_.header.TxFrameType = FDCAN_DATA_FRAME;
-        break;
+        if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &hdr, pfd.data) != HAL_OK)
+        {
+          // 发送失败：回队列，必须兜底
+          if (tx_pool_fd_.Put(pfd) != ErrorCode::OK)
+          {
+            ASSERT(false);  // 丢包属于异常：池满/实现问题
+          }
+          break;  // 不做立即 retry
+        }
+        continue;
+      }
 
-      case Type::REMOTE_STANDARD:
-        tx_buff_.header.IdType = FDCAN_STANDARD_ID;
-        tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
-        break;
+      // Classic
+      ClassicPack pc{};
+      if (tx_pool_.Get(pc) == ErrorCode::OK)
+      {
+        FDCAN_TxHeaderTypeDef hdr{};
+        BuildTxHeader(pc, hdr);
 
-      case Type::REMOTE_EXTENDED:
-        tx_buff_.header.IdType = FDCAN_EXTENDED_ID;
-        tx_buff_.header.TxFrameType = FDCAN_REMOTE_FRAME;
-        break;
+        if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &hdr, pc.data) != HAL_OK)
+        {
+          if (tx_pool_.Put(pc) != ErrorCode::OK)
+          {
+            ASSERT(false);
+          }
+          break;
+        }
+        continue;
+      }
 
-      default:
-        ASSERT(false);
-        return;
+      break;  // 两个池都空
     }
 
-    uint8_t dlc = (tx_buff_.pack.dlc <= 8u) ? tx_buff_.pack.dlc : 8u;
-    tx_buff_.header.DataLength = BytesToDlc(dlc);
-    tx_buff_.header.FDFormat = FDCAN_CLASSIC_CAN;
-    tx_buff_.header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-    tx_buff_.header.MessageMarker = 0x00;
-    tx_buff_.header.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-    tx_buff_.header.BitRateSwitch = FDCAN_BRS_OFF;
+    tx_lock_.store(0u, std::memory_order_release);
 
-    HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &tx_buff_.header, tx_buff_.pack.data);
+    if (tx_pend_.load(std::memory_order_acquire) == 0u)
+    {
+      return;
+    }
+
+    expected = 0u;
+    if (!tx_lock_.compare_exchange_strong(expected, 1u, std::memory_order_acquire,
+                                          std::memory_order_relaxed))
+    {
+      return;
+    }
   }
 }
 
@@ -941,7 +892,7 @@ extern "C" void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef* hcan)
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessTxInterrupt();
+    can->TxService();
   }
 }
 
@@ -952,7 +903,7 @@ extern "C" void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef* hfdcan,
   if (can)
   {
     can->ProcessErrorStatusInterrupt(ErrorStatusITs);
-    can->ProcessTxInterrupt();
+    can->TxService();
   }
 }
 
@@ -963,7 +914,7 @@ extern "C" void HAL_FDCAN_TxBufferCompleteCallback(FDCAN_HandleTypeDef* hcan,
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessTxInterrupt();
+    can->TxService();
   }
 }
 
@@ -972,7 +923,7 @@ extern "C" void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef* hcan)
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessTxInterrupt();
+    can->TxService();
   }
 }
 

@@ -79,12 +79,6 @@ class STM32CAN : public CAN
   void ProcessRxInterrupt();
 
   /**
-   * @brief 处理发送中断
-   *
-   */
-  void ProcessTxInterrupt();
-
-  /**
    * @brief 处理错误中断
    *
    */
@@ -112,7 +106,12 @@ class STM32CAN : public CAN
 
   LockFreePool<ClassicPack> tx_pool_;
 
-  std::atomic<uint32_t> bus_busy_ = 0;
+  std::atomic<uint32_t> tx_lock_{0};
+  std::atomic<uint32_t> tx_pend_{0};
+
+  static inline void BuildTxHeader(const ClassicPack& p, CAN_TxHeaderTypeDef& h);
+
+  void TxService();
 };
 }  // namespace LibXR
 

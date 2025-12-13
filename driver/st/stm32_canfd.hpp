@@ -239,12 +239,6 @@ class STM32CANFD : public FDCAN
   void ProcessRxInterrupt(uint32_t fifo);
 
   /**
-   * @brief 处理发送中断
-   *
-   */
-  void ProcessTxInterrupt();
-
-  /**
    * @brief 处理错误状态中断
    *
    * @param error_status_its 错误状态标志 Error status flags
@@ -261,6 +255,14 @@ class STM32CANFD : public FDCAN
     auto free = HAL_FDCAN_GetTxFifoFreeLevel(hcan_);
     return free;
   }
+
+  static inline void BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h);
+  static inline void BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h);
+
+  void TxService();
+
+  std::atomic<uint32_t> tx_lock_{0};
+  std::atomic<uint32_t> tx_pend_{0};
 
   FDCAN_HandleTypeDef* hcan_;
 
