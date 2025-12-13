@@ -133,6 +133,9 @@ ErrorCode STM32CAN::Init(void)
   }
 
   HAL_CAN_ActivateNotification(hcan_, CAN_IT_ERROR);
+  HAL_CAN_ActivateNotification(hcan_, CAN_IT_BUSOFF);
+  HAL_CAN_ActivateNotification(hcan_, CAN_IT_ERROR_PASSIVE);
+  HAL_CAN_ActivateNotification(hcan_, CAN_IT_ERROR_WARNING);
   HAL_CAN_ActivateNotification(hcan_, CAN_IT_TX_MAILBOX_EMPTY);
 
   return ErrorCode::OK;

@@ -1477,7 +1477,8 @@ class GsUsbClass : public DeviceClass
   bool ErrorPackToHostErrorFrame(uint8_t ch, const LibXR::CAN::ClassicPack &err_pack,
                                  GsUsb::HostFrame &hf)
   {
-    if (ch >= can_count_)
+    // ===== 基本校验 =====
+    if (ch >= can_count_ || !cans_[ch])
     {
       return false;
     }
@@ -1485,55 +1486,183 @@ class GsUsbClass : public DeviceClass
     {
       return false;
     }
-
-    // pack.id 在 STM32 驱动里是 ErrorID
     if (!LibXR::CAN::IsErrorId(err_pack.id))
     {
       return false;
     }
 
+    // ===== Linux error.h 里的 data[] 语义常量（避免你头文件没定义导致“空信息”）=====
+    // data[1] controller state bits
+    constexpr uint8_t LNX_CAN_ERR_CRTL_UNSPEC = 0x00;
+    constexpr uint8_t LNX_CAN_ERR_CRTL_RX_WARNING = 0x04;
+    constexpr uint8_t LNX_CAN_ERR_CRTL_TX_WARNING = 0x08;
+    constexpr uint8_t LNX_CAN_ERR_CRTL_RX_PASSIVE = 0x10;
+    constexpr uint8_t LNX_CAN_ERR_CRTL_TX_PASSIVE = 0x20;
+
+    // data[2] protocol error type bits
+    constexpr uint8_t LNX_CAN_ERR_PROT_UNSPEC = 0x00;
+    constexpr uint8_t LNX_CAN_ERR_PROT_FORM = 0x02;
+    constexpr uint8_t LNX_CAN_ERR_PROT_STUFF = 0x04;
+    constexpr uint8_t LNX_CAN_ERR_PROT_BIT0 = 0x08;
+    constexpr uint8_t LNX_CAN_ERR_PROT_BIT1 = 0x10;
+    constexpr uint8_t LNX_CAN_ERR_PROT_TX = 0x80;
+
+    // data[3] protocol error location
+    constexpr uint8_t LNX_CAN_ERR_PROT_LOC_UNSPEC = 0x00;
+    constexpr uint8_t LNX_CAN_ERR_PROT_LOC_ACK = 0x19;  // ACK slot
+
+    // 可选：新内核使用 CAN_ERR_CNT 表示 data[6]/data[7] 携带计数器
+    // 老内核忽略也无害
+    constexpr uint32_t LNX_CAN_ERR_CNT = 0x00000200U;
+
+    // ===== 尽量获取错误计数器（用于 data[6]/data[7]，也用于判断 warning/passive
+    // 的方向）=====
+    bool ec_valid = false;
+    uint32_t txerr = 0, rxerr = 0;
+    {
+      LibXR::CAN::ErrorState es{};
+      if (cans_[ch]->GetErrorState(es) == ErrorCode::OK)
+      {
+        ec_valid = true;
+        txerr = es.tx_error_counter;
+        rxerr = es.rx_error_counter;
+      }
+    }
+    const uint8_t txerr_u8 = (txerr > 255U) ? 255U : static_cast<uint8_t>(txerr);
+    const uint8_t rxerr_u8 = (rxerr > 255U) ? 255U : static_cast<uint8_t>(rxerr);
+
+    // ===== 生成 can_id 错误类别 =====
     auto eid = LibXR::CAN::ToErrorID(err_pack.id);
 
-    uint32_t cid = GsUsb::CAN_ERR_FLAG;
+    uint32_t cid = GsUsb::CAN_ERR_FLAG;  // 必须带 CAN_ERR_FLAG
+
+    // 先清空前 8 字节（只清 8，别清 64）
+    Memory::FastSet(hf.data, 0, 8);
 
     switch (eid)
     {
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_BUS_OFF:
+      {
         cid |= GsUsb::CAN_ERR_BUSOFF;
         break;
+      }
 
-      case LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE:
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING:
+      case LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE:
+      {
+        // Linux 侧：用 CAN_ERR_CRTL + data[1] 表达 warning/passive
         cid |= GsUsb::CAN_ERR_CRTL;
+
+        uint8_t ctrl = LNX_CAN_ERR_CRTL_UNSPEC;
+
+        if (ec_valid)
+        {
+          // warning 阈值通常是 96；passive 阈值 128（按 CAN 规范/常用实现）
+          if (eid == LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE)
+          {
+            if (txerr >= 128U) ctrl |= LNX_CAN_ERR_CRTL_TX_PASSIVE;
+            if (rxerr >= 128U) ctrl |= LNX_CAN_ERR_CRTL_RX_PASSIVE;
+          }
+          else
+          {
+            if (txerr >= 96U) ctrl |= LNX_CAN_ERR_CRTL_TX_WARNING;
+            if (rxerr >= 96U) ctrl |= LNX_CAN_ERR_CRTL_RX_WARNING;
+          }
+
+          // 如果方向判断不出来（例如计数器实现缺失），至少别让它是 0
+          if (ctrl == LNX_CAN_ERR_CRTL_UNSPEC)
+          {
+            ctrl = (eid == LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE)
+                       ? static_cast<uint8_t>(LNX_CAN_ERR_CRTL_TX_PASSIVE |
+                                              LNX_CAN_ERR_CRTL_RX_PASSIVE)
+                       : static_cast<uint8_t>(LNX_CAN_ERR_CRTL_TX_WARNING |
+                                              LNX_CAN_ERR_CRTL_RX_WARNING);
+          }
+        }
+        else
+        {
+          // 没拿到计数器：保守填“可能的状态”
+          ctrl = (eid == LibXR::CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE)
+                     ? static_cast<uint8_t>(LNX_CAN_ERR_CRTL_TX_PASSIVE |
+                                            LNX_CAN_ERR_CRTL_RX_PASSIVE)
+                     : static_cast<uint8_t>(LNX_CAN_ERR_CRTL_TX_WARNING |
+                                            LNX_CAN_ERR_CRTL_RX_WARNING);
+        }
+
+        hf.data[1] = ctrl;
         break;
+      }
 
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_ACK:
+      {
+        // 没有 ACK：用 CAN_ERR_ACK
         cid |= GsUsb::CAN_ERR_ACK;
+
+        // 同时给出“发生在 ACK slot”的位置信息（更利于 candump -e 解码）
+        cid |= GsUsb::CAN_ERR_PROT;
+        hf.data[2] = static_cast<uint8_t>(LNX_CAN_ERR_PROT_UNSPEC | LNX_CAN_ERR_PROT_TX);
+        hf.data[3] = LNX_CAN_ERR_PROT_LOC_ACK;
         break;
+      }
 
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_STUFF:
+      {
+        cid |= GsUsb::CAN_ERR_PROT;
+        hf.data[2] = static_cast<uint8_t>(LNX_CAN_ERR_PROT_STUFF | LNX_CAN_ERR_PROT_TX);
+        hf.data[3] = LNX_CAN_ERR_PROT_LOC_UNSPEC;
+        break;
+      }
+
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_FORM:
+      {
+        cid |= GsUsb::CAN_ERR_PROT;
+        hf.data[2] = static_cast<uint8_t>(LNX_CAN_ERR_PROT_FORM | LNX_CAN_ERR_PROT_TX);
+        hf.data[3] = LNX_CAN_ERR_PROT_LOC_UNSPEC;
+        break;
+      }
+
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_BIT0:
+      {
+        cid |= GsUsb::CAN_ERR_PROT;
+        hf.data[2] = static_cast<uint8_t>(LNX_CAN_ERR_PROT_BIT0 | LNX_CAN_ERR_PROT_TX);
+        hf.data[3] = LNX_CAN_ERR_PROT_LOC_UNSPEC;
+        break;
+      }
+
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_BIT1:
+      {
+        cid |= GsUsb::CAN_ERR_PROT;
+        hf.data[2] = static_cast<uint8_t>(LNX_CAN_ERR_PROT_BIT1 | LNX_CAN_ERR_PROT_TX);
+        hf.data[3] = LNX_CAN_ERR_PROT_LOC_UNSPEC;
+        break;
+      }
+
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_CRC:
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_PROTOCOL:
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_GENERIC:
       case LibXR::CAN::ErrorID::CAN_ERROR_ID_OTHER:
       default:
+      {
+        // 泛化：给 PROT + UNSPEC
         cid |= GsUsb::CAN_ERR_PROT;
+        hf.data[2] = static_cast<uint8_t>(LNX_CAN_ERR_PROT_UNSPEC | LNX_CAN_ERR_PROT_TX);
+        hf.data[3] = LNX_CAN_ERR_PROT_LOC_UNSPEC;
         break;
+      }
     }
 
+    // ===== 填计数器（data[6]=txerr, data[7]=rxerr），并标记 CAN_ERR_CNT =====
+    cid |= LNX_CAN_ERR_CNT;
+    hf.data[6] = txerr_u8;
+    hf.data[7] = rxerr_u8;
+
+    // ===== 输出 HostFrame =====
     hf.echo_id = GsUsb::ECHO_ID_INVALID;
     hf.can_id = cid;
     hf.can_dlc = GsUsb::CAN_ERR_DLC;  // 固定 8
     hf.channel = ch;
     hf.flags = 0;
     hf.reserved = 0;
-
-    // 简化版：data[0..7] 全 0；只依赖 can_id 的错误类别
-    Memory::FastSet(hf.data, 0, sizeof(hf.data));
-
     hf.timestamp_us = MakeTimestampUs();
 
     return true;
