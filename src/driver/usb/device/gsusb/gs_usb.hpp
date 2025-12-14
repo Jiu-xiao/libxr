@@ -226,8 +226,6 @@ class GsUsbClass : public DeviceClass
 
         fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::STANDARD);
         fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::EXTENDED);
-        fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_STANDARD);
-        fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_EXTENDED);
       }
       fd_can_rx_registered_ = true;
     }
