@@ -12,37 +12,26 @@ MSPM0GPIO* MSPM0GPIO::instance_map_[MAX_PORTS][32] = {{nullptr}};
  * @return uint32_t 极性掩码，用于配置中断触发边沿
  */
 static constexpr uint32_t MSPM0_GPIO_GetPolarityMask(uint8_t pin,  // NOLINT
-                                                      LibXR::GPIO::Direction direction)
+                                                     LibXR::GPIO::Direction direction)
 {
-  if (pin < 16)
+  uint32_t config_bits = 0;
+  switch (direction)
   {
-    switch (direction)
-    {
-      case LibXR::GPIO::Direction::RISING_INTERRUPT:
-        return GPIO_POLARITY15_0_DIO0_RISE << (pin * 2);
-      case LibXR::GPIO::Direction::FALL_INTERRUPT:
-        return GPIO_POLARITY15_0_DIO0_FALL << (pin * 2);
-      case LibXR::GPIO::Direction::FALL_RISING_INTERRUPT:
-        return GPIO_POLARITY15_0_DIO0_RISE_FALL << (pin * 2);
-      default:
-        return 0;
-    }
+    case LibXR::GPIO::Direction::RISING_INTERRUPT:
+      config_bits = GPIO_POLARITY15_0_DIO0_RISE;
+      break;
+    case LibXR::GPIO::Direction::FALL_INTERRUPT:
+      config_bits = GPIO_POLARITY15_0_DIO0_FALL;
+      break;
+    case LibXR::GPIO::Direction::FALL_RISING_INTERRUPT:
+      config_bits = GPIO_POLARITY15_0_DIO0_RISE_FALL;
+      break;
+    default:
+      return 0;
   }
-  else
-  {
-    uint8_t pin_offset = pin - 16;
-    switch (direction)
-    {
-      case LibXR::GPIO::Direction::RISING_INTERRUPT:
-        return GPIO_POLARITY31_16_DIO16_RISE << (pin_offset * 2);
-      case LibXR::GPIO::Direction::FALL_INTERRUPT:
-        return GPIO_POLARITY31_16_DIO16_FALL << (pin_offset * 2);
-      case LibXR::GPIO::Direction::FALL_RISING_INTERRUPT:
-        return GPIO_POLARITY31_16_DIO16_RISE_FALL << (pin_offset * 2);
-      default:
-        return 0;
-    }
-  }
+
+  uint32_t shift = (pin % 16) * 2;
+  return config_bits << shift;
 }
 
 MSPM0GPIO::MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm)
@@ -76,8 +65,6 @@ MSPM0GPIO::MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm)
 #endif
       break;
   }
-
-  __enable_irq();
 }
 
 bool MSPM0GPIO::Read() { return DL_GPIO_readPins(port_, pin_mask_) == pin_mask_; }
@@ -88,13 +75,10 @@ ErrorCode MSPM0GPIO::Write(bool value)
   {
     if (value)
     {
-      // 开漏高阻 / Open-drain high-Z
       DL_GPIO_disableOutput(port_, pin_mask_);
     }
     else
     {
-      // 开漏拉低 / Open-drain pull low
-      DL_GPIO_clearPins(port_, pin_mask_);
       DL_GPIO_enableOutput(port_, pin_mask_);
     }
   }
@@ -188,6 +172,9 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
       DL_GPIO_initDigitalInputFeatures(pincm_, DL_GPIO_INVERSION_DISABLE, res,
                                        DL_GPIO_HYSTERESIS_DISABLE,
                                        DL_GPIO_WAKEUP_DISABLE);
+
+      DL_GPIO_clearPins(port_, pin_mask_);
+      DL_GPIO_disableOutput(port_, pin_mask_);
       break;
     }
 
@@ -218,7 +205,7 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
         constexpr uint32_t BITS_PER_PIN = 2;
         constexpr uint32_t CLEAR_PATTERN = 0x3U;
 
-        uint32_t shift = (pin_idx - (pin_idx < 16 ? 0 : 16)) * BITS_PER_PIN;
+        uint32_t shift = (pin_idx % 16) * BITS_PER_PIN;
         uint32_t clear_mask = CLEAR_PATTERN << shift;
 
         if (pin_idx < 16)
