@@ -74,10 +74,12 @@ class GsUsbClass : public DeviceClass
  public:
   /**
    * @brief 构造：经典 CAN / Construct: Classic CAN
-   * @param cans 经典 CAN 指针列表，数量必须等于 CanChNum / Classic CAN pointers, count
-   * must equal CanChNum
+   * @param cans 经典 CAN 指针列表，数量必须等于 CAN_CH_NUM / Classic CAN pointers, count
+   * must equal CAN_CH_NUM
    * @param data_in_ep_num Bulk IN 端点号 / Bulk IN endpoint number
    * @param data_out_ep_num Bulk OUT 端点号 / Bulk OUT endpoint number
+   * @param rx_queue_size 接收队列大小 / RX queue size
+   * @param echo_queue_size 回显队列大小 / Echo queue size
    * @param identify_gpio Identify GPIO（可选） / Identify GPIO (optional)
    * @param termination_gpios 每通道终端电阻 GPIO（可选） / Per-channel termination GPIOs
    * (optional)
@@ -87,13 +89,16 @@ class GsUsbClass : public DeviceClass
   GsUsbClass(std::initializer_list<LibXR::CAN *> cans,
              Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP1,
              Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP2,
+             size_t rx_queue_size = 32, size_t echo_queue_size = 32,
              LibXR::GPIO *identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO *> termination_gpios = {},
              LibXR::Database *database = nullptr)
       : data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
         identify_gpio_(identify_gpio),
-        database_(database)
+        database_(database),
+        rx_queue_(rx_queue_size),
+        echo_queue_(echo_queue_size)
   {
     ASSERT(cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
@@ -121,12 +126,14 @@ class GsUsbClass : public DeviceClass
 
   /**
    * @brief 构造：FDCAN / Construct: FDCAN
-   * @param fd_cans FDCAN 指针列表，数量必须等于 CanChNum / FDCAN pointers, count must
-   * equal CanChNum
+   * @param fd_cans FDCAN 指针列表，数量必须等于 CAN_CH_NUM / FDCAN pointers, count must
+   * equal CAN_CH_NUM
    * @param data_in_ep_num Bulk IN 端点号（可自动分配） / Bulk IN endpoint number (auto
    * allowed)
    * @param data_out_ep_num Bulk OUT 端点号（可自动分配） / Bulk OUT endpoint number (auto
    * allowed)
+   * @param rx_queue_size 接收队列大小 / RX queue size
+   * @param echo_queue_size 回显队列大小 / Echo queue size
    * @param identify_gpio Identify GPIO（可选） / Identify GPIO (optional)
    * @param termination_gpios 每通道终端电阻 GPIO（可选） / Per-channel termination GPIOs
    * (optional)
@@ -136,6 +143,7 @@ class GsUsbClass : public DeviceClass
   GsUsbClass(std::initializer_list<LibXR::FDCAN *> fd_cans,
              Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
              Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
+             size_t rx_queue_size = 32, size_t echo_queue_size = 32,
              LibXR::GPIO *identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO *> termination_gpios = {},
              LibXR::Database *database = nullptr)
@@ -143,14 +151,16 @@ class GsUsbClass : public DeviceClass
         data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
         identify_gpio_(identify_gpio),
-        database_(database)
+        database_(database),
+        rx_queue_(rx_queue_size),
+        echo_queue_(echo_queue_size)
   {
     ASSERT(fd_cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
     for (auto *p : fd_cans)
     {
       fdcans_[i] = p;
-      cans_[i] = p;  // 向上转 CAN*
+      cans_[i] = p;  // 向上转 CAN* / Upcast to CAN*
       ++i;
     }
 
@@ -855,9 +865,6 @@ class GsUsbClass : public DeviceClass
   }
 
  private:
-  static constexpr size_t RX_QUEUE_SIZE = 64;    ///< RX 队列深度 / RX queue depth
-  static constexpr size_t ECHO_QUEUE_SIZE = 64;  ///< Echo 队列深度 / Echo queue depth
-
   // ================= 成员 / Members =================
   std::array<LibXR::CAN *, CanChNum> cans_{};  ///< CAN 通道列表 / CAN channel pointers
   std::array<LibXR::FDCAN *, CanChNum>
@@ -1020,10 +1027,10 @@ class GsUsbClass : public DeviceClass
     std::array<uint8_t, 64> data;  ///< 数据段 / Data bytes
   };
 
-  LibXR::LockFreeQueue<QueueItem> rx_queue_{
-      RX_QUEUE_SIZE};  ///< RX 队列（Device->Host） / RX queue (Device->Host)
-  LibXR::LockFreeQueue<QueueItem> echo_queue_{
-      ECHO_QUEUE_SIZE};  ///< Echo 队列（回送 echo_id） / Echo queue (echo back echo_id)
+  LibXR::LockFreeQueue<QueueItem>
+      rx_queue_;  ///< RX 队列（Device->Host） / RX queue (Device->Host)
+  LibXR::LockFreeQueue<QueueItem>
+      echo_queue_;  ///< Echo 队列（回送 echo_id） / Echo queue (echo back echo_id)
 
   /**
    * @brief classic CAN RX 处理 / Handle classic CAN RX
