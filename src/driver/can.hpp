@@ -62,9 +62,8 @@ class CAN
   {
     uint32_t bitrate = 0;       ///< 仲裁相位目标波特率。Target nominal bitrate.
     float sample_point = 0.0f;  ///< 仲裁相位采样点（0~1）。Nominal sample point (0–1).
-
-    BitTiming bit_timing{};  ///< 位时序配置。Bit timing configuration.
-    Mode mode{};             ///< 工作模式。Operating mode.
+    BitTiming bit_timing;       ///< 位时序配置。Bit timing configuration.
+    Mode mode;                  ///< 工作模式。Operating mode.
   };
 
   /**
@@ -121,17 +120,19 @@ class CAN
    */
   virtual ~CAN() = default;
 
+#pragma pack(push, 1)
   /**
    * @struct ClassicPack
    * @brief 经典 CAN 帧数据结构。Classic CAN frame structure.
    */
-  struct __attribute__((packed)) ClassicPack
+  struct ClassicPack
   {
     uint32_t id;      ///< CAN ID（11/29 bit 或 ErrorID）。CAN ID (11/29 bits or ErrorID).
     Type type;        ///< 帧类型。Frame type.
     uint8_t dlc;      ///< 有效数据长度（0~8）。Data length code (0–8).
     uint8_t data[8];  ///< 数据载荷。Data payload (up to 8 bytes).
   };
+#pragma pack(pop)
 
   /// 错误 ID 前缀 Error ID prefix.
   static constexpr uint32_t CAN_ERROR_ID_PREFIX = 0xFFFF0000u;
@@ -169,7 +170,7 @@ class CAN
     return (id & 0xFFFF0000u) == CAN_ERROR_ID_PREFIX;
   }
 
-  /// 将 id 解释为 ErrorID（调用前建议先用 IsErrorId 检查）。Interpret id as ErrorID.
+  /// 将 id 解释为 ErrorID。Interpret id as ErrorID.
   static constexpr ErrorID ToErrorID(uint32_t id) noexcept
   {
     return static_cast<ErrorID>(id);
@@ -255,17 +256,19 @@ class FDCAN : public CAN
    */
   virtual ~FDCAN() = default;
 
+#pragma pack(push, 1)
   /**
    * @struct FDPack
    * @brief CAN FD 帧数据结构。CAN FD frame structure.
    */
-  struct __attribute__((packed)) FDPack
+  struct FDPack
   {
     uint32_t id;       ///< CAN ID。CAN ID.
     Type type;         ///< 帧类型。Frame type.
     uint8_t len;       ///< 数据长度（0~64）。Data length (0–64 bytes).
     uint8_t data[64];  ///< 数据载荷。Data payload.
   };
+#pragma pack(pop)
 
   using CAN::AddMessage;
   using CAN::FilterMode;
@@ -321,9 +324,8 @@ class FDCAN : public CAN
   {
     uint32_t data_bitrate = 0;       ///< 数据相位波特率。Data-phase bitrate.
     float data_sample_point = 0.0f;  ///< 数据相位采样点。Data-phase sample point.
-
-    DataBitTiming data_timing{};  ///< 数据相位位时序。Data-phase bit timing.
-    FDMode fd_mode{};             ///< FD 模式配置。FD mode configuration.
+    DataBitTiming data_timing;       ///< 数据相位位时序。Data-phase bit timing.
+    FDMode fd_mode;                  ///< FD 模式配置。FD mode configuration.
   };
 
   /**

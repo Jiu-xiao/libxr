@@ -385,13 +385,11 @@ ErrorCode STM32CAN::SetConfig(const CAN::Configuration& cfg)
     HAL_CAN_ActivateNotification(hcan_, it_rx);
   }
 
-#ifdef CAN_IT_ERROR
   HAL_CAN_ActivateNotification(hcan_, CAN_IT_ERROR);
-#endif
-
-#ifdef CAN_IT_TX_MAILBOX_EMPTY
+  HAL_CAN_ActivateNotification(hcan_, CAN_IT_BUSOFF);
+  HAL_CAN_ActivateNotification(hcan_, CAN_IT_ERROR_PASSIVE);
+  HAL_CAN_ActivateNotification(hcan_, CAN_IT_ERROR_WARNING);
   HAL_CAN_ActivateNotification(hcan_, CAN_IT_TX_MAILBOX_EMPTY);
-#endif
 
   return ErrorCode::OK;
 }
@@ -476,7 +474,7 @@ void STM32CAN::TxService()
       return;
     }
 
-    // 允许出现 PEND=1, LOCK=0 的“无人服务”状态：尝试重新加锁再服务（失败就不管）
+    // 允许出现 PEND=1, LOCK=0 的“无人服务”状态：尝试重新加锁再服务
     expected = 0u;
     if (!tx_lock_.compare_exchange_strong(expected, 1u, std::memory_order_acquire,
                                           std::memory_order_relaxed))

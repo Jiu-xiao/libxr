@@ -12,11 +12,12 @@ namespace LibXR::USB
 {
 
 /**
- * @brief USB端点基类 / USB Endpoint base class
+ * @class Endpoint
+ * @brief USB 端点基类 / USB Endpoint base class
  *
- * 用于描述和操作USB端点，包括配置、数据读写、状态管理等接口。
- * Used for describing and manipulating USB endpoints, including configuration,
- * data read/write, state management, etc.
+ * 用于描述与操作 USB 端点，提供端点配置、传输控制、状态管理与回调接口。
+ * Used for describing and manipulating USB endpoints, providing endpoint configuration,
+ * transfer control, state management, and callback interfaces.
  */
 class Endpoint
 {
@@ -29,30 +30,31 @@ class Endpoint
   {
     OUT = 0,  ///< 输出方向 / OUT direction
     IN = 1,   ///< 输入方向 / IN direction
-    BOTH = 2  ///< 双向(可配置成IN/OUT) / Both (can be configured as IN/OUT)
+    BOTH = 2  ///< 双向（可配置为 IN/OUT） / Both (configurable as IN/OUT)
   };
 
   /**
-   * @brief 端点号 / Endpoint number
+   * @brief 端点号
+   *        Endpoint number
    */
   enum class EPNumber : uint8_t
   {
-    EP0 = 0,           ///< 端点0 / Endpoint 0
-    EP1 = 1,           ///< 端点1 / Endpoint 1
-    EP2 = 2,           ///< 端点2 / Endpoint 2
-    EP3 = 3,           ///< 端点3 / Endpoint 3
-    EP4 = 4,           ///< 端点4 / Endpoint 4
-    EP5 = 5,           ///< 端点5 / Endpoint 5
-    EP6 = 6,           ///< 端点6 / Endpoint 6
-    EP7 = 7,           ///< 端点7 / Endpoint 7
-    EP8 = 8,           ///< 端点8 / Endpoint 8
-    EP9 = 9,           ///< 端点9 / Endpoint 9
-    EP10 = 10,         ///< 端点10 / Endpoint 10
-    EP11 = 11,         ///< 端点11 / Endpoint 11
-    EP12 = 12,         ///< 端点12 / Endpoint 12
-    EP13 = 13,         ///< 端点13 / Endpoint 13
-    EP14 = 14,         ///< 端点14 / Endpoint 14
-    EP15 = 15,         ///< 端点15 / Endpoint 15
+    EP0 = 0,           ///< 端点 0 / Endpoint 0
+    EP1 = 1,           ///< 端点 1 / Endpoint 1
+    EP2 = 2,           ///< 端点 2 / Endpoint 2
+    EP3 = 3,           ///< 端点 3 / Endpoint 3
+    EP4 = 4,           ///< 端点 4 / Endpoint 4
+    EP5 = 5,           ///< 端点 5 / Endpoint 5
+    EP6 = 6,           ///< 端点 6 / Endpoint 6
+    EP7 = 7,           ///< 端点 7 / Endpoint 7
+    EP8 = 8,           ///< 端点 8 / Endpoint 8
+    EP9 = 9,           ///< 端点 9 / Endpoint 9
+    EP10 = 10,         ///< 端点 10 / Endpoint 10
+    EP11 = 11,         ///< 端点 11 / Endpoint 11
+    EP12 = 12,         ///< 端点 12 / Endpoint 12
+    EP13 = 13,         ///< 端点 13 / Endpoint 13
+    EP14 = 14,         ///< 端点 14 / Endpoint 14
+    EP15 = 15,         ///< 端点 15 / Endpoint 15
     EP_MAX_NUM = 16,   ///< 端点数量上限 / Maximum number of endpoints
     EP_AUTO = 0xFE,    ///< 自动分配端点号 / Auto allocate
     EP_INVALID = 0xFF  ///< 非法端点号 / Invalid endpoint
@@ -79,15 +81,14 @@ class Endpoint
     DISABLED,  ///< 禁用 / Disabled
     IDLE,      ///< 空闲 / Idle
     BUSY,      ///< 忙 / Busy
-    STALLED,   ///< 挂起 / Stalled
+    STALLED,   ///< 停止/挂起 / Stalled
     ERROR      ///< 错误 / Error
   };
 
   /**
-   * @brief 端点号转换为uint8_t / Convert endpoint number to uint8_t
-   *
+   * @brief 端点号转换为 uint8_t / Convert endpoint number to uint8_t
    * @param ep 端点号 / Endpoint number
-   * @return constexpr uint8_t
+   * @return uint8_t 端点号数值 / Endpoint number value
    */
   static constexpr uint8_t EPNumberToInt8(EPNumber ep)
   {
@@ -96,10 +97,9 @@ class Endpoint
 
   /**
    * @brief 端点号转换为端点地址 / Convert endpoint number to endpoint address
-   *
    * @param ep 端点号 / Endpoint number
    * @param dir 端点方向 / Endpoint direction
-   * @return constexpr uint8_t
+   * @return uint8_t 端点地址 / Endpoint address
    */
   static constexpr uint8_t EPNumberToAddr(EPNumber ep, Direction dir)
   {
@@ -109,10 +109,9 @@ class Endpoint
 
   /**
    * @brief 端点地址转换为端点号 / Convert endpoint address to endpoint number
-   *
    * @param addr 端点地址 / Endpoint address
-   * @param dir 返回的端点方向 / Return endpoint direction
-   * @return constexpr EPNumber
+   * @param dir 输出方向（输出参数） / Output direction (output)
+   * @return EPNumber 端点号 / Endpoint number
    */
   static constexpr EPNumber AddrToEPNumber(uint8_t addr, Direction& dir)
   {
@@ -122,9 +121,8 @@ class Endpoint
 
   /**
    * @brief 获取下一个端点号 / Get the next endpoint number
-   *
    * @param ep 当前端点号 / Current endpoint number
-   * @return constexpr EPNumber
+   * @return EPNumber 下一个端点号 / Next endpoint number
    */
   static constexpr EPNumber NextEPNumber(EPNumber ep)
   {
@@ -133,24 +131,23 @@ class Endpoint
   }
 
   /**
-   * @brief 端点配置结构体
-   *        Endpoint configuration struct
+   * @struct Config
+   * @brief 端点配置参数 / Endpoint configuration parameters
    */
   struct Config
   {
     Direction direction = Direction::OUT;   ///< 端点方向 / Endpoint direction
     Type type = Type::BULK;                 ///< 端点类型 / Endpoint type
     uint16_t max_packet_size = UINT16_MAX;  ///< 最大包长 / Max packet size
-    bool double_buffer = false;
-    uint8_t mult = 0;  ///< 多包，高带宽端点用 / Multiplier (high-bandwidth)
+    bool double_buffer = false;             ///< 是否启用双缓冲 / Enable double buffer
+    uint8_t mult = 0;  ///< 多包倍数（高带宽端点） / Multiplier (high-bandwidth)
   };
 
   /**
-   * @brief 构造函数
-   *        Constructor
-   *
+   * @brief 构造函数 / Constructor
    * @param number 端点号 / Endpoint number
-   * @param dir 允许配置的端点方向 / Allowed endpoint direction
+   * @param dir 允许配置的方向 / Allowed direction
+   * @param buffer 端点缓冲区 / Endpoint buffer
    */
   explicit Endpoint(EPNumber number, Direction dir, RawData buffer)
       : number_(number), avail_direction_(dir), buffer_(buffer), double_buffer_(buffer)
@@ -158,30 +155,28 @@ class Endpoint
   }
 
   /**
-   * @brief 析构函数
-   *        Destructor
+   * @brief 虚析构函数 / Virtual destructor
    */
-  ~Endpoint() = default;
+  virtual ~Endpoint() = default;
 
-  // 禁止拷贝
   Endpoint(const Endpoint&) = delete;
   Endpoint& operator=(const Endpoint&) = delete;
 
   /**
-   * @brief 获取端点号
-   *        Get endpoint number
+   * @brief 获取端点号 / Get endpoint number
+   * @return EPNumber 端点号 / Endpoint number
    */
   EPNumber GetNumber() const { return number_; }
 
   /**
-   * @brief 获取允许配置的端点方向
-   *        Get allowed endpoint direction
+   * @brief 获取允许配置的方向 / Get allowed endpoint direction
+   * @return Direction 允许方向 / Allowed direction
    */
   Direction AvailableDirection() const { return avail_direction_; }
 
   /**
-   * @brief 获取端点方向
-   *        Get endpoint direction
+   * @brief 获取当前端点方向 / Get current endpoint direction
+   * @return Direction 当前方向 / Current direction
    */
   Direction GetDirection() const
   {
@@ -193,8 +188,8 @@ class Endpoint
   }
 
   /**
-   * @brief 获取端点地址（方向 + 号）
-   *        Get endpoint address (dir + num)
+   * @brief 获取端点地址（方向 + 号） / Get endpoint address (dir + num)
+   * @return uint8_t 端点地址 / Endpoint address
    */
   uint8_t GetAddress() const
   {
@@ -206,52 +201,46 @@ class Endpoint
   }
 
   /**
-   * @brief 获取端点状态
-   *        Get endpoint state
+   * @brief 获取端点状态 / Get endpoint state
+   * @return State 当前状态 / Current state
    */
   State GetState() const { return state_; }
 
   /**
-   * @brief 设置端点状态
-   *        Set endpoint state
-   *
+   * @brief 设置端点状态 / Set endpoint state
    * @param state 状态 / State
    */
   void SetState(State state) { state_ = state; }
 
   /**
-   * @brief 获取端点类型
-   *        Get endpoint type
+   * @brief 获取端点类型 / Get endpoint type
+   * @return Type 端点类型 / Endpoint type
    */
   Type GetType() const { return config_.type; }
 
   /**
-   * @brief 获取最大包长
-   *        Get max packet size
+   * @brief 获取最大包长 / Get max packet size
+   * @return uint16_t 最大包长 / Max packet size
    */
   uint16_t MaxPacketSize() const { return config_.max_packet_size; }
 
   /**
-   * @brief 是否挂起 / Is endpoint stalled
-   *
-   * @return true
-   * @return false
+   * @brief 是否处于 STALL 状态 / Whether endpoint is stalled
+   * @return true 已 STALL / Stalled
+   * @return false 非 STALL / Not stalled
    */
   bool IsStalled() const { return state_ == State::STALLED; }
 
   /**
-   * @brief 是否使用双缓冲区 / Use double buffer
-   *
-   * @return true
-   * @return false
+   * @brief 是否启用双缓冲 / Whether double buffer is enabled
+   * @return true 启用 / Enabled
+   * @return false 未启用 / Disabled
    */
   bool UseDoubleBuffer() const { return config_.double_buffer; }
 
   /**
-   * @brief 获取端点缓冲区
-   *        Get endpoint buffer
-   *
-   * @return RawData
+   * @brief 获取当前可用于传输的缓冲区 / Get current transfer buffer
+   * @return RawData 缓冲区视图 / Buffer view
    */
   RawData GetBuffer() const
   {
@@ -267,64 +256,67 @@ class Endpoint
 
   /**
    * @brief 设置传输完成回调 / Set transfer complete callback
-   *
-   * @param cb 传输完成回调 / Transfer complete callback
+   * @param cb 回调函数 / Callback
    */
   void SetOnTransferCompleteCallback(Callback<ConstRawData&> cb)
   {
     on_transfer_complete_ = cb;
   }
 
+  /**
+   * @brief 设置当前活动缓冲区有效长度 / Set active buffer valid length
+   * @param len 有效长度 / Valid length
+   */
   void SetActiveLength(uint16_t len) { double_buffer_.SetActiveLength(len); }
 
+  /**
+   * @brief 获取当前活动缓冲区有效长度 / Get active buffer valid length
+   * @return size_t 有效长度 / Valid length
+   */
   size_t GetActiveLength() { return double_buffer_.GetActiveLength(); }
 
   /**
-   * @brief 返回最大可传输字节数
-   *        Return the maximum transferable size at this time
-   *
-   * 默认为最大包长，可在支持 FIFO 优化的平台中重载为动态剩余容量。
-   * Default equals MaxPacketSize; override for FIFO-aware implementation.
+   * @brief 返回当前最大可传输字节数 / Return maximum transferable size at this time
+   * @return size_t 最大可传输字节数 / Maximum transferable bytes
    */
   virtual size_t MaxTransferSize() const { return MaxPacketSize(); }
 
   /**
-   * @brief 二次初始化/配置端点协议参数（由Pool/Manager分配后调用）
-   *        Configure endpoint protocol parameters (call after pool allocation)
+   * @brief 配置端点协议参数 / Configure endpoint protocol parameters
+   * @param cfg 配置参数 / Configuration parameters
    */
   virtual void Configure(const Config& cfg) = 0;
 
   /**
-   * @brief 关闭端点（软禁用/资源复位）
-   *        Close (soft disable)
+   * @brief 关闭端点 / Close endpoint
    */
   virtual void Close() = 0;
 
   /**
-   * @brief 停止端点传输
-   *        Stop endpoint transfer
-   *
-   * @return ErrorCode
+   * @brief 置 STALL / Stall endpoint
+   * @return ErrorCode 错误码 / Error code
    */
-  ErrorCode virtual Stall() = 0;
+  virtual ErrorCode Stall() = 0;
 
   /**
-   * @brief 清除端点停止状态
-   *        Clear endpoint stop status
-   *
-   * @return ErrorCode
+   * @brief 清除 STALL / Clear stall
+   * @return ErrorCode 错误码 / Error code
    */
-  ErrorCode virtual ClearStall() = 0;
+  virtual ErrorCode ClearStall() = 0;
 
   /**
-   * @brief 传输数据
-   *        Transfer data
-   *
-   * @param size 传输大小 / Transfer size
-   * @return ErrorCode
+   * @brief 启动一次传输 / Start a transfer
+   * @param size 传输长度 / Transfer size
+   * @return ErrorCode 错误码 / Error code
    */
   virtual ErrorCode Transfer(size_t size) = 0;
 
+  /**
+   * @brief Bulk 多包传输辅助接口 / Helper for multi-packet bulk transfer
+   * @param data 应用层缓冲区（IN：待发送数据；OUT：接收缓冲区） / App buffer (IN: data to
+   * send; OUT: receive buffer)
+   * @return ErrorCode 错误码 / Error code
+   */
   virtual ErrorCode TransferMultiBulk(RawData& data)
   {
     auto ep_buf = GetBuffer();
@@ -381,13 +373,16 @@ class Endpoint
   }
 
   /**
-   * @brief 传输空包
-   *        Transfer zero length packet
-   *
-   * @return ErrorCode
+   * @brief 发送/接收 ZLP（零长度包） / Transfer zero length packet (ZLP)
+   * @return ErrorCode 错误码 / Error code
    */
   virtual ErrorCode TransferZLP() { return Transfer(0); }
 
+  /**
+   * @brief 由底层在传输完成时调用 / Called by low-level driver when transfer completes
+   * @param in_isr 是否在中断上下文 / Whether in ISR context
+   * @param actual_transfer_size 实际传输长度 / Actual transferred size
+   */
   void OnTransferCompleteCallback(bool in_isr, size_t actual_transfer_size)
   {
     if (GetState() != State::BUSY)
@@ -395,80 +390,71 @@ class Endpoint
       return;
     }
 
-    bool callback_uses_app_buffer = false;  // 是否用 multi_bulk_data_ 作为回调数据
-    const Direction dir = GetDirection();
-    const size_t max_chunk = MaxTransferSize();
+    bool callback_uses_app_buffer = false;
+    const Direction DIR = GetDirection();
+    const size_t MAX_CHUNK = MaxTransferSize();
 
     if (multi_bulk_)
     {
-      if (dir == Direction::IN)
+      if (DIR == Direction::IN)
       {
         // ========= IN 方向：device -> host，多包发送 =========
         if (multi_bulk_remain_ > 0)
         {
-          // 还有剩余没发送的字节，准备下一包
           auto ep_buf = GetBuffer();
 
-          // 已经拷贝出去的字节数 = 总长 - 剩余
-          const size_t sent = multi_bulk_data_.size_ - multi_bulk_remain_;
+          const size_t SENT = multi_bulk_data_.size_ - multi_bulk_remain_;
 
-          size_t chunk = max_chunk;
+          size_t chunk = MAX_CHUNK;
           if (chunk > multi_bulk_remain_)
           {
             chunk = multi_bulk_remain_;
           }
 
-          auto src = static_cast<const uint8_t*>(multi_bulk_data_.addr_) + sent;
+          auto src = static_cast<const uint8_t*>(multi_bulk_data_.addr_) + SENT;
           auto dst = static_cast<uint8_t*>(ep_buf.addr_);
 
           Memory::FastCopy(dst, src, chunk);
           multi_bulk_remain_ -= chunk;
 
-          // 启动下一次传输（中间过程不回调上层）
           SetState(State::IDLE);
           (void)Transfer(chunk);
           return;
         }
         else
         {
-          // 已经没有剩余需要发送了，这是最后一包完成
           multi_bulk_ = false;
-          // 对 TX 来说，上层一般只关心“发完了”，data 内容用不用无所谓，下面走公共尾部
+          callback_uses_app_buffer = true;
+          actual_transfer_size = multi_bulk_data_.size_;
         }
       }
       else
       {
-        // ========= OUT 方向：host -> device，多包接收 =========
         auto ep_buf = GetBuffer();
 
         size_t prev_remain = multi_bulk_remain_;
         size_t recvd = actual_transfer_size;
 
-        // 理论上 recvd 不会超过我们这次要求的长度，但这里做个保护
         if (recvd > prev_remain)
         {
           recvd = prev_remain;
         }
 
-        // 已写入应用 buffer 的偏移 = 总长 - 之前剩余
-        const size_t offset = multi_bulk_data_.size_ - prev_remain;
+        const size_t OFFSET = multi_bulk_data_.size_ - prev_remain;
 
-        auto dst = static_cast<uint8_t*>(multi_bulk_data_.addr_) + offset;
+        auto dst = static_cast<uint8_t*>(multi_bulk_data_.addr_) + OFFSET;
         auto src = static_cast<const uint8_t*>(ep_buf.addr_);
 
-        // 把本次收到的数据拷到应用层 buffer
         Memory::FastCopy(dst, src, recvd);
 
-        // 更新剩余可写容量
         multi_bulk_remain_ = prev_remain - recvd;
 
-        const bool short_packet = (recvd < max_chunk);
-        const bool buffer_full = (multi_bulk_remain_ == 0);
+        const bool SHORT_PACKET = (recvd < MAX_CHUNK);
+        const bool BUFFER_FULL = (multi_bulk_remain_ == 0);
 
-        if (!short_packet && !buffer_full)
+        if (!SHORT_PACKET && !BUFFER_FULL)
         {
-          // 还没结束：既没有 short packet，应用 buffer 也还有空间
-          size_t chunk = max_chunk;
+          size_t chunk = MAX_CHUNK;
           if (chunk > multi_bulk_remain_)
           {
             chunk = multi_bulk_remain_;
@@ -476,10 +462,10 @@ class Endpoint
 
           SetState(State::IDLE);
           (void)Transfer(chunk);
-          return;  // 中间过程不回调上层
+          return;
         }
 
-        // 否则：收到了 short packet 或 buffer 填满 -> 结束 multi-bulk
+        // 收到了 short packet 或 buffer 填满 -> 结束 multi-bulk
         multi_bulk_ = false;
         callback_uses_app_buffer = true;
 
@@ -488,31 +474,24 @@ class Endpoint
       }
     }
 
-    // ========= 走到这里：
-    // 1）不是 multi-bulk 的普通传输，或
-    // 2）multi-bulk（IN/OUT）已经完成，准备回调上层 =========
-
     SetState(State::IDLE);
 
     ConstRawData data;
 
     if (callback_uses_app_buffer)
     {
-      // multi-bulk OUT：回调给上层的是应用层的 buffer
       data = ConstRawData(multi_bulk_data_.addr_, actual_transfer_size);
     }
     else
     {
-      // 普通情况或 multi-bulk IN：保持原有逻辑
       data = UseDoubleBuffer()
-                 ? ConstRawData(dir == Direction::OUT ? double_buffer_.ActiveBuffer()
+                 ? ConstRawData(DIR == Direction::OUT ? double_buffer_.ActiveBuffer()
                                                       : double_buffer_.PendingBuffer(),
                                 actual_transfer_size)
                  : ConstRawData(buffer_.addr_, actual_transfer_size);
 
-      if (UseDoubleBuffer() && dir == Direction::OUT)
+      if (UseDoubleBuffer() && DIR == Direction::OUT)
       {
-        // 原有 OUT 方向的双缓冲切换策略
         SwitchBuffer();
       }
     }
@@ -522,15 +501,13 @@ class Endpoint
 
  protected:
   /**
-   * @brief 获取当前配置
-   *        Get endpoint config
+   * @brief 获取当前配置引用 / Get endpoint config reference
+   * @return Config& 配置引用 / Configuration reference
    */
   Config& GetConfig() { return config_; }
 
   /**
-   * @brief 切换缓冲区
-   *        Switch buffer
-   *
+   * @brief 切换双缓冲 / Switch double buffer
    */
   virtual void SwitchBuffer()
   {
@@ -539,10 +516,9 @@ class Endpoint
   }
 
   /**
-   * @brief 设置当前活动缓冲区
-   *        Set active buffer
-   *
-   * @param active_block true 表示使用第二个缓冲区，false 表示使用第一个缓冲区
+   * @brief 设置当前活动缓冲块 / Set active buffer block
+   * @param active_block true 使用第二块；false 使用第一块 / true selects second block;
+   * false selects first block
    */
   virtual void SetActiveBlock(bool active_block)
   {
@@ -551,18 +527,20 @@ class Endpoint
   }
 
  private:
-  /// 传输完成回调 / Called when transfer completes
-  LibXR::Callback<LibXR::ConstRawData&> on_transfer_complete_;
+  LibXR::Callback<LibXR::ConstRawData&>
+      on_transfer_complete_;  ///< 传输完成回调 / Transfer complete callback
 
-  EPNumber number_;                    ///< 当前端点编号 / Endpoint number
+  EPNumber number_;                    ///< 端点号 / Endpoint number
   Direction avail_direction_;          ///< 可配置方向 / Allowed direction
-  Config config_;                      ///< 当前端点配置 / Current configuration
-  State state_ = State::DISABLED;      ///< 当前状态 / Endpoint status
+  Config config_;                      ///< 当前配置 / Current configuration
+  State state_ = State::DISABLED;      ///< 当前状态 / Current state
   LibXR::RawData buffer_;              ///< 端点缓冲区 / Endpoint buffer
-  LibXR::DoubleBuffer double_buffer_;  ///< 双缓冲区 / Double buffer
-  bool multi_bulk_ = false;             ///< 当前是否处于多包 bulk 发送过程
-  RawData multi_bulk_data_{};     ///< 应用层整体 buffer（addr = 起始地址，size_ = 总长度）
-  size_t multi_bulk_remain_ = 0;  ///< 剩余尚未发送的字节数
-};  // namespace LibXR::USB
+  LibXR::DoubleBuffer double_buffer_;  ///< 双缓冲管理 / Double buffer manager
+
+  bool multi_bulk_ = false;  ///< 多包 bulk 状态机使能 / Multi-bulk state enabled
+  RawData multi_bulk_data_;  ///< 多包 bulk 应用层 buffer / App buffer for multi-bulk
+  size_t multi_bulk_remain_ =
+      0;  ///< 多包 bulk 剩余字节数 / Remaining bytes for multi-bulk
+};
 
 }  // namespace LibXR::USB

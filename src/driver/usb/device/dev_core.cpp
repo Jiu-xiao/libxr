@@ -808,7 +808,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket *setup,
     return ErrorCode::OK;
   }
 
-  // 既无缓冲也无 ZLP：认为类已处理并不需要数据阶段（状态阶段由底层完成）
+  // 既无缓冲也无 ZLP：认为类已处理并不需要数据阶段
   return ErrorCode::OK;
 }
 
@@ -881,9 +881,6 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket *&setu
     class_req_.class_ptr = item;
     class_req_.b_request = setup->bRequest;
     class_req_.data = result.read_data;
-
-    // 如果你想严格按 wLength 收，可以在这里改 size_ = wLength
-    // result.read_data.size_ = setup->wLength;
 
     DevReadEP0Data(result.read_data, endpoint_.in0->MaxTransferSize());
     return ErrorCode::OK;
