@@ -5,38 +5,14 @@ using namespace LibXR;
 MSPM0GPIO* MSPM0GPIO::instance_map_[MAX_PORTS][32] = {{nullptr}};
 
 /**
- * @brief 获取 GPIO 端口索引
- *
- * @param port_addr GPIO 端口基地址
- * @return int 端口索引 (0 = GPIOA, 1 = GPIOB, 2 = GPIOC, -1 = 无效地址)
- */
-static inline int MSPM0_GPIO_GetPortIndex(uint32_t port_addr)  // NOLINT
-{
-  if (port_addr == GPIOA_BASE)
-  {
-    return 0;
-  }
-#ifdef GPIOB_BASE
-  if (port_addr == GPIOB_BASE)
-  {
-    return 1;
-  }
-#endif
-#ifdef GPIOC_BASE
-  if (port_addr == GPIOC_BASE) return 2;
-#endif
-  return -1;
-}
-
-/**
  * @brief 计算 GPIO 中断极性掩码
  *
  * @param pin 引脚号 (0-31)
  * @param direction 中断触发方向
  * @return uint32_t 极性掩码，用于配置中断触发边沿
  */
-static inline uint32_t MSPM0_GPIO_GetPolarityMask(uint8_t pin,  // NOLINT
-                                                  LibXR::GPIO::Direction direction)
+static constexpr uint32_t MSPM0_GPIO_GetPolarityMask(uint8_t pin,  // NOLINT
+                                                      LibXR::GPIO::Direction direction)
 {
   if (pin < 16)
   {
@@ -69,51 +45,68 @@ static inline uint32_t MSPM0_GPIO_GetPolarityMask(uint8_t pin,  // NOLINT
   }
 }
 
-MSPM0GPIO::MSPM0GPIO(uint32_t port_addr, uint32_t pin_mask, uint32_t pincm)
-    : port_addr_(port_addr), pin_mask_(pin_mask), pincm_(pincm)
+MSPM0GPIO::MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm)
+    : port_(port), pin_mask_(pin_mask), pincm_(pincm)
 {
   int pin_idx = __builtin_ctz(pin_mask_);
-  int port_idx = MSPM0_GPIO_GetPortIndex(port_addr_);
+  int port_idx = GetPortIndex(reinterpret_cast<uint32_t>(port_));
 
   ASSERT(port_idx >= 0 && port_idx < LibXR::MAX_PORTS);
   ASSERT(instance_map_[port_idx][pin_idx] == nullptr);
 
   instance_map_[port_idx][pin_idx] = this;
+
+  switch (port_idx)
+  {
+    case 0:
+#ifdef GPIOA_BASE
+      NVIC_EnableIRQ(GPIOA_INT_IRQn);
+#endif
+      break;
+
+    case 1:
+#ifdef GPIOB_BASE
+      NVIC_EnableIRQ(GPIOB_INT_IRQn);
+#endif
+      break;
+
+    case 2:
+#ifdef GPIOC_BASE
+      NVIC_EnableIRQ(GPIOC_INT_IRQn);
+#endif
+      break;
+  }
+
+  __enable_irq();
 }
 
-bool MSPM0GPIO::Read()
-{
-  GPIO_Regs* port = reinterpret_cast<GPIO_Regs*>(port_addr_);  // NOLINT
-  return DL_GPIO_readPins(port, pin_mask_) == pin_mask_;
-}
+bool MSPM0GPIO::Read() { return DL_GPIO_readPins(port_, pin_mask_) == pin_mask_; }
 
 ErrorCode MSPM0GPIO::Write(bool value)
 {
-  GPIO_Regs* port = reinterpret_cast<GPIO_Regs*>(port_addr_);  // NOLINT
-
   if (current_direction_ == LibXR::GPIO::Direction::OUTPUT_OPEN_DRAIN)
   {
     if (value)
     {
       // 开漏高阻 / Open-drain high-Z
-      DL_GPIO_disableOutput(port, pin_mask_);
+      DL_GPIO_disableOutput(port_, pin_mask_);
     }
     else
     {
       // 开漏拉低 / Open-drain pull low
-      DL_GPIO_clearPins(port, pin_mask_);
-      DL_GPIO_enableOutput(port, pin_mask_);
+      DL_GPIO_clearPins(port_, pin_mask_);
+      DL_GPIO_enableOutput(port_, pin_mask_);
     }
   }
   else
   {
     if (value)
     {
-      DL_GPIO_setPins(port, pin_mask_);
+      DL_GPIO_setPins(port_, pin_mask_);
     }
     else
     {
-      DL_GPIO_clearPins(port, pin_mask_);
+      DL_GPIO_clearPins(port_, pin_mask_);
     }
   }
   return ErrorCode::OK;
@@ -121,15 +114,13 @@ ErrorCode MSPM0GPIO::Write(bool value)
 
 ErrorCode MSPM0GPIO::EnableInterrupt()
 {
-  GPIO_Regs* port = reinterpret_cast<GPIO_Regs*>(port_addr_);  // NOLINT
-  DL_GPIO_enableInterrupt(port, pin_mask_);
+  DL_GPIO_enableInterrupt(port_, pin_mask_);
   return ErrorCode::OK;
 }
 
 ErrorCode MSPM0GPIO::DisableInterrupt()
 {
-  GPIO_Regs* port = reinterpret_cast<GPIO_Regs*>(port_addr_);  // NOLINT
-  DL_GPIO_disableInterrupt(port, pin_mask_);
+  DL_GPIO_disableInterrupt(port_, pin_mask_);
   return ErrorCode::OK;
 }
 
@@ -137,11 +128,9 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
 {
   current_direction_ = config.direction;
 
-  GPIO_Regs* port = reinterpret_cast<GPIO_Regs*>(port_addr_);  // NOLINT
-
-  DL_GPIO_disableOutput(port, pin_mask_);
-  DL_GPIO_disableInterrupt(port, pin_mask_);
-  DL_GPIO_clearInterruptStatus(port, pin_mask_);
+  DL_GPIO_disableOutput(port_, pin_mask_);
+  DL_GPIO_disableInterrupt(port_, pin_mask_);
+  DL_GPIO_clearInterruptStatus(port_, pin_mask_);
 
   switch (config.direction)
   {
@@ -180,9 +169,9 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
       volatile uint32_t* pincm_reg = &IOMUX->SECCFG.PINCM[pincm_];
       *pincm_reg |= IOMUX_PINCM_INENA_ENABLE;
 
-      DL_GPIO_clearPins(port, pin_mask_);
+      DL_GPIO_clearPins(port_, pin_mask_);
 
-      DL_GPIO_enableOutput(port, pin_mask_);
+      DL_GPIO_enableOutput(port_, pin_mask_);
       break;
     }
 
@@ -226,32 +215,30 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
       {
         uint32_t pin_idx = __builtin_ctz(pin_mask_);
 
-        auto update_polarity = [&](auto getter, auto setter, uint32_t offset)
-        {
-          constexpr uint32_t BITS_PER_PIN = 2;
-          constexpr uint32_t CLEAR_PATTERN = 0x3U;
+        constexpr uint32_t BITS_PER_PIN = 2;
+        constexpr uint32_t CLEAR_PATTERN = 0x3U;
 
-          uint32_t shift = (pin_idx - offset) * BITS_PER_PIN;
-          uint32_t clear_mask = CLEAR_PATTERN << shift;
-
-          uint32_t current_polarity = getter(port);
-          current_polarity &= ~clear_mask;
-          current_polarity |= pol_mask;
-          setter(port, current_polarity);
-        };
+        uint32_t shift = (pin_idx - (pin_idx < 16 ? 0 : 16)) * BITS_PER_PIN;
+        uint32_t clear_mask = CLEAR_PATTERN << shift;
 
         if (pin_idx < 16)
         {
-          update_polarity(DL_GPIO_getLowerPinsPolarity, DL_GPIO_setLowerPinsPolarity, 0);
+          uint32_t current_polarity = DL_GPIO_getLowerPinsPolarity(port_);
+          current_polarity &= ~clear_mask;
+          current_polarity |= pol_mask;
+          DL_GPIO_setLowerPinsPolarity(port_, current_polarity);
         }
         else
         {
-          update_polarity(DL_GPIO_getUpperPinsPolarity, DL_GPIO_setUpperPinsPolarity, 16);
+          uint32_t current_polarity = DL_GPIO_getUpperPinsPolarity(port_);
+          current_polarity &= ~clear_mask;
+          current_polarity |= pol_mask;
+          DL_GPIO_setUpperPinsPolarity(port_, current_polarity);
         }
       }
 
-      DL_GPIO_clearInterruptStatus(port, pin_mask_);
-      DL_GPIO_enableInterrupt(port, pin_mask_);
+      DL_GPIO_clearInterruptStatus(port_, pin_mask_);
+      DL_GPIO_enableInterrupt(port_, pin_mask_);
     }
     break;
 
@@ -262,7 +249,7 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
   return ErrorCode::OK;
 }
 
-void MSPM0GPIO::OnInterrupt(GPIO_Regs* port, int port_idx)
+void MSPM0GPIO::OnInterruptDispatch(GPIO_Regs* port, int port_idx)
 {
   uint32_t pending_pins = DL_GPIO_getEnabledInterruptStatus(port, 0xFFFFFFFF);
 

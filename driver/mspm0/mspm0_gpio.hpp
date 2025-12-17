@@ -65,11 +65,11 @@ class MSPM0GPIO : public GPIO
  public:
   /**
    * @brief Constructor / 构造函数
-   * @param port_addr GPIO port base address / GPIO 端口基地址
+   * @param port GPIO port pointer / GPIO 端口指针
    * @param pin_mask Pin mask (e.g., DL_GPIO_PIN_0) / 引脚掩码 (例如 DL_GPIO_PIN_0)
    * @param pincm PINCM index for IOMUX configuration / IOMUX 配置的 PINCM 索引
    */
-  explicit MSPM0GPIO(uint32_t port_addr, uint32_t pin_mask, uint32_t pincm);
+  explicit MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm);
 
   bool Read() override;
 
@@ -81,10 +81,37 @@ class MSPM0GPIO : public GPIO
 
   ErrorCode SetConfig(Configuration config) override;
 
-  static void OnInterrupt(GPIO_Regs* port, int port_idx);
+  static inline void OnInterrupt(GPIO_Regs* port)
+  {
+    const int idx = GetPortIndex(reinterpret_cast<uint32_t>(port));  // NOLINT
+    OnInterruptDispatch(port, idx);
+  }
 
  private:
-  uint32_t port_addr_;
+  static void OnInterruptDispatch(GPIO_Regs* port, int port_idx);
+
+  static constexpr int GetPortIndex(uint32_t base_addr)
+  {
+    if (base_addr == GPIOA_BASE)
+    {
+      return 0;
+    }
+#ifdef GPIOB_BASE
+    if (base_addr == GPIOB_BASE)
+    {
+      return 1;
+    }
+#endif
+#ifdef GPIOC_BASE
+    if (base_addr == GPIOC_BASE)
+    {
+      return 2;
+    }
+#endif
+    return -1;
+  }
+
+  GPIO_Regs* port_;
   uint32_t pin_mask_;
   uint32_t pincm_;
   LibXR::GPIO::Direction current_direction_ = LibXR::GPIO::Direction::INPUT;
