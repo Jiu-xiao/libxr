@@ -6,19 +6,13 @@
 namespace LibXR
 {
 
-constexpr uint8_t MAX_PORTS =
-#ifdef GPIOA_BASE
-    1
-#else
-    0
-#endif
-#ifdef GPIOB_BASE
-    + 1
-#endif
 #ifdef GPIOC_BASE
-    + 1
+    constexpr uint8_t MAX_PORTS = 3;
+#elif defined(GPIOB_BASE)
+    constexpr uint8_t MAX_PORTS = 2;
+#else
+    constexpr uint8_t MAX_PORTS = 1;
 #endif
-    ;
 
 class MSPM0GPIO : public GPIO
 {
