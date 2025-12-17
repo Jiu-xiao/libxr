@@ -239,7 +239,11 @@ ErrorCode STM32CANFD::Init(void)
     HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO1_NEW_MESSAGE, 0);
   }
 
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_ERROR_PASSIVE, 0);
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_ERROR_WARNING, 0);
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_BUS_OFF, 0);
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_FIFO_EMPTY, 0);
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_COMPLETE, 0xFFFFFFFF);
 
   return ErrorCode::OK;
 }
@@ -587,16 +591,13 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
     return ErrorCode::FAILED;
   }
 
-  // 恢复通知：简单起见，两个 FIFO 都打开 + TX FIFO empty
-#ifdef FDCAN_IT_RX_FIFO0_NEW_MESSAGE
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_ERROR_PASSIVE, 0);
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_ERROR_WARNING, 0);
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_BUS_OFF, 0);
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-#endif
-#ifdef FDCAN_IT_RX_FIFO1_NEW_MESSAGE
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO1_NEW_MESSAGE, 0);
-#endif
-#ifdef FDCAN_IT_TX_FIFO_EMPTY
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_FIFO_EMPTY, 0);
-#endif
+  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_COMPLETE, 0xFFFFFFFF);
 
   return ErrorCode::OK;
 }
@@ -809,6 +810,7 @@ void STM32CANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
   if (protocol_status.BusOff != 0u)
   {
     eid = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
+    CLEAR_BIT(hcan_->Instance->CCCR, FDCAN_CCCR_INIT);
   }
   else if (protocol_status.ErrorPassive != 0u)
   {
