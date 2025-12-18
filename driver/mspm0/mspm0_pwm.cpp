@@ -2,6 +2,10 @@
 
 using namespace LibXR;
 
+static constexpr uint32_t MAX_TIMER_LOAD = 65535;
+static constexpr uint32_t MAX_PRESCALER = 256;
+static constexpr uint32_t MAX_DIVIDE_RATIO = 8;
+
 MSPM0PWM::MSPM0PWM(MSPM0PWM::Resources res)
     : timer_(res.timer), channel_(res.channel), clock_freq_(res.clock_freq)
 {
@@ -36,8 +40,7 @@ ErrorCode MSPM0PWM::SetDutyCycle(float value)
       break;
 
     default:
-      compare_value = static_cast<uint32_t>(static_cast<float>(period) * (1.0f - value));
-      break;
+      return ErrorCode::NOT_SUPPORT;
   }
 
   if (compare_value > period)
@@ -59,14 +62,14 @@ ErrorCode MSPM0PWM::SetConfig(Configuration config)
   }
 
   const uint32_t TOTAL_CYCLES_NEEDED = SOURCE_CLOCK / config.frequency;
-  uint32_t min_total_prescale = (TOTAL_CYCLES_NEEDED + 65535) >> 16;
+  uint32_t min_total_prescale = (TOTAL_CYCLES_NEEDED + MAX_TIMER_LOAD) >> 16;
   if (min_total_prescale == 0)
   {
     min_total_prescale = 1;
   }
 
-  uint32_t best_div = (min_total_prescale + 255) >> 8;
-  if (best_div > 8)
+  uint32_t best_div = (min_total_prescale + MAX_PRESCALER - 1) >> 8;
+  if (best_div > MAX_DIVIDE_RATIO)
   {
     return ErrorCode::NOT_SUPPORT;  // Frequency too low
   }
