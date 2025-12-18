@@ -146,6 +146,11 @@ enum class SizeLimitMode : uint8_t
  */
 extern void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
 
+#ifndef LIBXR_SYSTEM_CLOCK_HZ
+// Default system clock frequency (can be overridden by platform-specific config)
+#define LIBXR_SYSTEM_CLOCK_HZ 32000000U
+#endif
+
 namespace LibXR
 {
 using ErrorCode = ErrorCode;
