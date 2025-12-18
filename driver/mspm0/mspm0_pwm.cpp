@@ -22,18 +22,27 @@ ErrorCode MSPM0PWM::SetDutyCycle(float value)
 
   uint32_t period = DL_Timer_getLoadValue(timer_);
   uint32_t compare_value = 0;
+  DL_TIMER_COUNT_MODE count_mode = DL_Timer_getCounterMode(timer_);
 
-  if (value <= 0.0f)
+  switch (count_mode)
+  {
+    case DL_TIMER_COUNT_MODE_DOWN:
+      compare_value = static_cast<uint32_t>(static_cast<float>(period) * (1.0f - value));
+      break;
+
+    case DL_TIMER_COUNT_MODE_UP:
+    case DL_TIMER_COUNT_MODE_UP_DOWN:
+      compare_value = static_cast<uint32_t>(static_cast<float>(period) * value);
+      break;
+
+    default:
+      compare_value = static_cast<uint32_t>(static_cast<float>(period) * (1.0f - value));
+      break;
+  }
+
+  if (compare_value > period)
   {
     compare_value = period;
-  }
-  else if (value >= 1.0f)
-  {
-    compare_value = period + 1;
-  }
-  else
-  {
-    compare_value = static_cast<uint32_t>(static_cast<float>(period) * (1.0f - value));
   }
 
   DL_Timer_setCaptureCompareValue(timer_, compare_value, channel_);
