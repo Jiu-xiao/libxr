@@ -810,7 +810,6 @@ void STM32CANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
   if (protocol_status.BusOff != 0u)
   {
     eid = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
-    CLEAR_BIT(hcan_->Instance->CCCR, FDCAN_CCCR_INIT);
   }
   else if (protocol_status.ErrorPassive != 0u)
   {
