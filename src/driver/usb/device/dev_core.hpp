@@ -1,6 +1,7 @@
 #pragma once
 #include <cstring>
 
+#include "libxr_type.hpp"
 #include "usb/core/core.hpp"
 #include "usb/core/desc_cfg.hpp"
 #include "usb/core/ep_pool.hpp"
@@ -61,6 +62,7 @@ class DeviceClass : public ConfigDescriptorItem
    * @param bRequest 请求码 / Request code
    * @param wValue 请求值 / wValue field
    * @param wLength 请求长度 / Requested length
+   * @param wIndex 请求索引 / Request index
    * @param result 读写数据结构体 / Data result struct
    * @return ErrorCode 错误码 / Error code
    */
@@ -90,6 +92,30 @@ class DeviceClass : public ConfigDescriptorItem
     UNUSED(in_isr);
     UNUSED(bRequest);
     UNUSED(data);
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  /**
+   * @brief 处理厂商自定义请求 / Handle vendor request
+   *
+   * @param in_isr 是否在中断中 / In ISR
+   * @param bRequest 请求码 / Request code
+   * @param wValue 请求值 / wValue field
+   * @param wLength 请求长度 / Requested length
+   * @param wIndex 请求索引 / Request index
+   * @param result 读写数据结构体 / Data result struct
+   * @return ErrorCode
+   */
+  virtual ErrorCode OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
+                                    uint16_t wLength, uint16_t wIndex,
+                                    RequestResult &result)
+  {
+    UNUSED(in_isr);
+    UNUSED(bRequest);
+    UNUSED(wValue);
+    UNUSED(wLength);
+    UNUSED(wIndex);
+    UNUSED(result);
     return ErrorCode::NOT_SUPPORT;
   }
 
@@ -370,6 +396,7 @@ class DeviceCore
     bool read = false;                 ///< 是否读操作 / Read operation
     DeviceClass *class_ptr = nullptr;  ///< 当前类指针 / Current device class pointer
     uint8_t b_request = 0;             ///< 当前请求码 / Current request code
+    ConstRawData data;                 ///< 当前数据 / Current data
   } class_req_;
 };
 }  // namespace LibXR::USB

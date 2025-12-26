@@ -51,7 +51,7 @@ class Operation
 
   /// @brief Default constructor, initializes with NONE type.
   /// @brief 默认构造函数，初始化为NONE类型。
-  Operation() : type(OperationType::NONE) { memset(&data, 0, sizeof(data)); }
+  Operation() : type(OperationType::NONE) { Memory::FastSet(&data, 0, sizeof(data)); }
 
   /**
    * @brief Constructs a blocking operation with a semaphore and timeout.

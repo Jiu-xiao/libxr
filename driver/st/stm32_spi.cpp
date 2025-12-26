@@ -112,10 +112,10 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     if (write_data.size_ > 0 && read_data.size_ > 0)
     {
-      memcpy(tx.addr_, write_data.addr_, write_data.size_);
+      Memory::FastCopy(tx.addr_, write_data.addr_, write_data.size_);
       if (write_data.size_ < need_write)
       {
-        memset(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
+        Memory::FastSet(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
                need_write - write_data.size_);
       }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -129,10 +129,10 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     }
     else if (write_data.size_ > 0)
     {
-      memcpy(tx.addr_, write_data.addr_, write_data.size_);
+      Memory::FastCopy(tx.addr_, write_data.addr_, write_data.size_);
       if (write_data.size_ < need_write)
       {
-        memset(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
+        Memory::FastSet(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
                need_write - write_data.size_);
       }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -177,10 +177,10 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
   if (write_data.size_ > 0 && read_data.size_ > 0)
   {
-    memcpy(tx.addr_, write_data.addr_, write_data.size_);
+    Memory::FastCopy(tx.addr_, write_data.addr_, write_data.size_);
     if (write_data.size_ < need_write)
     {
-      memset(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
+      Memory::FastSet(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
              need_write - write_data.size_);
     }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -195,7 +195,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     if (ans == ErrorCode::OK)
     {
-      memcpy(read_data.addr_, rx.addr_, read_data.size_);
+      Memory::FastCopy(read_data.addr_, rx.addr_, read_data.size_);
     }
     SwitchBuffer();
   }
@@ -208,13 +208,13 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     if (ans == ErrorCode::OK)
     {
-      memcpy(read_data.addr_, rx.addr_, read_data.size_);
+      Memory::FastCopy(read_data.addr_, rx.addr_, read_data.size_);
     }
     SwitchBuffer();
   }
   else if (write_data.size_ > 0)
   {
-    memcpy(tx.addr_, write_data.addr_, write_data.size_);
+    Memory::FastCopy(tx.addr_, write_data.addr_, write_data.size_);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
                             static_cast<int32_t>(need_write));
@@ -363,7 +363,7 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op)
     rw_op_ = op;
 
     uint8_t *txb = reinterpret_cast<uint8_t *>(tx.addr_);
-    memset(txb, 0, need_read + 1);
+    Memory::FastSet(txb, 0, need_read + 1);
     txb[0] = static_cast<uint8_t>(reg | 0x80);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
@@ -390,7 +390,7 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op)
 
   mem_read_ = false;
   uint8_t *txb = reinterpret_cast<uint8_t *>(tx.addr_);
-  memset(txb, 0, need_read + 1);
+  Memory::FastSet(txb, 0, need_read + 1);
   txb[0] = static_cast<uint8_t>(reg | 0x80);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
   SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
@@ -406,7 +406,7 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op)
   if (ans == ErrorCode::OK)
   {
     uint8_t *rxb = reinterpret_cast<uint8_t *>(rx.addr_);
-    memcpy(read_data.addr_, rxb + 1, need_read);
+    Memory::FastCopy(read_data.addr_, rxb + 1, need_read);
   }
   SwitchBuffer();
 
@@ -436,7 +436,7 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW 
 
     uint8_t *txb = reinterpret_cast<uint8_t *>(tx.addr_);
     txb[0] = static_cast<uint8_t>(reg & 0x7F);
-    memcpy(txb + 1, write_data.addr_, need_write);
+    Memory::FastCopy(txb + 1, write_data.addr_, need_write);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
                             static_cast<int32_t>(need_write + 1));
@@ -461,7 +461,7 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW 
 
   uint8_t *txb = reinterpret_cast<uint8_t *>(tx.addr_);
   txb[0] = static_cast<uint8_t>(reg & 0x7F);
-  memcpy(txb + 1, write_data.addr_, need_write);
+  Memory::FastCopy(txb + 1, write_data.addr_, need_write);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
   SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
                           static_cast<int32_t>(need_write + 1));
@@ -741,7 +741,7 @@ extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
       SCB_InvalidateDCache_by_Addr(rx.addr_, spi->read_buff_.size_);
 #endif
-      memcpy(spi->read_buff_.addr_, rx.addr_, spi->read_buff_.size_);
+      Memory::FastCopy(spi->read_buff_.addr_, rx.addr_, spi->read_buff_.size_);
     }
     else
     {
@@ -749,7 +749,7 @@ extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
       SCB_InvalidateDCache_by_Addr(rx.addr_, spi->read_buff_.size_ + 1);
 #endif
       uint8_t *rx_dma_buff = reinterpret_cast<uint8_t *>(rx.addr_);
-      memcpy(spi->read_buff_.addr_, rx_dma_buff + 1, spi->read_buff_.size_);
+      Memory::FastCopy(spi->read_buff_.addr_, rx_dma_buff + 1, spi->read_buff_.size_);
     }
     spi->read_buff_.size_ = 0;
   }

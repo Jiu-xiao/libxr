@@ -24,7 +24,7 @@ DatabaseRawSequential::DatabaseRawSequential(Flash& flash, size_t max_buffer_siz
 
 void DatabaseRawSequential::Init()
 {
-  memset(buffer_, 0xFF, max_buffer_size_);
+  Memory::FastSet(buffer_, 0xFF, max_buffer_size_);
   FlashInfo* flash_data_ = reinterpret_cast<FlashInfo*>(buffer_);
   flash_data_->header = FLASH_HEADER;
   flash_data_->key = {0, 0, 0};
@@ -65,7 +65,7 @@ void DatabaseRawSequential::Load() { flash_.Read(0, {buffer_, max_buffer_size_})
 
 void DatabaseRawSequential::Restore()
 {
-  memset(buffer_, 0xFF, max_buffer_size_);
+  Memory::FastSet(buffer_, 0xFF, max_buffer_size_);
   FlashInfo* flash_data_ = reinterpret_cast<FlashInfo*>(buffer_);
   flash_data_->header = FLASH_HEADER;
   flash_data_->key = {0, 0, 0};

@@ -78,7 +78,7 @@ class Inertia
    * @brief 默认构造函数，初始化质量为0，惯性张量为零矩阵。Default constructor
    * initializing mass to 0 and inertia tensor to zero.
    */
-  Inertia() : mass(0) { memset(data, 0, sizeof(data)); }
+  Inertia() : mass(0) { Memory::FastSet(data, 0, sizeof(data)); }
 
   /**
    * @brief 使用质量和 6 维数组（对称惯性矩阵）构造惯性对象。Constructs an inertia object

@@ -97,8 +97,8 @@ class STM32CANFD : public FDCAN
   typename std::enable_if<HasMessageRAMOffset<T>::value, void>::type
   CheckMessageRAMOffset(T& fdcan_handle, uint32_t max_words = FDCAN_MESSAGE_RAM_WORDS_MAX)
   {
-  using HandleT = std::remove_reference_t<decltype(*fdcan_handle)>;
-  using InitT   = decltype(HandleT{}.Init);
+    using HandleT = std::remove_reference_t<decltype(*fdcan_handle)>;
+    using InitT = decltype(HandleT{}.Init);
 
     // NOLINTNEXTLINE
     static const auto FDCAN_ElmtWords = [](uint32_t sz) -> uint32_t
@@ -199,9 +199,37 @@ class STM32CANFD : public FDCAN
    */
   ErrorCode Init(void);
 
+  /**
+   * @brief 设置 CAN/FDCAN 配置。Set CAN/FDCAN configuration.
+   *
+   * @param cfg 仲裁相位配置。Nominal (arbitration) configuration.
+   * @return ErrorCode 操作结果。Operation result.
+   */
+  ErrorCode SetConfig(const CAN::Configuration& cfg) override;
+
+  /**
+   * @brief 设置 FDCAN 配置（仲裁相位 + 数据相位）。
+   *        Set full FDCAN configuration (nominal + data phase).
+   *
+   * @param cfg FDCAN 配置参数。FDCAN configuration.
+   * @return ErrorCode 操作结果。Operation result.
+   */
+  ErrorCode SetConfig(const FDCAN::Configuration& cfg) override;
+
+  /**
+   * @brief 获取 FDCAN 外设时钟（Hz）。Get FDCAN kernel clock (Hz).
+   */
+  uint32_t GetClockFreq() const override;
+
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
   ErrorCode AddMessage(const FDPack& pack) override;
+
+  /**
+   * @brief 查询当前错误状态（快照）。
+   *        Query current FDCAN error state (snapshot).
+   */
+  ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   /**
    * @brief 处理接收中断
@@ -211,10 +239,11 @@ class STM32CANFD : public FDCAN
   void ProcessRxInterrupt(uint32_t fifo);
 
   /**
-   * @brief 处理发送中断
+   * @brief 处理错误状态中断
    *
+   * @param error_status_its 错误状态标志 Error status flags
    */
-  void ProcessTxInterrupt();
+  void ProcessErrorStatusInterrupt(uint32_t error_status_its);
 
   /**
    * @brief 获取硬件发送队列空闲大小
@@ -226,6 +255,14 @@ class STM32CANFD : public FDCAN
     auto free = HAL_FDCAN_GetTxFifoFreeLevel(hcan_);
     return free;
   }
+
+  static inline void BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h);
+  static inline void BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h);
+
+  void TxService();
+
+  std::atomic<uint32_t> tx_lock_{0};
+  std::atomic<uint32_t> tx_pend_{0};
 
   FDCAN_HandleTypeDef* hcan_;
 

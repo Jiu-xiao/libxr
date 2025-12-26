@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include "libxr_mem.hpp"
 
 namespace LibXR
 {
@@ -33,7 +34,7 @@ struct IPAddressRaw
 
   bool operator==(const IPAddressRaw& other) const
   {
-    return std::memcmp(bytes, other.bytes, 4) == 0;
+    return Memory::FastCmp(bytes, other.bytes, 4) == 0;
   }
 
   bool operator!=(const IPAddressRaw& other) const
@@ -87,7 +88,7 @@ struct MACAddressRaw
 
   bool operator==(const MACAddressRaw& other) const
   {
-    return std::memcmp(bytes, other.bytes, 6) == 0;
+    return Memory::FastCmp(bytes, other.bytes, 6) == 0;
   }
 
   bool operator!=(const MACAddressRaw& other) const

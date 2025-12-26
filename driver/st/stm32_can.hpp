@@ -58,7 +58,19 @@ class STM32CAN : public CAN
    */
   ErrorCode Init(void);
 
+  /**
+   * @brief 设置 CAN 配置。Set CAN configuration.
+   *
+   * @param cfg CAN 配置参数。CAN configuration.
+   * @return ErrorCode 操作结果。Operation result.
+   */
+  ErrorCode SetConfig(const CAN::Configuration& cfg) override;
+
+  uint32_t GetClockFreq() const override;
+
   ErrorCode AddMessage(const ClassicPack& pack) override;
+
+  ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   /**
    * @brief 处理接收中断
@@ -67,10 +79,10 @@ class STM32CAN : public CAN
   void ProcessRxInterrupt();
 
   /**
-   * @brief 处理发送中断
+   * @brief 处理错误中断
    *
    */
-  void ProcessTxInterrupt();
+  void ProcessErrorInterrupt();
 
   CAN_HandleTypeDef* hcan_;
 
@@ -94,7 +106,12 @@ class STM32CAN : public CAN
 
   LockFreePool<ClassicPack> tx_pool_;
 
-  std::atomic<uint32_t> bus_busy_ = 0;
+  std::atomic<uint32_t> tx_lock_{0};
+  std::atomic<uint32_t> tx_pend_{0};
+
+  static inline void BuildTxHeader(const ClassicPack& p, CAN_TxHeaderTypeDef& h);
+
+  void TxService();
 };
 }  // namespace LibXR
 
