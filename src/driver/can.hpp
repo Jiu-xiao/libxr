@@ -21,8 +21,8 @@ class CAN
    */
   enum class Type : uint8_t
   {
-    STANDARD = 0,         ///< 标准数据帧（11-bit ID）。Standard data frame (11-bit ID).
-    EXTENDED = 1,         ///< 扩展数据帧（29-bit ID）。Extended data frame (29-bit ID).
+    STANDARD = 0,  ///< 标准数据帧（11-bit ID）。Standard data frame (11-bit ID).
+    EXTENDED = 1,  ///< 扩展数据帧（29-bit ID）。Extended data frame (29-bit ID).
     REMOTE_STANDARD = 2,  ///< 标准远程帧。Standard remote frame.
     REMOTE_EXTENDED = 3,  ///< 扩展远程帧。Extended remote frame.
     ERROR = 4,            ///< 错误帧（虚拟事件）。Error frame (virtual event).
@@ -48,8 +48,8 @@ class CAN
    */
   struct Mode
   {
-    bool loopback = false;         ///< 回环模式。Loopback mode.
-    bool listen_only = false;      ///< 只听（静默）模式。Listen-only (silent) mode.
+    bool loopback = false;     ///< 回环模式。Loopback mode.
+    bool listen_only = false;  ///< 只听（静默）模式。Listen-only (silent) mode.
     bool triple_sampling = false;  ///< 三采样。Triple sampling.
     bool one_shot = false;         ///< 单次发送模式。One-shot transmission.
   };
@@ -60,10 +60,10 @@ class CAN
    */
   struct Configuration
   {
-    uint32_t bitrate = 0;       ///< 仲裁相位目标波特率。Target nominal bitrate.
+    uint32_t bitrate = 0;  ///< 仲裁相位目标波特率。Target nominal bitrate.
     float sample_point = 0.0f;  ///< 仲裁相位采样点（0~1）。Nominal sample point (0–1).
-    BitTiming bit_timing;       ///< 位时序配置。Bit timing configuration.
-    Mode mode;                  ///< 工作模式。Operating mode.
+    BitTiming bit_timing;  ///< 位时序配置。Bit timing configuration.
+    Mode mode;             ///< 工作模式。Operating mode.
   };
 
   /**
@@ -89,7 +89,7 @@ class CAN
     uint8_t tx_error_counter = 0;  ///< 发送错误计数 TEC。Transmit error counter (TEC).
     uint8_t rx_error_counter = 0;  ///< 接收错误计数 REC。Receive error counter (REC).
 
-    bool bus_off = false;        ///< 是否处于 BUS-OFF。True if controller is bus-off.
+    bool bus_off = false;  ///< 是否处于 BUS-OFF。True if controller is bus-off.
     bool error_passive = false;  ///< 是否处于 Error Passive。True if error-passive.
     bool error_warning = false;  ///< 是否处于 Error Warning。True if error-warning.
   };
@@ -127,9 +127,9 @@ class CAN
    */
   struct ClassicPack
   {
-    uint32_t id;      ///< CAN ID（11/29 bit 或 ErrorID）。CAN ID (11/29 bits or ErrorID).
-    Type type;        ///< 帧类型。Frame type.
-    uint8_t dlc;      ///< 有效数据长度（0~8）。Data length code (0–8).
+    uint32_t id;  ///< CAN ID（11/29 bit 或 ErrorID）。CAN ID (11/29 bits or ErrorID).
+    Type type;    ///< 帧类型。Frame type.
+    uint8_t dlc;  ///< 有效数据长度（0~8）。Data length code (0–8).
     uint8_t data[8];  ///< 数据载荷。Data payload (up to 8 bytes).
   };
 #pragma pack(pop)
@@ -185,10 +185,10 @@ class CAN
    */
   enum class FilterMode : uint8_t
   {
-    ID_MASK = 0,  ///< 掩码匹配：(id & start_id_mask) == end_id_match。
-                  ///< Mask match: (id & start_id_mask) == end_id_match.
-    ID_RANGE = 1  ///< 区间匹配：start_id_mask <= id <= end_id_match。
-                  ///< Range match: start_id_mask <= id <= end_id_match.
+    ID_MASK = 0,  ///< 掩码匹配：(id & start_id_mask) == end_id_mask。
+                  ///< Mask match: (id & start_id_mask) == end_id_mask.
+    ID_RANGE = 1  ///< 区间匹配：start_id_mask <= id <= end_id_mask。
+                  ///< Range match: start_id_mask <= id <= end_id_mask.
   };
 
   /**
@@ -199,7 +199,7 @@ class CAN
   {
     FilterMode mode;         ///< 过滤模式。Filter mode.
     uint32_t start_id_mask;  ///< 起始 ID 或掩码。Start ID or mask.
-    uint32_t end_id_match;   ///< 结束 ID 或匹配值。End ID or match value.
+    uint32_t end_id_mask;    ///< 结束 ID 或匹配值。End ID or match value.
     Type type;               ///< 帧类型。Frame type.
     Callback cb;             ///< 回调函数。Callback function.
   };
@@ -212,10 +212,10 @@ class CAN
    * @param type 帧类型。Frame type.
    * @param mode 过滤器模式。Filter mode.
    * @param start_id_mask 起始 ID 或掩码。Start ID or mask.
-   * @param end_id_match 结束 ID 或匹配值。End ID or match value.
+   * @param end_id_mask 结束 ID 或匹配值。End ID or match value.
    */
   void Register(Callback cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
-                uint32_t start_id_mask = 0, uint32_t end_id_match = UINT32_MAX);
+                uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX);
 
   /**
    * @brief 添加经典 CAN 消息。Add classic CAN message.
@@ -272,7 +272,6 @@ class FDCAN : public CAN
 
   using CAN::AddMessage;
   using CAN::FilterMode;
-  using CAN::OnMessage;
   using CAN::Register;
 
   /// FD 帧回调类型。Callback type for FD frames.
@@ -337,7 +336,7 @@ class FDCAN : public CAN
    * @param cfg CAN 配置。CAN configuration.
    * @return ErrorCode 操作结果。Error code.
    */
-  virtual ErrorCode SetConfig(const CAN::Configuration &cfg) = 0;
+  virtual ErrorCode SetConfig(const CAN::Configuration &cfg) override = 0;
 
   /**
    * @brief 设置 FDCAN 配置。
@@ -367,6 +366,8 @@ class FDCAN : public CAN
   virtual ErrorCode AddMessage(const FDPack &pack) = 0;
 
  protected:
+  using CAN::OnMessage;
+
   /**
    * @brief 分发接收到的 FD CAN 帧。
    *        Dispatch a received FD CAN frame.
