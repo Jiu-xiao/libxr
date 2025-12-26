@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "cycle_value.hpp"
-#include "libxr_def.hpp"
 
 namespace LibXR
 {
@@ -45,20 +45,12 @@ class PID
    * @brief 构造 PID 控制器。
    *        Construct a PID controller.
    *
-   * @param param PID 参数结构体。
-   *              PID parameter struct.
-   */
-
-  /**
-   * @brief 构造 PID 控制器。
-   *        Construct a PID controller.
-   *
    * @tparam Param PID 参数结构体。
    *                PID parameter struct.
    * @param PARAM
    */
-  template <typename Param>
-  PID(Param&& PARAM) : param_(std::forward<Param>(PARAM))
+  template <typename P>
+  PID(P&& p) : param_(std::forward<P>(p))
   {
     Reset();
   }
@@ -66,7 +58,13 @@ class PID
   /**
    * @brief 使用反馈值计算 PID 输出。
    *        Compute output from feedback only.
-   *        out = k(p*err + i*∫err*dt - d*(fb-last_fb)/dt)
+   *
+   *        Define:
+   *        err    = (cycle ? CycleValue(sp) - fb : sp - fb)
+   *        e_k    = k * err
+   *        fb_d_k = k * (fb - last_fb) / dt
+   *
+   *        out = p * e_k + i * ∫(e_k)dt - d * fb_d_k + feed_forward
    *
    * @param sp 期望值 Setpoint
    * @param fb 反馈值 Feedback
@@ -75,114 +73,203 @@ class PID
    */
   Scalar Calculate(Scalar sp, Scalar fb, Scalar dt)
   {
-    if (!std::isfinite(sp) || !std::isfinite(fb) || !std::isfinite(dt))
+    if (!std::isfinite(sp) || !std::isfinite(fb) || !std::isfinite(dt) || dt <= Scalar(0))
     {
       return last_out_;
     }
 
     // Compute error
-    Scalar err = param_.cycle ? CycleValue<Scalar>(sp) - fb : sp - fb;
-    Scalar k_err = err * param_.k;
+    const Scalar ERR = param_.cycle ? (CycleValue<Scalar>(sp) - fb) : (sp - fb);
+    const Scalar E_K = ERR * param_.k;
 
-    // Derivative from feedback change
-    fb *= param_.k;
-    Scalar d = (fb - last_fb_) / dt;
-    if (!std::isfinite(d))
+    // Derivative from feedback change (scaled by k)
+    Scalar fb_dot = (fb - last_fb_) / dt;
+    if (!std::isfinite(fb_dot))
     {
-      d = 0;
+      fb_dot = Scalar(0);
+    }
+
+    Scalar fb_d_k = fb_dot * param_.k;
+    if (!std::isfinite(fb_d_k))
+    {
+      fb_d_k = Scalar(0);
     }
 
     // Compute PD
-    Scalar output = (k_err * param_.p) - (d * param_.d);
+    const Scalar OUTPUT_PD = (E_K * param_.p) - (fb_d_k * param_.d);
 
-    // Integrate if within limits
-    Scalar i_term = i_ + k_err * dt;
-    Scalar i_out = i_term * param_.i;
-
-    if (param_.i > PID_SIGMA && std::isfinite(i_term))
+    // -------------------------------
+    // Integrator update: anti-windup + allow unwind
+    // Rule: i_limit == 0 disables I (force i_ = 0)
+    // -------------------------------
+    if (param_.i > PID_SIGMA && param_.i_limit > PID_SIGMA)
     {
-      if (std::abs(output + i_out) <= param_.out_limit &&
-          std::abs(i_term) <= param_.i_limit)
+      Scalar i_candidate = i_ + E_K * dt;
+
+      if (std::isfinite(i_candidate))
       {
-        i_ = i_term;
+        // Clamp integrator state
+        i_candidate = std::clamp(i_candidate, -param_.i_limit, param_.i_limit);
+
+        bool accept = true;
+
+        // Output-limit-aware gating (windup prevention + unwind)
+        if (param_.out_limit > PID_SIGMA)
+        {
+          const Scalar OUT_BEFORE = OUTPUT_PD + (i_ * param_.i) + feed_forward_;
+          const Scalar OUT_AFTER = OUTPUT_PD + (i_candidate * param_.i) + feed_forward_;
+
+          if (std::isfinite(OUT_BEFORE) && std::isfinite(OUT_AFTER))
+          {
+            const bool BEFORE_SAT = (std::abs(OUT_BEFORE) > param_.out_limit);
+            const bool AFTER_SAT = (std::abs(OUT_AFTER) > param_.out_limit);
+
+            if (AFTER_SAT)
+            {
+              // If saturated (or would be), only allow integral update if it reduces
+              // saturation magnitude
+              // - If not saturated before but would saturate after: reject (prevent
+              // windup)
+              // - If already saturated: allow only if |out_after| < |out_before| (unwind)
+              accept = BEFORE_SAT && (std::abs(OUT_AFTER) < std::abs(OUT_BEFORE));
+            }
+          }
+          else
+          {
+            accept = false;
+          }
+        }
+
+        if (accept)
+        {
+          i_ = i_candidate;
+        }
       }
     }
+    else
+    {
+      // Disable I
+      i_ = Scalar(0);
+    }
+
+    const Scalar I_OUT = i_ * param_.i;
 
     // Apply output limits
-    output += i_out;
-    output += feed_forward_;
+    Scalar output = OUTPUT_PD + I_OUT + feed_forward_;
     if (std::isfinite(output) && param_.out_limit > PID_SIGMA)
     {
       output = std::clamp(output, -param_.out_limit, param_.out_limit);
     }
 
     // Store states
-    last_err_ = err;
-    last_fb_ = fb;
+    last_err_ = ERR;
+    last_fb_ = fb;  // store raw feedback
     last_out_ = output;
-    last_der_ = d;
+    last_der_ = fb_d_k;  // store scaled derivative: k * d(fb)/dt
     return output;
   }
 
   /**
    * @brief 使用外部导数计算 PID 输出。
    *        Compute output using external feedback derivative.
-   *        out = k(p*err + i*∫err*dt - d*fb_dot*dt)
+   *
+   *        Define:
+   *        err    = (cycle ? CycleValue(sp) - fb : sp - fb)
+   *        e_k    = k * err
+   *        fb_d_k = k * fb_dot
+   *
+   *        out = p * e_k + i * ∫(e_k)dt - d * fb_d_k + feed_forward
    *
    * @param sp 期望值 Setpoint
    * @param fb 反馈值 Feedback
-   * @param fb_dot 反馈导数 Feedback rate
+   * @param fb_dot 反馈导数 Feedback rate (d(fb)/dt)
    * @param dt 控制周期 Delta time
    * @return 控制器输出 Controller output
    */
   Scalar Calculate(Scalar sp, Scalar fb, Scalar fb_dot, Scalar dt)
   {
     if (!std::isfinite(sp) || !std::isfinite(fb) || !std::isfinite(fb_dot) ||
-        !std::isfinite(dt))
+        !std::isfinite(dt) || dt <= Scalar(0))
     {
       return last_out_;
     }
 
     // Compute error
-    Scalar err = param_.cycle ? CycleValue<Scalar>(sp) - fb : sp - fb;
-    Scalar k_err = err * param_.k;
+    const Scalar ERR = param_.cycle ? (CycleValue<Scalar>(sp) - fb) : (sp - fb);
+    const Scalar E_K = ERR * param_.k;
 
-    // Use externally provided derivative
-    Scalar d = fb_dot;
-    if (!std::isfinite(d))
+    // Use externally provided derivative (scaled by k)
+    Scalar fb_d_k = fb_dot * param_.k;
+    if (!std::isfinite(fb_d_k))
     {
-      d = 0;
+      fb_d_k = Scalar(0);
     }
 
     // Compute PD
-    Scalar output = (k_err * param_.p) - (d * param_.d);
+    const Scalar OUTPUT_PD = (E_K * param_.p) - (fb_d_k * param_.d);
 
-    // Integrate if within limits
-    Scalar i_term = i_ + k_err * dt;
-    Scalar i_out = i_term * param_.i;
-
-    if (param_.i > PID_SIGMA && std::isfinite(i_term))
+    // -------------------------------
+    // Integrator update: anti-windup + allow unwind
+    // Rule: i_limit == 0 disables I (force i_ = 0)
+    // -------------------------------
+    if (param_.i > PID_SIGMA && param_.i_limit > PID_SIGMA)
     {
-      if (std::abs(output + i_out) <= param_.out_limit &&
-          std::abs(i_term) <= param_.i_limit)
+      Scalar i_candidate = i_ + E_K * dt;
+
+      if (std::isfinite(i_candidate))
       {
-        i_ = i_term;
+        // Clamp integrator state
+        i_candidate = std::clamp(i_candidate, -param_.i_limit, param_.i_limit);
+
+        bool accept = true;
+
+        if (param_.out_limit > PID_SIGMA)
+        {
+          const Scalar OUT_BEFORE = OUTPUT_PD + (i_ * param_.i) + feed_forward_;
+          const Scalar OUT_AFTER = OUTPUT_PD + (i_candidate * param_.i) + feed_forward_;
+
+          if (std::isfinite(OUT_BEFORE) && std::isfinite(OUT_AFTER))
+          {
+            const bool BEFORE_SAT = (std::abs(OUT_BEFORE) > param_.out_limit);
+            const bool AFTER_SAT = (std::abs(OUT_AFTER) > param_.out_limit);
+
+            if (AFTER_SAT)
+            {
+              accept = BEFORE_SAT && (std::abs(OUT_AFTER) < std::abs(OUT_BEFORE));
+            }
+          }
+          else
+          {
+            accept = false;
+          }
+        }
+
+        if (accept)
+        {
+          i_ = i_candidate;
+        }
       }
     }
+    else
+    {
+      // Disable I
+      i_ = Scalar(0);
+    }
+
+    const Scalar I_OUT = i_ * param_.i;
 
     // Apply output limits
-    output += i_out;
-    output += feed_forward_;
+    Scalar output = OUTPUT_PD + I_OUT + feed_forward_;
     if (std::isfinite(output) && param_.out_limit > PID_SIGMA)
     {
       output = std::clamp(output, -param_.out_limit, param_.out_limit);
     }
 
     // Store states
-    last_err_ = err;
-    last_fb_ = fb;
+    last_err_ = ERR;
+    last_fb_ = fb;  // store raw feedback
     last_out_ = output;
-    last_der_ = d;
+    last_der_ = fb_d_k;  // store scaled derivative: k * d(fb)/dt
     return output;
   }
 
@@ -213,11 +300,11 @@ class PID
   Scalar OutLimit() const { return param_.out_limit; }
   /// 获取上一次误差 Get last error
   Scalar LastError() const { return last_err_; }
-  /// 获取上一次反馈值 Get last feedback
+  /// 获取上一次反馈值（未缩放）Get last feedback (raw)
   Scalar LastFeedback() const { return last_fb_; }
   /// 获取上一次输出 Get last output
   Scalar LastOutput() const { return last_out_; }
-  /// 获取上一次导数 Get last derivative
+  /// 获取上一次导数（k * d(fb)/dt 或 k * fb_dot）Get last derivative (scaled by k)
   Scalar LastDerivative() const { return last_der_; }
 
   /**
@@ -258,7 +345,6 @@ class PID
    * @brief 获取前馈项 Get feedforward
    *
    * @return 前馈项 Feedforward
-   *
    */
   Scalar GetFeedForward() const { return feed_forward_; }
 
@@ -266,8 +352,8 @@ class PID
   Param param_;              ///< PID 参数 PID parameter set
   Scalar i_ = 0;             ///< 积分状态 Integral state
   Scalar last_err_ = 0;      ///< 上次误差 Last error
-  Scalar last_fb_ = 0;       ///< 上次反馈 Last feedback
-  Scalar last_der_ = 0;      ///< 上次导数 Last derivative
+  Scalar last_fb_ = 0;       ///< 上次反馈（未缩放）Last feedback (raw)
+  Scalar last_der_ = 0;      ///< 上次导数（k 缩放）Last derivative (scaled by k)
   Scalar last_out_ = 0;      ///< 上次输出 Last output
   Scalar feed_forward_ = 0;  ///< 前馈项 Feedforward term
 };
