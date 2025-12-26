@@ -378,7 +378,7 @@ class FDCAN : public CAN
 
  private:
   /// 按帧类型划分的 FD 订阅者链表数组。FD subscriber lists per frame type.
-  LockFreeList subscriber_list_fd_[static_cast<uint8_t>(Type::TYPE_NUM)];
+  LockFreeList subscriber_list_fd_[static_cast<uint8_t>(Type::REMOTE_STANDARD)];
 };
 
 }  // namespace LibXR
