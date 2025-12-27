@@ -249,8 +249,8 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
 
   if (!is_isochronous_)
   {
-    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
-    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
+    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
     EnableTx(GetNumber());
     EnableRx(GetNumber());
   }
@@ -309,29 +309,15 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
     SetTxLen(GetNumber(), size);
     auto addr = GetTxCtrlAddr(GetNumber());
 
-    if (GetNumber() != EPNumber::EP0)
-    {
-      *addr = (is_isochronous_ ? USBFS_UEP_T_RES_NONE : USBFS_UEP_T_RES_ACK) |
-              (*addr & (~USBFS_UEP_T_RES_MASK));
-    }
-    else
-    {
-      *addr = USBFS_UEP_T_RES_ACK | (tog_ ? USBFS_UEP_T_TOG : 0);
-    }
+    *addr = (is_isochronous_ ? USBFS_UEP_T_RES_NONE : USBFS_UEP_T_RES_ACK) |
+            (tog_ ? USBFS_UEP_T_TOG : 0);
   }
   else
   {
     auto addr = GetRxCtrlAddr(GetNumber());
 
-    if (GetNumber() != EPNumber::EP0)
-    {
-      *addr = (is_isochronous_ ? USBFS_UEP_R_RES_NONE : USBFS_UEP_R_RES_ACK) |
-              (*addr & (~USBFS_UEP_R_RES_MASK));
-    }
-    else
-    {
-      *addr = USBFS_UEP_R_RES_ACK | (tog_ ? USBFS_UEP_R_TOG : 0);
-    }
+    *addr = (is_isochronous_ ? USBFS_UEP_R_RES_NONE : USBFS_UEP_R_RES_ACK) |
+            (tog_ ? USBFS_UEP_R_TOG : 0);
   }
 
   if (GetNumber() == EPNumber::EP0)
@@ -397,6 +383,12 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     return;
   }
 
+  if (GetState() == State::BUSY && GetNumber() != EPNumber::EP0 &&
+      GetType() != Type::ISOCHRONOUS)
+  {
+    tog_ = !tog_;
+  }
+
   if (GetNumber() == EPNumber::EP0 && GetDirection() == Direction::OUT)
   {
     tog_ = true;
@@ -417,12 +409,10 @@ void CH32EndpointOtgFs::SwitchBuffer()
 {
   if (GetDirection() == Direction::IN)
   {
-    tog_ = (*GetTxCtrlAddr(GetNumber()) & USBFS_UEP_T_TOG) == USBFS_UEP_T_TOG;
     SetActiveBlock(!tog_);
   }
   else
   {
-    tog_ = (*GetRxCtrlAddr(GetNumber()) & USBFS_UEP_R_TOG) == USBFS_UEP_R_TOG;
     SetActiveBlock(tog_);
   }
 }
