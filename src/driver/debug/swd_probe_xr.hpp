@@ -81,6 +81,8 @@ class SwdProbeXR final : public Swd
    */
   void Close() override
   {
+    InvalidateSelectCache();
+
     // 置为安全态（按硬件约定可调整）/ Safe state (adjustable)
     rst_n_.Write(false);
     rnw_.Write(false);
@@ -100,6 +102,8 @@ class SwdProbeXR final : public Swd
    */
   ErrorCode LineReset() override
   {
+    InvalidateSelectCache();
+
     rst_n_.Write(false);  // RAW mode / 原始模式
 
     const ErrorCode EC = RawIdleBytes(7, 0xFF);
@@ -254,6 +258,39 @@ class SwdProbeXR final : public Swd
 
     SetState(State::IDLE);
     return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 发送 idle clocks（用于 WAIT 重试间插入空闲时钟）/ Send idle clocks (for WAIT
+   * retry insertion)
+   *
+   * @param cycles 时钟个数 / Number of clock cycles
+   */
+  void IdleClocks(uint32_t cycles) override
+  {
+    if (cycles == 0u)
+    {
+      return;
+    }
+
+    // RAW mode / 原始模式
+    rst_n_.Write(false);
+
+    // Align to 8-bit / 对齐到 8-bit（byte）
+    const uint32_t BYTES = (cycles + 7u) / 8u;
+
+    // Keep direction stable (host drive) / 保持方向为 Host 驱动
+    rnw_.Write(false);
+
+    // Emit idle bytes (SWDIO=0) / 输出 idle 字节（SWDIO=0）
+    const ErrorCode EC = RawIdleBytes(BYTES, 0x00u);
+    if (EC != ErrorCode::OK)
+    {
+      SetState(State::ERROR);
+    }
+
+    // Back to baseline / 回到 baseline
+    rst_n_.Write(true);
   }
 
  private:

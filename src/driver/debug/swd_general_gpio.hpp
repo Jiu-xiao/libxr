@@ -72,6 +72,8 @@ class SwdGeneralGPIO final : public Swd
    */
   void Close() override
   {
+    InvalidateSelectCache();
+
     swclk_.Write(false);
 
     SetSwdioDriveMode();
@@ -92,6 +94,8 @@ class SwdGeneralGPIO final : public Swd
       return ErrorCode::FAILED;
     }
 
+    InvalidateSelectCache();
+
     SetState(State::BUSY);
 
     SetSwdioDriveMode();
@@ -106,6 +110,7 @@ class SwdGeneralGPIO final : public Swd
     swclk_.Write(false);
 
     SetState(State::IDLE);
+
     return ErrorCode::OK;
   }
 
@@ -145,6 +150,7 @@ class SwdGeneralGPIO final : public Swd
     WriteByteLSB(0x00);
 
     SetState(State::IDLE);
+
     return ErrorCode::OK;
   }
 
@@ -248,6 +254,27 @@ class SwdGeneralGPIO final : public Swd
     swclk_.Write(false);
     SetState(State::IDLE);
     return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 发送 idle clocks（用于 WAIT 重试间插入空闲时钟）/ Send idle clocks (for WAIT
+   * retry insertion)
+   *
+   * @param cycles 时钟个数 / Number of clock cycles
+   */
+  void IdleClocks(uint32_t cycles) override
+  {
+    // 与 Transfer() 中 pre-sync 的做法保持一致：Host 驱动 SWDIO=0
+    SetSwdioDriveMode();
+    swdio_.Write(false);
+    swclk_.Write(false);
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      GenOneClk();
+    }
+
+    swclk_.Write(false);
   }
 
  private:
