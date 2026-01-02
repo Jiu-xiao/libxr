@@ -1,5 +1,7 @@
 #include "desc_cfg.hpp"
 
+#include <cstdint>
+
 using namespace LibXR::USB;
 
 LibXR::RawData ConfigDescriptorItem::GetData() { return data_; }
@@ -26,6 +28,23 @@ bool ConfigDescriptor::IsCompositeConfig(
       {
         return true;
       }
+    }
+  }
+  return false;
+}
+
+bool ConfigDescriptor::HasWinUSB20Descriptor(ConstRawData& bos, ConstRawData& desc,
+                                             uint8_t& vendor_code) const
+{
+  auto config = items_[current_cfg_];
+  for (size_t i = 0; i < config.item_num; ++i)
+  {
+    if (config.items[i]->HasWinUSB20Descriptor())
+    {
+      bos = config.items[i]->GetWinUSBBOSDescriptor();
+      desc = config.items[i]->GetWinUSB20Descriptor();
+      vendor_code = config.items[i]->GetWinUSBVendorCode();
+      return true;
     }
   }
   return false;

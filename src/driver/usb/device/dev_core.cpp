@@ -1,5 +1,10 @@
 #include "dev_core.hpp"
 
+#include <cstdint>
+
+#include "libxr_type.hpp"
+#include "winusb_msos20.hpp"
+
 using namespace LibXR::USB;
 
 DeviceCore::DeviceCore(
@@ -626,8 +631,23 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket *setup,
       }
       break;
     }
-    case 0x06:  // Device Qualifier (USB 2.0+)
-                // TODO: Device Qualifier HS Only
+
+    // -----------------------------
+    // ADD: BOS (0x0F) for MS OS 2.0 (WinUSB auto-bind)
+    // -----------------------------
+    case 0x0F:  // BOS
+    {
+      if (!config_desc_.HasWinUSB20Descriptor(win_usb_.bos, win_usb_.descriptor,
+                                              win_usb_.vendor_code))
+      {
+        return ErrorCode::NOT_SUPPORT;
+      }
+      data = win_usb_.bos;
+      early_read_zlp = true;
+      break;
+    }
+
+    case 0x06:  // Device Qualifier
     case 0x07:  // Other Speed Configurations
       return ErrorCode::NOT_SUPPORT;
     default:
@@ -822,6 +842,38 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket *&setu
     return ErrorCode::NOT_SUPPORT;
   }
 
+  // -------------------------------------------------------
+  // ADD: MS OS 2.0 Descriptor Set request (WinUSB auto-bind)
+  //
+  // Windows will issue:
+  //   bmRequestType = 0xC0 (Device-to-host | Vendor | Device)
+  //   bRequest      = bMS_VendorCode (must match BOS capability)
+  //   wIndex        = 0x0007
+  //   wValue        = 0x0000
+  // -------------------------------------------------------
+  if (recipient == Recipient::DEVICE && setup->bmRequestType == 0xC0 &&
+      setup->bRequest == win_usb_.vendor_code &&
+      setup->wIndex == LibXR::USB::WinUsbMsOs20::kMsOs20DescriptorIndex &&
+      setup->wValue == 0x0000)
+  {
+    DevWriteEP0Data(win_usb_.descriptor, endpoint_.in0->MaxTransferSize(), setup->wLength,
+                    true);
+    return ErrorCode::OK;
+  }
+
+  // 可选：Alt Enumeration（一般用不到；保持 ACK 以避免主机重试）
+  if (recipient == Recipient::DEVICE && setup->bmRequestType == 0x40 &&
+      setup->bRequest == win_usb_.vendor_code &&
+      setup->wIndex == LibXR::USB::WinUsbMsOs20::kMsOs20SetAltEnumeration &&
+      setup->wValue == 0x0000)
+  {
+    WriteZLP();
+    return ErrorCode::OK;
+  }
+
+  // -----------------------
+  // 原逻辑：转发给具体 class
+  // -----------------------
   DeviceClass *item = nullptr;
 
   switch (recipient)

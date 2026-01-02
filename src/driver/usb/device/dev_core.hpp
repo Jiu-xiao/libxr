@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <cstring>
 
 #include "libxr_type.hpp"
@@ -398,5 +399,12 @@ class DeviceCore
     uint8_t b_request = 0;             ///< 当前请求码 / Current request code
     ConstRawData data;                 ///< 当前数据 / Current data
   } class_req_;
+
+  struct
+  {
+    ConstRawData bos;         ///< WinUSB BOS 描述符数据 / WinUSB BOS descriptor data
+    ConstRawData descriptor;  ///< WinUSB 描述符数据 / WinUSB descriptor data
+    uint8_t vendor_code = 0;  ///< WinUSB 厂商请求码 / WinUSB vendor request code
+  } win_usb_;
 };
 }  // namespace LibXR::USB

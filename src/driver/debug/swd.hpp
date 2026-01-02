@@ -31,6 +31,15 @@ class Swd
   };
 
   /**
+   * @brief 调试端口的物理引脚定义 / Physical pins of the debug port
+   */
+  enum class Pin : uint8_t
+  {
+    SWCLK = 0,  ///< 时钟引脚 / Clock pin
+    SWDIO = 1,  ///< 数据引脚 / Data pin
+  };
+
+  /**
    * @brief SWD ACK 值 / SWD ACK value
    *
    * ADIv5 SWD ACK:
@@ -639,6 +648,10 @@ class Swd
 
     return DpWrite(DpWriteReg::ABORT, FLAGS, ack);
   }
+
+  virtual void PinsWrite(Pin pin, bool level) = 0;
+
+  virtual bool PinsRead(Pin pin) = 0;
 
  private:
   State state_ = State::DISABLED;  ///< 当前状态 / Current state

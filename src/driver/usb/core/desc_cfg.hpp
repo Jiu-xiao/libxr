@@ -7,6 +7,7 @@
 #include "core.hpp"
 #include "desc_dev.hpp"
 #include "ep_pool.hpp"
+#include "libxr_type.hpp"
 #include "lockfree_list.hpp"
 #include "lockfree_pool.hpp"
 
@@ -195,6 +196,14 @@ class ConfigDescriptorItem
    */
   virtual bool HasIAD() = 0;
 
+  virtual bool HasWinUSB20Descriptor() { return false; }
+
+  virtual ConstRawData GetWinUSB20Descriptor() { return {nullptr, 0}; }
+
+  virtual ConstRawData GetWinUSBBOSDescriptor() { return {nullptr, 0}; }
+
+  virtual uint8_t GetWinUSBVendorCode() { return 0; }
+
  protected:
   /**
    * @brief 获取本配置项描述符的二进制数据
@@ -284,6 +293,9 @@ class ConfigDescriptor
    * @return true/false
    */
   bool IsComposite() const;
+
+  bool HasWinUSB20Descriptor(ConstRawData& bos, ConstRawData& desc,
+                             uint8_t& vendor_code) const;
 
   /**
    * @brief 覆盖设备描述符（非IAD时可用）
