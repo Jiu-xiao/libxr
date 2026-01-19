@@ -90,15 +90,7 @@ class ESP32GPIO : public GPIO
     return ErrorCode::OK;
   }
 
-  static void IRAM_ATTR InterruptDispatcher(void* arg)
-  {
-    auto gpio_num = static_cast<gpio_num_t>(reinterpret_cast<uintptr_t>(arg));
-    auto gpio = map_[gpio_num];
-    if (gpio)
-    {
-      gpio->callback_.Run(true);
-    }
-  }
+  static void IRAM_ATTR InterruptDispatcher(void* arg);
 
  private:
   gpio_num_t gpio_num_;
