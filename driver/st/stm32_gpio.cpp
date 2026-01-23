@@ -64,11 +64,18 @@ STM32GPIO::STM32GPIO(GPIO_TypeDef* port, uint16_t pin, IRQn_Type irq)
   }
 }
 
-bool STM32GPIO::Read() { return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET; }
+bool STM32GPIO::Read() { return (port_->IDR & pin_) != 0u; }
 
 ErrorCode STM32GPIO::Write(bool value)
 {
-  HAL_GPIO_WritePin(port_, pin_, value ? GPIO_PIN_SET : GPIO_PIN_RESET);
+  if (value)
+  {
+    port_->BSRR = static_cast<uint32_t>(pin_);
+  }
+  else
+  {
+    port_->BSRR = static_cast<uint32_t>(pin_) << 16;
+  }
   return ErrorCode::OK;
 }
 
@@ -88,9 +95,60 @@ ErrorCode STM32GPIO::DisableInterrupt()
 
 ErrorCode STM32GPIO::SetConfig(Configuration config)
 {
-  GPIO_InitTypeDef gpio_init = {};
+// LL快速路径，适用于非外部中断的输入/输出配置
+#ifdef USE_FULL_LL_DRIVER
+  if (static_cast<uint8_t>(config.direction) <=
+      static_cast<uint8_t>(LibXR::GPIO::Direction::OUTPUT_OPEN_DRAIN))
+  {
+    LL_GPIO_InitTypeDef ll = {};
+    ll.Pin = pin_;
+    ll.Speed = LL_GPIO_SPEED_FREQ_HIGH;
 
-  HAL_GPIO_DeInit(port_, pin_);
+    // Pull
+    switch (config.pull)
+    {
+      case Pull::NONE:
+        ll.Pull = LL_GPIO_PULL_NO;
+        break;
+      case Pull::UP:
+        ll.Pull = LL_GPIO_PULL_UP;
+        break;
+      case Pull::DOWN:
+        ll.Pull = LL_GPIO_PULL_DOWN;
+        break;
+      default:
+        ll.Pull = LL_GPIO_PULL_NO;
+        break;
+    }
+
+    // Mode + OutputType
+    switch (config.direction)
+    {
+      case Direction::INPUT:
+        ll.Mode = LL_GPIO_MODE_INPUT;
+        break;
+
+      case Direction::OUTPUT_PUSH_PULL:
+        ll.Mode = LL_GPIO_MODE_OUTPUT;
+        ll.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+        break;
+
+      case Direction::OUTPUT_OPEN_DRAIN:
+        ll.Mode = LL_GPIO_MODE_OUTPUT;
+        ll.OutputType = LL_GPIO_OUTPUT_OPENDRAIN;
+        break;
+
+      default:
+        return ErrorCode::ARG_ERR;
+    }
+
+    LL_GPIO_Init(port_, &ll);
+
+    return ErrorCode::OK;
+  }
+#endif
+
+  GPIO_InitTypeDef gpio_init = {};
 
   gpio_init.Pin = pin_;
 

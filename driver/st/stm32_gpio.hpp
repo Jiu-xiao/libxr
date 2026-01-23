@@ -30,7 +30,7 @@ stm32_gpio_exti_t STM32_GPIO_EXTI_GetID(uint16_t pin);  // NOLINT
 
 namespace LibXR
 {
-class STM32GPIO : public GPIO
+class STM32GPIO final : public GPIO
 {
  public:
   STM32GPIO(GPIO_TypeDef* port, uint16_t pin, IRQn_Type irq = NonMaskableInt_IRQn);
