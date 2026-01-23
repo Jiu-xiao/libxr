@@ -35,12 +35,13 @@ This repository only contains platform-independent stack code. For platform-spec
 
 ### Device Stack
 
-| Protocol | Status                | Notes                                                                                          |
-| -------- | --------------------- | ---------------------------------------------------------------------------------------------- |
-| CDC-ACM  | Supported             | Implemented as LibXR’s UART class                                                              |
-| HID      | Supported             | Only standard keyboard/mouse and remote controller; other types require you to derive your own |
-| UAC      | Supported             | Currently implements a UAC 1.0 microphone only                                                 |
-| GSUSB    | Supported (CAN/FDCAN) | Driverless SocketCAN on Linux                                                                  |
+| Protocol   | Status                        | Notes                                                                                          |
+| ---------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| CDC-ACM    | Supported                     | Implemented as LibXR’s UART class                                                              |
+| HID        | Supported                     | Only standard keyboard/mouse and remote controller; other types require you to derive your own |
+| UAC        | Supported                     | Currently implements a UAC 1.0 microphone only                                                 |
+| GSUSB      | Supported (CAN/FDCAN)         | Driverless SocketCAN on Linux                                                                  |
+| DAPLINK V2 | Supports (SWD interface only) | Can be used with Keil/OpenOCD                                                                  |
 
 ### Host Stack
 

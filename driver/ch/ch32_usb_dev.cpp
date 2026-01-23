@@ -100,7 +100,7 @@ CH32USBDeviceFS::CH32USBDeviceFS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::FULL, packet_size, vid,
+      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
                       pid, bcd, LANG_LIST, CONFIGS, uid)
 {
   self_ = this;
@@ -292,7 +292,7 @@ CH32USBDeviceHS::CH32USBDeviceHS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::HIGH,
+      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::HIGH,
                       USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd,
                       LANG_LIST, CONFIGS, uid)
 {

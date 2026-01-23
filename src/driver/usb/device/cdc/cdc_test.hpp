@@ -28,9 +28,9 @@ class CDCWriteTest : public CDCBase
   {
   }
 
-  void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
   {
-    CDCBase::Init(endpoint_pool, start_itf_num);
+    CDCBase::BindEndpoints(endpoint_pool, start_itf_num);
   }
 
   /**
@@ -101,9 +101,9 @@ class CDCReadTest : public CDCBase
    * 在初始化时即调用一次 Transfer()，保证主机数据可以立刻被接收。
    * Arms the OUT endpoint immediately so host data can be received right away.
    */
-  void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
   {
-    CDCBase::Init(endpoint_pool, start_itf_num);
+    CDCBase::BindEndpoints(endpoint_pool, start_itf_num);
     auto ep_data_out = GetDataOutEndpoint();
     ep_data_out->Transfer(ep_data_out->MaxTransferSize());
   }

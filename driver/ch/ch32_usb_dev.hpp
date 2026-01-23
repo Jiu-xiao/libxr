@@ -20,7 +20,7 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
           CONFIGS,
-      USB::Speed speed = USB::Speed::FULL, USB::USBSpec spec = USB::USBSpec::USB_2_0)
+      USB::Speed speed = USB::Speed::FULL, USB::USBSpec spec = USB::USBSpec::USB_2_1)
       : USB::EndpointPool(max_ep_num),
         USB::DeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
                         CONFIGS),

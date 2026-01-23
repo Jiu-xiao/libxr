@@ -274,7 +274,7 @@ class UAC1MicrophoneQ : public DeviceClass
    * @brief 初始化设备（分配端点、填充描述符）
    *        Initialize device (allocate endpoints, populate descriptors)
    */
-  void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
   {
     inited_ = false;
     streaming_ = false;
@@ -400,7 +400,7 @@ class UAC1MicrophoneQ : public DeviceClass
    * @brief 反初始化设备，释放端点
    *        Deinitialize device and release endpoints
    */
-  void Deinit(EndpointPool& endpoint_pool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool) override
   {
     streaming_ = false;
     inited_ = false;
@@ -428,7 +428,7 @@ class UAC1MicrophoneQ : public DeviceClass
    */
   ErrorCode OnClassRequest(bool /*in_isr*/, uint8_t bRequest, uint16_t wValue,
                            uint16_t wLength, uint16_t wIndex,
-                           DeviceClass::RequestResult& r) override
+                           DeviceClass::ControlTransferResult& r) override
   {
     // ===== 端点采样率控制（收件人：端点地址） / EP sampling‑freq control =====
     const uint8_t EP_ADDR = static_cast<uint8_t>(wIndex & 0xFF);
@@ -648,7 +648,7 @@ class UAC1MicrophoneQ : public DeviceClass
   }
 
   /** @brief 返回接口数量（AC+AS=2）| Get number of interfaces (AC+AS=2) */
-  size_t GetInterfaceNum() override { return 2; }
+  size_t GetInterfaceCount() override { return 2; }
   /** @brief 包含 IAD | Has IAD */
   bool HasIAD() override { return true; }
   /** @brief 配置描述符最大尺寸 | Get maximum configuration size */

@@ -194,7 +194,7 @@ class GsUsbClass : public DeviceClass
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 起始接口号 / Starting interface number
    */
-  void Init(EndpointPool &endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool &endpoint_pool, uint8_t start_itf_num) override
   {
     inited_ = false;
     interface_num_ = start_itf_num;
@@ -302,7 +302,7 @@ class GsUsbClass : public DeviceClass
    * @brief 释放端点资源并复位状态 / Release endpoint resources and reset state
    * @param endpoint_pool 端点池 / Endpoint pool
    */
-  void Deinit(EndpointPool &endpoint_pool) override
+  void UnbindEndpoints(EndpointPool &endpoint_pool) override
   {
     inited_ = false;
     host_format_ok_ = false;
@@ -337,7 +337,7 @@ class GsUsbClass : public DeviceClass
    * @brief 返回接口数量（实现侧固定 1） / Return interface count (fixed to 1)
    * @return size_t 接口数 / Interface count
    */
-  size_t GetInterfaceNum() override { return 1; }
+  size_t GetInterfaceCount() override { return 1; }
 
   /**
    * @brief 是否包含 IAD / Whether class has IAD
@@ -375,7 +375,7 @@ class GsUsbClass : public DeviceClass
    * @return ErrorCode 错误码 / Error code
    */
   ErrorCode OnClassRequest(bool, uint8_t, uint16_t, uint16_t, uint16_t,
-                           DeviceClass::RequestResult &) override
+                           DeviceClass::ControlTransferResult &) override
   {
     return ErrorCode::NOT_SUPPORT;
   }
@@ -392,7 +392,7 @@ class GsUsbClass : public DeviceClass
    */
   ErrorCode OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
                             uint16_t wLength, uint16_t wIndex,
-                            DeviceClass::RequestResult &result) override
+                            DeviceClass::ControlTransferResult &result) override
   {
     UNUSED(in_isr);
     UNUSED(wIndex);

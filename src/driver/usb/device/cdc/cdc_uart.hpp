@@ -142,9 +142,9 @@ class CDCUart : public CDCBase, public LibXR::UART
    * Calls CDCBase::Deinit(), then completes any pending TX requests with
    * INIT_ERR and drops their payloads, finally resets the write port.
    */
-  void Deinit(EndpointPool& endpoint_pool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool) override
   {
-    CDCBase::Deinit(endpoint_pool);
+    CDCBase::UnbindEndpoints(endpoint_pool);
     LibXR::WriteInfoBlock info;
     while (write_port_cdc_.queue_info_->Pop(info) == ErrorCode::OK)
     {

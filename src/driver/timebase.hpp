@@ -63,6 +63,24 @@ class Timebase
   static MillisecondTimestamp GetMilliseconds() { return timebase->_get_milliseconds(); }
 
   /**
+   * @brief 微秒级延时 / Delay in microseconds
+   * @param us 延时长度（us）/ Delay length (us)
+   */
+  static inline void DelayMicroseconds(uint32_t us)
+  {
+    if (us == 0u)
+    {
+      return;
+    }
+
+    const uint64_t START = static_cast<uint64_t>(Timebase::GetMicroseconds());
+    while ((static_cast<uint64_t>(Timebase::GetMicroseconds()) - START) < us)
+    {
+      // busy-wait
+    }
+  }
+
+  /**
    * @brief 纯虚函数，获取当前时间的微秒级时间戳（由派生类实现）。
    *        Pure virtual function for obtaining the current timestamp in microseconds
    * (implemented by derived classes).

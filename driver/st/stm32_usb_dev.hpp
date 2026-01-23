@@ -26,7 +26,7 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
           CONFIGS,
       ConstRawData uid = {nullptr, 0}, USB::Speed speed = USB::Speed::FULL,
-      USB::USBSpec spec = USB::USBSpec::USB_2_0)
+      USB::USBSpec spec = USB::USBSpec::USB_2_1)
       : LibXR::USB::EndpointPool(max_ep_num),
         LibXR::USB::DeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
                                CONFIGS, uid),

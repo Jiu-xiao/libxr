@@ -425,7 +425,7 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
    * @param result 输出结果 / Output result
    * @return ErrorCode 错误码 / Error code
    */
-  ErrorCode OnSetReport(uint8_t report_id, DeviceClass::RequestResult& result) override
+  ErrorCode OnSetReport(uint8_t report_id, DeviceClass::ControlTransferResult& result) override
   {
     UNUSED(report_id);
     UNUSED(result);

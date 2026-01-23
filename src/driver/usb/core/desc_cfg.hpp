@@ -2,121 +2,120 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
+#include <initializer_list>
 
+#include "bos.hpp"
 #include "core.hpp"
 #include "desc_dev.hpp"
 #include "ep_pool.hpp"
-#include "lockfree_list.hpp"
-#include "lockfree_pool.hpp"
+#include "libxr_type.hpp"
 
 namespace LibXR::USB
 {
-// USB 配置描述符属性标志（bmAttributes 位定义）
-// USB configuration descriptor attribute bits (bmAttributes)
-constexpr uint8_t CFG_BUS_POWERED = 0x80;    ///< 总线供电 / Bus powered
-constexpr uint8_t CFG_SELF_POWERED = 0x40;   ///< 自供电 / Self powered
-constexpr uint8_t CFG_REMOTE_WAKEUP = 0x20;  ///< 支持远程唤醒 / Remote wakeup supported
+/**
+ * @brief USB configuration descriptor attribute bits (bmAttributes)
+ *        配置描述符属性位（bmAttributes）
+ */
+constexpr uint8_t CFG_BUS_POWERED = 0x80;    ///< 总线供电 / Bus-powered
+constexpr uint8_t CFG_SELF_POWERED = 0x40;   ///< 自供电 / Self-powered
+constexpr uint8_t CFG_REMOTE_WAKEUP = 0x20;  ///< 远程唤醒 / Remote wakeup
 
 class ConfigDescriptor;
 class DeviceCore;
 
 /**
- * @brief USB 配置项接口类
- *        USB configuration item base class
+ * @brief USB 配置项基类（功能块）/ USB configuration item base (functional block)
  *
+ * 一个配置项通常包含一个功能集合，可由多个 Interface/IAD 组成。
+ * A configuration item usually represents one function group, consisting of multiple
+ * Interface descriptors and/or an IAD.
+ *
+ * 同时作为 BOS capability 提供者（BosCapabilityProvider）。
+ * Also serves as a BOS capability provider (BosCapabilityProvider).
  */
-class ConfigDescriptorItem
+class ConfigDescriptorItem : public BosCapabilityProvider
 {
  public:
+  virtual ~ConfigDescriptorItem() = default;
+
 #pragma pack(push, 1)
   /**
-   * @brief 配置描述符头部结构体
-   *        Configuration descriptor header (USB 2.0 Spec 9.6.3)
-   *
+   * @brief 配置描述符头（9 字节）/ Configuration descriptor header (9 bytes)
    */
   struct Header
   {
-    uint8_t bLength = 9;      ///< 结构体长度 / Descriptor length (always 9)
-    uint8_t bDescriptorType;  ///< 描述符类型（0x02）/ Descriptor type (0x02)
-    uint16_t wTotalLength;   ///< 本配置所有描述符总长度 / Total length of all descriptors
-                             ///< for this configuration
-    uint8_t bNumInterfaces;  ///< 接口数量 / Number of interfaces
+    uint8_t bLength = 9;          ///< 描述符长度 / Descriptor length
+    uint8_t bDescriptorType;      ///< 描述符类型（0x02）/ Descriptor type (0x02)
+    uint16_t wTotalLength;        ///< 配置总长度 / Total configuration length
+    uint8_t bNumInterfaces;       ///< 接口数量 / Number of interfaces
     uint8_t bConfigurationValue;  ///< 配置值 / Configuration value
-    uint8_t iConfiguration;       ///< 字符串描述符索引 / String descriptor index
-    uint8_t bmAttributes;         ///< 属性位 / Attributes bitmap
-    uint8_t bMaxPower;            ///< 最大电流（单位2mA）/ Max power (in units of 2mA)
+    uint8_t iConfiguration;       ///< 配置字符串索引 / Configuration string index
+    uint8_t bmAttributes;         ///< 属性位 / Attributes
+    uint8_t bMaxPower;            ///< 最大电流（2mA 单位）/ Max power (2mA units)
   };
 
   /**
-   * @brief 接口关联描述符（IAD，Interface Association Descriptor）
-   *        IAD descriptor structure (用于复合设备多接口归组 / used for grouping
-   * interfaces in composite devices)
-   *
+   * @brief IAD（8 字节）/ Interface Association Descriptor (8 bytes)
    */
   struct IADDescriptor
   {
-    uint8_t bLength = 8;             ///< 结构体长度 / Descriptor length (always 8)
-    uint8_t bDescriptorType = 0x0B;  ///< 描述符类型（0x0B）/ Descriptor type (IAD, 0x0B)
-    uint8_t bFirstInterface;         ///< 第一个接口号 / First interface number
-    uint8_t bInterfaceCount;    ///< 包含接口数 / Number of interfaces in this function
-    uint8_t bFunctionClass;     ///< 功能类代码 / Function class
-    uint8_t bFunctionSubClass;  ///< 功能子类代码 / Function subclass
-    uint8_t bFunctionProtocol;  ///< 功能协议代码 / Function protocol
-    uint8_t iFunction;          ///< 字符串描述符索引 / String descriptor index
+    uint8_t bLength = 8;             ///< 描述符长度 / Descriptor length
+    uint8_t bDescriptorType = 0x0B;  ///< 描述符类型 / Descriptor type
+    uint8_t bFirstInterface;         ///< 首接口号 / First interface number
+    uint8_t bInterfaceCount;         ///< 接口数量 / Interface count
+    uint8_t bFunctionClass;          ///< 功能类 / Function class
+    uint8_t bFunctionSubClass;       ///< 功能子类 / Function subclass
+    uint8_t bFunctionProtocol;       ///< 功能协议 / Function protocol
+    uint8_t iFunction;               ///< 功能字符串索引 / Function string index
   };
 
   /**
-   * @brief 接口描述符结构体
-   *        Interface descriptor structure (USB 2.0 Spec 9.6.5)
+   * @brief 接口描述符（9 字节）/ Interface descriptor (9 bytes)
    */
   struct InterfaceDescriptor
   {
-    uint8_t bLength = 9;  ///< 结构体长度 / Descriptor length (always 9)
-    uint8_t bDescriptorType =
-        0x04;                   ///< 描述符类型（0x04）/ Descriptor type (interface, 0x04)
-    uint8_t bInterfaceNumber;   ///< 接口号 / Interface number
-    uint8_t bAlternateSetting;  ///< 备用设置号 / Alternate setting number
-    uint8_t bNumEndpoints;      ///< 端点数量 / Number of endpoints (excluding endpoint 0)
-    uint8_t bInterfaceClass;    ///< 接口类 / Interface class code
-    uint8_t bInterfaceSubClass;  ///< 接口子类 / Interface subclass code
-    uint8_t bInterfaceProtocol;  ///< 协议代码 / Protocol code
-    uint8_t iInterface;          ///< 字符串描述符索引 / String descriptor index
+    uint8_t bLength = 9;             ///< 描述符长度 / Descriptor length
+    uint8_t bDescriptorType = 0x04;  ///< 描述符类型 / Descriptor type
+    uint8_t bInterfaceNumber;        ///< 接口号 / Interface number
+    uint8_t bAlternateSetting;       ///< 备用设置号 / Alternate setting
+    uint8_t bNumEndpoints;           ///< 端点数量 / Number of endpoints
+    uint8_t bInterfaceClass;         ///< 接口类 / Interface class
+    uint8_t bInterfaceSubClass;      ///< 接口子类 / Interface subclass
+    uint8_t bInterfaceProtocol;      ///< 接口协议 / Interface protocol
+    uint8_t iInterface;              ///< 接口字符串索引 / Interface string index
   };
 
   /**
-   * @brief 端点描述符结构体
-   *        Endpoint descriptor structure (USB 2.0 Spec 9.6.6)
+   * @brief 端点描述符（7 字节）/ Endpoint descriptor (7 bytes)
    */
   struct EndpointDescriptor
   {
-    uint8_t bLength = 7;  ///< 结构体长度 / Descriptor length (always 7)
-    uint8_t bDescriptorType =
-        0x05;                  ///< 描述符类型（0x05）/ Descriptor type (endpoint, 0x05)
-    uint8_t bEndpointAddress;  ///< 端点地址 / Endpoint address (IN/OUT & index)
-    uint8_t bmAttributes;      ///< 属性位 / Attributes (transfer type, sync, usage)
-    uint16_t wMaxPacketSize;   ///< 最大包长 / Max packet size
-    uint8_t bInterval;  ///< 轮询间隔 / Polling interval (ms/frames, per endpoint type)
+    uint8_t bLength = 7;             ///< 描述符长度 / Descriptor length
+    uint8_t bDescriptorType = 0x05;  ///< 描述符类型 / Descriptor type
+    uint8_t bEndpointAddress;        ///< 端点地址 / Endpoint address
+    uint8_t bmAttributes;            ///< 端点属性 / Endpoint attributes
+    uint16_t wMaxPacketSize;         ///< 最大包长 / Maximum packet size
+    uint8_t bInterval;               ///< 轮询间隔 / Polling interval
   };
 #pragma pack(pop)
 
   /**
-   * @brief USB配置描述符初始化，派生类在此处申请端点
-   *
+   * @brief 绑定端点资源 / Bind endpoint resources
+   * @param endpoint_pool 端点池 / Endpoint pool
+   * @param start_itf_num 起始接口号 / Start interface number
    */
-  virtual void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) = 0;
+  virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) = 0;
 
   /**
-   * @brief USB配置描述符反初始化，派生类在此处释放端点
-   *
+   * @brief 解绑端点资源 / Unbind endpoint resources
+   * @param endpoint_pool 端点池 / Endpoint pool
    */
-  virtual void Deinit(EndpointPool& endpoint_pool) = 0;
+  virtual void UnbindEndpoints(EndpointPool& endpoint_pool) = 0;
 
   /**
-   * @brief 写入/补全设备描述符（非IAD情况下会被调用）
-   *        Write device descriptor (non-IAD case will be called)
+   * @brief 可选：覆盖设备描述符字段 / Optional: override device descriptor fields
    * @param header 设备描述符 / Device descriptor
-   * @return 错误码 / Error code
+   * @return OK：已覆盖；NOT_SUPPORT：不支持 / OK: applied; NOT_SUPPORT: not supported
    */
   virtual ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header)
   {
@@ -125,30 +124,22 @@ class ConfigDescriptorItem
   }
 
   /**
-   * @brief 设置接口的备用设置
-   *        Set the alternate setting of an interface
-   *
+   * @brief 可选：设置接口备用设置 / Optional: set interface alternate setting
    * @param itf 接口号 / Interface number
-   * @param alt 备用设置号 / Alternate setting
-   * @return ErrorCode
+   * @param alt 备用设置 / Alternate setting
+   * @return OK：成功；NOT_SUPPORT：不支持 / OK: success; NOT_SUPPORT: not supported
    */
   virtual ErrorCode SetAltSetting(uint8_t itf, uint8_t alt)
   {
     UNUSED(itf);
-    if (alt == 0)
-    {
-      return ErrorCode::OK;
-    }
-    return ErrorCode::NOT_SUPPORT;
+    return (alt == 0) ? ErrorCode::OK : ErrorCode::NOT_SUPPORT;
   }
 
   /**
-   * @brief 获取接口的备用设置
-   *        Get the alternate setting of an interface
-   *
+   * @brief 可选：获取接口备用设置 / Optional: get interface alternate setting
    * @param itf 接口号 / Interface number
-   * @param alt 备用设置号 / Alternate setting
-   * @return ErrorCode
+   * @param alt 输出：备用设置 / Output: alternate setting
+   * @return OK：成功；NOT_SUPPORT：不支持 / OK: success; NOT_SUPPORT: not supported
    */
   virtual ErrorCode GetAltSetting(uint8_t itf, uint8_t& alt)
   {
@@ -158,12 +149,9 @@ class ConfigDescriptorItem
   }
 
   /**
-   * @brief 判断是否拥有该端点
-   *        Check if this configuration item owns this endpoint
-   *
+   * @brief 可选：端点归属判定 / Optional: endpoint ownership
    * @param ep_addr 端点地址 / Endpoint address
-   * @return true
-   * @return false
+   * @return true：归属；false：不归属 / true: owned; false: not owned
    */
   virtual bool OwnsEndpoint(uint8_t ep_addr) const
   {
@@ -172,65 +160,57 @@ class ConfigDescriptorItem
   }
 
   /**
-   * @brief 获取该配置项的最大描述符长度
-   *        Get the maximum descriptor length of this configuration item
-   *
-   * @return size_t 描述符长度 / Descriptor length
+   * @brief 最大配置描述符占用 / Maximum bytes required in configuration descriptor
+   * @return 最大字节数 / Maximum bytes
    */
   virtual size_t GetMaxConfigSize() = 0;
 
   /**
-   * @brief 获取该配置项包含的接口数
-   *        Get the number of interfaces included in this configuration item
-   * @return 接口数量 / Number of interfaces
+   * @brief 接口数量 / Number of interfaces contributed
+   * @return 接口数量 / Interface count
    */
-  virtual size_t GetInterfaceNum() = 0;
+  virtual size_t GetInterfaceCount() = 0;
 
   /**
-   * @brief 判断是否包含IAD
-   *        Check if this configuration item contains IAD
-   *
-   * @return true
-   * @return false
+   * @brief 是否包含 IAD / Whether an IAD is used
+   * @return true：包含；false：不包含 / true: used; false: not used
    */
   virtual bool HasIAD() = 0;
 
  protected:
   /**
-   * @brief 获取本配置项描述符的二进制数据
-   *        Get the binary data of this configuration item
-   * @return RawData 结构体 / RawData struct
+   * @brief 获取内部数据缓存 / Get internal data cache
+   * @return RawData 数据结构 / RawData
    */
   RawData GetData();
 
   /**
-   * @brief 设置配置项数据
-   *        Set configuration item data
-   *
-   * @param data 配置项数据 / Configuration item data
+   * @brief 设置内部数据缓存 / Set internal data cache
+   * @param data 数据缓存 / Data cache
    */
   void SetData(RawData data) { data_ = data; }
 
   friend class ConfigDescriptor;
 
  private:
-  RawData data_;  ///< 存储本配置项序列化后描述符数据 / Serialized descriptor data for
-                  ///< this item
+  RawData data_{nullptr, 0};  ///< 内部数据缓存 / Internal data cache
 };
 
 /**
- * @brief USB 配置描述符生成器
- *        USB configuration descriptor generator
- *
+ * @brief 配置描述符管理与构建器，并聚合 BOS 能力
+ *        Configuration descriptor builder with BOS aggregation.
  */
-class ConfigDescriptor
+class ConfigDescriptor : public BosManager
 {
   using Header = ConfigDescriptorItem::Header;
 
+  /**
+   * @brief 单个 configuration 的配置项集合 / Item set for one configuration
+   */
   struct Config
   {
-    ConfigDescriptorItem** items;
-    size_t item_num;
+    ConfigDescriptorItem** items = nullptr;  ///< 配置项指针表 / Item pointer table
+    size_t item_num = 0;                     ///< 配置项数量 / Item count
   };
 
   static bool IsCompositeConfig(
@@ -239,17 +219,13 @@ class ConfigDescriptor
 
  public:
   /**
-   * @brief 构造函数，初始化配置项存储和属性
-   *        Constructor: setup item list and descriptor attributes
-   * @param endpoint_pool 端点资源池指针 / Endpoint pool for endpoint allocation
-   * @param item_num 支持的功能项（接口块）最大数量 / Maximum number of config items
-   * @param bmAttributes bmAttributes 属性位（默认总线供电）/ bmAttributes flags (default:
-   * bus powered)
-   * @param bMaxPower 最大电流（2mA 单位，默认 50=100mA）/ Max power (unit: 2mA, default:
-   * 50 = 100mA)
+   * @brief 构造函数 / Constructor
    *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * @param endpoint_pool 端点池 / Endpoint pool
+   * @param configs configuration 列表（每个子列表为一个 configuration）
+   *                Config list (each sub-list is one configuration)
+   * @param bmAttributes 配置属性 / bmAttributes
+   * @param bMaxPower 最大电流（单位 2mA）/ Max power (2mA units)
    */
   ConfigDescriptor(
       EndpointPool& endpoint_pool,
@@ -257,101 +233,106 @@ class ConfigDescriptor
           configs,
       uint8_t bmAttributes = CFG_BUS_POWERED, uint8_t bMaxPower = 50);
 
+  /**
+   * @brief 切换当前 configuration / Switch current configuration
+   * @param index 配置索引 / Configuration index
+   * @return 错误码 / Error code
+   */
   ErrorCode SwitchConfig(size_t index);
 
   /**
-   * @brief 分配端点并分配总缓冲区
-   *        Assign endpoints and allocate the total config descriptor buffer
+   * @brief 绑定当前配置端点 / Bind endpoints for current configuration
    */
-  void AssignEndpoints();
+  void BindEndpoints();
 
   /**
-   * @brief 释放所有功能项占用的端点资源
-   *        Release all endpoints/resources allocated by function blocks
+   * @brief 解绑当前配置端点 / Unbind endpoints for current configuration
    */
-  void ReleaseEndpoints();
+  void UnbindEndpoints();
 
   /**
-   * @brief 生成完整的配置描述符（自动拼接 header 和所有功能项数据）
-   *        Generate and assemble the full configuration descriptor (header + all items)
-   * @return ErrorCode::OK 生成成功 / ErrorCode::FAILED 失败
+   * @brief 构建当前配置描述符 / Build current configuration descriptor
+   * @return 错误码 / Error code
    */
-  ErrorCode Generate();
+  ErrorCode BuildConfigDescriptor();
 
   /**
-   * @brief 判断是否为复合设备（composite device）
-   *        Check if this is a composite device
-   * @return true/false
+   * @brief 是否为复合设备 / Whether composite device
+   * @return true：复合设备；false：非复合 / true: composite; false: non-composite
    */
-  bool IsComposite() const;
+  [[nodiscard]] bool IsComposite() const;
 
   /**
-   * @brief 覆盖设备描述符（非IAD时可用）
-   *        Override the device descriptor (can be used when not using IAD)
-   *
+   * @brief 重建 BOS 缓存 / Rebuild BOS cache
+   */
+  void RebuildBosCache();
+
+  /**
+   * @brief 是否允许覆盖设备描述符 / Whether device descriptor override is allowed
+   * @return true：允许；false：不允许 / true: allowed; false: disallowed
+   */
+  [[nodiscard]] bool CanOverrideDeviceDescriptor() const;
+
+  /**
+   * @brief 覆盖设备描述符 / Override device descriptor
    * @param descriptor 设备描述符 / Device descriptor
-   * @return ErrorCode
+   * @return 错误码 / Error code
    */
   ErrorCode OverrideDeviceDescriptor(DeviceDescriptor& descriptor);
 
   /**
-   * @brief 获取拼接好的配置描述符数据
-   *        Get the generated configuration descriptor data
-   * @return RawData 结构体，包含指针和长度 / RawData with pointer and length
+   * @brief 获取配置描述符数据 / Get configuration descriptor data
+   * @return RawData 数据结构 / RawData
    */
-  RawData GetData() const;
+  [[nodiscard]] RawData GetData() const;
 
   /**
-   * @brief 获取配置项数量 / Get the number of configuration items
-   *
-   * @return size_t
+   * @brief 配置数量 / Number of configurations
+   * @return 配置数量 / Configuration count
    */
-  size_t GetConfigNum() const;
+  [[nodiscard]] size_t GetConfigNum() const;
 
   /**
-   * @brief 获取当前配置值 / Get the current configuration value
-   *
-   * @return size_t
+   * @brief 当前配置索引 / Current configuration index
+   * @return 配置索引 / Configuration index
    */
-  size_t GetCurrentConfig() const;
+  [[nodiscard]] size_t GetCurrentConfig() const;
 
   /**
-   * @brief 获取当前设备状态 / Get the current device status
-   *
-   * @return uint16_t
+   * @brief 设备状态（GET_STATUS）/ Device status (GET_STATUS)
+   * @return 设备状态位 / Device status bits
    */
-  uint16_t GetDeviceStatus() const;
+  [[nodiscard]] uint16_t GetDeviceStatus() const;
 
   /**
-   * @brief 获取指定接口的配置项 / Get the configuration item by interface number
-   *
+   * @brief 按接口号查找配置项 / Find item by interface number
    * @param index 接口号 / Interface number
-   * @return ConfigDescriptorItem*
+   * @return 配置项指针（可能为空）/ Item pointer (nullable)
    */
-  ConfigDescriptorItem* GetItemByInterfaceNum(size_t index) const;
+  [[nodiscard]] ConfigDescriptorItem* FindItemByInterfaceNumber(size_t index) const;
 
   /**
-   * @brief 获取指定端点的配置项 / Get the configuration item by endpoint address
-   *
+   * @brief 按端点地址查找配置项 / Find item by endpoint address
    * @param addr 端点地址 / Endpoint address
-   * @return ConfigDescriptorItem*
+   * @return 配置项指针（可能为空）/ Item pointer (nullable)
    */
-  ConfigDescriptorItem* GetItemByEndpointAddr(uint8_t addr) const;
+  [[nodiscard]] ConfigDescriptorItem* FindItemByEndpointAddress(uint8_t addr) const;
 
  private:
-  bool ep_assigned_ = false;  ///< 端点是否已分配 / Is endpoint assigned
+  bool ep_assigned_ = false;  ///< 端点是否已绑定 / Whether endpoints are assigned
 
-  EndpointPool& endpoint_pool_;   ///< 端点资源池 / Endpoint pool
-  uint8_t current_cfg_ = 0;       ///< 配置值 / Configuration value
-  uint8_t i_configuration_ = 0;   ///< 配置字符串索引 / String descriptor index
-  uint8_t bm_attributes_ = 0x80;  ///< 配置属性 / bmAttributes
-  uint8_t b_max_power_ = 50;      ///< 最大电流（2mA 单位）/ Max power (2mA unit)
+  EndpointPool& endpoint_pool_;  ///< 端点池引用 / Endpoint pool reference
+  uint8_t current_cfg_ = 0;      ///< 当前配置索引 / Current configuration index
+  uint8_t i_configuration_ = 0;  ///< 配置字符串索引 / Configuration string index
+  uint8_t bm_attributes_ = CFG_BUS_POWERED;  ///< 配置属性 / bmAttributes
+  uint8_t b_max_power_ = 50;  ///< 最大电流（2mA 单位）/ Max power (2mA units)
 
-  const bool COMPOSITE = false;    ///< 是否为复合设备 / Is composite device
-  const size_t CFG_NUM = 0;        ///< 当前功能项数 / Current item count
-  Config* items_ = nullptr;        ///< 功能项数组 / Item array
-  RawData buffer_ = {nullptr, 0};  ///< 拼接后的描述符缓冲区 / Assembled descriptor buffer
-  size_t buffer_index_ = 0;        ///< 数据写入索引 / Write index (for internal use)
+  const bool COMPOSITE = false;  ///< 是否为复合设备 / Whether composite device
+  const size_t CFG_NUM = 0;      ///< 配置数量 / Configuration count
+  Config* items_ = nullptr;      ///< 配置项集合 / Configuration item set
+
+  RawData buffer_{nullptr, 0};  ///< 配置描述符缓冲区 / Configuration descriptor buffer
+  size_t buffer_index_ = 0;     ///< 缓冲区写入位置 / Buffer write index
 };
 
 }  // namespace LibXR::USB
