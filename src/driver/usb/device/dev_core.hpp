@@ -1,5 +1,8 @@
 #pragma once
-#include <cstring>
+
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 
 #include "libxr_type.hpp"
 #include "usb/core/core.hpp"
@@ -9,66 +12,102 @@
 namespace LibXR::USB
 {
 class DeviceCore;
+
 /**
- * @class DeviceClass
- * @brief USB 设备类接口基类，所有自定义 USB 类（如 HID、CDC、MSC）都需派生自本类。
- *        USB device class base interface, all custom device classes (HID, CDC, MSC,
- * etc.) should derive from this.
+ * @brief USB 设备类接口基类 / USB device class interface base
  *
- * @note 仅供 DeviceCore 内部驱动和派生类扩展，普通用户无需直接使用。
- *       Only for internal drivers and derived classes, users do not need to use it
- * directly.
+ * 所有自定义 USB 类（HID/CDC/MSC 等）应派生自本类。
+ * All custom USB classes (HID/CDC/MSC, etc.) should derive from this class.
+ *
+ * @note 该类主要供 DeviceCore 驱动及派生类扩展使用。
+ *       This class is mainly used by DeviceCore and derived-class extensions.
  */
 class DeviceClass : public ConfigDescriptorItem
 {
+ public:
+  /**
+   * @brief 构造：传入本类提供的 BOS capabilities（对象指针列表）
+   *        Constructor: pass BOS capabilities provided by this class (pointer list).
+   *
+   * @param bos_caps BOS capability 指针列表 / BOS capability pointer list
+   *
+   * @note 基类会动态分配一个指针数组保存这些 capability 指针。
+   *       capability 对象本身生命周期应由派生类成员/静态对象管理。
+   */
+  explicit DeviceClass(std::initializer_list<BosCapability*> bos_caps = {});
+
+  /**
+   * @brief 析构函数 / Destructor
+   */
+  ~DeviceClass() override;
+
  protected:
   /**
-   * @brief 控制请求结果结构体 / Structure for control transfer results
+   * @brief 控制请求（Class/Vendor）处理结果 / Control request (Class/Vendor) handling
+   * result
+   *
    */
-  struct RequestResult
+  struct ControlTransferResult
   {
-    RawData read_data{nullptr, 0};  ///< 设备返回给主机的数据 / Data to read (to host)
-    ConstRawData write_data{nullptr,
-                            0};  ///< 主机写入设备的数据 / Data to write (from host)
-    bool read_zlp = false;       ///< 读操作是否需要发送 0 长度包 / Send ZLP after read
-    bool write_zlp = false;      ///< 写操作是否需要发送 0 长度包 / Send ZLP after write
+    RawData read_data{nullptr, 0};  ///< OUT 数据阶段接收缓冲区（Host->Device）/ OUT data
+                                    ///< stage buffer (Host->Device)
+    ConstRawData write_data{nullptr, 0};  ///< IN 数据阶段发送数据（Device->Host）/ IN
+                                          ///< data stage payload (Device->Host)
+    bool read_zlp = false;  ///< 期望 STATUS OUT（arm OUT 等待 ZLP）/ Expect STATUS OUT
+                            ///< (arm OUT for ZLP)
+    bool write_zlp = false;  ///< 发送 STATUS IN（发送 ZLP）/ Send STATUS IN (send ZLP)
+
+    RawData& OutData() { return read_data; }
+    const RawData& OutData() const { return read_data; }
+
+    ConstRawData& InData() { return write_data; }
+    const ConstRawData& InData() const { return write_data; }
+
+    bool& ExpectStatusOutZLP() { return read_zlp; }
+    bool ExpectStatusOutZLP() const { return read_zlp; }
+
+    bool& SendStatusInZLP() { return write_zlp; }
+    bool SendStatusInZLP() const { return write_zlp; }
   };
 
   /**
-   * @brief 处理标准请求 GET_DESCRIPTOR
-   *        Handle standard request GET_DESCRIPTOR
-   * @param in_isr 是否在中断中 / In ISR
+   * @brief 处理标准请求 GET_DESCRIPTOR（类特定描述符）
+   *        Handle standard GET_DESCRIPTOR request (class-specific descriptors).
+   *
+   * @param in_isr   是否在 ISR / Whether in ISR context
    * @param bRequest 请求码 / Request code
-   * @param wValue 请求值 / wValue field
-   * @param wLength 请求长度 / Requested length
-   * @param need_write 返回数据指针 / Output data
-   * @return ErrorCode 错误码 / Error code
+   * @param wValue   wValue / wValue
+   * @param wLength  wLength / wLength
+   * @param out_data 输出：返回给主机的描述符数据（Device->Host）
+   *                 Output: descriptor data to return (Device->Host)
+   * @return 错误码 / Error code
    */
   virtual ErrorCode OnGetDescriptor(bool in_isr, uint8_t bRequest, uint16_t wValue,
-                                    uint16_t wLength, ConstRawData &need_write)
+                                    uint16_t wLength, ConstRawData& out_data)
   {
     UNUSED(in_isr);
     UNUSED(bRequest);
     UNUSED(wValue);
     UNUSED(wLength);
-    UNUSED(need_write);
+    UNUSED(out_data);
     return ErrorCode::NOT_SUPPORT;
   }
 
   /**
-   * @brief 处理类特定请求（Class-specific Request）
-   *        Handle class-specific request
-   * @param in_isr 是否在中断中 / In ISR
+   * @brief 处理 Class-specific 请求（Setup stage）/ Handle class-specific request (Setup
+   * stage)
+   *
+   * @param in_isr   是否在 ISR / Whether in ISR context
    * @param bRequest 请求码 / Request code
-   * @param wValue 请求值 / wValue field
-   * @param wLength 请求长度 / Requested length
-   * @param wIndex 请求索引 / Request index
-   * @param result 读写数据结构体 / Data result struct
-   * @return ErrorCode 错误码 / Error code
+   * @param wValue   wValue / wValue
+   * @param wLength  wLength / wLength
+   * @param wIndex   wIndex / wIndex
+   * @param result   输出：控制传输结果 / Output: control transfer result
+   * @return 错误码 / Error code
    */
   virtual ErrorCode OnClassRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
                                    uint16_t wLength, uint16_t wIndex,
-                                   RequestResult &result)
+                                   ControlTransferResult& result)
   {
     UNUSED(in_isr);
     UNUSED(bRequest);
@@ -80,14 +119,18 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
   /**
-   * @brief 处理类请求的数据阶段
-   *        Handle data stage for class request
-   * @param in_isr 是否在中断中 / In ISR
+   * @brief 处理 Class request 数据阶段 / Handle class request data stage
+   *
+   * @param in_isr   是否在 ISR / Whether in ISR context
    * @param bRequest 请求码 / Request code
-   * @param data 主机写入数据 / Data from host
-   * @return ErrorCode 错误码 / Error code
+   * @param data     数据阶段数据 / Data stage payload
+   * @return 错误码 / Error code
+   *
+   * @note 当 OnClassRequest 返回需要 OUT/IN data stage 时，数据阶段完成后回调此函数。
+   *       When OnClassRequest requires an OUT/IN data stage, this callback is invoked
+   * after completion.
    */
-  virtual ErrorCode OnClassData(bool in_isr, uint8_t bRequest, LibXR::ConstRawData &data)
+  virtual ErrorCode OnClassData(bool in_isr, uint8_t bRequest, LibXR::ConstRawData& data)
   {
     UNUSED(in_isr);
     UNUSED(bRequest);
@@ -96,19 +139,19 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
   /**
-   * @brief 处理厂商自定义请求 / Handle vendor request
+   * @brief 处理 Vendor request（Setup stage）/ Handle vendor request (Setup stage)
    *
-   * @param in_isr 是否在中断中 / In ISR
+   * @param in_isr   是否在 ISR / Whether in ISR context
    * @param bRequest 请求码 / Request code
-   * @param wValue 请求值 / wValue field
-   * @param wLength 请求长度 / Requested length
-   * @param wIndex 请求索引 / Request index
-   * @param result 读写数据结构体 / Data result struct
-   * @return ErrorCode
+   * @param wValue   wValue / wValue
+   * @param wLength  wLength / wLength
+   * @param wIndex   wIndex / wIndex
+   * @param result   输出：控制传输结果 / Output: control transfer result
+   * @return 错误码 / Error code
    */
   virtual ErrorCode OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
                                     uint16_t wLength, uint16_t wIndex,
-                                    RequestResult &result)
+                                    ControlTransferResult& result)
   {
     UNUSED(in_isr);
     UNUSED(bRequest);
@@ -120,283 +163,196 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
   friend class DeviceCore;
+
+ private:
+  BosCapability** bos_caps_ =
+      nullptr;              ///< BOS capability 指针表 / BOS capability pointer table
+  size_t bos_cap_num_ = 0;  ///< BOS capability 数量 / BOS capability count
 };
 
 /**
- * @class DeviceCore
- * @brief USB 设备协议栈核心类，负责端点 0 控制传输及配置、描述符、标准请求处理等。
- *        USB device protocol stack core class. Handles EP0 control transfers,
- * descriptors, configurations, and standard/class/vendor requests.
- *
- * @note 用户无需直接操作，一般由派生类自动管理。
- *       Users do not need to operate it directly, it is automatically managed by derived
- * classes.
+ * @brief USB 设备协议栈核心：EP0 控制传输、描述符、配置、标准/类/厂商请求
+ *        USB device core: EP0 control transfer, descriptors, configuration,
+ *        and standard/class/vendor requests.
  */
 class DeviceCore
 {
  public:
   /**
-   * @brief 控制传输状态枚举 / Control transfer context enum
+   * @brief 控制传输上下文 / Control transfer context
+   *
+   * 说明：保留历史拼写 UNKNOW，同时增加同值别名 UNKNOWN，便于代码可读性提升。
+   * Note: keep legacy spelling UNKNOWN and add alias UNKNOWN for readability.
    */
   enum Context : uint8_t
   {
-    UNKNOW,      ///< 未知 / Unknown
-    SETUP,       ///< SETUP 阶段 / Setup stage
-    DATA_OUT,    ///< 数据 OUT 阶段 / Data out stage
-    STATUS_OUT,  ///< 状态 OUT 阶段 / Status out stage
-    DATA_IN,     ///< 数据 IN 阶段 / Data in stage
-    STATUS_IN,   ///< 状态 IN 阶段 / Status in stage
-    ZLP          ///< 0 长度包 / Zero-length packet
+    UNKNOWN = 0,  ///< 未知 / Unknown
+    SETUP,        ///< Setup stage / Setup stage
+    DATA_OUT,     ///< OUT data stage / OUT data stage
+    STATUS_OUT,   ///< OUT status stage / OUT status stage
+    DATA_IN,      ///< IN data stage / IN data stage
+    STATUS_IN,    ///< IN status stage / IN status stage
+    ZLP           ///< ZLP stage marker / ZLP stage marker
   };
 
   /**
    * @brief 构造函数 / Constructor
-   * @param ep_pool 端点池 / Endpoint pool
-   * @param spec USB 规范版本 / USB spec version
-   * @param speed 速度等级 / Device speed
-   * @param packet_size EP0 包大小 / EP0 packet size
-   * @param vid 厂商 ID / Vendor ID
-   * @param pid 产品 ID / Product ID
-   * @param bcd 设备版本号 / Device version (BCD)
-   * @param lang_list 语言包列表 / Language packs
-   * @param configs 配置描述符列表 / Config descriptor items
-   * @param uid UID / Unique ID
+   *
+   * @param ep_pool     端点池 / Endpoint pool
+   * @param spec        USB 规范版本 / USB specification
+   * @param speed       设备速度 / Device speed
+   * @param packet_size EP0 包长 / EP0 packet size
+   * @param vid         Vendor ID / Vendor ID
+   * @param pid         Product ID / Product ID
+   * @param bcd         设备版本号（BCD）/ Device release number (BCD)
+   * @param lang_list   字符串语言包列表 / String language pack list
+   * @param configs     配置列表（每个子列表为一个 configuration）
+   *                   Config list (each sub-list is one configuration)
+   * @param uid         UID 原始数据（可选）/ UID raw data (optional)
    */
   DeviceCore(
-      EndpointPool &ep_pool, USBSpec spec, Speed speed,
+      EndpointPool& ep_pool, USBSpec spec, Speed speed,
       DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
-      const std::initializer_list<const DescriptorStrings::LanguagePack *> &lang_list,
-      const std::initializer_list<const std::initializer_list<ConfigDescriptorItem *>>
-          &configs,
+      const std::initializer_list<const DescriptorStrings::LanguagePack*>& lang_list,
+      const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
+          configs,
       ConstRawData uid = {nullptr, 0});
 
   /**
-   * @brief 初始化 USB 设备 / Initialize USB device
-   * @return void
+   * @brief 初始化 / Initialize
    */
   virtual void Init();
 
   /**
-   * @brief 反初始化 USB 设备 / Deinitialize USB device
-   *
+   * @brief 反初始化 / Deinitialize
    */
   virtual void Deinit();
 
   /**
-   * @brief 启动 USB 设备 / Start USB device
-   *
+   * @brief 启动设备（由子类实现）/ Start device (implemented by derived class)
    */
   virtual void Start() = 0;
 
   /**
-   * @brief 停止 USB 设备 / Stop USB device
-   *
+   * @brief 停止设备（由子类实现）/ Stop device (implemented by derived class)
    */
   virtual void Stop() = 0;
 
   /**
-   * @brief 处理主机发送的 SETUP 包
-   *        Handle USB setup packet from host
-   * @param in_isr 是否在中断中 / In ISR
-   * @param setup SETUP 包指针 / Setup packet pointer
-   * @return void
+   * @brief 处理 Setup 包 / Handle Setup packet
+   * @param in_isr 是否在 ISR / Whether in ISR context
+   * @param setup  Setup 包 / Setup packet
    */
-  void OnSetupPacket(bool in_isr, const SetupPacket *setup);
+  void OnSetupPacket(bool in_isr, const SetupPacket* setup);
 
- private:
+ protected:
   /**
-   * @brief EP0 OUT 端点传输完成回调（静态）
-   *        EP0 OUT endpoint transfer complete (static)
-   */
-  static void OnEP0OutCompleteStatic(bool in_isr, DeviceCore *self,
-                                     LibXR::ConstRawData &data);
-
-  /**
-   * @brief EP0 IN 端点传输完成回调（静态）
-   *        EP0 IN endpoint transfer complete (static)
-   */
-  static void OnEP0InCompleteStatic(bool in_isr, DeviceCore *self,
-                                    LibXR::ConstRawData &data);
-
-  /**
-   * @brief 检查 USB 组合是否合法 / Check if USB combination is valid
-   */
-  static bool IsValidUSBCombination(USBSpec spec, Speed speed,
-                                    DeviceDescriptor::PacketSize0 packet_size);
-
-  /**
-   * @brief EP0 OUT 端点传输完成回调 / EP0 OUT endpoint transfer complete
-   */
-  void OnEP0OutComplete(bool in_isr, LibXR::ConstRawData &data);
-
-  /**
-   * @brief EP0 IN 端点传输完成回调 / EP0 IN endpoint transfer complete
-   */
-  void OnEP0InComplete(bool in_isr, LibXR::ConstRawData &data);
-
-  /**
-   * @brief 接收 0 长度包 / Receive zero-length packet (ZLP)
-   * @param context 传输上下文 / Transfer context
-   */
-  void ReadZLP(Context context = Context::ZLP);
-
-  /**
-   * @brief 发送 0 长度包 / Send zero-length packet (ZLP)
-   * @param context 传输上下文 / Transfer context
-   */
-  void WriteZLP(Context context = Context::ZLP);
-
-  /**
-   * @brief 向主机发送 EP0 数据包
-   *        Send data packet to host via EP0
-   * @param data 数据指针和长度 / Data and length
-   * @param packet_max_length 最大包长度 / Max packet size
-   * @param request_size 请求长度（可选）/ Request size (optional)
-   * @param early_read_zlp 是否提前读取 ZLP（可选）/ Read ZLP early (optional)
-   */
-  void DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_length,
-                       size_t request_size = 0, bool early_read_zlp = false);
-
-  /**
-   * @brief 接收主机发送的 EP0 数据包
-   *        Receive data packet from host via EP0
-   * @param data 数据指针和长度 / Data and length
-   * @param packet_max_length 最大包长度 / Max packet size
-   */
-  void DevReadEP0Data(LibXR::RawData data, size_t packet_max_length);
-
-  /**
-   * @brief 处理标准请求
-   *        Process standard USB requests
-   */
-  ErrorCode ProcessStandardRequest(bool in_isr, const SetupPacket *&setup,
-                                   RequestDirection direction, Recipient recipient);
-
-  /**
-   * @brief 返回状态响应 / Respond with status stage
-   */
-  ErrorCode RespondWithStatus(const SetupPacket *setup, Recipient recipient);
-
-  /**
-   * @brief 清除功能特性 / Clear USB feature
-   */
-  ErrorCode ClearFeature(const SetupPacket *setup, Recipient recipient);
-
-  /**
-   * @brief 启用功能特性 / Apply USB feature
-   */
-  ErrorCode ApplyFeature(const SetupPacket *setup, Recipient recipient);
-
-  /**
-   * @brief 发送描述符 / Send USB descriptor
-   */
-  ErrorCode SendDescriptor(bool in_isr, const SetupPacket *setup, Recipient recipient);
-
-  /**
-   * @brief 预设地址变更 / Prepare address change
-   */
-  ErrorCode PrepareAddressChange(uint16_t address);
-
-  /**
-   * @brief 切换配置 / Switch USB configuration
-   */
-  ErrorCode SwitchConfiguration(uint16_t value);
-
-  /**
-   * @brief 发送配置响应 / Send configuration
-   */
-  ErrorCode SendConfiguration();
-
-  /**
-   * @brief 设置控制端点为 STALL / Stall control endpoint
-   */
-  void StallControlEndpoint();
-
-  /**
-   * @brief 清除控制端点 STALL / Clear control endpoint stall
-   */
-  void ClearControlEndpointStall();
-
-  /**
-   * @brief 处理类请求 / Process class-specific request
-   */
-  ErrorCode ProcessClassRequest(bool in_isr, const SetupPacket *setup,
-                                RequestDirection direction, Recipient recipient);
-
-  /**
-   * @brief 处理厂商请求 / Process vendor-specific request
-   */
-  ErrorCode ProcessVendorRequest(bool in_isr, const SetupPacket *&setup,
-                                 RequestDirection direction, Recipient recipient);
-
-  /**
-   * @brief 设置设备地址（必须由子类实现）
-   *        Set device address (must be implemented by subclass)
-   * @param address 新地址 / New device address
-   * @param state 当前状态 / Current state
-   * @return ErrorCode 错误码 / Error code
+   * @brief 设置设备地址（由子类实现）
+   *        Set device address (implemented by derived class).
+   *
+   * @param address 设备地址 / Device address
+   * @param state   当前上下文 / Current context
+   * @return 错误码 / Error code
    */
   virtual ErrorCode SetAddress(uint8_t address, Context state) = 0;
 
   /**
-   * @brief 启用远程唤醒功能（SetFeature: DEVICE_REMOTE_WAKEUP）
-   *        Enable remote wakeup (via SetFeature)
+   * @brief 启用远程唤醒 / Enable remote wakeup
    */
   virtual void EnableRemoteWakeup() {}
 
   /**
-   * @brief 禁用远程唤醒功能（ClearFeature: DEVICE_REMOTE_WAKEUP）
-   *        Disable remote wakeup (via ClearFeature)
+   * @brief 禁用远程唤醒 / Disable remote wakeup
    */
   virtual void DisableRemoteWakeup() {}
 
   /**
-   * @brief 判断当前是否允许远程唤醒
-   *        Query if remote wakeup is enabled
+   * @brief 远程唤醒是否启用 / Whether remote wakeup is enabled
+   * @return true：已启用；false：未启用 / true: enabled; false: disabled
    */
   virtual bool IsRemoteWakeupEnabled() const { return false; }
 
   /**
-   * @brief 获取当前 USB 速度 / Get current USB speed
-   * @return Speed 当前速度枚举 / Current speed
+   * @brief 获取设备速度 / Get device speed
+   * @return 设备速度 / Device speed
    */
-  Speed GetSpeed() const;
+  [[nodiscard]] Speed GetSpeed() const;
 
  private:
-  ConfigDescriptor config_desc_;  ///< 配置描述符 / Config descriptor
+  static void OnEP0OutCompleteStatic(bool in_isr, DeviceCore* self,
+                                     LibXR::ConstRawData& data);
+  static void OnEP0InCompleteStatic(bool in_isr, DeviceCore* self,
+                                    LibXR::ConstRawData& data);
+
+  static bool IsValidUSBCombination(USBSpec spec, Speed speed,
+                                    DeviceDescriptor::PacketSize0 packet_size);
+
+  void OnEP0OutComplete(bool in_isr, LibXR::ConstRawData& data);
+  void OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data);
+
+  void ReadZLP(Context context = Context::ZLP);
+  void WriteZLP(Context context = Context::ZLP);
+
+  void DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_length,
+                       size_t request_size = 0, bool early_read_zlp = false);
+  void DevReadEP0Data(LibXR::RawData data, size_t packet_max_length);
+
+  ErrorCode ProcessStandardRequest(bool in_isr, const SetupPacket*& setup,
+                                   RequestDirection direction, Recipient recipient);
+
+  ErrorCode RespondWithStatus(const SetupPacket* setup, Recipient recipient);
+  ErrorCode ClearFeature(const SetupPacket* setup, Recipient recipient);
+  ErrorCode ApplyFeature(const SetupPacket* setup, Recipient recipient);
+  ErrorCode SendDescriptor(bool in_isr, const SetupPacket* setup, Recipient recipient);
+  ErrorCode PrepareAddressChange(uint16_t address);
+  ErrorCode SwitchConfiguration(uint16_t value);
+  ErrorCode SendConfiguration();
+
+  void StallControlEndpoint();
+  void ClearControlEndpointStall();
+
+  ErrorCode ProcessClassRequest(bool in_isr, const SetupPacket* setup,
+                                RequestDirection direction, Recipient recipient);
+
+  ErrorCode ProcessVendorRequest(bool in_isr, const SetupPacket*& setup,
+                                 RequestDirection direction, Recipient recipient);
+
+ private:
+  ConfigDescriptor config_desc_;  ///< 配置描述符管理器 / Configuration descriptor manager
   DeviceDescriptor device_desc_;  ///< 设备描述符 / Device descriptor
-  DescriptorStrings strings_;     ///< 字符串描述符管理 / String descriptors
+  DescriptorStrings strings_;     ///< 字符串描述符管理器 / String descriptor manager
 
   struct
   {
-    EndpointPool &pool;        ///< 端点池 / Endpoint pool
-    Endpoint *in0 = nullptr;   ///< 控制 IN 端点指针 / Control IN endpoint
-    Endpoint *out0 = nullptr;  ///< 控制 OUT 端点指针 / Control OUT endpoint
-    LibXR::Callback<LibXR::ConstRawData &> ep0_in_cb;  ///< EP0 IN 回调 / EP0 IN callback
-    LibXR::Callback<LibXR::ConstRawData &>
+    EndpointPool& pool;        ///< 端点池引用 / Endpoint pool reference
+    Endpoint* in0 = nullptr;   ///< EP0 IN 端点 / EP0 IN endpoint
+    Endpoint* out0 = nullptr;  ///< EP0 OUT 端点 / EP0 OUT endpoint
+    LibXR::Callback<LibXR::ConstRawData&> ep0_in_cb;  ///< EP0 IN 回调 / EP0 IN callback
+    LibXR::Callback<LibXR::ConstRawData&>
         ep0_out_cb;  ///< EP0 OUT 回调 / EP0 OUT callback
   } endpoint_;
 
   struct
   {
-    bool inited = false;             ///< 是否初始化 / Initialized
-    Speed speed = Speed::FULL;       ///< 当前速度 / Current speed
-    Context in0;                     ///< IN0 状态 / IN0 context
-    Context out0;                    ///< OUT0 状态 / OUT0 context
-    ConstRawData write_remain;       ///< 剩余写数据 / Remaining write data
-    RawData read_remain;             ///< 剩余读数据 / Remaining read data
-    uint8_t pending_addr = 0xFF;     ///< 待设置的新地址 / Pending device address
-    uint8_t *out0_buffer = nullptr;  ///< OUT0 缓冲区 / OUT0 buffer
-    bool need_write_zlp = false;     ///< 是否需要写 ZLP / Need to write ZLP
+    bool inited = false;                    ///< 是否已初始化 / Whether initialized
+    Speed speed = Speed::FULL;              ///< 设备速度 / Device speed
+    Context in0 = Context::UNKNOWN;          ///< EP0 IN 上下文 / EP0 IN context
+    Context out0 = Context::UNKNOWN;         ///< EP0 OUT 上下文 / EP0 OUT context
+    ConstRawData write_remain{nullptr, 0};  ///< IN 剩余待发送 / Remaining IN payload
+    RawData read_remain{nullptr, 0};        ///< OUT 剩余待接收 / Remaining OUT buffer
+    uint8_t pending_addr = 0xFF;            ///< 待生效地址 / Pending address
+    uint8_t* out0_buffer = nullptr;         ///< EP0 OUT 缓冲区 / EP0 OUT buffer
+    bool need_write_zlp = false;            ///< 是否需要发送 ZLP / Whether to send ZLP
   } state_;
 
   struct
   {
-    bool write = false;                ///< 是否写操作 / Write operation
-    bool read = false;                 ///< 是否读操作 / Read operation
-    DeviceClass *class_ptr = nullptr;  ///< 当前类指针 / Current device class pointer
+    bool write = false;  ///< 是否存在 IN 数据阶段 / Whether IN data stage exists
+    bool read = false;   ///< 是否存在 OUT 数据阶段 / Whether OUT data stage exists
+    DeviceClass* class_ptr = nullptr;  ///< 当前处理类 / Current class handler
     uint8_t b_request = 0;             ///< 当前请求码 / Current request code
-    ConstRawData data;                 ///< 当前数据 / Current data
+    ConstRawData data{nullptr, 0};     ///< 数据阶段数据 / Data stage payload
   } class_req_;
 };
+
 }  // namespace LibXR::USB

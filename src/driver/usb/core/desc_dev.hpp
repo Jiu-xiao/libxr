@@ -19,13 +19,16 @@ namespace LibXR::USB
  */
 enum class DescriptorType : uint8_t
 {
-  DEVICE = 0x01,         ///< 设备描述符（Device Descriptor）
-  CONFIGURATION = 0x02,  ///< 配置描述符（Configuration Descriptor）
-  STRING = 0x03,         ///< 字符串描述符（String Descriptor）
-  INTERFACE = 0x04,      ///< 接口描述符（Interface Descriptor）
-  ENDPOINT = 0x05,       ///< 端点描述符（Endpoint Descriptor）
-  IAD = 0x0B,            ///< 接口关联描述符（Interface Association Descriptor）
-  CS_INTERFACE = 0x24,   ///< 类特定接口描述符（Class-Specific Interface Descriptor）
+  DEVICE = 0x01,             ///< 设备描述符（Device Descriptor）
+  CONFIGURATION = 0x02,      ///< 配置描述符（Configuration Descriptor）
+  STRING = 0x03,             ///< 字符串描述符（String Descriptor）
+  INTERFACE = 0x04,          ///< 接口描述符（Interface Descriptor）
+  ENDPOINT = 0x05,           ///< 端点描述符（Endpoint Descriptor）
+  IAD = 0x0B,                ///< 接口关联描述符（Interface Association Descriptor）
+  BOS = 0x0F,                ///< 设备能力描述符（BOS Descriptor）
+  DEVICE_CAPABILITY = 0x10,  ///< 设备能力子描述符（Device Capability Descriptor）
+  CS_INTERFACE = 0x24,       ///< 类特定接口描述符（Class-Specific Interface Descriptor）
+
 };
 
 /**

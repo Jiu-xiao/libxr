@@ -47,7 +47,7 @@ class RamFS
     DIR,      ///< 目录 Directory
     DEVICE,   ///< 设备 Device
     STORAGE,  ///< 存储 Storage
-    UNKNOW,   ///< 未知 Unknown
+    UNKNOWN,   ///< 未知 Unknown
   };
 
   /**
