@@ -91,8 +91,8 @@ void DapLinkV2Class::InitWinUsbDescriptors()
       LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES;
 
   Memory::FastCopy(winusb_msos20_.prop.name,
-              LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16,
-              LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
+                   LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16,
+                   LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
 
   // DeviceInterfaceGUIDs: REG_MULTI_SZ UTF-16LE, include double-NUL terminator
   // 注意：此处为“单 GUID + 双 NUL 结束”的 REG_MULTI_SZ / Single GUID + double-NUL end.
@@ -141,12 +141,18 @@ ConstRawData DapLinkV2Class::GetWinUsbMsOs20DescriptorSet() const
 
 DapLinkV2Class::DapLinkV2Class(LibXR::Debug::Swd& swd_link, LibXR::GPIO* nreset_gpio,
                                Endpoint::EPNumber data_in_ep_num,
-                               Endpoint::EPNumber data_out_ep_num)
+                               Endpoint::EPNumber data_out_ep_num, uint8_t packet_count)
     : DeviceClass({&winusb_msos20_cap_}),
       swd_(swd_link),
       nreset_gpio_(nreset_gpio),
       data_in_ep_num_(data_in_ep_num),
-      data_out_ep_num_(data_out_ep_num)
+      data_out_ep_num_(data_out_ep_num),
+      packet_count_(packet_count),
+      slots_(new PacketSlot[packet_count_]),
+      free_slots_storage_(new uint8_t[packet_count_]),
+      tx_slots_storage_(new uint8_t[packet_count_]),
+      free_slots_(packet_count_, free_slots_storage_),
+      tx_slots_(packet_count_, tx_slots_storage_)
 {
   (void)swd_.SetClockHz(swj_clock_hz_);
 
@@ -186,7 +192,22 @@ size_t DapLinkV2Class::GetMaxConfigSize() { return sizeof(desc_block_); }
 void DapLinkV2Class::BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num)
 {
   inited_ = false;
-  tx_busy_ = false;
+
+  out_slot_in_flight_ = -1;
+  in_slot_in_flight_ = -1;
+
+  free_slots_.Reset();
+  tx_slots_.Reset();
+
+  for (uint8_t i = 0; i < packet_count_; ++i)
+  {
+    slots_[i].rx_len = 0;
+    slots_[i].tx_len = 0;
+    slots_[i].state = PacketSlot::State::FREE;
+
+    // 初始化 free-slot 队列：0..packet_count_-1
+    (void)free_slots_.Push(i);
+  }
 
   interface_num_ = start_itf_num;
 
@@ -202,7 +223,7 @@ void DapLinkV2Class::BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_it
 
   // Configure endpoints
   // - Use upper bound; core will choose a valid max packet size <= this limit.
-  // - Keep double_buffer=false to preserve strict request/response sequencing.
+  // - Keep double_buffer=false; multi PACKET_COUNT is implemented in software slots.
   ep_data_out_->Configure(
       {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, false});
   ep_data_in_->Configure(
@@ -259,7 +280,12 @@ void DapLinkV2Class::BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_it
 void DapLinkV2Class::UnbindEndpoints(EndpointPool& endpoint_pool)
 {
   inited_ = false;
-  tx_busy_ = false;
+
+  out_slot_in_flight_ = -1;
+  in_slot_in_flight_ = -1;
+
+  free_slots_.Reset();
+  tx_slots_.Reset();
 
   dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
   dap_state_.transfer_abort = false;
@@ -312,49 +338,128 @@ void DapLinkV2Class::OnDataInCompleteStatic(bool in_isr, DapLinkV2Class* self,
 
 void DapLinkV2Class::OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
 {
-  (void)in_isr;
-
   if (!inited_ || !ep_data_in_ || !ep_data_out_)
   {
     return;
   }
 
-  // With OUT not double-buffered and only armed when idle, tx_busy_ should rarely hit.
-  // Keep a guard for safety.
-  if (tx_busy_)
+  const int8_t SLOT_I8 = out_slot_in_flight_;
+  out_slot_in_flight_ = -1;
+
+  if (SLOT_I8 < 0 || SLOT_I8 >= static_cast<int8_t>(packet_count_))
   {
+    ArmOutTransferIfIdle();
     return;
   }
+
+  const uint8_t SLOT = static_cast<uint8_t>(SLOT_I8);
+
+  // 优先持续接收：先尝试 arm 下一次 OUT（用 free_slots_ 中的其它 slot）
+  ArmOutTransferIfIdle();
 
   const auto* req = static_cast<const uint8_t*>(data.addr_);
   const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
 
-  // Empty packet -> keep receiving
+  // 空包：释放 slot 回 free
   if (!req || REQ_LEN == 0u)
   {
-    ArmOutTransferIfIdle();
+    slots_[SLOT].rx_len = 0u;
+    slots_[SLOT].tx_len = 0u;
+    slots_[SLOT].state = PacketSlot::State::FREE;
+    (void)free_slots_.Push(SLOT);
+
+    StartInIfIdle();
     return;
   }
 
-  uint16_t out_len = 0;
-  auto ans = ProcessOneCommand(in_isr, req, REQ_LEN, tx_buf_, MAX_RESP, out_len);
+  // data.addr_ 应为 slots_[slot].rx（由 TransferMultiBulk(rx) 传入）
+  slots_[SLOT].rx_len = REQ_LEN;
 
-  UNUSED(ans);
+  uint16_t out_len = 0u;
+  (void)ProcessOneCommand(in_isr, slots_[SLOT].rx, slots_[SLOT].rx_len, slots_[SLOT].tx,
+                          MAX_RESP, out_len);
 
-  tx_busy_ = true;
-  LibXR::RawData tx(tx_buf_, out_len);
-
-  if (ep_data_in_->TransferMultiBulk(tx) != ErrorCode::OK)
+  if (out_len == 0u)
   {
-    tx_busy_ = false;
-    ArmOutTransferIfIdle();
+    slots_[SLOT].tx[0] = 0xFFu;
+    out_len = 1u;
   }
+
+  slots_[SLOT].tx_len = out_len;
+  slots_[SLOT].state = PacketSlot::State::RESP_READY;
+
+  // 将 slot 放入响应队列（FIFO）
+  (void)tx_slots_.Push(SLOT);
+
+  StartInIfIdle();
 }
 
 void DapLinkV2Class::OnDataInComplete(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
 {
-  tx_busy_ = false;
+  const int8_t SLOT_I8 = in_slot_in_flight_;
+  in_slot_in_flight_ = -1;
+
+  if (SLOT_I8 >= 0 && SLOT_I8 < static_cast<int8_t>(packet_count_))
+  {
+    const uint8_t SLOT = static_cast<uint8_t>(SLOT_I8);
+    slots_[SLOT].rx_len = 0u;
+    slots_[SLOT].tx_len = 0u;
+    slots_[SLOT].state = PacketSlot::State::FREE;
+
+    // 发送完成，slot 回收进 free_slots_
+    (void)free_slots_.Push(SLOT);
+  }
+
   ArmOutTransferIfIdle();
+  StartInIfIdle();
+}
+
+// ============================================================================
+// Multi PACKET_COUNT helpers (Queue-based)
+// ============================================================================
+
+void DapLinkV2Class::StartInIfIdle()
+{
+  if (!inited_ || !ep_data_in_)
+  {
+    return;
+  }
+
+  uint8_t slot = 0u;
+  if (tx_slots_.Peek(slot) != ErrorCode::OK)
+  {
+    return;
+  }
+
+  if (slot >= packet_count_)
+  {
+    // 队列里出现非法 slot：丢弃
+    (void)tx_slots_.Pop(slot);
+    return;
+  }
+
+  if (slots_[slot].state != PacketSlot::State::RESP_READY)
+  {
+    // 队列/状态不同步：丢弃
+    (void)tx_slots_.Pop(slot);
+    return;
+  }
+
+  uint16_t len = slots_[slot].tx_len;
+  if (len == 0u)
+  {
+    slots_[slot].tx[0] = 0xFFu;
+    len = 1u;
+    slots_[slot].tx_len = 1u;
+  }
+
+  LibXR::RawData tx(slots_[slot].tx, len);
+  if (ep_data_in_->TransferMultiBulk(tx) == ErrorCode::OK)
+  {
+    (void)tx_slots_.Pop(slot);
+    in_slot_in_flight_ = static_cast<int8_t>(slot);
+    slots_[slot].state = PacketSlot::State::IN_IN_FLIGHT;
+  }
 }
 
 // ============================================================================
@@ -363,7 +468,7 @@ void DapLinkV2Class::OnDataInComplete(bool /*in_isr*/, LibXR::ConstRawData& /*da
 
 void DapLinkV2Class::ArmOutTransferIfIdle()
 {
-  if (!inited_ || tx_busy_ || !ep_data_out_)
+  if (!inited_ || !ep_data_out_)
   {
     return;
   }
@@ -373,7 +478,31 @@ void DapLinkV2Class::ArmOutTransferIfIdle()
     return;
   }
 
-  LibXR::RawData rx(rx_buf_, MAX_REQ);
+  // OUT 同时只能有一个 transfer in-flight
+  if (out_slot_in_flight_ != -1)
+  {
+    return;
+  }
+
+  uint8_t slot = 0u;
+  if (free_slots_.Pop(slot) != ErrorCode::OK)
+  {
+    // 无空槽：背压（不 re-arm OUT，主机会 NAK 后重试）
+    return;
+  }
+
+  if (slot >= packet_count_)
+  {
+    return;
+  }
+
+  slots_[slot].rx_len = 0u;
+  slots_[slot].tx_len = 0u;
+  slots_[slot].state = PacketSlot::State::OUT_IN_FLIGHT;
+
+  out_slot_in_flight_ = static_cast<int8_t>(slot);
+
+  LibXR::RawData rx(slots_[slot].rx, MAX_REQ);
   (void)ep_data_out_->TransferMultiBulk(rx);
 }
 
@@ -507,7 +636,7 @@ ErrorCode DapLinkV2Class::HandleInfo(bool /*in_isr*/, const uint8_t* req,
       return BuildInfoU8Response(resp[0], LibXR::USB::DapLinkV2Def::DAP_CAP_SWD, resp,
                                  resp_cap, out_len);
     case to_u8(LibXR::USB::DapLinkV2Def::InfoId::PACKET_COUNT):
-      return BuildInfoU8Response(resp[0], 1, resp, resp_cap, out_len);
+      return BuildInfoU8Response(resp[0], packet_count_, resp, resp_cap, out_len);
     case to_u8(LibXR::USB::DapLinkV2Def::InfoId::PACKET_SIZE):
       return BuildInfoU16Response(resp[0], ep_data_in_ ? ep_data_in_->MaxPacketSize() : 0,
                                   resp, resp_cap, out_len);
@@ -827,7 +956,6 @@ ErrorCode DapLinkV2Class::HandleResetTarget(bool in_isr, const uint8_t* /*req*/,
   }
 
   // 关键：无论是否实现 reset，都返回 DAP_OK；未实现则 Execute=0
-  // Key: Always return DAP_OK; if not implemented, Execute=0.
   resp[1] = DAP_OK;
   resp[2] = execute;
   out_len = 3u;
@@ -837,6 +965,7 @@ ErrorCode DapLinkV2Class::HandleResetTarget(bool in_isr, const uint8_t* /*req*/,
 // ============================================================================
 // SWJ / SWD handlers
 // ============================================================================
+
 ErrorCode DapLinkV2Class::HandleSWJPins(bool /*in_isr*/, const uint8_t* req,
                                         uint16_t req_len, uint8_t* resp,
                                         uint16_t resp_cap, uint16_t& out_len)
@@ -871,11 +1000,9 @@ ErrorCode DapLinkV2Class::HandleSWJPins(bool /*in_isr*/, const uint8_t* req,
   if ((PIN_SEL & LibXR::USB::DapLinkV2Def::DAP_SWJ_NRESET) != 0u)
   {
     const bool LEVEL_HIGH = ((PIN_OUT & LibXR::USB::DapLinkV2Def::DAP_SWJ_NRESET) != 0u);
-    // DriveReset updates last_nreset_level_high_ and shadow, and writes GPIO if present.
     DriveReset(LEVEL_HIGH);
   }
 
-  // Read helper: start from shadow; override nRESET with physical level if wired.
   auto read_pins = [&]() -> uint8_t
   {
     uint8_t pin_in = swj_shadow_;
@@ -896,9 +1023,6 @@ ErrorCode DapLinkV2Class::HandleSWJPins(bool /*in_isr*/, const uint8_t* req,
     return pin_in;
   };
 
-  // 2) PinWait: wait until (PinInput & PinSelect) matches (PinOut & PinSelect), or
-  // timeout. Since SWCLK/SWDIO are shadow-only now, their selected bits will already
-  // match immediately.
   uint8_t pin_in = 0u;
 
   if (wait_us == 0u || PIN_SEL == 0u)
@@ -987,18 +1111,15 @@ ErrorCode DapLinkV2Class::HandleSWJSequence(bool /*in_isr*/, const uint8_t* req,
     return ErrorCode::ARG_ERR;
   }
 
-  const uint8_t* data = &req[2];
+  const uint8_t* data_bits = &req[2];
 
-  // Delegate to Swd implementation (no RawMode / no pin-level control here)
-  const ErrorCode EC = swd_.SeqWriteBits(BIT_COUNT, data);
+  const ErrorCode EC = swd_.SeqWriteBits(BIT_COUNT, data_bits);
   if (EC != ErrorCode::OK)
   {
     resp[1] = to_u8(LibXR::USB::DapLinkV2Def::Status::ERROR);
-    // Keep transport-level OK so host still gets a valid response.
     return ErrorCode::OK;
   }
 
-  // Maintain shadow semantics: keep SWCLK=0, SWDIO=last bit
   swj_shadow_ = static_cast<uint8_t>(
       swj_shadow_ & static_cast<uint8_t>(~LibXR::USB::DapLinkV2Def::DAP_SWJ_SWCLK_TCK));
 
@@ -1006,7 +1127,7 @@ ErrorCode DapLinkV2Class::HandleSWJSequence(bool /*in_isr*/, const uint8_t* req,
   if (BIT_COUNT != 0u)
   {
     const uint32_t LAST_I = BIT_COUNT - 1u;
-    last_swdio = (((data[LAST_I / 8u] >> (LAST_I & 7u)) & 0x01u) != 0u);
+    last_swdio = (((data_bits[LAST_I / 8u] >> (LAST_I & 7u)) & 0x01u) != 0u);
   }
 
   if (last_swdio)
@@ -1034,7 +1155,6 @@ ErrorCode DapLinkV2Class::HandleSWDConfigure(bool /*in_isr*/, const uint8_t* /*r
 
   resp[0] = to_u8(LibXR::USB::DapLinkV2Def::CommandId::SWD_CONFIGURE);
 
-  // Best-effort parse (optional). Keep compatibility by returning OK.
   resp[1] = to_u8(LibXR::USB::DapLinkV2Def::Status::OK);
   out_len = 2u;
   return ErrorCode::OK;
@@ -1054,12 +1174,6 @@ ErrorCode DapLinkV2Class::HandleSWDSequence(bool /*in_isr*/, const uint8_t* req,
   resp[1] = DAP_OK;
   out_len = 2u;
 
-  // Req: [0]=0x1D [1]=SequenceCount [ ... sequences ... ]
-  // Each sequence:
-  //   INFO: [7]=Direction (1=input,0=output), [5:0]=cycles (0=>64)
-  //   If output: followed by ceil(cycles/8) bytes data (LSB-first)
-  //   If input : no data in request; response appends ceil(cycles/8) bytes data
-  //   (LSB-first)
   if (req_len < 2u)
   {
     resp[1] = DAP_ERROR;
@@ -1093,7 +1207,6 @@ ErrorCode DapLinkV2Class::HandleSWDSequence(bool /*in_isr*/, const uint8_t* req,
 
     if (!MODE_IN)
     {
-      // Output: data bytes are in request
       if (req_off + BYTES > req_len)
       {
         resp[1] = DAP_ERROR;
@@ -1101,21 +1214,19 @@ ErrorCode DapLinkV2Class::HandleSWDSequence(bool /*in_isr*/, const uint8_t* req,
         return ErrorCode::ARG_ERR;
       }
 
-      const uint8_t* data = &req[req_off];
+      const uint8_t* data_bits = &req[req_off];
       req_off = static_cast<uint16_t>(req_off + BYTES);
 
-      const ErrorCode EC = swd_.SeqWriteBits(cycles, data);
+      const ErrorCode EC = swd_.SeqWriteBits(cycles, data_bits);
       if (EC != ErrorCode::OK)
       {
         resp[1] = DAP_ERROR;
         out_len = 2u;
-        // Return OK so host gets a valid response packet
         return ErrorCode::OK;
       }
     }
     else
     {
-      // Input: captured data is appended to response
       if (resp_off + BYTES > resp_cap)
       {
         resp[1] = DAP_ERROR;
@@ -1185,10 +1296,6 @@ void DapLinkV2Class::SetTransferAbortFlag(bool on) { dap_state_.transfer_abort =
 // ============================================================================
 // DAP_Transfer / DAP_TransferBlock
 // ============================================================================
-
-// 说明：以下长函数保持原样；本 cpp 文件不补充函数级注释，hpp 中再统一给出接口说明。
-// Note: The following long functions are kept as-is; no function-level docs in this cpp.
-// HPP will carry API docs.
 
 ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
                                          uint16_t req_len, uint8_t* resp,
@@ -1263,15 +1370,14 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
   { return static_cast<uint16_t>(need_ts ? 8u : 4u); };
 
   uint8_t response_count = 0u;
-  uint8_t response_value = 0u;  // 与参考实现一致：未发生 transfer 时为 0
+  uint8_t response_value = 0u;
 
-  bool check_write = false;  // 是否需要末尾 RDBUFF check（用于 write fault 冲刷）
+  bool check_write = false;
 
-  // -------- posted-read pipeline state (AP read only) --------
   struct PendingApRead
   {
     bool valid = false;
-    bool need_ts = false;  // 该 AP read transfer 是否要求 timestamp
+    bool need_ts = false;
   } pending;
 
   auto emit_read_with_ts = [&](bool need_ts, uint32_t data) -> bool
@@ -1291,7 +1397,6 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     return true;
   };
 
-  // 通过读 DP_RDBUFF 完成 pending AP read（用于：序列结束/被非 AP-read 打断/异常收尾）
   auto complete_pending_by_rdbuff = [&]() -> bool
   {
     if (!pending.valid)
@@ -1330,20 +1435,14 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     pending.valid = false;
     pending.need_ts = false;
 
-    // 读过 RDBUFF，等价于做过一次“posted/fault flush”
     check_write = false;
-
-    // 成功路径保持 OK
     response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
     return true;
   };
 
-  // 在处理“非 AP normal read”之前，必须先把 pending flush 掉（保证响应顺序与 pipeline
-  // 不紊乱）
   auto flush_pending_if_any = [&]() -> bool
   { return pending.valid ? complete_pending_by_rdbuff() : true; };
 
-  // -------- main loop --------
   for (uint32_t i = 0; i < COUNT; ++i)
   {
     if (req_off >= req_len)
@@ -1364,7 +1463,6 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     const bool MATCH_MASK =
         ((RQ & LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_MASK) != 0u);
 
-    // 规范：timestamp 不能与 match 位组合
     if (TS && (MATCH_VALUE || MATCH_MASK))
     {
       response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -1376,8 +1474,6 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
 
     if (!RNW)
     {
-      // ---------------- WRITE ----------------
-      // 写/配置类操作不参与 AP posted pipeline；先 flush pending
       if (!flush_pending_if_any())
       {
         break;
@@ -1397,7 +1493,7 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
       {
         match_mask_ = wdata;
         response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
-        response_count++;  // MATCH_MASK 视为成功 transfer
+        response_count++;
         continue;
       }
 
@@ -1436,12 +1532,8 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     }
     else
     {
-      // ---------------- READ ----------------
-
       if (MATCH_VALUE)
       {
-        // MATCH_VALUE 不回传 data；为简化语义，先 flush pending，再走原逻辑（AP read 仍用
-        // ApReadTxn）
         if (!flush_pending_if_any())
         {
           break;
@@ -1465,10 +1557,9 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         {
           if (AP)
           {
-            ec = swd_.ApReadTxn(ADDR2B, rdata, ack);  // 内含 RDBUFF
+            ec = swd_.ApReadTxn(ADDR2B, rdata, ack);
             if (ec == ErrorCode::OK && ack == LibXR::Debug::SwdProtocol::Ack::OK)
             {
-              // ApReadTxn 读过 RDBUFF，等价 flush
               check_write = false;
             }
           }
@@ -1512,7 +1603,6 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
           response_value =
               static_cast<uint8_t>(LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK |
                                    LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MISMATCH);
-          // MISMATCH 不计入 response_count
           break;
         }
 
@@ -1521,10 +1611,8 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         continue;
       }
 
-      // ---- Normal read ----
       if (!AP)
       {
-        // DP read：不参与 pipeline；先 flush pending
         if (!flush_pending_if_any())
         {
           break;
@@ -1561,11 +1649,8 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         continue;
       }
 
-      // AP normal read：posted-read pipeline
       if (!pending.valid)
       {
-        // 这是该段连续 AP reads 的第一笔：发起一次 AP read（posted），丢弃其 returned
-        // posted data
         uint32_t dummy_posted = 0u;
         ec = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
 
@@ -1577,20 +1662,16 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         if (ec != ErrorCode::OK)
         {
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-          {
-            break;
-          }
+          break;
         }
 
         pending.valid = true;
         pending.need_ts = TS;
 
-        // 该 transfer 尚未“完成”（数据要等下一次 AP read 或末尾 RDBUFF）
         response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
       }
       else
       {
-        // pending 存在：本次 AP read 的 returned posted data = 上一笔 AP read 的结果
         if (!ensure_space(bytes_for_read(pending.need_ts)))
         {
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -1603,25 +1684,19 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         const uint8_t CUR_V = ack_to_dap(ack);
         if (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK || ec != ErrorCode::OK)
         {
-          // 本次 AP read 没跑通：尽量用 RDBUFF 把 pending 补齐（否则 count 会少一笔且
-          // pipeline 残留）
           const uint8_t PROOR_FAIL = (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
                                          ? CUR_V
                                          : LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
 
           if (!complete_pending_by_rdbuff())
           {
-            // pending 本身失败：按“更早失败”返回（complete_pending_by_rdbuff 已写
-            // response_value）
             break;
           }
 
-          // pending 补齐成功：保留“当前失败”
           response_value = PROOR_FAIL;
           break;
         }
 
-        // 本次 AP read 成功：先回传 pending（用 posted_prev），再把“本次”设为新的 pending
         if (!emit_read_with_ts(pending.need_ts, posted_prev))
         {
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -1642,21 +1717,16 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     }
   }
 
-  // 若仍有 pending AP read：
-  // - 若当前 response_value=OK：正常收尾（读一次 RDBUFF）
-  // - 若当前 response_value!=OK：尝试先补齐 pending；补齐成功则保留原失败，否则以 pending
-  // 失败为准
   if (pending.valid)
   {
     const uint8_t PRIOR_FAIL = response_value;
 
     if (!complete_pending_by_rdbuff())
     {
-      // 以 pending 的失败为准（已写 response_value）
+      // keep pending fail
     }
     else
     {
-      // pending 补齐成功：保留原失败（如果原本就是 OK 则维持 OK）
       if (PRIOR_FAIL != 0u && PRIOR_FAIL != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
       {
         response_value = PRIOR_FAIL;
@@ -1664,8 +1734,6 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     }
   }
 
-  // 末尾写入冲刷：若全部 OK 且发生过真实 write，且期间未通过 RDBUFF flush，则做一次
-  // DP_RDBUFF read (discard)
   if (response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && check_write)
   {
     uint32_t dummy = 0u;
@@ -1693,8 +1761,6 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
                                               uint16_t req_len, uint8_t* resp,
                                               uint16_t resp_cap, uint16_t& out_len)
 {
-  // Req:  [0]=0x06 [1]=index [2..3]=count [4]=request [5..]=data(write)
-  // Resp: [0]=0x06 [1..2]=done [3]=resp [4..]=data(read)
   if (!resp || resp_cap < 4u)
   {
     out_len = 0u;
@@ -1725,7 +1791,6 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
 
   const uint8_t DAP_RQ = req[4];
 
-  // TransferBlock does not support match or timestamp
   if ((DAP_RQ & (LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_VALUE |
                  LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_MASK)) != 0u)
   {
@@ -1738,7 +1803,6 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
     return ErrorCode::NOT_SUPPORT;
   }
 
-  // Count==0: return OK
   if (count == 0u)
   {
     const uint16_t DONE0 = 0u;
@@ -1758,7 +1822,6 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
   uint16_t req_off = 5u;
   uint16_t resp_off = 4u;
 
-  // WRITE path: keep original behavior
   if (!RNW)
   {
     for (uint32_t i = 0; i < count; ++i)
@@ -1813,10 +1876,8 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
     return ErrorCode::OK;
   }
 
-  // READ path
   if (!AP)
   {
-    // DP read: keep original behavior
     for (uint32_t i = 0; i < count; ++i)
     {
       LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
@@ -1861,12 +1922,10 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
     return ErrorCode::OK;
   }
 
-  // AP read: posted-read pipeline
   {
     LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
     ErrorCode ec = ErrorCode::OK;
 
-    // 先发第一笔 AP read（posted），其 returned posted data 丢弃
     uint32_t dummy_posted = 0u;
     ec = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
     xresp = MapAckToDapResp(ack);
@@ -1886,7 +1945,6 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
       goto out_ap_read;  // NOLINT
     }
 
-    // i=1..COUNT-1：每次 AP read 返回上一笔数据
     for (uint32_t i = 1; i < count; ++i)
     {
       if (resp_off + 4u > resp_cap)
@@ -1907,7 +1965,6 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
 
       if (ack != LibXR::Debug::SwdProtocol::Ack::OK || ec != ErrorCode::OK)
       {
-        // 当前失败：尽量用 RDBUFF 把上一笔补齐（done 会更准确）
         if (resp_off + 4u <= resp_cap)
         {
           uint32_t last = 0u;
@@ -1919,11 +1976,10 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
           {
             Memory::FastCopy(&resp[resp_off], &last, sizeof(last));
             resp_off = static_cast<uint16_t>(resp_off + 4u);
-            done = static_cast<uint16_t>(i);  // 成功补齐了第 i-1 笔 => done=i
+            done = static_cast<uint16_t>(i);
           }
           else
           {
-            // 更早的 pending 失败：以它为准
             xresp = V2;
             if (EC2 != ErrorCode::OK)
             {
@@ -1933,7 +1989,6 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
           }
         }
 
-        // pending 已补齐：保留“当前失败”
         xresp = CUR;
         if (ec != ErrorCode::OK)
         {
@@ -1942,14 +1997,12 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
         goto out_ap_read;  // NOLINT
       }
 
-      // 当前成功：posted_prev 是上一笔(i-1)的数据
       Memory::FastCopy(&resp[resp_off], &posted_prev, sizeof(posted_prev));
       resp_off = static_cast<uint16_t>(resp_off + 4u);
-      done = static_cast<uint16_t>(i);  // 已完成 i 笔（0..i-1）
+      done = static_cast<uint16_t>(i);
       xresp = CUR;
     }
 
-    // 收尾：读一次 RDBUFF 取回最后一笔
     if (resp_off + 4u > resp_cap)
     {
       xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -1994,7 +2047,6 @@ void DapLinkV2Class::DriveReset(bool release)
 {
   last_nreset_level_high_ = release;
 
-  // Update shadow regardless of whether GPIO exists
   if (release)
   {
     swj_shadow_ |= LibXR::USB::DapLinkV2Def::DAP_SWJ_NRESET;
