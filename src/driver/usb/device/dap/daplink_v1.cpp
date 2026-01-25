@@ -1,242 +1,74 @@
-#pragma once
+#include "daplink_v1.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
 #include "daplink_v1_def.hpp"
-#include "debug/swd.hpp"
-#include "gpio.hpp"
-#include "hid.hpp"
 #include "libxr_def.hpp"
-#include "libxr_type.hpp"
 #include "timebase.hpp"
 
 namespace LibXR::USB
 {
 
-static constexpr uint8_t DAPLINK_V1_REPORT_DESC[] = {
-    0x06, 0x00, 0xFF,  // Usage Page (Vendor Defined 0xFF00)
-    0x09, 0x01,        // Usage (0x01)
-    0xA1, 0x01,        // Collection (Application)
-    0x15, 0x00,        // Logical Minimum (0)
-    0x26, 0xFF, 0x00,  // Logical Maximum (255)
-    0x75, 0x08,        // Report Size (8)
-    0x95, 0x40,        // Report Count (64)
-    0x09, 0x01,        // Usage (0x01)
-    0x81, 0x02,        // Input (Data, Variable, Absolute)
-    0x95, 0x40,        // Report Count (64)
-    0x09, 0x01,        // Usage (0x01)
-    0x91, 0x02,        // Output (Data, Variable, Absolute)
-    0x95, 0x40,        // Report Count (64)
-    0x09, 0x01,        // Usage (0x01)
-    0xB1, 0x02,        // Feature (Data, Variable, Absolute)
-    0xC0               // End Collection
-};
-
-template <typename SwdPort>
-class DapLinkV1Class
-    : public HID<sizeof(DAPLINK_V1_REPORT_DESC), DapLinkV1Def::MAX_REQUEST_SIZE,
-                 DapLinkV1Def::MAX_RESPONSE_SIZE>
+namespace
 {
- public:
-  struct InfoStrings
+template <typename E>
+static constexpr uint8_t to_u8(E e)
+{
+  return static_cast<uint8_t>(e);
+}
+
+static constexpr uint8_t DAP_OK = 0x00u;
+static constexpr uint8_t DAP_ERROR = 0xFFu;
+
+static inline ErrorCode build_unknown_cmd_response(uint8_t* resp, uint16_t cap,
+                                                   uint16_t& out_len)
+{
+  if (!resp || cap < 1u)
   {
-    const char* vendor = nullptr;
-    const char* product = nullptr;
-    const char* serial = nullptr;
-    const char* firmware_ver = nullptr;
-
-    const char* device_vendor = nullptr;
-    const char* device_name = nullptr;
-    const char* board_vendor = nullptr;
-    const char* board_name = nullptr;
-    const char* product_fw_ver = nullptr;
-  };
-
-  explicit DapLinkV1Class(SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
-                          Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
-                          Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO);
-
-  ~DapLinkV1Class() override = default;
-
-  DapLinkV1Class(const DapLinkV1Class&) = delete;
-  DapLinkV1Class& operator=(const DapLinkV1Class&) = delete;
-
-  void SetInfoStrings(const InfoStrings& info);
-  const LibXR::USB::DapLinkV1Def::State& GetState() const;
-  bool IsInited() const;
-
- protected:
-  ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) override;
-  ConstRawData GetReportDesc() override;
-
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
-                     bool in_isr) override;
-  void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override;
-
-  void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data) override;
-  void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data) override;
-
- private:
-  static void OnDataOutCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                      LibXR::ConstRawData& data);
-  static void OnDataInCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                     LibXR::ConstRawData& data);
-
-  void ArmOutTransferIfIdle();
-
-  ErrorCode ProcessOneCommand(bool in_isr, const uint8_t* req, uint16_t req_len,
-                              uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  void BuildNotSupportResponse(uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-
-  ErrorCode HandleInfo(bool in_isr, const uint8_t* req, uint16_t req_len, uint8_t* resp,
-                       uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleHostStatus(bool in_isr, const uint8_t* req, uint16_t req_len,
-                             uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleConnect(bool in_isr, const uint8_t* req, uint16_t req_len,
-                          uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleDisconnect(bool in_isr, const uint8_t* req, uint16_t req_len,
-                             uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleTransferConfigure(bool in_isr, const uint8_t* req, uint16_t req_len,
-                                    uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleTransfer(bool in_isr, const uint8_t* req, uint16_t req_len,
-                           uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleTransferBlock(bool in_isr, const uint8_t* req, uint16_t req_len,
-                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleTransferAbort(bool in_isr, const uint8_t* req, uint16_t req_len,
-                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleWriteABORT(bool in_isr, const uint8_t* req, uint16_t req_len,
-                             uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleDelay(bool in_isr, const uint8_t* req, uint16_t req_len, uint8_t* resp,
-                        uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleResetTarget(bool in_isr, const uint8_t* req, uint16_t req_len,
-                              uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleSWJPins(bool in_isr, const uint8_t* req, uint16_t req_len,
-                          uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleSWJClock(bool in_isr, const uint8_t* req, uint16_t req_len,
-                           uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleSWJSequence(bool in_isr, const uint8_t* req, uint16_t req_len,
-                              uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleSWDConfigure(bool in_isr, const uint8_t* req, uint16_t req_len,
-                               uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleSWDSequence(bool in_isr, const uint8_t* req, uint16_t req_len,
-                              uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleQueueCommands(bool in_isr, const uint8_t* req, uint16_t req_len,
-                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode HandleExecuteCommands(bool in_isr, const uint8_t* req, uint16_t req_len,
-                                  uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
-
-  ErrorCode BuildInfoStringResponse(uint8_t cmd, const char* str, uint8_t* resp,
-                                    uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode BuildInfoU8Response(uint8_t cmd, uint8_t val, uint8_t* resp,
-                                uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode BuildInfoU16Response(uint8_t cmd, uint16_t val, uint8_t* resp,
-                                 uint16_t resp_cap, uint16_t& out_len);
-  ErrorCode BuildInfoU32Response(uint8_t cmd, uint32_t val, uint8_t* resp,
-                                 uint16_t resp_cap, uint16_t& out_len);
-
-  uint8_t MapAckToDapResp(LibXR::Debug::SwdProtocol::Ack ack) const;
-  void SetTransferAbortFlag(bool on);
-
-  void DriveReset(bool release);
-  void DelayUsIfAllowed(bool in_isr, uint32_t us);
-
- private:
-  template <typename E>
-  static constexpr uint8_t to_u8(E e)
-  {
-    return static_cast<uint8_t>(e);
+    out_len = 0u;
+    return ErrorCode::NOT_FOUND;
   }
+  resp[0] = 0xFFu;
+  out_len = 1u;
+  return ErrorCode::OK;
+}
 
-  static constexpr uint8_t DAP_OK = 0x00u;
-  static constexpr uint8_t DAP_ERROR = 0xFFu;
-
-  static inline ErrorCode build_unknown_cmd_response(uint8_t* resp, uint16_t cap,
-                                                     uint16_t& out_len)
+static inline ErrorCode build_cmd_status_response(uint8_t cmd, uint8_t status,
+                                                  uint8_t* resp, uint16_t cap,
+                                                  uint16_t& out_len)
+{
+  if (!resp || cap < 2u)
   {
-    if (!resp || cap < 1u)
-    {
-      out_len = 0u;
-      return ErrorCode::NOT_FOUND;
-    }
-    resp[0] = 0xFFu;
-    out_len = 1u;
-    return ErrorCode::OK;
+    out_len = 0u;
+    return ErrorCode::NOT_FOUND;
   }
+  resp[0] = cmd;
+  resp[1] = status;
+  out_len = 2u;
+  return ErrorCode::OK;
+}
 
-  static inline ErrorCode build_cmd_status_response(uint8_t cmd, uint8_t status,
-                                                    uint8_t* resp, uint16_t cap,
-                                                    uint16_t& out_len)
-  {
-    if (!resp || cap < 2u)
-    {
-      out_len = 0u;
-      return ErrorCode::NOT_FOUND;
-    }
-    resp[0] = cmd;
-    resp[1] = status;
-    out_len = 2u;
-    return ErrorCode::OK;
-  }
+}  // namespace
 
-  static constexpr uint16_t MAX_REQ = DapLinkV1Def::MAX_REQUEST_SIZE;
-  static constexpr uint16_t MAX_RESP = DapLinkV1Def::MAX_RESPONSE_SIZE;
-
-  SwdPort& swd_;
-  LibXR::GPIO* nreset_gpio_ = nullptr;
-
-  uint8_t swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
-                                             DapLinkV1Def::DAP_SWJ_NRESET);
-  bool last_nreset_level_high_ = true;
-
-  LibXR::USB::DapLinkV1Def::State dap_state_{};
-  InfoStrings info_{"XRobot", "DAPLinkV1", "00000001", "1.0.0", "XRUSB",
-                    "XRDAP",  "XRobot",    "DAP_DEMO", "0.1.0"};
-
-  uint32_t swj_clock_hz_ = 1000000u;
-  uint32_t match_mask_ = 0xFFFFFFFFu;
-
-  Endpoint* ep_in_ = nullptr;   // Cached HID IN endpoint
-  Endpoint* ep_out_ = nullptr;  // Cached HID OUT endpoint
-
-  LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
-  LibXR::Callback<LibXR::ConstRawData&> on_data_in_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
-
-  bool inited_ = false;
-};
-
-template <typename SwdPort>
-DapLinkV1Class<SwdPort>::DapLinkV1Class(SwdPort& swd_link, LibXR::GPIO* nreset_gpio,
-                                        Endpoint::EPNumber in_ep_num,
-                                        Endpoint::EPNumber out_ep_num)
+DapLinkV1Class::DapLinkV1Class(LibXR::Debug::Swd& swd_link, LibXR::GPIO* nreset_gpio,
+                               Endpoint::EPNumber in_ep_num,
+                               Endpoint::EPNumber out_ep_num)
     : HID(true, 1, 1, in_ep_num, out_ep_num), swd_(swd_link), nreset_gpio_(nreset_gpio)
 {
   (void)swd_.SetClockHz(swj_clock_hz_);
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::SetInfoStrings(const InfoStrings& info)
-{
-  info_ = info;
-}
+void DapLinkV1Class::SetInfoStrings(const InfoStrings& info) { info_ = info; }
 
-template <typename SwdPort>
-const LibXR::USB::DapLinkV1Def::State& DapLinkV1Class<SwdPort>::GetState() const
+const LibXR::USB::DapLinkV1Def::State& DapLinkV1Class::GetState() const
 {
   return dap_state_;
 }
 
-template <typename SwdPort>
-bool DapLinkV1Class<SwdPort>::IsInited() const
-{
-  return inited_;
-}
+bool DapLinkV1Class::IsInited() const { return inited_; }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::WriteDeviceDescriptor(DeviceDescriptor& header)
+ErrorCode DapLinkV1Class::WriteDeviceDescriptor(DeviceDescriptor& header)
 {
   header.data_.bDeviceClass = DeviceDescriptor::ClassID::HID;
   header.data_.bDeviceSubClass = 0;
@@ -244,38 +76,17 @@ ErrorCode DapLinkV1Class<SwdPort>::WriteDeviceDescriptor(DeviceDescriptor& heade
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ConstRawData DapLinkV1Class<SwdPort>::GetReportDesc()
+ConstRawData DapLinkV1Class::GetReportDesc()
 {
   return ConstRawData{DAPLINK_V1_REPORT_DESC, sizeof(DAPLINK_V1_REPORT_DESC)};
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool,
-                                            uint8_t start_itf_num, bool in_isr)
+void DapLinkV1Class::BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num)
 {
-  HID::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
-
-  ep_in_ = GetInEndpoint();
-  ep_out_ = GetOutEndpoint();
-
-  if (ep_in_ != nullptr)
-  {
-    // Double buffer splits RawData into two halves; ensure EP IN buffer >= 2 * MAX_RESP.
-    ep_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, MAX_RESP, true});
-    ep_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
-  }
-
-  if (ep_out_ != nullptr)
-  {
-    // Double buffer splits RawData into two halves; ensure EP OUT buffer >= 2 * MAX_REQ.
-    ep_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT, MAX_REQ, true});
-    ep_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
-  }
+  HID::BindEndpoints(endpoint_pool, start_itf_num);
 
   inited_ = true;
+  tx_busy_ = false;
   match_mask_ = 0xFFFFFFFFu;
 
   dap_state_ = {};
@@ -288,22 +99,17 @@ void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool,
   last_nreset_level_high_ = true;
   swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
                                      DapLinkV1Def::DAP_SWJ_NRESET);
-
-  ArmOutTransferIfIdle();
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr)
+void DapLinkV1Class::UnbindEndpoints(EndpointPool& endpoint_pool)
 {
   inited_ = false;
+  tx_busy_ = false;
 
   dap_state_.debug_port = LibXR::USB::DapLinkV1Def::DebugPort::DISABLED;
   dap_state_.transfer_abort = false;
 
-  HID::UnbindEndpoints(endpoint_pool, in_isr);
-
-  ep_in_ = nullptr;
-  ep_out_ = nullptr;
+  HID::UnbindEndpoints(endpoint_pool);
 
   swd_.Close();
 
@@ -312,30 +118,9 @@ void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool, bool 
                                      DapLinkV1Def::DAP_SWJ_NRESET);
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataOutCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                                      LibXR::ConstRawData& data)
+void DapLinkV1Class::OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
 {
-  if (self && self->inited_)
-  {
-    self->OnDataOutComplete(in_isr, data);
-  }
-}
-
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataInCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                                     LibXR::ConstRawData& data)
-{
-  if (self && self->inited_)
-  {
-    self->OnDataInComplete(in_isr, data);
-  }
-}
-
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
-{
-  if (!inited_ || !ep_in_ || !ep_out_)
+  if (!inited_ || tx_busy_)
   {
     return;
   }
@@ -343,69 +128,33 @@ void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr, LibXR::ConstRawData
   const auto* REQ = static_cast<const uint8_t*>(data.addr_);
   const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
 
-  auto tx_buff = ep_in_->GetBuffer();
-  const uint16_t RESP_CAP = static_cast<uint16_t>(tx_buff.size_);
-  const uint16_t TX_LEN = (RESP_CAP < MAX_RESP) ? RESP_CAP : MAX_RESP;
-
-  if (ep_in_->GetState() == Endpoint::State::IDLE)
+  if (!REQ || REQ_LEN == 0u)
   {
-    ArmOutTransferIfIdle();
+    return;
   }
 
-  Memory::FastSet(tx_buff.addr_, 0, RESP_CAP);
   uint16_t out_len = 0u;
-  auto ans = ProcessOneCommand(
-      in_isr, REQ, REQ_LEN, reinterpret_cast<uint8_t*>(tx_buff.addr_), RESP_CAP, out_len);
+  Memory::FastSet(tx_buf_, 0, MAX_RESP);
+  auto ans = ProcessOneCommand(in_isr, REQ, REQ_LEN, tx_buf_, MAX_RESP, out_len);
   UNUSED(ans);
-  UNUSED(out_len);
 
-  if (ep_in_->GetState() == Endpoint::State::IDLE)
+  tx_busy_ = true;
+  if (SendInputReport(ConstRawData{tx_buf_, MAX_RESP}) != ErrorCode::OK)
   {
-    ep_in_->Transfer(TX_LEN);
-    ep_in_->SetActiveLength(0);
-  }
-  else
-  {
-    ep_in_->SetActiveLength(TX_LEN);
+    tx_busy_ = false;
   }
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataInComplete(bool in_isr, LibXR::ConstRawData& data)
+void DapLinkV1Class::OnDataInComplete(bool in_isr, LibXR::ConstRawData& data)
 {
   UNUSED(in_isr);
   UNUSED(data);
-
-  auto act_len = ep_in_->GetActiveLength();
-  if (act_len > 0)
-  {
-    ep_in_->Transfer(act_len);
-    ep_in_->SetActiveLength(0);
-  }
-
-  ArmOutTransferIfIdle();
+  tx_busy_ = false;
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::ArmOutTransferIfIdle()
-{
-  if (!inited_ || !ep_out_)
-  {
-    return;
-  }
-
-  if (ep_out_->GetState() != Endpoint::State::IDLE)
-  {
-    return;
-  }
-
-  (void)ep_out_->Transfer(ep_out_->MaxTransferSize());
-}
-
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::ProcessOneCommand(bool in_isr, const uint8_t* req,
-                                                     uint16_t req_len, uint8_t* resp,
-                                                     uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::ProcessOneCommand(bool in_isr, const uint8_t* req,
+                                            uint16_t req_len, uint8_t* resp,
+                                            uint16_t resp_cap, uint16_t& out_len)
 {
   out_len = 0u;
 
@@ -464,9 +213,8 @@ ErrorCode DapLinkV1Class<SwdPort>::ProcessOneCommand(bool in_isr, const uint8_t*
   }
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::BuildNotSupportResponse(uint8_t* resp, uint16_t resp_cap,
-                                                      uint16_t& out_len)
+void DapLinkV1Class::BuildNotSupportResponse(uint8_t* resp, uint16_t resp_cap,
+                                             uint16_t& out_len)
 {
   if (!resp || resp_cap < 1u)
   {
@@ -477,10 +225,9 @@ void DapLinkV1Class<SwdPort>::BuildNotSupportResponse(uint8_t* resp, uint16_t re
   out_len = 1u;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleInfo(bool /*in_isr*/, const uint8_t* req,
-                                              uint16_t req_len, uint8_t* resp,
-                                              uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleInfo(bool /*in_isr*/, const uint8_t* req,
+                                     uint16_t req_len, uint8_t* resp, uint16_t resp_cap,
+                                     uint16_t& out_len)
 {
   if (req_len < 2u)
   {
@@ -534,11 +281,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleInfo(bool /*in_isr*/, const uint8_t* re
   }
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::BuildInfoStringResponse(uint8_t cmd, const char* str,
-                                                           uint8_t* resp,
-                                                           uint16_t resp_cap,
-                                                           uint16_t& out_len)
+ErrorCode DapLinkV1Class::BuildInfoStringResponse(uint8_t cmd, const char* str,
+                                                  uint8_t* resp, uint16_t resp_cap,
+                                                  uint16_t& out_len)
 {
   resp[0] = cmd;
   resp[1] = 0u;
@@ -564,10 +309,8 @@ ErrorCode DapLinkV1Class<SwdPort>::BuildInfoStringResponse(uint8_t cmd, const ch
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::BuildInfoU8Response(uint8_t cmd, uint8_t val,
-                                                       uint8_t* resp, uint16_t resp_cap,
-                                                       uint16_t& out_len)
+ErrorCode DapLinkV1Class::BuildInfoU8Response(uint8_t cmd, uint8_t val, uint8_t* resp,
+                                              uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 3u)
   {
@@ -581,10 +324,8 @@ ErrorCode DapLinkV1Class<SwdPort>::BuildInfoU8Response(uint8_t cmd, uint8_t val,
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::BuildInfoU16Response(uint8_t cmd, uint16_t val,
-                                                        uint8_t* resp, uint16_t resp_cap,
-                                                        uint16_t& out_len)
+ErrorCode DapLinkV1Class::BuildInfoU16Response(uint8_t cmd, uint16_t val, uint8_t* resp,
+                                               uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 4u)
   {
@@ -598,10 +339,8 @@ ErrorCode DapLinkV1Class<SwdPort>::BuildInfoU16Response(uint8_t cmd, uint16_t va
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::BuildInfoU32Response(uint8_t cmd, uint32_t val,
-                                                        uint8_t* resp, uint16_t resp_cap,
-                                                        uint16_t& out_len)
+ErrorCode DapLinkV1Class::BuildInfoU32Response(uint8_t cmd, uint32_t val, uint8_t* resp,
+                                               uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 6u)
   {
@@ -615,11 +354,9 @@ ErrorCode DapLinkV1Class<SwdPort>::BuildInfoU32Response(uint8_t cmd, uint32_t va
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleHostStatus(bool /*in_isr*/,
-                                                    const uint8_t* /*req*/,
-                                                    uint16_t /*req_len*/, uint8_t* resp,
-                                                    uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleHostStatus(bool /*in_isr*/, const uint8_t* /*req*/,
+                                           uint16_t /*req_len*/, uint8_t* resp,
+                                           uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -632,10 +369,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleHostStatus(bool /*in_isr*/,
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleConnect(bool /*in_isr*/, const uint8_t* req,
-                                                 uint16_t req_len, uint8_t* resp,
-                                                 uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleConnect(bool /*in_isr*/, const uint8_t* req,
+                                        uint16_t req_len, uint8_t* resp,
+                                        uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -670,11 +406,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleConnect(bool /*in_isr*/, const uint8_t*
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleDisconnect(bool /*in_isr*/,
-                                                    const uint8_t* /*req*/,
-                                                    uint16_t /*req_len*/, uint8_t* resp,
-                                                    uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleDisconnect(bool /*in_isr*/, const uint8_t* /*req*/,
+                                           uint16_t /*req_len*/, uint8_t* resp,
+                                           uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -692,10 +426,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleDisconnect(bool /*in_isr*/,
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleTransferConfigure(
-    bool /*in_isr*/, const uint8_t* req, uint16_t req_len, uint8_t* resp,
-    uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleTransferConfigure(bool /*in_isr*/, const uint8_t* req,
+                                                  uint16_t req_len, uint8_t* resp,
+                                                  uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -733,12 +466,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransferConfigure(
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleTransferAbort(bool /*in_isr*/,
-                                                       const uint8_t* /*req*/,
-                                                       uint16_t /*req_len*/,
-                                                       uint8_t* resp, uint16_t resp_cap,
-                                                       uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleTransferAbort(bool /*in_isr*/, const uint8_t* /*req*/,
+                                              uint16_t /*req_len*/, uint8_t* resp,
+                                              uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -754,10 +484,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransferAbort(bool /*in_isr*/,
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleWriteABORT(bool /*in_isr*/, const uint8_t* req,
-                                                    uint16_t req_len, uint8_t* resp,
-                                                    uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleWriteABORT(bool /*in_isr*/, const uint8_t* req,
+                                           uint16_t req_len, uint8_t* resp,
+                                           uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -787,10 +516,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleWriteABORT(bool /*in_isr*/, const uint8
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleDelay(bool /*in_isr*/, const uint8_t* req,
-                                               uint16_t req_len, uint8_t* resp,
-                                               uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleDelay(bool /*in_isr*/, const uint8_t* req,
+                                      uint16_t req_len, uint8_t* resp, uint16_t resp_cap,
+                                      uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -817,10 +545,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleDelay(bool /*in_isr*/, const uint8_t* r
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleResetTarget(bool in_isr, const uint8_t* /*req*/,
-                                                     uint16_t /*req_len*/, uint8_t* resp,
-                                                     uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleResetTarget(bool in_isr, const uint8_t* /*req*/,
+                                            uint16_t /*req_len*/, uint8_t* resp,
+                                            uint16_t resp_cap, uint16_t& out_len)
 {
   if (!resp || resp_cap < 3u)
   {
@@ -846,10 +573,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleResetTarget(bool in_isr, const uint8_t*
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleSWJPins(bool /*in_isr*/, const uint8_t* req,
-                                                 uint16_t req_len, uint8_t* resp,
-                                                 uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleSWJPins(bool /*in_isr*/, const uint8_t* req,
+                                        uint16_t req_len, uint8_t* resp,
+                                        uint16_t resp_cap, uint16_t& out_len)
 {
   if (!resp || resp_cap < 2u)
   {
@@ -877,7 +603,8 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWJPins(bool /*in_isr*/, const uint8_t*
 
   if ((PIN_SEL & LibXR::USB::DapLinkV1Def::DAP_SWJ_NRESET) != 0u)
   {
-    const bool LEVEL_HIGH = ((PIN_OUT & LibXR::USB::DapLinkV1Def::DAP_SWJ_NRESET) != 0u);
+    const bool LEVEL_HIGH =
+        ((PIN_OUT & LibXR::USB::DapLinkV1Def::DAP_SWJ_NRESET) != 0u);
     DriveReset(LEVEL_HIGH);
   }
 
@@ -927,10 +654,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWJPins(bool /*in_isr*/, const uint8_t*
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleSWJClock(bool /*in_isr*/, const uint8_t* req,
-                                                  uint16_t req_len, uint8_t* resp,
-                                                  uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleSWJClock(bool /*in_isr*/, const uint8_t* req,
+                                         uint16_t req_len, uint8_t* resp,
+                                         uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -958,10 +684,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWJClock(bool /*in_isr*/, const uint8_t
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleSWJSequence(bool /*in_isr*/, const uint8_t* req,
-                                                     uint16_t req_len, uint8_t* resp,
-                                                     uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleSWJSequence(bool /*in_isr*/, const uint8_t* req,
+                                            uint16_t req_len, uint8_t* resp,
+                                            uint16_t resp_cap, uint16_t& out_len)
 {
   if (!resp || resp_cap < 2u)
   {
@@ -1023,12 +748,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWJSequence(bool /*in_isr*/, const uint
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleSWDConfigure(bool /*in_isr*/,
-                                                      const uint8_t* /*req*/,
-                                                      uint16_t /*req_len*/, uint8_t* resp,
-                                                      uint16_t resp_cap,
-                                                      uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleSWDConfigure(bool /*in_isr*/, const uint8_t* /*req*/,
+                                             uint16_t /*req_len*/, uint8_t* resp,
+                                             uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
   {
@@ -1042,10 +764,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWDConfigure(bool /*in_isr*/,
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleSWDSequence(bool /*in_isr*/, const uint8_t* req,
-                                                     uint16_t req_len, uint8_t* resp,
-                                                     uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleSWDSequence(bool /*in_isr*/, const uint8_t* req,
+                                            uint16_t req_len, uint8_t* resp,
+                                            uint16_t resp_cap, uint16_t& out_len)
 {
   if (!req || !resp || resp_cap < 2u)
   {
@@ -1133,32 +854,25 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWDSequence(bool /*in_isr*/, const uint
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleQueueCommands(bool /*in_isr*/,
-                                                       const uint8_t* /*req*/,
-                                                       uint16_t /*req_len*/,
-                                                       uint8_t* resp, uint16_t resp_cap,
-                                                       uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleQueueCommands(bool /*in_isr*/, const uint8_t* /*req*/,
+                                              uint16_t /*req_len*/, uint8_t* resp,
+                                              uint16_t resp_cap, uint16_t& out_len)
 {
   return build_cmd_status_response(
       to_u8(LibXR::USB::DapLinkV1Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
       resp_cap, out_len);
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleExecuteCommands(bool /*in_isr*/,
-                                                         const uint8_t* /*req*/,
-                                                         uint16_t /*req_len*/,
-                                                         uint8_t* resp, uint16_t resp_cap,
-                                                         uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleExecuteCommands(bool /*in_isr*/, const uint8_t* /*req*/,
+                                                uint16_t /*req_len*/, uint8_t* resp,
+                                                uint16_t resp_cap, uint16_t& out_len)
 {
   return build_cmd_status_response(
       to_u8(LibXR::USB::DapLinkV1Def::CommandId::EXECUTE_COMMANDS), DAP_ERROR, resp,
       resp_cap, out_len);
 }
 
-template <typename SwdPort>
-uint8_t DapLinkV1Class<SwdPort>::MapAckToDapResp(LibXR::Debug::SwdProtocol::Ack ack) const
+uint8_t DapLinkV1Class::MapAckToDapResp(LibXR::Debug::SwdProtocol::Ack ack) const
 {
   switch (ack)
   {
@@ -1175,16 +889,11 @@ uint8_t DapLinkV1Class<SwdPort>::MapAckToDapResp(LibXR::Debug::SwdProtocol::Ack 
   }
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::SetTransferAbortFlag(bool on)
-{
-  dap_state_.transfer_abort = on;
-}
+void DapLinkV1Class::SetTransferAbortFlag(bool on) { dap_state_.transfer_abort = on; }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
-                                                  uint16_t req_len, uint8_t* resp,
-                                                  uint16_t resp_cap, uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
+                                         uint16_t req_len, uint8_t* resp,
+                                         uint16_t resp_cap, uint16_t& out_len)
 {
   out_len = 0u;
   if (!req || !resp || resp_cap < 3u)
@@ -1565,9 +1274,10 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransfer(bool /*in_isr*/, const uint8_t
         const uint8_t CUR_V = ack_to_dap(ack);
         if (CUR_V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK || EC != ErrorCode::OK)
         {
-          const uint8_t PRIOR_FAIL = (CUR_V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK)
-                                         ? CUR_V
-                                         : LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
+          const uint8_t PRIOR_FAIL =
+              (CUR_V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK)
+                  ? CUR_V
+                  : LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
 
           if (!complete_pending_by_rdbuff())
           {
@@ -1636,12 +1346,9 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransfer(bool /*in_isr*/, const uint8_t
   return ErrorCode::OK;
 }
 
-template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleTransferBlock(bool /*in_isr*/,
-                                                       const uint8_t* req,
-                                                       uint16_t req_len, uint8_t* resp,
-                                                       uint16_t resp_cap,
-                                                       uint16_t& out_len)
+ErrorCode DapLinkV1Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* req,
+                                              uint16_t req_len, uint8_t* resp,
+                                              uint16_t resp_cap, uint16_t& out_len)
 {
   if (!resp || resp_cap < 4u)
   {
@@ -1921,8 +1628,7 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransferBlock(bool /*in_isr*/,
   }
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::DriveReset(bool release)
+void DapLinkV1Class::DriveReset(bool release)
 {
   last_nreset_level_high_ = release;
 
@@ -1942,8 +1648,7 @@ void DapLinkV1Class<SwdPort>::DriveReset(bool release)
   }
 }
 
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::DelayUsIfAllowed(bool /*in_isr*/, uint32_t us)
+void DapLinkV1Class::DelayUsIfAllowed(bool /*in_isr*/, uint32_t us)
 {
   LibXR::Timebase::DelayMicroseconds(us);
 }
