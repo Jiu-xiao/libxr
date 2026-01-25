@@ -326,18 +326,18 @@ void DapLinkV2Class::OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
     return;
   }
 
-  const auto* req = static_cast<const uint8_t*>(data.addr_);
+  const auto* REQ = static_cast<const uint8_t*>(data.addr_);
   const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
 
   // Empty packet -> keep receiving
-  if (!req || REQ_LEN == 0u)
+  if (!REQ || REQ_LEN == 0u)
   {
     ArmOutTransferIfIdle();
     return;
   }
 
   uint16_t out_len = 0;
-  auto ans = ProcessOneCommand(in_isr, req, REQ_LEN, tx_buf_, MAX_RESP, out_len);
+  auto ans = ProcessOneCommand(in_isr, REQ, REQ_LEN, tx_buf_, MAX_RESP, out_len);
 
   UNUSED(ans);
 
@@ -987,10 +987,10 @@ ErrorCode DapLinkV2Class::HandleSWJSequence(bool /*in_isr*/, const uint8_t* req,
     return ErrorCode::ARG_ERR;
   }
 
-  const uint8_t* data = &req[2];
+  const uint8_t* DATA = &req[2];
 
   // Delegate to Swd implementation (no RawMode / no pin-level control here)
-  const ErrorCode EC = swd_.SeqWriteBits(BIT_COUNT, data);
+  const ErrorCode EC = swd_.SeqWriteBits(BIT_COUNT, DATA);
   if (EC != ErrorCode::OK)
   {
     resp[1] = to_u8(LibXR::USB::DapLinkV2Def::Status::ERROR);
@@ -1006,7 +1006,7 @@ ErrorCode DapLinkV2Class::HandleSWJSequence(bool /*in_isr*/, const uint8_t* req,
   if (BIT_COUNT != 0u)
   {
     const uint32_t LAST_I = BIT_COUNT - 1u;
-    last_swdio = (((data[LAST_I / 8u] >> (LAST_I & 7u)) & 0x01u) != 0u);
+    last_swdio = (((DATA[LAST_I / 8u] >> (LAST_I & 7u)) & 0x01u) != 0u);
   }
 
   if (last_swdio)
@@ -1101,10 +1101,10 @@ ErrorCode DapLinkV2Class::HandleSWDSequence(bool /*in_isr*/, const uint8_t* req,
         return ErrorCode::ARG_ERR;
       }
 
-      const uint8_t* data = &req[req_off];
+      const uint8_t* DATA = &req[req_off];
       req_off = static_cast<uint16_t>(req_off + BYTES);
 
-      const ErrorCode EC = swd_.SeqWriteBits(cycles, data);
+      const ErrorCode EC = swd_.SeqWriteBits(cycles, DATA);
       if (EC != ErrorCode::OK)
       {
         resp[1] = DAP_ERROR;
@@ -1239,13 +1239,13 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     }
   };
 
-  auto push_u32 = [&](uint32_t v) -> bool
+  auto push_u32 = [&](uint32_t VALUE) -> bool
   {
     if (resp_off + 4u > resp_cap)
     {
       return false;
     }
-    Memory::FastCopy(&resp[resp_off], &v, sizeof(v));
+    Memory::FastCopy(&resp[resp_off], &VALUE, sizeof(VALUE));
     resp_off = static_cast<uint16_t>(resp_off + 4u);
     return true;
   };
@@ -1372,7 +1372,7 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
     }
 
     LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-    ErrorCode ec = ErrorCode::OK;
+    ErrorCode EC = ErrorCode::OK;
 
     if (!RNW)
     {
@@ -1403,11 +1403,11 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
 
       if (AP)
       {
-        ec = swd_.ApWriteTxn(ADDR2B, wdata, ack);
+        EC = swd_.ApWriteTxn(ADDR2B, wdata, ack);
       }
       else
       {
-        ec = swd_.DpWriteTxn(static_cast<LibXR::Debug::SwdProtocol::DpWriteReg>(ADDR2B),
+        EC = swd_.DpWriteTxn(static_cast<LibXR::Debug::SwdProtocol::DpWriteReg>(ADDR2B),
                              wdata, ack);
       }
 
@@ -1416,7 +1416,7 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
       {
         break;
       }
-      if (ec != ErrorCode::OK)
+      if (EC != ErrorCode::OK)
       {
         response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
         break;
@@ -1465,8 +1465,8 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         {
           if (AP)
           {
-            ec = swd_.ApReadTxn(ADDR2B, rdata, ack);  // 内含 RDBUFF
-            if (ec == ErrorCode::OK && ack == LibXR::Debug::SwdProtocol::Ack::OK)
+            EC = swd_.ApReadTxn(ADDR2B, rdata, ack);  // 内含 RDBUFF
+            if (EC == ErrorCode::OK && ack == LibXR::Debug::SwdProtocol::Ack::OK)
             {
               // ApReadTxn 读过 RDBUFF，等价 flush
               check_write = false;
@@ -1474,7 +1474,7 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
           }
           else
           {
-            ec = swd_.DpReadTxn(static_cast<LibXR::Debug::SwdProtocol::DpReadReg>(ADDR2B),
+            EC = swd_.DpReadTxn(static_cast<LibXR::Debug::SwdProtocol::DpReadReg>(ADDR2B),
                                 rdata, ack);
           }
 
@@ -1483,7 +1483,7 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
           {
             break;
           }
-          if (ec != ErrorCode::OK)
+          if (EC != ErrorCode::OK)
           {
             response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
             break;
@@ -1531,7 +1531,7 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         }
 
         uint32_t rdata = 0u;
-        ec = swd_.DpReadTxn(static_cast<LibXR::Debug::SwdProtocol::DpReadReg>(ADDR2B),
+        EC = swd_.DpReadTxn(static_cast<LibXR::Debug::SwdProtocol::DpReadReg>(ADDR2B),
                             rdata, ack);
 
         response_value = ack_to_dap(ack);
@@ -1539,7 +1539,7 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         {
           break;
         }
-        if (ec != ErrorCode::OK)
+        if (EC != ErrorCode::OK)
         {
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
           break;
@@ -1567,14 +1567,14 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         // 这是该段连续 AP reads 的第一笔：发起一次 AP read（posted），丢弃其 returned
         // posted data
         uint32_t dummy_posted = 0u;
-        ec = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
+        EC = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
 
         response_value = ack_to_dap(ack);
         if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
         {
           break;
         }
-        if (ec != ErrorCode::OK)
+        if (EC != ErrorCode::OK)
         {
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
           {
@@ -1598,10 +1598,10 @@ ErrorCode DapLinkV2Class::HandleTransfer(bool /*in_isr*/, const uint8_t* req,
         }
 
         uint32_t posted_prev = 0u;
-        ec = swd_.ApReadPostedTxn(ADDR2B, posted_prev, ack);
+        EC = swd_.ApReadPostedTxn(ADDR2B, posted_prev, ack);
 
         const uint8_t CUR_V = ack_to_dap(ack);
-        if (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK || ec != ErrorCode::OK)
+        if (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK || EC != ErrorCode::OK)
         {
           // 本次 AP read 没跑通：尽量用 RDBUFF 把 pending 补齐（否则 count 会少一笔且
           // pipeline 残留）
@@ -1764,7 +1764,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
     for (uint32_t i = 0; i < count; ++i)
     {
       LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-      ErrorCode ec = ErrorCode::OK;
+      ErrorCode EC = ErrorCode::OK;
 
       if (req_off + 4u > req_len)
       {
@@ -1778,11 +1778,11 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
 
       if (AP)
       {
-        ec = swd_.ApWriteTxn(ADDR2B, wdata, ack);
+        EC = swd_.ApWriteTxn(ADDR2B, wdata, ack);
       }
       else
       {
-        ec = swd_.DpWriteTxn(static_cast<LibXR::Debug::SwdProtocol::DpWriteReg>(ADDR2B),
+        EC = swd_.DpWriteTxn(static_cast<LibXR::Debug::SwdProtocol::DpWriteReg>(ADDR2B),
                              wdata, ack);
       }
 
@@ -1798,7 +1798,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
         break;
       }
 
-      if (ec != ErrorCode::OK)
+      if (EC != ErrorCode::OK)
       {
         xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
         break;
@@ -1820,7 +1820,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
     for (uint32_t i = 0; i < count; ++i)
     {
       LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-      ErrorCode ec = ErrorCode::OK;
+      ErrorCode EC = ErrorCode::OK;
       uint32_t rdata = 0u;
 
       if (resp_off + 4u > resp_cap)
@@ -1829,7 +1829,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
         break;
       }
 
-      ec = swd_.DpReadTxn(static_cast<LibXR::Debug::SwdProtocol::DpReadReg>(ADDR2B),
+      EC = swd_.DpReadTxn(static_cast<LibXR::Debug::SwdProtocol::DpReadReg>(ADDR2B),
                           rdata, ack);
 
       xresp = MapAckToDapResp(ack);
@@ -1844,7 +1844,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
         break;
       }
 
-      if (ec != ErrorCode::OK)
+      if (EC != ErrorCode::OK)
       {
         xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
         break;
@@ -1864,11 +1864,11 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
   // AP read: posted-read pipeline
   {
     LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-    ErrorCode ec = ErrorCode::OK;
+    ErrorCode EC = ErrorCode::OK;
 
     // 先发第一笔 AP read（posted），其 returned posted data 丢弃
     uint32_t dummy_posted = 0u;
-    ec = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
+    EC = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
     xresp = MapAckToDapResp(ack);
 
     if (xresp == 0u)
@@ -1880,7 +1880,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
     {
       goto out_ap_read;  // NOLINT
     }
-    if (ec != ErrorCode::OK)
+    if (EC != ErrorCode::OK)
     {
       xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
       goto out_ap_read;  // NOLINT
@@ -1896,7 +1896,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
       }
 
       uint32_t posted_prev = 0u;
-      ec = swd_.ApReadPostedTxn(ADDR2B, posted_prev, ack);
+      EC = swd_.ApReadPostedTxn(ADDR2B, posted_prev, ack);
       const uint8_t CUR = MapAckToDapResp(ack);
 
       if (CUR == 0u)
@@ -1905,7 +1905,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
         goto out_ap_read;  // NOLINT
       }
 
-      if (ack != LibXR::Debug::SwdProtocol::Ack::OK || ec != ErrorCode::OK)
+      if (ack != LibXR::Debug::SwdProtocol::Ack::OK || EC != ErrorCode::OK)
       {
         // 当前失败：尽量用 RDBUFF 把上一笔补齐（done 会更准确）
         if (resp_off + 4u <= resp_cap)
@@ -1935,7 +1935,7 @@ ErrorCode DapLinkV2Class::HandleTransferBlock(bool /*in_isr*/, const uint8_t* re
 
         // pending 已补齐：保留“当前失败”
         xresp = CUR;
-        if (ec != ErrorCode::OK)
+        if (EC != ErrorCode::OK)
         {
           xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
         }
