@@ -118,14 +118,14 @@ CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
   }
 }
 
-bool CH32GPIO::Read() { return GPIO_ReadInputDataBit(port_, pin_) == Bit_SET; }
+bool CH32GPIO::Read() { return (port_->INDR & pin_) != (uint32_t)Bit_RESET; }
 
 ErrorCode CH32GPIO::Write(bool value)
 {
   if (value)
-    GPIO_SetBits(port_, pin_);
+    port_->BSHR = pin_;
   else
-    GPIO_ResetBits(port_, pin_);
+    port_->BCR = pin_;
   return ErrorCode::OK;
 }
 

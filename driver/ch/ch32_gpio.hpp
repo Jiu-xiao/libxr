@@ -42,7 +42,7 @@ typedef enum
 
 uint32_t CH32GetGPIOPeriph(GPIO_TypeDef* port);
 
-class CH32GPIO : public GPIO
+class CH32GPIO final : public GPIO
 {
  public:
   CH32GPIO(GPIO_TypeDef* port, uint16_t pin,
