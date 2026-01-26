@@ -10,12 +10,15 @@
 namespace LibXR::Debug
 {
 /**
- * @brief 基于 GPIO 轮询 bit-bang 的 SWD 探针。
- *        SWD probe implemented via GPIO bit-banging.
+ * @brief 基于 GpioType 轮询 bit-bang 的 SWD 探针。
+ *        SWD probe based on polling bit-bang using GpioType.
+ * 
+ * @tparam GpioType GPIO 类型。GPIO type.
  *
  * @note 推荐外围电路：SWCLK/SWDIO 均串联 33Ω 限流电阻，SWDIO 端接 10k 上拉电阻。
  *       Recommended circuit: 33Ω series resistors on SWCLK/SWDIO, 10k pull-up on SWDIO.
  */
+template <typename GpioType>
 class SwdGeneralGPIO final : public Swd
 {
  public:
@@ -25,13 +28,13 @@ class SwdGeneralGPIO final : public Swd
    * @param swdio 用作 SWDIO 的 GPIO。GPIO used as SWDIO.
    * @param default_hz 默认 SWCLK 频率（Hz）。Default SWCLK frequency (Hz).
    */
-  explicit SwdGeneralGPIO(GPIO& swclk, GPIO& swdio,
+  explicit SwdGeneralGPIO(GpioType& swclk, GpioType& swdio,
                           uint32_t default_hz = DEFAULT_CLOCK_HZ)
       : swclk_(swclk), swdio_(swdio)
   {
     // SWCLK 基线配置：推挽输出，空闲高电平（保留历史行为）。SWCLK baseline: push-pull
     // output, idle high (legacy behavior kept).
-    swclk_.SetConfig({GPIO::Direction::OUTPUT_PUSH_PULL, GPIO::Pull::NONE});
+    swclk_.SetConfig({GpioType::Direction::OUTPUT_PUSH_PULL, GpioType::Pull::NONE});
     swclk_.Write(true);
 
     // SWDIO 基线配置：主机初始驱动为高电平（推挽输出）。SWDIO baseline: host drives high
@@ -373,7 +376,7 @@ class SwdGeneralGPIO final : public Swd
     }
 
     const ErrorCode EC =
-        swdio_.SetConfig({GPIO::Direction::OUTPUT_PUSH_PULL, GPIO::Pull::NONE});
+        swdio_.SetConfig({GpioType::Direction::OUTPUT_PUSH_PULL, GpioType::Pull::NONE});
     if (EC == ErrorCode::OK)
     {
       swdio_mode_ = SwdioMode::DRIVE_PP;
@@ -388,7 +391,8 @@ class SwdGeneralGPIO final : public Swd
       return ErrorCode::OK;
     }
 
-    const ErrorCode EC = swdio_.SetConfig({GPIO::Direction::INPUT, GPIO::Pull::UP});
+    const ErrorCode EC =
+        swdio_.SetConfig({GpioType::Direction::INPUT, GpioType::Pull::UP});
     if (EC == ErrorCode::OK)
     {
       swdio_mode_ = SwdioMode::SAMPLE_IN;
@@ -459,8 +463,8 @@ class SwdGeneralGPIO final : public Swd
   static constexpr uint8_t JTAG_TO_SWD_SEQ1 =
       0xE7u;  ///< JTAG->SWD 序列字节 1。JTAG-to-SWD sequence byte 1.
 
-  GPIO& swclk_;  ///< SWCLK GPIO。GPIO for SWCLK.
-  GPIO& swdio_;  ///< SWDIO GPIO。GPIO for SWDIO.
+  GpioType& swclk_;  ///< SWCLK GPIO。GPIO for SWCLK.
+  GpioType& swdio_;  ///< SWDIO GPIO。GPIO for SWDIO.
 
   uint32_t clock_hz_ = 0u;  ///< 当前 SWCLK 频率（Hz）。Current SWCLK frequency (Hz).
   uint32_t half_period_us_ = 0u;  ///< 半周期延时（us）。Half-period delay (us).

@@ -37,7 +37,7 @@ class STM32GPIO final : public GPIO
 
   bool Read();
 
-  ErrorCode Write(bool value);
+  void Write(bool value);
 
   ErrorCode EnableInterrupt();
 

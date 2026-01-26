@@ -49,15 +49,67 @@ class CH32GPIO final : public GPIO
            GPIO::Direction direction = GPIO::Direction::OUTPUT_PUSH_PULL,
            GPIO::Pull pull = GPIO::Pull::NONE, IRQn_Type irq = NonMaskableInt_IRQn);
 
-  bool Read() override;
+  inline bool Read() override { return (port_->INDR & pin_) != (uint32_t)Bit_RESET; }
 
-  ErrorCode Write(bool value) override;
+  inline void Write(bool value) override
+  {
+    if (value)
+      port_->BSHR = pin_;
+    else
+      port_->BCR = pin_;
+  }
 
   ErrorCode EnableInterrupt() override;
 
   ErrorCode DisableInterrupt() override;
 
-  ErrorCode SetConfig(Configuration config) override;
+  inline ErrorCode SetConfig(Configuration config) override
+  {
+    {
+      GPIO_InitTypeDef gpio_init = {};
+      gpio_init.GPIO_Pin = pin_;
+      gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
+
+      switch (config.direction)
+      {
+        case Direction::INPUT:
+          gpio_init.GPIO_Mode = (config.pull == Pull::UP)     ? GPIO_Mode_IPU
+                                : (config.pull == Pull::DOWN) ? GPIO_Mode_IPD
+                                                              : GPIO_Mode_IN_FLOATING;
+          break;
+        case Direction::OUTPUT_PUSH_PULL:
+          gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;
+          break;
+        case Direction::OUTPUT_OPEN_DRAIN:
+          gpio_init.GPIO_Mode = GPIO_Mode_Out_OD;
+          break;
+        case Direction::RISING_INTERRUPT:
+        case Direction::FALL_INTERRUPT:
+        case Direction::FALL_RISING_INTERRUPT:
+          gpio_init.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+          break;
+      }
+
+      GPIO_Init(port_, &gpio_init);
+
+      switch (config.direction)
+      {
+        case Direction::RISING_INTERRUPT:
+          ConfigureEXTI(EXTI_Trigger_Rising);
+          break;
+        case Direction::FALL_INTERRUPT:
+          ConfigureEXTI(EXTI_Trigger_Falling);
+          break;
+        case Direction::FALL_RISING_INTERRUPT:
+          ConfigureEXTI(EXTI_Trigger_Rising_Falling);
+          break;
+        default:
+          break;
+      }
+
+      return ErrorCode::OK;
+    }
+  }
 
   void OnInterrupt();
 

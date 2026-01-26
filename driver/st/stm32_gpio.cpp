@@ -66,7 +66,7 @@ STM32GPIO::STM32GPIO(GPIO_TypeDef* port, uint16_t pin, IRQn_Type irq)
 
 bool STM32GPIO::Read() { return (port_->IDR & pin_) != 0u; }
 
-ErrorCode STM32GPIO::Write(bool value)
+void STM32GPIO::Write(bool value)
 {
   if (value)
   {
