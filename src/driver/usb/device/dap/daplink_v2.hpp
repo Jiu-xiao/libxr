@@ -9,7 +9,6 @@
 #include "gpio.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include "queue.hpp"
 #include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"
 #include "winusb_msos20.hpp"
@@ -70,14 +69,11 @@ class DapLinkV2Class : public DeviceClass
    * @param data_in_ep_num  Bulk IN 端点号（可自动分配）/ Bulk IN EP number (auto allowed)
    * @param data_out_ep_num Bulk OUT 端点号（可自动分配）/ Bulk OUT EP number (auto
    * allowed)
-   * @param packet_count    对外宣称 PACKET_COUNT（1..MAX_PACKET_COUNT）/
-   *                        Advertised PACKET_COUNT (1..MAX_PACKET_COUNT)
    */
   explicit DapLinkV2Class(
       LibXR::Debug::Swd& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
       Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-      uint8_t packet_count = 4);
+      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO);
 
   /**
    * @brief 虚析构函数 / Virtual destructor
@@ -199,11 +195,6 @@ class DapLinkV2Class : public DeviceClass
    * @brief 若 OUT 空闲则 arm 一次接收 / Arm OUT transfer if idle
    */
   void ArmOutTransferIfIdle();
-
-  /**
-   * @brief 若 IN 空闲则发送队列头部响应 / Start IN transfer if idle
-   */
-  void StartInIfIdle();
 
  private:
   /**
@@ -375,27 +366,8 @@ class DapLinkV2Class : public DeviceClass
 #pragma pack(pop)
 
  private:
-  struct PacketSlot
-  {
-    enum class State : uint8_t
-    {
-      FREE = 0,
-      OUT_IN_FLIGHT,
-      RESP_READY,
-      IN_IN_FLIGHT,
-    };
+  LibXR::Debug::Swd& swd_;  ///< SWD 链路 / SWD link
 
-    uint8_t rx[LibXR::USB::DapLinkV2Def::MAX_REQUEST_SIZE]{};
-    uint16_t rx_len = 0;
-
-    uint8_t tx[LibXR::USB::DapLinkV2Def::MAX_RESPONSE_SIZE]{};
-    uint16_t tx_len = 0;
-
-    State state = State::FREE;
-  };
-
- private:
-  LibXR::Debug::Swd& swd_;              ///< SWD 链路 / SWD link
   LibXR::GPIO* nreset_gpio_ = nullptr;  ///< 可选 nRESET GPIO / Optional nRESET GPIO
 
   uint8_t swj_shadow_ = static_cast<uint8_t>(
@@ -435,31 +407,11 @@ class DapLinkV2Class : public DeviceClass
 #pragma pack(pop)
 
  private:
-  static constexpr uint16_t MAX_REQ =
-      LibXR::USB::DapLinkV2Def::MAX_REQUEST_SIZE;  ///< 最大请求 / Max request size
-  static constexpr uint16_t MAX_RESP =
-      LibXR::USB::DapLinkV2Def::MAX_RESPONSE_SIZE;  ///< 最大响应 / Max response size
-
   LibXR::USB::WinUsbMsOs20::MsOs20BosCapability winusb_msos20_cap_{
       LibXR::ConstRawData{nullptr, 0},
       WINUSB_VENDOR_CODE};  ///< WinUSB BOS capability / WinUSB BOS capability
 
   uint32_t match_mask_ = 0xFFFFFFFFu;  ///< Match mask / Match mask
-
-  uint8_t packet_count_ = 1;  ///< PACKET_COUNT 对外宣称值 / Advertised PACKET_COUNT
-
-  PacketSlot* slots_;  ///< 多槽缓冲 / Multi-slot buffers
-
-  int8_t out_slot_in_flight_ =
-      -1;  ///< 当前 OUT in-flight slot / Current OUT in-flight slot
-  int8_t in_slot_in_flight_ = -1;  ///< 当前 IN in-flight slot / Current IN in-flight slot
-
-  uint8_t* free_slots_storage_;  ///< free_slots_ storage / free_slots_
-                                 ///< storage
-  uint8_t* tx_slots_storage_;    ///< tx_slots_ storage / tx_slots_ storage
-
-  LibXR::Queue<uint8_t> free_slots_;  ///< 空闲 slot 队列 / Free slot queue
-  LibXR::Queue<uint8_t> tx_slots_;    ///< 响应 FIFO 队列 / TX FIFO queue
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
