@@ -8,7 +8,6 @@
 #include "swd.hpp"
 #include "timebase.hpp"
 
-
 namespace LibXR::Debug
 {
 /**
@@ -218,7 +217,6 @@ class SwdGeneralGPIO final : public Swd
   {
     if (cycles == 0u)
     {
-      // 保持一致：结束时 SWCLK 低电平
       swclk_.Write(false);
       return ErrorCode::OK;
     }
@@ -227,24 +225,21 @@ class SwdGeneralGPIO final : public Swd
       return ErrorCode::ARG_ERR;
     }
 
-    // 输出序列：SWDIO 输出，SWCLK 以 low->high->low 脉冲，结束保持 low
     (void)SetSwdioDriveMode();
 
-    // 统一让序列从 SWCLK=0 开始，并最终回到 0
+    // Keep legacy: start from SWCLK low and end low
     swclk_.Write(false);
 
     for (uint32_t i = 0; i < cycles; ++i)
     {
-      const bool BIT =
-          (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);  // LSB-first
-      swdio_.Write(BIT);
+      const bool bit = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
+      swdio_.Write(bit);
 
-      // clock pulse: low -> high -> low (leave low)
-      DelayHalf();
-      swclk_.Write(true);
-      DelayHalf();
+      // one clock cycle: low->high (with DelayHalf inside GenOneClk)
+      // NOTE: your GenOneClk ends at high; to keep "end low" legacy for SeqWrite,
+      // we explicitly pull low after each cycle (no extra DelayHalf added).
+      GenOneClk();
       swclk_.Write(false);
-      DelayHalf();
     }
 
     return ErrorCode::OK;
@@ -262,33 +257,41 @@ class SwdGeneralGPIO final : public Swd
       return ErrorCode::ARG_ERR;
     }
 
-    const uint32_t BYTES = (cycles + 7u) / 8u;
-    Memory::FastSet(out_lsb_first, 0, BYTES);
+    const uint32_t bytes = (cycles + 7u) / 8u;
+    Memory::FastSet(out_lsb_first, 0, bytes);
 
-    // 输入序列：SWDIO 输入采样，SWCLK low->high->low，采样在 high 相位（best-effort）
     (void)SetSwdioSampleMode();
 
+    // start from low, end low
     swclk_.Write(false);
 
     for (uint32_t i = 0; i < cycles; ++i)
     {
-      // low phase
-      DelayHalf();
+      // Use the updated read phase (CMSIS-style)
+      bool bit;
+      if (half_period_loops_ == 0u)
+      {
+        swclk_.Write(false);
+        bit = swdio_.Read();
+        swclk_.Write(true);
+      }
+      else
+      {
+        swclk_.Write(false);
+        DelayHalf();
+        bit = swdio_.Read();
+        swclk_.Write(true);
+        DelayHalf();
+      }
 
-      // high phase
-      swclk_.Write(true);
-      DelayHalf();
-
-      const bool BIT = swdio_.Read();
-      if (BIT)
+      if (bit)
       {
         out_lsb_first[i / 8u] =
             static_cast<uint8_t>(out_lsb_first[i / 8u] | (1u << (i & 7u)));
       }
 
-      // back to low (leave low)
+      // keep legacy end-low for next bit
       swclk_.Write(false);
-      DelayHalf();
     }
 
     return ErrorCode::OK;
@@ -430,16 +433,20 @@ class SwdGeneralGPIO final : public Swd
 
   inline bool ReadBitAndClock()
   {
-    const bool B = swdio_.Read();
-    GenOneClk();
-    return B;
+    swclk_.Write(false);
+    DelayHalf();
+    const bool b = swdio_.Read();
+    swclk_.Write(true);
+    DelayHalf();
+    return b;
   }
 
   inline bool ReadBitAndClockWithoutDelay()
   {
-    const bool B = swdio_.Read();
-    GenOneClkWithoutDelay();
-    return B;
+    swclk_.Write(false);
+    const bool b = swdio_.Read();
+    swclk_.Write(true);
+    return b;
   }
 
   inline uint8_t ReadByteLSB()
@@ -487,39 +494,26 @@ class SwdGeneralGPIO final : public Swd
     const bool APNDP = (req.port == SwdProtocol::Port::AP);
     const uint8_t REQUEST_BYTE = MakeReq(APNDP, req.rnw, req.addr2b);
 
-    // 请求阶段确保 SWDIO 处于驱动模式。Ensure SWDIO is driven for request phase.
     (void)SetSwdioDriveMode();
-
-    // 请求阶段（8 bit，LSB-first）。Request (8 bits, LSB-first).
     WriteByteLSB(REQUEST_BYTE);
 
-    // 方向切换 Host -> Target：将 SWDIO 切为输入，然后产生 1 个时钟。Turnaround Host ->
-    // Target: switch SWDIO to input, then one clock.
     (void)SetSwdioSampleMode();
-    GenOneClk();
+    GenOneClk();  // turnaround Host -> Target
 
-    // ACK：3 bit，LSB-first。ACK: 3 bits, LSB-first.
+    // ACK: CMSIS SW_READ_BIT phase (sample in low phase)
     uint8_t ack_raw = 0u;
     for (uint32_t i = 0; i < ACK_BITS; ++i)
     {
-      if (swdio_.Read())
+      if (ReadBitAndClock())
       {
         ack_raw |= static_cast<uint8_t>(1u << i);
       }
-      GenOneClk();
     }
     resp.ack = DecodeAck(static_cast<uint8_t>(ack_raw & 0x7u));
 
     if (resp.ack != SwdProtocol::Ack::OK)
     {
-      // 方向切换 Target -> Host（跳过数据阶段）：产生 1 个时钟。Turnaround Target -> Host
-      // (data phase skipped): one clock.
-      GenOneClk();
-
-      // 线路驻留（为下一次传输准备/与 SWJ shadow 使用保持一致）：Park lines for next
-      // transfer / keep consistent with SWJ shadow usage:
-      // - SWDIO 高电平（驻留）。SWDIO high (park).
-      // - SWCLK 低电平。SWCLK low.
+      GenOneClk();  // turnaround Target -> Host (skip data)
       (void)SetSwdioDriveMode();
       swdio_.Write(true);
       swclk_.Write(false);
@@ -528,8 +522,6 @@ class SwdGeneralGPIO final : public Swd
 
     if (req.rnw)
     {
-      // READ：保持输入，读取 32-bit 数据（按字节 LSB-first）+ 奇偶校验位。READ: keep
-      // input, read 32-bit data (LSB-first per byte) + parity bit.
       uint32_t data = 0u;
       for (uint32_t byte = 0; byte < 4u; ++byte)
       {
@@ -541,19 +533,14 @@ class SwdGeneralGPIO final : public Swd
       resp.rdata = data;
       resp.parity_ok = (static_cast<uint8_t>(PARITY_BIT) == Parity32(data));
 
-      // 方向切换 Target -> Host：切为驱动并将 SWDIO 驻留为高电平，然后产生 1
-      // 个时钟。Turnaround Target -> Host: switch to drive, park SWDIO high, one clock.
       (void)SetSwdioDriveMode();
       swdio_.Write(true);
       GenOneClk();
 
-      // SWCLK 驻留为低电平（与其他路径对齐）。Park SWCLK low (align with other paths).
       swclk_.Write(false);
     }
     else
     {
-      // WRITE：方向切换（1 个时钟）后写入 32-bit 数据 + 奇偶校验位。WRITE: turnaround
-      // (one clock) then 32-bit data + parity.
       (void)SetSwdioDriveMode();
       GenOneClk();
 
@@ -567,7 +554,6 @@ class SwdGeneralGPIO final : public Swd
       const bool PARITY_BIT = (Parity32(DATA) & 0x1u) != 0u;
       WriteBit(PARITY_BIT);
 
-      // 线路驻留。Park lines.
       swdio_.Write(true);
       swclk_.Write(false);
     }
@@ -585,39 +571,26 @@ class SwdGeneralGPIO final : public Swd
     const bool APNDP = (req.port == SwdProtocol::Port::AP);
     const uint8_t REQUEST_BYTE = MakeReq(APNDP, req.rnw, req.addr2b);
 
-    // 请求阶段确保 SWDIO 处于驱动模式。Ensure SWDIO is driven for request phase.
     (void)SetSwdioDriveMode();
-
-    // 请求阶段（8 bit，LSB-first）。Request (8 bits, LSB-first).
     WriteByteLSBWithoutDelay(REQUEST_BYTE);
 
-    // 方向切换 Host -> Target：将 SWDIO 切为输入，然后产生 1 个时钟。Turnaround Host ->
-    // Target: switch SWDIO to input, then one clock.
     (void)SetSwdioSampleMode();
-    GenOneClkWithoutDelay();
+    GenOneClkWithoutDelay();  // turnaround Host -> Target
 
-    // ACK：3 bit，LSB-first。ACK: 3 bits, LSB-first.
+    // ACK: CMSIS SW_READ_BIT phase (sample in low phase)
     uint8_t ack_raw = 0u;
     for (uint32_t i = 0; i < ACK_BITS; ++i)
     {
-      if (swdio_.Read())
+      if (ReadBitAndClockWithoutDelay())
       {
         ack_raw |= static_cast<uint8_t>(1u << i);
       }
-      GenOneClkWithoutDelay();
     }
     resp.ack = DecodeAck(static_cast<uint8_t>(ack_raw & 0x7u));
 
     if (resp.ack != SwdProtocol::Ack::OK)
     {
-      // 方向切换 Target -> Host（跳过数据阶段）：产生 1 个时钟。Turnaround Target -> Host
-      // (data phase skipped): one clock.
       GenOneClkWithoutDelay();
-
-      // 线路驻留（为下一次传输准备/与 SWJ shadow 使用保持一致）：Park lines for next
-      // transfer / keep consistent with SWJ shadow usage:
-      // - SWDIO 高电平（驻留）。SWDIO high (park).
-      // - SWCLK 低电平。SWCLK low.
       (void)SetSwdioDriveMode();
       swdio_.Write(true);
       swclk_.Write(false);
@@ -626,8 +599,6 @@ class SwdGeneralGPIO final : public Swd
 
     if (req.rnw)
     {
-      // READ：保持输入，读取 32-bit 数据（按字节 LSB-first）+ 奇偶校验位。READ: keep
-      // input, read 32-bit data (LSB-first per byte) + parity bit.
       uint32_t data = 0u;
       for (uint32_t byte = 0; byte < 4u; ++byte)
       {
@@ -639,19 +610,14 @@ class SwdGeneralGPIO final : public Swd
       resp.rdata = data;
       resp.parity_ok = (static_cast<uint8_t>(PARITY_BIT) == Parity32(data));
 
-      // 方向切换 Target -> Host：切为驱动并将 SWDIO 驻留为高电平，然后产生 1
-      // 个时钟。Turnaround Target -> Host: switch to drive, park SWDIO high, one clock.
       (void)SetSwdioDriveMode();
       swdio_.Write(true);
       GenOneClkWithoutDelay();
 
-      // SWCLK 驻留为低电平（与其他路径对齐）。Park SWCLK low (align with other paths).
       swclk_.Write(false);
     }
     else
     {
-      // WRITE：方向切换（1 个时钟）后写入 32-bit 数据 + 奇偶校验位。WRITE: turnaround
-      // (one clock) then 32-bit data + parity.
       (void)SetSwdioDriveMode();
       GenOneClkWithoutDelay();
 
@@ -665,7 +631,6 @@ class SwdGeneralGPIO final : public Swd
       const bool PARITY_BIT = (Parity32(DATA) & 0x1u) != 0u;
       WriteBitWithoutDelay(PARITY_BIT);
 
-      // 线路驻留。Park lines.
       swdio_.Write(true);
       swclk_.Write(false);
     }
