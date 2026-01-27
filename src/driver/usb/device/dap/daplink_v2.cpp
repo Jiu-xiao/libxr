@@ -91,8 +91,8 @@ void DapLinkV2Class::InitWinUsbDescriptors()
       LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES;
 
   Memory::FastCopy(winusb_msos20_.prop.name,
-              LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16,
-              LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
+                   LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16,
+                   LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
 
   // DeviceInterfaceGUIDs: REG_MULTI_SZ UTF-16LE, include double-NUL terminator
   // 注意：此处为“单 GUID + 双 NUL 结束”的 REG_MULTI_SZ / Single GUID + double-NUL end.
