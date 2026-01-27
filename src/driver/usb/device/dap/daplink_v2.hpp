@@ -12,7 +12,7 @@
 #include "libxr_type.hpp"
 #include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"
-#include "winusb_msos20.hpp"  // LibXR::USB::WinUsbMsOs20
+#include "bos/winusb_msos20.hpp"  // LibXR::USB::WinUsbMsOs20
 
 namespace LibXR::USB
 {
