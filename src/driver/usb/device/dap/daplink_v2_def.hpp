@@ -17,20 +17,9 @@ namespace LibXR::USB
  */
 namespace DapLinkV2Def
 {
-
-// ==============================
-// Limits / 限制
-// ==============================
-
-static constexpr std::uint16_t MAX_REQUEST_SIZE = 512u;   ///< 最大请求长度。Max request size.
-static constexpr std::uint16_t MAX_RESPONSE_SIZE = 512u;  ///< 最大响应长度。Max response size.
-
 // ==============================
 // CMSIS-DAP v2 Command IDs / 命令号
-// 注意：按规范值定义（SWO_Data=0x1C, SWD_Sequence=0x1D）
-// Note: Values follow the CMSIS-DAP specification (SWO_Data=0x1C, SWD_Sequence=0x1D).
 // ==============================
-
 enum class CommandId : std::uint8_t
 {
   // Core (0x00-0x0F)

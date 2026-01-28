@@ -9,15 +9,14 @@ namespace LibXR
 class ESP32GPIO : public GPIO
 {
  public:
-  explicit ESP32GPIO(gpio_num_t gpio_num) : gpio_num_(gpio_num) { map_[gpio_num_] = this; }
+  explicit ESP32GPIO(gpio_num_t gpio_num) : gpio_num_(gpio_num)
+  {
+    map_[gpio_num_] = this;
+  }
 
   bool Read() override { return gpio_get_level(gpio_num_) != 0; }
 
-  ErrorCode Write(bool value) override
-  {
-    gpio_set_level(gpio_num_, value ? 1 : 0);
-    return ErrorCode::OK;
-  }
+  void Write(bool value) override { gpio_set_level(gpio_num_, value ? 1 : 0); }
 
   ErrorCode EnableInterrupt() override
   {
@@ -90,15 +89,7 @@ class ESP32GPIO : public GPIO
     return ErrorCode::OK;
   }
 
-  static void IRAM_ATTR InterruptDispatcher(void* arg)
-  {
-    auto gpio_num = static_cast<gpio_num_t>(reinterpret_cast<uintptr_t>(arg));
-    auto gpio = map_[gpio_num];
-    if (gpio)
-    {
-      gpio->callback_.Run(true);
-    }
-  }
+  static void IRAM_ATTR InterruptDispatcher(void* arg);
 
  private:
   gpio_num_t gpio_num_;
