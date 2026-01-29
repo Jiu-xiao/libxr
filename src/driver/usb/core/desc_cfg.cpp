@@ -257,7 +257,7 @@ ConfigDescriptor::ConfigDescriptor(
   buffer_.size_ = max_config_size;
 }
 
-ErrorCode ConfigDescriptor::SwitchConfig(size_t index)
+ErrorCode ConfigDescriptor::SwitchConfig(size_t index, bool in_isr)
 {
   /** USB configuration value starts from 1; 0 means unconfigured / configuration value 从
    * 1 开始，0 表示未配置 */
@@ -266,13 +266,13 @@ ErrorCode ConfigDescriptor::SwitchConfig(size_t index)
     return ErrorCode::NOT_FOUND;
   }
 
-  UnbindEndpoints();
+  UnbindEndpoints(in_isr);
   current_cfg_ = index - 1;
-  BindEndpoints();
+  BindEndpoints(in_isr);
   return ErrorCode::OK;
 }
 
-void ConfigDescriptor::BindEndpoints()
+void ConfigDescriptor::BindEndpoints(bool in_isr)
 {
   if (ep_assigned_)
   {
@@ -291,12 +291,12 @@ void ConfigDescriptor::BindEndpoints()
       continue;
     }
 
-    item->BindEndpoints(endpoint_pool_, start_itf);
+    item->BindEndpoints(endpoint_pool_, start_itf, in_isr);
     start_itf += item->GetInterfaceCount();
   }
 }
 
-void ConfigDescriptor::UnbindEndpoints()
+void ConfigDescriptor::UnbindEndpoints(bool in_isr)
 {
   if (!ep_assigned_)
   {
@@ -313,7 +313,7 @@ void ConfigDescriptor::UnbindEndpoints()
     {
       continue;
     }
-    item->UnbindEndpoints(endpoint_pool_);
+    item->UnbindEndpoints(endpoint_pool_, in_isr);
   }
 }
 

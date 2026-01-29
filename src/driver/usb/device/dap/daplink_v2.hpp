@@ -101,8 +101,9 @@ class DapLinkV2Class : public DeviceClass
    * @brief 绑定端点资源 / Bind endpoint resources
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 起始接口号 / Start interface number
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
   {
     inited_ = false;
 
@@ -178,8 +179,9 @@ class DapLinkV2Class : public DeviceClass
   /**
    * @brief 解绑端点资源 / Unbind endpoint resources
    * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints(EndpointPool& endpoint_pool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
 

@@ -26,7 +26,8 @@ DeviceClass::DeviceClass(std::initializer_list<BosCapability*> bos_caps)
 DeviceClass::~DeviceClass()
 {
   // 仅释放指针数组本身（capability 对象生命周期由派生类成员管理）
-  // Only free the pointer array itself (capability objects are owned by derived class members).
+  // Only free the pointer array itself (capability objects are owned by derived class
+  // members).
   delete[] bos_caps_;
   bos_caps_ = nullptr;
   bos_cap_num_ = 0;
@@ -36,7 +37,8 @@ DeviceCore::DeviceCore(
     EndpointPool& ep_pool, USBSpec spec, Speed speed,
     DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
     const std::initializer_list<const DescriptorStrings::LanguagePack*>& lang_list,
-    const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>& configs,
+    const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
+        configs,
     ConstRawData uid)
     : config_desc_(ep_pool, configs),
       device_desc_(spec, packet_size, vid, pid, bcd, config_desc_.GetConfigNum()),
@@ -124,7 +126,7 @@ void DeviceCore::WriteZLP(Context context)
   endpoint_.in0->TransferZLP();
 }
 
-void DeviceCore::Init()
+void DeviceCore::Init(bool in_isr)
 {
   endpoint_.in0 = endpoint_.pool.GetEndpoint0In();
   endpoint_.out0 = endpoint_.pool.GetEndpoint0Out();
@@ -135,21 +137,21 @@ void DeviceCore::Init()
   endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
   endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
 
-  config_desc_.BindEndpoints();
+  config_desc_.BindEndpoints(in_isr);
 
   // 收集 BOS capabilities（以对象形式收集；BOS 构建由 BosManager 在 GET_DESCRIPTOR(BOS)
   // 时动态完成）
-  // Collect BOS capabilities (as objects; BOS building is done dynamically by BosManager on
-  // GET_DESCRIPTOR(BOS)).
+  // Collect BOS capabilities (as objects; BOS building is done dynamically by BosManager
+  // on GET_DESCRIPTOR(BOS)).
   config_desc_.RebuildBosCache();
 
   state_.inited = true;
 }
 
-void DeviceCore::Deinit()
+void DeviceCore::Deinit(bool in_isr)
 {
   state_.inited = false;
-  config_desc_.UnbindEndpoints();
+  config_desc_.UnbindEndpoints(in_isr);
   endpoint_.in0->Close();
   endpoint_.out0->Close();
 }
@@ -286,8 +288,9 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
   // Split packets.
   if (has_more)
   {
-    state_.write_remain = {reinterpret_cast<const uint8_t*>(data.addr_) + packet_max_length,
-                           data.size_ - packet_max_length};
+    state_.write_remain = {
+        reinterpret_cast<const uint8_t*>(data.addr_) + packet_max_length,
+        data.size_ - packet_max_length};
     data.size_ = packet_max_length;
     state_.need_write_zlp = false;
   }
@@ -339,7 +342,8 @@ void DeviceCore::DevReadEP0Data(LibXR::RawData data, size_t packet_max_length)
   }
 
   state_.out0_buffer = reinterpret_cast<uint8_t*>(data.addr_);
-  endpoint_.out0->Transfer(data.size_);  // 一次性收满，HAL/底层自动搞定多包 / Receive-full; HAL handles packetization
+  endpoint_.out0->Transfer(data.size_);  // 一次性收满，HAL/底层自动搞定多包 /
+                                         // Receive-full; HAL handles packetization
 }
 
 void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket* setup)
@@ -448,7 +452,7 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
     case StandardRequest::SET_CONFIGURATION:
       // 设置当前配置（切换 config 描述符索引）
       // Set current configuration (switch configuration index).
-      ans = SwitchConfiguration(setup->wValue);
+      ans = SwitchConfiguration(setup->wValue, in_isr);
       break;
 
     case StandardRequest::GET_INTERFACE:
@@ -576,7 +580,8 @@ ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient
       // Only ENDPOINT_HALT (wValue==0) is allowed.
       if (setup->wValue == 0)  // 0 = ENDPOINT_HALT
       {
-        uint8_t ep_addr = setup->wIndex & 0xFF;  // 端点号（低 7 位=EP 号, 高位=方向）/ Endpoint address
+        uint8_t ep_addr =
+            setup->wIndex & 0xFF;  // 端点号（低 7 位=EP 号, 高位=方向）/ Endpoint address
         Endpoint* ep = nullptr;
         endpoint_.pool.FindEndpoint(ep_addr, ep);
         if (ep)
@@ -668,7 +673,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
                                      Recipient recipient)
 {
   uint8_t desc_type = (setup->wValue >> 8) & 0xFF;
-  uint8_t desc_idx = (setup->wValue)&0xFF;
+  uint8_t desc_idx = (setup->wValue) & 0xFF;
   ConstRawData data = {nullptr, 0};
 
   bool early_read_zlp = false;
@@ -701,8 +706,8 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
       }
       else
       {
-        ErrorCode ec =
-            strings_.GenerateString(static_cast<DescriptorStrings::Index>(string_idx), lang);
+        ErrorCode ec = strings_.GenerateString(
+            static_cast<DescriptorStrings::Index>(string_idx), lang);
         if (ec != ErrorCode::OK)
         {
           return ec;
@@ -715,7 +720,8 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
     // BOS (0x0F)
     case 0x0F:  // BOS
     {
-      data = config_desc_.GetBosDescriptor();  // ConfigDescriptor 继承 BosManager / Inherits BosManager
+      data = config_desc_.GetBosDescriptor();  // ConfigDescriptor 继承 BosManager /
+                                               // Inherits BosManager
       early_read_zlp = true;
       break;
     }
@@ -737,11 +743,10 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
         return ErrorCode::ARG_ERR;
       }
 
-      auto* item =
-          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByInterfaceNumber(intf_num));
-      if (item &&
-          item->OnGetDescriptor(in_isr, setup->bRequest, setup->wValue, setup->wLength,
-                                data) == ErrorCode::OK)
+      auto* item = reinterpret_cast<DeviceClass*>(
+          config_desc_.FindItemByInterfaceNumber(intf_num));
+      if (item && item->OnGetDescriptor(in_isr, setup->bRequest, setup->wValue,
+                                        setup->wLength, data) == ErrorCode::OK)
       {
         break;
       }
@@ -761,7 +766,7 @@ ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
   return SetAddress(address, Context::SETUP);
 }
 
-ErrorCode DeviceCore::SwitchConfiguration(uint16_t value)
+ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
 {
   if (value == 0)  // reset
   {
@@ -769,7 +774,7 @@ ErrorCode DeviceCore::SwitchConfiguration(uint16_t value)
     return ErrorCode::NOT_SUPPORT;
   }
 
-  if (config_desc_.SwitchConfig(value) != ErrorCode::OK)
+  if (config_desc_.SwitchConfig(value, in_isr) != ErrorCode::OK)
   {
     return ErrorCode::NOT_FOUND;
   }
@@ -824,7 +829,8 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
       // 低字节 = 接口号
       // Low byte = interface number.
       uint8_t if_num = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item = reinterpret_cast<DeviceClass*>(config_desc_.FindItemByInterfaceNumber(if_num));
+      item =
+          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByInterfaceNumber(if_num));
       break;
     }
     case Recipient::ENDPOINT:
@@ -832,7 +838,8 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
       // 低字节 = 端点地址（含 0x80 方向位）
       // Low byte = endpoint address (including 0x80 direction bit).
       uint8_t ep_addr = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item = reinterpret_cast<DeviceClass*>(config_desc_.FindItemByEndpointAddress(ep_addr));
+      item =
+          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByEndpointAddress(ep_addr));
       break;
     }
     default:
@@ -972,13 +979,15 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     case Recipient::INTERFACE:
     {
       uint8_t if_num = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item = reinterpret_cast<DeviceClass*>(config_desc_.FindItemByInterfaceNumber(if_num));
+      item =
+          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByInterfaceNumber(if_num));
       break;
     }
     case Recipient::ENDPOINT:
     {
       uint8_t ep_addr = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item = reinterpret_cast<DeviceClass*>(config_desc_.FindItemByEndpointAddress(ep_addr));
+      item =
+          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByEndpointAddress(ep_addr));
       break;
     }
     default:

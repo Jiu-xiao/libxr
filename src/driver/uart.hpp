@@ -82,16 +82,16 @@ class UART
 
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
                                         WriteOperation, std::decay_t<OperationType>>>>
-  ErrorCode Write(ConstRawData data, OperationType&& op)
+  ErrorCode Write(ConstRawData data, OperationType&& op, bool in_isr = false)
   {
-    return (*write_port_)(data, std::forward<OperationType>(op));
+    return (*write_port_)(data, std::forward<OperationType>(op), in_isr);
   }
 
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
                                         ReadOperation, std::decay_t<OperationType>>>>
-  ErrorCode Read(RawData data, OperationType&& op)
+  ErrorCode Read(RawData data, OperationType&& op, bool in_isr = false)
   {
-    return (*read_port_)(data, std::forward<OperationType>(op));
+    return (*read_port_)(data, std::forward<OperationType>(op), in_isr);
   }
 };
 

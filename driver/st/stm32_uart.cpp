@@ -192,7 +192,7 @@ stm32_uart_id_t STM32_UART_GetID(USART_TypeDef *addr)
   }
 }
 
-ErrorCode STM32UART::WriteFun(WritePort &port)
+ErrorCode STM32UART::WriteFun(WritePort &port, bool in_isr)
 {
   STM32UART *uart = CONTAINER_OF(&port, STM32UART, _write_port);
 
@@ -252,7 +252,7 @@ ErrorCode STM32UART::WriteFun(WritePort &port)
 
     if (ans != HAL_OK)
     {
-      port.Finish(false, ErrorCode::FAILED, info, 0);
+      port.Finish(in_isr, ErrorCode::FAILED, info);
       return ErrorCode::FAILED;
     }
     else
@@ -264,13 +264,7 @@ ErrorCode STM32UART::WriteFun(WritePort &port)
   return ErrorCode::FAILED;
 }
 
-ErrorCode STM32UART::ReadFun(ReadPort &port)
-{
-  STM32UART *uart = CONTAINER_OF(&port, STM32UART, _read_port);
-  UNUSED(uart);
-
-  return ErrorCode::EMPTY;
-}
+ErrorCode STM32UART::ReadFun(ReadPort &, bool) { return ErrorCode::EMPTY; }
 
 STM32UART::STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx,
                      RawData dma_buff_tx, uint32_t tx_queue_size)
@@ -414,7 +408,7 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
   }
 
   uart->write_port_->Finish(true, ans == HAL_OK ? ErrorCode::OK : ErrorCode::BUSY,
-                            current_info, current_info.data.size_);
+                            current_info);
 
   WriteInfoBlock next_info;
 
@@ -459,7 +453,7 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart)
   WriteInfoBlock info;
   if (uart->write_port_->queue_info_->Peek(info) == ErrorCode::OK)
   {
-    uart->write_port_->Finish(true, ErrorCode::FAILED, info, 0);
+    uart->write_port_->Finish(true, ErrorCode::FAILED, info);
   }
 }
 
@@ -469,7 +463,7 @@ extern "C" void HAL_UART_AbortTransmitCpltCallback(UART_HandleTypeDef *huart)
   WriteInfoBlock info;
   if (uart->write_port_->queue_info_->Peek(info) == ErrorCode::OK)
   {
-    uart->write_port_->Finish(true, ErrorCode::FAILED, info, 0);
+    uart->write_port_->Finish(true, ErrorCode::FAILED, info);
   }
 }
 

@@ -120,31 +120,34 @@ class SPI
    * @param read_data 存储读取数据的缓冲区。Buffer to store the read data.
    * @param write_data 需要写入的数据缓冲区。Buffer containing the data to be written.
    * @param op 读写操作类型。Type of read/write operation.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
   virtual ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data,
-                                 OperationRW &op) = 0;
+                                 OperationRW &op, bool in_isr = false) = 0;
 
   /**
    * @brief 进行 SPI 读取操作。Performs SPI read operation.
    * @param read_data 存储读取数据的缓冲区。Buffer to store the read data.
    * @param op 读写操作类型。Type of read/write operation.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
-  virtual ErrorCode Read(RawData read_data, OperationRW &op)
+  virtual ErrorCode Read(RawData read_data, OperationRW &op, bool in_isr = false)
   {
-    return ReadAndWrite(read_data, ConstRawData(nullptr, 0), op);
+    return ReadAndWrite(read_data, ConstRawData(nullptr, 0), op, in_isr);
   }
 
   /**
    * @brief 进行 SPI 写入操作。Performs SPI write operation.
    * @param write_data 需要写入的数据缓冲区。Buffer containing the data to be written.
    * @param op 读写操作类型。Type of read/write operation.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
-  virtual ErrorCode Write(ConstRawData write_data, OperationRW &op)
+  virtual ErrorCode Write(ConstRawData write_data, OperationRW &op, bool in_isr = false)
   {
-    return ReadAndWrite(RawData(nullptr, 0), write_data, op);
+    return ReadAndWrite(RawData(nullptr, 0), write_data, op, in_isr);
   }
 
   /**
@@ -355,9 +358,10 @@ class SPI
    *        Performs a SPI transfer (zero-copy, supports double buffering).
    * @param size 需要传输的数据大小。The size of the data to be transferred.
    * @param op 读写操作类型。Type of read/write operation.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
-  virtual ErrorCode Transfer(size_t size, OperationRW &op) = 0;
+  virtual ErrorCode Transfer(size_t size, OperationRW &op, bool in_isr = false) = 0;
 
   /**
    * @brief 向 SPI 设备的寄存器写入数据。
@@ -366,9 +370,11 @@ class SPI
    * @param reg 寄存器地址。Register address.
    * @param write_data 写入的数据缓冲区。Buffer containing data to write.
    * @param op 操作类型（同步/异步）。Operation mode (sync/async).
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating success or failure.
    */
-  virtual ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op) = 0;
+  virtual ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op,
+                             bool in_isr = false) = 0;
 
   /**
    * @brief 从 SPI 设备的寄存器读取数据。
@@ -377,9 +383,11 @@ class SPI
    * @param reg 寄存器地址。Register address.
    * @param read_data 读取的数据缓冲区。Buffer to store read data.
    * @param op 操作类型（同步/异步）。Operation mode (sync/async).
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating success or failure.
    */
-  virtual ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW &op) = 0;
+  virtual ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW &op,
+                            bool in_isr = false) = 0;
 
   /**
    * @brief 获取 SPI 配置参数。Gets the SPI configuration parameters.
