@@ -4,10 +4,8 @@ if(NOT TARGET xr)
     message(FATAL_ERROR "Need LibXR to build.")
 endif()
 
-# 1. 递归查找所有 .cpp 文件（文件增删触发重新配置）
-file(GLOB_RECURSE XRUSB_ALL_CPP CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_LIST_DIR}/*.cpp"
-)
+# 1. 递归查找所有 .cpp 文件
+file(GLOB_RECURSE XRUSB_ALL_CPP "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 
 # 2. 递归查找所有目录（包括根目录）
 file(GLOB_RECURSE XRUSB_ALL_PATHS
