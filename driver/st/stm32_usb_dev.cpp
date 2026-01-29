@@ -52,8 +52,8 @@ extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
     return;
   }
 
-  usb->Deinit();
-  usb->Init();
+  usb->Deinit(true);
+  usb->Init(true);
 }
 
 extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
@@ -68,7 +68,7 @@ extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
   {
     return;
   }
-  usb->Deinit();
+  usb->Deinit(true);
 }
 
 extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
@@ -83,7 +83,7 @@ extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
   {
     return;
   }
-  usb->Init();
+  usb->Init(true);
 }
 
 extern "C" void HAL_PCD_ConnectCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }

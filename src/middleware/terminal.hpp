@@ -906,14 +906,10 @@ class Terminal
       buff.size_ = LibXR::min(term->read_port_->Size(), READ_BUFF_SIZE);
       if ((*term->read_port_)(buff, op) == ErrorCode::OK)
       {
-        if (term->read_port_->read_size_ > 0)
-        {
-          buff.size_ = term->read_port_->read_size_;
-          term->write_mutex_->Lock();
-          term->Parse(buff);
-          term->write_stream_.Commit();
-          term->write_mutex_->Unlock();
-        }
+        term->write_mutex_->Lock();
+        term->Parse(buff);
+        term->write_stream_.Commit();
+        term->write_mutex_->Unlock();
       }
     }
   }
@@ -952,14 +948,11 @@ class Terminal
         case ReadOperation::OperationPollingStatus::RUNNING:
           return;
         case ReadOperation::OperationPollingStatus::DONE:
-          buff.size_ = term->read_port_->read_size_;
-          if (buff.size_ > 0)
-          {
-            term->write_mutex_->Lock();
-            term->Parse(buff);
-            term->write_stream_.Commit();
-            term->write_mutex_->Unlock();
-          }
+          term->write_mutex_->Lock();
+          term->Parse(buff);
+          term->write_stream_.Commit();
+          term->write_mutex_->Unlock();
+        case ReadOperation::OperationPollingStatus::ERROR:
           buff.size_ =
               LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
           (*term->read_port_)(buff, op);

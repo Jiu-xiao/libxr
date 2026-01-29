@@ -142,14 +142,14 @@ class CDCUart : public CDCBase, public LibXR::UART
    * Calls CDCBase::Deinit(), then completes any pending TX requests with
    * INIT_ERR and drops their payloads, finally resets the write port.
    */
-  void UnbindEndpoints(EndpointPool& endpoint_pool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
-    CDCBase::UnbindEndpoints(endpoint_pool);
+    CDCBase::UnbindEndpoints(endpoint_pool, in_isr);
     LibXR::WriteInfoBlock info;
     while (write_port_cdc_.queue_info_->Pop(info) == ErrorCode::OK)
     {
       write_port_cdc_.queue_data_->PopBatch(nullptr, info.data.size_);
-      write_port_cdc_.Finish(true, ErrorCode::INIT_ERR, info, 0);
+      write_port_cdc_.Finish(in_isr, ErrorCode::INIT_ERR, info);
     }
     write_port_cdc_.Reset();
   }
@@ -167,7 +167,7 @@ class CDCUart : public CDCBase, public LibXR::UART
    * FAILED to retry later. Otherwise copy a chunk to the endpoint buffer and start
    * the transfer.
    */
-  static ErrorCode WriteFun(WritePort& port)
+  static ErrorCode WriteFun(WritePort& port, bool in_isr)
   {
     CDCUart* cdc = CONTAINER_OF(&port, CDCUart, write_port_cdc_);
 
@@ -185,7 +185,7 @@ class CDCUart : public CDCBase, public LibXR::UART
           return ErrorCode::EMPTY;
         }
         port.queue_data_->PopBatch(nullptr, info.data.size_);
-        port.Finish(true, ErrorCode::INIT_ERR, info, 0);
+        port.Finish(in_isr, ErrorCode::INIT_ERR, info);
       }
       return ErrorCode::FAILED;
     }
@@ -238,7 +238,7 @@ class CDCUart : public CDCBase, public LibXR::UART
       if (cdc->written_ >= info.data.size_)
       {
         port.queue_info_->Pop();
-        port.Finish(false, ErrorCode::OK, info, info.data.size_);
+        port.Finish(in_isr, ErrorCode::OK, info);
         cdc->written_ -= info.data.size_;
       }
 
@@ -281,11 +281,7 @@ class CDCUart : public CDCBase, public LibXR::UART
    *
    * Actual enqueuing happens in OnDataOutComplete(); this is a placeholder.
    */
-  static ErrorCode ReadFun(ReadPort& port)
-  {
-    UNUSED(port);
-    return ErrorCode::EMPTY;
-  }
+  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::EMPTY; }
 
   /**
    * @brief OUT 端点完成：预装下一次接收，并将本次数据推入软件缓冲
@@ -322,7 +318,6 @@ class CDCUart : public CDCBase, public LibXR::UART
    */
   void OnDataInComplete(bool in_isr, ConstRawData& data) override
   {
-    UNUSED(in_isr);
     UNUSED(data);
 
     auto ep_data_in = GetDataInEndpoint();
@@ -349,7 +344,7 @@ class CDCUart : public CDCBase, public LibXR::UART
     if (!Inited() || !IsDtrSet())
     {
       write_port_cdc_.queue_data_->PopBatch(nullptr, info.data.size_);
-      write_port_cdc_.Finish(true, ErrorCode::INIT_ERR, info, 0);
+      write_port_cdc_.Finish(in_isr, ErrorCode::INIT_ERR, info);
       return;
     }
 
@@ -371,7 +366,7 @@ class CDCUart : public CDCBase, public LibXR::UART
       if (written_ >= info.data.size_)
       {
         write_port_cdc_.queue_info_->Pop(info);
-        write_port_cdc_.Finish(true, ErrorCode::OK, info, info.data.size_);
+        write_port_cdc_.Finish(in_isr, ErrorCode::OK, info);
         written_ -= info.data.size_;
         ASSERT(written_ == 0);
       }

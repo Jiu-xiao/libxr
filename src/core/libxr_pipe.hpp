@@ -29,14 +29,10 @@ class Pipe
    * @brief 使用指定数据队列容量构造 Pipe。
    * @brief Construct a Pipe with the given shared data-queue capacity.
    *
-   *
    * @param buffer_size 共享数据队列的容量（字节）。 Capacity (in bytes) of the shared
    * data queue.
-   * @param in_isr 指示回调是否可能在中断上下文中运行。 Whether callbacks may run in ISR
-   * context.
    */
-  Pipe(size_t buffer_size, bool in_isr = false)
-      : read_port_(0), write_port_(1, buffer_size), in_isr_(in_isr)
+  Pipe(size_t buffer_size) : read_port_(0), write_port_(1, buffer_size)
   {
     // 绑定回调并共享同一数据队列。
     // Bind callbacks and share the same data queue.
@@ -87,10 +83,11 @@ class Pipe
    * in `ProcessPendingReads()`.
    *
    * @param port ReadPort 引用（未使用）。 ReadPort reference (unused).
+   * @param in_isr 是否在中断上下文中运行。 Whether running in ISR context.
    * @return 返回 `ErrorCode::EMPTY`，表示当前无操作。 Returns `ErrorCode::EMPTY` (no
    * action).
    */
-  static ErrorCode ReadFun(ReadPort&) { return ErrorCode::EMPTY; }
+  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::EMPTY; }
 
   /**
    * @brief 写端回调：弹出一次写操作并推动读侧处理。
@@ -103,11 +100,12 @@ class Pipe
    * data queue.
    *
    * @param port 触发本回调的 WritePort。 The WritePort invoking this callback.
+   * @param in_isr 是否在中断上下文中运行。 Whether running in ISR context.
    * @return 若已推进返回 `ErrorCode::OK`；若无可处理操作返回 `ErrorCode::EMPTY`。
    *         Returns `ErrorCode::OK` if progressed; `ErrorCode::EMPTY` if no op was
    * available.
    */
-  static ErrorCode WriteFun(WritePort& port)
+  static ErrorCode WriteFun(WritePort& port, bool in_isr)
   {
     Pipe* pipe = CONTAINER_OF(&port, Pipe, write_port_);
     WriteInfoBlock info;
@@ -119,16 +117,14 @@ class Pipe
 
     // 推动读端从共享队列中取数。
     // Drive the reader to consume from the shared queue.
-    pipe->read_port_.ProcessPendingReads(pipe->in_isr_);
+    pipe->read_port_.ProcessPendingReads(in_isr);
 
     return ErrorCode::OK;
   }
 
-  ReadPort read_port_;  ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
-                        ///< data queue.
+  ReadPort read_port_;    ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
+                          ///< data queue.
   WritePort write_port_;  ///< 持有共享数据队列（容量为构造参数）的写端。 Write endpoint
                           ///< owning the shared queue.
-  bool in_isr_ =
-      false;  ///< 回调是否运行在中断上下文中。 Whether callbacks may run in ISR.
 };
 }  // namespace LibXR

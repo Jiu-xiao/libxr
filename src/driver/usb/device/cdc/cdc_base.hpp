@@ -224,8 +224,10 @@ class CDCBase : public DeviceClass
    *
    * @param endpoint_pool 端点资源池 / Endpoint resource pool
    * @param start_itf_num 起始接口号 / Starting interface number
+   * @param in_isr        是否在中断上下文 / Whether in ISR context
    */
-  virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                             bool) override
   {
     control_line_state_ = 0;
     // 获取并配置数据IN端点
@@ -350,7 +352,7 @@ class CDCBase : public DeviceClass
    * 释放所有占用的资源
    * Releases all allocated resources
    */
-  virtual void UnbindEndpoints(EndpointPool& endpoint_pool) override
+  virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
     control_line_state_ = 0;

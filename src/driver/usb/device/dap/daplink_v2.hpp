@@ -109,14 +109,116 @@ class DapLinkV2Class : public DeviceClass
    * @brief 绑定端点资源 / Bind endpoint resources
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 起始接口号 / Start interface number
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override;
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
+  {
+    inited_ = false;
+
+    interface_num_ = start_itf_num;
+
+    // Patch WinUSB function subset to match this interface number
+    UpdateWinUsbInterfaceFields();
+
+    // Allocate endpoints
+    auto ans =
+        endpoint_pool.Get(ep_data_out_, Endpoint::Direction::OUT, data_out_ep_num_);
+    ASSERT(ans == ErrorCode::OK);
+
+    ans = endpoint_pool.Get(ep_data_in_, Endpoint::Direction::IN, data_in_ep_num_);
+    ASSERT(ans == ErrorCode::OK);
+
+    // Configure endpoints
+    // - Use upper bound; core will choose a valid max packet size <= this limit.
+    // - Keep double_buffer=false to preserve strict request/response sequencing.
+    ep_data_out_->Configure(
+        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, true});
+    ep_data_in_->Configure(
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
+
+    // Hook callbacks
+    ep_data_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
+    ep_data_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
+
+    // Interface descriptor (vendor specific, 2 endpoints)
+    desc_block_.intf = {9,
+                        static_cast<uint8_t>(DescriptorType::INTERFACE),
+                        interface_num_,
+                        0,
+                        2,
+                        0xFF,  // vendor specific
+                        0x00,
+                        0x00,
+                        0};
+
+    desc_block_.ep_out = {7,
+                          static_cast<uint8_t>(DescriptorType::ENDPOINT),
+                          static_cast<uint8_t>(ep_data_out_->GetAddress()),
+                          static_cast<uint8_t>(Endpoint::Type::BULK),
+                          ep_data_out_->MaxPacketSize(),
+                          0};
+
+    desc_block_.ep_in = {7,
+                         static_cast<uint8_t>(DescriptorType::ENDPOINT),
+                         static_cast<uint8_t>(ep_data_in_->GetAddress()),
+                         static_cast<uint8_t>(Endpoint::Type::BULK),
+                         ep_data_in_->MaxPacketSize(),
+                         0};
+
+    SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
+
+    // Runtime defaults
+    dap_state_ = {};
+    dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
+    dap_state_.transfer_abort = false;
+
+    swj_clock_hz_ = 1'000'000u;
+    (void)swd_.SetClockHz(swj_clock_hz_);
+
+    // SWJ shadow defaults: SWDIO=1, nRESET=1, SWCLK=0
+    last_nreset_level_high_ = true;
+    swj_shadow_ = static_cast<uint8_t>(DapLinkV2Def::DAP_SWJ_SWDIO_TMS |
+                                       DapLinkV2Def::DAP_SWJ_NRESET);
+
+    inited_ = true;
+    ArmOutTransferIfIdle();
+  }
 
   /**
    * @brief 解绑端点资源 / Unbind endpoint resources
    * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints(EndpointPool& endpoint_pool) override;
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
+  {
+    inited_ = false;
+
+    dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
+    dap_state_.transfer_abort = false;
+
+    if (ep_data_in_)
+    {
+      ep_data_in_->Close();
+      ep_data_in_->SetActiveLength(0);
+      endpoint_pool.Release(ep_data_in_);
+      ep_data_in_ = nullptr;
+    }
+
+    if (ep_data_out_)
+    {
+      ep_data_out_->Close();
+      ep_data_out_->SetActiveLength(0);
+      endpoint_pool.Release(ep_data_out_);
+      ep_data_out_ = nullptr;
+    }
+
+    swd_.Close();
+
+    // Reset shadow defaults
+    last_nreset_level_high_ = true;
+    swj_shadow_ = static_cast<uint8_t>(DapLinkV2Def::DAP_SWJ_SWDIO_TMS |
+                                       DapLinkV2Def::DAP_SWJ_NRESET);
+  }
 
   /**
    * @brief 接口数量 / Number of interfaces contributed
@@ -610,112 +712,6 @@ template <typename SwdPort>
 size_t DapLinkV2Class<SwdPort>::GetMaxConfigSize()
 {
   return sizeof(desc_block_);
-}
-
-template <typename SwdPort>
-void DapLinkV2Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool,
-                                            uint8_t start_itf_num)
-{
-  inited_ = false;
-
-  interface_num_ = start_itf_num;
-
-  // Patch WinUSB function subset to match this interface number
-  UpdateWinUsbInterfaceFields();
-
-  // Allocate endpoints
-  auto ans = endpoint_pool.Get(ep_data_out_, Endpoint::Direction::OUT, data_out_ep_num_);
-  ASSERT(ans == ErrorCode::OK);
-
-  ans = endpoint_pool.Get(ep_data_in_, Endpoint::Direction::IN, data_in_ep_num_);
-  ASSERT(ans == ErrorCode::OK);
-
-  // Configure endpoints
-  // - Use upper bound; core will choose a valid max packet size <= this limit.
-  // - Enable double buffer; sequencing is enforced by ArmOutTransferIfIdle().
-  ep_data_out_->Configure(
-      {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, true});
-  ep_data_in_->Configure(
-      {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
-
-  // Hook callbacks
-  ep_data_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
-  ep_data_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
-
-  // Interface descriptor (vendor specific, 2 endpoints)
-  desc_block_.intf = {9,
-                      static_cast<uint8_t>(DescriptorType::INTERFACE),
-                      interface_num_,
-                      0,
-                      2,
-                      0xFF,  // vendor specific
-                      0x00,
-                      0x00,
-                      0};
-
-  desc_block_.ep_out = {7,
-                        static_cast<uint8_t>(DescriptorType::ENDPOINT),
-                        static_cast<uint8_t>(ep_data_out_->GetAddress()),
-                        static_cast<uint8_t>(Endpoint::Type::BULK),
-                        ep_data_out_->MaxPacketSize(),
-                        0};
-
-  desc_block_.ep_in = {7,
-                       static_cast<uint8_t>(DescriptorType::ENDPOINT),
-                       static_cast<uint8_t>(ep_data_in_->GetAddress()),
-                       static_cast<uint8_t>(Endpoint::Type::BULK),
-                       ep_data_in_->MaxPacketSize(),
-                       0};
-
-  SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
-
-  // Runtime defaults
-  dap_state_ = {};
-  dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
-  dap_state_.transfer_abort = false;
-
-  swj_clock_hz_ = 1'000'000u;
-  (void)swd_.SetClockHz(swj_clock_hz_);
-
-  // SWJ shadow defaults: SWDIO=1, nRESET=1, SWCLK=0
-  last_nreset_level_high_ = true;
-  swj_shadow_ = static_cast<uint8_t>(DapLinkV2Def::DAP_SWJ_SWDIO_TMS |
-                                     DapLinkV2Def::DAP_SWJ_NRESET);
-
-  inited_ = true;
-  ArmOutTransferIfIdle();
-}
-
-template <typename SwdPort>
-void DapLinkV2Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool)
-{
-  inited_ = false;
-
-  dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
-  dap_state_.transfer_abort = false;
-
-  if (ep_data_in_)
-  {
-    ep_data_in_->Close();
-    ep_data_in_->SetActiveLength(0);
-    endpoint_pool.Release(ep_data_in_);
-    ep_data_in_ = nullptr;
-  }
-
-  if (ep_data_out_)
-  {
-    ep_data_out_->Close();
-    ep_data_out_->SetActiveLength(0);
-    endpoint_pool.Release(ep_data_out_);
-    ep_data_out_ = nullptr;
-  }
-
-  swd_.Close();
-
-  // Reset shadow defaults
-  last_nreset_level_high_ = true;
-  swj_shadow_ = static_cast<uint8_t>(DapLinkV2Def::DAP_SWJ_SWDIO_TMS |
-                                     DapLinkV2Def::DAP_SWJ_NRESET);
 }
 
 // ============================================================================

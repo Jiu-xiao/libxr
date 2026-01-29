@@ -53,10 +53,12 @@ class I2C
    * @param op 读取操作对象，包含同步或异步操作模式。
    *           Read operation object containing synchronous or asynchronous operation
    * mode.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，指示操作是否成功。
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
-  virtual ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation &op) = 0;
+  virtual ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation &op,
+                         bool in_isr) = 0;
 
   /**
    * @brief 向 I2C 设备写入数据。
@@ -72,11 +74,12 @@ class I2C
    * @param op 写入操作对象，包含同步或异步操作模式。
    *           Write operation object containing synchronous or asynchronous operation
    * mode.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，指示操作是否成功。
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
   virtual ErrorCode Write(uint16_t slave_addr, ConstRawData write_data,
-                          WriteOperation &op) = 0;
+                          WriteOperation &op, bool in_isr) = 0;
 
   /**
    * @brief 配置 I2C 设备参数。
@@ -110,12 +113,14 @@ class I2C
    *          Read operation object (sync or async).
    * @param mem_addr_size 寄存器地址长度。
    *                      Size of register address in bytes.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，表示是否读取成功。
    *         Returns `ErrorCode` indicating success or failure.
    */
   virtual ErrorCode MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
                             ReadOperation &op,
-                            MemAddrLength mem_addr_size = MemAddrLength::BYTE_8) = 0;
+                            MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
+                            bool in_isr = false) = 0;
 
   /**
    * @brief 向 I2C 设备指定寄存器写入数据。
@@ -134,12 +139,14 @@ class I2C
    *          Write operation object (sync or async).
    * @param mem_addr_size 寄存器地址长度。
    *                      Size of register address in bytes.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，表示是否写入成功。
    *         Returns `ErrorCode` indicating success or failure.
    */
   virtual ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                              ConstRawData write_data, WriteOperation &op,
-                             MemAddrLength mem_addr_size = MemAddrLength::BYTE_8) = 0;
+                             MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
+                             bool in_isr = false) = 0;
 };
 
 }  // namespace LibXR

@@ -143,6 +143,12 @@ class BaseQueue
    */
   [[nodiscard]] size_t EmptySize() const;
 
+  /**
+   * @brief 获取队列的最大容量 (Get the maximum capacity of the queue).
+   * @return 队列的最大容量 (Maximum capacity of the queue).
+   */
+  [[nodiscard]] size_t MaxSize() const { return length_; }
+
   BaseQueue(const BaseQueue &) = delete;
   BaseQueue &operator=(const BaseQueue &) = delete;
   BaseQueue &operator=(BaseQueue &) = delete;
@@ -304,6 +310,13 @@ class Queue : public BaseQueue
    *         - `ErrorCode::OK` 表示成功 (`ErrorCode::OK` on success).
    */
   ErrorCode Overwrite(const Data &data) { return BaseQueue::Overwrite(&data); }
+
+  /**
+   * @brief 获取队列的最大容量
+   *        (Get the maximum capacity of the queue).
+   * @return 队列的最大容量 (Maximum capacity of the queue).
+   */
+  [[nodiscard]] size_t MaxSize() const { return length_; }
 };
 
 }  // namespace LibXR

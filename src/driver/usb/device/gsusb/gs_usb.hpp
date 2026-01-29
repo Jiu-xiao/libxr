@@ -193,8 +193,9 @@ class GsUsbClass : public DeviceClass
    * @brief 初始化接口与端点资源 / Initialize interface and endpoints
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 起始接口号 / Starting interface number
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void BindEndpoints(EndpointPool &endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool &endpoint_pool, uint8_t start_itf_num, bool) override
   {
     inited_ = false;
     interface_num_ = start_itf_num;
@@ -301,8 +302,9 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief 释放端点资源并复位状态 / Release endpoint resources and reset state
    * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints(EndpointPool &endpoint_pool) override
+  void UnbindEndpoints(EndpointPool &endpoint_pool, bool) override
   {
     inited_ = false;
     host_format_ok_ = false;

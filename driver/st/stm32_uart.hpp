@@ -113,9 +113,9 @@ namespace LibXR
 class STM32UART : public UART
 {
  public:
-  static ErrorCode WriteFun(WritePort &port);
+  static ErrorCode WriteFun(WritePort &port, bool in_isr);
 
-  static ErrorCode ReadFun(ReadPort &port);
+  static ErrorCode ReadFun(ReadPort &port, bool in_isr);
 
   STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx, RawData dma_buff_tx,
             uint32_t tx_queue_size = 5);

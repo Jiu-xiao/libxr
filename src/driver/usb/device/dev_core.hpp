@@ -53,8 +53,8 @@ class DeviceClass : public ConfigDescriptorItem
                                     ///< stage buffer (Host->Device)
     ConstRawData write_data{nullptr, 0};  ///< IN 数据阶段发送数据（Device->Host）/ IN
                                           ///< data stage payload (Device->Host)
-    bool read_zlp = false;  ///< 期望 STATUS OUT（arm OUT 等待 ZLP）/ Expect STATUS OUT
-                            ///< (arm OUT for ZLP)
+    bool read_zlp = false;   ///< 期望 STATUS OUT（arm OUT 等待 ZLP）/ Expect STATUS OUT
+                             ///< (arm OUT for ZLP)
     bool write_zlp = false;  ///< 发送 STATUS IN（发送 ZLP）/ Send STATUS IN (send ZLP)
 
     RawData& OutData() { return read_data; }
@@ -220,23 +220,31 @@ class DeviceCore
 
   /**
    * @brief 初始化 / Initialize
+   *
+   * @param in_isr 是否在 ISR / Whether in ISR context
    */
-  virtual void Init();
+  virtual void Init(bool in_isr);
 
   /**
    * @brief 反初始化 / Deinitialize
+   *
+   * @param in_isr 是否在 ISR / Whether in ISR context
    */
-  virtual void Deinit();
+  virtual void Deinit(bool in_isr);
 
   /**
    * @brief 启动设备（由子类实现）/ Start device (implemented by derived class)
+   *
+   * @param in_isr 是否在 ISR / Whether in ISR context
    */
-  virtual void Start() = 0;
+  virtual void Start(bool in_isr) = 0;
 
   /**
    * @brief 停止设备（由子类实现）/ Stop device (implemented by derived class)
+   *
+   * @param in_isr 是否在 ISR / Whether in ISR context
    */
-  virtual void Stop() = 0;
+  virtual void Stop(bool in_isr) = 0;
 
   /**
    * @brief 处理 Setup 包 / Handle Setup packet
@@ -305,7 +313,7 @@ class DeviceCore
   ErrorCode ApplyFeature(const SetupPacket* setup, Recipient recipient);
   ErrorCode SendDescriptor(bool in_isr, const SetupPacket* setup, Recipient recipient);
   ErrorCode PrepareAddressChange(uint16_t address);
-  ErrorCode SwitchConfiguration(uint16_t value);
+  ErrorCode SwitchConfiguration(uint16_t value, bool in_isr);
   ErrorCode SendConfiguration();
 
   void StallControlEndpoint();
@@ -336,8 +344,8 @@ class DeviceCore
   {
     bool inited = false;                    ///< 是否已初始化 / Whether initialized
     Speed speed = Speed::FULL;              ///< 设备速度 / Device speed
-    Context in0 = Context::UNKNOWN;          ///< EP0 IN 上下文 / EP0 IN context
-    Context out0 = Context::UNKNOWN;         ///< EP0 OUT 上下文 / EP0 OUT context
+    Context in0 = Context::UNKNOWN;         ///< EP0 IN 上下文 / EP0 IN context
+    Context out0 = Context::UNKNOWN;        ///< EP0 OUT 上下文 / EP0 OUT context
     ConstRawData write_remain{nullptr, 0};  ///< IN 剩余待发送 / Remaining IN payload
     RawData read_remain{nullptr, 0};        ///< OUT 剩余待接收 / Remaining OUT buffer
     uint8_t pending_addr = 0xFF;            ///< 待生效地址 / Pending address
