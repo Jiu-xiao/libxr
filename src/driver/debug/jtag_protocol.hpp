@@ -117,6 +117,68 @@ struct ChainConfig
 };
 
 /**
+ * @brief 更新链路缓存（可选）。Update chain cache (optional).
+ *
+ * @note 默认假设 index=0 为 TDO 侧设备；缓存仅用于加速，不强制依赖。
+ */
+inline void UpdateChainCache(ChainConfig& cfg)
+{
+  cfg.ir_before_bits_len = 0;
+  cfg.ir_after_bits_len = 0;
+  cfg.dr_before_bits_len = 0;
+  cfg.dr_after_bits_len = 0;
+
+  if (cfg.count == 0 || cfg.index >= cfg.count)
+  {
+    return;
+  }
+
+  if (cfg.ir_length != nullptr)
+  {
+    for (uint8_t i = 0; i < cfg.index; ++i)
+    {
+      cfg.ir_before_bits_len += cfg.ir_length[i];
+    }
+    for (uint8_t i = static_cast<uint8_t>(cfg.index + 1u); i < cfg.count; ++i)
+    {
+      cfg.ir_after_bits_len += cfg.ir_length[i];
+    }
+  }
+
+  cfg.dr_before_bits_len = cfg.index;
+  cfg.dr_after_bits_len = static_cast<uint32_t>(cfg.count - cfg.index - 1u);
+}
+
+/**
+ * @brief 将 Request 组装为 35-bit DR（LSB-first）。
+ *
+ * 布局（LSB-first）：
+ *   bit0: RnW
+ *   bit1: A2
+ *   bit2: A3
+ *   bit3..34: DATA[31:0]
+ */
+inline uint64_t PackDpDr(const Request& req)
+{
+  const uint64_t RNW = req.rnw ? 1u : 0u;
+  const uint64_t A2 = static_cast<uint64_t>(req.addr2b & 0x1u);
+  const uint64_t A3 = static_cast<uint64_t>((req.addr2b >> 1) & 0x1u);
+  return (static_cast<uint64_t>(req.wdata) << 3) | (A3 << 2) | (A2 << 1) | RNW;
+}
+
+/**
+ * @brief 解析 35-bit DR（TDO LSB-first）到 Response。
+ *
+ * @note JTAG ACK 编码与 SWD 不同，需使用 map_jtag_ack 进行映射。
+ */
+inline void UnpackDpDr(uint64_t dr_lsb_first, Response& resp)
+{
+  const uint8_t RAW_ACK = static_cast<uint8_t>(dr_lsb_first & 0x7u);
+  resp.ack = map_jtag_ack(RAW_ACK);
+  resp.rdata = static_cast<uint32_t>((dr_lsb_first >> 3) & 0xFFFF'FFFFu);
+}
+
+/**
  * @brief 构造 DP 请求 / Build DP request
  */
 constexpr Request make_dp_req(bool rnw, uint8_t addr2b, uint32_t wdata = 0u)
