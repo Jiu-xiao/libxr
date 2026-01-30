@@ -123,7 +123,27 @@ class JtagDp final
 
   ErrorCode WriteAbort(uint32_t data, JtagProtocol::Ack& ack)
   {
-    return DpWrite(0u, data, ack);
+    const ErrorCode EC = SelectIr(JtagProtocol::JTAG_IR_ABORT);
+    if (EC != ErrorCode::OK)
+    {
+      ack = JtagProtocol::Ack::PROTOCOL;
+      return EC;
+    }
+
+    JtagProtocol::Response resp;
+    uint64_t out_dr = 0u;
+    const ErrorCode EC2 = ShiftValueThroughChain(
+        JtagProtocol::PackDpDr(JtagProtocol::make_dp_req(false, 0u, data)),
+        JtagProtocol::JTAG_DP_DR_LEN, out_dr);
+    if (EC2 != ErrorCode::OK)
+    {
+      ack = JtagProtocol::Ack::PROTOCOL;
+      return EC2;
+    }
+
+    JtagProtocol::UnpackDpDr(out_dr, resp);
+    ack = resp.ack;
+    return (resp.ack == JtagProtocol::Ack::OK) ? ErrorCode::OK : ErrorCode::FAILED;
   }
 
   ErrorCode Transfer(const JtagProtocol::Request& req, JtagProtocol::Response& resp)
