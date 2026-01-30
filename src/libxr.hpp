@@ -40,6 +40,7 @@
 #include "transform.hpp"
 #include "driver/debug/jtag.hpp"
 #include "driver/debug/jtag_general_gpio.hpp"
+#include "driver/debug/jtag_protocol.hpp"
 
 /**
  * @brief LibXR 命名空间
