@@ -35,6 +35,8 @@
 #include "timebase.hpp"
 #include "timer.hpp"
 #include "transform.hpp"
+#include "driver/debug/jtag.hpp"
+#include "driver/debug/jtag_general_gpio.hpp"
 
 /**
  * @brief LibXR 命名空间
