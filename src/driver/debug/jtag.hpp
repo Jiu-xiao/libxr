@@ -88,6 +88,17 @@ class Jtag
                             uint8_t* out_lsb_first) = 0;
 
   /**
+   * @brief 产生固定 TMS 的序列移位（LSB-first）。Shift sequence with fixed TMS (LSB-first).
+   * @param cycles 位数。Bit count.
+   * @param tms 固定的 TMS 值。Fixed TMS value.
+   * @param tdi_lsb_first 输入 TDI 数据（LSB-first），可为 nullptr。
+   * @param tdo_lsb_first 输出 TDO 数据（LSB-first），可为 nullptr。
+   * @return ErrorCode 操作结果。Error code.
+   */
+  virtual ErrorCode Sequence(uint32_t cycles, bool tms, const uint8_t* tdi_lsb_first,
+                             uint8_t* tdo_lsb_first) = 0;
+
+  /**
    * @brief 插入空闲时钟周期（Run-Test/Idle）。Insert idle cycles.
    * @param cycles 周期数。Number of cycles.
    */
@@ -98,4 +109,3 @@ class Jtag
 };
 
 }  // namespace LibXR::Debug
-

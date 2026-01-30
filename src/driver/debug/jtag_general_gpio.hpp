@@ -214,6 +214,38 @@ class JtagGeneralGPIO final : public Jtag
     return ErrorCode::OK;
   }
 
+  ErrorCode Sequence(uint32_t cycles, bool tms, const uint8_t* tdi_lsb_first,
+                     uint8_t* tdo_lsb_first) override
+  {
+    if (cycles == 0u)
+    {
+      return ErrorCode::OK;
+    }
+
+    if (tdo_lsb_first != nullptr)
+    {
+      const uint32_t BYTES = (cycles + 7u) / 8u;
+      Memory::FastSet(tdo_lsb_first, 0, BYTES);
+    }
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      const bool TDI_VAL = (tdi_lsb_first == nullptr)
+                               ? false
+                               : (((tdi_lsb_first[i / 8u] >> (i & 7u)) & 0x1u) != 0u);
+      bool tdo_bit = false;
+      ClockCycle(tms, TDI_VAL, tdo_lsb_first ? &tdo_bit : nullptr);
+
+      if (tdo_lsb_first != nullptr && tdo_bit)
+      {
+        tdo_lsb_first[i / 8u] =
+            static_cast<uint8_t>(tdo_lsb_first[i / 8u] | (1u << (i & 7u)));
+      }
+    }
+
+    return ErrorCode::OK;
+  }
+
   void IdleClocks(uint32_t cycles) override
   {
     if (cycles == 0u)
@@ -263,26 +295,33 @@ class JtagGeneralGPIO final : public Jtag
 
   void ShiftBits(uint32_t bits, const uint8_t* in_lsb_first, uint8_t* out_lsb_first)
   {
-    if (out_lsb_first != nullptr)
+    if (out_lsb_first != nullptr && bits <= 1u)
     {
       const uint32_t BYTES = (bits + 7u) / 8u;
       Memory::FastSet(out_lsb_first, 0, BYTES);
     }
 
-    for (uint32_t i = 0; i < bits; ++i)
+    if (bits == 0u)
     {
-      const bool TMS_VAL = (i + 1u == bits);
-      const bool TDI_VAL = (in_lsb_first == nullptr)
-                               ? false
-                               : (((in_lsb_first[i / 8u] >> (i & 7u)) & 0x1u) != 0u);
-      bool tdo_bit = false;
-      ClockCycle(TMS_VAL, TDI_VAL, out_lsb_first ? &tdo_bit : nullptr);
+      return;
+    }
 
-      if (out_lsb_first != nullptr && tdo_bit)
-      {
-        out_lsb_first[i / 8u] =
-            static_cast<uint8_t>(out_lsb_first[i / 8u] | (1u << (i & 7u)));
-      }
+    if (bits > 1u)
+    {
+      (void)Sequence(bits - 1u, false, in_lsb_first, out_lsb_first);
+    }
+
+    const uint32_t LAST = bits - 1u;
+    const bool LAST_TDI = (in_lsb_first == nullptr)
+                              ? false
+                              : (((in_lsb_first[LAST / 8u] >> (LAST & 7u)) & 0x1u) != 0u);
+    bool last_tdo = false;
+    ClockCycle(true, LAST_TDI, out_lsb_first ? &last_tdo : nullptr);
+
+    if (out_lsb_first != nullptr && last_tdo)
+    {
+      out_lsb_first[LAST / 8u] =
+          static_cast<uint8_t>(out_lsb_first[LAST / 8u] | (1u << (LAST & 7u)));
     }
   }
 
