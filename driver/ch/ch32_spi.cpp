@@ -283,7 +283,7 @@ ErrorCode CH32SPI::PollingTransfer(uint8_t* rx, const uint8_t* tx, uint32_t len)
 }
 
 ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
-                                OperationRW& op)
+                                OperationRW& op, bool in_isr)
 {
   const uint32_t rsz = read_data.size_;
   const uint32_t wsz = write_data.size_;
@@ -292,7 +292,7 @@ ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   if (need == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     return ErrorCode::OK;
   }
 
@@ -348,18 +348,18 @@ ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     SwitchBuffer();
 
-    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(false, ec);
+    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
     return ec;
   }
 }
 
-ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op)
+ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool in_isr)
 {
   const uint32_t n = read_data.size_;
   if (n == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     return ErrorCode::OK;
   }
 
@@ -406,18 +406,19 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op)
 
     SwitchBuffer();
 
-    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(false, ec);
+    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
     return ec;
   }
 }
 
-ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op)
+ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op,
+                            bool in_isr)
 {
   const uint32_t n = write_data.size_;
   if (n == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     return ErrorCode::OK;
   }
 
@@ -463,7 +464,7 @@ ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& 
 
     SwitchBuffer();
 
-    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(false, ec);
+    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
     return ec;
   }
 }
@@ -555,14 +556,14 @@ void CH32SPI::TxDmaIRQHandler()
 }
 
 // === 零拷贝 Transfer ===
-ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op)
+ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 {
   if (DmaBusy()) return ErrorCode::BUSY;
 
   if (size == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     return ErrorCode::OK;
   }
 
@@ -595,7 +596,7 @@ ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op)
 
   SwitchBuffer();
 
-  if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(false, ec);
+  if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
   return ec;
 }
 

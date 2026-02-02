@@ -16,15 +16,15 @@ namespace LibXR
 class CH32UART : public UART
 {
  public:
-  CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef *tx_gpio_port,
-           uint16_t tx_gpio_pin, GPIO_TypeDef *rx_gpio_port, uint16_t rx_gpio_pin,
+  CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef* tx_gpio_port,
+           uint16_t tx_gpio_pin, GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin,
            uint32_t pin_remap = 0, uint32_t tx_queue_size = 5,
            UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
   ErrorCode SetConfig(UART::Configuration config);
 
-  static ErrorCode WriteFun(WritePort &port);
-  static ErrorCode ReadFun(ReadPort &port);
+  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
   void TxDmaIRQHandler();
   void RxDmaIRQHandler();
@@ -41,11 +41,13 @@ class CH32UART : public UART
 
   size_t last_rx_pos_ = 0;
 
-  USART_TypeDef *instance_;
-  DMA_Channel_TypeDef *dma_rx_channel_;
-  DMA_Channel_TypeDef *dma_tx_channel_;
+  USART_TypeDef* instance_;
+  DMA_Channel_TypeDef* dma_rx_channel_;
+  DMA_Channel_TypeDef* dma_tx_channel_;
 
-  static CH32UART *map[CH32_UART_NUMBER];
+  Flag::Plain in_tx_isr, tx_busy_;
+
+  static CH32UART* map[CH32_UART_NUMBER];
 };
 
 }  // namespace LibXR
