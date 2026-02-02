@@ -84,10 +84,9 @@ class Pipe
    *
    * @param port ReadPort 引用（未使用）。 ReadPort reference (unused).
    * @param in_isr 是否在中断上下文中运行。 Whether running in ISR context.
-   * @return 返回 `ErrorCode::EMPTY`，表示当前无操作。 Returns `ErrorCode::EMPTY` (no
-   * action).
+   * @return 返回 `ErrorCode::PENDING`。 Returns `ErrorCode::PENDING`.
    */
-  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::EMPTY; }
+  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
   /**
    * @brief 写端回调：弹出一次写操作并推动读侧处理。
@@ -122,8 +121,8 @@ class Pipe
     return ErrorCode::OK;
   }
 
-  ReadPort read_port_;    ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
-                          ///< data queue.
+  ReadPort read_port_;  ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
+                        ///< data queue.
   WritePort write_port_;  ///< 持有共享数据队列（容量为构造参数）的写端。 Write endpoint
                           ///< owning the shared queue.
 };

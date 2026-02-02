@@ -145,7 +145,7 @@ enum class SizeLimitMode : uint8_t
  * @param line 出错的行号 | Line number where the error occurred
  * @param in_isr 是否发生在中断服务例程（ISR） | Whether it occurred in an ISR
  */
-extern void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
+extern "C" void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {
