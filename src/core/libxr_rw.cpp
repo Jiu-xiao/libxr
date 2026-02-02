@@ -1,5 +1,6 @@
 #include "libxr_rw.hpp"
 
+#include "libxr_def.hpp"
 #include "mutex.hpp"
 
 using namespace LibXR;
@@ -46,7 +47,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 {
   if (Readable())
   {
-    BusyState is_busy = busy_.load(std::memory_order_relaxed);
+    BusyState is_busy = busy_.load(std::memory_order_acquire);
 
     if (is_busy == BusyState::PENDING)
     {
@@ -67,6 +68,9 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
               queue_data_->PopBatch(reinterpret_cast<uint8_t*>(data.addr_), data.size_);
           ASSERT(ans == ErrorCode::OK);
         }
+
+        OnRxDequeue(in_isr);
+
         if (op.type != ReadOperation::OperationType::BLOCK)
         {
           op.UpdateStatus(in_isr, ErrorCode::OK);
@@ -80,7 +84,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
       auto ans = read_fun_(*this, in_isr);
 
-      if (ans != ErrorCode::OK)
+      if (ans == ErrorCode::PENDING)
       {
         BusyState expected = BusyState::IDLE;
         if (busy_.compare_exchange_weak(expected, BusyState::PENDING,
@@ -98,7 +102,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
       {
         if (op.type != ReadOperation::OperationType::BLOCK)
         {
-          op.UpdateStatus(in_isr, ErrorCode::OK);
+          op.UpdateStatus(in_isr, ans);
         }
         return ErrorCode::OK;
       }
@@ -253,11 +257,11 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     lock_.store(LockState::UNLOCKED, std::memory_order_release);
   }
 
-  if (ans == ErrorCode::OK)
+  if (ans != ErrorCode::PENDING)
   {
     if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      op.UpdateStatus(in_isr, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ans);
     }
     return ErrorCode::OK;
   }

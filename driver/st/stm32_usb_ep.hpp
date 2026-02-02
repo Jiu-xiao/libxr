@@ -21,7 +21,7 @@ class STM32Endpoint : public USB::Endpoint
 #if defined(USB_BASE)
   STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd,
                 Direction dir, size_t hw_buffer_offset, size_t hw_buffer_size,
-                bool double_hw_buffer, LibXR::RawData buffer);
+                LibXR::RawData buffer);
 #endif
 
   void Configure(const Config& cfg) override;
@@ -34,12 +34,14 @@ class STM32Endpoint : public USB::Endpoint
   size_t MaxTransferSize() const override;
 
   PCD_HandleTypeDef* hpcd_;
+
+  size_t last_transfer_size_ = 0;
+
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   size_t fifo_size_ = 0;
 #endif
 #if defined(USB_BASE)
   size_t hw_buffer_size_ = 0;
-  bool double_hw_buffer_ = false;
 #endif
   stm32_usb_dev_id_t id_;
 
@@ -51,7 +53,7 @@ class STM32Endpoint : public USB::Endpoint
   static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 9;
 #endif
 
-  static inline STM32Endpoint* map_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
+  static inline STM32Endpoint* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
 #endif
 
 #if defined(USB_OTG_FS)
@@ -63,12 +65,12 @@ class STM32Endpoint : public USB::Endpoint
 #else
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 6;
 #endif
-  static inline STM32Endpoint* map_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
+  static inline STM32Endpoint* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 #endif
 
 #if defined(USB_BASE)
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
-  static inline STM32Endpoint* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
+  static inline STM32Endpoint* map_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 #endif
 };
 

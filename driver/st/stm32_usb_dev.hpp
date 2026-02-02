@@ -206,7 +206,6 @@ class STM32USBDeviceDevFs : public STM32USBDevice
   {
     LibXR::RawData buffer1, buffer2;
     size_t hw_buffer_size1, hw_buffer_size2;
-    bool double_buffer = false;
     bool double_buffer_is_in = false;
 
     EPConfig(LibXR::RawData buffer, size_t hw_buffer_size, bool is_in)

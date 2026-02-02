@@ -27,7 +27,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
 {
   inline constexpr size_t AlignUp(size_t size, size_t align)
   {
-    return ((size + align - 1) / align) * align;
+    return (size / align + 1) * align;
   }
 
  public:
