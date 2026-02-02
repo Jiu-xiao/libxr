@@ -79,10 +79,13 @@ void StdoThread(LibXR::WritePort *write_port)
       }
 
       auto write_size = fwrite(write_buff, sizeof(char), info.data.size_, stdout);
-      fflush(stdout);
+      auto fflush_ans = fflush(stdout);
+
+      UNUSED(write_size);
+      UNUSED(fflush_ans);
+
       write_port->Finish(
-          false, write_size == info.data.size_ ? ErrorCode::OK : ErrorCode::FAILED, info,
-          write_size);
+          false, write_size == info.data.size_ ? ErrorCode::OK : ErrorCode::FAILED, info);
     }
   }
 }
@@ -92,7 +95,7 @@ void LibXR::PlatformInit(webots::Robot *robot, uint32_t timer_pri,
 {
   LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
   LibXR::Timer::stack_depth_ = timer_stack_depth;
-  auto write_fun = [](WritePort &port)
+  auto write_fun = [](WritePort &port, bool)
   {
     UNUSED(port);
     stdo_sem.Post();
@@ -104,7 +107,7 @@ void LibXR::PlatformInit(webots::Robot *robot, uint32_t timer_pri,
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort &port)
+  auto read_fun = [](ReadPort &port, bool)
   {
     UNUSED(port);
     return ErrorCode::FAILED;
