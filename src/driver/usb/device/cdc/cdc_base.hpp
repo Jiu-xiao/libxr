@@ -342,7 +342,7 @@ class CDCBase : public DeviceClass
     inited_ = true;
 
     // 启动OUT端点传输
-    ep_data_out_->Transfer(ep_data_out_->MaxTransferSize());
+    ep_data_out_->Transfer(ep_data_out_->MaxPacketSize());
   }
 
   /**

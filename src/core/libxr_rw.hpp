@@ -382,6 +382,15 @@ class ReadPort
   ErrorCode operator()(RawData data, ReadOperation &op, bool in_isr = false);
 
   /**
+   * @brief RX 数据从软件队列成功出队后的通知。
+   *        Notification after bytes are popped from RX data queue.
+   *
+   * @param in_isr 指示是否在中断上下文中执行。
+   *               Indicates whether the operation is executed in an interrupt context.
+   */
+  virtual void OnRxDequeue(bool) {}
+
+  /**
    * @brief Processes pending reads.
    * @brief 处理挂起的读取请求。
    *

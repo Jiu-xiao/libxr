@@ -60,6 +60,7 @@ static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void *));
  */
 enum class ErrorCode : int8_t
 {
+  PENDING = 1,        ///< 等待中 | Pending
   OK = 0,             ///< 操作成功 | Operation successful
   FAILED = -1,        ///< 操作失败 | Operation failed
   INIT_ERR = -2,      ///< 初始化错误 | Initialization error
