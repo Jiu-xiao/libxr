@@ -12,7 +12,7 @@ void test_pipe_basic()
   using namespace LibXR;
 
   // 1) 准备 Pipe 与两端口
-  Pipe pipe(/*buffer_size=*/64, /*in_isr=*/false);
+  Pipe pipe(/*buffer_size=*/64);
   ReadPort& r = pipe.GetReadPort();
   WritePort& w = pipe.GetWritePort();
 
@@ -44,7 +44,7 @@ void test_pipe_write_then_read()
 {
   using namespace LibXR;
 
-  Pipe pipe(64, false);
+  Pipe pipe(64);
   ReadPort& r = pipe.GetReadPort();
   WritePort& w = pipe.GetWritePort();
 
@@ -74,7 +74,7 @@ void test_pipe_chunked_rw()
 {
   using namespace LibXR;
 
-  Pipe pipe(64, false);
+  Pipe pipe(64);
   ReadPort& r = pipe.GetReadPort();
   WritePort& w = pipe.GetWritePort();
 
@@ -108,7 +108,7 @@ void test_pipe_stream_api()
 {
   using namespace LibXR;
 
-  Pipe pipe(64, false);
+  Pipe pipe(64);
   ReadPort& r = pipe.GetReadPort();
   WritePort& w = pipe.GetWritePort();
   WriteOperation wop;

@@ -21,7 +21,7 @@
  * @param in_isr 指示错误是否发生在 ISR 上下文中。 Indicates whether the error occurred in
  * an ISR context.
  */
-void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
+extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {
@@ -38,7 +38,7 @@ namespace LibXR
 class Assert
 {
  public:
-  using Callback = LibXR::Callback<const char *, uint32_t>;
+  using Callback = LibXR::Callback<const char*, uint32_t>;
 
   /**
    * @brief 注册致命错误的回调函数（左值引用版本）。
@@ -47,7 +47,7 @@ class Assert
    * @param cb 要注册的回调函数（左值引用）。The callback function to register (lvalue
    * reference).
    */
-  static void RegisterFatalErrorCallback(const Callback &cb);
+  static void RegisterFatalErrorCallback(const Callback& cb);
 
   /**
    * @brief 注册致命错误的回调函数（右值引用版本）。
@@ -56,7 +56,7 @@ class Assert
    * @param cb 要注册的回调函数（右值引用）。The callback function to register (rvalue
    * reference).
    */
-  static void RegisterFatalErrorCallback(Callback &&cb);
+  static void RegisterFatalErrorCallback(Callback&& cb);
 
 #ifdef LIBXR_DEBUG_BUILD
   /**
