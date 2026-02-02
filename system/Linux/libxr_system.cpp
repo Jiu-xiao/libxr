@@ -105,7 +105,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
   {
     UNUSED(port);
     stdo_sem.Post();
-    return ErrorCode::FAILED;
+    return ErrorCode::PENDING;
   };
 
   LibXR::STDIO::write_ =
@@ -116,7 +116,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
   auto read_fun = [](ReadPort &port, bool)
   {
     UNUSED(port);
-    return ErrorCode::FAILED;
+    return ErrorCode::PENDING;
   };
 
   LibXR::STDIO::read_ =
