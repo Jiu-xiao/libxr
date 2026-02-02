@@ -42,8 +42,8 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
     {
       USBFSD->DEV_ADDR = 0;  // NOLINT
 
-      LibXR::CH32USBDeviceFS::self_->Deinit();
-      LibXR::CH32USBDeviceFS::self_->Init();
+      LibXR::CH32USBDeviceFS::self_->Deinit(true);
+      LibXR::CH32USBDeviceFS::self_->Init(true);
 
       // EP0 toggle/state 复位
       if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -60,8 +60,8 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
 
     if (pending & USBFS_UIF_SUSPEND)
     {
-      LibXR::CH32USBDeviceFS::self_->Deinit();
-      LibXR::CH32USBDeviceFS::self_->Init();
+      LibXR::CH32USBDeviceFS::self_->Deinit(true);
+      LibXR::CH32USBDeviceFS::self_->Init(true);
 
       if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
       if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -77,12 +77,8 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
 
     if (pending & USBFS_UIF_TRANSFER)
     {
-      const uint8_t token =
-          intst &
-          USBFS_UIS_TOKEN_MASK;  // MASK_UIS_TOKEN
-      const uint8_t epnum =
-          intst &
-          USBFS_UIS_ENDP_MASK;  // MASK_UIS_ENDP
+      const uint8_t token = intst & USBFS_UIS_TOKEN_MASK;  // MASK_UIS_TOKEN
+      const uint8_t epnum = intst & USBFS_UIS_ENDP_MASK;   // MASK_UIS_ENDP
 
       auto& ep = map[epnum];
 
@@ -136,8 +132,7 @@ extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
     // 本轮未显式处理的其它 W1C 标志，一并清掉（与 USBHS 版本一致的“兜底清除”风格）
     clear_mask |= static_cast<uint8_t>(pending & ~clear_mask);
 
-    USBFSD->INT_FG =
-        clear_mask;  // NOLINT  // UIF_* 写 1 清零
+    USBFSD->INT_FG = clear_mask;  // NOLINT  // UIF_* 写 1 清零
   }
 }
 
@@ -204,7 +199,7 @@ ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context 
   return ErrorCode::OK;
 }
 
-void CH32USBDeviceFS::Start()
+void CH32USBDeviceFS::Start(bool)
 {
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;                     // NOLINT
   USBFSH->BASE_CTRL = 0x00;                                                      // NOLINT
@@ -214,7 +209,7 @@ void CH32USBDeviceFS::Start()
   NVIC_EnableIRQ(USBFS_IRQn);
 }
 
-void CH32USBDeviceFS::Stop()
+void CH32USBDeviceFS::Stop(bool)
 {
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;  // NOLINT
   USBFSD->BASE_CTRL = 0x00;                                   // NOLINT
@@ -255,8 +250,8 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
     {
       USBHSD->DEV_AD = 0;  // NOLINT
 
-      LibXR::CH32USBDeviceHS::self_->Deinit();
-      LibXR::CH32USBDeviceHS::self_->Init();
+      LibXR::CH32USBDeviceHS::self_->Deinit(true);
+      LibXR::CH32USBDeviceHS::self_->Init(true);
 
       // EP0 toggle/state 复位
       if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -281,8 +276,8 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 
     if (intflag & USBHS_UIF_SUSPEND)
     {
-      LibXR::CH32USBDeviceHS::self_->Deinit();
-      LibXR::CH32USBDeviceHS::self_->Init();
+      LibXR::CH32USBDeviceHS::self_->Deinit(true);
+      LibXR::CH32USBDeviceHS::self_->Init(true);
 
       if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
       if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -465,7 +460,7 @@ ErrorCode CH32USBDeviceHS::SetAddress(uint8_t address, USB::DeviceCore::Context 
   return ErrorCode::OK;
 }
 
-void CH32USBDeviceHS::Start()
+void CH32USBDeviceHS::Start(bool)
 {
   // NOLINTBEGIN
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
@@ -479,7 +474,7 @@ void CH32USBDeviceHS::Start()
   // NOLINTEND
 }
 
-void CH32USBDeviceHS::Stop()
+void CH32USBDeviceHS::Stop(bool)
 {
   // NOLINTBEGIN
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;

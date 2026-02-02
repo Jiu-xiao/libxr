@@ -8,12 +8,12 @@
 using namespace LibXR;
 
 // === 静态对象指针表 ===
-CH32UART *CH32UART::map[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
+CH32UART* CH32UART::map[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
 
 // === 构造函数：串口+DMA+GPIO初始化 ===
 CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
-                   GPIO_TypeDef *tx_gpio_port, uint16_t tx_gpio_pin,
-                   GPIO_TypeDef *rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
+                   GPIO_TypeDef* tx_gpio_port, uint16_t tx_gpio_pin,
+                   GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
                    uint32_t tx_queue_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
       id_(id),
@@ -116,8 +116,8 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (rx_enable)
   {
-    ch32_dma_callback_t rx_cb_fun = [](void *arg)
-    { reinterpret_cast<CH32UART *>(arg)->RxDmaIRQHandler(); };
+    ch32_dma_callback_t rx_cb_fun = [](void* arg)
+    { reinterpret_cast<CH32UART*>(arg)->RxDmaIRQHandler(); };
 
     CH32_DMA_RegisterCallback(CH32_DMA_GetID(CH32_UART_RX_DMA_CHANNEL_MAP[id]), rx_cb_fun,
                               this);
@@ -137,8 +137,8 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (tx_enable)
   {
-    ch32_dma_callback_t tx_cb_fun = [](void *arg)
-    { reinterpret_cast<CH32UART *>(arg)->TxDmaIRQHandler(); };
+    ch32_dma_callback_t tx_cb_fun = [](void* arg)
+    { reinterpret_cast<CH32UART*>(arg)->TxDmaIRQHandler(); };
 
     CH32_DMA_RegisterCallback(CH32_DMA_GetID(CH32_UART_TX_DMA_CHANNEL_MAP[id]), tx_cb_fun,
                               this);
@@ -214,33 +214,46 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
 
   USART_Cmd(instance_, ENABLE);
 
+  if (tx_busy_.IsSet())
+  {
+    dma_tx_channel_->CNTR = dma_buff_tx_.GetActiveLength();
+    dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(dma_buff_tx_.ActiveBuffer());
+    DMA_Cmd(dma_tx_channel_, ENABLE);
+  }
+
   return ErrorCode::OK;
 }
 
 // === 写操作回调（DMA搬运） ===
-ErrorCode CH32UART::WriteFun(WritePort &port)
+ErrorCode CH32UART::WriteFun(WritePort& port, bool)
 {
-  CH32UART *uart = CONTAINER_OF(&port, CH32UART, _write_port);
+  CH32UART* uart = CONTAINER_OF(&port, CH32UART, _write_port);
+
+  if (uart->in_tx_isr.IsSet())
+  {
+    return ErrorCode::PENDING;
+  }
+
   if (!uart->dma_buff_tx_.HasPending())
   {
     WriteInfoBlock info;
     if (port.queue_info_->Peek(info) != ErrorCode::OK)
     {
-      return ErrorCode::EMPTY;
+      return ErrorCode::PENDING;
     }
 
-    uint8_t *buffer = nullptr;
+    uint8_t* buffer = nullptr;
     bool use_pending = false;
 
     // DMA空闲判断
     bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
     if (dma_ready)
     {
-      buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
+      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
     }
     else
     {
-      buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.PendingBuffer());
+      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer());
       use_pending = true;
     }
 
@@ -262,7 +275,7 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
       }
       else
       {
-        return ErrorCode::FAILED;
+        return ErrorCode::PENDING;
       }
     }
 
@@ -272,25 +285,25 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
     uart->dma_tx_channel_->MADDR =
         reinterpret_cast<uint32_t>(uart->dma_buff_tx_.ActiveBuffer());
     uart->dma_tx_channel_->CNTR = info.data.size_;
-    uart->_write_port.write_size_ = info.data.size_;
+    uart->dma_buff_tx_.SetActiveLength(info.data.size_);
+    uart->tx_busy_.Set();
     DMA_Cmd(uart->dma_tx_channel_, ENABLE);
 
     return ErrorCode::OK;
   }
-  return ErrorCode::FAILED;
+  return ErrorCode::PENDING;
 }
 
 // === 读操作回调（由中断驱动） ===
-ErrorCode CH32UART::ReadFun(ReadPort &port)
+ErrorCode CH32UART::ReadFun(ReadPort&, bool)
 {
-  UNUSED(port);
   // 接收由 IDLE 中断驱动，读取在 ISR 中完成
-  return ErrorCode::EMPTY;
+  return ErrorCode::PENDING;
 }
 
-void CH32_UART_RX_ISR_Handler(LibXR::CH32UART *uart)
+void CH32_UART_RX_ISR_Handler(LibXR::CH32UART* uart)
 {
-  auto rx_buf = static_cast<uint8_t *>(uart->dma_buff_rx_.addr_);
+  auto rx_buf = static_cast<uint8_t*>(uart->dma_buff_rx_.addr_);
   size_t dma_size = uart->dma_buff_rx_.size_;
   size_t curr_pos = dma_size - uart->dma_rx_channel_->CNTR;
   size_t last_pos = uart->last_rx_pos_;
@@ -334,9 +347,13 @@ extern "C" void CH32_UART_ISR_Handler_IDLE(ch32_uart_id_t id)
 }
 
 // === DMA TX完成中断服务 ===
-extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
+extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART* uart)
 {
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
+
+  uart->tx_busy_.Clear();
+
+  Flag::ScopedRestore tx_flag(uart->in_tx_isr);
 
   size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
 
@@ -347,14 +364,14 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
 
   uart->dma_buff_tx_.Switch();
 
-  auto *buf = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
+  auto* buf = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
   DMA_Cmd(uart->dma_tx_channel_, DISABLE);
   uart->dma_tx_channel_->MADDR = (uint32_t)buf;
   uart->dma_tx_channel_->CNTR = pending_len;
-  uart->_write_port.write_size_ = pending_len;
+  uart->dma_buff_tx_.SetActiveLength(pending_len);
   DMA_Cmd(uart->dma_tx_channel_, ENABLE);
 
-  WriteInfoBlock &current_info = uart->write_info_active_;
+  WriteInfoBlock& current_info = uart->write_info_active_;
 
   // 有pending包，继续取下一包
   if (uart->_write_port.queue_info_->Pop(current_info) != ErrorCode::OK)
@@ -363,7 +380,7 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
     return;
   }
 
-  current_info.op.UpdateStatus(true, ErrorCode::OK);
+  uart->write_port_->Finish(true, ErrorCode::OK, current_info);
 
   // 预装pending区
   WriteInfoBlock next_info;
@@ -373,7 +390,7 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
   }
 
   if (uart->write_port_->queue_data_->PopBatch(
-          reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.PendingBuffer()),
+          reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer()),
           next_info.data.size_) != ErrorCode::OK)
   {
     ASSERT(false);
