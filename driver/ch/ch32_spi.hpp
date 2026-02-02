@@ -24,13 +24,15 @@ class CH32SPI : public SPI
           SPI::Configuration config = {SPI::ClockPolarity::LOW, SPI::ClockPhase::EDGE_1});
 
   // === SPI 基类必需接口 ===
-  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data,
-                         OperationRW& op) override;
+  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data, OperationRW& op,
+                         bool in_isr) override;
   ErrorCode SetConfig(SPI::Configuration config) override;
-  ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW& op) override;
-  ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op) override;
+  ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW& op,
+                    bool in_isr) override;
+  ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op,
+                     bool in_isr) override;
 
-  ErrorCode Transfer(size_t size, OperationRW& op) override;
+  ErrorCode Transfer(size_t size, OperationRW& op, bool in_isr) override;
   uint32_t GetMaxBusSpeed() const override;
   SPI::Prescaler GetMaxPrescaler() const override;
 

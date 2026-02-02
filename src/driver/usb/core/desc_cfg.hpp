@@ -103,14 +103,17 @@ class ConfigDescriptorItem : public BosCapabilityProvider
    * @brief 绑定端点资源 / Bind endpoint resources
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 起始接口号 / Start interface number
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) = 0;
+  virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                             bool in_isr) = 0;
 
   /**
    * @brief 解绑端点资源 / Unbind endpoint resources
    * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  virtual void UnbindEndpoints(EndpointPool& endpoint_pool) = 0;
+  virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) = 0;
 
   /**
    * @brief 可选：覆盖设备描述符字段 / Optional: override device descriptor fields
@@ -236,19 +239,22 @@ class ConfigDescriptor : public BosManager
   /**
    * @brief 切换当前 configuration / Switch current configuration
    * @param index 配置索引 / Configuration index
+   * @param in_isr 是否在中断中 / Whether in ISR
    * @return 错误码 / Error code
    */
-  ErrorCode SwitchConfig(size_t index);
+  ErrorCode SwitchConfig(size_t index, bool in_isr);
 
   /**
    * @brief 绑定当前配置端点 / Bind endpoints for current configuration
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void BindEndpoints();
+  void BindEndpoints(bool in_isr);
 
   /**
    * @brief 解绑当前配置端点 / Unbind endpoints for current configuration
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints();
+  void UnbindEndpoints(bool in_isr);
 
   /**
    * @brief 构建当前配置描述符 / Build current configuration descriptor

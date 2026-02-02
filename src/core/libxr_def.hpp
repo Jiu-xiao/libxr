@@ -60,6 +60,7 @@ static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void *));
  */
 enum class ErrorCode : int8_t
 {
+  PENDING = 1,        ///< 等待中 | Pending
   OK = 0,             ///< 操作成功 | Operation successful
   FAILED = -1,        ///< 操作失败 | Operation failed
   INIT_ERR = -2,      ///< 初始化错误 | Initialization error
@@ -144,7 +145,7 @@ enum class SizeLimitMode : uint8_t
  * @param line 出错的行号 | Line number where the error occurred
  * @param in_isr 是否发生在中断服务例程（ISR） | Whether it occurred in an ISR
  */
-extern void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
+extern "C" void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {

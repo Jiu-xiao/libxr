@@ -140,6 +140,7 @@ class Terminal
   RamFS &ramfs_;                    ///< 关联的文件系统 Associated file system
   char read_buff_[READ_BUFF_SIZE];  ///< 读取缓冲区 Read buffer
 
+  size_t request_read_size_ = 0;
   RamFS::Dir *current_dir_;        ///< 当前目录 Current directory
   uint8_t flag_ansi_ = 0;          ///< ANSI 控制字符状态 ANSI control character state
   int offset_ = 0;                 ///< 光标偏移 Cursor offset
@@ -891,29 +892,23 @@ class Terminal
    */
   static void ThreadFun(Terminal *term)
   {
-    RawData buff = term->read_buff_;
-
     Semaphore read_sem, write_sem;
     ReadOperation op(read_sem);
 
-    term->write_op_.type = WriteOperation::OperationType::NONE;
-    term->write_op_.data.sem_info.sem = &write_sem;
-    term->write_op_.data.sem_info.timeout = 10;
-    term->write_op_.type = WriteOperation::OperationType::BLOCK;
+    term->write_op_ = WriteOperation(write_sem, 10);
 
     while (true)
     {
-      buff.size_ = LibXR::min(term->read_port_->Size(), READ_BUFF_SIZE);
-      if ((*term->read_port_)(buff, op) == ErrorCode::OK)
+      term->request_read_size_ = LibXR::min(term->read_port_->Size(), READ_BUFF_SIZE);
+      auto buffer = RawData(term->read_buff_, term->request_read_size_);
+
+      if ((*term->read_port_)(buffer, op) == ErrorCode::OK &&
+          term->request_read_size_ > 0)
       {
-        if (term->read_port_->read_size_ > 0)
-        {
-          buff.size_ = term->read_port_->read_size_;
-          term->write_mutex_->Lock();
-          term->Parse(buff);
-          term->write_stream_.Commit();
-          term->write_mutex_->Unlock();
-        }
+        term->write_mutex_->Lock();
+        term->Parse(buffer);
+        term->write_stream_.Commit();
+        term->write_mutex_->Unlock();
       }
     }
   }
@@ -935,9 +930,6 @@ class Terminal
    */
   static void TaskFun(Terminal *term)
   {
-    RawData buff = term->read_buff_;
-    buff.size_ = LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
-
     ReadOperation op(term->read_status_);
 
     while (true)
@@ -945,25 +937,31 @@ class Terminal
       switch (term->read_status_)
       {
         case ReadOperation::OperationPollingStatus::READY:
-          buff.size_ =
+        {
+          term->request_read_size_ =
               LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
-          (*term->read_port_)(buff, op);
+          auto buffer = RawData(term->read_buff_, term->request_read_size_);
+          (*term->read_port_)(buffer, op);
           continue;
+        }
         case ReadOperation::OperationPollingStatus::RUNNING:
           return;
         case ReadOperation::OperationPollingStatus::DONE:
-          buff.size_ = term->read_port_->read_size_;
-          if (buff.size_ > 0)
-          {
-            term->write_mutex_->Lock();
-            term->Parse(buff);
-            term->write_stream_.Commit();
-            term->write_mutex_->Unlock();
-          }
-          buff.size_ =
+        {
+          term->write_mutex_->Lock();
+          auto buffer = RawData(term->read_buff_, term->request_read_size_);
+          term->Parse(buffer);
+          term->write_stream_.Commit();
+          term->write_mutex_->Unlock();
+        }
+        case ReadOperation::OperationPollingStatus::ERROR:
+        {
+          term->request_read_size_ =
               LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
-          (*term->read_port_)(buff, op);
+          auto buffer = RawData(term->read_buff_, term->request_read_size_);
+          (*term->read_port_)(buffer, op);
           return;
+        }
       }
     }
   }

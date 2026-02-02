@@ -28,8 +28,8 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   {
   }
 
-  void Init() override { USB::DeviceCore::Init(); }
-  void Deinit() override { USB::DeviceCore::Deinit(); }
+  void Init(bool in_isr) override { USB::DeviceCore::Init(in_isr); }
+  void Deinit(bool in_isr) override { USB::DeviceCore::Deinit(in_isr); }
 
   uint8_t id_;
 };
@@ -61,9 +61,9 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 
-  void Start() override;
+  void Start(bool in_isr) override;
 
-  void Stop() override;
+  void Stop(bool in_isr) override;
 
   static inline CH32USBDeviceFS* self_ = nullptr;
 };
@@ -108,9 +108,9 @@ class CH32USBDeviceHS : public USB::EndpointPool, public USB::DeviceCore
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 
-  void Start() override;
+  void Start(bool in_isr) override;
 
-  void Stop() override;
+  void Stop(bool in_isr) override;
 
   static inline CH32USBDeviceHS* self_ = nullptr;
 };

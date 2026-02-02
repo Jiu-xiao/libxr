@@ -17,12 +17,12 @@
 extern "C"
 {
   // JS 会调用它，传字符串进来
-  void receive_input(const char *js_input)
+  void receive_input(const char* js_input)
   {
     if (LibXR::STDIO::read_ && LibXR::STDIO::read_->Readable())
     {
       LibXR::STDIO::read_->queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t *>(js_input), strlen(js_input));
+          reinterpret_cast<const uint8_t*>(js_input), strlen(js_input));
       LibXR::STDIO::read_->ProcessPendingReads(false);
     }
   }
@@ -32,7 +32,7 @@ void LibXR::PlatformInit()
 {
   static LibXR::WebAsmTimebase libxr_webasm_timebase;
 
-  auto write_fun = [](WritePort &port)
+  auto write_fun = [](WritePort& port, bool)
   {
     static uint8_t write_buff[1024];
     WriteInfoBlock info;
@@ -57,7 +57,7 @@ void LibXR::PlatformInit()
 
       port.queue_info_->Pop(info);
 
-      port.Finish(false, ErrorCode::OK, info, info.data.size_);
+      port.Finish(false, ErrorCode::OK, info);
     }
 
     return ErrorCode::OK;
@@ -68,12 +68,7 @@ void LibXR::PlatformInit()
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort &port)
-  {
-    UNUSED(port);
-
-    return ErrorCode::EMPTY;
-  };
+  auto read_fun = [](ReadPort&, bool) { return ErrorCode::EMPTY; };
 
   LibXR::STDIO::read_ =
       new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
