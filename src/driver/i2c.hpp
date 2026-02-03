@@ -58,7 +58,7 @@ class I2C
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
   virtual ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation &op,
-                         bool in_isr) = 0;
+                         bool in_isr = false) = 0;
 
   /**
    * @brief 向 I2C 设备写入数据。
@@ -79,7 +79,7 @@ class I2C
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
   virtual ErrorCode Write(uint16_t slave_addr, ConstRawData write_data,
-                          WriteOperation &op, bool in_isr) = 0;
+                          WriteOperation &op, bool in_isr = false) = 0;
 
   /**
    * @brief 配置 I2C 设备参数。
