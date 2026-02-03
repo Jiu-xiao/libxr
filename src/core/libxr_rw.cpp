@@ -38,7 +38,7 @@ ReadPort& ReadPort::operator=(ReadFun fun)
 void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
 {
   busy_.store(BusyState::IDLE, std::memory_order_release);
-  info.op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
+  info.op.UpdateStatus(in_isr, ans);
 }
 
 void ReadPort::MarkAsRunning(ReadInfoBlock& info) { info.op.MarkAsRunning(); }
@@ -187,7 +187,7 @@ WritePort& WritePort::operator=(WriteFun fun)
 
 void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
 {
-  info.op.UpdateStatus(in_isr, std::forward<ErrorCode>(ans));
+  info.op.UpdateStatus(in_isr, ans);
 }
 
 void WritePort::MarkAsRunning(WriteOperation& op) { op.MarkAsRunning(); }
