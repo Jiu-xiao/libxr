@@ -22,8 +22,10 @@ namespace DapLinkV2Def
 // Limits / 限制
 // ==============================
 
-static constexpr std::uint16_t MAX_REQUEST_SIZE = 512u;   ///< 最大请求长度。Max request size.
-static constexpr std::uint16_t MAX_RESPONSE_SIZE = 512u;  ///< 最大响应长度。Max response size.
+static constexpr std::uint16_t MAX_REQUEST_SIZE =
+    512u;  ///< 最大请求长度。Max request size.
+static constexpr std::uint16_t MAX_RESPONSE_SIZE =
+    512u;  ///< 最大响应长度。Max response size.
 
 // ==============================
 // CMSIS-DAP v2 Command IDs / 命令号
@@ -175,7 +177,8 @@ static constexpr std::uint8_t JTAG_SEQUENCE_TDO = (1u << 7);
 // Helpers / 工具函数
 // ==============================
 
-/// 从 transfer request 字节提取 A[3:2]（2-bit）。Extract A[3:2] from transfer request (2-bit).
+/// 从 transfer request 字节提取 A[3:2]（2-bit）。Extract A[3:2] from transfer request
+/// (2-bit).
 static inline constexpr std::uint8_t req_addr2b(std::uint8_t req)
 {
   return static_cast<std::uint8_t>(((req & DAP_TRANSFER_A2) ? 1u : 0u) |
