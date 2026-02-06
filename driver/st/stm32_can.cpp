@@ -61,7 +61,6 @@ ErrorCode STM32CAN::Init(void)
   can_filter.FilterScale = CAN_FILTERSCALE_32BIT;
   can_filter.FilterMaskIdHigh = 0;
   can_filter.FilterMaskIdLow = 0;
-  can_filter.FilterFIFOAssignment = fifo_;
   can_filter.FilterActivation = ENABLE;
 
 #ifdef CAN3
@@ -79,7 +78,7 @@ ErrorCode STM32CAN::Init(void)
   }
   else if (id_ == STM32_CAN3)
   {
-    can_filter.FilterBank = 3;
+    can_filter.FilterBank = 0;
     fifo_ = CAN_RX_FIFO1;
   }
 #else

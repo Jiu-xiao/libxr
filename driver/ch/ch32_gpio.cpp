@@ -72,7 +72,6 @@ CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
 {
   if (irq_ != NonMaskableInt_IRQn)
   {
-    NVIC_EnableIRQ(irq_);
     map[GetEXTIID(pin)] = this;
   }
 
@@ -120,13 +119,13 @@ CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
 
 ErrorCode CH32GPIO::EnableInterrupt()
 {
-  EXTI->INTENR |= (1 << GetEXTIID(pin_));
+  EXTI->INTENR |= static_cast<uint32_t>(pin_);
   return ErrorCode::OK;
 }
 
 ErrorCode CH32GPIO::DisableInterrupt()
 {
-  EXTI->INTENR &= ~(1 << GetEXTIID(pin_));
+  EXTI->INTENR &= ~static_cast<uint32_t>(pin_);
   return ErrorCode::OK;
 }
 
@@ -143,14 +142,19 @@ void CH32GPIO::CheckInterrupt(uint32_t line)
   if (EXTI_GetITStatus(line) != RESET)
   {
     EXTI_ClearITPendingBit(line);
-    map[GetEXTIID(line)]->OnInterrupt();
+
+    const uint8_t id = GetEXTIID(static_cast<uint16_t>(line));
+    if (auto* gpio = map[id])
+    {
+      gpio->OnInterrupt();
+    }
   }
 }
 
 void CH32GPIO::ConfigureEXTI(EXTITrigger_TypeDef trigger)
 {
   EXTI_InitTypeDef exti = {};
-  uint8_t pin_source = __builtin_ctz(pin_);
+  uint8_t pin_source = GetEXTIID(pin_);
   uint8_t port_source = 0xFF;
 
 #if defined(GPIOA)
@@ -219,4 +223,8 @@ void CH32GPIO::ConfigureEXTI(EXTITrigger_TypeDef trigger)
   NVIC_EnableIRQ(irq_);
 }
 
-uint8_t CH32GPIO::GetEXTIID(uint16_t pin) { return __builtin_ctz(pin); }
+uint8_t CH32GPIO::GetEXTIID(uint16_t pin)
+{
+  ASSERT(pin != 0 && (pin & static_cast<uint16_t>(pin - 1)) == 0);
+  return __builtin_ctz(pin);
+}
