@@ -36,6 +36,9 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
                                static_cast<int32_t>(sizeof(USB::SetupPacket)));
 #endif
 
+  usb->GetEndpoint0In()->SetState(USB::Endpoint::State::IDLE);
+  usb->GetEndpoint0Out()->SetState(USB::Endpoint::State::IDLE);
+
   usb->OnSetupPacket(true, reinterpret_cast<USB::SetupPacket *>(hpcd->Setup));
 }
 
@@ -52,8 +55,8 @@ extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
     return;
   }
 
-  usb->Deinit();
-  usb->Init();
+  usb->Deinit(true);
+  usb->Init(true);
 }
 
 extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
@@ -68,7 +71,7 @@ extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
   {
     return;
   }
-  usb->Deinit();
+  usb->Deinit(true);
 }
 
 extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
@@ -83,7 +86,7 @@ extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
   {
     return;
   }
-  usb->Init();
+  usb->Init(true);
 }
 
 extern "C" void HAL_PCD_ConnectCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }
@@ -264,23 +267,21 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
 
   auto cfgs_itr = EP_CFGS.begin();
 
-  ASSERT(cfgs_itr->double_buffer == false);
-
 #if defined(PMA_START_ADDR)
   size_t buffer_offset = PMA_START_ADDR;
 #else
-  size_t buffer_offset = (BTABLE_ADDRESS + hpcd_->Init.dev_endpoints * 8U) * 2;  // 字节
+  size_t buffer_offset = BTABLE_ADDRESS + hpcd_->Init.dev_endpoints * 8U;  // 字节
 #endif
 
-  auto ep0_out = new STM32Endpoint(
-      USB::Endpoint::EPNumber::EP0, id_, hpcd_, USB::Endpoint::Direction::OUT,
-      buffer_offset, (*cfgs_itr).hw_buffer_size2, false, (*cfgs_itr).buffer2);
+  auto ep0_out = new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
+                                   USB::Endpoint::Direction::OUT, buffer_offset,
+                                   (*cfgs_itr).hw_buffer_size2, (*cfgs_itr).buffer2);
 
   buffer_offset += (*cfgs_itr).hw_buffer_size2;
 
-  auto ep0_in = new STM32Endpoint(
-      USB::Endpoint::EPNumber::EP0, id_, hpcd_, USB::Endpoint::Direction::IN,
-      buffer_offset, (*cfgs_itr).hw_buffer_size1, false, (*cfgs_itr).buffer1);
+  auto ep0_in = new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
+                                  USB::Endpoint::Direction::IN, buffer_offset,
+                                  (*cfgs_itr).hw_buffer_size1, (*cfgs_itr).buffer1);
 
   buffer_offset += (*cfgs_itr).hw_buffer_size1;
 
@@ -295,15 +296,14 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
     if (cfgs_itr->hw_buffer_size2 == 0)
     {
       ASSERT(cfgs_itr->buffer1.size_ % 2 == 0);
-      auto ep =
-          new STM32Endpoint(ep_index, id_, hpcd_,
-                            cfgs_itr->double_buffer_is_in ? USB::Endpoint::Direction::IN
-                                                          : USB::Endpoint::Direction::OUT,
-                            buffer_offset, (*cfgs_itr).hw_buffer_size1,
-                            (*cfgs_itr).double_buffer, (*cfgs_itr).buffer1);
+      auto ep = new STM32Endpoint(
+          ep_index, id_, hpcd_,
+          cfgs_itr->double_buffer_is_in ? USB::Endpoint::Direction::IN
+                                        : USB::Endpoint::Direction::OUT,
+          buffer_offset, (*cfgs_itr).hw_buffer_size1, (*cfgs_itr).buffer1);
       USB::EndpointPool::Put(ep);
       ep_index = USB::Endpoint::NextEPNumber(ep_index);
-      buffer_offset += (*cfgs_itr).hw_buffer_size1 * 2;
+      buffer_offset += (*cfgs_itr).hw_buffer_size1;
       cfgs_itr++;
     }
     else
@@ -312,12 +312,12 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
       ASSERT(cfgs_itr->buffer2.size_ % 2 == 0);
 
       auto ep_in = new STM32Endpoint(ep_index, id_, hpcd_, USB::Endpoint::Direction::IN,
-                                     buffer_offset, (*cfgs_itr).hw_buffer_size1, false,
+                                     buffer_offset, (*cfgs_itr).hw_buffer_size1,
                                      (*cfgs_itr).buffer1);
       USB::EndpointPool::Put(ep_in);
       buffer_offset += (*cfgs_itr).hw_buffer_size1;
       auto ep_out = new STM32Endpoint(ep_index, id_, hpcd_, USB::Endpoint::Direction::OUT,
-                                      buffer_offset, (*cfgs_itr).hw_buffer_size2, false,
+                                      buffer_offset, (*cfgs_itr).hw_buffer_size2,
                                       (*cfgs_itr).buffer2);
       USB::EndpointPool::Put(ep_out);
       buffer_offset += (*cfgs_itr).hw_buffer_size2;
@@ -326,7 +326,7 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
     }
   }
 
-  ASSERT(USB::Endpoint::EPNumberToInt8(ep_index) <= hpcd->Init.dev_endpoints);
+  ASSERT(USB::Endpoint::EPNumberToInt8(ep_index) < hpcd->Init.dev_endpoints);
   ASSERT(buffer_offset <= LIBXR_STM32_USB_PMA_SIZE);
 }
 

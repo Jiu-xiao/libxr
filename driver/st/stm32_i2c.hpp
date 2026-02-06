@@ -50,16 +50,17 @@ class STM32I2C : public I2C
  public:
   STM32I2C(I2C_HandleTypeDef *hi2c, RawData dma_buff, uint32_t dma_enable_min_size = 3);
 
-  ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation &op) override;
+  ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation &op,
+                 bool in_isr) override;
 
-  ErrorCode Write(uint16_t slave_addr, ConstRawData write_data,
-                  WriteOperation &op) override;
+  ErrorCode Write(uint16_t slave_addr, ConstRawData write_data, WriteOperation &op,
+                  bool in_isr) override;
 
   ErrorCode MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
-                    ReadOperation &op, MemAddrLength mem_addr_size) override;
+                    ReadOperation &op, MemAddrLength mem_addr_size, bool in_isr) override;
 
   ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr, ConstRawData write_data,
-                     WriteOperation &op, MemAddrLength mem_addr_size) override;
+                     WriteOperation &op, MemAddrLength mem_addr_size, bool in_isr) override;
 
   template <typename, typename = void>
   struct HasClockSpeed : std::false_type

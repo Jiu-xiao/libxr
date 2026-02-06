@@ -26,7 +26,7 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
       const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
           CONFIGS,
       ConstRawData uid = {nullptr, 0}, USB::Speed speed = USB::Speed::FULL,
-      USB::USBSpec spec = USB::USBSpec::USB_2_0)
+      USB::USBSpec spec = USB::USBSpec::USB_2_1)
       : LibXR::USB::EndpointPool(max_ep_num),
         LibXR::USB::DeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
                                CONFIGS, uid),
@@ -36,12 +36,12 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
     map_[id] = this;
   }
 
-  void Init() override { LibXR::USB::DeviceCore::Init(); }
+  void Init(bool in_isr) override { LibXR::USB::DeviceCore::Init(in_isr); }
 
-  void Deinit() override { LibXR::USB::DeviceCore::Deinit(); }
+  void Deinit(bool in_isr) override { LibXR::USB::DeviceCore::Deinit(in_isr); }
 
-  void Start() override { HAL_PCD_Start(hpcd_); }
-  void Stop() override { HAL_PCD_Stop(hpcd_); }
+  void Start(bool) override { HAL_PCD_Start(hpcd_); }
+  void Stop(bool) override { HAL_PCD_Stop(hpcd_); }
 
   PCD_HandleTypeDef* hpcd_;
   stm32_usb_dev_id_t id_;
@@ -111,7 +111,7 @@ class STM32USBDeviceOtgHS : public STM32USBDevice
 
 #if defined(USB_BASE)
 
-#if defined (PMA_END_ADDR)
+#if defined(PMA_END_ADDR)
 #define LIBXR_STM32_USB_PMA_SIZE PMA_END_ADDR
 // --- F0: USB FS Device, PMA = 1024B (dedicated) -------------------------
 #elif defined(STM32F0)
@@ -206,7 +206,6 @@ class STM32USBDeviceDevFs : public STM32USBDevice
   {
     LibXR::RawData buffer1, buffer2;
     size_t hw_buffer_size1, hw_buffer_size2;
-    bool double_buffer = false;
     bool double_buffer_is_in = false;
 
     EPConfig(LibXR::RawData buffer, size_t hw_buffer_size, bool is_in)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 
 #include "libxr_def.hpp"
 
@@ -26,7 +27,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
 {
   inline constexpr size_t AlignUp(size_t size, size_t align)
   {
-    return ((size + align - 1) / align) * align;
+    return (size / align + 1) * align;
   }
 
  public:
@@ -384,6 +385,11 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    * @brief 计算队列剩余可用空间 / Calculates the remaining available space in the queue
    */
   size_t EmptySize() { return LENGTH - Size(); }
+
+  /**
+   * @brief 获取队列的最大容量 / Returns the maximum capacity of the queue
+   */
+  size_t MaxSize() const { return LENGTH; }
 
  private:
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<uint32_t> head_;

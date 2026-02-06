@@ -9,11 +9,12 @@
 #endif
 
 #include "double_buffer.hpp"
+#include "flag.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "uart.hpp"
 
-typedef enum
+typedef enum : uint8_t
 {
 #ifdef USART1
   STM32_USART1,
@@ -106,21 +107,23 @@ typedef enum
   STM32_UART_ID_ERROR
 } stm32_uart_id_t;
 
-stm32_uart_id_t STM32_UART_GetID(USART_TypeDef *addr);
+stm32_uart_id_t stm32_uart_get_id(USART_TypeDef *addr);
 
 namespace LibXR
 {
 class STM32UART : public UART
 {
  public:
-  static ErrorCode WriteFun(WritePort &port);
+  static ErrorCode WriteFun(WritePort &port, bool in_isr);
 
-  static ErrorCode ReadFun(ReadPort &port);
+  static ErrorCode ReadFun(ReadPort &port, bool in_isr);
 
   STM32UART(UART_HandleTypeDef *uart_handle, RawData dma_buff_rx, RawData dma_buff_tx,
             uint32_t tx_queue_size = 5);
 
   ErrorCode SetConfig(UART::Configuration config);
+
+  void SetRxDMA();
 
   ReadPort _read_port;
   WritePort _write_port;
@@ -132,6 +135,8 @@ class STM32UART : public UART
   size_t last_rx_pos_ = 0;
 
   UART_HandleTypeDef *uart_handle_;
+
+  Flag::Plain in_tx_isr, tx_busy_;
 
   stm32_uart_id_t id_ = STM32_UART_ID_ERROR;
 

@@ -322,28 +322,34 @@ class Endpoint
     auto ep_buf = GetBuffer();
     size_t max_chunk = MaxTransferSize();
 
-    if (max_chunk == 0)
-    {
-      return ErrorCode::ARG_ERR;
-    }
+    ASSERT(max_chunk > 0);
 
     // 单包就能搞定的情况：不进入 multi-bulk 状态机，保持原有行为
     if (data.size_ <= max_chunk)
     {
-      multi_bulk_ = false;
-      multi_bulk_remain_ = 0;
-      multi_bulk_data_ = {nullptr, 0};
-
       if (GetDirection() == Direction::IN)
       {
-        // IN：发送，先把应用 buffer 拷到 EP buffer，再一次性 Transfer
+        multi_bulk_ = false;
+        multi_bulk_remain_ = 0;
+        multi_bulk_data_ = {nullptr, 0};
+
         auto src = static_cast<const uint8_t*>(data.addr_);
         auto dst = static_cast<uint8_t*>(ep_buf.addr_);
         Memory::FastCopy(dst, src, data.size_);
-      }
-      // OUT：接收，OUT 方向不预拷贝，直接启动一次接收即可
 
-      return Transfer(data.size_);
+        return Transfer(data.size_);
+      }
+
+      // OUT：接收——为了把数据回填到 data，单包也走 multi-bulk
+      if (GetDirection() == Direction::OUT)
+      {
+        multi_bulk_ = true;
+        multi_bulk_data_ = data;
+        multi_bulk_remain_ = data.size_;  // OUT: 剩余可写容量
+        return Transfer(data.size_);
+      }
+
+      return ErrorCode::ARG_ERR;
     }
 
     // 需要多包处理的情况
@@ -391,29 +397,26 @@ class Endpoint
     }
 
     bool callback_uses_app_buffer = false;
+    bool out_switched_before_cb = false;
+
     const Direction DIR = GetDirection();
     const size_t MAX_CHUNK = MaxTransferSize();
+    const bool DB = UseDoubleBuffer();
 
     if (multi_bulk_)
     {
       if (DIR == Direction::IN)
       {
-        // ========= IN 方向：device -> host，多包发送 =========
         if (multi_bulk_remain_ > 0)
         {
-          auto ep_buf = GetBuffer();
-
+          auto ep_buf = GetBuffer();  // 此时应是“下一块 Active”（因为 Transfer 已切换）
           const size_t SENT = multi_bulk_data_.size_ - multi_bulk_remain_;
 
           size_t chunk = MAX_CHUNK;
-          if (chunk > multi_bulk_remain_)
-          {
-            chunk = multi_bulk_remain_;
-          }
+          if (chunk > multi_bulk_remain_) chunk = multi_bulk_remain_;
 
           auto src = static_cast<const uint8_t*>(multi_bulk_data_.addr_) + SENT;
           auto dst = static_cast<uint8_t*>(ep_buf.addr_);
-
           Memory::FastCopy(dst, src, chunk);
           multi_bulk_remain_ -= chunk;
 
@@ -421,20 +424,18 @@ class Endpoint
           (void)Transfer(chunk);
           return;
         }
-        else
-        {
-          multi_bulk_ = false;
-          callback_uses_app_buffer = true;
-          actual_transfer_size = multi_bulk_data_.size_;
-        }
+
+        // 结束：对上层报告 app buffer
+        multi_bulk_ = false;
+        callback_uses_app_buffer = true;
+        actual_transfer_size = multi_bulk_data_.size_;
       }
       else
       {
+        // OUT：完成时 Active 里是数据
         auto ep_buf = GetBuffer();
-
         size_t prev_remain = multi_bulk_remain_;
         size_t recvd = actual_transfer_size;
-
         if (recvd > prev_remain)
         {
           recvd = prev_remain;
@@ -444,13 +445,18 @@ class Endpoint
 
         auto dst = static_cast<uint8_t*>(multi_bulk_data_.addr_) + OFFSET;
         auto src = static_cast<const uint8_t*>(ep_buf.addr_);
-
         Memory::FastCopy(dst, src, recvd);
 
         multi_bulk_remain_ = prev_remain - recvd;
 
         const bool SHORT_PACKET = (recvd < MAX_CHUNK);
         const bool BUFFER_FULL = (multi_bulk_remain_ == 0);
+
+        if (DB)
+        {
+          SwitchBuffer();  // 切换后 Pending = 刚接收的包；Active = 下次用
+          out_switched_before_cb = true;
+        }
 
         if (!SHORT_PACKET && !BUFFER_FULL)
         {
@@ -461,38 +467,40 @@ class Endpoint
           }
 
           SetState(State::IDLE);
-          (void)Transfer(chunk);
+          (void)Transfer(chunk);  // 下一包将落到新的 Active（
           return;
         }
 
-        // 收到了 short packet 或 buffer 填满 -> 结束 multi-bulk
         multi_bulk_ = false;
         callback_uses_app_buffer = true;
-
-        // 对上层报告的实际总长度 = 已经写入应用 buffer 的字节数
         actual_transfer_size = multi_bulk_data_.size_ - multi_bulk_remain_;
       }
+    }
+
+    // 非 multi-bulk：OUT 也必须“回调前切换”
+    if (!multi_bulk_ && DB && DIR == Direction::OUT && !out_switched_before_cb)
+    {
+      SwitchBuffer();
+      out_switched_before_cb = true;
     }
 
     SetState(State::IDLE);
 
     ConstRawData data;
-
     if (callback_uses_app_buffer)
     {
       data = ConstRawData(multi_bulk_data_.addr_, actual_transfer_size);
     }
     else
     {
-      data = UseDoubleBuffer()
-                 ? ConstRawData(DIR == Direction::OUT ? double_buffer_.ActiveBuffer()
-                                                      : double_buffer_.PendingBuffer(),
-                                actual_transfer_size)
-                 : ConstRawData(buffer_.addr_, actual_transfer_size);
-
-      if (UseDoubleBuffer() && DIR == Direction::OUT)
+      if (DB)
       {
-        SwitchBuffer();
+        // 回调里永远取 Pending = 刚刚完成的那包（IN/OUT 一致）
+        data = ConstRawData(double_buffer_.PendingBuffer(), actual_transfer_size);
+      }
+      else
+      {
+        data = ConstRawData(buffer_.addr_, actual_transfer_size);
       }
     }
 

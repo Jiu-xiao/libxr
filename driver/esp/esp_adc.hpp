@@ -127,6 +127,7 @@ class ESP32ADC
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = dma_buf_size,
         .conv_frame_size = dma_buf_size / 2,
+        .flags = {.flush_pool = 1},
     };
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &m_handle_));
 

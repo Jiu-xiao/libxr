@@ -81,7 +81,7 @@ STM32SPI::STM32SPI(SPI_HandleTypeDef *spi_handle, RawData rx, RawData tx,
 }
 
 ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
-                                 OperationRW &op)
+                                 OperationRW &op, bool in_isr)
 {
   uint32_t need_write = max(write_data.size_, read_data.size_);
 
@@ -116,7 +116,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
       if (write_data.size_ < need_write)
       {
         Memory::FastSet(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
-               need_write - write_data.size_);
+                        need_write - write_data.size_);
       }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
       SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
@@ -133,7 +133,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
       if (write_data.size_ < need_write)
       {
         Memory::FastSet(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
-               need_write - write_data.size_);
+                        need_write - write_data.size_);
       }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
       SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
@@ -155,7 +155,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     {
       if (op.type != OperationRW::OperationType::BLOCK)
       {
-        op.UpdateStatus(false, ErrorCode::OK);
+        op.UpdateStatus(in_isr, ErrorCode::OK);
       }
       return ErrorCode::OK;
     }
@@ -181,7 +181,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     if (write_data.size_ < need_write)
     {
       Memory::FastSet(reinterpret_cast<uint8_t *>(tx.addr_) + write_data.size_, 0,
-             need_write - write_data.size_);
+                      need_write - write_data.size_);
     }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(static_cast<uint32_t *>(tx.addr_),
@@ -230,14 +230,14 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   {
     if (op.type != OperationRW::OperationType::BLOCK)
     {
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
 
   if (op.type != OperationRW::OperationType::BLOCK)
   {
-    op.UpdateStatus(false, ans);
+    op.UpdateStatus(in_isr, ans);
   }
   return ans;
 }
@@ -342,7 +342,7 @@ ErrorCode STM32SPI::SetConfig(SPI::Configuration config)
   return (HAL_SPI_Init(spi_handle_) == HAL_OK) ? ErrorCode::OK : ErrorCode::BUSY;
 }
 
-ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op)
+ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op, bool in_isr)
 {
   uint32_t need_read = read_data.size_;
 
@@ -412,12 +412,13 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW &op)
 
   if (op.type != OperationRW::OperationType::BLOCK)
   {
-    op.UpdateStatus(false, ans);
+    op.UpdateStatus(in_isr, ans);
   }
   return ans;
 }
 
-ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op)
+ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op,
+                             bool in_isr)
 {
   uint32_t need_write = write_data.size_;
 
@@ -476,7 +477,7 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW 
 
   if (op.type != OperationRW::OperationType::BLOCK)
   {
-    op.UpdateStatus(false, ans);
+    op.UpdateStatus(in_isr, ans);
   }
   return ans;
 }
@@ -652,7 +653,7 @@ STM32SPI::Prescaler STM32SPI::GetMaxPrescaler() const
 #endif
 }
 
-ErrorCode STM32SPI::Transfer(size_t size, OperationRW &op)
+ErrorCode STM32SPI::Transfer(size_t size, OperationRW &op, bool in_isr)
 {
   if (spi_handle_->State != HAL_SPI_STATE_READY)
   {
@@ -663,7 +664,7 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW &op)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
     {
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -716,7 +717,7 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW &op)
 
   if (op.type != OperationRW::OperationType::BLOCK)
   {
-    op.UpdateStatus(false, ans);
+    op.UpdateStatus(in_isr, ans);
   }
   return ans;
 }

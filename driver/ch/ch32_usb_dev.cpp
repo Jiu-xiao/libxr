@@ -11,83 +11,128 @@ using namespace LibXR::USB;
 // NOLINTNEXTLINE
 extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
 {
-  uint8_t intflag = USBFSD->INT_FG;  // NOLINT
-  uint8_t intst = USBFSD->INT_ST;    // NOLINT
-
   auto& map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
 
-  if (intflag & USBFS_UIF_TRANSFER)
+  constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
+  constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
+
+  // USBFS: INT_FG[7:5] 是状态位(RO)，INT_FG[4:0] 为中断标志(W1C)。
+  constexpr uint8_t CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
+                                     USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
+                                     USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
+
+  while (true)
   {
-    uint8_t token = intst & USBFS_UIS_TOKEN_MASK;
-    uint8_t epnum = intst & USBFS_UIS_ENDP_MASK;
+    // INT_FG(低8) + INT_ST(高8)，两寄存器地址相邻：0x...06 / 0x...07
+    const uint16_t intfgst = *reinterpret_cast<volatile uint16_t*>(
+        reinterpret_cast<uintptr_t>(&USBFSD->INT_FG));
 
-    auto ep = map[epnum];
-    USBFSD->INT_FG = USBFS_UIF_TRANSFER;  // NOLINT
+    const uint8_t intflag = static_cast<uint8_t>(intfgst & 0x00FFu);
+    const uint8_t intst = static_cast<uint8_t>((intfgst >> 8) & 0x00FFu);
 
-    if (ep)
+    const uint8_t pending = static_cast<uint8_t>(intflag & CLEARABLE_MASK);
+    if (pending == 0)
     {
+      break;
+    }
+
+    uint8_t clear_mask = 0;
+
+    if (pending & USBFS_UIF_BUS_RST)
+    {
+      USBFSD->DEV_ADDR = 0;  // NOLINT
+
+      LibXR::CH32USBDeviceFS::self_->Deinit(true);
+      LibXR::CH32USBDeviceFS::self_->Init(true);
+
+      // EP0 toggle/state 复位
+      if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+      if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+      if (map[0][OUT_IDX]) map[0][OUT_IDX]->tog_ = true;
+      if (map[0][IN_IDX]) map[0][IN_IDX]->tog_ = true;
+
+      USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
+      USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
+
+      clear_mask |= USBFS_UIF_BUS_RST;
+    }
+
+    if (pending & USBFS_UIF_SUSPEND)
+    {
+      LibXR::CH32USBDeviceFS::self_->Deinit(true);
+      LibXR::CH32USBDeviceFS::self_->Init(true);
+
+      if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+      if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+      if (map[0][OUT_IDX]) map[0][OUT_IDX]->tog_ = true;
+      if (map[0][IN_IDX]) map[0][IN_IDX]->tog_ = true;
+
+      USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
+      USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
+
+      clear_mask |= USBFS_UIF_SUSPEND;
+    }
+
+    if (pending & USBFS_UIF_TRANSFER)
+    {
+      const uint8_t token = intst & USBFS_UIS_TOKEN_MASK;  // MASK_UIS_TOKEN
+      const uint8_t epnum = intst & USBFS_UIS_ENDP_MASK;   // MASK_UIS_ENDP
+
+      auto& ep = map[epnum];
+
       switch (token)
       {
         case USBFS_UIS_TOKEN_SETUP:
+        {
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
-          LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->tog_ = true;
-          LibXR::CH32EndpointOtgFs::map_otg_fs_[0][1]->tog_ = true;
 
-          map[0][0]->SetState(Endpoint::State::IDLE);
-          map[0][1]->SetState(Endpoint::State::IDLE);
+          if (map[0][OUT_IDX])
+            map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+          if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+          if (map[0][OUT_IDX]) map[0][OUT_IDX]->tog_ = true;
+          if (map[0][IN_IDX]) map[0][IN_IDX]->tog_ = true;
 
           LibXR::CH32USBDeviceFS::self_->OnSetupPacket(
-              true, reinterpret_cast<const SetupPacket*>(
-                        LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->GetBuffer().addr_));
+              true,
+              reinterpret_cast<const SetupPacket*>(map[0][OUT_IDX]->GetBuffer().addr_));
+
           break;
+        }
 
         case USBFS_UIS_TOKEN_OUT:
         {
-          uint16_t len = USBFSD->RX_LEN;  // NOLINT
-          ep[static_cast<uint8_t>(Endpoint::Direction::OUT)]->TransferComplete(len);
-          break;
-        }
-        case USBFS_UIS_TOKEN_IN:
-        {
-          ep[static_cast<uint8_t>(Endpoint::Direction::IN)]->TransferComplete(0);
+          const uint16_t len = USBFSD->RX_LEN;  // NOLINT
+          if (ep[OUT_IDX])
+          {
+            ep[OUT_IDX]->TransferComplete(len);
+          }
           break;
         }
 
-        // 其他情况略
+        case USBFS_UIS_TOKEN_IN:
+        {
+          if (ep[IN_IDX])
+          {
+            ep[IN_IDX]->TransferComplete(0);
+          }
+          break;
+        }
+
         default:
           break;
       }
+
+      clear_mask |= USBFS_UIF_TRANSFER;
     }
-  }
-  else if (intflag & USBFS_UIF_BUS_RST)
-  {
-    USBFSD->INT_FG = USBFS_UIF_BUS_RST;  // NOLINT
-    USBFSD->DEV_ADDR = 0;                // NOLINT
-    LibXR::CH32USBDeviceFS::self_->Deinit();
-    LibXR::CH32USBDeviceFS::self_->Init();
-    LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->tog_ = true;
-    LibXR::CH32EndpointOtgFs::map_otg_fs_[0][1]->tog_ = true;
-    map[0][0]->SetState(Endpoint::State::IDLE);
-    map[0][1]->SetState(Endpoint::State::IDLE);
-    USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-    USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
-  }
-  else if (intflag & USBFS_UIF_SUSPEND)
-  {
-    USBFSD->INT_FG = USBFS_UIF_SUSPEND;  // NOLINT
-    LibXR::CH32USBDeviceFS::self_->Deinit();
-    LibXR::CH32USBDeviceFS::self_->Init();
-    LibXR::CH32EndpointOtgFs::map_otg_fs_[0][0]->tog_ = true;
-    LibXR::CH32EndpointOtgFs::map_otg_fs_[0][1]->tog_ = true;
-    map[0][0]->SetState(Endpoint::State::IDLE);
-    map[0][1]->SetState(Endpoint::State::IDLE);
-    USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;  // NOLINT
-    USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;  // NOLINT
-  }
-  else
-  {
-    USBFSD->INT_FG = intflag;  // NOLINT
+
+    // 本轮未显式处理的其它 W1C 标志，一并清掉（与 USBHS 版本一致的“兜底清除”风格）
+    clear_mask |= static_cast<uint8_t>(pending & ~clear_mask);
+
+    USBFSD->INT_FG = clear_mask;  // NOLINT  // UIF_* 写 1 清零
   }
 }
 
@@ -100,7 +145,7 @@ CH32USBDeviceFS::CH32USBDeviceFS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::FULL, packet_size, vid,
+      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
                       pid, bcd, LANG_LIST, CONFIGS, uid)
 {
   self_ = this;
@@ -154,7 +199,7 @@ ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context 
   return ErrorCode::OK;
 }
 
-void CH32USBDeviceFS::Start()
+void CH32USBDeviceFS::Start(bool)
 {
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;                     // NOLINT
   USBFSH->BASE_CTRL = 0x00;                                                      // NOLINT
@@ -164,7 +209,7 @@ void CH32USBDeviceFS::Start()
   NVIC_EnableIRQ(USBFS_IRQn);
 }
 
-void CH32USBDeviceFS::Stop()
+void CH32USBDeviceFS::Stop(bool)
 {
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;  // NOLINT
   USBFSD->BASE_CTRL = 0x00;                                   // NOLINT
@@ -174,115 +219,182 @@ void CH32USBDeviceFS::Stop()
 #endif
 #if defined(USBHSD)
 // NOLINTNEXTLINE
+#if defined(USBHSD)
+
+// NOLINTNEXTLINE
 extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 {
-  uint8_t intflag = USBHSD->INT_FG;  // NOLINT
-  uint8_t intst = USBHSD->INT_ST;    // NOLINT
-
+  // 端点表
   auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 
-  if (intflag & USBHS_UIF_TRANSFER)
+  constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
+  constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
+
+  while (true)
   {
-    uint8_t token = intst & USBHS_UIS_TOKEN_MASK;
-    uint8_t epnum = intst & USBHS_UIS_ENDP_MASK;
+    // INT_FG(低8) + INT_ST(高8)
+    const uint16_t intfgst = *reinterpret_cast<volatile uint16_t*>(
+        reinterpret_cast<uintptr_t>(&USBHSD->INT_FG));
 
-    auto ep = map[epnum];
+    const uint8_t intflag = static_cast<uint8_t>(intfgst & 0x00FFu);
+    const uint8_t intst = static_cast<uint8_t>((intfgst >> 8) & 0x00FFu);
 
-    if (ep)
+    if (intflag == 0)
     {
+      break;
+    }
+
+    uint8_t clear_mask = 0;
+
+    if (intflag & USBHS_UIF_BUS_RST)
+    {
+      USBHSD->DEV_AD = 0;  // NOLINT
+
+      LibXR::CH32USBDeviceHS::self_->Deinit(true);
+      LibXR::CH32USBDeviceHS::self_->Init(true);
+
+      // EP0 toggle/state 复位
+      if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+      if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+      if (map[0][OUT_IDX])
+      {
+        map[0][OUT_IDX]->tog0_ = true;
+        map[0][OUT_IDX]->tog1_ = false;
+      }
+      if (map[0][IN_IDX])
+      {
+        map[0][IN_IDX]->tog0_ = true;
+        map[0][IN_IDX]->tog1_ = false;
+      }
+
+      USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
+      USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
+
+      clear_mask |= USBHS_UIF_BUS_RST;
+    }
+
+    if (intflag & USBHS_UIF_SUSPEND)
+    {
+      LibXR::CH32USBDeviceHS::self_->Deinit(true);
+      LibXR::CH32USBDeviceHS::self_->Init(true);
+
+      if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+      if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+      if (map[0][OUT_IDX])
+      {
+        map[0][OUT_IDX]->tog0_ = true;
+        map[0][OUT_IDX]->tog1_ = false;
+      }
+      if (map[0][IN_IDX])
+      {
+        map[0][IN_IDX]->tog0_ = true;
+        map[0][IN_IDX]->tog1_ = false;
+      }
+
+      USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
+      USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
+
+      clear_mask |= USBHS_UIF_SUSPEND;
+    }
+
+    if (intflag & USBHS_UIF_SETUP_ACT)
+    {
+      USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
+      USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
+
+      if (map[0][OUT_IDX]) map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+      if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+      if (map[0][OUT_IDX])
+      {
+        map[0][OUT_IDX]->tog0_ = true;
+        map[0][OUT_IDX]->tog1_ = false;
+      }
+      if (map[0][IN_IDX])
+      {
+        map[0][IN_IDX]->tog0_ = true;
+        map[0][IN_IDX]->tog1_ = false;
+      }
+
+      LibXR::CH32USBDeviceHS::self_->OnSetupPacket(
+          true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
+                    map[0][OUT_IDX]->GetBuffer().addr_));
+
+      clear_mask |= USBHS_UIF_SETUP_ACT;
+    }
+
+    if (intflag & USBHS_UIF_TRANSFER)
+    {
+      const uint8_t token = intst & USBHS_UIS_TOKEN_MASK;
+      const uint8_t epnum = intst & USBHS_UIS_ENDP_MASK;
+
+      auto& ep = map[epnum];
+
       switch (token)
       {
         case USBHS_UIS_TOKEN_SETUP:
-          USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
-
+        {
           USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_DATA1;  // NOLINT
-          USBHSD->UEP0_RX_CTRL = USBHS_UEP_T_RES_NAK | USBHS_UEP_R_TOG_DATA1;  // NOLINT
-          map[0][0]->SetState(Endpoint::State::IDLE);
-          map[0][1]->SetState(Endpoint::State::IDLE);
+          USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_RES_NAK | USBHS_UEP_R_TOG_DATA1;  // NOLINT
 
-          LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog0_ = true;
-          LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog0_ = true;
-          LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog1_ = false;
-          LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
+          if (map[0][OUT_IDX])
+            map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+          if (map[0][IN_IDX]) map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+          if (map[0][OUT_IDX])
+          {
+            map[0][OUT_IDX]->tog0_ = true;
+            map[0][OUT_IDX]->tog1_ = false;
+          }
+          if (map[0][IN_IDX])
+          {
+            map[0][IN_IDX]->tog0_ = true;
+            map[0][IN_IDX]->tog1_ = false;
+          }
 
           LibXR::CH32USBDeviceHS::self_->OnSetupPacket(
-              true, reinterpret_cast<const SetupPacket*>(
-                        LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->GetBuffer().addr_));
+              true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
+                        map[0][OUT_IDX]->GetBuffer().addr_));
           break;
+        }
 
         case USBHS_UIS_TOKEN_OUT:
         {
-          USBHSD->INT_FG = USBHS_UIF_TRANSFER;  // NOLINT
+          const uint16_t len = USBHSD->RX_LEN;  // NOLINT
 
-          uint16_t len = USBHSD->RX_LEN;  // NOLINT
-          ep[static_cast<uint8_t>(Endpoint::Direction::OUT)]->TransferComplete(len);
+          if (ep[OUT_IDX])
+          {
+            ep[OUT_IDX]->TransferComplete(len);
+          }
           break;
         }
+
         case USBHS_UIS_TOKEN_IN:
         {
-          ep[static_cast<uint8_t>(Endpoint::Direction::IN)]->TransferComplete(0);
+          if (ep[IN_IDX])
+          {
+            ep[IN_IDX]->TransferComplete(0);
+          }
           break;
         }
+
         case USBHS_UIS_TOKEN_SOF:
         default:
           break;
       }
+
+      clear_mask |= USBHS_UIF_TRANSFER;
     }
-  }
-  else if (intflag & USBHS_UIF_SETUP_ACT)
-  {
-    USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
-    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
 
-    map[0][0]->SetState(Endpoint::State::IDLE);
-    map[0][1]->SetState(Endpoint::State::IDLE);
+    clear_mask |= static_cast<uint8_t>(intflag & ~(clear_mask));
 
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog0_ = true;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog0_ = true;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog1_ = false;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
-
-    LibXR::CH32USBDeviceHS::self_->OnSetupPacket(
-        true, reinterpret_cast<const SetupPacket*>(
-                  LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->GetBuffer().addr_));
-    USBHSD->INT_FG = USBHS_UIF_SETUP_ACT;  // NOLINT
-  }
-  else if (intflag & USBHS_UIF_BUS_RST)
-  {
-    USBHSD->INT_FG = USBHS_UIF_BUS_RST;  // NOLINT
-    USBHSD->DEV_AD = 0;                  // NOLINT
-    LibXR::CH32USBDeviceHS::self_->Deinit();
-    LibXR::CH32USBDeviceHS::self_->Init();
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog0_ = true;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog0_ = true;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog1_ = false;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
-    USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
-    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
-
-    map[0][0]->SetState(Endpoint::State::IDLE);
-    map[0][1]->SetState(Endpoint::State::IDLE);
-  }
-  else if (intflag & USBHS_UIF_SUSPEND)
-  {
-    USBHSD->INT_FG = USBHS_UIF_SUSPEND;  // NOLINT
-    LibXR::CH32USBDeviceHS::self_->Deinit();
-    LibXR::CH32USBDeviceHS::self_->Init();
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog0_ = true;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog0_ = true;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][0]->tog1_ = false;
-    LibXR::CH32EndpointOtgHs::map_otg_hs_[0][1]->tog1_ = false;
-    USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;  // NOLINT
-    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;  // NOLINT
-
-    map[0][0]->SetState(Endpoint::State::IDLE);
-    map[0][1]->SetState(Endpoint::State::IDLE);
-  }
-  else
-  {
-    USBHSD->INT_FG = intflag;  // NOLINT
+    USBHSD->INT_FG = clear_mask;  // NOLINT
   }
 }
+
+#endif
 
 CH32USBDeviceHS::CH32USBDeviceHS(
     const std::initializer_list<CH32USBDeviceHS::EPConfig> EP_CFGS, uint16_t vid,
@@ -292,7 +404,7 @@ CH32USBDeviceHS::CH32USBDeviceHS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::HIGH,
+      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::HIGH,
                       USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd,
                       LANG_LIST, CONFIGS, uid)
 {
@@ -348,7 +460,7 @@ ErrorCode CH32USBDeviceHS::SetAddress(uint8_t address, USB::DeviceCore::Context 
   return ErrorCode::OK;
 }
 
-void CH32USBDeviceHS::Start()
+void CH32USBDeviceHS::Start(bool)
 {
   // NOLINTBEGIN
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
@@ -362,7 +474,7 @@ void CH32USBDeviceHS::Start()
   // NOLINTEND
 }
 
-void CH32USBDeviceHS::Stop()
+void CH32USBDeviceHS::Stop(bool)
 {
   // NOLINTBEGIN
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;

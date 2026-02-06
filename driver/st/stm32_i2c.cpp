@@ -74,7 +74,8 @@ STM32I2C::STM32I2C(I2C_HandleTypeDef *hi2c, RawData dma_buff,
   map[id_] = this;
 }
 
-ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation &op)
+ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation &op,
+                         bool in_isr)
 {
   if (i2c_handle_->State != HAL_I2C_STATE_READY)
   {
@@ -104,7 +105,8 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation &
                                       read_data.size_, 20) == HAL_OK
                    ? ErrorCode::OK
                    : ErrorCode::BUSY;
-    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+    //TODO: BLOCK快速路径
+    op.UpdateStatus(in_isr, ans);
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
@@ -114,7 +116,7 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation &
 }
 
 ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
-                          WriteOperation &op)
+                          WriteOperation &op, bool in_isr)
 {
   if (i2c_handle_->State != HAL_I2C_STATE_READY)
   {
@@ -149,7 +151,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
                                        write_data.size_, 20) == HAL_OK
                    ? ErrorCode::OK
                    : ErrorCode::BUSY;
-    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+    op.UpdateStatus(in_isr, ans);
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
       return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
@@ -159,7 +161,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
 }
 
 ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
-                            ReadOperation &op, MemAddrLength mem_addr_size)
+                            ReadOperation &op, MemAddrLength mem_addr_size, bool in_isr)
 {
   ASSERT(read_data.size_ <= dma_buff_.size_);
 
@@ -196,7 +198,7 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
             ? ErrorCode::OK
             : ErrorCode::BUSY;
 
-    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+    op.UpdateStatus(in_isr, ans);
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
@@ -207,7 +209,7 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
 
 ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                              ConstRawData write_data, WriteOperation &op,
-                             MemAddrLength mem_addr_size)
+                             MemAddrLength mem_addr_size, bool in_isr)
 {
   ASSERT(write_data.size_ <= dma_buff_.size_);
 
@@ -249,7 +251,7 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
             ? ErrorCode::OK
             : ErrorCode::BUSY;
 
-    op.UpdateStatus(false, std::forward<ErrorCode>(ans));
+    op.UpdateStatus(in_isr, ans);
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
       return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);

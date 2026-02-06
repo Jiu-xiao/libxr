@@ -224,8 +224,10 @@ class CDCBase : public DeviceClass
    *
    * @param endpoint_pool 端点资源池 / Endpoint resource pool
    * @param start_itf_num 起始接口号 / Starting interface number
+   * @param in_isr        是否在中断上下文 / Whether in ISR context
    */
-  virtual void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                             bool) override
   {
     control_line_state_ = 0;
     // 获取并配置数据IN端点
@@ -340,7 +342,7 @@ class CDCBase : public DeviceClass
     inited_ = true;
 
     // 启动OUT端点传输
-    ep_data_out_->Transfer(ep_data_out_->MaxTransferSize());
+    ep_data_out_->Transfer(ep_data_out_->MaxPacketSize());
   }
 
   /**
@@ -350,7 +352,7 @@ class CDCBase : public DeviceClass
    * 释放所有占用的资源
    * Releases all allocated resources
    */
-  virtual void Deinit(EndpointPool& endpoint_pool) override
+  virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
     control_line_state_ = 0;
@@ -418,7 +420,7 @@ class CDCBase : public DeviceClass
    *
    * @return size_t 接口数量（固定为2：通信接口+数据接口）
    */
-  size_t GetInterfaceNum() override { return 2; }
+  size_t GetInterfaceCount() override { return 2; }
 
   /**
    * @brief 检查是否包含IAD
@@ -457,7 +459,7 @@ class CDCBase : public DeviceClass
    */
   ErrorCode OnClassRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
                            uint16_t wLength, uint16_t wIndex,
-                           DeviceClass::RequestResult& result) override
+                           DeviceClass::ControlTransferResult& result) override
   {
     UNUSED(in_isr);
     UNUSED(wIndex);

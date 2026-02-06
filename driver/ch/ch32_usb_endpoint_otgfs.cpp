@@ -249,8 +249,8 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
 
   if (!is_isochronous_)
   {
-    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
-    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
+    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
     EnableTx(GetNumber());
     EnableRx(GetNumber());
   }
@@ -309,15 +309,29 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
     SetTxLen(GetNumber(), size);
     auto addr = GetTxCtrlAddr(GetNumber());
 
-    *addr = (is_isochronous_ ? USBFS_UEP_T_RES_NONE : USBFS_UEP_T_RES_ACK) |
-            (tog_ ? USBFS_UEP_T_TOG : 0);
+    if (GetNumber() != EPNumber::EP0)
+    {
+      *addr = (is_isochronous_ ? USBFS_UEP_T_RES_NONE : USBFS_UEP_T_RES_ACK) |
+              (*addr & (~USBFS_UEP_T_RES_MASK));
+    }
+    else
+    {
+      *addr = USBFS_UEP_T_RES_ACK | (tog_ ? USBFS_UEP_T_TOG : 0);
+    }
   }
   else
   {
     auto addr = GetRxCtrlAddr(GetNumber());
 
-    *addr = (is_isochronous_ ? USBFS_UEP_R_RES_NONE : USBFS_UEP_R_RES_ACK) |
-            (tog_ ? USBFS_UEP_R_TOG : 0);
+    if (GetNumber() != EPNumber::EP0)
+    {
+      *addr = (is_isochronous_ ? USBFS_UEP_R_RES_NONE : USBFS_UEP_R_RES_ACK) |
+              (*addr & (~USBFS_UEP_R_RES_MASK));
+    }
+    else
+    {
+      *addr = USBFS_UEP_R_RES_ACK | (tog_ ? USBFS_UEP_R_TOG : 0);
+    }
   }
 
   if (GetNumber() == EPNumber::EP0)
@@ -372,34 +386,54 @@ ErrorCode CH32EndpointOtgFs::ClearStall()
 
 void CH32EndpointOtgFs::TransferComplete(size_t size)
 {
-  if (GetDirection() == Direction::IN)
+  const bool is_in = (GetDirection() == Direction::IN);
+  const bool is_out = !is_in;
+  const bool is_ep0 = (GetNumber() == EPNumber::EP0);
+  const bool is_iso = (GetType() == Type::ISOCHRONOUS);
+
+  // UIF_TRANSFER / INT_FG 由 IRQ handler 统一在“本次处理结束后”清除（不在此处写
+  // INT_FG）。
+
+  if (is_in)
   {
+    // 收尾置 NAK
+    *GetTxCtrlAddr(GetNumber()) =
+        (*GetTxCtrlAddr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
+
     size = last_transfer_size_;
   }
-
-  if (GetDirection() == Direction::OUT &&
-      (USBFSD->INT_FG & USBFS_U_TOG_OK) != USBFS_U_TOG_OK)  // NOLINT
+  else
   {
-    return;
+    // 非 EP0 的 OUT：收尾置 NAK
+    if (!is_ep0)
+    {
+      *GetRxCtrlAddr(GetNumber()) =
+          (*GetRxCtrlAddr(GetNumber()) & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_NAK;
+    }
   }
 
-  if (GetState() == State::BUSY && GetNumber() != EPNumber::EP0 &&
-      GetType() != Type::ISOCHRONOUS)
+  // 若 TOG 不 OK，说明数据同步失败（RB_UIS_TOG_OK / RB_U_TOG_OK）
+  if (is_out)
+  {
+    const bool tog_ok = ((USBFSD->INT_ST & USBFS_U_TOG_OK) == USBFS_U_TOG_OK);  // NOLINT
+    if (!tog_ok)
+    {
+      SetState(State::IDLE);
+      (void)Transfer(last_transfer_size_);
+      return;
+    }
+  }
+
+  // 成功：更新软件 data toggle（非 EP0、非 ISO）
+  if (GetState() == State::BUSY && !is_ep0 && !is_iso)
   {
     tog_ = !tog_;
   }
 
-  if (GetNumber() == EPNumber::EP0 && GetDirection() == Direction::OUT)
+  if (is_ep0 && is_out)
   {
     tog_ = true;
     *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_ACK;
-  }
-
-  if (GetDirection() == Direction::IN)
-  {
-    *GetTxCtrlAddr(GetNumber()) =
-        (*GetTxCtrlAddr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
-    USBFSD->INT_FG = USBFS_UIF_TRANSFER;  // NOLINT
   }
 
   OnTransferCompleteCallback(true, size);
@@ -409,10 +443,12 @@ void CH32EndpointOtgFs::SwitchBuffer()
 {
   if (GetDirection() == Direction::IN)
   {
+    tog_ = (*GetTxCtrlAddr(GetNumber()) & USBFS_UEP_T_TOG) == USBFS_UEP_T_TOG;
     SetActiveBlock(!tog_);
   }
   else
   {
+    tog_ = (*GetRxCtrlAddr(GetNumber()) & USBFS_UEP_R_TOG) == USBFS_UEP_R_TOG;
     SetActiveBlock(tog_);
   }
 }

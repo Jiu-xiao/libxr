@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # LibXR
 set(LIBXR_SYSTEM FreeRTOS)
 set(LIBXR_DRIVER esp)
+set(LIBXR_STATIC_BUILD ON)
 
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_BINARY_DIR}/libxr_build)
 

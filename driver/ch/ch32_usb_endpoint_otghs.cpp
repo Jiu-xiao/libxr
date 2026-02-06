@@ -31,11 +31,15 @@ static inline volatile uint16_t* GetTxLenAddr(USB::Endpoint::EPNumber ep_num)
       static_cast<int>(ep_num) * 4);
 }
 
+static_assert(offsetof(USBHSD_TypeDef, UEP1_MAX_LEN) -
+                  offsetof(USBHSD_TypeDef, UEP0_MAX_LEN) ==
+              4);
+
 static inline volatile uint16_t* GetRxMaxLenAddr(USB::Endpoint::EPNumber ep_num)
 {
   return reinterpret_cast<volatile uint16_t*>(
       reinterpret_cast<volatile uint8_t*>(&USBHSD->UEP0_MAX_LEN) +
-      static_cast<int>(ep_num) * 2);
+      static_cast<int>(ep_num) * 4);
 }
 
 static inline volatile uint32_t* GetTxDmaAddr(USB::Endpoint::EPNumber ep_num)
@@ -365,70 +369,84 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
 
-  if (GetNumber() != EPNumber::EP0 && hw_double_buffer_)
-  {
-    ep_cfg.double_buffer = true;
-  }
-  else
-  {
-    if (ep_cfg.double_buffer)
-    {
-      ASSERT(false);
-    }
-    ep_cfg.double_buffer = false;
-  }
+  const int ep_idx = EPNumberToInt8(GetNumber());
 
+  const uint8_t in_idx = static_cast<uint8_t>(Direction::IN);
+  const uint8_t out_idx = static_cast<uint8_t>(Direction::OUT);
+
+  const bool has_in = (map_otg_hs_[ep_idx][in_idx] != nullptr);
+  const bool has_out = (map_otg_hs_[ep_idx][out_idx] != nullptr);
+
+  // 双缓冲策略：EP0 禁止双缓冲；若硬件配置为双缓冲则开启
+  bool enable_double = (GetNumber() != EPNumber::EP0) && hw_double_buffer_;
+  if (enable_double && has_in && has_out)
+  {
+    ASSERT(false);  // 双缓冲模式下端点只能单方向
+    enable_double = false;
+  }
+  ep_cfg.double_buffer = enable_double;
+
+  // 限制 max_packet_size 不超过 buffer
   if (ep_cfg.max_packet_size > GetBuffer().size_)
   {
     ep_cfg.max_packet_size = GetBuffer().size_;
   }
 
-  *GetRxControlAddr(GetNumber()) = USBHS_UEP_R_RES_NAK;
-  *GetTxControlAddr(GetNumber()) = USBHS_UEP_T_RES_NAK;
-
-  SetTxLen(GetNumber(), 0);
-
+  if (GetDirection() == Direction::IN)
   {
-    const int idx = static_cast<int>(GetNumber());
-    if (GetDirection() == Direction::IN)
+    *GetTxControlAddr(GetNumber()) = USBHS_UEP_T_RES_NAK;
+    SetTxLen(GetNumber(), 0);
+  }
+  else
+  {
+    *GetRxControlAddr(GetNumber()) = USBHS_UEP_R_RES_NAK;
+
+    if (GetNumber() != EPNumber::EP0)
     {
-      if (GetType() == Type::ISOCHRONOUS)
-        USBHSD->ENDP_TYPE |= (USBHS_UEP0_T_TYPE << idx);
-      else
-        USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_T_TYPE << idx);
+      *GetRxMaxLenAddr(GetNumber()) = ep_cfg.max_packet_size;
     }
+  }
+
+  const int idx = static_cast<int>(GetNumber());
+  if (GetDirection() == Direction::IN)
+  {
+    if (GetType() == Type::ISOCHRONOUS)
+      USBHSD->ENDP_TYPE |= (USBHS_UEP0_T_TYPE << idx);
     else
-    {
-      if (GetType() == Type::ISOCHRONOUS)
-        USBHSD->ENDP_TYPE |= (USBHS_UEP0_R_TYPE << idx);
-      else
-        USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_R_TYPE << idx);
-    }
+      USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_T_TYPE << idx);
+  }
+  else
+  {
+    if (GetType() == Type::ISOCHRONOUS)
+      USBHSD->ENDP_TYPE |= (USBHS_UEP0_R_TYPE << idx);
+    else
+      USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_R_TYPE << idx);
   }
 
   if (GetDirection() == Direction::IN)
   {
     if (GetType() != Type::ISOCHRONOUS)
-    {
       EnableTx(GetNumber());
-    }
     else
-    {
       DisableTx(GetNumber());
+
+    if (!has_out)
+    {
+      DisableRx(GetNumber());
     }
-    DisableRx(GetNumber());
-    SetTxDmaBuffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, hw_double_buffer_);
+
+    SetTxDmaBuffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, enable_double);
   }
   else
   {
-    DisableTx(GetNumber());
     EnableRx(GetNumber());
-    SetRxDmaBuffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, hw_double_buffer_);
 
-    if (GetType() == Type::ISOCHRONOUS)
+    if (!has_in)
     {
-      *GetRxMaxLenAddr(GetNumber()) = ep_cfg.max_packet_size;
+      DisableTx(GetNumber());
     }
+
+    SetRxDmaBuffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, enable_double);
   }
 
   SetState(State::IDLE);
@@ -566,35 +584,56 @@ ErrorCode CH32EndpointOtgHs::ClearStall()
 
 void CH32EndpointOtgHs::TransferComplete(size_t size)
 {
-  if (GetState() == State::BUSY && GetNumber() != EPNumber::EP0 &&
-      GetType() != Type::ISOCHRONOUS)
-  {
-    tog0_ = !tog0_;
-  }
+  const bool is_in = (GetDirection() == Direction::IN);
+  const bool is_out = !is_in;
+  const bool is_ep0 = (GetNumber() == EPNumber::EP0);
+  const bool is_iso = (GetType() == Type::ISOCHRONOUS);
 
-  if (GetDirection() == Direction::IN)
-  {
-    *GetTxControlAddr(GetNumber()) =
-        (*GetTxControlAddr(GetNumber()) & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
+  // UIF_TRANSFER / INT_FG 由 IRQ handler 统一在“本次处理结束后”清除；
 
-    USBHSD->INT_FG = USBHS_UIF_ISO_ACT | USBHS_UIF_TRANSFER;  // NOLINT
+  if (is_in)
+  {
+    auto* tx_ctrl = GetTxControlAddr(GetNumber());
+    *tx_ctrl = (*tx_ctrl & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
 
     size = last_transfer_size_;
 
-    if (GetType() == Type::ISOCHRONOUS)
+    if (is_iso)
     {
       SetTxLen(GetNumber(), 0);
       DisableTx(GetNumber());
     }
   }
-
-  if (GetDirection() == Direction::OUT &&
-      (USBHSD->INT_ST & USBHS_UIS_TOG_OK) != USBHS_UIS_TOG_OK)  // NOLINT
+  else
   {
-    return;
+    // 非 EP0 的 OUT：收尾置 NAK
+    if (!is_ep0)
+    {
+      auto* rx_ctrl = GetRxControlAddr(GetNumber());
+      *rx_ctrl = (*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK;
+    }
   }
 
-  if (GetNumber() == EPNumber::EP0 && GetDirection() == Direction::OUT)
+  // 若 TOG 不 OK，说明数据同步失败
+  if (is_out)
+  {
+    const bool tog_ok =
+        ((USBHSD->INT_ST & USBHS_UIS_TOG_OK) == USBHS_UIS_TOG_OK);  // NOLINT
+    if (!tog_ok)
+    {
+      SetState(State::IDLE);
+      (void)Transfer(last_transfer_size_);
+      return;
+    }
+  }
+
+  // 成功：更新软件 data toggle
+  if (GetState() == State::BUSY && !is_ep0 && !is_iso)
+  {
+    tog0_ = !tog0_;
+  }
+
+  if (is_ep0 && is_out)
   {
     tog0_ = true;
     tog1_ = false;

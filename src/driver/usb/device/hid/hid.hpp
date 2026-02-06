@@ -125,8 +125,9 @@ class HID : public DeviceClass
    * Initialize HID device and select descriptor block (IN or IN+OUT).
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 接口号起始 / Starting interface number
+   * @param in_isr 是否在中断上下文 / Whether in ISR
    */
-  void Init(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
   {
     inited_ = false;
     itf_num_ = start_itf_num;
@@ -238,8 +239,9 @@ class HID : public DeviceClass
    * @brief 反初始化 HID 设备
    * Deinitialize HID device.
    * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void Deinit(EndpointPool& endpoint_pool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
     if (ep_in_)
@@ -261,7 +263,7 @@ class HID : public DeviceClass
    * Get number of interfaces
    * @return size_t 接口数量 / Number of interfaces
    */
-  size_t GetInterfaceNum() override { return 1; }
+  size_t GetInterfaceCount() override { return 1; }
 
   /**
    * @brief 检查是否包含IAD
@@ -351,7 +353,7 @@ class HID : public DeviceClass
    */
   ErrorCode OnClassRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
                            uint16_t wLength, uint16_t wIndex,
-                           DeviceClass::RequestResult& result) override
+                           DeviceClass::ControlTransferResult& result) override
   {
     UNUSED(in_isr);
     UNUSED(wIndex);
@@ -478,7 +480,7 @@ class HID : public DeviceClass
    * Get Input Report
    */
   virtual ErrorCode OnGetInputReport(uint8_t report_id,
-                                     DeviceClass::RequestResult& result)
+                                     DeviceClass::ControlTransferResult& result)
   {
     UNUSED(report_id);
     result.write_data = ConstRawData{nullptr, 0};
@@ -490,7 +492,7 @@ class HID : public DeviceClass
    * Get last Output Report
    */
   virtual ErrorCode OnGetLastOutputReport(uint8_t report_id,
-                                          DeviceClass::RequestResult& result)
+                                          DeviceClass::ControlTransferResult& result)
   {
     UNUSED(report_id);
     result.write_data = ConstRawData{nullptr, 0};
@@ -502,7 +504,7 @@ class HID : public DeviceClass
    * Get Feature Report
    */
   virtual ErrorCode OnGetFeatureReport(uint8_t report_id,
-                                       DeviceClass::RequestResult& result)
+                                       DeviceClass::ControlTransferResult& result)
   {
     UNUSED(report_id);
     result.write_data = ConstRawData{nullptr, 0};
@@ -521,7 +523,8 @@ class HID : public DeviceClass
    * @return ErrorCode 错误码 / Error code
    */
   virtual ErrorCode OnCustomClassRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
-                                         uint16_t wLength, RequestResult& result)
+                                         uint16_t wLength,
+                                         DeviceClass::ControlTransferResult& result)
   {
     UNUSED(in_isr);
     UNUSED(bRequest);
@@ -543,7 +546,8 @@ class HID : public DeviceClass
    * @brief 处理 SET_REPORT 请求
    * Handle SET_REPORT request
    */
-  virtual ErrorCode OnSetReport(uint8_t report_id, DeviceClass::RequestResult& result)
+  virtual ErrorCode OnSetReport(uint8_t report_id,
+                                DeviceClass::ControlTransferResult& result)
   {
     UNUSED(report_id);
     UNUSED(result);

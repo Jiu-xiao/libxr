@@ -54,20 +54,22 @@ class STM32SPI : public SPI
   STM32SPI(SPI_HandleTypeDef *spi_handle, RawData dma_buff_rx, RawData dma_buff_tx,
            uint32_t dma_enable_min_size = 3);
 
-  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data,
-                         OperationRW &op) override;
+  ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data, OperationRW &op,
+                         bool in_isr) override;
 
   ErrorCode SetConfig(SPI::Configuration config) override;
 
-  ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW &op) override;
+  ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW &op,
+                    bool in_isr) override;
 
-  ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op) override;
+  ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op,
+                     bool in_isr) override;
 
   uint32_t GetMaxBusSpeed() const override;
 
   Prescaler GetMaxPrescaler() const override;
 
-  ErrorCode Transfer(size_t size, OperationRW &op) override;
+  ErrorCode Transfer(size_t size, OperationRW &op, bool in_isr) override;
 
   SPI_HandleTypeDef *spi_handle_;
 

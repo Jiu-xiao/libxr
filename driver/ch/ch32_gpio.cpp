@@ -117,17 +117,6 @@ CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
   }
 }
 
-bool CH32GPIO::Read() { return GPIO_ReadInputDataBit(port_, pin_) == Bit_SET; }
-
-ErrorCode CH32GPIO::Write(bool value)
-{
-  if (value)
-    GPIO_SetBits(port_, pin_);
-  else
-    GPIO_ResetBits(port_, pin_);
-  return ErrorCode::OK;
-}
-
 ErrorCode CH32GPIO::EnableInterrupt()
 {
   EXTI->INTENR |= static_cast<uint32_t>(pin_);
@@ -137,52 +126,6 @@ ErrorCode CH32GPIO::EnableInterrupt()
 ErrorCode CH32GPIO::DisableInterrupt()
 {
   EXTI->INTENR &= ~static_cast<uint32_t>(pin_);
-  return ErrorCode::OK;
-}
-
-ErrorCode CH32GPIO::SetConfig(Configuration config)
-{
-  GPIO_InitTypeDef gpio_init = {};
-  gpio_init.GPIO_Pin = pin_;
-  gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
-
-  switch (config.direction)
-  {
-    case Direction::INPUT:
-    case Direction::RISING_INTERRUPT:
-    case Direction::FALL_INTERRUPT:
-    case Direction::FALL_RISING_INTERRUPT:
-      gpio_init.GPIO_Mode = (config.pull == Pull::UP)     ? GPIO_Mode_IPU
-                            : (config.pull == Pull::DOWN) ? GPIO_Mode_IPD
-                                                          : GPIO_Mode_IN_FLOATING;
-      break;
-
-    case Direction::OUTPUT_PUSH_PULL:
-      gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;
-      break;
-
-    case Direction::OUTPUT_OPEN_DRAIN:
-      gpio_init.GPIO_Mode = GPIO_Mode_Out_OD;
-      break;
-  }
-
-  GPIO_Init(port_, &gpio_init);
-
-  switch (config.direction)
-  {
-    case Direction::RISING_INTERRUPT:
-      ConfigureEXTI(EXTI_Trigger_Rising);
-      break;
-    case Direction::FALL_INTERRUPT:
-      ConfigureEXTI(EXTI_Trigger_Falling);
-      break;
-    case Direction::FALL_RISING_INTERRUPT:
-      ConfigureEXTI(EXTI_Trigger_Rising_Falling);
-      break;
-    default:
-      break;
-  }
-
   return ErrorCode::OK;
 }
 

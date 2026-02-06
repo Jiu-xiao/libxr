@@ -61,7 +61,7 @@
 | POWER        | ✅        |
 | GPIO         | ✅        |
 | FLASH        | ✅        |
-| UART         | ✅        |
+| UART         | ❌        |
 | SPI          | ❌        |
 | I2C          | ❌        |
 | CAN          | ❌        |
@@ -69,7 +69,7 @@
 | ADC          | ✅        |
 | DAC          | ❌        |
 | PWM          | ✅        |
-| USB-DEVICE   | ✅        |
+| USB-DEVICE   | ❌        |
 | WDG          | ❌        |
 
 | `Network`   | ESP32-C3 |

@@ -2,14 +2,14 @@
 
 #include "thread.hpp"
 
-void libxr_fatal_error(const char *file, uint32_t line, bool in_isr)
+extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr)
 {
   volatile bool stop = false;
   while (!stop)
   {
     if (in_isr)
     {
-      *(volatile int *)0 = 0;  // NOLINT
+      *(volatile int*)0 = 0;  // NOLINT
     }
     else
     {
