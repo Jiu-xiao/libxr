@@ -932,6 +932,14 @@ class Terminal
   {
     ReadOperation op(term->read_status_);
 
+    auto start_read = [&]()
+    {
+      term->request_read_size_ =
+          LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
+      auto buffer = RawData(term->read_buff_, term->request_read_size_);
+      (*term->read_port_)(buffer, op);
+    };
+
     while (true)
     {
       switch (term->read_status_)
@@ -953,13 +961,12 @@ class Terminal
           term->Parse(buffer);
           term->write_stream_.Commit();
           term->write_mutex_->Unlock();
+          start_read();
+          return;
         }
         case ReadOperation::OperationPollingStatus::ERROR:
         {
-          term->request_read_size_ =
-              LibXR::min(LibXR::max(1u, term->read_port_->Size()), READ_BUFF_SIZE);
-          auto buffer = RawData(term->read_buff_, term->request_read_size_);
-          (*term->read_port_)(buffer, op);
+          start_read();
           return;
         }
       }

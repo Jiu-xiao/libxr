@@ -181,8 +181,6 @@ class Operation
         data.sem_info.sem->PostFromCallback(in_isr);
         break;
       case OperationType::POLLING:
-        /* 中断不允许阻塞语义 / ISR does not allow blocking semantics */
-        ASSERT(!in_isr);
         *data.status = (status == ErrorCode::OK) ? OperationPollingStatus::DONE
                                                  : OperationPollingStatus::ERROR;
         break;

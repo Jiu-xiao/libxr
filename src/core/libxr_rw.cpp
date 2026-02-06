@@ -110,6 +110,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
+      ASSERT(!in_isr);
       return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
     }
     else
@@ -268,6 +269,7 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
+    ASSERT(!in_isr);
     return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
   }
 
