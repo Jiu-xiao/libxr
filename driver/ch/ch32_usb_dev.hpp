@@ -34,6 +34,45 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   uint8_t id_;
 };
 
+// CH32 classic USB device (non-OTG, FSDEV / PMA)
+// NOTE: FSDEV is selected by the presence of RCC_APB1Periph_USB (classic USB device clock)
+// and excluded when HS OTG (USBHSD) exists.
+#if defined(RCC_APB1Periph_USB) && !defined(USBHSD)
+
+class CH32USBDeviceDevFS : public USB::EndpointPool, public USB::DeviceCore
+{
+ public:
+  struct EPConfig
+  {
+    LibXR::RawData buffer;
+    int8_t is_in;
+
+    EPConfig(LibXR::RawData buffer) : buffer(buffer), is_in(-1) {}
+
+    // isochronous endpoint
+    EPConfig(LibXR::RawData buffer, bool is_in) : buffer(buffer), is_in(is_in ? 1 : 0) {}
+  };
+
+  CH32USBDeviceDevFS(
+      const std::initializer_list<EPConfig> EP_CFGS,
+      USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
+      uint16_t bcd,
+      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
+          CONFIGS,
+      ConstRawData uid = {nullptr, 0});
+
+  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+
+  void Start(bool in_isr) override;
+
+  void Stop(bool in_isr) override;
+
+  static inline CH32USBDeviceDevFS* self_ = nullptr;
+};
+
+#endif
+
 #if defined(USBFSD)
 
 class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore

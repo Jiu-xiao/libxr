@@ -6,6 +6,108 @@
 using namespace LibXR;
 using namespace LibXR::USB;
 
+namespace
+{
+
+// Configure USB clock to 48MHz from current PLL/SYSCLK setting.
+// Must be called *before* enabling USBD/USBFS/USBHS peripheral clocks.
+static void CH32_USB_Clock48M_Config()
+{
+  RCC_ClocksTypeDef clk{};
+  RCC_GetClocksFreq(&clk);
+
+  const uint32_t sysclk_hz = clk.SYSCLK_Frequency;
+
+#if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && defined(RCC_USBCLKSource_PLLCLK_Div3)
+  if (sysclk_hz == 144000000u)
+  {
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div3);
+  }
+  else if (sysclk_hz == 96000000u)
+  {
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div2);
+  }
+  else if (sysclk_hz == 48000000u)
+  {
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div1);
+  }
+#if defined(RCC_USB5PRE_JUDGE) && defined(RCC_USBCLKSource_PLLCLK_Div5)
+  else if (sysclk_hz == 240000000u)
+  {
+    // USBPRE=11b: /5, requires PLL source to be HSE/2 (and only on some parts/batches).
+    ASSERT(RCC_USB5PRE_JUDGE() == SET);
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div5);
+  }
+#endif
+  else
+  {
+    ASSERT(false);
+  }
+
+#elif defined(RCC_USBCLK48MCLKSource_PLLCLK) && defined(RCC_USBFSCLKSource_PLLCLK_Div1) && defined(RCC_USBFSCLKSource_PLLCLK_Div2) && defined(RCC_USBFSCLKSource_PLLCLK_Div3)
+  // Some WCH libraries split the configuration into a 48M source + USBFS divider.
+  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_PLLCLK);
+
+  if (sysclk_hz == 144000000u)
+  {
+    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div3);
+  }
+  else if (sysclk_hz == 96000000u)
+  {
+    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div2);
+  }
+  else if (sysclk_hz == 48000000u)
+  {
+    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div1);
+  }
+  else
+  {
+    // /5 mode (PLL=240) is not universally available in this API set.
+    ASSERT(false);
+  }
+
+#else
+  // Fallback: direct register operation is intentionally not used here.
+  // Expect user project to provide RCC_* USB clock config helpers.
+  (void)sysclk_hz;
+#endif
+}
+
+static void CH32_USBFS_RCC_Enable()
+{
+  CH32_USB_Clock48M_Config();
+
+#if defined(RCC_AHBPeriph_USBFS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
+#elif defined(RCC_AHBPeriph_USBOTGFS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
+#endif
+}
+
+static void CH32_USBHS_RCC_Enable()
+{
+  // Always ensure USB logic gets a valid 48MHz clock first.
+  CH32_USB_Clock48M_Config();
+
+#if defined(RCC_HSBHSPLLCLKSource_HSE) && defined(RCC_USBPLL_Div2) && defined(RCC_USBHSPLLCKREFCLK_4M)
+  // Follow the WCH USBHS reference init sequence.
+  RCC_USBHSPLLCLKConfig(RCC_HSBHSPLLCLKSource_HSE);
+  RCC_USBHSConfig(RCC_USBPLL_Div2);
+  RCC_USBHSPLLCKREFCLKConfig(RCC_USBHSPLLCKREFCLK_4M);
+  RCC_USBHSPHYPLLALIVEcmd(ENABLE);
+#endif
+
+#if defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+#endif
+  // Many WCH demos also enable USBFS clock alongside USBHS.
+#if defined(RCC_AHBPeriph_USBFS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
+#endif
+}
+
+}  // namespace
+
 #if defined(USBFSD)
 
 // NOLINTNEXTLINE
@@ -201,6 +303,7 @@ ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context 
 
 void CH32USBDeviceFS::Start(bool)
 {
+  CH32_USBFS_RCC_Enable();
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;                     // NOLINT
   USBFSH->BASE_CTRL = 0x00;                                                      // NOLINT
   USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;   // NOLINT
@@ -463,6 +566,7 @@ ErrorCode CH32USBDeviceHS::SetAddress(uint8_t address, USB::DeviceCore::Context 
 void CH32USBDeviceHS::Start(bool)
 {
   // NOLINTBEGIN
+  CH32_USBHS_RCC_Enable();
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
   USBHSD->CONTROL &= ~USBHS_UC_RESET_SIE;
   USBHSD->HOST_CTRL = USBHS_UH_PHY_SUSPENDM;
