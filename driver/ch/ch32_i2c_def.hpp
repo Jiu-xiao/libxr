@@ -3,11 +3,6 @@
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
-extern "C"
-{
-#include "ch32v30x_i2c.h"
-}
-
 typedef enum
 {
 #if defined(I2C1)
