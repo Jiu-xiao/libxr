@@ -25,7 +25,18 @@ else()
 endif()
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBUDEV REQUIRED libudev)
+pkg_check_modules(LIBGPIOD REQUIRED libgpiod)
 
-target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LIBUDEV_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBUDEV_LIBRARIES})
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LIBGPIOD_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBGPIOD_LIBRARIES})
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBUDEV libudev)
+
+if(LIBUDEV_FOUND)
+    message(STATUS "libudev found.")
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LIBUDEV_INCLUDE_DIRS})
+    target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBUDEV_LIBRARIES})
+else()
+    message(WARNING "libudev not found. Use `sudo apt install libudev-dev` to install libudev.")
+endif()
