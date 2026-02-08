@@ -31,12 +31,7 @@ target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LIBGPIOD_INCLUDE_DIRS
 target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBGPIOD_LIBRARIES})
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBUDEV libudev)
+pkg_check_modules(LIBUDEV REQUIRED libudev)
 
-if(LIBUDEV_FOUND)
-    message(STATUS "libudev found.")
-    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LIBUDEV_INCLUDE_DIRS})
-    target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBUDEV_LIBRARIES})
-else()
-    message(WARNING "libudev not found. Use `sudo apt install libudev-dev` to install libudev.")
-endif()
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LIBUDEV_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBUDEV_LIBRARIES})
