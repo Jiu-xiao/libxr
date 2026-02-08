@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
-#include <stdexcept>
 #include <string>
 
 #include "gpio.hpp"
@@ -21,8 +20,8 @@ namespace LibXR
  */
 enum class GPIOEventType : uint8_t
 {
-  RISING_EDGE,   ///< 上升沿事件。Rising edge event.
-  FALLING_EDGE   ///< 下降沿事件。Falling edge event.
+  RISING_EDGE,  ///< 上升沿事件。Rising edge event.
+  FALLING_EDGE  ///< 下降沿事件。Falling edge event.
 };
 
 /**
@@ -31,8 +30,8 @@ enum class GPIOEventType : uint8_t
  */
 struct GPIOEvent
 {
-  int64_t timestamp;     ///< 事件时间戳（纳秒）。Event timestamp in nanoseconds.
-  GPIOEventType type;   ///< 事件类型。Event type.
+  int64_t timestamp;   ///< 事件时间戳（纳秒）。Event timestamp in nanoseconds.
+  GPIOEventType type;  ///< 事件类型。Event type.
 };
 
 /**
@@ -107,12 +106,16 @@ class LinuxGPIO : public GPIO
    */
   bool Read() override
   {
-    EnsureConfigured();
+    if (!EnsureConfigured())
+    {
+      return false;
+    }
 
     enum gpiod_line_value value = gpiod_line_request_get_value(request_, line_offset_);
     if (value == GPIOD_LINE_VALUE_ERROR)
     {
-      throw BuildErrnoError("Failed to read GPIO value");
+      XR_LOG_ERROR("Failed to read GPIO value: %s", std::strerror(errno));
+      return false;
     }
 
     return value == GPIOD_LINE_VALUE_ACTIVE;
@@ -124,14 +127,17 @@ class LinuxGPIO : public GPIO
    */
   void Write(bool value) override
   {
-    EnsureConfigured();
+    if (!EnsureConfigured())
+    {
+      return;
+    }
 
     enum gpiod_line_value line_value =
         value ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE;
 
     if (gpiod_line_request_set_value(request_, line_offset_, line_value) < 0)
     {
-      throw BuildErrnoError("Failed to write GPIO value");
+      XR_LOG_WARN("Failed to write GPIO value: %s", std::strerror(errno));
     }
   }
 
@@ -171,14 +177,9 @@ class LinuxGPIO : public GPIO
    */
   int GetFd() const
   {
-    if (!has_config_ || !request_)
+    if (EnsureInterruptReady() != ErrorCode::OK)
     {
-      throw std::logic_error("GPIO is not configured");
-    }
-
-    if (!interrupt_enabled_)
-    {
-      throw std::logic_error("GPIO interrupt is not enabled");
+      return -1;
     }
 
     return gpiod_line_request_get_fd(request_);
@@ -190,7 +191,11 @@ class LinuxGPIO : public GPIO
    */
   ErrorCode HandleInterrupt()
   {
-    EnsureInterruptReady();
+    const ErrorCode READY = EnsureInterruptReady();
+    if (READY != ErrorCode::OK)
+    {
+      return READY;
+    }
 
     bool handled = false;
     while (true)
@@ -198,7 +203,8 @@ class LinuxGPIO : public GPIO
       int ready = gpiod_line_request_wait_edge_events(request_, 0);
       if (ready < 0)
       {
-        throw BuildErrnoError("Failed to poll GPIO edge events");
+        XR_LOG_ERROR("Failed to poll GPIO edge events: %s", std::strerror(errno));
+        return ErrorCode::FAILED;
       }
 
       if (ready == 0)
@@ -206,10 +212,12 @@ class LinuxGPIO : public GPIO
         break;
       }
 
-      int read = gpiod_line_request_read_edge_events(request_, event_buffer_, EVENT_BUFFER_CAPACITY);
+      int read = gpiod_line_request_read_edge_events(request_, event_buffer_,
+                                                     EVENT_BUFFER_CAPACITY);
       if (read < 0)
       {
-        throw BuildErrnoError("Failed to read GPIO edge events");
+        XR_LOG_ERROR("Failed to read GPIO edge events: %s", std::strerror(errno));
+        return ErrorCode::FAILED;
       }
 
       if (read == 0)
@@ -235,14 +243,19 @@ class LinuxGPIO : public GPIO
    * @param event 输出事件结构体
    * @return ErrorCode
    */
-  ErrorCode ReadEvent(GPIOEvent &event)
+  ErrorCode ReadEvent(GPIOEvent& event)
   {
-    EnsureInterruptReady();
+    const ErrorCode READY_STATUS = EnsureInterruptReady();
+    if (READY_STATUS != ErrorCode::OK)
+    {
+      return READY_STATUS;
+    }
 
     int ready = gpiod_line_request_wait_edge_events(request_, 0);
     if (ready < 0)
     {
-      throw BuildErrnoError("Failed to poll GPIO edge events");
+      XR_LOG_ERROR("Failed to poll GPIO edge events: %s", std::strerror(errno));
+      return ErrorCode::FAILED;
     }
 
     if (ready == 0)
@@ -254,7 +267,8 @@ class LinuxGPIO : public GPIO
 
     if (ret < 0)
     {
-      throw BuildErrnoError("Failed to read GPIO edge event");
+      XR_LOG_ERROR("Failed to read GPIO edge event: %s", std::strerror(errno));
+      return ErrorCode::FAILED;
     }
 
     if (ret == 0)
@@ -262,24 +276,26 @@ class LinuxGPIO : public GPIO
       return ErrorCode::EMPTY;
     }
 
-    struct gpiod_edge_event *edge_event =
+    struct gpiod_edge_event* edge_event =
         gpiod_edge_event_buffer_get_event(event_buffer_, ret - 1);
     if (!edge_event)
     {
-      throw std::runtime_error("Failed to access GPIO edge event from buffer");
+      XR_LOG_ERROR("Failed to access GPIO edge event from buffer");
+      return ErrorCode::FAILED;
     }
 
-    const uint64_t timestamp_ns = gpiod_edge_event_get_timestamp_ns(edge_event);
-    if (timestamp_ns > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    const uint64_t TIMESTAMP_NS = gpiod_edge_event_get_timestamp_ns(edge_event);
+    if (TIMESTAMP_NS > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     {
       XR_LOG_ERROR("GPIO edge event timestamp out of int64 range");
       return ErrorCode::OUT_OF_RANGE;
     }
 
-    event.timestamp = static_cast<int64_t>(timestamp_ns);
-    event.type = (gpiod_edge_event_get_event_type(edge_event) == GPIOD_EDGE_EVENT_RISING_EDGE)
-                     ? GPIOEventType::RISING_EDGE
-                     : GPIOEventType::FALLING_EDGE;
+    event.timestamp = static_cast<int64_t>(TIMESTAMP_NS);
+    event.type =
+        (gpiod_edge_event_get_event_type(edge_event) == GPIOD_EDGE_EVENT_RISING_EDGE)
+            ? GPIOEventType::RISING_EDGE
+            : GPIOEventType::FALLING_EDGE;
 
     return ErrorCode::OK;
   }
@@ -421,7 +437,8 @@ class LinuxGPIO : public GPIO
         {
           return ErrorCode::FAILED;
         }
-        if (gpiod_line_settings_set_edge_detection(settings_, GPIOD_LINE_EDGE_FALLING) < 0)
+        if (gpiod_line_settings_set_edge_detection(settings_, GPIOD_LINE_EDGE_FALLING) <
+            0)
         {
           return ErrorCode::FAILED;
         }
@@ -484,38 +501,42 @@ class LinuxGPIO : public GPIO
   /**
    * @brief 确保 GPIO 已配置
    */
-  void EnsureConfigured() const
+  bool EnsureConfigured() const
   {
     if (!has_config_ || !request_)
     {
-      throw std::logic_error("GPIO is not configured");
+      XR_LOG_ERROR("GPIO is not configured");
+      ASSERT(false);
+      return false;
     }
+
+    return true;
   }
 
   /**
    * @brief 确保中断路径已启用
    */
-  void EnsureInterruptReady() const
+  ErrorCode EnsureInterruptReady() const
   {
-    EnsureConfigured();
+    if (!EnsureConfigured())
+    {
+      return ErrorCode::STATE_ERR;
+    }
 
     if (!IsInterruptDirection(current_config_.direction))
     {
-      throw std::logic_error("GPIO is not configured for interrupt mode");
+      XR_LOG_ERROR("GPIO is not configured for interrupt mode");
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
     }
 
     if (!interrupt_enabled_)
     {
-      throw std::logic_error("GPIO interrupt is not enabled");
+      XR_LOG_ERROR("GPIO interrupt is not enabled");
+      return ErrorCode::STATE_ERR;
     }
-  }
 
-  /**
-   * @brief 构造带 errno 的异常
-   */
-  static std::runtime_error BuildErrnoError(const char* message)
-  {
-    return std::runtime_error(std::string(message) + ": " + std::strerror(errno));
+    return ErrorCode::OK;
   }
 };
 
