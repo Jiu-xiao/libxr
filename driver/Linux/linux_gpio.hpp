@@ -45,9 +45,10 @@ class LinuxGPIO : public GPIO
   static constexpr size_t EVENT_BUFFER_CAPACITY = 64;
 
   /**
-   * @brief 构造函数
-   * @param chip_path GPIO chip 设备路径（如 "/dev/gpiochip0"）
-   * @param line_offset GPIO line 偏移量
+   * @brief 构造 LinuxGPIO 对象。Constructs a LinuxGPIO instance.
+   * @param chip_path GPIO chip 设备路径（如 "/dev/gpiochip0"）。
+   *                  GPIO chip device path (e.g. "/dev/gpiochip0").
+   * @param line_offset GPIO line 偏移量。GPIO line offset.
    */
   LinuxGPIO(const std::string& chip_path, unsigned int line_offset)
       : chip_path_(chip_path),
@@ -101,8 +102,8 @@ class LinuxGPIO : public GPIO
   LinuxGPIO& operator=(const LinuxGPIO&) = delete;
 
   /**
-   * @brief 读取 GPIO 引脚状态
-   * @return true 高电平，false 低电平
+   * @brief 读取 GPIO 引脚状态。Reads the GPIO line level.
+   * @return true 高电平，false 低电平。True for high level, false for low level.
    */
   bool Read() override
   {
@@ -122,8 +123,8 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 写入 GPIO 引脚状态
-   * @param value true 高电平，false 低电平
+   * @brief 写入 GPIO 引脚状态。Writes a level to the GPIO line.
+   * @param value true 高电平，false 低电平。True for high level, false for low level.
    */
   void Write(bool value) override
   {
@@ -142,8 +143,8 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 使能中断
-   * @return ErrorCode
+   * @brief 使能 GPIO 中断处理状态。Enables GPIO interrupt handling state.
+   * @return 操作结果。Operation result.
    */
   ErrorCode EnableInterrupt() override
   {
@@ -162,8 +163,8 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 禁用中断
-   * @return ErrorCode
+   * @brief 禁用 GPIO 中断处理状态。Disables GPIO interrupt handling state.
+   * @return 操作结果。Operation result.
    */
   ErrorCode DisableInterrupt() override
   {
@@ -172,8 +173,9 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 获取 GPIO request 对应的文件描述符，用于 epoll/poll 注册
-   * @return request 文件描述符
+   * @brief 获取 GPIO request 对应的文件描述符，用于 epoll/poll 注册。
+   *        Gets the request file descriptor for epoll/poll registration.
+   * @return request 文件描述符。Request file descriptor.
    */
   int GetFd() const
   {
@@ -186,8 +188,12 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 非阻塞处理中断事件，排空队列并触发回调
-   * @return ErrorCode::OK 表示处理了至少一个事件，ErrorCode::EMPTY 表示无事件
+   * @brief 非阻塞处理中断事件，排空队列并触发回调。
+   *        Handles GPIO interrupt events in non-blocking mode, drains queued events and
+   *        dispatches callbacks.
+   * @return ErrorCode::OK 表示处理了至少一个事件，ErrorCode::EMPTY 表示无事件。
+   *         ErrorCode::OK means at least one event was handled; ErrorCode::EMPTY means no
+   *         pending event.
    */
   ErrorCode HandleInterrupt()
   {
@@ -239,9 +245,9 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 读取中断事件
-   * @param event 输出事件结构体
-   * @return ErrorCode
+   * @brief 读取单个中断事件。Reads a single interrupt edge event.
+   * @param event 输出事件结构体。Output edge event structure.
+   * @return 操作结果。Operation result.
    */
   ErrorCode ReadEvent(GPIOEvent& event)
   {
@@ -301,9 +307,9 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 配置 GPIO 引脚参数
-   * @param config GPIO 配置
-   * @return ErrorCode
+   * @brief 配置 GPIO 引脚参数。Configures GPIO line settings.
+   * @param config GPIO 配置。GPIO configuration.
+   * @return 操作结果。Operation result.
    */
   ErrorCode SetConfig(Configuration config) override
   {
@@ -358,7 +364,8 @@ class LinuxGPIO : public GPIO
   std::string chip_path_;
   unsigned int line_offset_;
   gpiod_chip* chip_ = nullptr;
-  gpiod_edge_event_buffer* event_buffer_ = nullptr;  ///< 持久化事件缓冲区
+  gpiod_edge_event_buffer* event_buffer_ =
+      nullptr;  ///< 持久化事件缓冲区。Persistent edge event buffer.
   gpiod_line_settings* settings_ = nullptr;
   gpiod_request_config* req_cfg_ = nullptr;
   gpiod_line_config* line_cfg_ = nullptr;
@@ -368,8 +375,9 @@ class LinuxGPIO : public GPIO
   bool interrupt_enabled_ = false;
 
   /**
-   * @brief 根据 GPIO 方向配置 line settings
-   * @return ErrorCode
+   * @brief 根据 GPIO 方向配置 line settings。
+   *        Applies line settings according to GPIO direction.
+   * @return 操作结果。Operation result.
    */
   ErrorCode ApplyDirection(Direction direction)
   {
@@ -460,8 +468,9 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 根据 GPIO pull 配置 line settings
-   * @return ErrorCode
+   * @brief 根据 GPIO 上拉/下拉配置 line settings。
+   *        Applies line settings according to GPIO pull mode.
+   * @return 操作结果。Operation result.
    */
   ErrorCode ApplyPull(Pull pull)
   {
@@ -488,8 +497,8 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 判断 direction 是否为中断方向
-   * @return true 中断方向
+   * @brief 判断 direction 是否为中断方向。Checks whether direction is interrupt mode.
+   * @return true 表示中断方向。True if direction is interrupt mode.
    */
   static bool IsInterruptDirection(Direction direction)
   {
@@ -499,7 +508,7 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 确保 GPIO 已配置
+   * @brief 确保 GPIO 已配置。Ensures GPIO has been configured.
    */
   bool EnsureConfigured() const
   {
@@ -514,7 +523,7 @@ class LinuxGPIO : public GPIO
   }
 
   /**
-   * @brief 确保中断路径已启用
+   * @brief 确保中断路径已启用。Ensures interrupt path is enabled and ready.
    */
   ErrorCode EnsureInterruptReady() const
   {
