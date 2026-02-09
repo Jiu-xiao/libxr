@@ -29,10 +29,9 @@ MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_s
   read_port_impl_ = ReadFun;
   write_port_impl_ = WriteFun;
 
-  int instance_index = GetInstanceIndex(res_.instance);
-  ASSERT(instance_index >= 0);
-  ASSERT(instance_map_[instance_index] == nullptr);
-  instance_map_[instance_index] = this;
+  ASSERT(res_.index < MAX_UART_INSTANCES);
+  ASSERT(instance_map_[res_.index] == nullptr);
+  instance_map_[res_.index] = this;
 
   NVIC_ClearPendingIRQ(res_.irqn);
   NVIC_EnableIRQ(res_.irqn);
@@ -139,13 +138,7 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port)
 
 void MSPM0UART::OnInterrupt(UART_Regs* instance)
 {
-  int instance_index = GetInstanceIndex(instance);
-  if (instance_index < 0)
-  {
-    return;
-  }
-
-  auto* uart = instance_map_[instance_index];
+  auto* uart = FindByInstance(instance);
   if (uart == nullptr)
   {
     return;
@@ -154,57 +147,18 @@ void MSPM0UART::OnInterrupt(UART_Regs* instance)
   uart->HandleInterrupt();
 }
 
-int MSPM0UART::GetInstanceIndex(UART_Regs* instance)
+MSPM0UART* MSPM0UART::FindByInstance(UART_Regs* instance)
 {
-#if defined(UART0_BASE)
-  if (instance == UART0)
+  for (uint8_t index = 0; index < MAX_UART_INSTANCES; ++index)
   {
-    return 0;
+    auto* uart = instance_map_[index];
+    if (uart != nullptr && uart->res_.instance == instance)
+    {
+      return uart;
+    }
   }
-#endif
-#if defined(UART1_BASE)
-  if (instance == UART1)
-  {
-    return 1;
-  }
-#endif
-#if defined(UART2_BASE)
-  if (instance == UART2)
-  {
-    return 2;
-  }
-#endif
-#if defined(UART3_BASE)
-  if (instance == UART3)
-  {
-    return 3;
-  }
-#endif
-#if defined(UART4_BASE)
-  if (instance == UART4)
-  {
-    return 4;
-  }
-#endif
-#if defined(UART5_BASE)
-  if (instance == UART5)
-  {
-    return 5;
-  }
-#endif
-#if defined(UART6_BASE)
-  if (instance == UART6)
-  {
-    return 6;
-  }
-#endif
-#if defined(UART7_BASE)
-  if (instance == UART7)
-  {
-    return 7;
-  }
-#endif
-  return -1;
+
+  return nullptr;
 }
 
 void MSPM0UART::HandleInterrupt()

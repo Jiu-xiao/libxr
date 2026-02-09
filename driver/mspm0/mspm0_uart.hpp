@@ -15,6 +15,7 @@ class MSPM0UART : public UART
     UART_Regs* instance;
     IRQn_Type irqn;
     uint32_t clock_freq;
+    uint8_t index;
   };
 
   MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_size = 5,
@@ -29,13 +30,55 @@ class MSPM0UART : public UART
 
   static void OnInterrupt(UART_Regs* instance);
 
+  static constexpr uint8_t ResolveIndex(IRQn_Type irqn)
+  {
+    switch (irqn)
+    {
+#if defined(UART0_INT_IRQn)
+      case UART0_INT_IRQn:
+        return 0;
+#endif
+#if defined(UART1_INT_IRQn)
+      case UART1_INT_IRQn:
+        return 1;
+#endif
+#if defined(UART2_INT_IRQn)
+      case UART2_INT_IRQn:
+        return 2;
+#endif
+#if defined(UART3_INT_IRQn)
+      case UART3_INT_IRQn:
+        return 3;
+#endif
+#if defined(UART4_INT_IRQn)
+      case UART4_INT_IRQn:
+        return 4;
+#endif
+#if defined(UART5_INT_IRQn)
+      case UART5_INT_IRQn:
+        return 5;
+#endif
+#if defined(UART6_INT_IRQn)
+      case UART6_INT_IRQn:
+        return 6;
+#endif
+#if defined(UART7_INT_IRQn)
+      case UART7_INT_IRQn:
+        return 7;
+#endif
+      default:
+        return INVALID_INSTANCE_INDEX;
+    }
+  }
+
  private:
   ReadPort read_port_impl_;
   WritePort write_port_impl_;
 
   static constexpr uint8_t MAX_UART_INSTANCES = 8;
+  static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
 
-  static int GetInstanceIndex(UART_Regs* instance);
+  static MSPM0UART* FindByInstance(UART_Regs* instance);
 
   void HandleInterrupt();
 
@@ -61,13 +104,14 @@ class MSPM0UART : public UART
 };
 
 // Helper macro to initialize MSPM0UART from SysConfig in one shot
-#define MSPM0_UART_INIT(name, rx_stage_addr, rx_stage_size, tx_queue_size,  \
-                        tx_buffer_size)                                     \
-  ::LibXR::MSPM0UART::Resources{name##_INST, name##_INST_INT_IRQN,          \
-                                name##_INST_FREQUENCY},                     \
-      ::LibXR::RawData{(rx_stage_addr), (rx_stage_size)}, (tx_queue_size),  \
-      (tx_buffer_size),                                                     \
-      ::LibXR::UART::Configuration{static_cast<uint32_t>(name##_BAUD_RATE), \
+#define MSPM0_UART_INIT(name, rx_stage_addr, rx_stage_size, tx_queue_size,      \
+                        tx_buffer_size)                                           \
+  ::LibXR::MSPM0UART::Resources{                                                   \
+      name##_INST, name##_INST_INT_IRQN, name##_INST_FREQUENCY,                   \
+      ::LibXR::MSPM0UART::ResolveIndex(name##_INST_INT_IRQN)},                    \
+      ::LibXR::RawData{(rx_stage_addr), (rx_stage_size)}, (tx_queue_size),        \
+      (tx_buffer_size),                                                            \
+      ::LibXR::UART::Configuration{static_cast<uint32_t>(name##_BAUD_RATE),       \
                                    ::LibXR::UART::Parity::NO_PARITY, 8, 1}
 
 }  // namespace LibXR
