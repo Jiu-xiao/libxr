@@ -14,9 +14,9 @@ static constexpr uint32_t MSPM0_UART_DEFAULT_INTERRUPT_MASK =
 
 MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_size,
                      uint32_t tx_buffer_size, UART::Configuration config)
-    : UART(&read_port_impl_, &write_port_impl_),
-      read_port_impl_(rx_stage_buffer.size_),
-      write_port_impl_(tx_queue_size, tx_buffer_size),
+    : UART(&_read_port, &_write_port),
+      _read_port(rx_stage_buffer.size_),
+      _write_port(tx_queue_size, tx_buffer_size),
       res_(res)
 {
   ASSERT(res_.instance != nullptr);
@@ -26,8 +26,8 @@ MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_s
   ASSERT(tx_queue_size > 0);
   ASSERT(tx_buffer_size > 0);
 
-  read_port_impl_ = ReadFun;
-  write_port_impl_ = WriteFun;
+  _read_port = ReadFun;
+  _write_port = WriteFun;
 
   ASSERT(res_.index < MAX_UART_INSTANCES);
   ASSERT(instance_map_[res_.index] == nullptr);
@@ -118,7 +118,7 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
 
 ErrorCode MSPM0UART::WriteFun(WritePort& port)
 {
-  auto* uart = CONTAINER_OF(&port, MSPM0UART, write_port_impl_);
+  auto* uart = CONTAINER_OF(&port, MSPM0UART, _write_port);
   if (port.queue_info_->Size() == 0)
   {
     return ErrorCode::OK;
@@ -131,34 +131,25 @@ ErrorCode MSPM0UART::WriteFun(WritePort& port)
 
 ErrorCode MSPM0UART::ReadFun(ReadPort& port)
 {
-  auto* uart = CONTAINER_OF(&port, MSPM0UART, read_port_impl_);
+  auto* uart = CONTAINER_OF(&port, MSPM0UART, _read_port);
   UNUSED(uart);
   return ErrorCode::EMPTY;
 }
 
-void MSPM0UART::OnInterrupt(UART_Regs* instance)
+void MSPM0UART::OnInterrupt(uint8_t index)
 {
-  auto* uart = FindByInstance(instance);
+  if (index >= MAX_UART_INSTANCES)
+  {
+    return;
+  }
+
+  auto* uart = instance_map_[index];
   if (uart == nullptr)
   {
     return;
   }
 
   uart->HandleInterrupt();
-}
-
-MSPM0UART* MSPM0UART::FindByInstance(UART_Regs* instance)
-{
-  for (uint8_t index = 0; index < MAX_UART_INSTANCES; ++index)
-  {
-    auto* uart = instance_map_[index];
-    if (uart != nullptr && uart->res_.instance == instance)
-    {
-      return uart;
-    }
-  }
-
-  return nullptr;
 }
 
 void MSPM0UART::HandleInterrupt()
@@ -350,43 +341,43 @@ void MSPM0UART::DisableTxInterrupt()
 #if defined(UART0_BASE)
 extern "C" void UART0_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(UART0);
+  LibXR::MSPM0UART::OnInterrupt(0);
 }
 #endif
 
 #if defined(UART1_BASE)
 extern "C" void UART1_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(UART1);
+  LibXR::MSPM0UART::OnInterrupt(1);
 }
 #endif
 
 #if defined(UART2_BASE)
 extern "C" void UART2_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(UART2);
+  LibXR::MSPM0UART::OnInterrupt(2);
 }
 #endif
 
 #if defined(UART3_BASE)
 extern "C" void UART3_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(UART3);
+  LibXR::MSPM0UART::OnInterrupt(3);
 }
 #endif
 
 #if defined(UART4_BASE)
-extern "C" void UART4_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART4); }
+extern "C" void UART4_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(4); }
 #endif
 
 #if defined(UART5_BASE)
-extern "C" void UART5_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART5); }
+extern "C" void UART5_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(5); }
 #endif
 
 #if defined(UART6_BASE)
-extern "C" void UART6_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART6); }
+extern "C" void UART6_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(6); }
 #endif
 
 #if defined(UART7_BASE)
-extern "C" void UART7_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART7); }
+extern "C" void UART7_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(7); }
 #endif
