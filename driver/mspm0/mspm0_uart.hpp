@@ -29,10 +29,10 @@ class MSPM0UART : public UART
 
   static void OnInterrupt(UART_Regs* instance);
 
-  ReadPort _read_port;
-  WritePort _write_port;
-
  private:
+  ReadPort read_port_impl_;
+  WritePort write_port_impl_;
+
   static constexpr uint8_t MAX_UART_INSTANCES = 8;
 
   static int GetInstanceIndex(UART_Regs* instance);
@@ -61,13 +61,13 @@ class MSPM0UART : public UART
 };
 
 // Helper macro to initialize MSPM0UART from SysConfig in one shot
-#define MSPM0_UART_INIT(name, rx_stage_addr, rx_stage_size, tx_queue_size,       \
-                        tx_buffer_size)                                           \
-  ::LibXR::MSPM0UART::Resources{name##_INST, name##_INST_INT_IRQN,               \
-                                name##_INST_FREQUENCY},                           \
-      ::LibXR::RawData{(rx_stage_addr), (rx_stage_size)}, (tx_queue_size),       \
-      (tx_buffer_size),                                                           \
-      ::LibXR::UART::Configuration{static_cast<uint32_t>(name##_BAUD_RATE),      \
+#define MSPM0_UART_INIT(name, rx_stage_addr, rx_stage_size, tx_queue_size,  \
+                        tx_buffer_size)                                     \
+  ::LibXR::MSPM0UART::Resources{name##_INST, name##_INST_INT_IRQN,          \
+                                name##_INST_FREQUENCY},                     \
+      ::LibXR::RawData{(rx_stage_addr), (rx_stage_size)}, (tx_queue_size),  \
+      (tx_buffer_size),                                                     \
+      ::LibXR::UART::Configuration{static_cast<uint32_t>(name##_BAUD_RATE), \
                                    ::LibXR::UART::Parity::NO_PARITY, 8, 1}
 
 }  // namespace LibXR

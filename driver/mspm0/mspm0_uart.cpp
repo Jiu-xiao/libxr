@@ -14,9 +14,9 @@ static constexpr uint32_t MSPM0_UART_DEFAULT_INTERRUPT_MASK =
 
 MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_size,
                      uint32_t tx_buffer_size, UART::Configuration config)
-    : UART(&_read_port, &_write_port),
-      _read_port(rx_stage_buffer.size_),
-      _write_port(tx_queue_size, tx_buffer_size),
+    : UART(&read_port_impl_, &write_port_impl_),
+      read_port_impl_(rx_stage_buffer.size_),
+      write_port_impl_(tx_queue_size, tx_buffer_size),
       res_(res)
 {
   ASSERT(res_.instance != nullptr);
@@ -26,19 +26,19 @@ MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_s
   ASSERT(tx_queue_size > 0);
   ASSERT(tx_buffer_size > 0);
 
-  _read_port = ReadFun;
-  _write_port = WriteFun;
+  read_port_impl_ = ReadFun;
+  write_port_impl_ = WriteFun;
 
-  const int idx = GetInstanceIndex(res_.instance);
-  ASSERT(idx >= 0);
-  ASSERT(instance_map_[idx] == nullptr);
-  instance_map_[idx] = this;
+  int instance_index = GetInstanceIndex(res_.instance);
+  ASSERT(instance_index >= 0);
+  ASSERT(instance_map_[instance_index] == nullptr);
+  instance_map_[instance_index] = this;
 
   NVIC_ClearPendingIRQ(res_.irqn);
   NVIC_EnableIRQ(res_.irqn);
 
-  const ErrorCode set_cfg_ans = SetConfig(config);
-  ASSERT(set_cfg_ans == ErrorCode::OK);
+  const ErrorCode SET_CFG_ANS = SetConfig(config);
+  ASSERT(SET_CFG_ANS == ErrorCode::OK);
 }
 
 ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
@@ -93,14 +93,14 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
       return ErrorCode::ARG_ERR;
   }
 
-  const DL_UART_STOP_BITS stop_bits =
+  const DL_UART_STOP_BITS STOP_BITS =
       (config.stop_bits == 2) ? DL_UART_STOP_BITS_TWO : DL_UART_STOP_BITS_ONE;
 
   DL_UART_Main_changeConfig(res_.instance);
 
   DL_UART_Main_setWordLength(res_.instance, word_length);
   DL_UART_Main_setParityMode(res_.instance, parity);
-  DL_UART_Main_setStopBits(res_.instance, stop_bits);
+  DL_UART_Main_setStopBits(res_.instance, STOP_BITS);
 
   DL_UART_Main_enableFIFOs(res_.instance);
   DL_UART_Main_setRXFIFOThreshold(res_.instance, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
@@ -119,7 +119,7 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
 
 ErrorCode MSPM0UART::WriteFun(WritePort& port)
 {
-  auto* uart = CONTAINER_OF(&port, MSPM0UART, _write_port);
+  auto* uart = CONTAINER_OF(&port, MSPM0UART, write_port_impl_);
   if (port.queue_info_->Size() == 0)
   {
     return ErrorCode::OK;
@@ -132,20 +132,20 @@ ErrorCode MSPM0UART::WriteFun(WritePort& port)
 
 ErrorCode MSPM0UART::ReadFun(ReadPort& port)
 {
-  auto* uart = CONTAINER_OF(&port, MSPM0UART, _read_port);
+  auto* uart = CONTAINER_OF(&port, MSPM0UART, read_port_impl_);
   UNUSED(uart);
   return ErrorCode::EMPTY;
 }
 
 void MSPM0UART::OnInterrupt(UART_Regs* instance)
 {
-  const int idx = GetInstanceIndex(instance);
-  if (idx < 0)
+  int instance_index = GetInstanceIndex(instance);
+  if (instance_index < 0)
   {
     return;
   }
 
-  auto* uart = instance_map_[idx];
+  auto* uart = instance_map_[instance_index];
   if (uart == nullptr)
   {
     return;
@@ -157,49 +157,49 @@ void MSPM0UART::OnInterrupt(UART_Regs* instance)
 int MSPM0UART::GetInstanceIndex(UART_Regs* instance)
 {
 #if defined(UART0_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART0_BASE))
+  if (instance == UART0)
   {
     return 0;
   }
 #endif
 #if defined(UART1_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART1_BASE))
+  if (instance == UART1)
   {
     return 1;
   }
 #endif
 #if defined(UART2_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART2_BASE))
+  if (instance == UART2)
   {
     return 2;
   }
 #endif
 #if defined(UART3_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART3_BASE))
+  if (instance == UART3)
   {
     return 3;
   }
 #endif
 #if defined(UART4_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART4_BASE))
+  if (instance == UART4)
   {
     return 4;
   }
 #endif
 #if defined(UART5_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART5_BASE))
+  if (instance == UART5)
   {
     return 5;
   }
 #endif
 #if defined(UART6_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART6_BASE))
+  if (instance == UART6)
   {
     return 6;
   }
 #endif
 #if defined(UART7_BASE)
-  if (instance == reinterpret_cast<UART_Regs*>(UART7_BASE))
+  if (instance == UART7)
   {
     return 7;
   }
@@ -209,47 +209,46 @@ int MSPM0UART::GetInstanceIndex(UART_Regs* instance)
 
 void MSPM0UART::HandleInterrupt()
 {
-  constexpr uint32_t IRQ_MASK =
-      DL_UART_MAIN_INTERRUPT_RX | DL_UART_MAIN_INTERRUPT_TX |
-      MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
+  constexpr uint32_t IRQ_MASK = DL_UART_MAIN_INTERRUPT_RX | DL_UART_MAIN_INTERRUPT_TX |
+                                MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
 
   constexpr uint32_t MAX_IRQ_ROUNDS = 32;
   for (uint32_t round = 0; round < MAX_IRQ_ROUNDS; ++round)
   {
-    const uint32_t pending =
+    const uint32_t PENDING =
         DL_UART_Main_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
-    if (pending == 0)
+    if (PENDING == 0)
     {
       return;
     }
 
-    if ((pending & DL_UART_MAIN_INTERRUPT_RX) != 0)
+    if ((PENDING & DL_UART_MAIN_INTERRUPT_RX) != 0)
     {
       HandleRxInterrupt();
     }
 
-    if ((pending & DL_UART_MAIN_INTERRUPT_OVERRUN_ERROR) != 0)
+    if ((PENDING & DL_UART_MAIN_INTERRUPT_OVERRUN_ERROR) != 0)
     {
       HandleErrorInterrupt(DL_UART_MAIN_IIDX_OVERRUN_ERROR);
     }
-    if ((pending & DL_UART_MAIN_INTERRUPT_BREAK_ERROR) != 0)
+    if ((PENDING & DL_UART_MAIN_INTERRUPT_BREAK_ERROR) != 0)
     {
       HandleErrorInterrupt(DL_UART_MAIN_IIDX_BREAK_ERROR);
     }
-    if ((pending & DL_UART_MAIN_INTERRUPT_PARITY_ERROR) != 0)
+    if ((PENDING & DL_UART_MAIN_INTERRUPT_PARITY_ERROR) != 0)
     {
       HandleErrorInterrupt(DL_UART_MAIN_IIDX_PARITY_ERROR);
     }
-    if ((pending & DL_UART_MAIN_INTERRUPT_FRAMING_ERROR) != 0)
+    if ((PENDING & DL_UART_MAIN_INTERRUPT_FRAMING_ERROR) != 0)
     {
       HandleErrorInterrupt(DL_UART_MAIN_IIDX_FRAMING_ERROR);
     }
-    if ((pending & DL_UART_MAIN_INTERRUPT_NOISE_ERROR) != 0)
+    if ((PENDING & DL_UART_MAIN_INTERRUPT_NOISE_ERROR) != 0)
     {
       HandleErrorInterrupt(DL_UART_MAIN_IIDX_NOISE_ERROR);
     }
 
-    if ((pending & DL_UART_MAIN_INTERRUPT_TX) != 0)
+    if ((PENDING & DL_UART_MAIN_INTERRUPT_TX) != 0)
     {
       HandleTxInterrupt(true);
     }
@@ -293,6 +292,13 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
       if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
       {
         DisableTxInterrupt();
+
+        if (write_port_->queue_info_->Size() > 0)
+        {
+          DL_UART_Main_enableInterrupt(res_.instance, DL_UART_MAIN_INTERRUPT_TX);
+          res_.instance->CPU_INT.ISET = DL_UART_MAIN_INTERRUPT_TX;
+        }
+
         return;
       }
 
@@ -388,57 +394,45 @@ void MSPM0UART::DisableTxInterrupt()
 }
 
 #if defined(UART0_BASE)
-extern "C" void UART0_IRQHandler(void)
+extern "C" void UART0_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART0_BASE));
+  LibXR::MSPM0UART::OnInterrupt(UART0);
 }
 #endif
 
 #if defined(UART1_BASE)
-extern "C" void UART1_IRQHandler(void)
+extern "C" void UART1_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART1_BASE));
+  LibXR::MSPM0UART::OnInterrupt(UART1);
 }
 #endif
 
 #if defined(UART2_BASE)
-extern "C" void UART2_IRQHandler(void)
+extern "C" void UART2_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART2_BASE));
+  LibXR::MSPM0UART::OnInterrupt(UART2);
 }
 #endif
 
 #if defined(UART3_BASE)
-extern "C" void UART3_IRQHandler(void)
+extern "C" void UART3_IRQHandler(void)  // NOLINT
 {
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART3_BASE));
+  LibXR::MSPM0UART::OnInterrupt(UART3);
 }
 #endif
 
 #if defined(UART4_BASE)
-extern "C" void UART4_IRQHandler(void)
-{
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART4_BASE));
-}
+extern "C" void UART4_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART4); }
 #endif
 
 #if defined(UART5_BASE)
-extern "C" void UART5_IRQHandler(void)
-{
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART5_BASE));
-}
+extern "C" void UART5_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART5); }
 #endif
 
 #if defined(UART6_BASE)
-extern "C" void UART6_IRQHandler(void)
-{
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART6_BASE));
-}
+extern "C" void UART6_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART6); }
 #endif
 
 #if defined(UART7_BASE)
-extern "C" void UART7_IRQHandler(void)
-{
-  LibXR::MSPM0UART::OnInterrupt(reinterpret_cast<UART_Regs*>(UART7_BASE));
-}
+extern "C" void UART7_IRQHandler(void) { LibXR::MSPM0UART::OnInterrupt(UART7); }
 #endif
