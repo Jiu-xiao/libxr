@@ -655,7 +655,7 @@ class DapLinkV2Class : public DeviceClass
         return BuildInfoU8Response(resp[0], LibXR::USB::DapLinkV2Def::DAP_CAP_SWD, resp,
                                    resp_cap, out_len);
       case to_u8(LibXR::USB::DapLinkV2Def::InfoId::PACKET_COUNT):
-        return BuildInfoU8Response(resp[0], 127, resp, resp_cap, out_len);
+        return BuildInfoU8Response(resp[0], 2, resp, resp_cap, out_len);
       case to_u8(LibXR::USB::DapLinkV2Def::InfoId::PACKET_SIZE):
         return BuildInfoU16Response(resp[0],
                                     ep_data_in_ ? ep_data_in_->MaxTransferSize() : 0,
