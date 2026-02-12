@@ -75,12 +75,16 @@ EOF
   exit 1
 fi
 
+list_source_files() {
+  find driver src -type f \( \
+    -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
+  \) -print0
+}
+
 if [[ "${MODE}" == "check" ]]; then
-  rg --files -0 driver src -g '*.{c,cc,cpp,cxx}' | \
-    xargs -0 -r "${CLANG_FORMAT_BIN}" --dry-run --Werror --style=file
+  list_source_files | xargs -0 -r "${CLANG_FORMAT_BIN}" --dry-run --Werror --style=file
   echo "clang-format check passed for driver/ and src/."
 else
-  rg --files -0 driver src -g '*.{c,cc,cpp,cxx}' | \
-    xargs -0 -r "${CLANG_FORMAT_BIN}" -i --style=file
+  list_source_files | xargs -0 -r "${CLANG_FORMAT_BIN}" -i --style=file
   echo "Formatted C/C++ sources under driver/ and src/."
 fi
