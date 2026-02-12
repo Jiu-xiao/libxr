@@ -96,6 +96,30 @@ class DapLinkV2Class : public DeviceClass
    */
   bool IsInited() const { return inited_; }
 
+  /**
+   * @brief IN 端点是否忙碌 / Whether IN endpoint is busy
+   * 
+   * @return true 
+   * @return false 
+   */
+  bool EpInBusy()
+  {
+    auto ep = ep_data_in_;
+    return ep->GetState() != Endpoint::State::IDLE;
+  }
+
+  /**
+   * @brief OUT 端点是否忙碌 / Whether OUT endpoint is busy
+   * 
+   * @return true 
+   * @return false 
+   */
+  bool EpOutBusy()
+  {
+    auto ep = ep_data_out_;
+    return ep->GetState() != Endpoint::State::IDLE;
+  }
+
  protected:
   /**
    * @brief 绑定端点资源 / Bind endpoint resources
