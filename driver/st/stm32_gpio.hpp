@@ -39,7 +39,7 @@ class STM32GPIO final : public GPIO
   inline ErrorCode SetConfig(Configuration config)
   {
 // LL快速路径，适用于非外部中断的输入/输出配置
-#ifdef USE_FULL_LL_DRIVER
+#if defined(USE_FULL_LL_DRIVER) && defined(LL_GPIO_PULL_NO)
     if (static_cast<uint8_t>(config.direction) <=
         static_cast<uint8_t>(LibXR::GPIO::Direction::OUTPUT_OPEN_DRAIN))
     {
