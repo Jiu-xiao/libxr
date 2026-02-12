@@ -203,6 +203,13 @@ DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id)
   }
 #endif
 
+#if defined(DMA1_Channel8)
+  if (id == CH32_DMA1_CHANNEL8)
+  {
+    return DMA1_Channel8;
+  }
+#endif
+
 #if defined(DMA2_Channel1)
   if (id == CH32_DMA2_CHANNEL1)
   {

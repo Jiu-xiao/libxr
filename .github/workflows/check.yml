@@ -36,13 +36,7 @@ jobs:
         .venv-clang-format/bin/python -m pip install --upgrade pip
         .venv-clang-format/bin/python -m pip install "clang-format==21.1.8"
         .venv-clang-format/bin/clang-format --version
-    - name: check clang-format (exclude Eigen)
+    - name: check clang-format via script
       shell: bash
       run: |
-        count=$(git ls-files -- '*.c' '*.cc' '*.cpp' '*.cxx' ':(exclude)lib/Eigen/**' | wc -l)
-        if [ "${count}" -eq 0 ]; then
-          echo "No C/C++ source files found."
-          exit 0
-        fi
-        git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' ':(exclude)lib/Eigen/**' | \
-          xargs -0 -r .venv-clang-format/bin/clang-format --dry-run --Werror --style=file
+        tools/format_driver_src.sh --check

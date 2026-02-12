@@ -99,71 +99,96 @@ void CH32PWM::EnableGPIOClock(GPIO_TypeDef* gpio)
 
 void CH32PWM::EnableTIMClock(TIM_TypeDef* tim)
 {
+  // Keep each branch independent so conditional compilation cannot break brace structure.
+#if defined(TIM1) && defined(RCC_APB2Periph_TIM1)
   if (tim == TIM1)
   {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
+    return;
+  }
+#endif
 #if defined(TIM8) && defined(RCC_APB2Periph_TIM8)
-    else if (tim == TIM8)
-    {
-      RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
-    }
+  if (tim == TIM8)
+  {
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM9) && defined(RCC_APB2Periph_TIM9)
-    else if (tim == TIM9)
-    {
-      RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM9, ENABLE);
-    }
+  if (tim == TIM9)
+  {
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM9, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM10) && defined(RCC_APB2Periph_TIM10)
-    else if (tim == TIM10)
-    {
-      RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM10, ENABLE);
-    }
+  if (tim == TIM10)
+  {
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM10, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM2) && defined(RCC_APB1Periph_TIM2)
-  }
-  else if (tim == TIM2)
+  if (tim == TIM2)
   {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM3) && defined(RCC_APB1Periph_TIM3)
-  }
-  else if (tim == TIM3)
+  if (tim == TIM3)
   {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM4) && defined(RCC_APB1Periph_TIM4)
-  }
-  else if (tim == TIM4)
+  if (tim == TIM4)
   {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM5) && defined(RCC_APB1Periph_TIM5)
-  }
-  else if (tim == TIM5)
+  if (tim == TIM5)
   {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);
+    return;
   }
 #endif
 #if defined(TIM6) && defined(RCC_APB1Periph_TIM6)
-  else if (tim == TIM6)
+  if (tim == TIM6)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM7) && defined(RCC_APB1Periph_TIM7)
-  else if (tim == TIM7)
+  if (tim == TIM7)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM7, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM12) && defined(RCC_APB1Periph_TIM12)
-  else if (tim == TIM12)
+  if (tim == TIM12)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM12, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM13) && defined(RCC_APB1Periph_TIM13)
-  else if (tim == TIM13)
+  if (tim == TIM13)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM13, ENABLE);
+    return;
+  }
 #endif
 #if defined(TIM14) && defined(RCC_APB1Periph_TIM14)
-  else if (tim == TIM14)
+  if (tim == TIM14)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM14, ENABLE);
+  }
 #endif
 }
 
@@ -405,7 +430,7 @@ void CH32PWM::EnableChannel(bool en)
       break;
   }
 #else
-      (void)en;
+    (void)en;
 #endif
 }
 

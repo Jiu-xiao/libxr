@@ -386,19 +386,19 @@ static DMA_Channel_TypeDef* const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
     DMA1_Channel2,
 #endif
 #if defined(USART4)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART5)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART6)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART7)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART8)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(UART1)
     NULL,
@@ -441,19 +441,19 @@ static DMA_Channel_TypeDef* const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
     DMA1_Channel3,
 #endif
 #if defined(USART4)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART5)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART6)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART7)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART8)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(UART1)
     NULL,

@@ -16,7 +16,7 @@ static constexpr uint16_t USBD_PMA_BYTES_SOLO = 512;
 static constexpr uint16_t USBD_PMA_BYTES_WITHCAN = 384;
 
 // Build-time capabilities / mode detection.
-#if defined(RCC_APB1Periph_USB) && !defined(USBHSD)
+#if defined(RCC_APB1Periph_USB) 
 inline constexpr bool K_HAS_USB_DEV_FS = true;
 #else
 inline constexpr bool K_HAS_USB_DEV_FS = false;
@@ -95,7 +95,7 @@ inline bool can1_active()
 }  // namespace LibXR::CH32UsbCanShared
 
 #ifdef CH32_USBCAN_SHARED_IMPLEMENTATION
-#if defined(RCC_APB1Periph_USB) && !defined(USBHSD) && defined(CAN1) && !defined(CAN2)
+#if defined(RCC_APB1Periph_USB)  && defined(CAN1) && !defined(CAN2)
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt)) void USB_LP_CAN1_RX0_IRQHandler(void)

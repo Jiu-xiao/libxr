@@ -255,9 +255,10 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 
         case USBHS_UIS_TOKEN_OUT:
         {
-          const uint16_t LEN = USBHSD->RX_LEN;
-          if (ep[OUT_IDX])
+          // NAK is not a completed data OUT transaction.
+          if (((INTST & USBHS_UIS_IS_NAK) == 0) && ep[OUT_IDX])
           {
+            const uint16_t LEN = USBHSD->RX_LEN;
             ep[OUT_IDX]->TransferComplete(LEN);
           }
           break;
@@ -265,7 +266,8 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 
         case USBHS_UIS_TOKEN_IN:
         {
-          if (ep[IN_IDX])
+          // NAK is not a completed data IN transaction.
+          if (((INTST & USBHS_UIS_IS_NAK) == 0) && ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);
           }

@@ -34,7 +34,7 @@ static void ch32_usb_clock48_m_config()
     RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div1);
   }
 #if defined(RCC_USB5PRE_JUDGE) && defined(RCC_USBCLKSource_PLLCLK_Div5)
-  else if (sysclk_hz == 240000000u)
+  else if (SYSCLK_HZ == 240000000u)
   {
     ASSERT(RCC_USB5PRE_JUDGE() == SET);
     RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div5);
@@ -50,15 +50,15 @@ static void ch32_usb_clock48_m_config()
     defined(RCC_USBFSCLKSource_PLLCLK_Div2) && defined(RCC_USBFSCLKSource_PLLCLK_Div3)
   RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_PLLCLK);
 
-  if (sysclk_hz == 144000000u)
+  if (SYSCLK_HZ == 144000000u)
   {
     RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div3);
   }
-  else if (sysclk_hz == 96000000u)
+  else if (SYSCLK_HZ == 96000000u)
   {
     RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div2);
   }
-  else if (sysclk_hz == 48000000u)
+  else if (SYSCLK_HZ == 48000000u)
   {
     RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div1);
   }
@@ -68,7 +68,7 @@ static void ch32_usb_clock48_m_config()
   }
 
 #else
-  (void)sysclk_hz;
+  (void)SYSCLK_HZ;
 #endif
 }
 

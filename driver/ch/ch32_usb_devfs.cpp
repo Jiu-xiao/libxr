@@ -9,6 +9,8 @@
 using namespace LibXR;
 using namespace LibXR::USB;
 
+#if defined(RCC_APB1Periph_USB)
+
 namespace
 {
 
@@ -73,8 +75,6 @@ static void ch32_usb_clock48m_config()
 }
 
 }  // namespace
-
-#if defined(RCC_APB1Periph_USB) && !defined(USBHSD)
 
 #ifdef USB_BASE
 static constexpr uintptr_t USBDEV_REG_BASE = USB_BASE;
@@ -590,6 +590,6 @@ void CH32USBDeviceFS::Stop(bool)
   *usbdev_cntr() = USB_CNTR_FRES;
 }
 
-#endif  // defined(RCC_APB1Periph_USB) && !defined(USBHSD)
+#endif  // defined(RCC_APB1Periph_USB)
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

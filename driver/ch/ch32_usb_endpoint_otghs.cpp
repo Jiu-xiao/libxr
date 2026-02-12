@@ -414,12 +414,26 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
 
   if (GetDirection() == Direction::IN)
   {
-    *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
+    if (GetType() != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
+    {
+      *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_AUTO;
+    }
+    else
+    {
+      *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
+    }
     set_tx_len(GetNumber(), 0);
   }
   else
   {
-    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
+    if (GetType() != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
+    {
+      *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK | USBHS_UEP_R_TOG_AUTO;
+    }
+    else
+    {
+      *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
+    }
 
     if (GetNumber() != EPNumber::EP0)
     {
@@ -539,9 +553,16 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
     if (GetType() != Type::ISOCHRONOUS)
     {
-      *addr = USBHS_UEP_T_RES_ACK |
-              (*addr & (~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MDATA))) |
-              (tog0_ ? USBHS_UEP_T_TOG_DATA1 : 0);
+      if (GetNumber() != EPNumber::EP0)
+      {
+        *addr = (*addr & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_ACK;
+      }
+      else
+      {
+        *addr = USBHS_UEP_T_RES_ACK |
+                (*addr & (~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MDATA))) |
+                (tog0_ ? USBHS_UEP_T_TOG_DATA1 : 0);
+      }
     }
     else
     {
@@ -555,9 +576,16 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
     if (GetType() != Type::ISOCHRONOUS)
     {
-      *addr = USBHS_UEP_R_RES_ACK |
-              (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
-              (tog0_ ? USBHS_UEP_R_TOG_DATA1 : 0);
+      if (GetNumber() != EPNumber::EP0)
+      {
+        *addr = (*addr & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_ACK;
+      }
+      else
+      {
+        *addr = USBHS_UEP_R_RES_ACK |
+                (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
+                (tog0_ ? USBHS_UEP_R_TOG_DATA1 : 0);
+      }
     }
     else
     {
@@ -659,12 +687,6 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     }
   }
 
-  // 成功：更新软件 data toggle
-  if (GetState() == State::BUSY && !IS_EP0 && !IS_ISO)
-  {
-    tog0_ = !tog0_;
-  }
-
   if (IS_EP0 && IS_OUT)
   {
     tog0_ = true;
@@ -679,11 +701,17 @@ void CH32EndpointOtgHs::SwitchBuffer()
 {
   if (GetDirection() == Direction::IN)
   {
-    SetActiveBlock(!tog0_);
+    const auto* tx_ctrl = get_tx_control_addr(GetNumber());
+    const bool TOG_IS_DATA1 =
+        ((*tx_ctrl & USBHS_UEP_T_TOG_MASK) == USBHS_UEP_T_TOG_DATA1);
+    SetActiveBlock(!TOG_IS_DATA1);
   }
   else
   {
-    SetActiveBlock(tog0_);
+    const auto* rx_ctrl = get_rx_control_addr(GetNumber());
+    const bool TOG_IS_DATA1 =
+        ((*rx_ctrl & USBHS_UEP_R_TOG_MASK) == USBHS_UEP_R_TOG_DATA1);
+    SetActiveBlock(TOG_IS_DATA1);
   }
 }
 

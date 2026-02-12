@@ -32,6 +32,17 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   bool rx_enable = dma_rx.size_ > 0;
 
   ASSERT(tx_enable || rx_enable);
+  if (tx_enable)
+  {
+    ASSERT(dma_tx_channel_ != nullptr);
+    ASSERT(CH32_UART_TX_DMA_IT_MAP[id] != 0);
+  }
+  if (rx_enable)
+  {
+    ASSERT(dma_rx_channel_ != nullptr);
+    ASSERT(CH32_UART_RX_DMA_IT_TC_MAP[id] != 0);
+    ASSERT(CH32_UART_RX_DMA_IT_HT_MAP[id] != 0);
+  }
 
   /* GPIO配置（TX: 推挽输出，RX: 悬空输入） */
   GPIO_InitTypeDef gpio_init = {};
@@ -463,49 +474,49 @@ extern "C" void USART3_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART3
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART4_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART4_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART4); }
+extern "C" void USART4_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART4); }
 #endif
 #if defined(USART5)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART5_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART5_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART5); }
+extern "C" void USART5_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART5); }
 #endif
 #if defined(USART6)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART6_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART6_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART6); }
+extern "C" void USART6_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART6); }
 #endif
 #if defined(USART7)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART7_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART7_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART7); }
+extern "C" void USART7_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART7); }
 #endif
 #if defined(USART8)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART8_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART8_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART8); }
+extern "C" void USART8_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART8); }
 #endif
 #if defined(UART1)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART1_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART1_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART1); }
+extern "C" void UART1_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART1); }
 #endif
 #if defined(UART2)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART2_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART2_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART2); }
+extern "C" void UART2_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART2); }
 #endif
 #if defined(UART3)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART3_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART3_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART3); }
+extern "C" void UART3_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART3); }
 #endif
 #if defined(UART4)
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -517,25 +528,25 @@ extern "C" void UART4_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART4);
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART5_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART5_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART5); }
+extern "C" void UART5_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART5); }
 #endif
 #if defined(UART6)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART6_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART6_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART6); }
+extern "C" void UART6_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART6); }
 #endif
 #if defined(UART7)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART7_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART7_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART7); }
+extern "C" void UART7_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART7); }
 #endif
 #if defined(UART8)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART8_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART8_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART8); }
+extern "C" void UART8_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART8); }
 #endif
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

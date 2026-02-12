@@ -9,7 +9,7 @@
 
 using namespace LibXR;
 
-#if defined(RCC_APB1Periph_USB) && !defined(USBHSD)
+#if defined(RCC_APB1Periph_USB)
 
 #ifdef USB_BASE
 static constexpr uintptr_t REG_BASE = USB_BASE;
@@ -534,6 +534,6 @@ uint16_t CH32EndpointDevFs::GetRxCount(uint8_t ep)
   return get_rx_count_from_btable(ep);
 }
 
-#endif  // defined(RCC_APB1Periph_USB) && !defined(USBHSD)
+#endif  // defined(RCC_APB1Periph_USB)
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

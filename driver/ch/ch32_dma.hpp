@@ -91,6 +91,9 @@ static constexpr IRQn_Type CH32_DMA_IRQ_MAP[] = {
 #if defined(DMA1_Channel7)
     DMA1_Channel7_IRQn,
 #endif
+#if defined(DMA1_Channel8)
+    DMA1_Channel8_IRQn,
+#endif
 #if defined(DMA2_Channel1)
     DMA2_Channel1_IRQn,
 #endif

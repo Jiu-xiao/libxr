@@ -12,6 +12,7 @@ Usage:
 
 Description:
   Format all C/C++ source files under driver/ and src/ using clang-format.
+  Requires clang-format version 21.1.8 by default.
 
 Options:
   --check   Run clang-format in dry-run mode with --Werror.
@@ -20,6 +21,7 @@ EOF
 }
 
 MODE="format"
+REQUIRED_VERSION="${CLANG_FORMAT_REQUIRED_VERSION:-21.1.8}"
 case "${1:-}" in
   "")
     ;;
@@ -49,6 +51,28 @@ if [[ -z "${CLANG_FORMAT_BIN}" ]]; then
     echo "clang-format not found. Set CLANG_FORMAT_BIN or install clang-format." >&2
     exit 1
   fi
+fi
+
+CF_VERSION_OUTPUT="$("${CLANG_FORMAT_BIN}" --version 2>/dev/null || true)"
+CF_VERSION="$(printf '%s\n' "${CF_VERSION_OUTPUT}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+
+if [[ -z "${CF_VERSION}" ]]; then
+  echo "Failed to parse clang-format version from: ${CF_VERSION_OUTPUT}" >&2
+  exit 1
+fi
+
+if [[ "${CF_VERSION}" != "${REQUIRED_VERSION}" ]]; then
+  cat >&2 <<EOF
+clang-format version mismatch.
+  required: ${REQUIRED_VERSION}
+  found:    ${CF_VERSION} (${CLANG_FORMAT_BIN})
+
+Install the required version into a local venv:
+  python3 -m venv .venv-clang-format
+  .venv-clang-format/bin/python -m pip install --upgrade pip
+  .venv-clang-format/bin/python -m pip install "clang-format==${REQUIRED_VERSION}"
+EOF
+  exit 1
 fi
 
 if [[ "${MODE}" == "check" ]]; then
