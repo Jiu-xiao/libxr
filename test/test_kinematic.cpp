@@ -2,14 +2,14 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
-void test_kinematic() {
+void test_kinematic()
+{
   LibXR::Inertia inertia_endpoint(1.0, 0.1, 0.1, 0.1, 0., 0., 0.);
   LibXR::Inertia inertia_midpoint(1.0, 0.1, 0.1, 0.1, 0., 0., 0.);
   LibXR::Inertia inertia_startpoint(1000., 100., 100., 100., 0., 0., 0.);
 
   LibXR::Position pos_startpoint(0., 0., 1.);
-  LibXR::Quaternion quat_startpoint =
-      LibXR::EulerAngle(0., 0., 0.).ToQuaternion();
+  LibXR::Quaternion quat_startpoint = LibXR::EulerAngle(0., 0., 0.).ToQuaternion();
 
   LibXR::Position pos_startpoint2joint(0., 0.0, 0.5);
   LibXR::Position pos_joint2midpoint(1.0, 0.0, 0.0);
@@ -21,8 +21,7 @@ void test_kinematic() {
   LibXR::Quaternion quat_midpoint2joint(1., 0., 0., 0.);
   LibXR::Quaternion quat_joint2endpoint(1., 0., 0., 0.);
 
-  LibXR::Transform t_startpoint2joint(quat_startpoint2joint,
-                                      pos_startpoint2joint);
+  LibXR::Transform t_startpoint2joint(quat_startpoint2joint, pos_startpoint2joint);
   LibXR::Transform t_joint2midpoint(quat_joint2midpoint, pos_joint2midpoint);
   LibXR::Transform t_midpoint2joint(quat_midpoint2joint, pos_midpoint2joint);
   LibXR::Transform t_joint2endpoint(quat_joint2endpoint, pos_joint2endpoint);
@@ -61,6 +60,5 @@ void test_kinematic() {
 
   ASSERT(error_pos.norm() < 1e-3);
   ASSERT(std::abs(error_quat.x()) < 1e-2 && std::abs(error_quat.y()) < 1e-2 &&
-         std::abs(error_quat.z()) < 1e-2 &&
-         std::abs(error_quat.w() - 1.0) < 1e-2);
+         std::abs(error_quat.z()) < 1e-2 && std::abs(error_quat.w() - 1.0) < 1e-2);
 }

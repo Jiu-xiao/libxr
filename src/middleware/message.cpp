@@ -9,7 +9,7 @@
 using namespace LibXR;
 
 template class LibXR::RBTree<uint32_t>;
-template class LibXR::Callback<LibXR::RawData &>;
+template class LibXR::Callback<LibXR::RawData&>;
 
 void Topic::PackedDataHeader::SetDataLen(uint32_t len)
 {
@@ -85,14 +85,14 @@ void Topic::UnlockFromCallback(Topic::TopicHandle topic)
   }
 }
 
-Topic::Domain::Domain(const char *name)
+Topic::Domain::Domain(const char* name)
 {
   if (!domain_)
   {
     if (!domain_)
     {
       domain_ =
-          new RBTree<uint32_t>([](const uint32_t &a, const uint32_t &b)
+          new RBTree<uint32_t>([](const uint32_t& a, const uint32_t& b)
                                { return static_cast<int>(a) - static_cast<int>(b); });
     }
   }
@@ -108,13 +108,13 @@ Topic::Domain::Domain(const char *name)
   }
 
   node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
-      [](const uint32_t &a, const uint32_t &b)
+      [](const uint32_t& a, const uint32_t& b)
       { return static_cast<int>(a) - static_cast<int>(b); });
 
   domain_->Insert(*node_, crc32);
 }
 
-void LibXR::Topic::RegisterCallback(Callback &cb)
+void LibXR::Topic::RegisterCallback(Callback& cb)
 {
   CallbackBlock block;
   block.cb = cb;
@@ -126,7 +126,7 @@ void LibXR::Topic::RegisterCallback(Callback &cb)
 
 Topic::Topic() {}
 
-Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool multi_publisher,
+Topic::Topic(const char* name, uint32_t max_length, Domain* domain, bool multi_publisher,
              bool cache, bool check_length)
 {
   if (!def_domain_)
@@ -189,7 +189,7 @@ Topic::Topic(const char *name, uint32_t max_length, Domain *domain, bool multi_p
 
 Topic::Topic(TopicHandle topic) : block_(topic) {}
 
-Topic::TopicHandle Topic::Find(const char *name, Domain *domain)
+Topic::TopicHandle Topic::Find(const char* name, Domain* domain)
 {
   if (domain == nullptr)
   {
@@ -214,7 +214,7 @@ void Topic::EnableCache()
   Unlock(block_);
 }
 
-void Topic::Publish(void *addr, uint32_t size)
+void Topic::Publish(void* addr, uint32_t size)
 {
   Lock(block_);
   if (block_->data_.check_length)
@@ -239,20 +239,20 @@ void Topic::Publish(void *addr, uint32_t size)
 
   RawData data = block_->data_.data;
 
-  auto foreach_fun = [&](SuberBlock &block)
+  auto foreach_fun = [&](SuberBlock& block)
   {
     switch (block.type)
     {
       case SuberType::SYNC:
       {
-        auto sync = reinterpret_cast<SyncBlock *>(&block);
+        auto sync = reinterpret_cast<SyncBlock*>(&block);
         LibXR::Memory::FastCopy(sync->buff.addr_, data.addr_, data.size_);
         sync->sem.Post();
         break;
       }
       case SuberType::ASYNC:
       {
-        auto async = reinterpret_cast<ASyncBlock *>(&block);
+        auto async = reinterpret_cast<ASyncBlock*>(&block);
         if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
         {
           LibXR::Memory::FastCopy(async->buff.addr_, data.addr_, data.size_);
@@ -262,13 +262,13 @@ void Topic::Publish(void *addr, uint32_t size)
       }
       case SuberType::QUEUE:
       {
-        auto queue_block = reinterpret_cast<QueueBlock *>(&block);
+        auto queue_block = reinterpret_cast<QueueBlock*>(&block);
         queue_block->fun(data, queue_block->queue, false);
         break;
       }
       case SuberType::CALLBACK:
       {
-        auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
+        auto cb_block = reinterpret_cast<CallbackBlock*>(&block);
         cb_block->cb.Run(false, data);
         break;
       }
@@ -281,7 +281,7 @@ void Topic::Publish(void *addr, uint32_t size)
   Unlock(block_);
 }
 
-void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
+void Topic::PublishFromCallback(void* addr, uint32_t size, bool in_isr)
 {
   LockFromCallback(block_);
   if (block_->data_.check_length)
@@ -306,20 +306,20 @@ void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
 
   RawData data = block_->data_.data;
 
-  auto foreach_fun = [&](SuberBlock &block)
+  auto foreach_fun = [&](SuberBlock& block)
   {
     switch (block.type)
     {
       case SuberType::SYNC:
       {
-        auto sync = reinterpret_cast<SyncBlock *>(&block);
+        auto sync = reinterpret_cast<SyncBlock*>(&block);
         LibXR::Memory::FastCopy(sync->buff.addr_, data.addr_, data.size_);
         sync->sem.PostFromCallback(in_isr);
         break;
       }
       case SuberType::ASYNC:
       {
-        auto async = reinterpret_cast<ASyncBlock *>(&block);
+        auto async = reinterpret_cast<ASyncBlock*>(&block);
         if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
         {
           LibXR::Memory::FastCopy(async->buff.addr_, data.addr_, data.size_);
@@ -329,13 +329,13 @@ void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
       }
       case SuberType::QUEUE:
       {
-        auto queue_block = reinterpret_cast<QueueBlock *>(&block);
+        auto queue_block = reinterpret_cast<QueueBlock*>(&block);
         queue_block->fun(data, queue_block->queue, false);
         break;
       }
       case SuberType::CALLBACK:
       {
-        auto cb_block = reinterpret_cast<CallbackBlock *>(&block);
+        auto cb_block = reinterpret_cast<CallbackBlock*>(&block);
         cb_block->cb.Run(in_isr, data);
         break;
       }
@@ -350,7 +350,7 @@ void Topic::PublishFromCallback(void *addr, uint32_t size, bool in_isr)
 
 void Topic::PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
 {
-  PackedData<uint8_t> *pack = reinterpret_cast<PackedData<uint8_t> *>(buffer.addr_);
+  PackedData<uint8_t>* pack = reinterpret_cast<PackedData<uint8_t>*>(buffer.addr_);
 
   LibXR::Memory::FastCopy(&pack->raw.data_, source.addr_, source.size_);
 
@@ -359,13 +359,12 @@ void Topic::PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
   pack->raw.header_.SetDataLen(source.size_);
   pack->raw.header_.pack_header_crc8 =
       CRC8::Calculate(&pack->raw, sizeof(PackedDataHeader) - sizeof(uint8_t));
-  uint8_t *crc8_pack =
-      reinterpret_cast<uint8_t *>(reinterpret_cast<uint8_t *>(pack) + PACK_BASE_SIZE +
-                                  source.size_ - sizeof(uint8_t));
+  uint8_t* crc8_pack = reinterpret_cast<uint8_t*>(
+      reinterpret_cast<uint8_t*>(pack) + PACK_BASE_SIZE + source.size_ - sizeof(uint8_t));
   *crc8_pack = CRC8::Calculate(pack, PACK_BASE_SIZE - sizeof(uint8_t) + source.size_);
 }
 
-Topic::TopicHandle Topic::WaitTopic(const char *name, uint32_t timeout, Domain *domain)
+Topic::TopicHandle Topic::WaitTopic(const char* name, uint32_t timeout, Domain* domain)
 {
   TopicHandle topic = nullptr;
   do
@@ -397,7 +396,7 @@ uint32_t Topic::GetKey() const
 }
 
 Topic::Server::Server(size_t buffer_length)
-    : topic_map_([](const uint32_t &a, const uint32_t &b)
+    : topic_map_([](const uint32_t& a, const uint32_t& b)
                  { return static_cast<int>(a) - static_cast<int>(b); }),
       queue_(1, buffer_length)
 {
@@ -452,7 +451,7 @@ size_t Topic::Server::ParseData(ConstRawData data)
         queue_.PopBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
         if (CRC8::Verify(parse_buff_.addr_, sizeof(PackedDataHeader)))
         {
-          auto header = reinterpret_cast<PackedDataHeader *>(parse_buff_.addr_);
+          auto header = reinterpret_cast<PackedDataHeader*>(parse_buff_.addr_);
           /* Find topic */
           auto node = topic_map_.Search<TopicHandle>(header->topic_name_crc32);
           if (node)
@@ -490,15 +489,15 @@ size_t Topic::Server::ParseData(ConstRawData data)
       /* Check size&crc */
       if (queue_.Size() >= data_len_ + sizeof(uint8_t))
       {
-        uint8_t *data =
-            reinterpret_cast<uint8_t *>(parse_buff_.addr_) + sizeof(PackedDataHeader);
+        uint8_t* data =
+            reinterpret_cast<uint8_t*>(parse_buff_.addr_) + sizeof(PackedDataHeader);
         queue_.PopBatch(data, data_len_ + sizeof(uint8_t));
         if (CRC8::Verify(parse_buff_.addr_,
                          data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t)))
         {
           status_ = Status::WAIT_START;
           auto data =
-              reinterpret_cast<uint8_t *>(parse_buff_.addr_) + sizeof(PackedDataHeader);
+              reinterpret_cast<uint8_t*>(parse_buff_.addr_) + sizeof(PackedDataHeader);
           if (data_len_ > current_topic_->data_.max_length)
           {
             data_len_ = current_topic_->data_.max_length;

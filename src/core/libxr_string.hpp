@@ -33,7 +33,7 @@ class String
    *
    * 从 C 风格字符串构造 String。
    */
-  String(const char *str)
+  String(const char* str)
   {
     std::strncpy(&raw_string_[0], str, MaxLength);
     raw_string_[MaxLength] = '\0';
@@ -46,7 +46,7 @@ class String
    *
    * 从 C 风格字符串构造 String，并指定最大拷贝长度。
    */
-  String(const char *str, size_t len)
+  String(const char* str, size_t len)
   {
     size_t copy_len = LibXR::min(MaxLength, len);
     std::strncpy(&raw_string_[0], str, copy_len);
@@ -59,7 +59,7 @@ class String
    *
    * 获取原始 C 风格字符串。
    */
-  const char *Raw() const { return &raw_string_[0]; }
+  const char* Raw() const { return &raw_string_[0]; }
 
   /**
    * @brief Accesses a character at a given index.
@@ -94,7 +94,7 @@ class String
    *
    * 返回从索引 i 开始的子字符串的指针。
    */
-  const char *operator+(unsigned int i) { return &raw_string_[i]; }
+  const char* operator+(unsigned int i) { return &raw_string_[i]; }
 
   /**
    * @brief Appends a C-style string to the current string.
@@ -103,7 +103,7 @@ class String
    *
    * 将 C 风格字符串追加到当前字符串。
    */
-  String &operator+=(const char *str)
+  String& operator+=(const char* str)
   {
     auto len = strnlen(this->Raw(), MaxLength);
     size_t copy_len = LibXR::min(MaxLength - len, std::strlen(str));
@@ -119,13 +119,13 @@ class String
    *
    * 查找子字符串的首次出现位置。
    */
-  int Find(const char *str) const
+  int Find(const char* str) const
   {
     if (!str)
     {
       return -1;
     }
-    const char *result = std::strstr(this->Raw(), str);
+    const char* result = std::strstr(this->Raw(), str);
     return result ? static_cast<int>(result - this->Raw()) : -1;
   }
 
@@ -138,7 +138,7 @@ class String
    * 比较两个字符串是否相等。
    */
   template <unsigned int NextStrLength>
-  bool operator==(const String<NextStrLength> &other) const
+  bool operator==(const String<NextStrLength>& other) const
   {
     return strncmp(this->Raw(), other.Raw(), MaxLength) == 0;
   }
@@ -152,7 +152,7 @@ class String
    * 比较两个字符串是否不相等。
    */
   template <unsigned int NextStrLength>
-  bool operator!=(const String<NextStrLength> &other) const
+  bool operator!=(const String<NextStrLength>& other) const
   {
     return strncmp(this->Raw(), other.Raw(), MaxLength) != 0;
   }
@@ -166,7 +166,7 @@ class String
    * 比较两个字符串，判断当前字符串是否小于另一个字符串。
    */
   template <unsigned int NextStrLength>
-  bool operator<(const String<NextStrLength> &other) const
+  bool operator<(const String<NextStrLength>& other) const
   {
     return strncmp(this->Raw(), other.Raw(), MaxLength) < 0;
   }
@@ -180,7 +180,7 @@ class String
    * 比较两个字符串，判断当前字符串是否大于另一个字符串。
    */
   template <unsigned int NextStrLength>
-  bool operator>(const String<NextStrLength> &other) const
+  bool operator>(const String<NextStrLength>& other) const
   {
     return strncmp(this->Raw(), other.Raw(), MaxLength) > 0;
   }
@@ -194,7 +194,7 @@ class String
    * 比较两个字符串，判断当前字符串是否小于或等于另一个字符串。
    */
   template <unsigned int NextStrLength>
-  bool operator<=(const String<NextStrLength> &other) const
+  bool operator<=(const String<NextStrLength>& other) const
   {
     return strncmp(this->Raw(), other.Raw(), MaxLength) <= 0;
   }
@@ -208,7 +208,7 @@ class String
    * 比较两个字符串，判断当前字符串是否大于或等于另一个字符串。
    */
   template <unsigned int NextStrLength>
-  bool operator>=(const String<NextStrLength> &other) const
+  bool operator>=(const String<NextStrLength>& other) const
   {
     return strncmp(this->Raw(), other.Raw(), MaxLength) >= 0;
   }

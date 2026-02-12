@@ -37,6 +37,7 @@ class CH32CAN : public CAN
    * @param pool_size   TX pool size (number of ClassicPack entries).
    */
   explicit CH32CAN(ch32_can_id_t id, uint32_t pool_size);
+  ~CH32CAN() override;
 
   /**
    * @brief Initialize filter + IRQ routing. Does NOT force a bitrate; call SetConfig().

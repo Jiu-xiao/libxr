@@ -2,7 +2,8 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
-void test_transform() {
+void test_transform()
+{
   LibXR::Position pos(1., 8., 0.3);
   LibXR::Position pos_new;
   LibXR::EulerAngle eulr = {M_PI / 12, M_PI / 6, M_PI / 4}, eulr_new;
@@ -28,8 +29,7 @@ void test_transform() {
   pos_new = (pos - pos_new) * 2.;
   pos_new *= 2;
   pos_new /= 4;
-  ASSERT(equal(pos_new(0), 0.) && equal(pos_new(1), 0.) &&
-         equal(pos_new(2), 0.));
+  ASSERT(equal(pos_new(0), 0.) && equal(pos_new(1), 0.) && equal(pos_new(2), 0.));
 
   pos_new = pos + pos_new;
   ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&
@@ -37,8 +37,7 @@ void test_transform() {
 
   pos_new -= pos;
 
-  ASSERT(equal(pos_new(0), 0.) && equal(pos_new(1), 0.) &&
-         equal(pos_new(2), 0.));
+  ASSERT(equal(pos_new(0), 0.) && equal(pos_new(1), 0.) && equal(pos_new(2), 0.));
 
   pos_new += pos;
   ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&

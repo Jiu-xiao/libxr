@@ -47,7 +47,7 @@ class CH32UART : public UART
 
   Flag::Plain in_tx_isr, tx_busy_;
 
-  static CH32UART* map[CH32_UART_NUMBER];
+  static CH32UART* map_[CH32_UART_NUMBER];
 };
 
 }  // namespace LibXR

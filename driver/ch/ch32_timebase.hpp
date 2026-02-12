@@ -22,7 +22,7 @@ class CH32Timebase : public Timebase
 
   void Sync(uint32_t ticks);
 
-  static inline volatile uint32_t sys_tick_ms = 0;
+  static inline volatile uint32_t sys_tick_ms_ = 0;
 };
 
 }  // namespace LibXR

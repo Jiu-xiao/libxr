@@ -1,3 +1,4 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_pwm.hpp"
 
 namespace LibXR
@@ -17,6 +18,8 @@ CH32PWM::CH32PWM(TIM_TypeDef* tim, uint16_t channel, bool active_high, GPIO_Type
 
 bool CH32PWM::OnAPB2(TIM_TypeDef* t)
 {
+  // TIMx macros in vendor headers are casted pointer constants.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
   return (t == TIM1)
 #if defined(TIM8)
          || (t == TIM8)
@@ -32,6 +35,8 @@ bool CH32PWM::OnAPB2(TIM_TypeDef* t)
 
 bool CH32PWM::IsAdvancedTimer(TIM_TypeDef* t)
 {
+  // TIMx macros in vendor headers are casted pointer constants.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
   return (t == TIM1)
 #if defined(TIM8)
          || (t == TIM8)
@@ -50,65 +55,95 @@ uint32_t CH32PWM::GetTimerClockHz(TIM_TypeDef* t)
   RCC_ClocksTypeDef c{};
   RCC_GetClocksFreq(&c);
 
-  const bool on_apb2 = OnAPB2(t);
-  const uint32_t pclk = on_apb2 ? c.PCLK2_Frequency : c.PCLK1_Frequency;
-  const uint32_t hclk = c.HCLK_Frequency;
+  const bool ON_APB2 = OnAPB2(t);
+  const uint32_t PCLK = ON_APB2 ? c.PCLK2_Frequency : c.PCLK1_Frequency;
+  const uint32_t HCLK = c.HCLK_Frequency;
 
-  if (pclk == 0u || hclk == 0u) return 0u;
+  if (PCLK == 0u || HCLK == 0u)
+  {
+    return 0u;
+  }
 
   // APB 预分频 = HCLK / PCLK。=1 表示不分频；>1 表示分频，此时 TIMxCLK = 2 * PCLKx。
-  const uint32_t apb_div = hclk / pclk;  // 1/2/4/8/16（取整足够）
-  const uint32_t timclk = (apb_div > 1u) ? (pclk * 2u) : pclk;
+  const uint32_t APB_DIV = HCLK / PCLK;  // 1/2/4/8/16（取整足够）
+  const uint32_t TIMCLK = (APB_DIV > 1u) ? (PCLK * 2u) : PCLK;
 
-  return timclk;
+  return TIMCLK;
 }
 
 void CH32PWM::EnableGPIOClock(GPIO_TypeDef* gpio)
 {
   if (gpio == GPIOA)
+  {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+  }
   else if (gpio == GPIOB)
+  {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
+  }
   else if (gpio == GPIOC)
+  {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+  }
   else if (gpio == GPIOD)
+  {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);
 #if defined(GPIOE)
+  }
   else if (gpio == GPIOE)
+  {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOE, ENABLE);
+  }
 #endif
 }
 
 void CH32PWM::EnableTIMClock(TIM_TypeDef* tim)
 {
-  if (tim == TIM1) RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
+  if (tim == TIM1)
+  {
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
 #if defined(TIM8) && defined(RCC_APB2Periph_TIM8)
-  else if (tim == TIM8)
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
+    else if (tim == TIM8)
+    {
+      RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
+    }
 #endif
 #if defined(TIM9) && defined(RCC_APB2Periph_TIM9)
-  else if (tim == TIM9)
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM9, ENABLE);
+    else if (tim == TIM9)
+    {
+      RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM9, ENABLE);
+    }
 #endif
 #if defined(TIM10) && defined(RCC_APB2Periph_TIM10)
-  else if (tim == TIM10)
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM10, ENABLE);
+    else if (tim == TIM10)
+    {
+      RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM10, ENABLE);
+    }
 #endif
 #if defined(TIM2) && defined(RCC_APB1Periph_TIM2)
+  }
   else if (tim == TIM2)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
 #endif
 #if defined(TIM3) && defined(RCC_APB1Periph_TIM3)
+  }
   else if (tim == TIM3)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
 #endif
 #if defined(TIM4) && defined(RCC_APB1Periph_TIM4)
+  }
   else if (tim == TIM4)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
 #endif
 #if defined(TIM5) && defined(RCC_APB1Periph_TIM5)
+  }
   else if (tim == TIM5)
+  {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);
+  }
 #endif
 #if defined(TIM6) && defined(RCC_APB1Periph_TIM6)
   else if (tim == TIM6)
@@ -156,22 +191,37 @@ void CH32PWM::ConfigureGPIO()
 
 ErrorCode CH32PWM::SetDutyCycle(float value)
 {
-  if (!tim_) return ErrorCode::ARG_ERR;
+  if (!tim_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
-  if (value < 0.0f) value = 0.0f;
-  if (value > 1.0f) value = 1.0f;
+  if (value < 0.0f)
+  {
+    value = 0.0f;
+  }
+  if (value > 1.0f)
+  {
+    value = 1.0f;
+  }
 
-  const uint32_t arr = ReadARR32(tim_);
-  const uint32_t pulse = static_cast<uint32_t>((arr + 1u) * value + 0.5f);
+  const uint32_t ARR = ReadARR32(tim_);
+  const uint32_t PULSE = static_cast<uint32_t>((ARR + 1u) * value + 0.5f);
 
-  ApplyCompare(pulse);
+  ApplyCompare(PULSE);
   return ErrorCode::OK;
 }
 
 ErrorCode CH32PWM::SetConfig(Configuration cfg)
 {
-  if (!tim_) return ErrorCode::ARG_ERR;
-  if (cfg.frequency == 0u) return ErrorCode::ARG_ERR;
+  if (!tim_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (cfg.frequency == 0u)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   // 先完成引脚与（可选）重映射
   ConfigureGPIO();
@@ -179,8 +229,11 @@ ErrorCode CH32PWM::SetConfig(Configuration cfg)
   // 确保定时器时钟已开
   EnableTIMClock(tim_);
 
-  const uint32_t timclk = GetTimerClockHz(tim_);
-  if (timclk == 0u) return ErrorCode::INIT_ERR;
+  const uint32_t TIMCLK = GetTimerClockHz(tim_);
+  if (TIMCLK == 0u)
+  {
+    return ErrorCode::INIT_ERR;
+  }
 
   // 寻找 PSC/ARR（16 位），偏向更小的 PSC 以提升占空比分辨率
   bool found = false;
@@ -188,17 +241,23 @@ ErrorCode CH32PWM::SetConfig(Configuration cfg)
 
   for (uint32_t psc = 1; psc <= 0xFFFFu; ++psc)
   {
-    const uint32_t arr = timclk / (psc * cfg.frequency);
-    if (arr == 0u) break;
-    if (arr <= 0x10000u)
+    const uint32_t ARR = TIMCLK / (psc * cfg.frequency);
+    if (ARR == 0u)
+    {
+      break;
+    }
+    if (ARR <= 0x10000u)
     {
       best_psc = psc;
-      best_arr = arr;  // 写寄存器时用 (arr-1)
+      best_arr = ARR;  // 写寄存器时用 (arr-1)
       found = true;
       break;
     }
   }
-  if (!found || best_arr == 0u) return ErrorCode::INIT_ERR;
+  if (!found || best_arr == 0u)
+  {
+    return ErrorCode::INIT_ERR;
+  }
 
   TIM_TimeBaseInitTypeDef tb{};
   tb.TIM_Prescaler = static_cast<uint16_t>(best_psc - 1u);
@@ -227,7 +286,10 @@ ErrorCode CH32PWM::SetConfig(Configuration cfg)
 
 ErrorCode CH32PWM::Enable()
 {
-  if (!tim_) return ErrorCode::ARG_ERR;
+  if (!tim_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   // 先开通道，后启计数器，避免毛刺
   EnableChannel(true);
@@ -245,7 +307,10 @@ ErrorCode CH32PWM::Enable()
 
 ErrorCode CH32PWM::Disable()
 {
-  if (!tim_) return ErrorCode::ARG_ERR;
+  if (!tim_)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   if (complementary_ && IsAdvancedTimer(tim_))
   {
@@ -260,20 +325,20 @@ ErrorCode CH32PWM::Disable()
 
 void CH32PWM::ApplyCompare(uint32_t pulse)
 {
-  const uint16_t ccr = static_cast<uint16_t>(std::min<uint32_t>(pulse, 0xFFFFu));
+  const uint16_t CCR = static_cast<uint16_t>(std::min<uint32_t>(pulse, 0xFFFFu));
   switch (channel_)
   {
     case TIM_Channel_1:
-      TIM_SetCompare1(tim_, ccr);
+      TIM_SetCompare1(tim_, CCR);
       break;
     case TIM_Channel_2:
-      TIM_SetCompare2(tim_, ccr);
+      TIM_SetCompare2(tim_, CCR);
       break;
     case TIM_Channel_3:
-      TIM_SetCompare3(tim_, ccr);
+      TIM_SetCompare3(tim_, CCR);
       break;
     case TIM_Channel_4:
-      TIM_SetCompare4(tim_, ccr);
+      TIM_SetCompare4(tim_, CCR);
       break;
     default:
       break;
@@ -340,13 +405,16 @@ void CH32PWM::EnableChannel(bool en)
       break;
   }
 #else
-  (void)en;
+      (void)en;
 #endif
 }
 
 void CH32PWM::EnableChannelN(bool en)
 {
-  if (!IsAdvancedTimer(tim_)) return;
+  if (!IsAdvancedTimer(tim_))
+  {
+    return;
+  }
   switch (channel_)
   {
     case TIM_Channel_1:
@@ -364,3 +432,5 @@ void CH32PWM::EnableChannelN(bool en)
 }
 
 }  // namespace LibXR
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

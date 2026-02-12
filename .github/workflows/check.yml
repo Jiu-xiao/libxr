@@ -22,3 +22,27 @@ jobs:
     - name: check
       run: script -q -c "./build/test"
 
+  clang-format:
+
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: install clang-format 21.1.8
+      shell: bash
+      run: |
+        python3 -m venv .venv-clang-format
+        .venv-clang-format/bin/python -m pip install --upgrade pip
+        .venv-clang-format/bin/python -m pip install "clang-format==21.1.8"
+        .venv-clang-format/bin/clang-format --version
+    - name: check clang-format (exclude Eigen)
+      shell: bash
+      run: |
+        count=$(git ls-files -- '*.c' '*.cc' '*.cpp' '*.cxx' ':(exclude)lib/Eigen/**' | wc -l)
+        if [ "${count}" -eq 0 ]; then
+          echo "No C/C++ source files found."
+          exit 0
+        fi
+        git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' ':(exclude)lib/Eigen/**' | \
+          xargs -0 -r .venv-clang-format/bin/clang-format --dry-run --Werror --style=file

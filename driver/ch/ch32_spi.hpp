@@ -43,7 +43,7 @@ class CH32SPI : public SPI
   // 低级轮询传输（内部使用）
   ErrorCode PollingTransfer(uint8_t* rx, const uint8_t* tx, uint32_t len);
 
-  static CH32SPI* map[CH32_SPI_NUMBER];
+  static CH32SPI* map_[CH32_SPI_NUMBER];
 
  private:
   inline bool DmaBusy() const

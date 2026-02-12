@@ -115,7 +115,7 @@ class Inertia
    * @param m 质量值。Mass value.
    * @param R 3x3 惯性张量矩阵。3x3 inertia tensor matrix.
    */
-  Inertia(Scalar m, const Eigen::Matrix<Scalar, 3, 3> &R) : mass(m)
+  Inertia(Scalar m, const Eigen::Matrix<Scalar, 3, 3>& R) : mass(m)
   {
     data[0] = R.data()[0];
     data[1] = R.data()[1];
@@ -141,7 +141,7 @@ class Inertia
   /// @brief 将惯性张量与另一个 3x3 矩阵相加。Adds the inertia tensor with another 3x3
   /// matrix.
 
-  Eigen::Matrix<Scalar, 3, 3> operator+(const Eigen::Matrix<Scalar, 3, 3> &R) const
+  Eigen::Matrix<Scalar, 3, 3> operator+(const Eigen::Matrix<Scalar, 3, 3>& R) const
   {
     return Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) + R;
   }
@@ -151,7 +151,7 @@ class Inertia
    * @param p 平移向量。Translation vector.
    * @return 平移后的惯性对象。Translated inertia object.
    */
-  Inertia Translate(const Eigen::Matrix<Scalar, 3, 1> &p) const
+  Inertia Translate(const Eigen::Matrix<Scalar, 3, 1>& p) const
   {
     Scalar dx = p(0), dy = p(1), dz = p(2);
     Eigen::Matrix<Scalar, 3, 3> translation_matrix;
@@ -167,7 +167,7 @@ class Inertia
    * @param R 旋转矩阵。Rotation matrix.
    * @return 旋转后的惯性张量。Rotated inertia tensor.
    */
-  Inertia Rotate(const Eigen::Matrix<Scalar, 3, 3> &R) const
+  Inertia Rotate(const Eigen::Matrix<Scalar, 3, 3>& R) const
   {
     return Inertia(
         mass, R * Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) * R.transpose());
@@ -179,7 +179,7 @@ class Inertia
    * @param R 旋转矩阵对象。Rotation matrix object.
    * @return 旋转后的惯性张量。Rotated inertia tensor.
    */
-  Inertia Rotate(const RotationMatrix<Scalar> &R) const
+  Inertia Rotate(const RotationMatrix<Scalar>& R) const
   {
     return Rotate(Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(R.data_));
   }
@@ -189,7 +189,7 @@ class Inertia
    * @param q 四元数。Quaternion.
    * @return 旋转后的惯性张量。Rotated inertia tensor.
    */
-  Inertia Rotate(const Eigen::Quaternion<Scalar> &q) const
+  Inertia Rotate(const Eigen::Quaternion<Scalar>& q) const
   {
     return Inertia(
         mass, q * Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(data) * q.conjugate());
@@ -201,8 +201,8 @@ class Inertia
    * @param q 四元数。Quaternion.
    * @return 旋转后的矩阵。Rotated matrix.
    */
-  static Eigen::Matrix<Scalar, 3, 3> Rotate(const Eigen::Matrix<Scalar, 3, 3> &R,
-                                            const Eigen::Quaternion<Scalar> &q)
+  static Eigen::Matrix<Scalar, 3, 3> Rotate(const Eigen::Matrix<Scalar, 3, 3>& R,
+                                            const Eigen::Quaternion<Scalar>& q)
   {
     return q * R * q.conjugate();
   }
@@ -213,7 +213,7 @@ class Inertia
    * @param q 自定义四元数对象。Custom quaternion object.
    * @return 旋转后的惯性张量。Rotated inertia tensor.
    */
-  Inertia Rotate(const Quaternion<Scalar> &q) const
+  Inertia Rotate(const Quaternion<Scalar>& q) const
   {
     return Rotate(Eigen::Quaternion<Scalar>(q));
   }
@@ -241,7 +241,7 @@ class CenterOfMass
    * @param m 质量值。Mass value.
    * @param p 质心位置。Center of mass position.
    */
-  CenterOfMass(Scalar m, const LibXR::Position<Scalar> &p) : position(p), mass(m) {}
+  CenterOfMass(Scalar m, const LibXR::Position<Scalar>& p) : position(p), mass(m) {}
 
   /**
    * @brief 使用质量和 Eigen 3D 向量构造质心对象。Constructs a center of mass object using
@@ -249,7 +249,7 @@ class CenterOfMass
    * @param m 质量值。Mass value.
    * @param p 3D 位置向量。3D position vector.
    */
-  CenterOfMass(Scalar m, const Eigen::Matrix<Scalar, 3, 1> &p) : position(p), mass(m) {}
+  CenterOfMass(Scalar m, const Eigen::Matrix<Scalar, 3, 1>& p) : position(p), mass(m) {}
 
   /**
    * @brief 从惯性对象和变换构造质心对象。Constructs a center of mass object from inertia
@@ -257,7 +257,7 @@ class CenterOfMass
    * @param m 惯性对象。Inertia object.
    * @param p 变换对象。Transformation object.
    */
-  CenterOfMass(const Inertia<Scalar> &m, const Transform<Scalar> &p)
+  CenterOfMass(const Inertia<Scalar>& m, const Transform<Scalar>& p)
       : position(p.translation), mass(m.mass)
   {
   }
@@ -267,7 +267,7 @@ class CenterOfMass
    * @param m 另一个质心对象。Another center of mass object.
    * @return 合并后的质心对象。Combined center of mass object.
    */
-  CenterOfMass operator+(const CenterOfMass &m) const
+  CenterOfMass operator+(const CenterOfMass& m) const
   {
     Scalar new_mass = mass + m.mass;
     return CenterOfMass(
@@ -282,7 +282,7 @@ class CenterOfMass
    * @param m 另一个质心对象。Another center of mass object.
    * @return 当前对象的引用。Reference to the current object.
    */
-  CenterOfMass &operator+=(const CenterOfMass &m)
+  CenterOfMass& operator+=(const CenterOfMass& m)
   {
     *this = *this + m;
     return *this;

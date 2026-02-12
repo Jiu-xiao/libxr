@@ -40,9 +40,9 @@ class RBTree
    public:
     Key key;                     ///< 节点键值 (Key associated with the node).
     RbtColor color;              ///< 节点颜色 (Color of the node).
-    BaseNode *left = nullptr;    ///< 左子节点 (Left child node).
-    BaseNode *right = nullptr;   ///< 右子节点 (Right child node).
-    BaseNode *parent = nullptr;  ///< 父节点 (Parent node).
+    BaseNode* left = nullptr;    ///< 左子节点 (Left child node).
+    BaseNode* right = nullptr;   ///< 右子节点 (Right child node).
+    BaseNode* parent = nullptr;  ///< 父节点 (Parent node).
     size_t size;                 ///< 节点大小 (Size of the node).
 
    protected:
@@ -74,7 +74,7 @@ class RBTree
      *        (Constructor initializing a node with the given data).
      * @param data 要存储的数据 (Data to store in the node).
      */
-    explicit Node(const Data &data) : BaseNode(sizeof(Data)), data_(data) {}
+    explicit Node(const Data& data) : BaseNode(sizeof(Data)), data_(data) {}
 
     /**
      * @brief 通过参数列表构造节点 (Constructor initializing a node using arguments list).
@@ -86,15 +86,15 @@ class RBTree
     {
     }
 
-    operator Data &() { return data_; }
-    Node &operator=(const Data &data)
+    operator Data&() { return data_; }
+    Node& operator=(const Data& data)
     {
       data_ = data;
       return *this;
     }
-    Data *operator->() { return &data_; }
-    const Data *operator->() const { return &data_; }
-    Data &operator*() { return data_; }
+    Data* operator->() { return &data_; }
+    const Data* operator->() const { return &data_; }
+    Data& operator*() { return data_; }
 
     Data data_;  ///< 存储的数据 (Stored data).
   };
@@ -104,8 +104,7 @@ class RBTree
    * @param compare_fun 比较函数指针，用于键值比较 (Comparison function pointer for key
    * comparison).
    */
-  explicit RBTree(int (*compare_fun)(const Key &, const Key &))
-      : compare_fun_(compare_fun)
+  explicit RBTree(int (*compare_fun)(const Key&, const Key&)) : compare_fun_(compare_fun)
   {
     ASSERT(compare_fun_);
   }
@@ -119,13 +118,13 @@ class RBTree
    *         (Pointer to the found node, or `nullptr` if not found).
    */
   template <typename Data, SizeLimitMode LimitMode = SizeLimitMode::MORE>
-  Node<Data> *Search(const Key &key)
+  Node<Data>* Search(const Key& key)
   {
     mutex_.Lock();
-    Node<Data> *result = nullptr;
+    Node<Data>* result = nullptr;
     if (root_)
     {
-      if (BaseNode *found = Search(root_, key))
+      if (BaseNode* found = Search(root_, key))
       {
         result = ToDerivedType<Data, LimitMode>(found);
       }
@@ -138,7 +137,7 @@ class RBTree
    * @brief 从树中删除指定节点 (Delete a specified node from the tree).
    * @param node 要删除的节点 (Node to be deleted).
    */
-  void Delete(BaseNode &node)
+  void Delete(BaseNode& node)
   {
     mutex_.Lock();
 
@@ -147,7 +146,7 @@ class RBTree
 
     if (node.left && node.right)
     {
-      BaseNode *replace = node.right;
+      BaseNode* replace = node.right;
       while (replace->left)
       {
         replace = replace->left;
@@ -234,7 +233,7 @@ class RBTree
    * @param key 节点键 (Key of the node).
    */
   template <typename KeyType>
-  void Insert(BaseNode &node, KeyType &&key)
+  void Insert(BaseNode& node, KeyType&& key)
   {
     mutex_.Lock();
     node.left = nullptr;
@@ -286,39 +285,39 @@ class RBTree
    * @return 指向下一个节点的指针 (Pointer to the next node).
    */
   template <typename Data>
-  Node<Data> *ForeachDisc(Node<Data> *node)
+  Node<Data>* ForeachDisc(Node<Data>* node)
   {
     mutex_.Lock();
-    Node<Data> *result = nullptr;
+    Node<Data>* result = nullptr;
     if (!node)
     {
-      result = static_cast<Node<Data> *>(root_);
+      result = static_cast<Node<Data>*>(root_);
       while (result && result->left)
       {
-        result = static_cast<Node<Data> *>(result->left);
+        result = static_cast<Node<Data>*>(result->left);
       }
     }
     else if (node->right)
     {
-      result = static_cast<Node<Data> *>(node->right);
+      result = static_cast<Node<Data>*>(node->right);
       while (result && result->left)
       {
-        result = static_cast<Node<Data> *>(result->left);
+        result = static_cast<Node<Data>*>(result->left);
       }
     }
     else if (node->parent)
     {
       if (node == node->parent->left)
       {
-        result = static_cast<Node<Data> *>(node->parent);
+        result = static_cast<Node<Data>*>(node->parent);
       }
       else
       {
         while (node->parent && node == node->parent->right)
         {
-          node = static_cast<Node<Data> *>(node->parent);
+          node = static_cast<Node<Data>*>(node->parent);
         }
-        result = static_cast<Node<Data> *>(node->parent);
+        result = static_cast<Node<Data>*>(node->parent);
       }
     }
     mutex_.Unlock();
@@ -326,15 +325,15 @@ class RBTree
   }
 
  private:
-  BaseNode *root_ = nullptr;  ///< 红黑树的根节点 (Root node of the Red-Black Tree).
+  BaseNode* root_ = nullptr;  ///< 红黑树的根节点 (Root node of the Red-Black Tree).
   LibXR::Mutex mutex_;        ///< 互斥锁，确保线程安全 (Mutex for thread-safety).
-  int (*compare_fun_)(const Key &,
-                      const Key &);  ///< 键值比较函数 (Function for key comparison).
+  int (*compare_fun_)(const Key&,
+                      const Key&);  ///< 键值比较函数 (Function for key comparison).
 
-  void RbtreeInsert(BaseNode &node)
+  void RbtreeInsert(BaseNode& node)
   {
-    BaseNode *parent = nullptr;
-    BaseNode **current = &root_;
+    BaseNode* parent = nullptr;
+    BaseNode** current = &root_;
     while (*current)
     {
       parent = *current;
@@ -346,7 +345,7 @@ class RBTree
     RbtreeInsertFixup(&node);
   }
 
-  void RbtreeInsertFixup(BaseNode *node)
+  void RbtreeInsertFixup(BaseNode* node)
   {
     BaseNode *parent = nullptr, *gparent = nullptr;
 
@@ -356,7 +355,7 @@ class RBTree
 
       if (parent == gparent->left)
       {
-        BaseNode *uncle = gparent->right;
+        BaseNode* uncle = gparent->right;
         if (uncle && uncle->color == RbtColor::RED)
         {
           uncle->color = RbtColor::BLACK;
@@ -368,7 +367,7 @@ class RBTree
 
         if (node == parent->right)
         {
-          BaseNode *tmp = nullptr;
+          BaseNode* tmp = nullptr;
           RbtreeLeftRotate(parent);
           tmp = parent;
           parent = node;
@@ -381,7 +380,7 @@ class RBTree
       }
       else
       {
-        BaseNode *uncle = gparent->left;
+        BaseNode* uncle = gparent->left;
         if (uncle && uncle->color == RbtColor::RED)
         {
           uncle->color = RbtColor::BLACK;
@@ -393,7 +392,7 @@ class RBTree
 
         if (node == parent->left)
         {
-          BaseNode *tmp = nullptr;
+          BaseNode* tmp = nullptr;
           RbtreeRightRotate(parent);
           tmp = parent;
           parent = node;
@@ -408,14 +407,14 @@ class RBTree
     root_->color = RbtColor::BLACK;
   }
 
-  void RbtreeLeftRotate(BaseNode *x)
+  void RbtreeLeftRotate(BaseNode* x)
   {
     if (!x || !x->right)
     {
       return;
     }
 
-    BaseNode *y = x->right;
+    BaseNode* y = x->right;
     x->right = y->left;
     if (y->left)
     {
@@ -444,14 +443,14 @@ class RBTree
     x->parent = y;
   }
 
-  void RbtreeRightRotate(BaseNode *y)
+  void RbtreeRightRotate(BaseNode* y)
   {
     if (!y || !y->left)
     {
       return;
     }
 
-    BaseNode *x = y->left;
+    BaseNode* x = y->left;
     y->left = x->right;
     if (x->right)
     {
@@ -480,9 +479,9 @@ class RBTree
     y->parent = x;
   }
 
-  void RbtreeDeleteFixup(BaseNode *node, BaseNode *parent)
+  void RbtreeDeleteFixup(BaseNode* node, BaseNode* parent)
   {
-    BaseNode *other = nullptr;
+    BaseNode* other = nullptr;
 
     while ((!node || node->color == RbtColor::BLACK) && node != root_)
     {
@@ -562,7 +561,7 @@ class RBTree
   }
 
   template <typename Data, typename Func>
-  ErrorCode RbtreeForeachStart(BaseNode *node, Func func)
+  ErrorCode RbtreeForeachStart(BaseNode* node, Func func)
   {
     if (!node)
     {
@@ -570,23 +569,23 @@ class RBTree
     }
 
     if (ErrorCode code =
-            RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data> *>(node->left), func);
+            RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data>*>(node->left), func);
         code != ErrorCode::OK)
     {
       return code;
     }
 
-    if (ErrorCode code = func(*reinterpret_cast<Node<Data> *>(node));
+    if (ErrorCode code = func(*reinterpret_cast<Node<Data>*>(node));
         code != ErrorCode::OK)
     {
       return code;
     }
 
-    return RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data> *>(node->right), func);
+    return RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data>*>(node->right), func);
   }
 
   template <typename Data, typename Func>
-  ErrorCode RbtreeForeach(BaseNode *node, Func func)
+  ErrorCode RbtreeForeach(BaseNode* node, Func func)
   {
     if (!node)
     {
@@ -594,22 +593,22 @@ class RBTree
     }
 
     if (ErrorCode code =
-            RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data> *>(node->left), func);
+            RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data>*>(node->left), func);
         code != ErrorCode::OK)
     {
       return code;
     }
 
-    if (ErrorCode code = func(*reinterpret_cast<Node<Data> *>(node));
+    if (ErrorCode code = func(*reinterpret_cast<Node<Data>*>(node));
         code != ErrorCode::OK)
     {
       return code;
     }
 
-    return RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data> *>(node->right), func);
+    return RbtreeForeach<Data, Func>(reinterpret_cast<Node<Data>*>(node->right), func);
   }
 
-  void RbtreeGetNum(BaseNode *node, uint32_t *count)
+  void RbtreeGetNum(BaseNode* node, uint32_t* count)
   {
     if (!node)
     {
@@ -620,7 +619,7 @@ class RBTree
     RbtreeGetNum(node->right, count);
   }
 
-  BaseNode *Search(BaseNode *x, const Key &key)
+  BaseNode* Search(BaseNode* x, const Key& key)
   {
     while (x)
     {
@@ -635,13 +634,13 @@ class RBTree
   }
 
   template <typename Data, SizeLimitMode LimitMode>
-  static Node<Data> *ToDerivedType(BaseNode *node)
+  static Node<Data>* ToDerivedType(BaseNode* node)
   {
     if (node)
     {
       Assert::SizeLimitCheck<LimitMode>(sizeof(Data), node->size);
     }
-    return static_cast<Node<Data> *>(node);
+    return static_cast<Node<Data>*>(node);
   }
 };
 }  // namespace LibXR

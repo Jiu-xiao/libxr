@@ -1,9 +1,10 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_flash.hpp"
 
 using namespace LibXR;
 
 // 访问时钟切半
-static void Flash_SetAccessClock_HalfSysclk(void)
+static void flash_set_access_clock_half_sysclk(void)
 {
   FLASH_Unlock();              // 解锁 FPEC/CTL
   FLASH->CTLR &= ~(1u << 25);  // SCKMOD=0 => SYSCLK/2
@@ -11,14 +12,14 @@ static void Flash_SetAccessClock_HalfSysclk(void)
 }
 
 // 访问时钟还原
-static void Flash_SetAccessClock_Sysclk(void)
+static void flash_set_access_clock_sysclk(void)
 {
   FLASH_Unlock();
   FLASH->CTLR |= (1u << 25);  // SCKMOD=1 => 访问时钟=SYSCLK
   FLASH_Lock();
 }
 
-static inline void Flash_ExitEnhancedReadIfEnabled()
+static inline void flash_exit_enhanced_read_if_enabled()
 {
   if (FLASH->STATR & (1u << 7))
   {  // EHMODS=1?
@@ -29,7 +30,7 @@ static inline void Flash_ExitEnhancedReadIfEnabled()
   }
 }
 
-static inline void Flash_FastUnlock()
+static inline void flash_fast_unlock()
 {
   FLASH_Unlock();  // 常规解锁：写 KEYR(两把钥匙) 由库函数完成
   // 快速模式解锁：向 MODEKEYR 依次写入 KEY1/KEY2
@@ -37,18 +38,21 @@ static inline void Flash_FastUnlock()
   FLASH->MODEKEYR = 0xCDEF89ABu;
 }
 
-static inline void Flash_FastLock()
+static inline void flash_fast_lock()
 {
   FLASH_Unlock();
   FLASH->CTLR |= (1u << 15);  // FLOCK=1 复锁快速模式
   FLASH_Lock();
 }
 
-static bool Flash_WaitBusyClear(uint32_t spin = 1000000u)
+static bool flash_wait_busy_clear(uint32_t spin = 1000000u)
 {
   while (FLASH->STATR & 0x1u)
   {
-    if (spin-- == 0) return false;
+    if (spin-- == 0)
+    {
+      return false;
+    }
   }
   return true;
 }
@@ -75,32 +79,38 @@ CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t sta
 
 ErrorCode CH32Flash::Erase(size_t offset, size_t size)
 {
-  if (size == 0) return ErrorCode::ARG_ERR;
+  if (size == 0)
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   ASSERT(SystemCoreClock <= 120000000);
 
-  const uint32_t start_addr = base_address_ + static_cast<uint32_t>(offset);
-  if (!IsInRange(start_addr, size)) return ErrorCode::OUT_OF_RANGE;
-  const uint32_t end_addr = start_addr + static_cast<uint32_t>(size);
+  const uint32_t START_ADDR = base_address_ + static_cast<uint32_t>(offset);
+  if (!IsInRange(START_ADDR, size))
+  {
+    return ErrorCode::OUT_OF_RANGE;
+  }
+  const uint32_t END_ADDR = START_ADDR + static_cast<uint32_t>(size);
 
   // 1) 退出增强读模式
-  Flash_ExitEnhancedReadIfEnabled();  // 进入擦写前必须退出 EHMOD
+  flash_exit_enhanced_read_if_enabled();  // 进入擦写前必须退出 EHMOD
 
   // 2) 访问时钟降为 SYSCLK/2（SCKMOD=0）
-  Flash_SetAccessClock_HalfSysclk();
+  flash_set_access_clock_half_sysclk();
 
   // 3) 解锁：常规 + 快速模式
-  Flash_FastUnlock();
+  flash_fast_unlock();
   ClearFlashFlagsOnce();
 
   // 4) 计算 256B 对齐区间
   const uint32_t FAST_SZ = 256u;
-  const uint32_t erase_begin = start_addr & ~(FAST_SZ - 1u);
-  const uint32_t erase_end = (end_addr + FAST_SZ - 1u) & ~(FAST_SZ - 1u);
-  if (erase_end <= erase_begin)
+  const uint32_t ERASE_BEGIN = START_ADDR & ~(FAST_SZ - 1u);
+  const uint32_t ERASE_END = (END_ADDR + FAST_SZ - 1u) & ~(FAST_SZ - 1u);
+  if (ERASE_END <= ERASE_BEGIN)
   {
-    Flash_FastLock();
-    Flash_SetAccessClock_Sysclk();
+    flash_fast_lock();
+    flash_set_access_clock_sysclk();
     return ErrorCode::OK;
   }
 
@@ -108,7 +118,7 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
   FLASH->CTLR |= (1u << 17);
 
   // 6) 逐页(256B)擦除
-  for (uint32_t adr = erase_begin; adr < erase_end; adr += FAST_SZ)
+  for (uint32_t adr = ERASE_BEGIN; adr < ERASE_END; adr += FAST_SZ)
   {
     // 写入页首地址
     FLASH->ADDR = adr;
@@ -117,12 +127,12 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
     FLASH->CTLR |= (1u << 6);
 
     // 等待 BSY=0
-    if (!Flash_WaitBusyClear())
+    if (!flash_wait_busy_clear())
     {
       // 关闭 FTER & 复锁 & 还原时钟后返回
       FLASH->CTLR &= ~(1u << 17);
-      Flash_FastLock();
-      Flash_SetAccessClock_Sysclk();
+      flash_fast_lock();
+      flash_set_access_clock_sysclk();
       return ErrorCode::FAILED;
     }
 
@@ -131,8 +141,8 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
     {  // WRPRTERR
       FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
       FLASH->CTLR &= ~(1u << 17);
-      Flash_FastLock();
-      Flash_SetAccessClock_Sysclk();
+      flash_fast_lock();
+      flash_set_access_clock_sysclk();
       return ErrorCode::FAILED;
     }
 
@@ -142,8 +152,8 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
 
   // 7) 关闭快速页擦除位，复锁快速模式与常规锁，并恢复访问时钟
   FLASH->CTLR &= ~(1u << 17);  // FTER=0
-  Flash_FastLock();
-  Flash_SetAccessClock_Sysclk();
+  flash_fast_lock();
+  flash_set_access_clock_sysclk();
 
   return ErrorCode::OK;
 }
@@ -153,59 +163,62 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
   ASSERT(SystemCoreClock <= 120000000);
 
   // 退出增强读模式 → 减少失败风险（手册要求在编程/擦除前退出）
-  Flash_ExitEnhancedReadIfEnabled();
+  flash_exit_enhanced_read_if_enabled();
 
   // 访问时钟切半（SCKMOD=0）
-  Flash_SetAccessClock_HalfSysclk();
+  flash_set_access_clock_half_sysclk();
 
   if (!data.addr_ || data.size_ == 0)
   {
-    Flash_SetAccessClock_Sysclk();
+    flash_set_access_clock_sysclk();
     ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
 
-  const uint32_t start_addr = base_address_ + static_cast<uint32_t>(offset);
-  if (!IsInRange(start_addr, data.size_))
+  const uint32_t START_ADDR = base_address_ + static_cast<uint32_t>(offset);
+  if (!IsInRange(START_ADDR, data.size_))
   {
-    Flash_SetAccessClock_Sysclk();
+    flash_set_access_clock_sysclk();
     ASSERT(false);
     return ErrorCode::OUT_OF_RANGE;
   }
 
   const uint8_t* src = reinterpret_cast<const uint8_t*>(data.addr_);
-  const uint32_t end_addr = start_addr + static_cast<uint32_t>(data.size_);
+  const uint32_t END_ADDR = START_ADDR + static_cast<uint32_t>(data.size_);
 
   FLASH_Unlock();
   ClearFlashFlagsOnce();
 
-  const uint32_t hw_begin = start_addr & ~1u;
-  const uint32_t hw_end = (end_addr + 1u) & ~1u;  // 向上取整到半字
+  const uint32_t HW_BEGIN = START_ADDR & ~1u;
+  const uint32_t HW_END = (END_ADDR + 1u) & ~1u;  // 向上取整到半字
 
-  for (uint32_t hw = hw_begin; hw < hw_end; hw += 2u)
+  for (uint32_t hw = HW_BEGIN; hw < HW_END; hw += 2u)
   {
     volatile uint16_t* p = reinterpret_cast<volatile uint16_t*>(hw);
     volatile uint16_t orig = *p;
     volatile uint16_t val = orig;
 
-    if (hw >= start_addr && hw < end_addr)
+    if (hw >= START_ADDR && hw < END_ADDR)
     {
-      uint8_t b0 = src[hw - start_addr];
+      uint8_t b0 = src[hw - START_ADDR];
       val = static_cast<uint16_t>((val & 0xFF00u) | b0);
     }
-    if ((hw + 1u) >= start_addr && (hw + 1u) < end_addr)
+    if ((hw + 1u) >= START_ADDR && (hw + 1u) < END_ADDR)
     {
-      uint8_t b1 = src[(hw + 1u) - start_addr];
+      uint8_t b1 = src[(hw + 1u) - START_ADDR];
       val = static_cast<uint16_t>((val & 0x00FFu) | (static_cast<uint16_t>(b1) << 8));
     }
 
-    if (val == orig) continue;  // 无变化
+    if (val == orig)
+    {
+      continue;  // 无变化
+    }
 
     // 未擦除单元禁止 0->1 抬位
     if (((~orig) & val) != 0u && orig != 0xE339u)
     {
       FLASH_Lock();
-      Flash_SetAccessClock_Sysclk();
+      flash_set_access_clock_sysclk();
       ASSERT(false);
       return ErrorCode::FAILED;
     }
@@ -213,7 +226,7 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
     if (FLASH_ProgramHalfWord(hw, val) != FLASH_COMPLETE)
     {
       FLASH_Lock();
-      Flash_SetAccessClock_Sysclk();
+      flash_set_access_clock_sysclk();
       ASSERT(false);
       return ErrorCode::FAILED;
     }
@@ -224,7 +237,7 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
   }
 
   FLASH_Lock();
-  Flash_SetAccessClock_Sysclk();
+  flash_set_access_clock_sysclk();
   return ErrorCode::OK;
 }
 
@@ -236,3 +249,5 @@ bool CH32Flash::IsInRange(uint32_t addr, size_t size) const
   const uint32_t END = addr + static_cast<uint32_t>(size);
   return (addr >= BEGIN) && (END <= LIMIT) && (END >= addr);
 }
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

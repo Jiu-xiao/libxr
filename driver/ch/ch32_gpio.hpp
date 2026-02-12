@@ -40,7 +40,7 @@ typedef enum
   CH32_GPIO_NUMBER
 } ch32_gpio_group_t;
 
-uint32_t CH32GetGPIOPeriph(GPIO_TypeDef* port);
+uint32_t ch32_get_gpio_periph(GPIO_TypeDef* port);
 
 class CH32GPIO final : public GPIO
 {
@@ -54,9 +54,13 @@ class CH32GPIO final : public GPIO
   inline void Write(bool value) override
   {
     if (value)
+    {
       port_->BSHR = pin_;
+    }
     else
+    {
       port_->BCR = pin_;
+    }
   }
 
   ErrorCode EnableInterrupt() override;
@@ -113,7 +117,7 @@ class CH32GPIO final : public GPIO
 
   static void CheckInterrupt(uint32_t line);
 
-  static inline CH32GPIO* map[16] = {nullptr};
+  static inline CH32GPIO* map_[16] = {nullptr};
 
  private:
   GPIO_TypeDef* port_;

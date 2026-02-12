@@ -47,7 +47,7 @@ class Topic
     LockFreeList subers;          ///< 订阅者列表。List of subscribers.
     uint32_t max_length;          ///< 数据的最大长度。Maximum length of data.
     uint32_t crc32;     ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex *mutex;       ///< 线程同步互斥锁。Mutex for thread synchronization.
+    Mutex* mutex;       ///< 线程同步互斥锁。Mutex for thread synchronization.
     RawData data;       ///< 存储的数据。Stored data.
     bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
     bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
@@ -107,7 +107,7 @@ class Topic
      * @param data 要赋值的数据。Data to be assigned.
      * @return 赋值后的数据。The assigned data.
      */
-    PackedData &operator=(const Data &data)
+    PackedData& operator=(const Data& data)
     {
       LibXR::Memory::FastCopy(raw.data_, &data, sizeof(Data));
       crc8_ = CRC8::Calculate(&raw, sizeof(raw));
@@ -118,18 +118,18 @@ class Topic
      * @brief 类型转换运算符，返回数据内容。Type conversion operator returning the data
      * content.
      */
-    operator Data() { return *reinterpret_cast<Data *>(raw.data_); }
+    operator Data() { return *reinterpret_cast<Data*>(raw.data_); }
 
     /**
      * @brief 指针运算符，访问数据成员。Pointer operator for accessing data members.
      */
-    Data *operator->() { return reinterpret_cast<Data *>(raw.data_); }
+    Data* operator->() { return reinterpret_cast<Data*>(raw.data_); }
 
     /**
      * @brief 指针运算符，访问数据成员（常量版本）。Pointer operator for accessing data
      * members (const version).
      */
-    const Data *operator->() const { return reinterpret_cast<const Data *>(raw.data_); }
+    const Data* operator->() const { return reinterpret_cast<const Data*>(raw.data_); }
   };
 #pragma pack(pop)
 
@@ -142,7 +142,7 @@ class Topic
    * @brief 主题句柄，指向存储数据的红黑树节点。Handle pointing to a red-black tree node
    * storing data.
    */
-  typedef RBTree<uint32_t>::Node<Block> *TopicHandle;
+  typedef RBTree<uint32_t>::Node<Block>* TopicHandle;
 
   /**
    * @brief 锁定主题，防止其被多个订阅者同时访问。Lock the topic to prevent it from being
@@ -190,12 +190,12 @@ class Topic
      * @note 包含动态内存分配。
      *       Contains dynamic memory allocation.
      */
-    Domain(const char *name);
+    Domain(const char* name);
 
     /**
      * @brief 指向该域的根节点。Pointer to the root node of the domain.
      */
-    RBTree<uint32_t>::Node<RBTree<uint32_t>> *node_;
+    RBTree<uint32_t>::Node<RBTree<uint32_t>>* node_;
   };
 
   /**
@@ -249,7 +249,7 @@ class Topic
      * @note 包含动态内存分配。
      *       Contains dynamic memory allocation.
      */
-    SyncSubscriber(const char *name, Data &data, Domain *domain = nullptr)
+    SyncSubscriber(const char* name, Data& data, Domain* domain = nullptr)
     {
       *this = SyncSubscriber<Data>(WaitTopic(name, UINT32_MAX, domain), data);
     }
@@ -263,7 +263,7 @@ class Topic
      * @note 包含动态内存分配。
      *       Contains dynamic memory allocation.
      */
-    SyncSubscriber(Topic topic, Data &data)
+    SyncSubscriber(Topic topic, Data& data)
     {
       if (topic.block_->data_.check_length)
       {
@@ -291,7 +291,7 @@ class Topic
       return block_->data_.sem.Wait(timeout);
     }
 
-    LockFreeList::Node<SyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
+    LockFreeList::Node<SyncBlock>* block_;  ///< 订阅者数据块。Subscriber data block.
   };
 
   enum class ASyncSubscriberState : uint32_t
@@ -331,7 +331,7 @@ class Topic
      * @note 包含动态内存分配。
      *       Contains dynamic memory allocation.
      */
-    ASyncSubscriber(const char *name, Domain *domain = nullptr)
+    ASyncSubscriber(const char* name, Domain* domain = nullptr)
     {
       *this = ASyncSubscriber(WaitTopic(name, UINT32_MAX, domain));
     }
@@ -381,10 +381,10 @@ class Topic
      * @return Data& 返回数据引用
      *         Reference to the data
      */
-    Data &GetData()
+    Data& GetData()
     {
       block_->data_.state.store(ASyncSubscriberState::IDLE, std::memory_order_release);
-      return *reinterpret_cast<Data *>(block_->data_.buff.addr_);
+      return *reinterpret_cast<Data*>(block_->data_.buff.addr_);
     }
 
     /**
@@ -396,7 +396,7 @@ class Topic
       block_->data_.state.store(ASyncSubscriberState::WAITING, std::memory_order_release);
     }
 
-    LockFreeList::Node<ASyncBlock> *block_;  ///< 订阅者数据块。Subscriber data block.
+    LockFreeList::Node<ASyncBlock>* block_;  ///< 订阅者数据块。Subscriber data block.
   };
 
   /**
@@ -406,8 +406,8 @@ class Topic
    */
   typedef struct QueueBlock : public SuberBlock
   {
-    void *queue;  ///< 指向订阅队列的指针 Pointer to the subscribed queue
-    void (*fun)(RawData &, void *,
+    void* queue;  ///< 指向订阅队列的指针 Pointer to the subscribed queue
+    void (*fun)(RawData&, void*,
                 bool);  ///< 处理数据的回调函数 Callback function to handle data
   } QueueBlock;
 
@@ -427,8 +427,8 @@ class Topic
      *       Contains dynamic memory allocation.
      */
     template <typename Data, uint32_t Length>
-    QueuedSubscriber(const char *name, LockFreeQueue<Data> &queue,
-                     Domain *domain = nullptr)
+    QueuedSubscriber(const char* name, LockFreeQueue<Data>& queue,
+                     Domain* domain = nullptr)
     {
       *this = QueuedSubscriber(WaitTopic(name, UINT32_MAX, domain), queue);
     }
@@ -444,7 +444,7 @@ class Topic
      *       Contains dynamic memory allocation.
      */
     template <typename Data>
-    QueuedSubscriber(Topic topic, LockFreeQueue<Data> &queue)
+    QueuedSubscriber(Topic topic, LockFreeQueue<Data>& queue)
     {
       if (topic.block_->data_.check_length)
       {
@@ -458,18 +458,18 @@ class Topic
       auto block = new LockFreeList::Node<QueueBlock>;
       block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
-      block->data_.fun = [](RawData &data, void *arg, bool in_isr)
+      block->data_.fun = [](RawData& data, void* arg, bool in_isr)
       {
         UNUSED(in_isr);
-        LockFreeQueue<Data> *queue = reinterpret_cast<LockFreeQueue<Data> *>(arg);
-        queue->Push(*reinterpret_cast<Data *>(data.addr_));
+        LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(arg);
+        queue->Push(*reinterpret_cast<Data*>(data.addr_));
       };
 
       topic.block_->data_.subers.Add(*block);
     }
   };
 
-  using Callback = LibXR::Callback<LibXR::RawData &>;
+  using Callback = LibXR::Callback<LibXR::RawData&>;
 
   /**
    * @struct CallbackBlock
@@ -489,7 +489,7 @@ class Topic
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  void RegisterCallback(Callback &cb);
+  void RegisterCallback(Callback& cb);
 
   /**
    * @brief  默认构造函数，创建一个空的 Topic 实例
@@ -514,7 +514,7 @@ class Topic
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  Topic(const char *name, uint32_t max_length, Domain *domain = nullptr,
+  Topic(const char* name, uint32_t max_length, Domain* domain = nullptr,
         bool multi_publisher = false, bool cache = false, bool check_length = false);
 
   /**
@@ -535,7 +535,7 @@ class Topic
    *       Contains dynamic memory allocation.
    */
   template <typename Data>
-  static Topic CreateTopic(const char *name, Domain *domain = nullptr,
+  static Topic CreateTopic(const char* name, Domain* domain = nullptr,
                            bool multi_publisher = false, bool cache = false,
                            bool check_length = false)
   {
@@ -557,7 +557,7 @@ class Topic
    * @return 主题句柄，如果找到则返回对应的句柄，否则返回 nullptr
    *         Topic handle if found, otherwise returns nullptr
    */
-  static TopicHandle Find(const char *name, Domain *domain = nullptr);
+  static TopicHandle Find(const char* name, Domain* domain = nullptr);
 
   /**
    * @brief  在指定域中查找或创建主题
@@ -576,7 +576,7 @@ class Topic
    *       Contains dynamic memory allocation.
    */
   template <typename Data>
-  static TopicHandle FindOrCreate(const char *name, Domain *domain = nullptr,
+  static TopicHandle FindOrCreate(const char* name, Domain* domain = nullptr,
                                   bool multi_publisher = false, bool cache = false,
                                   bool check_length = false)
   {
@@ -605,7 +605,7 @@ class Topic
    * @param  data 需要发布的数据 Data to be published
    */
   template <typename Data>
-  void Publish(Data &data)
+  void Publish(Data& data)
   {
     Publish(&data, sizeof(Data));
   }
@@ -616,7 +616,7 @@ class Topic
    * @param  addr 数据的地址 Address of the data
    * @param  size 数据大小 Size of the data
    */
-  void Publish(void *addr, uint32_t size);
+  void Publish(void* addr, uint32_t size);
 
   /**
    * @brief  在回调函数中发布数据
@@ -626,7 +626,7 @@ class Topic
    * @param  in_isr 是否在中断中发布数据 Whether to publish data in an interrupt
    */
   template <typename Data>
-  void PublishFromCallback(Data &data, bool in_isr)
+  void PublishFromCallback(Data& data, bool in_isr)
   {
     PublishFromCallback(&data, sizeof(Data), in_isr);
   }
@@ -638,7 +638,7 @@ class Topic
    * @param  size 数据大小 Size of the data
    * @param  in_isr 是否在中断中发布数据 Whether to publish data in an interrupt
    */
-  void PublishFromCallback(void *addr, uint32_t size, bool in_isr);
+  void PublishFromCallback(void* addr, uint32_t size, bool in_isr);
 
   /**
    * @brief 转储数据
@@ -693,7 +693,7 @@ class Topic
    * @param  data 存储数据的 PackedData 结构 PackedData structure to store data
    */
   template <typename Data>
-  ErrorCode DumpData(PackedData<Data> &data)
+  ErrorCode DumpData(PackedData<Data>& data)
   {
     if (block_->data_.data.addr_ == nullptr)
     {
@@ -712,7 +712,7 @@ class Topic
    * @param  data 存储数据的变量 Variable to store the data
    */
   template <typename Data>
-  ErrorCode DumpData(Data &data)
+  ErrorCode DumpData(Data& data)
   {
     if (block_->data_.data.addr_ == nullptr)
     {
@@ -735,8 +735,8 @@ class Topic
    * @return TopicHandle 如果找到主题，则返回其句柄，否则返回 nullptr
    *         TopicHandle if the topic is found, otherwise returns nullptr
    */
-  static TopicHandle WaitTopic(const char *name, uint32_t timeout = UINT32_MAX,
-                               Domain *domain = nullptr);
+  static TopicHandle WaitTopic(const char* name, uint32_t timeout = UINT32_MAX,
+                               Domain* domain = nullptr);
 
   /**
    * @brief  将 Topic 转换为 TopicHandle
@@ -823,12 +823,12 @@ class Topic
    * @brief  主题域的红黑树结构，存储不同的主题
    *         Red-Black Tree structure for storing different topics in the domain
    */
-  static inline RBTree<uint32_t> *domain_ = nullptr;
+  static inline RBTree<uint32_t>* domain_ = nullptr;
 
   /**
    * @brief  默认的主题域，所有未指定域的主题都会归入此域
    *         Default domain where all topics without a specified domain are assigned
    */
-  static inline Domain *def_domain_ = nullptr;
+  static inline Domain* def_domain_ = nullptr;
 };
 }  // namespace LibXR

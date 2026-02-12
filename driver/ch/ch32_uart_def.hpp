@@ -375,7 +375,7 @@ static constexpr uint32_t CH32_UART_RX_DMA_IT_HT_MAP[] = {
 #endif
 };
 
-static DMA_Channel_TypeDef *const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef* const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)
     DMA1_Channel4,
 #endif
@@ -430,7 +430,7 @@ static DMA_Channel_TypeDef *const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #endif
 };
 
-static DMA_Channel_TypeDef *const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef* const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)
     DMA1_Channel5,
 #endif
@@ -536,5 +536,5 @@ static constexpr IRQn_Type CH32_UART_IRQ_MAP[] = {
 #endif
 };
 
-ch32_uart_id_t CH32_UART_GetID(USART_TypeDef *addr);
-USART_TypeDef *CH32_UART_GetInstanceID(ch32_uart_id_t);
+ch32_uart_id_t ch32_uart_get_id(USART_TypeDef* addr);
+USART_TypeDef* ch32_uart_get_instance_id(ch32_uart_id_t);

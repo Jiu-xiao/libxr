@@ -12,9 +12,9 @@ void test_message()
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
 
   auto msg_cb = LibXR::Topic::Callback::Create(
-      [](bool, void *, LibXR::RawData &data)
-      { msg[3] = *reinterpret_cast<const double *>(data.addr_); },
-      reinterpret_cast<void *>(0));
+      [](bool, void*, LibXR::RawData& data)
+      { msg[3] = *reinterpret_cast<const double*>(data.addr_); },
+      reinterpret_cast<void*>(0));
 
   topic.RegisterCallback(msg_cb);
 
@@ -61,7 +61,7 @@ void test_message()
     }
     for (int j = 0; j < sizeof(packed_data); j++)
     {
-      auto tmp = reinterpret_cast<uint8_t *>(&packed_data);
+      auto tmp = reinterpret_cast<uint8_t*>(&packed_data);
       topic_server.ParseData(LibXR::ConstRawData(tmp[j]));
     }
     ASSERT(msg[1] == msg[0]);

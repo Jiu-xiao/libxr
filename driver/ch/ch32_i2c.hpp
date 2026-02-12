@@ -51,11 +51,11 @@ class CH32I2C : public I2C
   // I2C ER 中断回调
   void ErrorIRQHandler();
 
-  static CH32I2C* map[CH32_I2C_NUMBER];
+  static CH32I2C* map_[CH32_I2C_NUMBER];
 
  private:
   // 超时：按“时间”而不是“循环次数”
-  static constexpr uint32_t kDefaultTimeoutUs = 20000;  // 20ms
+  static constexpr uint32_t K_DEFAULT_TIMEOUT_US = 20000;  // 20ms
 
   inline bool DmaBusy() const
   {
@@ -75,8 +75,8 @@ class CH32I2C : public I2C
     return static_cast<uint16_t>(addr10 & 0x3FF);
   }
 
-  bool WaitEvent(uint32_t evt, uint32_t timeout_us = kDefaultTimeoutUs);
-  bool WaitFlag(uint32_t flag, FlagStatus st, uint32_t timeout_us = kDefaultTimeoutUs);
+  bool WaitEvent(uint32_t evt, uint32_t timeout_us = K_DEFAULT_TIMEOUT_US);
+  bool WaitFlag(uint32_t flag, FlagStatus st, uint32_t timeout_us = K_DEFAULT_TIMEOUT_US);
 
   void ClearAddrFlag();
 

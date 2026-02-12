@@ -22,7 +22,7 @@ template <typename Data>
 class Stack
 {
  private:
-  Data *stack_;         ///< 栈存储数组 / Stack storage array
+  Data* stack_;         ///< 栈存储数组 / Stack storage array
   uint32_t top_ = 0;    ///< 当前栈顶索引 / Current top index of the stack
   uint32_t depth_;      ///< 栈的最大容量 / Maximum capacity of the stack
   LibXR::Mutex mutex_;  ///< 互斥锁，确保线程安全 / Mutex to ensure thread safety
@@ -43,7 +43,7 @@ class Stack
    * negative indexing (relative to the top)
    * @return 该索引位置的元素 / The element at the given index
    */
-  Data &operator[](int32_t index)
+  Data& operator[](int32_t index)
   {
     if (index >= 0)
     {
@@ -74,7 +74,7 @@ class Stack
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::FULL` if
    * the stack is full
    */
-  ErrorCode Push(const Data &data)
+  ErrorCode Push(const Data& data)
   {
     mutex_.Lock();
 
@@ -95,7 +95,7 @@ class Stack
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
    * the stack is empty
    */
-  ErrorCode Pop(Data &data)
+  ErrorCode Pop(Data& data)
   {
     mutex_.Lock();
 
@@ -137,7 +137,7 @@ class Stack
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
    * the stack is empty
    */
-  ErrorCode Peek(Data &data)
+  ErrorCode Peek(Data& data)
   {
     mutex_.Lock();
 
@@ -162,7 +162,7 @@ class Stack
    * returns `ErrorCode::OK` on success, `ErrorCode::FULL` if the stack is full,
    * `ErrorCode::OUT_OF_RANGE` if the index is out of range
    */
-  ErrorCode Insert(const Data &data, uint32_t index)
+  ErrorCode Insert(const Data& data, uint32_t index)
   {
     mutex_.Lock();
     if (top_ >= depth_)

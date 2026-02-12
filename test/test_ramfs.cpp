@@ -8,9 +8,9 @@ void test_ramfs()
 
   int ramfs_arg = 0;
 
-  auto file = LibXR::RamFS::CreateFile<int *>(
+  auto file = LibXR::RamFS::CreateFile<int*>(
       "test_file",
-      [](int *arg, int argc, char **argv)
+      [](int* arg, int argc, char** argv)
       {
         UNUSED(argc);
         UNUSED(argv);

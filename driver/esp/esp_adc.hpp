@@ -54,7 +54,7 @@ class ESP32ADC
      * @param idx 逻辑通道索引 / Logical channel index
      * @param channel_num 物理ADC通道号 / Physical ADC channel number
      */
-    Channel(ESP32ADC *parent, uint8_t idx, uint8_t channel_num)
+    Channel(ESP32ADC* parent, uint8_t idx, uint8_t channel_num)
         : parent_(parent), idx_(idx), channel_num_(channel_num)
     {
     }
@@ -76,7 +76,7 @@ class ESP32ADC
     uint8_t ChannelNumber() const { return channel_num_; }
 
    private:
-    ESP32ADC *parent_;     ///< 父ADC对象 / Parent ADC pointer
+    ESP32ADC* parent_;     ///< 父ADC对象 / Parent ADC pointer
     uint8_t idx_;          ///< 逻辑通道号 / Logical index
     uint8_t channel_num_;  ///< 物理通道号 / Physical ADC channel number
   };
@@ -96,7 +96,7 @@ class ESP32ADC
    * @param dma_buf_size DMA缓冲区大小 / DMA buffer size in bytes (default: 256)
    */
   ESP32ADC(
-      adc_unit_t unit, const adc_channel_t *channels, uint8_t num_channels,
+      adc_unit_t unit, const adc_channel_t* channels, uint8_t num_channels,
       uint32_t freq = SOC_ADC_SAMPLE_FREQ_THRES_LOW,
       adc_atten_t attenuation = ADC_ATTEN_DB_12,
       adc_bitwidth_t bitwidth = static_cast<adc_bitwidth_t>(SOC_ADC_DIGI_MAX_BITWIDTH),
@@ -177,7 +177,7 @@ class ESP32ADC
    * @param idx 逻辑通道索引 / Channel logical index
    * @return Channel对象引用 / Reference to Channel object
    */
-  Channel &GetChannel(uint8_t idx) { return m_channels_[idx]; }
+  Channel& GetChannel(uint8_t idx) { return m_channels_[idx]; }
 
   /**
    * @brief 读取指定通道最新均值（已归一化为电压）
@@ -193,10 +193,10 @@ class ESP32ADC
    * DMA conversion done callback. Called internally by ESP-IDF.
    */
   static bool IRAM_ATTR OnConvDone(adc_continuous_handle_t handle,
-                                   const adc_continuous_evt_data_t *edata,
-                                   void *user_data)
+                                   const adc_continuous_evt_data_t* edata,
+                                   void* user_data)
   {
-    auto *self = reinterpret_cast<ESP32ADC *>(user_data);
+    auto* self = reinterpret_cast<ESP32ADC*>(user_data);
     self->HandleSamples(edata->conv_frame_buffer, edata->size);
     return false;
   }
@@ -208,7 +208,7 @@ class ESP32ADC
    * @param buf 缓冲区指针 / Buffer pointer
    * @param size_bytes 数据字节数 / Buffer size in bytes
    */
-  void HandleSamples(const void *buf, size_t size_bytes)
+  void HandleSamples(const void* buf, size_t size_bytes)
   {
     for (uint8_t idx = 0; idx < m_num_channels_; ++idx)
     {
@@ -217,8 +217,8 @@ class ESP32ADC
     }
 
     size_t n = size_bytes / sizeof(adc_digi_output_data_t);
-    const adc_digi_output_data_t *samples =
-        static_cast<const adc_digi_output_data_t *>(buf);
+    const adc_digi_output_data_t* samples =
+        static_cast<const adc_digi_output_data_t*>(buf);
 
     for (size_t i = 0; i < n; ++i)
     {
@@ -257,11 +257,11 @@ class ESP32ADC
     return (raw / static_cast<float>(m_max_raw_)) * m_reference_voltage_;
   }
 
-  adc_digi_pattern_config_t *m_patterns_;  ///< ADC采样模式数组 / Pattern config array
-  Channel *m_channels_;                    ///< 通道对象数组 / Channel objects array
-  float *m_latest_values_;  ///< 最新均值（每通道）/ Latest average value (per channel)
-  int *m_sum_buf_;          ///< 求和缓冲 / Accumulation buffer
-  int *m_cnt_buf_;          ///< 计数缓冲 / Count buffer
+  adc_digi_pattern_config_t* m_patterns_;  ///< ADC采样模式数组 / Pattern config array
+  Channel* m_channels_;                    ///< 通道对象数组 / Channel objects array
+  float* m_latest_values_;  ///< 最新均值（每通道）/ Latest average value (per channel)
+  int* m_sum_buf_;          ///< 求和缓冲 / Accumulation buffer
+  int* m_cnt_buf_;          ///< 计数缓冲 / Count buffer
 
   adc_unit_t m_unit_;                           ///< ADC单元 / ADC unit
   uint8_t m_num_channels_;                      ///< 通道数 / Number of channels

@@ -91,7 +91,7 @@ class MicrosecondTimestamp
    * @param old_microsecond 旧的时间戳。The older timestamp.
    * @return Duration 计算得到的时间差。Computed time difference.
    */
-  Duration operator-(const MicrosecondTimestamp &old_microsecond) const;
+  Duration operator-(const MicrosecondTimestamp& old_microsecond) const;
 
   /**
    * @brief 赋值运算符重载。
@@ -99,7 +99,7 @@ class MicrosecondTimestamp
    * @param other 另一个 MicrosecondTimestamp 对象。Another MicrosecondTimestamp object.
    * @return 返回当前对象的引用。Returns a reference to the current object.
    */
-  MicrosecondTimestamp &operator=(const MicrosecondTimestamp &other);
+  MicrosecondTimestamp& operator=(const MicrosecondTimestamp& other);
 
  private:
   uint64_t microsecond_;  ///< 以微秒存储的时间戳。Timestamp stored in microseconds.
@@ -170,7 +170,7 @@ class MillisecondTimestamp
    * @param old_millisecond 旧的时间戳。The older timestamp.
    * @return Duration 计算得到的时间差。Computed time difference.
    */
-  [[nodiscard]] Duration operator-(const MillisecondTimestamp &old_millisecond) const;
+  [[nodiscard]] Duration operator-(const MillisecondTimestamp& old_millisecond) const;
 
  private:
   uint32_t millisecond_;  ///< 以毫秒存储的时间戳。Timestamp stored in milliseconds.

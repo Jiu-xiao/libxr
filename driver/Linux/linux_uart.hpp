@@ -26,7 +26,7 @@ namespace LibXR
 class LinuxUART : public UART
 {
  public:
-  LinuxUART(const char *dev_path, unsigned int baudrate = 115200,
+  LinuxUART(const char* dev_path, unsigned int baudrate = 115200,
             Parity parity = Parity::NO_PARITY, uint8_t data_bits = 8,
             uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512,
             size_t thread_stack_size = 65536)
@@ -68,16 +68,16 @@ class LinuxUART : public UART
     _read_port = ReadFun;
     _write_port = WriteFun;
 
-    rx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
+    rx_thread_.Create<LinuxUART*>(
+        this, [](LinuxUART* self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
 
-    tx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
+    tx_thread_.Create<LinuxUART*>(
+        this, [](LinuxUART* self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
   }
 
-  LinuxUART(const std::string &vid, const std::string &pid,
+  LinuxUART(const std::string& vid, const std::string& pid,
             unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
             size_t buffer_size = 512, size_t thread_stack_size = 65536)
@@ -127,16 +127,16 @@ class LinuxUART : public UART
     _read_port = ReadFun;
     _write_port = WriteFun;
 
-    rx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
+    rx_thread_.Create<LinuxUART*>(
+        this, [](LinuxUART* self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
 
-    tx_thread_.Create<LinuxUART *>(
-        this, [](LinuxUART *self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
+    tx_thread_.Create<LinuxUART*>(
+        this, [](LinuxUART* self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
   }
 
-  std::string GetByPathForTTY(const std::string &tty_name)
+  std::string GetByPathForTTY(const std::string& tty_name)
   {
     const std::string BASE = "/dev/serial/by-path";
     if (strncmp(tty_name.c_str(), BASE.c_str(), BASE.length()) == 0 ||
@@ -144,7 +144,7 @@ class LinuxUART : public UART
     {
       return tty_name;
     }
-    for (const auto &entry : std::filesystem::directory_iterator(BASE))
+    for (const auto& entry : std::filesystem::directory_iterator(BASE))
     {
       std::string full = std::filesystem::canonical(entry.path());
       if (full == tty_name)
@@ -155,44 +155,44 @@ class LinuxUART : public UART
     return "";  // 没找到
   }
 
-  static bool FindUSBTTYByVidPid(const std::string &target_vid,
-                                 const std::string &target_pid, std::string &tty_path)
+  static bool FindUSBTTYByVidPid(const std::string& target_vid,
+                                 const std::string& target_pid, std::string& tty_path)
   {
-    struct udev *udev = udev_new();
+    struct udev* udev = udev_new();
     if (!udev)
     {
       XR_LOG_ERROR("Cannot create udev context");
       return false;
     }
 
-    struct udev_enumerate *enumerate = udev_enumerate_new(udev);
+    struct udev_enumerate* enumerate = udev_enumerate_new(udev);
     udev_enumerate_add_match_subsystem(enumerate, "tty");
     udev_enumerate_scan_devices(enumerate);
 
-    struct udev_list_entry *devices = udev_enumerate_get_list_entry(enumerate);
-    struct udev_list_entry *entry = nullptr;
+    struct udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
+    struct udev_list_entry* entry = nullptr;
     bool found = false;
 
     udev_list_entry_foreach(entry, devices)
     {
-      const char *path = udev_list_entry_get_name(entry);
-      struct udev_device *tty_dev = udev_device_new_from_syspath(udev, path);
+      const char* path = udev_list_entry_get_name(entry);
+      struct udev_device* tty_dev = udev_device_new_from_syspath(udev, path);
       if (!tty_dev)
       {
         continue;
       }
 
-      struct udev_device *usb_dev =
+      struct udev_device* usb_dev =
           udev_device_get_parent_with_subsystem_devtype(tty_dev, "usb", "usb_device");
 
       if (usb_dev)
       {
-        const char *vid = udev_device_get_sysattr_value(usb_dev, "idVendor");
-        const char *pid = udev_device_get_sysattr_value(usb_dev, "idProduct");
+        const char* vid = udev_device_get_sysattr_value(usb_dev, "idVendor");
+        const char* pid = udev_device_get_sysattr_value(usb_dev, "idProduct");
 
         if (vid && pid && target_vid == vid && target_pid == pid)
         {
-          const char *devnode = udev_device_get_devnode(tty_dev);
+          const char* devnode = udev_device_get_devnode(tty_dev);
           if (devnode)
           {
             tty_path = devnode;
@@ -226,9 +226,7 @@ class LinuxUART : public UART
       config_ = config;
     }
 
-    struct termios2 tio
-    {
-    };
+    struct termios2 tio{};
     if (ioctl(fd_, TCGETS2, &tio) != 0)
     {
       return ErrorCode::INIT_ERR;
@@ -332,9 +330,9 @@ class LinuxUART : public UART
     return ErrorCode::OK;
   }
 
-  static ErrorCode ReadFun(ReadPort &) { return ErrorCode::EMPTY; }
+  static ErrorCode ReadFun(ReadPort&) { return ErrorCode::EMPTY; }
 
-  static ErrorCode WriteFun(WritePort &port)
+  static ErrorCode WriteFun(WritePort& port)
   {
     auto uart = CONTAINER_OF(&port, LinuxUART, _write_port);
     uart->write_sem_.Post();
@@ -424,8 +422,8 @@ class LinuxUART : public UART
   std::string device_path_;
   Thread rx_thread_;
   Thread tx_thread_;
-  uint8_t *rx_buff_ = nullptr;
-  uint8_t *tx_buff_ = nullptr;
+  uint8_t* rx_buff_ = nullptr;
+  uint8_t* tx_buff_ = nullptr;
   size_t buff_size_ = 0;
   Semaphore write_sem_;
   Mutex read_mutex_;

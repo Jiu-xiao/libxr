@@ -11,8 +11,8 @@ using H = ADC_HandleTypeDef*;
 #if defined(HAL_ADC_MODULE_ENABLED) && !defined(ADC_CALIB_OFFSET_AND_LINEARITY) && \
     !defined(ADC_CALIB_OFFSET_LINEARITY) && !defined(ADC_CALIB_OFFSET) &&          \
     !defined(ADC_SINGLE_ENDED)
-extern "C" HAL_StatusTypeDef __attribute__((weak)) HAL_ADCEx_Calibration_Start(
-    ADC_HandleTypeDef* hadc)
+extern "C" HAL_StatusTypeDef
+    __attribute__((weak)) HAL_ADCEx_Calibration_Start(ADC_HandleTypeDef* hadc)
 {
   (void)hadc;
   return HAL_OK;

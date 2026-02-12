@@ -1,8 +1,9 @@
-#include "libxr_string.hpp"
 #include "libxr_def.hpp"
+#include "libxr_string.hpp"
 #include "test.hpp"
 
-void test_string() {
+void test_string()
+{
   LibXR::String<16> str1("hello");
   ASSERT(str1.Length() == 5);
 

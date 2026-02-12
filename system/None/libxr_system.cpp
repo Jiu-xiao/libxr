@@ -13,15 +13,18 @@
 
 void LibXR::PlatformInit() {}
 
-void LibXR::Timer::RefreshTimerInIdle() {
+void LibXR::Timer::RefreshTimerInIdle()
+{
   static bool in_timer = false;
-  if (in_timer) {
+  if (in_timer)
+  {
     return;
   }
 
   static auto last_refresh_time = Timebase::GetMilliseconds();
 
-  if (last_refresh_time == Timebase::GetMilliseconds()) {
+  if (last_refresh_time == Timebase::GetMilliseconds())
+  {
     return;
   }
 
