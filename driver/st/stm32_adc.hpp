@@ -17,18 +17,10 @@ namespace LibXR
 {
 
 /**
- * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32 ADC
- * channels.
- *
+ * @brief STM32 ADC 驱动实现 / STM32 ADC driver implementation
  */
 class STM32ADC
 {
-  /**
-   * @brief 获取 ADC 分辨率 Get ADC resolution
-   *
-   * @tparam typename
-   * @tparam typename
-   */
   template <typename, typename = void>
   struct GetADCResolution
   {
@@ -39,11 +31,6 @@ class STM32ADC
     }
   };
 
-  /**
-   * @brief 获取 ADC 分辨率 Get ADC resolution
-   *
-   * @tparam T
-   */
   template <typename T>
   struct GetADCResolution<T, std::void_t<decltype(std::declval<T>().Init.Resolution)>>
   {
@@ -218,27 +205,24 @@ class STM32ADC
 
  public:
   /**
-   * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32 ADC
-   *
+   * @brief ADC 通道对象 / ADC channel object
    */
   class Channel : public ADC
   {
    public:
     /**
-     * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32
-     * ADC
+     * @brief 构造通道对象 / Construct channel object
      *
-     * @param adc STM32ADC对象 ADC object
-     * @param index 通道索引 Channel index
-     * @param ch 通道号 Channel number
+     * @param adc 所属 ADC 对象 / Parent ADC object
+     * @param index 通道索引 / Channel index
+     * @param ch 通道号 / Channel number
      */
     Channel(STM32ADC* adc, uint8_t index, uint32_t ch);
 
     /**
-     * @brief 读取 ADC 值
-     * @brief Reads the ADC value
+     * @brief 读取 ADC 电压值 / Read ADC voltage
      *
-     * @return float
+     * @return float 电压值 / Voltage value
      */
     float Read() override;
 
@@ -252,34 +236,34 @@ class STM32ADC
   };
 
   /**
-   * @brief STM32ADC 类，用于处理 STM32 系统的 ADC 通道。 Provides handling for STM32
+   * @brief 构造 ADC 驱动对象 / Construct ADC driver object
    *
-   * @param hadc ADC外设 ADC device
-   * @param dma_buff DMA缓冲区 DMA buffer
-   * @param channels ADC通道列表 List of ADC channels
-   * @param vref 参考电压 Reference voltage
+   * @param hadc HAL ADC 句柄 / HAL ADC handle
+   * @param dma_buff DMA 缓冲区 / DMA buffer
+   * @param channels ADC 通道列表 / ADC channel list
+   * @param vref 参考电压 / Reference voltage
    */
   STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
            std::initializer_list<uint32_t> channels, float vref);
 
   /**
-   * @brief 析构函数 Destructor
+   * @brief 析构函数 / Destructor
    */
   ~STM32ADC();
 
   /**
-   * @brief 获取 ADC 通道对象 Get ADC channel object
+   * @brief 获取 ADC 通道对象 / Get ADC channel object
    *
-   * @param index 通道索引 Channel index
-   * @return Channel& 通道对象 Channel object
+   * @param index 通道索引 / Channel index
+   * @return Channel& 通道对象引用 / Channel object reference
    */
   Channel& GetChannel(uint8_t index);
 
   /**
-   * @brief 读取 ADC 值
+   * @brief 读取指定通道电压 / Read channel voltage
    *
-   * @param channel 通道号 Channel number
-   * @return float
+   * @param channel 通道号 / Channel number
+   * @return float 电压值 / Voltage value
    */
   float ReadChannel(uint8_t channel);
 

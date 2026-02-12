@@ -3,6 +3,9 @@
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
+/**
+ * @brief CH32 SPI 实例编号 / CH32 SPI instance identifier
+ */
 typedef enum
 {
 #if defined(SPI1)
@@ -78,7 +81,7 @@ static constexpr uint32_t CH32_SPI_RX_DMA_IT_MAP[] = {
 #endif
 };
 
-static DMA_Channel_TypeDef *const CH32_SPI_TX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef* const CH32_SPI_TX_DMA_CHANNEL_MAP[] = {
 #if defined(SPI1)
     DMA1_Channel3,
 #endif
@@ -90,7 +93,7 @@ static DMA_Channel_TypeDef *const CH32_SPI_TX_DMA_CHANNEL_MAP[] = {
 #endif
 };
 
-static DMA_Channel_TypeDef *const CH32_SPI_RX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef* const CH32_SPI_RX_DMA_CHANNEL_MAP[] = {
 #if defined(SPI1)
     DMA1_Channel2,
 #endif
@@ -114,5 +117,5 @@ static constexpr IRQn_Type CH32_SPI_IRQ_MAP[] = {
 #endif
 };
 
-ch32_spi_id_t CH32_SPI_GetID(SPI_TypeDef *addr);
-SPI_TypeDef *CH32_SPI_GetInstanceID(ch32_spi_id_t);
+ch32_spi_id_t ch32_spi_get_id(SPI_TypeDef* addr);
+SPI_TypeDef* ch32_spi_get_instance_id(ch32_spi_id_t);

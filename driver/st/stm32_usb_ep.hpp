@@ -11,6 +11,9 @@
 namespace LibXR
 {
 
+/**
+ * @brief STM32 USB 端点实现 / STM32 USB endpoint implementation
+ */
 class STM32Endpoint : public USB::Endpoint
 {
  public:

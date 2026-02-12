@@ -9,20 +9,20 @@ namespace LibXR
 {
 
 /**
- * @brief WebAsmTimebase 类，用于获取 WebAssembly 系统的时间基准。
+ * @brief WebAssembly 时间基准实现 / WebAssembly timebase implementation
  */
 class WebAsmTimebase : public Timebase
 {
  public:
   WebAsmTimebase()
   {
-    // 初始化基准时间点
+    // Initialize reference timestamp.
     start_time_ = std::chrono::system_clock::now();
   }
 
   /**
-   * @brief 获取当前时间戳（微秒级）
-   * @return MicrosecondTimestamp
+   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
+   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
    */
   MicrosecondTimestamp _get_microseconds() override
   {
@@ -33,8 +33,8 @@ class WebAsmTimebase : public Timebase
   }
 
   /**
-   * @brief 获取当前时间戳（毫秒级）
-   * @return MillisecondTimestamp
+   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
+   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
    */
   MillisecondTimestamp _get_milliseconds() override
   {

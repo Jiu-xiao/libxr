@@ -5,12 +5,12 @@ using namespace LibXR;
 template class LibXR::Callback<uint32_t>;
 
 Event::Event()
-    : rbt_([](const uint32_t &a, const uint32_t &b)
+    : rbt_([](const uint32_t& a, const uint32_t& b)
            { return static_cast<int>(a) - static_cast<int>(b); })
 {
 }
 
-void Event::Register(uint32_t event, const Callback &cb)
+void Event::Register(uint32_t event, const Callback& cb)
 {
   auto list = rbt_.Search<LockFreeList>(event);
 
@@ -20,7 +20,7 @@ void Event::Register(uint32_t event, const Callback &cb)
     rbt_.Insert(*list, event);
   }
 
-  LockFreeList::Node<Block> *node = new LockFreeList::Node<Block>;
+  LockFreeList::Node<Block>* node = new LockFreeList::Node<Block>;
 
   node->data_.event = event;
   node->data_.cb = cb;
@@ -35,7 +35,7 @@ void Event::Active(uint32_t event)
     return;
   }
 
-  auto foreach_fun = [=](Block &block)
+  auto foreach_fun = [=](Block& block)
   {
     block.cb.Run(false, event);
     return ErrorCode::OK;
@@ -51,7 +51,7 @@ void Event::ActiveFromCallback(CallbackList list, uint32_t event)
     return;
   }
 
-  auto foreach_fun = [=](Block &block)
+  auto foreach_fun = [=](Block& block)
   {
     block.cb.Run(true, event);
     return ErrorCode::OK;
@@ -72,17 +72,17 @@ Event::CallbackList Event::GetList(uint32_t event)
   return &node->data_;
 }
 
-void Event::Bind(Event &sources, uint32_t source_event, uint32_t target_event)
+void Event::Bind(Event& sources, uint32_t source_event, uint32_t target_event)
 {
   struct BindBlock
   {
-    Event *target;
+    Event* target;
     uint32_t event;
   };
 
   auto block = new BindBlock{this, target_event};
 
-  auto bind_fun = [](bool in_isr, BindBlock *block, uint32_t event)
+  auto bind_fun = [](bool in_isr, BindBlock* block, uint32_t event)
   {
     UNUSED(event);
     UNUSED(in_isr);

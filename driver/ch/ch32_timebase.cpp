@@ -1,3 +1,4 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_timebase.hpp"
 
 using namespace LibXR;
@@ -8,9 +9,9 @@ MicrosecondTimestamp CH32Timebase::_get_microseconds()
 {
   do
   {
-    uint32_t tick_old = sys_tick_ms;
+    uint32_t tick_old = sys_tick_ms_;
     uint32_t cnt_old = SysTick->CNT;
-    uint32_t tick_new = sys_tick_ms;
+    uint32_t tick_new = sys_tick_ms_;
     uint32_t cnt_new = SysTick->CNT;
 
     auto tick_diff = tick_new - tick_old;
@@ -32,10 +33,12 @@ MicrosecondTimestamp CH32Timebase::_get_microseconds()
   } while (true);
 }
 
-MillisecondTimestamp CH32Timebase::_get_milliseconds() { return sys_tick_ms; }
+MillisecondTimestamp CH32Timebase::_get_milliseconds() { return sys_tick_ms_; }
 
-void CH32Timebase::OnSysTickInterrupt() { sys_tick_ms++; }
+void CH32Timebase::OnSysTickInterrupt() { sys_tick_ms_++; }
 
-void CH32Timebase::Sync(uint32_t ticks) { sys_tick_ms = ticks; }
+void CH32Timebase::Sync(uint32_t ticks) { sys_tick_ms_ = ticks; }
 
 extern "C" void libxr_systick_handler(void) { CH32Timebase::OnSysTickInterrupt(); }
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

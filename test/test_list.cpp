@@ -18,7 +18,7 @@ void test_list()
 
   ASSERT(list.Size() == 3);
 
-  auto node_foreach_fn = [](int &node)
+  auto node_foreach_fn = [](int& node)
   {
     UNUSED(node);
 

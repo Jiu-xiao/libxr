@@ -6,9 +6,15 @@
 
 namespace LibXR
 {
+/**
+ * @brief CH32 PWM 驱动实现 / CH32 PWM driver implementation
+ */
 class CH32PWM : public PWM
 {
  public:
+  /**
+   * @brief 构造 PWM 对象 / Construct PWM object
+   */
   CH32PWM(TIM_TypeDef* tim, uint16_t channel, bool active_high, GPIO_TypeDef* gpio,
           uint16_t pin, uint32_t pin_remap = 0, bool complementary = false);
 
@@ -38,7 +44,7 @@ class CH32PWM : public PWM
   void EnableChannel(bool en);
   void EnableChannelN(bool en);
 
-  // 时钟/引脚配置
+  /// 时钟与 GPIO 初始化辅助 / Clock and GPIO configuration helpers
   static void EnableGPIOClock(GPIO_TypeDef* gpio);
   static void EnableTIMClock(TIM_TypeDef* tim);
   void ConfigureGPIO();

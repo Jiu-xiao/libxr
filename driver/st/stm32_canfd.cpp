@@ -322,7 +322,8 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
   SET_BIT(can->CCCR, FDCAN_CCCR_CCE);
 #endif
 
-  // ===== 模式相关：one-shot / loopback / listen-only =====
+  // 模式配置：one-shot / loopback / listen-only。
+  // Configure mode flags: one-shot / loopback / listen-only.
 #ifdef FDCAN_CCCR_DAR
   if (cfg.mode.one_shot)
   {
@@ -366,7 +367,8 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
   }
 #endif
 
-  // ===== 仲裁相位 bit timing 范围校验 + 写 NBTP =====
+  // 仲裁相位时序范围校验并写入 NBTP。
+  // Validate nominal timing range and update NBTP.
   const auto& bt = cfg.bit_timing;
 
   // 用掩码算出字段最大值，避免硬编码
@@ -476,7 +478,8 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
   }
 #endif  // FDCAN_NBTP_NBRP_Msk
 
-  // ===== 数据相位 bit timing（CAN FD 才用），写 DBTP =====
+  // 数据相位时序范围校验并写入 DBTP（仅 CAN FD）。
+  // Validate data-phase timing and update DBTP (CAN FD only).
   const auto& dbt = cfg.data_timing;
 
 #ifdef FDCAN_DBTP_DBRP_Msk

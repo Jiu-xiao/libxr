@@ -17,12 +17,12 @@ void Logger::Init()
   log_topic = Topic::CreateTopic<LogData>("/xr/log", nullptr, true, false, false);
 
 #if LIBXR_PRINTF_BUFFER_SIZE > 0
-  void (*log_cb_fun)(bool in_isr, Topic, RawData &log_data) =
-      [](bool, Topic tp, LibXR::RawData &log_data)
+  void (*log_cb_fun)(bool in_isr, Topic, RawData& log_data) =
+      [](bool, Topic tp, LibXR::RawData& log_data)
   {
     UNUSED(tp);
 
-    auto log = reinterpret_cast<LogData *>(log_data.addr_);
+    auto log = reinterpret_cast<LogData*>(log_data.addr_);
 
     if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(log->level) && STDIO::write_ &&
         STDIO::write_->Writable())
@@ -39,7 +39,7 @@ void Logger::Init()
 }
 
 // NOLINTNEXTLINE
-void Logger::Publish(LogLevel level, const char *file, uint32_t line, const char *fmt,
+void Logger::Publish(LogLevel level, const char* file, uint32_t line, const char* fmt,
                      ...)
 {
   if (!initialized_)
@@ -61,16 +61,16 @@ void Logger::Publish(LogLevel level, const char *file, uint32_t line, const char
   log_topic.Publish(data);
 }
 
-void Logger::PrintToTerminal(const LogData &data)
+void Logger::PrintToTerminal(const LogData& data)
 {
-  const char *color = GetColor(data.level);
+  const char* color = GetColor(data.level);
 
   STDIO::Printf("%s%s [%u](%s:%u) %s%s\r\n", color, LevelToString(data.level),
                 static_cast<uint32_t>(data.timestamp), data.file, data.line, data.message,
                 LIBXR_FORMAT_STR[static_cast<uint8_t>(Format::RESET)]);
 }
 
-const char *Logger::GetColor(LogLevel level)
+const char* Logger::GetColor(LogLevel level)
 {
   switch (level)
   {
@@ -89,7 +89,7 @@ const char *Logger::GetColor(LogLevel level)
   }
 }
 
-const char *Logger::LevelToString(LogLevel level)
+const char* Logger::LevelToString(LogLevel level)
 {
   switch (level)
   {

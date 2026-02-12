@@ -87,7 +87,7 @@
 | FLASH        | ✅                 |
 | UART         | ✅                 |
 | SPI          | ✅                 |
-| I2C          | ❌                 |
+| I2C          | ✅                 |
 | CAN          | ✅                 |
 | CANFD        | 🚫                 |
 | ADC          | ❌                 |

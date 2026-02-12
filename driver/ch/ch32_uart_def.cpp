@@ -1,6 +1,7 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_uart_def.hpp"
 
-ch32_uart_id_t CH32_UART_GetID(USART_TypeDef *addr)
+ch32_uart_id_t ch32_uart_get_id(USART_TypeDef* addr)
 {
   if (addr == nullptr)
   {  // NOLINT
@@ -108,7 +109,7 @@ ch32_uart_id_t CH32_UART_GetID(USART_TypeDef *addr)
   }
 }
 
-USART_TypeDef *CH32_UART_GetInstanceID(ch32_uart_id_t id)
+USART_TypeDef* ch32_uart_get_instance_id(ch32_uart_id_t id)
 {
   switch (id)
   {
@@ -180,3 +181,4 @@ USART_TypeDef *CH32_UART_GetInstanceID(ch32_uart_id_t id)
       return nullptr;
   }
 }
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

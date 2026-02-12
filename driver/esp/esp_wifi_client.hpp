@@ -9,11 +9,10 @@ namespace LibXR
 {
 
 /**
- * @class ESP32WifiClient
- * @brief ESP32 平台的 WiFi 客户端实现 / WiFi client implementation for ESP32
+ * @brief ESP32 Wi-Fi 客户端实现 / ESP32 Wi-Fi client implementation
  *
- * 提供基于 ESP-IDF 的 WiFi 接口实现，包含连接、断开、扫描、RSSI 查询等功能，
- * 继承自抽象类 WifiClient 并实现其所有接口。
+ * 基于 ESP-IDF 提供连接、断开、扫描、RSSI 查询等接口。
+ * Provides connect/disconnect/scan/RSSI operations via ESP-IDF.
  */
 class ESP32WifiClient : public WifiClient
 {

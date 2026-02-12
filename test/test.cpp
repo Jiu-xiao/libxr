@@ -7,7 +7,7 @@
 #include "libxr.hpp"
 #include "logger.hpp"
 
-const static char *test_name = nullptr;
+const static char* test_name = nullptr;
 
 #define TEST_STEP(_arg)                                \
   do                                                   \
@@ -24,7 +24,7 @@ bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
 struct TestCase
 {
-  const char *name;
+  const char* name;
   void (*function)();
 };
 
@@ -79,8 +79,8 @@ static void run_libxr_tests()
 
   struct
   {
-    TestCase *tests;
-    const char *name;
+    TestCase* tests;
+    const char* name;
   } test_groups[] = {{core_tests, "core_tests"},
                      {synchronization_tests, "synchronization_tests"},
                      {utility_tests, "utility_tests"},
@@ -121,7 +121,7 @@ int main()
   LibXR::PlatformInit();
 
   auto err_cb = LibXR::Assert::Callback::Create(
-      [](bool in_isr, void *arg, const char *file, uint32_t line)
+      [](bool in_isr, void* arg, const char* file, uint32_t line)
       {
         UNUSED(in_isr);
         UNUSED(arg);
@@ -130,10 +130,10 @@ int main()
 
         XR_LOG_ERROR("Error: Union test failed at step [%s].\r\n", test_name);
         // NOLINTNEXTLINE
-        *(volatile long long *)(nullptr) = 0;
+        *(volatile long long*)(nullptr) = 0;
         exit(-1);
       },
-      reinterpret_cast<void *>(0));
+      reinterpret_cast<void*>(0));
 
   LibXR::Assert::RegisterFatalErrorCallback(err_cb);
 

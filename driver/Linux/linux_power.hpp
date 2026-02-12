@@ -13,16 +13,18 @@ namespace LibXR
 {
 
 /**
- * @class LinuxPowerManager
- * @brief 基于 Linux 的电源管理器实现 / Linux implementation of PowerManager
+ * @brief Linux 电源管理实现 / Linux power manager implementation
  *
- * 使用系统命令执行重启与关机操作，需运行权限支持。
+ * @note 使用系统命令执行重启和关机 / Uses system commands for reboot and shutdown
  */
 class LinuxPowerManager : public PowerManager
 {
  public:
   LinuxPowerManager() = default;
 
+  /**
+   * @brief 重启系统 / Reboot system
+   */
   void Reset() override
   {
     CheckRoot();
@@ -33,6 +35,9 @@ class LinuxPowerManager : public PowerManager
     }
   }
 
+  /**
+   * @brief 关闭系统 / Power off system
+   */
   void Shutdown() override
   {
     CheckRoot();

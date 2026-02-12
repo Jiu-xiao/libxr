@@ -124,7 +124,7 @@ class SPI
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
   virtual ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data,
-                                 OperationRW &op, bool in_isr = false) = 0;
+                                 OperationRW& op, bool in_isr = false) = 0;
 
   /**
    * @brief 进行 SPI 读取操作。Performs SPI read operation.
@@ -133,7 +133,7 @@ class SPI
    * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
-  virtual ErrorCode Read(RawData read_data, OperationRW &op, bool in_isr = false)
+  virtual ErrorCode Read(RawData read_data, OperationRW& op, bool in_isr = false)
   {
     return ReadAndWrite(read_data, ConstRawData(nullptr, 0), op, in_isr);
   }
@@ -145,7 +145,7 @@ class SPI
    * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
-  virtual ErrorCode Write(ConstRawData write_data, OperationRW &op, bool in_isr = false)
+  virtual ErrorCode Write(ConstRawData write_data, OperationRW& op, bool in_isr = false)
   {
     return ReadAndWrite(RawData(nullptr, 0), write_data, op, in_isr);
   }
@@ -361,7 +361,7 @@ class SPI
    * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating the result of the operation.
    */
-  virtual ErrorCode Transfer(size_t size, OperationRW &op, bool in_isr = false) = 0;
+  virtual ErrorCode Transfer(size_t size, OperationRW& op, bool in_isr = false) = 0;
 
   /**
    * @brief 向 SPI 设备的寄存器写入数据。
@@ -373,7 +373,7 @@ class SPI
    * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating success or failure.
    */
-  virtual ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW &op,
+  virtual ErrorCode MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op,
                              bool in_isr = false) = 0;
 
   /**
@@ -386,14 +386,14 @@ class SPI
    * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 操作结果的错误码。Error code indicating success or failure.
    */
-  virtual ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW &op,
+  virtual ErrorCode MemRead(uint16_t reg, RawData read_data, OperationRW& op,
                             bool in_isr = false) = 0;
 
   /**
    * @brief 获取 SPI 配置参数。Gets the SPI configuration parameters.
    * @return SPI 配置参数。The SPI configuration parameters.
    */
-  inline Configuration &GetConfig() { return config_; }
+  inline Configuration& GetConfig() { return config_; }
 
   /**
    * @brief 检查是否使用双缓冲区。Checks if double buffering is enabled.

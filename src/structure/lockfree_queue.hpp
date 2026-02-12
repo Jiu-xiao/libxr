@@ -62,7 +62,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    * @param index 数据索引 / Data index
    * @return 指向该索引数据的指针 / Pointer to the data at the given index
    */
-  Data *operator[](uint32_t index) { return &queue_handle_[static_cast<size_t>(index)]; }
+  Data* operator[](uint32_t index) { return &queue_handle_[static_cast<size_t>(index)]; }
 
   /**
    * @brief 向队列中推入数据 / Pushes data into the queue
@@ -72,7 +72,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    * the queue is full
    */
   template <typename ElementData = Data>
-  ErrorCode Push(ElementData &&item)
+  ErrorCode Push(ElementData&& item)
   {
     const auto CURRENT_TAIL = tail_.load(std::memory_order_relaxed);
     const auto NEXT_TAIL = Increment(CURRENT_TAIL);
@@ -95,7 +95,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    * the queue is empty
    */
   template <typename ElementData = Data>
-  ErrorCode Pop(ElementData &item)
+  ErrorCode Pop(ElementData& item)
   {
     auto current_head = head_.load(std::memory_order_relaxed);
 
@@ -135,7 +135,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    *         - `ErrorCode::EMPTY` 表示队列为空 (`ErrorCode::EMPTY` if the queue is empty).
    *
    */
-  ErrorCode Pop(Data &item)
+  ErrorCode Pop(Data& item)
   {
     auto current_head = head_.load(std::memory_order_relaxed);
 
@@ -192,7 +192,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
    * the queue is empty
    */
-  ErrorCode Peek(Data &item)
+  ErrorCode Peek(Data& item)
   {
     while (true)
     {
@@ -219,7 +219,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::FULL` if
    * the queue is full
    */
-  ErrorCode PushBatch(const Data *data, size_t size)
+  ErrorCode PushBatch(const Data* data, size_t size)
   {
     auto current_tail = tail_.load(std::memory_order_relaxed);
     auto current_head = head_.load(std::memory_order_acquire);
@@ -235,14 +235,14 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     }
 
     size_t first_chunk = LibXR::min(size, capacity - current_tail);
-    LibXR::Memory::FastCopy(reinterpret_cast<void *>(queue_handle_ + current_tail),
-                            reinterpret_cast<const void *>(data),
+    LibXR::Memory::FastCopy(reinterpret_cast<void*>(queue_handle_ + current_tail),
+                            reinterpret_cast<const void*>(data),
                             first_chunk * sizeof(Data));
 
     if (size > first_chunk)
     {
-      LibXR::Memory::FastCopy(reinterpret_cast<void *>(queue_handle_),
-                              reinterpret_cast<const void *>(data + first_chunk),
+      LibXR::Memory::FastCopy(reinterpret_cast<void*>(queue_handle_),
+                              reinterpret_cast<const void*>(data + first_chunk),
                               (size - first_chunk) * sizeof(Data));
     }
 
@@ -258,7 +258,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
    * the queue is empty
    */
-  ErrorCode PopBatch(Data *data, size_t size)
+  ErrorCode PopBatch(Data* data, size_t size)
   {
     size_t capacity = LENGTH + 1;
 
@@ -280,14 +280,14 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
       {
         size_t first_chunk = LibXR::min(size, capacity - current_head);
         LibXR::Memory::FastCopy(
-            reinterpret_cast<void *>(data),
-            reinterpret_cast<const void *>(queue_handle_ + current_head),
+            reinterpret_cast<void*>(data),
+            reinterpret_cast<const void*>(queue_handle_ + current_head),
             first_chunk * sizeof(Data));
 
         if (size > first_chunk)
         {
-          LibXR::Memory::FastCopy(reinterpret_cast<void *>(data + first_chunk),
-                                  reinterpret_cast<const void *>(queue_handle_),
+          LibXR::Memory::FastCopy(reinterpret_cast<void*>(data + first_chunk),
+                                  reinterpret_cast<const void*>(queue_handle_),
                                   (size - first_chunk) * sizeof(Data));
         }
       }
@@ -311,7 +311,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
    * not enough data is available
    */
-  ErrorCode PeekBatch(Data *data, size_t size)
+  ErrorCode PeekBatch(Data* data, size_t size)
   {
     if (size == 0)
     {
@@ -338,14 +338,14 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
       {
         size_t first_chunk = LibXR::min(size, CAPACITY - current_head);
         LibXR::Memory::FastCopy(
-            reinterpret_cast<void *>(data),
-            reinterpret_cast<const void *>(queue_handle_ + current_head),
+            reinterpret_cast<void*>(data),
+            reinterpret_cast<const void*>(queue_handle_ + current_head),
             first_chunk * sizeof(Data));
 
         if (size > first_chunk)
         {
-          LibXR::Memory::FastCopy(reinterpret_cast<void *>(data + first_chunk),
-                                  reinterpret_cast<const void *>(queue_handle_),
+          LibXR::Memory::FastCopy(reinterpret_cast<void*>(data + first_chunk),
+                                  reinterpret_cast<const void*>(queue_handle_),
                                   (size - first_chunk) * sizeof(Data));
         }
       }
@@ -395,7 +395,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<uint32_t> head_;
   alignas(LIBXR_CACHE_LINE_SIZE) std::atomic<uint32_t> tail_;
   const size_t LENGTH;
-  Data *queue_handle_;
+  Data* queue_handle_;
 
   uint32_t Increment(uint32_t index) const { return (index + 1) % (LENGTH + 1); }
 };

@@ -45,7 +45,7 @@ class Watchdog
    * @param config 配置参数 Configuration
    * @return 操作结果的错误码 Error code of the operation
    */
-  virtual ErrorCode SetConfig(const Configuration &config) = 0;
+  virtual ErrorCode SetConfig(const Configuration& config) = 0;
 
   /**
    * @brief 立即手动喂狗
@@ -75,7 +75,7 @@ class Watchdog
    *
    * @param wdg 指向 Watchdog 实例的指针 Pointer to the Watchdog instance
    */
-  static void ThreadFun(Watchdog *wdg)
+  static void ThreadFun(Watchdog* wdg)
   {
     while (true)
     {
@@ -98,7 +98,7 @@ class Watchdog
    *
    * @param wdg 指向 Watchdog 实例的指针 Pointer to the Watchdog instance
    */
-  static void TaskFun(Watchdog *wdg)
+  static void TaskFun(Watchdog* wdg)
   {
     if (wdg->auto_feed_)
     {

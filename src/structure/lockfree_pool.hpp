@@ -58,7 +58,7 @@ class LockFreePool
    */
   LockFreePool(uint32_t slot_count)
       : SLOT_COUNT(slot_count),
-        slots_(new(std::align_val_t(LIBXR_CACHE_LINE_SIZE)) Slot[slot_count])
+        slots_(new (std::align_val_t(LIBXR_CACHE_LINE_SIZE)) Slot[slot_count])
   {
     for (uint32_t index = 0; index < SLOT_COUNT; index++)
     {
@@ -79,7 +79,7 @@ class LockFreePool
    *         - `ErrorCode::FULL`：池满，无法放入 / Pool full, cannot put
    *
    */
-  ErrorCode Put(const Data &data)
+  ErrorCode Put(const Data& data)
   {
     uint32_t start_index = 0;
     return Put(data, start_index);
@@ -95,7 +95,7 @@ class LockFreePool
    *         - `ErrorCode::OK`：成功放入 / Successfully put
    *         - `ErrorCode::FULL`：池满，无法放入 / Pool full, cannot put
    */
-  ErrorCode Put(const Data &data, uint32_t &start_index)
+  ErrorCode Put(const Data& data, uint32_t& start_index)
   {
     for (uint32_t index = start_index; index < SLOT_COUNT; index++)
     {
@@ -125,7 +125,7 @@ class LockFreePool
    *         - `ErrorCode::OK`：成功放入 / Successfully put
    *         - `ErrorCode::FULL`：池满，无法放入 / Pool full, cannot put
    */
-  ErrorCode PutToSlot(const Data &data, uint32_t index)
+  ErrorCode PutToSlot(const Data& data, uint32_t index)
   {
     auto expected = slots_[index].slot.state.load(std::memory_order_relaxed);
     if (expected == SlotState::FREE || expected == SlotState::RECYCLE)
@@ -150,7 +150,7 @@ class LockFreePool
    *         - `ErrorCode::EMPTY`：池空，无可取元素 / Pool empty, no available element
    *
    */
-  ErrorCode Get(Data &data)
+  ErrorCode Get(Data& data)
   {
     uint32_t start_index = 0;
 
@@ -167,7 +167,7 @@ class LockFreePool
    *         - `ErrorCode::EMPTY`：池空，无可取元素 / Pool empty, no available element
    *
    */
-  ErrorCode Get(Data &data, uint32_t &start_index)
+  ErrorCode Get(Data& data, uint32_t& start_index)
   {
     for (uint32_t index = start_index; index < SLOT_COUNT; index++)
     {
@@ -204,7 +204,7 @@ class LockFreePool
    *         - `ErrorCode::OK`：成功取出 / Successfully retrieved
    *         - `ErrorCode::EMPTY`：池空，无可取元素 / Pool empty, no available element
    */
-  ErrorCode GetFromSlot(Data &data, uint32_t index)
+  ErrorCode GetFromSlot(Data& data, uint32_t index)
   {
     auto expected = slots_[index].slot.state.load(std::memory_order_acquire);
     if (expected == SlotState::READY)
@@ -287,7 +287,7 @@ class LockFreePool
   uint32_t SlotCount() const { return SLOT_COUNT; }
 
  protected:
-  Slot &operator[](uint32_t index)
+  Slot& operator[](uint32_t index)
   {
     if (index >= SLOT_COUNT)
     {
@@ -298,6 +298,6 @@ class LockFreePool
 
  private:
   const uint32_t SLOT_COUNT;  ///< 槽总数 / Number of slots
-  Slot *slots_;               ///< 槽数组指针 / Array of slots
+  Slot* slots_;               ///< 槽数组指针 / Array of slots
 };
 }  // namespace LibXR

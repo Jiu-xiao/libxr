@@ -1,3 +1,4 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_spi.hpp"
 
 #include <cstring>
@@ -7,7 +8,7 @@
 
 using namespace LibXR;
 
-CH32SPI* CH32SPI::map[CH32_SPI_NUMBER] = {nullptr};
+CH32SPI* CH32SPI::map_[CH32_SPI_NUMBER] = {nullptr};
 
 bool CH32SPI::MapEnumToCH32Prescaler(SPI::Prescaler p, uint16_t& out)
 {
@@ -64,7 +65,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
                  bool master_mode, bool firstbit_msb, uint16_t prescaler,
                  uint32_t dma_enable_min_size, SPI::Configuration config)
     : SPI(dma_rx, dma_tx),
-      instance_(CH32_SPI_GetInstanceID(id)),
+      instance_(ch32_spi_get_instance_id(id)),
       dma_rx_channel_(CH32_SPI_RX_DMA_CHANNEL_MAP[id]),
       dma_tx_channel_(CH32_SPI_TX_DMA_CHANNEL_MAP[id]),
       id_(id),
@@ -82,9 +83,9 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
 {
   ASSERT(instance_ != nullptr);
 
-  map[id] = this;
+  map_[id] = this;
 
-  // === 时钟 ===
+  // Clock configuration.
   if (CH32_SPI_APB_MAP[id] == 1)
   {
     RCC_APB1PeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP[id], ENABLE);
@@ -99,13 +100,13 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
   }
   RCC_AHBPeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP_DMA[id], ENABLE);
 
-  // === GPIO ===
+  // GPIO configuration.
   {
     GPIO_InitTypeDef gpio = {};
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
 
     // SCK
-    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(sck_port_), ENABLE);
+    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(sck_port_), ENABLE);
     if (mode_ == SPI_Mode_Master)
     {
       gpio.GPIO_Pin = sck_pin_;
@@ -119,7 +120,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     GPIO_Init(sck_port_, &gpio);
 
     // MISO
-    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(miso_port_), ENABLE);
+    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(miso_port_), ENABLE);
     if (mode_ == SPI_Mode_Master)
     {
       gpio.GPIO_Pin = miso_pin_;
@@ -133,7 +134,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     GPIO_Init(miso_port_, &gpio);
 
     // MOSI
-    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(mosi_port_), ENABLE);
+    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(mosi_port_), ENABLE);
     if (mode_ == SPI_Mode_Master)
     {
       gpio.GPIO_Pin = mosi_pin_;
@@ -153,7 +154,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     }
   }
 
-  // === SPI 基本配置 ===
+  // SPI base configuration.
   {
     SPI_InitTypeDef init = {};
     init.SPI_Direction = SPI_Direction_2Lines_FullDuplex;
@@ -172,13 +173,13 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     SPI_Cmd(instance_, ENABLE);
   }
 
-  // === DMA 通道基础配置（MADDR/CNTR 运行时再设） ===
+  // DMA channel base configuration (MADDR/CNTR set at runtime).
   {
     // RX
     {
       ch32_dma_callback_t cb = [](void* arg)
       { reinterpret_cast<CH32SPI*>(arg)->RxDmaIRQHandler(); };
-      CH32_DMA_RegisterCallback(CH32_DMA_GetID(dma_rx_channel_), cb, this);
+      ch32_dma_register_callback(ch32_dma_get_id(dma_rx_channel_), cb, this);
 
       DMA_InitTypeDef di = {};
       DMA_DeInit(dma_rx_channel_);
@@ -195,13 +196,13 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
       di.DMA_M2M = DMA_M2M_Disable;
       DMA_Init(dma_rx_channel_, &di);
       DMA_ITConfig(dma_rx_channel_, DMA_IT_TC, ENABLE);
-      NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[CH32_DMA_GetID(dma_rx_channel_)]);
+      NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_rx_channel_)]);
     }
     // TX
     {
       ch32_dma_callback_t cb = [](void* arg)
       { reinterpret_cast<CH32SPI*>(arg)->TxDmaIRQHandler(); };
-      CH32_DMA_RegisterCallback(CH32_DMA_GetID(dma_tx_channel_), cb, this);
+      ch32_dma_register_callback(ch32_dma_get_id(dma_tx_channel_), cb, this);
 
       DMA_InitTypeDef di = {};
       DMA_DeInit(dma_tx_channel_);
@@ -218,16 +219,16 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
       di.DMA_M2M = DMA_M2M_Disable;
       DMA_Init(dma_tx_channel_, &di);
       DMA_ITConfig(dma_tx_channel_, DMA_IT_TC, ENABLE);
-      NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[CH32_DMA_GetID(dma_tx_channel_)]);
+      NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_tx_channel_)]);
     }
   }
 
-  // === 同步基类配置用于速率查询 ===
+  // Sync base-class configuration for rate query helpers.
   GetConfig() = config;
   GetConfig().prescaler = MapCH32PrescalerToEnum(prescaler_);
 }
 
-// === SetConfig：更新极性/相位，并同步基类配置 ===
+// SetConfig updates polarity/phase and synchronizes base-class configuration.
 ErrorCode CH32SPI::SetConfig(SPI::Configuration config)
 {
   // 1) 把 SPI::Prescaler → CH32 Prescaler 宏
@@ -277,7 +278,10 @@ ErrorCode CH32SPI::PollingTransfer(uint8_t* rx, const uint8_t* tx, uint32_t len)
     {
     }
     uint16_t d = SPI_I2S_ReceiveData(instance_);
-    if (rx) rx[i] = static_cast<uint8_t>(d & 0xff);
+    if (rx)
+    {
+      rx[i] = static_cast<uint8_t>(d & 0xff);
+    }
   }
   return ErrorCode::OK;
 }
@@ -285,35 +289,40 @@ ErrorCode CH32SPI::PollingTransfer(uint8_t* rx, const uint8_t* tx, uint32_t len)
 ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
                                 OperationRW& op, bool in_isr)
 {
-  const uint32_t rsz = read_data.size_;
-  const uint32_t wsz = write_data.size_;
-  const uint32_t need = (rsz > wsz) ? rsz : wsz;
+  const uint32_t RSZ = read_data.size_;
+  const uint32_t WSZ = write_data.size_;
+  const uint32_t NEED = (RSZ > WSZ) ? RSZ : WSZ;
 
-  if (need == 0)
+  if (NEED == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
+    {
       op.UpdateStatus(in_isr, ErrorCode::OK);
+    }
     return ErrorCode::OK;
   }
 
-  if (DmaBusy()) return ErrorCode::BUSY;
+  if (DmaBusy())
+  {
+    return ErrorCode::BUSY;
+  }
 
   RawData rx = GetRxBuffer();
   RawData tx = GetTxBuffer();
 
-  ASSERT(rx.size_ >= need);
-  ASSERT(tx.size_ >= need);
+  ASSERT(rx.size_ >= NEED);
+  ASSERT(tx.size_ >= NEED);
 
-  if (need > dma_enable_min_size_)
+  if (NEED > dma_enable_min_size_)
   {
     mem_read_ = false;
     read_buff_ = read_data;
     rw_op_ = op;
     busy_ = true;
 
-    PrepareTxBuffer(write_data, need);
+    PrepareTxBuffer(write_data, NEED);
 
-    StartDmaDuplex(need);
+    StartDmaDuplex(NEED);
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
@@ -329,62 +338,73 @@ ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
 
     // 准备 tx
-    if (wsz)
+    if (WSZ)
     {
-      Memory::FastCopy(txp, write_data.addr_, wsz);
-      if (need > wsz) Memory::FastSet(txp + wsz, 0x00, need - wsz);
+      Memory::FastCopy(txp, write_data.addr_, WSZ);
+      if (NEED > WSZ)
+      {
+        Memory::FastSet(txp + WSZ, 0x00, NEED - WSZ);
+      }
     }
     else
     {
-      Memory::FastSet(txp, 0x00, need);
+      Memory::FastSet(txp, 0x00, NEED);
     }
 
-    ErrorCode ec = PollingTransfer(rxp, txp, need);
+    ErrorCode ec = PollingTransfer(rxp, txp, NEED);
 
-    if (rsz)
+    if (RSZ)
     {
-      Memory::FastCopy(read_data.addr_, rxp, rsz);
+      Memory::FastCopy(read_data.addr_, rxp, RSZ);
     }
 
     SwitchBuffer();
 
-    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
+    if (op.type != OperationRW::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ec);
+    }
     return ec;
   }
 }
 
 ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool in_isr)
 {
-  const uint32_t n = read_data.size_;
-  if (n == 0)
+  const uint32_t N = read_data.size_;
+  if (N == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
+    {
       op.UpdateStatus(in_isr, ErrorCode::OK);
+    }
     return ErrorCode::OK;
   }
 
-  if (DmaBusy()) return ErrorCode::BUSY;
+  if (DmaBusy())
+  {
+    return ErrorCode::BUSY;
+  }
 
   RawData rx = GetRxBuffer();
   RawData tx = GetTxBuffer();
 
-  ASSERT(rx.size_ >= n + 1);
-  ASSERT(tx.size_ >= n + 1);
+  ASSERT(rx.size_ >= N + 1);
+  ASSERT(tx.size_ >= N + 1);
 
-  const uint32_t total = n + 1;
+  const uint32_t TOTAL = N + 1;
 
-  if (total > dma_enable_min_size_)
+  if (TOTAL > dma_enable_min_size_)
   {
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg | 0x80);
-    Memory::FastSet(txp + 1, 0x00, n);
+    Memory::FastSet(txp + 1, 0x00, N);
 
     mem_read_ = true;
     read_buff_ = read_data;
     rw_op_ = op;
     busy_ = true;
 
-    StartDmaDuplex(total);
+    StartDmaDuplex(TOTAL);
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
@@ -399,14 +419,17 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, boo
     uint8_t* rxp = static_cast<uint8_t*>(rx.addr_);
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg | 0x80);
-    Memory::FastSet(txp + 1, 0x00, n);
+    Memory::FastSet(txp + 1, 0x00, N);
 
-    ErrorCode ec = PollingTransfer(rxp, txp, total);
-    Memory::FastCopy(read_data.addr_, rxp + 1, n);
+    ErrorCode ec = PollingTransfer(rxp, txp, TOTAL);
+    Memory::FastCopy(read_data.addr_, rxp + 1, N);
 
     SwitchBuffer();
 
-    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
+    if (op.type != OperationRW::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ec);
+    }
     return ec;
   }
 }
@@ -414,36 +437,41 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, boo
 ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op,
                             bool in_isr)
 {
-  const uint32_t n = write_data.size_;
-  if (n == 0)
+  const uint32_t N = write_data.size_;
+  if (N == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
+    {
       op.UpdateStatus(in_isr, ErrorCode::OK);
+    }
     return ErrorCode::OK;
   }
 
-  if (DmaBusy()) return ErrorCode::BUSY;
+  if (DmaBusy())
+  {
+    return ErrorCode::BUSY;
+  }
 
   RawData rx = GetRxBuffer();
   RawData tx = GetTxBuffer();
   (void)rx;  // RX 仅用于丢弃
 
-  ASSERT(tx.size_ >= n + 1);
+  ASSERT(tx.size_ >= N + 1);
 
-  const uint32_t total = n + 1;
+  const uint32_t TOTAL = N + 1;
 
-  if (total > dma_enable_min_size_)
+  if (TOTAL > dma_enable_min_size_)
   {
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg & 0x7F);
-    Memory::FastCopy(txp + 1, write_data.addr_, n);
+    Memory::FastCopy(txp + 1, write_data.addr_, N);
 
     mem_read_ = false;
     read_buff_ = {nullptr, 0};
     rw_op_ = op;
     busy_ = true;
 
-    StartDmaDuplex(total);
+    StartDmaDuplex(TOTAL);
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
@@ -458,13 +486,16 @@ ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& 
     uint8_t* rxp = static_cast<uint8_t*>(rx.addr_);
     uint8_t* txp = static_cast<uint8_t*>(tx.addr_);
     txp[0] = static_cast<uint8_t>(reg & 0x7F);
-    Memory::FastCopy(txp + 1, write_data.addr_, n);
+    Memory::FastCopy(txp + 1, write_data.addr_, N);
 
-    ErrorCode ec = PollingTransfer(rxp, txp, total);
+    ErrorCode ec = PollingTransfer(rxp, txp, TOTAL);
 
     SwitchBuffer();
 
-    if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
+    if (op.type != OperationRW::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ec);
+    }
     return ec;
   }
 }
@@ -477,12 +508,12 @@ void CH32SPI::PrepareTxBuffer(ConstRawData write_data, uint32_t need_len, uint32
 
   if (write_data.size_ > 0)
   {
-    const uint32_t copy =
+    const uint32_t COPY =
         (write_data.size_ > need_len - prefix) ? (need_len - prefix) : write_data.size_;
-    Memory::FastCopy(txp + prefix, write_data.addr_, copy);
-    if (prefix + copy < need_len)
+    Memory::FastCopy(txp + prefix, write_data.addr_, COPY);
+    if (prefix + COPY < need_len)
     {
-      Memory::FastSet(txp + prefix + copy, dummy, need_len - prefix - copy);
+      Memory::FastSet(txp + prefix + COPY, dummy, need_len - prefix - COPY);
     }
   }
   else
@@ -517,7 +548,10 @@ void CH32SPI::StopDma()
 
 void CH32SPI::RxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_SPI_RX_DMA_IT_MAP[id_]) == RESET) return;
+  if (DMA_GetITStatus(CH32_SPI_RX_DMA_IT_MAP[id_]) == RESET)
+  {
+    return;
+  }
 
   DMA_ClearITPendingBit(CH32_SPI_RX_DMA_IT_MAP[id_]);
 
@@ -548,22 +582,30 @@ void CH32SPI::RxDmaIRQHandler()
 
 void CH32SPI::TxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_SPI_TX_DMA_IT_MAP[id_]) == RESET) return;
+  if (DMA_GetITStatus(CH32_SPI_TX_DMA_IT_MAP[id_]) == RESET)
+  {
+    return;
+  }
   DMA_ClearITPendingBit(CH32_SPI_TX_DMA_IT_MAP[id_]);
 
   SPI_I2S_DMACmd(instance_, SPI_I2S_DMAReq_Tx, DISABLE);
   DMA_Cmd(dma_tx_channel_, DISABLE);
 }
 
-// === 零拷贝 Transfer ===
+// Zero-copy transfer path.
 ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 {
-  if (DmaBusy()) return ErrorCode::BUSY;
+  if (DmaBusy())
+  {
+    return ErrorCode::BUSY;
+  }
 
   if (size == 0)
   {
     if (op.type != OperationRW::OperationType::BLOCK)
+    {
       op.UpdateStatus(in_isr, ErrorCode::OK);
+    }
     return ErrorCode::OK;
   }
 
@@ -596,11 +638,14 @@ ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 
   SwitchBuffer();
 
-  if (op.type != OperationRW::OperationType::BLOCK) op.UpdateStatus(in_isr, ec);
+  if (op.type != OperationRW::OperationType::BLOCK)
+  {
+    op.UpdateStatus(in_isr, ec);
+  }
   return ec;
 }
 
-// === 最大总线时钟（Hz） ===
+// Maximum bus clock in Hz.
 uint32_t CH32SPI::GetMaxBusSpeed() const
 {
   RCC_ClocksTypeDef clocks{};
@@ -617,7 +662,7 @@ uint32_t CH32SPI::GetMaxBusSpeed() const
   return 0u;
 }
 
-// === 最大可用分频枚举 ===
+// Maximum available prescaler enumeration.
 SPI::Prescaler CH32SPI::GetMaxPrescaler() const
 {
 #if defined(SPI_BaudRatePrescaler_1024)
@@ -685,3 +730,5 @@ SPI::Prescaler CH32SPI::MapCH32PrescalerToEnum(uint16_t p)
       return SPI::Prescaler::UNKNOWN;
   }
 }
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

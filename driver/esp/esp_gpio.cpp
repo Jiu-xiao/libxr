@@ -1,6 +1,7 @@
 #include "esp_gpio.hpp"
 
-namespace LibXR {
+namespace LibXR
+{
 
 void IRAM_ATTR ESP32GPIO::InterruptDispatcher(void* arg)
 {
@@ -12,4 +13,4 @@ void IRAM_ATTR ESP32GPIO::InterruptDispatcher(void* arg)
   }
 }
 
-} // namespace LibXR
+}  // namespace LibXR

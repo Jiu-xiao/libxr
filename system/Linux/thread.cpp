@@ -21,7 +21,7 @@ void Thread::Sleep(uint32_t milliseconds)
   UNUSED(clock_nanosleep(CLOCK_REALTIME, 0, &ts, nullptr));
 }
 
-void Thread::SleepUntil(MillisecondTimestamp &last_waskup_time, uint32_t time_to_sleep)
+void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep)
 {
   last_waskup_time = last_waskup_time + time_to_sleep;
 

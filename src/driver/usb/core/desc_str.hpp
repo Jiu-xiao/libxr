@@ -169,7 +169,8 @@ class DescriptorStrings
   const LanguagePack** string_list_;  ///< 多语言包指针表 / LanguagePack pointer table
   RawData buffer_;                    ///< 临时描述符缓冲区 / Temp descriptor buffer
 
-  const uint8_t* serial_uid_;  ///< 序列号后缀 UID （原始字节） / Serial number suffix UID (original bytes)
+  const uint8_t* serial_uid_;  ///< 序列号后缀 UID （原始字节） / Serial number suffix UID
+                               ///< (original bytes)
   size_t serial_uid_len_;      ///< UID 字节数 / UID byte count
 };
 }  // namespace LibXR::USB

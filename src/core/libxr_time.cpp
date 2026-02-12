@@ -39,7 +39,7 @@ MicrosecondTimestamp::Duration::Duration::operator uint64_t() const { return dif
 }
 
 MicrosecondTimestamp::Duration MicrosecondTimestamp::operator-(
-    const MicrosecondTimestamp &old_microsecond) const
+    const MicrosecondTimestamp& old_microsecond) const
 {
   uint64_t diff;  // NOLINT
 
@@ -57,7 +57,7 @@ MicrosecondTimestamp::Duration MicrosecondTimestamp::operator-(
   return Duration(diff);
 }
 
-MicrosecondTimestamp &MicrosecondTimestamp::operator=(const MicrosecondTimestamp &other)
+MicrosecondTimestamp& MicrosecondTimestamp::operator=(const MicrosecondTimestamp& other)
 {
   if (this != &other)
   {
@@ -100,7 +100,7 @@ MillisecondTimestamp::Duration::operator uint32_t() const { return diff_; }
 }
 
 [[nodiscard]] MillisecondTimestamp::Duration MillisecondTimestamp::operator-(
-    const MillisecondTimestamp &old_millisecond) const
+    const MillisecondTimestamp& old_millisecond) const
 {
   uint32_t diff;  // NOLINT
 

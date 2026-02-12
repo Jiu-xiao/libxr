@@ -69,7 +69,7 @@ class Mutex
      *        (Constructor automatically locking the mutex).
      * @param mutex 需要管理的互斥锁 (Reference to the mutex to manage).
      */
-    LockGuard(Mutex &mutex) : mutex_(mutex) { mutex_.Lock(); }
+    LockGuard(Mutex& mutex) : mutex_(mutex) { mutex_.Lock(); }
 
     /**
      * @brief 析构函数，自动解锁
@@ -78,7 +78,7 @@ class Mutex
     ~LockGuard() { mutex_.Unlock(); }
 
    private:
-    Mutex &mutex_;  ///< 被管理的互斥锁 (Reference to the managed mutex).
+    Mutex& mutex_;  ///< 被管理的互斥锁 (Reference to the managed mutex).
   };
 
  private:

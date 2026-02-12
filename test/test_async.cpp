@@ -6,7 +6,7 @@ void test_async()
 {
   int async_arg = 0;
   auto async_cb = LibXR::ASync::Job::Create(
-      [](bool in_isr, int *arg, LibXR::ASync *async)
+      [](bool in_isr, int* arg, LibXR::ASync* async)
       {
         UNUSED(async);
         UNUSED(in_isr);

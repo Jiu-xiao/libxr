@@ -9,26 +9,27 @@ using namespace LibXR;
 
 // NOLINTBEGIN
 
-static inline volatile uint8_t* GetTxCtrlAddr(USB::Endpoint::EPNumber ep)
+static inline volatile uint8_t* get_tx_ctrl_addr(USB::Endpoint::EPNumber ep)
 {
   return &USBFSD->UEP0_TX_CTRL + 4 * (USB::Endpoint::EPNumberToInt8(ep));
 }
-static inline volatile uint8_t* GetRxCtrlAddr(USB::Endpoint::EPNumber ep)
+static inline volatile uint8_t* get_rx_ctrl_addr(USB::Endpoint::EPNumber ep)
 {
   return &USBFSD->UEP0_RX_CTRL + 4 * (USB::Endpoint::EPNumberToInt8(ep));
 }
-static inline volatile uint16_t* GetTxLenAddr(USB::Endpoint::EPNumber ep)
+static inline volatile uint16_t* get_tx_len_addr(USB::Endpoint::EPNumber ep)
 {
   return &USBFSD->UEP0_TX_LEN + 2 * (USB::Endpoint::EPNumberToInt8(ep));
 }
-static inline volatile uint32_t* GetDmaAddr(USB::Endpoint::EPNumber ep)
+static inline volatile uint32_t* get_dma_addr(USB::Endpoint::EPNumber ep)
 {
   return &USBFSD->UEP0_DMA + USB::Endpoint::EPNumberToInt8(ep);
 }
 
-static void SetDmaBuffer(USB::Endpoint::EPNumber ep_num, void* value, bool double_buffer)
+static void set_dma_buffer(USB::Endpoint::EPNumber ep_num, void* value,
+                           bool double_buffer)
 {
-  *GetDmaAddr(ep_num) = (uint32_t)value;
+  *get_dma_addr(ep_num) = (uint32_t)value;
 
   if (!double_buffer)
   {
@@ -63,12 +64,12 @@ static void SetDmaBuffer(USB::Endpoint::EPNumber ep_num, void* value, bool doubl
   }
 }
 
-static void SetTxLen(USB::Endpoint::EPNumber ep_num, uint32_t value)
+static void set_tx_len(USB::Endpoint::EPNumber ep_num, uint32_t value)
 {
-  *GetTxLenAddr(ep_num) = value;
+  *get_tx_len_addr(ep_num) = value;
 }
 
-static void EnableTx(USB::Endpoint::EPNumber ep_num)
+static void enable_tx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
@@ -97,7 +98,7 @@ static void EnableTx(USB::Endpoint::EPNumber ep_num)
       break;
   }
 }
-static void DisableTx(USB::Endpoint::EPNumber ep_num)
+static void disable_tx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
@@ -126,7 +127,7 @@ static void DisableTx(USB::Endpoint::EPNumber ep_num)
       break;
   }
 }
-static void EnableRx(USB::Endpoint::EPNumber ep_num)
+static void enable_rx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
@@ -155,7 +156,7 @@ static void EnableRx(USB::Endpoint::EPNumber ep_num)
       break;
   }
 }
-static void DisableRx(USB::Endpoint::EPNumber ep_num)
+static void disable_rx(USB::Endpoint::EPNumber ep_num)
 {
   switch (ep_num)
   {
@@ -187,9 +188,9 @@ static void DisableRx(USB::Endpoint::EPNumber ep_num)
 // NOLINTEND
 
 // NOLINTNEXTLINE
-static LibXR::RawData SelectBuffer(USB::Endpoint::EPNumber ep_num,
-                                   USB::Endpoint::Direction dir,
-                                   const LibXR::RawData& buffer)
+static LibXR::RawData select_buffer(USB::Endpoint::EPNumber ep_num,
+                                    USB::Endpoint::Direction dir,
+                                    const LibXR::RawData& buffer)
 {
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
@@ -210,22 +211,22 @@ static LibXR::RawData SelectBuffer(USB::Endpoint::EPNumber ep_num,
 
 CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
                                      LibXR::RawData buffer, bool is_isochronous)
-    : Endpoint(ep_num, dir, is_isochronous ? buffer : SelectBuffer(ep_num, dir, buffer)),
+    : Endpoint(ep_num, dir, is_isochronous ? buffer : select_buffer(ep_num, dir, buffer)),
       is_isochronous_(is_isochronous),
       dma_buffer_(buffer)
 {
   map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
-  SetDmaBuffer(GetNumber(), dma_buffer_.addr_, is_isochronous ? false : true);
+  set_dma_buffer(GetNumber(), dma_buffer_.addr_, is_isochronous ? false : true);
 
   if (dir == Direction::IN)
   {
-    SetTxLen(GetNumber(), 0);
-    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+    set_tx_len(GetNumber(), 0);
+    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
   }
   else
   {
-    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
   }
 }
 
@@ -245,41 +246,41 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
 
   ep_cfg.max_packet_size = GetBuffer().size_;
 
-  SetTxLen(GetNumber(), 0);
+  set_tx_len(GetNumber(), 0);
 
   if (!is_isochronous_)
   {
-    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
-    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
-    EnableTx(GetNumber());
-    EnableRx(GetNumber());
+    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
+    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
+    enable_tx(GetNumber());
+    enable_rx(GetNumber());
   }
   else
   {
-    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
-    *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
     if (GetDirection() == Direction::IN)
     {
-      EnableTx(GetNumber());
+      enable_tx(GetNumber());
     }
     else
     {
-      EnableRx(GetNumber());
+      enable_rx(GetNumber());
     }
   }
 
-  SetDmaBuffer(GetNumber(), dma_buffer_.addr_, is_isochronous_ ? false : true);
+  set_dma_buffer(GetNumber(), dma_buffer_.addr_, is_isochronous_ ? false : true);
 
   SetState(State::IDLE);
 }
 
 void CH32EndpointOtgFs::Close()
 {
-  DisableTx(GetNumber());
-  DisableRx(GetNumber());
+  disable_tx(GetNumber());
+  disable_rx(GetNumber());
 
-  *GetTxCtrlAddr(GetNumber()) = USBFS_UEP_T_RES_NAK;
-  *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+  *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+  *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
 
   SetState(State::DISABLED);
 }
@@ -306,8 +307,8 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
 
   if (is_in)
   {
-    SetTxLen(GetNumber(), size);
-    auto addr = GetTxCtrlAddr(GetNumber());
+    set_tx_len(GetNumber(), size);
+    auto addr = get_tx_ctrl_addr(GetNumber());
 
     if (GetNumber() != EPNumber::EP0)
     {
@@ -321,7 +322,7 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
   }
   else
   {
-    auto addr = GetRxCtrlAddr(GetNumber());
+    auto addr = get_rx_ctrl_addr(GetNumber());
 
     if (GetNumber() != EPNumber::EP0)
     {
@@ -354,11 +355,11 @@ ErrorCode CH32EndpointOtgFs::Stall()
   bool is_in = (GetDirection() == Direction::IN);
   if (is_in)
   {
-    *GetTxCtrlAddr(GetNumber()) |= USBFS_UEP_T_RES_STALL;
+    *get_tx_ctrl_addr(GetNumber()) |= USBFS_UEP_T_RES_STALL;
   }
   else
   {
-    *GetRxCtrlAddr(GetNumber()) |= USBFS_UEP_R_RES_STALL;
+    *get_rx_ctrl_addr(GetNumber()) |= USBFS_UEP_R_RES_STALL;
   }
   SetState(State::STALLED);
   return ErrorCode::OK;
@@ -374,11 +375,11 @@ ErrorCode CH32EndpointOtgFs::ClearStall()
   bool is_in = (GetDirection() == Direction::IN);
   if (is_in)
   {
-    *GetTxCtrlAddr(GetNumber()) &= ~USBFS_UEP_T_RES_STALL;
+    *get_tx_ctrl_addr(GetNumber()) &= ~USBFS_UEP_T_RES_STALL;
   }
   else
   {
-    *GetRxCtrlAddr(GetNumber()) &= ~USBFS_UEP_R_RES_STALL;
+    *get_rx_ctrl_addr(GetNumber()) &= ~USBFS_UEP_R_RES_STALL;
   }
   SetState(State::IDLE);
   return ErrorCode::OK;
@@ -386,37 +387,36 @@ ErrorCode CH32EndpointOtgFs::ClearStall()
 
 void CH32EndpointOtgFs::TransferComplete(size_t size)
 {
-  const bool is_in = (GetDirection() == Direction::IN);
-  const bool is_out = !is_in;
-  const bool is_ep0 = (GetNumber() == EPNumber::EP0);
-  const bool is_iso = (GetType() == Type::ISOCHRONOUS);
+  const bool IS_IN = (GetDirection() == Direction::IN);
+  const bool IS_OUT = !IS_IN;
+  const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
+  const bool IS_ISO = (GetType() == Type::ISOCHRONOUS);
 
-  // UIF_TRANSFER / INT_FG 由 IRQ handler 统一在“本次处理结束后”清除（不在此处写
-  // INT_FG）。
+  // UIF_TRANSFER/INT_FG are cleared by the IRQ handler after dispatch.
 
-  if (is_in)
+  if (IS_IN)
   {
-    // 收尾置 NAK
-    *GetTxCtrlAddr(GetNumber()) =
-        (*GetTxCtrlAddr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
+    // Restore NAK on completion.
+    *get_tx_ctrl_addr(GetNumber()) =
+        (*get_tx_ctrl_addr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
 
     size = last_transfer_size_;
   }
   else
   {
-    // 非 EP0 的 OUT：收尾置 NAK
-    if (!is_ep0)
+    // For non-EP0 OUT endpoints, restore NAK on completion.
+    if (!IS_EP0)
     {
-      *GetRxCtrlAddr(GetNumber()) =
-          (*GetRxCtrlAddr(GetNumber()) & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_NAK;
+      *get_rx_ctrl_addr(GetNumber()) =
+          (*get_rx_ctrl_addr(GetNumber()) & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_NAK;
     }
   }
 
-  // 若 TOG 不 OK，说明数据同步失败（RB_UIS_TOG_OK / RB_U_TOG_OK）
-  if (is_out)
+  // TOG mismatch indicates data synchronization failure.
+  if (IS_OUT)
   {
-    const bool tog_ok = ((USBFSD->INT_ST & USBFS_U_TOG_OK) == USBFS_U_TOG_OK);  // NOLINT
-    if (!tog_ok)
+    const bool TOG_OK = ((USBFSD->INT_ST & USBFS_U_TOG_OK) == USBFS_U_TOG_OK);  // NOLINT
+    if (!TOG_OK)
     {
       SetState(State::IDLE);
       (void)Transfer(last_transfer_size_);
@@ -424,16 +424,16 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     }
   }
 
-  // 成功：更新软件 data toggle（非 EP0、非 ISO）
-  if (GetState() == State::BUSY && !is_ep0 && !is_iso)
+  // Update software data toggle for non-EP0 non-ISO endpoints.
+  if (GetState() == State::BUSY && !IS_EP0 && !IS_ISO)
   {
     tog_ = !tog_;
   }
 
-  if (is_ep0 && is_out)
+  if (IS_EP0 && IS_OUT)
   {
     tog_ = true;
-    *GetRxCtrlAddr(GetNumber()) = USBFS_UEP_R_RES_ACK;
+    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_ACK;
   }
 
   OnTransferCompleteCallback(true, size);
@@ -443,12 +443,12 @@ void CH32EndpointOtgFs::SwitchBuffer()
 {
   if (GetDirection() == Direction::IN)
   {
-    tog_ = (*GetTxCtrlAddr(GetNumber()) & USBFS_UEP_T_TOG) == USBFS_UEP_T_TOG;
+    tog_ = (*get_tx_ctrl_addr(GetNumber()) & USBFS_UEP_T_TOG) == USBFS_UEP_T_TOG;
     SetActiveBlock(!tog_);
   }
   else
   {
-    tog_ = (*GetRxCtrlAddr(GetNumber()) & USBFS_UEP_R_TOG) == USBFS_UEP_R_TOG;
+    tog_ = (*get_rx_ctrl_addr(GetNumber()) & USBFS_UEP_R_TOG) == USBFS_UEP_R_TOG;
     SetActiveBlock(tog_);
   }
 }

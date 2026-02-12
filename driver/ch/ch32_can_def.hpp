@@ -6,12 +6,10 @@
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 /**
- * @brief CH32 CAN instance ID.
+ * @brief CH32 CAN 实例编号 / CH32 CAN instance identifier
  *
- * Note:
- * - Some CH32 parts expose CAN1 only; some expose CAN1 + CAN2.
- * - Filters may be shared across instances (bxCAN-like). This driver defaults to:
- *   CAN1 -> FIFO0, CAN2 -> FIFO1, and uses filter bank 0/14 respectively.
+ * @note 不同型号可能只有 CAN1 或同时支持 CAN1/CAN2。
+ *       Some MCUs expose CAN1 only, while others expose both CAN1 and CAN2.
  */
 typedef enum
 {
@@ -28,20 +26,20 @@ typedef enum
 static_assert(CH32_CAN_NUMBER >= 1, "No CAN instance detected for this MCU");
 
 /**
- * @brief Get CAN peripheral ID from instance address.
+ * @brief 通过外设地址获取 CAN 编号 / Get CAN ID by peripheral address
  */
 ch32_can_id_t CH32_CAN_GetID(CAN_TypeDef* addr);  // NOLINT
 
 /**
- * @brief Get CAN peripheral instance pointer from ID.
+ * @brief 通过编号获取外设地址 / Get CAN instance by ID
  */
 CAN_TypeDef* CH32_CAN_GetInstanceID(ch32_can_id_t id);  // NOLINT
 
 /**
- * @brief Default "slave start" filter bank split for dual-CAN.
+ * @brief 双 CAN 过滤器分界默认值 / Default filter split for dual-CAN
  *
- * For bxCAN-like designs with 28 filter groups, split at 14 is typical:
- *   banks [0..13] for CAN1, [14..27] for CAN2.
+ * 对于 28 组过滤器，常见分界点为 14。
+ * For 28 filter banks, split-at-14 is a common layout.
  */
 static constexpr uint8_t CH32_CAN_DEFAULT_SLAVE_START_BANK = 14;
 

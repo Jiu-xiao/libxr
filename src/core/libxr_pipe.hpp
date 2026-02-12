@@ -121,8 +121,8 @@ class Pipe
     return ErrorCode::OK;
   }
 
-  ReadPort read_port_;  ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
-                        ///< data queue.
+  ReadPort read_port_;    ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
+                          ///< data queue.
   WritePort write_port_;  ///< 持有共享数据队列（容量为构造参数）的写端。 Write endpoint
                           ///< owning the shared queue.
 };
