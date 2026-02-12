@@ -1,6 +1,5 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 // ch32_usb_devfs.cpp  (classic FSDEV / PMA)
-#define CH32_USBCAN_SHARED_IMPLEMENTATION
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
 #include "ch32_usbcan_shared.hpp"
@@ -106,7 +105,7 @@ static inline volatile uint16_t* usbdev_ep_reg(uint8_t ep)
                                               static_cast<uintptr_t>(ep) * 4U);
 }
 
-// Compatibility bridge for classic USBLIB-style macro names
+// Compatibility aliases for classic USBLIB-style macro names.
 #if !defined(USB_ISTR_CTR) && defined(ISTR_CTR)
 #define USB_ISTR_CTR ISTR_CTR
 #endif
@@ -551,8 +550,8 @@ void CH32USBDeviceFS::Start(bool)
   CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
   CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
 
-  // DeviceCore::Init() may arm OUT endpoints before FSDEV reset/BTABLE init above.
-  // Re-arm non-EP0 OUT endpoints that are logically BUSY after hardware is live.
+  // DeviceCore::Init() may arm OUT endpoints before FSDEV reset/BTABLE initialization.
+  // Re-arm non-EP0 OUT endpoints that remain BUSY after hardware initialization.
   auto& ep_map = LibXR::CH32EndpointDevFs::map_dev_fs_;
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
   const uint8_t N_EP = static_cast<uint8_t>(LibXR::CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);

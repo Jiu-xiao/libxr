@@ -1,4 +1,3 @@
-// ch32_i2c.hpp
 #pragma once
 
 #include "libxr.hpp"
@@ -20,10 +19,11 @@ namespace LibXR
 class CH32I2C : public I2C
 {
  public:
-  // 统一地址语义：
-  // - 7-bit 模式：slave_addr 传原始 7-bit (0x00..0x7F)，不带 R/W 位
-  // - 10-bit 模式：slave_addr 传原始 10-bit (0x000..0x3FF)，不带 R/W 位
-  // ten_bit_addr 必须是最后一个参数（按你的要求）
+  /**
+   * @brief 构造 I2C 驱动对象 / Construct I2C driver object
+   * @details `slave_addr` 使用不带 R/W 位的原始 7 位或 10 位地址。
+   *          `slave_addr` uses raw 7-bit or 10-bit addresses without the R/W bit.
+   */
   CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port, uint16_t scl_pin,
           GPIO_TypeDef* sda_port, uint16_t sda_pin, uint32_t pin_remap = 0,
           uint32_t dma_enable_min_size = 3, uint32_t default_clock_hz = 400000,
@@ -44,17 +44,17 @@ class CH32I2C : public I2C
 
   ErrorCode SetConfig(Configuration config) override;
 
-  // DMA 回调（由 ch32_dma 模块转发）
+  /// DMA 回调入口 / DMA callbacks from CH32 DMA driver
   void RxDmaIRQHandler();
   void TxDmaIRQHandler();
 
-  // I2C ER 中断回调
+  /// 错误中断回调 / I2C error IRQ callback
   void ErrorIRQHandler();
 
   static CH32I2C* map_[CH32_I2C_NUMBER];
 
  private:
-  // 超时：按“时间”而不是“循环次数”
+  /// 默认超时（微秒） / Default timeout in microseconds
   static constexpr uint32_t K_DEFAULT_TIMEOUT_US = 20000;  // 20ms
 
   inline bool DmaBusy() const
@@ -64,7 +64,8 @@ class CH32I2C : public I2C
 
   static inline uint8_t Addr7ToAddr8(uint16_t addr7)
   {
-    // WCH SPL: I2C_Send7bitAddress 仅改 bit0(R/W)，不做 <<1
+    // WCH SPL 在 I2C_Send7bitAddress 中仅更新 bit0(R/W)。
+    // WCH SPL updates only bit0 (R/W) in I2C_Send7bitAddress.
     ASSERT(addr7 <= 0x7F);
     return static_cast<uint8_t>(((addr7 & 0x7F) << 1) & 0xFE);
   }
@@ -82,7 +83,9 @@ class CH32I2C : public I2C
 
   ErrorCode MasterStartAndAddress(uint16_t slave_addr, uint8_t dir);
 
-  // 10-bit 序列：先用写方向完成地址阶段；若最终是读，再重复起始并发读头
+  // 10 位地址流程：先以写方向发送地址阶段，读流程再发重复起始切到读方向。
+  // 10-bit address flow: use write direction for address phase, then repeated start
+  // with read direction when needed.
   ErrorCode MasterStartAndAddress10Bit(uint16_t addr10, uint8_t final_dir);
 
   ErrorCode SendMemAddr(uint16_t mem_addr, MemAddrLength len);

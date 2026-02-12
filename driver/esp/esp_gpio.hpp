@@ -6,9 +6,16 @@
 
 namespace LibXR
 {
+/**
+ * @brief ESP32 GPIO 驱动实现 / ESP32 GPIO driver implementation
+ */
 class ESP32GPIO : public GPIO
 {
  public:
+  /**
+   * @brief 构造 GPIO 对象 / Construct GPIO object
+   * @param gpio_num GPIO 编号 / GPIO number
+   */
   explicit ESP32GPIO(gpio_num_t gpio_num) : gpio_num_(gpio_num)
   {
     map_[gpio_num_] = this;

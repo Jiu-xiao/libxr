@@ -23,9 +23,18 @@
 namespace LibXR
 {
 
+/**
+ * @brief Linux UART 串口驱动实现 / Linux UART driver implementation
+ *
+ * 支持按设备路径或 USB VID/PID 自动发现并创建 UART 通道。
+ * Supports UART creation by device path or USB VID/PID auto discovery.
+ */
 class LinuxUART : public UART
 {
  public:
+  /**
+   * @brief 通过设备路径构造 UART / Construct UART by device path
+   */
   LinuxUART(const char* dev_path, unsigned int baudrate = 115200,
             Parity parity = Parity::NO_PARITY, uint8_t data_bits = 8,
             uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512,
@@ -77,6 +86,9 @@ class LinuxUART : public UART
         Thread::Priority::REALTIME);
   }
 
+  /**
+   * @brief 通过 USB VID/PID 构造 UART / Construct UART by USB VID/PID
+   */
   LinuxUART(const std::string& vid, const std::string& pid,
             unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,

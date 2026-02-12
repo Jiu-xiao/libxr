@@ -1,4 +1,3 @@
-// ch32_uart.hpp
 #pragma once
 
 #include "libxr.hpp"
@@ -13,9 +12,15 @@
 namespace LibXR
 {
 
+/**
+ * @brief CH32 UART 驱动实现 / CH32 UART driver implementation
+ */
 class CH32UART : public UART
 {
  public:
+  /**
+   * @brief 构造 UART 对象 / Construct UART object
+   */
   CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef* tx_gpio_port,
            uint16_t tx_gpio_pin, GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin,
            uint32_t pin_remap = 0, uint32_t tx_queue_size = 5,

@@ -48,9 +48,15 @@ stm32_spi_id_t STM32_SPI_GetID(SPI_TypeDef* addr);  // NOLINT
 
 namespace LibXR
 {
+/**
+ * @brief STM32 SPI 驱动实现 / STM32 SPI driver implementation
+ */
 class STM32SPI : public SPI
 {
  public:
+  /**
+   * @brief 构造 SPI 对象 / Construct SPI object
+   */
   STM32SPI(SPI_HandleTypeDef* spi_handle, RawData dma_buff_rx, RawData dma_buff_tx,
            uint32_t dma_enable_min_size = 3);
 

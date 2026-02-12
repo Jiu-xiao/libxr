@@ -6,7 +6,9 @@
 namespace LibXR
 {
 
-// 设备ID枚举（对标STM32的 stm32_usb_dev_id_t）
+/**
+ * @brief CH32 USB 控制器编号 / CH32 USB controller identifiers
+ */
 typedef enum : uint8_t
 {
 #if defined(USBFSD)
@@ -15,7 +17,6 @@ typedef enum : uint8_t
 #if defined(USBHSD)
   CH32_USB_OTG_HS,
 #endif
-  // CH32_USB_HS_DEV, // 如需支持HS/OTG可补充
   CH32_USB_DEV_ID_NUM
 } ch32_usb_dev_id_t;
 

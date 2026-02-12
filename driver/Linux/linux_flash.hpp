@@ -14,24 +14,22 @@
 namespace LibXR
 {
 /**
- * @brief LinuxBinaryFileFlash 类，用于从二进制文件加载闪存数据
- *        LinuxBinaryFileFlash class for loading flash data from a binary file
+ * @brief Linux 二进制文件闪存实现 / Linux binary-file flash implementation
  *
- * @tparam FLASH_SIZE 闪存大小 Flash size
+ * @tparam FLASH_SIZE 闪存容量（字节） / Flash size in bytes
  */
 template <size_t FLASH_SIZE>
 class LinuxBinaryFileFlash : public Flash
 {
  public:
   /**
-   * @brief LinuxBinaryFileFlash 构造函数
-   *        LinuxBinaryFileFlash constructor
+   * @brief 构造 Linux 文件闪存对象 / Construct Linux file-backed flash
    *
-   * @param file_path 二进制文件路径 Binary file path
-   * @param min_erase_size 最小擦除块大小 Minimum erase block size
-   * @param min_write_size 最小写入块大小 Minimum write block size
-   * @param write_order_check 开启写入顺序检查 Enable write order check
-   * @param write_as_one_check 开启写入一致性检查 Enable write consistency check
+   * @param file_path 二进制文件路径 / Binary file path
+   * @param min_erase_size 最小擦除块大小 / Minimum erase block size
+   * @param min_write_size 最小写入块大小 / Minimum write block size
+   * @param write_order_check 写入顺序检查开关 / Enable write order check
+   * @param write_as_one_check 写入一致性检查开关 / Enable write consistency check
    */
   LinuxBinaryFileFlash(const std::string& file_path,
                        size_t min_erase_size = FLASH_SIZE / 2,
@@ -51,11 +49,11 @@ class LinuxBinaryFileFlash : public Flash
   }
 
   /**
-   * @brief 擦除闪存区域
+   * @brief 擦除闪存区域 / Erase flash area
    *
-   * @param offset 距离闪存区域起始位置的偏移量 Offset from the start of the flash area
-   * @param size 要擦除的大小 Size to erase
-   * @return ErrorCode
+   * @param offset 相对闪存起始地址的偏移 / Offset from flash base
+   * @param size 擦除长度 / Erase size
+   * @return ErrorCode 错误码 / Error code
    */
   ErrorCode Erase(size_t offset, size_t size) override
   {
@@ -73,11 +71,11 @@ class LinuxBinaryFileFlash : public Flash
   }
 
   /**
-   * @brief 写入数据 Write data
+   * @brief 写入闪存数据 / Write flash data
    *
-   * @param offset 距离闪存区域起始位置的偏移量 Offset from the start of the flash area
-   * @param data 要写入的数据 Data to write
-   * @return ErrorCode
+   * @param offset 相对闪存起始地址的偏移 / Offset from flash base
+   * @param data 写入数据 / Data to write
+   * @return ErrorCode 错误码 / Error code
    */
   ErrorCode Write(size_t offset, ConstRawData data) override
   {

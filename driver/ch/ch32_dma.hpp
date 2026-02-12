@@ -5,6 +5,9 @@
 
 typedef void (*ch32_dma_callback_t)(void*);
 
+/**
+ * @brief CH32 DMA 通道编号 / CH32 DMA channel identifier
+ */
 typedef enum
 {
 #if defined(DMA1_Channel1)
@@ -133,5 +136,8 @@ ch32_dma_channel_t ch32_dma_get_id(DMA_Channel_TypeDef* channel);
 
 DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id);
 
+/**
+ * @brief 注册 DMA 回调 / Register DMA callback
+ */
 void ch32_dma_register_callback(ch32_dma_channel_t id, ch32_dma_callback_t callback,
                                 void* arg);

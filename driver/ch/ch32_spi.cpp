@@ -85,7 +85,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
 
   map_[id] = this;
 
-  // === 时钟 ===
+  // Clock configuration.
   if (CH32_SPI_APB_MAP[id] == 1)
   {
     RCC_APB1PeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP[id], ENABLE);
@@ -100,7 +100,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
   }
   RCC_AHBPeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP_DMA[id], ENABLE);
 
-  // === GPIO ===
+  // GPIO configuration.
   {
     GPIO_InitTypeDef gpio = {};
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
@@ -154,7 +154,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     }
   }
 
-  // === SPI 基本配置 ===
+  // SPI base configuration.
   {
     SPI_InitTypeDef init = {};
     init.SPI_Direction = SPI_Direction_2Lines_FullDuplex;
@@ -173,7 +173,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     SPI_Cmd(instance_, ENABLE);
   }
 
-  // === DMA 通道基础配置（MADDR/CNTR 运行时再设） ===
+  // DMA channel base configuration (MADDR/CNTR set at runtime).
   {
     // RX
     {
@@ -223,12 +223,12 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     }
   }
 
-  // === 同步基类配置用于速率查询 ===
+  // Sync base-class configuration for rate query helpers.
   GetConfig() = config;
   GetConfig().prescaler = MapCH32PrescalerToEnum(prescaler_);
 }
 
-// === SetConfig：更新极性/相位，并同步基类配置 ===
+// SetConfig updates polarity/phase and synchronizes base-class configuration.
 ErrorCode CH32SPI::SetConfig(SPI::Configuration config)
 {
   // 1) 把 SPI::Prescaler → CH32 Prescaler 宏
@@ -592,7 +592,7 @@ void CH32SPI::TxDmaIRQHandler()
   DMA_Cmd(dma_tx_channel_, DISABLE);
 }
 
-// === 零拷贝 Transfer ===
+// Zero-copy transfer path.
 ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 {
   if (DmaBusy())
@@ -645,7 +645,7 @@ ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   return ec;
 }
 
-// === 最大总线时钟（Hz） ===
+// Maximum bus clock in Hz.
 uint32_t CH32SPI::GetMaxBusSpeed() const
 {
   RCC_ClocksTypeDef clocks{};
@@ -662,7 +662,7 @@ uint32_t CH32SPI::GetMaxBusSpeed() const
   return 0u;
 }
 
-// === 最大可用分频枚举 ===
+// Maximum available prescaler enumeration.
 SPI::Prescaler CH32SPI::GetMaxPrescaler() const
 {
 #if defined(SPI_BaudRatePrescaler_1024)

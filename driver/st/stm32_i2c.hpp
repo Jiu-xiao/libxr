@@ -45,9 +45,15 @@ stm32_i2c_id_t STM32_I2C_GetID(I2C_TypeDef* hi2c);  // NOLINT
 
 namespace LibXR
 {
+/**
+ * @brief STM32 I2C 驱动实现 / STM32 I2C driver implementation
+ */
 class STM32I2C : public I2C
 {
  public:
+  /**
+   * @brief 构造 I2C 对象 / Construct I2C object
+   */
   STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff, uint32_t dma_enable_min_size = 3);
 
   ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,

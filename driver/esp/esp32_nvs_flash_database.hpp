@@ -11,12 +11,15 @@
 namespace LibXR
 {
 
+/**
+ * @brief ESP32 NVS 数据库存储实现 / ESP32 NVS-backed database implementation
+ */
 class ESP32NvsFlashDatabase : public Database
 {
  public:
   /**
-   * @brief 构造函数，初始化 NVS 和命名空间
-   * @param namespace_name 命名空间名，默认 "storage"
+   * @brief 构造并初始化 NVS / Construct and initialize NVS storage
+   * @param namespace_name 命名空间名称 / Namespace name (default: "storage")
    */
   explicit ESP32NvsFlashDatabase(const char* namespace_name = "storage")
       : namespace_(namespace_name)
@@ -31,7 +34,7 @@ class ESP32NvsFlashDatabase : public Database
   }
 
   /**
-   * @brief 数据库是否有效初始化
+   * @brief 查询初始化状态 / Check initialization state
    */
   bool IsValid() const { return valid_; }
 

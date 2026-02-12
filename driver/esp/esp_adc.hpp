@@ -21,38 +21,31 @@ namespace LibXR
 {
 
 /**
- * @brief ESP32 ADC多通道驱动
- * @brief ESP32 multi-channel ADC driver
+ * @brief ESP32 多通道 ADC 驱动 / ESP32 multi-channel ADC driver
  *
- * 该类封装ESP32的ADC连续采样、DMA搬运和多通道均值计算。
- * 支持线程安全读取，适用于高采样率场景。
- *
- * This class encapsulates ESP32 ADC continuous sampling, DMA buffering,
- * and per-channel averaging. Thread-safe and suitable for high-speed applications.
+ * 封装 ADC 连续采样、DMA 读取和通道均值计算。
+ * Encapsulates continuous ADC sampling, DMA reads, and per-channel averaging.
  */
 class ESP32ADC
 {
  public:
   /**
-   * @brief ADC通道对象，提供通道级数据访问和抽象接口。
-   * @brief ADC channel object, offering per-channel access and interface.
+   * @brief ADC 通道对象 / ADC channel object
    */
   class Channel : public ADC
   {
    public:
     /**
-     * @brief 默认构造函数
-     * Default constructor.
+     * @brief 默认构造函数 / Default constructor
      */
     Channel() : parent_(nullptr), idx_(0), channel_num_(0) {}
 
     /**
-     * @brief 构造指定父ADC和通道编号的通道对象
-     * Construct with given parent ADC and channel numbers.
+     * @brief 构造通道对象 / Construct channel object
      *
-     * @param parent 父ADC对象指针 / Parent ADC object pointer
+     * @param parent 父 ADC 对象指针 / Parent ADC object pointer
      * @param idx 逻辑通道索引 / Logical channel index
-     * @param channel_num 物理ADC通道号 / Physical ADC channel number
+     * @param channel_num 物理 ADC 通道号 / Physical ADC channel number
      */
     Channel(ESP32ADC* parent, uint8_t idx, uint8_t channel_num)
         : parent_(parent), idx_(idx), channel_num_(channel_num)
@@ -60,16 +53,14 @@ class ESP32ADC
     }
 
     /**
-     * @brief 读取当前通道归一化电压值（单位：V）
-     * Read normalized voltage (unit: V) for this channel.
+     * @brief 读取当前通道电压值 / Read channel voltage
      *
-     * @return 电压值（V）/ Voltage value in volts
+     * @return 电压值（V） / Voltage value in volts
      */
     float Read() override { return parent_ ? parent_->ReadChannel(idx_) : 0.f; }
 
     /**
-     * @brief 获取物理ADC通道号
-     * Get the physical ADC channel number.
+     * @brief 获取物理通道号 / Get physical channel number
      *
      * @return 通道号 / Channel number
      */
@@ -82,18 +73,16 @@ class ESP32ADC
   };
 
   /**
-   * @brief 构造函数：初始化ADC与DMA、参数配置
-   * Constructor: Initialize ADC, DMA, and config parameters.
+   * @brief 构造 ADC 驱动对象 / Construct ADC driver
    *
-   * @param unit ADC单元（ADC_UNIT_1或2）/ ADC unit number (ADC_UNIT_1 or 2)
-   * @param channels ADC通道号数组 / Array of ADC channel numbers
+   * @param unit ADC 单元（ADC_UNIT_1 或 ADC_UNIT_2） / ADC unit
+   * @param channels ADC 通道号数组 / ADC channel array
    * @param num_channels 通道数量 / Number of channels
-   * @param freq 采样频率（Hz）/ Sample frequency in Hz (default:
-   * SOC_ADC_SAMPLE_FREQ_THRES_LOW)
-   * @param attenuation 衰减档位 / ADC attenuation (default: ADC_ATTEN_DB_12)
-   * @param bitwidth 精度位宽 / Bit width (default: chip max)
-   * @param reference_voltage 参考电压（V）/ Reference voltage (default: 3.3V)
-   * @param dma_buf_size DMA缓冲区大小 / DMA buffer size in bytes (default: 256)
+   * @param freq 采样频率（Hz） / Sample frequency in Hz
+   * @param attenuation 衰减档位 / ADC attenuation
+   * @param bitwidth 位宽 / ADC bit width
+   * @param reference_voltage 参考电压（V） / Reference voltage in volts
+   * @param dma_buf_size DMA 缓冲区大小（字节） / DMA buffer size in bytes
    */
   ESP32ADC(
       adc_unit_t unit, const adc_channel_t* channels, uint8_t num_channels,
@@ -154,8 +143,7 @@ class ESP32ADC
   }
 
   /**
-   * @brief 析构函数，释放所有资源
-   * Destructor. Free all resources and stop ADC.
+   * @brief 析构函数 / Destructor
    */
   ~ESP32ADC()
   {
@@ -172,25 +160,22 @@ class ESP32ADC
   }
 
   /**
-   * @brief 获取通道对象的引用
-   * Get a reference to channel object by index.
+   * @brief 获取通道对象 / Get channel object
    * @param idx 逻辑通道索引 / Channel logical index
-   * @return Channel对象引用 / Reference to Channel object
+   * @return Channel 对象引用 / Reference to Channel object
    */
   Channel& GetChannel(uint8_t idx) { return m_channels_[idx]; }
 
   /**
-   * @brief 读取指定通道最新均值（已归一化为电压）
-   * Read latest averaged and normalized value (in volts) for the given channel.
+   * @brief 读取指定通道电压值 / Read channel voltage
    * @param idx 逻辑通道索引 / Channel index
-   * @return 电压值（V）/ Voltage value (V)
+   * @return 电压值（V） / Voltage value in volts
    */
   float ReadChannel(uint8_t idx) { return m_latest_values_[idx]; }
 
  private:
   /**
-   * @brief DMA采集完成中断回调。内部调用。
-   * DMA conversion done callback. Called internally by ESP-IDF.
+   * @brief DMA 采样完成回调 / DMA conversion done callback
    */
   static bool IRAM_ATTR OnConvDone(adc_continuous_handle_t handle,
                                    const adc_continuous_evt_data_t* edata,
@@ -202,8 +187,7 @@ class ESP32ADC
   }
 
   /**
-   * @brief 采样缓冲区数据解析与均值计算
-   * Parse DMA buffer and calculate channel averages.
+   * @brief 解析 DMA 缓冲并计算均值 / Parse DMA buffer and compute averages
    *
    * @param buf 缓冲区指针 / Buffer pointer
    * @param size_bytes 数据字节数 / Buffer size in bytes
@@ -246,11 +230,10 @@ class ESP32ADC
   }
 
   /**
-   * @brief 原始ADC值归一化到电压
-   * Normalize raw ADC value to voltage.
+   * @brief 将原始 ADC 值归一化为电压 / Normalize raw ADC to voltage
    *
    * @param raw 原始采样值 / Raw ADC value
-   * @return 电压（V）/ Voltage (V)
+   * @return 电压（V） / Voltage in volts
    */
   float Normalize(float raw) const
   {

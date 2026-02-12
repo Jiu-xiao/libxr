@@ -19,9 +19,16 @@
 namespace LibXR
 {
 
+/**
+ * @brief Linux Wi-Fi 客户端实现 / Linux Wi-Fi client implementation
+ */
 class LinuxWifiClient : public WifiClient
 {
  public:
+  /**
+   * @brief 构造客户端对象 / Construct client object
+   * @param ifname 网卡名，空则自动探测 / Interface name, auto-detect when null
+   */
   LinuxWifiClient(const char* ifname = nullptr)
   {
     if (ifname)
@@ -45,6 +52,9 @@ class LinuxWifiClient : public WifiClient
     socket_path_ = "/var/run/wpa_supplicant/" + std::string(ifname_cstr_);
   }
 
+  /**
+   * @brief 析构函数 / Destructor
+   */
   ~LinuxWifiClient() override
   {
     Disconnect();

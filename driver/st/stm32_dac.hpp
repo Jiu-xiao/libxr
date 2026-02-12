@@ -12,27 +12,22 @@ namespace LibXR
 {
 
 /**
- * @class STM32DAC
- * @brief STM32 平台上的 DAC 实现
- * @brief DAC implementation for STM32 platform
+ * @brief STM32 DAC 驱动实现 / STM32 DAC driver implementation
  */
 class STM32DAC : public DAC
 {
  public:
   /**
-   * @brief 构造函数
-   * @brief Constructor
+   * @brief 构造 DAC 对象 / Construct DAC object
    */
   STM32DAC(DAC_HandleTypeDef* hdac, uint32_t channel, float init_voltage = 0.0f,
            float vref = 3.3f);
 
   /**
-   * @brief 输出电压
-   * @brief Outputs the voltage on STM32 DAC
-   * @param voltage 模拟电压值
-   * @param voltage The analog voltage value
+   * @brief 输出电压 / Output analog voltage
+   * @param voltage 模拟电压值 / Analog voltage value
    *
-   * @return 错误码 ErrorCode
+   * @return ErrorCode 错误码 / Error code
    */
   ErrorCode Write(float voltage) override;
 

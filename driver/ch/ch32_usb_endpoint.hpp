@@ -1,4 +1,3 @@
-// ch32_usb_endpoint.hpp
 #pragma once
 
 #include "ch32_usb.hpp"
@@ -11,6 +10,9 @@ namespace LibXR
 
 #if defined(USBFSD)
 
+/**
+ * @brief CH32 OTG FS 端点实现 / CH32 OTG FS endpoint implementation
+ */
 class CH32EndpointOtgFs : public USB::Endpoint
 {
  public:
@@ -41,6 +43,9 @@ class CH32EndpointOtgFs : public USB::Endpoint
 
 #if defined(RCC_APB1Periph_USB)
 
+/**
+ * @brief CH32 FSDEV 端点实现 / CH32 FSDEV endpoint implementation
+ */
 class CH32EndpointDevFs : public USB::Endpoint
 {
  public:
@@ -81,6 +86,9 @@ class CH32EndpointDevFs : public USB::Endpoint
 
 #if defined(USBHSD)
 
+/**
+ * @brief CH32 OTG HS 端点实现 / CH32 OTG HS endpoint implementation
+ */
 class CH32EndpointOtgHs : public USB::Endpoint
 {
  public:

@@ -39,10 +39,10 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
 
   map_[id_] = this;
 
-  // === 时钟配置 ===
+  // Clock configuration.
   ch32_i2c_enable_clocks(id_);
 
-  // === GPIO 配置（I2C: AF_OD） ===
+  // GPIO configuration (I2C alternate-function open-drain).
   {
     GPIO_InitTypeDef gpio = {};
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
@@ -67,7 +67,7 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
     }
   }
 
-  // === DMA 配置 ===
+  // DMA configuration.
   {
     // RX
     {
@@ -118,11 +118,11 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
     }
   }
 
-  // === I2C 错误中断（用于异常终止异步传输） ===
+  // I2C error interrupt for asynchronous transfer abort handling.
   I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   NVIC_EnableIRQ(CH32_I2C_ER_IRQ_MAP[id_]);
 
-  // === 默认参数 ===
+  // Default runtime parameters.
   cfg_.clock_speed = default_clock_hz;
   (void)SetConfig(cfg_);
 }
@@ -843,7 +843,7 @@ void CH32I2C::ErrorIRQHandler()
   }
 }
 
-// ====== I2C ER 中断入口 ======
+// I2C ER IRQ entry.
 extern "C"
 {
 #if defined(I2C1)

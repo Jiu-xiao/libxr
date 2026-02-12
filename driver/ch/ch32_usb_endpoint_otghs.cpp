@@ -397,16 +397,16 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   const bool HAS_IN = (map_otg_hs_[EP_IDX][IN_IDX] != nullptr);
   const bool HAS_OUT = (map_otg_hs_[EP_IDX][OUT_IDX] != nullptr);
 
-  // 双缓冲策略：EP0 禁止双缓冲；若硬件配置为双缓冲则开启
+  // Double-buffer policy: EP0 does not use double buffering.
   bool enable_double = (GetNumber() != EPNumber::EP0) && hw_double_buffer_;
   if (enable_double && HAS_IN && HAS_OUT)
   {
-    ASSERT(false);  // 双缓冲模式下端点只能单方向
+    ASSERT(false);  // Double-buffer endpoints must be single-direction.
     enable_double = false;
   }
   ep_cfg.double_buffer = enable_double;
 
-  // 限制 max_packet_size 不超过 buffer
+  // Clamp max_packet_size to the endpoint buffer size.
   if (ep_cfg.max_packet_size > GetBuffer().size_)
   {
     ep_cfg.max_packet_size = GetBuffer().size_;
@@ -649,7 +649,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
   const bool IS_ISO = (GetType() == Type::ISOCHRONOUS);
 
-  // UIF_TRANSFER / INT_FG 由 IRQ handler 统一在“本次处理结束后”清除；
+  // UIF_TRANSFER/INT_FG are cleared by the IRQ handler after dispatch.
 
   if (IS_IN)
   {
@@ -666,7 +666,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   }
   else
   {
-    // 非 EP0 的 OUT：收尾置 NAK
+    // For non-EP0 OUT endpoints, restore NAK on completion.
     if (!IS_EP0)
     {
       auto* rx_ctrl = get_rx_control_addr(GetNumber());
@@ -674,7 +674,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     }
   }
 
-  // 若 TOG 不 OK，说明数据同步失败
+  // TOG mismatch indicates data synchronization failure.
   if (IS_OUT)
   {
     const bool TOG_OK =

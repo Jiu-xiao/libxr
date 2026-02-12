@@ -111,6 +111,9 @@ stm32_uart_id_t stm32_uart_get_id(USART_TypeDef* addr);
 
 namespace LibXR
 {
+/**
+ * @brief STM32 UART 驱动实现 / STM32 UART driver implementation
+ */
 class STM32UART : public UART
 {
  public:
@@ -118,6 +121,9 @@ class STM32UART : public UART
 
   static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
+  /**
+   * @brief 构造 UART 对象 / Construct UART object
+   */
   STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx, RawData dma_buff_tx,
             uint32_t tx_queue_size = 5);
 

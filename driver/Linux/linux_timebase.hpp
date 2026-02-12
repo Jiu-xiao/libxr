@@ -7,17 +7,16 @@ extern struct timeval libxr_linux_start_time;
 namespace LibXR
 {
 /**
- * @brief LinuxTimebase 类，用于获取 Linux 系统的时间基准。Provides a timebase for Linux
- * systems.
+ * @brief Linux 时间基准实现 / Linux timebase implementation
  *
  */
 class LinuxTimebase : public Timebase
 {
  public:
   /**
-   * @brief 获取当前时间戳（微秒级）。Returns the current timestamp in microseconds.
+   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
    *
-   * @return MicrosecondTimestamp
+   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
    */
   MicrosecondTimestamp _get_microseconds()
   {
@@ -29,9 +28,9 @@ class LinuxTimebase : public Timebase
   }
 
   /**
-   * @brief 获取当前时间戳（毫秒级）
+   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
    *
-   * @return MillisecondTimestamp
+   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
    */
   MillisecondTimestamp _get_milliseconds()
   {

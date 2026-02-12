@@ -69,9 +69,7 @@ GetTxFifoTotalElements(T& hcan)  // NOLINT
 namespace LibXR
 {
 /**
- * @brief STM32CANFD 类，用于处理 STM32 系统的 CANFD 通道。 Provides handling for STM32
- * CANFD
- *
+ * @brief STM32 FDCAN 驱动实现 / STM32 FDCAN driver implementation
  */
 class STM32CANFD : public FDCAN
 {
@@ -184,40 +182,38 @@ class STM32CANFD : public FDCAN
   }
 
   /**
-   * @brief STM32CANFD 类，用于处理 STM32 系统的 CANFD 通道。 Provides handling for STM32
-   * CANFD
+   * @brief 构造 FDCAN 驱动对象 / Construct FDCAN driver object
    *
-   * @param hcan STM32CANFD对象 CAN object
-   * @param queue_size 发送队列大小 Send queue size
+   * @param hcan HAL FDCAN 句柄 / HAL FDCAN handle
+   * @param queue_size 发送队列大小 / TX queue size
    */
   STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size);
 
   /**
-   * @brief 初始化
+   * @brief 初始化驱动 / Initialize driver
    *
-   * @return ErrorCode
+   * @return ErrorCode 错误码 / Error code
    */
   ErrorCode Init(void);
 
   /**
-   * @brief 设置 CAN/FDCAN 配置。Set CAN/FDCAN configuration.
+   * @brief 设置 CAN/FDCAN 配置 / Set CAN/FDCAN configuration
    *
-   * @param cfg 仲裁相位配置。Nominal (arbitration) configuration.
-   * @return ErrorCode 操作结果。Operation result.
+   * @param cfg 仲裁相位配置 / Nominal (arbitration) configuration
+   * @return ErrorCode 操作结果 / Operation result
    */
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
   /**
-   * @brief 设置 FDCAN 配置（仲裁相位 + 数据相位）。
-   *        Set full FDCAN configuration (nominal + data phase).
+   * @brief 设置 FDCAN 全配置 / Set full FDCAN configuration
    *
-   * @param cfg FDCAN 配置参数。FDCAN configuration.
-   * @return ErrorCode 操作结果。Operation result.
+   * @param cfg FDCAN 配置参数 / FDCAN configuration
+   * @return ErrorCode 操作结果 / Operation result
    */
   ErrorCode SetConfig(const FDCAN::Configuration& cfg) override;
 
   /**
-   * @brief 获取 FDCAN 外设时钟（Hz）。Get FDCAN kernel clock (Hz).
+   * @brief 获取 FDCAN 外设时钟 / Get FDCAN kernel clock
    */
   uint32_t GetClockFreq() const override;
 
@@ -226,29 +222,28 @@ class STM32CANFD : public FDCAN
   ErrorCode AddMessage(const FDPack& pack) override;
 
   /**
-   * @brief 查询当前错误状态（快照）。
-   *        Query current FDCAN error state (snapshot).
+   * @brief 查询当前错误状态 / Query current FDCAN error state
    */
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   /**
-   * @brief 处理接收中断
+   * @brief 处理接收中断 / Handle RX interrupt
    *
-   * @param fifo 接收缓冲区号 Receive buffer number
+   * @param fifo 接收 FIFO 编号 / RX FIFO index
    */
   void ProcessRxInterrupt(uint32_t fifo);
 
   /**
-   * @brief 处理错误状态中断
+   * @brief 处理错误状态中断 / Handle error-status interrupt
    *
-   * @param error_status_its 错误状态标志 Error status flags
+   * @param error_status_its 错误状态标志 / Error-status flags
    */
   void ProcessErrorStatusInterrupt(uint32_t error_status_its);
 
   /**
-   * @brief 获取硬件发送队列空闲大小
+   * @brief 获取硬件发送队列空闲数 / Get free level of hardware TX queue
    *
-   * @return size_t 硬件发送队列空闲大小
+   * @return size_t 空闲元素数量 / Number of free elements
    */
   size_t HardwareTxQueueEmptySize()
   {

@@ -133,7 +133,8 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
                                       read_data.size_, 20) == HAL_OK
                    ? ErrorCode::OK
                    : ErrorCode::BUSY;
-    // TODO: BLOCK快速路径
+    // BLOCK 模式下沿用统一状态更新路径。
+    // Reuse the same status update path for BLOCK mode.
     op.UpdateStatus(in_isr, ans);
     if (op.type == ReadOperation::OperationType::BLOCK)
     {

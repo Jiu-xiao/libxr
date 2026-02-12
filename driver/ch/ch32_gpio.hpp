@@ -42,9 +42,15 @@ typedef enum
 
 uint32_t ch32_get_gpio_periph(GPIO_TypeDef* port);
 
+/**
+ * @brief CH32 GPIO 驱动实现 / CH32 GPIO driver implementation
+ */
 class CH32GPIO final : public GPIO
 {
  public:
+  /**
+   * @brief 构造 GPIO 对象 / Construct GPIO object
+   */
   CH32GPIO(GPIO_TypeDef* port, uint16_t pin,
            GPIO::Direction direction = GPIO::Direction::OUTPUT_PUSH_PULL,
            GPIO::Pull pull = GPIO::Pull::NONE, IRQn_Type irq = NonMaskableInt_IRQn);
@@ -117,6 +123,7 @@ class CH32GPIO final : public GPIO
 
   static void CheckInterrupt(uint32_t line);
 
+  /// EXTI 线路映射表 / EXTI line map
   static inline CH32GPIO* map_[16] = {nullptr};
 
  private:

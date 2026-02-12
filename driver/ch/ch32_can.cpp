@@ -43,7 +43,7 @@ static inline uint8_t ch32_can_mode_macro(const CAN::Mode& m)
 
 static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
 {
-  // ===== TX =====
+  // TX interrupt line.
   switch (id)
   {
 #if defined(CAN1)
@@ -61,7 +61,7 @@ static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
       break;
   }
 
-  // ===== RX (FIFO0 -> RX0 vector, FIFO1 -> RX1 vector) =====
+  // RX interrupt line: FIFO0 -> RX0 vector, FIFO1 -> RX1 vector.
   if (fifo == 0u)
   {
     switch (id)
@@ -102,7 +102,7 @@ static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
     }
   }
 
-  // ===== SCE =====
+  // SCE interrupt line.
   switch (id)
   {
 #if defined(CAN1)
@@ -130,7 +130,7 @@ CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
 #if defined(CAN1) && !defined(CAN2)
     const bool USB_ALREADY_INITED =
         LibXR::CH32UsbCanShared::usb_inited.load(std::memory_order_acquire);
-    // CAN1 Should only be initialized before USB is initialized.
+    // On shared USB/CAN interrupt configurations, CAN1 must initialize before USB.
     ASSERT(USB_ALREADY_INITED == false);
 #endif
   }
@@ -156,30 +156,18 @@ CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
 
   map[id_] = this;
 
-  // Enable peripheral clock
+  // Enable peripheral clock.
   RCC_APB1PeriphClockCmd(CH32_CAN_RCC_PERIPH_MAP[id_], ENABLE);
 
-  // Keep CAN in initialization mode until user calls SetConfig().
+  // Keep CAN in initialization mode until SetConfig() is called.
   (void)CAN_OperatingModeRequest(instance_, CAN_OperatingMode_Initialization);
 
 #if defined(CAN2)
-  // If dual CAN exists and filters are shared, set a typical split point.
+  // On dual-CAN variants, configure the default shared filter split point.
   CAN_SlaveStartBank(CH32_CAN_DEFAULT_SLAVE_START_BANK);
 #endif
 
   (void)Init();
-}
-
-CH32CAN::~CH32CAN()
-{
-  if constexpr (LibXR::CH32UsbCanShared::usb_can_share_enabled())
-  {
-#if defined(CAN1) && !defined(CAN2)
-    LibXR::CH32UsbCanShared::register_can1_rx0(nullptr);
-    LibXR::CH32UsbCanShared::register_can1_tx(nullptr);
-    LibXR::CH32UsbCanShared::can1_inited.store(false, std::memory_order_release);
-#endif
-  }
 }
 
 ErrorCode CH32CAN::Init()
@@ -189,7 +177,7 @@ ErrorCode CH32CAN::Init()
     return ErrorCode::ARG_ERR;
   }
 
-  // ===== Accept-all filter (ID Mask, all zeros) =====
+  // Default accept-all filter (ID-mask mode, all zeros).
   CAN_FilterInitTypeDef f = {};
   f.CAN_FilterIdHigh = 0u;
   f.CAN_FilterIdLow = 0u;
@@ -205,7 +193,7 @@ ErrorCode CH32CAN::Init()
 
   EnableIRQs();
 
-  // Enable NVIC for this CAN instance (handles WCH alias IRQ names correctly)
+  // Enable NVIC for this CAN instance.
   ch32_can_enable_nvic(id_, fifo_);
 
   if constexpr (LibXR::CH32UsbCanShared::usb_can_share_enabled())
@@ -302,8 +290,7 @@ void CH32CAN::EnableIRQs()
 
   if (it != 0u)
   {
-    // WCH StdPeriph examples: clear pending bits before enabling interrupts
-    // to avoid spurious entry and ensure proper ACK in some variants.
+    // Clear pending interrupt flags before enabling interrupt sources.
 #ifdef CAN_IT_TME
     if ((it & CAN_IT_TME) != 0u)
     {
@@ -360,7 +347,7 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     return ErrorCode::ARG_ERR;
   }
 
-  // RAII: ensure IRQs are always restored even if we early-return
+  // Ensure IRQ state restoration on all return paths.
   struct IrqGuard
   {
     CH32CAN* self;
@@ -371,7 +358,7 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
   ErrorCode ec = ErrorCode::OK;
   bool entered_init = false;
 
-  // Build an "effective" timing: support "0 means keep last applied".
+  // Build effective timing values; zero fields reuse cached configuration.
   CAN::Configuration cfg = cfg_in;
 
   if (!fill_keep_zero_from_cache(cfg.bit_timing, cfg_cache_.bit_timing))
@@ -379,17 +366,17 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     return ErrorCode::ARG_ERR;
   }
 
-  // ===== Validate timing (bxCAN constraints) =====
+  // Validate bxCAN timing constraints.
   const CAN::BitTiming& bt = cfg.bit_timing;
 
-  // brp: 1..1024
+  // BRP: 1..1024.
   if (bt.brp < 1u || bt.brp > 1024u)
   {
     ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
 
-  // BS1 = prop + phase1: 1..16
+  // BS1 = PROP_SEG + PHASE_SEG1: 1..16.
   const uint32_t BS1 = bt.prop_seg + bt.phase_seg1;
   if (BS1 < 1u || BS1 > 16u)
   {
@@ -397,21 +384,21 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     return ErrorCode::ARG_ERR;
   }
 
-  // BS2: 1..8
+  // BS2: 1..8.
   if (bt.phase_seg2 < 1u || bt.phase_seg2 > 8u)
   {
     ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
 
-  // SJW: 1..4 and SJW <= BS2
+  // SJW: 1..4 and SJW <= BS2.
   if (bt.sjw < 1u || bt.sjw > 4u || bt.sjw > bt.phase_seg2)
   {
     ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
 
-  // ===== Enter initialization mode =====
+  // Enter initialization mode.
   if (CAN_OperatingModeRequest(instance_, CAN_OperatingMode_Initialization) ==
       CAN_ModeStatus_Failed)
   {
@@ -419,7 +406,7 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
   }
   entered_init = true;
 
-  // ===== Apply init struct =====
+  // Apply initialization structure.
   CAN_InitTypeDef init;
   std::memset(&init, 0, sizeof(init));
   CAN_StructInit(&init);
@@ -431,10 +418,10 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
   init.CAN_BS1 = static_cast<uint8_t>(BS1 - 1u);
   init.CAN_BS2 = static_cast<uint8_t>(bt.phase_seg2 - 1u);
 
-  // Mode knobs (best-effort mapping)
+  // Mode mapping.
   init.CAN_NART = cfg.mode.one_shot ? ENABLE : DISABLE;
 
-  // Reasonable defaults
+  // Default controller options.
   init.CAN_TTCM = DISABLE;
   init.CAN_ABOM = ENABLE;   // auto bus-off management
   init.CAN_AWUM = DISABLE;  // auto wake-up
@@ -454,13 +441,13 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     }
     else
     {
-      // Update cache only when success
+      // Update cache only on successful configuration.
       cfg_cache_ = cfg;
       ec = ErrorCode::OK;
     }
   }
 
-  // Best-effort: if we entered init but failed later, try to return to normal
+  // If configuration fails after entering init mode, request normal mode.
   if (ec != ErrorCode::OK && entered_init)
   {
     (void)CAN_OperatingModeRequest(instance_, CAN_OperatingMode_Normal);
@@ -587,9 +574,7 @@ void CH32CAN::ProcessRxInterrupt()
     return;
   }
 
-  // NOTE:
-  // WCH examples clear FMP pending in RX ISR.
-  // We keep the "drain FIFO" behavior and ACK pending at the end.
+  // Drain RX FIFO first, then acknowledge RX pending flags.
   while (CAN_MessagePending(instance_, fifo_) != 0u)
   {
     CAN_Receive(instance_, fifo_, &rx_msg_);
@@ -617,7 +602,7 @@ void CH32CAN::ProcessRxInterrupt()
     OnMessage(p, true);
   }
 
-  // ACK RX pending (WCH StdPeriph style)
+  // Acknowledge RX pending flags.
 #ifdef CAN_IT_FMP0
   if (fifo_ == 0u)
   {
@@ -645,9 +630,7 @@ void CH32CAN::ProcessErrorInterrupt()
     return;
   }
 
-  // NOTE (Fix #2):
-  // WCH CAN_ClearITPendingBit(CAN_IT_ERR/CAN_IT_LEC) clears ERRSR.
-  // Therefore snapshot flags + LEC BEFORE clearing any pending bits.
+  // Snapshot error flags and LEC before clearing pending bits.
   const bool BOF = (CAN_GetFlagStatus(instance_, CAN_FLAG_BOF) != RESET);
   const bool EPV = (CAN_GetFlagStatus(instance_, CAN_FLAG_EPV) != RESET);
   const bool EWG = (CAN_GetFlagStatus(instance_, CAN_FLAG_EWG) != RESET);

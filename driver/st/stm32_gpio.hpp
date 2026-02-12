@@ -7,9 +7,15 @@
 
 namespace LibXR
 {
+/**
+ * @brief STM32 GPIO 驱动实现 / STM32 GPIO driver implementation
+ */
 class STM32GPIO final : public GPIO
 {
  public:
+  /**
+   * @brief 构造 GPIO 对象 / Construct GPIO object
+   */
   STM32GPIO(GPIO_TypeDef* port, uint16_t pin, IRQn_Type irq = NonMaskableInt_IRQn);
 
   inline bool Read() { return (port_->IDR & pin_) != 0u; }

@@ -15,9 +15,15 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd);
 namespace LibXR
 {
 
+/**
+ * @brief STM32 USB 设备核心实现 / STM32 USB device core implementation
+ */
 class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::DeviceCore
 {
  public:
+  /**
+   * @brief 构造 USB 设备核心对象 / Construct USB device core object
+   */
   STM32USBDevice(
       PCD_HandleTypeDef* hpcd, stm32_usb_dev_id_t id, size_t max_ep_num,
       USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
@@ -56,15 +62,24 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
 #define USB_OTG_FS_TOTAL_FIFO_SIZE 1280
 #endif
 #endif
+/**
+ * @brief STM32 OTG FS 设备实现 / STM32 OTG FS device implementation
+ */
 class STM32USBDeviceOtgFS : public STM32USBDevice
 {
  public:
+  /**
+   * @brief OTG FS IN 端点配置 / OTG FS IN endpoint configuration
+   */
   struct EPInConfig
   {
     LibXR::RawData buffer;
     size_t fifo_size;
   };
 
+  /**
+   * @brief 构造 OTG FS 设备对象 / Construct OTG FS device object
+   */
   STM32USBDeviceOtgFS(
       PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
       const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
@@ -85,15 +100,24 @@ class STM32USBDeviceOtgFS : public STM32USBDevice
 #if !defined(USB_OTG_HS_TOTAL_FIFO_SIZE)
 #define USB_OTG_HS_TOTAL_FIFO_SIZE 4096
 #endif
+/**
+ * @brief STM32 OTG HS 设备实现 / STM32 OTG HS device implementation
+ */
 class STM32USBDeviceOtgHS : public STM32USBDevice
 {
  public:
+  /**
+   * @brief OTG HS IN 端点配置 / OTG HS IN endpoint configuration
+   */
   struct EPInConfig
   {
     LibXR::RawData buffer;
     size_t fifo_size;
   };
 
+  /**
+   * @brief 构造 OTG HS 设备对象 / Construct OTG HS device object
+   */
   STM32USBDeviceOtgHS(
       PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
       const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
@@ -202,6 +226,9 @@ class STM32USBDeviceOtgHS : public STM32USBDevice
 class STM32USBDeviceDevFs : public STM32USBDevice
 {
  public:
+  /**
+   * @brief FSDEV 端点配置 / FSDEV endpoint configuration
+   */
   struct EPConfig
   {
     LibXR::RawData buffer1, buffer2;
@@ -229,6 +256,9 @@ class STM32USBDeviceDevFs : public STM32USBDevice
     EPConfig() = delete;
   };
 
+  /**
+   * @brief 构造 FSDEV 设备对象 / Construct FSDEV device object
+   */
   STM32USBDeviceDevFs(
       PCD_HandleTypeDef* hpcd, const std::initializer_list<EPConfig> EP_CFGS,
       USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,

@@ -7,6 +7,9 @@
 
 namespace LibXR::CH32UsbCanShared
 {
+/**
+ * @brief USB/CAN 共享中断与资源状态 / Shared USB/CAN IRQ and resource state
+ */
 using IrqFn = void (*)();
 
 inline std::atomic_bool usb_inited{false};
@@ -15,8 +18,9 @@ inline std::atomic_bool can1_inited{false};
 static constexpr uint16_t USBD_PMA_BYTES_SOLO = 512;
 static constexpr uint16_t USBD_PMA_BYTES_WITHCAN = 384;
 
-// Build-time capabilities / mode detection.
-#if defined(RCC_APB1Periph_USB) 
+// USB/CAN 共享中断拓扑的编译期能力标志。
+// Build-time capability flags for USB/CAN shared interrupt topology.
+#if defined(RCC_APB1Periph_USB)
 inline constexpr bool K_HAS_USB_DEV_FS = true;
 #else
 inline constexpr bool K_HAS_USB_DEV_FS = false;
@@ -93,39 +97,3 @@ inline bool can1_active()
          (can1_tx_cb.load(std::memory_order_acquire) != nullptr);
 }
 }  // namespace LibXR::CH32UsbCanShared
-
-#ifdef CH32_USBCAN_SHARED_IMPLEMENTATION
-#if defined(RCC_APB1Periph_USB)  && defined(CAN1) && !defined(CAN2)
-
-// NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" __attribute__((interrupt)) void USB_LP_CAN1_RX0_IRQHandler(void)
-{
-  using namespace LibXR::CH32UsbCanShared;
-
-  if (auto fn = usb_irq_cb.load(std::memory_order_acquire))
-  {
-    fn();
-  }
-  if (auto fn = can1_rx0_cb.load(std::memory_order_acquire))
-  {
-    fn();
-  }
-}
-
-// NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" __attribute__((interrupt)) void USB_HP_CAN1_TX_IRQHandler(void)
-{
-  using namespace LibXR::CH32UsbCanShared;
-
-  if (auto fn = usb_irq_cb.load(std::memory_order_acquire))
-  {
-    fn();
-  }
-  if (auto fn = can1_tx_cb.load(std::memory_order_acquire))
-  {
-    fn();
-  }
-}
-
-#endif
-#endif  // CH32_USBCAN_SHARED_IMPLEMENTATION

@@ -3,6 +3,9 @@
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
+/**
+ * @brief CH32 UART 实例编号 / CH32 UART instance identifier
+ */
 typedef enum
 {
 #if defined(USART1)

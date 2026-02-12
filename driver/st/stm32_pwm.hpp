@@ -9,9 +9,15 @@
 namespace LibXR
 {
 
+/**
+ * @brief STM32 PWM 驱动实现 / STM32 PWM driver implementation
+ */
 class STM32PWM : public PWM
 {
  public:
+  /**
+   * @brief 构造 PWM 对象 / Construct PWM object
+   */
   STM32PWM(TIM_HandleTypeDef* htim, uint32_t channel, bool complementary = false);
 
   ErrorCode SetDutyCycle(float value) override;

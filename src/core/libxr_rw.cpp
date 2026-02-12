@@ -142,9 +142,8 @@ void ReadPort::ProcessPendingReads(bool in_isr)
         UNUSED(ans);
         ASSERT(ans == ErrorCode::OK);
       }
+
       Finish(in_isr, ErrorCode::OK, info_);
-      // Keep dequeue side-effects consistent with direct read path.
-      // CDCUart uses this hook to lift RX backpressure and rearm OUT.
       OnRxDequeue(in_isr);
     }
   }

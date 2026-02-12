@@ -5,7 +5,7 @@
 
 #include "ch32_usb.hpp"
 
-// Only for classic FSDEV/PMA path
+// Register helpers for the classic FSDEV/PMA peripheral path.
 #if defined(RCC_APB1Periph_USB)
 
 namespace LibXR::CH32::FSDEV
@@ -38,7 +38,7 @@ static inline volatile uint16_t* ep_reg(uint8_t ep)
   return reinterpret_cast<volatile uint16_t*>(REG_BASE + static_cast<uintptr_t>(ep) * 4U);
 }
 
-// Compatibility bridge (vendor macro -> USB_* macro)
+// Compatibility aliases from vendor macro names to USB_* names.
 #if !defined(USB_ISTR_CTR) && defined(ISTR_CTR)
 #define USB_ISTR_CTR ISTR_CTR
 #endif
@@ -167,7 +167,7 @@ static inline volatile uint16_t* ep_reg(uint8_t ep)
 
 static inline void clear_istr(uint16_t mask) { *istr() = static_cast<uint16_t>(~mask); }
 
-// Write EA field correctly (clear old EA bits first)
+// Update endpoint address field after clearing previous EA bits.
 static inline void set_ep_address(uint8_t ep, uint8_t addr)
 {
   volatile uint16_t* reg = ep_reg(ep);

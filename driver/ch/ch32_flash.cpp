@@ -6,16 +6,16 @@ using namespace LibXR;
 // 访问时钟切半
 static void flash_set_access_clock_half_sysclk(void)
 {
-  FLASH_Unlock();              // 解锁 FPEC/CTL
-  FLASH->CTLR &= ~(1u << 25);  // SCKMOD=0 => SYSCLK/2
-  FLASH_Lock();                // 可选：改完再上锁
+  FLASH_Unlock();              // Unlock FPEC/CTL.
+  FLASH->CTLR &= ~(1u << 25);  // SCKMOD=0 => SYSCLK/2.
+  FLASH_Lock();                // Optional relock.
 }
 
 // 访问时钟还原
 static void flash_set_access_clock_sysclk(void)
 {
   FLASH_Unlock();
-  FLASH->CTLR |= (1u << 25);  // SCKMOD=1 => 访问时钟=SYSCLK
+  FLASH->CTLR |= (1u << 25);  // SCKMOD=1 => access clock = SYSCLK.
   FLASH_Lock();
 }
 
@@ -24,16 +24,16 @@ static inline void flash_exit_enhanced_read_if_enabled()
   if (FLASH->STATR & (1u << 7))
   {  // EHMODS=1?
     FLASH_Unlock();
-    FLASH->CTLR &= ~(1u << 24);  // EHMOD=0
-    FLASH->CTLR |= (1u << 22);   // RSENACT=1（WO，硬件自动清）
+    FLASH->CTLR &= ~(1u << 24);  // EHMOD=0.
+    FLASH->CTLR |= (1u << 22);   // RSENACT=1 (write-only, auto-cleared by hardware).
     FLASH_Lock();
   }
 }
 
 static inline void flash_fast_unlock()
 {
-  FLASH_Unlock();  // 常规解锁：写 KEYR(两把钥匙) 由库函数完成
-  // 快速模式解锁：向 MODEKEYR 依次写入 KEY1/KEY2
+  FLASH_Unlock();  // Regular unlock sequence (KEYR).
+  // Fast-mode unlock sequence (MODEKEYR KEY1/KEY2).
   FLASH->MODEKEYR = 0x45670123u;
   FLASH->MODEKEYR = 0xCDEF89ABu;
 }
@@ -41,7 +41,7 @@ static inline void flash_fast_unlock()
 static inline void flash_fast_lock()
 {
   FLASH_Unlock();
-  FLASH->CTLR |= (1u << 15);  // FLOCK=1 复锁快速模式
+  FLASH->CTLR |= (1u << 15);  // FLOCK=1.
   FLASH_Lock();
 }
 

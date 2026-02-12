@@ -7,9 +7,20 @@
 namespace LibXR
 {
 
+/**
+ * @brief ESP32 PWM 驱动实现 / ESP32 PWM driver implementation
+ */
 class ESP32PWM : public PWM
 {
  public:
+  /**
+   * @brief 构造 PWM 通道对象 / Construct PWM channel object
+   *
+   * @param gpio_num GPIO 编号 / GPIO number
+   * @param channel LEDC 通道 / LEDC channel
+   * @param timer LEDC 定时器 / LEDC timer
+   * @param resolution 占空比分辨率 / Duty resolution
+   */
   ESP32PWM(int gpio_num, ledc_channel_t channel, ledc_timer_t timer = LEDC_TIMER_0,
            ledc_timer_bit_t resolution = static_cast<ledc_timer_bit_t>(
                (static_cast<uint8_t>(LEDC_TIMER_BIT_MAX) - 1)))

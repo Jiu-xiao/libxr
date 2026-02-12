@@ -490,7 +490,8 @@ uint32_t STM32SPI::GetMaxBusSpeed() const
   }
 
 #if defined(HAL_RCC_MODULE_ENABLED)
-// === 1) 优先读取“独立的 SPI 内核时钟” (kernel clock) ===
+// 1) 优先读取独立 SPI 内核时钟。
+// 1) Prefer dedicated SPI kernel clock when available.
 // H7: 分组宏 SPI123 / SPI45 / SPI6
 #if defined(RCC_PERIPHCLK_SPI123) || defined(RCC_PERIPHCLK_SPI45) || \
     defined(RCC_PERIPHCLK_SPI6)
@@ -569,7 +570,8 @@ uint32_t STM32SPI::GetMaxBusSpeed() const
 #endif
 #endif  // HAL_RCC_MODULE_ENABLED
 
-  // === 2) 回退：使用所在 APB 的 PCLK 作为 SPI 内核时钟 ===
+  // 2) 回退到所在 APB 的 PCLK。
+  // 2) Fallback to APB PCLK if no dedicated kernel clock is available.
 #if defined(STM32H7) && defined(SPI6)
   if (inst == SPI6)
   {

@@ -13,73 +13,66 @@
 namespace LibXR
 {
 /**
- * @brief CH32CAN driver (bxCAN-like) for LibXR::CAN.
+ * @brief CH32 CAN 驱动实现 / CH32 CAN driver implementation
  *
- * Design goals (aligned with your STM32CAN driver):
- * - Lock-free TX queue (LockFreePool) + mailbox service in IRQ / thread contexts.
- * - RX dispatch in ISR via LibXR::CAN::OnMessage().
- * - Error to "virtual error frame" mapping using LibXR::CAN::ErrorID.
+ * 设计目标与 STM32 CAN 驱动行为保持一致。
+ * Designed to keep behavior aligned with the STM32 CAN driver.
  *
- * Notes:
- * - This driver is written against WCH StdPeriph CAN API (CAN_Init / CAN_Transmit /
- *   CAN_Receive / CAN_ITConfig...).
- * - Bit timing fields in Configuration are interpreted as:
- *     BRP, (PROP_SEG + PHASE_SEG1) -> BS1, PHASE_SEG2 -> BS2, SJW.
- * - triple_sampling is ignored (WCH StdPeriph init struct has no such field).
+ * @note 基于 WCH StdPeriph CAN 接口实现。 / Implemented on top of WCH StdPeriph CAN APIs.
  */
 class CH32CAN : public CAN
 {
  public:
   /**
-   * @brief Construct CH32CAN.
+   * @brief 构造 CAN 驱动对象 / Construct CAN driver object
    *
-   * @param id          CAN instance ID.
-   * @param pool_size   TX pool size (number of ClassicPack entries).
+   * @param id CAN 实例编号 / CAN instance ID
+   * @param pool_size 发送池大小 / TX pool size (ClassicPack entries)
    */
   explicit CH32CAN(ch32_can_id_t id, uint32_t pool_size);
-  ~CH32CAN() override;
+  ~CH32CAN() override = default;
 
   /**
-   * @brief Initialize filter + IRQ routing. Does NOT force a bitrate; call SetConfig().
+   * @brief 初始化过滤器和中断路由 / Initialize filters and IRQ routing
    */
   ErrorCode Init();
 
   /**
-   * @brief Set CAN configuration (bit timing + mode). Also (re-)enables IRQs.
+   * @brief 设置 CAN 配置 / Set CAN configuration
    */
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
   /**
-   * @brief CAN clock frequency (Hz). CH32 CAN is on APB1.
+   * @brief 获取 CAN 时钟频率 / Get CAN clock frequency
    */
   uint32_t GetClockFreq() const override;
 
   /**
-   * @brief Enqueue a ClassicPack for transmission.
+   * @brief 发送消息入队 / Enqueue TX message
    */
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
   /**
-   * @brief Read bus error state and counters.
+   * @brief 获取总线错误状态 / Get bus error state
    */
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   /**
-   * @brief Process RX interrupt (call from CANx_RX0 / CANx_RX1 handlers).
+   * @brief 处理接收中断 / Handle RX interrupt
    */
   void ProcessRxInterrupt();
 
   /**
-   * @brief Process TX interrupt (call from CANx_TX handler).
+   * @brief 处理发送中断 / Handle TX interrupt
    */
   void ProcessTxInterrupt();
 
   /**
-   * @brief Process SCE/error interrupt (call from CANx_SCE handler).
+   * @brief 处理错误中断 / Handle error interrupt
    */
   void ProcessErrorInterrupt();
 
-  // Map for ISR dispatch
+  /// 中断分发表 / IRQ dispatch map
   static CH32CAN* map[CH32_CAN_NUMBER];  // NOLINT
 
  private:
@@ -102,10 +95,10 @@ class CH32CAN : public CAN
   std::atomic<uint32_t> tx_lock_{0};
   std::atomic<uint32_t> tx_pend_{0};
 
-  // Cache last applied configuration so "0 means keep" can be supported safely
+  /// 缓存配置（用于保留原值语义） / Cached configuration for keep-previous semantics
   CAN::Configuration cfg_cache_{};
 
-  // Buffers used in IRQ context
+  /// 中断上下文收发缓冲 / RX/TX buffers in IRQ context
   CanRxMsg rx_msg_{};
   CanTxMsg tx_msg_{};
 };

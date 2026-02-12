@@ -9,6 +9,9 @@ extern uint32_t SystemCoreClock;
 namespace LibXR
 {
 
+/**
+ * @brief CH32 时间基准实现 / CH32 timebase implementation
+ */
 class CH32Timebase : public Timebase
 {
  public:

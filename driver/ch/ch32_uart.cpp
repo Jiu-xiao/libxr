@@ -8,10 +8,10 @@
 
 using namespace LibXR;
 
-// === 静态对象指针表 ===
+// Static instance map.
 CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
 
-// === 构造函数：串口+DMA+GPIO初始化 ===
+// Constructor: USART, DMA, and GPIO initialization.
 CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
                    GPIO_TypeDef* tx_gpio_port, uint16_t tx_gpio_pin,
                    GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
@@ -182,7 +182,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id]);
 }
 
-// === 串口运行时配置变更 ===
+// Runtime USART configuration.
 ErrorCode CH32UART::SetConfig(UART::Configuration config)
 {
   USART_InitTypeDef usart_cfg = {};
@@ -236,7 +236,7 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
-// === 写操作回调（DMA搬运） ===
+// Write callback (DMA-based transfer).
 ErrorCode CH32UART::WriteFun(WritePort& port, bool)
 {
   CH32UART* uart = CONTAINER_OF(&port, CH32UART, _write_port);
@@ -306,7 +306,7 @@ ErrorCode CH32UART::WriteFun(WritePort& port, bool)
   return ErrorCode::PENDING;
 }
 
-// === 读操作回调（由中断驱动） ===
+// Read callback (interrupt-driven).
 ErrorCode CH32UART::ReadFun(ReadPort&, bool)
 {
   // 接收由 IDLE 中断驱动，读取在 ISR 中完成
@@ -338,7 +338,7 @@ void ch32_uart_rx_isr_handler(LibXR::CH32UART* uart)
   }
 }
 
-// === USART IDLE中断服务 ===
+// USART IDLE interrupt handler.
 extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 {
   auto uart = CH32UART::map_[id];
@@ -358,7 +358,7 @@ extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
   ch32_uart_rx_isr_handler(uart);
 }
 
-// === DMA TX完成中断服务 ===
+// DMA TX completion interrupt handler.
 extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
 {
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
@@ -414,7 +414,7 @@ extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
   uart->dma_buff_tx_.EnablePending();
 }
 
-// === DMA 通道中断回调 ===
+// DMA channel IRQ callbacks.
 void CH32UART::TxDmaIRQHandler()
 {
   if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET)
@@ -451,7 +451,7 @@ void CH32UART::RxDmaIRQHandler()
   }
 }
 
-// === 各类串口中断入口适配 ===
+// USART IRQ entry adapters.
 #if defined(USART1)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART1_IRQHandler(void) __attribute__((interrupt));
