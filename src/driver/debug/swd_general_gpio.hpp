@@ -232,8 +232,8 @@ class SwdGeneralGPIO final : public Swd
 
     for (uint32_t i = 0; i < cycles; ++i)
     {
-      const bool bit = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
-      swdio_.Write(bit);
+      const bool BIT = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
+      swdio_.Write(BIT);
 
       // one clock cycle: low->high (with DelayHalf inside GenOneClk)
       // NOTE: your GenOneClk ends at high; to keep "end low" legacy for SeqWrite,
@@ -257,8 +257,8 @@ class SwdGeneralGPIO final : public Swd
       return ErrorCode::ARG_ERR;
     }
 
-    const uint32_t bytes = (cycles + 7u) / 8u;
-    Memory::FastSet(out_lsb_first, 0, bytes);
+    const uint32_t BYTES = (cycles + 7u) / 8u;
+    Memory::FastSet(out_lsb_first, 0, BYTES);
 
     (void)SetSwdioSampleMode();
 
@@ -268,7 +268,7 @@ class SwdGeneralGPIO final : public Swd
     for (uint32_t i = 0; i < cycles; ++i)
     {
       // Use the updated read phase (CMSIS-style)
-      bool bit;
+      bool bit = false;
       if (half_period_loops_ == 0u)
       {
         swclk_.Write(false);
@@ -357,34 +357,33 @@ class SwdGeneralGPIO final : public Swd
 
   ErrorCode SetSwdioDriveMode()
   {
-    if (swdio_mode_ == SwdioMode::DRIVE_PP)
+    if (swdio_mode_ == SwdioMode::UNKNOWN)
     {
-      return ErrorCode::OK;
+      const ErrorCode EC = swdio_.SetConfig(
+          {SwdioGpioType::Direction::OUTPUT_OPEN_DRAIN, SwdioGpioType::Pull::UP});
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
     }
 
-    const ErrorCode EC = swdio_.SetConfig(
-        {SwdioGpioType::Direction::OUTPUT_PUSH_PULL, SwdioGpioType::Pull::NONE});
-    if (EC == ErrorCode::OK)
-    {
-      swdio_mode_ = SwdioMode::DRIVE_PP;
-    }
-    return EC;
+    swdio_mode_ = SwdioMode::DRIVE_PP;
+    return ErrorCode::OK;
   }
 
   ErrorCode SetSwdioSampleMode()
   {
-    if (swdio_mode_ == SwdioMode::SAMPLE_IN)
+    const ErrorCode EC = SetSwdioDriveMode();
+    if (EC != ErrorCode::OK)
     {
-      return ErrorCode::OK;
+      return EC;
     }
 
-    const ErrorCode EC =
-        swdio_.SetConfig({SwdioGpioType::Direction::INPUT, SwdioGpioType::Pull::UP});
-    if (EC == ErrorCode::OK)
-    {
-      swdio_mode_ = SwdioMode::SAMPLE_IN;
-    }
-    return EC;
+    // 开漏输出高电平表示释放总线，目标可驱动 ACK/数据 / Open-drain high releases line
+    // so target can drive ACK/data.
+    swdio_.Write(true);
+    swdio_mode_ = SwdioMode::SAMPLE_IN;
+    return ErrorCode::OK;
   }
 
   inline void DelayHalf() { BusyLoop(half_period_loops_); }
@@ -435,18 +434,18 @@ class SwdGeneralGPIO final : public Swd
   {
     swclk_.Write(false);
     DelayHalf();
-    const bool b = swdio_.Read();
+    const bool BIT = swdio_.Read();
     swclk_.Write(true);
     DelayHalf();
-    return b;
+    return BIT;
   }
 
   inline bool ReadBitAndClockWithoutDelay()
   {
     swclk_.Write(false);
-    const bool b = swdio_.Read();
+    const bool BIT = swdio_.Read();
     swclk_.Write(true);
-    return b;
+    return BIT;
   }
 
   inline uint8_t ReadByteLSB()
