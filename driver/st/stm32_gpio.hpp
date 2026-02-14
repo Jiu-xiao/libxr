@@ -5,6 +5,27 @@
 
 #ifdef HAL_GPIO_MODULE_ENABLED
 
+#if (defined(GPIO_CRL_MODE0) || defined(GPIO_CRL_MODE0_Msk)) && \
+    (defined(GPIO_CRL_CNF0) || defined(GPIO_CRL_CNF0_Msk))
+#define XR_STM32_GPIO_HAS_F1_LAYOUT 1
+#else
+#define XR_STM32_GPIO_HAS_F1_LAYOUT 0
+#endif
+
+#if (defined(GPIO_MODER_MODE0) || defined(GPIO_MODER_MODE0_Msk)) && \
+    (defined(GPIO_OTYPER_OT0) || defined(GPIO_OTYPER_OT0_Msk)) && \
+    (defined(GPIO_PUPDR_PUPD0) || defined(GPIO_PUPDR_PUPD0_Msk))
+#define XR_STM32_GPIO_HAS_MODER_LAYOUT 1
+#else
+#define XR_STM32_GPIO_HAS_MODER_LAYOUT 0
+#endif
+
+#if defined(GPIO_OSPEEDR_OSPEED0) || defined(GPIO_OSPEEDR_OSPEED0_Msk)
+#define XR_STM32_GPIO_HAS_OSPEEDR 1
+#else
+#define XR_STM32_GPIO_HAS_OSPEEDR 0
+#endif
+
 namespace LibXR
 {
 /**
@@ -44,9 +65,10 @@ class STM32GPIO final : public GPIO
 
     if (IS_NON_IRQ_DIRECTION)
     {
+      ASSERT(pin_ != 0 && (pin_ & (pin_ - 1u)) == 0u);
       const uint32_t PIN_POS = static_cast<uint32_t>(__builtin_ctz(pin_));
 
-#if defined(GPIO_CRL_MODE0_Msk) && defined(GPIO_CRL_CNF0_Msk)
+#if XR_STM32_GPIO_HAS_F1_LAYOUT
       // 寄存器快路径（F1 类）：CRL/CRH 格式 / Register fast path (F1 class): CRL/CRH.
       volatile uint32_t* cr = (PIN_POS < 8u) ? &port_->CRL : &port_->CRH;
       const uint32_t SHIFT = (PIN_POS & 0x7u) * 4u;
@@ -90,8 +112,7 @@ class STM32GPIO final : public GPIO
       *cr = reg;
       return ErrorCode::OK;
 
-#elif defined(GPIO_MODER_MODE0_Msk) && defined(GPIO_OTYPER_OT0) && \
-    defined(GPIO_PUPDR_PUPD0_Msk)
+#elif XR_STM32_GPIO_HAS_MODER_LAYOUT
       // 寄存器快路径（MODER 类）：MODER/OTYPER/PUPDR/OSPEEDR / Register fast path (MODER
       // class).
       const uint32_t SHIFT = PIN_POS * 2u;
@@ -117,7 +138,7 @@ class STM32GPIO final : public GPIO
           port_->OTYPER &= ~PIN_MASK;
         }
 
-#if defined(GPIO_OSPEEDR_OSPEED0_Msk)
+#if XR_STM32_GPIO_HAS_OSPEEDR
         uint32_t ospeedr = port_->OSPEEDR;
         ospeedr &= ~MASK2;
         ospeedr |= (0x3u << SHIFT);  // SWD 方向切换用最高速率 / Fastest slew for SWD.
@@ -195,5 +216,9 @@ class STM32GPIO final : public GPIO
 };
 
 }  // namespace LibXR
+
+#undef XR_STM32_GPIO_HAS_F1_LAYOUT
+#undef XR_STM32_GPIO_HAS_MODER_LAYOUT
+#undef XR_STM32_GPIO_HAS_OSPEEDR
 
 #endif
