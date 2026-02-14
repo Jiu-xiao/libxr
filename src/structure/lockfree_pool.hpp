@@ -47,6 +47,13 @@ class LockFreePool
     } slot;
 
     uint8_t pad[LIBXR_CACHE_LINE_SIZE];  ///< 缓存行填充 / Cache line padding
+
+    Slot()
+    {
+      new (&slot.state) std::atomic<SlotState>(SlotState::FREE);
+    }
+
+    ~Slot() {}
   };
 
   /**
