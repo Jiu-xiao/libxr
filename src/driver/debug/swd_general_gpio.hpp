@@ -351,8 +351,8 @@ class SwdGeneralGPIO final : public Swd
   enum class SwdioMode : uint8_t
   {
     UNKNOWN = 0,  ///< 未知/未初始化。Unknown / uninitialized.
-    DRIVE_PP,     ///< 推挽输出。Push-pull output.
-    SAMPLE_IN,    ///< 输入采样。Input sampling.
+    DRIVE_OD,     ///< 开漏输出（高电平=释放总线）。Open-drain output (high=release).
+    SAMPLE_IN,    ///< 采样阶段（保持开漏释放）。Sampling phase (line released by OD high).
   };
 
   ErrorCode SetSwdioDriveMode()
@@ -367,7 +367,7 @@ class SwdGeneralGPIO final : public Swd
       }
     }
 
-    swdio_mode_ = SwdioMode::DRIVE_PP;
+    swdio_mode_ = SwdioMode::DRIVE_OD;
     return ErrorCode::OK;
   }
 
@@ -379,6 +379,10 @@ class SwdGeneralGPIO final : public Swd
       return EC;
     }
 
+    // 约束：GPIO::Read() 需要在开漏输出模式下返回实际引脚电平（而不是输出锁存值）。
+    // Constraint: GPIO::Read() must sample the physical pin level in open-drain output
+    // mode (not just the output latch).
+    //
     // 开漏输出高电平表示释放总线，目标可驱动 ACK/数据 / Open-drain high releases line
     // so target can drive ACK/data.
     swdio_.Write(true);

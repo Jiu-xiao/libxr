@@ -536,19 +536,10 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    uint8_t resp_local[RESP_SLOT_SIZE] = {};
-    uint16_t out_len = 0u;
-    auto ans =
-        ProcessOneCommand(in_isr, req, REQ_LEN, resp_local, RESP_SLOT_SIZE, out_len);
-    UNUSED(ans);
-
-    if (!EnqueueResponse(resp_local, out_len))
-    {
-      // 正常背压下不应触发；这里做一次 best-effort 腾挪 / Should not happen with proper
-      // backpressure; make room once as best effort.
-      (void)SubmitNextQueuedResponseIfIdle();
-      (void)EnqueueResponse(resp_local, out_len);
-    }
+    // 正常背压下不应触发；这里做一次 best-effort 腾挪后重试队列构建。
+    // Should not happen with proper backpressure; drain once and retry queue build.
+    (void)SubmitNextQueuedResponseIfIdle();
+    (void)TryBuildAndEnqueueResponse(in_isr, req, REQ_LEN);
 
     (void)SubmitDeferredResponseIfIdle();
     (void)SubmitNextQueuedResponseIfIdle();
@@ -567,10 +558,44 @@ class DapLinkV2Class : public DeviceClass
 
  private:
   /**
-   * @brief 若 OUT 空闲则 arm 一次接收 / Arm OUT transfer if idle
+   * @brief 获取当前 DAP 有效包长 / Get effective DAP packet size
    */
-  static uint16_t ClipResponseLength(uint16_t len, uint16_t cap)
+  uint16_t GetDapPacketSize() const
   {
+    const uint16_t IN_PS = ep_data_in_ ? ep_data_in_->MaxPacketSize() : 0u;
+    const uint16_t OUT_PS = ep_data_out_ ? ep_data_out_->MaxPacketSize() : 0u;
+    uint16_t dap_ps = 0u;
+
+    if (IN_PS > 0u && OUT_PS > 0u)
+    {
+      dap_ps = (IN_PS < OUT_PS) ? IN_PS : OUT_PS;
+    }
+    else
+    {
+      dap_ps = (IN_PS > 0u) ? IN_PS : OUT_PS;
+    }
+
+    if (dap_ps == 0u)
+    {
+      dap_ps = DEFAULT_DAP_PACKET_SIZE;
+    }
+    if (dap_ps > MAX_DAP_PACKET_SIZE)
+    {
+      dap_ps = MAX_DAP_PACKET_SIZE;
+    }
+    return dap_ps;
+  }
+
+  /**
+   * @brief 裁剪响应长度到 DAP 包长与缓冲容量 / Clip response length by DAP packet and buffer cap
+   */
+  uint16_t ClipResponseLength(uint16_t len, uint16_t cap) const
+  {
+    const uint16_t DAP_PS = GetDapPacketSize();
+    if (len > DAP_PS)
+    {
+      len = DAP_PS;
+    }
     if (len > RESP_SLOT_SIZE)
     {
       len = RESP_SLOT_SIZE;
@@ -890,10 +915,7 @@ class DapLinkV2Class : public DeviceClass
                                    out_len);
       case ToU8(LibXR::USB::DapLinkV2Def::InfoId::PACKET_SIZE):
       {
-        const uint16_t IN_PS = ep_data_in_ ? ep_data_in_->MaxPacketSize() : 0u;
-        const uint16_t OUT_PS = ep_data_out_ ? ep_data_out_->MaxPacketSize() : 0u;
-        const uint16_t DAP_PS =
-            (IN_PS > 0u && OUT_PS > 0u) ? ((IN_PS < OUT_PS) ? IN_PS : OUT_PS) : IN_PS;
+        const uint16_t DAP_PS = GetDapPacketSize();
         return BuildInfoU16Response(resp[0], DAP_PS, resp, resp_cap, out_len);
       }
       case ToU8(LibXR::USB::DapLinkV2Def::InfoId::TIMESTAMP_CLOCK):
@@ -2360,10 +2382,14 @@ class DapLinkV2Class : public DeviceClass
   }
 
  private:
+  static constexpr uint16_t DEFAULT_DAP_PACKET_SIZE = 64u;
   static constexpr uint8_t PACKET_COUNT_ADVERTISED = 2u;
   static constexpr uint8_t MAX_OUTSTANDING_RESPONSES = PACKET_COUNT_ADVERTISED;
-  static constexpr uint16_t RESP_SLOT_SIZE = 64u;
+  static constexpr uint16_t MAX_DAP_PACKET_SIZE = 512u;  // USB HS bulk max packet size.
+  static constexpr uint16_t RESP_SLOT_SIZE = MAX_DAP_PACKET_SIZE;
   static constexpr uint8_t RESP_QUEUE_DEPTH = PACKET_COUNT_ADVERTISED;
+  static_assert(RESP_SLOT_SIZE >= DEFAULT_DAP_PACKET_SIZE,
+                "RESP_SLOT_SIZE must cover FS bulk packet size");
   static_assert((RESP_QUEUE_DEPTH & (RESP_QUEUE_DEPTH - 1u)) == 0u,
                 "Response queue depth must be power-of-two");
 
