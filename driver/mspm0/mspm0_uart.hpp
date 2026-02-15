@@ -126,7 +126,6 @@ class MSPM0UART : public UART
   size_t tx_active_total_ = 0;
   RxTimeoutMode rx_timeout_mode_ = RxTimeoutMode::BYTE_INTERRUPT;
   uint32_t rx_drop_count_ = 0;
-  uint32_t rx_error_count_ = 0;
   uint32_t rx_timeout_count_ = 0;
 
   static MSPM0UART* instance_map_[MAX_UART_INSTANCES];

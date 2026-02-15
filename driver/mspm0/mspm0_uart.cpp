@@ -622,8 +622,6 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
 
 void MSPM0UART::HandleErrorInterrupt(DL_UART_IIDX iidx)
 {
-  rx_error_count_++;
-
   uint32_t clear_mask = 0;
 
   switch (iidx)
