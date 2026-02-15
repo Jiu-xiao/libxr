@@ -45,6 +45,55 @@ MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_s
   ASSERT(SET_CFG_ANS == ErrorCode::OK);
 }
 
+UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
+                                                     uint32_t baudrate)
+{
+  ASSERT(instance != nullptr);
+  ASSERT(baudrate > 0U);
+
+  UART::Configuration config = {
+      baudrate, UART::Parity::NO_PARITY, 8U, 1U};
+
+  switch (DL_UART_getWordLength(instance))
+  {
+    case DL_UART_WORD_LENGTH_5_BITS:
+      config.data_bits = 5U;
+      break;
+    case DL_UART_WORD_LENGTH_6_BITS:
+      config.data_bits = 6U;
+      break;
+    case DL_UART_WORD_LENGTH_7_BITS:
+      config.data_bits = 7U;
+      break;
+    case DL_UART_WORD_LENGTH_8_BITS:
+    default:
+      config.data_bits = 8U;
+      break;
+  }
+
+  switch (DL_UART_getParityMode(instance))
+  {
+    case DL_UART_PARITY_NONE:
+      config.parity = UART::Parity::NO_PARITY;
+      break;
+    case DL_UART_PARITY_EVEN:
+      config.parity = UART::Parity::EVEN;
+      break;
+    case DL_UART_PARITY_ODD:
+      config.parity = UART::Parity::ODD;
+      break;
+    default:
+      // LibXR UART config only supports none/even/odd parity.
+      ASSERT(false);
+      config.parity = UART::Parity::NO_PARITY;
+      break;
+  }
+
+  config.stop_bits =
+      (DL_UART_getStopBits(instance) == DL_UART_STOP_BITS_TWO) ? 2U : 1U;
+  return config;
+}
+
 ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
 {
   if (config.baudrate == 0)

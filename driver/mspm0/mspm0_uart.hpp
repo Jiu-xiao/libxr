@@ -35,6 +35,8 @@ class MSPM0UART : public UART
   static ErrorCode ReadFun(ReadPort& port);
 
   static void OnInterrupt(uint8_t index);
+  static UART::Configuration BuildConfigFromSysCfg(UART_Regs* instance,
+                                                   uint32_t baudrate);
 
   RxTimeoutMode GetRxTimeoutMode() const { return rx_timeout_mode_; }
   uint32_t GetRxTimeoutCount() const { return rx_timeout_count_; }
@@ -137,8 +139,7 @@ class MSPM0UART : public UART
                                 name##_INST_FREQUENCY,                                   \
                                 ::LibXR::MSPM0UART::ResolveIndex(name##_INST_INT_IRQN)}, \
       ::LibXR::RawData{(rx_stage_addr), (rx_stage_size)}, (tx_queue_size),               \
-      (tx_buffer_size),                                                                  \
-      ::LibXR::UART::Configuration{static_cast<uint32_t>(name##_BAUD_RATE),              \
-                                   ::LibXR::UART::Parity::NO_PARITY, 8, 1}
+      (tx_buffer_size), ::LibXR::MSPM0UART::BuildConfigFromSysCfg(                       \
+                            name##_INST, static_cast<uint32_t>(name##_BAUD_RATE))
 
 }  // namespace LibXR
