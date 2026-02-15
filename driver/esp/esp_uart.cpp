@@ -224,38 +224,57 @@ ErrorCode ESP32UART::FastWriteFun(WritePort& port, ConstRawData data, WriteOpera
                     !uart->tx_active_valid_ && !uart->tx_pending_valid_ &&
                     !uart->tx_double_buffer_.HasPending() &&
                     (port.queue_info_->Size() == 0) && (port.queue_data_->Size() == 0);
-  if (!idle)
+  if (idle)
   {
-    port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
-    return ErrorCode::NOT_SUPPORT;
-  }
-
-  std::memcpy(uart->tx_double_buffer_.ActiveBuffer(), data.addr_, data.size_);
-  uart->tx_double_buffer_.SetActiveLength(data.size_);
-  uart->tx_active_offset_ = 0;
-  uart->tx_active_info_ = WriteInfoBlock{data, op};
-  uart->tx_active_valid_ = true;
-  uart->tx_active_reported_ = false;
-  uart->tx_pending_valid_ = false;
-  op.MarkAsRunning();
-
-  const bool started = uart->StartActiveTransfer(in_isr);
-  if (!started)
-  {
-    uart->tx_active_valid_ = false;
+    std::memcpy(uart->tx_double_buffer_.ActiveBuffer(), data.addr_, data.size_);
+    uart->tx_double_buffer_.SetActiveLength(data.size_);
+    uart->tx_active_offset_ = 0;
+    uart->tx_active_info_ = WriteInfoBlock{data, op};
+    uart->tx_active_valid_ = true;
     uart->tx_active_reported_ = false;
-    if (op.type != WriteOperation::OperationType::BLOCK)
+    uart->tx_pending_valid_ = false;
+    op.MarkAsRunning();
+
+    const bool started = uart->StartActiveTransfer(in_isr);
+    if (!started)
     {
-      op.UpdateStatus(in_isr, ErrorCode::FAILED);
+      uart->tx_active_valid_ = false;
+      uart->tx_active_reported_ = false;
+      if (op.type != WriteOperation::OperationType::BLOCK)
+      {
+        op.UpdateStatus(in_isr, ErrorCode::FAILED);
+      }
     }
+    else
+    {
+      // Current op completion is reported by WritePort when FastWriteFun returns OK.
+      uart->tx_active_reported_ = true;
+    }
+
+    port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
+    return started ? ErrorCode::OK : ErrorCode::FAILED;
   }
-  else
+
+  const bool direct_pending = uart->tx_busy_.load(std::memory_order_acquire) &&
+                              uart->tx_active_valid_ && !uart->tx_pending_valid_ &&
+                              !uart->tx_double_buffer_.HasPending() &&
+                              (port.queue_info_->Size() == 0) &&
+                              (port.queue_data_->Size() == 0);
+  if (direct_pending)
   {
-    uart->tx_active_reported_ = true;
+    std::memcpy(uart->tx_double_buffer_.PendingBuffer(), data.addr_, data.size_);
+    uart->tx_double_buffer_.SetPendingLength(data.size_);
+    uart->tx_double_buffer_.EnablePending();
+    uart->tx_pending_info_ = WriteInfoBlock{data, op};
+    uart->tx_pending_valid_ = true;
+    op.MarkAsRunning();
+
+    port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
+    return ErrorCode::PENDING;
   }
 
   port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
-  return started ? ErrorCode::OK : ErrorCode::FAILED;
+  return ErrorCode::NOT_SUPPORT;
 }
 
 ErrorCode ESP32UART::ReadFun(ReadPort&, bool)
@@ -446,8 +465,6 @@ ErrorCode ESP32UART::ConfigurePins()
 
 ErrorCode ESP32UART::TryStartTx(bool in_isr)
 {
-  bool started_now = false;
-
   if (!tx_active_valid_)
   {
     (void)LoadActiveTxFromQueue(in_isr);
@@ -457,15 +474,19 @@ ErrorCode ESP32UART::TryStartTx(bool in_isr)
   {
     if (!StartActiveTransfer(in_isr))
     {
-      write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
       tx_active_valid_ = false;
       tx_active_reported_ = false;
+      return ErrorCode::FAILED;
     }
     else if (!tx_active_reported_)
     {
-      write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+      // Current op completion is reported by WritePort when TryStartTx returns OK.
       tx_active_reported_ = true;
-      started_now = true;
+      if (!tx_pending_valid_)
+      {
+        (void)LoadPendingTxFromQueue(in_isr);
+      }
+      return ErrorCode::OK;
     }
   }
 
@@ -474,7 +495,7 @@ ErrorCode ESP32UART::TryStartTx(bool in_isr)
     (void)LoadPendingTxFromQueue(in_isr);
   }
 
-  return started_now ? ErrorCode::OK : ErrorCode::PENDING;
+  return ErrorCode::PENDING;
 }
 
 bool ESP32UART::LoadActiveTxFromQueue(bool in_isr)
@@ -641,7 +662,11 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   if (result != ErrorCode::OK)
   {
-    tx_double_buffer_.Switch();
+    if (tx_double_buffer_.HasPending())
+    {
+      tx_double_buffer_.Switch();
+    }
+    tx_double_buffer_.SetPendingLength(0);
     tx_double_buffer_.SetActiveLength(0);
     tx_active_offset_ = 0;
     return;
