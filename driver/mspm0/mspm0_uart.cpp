@@ -366,70 +366,61 @@ void MSPM0UART::HandleInterrupt()
   const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
   const uint32_t IRQ_MASK = MSPM0_UART_BASE_INTERRUPT_MASK | TIMEOUT_MASK;
 
-  // 处理中断服务过程中产生的新中断，避免长时间占用 IRQ / Handle IRQs raised
-  // during ISR service and bound ISR residency time.
-  constexpr uint32_t MAX_IRQ_ROUNDS = 32;
-  for (uint32_t round = 0; round < MAX_IRQ_ROUNDS; ++round)
+  uint32_t pending = DL_UART_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
+  if (TIMEOUT_MASK != 0U)
   {
-    uint32_t pending = DL_UART_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
-    if (TIMEOUT_MASK != 0U)
-    {
-      // LIN compare 在部分路径需读取 RAW 位，避免漏掉超时事件 / For LIN
-      // compare, raw status is required on some paths to avoid missing timeout events.
-      pending |= DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
-    }
+    // LIN compare 在部分路径需读取 RAW 位，避免漏掉超时事件 / For LIN
+    // compare, raw status is required on some paths to avoid missing timeout events.
+    pending |= DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
+  }
 
-    const uint32_t PENDING = pending;
-    if (PENDING == 0)
-    {
-      return;
-    }
+  const uint32_t PENDING = pending;
+  if (PENDING == 0U)
+  {
+    return;
+  }
 
-    constexpr uint32_t RX_PENDING_MASK =
-        DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_ADDRESS_MATCH;
-    if ((PENDING & RX_PENDING_MASK) != 0U)
+  constexpr uint32_t RX_PENDING_MASK =
+      DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_ADDRESS_MATCH;
+  if ((PENDING & RX_PENDING_MASK) != 0U)
+  {
+    HandleRxInterrupt(TIMEOUT_MASK);
+    if ((PENDING & DL_UART_INTERRUPT_ADDRESS_MATCH) != 0U)
     {
-      HandleRxInterrupt(TIMEOUT_MASK);
-      if ((PENDING & DL_UART_INTERRUPT_ADDRESS_MATCH) != 0U)
-      {
-        DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_ADDRESS_MATCH);
-      }
-    }
-
-    if (TIMEOUT_MASK != 0U)
-    {
-      HandleRxTimeoutInterrupt(PENDING, TIMEOUT_MASK);
-    }
-
-    if ((PENDING & DL_UART_INTERRUPT_OVERRUN_ERROR) != 0)
-    {
-      HandleErrorInterrupt(DL_UART_IIDX_OVERRUN_ERROR);
-    }
-    if ((PENDING & DL_UART_INTERRUPT_BREAK_ERROR) != 0)
-    {
-      HandleErrorInterrupt(DL_UART_IIDX_BREAK_ERROR);
-    }
-    if ((PENDING & DL_UART_INTERRUPT_PARITY_ERROR) != 0)
-    {
-      HandleErrorInterrupt(DL_UART_IIDX_PARITY_ERROR);
-    }
-    if ((PENDING & DL_UART_INTERRUPT_FRAMING_ERROR) != 0)
-    {
-      HandleErrorInterrupt(DL_UART_IIDX_FRAMING_ERROR);
-    }
-    if ((PENDING & DL_UART_INTERRUPT_NOISE_ERROR) != 0)
-    {
-      HandleErrorInterrupt(DL_UART_IIDX_NOISE_ERROR);
-    }
-
-    if ((PENDING & DL_UART_INTERRUPT_TX) != 0)
-    {
-      HandleTxInterrupt(true);
+      DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_ADDRESS_MATCH);
     }
   }
 
-  DL_UART_clearInterruptStatus(res_.instance, IRQ_MASK);
-  NVIC_ClearPendingIRQ(res_.irqn);
+  if (TIMEOUT_MASK != 0U)
+  {
+    HandleRxTimeoutInterrupt(PENDING, TIMEOUT_MASK);
+  }
+
+  if ((PENDING & DL_UART_INTERRUPT_OVERRUN_ERROR) != 0U)
+  {
+    HandleErrorInterrupt(DL_UART_IIDX_OVERRUN_ERROR);
+  }
+  if ((PENDING & DL_UART_INTERRUPT_BREAK_ERROR) != 0U)
+  {
+    HandleErrorInterrupt(DL_UART_IIDX_BREAK_ERROR);
+  }
+  if ((PENDING & DL_UART_INTERRUPT_PARITY_ERROR) != 0U)
+  {
+    HandleErrorInterrupt(DL_UART_IIDX_PARITY_ERROR);
+  }
+  if ((PENDING & DL_UART_INTERRUPT_FRAMING_ERROR) != 0U)
+  {
+    HandleErrorInterrupt(DL_UART_IIDX_FRAMING_ERROR);
+  }
+  if ((PENDING & DL_UART_INTERRUPT_NOISE_ERROR) != 0U)
+  {
+    HandleErrorInterrupt(DL_UART_IIDX_NOISE_ERROR);
+  }
+
+  if ((PENDING & DL_UART_INTERRUPT_TX) != 0U)
+  {
+    HandleTxInterrupt(true);
+  }
 }
 
 void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
