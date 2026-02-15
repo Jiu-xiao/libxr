@@ -138,7 +138,8 @@ class MSPM0UART : public UART
                                 name##_INST_FREQUENCY,                                   \
                                 ::LibXR::MSPM0UART::ResolveIndex(name##_INST_INT_IRQN)}, \
       ::LibXR::RawData{(rx_stage_addr), (rx_stage_size)}, (tx_queue_size),               \
-      (tx_buffer_size), ::LibXR::MSPM0UART::BuildConfigFromSysCfg(                       \
-                            name##_INST, static_cast<uint32_t>(name##_BAUD_RATE))
+      (tx_buffer_size),                                                                  \
+      ::LibXR::MSPM0UART::BuildConfigFromSysCfg(name##_INST,                             \
+                                                static_cast<uint32_t>(name##_BAUD_RATE))
 
 }  // namespace LibXR

@@ -51,8 +51,7 @@ UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
   ASSERT(instance != nullptr);
   ASSERT(baudrate > 0U);
 
-  UART::Configuration config = {
-      baudrate, UART::Parity::NO_PARITY, 8U, 1U};
+  UART::Configuration config = {baudrate, UART::Parity::NO_PARITY, 8U, 1U};
 
   switch (DL_UART_getWordLength(instance))
   {
@@ -89,8 +88,7 @@ UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
       break;
   }
 
-  config.stop_bits =
-      (DL_UART_getStopBits(instance) == DL_UART_STOP_BITS_TWO) ? 2U : 1U;
+  config.stop_bits = (DL_UART_getStopBits(instance) == DL_UART_STOP_BITS_TWO) ? 2U : 1U;
   return config;
 }
 
