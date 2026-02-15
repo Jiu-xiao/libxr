@@ -10,6 +10,12 @@ namespace LibXR
 class MSPM0UART : public UART
 {
  public:
+  enum class RxTimeoutMode : uint8_t
+  {
+    LIN_COMPARE,
+    BYTE_INTERRUPT
+  };
+
   struct Resources
   {
     UART_Regs* instance;
@@ -29,6 +35,15 @@ class MSPM0UART : public UART
   static ErrorCode ReadFun(ReadPort& port);
 
   static void OnInterrupt(uint8_t index);
+
+  RxTimeoutMode GetRxTimeoutMode() const { return rx_timeout_mode_; }
+  uint32_t GetRxTimeoutCount() const { return rx_timeout_count_; }
+  uint32_t GetRxDropCount() const { return rx_drop_count_; }
+  uint32_t GetTimeoutInterruptEnabledMask() const;
+  uint32_t GetTimeoutInterruptMaskedStatus() const;
+  uint32_t GetTimeoutInterruptRawStatus() const;
+  uint32_t GetRxInterruptTimeoutValue() const;
+  uint32_t GetRxFifoThresholdValue() const;
 
   ReadPort _read_port;    // NOLINT
   WritePort _write_port;  // NOLINT
@@ -80,13 +95,25 @@ class MSPM0UART : public UART
 
   void HandleInterrupt();
 
-  void HandleRxInterrupt();
+  void HandleRxInterrupt(uint32_t timeout_mask);
+
+  void HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask);
+
+  void DrainRxFIFO(bool& received, bool& pushed);
 
   void HandleTxInterrupt(bool in_isr);
 
   void HandleErrorInterrupt(DL_UART_IIDX iidx);
 
-  ErrorCode TryStartTx(bool in_isr);
+  void CompletePendingReadOnTimeout(bool in_isr);
+
+  void ApplyRxTimeoutMode();
+
+  RxTimeoutMode ResolveRxTimeoutMode() const;
+
+  uint32_t GetTimeoutInterruptMask() const;
+
+  void ResetLinCounter();
 
   void DisableTxInterrupt();
 
@@ -95,8 +122,10 @@ class MSPM0UART : public UART
   bool tx_active_valid_ = false;
   size_t tx_active_remaining_ = 0;
   size_t tx_active_total_ = 0;
+  RxTimeoutMode rx_timeout_mode_ = RxTimeoutMode::BYTE_INTERRUPT;
   uint32_t rx_drop_count_ = 0;
   uint32_t rx_error_count_ = 0;
+  uint32_t rx_timeout_count_ = 0;
 
   static MSPM0UART* instance_map_[MAX_UART_INSTANCES];
 };
