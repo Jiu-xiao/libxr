@@ -361,7 +361,6 @@ bool ESP32UART::StartDmaTx()
     return false;
   }
 
-  gdma_reset(tx_dma_channel_);
   return gdma_start(tx_dma_channel_, gdma_link_get_head_addr(tx_dma_link_)) == ESP_OK;
 }
 
