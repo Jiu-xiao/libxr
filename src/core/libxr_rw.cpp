@@ -37,6 +37,14 @@ ReadPort& ReadPort::operator=(ReadFun fun)
 
 void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
 {
+  if (info.op.type == ReadOperation::OperationType::BLOCK)
+  {
+    // Keep BLOCK op owner alive until wake-up signal is sent.
+    info.op.UpdateStatus(in_isr, ans);
+    busy_.store(BusyState::IDLE, std::memory_order_release);
+    return;
+  }
+
   busy_.store(BusyState::IDLE, std::memory_order_release);
   info.op.UpdateStatus(in_isr, ans);
 }
@@ -111,7 +119,34 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       ASSERT(!in_isr);
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      if (wait_ans != ErrorCode::TIMEOUT)
+      {
+        return wait_ans;
+      }
+
+      // Timeout path: try to cancel pending read. If completion already raced in,
+      // consume a possible late wake-up signal before returning.
+      while (true)
+      {
+        BusyState expected = BusyState::PENDING;
+        if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
+                                          std::memory_order_acq_rel,
+                                          std::memory_order_acquire))
+        {
+          info_ = ReadInfoBlock{};
+          return ErrorCode::TIMEOUT;
+        }
+
+        const BusyState state = busy_.load(std::memory_order_acquire);
+        if (state == BusyState::EVENT)
+        {
+          continue;
+        }
+
+        const auto late = op.data.sem_info.sem->Wait(0);
+        return (late == ErrorCode::OK) ? ErrorCode::OK : ErrorCode::TIMEOUT;
+      }
     }
     else
     {
@@ -128,26 +163,31 @@ void ReadPort::ProcessPendingReads(bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
 
-  auto is_busy = busy_.load(std::memory_order_relaxed);
-
-  if (is_busy == BusyState::PENDING)
+  BusyState expected = BusyState::PENDING;
+  if (busy_.compare_exchange_strong(expected, BusyState::EVENT,
+                                    std::memory_order_acq_rel,
+                                    std::memory_order_acquire))
   {
-    auto size = queue_data_->Size();
-    if (size > 0 && size >= info_.data.size_)
+    const size_t need_size = info_.data.size_;
+    const size_t avail_size = queue_data_->Size();
+    if (avail_size > 0 && avail_size >= need_size)
     {
-      if (info_.data.size_ > 0)
+      if (need_size > 0)
       {
-        auto ans = queue_data_->PopBatch(reinterpret_cast<uint8_t*>(info_.data.addr_),
-                                         info_.data.size_);
+        auto ans =
+            queue_data_->PopBatch(reinterpret_cast<uint8_t*>(info_.data.addr_), need_size);
         UNUSED(ans);
         ASSERT(ans == ErrorCode::OK);
       }
 
       Finish(in_isr, ErrorCode::OK, info_);
       OnRxDequeue(in_isr);
+      return;
     }
+
+    busy_.store(BusyState::PENDING, std::memory_order_release);
   }
-  else if (is_busy == BusyState::IDLE)
+  else if (expected == BusyState::IDLE)
   {
     busy_.store(BusyState::EVENT, std::memory_order_release);
   }
@@ -206,6 +246,31 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_i
         op.UpdateStatus(in_isr, ErrorCode::OK);
       }
       return ErrorCode::OK;
+    }
+
+    if (fast_write_fun_ != nullptr)
+    {
+      const ErrorCode fast_ans = fast_write_fun_(*this, data, op, in_isr);
+      if (fast_ans != ErrorCode::NOT_SUPPORT)
+      {
+        if (fast_ans != ErrorCode::PENDING)
+        {
+          if (fast_ans == ErrorCode::OK &&
+              op.type != WriteOperation::OperationType::BLOCK)
+          {
+            op.UpdateStatus(in_isr, ErrorCode::OK);
+          }
+          return fast_ans;
+        }
+
+        if (op.type == WriteOperation::OperationType::BLOCK)
+        {
+          ASSERT(!in_isr);
+          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        }
+
+        return ErrorCode::OK;
+      }
     }
 
     LockState expected = LockState::UNLOCKED;

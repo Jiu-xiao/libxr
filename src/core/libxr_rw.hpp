@@ -243,6 +243,8 @@ typedef Operation<ErrorCode> WriteOperation;
 /// @brief Function pointer type for write operations.
 /// @brief 写入操作的函数指针类型。
 typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
+typedef ErrorCode (*FastWriteFun)(WritePort& port, ConstRawData data, WriteOperation& op,
+                                  bool in_isr);
 
 /// @brief Function pointer type for read operations.
 /// @brief 读取操作的函数指针类型。
@@ -419,6 +421,7 @@ class WritePort
   };
 
   WriteFun write_fun_ = nullptr;
+  FastWriteFun fast_write_fun_ = nullptr;
   LockFreeQueue<WriteInfoBlock>* queue_info_;
   LockFreeQueue<uint8_t>* queue_data_;
   std::atomic<LockState> lock_{LockState::UNLOCKED};

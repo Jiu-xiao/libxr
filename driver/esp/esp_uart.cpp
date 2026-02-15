@@ -1,0 +1,693 @@
+#include "esp_uart.hpp"
+
+#include <algorithm>
+#include <cstring>
+#include <new>
+
+#include "esp_attr.h"
+#include "esp_clk_tree.h"
+#include "esp_err.h"
+#include "esp_heap_caps.h"
+#include "esp_private/periph_ctrl.h"
+#include "esp_rom_gpio.h"
+#include "hal/uart_ll.h"
+#include "soc/gpio_sig_map.h"
+#include "soc/uart_periph.h"
+
+namespace
+{
+constexpr uint32_t kUartRxIntrMask =
+    UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF;
+constexpr uint32_t kUartTxIntrMask = UART_INTR_TXFIFO_EMPTY;
+
+constexpr uint8_t kRxToutThreshold = 4;
+constexpr uint16_t kTxEmptyThreshold = 24;
+}  // namespace
+
+namespace LibXR
+{
+
+uint8_t* ESP32UART::AllocateTxStorage(size_t size)
+{
+  void* aligned = heap_caps_aligned_alloc(
+      4, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+  if (aligned != nullptr)
+  {
+    return static_cast<uint8_t*>(aligned);
+  }
+
+  return static_cast<uint8_t*>(
+      heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+}
+
+void ESP32UART::FreeTxStorage(uint8_t* storage)
+{
+  if (storage != nullptr)
+  {
+    heap_caps_free(storage);
+  }
+}
+
+ErrorCode ESP32UART::ResolveUartPeriph(uart_port_t uart_num, periph_module_t& out)
+{
+  switch (uart_num)
+  {
+    case UART_NUM_0:
+      out = PERIPH_UART0_MODULE;
+      return ErrorCode::OK;
+    case UART_NUM_1:
+      out = PERIPH_UART1_MODULE;
+      return ErrorCode::OK;
+#if SOC_UART_HP_NUM > 2
+    case UART_NUM_2:
+      out = PERIPH_UART2_MODULE;
+      return ErrorCode::OK;
+#endif
+    default:
+      return ErrorCode::NOT_SUPPORT;
+  }
+}
+
+ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
+                     int cts_pin, size_t rx_buffer_size, size_t tx_buffer_size,
+                     uint32_t tx_queue_size, UART::Configuration config)
+    : UART(&_read_port, &_write_port),
+      uart_num_(uart_num),
+      tx_pin_(tx_pin),
+      rx_pin_(rx_pin),
+      rts_pin_(rts_pin),
+      cts_pin_(cts_pin),
+      config_(config),
+      rx_isr_buffer_(new (std::nothrow) uint8_t[rx_buffer_size]),
+      rx_isr_buffer_size_(rx_buffer_size),
+      tx_storage_(AllocateTxStorage(tx_buffer_size * 2)),
+      tx_storage_size_(tx_buffer_size * 2),
+      tx_buffer_size_(tx_buffer_size),
+      tx_double_buffer_(RawData{tx_storage_, tx_storage_size_}),
+      _read_port(rx_buffer_size),
+      _write_port(tx_queue_size, tx_buffer_size)
+{
+  ASSERT(uart_num_ < UART_NUM_MAX);
+  ASSERT(uart_num_ < SOC_UART_HP_NUM);
+  ASSERT(rx_isr_buffer_size_ > 0);
+  ASSERT(tx_buffer_size_ > 0);
+  ASSERT(rx_isr_buffer_ != nullptr);
+  ASSERT(tx_storage_ != nullptr);
+
+  _read_port = ReadFun;
+  _write_port = WriteFun;
+  _write_port.fast_write_fun_ = FastWriteFun;
+
+  if (InitUartHardware() != ErrorCode::OK)
+  {
+    ASSERT(false);
+    return;
+  }
+
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (InitDmaBackend() != ErrorCode::OK)
+  {
+    ASSERT(false);
+    return;
+  }
+#else
+  if (InstallUartIsr() != ErrorCode::OK)
+  {
+    ASSERT(false);
+    return;
+  }
+
+  const size_t rx_full_floor = 16;
+  const size_t rx_full_ceil = std::max<size_t>(rx_full_floor, SOC_UART_FIFO_LEN / 2);
+  const uint16_t full_thr =
+      static_cast<uint16_t>(std::min<size_t>(rx_full_ceil,
+                                             std::max<size_t>(rx_full_floor,
+                                                              rx_isr_buffer_size_ / 16)));
+  uart_hal_set_rxfifo_full_thr(&uart_hal_, full_thr);
+  uart_hal_set_rx_timeout(&uart_hal_, kRxToutThreshold);
+  uart_hal_clr_intsts_mask(&uart_hal_, kUartRxIntrMask);
+  uart_hal_ena_intr_mask(&uart_hal_, kUartRxIntrMask);
+#endif
+}
+
+ESP32UART::~ESP32UART()
+{
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  DeinitDmaBackend();
+#endif
+  RemoveUartIsr();
+  DeinitUartHardware();
+
+  FreeTxStorage(tx_storage_);
+  tx_storage_ = nullptr;
+
+  delete[] rx_isr_buffer_;
+  rx_isr_buffer_ = nullptr;
+}
+
+ErrorCode ESP32UART::SetConfig(UART::Configuration config)
+{
+  if (!uart_hw_enabled_)
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
+  uart_word_length_t word_length = UART_DATA_8_BITS;
+  uart_stop_bits_t stop_bits = UART_STOP_BITS_1;
+
+  if (!ResolveWordLength(config.data_bits, word_length))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  if (!ResolveStopBits(config.stop_bits, stop_bits))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uart_sclk_t sclk = UART_SCLK_DEFAULT;
+  uart_hal_set_sclk(&uart_hal_, static_cast<soc_module_clk_t>(sclk));
+
+  uint32_t sclk_hz = 0;
+  if ((esp_clk_tree_src_get_freq_hz(static_cast<soc_module_clk_t>(sclk),
+                                     ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
+                                     &sclk_hz) != ESP_OK) ||
+      (sclk_hz == 0))
+  {
+    return ErrorCode::INIT_ERR;
+  }
+
+  if (!uart_hal_set_baudrate(&uart_hal_, config.baudrate, sclk_hz))
+  {
+    return ErrorCode::INIT_ERR;
+  }
+
+  uart_hal_set_data_bit_num(&uart_hal_, word_length);
+  uart_hal_set_stop_bits(&uart_hal_, stop_bits);
+  uart_hal_set_parity(&uart_hal_, ResolveParity(config.parity));
+  uart_hal_set_hw_flow_ctrl(&uart_hal_, UART_HW_FLOWCTRL_DISABLE, 0);
+  uart_hal_set_mode(&uart_hal_, UART_MODE_UART);
+  uart_hal_set_txfifo_empty_thr(&uart_hal_, kTxEmptyThreshold);
+
+  config_ = config;
+  return ErrorCode::OK;
+}
+
+ErrorCode ESP32UART::WriteFun(WritePort& port, bool in_isr)
+{
+  auto* uart = CONTAINER_OF(&port, ESP32UART, _write_port);
+  return uart->TryStartTx(in_isr);
+}
+
+ErrorCode ESP32UART::FastWriteFun(WritePort& port, ConstRawData data, WriteOperation& op,
+                                  bool in_isr)
+{
+  auto* uart = CONTAINER_OF(&port, ESP32UART, _write_port);
+
+  if ((data.addr_ == nullptr) || (data.size_ == 0))
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  if (data.size_ > uart->tx_double_buffer_.Size())
+  {
+    return ErrorCode::SIZE_ERR;
+  }
+
+  WritePort::LockState expected = WritePort::LockState::UNLOCKED;
+  if (!port.lock_.compare_exchange_strong(expected, WritePort::LockState::LOCKED))
+  {
+    return ErrorCode::BUSY;
+  }
+
+  const bool idle = !uart->tx_busy_.load(std::memory_order_acquire) &&
+                    !uart->tx_active_valid_ && !uart->tx_pending_valid_ &&
+                    !uart->tx_double_buffer_.HasPending() &&
+                    (port.queue_info_->Size() == 0) && (port.queue_data_->Size() == 0);
+  if (!idle)
+  {
+    port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  std::memcpy(uart->tx_double_buffer_.ActiveBuffer(), data.addr_, data.size_);
+  uart->tx_double_buffer_.SetActiveLength(data.size_);
+  uart->tx_active_offset_ = 0;
+  uart->tx_active_info_ = WriteInfoBlock{data, op};
+  uart->tx_active_valid_ = true;
+  uart->tx_active_reported_ = false;
+  uart->tx_pending_valid_ = false;
+  op.MarkAsRunning();
+
+  const bool started = uart->StartActiveTransfer(in_isr);
+  if (!started)
+  {
+    uart->tx_active_valid_ = false;
+    uart->tx_active_reported_ = false;
+    if (op.type != WriteOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::FAILED);
+    }
+  }
+  else
+  {
+    uart->tx_active_reported_ = true;
+  }
+
+  port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
+  return started ? ErrorCode::OK : ErrorCode::FAILED;
+}
+
+ErrorCode ESP32UART::ReadFun(ReadPort&, bool)
+{
+  return ErrorCode::PENDING;
+}
+
+bool ESP32UART::ResolveWordLength(uint8_t data_bits, uart_word_length_t& out)
+{
+  switch (data_bits)
+  {
+    case 5:
+      out = UART_DATA_5_BITS;
+      return true;
+    case 6:
+      out = UART_DATA_6_BITS;
+      return true;
+    case 7:
+      out = UART_DATA_7_BITS;
+      return true;
+    case 8:
+      out = UART_DATA_8_BITS;
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool ESP32UART::ResolveStopBits(uint8_t stop_bits, uart_stop_bits_t& out)
+{
+  switch (stop_bits)
+  {
+    case 1:
+      out = UART_STOP_BITS_1;
+      return true;
+    case 2:
+      out = UART_STOP_BITS_2;
+      return true;
+    default:
+      return false;
+  }
+}
+
+uart_parity_t ESP32UART::ResolveParity(UART::Parity parity)
+{
+  switch (parity)
+  {
+    case UART::Parity::NO_PARITY:
+      return UART_PARITY_DISABLE;
+    case UART::Parity::EVEN:
+      return UART_PARITY_EVEN;
+    case UART::Parity::ODD:
+      return UART_PARITY_ODD;
+    default:
+      return UART_PARITY_DISABLE;
+  }
+}
+
+
+ErrorCode ESP32UART::InitUartHardware()
+{
+  if (uart_num_ >= UART_NUM_MAX)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  periph_module_t uart_module = PERIPH_MODULE_MAX;
+  if (ResolveUartPeriph(uart_num_, uart_module) != ErrorCode::OK)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  uart_hal_.dev = UART_LL_GET_HW(uart_num_);
+  if (uart_hal_.dev == nullptr)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  periph_module_enable(uart_module);
+  periph_module_reset(uart_module);
+
+  uart_ll_sclk_enable(uart_hal_.dev);
+  uart_hal_init(&uart_hal_, uart_num_);
+
+  uart_hw_enabled_ = true;
+  if (SetConfig(config_) != ErrorCode::OK)
+  {
+    uart_hw_enabled_ = false;
+    return ErrorCode::INIT_ERR;
+  }
+
+  if (ConfigurePins() != ErrorCode::OK)
+  {
+    uart_hw_enabled_ = false;
+    return ErrorCode::INIT_ERR;
+  }
+
+  uart_hal_txfifo_rst(&uart_hal_);
+  uart_hal_rxfifo_rst(&uart_hal_);
+  uart_hal_clr_intsts_mask(&uart_hal_, UINT32_MAX);
+  uart_hal_disable_intr_mask(&uart_hal_, UINT32_MAX);
+
+  return ErrorCode::OK;
+}
+
+void ESP32UART::DeinitUartHardware()
+{
+  if (!uart_hw_enabled_)
+  {
+    return;
+  }
+
+  periph_module_t uart_module = PERIPH_MODULE_MAX;
+  const bool has_module =
+      ResolveUartPeriph(uart_num_, uart_module) == ErrorCode::OK;
+
+  uart_hal_disable_intr_mask(&uart_hal_, UINT32_MAX);
+  uart_hal_clr_intsts_mask(&uart_hal_, UINT32_MAX);
+  uart_ll_sclk_disable(uart_hal_.dev);
+  if (has_module)
+  {
+    periph_module_disable(uart_module);
+  }
+
+  uart_hw_enabled_ = false;
+}
+
+ErrorCode ESP32UART::ConfigurePins()
+{
+  if (tx_pin_ >= 0)
+  {
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(tx_pin_))
+    {
+      return ErrorCode::ARG_ERR;
+    }
+    esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(tx_pin_));
+    esp_rom_gpio_connect_out_signal(tx_pin_,
+                                    UART_PERIPH_SIGNAL(uart_num_, SOC_UART_TX_PIN_IDX),
+                                    false, false);
+  }
+
+  if (rx_pin_ >= 0)
+  {
+    if (!GPIO_IS_VALID_GPIO(rx_pin_))
+    {
+      return ErrorCode::ARG_ERR;
+    }
+    gpio_input_enable(static_cast<gpio_num_t>(rx_pin_));
+    esp_rom_gpio_connect_in_signal(rx_pin_,
+                                   UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX),
+                                   false);
+  }
+  else
+  {
+    esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT,
+                                   UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX),
+                                   false);
+  }
+
+  if (rts_pin_ >= 0)
+  {
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(rts_pin_))
+    {
+      return ErrorCode::ARG_ERR;
+    }
+    esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(rts_pin_));
+    esp_rom_gpio_connect_out_signal(rts_pin_,
+                                    UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RTS_PIN_IDX),
+                                    false, false);
+  }
+
+  if (cts_pin_ >= 0)
+  {
+    if (!GPIO_IS_VALID_GPIO(cts_pin_))
+    {
+      return ErrorCode::ARG_ERR;
+    }
+    gpio_pullup_en(static_cast<gpio_num_t>(cts_pin_));
+    gpio_input_enable(static_cast<gpio_num_t>(cts_pin_));
+    esp_rom_gpio_connect_in_signal(cts_pin_,
+                                   UART_PERIPH_SIGNAL(uart_num_, SOC_UART_CTS_PIN_IDX),
+                                   false);
+  }
+
+  return ErrorCode::OK;
+}
+
+
+ErrorCode ESP32UART::TryStartTx(bool in_isr)
+{
+  bool started_now = false;
+
+  if (!tx_active_valid_)
+  {
+    (void)LoadActiveTxFromQueue(in_isr);
+  }
+
+  if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
+  {
+    if (!StartActiveTransfer(in_isr))
+    {
+      write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
+      tx_active_valid_ = false;
+      tx_active_reported_ = false;
+    }
+    else if (!tx_active_reported_)
+    {
+      write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+      tx_active_reported_ = true;
+      started_now = true;
+    }
+  }
+
+  if (!tx_pending_valid_)
+  {
+    (void)LoadPendingTxFromQueue(in_isr);
+  }
+
+  return started_now ? ErrorCode::OK : ErrorCode::PENDING;
+}
+
+bool ESP32UART::LoadActiveTxFromQueue(bool in_isr)
+{
+  while (true)
+  {
+    WriteInfoBlock info = {};
+    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (info.data.size_ > tx_double_buffer_.Size())
+    {
+      (void)write_port_->queue_info_->Pop(info);
+      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
+      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
+      continue;
+    }
+
+    if (write_port_->queue_data_->PopBatch(tx_double_buffer_.ActiveBuffer(),
+                                           info.data.size_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    tx_double_buffer_.SetActiveLength(info.data.size_);
+    tx_active_offset_ = 0;
+    tx_active_valid_ = true;
+    tx_active_reported_ = false;
+    return true;
+  }
+}
+
+bool ESP32UART::LoadPendingTxFromQueue(bool in_isr)
+{
+  if (tx_pending_valid_ || tx_double_buffer_.HasPending())
+  {
+    return false;
+  }
+
+  while (true)
+  {
+    WriteInfoBlock info = {};
+    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (info.data.size_ > tx_double_buffer_.Size())
+    {
+      (void)write_port_->queue_info_->Pop(info);
+      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
+      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
+      continue;
+    }
+
+    if (write_port_->queue_data_->PopBatch(tx_double_buffer_.PendingBuffer(),
+                                           info.data.size_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (write_port_->queue_info_->Pop(tx_pending_info_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    tx_double_buffer_.SetPendingLength(info.data.size_);
+    tx_double_buffer_.EnablePending();
+    tx_pending_valid_ = true;
+    return true;
+  }
+}
+
+bool ESP32UART::StartActiveTransfer(bool)
+{
+  if (!tx_active_valid_)
+  {
+    return false;
+  }
+
+  bool expected = false;
+  if (!tx_busy_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
+  {
+    return true;
+  }
+
+  tx_active_offset_ = 0;
+
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
+  {
+    if (StartDmaTx())
+    {
+      return true;
+    }
+
+    tx_busy_.store(false, std::memory_order_release);
+    return false;
+  }
+#endif
+
+  uart_hal_clr_intsts_mask(&uart_hal_, kUartTxIntrMask);
+  uart_hal_ena_intr_mask(&uart_hal_, kUartTxIntrMask);
+  FillTxFifo(false);
+
+  return true;
+}
+
+
+void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_isr)
+{
+  size_t offset = 0;
+  bool pushed_any = false;
+  while (offset < size)
+  {
+    const size_t free_space = read_port_->queue_data_->EmptySize();
+    if (free_space == 0)
+    {
+      break;
+    }
+
+    const size_t chunk = std::min(free_space, size - offset);
+    if (read_port_->queue_data_->PushBatch(data + offset, chunk) != ErrorCode::OK)
+    {
+      break;
+    }
+
+    offset += chunk;
+    pushed_any = true;
+  }
+
+  if (pushed_any)
+  {
+    read_port_->ProcessPendingReads(in_isr);
+  }
+}
+
+void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
+{
+  tx_busy_.store(false, std::memory_order_release);
+
+  if (tx_active_valid_ && !tx_active_reported_)
+  {
+    write_port_->Finish(in_isr, result, tx_active_info_);
+    tx_active_reported_ = true;
+  }
+
+  tx_active_valid_ = false;
+  tx_active_reported_ = false;
+
+  if ((result != ErrorCode::OK) && tx_pending_valid_)
+  {
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_pending_info_);
+    tx_pending_valid_ = false;
+  }
+
+  if (result != ErrorCode::OK)
+  {
+    tx_double_buffer_.Switch();
+    tx_double_buffer_.SetActiveLength(0);
+    tx_active_offset_ = 0;
+    return;
+  }
+
+  if (tx_pending_valid_ && tx_double_buffer_.HasPending())
+  {
+    const size_t pending_len = tx_double_buffer_.GetPendingLength();
+    tx_double_buffer_.Switch();
+    tx_double_buffer_.SetActiveLength(pending_len);
+    tx_active_info_ = tx_pending_info_;
+    tx_active_valid_ = true;
+    tx_active_reported_ = false;
+    tx_pending_valid_ = false;
+
+    if (!StartActiveTransfer(in_isr))
+    {
+      write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
+      tx_active_valid_ = false;
+      tx_active_reported_ = false;
+    }
+    else
+    {
+      write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+      tx_active_reported_ = true;
+    }
+  }
+  else
+  {
+    if (LoadActiveTxFromQueue(in_isr) && !StartActiveTransfer(in_isr))
+    {
+      write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
+      tx_active_valid_ = false;
+      tx_active_reported_ = false;
+    }
+    else if (tx_active_valid_ && !tx_active_reported_)
+    {
+      write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+      tx_active_reported_ = true;
+    }
+  }
+
+  if (!tx_pending_valid_)
+  {
+    (void)LoadPendingTxFromQueue(in_isr);
+  }
+}
+
+}  // namespace LibXR
