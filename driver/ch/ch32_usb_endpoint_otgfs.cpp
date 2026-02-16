@@ -192,19 +192,28 @@ static LibXR::RawData select_buffer(USB::Endpoint::EPNumber ep_num,
                                     USB::Endpoint::Direction dir,
                                     const LibXR::RawData& buffer)
 {
+  ASSERT(buffer.addr_ != nullptr);
+
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
     return buffer;
   }
   else
   {
+    ASSERT(dir == USB::Endpoint::Direction::OUT || dir == USB::Endpoint::Direction::IN);
+    ASSERT(buffer.size_ >= 4);
+    ASSERT((buffer.size_ & 0x1u) == 0);
+
+    const size_t PER_DIRECTION_SIZE = buffer.size_ / 2;
+
     if (dir == USB::Endpoint::Direction::OUT)
     {
-      return LibXR::RawData(buffer.addr_, 128);
+      return LibXR::RawData(buffer.addr_, PER_DIRECTION_SIZE);
     }
     else
     {
-      return LibXR::RawData(reinterpret_cast<uint8_t*>(buffer.addr_) + 128, 128);
+      return LibXR::RawData(reinterpret_cast<uint8_t*>(buffer.addr_) + PER_DIRECTION_SIZE,
+                            PER_DIRECTION_SIZE);
     }
   }
 }
