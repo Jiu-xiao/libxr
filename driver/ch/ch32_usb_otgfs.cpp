@@ -258,6 +258,8 @@ CH32USBOtgFS::CH32USBOtgFS(
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgFs::EP_OTG_FS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
+  ASSERT(cfgs_itr->buffer.addr_ != nullptr);
+  ASSERT(cfgs_itr->buffer.size_ >= static_cast<size_t>(packet_size));
 
   auto ep0_out =
       new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0, USB::Endpoint::Direction::OUT,
@@ -273,8 +275,15 @@ CH32USBOtgFS::CH32USBOtgFS(
   for (++cfgs_itr, ep_index = USB::Endpoint::EPNumber::EP1; cfgs_itr != EP_CFGS.end();
        ++cfgs_itr, ep_index = USB::Endpoint::NextEPNumber(ep_index))
   {
+    ASSERT(cfgs_itr->buffer.addr_ != nullptr);
+
     if (cfgs_itr->is_in == -1)
     {
+      // Current OTGFS non-EP0 bi-directional mode is 1/1/1 (RX_EN/TX_EN/BUF_MOD),
+      // which requires 256B total (OUT dual-64 + IN dual-64). Mode 1/1/0 needs 128B.
+      ASSERT(cfgs_itr->buffer.size_ >= 256);
+      ASSERT((cfgs_itr->buffer.size_ & 0x1u) == 0);
+
       auto ep_out = new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::OUT,
                                           cfgs_itr->buffer, false);
       USB::EndpointPool::Put(ep_out);
@@ -285,6 +294,8 @@ CH32USBOtgFS::CH32USBOtgFS(
     }
     else
     {
+      ASSERT(cfgs_itr->buffer.size_ > 0);
+
       auto ep = new CH32EndpointOtgFs(
           ep_index,
           cfgs_itr->is_in ? USB::Endpoint::Direction::IN : USB::Endpoint::Direction::OUT,
