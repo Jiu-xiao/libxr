@@ -31,11 +31,14 @@ class ESP32UART : public UART
             int rts_pin = PIN_NO_CHANGE, int cts_pin = PIN_NO_CHANGE,
             size_t rx_buffer_size = 1024, size_t tx_buffer_size = 512,
             uint32_t tx_queue_size = 5,
-            UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
+            UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1},
+            bool enable_dma = true);
 
   ~ESP32UART();
 
   ErrorCode SetConfig(UART::Configuration config) override;
+
+  ErrorCode SetLoopback(bool enable);
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 
@@ -86,6 +89,8 @@ class ESP32UART : public UART
   ErrorCode InstallUartIsr();
 
   void RemoveUartIsr();
+
+  void ConfigureRxInterruptPath();
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   ErrorCode InitDmaBackend();
@@ -151,6 +156,7 @@ class ESP32UART : public UART
   uart_hal_context_t uart_hal_ = {};
   intr_handle_t uart_intr_handle_ = nullptr;
   bool uart_isr_installed_ = false;
+  bool dma_requested_ = true;
 
   ReadPort _read_port;
   WritePort _write_port;
@@ -160,7 +166,9 @@ class ESP32UART : public UART
   uhci_hal_context_t uhci_hal_ = {};
   gdma_channel_handle_t tx_dma_channel_ = nullptr;
   gdma_channel_handle_t rx_dma_channel_ = nullptr;
-  gdma_link_list_handle_t tx_dma_link_ = nullptr;
+  gdma_link_list_handle_t tx_dma_links_[2] = {nullptr, nullptr};
+  uintptr_t tx_dma_head_addr_[2] = {0U, 0U};
+  uint8_t* tx_dma_buffer_addr_[2] = {nullptr, nullptr};
   gdma_link_list_handle_t rx_dma_link_ = nullptr;
   size_t tx_dma_alignment_ = 1;
   size_t rx_dma_alignment_ = 1;

@@ -22,6 +22,16 @@ constexpr uint32_t kUartTxIntrMask = UART_INTR_TXFIFO_EMPTY;
 
 constexpr uint8_t kRxToutThreshold = 4;
 constexpr uint16_t kTxEmptyThreshold = 24;
+
+bool IsConsoleUartInUse(uart_port_t uart_num)
+{
+#if defined(CONFIG_ESP_CONSOLE_UART) && CONFIG_ESP_CONSOLE_UART
+  return static_cast<int>(uart_num) == CONFIG_ESP_CONSOLE_UART_NUM;
+#else
+  (void)uart_num;
+  return false;
+#endif
+}
 }  // namespace
 
 namespace LibXR
@@ -70,7 +80,8 @@ ErrorCode ESP32UART::ResolveUartPeriph(uart_port_t uart_num, periph_module_t& ou
 
 ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
                      int cts_pin, size_t rx_buffer_size, size_t tx_buffer_size,
-                     uint32_t tx_queue_size, UART::Configuration config)
+                     uint32_t tx_queue_size, UART::Configuration config,
+                     bool enable_dma)
     : UART(&_read_port, &_write_port),
       uart_num_(uart_num),
       tx_pin_(tx_pin),
@@ -84,9 +95,11 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       tx_storage_size_(tx_buffer_size * 2),
       tx_buffer_size_(tx_buffer_size),
       tx_double_buffer_(RawData{tx_storage_, tx_storage_size_}),
+      dma_requested_(enable_dma),
       _read_port(rx_buffer_size),
       _write_port(tx_queue_size, tx_buffer_size)
 {
+  ASSERT(!IsConsoleUartInUse(uart_num_));
   ASSERT(uart_num_ < UART_NUM_MAX);
   ASSERT(uart_num_ < SOC_UART_HP_NUM);
   ASSERT(rx_isr_buffer_size_ > 0);
@@ -105,10 +118,22 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   }
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (InitDmaBackend() != ErrorCode::OK)
+  if (dma_requested_)
   {
-    ASSERT(false);
-    return;
+    if (InitDmaBackend() != ErrorCode::OK)
+    {
+      ASSERT(false);
+      return;
+    }
+  }
+  else
+  {
+    if (InstallUartIsr() != ErrorCode::OK)
+    {
+      ASSERT(false);
+      return;
+    }
+    ConfigureRxInterruptPath();
   }
 #else
   if (InstallUartIsr() != ErrorCode::OK)
@@ -116,17 +141,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
     ASSERT(false);
     return;
   }
-
-  const size_t rx_full_floor = 16;
-  const size_t rx_full_ceil = std::max<size_t>(rx_full_floor, SOC_UART_FIFO_LEN / 2);
-  const uint16_t full_thr =
-      static_cast<uint16_t>(std::min<size_t>(rx_full_ceil,
-                                             std::max<size_t>(rx_full_floor,
-                                                              rx_isr_buffer_size_ / 16)));
-  uart_hal_set_rxfifo_full_thr(&uart_hal_, full_thr);
-  uart_hal_set_rx_timeout(&uart_hal_, kRxToutThreshold);
-  uart_hal_clr_intsts_mask(&uart_hal_, kUartRxIntrMask);
-  uart_hal_ena_intr_mask(&uart_hal_, kUartRxIntrMask);
+  ConfigureRxInterruptPath();
 #endif
 }
 
@@ -143,6 +158,21 @@ ESP32UART::~ESP32UART()
 
   delete[] rx_isr_buffer_;
   rx_isr_buffer_ = nullptr;
+}
+
+void ESP32UART::ConfigureRxInterruptPath()
+{
+  const size_t rx_full_floor = 16;
+  const size_t rx_full_ceil = std::max<size_t>(rx_full_floor, SOC_UART_FIFO_LEN / 2);
+  const uint16_t full_thr =
+      static_cast<uint16_t>(std::min<size_t>(rx_full_ceil,
+                                             std::max<size_t>(rx_full_floor,
+                                                              rx_isr_buffer_size_ / 16)));
+
+  uart_hal_set_rxfifo_full_thr(&uart_hal_, full_thr);
+  uart_hal_set_rx_timeout(&uart_hal_, kRxToutThreshold);
+  uart_hal_clr_intsts_mask(&uart_hal_, kUartRxIntrMask);
+  uart_hal_ena_intr_mask(&uart_hal_, kUartRxIntrMask);
 }
 
 ErrorCode ESP32UART::SetConfig(UART::Configuration config)
@@ -193,14 +223,25 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
-ErrorCode ESP32UART::WriteFun(WritePort& port, bool in_isr)
+ErrorCode ESP32UART::SetLoopback(bool enable)
+{
+  if (!uart_hw_enabled_)
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
+  uart_ll_set_loop_back(uart_hal_.dev, enable);
+  return ErrorCode::OK;
+}
+
+ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = CONTAINER_OF(&port, ESP32UART, _write_port);
   return uart->TryStartTx(in_isr);
 }
 
-ErrorCode ESP32UART::FastWriteFun(WritePort& port, ConstRawData data, WriteOperation& op,
-                                  bool in_isr)
+ErrorCode IRAM_ATTR ESP32UART::FastWriteFun(WritePort& port, ConstRawData data,
+                                            WriteOperation& op, bool in_isr)
 {
   auto* uart = CONTAINER_OF(&port, ESP32UART, _write_port);
 
@@ -463,7 +504,7 @@ ErrorCode ESP32UART::ConfigurePins()
 }
 
 
-ErrorCode ESP32UART::TryStartTx(bool in_isr)
+ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 {
   if (!tx_active_valid_)
   {
@@ -498,7 +539,7 @@ ErrorCode ESP32UART::TryStartTx(bool in_isr)
   return ErrorCode::PENDING;
 }
 
-bool ESP32UART::LoadActiveTxFromQueue(bool in_isr)
+bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 {
   while (true)
   {
@@ -535,7 +576,7 @@ bool ESP32UART::LoadActiveTxFromQueue(bool in_isr)
   }
 }
 
-bool ESP32UART::LoadPendingTxFromQueue(bool in_isr)
+bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 {
   if (tx_pending_valid_ || tx_double_buffer_.HasPending())
   {
@@ -576,7 +617,7 @@ bool ESP32UART::LoadPendingTxFromQueue(bool in_isr)
   }
 }
 
-bool ESP32UART::StartActiveTransfer(bool)
+bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
 {
   if (!tx_active_valid_)
   {

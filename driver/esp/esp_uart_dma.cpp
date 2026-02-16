@@ -3,16 +3,40 @@
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
 
 #include <algorithm>
+#include <array>
 
 #include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_private/periph_ctrl.h"
 #include "hal/uhci_ll.h"
+#include "soc/ext_mem_defs.h"
 
 namespace
 {
-constexpr uint32_t kDmaRxNodeCount = 2;
+// RX uses a circular DMA descriptor ring, similar to STM/CH circular RX DMA
+// behavior (continuous receive + software consumer index).
+constexpr uint32_t kDmaRxNodeCount = 8;
+constexpr size_t kDmaMaxBufferSizePerLinkItem = 4095U;
+
+struct GdmaLinkItem
+{
+  struct
+  {
+    uint32_t size : 12;
+    uint32_t length : 12;
+    uint32_t reserved24 : 4;
+    uint32_t err_eof : 1;
+    uint32_t reserved29 : 1;
+    uint32_t suc_eof : 1;
+    uint32_t owner : 1;
+  } dw0;
+  void* buffer;
+  GdmaLinkItem* next;
+};
+
+constexpr uint32_t kGdmaOwnerCpu = 0U;
+constexpr uint32_t kGdmaOwnerDma = 1U;
 
 size_t AlignUp(size_t value, size_t align)
 {
@@ -21,6 +45,20 @@ size_t AlignUp(size_t value, size_t align)
     return value;
   }
   return ((value + align - 1) / align) * align;
+}
+
+uintptr_t CacheAddrToNonCache(uintptr_t addr)
+{
+#if SOC_NON_CACHEABLE_OFFSET
+  return addr + SOC_NON_CACHEABLE_OFFSET;
+#else
+  return addr;
+#endif
+}
+
+GdmaLinkItem* LinkItemFromHeadAddr(uintptr_t head_addr)
+{
+  return reinterpret_cast<GdmaLinkItem*>(CacheAddrToNonCache(head_addr));
 }
 }  // namespace
 
@@ -147,10 +185,40 @@ ErrorCode ESP32UART::InitDmaBackend()
       .item_alignment = 4,
       .flags = {},
   };
-  if (gdma_new_link_list(&tx_link_cfg, &tx_dma_link_) != ESP_OK)
+  tx_dma_buffer_addr_[0] = tx_double_buffer_.ActiveBuffer();
+  tx_dma_buffer_addr_[1] = tx_double_buffer_.PendingBuffer();
+
+  for (int i = 0; i < 2; ++i)
   {
-    DeinitDmaBackend();
-    return ErrorCode::INIT_ERR;
+    if (gdma_new_link_list(&tx_link_cfg, &tx_dma_links_[i]) != ESP_OK)
+    {
+      DeinitDmaBackend();
+      return ErrorCode::INIT_ERR;
+    }
+
+    gdma_buffer_mount_config_t tx_mount = {
+        .buffer = tx_dma_buffer_addr_[i],
+        .buffer_alignment = tx_dma_alignment_,
+        .length = 1,
+        .flags = {
+            .mark_eof = 1,
+            .mark_final = 1,
+            .bypass_buffer_align_check = 0,
+        },
+    };
+
+    if (gdma_link_mount_buffers(tx_dma_links_[i], 0, &tx_mount, 1, nullptr) != ESP_OK)
+    {
+      DeinitDmaBackend();
+      return ErrorCode::INIT_ERR;
+    }
+
+    tx_dma_head_addr_[i] = gdma_link_get_head_addr(tx_dma_links_[i]);
+    if (tx_dma_head_addr_[i] == 0U)
+    {
+      DeinitDmaBackend();
+      return ErrorCode::INIT_ERR;
+    }
   }
 
   gdma_tx_event_callbacks_t tx_callbacks = {
@@ -208,7 +276,9 @@ ErrorCode ESP32UART::InitDmaBackend()
     return ErrorCode::INIT_ERR;
   }
 
-  const size_t rx_chunk_target = std::min<size_t>(rx_isr_buffer_size_, 128);
+  // Keep one ring window reasonably large to lower ISR pressure at high baud.
+  const size_t rx_chunk_target = std::min<size_t>(
+      std::max<size_t>(32, rx_isr_buffer_size_ / kDmaRxNodeCount), 512);
   rx_dma_chunk_size_ = std::max<size_t>(AlignUp(rx_chunk_target, 4), 32);
   rx_dma_node_count_ = kDmaRxNodeCount;
   const size_t rx_storage_alignment = std::max<size_t>(4, rx_dma_alignment_);
@@ -225,30 +295,24 @@ ErrorCode ESP32UART::InitDmaBackend()
     return ErrorCode::NO_MEM;
   }
 
-  gdma_buffer_mount_config_t rx_mount[kDmaRxNodeCount] = {
-      {
-          .buffer = rx_dma_storage_,
-          .buffer_alignment = rx_dma_alignment_,
-          .length = rx_dma_chunk_size_,
-          .flags = {
-              .mark_eof = 0,
-              .mark_final = 0,
-              .bypass_buffer_align_check = 0,
-          },
-      },
-      {
-          .buffer = rx_dma_storage_ + rx_dma_chunk_size_,
-          .buffer_alignment = rx_dma_alignment_,
-          .length = rx_dma_chunk_size_,
-          .flags = {
-              .mark_eof = 0,
-              .mark_final = 0,
-              .bypass_buffer_align_check = 0,
-          },
-      },
-  };
+  std::array<gdma_buffer_mount_config_t, kDmaRxNodeCount> rx_mount = {};
+  for (uint32_t i = 0; i < kDmaRxNodeCount; ++i)
+  {
+    rx_mount[i] = gdma_buffer_mount_config_t{
+        .buffer = rx_dma_storage_ + (static_cast<size_t>(i) * rx_dma_chunk_size_),
+        .buffer_alignment = rx_dma_alignment_,
+        .length = rx_dma_chunk_size_,
+        .flags =
+            {
+                .mark_eof = 0,
+                .mark_final = 0,
+                .bypass_buffer_align_check = 0,
+            },
+    };
+  }
 
-  if (gdma_link_mount_buffers(rx_dma_link_, 0, rx_mount, kDmaRxNodeCount, nullptr) !=
+  if (gdma_link_mount_buffers(rx_dma_link_, 0, rx_mount.data(), kDmaRxNodeCount,
+                              nullptr) !=
       ESP_OK)
   {
     DeinitDmaBackend();
@@ -307,10 +371,15 @@ void ESP32UART::DeinitDmaBackend()
     rx_dma_channel_ = nullptr;
   }
 
-  if (tx_dma_link_ != nullptr)
+  for (int i = 0; i < 2; ++i)
   {
-    gdma_del_link_list(tx_dma_link_);
-    tx_dma_link_ = nullptr;
+    if (tx_dma_links_[i] != nullptr)
+    {
+      gdma_del_link_list(tx_dma_links_[i]);
+      tx_dma_links_[i] = nullptr;
+    }
+    tx_dma_head_addr_[i] = 0U;
+    tx_dma_buffer_addr_[i] = nullptr;
   }
   if (rx_dma_link_ != nullptr)
   {
@@ -338,30 +407,57 @@ void ESP32UART::DeinitDmaBackend()
   rx_dma_node_index_ = 0;
 }
 
-bool ESP32UART::StartDmaTx()
+bool IRAM_ATTR ESP32UART::StartDmaTx()
 {
-  if ((tx_dma_channel_ == nullptr) || (tx_dma_link_ == nullptr) || !tx_active_valid_)
+  if ((tx_dma_channel_ == nullptr) || !tx_active_valid_)
   {
     return false;
   }
 
-  gdma_buffer_mount_config_t tx_mount = {
-      .buffer = tx_double_buffer_.ActiveBuffer(),
-      .buffer_alignment = tx_dma_alignment_,
-      .length = tx_double_buffer_.GetActiveLength(),
-      .flags = {
-          .mark_eof = 1,
-          .mark_final = 1,
-          .bypass_buffer_align_check = 0,
-      },
-  };
-
-  if (gdma_link_mount_buffers(tx_dma_link_, 0, &tx_mount, 1, nullptr) != ESP_OK)
+  uint8_t* const active_buffer = tx_double_buffer_.ActiveBuffer();
+  const size_t active_len = tx_double_buffer_.GetActiveLength();
+  if ((active_buffer == nullptr) || (active_len == 0) ||
+      (active_len > kDmaMaxBufferSizePerLinkItem))
   {
     return false;
   }
 
-  return gdma_start(tx_dma_channel_, gdma_link_get_head_addr(tx_dma_link_)) == ESP_OK;
+  int link_index = -1;
+  if (active_buffer == tx_dma_buffer_addr_[0])
+  {
+    link_index = 0;
+  }
+  else if (active_buffer == tx_dma_buffer_addr_[1])
+  {
+    link_index = 1;
+  }
+  else
+  {
+    return false;
+  }
+
+  if ((tx_dma_links_[link_index] == nullptr) || (tx_dma_head_addr_[link_index] == 0U))
+  {
+    return false;
+  }
+
+  auto* desc = LinkItemFromHeadAddr(tx_dma_head_addr_[link_index]);
+  if (desc == nullptr)
+  {
+    return false;
+  }
+
+  // Keep descriptor list pre-mounted and only patch the dynamic transfer length in-place.
+  desc->buffer = active_buffer;
+  desc->dw0.size = static_cast<uint32_t>(active_len);
+  desc->dw0.length = static_cast<uint32_t>(active_len);
+  desc->dw0.err_eof = 0U;
+  desc->dw0.suc_eof = 1U;
+  desc->dw0.owner = kGdmaOwnerDma;
+  desc->next = nullptr;
+  std::atomic_thread_fence(std::memory_order_release);
+
+  return gdma_start(tx_dma_channel_, tx_dma_head_addr_[link_index]) == ESP_OK;
 }
 
 void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)

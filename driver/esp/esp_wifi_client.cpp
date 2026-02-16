@@ -10,6 +10,43 @@
 
 namespace LibXR
 {
+namespace
+{
+
+size_t BoundedStringLength(const char* text, size_t max_len)
+{
+  if (text == nullptr) return 0;
+  size_t len = 0;
+  while (len < max_len && text[len] != '\0')
+  {
+    ++len;
+  }
+  return len;
+}
+
+void CopyToWifiField(uint8_t* dst, size_t dst_size, const char* src)
+{
+  if (dst_size == 0) return;
+  const size_t copy_len = BoundedStringLength(src, dst_size - 1);
+  if (copy_len > 0)
+  {
+    std::memcpy(dst, src, copy_len);
+  }
+  dst[copy_len] = 0;
+}
+
+void CopyToCharField(char* dst, size_t dst_size, const char* src)
+{
+  if (dst_size == 0) return;
+  const size_t copy_len = BoundedStringLength(src, dst_size - 1);
+  if (copy_len > 0)
+  {
+    std::memcpy(dst, src, copy_len);
+  }
+  dst[copy_len] = '\0';
+}
+
+}  // namespace
 
 ESP32WifiClient::ESP32WifiClient()
 {
@@ -91,10 +128,9 @@ WifiClient::WifiError ESP32WifiClient::Connect(const Config& config)
   if (!enabled_) return WifiError::NOT_ENABLED;
 
   wifi_config_t wifi_config{};
-  std::strncpy(reinterpret_cast<char*>(wifi_config.sta.ssid), config.ssid,
-               sizeof(wifi_config.sta.ssid));
-  std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password), config.password,
-               sizeof(wifi_config.sta.password));
+  CopyToWifiField(wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), config.ssid);
+  CopyToWifiField(wifi_config.sta.password, sizeof(wifi_config.sta.password),
+                  config.password);
   esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
   esp_wifi_connect();
 
@@ -160,8 +196,8 @@ WifiClient::WifiError ESP32WifiClient::Scan(ScanResult* out_list, size_t max_cou
   out_found = ap_num;
   for (int i = 0; i < ap_num; ++i)
   {
-    std::strncpy(out_list[i].ssid, reinterpret_cast<const char*>(ap_records[i].ssid),
-                 sizeof(out_list[i].ssid));
+    CopyToCharField(out_list[i].ssid, sizeof(out_list[i].ssid),
+                    reinterpret_cast<const char*>(ap_records[i].ssid));
     out_list[i].rssi = ap_records[i].rssi;
     out_list[i].security = (ap_records[i].authmode == WIFI_AUTH_OPEN) ? Security::OPEN
                            : (ap_records[i].authmode == WIFI_AUTH_WPA2_PSK)
