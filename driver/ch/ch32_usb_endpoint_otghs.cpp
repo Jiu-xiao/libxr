@@ -9,6 +9,11 @@ using namespace LibXR;
 
 #if defined(USBHSD)
 
+namespace
+{
+constexpr uint16_t kHsBulkMaxPacketSize = 512;
+}
+
 // NOLINTBEGIN
 static inline volatile uint8_t* get_tx_control_addr(USB::Endpoint::EPNumber ep_num)
 {
@@ -410,6 +415,11 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   if (ep_cfg.max_packet_size > GetBuffer().size_)
   {
     ep_cfg.max_packet_size = GetBuffer().size_;
+  }
+
+  if (ep_cfg.type == Type::BULK)
+  {
+    ASSERT(ep_cfg.max_packet_size == kHsBulkMaxPacketSize);
   }
 
   if (GetDirection() == Direction::IN)
