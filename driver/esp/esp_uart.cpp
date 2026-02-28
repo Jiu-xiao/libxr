@@ -112,11 +112,6 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   tx_active_length_ = 0;
   tx_pending_length_ = 0;
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  // ESP UART policy: use DMA whenever hardware backend exists.
-  dma_requested_ = true;
-#endif
-
   _read_port = ReadFun;
   _write_port = WriteFun;
 
@@ -131,11 +126,11 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   {
     if (InitDmaBackend() != ErrorCode::OK)
     {
-      ASSERT(false);
-      return;
+      dma_requested_ = false;
     }
   }
-  else
+
+  if (!dma_backend_enabled_)
   {
     if (InstallUartIsr() != ErrorCode::OK)
     {
