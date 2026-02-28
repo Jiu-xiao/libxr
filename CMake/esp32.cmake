@@ -9,6 +9,13 @@ endif()
 
 target_compile_definitions(xr PUBLIC ESP_PLATFORM=1)
 
+# Keep platform macro collision workaround in ESP driver layer.
+# Xtensa headers may define INTERRUPT and break Endpoint::Type::INTERRUPT.
+target_compile_options(
+  xr PRIVATE
+  -include
+  esp_platform_macro_fix.hpp)
+
 # Prefer official ESP-IDF component targets so headers/libs are managed by IDF.
 set(_libxr_idf_components
     freertos

@@ -8,6 +8,7 @@
 #include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
+#include "esp_memory_utils.h"
 #include "esp_private/periph_ctrl.h"
 #include "hal/uhci_ll.h"
 #include "soc/ext_mem_defs.h"
@@ -60,6 +61,36 @@ GdmaLinkItem* LinkItemFromHeadAddr(uintptr_t head_addr)
 {
   return reinterpret_cast<GdmaLinkItem*>(CacheAddrToNonCache(head_addr));
 }
+
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
+extern "C" esp_err_t esp_cache_msync(void* addr, size_t size, int flags);
+
+constexpr int kCacheSyncFlagUnaligned = (1 << 1);
+constexpr int kCacheSyncFlagDirC2M = (1 << 2);
+constexpr int kCacheSyncFlagDirM2C = (1 << 3);
+
+bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
+{
+  if ((addr == nullptr) || (size == 0U))
+  {
+    return true;
+  }
+
+#if SOC_PSRAM_DMA_CAPABLE && !SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+  if (!esp_ptr_external_ram(addr))
+  {
+    return true;
+  }
+#endif
+
+  int flags = cache_to_mem ? kCacheSyncFlagDirC2M : kCacheSyncFlagDirM2C;
+  flags |= kCacheSyncFlagUnaligned;
+
+  const esp_err_t ret = esp_cache_msync(const_cast<void*>(addr), size, flags);
+  // Non-cacheable regions can return ESP_ERR_INVALID_ARG; treat as no-op success.
+  return (ret == ESP_OK) || (ret == ESP_ERR_INVALID_ARG);
+}
+#endif
 }  // namespace
 
 namespace LibXR
@@ -185,8 +216,8 @@ ErrorCode ESP32UART::InitDmaBackend()
       .item_alignment = 4,
       .flags = {},
   };
-  tx_dma_buffer_addr_[0] = tx_double_buffer_.ActiveBuffer();
-  tx_dma_buffer_addr_[1] = tx_double_buffer_.PendingBuffer();
+  tx_dma_buffer_addr_[0] = tx_active_buffer_;
+  tx_dma_buffer_addr_[1] = tx_pending_buffer_;
 
   for (int i = 0; i < 2; ++i)
   {
@@ -414,8 +445,8 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
     return false;
   }
 
-  uint8_t* const active_buffer = tx_double_buffer_.ActiveBuffer();
-  const size_t active_len = tx_double_buffer_.GetActiveLength();
+  uint8_t* const active_buffer = tx_active_buffer_;
+  const size_t active_len = tx_active_length_;
   if ((active_buffer == nullptr) || (active_len == 0) ||
       (active_len > kDmaMaxBufferSizePerLinkItem))
   {
@@ -457,6 +488,13 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
   desc->next = nullptr;
   std::atomic_thread_fence(std::memory_order_release);
 
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
+  if (!CacheSyncDmaBuffer(active_buffer, active_len, true))
+  {
+    return false;
+  }
+#endif
+
   return gdma_start(tx_dma_channel_, tx_dma_head_addr_[link_index]) == ESP_OK;
 }
 
@@ -474,8 +512,16 @@ void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
   {
     const size_t offset = static_cast<size_t>(rx_dma_node_index_) * rx_dma_chunk_size_;
     const size_t chunk = std::min(remaining, rx_dma_chunk_size_);
+    auto* chunk_ptr = rx_dma_storage_ + offset;
 
-    PushRxBytes(rx_dma_storage_ + offset, chunk, in_isr);
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
+    if (!CacheSyncDmaBuffer(chunk_ptr, chunk, false))
+    {
+      HandleDmaRxError();
+      return;
+    }
+#endif
+    PushRxBytes(chunk_ptr, chunk, in_isr);
     remaining -= chunk;
     rx_dma_node_index_ = (rx_dma_node_index_ + 1U) % rx_dma_node_count_;
   }
