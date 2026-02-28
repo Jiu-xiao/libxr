@@ -126,7 +126,8 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   {
     if (InitDmaBackend() != ErrorCode::OK)
     {
-      dma_requested_ = false;
+      ASSERT(false);
+      return;
     }
   }
 
