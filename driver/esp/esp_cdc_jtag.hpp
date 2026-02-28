@@ -6,8 +6,7 @@
 
 #include "sdkconfig.h"
 #include "esp_intr_alloc.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/portmacro.h"
+#include "flag.hpp"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
 
@@ -37,8 +36,6 @@ class ESP32CDCJtag : public UART
   ErrorCode SetConfig(UART::Configuration config) override;
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
-  static ErrorCode FastWriteFun(WritePort& port, ConstRawData data, WriteOperation& op,
-                                bool in_isr);
 
   static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
@@ -51,13 +48,18 @@ class ESP32CDCJtag : public UART
 
   void HandleInterrupt();
 
-  ErrorCode WriteBlocking(const uint8_t* data, size_t size, bool in_isr);
+  ErrorCode TryStartTx(bool in_isr);
+  bool LoadActiveTxFromQueue(bool in_isr);
+  bool LoadPendingTxFromQueue(bool in_isr);
+  bool StartActiveTransfer(bool in_isr);
+  bool StartAndReportActive(bool in_isr);
+  void OnTxTransferDone(bool in_isr, ErrorCode result);
   bool PumpTx(bool in_isr);
+  void ClearActiveTx();
+  void ClearPendingTx();
   void ResetTxState(bool in_isr);
 
   UART::Configuration config_;
-  uint8_t* tx_work_buffer_ = nullptr;
-  size_t tx_work_buffer_size_ = 0;
   uint8_t* tx_slot_storage_ = nullptr;
   size_t tx_slot_size_ = 0;
   uint8_t* tx_slot_a_ = nullptr;
@@ -65,16 +67,18 @@ class ESP32CDCJtag : public UART
   intr_handle_t intr_handle_ = nullptr;
   bool intr_installed_ = false;
   bool hw_inited_ = false;
-  portMUX_TYPE tx_lock_ = portMUX_INITIALIZER_UNLOCKED;
   const uint8_t* tx_active_ptr_ = nullptr;
   size_t tx_active_size_ = 0;
   size_t tx_active_offset_ = 0;
+  WriteInfoBlock tx_active_info_ = {};
+  bool tx_active_valid_ = false;
+  bool tx_active_reported_ = false;
   const uint8_t* tx_pending_ptr_ = nullptr;
   size_t tx_pending_size_ = 0;
   bool tx_pending_valid_ = false;
+  WriteInfoBlock tx_pending_info_ = {};
   std::atomic<bool> tx_busy_{false};
-  std::atomic<bool> tx_source_done_{true};
-  std::atomic<uint32_t> tx_event_seq_{0};
+  Flag::Plain in_tx_isr_;
 
   ReadPort _read_port;
   WritePort _write_port;

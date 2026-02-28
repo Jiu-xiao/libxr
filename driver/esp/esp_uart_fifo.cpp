@@ -31,8 +31,16 @@ ErrorCode ESP32UART::InstallUartIsr()
     return ErrorCode::OK;
   }
 
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S3
+  // Classic ESP32/S3 can enter cache-disabled flash windows while UART IRQ is active.
+  // The current WritePort path is not fully IRAM-safe, so keep this IRQ non-IRAM.
+  constexpr int kUartIntrFlags = 0;
+#else
+  constexpr int kUartIntrFlags = ESP_INTR_FLAG_IRAM;
+#endif
+
   const esp_err_t err = esp_intr_alloc(uart_periph_signal[uart_num_].irq,
-                                       ESP_INTR_FLAG_IRAM,
+                                       kUartIntrFlags,
                                        UartIsrEntry,
                                        this,
                                        &uart_intr_handle_);
@@ -62,7 +70,7 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
     return;
   }
 
-  while (tx_active_offset_ < tx_double_buffer_.GetActiveLength())
+  while (tx_active_offset_ < tx_active_length_)
   {
     if (uart_hal_get_txfifo_len(&uart_hal_) == 0)
     {
@@ -70,9 +78,9 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
     }
 
     uint32_t write_size = 0;
-    const uint8_t* src = tx_double_buffer_.ActiveBuffer() + tx_active_offset_;
-    const uint32_t remaining = static_cast<uint32_t>(
-        tx_double_buffer_.GetActiveLength() - tx_active_offset_);
+    const uint8_t* src = tx_active_buffer_ + tx_active_offset_;
+    const uint32_t remaining =
+        static_cast<uint32_t>(tx_active_length_ - tx_active_offset_);
 
     uart_hal_write_txfifo(&uart_hal_, src, remaining, &write_size);
     if (write_size == 0)
@@ -83,7 +91,7 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
     tx_active_offset_ += write_size;
   }
 
-  if (tx_active_offset_ >= tx_double_buffer_.GetActiveLength())
+  if (tx_active_offset_ >= tx_active_length_)
   {
     if (in_isr)
     {

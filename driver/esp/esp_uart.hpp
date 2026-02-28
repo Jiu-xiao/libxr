@@ -10,7 +10,6 @@
 #include "hal/uart_types.h"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
-#include "double_buffer.hpp"
 #include "uart.hpp"
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
@@ -41,9 +40,6 @@ class ESP32UART : public UART
   ErrorCode SetLoopback(bool enable);
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
-
-  static ErrorCode FastWriteFun(WritePort& port, ConstRawData data, WriteOperation& op,
-                                bool in_isr);
 
   static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
@@ -115,6 +111,9 @@ class ESP32UART : public UART
   bool LoadPendingTxFromQueue(bool in_isr);
 
   bool StartActiveTransfer(bool in_isr);
+  bool StartAndReportActive(bool in_isr);
+  void ClearActiveTx();
+  void ClearPendingTx();
 
   void FillTxFifo(bool in_isr);
 
@@ -142,7 +141,10 @@ class ESP32UART : public UART
   uint8_t* tx_storage_ = nullptr;
   size_t tx_storage_size_ = 0;
   size_t tx_buffer_size_ = 0;
-  DoubleBuffer tx_double_buffer_;
+  uint8_t* tx_active_buffer_ = nullptr;
+  uint8_t* tx_pending_buffer_ = nullptr;
+  size_t tx_active_length_ = 0;
+  size_t tx_pending_length_ = 0;
   size_t tx_active_offset_ = 0;
 
   WriteInfoBlock tx_active_info_ = {};

@@ -94,7 +94,6 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       tx_storage_(AllocateTxStorage(tx_buffer_size * 2)),
       tx_storage_size_(tx_buffer_size * 2),
       tx_buffer_size_(tx_buffer_size),
-      tx_double_buffer_(RawData{tx_storage_, tx_storage_size_}),
       dma_requested_(enable_dma),
       _read_port(rx_buffer_size),
       _write_port(tx_queue_size, tx_buffer_size)
@@ -106,10 +105,20 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   ASSERT(tx_buffer_size_ > 0);
   ASSERT(rx_isr_buffer_ != nullptr);
   ASSERT(tx_storage_ != nullptr);
+  ASSERT(tx_storage_size_ >= (tx_buffer_size_ * 2U));
+
+  tx_active_buffer_ = tx_storage_;
+  tx_pending_buffer_ = tx_storage_ + tx_buffer_size_;
+  tx_active_length_ = 0;
+  tx_pending_length_ = 0;
+
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  // ESP UART policy: use DMA whenever hardware backend exists.
+  dma_requested_ = true;
+#endif
 
   _read_port = ReadFun;
   _write_port = WriteFun;
-  _write_port.fast_write_fun_ = FastWriteFun;
 
   if (InitUartHardware() != ErrorCode::OK)
   {
@@ -238,84 +247,6 @@ ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = CONTAINER_OF(&port, ESP32UART, _write_port);
   return uart->TryStartTx(in_isr);
-}
-
-ErrorCode IRAM_ATTR ESP32UART::FastWriteFun(WritePort& port, ConstRawData data,
-                                            WriteOperation& op, bool in_isr)
-{
-  auto* uart = CONTAINER_OF(&port, ESP32UART, _write_port);
-
-  if ((data.addr_ == nullptr) || (data.size_ == 0))
-  {
-    return ErrorCode::NOT_SUPPORT;
-  }
-
-  if (data.size_ > uart->tx_double_buffer_.Size())
-  {
-    return ErrorCode::SIZE_ERR;
-  }
-
-  WritePort::LockState expected = WritePort::LockState::UNLOCKED;
-  if (!port.lock_.compare_exchange_strong(expected, WritePort::LockState::LOCKED))
-  {
-    return ErrorCode::BUSY;
-  }
-
-  const bool idle = !uart->tx_busy_.load(std::memory_order_acquire) &&
-                    !uart->tx_active_valid_ && !uart->tx_pending_valid_ &&
-                    !uart->tx_double_buffer_.HasPending() &&
-                    (port.queue_info_->Size() == 0) && (port.queue_data_->Size() == 0);
-  if (idle)
-  {
-    std::memcpy(uart->tx_double_buffer_.ActiveBuffer(), data.addr_, data.size_);
-    uart->tx_double_buffer_.SetActiveLength(data.size_);
-    uart->tx_active_offset_ = 0;
-    uart->tx_active_info_ = WriteInfoBlock{data, op};
-    uart->tx_active_valid_ = true;
-    uart->tx_active_reported_ = false;
-    uart->tx_pending_valid_ = false;
-    op.MarkAsRunning();
-
-    const bool started = uart->StartActiveTransfer(in_isr);
-    if (!started)
-    {
-      uart->tx_active_valid_ = false;
-      uart->tx_active_reported_ = false;
-      if (op.type != WriteOperation::OperationType::BLOCK)
-      {
-        op.UpdateStatus(in_isr, ErrorCode::FAILED);
-      }
-    }
-    else
-    {
-      // Current op completion is reported by WritePort when FastWriteFun returns OK.
-      uart->tx_active_reported_ = true;
-    }
-
-    port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
-    return started ? ErrorCode::OK : ErrorCode::FAILED;
-  }
-
-  const bool direct_pending = uart->tx_busy_.load(std::memory_order_acquire) &&
-                              uart->tx_active_valid_ && !uart->tx_pending_valid_ &&
-                              !uart->tx_double_buffer_.HasPending() &&
-                              (port.queue_info_->Size() == 0) &&
-                              (port.queue_data_->Size() == 0);
-  if (direct_pending)
-  {
-    std::memcpy(uart->tx_double_buffer_.PendingBuffer(), data.addr_, data.size_);
-    uart->tx_double_buffer_.SetPendingLength(data.size_);
-    uart->tx_double_buffer_.EnablePending();
-    uart->tx_pending_info_ = WriteInfoBlock{data, op};
-    uart->tx_pending_valid_ = true;
-    op.MarkAsRunning();
-
-    port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
-    return ErrorCode::PENDING;
-  }
-
-  port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
-  return ErrorCode::NOT_SUPPORT;
 }
 
 ErrorCode ESP32UART::ReadFun(ReadPort&, bool)
@@ -503,6 +434,37 @@ ErrorCode ESP32UART::ConfigurePins()
   return ErrorCode::OK;
 }
 
+void IRAM_ATTR ESP32UART::ClearActiveTx()
+{
+  tx_active_length_ = 0;
+  tx_active_offset_ = 0;
+  tx_active_info_ = {};
+  tx_active_valid_ = false;
+  tx_active_reported_ = false;
+}
+
+void IRAM_ATTR ESP32UART::ClearPendingTx()
+{
+  tx_pending_length_ = 0;
+  tx_pending_info_ = {};
+  tx_pending_valid_ = false;
+}
+
+bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
+{
+  if (!StartActiveTransfer(in_isr))
+  {
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
+    ClearActiveTx();
+    return false;
+  }
+
+  // Align with STM/CH semantics: op is considered complete once transfer is kicked.
+  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+  tx_active_reported_ = true;
+  return true;
+}
+
 
 ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 {
@@ -515,8 +477,7 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
   {
     if (!StartActiveTransfer(in_isr))
     {
-      tx_active_valid_ = false;
-      tx_active_reported_ = false;
+      ClearActiveTx();
       return ErrorCode::FAILED;
     }
     else if (!tx_active_reported_)
@@ -549,7 +510,7 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
       return false;
     }
 
-    if (info.data.size_ > tx_double_buffer_.Size())
+    if (info.data.size_ > tx_buffer_size_)
     {
       (void)write_port_->queue_info_->Pop(info);
       (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
@@ -557,8 +518,8 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
       continue;
     }
 
-    if (write_port_->queue_data_->PopBatch(tx_double_buffer_.ActiveBuffer(),
-                                           info.data.size_) != ErrorCode::OK)
+    if (write_port_->queue_data_->PopBatch(tx_active_buffer_, info.data.size_) !=
+        ErrorCode::OK)
     {
       return false;
     }
@@ -568,7 +529,7 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
       return false;
     }
 
-    tx_double_buffer_.SetActiveLength(info.data.size_);
+    tx_active_length_ = info.data.size_;
     tx_active_offset_ = 0;
     tx_active_valid_ = true;
     tx_active_reported_ = false;
@@ -578,7 +539,7 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 
 bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 {
-  if (tx_pending_valid_ || tx_double_buffer_.HasPending())
+  if (tx_pending_valid_)
   {
     return false;
   }
@@ -591,7 +552,7 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
       return false;
     }
 
-    if (info.data.size_ > tx_double_buffer_.Size())
+    if (info.data.size_ > tx_buffer_size_)
     {
       (void)write_port_->queue_info_->Pop(info);
       (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
@@ -599,8 +560,8 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
       continue;
     }
 
-    if (write_port_->queue_data_->PopBatch(tx_double_buffer_.PendingBuffer(),
-                                           info.data.size_) != ErrorCode::OK)
+    if (write_port_->queue_data_->PopBatch(tx_pending_buffer_, info.data.size_) !=
+        ErrorCode::OK)
     {
       return false;
     }
@@ -610,8 +571,7 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
       return false;
     }
 
-    tx_double_buffer_.SetPendingLength(info.data.size_);
-    tx_double_buffer_.EnablePending();
+    tx_pending_length_ = info.data.size_;
     tx_pending_valid_ = true;
     return true;
   }
@@ -692,61 +652,36 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
     tx_active_reported_ = true;
   }
 
-  tx_active_valid_ = false;
-  tx_active_reported_ = false;
+  ClearActiveTx();
 
   if ((result != ErrorCode::OK) && tx_pending_valid_)
   {
     write_port_->Finish(in_isr, ErrorCode::FAILED, tx_pending_info_);
-    tx_pending_valid_ = false;
+    ClearPendingTx();
   }
 
   if (result != ErrorCode::OK)
   {
-    if (tx_double_buffer_.HasPending())
-    {
-      tx_double_buffer_.Switch();
-    }
-    tx_double_buffer_.SetPendingLength(0);
-    tx_double_buffer_.SetActiveLength(0);
-    tx_active_offset_ = 0;
+    ClearPendingTx();
     return;
   }
 
-  if (tx_pending_valid_ && tx_double_buffer_.HasPending())
+  if (tx_pending_valid_)
   {
-    const size_t pending_len = tx_double_buffer_.GetPendingLength();
-    tx_double_buffer_.Switch();
-    tx_double_buffer_.SetActiveLength(pending_len);
+    std::swap(tx_active_buffer_, tx_pending_buffer_);
+    tx_active_length_ = tx_pending_length_;
+    tx_pending_length_ = 0;
     tx_active_info_ = tx_pending_info_;
     tx_active_valid_ = true;
     tx_active_reported_ = false;
-    tx_pending_valid_ = false;
-
-    if (!StartActiveTransfer(in_isr))
-    {
-      write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
-      tx_active_valid_ = false;
-      tx_active_reported_ = false;
-    }
-    else
-    {
-      write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-      tx_active_reported_ = true;
-    }
+    ClearPendingTx();
+    (void)StartAndReportActive(in_isr);
   }
   else
   {
-    if (LoadActiveTxFromQueue(in_isr) && !StartActiveTransfer(in_isr))
+    if (LoadActiveTxFromQueue(in_isr))
     {
-      write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
-      tx_active_valid_ = false;
-      tx_active_reported_ = false;
-    }
-    else if (tx_active_valid_ && !tx_active_reported_)
-    {
-      write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-      tx_active_reported_ = true;
+      (void)StartAndReportActive(in_isr);
     }
   }
 

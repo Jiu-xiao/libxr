@@ -26,13 +26,14 @@ extern "C" __attribute__((weak)) BaseType_t xTaskCatchUpTicks(TickType_t)
 
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
-  LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
-  LibXR::Timer::stack_depth_ = timer_stack_depth;
-
   if (Timebase::timebase == nullptr)
   {
-    return;
+    /* You should initialize Timebase first */
+    ASSERT(false);
   }
+
+  LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
+  LibXR::Timer::stack_depth_ = timer_stack_depth;
 
   int64_t time_need_to_catch_up = static_cast<int64_t>(Timebase::GetMilliseconds()) -
                                   static_cast<int64_t>(xTaskGetTickCount());

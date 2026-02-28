@@ -14,9 +14,6 @@
 
 namespace
 {
-constexpr uint32_t kWriteSpinWait = 20000U;
-constexpr uint32_t kWriteStallRetries = 16U;
-constexpr size_t kTxChunkMax = 2048U;
 constexpr uint32_t kTxIntrMask = USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY;
 }  // namespace
 
@@ -27,24 +24,19 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
                            uint32_t tx_queue_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
       config_(config),
-      tx_work_buffer_(new (std::nothrow) uint8_t[tx_buffer_size]),
-      tx_work_buffer_size_(tx_buffer_size),
       tx_slot_storage_(new (std::nothrow) uint8_t[tx_buffer_size * 2U]),
       tx_slot_size_(tx_buffer_size),
       _read_port(rx_buffer_size),
       _write_port(tx_queue_size, tx_buffer_size)
 {
-  ASSERT(tx_work_buffer_ != nullptr);
   ASSERT(tx_slot_storage_ != nullptr);
-  ASSERT(tx_work_buffer_size_ > 0);
-  ASSERT(tx_slot_size_ > 0);
+  ASSERT(tx_slot_size_ > 0U);
 
   tx_slot_a_ = tx_slot_storage_;
   tx_slot_b_ = tx_slot_storage_ + tx_slot_size_;
 
   _read_port = ReadFun;
   _write_port = WriteFun;
-  _write_port.fast_write_fun_ = FastWriteFun;
 
   if (SetConfig(config_) != ErrorCode::OK)
   {
@@ -63,8 +55,6 @@ ESP32CDCJtag::~ESP32CDCJtag()
   DeinitHardware();
   delete[] tx_slot_storage_;
   tx_slot_storage_ = nullptr;
-  delete[] tx_work_buffer_;
-  tx_work_buffer_ = nullptr;
 }
 
 ErrorCode ESP32CDCJtag::SetConfig(UART::Configuration config)
@@ -86,7 +76,6 @@ ErrorCode ESP32CDCJtag::InitHardware()
   }
 
   ResetTxState(false);
-  tx_source_done_.store(true, std::memory_order_release);
 
   const esp_err_t intr_ans = esp_intr_alloc(ETS_USB_SERIAL_JTAG_INTR_SOURCE,
                                             ESP_INTR_FLAG_IRAM, IsrEntry, this,
@@ -121,7 +110,6 @@ void ESP32CDCJtag::DeinitHardware()
   }
 
   ResetTxState(false);
-  tx_source_done_.store(true, std::memory_order_release);
   hw_inited_ = false;
 }
 
@@ -137,37 +125,7 @@ void IRAM_ATTR ESP32CDCJtag::IsrEntry(void* arg)
 ErrorCode IRAM_ATTR ESP32CDCJtag::WriteFun(WritePort& port, bool in_isr)
 {
   auto* cdc = CONTAINER_OF(&port, ESP32CDCJtag, _write_port);
-
-  WriteInfoBlock info = {};
-  auto ans = port.queue_info_->Pop(info);
-  if (ans != ErrorCode::OK)
-  {
-    return ErrorCode::PENDING;
-  }
-
-  if (info.data.size_ == 0)
-  {
-    port.Finish(in_isr, ErrorCode::OK, info);
-    return ErrorCode::PENDING;
-  }
-
-  if (info.data.size_ > cdc->tx_work_buffer_size_)
-  {
-    (void)port.queue_data_->PopBatch(nullptr, info.data.size_);
-    port.Finish(in_isr, ErrorCode::SIZE_ERR, info);
-    return ErrorCode::PENDING;
-  }
-
-  ans = port.queue_data_->PopBatch(cdc->tx_work_buffer_, info.data.size_);
-  if (ans != ErrorCode::OK)
-  {
-    port.Finish(in_isr, ErrorCode::FAILED, info);
-    return ErrorCode::PENDING;
-  }
-
-  ans = cdc->WriteBlocking(cdc->tx_work_buffer_, info.data.size_, in_isr);
-  port.Finish(in_isr, ans, info);
-  return ErrorCode::PENDING;
+  return cdc->TryStartTx(in_isr);
 }
 
 ErrorCode ESP32CDCJtag::ReadFun(ReadPort&, bool)
@@ -175,110 +133,128 @@ ErrorCode ESP32CDCJtag::ReadFun(ReadPort&, bool)
   return ErrorCode::PENDING;
 }
 
-ErrorCode IRAM_ATTR ESP32CDCJtag::FastWriteFun(WritePort& port, ConstRawData data,
-                                               WriteOperation& op, bool in_isr)
+void IRAM_ATTR ESP32CDCJtag::ClearActiveTx()
 {
-  auto* cdc = CONTAINER_OF(&port, ESP32CDCJtag, _write_port);
-  if (cdc == nullptr)
-  {
-    return ErrorCode::FAILED;
-  }
-
-  if (op.type != WriteOperation::OperationType::BLOCK)
-  {
-    return ErrorCode::NOT_SUPPORT;
-  }
-
-  if ((data.addr_ == nullptr) || (data.size_ == 0U))
-  {
-    return (data.size_ == 0U) ? ErrorCode::OK : ErrorCode::ARG_ERR;
-  }
-
-  WritePort::LockState expected = WritePort::LockState::UNLOCKED;
-  if (!port.lock_.compare_exchange_strong(expected, WritePort::LockState::LOCKED))
-  {
-    return ErrorCode::BUSY;
-  }
-
-  const ErrorCode ans = cdc->WriteBlocking(
-      reinterpret_cast<const uint8_t*>(data.addr_), data.size_, in_isr);
-
-  port.lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
-  return ans;
-}
-
-void IRAM_ATTR ESP32CDCJtag::ResetTxState(bool in_isr)
-{
-  if (in_isr)
-  {
-    portENTER_CRITICAL_ISR(&tx_lock_);
-  }
-  else
-  {
-    portENTER_CRITICAL(&tx_lock_);
-  }
-
   tx_active_ptr_ = nullptr;
   tx_active_size_ = 0;
   tx_active_offset_ = 0;
+  tx_active_info_ = {};
+  tx_active_valid_ = false;
+  tx_active_reported_ = false;
+}
+
+void IRAM_ATTR ESP32CDCJtag::ClearPendingTx()
+{
   tx_pending_ptr_ = nullptr;
   tx_pending_size_ = 0;
+  tx_pending_info_ = {};
   tx_pending_valid_ = false;
-  tx_source_done_.store(true, std::memory_order_release);
-  tx_busy_.store(false, std::memory_order_release);
-  tx_event_seq_.fetch_add(1, std::memory_order_acq_rel);
+}
 
-  if (in_isr)
+void IRAM_ATTR ESP32CDCJtag::ResetTxState(bool)
+{
+  ClearActiveTx();
+  ClearPendingTx();
+  tx_busy_.store(false, std::memory_order_release);
+}
+
+bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
+{
+  if (tx_active_valid_)
   {
-    portEXIT_CRITICAL_ISR(&tx_lock_);
+    return true;
   }
-  else
+
+  while (true)
   {
-    portEXIT_CRITICAL(&tx_lock_);
+    WriteInfoBlock info = {};
+    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (info.data.size_ > tx_slot_size_)
+    {
+      (void)write_port_->queue_info_->Pop(info);
+      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
+      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
+      continue;
+    }
+
+    if (write_port_->queue_data_->PopBatch(tx_slot_a_, info.data.size_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    tx_active_ptr_ = tx_slot_a_;
+    tx_active_size_ = info.data.size_;
+    tx_active_offset_ = 0;
+    tx_active_valid_ = true;
+    tx_active_reported_ = false;
+    return true;
   }
 }
 
-bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool in_isr)
+bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
 {
-  bool wrote_any = false;
-  bool became_idle = false;
-
-  if (in_isr)
+  if (tx_pending_valid_)
   {
-    portENTER_CRITICAL_ISR(&tx_lock_);
-  }
-  else
-  {
-    portENTER_CRITICAL(&tx_lock_);
+    return false;
   }
 
+  while (true)
+  {
+    WriteInfoBlock info = {};
+    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (info.data.size_ > tx_slot_size_)
+    {
+      (void)write_port_->queue_info_->Pop(info);
+      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
+      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
+      continue;
+    }
+
+    uint8_t* pending_slot = tx_slot_b_;
+    if (tx_active_ptr_ == tx_slot_b_)
+    {
+      pending_slot = tx_slot_a_;
+    }
+
+    if (write_port_->queue_data_->PopBatch(pending_slot, info.data.size_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    if (write_port_->queue_info_->Pop(tx_pending_info_) != ErrorCode::OK)
+    {
+      return false;
+    }
+
+    tx_pending_ptr_ = pending_slot;
+    tx_pending_size_ = info.data.size_;
+    tx_pending_valid_ = true;
+    return true;
+  }
+}
+
+bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)
+{
   while (tx_busy_.load(std::memory_order_acquire))
   {
-    if ((tx_active_ptr_ == nullptr) || (tx_active_offset_ >= tx_active_size_))
+    if (!tx_active_valid_ || (tx_active_ptr_ == nullptr) ||
+        (tx_active_offset_ >= tx_active_size_))
     {
-      if (tx_pending_valid_)
-      {
-        tx_active_ptr_ = tx_pending_ptr_;
-        tx_active_size_ = tx_pending_size_;
-        tx_active_offset_ = 0;
-        tx_pending_ptr_ = nullptr;
-        tx_pending_size_ = 0;
-        tx_pending_valid_ = false;
-        continue;
-      }
-
-      if (tx_source_done_.load(std::memory_order_acquire))
-      {
-        tx_active_ptr_ = nullptr;
-        tx_active_size_ = 0;
-        tx_active_offset_ = 0;
-        tx_pending_ptr_ = nullptr;
-        tx_pending_size_ = 0;
-        tx_pending_valid_ = false;
-        tx_busy_.store(false, std::memory_order_release);
-        became_idle = true;
-      }
-      break;
+      tx_busy_.store(false, std::memory_order_release);
+      return true;
     }
 
     const uint32_t remain =
@@ -287,185 +263,182 @@ bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool in_isr)
         usb_serial_jtag_ll_write_txfifo(tx_active_ptr_ + tx_active_offset_, remain);
     if (written <= 0)
     {
-      break;
+      return false;
     }
 
     tx_active_offset_ += static_cast<size_t>(written);
-    wrote_any = true;
+    if (tx_active_offset_ >= tx_active_size_)
+    {
+      tx_busy_.store(false, std::memory_order_release);
+      return true;
+    }
   }
 
-  if (in_isr)
+  return false;
+}
+
+bool IRAM_ATTR ESP32CDCJtag::StartActiveTransfer(bool in_isr)
+{
+  if (!tx_active_valid_ || (tx_active_ptr_ == nullptr) || (tx_active_size_ == 0U))
   {
-    portEXIT_CRITICAL_ISR(&tx_lock_);
+    return false;
+  }
+
+  bool expected = false;
+  if (!tx_busy_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
+  {
+    return true;
+  }
+
+  tx_active_offset_ = 0;
+  usb_serial_jtag_ll_ena_intr_mask(kTxIntrMask);
+  (void)PumpTx(in_isr);
+  return true;
+}
+
+bool IRAM_ATTR ESP32CDCJtag::StartAndReportActive(bool in_isr)
+{
+  if (!StartActiveTransfer(in_isr))
+  {
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
+    ClearActiveTx();
+    return false;
+  }
+
+  // Keep aligned with STM/CH: once next op is kicked to HW, report it finished.
+  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+  tx_active_reported_ = true;
+  if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
+  {
+    OnTxTransferDone(in_isr, ErrorCode::OK);
+  }
+  return true;
+}
+
+void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
+{
+  Flag::ScopedRestore tx_flag(in_tx_isr_);
+  tx_busy_.store(false, std::memory_order_release);
+
+  if (tx_active_valid_ && !tx_active_reported_)
+  {
+    write_port_->Finish(in_isr, result, tx_active_info_);
+    tx_active_reported_ = true;
+  }
+
+  ClearActiveTx();
+
+  if ((result != ErrorCode::OK) && tx_pending_valid_)
+  {
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_pending_info_);
+    ClearPendingTx();
+  }
+
+  if (result != ErrorCode::OK)
+  {
+    usb_serial_jtag_ll_txfifo_flush();
+    usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
+    return;
+  }
+
+  if (tx_pending_valid_)
+  {
+    tx_active_ptr_ = tx_pending_ptr_;
+    tx_active_size_ = tx_pending_size_;
+    tx_active_offset_ = 0;
+    tx_active_info_ = tx_pending_info_;
+    tx_active_valid_ = true;
+    tx_active_reported_ = false;
+    ClearPendingTx();
+    (void)StartAndReportActive(in_isr);
   }
   else
   {
-    portEXIT_CRITICAL(&tx_lock_);
+    if (LoadActiveTxFromQueue(in_isr))
+    {
+      (void)StartAndReportActive(in_isr);
+    }
   }
 
-  if (wrote_any || became_idle)
+  if (!tx_pending_valid_)
   {
-    tx_event_seq_.fetch_add(1, std::memory_order_acq_rel);
+    (void)LoadPendingTxFromQueue(in_isr);
   }
 
-  if (became_idle)
+  if (!tx_busy_.load(std::memory_order_acquire) && !tx_active_valid_ && !tx_pending_valid_)
   {
     usb_serial_jtag_ll_txfifo_flush();
-  }
-
-  if (became_idle)
-  {
     usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
   }
-
-  return wrote_any || became_idle;
 }
 
-ErrorCode IRAM_ATTR ESP32CDCJtag::WriteBlocking(const uint8_t* data, size_t size,
-                                                bool in_isr)
+ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
 {
-  if ((data == nullptr) || (size == 0U))
+  if (in_tx_isr_.IsSet())
   {
-    return (size == 0U) ? ErrorCode::OK : ErrorCode::ARG_ERR;
+    return ErrorCode::PENDING;
   }
 
-  if (in_isr)
+  if (!tx_active_valid_)
   {
-    return ErrorCode::NOT_SUPPORT;
+    (void)LoadActiveTxFromQueue(in_isr);
   }
 
-  if (!intr_installed_)
+  if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
   {
-    return ErrorCode::INIT_ERR;
-  }
-
-  const size_t chunk_size = std::max<size_t>(
-      64U, std::min<size_t>(kTxChunkMax, tx_slot_size_));
-  if (chunk_size == 0U)
-  {
-    return ErrorCode::SIZE_ERR;
-  }
-
-  const uint8_t* src = data;
-  size_t remain = size;
-  uint32_t last_seq = tx_event_seq_.load(std::memory_order_acquire);
-  uint32_t stall_retries = 0;
-
-  while (remain > 0U)
-  {
-    size_t produced = 0;
-    bool queued = false;
-    bool need_start = false;
-
-    portENTER_CRITICAL(&tx_lock_);
-    if (!tx_busy_.load(std::memory_order_acquire))
+    const bool report_by_write_port = !tx_active_reported_;
+    if (report_by_write_port)
     {
-      const size_t copy_size = std::min(chunk_size, remain);
-      std::memcpy(tx_slot_a_, src, copy_size);
-      tx_active_ptr_ = tx_slot_a_;
-      tx_active_size_ = copy_size;
-      tx_active_offset_ = 0;
-      tx_pending_ptr_ = nullptr;
-      tx_pending_size_ = 0;
-      tx_pending_valid_ = false;
-      tx_source_done_.store(true, std::memory_order_release);
-      tx_busy_.store(true, std::memory_order_release);
-      produced = copy_size;
-      queued = true;
-      need_start = true;
+      tx_active_reported_ = true;
     }
-    else if (!tx_pending_valid_)
+
+    if (!StartActiveTransfer(in_isr))
     {
-      const size_t copy_size = std::min(chunk_size, remain);
-      uint8_t* pending_slot = tx_slot_b_;
-      if (tx_active_ptr_ == tx_slot_b_)
+      ClearActiveTx();
+      return ErrorCode::FAILED;
+    }
+
+    if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
+    {
+      OnTxTransferDone(in_isr, ErrorCode::OK);
+    }
+
+    if (report_by_write_port)
+    {
+      if (!tx_pending_valid_)
       {
-        pending_slot = tx_slot_a_;
+        (void)LoadPendingTxFromQueue(in_isr);
       }
-      std::memcpy(pending_slot, src, copy_size);
-      tx_pending_ptr_ = pending_slot;
-      tx_pending_size_ = copy_size;
-      tx_pending_valid_ = true;
-      produced = copy_size;
-      queued = true;
-    }
-
-    if (queued)
-    {
-      tx_source_done_.store(true, std::memory_order_release);
-    }
-    portEXIT_CRITICAL(&tx_lock_);
-    if (queued)
-    {
-      src += produced;
-      remain -= produced;
-      if (need_start)
-      {
-        usb_serial_jtag_ll_ena_intr_mask(kTxIntrMask);
-      }
-      if (PumpTx(false))
-      {
-        last_seq = tx_event_seq_.load(std::memory_order_acquire);
-        stall_retries = 0;
-      }
-      continue;
-    }
-
-    if (PumpTx(false))
-    {
-      last_seq = tx_event_seq_.load(std::memory_order_acquire);
-      stall_retries = 0;
-      continue;
-    }
-
-    uint32_t spin = kWriteSpinWait;
-    while ((spin > 0U) && tx_busy_.load(std::memory_order_acquire))
-    {
-      const uint32_t seq = tx_event_seq_.load(std::memory_order_acquire);
-      if (seq != last_seq)
-      {
-        last_seq = seq;
-        stall_retries = 0;
-        break;
-      }
-      --spin;
-    }
-
-    if (!tx_busy_.load(std::memory_order_acquire))
-    {
-      break;
-    }
-
-    const uint32_t seq = tx_event_seq_.load(std::memory_order_acquire);
-    if (seq == last_seq)
-    {
-      ++stall_retries;
-      if (stall_retries > kWriteStallRetries)
-      {
-        ResetTxState(false);
-        tx_source_done_.store(true, std::memory_order_release);
-        usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
-        return ErrorCode::TIMEOUT;
-      }
-    }
-    else
-    {
-      last_seq = seq;
-      stall_retries = 0;
+      return ErrorCode::OK;
     }
   }
 
-  return ErrorCode::OK;
+  if (!tx_pending_valid_)
+  {
+    (void)LoadPendingTxFromQueue(in_isr);
+  }
+
+  return ErrorCode::PENDING;
 }
 
 void IRAM_ATTR ESP32CDCJtag::HandleInterrupt()
 {
   const uint32_t status = usb_serial_jtag_ll_get_intsts_mask();
   const uint32_t tx_status = status & kTxIntrMask;
-  if (tx_status != 0U)
+  if (tx_status == 0U)
   {
-    usb_serial_jtag_ll_clr_intsts_mask(tx_status);
-    (void)PumpTx(true);
+    return;
+  }
+
+  usb_serial_jtag_ll_clr_intsts_mask(tx_status);
+
+  Flag::ScopedRestore tx_flag(in_tx_isr_);
+  const bool was_busy = tx_busy_.load(std::memory_order_acquire);
+  (void)PumpTx(true);
+  if (was_busy && !tx_busy_.load(std::memory_order_acquire))
+  {
+    OnTxTransferDone(true, ErrorCode::OK);
   }
 }
 

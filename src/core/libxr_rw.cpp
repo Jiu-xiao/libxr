@@ -248,31 +248,6 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_i
       return ErrorCode::OK;
     }
 
-    if (fast_write_fun_ != nullptr)
-    {
-      const ErrorCode fast_ans = fast_write_fun_(*this, data, op, in_isr);
-      if (fast_ans != ErrorCode::NOT_SUPPORT)
-      {
-        if (fast_ans != ErrorCode::PENDING)
-        {
-          if (fast_ans == ErrorCode::OK &&
-              op.type != WriteOperation::OperationType::BLOCK)
-          {
-            op.UpdateStatus(in_isr, ErrorCode::OK);
-          }
-          return fast_ans;
-        }
-
-        if (op.type == WriteOperation::OperationType::BLOCK)
-        {
-          ASSERT(!in_isr);
-          return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-        }
-
-        return ErrorCode::OK;
-      }
-    }
-
     LockState expected = LockState::UNLOCKED;
     if (!lock_.compare_exchange_strong(expected, LockState::LOCKED))
     {

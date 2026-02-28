@@ -4,10 +4,6 @@
 #include "semphr.h"
 #include "task.h"
 
-#if defined(INTERRUPT)
-#undef INTERRUPT
-#endif
-
 namespace LibXR
 {
 typedef SemaphoreHandle_t libxr_mutex_handle;
