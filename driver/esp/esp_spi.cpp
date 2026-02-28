@@ -600,7 +600,7 @@ void ESP32SPI::SwitchBufferLocal()
 
 bool ESP32SPI::CanUseDma(size_t size) const
 {
-  return dma_enabled_ && (dma_ctx_ != nullptr) && (size > 0U) &&
+  return dma_enabled_ && (dma_ctx_ != nullptr) && (size > dma_enable_min_size_) &&
          (size <= dma_max_transfer_bytes_);
 }
 
