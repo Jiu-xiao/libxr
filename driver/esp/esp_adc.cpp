@@ -115,16 +115,14 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
     return;
   }
 
-  if (cont_ans == ContinuousInitResult::FAILED)
-  {
-    // Unsupported instance can fallback silently; runtime init failures should not.
-    ASSERT(false);
-    return;
-  }
-
-  // Keep compatibility path for instances that cannot run continuous DMA backend.
+#if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
+  // Strict DMA policy: on DMA-capable targets, do not silently downgrade to oneshot.
+  ASSERT(false);
+  return;
+#else
   const bool oneshot_ok = InitOneshot();
   ASSERT(oneshot_ok);
+#endif
 }
 
 ESP32ADC::~ESP32ADC()
