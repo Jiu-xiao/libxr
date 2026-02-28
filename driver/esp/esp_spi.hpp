@@ -28,9 +28,9 @@ class ESP32SPI : public SPI
           SPI::Prescaler::DIV_8,
           false,
       },
-      uint32_t dma_enable_min_size = 3U)
+      uint32_t dma_enable_min_size = 3U, bool enable_dma = true)
       : ESP32SPI(host, sclk_pin, miso_pin, mosi_pin, PIN_NO_CHANGE, dma_rx, dma_tx, cs_id,
-                 config, dma_enable_min_size)
+                 config, dma_enable_min_size, enable_dma)
   {
   }
 
@@ -43,7 +43,7 @@ class ESP32SPI : public SPI
           SPI::Prescaler::DIV_8,
           false,
       },
-      uint32_t dma_enable_min_size = 3U);
+      uint32_t dma_enable_min_size = 3U, bool enable_dma = true);
 
   ~ESP32SPI();
 
@@ -126,6 +126,7 @@ class ESP32SPI : public SPI
   std::atomic<bool> busy_{false};
   bool initialized_ = false;
   uint32_t dma_enable_min_size_ = 3U;
+  bool dma_requested_ = true;
   RawData dma_rx_raw_ = {nullptr, 0};
   RawData dma_tx_raw_ = {nullptr, 0};
   size_t dbuf_rx_block_size_ = 0;

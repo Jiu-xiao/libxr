@@ -95,7 +95,8 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 
 ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_pin,
                    int cs_pin, RawData dma_rx, RawData dma_tx, int cs_id,
-                   SPI::Configuration config, uint32_t dma_enable_min_size)
+                   SPI::Configuration config, uint32_t dma_enable_min_size,
+                   bool enable_dma)
     : SPI(dma_rx, dma_tx),
       host_(host),
       sclk_pin_(sclk_pin),
@@ -104,6 +105,7 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
       cs_pin_(cs_pin),
       cs_id_(cs_id),
       dma_enable_min_size_(dma_enable_min_size),
+      dma_requested_(enable_dma),
       dma_rx_raw_(dma_rx),
       dma_tx_raw_(dma_tx),
       dbuf_rx_block_size_(dma_rx.size_ / 2U),
@@ -139,11 +141,9 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
     return;
   }
 
-  if (InitDmaBackend() != ErrorCode::OK)
+  if (dma_requested_)
   {
-    ASSERT(false);
-    DeinitializeHardware();
-    return;
+    (void)InitDmaBackend();
   }
 
   if (SetConfig(config) != ErrorCode::OK)
@@ -600,8 +600,8 @@ void ESP32SPI::SwitchBufferLocal()
 
 bool ESP32SPI::CanUseDma(size_t size) const
 {
-  return dma_enabled_ && (dma_ctx_ != nullptr) && (size > dma_enable_min_size_) &&
-         (size <= dma_max_transfer_bytes_);
+  return dma_requested_ && dma_enabled_ && (dma_ctx_ != nullptr) &&
+         (size > dma_enable_min_size_) && (size <= dma_max_transfer_bytes_);
 }
 
 void ESP32SPI::ConfigureTransferRegisters(size_t size, bool keep_cs, bool enable_rx)
