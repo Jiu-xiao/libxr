@@ -22,8 +22,7 @@ class ESP32I2C : public I2C
   ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin,
            uint32_t clock_speed = 400000U,
            bool enable_internal_pullup = true,
-           uint32_t timeout_ms = 100U,
-           uint32_t dma_enable_min_size = 3U);
+           uint32_t timeout_ms = 100U);
 
   ~ESP32I2C();
 
@@ -73,7 +72,6 @@ class ESP32I2C : public I2C
   int sda_pin_;
   bool enable_internal_pullup_;
   uint32_t timeout_ms_;
-  uint32_t dma_enable_min_size_ = 3U;
   bool initialized_ = false;
   Configuration config_{};
   i2c_hal_context_t hal_ = {};

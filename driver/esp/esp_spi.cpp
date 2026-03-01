@@ -143,7 +143,13 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
 
   if (dma_requested_)
   {
-    (void)InitDmaBackend();
+    const ErrorCode dma_ans = InitDmaBackend();
+    ASSERT(dma_ans == ErrorCode::OK);
+    if (dma_ans != ErrorCode::OK)
+    {
+      DeinitializeHardware();
+      return;
+    }
   }
 
   if (SetConfig(config) != ErrorCode::OK)

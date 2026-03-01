@@ -92,15 +92,6 @@ ErrorCode StartAndWaitSegment(i2c_hal_context_t& hal, int done_cmd_idx, uint64_t
 }
 
 template <typename OperationType>
-void MarkRunningIfDmaLike(OperationType& op, size_t size, uint32_t dma_enable_min_size)
-{
-  if (size > static_cast<size_t>(dma_enable_min_size))
-  {
-    op.MarkAsRunning();
-  }
-}
-
-template <typename OperationType>
 ErrorCode Complete(OperationType& op, bool in_isr, ErrorCode result)
 {
   op.UpdateStatus(in_isr, result);
@@ -123,13 +114,12 @@ ErrorCode Complete(OperationType& op, bool in_isr, ErrorCode result)
 
 ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin,
                    uint32_t clock_speed, bool enable_internal_pullup,
-                   uint32_t timeout_ms, uint32_t dma_enable_min_size)
+                   uint32_t timeout_ms)
     : port_num_(port_num),
       scl_pin_(scl_pin),
       sda_pin_(sda_pin),
       enable_internal_pullup_(enable_internal_pullup),
       timeout_ms_(timeout_ms),
-      dma_enable_min_size_(dma_enable_min_size),
       config_{clock_speed}
 {
   ASSERT(port_num_ >= 0);
@@ -571,8 +561,6 @@ ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     return Complete(op, in_isr, ErrorCode::BUSY);
   }
 
-  MarkRunningIfDmaLike(op, write_data.size_, dma_enable_min_size_);
-
   ErrorCode ans = ErrorCode::OK;
   ans = ExecuteTransaction(slave_addr,
                            static_cast<const uint8_t*>(write_data.addr_),
@@ -613,8 +601,6 @@ ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
   {
     return Complete(op, in_isr, ErrorCode::BUSY);
   }
-
-  MarkRunningIfDmaLike(op, read_data.size_, dma_enable_min_size_);
 
   ErrorCode ans = ErrorCode::OK;
   ans = ExecuteTransaction(slave_addr, nullptr, 0U,
@@ -663,8 +649,6 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   {
     return Complete(op, in_isr, ErrorCode::BUSY);
   }
-
-  MarkRunningIfDmaLike(op, write_data.size_, dma_enable_min_size_);
 
   std::array<uint8_t, kFifoLen> staging = {};
   const size_t max_chunk = kMaxWritePayload - mem_len;
@@ -752,8 +736,6 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   {
     return Complete(op, in_isr, ErrorCode::BUSY);
   }
-
-  MarkRunningIfDmaLike(op, read_data.size_, dma_enable_min_size_);
 
   std::array<uint8_t, 2> mem_raw = {};
   auto* dst = static_cast<uint8_t*>(read_data.addr_);
