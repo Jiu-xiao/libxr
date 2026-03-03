@@ -716,6 +716,11 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
       (void)StartAndReportActive(in_isr);
     }
   }
+
+  if (!tx_pending_valid_)
+  {
+    (void)LoadPendingTxFromQueue(in_isr);
+  }
 }
 
 }  // namespace LibXR
