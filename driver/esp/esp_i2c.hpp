@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "driver/gpio.h"
+#include "esp_intr_alloc.h"
 #include "hal/i2c_hal.h"
 #include "hal/i2c_types.h"
 #include "i2c.hpp"
@@ -22,7 +24,8 @@ class ESP32I2C : public I2C
   ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin,
            uint32_t clock_speed = 400000U,
            bool enable_internal_pullup = true,
-           uint32_t timeout_ms = 100U);
+           uint32_t timeout_ms = 100U,
+           uint32_t isr_enable_min_size = 32U);
 
   ~ESP32I2C();
 
@@ -62,21 +65,56 @@ class ESP32I2C : public I2C
   ErrorCode ApplyConfig();
   ErrorCode ResolveClockSource(uint32_t& source_hz);
   ErrorCode RecoverController();
+  bool ShouldUseInterruptAsync(size_t total_size, bool in_isr,
+                               ReadOperation::OperationType op_type) const;
   ErrorCode ExecuteTransaction(uint16_t slave_addr, const uint8_t* write_payload,
                                size_t write_size, uint8_t* read_payload,
                                size_t read_size);
+  ErrorCode StartAsyncTransaction(uint16_t slave_addr,
+                                  const uint8_t* write_prefix_payload,
+                                  size_t write_prefix_size,
+                                  const uint8_t* write_payload, size_t write_size,
+                                  uint8_t* read_payload, size_t read_size,
+                                  ReadOperation& op);
+  ErrorCode KickAsyncTransaction();
+  void FinishAsync(bool in_isr, ErrorCode ec);
   static bool IsValid7BitAddr(uint16_t addr);
+  ErrorCode InstallInterrupt();
+  void RemoveInterrupt();
+  static void I2cIsrEntry(void* arg);
+  void HandleInterrupt();
 
   i2c_port_t port_num_;
   int scl_pin_;
   int sda_pin_;
   bool enable_internal_pullup_;
   uint32_t timeout_ms_;
+  uint32_t isr_enable_min_size_;
   bool initialized_ = false;
   Configuration config_{};
   i2c_hal_context_t hal_ = {};
   uint32_t source_clock_hz_ = 0U;
   std::atomic<bool> busy_{false};
+  intr_handle_t intr_handle_ = nullptr;
+  bool intr_installed_ = false;
+
+  bool async_running_ = false;
+  ReadOperation async_op_{};
+  uint16_t async_slave_addr_ = 0U;
+  std::array<uint8_t, 2> async_write_prefix_ = {};
+  size_t async_write_prefix_size_ = 0U;
+  size_t async_write_prefix_offset_ = 0U;
+  const uint8_t* async_write_payload_ = nullptr;
+  size_t async_write_size_ = 0U;
+  size_t async_write_offset_ = 0U;
+  uint8_t* async_read_payload_ = nullptr;
+  size_t async_read_size_ = 0U;
+  size_t async_read_offset_ = 0U;
+  size_t async_pending_read_chunk_ = 0U;
+  bool async_write_phase_done_ = true;
+  bool async_write_addr_sent_ = false;
+  bool async_write_stop_sent_ = false;
+  bool async_read_addr_sent_ = false;
 };
 
 }  // namespace LibXR

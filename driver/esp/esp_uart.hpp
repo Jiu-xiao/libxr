@@ -6,6 +6,7 @@
 
 #include "driver/gpio.h"
 #include "esp_intr_alloc.h"
+#include "flag.hpp"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
 #include "soc/periph_defs.h"
@@ -150,6 +151,7 @@ class ESP32UART : public UART
   WriteInfoBlock tx_active_info_ = {};
   WriteInfoBlock tx_pending_info_ = {};
   std::atomic<bool> tx_busy_{false};
+  Flag::Plain in_tx_isr_;
   bool tx_active_valid_ = false;
   bool tx_active_reported_ = false;
   bool tx_pending_valid_ = false;

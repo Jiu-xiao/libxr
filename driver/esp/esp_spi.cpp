@@ -10,6 +10,7 @@
 #include "esp_attr.h"
 #include "esp_clk_tree.h"
 #include "esp_err.h"
+#include "esp_timer.h"
 #include "esp_memory_utils.h"
 #include "esp_private/periph_ctrl.h"
 #include "esp_private/spi_common_internal.h"
@@ -19,6 +20,7 @@
 #include "esp_rom_gpio.h"
 #include "hal/spi_hal.h"
 #include "libxr_def.hpp"
+#include "timebase.hpp"
 #include "soc/spi_periph.h"
 
 namespace LibXR
@@ -38,6 +40,24 @@ uint8_t ResolveSpiMode(SPI::ClockPolarity polarity, SPI::ClockPhase phase)
 spi_dma_ctx_t* ToDmaCtx(void* ctx)
 {
   return reinterpret_cast<spi_dma_ctx_t*>(ctx);
+}
+
+uint64_t GetNowUs()
+{
+  if (Timebase::timebase != nullptr)
+  {
+    return static_cast<uint64_t>(Timebase::GetMicroseconds());
+  }
+  return static_cast<uint64_t>(esp_timer_get_time());
+}
+
+uint64_t CalcPollingTimeoutUs(size_t size, uint32_t bus_hz)
+{
+  const uint32_t safe_hz = (bus_hz == 0U) ? 1U : bus_hz;
+  const uint64_t bits = static_cast<uint64_t>(size) * 8ULL;
+  const uint64_t wire_time_us = (bits * 1000000ULL + safe_hz - 1ULL) / safe_hz;
+  // Keep a generous margin for bus contention / APB jitter while staying time-based.
+  return std::max<uint64_t>(100ULL, wire_time_us * 8ULL + 50ULL);
 }
 
 #if SOC_GDMA_SUPPORTED
@@ -94,16 +114,13 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 }  // namespace
 
 ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_pin,
-                   int cs_pin, RawData dma_rx, RawData dma_tx, int cs_id,
-                   SPI::Configuration config, uint32_t dma_enable_min_size,
-                   bool enable_dma)
+                   RawData dma_rx, RawData dma_tx, SPI::Configuration config,
+                   uint32_t dma_enable_min_size, bool enable_dma)
     : SPI(dma_rx, dma_tx),
       host_(host),
       sclk_pin_(sclk_pin),
       miso_pin_(miso_pin),
       mosi_pin_(mosi_pin),
-      cs_pin_(cs_pin),
-      cs_id_(cs_id),
       dma_enable_min_size_(dma_enable_min_size),
       dma_requested_(enable_dma),
       dma_rx_raw_(dma_rx),
@@ -114,8 +131,6 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
   ASSERT(host_ != SPI1_HOST);
   ASSERT(host_ < SPI_HOST_MAX);
   ASSERT(static_cast<int>(host_) < SOC_SPI_PERIPH_NUM);
-  ASSERT(cs_id_ >= 0);
-  ASSERT(cs_id_ < SOC_SPI_PERIPH_CS_NUM(host_));
   ASSERT(dma_rx_raw_.addr_ != nullptr);
   ASSERT(dma_tx_raw_.addr_ != nullptr);
   ASSERT(dma_rx_raw_.size_ > 0U);
@@ -209,10 +224,6 @@ ErrorCode ESP32SPI::InitializeHardware()
   spi_ll_set_half_duplex(hw_, false);
   spi_ll_set_tx_lsbfirst(hw_, false);
   spi_ll_set_rx_lsbfirst(hw_, false);
-  spi_ll_master_select_cs(hw_, cs_id_);
-  spi_ll_master_keep_cs(hw_, 0);
-  spi_ll_master_set_cs_setup(hw_, 0);
-  spi_ll_master_set_cs_hold(hw_, 0);
   spi_ll_set_mosi_delay(hw_, 0, 0);
   spi_ll_enable_mosi(hw_, 1);
   spi_ll_enable_miso(hw_, 1);
@@ -249,7 +260,6 @@ void ESP32SPI::DeinitializeHardware()
   ASSERT(!busy_.load(std::memory_order_acquire));
 
   spi_ll_disable_int(hw_);
-  spi_ll_master_keep_cs(hw_, 0);
   spi_ll_clear_int_stat(hw_);
   spi_ll_enable_clock(host_, false);
   PERIPH_RCC_ATOMIC()
@@ -304,16 +314,6 @@ ErrorCode ESP32SPI::ConfigurePins()
     }
     gpio_input_enable(static_cast<gpio_num_t>(miso_pin_));
     esp_rom_gpio_connect_in_signal(miso_pin_, signal.spiq_in, false);
-  }
-
-  if (cs_pin_ >= 0)
-  {
-    if (!GPIO_IS_VALID_OUTPUT_GPIO(cs_pin_))
-    {
-      return ErrorCode::ARG_ERR;
-    }
-    esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(cs_pin_));
-    esp_rom_gpio_connect_out_signal(cs_pin_, signal.spics_out[cs_id_], false, false);
   }
 
   return ErrorCode::OK;
@@ -610,7 +610,7 @@ bool ESP32SPI::CanUseDma(size_t size) const
          (size > dma_enable_min_size_) && (size <= dma_max_transfer_bytes_);
 }
 
-void ESP32SPI::ConfigureTransferRegisters(size_t size, bool keep_cs, bool enable_rx)
+void ESP32SPI::ConfigureTransferRegisters(size_t size)
 {
   static constexpr spi_line_mode_t kLineMode = {
       .cmd_lines = 1,
@@ -628,7 +628,6 @@ void ESP32SPI::ConfigureTransferRegisters(size_t size, bool keep_cs, bool enable
   spi_ll_set_address(hw_, 0, 0, false);
   hw_->user.usr_command = 0;
   hw_->user.usr_addr = 0;
-  spi_ll_master_keep_cs(hw_, keep_cs ? 1 : 0);
 }
 
 ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t size,
@@ -653,7 +652,7 @@ ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t si
   }
 
   const bool rx_enabled = enable_rx && (rx != nullptr);
-  ConfigureTransferRegisters(size, false, rx_enabled);
+  ConfigureTransferRegisters(size);
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
   if (!CacheSyncDmaBuffer(tx, size, true))
@@ -723,7 +722,7 @@ ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t si
   return ErrorCode::OK;
 }
 
-ErrorCode ESP32SPI::ExecuteChunk(const uint8_t* tx, uint8_t* rx, size_t size, bool keep_cs,
+ErrorCode ESP32SPI::ExecuteChunk(const uint8_t* tx, uint8_t* rx, size_t size,
                                  bool enable_rx)
 {
   if ((size == 0U) || (size > kMaxPollingTransferBytes))
@@ -734,7 +733,7 @@ ErrorCode ESP32SPI::ExecuteChunk(const uint8_t* tx, uint8_t* rx, size_t size, bo
   static constexpr std::array<uint8_t, kMaxPollingTransferBytes> kZero = {};
   const uint8_t* tx_data = (tx != nullptr) ? tx : kZero.data();
 
-  ConfigureTransferRegisters(size, keep_cs, enable_rx);
+  ConfigureTransferRegisters(size);
   spi_ll_enable_mosi(hw_, 1);
   spi_ll_enable_miso(hw_, enable_rx ? 1 : 0);
   spi_ll_write_buffer(hw_, tx_data, size * 8U);
@@ -742,14 +741,14 @@ ErrorCode ESP32SPI::ExecuteChunk(const uint8_t* tx, uint8_t* rx, size_t size, bo
   spi_ll_apply_config(hw_);
   spi_ll_user_start(hw_);
 
-  uint32_t guard = 1000000U;
-  while (!spi_ll_usr_is_done(hw_) && (guard > 0U))
+  const uint64_t timeout_us = CalcPollingTimeoutUs(size, GetBusSpeed());
+  const uint64_t start_us = GetNowUs();
+  while (!spi_ll_usr_is_done(hw_))
   {
-    --guard;
-  }
-  if (guard == 0U)
-  {
-    return ErrorCode::TIMEOUT;
+    if ((GetNowUs() - start_us) > timeout_us)
+    {
+      return ErrorCode::TIMEOUT;
+    }
   }
 
   if (enable_rx && (rx != nullptr))
@@ -768,11 +767,10 @@ ErrorCode ESP32SPI::ExecuteTransfer(const uint8_t* tx, uint8_t* rx, size_t size,
   {
     const size_t remain = size - offset;
     const size_t chunk = std::min(remain, kMaxPollingTransferBytes);
-    const bool keep_cs = (offset + chunk) < size;
     const uint8_t* tx_chunk = (tx != nullptr) ? (tx + offset) : nullptr;
     uint8_t* rx_chunk = (enable_rx && (rx != nullptr)) ? (rx + offset) : nullptr;
 
-    const ErrorCode ec = ExecuteChunk(tx_chunk, rx_chunk, chunk, keep_cs, enable_rx);
+    const ErrorCode ec = ExecuteChunk(tx_chunk, rx_chunk, chunk, enable_rx);
     if (ec != ErrorCode::OK)
     {
       return ec;
@@ -843,11 +841,11 @@ ErrorCode ESP32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     SwitchBufferLocal();
   }
 
+  Release();
   if (op.type != OperationRW::OperationType::BLOCK)
   {
     op.UpdateStatus(in_isr, ec);
   }
-  Release();
   return ec;
 }
 
@@ -903,11 +901,11 @@ ErrorCode ESP32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
     SwitchBufferLocal();
   }
 
+  Release();
   if (op.type != OperationRW::OperationType::BLOCK)
   {
     op.UpdateStatus(in_isr, ec);
   }
-  Release();
   return ec;
 }
 
@@ -958,11 +956,11 @@ ErrorCode ESP32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
     SwitchBufferLocal();
   }
 
+  Release();
   if (op.type != OperationRW::OperationType::BLOCK)
   {
     op.UpdateStatus(in_isr, ec);
   }
-  Release();
   return ec;
 }
 
@@ -1012,11 +1010,11 @@ ErrorCode ESP32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
     SwitchBufferLocal();
   }
 
+  Release();
   if (op.type != OperationRW::OperationType::BLOCK)
   {
     op.UpdateStatus(in_isr, ec);
   }
-  Release();
   return ec;
 }
 

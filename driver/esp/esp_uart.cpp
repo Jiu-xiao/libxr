@@ -20,7 +20,7 @@ constexpr uint32_t kUartRxIntrMask =
     UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF;
 constexpr uint32_t kUartTxIntrMask = UART_INTR_TXFIFO_EMPTY;
 
-constexpr uint8_t kRxToutThreshold = 4;
+constexpr uint8_t kRxToutThreshold = 2;
 constexpr uint16_t kTxEmptyThreshold = 24;
 
 bool IsConsoleUartInUse(uart_port_t uart_num)
@@ -168,7 +168,7 @@ ESP32UART::~ESP32UART()
 void ESP32UART::ConfigureRxInterruptPath()
 {
   const size_t rx_full_floor = 16;
-  const size_t rx_full_ceil = std::max<size_t>(rx_full_floor, SOC_UART_FIFO_LEN / 2);
+  const size_t rx_full_ceil = std::max<size_t>(rx_full_floor, SOC_UART_FIFO_LEN / 4);
   const uint16_t full_thr =
       static_cast<uint16_t>(std::min<size_t>(rx_full_ceil,
                                              std::max<size_t>(rx_full_floor,
@@ -223,6 +223,39 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   uart_hal_set_hw_flow_ctrl(&uart_hal_, UART_HW_FLOWCTRL_DISABLE, 0);
   uart_hal_set_mode(&uart_hal_, UART_MODE_UART);
   uart_hal_set_txfifo_empty_thr(&uart_hal_, kTxEmptyThreshold);
+  // Drop stale RX bytes from the previous baud so the next blocking read
+  // starts from a clean frame boundary.
+  uart_hal_rxfifo_rst(&uart_hal_);
+  uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
+  read_port_->Reset();
+
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
+  {
+    // Re-align the circular RX DMA window after reconfig to avoid
+    // carrying stale pre-switch bytes into the next frame.
+    HandleDmaRxError();
+  }
+#endif
+
+
+  // Align with ST/CH SetConfig semantics: if TX was in-flight during
+  // reconfiguration, keep transfer progression instead of surfacing BUSY.
+  if (tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
+  {
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+    if (dma_backend_enabled_)
+    {
+      (void)StartDmaTx();
+    }
+    else
+#endif
+    {
+      uart_hal_clr_intsts_mask(&uart_hal_, kUartTxIntrMask);
+      uart_hal_ena_intr_mask(&uart_hal_, kUartTxIntrMask);
+      FillTxFifo(false);
+    }
+  }
 
   config_ = config;
   return ErrorCode::OK;
@@ -464,6 +497,10 @@ bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
 
 ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 {
+  if (in_tx_isr_.IsSet())
+  {
+    return ErrorCode::PENDING;
+  }
   if (!tx_active_valid_)
   {
     (void)LoadActiveTxFromQueue(in_isr);
@@ -498,6 +535,8 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 
 bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 {
+  (void)in_isr;
+
   while (true)
   {
     WriteInfoBlock info = {};
@@ -508,10 +547,8 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 
     if (info.data.size_ > tx_buffer_size_)
     {
-      (void)write_port_->queue_info_->Pop(info);
-      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
-      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
-      continue;
+      ASSERT(false);
+      return false;
     }
 
     if (write_port_->queue_data_->PopBatch(tx_active_buffer_, info.data.size_) !=
@@ -535,6 +572,8 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 
 bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 {
+  (void)in_isr;
+
   if (tx_pending_valid_)
   {
     return false;
@@ -550,10 +589,8 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 
     if (info.data.size_ > tx_buffer_size_)
     {
-      (void)write_port_->queue_info_->Pop(info);
-      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
-      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
-      continue;
+      ASSERT(false);
+      return false;
     }
 
     if (write_port_->queue_data_->PopBatch(tx_pending_buffer_, info.data.size_) !=
@@ -572,7 +609,6 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
     return true;
   }
 }
-
 bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
 {
   if (!tx_active_valid_)
@@ -637,9 +673,9 @@ void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_
     read_port_->ProcessPendingReads(in_isr);
   }
 }
-
 void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
 {
+  Flag::ScopedRestore tx_flag(in_tx_isr_);
   tx_busy_.store(false, std::memory_order_release);
 
   if (tx_active_valid_ && !tx_active_reported_)
@@ -679,11 +715,6 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
     {
       (void)StartAndReportActive(in_isr);
     }
-  }
-
-  if (!tx_pending_valid_)
-  {
-    (void)LoadPendingTxFromQueue(in_isr);
   }
 }
 

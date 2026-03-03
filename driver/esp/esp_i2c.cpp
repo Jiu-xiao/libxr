@@ -8,6 +8,7 @@
 #include "esp_rom_gpio.h"
 #include "esp_timer.h"
 #include "libxr_def.hpp"
+#include "timebase.hpp"
 
 namespace LibXR
 {
@@ -26,6 +27,39 @@ uint64_t ToTimeoutUs(uint32_t timeout_ms)
              : static_cast<uint64_t>(timeout_ms) * 1000ULL;
 }
 
+uint64_t GetNowUs()
+{
+  if (Timebase::timebase != nullptr)
+  {
+    return static_cast<uint64_t>(Timebase::GetMicroseconds());
+  }
+  return static_cast<uint64_t>(esp_timer_get_time());
+}
+
+inline void SetBusClockAtomic(i2c_port_t port, bool enable)
+{
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif
+  PERIPH_RCC_ATOMIC() { i2c_ll_enable_bus_clock(port, enable); }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+}
+
+inline void ResetBusRegisterAtomic(i2c_port_t port)
+{
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif
+  PERIPH_RCC_ATOMIC() { i2c_ll_reset_register(port); }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+}
+
 void WriteCommand(i2c_dev_t* dev, int cmd_idx, uint8_t op_code, uint8_t ack_val,
                   uint8_t ack_exp, uint8_t ack_en, uint8_t byte_num)
 {
@@ -40,30 +74,31 @@ void WriteCommand(i2c_dev_t* dev, int cmd_idx, uint8_t op_code, uint8_t ack_val,
 
 ErrorCode WaitSegmentDone(i2c_hal_context_t& hal, int done_cmd_idx, uint64_t timeout_us)
 {
-  const int64_t start_us = esp_timer_get_time();
+  const uint64_t start_us = GetNowUs();
+
+  auto recover_after_error = [&]() {
+    i2c_ll_clear_intr_mask(hal.dev, I2C_LL_INTR_MASK);
+    i2c_hal_master_fsm_rst(&hal);
+    i2c_ll_update(hal.dev);
+  };
+
   while (true)
   {
     const uint32_t intr = hal.dev->int_raw.val;
 
     if ((intr & I2C_LL_INTR_NACK) != 0U)
     {
-      i2c_ll_clear_intr_mask(hal.dev, I2C_LL_INTR_MASK);
-      i2c_hal_master_fsm_rst(&hal);
-      i2c_ll_update(hal.dev);
+      recover_after_error();
       return ErrorCode::NO_RESPONSE;
     }
     if ((intr & I2C_LL_INTR_TIMEOUT) != 0U)
     {
-      i2c_ll_clear_intr_mask(hal.dev, I2C_LL_INTR_MASK);
-      i2c_hal_master_fsm_rst(&hal);
-      i2c_ll_update(hal.dev);
+      recover_after_error();
       return ErrorCode::TIMEOUT;
     }
     if ((intr & I2C_LL_INTR_ARBITRATION) != 0U)
     {
-      i2c_ll_clear_intr_mask(hal.dev, I2C_LL_INTR_MASK);
-      i2c_hal_master_fsm_rst(&hal);
-      i2c_ll_update(hal.dev);
+      recover_after_error();
       return ErrorCode::FAILED;
     }
 
@@ -73,12 +108,9 @@ ErrorCode WaitSegmentDone(i2c_hal_context_t& hal, int done_cmd_idx, uint64_t tim
       return ErrorCode::OK;
     }
 
-    if ((timeout_us != UINT64_MAX) &&
-        (static_cast<uint64_t>(esp_timer_get_time() - start_us) > timeout_us))
+    if ((timeout_us != UINT64_MAX) && ((GetNowUs() - start_us) > timeout_us))
     {
-      i2c_ll_clear_intr_mask(hal.dev, I2C_LL_INTR_MASK);
-      i2c_hal_master_fsm_rst(&hal);
-      i2c_ll_update(hal.dev);
+      recover_after_error();
       return ErrorCode::TIMEOUT;
     }
   }
@@ -114,12 +146,13 @@ ErrorCode Complete(OperationType& op, bool in_isr, ErrorCode result)
 
 ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin,
                    uint32_t clock_speed, bool enable_internal_pullup,
-                   uint32_t timeout_ms)
+                   uint32_t timeout_ms, uint32_t isr_enable_min_size)
     : port_num_(port_num),
       scl_pin_(scl_pin),
       sda_pin_(sda_pin),
       enable_internal_pullup_(enable_internal_pullup),
       timeout_ms_(timeout_ms),
+      isr_enable_min_size_(isr_enable_min_size),
       config_{clock_speed}
 {
   ASSERT(port_num_ >= 0);
@@ -207,15 +240,13 @@ ErrorCode ESP32I2C::InitHardware()
     return ErrorCode::ARG_ERR;
   }
 
-  PERIPH_RCC_ATOMIC()
-  {
-    i2c_ll_enable_bus_clock(port_num_, true);
-    i2c_ll_reset_register(port_num_);
-  }
+  SetBusClockAtomic(port_num_, true);
+  ResetBusRegisterAtomic(port_num_);
 
   _i2c_hal_init(&hal_, static_cast<int>(port_num_));
   if (hal_.dev == nullptr)
   {
+    SetBusClockAtomic(port_num_, false);
     return ErrorCode::INIT_ERR;
   }
 
@@ -224,6 +255,13 @@ ErrorCode ESP32I2C::InitHardware()
   i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
 
   ErrorCode err = ConfigurePins();
+  if (err != ErrorCode::OK)
+  {
+    DeinitHardware();
+    return err;
+  }
+
+  err = InstallInterrupt();
   if (err != ErrorCode::OK)
   {
     DeinitHardware();
@@ -243,18 +281,20 @@ ErrorCode ESP32I2C::InitHardware()
 
 void ESP32I2C::DeinitHardware()
 {
-  if (!initialized_)
+  if (!initialized_ && (hal_.dev == nullptr) && !intr_installed_)
   {
     return;
   }
+
+  RemoveInterrupt();
 
   if (hal_.dev != nullptr)
   {
     i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
     i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
+    _i2c_hal_deinit(&hal_);
   }
-  _i2c_hal_deinit(&hal_);
-  PERIPH_RCC_ATOMIC() { i2c_ll_enable_bus_clock(port_num_, false); }
+  SetBusClockAtomic(port_num_, false);
 
   // Release pin matrix ownership so later GPIO/UART tests can remux these pins.
   if (gpio_num_t sda_gpio = static_cast<gpio_num_t>(sda_pin_);
@@ -314,7 +354,7 @@ ErrorCode ESP32I2C::RecoverController()
   return ErrorCode::OK;
 #else
   // ESP32-class targets without HW FSM reset require full register reset.
-  PERIPH_RCC_ATOMIC() { i2c_ll_reset_register(port_num_); }
+  ResetBusRegisterAtomic(port_num_);
   i2c_hal_master_init(&hal_);
   i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
   i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
@@ -326,6 +366,415 @@ ErrorCode ESP32I2C::RecoverController()
   }
   return ApplyConfig();
 #endif
+}
+
+bool ESP32I2C::ShouldUseInterruptAsync(size_t total_size, bool in_isr,
+                                       ReadOperation::OperationType op_type) const
+{
+  if (op_type == ReadOperation::OperationType::NONE)
+  {
+    // Keep legacy synchronous semantics for direct call-sites that do not provide
+    // explicit async operation mode.
+    return false;
+  }
+  return (!in_isr) && intr_installed_ && (isr_enable_min_size_ > 0U) &&
+         (total_size >= static_cast<size_t>(isr_enable_min_size_));
+}
+
+ErrorCode ESP32I2C::StartAsyncTransaction(uint16_t slave_addr,
+                                          const uint8_t* write_prefix_payload,
+                                          size_t write_prefix_size,
+                                          const uint8_t* write_payload,
+                                          size_t write_size,
+                                          uint8_t* read_payload,
+                                          size_t read_size,
+                                          ReadOperation& op)
+{
+  if (!initialized_ || (hal_.dev == nullptr))
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  if (!IsValid7BitAddr(slave_addr))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if ((write_prefix_size > 0U) && (write_prefix_payload == nullptr))
+  {
+    return ErrorCode::PTR_NULL;
+  }
+  if (write_prefix_size > async_write_prefix_.size())
+  {
+    return ErrorCode::SIZE_ERR;
+  }
+  if ((write_size > 0U) && (write_payload == nullptr))
+  {
+    return ErrorCode::PTR_NULL;
+  }
+  if ((read_size > 0U) && (read_payload == nullptr))
+  {
+    return ErrorCode::PTR_NULL;
+  }
+  if (async_running_)
+  {
+    return ErrorCode::BUSY;
+  }
+
+  if (i2c_ll_is_bus_busy(hal_.dev))
+  {
+    const ErrorCode ec = RecoverController();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+  }
+
+  i2c_ll_txfifo_rst(hal_.dev);
+  i2c_ll_rxfifo_rst(hal_.dev);
+  i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
+  i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
+
+  async_op_ = op;
+  op.MarkAsRunning();
+  async_running_ = true;
+  async_slave_addr_ = slave_addr;
+  async_write_prefix_size_ = write_prefix_size;
+  async_write_prefix_offset_ = 0U;
+  if (write_prefix_size > 0U)
+  {
+    Memory::FastCopy(async_write_prefix_.data(), write_prefix_payload, write_prefix_size);
+  }
+  async_write_payload_ = write_payload;
+  async_write_size_ = write_size;
+  async_write_offset_ = 0U;
+  async_read_payload_ = read_payload;
+  async_read_size_ = read_size;
+  async_read_offset_ = 0U;
+  async_pending_read_chunk_ = 0U;
+  async_write_phase_done_ =
+      !((write_prefix_size > 0U) || (write_size > 0U) || (read_size == 0U));
+  async_write_addr_sent_ = false;
+  async_write_stop_sent_ = false;
+  async_read_addr_sent_ = false;
+
+  const ErrorCode kick = KickAsyncTransaction();
+  if ((kick == ErrorCode::PENDING) || (kick == ErrorCode::OK))
+  {
+    if (kick == ErrorCode::OK)
+    {
+      FinishAsync(false, ErrorCode::OK);
+    }
+    return ErrorCode::OK;
+  }
+
+  async_running_ = false;
+  async_write_prefix_size_ = 0U;
+  async_write_prefix_offset_ = 0U;
+  async_write_payload_ = nullptr;
+  async_write_size_ = 0U;
+  async_write_offset_ = 0U;
+  async_read_payload_ = nullptr;
+  async_read_size_ = 0U;
+  async_read_offset_ = 0U;
+  async_pending_read_chunk_ = 0U;
+  async_write_phase_done_ = true;
+  async_write_addr_sent_ = false;
+  async_write_stop_sent_ = false;
+  async_read_addr_sent_ = false;
+  return kick;
+}
+
+ErrorCode ESP32I2C::KickAsyncTransaction()
+{
+  if (!async_running_ || (hal_.dev == nullptr))
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
+  const uint8_t write_addr =
+      static_cast<uint8_t>((async_slave_addr_ << 1U) | I2C_MASTER_WRITE);
+  const uint8_t read_addr =
+      static_cast<uint8_t>((async_slave_addr_ << 1U) | I2C_MASTER_READ);
+  const size_t fifo_len = kFifoLen;
+  const size_t write_chunk_cap = (fifo_len > 1U) ? (fifo_len - 1U) : 0U;
+  ASSERT(write_chunk_cap > 0U);
+
+  while (true)
+  {
+    if (async_pending_read_chunk_ > 0U)
+    {
+      i2c_ll_read_rxfifo(
+          hal_.dev, async_read_payload_ + async_read_offset_,
+          static_cast<uint8_t>(async_pending_read_chunk_));
+      async_read_offset_ += async_pending_read_chunk_;
+      async_pending_read_chunk_ = 0U;
+    }
+
+    int cmd_idx = 0;
+
+    if (!async_write_phase_done_)
+    {
+      if (!async_write_addr_sent_)
+      {
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, kAckValue, kAckValue,
+                     kNoCheckAck, 0U);
+        i2c_ll_write_txfifo(hal_.dev, &write_addr, 1U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
+                     kCheckAck, 1U);
+        async_write_addr_sent_ = true;
+      }
+
+      if (async_write_prefix_offset_ < async_write_prefix_size_)
+      {
+        const size_t chunk = std::min(async_write_prefix_size_ - async_write_prefix_offset_,
+                                      write_chunk_cap);
+        i2c_ll_write_txfifo(
+            hal_.dev, async_write_prefix_.data() + async_write_prefix_offset_,
+            static_cast<uint8_t>(chunk));
+        async_write_prefix_offset_ += chunk;
+
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
+                     kCheckAck, static_cast<uint8_t>(chunk));
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
+                     kNoCheckAck, 0U);
+      }
+      else if (async_write_offset_ < async_write_size_)
+      {
+        const size_t chunk =
+            std::min(async_write_size_ - async_write_offset_, write_chunk_cap);
+        i2c_ll_write_txfifo(hal_.dev, async_write_payload_ + async_write_offset_,
+                            static_cast<uint8_t>(chunk));
+        async_write_offset_ += chunk;
+
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
+                     kCheckAck, static_cast<uint8_t>(chunk));
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
+                     kNoCheckAck, 0U);
+      }
+      else if (async_read_size_ == 0U)
+      {
+        if (!async_write_stop_sent_)
+        {
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, kAckValue, kAckValue,
+                       kNoCheckAck, 0U);
+#if SOC_I2C_STOP_INDEPENDENT
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
+                       kNoCheckAck, 0U);
+#endif
+          async_write_stop_sent_ = true;
+        }
+        async_write_phase_done_ = async_write_stop_sent_;
+      }
+      else
+      {
+        async_write_phase_done_ = true;
+      }
+
+      if (cmd_idx > 0)
+      {
+        i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
+        i2c_ll_enable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
+        i2c_hal_master_trans_start(&hal_);
+        return ErrorCode::PENDING;
+      }
+
+      continue;
+    }
+
+    if (async_read_size_ > 0U)
+    {
+      if (!async_read_addr_sent_)
+      {
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, kAckValue, kAckValue,
+                     kNoCheckAck, 0U);
+        i2c_ll_write_txfifo(hal_.dev, &read_addr, 1U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
+                     kCheckAck, 1U);
+        async_read_addr_sent_ = true;
+      }
+      else if (async_read_offset_ < async_read_size_)
+      {
+        const size_t chunk = std::min(async_read_size_ - async_read_offset_, fifo_len);
+        const bool is_last = (async_read_offset_ + chunk) >= async_read_size_;
+
+        if (!is_last)
+        {
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kAckValue, kAckValue,
+                       kNoCheckAck, static_cast<uint8_t>(chunk));
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
+                       kNoCheckAck, 0U);
+        }
+        else if (chunk == 1U)
+        {
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kNackValue, kAckValue,
+                       kNoCheckAck, 1U);
+        }
+        else
+        {
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kAckValue, kAckValue,
+                       kNoCheckAck, static_cast<uint8_t>(chunk - 1U));
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kNackValue, kAckValue,
+                       kNoCheckAck, 1U);
+        }
+
+        if (is_last)
+        {
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, kAckValue, kAckValue,
+                       kNoCheckAck, 0U);
+#if SOC_I2C_STOP_INDEPENDENT
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
+                       kNoCheckAck, 0U);
+#endif
+        }
+
+        async_pending_read_chunk_ = chunk;
+      }
+
+      if (cmd_idx > 0)
+      {
+        i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
+        i2c_ll_enable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
+        i2c_hal_master_trans_start(&hal_);
+        return ErrorCode::PENDING;
+      }
+    }
+
+    return ErrorCode::OK;
+  }
+}
+
+void ESP32I2C::FinishAsync(bool in_isr, ErrorCode ec)
+{
+  if (!async_running_)
+  {
+    return;
+  }
+
+  if (hal_.dev != nullptr)
+  {
+    i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
+    i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
+  }
+
+  ReadOperation op = async_op_;
+  async_op_ = {};
+  async_running_ = false;
+  async_write_prefix_size_ = 0U;
+  async_write_prefix_offset_ = 0U;
+  async_write_payload_ = nullptr;
+  async_write_size_ = 0U;
+  async_write_offset_ = 0U;
+  async_read_payload_ = nullptr;
+  async_read_size_ = 0U;
+  async_read_offset_ = 0U;
+  async_pending_read_chunk_ = 0U;
+  async_write_phase_done_ = true;
+  async_write_addr_sent_ = false;
+  async_write_stop_sent_ = false;
+  async_read_addr_sent_ = false;
+
+  Release();
+  op.UpdateStatus(in_isr, ec);
+}
+
+ErrorCode ESP32I2C::InstallInterrupt()
+{
+  if (intr_installed_)
+  {
+    return ErrorCode::OK;
+  }
+
+  const int irq = i2c_periph_signal[port_num_].irq;
+  if (irq <= 0)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  if (esp_intr_alloc(irq, 0, I2cIsrEntry, this, &intr_handle_) != ESP_OK)
+  {
+    intr_handle_ = nullptr;
+    return ErrorCode::INIT_ERR;
+  }
+
+  intr_installed_ = true;
+  return ErrorCode::OK;
+}
+
+void ESP32I2C::RemoveInterrupt()
+{
+  if (intr_handle_ != nullptr)
+  {
+    esp_intr_free(intr_handle_);
+    intr_handle_ = nullptr;
+  }
+  intr_installed_ = false;
+}
+
+void ESP32I2C::I2cIsrEntry(void* arg)
+{
+  auto* self = static_cast<ESP32I2C*>(arg);
+  if (self != nullptr)
+  {
+    self->HandleInterrupt();
+  }
+}
+
+void ESP32I2C::HandleInterrupt()
+{
+  if (hal_.dev == nullptr)
+  {
+    return;
+  }
+
+  const uint32_t intr = hal_.dev->int_raw.val;
+  if ((intr & I2C_LL_MASTER_EVENT_INTR) == 0U)
+  {
+    return;
+  }
+
+  if (!async_running_)
+  {
+    i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
+    i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
+    return;
+  }
+
+  i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
+  i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
+
+  if ((intr & I2C_LL_INTR_NACK) != 0U)
+  {
+    i2c_hal_master_fsm_rst(&hal_);
+    i2c_ll_update(hal_.dev);
+    FinishAsync(true, ErrorCode::NO_RESPONSE);
+    return;
+  }
+  if ((intr & I2C_LL_INTR_TIMEOUT) != 0U)
+  {
+    i2c_hal_master_fsm_rst(&hal_);
+    i2c_ll_update(hal_.dev);
+    FinishAsync(true, ErrorCode::TIMEOUT);
+    return;
+  }
+  if ((intr & I2C_LL_INTR_ARBITRATION) != 0U)
+  {
+    i2c_hal_master_fsm_rst(&hal_);
+    i2c_ll_update(hal_.dev);
+    FinishAsync(true, ErrorCode::FAILED);
+    return;
+  }
+
+  if ((intr & (I2C_LL_INTR_MST_COMPLETE | I2C_LL_INTR_END_DETECT)) == 0U)
+  {
+    return;
+  }
+
+  const ErrorCode kick = KickAsyncTransaction();
+  if (kick == ErrorCode::PENDING)
+  {
+    return;
+  }
+
+  FinishAsync(true, kick);
 }
 
 ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write_payload,
@@ -371,6 +820,10 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
 
   int cmd_idx = 0;
 
+  auto start_and_wait = [&](int done_cmd) -> ErrorCode {
+    return StartAndWaitSegment(hal_, done_cmd, timeout_us);
+  };
+
   if ((write_size > 0U) || (read_size == 0U))
   {
     WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, kAckValue, kAckValue,
@@ -394,7 +847,7 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
       WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
                    kNoCheckAck, 0U);
 
-      const ErrorCode ec = StartAndWaitSegment(hal_, cmd_idx - 1, timeout_us);
+      const ErrorCode ec = start_and_wait(cmd_idx - 1);
       if (ec != ErrorCode::OK)
       {
         (void)RecoverController();
@@ -414,7 +867,7 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
                      kNoCheckAck, 0U);
 #endif
       }
-      const ErrorCode ec = StartAndWaitSegment(hal_, cmd_idx - 1, timeout_us);
+      const ErrorCode ec = start_and_wait(cmd_idx - 1);
       if (ec != ErrorCode::OK)
       {
         (void)RecoverController();
@@ -430,7 +883,7 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
       WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
                    kNoCheckAck, 0U);
 #endif
-      const ErrorCode ec = StartAndWaitSegment(hal_, cmd_idx - 1, timeout_us);
+      const ErrorCode ec = start_and_wait(cmd_idx - 1);
       if (ec != ErrorCode::OK)
       {
         (void)RecoverController();
@@ -484,7 +937,7 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
 #endif
       }
 
-      const ErrorCode ec = StartAndWaitSegment(hal_, cmd_idx - 1, timeout_us);
+      const ErrorCode ec = start_and_wait(cmd_idx - 1);
       if (ec != ErrorCode::OK)
       {
         (void)RecoverController();
@@ -561,11 +1014,29 @@ ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     return Complete(op, in_isr, ErrorCode::BUSY);
   }
 
-  ErrorCode ans = ErrorCode::OK;
-  ans = ExecuteTransaction(slave_addr,
-                           static_cast<const uint8_t*>(write_data.addr_),
-                           write_data.size_, nullptr, 0U);
+  const size_t total_size = write_data.size_;
+  if (ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  {
+    const ErrorCode ans = StartAsyncTransaction(
+        slave_addr, nullptr, 0U, static_cast<const uint8_t*>(write_data.addr_),
+        write_data.size_, nullptr, 0U, op);
+    if (ans != ErrorCode::OK)
+    {
+      Release();
+      return Complete(op, in_isr, ans);
+    }
 
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
+  }
+
+  const ErrorCode ans =
+      ExecuteTransaction(slave_addr, static_cast<const uint8_t*>(write_data.addr_),
+                         write_data.size_, nullptr, 0U);
   Release();
   return Complete(op, in_isr, ans);
 }
@@ -602,11 +1073,29 @@ ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     return Complete(op, in_isr, ErrorCode::BUSY);
   }
 
-  ErrorCode ans = ErrorCode::OK;
-  ans = ExecuteTransaction(slave_addr, nullptr, 0U,
-                           static_cast<uint8_t*>(read_data.addr_),
-                           read_data.size_);
+  const size_t total_size = read_data.size_;
+  if (ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  {
+    const ErrorCode ans = StartAsyncTransaction(
+        slave_addr, nullptr, 0U, nullptr, 0U,
+        static_cast<uint8_t*>(read_data.addr_), read_data.size_, op);
+    if (ans != ErrorCode::OK)
+    {
+      Release();
+      return Complete(op, in_isr, ans);
+    }
 
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
+  }
+
+  const ErrorCode ans = ExecuteTransaction(slave_addr, nullptr, 0U,
+                                           static_cast<uint8_t*>(read_data.addr_),
+                                           read_data.size_);
   Release();
   return Complete(op, in_isr, ans);
 }
@@ -648,6 +1137,37 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   if (!Acquire())
   {
     return Complete(op, in_isr, ErrorCode::BUSY);
+  }
+
+  std::array<uint8_t, 2> mem_raw = {};
+  if (mem_len == 2U)
+  {
+    mem_raw[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
+    mem_raw[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
+  }
+  else
+  {
+    mem_raw[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
+  }
+
+  const size_t total_size = mem_len + write_data.size_;
+  if (ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  {
+    const ErrorCode ans = StartAsyncTransaction(
+        slave_addr, mem_raw.data(), mem_len, static_cast<const uint8_t*>(write_data.addr_),
+        write_data.size_, nullptr, 0U, op);
+    if (ans != ErrorCode::OK)
+    {
+      Release();
+      return Complete(op, in_isr, ans);
+    }
+
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
   }
 
   std::array<uint8_t, kFifoLen> staging = {};
@@ -738,7 +1258,37 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   }
 
   std::array<uint8_t, 2> mem_raw = {};
+  if (mem_len == 2U)
+  {
+    mem_raw[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
+    mem_raw[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
+  }
+  else
+  {
+    mem_raw[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
+  }
+
   auto* dst = static_cast<uint8_t*>(read_data.addr_);
+  const size_t total_size = mem_len + read_data.size_;
+  if ((read_data.size_ > 0U) && ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  {
+    const ErrorCode ans =
+        StartAsyncTransaction(slave_addr, mem_raw.data(), mem_len, nullptr, 0U, dst,
+                              read_data.size_, op);
+    if (ans != ErrorCode::OK)
+    {
+      Release();
+      return Complete(op, in_isr, ans);
+    }
+
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
+  }
+
   size_t offset = 0U;
   ErrorCode ans = ErrorCode::OK;
 

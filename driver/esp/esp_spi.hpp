@@ -17,26 +17,9 @@ namespace LibXR
 class ESP32SPI : public SPI
 {
  public:
-  static constexpr int PIN_NO_CHANGE = -1;
-
   ESP32SPI(
       spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_pin, RawData dma_rx,
-      RawData dma_tx, int cs_id = 0,
-      SPI::Configuration config = {
-          SPI::ClockPolarity::LOW,
-          SPI::ClockPhase::EDGE_1,
-          SPI::Prescaler::DIV_8,
-          false,
-      },
-      uint32_t dma_enable_min_size = 3U, bool enable_dma = true)
-      : ESP32SPI(host, sclk_pin, miso_pin, mosi_pin, PIN_NO_CHANGE, dma_rx, dma_tx, cs_id,
-                 config, dma_enable_min_size, enable_dma)
-  {
-  }
-
-  ESP32SPI(
-      spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_pin, int cs_pin,
-      RawData dma_rx, RawData dma_tx, int cs_id = 0,
+      RawData dma_tx,
       SPI::Configuration config = {
           SPI::ClockPolarity::LOW,
           SPI::ClockPhase::EDGE_1,
@@ -104,10 +87,9 @@ class ESP32SPI : public SPI
                                RawData read_back, bool mem_read, OperationRW& op,
                                bool& started);
 
-  void ConfigureTransferRegisters(size_t size, bool keep_cs, bool enable_rx);
+  void ConfigureTransferRegisters(size_t size);
 
-  ErrorCode ExecuteChunk(const uint8_t* tx, uint8_t* rx, size_t size, bool keep_cs,
-                         bool enable_rx);
+  ErrorCode ExecuteChunk(const uint8_t* tx, uint8_t* rx, size_t size, bool enable_rx);
 
   ErrorCode ExecuteTransfer(const uint8_t* tx, uint8_t* rx, size_t size, bool enable_rx);
 
@@ -120,8 +102,6 @@ class ESP32SPI : public SPI
   int sclk_pin_;
   int miso_pin_;
   int mosi_pin_;
-  int cs_pin_;
-  int cs_id_;
   uint32_t source_clock_hz_ = 0;
   std::atomic<bool> busy_{false};
   bool initialized_ = false;

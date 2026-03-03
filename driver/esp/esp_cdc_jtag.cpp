@@ -160,90 +160,84 @@ void IRAM_ATTR ESP32CDCJtag::ResetTxState(bool)
 
 bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
 {
+  (void)in_isr;
+
   if (tx_active_valid_)
   {
     return true;
   }
 
-  while (true)
+  WriteInfoBlock info = {};
+  if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
   {
-    WriteInfoBlock info = {};
-    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (info.data.size_ > tx_slot_size_)
-    {
-      (void)write_port_->queue_info_->Pop(info);
-      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
-      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
-      continue;
-    }
-
-    if (write_port_->queue_data_->PopBatch(tx_slot_a_, info.data.size_) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    tx_active_ptr_ = tx_slot_a_;
-    tx_active_size_ = info.data.size_;
-    tx_active_offset_ = 0;
-    tx_active_valid_ = true;
-    tx_active_reported_ = false;
-    return true;
+    return false;
   }
+
+  if (info.data.size_ > tx_slot_size_)
+  {
+    ASSERT(false);
+    return false;
+  }
+
+  if (write_port_->queue_data_->PopBatch(tx_slot_a_, info.data.size_) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  tx_active_ptr_ = tx_slot_a_;
+  tx_active_size_ = info.data.size_;
+  tx_active_offset_ = 0;
+  tx_active_valid_ = true;
+  tx_active_reported_ = false;
+  return true;
 }
 
 bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
 {
+  (void)in_isr;
+
   if (tx_pending_valid_)
   {
     return false;
   }
 
-  while (true)
+  WriteInfoBlock info = {};
+  if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
   {
-    WriteInfoBlock info = {};
-    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (info.data.size_ > tx_slot_size_)
-    {
-      (void)write_port_->queue_info_->Pop(info);
-      (void)write_port_->queue_data_->PopBatch(nullptr, info.data.size_);
-      write_port_->Finish(in_isr, ErrorCode::SIZE_ERR, info);
-      continue;
-    }
-
-    uint8_t* pending_slot = tx_slot_b_;
-    if (tx_active_ptr_ == tx_slot_b_)
-    {
-      pending_slot = tx_slot_a_;
-    }
-
-    if (write_port_->queue_data_->PopBatch(pending_slot, info.data.size_) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (write_port_->queue_info_->Pop(tx_pending_info_) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    tx_pending_ptr_ = pending_slot;
-    tx_pending_size_ = info.data.size_;
-    tx_pending_valid_ = true;
-    return true;
+    return false;
   }
+
+  if (info.data.size_ > tx_slot_size_)
+  {
+    ASSERT(false);
+    return false;
+  }
+
+  uint8_t* pending_slot = tx_slot_b_;
+  if (tx_active_ptr_ == tx_slot_b_)
+  {
+    pending_slot = tx_slot_a_;
+  }
+
+  if (write_port_->queue_data_->PopBatch(pending_slot, info.data.size_) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  if (write_port_->queue_info_->Pop(tx_pending_info_) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  tx_pending_ptr_ = pending_slot;
+  tx_pending_size_ = info.data.size_;
+  tx_pending_valid_ = true;
+  return true;
 }
 
 bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)

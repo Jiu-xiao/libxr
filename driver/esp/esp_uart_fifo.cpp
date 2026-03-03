@@ -103,13 +103,22 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 
 void IRAM_ATTR ESP32UART::HandleRxInterrupt(uint32_t uart_intr_status)
 {
+  bool need_drain = false;
+
   if (uart_intr_status & UART_INTR_RXFIFO_OVF)
   {
-    uart_hal_rxfifo_rst(&uart_hal_);
+    // Overrun means at least one incoming byte was dropped. Keep remaining FIFO
+    // bytes to minimize extra loss instead of resetting the whole RX FIFO.
     uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_OVF);
+    need_drain = true;
   }
 
   if (uart_intr_status & (UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT))
+  {
+    need_drain = true;
+  }
+
+  if (need_drain)
   {
     while (uart_hal_get_rxfifo_len(&uart_hal_) > 0)
     {
@@ -137,6 +146,7 @@ void IRAM_ATTR ESP32UART::HandleTxInterrupt(uint32_t uart_intr_status)
 {
   if (uart_intr_status & UART_INTR_TXFIFO_EMPTY)
   {
+    Flag::ScopedRestore tx_flag(in_tx_isr_);
     FillTxFifo(true);
     uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_TXFIFO_EMPTY);
   }
