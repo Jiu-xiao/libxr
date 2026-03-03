@@ -238,7 +238,6 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   }
 #endif
 
-
   // Align with ST/CH SetConfig semantics: if TX was in-flight during
   // reconfiguration, keep transfer progression instead of surfacing BUSY.
   if (tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
@@ -494,7 +493,6 @@ bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
   return true;
 }
 
-
 ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 {
   if (in_tx_isr_.IsSet())
@@ -644,7 +642,6 @@ bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
 
   return true;
 }
-
 
 void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_isr)
 {
