@@ -105,35 +105,37 @@ void IRAM_ATTR ESP32UART::DrainRxFifoFromIsr()
   bool pushed_any = false;
   while (uart_hal_get_rxfifo_len(&uart_hal_) > 0U)
   {
-    uint8_t* write_ptr = nullptr;
-    size_t writable = 0;
-    uint32_t ticket = 0;
-    if (!read_port_->queue_data_->AcquirePushBuffer(write_ptr, writable, ticket) ||
-        (write_ptr == nullptr) || (writable == 0U))
+    const ErrorCode push_ec = read_port_->queue_data_->PushWithWriter(
+        [this](uint8_t* buffer, size_t contiguous, size_t& out_written) -> ErrorCode {
+          int read_len = static_cast<int>(
+              std::min<size_t>(uart_hal_get_rxfifo_len(&uart_hal_), contiguous));
+          if (read_len <= 0)
+          {
+            out_written = 0;
+            return ErrorCode::EMPTY;
+          }
+
+          uart_hal_read_rxfifo(&uart_hal_, buffer, &read_len);
+          if (read_len <= 0)
+          {
+            out_written = 0;
+            return ErrorCode::EMPTY;
+          }
+
+          out_written = static_cast<size_t>(read_len);
+          return ErrorCode::OK;
+        });
+
+    if ((push_ec == ErrorCode::FULL) || (push_ec == ErrorCode::EMPTY))
     {
       break;
     }
-
-    int read_len = static_cast<int>(
-        std::min<size_t>(uart_hal_get_rxfifo_len(&uart_hal_), writable));
-    if (read_len <= 0)
-    {
-      break;
-    }
-
-    uart_hal_read_rxfifo(&uart_hal_, write_ptr, &read_len);
-    if (read_len <= 0)
-    {
-      break;
-    }
-
-    const ErrorCode commit_ec =
-        read_port_->queue_data_->CommitPushBuffer(ticket, static_cast<size_t>(read_len));
-    if (commit_ec != ErrorCode::OK)
+    if (push_ec != ErrorCode::OK)
     {
       ASSERT(false);
       break;
     }
+
     pushed_any = true;
   }
 

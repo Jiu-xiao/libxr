@@ -304,6 +304,32 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     tail_.store((current_tail + size) % capacity, std::memory_order_release);
     return ErrorCode::OK;
   }
+
+  /**
+   * @brief 通过写入器回调提交数据（单生产者） / Push via writer callback (single producer)
+   *
+   * @param writer 写入器：签名 ErrorCode(Data* buffer, size_t contiguous, size_t& written)
+   *               Writer callback signature:
+   *               ErrorCode(Data* buffer, size_t contiguous, size_t& written)
+   * @note 仅当回调返回 ErrorCode::OK 时才会提交写入。
+   *       The written span is committed only when callback returns ErrorCode::OK.
+   */
+  template <typename Writer>
+  ErrorCode PushWithWriter(Writer&& writer)
+  {
+    Data* buffer = nullptr;
+    size_t contiguous = 0;
+    uint32_t ticket = 0;
+    if (!AcquirePushBuffer(buffer, contiguous, ticket) || (buffer == nullptr) ||
+        (contiguous == 0U))
+    {
+      return ErrorCode::FULL;
+    }
+
+    size_t written = 0;
+    const ErrorCode writer_ec = writer(buffer, contiguous, written);
+    return (writer_ec == ErrorCode::OK) ? CommitPushBuffer(ticket, written) : writer_ec;
+  }
   /**
    * @brief 批量弹出数据 / Pops multiple elements from the queue
    * @param data 数据存储数组指针 / Pointer to the array to store popped data
