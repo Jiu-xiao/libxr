@@ -158,39 +158,52 @@ void IRAM_ATTR ESP32CDCJtag::ResetTxState(bool)
   tx_busy_.store(false, std::memory_order_release);
 }
 
-bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
+bool IRAM_ATTR ESP32CDCJtag::DequeueTxToSlot(uint8_t* slot, size_t& size,
+                                             WriteInfoBlock& info, bool in_isr)
 {
   (void)in_isr;
 
-  if (tx_active_valid_)
-  {
-    return true;
-  }
-
-  WriteInfoBlock info = {};
-  if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
+  WriteInfoBlock peek_info = {};
+  if (write_port_->queue_info_->Peek(peek_info) != ErrorCode::OK)
   {
     return false;
   }
 
-  if (info.data.size_ > tx_slot_size_)
+  if (peek_info.data.size_ > tx_slot_size_)
   {
     ASSERT(false);
     return false;
   }
 
-  if (write_port_->queue_data_->PopBatch(tx_slot_a_, info.data.size_) != ErrorCode::OK)
+  if (write_port_->queue_data_->PopBatch(slot, peek_info.data.size_) != ErrorCode::OK)
   {
     return false;
   }
 
-  if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
+  if (write_port_->queue_info_->Pop(info) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  size = peek_info.data.size_;
+  return true;
+}
+
+bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
+{
+  if (tx_active_valid_)
+  {
+    return true;
+  }
+
+  size_t active_size = 0U;
+  if (!DequeueTxToSlot(tx_slot_a_, active_size, tx_active_info_, in_isr))
   {
     return false;
   }
 
   tx_active_ptr_ = tx_slot_a_;
-  tx_active_size_ = info.data.size_;
+  tx_active_size_ = active_size;
   tx_active_offset_ = 0;
   tx_active_valid_ = true;
   tx_active_reported_ = false;
@@ -199,22 +212,8 @@ bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
 
 bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
 {
-  (void)in_isr;
-
   if (tx_pending_valid_)
   {
-    return false;
-  }
-
-  WriteInfoBlock info = {};
-  if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
-  {
-    return false;
-  }
-
-  if (info.data.size_ > tx_slot_size_)
-  {
-    ASSERT(false);
     return false;
   }
 
@@ -224,18 +223,14 @@ bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
     pending_slot = tx_slot_a_;
   }
 
-  if (write_port_->queue_data_->PopBatch(pending_slot, info.data.size_) != ErrorCode::OK)
-  {
-    return false;
-  }
-
-  if (write_port_->queue_info_->Pop(tx_pending_info_) != ErrorCode::OK)
+  size_t pending_size = 0U;
+  if (!DequeueTxToSlot(pending_slot, pending_size, tx_pending_info_, in_isr))
   {
     return false;
   }
 
   tx_pending_ptr_ = pending_slot;
-  tx_pending_size_ = info.data.size_;
+  tx_pending_size_ = pending_size;
   tx_pending_valid_ = true;
   return true;
 }
@@ -310,6 +305,12 @@ bool IRAM_ATTR ESP32CDCJtag::StartAndReportActive(bool in_isr)
   return true;
 }
 
+void IRAM_ATTR ESP32CDCJtag::StopTxTransfer()
+{
+  usb_serial_jtag_ll_txfifo_flush();
+  usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
+}
+
 void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 {
   Flag::ScopedRestore tx_flag(in_tx_isr_);
@@ -331,8 +332,7 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   if (result != ErrorCode::OK)
   {
-    usb_serial_jtag_ll_txfifo_flush();
-    usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
+    StopTxTransfer();
     return;
   }
 
@@ -362,8 +362,7 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   if (!tx_busy_.load(std::memory_order_acquire) && !tx_active_valid_ && !tx_pending_valid_)
   {
-    usb_serial_jtag_ll_txfifo_flush();
-    usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
+    StopTxTransfer();
   }
 }
 

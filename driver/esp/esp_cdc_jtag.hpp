@@ -51,8 +51,10 @@ class ESP32CDCJtag : public UART
   ErrorCode TryStartTx(bool in_isr);
   bool LoadActiveTxFromQueue(bool in_isr);
   bool LoadPendingTxFromQueue(bool in_isr);
+  bool DequeueTxToSlot(uint8_t* slot, size_t& size, WriteInfoBlock& info, bool in_isr);
   bool StartActiveTransfer(bool in_isr);
   bool StartAndReportActive(bool in_isr);
+  void StopTxTransfer();
   void OnTxTransferDone(bool in_isr, ErrorCode result);
   bool PumpTx(bool in_isr);
   void ClearActiveTx();
