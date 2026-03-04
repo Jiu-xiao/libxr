@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "libxr_def.hpp"
 
@@ -317,6 +318,13 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
   template <typename Writer>
   ErrorCode PushWithWriter(Writer&& writer)
   {
+    static_assert(std::is_invocable_v<Writer&, Data*, size_t, size_t&>,
+                  "PushWithWriter writer must be callable as "
+                  "ErrorCode(Data* buffer, size_t contiguous, size_t& written)");
+    using WriterRet = std::invoke_result_t<Writer&, Data*, size_t, size_t&>;
+    static_assert(std::is_convertible_v<WriterRet, ErrorCode>,
+                  "PushWithWriter writer return type must be convertible to ErrorCode");
+
     Data* buffer = nullptr;
     size_t contiguous = 0;
     uint32_t ticket = 0;
@@ -327,7 +335,12 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     }
 
     size_t written = 0;
-    const ErrorCode writer_ec = writer(buffer, contiguous, written);
+    const ErrorCode writer_ec = std::forward<Writer>(writer)(buffer, contiguous, written);
+    if (written > contiguous)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
     return (writer_ec == ErrorCode::OK) ? CommitPushBuffer(ticket, written) : writer_ec;
   }
   /**
