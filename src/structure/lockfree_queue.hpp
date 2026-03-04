@@ -292,7 +292,7 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     }
 
     const size_t first_chunk = LibXR::min(size, capacity - static_cast<size_t>(current_tail));
-    auto&& writer_ref = writer;
+    Writer& writer_ref = writer;
     const ErrorCode first_ec = writer_ref(queue_handle_ + current_tail, first_chunk);
     if (first_ec != ErrorCode::OK)
     {
