@@ -65,8 +65,11 @@ class ESP32I2C : public I2C
   ErrorCode ApplyConfig();
   ErrorCode ResolveClockSource(uint32_t& source_hz);
   ErrorCode RecoverController();
+  ErrorCode EnsureInitialized(bool in_isr);
   bool ShouldUseInterruptAsync(size_t total_size, bool in_isr,
                                ReadOperation::OperationType op_type) const;
+  static size_t MemAddrBytes(MemAddrLength mem_addr_size);
+  static void EncodeMemAddr(uint16_t mem_addr, size_t mem_len, uint8_t* out);
   ErrorCode ExecuteTransaction(uint16_t slave_addr, const uint8_t* write_payload,
                                size_t write_size, uint8_t* read_payload,
                                size_t read_size);

@@ -142,6 +142,18 @@ ErrorCode Complete(OperationType& op, bool in_isr, ErrorCode result)
   return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
 }
 
+template <typename OperationType>
+ErrorCode WaitAsyncIfBlock(OperationType& op, bool in_isr)
+{
+  if (op.type != OperationType::OperationType::BLOCK)
+  {
+    return ErrorCode::OK;
+  }
+
+  ASSERT(!in_isr);
+  return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+}
+
 }  // namespace
 
 ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin,
@@ -180,6 +192,37 @@ bool ESP32I2C::Acquire()
 void ESP32I2C::Release() { busy_.store(false, std::memory_order_release); }
 
 bool ESP32I2C::IsValid7BitAddr(uint16_t addr) { return addr <= 0x7FU; }
+
+ErrorCode ESP32I2C::EnsureInitialized(bool in_isr)
+{
+  if (initialized_)
+  {
+    return ErrorCode::OK;
+  }
+  if (in_isr)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  return InitHardware();
+}
+
+size_t ESP32I2C::MemAddrBytes(MemAddrLength mem_addr_size)
+{
+  return (mem_addr_size == MemAddrLength::BYTE_16) ? 2U : 1U;
+}
+
+void ESP32I2C::EncodeMemAddr(uint16_t mem_addr, size_t mem_len, uint8_t* out)
+{
+  ASSERT(out != nullptr);
+  if (mem_len == 2U)
+  {
+    out[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
+    out[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
+    return;
+  }
+
+  out[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
+}
 
 ErrorCode ESP32I2C::ResolveClockSource(uint32_t& source_hz)
 {
@@ -985,18 +1028,10 @@ ErrorCode ESP32I2C::SetConfig(Configuration config)
 ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
                           WriteOperation& op, bool in_isr)
 {
-  if (!initialized_)
+  const ErrorCode init_ec = EnsureInitialized(in_isr);
+  if (init_ec != ErrorCode::OK)
   {
-    if (in_isr)
-    {
-      return Complete(op, in_isr, ErrorCode::INIT_ERR);
-    }
-
-    const ErrorCode init_err = InitHardware();
-    if (init_err != ErrorCode::OK)
-    {
-      return Complete(op, in_isr, init_err);
-    }
+    return Complete(op, in_isr, init_ec);
   }
 
   if (!IsValid7BitAddr(slave_addr))
@@ -1025,13 +1060,7 @@ ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
       Release();
       return Complete(op, in_isr, ans);
     }
-
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      ASSERT(!in_isr);
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    }
-    return ErrorCode::OK;
+    return WaitAsyncIfBlock(op, in_isr);
   }
 
   const ErrorCode ans =
@@ -1044,18 +1073,10 @@ ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
 ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
                          bool in_isr)
 {
-  if (!initialized_)
+  const ErrorCode init_ec = EnsureInitialized(in_isr);
+  if (init_ec != ErrorCode::OK)
   {
-    if (in_isr)
-    {
-      return Complete(op, in_isr, ErrorCode::INIT_ERR);
-    }
-
-    const ErrorCode init_err = InitHardware();
-    if (init_err != ErrorCode::OK)
-    {
-      return Complete(op, in_isr, init_err);
-    }
+    return Complete(op, in_isr, init_ec);
   }
 
   if (!IsValid7BitAddr(slave_addr))
@@ -1084,13 +1105,7 @@ ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
       Release();
       return Complete(op, in_isr, ans);
     }
-
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      ASSERT(!in_isr);
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    }
-    return ErrorCode::OK;
+    return WaitAsyncIfBlock(op, in_isr);
   }
 
   const ErrorCode ans = ExecuteTransaction(slave_addr, nullptr, 0U,
@@ -1104,18 +1119,10 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                              ConstRawData write_data, WriteOperation& op,
                              MemAddrLength mem_addr_size, bool in_isr)
 {
-  if (!initialized_)
+  const ErrorCode init_ec = EnsureInitialized(in_isr);
+  if (init_ec != ErrorCode::OK)
   {
-    if (in_isr)
-    {
-      return Complete(op, in_isr, ErrorCode::INIT_ERR);
-    }
-
-    const ErrorCode init_err = InitHardware();
-    if (init_err != ErrorCode::OK)
-    {
-      return Complete(op, in_isr, init_err);
-    }
+    return Complete(op, in_isr, init_ec);
   }
 
   if (!IsValid7BitAddr(slave_addr))
@@ -1128,7 +1135,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     return Complete(op, in_isr, ErrorCode::PTR_NULL);
   }
 
-  const size_t mem_len = (mem_addr_size == MemAddrLength::BYTE_16) ? 2U : 1U;
+  const size_t mem_len = MemAddrBytes(mem_addr_size);
   if (mem_len > kMaxWritePayload)
   {
     return Complete(op, in_isr, ErrorCode::SIZE_ERR);
@@ -1140,15 +1147,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   }
 
   std::array<uint8_t, 2> mem_raw = {};
-  if (mem_len == 2U)
-  {
-    mem_raw[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
-    mem_raw[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
-  }
-  else
-  {
-    mem_raw[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
-  }
+  EncodeMemAddr(mem_addr, mem_len, mem_raw.data());
 
   const size_t total_size = mem_len + write_data.size_;
   if (ShouldUseInterruptAsync(total_size, in_isr, op.type))
@@ -1161,13 +1160,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
       Release();
       return Complete(op, in_isr, ans);
     }
-
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      ASSERT(!in_isr);
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    }
-    return ErrorCode::OK;
+    return WaitAsyncIfBlock(op, in_isr);
   }
 
   std::array<uint8_t, kFifoLen> staging = {};
@@ -1178,15 +1171,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
   if (write_data.size_ == 0U)
   {
-    if (mem_len == 2U)
-    {
-      staging[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
-      staging[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
-    }
-    else
-    {
-      staging[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
-    }
+    EncodeMemAddr(mem_addr, mem_len, staging.data());
     ans = ExecuteTransaction(slave_addr, staging.data(), mem_len, nullptr, 0U);
   }
   else
@@ -1195,15 +1180,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     {
       const size_t chunk = std::min(write_data.size_ - offset, max_chunk);
       const uint16_t cur_mem = static_cast<uint16_t>(mem_addr + offset);
-      if (mem_len == 2U)
-      {
-        staging[0] = static_cast<uint8_t>((cur_mem >> 8) & 0xFFU);
-        staging[1] = static_cast<uint8_t>(cur_mem & 0xFFU);
-      }
-      else
-      {
-        staging[0] = static_cast<uint8_t>(cur_mem & 0xFFU);
-      }
+      EncodeMemAddr(cur_mem, mem_len, staging.data());
       Memory::FastCopy(staging.data() + mem_len, src + offset, chunk);
       ans = ExecuteTransaction(slave_addr, staging.data(), mem_len + chunk, nullptr, 0U);
       if (ans != ErrorCode::OK)
@@ -1222,18 +1199,10 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
                             ReadOperation& op, MemAddrLength mem_addr_size,
                             bool in_isr)
 {
-  if (!initialized_)
+  const ErrorCode init_ec = EnsureInitialized(in_isr);
+  if (init_ec != ErrorCode::OK)
   {
-    if (in_isr)
-    {
-      return Complete(op, in_isr, ErrorCode::INIT_ERR);
-    }
-
-    const ErrorCode init_err = InitHardware();
-    if (init_err != ErrorCode::OK)
-    {
-      return Complete(op, in_isr, init_err);
-    }
+    return Complete(op, in_isr, init_ec);
   }
 
   if (!IsValid7BitAddr(slave_addr))
@@ -1246,7 +1215,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     return Complete(op, in_isr, ErrorCode::PTR_NULL);
   }
 
-  const size_t mem_len = (mem_addr_size == MemAddrLength::BYTE_16) ? 2U : 1U;
+  const size_t mem_len = MemAddrBytes(mem_addr_size);
   if (mem_len > kMaxWriteReadPrefix)
   {
     return Complete(op, in_isr, ErrorCode::SIZE_ERR);
@@ -1258,15 +1227,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   }
 
   std::array<uint8_t, 2> mem_raw = {};
-  if (mem_len == 2U)
-  {
-    mem_raw[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
-    mem_raw[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
-  }
-  else
-  {
-    mem_raw[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
-  }
+  EncodeMemAddr(mem_addr, mem_len, mem_raw.data());
 
   auto* dst = static_cast<uint8_t*>(read_data.addr_);
   const size_t total_size = mem_len + read_data.size_;
@@ -1280,13 +1241,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
       Release();
       return Complete(op, in_isr, ans);
     }
-
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      ASSERT(!in_isr);
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    }
-    return ErrorCode::OK;
+    return WaitAsyncIfBlock(op, in_isr);
   }
 
   size_t offset = 0U;
@@ -1296,15 +1251,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   {
     const size_t chunk = std::min(read_data.size_ - offset, kMaxReadPayload);
     const uint16_t cur_mem = static_cast<uint16_t>(mem_addr + offset);
-    if (mem_len == 2U)
-    {
-      mem_raw[0] = static_cast<uint8_t>((cur_mem >> 8) & 0xFFU);
-      mem_raw[1] = static_cast<uint8_t>(cur_mem & 0xFFU);
-    }
-    else
-    {
-      mem_raw[0] = static_cast<uint8_t>(cur_mem & 0xFFU);
-    }
+    EncodeMemAddr(cur_mem, mem_len, mem_raw.data());
 
     ans = ExecuteTransaction(slave_addr, mem_raw.data(), mem_len, dst + offset, chunk);
     if (ans != ErrorCode::OK)
