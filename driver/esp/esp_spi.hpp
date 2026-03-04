@@ -83,6 +83,14 @@ class ESP32SPI : public SPI
 
   bool CanUseDma(size_t size) const;
 
+  ErrorCode EnsureReadyAndAcquire();
+
+  static ErrorCode FinalizeSyncResult(OperationRW& op, bool in_isr, ErrorCode ec);
+
+  static ErrorCode CompleteZeroSize(OperationRW& op, bool in_isr);
+
+  ErrorCode ReturnAsyncStartResult(ErrorCode ec, bool started);
+
   ErrorCode StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t size, bool enable_rx,
                                RawData read_back, bool mem_read, OperationRW& op,
                                bool& started);

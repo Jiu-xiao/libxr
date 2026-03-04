@@ -610,6 +610,42 @@ bool ESP32SPI::CanUseDma(size_t size) const
          (size > dma_enable_min_size_) && (size <= dma_max_transfer_bytes_);
 }
 
+ErrorCode ESP32SPI::EnsureReadyAndAcquire()
+{
+  if (!initialized_)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  if (!Acquire())
+  {
+    return ErrorCode::BUSY;
+  }
+  return ErrorCode::OK;
+}
+
+ErrorCode ESP32SPI::FinalizeSyncResult(OperationRW& op, bool in_isr, ErrorCode ec)
+{
+  if (op.type != OperationRW::OperationType::BLOCK)
+  {
+    op.UpdateStatus(in_isr, ec);
+  }
+  return ec;
+}
+
+ErrorCode ESP32SPI::CompleteZeroSize(OperationRW& op, bool in_isr)
+{
+  return FinalizeSyncResult(op, in_isr, ErrorCode::OK);
+}
+
+ErrorCode ESP32SPI::ReturnAsyncStartResult(ErrorCode ec, bool started)
+{
+  if (!started)
+  {
+    Release();
+  }
+  return ec;
+}
+
 void ESP32SPI::ConfigureTransferRegisters(size_t size)
 {
   static constexpr spi_line_mode_t kLineMode = {
@@ -787,20 +823,13 @@ ErrorCode ESP32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   const size_t need = std::max(read_data.size_, write_data.size_);
   if (need == 0U)
   {
-    if (op.type != OperationRW::OperationType::BLOCK)
-    {
-      op.UpdateStatus(in_isr, ErrorCode::OK);
-    }
-    return ErrorCode::OK;
+    return CompleteZeroSize(op, in_isr);
   }
 
-  if (!initialized_)
+  const ErrorCode lock_ec = EnsureReadyAndAcquire();
+  if (lock_ec != ErrorCode::OK)
   {
-    return ErrorCode::INIT_ERR;
-  }
-  if (!Acquire())
-  {
-    return ErrorCode::BUSY;
+    return lock_ec;
   }
 
   RawData rx = GetRxBuffer();
@@ -824,11 +853,7 @@ ErrorCode ESP32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     const ErrorCode ec =
         StartAsyncTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), need, true, read_data,
                            false, op, started);
-    if (!started)
-    {
-      Release();
-    }
-    return ec;
+    return ReturnAsyncStartResult(ec, started);
   }
 
   const ErrorCode ec = ExecuteTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), need, true);
@@ -842,31 +867,20 @@ ErrorCode ESP32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   }
 
   Release();
-  if (op.type != OperationRW::OperationType::BLOCK)
-  {
-    op.UpdateStatus(in_isr, ec);
-  }
-  return ec;
+  return FinalizeSyncResult(op, in_isr, ec);
 }
 
 ErrorCode ESP32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool in_isr)
 {
   if (read_data.size_ == 0U)
   {
-    if (op.type != OperationRW::OperationType::BLOCK)
-    {
-      op.UpdateStatus(in_isr, ErrorCode::OK);
-    }
-    return ErrorCode::OK;
+    return CompleteZeroSize(op, in_isr);
   }
 
-  if (!initialized_)
+  const ErrorCode lock_ec = EnsureReadyAndAcquire();
+  if (lock_ec != ErrorCode::OK)
   {
-    return ErrorCode::INIT_ERR;
-  }
-  if (!Acquire())
-  {
-    return ErrorCode::BUSY;
+    return lock_ec;
   }
 
   RawData rx = GetRxBuffer();
@@ -886,11 +900,7 @@ ErrorCode ESP32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
     const ErrorCode ec =
         StartAsyncTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), total, true, read_data,
                            true, op, started);
-    if (!started)
-    {
-      Release();
-    }
-    return ec;
+    return ReturnAsyncStartResult(ec, started);
   }
 
   const ErrorCode ec = ExecuteTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), total, true);
@@ -902,11 +912,7 @@ ErrorCode ESP32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
   }
 
   Release();
-  if (op.type != OperationRW::OperationType::BLOCK)
-  {
-    op.UpdateStatus(in_isr, ec);
-  }
-  return ec;
+  return FinalizeSyncResult(op, in_isr, ec);
 }
 
 ErrorCode ESP32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op,
@@ -914,20 +920,13 @@ ErrorCode ESP32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
 {
   if (write_data.size_ == 0U)
   {
-    if (op.type != OperationRW::OperationType::BLOCK)
-    {
-      op.UpdateStatus(in_isr, ErrorCode::OK);
-    }
-    return ErrorCode::OK;
+    return CompleteZeroSize(op, in_isr);
   }
 
-  if (!initialized_)
+  const ErrorCode lock_ec = EnsureReadyAndAcquire();
+  if (lock_ec != ErrorCode::OK)
   {
-    return ErrorCode::INIT_ERR;
-  }
-  if (!Acquire())
-  {
-    return ErrorCode::BUSY;
+    return lock_ec;
   }
 
   RawData tx = GetTxBuffer();
@@ -943,11 +942,7 @@ ErrorCode ESP32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
     bool started = false;
     const ErrorCode ec = StartAsyncTransfer(tx_ptr, nullptr, total, false, {nullptr, 0},
                                             false, op, started);
-    if (!started)
-    {
-      Release();
-    }
-    return ec;
+    return ReturnAsyncStartResult(ec, started);
   }
 
   const ErrorCode ec = ExecuteTransfer(tx_ptr, nullptr, total, false);
@@ -957,31 +952,20 @@ ErrorCode ESP32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
   }
 
   Release();
-  if (op.type != OperationRW::OperationType::BLOCK)
-  {
-    op.UpdateStatus(in_isr, ec);
-  }
-  return ec;
+  return FinalizeSyncResult(op, in_isr, ec);
 }
 
 ErrorCode ESP32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 {
   if (size == 0U)
   {
-    if (op.type != OperationRW::OperationType::BLOCK)
-    {
-      op.UpdateStatus(in_isr, ErrorCode::OK);
-    }
-    return ErrorCode::OK;
+    return CompleteZeroSize(op, in_isr);
   }
 
-  if (!initialized_)
+  const ErrorCode lock_ec = EnsureReadyAndAcquire();
+  if (lock_ec != ErrorCode::OK)
   {
-    return ErrorCode::INIT_ERR;
-  }
-  if (!Acquire())
-  {
-    return ErrorCode::BUSY;
+    return lock_ec;
   }
 
   RawData rx = GetRxBuffer();
@@ -996,11 +980,7 @@ ErrorCode ESP32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
         StartAsyncTransfer(static_cast<const uint8_t*>(tx.addr_),
                            static_cast<uint8_t*>(rx.addr_), size, true, {nullptr, 0}, false,
                            op, started);
-    if (!started)
-    {
-      Release();
-    }
-    return ec;
+    return ReturnAsyncStartResult(ec, started);
   }
 
   const ErrorCode ec = ExecuteTransfer(static_cast<const uint8_t*>(tx.addr_),
@@ -1011,11 +991,7 @@ ErrorCode ESP32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   }
 
   Release();
-  if (op.type != OperationRW::OperationType::BLOCK)
-  {
-    op.UpdateStatus(in_isr, ec);
-  }
-  return ec;
+  return FinalizeSyncResult(op, in_isr, ec);
 }
 
 uint32_t ESP32SPI::GetMaxBusSpeed() const { return source_clock_hz_; }
