@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 
 #include "libxr_def.hpp"
 
@@ -251,11 +252,64 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
   }
 
   /**
+   * @brief 获取连续可写段（单生产者） / Acquire contiguous writable span (single producer)
+   *
+   * @note 该接口不推进 tail；写入后需调用 CommitPushBuffer。
+   */
+  bool AcquirePushBuffer(Data*& buffer, size_t& contiguous, uint32_t& ticket)
+  {
+    const auto current_tail = tail_.load(std::memory_order_relaxed);
+    const auto current_head = head_.load(std::memory_order_acquire);
+    const size_t capacity = LENGTH + 1;
+    const size_t free_space =
+        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
+                                       : (current_head - current_tail - 1);
+
+    ticket = current_tail;
+    if (free_space == 0)
+    {
+      buffer = nullptr;
+      contiguous = 0;
+      return false;
+    }
+
+    buffer = queue_handle_ + current_tail;
+    contiguous = LibXR::min(free_space, capacity - static_cast<size_t>(current_tail));
+    return true;
+  }
+
+  /**
+   * @brief 提交连续写入段（单生产者） / Commit contiguous written span (single producer)
+   */
+  ErrorCode CommitPushBuffer(uint32_t ticket, size_t size)
+  {
+    if (size == 0)
+    {
+      return ErrorCode::OK;
+    }
+
+    const auto current_tail = tail_.load(std::memory_order_relaxed);
+    if (current_tail != ticket)
+    {
+      return ErrorCode::STATE_ERR;
+    }
+
+    const size_t capacity = LENGTH + 1;
+    const size_t contiguous = capacity - static_cast<size_t>(current_tail);
+    if (size > contiguous)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    tail_.store((current_tail + size) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
+  }
+  /**
    * @brief 批量弹出数据 / Pops multiple elements from the queue
    * @param data 数据存储数组指针 / Pointer to the array to store popped data
    * @param size 需要弹出的数据个数 / Number of elements to pop
-   * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空返回 `ErrorCode::EMPTY` /
-   *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
+   * @return 操作结果，成功返回 ErrorCode::OK，队列为空返回 ErrorCode::EMPTY /
+   *         Operation result: returns ErrorCode::OK on success, ErrorCode::EMPTY if
    * the queue is empty
    */
   ErrorCode PopBatch(Data* data, size_t size)

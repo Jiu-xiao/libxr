@@ -102,22 +102,44 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 
 void IRAM_ATTR ESP32UART::DrainRxFifoFromIsr()
 {
+  bool pushed_any = false;
   while (uart_hal_get_rxfifo_len(&uart_hal_) > 0U)
   {
+    uint8_t* write_ptr = nullptr;
+    size_t writable = 0;
+    uint32_t ticket = 0;
+    if (!read_port_->queue_data_->AcquirePushBuffer(write_ptr, writable, ticket) ||
+        (write_ptr == nullptr) || (writable == 0U))
+    {
+      break;
+    }
+
     int read_len = static_cast<int>(
-        std::min<size_t>(uart_hal_get_rxfifo_len(&uart_hal_), rx_isr_buffer_size_));
+        std::min<size_t>(uart_hal_get_rxfifo_len(&uart_hal_), writable));
     if (read_len <= 0)
     {
       break;
     }
 
-    uart_hal_read_rxfifo(&uart_hal_, rx_isr_buffer_, &read_len);
+    uart_hal_read_rxfifo(&uart_hal_, write_ptr, &read_len);
     if (read_len <= 0)
     {
       break;
     }
 
-    PushRxBytes(rx_isr_buffer_, static_cast<size_t>(read_len), true);
+    const ErrorCode commit_ec =
+        read_port_->queue_data_->CommitPushBuffer(ticket, static_cast<size_t>(read_len));
+    if (commit_ec != ErrorCode::OK)
+    {
+      ASSERT(false);
+      break;
+    }
+    pushed_any = true;
+  }
+
+  if (pushed_any)
+  {
+    read_port_->ProcessPendingReads(true);
   }
 }
 

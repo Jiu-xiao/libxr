@@ -155,7 +155,7 @@ class ESP32UART : public UART
 
   WriteInfoBlock tx_active_info_ = {};
   WriteInfoBlock tx_pending_info_ = {};
-  std::atomic<bool> tx_busy_{false};
+  Flag::Plain tx_busy_;
   Flag::Plain in_tx_isr_;
   bool tx_active_valid_ = false;
   bool tx_active_reported_ = false;
