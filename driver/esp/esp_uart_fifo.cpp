@@ -91,65 +91,68 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
     tx_active_offset_ += write_size;
   }
 
-  if (tx_active_offset_ >= tx_active_length_)
+  if ((tx_active_offset_ < tx_active_length_) || !in_isr)
   {
-    if (in_isr)
+    return;
+  }
+
+  uart_hal_disable_intr_mask(&uart_hal_, UART_INTR_TXFIFO_EMPTY);
+  OnTxTransferDone(true, ErrorCode::OK);
+}
+
+void IRAM_ATTR ESP32UART::DrainRxFifoFromIsr()
+{
+  while (uart_hal_get_rxfifo_len(&uart_hal_) > 0U)
+  {
+    int read_len = static_cast<int>(
+        std::min<size_t>(uart_hal_get_rxfifo_len(&uart_hal_), rx_isr_buffer_size_));
+    if (read_len <= 0)
     {
-      uart_hal_disable_intr_mask(&uart_hal_, UART_INTR_TXFIFO_EMPTY);
-      OnTxTransferDone(true, ErrorCode::OK);
+      break;
     }
+
+    uart_hal_read_rxfifo(&uart_hal_, rx_isr_buffer_, &read_len);
+    if (read_len <= 0)
+    {
+      break;
+    }
+
+    PushRxBytes(rx_isr_buffer_, static_cast<size_t>(read_len), true);
   }
 }
 
 void IRAM_ATTR ESP32UART::HandleRxInterrupt(uint32_t uart_intr_status)
 {
-  bool need_drain = false;
+  const bool has_overflow = (uart_intr_status & UART_INTR_RXFIFO_OVF) != 0U;
+  const bool has_rx_data =
+      (uart_intr_status & (UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT)) != 0U;
 
-  if (uart_intr_status & UART_INTR_RXFIFO_OVF)
+  if (!has_overflow && !has_rx_data)
+  {
+    return;
+  }
+
+  if (has_overflow)
   {
     // Overrun means at least one incoming byte was dropped. Keep remaining FIFO
     // bytes to minimize extra loss instead of resetting the whole RX FIFO.
     uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_OVF);
-    need_drain = true;
   }
 
-  if (uart_intr_status & (UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT))
-  {
-    need_drain = true;
-  }
-
-  if (need_drain)
-  {
-    while (uart_hal_get_rxfifo_len(&uart_hal_) > 0)
-    {
-      int read_len = static_cast<int>(std::min<size_t>(
-          uart_hal_get_rxfifo_len(&uart_hal_), rx_isr_buffer_size_));
-      if (read_len <= 0)
-      {
-        break;
-      }
-
-      uart_hal_read_rxfifo(&uart_hal_, rx_isr_buffer_, &read_len);
-      if (read_len <= 0)
-      {
-        break;
-      }
-
-      PushRxBytes(rx_isr_buffer_, static_cast<size_t>(read_len), true);
-    }
-
-    uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
-  }
+  DrainRxFifoFromIsr();
+  uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
 }
 
 void IRAM_ATTR ESP32UART::HandleTxInterrupt(uint32_t uart_intr_status)
 {
-  if (uart_intr_status & UART_INTR_TXFIFO_EMPTY)
+  if ((uart_intr_status & UART_INTR_TXFIFO_EMPTY) == 0U)
   {
-    Flag::ScopedRestore tx_flag(in_tx_isr_);
-    FillTxFifo(true);
-    uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_TXFIFO_EMPTY);
+    return;
   }
+
+  Flag::ScopedRestore tx_flag(in_tx_isr_);
+  FillTxFifo(true);
+  uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_TXFIFO_EMPTY);
 }
 
 void IRAM_ATTR ESP32UART::HandleUartInterrupt()

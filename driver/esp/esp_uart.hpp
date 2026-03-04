@@ -120,6 +120,8 @@ class ESP32UART : public UART
 
   void PushRxBytes(const uint8_t* data, size_t size, bool in_isr);
 
+  void DrainRxFifoFromIsr();
+
   void HandleRxInterrupt(uint32_t uart_intr_status);
 
   void HandleTxInterrupt(uint32_t uart_intr_status);
