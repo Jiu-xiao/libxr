@@ -571,6 +571,7 @@ bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
                                             WriteInfoBlock& info, bool in_isr)
 {
   (void)in_isr;
+  (void)buffer;
 
   WriteInfoBlock peek_info = {};
   if (write_port_->queue_info_->Peek(peek_info) != ErrorCode::OK)
@@ -584,10 +585,15 @@ bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
     return false;
   }
 
-  if (write_port_->queue_data_->PopBatch(buffer, peek_info.data.size_) != ErrorCode::OK)
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
   {
-    return false;
+    if (write_port_->queue_data_->PopBatch(buffer, peek_info.data.size_) != ErrorCode::OK)
+    {
+      return false;
+    }
   }
+#endif
 
   if (write_port_->queue_info_->Pop(info) != ErrorCode::OK)
   {

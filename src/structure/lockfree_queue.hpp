@@ -311,6 +311,66 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     tail_.store((current_tail + size) % capacity, std::memory_order_release);
     return ErrorCode::OK;
   }
+
+  /**
+   * @brief 通过读取器回调弹出固定长度数据（单消费者） /
+   *        Pop fixed-size data via reader callback (single consumer)
+   *
+   * @param size 需要弹出的元素数 / Number of elements to pop
+   * @param reader 读取器：签名 ErrorCode(const Data* buffer, size_t chunk_size)
+   *               Reader callback signature:
+   *               ErrorCode(const Data* buffer, size_t chunk_size)
+   * @note 语义对齐 PopBatch：数据不足返回 EMPTY；仅当整段读取成功后才提交 head。
+   *       Semantics align with PopBatch: returns EMPTY when data is insufficient;
+   *       head is committed only after whole range is read successfully.
+   */
+  template <typename Reader>
+  ErrorCode PopWithReader(size_t size, Reader&& reader)
+  {
+    static_assert(std::is_invocable_v<Reader&, const Data*, size_t>,
+                  "PopWithReader reader must be callable as "
+                  "ErrorCode(const Data* buffer, size_t chunk_size)");
+    using ReaderRet = std::invoke_result_t<Reader&, const Data*, size_t>;
+    static_assert(std::is_convertible_v<ReaderRet, ErrorCode>,
+                  "PopWithReader reader return type must be convertible to ErrorCode");
+
+    if (size == 0U)
+    {
+      return ErrorCode::OK;
+    }
+
+    const auto current_head = head_.load(std::memory_order_relaxed);
+    const auto current_tail = tail_.load(std::memory_order_acquire);
+    const size_t capacity = LENGTH + 1;
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+
+    if (available < size)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    const size_t first_chunk = LibXR::min(size, capacity - static_cast<size_t>(current_head));
+    Reader& reader_ref = reader;
+    const ErrorCode first_ec = reader_ref(queue_handle_ + current_head, first_chunk);
+    if (first_ec != ErrorCode::OK)
+    {
+      return first_ec;
+    }
+
+    if (size > first_chunk)
+    {
+      const ErrorCode second_ec = reader_ref(queue_handle_, size - first_chunk);
+      if (second_ec != ErrorCode::OK)
+      {
+        return second_ec;
+      }
+    }
+
+    head_.store((current_head + size) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
+  }
   /**
    * @brief 批量弹出数据 / Pops multiple elements from the queue
    * @param data 数据存储数组指针 / Pointer to the array to store popped data
