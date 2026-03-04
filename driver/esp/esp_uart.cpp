@@ -535,37 +535,17 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 {
   (void)in_isr;
 
-  while (true)
+  size_t active_length = 0U;
+  if (!DequeueTxToBuffer(tx_active_buffer_, active_length, tx_active_info_, in_isr))
   {
-    WriteInfoBlock info = {};
-    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (info.data.size_ > tx_buffer_size_)
-    {
-      ASSERT(false);
-      return false;
-    }
-
-    if (write_port_->queue_data_->PopBatch(tx_active_buffer_, info.data.size_) !=
-        ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    tx_active_length_ = info.data.size_;
-    tx_active_offset_ = 0;
-    tx_active_valid_ = true;
-    tx_active_reported_ = false;
-    return true;
+    return false;
   }
+
+  tx_active_length_ = active_length;
+  tx_active_offset_ = 0;
+  tx_active_valid_ = true;
+  tx_active_reported_ = false;
+  return true;
 }
 
 bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
@@ -577,36 +557,48 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
     return false;
   }
 
-  while (true)
+  size_t pending_length = 0U;
+  if (!DequeueTxToBuffer(tx_pending_buffer_, pending_length, tx_pending_info_, in_isr))
   {
-    WriteInfoBlock info = {};
-    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (info.data.size_ > tx_buffer_size_)
-    {
-      ASSERT(false);
-      return false;
-    }
-
-    if (write_port_->queue_data_->PopBatch(tx_pending_buffer_, info.data.size_) !=
-        ErrorCode::OK)
-    {
-      return false;
-    }
-
-    if (write_port_->queue_info_->Pop(tx_pending_info_) != ErrorCode::OK)
-    {
-      return false;
-    }
-
-    tx_pending_length_ = info.data.size_;
-    tx_pending_valid_ = true;
-    return true;
+    return false;
   }
+
+  tx_pending_length_ = pending_length;
+  tx_pending_valid_ = true;
+  return true;
 }
+
+bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
+                                            WriteInfoBlock& info, bool in_isr)
+{
+  (void)in_isr;
+
+  WriteInfoBlock peek_info = {};
+  if (write_port_->queue_info_->Peek(peek_info) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  if (peek_info.data.size_ > tx_buffer_size_)
+  {
+    ASSERT(false);
+    return false;
+  }
+
+  if (write_port_->queue_data_->PopBatch(buffer, peek_info.data.size_) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  if (write_port_->queue_info_->Pop(info) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  size = peek_info.data.size_;
+  return true;
+}
+
 bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
 {
   if (!tx_active_valid_)

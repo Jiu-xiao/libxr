@@ -111,6 +111,9 @@ class ESP32UART : public UART
 
   bool LoadPendingTxFromQueue(bool in_isr);
 
+  bool DequeueTxToBuffer(uint8_t* buffer, size_t& size, WriteInfoBlock& info,
+                         bool in_isr);
+
   bool StartActiveTransfer(bool in_isr);
   bool StartAndReportActive(bool in_isr);
   void ClearActiveTx();
