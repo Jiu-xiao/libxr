@@ -253,67 +253,13 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
   }
 
   /**
-   * @brief 获取连续可写段（单生产者） / Acquire contiguous writable span (single producer)
-   *
-   * @note 该接口不推进 tail；写入后需调用 CommitPushBuffer。
-   */
-  bool AcquirePushBuffer(Data*& buffer, size_t& contiguous, uint32_t& ticket)
-  {
-    const auto current_tail = tail_.load(std::memory_order_relaxed);
-    const auto current_head = head_.load(std::memory_order_acquire);
-    const size_t capacity = LENGTH + 1;
-    const size_t free_space =
-        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
-                                       : (current_head - current_tail - 1);
-
-    ticket = current_tail;
-    if (free_space == 0)
-    {
-      buffer = nullptr;
-      contiguous = 0;
-      return false;
-    }
-
-    buffer = queue_handle_ + current_tail;
-    contiguous = LibXR::min(free_space, capacity - static_cast<size_t>(current_tail));
-    return true;
-  }
-
-  /**
-   * @brief 提交连续写入段（单生产者） / Commit contiguous written span (single producer)
-   */
-  ErrorCode CommitPushBuffer(uint32_t ticket, size_t size)
-  {
-    if (size == 0)
-    {
-      return ErrorCode::OK;
-    }
-
-    const auto current_tail = tail_.load(std::memory_order_relaxed);
-    if (current_tail != ticket)
-    {
-      return ErrorCode::STATE_ERR;
-    }
-
-    const size_t capacity = LENGTH + 1;
-    const size_t contiguous = capacity - static_cast<size_t>(current_tail);
-    if (size > contiguous)
-    {
-      return ErrorCode::ARG_ERR;
-    }
-
-    tail_.store((current_tail + size) % capacity, std::memory_order_release);
-    return ErrorCode::OK;
-  }
-
-  /**
    * @brief 通过写入器回调提交数据（单生产者） / Push via writer callback (single producer)
    *
    * @param writer 写入器：签名 ErrorCode(Data* buffer, size_t contiguous, size_t& written)
    *               Writer callback signature:
    *               ErrorCode(Data* buffer, size_t contiguous, size_t& written)
-   * @note 仅当回调返回 ErrorCode::OK 时才会提交写入。
-   *       The written span is committed only when callback returns ErrorCode::OK.
+   * @note 该接口内部完成可写段计算与 tail 提交。
+   *       Writable-span reservation and tail commit are both handled internally.
    */
   template <typename Writer>
   ErrorCode PushWithWriter(Writer&& writer)
@@ -325,23 +271,40 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
     static_assert(std::is_convertible_v<WriterRet, ErrorCode>,
                   "PushWithWriter writer return type must be convertible to ErrorCode");
 
-    Data* buffer = nullptr;
-    size_t contiguous = 0;
-    uint32_t ticket = 0;
-    if (!AcquirePushBuffer(buffer, contiguous, ticket) || (buffer == nullptr) ||
-        (contiguous == 0U))
+    const auto current_tail = tail_.load(std::memory_order_relaxed);
+    const auto current_head = head_.load(std::memory_order_acquire);
+    const size_t capacity = LENGTH + 1;
+    const size_t free_space =
+        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
+                                       : (current_head - current_tail - 1);
+
+    if (free_space == 0U)
     {
       return ErrorCode::FULL;
     }
 
+    Data* buffer = queue_handle_ + current_tail;
+    const size_t contiguous =
+        LibXR::min(free_space, capacity - static_cast<size_t>(current_tail));
     size_t written = 0;
     const ErrorCode writer_ec = std::forward<Writer>(writer)(buffer, contiguous, written);
+    if (writer_ec != ErrorCode::OK)
+    {
+      return writer_ec;
+    }
+
     if (written > contiguous)
     {
       return ErrorCode::ARG_ERR;
     }
 
-    return (writer_ec == ErrorCode::OK) ? CommitPushBuffer(ticket, written) : writer_ec;
+    if (written == 0U)
+    {
+      return ErrorCode::OK;
+    }
+
+    tail_.store((current_tail + written) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
   }
   /**
    * @brief 批量弹出数据 / Pops multiple elements from the queue
