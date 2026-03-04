@@ -253,23 +253,31 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
   }
 
   /**
-   * @brief 通过写入器回调提交数据（单生产者） / Push via writer callback (single producer)
+   * @brief 通过写入器回调写入固定长度数据（单生产者） /
+   *        Push fixed-size data via writer callback (single producer)
    *
-   * @param writer 写入器：签名 ErrorCode(Data* buffer, size_t contiguous, size_t& written)
+   * @param size 需要写入的元素数 / Number of elements to write
+   * @param writer 写入器：签名 ErrorCode(Data* buffer, size_t chunk_size)
    *               Writer callback signature:
-   *               ErrorCode(Data* buffer, size_t contiguous, size_t& written)
-   * @note 该接口内部完成可写段计算与 tail 提交。
-   *       Writable-span reservation and tail commit are both handled internally.
+   *               ErrorCode(Data* buffer, size_t chunk_size)
+   * @note 语义对齐 PushBatch：空间不足返回 FULL；仅当整段写入成功后才提交 tail。
+   *       Semantics align with PushBatch: returns FULL when space is insufficient;
+   *       tail is committed only after whole range is written successfully.
    */
   template <typename Writer>
-  ErrorCode PushWithWriter(Writer&& writer)
+  ErrorCode PushWithWriter(size_t size, Writer&& writer)
   {
-    static_assert(std::is_invocable_v<Writer&, Data*, size_t, size_t&>,
+    static_assert(std::is_invocable_v<Writer&, Data*, size_t>,
                   "PushWithWriter writer must be callable as "
-                  "ErrorCode(Data* buffer, size_t contiguous, size_t& written)");
-    using WriterRet = std::invoke_result_t<Writer&, Data*, size_t, size_t&>;
+                  "ErrorCode(Data* buffer, size_t chunk_size)");
+    using WriterRet = std::invoke_result_t<Writer&, Data*, size_t>;
     static_assert(std::is_convertible_v<WriterRet, ErrorCode>,
                   "PushWithWriter writer return type must be convertible to ErrorCode");
+
+    if (size == 0U)
+    {
+      return ErrorCode::OK;
+    }
 
     const auto current_tail = tail_.load(std::memory_order_relaxed);
     const auto current_head = head_.load(std::memory_order_acquire);
@@ -278,32 +286,29 @@ class alignas(LIBXR_CACHE_LINE_SIZE) LockFreeQueue
         (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
                                        : (current_head - current_tail - 1);
 
-    if (free_space == 0U)
+    if (free_space < size)
     {
       return ErrorCode::FULL;
     }
 
-    Data* buffer = queue_handle_ + current_tail;
-    const size_t contiguous =
-        LibXR::min(free_space, capacity - static_cast<size_t>(current_tail));
-    size_t written = 0;
-    const ErrorCode writer_ec = std::forward<Writer>(writer)(buffer, contiguous, written);
-    if (writer_ec != ErrorCode::OK)
+    const size_t first_chunk = LibXR::min(size, capacity - static_cast<size_t>(current_tail));
+    auto&& writer_ref = writer;
+    const ErrorCode first_ec = writer_ref(queue_handle_ + current_tail, first_chunk);
+    if (first_ec != ErrorCode::OK)
     {
-      return writer_ec;
+      return first_ec;
     }
 
-    if (written > contiguous)
+    if (size > first_chunk)
     {
-      return ErrorCode::ARG_ERR;
+      const ErrorCode second_ec = writer_ref(queue_handle_, size - first_chunk);
+      if (second_ec != ErrorCode::OK)
+      {
+        return second_ec;
+      }
     }
 
-    if (written == 0U)
-    {
-      return ErrorCode::OK;
-    }
-
-    tail_.store((current_tail + written) % capacity, std::memory_order_release);
+    tail_.store((current_tail + size) % capacity, std::memory_order_release);
     return ErrorCode::OK;
   }
   /**

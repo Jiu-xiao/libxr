@@ -105,25 +105,20 @@ void IRAM_ATTR ESP32UART::DrainRxFifoFromIsr()
   bool pushed_any = false;
   while (uart_hal_get_rxfifo_len(&uart_hal_) > 0U)
   {
+    const size_t fifo_len = uart_hal_get_rxfifo_len(&uart_hal_);
+    const size_t write_len = std::min(fifo_len, read_port_->queue_data_->EmptySize());
+    if (write_len == 0U)
+    {
+      break;
+    }
+
     const ErrorCode push_ec = read_port_->queue_data_->PushWithWriter(
-        [this](uint8_t* buffer, size_t contiguous, size_t& out_written) -> ErrorCode {
-          int read_len = static_cast<int>(
-              std::min<size_t>(uart_hal_get_rxfifo_len(&uart_hal_), contiguous));
-          if (read_len <= 0)
-          {
-            out_written = 0;
-            return ErrorCode::EMPTY;
-          }
-
+        write_len,
+        [this](uint8_t* buffer, size_t chunk_size) -> ErrorCode {
+          int read_len = static_cast<int>(chunk_size);
           uart_hal_read_rxfifo(&uart_hal_, buffer, &read_len);
-          if (read_len <= 0)
-          {
-            out_written = 0;
-            return ErrorCode::EMPTY;
-          }
-
-          out_written = static_cast<size_t>(read_len);
-          return ErrorCode::OK;
+          return (read_len == static_cast<int>(chunk_size)) ? ErrorCode::OK
+                                                            : ErrorCode::EMPTY;
         });
 
     if ((push_ec == ErrorCode::FULL) || (push_ec == ErrorCode::EMPTY))
