@@ -25,18 +25,36 @@ class ESP32GPIO : public GPIO
    */
   explicit ESP32GPIO(gpio_num_t gpio_num) : gpio_num_(gpio_num)
   {
-    ASSERT((gpio_num_ >= 0) && (gpio_num_ < GPIO_NUM_MAX));
-    map_[gpio_num_] = this;
+    const bool valid = (gpio_num_ >= 0) && (gpio_num_ < GPIO_NUM_MAX);
+    ASSERT(valid);
+    if (valid)
+    {
+      map_[gpio_num_] = this;
+    }
   }
 
   bool Read() override
   {
+    const bool valid = (gpio_num_ >= 0) && (gpio_num_ < GPIO_NUM_MAX);
+    ASSERT(valid);
+    if (!valid)
+    {
+      return false;
+    }
+
     gpio_hal_context_t hal = {.dev = LibXREspGpioHw()};
     return gpio_hal_get_level(&hal, gpio_num_) != 0;
   }
 
   void Write(bool value) override
   {
+    const bool valid = (gpio_num_ >= 0) && (gpio_num_ < GPIO_NUM_MAX);
+    ASSERT(valid);
+    if (!valid)
+    {
+      return;
+    }
+
     gpio_hal_context_t hal = {.dev = LibXREspGpioHw()};
     gpio_hal_set_level(&hal, gpio_num_, value ? 1 : 0);
   }
@@ -57,11 +75,15 @@ class ESP32GPIO : public GPIO
       isr_service_installed_ = true;
     }
 
-    if (gpio_isr_handler_add(gpio_num_, ESP32GPIO::InterruptDispatcher,
-                             reinterpret_cast<void*>(
-                                 static_cast<uintptr_t>(gpio_num_))) != ESP_OK)
+    if (!isr_handler_added_)
     {
-      return ErrorCode::INIT_ERR;
+      if (gpio_isr_handler_add(gpio_num_, ESP32GPIO::InterruptDispatcher,
+                               reinterpret_cast<void*>(
+                                   static_cast<uintptr_t>(gpio_num_))) != ESP_OK)
+      {
+        return ErrorCode::INIT_ERR;
+      }
+      isr_handler_added_ = true;
     }
 
     if (gpio_intr_enable(gpio_num_) != ESP_OK)
@@ -73,11 +95,17 @@ class ESP32GPIO : public GPIO
 
   ErrorCode DisableInterrupt() override
   {
-    if (gpio_intr_disable(gpio_num_) != ESP_OK)
+    if (!GPIO_IS_VALID_GPIO(gpio_num_))
     {
-      return ErrorCode::FAILED;
+      return ErrorCode::ARG_ERR;
     }
-    if (gpio_isr_handler_remove(gpio_num_) != ESP_OK)
+
+    if (!isr_handler_added_)
+    {
+      return ErrorCode::OK;
+    }
+
+    if (gpio_intr_disable(gpio_num_) != ESP_OK)
     {
       return ErrorCode::FAILED;
     }
@@ -91,12 +119,11 @@ class ESP32GPIO : public GPIO
       return ErrorCode::ARG_ERR;
     }
 
-    if (gpio_reset_pin(gpio_num_) != ESP_OK)
-    {
-      return ErrorCode::INIT_ERR;
-    }
-
     gpio_hal_context_t hal = {.dev = LibXREspGpioHw()};
+
+    // Align with ST/CH reconfigure semantics: no full reset, only re-apply mode fields.
+    gpio_hal_set_output_enable_ctrl(&hal, gpio_num_, false, false);
+    gpio_hal_func_sel(&hal, gpio_num_, PIN_FUNC_GPIO);
 
     gpio_hal_pullup_dis(&hal, gpio_num_);
     gpio_hal_pulldown_dis(&hal, gpio_num_);
@@ -154,6 +181,7 @@ class ESP32GPIO : public GPIO
 
  private:
   gpio_num_t gpio_num_;
+  bool isr_handler_added_ = false;
   static inline bool isr_service_installed_ = false;
   static inline ESP32GPIO* map_[GPIO_NUM_MAX];
 };

@@ -126,20 +126,12 @@ ErrorCode StartAndWaitSegment(i2c_hal_context_t& hal, int done_cmd_idx, uint64_t
 template <typename OperationType>
 ErrorCode Complete(OperationType& op, bool in_isr, ErrorCode result)
 {
-  op.UpdateStatus(in_isr, result);
-
+  // Synchronous fast path: BLOCK ops return directly without post+wait round-trip.
   if (op.type != OperationType::OperationType::BLOCK)
   {
-    return result;
+    op.UpdateStatus(in_isr, result);
   }
-
-  if (in_isr)
-  {
-    // ISR context must not block on semaphore wait.
-    return result;
-  }
-
-  return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+  return result;
 }
 
 template <typename OperationType>
@@ -180,16 +172,13 @@ ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin,
   }
 }
 
-ESP32I2C::~ESP32I2C() { DeinitHardware(); }
 
 bool ESP32I2C::Acquire()
 {
-  bool expected = false;
-  return busy_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                       std::memory_order_acquire);
+  return !busy_.TestAndSet();
 }
 
-void ESP32I2C::Release() { busy_.store(false, std::memory_order_release); }
+void ESP32I2C::Release() { busy_.Clear(); }
 
 bool ESP32I2C::IsValid7BitAddr(uint16_t addr) { return addr <= 0x7FU; }
 
@@ -289,7 +278,7 @@ ErrorCode ESP32I2C::InitHardware()
   _i2c_hal_init(&hal_, static_cast<int>(port_num_));
   if (hal_.dev == nullptr)
   {
-    SetBusClockAtomic(port_num_, false);
+    ASSERT(false);
     return ErrorCode::INIT_ERR;
   }
 
@@ -300,60 +289,26 @@ ErrorCode ESP32I2C::InitHardware()
   ErrorCode err = ConfigurePins();
   if (err != ErrorCode::OK)
   {
-    DeinitHardware();
+    ASSERT(false);
     return err;
   }
 
   err = InstallInterrupt();
   if (err != ErrorCode::OK)
   {
-    DeinitHardware();
+    ASSERT(false);
     return err;
   }
 
   err = ApplyConfig();
   if (err != ErrorCode::OK)
   {
-    DeinitHardware();
+    ASSERT(false);
     return err;
   }
 
   initialized_ = true;
   return ErrorCode::OK;
-}
-
-void ESP32I2C::DeinitHardware()
-{
-  if (!initialized_ && (hal_.dev == nullptr) && !intr_installed_)
-  {
-    return;
-  }
-
-  RemoveInterrupt();
-
-  if (hal_.dev != nullptr)
-  {
-    i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
-    i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
-    _i2c_hal_deinit(&hal_);
-  }
-  SetBusClockAtomic(port_num_, false);
-
-  // Release pin matrix ownership so later GPIO/UART tests can remux these pins.
-  if (gpio_num_t sda_gpio = static_cast<gpio_num_t>(sda_pin_);
-      GPIO_IS_VALID_GPIO(sda_gpio))
-  {
-    gpio_reset_pin(sda_gpio);
-  }
-  if (gpio_num_t scl_gpio = static_cast<gpio_num_t>(scl_pin_);
-      GPIO_IS_VALID_GPIO(scl_gpio))
-  {
-    gpio_reset_pin(scl_gpio);
-  }
-
-  hal_.dev = nullptr;
-  source_clock_hz_ = 0U;
-  initialized_ = false;
 }
 
 ErrorCode ESP32I2C::ConfigurePins()
@@ -411,16 +366,13 @@ ErrorCode ESP32I2C::RecoverController()
 #endif
 }
 
-bool ESP32I2C::ShouldUseInterruptAsync(size_t total_size, bool in_isr,
-                                       ReadOperation::OperationType op_type) const
+bool ESP32I2C::ShouldUseInterruptAsync(size_t total_size) const
 {
-  if (op_type == ReadOperation::OperationType::NONE)
+  if (!intr_installed_)
   {
-    // Keep legacy synchronous semantics for direct call-sites that do not provide
-    // explicit async operation mode.
     return false;
   }
-  return (!in_isr) && intr_installed_ && (isr_enable_min_size_ > 0U) &&
+  return (isr_enable_min_size_ > 0U) &&
          (total_size >= static_cast<size_t>(isr_enable_min_size_));
 }
 
@@ -634,7 +586,8 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
                      kCheckAck, 1U);
         async_read_addr_sent_ = true;
       }
-      else if (async_read_offset_ < async_read_size_)
+
+      if (async_read_offset_ < async_read_size_)
       {
         const size_t chunk = std::min(async_read_size_ - async_read_offset_, fifo_len);
         const bool is_last = (async_read_offset_ + chunk) >= async_read_size_;
@@ -740,16 +693,6 @@ ErrorCode ESP32I2C::InstallInterrupt()
 
   intr_installed_ = true;
   return ErrorCode::OK;
-}
-
-void ESP32I2C::RemoveInterrupt()
-{
-  if (intr_handle_ != nullptr)
-  {
-    esp_intr_free(intr_handle_);
-    intr_handle_ = nullptr;
-  }
-  intr_installed_ = false;
 }
 
 void ESP32I2C::I2cIsrEntry(void* arg)
@@ -1050,7 +993,7 @@ ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
   }
 
   const size_t total_size = write_data.size_;
-  if (ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  if (ShouldUseInterruptAsync(total_size))
   {
     const ErrorCode ans = StartAsyncTransaction(
         slave_addr, nullptr, 0U, static_cast<const uint8_t*>(write_data.addr_),
@@ -1095,7 +1038,7 @@ ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
   }
 
   const size_t total_size = read_data.size_;
-  if (ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  if (ShouldUseInterruptAsync(total_size))
   {
     const ErrorCode ans = StartAsyncTransaction(
         slave_addr, nullptr, 0U, nullptr, 0U,
@@ -1150,7 +1093,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   EncodeMemAddr(mem_addr, mem_len, mem_raw.data());
 
   const size_t total_size = mem_len + write_data.size_;
-  if (ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  if (ShouldUseInterruptAsync(total_size))
   {
     const ErrorCode ans = StartAsyncTransaction(
         slave_addr, mem_raw.data(), mem_len, static_cast<const uint8_t*>(write_data.addr_),
@@ -1231,7 +1174,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
 
   auto* dst = static_cast<uint8_t*>(read_data.addr_);
   const size_t total_size = mem_len + read_data.size_;
-  if ((read_data.size_ > 0U) && ShouldUseInterruptAsync(total_size, in_isr, op.type))
+  if ((read_data.size_ > 0U) && ShouldUseInterruptAsync(total_size))
   {
     const ErrorCode ans =
         StartAsyncTransaction(slave_addr, mem_raw.data(), mem_len, nullptr, 0U, dst,

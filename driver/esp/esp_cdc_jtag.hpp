@@ -57,6 +57,7 @@ class ESP32CDCJtag : public UART
   void StopTxTransfer();
   void OnTxTransferDone(bool in_isr, ErrorCode result);
   bool PumpTx(bool in_isr);
+  void PushRxBytes(const uint8_t* data, size_t size, bool in_isr);
   void ClearActiveTx();
   void ClearPendingTx();
   void ResetTxState(bool in_isr);

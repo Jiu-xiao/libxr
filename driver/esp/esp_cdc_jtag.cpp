@@ -15,6 +15,8 @@
 namespace
 {
 constexpr uint32_t kTxIntrMask = USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY;
+constexpr uint32_t kRxIntrMask = USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT;
+constexpr uint32_t kAllIntrMask = kTxIntrMask | kRxIntrMask;
 }  // namespace
 
 namespace LibXR
@@ -87,6 +89,9 @@ ErrorCode ESP32CDCJtag::InitHardware()
     return ErrorCode::INIT_ERR;
   }
 
+  usb_serial_jtag_ll_clr_intsts_mask(kAllIntrMask);
+  usb_serial_jtag_ll_ena_intr_mask(kRxIntrMask);
+
   hw_inited_ = true;
   return ErrorCode::OK;
 }
@@ -100,7 +105,7 @@ void ESP32CDCJtag::DeinitHardware()
 
   if (intr_installed_)
   {
-    usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
+    usb_serial_jtag_ll_disable_intr_mask(kAllIntrMask);
     if (intr_handle_ != nullptr)
     {
       (void)esp_intr_free(intr_handle_);
@@ -266,6 +271,35 @@ bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)
   return false;
 }
 
+void IRAM_ATTR ESP32CDCJtag::PushRxBytes(const uint8_t* data, size_t size, bool in_isr)
+{
+  size_t offset = 0U;
+  bool pushed_any = false;
+
+  while (offset < size)
+  {
+    const size_t free_space = read_port_->queue_data_->EmptySize();
+    if (free_space == 0U)
+    {
+      break;
+    }
+
+    const size_t chunk = std::min(free_space, size - offset);
+    if (read_port_->queue_data_->PushBatch(data + offset, chunk) != ErrorCode::OK)
+    {
+      break;
+    }
+
+    offset += chunk;
+    pushed_any = true;
+  }
+
+  if (pushed_any)
+  {
+    read_port_->ProcessPendingReads(in_isr);
+  }
+}
+
 bool IRAM_ATTR ESP32CDCJtag::StartActiveTransfer(bool in_isr)
 {
   if (!tx_active_valid_ || (tx_active_ptr_ == nullptr) || (tx_active_size_ == 0U))
@@ -418,6 +452,20 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
 void IRAM_ATTR ESP32CDCJtag::HandleInterrupt()
 {
   const uint32_t status = usb_serial_jtag_ll_get_intsts_mask();
+
+  const uint32_t rx_status = status & kRxIntrMask;
+  if (rx_status != 0U)
+  {
+    usb_serial_jtag_ll_clr_intsts_mask(rx_status);
+
+    uint8_t rx_tmp[64] = {};
+    const int got = usb_serial_jtag_ll_read_rxfifo(rx_tmp, sizeof(rx_tmp));
+    if (got > 0)
+    {
+      PushRxBytes(rx_tmp, static_cast<size_t>(got), true);
+    }
+  }
+
   const uint32_t tx_status = status & kTxIntrMask;
   if (tx_status == 0U)
   {

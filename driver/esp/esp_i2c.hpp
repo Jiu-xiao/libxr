@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -26,8 +25,6 @@ class ESP32I2C : public I2C
            bool enable_internal_pullup = true,
            uint32_t timeout_ms = 100U,
            uint32_t isr_enable_min_size = 32U);
-
-  ~ESP32I2C();
 
   ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
                  bool in_isr = false) override;
@@ -60,14 +57,12 @@ class ESP32I2C : public I2C
   void Release();
 
   ErrorCode InitHardware();
-  void DeinitHardware();
   ErrorCode ConfigurePins();
   ErrorCode ApplyConfig();
   ErrorCode ResolveClockSource(uint32_t& source_hz);
   ErrorCode RecoverController();
   ErrorCode EnsureInitialized(bool in_isr);
-  bool ShouldUseInterruptAsync(size_t total_size, bool in_isr,
-                               ReadOperation::OperationType op_type) const;
+  bool ShouldUseInterruptAsync(size_t total_size) const;
   static size_t MemAddrBytes(MemAddrLength mem_addr_size);
   static void EncodeMemAddr(uint16_t mem_addr, size_t mem_len, uint8_t* out);
   ErrorCode ExecuteTransaction(uint16_t slave_addr, const uint8_t* write_payload,
@@ -83,7 +78,6 @@ class ESP32I2C : public I2C
   void FinishAsync(bool in_isr, ErrorCode ec);
   static bool IsValid7BitAddr(uint16_t addr);
   ErrorCode InstallInterrupt();
-  void RemoveInterrupt();
   static void I2cIsrEntry(void* arg);
   void HandleInterrupt();
 
@@ -97,7 +91,7 @@ class ESP32I2C : public I2C
   Configuration config_{};
   i2c_hal_context_t hal_ = {};
   uint32_t source_clock_hz_ = 0U;
-  std::atomic<bool> busy_{false};
+  Flag::Plain busy_;
   intr_handle_t intr_handle_ = nullptr;
   bool intr_installed_ = false;
 
