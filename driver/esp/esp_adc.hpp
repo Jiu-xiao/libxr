@@ -1,15 +1,17 @@
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "sdkconfig.h"
 #include "adc.hpp"
 #include "esp_adc/adc_oneshot.h"
-#include "esp_err.h"
 #include "hal/adc_types.h"
 #include "soc/soc_caps.h"
+
+#if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
+#include "esp_adc/adc_continuous.h"
+#endif
 
 struct adc_oneshot_hal_ctx_t;
 
@@ -35,7 +37,6 @@ class ESP32ADC
     uint8_t channel_num_;
   };
 
-  // Separate expected capability fallback from runtime initialization faults.
   enum class ContinuousInitResult : uint8_t
   {
     STARTED = 0,
@@ -69,27 +70,24 @@ class ESP32ADC
   float Normalize(float raw) const;
   static uint32_t ClampSampleFreq(uint32_t freq);
   static uint32_t AlignUp(uint32_t value, uint32_t align);
+  bool IsValidChannel(adc_channel_t channel) const;
   void ConfigureAnalogPad(adc_channel_t channel) const;
-
   bool InitOneshot();
 
 #if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
   static bool IsDigiUnitSupported(adc_unit_t unit);
-
-  void DrainContinuousFrames();
-  void ConsumeContinuousBuffer(
-      const uint8_t* buffer, uint32_t size, uint32_t* sums, uint32_t* counts);
+  static adc_digi_output_format_t ResolveContinuousFormat();
+  void DrainContinuousFrames(uint32_t timeout_ms);
   void DeinitContinuous();
-#endif
-
   ContinuousInitResult InitContinuous(uint32_t freq, size_t dma_buf_size);
+#endif
 
   Channel* channels_ = nullptr;
   adc_channel_t* channel_ids_ = nullptr;
   uint8_t channel_idx_map_[SOC_ADC_MAX_CHANNEL_NUM] = {};
   bool* channel_ready_ = nullptr;
   float* latest_values_ = nullptr;
-  std::atomic<uint16_t>* latest_raw_ = nullptr;
+  uint16_t* latest_raw_ = nullptr;
 
   adc_unit_t unit_;
   uint8_t num_channels_;
@@ -102,10 +100,14 @@ class ESP32ADC
   Backend backend_ = Backend::NONE;
   adc_oneshot_hal_ctx_t* oneshot_hal_ = nullptr;
   bool oneshot_inited_ = false;
+  bool valid_ = false;
 
 #if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
-  struct ContinuousLLContext;
-  ContinuousLLContext* continuous_ctx_ = nullptr;
+  adc_continuous_handle_t continuous_handle_ = nullptr;
+  uint8_t* continuous_read_buf_ = nullptr;
+  adc_continuous_data_t* continuous_parsed_buf_ = nullptr;
+  uint32_t continuous_frame_size_ = 0U;
+  uint32_t continuous_prime_timeout_ms_ = 0U;
 #endif
 };
 

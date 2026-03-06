@@ -27,6 +27,21 @@ bool ESP32ADC::InitOneshot()
     return false;
   }
 
+  auto fail = [&]() -> bool {
+    if (oneshot_inited_)
+    {
+      sar_periph_ctrl_adc_oneshot_power_release();
+#if SOC_ADC_DIG_CTRL_SUPPORTED && !SOC_ADC_RTC_CTRL_SUPPORTED
+      adc_apb_periph_free();
+#endif
+      oneshot_inited_ = false;
+    }
+
+    delete oneshot_hal_;
+    oneshot_hal_ = nullptr;
+    return false;
+  };
+
   oneshot_hal_ = new (std::nothrow) adc_oneshot_hal_ctx_t{};
   ASSERT(oneshot_hal_ != nullptr);
   if (oneshot_hal_ == nullptr)
@@ -45,19 +60,19 @@ bool ESP32ADC::InitOneshot()
   unit_cfg.clk_src_freq_hz = 0U;
 
 #if SOC_ADC_DIG_CTRL_SUPPORTED && !SOC_ADC_RTC_CTRL_SUPPORTED
-  if (esp_clk_tree_src_get_freq_hz(
-          static_cast<soc_module_clk_t>(unit_cfg.clk_src),
-          ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &unit_cfg.clk_src_freq_hz) != ESP_OK)
+  if (esp_clk_tree_src_get_freq_hz(static_cast<soc_module_clk_t>(unit_cfg.clk_src),
+                                   ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
+                                   &unit_cfg.clk_src_freq_hz) != ESP_OK)
   {
-    delete oneshot_hal_;
-    oneshot_hal_ = nullptr;
-    return false;
+    return fail();
   }
   adc_apb_periph_claim();
 #endif
 
   adc_oneshot_hal_init(oneshot_hal_, &unit_cfg);
   sar_periph_ctrl_adc_oneshot_power_acquire();
+  oneshot_inited_ = true;
+
 #if SOC_ADC_CALIBRATION_V1_SUPPORTED
   portENTER_CRITICAL(&rtc_spinlock);
   adc_hal_calibration_init(unit_);
@@ -69,36 +84,24 @@ bool ESP32ADC::InitOneshot()
   chan_cfg.atten = attenuation_;
   chan_cfg.bitwidth = bitwidth_;
 
-  bool any_ready = false;
   for (uint8_t i = 0; i < num_channels_; ++i)
   {
-    if (channel_ids_[i] >= SOC_ADC_CHANNEL_NUM(static_cast<int>(unit_)))
+    ASSERT(IsValidChannel(channel_ids_[i]));
+    if (!IsValidChannel(channel_ids_[i]))
     {
-      channel_ready_[i] = false;
-      continue;
+      return fail();
     }
 
     portENTER_CRITICAL(&rtc_spinlock);
     adc_oneshot_hal_channel_config(oneshot_hal_, &chan_cfg, channel_ids_[i]);
     portEXIT_CRITICAL(&rtc_spinlock);
 
-    channel_ready_[i] = true;
-    any_ready = true;
     ConfigureAnalogPad(channel_ids_[i]);
+    channel_ready_[i] = false;
+    latest_values_[i] = 0.0f;
+    latest_raw_[i] = 0U;
   }
 
-  if (!any_ready)
-  {
-    sar_periph_ctrl_adc_oneshot_power_release();
-#if SOC_ADC_DIG_CTRL_SUPPORTED && !SOC_ADC_RTC_CTRL_SUPPORTED
-    adc_apb_periph_free();
-#endif
-    delete oneshot_hal_;
-    oneshot_hal_ = nullptr;
-    return false;
-  }
-
-  oneshot_inited_ = true;
   backend_ = Backend::ONESHOT;
   return true;
 }
