@@ -3,6 +3,7 @@
 #include <new>
 
 #include "esp_clk_tree.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "esp_private/adc_private.h"
 #include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_private/esp_clk_tree_common.h"
@@ -33,6 +34,13 @@ extern portMUX_TYPE rtc_spinlock;
 
 namespace LibXR
 {
+
+namespace
+{
+
+constexpr uint32_t kDefaultLineFittingVrefMv = 1100U;
+
+}  // namespace
 
 ESP32ADC::Channel::Channel() : parent_(nullptr), idx_(0), channel_num_(0) {}
 
@@ -84,6 +92,7 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
   for (uint8_t i = 0; i < SOC_ADC_MAX_CHANNEL_NUM; ++i)
   {
     channel_idx_map_[i] = kInvalidChannelIdx;
+    cali_handles_[i] = nullptr;
   }
 
   for (uint8_t i = 0; i < num_channels_; ++i)
@@ -119,6 +128,8 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
   }
 #endif
 
+  (void)InitCalibration();
+
   const ContinuousInitResult cont_ans = InitContinuous(freq, dma_buf_size);
   if (cont_ans == ContinuousInitResult::STARTED)
   {
@@ -147,6 +158,8 @@ ESP32ADC::~ESP32ADC()
 #if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
   DeinitContinuous();
 #endif
+
+  DeinitCalibration();
 
   if (oneshot_inited_)
   {
@@ -266,7 +279,7 @@ float ESP32ADC::ReadChannel(uint8_t idx)
   }
 
   latest_raw_[idx] = static_cast<uint16_t>(raw);
-  latest_values_[idx] = Normalize(static_cast<float>(raw));
+  latest_values_[idx] = RawToVoltage(idx, latest_raw_[idx]);
   channel_ready_[idx] = true;
   return latest_values_[idx];
 }
@@ -278,6 +291,123 @@ adc_bitwidth_t ESP32ADC::ResolveBitwidth(adc_bitwidth_t bitwidth)
     return static_cast<adc_bitwidth_t>(SOC_ADC_RTC_MAX_BITWIDTH);
   }
   return bitwidth;
+}
+
+bool ESP32ADC::InitCalibration()
+{
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+  bool calibrated = false;
+
+  for (uint8_t i = 0; i < num_channels_; ++i)
+  {
+    adc_cali_curve_fitting_config_t config = {};
+    config.unit_id = unit_;
+    config.chan = channel_ids_[i];
+    config.atten = attenuation_;
+    config.bitwidth = bitwidth_;
+
+    adc_cali_handle_t handle = nullptr;
+    const esp_err_t err = adc_cali_create_scheme_curve_fitting(&config, &handle);
+    ASSERT((err == ESP_OK) || (err == ESP_ERR_NOT_SUPPORTED) ||
+           (err == ESP_ERR_INVALID_ARG) || (err == ESP_ERR_NO_MEM));
+    if (err != ESP_OK)
+    {
+      continue;
+    }
+
+    cali_handles_[i] = handle;
+    calibrated = true;
+  }
+
+  return calibrated;
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+  adc_cali_line_fitting_config_t config = {};
+  config.unit_id = unit_;
+  config.atten = attenuation_;
+  config.bitwidth = bitwidth_;
+#if CONFIG_IDF_TARGET_ESP32
+  config.default_vref = kDefaultLineFittingVrefMv;
+#endif
+
+  adc_cali_handle_t handle = nullptr;
+  const esp_err_t err = adc_cali_create_scheme_line_fitting(&config, &handle);
+  ASSERT((err == ESP_OK) || (err == ESP_ERR_NOT_SUPPORTED) ||
+         (err == ESP_ERR_INVALID_ARG) || (err == ESP_ERR_NO_MEM));
+  if (err != ESP_OK)
+  {
+    return false;
+  }
+
+  for (uint8_t i = 0; i < num_channels_; ++i)
+  {
+    cali_handles_[i] = handle;
+  }
+
+  return true;
+#else
+  return false;
+#endif
+}
+
+void ESP32ADC::DeinitCalibration()
+{
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+  for (uint8_t i = 0; i < num_channels_; ++i)
+  {
+    if (cali_handles_[i] == nullptr)
+    {
+      continue;
+    }
+
+    const esp_err_t err = adc_cali_delete_scheme_curve_fitting(cali_handles_[i]);
+    ASSERT(err == ESP_OK);
+    cali_handles_[i] = nullptr;
+  }
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+  adc_cali_handle_t handle = nullptr;
+  for (uint8_t i = 0; i < num_channels_; ++i)
+  {
+    if (cali_handles_[i] != nullptr)
+    {
+      handle = cali_handles_[i];
+      break;
+    }
+  }
+
+  if (handle != nullptr)
+  {
+    const esp_err_t err = adc_cali_delete_scheme_line_fitting(handle);
+    ASSERT(err == ESP_OK);
+  }
+
+  for (uint8_t i = 0; i < num_channels_; ++i)
+  {
+    cali_handles_[i] = nullptr;
+  }
+#endif
+}
+
+float ESP32ADC::RawToVoltage(uint8_t idx, uint16_t raw) const
+{
+  ASSERT(idx < num_channels_);
+  if (idx >= num_channels_)
+  {
+    return 0.f;
+  }
+
+  if (cali_handles_[idx] != nullptr)
+  {
+    int voltage_mv = 0;
+    const esp_err_t err =
+        adc_cali_raw_to_voltage(cali_handles_[idx], static_cast<int>(raw), &voltage_mv);
+    ASSERT(err == ESP_OK);
+    if (err == ESP_OK)
+    {
+      return static_cast<float>(voltage_mv) / 1000.0f;
+    }
+  }
+
+  return Normalize(static_cast<float>(raw));
 }
 
 float ESP32ADC::Normalize(float raw) const

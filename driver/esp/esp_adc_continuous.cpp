@@ -114,7 +114,7 @@ void ESP32ADC::DrainContinuousFrames(uint32_t timeout_ms)
 
     const uint16_t raw = static_cast<uint16_t>(sums[i] / counts[i]);
     latest_raw_[i] = raw;
-    latest_values_[i] = Normalize(static_cast<float>(raw));
+    latest_values_[i] = RawToVoltage(i, raw);
     channel_ready_[i] = true;
   }
 }

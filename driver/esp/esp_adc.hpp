@@ -5,6 +5,7 @@
 
 #include "sdkconfig.h"
 #include "adc.hpp"
+#include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_oneshot.h"
 #include "hal/adc_types.h"
 #include "soc/soc_caps.h"
@@ -72,7 +73,10 @@ class ESP32ADC
   static uint32_t AlignUp(uint32_t value, uint32_t align);
   bool IsValidChannel(adc_channel_t channel) const;
   void ConfigureAnalogPad(adc_channel_t channel) const;
+  bool InitCalibration();
   bool InitOneshot();
+  void DeinitCalibration();
+  float RawToVoltage(uint8_t idx, uint16_t raw) const;
 
 #if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
   static bool IsDigiUnitSupported(adc_unit_t unit);
@@ -88,6 +92,8 @@ class ESP32ADC
   bool* channel_ready_ = nullptr;
   float* latest_values_ = nullptr;
   uint16_t* latest_raw_ = nullptr;
+
+  adc_cali_handle_t cali_handles_[SOC_ADC_MAX_CHANNEL_NUM] = {};
 
   adc_unit_t unit_;
   uint8_t num_channels_;
