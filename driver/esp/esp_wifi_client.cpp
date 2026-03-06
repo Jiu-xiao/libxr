@@ -12,6 +12,10 @@ namespace LibXR
 {
 namespace
 {
+constexpr uint32_t kWifiConnectTimeoutMs = 15000U;
+constexpr uint32_t kWifiDhcpTimeoutMs = 15000U;
+constexpr uint32_t kWifiDisconnectTimeoutMs = 5000U;
+constexpr uint16_t kMaxScanResults = 20U;
 
 size_t BoundedStringLength(const char* text, size_t max_len)
 {
@@ -50,17 +54,53 @@ void CopyToCharField(char* dst, size_t dst_size, const char* src)
 
 ESP32WifiClient::ESP32WifiClient()
 {
-  if (!is_initialized_)
+  if (is_initialized_)
   {
-    esp_netif_init();
-    esp_event_loop_create_default();
-    netif_ = esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
-
-    is_initialized_ = true;
+    init_ok_ = true;
+    return;
   }
+
+  esp_err_t err = nvs_flash_init();
+  if ((err == ESP_ERR_NVS_NO_FREE_PAGES) || (err == ESP_ERR_NVS_NEW_VERSION_FOUND))
+  {
+    if (nvs_flash_erase() != ESP_OK)
+    {
+      return;
+    }
+    err = nvs_flash_init();
+  }
+  if (err != ESP_OK)
+  {
+    return;
+  }
+
+  err = esp_netif_init();
+  if ((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE))
+  {
+    return;
+  }
+
+  err = esp_event_loop_create_default();
+  if ((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE))
+  {
+    return;
+  }
+
+  netif_ = esp_netif_create_default_wifi_sta();
+  if (netif_ == nullptr)
+  {
+    return;
+  }
+
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  err = esp_wifi_init(&cfg);
+  if ((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE))
+  {
+    return;
+  }
+
+  is_initialized_ = true;
+  init_ok_ = true;
 }
 
 ESP32WifiClient::~ESP32WifiClient()
@@ -69,33 +109,52 @@ ESP32WifiClient::~ESP32WifiClient()
   {
     Disable();
   }
+
+  UnregisterHandlers();
 }
 
 bool ESP32WifiClient::Enable()
 {
   if (enabled_) return true;
 
-  esp_wifi_set_mode(WIFI_MODE_STA);
+  if (!init_ok_)
+  {
+    return false;
+  }
 
-  esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &EventHandler, this);
-  esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &EventHandler,
-                             this);
-  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &EventHandler, this);
-  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &EventHandler, this);
+  if (!RegisterHandlers())
+  {
+    return false;
+  }
 
-  esp_wifi_start();
+  if (esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK)
+  {
+    UnregisterHandlers();
+    return false;
+  }
+
+  ResetConnectionState();
+  DrainEvents();
+  if (esp_wifi_start() != ESP_OK)
+  {
+    UnregisterHandlers();
+    return false;
+  }
   enabled_ = true;
 
-  wifi_config_t cfg;
+  wifi_config_t cfg = {};
   esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &cfg);
   if (err == ESP_OK && cfg.sta.ssid[0] != 0)
   {
-    esp_wifi_connect();
-    semaphore_.Wait();
-    if (!connected_) return true;
-
-    semaphore_.Wait();
-    if (!got_ip_) return true;
+    ResetConnectionState();
+    DrainEvents();
+    if (esp_wifi_connect() == ESP_OK)
+    {
+      if (semaphore_.Wait(kWifiConnectTimeoutMs) == ErrorCode::OK && connected_)
+      {
+        (void)semaphore_.Wait(kWifiDhcpTimeoutMs);
+      }
+    }
   }
 
   wifi_ap_record_t ap_info;
@@ -118,30 +177,42 @@ void ESP32WifiClient::Disable()
 {
   if (!enabled_) return;
 
-  esp_wifi_stop();
+  (void)esp_wifi_stop();
   enabled_ = false;
-  connected_ = false;
+  ResetConnectionState();
+  UnregisterHandlers();
 }
 
 WifiClient::WifiError ESP32WifiClient::Connect(const Config& config)
 {
   if (!enabled_) return WifiError::NOT_ENABLED;
 
+  ResetConnectionState();
+  DrainEvents();
+
   wifi_config_t wifi_config{};
   CopyToWifiField(wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), config.ssid);
   CopyToWifiField(wifi_config.sta.password, sizeof(wifi_config.sta.password),
                   config.password);
-  esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-  esp_wifi_connect();
-
-  while (semaphore_.Wait(0) == ErrorCode::OK)
+  if (esp_wifi_set_config(WIFI_IF_STA, &wifi_config) != ESP_OK)
   {
+    return WifiError::INVALID_CONFIG;
+  }
+  if (esp_wifi_connect() != ESP_OK)
+  {
+    return WifiError::HARDWARE_FAILURE;
   }
 
-  semaphore_.Wait();
+  if (semaphore_.Wait(kWifiConnectTimeoutMs) != ErrorCode::OK)
+  {
+    return WifiError::CONNECTION_TIMEOUT;
+  }
   if (!connected_) return WifiError::CONNECTION_TIMEOUT;
 
-  semaphore_.Wait();
+  if (semaphore_.Wait(kWifiDhcpTimeoutMs) != ErrorCode::OK)
+  {
+    return WifiError::DHCP_FAILED;
+  }
   if (!got_ip_) return WifiError::DHCP_FAILED;
 
   return WifiError::NONE;
@@ -152,11 +223,16 @@ WifiClient::WifiError ESP32WifiClient::Disconnect()
   if (!enabled_) return WifiError::NOT_ENABLED;
   if (!connected_) return WifiError::NONE;
 
-  while (semaphore_.Wait(0) == ErrorCode::OK)
+  DrainEvents();
+  if (esp_wifi_disconnect() != ESP_OK)
   {
+    return WifiError::HARDWARE_FAILURE;
   }
-  esp_wifi_disconnect();
-  semaphore_.Wait();
+
+  if (semaphore_.Wait(kWifiDisconnectTimeoutMs) != ErrorCode::OK)
+  {
+    return WifiError::UNKNOWN;
+  }
 
   return WifiError::NONE;
 }
@@ -180,6 +256,16 @@ MACAddressRaw ESP32WifiClient::GetMACAddress() const
 WifiClient::WifiError ESP32WifiClient::Scan(ScanResult* out_list, size_t max_count,
                                             size_t& out_found)
 {
+  out_found = 0;
+  if (!enabled_)
+  {
+    return WifiError::NOT_ENABLED;
+  }
+  if ((out_list == nullptr) && (max_count != 0U))
+  {
+    return WifiError::INVALID_CONFIG;
+  }
+
   wifi_scan_config_t scan_config = {};
   if (esp_wifi_scan_start(&scan_config, true) != ESP_OK)
   {
@@ -187,14 +273,29 @@ WifiClient::WifiError ESP32WifiClient::Scan(ScanResult* out_list, size_t max_cou
   }
 
   uint16_t ap_num = 0;
-  esp_wifi_scan_get_ap_num(&ap_num);
-  if (ap_num > max_count) ap_num = max_count;
+  if (esp_wifi_scan_get_ap_num(&ap_num) != ESP_OK)
+  {
+    return WifiError::SCAN_FAILED;
+  }
 
-  wifi_ap_record_t ap_records[20] = {};
-  esp_wifi_scan_get_ap_records(&ap_num, ap_records);
+  uint16_t copy_count = ap_num;
+  if (copy_count > max_count)
+  {
+    copy_count = static_cast<uint16_t>(max_count);
+  }
+  if (copy_count > kMaxScanResults)
+  {
+    copy_count = kMaxScanResults;
+  }
 
-  out_found = ap_num;
-  for (int i = 0; i < ap_num; ++i)
+  wifi_ap_record_t ap_records[kMaxScanResults] = {};
+  if ((copy_count > 0U) && (esp_wifi_scan_get_ap_records(&copy_count, ap_records) != ESP_OK))
+  {
+    return WifiError::SCAN_FAILED;
+  }
+
+  out_found = copy_count;
+  for (uint16_t i = 0; i < copy_count; ++i)
   {
     CopyToCharField(out_list[i].ssid, sizeof(out_list[i].ssid),
                     reinterpret_cast<const char*>(ap_records[i].ssid));
@@ -223,6 +324,8 @@ void ESP32WifiClient::EventHandler(void* arg, esp_event_base_t event_base,
         break;
       case WIFI_EVENT_STA_DISCONNECTED:
         self->connected_ = false;
+        self->got_ip_ = false;
+        self->ip_str_[0] = '\0';
         self->semaphore_.Post();
         break;
       default:
@@ -244,6 +347,10 @@ void ESP32WifiClient::EventHandler(void* arg, esp_event_base_t event_base,
       }
       case IP_EVENT_STA_LOST_IP:
         self->got_ip_ = false;
+        self->ip_str_[0] = '\0';
+        self->semaphore_.Post();
+        break;
+      default:
         break;
     }
   }
@@ -259,6 +366,82 @@ int ESP32WifiClient::GetRSSI() const
     return ap_info.rssi;
   }
   return -127;
+}
+
+bool ESP32WifiClient::RegisterHandlers()
+{
+  if (handlers_registered_)
+  {
+    return true;
+  }
+
+  if ((esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED,
+                                           &EventHandler, this,
+                                           &wifi_connected_handler_) != ESP_OK) ||
+      (esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED,
+                                           &EventHandler, this,
+                                           &wifi_disconnected_handler_) != ESP_OK) ||
+      (esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &EventHandler,
+                                           this, &got_ip_handler_) != ESP_OK) ||
+      (esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &EventHandler,
+                                           this, &lost_ip_handler_) != ESP_OK))
+  {
+    UnregisterHandlers();
+    return false;
+  }
+
+  handlers_registered_ = true;
+  return true;
+}
+
+void ESP32WifiClient::UnregisterHandlers()
+{
+  if ((wifi_connected_handler_ == nullptr) && (wifi_disconnected_handler_ == nullptr) &&
+      (got_ip_handler_ == nullptr) && (lost_ip_handler_ == nullptr))
+  {
+    handlers_registered_ = false;
+    return;
+  }
+
+  if (wifi_connected_handler_ != nullptr)
+  {
+    (void)esp_event_handler_instance_unregister(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED,
+                                                wifi_connected_handler_);
+    wifi_connected_handler_ = nullptr;
+  }
+  if (wifi_disconnected_handler_ != nullptr)
+  {
+    (void)esp_event_handler_instance_unregister(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED,
+                                                wifi_disconnected_handler_);
+    wifi_disconnected_handler_ = nullptr;
+  }
+  if (got_ip_handler_ != nullptr)
+  {
+    (void)esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                                got_ip_handler_);
+    got_ip_handler_ = nullptr;
+  }
+  if (lost_ip_handler_ != nullptr)
+  {
+    (void)esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_LOST_IP,
+                                                lost_ip_handler_);
+    lost_ip_handler_ = nullptr;
+  }
+  handlers_registered_ = false;
+}
+
+void ESP32WifiClient::ResetConnectionState()
+{
+  connected_ = false;
+  got_ip_ = false;
+  ip_str_[0] = '\0';
+}
+
+void ESP32WifiClient::DrainEvents()
+{
+  while (semaphore_.Wait(0) == ErrorCode::OK)
+  {
+  }
 }
 
 }  // namespace LibXR
