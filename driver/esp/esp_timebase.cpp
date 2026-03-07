@@ -37,7 +37,7 @@ MicrosecondTimestamp IRAM_ATTR ESP32Timebase::_get_microseconds()
 
 MillisecondTimestamp IRAM_ATTR ESP32Timebase::_get_milliseconds()
 {
-  return static_cast<MillisecondTimestamp>(_get_microseconds() / 1000ULL) % UINT32_MAX;
+  return MillisecondTimestamp(static_cast<uint32_t>(_get_microseconds() / 1000ULL));
 }
 
 }  // namespace LibXR
