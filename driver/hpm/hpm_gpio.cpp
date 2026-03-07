@@ -1,9 +1,16 @@
 ﻿#include "hpm_gpio.hpp"
 
+#include "hpm_interrupt.h"
 #include "hpm_ioc_regs.h"
 
 using namespace LibXR;
 
+/**
+ * @brief GPIO 对象映射表 / GPIO object dispatch map.
+ *
+ * 按端口和引脚保存对象指针，供中断入口快速找到具体实例并触发回调。
+ * Stores instance pointers by port/pin so IRQ entry can dispatch callbacks quickly.
+ */
 HPMGPIO* HPMGPIO::map[HPMGPIO::kPortCount][HPMGPIO::kPinCount] = {};
 
 /**
@@ -54,6 +61,13 @@ HPMGPIO::HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq,
 
 /**
  * @brief 使能当前引脚中断 / Enable interrupt for current pin.
+ *
+ * 对于从 STM32 迁移的开发者：
+ * - `gpio_enable_pin_interrupt()` 只打开 GPIO 侧事件；
+ * - `intc_m_enable_irq_with_priority()` 打开 PLIC 路由并设置优先级。
+ * For STM32-oriented users:
+ * - `gpio_enable_pin_interrupt()` enables GPIO-side event generation only.
+ * - `intc_m_enable_irq_with_priority()` enables PLIC routing and IRQ priority.
  */
 ErrorCode HPMGPIO::EnableInterrupt()
 {
@@ -62,12 +76,15 @@ ErrorCode HPMGPIO::EnableInterrupt()
     return ErrorCode::ARG_ERR;
   }
   gpio_enable_pin_interrupt(gpio_, port_, pin_);
-  __plic_enable_irq(HPM_PLIC_BASE, HPM_PLIC_TARGET_M_MODE, irq_);
+  intc_m_enable_irq_with_priority(irq_, 1);
   return ErrorCode::OK;
 }
 
 /**
  * @brief 失能当前引脚中断 / Disable interrupt for current pin.
+ *
+ * 先关闭 GPIO 事件，再关闭 PLIC 路由，避免在关中断过程中出现残留触发。
+ * Disable GPIO event first, then PLIC routing, to avoid residual triggers while disabling.
  */
 ErrorCode HPMGPIO::DisableInterrupt()
 {
@@ -76,12 +93,19 @@ ErrorCode HPMGPIO::DisableInterrupt()
     return ErrorCode::ARG_ERR;
   }
   gpio_disable_pin_interrupt(gpio_, port_, pin_);
-  __plic_disable_irq(HPM_PLIC_BASE, HPM_PLIC_TARGET_M_MODE, irq_);
+  intc_m_disable_irq(irq_);
   return ErrorCode::OK;
 }
 
 /**
  * @brief 配置 GPIO 方向、中断模式与上下拉 / Configure GPIO direction, interrupt mode, and pull.
+ *
+ * 与 STM32 HAL 的常见用法对齐：
+ * - `Direction` 对应 GPIO 模式（输入/输出/中断边沿）
+ * - `Pull` 对应上拉/下拉配置
+ * Aligned with common STM32 HAL usage:
+ * - `Direction` maps to GPIO mode (input/output/IRQ edge)
+ * - `Pull` maps to pull-up / pull-down configuration
  */
 ErrorCode HPMGPIO::SetConfig(Configuration config)
 {
@@ -155,8 +179,51 @@ ErrorCode HPMGPIO::SetConfig(Configuration config)
 }
 
 /**
- * @brief 分发指定端口的 GPIO 中断回调 / Dispatch GPIO interrupt callbacks for a port.
+ * @brief 将引脚切换为模拟高阻 / Put current pin into analog high-impedance mode.
+ *
+ * 用途：
+ * - 该引脚仅作为外部网络连接点，不希望其数字输入/上下拉影响外部 PWM 信号；
+ * - 例如 PB10 外部跳线到 PA10 时，PA10 需保持高阻避免“分流”。
+ * Usage:
+ * - Keep this pin from loading an externally driven signal (PWM/analog net);
+ * - Example: PB10 externally jumpered to PA10, PA10 should stay high-Z.
+ */
+ErrorCode HPMGPIO::SetAnalogHighImpedance()
+{
+  if (port_ >= kPortCount || pin_ >= kPinCount)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  if (pad_index_ == kInvalidPadIndex)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  gpio_disable_pin_interrupt(gpio_, port_, pin_);
+  gpio_set_pin_input(gpio_, port_, pin_);
+
+  HPM_IOC->PAD[pad_index_].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
+
+  uint32_t pad_ctl = HPM_IOC->PAD[pad_index_].PAD_CTL;
+  pad_ctl &= ~(IOC_PAD_PAD_CTL_PE_MASK | IOC_PAD_PAD_CTL_OD_MASK);
+  HPM_IOC->PAD[pad_index_].PAD_CTL = pad_ctl;
+
+  return ErrorCode::OK;
+}
+
+/**
+ * @brief 扫描并分发指定端口的 GPIO 中断 / Scan and dispatch GPIO IRQ callbacks for one port.
  * @param port GPIO 端口号 / GPIO port index.
+ *
+ * 建议在板级 IRQHandler 中仅调用一次该函数：
+ * - 读取端口中断标志；
+ * - 逐 pin 清标志；
+ * - 触发对应对象的 LibXR 回调。
+ * Recommended to call once from board IRQ handler:
+ * - read port IRQ flags;
+ * - clear flag per asserted pin;
+ * - run corresponding LibXR callback.
  */
 void HPMGPIO::CheckInterrupt(uint32_t port)
 {

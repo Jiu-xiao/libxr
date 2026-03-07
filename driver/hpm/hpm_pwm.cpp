@@ -1,14 +1,33 @@
-#include "hpm_pwm.hpp"
+﻿#include "hpm_pwm.hpp"
+
+#if __has_include("board.h")
+#include "board.h"
+#define LIBXR_HPM_PWM_HAS_BOARD_HELPER 1
+#else
+#define LIBXR_HPM_PWM_HAS_BOARD_HELPER 0
+#endif
 
 using namespace LibXR;
 
+/**
+ * @brief 构造 PWM 实例 / Construct PWM instance.
+ *
+ * 说明：
+ * - 当芯片存在原生 PWM 外设时，`pwm_` 按原生路径使用；
+ * - 当芯片仅有 GPTMR 输出比较能力时，`gptmr_` 走 fallback 路径。
+ * Notes:
+ * - If native PWM exists, `pwm_` is used in native path.
+ * - If only GPTMR compare output is available, `gptmr_` is used as fallback.
+ */
 HPMPWM::HPMPWM(LibXRHpmPwmType* pwm, clock_name_t clock, uint8_t pwm_index, uint8_t cmp_index,
-               bool invert)
+               bool invert, bool auto_board_init)
     : pwm_(pwm),
+      gptmr_(reinterpret_cast<GPTMR_Type*>(pwm)),
       clock_(clock),
       pwm_index_(pwm_index),
       cmp_index_(cmp_index),
       invert_(invert),
+      auto_board_init_(auto_board_init),
       reload_(0),
       configured_(false)
 {
@@ -16,10 +35,6 @@ HPMPWM::HPMPWM(LibXRHpmPwmType* pwm, clock_name_t clock, uint8_t pwm_index, uint
 
 ErrorCode HPMPWM::SetDutyCycle(float value)
 {
-#if !LIBXR_HPM_PWM_SUPPORTED
-  (void) value;
-  return ErrorCode::NOT_SUPPORT;
-#else
   if (!configured_)
   {
     return ErrorCode::INIT_ERR;
@@ -34,28 +49,57 @@ ErrorCode HPMPWM::SetDutyCycle(float value)
     value = 1.0f;
   }
 
+#if LIBXR_HPM_PWM_SUPPORTED
   const float duty_percent = value * 100.0f;
   if (pwm_update_duty_edge_aligned(pwm_, cmp_index_, duty_percent) != status_success)
   {
     return ErrorCode::FAILED;
   }
+#elif LIBXR_HPM_GPTMR_PWM_FALLBACK
+  // GPTMR 比较值不允许落在 0 或 reload，避免输出退化成常高/常低。
+  // Keep compare away from 0/reload to avoid constant-high/constant-low output.
+  uint32_t cmp = static_cast<uint32_t>(static_cast<float>(reload_) * value);
+  if (cmp == 0u)
+  {
+    cmp = 1u;
+  }
+  else if (cmp >= reload_)
+  {
+    cmp = reload_ - 1u;
+  }
+  gptmr_update_cmp(gptmr_, pwm_index_, cmp_index_, cmp);
+#else
+  (void) value;
+  return ErrorCode::NOT_SUPPORT;
+#endif
 
   return ErrorCode::OK;
-#endif
 }
 
 ErrorCode HPMPWM::SetConfig(Configuration config)
 {
-#if !LIBXR_HPM_PWM_SUPPORTED
-  (void) config;
-  return ErrorCode::NOT_SUPPORT;
-#else
   if (config.frequency == 0u)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  const uint32_t clock_hz = clock_get_frequency(clock_);
+  uint32_t clock_hz = 0u;
+
+#if LIBXR_HPM_GPTMR_PWM_FALLBACK && LIBXR_HPM_PWM_HAS_BOARD_HELPER
+  if (auto_board_init_ && gptmr_ != nullptr)
+  {
+    // 为了与 STM32 风格一致，应用层可不显式调用 board_init_*。
+    // To keep STM32-like app style, board_init_* can be hidden inside driver.
+    clock_hz = board_init_gptmr_clock(gptmr_);
+    board_init_gptmr_channel_pin(gptmr_, pwm_index_, true);
+  }
+#endif
+
+  if (clock_hz == 0u)
+  {
+    clock_hz = clock_get_frequency(clock_);
+  }
+
   if (clock_hz == 0u)
   {
     return ErrorCode::INIT_ERR;
@@ -68,6 +112,7 @@ ErrorCode HPMPWM::SetConfig(Configuration config)
   }
   reload_ = reload;
 
+#if LIBXR_HPM_PWM_SUPPORTED
   pwm_stop_counter(pwm_);
 
   pwm_config_t pwm_config{};
@@ -94,32 +139,64 @@ ErrorCode HPMPWM::SetConfig(Configuration config)
   }
 
   pwm_issue_shadow_register_lock_event(pwm_);
+#elif LIBXR_HPM_GPTMR_PWM_FALLBACK
+  if (gptmr_ == nullptr)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  // 重新配置前先停计数器，避免切换参数时输出毛刺。
+  // Stop counter before reconfiguration to avoid output glitches.
+  gptmr_stop_counter(gptmr_, pwm_index_);
+
+  gptmr_channel_config_t cfg;
+  gptmr_channel_get_default_config(gptmr_, &cfg);
+  cfg.mode = gptmr_work_mode_no_capture;
+  cfg.cmp_initial_polarity_high = invert_;
+  cfg.enable_cmp_output = true;
+  cfg.reload = reload_;
+  cfg.cmp[cmp_index_] = reload_ / 2u;
+  cfg.cmp[1] = reload_;
+
+  if (gptmr_channel_config(gptmr_, pwm_index_, &cfg, false) != status_success)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  gptmr_channel_reset_count(gptmr_, pwm_index_);
+#else
+  return ErrorCode::NOT_SUPPORT;
+#endif
+
   configured_ = true;
   return ErrorCode::OK;
-#endif
 }
 
 ErrorCode HPMPWM::Enable()
 {
-#if !LIBXR_HPM_PWM_SUPPORTED
-  return ErrorCode::NOT_SUPPORT;
-#else
   if (!configured_)
   {
     return ErrorCode::INIT_ERR;
   }
 
+#if LIBXR_HPM_PWM_SUPPORTED
   pwm_start_counter(pwm_);
-  return ErrorCode::OK;
+#elif LIBXR_HPM_GPTMR_PWM_FALLBACK
+  gptmr_start_counter(gptmr_, pwm_index_);
+#else
+  return ErrorCode::NOT_SUPPORT;
 #endif
+
+  return ErrorCode::OK;
 }
 
 ErrorCode HPMPWM::Disable()
 {
-#if !LIBXR_HPM_PWM_SUPPORTED
-  return ErrorCode::NOT_SUPPORT;
-#else
+#if LIBXR_HPM_PWM_SUPPORTED
   pwm_stop_counter(pwm_);
-  return ErrorCode::OK;
+#elif LIBXR_HPM_GPTMR_PWM_FALLBACK
+  gptmr_stop_counter(gptmr_, pwm_index_);
+#else
+  return ErrorCode::NOT_SUPPORT;
 #endif
+  return ErrorCode::OK;
 }

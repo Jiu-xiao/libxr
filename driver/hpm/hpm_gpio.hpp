@@ -80,6 +80,13 @@ class HPMGPIO final : public GPIO
   ErrorCode SetConfig(Configuration config) override;
 
   /**
+   * @brief 将当前 PAD 配置为模拟高阻 / Configure current pad to analog high-impedance.
+   * @return 成功返回 `ErrorCode::OK`，PAD 不可解析返回 `ErrorCode::NOT_SUPPORT` /
+   * Returns `ErrorCode::OK` on success, `ErrorCode::NOT_SUPPORT` when PAD is unavailable.
+   */
+  ErrorCode SetAnalogHighImpedance();
+
+  /**
    * @brief 分发某一端口的 GPIO 中断回调 / Dispatch GPIO interrupt callbacks for one port.
    * @param port GPIO 端口号 / GPIO port index.
    *
