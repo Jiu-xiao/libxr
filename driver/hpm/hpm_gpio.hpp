@@ -118,6 +118,7 @@ class HPMGPIO final : public GPIO
   ///< 端口-引脚到对象实例的静态映射，用于中断分发 /
   ///< Static port-pin to object map for interrupt dispatch.
   static HPMGPIO* map[kPortCount][kPinCount];
+  static GPIO_Type* port_controller_map[kPortCount];
 
   GPIO_Type* gpio_;     ///< GPIO 控制器实例 / GPIO controller instance.
   uint32_t port_;       ///< GPIO 端口号 / GPIO port index.

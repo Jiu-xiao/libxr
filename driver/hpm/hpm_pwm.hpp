@@ -71,6 +71,9 @@ class HPMPWM : public PWM
   ErrorCode Disable() override;
 
  private:
+  static constexpr uint8_t kInvalidCmpIndex = 0xFFu;
+  static uint8_t ResolveGptmrReloadCmpIndex(uint8_t duty_cmp_index);
+
   LibXRHpmPwmType* pwm_;
   GPTMR_Type* gptmr_;
   clock_name_t clock_;

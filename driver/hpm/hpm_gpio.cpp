@@ -12,6 +12,7 @@ using namespace LibXR;
  * Stores instance pointers by port/pin so IRQ entry can dispatch callbacks quickly.
  */
 HPMGPIO* HPMGPIO::map[HPMGPIO::kPortCount][HPMGPIO::kPinCount] = {};
+GPIO_Type* HPMGPIO::port_controller_map[HPMGPIO::kPortCount] = {};
 
 /**
  * @brief 将 PAD 复用切换为 GPIO 功能 / Route PAD mux to GPIO function.
@@ -56,6 +57,10 @@ HPMGPIO::HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq,
   if (port_ < kPortCount && pin_ < kPinCount)
   {
     map[port_][pin_] = this;
+    if (port_controller_map[port_] == nullptr)
+    {
+      port_controller_map[port_] = gpio_;
+    }
   }
 }
 
@@ -232,16 +237,7 @@ void HPMGPIO::CheckInterrupt(uint32_t port)
     return;
   }
 
-  GPIO_Type* controller = nullptr;
-  for (uint8_t pin = 0; pin < kPinCount; ++pin)
-  {
-    if (map[port][pin] != nullptr)
-    {
-      controller = map[port][pin]->gpio_;
-      break;
-    }
-  }
-
+  GPIO_Type* controller = port_controller_map[port];
   if (controller == nullptr)
   {
     return;

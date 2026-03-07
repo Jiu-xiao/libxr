@@ -9,6 +9,15 @@
 
 using namespace LibXR;
 
+uint8_t HPMPWM::ResolveGptmrReloadCmpIndex(uint8_t duty_cmp_index)
+{
+  if (duty_cmp_index >= GPTMR_CH_CMP_COUNT)
+  {
+    return kInvalidCmpIndex;
+  }
+  return static_cast<uint8_t>(duty_cmp_index == 0u ? 1u : 0u);
+}
+
 /**
  * @brief 构造 PWM 实例 / Construct PWM instance.
  *
@@ -145,6 +154,12 @@ ErrorCode HPMPWM::SetConfig(Configuration config)
     return ErrorCode::ARG_ERR;
   }
 
+  const uint8_t reload_cmp_index = ResolveGptmrReloadCmpIndex(cmp_index_);
+  if (reload_cmp_index == kInvalidCmpIndex)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
   // 重新配置前先停计数器，避免切换参数时输出毛刺。
   // Stop counter before reconfiguration to avoid output glitches.
   gptmr_stop_counter(gptmr_, pwm_index_);
@@ -156,7 +171,7 @@ ErrorCode HPMPWM::SetConfig(Configuration config)
   cfg.enable_cmp_output = true;
   cfg.reload = reload_;
   cfg.cmp[cmp_index_] = reload_ / 2u;
-  cfg.cmp[1] = reload_;
+  cfg.cmp[reload_cmp_index] = reload_;
 
   if (gptmr_channel_config(gptmr_, pwm_index_, &cfg, false) != status_success)
   {
