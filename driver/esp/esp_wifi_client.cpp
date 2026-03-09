@@ -4,6 +4,7 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
@@ -16,6 +17,42 @@ constexpr uint32_t kWifiConnectTimeoutMs = 15000U;
 constexpr uint32_t kWifiDhcpTimeoutMs = 15000U;
 constexpr uint32_t kWifiDisconnectTimeoutMs = 5000U;
 constexpr uint16_t kMaxScanResults = 20U;
+
+template <typename Predicate>
+bool WaitForPredicate(Semaphore& semaphore, uint32_t timeout_ms, Predicate&& predicate)
+{
+  if (predicate())
+  {
+    return true;
+  }
+
+  if (timeout_ms == UINT32_MAX)
+  {
+    while (!predicate())
+    {
+      (void)semaphore.Wait(UINT32_MAX);
+    }
+    return true;
+  }
+
+  const int64_t start_us = esp_timer_get_time();
+  const int64_t timeout_us = static_cast<int64_t>(timeout_ms) * 1000LL;
+  while (!predicate())
+  {
+    const int64_t remaining_us = timeout_us - (esp_timer_get_time() - start_us);
+    if (remaining_us <= 0)
+    {
+      return predicate();
+    }
+
+    const uint32_t wait_ms = static_cast<uint32_t>((remaining_us + 999LL) / 1000LL);
+    if ((semaphore.Wait(wait_ms) != ErrorCode::OK) && !predicate())
+    {
+      return false;
+    }
+  }
+  return true;
+}
 
 size_t BoundedStringLength(const char* text, size_t max_len)
 {
@@ -141,35 +178,6 @@ bool ESP32WifiClient::Enable()
     return false;
   }
   enabled_ = true;
-
-  wifi_config_t cfg = {};
-  esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &cfg);
-  if (err == ESP_OK && cfg.sta.ssid[0] != 0)
-  {
-    ResetConnectionState();
-    DrainEvents();
-    if (esp_wifi_connect() == ESP_OK)
-    {
-      if (semaphore_.Wait(kWifiConnectTimeoutMs) == ErrorCode::OK && connected_)
-      {
-        (void)semaphore_.Wait(kWifiDhcpTimeoutMs);
-      }
-    }
-  }
-
-  wifi_ap_record_t ap_info;
-  if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK)
-  {
-    connected_ = true;
-    got_ip_ = true;
-
-    esp_netif_ip_info_t ip_info;
-    if (esp_netif_get_ip_info(netif_, &ip_info) == ESP_OK)
-    {
-      esp_ip4addr_ntoa(&ip_info.ip, ip_str_, sizeof(ip_str_));
-    }
-  }
-
   return true;
 }
 
@@ -203,16 +211,17 @@ WifiClient::WifiError ESP32WifiClient::Connect(const Config& config)
     return WifiError::HARDWARE_FAILURE;
   }
 
-  if (semaphore_.Wait(kWifiConnectTimeoutMs) != ErrorCode::OK)
+  if (!WaitForPredicate(semaphore_, kWifiConnectTimeoutMs, [&]() { return connected_; }))
   {
     return WifiError::CONNECTION_TIMEOUT;
   }
-  if (!connected_) return WifiError::CONNECTION_TIMEOUT;
 
-  if (semaphore_.Wait(kWifiDhcpTimeoutMs) != ErrorCode::OK)
+  if (!WaitForPredicate(semaphore_, kWifiDhcpTimeoutMs,
+                        [&]() { return got_ip_ || !connected_; }))
   {
     return WifiError::DHCP_FAILED;
   }
+  if (!connected_) return WifiError::CONNECTION_TIMEOUT;
   if (!got_ip_) return WifiError::DHCP_FAILED;
 
   return WifiError::NONE;
@@ -229,7 +238,8 @@ WifiClient::WifiError ESP32WifiClient::Disconnect()
     return WifiError::HARDWARE_FAILURE;
   }
 
-  if (semaphore_.Wait(kWifiDisconnectTimeoutMs) != ErrorCode::OK)
+  if (!WaitForPredicate(semaphore_, kWifiDisconnectTimeoutMs,
+                        [&]() { return !connected_; }))
   {
     return WifiError::UNKNOWN;
   }
