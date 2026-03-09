@@ -10,18 +10,18 @@
 #include "esp_attr.h"
 #include "esp_clk_tree.h"
 #include "esp_err.h"
-#include "esp_timer.h"
 #include "esp_memory_utils.h"
 #include "esp_private/periph_ctrl.h"
 #include "esp_private/spi_common_internal.h"
+#include "esp_timer.h"
 #if SOC_GDMA_SUPPORTED
 #include "esp_private/gdma.h"
 #endif
 #include "esp_rom_gpio.h"
 #include "hal/spi_hal.h"
 #include "libxr_def.hpp"
-#include "timebase.hpp"
 #include "soc/spi_periph.h"
+#include "timebase.hpp"
 
 namespace LibXR
 {
@@ -37,10 +37,7 @@ uint8_t ResolveSpiMode(SPI::ClockPolarity polarity, SPI::ClockPhase phase)
   return (phase == SPI::ClockPhase::EDGE_1) ? 2U : 3U;
 }
 
-spi_dma_ctx_t* ToDmaCtx(void* ctx)
-{
-  return reinterpret_cast<spi_dma_ctx_t*>(ctx);
-}
+spi_dma_ctx_t* ToDmaCtx(void* ctx) { return reinterpret_cast<spi_dma_ctx_t*>(ctx); }
 
 uint64_t GetNowUs()
 {
@@ -322,9 +319,9 @@ ErrorCode ESP32SPI::ConfigurePins()
 ErrorCode ESP32SPI::ResolveClockSource(uint32_t& source_hz)
 {
   source_hz = 0;
-  const esp_err_t err = esp_clk_tree_src_get_freq_hz(
-      static_cast<soc_module_clk_t>(SPI_CLK_SRC_DEFAULT),
-      ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &source_hz);
+  const esp_err_t err =
+      esp_clk_tree_src_get_freq_hz(static_cast<soc_module_clk_t>(SPI_CLK_SRC_DEFAULT),
+                                   ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &source_hz);
   if ((err != ESP_OK) || (source_hz == 0))
   {
     return ErrorCode::INIT_ERR;
@@ -385,9 +382,9 @@ ErrorCode ESP32SPI::InitDmaBackend()
 
   dma_ctx_ = ctx;
   dma_enabled_ = true;
-  dma_max_transfer_bytes_ = std::min<size_t>(
-      {static_cast<size_t>(actual_max_size), dma_rx_raw_.size_, dma_tx_raw_.size_,
-       kMaxDmaTransferBytes});
+  dma_max_transfer_bytes_ =
+      std::min<size_t>({static_cast<size_t>(actual_max_size), dma_rx_raw_.size_,
+                        dma_tx_raw_.size_, kMaxDmaTransferBytes});
 
   if (dma_max_transfer_bytes_ == 0U)
   {
@@ -533,7 +530,8 @@ ErrorCode ESP32SPI::SetConfig(SPI::Configuration config)
   {
     return ErrorCode::ARG_ERR;
   }
-  if (config.double_buffer && ((dbuf_rx_block_size_ == 0U) || (dbuf_tx_block_size_ == 0U)))
+  if (config.double_buffer &&
+      ((dbuf_rx_block_size_ == 0U) || (dbuf_tx_block_size_ == 0U)))
   {
     return ErrorCode::ARG_ERR;
   }
@@ -553,9 +551,8 @@ ErrorCode ESP32SPI::SetConfig(SPI::Configuration config)
   const uint8_t mode = ResolveSpiMode(config.clock_polarity, config.clock_phase);
   spi_ll_master_set_mode(hw_, mode);
 
-  const int applied_hz =
-      spi_ll_master_set_clock(hw_, static_cast<int>(source_clock_hz_),
-                              static_cast<int>(target_hz), 128);
+  const int applied_hz = spi_ll_master_set_clock(hw_, static_cast<int>(source_clock_hz_),
+                                                 static_cast<int>(target_hz), 128);
   if (applied_hz <= 0)
   {
     return ErrorCode::INIT_ERR;
@@ -850,13 +847,13 @@ ErrorCode ESP32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   if (CanUseDma(need))
   {
     bool started = false;
-    const ErrorCode ec =
-        StartAsyncTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), need, true, read_data,
-                           false, op, started);
+    const ErrorCode ec = StartAsyncTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), need,
+                                            true, read_data, false, op, started);
     return ReturnAsyncStartResult(ec, started);
   }
 
-  const ErrorCode ec = ExecuteTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), need, true);
+  const ErrorCode ec =
+      ExecuteTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), need, true);
   if (ec == ErrorCode::OK)
   {
     if (read_data.size_ > 0U)
@@ -897,13 +894,13 @@ ErrorCode ESP32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
   if (CanUseDma(total))
   {
     bool started = false;
-    const ErrorCode ec =
-        StartAsyncTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), total, true, read_data,
-                           true, op, started);
+    const ErrorCode ec = StartAsyncTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_),
+                                            total, true, read_data, true, op, started);
     return ReturnAsyncStartResult(ec, started);
   }
 
-  const ErrorCode ec = ExecuteTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), total, true);
+  const ErrorCode ec =
+      ExecuteTransfer(tx_ptr, static_cast<uint8_t*>(rx.addr_), total, true);
   if (ec == ErrorCode::OK)
   {
     auto* rx_ptr = static_cast<uint8_t*>(rx.addr_);
@@ -976,10 +973,9 @@ ErrorCode ESP32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   if (CanUseDma(size))
   {
     bool started = false;
-    const ErrorCode ec =
-        StartAsyncTransfer(static_cast<const uint8_t*>(tx.addr_),
-                           static_cast<uint8_t*>(rx.addr_), size, true, {nullptr, 0}, false,
-                           op, started);
+    const ErrorCode ec = StartAsyncTransfer(static_cast<const uint8_t*>(tx.addr_),
+                                            static_cast<uint8_t*>(rx.addr_), size, true,
+                                            {nullptr, 0}, false, op, started);
     return ReturnAsyncStartResult(ec, started);
   }
 

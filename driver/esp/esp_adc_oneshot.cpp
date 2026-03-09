@@ -1,7 +1,6 @@
-#include "esp_adc.hpp"
-
 #include <new>
 
+#include "esp_adc.hpp"
 #include "esp_clk_tree.h"
 #include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_private/esp_clk_tree_common.h"
@@ -27,7 +26,8 @@ bool ESP32ADC::InitOneshot()
     return false;
   }
 
-  auto fail = [&]() -> bool {
+  auto fail = [&]() -> bool
+  {
     if (oneshot_inited_)
     {
       sar_periph_ctrl_adc_oneshot_power_release();

@@ -158,7 +158,8 @@ ErrorCode ESP32Watchdog::ApplyConfiguration()
 
 ErrorCode ESP32Watchdog::SetConfig(const Configuration& config)
 {
-  if ((config.timeout_ms == 0) || (config.feed_ms == 0) || (config.feed_ms > config.timeout_ms))
+  if ((config.timeout_ms == 0) || (config.feed_ms == 0) ||
+      (config.feed_ms > config.timeout_ms))
   {
     return ErrorCode::ARG_ERR;
   }

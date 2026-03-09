@@ -1,7 +1,7 @@
-#include "esp_adc.hpp"
-
 #include <array>
 #include <new>
+
+#include "esp_adc.hpp"
 
 namespace LibXR
 {
@@ -65,9 +65,9 @@ void ESP32ADC::DrainContinuousFrames(uint32_t timeout_ms)
     }
 
     uint32_t parsed_count = 0U;
-    const esp_err_t parse_err = adc_continuous_parse_data(
-        continuous_handle_, continuous_read_buf_, out_length, continuous_parsed_buf_,
-        &parsed_count);
+    const esp_err_t parse_err =
+        adc_continuous_parse_data(continuous_handle_, continuous_read_buf_, out_length,
+                                  continuous_parsed_buf_, &parsed_count);
     ASSERT(parse_err == ESP_OK);
     if (parse_err != ESP_OK)
     {
@@ -136,14 +136,16 @@ void ESP32ADC::DeinitContinuous()
   continuous_prime_timeout_ms_ = 0U;
 }
 
-ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq, size_t dma_buf_size)
+ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
+                                                        size_t dma_buf_size)
 {
   if (!IsDigiUnitSupported(unit_))
   {
     return ContinuousInitResult::UNSUPPORTED;
   }
 
-  auto fail = [&]() -> ContinuousInitResult {
+  auto fail = [&]() -> ContinuousInitResult
+  {
     DeinitContinuous();
     return ContinuousInitResult::FAILED;
   };
@@ -152,10 +154,11 @@ ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq, size_t dm
   const uint32_t min_frame =
       static_cast<uint32_t>(num_channels_) * SOC_ADC_DIGI_RESULT_BYTES;
   const uint32_t frame_size = AlignUp(min_frame, SOC_ADC_DIGI_DATA_BYTES_PER_CONV);
-  const uint32_t store_size = AlignUp(
-      static_cast<uint32_t>((dma_buf_size > static_cast<size_t>(frame_size)) ? dma_buf_size
-                                                                             : frame_size * 5U),
-      SOC_ADC_DIGI_DATA_BYTES_PER_CONV);
+  const uint32_t store_size =
+      AlignUp(static_cast<uint32_t>((dma_buf_size > static_cast<size_t>(frame_size))
+                                        ? dma_buf_size
+                                        : frame_size * 5U),
+              SOC_ADC_DIGI_DATA_BYTES_PER_CONV);
   const uint32_t parsed_capacity = frame_size / SOC_ADC_DIGI_RESULT_BYTES;
 
   continuous_read_buf_ = new (std::nothrow) uint8_t[frame_size];

@@ -2,8 +2,8 @@
 
 #include <new>
 
-#include "esp_clk_tree.h"
 #include "esp_adc/adc_cali_scheme.h"
+#include "esp_clk_tree.h"
 #include "esp_private/adc_private.h"
 #include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_private/esp_clk_tree_common.h"
@@ -82,8 +82,9 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
   ASSERT(channel_ready_ != nullptr);
   ASSERT(latest_values_ != nullptr);
   ASSERT(latest_raw_ != nullptr);
-  if ((channels_ == nullptr) || (channel_ids_ == nullptr) || (channel_ready_ == nullptr) ||
-      (latest_values_ == nullptr) || (latest_raw_ == nullptr))
+  if ((channels_ == nullptr) || (channel_ids_ == nullptr) ||
+      (channel_ready_ == nullptr) || (latest_values_ == nullptr) ||
+      (latest_raw_ == nullptr))
   {
     ASSERT(false);
     return;
@@ -253,8 +254,8 @@ float ESP32ADC::ReadChannel(uint8_t idx)
 #if SOC_ADC_DIG_CTRL_SUPPORTED && !SOC_ADC_RTC_CTRL_SUPPORTED
   if (clk_src_enabled)
   {
-    const esp_err_t clk_off =
-        esp_clk_tree_enable_src(static_cast<soc_module_clk_t>(oneshot_hal_->clk_src), false);
+    const esp_err_t clk_off = esp_clk_tree_enable_src(
+        static_cast<soc_module_clk_t>(oneshot_hal_->clk_src), false);
     ASSERT(clk_off == ESP_OK);
     if (clk_off != ESP_OK)
     {

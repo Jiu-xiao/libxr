@@ -1,7 +1,7 @@
 #include "esp_cdc_jtag.hpp"
 
-#if SOC_USB_SERIAL_JTAG_SUPPORTED &&                                              \
-    ((defined(CONFIG_IDF_TARGET_ESP32C3) && CONFIG_IDF_TARGET_ESP32C3) ||         \
+#if SOC_USB_SERIAL_JTAG_SUPPORTED &&                                      \
+    ((defined(CONFIG_IDF_TARGET_ESP32C3) && CONFIG_IDF_TARGET_ESP32C3) || \
      (defined(CONFIG_IDF_TARGET_ESP32C6) && CONFIG_IDF_TARGET_ESP32C6))
 
 #include <algorithm>
@@ -79,9 +79,8 @@ ErrorCode ESP32CDCJtag::InitHardware()
 
   ResetTxState(false);
 
-  const esp_err_t intr_ans = esp_intr_alloc(ETS_USB_SERIAL_JTAG_INTR_SOURCE,
-                                            ESP_INTR_FLAG_IRAM, IsrEntry, this,
-                                            &intr_handle_);
+  const esp_err_t intr_ans = esp_intr_alloc(
+      ETS_USB_SERIAL_JTAG_INTR_SOURCE, ESP_INTR_FLAG_IRAM, IsrEntry, this, &intr_handle_);
   intr_installed_ = (intr_ans == ESP_OK);
   if (!intr_installed_)
   {
@@ -133,10 +132,7 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::WriteFun(WritePort& port, bool in_isr)
   return cdc->TryStartTx(in_isr);
 }
 
-ErrorCode ESP32CDCJtag::ReadFun(ReadPort&, bool)
-{
-  return ErrorCode::PENDING;
-}
+ErrorCode ESP32CDCJtag::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
 void IRAM_ATTR ESP32CDCJtag::ClearActiveTx()
 {
@@ -251,8 +247,7 @@ bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)
       return true;
     }
 
-    const uint32_t remain =
-        static_cast<uint32_t>(tx_active_size_ - tx_active_offset_);
+    const uint32_t remain = static_cast<uint32_t>(tx_active_size_ - tx_active_offset_);
     const int written =
         usb_serial_jtag_ll_write_txfifo(tx_active_ptr_ + tx_active_offset_, remain);
     if (written <= 0)
@@ -394,7 +389,8 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
     (void)LoadPendingTxFromQueue(in_isr);
   }
 
-  if (!tx_busy_.load(std::memory_order_acquire) && !tx_active_valid_ && !tx_pending_valid_)
+  if (!tx_busy_.load(std::memory_order_acquire) && !tx_active_valid_ &&
+      !tx_pending_valid_)
   {
     StopTxTransfer();
   }

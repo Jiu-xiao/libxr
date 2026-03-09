@@ -4,8 +4,8 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
@@ -299,7 +299,8 @@ WifiClient::WifiError ESP32WifiClient::Scan(ScanResult* out_list, size_t max_cou
   }
 
   wifi_ap_record_t ap_records[kMaxScanResults] = {};
-  if ((copy_count > 0U) && (esp_wifi_scan_get_ap_records(&copy_count, ap_records) != ESP_OK))
+  if ((copy_count > 0U) &&
+      (esp_wifi_scan_get_ap_records(&copy_count, ap_records) != ESP_OK))
   {
     return WifiError::SCAN_FAILED;
   }

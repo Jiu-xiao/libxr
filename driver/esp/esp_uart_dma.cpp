@@ -96,8 +96,7 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 namespace LibXR
 {
 
-bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t,
-                                           gdma_event_data_t*,
+bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t, gdma_event_data_t*,
                                            void* user_data)
 {
   auto* uart = static_cast<ESP32UART*>(user_data);
@@ -108,8 +107,7 @@ bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t,
   return false;
 }
 
-bool IRAM_ATTR ESP32UART::DmaTxDescrErrCallback(gdma_channel_handle_t,
-                                                gdma_event_data_t*,
+bool IRAM_ATTR ESP32UART::DmaTxDescrErrCallback(gdma_channel_handle_t, gdma_event_data_t*,
                                                 void* user_data)
 {
   auto* uart = static_cast<ESP32UART*>(user_data);
@@ -132,8 +130,7 @@ bool IRAM_ATTR ESP32UART::DmaRxDoneCallback(gdma_channel_handle_t,
   return false;
 }
 
-bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t,
-                                                gdma_event_data_t*,
+bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t, gdma_event_data_t*,
                                                 void* user_data)
 {
   auto* uart = static_cast<ESP32UART*>(user_data);
@@ -231,11 +228,12 @@ ErrorCode ESP32UART::InitDmaBackend()
         .buffer = tx_dma_buffer_addr_[i],
         .buffer_alignment = tx_dma_alignment_,
         .length = 1,
-        .flags = {
-            .mark_eof = 1,
-            .mark_final = 1,
-            .bypass_buffer_align_check = 0,
-        },
+        .flags =
+            {
+                .mark_eof = 1,
+                .mark_final = 1,
+                .bypass_buffer_align_check = 0,
+            },
     };
 
     if (gdma_link_mount_buffers(tx_dma_links_[i], 0, &tx_mount, 1, nullptr) != ESP_OK)
@@ -308,18 +306,17 @@ ErrorCode ESP32UART::InitDmaBackend()
   }
 
   // Keep one ring window reasonably large to lower ISR pressure at high baud.
-  const size_t rx_chunk_target = std::min<size_t>(
-      std::max<size_t>(32, rx_isr_buffer_size_ / kDmaRxNodeCount), 512);
+  const size_t rx_chunk_target =
+      std::min<size_t>(std::max<size_t>(32, rx_isr_buffer_size_ / kDmaRxNodeCount), 512);
   rx_dma_chunk_size_ = std::max<size_t>(AlignUp(rx_chunk_target, 4), 32);
   rx_dma_node_count_ = kDmaRxNodeCount;
   const size_t rx_storage_alignment = std::max<size_t>(4, rx_dma_alignment_);
   const size_t rx_storage_bytes =
       AlignUp(rx_dma_chunk_size_ * rx_dma_node_count_, rx_storage_alignment);
 
-  rx_dma_storage_ = static_cast<uint8_t*>(heap_caps_aligned_alloc(
-      rx_storage_alignment,
-      rx_storage_bytes,
-      MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+  rx_dma_storage_ = static_cast<uint8_t*>(
+      heap_caps_aligned_alloc(rx_storage_alignment, rx_storage_bytes,
+                              MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
   if (rx_dma_storage_ == nullptr)
   {
     DeinitDmaBackend();
@@ -343,8 +340,7 @@ ErrorCode ESP32UART::InitDmaBackend()
   }
 
   if (gdma_link_mount_buffers(rx_dma_link_, 0, rx_mount.data(), kDmaRxNodeCount,
-                              nullptr) !=
-      ESP_OK)
+                              nullptr) != ESP_OK)
   {
     DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
@@ -500,7 +496,8 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
 
 void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
 {
-  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) || (rx_dma_node_count_ == 0))
+  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) ||
+      (rx_dma_node_count_ == 0))
   {
     return;
   }
@@ -529,7 +526,8 @@ void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
 
 void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data)
 {
-  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) || (rx_dma_node_count_ == 0))
+  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) ||
+      (rx_dma_node_count_ == 0))
   {
     return;
   }
@@ -543,8 +541,8 @@ void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data)
   size_t recv_size = rx_dma_chunk_size_;
   if ((event_data != nullptr) && event_data->flags.normal_eof)
   {
-    const size_t eof_size =
-        gdma_link_count_buffer_size_till_eof(rx_dma_link_, static_cast<int>(rx_dma_node_index_));
+    const size_t eof_size = gdma_link_count_buffer_size_till_eof(
+        rx_dma_link_, static_cast<int>(rx_dma_node_index_));
     if (eof_size > 0)
     {
       recv_size = eof_size;

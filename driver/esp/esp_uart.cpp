@@ -80,8 +80,7 @@ ErrorCode ESP32UART::ResolveUartPeriph(uart_port_t uart_num, periph_module_t& ou
 
 ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
                      int cts_pin, size_t rx_buffer_size, size_t tx_buffer_size,
-                     uint32_t tx_queue_size, UART::Configuration config,
-                     bool enable_dma)
+                     uint32_t tx_queue_size, UART::Configuration config, bool enable_dma)
     : UART(&_read_port, &_write_port),
       uart_num_(uart_num),
       tx_pin_(tx_pin),
@@ -169,10 +168,8 @@ void ESP32UART::ConfigureRxInterruptPath()
 {
   const size_t rx_full_floor = 16;
   const size_t rx_full_ceil = std::max<size_t>(rx_full_floor, SOC_UART_FIFO_LEN / 4);
-  const uint16_t full_thr =
-      static_cast<uint16_t>(std::min<size_t>(rx_full_ceil,
-                                             std::max<size_t>(rx_full_floor,
-                                                              rx_isr_buffer_size_ / 16)));
+  const uint16_t full_thr = static_cast<uint16_t>(std::min<size_t>(
+      rx_full_ceil, std::max<size_t>(rx_full_floor, rx_isr_buffer_size_ / 16)));
 
   uart_hal_set_rxfifo_full_thr(&uart_hal_, full_thr);
   uart_hal_set_rx_timeout(&uart_hal_, kRxToutThreshold);
@@ -205,8 +202,8 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
 
   uint32_t sclk_hz = 0;
   if ((esp_clk_tree_src_get_freq_hz(static_cast<soc_module_clk_t>(sclk),
-                                     ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
-                                     &sclk_hz) != ESP_OK) ||
+                                    ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
+                                    &sclk_hz) != ESP_OK) ||
       (sclk_hz == 0))
   {
     return ErrorCode::INIT_ERR;
@@ -276,10 +273,7 @@ ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
   return uart->TryStartTx(in_isr);
 }
 
-ErrorCode ESP32UART::ReadFun(ReadPort&, bool)
-{
-  return ErrorCode::PENDING;
-}
+ErrorCode ESP32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
 bool ESP32UART::ResolveWordLength(uint8_t data_bits, uart_word_length_t& out)
 {
@@ -331,7 +325,6 @@ uart_parity_t ESP32UART::ResolveParity(UART::Parity parity)
       return UART_PARITY_DISABLE;
   }
 }
-
 
 ErrorCode ESP32UART::InitUartHardware()
 {
@@ -387,8 +380,7 @@ void ESP32UART::DeinitUartHardware()
   }
 
   periph_module_t uart_module = PERIPH_MODULE_MAX;
-  const bool has_module =
-      ResolveUartPeriph(uart_num_, uart_module) == ErrorCode::OK;
+  const bool has_module = ResolveUartPeriph(uart_num_, uart_module) == ErrorCode::OK;
 
   uart_hal_disable_intr_mask(&uart_hal_, UINT32_MAX);
   uart_hal_clr_intsts_mask(&uart_hal_, UINT32_MAX);
@@ -410,9 +402,8 @@ ErrorCode ESP32UART::ConfigurePins()
       return ErrorCode::ARG_ERR;
     }
     esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(tx_pin_));
-    esp_rom_gpio_connect_out_signal(tx_pin_,
-                                    UART_PERIPH_SIGNAL(uart_num_, SOC_UART_TX_PIN_IDX),
-                                    false, false);
+    esp_rom_gpio_connect_out_signal(
+        tx_pin_, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_TX_PIN_IDX), false, false);
   }
 
   if (rx_pin_ >= 0)
@@ -422,9 +413,8 @@ ErrorCode ESP32UART::ConfigurePins()
       return ErrorCode::ARG_ERR;
     }
     gpio_input_enable(static_cast<gpio_num_t>(rx_pin_));
-    esp_rom_gpio_connect_in_signal(rx_pin_,
-                                   UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX),
-                                   false);
+    esp_rom_gpio_connect_in_signal(
+        rx_pin_, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX), false);
   }
   else
   {
@@ -440,9 +430,8 @@ ErrorCode ESP32UART::ConfigurePins()
       return ErrorCode::ARG_ERR;
     }
     esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(rts_pin_));
-    esp_rom_gpio_connect_out_signal(rts_pin_,
-                                    UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RTS_PIN_IDX),
-                                    false, false);
+    esp_rom_gpio_connect_out_signal(
+        rts_pin_, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RTS_PIN_IDX), false, false);
   }
 
   if (cts_pin_ >= 0)
@@ -453,9 +442,8 @@ ErrorCode ESP32UART::ConfigurePins()
     }
     gpio_pullup_en(static_cast<gpio_num_t>(cts_pin_));
     gpio_input_enable(static_cast<gpio_num_t>(cts_pin_));
-    esp_rom_gpio_connect_in_signal(cts_pin_,
-                                   UART_PERIPH_SIGNAL(uart_num_, SOC_UART_CTS_PIN_IDX),
-                                   false);
+    esp_rom_gpio_connect_in_signal(
+        cts_pin_, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_CTS_PIN_IDX), false);
   }
 
   return ErrorCode::OK;

@@ -8,8 +8,7 @@
 namespace LibXR
 {
 
-ESP32Timebase::ESP32Timebase()
-    : Timebase(static_cast<uint64_t>(UINT64_MAX), UINT32_MAX)
+ESP32Timebase::ESP32Timebase() : Timebase(static_cast<uint64_t>(UINT64_MAX), UINT32_MAX)
 {
 #if SOC_SYSTIMER_SUPPORTED
   systimer_hal_init(&systimer_hal_);

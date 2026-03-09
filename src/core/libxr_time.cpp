@@ -49,7 +49,8 @@ MicrosecondTimestamp::Duration MicrosecondTimestamp::operator-(
   }
   else
   {
-    diff = microsecond_ + (libxr_timebase_max_valid_us - old_microsecond.microsecond_) + 1ULL;
+    diff = microsecond_ + (libxr_timebase_max_valid_us - old_microsecond.microsecond_) +
+           1ULL;
   }
 
   ASSERT(diff <= libxr_timebase_max_valid_us);
@@ -110,7 +111,8 @@ MillisecondTimestamp::Duration::operator uint32_t() const { return diff_; }
   }
   else
   {
-    diff = millisecond_ + (libxr_timebase_max_valid_ms - old_millisecond.millisecond_) + 1U;
+    diff =
+        millisecond_ + (libxr_timebase_max_valid_ms - old_millisecond.millisecond_) + 1U;
   }
 
   ASSERT(diff <= libxr_timebase_max_valid_ms);

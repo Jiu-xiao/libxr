@@ -1,8 +1,7 @@
-#include "esp_uart.hpp"
-
 #include <algorithm>
 
 #include "esp_attr.h"
+#include "esp_uart.hpp"
 #include "soc/uart_periph.h"
 
 namespace
@@ -39,11 +38,8 @@ ErrorCode ESP32UART::InstallUartIsr()
   constexpr int kUartIntrFlags = ESP_INTR_FLAG_IRAM;
 #endif
 
-  const esp_err_t err = esp_intr_alloc(uart_periph_signal[uart_num_].irq,
-                                       kUartIntrFlags,
-                                       UartIsrEntry,
-                                       this,
-                                       &uart_intr_handle_);
+  const esp_err_t err = esp_intr_alloc(uart_periph_signal[uart_num_].irq, kUartIntrFlags,
+                                       UartIsrEntry, this, &uart_intr_handle_);
   if (err != ESP_OK)
   {
     return ErrorCode::INIT_ERR;
@@ -110,9 +106,11 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 
       const ErrorCode pop_ec = write_port_->queue_data_->PopWithReader(
           chunk_size,
-          [this](const uint8_t* src, size_t size) -> ErrorCode {
+          [this](const uint8_t* src, size_t size) -> ErrorCode
+          {
             uint32_t write_size = 0;
-            uart_hal_write_txfifo(&uart_hal_, src, static_cast<uint32_t>(size), &write_size);
+            uart_hal_write_txfifo(&uart_hal_, src, static_cast<uint32_t>(size),
+                                  &write_size);
             return (write_size == static_cast<uint32_t>(size)) ? ErrorCode::OK
                                                                : ErrorCode::EMPTY;
           });
@@ -149,7 +147,8 @@ void IRAM_ATTR ESP32UART::DrainRxFifoFromIsr()
 
     const ErrorCode push_ec = read_port_->queue_data_->PushWithWriter(
         write_len,
-        [this](uint8_t* buffer, size_t chunk_size) -> ErrorCode {
+        [this](uint8_t* buffer, size_t chunk_size) -> ErrorCode
+        {
           int read_len = static_cast<int>(chunk_size);
           uart_hal_read_rxfifo(&uart_hal_, buffer, &read_len);
           return (read_len == static_cast<int>(chunk_size)) ? ErrorCode::OK
