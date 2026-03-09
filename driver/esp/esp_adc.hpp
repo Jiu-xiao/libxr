@@ -1,9 +1,10 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include <cstddef>
 #include <cstdint>
 
-#include "sdkconfig.h"
 #include "adc.hpp"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_oneshot.h"

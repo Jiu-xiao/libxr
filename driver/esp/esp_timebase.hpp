@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include "esp_timer.h"
 #include "soc/soc_caps.h"
 #if SOC_SYSTIMER_SUPPORTED

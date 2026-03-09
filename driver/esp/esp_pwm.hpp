@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include "driver/ledc.h"
 #include "esp_err.h"
 #include "hal/ledc_hal.h"

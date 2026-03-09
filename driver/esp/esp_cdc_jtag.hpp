@@ -1,10 +1,11 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 
-#include "sdkconfig.h"
 #include "esp_intr_alloc.h"
 #include "flag.hpp"
 #include "soc/soc_caps.h"

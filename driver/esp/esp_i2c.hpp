@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
