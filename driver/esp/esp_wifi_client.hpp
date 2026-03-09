@@ -21,7 +21,6 @@ class ESP32WifiClient : public WifiClient
  public:
   ESP32WifiClient();
 
-  ~ESP32WifiClient() override;
 
   bool Enable() override;
 

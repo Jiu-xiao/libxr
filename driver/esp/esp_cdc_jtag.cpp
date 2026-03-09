@@ -52,13 +52,6 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
   }
 }
 
-ESP32CDCJtag::~ESP32CDCJtag()
-{
-  DeinitHardware();
-  delete[] tx_slot_storage_;
-  tx_slot_storage_ = nullptr;
-}
-
 ErrorCode ESP32CDCJtag::SetConfig(UART::Configuration config)
 {
   if ((config.data_bits != 8) || (config.stop_bits != 1) ||
@@ -93,28 +86,6 @@ ErrorCode ESP32CDCJtag::InitHardware()
 
   hw_inited_ = true;
   return ErrorCode::OK;
-}
-
-void ESP32CDCJtag::DeinitHardware()
-{
-  if (!hw_inited_)
-  {
-    return;
-  }
-
-  if (intr_installed_)
-  {
-    usb_serial_jtag_ll_disable_intr_mask(kAllIntrMask);
-    if (intr_handle_ != nullptr)
-    {
-      (void)esp_intr_free(intr_handle_);
-      intr_handle_ = nullptr;
-    }
-    intr_installed_ = false;
-  }
-
-  ResetTxState(false);
-  hw_inited_ = false;
 }
 
 void IRAM_ATTR ESP32CDCJtag::IsrEntry(void* arg)

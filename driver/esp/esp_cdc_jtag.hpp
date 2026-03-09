@@ -32,7 +32,6 @@ class ESP32CDCJtag : public UART
       uint32_t tx_queue_size = 5,
       UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
-  ~ESP32CDCJtag();
 
   ErrorCode SetConfig(UART::Configuration config) override;
 
@@ -45,7 +44,6 @@ class ESP32CDCJtag : public UART
 
   ErrorCode InitHardware();
 
-  void DeinitHardware();
 
   void HandleInterrupt();
 

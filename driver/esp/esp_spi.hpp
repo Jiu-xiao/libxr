@@ -30,7 +30,6 @@ class ESP32SPI : public SPI
       },
       uint32_t dma_enable_min_size = 3U, bool enable_dma = true);
 
-  ~ESP32SPI();
 
   ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data, OperationRW& op,
                          bool in_isr = false) override;
@@ -63,7 +62,6 @@ class ESP32SPI : public SPI
 
   ErrorCode InitializeHardware();
 
-  void DeinitializeHardware();
 
   ErrorCode ConfigurePins();
 
@@ -71,11 +69,9 @@ class ESP32SPI : public SPI
 
   ErrorCode InstallInterrupt();
 
-  void RemoveInterrupt();
 
   ErrorCode InitDmaBackend();
 
-  void DeinitDmaBackend();
 
   static void SpiIsrEntry(void* arg);
 

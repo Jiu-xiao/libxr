@@ -49,16 +49,6 @@ ErrorCode ESP32UART::InstallUartIsr()
   return ErrorCode::OK;
 }
 
-void ESP32UART::RemoveUartIsr()
-{
-  if ((uart_intr_handle_ != nullptr) && uart_isr_installed_)
-  {
-    esp_intr_free(uart_intr_handle_);
-    uart_intr_handle_ = nullptr;
-    uart_isr_installed_ = false;
-  }
-}
-
 void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 {
   if (!tx_active_valid_)

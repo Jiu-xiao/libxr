@@ -154,32 +154,6 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
   valid_ = true;
 }
 
-ESP32ADC::~ESP32ADC()
-{
-#if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
-  DeinitContinuous();
-#endif
-
-  DeinitCalibration();
-
-  if (oneshot_inited_)
-  {
-    sar_periph_ctrl_adc_oneshot_power_release();
-#if SOC_ADC_DIG_CTRL_SUPPORTED && !SOC_ADC_RTC_CTRL_SUPPORTED
-    adc_apb_periph_free();
-#endif
-    oneshot_inited_ = false;
-  }
-  delete oneshot_hal_;
-  oneshot_hal_ = nullptr;
-
-  delete[] channels_;
-  delete[] channel_ids_;
-  delete[] channel_ready_;
-  delete[] latest_values_;
-  delete[] latest_raw_;
-}
-
 ESP32ADC::Channel& ESP32ADC::GetChannel(uint8_t idx)
 {
   ASSERT(idx < num_channels_);
@@ -347,44 +321,6 @@ bool ESP32ADC::InitCalibration()
   return true;
 #else
   return false;
-#endif
-}
-
-void ESP32ADC::DeinitCalibration()
-{
-#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
-  for (uint8_t i = 0; i < num_channels_; ++i)
-  {
-    if (cali_handles_[i] == nullptr)
-    {
-      continue;
-    }
-
-    const esp_err_t err = adc_cali_delete_scheme_curve_fitting(cali_handles_[i]);
-    ASSERT(err == ESP_OK);
-    cali_handles_[i] = nullptr;
-  }
-#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
-  adc_cali_handle_t handle = nullptr;
-  for (uint8_t i = 0; i < num_channels_; ++i)
-  {
-    if (cali_handles_[i] != nullptr)
-    {
-      handle = cali_handles_[i];
-      break;
-    }
-  }
-
-  if (handle != nullptr)
-  {
-    const esp_err_t err = adc_cali_delete_scheme_line_fitting(handle);
-    ASSERT(err == ESP_OK);
-  }
-
-  for (uint8_t i = 0; i < num_channels_; ++i)
-  {
-    cali_handles_[i] = nullptr;
-  }
 #endif
 }
 

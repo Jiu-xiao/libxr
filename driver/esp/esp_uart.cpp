@@ -50,14 +50,6 @@ uint8_t* ESP32UART::AllocateTxStorage(size_t size)
       heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
 }
 
-void ESP32UART::FreeTxStorage(uint8_t* storage)
-{
-  if (storage != nullptr)
-  {
-    heap_caps_free(storage);
-  }
-}
-
 ErrorCode ESP32UART::ResolveUartPeriph(uart_port_t uart_num, periph_module_t& out)
 {
   switch (uart_num)
@@ -147,21 +139,6 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   }
   ConfigureRxInterruptPath();
 #endif
-}
-
-ESP32UART::~ESP32UART()
-{
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  DeinitDmaBackend();
-#endif
-  RemoveUartIsr();
-  DeinitUartHardware();
-
-  FreeTxStorage(tx_storage_);
-  tx_storage_ = nullptr;
-
-  delete[] rx_isr_buffer_;
-  rx_isr_buffer_ = nullptr;
 }
 
 void ESP32UART::ConfigureRxInterruptPath()
@@ -370,27 +347,6 @@ ErrorCode ESP32UART::InitUartHardware()
   uart_hal_disable_intr_mask(&uart_hal_, UINT32_MAX);
 
   return ErrorCode::OK;
-}
-
-void ESP32UART::DeinitUartHardware()
-{
-  if (!uart_hw_enabled_)
-  {
-    return;
-  }
-
-  periph_module_t uart_module = PERIPH_MODULE_MAX;
-  const bool has_module = ResolveUartPeriph(uart_num_, uart_module) == ErrorCode::OK;
-
-  uart_hal_disable_intr_mask(&uart_hal_, UINT32_MAX);
-  uart_hal_clr_intsts_mask(&uart_hal_, UINT32_MAX);
-  uart_ll_sclk_disable(uart_hal_.dev);
-  if (has_module)
-  {
-    periph_module_disable(uart_module);
-  }
-
-  uart_hw_enabled_ = false;
 }
 
 ErrorCode ESP32UART::ConfigurePins()

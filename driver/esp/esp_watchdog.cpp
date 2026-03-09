@@ -43,12 +43,6 @@ ESP32Watchdog::ESP32Watchdog(uint32_t timeout_ms, uint32_t feed_ms)
   (void)Start();
 }
 
-ESP32Watchdog::~ESP32Watchdog()
-{
-  (void)Stop();
-  ReleaseHardware();
-}
-
 bool ESP32Watchdog::IsInstanceSupported(wdt_inst_t instance)
 {
   switch (instance)
@@ -101,34 +95,6 @@ ErrorCode ESP32Watchdog::InitializeHardware()
   wdt_hal_init(&hal_, instance_, prescaler, false);
   initialized_ = true;
   return ErrorCode::OK;
-}
-
-void ESP32Watchdog::ReleaseHardware()
-{
-  if (!initialized_)
-  {
-    return;
-  }
-
-  wdt_hal_deinit(&hal_);
-
-  if (instance_ != WDT_RWDT)
-  {
-    int group_id = 0;
-    periph_module_t periph = PERIPH_TIMG0_MODULE;
-    if (GetMwdtGroupInfo(instance_, &group_id, &periph))
-    {
-      PERIPH_RCC_RELEASE_ATOMIC(periph, ref_count)
-      {
-        if (ref_count == 0)
-        {
-          timer_ll_enable_bus_clock(group_id, false);
-        }
-      }
-    }
-  }
-
-  initialized_ = false;
 }
 
 ErrorCode ESP32Watchdog::ApplyConfiguration()

@@ -166,14 +166,12 @@ ErrorCode ESP32UART::InitDmaBackend()
   };
   if (gdma_new_ahb_channel(&tx_cfg, &tx_dma_channel_) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
   if (gdma_connect(tx_dma_channel_, GDMA_MAKE_TRIGGER(GDMA_TRIG_PERIPH_UHCI, 0)) !=
       ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
@@ -183,7 +181,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   };
   if (gdma_config_transfer(tx_dma_channel_, &transfer_cfg) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
@@ -192,7 +189,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   if (gdma_get_alignment_constraints(tx_dma_channel_, &tx_int_alignment,
                                      &tx_ext_alignment) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
   tx_dma_alignment_ = std::max<size_t>(1, std::max(tx_int_alignment, tx_ext_alignment));
@@ -204,7 +200,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   };
   if (gdma_apply_strategy(tx_dma_channel_, &tx_strategy) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
@@ -220,7 +215,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     if (gdma_new_link_list(&tx_link_cfg, &tx_dma_links_[i]) != ESP_OK)
     {
-      DeinitDmaBackend();
       return ErrorCode::INIT_ERR;
     }
 
@@ -238,14 +232,12 @@ ErrorCode ESP32UART::InitDmaBackend()
 
     if (gdma_link_mount_buffers(tx_dma_links_[i], 0, &tx_mount, 1, nullptr) != ESP_OK)
     {
-      DeinitDmaBackend();
       return ErrorCode::INIT_ERR;
     }
 
     tx_dma_head_addr_[i] = gdma_link_get_head_addr(tx_dma_links_[i]);
     if (tx_dma_head_addr_[i] == 0U)
     {
-      DeinitDmaBackend();
       return ErrorCode::INIT_ERR;
     }
   }
@@ -256,7 +248,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   };
   if (gdma_register_tx_event_callbacks(tx_dma_channel_, &tx_callbacks, this) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
@@ -267,20 +258,17 @@ ErrorCode ESP32UART::InitDmaBackend()
   };
   if (gdma_new_ahb_channel(&rx_cfg, &rx_dma_channel_) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
   if (gdma_connect(rx_dma_channel_, GDMA_MAKE_TRIGGER(GDMA_TRIG_PERIPH_UHCI, 0)) !=
       ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
   if (gdma_config_transfer(rx_dma_channel_, &transfer_cfg) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
@@ -289,7 +277,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   if (gdma_get_alignment_constraints(rx_dma_channel_, &rx_int_alignment,
                                      &rx_ext_alignment) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
   rx_dma_alignment_ = std::max<size_t>(1, std::max(rx_int_alignment, rx_ext_alignment));
@@ -301,7 +288,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   };
   if (gdma_new_link_list(&rx_link_cfg, &rx_dma_link_) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
@@ -319,7 +305,6 @@ ErrorCode ESP32UART::InitDmaBackend()
                               MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
   if (rx_dma_storage_ == nullptr)
   {
-    DeinitDmaBackend();
     return ErrorCode::NO_MEM;
   }
 
@@ -342,7 +327,6 @@ ErrorCode ESP32UART::InitDmaBackend()
   if (gdma_link_mount_buffers(rx_dma_link_, 0, rx_mount.data(), kDmaRxNodeCount,
                               nullptr) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
@@ -353,85 +337,22 @@ ErrorCode ESP32UART::InitDmaBackend()
   };
   if (gdma_register_rx_event_callbacks(rx_dma_channel_, &rx_callbacks, this) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
   if (gdma_reset(rx_dma_channel_) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
   if (gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_)) != ESP_OK)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
   rx_dma_node_index_ = 0;
   dma_backend_enabled_ = true;
   return ErrorCode::OK;
-}
-
-void ESP32UART::DeinitDmaBackend()
-{
-  if (tx_dma_channel_ != nullptr)
-  {
-    gdma_stop(tx_dma_channel_);
-  }
-  if (rx_dma_channel_ != nullptr)
-  {
-    gdma_stop(rx_dma_channel_);
-  }
-
-  if (tx_dma_channel_ != nullptr)
-  {
-    gdma_disconnect(tx_dma_channel_);
-    gdma_del_channel(tx_dma_channel_);
-    tx_dma_channel_ = nullptr;
-  }
-  if (rx_dma_channel_ != nullptr)
-  {
-    gdma_disconnect(rx_dma_channel_);
-    gdma_del_channel(rx_dma_channel_);
-    rx_dma_channel_ = nullptr;
-  }
-
-  for (int i = 0; i < 2; ++i)
-  {
-    if (tx_dma_links_[i] != nullptr)
-    {
-      gdma_del_link_list(tx_dma_links_[i]);
-      tx_dma_links_[i] = nullptr;
-    }
-    tx_dma_head_addr_[i] = 0U;
-    tx_dma_buffer_addr_[i] = nullptr;
-  }
-  if (rx_dma_link_ != nullptr)
-  {
-    gdma_del_link_list(rx_dma_link_);
-    rx_dma_link_ = nullptr;
-  }
-
-  if (rx_dma_storage_ != nullptr)
-  {
-    heap_caps_free(rx_dma_storage_);
-    rx_dma_storage_ = nullptr;
-  }
-
-  if (uhci_hal_.dev != nullptr)
-  {
-    uhci_hal_deinit(&uhci_hal_);
-    periph_module_disable(PERIPH_UHCI0_MODULE);
-  }
-
-  dma_backend_enabled_ = false;
-  tx_dma_alignment_ = 1;
-  rx_dma_alignment_ = 1;
-  rx_dma_chunk_size_ = 0;
-  rx_dma_node_count_ = 0;
-  rx_dma_node_index_ = 0;
 }
 
 bool IRAM_ATTR ESP32UART::StartDmaTx()

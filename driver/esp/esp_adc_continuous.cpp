@@ -119,23 +119,6 @@ void ESP32ADC::DrainContinuousFrames(uint32_t timeout_ms)
   }
 }
 
-void ESP32ADC::DeinitContinuous()
-{
-  if (continuous_handle_ != nullptr)
-  {
-    (void)adc_continuous_stop(continuous_handle_);
-    (void)adc_continuous_deinit(continuous_handle_);
-    continuous_handle_ = nullptr;
-  }
-
-  delete[] continuous_parsed_buf_;
-  continuous_parsed_buf_ = nullptr;
-  delete[] continuous_read_buf_;
-  continuous_read_buf_ = nullptr;
-  continuous_frame_size_ = 0U;
-  continuous_prime_timeout_ms_ = 0U;
-}
-
 ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
                                                         size_t dma_buf_size)
 {
@@ -143,12 +126,6 @@ ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
   {
     return ContinuousInitResult::UNSUPPORTED;
   }
-
-  auto fail = [&]() -> ContinuousInitResult
-  {
-    DeinitContinuous();
-    return ContinuousInitResult::FAILED;
-  };
 
   const uint32_t sample_freq = ClampSampleFreq(freq);
   const uint32_t min_frame =
@@ -166,7 +143,7 @@ ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
   ASSERT((continuous_read_buf_ != nullptr) && (continuous_parsed_buf_ != nullptr));
   if ((continuous_read_buf_ == nullptr) || (continuous_parsed_buf_ == nullptr))
   {
-    return fail();
+    return ContinuousInitResult::FAILED;
   }
 
   adc_continuous_handle_cfg_t handle_cfg = {};
@@ -175,14 +152,14 @@ ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
   handle_cfg.flags.flush_pool = 1U;
   if (adc_continuous_new_handle(&handle_cfg, &continuous_handle_) != ESP_OK)
   {
-    return fail();
+    return ContinuousInitResult::FAILED;
   }
 
   std::array<adc_digi_pattern_config_t, SOC_ADC_PATT_LEN_MAX> patterns = {};
   ASSERT(num_channels_ <= patterns.size());
   if (num_channels_ > patterns.size())
   {
-    return fail();
+    return ContinuousInitResult::FAILED;
   }
 
   for (uint8_t i = 0; i < num_channels_; ++i)
@@ -206,12 +183,12 @@ ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
   config.format = ResolveContinuousFormat();
   if (adc_continuous_config(continuous_handle_, &config) != ESP_OK)
   {
-    return fail();
+    return ContinuousInitResult::FAILED;
   }
 
   if (adc_continuous_start(continuous_handle_) != ESP_OK)
   {
-    return fail();
+    return ContinuousInitResult::FAILED;
   }
 
   continuous_frame_size_ = frame_size;

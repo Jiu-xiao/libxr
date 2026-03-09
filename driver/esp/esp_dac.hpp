@@ -41,15 +41,6 @@ class ESP32DAC : public DAC
 #endif
   }
 
-  ~ESP32DAC()
-  {
-#if SOC_DAC_SUPPORTED
-    if (ready_)
-    {
-      dac_ll_power_down(ToChannel(channel_id_));
-    }
-#endif
-  }
 
   ErrorCode Write(float voltage) override
   {

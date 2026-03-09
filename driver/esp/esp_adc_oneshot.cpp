@@ -26,22 +26,6 @@ bool ESP32ADC::InitOneshot()
     return false;
   }
 
-  auto fail = [&]() -> bool
-  {
-    if (oneshot_inited_)
-    {
-      sar_periph_ctrl_adc_oneshot_power_release();
-#if SOC_ADC_DIG_CTRL_SUPPORTED && !SOC_ADC_RTC_CTRL_SUPPORTED
-      adc_apb_periph_free();
-#endif
-      oneshot_inited_ = false;
-    }
-
-    delete oneshot_hal_;
-    oneshot_hal_ = nullptr;
-    return false;
-  };
-
   oneshot_hal_ = new (std::nothrow) adc_oneshot_hal_ctx_t{};
   ASSERT(oneshot_hal_ != nullptr);
   if (oneshot_hal_ == nullptr)
@@ -64,7 +48,7 @@ bool ESP32ADC::InitOneshot()
                                    ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
                                    &unit_cfg.clk_src_freq_hz) != ESP_OK)
   {
-    return fail();
+    return false;
   }
   adc_apb_periph_claim();
 #endif
@@ -89,7 +73,7 @@ bool ESP32ADC::InitOneshot()
     ASSERT(IsValidChannel(channel_ids_[i]));
     if (!IsValidChannel(channel_ids_[i]))
     {
-      return fail();
+      return false;
     }
 
     portENTER_CRITICAL(&rtc_spinlock);

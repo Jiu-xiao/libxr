@@ -140,16 +140,6 @@ ESP32WifiClient::ESP32WifiClient()
   init_ok_ = true;
 }
 
-ESP32WifiClient::~ESP32WifiClient()
-{
-  if (enabled_)
-  {
-    Disable();
-  }
-
-  UnregisterHandlers();
-}
-
 bool ESP32WifiClient::Enable()
 {
   if (enabled_) return true;

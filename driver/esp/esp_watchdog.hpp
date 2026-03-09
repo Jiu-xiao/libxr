@@ -46,7 +46,6 @@ class ESP32Watchdog : public Watchdog
 {
  public:
   explicit ESP32Watchdog(uint32_t timeout_ms = 1000, uint32_t feed_ms = 250);
-  ~ESP32Watchdog() override;
 
   ErrorCode SetConfig(const Configuration& config) override;
   ErrorCode Feed() override;
@@ -57,7 +56,6 @@ class ESP32Watchdog : public Watchdog
   static bool IsInstanceSupported(wdt_inst_t instance);
   ErrorCode InitializeHardware();
   ErrorCode ApplyConfiguration();
-  void ReleaseHardware();
 
   wdt_hal_context_t hal_{};
   const wdt_inst_t instance_ = kESP32WatchdogDefaultInstance;

@@ -142,14 +142,12 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
   if (ConfigurePins() != ErrorCode::OK)
   {
     ASSERT(false);
-    DeinitializeHardware();
     return;
   }
 
   if (InstallInterrupt() != ErrorCode::OK)
   {
     ASSERT(false);
-    DeinitializeHardware();
     return;
   }
 
@@ -159,7 +157,6 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
     ASSERT(dma_ans == ErrorCode::OK);
     if (dma_ans != ErrorCode::OK)
     {
-      DeinitializeHardware();
       return;
     }
   }
@@ -167,12 +164,9 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
   if (SetConfig(config) != ErrorCode::OK)
   {
     ASSERT(false);
-    DeinitializeHardware();
     return;
   }
 }
-
-ESP32SPI::~ESP32SPI() { DeinitializeHardware(); }
 
 bool ESP32SPI::Acquire()
 {
@@ -242,32 +236,6 @@ ErrorCode ESP32SPI::InitializeHardware()
   spi_ll_clear_int_stat(hw_);
   initialized_ = true;
   return ErrorCode::OK;
-}
-
-void ESP32SPI::DeinitializeHardware()
-{
-  DeinitDmaBackend();
-  RemoveInterrupt();
-
-  if (!initialized_)
-  {
-    return;
-  }
-
-  ASSERT(!busy_.load(std::memory_order_acquire));
-
-  spi_ll_disable_int(hw_);
-  spi_ll_clear_int_stat(hw_);
-  spi_ll_enable_clock(host_, false);
-  PERIPH_RCC_ATOMIC()
-  {
-    (void)__DECLARE_RCC_ATOMIC_ENV;
-    spi_ll_enable_bus_clock(host_, false);
-  }
-
-  initialized_ = false;
-  hw_ = nullptr;
-  source_clock_hz_ = 0;
 }
 
 ErrorCode ESP32SPI::ConfigurePins()
@@ -348,16 +316,6 @@ ErrorCode ESP32SPI::InstallInterrupt()
   return ErrorCode::OK;
 }
 
-void ESP32SPI::RemoveInterrupt()
-{
-  if (intr_handle_ != nullptr)
-  {
-    esp_intr_free(intr_handle_);
-    intr_handle_ = nullptr;
-  }
-  intr_installed_ = false;
-}
-
 ErrorCode ESP32SPI::InitDmaBackend()
 {
   if (dma_enabled_)
@@ -388,34 +346,10 @@ ErrorCode ESP32SPI::InitDmaBackend()
 
   if (dma_max_transfer_bytes_ == 0U)
   {
-    DeinitDmaBackend();
     return ErrorCode::INIT_ERR;
   }
 
   return ErrorCode::OK;
-}
-
-void ESP32SPI::DeinitDmaBackend()
-{
-  spi_dma_ctx_t* ctx = ToDmaCtx(dma_ctx_);
-  if (ctx != nullptr)
-  {
-    if (ctx->dmadesc_tx != nullptr)
-    {
-      std::free(ctx->dmadesc_tx);
-      ctx->dmadesc_tx = nullptr;
-    }
-    if (ctx->dmadesc_rx != nullptr)
-    {
-      std::free(ctx->dmadesc_rx);
-      ctx->dmadesc_rx = nullptr;
-    }
-    (void)spicommon_dma_chan_free(ctx);
-  }
-
-  dma_ctx_ = nullptr;
-  dma_enabled_ = false;
-  dma_max_transfer_bytes_ = 0U;
 }
 
 void IRAM_ATTR ESP32SPI::SpiIsrEntry(void* arg)

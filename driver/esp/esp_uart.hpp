@@ -36,7 +36,6 @@ class ESP32UART : public UART
             UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1},
             bool enable_dma = true);
 
-  ~ESP32UART();
 
   ErrorCode SetConfig(UART::Configuration config) override;
 
@@ -49,7 +48,6 @@ class ESP32UART : public UART
  private:
   static uint8_t* AllocateTxStorage(size_t size);
 
-  static void FreeTxStorage(uint8_t* storage);
 
   static ErrorCode ResolveUartPeriph(uart_port_t uart_num, periph_module_t& out);
 
@@ -81,20 +79,17 @@ class ESP32UART : public UART
 
   ErrorCode InitUartHardware();
 
-  void DeinitUartHardware();
 
   ErrorCode ConfigurePins();
 
   ErrorCode InstallUartIsr();
 
-  void RemoveUartIsr();
 
   void ConfigureRxInterruptPath();
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   ErrorCode InitDmaBackend();
 
-  void DeinitDmaBackend();
 
   bool StartDmaTx();
 
