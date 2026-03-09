@@ -1,49 +1,46 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include "driver/ledc.h"
 #include "esp_err.h"
+#include "hal/ledc_hal.h"
 #include "pwm.hpp"
 
 namespace LibXR
 {
 
-/**
- * @brief ESP32 PWM 驱动实现 / ESP32 PWM driver implementation
- */
+/** @brief ESP32 PWM driver implementation. */
 class ESP32PWM : public PWM
 {
  public:
-  /**
-   * @brief 构造 PWM 通道对象 / Construct PWM channel object
-   *
-   * @param gpio_num GPIO 编号 / GPIO number
-   * @param channel LEDC 通道 / LEDC channel
-   * @param timer LEDC 定时器 / LEDC timer
-   * @param resolution 占空比分辨率 / Duty resolution
-   */
+  /** @brief Construct a PWM channel object. */
   ESP32PWM(int gpio_num, ledc_channel_t channel, ledc_timer_t timer = LEDC_TIMER_0,
            ledc_timer_bit_t resolution = static_cast<ledc_timer_bit_t>(
-               (static_cast<uint8_t>(LEDC_TIMER_BIT_MAX) - 1)))
+               static_cast<uint8_t>(LEDC_TIMER_BIT_MAX) - 1))
       : gpio_num_(gpio_num),
         channel_(channel),
         timer_(timer),
+        speed_mode_(LEDC_LOW_SPEED_MODE),
         resolution_(resolution),
-        max_duty_((1 << resolution) - 1)
+        max_duty_((1U << static_cast<uint8_t>(resolution_)) - 1U)
   {
+    ledc_hal_init(&hal_, speed_mode_);
+
     ledc_channel_config_t channel_conf = {};
     channel_conf.gpio_num = gpio_num_;
-    channel_conf.speed_mode = static_cast<ledc_mode_t>(0);
+    channel_conf.speed_mode = speed_mode_;
     channel_conf.channel = channel_;
     channel_conf.intr_type = LEDC_INTR_DISABLE;
     channel_conf.timer_sel = timer_;
     channel_conf.duty = 0;
     channel_conf.hpoint = 0;
 
-    auto err = ledc_channel_config(&channel_conf);
+    const esp_err_t err = ledc_channel_config(&channel_conf);
     if (err != ESP_OK)
     {
       ASSERT(false);
-    };
+    }
   }
 
   ErrorCode SetDutyCycle(float value) override
@@ -57,12 +54,11 @@ class ESP32PWM : public PWM
       value = 1.0f;
     }
 
-    uint32_t duty = static_cast<uint32_t>(max_duty_ * value);
-    esp_err_t err = ledc_set_duty(static_cast<ledc_mode_t>(0), channel_, duty);
-    if (err != ESP_OK) return ErrorCode::FAILED;
-
-    err = ledc_update_duty(static_cast<ledc_mode_t>(0), channel_);
-    return (err == ESP_OK) ? ErrorCode::OK : ErrorCode::FAILED;
+    const uint32_t duty = static_cast<uint32_t>(max_duty_ * value);
+    ledc_hal_set_duty_int_part(&hal_, channel_, duty);
+    ledc_hal_set_duty_start(&hal_, channel_);
+    ledc_hal_ls_channel_update(&hal_, channel_);
+    return ErrorCode::OK;
   }
 
   ErrorCode SetConfig(Configuration config) override
@@ -72,38 +68,55 @@ class ESP32PWM : public PWM
       return ErrorCode::ARG_ERR;
     }
 
-    ledc_timer_config_t timer_conf = {};
-    timer_conf.speed_mode = static_cast<ledc_mode_t>(0);
-    timer_conf.duty_resolution = resolution_;
-    timer_conf.timer_num = timer_;
-    timer_conf.freq_hz = config.frequency;
-    timer_conf.clk_cfg = LEDC_AUTO_CLK;
+    for (int bits = static_cast<int>(resolution_);
+         bits >= static_cast<int>(LEDC_TIMER_1_BIT); --bits)
+    {
+      ledc_timer_config_t timer_conf = {};
+      timer_conf.speed_mode = speed_mode_;
+      timer_conf.duty_resolution = static_cast<ledc_timer_bit_t>(bits);
+      timer_conf.timer_num = timer_;
+      timer_conf.freq_hz = config.frequency;
+      timer_conf.clk_cfg = LEDC_AUTO_CLK;
 
-    esp_err_t err = ledc_timer_config(&timer_conf);
-    if (err != ESP_OK) return ErrorCode::INIT_ERR;
+      if (ledc_timer_config(&timer_conf) != ESP_OK)
+      {
+        continue;
+      }
 
-    max_duty_ = (1 << resolution_) - 1;
-    return ErrorCode::OK;
+      resolution_ = static_cast<ledc_timer_bit_t>(bits);
+      ledc_hal_bind_channel_timer(&hal_, channel_, timer_);
+      ledc_hal_ls_timer_update(&hal_, timer_);
+      max_duty_ = (1U << static_cast<uint8_t>(resolution_)) - 1U;
+      return ErrorCode::OK;
+    }
+
+    return ErrorCode::INIT_ERR;
   }
 
   ErrorCode Enable() override
   {
-    esp_err_t err = ledc_update_duty(static_cast<ledc_mode_t>(0), channel_);
-    return (err == ESP_OK) ? ErrorCode::OK : ErrorCode::FAILED;
+    ledc_hal_set_sig_out_en(&hal_, channel_, true);
+    ledc_hal_ls_channel_update(&hal_, channel_);
+    return ErrorCode::OK;
   }
 
   ErrorCode Disable() override
   {
-    esp_err_t err = ledc_stop(static_cast<ledc_mode_t>(0), channel_, 0);
-    return (err == ESP_OK) ? ErrorCode::OK : ErrorCode::FAILED;
+    ledc_hal_set_idle_level(&hal_, channel_, 0);
+    ledc_hal_set_sig_out_en(&hal_, channel_, false);
+    ledc_hal_ls_channel_update(&hal_, channel_);
+    return ErrorCode::OK;
   }
 
  private:
   int gpio_num_;
   ledc_channel_t channel_;
   ledc_timer_t timer_;
+  ledc_mode_t speed_mode_;
+  ledc_hal_context_t hal_{};
   ledc_timer_bit_t resolution_;
   uint32_t max_duty_;
 };
 
 }  // namespace LibXR
+

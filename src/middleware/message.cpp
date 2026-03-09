@@ -366,13 +366,15 @@ void Topic::PackData(uint32_t topic_name_crc32, RawData buffer, RawData source)
 
 Topic::TopicHandle Topic::WaitTopic(const char* name, uint32_t timeout, Domain* domain)
 {
+  const uint32_t start_time = Thread::GetTime();
   TopicHandle topic = nullptr;
   do
   {
     topic = Find(name, domain);
     if (topic == nullptr)
     {
-      if (timeout <= Thread::GetTime())
+      if (timeout != UINT32_MAX &&
+          static_cast<uint32_t>(Thread::GetTime() - start_time) >= timeout)
       {
         return nullptr;
       }

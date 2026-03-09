@@ -5,6 +5,7 @@
 #include <cerrno>
 
 #include "libxr_def.hpp"
+#include "timebase.hpp"
 
 using namespace LibXR;
 
@@ -40,11 +41,7 @@ void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to
 
 uint32_t Thread::GetTime()
 {
-  struct timeval tv;
-  gettimeofday(&tv, nullptr);
-  return ((tv.tv_sec - libxr_linux_start_time.tv_sec) * 1000 +
-          (tv.tv_usec - libxr_linux_start_time.tv_usec) / 1000) %
-         UINT32_MAX;
+  return Timebase::GetMilliseconds();
 }
 
 void Thread::Yield() { sched_yield(); }
