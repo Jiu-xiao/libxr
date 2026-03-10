@@ -328,24 +328,7 @@ class JtagGeneralGPIO final : public Jtag
 
     if (half_period_loops_ == 0u)
     {
-      for (uint32_t i = 0; i < cycles; ++i)
-      {
-        const bool TDI_VAL =
-            (tdi_lsb_first == nullptr)
-                ? false
-                : (((tdi_lsb_first[i / 8u] >> (i & 7u)) & 0x1u) != 0u);
-
-        tdi_.Write(TDI_VAL);
-        tck_.Write(true);
-
-        if (tdo_lsb_first != nullptr && tdo_.Read())
-        {
-          tdo_lsb_first[i / 8u] =
-              static_cast<uint8_t>(tdo_lsb_first[i / 8u] | (1u << (i & 7u)));
-        }
-
-        tck_.Write(false);
-      }
+      SequenceFastNoDelay(cycles, tdi_lsb_first, tdo_lsb_first);
       return;
     }
 
@@ -369,6 +352,157 @@ class JtagGeneralGPIO final : public Jtag
 
       DelayHalf();
       tck_.Write(false);
+    }
+  }
+
+  void SequenceFastNoDelay(uint32_t cycles, const uint8_t* tdi_lsb_first,
+                           uint8_t* tdo_lsb_first)
+  {
+    if (tdi_lsb_first == nullptr)
+    {
+      tdi_.Write(false);
+      if (tdo_lsb_first == nullptr)
+      {
+        SequenceFastNoDelayDriveZero(cycles);
+      }
+      else
+      {
+        SequenceFastNoDelayReadOnly(cycles, tdo_lsb_first);
+      }
+      return;
+    }
+
+    if (tdo_lsb_first == nullptr)
+    {
+      SequenceFastNoDelayWriteOnly(cycles, tdi_lsb_first);
+    }
+    else
+    {
+      SequenceFastNoDelayReadWrite(cycles, tdi_lsb_first, tdo_lsb_first);
+    }
+  }
+
+  void SequenceFastNoDelayDriveZero(uint32_t cycles)
+  {
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      tck_.Write(true);
+      tck_.Write(false);
+    }
+  }
+
+  void SequenceFastNoDelayReadOnly(uint32_t cycles, uint8_t* tdo_lsb_first)
+  {
+    uint8_t* out = tdo_lsb_first;
+    uint8_t out_mask = 0x01u;
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      tck_.Write(true);
+      if (tdo_.Read())
+      {
+        *out = static_cast<uint8_t>(*out | out_mask);
+      }
+      tck_.Write(false);
+
+      if (out_mask == 0x80u)
+      {
+        out_mask = 0x01u;
+        ++out;
+      }
+      else
+      {
+        out_mask = static_cast<uint8_t>(out_mask << 1u);
+      }
+    }
+  }
+
+  void SequenceFastNoDelayWriteOnly(uint32_t cycles, const uint8_t* tdi_lsb_first)
+  {
+    const uint8_t* in = tdi_lsb_first;
+    uint8_t in_byte = *in;
+    uint8_t in_mask = 0x01u;
+    bool current_tdi = (in_byte & in_mask) != 0u;
+    tdi_.Write(current_tdi);
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      const bool tdi_val = (in_byte & in_mask) != 0u;
+      if (tdi_val != current_tdi)
+      {
+        current_tdi = tdi_val;
+        tdi_.Write(current_tdi);
+      }
+
+      tck_.Write(true);
+      tck_.Write(false);
+
+      if (in_mask == 0x80u)
+      {
+        in_mask = 0x01u;
+        ++in;
+        if ((i + 1u) < cycles)
+        {
+          in_byte = *in;
+        }
+      }
+      else
+      {
+        in_mask = static_cast<uint8_t>(in_mask << 1u);
+      }
+    }
+  }
+
+  void SequenceFastNoDelayReadWrite(uint32_t cycles, const uint8_t* tdi_lsb_first,
+                                    uint8_t* tdo_lsb_first)
+  {
+    const uint8_t* in = tdi_lsb_first;
+    uint8_t in_byte = *in;
+    uint8_t in_mask = 0x01u;
+    uint8_t* out = tdo_lsb_first;
+    uint8_t out_mask = 0x01u;
+    bool current_tdi = (in_byte & in_mask) != 0u;
+    tdi_.Write(current_tdi);
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      const bool tdi_val = (in_byte & in_mask) != 0u;
+      if (tdi_val != current_tdi)
+      {
+        current_tdi = tdi_val;
+        tdi_.Write(current_tdi);
+      }
+
+      tck_.Write(true);
+      if (tdo_.Read())
+      {
+        *out = static_cast<uint8_t>(*out | out_mask);
+      }
+      tck_.Write(false);
+
+      if (in_mask == 0x80u)
+      {
+        in_mask = 0x01u;
+        ++in;
+        if ((i + 1u) < cycles)
+        {
+          in_byte = *in;
+        }
+      }
+      else
+      {
+        in_mask = static_cast<uint8_t>(in_mask << 1u);
+      }
+
+      if (out_mask == 0x80u)
+      {
+        out_mask = 0x01u;
+        ++out;
+      }
+      else
+      {
+        out_mask = static_cast<uint8_t>(out_mask << 1u);
+      }
     }
   }
 
