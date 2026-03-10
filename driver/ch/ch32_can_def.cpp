@@ -1,3 +1,4 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_can_def.hpp"
 
 ch32_can_id_t CH32_CAN_GetID(CAN_TypeDef* addr)
@@ -39,3 +40,5 @@ CAN_TypeDef* CH32_CAN_GetInstanceID(ch32_can_id_t id)
       return nullptr;
   }
 }
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

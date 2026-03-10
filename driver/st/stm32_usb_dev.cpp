@@ -4,7 +4,7 @@
 
 using namespace LibXR;
 
-stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef *hpcd)
+stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd)
 {
   for (int i = 0; i < STM32_USB_DEV_ID_NUM; i++)
   {
@@ -16,9 +16,9 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef *hpcd)
   return STM32_USB_DEV_ID_NUM;
 }
 
-extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }
+extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef* hpcd) { UNUSED(hpcd); }
 
-extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
+extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -39,10 +39,10 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
   usb->GetEndpoint0In()->SetState(USB::Endpoint::State::IDLE);
   usb->GetEndpoint0Out()->SetState(USB::Endpoint::State::IDLE);
 
-  usb->OnSetupPacket(true, reinterpret_cast<USB::SetupPacket *>(hpcd->Setup));
+  usb->OnSetupPacket(true, reinterpret_cast<USB::SetupPacket*>(hpcd->Setup));
 }
 
-extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
+extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -59,7 +59,7 @@ extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
   usb->Init(true);
 }
 
-extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
+extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -74,7 +74,7 @@ extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
   usb->Deinit(true);
 }
 
-extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
+extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -89,20 +89,20 @@ extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
   usb->Init(true);
 }
 
-extern "C" void HAL_PCD_ConnectCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }
+extern "C" void HAL_PCD_ConnectCallback(PCD_HandleTypeDef* hpcd) { UNUSED(hpcd); }
 
-extern "C" void HAL_PCD_DisconnectCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }
+extern "C" void HAL_PCD_DisconnectCallback(PCD_HandleTypeDef* hpcd) { UNUSED(hpcd); }
 
 #if (defined(USB_OTG_FS))
 
 STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
-    PCD_HandleTypeDef *hpcd, size_t rx_fifo_size,
+    PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
     const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
     const std::initializer_list<EPInConfig> TX_EP_CFGS,
     USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
     uint16_t bcd,
-    const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
+    const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS,
     ConstRawData uid)
     : STM32USBDevice(hpcd, STM32_USB_OTG_FS, RX_EP_CFGS.size() + TX_EP_CFGS.size(),
@@ -174,13 +174,13 @@ ErrorCode STM32USBDeviceOtgFS::SetAddress(uint8_t address,
 #if (defined(USB_OTG_HS))
 
 STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
-    PCD_HandleTypeDef *hpcd, size_t rx_fifo_size,
+    PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
     const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
     const std::initializer_list<EPInConfig> TX_EP_CFGS,
     USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
     uint16_t bcd,
-    const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
+    const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS,
     ConstRawData uid)
     : STM32USBDevice(
@@ -253,11 +253,11 @@ ErrorCode STM32USBDeviceOtgHS::SetAddress(uint8_t address,
 
 #if defined(USB_BASE)
 STM32USBDeviceDevFs::STM32USBDeviceDevFs(
-    PCD_HandleTypeDef *hpcd, const std::initializer_list<EPConfig> EP_CFGS,
+    PCD_HandleTypeDef* hpcd, const std::initializer_list<EPConfig> EP_CFGS,
     USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
     uint16_t bcd,
-    const std::initializer_list<const USB::DescriptorStrings::LanguagePack *> LANG_LIST,
-    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem *>>
+    const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS,
     ConstRawData uid)
     : STM32USBDevice(hpcd, STM32_USB_FS_DEV, EP_CFGS.size() * 2, packet_size, vid, pid,

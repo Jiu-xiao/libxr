@@ -24,7 +24,7 @@ class Event
    *        Pointer to the callback list, safe to use in ISR after acquired in
    * non-interrupt context.
    */
-  using CallbackList = LockFreeList *;
+  using CallbackList = LockFreeList*;
 
   /**
    * @brief 构造函数，初始化用于存储事件的红黑树。
@@ -42,7 +42,7 @@ class Event
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  void Register(uint32_t event, const Callback &cb);
+  void Register(uint32_t event, const Callback& cb);
 
   /**
    * @brief 触发与特定事件关联的所有回调函数（非中断上下文）。
@@ -84,7 +84,7 @@ class Event
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  void Bind(Event &sources, uint32_t source_event, uint32_t target_event);
+  void Bind(Event& sources, uint32_t source_event, uint32_t target_event);
 
  private:
   /**

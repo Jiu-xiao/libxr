@@ -150,7 +150,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
     Memory::FastCopy(flash_word_buffer, src + written, chunk_size);
 
     if (Memory::FastCmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
-               chunk_size) == 0)
+                        chunk_size) == 0)
     {
       written += chunk_size;
       continue;
@@ -172,7 +172,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
     size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);
 
     if (Memory::FastCmp(reinterpret_cast<const uint8_t*>(addr + written), src + written,
-               chunk_size) == 0)
+                        chunk_size) == 0)
     {
       written += chunk_size;
       continue;

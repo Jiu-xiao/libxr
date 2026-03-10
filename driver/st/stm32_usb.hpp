@@ -10,6 +10,9 @@
 
 #if defined(HAL_PCD_MODULE_ENABLED)
 
+/**
+ * @brief STM32 USB 设备编号 / STM32 USB device identifier
+ */
 typedef enum : uint8_t
 {
 #if (defined(USB_BASE))

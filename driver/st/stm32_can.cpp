@@ -200,8 +200,8 @@ ErrorCode STM32CAN::SetConfig(const CAN::Configuration& cfg)
 
   const auto& bt = cfg.bit_timing;
 
-  // ====== 范围校验（0 表示“保持原值”，跳过检查） ======
-  // 最大值从掩码推出来，避免硬编码
+  // 参数范围校验（0 表示保留原值）。
+  // Derive field maxima from masks instead of hard-coded constants.
   constexpr uint32_t BRP_FIELD_MAX =
       (CAN_BTR_BRP_Msk >> CAN_BTR_BRP_Pos);  // 存的是 brp-1
   constexpr uint32_t TS1_FIELD_MAX =
@@ -464,7 +464,8 @@ void STM32CAN::TxService()
       txMailbox = mailbox;
     }
 
-    // 按你的要求：先解锁
+    // 先解锁，再检查是否仍有待处理发送请求。
+    // Release lock first, then check whether pending TX work remains.
     tx_lock_.store(0u, std::memory_order_release);
 
     // 再看是否还有 pend：若没有，直接退出

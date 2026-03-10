@@ -86,13 +86,13 @@ class GsUsbClass : public DeviceClass
    * @param database 数据库存储（可选，用于 USER_ID） / Database storage (optional, used
    * by USER_ID)
    */
-  GsUsbClass(std::initializer_list<LibXR::CAN *> cans,
+  GsUsbClass(std::initializer_list<LibXR::CAN*> cans,
              Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP1,
              Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP2,
              size_t rx_queue_size = 32, size_t echo_queue_size = 32,
-             LibXR::GPIO *identify_gpio = nullptr,
-             std::initializer_list<LibXR::GPIO *> termination_gpios = {},
-             LibXR::Database *database = nullptr)
+             LibXR::GPIO* identify_gpio = nullptr,
+             std::initializer_list<LibXR::GPIO*> termination_gpios = {},
+             LibXR::Database* database = nullptr)
       : data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
         identify_gpio_(identify_gpio),
@@ -102,7 +102,7 @@ class GsUsbClass : public DeviceClass
   {
     ASSERT(cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
-    for (auto *p : cans)
+    for (auto* p : cans)
     {
       cans_[i++] = p;
     }
@@ -115,7 +115,7 @@ class GsUsbClass : public DeviceClass
     {
       ASSERT(termination_gpios.size() == CAN_CH_NUM);
       i = 0;
-      for (auto *g : termination_gpios)
+      for (auto* g : termination_gpios)
       {
         termination_gpios_[i++] = g;
       }
@@ -140,13 +140,13 @@ class GsUsbClass : public DeviceClass
    * @param database 数据库存储（可选，用于 USER_ID） / Database storage (optional, used
    * by USER_ID)
    */
-  GsUsbClass(std::initializer_list<LibXR::FDCAN *> fd_cans,
+  GsUsbClass(std::initializer_list<LibXR::FDCAN*> fd_cans,
              Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
              Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
              size_t rx_queue_size = 32, size_t echo_queue_size = 32,
-             LibXR::GPIO *identify_gpio = nullptr,
-             std::initializer_list<LibXR::GPIO *> termination_gpios = {},
-             LibXR::Database *database = nullptr)
+             LibXR::GPIO* identify_gpio = nullptr,
+             std::initializer_list<LibXR::GPIO*> termination_gpios = {},
+             LibXR::Database* database = nullptr)
       : fd_supported_(true),
         data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
@@ -157,7 +157,7 @@ class GsUsbClass : public DeviceClass
   {
     ASSERT(fd_cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
-    for (auto *p : fd_cans)
+    for (auto* p : fd_cans)
     {
       fdcans_[i] = p;
       cans_[i] = p;  // 向上转 CAN* / Upcast to CAN*
@@ -172,7 +172,7 @@ class GsUsbClass : public DeviceClass
     {
       ASSERT(termination_gpios.size() == CAN_CH_NUM);
       i = 0;
-      for (auto *g : termination_gpios)
+      for (auto* g : termination_gpios)
       {
         termination_gpios_[i++] = g;
       }
@@ -195,7 +195,7 @@ class GsUsbClass : public DeviceClass
    * @param start_itf_num 起始接口号 / Starting interface number
    * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void BindEndpoints(EndpointPool &endpoint_pool, uint8_t start_itf_num, bool) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
   {
     inited_ = false;
     interface_num_ = start_itf_num;
@@ -236,7 +236,7 @@ class GsUsbClass : public DeviceClass
                          ep_data_in_->MaxPacketSize(),
                          0};
 
-    SetData(RawData{reinterpret_cast<uint8_t *>(&desc_block_), sizeof(desc_block_)});
+    SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
 
     ep_data_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
     ep_data_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
@@ -304,7 +304,7 @@ class GsUsbClass : public DeviceClass
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints(EndpointPool &endpoint_pool, bool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
     host_format_ok_ = false;
@@ -377,7 +377,7 @@ class GsUsbClass : public DeviceClass
    * @return ErrorCode 错误码 / Error code
    */
   ErrorCode OnClassRequest(bool, uint8_t, uint16_t, uint16_t, uint16_t,
-                           DeviceClass::ControlTransferResult &) override
+                           DeviceClass::ControlTransferResult&) override
   {
     return ErrorCode::NOT_SUPPORT;
   }
@@ -394,7 +394,7 @@ class GsUsbClass : public DeviceClass
    */
   ErrorCode OnVendorRequest(bool in_isr, uint8_t bRequest, uint16_t wValue,
                             uint16_t wLength, uint16_t wIndex,
-                            DeviceClass::ControlTransferResult &result) override
+                            DeviceClass::ControlTransferResult& result) override
   {
     UNUSED(in_isr);
     UNUSED(wIndex);
@@ -410,8 +410,8 @@ class GsUsbClass : public DeviceClass
         {
           return ErrorCode::ARG_ERR;
         }
-        result.write_data = ConstRawData{reinterpret_cast<const uint8_t *>(&bt_const_),
-                                         sizeof(bt_const_)};
+        result.write_data =
+            ConstRawData{reinterpret_cast<const uint8_t*>(&bt_const_), sizeof(bt_const_)};
         return ErrorCode::OK;
       }
 
@@ -425,8 +425,8 @@ class GsUsbClass : public DeviceClass
         {
           return ErrorCode::ARG_ERR;
         }
-        result.write_data = ConstRawData{
-            reinterpret_cast<const uint8_t *>(&bt_const_ext_), sizeof(bt_const_ext_)};
+        result.write_data = ConstRawData{reinterpret_cast<const uint8_t*>(&bt_const_ext_),
+                                         sizeof(bt_const_ext_)};
         return ErrorCode::OK;
       }
 
@@ -437,7 +437,7 @@ class GsUsbClass : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         result.write_data =
-            ConstRawData{reinterpret_cast<const uint8_t *>(&dev_cfg_), sizeof(dev_cfg_)};
+            ConstRawData{reinterpret_cast<const uint8_t*>(&dev_cfg_), sizeof(dev_cfg_)};
         return ErrorCode::OK;
       }
 
@@ -450,7 +450,7 @@ class GsUsbClass : public DeviceClass
         }
 
         result.write_data =
-            ConstRawData{reinterpret_cast<const uint8_t *>(&ctrl_buf_.timestamp_us),
+            ConstRawData{reinterpret_cast<const uint8_t*>(&ctrl_buf_.timestamp_us),
                          sizeof(ctrl_buf_.timestamp_us)};
         return ErrorCode::OK;
       }
@@ -468,7 +468,7 @@ class GsUsbClass : public DeviceClass
         }
 
         result.write_data = ConstRawData{
-            reinterpret_cast<const uint8_t *>(&ctrl_buf_.term), sizeof(ctrl_buf_.term)};
+            reinterpret_cast<const uint8_t*>(&ctrl_buf_.term), sizeof(ctrl_buf_.term)};
         return ErrorCode::OK;
       }
 
@@ -483,7 +483,7 @@ class GsUsbClass : public DeviceClass
         uint32_t rxerr = 0;
         uint32_t txerr = 0;
 
-        auto *can = cans_[wValue];
+        auto* can = cans_[wValue];
         if (can != nullptr)
         {
           LibXR::CAN::ErrorState es;
@@ -521,7 +521,7 @@ class GsUsbClass : public DeviceClass
         }
 
         result.write_data =
-            ConstRawData{reinterpret_cast<const uint8_t *>(&ctrl_buf_.dev_state),
+            ConstRawData{reinterpret_cast<const uint8_t*>(&ctrl_buf_.dev_state),
                          sizeof(ctrl_buf_.dev_state)};
         return ErrorCode::OK;
       }
@@ -535,7 +535,7 @@ class GsUsbClass : public DeviceClass
         }
 
         result.write_data =
-            ConstRawData{reinterpret_cast<const uint8_t *>(&ctrl_buf_.user_id),
+            ConstRawData{reinterpret_cast<const uint8_t*>(&ctrl_buf_.user_id),
                          sizeof(ctrl_buf_.user_id)};
         return ErrorCode::OK;
       }
@@ -547,7 +547,7 @@ class GsUsbClass : public DeviceClass
         {
           return ErrorCode::ARG_ERR;
         }
-        result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.host_cfg),
+        result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.host_cfg),
                                    sizeof(GsUsb::HostConfig)};
         return ErrorCode::OK;
       }
@@ -559,7 +559,7 @@ class GsUsbClass : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-        result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.bt),
+        result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.bt),
                                    sizeof(GsUsb::DeviceBitTiming)};
         return ErrorCode::OK;
       }
@@ -575,7 +575,7 @@ class GsUsbClass : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-        result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.bt),
+        result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.bt),
                                    sizeof(GsUsb::DeviceBitTiming)};
         return ErrorCode::OK;
       }
@@ -587,7 +587,7 @@ class GsUsbClass : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-        result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.mode),
+        result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.mode),
                                    sizeof(GsUsb::DeviceMode)};
         return ErrorCode::OK;
       }
@@ -600,7 +600,7 @@ class GsUsbClass : public DeviceClass
         }
         ctrl_target_channel_ = static_cast<uint8_t>(wValue);
         result.read_data =
-            RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.berr_on), sizeof(uint32_t)};
+            RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.berr_on), sizeof(uint32_t)};
         return ErrorCode::OK;
       }
 
@@ -611,7 +611,7 @@ class GsUsbClass : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-        result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.identify),
+        result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.identify),
                                    sizeof(GsUsb::Identify)};
         return ErrorCode::OK;
       }
@@ -623,7 +623,7 @@ class GsUsbClass : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         ctrl_target_channel_ = static_cast<uint8_t>(wValue);
-        result.read_data = RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.term),
+        result.read_data = RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.term),
                                    sizeof(GsUsb::DeviceTerminationState)};
         return ErrorCode::OK;
       }
@@ -635,7 +635,7 @@ class GsUsbClass : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         result.read_data =
-            RawData{reinterpret_cast<uint8_t *>(&ctrl_buf_.user_id), sizeof(uint32_t)};
+            RawData{reinterpret_cast<uint8_t*>(&ctrl_buf_.user_id), sizeof(uint32_t)};
         return ErrorCode::OK;
       }
 
@@ -651,7 +651,7 @@ class GsUsbClass : public DeviceClass
    * @param data DATA 阶段数据 / DATA stage data
    * @return ErrorCode 错误码 / Error code
    */
-  ErrorCode OnClassData(bool in_isr, uint8_t bRequest, LibXR::ConstRawData &data) override
+  ErrorCode OnClassData(bool in_isr, uint8_t bRequest, LibXR::ConstRawData& data) override
   {
     UNUSED(in_isr);
 
@@ -742,7 +742,7 @@ class GsUsbClass : public DeviceClass
    * @param self this 指针 / this pointer
    * @param data 收到的数据 / Received data
    */
-  static void OnDataOutCompleteStatic(bool in_isr, GsUsbClass *self, ConstRawData &data)
+  static void OnDataOutCompleteStatic(bool in_isr, GsUsbClass* self, ConstRawData& data)
   {
     if (!self->inited_)
     {
@@ -757,7 +757,7 @@ class GsUsbClass : public DeviceClass
    * @param self this 指针 / this pointer
    * @param data 发送完成的数据视图 / Completed transfer data view
    */
-  static void OnDataInCompleteStatic(bool in_isr, GsUsbClass *self, ConstRawData &data)
+  static void OnDataInCompleteStatic(bool in_isr, GsUsbClass* self, ConstRawData& data)
   {
     if (!self->inited_)
     {
@@ -771,7 +771,7 @@ class GsUsbClass : public DeviceClass
    * @param in_isr 是否在中断上下文 / Whether in ISR
    * @param data 收到的数据 / Received data
    */
-  void OnDataOutComplete(bool in_isr, ConstRawData &data)
+  void OnDataOutComplete(bool in_isr, ConstRawData& data)
   {
     UNUSED(in_isr);
 
@@ -788,7 +788,7 @@ class GsUsbClass : public DeviceClass
     }
 
     // 解析 wire header / Parse wire header
-    const WireHeader &wh = *reinterpret_cast<const WireHeader *>(data.addr_);
+    const WireHeader& wh = *reinterpret_cast<const WireHeader*>(data.addr_);
 
     const uint8_t CH = wh.channel;
     if (CH >= can_count_ || !cans_[CH])
@@ -798,8 +798,7 @@ class GsUsbClass : public DeviceClass
     }
 
     const bool IS_FD = (wh.flags & GsUsb::CAN_FLAG_FD) != 0;
-    const uint8_t *payload =
-        reinterpret_cast<const uint8_t *>(data.addr_) + WIRE_HDR_SIZE;
+    const uint8_t* payload = reinterpret_cast<const uint8_t*>(data.addr_) + WIRE_HDR_SIZE;
 
     if (IS_FD)
     {
@@ -859,7 +858,7 @@ class GsUsbClass : public DeviceClass
    * @param in_isr 是否在中断上下文 / Whether in ISR
    * @param data 发送完成的数据视图 / Completed transfer data view
    */
-  void OnDataInComplete(bool in_isr, ConstRawData &data)
+  void OnDataInComplete(bool in_isr, ConstRawData& data)
   {
     UNUSED(in_isr);
     UNUSED(data);
@@ -868,8 +867,8 @@ class GsUsbClass : public DeviceClass
 
  private:
   // ================= 成员 / Members =================
-  std::array<LibXR::CAN *, CanChNum> cans_{};  ///< CAN 通道列表 / CAN channel pointers
-  std::array<LibXR::FDCAN *, CanChNum>
+  std::array<LibXR::CAN*, CanChNum> cans_{};  ///< CAN 通道列表 / CAN channel pointers
+  std::array<LibXR::FDCAN*, CanChNum>
       fdcans_{};               ///< FDCAN 通道列表 / FDCAN channel pointers
   bool fd_supported_ = false;  ///< 是否支持 FD / FD supported
 
@@ -878,28 +877,28 @@ class GsUsbClass : public DeviceClass
   Endpoint::EPNumber data_in_ep_num_;   ///< Bulk IN 端点号 / Bulk IN endpoint number
   Endpoint::EPNumber data_out_ep_num_;  ///< Bulk OUT 端点号 / Bulk OUT endpoint number
 
-  Endpoint *ep_data_in_ = nullptr;   ///< Bulk IN 端点对象 / Bulk IN endpoint object
-  Endpoint *ep_data_out_ = nullptr;  ///< Bulk OUT 端点对象 / Bulk OUT endpoint object
+  Endpoint* ep_data_in_ = nullptr;   ///< Bulk IN 端点对象 / Bulk IN endpoint object
+  Endpoint* ep_data_out_ = nullptr;  ///< Bulk OUT 端点对象 / Bulk OUT endpoint object
 
   bool inited_ = false;        ///< 是否已初始化 / Initialized
   uint8_t interface_num_ = 0;  ///< 接口号 / Interface number
 
-  LibXR::GPIO *identify_gpio_ =
+  LibXR::GPIO* identify_gpio_ =
       nullptr;  ///< Identify GPIO（可选） / Identify GPIO (optional)
-  std::array<LibXR::GPIO *, CanChNum>
+  std::array<LibXR::GPIO*, CanChNum>
       termination_gpios_{};  ///< 终端电阻 GPIO（可选） / Termination GPIOs (optional)
 
-  LibXR::Database *database_ = nullptr;  ///< 数据库存储（可选，用于 USER_ID） / Database
+  LibXR::Database* database_ = nullptr;  ///< 数据库存储（可选，用于 USER_ID） / Database
                                          ///< storage (optional, used by USER_ID)
   uint32_t user_id_ram_ = 0;             ///< USER_ID 的 RAM 备份 / USER_ID RAM backup
 
-  LibXR::Callback<LibXR::ConstRawData &> on_data_out_cb_ =
-      LibXR::Callback<LibXR::ConstRawData &>::Create(OnDataOutCompleteStatic,
-                                                     this);  ///< OUT 回调 / OUT callback
+  LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
+      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic,
+                                                    this);  ///< OUT 回调 / OUT callback
 
-  LibXR::Callback<LibXR::ConstRawData &> on_data_in_cb_ =
-      LibXR::Callback<LibXR::ConstRawData &>::Create(OnDataInCompleteStatic,
-                                                     this);  ///< IN 回调 / IN callback
+  LibXR::Callback<LibXR::ConstRawData&> on_data_in_cb_ =
+      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic,
+                                                    this);  ///< IN 回调 / IN callback
 
   GsUsb::DeviceConfig dev_cfg_{};    ///< 设备配置 / Device configuration
   GsUsb::DeviceBTConst bt_const_{};  ///< BT 常量（classic） / BT constants (classic)
@@ -965,7 +964,7 @@ class GsUsbClass : public DeviceClass
    */
   struct CanRxCtx
   {
-    GsUsbClass *self;  ///< 实例指针 / Instance pointer
+    GsUsbClass* self;  ///< 实例指针 / Instance pointer
     uint8_t ch;        ///< 通道号 / Channel index
   };
 
@@ -974,7 +973,7 @@ class GsUsbClass : public DeviceClass
    */
   struct FdCanRxCtx
   {
-    GsUsbClass *self;  ///< 实例指针 / Instance pointer
+    GsUsbClass* self;  ///< 实例指针 / Instance pointer
     uint8_t ch;        ///< 通道号 / Channel index
   };
 
@@ -993,8 +992,8 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief classic CAN RX 静态回调入口 / Static entry for classic CAN RX callback
    */
-  static void OnCanRxStatic(bool in_isr, CanRxCtx *ctx,
-                            const LibXR::CAN::ClassicPack &pack)
+  static void OnCanRxStatic(bool in_isr, CanRxCtx* ctx,
+                            const LibXR::CAN::ClassicPack& pack)
   {
     if (!ctx || !ctx->self || !ctx->self->inited_)
     {
@@ -1006,8 +1005,8 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief FD CAN RX 静态回调入口 / Static entry for FD CAN RX callback
    */
-  static void OnFdCanRxStatic(bool in_isr, FdCanRxCtx *ctx,
-                              const LibXR::FDCAN::FDPack &pack)
+  static void OnFdCanRxStatic(bool in_isr, FdCanRxCtx* ctx,
+                              const LibXR::FDCAN::FDPack& pack)
   {
     if (!ctx || !ctx->self || !ctx->self->inited_)
     {
@@ -1037,7 +1036,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief classic CAN RX 处理 / Handle classic CAN RX
    */
-  void OnCanRx(bool in_isr, uint8_t ch, const LibXR::CAN::ClassicPack &pack)
+  void OnCanRx(bool in_isr, uint8_t ch, const LibXR::CAN::ClassicPack& pack)
   {
     if (ch >= can_count_ || !ep_data_in_)
     {
@@ -1067,7 +1066,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief FD CAN RX 处理 / Handle FD CAN RX
    */
-  void OnFdCanRx(bool in_isr, uint8_t ch, const LibXR::FDCAN::FDPack &pack)
+  void OnFdCanRx(bool in_isr, uint8_t ch, const LibXR::FDCAN::FDPack& pack)
   {
     if (!fd_supported_ || ch >= can_count_ || !fd_enabled_[ch] || !ep_data_in_)
     {
@@ -1077,7 +1076,7 @@ class GsUsbClass : public DeviceClass
     QueueItem qi;
     FdPackToQueueItem(pack, ch, qi);
 
-    const auto &fd_cfg = fd_config_[ch];
+    const auto& fd_cfg = fd_config_[ch];
     if (fd_cfg.fd_mode.brs)
     {
       qi.hdr.flags |= GsUsb::CAN_FLAG_BRS;
@@ -1098,7 +1097,7 @@ class GsUsbClass : public DeviceClass
    * @return true 入队成功 / Enqueued
    * @return false 入队失败 / Failed
    */
-  bool EnqueueFrame(const QueueItem &qi, bool is_echo, bool in_isr)
+  bool EnqueueFrame(const QueueItem& qi, bool is_echo, bool in_isr)
   {
     UNUSED(in_isr);
 
@@ -1304,7 +1303,7 @@ class GsUsbClass : public DeviceClass
    * @param cfg HostConfig
    * @return ErrorCode 错误码 / Error code
    */
-  ErrorCode HandleHostFormat(const GsUsb::HostConfig &cfg)
+  ErrorCode HandleHostFormat(const GsUsb::HostConfig& cfg)
   {
     host_format_ok_ = (cfg.byte_order == 0x0000beefu);
     return ErrorCode::OK;
@@ -1313,7 +1312,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief 处理 BITTIMING（仲裁相位） / Handle BITTIMING (arbitration phase)
    */
-  ErrorCode HandleBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming &bt)
+  ErrorCode HandleBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming& bt)
   {
     if (!host_format_ok_ || ch >= can_count_ || !cans_[ch])
     {
@@ -1326,7 +1325,7 @@ class GsUsbClass : public DeviceClass
 
     const uint32_t FCLK = cans_[ch]->GetClockFreq();
 
-    auto &cfg = config_[ch];
+    auto& cfg = config_[ch];
     cfg.bit_timing.brp = bt.brp;
     cfg.bit_timing.prop_seg = bt.prop_seg;
     cfg.bit_timing.phase_seg1 = bt.phase_seg1;
@@ -1346,8 +1345,8 @@ class GsUsbClass : public DeviceClass
 
     if (fd_supported_ && fdcans_[ch])
     {
-      auto &fd_cfg = fd_config_[ch];
-      static_cast<CAN::Configuration &>(fd_cfg) = cfg;
+      auto& fd_cfg = fd_config_[ch];
+      static_cast<CAN::Configuration&>(fd_cfg) = cfg;
     }
 
     return cans_[ch]->SetConfig(cfg);
@@ -1356,7 +1355,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief 处理 DATA_BITTIMING（数据相位） / Handle DATA_BITTIMING (data phase)
    */
-  ErrorCode HandleDataBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming &bt)
+  ErrorCode HandleDataBitTiming(uint8_t ch, const GsUsb::DeviceBitTiming& bt)
   {
     if (!host_format_ok_)
     {
@@ -1373,8 +1372,8 @@ class GsUsbClass : public DeviceClass
 
     const uint32_t FCLK = fdcans_[ch]->GetClockFreq();
 
-    auto &fd_cfg = fd_config_[ch];
-    static_cast<CAN::Configuration &>(fd_cfg) = config_[ch];
+    auto& fd_cfg = fd_config_[ch];
+    static_cast<CAN::Configuration&>(fd_cfg) = config_[ch];
 
     fd_cfg.data_timing.brp = bt.brp;
     fd_cfg.data_timing.prop_seg = bt.prop_seg;
@@ -1400,7 +1399,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief 处理 MODE（启动/复位 + 标志位） / Handle MODE (start/reset + flags)
    */
-  ErrorCode HandleMode(uint8_t ch, const GsUsb::DeviceMode &mode)
+  ErrorCode HandleMode(uint8_t ch, const GsUsb::DeviceMode& mode)
   {
     if (!host_format_ok_ || ch >= can_count_ || !cans_[ch])
     {
@@ -1426,7 +1425,7 @@ class GsUsbClass : public DeviceClass
         return ErrorCode::ARG_ERR;
     }
 
-    auto &cfg = config_[ch];
+    auto& cfg = config_[ch];
     cfg.mode.loopback = (mode.flags & GsUsb::GSCAN_MODE_LOOP_BACK) != 0;
     cfg.mode.listen_only = (mode.flags & GsUsb::GSCAN_MODE_LISTEN_ONLY) != 0;
     cfg.mode.triple_sampling = (mode.flags & GsUsb::GSCAN_MODE_TRIPLE_SAMPLE) != 0;
@@ -1439,8 +1438,8 @@ class GsUsbClass : public DeviceClass
 
     if (fd_supported_ && fdcans_[ch])
     {
-      auto &fd_cfg = fd_config_[ch];
-      static_cast<CAN::Configuration &>(fd_cfg) = cfg;
+      auto& fd_cfg = fd_config_[ch];
+      static_cast<CAN::Configuration&>(fd_cfg) = cfg;
       fd_cfg.fd_mode.fd_enabled = (mode.flags & GsUsb::GSCAN_MODE_FD) != 0;
       (void)fdcans_[ch]->SetConfig(fd_cfg);
     }
@@ -1464,7 +1463,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief 处理 IDENTIFY / Handle IDENTIFY
    */
-  ErrorCode HandleIdentify(uint8_t, const GsUsb::Identify &id)
+  ErrorCode HandleIdentify(uint8_t, const GsUsb::Identify& id)
   {
     const bool ON = (id.mode == static_cast<uint32_t>(GsUsb::IdentifyMode::ON));
     if (identify_gpio_)
@@ -1477,7 +1476,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief 处理 SET_TERMINATION / Handle SET_TERMINATION
    */
-  ErrorCode HandleSetTermination(uint8_t ch, const GsUsb::DeviceTerminationState &st)
+  ErrorCode HandleSetTermination(uint8_t ch, const GsUsb::DeviceTerminationState& st)
   {
     if (ch >= can_count_)
     {
@@ -1500,8 +1499,8 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief wire -> ClassicPack / Convert wire frame to ClassicPack
    */
-  static void HostWireToClassicPack(const WireHeader &wh, const uint8_t *payload,
-                                    LibXR::CAN::ClassicPack &pack)
+  static void HostWireToClassicPack(const WireHeader& wh, const uint8_t* payload,
+                                    LibXR::CAN::ClassicPack& pack)
   {
     const uint32_t CID = wh.can_id;
     const bool IS_EFF = (CID & GsUsb::CAN_EFF_FLAG) != 0;
@@ -1534,8 +1533,8 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief wire -> FDPack / Convert wire frame to FDPack
    */
-  static void HostWireToFdPack(const WireHeader &wh, const uint8_t *payload,
-                               LibXR::FDCAN::FDPack &pack)
+  static void HostWireToFdPack(const WireHeader& wh, const uint8_t* payload,
+                               LibXR::FDCAN::FDPack& pack)
   {
     const uint32_t CID = wh.can_id;
     const bool IS_EFF = (CID & GsUsb::CAN_EFF_FLAG) != 0;
@@ -1568,8 +1567,8 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief ClassicPack -> QueueItem / Convert ClassicPack to QueueItem
    */
-  void ClassicPackToQueueItem(const LibXR::CAN::ClassicPack &pack, uint8_t ch,
-                              QueueItem &qi)
+  void ClassicPackToQueueItem(const LibXR::CAN::ClassicPack& pack, uint8_t ch,
+                              QueueItem& qi)
   {
     uint32_t cid = 0;
     switch (pack.type)
@@ -1612,7 +1611,7 @@ class GsUsbClass : public DeviceClass
   /**
    * @brief FDPack -> QueueItem / Convert FDPack to QueueItem
    */
-  void FdPackToQueueItem(const LibXR::FDCAN::FDPack &pack, uint8_t ch, QueueItem &qi)
+  void FdPackToQueueItem(const LibXR::FDCAN::FDPack& pack, uint8_t ch, QueueItem& qi)
   {
     uint32_t cid = 0;
     switch (pack.type)
@@ -1664,7 +1663,7 @@ class GsUsbClass : public DeviceClass
    * @param cap 输出缓冲容量 / Output buffer capacity
    * @return std::size_t 实际写入长度（0 表示失败） / Bytes written (0 means failed)
    */
-  std::size_t PackQueueItemToWire(const QueueItem &qi, uint8_t *out,
+  std::size_t PackQueueItemToWire(const QueueItem& qi, uint8_t* out,
                                   std::size_t cap) const
   {
     if (cap < WIRE_HDR_SIZE)
@@ -1702,8 +1701,8 @@ class GsUsbClass : public DeviceClass
    * @return true 转换成功并应上报 / Converted and should report
    * @return false 不上报 / Do not report
    */
-  bool ErrorPackToHostErrorFrame(uint8_t ch, const LibXR::CAN::ClassicPack &err_pack,
-                                 QueueItem &qi)
+  bool ErrorPackToHostErrorFrame(uint8_t ch, const LibXR::CAN::ClassicPack& err_pack,
+                                 QueueItem& qi)
   {
     if (ch >= can_count_ || !cans_[ch])
     {

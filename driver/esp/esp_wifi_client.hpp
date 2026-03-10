@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -9,18 +11,16 @@ namespace LibXR
 {
 
 /**
- * @class ESP32WifiClient
- * @brief ESP32 平台的 WiFi 客户端实现 / WiFi client implementation for ESP32
+ * @brief ESP32 Wi-Fi 客户端实现 / ESP32 Wi-Fi client implementation
  *
- * 提供基于 ESP-IDF 的 WiFi 接口实现，包含连接、断开、扫描、RSSI 查询等功能，
- * 继承自抽象类 WifiClient 并实现其所有接口。
+ * 基于 ESP-IDF 提供连接、断开、扫描、RSSI 查询等接口。
+ * Provides connect/disconnect/scan/RSSI operations via ESP-IDF.
  */
 class ESP32WifiClient : public WifiClient
 {
  public:
   ESP32WifiClient();
 
-  ~ESP32WifiClient() override;
 
   bool Enable() override;
 
@@ -41,6 +41,11 @@ class ESP32WifiClient : public WifiClient
   int GetRSSI() const override;
 
  private:
+  bool RegisterHandlers();
+  void UnregisterHandlers();
+  void ResetConnectionState();
+  void DrainEvents();
+
   /**
    * @brief 事件处理回调 / Event handler callback
    * @param arg 用户数据 / User pointer
@@ -55,11 +60,16 @@ class ESP32WifiClient : public WifiClient
       false;  ///< ESP 网络是否已初始化 / Netif initialized
   static inline esp_netif_t* netif_ = nullptr;  ///< ESP 默认 netif 对象 / Default netif
 
+  bool init_ok_ = false;
   bool enabled_ = false;    ///< 是否启用 / Whether WiFi is enabled
+  bool handlers_registered_ = false;
   bool connected_ = false;  ///< 是否连接 / Whether WiFi is connected
   bool got_ip_ = false;     ///< 是否获取 IP / Whether IP is acquired
   char ip_str_[16] = {};    ///< 当前 IP 字符串 / Current IP string
-  uint8_t mac_[6] = {};     ///< 当前 MAC 缓存 / Cached MAC address
+  esp_event_handler_instance_t wifi_connected_handler_ = nullptr;
+  esp_event_handler_instance_t wifi_disconnected_handler_ = nullptr;
+  esp_event_handler_instance_t got_ip_handler_ = nullptr;
+  esp_event_handler_instance_t lost_ip_handler_ = nullptr;
 
   LibXR::Semaphore semaphore_;  ///< 状态同步信号量 / Event wait semaphore
 };

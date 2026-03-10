@@ -51,7 +51,7 @@ class Terminal
    * @return char* 指向找到的字符的指针，如果未找到返回 nullptr
    *         Pointer to the found character, nullptr if not found
    */
-  char *StrchrRev(char *str, char c)
+  char* StrchrRev(char* str, char c)
   {
     auto len = strlen(str);
     for (int i = static_cast<int>(len - 1); i >= 0; i--)
@@ -90,8 +90,8 @@ class Terminal
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  Terminal(LibXR::RamFS &ramfs, RamFS::Dir *current_dir = nullptr,
-           ReadPort *read_port = STDIO::read_, WritePort *write_port = STDIO::write_,
+  Terminal(LibXR::RamFS& ramfs, RamFS::Dir* current_dir = nullptr,
+           ReadPort* read_port = STDIO::read_, WritePort* write_port = STDIO::write_,
            Mode MODE = Mode::CRLF)
       : read_status_(ReadOperation::OperationPollingStatus::READY),
         write_status_(WriteOperation::OperationPollingStatus::READY),
@@ -131,21 +131,21 @@ class Terminal
 
   const Mode MODE;                  ///< 终端换行模式 Terminal line feed mode
   WriteOperation write_op_;         ///< 终端写操作 Terminal write operation
-  ReadPort *read_port_;             ///< 读取端口 Read port
-  WritePort *write_port_;           ///< 写入端口 Write port
+  ReadPort* read_port_;             ///< 读取端口 Read port
+  WritePort* write_port_;           ///< 写入端口 Write port
   WritePort::Stream write_stream_;  ///< 写入流 Write stream
 
-  LibXR::Mutex *write_mutex_ = nullptr;  ///< 写入端口互斥锁 Write port mutex
+  LibXR::Mutex* write_mutex_ = nullptr;  ///< 写入端口互斥锁 Write port mutex
 
-  RamFS &ramfs_;                    ///< 关联的文件系统 Associated file system
+  RamFS& ramfs_;                    ///< 关联的文件系统 Associated file system
   char read_buff_[READ_BUFF_SIZE];  ///< 读取缓冲区 Read buffer
 
   size_t request_read_size_ = 0;
-  RamFS::Dir *current_dir_;        ///< 当前目录 Current directory
+  RamFS::Dir* current_dir_;        ///< 当前目录 Current directory
   uint8_t flag_ansi_ = 0;          ///< ANSI 控制字符状态 ANSI control character state
   int offset_ = 0;                 ///< 光标偏移 Cursor offset
   Stack<char> input_line_;         ///< 输入行缓冲区 Input line buffer
-  char *arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 Command argument list
+  char* arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 Command argument list
   size_t arg_number_ = 0;          ///< 参数数量 Number of arguments
   Queue<LibXR::String<MAX_LINE_SIZE>> history_;  ///< 历史命令 History of commands
   int history_index_ = -1;                       ///< 当前历史索引 Current history index
@@ -379,7 +379,7 @@ class Terminal
     {
       history_.Pop();
     }
-    history_.Push(*reinterpret_cast<String<MAX_LINE_SIZE> *>(&input_line_[0]));
+    history_.Push(*reinterpret_cast<String<MAX_LINE_SIZE>*>(&input_line_[0]));
   }
 
   /**
@@ -412,7 +412,7 @@ class Terminal
    * @return RamFS::Dir* 解析出的目录指针，若找不到则返回 nullptr
    *         Pointer to the resolved directory, or nullptr if not found
    */
-  RamFS::Dir *Path2Dir(char *path)
+  RamFS::Dir* Path2Dir(char* path)
   {
     if (path == nullptr)
     {
@@ -420,7 +420,7 @@ class Terminal
     }
 
     size_t index = 0;
-    RamFS::Dir *dir = current_dir_;
+    RamFS::Dir* dir = current_dir_;
 
     if (*path == '/')
     {
@@ -462,7 +462,7 @@ class Terminal
    * @return RamFS::File* 解析出的文件指针，若找不到则返回 nullptr
    *         Pointer to the resolved file, or nullptr if not found
    */
-  RamFS::File *Path2File(char *path)
+  RamFS::File* Path2File(char* path)
   {
     if (path == nullptr)
     {
@@ -482,7 +482,7 @@ class Terminal
     }
 
     *name = '\0';
-    RamFS::Dir *dir = Path2Dir(path);
+    RamFS::Dir* dir = Path2Dir(path);
     *name = '/';
     if (dir != nullptr)
     {
@@ -511,7 +511,7 @@ class Terminal
 
     if (strcmp(arg_tab_[0], "cd") == 0)
     {
-      RamFS::Dir *dir = Path2Dir(arg_tab_[1]);
+      RamFS::Dir* dir = Path2Dir(arg_tab_[1]);
       if (dir != nullptr)
       {
         current_dir_ = dir;
@@ -522,7 +522,7 @@ class Terminal
 
     if (strcmp(arg_tab_[0], "ls") == 0)
     {
-      auto ls_fun = [&](RBTree<const char *>::Node<RamFS::FsNode> &item)
+      auto ls_fun = [&](RBTree<const char*>::Node<RamFS::FsNode>& item)
       {
         switch (item->type)
         {
@@ -577,9 +577,9 @@ class Terminal
    * them
    * @param  raw_data 输入的原始数据 Input raw data
    */
-  void Parse(RawData &raw_data)
+  void Parse(RawData& raw_data)
   {
-    char *buff = static_cast<char *>(raw_data.addr_);
+    char* buff = static_cast<char*>(raw_data.addr_);
     for (size_t i = 0; i < raw_data.size_; i++)
     {
       HandleCharacter(buff[i]);
@@ -663,7 +663,7 @@ class Terminal
   void AutoComplete()
   {
     /* skip space */
-    char *path = &input_line_[0];
+    char* path = &input_line_[0];
     while (*path == ' ')
     {
       path++;
@@ -688,8 +688,8 @@ class Terminal
     }
 
     /* get start of prefix */
-    char *prefix_start = nullptr;
-    RamFS::Dir *dir = nullptr;
+    char* prefix_start = nullptr;
+    RamFS::Dir* dir = nullptr;
 
     if (path_end == path)
     {
@@ -714,7 +714,7 @@ class Terminal
     }
 
     /* prepre for match */
-    RBTree<const char *>::Node<RamFS::FsNode> *ans_node = nullptr;
+    RBTree<const char*>::Node<RamFS::FsNode>* ans_node = nullptr;
     uint32_t number = 0;
     size_t same_char_number = 0;
 
@@ -725,7 +725,7 @@ class Terminal
 
     int prefix_len = static_cast<int>(tmp - prefix_start);
 
-    auto foreach_fun_find = [&](RBTree<const char *>::Node<RamFS::FsNode> &node)
+    auto foreach_fun_find = [&](RBTree<const char*>::Node<RamFS::FsNode>& node)
     {
       if (strncmp(node->name, prefix_start, prefix_len) == 0)
       {
@@ -756,7 +756,7 @@ class Terminal
       ans_node = nullptr;
       LineFeed();
 
-      auto foreach_fun_show = [&](RBTree<const char *>::Node<RamFS::FsNode> &node)
+      auto foreach_fun_show = [&](RBTree<const char*>::Node<RamFS::FsNode>& node)
       {
         if (strncmp(node->name, prefix_start, prefix_len) == 0)
         {
@@ -890,7 +890,7 @@ class Terminal
    *
    * @param  term 指向 Terminal 实例的指针 Pointer to the Terminal instance
    */
-  static void ThreadFun(Terminal *term)
+  static void ThreadFun(Terminal* term)
   {
     Semaphore read_sem, write_sem;
     ReadOperation op(read_sem);
@@ -928,7 +928,7 @@ class Terminal
    *
    * @param  term 指向 Terminal 实例的指针 Pointer to the Terminal instance
    */
-  static void TaskFun(Terminal *term)
+  static void TaskFun(Terminal* term)
   {
     ReadOperation op(term->read_status_);
 

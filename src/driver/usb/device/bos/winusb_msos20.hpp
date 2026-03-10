@@ -115,10 +115,10 @@ struct MsOs20PlatformCapability
       0x9C, 0xD2, 0x65, 0x9D, 0x9E, 0x64, 0x8A, 0x9F,
   };
 
-  uint32_t dwWindowsVersion = 0x06030000;         // Win 8.1+
-  uint16_t wMSOSDescriptorSetTotalLength = 0;     // sizeof(MS OS 2.0 set)
-  uint8_t bMS_VendorCode = 0x20;                  // vendor request bRequest
-  uint8_t bAltEnumCode = 0x00;                    // optional, often 0
+  uint32_t dwWindowsVersion = 0x06030000;      // Win 8.1+
+  uint16_t wMSOSDescriptorSetTotalLength = 0;  // sizeof(MS OS 2.0 set)
+  uint8_t bMS_VendorCode = 0x20;               // vendor request bRequest
+  uint8_t bAltEnumCode = 0x00;                 // optional, often 0
 };
 
 #pragma pack(pop)
@@ -132,7 +132,8 @@ static_assert(sizeof(MsOs20PlatformCapability) == 28, "PlatformCapability size m
 
 // ---- helpers ----
 
-// Initialize MsOs20PlatformCapability with given descriptor-set length / vendor code / version.
+// Initialize MsOs20PlatformCapability with given descriptor-set length / vendor code /
+// version.
 inline void init_msos20_platform_capability(MsOs20PlatformCapability& cap,
                                             uint16_t msos_descriptor_set_total_length,
                                             uint8_t vendor_code = 0x20,
@@ -140,7 +141,7 @@ inline void init_msos20_platform_capability(MsOs20PlatformCapability& cap,
 {
   cap = MsOs20PlatformCapability{};
   Memory::FastCopy(cap.PlatformCapabilityUUID, MSOS20_PLATFORM_CAPABILITY_UUID,
-              sizeof(MSOS20_PLATFORM_CAPABILITY_UUID));
+                   sizeof(MSOS20_PLATFORM_CAPABILITY_UUID));
   cap.dwWindowsVersion = windows_version;
   cap.wMSOSDescriptorSetTotalLength = msos_descriptor_set_total_length;
   cap.bMS_VendorCode = vendor_code;
@@ -271,8 +272,9 @@ class MsOs20BosCapability final : public LibXR::USB::BosCapability
   {
     // Keep Platform Capability synchronized with descriptor set length / vendor code.
     platform_cap_ = MsOs20PlatformCapability{};
-    Memory::FastCopy(platform_cap_.PlatformCapabilityUUID, MSOS20_PLATFORM_CAPABILITY_UUID,
-                sizeof(MSOS20_PLATFORM_CAPABILITY_UUID));
+    Memory::FastCopy(platform_cap_.PlatformCapabilityUUID,
+                     MSOS20_PLATFORM_CAPABILITY_UUID,
+                     sizeof(MSOS20_PLATFORM_CAPABILITY_UUID));
     platform_cap_.dwWindowsVersion = windows_version_;
     platform_cap_.bMS_VendorCode = vendor_code_;
     platform_cap_.bAltEnumCode = 0x00;

@@ -3,6 +3,9 @@
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
+/**
+ * @brief CH32 I2C 实例编号 / CH32 I2C instance identifier
+ */
 typedef enum
 {
 #if defined(I2C1)
@@ -33,8 +36,9 @@ static constexpr uint32_t CH32_I2C_RCC_PERIPH_MAP_DMA[] = {
 #endif
 };
 
-// 仍按“类 F1”的常见映射：I2C1_TX=CH6, I2C1_RX=CH7; I2C2_TX=CH4, I2C2_RX=CH5
-static DMA_Channel_TypeDef *const CH32_I2C_TX_DMA_CHANNEL_MAP[] = {
+// DMA channel mapping follows the common CH32F1-compatible layout:
+// I2C1_TX=CH6, I2C1_RX=CH7, I2C2_TX=CH4, I2C2_RX=CH5.
+static DMA_Channel_TypeDef* const CH32_I2C_TX_DMA_CHANNEL_MAP[] = {
 #if defined(I2C1)
     DMA1_Channel6,
 #endif
@@ -43,7 +47,7 @@ static DMA_Channel_TypeDef *const CH32_I2C_TX_DMA_CHANNEL_MAP[] = {
 #endif
 };
 
-static DMA_Channel_TypeDef *const CH32_I2C_RX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef* const CH32_I2C_RX_DMA_CHANNEL_MAP[] = {
 #if defined(I2C1)
     DMA1_Channel7,
 #endif
@@ -79,5 +83,5 @@ static constexpr IRQn_Type CH32_I2C_ER_IRQ_MAP[] = {
 #endif
 };
 
-ch32_i2c_id_t CH32_I2C_GetID(I2C_TypeDef *addr);
-I2C_TypeDef *CH32_I2C_GetInstanceID(ch32_i2c_id_t id);
+ch32_i2c_id_t ch32_i2c_get_id(I2C_TypeDef* addr);
+I2C_TypeDef* ch32_i2c_get_instance_id(ch32_i2c_id_t id);

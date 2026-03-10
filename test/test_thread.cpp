@@ -2,16 +2,18 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
-void test_thread() {
+void test_thread()
+{
   LibXR::Thread thread;
 
   static LibXR::Semaphore sem(0);
 
   ASSERT(sem.Wait(0) != ErrorCode::OK);
 
-  thread.Create<LibXR::Semaphore *>(
+  thread.Create<LibXR::Semaphore*>(
       &sem,
-      [](LibXR::Semaphore *sem) {
+      [](LibXR::Semaphore* sem)
+      {
         sem->Post();
         return;
       },

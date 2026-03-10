@@ -57,7 +57,7 @@ class I2C
    * @return 返回 `ErrorCode`，指示操作是否成功。
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
-  virtual ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation &op,
+  virtual ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
                          bool in_isr = false) = 0;
 
   /**
@@ -79,7 +79,7 @@ class I2C
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
   virtual ErrorCode Write(uint16_t slave_addr, ConstRawData write_data,
-                          WriteOperation &op, bool in_isr = false) = 0;
+                          WriteOperation& op, bool in_isr = false) = 0;
 
   /**
    * @brief 配置 I2C 设备参数。
@@ -118,7 +118,7 @@ class I2C
    *         Returns `ErrorCode` indicating success or failure.
    */
   virtual ErrorCode MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
-                            ReadOperation &op,
+                            ReadOperation& op,
                             MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
                             bool in_isr = false) = 0;
 
@@ -144,7 +144,7 @@ class I2C
    *         Returns `ErrorCode` indicating success or failure.
    */
   virtual ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr,
-                             ConstRawData write_data, WriteOperation &op,
+                             ConstRawData write_data, WriteOperation& op,
                              MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
                              bool in_isr = false) = 0;
 };

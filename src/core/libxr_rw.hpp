@@ -60,7 +60,7 @@ class Operation
    * @param sem Semaphore reference.
    * @param timeout Timeout duration (default is maximum).
    */
-  Operation(Semaphore &sem, uint32_t timeout = UINT32_MAX) : type(OperationType::BLOCK)
+  Operation(Semaphore& sem, uint32_t timeout = UINT32_MAX) : type(OperationType::BLOCK)
   {
     data.sem_info.sem = &sem;
     data.sem_info.timeout = timeout;
@@ -71,7 +71,7 @@ class Operation
    * @brief 构造基于回调的操作。
    * @param callback Callback function reference.
    */
-  Operation(Callback &callback) : type(OperationType::CALLBACK)
+  Operation(Callback& callback) : type(OperationType::CALLBACK)
   {
     data.callback = &callback;
   }
@@ -81,7 +81,7 @@ class Operation
    * @brief 构造轮询操作。
    * @param status Reference to polling status.
    */
-  Operation(OperationPollingStatus &status) : type(OperationType::POLLING)
+  Operation(OperationPollingStatus& status) : type(OperationType::POLLING)
   {
     data.status = &status;
   }
@@ -92,7 +92,7 @@ class Operation
    * @param op Another Operation instance.
    * @return Reference to this operation.
    */
-  Operation &operator=(const Operation &op)
+  Operation& operator=(const Operation& op)
   {
     if (this != &op)
     {
@@ -122,7 +122,7 @@ class Operation
    * @param op Another Operation instance.
    * @return Reference to this operation.
    */
-  Operation &operator=(Operation &&op) noexcept
+  Operation& operator=(Operation&& op) noexcept
   {
     if (this != &op)
     {
@@ -157,7 +157,7 @@ class Operation
   template <
       typename InitOperation,
       typename = std::enable_if_t<std::is_same_v<std::decay_t<InitOperation>, Operation>>>
-  Operation(InitOperation &&op)
+  Operation(InitOperation&& op)
   {
     *this = std::forward<InitOperation>(op);
   }
@@ -169,9 +169,9 @@ class Operation
    * @param args Parameters passed to the callback.
    */
   template <typename Status>
-  void UpdateStatus(bool in_isr, Status &&status)
+  void UpdateStatus(bool in_isr, Status&& status)
   {
-    //TODO: 任何操作类型都应拿到执行结果。
+    // TODO: 任何操作类型都应拿到执行结果。
     switch (type)
     {
       case OperationType::CALLBACK:
@@ -214,13 +214,13 @@ class Operation
   /// 存储不同操作类型的数据。
   union
   {
-    Callback *callback;
+    Callback* callback;
     struct
     {
-      Semaphore *sem;
+      Semaphore* sem;
       uint32_t timeout;
     } sem_info;
-    OperationPollingStatus *status;
+    OperationPollingStatus* status;
     // TODO: state
   } data;
 
@@ -242,11 +242,11 @@ typedef Operation<ErrorCode> WriteOperation;
 
 /// @brief Function pointer type for write operations.
 /// @brief 写入操作的函数指针类型。
-typedef ErrorCode (*WriteFun)(WritePort &port, bool in_isr);
+typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
 
 /// @brief Function pointer type for read operations.
 /// @brief 读取操作的函数指针类型。
-typedef ErrorCode (*ReadFun)(ReadPort &port, bool in_isr);
+typedef ErrorCode (*ReadFun)(ReadPort& port, bool in_isr);
 
 /**
  * @brief Read information block structure.
@@ -279,7 +279,7 @@ class ReadPort
   };
 
   ReadFun read_fun_ = nullptr;
-  LockFreeQueue<uint8_t> *queue_data_ = nullptr;
+  LockFreeQueue<uint8_t>* queue_data_ = nullptr;
   ReadInfoBlock info_;
   std::atomic<BusyState> busy_{BusyState::IDLE};
 
@@ -335,7 +335,7 @@ class ReadPort
    * @return 返回自身的引用，以支持链式调用。
    *         Returns a reference to itself for chaining.
    */
-  ReadPort &operator=(ReadFun fun);
+  ReadPort& operator=(ReadFun fun);
 
   /**
    * @brief 更新读取操作的状态。
@@ -348,7 +348,7 @@ class ReadPort
    * @param info 需要更新状态的 `ReadInfoBlock` 引用。
    *             Reference to the `ReadInfoBlock` whose status needs to be updated.
    */
-  void Finish(bool in_isr, ErrorCode ans, ReadInfoBlock &info);
+  void Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info);
 
   /**
    * @brief 标记读取操作为运行中。
@@ -360,7 +360,7 @@ class ReadPort
    * @param info 需要更新状态的 `ReadInfoBlock` 引用。
    *             Reference to the `ReadInfoBlock` whose status needs to be updated.
    */
-  void MarkAsRunning(ReadInfoBlock &info);
+  void MarkAsRunning(ReadInfoBlock& info);
 
   /**
    * @brief 读取操作符重载，用于执行读取操作。
@@ -380,7 +380,7 @@ class ReadPort
    * @return 返回操作的 `ErrorCode`，指示操作结果。
    *         Returns an `ErrorCode` indicating the result of the operation.
    */
-  ErrorCode operator()(RawData data, ReadOperation &op, bool in_isr = false);
+  ErrorCode operator()(RawData data, ReadOperation& op, bool in_isr = false);
 
   /**
    * @brief RX 数据从软件队列成功出队后的通知。
@@ -419,8 +419,8 @@ class WritePort
   };
 
   WriteFun write_fun_ = nullptr;
-  LockFreeQueue<WriteInfoBlock> *queue_info_;
-  LockFreeQueue<uint8_t> *queue_data_;
+  LockFreeQueue<WriteInfoBlock>* queue_info_;
+  LockFreeQueue<uint8_t>* queue_data_;
   std::atomic<LockState> lock_{LockState::UNLOCKED};
 
   /**
@@ -443,7 +443,7 @@ class WritePort
      * @param port 指向 WritePort 的指针 Pointer to WritePort.
      * @param op 写操作对象（可重用）Write operation object (can be reused).
      */
-    Stream(LibXR::WritePort *port, LibXR::WriteOperation op);
+    Stream(LibXR::WritePort* port, LibXR::WriteOperation op);
 
     /**
      * @brief 析构时自动提交已累积的数据并释放锁。
@@ -458,7 +458,7 @@ class WritePort
      * @param data 要写入的数据 Data to write.
      * @return 返回自身引用 Enables chainable call.
      */
-    Stream &operator<<(const ConstRawData &data);
+    Stream& operator<<(const ConstRawData& data);
 
     /**
      * @brief 手动提交已写入的数据到队列，并尝试续锁。
@@ -474,7 +474,7 @@ class WritePort
     ErrorCode Commit();
 
    private:
-    LibXR::WritePort *port_;    ///< 写端口指针 Pointer to the WritePort
+    LibXR::WritePort* port_;    ///< 写端口指针 Pointer to the WritePort
     LibXR::WriteOperation op_;  ///< 写操作对象 Write operation object
     size_t cap_;                ///< 当前队列容量 Current queue capacity
     size_t size_ = 0;  ///< 当前已写入但未提交的字节数 Bytes written but not yet committed
@@ -539,7 +539,7 @@ class WritePort
    * @return 返回自身的引用，以支持链式调用。
    *         Returns a reference to itself for chaining.
    */
-  WritePort &operator=(WriteFun fun);
+  WritePort& operator=(WriteFun fun);
 
   /**
    * @brief 更新写入操作的状态。
@@ -556,7 +556,7 @@ class WritePort
    * @param op 需要更新状态的 `WriteOperation` 引用。
    *           Reference to the `WriteOperation` whose status needs to be updated.
    */
-  void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock &info);
+  void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info);
 
   /**
    * @brief 标记写入操作为运行中。
@@ -568,7 +568,7 @@ class WritePort
    * @param op 需要更新状态的 `WriteOperation` 引用。
    *           Reference to the `WriteOperation` whose status needs to be updated.
    */
-  void MarkAsRunning(WriteOperation &op);
+  void MarkAsRunning(WriteOperation& op);
 
   /**
    * @brief 执行写入操作。
@@ -588,7 +588,7 @@ class WritePort
    * @return 返回操作的 `ErrorCode`，指示操作结果。
    *         Returns an `ErrorCode` indicating the result of the operation.
    */
-  ErrorCode operator()(ConstRawData data, WriteOperation &op, bool in_isr = false);
+  ErrorCode operator()(ConstRawData data, WriteOperation& op, bool in_isr = false);
 
   /// @brief Resets the WritePort.
   /// @brief 重置WritePort。
@@ -608,7 +608,7 @@ class WritePort
    * @return 返回操作的 `ErrorCode`，指示操作结果。
    *         Returns an `ErrorCode` indicating the result of the operation.
    */
-  ErrorCode CommitWrite(ConstRawData data, WriteOperation &op, bool pushed = false,
+  ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool pushed = false,
                         bool in_isr = false);
 };
 
@@ -620,11 +620,11 @@ class STDIO
 {
  public:
   // NOLINTBEGIN
-  static inline ReadPort *read_ = nullptr;    ///< Read port instance. 读取端口。
-  static inline WritePort *write_ = nullptr;  ///< Write port instance. 写入端口。
-  static inline LibXR::Mutex *write_mutex_ =
+  static inline ReadPort* read_ = nullptr;    ///< Read port instance. 读取端口。
+  static inline WritePort* write_ = nullptr;  ///< Write port instance. 写入端口。
+  static inline LibXR::Mutex* write_mutex_ =
       nullptr;  ///< Write port mutex. 写入端口互斥锁。
-  static inline LibXR::WritePort::Stream *write_stream_ = nullptr;
+  static inline LibXR::WritePort::Stream* write_stream_ = nullptr;
 #if LIBXR_PRINTF_BUFFER_SIZE > 0
   static inline char
       printf_buff_[LIBXR_PRINTF_BUFFER_SIZE];  ///< Print buffer. 打印缓冲区。
@@ -640,6 +640,6 @@ class STDIO
    * @return Number of characters written, or negative on error.
    *         成功返回写入的字符数，失败返回负数。
    */
-  static int Printf(const char *fmt, ...);  // NOLINT
+  static int Printf(const char* fmt, ...);  // NOLINT
 };
 }  // namespace LibXR
