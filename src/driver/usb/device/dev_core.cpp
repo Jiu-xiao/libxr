@@ -52,6 +52,9 @@ DeviceCore::DeviceCore(
               {nullptr, 0},
               0xff,
               nullptr,
+              false,
+              false,
+              false,
               false})
 {
   ASSERT(IsValidUSBCombination(spec, speed, packet_size));
@@ -170,15 +173,18 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData& data)
     case Context::ZLP:
       // 主机中断 IN 操作后，重新配置控制端点
       // Re-configure control endpoint after host aborts IN transfer.
+      state_.status_out_armed = false;
       if (endpoint_.in0->GetState() == Endpoint::State::BUSY)
       {
         endpoint_.in0->Close();
         endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
         state_.in0 = Context::ZLP;
         state_.write_remain = {nullptr, 0};
+        ClearStatusOutArming();
       }
       // fall through
     case Context::STATUS_OUT:
+      state_.status_out_armed = false;
       break;
 
     case Context::DATA_OUT:
@@ -226,6 +232,11 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
   switch (status)
   {
     case Context::ZLP:
+      if (state_.arm_status_out_after_in_zlp)
+      {
+        state_.arm_status_out_after_in_zlp = false;
+        ArmStatusOutIfNeeded();
+      }
       break;
 
     case Context::STATUS_IN:
@@ -244,13 +255,19 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
       else if (state_.need_write_zlp)
       {
         state_.need_write_zlp = false;
-        ReadZLP();
+        state_.arm_status_out_after_in_zlp = !state_.status_out_armed;
         WriteZLP();
       }
       else if (class_req_.write)
       {
         class_req_.write = false;
         class_req_.class_ptr->OnClassData(in_isr, class_req_.b_request, data);
+      }
+
+      if (state_.arm_status_out_after_in_data)
+      {
+        state_.arm_status_out_after_in_data = false;
+        ArmStatusOutIfNeeded();
       }
       break;
 
@@ -264,12 +281,32 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
                                  size_t request_size, bool early_read_zlp)
 {
   state_.in0 = Context::DATA_IN;
+  ClearStatusOutArming();
 
-  // 限制最大传输长度
-  // Clamp max transfer length.
+  const bool FIRST_CHUNK = (state_.write_remain.size_ == 0);
+  const size_t PAYLOAD_TOTAL_SIZE = data.size_;
+  const size_t HOST_REQUEST_SIZE = (request_size > 0) ? request_size : PAYLOAD_TOTAL_SIZE;
+  size_t transfer_total_size = PAYLOAD_TOTAL_SIZE;
+
+  if (FIRST_CHUNK)
+  {
+    state_.status_out_armed = false;
+  }
+
   if (request_size > 0 && request_size < data.size_)
   {
     data.size_ = request_size;
+    transfer_total_size = request_size;
+  }
+
+  // `need_write_zlp` 依据主机可见的完整 control-IN 总长度推导，
+  // 而不是依据当前拆分后的单个分片长度。
+  // `need_write_zlp` is derived from the full control-IN payload length visible to the
+  // host, not from the current split chunk.
+  if (FIRST_CHUNK)
+  {
+    state_.need_write_zlp = (HOST_REQUEST_SIZE > transfer_total_size) &&
+                            ((transfer_total_size % endpoint_.in0->MaxPacketSize()) == 0);
   }
 
   // 数据长度为 0，直接 STALL（协议层面不允许）
@@ -292,26 +329,41 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
         reinterpret_cast<const uint8_t*>(data.addr_) + packet_max_length,
         data.size_ - packet_max_length};
     data.size_ = packet_max_length;
-    state_.need_write_zlp = false;
   }
   else
   {
     state_.write_remain = {nullptr, 0};
-    state_.need_write_zlp = (data.size_ % endpoint_.in0->MaxPacketSize()) == 0;
+    // 在最后一个非 ZLP IN 包完成后再挂起 STATUS OUT。
+    // Defer STATUS OUT arming until the final non-ZLP IN packet completes.
+    state_.arm_status_out_after_in_data =
+        !state_.need_write_zlp && !state_.status_out_armed;
   }
 
   auto buffer = endpoint_.in0->GetBuffer();
   ASSERT(buffer.size_ >= data.size_);
   LibXR::Memory::FastCopy(buffer.addr_, data.addr_, data.size_);
 
-  // early_read_zlp 防止主机实际读取小于 wLength，提前进入 DATA_OUT 阶段
-  // early_read_zlp: enter DATA_OUT early to tolerate host short-read (< wLength).
-  if (early_read_zlp || (!has_more && !state_.need_write_zlp))
+  if (early_read_zlp && !state_.status_out_armed)
   {
-    ReadZLP();
+    ArmStatusOutIfNeeded();
   }
 
   endpoint_.in0->Transfer(data.size_);
+}
+
+void DeviceCore::ClearStatusOutArming()
+{
+  state_.arm_status_out_after_in_data = false;
+  state_.arm_status_out_after_in_zlp = false;
+}
+
+void DeviceCore::ArmStatusOutIfNeeded()
+{
+  if (!state_.status_out_armed)
+  {
+    ReadZLP();
+    state_.status_out_armed = true;
+  }
 }
 
 void DeviceCore::DevReadEP0Data(LibXR::RawData data, size_t packet_max_length)
