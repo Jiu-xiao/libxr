@@ -9,7 +9,7 @@ using namespace LibXR;
 
 Semaphore::Semaphore(uint32_t init_count)
 {
-  tx_semaphore_create(&semaphore_handle_, const_cast<char *>("xr_sem"), init_count);
+  tx_semaphore_create(&semaphore_handle_, const_cast<char*>("xr_sem"), init_count);
 }
 
 Semaphore::~Semaphore() { tx_semaphore_delete(&semaphore_handle_); }

@@ -87,7 +87,7 @@ class Database
     {
       if (database.Get(*this) == ErrorCode::NOT_FOUND)
       {
-        memset(&data_, 0, sizeof(Data));
+        Memory::FastSet(&data_, 0, sizeof(Data));
         database.Add(*this);
       }
     }
@@ -352,7 +352,7 @@ class DatabaseRaw : public Database
    public:
     static void SetFlag(BlockBoolData<BlockSize>& obj, bool value)
     {
-      memset(obj.data, 0xFF, BlockSize);
+      Memory::FastSet(obj.data, 0xFF, BlockSize);
       if (!value)
       {
         obj.data[BlockSize - 1] &= 0xF0;
@@ -443,7 +443,7 @@ class DatabaseRaw : public Database
     FlashInfo()
     {
       header = 0xFFFFFFFF;
-      memset(padding, 0xFF, MinWriteSize);
+      Memory::FastSet(padding, 0xFF, MinWriteSize);
     }
 
     union
@@ -905,7 +905,7 @@ class DatabaseRaw : public Database
       {
         flash_.Write(offset, {data.addr_, final_block_index});
       }
-      memset(write_buffer_, 0xff, MinWriteSize);
+      Memory::FastSet(write_buffer_, 0xff, MinWriteSize);
       LibXR::Memory::FastCopy(
           write_buffer_, reinterpret_cast<const uint8_t*>(data.addr_) + final_block_index,
           data.size_ % MinWriteSize);

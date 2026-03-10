@@ -35,11 +35,13 @@ This repository only contains platform-independent stack code. For platform-spec
 
 ### Device Stack
 
-| Protocol | Status    | Notes                                                                                          |
-| -------- | --------- | ---------------------------------------------------------------------------------------------- |
-| CDC-ACM  | Supported | Implemented as LibXR’s UART class                                                              |
-| HID      | Supported | Only standard keyboard/mouse and remote controller; other types require you to derive your own |
-| UAC      | Supported | Currently implements a UAC 1.0 microphone only                                                 |
+| Protocol   | Status                        | Notes                                                                                          |
+| ---------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| CDC-ACM    | Supported                     | Implemented as LibXR’s UART class                                                              |
+| HID        | Supported                     | Only standard keyboard/mouse and remote controller; other types require you to derive your own |
+| UAC        | Supported                     | Currently implements a UAC 1.0 microphone only                                                 |
+| GSUSB      | Supported (CAN/FDCAN)         | Driverless SocketCAN on Linux                                                                  |
+| DAPLINK V2 | Supports (SWD interface only) | Can be used with Keil/OpenOCD                                                                  |
 
 ### Host Stack
 
@@ -53,8 +55,9 @@ TODO
 | STM32    | USB_DRV_FS    | Supported (Device) | STM32G431                  |
 | STM32    | USB_OTG_FS    | Supported (Device) | STM32F407                  |
 | STM32    | USB_OTG_HS    | Supported (Device) | STM32F407/STM32H750        |
+| CH32     | USB_DEVICE_FS | Supported          | CH32V203                   |
 | CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203/CH32V208 |
-| CH32     | USB_HS        | Supported          | CH32V307                   |
+| CH32     | USB_OTG_HS    | Supported (Device) | CH32V307                   |
 
 ## Documentation
 

@@ -22,6 +22,7 @@ Diagnostics:
             performance-*]
     Remove: [google-build-using-namespace,
             bugprone-undefined-memory-manipulation,
+            bugprone-dynamic-static-initializers,
             cppcoreguidelines-pro-type-union-access,
             cppcoreguidelines-pro-type-member-init,
             misc-no-recursion,
@@ -50,7 +51,8 @@ Diagnostics:
             cppcoreguidelines-avoid-const-or-ref-data-members,
             cppcoreguidelines-macro-usage,
             cppcoreguidelines-avoid-do-while,
-            misc-use-anonymous-namespace]
+            misc-use-anonymous-namespace,
+            google-default-arguments]
     CheckOptions:
       misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: 1
       modernize-loop-convert.MinConfidence: risky

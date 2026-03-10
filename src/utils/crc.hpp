@@ -63,9 +63,9 @@ class CRC8
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC8 值 / Computed CRC8 value
    */
-  static uint8_t Calculate(const void *raw, size_t len)
+  static uint8_t Calculate(const void* raw, size_t len)
   {
-    const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
     {
       GenerateTable();
@@ -88,9 +88,9 @@ class CRC8
    * @return 校验成功返回 `true`，否则返回 `false` /
    *         Returns `true` if the checksum is valid, otherwise returns `false`
    */
-  static bool Verify(const void *raw, size_t len)
+  static bool Verify(const void* raw, size_t len)
   {
-    const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
     {
       GenerateTable();
@@ -155,9 +155,9 @@ class CRC16
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC16 值 / Computed CRC16 value
    */
-  static uint16_t Calculate(const void *raw, size_t len)
+  static uint16_t Calculate(const void* raw, size_t len)
   {
-    const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
     {
       GenerateTable();
@@ -178,9 +178,9 @@ class CRC16
    * @return 校验成功返回 `true`，否则返回 `false` /
    *         Returns `true` if the checksum is valid, otherwise returns `false`
    */
-  static bool Verify(const void *raw, size_t len)
+  static bool Verify(const void* raw, size_t len)
   {
-    const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
     {
       GenerateTable();
@@ -192,7 +192,7 @@ class CRC16
     }
 
     uint16_t expected = Calculate(buf, len - sizeof(uint16_t));
-    return expected == (reinterpret_cast<const uint16_t *>(
+    return expected == (reinterpret_cast<const uint16_t*>(
                            buf + (len % 2)))[len / sizeof(uint16_t) - 1];
   }
 };
@@ -248,9 +248,9 @@ class CRC32
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC32 值 / Computed CRC32 value
    */
-  static uint32_t Calculate(const void *raw, size_t len)
+  static uint32_t Calculate(const void* raw, size_t len)
   {
-    const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
     {
       GenerateTable();
@@ -271,9 +271,9 @@ class CRC32
    * @return 校验成功返回 `true`，否则返回 `false` /
    *         Returns `true` if the checksum is valid, otherwise returns `false`
    */
-  static bool Verify(const void *raw, size_t len)
+  static bool Verify(const void* raw, size_t len)
   {
-    const uint8_t *buf = reinterpret_cast<const uint8_t *>(raw);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
     {
       GenerateTable();
@@ -285,7 +285,7 @@ class CRC32
     }
 
     uint32_t expected = Calculate(buf, len - sizeof(uint32_t));
-    return expected == (reinterpret_cast<const uint32_t *>(
+    return expected == (reinterpret_cast<const uint32_t*>(
                            buf + (len % 4)))[len / sizeof(uint32_t) - 1];
   }
 };

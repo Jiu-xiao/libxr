@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
-#include <cstring>
 #include <cstdio>
+#include <cstring>
+
+#include "libxr_mem.hpp"
 
 namespace LibXR
 {
@@ -20,26 +22,23 @@ struct IPAddressRaw
   static IPAddressRaw FromString(const char* str)
   {
     IPAddressRaw ip{};
-    std::sscanf(str, "%hhu.%hhu.%hhu.%hhu",
-                &ip.bytes[0], &ip.bytes[1], &ip.bytes[2], &ip.bytes[3]);
+    std::sscanf(str, "%hhu.%hhu.%hhu.%hhu", &ip.bytes[0], &ip.bytes[1], &ip.bytes[2],
+                &ip.bytes[3]);
     return ip;
   }
 
   void ToString(char out[IPADDR_STRLEN]) const
   {
-    std::snprintf(out, IPADDR_STRLEN, "%u.%u.%u.%u",
-                  bytes[0], bytes[1], bytes[2], bytes[3]);
+    std::snprintf(out, IPADDR_STRLEN, "%u.%u.%u.%u", bytes[0], bytes[1], bytes[2],
+                  bytes[3]);
   }
 
   bool operator==(const IPAddressRaw& other) const
   {
-    return std::memcmp(bytes, other.bytes, 4) == 0;
+    return Memory::FastCmp(bytes, other.bytes, 4) == 0;
   }
 
-  bool operator!=(const IPAddressRaw& other) const
-  {
-    return !(*this == other);
-  }
+  bool operator!=(const IPAddressRaw& other) const { return !(*this == other); }
 };
 
 /**
@@ -56,10 +55,7 @@ struct IPAddressStr
     return s;
   }
 
-  IPAddressRaw ToRaw() const
-  {
-    return IPAddressRaw::FromString(str);
-  }
+  IPAddressRaw ToRaw() const { return IPAddressRaw::FromString(str); }
 };
 
 /**
@@ -72,28 +68,23 @@ struct MACAddressRaw
   static MACAddressRaw FromString(const char* str)
   {
     MACAddressRaw mac{};
-    std::sscanf(str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-                &mac.bytes[0], &mac.bytes[1], &mac.bytes[2],
-                &mac.bytes[3], &mac.bytes[4], &mac.bytes[5]);
+    std::sscanf(str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac.bytes[0], &mac.bytes[1],
+                &mac.bytes[2], &mac.bytes[3], &mac.bytes[4], &mac.bytes[5]);
     return mac;
   }
 
   void ToString(char out[MACADDR_STRLEN]) const
   {
-    std::snprintf(out, MACADDR_STRLEN, "%02X:%02X:%02X:%02X:%02X:%02X",
-                  bytes[0], bytes[1], bytes[2],
-                  bytes[3], bytes[4], bytes[5]);
+    std::snprintf(out, MACADDR_STRLEN, "%02X:%02X:%02X:%02X:%02X:%02X", bytes[0],
+                  bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
   }
 
   bool operator==(const MACAddressRaw& other) const
   {
-    return std::memcmp(bytes, other.bytes, 6) == 0;
+    return Memory::FastCmp(bytes, other.bytes, 6) == 0;
   }
 
-  bool operator!=(const MACAddressRaw& other) const
-  {
-    return !(*this == other);
-  }
+  bool operator!=(const MACAddressRaw& other) const { return !(*this == other); }
 };
 
 /**
@@ -110,10 +101,7 @@ struct MACAddressStr
     return s;
   }
 
-  MACAddressRaw ToRaw() const
-  {
-    return MACAddressRaw::FromString(str);
-  }
+  MACAddressRaw ToRaw() const { return MACAddressRaw::FromString(str); }
 };
 
 /**

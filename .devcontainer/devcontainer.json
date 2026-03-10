@@ -7,9 +7,9 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
-				"twxs.cmake",
-				"ms-vscode.cpptools",
-				"ms-vscode.cmake-tools"
+				"llvm-vs-code-extensions.vscode-clangd",
+				"ms-vscode.cmake-tools",
+				"vadimcn.vscode-lldb"
 			]
 		}
 	}

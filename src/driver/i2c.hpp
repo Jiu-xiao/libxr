@@ -46,17 +46,19 @@ class I2C
    * This function reads data from the specified I2C slave address
    * and stores it in `read_data`.
    *
-   * @param slave_addr 目标 I2C 从设备的八位地址。
-   *                   The eight-bit address of the target I2C slave device.
+   * @param slave_addr 目标 I2C 从设备地址，不带 R/W 位。
+   *                   Target I2C slave address, no R/W bit included.
    * @param read_data 存储读取数据的 `RawData` 对象。
    *                  A `RawData` object to store the read data.
    * @param op 读取操作对象，包含同步或异步操作模式。
    *           Read operation object containing synchronous or asynchronous operation
    * mode.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，指示操作是否成功。
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
-  virtual ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation &op) = 0;
+  virtual ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
+                         bool in_isr = false) = 0;
 
   /**
    * @brief 向 I2C 设备写入数据。
@@ -65,18 +67,19 @@ class I2C
    * 该函数将 `write_data` 写入指定的 I2C 从设备地址。
    * This function writes `write_data` to the specified I2C slave address.
    *
-   * @param slave_addr 目标 I2C 从设备的八位地址。
-   *                   The eight-bit address of the target I2C slave device.
+   * @param slave_addr 目标 I2C 从设备地址，不带 R/W 位。
+   *                   Target I2C slave address, no R/W bit included.
    * @param write_data 需要写入的数据，`ConstRawData` 类型。
    *                   The data to be written, of type `ConstRawData`.
    * @param op 写入操作对象，包含同步或异步操作模式。
    *           Write operation object containing synchronous or asynchronous operation
    * mode.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，指示操作是否成功。
    *         Returns an `ErrorCode` indicating whether the operation was successful.
    */
   virtual ErrorCode Write(uint16_t slave_addr, ConstRawData write_data,
-                          WriteOperation &op) = 0;
+                          WriteOperation& op, bool in_isr = false) = 0;
 
   /**
    * @brief 配置 I2C 设备参数。
@@ -100,8 +103,8 @@ class I2C
    * This function reads data from the specified register of the I2C slave
    * and stores it in `read_data`.
    *
-   * @param slave_addr I2C 从设备的八位地址。
-   *                   The eight-bit address of the I2C slave device.
+   * @param slave_addr 目标 I2C 从设备地址，不带 R/W 位。
+   *                   Target I2C slave address, no R/W bit included.
    * @param mem_addr 寄存器地址（通常为 8 位或 16 位）。
    *                 Register address (typically 8-bit or 16-bit).
    * @param read_data 用于存储读取数据的 `RawData` 对象。
@@ -110,12 +113,14 @@ class I2C
    *          Read operation object (sync or async).
    * @param mem_addr_size 寄存器地址长度。
    *                      Size of register address in bytes.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，表示是否读取成功。
    *         Returns `ErrorCode` indicating success or failure.
    */
   virtual ErrorCode MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
-                            ReadOperation &op,
-                            MemAddrLength mem_addr_size = MemAddrLength::BYTE_8) = 0;
+                            ReadOperation& op,
+                            MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
+                            bool in_isr = false) = 0;
 
   /**
    * @brief 向 I2C 设备指定寄存器写入数据。
@@ -124,8 +129,8 @@ class I2C
    * 该函数将 `write_data` 写入指定 I2C 从设备的寄存器地址。
    * This function writes `write_data` to the specified register of the I2C slave.
    *
-   * @param slave_addr I2C 从设备的八位地址。
-   *                   The eight-bit address of the I2C slave device.
+   * @param slave_addr 目标 I2C 从设备地址，不带 R/W 位。
+   *                   Target I2C slave address, no R/W bit included.
    * @param mem_addr 寄存器地址（通常为 8 位或 16 位）。
    *                 Register address (typically 8-bit or 16-bit).
    * @param write_data 要写入的数据，`ConstRawData` 类型。
@@ -134,12 +139,14 @@ class I2C
    *          Write operation object (sync or async).
    * @param mem_addr_size 寄存器地址长度。
    *                      Size of register address in bytes.
+   * @param in_isr 是否在中断中进行操作。Whether the operation is performed in an ISR.
    * @return 返回 `ErrorCode`，表示是否写入成功。
    *         Returns `ErrorCode` indicating success or failure.
    */
   virtual ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr,
-                             ConstRawData write_data, WriteOperation &op,
-                             MemAddrLength mem_addr_size = MemAddrLength::BYTE_8) = 0;
+                             ConstRawData write_data, WriteOperation& op,
+                             MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
+                             bool in_isr = false) = 0;
 };
 
 }  // namespace LibXR

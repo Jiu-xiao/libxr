@@ -42,11 +42,13 @@ XRUSB是一个独立的现代 C++ USB 协议栈。以subtree的形式作为[LibX
 
 ### 设备协议栈
 
-| 协议    | 支持状态 | 其他                                              |
-| ------- | -------- | ------------------------------------------------- |
-| CDC-ACM | 支持     | 封装为LibXR的UART实现                             |
-| HID     | 支持     | 仅提供标准键盘/鼠标与遥控器，其他类型需要自行派生 |
-| UAC     | 支持     | 目前仅实现了UAC1.0的麦克风                        |
+| 协议       | 支持状态        | 其他                                              |
+| ---------- | --------------- | ------------------------------------------------- |
+| CDC-ACM    | 支持            | 封装为LibXR的UART实现                             |
+| HID        | 支持            | 仅提供标准键盘/鼠标与遥控器，其他类型需要自行派生 |
+| UAC        | 支持            | 目前仅实现了UAC1.0的麦克风                        |
+| GSUSB      | 支持(CAN/FDCAN) | 适用于 Linux 平台的免驱 SocketCAN                 |
+| DAPLINK V2 | 支持(仅SWD接口) | 可在Keil/OpenOCD使用                              |
 
 ### 主机协议栈
 
@@ -60,8 +62,9 @@ TODO
 | STM32 | USB_DRV_FS    | 支持 (Device) | STM32G431                  |
 | STM32 | USB_OTG_FS    | 支持 (Device) | STM32F407                  |
 | STM32 | USB_OTG_HS    | 支持 (Device) | STM32F407/STM32H750        |
+| CH32  | USB_DEVICE_FS | 支持          | CH32V203                   |
 | CH32  | USB_OTG_FS    | 支持 (Device) | CH32V307/CH32V203/CH32V208 |
-| CH32  | USB_HS        | 支持          | CH32V307                   |
+| CH32  | USB_OTG_HS    | 支持          | CH32V307                   |
 
 ## 文档
 

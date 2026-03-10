@@ -3,8 +3,11 @@
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
-typedef void (*ch32_dma_callback_t)(void *);
+typedef void (*ch32_dma_callback_t)(void*);
 
+/**
+ * @brief CH32 DMA 通道编号 / CH32 DMA channel identifier
+ */
 typedef enum
 {
 #if defined(DMA1_Channel1)
@@ -91,6 +94,9 @@ static constexpr IRQn_Type CH32_DMA_IRQ_MAP[] = {
 #if defined(DMA1_Channel7)
     DMA1_Channel7_IRQn,
 #endif
+#if defined(DMA1_Channel8)
+    DMA1_Channel8_IRQn,
+#endif
 #if defined(DMA2_Channel1)
     DMA2_Channel1_IRQn,
 #endif
@@ -126,9 +132,12 @@ static constexpr IRQn_Type CH32_DMA_IRQ_MAP[] = {
 #endif
 };
 
-ch32_dma_channel_t CH32_DMA_GetID(DMA_Channel_TypeDef *channel);
+ch32_dma_channel_t ch32_dma_get_id(DMA_Channel_TypeDef* channel);
 
-DMA_Channel_TypeDef *CH32_DMA_GetChannel(ch32_dma_channel_t id);
+DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id);
 
-void CH32_DMA_RegisterCallback(ch32_dma_channel_t id, ch32_dma_callback_t callback,
-                               void *arg);
+/**
+ * @brief 注册 DMA 回调 / Register DMA callback
+ */
+void ch32_dma_register_callback(ch32_dma_channel_t id, ch32_dma_callback_t callback,
+                                void* arg);

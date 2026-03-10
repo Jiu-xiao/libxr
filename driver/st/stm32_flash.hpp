@@ -13,13 +13,12 @@ namespace LibXR
 {
 
 /**
- * @brief STM32Flash 通用类，构造时传入扇区列表，自动判断编程粒度。
- *
+ * @brief 闪存扇区描述 / Flash sector descriptor
  */
 struct FlashSector
 {
-  uint32_t address;  //< 扇区起始地址 / Start address of the sector
-  uint32_t size;     //< 扇区大小 / Size of the sector
+  uint32_t address;  ///< 扇区起始地址 / Sector start address
+  uint32_t size;     ///< 扇区大小（字节） / Sector size in bytes
 };
 
 #if defined(FLASH_BANK_2) && defined(FLASH_BANK_1)
@@ -100,25 +99,25 @@ typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init, uint32_t
 #endif
 
 /**
- * @brief STM32Flash 通用类，构造时传入扇区列表，自动判断编程粒度。
+ * @brief STM32 闪存驱动实现 / STM32 flash driver implementation
  */
 class STM32Flash : public Flash
 {
  public:
   /**
-   * @brief STM32Flash 类，构造时传入扇区列表，自动判断编程粒度。
-   * @param sectors 扇区列表
-   * @param sector_count 扇区数量
-   * @param start_sector 起始扇区
+   * @brief 构造闪存对象 / Construct flash object
+   * @param sectors 扇区列表 / Sector list
+   * @param sector_count 扇区数量 / Number of sectors
+   * @param start_sector 起始扇区索引 / Start sector index
    *
    */
   STM32Flash(const FlashSector* sectors, size_t sector_count, size_t start_sector);
 
   /**
-   * @brief STM32Flash 类，自动取最后两个扇区
+   * @brief 构造并使用末尾扇区 / Construct using tail sectors
    *
-   * @param sectors 扇区列表
-   * @param sector_count 扇区数量
+   * @param sectors 扇区列表 / Sector list
+   * @param sector_count 扇区数量 / Number of sectors
    */
   STM32Flash(const FlashSector* sectors, size_t sector_count)
       : STM32Flash(sectors, sector_count, sector_count - 1)

@@ -56,7 +56,7 @@ class ASync
    * @param async 指向 `ASync` 实例的指针。
    *              Pointer to the `ASync` instance.
    */
-  static void ThreadFun(ASync *async)
+  static void ThreadFun(ASync* async)
   {
     while (true)
     {
@@ -93,7 +93,7 @@ class ASync
     return Status::DONE;
   }
 
-  using Job = LibXR::Callback<ASync *>;
+  using Job = LibXR::Callback<ASync*>;
 
   /**
    * @brief 分配一个异步任务并准备执行。

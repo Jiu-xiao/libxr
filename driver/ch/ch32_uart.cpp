@@ -1,3 +1,4 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 // ch32_uart.cpp
 
 #include "ch32_uart.hpp"
@@ -7,13 +8,13 @@
 
 using namespace LibXR;
 
-// === 静态对象指针表 ===
-CH32UART *CH32UART::map[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
+// Static instance map.
+CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
 
-// === 构造函数：串口+DMA+GPIO初始化 ===
+// Constructor: USART, DMA, and GPIO initialization.
 CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
-                   GPIO_TypeDef *tx_gpio_port, uint16_t tx_gpio_pin,
-                   GPIO_TypeDef *rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
+                   GPIO_TypeDef* tx_gpio_port, uint16_t tx_gpio_pin,
+                   GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
                    uint32_t tx_queue_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
       id_(id),
@@ -21,16 +22,27 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
       _write_port(tx_queue_size, dma_tx.size_ / 2),
       dma_buff_rx_(dma_rx),
       dma_buff_tx_(dma_tx),
-      instance_(CH32_UART_GetInstanceID(id)),
+      instance_(ch32_uart_get_instance_id(id)),
       dma_rx_channel_(CH32_UART_RX_DMA_CHANNEL_MAP[id]),
       dma_tx_channel_(CH32_UART_TX_DMA_CHANNEL_MAP[id])
 {
-  map[id] = this;
+  map_[id] = this;
 
   bool tx_enable = dma_tx.size_ > 1;
   bool rx_enable = dma_rx.size_ > 0;
 
   ASSERT(tx_enable || rx_enable);
+  if (tx_enable)
+  {
+    ASSERT(dma_tx_channel_ != nullptr);
+    ASSERT(CH32_UART_TX_DMA_IT_MAP[id] != 0);
+  }
+  if (rx_enable)
+  {
+    ASSERT(dma_rx_channel_ != nullptr);
+    ASSERT(CH32_UART_RX_DMA_IT_TC_MAP[id] != 0);
+    ASSERT(CH32_UART_RX_DMA_IT_HT_MAP[id] != 0);
+  }
 
   /* GPIO配置（TX: 推挽输出，RX: 悬空输入） */
   GPIO_InitTypeDef gpio_init = {};
@@ -38,7 +50,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (tx_enable)
   {
-    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(tx_gpio_port), ENABLE);
+    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(tx_gpio_port), ENABLE);
     gpio_init.GPIO_Pin = tx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_Init(tx_gpio_port, &gpio_init);
@@ -47,7 +59,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (rx_enable)
   {
-    RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(rx_gpio_port), ENABLE);
+    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(rx_gpio_port), ENABLE);
     gpio_init.GPIO_Pin = rx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(rx_gpio_port, &gpio_init);
@@ -116,11 +128,11 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (rx_enable)
   {
-    ch32_dma_callback_t rx_cb_fun = [](void *arg)
-    { reinterpret_cast<CH32UART *>(arg)->RxDmaIRQHandler(); };
+    ch32_dma_callback_t rx_cb_fun = [](void* arg)
+    { reinterpret_cast<CH32UART*>(arg)->RxDmaIRQHandler(); };
 
-    CH32_DMA_RegisterCallback(CH32_DMA_GetID(CH32_UART_RX_DMA_CHANNEL_MAP[id]), rx_cb_fun,
-                              this);
+    ch32_dma_register_callback(ch32_dma_get_id(CH32_UART_RX_DMA_CHANNEL_MAP[id]),
+                               rx_cb_fun, this);
 
     DMA_DeInit(dma_rx_channel_);
     dma_init.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
@@ -137,11 +149,11 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (tx_enable)
   {
-    ch32_dma_callback_t tx_cb_fun = [](void *arg)
-    { reinterpret_cast<CH32UART *>(arg)->TxDmaIRQHandler(); };
+    ch32_dma_callback_t tx_cb_fun = [](void* arg)
+    { reinterpret_cast<CH32UART*>(arg)->TxDmaIRQHandler(); };
 
-    CH32_DMA_RegisterCallback(CH32_DMA_GetID(CH32_UART_TX_DMA_CHANNEL_MAP[id]), tx_cb_fun,
-                              this);
+    ch32_dma_register_callback(ch32_dma_get_id(CH32_UART_TX_DMA_CHANNEL_MAP[id]),
+                               tx_cb_fun, this);
     DMA_DeInit(dma_tx_channel_);
     dma_init.DMA_PeripheralBaseAddr = (u32)(&instance_->DATAR);
     dma_init.DMA_MemoryBaseAddr = 0;
@@ -159,18 +171,18 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   if (rx_enable)
   {
     USART_ITConfig(instance_, USART_IT_IDLE, ENABLE);
-    NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[CH32_DMA_GetID(dma_rx_channel_)]);
+    NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_rx_channel_)]);
   }
 
   if (tx_enable)
   {
-    NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[CH32_DMA_GetID(dma_tx_channel_)]);
+    NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_tx_channel_)]);
   }
 
   NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id]);
 }
 
-// === 串口运行时配置变更 ===
+// Runtime USART configuration.
 ErrorCode CH32UART::SetConfig(UART::Configuration config)
 {
   USART_InitTypeDef usart_cfg = {};
@@ -214,33 +226,46 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
 
   USART_Cmd(instance_, ENABLE);
 
+  if (tx_busy_.IsSet())
+  {
+    dma_tx_channel_->CNTR = dma_buff_tx_.GetActiveLength();
+    dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(dma_buff_tx_.ActiveBuffer());
+    DMA_Cmd(dma_tx_channel_, ENABLE);
+  }
+
   return ErrorCode::OK;
 }
 
-// === 写操作回调（DMA搬运） ===
-ErrorCode CH32UART::WriteFun(WritePort &port)
+// Write callback (DMA-based transfer).
+ErrorCode CH32UART::WriteFun(WritePort& port, bool)
 {
-  CH32UART *uart = CONTAINER_OF(&port, CH32UART, _write_port);
+  CH32UART* uart = CONTAINER_OF(&port, CH32UART, _write_port);
+
+  if (uart->in_tx_isr.IsSet())
+  {
+    return ErrorCode::PENDING;
+  }
+
   if (!uart->dma_buff_tx_.HasPending())
   {
     WriteInfoBlock info;
     if (port.queue_info_->Peek(info) != ErrorCode::OK)
     {
-      return ErrorCode::EMPTY;
+      return ErrorCode::PENDING;
     }
 
-    uint8_t *buffer = nullptr;
+    uint8_t* buffer = nullptr;
     bool use_pending = false;
 
     // DMA空闲判断
     bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
     if (dma_ready)
     {
-      buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
+      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
     }
     else
     {
-      buffer = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.PendingBuffer());
+      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer());
       use_pending = true;
     }
 
@@ -262,7 +287,7 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
       }
       else
       {
-        return ErrorCode::FAILED;
+        return ErrorCode::PENDING;
       }
     }
 
@@ -272,25 +297,25 @@ ErrorCode CH32UART::WriteFun(WritePort &port)
     uart->dma_tx_channel_->MADDR =
         reinterpret_cast<uint32_t>(uart->dma_buff_tx_.ActiveBuffer());
     uart->dma_tx_channel_->CNTR = info.data.size_;
-    uart->_write_port.write_size_ = info.data.size_;
+    uart->dma_buff_tx_.SetActiveLength(info.data.size_);
+    uart->tx_busy_.Set();
     DMA_Cmd(uart->dma_tx_channel_, ENABLE);
 
     return ErrorCode::OK;
   }
-  return ErrorCode::FAILED;
+  return ErrorCode::PENDING;
 }
 
-// === 读操作回调（由中断驱动） ===
-ErrorCode CH32UART::ReadFun(ReadPort &port)
+// Read callback (interrupt-driven).
+ErrorCode CH32UART::ReadFun(ReadPort&, bool)
 {
-  UNUSED(port);
   // 接收由 IDLE 中断驱动，读取在 ISR 中完成
-  return ErrorCode::EMPTY;
+  return ErrorCode::PENDING;
 }
 
-void CH32_UART_RX_ISR_Handler(LibXR::CH32UART *uart)
+void ch32_uart_rx_isr_handler(LibXR::CH32UART* uart)
 {
-  auto rx_buf = static_cast<uint8_t *>(uart->dma_buff_rx_.addr_);
+  auto rx_buf = static_cast<uint8_t*>(uart->dma_buff_rx_.addr_);
   size_t dma_size = uart->dma_buff_rx_.size_;
   size_t curr_pos = dma_size - uart->dma_rx_channel_->CNTR;
   size_t last_pos = uart->last_rx_pos_;
@@ -313,10 +338,10 @@ void CH32_UART_RX_ISR_Handler(LibXR::CH32UART *uart)
   }
 }
 
-// === USART IDLE中断服务 ===
-extern "C" void CH32_UART_ISR_Handler_IDLE(ch32_uart_id_t id)
+// USART IDLE interrupt handler.
+extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 {
-  auto uart = CH32UART::map[id];
+  auto uart = CH32UART::map_[id];
   if (!uart)
   {
     return;
@@ -330,13 +355,17 @@ extern "C" void CH32_UART_ISR_Handler_IDLE(ch32_uart_id_t id)
 
   USART_ReceiveData(uart->instance_);
 
-  CH32_UART_RX_ISR_Handler(uart);
+  ch32_uart_rx_isr_handler(uart);
 }
 
-// === DMA TX完成中断服务 ===
-extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
+// DMA TX completion interrupt handler.
+extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
 {
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
+
+  uart->tx_busy_.Clear();
+
+  Flag::ScopedRestore tx_flag(uart->in_tx_isr);
 
   size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
 
@@ -347,14 +376,14 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
 
   uart->dma_buff_tx_.Switch();
 
-  auto *buf = reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.ActiveBuffer());
+  auto* buf = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
   DMA_Cmd(uart->dma_tx_channel_, DISABLE);
   uart->dma_tx_channel_->MADDR = (uint32_t)buf;
   uart->dma_tx_channel_->CNTR = pending_len;
-  uart->_write_port.write_size_ = pending_len;
+  uart->dma_buff_tx_.SetActiveLength(pending_len);
   DMA_Cmd(uart->dma_tx_channel_, ENABLE);
 
-  WriteInfoBlock &current_info = uart->write_info_active_;
+  WriteInfoBlock& current_info = uart->write_info_active_;
 
   // 有pending包，继续取下一包
   if (uart->_write_port.queue_info_->Pop(current_info) != ErrorCode::OK)
@@ -363,7 +392,7 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
     return;
   }
 
-  current_info.op.UpdateStatus(true, ErrorCode::OK);
+  uart->write_port_->Finish(true, ErrorCode::OK, current_info);
 
   // 预装pending区
   WriteInfoBlock next_info;
@@ -373,7 +402,7 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
   }
 
   if (uart->write_port_->queue_data_->PopBatch(
-          reinterpret_cast<uint8_t *>(uart->dma_buff_tx_.PendingBuffer()),
+          reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer()),
           next_info.data.size_) != ErrorCode::OK)
   {
     ASSERT(false);
@@ -385,12 +414,18 @@ extern "C" void CH32_UART_ISR_Handler_TX_CPLT(CH32UART *uart)
   uart->dma_buff_tx_.EnablePending();
 }
 
-// === DMA 通道中断回调 ===
+// DMA channel IRQ callbacks.
 void CH32UART::TxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET) return;
+  if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET)
+  {
+    return;
+  }
 
-  if (dma_tx_channel_->CNTR == 0) CH32_UART_ISR_Handler_TX_CPLT(this);
+  if (dma_tx_channel_->CNTR == 0)
+  {
+    ch32_uart_isr_handler_tx_cplt(this);
+  }
 }
 
 /**
@@ -406,78 +441,112 @@ void CH32UART::RxDmaIRQHandler()
   if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET)
   {
     DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
-    CH32_UART_RX_ISR_Handler(this);
+    ch32_uart_rx_isr_handler(this);
   }
 
   if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) == SET)
   {
     DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
-    CH32_UART_RX_ISR_Handler(this);
+    ch32_uart_rx_isr_handler(this);
   }
 }
 
-// === 各类串口中断入口适配 ===
+// USART IRQ entry adapters.
 #if defined(USART1)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART1_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART1_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART1); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART1_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART1); }
 #endif
 #if defined(USART2)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART2_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART2_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART2); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART2_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART2); }
 #endif
 #if defined(USART3)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART3_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART3_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART3); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART3_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART3); }
 #endif
 #if defined(USART4)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART4_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART4_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART4); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART4_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART4); }
 #endif
 #if defined(USART5)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART5_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART5_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART5); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART5_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART5); }
 #endif
 #if defined(USART6)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART6_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART6_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART6); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART6_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART6); }
 #endif
 #if defined(USART7)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART7_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART7_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART7); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART7_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART7); }
 #endif
 #if defined(USART8)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART8_IRQHandler(void) __attribute__((interrupt));
-extern "C" void USART8_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_USART8); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void USART8_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART8); }
 #endif
 #if defined(UART1)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART1_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART1_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART1); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART1_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART1); }
 #endif
 #if defined(UART2)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART2_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART2_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART2); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART2_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART2); }
 #endif
 #if defined(UART3)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART3_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART3_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART3); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART3_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART3); }
 #endif
 #if defined(UART4)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART4_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART4_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART4); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART4_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART4); }
 #endif
 #if defined(UART5)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART5_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART5_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART5); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART5_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART5); }
 #endif
 #if defined(UART6)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART6_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART6_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART6); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART6_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART6); }
 #endif
 #if defined(UART7)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART7_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART7_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART7); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART7_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART7); }
 #endif
 #if defined(UART8)
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART8_IRQHandler(void) __attribute__((interrupt));
-extern "C" void UART8_IRQHandler(void) { CH32_UART_ISR_Handler_IDLE(CH32_UART8); }
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART8_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART8); }
 #endif
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

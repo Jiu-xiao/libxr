@@ -1,6 +1,7 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_spi_def.hpp"
 
-ch32_spi_id_t CH32_SPI_GetID(SPI_TypeDef *addr)
+ch32_spi_id_t ch32_spi_get_id(SPI_TypeDef* addr)
 {
   if (addr == nullptr)
   {
@@ -28,7 +29,7 @@ ch32_spi_id_t CH32_SPI_GetID(SPI_TypeDef *addr)
   return ch32_spi_id_t::CH32_SPI_NUMBER;
 }
 
-SPI_TypeDef *CH32_SPI_GetInstanceID(ch32_spi_id_t id)
+SPI_TypeDef* ch32_spi_get_instance_id(ch32_spi_id_t id)
 {
   switch (id)
   {
@@ -48,3 +49,5 @@ SPI_TypeDef *CH32_SPI_GetInstanceID(ch32_spi_id_t id)
       return nullptr;
   }
 }
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

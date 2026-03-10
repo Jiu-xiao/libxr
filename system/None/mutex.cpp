@@ -10,16 +10,20 @@ Mutex::Mutex() : mutex_handle_(1) {}
 
 Mutex::~Mutex() {}
 
-ErrorCode Mutex::Lock() {
-  while (mutex_handle_ < 1) {
+ErrorCode Mutex::Lock()
+{
+  while (mutex_handle_ < 1)
+  {
     Timer::RefreshTimerInIdle();
   }
   mutex_handle_ = 0;
   return ErrorCode::OK;
 }
 
-ErrorCode Mutex::TryLock() {
-  if (mutex_handle_ == 0) {
+ErrorCode Mutex::TryLock()
+{
+  if (mutex_handle_ == 0)
+  {
     return ErrorCode::BUSY;
   }
   mutex_handle_ = 0;
