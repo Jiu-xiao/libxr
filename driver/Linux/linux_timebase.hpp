@@ -20,11 +20,7 @@ class LinuxTimebase : public Timebase
    */
   MicrosecondTimestamp _get_microseconds()
   {
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    return ((tv.tv_sec - libxr_linux_start_time.tv_sec) * 1000000 +
-            (tv.tv_usec - libxr_linux_start_time.tv_usec)) %
-           UINT32_MAX;
+    return MicrosecondTimestamp(static_cast<uint64_t>(GetElapsedMicroseconds()));
   }
 
   /**
@@ -34,11 +30,16 @@ class LinuxTimebase : public Timebase
    */
   MillisecondTimestamp _get_milliseconds()
   {
+    return MillisecondTimestamp(static_cast<uint32_t>(GetElapsedMicroseconds() / 1000LL));
+  }
+
+ private:
+  static int64_t GetElapsedMicroseconds()
+  {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
-    return ((tv.tv_sec - libxr_linux_start_time.tv_sec) * 1000 +
-            (tv.tv_usec - libxr_linux_start_time.tv_usec) / 1000) %
-           UINT32_MAX;
+    return static_cast<int64_t>(tv.tv_sec - libxr_linux_start_time.tv_sec) * 1000000LL +
+           static_cast<int64_t>(tv.tv_usec - libxr_linux_start_time.tv_usec);
   }
 };
 }  // namespace LibXR
