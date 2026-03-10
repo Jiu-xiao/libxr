@@ -138,6 +138,16 @@ class JtagGeneralGPIO final : public Jtag
 
   ErrorCode ResetTap() override
   {
+    (void)tck_.SetConfig(
+        {TckGpioType::Direction::OUTPUT_PUSH_PULL, TckGpioType::Pull::NONE});
+    (void)tms_.SetConfig(
+        {TmsGpioType::Direction::OUTPUT_PUSH_PULL, TmsGpioType::Pull::UP});
+    (void)tdi_.SetConfig(
+        {TdiGpioType::Direction::OUTPUT_PUSH_PULL, TdiGpioType::Pull::NONE});
+    (void)tdo_.SetConfig({TdoGpioType::Direction::INPUT, TdoGpioType::Pull::NONE});
+
+    tck_.Write(false);
+    tdi_.Write(false);
     tms_.Write(true);
     for (uint32_t i = 0; i < RESET_CYCLES; ++i)
     {
@@ -221,28 +231,7 @@ class JtagGeneralGPIO final : public Jtag
     {
       return ErrorCode::OK;
     }
-
-    if (tdo_lsb_first != nullptr)
-    {
-      const uint32_t BYTES = (cycles + 7u) / 8u;
-      Memory::FastSet(tdo_lsb_first, 0, BYTES);
-    }
-
-    for (uint32_t i = 0; i < cycles; ++i)
-    {
-      const bool TDI_VAL = (tdi_lsb_first == nullptr)
-                               ? false
-                               : (((tdi_lsb_first[i / 8u] >> (i & 7u)) & 0x1u) != 0u);
-      bool tdo_bit = false;
-      ClockCycle(tms, TDI_VAL, tdo_lsb_first ? &tdo_bit : nullptr);
-
-      if (tdo_lsb_first != nullptr && tdo_bit)
-      {
-        tdo_lsb_first[i / 8u] =
-            static_cast<uint8_t>(tdo_lsb_first[i / 8u] | (1u << (i & 7u)));
-      }
-    }
-
+    SequenceFast(cycles, tms, tdi_lsb_first, tdo_lsb_first);
     return ErrorCode::OK;
   }
 
@@ -322,6 +311,64 @@ class JtagGeneralGPIO final : public Jtag
     {
       out_lsb_first[LAST / 8u] =
           static_cast<uint8_t>(out_lsb_first[LAST / 8u] | (1u << (LAST & 7u)));
+    }
+  }
+
+  void SequenceFast(uint32_t cycles, bool tms, const uint8_t* tdi_lsb_first,
+                    uint8_t* tdo_lsb_first)
+  {
+    if (tdo_lsb_first != nullptr)
+    {
+      const uint32_t BYTES = (cycles + 7u) / 8u;
+      Memory::FastSet(tdo_lsb_first, 0, BYTES);
+    }
+
+    tms_.Write(tms);
+    tck_.Write(false);
+
+    if (half_period_loops_ == 0u)
+    {
+      for (uint32_t i = 0; i < cycles; ++i)
+      {
+        const bool TDI_VAL =
+            (tdi_lsb_first == nullptr)
+                ? false
+                : (((tdi_lsb_first[i / 8u] >> (i & 7u)) & 0x1u) != 0u);
+
+        tdi_.Write(TDI_VAL);
+        tck_.Write(true);
+
+        if (tdo_lsb_first != nullptr && tdo_.Read())
+        {
+          tdo_lsb_first[i / 8u] =
+              static_cast<uint8_t>(tdo_lsb_first[i / 8u] | (1u << (i & 7u)));
+        }
+
+        tck_.Write(false);
+      }
+      return;
+    }
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      const bool TDI_VAL =
+          (tdi_lsb_first == nullptr)
+              ? false
+              : (((tdi_lsb_first[i / 8u] >> (i & 7u)) & 0x1u) != 0u);
+
+      tdi_.Write(TDI_VAL);
+      tck_.Write(false);
+      DelayHalf();
+      tck_.Write(true);
+
+      if (tdo_lsb_first != nullptr && tdo_.Read())
+      {
+        tdo_lsb_first[i / 8u] =
+            static_cast<uint8_t>(tdo_lsb_first[i / 8u] | (1u << (i & 7u)));
+      }
+
+      DelayHalf();
+      tck_.Write(false);
     }
   }
 
