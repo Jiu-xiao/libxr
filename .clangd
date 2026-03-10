@@ -1,3 +1,11 @@
+CompileFlags:
+  Add: [-isystem,/usr/arm-none-eabi/include/c++/15.2.0,
+        -isystem,/usr/arm-none-eabi/include/c++/15.2.0/arm-none-eabi,
+        -isystem,/usr/arm-none-eabi/include/c++/15.2.0/backward,
+        -isystem,/usr/lib/gcc/arm-none-eabi/15.2.0/include,
+        -isystem,/usr/lib/gcc/arm-none-eabi/15.2.0/include-fixed,
+        -isystem,/usr/arm-none-eabi/include]
+
 Diagnostics:
   ClangTidy:
     Add:   [readability-braces-around-statements,
