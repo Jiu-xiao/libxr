@@ -2,8 +2,8 @@
 
 using namespace LibXR;
 
-template class LibXR::Callback<const CAN::ClassicPack &>;
-template class LibXR::Callback<const FDCAN::FDPack &>;
+template class LibXR::Callback<const CAN::ClassicPack&>;
+template class LibXR::Callback<const FDCAN::FDPack&>;
 
 void CAN::Register(Callback cb, Type type, FilterMode mode, uint32_t start_id_mask,
                    uint32_t end_id_mask)
@@ -15,11 +15,11 @@ void CAN::Register(Callback cb, Type type, FilterMode mode, uint32_t start_id_ma
   subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
 }
 
-void CAN::OnMessage(const ClassicPack &pack, bool in_isr)
+void CAN::OnMessage(const ClassicPack& pack, bool in_isr)
 {
   ASSERT(pack.type < Type::TYPE_NUM);
   subscriber_list_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
-      [&](Filter &node)
+      [&](Filter& node)
       {
         switch (node.mode)
         {
@@ -51,11 +51,11 @@ void FDCAN::Register(CallbackFD cb, Type type, FilterMode mode, uint32_t start_i
   subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);
 }
 
-void FDCAN::OnMessage(const FDPack &pack, bool in_isr)
+void FDCAN::OnMessage(const FDPack& pack, bool in_isr)
 {
   ASSERT(pack.type < Type::TYPE_NUM);
   subscriber_list_fd_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
-      [&](Filter &node)
+      [&](Filter& node)
       {
         switch (node.mode)
         {

@@ -21,8 +21,8 @@ class CAN
    */
   enum class Type : uint8_t
   {
-    STANDARD = 0,  ///< 标准数据帧（11-bit ID）。Standard data frame (11-bit ID).
-    EXTENDED = 1,  ///< 扩展数据帧（29-bit ID）。Extended data frame (29-bit ID).
+    STANDARD = 0,         ///< 标准数据帧（11-bit ID）。Standard data frame (11-bit ID).
+    EXTENDED = 1,         ///< 扩展数据帧（29-bit ID）。Extended data frame (29-bit ID).
     REMOTE_STANDARD = 2,  ///< 标准远程帧。Standard remote frame.
     REMOTE_EXTENDED = 3,  ///< 扩展远程帧。Extended remote frame.
     ERROR = 4,            ///< 错误帧（虚拟事件）。Error frame (virtual event).
@@ -48,8 +48,8 @@ class CAN
    */
   struct Mode
   {
-    bool loopback = false;     ///< 回环模式。Loopback mode.
-    bool listen_only = false;  ///< 只听（静默）模式。Listen-only (silent) mode.
+    bool loopback = false;         ///< 回环模式。Loopback mode.
+    bool listen_only = false;      ///< 只听（静默）模式。Listen-only (silent) mode.
     bool triple_sampling = false;  ///< 三采样。Triple sampling.
     bool one_shot = false;         ///< 单次发送模式。One-shot transmission.
   };
@@ -60,10 +60,10 @@ class CAN
    */
   struct Configuration
   {
-    uint32_t bitrate = 0;  ///< 仲裁相位目标波特率。Target nominal bitrate.
+    uint32_t bitrate = 0;       ///< 仲裁相位目标波特率。Target nominal bitrate.
     float sample_point = 0.0f;  ///< 仲裁相位采样点（0~1）。Nominal sample point (0–1).
-    BitTiming bit_timing;  ///< 位时序配置。Bit timing configuration.
-    Mode mode;             ///< 工作模式。Operating mode.
+    BitTiming bit_timing;       ///< 位时序配置。Bit timing configuration.
+    Mode mode;                  ///< 工作模式。Operating mode.
   };
 
   /**
@@ -71,7 +71,7 @@ class CAN
    * @param cfg 配置参数。Configuration parameters.
    * @return ErrorCode 操作结果。Error code.
    */
-  virtual ErrorCode SetConfig(const CAN::Configuration &cfg) = 0;
+  virtual ErrorCode SetConfig(const CAN::Configuration& cfg) = 0;
 
   /**
    * @brief 获取 CAN 外设时钟频率（Hz）。
@@ -89,7 +89,7 @@ class CAN
     uint8_t tx_error_counter = 0;  ///< 发送错误计数 TEC。Transmit error counter (TEC).
     uint8_t rx_error_counter = 0;  ///< 接收错误计数 REC。Receive error counter (REC).
 
-    bool bus_off = false;  ///< 是否处于 BUS-OFF。True if controller is bus-off.
+    bool bus_off = false;        ///< 是否处于 BUS-OFF。True if controller is bus-off.
     bool error_passive = false;  ///< 是否处于 Error Passive。True if error-passive.
     bool error_warning = false;  ///< 是否处于 Error Warning。True if error-warning.
   };
@@ -104,7 +104,7 @@ class CAN
    * @param state 输出参数，用于返回当前错误状态。
    * @return ErrorCode 操作结果；若未实现则返回 ErrorCode::NOT_SUPPORT。
    */
-  virtual ErrorCode GetErrorState(ErrorState &state) const
+  virtual ErrorCode GetErrorState(ErrorState& state) const
   {
     (void)state;
     return ErrorCode::NOT_SUPPORT;
@@ -127,9 +127,9 @@ class CAN
    */
   struct ClassicPack
   {
-    uint32_t id;  ///< CAN ID（11/29 bit 或 ErrorID）。CAN ID (11/29 bits or ErrorID).
-    Type type;    ///< 帧类型。Frame type.
-    uint8_t dlc;  ///< 有效数据长度（0~8）。Data length code (0–8).
+    uint32_t id;      ///< CAN ID（11/29 bit 或 ErrorID）。CAN ID (11/29 bits or ErrorID).
+    Type type;        ///< 帧类型。Frame type.
+    uint8_t dlc;      ///< 有效数据长度（0~8）。Data length code (0–8).
     uint8_t data[8];  ///< 数据载荷。Data payload (up to 8 bytes).
   };
 #pragma pack(pop)
@@ -177,7 +177,7 @@ class CAN
   }
 
   /// 回调类型。Callback type.
-  using Callback = LibXR::Callback<const ClassicPack &>;
+  using Callback = LibXR::Callback<const ClassicPack&>;
 
   /**
    * @enum FilterMode
@@ -222,7 +222,7 @@ class CAN
    * @param pack 经典 CAN 帧。Classic CAN frame.
    * @return ErrorCode 操作结果。Error code.
    */
-  virtual ErrorCode AddMessage(const ClassicPack &pack) = 0;
+  virtual ErrorCode AddMessage(const ClassicPack& pack) = 0;
 
  protected:
   /**
@@ -231,7 +231,7 @@ class CAN
    * @param pack 接收到的帧。Received frame.
    * @param in_isr 是否在中断上下文中。True if called in ISR context.
    */
-  void OnMessage(const ClassicPack &pack, bool in_isr);
+  void OnMessage(const ClassicPack& pack, bool in_isr);
 
  private:
   /// 按帧类型划分的订阅者链表数组。Subscriber lists per frame type.
@@ -275,7 +275,7 @@ class FDCAN : public CAN
   using CAN::Register;
 
   /// FD 帧回调类型。Callback type for FD frames.
-  using CallbackFD = LibXR::Callback<const FDPack &>;
+  using CallbackFD = LibXR::Callback<const FDPack&>;
 
   /**
    * @struct Filter
@@ -336,7 +336,7 @@ class FDCAN : public CAN
    * @param cfg CAN 配置。CAN configuration.
    * @return ErrorCode 操作结果。Error code.
    */
-  virtual ErrorCode SetConfig(const CAN::Configuration &cfg) override = 0;
+  virtual ErrorCode SetConfig(const CAN::Configuration& cfg) override = 0;
 
   /**
    * @brief 设置 FDCAN 配置。
@@ -344,7 +344,7 @@ class FDCAN : public CAN
    * @param cfg FDCAN 配置。FDCAN configuration.
    * @return ErrorCode 操作结果。Error code.
    */
-  virtual ErrorCode SetConfig(const FDCAN::Configuration &cfg) = 0;
+  virtual ErrorCode SetConfig(const FDCAN::Configuration& cfg) = 0;
 
   /**
    * @brief 注册 FDCAN FD 帧回调。
@@ -363,7 +363,7 @@ class FDCAN : public CAN
    * @param pack FD CAN 帧。FD CAN frame.
    * @return ErrorCode 操作结果。Error code.
    */
-  virtual ErrorCode AddMessage(const FDPack &pack) = 0;
+  virtual ErrorCode AddMessage(const FDPack& pack) = 0;
 
  protected:
   using CAN::OnMessage;
@@ -374,7 +374,7 @@ class FDCAN : public CAN
    * @param pack 接收到的 FD 帧。Received FD frame.
    * @param in_isr 是否在中断上下文中。True if called in ISR context.
    */
-  void OnMessage(const FDPack &pack, bool in_isr);
+  void OnMessage(const FDPack& pack, bool in_isr);
 
  private:
   /// 按帧类型划分的 FD 订阅者链表数组。FD subscriber lists per frame type.

@@ -33,25 +33,25 @@ constexpr double M_1G = 9.80665;
 #ifndef OFFSET_OF
 /// \brief 计算结构体成员在结构体中的偏移量
 /// \brief Computes the offset of a member within a struct
-#define OFFSET_OF(type, member) ((size_t)&((type *)0)->member)
+#define OFFSET_OF(type, member) ((size_t)&((type*)0)->member)
 #endif
 
 #ifndef MEMBER_SIZE_OF
 /// \brief 获取结构体成员的大小
 /// \brief Retrieves the size of a member within a struct
-#define MEMBER_SIZE_OF(type, member) (sizeof(decltype(((type *)0)->member)))
+#define MEMBER_SIZE_OF(type, member) (sizeof(decltype(((type*)0)->member)))
 #endif
 
 #ifndef CONTAINER_OF
 /// \brief 通过成员指针获取包含该成员的结构体指针
 /// \brief Retrieve the pointer to the containing structure from a member pointer
 #define CONTAINER_OF(ptr, type, member) \
-  ((type *)((char *)(ptr) - OFFSET_OF(type, member)))  // NOLINT
+  ((type*)((char*)(ptr) - OFFSET_OF(type, member)))  // NOLINT
 #endif
 
 /// \brief 缓存行大小
-static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void *) == 8) ? 64 : 32;
-static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void *));
+static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
+static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void*));
 
 /**
  * @enum ErrorCode
@@ -145,7 +145,7 @@ enum class SizeLimitMode : uint8_t
  * @param line 出错的行号 | Line number where the error occurred
  * @param in_isr 是否发生在中断服务例程（ISR） | Whether it occurred in an ISR
  */
-extern "C" void libxr_fatal_error(const char *file, uint32_t line, bool in_isr);
+extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {

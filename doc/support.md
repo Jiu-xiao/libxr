@@ -21,7 +21,7 @@
 | ADC          | ❌             |
 | DAC          | ❌             |
 | PWM          | ❌             |
-| USB-CDC      | ❌             |
+| USB-DEVICE   | ❌             |
 | WDG          | ❌             |
 
 | `Network`   | Ubuntu/Debian |
@@ -45,7 +45,7 @@
 | ADC          | ✅                      | ⚙️             |
 | DAC          | ✅                      | ⚙️             |
 | PWM          | ✅                      | ⚙️             |
-| USB-CDC      | ✅                      | ⚙️             |
+| USB-DEVICE   | ✅                      | ⚙️             |
 | WDG          | ✅                      | ⚙️             |
 
 | `Network`   | STM32 |
@@ -69,7 +69,7 @@
 | ADC          | ✅        |
 | DAC          | ❌        |
 | PWM          | ✅        |
-| USB-CDC      | ❌        |
+| USB-DEVICE   | ❌        |
 | WDG          | ❌        |
 
 | `Network`   | ESP32-C3 |
@@ -87,13 +87,13 @@
 | FLASH        | ✅                 |
 | UART         | ✅                 |
 | SPI          | ✅                 |
-| I2C          | ❌                 |
-| CAN          | ❌                 |
+| I2C          | ✅                 |
+| CAN          | ✅                 |
 | CANFD        | 🚫                 |
 | ADC          | ❌                 |
 | DAC          | ❌                 |
 | PWM          | ✅                 |
-| USB-CDC      | ✅                 |
+| USB-DEVICE   | ✅                 |
 | WDG          | ❌                 |
 
 | `Network`   | CH32V307 |

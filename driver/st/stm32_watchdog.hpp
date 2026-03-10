@@ -9,8 +9,7 @@ namespace LibXR
 {
 
 /**
- * @class STM32Watchdog
- * @brief STM32 IWDG 独立看门狗 / Independent Watchdog
+ * @brief STM32 IWDG 看门狗驱动 / STM32 independent watchdog driver
  *
  */
 class STM32Watchdog : public Watchdog

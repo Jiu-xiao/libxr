@@ -1,4 +1,5 @@
 #include "timer.hpp"
+
 #include "lockfree_list.hpp"
 
 using namespace LibXR;
@@ -13,7 +14,7 @@ void Timer::SetCycle(TimerHandle handle, uint32_t cycle)
   handle->data_.cycle_ = cycle;
 }
 
-void Timer::RefreshThreadFunction(void *)
+void Timer::RefreshThreadFunction(void*)
 {
   MillisecondTimestamp time = Thread::GetTime();
   while (true)
@@ -32,8 +33,8 @@ void Timer::Add(TimerHandle handle)
     LibXR::Timer::list_ = new LibXR::LockFreeList();
 #ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
 #else
-    thread_handle_.Create<void *>(nullptr, RefreshThreadFunction, "libxr_timer_task",
-                                  stack_depth_, priority_);
+    thread_handle_.Create<void*>(nullptr, RefreshThreadFunction, "libxr_timer_task",
+                                 stack_depth_, priority_);
 #endif
   }
   list_->Add(*handle);
@@ -48,12 +49,12 @@ void Timer::Refresh()
 #ifndef LIBXR_NOT_SUPPORT_MUTI_THREAD
 
     auto thread_handle = Thread();
-    thread_handle.Create<void *>(nullptr, RefreshThreadFunction, "libxr_timer_task", 512,
-                                 Thread::Priority::HIGH);
+    thread_handle.Create<void*>(nullptr, RefreshThreadFunction, "libxr_timer_task", 512,
+                                Thread::Priority::HIGH);
 #endif
   }
 
-  auto fun = [](ControlBlock &block)
+  auto fun = [](ControlBlock& block)
   {
     if (!block.enable_)
     {

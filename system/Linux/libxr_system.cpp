@@ -26,7 +26,7 @@ static LibXR::LinuxTimebase libxr_linux_timebase;
 
 static LibXR::Semaphore stdo_sem;
 
-void StdiThread(LibXR::ReadPort *read_port)
+void StdiThread(LibXR::ReadPort* read_port)
 {
   static uint8_t read_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
 
@@ -64,7 +64,7 @@ void StdiThread(LibXR::ReadPort *read_port)
   }
 }
 
-void StdoThread(LibXR::WritePort *write_port)
+void StdoThread(LibXR::WritePort* write_port)
 {
   LibXR::WriteInfoBlock info;
   static uint8_t write_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
@@ -101,7 +101,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
   LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
   LibXR::Timer::stack_depth_ = timer_stack_depth;
-  auto write_fun = [](WritePort &port, bool)
+  auto write_fun = [](WritePort& port, bool)
   {
     UNUSED(port);
     stdo_sem.Post();
@@ -113,7 +113,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort &port, bool)
+  auto read_fun = [](ReadPort& port, bool)
   {
     UNUSED(port);
     return ErrorCode::PENDING;
@@ -133,9 +133,9 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
   tcsetattr(STDIN_FILENO, TCSANOW, &tty);  // 立即生效
 
   LibXR::Thread stdi_thread, stdo_thread;
-  stdi_thread.Create<LibXR::ReadPort *>(LibXR::STDIO::read_, StdiThread, "STDIO.read_",
-                                        1024, LibXR::Thread::Priority::MEDIUM);
+  stdi_thread.Create<LibXR::ReadPort*>(LibXR::STDIO::read_, StdiThread, "STDIO.read_",
+                                       1024, LibXR::Thread::Priority::MEDIUM);
 
-  stdo_thread.Create<LibXR::WritePort *>(LibXR::STDIO::write_, StdoThread, "STDIO.write_",
-                                         1024, LibXR::Thread::Priority::MEDIUM);
+  stdo_thread.Create<LibXR::WritePort*>(LibXR::STDIO::write_, StdoThread, "STDIO.write_",
+                                        1024, LibXR::Thread::Priority::MEDIUM);
 }

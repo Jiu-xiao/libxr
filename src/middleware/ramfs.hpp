@@ -25,7 +25,7 @@ class RamFS
    * @param  name 根目录的名称（默认为 "ramfs"）
    *         Name of the root directory (default: "ramfs")
    */
-  RamFS(const char *name = "ramfs");
+  RamFS(const char* name = "ramfs");
 
   /**
    * @brief  比较两个字符串
@@ -34,7 +34,7 @@ class RamFS
    * @param  b 字符串 B String B
    * @return int 比较结果 Comparison result
    */
-  static int CompareStr(const char *const &a, const char *const &b);
+  static int CompareStr(const char* const& a, const char* const& b);
 
   /**
    * @enum FsNodeType
@@ -47,7 +47,7 @@ class RamFS
     DIR,      ///< 目录 Directory
     DEVICE,   ///< 设备 Device
     STORAGE,  ///< 存储 Storage
-    UNKNOWN,   ///< 未知 Unknown
+    UNKNOWN,  ///< 未知 Unknown
   };
 
   /**
@@ -72,9 +72,9 @@ class RamFS
   class FsNode
   {
    public:
-    const char *name;
+    const char* name;
     FsNodeType type;
-    Dir *parent;
+    Dir* parent;
   };
 
   /**
@@ -87,16 +87,16 @@ class RamFS
    public:
     union
     {
-      void *addr;              ///< 读写地址 Read/Write address
-      const void *addr_const;  ///< 只读地址 Read-only address
-      int (*exec)(void *raw, int argc,
-                  char **argv);  ///< 可执行文件指针 Executable function pointer
+      void* addr;              ///< 读写地址 Read/Write address
+      const void* addr_const;  ///< 只读地址 Read-only address
+      int (*exec)(void* raw, int argc,
+                  char** argv);  ///< 可执行文件指针 Executable function pointer
     };
 
     union
     {
       size_t size;  ///< 文件大小 File size
-      void *arg;    ///< 可执行文件参数 Executable file argument
+      void* arg;    ///< 可执行文件参数 Executable file argument
     };
 
     FileType type;  ///< 文件类型 File type
@@ -108,7 +108,7 @@ class RamFS
      * @param  argv 参数列表 Argument list
      * @return int 执行结果 Execution result
      */
-    int Run(int argc, char **argv);
+    int Run(int argc, char** argv);
 
     /**
      * @brief  获取文件数据
@@ -118,27 +118,27 @@ class RamFS
      * @return const DataType& 数据引用 Reference to the data
      */
     template <typename DataType, SizeLimitMode LimitMode = SizeLimitMode::MORE>
-    const DataType &GetData()
+    const DataType& GetData()
     {
       LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(DataType), size);
       if (type == FileType::READ_WRITE)
       {
-        return *reinterpret_cast<DataType *>(addr);
+        return *reinterpret_cast<DataType*>(addr);
       }
       else if (type == FileType::READ_ONLY)
       {
-        return *reinterpret_cast<const DataType *>(addr_const);
+        return *reinterpret_cast<const DataType*>(addr_const);
       }
       else
       {
         ASSERT(false);
-        const void *addr = nullptr;
-        return *reinterpret_cast<const DataType *>(addr);
+        const void* addr = nullptr;
+        return *reinterpret_cast<const DataType*>(addr);
       }
     }
   } FileNode;
 
-  typedef RBTree<const char *>::Node<FileNode> File;
+  typedef RBTree<const char*>::Node<FileNode> File;
 
   /**
    * @class DeviceNode
@@ -156,7 +156,7 @@ class RamFS
    * @brief  设备类，继承自红黑树节点 DeviceNode
    *         Device class inheriting from Red-Black tree node DeviceNode
    */
-  class Device : public RBTree<const char *>::Node<DeviceNode>
+  class Device : public RBTree<const char*>::Node<DeviceNode>
   {
    public:
     /**
@@ -166,8 +166,8 @@ class RamFS
      * @param  read_port 读取端口（默认 ReadPort()）Read port (default: ReadPort())
      * @param  write_port 写入端口（默认 WritePort()）Write port (default: WritePort())
      */
-    Device(const char *name, const ReadPort &read_port = ReadPort(),
-           const WritePort &write_port = WritePort());
+    Device(const char* name, const ReadPort& read_port = ReadPort(),
+           const WritePort& write_port = WritePort());
 
     /**
      * @brief  读取设备数据
@@ -178,7 +178,7 @@ class RamFS
      * @return ErrorCode 错误码 Error code
      */
     template <typename ReadOperation>
-    ErrorCode Read(ReadOperation &&op, RawData data)
+    ErrorCode Read(ReadOperation&& op, RawData data)
     {
       return data_.read_port(data, std::forward<ReadOperation>(op));
     }
@@ -192,7 +192,7 @@ class RamFS
      * @return ErrorCode 错误码 Error code
      */
     template <typename WriteOperation>
-    ErrorCode Write(WriteOperation &&op, ConstRawData data)
+    ErrorCode Write(WriteOperation&& op, ConstRawData data)
     {
       return data_.write_port(data, std::forward<WriteOperation>(op));
     }
@@ -214,9 +214,9 @@ class RamFS
   class DirNode : public FsNode
   {
    public:
-    DirNode() : rbt(RBTree<const char *>(CompareStr)) {}
+    DirNode() : rbt(RBTree<const char*>(CompareStr)) {}
 
-    RBTree<const char *> rbt;  ///< 目录中的文件树 File tree in the directory
+    RBTree<const char*> rbt;  ///< 目录中的文件树 File tree in the directory
   };
 
   /**
@@ -225,7 +225,7 @@ class RamFS
    *         Directory class, inheriting from RBTree node, used for managing files,
    * subdirectories, and devices
    */
-  class Dir : public RBTree<const char *>::Node<DirNode>
+  class Dir : public RBTree<const char*>::Node<DirNode>
   {
    public:
     /**
@@ -233,7 +233,7 @@ class RamFS
      *         Adds a file to the current directory
      * @param  file 要添加的文件 The file to be added
      */
-    void Add(File &file)
+    void Add(File& file)
     {
       (*this)->rbt.Insert(file, file->name);
       file->parent = this;
@@ -243,7 +243,7 @@ class RamFS
      *         Adds a subdirectory to the current directory
      * @param  dir 要添加的子目录 The subdirectory to be added
      */
-    void Add(Dir &dir)
+    void Add(Dir& dir)
     {
       (*this)->rbt.Insert(dir, dir->name);
       dir->parent = this;
@@ -253,7 +253,7 @@ class RamFS
      *         Adds a device to the current directory
      * @param  dev 要添加的设备 The device to be added
      */
-    void Add(Device &dev)
+    void Add(Device& dev)
     {
       (*this)->rbt.Insert(dev, dev->name);
       dev->parent = this;
@@ -266,7 +266,7 @@ class RamFS
      * @return File* 指向文件的指针，如果未找到则返回 nullptr
      *         Pointer to the file, returns nullptr if not found
      */
-    File *FindFile(const char *name);
+    File* FindFile(const char* name);
 
     /**
      * @brief  递归查找文件
@@ -275,7 +275,7 @@ class RamFS
      * @return File* 指向文件的指针，如果未找到则返回 nullptr
      *         Pointer to the file, returns nullptr if not found
      */
-    File *FindFileRev(const char *name);
+    File* FindFileRev(const char* name);
 
     /**
      * @brief  查找当前目录中的子目录
@@ -284,7 +284,7 @@ class RamFS
      * @return Dir* 指向目录的指针，如果未找到则返回 nullptr
      *         Pointer to the directory, returns nullptr if not found
      */
-    Dir *FindDir(const char *name);
+    Dir* FindDir(const char* name);
 
     /**
      * @brief  递归查找子目录
@@ -293,7 +293,7 @@ class RamFS
      * @return Dir* 指向目录的指针，如果未找到则返回 nullptr
      *         Pointer to the directory, returns nullptr if not found
      */
-    Dir *FindDirRev(const char *name);
+    Dir* FindDirRev(const char* name);
 
     /**
      * @brief  递归查找设备
@@ -302,7 +302,7 @@ class RamFS
      * @return Device* 指向设备的指针，如果未找到则返回 nullptr
      *         Pointer to the device, returns nullptr if not found
      */
-    Device *FindDeviceRev(const char *name);
+    Device* FindDeviceRev(const char* name);
 
     /**
      * @brief  在当前目录中查找设备
@@ -311,7 +311,7 @@ class RamFS
      * @return Device* 指向设备的指针，如果未找到则返回 nullptr
      *         Pointer to the device, returns nullptr if not found
      */
-    Device *FindDevice(const char *name);
+    Device* FindDevice(const char* name);
   };
 
   /**
@@ -326,10 +326,10 @@ class RamFS
    *       Contains dynamic memory allocation.
    */
   template <typename DataType>
-  static File CreateFile(const char *name, DataType &raw)
+  static File CreateFile(const char* name, DataType& raw)
   {
     File file;
-    char *name_buff = new char[strlen(name) + 1];
+    char* name_buff = new char[strlen(name) + 1];
     strcpy(name_buff, name);
     file->name = name_buff;
 
@@ -362,8 +362,8 @@ class RamFS
    *       Contains dynamic memory allocation.
    */
   template <typename ArgType>
-  static File CreateFile(const char *name,
-                         int (*exec)(ArgType arg, int argc, char **argv), ArgType &&arg)
+  static File CreateFile(const char* name,
+                         int (*exec)(ArgType arg, int argc, char** argv), ArgType&& arg)
   {
     typedef struct
     {
@@ -373,7 +373,7 @@ class RamFS
 
     File file;
 
-    char *name_buff = new char[strlen(name) + 1];
+    char* name_buff = new char[strlen(name) + 1];
     strcpy(name_buff, name);
     file->name = name_buff;
     file->type = FileType::EXEC;
@@ -383,9 +383,9 @@ class RamFS
     block->exec_fun = exec;
     file->arg = block;
 
-    auto fun = [](void *arg, int argc, char **argv)
+    auto fun = [](void* arg, int argc, char** argv)
     {
-      auto block = reinterpret_cast<FileBlock *>(arg);
+      auto block = reinterpret_cast<FileBlock*>(arg);
       return block->exec_fun(block->arg, argc, argv);
     };
 
@@ -403,11 +403,11 @@ class RamFS
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  static Dir CreateDir(const char *name)
+  static Dir CreateDir(const char* name)
   {
     Dir dir;
 
-    char *name_buff = new char[strlen(name) + 1];
+    char* name_buff = new char[strlen(name) + 1];
     strcpy(name_buff, name);
     dir->name = name_buff;
     dir->type = FsNodeType::DIR;
@@ -420,19 +420,19 @@ class RamFS
    *         Adds a file to the root directory of the file system
    * @param  file 要添加的文件 The file to be added
    */
-  void Add(File &file) { root_.Add(file); }
+  void Add(File& file) { root_.Add(file); }
   /**
    * @brief  向文件系统的根目录添加子目录
    *         Adds a subdirectory to the root directory of the file system
    * @param  dir 要添加的子目录 The subdirectory to be added
    */
-  void Add(Dir &dir) { root_.Add(dir); }
+  void Add(Dir& dir) { root_.Add(dir); }
   /**
    * @brief  向文件系统的根目录添加设备
    *         Adds a device to the root directory of the file system
    * @param  dev 要添加的设备 The device to be added
    */
-  void Add(Device &dev) { root_.Add(dev); }
+  void Add(Device& dev) { root_.Add(dev); }
 
   /**
    * @brief  在整个文件系统中查找文件
@@ -441,7 +441,7 @@ class RamFS
    * @return File* 指向找到的文件的指针，如果未找到则返回 nullptr
    *         Pointer to the found file, or nullptr if not found
    */
-  File *FindFile(const char *name) { return root_.FindFileRev(name); }
+  File* FindFile(const char* name) { return root_.FindFileRev(name); }
   /**
    * @brief  在整个文件系统中查找目录
    *         Finds a directory in the entire file system
@@ -449,7 +449,7 @@ class RamFS
    * @return Dir* 指向找到的目录的指针，如果未找到则返回 nullptr
    *         Pointer to the found directory, or nullptr if not found
    */
-  Dir *FindDir(const char *name) { return root_.FindDirRev(name); }
+  Dir* FindDir(const char* name) { return root_.FindDirRev(name); }
   /**
    * @brief  在整个文件系统中查找设备
    *         Finds a device in the entire file system
@@ -457,7 +457,7 @@ class RamFS
    * @return Device* 指向找到的设备的指针，如果未找到则返回 nullptr
    *         Pointer to the found device, or nullptr if not found
    */
-  Device *FindDevice(const char *name) { return root_.FindDeviceRev(name); }
+  Device* FindDevice(const char* name) { return root_.FindDeviceRev(name); }
 
   /**
    * @brief  文件系统的根目录

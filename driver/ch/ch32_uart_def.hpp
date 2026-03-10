@@ -3,6 +3,9 @@
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
+/**
+ * @brief CH32 UART 实例编号 / CH32 UART instance identifier
+ */
 typedef enum
 {
 #if defined(USART1)
@@ -375,7 +378,7 @@ static constexpr uint32_t CH32_UART_RX_DMA_IT_HT_MAP[] = {
 #endif
 };
 
-static DMA_Channel_TypeDef *const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef* const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)
     DMA1_Channel4,
 #endif
@@ -386,19 +389,19 @@ static DMA_Channel_TypeDef *const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
     DMA1_Channel2,
 #endif
 #if defined(USART4)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART5)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART6)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART7)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART8)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(UART1)
     NULL,
@@ -430,7 +433,7 @@ static DMA_Channel_TypeDef *const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #endif
 };
 
-static DMA_Channel_TypeDef *const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
+static DMA_Channel_TypeDef* const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)
     DMA1_Channel5,
 #endif
@@ -441,19 +444,19 @@ static DMA_Channel_TypeDef *const CH32_UART_RX_DMA_CHANNEL_MAP[] = {
     DMA1_Channel3,
 #endif
 #if defined(USART4)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART5)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART6)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART7)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(USART8)
-    DMA1_Channelx,
+    nullptr,
 #endif
 #if defined(UART1)
     NULL,
@@ -536,5 +539,5 @@ static constexpr IRQn_Type CH32_UART_IRQ_MAP[] = {
 #endif
 };
 
-ch32_uart_id_t CH32_UART_GetID(USART_TypeDef *addr);
-USART_TypeDef *CH32_UART_GetInstanceID(ch32_uart_id_t);
+ch32_uart_id_t ch32_uart_get_id(USART_TypeDef* addr);
+USART_TypeDef* ch32_uart_get_instance_id(ch32_uart_id_t);

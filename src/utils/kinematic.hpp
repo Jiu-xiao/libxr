@@ -82,8 +82,8 @@ class Joint
 
   Runtime runtime_;  ///< 关节的运行时数据。 Runtime data of the joint.
 
-  Object<Scalar> *parent = nullptr;  ///< 指向父物体的指针。 Pointer to the parent object.
-  Object<Scalar> *child = nullptr;   ///< 指向子物体的指针。 Pointer to the child object.
+  Object<Scalar>* parent = nullptr;  ///< 指向父物体的指针。 Pointer to the parent object.
+  Object<Scalar>* child = nullptr;   ///< 指向子物体的指针。 Pointer to the child object.
   Param param_;                      ///< 关节的参数配置。 Parameters of the joint.
 
   /**
@@ -101,8 +101,8 @@ class Joint
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  Joint(Axis<Scalar> axis, Object<Scalar> *parent, Transform<Scalar> &parent2this,
-        Object<Scalar> *child, Transform<Scalar> &this2child)
+  Joint(Axis<Scalar> axis, Object<Scalar>* parent, Transform<Scalar>& parent2this,
+        Object<Scalar>* child, Transform<Scalar>& this2child)
       : parent(parent), child(child), param_({parent2this, this2child, axis, 1.0})
   {
     runtime_.inertia = Eigen::Matrix<Scalar, 3, 3>::Zero();
@@ -185,7 +185,7 @@ template <typename Scalar>
 class Object
 {
  public:
-  typedef List::Node<Joint<Scalar> *> Link;  ///< 关节链接类型。 Type for linking joints.
+  typedef List::Node<Joint<Scalar>*> Link;  ///< 关节链接类型。 Type for linking joints.
 
   /**
    * @brief 物体参数结构体，存储物体的惯性参数。
@@ -210,7 +210,7 @@ class Object
 
   List joints;  ///< 物体的关节列表。 List of joints associated with the object.
 
-  Joint<Scalar> *parent = nullptr;  ///< 指向父关节的指针。 Pointer to the parent joint.
+  Joint<Scalar>* parent = nullptr;  ///< 指向父关节的指针。 Pointer to the parent joint.
 
   Param param_;      ///< 物体参数。 Object parameters.
   Runtime runtime_;  ///< 物体运行时状态。 Object runtime data.
@@ -221,7 +221,7 @@ class Object
    *
    * @param inertia 物体的惯性参数。 The inertia parameters of the object.
    */
-  Object(Inertia<Scalar> &inertia) : param_({inertia}) {}
+  Object(Inertia<Scalar>& inertia) : param_({inertia}) {}
 
   /**
    * @brief 设置物体的位置信息。
@@ -234,7 +234,7 @@ class Object
    * @param pos 物体的新位置。
    *            The new position of the object.
    */
-  void SetPosition(const Position<Scalar> &pos) { runtime_.state = pos; }
+  void SetPosition(const Position<Scalar>& pos) { runtime_.state = pos; }
 
   /**
    * @brief 设置物体的旋转信息（四元数表示）。
@@ -247,7 +247,7 @@ class Object
    * @param quat 物体的新旋转四元数。
    *             The new quaternion representing the object's rotation.
    */
-  void SetQuaternion(const Quaternion<Scalar> &quat) { runtime_.state = quat; }
+  void SetQuaternion(const Quaternion<Scalar>& quat) { runtime_.state = quat; }
 
   virtual void CalcBackward() {}
 };
@@ -270,10 +270,10 @@ template <typename Scalar>
 class EndPoint : public Object<Scalar>
 {
  private:
-  Eigen::Matrix<Scalar, 6, Eigen::Dynamic> *jacobian_matrix_ =
+  Eigen::Matrix<Scalar, 6, Eigen::Dynamic>* jacobian_matrix_ =
       nullptr;  ///< 雅可比矩阵，用于逆运动学计算。 Jacobian matrix for inverse kinematics
                 ///< calculations.
-  Eigen::Matrix<Scalar, Eigen::Dynamic, 1> *delta_theta_ =
+  Eigen::Matrix<Scalar, Eigen::Dynamic, 1>* delta_theta_ =
       nullptr;  ///< 关节角度调整量。 Joint angle adjustments.
   Eigen::Matrix<Scalar, 6, 1> err_weight_ =
       Eigen::Matrix<Scalar, 6, 1>::Constant(1);  ///< 误差权重矩阵。 Error weight matrix.
@@ -295,7 +295,7 @@ class EndPoint : public Object<Scalar>
    *
    * @param inertia 物体的惯性参数。 The inertia parameters of the object.
    */
-  EndPoint(Inertia<Scalar> &inertia) : Object<Scalar>(inertia) {}
+  EndPoint(Inertia<Scalar>& inertia) : Object<Scalar>(inertia) {}
 
   /**
    * @brief 设置目标四元数方向。
@@ -303,7 +303,7 @@ class EndPoint : public Object<Scalar>
    *
    * @param quat 目标四元数。 The target quaternion.
    */
-  void SetTargetQuaternion(const Quaternion<Scalar> &quat) { target_quat_ = quat; }
+  void SetTargetQuaternion(const Quaternion<Scalar>& quat) { target_quat_ = quat; }
 
   /**
    * @brief 设置目标位置。
@@ -311,7 +311,7 @@ class EndPoint : public Object<Scalar>
    *
    * @param pos 目标位置。 The target position.
    */
-  void SetTargetPosition(const Position<Scalar> &pos) { target_pos_ = pos; }
+  void SetTargetPosition(const Position<Scalar>& pos) { target_pos_ = pos; }
 
   /**
    * @brief 设置误差权重矩阵。
@@ -323,7 +323,7 @@ class EndPoint : public Object<Scalar>
    *
    * @param weight 误差权重矩阵。 The error weight matrix.
    */
-  void SetErrorWeight(const Eigen::Matrix<Scalar, 6, 1> &weight) { err_weight_ = weight; }
+  void SetErrorWeight(const Eigen::Matrix<Scalar, 6, 1>& weight) { err_weight_ = weight; }
 
   /**
    * @brief 设置最大角速度。
@@ -404,7 +404,7 @@ class EndPoint : public Object<Scalar>
     /* Initialize */
     if (jacobian_matrix_ == nullptr)
     {
-      Object<Scalar> *tmp = this;
+      Object<Scalar>* tmp = this;
       for (int i = 0;; i++)
       {
         if (tmp->parent == nullptr)
@@ -477,7 +477,7 @@ class EndPoint : public Object<Scalar>
       /* Calculate Jacobian */
       do
       {
-        Joint<Scalar> *joint = this->parent;
+        Joint<Scalar>* joint = this->parent;
         for (int joint_index = 0; joint_index < joint_num_; joint_index++)
         {
           /* J = [translation[3], rotation[3]] */
@@ -501,7 +501,7 @@ class EndPoint : public Object<Scalar>
       /* Update Joint Angle */
       do
       {
-        Joint<Scalar> *joint = this->parent;
+        Joint<Scalar>* joint = this->parent;
 
         for (int joint_index = 0; joint_index < joint_num_; joint_index++)
         {
@@ -522,13 +522,13 @@ class EndPoint : public Object<Scalar>
       /* Recalculate Forward Kinematics */
       do
       {
-        Joint<Scalar> *joint = this->parent;
+        Joint<Scalar>* joint = this->parent;
 
         for (int joint_index = 0; joint_index < joint_num_; joint_index++)
         {
           if (joint_index == joint_num_ - 1)
           {
-            auto start_point = reinterpret_cast<StartPoint<Scalar> *>(joint->parent);
+            auto start_point = reinterpret_cast<StartPoint<Scalar>*>(joint->parent);
             start_point->CalcTargetForward();
             break;
           }
@@ -568,7 +568,7 @@ class StartPoint : public Object<Scalar>
    *
    * @param inertia 物体的惯性参数。 The inertia parameters of the object.
    */
-  StartPoint(Inertia<Scalar> &inertia) : Object<Scalar>(inertia) {}
+  StartPoint(Inertia<Scalar>& inertia) : Object<Scalar>(inertia) {}
 
   /**
    * @brief 计算当前状态的前向运动学（FK）。
@@ -581,8 +581,8 @@ class StartPoint : public Object<Scalar>
   void CalcForward()
   {
     this->runtime_.target = this->runtime_.state;
-    auto fun = [&](Joint<Scalar> *joint) { return ForwardForeachFunLoop(joint, *this); };
-    this->joints.template Foreach<Joint<Scalar> *>(fun);
+    auto fun = [&](Joint<Scalar>* joint) { return ForwardForeachFunLoop(joint, *this); };
+    this->joints.template Foreach<Joint<Scalar>*>(fun);
   }
 
   /**
@@ -596,9 +596,9 @@ class StartPoint : public Object<Scalar>
   void CalcTargetForward()
   {
     this->runtime_.target = this->runtime_.state;
-    auto fun = [&](Joint<Scalar> *joint)
+    auto fun = [&](Joint<Scalar>* joint)
     { return TargetForwardForeachFunLoop(joint, *this); };
-    this->joints.template Foreach<Joint<Scalar> *>(fun);
+    this->joints.template Foreach<Joint<Scalar>*>(fun);
   }
 
   /**
@@ -611,10 +611,10 @@ class StartPoint : public Object<Scalar>
    */
   void CalcInertia()
   {
-    Joint<Scalar> *res = nullptr;
-    auto fun = [&](Joint<Scalar> *joint)
+    Joint<Scalar>* res = nullptr;
+    auto fun = [&](Joint<Scalar>* joint)
     { return InertiaForeachFunLoopStart(joint, res); };
-    this->joints.template Foreach<Joint<Scalar> *>(fun);
+    this->joints.template Foreach<Joint<Scalar>*>(fun);
   }
 
   /**
@@ -635,7 +635,7 @@ class StartPoint : public Object<Scalar>
    * @brief 计算起始点惯性（首次遍历）。
    *        Computes the inertia of the start point (first traversal).
    */
-  static ErrorCode InertiaForeachFunLoopStart(Joint<Scalar> *joint, Joint<Scalar> *parent)
+  static ErrorCode InertiaForeachFunLoopStart(Joint<Scalar>* joint, Joint<Scalar>* parent)
   {
     UNUSED(parent);
     joint->runtime_.inertia = joint->child->param_.inertia
@@ -647,14 +647,14 @@ class StartPoint : public Object<Scalar>
     joint->runtime_.inertia = Inertia<Scalar>::Rotate(
         joint->runtime_.inertia, Eigen::Quaternion<Scalar>(joint->runtime_.state_angle));
 
-    auto fun_loop = [&](Joint<Scalar> *child_joint)
+    auto fun_loop = [&](Joint<Scalar>* child_joint)
     { return InertiaForeachFunLoop(child_joint, joint); };
 
-    auto fun_start = [&](Joint<Scalar> *child_joint)
+    auto fun_start = [&](Joint<Scalar>* child_joint)
     { return InertiaForeachFunLoopStart(child_joint, joint); };
 
-    joint->child->joints.template Foreach<Joint<Scalar> *>(fun_loop);
-    joint->child->joints.template Foreach<Joint<Scalar> *>(fun_start);
+    joint->child->joints.template Foreach<Joint<Scalar>*>(fun_loop);
+    joint->child->joints.template Foreach<Joint<Scalar>*>(fun_start);
 
     return ErrorCode::OK;
   }
@@ -663,7 +663,7 @@ class StartPoint : public Object<Scalar>
    * @brief 计算机器人系统的惯性（后续遍历）。
    *        Computes the inertia of the robotic system (subsequent traversal).
    */
-  static ErrorCode InertiaForeachFunLoop(Joint<Scalar> *joint, Joint<Scalar> *parent)
+  static ErrorCode InertiaForeachFunLoop(Joint<Scalar>* joint, Joint<Scalar>* parent)
   {
     auto new_inertia =
         joint->child->param_.inertia
@@ -673,10 +673,10 @@ class StartPoint : public Object<Scalar>
 
     parent->runtime_.inertia = new_inertia + parent->runtime_.inertia;
 
-    auto fun_loop = [&](Joint<Scalar> *child_joint)
+    auto fun_loop = [&](Joint<Scalar>* child_joint)
     { return InertiaForeachFunLoop(child_joint, joint); };
 
-    joint->child->joints.template Foreach<Joint<Scalar> *>(fun_loop);
+    joint->child->joints.template Foreach<Joint<Scalar>*>(fun_loop);
 
     return ErrorCode::OK;
   }
@@ -685,7 +685,7 @@ class StartPoint : public Object<Scalar>
    * @brief 计算当前状态的前向运动学（FK）。
    *        Computes forward kinematics (FK) for the current state.
    */
-  static ErrorCode ForwardForeachFunLoop(Joint<Scalar> *joint, StartPoint<Scalar> &start)
+  static ErrorCode ForwardForeachFunLoop(Joint<Scalar>* joint, StartPoint<Scalar>& start)
   {
     Transform<Scalar> t_joint(joint->parent->runtime_.state + joint->param_.parent2this);
 
@@ -705,10 +705,10 @@ class StartPoint : public Object<Scalar>
     joint->runtime_.target_angle = joint->runtime_.state_angle;
     joint->child->runtime_.target = joint->child->runtime_.state;
 
-    auto fun = [&](Joint<Scalar> *child_joint)
+    auto fun = [&](Joint<Scalar>* child_joint)
     { return ForwardForeachFunLoop(child_joint, start); };
 
-    joint->child->joints.template Foreach<Joint<Scalar> *>(fun);
+    joint->child->joints.template Foreach<Joint<Scalar>*>(fun);
 
     return ErrorCode::OK;
   }
@@ -717,8 +717,8 @@ class StartPoint : public Object<Scalar>
    * @brief 计算目标状态的前向运动学（FK）。
    *        Computes forward kinematics (FK) for the target state.
    */
-  static ErrorCode TargetForwardForeachFunLoop(Joint<Scalar> *joint,
-                                               StartPoint<Scalar> &start)
+  static ErrorCode TargetForwardForeachFunLoop(Joint<Scalar>* joint,
+                                               StartPoint<Scalar>& start)
   {
     Transform<Scalar> t_joint(joint->parent->runtime_.target + joint->param_.parent2this);
 
@@ -733,10 +733,10 @@ class StartPoint : public Object<Scalar>
 
     joint->runtime_.target_axis = joint->runtime_.target.rotation * joint->param_.axis;
 
-    auto fun = [&](Joint<Scalar> *child_joint)
+    auto fun = [&](Joint<Scalar>* child_joint)
     { return TargetForwardForeachFunLoop(child_joint, start); };
 
-    joint->child->joints.template Foreach<Joint<Scalar> *>(fun);
+    joint->child->joints.template Foreach<Joint<Scalar>*>(fun);
 
     return ErrorCode::OK;
   }
@@ -745,8 +745,8 @@ class StartPoint : public Object<Scalar>
    * @brief 计算系统的质心。
    *        Computes the center of mass of the system.
    */
-  static ErrorCode CenterOfMassForeachFunLoop(Joint<Scalar> *joint,
-                                              StartPoint<Scalar> &start)
+  static ErrorCode CenterOfMassForeachFunLoop(Joint<Scalar>* joint,
+                                              StartPoint<Scalar>& start)
   {
     CenterOfMass<Scalar> child_cog(joint->child->param_.inertia,
                                    joint->child->runtime_.state);

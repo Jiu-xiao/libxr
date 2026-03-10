@@ -36,33 +36,31 @@ stm32_can_id_t STM32_CAN_GetID(CAN_TypeDef* addr);  // NOLINT
 namespace LibXR
 {
 /**
- * @brief STM32CAN 类，用于处理 STM32 系统的 CAN 通道。 Provides handling for STM32 CAN
- * channels.
- *
+ * @brief STM32 CAN 驱动实现 / STM32 CAN driver implementation
  */
 class STM32CAN : public CAN
 {
  public:
   /**
-   * @brief STM32CAN 类，用于处理 STM32 系统的 CAN 通道。 Provides handling for STM32 CAN
+   * @brief 构造 CAN 驱动对象 / Construct CAN driver object
    *
-   * @param hcan STM32CAN对象 CAN object
-   * @param pool_size 发送池大小 Send pool size
+   * @param hcan HAL CAN 句柄 / HAL CAN handle
+   * @param pool_size 发送池大小 / TX pool size
    */
   STM32CAN(CAN_HandleTypeDef* hcan, uint32_t pool_size);
 
   /**
-   * @brief 初始化
+   * @brief 初始化驱动 / Initialize driver
    *
-   * @return ErrorCode
+   * @return ErrorCode 错误码 / Error code
    */
   ErrorCode Init(void);
 
   /**
-   * @brief 设置 CAN 配置。Set CAN configuration.
+   * @brief 设置 CAN 配置 / Set CAN configuration
    *
-   * @param cfg CAN 配置参数。CAN configuration.
-   * @return ErrorCode 操作结果。Operation result.
+   * @param cfg CAN 配置参数 / CAN configuration
+   * @return ErrorCode 操作结果 / Operation result
    */
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
@@ -73,13 +71,13 @@ class STM32CAN : public CAN
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   /**
-   * @brief 处理接收中断
+   * @brief 处理接收中断 / Handle RX interrupt
    *
    */
   void ProcessRxInterrupt();
 
   /**
-   * @brief 处理错误中断
+   * @brief 处理错误中断 / Handle error interrupt
    *
    */
   void ProcessErrorInterrupt();
