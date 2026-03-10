@@ -4,7 +4,8 @@ using namespace LibXR;
 
 namespace
 {
-static inline uint64_t ConvertTicksToTime(uint64_t ticks, uint32_t freq_hz, uint64_t scale)
+static inline uint64_t ConvertTicksToTime(uint64_t ticks, uint32_t freq_hz,
+                                          uint64_t scale)
 {
   if (freq_hz == 0u) return 0u;
 

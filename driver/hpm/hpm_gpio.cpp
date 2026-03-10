@@ -24,7 +24,8 @@ GPIO_Type* HPMGPIO::port_controller_map[HPMGPIO::kPortCount] = {};
  * 仅处理 GPIO 复用，不涉及外设复用配置。
  * Only GPIO muxing is handled here; peripheral alternate-function setup is not included.
  */
-static inline void HPM_GPIO_ConfigMuxToGPIO(GPIO_Type* gpio, uint32_t port, uint16_t pad_index,
+static inline void HPM_GPIO_ConfigMuxToGPIO(GPIO_Type* gpio, uint32_t port,
+                                            uint16_t pad_index,
                                             bool enable_loopback = true)
 {
   uint32_t func_ctl = IOC_PAD_FUNC_CTL_ALT_SELECT_SET(0);
@@ -89,7 +90,8 @@ ErrorCode HPMGPIO::EnableInterrupt()
  * @brief 失能当前引脚中断 / Disable interrupt for current pin.
  *
  * 先关闭 GPIO 事件，再关闭 PLIC 路由，避免在关中断过程中出现残留触发。
- * Disable GPIO event first, then PLIC routing, to avoid residual triggers while disabling.
+ * Disable GPIO event first, then PLIC routing, to avoid residual triggers while
+ * disabling.
  */
 ErrorCode HPMGPIO::DisableInterrupt()
 {
@@ -103,7 +105,8 @@ ErrorCode HPMGPIO::DisableInterrupt()
 }
 
 /**
- * @brief 配置 GPIO 方向、中断模式与上下拉 / Configure GPIO direction, interrupt mode, and pull.
+ * @brief 配置 GPIO 方向、中断模式与上下拉 / Configure GPIO direction, interrupt mode, and
+ * pull.
  *
  * 与 STM32 HAL 的常见用法对齐：
  * - `Direction` 对应 GPIO 模式（输入/输出/中断边沿）
@@ -121,7 +124,8 @@ ErrorCode HPMGPIO::SetConfig(Configuration config)
 
   if (pad_index_ != kInvalidPadIndex)
   {
-    // 保持接口自洽：先确保 PAD 复用到 GPIO / Keep API self-contained: force GPIO mux first.
+    // 保持接口自洽：先确保 PAD 复用到 GPIO / Keep API self-contained: force GPIO mux
+    // first.
     HPM_GPIO_ConfigMuxToGPIO(gpio_, port_, pad_index_);
   }
 
@@ -218,7 +222,8 @@ ErrorCode HPMGPIO::SetAnalogHighImpedance()
 }
 
 /**
- * @brief 扫描并分发指定端口的 GPIO 中断 / Scan and dispatch GPIO IRQ callbacks for one port.
+ * @brief 扫描并分发指定端口的 GPIO 中断 / Scan and dispatch GPIO IRQ callbacks for one
+ * port.
  * @param port GPIO 端口号 / GPIO port index.
  *
  * 建议在板级 IRQHandler 中仅调用一次该函数：

@@ -28,8 +28,8 @@ uint8_t HPMPWM::ResolveGptmrReloadCmpIndex(uint8_t duty_cmp_index)
  * - If native PWM exists, `pwm_` is used in native path.
  * - If only GPTMR compare output is available, `gptmr_` is used as fallback.
  */
-HPMPWM::HPMPWM(LibXRHpmPwmType* pwm, clock_name_t clock, uint8_t pwm_index, uint8_t cmp_index,
-               bool invert, bool auto_board_init)
+HPMPWM::HPMPWM(LibXRHpmPwmType* pwm, clock_name_t clock, uint8_t pwm_index,
+               uint8_t cmp_index, bool invert, bool auto_board_init)
     : pwm_(pwm),
       gptmr_(reinterpret_cast<GPTMR_Type*>(pwm)),
       clock_(clock),
@@ -78,7 +78,7 @@ ErrorCode HPMPWM::SetDutyCycle(float value)
   }
   gptmr_update_cmp(gptmr_, pwm_index_, cmp_index_, cmp);
 #else
-  (void) value;
+  (void)value;
   return ErrorCode::NOT_SUPPORT;
 #endif
 
