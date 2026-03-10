@@ -17,15 +17,15 @@
  * @retval 返回 1 表示成功，0 表示失败 / Returns 1 on success, 0 on failure
  */
 __attribute__((weak, used)) _Bool
-__atomic_compare_exchange_4(volatile void *ptr, void *expected, unsigned int desired,
+__atomic_compare_exchange_4(volatile void* ptr, void* expected, unsigned int desired,
                             _Bool weak, int success_memorder, int failure_memorder)
 {
   UNUSED(weak);
   UNUSED(success_memorder);
   UNUSED(failure_memorder);
 
-  volatile unsigned int *addr = (volatile unsigned int *)ptr;
-  unsigned int expected_val = *(unsigned int *)expected;
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
+  unsigned int expected_val = *(unsigned int*)expected;
   int result;
 
   __disable_irq();
@@ -36,7 +36,7 @@ __atomic_compare_exchange_4(volatile void *ptr, void *expected, unsigned int des
   }
   else
   {
-    *(unsigned int *)expected = *addr;
+    *(unsigned int*)expected = *addr;
     result = 0;
   }
   __enable_irq();
@@ -50,12 +50,12 @@ __atomic_compare_exchange_4(volatile void *ptr, void *expected, unsigned int des
  * @param  memorder 内存顺序标志 / Memory order (ignored)
  * @retval 无返回值 / None
  */
-__attribute__((weak, used)) void __atomic_store_4(volatile void *ptr, unsigned int val,
+__attribute__((weak, used)) void __atomic_store_4(volatile void* ptr, unsigned int val,
                                                   int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned int *addr = (volatile unsigned int *)ptr;
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
   __disable_irq();
   *addr = val;
   __enable_irq();
@@ -67,12 +67,12 @@ __attribute__((weak, used)) void __atomic_store_4(volatile void *ptr, unsigned i
  * @param  memorder 内存顺序标志 / Memory order (ignored)
  * @retval 当前值 / Returns the current value
  */
-__attribute__((weak, used)) unsigned int __atomic_load_4(const volatile void *ptr,
+__attribute__((weak, used)) unsigned int __atomic_load_4(const volatile void* ptr,
                                                          int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned int *addr = (volatile unsigned int *)ptr;
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int val;
   __disable_irq();
   val = *addr;
@@ -87,13 +87,13 @@ __attribute__((weak, used)) unsigned int __atomic_load_4(const volatile void *pt
  * @param  memorder 内存顺序标志 / Memory order (ignored)
  * @retval 交换前的旧值 / Returns the old value before exchange
  */
-__attribute__((weak, used)) unsigned int __atomic_exchange_4(volatile void *ptr,
+__attribute__((weak, used)) unsigned int __atomic_exchange_4(volatile void* ptr,
                                                              unsigned int val,
                                                              int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned int *addr = (volatile unsigned int *)ptr;
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int old_val;
   __disable_irq();
   old_val = *addr;
@@ -109,13 +109,13 @@ __attribute__((weak, used)) unsigned int __atomic_exchange_4(volatile void *ptr,
  * @param  memorder 内存顺序标志 / Memory order (ignored)
  * @retval 加法前的旧值 / Returns the old value before addition
  */
-__attribute__((weak, used)) unsigned int __atomic_fetch_add_4(volatile void *ptr,
+__attribute__((weak, used)) unsigned int __atomic_fetch_add_4(volatile void* ptr,
                                                               unsigned int val,
                                                               int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned int *addr = (volatile unsigned int *)ptr;
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int old_val;
   __disable_irq();
   old_val = *addr;
@@ -131,13 +131,13 @@ __attribute__((weak, used)) unsigned int __atomic_fetch_add_4(volatile void *ptr
  * @param  memorder 内存顺序标志 / Memory order (ignored)
  * @retval 减法前的旧值 / Returns the old value before subtraction
  */
-__attribute__((weak, used)) unsigned int __atomic_fetch_sub_4(volatile void *ptr,
+__attribute__((weak, used)) unsigned int __atomic_fetch_sub_4(volatile void* ptr,
                                                               unsigned int val,
                                                               int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned int *addr = (volatile unsigned int *)ptr;
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int old_val;
   __disable_irq();
   old_val = *addr;
@@ -153,13 +153,13 @@ __attribute__((weak, used)) unsigned int __atomic_fetch_sub_4(volatile void *ptr
  * @param  memorder 内存顺序标志（忽略） / Memory order (ignored)
  * @retval 交换前的旧值 / Returns the old value before exchange
  */
-__attribute__((weak, used)) unsigned char __atomic_exchange_1(volatile void *ptr,
+__attribute__((weak, used)) unsigned char __atomic_exchange_1(volatile void* ptr,
                                                               unsigned char val,
                                                               int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned char *addr = (volatile unsigned char *)ptr;
+  volatile unsigned char* addr = (volatile unsigned char*)ptr;
   unsigned char old_val;
   __disable_irq();
   old_val = *addr;
@@ -175,12 +175,12 @@ __attribute__((weak, used)) unsigned char __atomic_exchange_1(volatile void *ptr
  * @param  memorder 内存顺序标志（忽略） / Memory order (ignored)
  * @retval 无返回值 / None
  */
-__attribute__((weak, used)) void __atomic_store_1(volatile void *ptr, unsigned char val,
+__attribute__((weak, used)) void __atomic_store_1(volatile void* ptr, unsigned char val,
                                                   int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned char *addr = (volatile unsigned char *)ptr;
+  volatile unsigned char* addr = (volatile unsigned char*)ptr;
   __disable_irq();
   *addr = val;
   __enable_irq();
@@ -194,11 +194,11 @@ __attribute__((weak, used)) void __atomic_store_1(volatile void *ptr, unsigned c
  * @retval 返回之前的值 / Returns the previous value (0 or 1)
  */
 #if !defined(__clang__)
-__attribute__((weak, used)) _Bool __atomic_test_and_set(volatile void *ptr, int memorder)
+__attribute__((weak, used)) _Bool __atomic_test_and_set(volatile void* ptr, int memorder)
 {
   UNUSED(memorder);
 
-  volatile unsigned char *addr = (volatile unsigned char *)ptr;
+  volatile unsigned char* addr = (volatile unsigned char*)ptr;
   _Bool old_val;
 
   __disable_irq();

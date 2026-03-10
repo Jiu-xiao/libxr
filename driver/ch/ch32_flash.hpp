@@ -13,14 +13,23 @@ namespace LibXR
 
 struct FlashSector
 {
-  uint32_t address;  // 扇区起始地址
-  uint32_t size;     // 扇区大小
+  uint32_t address;  ///< 扇区起始地址 / Sector base address
+  uint32_t size;     ///< 扇区大小（字节） / Sector size in bytes
 };
 
+/**
+ * @brief CH32 闪存驱动实现 / CH32 flash driver implementation
+ */
 class CH32Flash : public Flash
 {
  public:
+  /**
+   * @brief 构造闪存对象 / Construct flash object
+   */
   CH32Flash(const FlashSector* sectors, size_t sector_count, size_t start_sector);
+  /**
+   * @brief 构造并使用默认起始扇区 / Construct with default start sector
+   */
   CH32Flash(const FlashSector* sectors, size_t sector_count)
       : CH32Flash(sectors, sector_count, sector_count - 1)
   {
@@ -29,9 +38,15 @@ class CH32Flash : public Flash
   ErrorCode Erase(size_t offset, size_t size) override;
   ErrorCode Write(size_t offset, ConstRawData data) override;
 
-  static constexpr size_t MinWriteSize() { return 2; }  // 普通编程：半字
+  static constexpr size_t MinWriteSize()
+  {
+    return 2;
+  }  ///< 最小写入粒度（半字） / Minimum write size (half-word)
 
-  static constexpr uint32_t PageSize() { return 256; }  // 快速页擦除：256字节
+  static constexpr uint32_t PageSize()
+  {
+    return 256;
+  }  ///< Page erase size in fast erase mode / 快速擦除页大小
 
  private:
   const FlashSector* sectors_;

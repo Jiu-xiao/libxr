@@ -37,15 +37,15 @@ class Timer
      */
     void Run() { fun_(handle); }
 
-    void (*fun_)(void *);  ///< 任务执行函数 Function pointer to the task
-    void *handle;          ///< 任务句柄 Handle to the task
-    uint32_t cycle_;       ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
-    uint32_t count_;       ///< 计数器 Counter
-    bool enable_;          ///< 任务是否启用 Flag indicating whether the task is enabled
+    void (*fun_)(void*);  ///< 任务执行函数 Function pointer to the task
+    void* handle;         ///< 任务句柄 Handle to the task
+    uint32_t cycle_;      ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
+    uint32_t count_;      ///< 计数器 Counter
+    bool enable_;         ///< 任务是否启用 Flag indicating whether the task is enabled
   };
 
-  typedef LibXR::LockFreeList::Node<ControlBlock>
-      *TimerHandle;  ///< 定时器任务句柄 Timer task handle
+  typedef LibXR::LockFreeList::Node<ControlBlock>*
+      TimerHandle;  ///< 定时器任务句柄 Timer task handle
 
   /**
    * @brief  创建定时任务
@@ -76,14 +76,14 @@ class Timer
       void (*fun)(ArgType);
     } Data;
 
-    Data *data = new Data;
+    Data* data = new Data;
     data->fun = fun;
     data->arg = arg;
 
     data->ctrl_block.data_.handle = data;
-    data->ctrl_block.data_.fun_ = [](void *arg)
+    data->ctrl_block.data_.fun_ = [](void* arg)
     {
-      Data *data = reinterpret_cast<Data *>(arg);
+      Data* data = reinterpret_cast<Data*>(arg);
       data->fun(data->arg);
     };
     data->ctrl_block.data_.count_ = 0;
@@ -128,7 +128,7 @@ class Timer
    * and ensuring timely task execution.
    * `Thread::SleepUntil` is used for precise scheduling.
    */
-  static void RefreshThreadFunction(void *);
+  static void RefreshThreadFunction(void*);
 
   /**
    * @brief  添加定时任务
@@ -159,7 +159,7 @@ class Timer
    */
   static void RefreshTimerInIdle();
 
-  static inline LibXR::LockFreeList *list_ =
+  static inline LibXR::LockFreeList* list_ =
       nullptr;  ///< 定时任务列表 List of registered tasks
 
   static inline Thread thread_handle_;  ///< 定时器管理线程 Timer management thread

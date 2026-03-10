@@ -2,11 +2,13 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
-void test_event() {
+void test_event()
+{
   static int event_arg = 0;
 
   auto event_cb = LibXR::Event::Callback::Create(
-      [](bool in_isr, int *arg, uint32_t event) {
+      [](bool in_isr, int* arg, uint32_t event)
+      {
         UNUSED(in_isr);
         *arg = *arg + 1;
         ASSERT(event == 0x1234);
@@ -18,7 +20,8 @@ void test_event() {
   event.Register(0x1234, event_cb);
   event.Active(0x1234);
   ASSERT(event_arg == 1);
-  for (int i = 0; i <= 0x1234; i++) {
+  for (int i = 0; i <= 0x1234; i++)
+  {
     event.Active(i);
   }
   ASSERT(event_arg == 2);

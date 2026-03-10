@@ -7,9 +7,9 @@ void test_queue()
   LibXR::Thread thread1, thread2;
   static auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
 
-  thread1.Create<LibXR::LockFreeQueue<float> *>(
+  thread1.Create<LibXR::LockFreeQueue<float>*>(
       &lock_free_queue,
-      [](LibXR::LockFreeQueue<float> *queue)
+      [](LibXR::LockFreeQueue<float>* queue)
       {
         queue->Push(1.2f);
         queue->Push(3.8f);
@@ -41,9 +41,9 @@ void test_queue()
 
   static auto queue = LibXR::LockQueue<float>(3);
 
-  thread2.Create<LibXR::LockQueue<float> *>(
+  thread2.Create<LibXR::LockQueue<float>*>(
       &queue,
-      [](LibXR::LockQueue<float> *queue)
+      [](LibXR::LockQueue<float>* queue)
       {
         LibXR::Thread::Sleep(100);
         queue->Push(1.2f);

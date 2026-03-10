@@ -125,8 +125,9 @@ class HID : public DeviceClass
    * Initialize HID device and select descriptor block (IN or IN+OUT).
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 接口号起始 / Starting interface number
+   * @param in_isr 是否在中断上下文 / Whether in ISR
    */
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
   {
     inited_ = false;
     itf_num_ = start_itf_num;
@@ -238,8 +239,9 @@ class HID : public DeviceClass
    * @brief 反初始化 HID 设备
    * Deinitialize HID device.
    * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints(EndpointPool& endpoint_pool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
     if (ep_in_)

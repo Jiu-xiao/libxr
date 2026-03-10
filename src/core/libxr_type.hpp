@@ -29,7 +29,7 @@ class RawData
    * @param size 数据的大小（字节）。
    *             The size of the data (in bytes).
    */
-  RawData(void *addr, size_t size);
+  RawData(void* addr, size_t size);
 
   /**
    * @brief 默认构造函数，初始化为空数据。
@@ -48,8 +48,8 @@ class RawData
    *             The actual data to be stored.
    */
   template <typename DataType>
-  RawData(const DataType &data)
-      : addr_(const_cast<DataType *>(&data)), size_(sizeof(DataType))
+  RawData(const DataType& data)
+      : addr_(const_cast<DataType*>(&data)), size_(sizeof(DataType))
   {
   }
 
@@ -60,7 +60,7 @@ class RawData
    * @param data 另一个 `RawData` 对象。
    *             Another `RawData` object.
    */
-  RawData(const RawData &data) = default;
+  RawData(const RawData& data) = default;
 
   /**
    * @brief 从 `char *` 指针构造 `RawData`，数据大小为字符串长度（不含 `\0`）。
@@ -70,7 +70,7 @@ class RawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  RawData(char *data);
+  RawData(char* data);
 
   /**
    * @brief 从字符数组构造 `RawData`，数据大小为数组长度减 1（不含 `\0`）。
@@ -83,7 +83,7 @@ class RawData
    *             The character array to be stored.
    */
   template <size_t N>
-  RawData(const char (&data)[N]) : addr_(reinterpret_cast<void *>(data)), size_(N - 1)
+  RawData(const char (&data)[N]) : addr_(reinterpret_cast<void*>(data)), size_(N - 1)
   {
   }
 
@@ -95,7 +95,7 @@ class RawData
    * @param data `std::string` 类型数据。
    *             A `std::string` object.
    */
-  explicit RawData(const std::string &data);
+  explicit RawData(const std::string& data);
 
   /**
    * @brief 赋值运算符重载。
@@ -106,9 +106,9 @@ class RawData
    * @return 返回赋值后的 `RawData` 对象引用。
    *         Returns a reference to the assigned `RawData` object.
    */
-  RawData &operator=(const RawData &data) = default;
+  RawData& operator=(const RawData& data) = default;
 
-  void *addr_;   ///< 数据存储地址。 The storage address of the data.
+  void* addr_;   ///< 数据存储地址。 The storage address of the data.
   size_t size_;  ///< 数据大小（字节）。 The size of the data (in bytes).
 };
 
@@ -133,7 +133,7 @@ class ConstRawData
    * @param size 数据的大小（字节）。
    *             The size of the data (in bytes).
    */
-  ConstRawData(const void *addr, size_t size);
+  ConstRawData(const void* addr, size_t size);
 
   /**
    * @brief 默认构造函数，初始化为空数据。
@@ -153,8 +153,8 @@ class ConstRawData
    *             The actual data to be stored.
    */
   template <typename DataType>
-  ConstRawData(const DataType &data)
-      : addr_(reinterpret_cast<const DataType *>(&data)), size_(sizeof(DataType))
+  ConstRawData(const DataType& data)
+      : addr_(reinterpret_cast<const DataType*>(&data)), size_(sizeof(DataType))
   {
   }
 
@@ -165,7 +165,7 @@ class ConstRawData
    * @param data 另一个 `ConstRawData` 对象。
    *             Another `ConstRawData` object.
    */
-  ConstRawData(const ConstRawData &data) = default;
+  ConstRawData(const ConstRawData& data) = default;
 
   /**
    * @brief 从 `RawData` 构造 `ConstRawData`，数据地址和大小保持不变。
@@ -175,7 +175,7 @@ class ConstRawData
    * @param data `RawData` 对象。
    *             A `RawData` object.
    */
-  ConstRawData(const RawData &data);
+  ConstRawData(const RawData& data);
 
   /**
    * @brief 从 `char *` 指针构造 `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
@@ -185,7 +185,7 @@ class ConstRawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  ConstRawData(char *data);
+  ConstRawData(char* data);
 
   /**
    * @brief 从 `char *` 指针构造 `ConstRawData`（常量版本）。
@@ -194,7 +194,7 @@ class ConstRawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  ConstRawData(const char *data);
+  ConstRawData(const char* data);
 
   /**
    * @brief 从字符数组构造 `ConstRawData`，数据大小为数组长度减 1（不含 `\0`）。
@@ -208,7 +208,7 @@ class ConstRawData
    */
   template <size_t N>
   ConstRawData(const char (&data)[N])
-      : addr_(reinterpret_cast<const void *>(data)), size_(N - 1)
+      : addr_(reinterpret_cast<const void*>(data)), size_(N - 1)
   {
   }
 
@@ -221,10 +221,10 @@ class ConstRawData
    * @return 返回赋值后的 `ConstRawData` 对象引用。
    *         Returns a reference to the assigned `ConstRawData` object.
    */
-  ConstRawData &operator=(const ConstRawData &data) = default;
+  ConstRawData& operator=(const ConstRawData& data) = default;
 
-  const void
-      *addr_;    ///< 数据存储地址（常量）。 The storage address of the data (constant).
+  const void*
+      addr_;     ///< 数据存储地址（常量）。 The storage address of the data (constant).
   size_t size_;  ///< 数据大小（字节）。 The size of the data (in bytes).
 };
 
@@ -235,7 +235,7 @@ class ConstRawData
 class TypeID
 {
  public:
-  using ID = const void *;
+  using ID = const void*;
   /**
    * @brief 获取类型的唯一标识符
    * @brief Get unique identifier for type T

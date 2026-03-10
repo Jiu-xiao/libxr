@@ -5,6 +5,7 @@
 #include "database.hpp"
 #include "double_buffer.hpp"
 #include "event.hpp"
+#include "flag.hpp"
 #include "inertia.hpp"
 #include "kinematic.hpp"
 #include "libxr_assert.hpp"

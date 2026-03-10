@@ -273,8 +273,11 @@ class UAC1MicrophoneQ : public DeviceClass
   /**
    * @brief 初始化设备（分配端点、填充描述符）
    *        Initialize device (allocate endpoints, populate descriptors)
+   *
+   * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
   {
     inited_ = false;
     streaming_ = false;
@@ -399,8 +402,11 @@ class UAC1MicrophoneQ : public DeviceClass
   /**
    * @brief 反初始化设备，释放端点
    *        Deinitialize device and release endpoints
+   *
+   * @param endpoint_pool 端点池 / Endpoint pool
+   * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints(EndpointPool& endpoint_pool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     streaming_ = false;
     inited_ = false;

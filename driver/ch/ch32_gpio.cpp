@@ -1,51 +1,74 @@
+// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_gpio.hpp"
 
 using namespace LibXR;
 
-uint32_t LibXR::CH32GetGPIOPeriph(GPIO_TypeDef* port)
+uint32_t LibXR::ch32_get_gpio_periph(GPIO_TypeDef* port)
 {
   if (false)
   {
   }
 #if defined(GPIOA)
   else if (port == GPIOA)
+  {
     return RCC_APB2Periph_GPIOA;
 #endif
 #if defined(GPIOB)
+  }
   else if (port == GPIOB)
+  {
     return RCC_APB2Periph_GPIOB;
 #endif
 #if defined(GPIOC)
+  }
   else if (port == GPIOC)
+  {
     return RCC_APB2Periph_GPIOC;
 #endif
 #if defined(GPIOD)
+  }
   else if (port == GPIOD)
+  {
     return RCC_APB2Periph_GPIOD;
 #endif
 #if defined(GPIOE)
+  }
   else if (port == GPIOE)
+  {
     return RCC_APB2Periph_GPIOE;
+  }
 #endif
   return 0;
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI0_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI0_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line0); }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI1_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI1_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line1); }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI2_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI2_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line2); }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI3_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI3_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line3); }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI4_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI4_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line4); }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI9_5_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI9_5_IRQHandler(void)
 {
   LibXR::CH32GPIO::CheckInterrupt(EXTI_Line5);
@@ -55,7 +78,9 @@ extern "C" void EXTI9_5_IRQHandler(void)
   LibXR::CH32GPIO::CheckInterrupt(EXTI_Line9);
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI15_10_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI15_10_IRQHandler(void)
 {
   LibXR::CH32GPIO::CheckInterrupt(EXTI_Line10);
@@ -72,11 +97,10 @@ CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
 {
   if (irq_ != NonMaskableInt_IRQn)
   {
-    NVIC_EnableIRQ(irq_);
-    map[GetEXTIID(pin)] = this;
+    map_[GetEXTIID(pin)] = this;
   }
 
-  RCC_APB2PeriphClockCmd(CH32GetGPIOPeriph(port_), ENABLE);
+  RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(port_), ENABLE);
 
   GPIO_InitTypeDef gpio_init = {};
   gpio_init.GPIO_Pin = pin_;
@@ -120,13 +144,13 @@ CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
 
 ErrorCode CH32GPIO::EnableInterrupt()
 {
-  EXTI->INTENR |= (1 << GetEXTIID(pin_));
+  EXTI->INTENR |= static_cast<uint32_t>(pin_);
   return ErrorCode::OK;
 }
 
 ErrorCode CH32GPIO::DisableInterrupt()
 {
-  EXTI->INTENR &= ~(1 << GetEXTIID(pin_));
+  EXTI->INTENR &= ~static_cast<uint32_t>(pin_);
   return ErrorCode::OK;
 }
 
@@ -143,20 +167,28 @@ void CH32GPIO::CheckInterrupt(uint32_t line)
   if (EXTI_GetITStatus(line) != RESET)
   {
     EXTI_ClearITPendingBit(line);
-    map[GetEXTIID(line)]->OnInterrupt();
+
+    const uint8_t ID = GetEXTIID(static_cast<uint16_t>(line));
+    if (auto* gpio = map_[ID])
+    {
+      gpio->OnInterrupt();
+    }
   }
 }
 
 void CH32GPIO::ConfigureEXTI(EXTITrigger_TypeDef trigger)
 {
   EXTI_InitTypeDef exti = {};
-  uint8_t pin_source = __builtin_ctz(pin_);
+  uint8_t pin_source = GetEXTIID(pin_);
   uint8_t port_source = 0xFF;
 
 #if defined(GPIOA)
-  if (port_ == GPIOA) port_source = GPIO_PortSourceGPIOA;
+  if (port_ == GPIOA)
+  {
+    port_source = GPIO_PortSourceGPIOA;
 #endif
 #if defined(GPIOB)
+  }
   else if (port_ == GPIOB)
   {
     port_source = GPIO_PortSourceGPIOB;
@@ -219,4 +251,10 @@ void CH32GPIO::ConfigureEXTI(EXTITrigger_TypeDef trigger)
   NVIC_EnableIRQ(irq_);
 }
 
-uint8_t CH32GPIO::GetEXTIID(uint16_t pin) { return __builtin_ctz(pin); }
+uint8_t CH32GPIO::GetEXTIID(uint16_t pin)
+{
+  ASSERT(pin != 0 && (pin & static_cast<uint16_t>(pin - 1)) == 0);
+  return __builtin_ctz(pin);
+}
+
+// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

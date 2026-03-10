@@ -57,13 +57,13 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @brief 复制构造函数 / Copy constructor
    * @param p 另一个 Position 实例 / Another Position instance
    */
-  Position(const Eigen::Matrix<Scalar, 3, 1> &p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
+  Position(const Eigen::Matrix<Scalar, 3, 1>& p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
 
   /**
    * @brief 复制构造函数 / Copy constructor
    * @param p 另一个 Position 实例 / Another Position instance
    */
-  Position(const Position &p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
+  Position(const Position& p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
 
   /**
    * @brief 乘以旋转矩阵 / Multiply by a rotation matrix
@@ -85,7 +85,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param p Eigen 3x1 向量 / Eigen 3x1 vector
    * @return 赋值后的 Position / Updated Position object
    */
-  Position &operator=(const Eigen::Matrix<Scalar, 3, 1> &p)
+  Position& operator=(const Eigen::Matrix<Scalar, 3, 1>& p)
   {
     this->data()[0] = p[0];
     this->data()[1] = p[1];
@@ -99,7 +99,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param p Eigen 3x1 向量 / Eigen 3x1 vector
    * @return 赋值后的 Position / Updated Position object
    */
-  Position &operator=(const Position &p)
+  Position& operator=(const Position& p)
   {
     if (this != &p)
     {
@@ -124,7 +124,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
                            std::is_same<Rotation, Quaternion<Scalar>>::value ||
                            std::is_same<Rotation, Eigen::Quaternion<Scalar>>::value,
                        int> = 0>
-  Eigen::Matrix<Scalar, 3, 1> operator*(const Rotation &R) const
+  Eigen::Matrix<Scalar, 3, 1> operator*(const Rotation& R) const
   {
     return R * (*this);
   }
@@ -143,7 +143,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
                            std::is_same<Rotation, Quaternion<Scalar>>::value ||
                            std::is_same<Rotation, Eigen::Quaternion<Scalar>>::value,
                        int> = 0>
-  const Position &operator*=(const Rotation &R)
+  const Position& operator*=(const Rotation& R)
   {
     *this = R * (*this);
     return *this;
@@ -154,7 +154,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param R 旋转矩阵 / Rotation matrix
    * @return 变换后的向量 / Transformed vector
    */
-  Eigen::Matrix<Scalar, 3, 1> operator/(const RotationMatrix<Scalar> &R) const
+  Eigen::Matrix<Scalar, 3, 1> operator/(const RotationMatrix<Scalar>& R) const
   {
     return (-R) * (*this);
   }
@@ -165,7 +165,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param q 四元数 / Quaternion
    * @return 更新后的 Position / Updated Position object
    */
-  const Position &operator/=(const Quaternion<Scalar> &q)
+  const Position& operator/=(const Quaternion<Scalar>& q)
   {
     *this = (-q) * (*this);
     return *this;
@@ -177,7 +177,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param R 旋转矩阵 / Rotation matrix
    * @return 更新后的 Position / Updated Position object
    */
-  const Position &operator/=(const Eigen::Matrix<Scalar, 3, 3> &R)
+  const Position& operator/=(const Eigen::Matrix<Scalar, 3, 3>& R)
   {
     *this = R.transpose() * Eigen::Map<const Eigen::Matrix<Scalar, 3, 1>>(this->data_);
     return *this;
@@ -189,7 +189,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param q 四元数 / Quaternion
    * @return 更新后的 Position / Updated Position object
    */
-  const Position &operator/=(const Eigen::Quaternion<Scalar> &q)
+  const Position& operator/=(const Eigen::Quaternion<Scalar>& q)
   {
     *this = q.conjugate() * Eigen::Map<const Eigen::Matrix<Scalar, 3, 1>>(this->data_);
     return *this;
@@ -200,7 +200,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param s 缩放因子 / Scaling factor
    * @return 更新后的 Position / Updated Position object
    */
-  const Position &operator*=(Scalar s)
+  const Position& operator*=(Scalar s)
   {
     *this = s * (*this);
     return *this;
@@ -211,7 +211,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param s 缩放因子 / Scaling factor
    * @return 更新后的 Position / Updated Position object
    */
-  const Position &operator/=(Scalar s)
+  const Position& operator/=(Scalar s)
   {
     (*this)[0] /= s;
     (*this)[1] /= s;
@@ -225,7 +225,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    * @param p 参考 Position / Reference Position
    * @return 旋转四元数 / Quaternion rotation
    */
-  Eigen::Quaternion<Scalar> operator/(const Position<> &p)
+  Eigen::Quaternion<Scalar> operator/(const Position<>& p)
   {
     return Eigen::Quaternion<Scalar>::FromTwoVectors(p, *this);
   }
@@ -269,7 +269,7 @@ class Axis : public Eigen::Matrix<Scalar, 3, 1>
    *
    * @param p 要复制的 `Axis` 对象。 The `Axis` object to be copied.
    */
-  Axis(const Axis &p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
+  Axis(const Axis& p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
 
   /**
    * @brief 返回 X 轴单位向量 (1,0,0)。
@@ -309,7 +309,7 @@ class Axis : public Eigen::Matrix<Scalar, 3, 1>
    * @return 返回赋值后的 `Axis` 对象引用。
    *         Returns a reference to the assigned `Axis` object.
    */
-  Axis<Scalar> &operator=(const Eigen::Matrix<Scalar, 3, 1> &p)
+  Axis<Scalar>& operator=(const Eigen::Matrix<Scalar, 3, 1>& p)
   {
     this->data()[0] = p[0];
     this->data()[1] = p[1];
@@ -328,7 +328,7 @@ class Axis : public Eigen::Matrix<Scalar, 3, 1>
    * @return 返回赋值后的 `Axis` 对象引用。
    *         Returns a reference to the assigned `Axis` object.
    */
-  Axis<Scalar> &operator=(const Axis &p)
+  Axis<Scalar>& operator=(const Axis& p)
   {
     if (this != &p)
     {
@@ -369,20 +369,20 @@ class EulerAngle
    * Eigen 3D vector.
    * @param p 含有 (roll, pitch, yaw) 的向量。Vector containing (roll, pitch, yaw).
    */
-  EulerAngle(const Eigen::Matrix<Scalar, 3, 1> &p) : data_{p.x(), p.y(), p.z()} {}
+  EulerAngle(const Eigen::Matrix<Scalar, 3, 1>& p) : data_{p.x(), p.y(), p.z()} {}
 
   /**
    * @brief 拷贝构造函数。Copy constructor.
    * @param p 另一个 EulerAngle 对象。Another EulerAngle object.
    */
-  EulerAngle(const EulerAngle &p) : data_{p.data_[0], p.data_[1], p.data_[2]} {}
+  EulerAngle(const EulerAngle& p) : data_{p.data_[0], p.data_[1], p.data_[2]} {}
 
-  Scalar &Roll() noexcept { return data_[0]; }
-  const Scalar &Roll() const noexcept { return data_[0]; }
-  Scalar &Pitch() noexcept { return data_[1]; }
-  const Scalar &Pitch() const noexcept { return data_[1]; }
-  Scalar &Yaw() noexcept { return data_[2]; }
-  const Scalar &Yaw() const noexcept { return data_[2]; }
+  Scalar& Roll() noexcept { return data_[0]; }
+  const Scalar& Roll() const noexcept { return data_[0]; }
+  Scalar& Pitch() noexcept { return data_[1]; }
+  const Scalar& Pitch() const noexcept { return data_[1]; }
+  Scalar& Yaw() noexcept { return data_[2]; }
+  const Scalar& Yaw() const noexcept { return data_[2]; }
 
   /**
    * @brief 通过 3 元素数组构造欧拉角对象。Constructs an Euler angle object using a
@@ -410,7 +410,7 @@ class EulerAngle
 
   /// @brief 赋值运算符，从 Eigen 3D 向量赋值。Assignment operator from an Eigen 3D
   /// vector.
-  EulerAngle &operator=(const Eigen::Matrix<Scalar, 3, 1> &p)
+  EulerAngle& operator=(const Eigen::Matrix<Scalar, 3, 1>& p)
   {
     data_[0] = p(0);
     data_[1] = p(1);
@@ -420,7 +420,7 @@ class EulerAngle
 
   /// @brief 赋值运算符，从另一个 EulerAngle 赋值。Assignment operator from another
   /// EulerAngle.
-  EulerAngle &operator=(const EulerAngle &p)
+  EulerAngle& operator=(const EulerAngle& p)
   {
     if (this != &p)
     {
@@ -626,7 +626,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    *
    * @param R 3x3 旋转矩阵。 The 3x3 rotation matrix.
    */
-  RotationMatrix(const Eigen::Matrix<Scalar, 3, 3> &R) : Eigen::Matrix<Scalar, 3, 3>{R} {}
+  RotationMatrix(const Eigen::Matrix<Scalar, 3, 3>& R) : Eigen::Matrix<Scalar, 3, 3>{R} {}
 
   /**
    * @brief 通过 Eigen 四元数构造旋转矩阵。
@@ -634,7 +634,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    *
    * @param q Eigen 四元数。 The Eigen quaternion.
    */
-  RotationMatrix(const Eigen::Quaternion<Scalar> &q)
+  RotationMatrix(const Eigen::Quaternion<Scalar>& q)
       : Eigen::Matrix<Scalar, 3, 3>{q.ToRotationMatrix()}
   {
   }
@@ -645,7 +645,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    *
    * @param q `Quaternion` 四元数。 The `Quaternion` object.
    */
-  RotationMatrix(const Quaternion<Scalar> &q) { *this = q.ToRotationMatrix(); }
+  RotationMatrix(const Quaternion<Scalar>& q) { *this = q.ToRotationMatrix(); }
 
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
@@ -684,7 +684,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    * @return 返回赋值后的 `RotationMatrix` 对象引用。
    *         Returns a reference to the assigned `RotationMatrix` object.
    */
-  RotationMatrix &operator=(const RotationMatrix &R)
+  RotationMatrix& operator=(const RotationMatrix& R)
   {
     if (this != &R)
     {
@@ -701,7 +701,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
     return *this;
   }
 
-  RotationMatrix &operator=(const Eigen::Matrix<Scalar, 3, 3> &R)
+  RotationMatrix& operator=(const Eigen::Matrix<Scalar, 3, 3>& R)
   {
     this->data()[0] = R.data()[0];
     this->data()[1] = R.data()[1];
@@ -715,19 +715,19 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
     return *this;
   }
 
-  RotationMatrix &operator=(const Eigen::Quaternion<Scalar> &q)
+  RotationMatrix& operator=(const Eigen::Quaternion<Scalar>& q)
   {
     *this = q.ToRotationMatrix();
     return *this;
   }
 
-  RotationMatrix &operator=(const Quaternion<Scalar> &q)
+  RotationMatrix& operator=(const Quaternion<Scalar>& q)
   {
     *this = q.ToRotationMatrix();
     return *this;
   }
 
-  Position<Scalar> operator*(const Position<Scalar> &p) const
+  Position<Scalar> operator*(const Position<Scalar>& p) const
   {
     return Position<Scalar>((*this) * Eigen::Matrix<Scalar, 3, 1>(p));
   }
@@ -739,7 +739,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    * @param p 输入的三维位置向量。 The input 3D position vector.
    * @return 旋转后的三维向量。 The rotated 3D vector.
    */
-  Eigen::Matrix<Scalar, 3, 1> operator*(const Eigen::Matrix<Scalar, 3, 1> &p) const
+  Eigen::Matrix<Scalar, 3, 1> operator*(const Eigen::Matrix<Scalar, 3, 1>& p) const
   {
     return static_cast<Eigen::Matrix<Scalar, 3, 3>>(*this) * p;
   }
@@ -751,12 +751,12 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    * @param rhs 另一个旋转矩阵。 The second rotation matrix.
    * @return 两个旋转矩阵的乘积。 The product of the two rotation matrices.
    */
-  RotationMatrix operator*(const RotationMatrix &rhs) const
+  RotationMatrix operator*(const RotationMatrix& rhs) const
   {
-    const Eigen::Matrix<Scalar, 3, 3> &a =
-        static_cast<const Eigen::Matrix<Scalar, 3, 3> &>(*this);
-    const Eigen::Matrix<Scalar, 3, 3> &b =
-        static_cast<const Eigen::Matrix<Scalar, 3, 3> &>(rhs);
+    const Eigen::Matrix<Scalar, 3, 3>& a =
+        static_cast<const Eigen::Matrix<Scalar, 3, 3>&>(*this);
+    const Eigen::Matrix<Scalar, 3, 3>& b =
+        static_cast<const Eigen::Matrix<Scalar, 3, 3>&>(rhs);
     return RotationMatrix(a * b);
   }
 
@@ -774,7 +774,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
 
   Eigen::Matrix<Scalar, 3, 1> ToEulerAngleZYX() const
   {
-    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+    const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar roll = std::atan2(r(2, 1), r(2, 2));
     Scalar yaw = std::atan2(r(1, 0), r(0, 0));
@@ -785,7 +785,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
 
   Eigen::Matrix<Scalar, 3, 1> ToEulerAngleXZY() const
   {
-    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+    const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar roll = std::atan2(r(2, 1), r(1, 1));
     Scalar yaw = std::asin(-r(0, 1));
@@ -796,7 +796,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
 
   Eigen::Matrix<Scalar, 3, 1> ToEulerAngleYZX() const
   {
-    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+    const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar pitch = std::atan2(-r(2, 0), r(0, 0));
     Scalar yaw = std::asin(r(1, 0));
@@ -807,7 +807,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
 
   Eigen::Matrix<Scalar, 3, 1> ToEulerAngleYXZ() const
   {
-    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+    const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar pitch = std::atan2(r(0, 2), r(2, 2));
     Scalar roll = std::asin(-r(1, 2));
@@ -818,7 +818,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
 
   Eigen::Matrix<Scalar, 3, 1> ToEulerAngleZXY() const
   {
-    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+    const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar roll = std::asin(r(2, 1));
     Scalar yaw = std::atan2(r(1, 1), -r(0, 1));
@@ -829,7 +829,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
 
   Eigen::Matrix<Scalar, 3, 1> ToEulerAngleXYZ() const
   {
-    const Eigen::Matrix<Scalar, 3, 3> &r = (*this);
+    const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar yaw = std::atan2(-r(0, 1), r(0, 0));
     Scalar pitch = std::asin(r(0, 2));
@@ -878,13 +878,13 @@ class Quaternion : public Eigen::Quaternion<Scalar>
    * @brief 复制构造函数 / Copy constructor
    * @param q 另一个 Eigen::Quaternion 四元数 / Another Eigen::Quaternion
    */
-  Quaternion(const Eigen::Quaternion<Scalar> &q) : Eigen::Quaternion<Scalar>(q) {}
+  Quaternion(const Eigen::Quaternion<Scalar>& q) : Eigen::Quaternion<Scalar>(q) {}
 
   /**
    * @brief 通过旋转矩阵构造四元数 / Construct a quaternion from a rotation matrix
    * @param R 旋转矩阵 / Rotation matrix
    */
-  Quaternion(const RotationMatrix<Scalar> &R)
+  Quaternion(const RotationMatrix<Scalar>& R)
       : Eigen::Quaternion<Scalar>(
             Eigen::Quaternion<Scalar>(static_cast<Eigen::Matrix<Scalar, 3, 3>>(R)))
   {
@@ -940,7 +940,7 @@ class Quaternion : public Eigen::Quaternion<Scalar>
    * @param q 另一个四元数 / Another quaternion
    * @return 赋值后的 Quaternion / Assigned Quaternion
    */
-  Quaternion &operator=(const Eigen::Quaternion<Scalar> &q)
+  Quaternion& operator=(const Eigen::Quaternion<Scalar>& q)
   {
     *this = Quaternion(q);
     return *this;
@@ -957,25 +957,25 @@ class Quaternion : public Eigen::Quaternion<Scalar>
    * @param q 另一个四元数 / Another quaternion
    * @return 计算后的四元数 / Computed quaternion
    */
-  Quaternion operator+(const Quaternion &q) const
+  Quaternion operator+(const Quaternion& q) const
   {
     return Quaternion(this->w() + q.w(), this->x() + q.x(), this->y() + q.y(),
                       this->z() + q.z());
   }
 
-  Quaternion operator+(const Eigen::Quaternion<Scalar> &q) const
+  Quaternion operator+(const Eigen::Quaternion<Scalar>& q) const
   {
     return Quaternion(this->w() + q.w(), this->x() + q.x(), this->y() + q.y(),
                       this->z() + q.z());
   }
 
-  Quaternion operator-(const Quaternion &q) const
+  Quaternion operator-(const Quaternion& q) const
   {
     return Quaternion(this->w() - q.w(), this->x() - q.x(), this->y() - q.y(),
                       this->z() - q.z());
   }
 
-  Quaternion operator-(const Eigen::Quaternion<Scalar> &q) const
+  Quaternion operator-(const Eigen::Quaternion<Scalar>& q) const
   {
     return Quaternion(this->w() - q.w(), this->x() - q.x(), this->y() - q.y(),
                       this->z() - q.z());
@@ -986,12 +986,12 @@ class Quaternion : public Eigen::Quaternion<Scalar>
    * @param q 另一个四元数 / Another quaternion
    * @return 计算后的四元数 / Computed quaternion
    */
-  Quaternion operator*(const Quaternion &q) const
+  Quaternion operator*(const Quaternion& q) const
   {
     return Eigen::Quaternion<Scalar>(*this) * Eigen::Quaternion<Scalar>(q);
   }
 
-  Quaternion operator*(const Eigen::Quaternion<Scalar> &q) const
+  Quaternion operator*(const Eigen::Quaternion<Scalar>& q) const
   {
     return Eigen::Quaternion<Scalar>(*this) * q;
   }
@@ -1002,9 +1002,9 @@ class Quaternion : public Eigen::Quaternion<Scalar>
    * @param q 另一个四元数 / Another quaternion
    * @return 计算后的四元数 / Computed quaternion
    */
-  Quaternion operator/(const Quaternion &q) const { return (*this) * (-q); }
+  Quaternion operator/(const Quaternion& q) const { return (*this) * (-q); }
 
-  Quaternion operator/(const Eigen::Quaternion<Scalar> &q) const
+  Quaternion operator/(const Eigen::Quaternion<Scalar>& q) const
   {
     return (*this) * (-q);
   }
@@ -1013,7 +1013,7 @@ class Quaternion : public Eigen::Quaternion<Scalar>
             std::enable_if_t<std::is_same<Q, Quaternion>::value ||
                                  std::is_same<Q, Eigen::Quaternion<Scalar>>::value,
                              int> = 0>
-  const Quaternion &operator+=(const Q &q)
+  const Quaternion& operator+=(const Q& q)
   {
     *this = *this + q;
     return *this;
@@ -1023,7 +1023,7 @@ class Quaternion : public Eigen::Quaternion<Scalar>
             std::enable_if_t<std::is_same<Q, Quaternion>::value ||
                                  std::is_same<Q, Eigen::Quaternion<Scalar>>::value,
                              int> = 0>
-  const Quaternion &operator-=(const Q &q)
+  const Quaternion& operator-=(const Q& q)
   {
     *this = *this - q;
     return *this;
@@ -1034,7 +1034,7 @@ class Quaternion : public Eigen::Quaternion<Scalar>
    * @param p 需要旋转的 Position 向量 / Position vector to be rotated
    * @return 旋转后的 Position 向量 / Rotated Position vector
    */
-  Position<Scalar> operator*(const Position<Scalar> &p) const
+  Position<Scalar> operator*(const Position<Scalar>& p) const
   {
     return Eigen::Quaternion<Scalar>(*this) * Eigen::Matrix<Scalar, 3, 1>(p);
   }
@@ -1138,8 +1138,8 @@ template <typename Scalar = DefaultScalar>
 class Transform
 {
  public:
-  Quaternion<Scalar> rotation;  ///< 旋转部分，使用四元数表示。Rotation component
-                                ///< represented by a quaternion.
+  Quaternion<Scalar> rotation;   ///< 旋转部分，使用四元数表示。Rotation component
+                                 ///< represented by a quaternion.
   Position<Scalar> translation;  ///< 平移部分，使用三维向量表示。Translation component
                                  ///< represented by a 3D vector.
 
@@ -1153,7 +1153,7 @@ class Transform
    * @param rotation 旋转四元数。Rotation quaternion.
    * @param translation 平移向量。Translation vector.
    */
-  Transform(const Quaternion<Scalar> &rotation, const Position<Scalar> &translation)
+  Transform(const Quaternion<Scalar>& rotation, const Position<Scalar>& translation)
       : rotation(rotation), translation(translation)
   {
   }
@@ -1164,7 +1164,7 @@ class Transform
    * @param q 旋转四元数。Rotation quaternion.
    * @return 当前 Transform 对象的引用。Reference to the current Transform object.
    */
-  Transform &operator=(const Quaternion<Scalar> &q)
+  Transform& operator=(const Quaternion<Scalar>& q)
   {
     rotation = q;
     return *this;
@@ -1176,7 +1176,7 @@ class Transform
    * @param a 旋转轴-角度对象。Axis-angle representation.
    * @return 当前 Transform 对象的引用。Reference to the current Transform object.
    */
-  Transform &operator=(const Eigen::AngleAxis<Scalar> &a)
+  Transform& operator=(const Eigen::AngleAxis<Scalar>& a)
   {
     rotation = a;
     return *this;
@@ -1188,7 +1188,7 @@ class Transform
    * @param p 平移向量。Translation vector.
    * @return 当前 Transform 对象的引用。Reference to the current Transform object.
    */
-  Transform &operator=(const Position<Scalar> &p)
+  Transform& operator=(const Position<Scalar>& p)
   {
     translation = p;
     return *this;
@@ -1200,7 +1200,7 @@ class Transform
    * @param t 另一个变换。Another transformation.
    * @return 组合后的变换。Resulting transformation.
    */
-  Transform operator+(const Transform &t) const
+  Transform operator+(const Transform& t) const
   {
     return Transform(Eigen::Quaternion<Scalar>(rotation * t.rotation),
                      Eigen::Matrix<Scalar, 3, 1>(translation + rotation * t.translation));
@@ -1212,7 +1212,7 @@ class Transform
    * @param t 另一个变换。Another transformation.
    * @return 计算得到的相对变换。Resulting relative transformation.
    */
-  Transform operator-(const Transform &t) const
+  Transform operator-(const Transform& t) const
   {
     return Transform(rotation / t.rotation, translation - t.translation);
   }
