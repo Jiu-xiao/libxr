@@ -195,13 +195,6 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port)
   {
     // 仅在有挂起读请求时启用超时中断，避免空闲无效触发 / Enable timeout IRQ
     // only when a read request is pending to avoid idle false triggers.
-    if (uart->rx_timeout_mode_ == RxTimeoutMode::LIN_COMPARE)
-    {
-      // 以本次 Read 请求开始作为超时计时起点 / Start timeout timing from this
-      // Read request boundary.
-      uart->ResetLinCounter();
-    }
-
     DL_UART_clearInterruptStatus(uart->res_.instance, TIMEOUT_MASK);
     DL_UART_enableInterrupt(uart->res_.instance, TIMEOUT_MASK);
   }
@@ -529,6 +522,8 @@ void MSPM0UART::CompletePendingReadOnTimeout(bool in_isr)
   const size_t AVAILABLE = read_port_->queue_data_->Size();
   if (AVAILABLE == 0U)
   {
+    // 超时但没有数据时也必须收尾挂起读，避免 busy_ 卡在 PENDING。
+    read_port_->Finish(in_isr, ErrorCode::EMPTY, read_port_->info_, 0U);
     return;
   }
 
