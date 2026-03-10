@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include <cstring>
 
 #include "libxr.hpp"

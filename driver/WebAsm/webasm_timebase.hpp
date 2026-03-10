@@ -29,7 +29,7 @@ class WebAsmTimebase : public Timebase
     auto now = std::chrono::system_clock::now();
     auto us =
         std::chrono::duration_cast<std::chrono::microseconds>(now - start_time_).count();
-    return static_cast<MicrosecondTimestamp>(us % UINT32_MAX);
+    return MicrosecondTimestamp(static_cast<uint64_t>(us));
   }
 
   /**
@@ -41,7 +41,7 @@ class WebAsmTimebase : public Timebase
     auto now = std::chrono::system_clock::now();
     auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time_).count();
-    return static_cast<MillisecondTimestamp>(ms % UINT32_MAX);
+    return MillisecondTimestamp(static_cast<uint32_t>(ms));
   }
 
  private:

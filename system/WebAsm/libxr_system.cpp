@@ -86,13 +86,8 @@ void LibXR::Timer::RefreshTimerInIdle()
 
   static auto last_refresh_time = Timebase::GetMilliseconds();
 
-  while (true)
+  while (static_cast<uint32_t>(Timebase::GetMilliseconds() - last_refresh_time) > 0u)
   {
-    if (last_refresh_time >= Timebase::GetMilliseconds())
-    {
-      return;
-    }
-
     in_timer = true;
     last_refresh_time = (last_refresh_time + 1);
     Timer::Refresh();
