@@ -439,8 +439,7 @@ void MSPM0UART::EnsureByteModeBlockTimeoutTask()
 
 void MSPM0UART::ArmByteModeBlockTimeout(uint32_t timeout_ms)
 {
-  if ((rx_timeout_mode_ != RxTimeoutMode::BYTE_INTERRUPT) ||
-      (timeout_ms == UINT32_MAX))
+  if ((rx_timeout_mode_ != RxTimeoutMode::BYTE_INTERRUPT) || (timeout_ms == UINT32_MAX))
   {
     return;
   }
@@ -501,8 +500,7 @@ void MSPM0UART::OnByteModeBlockTimeout(MSPM0UART* uart)
   if (uart->read_port_->busy_.load(std::memory_order_acquire) ==
       ReadPort::BusyState::PENDING)
   {
-    uart->read_port_->busy_.store(ReadPort::BusyState::IDLE,
-                                  std::memory_order_release);
+    uart->read_port_->busy_.store(ReadPort::BusyState::IDLE, std::memory_order_release);
   }
 }
 
@@ -634,8 +632,7 @@ void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
   }
 
   if ((rx_timeout_mode_ == RxTimeoutMode::BYTE_INTERRUPT) &&
-      (read_port_->busy_.load(std::memory_order_relaxed) !=
-       ReadPort::BusyState::PENDING))
+      (read_port_->busy_.load(std::memory_order_relaxed) != ReadPort::BusyState::PENDING))
   {
     CancelByteModeBlockTimeout();
   }
@@ -649,7 +646,6 @@ void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
     DL_UART_disableInterrupt(res_.instance, timeout_mask);
     DL_UART_clearInterruptStatus(res_.instance, timeout_mask);
   }
-
 }
 
 void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
