@@ -423,16 +423,27 @@ void IRAM_ATTR ESP32UART::ClearPendingTx()
 
 bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
 {
+  // Mark the op as already reported before kicking HW so a very-fast EOF ISR
+  // cannot race back in and report the same callback twice.
+  const bool report_now = !tx_active_reported_;
+  if (report_now)
+  {
+    tx_active_reported_ = true;
+  }
+
   if (!StartActiveTransfer(in_isr))
   {
+    tx_active_reported_ = false;
     write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
     ClearActiveTx();
     return false;
   }
 
-  // Align with STM/CH semantics: op is considered complete once transfer is kicked.
-  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-  tx_active_reported_ = true;
+  if (report_now)
+  {
+    // Align with STM/CH semantics: op is considered complete once transfer is kicked.
+    write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+  }
   return true;
 }
 
@@ -449,15 +460,21 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 
   if (!tx_busy_.IsSet() && tx_active_valid_)
   {
+    const bool report_now = !tx_active_reported_;
+    if (report_now)
+    {
+      tx_active_reported_ = true;
+    }
+
     if (!StartActiveTransfer(in_isr))
     {
       ClearActiveTx();
       return ErrorCode::FAILED;
     }
-    else if (!tx_active_reported_)
+
+    if (report_now)
     {
       // Current op completion is reported by WritePort when TryStartTx returns OK.
-      tx_active_reported_ = true;
       if (!tx_pending_valid_)
       {
         (void)LoadPendingTxFromQueue(in_isr);
