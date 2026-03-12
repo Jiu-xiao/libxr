@@ -372,12 +372,6 @@ ErrorCode ESP32UART::ConfigurePins()
     esp_rom_gpio_connect_in_signal(
         rx_pin_, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX), false);
   }
-  else
-  {
-    esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT,
-                                   UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX),
-                                   false);
-  }
 
   if (rts_pin_ >= 0)
   {
