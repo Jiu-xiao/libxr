@@ -531,7 +531,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
   if (GetNumber() == EPNumber::EP0)
   {
-    if (!is_in && size == 0)
+    if (!IS_IN && size == 0)
     {
       tog0_ = true;
       tog1_ = false;
