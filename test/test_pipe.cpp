@@ -693,6 +693,70 @@ void test_write_port_stream_block_destructor_autocommit()
                                      StreamSubmitMode::DESTRUCT);
 }
 
+void test_pipe_stream_commit_releases_lock_for_next_stream()
+{
+  using namespace LibXR;
+
+  Pipe pipe(64);
+  ReadPort& r = pipe.GetReadPort();
+  WritePort& w = pipe.GetWritePort();
+
+  static const uint8_t A[] = {0x10, 0x11, 0x12};
+  static const uint8_t B[] = {0x20, 0x21, 0x22, 0x23};
+  uint8_t rx[sizeof(A) + sizeof(B)] = {0};
+
+  ReadOperation rop;
+  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+
+  WriteOperation op1;
+  WritePort::Stream ws1(&w, op1);
+  ws1 << ConstRawData{A, sizeof(A)};
+  ASSERT(ws1.Commit() == ErrorCode::OK);
+
+  WriteOperation op2;
+  WritePort::Stream ws2(&w, op2);
+  ws2 << ConstRawData{B, sizeof(B)};
+  ASSERT(ws2.Commit() == ErrorCode::OK);
+
+  static const uint8_t EXPECT[] = {0x10, 0x11, 0x12, 0x20, 0x21, 0x22, 0x23};
+  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+}
+
+void test_pipe_stream_commit_allows_persistent_and_external_streams()
+{
+  using namespace LibXR;
+
+  Pipe pipe(64);
+  ReadPort& r = pipe.GetReadPort();
+  WritePort& w = pipe.GetWritePort();
+
+  static const uint8_t A[] = {'T', '1'};
+  static const uint8_t B[] = {'E', 'X', 'T'};
+  static const uint8_t C[] = {'T', '2', '!'};
+  uint8_t rx[sizeof(A) + sizeof(B) + sizeof(C)] = {0};
+
+  ReadOperation rop;
+  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+
+  WriteOperation owner_op;
+  WritePort::Stream owner(&w, owner_op);
+  owner << ConstRawData{A, sizeof(A)};
+  ASSERT(owner.Commit() == ErrorCode::OK);
+
+  WriteOperation external_op;
+  WritePort::Stream external(&w, external_op);
+  external << ConstRawData{B, sizeof(B)};
+  ASSERT(external.Commit() == ErrorCode::OK);
+
+  owner << ConstRawData{C, sizeof(C)};
+  ASSERT(owner.Commit() == ErrorCode::OK);
+
+  static const uint8_t EXPECT[] = {'T', '1', 'E', 'X', 'T', 'T', '2', '!'};
+  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+}
+
 void test_pipe_mode_matrix()
 {
   uint8_t seed = 0x21;
@@ -1090,6 +1154,8 @@ void test_pipe()
   test_write_port_stream_block_pending_result_propagates();
   test_write_port_stream_block_timeout_detaches_waiter();
   test_write_port_stream_block_destructor_autocommit();
+  test_pipe_stream_commit_releases_lock_for_next_stream();
+  test_pipe_stream_commit_allows_persistent_and_external_streams();
   test_pipe_mode_matrix();
   test_pipe_pending_mode_matrix();
   test_pipe_reuse_stress();

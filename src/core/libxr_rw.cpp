@@ -562,14 +562,10 @@ ErrorCode WritePort::Stream::Commit()
     size_ = 0;
   }
 
-  if (port_->queue_info_->EmptySize() < 1)
+  if (locked_)
   {
     locked_ = false;
     port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-  }
-  else
-  {
-    cap_ = port_->queue_data_->EmptySize();
   }
 
   return ans;
