@@ -136,9 +136,11 @@ class DapLinkV2Class : public DeviceClass
 
   ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) override
   {
-    header.data_.bDeviceClass = DeviceDescriptor::ClassID::MISCELLANEOUS;
-    header.data_.bDeviceSubClass = 0x02;
-    header.data_.bDeviceProtocol = 0x01;
+    // Keep the device descriptor per-interface so Windows can match the
+    // single vendor-specific interface against the MS OS 2.0 function subset.
+    header.data_.bDeviceClass = DeviceDescriptor::ClassID::PER_INTERFACE;
+    header.data_.bDeviceSubClass = 0x00;
+    header.data_.bDeviceProtocol = 0x00;
     return ErrorCode::OK;
   }
 
@@ -308,8 +310,9 @@ class DapLinkV2Class : public DeviceClass
    */
   ConstRawData GetWinUsbMsOs20DescriptorSet() const
   {
+    const auto desc_size = GetWinUsbMsOs20DescriptorSetSize();
     return ConstRawData{reinterpret_cast<const uint8_t*>(&winusb_msos20_),
-                        sizeof(winusb_msos20_)};
+                        desc_size};
   }
 
   /**
@@ -342,6 +345,12 @@ class DapLinkV2Class : public DeviceClass
   static constexpr uint8_t ToU8(E e)
   {
     return static_cast<uint8_t>(e);
+  }
+
+  template <typename E>
+  static constexpr uint8_t to_u8(E e)
+  {
+    return ToU8(e);
   }
 
   // CMSIS-DAP status bytes
@@ -385,62 +394,70 @@ class DapLinkV2Class : public DeviceClass
 
   void InitWinUsbDescriptors()
   {
+    const auto desc_set_size = GetWinUsbMsOs20DescriptorSetSize();
+    const auto compat_only_size =
+        static_cast<uint16_t>(offsetof(WinUsbMsOs20DescSet, prop));
+
     winusb_msos20_.set.wLength = static_cast<uint16_t>(sizeof(winusb_msos20_.set));
     winusb_msos20_.set.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SET_HEADER_DESCRIPTOR;
     winusb_msos20_.set.dwWindowsVersion = 0x06030000;  // Win 8.1+
-    winusb_msos20_.set.wTotalLength = static_cast<uint16_t>(sizeof(winusb_msos20_));
+    winusb_msos20_.set.wTotalLength = desc_set_size;
 
     winusb_msos20_.cfg.wLength = static_cast<uint16_t>(sizeof(winusb_msos20_.cfg));
     winusb_msos20_.cfg.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SUBSET_HEADER_CONFIGURATION;
 
+    // Windows' composite examples use 0 for the first configuration subset.
     winusb_msos20_.cfg.bConfigurationValue = 0;
     winusb_msos20_.cfg.bReserved = 0;
-    winusb_msos20_.cfg.wTotalLength = static_cast<uint16_t>(
-        sizeof(winusb_msos20_) - offsetof(WinUsbMsOs20DescSet, cfg));
+    winusb_msos20_.cfg.wTotalLength = static_cast<uint16_t>(desc_set_size -
+                                                            offsetof(WinUsbMsOs20DescSet, cfg));
 
     winusb_msos20_.func.wLength = static_cast<uint16_t>(sizeof(winusb_msos20_.func));
     winusb_msos20_.func.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SUBSET_HEADER_FUNCTION;
     winusb_msos20_.func.bReserved = 0;
-    winusb_msos20_.func.wTotalLength = static_cast<uint16_t>(
-        sizeof(winusb_msos20_) - offsetof(WinUsbMsOs20DescSet, func));
+    winusb_msos20_.func.wTotalLength = static_cast<uint16_t>(desc_set_size -
+                                                             offsetof(WinUsbMsOs20DescSet, func));
 
     winusb_msos20_.compat.wLength = static_cast<uint16_t>(sizeof(winusb_msos20_.compat));
     winusb_msos20_.compat.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_FEATURE_COMPATIBLE_ID;
 
-    winusb_msos20_.prop.header.wDescriptorType =
-        LibXR::USB::WinUsbMsOs20::MS_OS_20_FEATURE_REG_PROPERTY;
-    winusb_msos20_.prop.header.wPropertyDataType = LibXR::USB::WinUsbMsOs20::REG_MULTI_SZ;
-    winusb_msos20_.prop.header.wPropertyNameLength =
-        LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES;
-
-    Memory::FastCopy(winusb_msos20_.prop.name,
-                     LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16,
-                     LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
-
-    // DeviceInterfaceGUIDs: REG_MULTI_SZ UTF-16LE, include double-NUL terminator
-    // 注意：此处为“单 GUID + 双 NUL 结束”的 REG_MULTI_SZ / Single GUID + double-NUL end.
-    const char GUID_STR[] = "{CDB3B5AD-293B-4663-AA36-1AAE46463776}";
-    const size_t GUID_LEN = sizeof(GUID_STR) - 1;
-
-    for (size_t i = 0; i < GUID_LEN; ++i)
+    if (desc_set_size > compat_only_size)
     {
-      winusb_msos20_.prop.data[i * 2] = static_cast<uint8_t>(GUID_STR[i]);
-      winusb_msos20_.prop.data[i * 2 + 1] = 0x00;
+      winusb_msos20_.prop.header.wDescriptorType =
+          LibXR::USB::WinUsbMsOs20::MS_OS_20_FEATURE_REG_PROPERTY;
+      winusb_msos20_.prop.header.wPropertyDataType = LibXR::USB::WinUsbMsOs20::REG_MULTI_SZ;
+      winusb_msos20_.prop.header.wPropertyNameLength =
+          LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES;
+
+      Memory::FastCopy(winusb_msos20_.prop.name,
+                       LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16,
+                       LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
+
+      // DeviceInterfaceGUIDs: REG_MULTI_SZ UTF-16LE, include double-NUL terminator
+      // 注意：此处为“单 GUID + 双 NUL 结束”的 REG_MULTI_SZ / Single GUID + double-NUL end.
+      const char GUID_STR[] = "{CDB3B5AD-293B-4663-AA36-1AAE46463776}";
+      const size_t GUID_LEN = sizeof(GUID_STR) - 1;
+
+      for (size_t i = 0; i < GUID_LEN; ++i)
+      {
+        winusb_msos20_.prop.data[i * 2] = static_cast<uint8_t>(GUID_STR[i]);
+        winusb_msos20_.prop.data[i * 2 + 1] = 0x00;
+      }
+
+      // Append UTF-16 NUL + extra UTF-16 NUL (REG_MULTI_SZ end)
+      winusb_msos20_.prop.data[GUID_LEN * 2 + 0] = 0x00;
+      winusb_msos20_.prop.data[GUID_LEN * 2 + 1] = 0x00;
+      winusb_msos20_.prop.data[GUID_LEN * 2 + 2] = 0x00;
+      winusb_msos20_.prop.data[GUID_LEN * 2 + 3] = 0x00;
+
+      winusb_msos20_.prop.wPropertyDataLength = static_cast<uint16_t>((GUID_LEN * 2) + 4);
+      winusb_msos20_.prop.header.wLength =
+          static_cast<uint16_t>(sizeof(winusb_msos20_.prop));
     }
-
-    // Append UTF-16 NUL + extra UTF-16 NUL (REG_MULTI_SZ end)
-    winusb_msos20_.prop.data[GUID_LEN * 2 + 0] = 0x00;
-    winusb_msos20_.prop.data[GUID_LEN * 2 + 1] = 0x00;
-    winusb_msos20_.prop.data[GUID_LEN * 2 + 2] = 0x00;
-    winusb_msos20_.prop.data[GUID_LEN * 2 + 3] = 0x00;
-
-    winusb_msos20_.prop.wPropertyDataLength = static_cast<uint16_t>((GUID_LEN * 2) + 4);
-    winusb_msos20_.prop.header.wLength =
-        static_cast<uint16_t>(sizeof(winusb_msos20_.prop));
 
     // Sync to BOS capability object
     winusb_msos20_cap_.SetVendorCode(WINUSB_VENDOR_CODE);
@@ -455,6 +472,13 @@ class DapLinkV2Class : public DeviceClass
     // 内容变化但总长度不变；同步一次保持一致性
     // Content changes but total size stays the same; resync for consistency.
     winusb_msos20_cap_.SetDescriptorSet(GetWinUsbMsOs20DescriptorSet());
+  }
+
+  static constexpr uint16_t GetWinUsbMsOs20DescriptorSetSize()
+  {
+    // Include DeviceInterfaceGUIDs so libusb/WinUSB clients can resolve the
+    // interface path after Windows auto-binds the vendor interface.
+    return static_cast<uint16_t>(sizeof(WinUsbMsOs20DescSet));
   }
 
  private:
@@ -1790,7 +1814,7 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-ErrorCode HandleJTAGSequence(bool /*in_isr*/, const uint8_t* req,
+  ErrorCode HandleJTAGSequence(bool /*in_isr*/, const uint8_t* req,
                                              uint16_t req_len, uint8_t* resp,
                                              uint16_t resp_cap, uint16_t& out_len)
 {
