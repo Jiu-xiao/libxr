@@ -37,6 +37,14 @@ ReadPort& ReadPort::operator=(ReadFun fun)
 
 void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
 {
+  if (info.op.type == ReadOperation::OperationType::BLOCK)
+  {
+    block_result_ = ans;
+    info.op.data.sem_info.sem->PostFromCallback(in_isr);
+    busy_.store(BusyState::IDLE, std::memory_order_release);
+    return;
+  }
+
   busy_.store(BusyState::IDLE, std::memory_order_release);
   info.op.UpdateStatus(in_isr, ans);
 }
@@ -49,7 +57,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   {
     BusyState is_busy = busy_.load(std::memory_order_acquire);
 
-    if (is_busy == BusyState::PENDING)
+    if (is_busy == BusyState::PENDING || is_busy == BusyState::BLOCK_CLAIMED)
     {
       return ErrorCode::BUSY;
     }
@@ -86,6 +94,11 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
       if (ans == ErrorCode::PENDING)
       {
+        if (op.type == ReadOperation::OperationType::BLOCK)
+        {
+          block_result_ = ErrorCode::PENDING;
+        }
+
         BusyState expected = BusyState::IDLE;
         if (busy_.compare_exchange_weak(expected, BusyState::PENDING,
                                         std::memory_order_acq_rel,
@@ -100,6 +113,10 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
       }
       else
       {
+        if (op.type == ReadOperation::OperationType::BLOCK)
+        {
+          return ans;
+        }
         if (op.type != ReadOperation::OperationType::BLOCK)
         {
           op.UpdateStatus(in_isr, ans);
@@ -111,7 +128,24 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       ASSERT(!in_isr);
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      if (wait_ans == ErrorCode::OK)
+      {
+        return block_result_;
+      }
+
+      BusyState expected = BusyState::PENDING;
+      if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
+                                        std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
+      {
+        return ErrorCode::TIMEOUT;
+      }
+
+      auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
+      UNUSED(finish_wait_ans);
+      ASSERT(finish_wait_ans == ErrorCode::OK);
+      return block_result_;
     }
     else
     {
@@ -135,6 +169,18 @@ void ReadPort::ProcessPendingReads(bool in_isr)
     auto size = queue_data_->Size();
     if (size > 0 && size >= info_.data.size_)
     {
+      if (info_.op.type == ReadOperation::OperationType::BLOCK)
+      {
+        // BLOCK timeout and completion both race on busy_; claim completion first.
+        BusyState expected = BusyState::PENDING;
+        if (!busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
+                                           std::memory_order_acq_rel,
+                                           std::memory_order_acquire))
+        {
+          return;
+        }
+      }
+
       if (info_.data.size_ > 0)
       {
         auto ans = queue_data_->PopBatch(reinterpret_cast<uint8_t*>(info_.data.addr_),
@@ -157,6 +203,8 @@ void ReadPort::Reset()
 {
   ASSERT(queue_data_ != nullptr);
   queue_data_->Reset();
+  busy_.store(BusyState::IDLE, std::memory_order_release);
+  block_result_ = ErrorCode::OK;
 }
 
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
@@ -190,6 +238,31 @@ WritePort& WritePort::operator=(WriteFun fun)
 
 void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
 {
+  if (info.op.type == WriteOperation::OperationType::BLOCK)
+  {
+    block_result_ = ans;
+
+    BusyState expected = BusyState::BLOCK_WAITING;
+    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      info.op.data.sem_info.sem->PostFromCallback(in_isr);
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return;
+    }
+
+    expected = BusyState::BLOCK_DETACHED;
+    if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      return;
+    }
+
+    return;
+  }
+
   info.op.UpdateStatus(in_isr, ans);
 }
 
@@ -208,8 +281,10 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_i
       return ErrorCode::OK;
     }
 
-    LockState expected = LockState::UNLOCKED;
-    if (!lock_.compare_exchange_strong(expected, LockState::LOCKED))
+    BusyState expected = BusyState::IDLE;
+    if (!busy_.compare_exchange_strong(expected, BusyState::LOCKED,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
     {
       return ErrorCode::BUSY;
     }
@@ -227,7 +302,7 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 {
   if (!meta_pushed && queue_info_->EmptySize() < 1)
   {
-    lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    busy_.store(BusyState::IDLE, std::memory_order_release);
     return ErrorCode::FULL;
   }
 
@@ -236,7 +311,7 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
   {
     if (queue_data_->EmptySize() < data.size_)
     {
-      lock_.store(LockState::UNLOCKED, std::memory_order_release);
+      busy_.store(BusyState::IDLE, std::memory_order_release);
       return ErrorCode::FULL;
     }
 
@@ -253,15 +328,28 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 
   op.MarkAsRunning();
 
-  ans = write_fun_(*this, in_isr);
-
-  if (!meta_pushed)
+  if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    // Arm the waiter before the driver can complete the write immediately.
+    block_result_ = ErrorCode::PENDING;
+    busy_.store(BusyState::BLOCK_WAITING, std::memory_order_release);
   }
+
+  ans = write_fun_(*this, in_isr);
 
   if (ans != ErrorCode::PENDING)
   {
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return ans;
+    }
+
+    if (!meta_pushed)
+    {
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+    }
+
     if (op.type != WriteOperation::OperationType::BLOCK)
     {
       op.UpdateStatus(in_isr, ans);
@@ -272,7 +360,30 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
     ASSERT(!in_isr);
-    return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    if (wait_ans == ErrorCode::OK)
+    {
+      return block_result_;
+    }
+
+    BusyState expected = BusyState::BLOCK_WAITING;
+    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      return ErrorCode::TIMEOUT;
+    }
+
+    auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
+    UNUSED(finish_wait_ans);
+    ASSERT(finish_wait_ans == ErrorCode::OK);
+
+    return block_result_;
+  }
+
+  if (!meta_pushed)
+  {
+    busy_.store(BusyState::IDLE, std::memory_order_release);
   }
 
   return ErrorCode::OK;
@@ -283,36 +394,48 @@ void WritePort::Reset()
   ASSERT(queue_data_ != nullptr);
   queue_data_->Reset();
   queue_info_->Reset();
+  busy_.store(BusyState::IDLE, std::memory_order_release);
+  block_result_ = ErrorCode::OK;
 }
 
 WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
     : port_(port), op_(op)
 {
-  LockState expected = LockState::UNLOCKED;
-  if (port_->lock_.compare_exchange_strong(expected, LockState::LOCKED))
+  BusyState expected = BusyState::IDLE;
+  if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire))
   {
-    if (port_->queue_info_->EmptySize() < 1)
-    {
-      locked_ = false;
-      port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
-      return;
-    }
-    locked_ = true;
-    cap_ = port_->queue_data_->EmptySize();
+    return;
   }
+
+  if (port_->queue_info_->EmptySize() < 1)
+  {
+    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    return;
+  }
+
+  locked_ = true;
+  cap_ = port_->queue_data_->EmptySize();
 }
 
 WritePort::Stream::~Stream()
 {
   if (locked_ && size_ > 0)
   {
-    port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
+    auto ans = port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
+    ASSERT(ans == ErrorCode::OK);
     port_->CommitWrite({nullptr, size_}, op_, true);
+    if (op_.type == WriteOperation::OperationType::BLOCK)
+    {
+      // WritePort now owns the BLOCK wait/finish state machine.
+      locked_ = false;
+    }
   }
 
   if (locked_)
   {
-    port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
   }
 }
 
@@ -320,30 +443,28 @@ WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
 {
   if (!locked_)
   {
-    LockState expected = LockState::UNLOCKED;
-    if (port_->lock_.compare_exchange_strong(expected, LockState::LOCKED))
-    {
-      if (port_->queue_info_->EmptySize() < 1)
-      {
-        locked_ = false;
-        port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
-        return *this;
-      }
-      else
-      {
-        locked_ = true;
-        cap_ = port_->queue_data_->EmptySize();
-      }
-    }
-    else
+    BusyState expected = BusyState::IDLE;
+    if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire))
     {
       return *this;
     }
+
+    if (port_->queue_info_->EmptySize() < 1)
+    {
+      port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+      return *this;
+    }
+
+    locked_ = true;
+    cap_ = port_->queue_data_->EmptySize();
   }
   if (size_ + data.size_ <= cap_)
   {
-    port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                  data.size_);
+    auto ans = port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
+                                             data.size_);
+    ASSERT(ans == ErrorCode::OK);
     size_ += data.size_;
   }
 
@@ -359,6 +480,14 @@ ErrorCode WritePort::Stream::Commit()
     ans = port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
     ASSERT(ans == ErrorCode::OK);
     ans = port_->CommitWrite({nullptr, size_}, op_, true);
+    if (op_.type == WriteOperation::OperationType::BLOCK)
+    {
+      // WritePort will release busy_ after the BLOCK handoff completes.
+      size_ = 0;
+      locked_ = false;
+      return ans;
+    }
+
     ASSERT(ans == ErrorCode::OK);
     size_ = 0;
   }
@@ -366,7 +495,7 @@ ErrorCode WritePort::Stream::Commit()
   if (port_->queue_info_->EmptySize() < 1)
   {
     locked_ = false;
-    port_->lock_.store(LockState::UNLOCKED, std::memory_order_release);
+    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
   }
   else
   {

@@ -275,6 +275,7 @@ class ReadPort
   {
     IDLE = 0,
     PENDING = 1,
+    BLOCK_CLAIMED = 2,  ///< BLOCK completion won the race with timeout.
     EVENT = UINT32_MAX
   };
 
@@ -282,6 +283,7 @@ class ReadPort
   LockFreeQueue<uint8_t>* queue_data_ = nullptr;
   ReadInfoBlock info_;
   std::atomic<BusyState> busy_{BusyState::IDLE};
+  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
 
   /**
    * @brief Constructs a ReadPort with queue sizes.
@@ -412,16 +414,20 @@ class ReadPort
 class WritePort
 {
  public:
-  enum class LockState : uint32_t
+  enum class BusyState : uint32_t
   {
-    LOCKED = 0,
-    UNLOCKED = UINT32_MAX
+    LOCKED = 0,          ///< Submission lock held by operator()/Stream.
+    BLOCK_WAITING = 1,   ///< One BLOCK waiter is armed and still waiting.
+    BLOCK_CLAIMED = 2,   ///< Completion owns the wake/drain handoff.
+    BLOCK_DETACHED = 3,  ///< Waiter timed out; completion must not post.
+    IDLE = UINT32_MAX
   };
 
   WriteFun write_fun_ = nullptr;
   LockFreeQueue<WriteInfoBlock>* queue_info_;
   LockFreeQueue<uint8_t>* queue_data_;
-  std::atomic<LockState> lock_{LockState::UNLOCKED};
+  std::atomic<BusyState> busy_{BusyState::IDLE};
+  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
 
   /**
    * @brief WritePort 的流式写入操作器，支持链式 << 操作和批量提交。
