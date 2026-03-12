@@ -72,9 +72,19 @@ class DapLinkV1Class
  protected:
   ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) override;
   ConstRawData GetReportDesc() override;
+  ErrorCode OnGetInputReport(uint8_t report_id,
+                             DeviceClass::ControlTransferResult& result) override;
+  ErrorCode OnGetLastOutputReport(uint8_t report_id,
+                                  DeviceClass::ControlTransferResult& result) override;
+  ErrorCode OnGetFeatureReport(uint8_t report_id,
+                               DeviceClass::ControlTransferResult& result) override;
+  ErrorCode OnSetReport(uint8_t report_id,
+                        DeviceClass::ControlTransferResult& result) override;
+  ErrorCode OnSetReportData(bool in_isr, ConstRawData& data) override;
 
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num) override;
-  void UnbindEndpoints(EndpointPool& endpoint_pool) override;
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                     bool in_isr) override;
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override;
 
   void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data) override;
   void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data) override;
@@ -85,6 +95,16 @@ class DapLinkV1Class
   static void OnDataInCompleteStatic(bool in_isr, DapLinkV1Class* self,
                                      LibXR::ConstRawData& data);
 
+  uint16_t GetDapPacketSize() const;
+  uint16_t ClipResponseLength(uint16_t len, uint16_t cap) const;
+  static constexpr uint8_t NextRespQueueIndex(uint8_t idx);
+  void ResetResponseQueue();
+  bool IsResponseQueueEmpty() const;
+  bool IsResponseQueueFull() const;
+  bool TryBuildAndEnqueueResponse(bool in_isr, const uint8_t* req, uint16_t req_len);
+  uint8_t OutstandingResponseCount() const;
+  bool EnqueueResponse(const uint8_t* data, uint16_t len);
+  bool SubmitNextQueuedResponseIfIdle();
   void ArmOutTransferIfIdle();
 
   ErrorCode ProcessOneCommand(bool in_isr, const uint8_t* req, uint16_t req_len,
@@ -197,6 +217,22 @@ class DapLinkV1Class
   static constexpr uint16_t MAX_REQ = DapLinkV1Def::MAX_REQUEST_SIZE;
   static constexpr uint16_t MAX_RESP = DapLinkV1Def::MAX_RESPONSE_SIZE;
   static constexpr uint8_t JTAG_MAX_DEVICES = 16u;
+  static constexpr uint16_t DEFAULT_DAP_PACKET_SIZE = MAX_RESP;
+  static constexpr uint8_t PACKET_COUNT_ADVERTISED = 1u;
+  static constexpr uint8_t MAX_OUTSTANDING_RESPONSES = PACKET_COUNT_ADVERTISED;
+  static constexpr uint16_t MAX_DAP_PACKET_SIZE = MAX_RESP;
+  static constexpr uint16_t RESP_SLOT_SIZE = MAX_DAP_PACKET_SIZE;
+  static constexpr uint8_t RESP_QUEUE_DEPTH = PACKET_COUNT_ADVERTISED;
+  static_assert(RESP_SLOT_SIZE >= DEFAULT_DAP_PACKET_SIZE,
+                "RESP_SLOT_SIZE must cover HID packet size");
+  static_assert((RESP_QUEUE_DEPTH & (RESP_QUEUE_DEPTH - 1u)) == 0u,
+                "Response queue depth must be power-of-two");
+
+  struct ResponseSlot
+  {
+    uint16_t len = 0u;
+    uint8_t payload[RESP_SLOT_SIZE] = {};
+  };
 
   SwdPort& swd_;
   LibXR::Debug::Jtag* jtag_ = nullptr;
@@ -207,8 +243,10 @@ class DapLinkV1Class
   LibXR::GPIO* nreset_gpio_ = nullptr;
 
   uint8_t swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
+                                             DapLinkV1Def::DAP_SWJ_NTRST |
                                              DapLinkV1Def::DAP_SWJ_NRESET);
   bool last_nreset_level_high_ = true;
+  bool session_touched_reset_ = false;
 
   LibXR::USB::DapLinkV1Def::State dap_state_{};
   InfoStrings info_{"XRobot", "DAPLinkV1", "00000001", "1.0.0", "XRUSB",
@@ -219,6 +257,8 @@ class DapLinkV1Class
 
   Endpoint* ep_in_ = nullptr;   // Cached HID IN endpoint
   Endpoint* ep_out_ = nullptr;  // Cached HID OUT endpoint
+  uint8_t control_out_report_[MAX_REQ] = {};
+  uint8_t control_in_report_[MAX_RESP] = {};
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
@@ -226,6 +266,10 @@ class DapLinkV1Class
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
 
   bool inited_ = false;
+  ResponseSlot resp_q_[RESP_QUEUE_DEPTH] = {};
+  uint8_t resp_q_head_ = 0u;
+  uint8_t resp_q_tail_ = 0u;
+  uint8_t resp_q_count_ = 0u;
 };
 
 template <typename SwdPort>
@@ -249,6 +293,15 @@ template <typename SwdPort>
 void DapLinkV1Class<SwdPort>::SetJtag(LibXR::Debug::Jtag* jtag)
 {
   jtag_ = jtag;
+  jtag_chain_.ir_length = jtag_ir_len_;
+  jtag_chain_.ir_before = jtag_ir_before_;
+  jtag_chain_.ir_after = jtag_ir_after_;
+  jtag_chain_.count = 0u;
+  jtag_chain_.index = 0u;
+  if (jtag_ != nullptr)
+  {
+    (void)jtag_->SetClockHz(swj_clock_hz_);
+  }
 }
 
 template <typename SwdPort>
@@ -263,7 +316,7 @@ bool DapLinkV1Class<SwdPort>::IsInited() const { return inited_; }
 template <typename SwdPort>
 ErrorCode DapLinkV1Class<SwdPort>::WriteDeviceDescriptor(DeviceDescriptor& header)
 {
-  header.data_.bDeviceClass = DeviceDescriptor::ClassID::HID;
+  header.data_.bDeviceClass = DeviceDescriptor::ClassID::PER_INTERFACE;
   header.data_.bDeviceSubClass = 0;
   header.data_.bDeviceProtocol = 0;
   return ErrorCode::OK;
@@ -276,9 +329,80 @@ ConstRawData DapLinkV1Class<SwdPort>::GetReportDesc()
 }
 
 template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num)
+ErrorCode DapLinkV1Class<SwdPort>::OnGetInputReport(
+    uint8_t report_id, DeviceClass::ControlTransferResult& result)
 {
-  HID::BindEndpoints(endpoint_pool, start_itf_num);
+  if (report_id != 0u)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  result.write_data = ConstRawData{control_in_report_, sizeof(control_in_report_)};
+  return ErrorCode::OK;
+}
+
+template <typename SwdPort>
+ErrorCode DapLinkV1Class<SwdPort>::OnGetLastOutputReport(
+    uint8_t report_id, DeviceClass::ControlTransferResult& result)
+{
+  if (report_id != 0u)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  result.write_data = ConstRawData{control_out_report_, sizeof(control_out_report_)};
+  return ErrorCode::OK;
+}
+
+template <typename SwdPort>
+ErrorCode DapLinkV1Class<SwdPort>::OnGetFeatureReport(
+    uint8_t report_id, DeviceClass::ControlTransferResult& result)
+{
+  return OnGetInputReport(report_id, result);
+}
+
+template <typename SwdPort>
+ErrorCode DapLinkV1Class<SwdPort>::OnSetReport(
+    uint8_t report_id, DeviceClass::ControlTransferResult& result)
+{
+  if (report_id != 0u)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  Memory::FastSet(control_out_report_, 0, sizeof(control_out_report_));
+  result.read_data = RawData{control_out_report_, sizeof(control_out_report_)};
+  return ErrorCode::OK;
+}
+
+template <typename SwdPort>
+ErrorCode DapLinkV1Class<SwdPort>::OnSetReportData(bool in_isr, ConstRawData& data)
+{
+  if (data.addr_ == nullptr || data.size_ == 0u || data.size_ > sizeof(control_out_report_))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  Memory::FastSet(control_in_report_, 0, sizeof(control_in_report_));
+
+  uint16_t out_len = 0u;
+  auto ans =
+      ProcessOneCommand(in_isr, reinterpret_cast<const uint8_t*>(data.addr_),
+                        static_cast<uint16_t>(data.size_), control_in_report_,
+                        static_cast<uint16_t>(sizeof(control_in_report_)), out_len);
+  if (ans != ErrorCode::OK && out_len == 0u)
+  {
+    BuildNotSupportResponse(control_in_report_, static_cast<uint16_t>(sizeof(control_in_report_)),
+                            out_len);
+  }
+  return ErrorCode::OK;
+}
+
+template <typename SwdPort>
+void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool,
+                                            uint8_t start_itf_num, bool in_isr)
+{
+  HID::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
 
   ep_in_ = GetInEndpoint();
   ep_out_ = GetOutEndpoint();
@@ -301,10 +425,17 @@ void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool, uint8_t
 
   inited_ = true;
   match_mask_ = 0xFFFFFFFFu;
+  Memory::FastSet(control_out_report_, 0, sizeof(control_out_report_));
+  Memory::FastSet(control_in_report_, 0, sizeof(control_in_report_));
 
   dap_state_ = {};
   dap_state_.debug_port = LibXR::USB::DapLinkV1Def::DebugPort::DISABLED;
   dap_state_.transfer_abort = false;
+  ResetResponseQueue();
+  if (ep_in_ != nullptr)
+  {
+    ep_in_->SetActiveLength(0);
+  }
 
   swj_clock_hz_ = 1000000u;
   (void)swd_.SetClockHz(swj_clock_hz_);
@@ -324,24 +455,37 @@ void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool, uint8_t
   Memory::FastSet(jtag_ir_after_, 0, sizeof(jtag_ir_after_));
 
   last_nreset_level_high_ = true;
+  session_touched_reset_ = false;
   swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
+                                     DapLinkV1Def::DAP_SWJ_NTRST |
                                      DapLinkV1Def::DAP_SWJ_NRESET);
 
   ArmOutTransferIfIdle();
 }
 
 template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool)
+void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr)
 {
   inited_ = false;
 
   dap_state_.debug_port = LibXR::USB::DapLinkV1Def::DebugPort::DISABLED;
   dap_state_.transfer_abort = false;
 
-  HID::UnbindEndpoints(endpoint_pool);
+  HID::UnbindEndpoints(endpoint_pool, in_isr);
 
   ep_in_ = nullptr;
   ep_out_ = nullptr;
+  ResetResponseQueue();
+  if (ep_in_ != nullptr)
+  {
+    ep_in_->SetActiveLength(0);
+  }
+  if (ep_out_ != nullptr)
+  {
+    ep_out_->SetActiveLength(0);
+  }
+  Memory::FastSet(control_out_report_, 0, sizeof(control_out_report_));
+  Memory::FastSet(control_in_report_, 0, sizeof(control_in_report_));
 
   swd_.Close();
   if (jtag_ != nullptr)
@@ -350,7 +494,9 @@ void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool)
   }
 
   last_nreset_level_high_ = true;
+  session_touched_reset_ = false;
   swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
+                                     DapLinkV1Def::DAP_SWJ_NTRST |
                                      DapLinkV1Def::DAP_SWJ_NRESET);
 }
 
@@ -387,32 +533,56 @@ void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr, LibXR::ConstRawData
   const auto* REQ = static_cast<const uint8_t*>(data.addr_);
   const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
 
-  auto tx_buff = ep_in_->GetBuffer();
-  const uint16_t RESP_CAP = static_cast<uint16_t>(tx_buff.size_);
-  const uint16_t TX_LEN = (RESP_CAP < MAX_RESP) ? RESP_CAP : MAX_RESP;
-
-  if (ep_in_->GetState() == Endpoint::State::IDLE)
+  if (ep_in_->GetState() == Endpoint::State::IDLE && !IsResponseQueueEmpty())
   {
+    ResetResponseQueue();
+  }
+
+  if (IsResponseQueueEmpty() && ep_in_->GetState() == Endpoint::State::IDLE)
+  {
+    auto tx_buff = ep_in_->GetBuffer();
+    if (tx_buff.addr_ && tx_buff.size_ > 0u)
+    {
+      auto* tx_buf = static_cast<uint8_t*>(tx_buff.addr_);
+      Memory::FastSet(tx_buf, 0, tx_buff.size_);
+      uint16_t out_len = 0u;
+      auto ans = ProcessOneCommand(in_isr, REQ, REQ_LEN, tx_buf,
+                                   static_cast<uint16_t>(tx_buff.size_), out_len);
+      UNUSED(ans);
+
+      uint16_t tx_len = GetDapPacketSize();
+      if (tx_len > tx_buff.size_)
+      {
+        tx_len = static_cast<uint16_t>(tx_buff.size_);
+      }
+      if (ep_in_->Transfer(tx_len) == ErrorCode::OK)
+      {
+        return;
+      }
+
+      if (!EnqueueResponse(tx_buf, tx_len))
+      {
+        (void)SubmitNextQueuedResponseIfIdle();
+        (void)EnqueueResponse(tx_buf, tx_len);
+      }
+
+      (void)SubmitNextQueuedResponseIfIdle();
+      ArmOutTransferIfIdle();
+      return;
+    }
+  }
+
+  if (TryBuildAndEnqueueResponse(in_isr, REQ, REQ_LEN))
+  {
+    (void)SubmitNextQueuedResponseIfIdle();
     ArmOutTransferIfIdle();
+    return;
   }
 
-  Memory::FastSet(tx_buff.addr_, 0, RESP_CAP);
-  uint16_t out_len = 0u;
-  auto ans = ProcessOneCommand(in_isr, REQ, REQ_LEN,
-                               reinterpret_cast<uint8_t*>(tx_buff.addr_), RESP_CAP,
-                               out_len);
-  UNUSED(ans);
-  UNUSED(out_len);
-
-  if (ep_in_->GetState() == Endpoint::State::IDLE)
-  {
-    ep_in_->Transfer(TX_LEN);
-    ep_in_->SetActiveLength(0);
-  }
-  else
-  {
-    ep_in_->SetActiveLength(TX_LEN);
-  }
+  (void)SubmitNextQueuedResponseIfIdle();
+  (void)TryBuildAndEnqueueResponse(in_isr, REQ, REQ_LEN);
+  (void)SubmitNextQueuedResponseIfIdle();
+  ArmOutTransferIfIdle();
 }
 
 template <typename SwdPort>
@@ -421,20 +591,176 @@ void DapLinkV1Class<SwdPort>::OnDataInComplete(bool in_isr, LibXR::ConstRawData&
   UNUSED(in_isr);
   UNUSED(data);
 
-  auto act_len = ep_in_->GetActiveLength();
-  if (act_len > 0)
+  (void)SubmitNextQueuedResponseIfIdle();
+  ArmOutTransferIfIdle();
+}
+
+template <typename SwdPort>
+uint16_t DapLinkV1Class<SwdPort>::GetDapPacketSize() const
+{
+  const uint16_t IN_PS = ep_in_ ? ep_in_->MaxPacketSize() : 0u;
+  const uint16_t OUT_PS = ep_out_ ? ep_out_->MaxPacketSize() : 0u;
+  uint16_t dap_ps = 0u;
+
+  if (IN_PS > 0u && OUT_PS > 0u)
   {
-    ep_in_->Transfer(act_len);
-    ep_in_->SetActiveLength(0);
+    dap_ps = (IN_PS < OUT_PS) ? IN_PS : OUT_PS;
+  }
+  else
+  {
+    dap_ps = (IN_PS > 0u) ? IN_PS : OUT_PS;
   }
 
-  ArmOutTransferIfIdle();
+  if (dap_ps == 0u)
+  {
+    dap_ps = DEFAULT_DAP_PACKET_SIZE;
+  }
+  if (dap_ps > MAX_DAP_PACKET_SIZE)
+  {
+    dap_ps = MAX_DAP_PACKET_SIZE;
+  }
+  return dap_ps;
+}
+
+template <typename SwdPort>
+uint16_t DapLinkV1Class<SwdPort>::ClipResponseLength(uint16_t len, uint16_t cap) const
+{
+  const uint16_t DAP_PS = GetDapPacketSize();
+  if (len > DAP_PS)
+  {
+    len = DAP_PS;
+  }
+  if (len > RESP_SLOT_SIZE)
+  {
+    len = RESP_SLOT_SIZE;
+  }
+  if (len > cap)
+  {
+    len = cap;
+  }
+  return len;
+}
+
+template <typename SwdPort>
+constexpr uint8_t DapLinkV1Class<SwdPort>::NextRespQueueIndex(uint8_t idx)
+{
+  return static_cast<uint8_t>((idx + 1u) & (RESP_QUEUE_DEPTH - 1u));
+}
+
+template <typename SwdPort>
+void DapLinkV1Class<SwdPort>::ResetResponseQueue()
+{
+  resp_q_head_ = 0u;
+  resp_q_tail_ = 0u;
+  resp_q_count_ = 0u;
+}
+
+template <typename SwdPort>
+bool DapLinkV1Class<SwdPort>::IsResponseQueueEmpty() const
+{
+  return resp_q_count_ == 0u;
+}
+
+template <typename SwdPort>
+bool DapLinkV1Class<SwdPort>::IsResponseQueueFull() const
+{
+  return resp_q_count_ >= RESP_QUEUE_DEPTH;
+}
+
+template <typename SwdPort>
+bool DapLinkV1Class<SwdPort>::TryBuildAndEnqueueResponse(bool in_isr, const uint8_t* req,
+                                                         uint16_t req_len)
+{
+  if (!req || IsResponseQueueFull())
+  {
+    return false;
+  }
+
+  auto& slot = resp_q_[resp_q_tail_];
+  Memory::FastSet(slot.payload, 0, sizeof(slot.payload));
+  uint16_t out_len = 0u;
+  auto ans = ProcessOneCommand(in_isr, req, req_len, slot.payload, RESP_SLOT_SIZE, out_len);
+  UNUSED(ans);
+  slot.len = GetDapPacketSize();
+  if (slot.len > RESP_SLOT_SIZE)
+  {
+    slot.len = RESP_SLOT_SIZE;
+  }
+
+  resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
+  ++resp_q_count_;
+  return true;
+}
+
+template <typename SwdPort>
+uint8_t DapLinkV1Class<SwdPort>::OutstandingResponseCount() const
+{
+  const uint8_t IN_FLIGHT =
+      (ep_in_ && ep_in_->GetState() == Endpoint::State::BUSY) ? 1u : 0u;
+  return static_cast<uint8_t>(resp_q_count_ + IN_FLIGHT);
+}
+
+template <typename SwdPort>
+bool DapLinkV1Class<SwdPort>::EnqueueResponse(const uint8_t* data, uint16_t len)
+{
+  if (!data || IsResponseQueueFull())
+  {
+    return false;
+  }
+
+  auto& slot = resp_q_[resp_q_tail_];
+  const uint16_t CLIPPED = ClipResponseLength(len, RESP_SLOT_SIZE);
+  slot.len = CLIPPED;
+  if (CLIPPED > 0u)
+  {
+    Memory::FastCopy(slot.payload, data, CLIPPED);
+  }
+
+  resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
+  ++resp_q_count_;
+  return true;
+}
+
+template <typename SwdPort>
+bool DapLinkV1Class<SwdPort>::SubmitNextQueuedResponseIfIdle()
+{
+  if (!ep_in_ || ep_in_->GetState() != Endpoint::State::IDLE || IsResponseQueueEmpty())
+  {
+    return false;
+  }
+
+  auto tx_buff = ep_in_->GetBuffer();
+  if (!tx_buff.addr_ || tx_buff.size_ == 0u)
+  {
+    return false;
+  }
+
+  auto& slot = resp_q_[resp_q_head_];
+  uint16_t tx_len = slot.len;
+  if (tx_len > tx_buff.size_)
+  {
+    tx_len = static_cast<uint16_t>(tx_buff.size_);
+  }
+
+  if (tx_len > 0u)
+  {
+    Memory::FastCopy(tx_buff.addr_, slot.payload, tx_len);
+  }
+
+  if (ep_in_->Transfer(tx_len) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  resp_q_head_ = NextRespQueueIndex(resp_q_head_);
+  --resp_q_count_;
+  return true;
 }
 
 template <typename SwdPort>
 void DapLinkV1Class<SwdPort>::ArmOutTransferIfIdle()
 {
-  if (!inited_ || !ep_out_)
+  if (!inited_ || ep_out_ == nullptr || ep_in_ == nullptr)
   {
     return;
   }
@@ -444,7 +770,17 @@ void DapLinkV1Class<SwdPort>::ArmOutTransferIfIdle()
     return;
   }
 
-  (void)ep_out_->Transfer(ep_out_->MaxTransferSize());
+  if (OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
+  {
+    return;
+  }
+
+  uint16_t out_rx_len = ep_out_->MaxPacketSize();
+  if (out_rx_len == 0u)
+  {
+    out_rx_len = ep_out_->MaxTransferSize();
+  }
+  (void)ep_out_->Transfer(out_rx_len);
 }
 
 template <typename SwdPort>
@@ -579,9 +915,12 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleInfo(bool /*in_isr*/, const uint8_t* re
       return BuildInfoU8Response(resp[0], caps, resp, resp_cap, out_len);
     }
     case to_u8(LibXR::USB::DapLinkV1Def::InfoId::PACKET_COUNT):
-      return BuildInfoU8Response(resp[0], 1, resp, resp_cap, out_len);
+      return BuildInfoU8Response(resp[0], PACKET_COUNT_ADVERTISED, resp, resp_cap, out_len);
     case to_u8(LibXR::USB::DapLinkV1Def::InfoId::PACKET_SIZE):
-      return BuildInfoU16Response(resp[0], MAX_RESP, resp, resp_cap, out_len);
+    {
+      const uint16_t DAP_PS = GetDapPacketSize();
+      return BuildInfoU16Response(resp[0], DAP_PS, resp, resp_cap, out_len);
+    }
     case to_u8(LibXR::USB::DapLinkV1Def::InfoId::TIMESTAMP_CLOCK):
       return BuildInfoU32Response(resp[0], 1000000U, resp, resp_cap, out_len);
     default:
@@ -615,6 +954,7 @@ ErrorCode DapLinkV1Class<SwdPort>::BuildInfoStringResponse(uint8_t cmd, const ch
 
   const size_t COPY_N = (N_WITH_NUL > MAX_PAYLOAD) ? MAX_PAYLOAD : N_WITH_NUL;
   Memory::FastCopy(&resp[2], str, COPY_N);
+  resp[2 + COPY_N - 1] = 0x00;
   resp[1] = static_cast<uint8_t>(COPY_N);
   out_len = static_cast<uint16_t>(COPY_N + 2u);
   return ErrorCode::OK;
@@ -710,8 +1050,21 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleConnect(bool /*in_isr*/, const uint8_t*
 
   if (port == to_u8(LibXR::USB::DapLinkV1Def::Port::SWD))
   {
+    session_touched_reset_ = false;
+    const bool NEED_CONNECT_PULSE =
+        (nreset_gpio_ != nullptr) && last_nreset_level_high_;
+    if (NEED_CONNECT_PULSE)
+    {
+      DriveReset(false);
+      DelayUsIfAllowed(false, 1000u);
+    }
     (void)swd_.EnterSwd();
     (void)swd_.SetClockHz(swj_clock_hz_);
+    if (NEED_CONNECT_PULSE)
+    {
+      DriveReset(true);
+      DelayUsIfAllowed(false, 1000u);
+    }
 
     dap_state_.debug_port = LibXR::USB::DapLinkV1Def::DebugPort::SWD;
     dap_state_.transfer_abort = false;
@@ -720,13 +1073,32 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleConnect(bool /*in_isr*/, const uint8_t*
   }
   else if (port == to_u8(LibXR::USB::DapLinkV1Def::Port::JTAG))
   {
+    session_touched_reset_ = false;
     if (jtag_ == nullptr)
     {
       resp[1] = to_u8(LibXR::USB::DapLinkV1Def::Port::DISABLED);
     }
     else
     {
+      static constexpr uint8_t SWD_TO_JTAG_SEQUENCE[2] = {0x3Cu, 0xE7u};
+      const bool NEED_CONNECT_PULSE =
+          (nreset_gpio_ != nullptr) && last_nreset_level_high_;
+      if (NEED_CONNECT_PULSE)
+      {
+        DriveReset(false);
+        DelayUsIfAllowed(false, 1000u);
+      }
+      (void)swd_.SetClockHz(swj_clock_hz_);
+      (void)swd_.LineReset();
+      (void)swd_.SeqWriteBits(16u, SWD_TO_JTAG_SEQUENCE);
+      (void)swd_.LineReset();
       (void)jtag_->SetClockHz(swj_clock_hz_);
+      (void)jtag_->ResetTap();
+      if (NEED_CONNECT_PULSE)
+      {
+        DriveReset(true);
+        DelayUsIfAllowed(false, 1000u);
+      }
       dap_state_.debug_port = LibXR::USB::DapLinkV1Def::DebugPort::JTAG;
       dap_state_.transfer_abort = false;
       resp[1] = to_u8(LibXR::USB::DapLinkV1Def::Port::JTAG);
@@ -752,9 +1124,27 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleDisconnect(bool /*in_isr*/, const uint8
     return ErrorCode::NOT_FOUND;
   }
 
+  const bool NEED_SESSION_RESET =
+      (dap_state_.debug_port == LibXR::USB::DapLinkV1Def::DebugPort::SWD) &&
+      (nreset_gpio_ != nullptr) && session_touched_reset_;
+
   swd_.Close();
+  if (jtag_ != nullptr)
+  {
+    jtag_->Close();
+  }
+
+  if (NEED_SESSION_RESET)
+  {
+    DriveReset(false);
+    DelayUsIfAllowed(false, 1000u);
+    DriveReset(true);
+    DelayUsIfAllowed(false, 10000u);
+  }
+
   dap_state_.debug_port = LibXR::USB::DapLinkV1Def::DebugPort::DISABLED;
   dap_state_.transfer_abort = false;
+  session_touched_reset_ = false;
 
   resp[0] = to_u8(LibXR::USB::DapLinkV1Def::CommandId::DISCONNECT);
   resp[1] = to_u8(LibXR::USB::DapLinkV1Def::Status::OK);
@@ -906,6 +1296,7 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleResetTarget(bool in_isr, const uint8_t*
   uint8_t execute = 0u;
   if (nreset_gpio_ != nullptr)
   {
+    session_touched_reset_ = true;
     DriveReset(false);
     DelayUsIfAllowed(in_isr, 1000u);
     DriveReset(true);
@@ -950,6 +1341,7 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWJPins(bool /*in_isr*/, const uint8_t*
 
   if ((PIN_SEL & LibXR::USB::DapLinkV1Def::DAP_SWJ_NRESET) != 0u)
   {
+    session_touched_reset_ = true;
     const bool LEVEL_HIGH =
         ((PIN_OUT & LibXR::USB::DapLinkV1Def::DAP_SWJ_NRESET) != 0u);
     DriveReset(LEVEL_HIGH);
@@ -1102,8 +1494,8 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWJSequence(bool /*in_isr*/, const uint
 }
 
 template <typename SwdPort>
-ErrorCode DapLinkV1Class<SwdPort>::HandleSWDConfigure(bool /*in_isr*/, const uint8_t* /*req*/,
-                                             uint16_t /*req_len*/, uint8_t* resp,
+ErrorCode DapLinkV1Class<SwdPort>::HandleSWDConfigure(bool /*in_isr*/, const uint8_t* req,
+                                             uint16_t req_len, uint8_t* resp,
                                              uint16_t resp_cap, uint16_t& out_len)
 {
   if (resp_cap < 2u)
@@ -1113,6 +1505,18 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleSWDConfigure(bool /*in_isr*/, const uin
   }
 
   resp[0] = to_u8(LibXR::USB::DapLinkV1Def::CommandId::SWD_CONFIGURE);
+
+  if (req == nullptr || req_len < 2u)
+  {
+    resp[1] = to_u8(LibXR::USB::DapLinkV1Def::Status::ERROR);
+    out_len = 2u;
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uint8_t CFG = req[1];
+  dap_state_.swd_cfg.turnaround = static_cast<uint8_t>((CFG & 0x03u) + 1u);
+  dap_state_.swd_cfg.data_phase = (CFG & 0x04u) != 0u;
+
   resp[1] = to_u8(LibXR::USB::DapLinkV1Def::Status::OK);
   out_len = 2u;
   return ErrorCode::OK;
@@ -2017,16 +2421,23 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransferBlock(bool /*in_isr*/, const ui
 
   if (!RNW)
   {
+    const uint32_t REQ_NEED =
+        static_cast<uint32_t>(req_off) + (static_cast<uint32_t>(count) * 4u);
+    if (REQ_NEED > req_len)
+    {
+      xresp |= LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
+      Memory::FastCopy(&resp[1], &done, sizeof(done));
+      resp[3] = xresp;
+      out_len = resp_off;
+      return ErrorCode::OK;
+    }
+
+    bool check_write = false;
+
     for (uint32_t i = 0; i < count; ++i)
     {
       LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
       ErrorCode EC = ErrorCode::OK;
-
-      if (req_off + 4u > req_len)
-      {
-        xresp |= LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
-        break;
-      }
 
       uint32_t wdata = 0u;
       Memory::FastCopy(&wdata, &req[req_off], sizeof(wdata));
@@ -2035,6 +2446,10 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransferBlock(bool /*in_isr*/, const ui
       if (AP)
       {
         EC = swd_.ApWriteTxn(ADDR2B, wdata, ack);
+        if (ack == LibXR::Debug::SwdProtocol::Ack::OK && EC == ErrorCode::OK)
+        {
+          check_write = true;
+        }
       }
       else
       {
@@ -2061,6 +2476,23 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleTransferBlock(bool /*in_isr*/, const ui
       }
 
       done = static_cast<uint16_t>(i + 1u);
+    }
+
+    if (xresp == LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK && check_write)
+    {
+      uint32_t dummy = 0u;
+      LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+      const ErrorCode EC = swd_.DpReadRdbuffTxn(dummy, ack);
+      const uint8_t V = MapAckToDapResp(ack);
+
+      if (V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK)
+      {
+        xresp = V;
+      }
+      else if (EC != ErrorCode::OK)
+      {
+        xresp |= LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
+      }
     }
 
     Memory::FastCopy(&resp[1], &done, sizeof(done));
@@ -2377,6 +2809,23 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransfer(bool /*in_isr*/, const uin
     }
   };
 
+  auto dp_rdbuff_retry = [&](uint32_t& val,
+                             LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
+  {
+    uint32_t retry = dap_state_.transfer_cfg.retry_count;
+    while (true)
+    {
+      const ErrorCode EC = dp.DpReadTxn(3u, val, ack);
+      idle_after_attempt();
+      if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
+          dap_state_.transfer_abort)
+      {
+        return EC;
+      }
+      --retry;
+    }
+  };
+
   uint8_t response_count = 0u;
   uint8_t response_value = LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK;
   bool check_write = false;
@@ -2596,7 +3045,7 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransfer(bool /*in_isr*/, const uin
   {
     uint32_t dummy = 0u;
     LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-    const ErrorCode EC = dp_read_retry(3u, dummy, ack);
+    const ErrorCode EC = dp_rdbuff_retry(dummy, ack);
     const uint8_t V = MapAckToDapResp(ack);
 
     if (V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK)
@@ -2759,6 +3208,23 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransferBlock(bool /*in_isr*/,
     }
   };
 
+  auto dp_rdbuff_retry = [&](uint32_t& val,
+                             LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
+  {
+    uint32_t retry = dap_state_.transfer_cfg.retry_count;
+    while (true)
+    {
+      const ErrorCode EC = dp.DpReadTxn(3u, val, ack);
+      idle_after_attempt();
+      if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
+          dap_state_.transfer_abort)
+      {
+        return EC;
+      }
+      --retry;
+    }
+  };
+
   const bool AP = LibXR::USB::DapLinkV1Def::req_is_ap(DAP_RQ);
   const bool RNW = LibXR::USB::DapLinkV1Def::req_is_read(DAP_RQ);
   const uint8_t ADDR2B = LibXR::USB::DapLinkV1Def::req_addr2b(DAP_RQ);
@@ -2820,7 +3286,7 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransferBlock(bool /*in_isr*/,
     {
       uint32_t dummy = 0u;
       LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-      const ErrorCode EC = dp_read_retry(3u, dummy, ack);
+      const ErrorCode EC = dp_rdbuff_retry(dummy, ack);
       const uint8_t V = MapAckToDapResp(ack);
       if (V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK)
       {
