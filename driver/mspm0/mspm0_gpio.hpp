@@ -21,7 +21,7 @@ class MSPM0GPIO : public GPIO
 
   bool Read() override;
 
-  ErrorCode Write(bool value) override;
+  void Write(bool value) override;
 
   ErrorCode EnableInterrupt() override;
 

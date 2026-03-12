@@ -69,7 +69,7 @@ MSPM0GPIO::MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm)
 
 bool MSPM0GPIO::Read() { return DL_GPIO_readPins(port_, pin_mask_) == pin_mask_; }
 
-ErrorCode MSPM0GPIO::Write(bool value)
+void MSPM0GPIO::Write(bool value)
 {
   if (current_direction_ == LibXR::GPIO::Direction::OUTPUT_OPEN_DRAIN)
   {
@@ -93,7 +93,6 @@ ErrorCode MSPM0GPIO::Write(bool value)
       DL_GPIO_clearPins(port_, pin_mask_);
     }
   }
-  return ErrorCode::OK;
 }
 
 ErrorCode MSPM0GPIO::EnableInterrupt()
