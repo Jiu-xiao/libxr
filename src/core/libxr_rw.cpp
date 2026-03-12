@@ -57,7 +57,8 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   {
     BusyState is_busy = busy_.load(std::memory_order_acquire);
 
-    if (is_busy == BusyState::PENDING || is_busy == BusyState::BLOCK_CLAIMED)
+    if (is_busy == BusyState::PENDING || is_busy == BusyState::BLOCK_CLAIMED ||
+        is_busy == BusyState::BLOCK_DETACHED)
     {
       return ErrorCode::BUSY;
     }
@@ -142,6 +143,20 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
         return ErrorCode::TIMEOUT;
       }
 
+      auto detached_state = busy_.load(std::memory_order_acquire);
+      if (detached_state == BusyState::BLOCK_DETACHED)
+      {
+        expected = BusyState::BLOCK_DETACHED;
+        busy_.compare_exchange_strong(expected, BusyState::IDLE, std::memory_order_acq_rel,
+                                      std::memory_order_acquire);
+        return ErrorCode::TIMEOUT;
+      }
+
+      if (detached_state == BusyState::IDLE || detached_state == BusyState::EVENT)
+      {
+        return ErrorCode::TIMEOUT;
+      }
+
       auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
       UNUSED(finish_wait_ans);
       ASSERT(finish_wait_ans == ErrorCode::OK);
@@ -203,6 +218,27 @@ void ReadPort::Reset()
 {
   ASSERT(queue_data_ != nullptr);
   queue_data_->Reset();
+
+  auto state = busy_.load(std::memory_order_acquire);
+  if (state == BusyState::PENDING &&
+      info_.op.type == ReadOperation::OperationType::BLOCK)
+  {
+    BusyState expected = BusyState::PENDING;
+    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      return;
+    }
+
+    state = busy_.load(std::memory_order_acquire);
+  }
+
+  if (state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_DETACHED)
+  {
+    return;
+  }
+
   busy_.store(BusyState::IDLE, std::memory_order_release);
   block_result_ = ErrorCode::OK;
 }
@@ -374,6 +410,20 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
       return ErrorCode::TIMEOUT;
     }
 
+    auto detached_state = busy_.load(std::memory_order_acquire);
+    if (detached_state == BusyState::BLOCK_DETACHED)
+    {
+      expected = BusyState::BLOCK_DETACHED;
+      busy_.compare_exchange_strong(expected, BusyState::IDLE, std::memory_order_acq_rel,
+                                    std::memory_order_acquire);
+      return ErrorCode::TIMEOUT;
+    }
+
+    if (detached_state == BusyState::IDLE)
+    {
+      return ErrorCode::TIMEOUT;
+    }
+
     auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
     UNUSED(finish_wait_ans);
     ASSERT(finish_wait_ans == ErrorCode::OK);
@@ -394,6 +444,26 @@ void WritePort::Reset()
   ASSERT(queue_data_ != nullptr);
   queue_data_->Reset();
   queue_info_->Reset();
+
+  auto state = busy_.load(std::memory_order_acquire);
+  if (state == BusyState::BLOCK_WAITING)
+  {
+    BusyState expected = BusyState::BLOCK_WAITING;
+    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      return;
+    }
+
+    state = busy_.load(std::memory_order_acquire);
+  }
+
+  if (state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_DETACHED)
+  {
+    return;
+  }
+
   busy_.store(BusyState::IDLE, std::memory_order_release);
   block_result_ = ErrorCode::OK;
 }

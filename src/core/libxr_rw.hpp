@@ -276,6 +276,7 @@ class ReadPort
     IDLE = 0,
     PENDING = 1,
     BLOCK_CLAIMED = 2,  ///< BLOCK completion won the race with timeout.
+    BLOCK_DETACHED = 3, ///< Reset detached the BLOCK waiter; completion must not resume it.
     EVENT = UINT32_MAX
   };
 
