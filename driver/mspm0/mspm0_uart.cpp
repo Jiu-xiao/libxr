@@ -201,15 +201,17 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
     if ((uart->rx_timeout_mode_ == RxTimeoutMode::LIN_COMPARE) &&
         uart->lin_compare_timeout_latched_.load(std::memory_order_acquire))
     {
-      // 上一轮 read-arm 窗口里已经到达 timeout，保留该事件，等 PENDING 建立后立即消费。
+      // [LIN路径 / LIN path] 若 timeout 已在本次挂读前锁存，则让该事件继续驱动当前读请求
+      // / If timeout is already latched before this read is armed, reuse it for the
+      // current pending read.
       NVIC_ClearPendingIRQ(uart->res_.irqn);
       DL_UART_enableInterrupt(uart->res_.instance, TIMEOUT_MASK);
       uart->res_.instance->CPU_INT.ISET = TIMEOUT_MASK;
       return ErrorCode::PENDING;
     }
 
-    // Re-arm LIN compare from a clean state so stale raw timeout flags cannot leak
-    // into the next read request.
+    // [LIN路径 / LIN path] 在挂起本次读请求前重新装载 LIN compare 窗口 /
+    // Re-arm the LIN compare window before publishing the pending read.
     uart->RearmLinCompareTimeout();
     DL_UART_enableInterrupt(uart->res_.instance, TIMEOUT_MASK);
   }
@@ -225,10 +227,13 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
 
 MSPM0UART::RxTimeoutMode MSPM0UART::ResolveRxTimeoutMode() const
 {
-  // 分发规则 / Dispatch rule:
-  // 1) [LIN路径 / LIN path] UART0 且存在 LIN compare 宏配置 -> LIN_COMPARE
-  // 2) [LIN路径 / LIN path] 运行时探测到 LIN counter+compare 已启用 -> LIN_COMPARE
-  // 3) [BYTE路径 / BYTE path] 其他情况 -> BYTE_INTERRUPT
+  // 超时模式分发 / Timeout mode dispatch:
+  // 1) [LIN路径 / LIN path] UART0 且存在 LIN compare 宏配置时，选择 LIN_COMPARE /
+  //    On UART0, select LIN_COMPARE when the LIN compare macro is configured.
+  // 2) [LIN路径 / LIN path] 运行时探测到 LIN counter+compare 已启用时，选择 LIN_COMPARE /
+  //    Select LIN_COMPARE when LIN counter and compare match are enabled at runtime.
+  // 3) [BYTE路径 / BYTE path] 其他情况回退到 BYTE_INTERRUPT /
+  //    Fall back to BYTE_INTERRUPT in all other cases.
 #if defined(UART_0_INST) && defined(UART_0_COUNTER_COMPARE_VALUE)
   if (res_.instance == UART_0_INST)
   {
@@ -605,9 +610,9 @@ void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
 
   if (!received)
   {
-    // 对真实突发接收，继续依赖“读空 FIFO”撤销 RX 条件，避免像之前那样清掉同批次后续字节。
-    // 但若进入 RX IRQ 后 FIFO 已经为空，而 RX 仍持续报 pending，则说明这是陈旧 RX 状态；
-    // 这里定点清一次，避免在 partial/LIN 场景下陷入空转中断。
+    // [RX路径 / RX path] FIFO 已空但 RX 仍报 pending 时，清一次 RX 状态位 /
+    // If FIFO is already empty while RX still reports pending, clear RX once to stop
+    // a spin IRQ.
     DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_RX);
   }
 
@@ -617,8 +622,9 @@ void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
     // Reset LIN counter on data reception to avoid in-frame timeout.
     ResetLinCounter();
 
-    // 若 timeout 与新字节在同一次 IRQ 中相遇，则以“已收到新字节并重启窗口”为准，
-    // 避免后续 timeout 路径继续消费旧快照并制造伪 timeout。
+    // [LIN路径 / LIN path] 同一 IRQ 内若已收到新字节，则清掉本次 timeout
+    // 状态并继续按新窗口计时 / If new data arrives in the same IRQ, clear this timeout
+    // state and continue with the refreshed window.
     lin_compare_timeout_latched_.store(false, std::memory_order_release);
     if (timeout_mask != 0U)
     {
@@ -697,9 +703,9 @@ void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask
     const bool has_buffered_data = pushed || (read_port_->queue_data_->Size() > 0U);
     lin_compare_timeout_latched_.store(!has_buffered_data, std::memory_order_release);
     DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
-    // timeout 抢在 ReadPort 发布 PENDING 前到达时，只有在软件 RX 队列里仍无数据时
-    // 才锁存该事件并让 CAS 失败重试；若本次 timeout IRQ 已经把字节搬进软件队列，
-    // 下一轮读应先消费这些字节，不能再传播陈旧 timeout。
+    // [LIN路径 / LIN path] 无挂起读时，根据软件队列是否已有字节来更新 timeout 锁存状态 /
+    // Without a pending read, update the timeout latch from the software RX queue
+    // state.
     if (busy_before_timeout == ReadPort::BusyState::IDLE)
     {
       read_port_->busy_.store(ReadPort::BusyState::EVENT, std::memory_order_release);
@@ -747,17 +753,16 @@ void MSPM0UART::CompletePendingReadOnTimeout(bool in_isr)
 
   if (read_port_->info_.op.type == ReadOperation::OperationType::BLOCK)
   {
-    // 对阻塞读，partial-timeout 不能伪装成成功完成；当前 API 没有返回实际长度的
-    // 通道，所以这里直接丢弃残帧并释放 busy_，让外层 Wait(timeout) 返回 TIMEOUT。
+    // [BLOCK路径 / BLOCK path] 阻塞读超时时，丢弃本次残留字节并释放 busy_ /
+    // On blocking timeout, drop the residual bytes from this read and release busy_.
     UNUSED(ConsumeTimedOutReadData(in_isr, false));
     read_port_->busy_.store(ReadPort::BusyState::IDLE, std::memory_order_release);
     return;
   }
 
-  // 对非阻塞读，不再把 partial 数据偷偷塞进本次 read buffer。
-  // 当前通用 ReadPort API 无法携带“ERROR + 实际长度”，因此这里保留软件 RX 队列，
-  // 让上层在下一次 Read() 中按常规路径读取这些残帧字节，避免出现“buffer 里有数据，
-  // 但 polling/callback 只看见 ERROR”的语义错位。
+  // [非阻塞路径 / non-blocking path] 非阻塞读超时时，保留软件 RX 队列中的字节，留给下一次
+  // Read() 消费 / On non-blocking timeout, leave buffered bytes in the software RX
+  // queue for the next Read().
   last_timeout_consumed_size_ = 0U;
   read_port_->Finish(in_isr, ErrorCode::EMPTY, read_port_->info_);
 }
