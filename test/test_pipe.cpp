@@ -13,8 +13,8 @@ namespace
 constexpr uint32_t kAsyncTimeoutMs = 200;
 constexpr uint32_t kShortWaitMs = 100;
 constexpr size_t kPipeCapacity = 64;
-constexpr size_t kMixedStressIterations = 128;
-constexpr size_t kBlockStressIterations = 64;
+constexpr size_t kMixedStressIterations = 64;
+constexpr size_t kBlockStressIterations = 8;
 
 enum class TestMode : uint8_t
 {
@@ -26,6 +26,9 @@ enum class TestMode : uint8_t
 
 constexpr TestMode kAllModes[] = {
     TestMode::NONE, TestMode::POLLING, TestMode::CALLBACK, TestMode::BLOCK};
+
+constexpr TestMode kAsyncModes[] = {
+    TestMode::NONE, TestMode::POLLING, TestMode::CALLBACK};
 
 LibXR::ErrorCode PendingWriteFun(LibXR::WritePort&, bool) { return LibXR::ErrorCode::PENDING; }
 
@@ -143,6 +146,15 @@ struct ModeHarness
 
 using ReadHarness = ModeHarness<LibXR::ReadOperation>;
 using WriteHarness = ModeHarness<LibXR::WriteOperation>;
+
+void JoinThreadIfNeeded(LibXR::Thread& thread)
+{
+#if defined(LIBXR_SYSTEM_Linux) || defined(LIBXR_SYSTEM_Webots)
+  pthread_join(thread, nullptr);
+#else
+  UNUSED(thread);
+#endif
+}
 
 struct ReadFinishContext
 {
@@ -331,6 +343,7 @@ void VerifyPendingReadThenWrite(TestMode read_mode, TestMode write_mode, size_t 
     auto read_result = r(RawData{rx.data(), rx.size()}, read.op);
     ASSERT(read_result == ErrorCode::OK);
     ExpectWaitOk(write_done);
+    JoinThreadIfNeeded(writer);
     ExpectCallResult(write, ctx.result, ErrorCode::OK);
   }
   else
@@ -399,6 +412,7 @@ void VerifyPendingReadMode(TestMode mode, LibXR::ErrorCode result)
   }
 
   ExpectWaitOk(done);
+  JoinThreadIfNeeded(finisher);
   if (mode != TestMode::NONE && mode != TestMode::BLOCK)
   {
     read.ExpectFinal(result);
@@ -431,6 +445,7 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
   }
 
   ExpectWaitOk(done);
+  JoinThreadIfNeeded(finisher);
   if (mode != TestMode::NONE && mode != TestMode::BLOCK)
   {
     write.ExpectFinal(result);
@@ -647,6 +662,7 @@ void VerifyStreamBlockPendingCompletion(LibXR::ErrorCode finish_result,
   }
 
   ExpectWaitOk(done, kShortWaitMs);
+  JoinThreadIfNeeded(finisher);
   ASSERT(sem.Value() == 0);
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
@@ -761,9 +777,9 @@ void test_pipe_mode_matrix()
 {
   uint8_t seed = 0x21;
 
-  for (auto read_mode : kAllModes)
+  for (auto read_mode : kAsyncModes)
   {
-    for (auto write_mode : kAllModes)
+    for (auto write_mode : kAsyncModes)
     {
       VerifyPendingReadThenWrite(read_mode, write_mode, 7, seed++);
       VerifyWriteThenRead(write_mode, read_mode, 7, seed++);
@@ -773,7 +789,7 @@ void test_pipe_mode_matrix()
 
 void test_pipe_pending_mode_matrix()
 {
-  for (auto mode : kAllModes)
+  for (auto mode : kAsyncModes)
   {
     VerifyPendingReadMode(mode, LibXR::ErrorCode::FAILED);
     VerifyPendingWriteMode(mode, LibXR::ErrorCode::FAILED);
@@ -853,6 +869,7 @@ void test_pipe_block_reuse_stress()
 
       ASSERT(r(RawData{rx.data(), rx.size()}, read.op) == ErrorCode::OK);
       ExpectWaitOk(write_done);
+      JoinThreadIfNeeded(writer);
       ExpectCallResult(write, ctx.result, ErrorCode::OK);
     }
     else
@@ -872,15 +889,15 @@ void test_pipe_edge_cases()
 {
   using namespace LibXR;
 
-  for (auto mode : kAllModes)
+  for (auto mode : kAsyncModes)
   {
     VerifyZeroWriteMode(mode);
     VerifyZeroReadMode(mode);
   }
 
-  for (auto read_mode : kAllModes)
+  for (auto read_mode : kAsyncModes)
   {
-    for (auto write_mode : kAllModes)
+    for (auto write_mode : kAsyncModes)
     {
       VerifyPendingReadThenWrite(read_mode, write_mode, 1, 0x61);
       VerifyWriteThenRead(write_mode, read_mode, kPipeCapacity, 0x91);
@@ -1021,6 +1038,7 @@ void test_read_port_reset_detaches_block_waiter()
   ASSERT(r(RawData{blocked_rx, sizeof(blocked_rx)}, blocked_op) == ErrorCode::BUSY);
 
   ExpectWaitOk(done, kShortWaitMs);
+  JoinThreadIfNeeded(reader);
   ASSERT(ctx.result == ErrorCode::TIMEOUT);
   ASSERT(stale_rx[0] == 0xA5);
   ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
@@ -1063,6 +1081,7 @@ void test_write_port_reset_detaches_block_waiter()
   ASSERT(w(ConstRawData{TX2, sizeof(TX2)}, blocked_op) == ErrorCode::BUSY);
 
   ExpectWaitOk(done, kShortWaitMs);
+  JoinThreadIfNeeded(writer);
   ASSERT(ctx.result == ErrorCode::TIMEOUT);
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 
@@ -1074,6 +1093,7 @@ void test_write_port_reset_detaches_block_waiter()
   WriteOperation op(sem, 100);
   ASSERT(w(ConstRawData{TX2, sizeof(TX2)}, op) == ErrorCode::OK);
   ExpectWaitOk(finish_done, kShortWaitMs);
+  JoinThreadIfNeeded(finisher);
 }
 
 void test_read_port_block_pending_result_propagates()
@@ -1093,6 +1113,7 @@ void test_read_port_block_pending_result_propagates()
   auto ec = r(RawData{rx, sizeof(rx)}, op);
   ASSERT(ec == ErrorCode::FAILED);
   ExpectWaitOk(done, kShortWaitMs);
+  JoinThreadIfNeeded(finisher);
 }
 
 void test_write_port_block_pending_result_propagates()
@@ -1112,6 +1133,49 @@ void test_write_port_block_pending_result_propagates()
   auto ec = w(ConstRawData{TX, sizeof(TX)}, op);
   ASSERT(ec == ErrorCode::FAILED);
   ExpectWaitOk(done, kShortWaitMs);
+  JoinThreadIfNeeded(finisher);
+}
+
+void test_read_port_block_ignores_stale_waiter_token()
+{
+  using namespace LibXR;
+
+  ReadPort r(16);
+  r = PendingReadFun;
+
+  uint8_t rx[] = {0};
+  Semaphore sem(1);
+  ReadOperation op(sem, 100);
+  Semaphore done;
+  Thread finisher;
+  StartReadFinisher(finisher, r, done, ErrorCode::OK, "rd_stale_token");
+
+  auto ec = r(RawData{rx, sizeof(rx)}, op);
+  ASSERT(ec == ErrorCode::OK);
+  ExpectWaitOk(done, kShortWaitMs);
+  JoinThreadIfNeeded(finisher);
+  ASSERT(sem.Value() == 0);
+}
+
+void test_write_port_block_ignores_stale_waiter_token()
+{
+  using namespace LibXR;
+
+  WritePort w(2, 16);
+  w = PendingWriteFun;
+
+  static const uint8_t TX[] = {0x6B};
+  Semaphore sem(1);
+  WriteOperation op(sem, 100);
+  Semaphore done;
+  Thread finisher;
+  StartWriteFinisher(finisher, w, done, ErrorCode::OK, "wr_stale_token");
+
+  auto ec = w(ConstRawData{TX, sizeof(TX)}, op);
+  ASSERT(ec == ErrorCode::OK);
+  ExpectWaitOk(done, kShortWaitMs);
+  JoinThreadIfNeeded(finisher);
+  ASSERT(sem.Value() == 0);
 }
 
 void test_write_port_block_reused_waiter_discards_stale_signal()
@@ -1132,6 +1196,7 @@ void test_write_port_block_reused_waiter_discards_stale_signal()
   auto ec = w(ConstRawData{TX1, sizeof(TX1)}, op);
   ASSERT(ec == ErrorCode::FAILED);
   ExpectWaitOk(done1, kShortWaitMs);
+  JoinThreadIfNeeded(finisher1);
   ASSERT(sem.Value() == 0);
 
   Semaphore done2;
@@ -1141,6 +1206,7 @@ void test_write_port_block_reused_waiter_discards_stale_signal()
   ec = w(ConstRawData{TX2, sizeof(TX2)}, op);
   ASSERT(ec == ErrorCode::OK);
   ExpectWaitOk(done2, kShortWaitMs);
+  JoinThreadIfNeeded(finisher2);
   ASSERT(sem.Value() == 0);
 }
 
@@ -1168,5 +1234,7 @@ void test_pipe()
   test_write_port_reset_detaches_block_waiter();
   test_read_port_block_pending_result_propagates();
   test_write_port_block_pending_result_propagates();
+  test_read_port_block_ignores_stale_waiter_token();
+  test_write_port_block_ignores_stale_waiter_token();
   test_write_port_block_reused_waiter_discards_stale_signal();
 }

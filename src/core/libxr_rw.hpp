@@ -275,7 +275,7 @@ class ReadPort
   {
     IDLE = 0,
     PENDING = 1,
-    BLOCK_CLAIMED = 2,  ///< BLOCK completion won the race with timeout.
+    BLOCK_CLAIMED = 2,  ///< BLOCK completion owns the wakeup; waiter releases to IDLE.
     BLOCK_DETACHED = 3, ///< Reset detached the BLOCK waiter; completion must not resume it.
     EVENT = UINT32_MAX
   };
@@ -419,7 +419,7 @@ class WritePort
   {
     LOCKED = 0,          ///< Submission lock held by operator()/Stream.
     BLOCK_WAITING = 1,   ///< One BLOCK waiter is armed and still waiting.
-    BLOCK_CLAIMED = 2,   ///< Completion owns the wake/drain handoff.
+    BLOCK_CLAIMED = 2,   ///< Completion owns the wakeup; waiter releases to IDLE.
     BLOCK_DETACHED = 3,  ///< Waiter timed out; completion must not post.
     IDLE = UINT32_MAX
   };
@@ -468,8 +468,8 @@ class WritePort
     Stream& operator<<(const ConstRawData& data);
 
     /**
-     * @brief 手动提交已写入的数据到队列，并尝试续锁。
-     * @brief Manually commit accumulated data to the queue, and try to extend the lock.
+     * @brief 手动提交已写入的数据到队列，并释放当前锁。
+     * @brief Manually commit accumulated data to the queue, then release the current lock.
      *
      * 调用后已写入数据会立即入队，size 计数归零。适合周期性手动 flush。
      * After calling, written data is enqueued, size counter reset. Suitable for periodic
