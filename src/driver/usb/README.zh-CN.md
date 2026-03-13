@@ -36,7 +36,15 @@ XRUSB是一个独立的现代 C++ USB 协议栈。以subtree的形式作为[LibX
 
 ## 设备驱动
 
-本仓库只包含平台无关的协议栈代码，具体的设备驱动请到libxr对应平台的驱动下查看。如`driver/st/stm32_usb_ep.cpp`和`driver/ch/ch32_usb_endpoint_otghs.cpp`。
+本仓库只包含平台无关的协议栈代码，具体的平台驱动请到 libxr 对应路径查看，例如：
+
+- `driver/st/stm32_usb_ep.cpp`
+- `driver/ch/ch32_usb_endpoint_otghs.cpp`
+
+说明：
+
+- 下表中的 `USB-DEVICE` 指 XRUSB 使用的原生 USB 设备控制器路径。
+- 当前主线 libxr 中，ESP32-C3 / ESP32-C6 通过 `driver/esp/esp_cdc_jtag.*` 提供 `CDC-JTAG`；这是独立的 USB Serial/JTAG UART 后端，不属于 XRUSB 的通用设备控制器路径。
 
 ## 支持进度
 

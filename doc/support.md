@@ -56,27 +56,32 @@
 
 ## ESP32 Support
 
-| `Peripheral` | ESP32-C3 |
-| ------------ | -------- |
-| POWER        | ✅        |
-| GPIO         | ✅        |
-| FLASH        | ✅        |
-| UART         | ❌        |
-| SPI          | ❌        |
-| I2C          | ❌        |
-| CAN          | ❌        |
-| CANFD        | 🚫        |
-| ADC          | ✅        |
-| DAC          | ❌        |
-| PWM          | ✅        |
-| USB-DEVICE   | ❌        |
-| WDG          | ❌        |
+| `Peripheral` | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 |
+| ------------ | ----- | -------- | -------- | -------- |
+| POWER        | ✅     | ✅        | ✅        | ✅        |
+| GPIO         | ✅     | ✅        | ✅        | ✅        |
+| FLASH        | ✅     | ✅        | ✅        | ✅        |
+| UART         | ✅     | ✅        | ✅        | ✅        |
+| SPI          | ✅     | ✅        | ✅        | ✅        |
+| I2C          | ✅     | ✅        | ✅        | ✅        |
+| CAN          | ❌     | ❌        | ❌        | ❌        |
+| CANFD        | 🚫     | 🚫        | 🚫        | 🚫        |
+| ADC          | ✅     | ✅        | ✅        | ✅        |
+| DAC          | ✅     | 🚫        | 🚫        | 🚫        |
+| PWM          | ✅     | ✅        | ✅        | ✅        |
+| USB-DEVICE   | ❌     | ❌        | ❌        | ❌        |
+| CDC-JTAG     | 🚫     | 🚫        | ✅        | ✅        |
+| WDG          | ✅     | ✅        | ✅        | ✅        |
 
-| `Network`   | ESP32-C3 |
-| ----------- | -------- |
-| WIFI Client | ✅        |
-| SmartConfig | ❌        |
-| Bluetooth   | ❌        |
+| `Network`   | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 |
+| ----------- | ----- | -------- | -------- | -------- |
+| WIFI Client | ✅     | ✅        | ✅        | ✅        |
+| SmartConfig | ❌     | ❌        | ❌        | ❌        |
+| Bluetooth   | ❌     | ❌        | ❌        | ❌        |
+
+> Note:
+> `USB-DEVICE` refers to the native USB device controller path.
+> `CDC-JTAG` refers to the dedicated USB Serial/JTAG peripheral and is distinct from the native USB device stack.
 
 ## CH32 Support
 

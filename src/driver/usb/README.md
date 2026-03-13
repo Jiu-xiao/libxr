@@ -29,7 +29,15 @@ XRUSB is a standalone, modern C++ USB protocol stack. It is provided both as a [
 
 ## Device Drivers
 
-This repository only contains platform-independent stack code. For platform-specific device drivers, please refer to the corresponding drivers in libxr, such as `driver/st/stm32_usb_ep.cpp` and `driver/ch/ch32_usb_endpoint_otghs.cpp`.
+This repository only contains platform-independent stack code. For platform-specific device drivers, please refer to the corresponding drivers in libxr, such as:
+
+- `driver/st/stm32_usb_ep.cpp`
+- `driver/ch/ch32_usb_endpoint_otghs.cpp`
+
+Note:
+
+- `USB-DEVICE` below refers to the native USB device controller path used by XRUSB.
+- Mainline libxr currently provides `CDC-JTAG` on ESP32-C3/ESP32-C6 via `driver/esp/esp_cdc_jtag.*`; this is a separate dedicated USB Serial/JTAG UART backend, not the generic XRUSB device-controller path.
 
 ## Support Status
 
