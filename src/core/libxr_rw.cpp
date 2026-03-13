@@ -232,8 +232,7 @@ void ReadPort::Reset()
   queue_data_->Reset();
 
   auto state = busy_.load(std::memory_order_acquire);
-  if (state == BusyState::PENDING &&
-      info_.op.type == ReadOperation::OperationType::BLOCK)
+  if (state == BusyState::PENDING && info_.op.type == ReadOperation::OperationType::BLOCK)
   {
     BusyState expected = BusyState::PENDING;
     if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
@@ -508,7 +507,8 @@ WritePort::Stream::~Stream()
 {
   if (locked_ && size_ > 0)
   {
-    auto ans = port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
+    auto ans =
+        port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
     ASSERT(ans == ErrorCode::OK);
     port_->CommitWrite({nullptr, size_}, op_, true);
     if (op_.type == WriteOperation::OperationType::BLOCK)
