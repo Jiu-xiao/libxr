@@ -159,8 +159,15 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
       if (expected != BusyState::BLOCK_CLAIMED)
       {
-        ASSERT(expected == BusyState::BLOCK_DETACHED);
-        busy_.store(BusyState::IDLE, std::memory_order_release);
+        // A detached late completion may already have cleared BLOCK_DETACHED
+        // back to IDLE before this waiter wakes from timeout.
+        // 分离后的迟到完成可能会在当前 waiter 超时醒来前，先把
+        // BLOCK_DETACHED 清回 IDLE。
+        ASSERT(expected == BusyState::BLOCK_DETACHED || expected == BusyState::IDLE);
+        if (expected == BusyState::BLOCK_DETACHED)
+        {
+          busy_.store(BusyState::IDLE, std::memory_order_release);
+        }
         return ErrorCode::TIMEOUT;
       }
 
