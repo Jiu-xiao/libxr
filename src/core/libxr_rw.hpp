@@ -271,13 +271,22 @@ typedef struct
 class ReadPort
 {
  public:
+  // Read-side state machine / 读侧状态机:
+  // 1. Fast path:
+  //    IDLE -> (queue has enough data) -> IDLE
+  // 2. Async/BLOCK path:
+  //    IDLE -> PENDING -> BLOCK_CLAIMED -> IDLE
+  // 3. Timeout/reset detach path:
+  //    IDLE -> PENDING -> BLOCK_DETACHED -> IDLE
+  // 4. Event hint when data arrives before a waiter is armed:
+  //    IDLE -> EVENT -> IDLE
   enum class BusyState : uint32_t
   {
-    IDLE = 0,
-    PENDING = 1,
-    BLOCK_CLAIMED = 2,  ///< BLOCK completion owns the wakeup; waiter releases to IDLE.
-    BLOCK_DETACHED = 3, ///< Reset detached the BLOCK waiter; completion must not resume it.
-    EVENT = UINT32_MAX
+    IDLE = 0,  ///< No active waiter and no pending completion. 无等待者、无挂起完成。
+    PENDING = 1,  ///< Driver accepted the request; completion still owns progress. 请求已交给底层推进。
+    BLOCK_CLAIMED = 2,  ///< BLOCK wakeup already belongs to the current waiter. 当前 BLOCK 唤醒已被本次等待者认领。
+    BLOCK_DETACHED = 3,  ///< Timeout/reset detached the waiter; completion must stay silent. 超时或 Reset 已分离等待者，完成侧不得再唤醒。
+    EVENT = UINT32_MAX  ///< Data arrived before a waiter was armed; next caller must re-check queue. 数据先到，后续调用者要重查队列。
   };
 
   ReadFun read_fun_ = nullptr;
@@ -415,13 +424,20 @@ class ReadPort
 class WritePort
 {
  public:
+  // Write-side state machine / 写侧状态机:
+  // 1. Submission path:
+  //    IDLE -> LOCKED -> IDLE
+  // 2. BLOCK write in flight:
+  //    IDLE -> LOCKED -> BLOCK_WAITING -> BLOCK_CLAIMED -> IDLE
+  // 3. BLOCK timeout/reset detach:
+  //    IDLE -> LOCKED -> BLOCK_WAITING -> BLOCK_DETACHED -> IDLE
   enum class BusyState : uint32_t
   {
-    LOCKED = 0,          ///< Submission lock held by operator()/Stream.
-    BLOCK_WAITING = 1,   ///< One BLOCK waiter is armed and still waiting.
-    BLOCK_CLAIMED = 2,   ///< Completion owns the wakeup; waiter releases to IDLE.
-    BLOCK_DETACHED = 3,  ///< Waiter timed out; completion must not post.
-    IDLE = UINT32_MAX
+    LOCKED = 0,  ///< Submission path owns queue mutation. 提交路径占有写队列/元数据修改权。
+    BLOCK_WAITING = 1,   ///< One BLOCK waiter is armed and waiting for final completion. 一个 BLOCK 等待者已经挂起，等待最终完成。
+    BLOCK_CLAIMED = 2,   ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
+    BLOCK_DETACHED = 3,  ///< Waiter already timed out/reset; completion must not post. 等待者已超时/被分离，完成侧不能再 Post。
+    IDLE = UINT32_MAX  ///< No active submitter and no armed BLOCK waiter. 没有活动提交者，也没有挂起中的 BLOCK 等待者。
   };
 
   WriteFun write_fun_ = nullptr;
