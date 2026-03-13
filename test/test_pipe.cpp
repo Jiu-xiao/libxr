@@ -1136,48 +1136,6 @@ void test_write_port_block_pending_result_propagates()
   JoinThreadIfNeeded(finisher);
 }
 
-void test_read_port_block_ignores_stale_waiter_token()
-{
-  using namespace LibXR;
-
-  ReadPort r(16);
-  r = PendingReadFun;
-
-  uint8_t rx[] = {0};
-  Semaphore sem(1);
-  ReadOperation op(sem, 100);
-  Semaphore done;
-  Thread finisher;
-  StartReadFinisher(finisher, r, done, ErrorCode::OK, "rd_stale_token");
-
-  auto ec = r(RawData{rx, sizeof(rx)}, op);
-  ASSERT(ec == ErrorCode::OK);
-  ExpectWaitOk(done, kShortWaitMs);
-  JoinThreadIfNeeded(finisher);
-  ASSERT(sem.Value() == 0);
-}
-
-void test_write_port_block_ignores_stale_waiter_token()
-{
-  using namespace LibXR;
-
-  WritePort w(2, 16);
-  w = PendingWriteFun;
-
-  static const uint8_t TX[] = {0x6B};
-  Semaphore sem(1);
-  WriteOperation op(sem, 100);
-  Semaphore done;
-  Thread finisher;
-  StartWriteFinisher(finisher, w, done, ErrorCode::OK, "wr_stale_token");
-
-  auto ec = w(ConstRawData{TX, sizeof(TX)}, op);
-  ASSERT(ec == ErrorCode::OK);
-  ExpectWaitOk(done, kShortWaitMs);
-  JoinThreadIfNeeded(finisher);
-  ASSERT(sem.Value() == 0);
-}
-
 void test_write_port_block_reused_waiter_discards_stale_signal()
 {
   using namespace LibXR;
@@ -1234,7 +1192,5 @@ void test_pipe()
   test_write_port_reset_detaches_block_waiter();
   test_read_port_block_pending_result_propagates();
   test_write_port_block_pending_result_propagates();
-  test_read_port_block_ignores_stale_waiter_token();
-  test_write_port_block_ignores_stale_waiter_token();
   test_write_port_block_reused_waiter_discards_stale_signal();
 }

@@ -140,56 +140,42 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       ASSERT(!in_isr);
-      // Reused BLOCK waiters may still carry an old token; only a claimed state
-      // belongs to the current completion.
-      while (true)
+      auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      if (wait_ans == ErrorCode::OK)
       {
-        auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-        if (wait_ans == ErrorCode::OK)
-        {
-          auto state = busy_.load(std::memory_order_acquire);
-          if (state == BusyState::BLOCK_CLAIMED)
-          {
-            busy_.store(BusyState::IDLE, std::memory_order_release);
-            return block_result_;
-          }
-
-          if (state == BusyState::BLOCK_DETACHED)
-          {
-            busy_.store(BusyState::IDLE, std::memory_order_release);
-            return ErrorCode::TIMEOUT;
-          }
-          continue;
-        }
-
-        BusyState expected = BusyState::PENDING;
-        if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                          std::memory_order_acq_rel,
-                                          std::memory_order_acquire))
-        {
-          return ErrorCode::TIMEOUT;
-        }
-
-        auto detached_state = busy_.load(std::memory_order_acquire);
-        if (detached_state == BusyState::BLOCK_DETACHED)
-        {
-          busy_.store(BusyState::IDLE, std::memory_order_release);
-          return ErrorCode::TIMEOUT;
-        }
-
-        if (detached_state == BusyState::IDLE || detached_state == BusyState::EVENT)
-        {
-          return ErrorCode::TIMEOUT;
-        }
-
-        auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-        UNUSED(finish_wait_ans);
-        ASSERT(finish_wait_ans == ErrorCode::OK);
         auto state = busy_.load(std::memory_order_acquire);
         ASSERT(state == BusyState::BLOCK_CLAIMED);
         busy_.store(BusyState::IDLE, std::memory_order_release);
         return block_result_;
       }
+
+      BusyState expected = BusyState::PENDING;
+      if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
+                                        std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
+      {
+        return ErrorCode::TIMEOUT;
+      }
+
+      auto detached_state = busy_.load(std::memory_order_acquire);
+      if (detached_state == BusyState::BLOCK_DETACHED)
+      {
+        busy_.store(BusyState::IDLE, std::memory_order_release);
+        return ErrorCode::TIMEOUT;
+      }
+
+      if (detached_state == BusyState::IDLE || detached_state == BusyState::EVENT)
+      {
+        return ErrorCode::TIMEOUT;
+      }
+
+      auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
+      UNUSED(finish_wait_ans);
+      ASSERT(finish_wait_ans == ErrorCode::OK);
+      auto state = busy_.load(std::memory_order_acquire);
+      ASSERT(state == BusyState::BLOCK_CLAIMED);
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return block_result_;
     }
     else
     {
@@ -431,57 +417,43 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
     ASSERT(!in_isr);
-    // Reused BLOCK waiters may still carry an old token; only a claimed state
-    // belongs to the current completion.
-    while (true)
+    auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    if (wait_ans == ErrorCode::OK)
     {
-      auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-      if (wait_ans == ErrorCode::OK)
-      {
-        auto state = busy_.load(std::memory_order_acquire);
-        if (state == BusyState::BLOCK_CLAIMED)
-        {
-          busy_.store(BusyState::IDLE, std::memory_order_release);
-          return block_result_;
-        }
-
-        if (state == BusyState::BLOCK_DETACHED)
-        {
-          busy_.store(BusyState::IDLE, std::memory_order_release);
-          return ErrorCode::TIMEOUT;
-        }
-        continue;
-      }
-
-      BusyState expected = BusyState::BLOCK_WAITING;
-      if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
-      {
-        return ErrorCode::TIMEOUT;
-      }
-
-      auto detached_state = busy_.load(std::memory_order_acquire);
-      if (detached_state == BusyState::BLOCK_DETACHED)
-      {
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-        return ErrorCode::TIMEOUT;
-      }
-
-      if (detached_state == BusyState::IDLE)
-      {
-        return ErrorCode::TIMEOUT;
-      }
-
-      auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-      UNUSED(finish_wait_ans);
-      ASSERT(finish_wait_ans == ErrorCode::OK);
       auto state = busy_.load(std::memory_order_acquire);
       ASSERT(state == BusyState::BLOCK_CLAIMED);
       busy_.store(BusyState::IDLE, std::memory_order_release);
-
       return block_result_;
     }
+
+    BusyState expected = BusyState::BLOCK_WAITING;
+    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      return ErrorCode::TIMEOUT;
+    }
+
+    auto detached_state = busy_.load(std::memory_order_acquire);
+    if (detached_state == BusyState::BLOCK_DETACHED)
+    {
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return ErrorCode::TIMEOUT;
+    }
+
+    if (detached_state == BusyState::IDLE)
+    {
+      return ErrorCode::TIMEOUT;
+    }
+
+    auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
+    UNUSED(finish_wait_ans);
+    ASSERT(finish_wait_ans == ErrorCode::OK);
+    auto state = busy_.load(std::memory_order_acquire);
+    ASSERT(state == BusyState::BLOCK_CLAIMED);
+    busy_.store(BusyState::IDLE, std::memory_order_release);
+
+    return block_result_;
   }
 
   if (!meta_pushed)
