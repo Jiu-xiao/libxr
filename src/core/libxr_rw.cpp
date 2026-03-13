@@ -39,39 +39,23 @@ void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
 {
   if (info.op.type == ReadOperation::OperationType::BLOCK)
   {
-    block_result_ = ans;
-
-    // BLOCK read completion can be claimed in two places:
-    // 1. Finish() directly claims PENDING -> BLOCK_CLAIMED for driver-led completion.
-    // 2. ProcessPendingReads() pre-claims PENDING -> BLOCK_CLAIMED before copying
-    //    queued bytes into the caller buffer.
-    // BLOCK 读有两个 claim 点：
-    // 1. 驱动直接完成时由 Finish() 抢占 PENDING -> BLOCK_CLAIMED。
-    // 2. 软件队列补数时由 ProcessPendingReads() 先 claim，再把数据拷到调用者缓冲区。
-    BusyState expected = BusyState::PENDING;
-    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
+    // Read completion must come from ProcessPendingReads(); drivers are not
+    // allowed to finish a BLOCK read directly.
+    // BLOCK 读完成只能来自 ProcessPendingReads()；驱动不能直接 Finish。
+    BusyState expected = BusyState::BLOCK_DETACHED;
+    if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
                                       std::memory_order_acq_rel,
                                       std::memory_order_acquire))
     {
-      info.op.data.sem_info.sem->PostFromCallback(in_isr);
       return;
     }
 
+    ASSERT(expected == BusyState::BLOCK_CLAIMED);
     if (expected == BusyState::BLOCK_CLAIMED)
     {
+      block_result_ = ans;
       info.op.data.sem_info.sem->PostFromCallback(in_isr);
-      return;
     }
-
-    // Timeout/reset already detached this waiter. Best-effort clear the detach
-    // marker back to IDLE; this completion must not post anymore because the
-    // caller has already returned.
-    // 超时或 Reset 已把等待者分离；这里只做尽力清理，绝不能再 Post，
-    // 因为调用者已经从超时路径返回了。
-    expected = BusyState::BLOCK_DETACHED;
-    (void)busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire);
     return;
   }
 
@@ -153,10 +137,8 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
       auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
       if (wait_ans == ErrorCode::OK)
       {
-        // The final wakeup now belongs to this waiter. Finish() never releases
-        // BLOCK_CLAIMED -> IDLE on behalf of the caller; the waiter does it here.
-        // 最终唤醒已经归当前 waiter 所有；Finish() 不替调用者释放
-        // BLOCK_CLAIMED -> IDLE，这一步必须由 waiter 自己完成。
+        // BLOCK_CLAIMED is always released by the waiter itself.
+        // BLOCK_CLAIMED 始终由 waiter 自己释放。
 #ifdef LIBXR_DEBUG_BUILD
         auto state = busy_.load(std::memory_order_acquire);
         ASSERT(state == BusyState::BLOCK_CLAIMED);
@@ -165,9 +147,8 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
         return block_result_;
       }
 
-      // Timeout won cleanly: the driver had not claimed the completion yet, so
-      // we can detach and return TIMEOUT immediately.
-      // 超时路径干净获胜：底层还没 claim 完成，所以可以直接脱离并返回 TIMEOUT。
+      // Timeout won before completion claimed the waiter.
+      // 超时先赢，完成侧还没 claim 当前 waiter。
       BusyState expected = BusyState::PENDING;
       if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
                                         std::memory_order_acq_rel,
@@ -176,27 +157,15 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
         return ErrorCode::TIMEOUT;
       }
 
-      // compare_exchange_strong() already wrote the current state back into
-      // `expected` on failure, so we can branch on that exact post-race state
-      // without taking another atomic load.
-      // compare_exchange_strong() 失败时已经把当前状态回填到 `expected`，
-      // 所以这里直接按 race 之后的真实状态分流，不再额外 load 一次。
-      switch (expected)
+      if (expected != BusyState::BLOCK_CLAIMED)
       {
-        case BusyState::BLOCK_CLAIMED:
-          break;
-        case BusyState::BLOCK_DETACHED:
-          busy_.store(BusyState::IDLE, std::memory_order_release);
-          return ErrorCode::TIMEOUT;
-        default:
-          ASSERT(false);
-          return ErrorCode::TIMEOUT;
+        ASSERT(expected == BusyState::BLOCK_DETACHED);
+        busy_.store(BusyState::IDLE, std::memory_order_release);
+        return ErrorCode::TIMEOUT;
       }
 
-      // Timeout lost after completion had already claimed the waiter. Drain the
-      // final post here so no semaphore token leaks into the next BLOCK op.
-      // 超时发生得太晚，完成侧已经 claim 了本 waiter；这里把最终 Post 吃掉，
-      // 避免信号量令牌泄露到下一次 BLOCK 操作。
+      // Timeout lost after completion had already claimed the waiter.
+      // 超时发生得太晚，完成侧已经 claim 了当前 waiter。
       auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
       UNUSED(finish_wait_ans);
       ASSERT(finish_wait_ans == ErrorCode::OK);
@@ -227,11 +196,8 @@ void ReadPort::ProcessPendingReads(bool in_isr)
     {
       if (info_.op.type == ReadOperation::OperationType::BLOCK)
       {
-        // Queue-fed completion must claim the BLOCK waiter before copying bytes,
-        // otherwise timeout/reset could race and leave the waiter ownership
-        // ambiguous.
-        // 软件队列喂数时，必须先 claim BLOCK waiter 再拷数据；
-        // 否则 timeout/reset 可能并发抢占，导致 waiter 所有权不清楚。
+        // Read BLOCK completion is claimed here before copying data.
+        // BLOCK 读完成在这里先 claim，再拷数据。
         BusyState expected = BusyState::PENDING;
         if (!busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
                                            std::memory_order_acq_rel,
@@ -267,11 +233,8 @@ void ReadPort::Reset()
   auto state = busy_.load(std::memory_order_acquire);
   if (state == BusyState::PENDING && info_.op.type == ReadOperation::OperationType::BLOCK)
   {
-    // Reset does not reopen the port immediately if a BLOCK waiter is still
-    // armed. It first detaches the waiter, and the waiter/late completion pair
-    // is responsible for draining that detached state.
-    // Reset 不会在 BLOCK waiter 还挂着时立刻把端口重开；它先把 waiter
-    // 分离，后续由 waiter/迟到完成这对并发方自己把分离状态排干净。
+    // Reset detaches the BLOCK waiter instead of reopening the port directly.
+    // Reset 先分离 BLOCK waiter，不直接重开端口。
     BusyState expected = BusyState::PENDING;
     if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
                                       std::memory_order_acq_rel,
@@ -327,11 +290,8 @@ void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
   {
     block_result_ = ans;
 
-    // Write-side BLOCK completion has only one normal claim site:
-    // Finish() moves BLOCK_WAITING -> BLOCK_CLAIMED, then hands the final post
-    // to the waiting thread.
-    // 写侧 BLOCK 完成只有一个正常 claim 点：
-    // Finish() 把 BLOCK_WAITING -> BLOCK_CLAIMED，然后把最终 Post 交给等待线程。
+    // Write completion claims BLOCK_WAITING and hands the wakeup to the waiter.
+    // 写完成从 BLOCK_WAITING claim 当前 waiter，并把唤醒交给它。
     BusyState expected = BusyState::BLOCK_WAITING;
     if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
                                       std::memory_order_acq_rel,
@@ -341,12 +301,7 @@ void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
       return;
     }
 
-    // If timeout/reset already detached the waiter, this completion is only
-    // allowed to clear BLOCK_DETACHED back to IDLE. Any other state means the
-    // wakeup ownership is no longer ours, so we must stay silent.
-    // 如果 timeout/reset 已经把 waiter 分离，这个完成侧最多只允许把
-    // BLOCK_DETACHED 清回 IDLE；其他状态都说明唤醒所有权已经不在这里了，
-    // 不能再 Post。
+    ASSERT(expected == BusyState::BLOCK_DETACHED);
     if (expected == BusyState::BLOCK_DETACHED)
     {
       expected = BusyState::BLOCK_DETACHED;
@@ -424,11 +379,8 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    // Arm the waiter before the driver can complete the write immediately.
-    // BLOCK waiter must be armed before write_fun_() runs, otherwise a very
-    // fast completion could finish and post before the waiter state exists.
-    // 必须先把 BLOCK waiter 挂起来再调用 write_fun_()，否则极快完成可能会在
-    // waiter 状态建立前就结束并 Post。
+    // BLOCK waiter must be armed before write_fun_() runs.
+    // 必须先挂起 BLOCK waiter，再调用 write_fun_()。
     busy_.store(BusyState::BLOCK_WAITING, std::memory_order_release);
   }
 
@@ -460,9 +412,8 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
     if (wait_ans == ErrorCode::OK)
     {
-      // The final wakeup now belongs to this waiter; release the claimed state
-      // here instead of from the completion side.
-      // 最终唤醒已经归当前 waiter 所有；由 waiter 自己把 claim 状态释放掉。
+      // BLOCK_CLAIMED is always released by the waiter itself.
+      // BLOCK_CLAIMED 始终由 waiter 自己释放。
 #ifdef LIBXR_DEBUG_BUILD
       auto state = busy_.load(std::memory_order_acquire);
       ASSERT(state == BusyState::BLOCK_CLAIMED);
@@ -471,8 +422,8 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
       return block_result_;
     }
 
-    // Timeout won cleanly: write completion had not claimed the waiter yet.
-    // 超时路径干净获胜：写完成侧还没来得及 claim 当前 waiter。
+    // Timeout won before completion claimed the waiter.
+    // 超时先赢，完成侧还没 claim 当前 waiter。
     BusyState expected = BusyState::BLOCK_WAITING;
     if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
                                       std::memory_order_acq_rel,
@@ -481,27 +432,15 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
       return ErrorCode::TIMEOUT;
     }
 
-    // compare_exchange_strong() already wrote the current state back into
-    // `expected` on failure, so we can branch on that exact post-race state
-    // without taking another atomic load.
-    // compare_exchange_strong() 失败时已经把当前状态回填到 `expected`，
-    // 所以这里直接按 race 之后的真实状态分流，不再额外 load 一次。
-    switch (expected)
+    if (expected != BusyState::BLOCK_CLAIMED)
     {
-      case BusyState::BLOCK_CLAIMED:
-        break;
-      case BusyState::BLOCK_DETACHED:
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-        return ErrorCode::TIMEOUT;
-      default:
-        ASSERT(false);
-        return ErrorCode::TIMEOUT;
+      ASSERT(expected == BusyState::BLOCK_DETACHED);
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return ErrorCode::TIMEOUT;
     }
 
-    // Timeout lost after completion had already claimed the waiter. Drain the
-    // final post here so no semaphore token survives into the next BLOCK write.
-    // 超时发生得太晚，完成侧已经 claim 了当前 waiter；这里把最终 Post 吃掉，
-    // 避免信号量令牌残留到下一次 BLOCK 写。
+    // Timeout lost after completion had already claimed the waiter.
+    // 超时发生得太晚，完成侧已经 claim 了当前 waiter。
     auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
     UNUSED(finish_wait_ans);
     ASSERT(finish_wait_ans == ErrorCode::OK);
@@ -527,10 +466,8 @@ void WritePort::Reset()
   auto state = busy_.load(std::memory_order_acquire);
   if (state == BusyState::BLOCK_WAITING)
   {
-    // Reset detaches the waiter first; it does not directly release a waiting
-    // BLOCK write back to IDLE because the old waiter may still be draining.
-    // Reset 先把 waiter 分离，而不是直接把等待中的 BLOCK 写释放回 IDLE，
-    // 因为旧 waiter 可能还在收尾。
+    // Reset detaches the BLOCK waiter instead of reopening the port directly.
+    // Reset 先分离 BLOCK waiter，不直接重开端口。
     BusyState expected = BusyState::BLOCK_WAITING;
     if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
                                       std::memory_order_acq_rel,
