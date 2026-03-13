@@ -168,8 +168,6 @@ class Thread
     // 创建线程
     int ans = pthread_create(&this->thread_handle_, &attr, ThreadBlock::Port, block);
 
-    pthread_attr_destroy(&attr);
-
     if (ans != 0)
     {
       XR_LOG_WARN("Failed to create thread: %s (%s), retrying with default attributes.",

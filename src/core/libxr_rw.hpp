@@ -271,17 +271,32 @@ typedef struct
 class ReadPort
 {
  public:
+  // Read BLOCK states:
+  // PENDING = waiting for queue-fed completion
+  // BLOCK_CLAIMED = wakeup now belongs to the waiter
+  // BLOCK_DETACHED = timeout/reset detached the waiter
+  // 读 BLOCK 状态：
+  // PENDING = 等待队列侧完成
+  // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
+  // BLOCK_DETACHED = timeout/reset 已把 waiter 分离
   enum class BusyState : uint32_t
   {
-    IDLE = 0,
-    PENDING = 1,
-    EVENT = UINT32_MAX
+    IDLE = 0,     ///< No active waiter and no pending completion. 无等待者、无挂起完成。
+    PENDING = 1,  ///< Driver accepted the request; completion still owns progress.
+                  ///< 请求已交给底层推进。
+    BLOCK_CLAIMED = 2,   ///< BLOCK wakeup already belongs to the current waiter. 当前
+                         ///< BLOCK 唤醒已被本次等待者认领。
+    BLOCK_DETACHED = 3,  ///< Timeout/reset detached the waiter; completion must stay
+                         ///< silent. 超时或 Reset 已分离等待者，完成侧不得再唤醒。
+    EVENT = UINT32_MAX   ///< Data arrived before a waiter was armed; next caller must
+                         ///< re-check queue. 数据先到，后续调用者要重查队列。
   };
 
   ReadFun read_fun_ = nullptr;
   LockFreeQueue<uint8_t>* queue_data_ = nullptr;
   ReadInfoBlock info_;
   std::atomic<BusyState> busy_{BusyState::IDLE};
+  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
 
   /**
    * @brief Constructs a ReadPort with queue sizes.
@@ -412,16 +427,35 @@ class ReadPort
 class WritePort
 {
  public:
-  enum class LockState : uint32_t
+  // Write BLOCK states:
+  // LOCKED = submit path owns queue mutation
+  // BLOCK_WAITING = waiter armed, completion not claimed yet
+  // BLOCK_CLAIMED = final wakeup belongs to the waiter
+  // BLOCK_DETACHED = timeout/reset detached the waiter
+  // 写 BLOCK 状态：
+  // LOCKED = 提交路径占有队列修改权
+  // BLOCK_WAITING = waiter 已挂起，完成尚未 claim
+  // BLOCK_CLAIMED = 最终唤醒已经归 waiter 所有
+  // BLOCK_DETACHED = timeout/reset 已把 waiter 分离
+  enum class BusyState : uint32_t
   {
-    LOCKED = 0,
-    UNLOCKED = UINT32_MAX
+    LOCKED =
+        0,  ///< Submission path owns queue mutation. 提交路径占有写队列/元数据修改权。
+    BLOCK_WAITING = 1,  ///< One BLOCK waiter is armed and waiting for final completion.
+                        ///< 一个 BLOCK 等待者已经挂起，等待最终完成。
+    BLOCK_CLAIMED =
+        2,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
+    BLOCK_DETACHED = 3,  ///< Waiter already timed out/reset; completion must not post.
+                         ///< 等待者已超时/被分离，完成侧不能再 Post。
+    IDLE = UINT32_MAX    ///< No active submitter and no armed BLOCK waiter.
+                         ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
   };
 
   WriteFun write_fun_ = nullptr;
   LockFreeQueue<WriteInfoBlock>* queue_info_;
   LockFreeQueue<uint8_t>* queue_data_;
-  std::atomic<LockState> lock_{LockState::UNLOCKED};
+  std::atomic<BusyState> busy_{BusyState::IDLE};
+  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
 
   /**
    * @brief WritePort 的流式写入操作器，支持链式 << 操作和批量提交。
@@ -461,8 +495,9 @@ class WritePort
     Stream& operator<<(const ConstRawData& data);
 
     /**
-     * @brief 手动提交已写入的数据到队列，并尝试续锁。
-     * @brief Manually commit accumulated data to the queue, and try to extend the lock.
+     * @brief 手动提交已写入的数据到队列，并释放当前锁。
+     * @brief Manually commit accumulated data to the queue, then release the current
+     * lock.
      *
      * 调用后已写入数据会立即入队，size 计数归零。适合周期性手动 flush。
      * After calling, written data is enqueued, size counter reset. Suitable for periodic

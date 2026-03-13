@@ -199,6 +199,9 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   uart_hal_set_txfifo_empty_thr(&uart_hal_, kTxEmptyThreshold);
   // Drop stale hardware RX FIFO bytes from the previous baud.
   // Keep software read queue semantics aligned with ST/CH (no read_port reset).
+  // TODO: classic ESP32 FIFO+ISR still shows a small startup RX transient in the
+  // first legacy loopback window. Find the driver-side source so the external
+  // benchmark warm-up workaround can be removed.
   uart_hal_rxfifo_rst(&uart_hal_);
   uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
 
@@ -372,12 +375,6 @@ ErrorCode ESP32UART::ConfigurePins()
     esp_rom_gpio_connect_in_signal(
         rx_pin_, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX), false);
   }
-  else
-  {
-    esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT,
-                                   UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX),
-                                   false);
-  }
 
   if (rts_pin_ >= 0)
   {
@@ -423,16 +420,27 @@ void IRAM_ATTR ESP32UART::ClearPendingTx()
 
 bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
 {
+  // Mark the op as already reported before kicking HW so a very-fast EOF ISR
+  // cannot race back in and report the same callback twice.
+  const bool report_now = !tx_active_reported_;
+  if (report_now)
+  {
+    tx_active_reported_ = true;
+  }
+
   if (!StartActiveTransfer(in_isr))
   {
+    tx_active_reported_ = false;
     write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
     ClearActiveTx();
     return false;
   }
 
-  // Align with STM/CH semantics: op is considered complete once transfer is kicked.
-  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-  tx_active_reported_ = true;
+  if (report_now)
+  {
+    // Align with STM/CH semantics: op is considered complete once transfer is kicked.
+    write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
+  }
   return true;
 }
 
@@ -449,15 +457,21 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 
   if (!tx_busy_.IsSet() && tx_active_valid_)
   {
+    const bool report_now = !tx_active_reported_;
+    if (report_now)
+    {
+      tx_active_reported_ = true;
+    }
+
     if (!StartActiveTransfer(in_isr))
     {
       ClearActiveTx();
       return ErrorCode::FAILED;
     }
-    else if (!tx_active_reported_)
+
+    if (report_now)
     {
       // Current op completion is reported by WritePort when TryStartTx returns OK.
-      tx_active_reported_ = true;
       if (!tx_pending_valid_)
       {
         (void)LoadPendingTxFromQueue(in_isr);
