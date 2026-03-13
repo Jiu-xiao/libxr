@@ -147,6 +147,8 @@ struct ModeHarness
 using ReadHarness = ModeHarness<LibXR::ReadOperation>;
 using WriteHarness = ModeHarness<LibXR::WriteOperation>;
 
+// Linux/Webots host tests use helper threads to close timeout/completion races.
+// Join them explicitly once the done semaphore fires so host runs stay stable.
 void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
 #if defined(LIBXR_SYSTEM_Linux) || defined(LIBXR_SYSTEM_Webots)
@@ -667,6 +669,8 @@ void VerifyStreamBlockPendingCompletion(LibXR::ErrorCode finish_result,
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
+// BLOCK stream timeout must detach the waiter and still leave the eventual
+// completion token fully consumed once the producer finishes later.
 void VerifyStreamBlockTimeout()
 {
   using namespace LibXR;
@@ -1157,6 +1161,8 @@ void test_write_port_block_reused_waiter_discards_stale_signal()
   JoinThreadIfNeeded(finisher1);
   ASSERT(sem.Value() == 0);
 
+  // Reusing the same zero-initialized semaphore is valid as long as the
+  // previous blocking operation consumed its completion token completely.
   Semaphore done2;
   Thread finisher2;
   StartWriteFinisher(finisher2, w, done2, ErrorCode::OK, "wr_stale2");

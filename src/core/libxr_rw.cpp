@@ -50,6 +50,12 @@ void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
       return;
     }
 
+    if (busy_.load(std::memory_order_acquire) == BusyState::BLOCK_CLAIMED)
+    {
+      info.op.data.sem_info.sem->PostFromCallback(in_isr);
+      return;
+    }
+
     expected = BusyState::BLOCK_DETACHED;
     busy_.compare_exchange_strong(expected, BusyState::IDLE, std::memory_order_acq_rel,
                                   std::memory_order_acquire);
@@ -68,8 +74,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   {
     BusyState is_busy = busy_.load(std::memory_order_acquire);
 
-    if (is_busy == BusyState::PENDING || is_busy == BusyState::BLOCK_CLAIMED ||
-        is_busy == BusyState::BLOCK_DETACHED)
+    if (is_busy != BusyState::IDLE && is_busy != BusyState::EVENT)
     {
       return ErrorCode::BUSY;
     }
@@ -106,11 +111,6 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
       if (ans == ErrorCode::PENDING)
       {
-        if (op.type == ReadOperation::OperationType::BLOCK)
-        {
-          block_result_ = ErrorCode::PENDING;
-        }
-
         BusyState expected = BusyState::IDLE;
         if (busy_.compare_exchange_weak(expected, BusyState::PENDING,
                                         std::memory_order_acq_rel,
@@ -129,10 +129,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
         {
           return ans;
         }
-        if (op.type != ReadOperation::OperationType::BLOCK)
-        {
-          op.UpdateStatus(in_isr, ans);
-        }
+        op.UpdateStatus(in_isr, ans);
         return ErrorCode::OK;
       }
     }
@@ -158,17 +155,18 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
       }
 
       auto detached_state = busy_.load(std::memory_order_acquire);
-      if (detached_state == BusyState::BLOCK_DETACHED)
+      if (detached_state != BusyState::BLOCK_CLAIMED)
       {
-        busy_.store(BusyState::IDLE, std::memory_order_release);
+        if (detached_state == BusyState::BLOCK_DETACHED)
+        {
+          busy_.store(BusyState::IDLE, std::memory_order_release);
+        }
         return ErrorCode::TIMEOUT;
       }
 
-      if (detached_state == BusyState::IDLE || detached_state == BusyState::EVENT)
-      {
-        return ErrorCode::TIMEOUT;
-      }
-
+      // Completion has already claimed the operation but the wakeup has not
+      // reached this waiter yet. Consume that final post here so the token
+      // cannot leak into the next blocking operation.
       auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
       UNUSED(finish_wait_ans);
       ASSERT(finish_wait_ans == ErrorCode::OK);
@@ -218,15 +216,7 @@ void ReadPort::ProcessPendingReads(bool in_isr)
         ASSERT(ans == ErrorCode::OK);
       }
 
-      if (info_.op.type == ReadOperation::OperationType::BLOCK)
-      {
-        block_result_ = ErrorCode::OK;
-        info_.op.data.sem_info.sem->PostFromCallback(in_isr);
-      }
-      else
-      {
-        Finish(in_isr, ErrorCode::OK, info_);
-      }
+      Finish(in_isr, ErrorCode::OK, info_);
       OnRxDequeue(in_isr);
     }
   }
@@ -388,7 +378,6 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
     // Arm the waiter before the driver can complete the write immediately.
-    block_result_ = ErrorCode::PENDING;
     busy_.store(BusyState::BLOCK_WAITING, std::memory_order_release);
   }
 
@@ -435,17 +424,18 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     }
 
     auto detached_state = busy_.load(std::memory_order_acquire);
-    if (detached_state == BusyState::BLOCK_DETACHED)
+    if (detached_state != BusyState::BLOCK_CLAIMED)
     {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
+      if (detached_state == BusyState::BLOCK_DETACHED)
+      {
+        busy_.store(BusyState::IDLE, std::memory_order_release);
+      }
       return ErrorCode::TIMEOUT;
     }
 
-    if (detached_state == BusyState::IDLE)
-    {
-      return ErrorCode::TIMEOUT;
-    }
-
+    // Completion has already claimed the operation but its final wakeup has
+    // not been consumed by this waiter yet. Drain that post here so no token
+    // survives into the next blocking write.
     auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
     UNUSED(finish_wait_ans);
     ASSERT(finish_wait_ans == ErrorCode::OK);
