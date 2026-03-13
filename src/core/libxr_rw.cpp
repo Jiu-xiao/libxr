@@ -251,8 +251,8 @@ void ReadPort::Reset()
     return;
   }
 
-  busy_.store(BusyState::IDLE, std::memory_order_release);
   block_result_ = ErrorCode::OK;
+  busy_.store(BusyState::IDLE, std::memory_order_release);
 }
 
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
@@ -484,8 +484,8 @@ void WritePort::Reset()
     return;
   }
 
-  busy_.store(BusyState::IDLE, std::memory_order_release);
   block_result_ = ErrorCode::OK;
+  busy_.store(BusyState::IDLE, std::memory_order_release);
 }
 
 WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
