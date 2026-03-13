@@ -199,6 +199,9 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   uart_hal_set_txfifo_empty_thr(&uart_hal_, kTxEmptyThreshold);
   // Drop stale hardware RX FIFO bytes from the previous baud.
   // Keep software read queue semantics aligned with ST/CH (no read_port reset).
+  // TODO: classic ESP32 FIFO+ISR still shows a small startup RX transient in the
+  // first legacy loopback window. Find the driver-side source so the external
+  // benchmark warm-up workaround can be removed.
   uart_hal_rxfifo_rst(&uart_hal_);
   uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
 
