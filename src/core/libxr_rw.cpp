@@ -155,13 +155,16 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
       }
 
       auto detached_state = busy_.load(std::memory_order_acquire);
-      if (detached_state != BusyState::BLOCK_CLAIMED)
+      switch (detached_state)
       {
-        if (detached_state == BusyState::BLOCK_DETACHED)
-        {
+        case BusyState::BLOCK_CLAIMED:
+          break;
+        case BusyState::BLOCK_DETACHED:
           busy_.store(BusyState::IDLE, std::memory_order_release);
-        }
-        return ErrorCode::TIMEOUT;
+          return ErrorCode::TIMEOUT;
+        default:
+          ASSERT(false);
+          return ErrorCode::TIMEOUT;
       }
 
       // Completion has already claimed the operation but the wakeup has not
@@ -170,8 +173,6 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
       auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
       UNUSED(finish_wait_ans);
       ASSERT(finish_wait_ans == ErrorCode::OK);
-      auto state = busy_.load(std::memory_order_acquire);
-      ASSERT(state == BusyState::BLOCK_CLAIMED);
       busy_.store(BusyState::IDLE, std::memory_order_release);
       return block_result_;
     }
@@ -423,13 +424,16 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     }
 
     auto detached_state = busy_.load(std::memory_order_acquire);
-    if (detached_state != BusyState::BLOCK_CLAIMED)
+    switch (detached_state)
     {
-      if (detached_state == BusyState::BLOCK_DETACHED)
-      {
+      case BusyState::BLOCK_CLAIMED:
+        break;
+      case BusyState::BLOCK_DETACHED:
         busy_.store(BusyState::IDLE, std::memory_order_release);
-      }
-      return ErrorCode::TIMEOUT;
+        return ErrorCode::TIMEOUT;
+      default:
+        ASSERT(false);
+        return ErrorCode::TIMEOUT;
     }
 
     // Completion has already claimed the operation but its final wakeup has
@@ -438,8 +442,6 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
     UNUSED(finish_wait_ans);
     ASSERT(finish_wait_ans == ErrorCode::OK);
-    auto state = busy_.load(std::memory_order_acquire);
-    ASSERT(state == BusyState::BLOCK_CLAIMED);
     busy_.store(BusyState::IDLE, std::memory_order_release);
 
     return block_result_;
