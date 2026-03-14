@@ -33,6 +33,7 @@ This repository only contains platform-independent stack code. For platform-spec
 
 - `driver/st/stm32_usb_ep.cpp`
 - `driver/ch/ch32_usb_endpoint_otghs.cpp`
+- `driver/esp/esp_usb_dev.cpp`
 
 Note:
 
@@ -63,9 +64,14 @@ TODO
 | STM32    | USB_DRV_FS    | Supported (Device) | STM32G431                  |
 | STM32    | USB_OTG_FS    | Supported (Device) | STM32F407                  |
 | STM32    | USB_OTG_HS    | Supported (Device) | STM32F407/STM32H750        |
+| ESP32-S3 | USB_OTG_FS    | Supported (Device) | ESP32-S3                   |
 | CH32     | USB_DEVICE_FS | Supported          | CH32V203                   |
 | CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203/CH32V208 |
 | CH32     | USB_OTG_HS    | Supported (Device) | CH32V307                   |
+
+Note:
+
+- The current ESP native USB device backend is implemented for `ESP32-S3`.
 
 ## Documentation
 

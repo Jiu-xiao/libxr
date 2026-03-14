@@ -69,7 +69,7 @@
 | ADC          | ✅     | ✅        | ✅        | ✅        |
 | DAC          | ✅     | 🚫        | 🚫        | 🚫        |
 | PWM          | ✅     | ✅        | ✅        | ✅        |
-| USB-DEVICE   | ❌     | ❌        | ❌        | ❌        |
+| USB-DEVICE   | ❌     | ✅        | ❌        | ❌        |
 | CDC-JTAG     | 🚫     | 🚫        | ✅        | ✅        |
 | WDG          | ✅     | ✅        | ✅        | ✅        |
 
@@ -82,6 +82,7 @@
 > Note:
 > `USB-DEVICE` refers to the native USB device controller path.
 > `CDC-JTAG` refers to the dedicated USB Serial/JTAG peripheral and is distinct from the native USB device stack.
+> The currently verified ESP native USB device backend is the `ESP32-S3` path.
 
 ## CH32 Support
 

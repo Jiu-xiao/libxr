@@ -40,6 +40,7 @@ XRUSB是一个独立的现代 C++ USB 协议栈。以subtree的形式作为[LibX
 
 - `driver/st/stm32_usb_ep.cpp`
 - `driver/ch/ch32_usb_endpoint_otghs.cpp`
+- `driver/esp/esp_usb_dev.cpp`
 
 说明：
 
@@ -70,9 +71,14 @@ TODO
 | STM32 | USB_DRV_FS    | 支持 (Device) | STM32G431                  |
 | STM32 | USB_OTG_FS    | 支持 (Device) | STM32F407                  |
 | STM32 | USB_OTG_HS    | 支持 (Device) | STM32F407/STM32H750        |
+| ESP32-S3 | USB_OTG_FS | 支持 (Device) | ESP32-S3                   |
 | CH32  | USB_DEVICE_FS | 支持          | CH32V203                   |
 | CH32  | USB_OTG_FS    | 支持 (Device) | CH32V307/CH32V203/CH32V208 |
 | CH32  | USB_OTG_HS    | 支持          | CH32V307                   |
+
+说明：
+
+- 当前 ESP 原生 USB 设备后端实现于 `ESP32-S3`。
 
 ## 文档
 
