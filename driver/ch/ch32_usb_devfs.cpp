@@ -484,7 +484,7 @@ CH32USBDeviceFS::CH32USBDeviceFS(
 
 ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
-  if (context == USB::DeviceCore::Context::STATUS_IN)
+  if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {
     const uint8_t N_EP = static_cast<uint8_t>(CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);
     for (uint8_t i = 0; i < N_EP; i++)

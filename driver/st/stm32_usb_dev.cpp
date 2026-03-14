@@ -162,7 +162,7 @@ ErrorCode STM32USBDeviceOtgFS::SetAddress(uint8_t address,
 {
   HAL_StatusTypeDef ans = HAL_OK;
 
-  if (context == USB::DeviceCore::Context::SETUP)
+  if (context == USB::DeviceCore::Context::STATUS_IN_ARMED)
   {
     ans = HAL_PCD_SetAddress(hpcd_, address);
   }
@@ -242,7 +242,7 @@ ErrorCode STM32USBDeviceOtgHS::SetAddress(uint8_t address,
 {
   HAL_StatusTypeDef ans = HAL_OK;
 
-  if (context == USB::DeviceCore::Context::SETUP)
+  if (context == USB::DeviceCore::Context::STATUS_IN_ARMED)
   {
     ans = HAL_PCD_SetAddress(hpcd_, address);
   }
@@ -335,7 +335,7 @@ ErrorCode STM32USBDeviceDevFs::SetAddress(uint8_t address,
 {
   HAL_StatusTypeDef ans = HAL_OK;
 
-  if (context == USB::DeviceCore::Context::STATUS_IN)
+  if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {
     ans = HAL_PCD_SetAddress(hpcd_, address);
   }

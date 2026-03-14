@@ -96,7 +96,7 @@ void ESP32USBDevice::Deinit(bool in_isr)
 
 ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
-  if (context == USB::DeviceCore::Context::SETUP)
+  if (context == USB::DeviceCore::Context::SETUP_BEFORE_STATUS)
   {
     auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
     dev->dcfg_reg.devaddr = address;
