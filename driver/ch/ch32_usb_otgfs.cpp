@@ -296,7 +296,7 @@ CH32USBOtgFS::CH32USBOtgFS(
 
 ErrorCode CH32USBOtgFS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
-  if (context == USB::DeviceCore::Context::STATUS_IN)
+  if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {
     USBFSD->DEV_ADDR = (USBFSD->DEV_ADDR & USBFS_UDA_GP_BIT) | address;
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;

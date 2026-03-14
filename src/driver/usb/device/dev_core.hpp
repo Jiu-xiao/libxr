@@ -186,13 +186,14 @@ class DeviceCore
    */
   enum Context : uint8_t
   {
-    UNKNOWN = 0,  ///< 未知 / Unknown
-    SETUP,        ///< Setup stage / Setup stage
-    DATA_OUT,     ///< OUT data stage / OUT data stage
-    STATUS_OUT,   ///< OUT status stage / OUT status stage
-    DATA_IN,      ///< IN data stage / IN data stage
-    STATUS_IN,    ///< IN status stage / IN status stage
-    ZLP           ///< ZLP stage marker / ZLP stage marker
+    UNKNOWN = 0,         ///< 未知 / Unknown
+    SETUP_BEFORE_STATUS, ///< Setup handled, before STATUS IN ZLP is armed
+    STATUS_IN_ARMED,     ///< STATUS IN ZLP armed, but not yet completed
+    DATA_OUT,            ///< OUT data stage / OUT data stage
+    STATUS_OUT,          ///< OUT status stage / OUT status stage
+    DATA_IN,             ///< IN data stage / IN data stage
+    STATUS_IN_COMPLETE,  ///< IN status stage completed
+    ZLP                  ///< ZLP stage marker / ZLP stage marker
   };
 
   /**

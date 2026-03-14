@@ -239,10 +239,10 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
       }
       break;
 
-    case Context::STATUS_IN:
+    case Context::STATUS_IN_COMPLETE:
       if (state_.pending_addr != 0xFF)
       {
-        SetAddress(state_.pending_addr, Context::STATUS_IN);
+        SetAddress(state_.pending_addr, Context::STATUS_IN_COMPLETE);
         state_.pending_addr = 0xFF;
       }
       break;
@@ -814,8 +814,10 @@ ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
 {
   state_.pending_addr = static_cast<uint8_t>(address & 0x7F);
 
-  WriteZLP(Context::STATUS_IN);
-  return SetAddress(address, Context::SETUP);
+  const ErrorCode pre_status = SetAddress(address, Context::SETUP_BEFORE_STATUS);
+  WriteZLP(Context::STATUS_IN_COMPLETE);
+  const ErrorCode armed = SetAddress(address, Context::STATUS_IN_ARMED);
+  return (pre_status != ErrorCode::OK) ? pre_status : armed;
 }
 
 ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)

@@ -28,6 +28,14 @@ class UAC1MicrophoneQ : public DeviceClass
   static const constexpr uint8_t K_SUBFRAME_SIZE = (BITS_PER_SAMPLE <= 8)    ? 1
                                                    : (BITS_PER_SAMPLE <= 16) ? 2
                                                                              : 3;
+  // 保守默认值：smoke 构造时固定暴露 0 dB，避免主机看到误导性的音量范围。
+  // Conservative smoke-safe defaults: expose fixed 0 dB gain by default.
+  static constexpr int16_t K_DEFAULT_VOL_MIN = 0;
+  static constexpr int16_t K_DEFAULT_VOL_MAX = 0;
+  static constexpr int16_t K_DEFAULT_VOL_RES = 1;
+  static constexpr Speed K_DEFAULT_SPEED = Speed::FULL;
+  static constexpr size_t K_DEFAULT_QUEUE_BYTES = 8192;
+  static constexpr uint8_t K_DEFAULT_INTERVAL = 1;
 
  public:
   /**
@@ -35,15 +43,19 @@ class UAC1MicrophoneQ : public DeviceClass
    *        Construct a queue‑backed UAC1 microphone
    *
    * @param sample_rate_hz  采样率 | Sampling rate in Hz
-   * @param vol_min         最小音量 | Min volume (1/256 dB)
-   * @param vol_max         最大音量 | Max volume (1/256 dB)
-   * @param vol_res         步进 | Step (1/256 dB)
-   * @param queue_bytes     队列容量 | Queue capacity in bytes
+   * @param vol_min         最小音量 | Min volume (1/256 dB), default 0 dB
+   * @param vol_max         最大音量 | Max volume (1/256 dB), default 0 dB
+   * @param vol_res         步进 | Step (1/256 dB), default 1
+   * @param speed           USB 速度 | USB device speed, default FULL
+   * @param queue_bytes     队列容量 | Queue capacity in bytes, default 8192
+   * @param interval        端点轮询间隔 | Endpoint interval, default 1
    * @param iso_in_ep_num   ISO IN 端点号 | Isochronous IN endpoint number
    */
-  UAC1MicrophoneQ(uint32_t sample_rate_hz, int16_t vol_min, int16_t vol_max,
-                  int16_t vol_res, Speed speed, size_t queue_bytes = 8192,
-                  uint8_t interval = 1,
+  UAC1MicrophoneQ(uint32_t sample_rate_hz, int16_t vol_min = K_DEFAULT_VOL_MIN,
+                  int16_t vol_max = K_DEFAULT_VOL_MAX,
+                  int16_t vol_res = K_DEFAULT_VOL_RES, Speed speed = K_DEFAULT_SPEED,
+                  size_t queue_bytes = K_DEFAULT_QUEUE_BYTES,
+                  uint8_t interval = K_DEFAULT_INTERVAL,
                   Endpoint::EPNumber iso_in_ep_num = Endpoint::EPNumber::EP_AUTO)
       : iso_in_ep_num_(iso_in_ep_num),
         vol_min_(vol_min),
