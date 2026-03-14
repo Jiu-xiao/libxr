@@ -1,17 +1,17 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 
+#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "libxr_type.hpp"
 #include "usb/core/ep_pool.hpp"
 #include "usb/device/dev_core.hpp"
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    CONFIG_IDF_TARGET_ESP32S3
 
 namespace LibXR
 {
@@ -138,7 +138,6 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
     bool started = false;
     bool core_inited = false;
     bool rom_usb_cleaned = false;
-    uint8_t pending_address = 0xFFU;
   };
 
   static void IRAM_ATTR IsrEntry(void* arg);
@@ -158,7 +157,8 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   void HandleRxFifoLevel();
   bool DmaEnabled() const { return true; }
 
-  bool AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool is_bulk, uint16_t& fifo_words);
+  bool AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool is_bulk,
+                      uint16_t& fifo_words);
   bool EnsureRxFifo(uint16_t packet_size);
 
   // Endpoint ownership map.

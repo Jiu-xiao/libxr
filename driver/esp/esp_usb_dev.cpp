@@ -101,7 +101,6 @@ ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context c
   {
     auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
     dev->dcfg_reg.devaddr = address;
-    runtime_.pending_address = 0xFFU;
   }
   return ErrorCode::OK;
 }
@@ -313,7 +312,6 @@ void ESP32USBDevice::ResetFifoState()
 void ESP32USBDevice::ResetDeviceState()
 {
   ResetFifoState();
-  runtime_.pending_address = 0xFFU;
   debug_.line_state = 0U;
   debug_.last_line_doepint = 0U;
   debug_.last_line_diepint = 0U;

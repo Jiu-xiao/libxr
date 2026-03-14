@@ -87,7 +87,27 @@ bool CanUseDirectOutDmaBuffer(const void* ptr, size_t size)
     return false;
   }
 
-  return esp_dma_is_buffer_alignment_satisfied(ptr, size, UsbDmaMemInfo());
+  auto* start = static_cast<const uint8_t*>(ptr);
+  auto* end = start + size - 1U;
+  if (!esp_ptr_dma_capable(start) || !esp_ptr_dma_capable(end) ||
+      !esp_ptr_word_aligned(ptr) ||
+      !esp_dma_is_buffer_alignment_satisfied(ptr, size, UsbDmaMemInfo()))
+  {
+    return false;
+  }
+
+  uint32_t cache_level = 0;
+  uint32_t cache_id = 0;
+  const bool cache_supported = cache_hal_vaddr_to_cache_level_id(
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr)), size, &cache_level,
+      &cache_id);
+  if (!cache_supported)
+  {
+    return true;
+  }
+
+  const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+  return ((addr % kUsbDmaAlignment) == 0U) && (AlignUp(size, kUsbDmaAlignment) == size);
 }
 
 uint16_t CalcRxFifoWords(uint16_t largest_packet_size, uint8_t ep_count)

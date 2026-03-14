@@ -743,12 +743,6 @@ void ESP32USBEndpoint::ProgramTransfer(size_t size)
         dev->diepdma0_reg.dmaaddr =
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(transfer_hw_buffer_));
       }
-      if (device_.DmaEnabled() && (size == 0U) &&
-          (device_.runtime_.pending_address != 0xFFU))
-      {
-        dev->dcfg_reg.devaddr = device_.runtime_.pending_address;
-        device_.runtime_.pending_address = 0xFFU;
-      }
       Detail::StartEndpointTransfer(dev->diepctl0_reg);
     }
     else
