@@ -55,6 +55,22 @@ DescriptorStrings::DescriptorStrings(
   serial_uid_len_ = uid_len;
 }
 
+DescriptorStrings::~DescriptorStrings()
+{
+  delete[] header_;
+  header_ = nullptr;
+  land_id_ = nullptr;
+
+  delete[] string_list_;
+  string_list_ = nullptr;
+
+  delete[] reinterpret_cast<uint8_t*>(buffer_.addr_);
+  buffer_ = {nullptr, 0};
+
+  serial_uid_ = nullptr;
+  serial_uid_len_ = 0;
+}
+
 ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
 {
   ASSERT(buffer_.addr_ != nullptr);
@@ -80,7 +96,13 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
 
   uint8_t* buffer = reinterpret_cast<uint8_t*>(buffer_.addr_);
 
-  // 有 UID 且请求的是 Serial：前缀 + UID 的十六进制字符串
+  const auto INDEX_NUM = static_cast<uint8_t>(index);
+  if (INDEX_NUM < static_cast<uint8_t>(Index::MANUFACTURER_STRING) ||
+      INDEX_NUM > static_cast<uint8_t>(Index::SERIAL_NUMBER_STRING))
+  {
+    return ErrorCode::NOT_FOUND;
+  }
+
   if (index == Index::SERIAL_NUMBER_STRING && serial_uid_ != nullptr)
   {
     const LanguagePack* pack = string_list_[ans];
@@ -99,11 +121,9 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
 
     uint8_t* out = buffer + 2;
 
-    // 先写前缀（UTF-8 -> UTF-16LE）
     ToUTF16LE(SERIAL_PREFIX, out);
-    out += PREFIX_UTF16_LEN;  // 前缀的 UTF-16LE 字节数
+    out += PREFIX_UTF16_LEN;
 
-    // 再写 UID 的十六进制（ASCII 0-9 A-F）
     static const char HEX[16] = {'0', '1', '2', '3', '4', '5', '6', '7',
                                  '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
@@ -113,11 +133,8 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
       char hi = HEX[(b >> 4) & 0x0F];
       char lo = HEX[b & 0x0F];
 
-      // hi
       *out++ = static_cast<uint8_t>(hi);
       *out++ = 0x00;
-
-      // lo
       *out++ = static_cast<uint8_t>(lo);
       *out++ = 0x00;
     }
@@ -125,12 +142,10 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
     return ErrorCode::OK;
   }
 
-  // 其它字符串：走原来的逻辑
-  auto data_len = string_list_[ans]->string_lens[static_cast<size_t>(index) - 1] + 2;
-
+  auto data_len = string_list_[ans]->string_lens[INDEX_NUM - 1] + 2;
   buffer[1] = 0x03;
   buffer[0] = static_cast<uint8_t>(data_len);
-  const char* str = string_list_[ans]->strings[static_cast<size_t>(index) - 1];
+  const char* str = string_list_[ans]->strings[INDEX_NUM - 1];
   ToUTF16LE(str, buffer + 2);
   return ErrorCode::OK;
 }
@@ -178,7 +193,6 @@ void DescriptorStrings::ToUTF16LE(const char* str, uint8_t* buffer)
     }
     else if ((*s & 0xF8) == 0xF0)
     {
-      // 忽略超出 BMP 的字符（如 emoji）
       s++;
       if (*s)
       {

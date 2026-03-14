@@ -3,35 +3,10 @@
 #include <cstdint>
 
 #include "core.hpp"
-#include "desc_cfg.hpp"
 #include "libxr_type.hpp"
-#include "usb/core/bos.hpp"
+#include "device_composition.hpp"
 
 using namespace LibXR::USB;
-
-DeviceClass::DeviceClass(std::initializer_list<BosCapability*> bos_caps)
-    : bos_cap_num_(bos_caps.size())
-{
-  if (bos_cap_num_ > 0)
-  {
-    bos_caps_ = new BosCapability*[bos_cap_num_];
-    size_t i = 0;
-    for (auto* cap : bos_caps)
-    {
-      bos_caps_[i++] = cap;
-    }
-  }
-}
-
-DeviceClass::~DeviceClass()
-{
-  // 仅释放指针数组本身（capability 对象生命周期由派生类成员管理）
-  // Only free the pointer array itself (capability objects are owned by derived class
-  // members).
-  delete[] bos_caps_;
-  bos_caps_ = nullptr;
-  bos_cap_num_ = 0;
-}
 
 DeviceCore::DeviceCore(
     EndpointPool& ep_pool, USBSpec spec, Speed speed,
@@ -40,16 +15,18 @@ DeviceCore::DeviceCore(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs,
     ConstRawData uid)
-    : config_desc_(ep_pool, configs),
-      device_desc_(spec, packet_size, vid, pid, bcd, config_desc_.GetConfigNum()),
-      strings_(lang_list, reinterpret_cast<const uint8_t*>(uid.addr_), uid.size_),
+    : composition_(new DeviceComposition(ep_pool, lang_list, configs, uid)),
+      device_desc_(spec, packet_size, vid, pid, bcd, composition_->GetConfigNum()),
       endpoint_({ep_pool, nullptr, nullptr, {}, {}}),
       state_({false,
               speed,
               Context::UNKNOWN,
               Context::UNKNOWN,
               {nullptr, 0},
+              0u,
+              false,
               {nullptr, 0},
+              0u,
               0xff,
               nullptr,
               false,
@@ -64,6 +41,12 @@ DeviceCore::DeviceCore(
 
   endpoint_.ep0_out_cb =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnEP0OutCompleteStatic, this);
+}
+
+DeviceCore::~DeviceCore()
+{
+  delete composition_;
+  composition_ = nullptr;
 }
 
 void DeviceCore::OnEP0OutCompleteStatic(bool in_isr, DeviceCore* self,
@@ -120,13 +103,35 @@ bool DeviceCore::IsValidUSBCombination(USBSpec spec, Speed speed,
 void DeviceCore::ReadZLP(Context context)
 {
   state_.out0 = context;
-  endpoint_.out0->TransferZLP();
+  auto ec = endpoint_.out0->TransferZLP();
+  if (ec != ErrorCode::OK)
+  {
+    endpoint_.out0->Close();
+    endpoint_.out0->Configure({Endpoint::Direction::OUT, Endpoint::Type::CONTROL, 64});
+    endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
+    ec = endpoint_.out0->TransferZLP();
+    if (ec != ErrorCode::OK)
+    {
+      StallControlEndpoint();
+    }
+  }
 }
 
 void DeviceCore::WriteZLP(Context context)
 {
   state_.in0 = context;
-  endpoint_.in0->TransferZLP();
+  auto ec = endpoint_.in0->TransferZLP();
+  if (ec != ErrorCode::OK)
+  {
+    endpoint_.in0->Close();
+    endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
+    endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
+    ec = endpoint_.in0->TransferZLP();
+    if (ec != ErrorCode::OK)
+    {
+      StallControlEndpoint();
+    }
+  }
 }
 
 void DeviceCore::Init(bool in_isr)
@@ -140,13 +145,7 @@ void DeviceCore::Init(bool in_isr)
   endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
   endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
 
-  config_desc_.BindEndpoints(in_isr);
-
-  // 收集 BOS capabilities（以对象形式收集；BOS 构建由 BosManager 在 GET_DESCRIPTOR(BOS)
-  // 时动态完成）
-  // Collect BOS capabilities (as objects; BOS building is done dynamically by BosManager
-  // on GET_DESCRIPTOR(BOS)).
-  config_desc_.RebuildBosCache();
+  composition_->Init(in_isr);
 
   state_.inited = true;
 }
@@ -154,7 +153,7 @@ void DeviceCore::Init(bool in_isr)
 void DeviceCore::Deinit(bool in_isr)
 {
   state_.inited = false;
-  config_desc_.UnbindEndpoints(in_isr);
+  composition_->Deinit(in_isr);
   endpoint_.in0->Close();
   endpoint_.out0->Close();
 }
@@ -188,6 +187,57 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData& data)
       break;
 
     case Context::DATA_OUT:
+      if (state_.read_streaming)
+      {
+        size_t chunk = data.size_;
+        if (chunk > state_.read_request_remain)
+        {
+          chunk = state_.read_request_remain;
+        }
+
+        if (chunk > 0)
+        {
+          LibXR::Memory::FastCopy(state_.out0_buffer, data.addr_, chunk);
+          state_.out0_buffer += chunk;
+          state_.read_request_remain -= chunk;
+        }
+
+        state_.read_remain = {state_.out0_buffer, state_.read_request_remain};
+
+        if (state_.read_request_remain > 0)
+        {
+          if (data.size_ == endpoint_.out0->MaxTransferSize())
+          {
+            state_.out0 = Context::DATA_OUT;
+            return;
+          }
+
+          state_.read_streaming = false;
+          state_.read_request_remain = 0u;
+          state_.read_remain = {nullptr, 0};
+          endpoint_.out0->SetState(Endpoint::State::IDLE);
+          StallControlEndpoint();
+          return;
+        }
+
+        state_.read_streaming = false;
+        state_.read_request_remain = 0u;
+        state_.read_remain = {nullptr, 0};
+        endpoint_.out0->SetState(Endpoint::State::IDLE);
+
+        if (class_req_.read)
+        {
+          class_req_.read = false;
+          class_req_.class_ptr->OnClassData(in_isr, class_req_.b_request, class_req_.data);
+          WriteZLP();
+        }
+        else
+        {
+          WriteZLP();
+        }
+        break;
+      }
+
       if (data.size_ > 0)
       {
         LibXR::Memory::FastCopy(state_.out0_buffer, data.addr_, data.size_);
@@ -293,6 +343,13 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
     state_.status_out_armed = false;
   }
 
+  if (request_size > 0)
+  {
+    state_.write_request_remain = request_size;
+  }
+
+  // 限制最大传输长度
+  // Clamp max transfer length.
   if (request_size > 0 && request_size < data.size_)
   {
     data.size_ = request_size;
@@ -309,11 +366,29 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
                             ((transfer_total_size % endpoint_.in0->MaxPacketSize()) == 0);
   }
 
-  // 数据长度为 0，直接 STALL（协议层面不允许）
-  // If length is 0, STALL directly (not allowed by protocol).
-  if (data.size_ == 0 || data.size_ > 0xFFFF)
+  if (data.size_ > 0xFFFF)
   {
     StallControlEndpoint();
+    return;
+  }
+
+  if (data.size_ == 0)
+  {
+    state_.write_remain = {nullptr, 0};
+    state_.need_write_zlp = false;
+    ReadZLP();
+    auto ec = endpoint_.in0->TransferZLP();
+    if (ec != ErrorCode::OK)
+    {
+      endpoint_.in0->Close();
+      endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
+      endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
+      ec = endpoint_.in0->TransferZLP();
+      if (ec != ErrorCode::OK)
+      {
+        StallControlEndpoint();
+      }
+    }
     return;
   }
 
@@ -329,10 +404,24 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
         reinterpret_cast<const uint8_t*>(data.addr_) + packet_max_length,
         data.size_ - packet_max_length};
     data.size_ = packet_max_length;
+    if (state_.write_request_remain >= data.size_)
+    {
+      state_.write_request_remain -= data.size_;
+    }
+    else
+    {
+      state_.write_request_remain = 0u;
+    }
+    state_.need_write_zlp = false;
   }
   else
   {
     state_.write_remain = {nullptr, 0};
+    const bool request_expects_more =
+        (state_.write_request_remain > data.size_) && (state_.write_request_remain != 0u);
+    state_.need_write_zlp =
+        request_expects_more && ((data.size_ % endpoint_.in0->MaxPacketSize()) == 0);
+    state_.write_request_remain = 0u;
     // 在最后一个非 ZLP IN 包完成后再挂起 STATUS OUT。
     // Defer STATUS OUT arming until the final non-ZLP IN packet completes.
     state_.arm_status_out_after_in_data =
@@ -348,7 +437,18 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
     ArmStatusOutIfNeeded();
   }
 
-  endpoint_.in0->Transfer(data.size_);
+  auto ec = endpoint_.in0->Transfer(data.size_);
+  if (ec != ErrorCode::OK)
+  {
+    endpoint_.in0->Close();
+    endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
+    endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
+    ec = endpoint_.in0->Transfer(data.size_);
+    if (ec != ErrorCode::OK)
+    {
+      StallControlEndpoint();
+    }
+  }
 }
 
 void DeviceCore::ClearStatusOutArming()
@@ -378,6 +478,32 @@ void DeviceCore::DevReadEP0Data(LibXR::RawData data, size_t packet_max_length)
     return;
   }
 
+  state_.read_request_remain = data.size_;
+  state_.read_streaming = false;
+
+  // CH32 USBHS EP0 requires per-packet software accumulation for control OUT payloads larger
+  // than one packet. Keep the endpoint BUSY for the whole request and accumulate 64-byte
+  // chunks in the completion callback instead of re-arming packet-by-packet from software.
+  if (endpoint_.out0->GetNumber() == Endpoint::EPNumber::EP0 && data.size_ > packet_max_length)
+  {
+    state_.read_streaming = true;
+    state_.read_remain = {reinterpret_cast<uint8_t*>(data.addr_), data.size_};
+    state_.out0_buffer = reinterpret_cast<uint8_t*>(data.addr_);
+    auto ec = endpoint_.out0->Transfer(data.size_);
+    if (ec != ErrorCode::OK)
+    {
+      endpoint_.out0->Close();
+      endpoint_.out0->Configure({Endpoint::Direction::OUT, Endpoint::Type::CONTROL, 64});
+      endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
+      ec = endpoint_.out0->Transfer(data.size_);
+      if (ec != ErrorCode::OK)
+      {
+        StallControlEndpoint();
+      }
+    }
+    return;
+  }
+
   // 数据长度 <= 一个包长，直接收一次即可
   // If length <= one packet, receive once.
   if (data.size_ <= packet_max_length)
@@ -394,8 +520,18 @@ void DeviceCore::DevReadEP0Data(LibXR::RawData data, size_t packet_max_length)
   }
 
   state_.out0_buffer = reinterpret_cast<uint8_t*>(data.addr_);
-  endpoint_.out0->Transfer(data.size_);  // 一次性收满，HAL/底层自动搞定多包 /
-                                         // Receive-full; HAL handles packetization
+  auto ec = endpoint_.out0->Transfer(data.size_);
+  if (ec != ErrorCode::OK)
+  {
+    endpoint_.out0->Close();
+    endpoint_.out0->Configure({Endpoint::Direction::OUT, Endpoint::Type::CONTROL, 64});
+    endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
+    ec = endpoint_.out0->Transfer(data.size_);
+    if (ec != ErrorCode::OK)
+    {
+      StallControlEndpoint();
+    }
+  }
 }
 
 void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket* setup)
@@ -518,7 +654,7 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
       uint8_t interface_index = static_cast<uint8_t>(setup->wIndex & 0xFF);
 
       uint8_t alt = 0;
-      auto item = config_desc_.FindItemByInterfaceNumber(interface_index);
+      auto* item = composition_->FindClassByInterfaceNumber(interface_index);
 
       if (item != nullptr)
       {
@@ -545,7 +681,7 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
       uint8_t interface_index = static_cast<uint8_t>(setup->wIndex & 0xFF);
       uint8_t alt_setting = static_cast<uint8_t>(setup->wValue);
 
-      auto item = config_desc_.FindItemByInterfaceNumber(interface_index);
+      auto* item = composition_->FindClassByInterfaceNumber(interface_index);
       if (item == nullptr)
       {
         ans = ErrorCode::NOT_FOUND;
@@ -587,7 +723,7 @@ ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup, Recipient reci
   switch (recipient)
   {
     case Recipient::DEVICE:
-      status = config_desc_.GetDeviceStatus();
+      status = composition_->GetDeviceStatus();
       break;
 
     case Recipient::INTERFACE:
@@ -736,35 +872,32 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
       data = device_desc_.GetData();
       // 覆盖设备描述符（非 IAD 时可用）
       // Override device descriptor (available when not using IAD).
-      if (config_desc_.CanOverrideDeviceDescriptor())
+      if (composition_->CanOverrideDeviceDescriptor())
       {
-        config_desc_.OverrideDeviceDescriptor(device_desc_);
+        composition_->OverrideDeviceDescriptor(device_desc_);
       }
       early_read_zlp = true;
       break;
 
     case 0x02:  // CONFIGURATION
-      config_desc_.BuildConfigDescriptor();
-      data = config_desc_.GetData();
+    {
+      auto ec = composition_->BuildConfigDescriptor();
+      if (ec != ErrorCode::OK)
+      {
+        return ec;
+      }
+      data = composition_->GetConfigDescriptor();
       break;
+    }
 
     case 0x03:  // STRING
     {
       uint8_t string_idx = desc_idx;
       uint16_t lang = setup->wIndex;
-      if (string_idx == 0)
+      auto ec = composition_->GetStringDescriptor(string_idx, lang, data);
+      if (ec != ErrorCode::OK)
       {
-        data = strings_.GetLangIDData();
-      }
-      else
-      {
-        ErrorCode ec = strings_.GenerateString(
-            static_cast<DescriptorStrings::Index>(string_idx), lang);
-        if (ec != ErrorCode::OK)
-        {
-          return ec;
-        }
-        data = strings_.GetData();
+        return ec;
       }
       break;
     }
@@ -772,8 +905,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
     // BOS (0x0F)
     case 0x0F:  // BOS
     {
-      data = config_desc_.GetBosDescriptor();  // ConfigDescriptor 继承 BosManager /
-                                               // Inherits BosManager
+      data = composition_->GetBosDescriptor();
       early_read_zlp = true;
       break;
     }
@@ -795,8 +927,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
         return ErrorCode::ARG_ERR;
       }
 
-      auto* item = reinterpret_cast<DeviceClass*>(
-          config_desc_.FindItemByInterfaceNumber(intf_num));
+      auto* item = composition_->FindClassByInterfaceNumber(intf_num);
       if (item && item->OnGetDescriptor(in_isr, setup->bRequest, setup->wValue,
                                         setup->wLength, data) == ErrorCode::OK)
       {
@@ -828,12 +959,10 @@ ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
     return ErrorCode::NOT_SUPPORT;
   }
 
-  if (config_desc_.SwitchConfig(value, in_isr) != ErrorCode::OK)
+  if (composition_->SwitchConfig(value, in_isr) != ErrorCode::OK)
   {
     return ErrorCode::NOT_FOUND;
   }
-
-  config_desc_.RebuildBosCache();
 
   // ACK status 阶段
   // ACK status stage.
@@ -844,7 +973,7 @@ ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
 
 ErrorCode DeviceCore::SendConfiguration()
 {
-  uint8_t cfg = config_desc_.GetCurrentConfig();
+  uint8_t cfg = composition_->GetCurrentConfig();
   LibXR::ConstRawData data(&cfg, 1);
   DevWriteEP0Data(data, endpoint_.in0->MaxTransferSize(), 1);
 
@@ -883,8 +1012,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
       // 低字节 = 接口号
       // Low byte = interface number.
       uint8_t if_num = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item =
-          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByInterfaceNumber(if_num));
+      item = composition_->FindClassByInterfaceNumber(if_num);
       break;
     }
     case Recipient::ENDPOINT:
@@ -892,8 +1020,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
       // 低字节 = 端点地址（含 0x80 方向位）
       // Low byte = endpoint address (including 0x80 direction bit).
       uint8_t ep_addr = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item =
-          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByEndpointAddress(ep_addr));
+      item = composition_->FindClassByEndpointAddress(ep_addr);
       break;
     }
     default:
@@ -918,7 +1045,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
   // 不允许同时提供读写缓冲
   // Do not allow both read and write buffers simultaneously.
   const bool HAS_READ_BUF = (result.read_data.size_ > 0);
-  const bool HAS_WRITE_BUF = (result.write_data.size_ > 0);
+  const bool HAS_WRITE_BUF = (result.write_data.addr_ != nullptr);
   if (HAS_READ_BUF && HAS_WRITE_BUF)
   {
     return ErrorCode::ARG_ERR;
@@ -991,7 +1118,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
   // First, try BOS capabilities (WinUSB / WebUSB / ContainerID, etc.).
   {
     BosVendorResult bos_ret{};
-    auto bec = config_desc_.BosManager::ProcessVendorRequest(in_isr, setup, bos_ret);
+    auto bec = composition_->ProcessBosVendorRequest(in_isr, setup, bos_ret);
     if (bec == ErrorCode::OK && bos_ret.handled)
     {
       if (bos_ret.in_data.addr_ != nullptr && bos_ret.in_data.size_ > 0)
@@ -1033,15 +1160,13 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     case Recipient::INTERFACE:
     {
       uint8_t if_num = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item =
-          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByInterfaceNumber(if_num));
+      item = composition_->FindClassByInterfaceNumber(if_num);
       break;
     }
     case Recipient::ENDPOINT:
     {
       uint8_t ep_addr = static_cast<uint8_t>(setup->wIndex & 0xFF);
-      item =
-          reinterpret_cast<DeviceClass*>(config_desc_.FindItemByEndpointAddress(ep_addr));
+      item = composition_->FindClassByEndpointAddress(ep_addr);
       break;
     }
     default:

@@ -2,18 +2,14 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 
 #include "core.hpp"
-#include "ep_pool.hpp"
-#include "lockfree_list.hpp"
-#include "lockfree_pool.hpp"
+#include "libxr_type.hpp"
 
 namespace LibXR::USB
 {
 /**
  * @brief 字符串描述符管理器 / USB string descriptor manager
- *
  */
 class DescriptorStrings
 {
@@ -48,23 +44,14 @@ class DescriptorStrings
   struct LanguagePack
   {
     Language lang_id;                      ///< 语言 / Language
-    StringData strings[STRING_LIST_SIZE];  ///< 指向UTF-16LE静态数组 / Pointers to
-                                           ///< UTF-16LE static arrays
-    size_t string_lens[STRING_LIST_SIZE];  ///< 每个字符串的字节数 / Size (bytes) of each
-                                           ///< string
+    StringData strings[STRING_LIST_SIZE];  ///< 指向 UTF-16LE 静态数组 / UTF-16LE strings
+    size_t string_lens[STRING_LIST_SIZE];  ///< 每个字符串的字节数 / String byte lengths
     size_t max_string_length;              ///< 最大字符串长度 / Maximum string length
   };
 
   /**
-   * @brief 编译期构造LanguagePack
+   * @brief 编译期构造 LanguagePack
    *        Compile-time LanguagePack constructor
-   *
-   * @tparam N1/N2/N3 3个字符串字面量长度
-   * @param lang 语言ID / Language ID
-   * @param manu 制造商字符串 / Manufacturer
-   * @param prod 产品字符串 / Product
-   * @param serial 序列号字符串 / Serial number
-   * @return 静态LanguagePack（供注册时传地址用）
    */
   template <size_t N1, size_t N2, size_t N3>
   static const constexpr LanguagePack MakeLanguagePack(Language lang,
@@ -97,15 +84,19 @@ class DescriptorStrings
    * @brief USB 描述符字符串管理器构造函数
    *        USB descriptor string manager constructor
    *
+   * @param lang_list 全局/静态 LanguagePack 对象指针表 / Pointer table of LanguagePack
+   * @param uid       UID 字节数组（可选） / UID byte array (optional)
+   * @param uid_len   UID 长度（单位字节，可选） / UID length (bytes, optional)
    *
-   * @param lang_list 全局/静态LanguagePack对象指针表 / Pointer table of LanguagePack
-   * @param uid       UID字节数组（可选） / UID byte array (optional)
-   * @param uid_len   UID长度（单位字节，可选）/ UID length (in bytes, optional)
-   *
-   * @note Serial = SERIAL_NUMBER_STRING+UID
+   * @note Serial = SERIAL_NUMBER_STRING + UID
    */
   DescriptorStrings(const std::initializer_list<const LanguagePack*>& lang_list,
                     const uint8_t* uid = nullptr, size_t uid_len = 0);
+
+  ~DescriptorStrings();
+
+  DescriptorStrings(const DescriptorStrings&) = delete;
+  DescriptorStrings& operator=(const DescriptorStrings&) = delete;
 
   /**
    * @brief 生成指定语言和索引的字符串描述符
@@ -116,10 +107,11 @@ class DescriptorStrings
    * @return 错误码 / Error code
    */
   ErrorCode GenerateString(Index index, uint16_t lang);
+
   /**
    * @brief 获取当前构建好的字符串描述符数据
    *        Get the descriptor buffer
-   * @return RawData 数据结构
+   * @return RawData 数据结构 / RawData
    */
   RawData GetData();
 
@@ -173,4 +165,5 @@ class DescriptorStrings
                                ///< (original bytes)
   size_t serial_uid_len_;      ///< UID 字节数 / UID byte count
 };
+
 }  // namespace LibXR::USB

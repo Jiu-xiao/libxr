@@ -47,6 +47,8 @@ static void run_libxr_tests()
       {"crc", test_crc},
       {"encoder", test_float_encoder},
       {"cycle_value", test_cycle_value},
+      {"usb_dfu", test_usb_dfu},
+      {"usb_interface_strings", test_usb_interface_strings},
   };
 
   TestCase data_structure_tests[] = {{"rbt", test_rbt},

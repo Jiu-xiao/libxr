@@ -20,10 +20,14 @@ namespace LibXR::USB
 template <uint8_t CHANNELS, uint8_t BITS_PER_SAMPLE>
 class UAC1MicrophoneQ : public DeviceClass
 {
+ public:
   static_assert(CHANNELS >= 1 && CHANNELS <= 8, "CHANNELS out of range");
   static_assert(BITS_PER_SAMPLE == 8 || BITS_PER_SAMPLE == 16 || BITS_PER_SAMPLE == 24,
                 "BITS_PER_SAMPLE must be 8/16/24");
+  static constexpr const char* kControlInterfaceStringDefault = "XRUSB UAC1 Control";
+  static constexpr const char* kStreamingInterfaceStringDefault = "XRUSB UAC1 Streaming";
 
+ private:
   /// 每通道每采样的子帧字节数 / Subframe size (bytes per channel per sample)
   static const constexpr uint8_t K_SUBFRAME_SIZE = (BITS_PER_SAMPLE <= 8)    ? 1
                                                    : (BITS_PER_SAMPLE <= 16) ? 2
@@ -51,12 +55,14 @@ class UAC1MicrophoneQ : public DeviceClass
    * @param interval        端点轮询间隔 | Endpoint interval, default 1
    * @param iso_in_ep_num   ISO IN 端点号 | Isochronous IN endpoint number
    */
-  UAC1MicrophoneQ(uint32_t sample_rate_hz, int16_t vol_min = K_DEFAULT_VOL_MIN,
-                  int16_t vol_max = K_DEFAULT_VOL_MAX,
-                  int16_t vol_res = K_DEFAULT_VOL_RES, Speed speed = K_DEFAULT_SPEED,
-                  size_t queue_bytes = K_DEFAULT_QUEUE_BYTES,
-                  uint8_t interval = K_DEFAULT_INTERVAL,
-                  Endpoint::EPNumber iso_in_ep_num = Endpoint::EPNumber::EP_AUTO)
+  UAC1MicrophoneQ(
+      uint32_t sample_rate_hz, int16_t vol_min = K_DEFAULT_VOL_MIN,
+      int16_t vol_max = K_DEFAULT_VOL_MAX, int16_t vol_res = K_DEFAULT_VOL_RES,
+      Speed speed = K_DEFAULT_SPEED, size_t queue_bytes = K_DEFAULT_QUEUE_BYTES,
+      uint8_t interval = K_DEFAULT_INTERVAL,
+      Endpoint::EPNumber iso_in_ep_num = Endpoint::EPNumber::EP_AUTO,
+      const char* control_interface_string = kControlInterfaceStringDefault,
+      const char* streaming_interface_string = kStreamingInterfaceStringDefault)
       : iso_in_ep_num_(iso_in_ep_num),
         vol_min_(vol_min),
         vol_max_(vol_max),
@@ -64,13 +70,28 @@ class UAC1MicrophoneQ : public DeviceClass
         interval_(interval),
         speed_(speed),
         sr_hz_(sample_rate_hz),
-        pcm_queue_(queue_bytes)
+        pcm_queue_(queue_bytes),
+        control_interface_string_(control_interface_string),
+        streaming_interface_string_(streaming_interface_string)
   {
     RecomputeTiming();
     // 缓存端点采样率（3 字节小端） / Cache current sampling frequency (3‑byte LE)
     sf_cur_[0] = static_cast<uint8_t>(sr_hz_ & 0xFF);
     sf_cur_[1] = static_cast<uint8_t>((sr_hz_ >> 8) & 0xFF);
     sf_cur_[2] = static_cast<uint8_t>((sr_hz_ >> 16) & 0xFF);
+  }
+
+  const char* GetInterfaceString(size_t local_interface_index) const override
+  {
+    switch (local_interface_index)
+    {
+      case 0:
+        return control_interface_string_;
+      case 1:
+        return streaming_interface_string_;
+      default:
+        return nullptr;
+    }
   }
 
   // ===== 生产者接口 / Producer‑side API =====
@@ -334,7 +355,7 @@ class UAC1MicrophoneQ : public DeviceClass
                            USB_CLASS_AUDIO,
                            SUBCLASS_AC,
                            0x00,
-                           0};
+                           GetInterfaceStringIndex(0u)};
 
     // AC Header
     desc_block_.ac_hdr.baInterfaceNr = itf_as_num_;
@@ -361,7 +382,7 @@ class UAC1MicrophoneQ : public DeviceClass
                            USB_CLASS_AUDIO,
                            SUBCLASS_AS,
                            0x00,
-                           0};
+                           GetInterfaceStringIndex(1u)};
 
     // AS Alt 1（1 个 Iso IN 端点）
     desc_block_.as_alt1 = {9,
@@ -372,7 +393,7 @@ class UAC1MicrophoneQ : public DeviceClass
                            USB_CLASS_AUDIO,
                            SUBCLASS_AS,
                            0x00,
-                           0};
+                           GetInterfaceStringIndex(1u)};
 
     // AS General
     desc_block_.as_gen = {};
@@ -806,6 +827,10 @@ class UAC1MicrophoneQ : public DeviceClass
   Endpoint* ep_iso_in_ = nullptr;
   uint8_t itf_ac_num_ = 0;
   uint8_t itf_as_num_ = 0;
+  const char* control_interface_string_ =
+      nullptr;  ///< 控制接口字符串 / Control interface string
+  const char* streaming_interface_string_ =
+      nullptr;  ///< 流接口字符串 / Streaming interface string
 
   // 状态 / State
   bool inited_ = false;

@@ -26,6 +26,8 @@ template <typename SwdPort>
 class DapLinkV2Class : public DeviceClass
 {
  public:
+  static constexpr const char* kInterfaceStringDefault = "XRUSB CMSIS-DAP v2";
+
   /**
    * @brief Info 字符串集合 / Info string set
    */
@@ -56,12 +58,14 @@ class DapLinkV2Class : public DeviceClass
   explicit DapLinkV2Class(
       SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
       Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO)
+      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
+      const char* interface_string = kInterfaceStringDefault)
       : DeviceClass({&winusb_msos20_cap_}),
         swd_(swd_link),
         nreset_gpio_(nreset_gpio),
         data_in_ep_num_(data_in_ep_num),
-        data_out_ep_num_(data_out_ep_num)
+        data_out_ep_num_(data_out_ep_num),
+        interface_string_(interface_string)
   {
     (void)swd_.SetClockHz(swj_clock_hz_);
 
@@ -78,6 +82,11 @@ class DapLinkV2Class : public DeviceClass
   DapLinkV2Class& operator=(const DapLinkV2Class&) = delete;
 
  public:
+  const char* GetInterfaceString(size_t local_interface_index) const override
+  {
+    return (local_interface_index == 0u) ? interface_string_ : nullptr;
+  }
+
   /**
    * @brief 设置 Info 字符串 / Set info strings
    * @param info 字符串集合 / String set
@@ -165,7 +174,7 @@ class DapLinkV2Class : public DeviceClass
                         0xFF,  // vendor specific
                         0x00,
                         0x00,
-                        0};
+                        GetInterfaceStringIndex(0u)};
 
     desc_block_.ep_out = {7,
                           static_cast<uint8_t>(DescriptorType::ENDPOINT),
@@ -305,7 +314,7 @@ class DapLinkV2Class : public DeviceClass
 
  private:
   // ============================================================================
-  // Local helpers (kept with original comments, moved inside the class)
+  // Local helpers
   // ============================================================================
 
   // 枚举/整型转 uint8_t。Cast enum/integer to uint8_t.
@@ -587,7 +596,8 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 裁剪响应长度到 DAP 包长与缓冲容量 / Clip response length by DAP packet and buffer cap
+   * @brief 裁剪响应长度到 DAP 包长与缓冲容量 / Clip response length by DAP packet and
+   * buffer cap
    */
   uint16_t ClipResponseLength(uint16_t len, uint16_t cap) const
   {
@@ -1580,9 +1590,7 @@ class DapLinkV2Class : public DeviceClass
   // DAP_Transfer / DAP_TransferBlock
   // ============================================================================
 
-  // 说明：以下长函数保持原样；本 cpp 文件不补充函数级注释，hpp 中再统一给出接口说明。
-  // Note: The following long functions are kept as-is; no function-level docs in this
-  // cpp. HPP will carry API docs.
+  // Shared handlers for DAP_Transfer / DAP_TransferBlock.
 
   ErrorCode HandleTransfer(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
                            uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
@@ -2465,8 +2473,9 @@ class DapLinkV2Class : public DeviceClass
 
   uint32_t swj_clock_hz_ = 1000000u;  ///< SWJ 时钟（Hz）/ SWJ clock (Hz)
 
-  Endpoint::EPNumber data_in_ep_num_;   ///< Bulk IN EP number / Bulk IN EP number
-  Endpoint::EPNumber data_out_ep_num_;  ///< Bulk OUT EP number / Bulk OUT EP number
+  Endpoint::EPNumber data_in_ep_num_;       ///< Bulk IN EP number / Bulk IN EP number
+  Endpoint::EPNumber data_out_ep_num_;      ///< Bulk OUT EP number / Bulk OUT EP number
+  const char* interface_string_ = nullptr;  ///< Interface string / Interface string
 
   Endpoint* ep_data_in_ = nullptr;   ///< Bulk IN endpoint / Bulk IN endpoint
   Endpoint* ep_data_out_ = nullptr;  ///< Bulk OUT endpoint / Bulk OUT endpoint

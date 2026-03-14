@@ -242,8 +242,11 @@ class CDCUart : public CDCBase, public LibXR::UART
           size_t tx_queue_size = 5,
           Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
           Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-          Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO)
-      : CDCBase(data_in_ep_num, data_out_ep_num, comm_ep_num),
+          Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO,
+          const char* control_interface_string = CDCBase::kControlInterfaceStringDefault,
+          const char* data_interface_string = CDCBase::kDataInterfaceStringDefault)
+      : CDCBase(data_in_ep_num, data_out_ep_num, comm_ep_num, control_interface_string,
+                data_interface_string),
         LibXR::UART(&read_port_cdc_, &write_port_cdc_),
         read_port_cdc_(rx_buffer_size, *this),
         write_port_cdc_(tx_queue_size, tx_buffer_size),

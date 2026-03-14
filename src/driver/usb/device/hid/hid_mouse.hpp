@@ -51,8 +51,11 @@ class HIDMouse : public HID<sizeof(HID_MOUSE_REPORT_DESC), 4, 0>
    * @param in_ep_num IN 端点号 / IN endpoint number
    */
   HIDMouse(uint8_t in_ep_interval = 1,
-           Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO)
-      : HID(false, in_ep_interval, 1, in_ep_num, Endpoint::EPNumber::EP_AUTO)
+           Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
+           const char* interface_string =
+               HID<sizeof(HID_MOUSE_REPORT_DESC), 4, 0>::kInterfaceStringDefault)
+      : HID(false, in_ep_interval, 1, in_ep_num, Endpoint::EPNumber::EP_AUTO,
+            interface_string)
   {
   }
 

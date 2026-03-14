@@ -64,8 +64,11 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
   HIDKeyboard(bool enable_out_endpoint = false, uint8_t in_ep_interval = 1,
               uint8_t out_ep_interval = 1,
               Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
-              Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO)
-      : HID(enable_out_endpoint, in_ep_interval, out_ep_interval, in_ep_num, out_ep_num)
+              Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO,
+              const char* interface_string =
+                  HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>::kInterfaceStringDefault)
+      : HID(enable_out_endpoint, in_ep_interval, out_ep_interval, in_ep_num, out_ep_num,
+            interface_string)
   {
   }
 

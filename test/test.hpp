@@ -25,5 +25,7 @@ void test_pid();
 void test_pipe();
 void test_rw();
 void test_memory();
+void test_usb_dfu();
+void test_usb_interface_strings();
 
 bool equal(double a, double b);

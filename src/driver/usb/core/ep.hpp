@@ -507,6 +507,27 @@ class Endpoint
     on_transfer_complete_.Run(in_isr, data);
   }
 
+  /**
+   * @brief 在保持 BUSY 的前提下上报当前分片 / Report a received chunk while staying BUSY
+   *
+   * 主要用于 CH32 USBHS EP0 OUT 多包控制传输：每收到一个数据包就先回调上层搬运，
+   * 但不释放端点 BUSY 状态，这样硬件可以继续同一笔控制 OUT 数据阶段。
+   */
+  void OnTransferChunkCallback(bool in_isr, size_t actual_transfer_size)
+  {
+    if (GetState() != State::BUSY)
+    {
+      return;
+    }
+
+    ASSERT(!multi_bulk_);
+
+    ConstRawData data = UseDoubleBuffer()
+                            ? ConstRawData(double_buffer_.PendingBuffer(), actual_transfer_size)
+                            : ConstRawData(buffer_.addr_, actual_transfer_size);
+    on_transfer_complete_.Run(in_isr, data);
+  }
+
  protected:
   /**
    * @brief 获取当前配置引用 / Get endpoint config reference

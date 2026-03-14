@@ -406,10 +406,21 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   }
   ep_cfg.double_buffer = enable_double;
 
+  if (ep_cfg.type == Type::BULK)
+  {
+    ASSERT(ep_cfg.max_packet_size == 512u);
+    ASSERT(GetBuffer().size_ >= 512u);
+  }
+
   // Clamp max_packet_size to the endpoint buffer size.
   if (ep_cfg.max_packet_size > GetBuffer().size_)
   {
     ep_cfg.max_packet_size = GetBuffer().size_;
+  }
+
+  if (ep_cfg.type == Type::BULK)
+  {
+    ASSERT(ep_cfg.max_packet_size == 512u);
   }
 
   if (GetDirection() == Direction::IN)
@@ -435,10 +446,7 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
       *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
     }
 
-    if (GetNumber() != EPNumber::EP0)
-    {
-      *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
-    }
+    *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
   }
 
   const int IDX = static_cast<int>(GetNumber());
@@ -531,7 +539,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
   if (GetNumber() == EPNumber::EP0)
   {
-    if (!is_in && size == 0)
+    if (size == 0)
     {
       tog0_ = true;
       tog1_ = false;
@@ -675,7 +683,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   }
 
   // TOG mismatch indicates data synchronization failure.
-  if (IS_OUT)
+  if (IS_OUT && !IS_EP0)
   {
     const bool TOG_OK =
         ((USBHSD->INT_ST & USBHS_UIS_TOG_OK) == USBHS_UIS_TOG_OK);  // NOLINT
@@ -687,13 +695,28 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     }
   }
 
-  if (IS_EP0 && IS_OUT)
+  if (IS_EP0 && IS_OUT && (last_transfer_size_ > MaxTransferSize()))
   {
-    tog0_ = true;
-    tog1_ = false;
     *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_ACK;
+
+    if (size < MaxTransferSize())
+    {
+      OnTransferCompleteCallback(true, size);
+    }
+    else
+    {
+      OnTransferChunkCallback(true, size);
+    }
+    return;
   }
 
+  if (IS_EP0 && IS_OUT)
+  {
+    // Keep the current EP0 OUT data toggle across multi-packet control transfers.
+    // The next arm happens from the completion callback, and resetting back to DATA1 here
+    // breaks the second packet of DFU DNLOAD transfers larger than 64 bytes.
+    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_ACK;
+  }
   OnTransferCompleteCallback(true, size);
 }
 

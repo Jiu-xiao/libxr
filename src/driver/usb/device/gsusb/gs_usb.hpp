@@ -28,9 +28,12 @@ namespace LibXR::USB
 template <std::size_t CanChNum>
 class GsUsbClass : public DeviceClass
 {
+ public:
   static_assert(CanChNum > 0 && CanChNum <= 255, "CanChNum must be in (0, 255]");
   static constexpr uint8_t CAN_CH_NUM = static_cast<uint8_t>(CanChNum);
+  static constexpr const char* kInterfaceStringDefault = "XRUSB GS USB";
 
+ private:
   // ===== Linux gs_usb 线缆格式（header 固定 12 字节） / Linux gs_usb wire format
   // (12-byte header) =====
 #pragma pack(push, 1)
@@ -92,13 +95,15 @@ class GsUsbClass : public DeviceClass
              size_t rx_queue_size = 32, size_t echo_queue_size = 32,
              LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},
-             LibXR::Database* database = nullptr)
+             LibXR::Database* database = nullptr,
+             const char* interface_string = kInterfaceStringDefault)
       : data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
         identify_gpio_(identify_gpio),
         database_(database),
         rx_queue_(rx_queue_size),
-        echo_queue_(echo_queue_size)
+        echo_queue_(echo_queue_size),
+        interface_string_(interface_string)
   {
     ASSERT(cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
@@ -124,6 +129,11 @@ class GsUsbClass : public DeviceClass
     InitDeviceConfigClassic();
   }
 
+  const char* GetInterfaceString(size_t local_interface_index) const override
+  {
+    return (local_interface_index == 0u) ? interface_string_ : nullptr;
+  }
+
   /**
    * @brief 构造：FDCAN / Construct: FDCAN
    * @param fd_cans FDCAN 指针列表，数量必须等于 CAN_CH_NUM / FDCAN pointers, count must
@@ -146,14 +156,16 @@ class GsUsbClass : public DeviceClass
              size_t rx_queue_size = 32, size_t echo_queue_size = 32,
              LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},
-             LibXR::Database* database = nullptr)
+             LibXR::Database* database = nullptr,
+             const char* interface_string = kInterfaceStringDefault)
       : fd_supported_(true),
         data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
         identify_gpio_(identify_gpio),
         database_(database),
         rx_queue_(rx_queue_size),
-        echo_queue_(echo_queue_size)
+        echo_queue_(echo_queue_size),
+        interface_string_(interface_string)
   {
     ASSERT(fd_cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
@@ -220,7 +232,7 @@ class GsUsbClass : public DeviceClass
                         0xFF,
                         0xFF,
                         0xFF,
-                        0};
+                        GetInterfaceStringIndex(0u)};
 
     desc_block_.ep_out = {7,
                           static_cast<uint8_t>(DescriptorType::ENDPOINT),
@@ -880,8 +892,9 @@ class GsUsbClass : public DeviceClass
   Endpoint* ep_data_in_ = nullptr;   ///< Bulk IN 端点对象 / Bulk IN endpoint object
   Endpoint* ep_data_out_ = nullptr;  ///< Bulk OUT 端点对象 / Bulk OUT endpoint object
 
-  bool inited_ = false;        ///< 是否已初始化 / Initialized
-  uint8_t interface_num_ = 0;  ///< 接口号 / Interface number
+  bool inited_ = false;                     ///< 是否已初始化 / Initialized
+  uint8_t interface_num_ = 0;               ///< 接口号 / Interface number
+  const char* interface_string_ = nullptr;  ///< 接口字符串 / Interface string
 
   LibXR::GPIO* identify_gpio_ =
       nullptr;  ///< Identify GPIO（可选） / Identify GPIO (optional)
