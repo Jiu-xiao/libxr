@@ -22,6 +22,7 @@ set(_libxr_idf_components
     freertos
     driver
     hal
+    usb
     esp_hw_support
     esp_timer
     esp_event

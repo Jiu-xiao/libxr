@@ -762,8 +762,9 @@ ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
 {
   state_.pending_addr = static_cast<uint8_t>(address & 0x7F);
 
+  const ErrorCode ret = SetAddress(address, Context::SETUP);
   WriteZLP(Context::STATUS_IN);
-  return SetAddress(address, Context::SETUP);
+  return ret;
 }
 
 ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
