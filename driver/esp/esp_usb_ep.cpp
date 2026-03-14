@@ -1,6 +1,7 @@
 #include "esp_usb_ep.hpp"
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    CONFIG_IDF_TARGET_ESP32S3
 
 #include <algorithm>
 #include <cstring>
@@ -50,8 +51,8 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
   {
     const bool is_bulk = (cfg.type == Type::BULK);
     if (!fifo_allocated_ &&
-        !device_.AllocateTxFifo(EPNumberToInt8(GetNumber()), ep_cfg.max_packet_size, is_bulk,
-                                fifo_words_))
+        !device_.AllocateTxFifo(EPNumberToInt8(GetNumber()), ep_cfg.max_packet_size,
+                                is_bulk, fifo_words_))
     {
       SetState(State::ERROR);
       return;
@@ -293,9 +294,9 @@ void ESP32USBEndpoint::HandleInInterrupt(bool in_isr)
 
   if (intr.xfercompl)
   {
-    const bool rearm_ep0_setup = (ep_num == 0U) && device_.DmaEnabled() &&
-                                 (transfer_request_size_ == 0U) &&
-                                 Detail::IsOutRequestSetup(device_.debug_.last_setup_packet);
+    const bool rearm_ep0_setup =
+        (ep_num == 0U) && device_.DmaEnabled() && (transfer_request_size_ == 0U) &&
+        Detail::IsOutRequestSetup(device_.debug_.last_setup_packet);
     dev->diepempmsk_reg.val &= ~(1UL << ep_num);
     const size_t actual =
         device_.DmaEnabled() ? GetCompletedTransferSize() : transfer_request_size_;
@@ -370,12 +371,13 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
       (ep_num == 0U) && (GetState() == State::BUSY) &&
       ((transfer_buffer_ != nullptr) || (transfer_request_size_ > 0U));
 
-  if (intr.xfercompl && ((ep_num != 0U) ||
-                         ((ep0_out_phase_ != Ep0OutPhase::SETUP) && !ep0_setup_related &&
+  if (intr.xfercompl &&
+      ((ep_num != 0U) || ((ep0_out_phase_ != Ep0OutPhase::SETUP) && !ep0_setup_related &&
                           has_active_ep0_transfer)))
   {
-    const bool line_transfer = device_.DmaEnabled() && (ep_num == 0U) &&
-                               Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet);
+    const bool line_transfer =
+        device_.DmaEnabled() && (ep_num == 0U) &&
+        Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet);
     const size_t actual =
         device_.DmaEnabled() ? GetCompletedTransferSize() : transfer_actual_size_;
     ASSERT(FinishOutTransfer(actual));
@@ -434,8 +436,7 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
         }
       }
     }
-    const auto* setup =
-        reinterpret_cast<const USB::SetupPacket*>(device_.setup_packet_);
+    const auto* setup = reinterpret_cast<const USB::SetupPacket*>(device_.setup_packet_);
     const bool expect_out_data_stage =
         ((setup->bmRequestType & 0x80U) == 0U) && (setup->wLength > 0U);
 
@@ -464,8 +465,9 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
 
 void ESP32USBEndpoint::HandleRxData(size_t size)
 {
-  uint8_t* const dst =
-      (transfer_buffer_ != nullptr) ? (transfer_buffer_ + transfer_actual_size_) : nullptr;
+  uint8_t* const dst = (transfer_buffer_ != nullptr)
+                           ? (transfer_buffer_ + transfer_actual_size_)
+                           : nullptr;
   const size_t remain = (transfer_request_size_ > transfer_actual_size_)
                             ? (transfer_request_size_ - transfer_actual_size_)
                             : 0U;
@@ -475,7 +477,8 @@ void ESP32USBEndpoint::HandleRxData(size_t size)
   if (copy_size > 0U)
   {
     Detail::ReadFifoPacket(
-        Detail::GetEndpointFifo(reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase), 0),
+        Detail::GetEndpointFifo(reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase),
+                                0),
         dst, copy_size);
     transfer_actual_size_ += copy_size;
   }
@@ -487,8 +490,8 @@ void ESP32USBEndpoint::HandleRxData(size_t size)
 
   uint8_t sink[64] = {};
   size_t remain_drop = drop_size;
-  auto* fifo =
-      Detail::GetEndpointFifo(reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase), 0);
+  auto* fifo = Detail::GetEndpointFifo(
+      reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase), 0);
   while (remain_drop > 0U)
   {
     const size_t chunk = std::min(remain_drop, sizeof(sink));
@@ -621,13 +624,15 @@ bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
     {
       return true;
     }
-    return Detail::CacheSyncDmaBuffer(transfer_hw_buffer_, transfer_direct_sync_size_, false);
+    return Detail::CacheSyncDmaBuffer(transfer_hw_buffer_, transfer_direct_sync_size_,
+                                      false);
   }
 
   ASSERT(transfer_buffer_ != nullptr);
 
-  if (!Detail::CacheSyncDmaBuffer(
-          transfer_hw_buffer_, Detail::AlignUp(actual_size, Detail::kUsbDmaAlignment), false))
+  if (!Detail::CacheSyncDmaBuffer(transfer_hw_buffer_,
+                                  Detail::AlignUp(actual_size, Detail::kUsbDmaAlignment),
+                                  false))
   {
     return false;
   }
@@ -665,7 +670,8 @@ size_t ESP32USBEndpoint::GetCompletedTransferSize() const
   }
 
   const size_t remaining = GetRemainingTransferSize();
-  return (remaining >= transfer_request_size_) ? 0U : (transfer_request_size_ - remaining);
+  return (remaining >= transfer_request_size_) ? 0U
+                                               : (transfer_request_size_ - remaining);
 }
 
 void ESP32USBEndpoint::ActivateHardwareEndpoint()
@@ -737,7 +743,8 @@ void ESP32USBEndpoint::ProgramTransfer(size_t size)
         dev->diepdma0_reg.dmaaddr =
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(transfer_hw_buffer_));
       }
-      if (device_.DmaEnabled() && (size == 0U) && (device_.runtime_.pending_address != 0xFFU))
+      if (device_.DmaEnabled() && (size == 0U) &&
+          (device_.runtime_.pending_address != 0xFFU))
       {
         dev->dcfg_reg.devaddr = device_.runtime_.pending_address;
         device_.runtime_.pending_address = 0xFFU;

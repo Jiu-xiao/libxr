@@ -1,20 +1,20 @@
 #include "esp_usb_dev.hpp"
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    CONFIG_IDF_TARGET_ESP32S3
 
 #include <cstring>
 #include <new>
 
-#include "esp_attr.h"
-#include "esp_err.h"
-#include "esp_private/usb_phy.h"
 #include "esp32s3/rom/usb/cdc_acm.h"
 #include "esp32s3/rom/usb/usb_dc.h"
 #include "esp32s3/rom/usb/usb_device.h"
-#include "soc/interrupts.h"
-
+#include "esp_attr.h"
+#include "esp_err.h"
+#include "esp_private/usb_phy.h"
 #include "esp_usb.hpp"
 #include "esp_usb_ep.hpp"
+#include "soc/interrupts.h"
 
 namespace Detail = LibXR::ESPUSBDetail;
 
@@ -30,8 +30,8 @@ ESP32USBDevice::ESP32USBDevice(
         configs,
     ConstRawData uid)
     : USB::EndpointPool(ep_cfgs.size() * 2U),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid, pid,
-                      bcd, lang_list, configs, uid)
+      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
+                      pid, bcd, lang_list, configs, uid)
 {
   ASSERT(ep_cfgs.size() > 0U && ep_cfgs.size() <= kEndpointCount);
 
@@ -47,7 +47,8 @@ ESP32USBDevice::ESP32USBDevice(
   endpoint_map_.out[0] = ep0_out;
 
   auto ep_num = USB::Endpoint::EPNumber::EP1;
-  for (++cfg_it; cfg_it != ep_cfgs.end(); ++cfg_it, ep_num = USB::Endpoint::NextEPNumber(ep_num))
+  for (++cfg_it; cfg_it != ep_cfgs.end();
+       ++cfg_it, ep_num = USB::Endpoint::NextEPNumber(ep_num))
   {
     ASSERT(USB::Endpoint::EPNumberToInt8(ep_num) < kEndpointCount);
 
@@ -275,7 +276,8 @@ void ESP32USBDevice::ClearTxFifoRegisters()
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
   dev->gnptxfsiz_reg.val = 0U;
-  const size_t tx_fifo_reg_count = sizeof(dev->dieptxf_regs) / sizeof(dev->dieptxf_regs[0]);
+  const size_t tx_fifo_reg_count =
+      sizeof(dev->dieptxf_regs) / sizeof(dev->dieptxf_regs[0]);
   for (size_t i = 0U; i < tx_fifo_reg_count; ++i)
   {
     dev->dieptxf_regs[i].val = 0U;
@@ -300,7 +302,8 @@ void ESP32USBDevice::ResetFifoState()
 {
   fifo_state_.depth_words = Detail::GetHardwareFifoDepthWords();
   ASSERT(fifo_state_.depth_words > 0U);
-  fifo_state_.rx_words = Detail::CalcConfiguredRxFifoWords(64U, kEndpointCount, DmaEnabled());
+  fifo_state_.rx_words =
+      Detail::CalcConfiguredRxFifoWords(64U, kEndpointCount, DmaEnabled());
   fifo_state_.tx_next_words = fifo_state_.rx_words;
   std::memset(fifo_state_.tx_words, 0, sizeof(fifo_state_.tx_words));
   std::memset(fifo_state_.tx_bound, 0, sizeof(fifo_state_.tx_bound));
@@ -619,7 +622,8 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
       continue;
     }
 
-    const uint16_t next_words = static_cast<uint16_t>(fifo_state_.tx_next_words + requested_words);
+    const uint16_t next_words =
+        static_cast<uint16_t>(fifo_state_.tx_next_words + requested_words);
     if (next_words > fifo_state_.depth_words)
     {
       return false;

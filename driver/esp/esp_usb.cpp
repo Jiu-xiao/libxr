@@ -1,6 +1,7 @@
 #include "esp_usb.hpp"
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    CONFIG_IDF_TARGET_ESP32S3
 
 #include <algorithm>
 #include <cstring>
@@ -20,7 +21,8 @@ constexpr int kCacheSyncFlagUnaligned = (1 << 1);
 constexpr int kCacheSyncFlagDirC2M = (1 << 2);
 constexpr int kCacheSyncFlagDirM2C = (1 << 3);
 
-bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem, bool allow_unaligned)
+bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem,
+                        bool allow_unaligned)
 {
   if ((addr == nullptr) || (size == 0U))
   {
@@ -30,7 +32,8 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem, bool a
   uint32_t cache_level = 0;
   uint32_t cache_id = 0;
   const bool cache_supported = cache_hal_vaddr_to_cache_level_id(
-      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addr)), size, &cache_level, &cache_id);
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addr)), size, &cache_level,
+      &cache_id);
   if (!cache_supported)
   {
     return true;
@@ -44,10 +47,7 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem, bool a
   return esp_cache_msync(const_cast<void*>(addr), size, flags) == ESP_OK;
 }
 #else
-bool CacheSyncDmaBuffer(const void*, size_t, bool, bool)
-{
-  return true;
-}
+bool CacheSyncDmaBuffer(const void*, size_t, bool, bool) { return true; }
 #endif
 
 size_t AlignUp(size_t value, size_t align)
@@ -76,7 +76,8 @@ bool CanUseDirectInDmaBuffer(const void* ptr, size_t size)
 
   auto* start = static_cast<const uint8_t*>(ptr);
   auto* end = start + size - 1U;
-  return esp_ptr_dma_capable(start) && esp_ptr_dma_capable(end) && esp_ptr_word_aligned(ptr);
+  return esp_ptr_dma_capable(start) && esp_ptr_dma_capable(end) &&
+         esp_ptr_word_aligned(ptr);
 }
 
 bool CanUseDirectOutDmaBuffer(const void* ptr, size_t size)
@@ -158,8 +159,8 @@ uint16_t CalcTxFifoWords(uint16_t packet_size, bool dma_enabled)
 volatile uint32_t* GetEndpointFifo(usb_dwc_dev_t* dev, uint8_t ep_num)
 {
   uintptr_t base = reinterpret_cast<uintptr_t>(dev);
-  return reinterpret_cast<volatile uint32_t*>(base + kFifoBaseOffset +
-                                               static_cast<uintptr_t>(ep_num) * kFifoStride);
+  return reinterpret_cast<volatile uint32_t*>(
+      base + kFifoBaseOffset + static_cast<uintptr_t>(ep_num) * kFifoStride);
 }
 
 void WriteFifoPacket(volatile uint32_t* fifo, const uint8_t* src, size_t size)
