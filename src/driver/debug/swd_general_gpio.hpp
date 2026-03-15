@@ -161,7 +161,13 @@ class SwdGeneralGPIO final : public Swd
 
   ErrorCode EnterSwd() override
   {
-    ErrorCode ec = LineReset();
+    ErrorCode ec = PreparePinsForSwd();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    ec = LineReset();
     if (ec != ErrorCode::OK)
     {
       return ec;
@@ -351,41 +357,66 @@ class SwdGeneralGPIO final : public Swd
   enum class SwdioMode : uint8_t
   {
     UNKNOWN = 0,  ///< 未知/未初始化。Unknown / uninitialized.
-    DRIVE_OD,     ///< 开漏输出（高电平=释放总线）。Open-drain output (high=release).
-    SAMPLE_IN,    ///< 采样阶段（保持开漏释放）。Sampling phase (line released by OD high).
+    DRIVE_OUT,    ///< 推挽输出。Push-pull output.
+    SAMPLE_IN,    ///< 上拉输入采样。Pull-up input for sampling.
   };
 
   ErrorCode SetSwdioDriveMode()
   {
-    if (swdio_mode_ == SwdioMode::UNKNOWN)
+    if (swdio_mode_ != SwdioMode::DRIVE_OUT)
     {
       const ErrorCode EC = swdio_.SetConfig(
-          {SwdioGpioType::Direction::OUTPUT_OPEN_DRAIN, SwdioGpioType::Pull::UP});
+          {SwdioGpioType::Direction::OUTPUT_PUSH_PULL, SwdioGpioType::Pull::NONE});
       if (EC != ErrorCode::OK)
       {
         return EC;
       }
     }
 
-    swdio_mode_ = SwdioMode::DRIVE_OD;
+    swdio_mode_ = SwdioMode::DRIVE_OUT;
+    return ErrorCode::OK;
+  }
+
+  ErrorCode PreparePinsForSwd()
+  {
+    const ErrorCode CLK_EC = swclk_.SetConfig(
+        {SwclkGpioType::Direction::OUTPUT_PUSH_PULL, SwclkGpioType::Pull::NONE});
+    if (CLK_EC != ErrorCode::OK)
+    {
+      return CLK_EC;
+    }
+
+    swclk_.Write(true);
+
+    // Shared SWD/JTAG designs can leave SWDIO physically reconfigured by the JTAG
+    // owner while our logical mode cache still says DRIVE_OD/SAMPLE_IN. Force one
+    // clean handoff before the next SWD session starts.
+    swdio_mode_ = SwdioMode::UNKNOWN;
+
+    const ErrorCode SWDIO_EC = SetSwdioDriveMode();
+    if (SWDIO_EC != ErrorCode::OK)
+    {
+      return SWDIO_EC;
+    }
+
+    swdio_.Write(true);
     return ErrorCode::OK;
   }
 
   ErrorCode SetSwdioSampleMode()
   {
-    const ErrorCode EC = SetSwdioDriveMode();
-    if (EC != ErrorCode::OK)
+    if (swdio_mode_ != SwdioMode::SAMPLE_IN)
     {
-      return EC;
+      const ErrorCode EC = swdio_.SetConfig(
+          {SwdioGpioType::Direction::INPUT, SwdioGpioType::Pull::UP});
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
     }
 
-    // 约束：GPIO::Read() 需要在开漏输出模式下返回实际引脚电平（而不是输出锁存值）。
-    // Constraint: GPIO::Read() must sample the physical pin level in open-drain output
-    // mode (not just the output latch).
-    //
-    // 开漏输出高电平表示释放总线，目标可驱动 ACK/数据 / Open-drain high releases line
-    // so target can drive ACK/data.
-    swdio_.Write(true);
+    // Read in real input mode so the target owns SWDIO cleanly during turnaround
+    // and ACK/data phases.
     swdio_mode_ = SwdioMode::SAMPLE_IN;
     return ErrorCode::OK;
   }
