@@ -112,7 +112,6 @@ void IRAM_ATTR ESP32CDCJtag::ClearActiveTx()
   tx_active_offset_ = 0;
   tx_active_info_ = {};
   tx_active_valid_ = false;
-  tx_active_reported_ = false;
 }
 
 void IRAM_ATTR ESP32CDCJtag::ClearPendingTx()
@@ -176,9 +175,7 @@ bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
 
   tx_active_ptr_ = tx_slot_a_;
   tx_active_size_ = active_size;
-  tx_active_offset_ = 0;
   tx_active_valid_ = true;
-  tx_active_reported_ = false;
   return true;
 }
 
@@ -297,7 +294,6 @@ bool IRAM_ATTR ESP32CDCJtag::StartAndReportActive(bool in_isr)
 
   // Keep aligned with STM/CH: once next op is kicked to HW, report it finished.
   write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-  tx_active_reported_ = true;
   if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
   {
     OnTxTransferDone(in_isr, ErrorCode::OK);
@@ -315,12 +311,6 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 {
   Flag::ScopedRestore tx_flag(in_tx_isr_);
   tx_busy_.store(false, std::memory_order_release);
-
-  if (tx_active_valid_ && !tx_active_reported_)
-  {
-    write_port_->Finish(in_isr, result, tx_active_info_);
-    tx_active_reported_ = true;
-  }
 
   ClearActiveTx();
 
@@ -340,10 +330,8 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
   {
     tx_active_ptr_ = tx_pending_ptr_;
     tx_active_size_ = tx_pending_size_;
-    tx_active_offset_ = 0;
     tx_active_info_ = tx_pending_info_;
     tx_active_valid_ = true;
-    tx_active_reported_ = false;
     ClearPendingTx();
     (void)StartAndReportActive(in_isr);
   }
@@ -381,12 +369,6 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
 
   if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
   {
-    const bool report_by_write_port = !tx_active_reported_;
-    if (report_by_write_port)
-    {
-      tx_active_reported_ = true;
-    }
-
     if (!StartActiveTransfer(in_isr))
     {
       ClearActiveTx();
@@ -398,14 +380,11 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
       OnTxTransferDone(in_isr, ErrorCode::OK);
     }
 
-    if (report_by_write_port)
+    if (!tx_pending_valid_)
     {
-      if (!tx_pending_valid_)
-      {
-        (void)LoadPendingTxFromQueue(in_isr);
-      }
-      return ErrorCode::OK;
+      (void)LoadPendingTxFromQueue(in_isr);
     }
+    return ErrorCode::OK;
   }
 
   if (!tx_pending_valid_)

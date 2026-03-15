@@ -206,31 +206,9 @@ ErrorCode ESP32USBEndpoint::Transfer(size_t size)
   transfer_queued_size_ = 0U;
 
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
-  if (ep_num == 0U)
+  if ((ep_num == 0U) && (GetDirection() == Direction::OUT))
   {
-    if (GetDirection() == Direction::IN)
-    {
-      device_.debug_.ep0_in_start_count++;
-      device_.debug_.last_ep0_in_size = static_cast<uint16_t>(size);
-      if (device_.DmaEnabled() && (size == 0U) &&
-          Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet))
-      {
-        device_.debug_.line_in_zlp_start_count++;
-        device_.debug_.line_state = 5U;
-      }
-    }
-    else
-    {
-      device_.debug_.ep0_out_start_count++;
-      device_.debug_.last_ep0_out_size = static_cast<uint16_t>(size);
-      ep0_out_phase_ = (size == 0U) ? Ep0OutPhase::STATUS : Ep0OutPhase::DATA;
-      if (device_.DmaEnabled() && (size > 0U) &&
-          Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet))
-      {
-        device_.debug_.line_out_arm_count++;
-        device_.debug_.line_state = 2U;
-      }
-    }
+    ep0_out_phase_ = (size == 0U) ? Ep0OutPhase::STATUS : Ep0OutPhase::DATA;
   }
 
   if (UseDoubleBuffer() && GetDirection() == Direction::IN && size > 0U)
@@ -294,23 +272,12 @@ void ESP32USBEndpoint::HandleInInterrupt(bool in_isr)
 
   if (intr.xfercompl)
   {
-    const bool rearm_ep0_setup =
-        (ep_num == 0U) && device_.DmaEnabled() && (transfer_request_size_ == 0U) &&
-        Detail::IsOutRequestSetup(device_.debug_.last_setup_packet);
+    const bool rearm_ep0_setup = (ep_num == 0U) && device_.DmaEnabled() &&
+                                 (transfer_request_size_ == 0U) &&
+                                 device_.LastSetupDirectionOut();
     dev->diepempmsk_reg.val &= ~(1UL << ep_num);
     const size_t actual =
         device_.DmaEnabled() ? GetCompletedTransferSize() : transfer_request_size_;
-    if (ep_num == 0U)
-    {
-      device_.debug_.ep0_in_complete_count++;
-      if (device_.DmaEnabled() &&
-          Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet))
-      {
-        device_.debug_.line_in_irq_count++;
-        device_.debug_.line_state = 6U;
-        device_.debug_.last_line_diepint = intr.val;
-      }
-    }
     OnTransferCompleteCallback(in_isr, actual);
     if (rearm_ep0_setup)
     {
@@ -336,11 +303,6 @@ void ESP32USBEndpoint::FinishPendingEp0InStatus(bool in_isr)
     return;
   }
 
-  if (Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet))
-  {
-    device_.debug_.line_in_manual_finish_count++;
-    device_.debug_.line_state = 7U;
-  }
   ep0_in->OnTransferCompleteCallback(in_isr, 0U);
   if (ep0_in->GetState() != State::BUSY)
   {
@@ -375,31 +337,14 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
       ((ep_num != 0U) || ((ep0_out_phase_ != Ep0OutPhase::SETUP) && !ep0_setup_related &&
                           has_active_ep0_transfer)))
   {
-    const bool line_transfer =
-        device_.DmaEnabled() && (ep_num == 0U) &&
-        Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet);
     const size_t actual =
         device_.DmaEnabled() ? GetCompletedTransferSize() : transfer_actual_size_;
     ASSERT(FinishOutTransfer(actual));
     if (ep_num == 0U)
     {
-      device_.debug_.ep0_out_complete_count++;
-      device_.debug_.last_ep0_out_size = static_cast<uint16_t>(actual);
-      if (line_transfer)
-      {
-        device_.debug_.line_out_irq_count++;
-        device_.debug_.line_state = 3U;
-        device_.debug_.last_line_out_actual = static_cast<uint16_t>(actual);
-        device_.debug_.last_line_doepint = intr.val;
-      }
       FinishPendingEp0InStatus(in_isr);
     }
     OnTransferCompleteCallback(in_isr, actual);
-    if (line_transfer)
-    {
-      device_.debug_.line_out_cb_count++;
-      device_.debug_.line_state = 4U;
-    }
     if ((ep_num == 0U) && device_.DmaEnabled() && (transfer_request_size_ == 0U))
     {
       device_.ReloadSetupPacketCount();
@@ -409,33 +354,15 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
       ResetTransferState();
     }
   }
-  else if ((ep_num == 0U) && intr.xfercompl && ep0_setup_related &&
-           Detail::IsSetLineCodingSetup(device_.debug_.last_setup_packet))
-  {
-    device_.debug_.line_setup_xfer_overlap_count++;
-  }
 
   if (intr.setup)
   {
-    device_.debug_.ep0_setup_irq_count++;
     if (device_.DmaEnabled())
     {
       ASSERT(Detail::CacheSyncDmaBuffer(device_.setup_packet_,
                                         ESP32USBDevice::kSetupDmaBufferBytes, false));
-      device_.debug_.setup_data_count++;
-      device_.debug_.setup_done_count++;
-      std::memcpy(device_.debug_.last_setup_packet, device_.setup_packet_,
-                  ESP32USBDevice::kSetupPacketBytes);
-      if (Detail::IsSetLineCodingSetup(device_.setup_packet_))
-      {
-        device_.debug_.line_setup_irq_count++;
-        device_.debug_.line_state = 1U;
-        if (intr.xfercompl)
-        {
-          device_.debug_.line_setup_xfer_overlap_count++;
-        }
-      }
     }
+    device_.UpdateSetupState(device_.setup_packet_);
     const auto* setup = reinterpret_cast<const USB::SetupPacket*>(device_.setup_packet_);
     const bool expect_out_data_stage =
         ((setup->bmRequestType & 0x80U) == 0U) && (setup->wLength > 0U);

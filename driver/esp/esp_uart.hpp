@@ -155,9 +155,6 @@ class ESP32UART : public UART
   Flag::Plain tx_busy_;
   Flag::Plain in_tx_isr_;
   bool tx_active_valid_ = false;
-  // TODO: collapse ESP TX completion to one owner path so this dedup flag can go away.
-  // STM/CH already keep "kick HW" and "advance next slot" separated.
-  bool tx_active_reported_ = false;
   bool tx_pending_valid_ = false;
 
   bool uart_hw_enabled_ = false;

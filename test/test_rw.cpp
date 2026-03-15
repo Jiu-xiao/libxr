@@ -810,6 +810,8 @@ void test_rw_write_port_block_reused_waiter_discards_stale_signal()
   JoinThreadIfNeeded(finisher1);
   ASSERT(sem.Value() == 0);
 
+  // Reuse is valid only after the prior BLOCK call returned and drained any
+  // late completion token that still belonged to that waiter.
   Semaphore done2;
   Thread finisher2;
   StartWriteFinisher(finisher2, w, done2, ErrorCode::OK, "wr_stale2");
