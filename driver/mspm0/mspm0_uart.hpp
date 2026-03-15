@@ -1,5 +1,6 @@
 #pragma once
 
+#include "timer.hpp"
 #include "dl_uart_main.h"
 #include "ti_msp_dl_config.h"
 #include "uart.hpp"
@@ -10,6 +11,8 @@ namespace LibXR
 class MSPM0UART : public UART
 {
  public:
+  using UART::Write;
+
   enum class RxTimeoutMode : uint8_t
   {
     LIN_COMPARE,
@@ -30,9 +33,50 @@ class MSPM0UART : public UART
 
   ErrorCode SetConfig(UART::Configuration config) override;
 
-  static ErrorCode WriteFun(WritePort& port);
+  template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
+                                        ReadOperation, std::decay_t<OperationType>>>>
+  ErrorCode Read(RawData data, OperationType&& op, bool in_isr = false)
+  {
+    auto& read_op = op;
+    bool block_timeout_modified = false;
+    uint32_t original_block_timeout = UINT32_MAX;
 
-  static ErrorCode ReadFun(ReadPort& port);
+    if ((rx_timeout_mode_ == RxTimeoutMode::BYTE_INTERRUPT) &&
+        (read_op.type == ReadOperation::OperationType::BLOCK) &&
+        (read_op.data.sem_info.timeout != UINT32_MAX))
+    {
+      block_timeout_modified = true;
+      original_block_timeout = read_op.data.sem_info.timeout;
+      read_op.data.sem_info.timeout = NormalizeByteModeBlockTimeout(original_block_timeout);
+    }
+
+    const ErrorCode ans = (*read_port_)(data, read_op, in_isr);
+
+    if (block_timeout_modified)
+    {
+      if ((ans == ErrorCode::TIMEOUT) && (rx_timeout_mode_ == RxTimeoutMode::BYTE_INTERRUPT))
+      {
+        CancelByteModeBlockTimeout();
+        if (read_port_->busy_.load(std::memory_order_acquire) == ReadPort::BusyState::PENDING)
+        {
+          read_port_->ProcessPendingReads(false);
+          if (read_port_->busy_.load(std::memory_order_acquire) ==
+              ReadPort::BusyState::PENDING)
+          {
+            read_port_->busy_.store(ReadPort::BusyState::IDLE,
+                                    std::memory_order_release);
+          }
+        }
+      }
+      read_op.data.sem_info.timeout = original_block_timeout;
+    }
+
+    return ans;
+  }
+
+  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+
+  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
   static void OnInterrupt(uint8_t index);
   static UART::Configuration BuildConfigFromSysCfg(UART_Regs* instance,
@@ -41,6 +85,8 @@ class MSPM0UART : public UART
   RxTimeoutMode GetRxTimeoutMode() const { return rx_timeout_mode_; }
   uint32_t GetRxTimeoutCount() const { return rx_timeout_count_; }
   uint32_t GetRxDropCount() const { return rx_drop_count_; }
+  uint16_t GetLinCompareWindow() const { return lin_compare_window_; }
+  uint32_t GetLastTimeoutConsumedSize() const { return last_timeout_consumed_size_; }
   uint32_t GetTimeoutInterruptEnabledMask() const;
   uint32_t GetTimeoutInterruptMaskedStatus() const;
   uint32_t GetTimeoutInterruptRawStatus() const;
@@ -113,7 +159,23 @@ class MSPM0UART : public UART
 
   RxTimeoutMode ResolveRxTimeoutMode() const;
 
+  void EnsureByteModeBlockTimeoutTask();
+
+  void ArmByteModeBlockTimeout(uint32_t timeout_ms);
+
+  void CancelByteModeBlockTimeout();
+
+  static void OnByteModeBlockTimeout(MSPM0UART* uart);
+
+  uint32_t NormalizeByteModeBlockTimeout(uint32_t timeout_ms) const;
+
   uint32_t GetTimeoutInterruptMask() const;
+
+  void RearmLinCompareTimeout();
+
+  uint16_t GetLinCompareRegisterValue() const;
+
+  size_t ConsumeTimedOutReadData(bool in_isr, bool copy_to_buffer);
 
   void ResetLinCounter();
 
@@ -125,8 +187,13 @@ class MSPM0UART : public UART
   size_t tx_active_remaining_ = 0;
   size_t tx_active_total_ = 0;
   RxTimeoutMode rx_timeout_mode_ = RxTimeoutMode::BYTE_INTERRUPT;
+  uint16_t lin_compare_window_ = 0U;
   uint32_t rx_drop_count_ = 0;
   uint32_t rx_timeout_count_ = 0;
+  uint32_t last_timeout_consumed_size_ = 0U;
+  std::atomic<bool> lin_compare_timeout_latched_{false};
+  Timer::TimerHandle byte_mode_block_timeout_task_ = nullptr;
+  std::atomic<bool> byte_mode_block_timeout_armed_{false};
 
   static MSPM0UART* instance_map_[MAX_UART_INSTANCES];
 };
