@@ -312,10 +312,7 @@ void ESP32USBDevice::ResetFifoState()
 void ESP32USBDevice::ResetDeviceState()
 {
   ResetFifoState();
-  debug_.line_state = 0U;
-  debug_.last_line_doepint = 0U;
-  debug_.last_line_diepint = 0U;
-  debug_.last_line_out_actual = 0U;
+  ResetControlState();
 
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
   dev->grxfsiz_reg.rxfdep = fifo_state_.rx_words;
@@ -365,6 +362,13 @@ void ESP32USBDevice::ReloadSetupPacketCount()
   }
 }
 
+void ESP32USBDevice::ResetControlState() { control_ = {}; }
+
+void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
+{
+  control_.setup_direction_out = (setup != nullptr) && ((setup[0] & 0x80U) == 0U);
+}
+
 void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
@@ -387,7 +391,6 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
     if (pending.enumdone)
     {
       dev->gintsts_reg.enumdone = 1;
-      debug_.enum_done_count++;
       const uint32_t enum_speed = dev->dsts_reg.enumspd;
       if (enum_speed != Detail::kEnumSpeedFull30To60Mhz &&
           enum_speed != Detail::kEnumSpeedFull48Mhz)
@@ -437,7 +440,6 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 void ESP32USBDevice::HandleBusReset(bool in_isr)
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
-  debug_.bus_reset_count++;
 
   for (uint8_t i = 0; i < kEndpointCount; ++i)
   {
@@ -557,12 +559,10 @@ void ESP32USBDevice::HandleRxFifoLevel()
     case Detail::kRxStatusSetupData:
       Detail::ReadFifoPacket(Detail::GetEndpointFifo(dev, 0), setup_packet_,
                              sizeof(setup_packet_));
-      debug_.setup_data_count++;
-      std::memcpy(debug_.last_setup_packet, setup_packet_, sizeof(setup_packet_));
+      UpdateSetupState(setup_packet_);
       break;
 
     case Detail::kRxStatusSetupDone:
-      debug_.setup_done_count++;
       ReloadSetupPacketCount();
       break;
 

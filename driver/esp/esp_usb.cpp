@@ -213,21 +213,6 @@ uint16_t PacketCount(size_t size, uint16_t max_packet_size)
   return static_cast<uint16_t>((size + max_packet_size - 1U) / max_packet_size);
 }
 
-bool IsSetLineCodingSetup(const uint8_t* setup)
-{
-  return (setup != nullptr) && (setup[0] == 0x21U) && (setup[1] == 0x20U);
-}
-
-bool IsSetControlLineStateSetup(const uint8_t* setup)
-{
-  return (setup != nullptr) && (setup[0] == 0x21U) && (setup[1] == 0x22U);
-}
-
-bool IsOutRequestSetup(const uint8_t* setup)
-{
-  return (setup != nullptr) && ((setup[0] & 0x80U) == 0U);
-}
-
 void FlushTxFifo(usb_dwc_dev_t* dev, uint8_t fifo_num)
 {
   dev->grstctl_reg.txfnum = fifo_num;

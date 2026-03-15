@@ -199,9 +199,6 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   uart_hal_set_txfifo_empty_thr(&uart_hal_, kTxEmptyThreshold);
   // Drop stale hardware RX FIFO bytes from the previous baud.
   // Keep software read queue semantics aligned with ST/CH (no read_port reset).
-  // TODO: classic ESP32 FIFO+ISR still shows a small startup RX transient in the
-  // first legacy loopback window. Find the driver-side source so the external
-  // benchmark warm-up workaround can be removed.
   uart_hal_rxfifo_rst(&uart_hal_);
   uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
 
@@ -408,7 +405,6 @@ void IRAM_ATTR ESP32UART::ClearActiveTx()
   tx_active_offset_ = 0;
   tx_active_info_ = {};
   tx_active_valid_ = false;
-  tx_active_reported_ = false;
 }
 
 void IRAM_ATTR ESP32UART::ClearPendingTx()
@@ -420,27 +416,16 @@ void IRAM_ATTR ESP32UART::ClearPendingTx()
 
 bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
 {
-  // Mark the op as already reported before kicking HW so a very-fast EOF ISR
-  // cannot race back in and report the same callback twice.
-  const bool report_now = !tx_active_reported_;
-  if (report_now)
-  {
-    tx_active_reported_ = true;
-  }
-
   if (!StartActiveTransfer(in_isr))
   {
-    tx_active_reported_ = false;
     write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
     ClearActiveTx();
     return false;
   }
 
-  if (report_now)
-  {
-    // Align with STM/CH semantics: op is considered complete once transfer is kicked.
-    write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-  }
+  // Align with STM/CH semantics: once the active write is kicked to HW,
+  // WritePort owns the completion notification and the ISR only advances queues.
+  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
   return true;
 }
 
@@ -457,27 +442,18 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 
   if (!tx_busy_.IsSet() && tx_active_valid_)
   {
-    const bool report_now = !tx_active_reported_;
-    if (report_now)
-    {
-      tx_active_reported_ = true;
-    }
-
     if (!StartActiveTransfer(in_isr))
     {
       ClearActiveTx();
       return ErrorCode::FAILED;
     }
 
-    if (report_now)
+    // Current op completion is reported by WritePort when TryStartTx returns OK.
+    if (!tx_pending_valid_)
     {
-      // Current op completion is reported by WritePort when TryStartTx returns OK.
-      if (!tx_pending_valid_)
-      {
-        (void)LoadPendingTxFromQueue(in_isr);
-      }
-      return ErrorCode::OK;
+      (void)LoadPendingTxFromQueue(in_isr);
     }
+    return ErrorCode::OK;
   }
 
   if (!tx_pending_valid_)
@@ -499,9 +475,7 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
   }
 
   tx_active_length_ = active_length;
-  tx_active_offset_ = 0;
   tx_active_valid_ = true;
-  tx_active_reported_ = false;
   return true;
 }
 
@@ -628,12 +602,6 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
   Flag::ScopedRestore tx_flag(in_tx_isr_);
   tx_busy_.Clear();
 
-  if (tx_active_valid_ && !tx_active_reported_)
-  {
-    write_port_->Finish(in_isr, result, tx_active_info_);
-    tx_active_reported_ = true;
-  }
-
   ClearActiveTx();
 
   if ((result != ErrorCode::OK) && tx_pending_valid_)
@@ -655,7 +623,6 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
     tx_pending_length_ = 0;
     tx_active_info_ = tx_pending_info_;
     tx_active_valid_ = true;
-    tx_active_reported_ = false;
     ClearPendingTx();
     (void)StartAndReportActive(in_isr);
   }

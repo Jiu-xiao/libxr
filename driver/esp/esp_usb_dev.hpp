@@ -76,32 +76,12 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   static constexpr size_t kSetupPacketBytes = 8U;
   static constexpr size_t kSetupDmaBufferBytes = 64U;
 
-  struct DebugTraceState
+  /**
+   * @brief Minimal EP0 setup facts shared with the endpoint layer
+   */
+  struct ControlState
   {
-    uint32_t bus_reset_count = 0;
-    uint32_t enum_done_count = 0;
-    uint32_t setup_data_count = 0;
-    uint32_t setup_done_count = 0;
-    uint32_t ep0_setup_irq_count = 0;
-    uint32_t ep0_in_start_count = 0;
-    uint32_t ep0_in_complete_count = 0;
-    uint32_t ep0_out_start_count = 0;
-    uint32_t ep0_out_complete_count = 0;
-    uint32_t line_setup_irq_count = 0;
-    uint32_t line_setup_xfer_overlap_count = 0;
-    uint32_t line_out_arm_count = 0;
-    uint32_t line_out_irq_count = 0;
-    uint32_t line_out_cb_count = 0;
-    uint32_t line_in_zlp_start_count = 0;
-    uint32_t line_in_irq_count = 0;
-    uint32_t line_in_manual_finish_count = 0;
-    uint32_t last_line_doepint = 0;
-    uint32_t last_line_diepint = 0;
-    uint16_t last_ep0_in_size = 0;
-    uint16_t last_ep0_out_size = 0;
-    uint16_t last_line_out_actual = 0;
-    uint8_t line_state = 0;
-    uint8_t last_setup_packet[8] = {};
+    bool setup_direction_out = false;
   };
 
   /**
@@ -155,6 +135,9 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   void HandleBusReset(bool in_isr);
   void HandleEndpointInterrupt(bool in_isr, bool in_dir);
   void HandleRxFifoLevel();
+  void ResetControlState();
+  void UpdateSetupState(const uint8_t* setup);
+  bool LastSetupDirectionOut() const { return control_.setup_direction_out; }
   bool DmaEnabled() const { return true; }
 
   bool AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool is_bulk,
@@ -169,8 +152,8 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   RuntimeState runtime_ = {};
   // Shared DMA-visible setup packet buffer.
   alignas(kSetupDmaBufferBytes) uint8_t setup_packet_[kSetupDmaBufferBytes] = {};
-  // Internal debug trace retained only for in-tree endpoint/device code.
-  DebugTraceState debug_ = {};
+  // Functional EP0 setup state that must survive until status completion.
+  ControlState control_ = {};
 };
 
 }  // namespace LibXR

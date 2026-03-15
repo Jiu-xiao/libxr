@@ -59,6 +59,11 @@ class Operation
    * @brief 使用信号量和超时构造阻塞操作。
    * @param sem Semaphore reference.
    * @param timeout Timeout duration (default is maximum).
+   *
+   * @note `sem` must be dedicated to one live BLOCK call at a time.
+   *       Reuse is allowed only after that call returns.
+   * @note `sem` 在任一时刻只能服务一个存活中的 BLOCK 调用；
+   *       只有在该调用返回后才能复用。
    */
   Operation(Semaphore& sem, uint32_t timeout = UINT32_MAX) : type(OperationType::BLOCK)
   {
@@ -171,13 +176,15 @@ class Operation
   template <typename Status>
   void UpdateStatus(bool in_isr, Status&& status)
   {
-    // TODO: 任何操作类型都应拿到执行结果。
     switch (type)
     {
       case OperationType::CALLBACK:
         data.callback->Run(in_isr, std::forward<Status>(status));
         break;
       case OperationType::BLOCK:
+        // BLOCK waits are signaled by semaphore only; the owning port keeps the
+        // final ErrorCode in its block_result_ handoff state.
+        // BLOCK 只通过信号量唤醒；最终 ErrorCode 由端口侧 block_result_ 交接。
         data.sem_info.sem->PostFromCallback(in_isr);
         break;
       case OperationType::POLLING:
@@ -275,10 +282,13 @@ class ReadPort
   // PENDING = waiting for queue-fed completion
   // BLOCK_CLAIMED = wakeup now belongs to the waiter
   // BLOCK_DETACHED = timeout/reset detached the waiter
+  // The same semaphore may be reused only after the previous BLOCK call
+  // returns and the port goes back to IDLE.
   // 读 BLOCK 状态：
   // PENDING = 等待队列侧完成
   // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
   // BLOCK_DETACHED = timeout/reset 已把 waiter 分离
+  // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
   enum class BusyState : uint32_t
   {
     IDLE = 0,     ///< No active waiter and no pending completion. 无等待者、无挂起完成。
@@ -432,11 +442,14 @@ class WritePort
   // BLOCK_WAITING = waiter armed, completion not claimed yet
   // BLOCK_CLAIMED = final wakeup belongs to the waiter
   // BLOCK_DETACHED = timeout/reset detached the waiter
+  // The same semaphore may be reused only after the previous BLOCK call
+  // returns and the port goes back to IDLE.
   // 写 BLOCK 状态：
   // LOCKED = 提交路径占有队列修改权
   // BLOCK_WAITING = waiter 已挂起，完成尚未 claim
   // BLOCK_CLAIMED = 最终唤醒已经归 waiter 所有
   // BLOCK_DETACHED = timeout/reset 已把 waiter 分离
+  // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
   enum class BusyState : uint32_t
   {
     LOCKED =

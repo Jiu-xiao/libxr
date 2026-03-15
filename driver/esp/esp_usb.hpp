@@ -8,9 +8,10 @@
 #include "esp_dma_utils.h"
 #include "esp_heap_caps.h"
 #include "usb/core/ep.hpp"
-#include "soc/usb_dwc_struct.h"
 
 #if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+
+#include "soc/usb_dwc_struct.h"
 
 namespace LibXR::ESPUSBDetail
 {
@@ -67,9 +68,6 @@ volatile uint32_t* GetEndpointFifo(usb_dwc_dev_t* dev, uint8_t ep_num);
 void WriteFifoPacket(volatile uint32_t* fifo, const uint8_t* src, size_t size);
 void ReadFifoPacket(const volatile uint32_t* fifo, uint8_t* dst, size_t size);
 uint16_t PacketCount(size_t size, uint16_t max_packet_size);
-bool IsSetLineCodingSetup(const uint8_t* setup);
-bool IsSetControlLineStateSetup(const uint8_t* setup);
-bool IsOutRequestSetup(const uint8_t* setup);
 void FlushTxFifo(usb_dwc_dev_t* dev, uint8_t fifo_num);
 void DisableInEndpointAndWait(usb_dwc_dev_t* dev);
 void DisableInEndpointAndWait(usb_dwc_dev_t* dev, uint8_t ep_num);

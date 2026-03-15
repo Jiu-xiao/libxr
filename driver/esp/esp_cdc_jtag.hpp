@@ -74,7 +74,6 @@ class ESP32CDCJtag : public UART
   size_t tx_active_offset_ = 0;
   WriteInfoBlock tx_active_info_ = {};
   bool tx_active_valid_ = false;
-  bool tx_active_reported_ = false;
   const uint8_t* tx_pending_ptr_ = nullptr;
   size_t tx_pending_size_ = 0;
   bool tx_pending_valid_ = false;
