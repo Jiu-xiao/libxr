@@ -170,6 +170,7 @@ ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin, uint32_t clock
   if (InitHardware() != ErrorCode::OK)
   {
     ASSERT(false);
+    return;
   }
 }
 

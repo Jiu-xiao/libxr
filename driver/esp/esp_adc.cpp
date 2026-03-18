@@ -192,7 +192,7 @@ float ESP32ADC::ReadChannel(uint8_t idx)
     return 0.f;
   }
 
-  const esp_err_t lock_err = adc_lock_acquire(unit_);
+  const esp_err_t lock_err = adc_lock_try_acquire(unit_);
   ASSERT(lock_err == ESP_OK);
   if (lock_err != ESP_OK)
   {
