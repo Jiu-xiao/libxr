@@ -2,6 +2,7 @@
 // ch32_usb_otghs.cpp  (OTG HS)
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
+#include "ch32_usb_rcc.hpp"
 #include "ep.hpp"
 
 using namespace LibXR;
@@ -12,84 +13,176 @@ using namespace LibXR::USB;
 namespace
 {
 
-static void ch32_usb_clock48m_config()
+using OtgHsEndpointMap = decltype(LibXR::CH32EndpointOtgHs::map_otg_hs_);
+
+constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
+constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
+
+static void ResetEp0State(OtgHsEndpointMap& map)
 {
-  RCC_ClocksTypeDef clk{};
-  RCC_GetClocksFreq(&clk);
+  auto* out0 = map[0][OUT_IDX];
+  auto* in0 = map[0][IN_IDX];
 
-  const uint32_t SYSCLK_HZ = clk.SYSCLK_Frequency;
+  ASSERT(out0 != nullptr);
+  ASSERT(in0 != nullptr);
 
-#if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && \
-    defined(RCC_USBCLKSource_PLLCLK_Div3)
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div1);
-  }
-#if defined(RCC_USB5PRE_JUDGE) && defined(RCC_USBCLKSource_PLLCLK_Div5)
-  else if (SYSCLK_HZ == 240000000u)
-  {
-    ASSERT(RCC_USB5PRE_JUDGE() == SET);
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div5);
-  }
-#endif
-  else
-  {
-    ASSERT(false);
-  }
+  out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+  out0->tog0_ = true;
+  out0->tog1_ = false;
+  in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+  in0->tog0_ = true;
+  in0->tog1_ = false;
 
-#elif defined(RCC_USBCLK48MCLKSource_PLLCLK) && \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div1) &&  \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div2) && defined(RCC_USBFSCLKSource_PLLCLK_Div3)
-  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_PLLCLK);
-
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div1);
-  }
-  else
-  {
-    ASSERT(false);
-  }
-
-#else
-  (void)SYSCLK_HZ;
-#endif
+  // After reset/suspend recovery, EP0 must be ready for the next setup packet.
+  // reset/suspend 恢复后，EP0 必须回到等待下一包 setup 的状态。
+  USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;
+  USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_ACK;
 }
 
-static void ch32_usbhs_rcc_enable()
+static bool CompleteEp0InBeforeSetup(OtgHsEndpointMap& map, uint8_t int_flag,
+                                     uint8_t int_st)
 {
-  ch32_usb_clock48m_config();
+  if ((int_flag & USBHS_UIF_SETUP_ACT) == 0u || (int_flag & USBHS_UIF_TRANSFER) == 0u)
+  {
+    return false;
+  }
+  if ((int_st & USBHS_UIS_ENDP_MASK) != 0u ||
+      (int_st & USBHS_UIS_TOKEN_MASK) != USBHS_UIS_TOKEN_IN)
+  {
+    return false;
+  }
 
-#if defined(RCC_HSBHSPLLCLKSource_HSE) && defined(RCC_USBPLL_Div2) && \
-    defined(RCC_USBHSPLLCKREFCLK_4M)
-  RCC_USBHSPLLCLKConfig(RCC_HSBHSPLLCLKSource_HSE);
-  RCC_USBHSConfig(RCC_USBPLL_Div2);
-  RCC_USBHSPLLCKREFCLKConfig(RCC_USBHSPLLCKREFCLK_4M);
-  RCC_USBHSPHYPLLALIVEcmd(ENABLE);
-#endif
+  auto* in0 = map[0][IN_IDX];
+  ASSERT(in0 != nullptr);
+  if (in0->GetState() != LibXR::USB::Endpoint::State::BUSY)
+  {
+    return false;
+  }
 
-#if defined(RCC_AHBPeriph_USBHS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
-#endif
-#if defined(RCC_AHBPeriph_USBFS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
-#endif
+  // Some setup races report "new setup" and "previous EP0 IN complete" together.
+  // Consume the old EP0 IN completion first, then let setup rebuild the control state.
+  // 部分 setup 竞争会把“新 setup 到来”和“上一笔 EP0 IN 完成”同时上报；
+  // 这里先消费旧的 EP0 IN 完成，再让 setup 重建控制传输状态。
+  in0->TransferComplete(0u);
+  return true;
+}
+
+static void PrepareEp0ForSetup(OtgHsEndpointMap& map)
+{
+  auto* out0 = map[0][OUT_IDX];
+  auto* in0 = map[0][IN_IDX];
+
+  ASSERT(out0 != nullptr);
+  ASSERT(in0 != nullptr);
+
+  // A fresh SETUP cancels the previous control transfer, so EP0 must be re-armed
+  // to the default control endpoint shape before the setup packet is dispatched.
+  // 新的 SETUP 会中断前一笔控制传输，因此在分发 setup 包之前，
+  // 必须先把 EP0 恢复成默认控制端点形态。
+  out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+  in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+  out0->tog0_ = true;
+  out0->tog1_ = false;
+  in0->tog0_ = true;
+  in0->tog1_ = false;
+  USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;
+  USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;
+}
+
+static void HandleTransferOut(CH32EndpointOtgHs* ep_out, uint8_t ep_num, uint8_t int_st)
+{
+  if (ep_out == nullptr)
+  {
+    return;
+  }
+
+  const bool is_nak = ((int_st & USBHS_UIS_IS_NAK) != 0u);
+  const bool busy = (ep_out->GetState() == LibXR::USB::Endpoint::State::BUSY);
+  const uint16_t rx_len = USBHSD->RX_LEN;
+
+  if (ep_num == 0u)
+  {
+    if (busy && ((rx_len > 0u) || !is_nak))
+    {
+      ep_out->TransferComplete(rx_len);
+    }
+    return;
+  }
+
+  if (!is_nak)
+  {
+    ep_out->TransferComplete(rx_len);
+    return;
+  }
+  if (!busy || rx_len == 0u)
+  {
+    return;
+  }
+
+  // Some non-EP0 OUT paths may still expose a usable late length snapshot while the
+  // endpoint stays BUSY. Keep that narrow recovery path here.
+  // 部分 non-EP0 OUT 路径在端点仍处于 BUSY 时，仍可能给出可用的晚到长度快照；
+  // 这里只保留这条窄恢复路径。
+  ep_out->TransferComplete(rx_len);
+}
+
+static void HandleTransferIn(CH32EndpointOtgHs* ep_in, uint8_t ep_num, uint8_t int_st)
+{
+  if (ep_in == nullptr)
+  {
+    return;
+  }
+
+  const bool is_nak = ((int_st & USBHS_UIS_IS_NAK) != 0u);
+  if (!is_nak)
+  {
+    ep_in->TransferComplete(0u);
+    return;
+  }
+
+  const bool busy = (ep_in->GetState() == LibXR::USB::Endpoint::State::BUSY);
+  const bool ep0_data_in_complete =
+      (ep_num == 0u) && busy && (ep_in->last_transfer_size_ > 0u);
+  if (!ep0_data_in_complete)
+  {
+    return;
+  }
+
+  // EP0 data IN may complete after setup arbitration without a visible ACK.
+  // Status ZLP must still stay strict, so only non-zero data stages use this path.
+  // EP0 的数据 IN 在 setup 仲裁后也可能没有可见 ACK 就结束；
+  // 但 status ZLP 仍然必须保持严格，因此这里只允许非零数据阶段走这条路径。
+  ep_in->TransferComplete(0u);
+}
+
+static void HandleTransferToken(OtgHsEndpointMap& map, uint8_t int_st)
+{
+  const uint8_t token = int_st & USBHS_UIS_TOKEN_MASK;
+  const uint8_t ep_num = int_st & USBHS_UIS_ENDP_MASK;
+  auto& ep = map[ep_num];
+
+  switch (token)
+  {
+    case USBHS_UIS_TOKEN_SETUP:
+    {
+      // CH32V30x USBHS reports SETUP through SETUP_ACT, so TOKEN_SETUP is
+      // informational only here and must not re-run the setup path.
+      // CH32V30x USBHS 通过 SETUP_ACT 上报 SETUP，因此这里的 TOKEN_SETUP
+      // 只是信息位，不能再次重复执行 setup 路径。
+      break;
+    }
+
+    case USBHS_UIS_TOKEN_OUT:
+      HandleTransferOut(ep[OUT_IDX], ep_num, int_st);
+      break;
+
+    case USBHS_UIS_TOKEN_IN:
+      HandleTransferIn(ep[IN_IDX], ep_num, int_st);
+      break;
+
+    default:
+      break;
+  }
 }
 
 }  // namespace
@@ -99,9 +192,10 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 {
   auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 
-  constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
-  constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
-
+  // Handle order matters: recover bus-level events first, then settle EP0 setup
+  // arbitration, and finally dispatch ordinary token completions.
+  // 处理顺序很重要：先恢复总线级事件，再收束 EP0 setup 仲裁，
+  // 最后分发普通 token 完成事件。
   while (true)
   {
     const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
@@ -117,36 +211,14 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
 
     uint8_t clear_mask = 0;
 
+    // 1) Bus-level recovery: reset/suspend must rebuild EP0 first.
+    // 1) 总线级恢复：reset/suspend 必须优先重建 EP0。
     if (INTFLAG & USBHS_UIF_BUS_RST)
     {
       USBHSD->DEV_AD = 0;
-
       LibXR::CH32USBOtgHS::self_->Deinit(true);
       LibXR::CH32USBOtgHS::self_->Init(true);
-
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->tog0_ = true;
-        map[0][OUT_IDX]->tog1_ = false;
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->tog0_ = true;
-        map[0][IN_IDX]->tog1_ = false;
-      }
-
-      USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;
-      USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;
-
+      ResetEp0State(map);
       clear_mask |= USBHS_UIF_BUS_RST;
     }
 
@@ -154,130 +226,36 @@ extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
     {
       LibXR::CH32USBOtgHS::self_->Deinit(true);
       LibXR::CH32USBOtgHS::self_->Init(true);
-
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->tog0_ = true;
-        map[0][OUT_IDX]->tog1_ = false;
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->tog0_ = true;
-        map[0][IN_IDX]->tog1_ = false;
-      }
-
-      USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;
-      USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;
-
+      ResetEp0State(map);
       clear_mask |= USBHS_UIF_SUSPEND;
+    }
+
+    // 2) Setup arbitration: consume the previous EP0 IN completion before the
+    // new setup resets the control-transfer state.
+    // 2) Setup 仲裁：在新 setup 重置控制传输状态之前，
+    // 先消费上一笔 EP0 IN 完成。
+    if (CompleteEp0InBeforeSetup(map, INTFLAG, INTST))
+    {
+      clear_mask |= USBHS_UIF_TRANSFER;
     }
 
     if (INTFLAG & USBHS_UIF_SETUP_ACT)
     {
-      USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;
-      USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_NAK;
+      PrepareEp0ForSetup(map);
 
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->tog0_ = true;
-        map[0][OUT_IDX]->tog1_ = false;
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->tog0_ = true;
-        map[0][IN_IDX]->tog1_ = false;
-      }
-
-      LibXR::CH32USBOtgHS::self_->OnSetupPacket(
-          true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
-                    map[0][OUT_IDX]->GetBuffer().addr_));
-
+      auto* out0 = map[0][OUT_IDX];
+      ASSERT(out0 != nullptr);
+      const auto* setup =
+          reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_);
+      LibXR::CH32USBOtgHS::self_->OnSetupPacket(true, setup);
       clear_mask |= USBHS_UIF_SETUP_ACT;
     }
 
-    if (INTFLAG & USBHS_UIF_TRANSFER)
+    // 3) Ordinary token completion: non-setup transfers arrive here.
+    // 3) 普通 token 完成：非 setup 传输统一在这里分发。
+    if ((INTFLAG & USBHS_UIF_TRANSFER) && ((clear_mask & USBHS_UIF_TRANSFER) == 0u))
     {
-      const uint8_t TOKEN = INTST & USBHS_UIS_TOKEN_MASK;
-      const uint8_t EPNUM = INTST & USBHS_UIS_ENDP_MASK;
-
-      auto& ep = map[EPNUM];
-
-      switch (TOKEN)
-      {
-        case USBHS_UIS_TOKEN_SETUP:
-        {
-          USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_DATA1;
-          USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_RES_NAK | USBHS_UEP_R_TOG_DATA1;
-
-          if (map[0][OUT_IDX])
-          {
-            map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-          }
-          if (map[0][IN_IDX])
-          {
-            map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-          }
-
-          if (map[0][OUT_IDX])
-          {
-            map[0][OUT_IDX]->tog0_ = true;
-            map[0][OUT_IDX]->tog1_ = false;
-          }
-          if (map[0][IN_IDX])
-          {
-            map[0][IN_IDX]->tog0_ = true;
-            map[0][IN_IDX]->tog1_ = false;
-          }
-
-          LibXR::CH32USBOtgHS::self_->OnSetupPacket(
-              true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
-                        map[0][OUT_IDX]->GetBuffer().addr_));
-          break;
-        }
-
-        case USBHS_UIS_TOKEN_OUT:
-        {
-          // NAK is not a completed data OUT transaction.
-          if (((INTST & USBHS_UIS_IS_NAK) == 0) && ep[OUT_IDX])
-          {
-            const uint16_t LEN = USBHSD->RX_LEN;
-            ep[OUT_IDX]->TransferComplete(LEN);
-          }
-          break;
-        }
-
-        case USBHS_UIS_TOKEN_IN:
-        {
-          // NAK is not a completed data IN transaction.
-          if (((INTST & USBHS_UIS_IS_NAK) == 0) && ep[IN_IDX])
-          {
-            ep[IN_IDX]->TransferComplete(0);
-          }
-          break;
-        }
-
-        default:
-          break;
-      }
-
+      HandleTransferToken(map, INTST);
       clear_mask |= USBHS_UIF_TRANSFER;
     }
 
@@ -303,7 +281,8 @@ CH32USBOtgHS::CH32USBOtgHS(
 
   auto cfgs_itr = EP_CFGS.begin();
 
-  ASSERT(cfgs_itr->buffer_tx.size_ == 64 && cfgs_itr->double_buffer == false);
+  ASSERT(cfgs_itr->buffer_tx.size_ >= 64 && cfgs_itr->buffer_rx.size_ >= 64 &&
+         cfgs_itr->double_buffer == false);
 
   auto ep0_out =
       new CH32EndpointOtgHs(USB::Endpoint::EPNumber::EP0, USB::Endpoint::Direction::OUT,
@@ -351,13 +330,18 @@ ErrorCode CH32USBOtgHS::SetAddress(uint8_t address, USB::DeviceCore::Context con
 
 void CH32USBOtgHS::Start(bool)
 {
-  ch32_usbhs_rcc_enable();
+  // OTGHS selects the shared 48 MHz source first, then enables its own bus clock.
+  // OTGHS 先选择共享 48 MHz 时钟源，再打开 USBHS 自己的总线时钟。
+  LibXR::CH32UsbRcc::ConfigureUsb48M();
+#if defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+#endif
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
   USBHSD->CONTROL &= ~USBHS_UC_RESET_SIE;
   USBHSD->HOST_CTRL = USBHS_UH_PHY_SUSPENDM;
   USBHSD->CONTROL = USBHS_UC_DMA_EN | USBHS_UC_INT_BUSY | USBHS_UC_SPEED_HIGH;
   USBHSD->INT_EN = USBHS_UIE_SETUP_ACT | USBHS_UIE_TRANSFER | USBHS_UIE_DETECT |
-                   USBHS_UIE_SUSPEND | USBHS_UIE_ISO_ACT;
+                   USBHS_UIE_SUSPEND;
   USBHSD->CONTROL |= USBHS_UC_DEV_PU_EN;
   NVIC_EnableIRQ(USBHS_IRQn);
 }

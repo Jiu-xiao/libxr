@@ -2,6 +2,7 @@
 // ch32_usb_devfs.cpp  (classic FSDEV / PMA)
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
+#include "ch32_usb_rcc.hpp"
 #include "ch32_usbcan_shared.hpp"
 #include "ep.hpp"
 
@@ -9,71 +10,6 @@ using namespace LibXR;
 using namespace LibXR::USB;
 
 #if defined(RCC_APB1Periph_USB)
-
-namespace
-{
-
-static void ch32_usb_clock48m_config()
-{
-  RCC_ClocksTypeDef clk{};
-  RCC_GetClocksFreq(&clk);
-
-  const uint32_t SYSCLK_HZ = clk.SYSCLK_Frequency;
-
-#if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && \
-    defined(RCC_USBCLKSource_PLLCLK_Div3)
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div1);
-  }
-#if defined(RCC_USB5PRE_JUDGE) && defined(RCC_USBCLKSource_PLLCLK_Div5)
-  else if (SYSCLK_HZ == 240000000u)
-  {
-    ASSERT(RCC_USB5PRE_JUDGE() == SET);
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div5);
-  }
-#endif
-  else
-  {
-    ASSERT(false);
-  }
-
-#elif defined(RCC_USBCLK48MCLKSource_PLLCLK) && \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div1) &&  \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div2) && defined(RCC_USBFSCLKSource_PLLCLK_Div3)
-  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_PLLCLK);
-
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div1);
-  }
-  else
-  {
-    ASSERT(false);
-  }
-
-#else
-  (void)SYSCLK_HZ;
-#endif
-}
-
-}  // namespace
 
 #ifdef USB_BASE
 static constexpr uintptr_t USBDEV_REG_BASE = USB_BASE;
@@ -278,11 +214,18 @@ static void usbdev_fs_irqhandler()
 
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
   constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
+  auto* out0 = map[0][OUT_IDX];
+  auto* in0 = map[0][IN_IDX];
+  ASSERT(out0 != nullptr);
+  ASSERT(in0 != nullptr);
 
   while (true)
   {
     const uint16_t ISTR = *usbdev_istr();
 
+    // Bus reset rebuilds the PMA allocator and EP0 default state before any CTR events
+    // are processed again.
+    // 总线 reset 需要先重建 PMA 分配器和 EP0 默认状态，之后才继续处理新的 CTR 事件。
     if (ISTR & USB_ISTR_RESET)
     {
       usbdev_clear_istr(USB_ISTR_RESET);
@@ -295,20 +238,18 @@ static void usbdev_fs_irqhandler()
       LibXR::CH32USBDeviceFS::self_->Deinit(true);
       LibXR::CH32USBDeviceFS::self_->Init(true);
 
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
+      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
 
       LibXR::CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
       LibXR::CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
       continue;
     }
 
+    // Suspend follows the same control-endpoint recovery path, but keeps EP0 RX in NAK
+    // until the stack re-arms the next transfer.
+    // suspend 也走同一条控制端点恢复路径，但会先把 EP0 RX 保持在 NAK，
+    // 等协议栈重新挂起下一笔传输。
     if (ISTR & USB_ISTR_SUSP)
     {
       usbdev_clear_istr(USB_ISTR_SUSP);
@@ -316,14 +257,8 @@ static void usbdev_fs_irqhandler()
       LibXR::CH32USBDeviceFS::self_->Deinit(true);
       LibXR::CH32USBDeviceFS::self_->Init(true);
 
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
+      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
 
       LibXR::CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
       LibXR::CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_NAK);
@@ -341,6 +276,8 @@ static void usbdev_fs_irqhandler()
       break;
     }
 
+    // Classic FSDEV reports one endpoint-at-a-time through CTR flags.
+    // 经典 FSDEV 通过 CTR 标志一次只上报一个端点。
     const uint8_t EP_ID = static_cast<uint8_t>(ISTR & USB_ISTR_EP_ID);
 
     uint16_t epr = *usbdev_ep_reg(EP_ID);
@@ -360,28 +297,26 @@ static void usbdev_fs_irqhandler()
           }
           LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
 
-          if (map[0][OUT_IDX])
-          {
-            map[0][OUT_IDX]->CopyRxDataToBuffer(sizeof(LibXR::USB::SetupPacket));
-            LibXR::CH32USBDeviceFS::self_->OnSetupPacket(
-                true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
-                          map[0][OUT_IDX]->GetBuffer().addr_));
-          }
+          out0->CopyRxDataToBuffer(sizeof(LibXR::USB::SetupPacket));
+          LibXR::CH32USBDeviceFS::self_->OnSetupPacket(
+              true,
+              reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_));
 
           continue;
         }
         else
         {
+          // Ordinary EP0 OUT data/status completion.
+          // 普通 EP0 OUT 数据/状态阶段完成。
           LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
           const uint16_t LEN = LibXR::CH32EndpointDevFs::GetRxCount(0);
-          if (map[0][OUT_IDX])
-          {
-            map[0][OUT_IDX]->TransferComplete(LEN);
-          }
+          out0->TransferComplete(LEN);
         }
       }
       else
       {
+        // Non-EP0 OUT completion uses the per-endpoint RX count latched by hardware.
+        // non-EP0 OUT 完成直接使用硬件锁存的该端点 RX 长度。
         LibXR::CH32EndpointDevFs::ClearEpCtrRx(EP_ID);
         const uint16_t LEN = LibXR::CH32EndpointDevFs::GetRxCount(EP_ID);
         if (map[EP_ID][OUT_IDX])
@@ -397,14 +332,15 @@ static void usbdev_fs_irqhandler()
     {
       if (EP_ID == 0)
       {
+        // EP0 IN completion is enough by itself; no extra length bookkeeping is needed.
+        // EP0 IN 完成事件本身就足够，不需要额外长度信息。
         LibXR::CH32EndpointDevFs::ClearEpCtrTx(0);
-        if (map[0][IN_IDX])
-        {
-          map[0][IN_IDX]->TransferComplete(0);
-        }
+        in0->TransferComplete(0);
       }
       else
       {
+        // Non-EP0 IN completion follows the same rule as EP0 IN on FSDEV.
+        // FSDEV 上的 non-EP0 IN 完成与 EP0 IN 一样，不额外携带长度信息。
         LibXR::CH32EndpointDevFs::ClearEpCtrTx(EP_ID);
         if (map[EP_ID][IN_IDX])
         {
@@ -505,7 +441,14 @@ void CH32USBDeviceFS::Start(bool)
   LibXR::CH32UsbCanShared::usb_inited.store(true, std::memory_order_release);
   LibXR::CH32UsbCanShared::register_usb_irq(&usb_irq_thunk);
 
-  ch32_usb_clock48m_config();
+  // FSDEV uses the shared USB 48 MHz clock. When that clock comes from the USBHS PHY PLL,
+  // keep the USBHS dependency clock enabled before turning on USBDEV itself.
+  // FSDEV 使用共享 USB 48 MHz 时钟；如果这个时钟来自 USBHS PHY PLL，
+  // 则必须先打开 USBHS 依赖时钟，再打开 USBDEV 本体时钟。
+  LibXR::CH32UsbRcc::ConfigureUsb48M();
+#if defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+#endif
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_USB, ENABLE);
 
 #if defined(RCC_APB2Periph_GPIOA) && defined(GPIOA) && defined(GPIO_Pin_11) &&        \
@@ -552,6 +495,8 @@ void CH32USBDeviceFS::Start(bool)
 
   // DeviceCore::Init() may arm OUT endpoints before FSDEV reset/BTABLE initialization.
   // Re-arm non-EP0 OUT endpoints that remain BUSY after hardware initialization.
+  // DeviceCore::Init() 可能早于 FSDEV reset/BTABLE 初始化就预挂起 OUT 端点。
+  // 因此这里在硬件初始化完成后补一次 non-EP0 OUT 端点重装填。
   auto& ep_map = LibXR::CH32EndpointDevFs::map_dev_fs_;
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
   const uint8_t N_EP = static_cast<uint8_t>(LibXR::CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);

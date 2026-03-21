@@ -406,10 +406,19 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   }
   ep_cfg.double_buffer = enable_double;
 
-  // Clamp max_packet_size to the endpoint buffer size.
-  if (ep_cfg.max_packet_size > GetBuffer().size_)
+  const size_t buffer_size = GetBuffer().size_;
+  if (ep_cfg.type == Type::BULK)
   {
-    ep_cfg.max_packet_size = GetBuffer().size_;
+    // CH32 USBHS bulk endpoints always use the hardware-fixed 512-byte packet size.
+    // CH32 USBHS 的 BULK 端点始终使用硬件固定的 512 字节包长。
+    ASSERT(buffer_size >= 512u);
+    ep_cfg.max_packet_size = 512u;
+  }
+  else if (ep_cfg.max_packet_size > buffer_size)
+  {
+    // Clamp non-bulk packet sizes to the endpoint buffer size.
+    // 非 BULK 端点的包长按缓冲区大小截断。
+    ep_cfg.max_packet_size = buffer_size;
   }
 
   if (GetDirection() == Direction::IN)
@@ -435,10 +444,7 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
       *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
     }
 
-    if (GetNumber() != EPNumber::EP0)
-    {
-      *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
-    }
+    *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
   }
 
   const int IDX = static_cast<int>(GetNumber());
@@ -531,7 +537,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
   if (GetNumber() == EPNumber::EP0)
   {
-    if (!is_in && size == 0)
+    if (!IS_IN && size == 0)
     {
       tog0_ = true;
       tog1_ = false;
@@ -693,7 +699,6 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     tog1_ = false;
     *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_ACK;
   }
-
   OnTransferCompleteCallback(true, size);
 }
 
