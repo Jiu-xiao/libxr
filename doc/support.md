@@ -54,6 +54,11 @@
 | SmartConfig | ❌     |
 | Bluetooth   | ❌     |
 
+> Verified USB device-controller paths:
+> - `USB_DRV_FS`: `STM32G431`
+> - `USB_OTG_FS`: `STM32F401`, `STM32F407`
+> - `USB_OTG_HS`: `STM32F407`, `STM32H750`
+
 ## ESP32 Support
 
 | `Peripheral` | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 |
@@ -107,3 +112,8 @@
 | WIFI Client | ❌        |
 | SmartConfig | ❌        |
 | Bluetooth   | ❌        |
+
+> Verified USB device-controller paths:
+> - `USB_DEVICE_FS`: `CH32V203`
+> - `USB_OTG_FS`: `CH32V203`, `CH32V208`, `CH32V307`
+> - `USB_OTG_HS`: `CH32V305`, `CH32V307`

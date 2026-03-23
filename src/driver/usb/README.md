@@ -62,16 +62,18 @@ TODO
 | -------- | ------------- | ------------------ | -------------------------- |
 | STM32    | USB_DEVICE_FS | Supported          | STM32F103                  |
 | STM32    | USB_DRV_FS    | Supported (Device) | STM32G431                  |
-| STM32    | USB_OTG_FS    | Supported (Device) | STM32F407                  |
+| STM32    | USB_OTG_FS    | Supported (Device) | STM32F401/STM32F407        |
 | STM32    | USB_OTG_HS    | Supported (Device) | STM32F407/STM32H750        |
 | ESP32-S3 | USB_OTG_FS    | Supported (Device) | ESP32-S3                   |
 | CH32     | USB_DEVICE_FS | Supported          | CH32V203                   |
 | CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203/CH32V208 |
-| CH32     | USB_OTG_HS    | Supported (Device) | CH32V307                   |
+| CH32     | USB_OTG_HS    | Supported (Device) | CH32V305/CH32V307          |
 
 Note:
 
 - The current ESP native USB device backend is implemented for `ESP32-S3`.
+- The current STM32 OTG FS device backend has been verified on `STM32F401` and `STM32F407`.
+- The current CH32 OTG HS device backend has been verified on `CH32V305` and `CH32V307`.
 
 ## Documentation
 

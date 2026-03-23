@@ -69,16 +69,18 @@ TODO
 | ----- | ------------- | ------------- | -------------------------- |
 | STM32 | USB_DEVICE_FS | 支持          | STM32F103                  |
 | STM32 | USB_DRV_FS    | 支持 (Device) | STM32G431                  |
-| STM32 | USB_OTG_FS    | 支持 (Device) | STM32F407                  |
+| STM32 | USB_OTG_FS    | 支持 (Device) | STM32F401/STM32F407        |
 | STM32 | USB_OTG_HS    | 支持 (Device) | STM32F407/STM32H750        |
 | ESP32-S3 | USB_OTG_FS | 支持 (Device) | ESP32-S3                   |
 | CH32  | USB_DEVICE_FS | 支持          | CH32V203                   |
 | CH32  | USB_OTG_FS    | 支持 (Device) | CH32V307/CH32V203/CH32V208 |
-| CH32  | USB_OTG_HS    | 支持          | CH32V307                   |
+| CH32  | USB_OTG_HS    | 支持          | CH32V305/CH32V307          |
 
 说明：
 
 - 当前 ESP 原生 USB 设备后端实现于 `ESP32-S3`。
+- 当前 STM32 `USB_OTG_FS` 设备后端已经在 `STM32F401` 与 `STM32F407` 上验证。
+- 当前 CH32 `USB_OTG_HS` 设备后端已经在 `CH32V305` 与 `CH32V307` 上验证。
 
 ## 文档
 
