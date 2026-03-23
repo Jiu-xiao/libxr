@@ -6,6 +6,11 @@
 - ❌：未支持（Not Supported）
 - 🚫：硬件不支持/不可用（Unavailable）
 
+> Current verified XRUSB device-side protocol coverage includes:
+> `CDC-ACM`, `HID`, `UAC1 microphone`, `GSUSB`, `DAPLink V2`, `DFU Runtime`, and
+> `DFU Bootloader`.
+> Verified BOS / platform capabilities currently include `WebUSB` and `WinUSB MS OS 2.0`.
+
 ## Linux Support
 
 | `Peripheral` | Ubuntu/Debian |

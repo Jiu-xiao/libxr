@@ -50,7 +50,16 @@ Note:
 | HID        | Supported                     | Only standard keyboard/mouse and remote controller; other types require you to derive your own |
 | UAC        | Supported                     | Currently implements a UAC 1.0 microphone only                                                 |
 | GSUSB      | Supported (CAN/FDCAN)         | Driverless SocketCAN on Linux                                                                  |
+| DFU Runtime | Supported                    | Handles runtime `DETACH` and delayed jump to bootloader                                        |
+| DFU Bootloader | Supported                 | Supports `DNLOAD` / `UPLOAD` / `GETSTATUS` / `ABORT` / `CLRSTATUS` / manifest flow             |
 | DAPLINK V2 | Supports (SWD interface only) | Can be used with Keil/OpenOCD                                                                  |
+
+### BOS / Platform Capabilities
+
+| Capability        | Status             | Notes                                                                 |
+| ----------------- | ------------------ | --------------------------------------------------------------------- |
+| WebUSB            | Supported          | Used by DFU runtime / DFU bootloader via BOS platform capability      |
+| WinUSB MS OS 2.0  | Supported          | Used by DAPLink V2 for Windows driverless interface discovery         |
 
 ### Host Stack
 

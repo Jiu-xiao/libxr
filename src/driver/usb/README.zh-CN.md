@@ -57,7 +57,16 @@ XRUSB是一个独立的现代 C++ USB 协议栈。以subtree的形式作为[LibX
 | HID        | 支持            | 仅提供标准键盘/鼠标与遥控器，其他类型需要自行派生 |
 | UAC        | 支持            | 目前仅实现了UAC1.0的麦克风                        |
 | GSUSB      | 支持(CAN/FDCAN) | 适用于 Linux 平台的免驱 SocketCAN                 |
+| DFU Runtime | 支持           | 处理运行时 `DETACH` 并延后跳转到 bootloader       |
+| DFU Bootloader | 支持        | 支持 `DNLOAD` / `UPLOAD` / `GETSTATUS` / `ABORT` / `CLRSTATUS` / manifest 流程 |
 | DAPLINK V2 | 支持(仅SWD接口) | 可在Keil/OpenOCD使用                              |
+
+### BOS / 平台能力
+
+| 能力                | 支持状态 | 说明                                              |
+| ------------------- | -------- | ------------------------------------------------- |
+| WebUSB              | 支持     | 通过 BOS platform capability 用于 DFU runtime / bootloader |
+| WinUSB MS OS 2.0    | 支持     | 用于 DAPLink V2 在 Windows 下的免驱接口发现       |
 
 ### 主机协议栈
 
