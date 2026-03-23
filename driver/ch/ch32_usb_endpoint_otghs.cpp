@@ -610,12 +610,12 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
 
 ErrorCode CH32EndpointOtgHs::Stall()
 {
-  if (GetState() != State::IDLE)
+  const bool IS_IN = (GetDirection() == Direction::IN);
+  if (GetState() != State::IDLE && !(GetState() == State::BUSY && !IS_IN))
   {
     return ErrorCode::BUSY;
   }
 
-  bool IS_IN = (GetDirection() == Direction::IN);
   if (IS_IN)
   {
     *get_tx_control_addr(GetNumber()) |= USBHS_UEP_T_RES_STALL;

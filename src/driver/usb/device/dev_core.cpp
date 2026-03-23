@@ -633,7 +633,11 @@ ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient
         endpoint_.pool.FindEndpoint(ep_addr, ep);
         if (ep)
         {
-          ep->ClearStall();
+          auto ans = ep->ClearStall();
+          if (ans != ErrorCode::OK)
+          {
+            return ans;
+          }
           WriteZLP();  // 状态阶段：回复 ZLP / Status stage: send ZLP
         }
         else
@@ -682,7 +686,11 @@ ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient recipient
         endpoint_.pool.FindEndpoint(ep_addr, ep);
         if (ep)
         {
-          ep->Stall();
+          auto ans = ep->Stall();
+          if (ans != ErrorCode::OK)
+          {
+            return ans;
+          }
           WriteZLP();  // 状态阶段回复 ZLP / Status stage: send ZLP
         }
         else
