@@ -69,12 +69,6 @@ TODO
 | CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203/CH32V208 |
 | CH32     | USB_OTG_HS    | Supported (Device) | CH32V305/CH32V307          |
 
-Note:
-
-- The current ESP native USB device backend is implemented for `ESP32-S3`.
-- The current STM32 OTG FS device backend has been verified on `STM32F401` and `STM32F407`.
-- The current CH32 OTG HS device backend has been verified on `CH32V305` and `CH32V307`.
-
 ## Documentation
 
 Released together with the [LibXR documentation](https://xrobot-org.github.io/en/docs/xrusb).
