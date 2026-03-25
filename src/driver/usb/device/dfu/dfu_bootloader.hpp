@@ -1369,17 +1369,18 @@ class DfuBootloaderClassStorage
  * @brief 面向单镜像 bootloader 区的 DFU 类
  *        Bootloader DFU class for a single image region.
  */
-class DfuBootloaderClass : private DfuBootloaderClassStorage,
-                           public DFUClass<DfuBootloaderBackend, 4096u>
+template <size_t MAX_TRANSFER_SIZE = 4096u>
+class DfuBootloaderClassT : private DfuBootloaderClassStorage,
+                            public DFUClass<DfuBootloaderBackend, MAX_TRANSFER_SIZE>
 {
   using Storage = DfuBootloaderClassStorage;
-  using Base = DFUClass<DfuBootloaderBackend, 4096u>;
+  using Base = DFUClass<DfuBootloaderBackend, MAX_TRANSFER_SIZE>;
 
  public:
   using JumpCallback = DfuBootloaderBackend::JumpCallback;
   static constexpr uint8_t kVendorRequestRunApp = 0x5Au;
 
-  DfuBootloaderClass(
+  DfuBootloaderClassT(
       Flash& flash, size_t image_base, size_t image_limit, size_t seal_offset,
       JumpCallback jump_to_app, void* jump_app_ctx = nullptr, bool autorun = true,
       const char* interface_string = Base::DEFAULT_INTERFACE_STRING,
@@ -1411,7 +1412,7 @@ class DfuBootloaderClass : private DfuBootloaderClassStorage,
 
  protected:
   ErrorCode OnVendorRequest(bool, uint8_t bRequest, uint16_t wValue, uint16_t wLength,
-                            uint16_t, ControlTransferResult& result) override
+                            uint16_t, typename Base::ControlTransferResult& result) override
   {
     if (bRequest != kVendorRequestRunApp)
     {
@@ -1437,5 +1438,7 @@ class DfuBootloaderClass : private DfuBootloaderClassStorage,
     return ErrorCode::OK;
   }
 };
+
+using DfuBootloaderClass = DfuBootloaderClassT<4096u>;
 
 }  // namespace LibXR::USB

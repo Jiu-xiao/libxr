@@ -148,7 +148,6 @@ class DeviceCore
   void DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_length,
                        size_t request_size = 0, bool early_read_zlp = false);
   void DevReadEP0Data(LibXR::RawData data, size_t packet_max_length);
-  void ClearStatusOutArming();
   void ArmStatusOutIfNeeded();
 
   ErrorCode ProcessStandardRequest(bool in_isr, const SetupPacket*& setup,
@@ -199,12 +198,6 @@ class DeviceCore
     bool need_write_zlp = false;            ///< 是否需要发送 ZLP / Whether to send ZLP
     bool status_out_armed =
         false;  ///< STATUS OUT 已经预先挂起 / STATUS OUT already armed
-    bool arm_status_out_after_in_data =
-        false;  ///< 在最后一个 IN 数据包完成后补挂 STATUS OUT / Defer STATUS OUT arming
-                ///< until the final IN data packet completes
-    bool arm_status_out_after_in_zlp =
-        false;  ///< 在 IN ZLP 完成后补挂 STATUS OUT / Defer STATUS OUT arming until the
-                ///< IN ZLP completes
   } state_;
 
   struct

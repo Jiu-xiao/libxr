@@ -26,9 +26,6 @@ DeviceCore::DeviceCore(
               {nullptr, 0},
               0xff,
               nullptr,
-              false,
-              false,
-              false,
               false})
 {
   ASSERT(IsValidUSBCombination(spec, speed, packet_size));
@@ -162,7 +159,6 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData& data)
         endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
         state_.in0 = Context::ZLP;
         state_.write_remain = {nullptr, 0};
-        ClearStatusOutArming();
       }
       // fall through
     case Context::STATUS_OUT:
@@ -220,11 +216,6 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
   switch (status)
   {
     case Context::ZLP:
-      if (state_.arm_status_out_after_in_zlp)
-      {
-        state_.arm_status_out_after_in_zlp = false;
-        ArmStatusOutIfNeeded();
-      }
       break;
 
     case Context::STATUS_IN_COMPLETE:
@@ -243,7 +234,7 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
       else if (state_.need_write_zlp)
       {
         state_.need_write_zlp = false;
-        state_.arm_status_out_after_in_zlp = !state_.status_out_armed;
+        ArmStatusOutIfNeeded();
         WriteZLP();
       }
       else if (class_req_.write)
@@ -254,12 +245,6 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
         {
           ResetClassRequestState();
         }
-      }
-
-      if (state_.arm_status_out_after_in_data)
-      {
-        state_.arm_status_out_after_in_data = false;
-        ArmStatusOutIfNeeded();
       }
       break;
 
@@ -273,7 +258,6 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
                                  size_t request_size, bool early_read_zlp)
 {
   state_.in0 = Context::DATA_IN;
-  ClearStatusOutArming();
 
   const bool FIRST_CHUNK = (state_.write_remain.size_ == 0);
   const size_t PAYLOAD_TOTAL_SIZE = data.size_;
@@ -327,10 +311,13 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
   else
   {
     state_.write_remain = {nullptr, 0};
-    // 在最后一个非 ZLP IN 包完成后再挂起 STATUS OUT。
-    // Defer STATUS OUT arming until the final non-ZLP IN packet completes.
-    state_.arm_status_out_after_in_data =
-        !state_.need_write_zlp && !state_.status_out_armed;
+    // 对单缓冲/软件补挂 STATUS OUT 的控制器，最后一个 IN 包发出前必须先挂好
+    // STATUS OUT，否则主机可能在我们收到 IN 完成回调前就发出零长度 OUT，导致
+    // 枚举阶段直接丢掉状态包。
+    if (!state_.need_write_zlp && !state_.status_out_armed)
+    {
+      ArmStatusOutIfNeeded();
+    }
   }
 
   auto buffer = endpoint_.in0->GetBuffer();
@@ -343,12 +330,6 @@ void DeviceCore::DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_len
   }
 
   endpoint_.in0->Transfer(data.size_);
-}
-
-void DeviceCore::ClearStatusOutArming()
-{
-  state_.arm_status_out_after_in_data = false;
-  state_.arm_status_out_after_in_zlp = false;
 }
 
 void DeviceCore::ArmStatusOutIfNeeded()
@@ -388,8 +369,7 @@ void DeviceCore::DevReadEP0Data(LibXR::RawData data, size_t packet_max_length)
   }
 
   state_.out0_buffer = reinterpret_cast<uint8_t*>(data.addr_);
-  endpoint_.out0->Transfer(data.size_);  // 一次性收满，HAL/底层自动搞定多包 /
-                                         // Receive-full; HAL handles packetization
+  endpoint_.out0->Transfer(data.size_);
 }
 
 void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket* setup)
