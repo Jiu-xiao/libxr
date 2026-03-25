@@ -3,6 +3,17 @@
 
 using namespace LibXR;
 
+// WCH GCC15 is sensitive to the exact self-programming code shape on CH32V3.
+// Keep the erase/write hot loops behind hard noinline boundaries, but leave the
+// surrounding unlock/clock/flag choreography in the original call sites.
+// WCH GCC15 对 CH32V3 自擦写路径的代码形状很敏感。
+// 这里把擦除/写入热循环放到明确的 noinline 边界后面，
+// 但解锁、降频、清标志这些外围时序仍留在原来的调用点。
+extern "C" __attribute__((noinline)) ErrorCode CH32FlashEraseHotPath(uint32_t erase_begin,
+                                                                     uint32_t erase_end);
+extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(
+    uint32_t start_addr, uint32_t end_addr, const uint8_t* src);
+
 // 访问时钟切半
 static void flash_set_access_clock_half_sysclk(void)
 {
@@ -57,13 +68,18 @@ static bool flash_wait_busy_clear(uint32_t spin = 1000000u)
   return true;
 }
 
-inline void CH32Flash::ClearFlashFlagsOnce()
+static inline void flash_clear_flags_once()
 {
 #ifdef FLASH_FLAG_BSY
   FLASH_ClearFlag(FLASH_FLAG_BSY | FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
 #else
   FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
 #endif
+}
+
+inline void CH32Flash::ClearFlashFlagsOnce()
+{
+  flash_clear_flags_once();
 }
 
 CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t start_sector)
@@ -75,6 +91,32 @@ CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t sta
       base_address_(sectors[start_sector - 1].address),
       sector_count_(sector_count)
 {
+}
+
+extern "C" __attribute__((noinline)) ErrorCode CH32FlashEraseHotPath(uint32_t erase_begin,
+                                                                     uint32_t erase_end)
+{
+  // 仅保留逐页擦除热循环；上下文准备/收尾由外层 Erase() 负责。
+  // Keep only the per-page erase hot loop here; setup/teardown stays in Erase().
+  for (uint32_t adr = erase_begin; adr < erase_end; adr += 256u)
+  {
+    FLASH->ADDR = adr;
+    FLASH->CTLR |= (1u << 6);
+
+    if (!flash_wait_busy_clear())
+    {
+      return ErrorCode::FAILED;
+    }
+
+    if (FLASH->STATR & (1u << 4))
+    {
+      FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
+      return ErrorCode::FAILED;
+    }
+
+    FLASH_ClearFlag(FLASH_FLAG_EOP);
+  }
+  return ErrorCode::OK;
 }
 
 ErrorCode CH32Flash::Erase(size_t offset, size_t size)
@@ -114,63 +156,20 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
     return ErrorCode::OK;
   }
 
-  // 5) 开启快速页擦除：CTLR.FTER=1
   FLASH->CTLR |= (1u << 17);
-
-  // 6) 逐页(256B)擦除
-  for (uint32_t adr = ERASE_BEGIN; adr < ERASE_END; adr += FAST_SZ)
-  {
-    // 写入页首地址
-    FLASH->ADDR = adr;
-
-    // 触发 STRT
-    FLASH->CTLR |= (1u << 6);
-
-    // 等待 BSY=0
-    if (!flash_wait_busy_clear())
-    {
-      // 关闭 FTER & 复锁 & 还原时钟后返回
-      FLASH->CTLR &= ~(1u << 17);
-      flash_fast_lock();
-      flash_set_access_clock_sysclk();
-      return ErrorCode::FAILED;
-    }
-
-    // 检查错误并清标志
-    if (FLASH->STATR & (1u << 4))
-    {  // WRPRTERR
-      FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
-      FLASH->CTLR &= ~(1u << 17);
-      flash_fast_lock();
-      flash_set_access_clock_sysclk();
-      return ErrorCode::FAILED;
-    }
-
-    // 成功：清 EOP
-    FLASH_ClearFlag(FLASH_FLAG_EOP);
-  }
-
-  // 7) 关闭快速页擦除位，复锁快速模式与常规锁，并恢复访问时钟
-  FLASH->CTLR &= ~(1u << 17);  // FTER=0
+  const ErrorCode ec = CH32FlashEraseHotPath(ERASE_BEGIN, ERASE_END);
+  FLASH->CTLR &= ~(1u << 17);
   flash_fast_lock();
   flash_set_access_clock_sysclk();
-
-  return ErrorCode::OK;
+  return ec;
 }
 
 ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
 {
   ASSERT(SystemCoreClock <= 120000000);
 
-  // 退出增强读模式 → 减少失败风险（手册要求在编程/擦除前退出）
-  flash_exit_enhanced_read_if_enabled();
-
-  // 访问时钟切半（SCKMOD=0）
-  flash_set_access_clock_half_sysclk();
-
   if (!data.addr_ || data.size_ == 0)
   {
-    flash_set_access_clock_sysclk();
     ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
@@ -178,19 +177,26 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
   const uint32_t START_ADDR = base_address_ + static_cast<uint32_t>(offset);
   if (!IsInRange(START_ADDR, data.size_))
   {
-    flash_set_access_clock_sysclk();
     ASSERT(false);
     return ErrorCode::OUT_OF_RANGE;
   }
 
   const uint8_t* src = reinterpret_cast<const uint8_t*>(data.addr_);
   const uint32_t END_ADDR = START_ADDR + static_cast<uint32_t>(data.size_);
+  return CH32FlashWriteHotPath(START_ADDR, END_ADDR, src);
+}
+
+extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(
+    uint32_t start_addr, uint32_t end_addr, const uint8_t* src)
+{
+  flash_exit_enhanced_read_if_enabled();
+  flash_set_access_clock_half_sysclk();
 
   FLASH_Unlock();
-  ClearFlashFlagsOnce();
+  flash_clear_flags_once();
 
-  const uint32_t HW_BEGIN = START_ADDR & ~1u;
-  const uint32_t HW_END = (END_ADDR + 1u) & ~1u;  // 向上取整到半字
+  const uint32_t HW_BEGIN = start_addr & ~1u;
+  const uint32_t HW_END = (end_addr + 1u) & ~1u;
 
   for (uint32_t hw = HW_BEGIN; hw < HW_END; hw += 2u)
   {
@@ -198,14 +204,14 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
     volatile uint16_t orig = *p;
     volatile uint16_t val = orig;
 
-    if (hw >= START_ADDR && hw < END_ADDR)
+    if (hw >= start_addr && hw < end_addr)
     {
-      uint8_t b0 = src[hw - START_ADDR];
+      uint8_t b0 = src[hw - start_addr];
       val = static_cast<uint16_t>((val & 0xFF00u) | b0);
     }
-    if ((hw + 1u) >= START_ADDR && (hw + 1u) < END_ADDR)
+    if ((hw + 1u) >= start_addr && (hw + 1u) < end_addr)
     {
-      uint8_t b1 = src[(hw + 1u) - START_ADDR];
+      uint8_t b1 = src[(hw + 1u) - start_addr];
       val = static_cast<uint16_t>((val & 0x00FFu) | (static_cast<uint16_t>(b1) << 8));
     }
 
@@ -219,7 +225,6 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
     {
       FLASH_Lock();
       flash_set_access_clock_sysclk();
-      ASSERT(false);
       return ErrorCode::FAILED;
     }
 
@@ -227,11 +232,15 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
     {
       FLASH_Lock();
       flash_set_access_clock_sysclk();
-      ASSERT(false);
       return ErrorCode::FAILED;
     }
 
-    ASSERT(*p == val);
+    if (*p != val)
+    {
+      FLASH_Lock();
+      flash_set_access_clock_sysclk();
+      return ErrorCode::FAILED;
+    }
 
     FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
   }

@@ -697,7 +697,13 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   {
     tog0_ = true;
     tog1_ = false;
-    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_ACK;
+    // Do not leave EP0 OUT open here. The upper control stack will re-arm it after the
+    // current packet has been fully consumed; otherwise the next session may race stale
+    // EP0 software state and duplicate/skip DFU payload blocks.
+    // 这里不要直接把 EP0 OUT 留在 ACK。
+    // 上层控制传输栈会在“当前包已经被完整消费”后再重新挂接收；
+    // 否则下一轮 session 可能撞上陈旧的 EP0 软件状态，导致 DFU 数据块重复或丢失。
+    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
   }
   OnTransferCompleteCallback(true, size);
 }

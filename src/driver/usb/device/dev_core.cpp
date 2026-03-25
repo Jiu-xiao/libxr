@@ -100,6 +100,24 @@ void DeviceCore::WriteZLP(Context context)
   endpoint_.in0->TransferZLP();
 }
 
+void DeviceCore::ResetControlTransferState()
+{
+  // USB reset/re-enumeration can rebuild DeviceCore while a previous control transfer
+  // is still partially remembered in software. If these fields leak across sessions,
+  // the next DFU DNLOAD may inherit stale EP0 state and break only on the second run.
+  // USB reset / 重枚举会重建 DeviceCore，但软件侧前一笔控制传输
+  // 不一定已经自然清干净。这里必须把 EP0 软状态全部清零，
+  // 否则下一轮 DFU DNLOAD 可能继承陈旧状态，只在“第二次传输”时才坏。
+  state_.in0 = Context::UNKNOWN;
+  state_.out0 = Context::UNKNOWN;
+  state_.write_remain = {nullptr, 0};
+  state_.read_remain = {nullptr, 0};
+  state_.pending_addr = 0xFF;
+  state_.out0_buffer = nullptr;
+  state_.need_write_zlp = false;
+  state_.status_out_armed = false;
+}
+
 void DeviceCore::Init(bool in_isr)
 {
   endpoint_.in0 = endpoint_.pool.GetEndpoint0In();
@@ -111,6 +129,7 @@ void DeviceCore::Init(bool in_isr)
   endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
   endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
 
+  ResetControlTransferState();
   composition_.Init(in_isr);
 
   state_.inited = true;
@@ -122,6 +141,7 @@ void DeviceCore::Deinit(bool in_isr)
   composition_.Deinit(in_isr);
   endpoint_.in0->Close();
   endpoint_.out0->Close();
+  ResetControlTransferState();
   ResetClassRequestState();
 }
 

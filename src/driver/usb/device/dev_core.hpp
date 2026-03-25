@@ -144,6 +144,7 @@ class DeviceCore
 
   void ReadZLP(Context context = Context::ZLP);
   void WriteZLP(Context context = Context::ZLP);
+  void ResetControlTransferState();
 
   void DevWriteEP0Data(LibXR::ConstRawData data, size_t packet_max_length,
                        size_t request_size = 0, bool early_read_zlp = false);
