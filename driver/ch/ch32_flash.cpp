@@ -93,11 +93,56 @@ CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t sta
 {
 }
 
+#if defined(__OPTIMIZE_SIZE__) || defined(LIBXR_CH32_FLASH_ERASE_ASM)
+#if defined(__OPTIMIZE_SIZE__) || defined(LIBXR_CH32_FLASH_ERASE_ASM)
+extern "C" __attribute__((naked, noinline)) ErrorCode CH32FlashEraseHotPath(
+    uint32_t erase_begin, uint32_t erase_end)
+{
+  // `Os + LTO` on the slow-exec route can hard-fault immediately after STRT.
+  // Keep only the size-optimized line on this fixed erase-loop sequence; default
+  // optimized builds keep the simpler C loop below, which already passes.
+  // slow-exec + `Os + LTO` 会在 STRT 之后立刻撞上取指窗口并 HardFault。
+  // 这里只有 size-opt 构建走固定汇编序列；默认优化线继续走下面更简单的 C 循环，
+  // 因为默认线本来就已经通过。
+  __asm volatile(
+      "bgeu a0, a1, 2f\n"
+      "lui a3, 0x40022\n"
+      "li a2, 32\n"
+      "1:\n"
+      "sw a0, 20(a3)\n"
+      "lw a5, 16(a3)\n"
+      "lui a4, 0x0f4\n"
+      "addi a4, a4, 577\n"
+      "ori a5, a5, 64\n"
+      "sw a5, 16(a3)\n"
+      "j 3f\n"
+      "4:\n"
+      "beqz a4, 5f\n"
+      "3:\n"
+      "lw a5, 12(a3)\n"
+      "addi a4, a4, -1\n"
+      "andi a5, a5, 1\n"
+      "bnez a5, 4b\n"
+      "lw a5, 12(a3)\n"
+      "andi a5, a5, 16\n"
+      "bnez a5, 6f\n"
+      "sw a2, 12(a3)\n"
+      "addi a0, a0, 256\n"
+      "bltu a0, a1, 1b\n"
+      "2:\n"
+      "li a0, 0\n"
+      "ret\n"
+      "6:\n"
+      "li a5, 48\n"
+      "sw a5, 12(a3)\n"
+      "5:\n"
+      "li a0, -1\n"
+      "ret\n");
+}
+#else
 extern "C" __attribute__((noinline)) ErrorCode CH32FlashEraseHotPath(uint32_t erase_begin,
                                                                      uint32_t erase_end)
 {
-  // 仅保留逐页擦除热循环；上下文准备/收尾由外层 Erase() 负责。
-  // Keep only the per-page erase hot loop here; setup/teardown stays in Erase().
   for (uint32_t adr = erase_begin; adr < erase_end; adr += 256u)
   {
     FLASH->ADDR = adr;
@@ -118,6 +163,32 @@ extern "C" __attribute__((noinline)) ErrorCode CH32FlashEraseHotPath(uint32_t er
   }
   return ErrorCode::OK;
 }
+#endif
+#else
+extern "C" __attribute__((noinline)) ErrorCode CH32FlashEraseHotPath(uint32_t erase_begin,
+                                                                     uint32_t erase_end)
+{
+  for (uint32_t adr = erase_begin; adr < erase_end; adr += 256u)
+  {
+    FLASH->ADDR = adr;
+    FLASH->CTLR |= (1u << 6);
+
+    if (!flash_wait_busy_clear())
+    {
+      return ErrorCode::FAILED;
+    }
+
+    if (FLASH->STATR & (1u << 4))
+    {
+      FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
+      return ErrorCode::FAILED;
+    }
+
+    FLASH_ClearFlag(FLASH_FLAG_EOP);
+  }
+  return ErrorCode::OK;
+}
+#endif
 
 ErrorCode CH32Flash::Erase(size_t offset, size_t size)
 {
