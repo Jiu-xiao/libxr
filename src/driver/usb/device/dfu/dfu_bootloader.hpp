@@ -1439,6 +1439,12 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
   }
 };
 
-using DfuBootloaderClass = DfuBootloaderClassT<4096u>;
+// Keep the default bootloader DFU control-transfer size conservative.
+// CH32 USBHS bootloader paths are verified stable at 64B; larger EP0 OUT data
+// stages still need controller-specific validation before becoming the default.
+// 默认 bootloader DFU 控制传输块保持保守：
+// CH32 USBHS bootloader 路径已经在 64B 上验证稳定；
+// 更大的 EP0 OUT 数据阶段在成为默认值前仍需要控制器级验证。
+using DfuBootloaderClass = DfuBootloaderClassT<64u>;
 
 }  // namespace LibXR::USB

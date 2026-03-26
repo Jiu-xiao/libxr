@@ -392,6 +392,7 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
   flash_set_access_clock_half_sysclk();
 
   // 3) 解锁：常规 + 快速模式
+  __disable_irq();
   flash_fast_unlock();
   ClearFlashFlagsOnce();
 
@@ -402,12 +403,14 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
   if (ERASE_END <= ERASE_BEGIN)
   {
     flash_fast_lock();
+    __enable_irq();
     flash_set_access_clock_sysclk();
     return ErrorCode::OK;
   }
 
   const ErrorCode ec = erase_hot_path(ERASE_BEGIN, ERASE_END);
   flash_fast_lock();
+  __enable_irq();
   flash_set_access_clock_sysclk();
   return ec;
 }
@@ -444,30 +447,37 @@ extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(
   flash_exit_enhanced_read_if_enabled();
   flash_set_access_clock_half_sysclk();
 
+  __disable_irq();
   flash_fast_unlock();
   flash_clear_flags_once();
   ErrorCode ec = ErrorCode::OK;
 
-  const uint32_t page_begin = (start_addr + kPageSize - 1u) & ~(kPageSize - 1u);
-  const uint32_t page_end = end_addr & ~(kPageSize - 1u);
+  const uint32_t aligned_begin = (start_addr + kPageSize - 1u) & ~(kPageSize - 1u);
+  const uint32_t aligned_end = end_addr & ~(kPageSize - 1u);
 
-  if (start_addr < page_begin && start_addr < end_addr)
+  const uint32_t head_end = (aligned_begin < end_addr) ? aligned_begin : end_addr;
+  if (start_addr < head_end)
   {
-    const uint32_t head_end = page_begin < end_addr ? page_begin : end_addr;
     ec = write_hot_loop(start_addr, head_end, src);
   }
 
-  if (ec == ErrorCode::OK && page_begin < page_end)
+  if (ec == ErrorCode::OK && aligned_begin < aligned_end)
   {
-    ec = write_page(page_begin, page_end, src + (page_begin - start_addr));
+    ec = write_page(aligned_begin, aligned_end, src + (aligned_begin - start_addr));
   }
 
-  if (ec == ErrorCode::OK && page_end < end_addr)
+  // When the write starts mid-page and does not reach the next aligned page
+  // boundary, `aligned_end` can be lower than `start_addr`. Clamp the tail
+  // begin to the true start so the copied SRAM hot path never sees a wrapped
+  // address range or an underflowed source pointer.
+  const uint32_t tail_begin = (aligned_end > start_addr) ? aligned_end : start_addr;
+  if (ec == ErrorCode::OK && tail_begin < end_addr)
   {
-    ec = write_hot_loop(page_end, end_addr, src + (page_end - start_addr));
+    ec = write_hot_loop(tail_begin, end_addr, src + (tail_begin - start_addr));
   }
 
   flash_fast_lock();
+  __enable_irq();
   flash_set_access_clock_sysclk();
   return ec;
 }

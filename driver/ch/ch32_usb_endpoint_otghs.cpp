@@ -588,9 +588,23 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
       }
       else
       {
-        *addr = USBHS_UEP_R_RES_ACK |
-                (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
-                (tog0_ ? USBHS_UEP_R_TOG_DATA1 : 0);
+        if (size == 0u)
+        {
+          // Control status OUT always starts from DATA1.
+          // 控制传输的 status OUT 固定从 DATA1 开始。
+          *addr = USBHS_UEP_R_RES_ACK |
+                  (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
+                  USBHS_UEP_R_TOG_DATA1;
+        }
+        else
+        {
+          // For EP0 multi-packet OUT, keep the current hardware DATA0/DATA1 phase and
+          // only reopen ACK here. The packet-complete path advances the RX toggle after
+          // each successfully received packet.
+          // EP0 多包 OUT 续挂时，这里只重新打开 ACK，不再用软件重算 DATA0/DATA1。
+          // 每个包成功收完后，由完成路径推进一次硬件 RX toggle。
+          *addr = (*addr & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_ACK;
+        }
       }
     }
     else
@@ -600,7 +614,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
     }
   }
 
-  if (GetNumber() == EPNumber::EP0)
+  if (GetNumber() == EPNumber::EP0 && IS_IN)
   {
     tog0_ = !tog0_;
   }
@@ -695,15 +709,30 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
 
   if (IS_EP0 && IS_OUT)
   {
-    tog0_ = true;
-    tog1_ = false;
+    auto* rx_ctrl = get_rx_control_addr(GetNumber());
     // Do not leave EP0 OUT open here. The upper control stack will re-arm it after the
     // current packet has been fully consumed; otherwise the next session may race stale
     // EP0 software state and duplicate/skip DFU payload blocks.
     // 这里不要直接把 EP0 OUT 留在 ACK。
     // 上层控制传输栈会在“当前包已经被完整消费”后再重新挂接收；
     // 否则下一轮 session 可能撞上陈旧的 EP0 软件状态，导致 DFU 数据块重复或丢失。
-    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
+    if (size > 0u)
+    {
+      // Advance the RX DATA0/DATA1 phase once per successfully received EP0 OUT packet.
+      // CH32 USBHS does not reliably keep EP0 multi-packet OUT flowing if we only reopen
+      // ACK without consuming the current hardware toggle.
+      // 每成功收完一个 EP0 OUT 包，都要推进一次 RX DATA0/DATA1 相位。
+      // CH32 USBHS 在多包 EP0 OUT 上，如果这里只是重新开 ACK 而不消费当前 toggle，
+      // 后续包会停在这里。
+      *rx_ctrl = static_cast<uint8_t>(((*rx_ctrl ^ USBHS_UEP_R_TOG_DATA1) &
+                                       ~USBHS_UEP_R_RES_MASK) |
+                                      USBHS_UEP_R_RES_NAK);
+    }
+    else
+    {
+      *rx_ctrl = static_cast<uint8_t>((*rx_ctrl & ~USBHS_UEP_R_RES_MASK) |
+                                      USBHS_UEP_R_RES_NAK);
+    }
   }
   OnTransferCompleteCallback(true, size);
 }
