@@ -461,16 +461,19 @@ extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(
     ec = write_hot_loop(start_addr, head_end, src);
   }
 
-  if (ec == ErrorCode::OK && aligned_begin < aligned_end)
+  const bool has_full_pages = (aligned_begin < aligned_end);
+  if (ec == ErrorCode::OK && has_full_pages)
   {
     ec = write_page(aligned_begin, aligned_end, src + (aligned_begin - start_addr));
   }
 
-  // When the write starts mid-page and does not reach the next aligned page
-  // boundary, `aligned_end` can be lower than `start_addr`. Clamp the tail
-  // begin to the true start so the copied SRAM hot path never sees a wrapped
-  // address range or an underflowed source pointer.
-  const uint32_t tail_begin = (aligned_end > start_addr) ? aligned_end : start_addr;
+  // Tail begins after the already-consumed head/body segments.
+  // For single-page unaligned writes, `head_end` may already reach `end_addr`,
+  // so the tail must start from `head_end` instead of replaying the same span.
+  // 尾段必须从已经消费完的 head/body 之后开始。
+  // 对“同页内的非对齐小写入”，`head_end` 可能已经等于 `end_addr`，
+  // 这里不能再从 `start_addr` 重放同一段。
+  const uint32_t tail_begin = has_full_pages ? aligned_end : head_end;
   if (ec == ErrorCode::OK && tail_begin < end_addr)
   {
     ec = write_hot_loop(tail_begin, end_addr, src + (tail_begin - start_addr));
