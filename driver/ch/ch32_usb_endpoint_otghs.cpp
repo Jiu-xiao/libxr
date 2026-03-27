@@ -695,7 +695,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   }
 
   // TOG mismatch indicates data synchronization failure.
-  if (IS_OUT)
+  if (IS_OUT && !IS_EP0)
   {
     const bool TOG_OK =
         ((USBHSD->INT_ST & USBHS_UIS_TOG_OK) == USBHS_UIS_TOG_OK);  // NOLINT
