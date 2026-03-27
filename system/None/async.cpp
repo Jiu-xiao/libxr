@@ -19,6 +19,6 @@ ErrorCode ASync::AssignJob(Job job)
     return ErrorCode::BUSY;
   }
 
-  job.Run(false, this);
+  job.Run<false>(this);
   return ErrorCode::OK;
 }

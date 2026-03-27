@@ -264,7 +264,7 @@ void HPMGPIO::CheckInterrupt(uint32_t port)
     gpio_clear_pin_interrupt_flag(controller, port, pin);
     if (auto* gpio = map[port][pin])
     {
-      gpio->callback_.Run(true);
+      gpio->callback_.Run<true>();
     }
   }
 }

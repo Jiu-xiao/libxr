@@ -504,7 +504,14 @@ class Endpoint
       }
     }
 
-    on_transfer_complete_.Run(in_isr, data);
+    if (in_isr)
+    {
+      on_transfer_complete_.Run<true>(data);
+    }
+    else
+    {
+      on_transfer_complete_.Run<false>(data);
+    }
   }
 
  protected:

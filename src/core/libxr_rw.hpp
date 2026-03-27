@@ -179,7 +179,15 @@ class Operation
     switch (type)
     {
       case OperationType::CALLBACK:
-        data.callback->Run(in_isr, std::forward<Status>(status));
+        // Operation callback mode is an indirect completion path:
+        // the driver/core finishes one async step, then software callbacks may
+        // schedule the next step in the same call chain (for example CDC<->UART pumping).
+        // Keep the reentrancy guard on this path explicitly.
+        // Operation 的 CALLBACK 模式属于“间接完成路径”：
+        // 驱动/核心完成一步异步动作后，软件回调可能在同一调用链里继续调度下一步
+        // （例如 CDC<->UART 泵送链）。
+        // 这里显式保留防重入语义。
+        data.callback->RunGuarded(in_isr, std::forward<Status>(status));
         break;
       case OperationType::BLOCK:
         // BLOCK waits are signaled by semaphore only; the owning port keeps the

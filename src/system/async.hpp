@@ -62,7 +62,7 @@ class ASync
     {
       if (async->sem_.Wait() == ErrorCode::OK)
       {
-        async->job_.Run(false, async);
+        async->job_.Run<false>(async);
         async->status_ = Status::DONE;
       }
     }

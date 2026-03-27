@@ -37,7 +37,7 @@ void Event::Active(uint32_t event)
 
   auto foreach_fun = [=](Block& block)
   {
-    block.cb.Run(false, event);
+    block.cb.RunGuarded(false, event);
     return ErrorCode::OK;
   };
 
@@ -53,7 +53,7 @@ void Event::ActiveFromCallback(CallbackList list, uint32_t event)
 
   auto foreach_fun = [=](Block& block)
   {
-    block.cb.Run(true, event);
+    block.cb.RunGuarded(true, event);
     return ErrorCode::OK;
   };
 

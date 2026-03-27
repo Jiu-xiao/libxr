@@ -26,13 +26,27 @@ void CAN::OnMessage(const ClassicPack& pack, bool in_isr)
           case FilterMode::ID_MASK:
             if ((pack.id & node.start_id_mask) == node.end_id_mask)
             {
-              node.cb.Run(in_isr, pack);
+              if (in_isr)
+              {
+                node.cb.Run<true>(pack);
+              }
+              else
+              {
+                node.cb.Run<false>(pack);
+              }
             }
             break;
           case FilterMode::ID_RANGE:
             if (pack.id >= node.start_id_mask && pack.id <= node.end_id_mask)
             {
-              node.cb.Run(in_isr, pack);
+              if (in_isr)
+              {
+                node.cb.Run<true>(pack);
+              }
+              else
+              {
+                node.cb.Run<false>(pack);
+              }
             }
             break;
         }
@@ -62,13 +76,27 @@ void FDCAN::OnMessage(const FDPack& pack, bool in_isr)
           case FilterMode::ID_MASK:
             if ((pack.id & node.start_id_mask) == node.end_id_mask)
             {
-              node.cb.Run(in_isr, pack);
+              if (in_isr)
+              {
+                node.cb.Run<true>(pack);
+              }
+              else
+              {
+                node.cb.Run<false>(pack);
+              }
             }
             break;
           case FilterMode::ID_RANGE:
             if (pack.id >= node.start_id_mask && pack.id <= node.end_id_mask)
             {
-              node.cb.Run(in_isr, pack);
+              if (in_isr)
+              {
+                node.cb.Run<true>(pack);
+              }
+              else
+              {
+                node.cb.Run<false>(pack);
+              }
             }
             break;
         }

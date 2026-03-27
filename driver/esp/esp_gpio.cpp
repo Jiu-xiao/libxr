@@ -16,7 +16,7 @@ void IRAM_ATTR ESP32GPIO::InterruptDispatcher(void* arg)
   auto gpio = map_[gpio_num];
   if (gpio)
   {
-    gpio->callback_.Run(true);
+    gpio->callback_.Run<true>();
   }
 }
 

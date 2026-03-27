@@ -63,7 +63,18 @@ class CallbackBlock
    *       On reentry, the callback is not invoked recursively. A pending flag is set and
    * arguments are stored for a single replay after the current run.
    */
-  void Call(bool in_isr, Args... args)
+  template <typename... PassArgs>
+  void CallDirect(bool in_isr, PassArgs&&... args)
+  {
+    if (!fun_)
+    {
+      return;
+    }
+
+    fun_(in_isr, arg_, std::forward<PassArgs>(args)...);
+  }
+
+  void CallGuarded(bool in_isr, Args... args)
   {
     if (!fun_)
     {
@@ -110,8 +121,7 @@ class CallbackBlock
    */
   CallbackBlock(CallbackBlock&& other) noexcept
       : fun_(std::exchange(other.fun_, nullptr)),
-        arg_(std::move(other.arg_)),
-        in_isr_(other.in_isr_)
+        arg_(std::move(other.arg_))
   {
   }
 
@@ -128,7 +138,6 @@ class CallbackBlock
     {
       fun_ = std::exchange(other.fun_, nullptr);
       arg_ = std::move(other.arg_);
-      in_isr_ = other.in_isr_;
     }
     return *this;
   }
@@ -136,7 +145,6 @@ class CallbackBlock
  private:
   void (*fun_)(bool, ArgType, Args...);  ///< 绑定的回调函数 / Bound callback function
   ArgType arg_;                          ///< 绑定的参数 / Bound argument
-  bool in_isr_ = false;  ///< 是否在中断上下文中执行 / Whether executed in ISR context
 };
 
 /**
@@ -148,7 +156,8 @@ class CallbackBlock
 template <typename... Args>
 class Callback
 {
-  static void FunctionDefault(bool, void*, Args...) {}
+  static void FunctionDefault(void*, Args...) {}
+  static void FunctionGuardedDefault(bool, void*, Args...) {}
 
  public:
   /**
@@ -169,13 +178,25 @@ class Callback
     void (*fun_ptr)(bool, ArgType, Args...) = fun;
     auto cb_block = new CallbackBlock<ArgType, Args...>(fun_ptr, arg);
 
-    auto cb_fun = [](bool in_isr, void* cb_block, Args... args)
+    auto cb_fun_true = [](void* cb_block, Args... args)
     {
       auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
-      cb->Call(in_isr, std::forward<Args>(args)...);
+      cb->CallDirect(true, std::forward<Args>(args)...);
     };
 
-    return Callback(cb_block, cb_fun);
+    auto cb_fun_false = [](void* cb_block, Args... args)
+    {
+      auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
+      cb->CallDirect(false, std::forward<Args>(args)...);
+    };
+
+    auto cb_fun_guarded = [](bool in_isr, void* cb_block, Args... args)
+    {
+      auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
+      cb->CallGuarded(in_isr, std::forward<Args>(args)...);
+    };
+
+    return Callback(cb_block, cb_fun_true, cb_fun_false, cb_fun_guarded);
   }
 
   /**
@@ -194,7 +215,9 @@ class Callback
    */
   Callback(Callback&& other) noexcept
       : cb_block_(std::exchange(other.cb_block_, nullptr)),
-        cb_fun_(std::exchange(other.cb_fun_, nullptr))
+        cb_fun_true_(std::exchange(other.cb_fun_true_, nullptr)),
+        cb_fun_false_(std::exchange(other.cb_fun_false_, nullptr)),
+        cb_fun_guarded_(std::exchange(other.cb_fun_guarded_, nullptr))
   {
   }
 
@@ -210,21 +233,30 @@ class Callback
     if (this != &other)
     {
       cb_block_ = std::exchange(other.cb_block_, nullptr);
-      cb_fun_ = std::exchange(other.cb_fun_, nullptr);
+      cb_fun_true_ = std::exchange(other.cb_fun_true_, nullptr);
+      cb_fun_false_ = std::exchange(other.cb_fun_false_, nullptr);
+      cb_fun_guarded_ = std::exchange(other.cb_fun_guarded_, nullptr);
     }
     return *this;
   }
 
-  /**
-   * @brief 执行回调函数并传递参数 / Execute the callback with arguments
-   *
-   * @param in_isr 是否在中断上下文中执行 / Whether executed in ISR context
-   * @param args 额外传递的参数 / Additional arguments to pass
-   */
-  template <typename... PassArgs>
-  void Run(bool in_isr, PassArgs&&... args) const
+  template <bool kInIsr, typename... PassArgs>
+  void Run(PassArgs&&... args) const
   {
-    cb_fun_(in_isr, cb_block_, std::forward<PassArgs>(args)...);
+    if constexpr (kInIsr)
+    {
+      cb_fun_true_(cb_block_, std::forward<PassArgs>(args)...);
+    }
+    else
+    {
+      cb_fun_false_(cb_block_, std::forward<PassArgs>(args)...);
+    }
+  }
+
+  template <typename... PassArgs>
+  void RunGuarded(bool in_isr, PassArgs&&... args) const
+  {
+      cb_fun_guarded_(in_isr, cb_block_, std::forward<PassArgs>(args)...);
   }
 
   /**
@@ -243,14 +275,23 @@ class Callback
    * @param cb_block 回调块对象指针 / Pointer to the callback block
    * @param cb_fun 回调执行函数指针 / Callback invocation function pointer
    */
-  Callback(void* cb_block, void (*cb_fun)(bool, void*, Args...))
-      : cb_block_(cb_block), cb_fun_(cb_fun)
+  Callback(void* cb_block, void (*cb_fun_true)(void*, Args...),
+           void (*cb_fun_false)(void*, Args...),
+           void (*cb_fun_guarded)(bool, void*, Args...))
+      : cb_block_(cb_block),
+        cb_fun_true_(cb_fun_true),
+        cb_fun_false_(cb_fun_false),
+        cb_fun_guarded_(cb_fun_guarded)
   {
   }
 
   void* cb_block_ = nullptr;  ///< 回调块指针 / Pointer to the callback block
-  void (*cb_fun_)(bool, void*, Args...) =
+  void (*cb_fun_true_)(void*, Args...) =
+      FunctionDefault;  ///< 直通 ISR=true/false 中的 true 分支 / Direct callback true branch
+  void (*cb_fun_false_)(void*, Args...) =
       FunctionDefault;  ///< 回调执行函数指针 / Callback invocation function pointer
+  void (*cb_fun_guarded_)(bool, void*, Args...) =
+      FunctionGuardedDefault;  ///< 显式防重入路径 / Explicit guarded callback path
 };
 
 }  // namespace LibXR
