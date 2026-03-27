@@ -454,97 +454,97 @@ void CH32UART::RxDmaIRQHandler()
 // USART IRQ entry adapters.
 #if defined(USART1)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART1_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART1); }
 #endif
 #if defined(USART2)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART2_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART2); }
 #endif
 #if defined(USART3)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART3_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART3); }
 #endif
 #if defined(USART4)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART4_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART4_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART4); }
 #endif
 #if defined(USART5)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART5_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART5_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART5); }
 #endif
 #if defined(USART6)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART6_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART6_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART6); }
 #endif
 #if defined(USART7)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART7_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART7_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART7_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART7); }
 #endif
 #if defined(USART8)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void USART8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void USART8_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART8_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_USART8); }
 #endif
 #if defined(UART1)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART1_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART1); }
 #endif
 #if defined(UART2)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART2_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART2); }
 #endif
 #if defined(UART3)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART3_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART3); }
 #endif
 #if defined(UART4)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART4_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART4_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART4); }
 #endif
 #if defined(UART5)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART5_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART5_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART5); }
 #endif
 #if defined(UART6)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART6_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART6_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART6); }
 #endif
 #if defined(UART7)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART7_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART7_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART7_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART7); }
 #endif
 #if defined(UART8)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void UART8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void UART8_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART8_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART8); }
 #endif

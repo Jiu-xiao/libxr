@@ -736,7 +736,7 @@ ErrorCode CH32CAN::GetErrorState(CAN::ErrorState& state) const
 
 #if defined(CAN1)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void CAN1_TX_IRQHandler(void) __attribute__((interrupt));
+extern "C" void CAN1_TX_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void CAN1_TX_IRQHandler(void)
 {
@@ -747,7 +747,7 @@ extern "C" void CAN1_TX_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void CAN1_RX1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void CAN1_RX1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void CAN1_RX1_IRQHandler(void)
 {
@@ -758,7 +758,7 @@ extern "C" void CAN1_RX1_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void CAN1_SCE_IRQHandler(void) __attribute__((interrupt));
+extern "C" void CAN1_SCE_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void CAN1_SCE_IRQHandler(void)
 {
@@ -771,7 +771,7 @@ extern "C" void CAN1_SCE_IRQHandler(void)
 
 #if defined(CAN2)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void CAN2_TX_IRQHandler(void) __attribute__((interrupt));
+extern "C" void CAN2_TX_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void CAN2_TX_IRQHandler(void)
 {
@@ -782,7 +782,7 @@ extern "C" void CAN2_TX_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void CAN2_RX0_IRQHandler(void) __attribute__((interrupt));
+extern "C" void CAN2_RX0_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void CAN2_RX0_IRQHandler(void)
 {
@@ -793,7 +793,7 @@ extern "C" void CAN2_RX0_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void CAN2_RX1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void CAN2_RX1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void CAN2_RX1_IRQHandler(void)
 {
@@ -804,7 +804,7 @@ extern "C" void CAN2_RX1_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void CAN2_SCE_IRQHandler(void) __attribute__((interrupt));
+extern "C" void CAN2_SCE_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void CAN2_SCE_IRQHandler(void)
 {

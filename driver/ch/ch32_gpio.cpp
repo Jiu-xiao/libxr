@@ -42,32 +42,32 @@ uint32_t LibXR::ch32_get_gpio_periph(GPIO_TypeDef* port)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI0_IRQHandler(void) __attribute__((interrupt));
+extern "C" void EXTI0_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI0_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line0); }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void EXTI1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI1_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line1); }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void EXTI2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI2_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line2); }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void EXTI3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI3_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line3); }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void EXTI4_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI4_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Line4); }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI9_5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void EXTI9_5_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI9_5_IRQHandler(void)
 {
@@ -79,7 +79,7 @@ extern "C" void EXTI9_5_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI15_10_IRQHandler(void) __attribute__((interrupt));
+extern "C" void EXTI15_10_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI15_10_IRQHandler(void)
 {

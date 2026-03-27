@@ -3,7 +3,7 @@
 #if defined(RCC_APB1Periph_USB) && defined(CAN1) && !defined(CAN2)
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" __attribute__((interrupt)) void USB_LP_CAN1_RX0_IRQHandler(void)
+extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USB_LP_CAN1_RX0_IRQHandler(void)
 {
   using namespace LibXR::CH32UsbCanShared;
 
@@ -18,7 +18,7 @@ extern "C" __attribute__((interrupt)) void USB_LP_CAN1_RX0_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" __attribute__((interrupt)) void USB_HP_CAN1_TX_IRQHandler(void)
+extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USB_HP_CAN1_TX_IRQHandler(void)
 {
   using namespace LibXR::CH32UsbCanShared;
 

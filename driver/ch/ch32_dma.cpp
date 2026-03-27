@@ -292,7 +292,7 @@ DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id)
 
 #if defined(DMA1_Channel1)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel1_IRQHandler(void)
 {
@@ -306,7 +306,7 @@ extern "C" void DMA1_Channel1_IRQHandler(void)
 
 #if defined(DMA1_Channel2)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel2_IRQHandler(void)
 {
@@ -320,7 +320,7 @@ extern "C" void DMA1_Channel2_IRQHandler(void)
 
 #if defined(DMA1_Channel3)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel3_IRQHandler(void)
 {
@@ -334,7 +334,7 @@ extern "C" void DMA1_Channel3_IRQHandler(void)
 
 #if defined(DMA1_Channel4)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel4_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel4_IRQHandler(void)
 {
@@ -348,7 +348,7 @@ extern "C" void DMA1_Channel4_IRQHandler(void)
 
 #if defined(DMA1_Channel5)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel5_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel5_IRQHandler(void)
 {
@@ -362,7 +362,7 @@ extern "C" void DMA1_Channel5_IRQHandler(void)
 
 #if defined(DMA1_Channel6)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel6_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel6_IRQHandler(void)
 {
@@ -376,7 +376,7 @@ extern "C" void DMA1_Channel6_IRQHandler(void)
 
 #if defined(DMA1_Channel7)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel7_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel7_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel7_IRQHandler(void)
 {
@@ -390,7 +390,7 @@ extern "C" void DMA1_Channel7_IRQHandler(void)
 
 #if defined(DMA1_Channel8)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA1_Channel8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA1_Channel8_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel8_IRQHandler(void)
 {
@@ -404,7 +404,7 @@ extern "C" void DMA1_Channel8_IRQHandler(void)
 
 #if defined(DMA2_Channel1)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel1_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel1_IRQHandler(void)
 {
@@ -418,7 +418,7 @@ extern "C" void DMA2_Channel1_IRQHandler(void)
 
 #if defined(DMA2_Channel2)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel2_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel2_IRQHandler(void)
 {
@@ -432,7 +432,7 @@ extern "C" void DMA2_Channel2_IRQHandler(void)
 
 #if defined(DMA2_Channel3)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel3_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel3_IRQHandler(void)
 {
@@ -446,7 +446,7 @@ extern "C" void DMA2_Channel3_IRQHandler(void)
 
 #if defined(DMA2_Channel4)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel4_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel4_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel4_IRQHandler(void)
 {
@@ -460,7 +460,7 @@ extern "C" void DMA2_Channel4_IRQHandler(void)
 
 #if defined(DMA2_Channel5)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel5_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel5_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel5_IRQHandler(void)
 {
@@ -474,7 +474,7 @@ extern "C" void DMA2_Channel5_IRQHandler(void)
 
 #if defined(DMA2_Channel6)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel6_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel6_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel6_IRQHandler(void)
 {
@@ -488,7 +488,7 @@ extern "C" void DMA2_Channel6_IRQHandler(void)
 
 #if defined(DMA2_Channel7)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel7_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel7_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel7_IRQHandler(void)
 {
@@ -502,7 +502,7 @@ extern "C" void DMA2_Channel7_IRQHandler(void)
 
 #if defined(DMA2_Channel8)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel8_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel8_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel8_IRQHandler(void)
 {
@@ -516,7 +516,7 @@ extern "C" void DMA2_Channel8_IRQHandler(void)
 
 #if defined(DMA2_Channel9)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel9_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel9_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel9_IRQHandler(void)
 {
@@ -530,7 +530,7 @@ extern "C" void DMA2_Channel9_IRQHandler(void)
 
 #if defined(DMA2_Channel10)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel10_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel10_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel10_IRQHandler(void)
 {
@@ -544,7 +544,7 @@ extern "C" void DMA2_Channel10_IRQHandler(void)
 
 #if defined(DMA2_Channel11)
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void DMA2_Channel11_IRQHandler(void) __attribute__((interrupt));
+extern "C" void DMA2_Channel11_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA2_Channel11_IRQHandler(void)
 {
