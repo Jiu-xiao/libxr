@@ -36,16 +36,29 @@ struct CH32FlashHotPaths
   CH32FlashWritePageFn write_page = nullptr;
 };
 
-// This buffer hosts the copied erase loop so the CPU does not fetch the next
-// instruction from flash after STRT has already launched a page erase.
-// 这个静态缓冲区承载拷到 SRAM 的擦除循环，避免 STRT 之后 CPU 还从 flash 取指。
-constexpr size_t kCH32FlashEraseHotPathSramBytes = 256u;
-alignas(16) static uint8_t g_ch32_flash_erase_hot_path_sram[kCH32FlashEraseHotPathSramBytes];
-constexpr size_t kCH32FlashWriteHotLoopSramBytes = 512u;
-alignas(16) static uint8_t g_ch32_flash_write_hot_loop_sram[kCH32FlashWriteHotLoopSramBytes];
-constexpr size_t kCH32FlashWritePageSramBytes = 512u;
-alignas(16) static uint8_t g_ch32_flash_write_page_sram[kCH32FlashWritePageSramBytes];
+constexpr size_t kRoutineAlign = 16u;
+// Current verified WCH GCC15 build emits:
+// - erase loop      : 0x78 bytes
+// - halfword writer : 0xD2 bytes
+// - page writer     : 0x138 bytes
+// Rounded up to 16-byte alignment and packed into one SRAM arena.
+constexpr size_t kHotCodeBytes = 0x2C0u;
+
+alignas(kRoutineAlign) static uint8_t g_hot_code[kHotCodeBytes];
 static CH32FlashHotPaths g_ch32_flash_hot_paths;
+
+static uintptr_t AlignUp(uintptr_t value, size_t align)
+{
+  return (value + align - 1u) & ~(static_cast<uintptr_t>(align) - 1u);
+}
+
+template <typename Fn>
+static size_t RoutineSize(Fn flash_fn, const void* flash_end)
+{
+  const auto* begin = reinterpret_cast<const uint8_t*>(flash_fn);
+  const auto* end = reinterpret_cast<const uint8_t*>(flash_end);
+  return static_cast<size_t>(end - begin);
+}
 
 static inline void flash_clear_status_direct(uint32_t flags)
 {
@@ -92,21 +105,27 @@ void CH32FlashEraseHotPathFlashEnd()
 {
 }
 
-template <typename Fn, size_t N>
-static Fn CopyHotPathToSram(Fn flash_fn, const void* flash_end, uint8_t (&sram)[N])
+template <typename Fn>
+static Fn CopyRoutineToSram(Fn flash_fn, const void* flash_end, uint8_t*& cursor,
+                            uint8_t* limit)
 {
-  const auto* begin = reinterpret_cast<const uint8_t*>(flash_fn);
-  const auto* end = reinterpret_cast<const uint8_t*>(flash_end);
-  const size_t size = static_cast<size_t>(end - begin);
-  ASSERT(size != 0u && size <= sizeof(sram));
-  if (size == 0u || size > sizeof(sram))
+  const size_t size = RoutineSize(flash_fn, flash_end);
+  cursor = reinterpret_cast<uint8_t*>(AlignUp(reinterpret_cast<uintptr_t>(cursor), kRoutineAlign));
+
+  ASSERT(size != 0u);
+  ASSERT(static_cast<size_t>(limit - cursor) >= size);
+  if (size == 0u || static_cast<size_t>(limit - cursor) < size)
   {
     return flash_fn;
   }
 
-  std::memcpy(sram, begin, size);
-  __builtin___clear_cache(reinterpret_cast<char*>(sram), reinterpret_cast<char*>(sram + size));
-  return reinterpret_cast<Fn>(sram);
+  std::memcpy(cursor, reinterpret_cast<const void*>(flash_fn), size);
+  __builtin___clear_cache(reinterpret_cast<char*>(cursor),
+                          reinterpret_cast<char*>(cursor + size));
+
+  Fn sram_fn = reinterpret_cast<Fn>(cursor);
+  cursor += size;
+  return sram_fn;
 }
 
 static void InitHotPathsOnce()
@@ -117,18 +136,35 @@ static void InitHotPathsOnce()
     return;
   }
 
-  g_ch32_flash_hot_paths.erase =
-      CopyHotPathToSram(CH32FlashEraseHotPathFlash,
-                        reinterpret_cast<const void*>(CH32FlashEraseHotPathFlashEnd),
-                        g_ch32_flash_erase_hot_path_sram);
-  g_ch32_flash_hot_paths.write_halfword =
-      CopyHotPathToSram(CH32FlashWriteHotLoopFlash,
-                        reinterpret_cast<const void*>(CH32FlashWriteHotLoopFlashEnd),
-                        g_ch32_flash_write_hot_loop_sram);
-  g_ch32_flash_hot_paths.write_page =
-      CopyHotPathToSram(CH32FlashWritePageFlash,
-                        reinterpret_cast<const void*>(CH32FlashWritePageFlashEnd),
-                        g_ch32_flash_write_page_sram);
+  const size_t erase_size =
+      AlignUp(RoutineSize(CH32FlashEraseHotPathFlash,
+                          reinterpret_cast<const void*>(CH32FlashEraseHotPathFlashEnd)),
+              kRoutineAlign);
+  const size_t write_halfword_size =
+      AlignUp(RoutineSize(CH32FlashWriteHotLoopFlash,
+                          reinterpret_cast<const void*>(CH32FlashWriteHotLoopFlashEnd)),
+              kRoutineAlign);
+  const size_t write_page_size =
+      AlignUp(RoutineSize(CH32FlashWritePageFlash,
+                          reinterpret_cast<const void*>(CH32FlashWritePageFlashEnd)),
+              kRoutineAlign);
+
+  const size_t total_size = erase_size + write_halfword_size + write_page_size;
+  ASSERT(total_size <= sizeof(g_hot_code));
+
+  uint8_t* cursor = reinterpret_cast<uint8_t*>(
+      AlignUp(reinterpret_cast<uintptr_t>(g_hot_code), kRoutineAlign));
+  uint8_t* limit = g_hot_code + sizeof(g_hot_code);
+
+  g_ch32_flash_hot_paths.erase = CopyRoutineToSram(
+      CH32FlashEraseHotPathFlash, reinterpret_cast<const void*>(CH32FlashEraseHotPathFlashEnd),
+      cursor, limit);
+  g_ch32_flash_hot_paths.write_halfword = CopyRoutineToSram(
+      CH32FlashWriteHotLoopFlash, reinterpret_cast<const void*>(CH32FlashWriteHotLoopFlashEnd),
+      cursor, limit);
+  g_ch32_flash_hot_paths.write_page = CopyRoutineToSram(
+      CH32FlashWritePageFlash, reinterpret_cast<const void*>(CH32FlashWritePageFlashEnd), cursor,
+      limit);
   inited = true;
 }
 
