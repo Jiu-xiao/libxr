@@ -951,7 +951,10 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
     class_req_.b_request = setup->bRequest;
     class_req_.data = result.write_data;
 
-    DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize());
+    // Class IN transfers need the host-requested wLength so EP0 can decide whether
+    // a terminating ZLP is required when the payload is shorter than the request
+    // but still an exact multiple of bMaxPacketSize0 (for example DFU UPLOAD tails).
+    DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize(), setup->wLength);
     return ErrorCode::OK;
   }
 
