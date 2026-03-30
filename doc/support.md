@@ -6,11 +6,6 @@
 - ❌：未支持（Not Supported）
 - 🚫：硬件不支持/不可用（Unavailable）
 
-> Current verified XRUSB device-side protocol coverage includes:
-> `CDC-ACM`, `HID`, `UAC1 microphone`, `GSUSB`, `DAPLink V2`, `DFU Runtime`, and
-> `DFU Bootloader`.
-> Verified BOS / platform capabilities currently include `WebUSB` and `WinUSB MS OS 2.0`.
-
 ## Linux Support
 
 | `Peripheral` | Ubuntu/Debian |
@@ -59,11 +54,6 @@
 | SmartConfig | ❌     |
 | Bluetooth   | ❌     |
 
-> Verified USB device-controller paths:
-> - `USB_DRV_FS`: `STM32G431`
-> - `USB_OTG_FS`: `STM32F401`, `STM32F407`
-> - `USB_OTG_HS`: `STM32F407`, `STM32H750`
-
 ## ESP32 Support
 
 | `Peripheral` | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 |
@@ -89,11 +79,6 @@
 | SmartConfig | ❌     | ❌        | ❌        | ❌        |
 | Bluetooth   | ❌     | ❌        | ❌        | ❌        |
 
-> Note:
-> `USB-DEVICE` refers to the native USB device controller path.
-> `CDC-JTAG` refers to the dedicated USB Serial/JTAG peripheral and is distinct from the native USB device stack.
-> The currently verified ESP native USB device backend is the `ESP32-S3` path.
-
 ## CH32 Support
 
 | `Peripheral` | CH32V307/CH32V203 |
@@ -117,8 +102,3 @@
 | WIFI Client | ❌        |
 | SmartConfig | ❌        |
 | Bluetooth   | ❌        |
-
-> Verified USB device-controller paths:
-> - `USB_DEVICE_FS`: `CH32V203`
-> - `USB_OTG_FS`: `CH32V203`, `CH32V208`, `CH32V307`
-> - `USB_OTG_HS`: `CH32V305`, `CH32V307`
