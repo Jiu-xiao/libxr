@@ -724,14 +724,14 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
       // 每成功收完一个 EP0 OUT 包，都要推进一次 RX DATA0/DATA1 相位。
       // CH32 USBHS 在多包 EP0 OUT 上，如果这里只是重新开 ACK 而不消费当前 toggle，
       // 后续包会停在这里。
-      *rx_ctrl = static_cast<uint8_t>(((*rx_ctrl ^ USBHS_UEP_R_TOG_DATA1) &
-                                       ~USBHS_UEP_R_RES_MASK) |
-                                      USBHS_UEP_R_RES_NAK);
+      *rx_ctrl = static_cast<uint8_t>(
+          ((*rx_ctrl ^ USBHS_UEP_R_TOG_DATA1) & ~USBHS_UEP_R_RES_MASK) |
+          USBHS_UEP_R_RES_NAK);
     }
     else
     {
-      *rx_ctrl = static_cast<uint8_t>((*rx_ctrl & ~USBHS_UEP_R_RES_MASK) |
-                                      USBHS_UEP_R_RES_NAK);
+      *rx_ctrl =
+          static_cast<uint8_t>((*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK);
     }
   }
   OnTransferCompleteCallback<true>(size);

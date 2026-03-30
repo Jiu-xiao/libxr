@@ -3,8 +3,8 @@
 #include <cstdint>
 
 #include "core.hpp"
-#include "libxr_type.hpp"
 #include "device_composition.hpp"
+#include "libxr_type.hpp"
 
 using namespace LibXR::USB;
 
@@ -161,9 +161,9 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData& data)
   {
     return;
   }
-  const bool STATUS_OUT_DONE =
-      state_.status_out_armed && class_req_.class_in_data_status_pending &&
-      endpoint_.in0->GetState() != Endpoint::State::BUSY;
+  const bool STATUS_OUT_DONE = state_.status_out_armed &&
+                               class_req_.class_in_data_status_pending &&
+                               endpoint_.in0->GetState() != Endpoint::State::BUSY;
   auto status = this->state_.out0;
   state_.out0 = Context::UNKNOWN;
 

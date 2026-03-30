@@ -41,7 +41,8 @@ static size_t calc_max_config_size(
 
 LibXR::RawData ConfigDescriptorItem::GetData() { return data_; }
 
-ConfigDescriptor::ConfigDescriptor(size_t buffer_size, uint8_t bmAttributes, uint8_t bMaxPower)
+ConfigDescriptor::ConfigDescriptor(size_t buffer_size, uint8_t bmAttributes,
+                                   uint8_t bMaxPower)
     : bm_attributes_(bmAttributes), b_max_power_(bMaxPower)
 {
   ASSERT(buffer_size > 0);
@@ -95,8 +96,7 @@ ErrorCode ConfigDescriptor::BuildConfigDescriptor(ConfigDescriptorItem* const* i
     LibXR::Memory::FastCopy(&buffer[offset], data.addr_, data.size_);
     offset += data.size_;
 
-    total_interfaces =
-        static_cast<uint8_t>(total_interfaces + item->GetInterfaceCount());
+    total_interfaces = static_cast<uint8_t>(total_interfaces + item->GetInterfaceCount());
   }
 
   ASSERT(offset <= 0xFFFF);

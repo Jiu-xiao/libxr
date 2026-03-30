@@ -73,7 +73,8 @@ ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
   {
     auto& slot_container = (*this)[i];
     auto state = slot_container.slot.state.load(std::memory_order_acquire);
-    if (state == SlotState::RECYCLE && slot_container.slot.data->GetAddress() == ep_addr &&
+    if (state == SlotState::RECYCLE &&
+        slot_container.slot.data->GetAddress() == ep_addr &&
         slot_container.slot.data->GetDirection() == direction)
     {
       ans = slot_container.slot.data;

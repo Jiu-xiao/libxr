@@ -9,8 +9,9 @@ using namespace LibXR;
 // WCH GCC15 对 CH32V3 自擦写路径的代码形状很敏感。
 // 这里把擦除/写入热循环放到明确的 noinline 边界后面，
 // 但解锁、降频、清标志这些外围时序仍留在原来的调用点。
-extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(
-    uint32_t start_addr, uint32_t end_addr, const uint8_t* src);
+extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
+                                                                     uint32_t end_addr,
+                                                                     const uint8_t* src);
 
 namespace
 {
@@ -60,13 +61,11 @@ static size_t RoutineSize(Fn flash_fn, const void* flash_end)
   return static_cast<size_t>(end - begin);
 }
 
-static inline void flash_clear_status_direct(uint32_t flags)
-{
-  FLASH->STATR = flags;
-}
+static inline void flash_clear_status_direct(uint32_t flags) { FLASH->STATR = flags; }
 
-extern "C" __attribute__((noinline, used, section(".text.ch32_flash_erase_hot_src")))
-ErrorCode CH32FlashEraseHotPathFlash(uint32_t erase_begin, uint32_t erase_end)
+extern "C"
+    __attribute__((noinline, used, section(".text.ch32_flash_erase_hot_src"))) ErrorCode
+    CH32FlashEraseHotPathFlash(uint32_t erase_begin, uint32_t erase_end)
 {
   constexpr uint32_t kFastEraseBit = (1u << 17);
   constexpr uint32_t kFastPageSize = 256u;
@@ -100,8 +99,8 @@ ErrorCode CH32FlashEraseHotPathFlash(uint32_t erase_begin, uint32_t erase_end)
   return ErrorCode::OK;
 }
 
-extern "C" __attribute__((noinline, used, section(".text.ch32_flash_erase_hot_src")))
-void CH32FlashEraseHotPathFlashEnd()
+extern "C" __attribute__((noinline, used, section(".text.ch32_flash_erase_hot_src"))) void
+CH32FlashEraseHotPathFlashEnd()
 {
 }
 
@@ -110,7 +109,8 @@ static Fn CopyRoutineToSram(Fn flash_fn, const void* flash_end, uint8_t*& cursor
                             uint8_t* limit)
 {
   const size_t size = RoutineSize(flash_fn, flash_end);
-  cursor = reinterpret_cast<uint8_t*>(AlignUp(reinterpret_cast<uintptr_t>(cursor), kRoutineAlign));
+  cursor = reinterpret_cast<uint8_t*>(
+      AlignUp(reinterpret_cast<uintptr_t>(cursor), kRoutineAlign));
 
   ASSERT(size != 0u);
   ASSERT(static_cast<size_t>(limit - cursor) >= size);
@@ -157,19 +157,20 @@ static void InitHotPathsOnce()
   uint8_t* limit = g_hot_code + sizeof(g_hot_code);
 
   g_ch32_flash_hot_paths.erase = CopyRoutineToSram(
-      CH32FlashEraseHotPathFlash, reinterpret_cast<const void*>(CH32FlashEraseHotPathFlashEnd),
-      cursor, limit);
+      CH32FlashEraseHotPathFlash,
+      reinterpret_cast<const void*>(CH32FlashEraseHotPathFlashEnd), cursor, limit);
   g_ch32_flash_hot_paths.write_halfword = CopyRoutineToSram(
-      CH32FlashWriteHotLoopFlash, reinterpret_cast<const void*>(CH32FlashWriteHotLoopFlashEnd),
-      cursor, limit);
+      CH32FlashWriteHotLoopFlash,
+      reinterpret_cast<const void*>(CH32FlashWriteHotLoopFlashEnd), cursor, limit);
   g_ch32_flash_hot_paths.write_page = CopyRoutineToSram(
-      CH32FlashWritePageFlash, reinterpret_cast<const void*>(CH32FlashWritePageFlashEnd), cursor,
-      limit);
+      CH32FlashWritePageFlash, reinterpret_cast<const void*>(CH32FlashWritePageFlashEnd),
+      cursor, limit);
   inited = true;
 }
 
-extern "C" __attribute__((noinline, used, section(".text.ch32_flash_write_hot_src")))
-ErrorCode CH32FlashWriteHotLoopFlash(uint32_t start_addr, uint32_t end_addr, const uint8_t* src)
+extern "C"
+    __attribute__((noinline, used, section(".text.ch32_flash_write_hot_src"))) ErrorCode
+    CH32FlashWriteHotLoopFlash(uint32_t start_addr, uint32_t end_addr, const uint8_t* src)
 {
   const uint32_t HW_BEGIN = start_addr & ~1u;
   const uint32_t HW_END = (end_addr + 1u) & ~1u;
@@ -233,13 +234,14 @@ ErrorCode CH32FlashWriteHotLoopFlash(uint32_t start_addr, uint32_t end_addr, con
   return ErrorCode::OK;
 }
 
-extern "C" __attribute__((noinline, used, section(".text.ch32_flash_write_hot_src")))
-void CH32FlashWriteHotLoopFlashEnd()
+extern "C" __attribute__((noinline, used, section(".text.ch32_flash_write_hot_src"))) void
+CH32FlashWriteHotLoopFlashEnd()
 {
 }
 
-extern "C" __attribute__((noinline, used, section(".text.ch32_flash_write_page_src")))
-ErrorCode CH32FlashWritePageFlash(uint32_t start_addr, uint32_t end_addr, const uint8_t* src)
+extern "C"
+    __attribute__((noinline, used, section(".text.ch32_flash_write_page_src"))) ErrorCode
+    CH32FlashWritePageFlash(uint32_t start_addr, uint32_t end_addr, const uint8_t* src)
 {
   constexpr uint32_t kPageSize = 256u;
   constexpr uint32_t kPageProgramBit = (1u << 16);
@@ -273,11 +275,10 @@ ErrorCode CH32FlashWritePageFlash(uint32_t start_addr, uint32_t end_addr, const 
     const uint8_t* page_src = src + (page - start_addr);
     for (uint32_t i = 0u; i < kPageSize; i += 4u)
     {
-      const uint32_t word =
-          static_cast<uint32_t>(page_src[i]) |
-          (static_cast<uint32_t>(page_src[i + 1u]) << 8) |
-          (static_cast<uint32_t>(page_src[i + 2u]) << 16) |
-          (static_cast<uint32_t>(page_src[i + 3u]) << 24);
+      const uint32_t word = static_cast<uint32_t>(page_src[i]) |
+                            (static_cast<uint32_t>(page_src[i + 1u]) << 8) |
+                            (static_cast<uint32_t>(page_src[i + 2u]) << 16) |
+                            (static_cast<uint32_t>(page_src[i + 3u]) << 24);
 
       *reinterpret_cast<volatile uint32_t*>(page + i) = word;
 
@@ -313,9 +314,8 @@ ErrorCode CH32FlashWritePageFlash(uint32_t start_addr, uint32_t end_addr, const 
 
     for (uint32_t i = 0u; i < kPageSize; i += 2u)
     {
-      const uint16_t expect =
-          static_cast<uint16_t>(page_src[i]) |
-          (static_cast<uint16_t>(page_src[i + 1u]) << 8);
+      const uint16_t expect = static_cast<uint16_t>(page_src[i]) |
+                              (static_cast<uint16_t>(page_src[i + 1u]) << 8);
       const uint16_t actual = *reinterpret_cast<volatile uint16_t*>(page + i);
       if (actual != expect)
       {
@@ -329,8 +329,9 @@ ErrorCode CH32FlashWritePageFlash(uint32_t start_addr, uint32_t end_addr, const 
   return ErrorCode::OK;
 }
 
-extern "C" __attribute__((noinline, used, section(".text.ch32_flash_write_page_src")))
-void CH32FlashWritePageFlashEnd()
+extern "C"
+    __attribute__((noinline, used, section(".text.ch32_flash_write_page_src"))) void
+    CH32FlashWritePageFlashEnd()
 {
 }
 }  // namespace
@@ -386,10 +387,7 @@ static inline void flash_clear_flags_once()
 #endif
 }
 
-inline void CH32Flash::ClearFlashFlagsOnce()
-{
-  flash_clear_flags_once();
-}
+inline void CH32Flash::ClearFlashFlagsOnce() { flash_clear_flags_once(); }
 
 CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t start_sector)
     : Flash(sectors[start_sector - 1].size, MinWriteSize(),
@@ -473,8 +471,9 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
   return CH32FlashWriteHotPath(START_ADDR, END_ADDR, src);
 }
 
-extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(
-    uint32_t start_addr, uint32_t end_addr, const uint8_t* src)
+extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
+                                                                     uint32_t end_addr,
+                                                                     const uint8_t* src)
 {
   const auto write_hot_loop = g_ch32_flash_hot_paths.write_halfword;
   const auto write_page = g_ch32_flash_hot_paths.write_page;

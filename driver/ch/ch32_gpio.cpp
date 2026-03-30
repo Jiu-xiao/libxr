@@ -79,7 +79,8 @@ extern "C" void EXTI9_5_IRQHandler(void)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI15_10_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
+extern "C" void EXTI15_10_IRQHandler(void)
+    __attribute__((interrupt("WCH-Interrupt-fast")));
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI15_10_IRQHandler(void)
 {

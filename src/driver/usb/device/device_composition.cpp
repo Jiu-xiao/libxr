@@ -11,8 +11,8 @@ using LibXR::USB::CFG_REMOTE_WAKEUP;
 using LibXR::USB::CFG_SELF_POWERED;
 using LibXR::USB::ConfigDescriptorItem;
 using LibXR::USB::DESCRIPTOR_TYPE_DEVICE_CAPABILITY;
-using LibXR::USB::DEV_CAPABILITY_TYPE_USB20EXT;
 using LibXR::USB::DescriptorStrings;
+using LibXR::USB::DEV_CAPABILITY_TYPE_USB20EXT;
 using LibXR::USB::DeviceClass;
 
 struct InterfaceStringLayout
@@ -27,8 +27,8 @@ static size_t calc_total_item_num(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
 {
-  // Count raw items first; the final unique-class table is deduplicated in the constructor.
-  // 这里先统计原始 item 数量；最终唯一 class 表会在构造函数里去重。
+  // Count raw items first; the final unique-class table is deduplicated in the
+  // constructor. 这里先统计原始 item 数量；最终唯一 class 表会在构造函数里去重。
   size_t total = 0;
   for (const auto& group : configs)
   {
@@ -39,7 +39,8 @@ static size_t calc_total_item_num(
 
 // Constructor-time unique-class table is tiny, so a linear contains check is sufficient.
 // 构造期唯一 class 表很小，线性查重已经足够。
-static bool contains_class(DeviceClass* const* list, size_t count, const DeviceClass* item)
+static bool contains_class(DeviceClass* const* list, size_t count,
+                           const DeviceClass* item)
 {
   for (size_t i = 0; i < count; ++i)
   {
@@ -155,7 +156,8 @@ static InterfaceStringLayout calc_interface_string_layout(DeviceClass* const* cl
 {
   // Interface strings are generated at runtime, but their source pointers and the maximum
   // UTF-16LE descriptor size can be fixed up front during composition construction.
-  // 接口字符串描述符在运行时生成，但其源字符串指针和最大 UTF-16LE 空间可在构造期一次算清。
+  // 接口字符串描述符在运行时生成，但其源字符串指针和最大 UTF-16LE
+  // 空间可在构造期一次算清。
   InterfaceStringLayout layout{};
   for (size_t class_index = 0; class_index < class_count; ++class_index)
   {
@@ -204,9 +206,9 @@ static bool is_composite_config(const std::initializer_list<ConfigDescriptorItem
   return (group.size() > 1) || config_contains_iad(group);
 }
 
-// Device descriptor override is only valid for the simple "single class, single interface,
-// no IAD" shape.
-// 只有“单 class、单接口、无 IAD”的简单形态，才允许覆盖 device descriptor 的类字段。
+// Device descriptor override is only valid for the simple "single class, single
+// interface, no IAD" shape. 只有“单 class、单接口、无 IAD”的简单形态，才允许覆盖 device
+// descriptor 的类字段。
 static bool is_device_descriptor_override_eligible(ConfigDescriptorItem* const* items,
                                                    size_t item_num)
 {
@@ -272,9 +274,9 @@ static size_t calc_bos_capability_num_max(
 }
 
 // Count the worst-case BOS descriptor size among all configurations.
-// If no class provides a USB 2.0 Extension capability, reserve space for the auto-added one.
-// 统计所有 configuration 中 BOS 描述符尺寸的最大值；
-// 若没有类提供 USB 2.0 Extension capability，则为自动补上的那项预留空间。
+// If no class provides a USB 2.0 Extension capability, reserve space for the auto-added
+// one. 统计所有 configuration 中 BOS 描述符尺寸的最大值； 若没有类提供 USB 2.0 Extension
+// capability，则为自动补上的那项预留空间。
 static size_t calc_bos_descriptor_size_max(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
@@ -371,7 +373,8 @@ DeviceComposition::DeviceComposition(
     {
       items_[config_index].items[item_index++] = item;
       auto* device_class = static_cast<DeviceClass*>(item);
-      if (device_class != nullptr && !contains_class(classes_, class_count_, device_class))
+      if (device_class != nullptr &&
+          !contains_class(classes_, class_count_, device_class))
       {
         classes_[class_count_++] = device_class;
       }
@@ -382,7 +385,8 @@ DeviceComposition::DeviceComposition(
 
   // Pre-compute interface-string storage once during initialization.
   // 初始化阶段一次性算出接口字符串容量和最大描述符空间。
-  const auto interface_string_layout = calc_interface_string_layout(classes_, class_count_);
+  const auto interface_string_layout =
+      calc_interface_string_layout(classes_, class_count_);
   interface_string_count_ = interface_string_layout.count;
   if (interface_string_count_ > 0)
   {
@@ -443,7 +447,8 @@ RawData DeviceComposition::GetConfigDescriptor() const { return config_desc_.Get
 
 ConstRawData DeviceComposition::GetBosDescriptor() { return bos_.GetBosDescriptor(); }
 
-ErrorCode DeviceComposition::ProcessBosVendorRequest(bool in_isr, const SetupPacket* setup,
+ErrorCode DeviceComposition::ProcessBosVendorRequest(bool in_isr,
+                                                     const SetupPacket* setup,
                                                      BosVendorResult& result)
 {
   return bos_.ProcessVendorRequest(in_isr, setup, result);
@@ -469,8 +474,8 @@ ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index, uint16_t 
     return GenerateInterfaceString(string_index, data);
   }
 
-  auto ec = strings_.GenerateString(
-      static_cast<DescriptorStrings::Index>(string_index), lang);
+  auto ec =
+      strings_.GenerateString(static_cast<DescriptorStrings::Index>(string_index), lang);
   if (ec != ErrorCode::OK)
   {
     return ec;
@@ -632,11 +637,13 @@ void DeviceComposition::RebuildBosCache()
   (void)bos_.GetBosDescriptor();
 }
 
-ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index, ConstRawData& data)
+ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
+                                                     ConstRawData& data)
 {
   // Interface strings live after the built-in manufacturer/product/serial range.
   // 接口字符串位于内建 manufacturer/product/serial 之后的索引区间。
-  const size_t base_index = static_cast<uint8_t>(DescriptorStrings::Index::SERIAL_NUMBER_STRING);
+  const size_t base_index =
+      static_cast<uint8_t>(DescriptorStrings::Index::SERIAL_NUMBER_STRING);
   if (string_index <= base_index)
   {
     return ErrorCode::NOT_FOUND;
