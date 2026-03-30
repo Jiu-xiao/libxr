@@ -734,7 +734,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
                                       USBHS_UEP_R_RES_NAK);
     }
   }
-  OnTransferCompleteCallback(true, size);
+  OnTransferCompleteCallback<true>(size);
 }
 
 void CH32EndpointOtgHs::SwitchBuffer()

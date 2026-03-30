@@ -10,6 +10,12 @@
 
 namespace LibXR::Debug
 {
+enum class SwdIoDriveMode : uint8_t
+{
+  PUSH_PULL = 0,
+  OPEN_DRAIN = 1,
+};
+
 /**
  * @brief 基于 GpioType 轮询 bit-bang 的 SWD 探针。
  *        SWD probe based on polling bit-bang using GpioType.
@@ -20,7 +26,8 @@ namespace LibXR::Debug
  * @note 推荐外围电路：SWCLK/SWDIO 均串联 33Ω 限流电阻，SWDIO 端接 10k 上拉电阻。
  *       Recommended circuit: 33Ω series resistors on SWCLK/SWDIO, 10k pull-up on SWDIO.
  */
-template <typename SwclkGpioType, typename SwdioGpioType>
+template <typename SwclkGpioType, typename SwdioGpioType,
+          SwdIoDriveMode kIoDriveMode = SwdIoDriveMode::PUSH_PULL>
 class SwdGeneralGPIO final : public Swd
 {
   static constexpr uint32_t MIN_HZ = 10'000u;
@@ -351,44 +358,51 @@ class SwdGeneralGPIO final : public Swd
   enum class SwdioMode : uint8_t
   {
     UNKNOWN = 0,  ///< 未知/未初始化。Unknown / uninitialized.
-    DRIVE_OD,     ///< 开漏输出（高电平=释放总线）。Open-drain output (high=release).
-    SAMPLE_IN,    ///< 采样阶段（保持开漏释放）。Sampling phase (line released by OD high).
+    DRIVE,        ///< 输出驱动阶段。Drive phase.
+    SAMPLE_IN,    ///< 输入采样阶段。Sample phase.
   };
 
   ErrorCode SetSwdioDriveMode()
   {
-    if (swdio_mode_ == SwdioMode::UNKNOWN)
+    if (swdio_mode_ != SwdioMode::DRIVE)
     {
-      const ErrorCode EC = swdio_.SetConfig(
-          {SwdioGpioType::Direction::OUTPUT_OPEN_DRAIN, SwdioGpioType::Pull::UP});
+      const ErrorCode EC =
+          swdio_.SetConfig({(kIoDriveMode == SwdIoDriveMode::OPEN_DRAIN)
+                                ? SwdioGpioType::Direction::OUTPUT_OPEN_DRAIN
+                                : SwdioGpioType::Direction::OUTPUT_PUSH_PULL,
+                            SwdioGpioType::Pull::NONE});
       if (EC != ErrorCode::OK)
       {
         return EC;
       }
     }
 
-    swdio_mode_ = SwdioMode::DRIVE_OD;
+    swdio_mode_ = SwdioMode::DRIVE;
     return ErrorCode::OK;
   }
 
   ErrorCode SetSwdioSampleMode()
   {
-    const ErrorCode EC = SetSwdioDriveMode();
-    if (EC != ErrorCode::OK)
+    if (swdio_mode_ != SwdioMode::SAMPLE_IN)
     {
-      return EC;
+      const ErrorCode EC =
+          swdio_.SetConfig({SwdioGpioType::Direction::INPUT,
+                            (kIoDriveMode == SwdIoDriveMode::OPEN_DRAIN)
+                                ? SwdioGpioType::Pull::UP
+                                : SwdioGpioType::Pull::NONE});
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
     }
 
-    // 约束：GPIO::Read() 需要在开漏输出模式下返回实际引脚电平（而不是输出锁存值）。
-    // Constraint: GPIO::Read() must sample the physical pin level in open-drain output
-    // mode (not just the output latch).
-    //
-    // 开漏输出高电平表示释放总线，目标可驱动 ACK/数据 / Open-drain high releases line
-    // so target can drive ACK/data.
-    swdio_.Write(true);
     swdio_mode_ = SwdioMode::SAMPLE_IN;
     return ErrorCode::OK;
   }
+
+
+
+
 
   inline void DelayHalf() { BusyLoop(half_period_loops_); }
 
@@ -468,13 +482,14 @@ class SwdGeneralGPIO final : public Swd
   inline uint8_t ReadByteLSBWithoutDelay()
   {
     uint8_t v = 0u;
-    for (uint32_t i = 0; i < BYTE_BITS; ++i)
-    {
-      if (ReadBitAndClockWithoutDelay())
-      {
-        v = static_cast<uint8_t>(v | (1u << i));
-      }
-    }
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x01u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x02u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x04u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x08u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x10u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x20u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x40u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x80u : 0u);
     return v;
   }
 

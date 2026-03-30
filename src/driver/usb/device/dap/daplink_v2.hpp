@@ -17,46 +17,47 @@
 namespace LibXR::USB
 {
 /**
- * @brief CMSIS-DAP v2（Bulk）USB 类（仅 SWD，nRESET 可选）
- *        CMSIS-DAP v2 (Bulk) USB class (SWD-only, optional nRESET control).
+ * @brief CMSIS-DAP v2 (Bulk) USB class (SWD-only, optional nRESET control).
  *
- * @tparam SwdPort SWD 链路类型 / SWD link type
+ *
+ * @tparam SwdPort SWD link type
  */
-template <typename SwdPort>
+template <typename SwdPort, uint16_t DefaultDapPacketSize = 512u,
+          uint8_t AdvertisedPacketCount = 8u,
+          uint16_t MaxDapPacketSize = 1024u,
+          uint16_t QueuedRequestBufferSize = 2048u,
+          uint16_t QueuedCommandCountMax = 255u>
 class DapLinkV2Class : public DeviceClass
 {
  public:
-  // Default interface string for the CMSIS-DAP v2 bulk interface.
-  // CMSIS-DAP v2 Bulk 接口的默认字符串。
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB CMSIS-DAP v2";
 
   /**
-   * @brief Info 字符串集合 / Info string set
+   * @brief Info string set
    */
   struct InfoStrings
   {
-    const char* vendor = nullptr;        ///< Vendor 字符串 / Vendor string
-    const char* product = nullptr;       ///< Product 字符串 / Product string
-    const char* serial = nullptr;        ///< Serial 字符串 / Serial string
-    const char* firmware_ver = nullptr;  ///< Firmware version / Firmware version
+    const char* vendor = nullptr;        ///< Vendor string
+    const char* product = nullptr;       ///< Product string
+    const char* serial = nullptr;        ///< Serial string
+    const char* firmware_ver = nullptr;  ///< Firmware version
 
-    const char* device_vendor = nullptr;   ///< Device vendor / Device vendor
-    const char* device_name = nullptr;     ///< Device name / Device name
-    const char* board_vendor = nullptr;    ///< Board vendor / Board vendor
-    const char* board_name = nullptr;      ///< Board name / Board name
-    const char* product_fw_ver = nullptr;  ///< Product FW version / Product FW version
+    const char* device_vendor = nullptr;   ///< Device vendor
+    const char* device_name = nullptr;     ///< Device name
+    const char* board_vendor = nullptr;    ///< Board vendor
+    const char* board_name = nullptr;      ///< Board name
+    const char* product_fw_ver = nullptr;  ///< Product FW version
   };
 
  public:
   /**
-   * @brief 构造函数 / Constructor
+   * @brief Constructor
    *
-   * @param swd_link        SWD 链路对象引用 / SWD link reference
-   * @param nreset_gpio     可选 nRESET GPIO / Optional nRESET GPIO
-   * @param data_in_ep_num  Bulk IN 端点号（可自动分配）/ Bulk IN EP number (auto allowed)
-   * @param data_out_ep_num Bulk OUT 端点号（可自动分配）/ Bulk OUT EP number (auto
-   * allowed)
-   * @param interface_string 接口字符串 / Interface string
+   * @param swd_link        SWD link reference
+   * @param nreset_gpio     Optional nRESET GPIO
+   * @param data_in_ep_num  Bulk IN endpoint number (auto allowed)
+   * @param data_out_ep_num Bulk OUT endpoint number (auto allowed)
+   *
    */
   explicit DapLinkV2Class(
       SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
@@ -77,7 +78,7 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 虚析构函数 / Virtual destructor
+   * @brief Virtual destructor
    */
   ~DapLinkV2Class() override = default;
 
@@ -87,20 +88,18 @@ class DapLinkV2Class : public DeviceClass
  public:
   const char* GetInterfaceString(size_t local_interface_index) const override
   {
-    // DAPLink v2 contributes one vendor-specific bulk interface.
-    // DAPLink v2 暴露一个 vendor-specific bulk 接口。
     return (local_interface_index == 0u) ? interface_string_ : nullptr;
   }
 
   /**
-   * @brief 设置 Info 字符串 / Set info strings
-   * @param info 字符串集合 / String set
+   * @brief Set info strings
+   * @param info Info string set
    */
   void SetInfoStrings(const InfoStrings& info) { info_ = info; }
 
   /**
-   * @brief 获取内部状态 / Get internal state
-   * @return State 引用 / State reference
+   * @brief Get internal state
+   * @return State reference
    */
   const LibXR::USB::DapLinkV2Def::State& GetState() const { return dap_state_; }
 
@@ -137,8 +136,8 @@ class DapLinkV2Class : public DeviceClass
  protected:
   /**
    * @brief 绑定端点资源 / Bind endpoint resources
-   * @param endpoint_pool 端点池 / Endpoint pool
-   * @param start_itf_num 起始接口号 / Start interface number
+   * @param endpoint_pool Endpoint pool
+   * @param start_itf_num Start interface number
    * @param in_isr 是否在中断中 / Whether in ISR
    */
   void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
@@ -211,6 +210,7 @@ class DapLinkV2Class : public DeviceClass
                                        DapLinkV2Def::DAP_SWJ_NRESET);
 
     ResetResponseQueue();
+    ResetQueuedCommandState();
     ep_data_in_->SetActiveLength(0);
 
     inited_ = true;
@@ -219,13 +219,14 @@ class DapLinkV2Class : public DeviceClass
 
   /**
    * @brief 解绑端点资源 / Unbind endpoint resources
-   * @param endpoint_pool 端点池 / Endpoint pool
+   * @param endpoint_pool Endpoint pool
    * @param in_isr 是否在中断中 / Whether in ISR
    */
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
     ResetResponseQueue();
+    ResetQueuedCommandState();
 
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
     dap_state_.transfer_abort = false;
@@ -288,8 +289,8 @@ class DapLinkV2Class : public DeviceClass
   size_t GetMaxConfigSize() override { return sizeof(desc_block_); }
 
   /**
-   * @brief 获取 WinUSB MS OS 2.0 描述符集合 / Get WinUSB MS OS 2.0 descriptor set
-   * @return ConstRawData 描述符集合 / Descriptor set bytes
+   * @brief Get WinUSB MS OS 2.0 descriptor set
+   * @return ConstRawData descriptor set bytes
    */
   ConstRawData GetWinUsbMsOs20DescriptorSet() const
   {
@@ -319,10 +320,10 @@ class DapLinkV2Class : public DeviceClass
 
  private:
   // ============================================================================
-  // Local helpers
+  // Local helpers (kept with original comments, moved inside the class)
   // ============================================================================
 
-  // 枚举/整型转 uint8_t。Cast enum/integer to uint8_t.
+  // 枚举/整型uint8_t。Cast enum/integer to uint8_t.
   template <typename E>
   static constexpr uint8_t ToU8(E e)
   {
@@ -334,8 +335,8 @@ class DapLinkV2Class : public DeviceClass
   static constexpr uint8_t DAP_ERROR = 0xFFu;  ///< DAP_ERROR / DAP_ERROR
 
   // 未知命令响应：单字节 0xFF。Unknown command response: single byte 0xFF.
-  static inline ErrorCode BuildUnknowCmdResponse(uint8_t* resp, uint16_t cap,
-                                                 uint16_t& out_len)
+  static inline ErrorCode BuildUnknownCmdResponse(uint8_t* resp, uint16_t cap,
+                                                  uint16_t& out_len)
   {
     if (!resp || cap < 1u)
     {
@@ -407,7 +408,7 @@ class DapLinkV2Class : public DeviceClass
                      LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
 
     // DeviceInterfaceGUIDs: REG_MULTI_SZ UTF-16LE, include double-NUL terminator
-    // 注意：此处为“单 GUID + 双 NUL 结束”的 REG_MULTI_SZ / Single GUID + double-NUL end.
+    // 注意：此处为“单 GUID + NUL 结束”的 REG_MULTI_SZ / Single GUID + double-NUL end.
     const char GUID_STR[] = "{CDB3B5AD-293B-4663-AA36-1AAE46463776}";
     const size_t GUID_LEN = sizeof(GUID_STR) - 1;
 
@@ -437,7 +438,7 @@ class DapLinkV2Class : public DeviceClass
     // Function subset interface number
     winusb_msos20_.func.bFirstInterface = interface_num_;
 
-    // 内容变化但总长度不变；同步一次保持一致性
+    // 内容变化但总长度不变；同步一次保持一致
     // Content changes but total size stays the same; resync for consistency.
     winusb_msos20_cap_.SetDescriptorSet(GetWinUsbMsOs20DescriptorSet());
   }
@@ -483,16 +484,19 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    // 尽早 re-arm OUT 以覆盖 host->probe 流水 / Re-arm OUT early for host->probe overlap.
+    // 尽早 re-arm OUT 以覆盖 host->probe 流水 /
+    // Re-arm OUT early to overlap the host->probe pipeline.
     ArmOutTransferIfIdle();
 
     const auto* req = static_cast<const uint8_t*>(data.addr_);
     const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
 
-    // 快路径：IN idle 且无积压时，直接在 IN 缓冲构造并发送 / Fast path: build directly
+    // 快路径：IN idle 且无积压时，直接在 IN 缓冲构造响应并发包 /
+    // Fast path: build directly
     // in IN endpoint buffer and submit without extra response copy.
     if (!HasDeferredResponseInEpBuffer() && IsResponseQueueEmpty() &&
-        ep_data_in_->GetState() == Endpoint::State::IDLE)
+        ep_data_in_->GetState() == Endpoint::State::IDLE &&
+        CanBuildResponseDirectlyInEpBuffer())
     {
       auto tx_buff = ep_data_in_->GetBuffer();
       if (tx_buff.addr_ && tx_buff.size_ > 0u)
@@ -504,7 +508,7 @@ class DapLinkV2Class : public DeviceClass
         UNUSED(ans);
 
         out_len = ClipResponseLength(out_len, static_cast<uint16_t>(tx_buff.size_));
-        if (ep_data_in_->Transfer(out_len) == ErrorCode::OK)
+        if (StartInTransferFromCurrentBuffer(out_len))
         {
           return;
         }
@@ -521,10 +525,11 @@ class DapLinkV2Class : public DeviceClass
       }
     }
 
-    // 延迟快路径：IN busy 且无积压时，直接写入另一半 IN 双缓冲 / Deferred fast path:
+    // 延迟快路径：IN busy 且无积压时，直接写入另一IN 双缓/ Deferred fast path:
     // build next response in the other IN DB buffer to avoid queue copy.
     if (!HasDeferredResponseInEpBuffer() && IsResponseQueueEmpty() &&
-        ep_data_in_->GetState() == Endpoint::State::BUSY)
+        ep_data_in_->GetState() == Endpoint::State::BUSY &&
+        CanBuildResponseDirectlyInEpBuffer())
     {
       auto tx_buff = ep_data_in_->GetBuffer();
       if (tx_buff.addr_ && tx_buff.size_ > 0u)
@@ -550,7 +555,7 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    // 正常背压下不应触发；这里做一次 best-effort 腾挪后重试队列构建。
+    // 正常背压下不应触发；这里做一best-effort 腾挪后重试队列构建
     // Should not happen with proper backpressure; drain once and retry queue build.
     (void)SubmitNextQueuedResponseIfIdle();
     (void)TryBuildAndEnqueueResponse(in_isr, req, REQ_LEN);
@@ -576,33 +581,88 @@ class DapLinkV2Class : public DeviceClass
    */
   uint16_t GetDapPacketSize() const
   {
-    const uint16_t IN_PS = ep_data_in_ ? ep_data_in_->MaxPacketSize() : 0u;
-    const uint16_t OUT_PS = ep_data_out_ ? ep_data_out_->MaxPacketSize() : 0u;
-    uint16_t dap_ps = 0u;
+    constexpr uint16_t OPENOCD_SAFE_PS = static_cast<uint16_t>((255u * 5u) + 4u);
+    constexpr uint16_t RAW_PS =
+        (MaxDapPacketSize == 0u) ? DefaultDapPacketSize : MaxDapPacketSize;
+    return (RAW_PS > OPENOCD_SAFE_PS) ? OPENOCD_SAFE_PS : RAW_PS;
+  }
+  bool CanBuildResponseDirectlyInEpBuffer() const
+  {
+    if (!ep_data_in_)
+    {
+      return false;
+    }
+    auto tx_buff = ep_data_in_->GetBuffer();
+    if (!tx_buff.addr_ || tx_buff.size_ == 0u)
+    {
+      return false;
+    }
+    return GetDapPacketSize() <= static_cast<uint16_t>(tx_buff.size_);
+  }
 
-    if (IN_PS > 0u && OUT_PS > 0u)
+  bool StartInTransferFromCurrentBuffer(uint16_t len)
+  {
+    if (!ep_data_in_)
     {
-      dap_ps = (IN_PS < OUT_PS) ? IN_PS : OUT_PS;
+      return false;
     }
-    else
+    auto tx_buff = ep_data_in_->GetBuffer();
+    if (!tx_buff.addr_ || tx_buff.size_ == 0u)
     {
-      dap_ps = (IN_PS > 0u) ? IN_PS : OUT_PS;
+      return false;
     }
-
-    if (dap_ps == 0u)
+    uint16_t tx_len = len;
+    if (tx_len > tx_buff.size_)
     {
-      dap_ps = DEFAULT_DAP_PACKET_SIZE;
+      tx_len = static_cast<uint16_t>(tx_buff.size_);
     }
-    if (dap_ps > MAX_DAP_PACKET_SIZE)
+    if (tx_len <= static_cast<uint16_t>(ep_data_in_->MaxTransferSize()))
     {
-      dap_ps = MAX_DAP_PACKET_SIZE;
+      return ep_data_in_->Transfer(tx_len) == ErrorCode::OK;
     }
-    return dap_ps;
+    LibXR::RawData in_multi{tx_buff.addr_, tx_len};
+    return ep_data_in_->TransferMultiBulk(in_multi) == ErrorCode::OK;
+  }
+  bool StartInTransferFromPayload(const uint8_t* data, uint16_t len)
+  {
+    if (!ep_data_in_ || !data)
+    {
+      return false;
+    }
+    auto tx_buff = ep_data_in_->GetBuffer();
+    if (!tx_buff.addr_ || tx_buff.size_ == 0u)
+    {
+      return false;
+    }
+    uint16_t tx_len = len;
+    if (tx_len > MAX_DAP_PACKET_SIZE)
+    {
+      tx_len = MAX_DAP_PACKET_SIZE;
+    }
+    const uint16_t MAX_XFER = static_cast<uint16_t>(ep_data_in_->MaxTransferSize());
+    if (tx_len <= MAX_XFER && tx_len <= static_cast<uint16_t>(tx_buff.size_))
+    {
+      if (tx_len > 0u)
+      {
+        Memory::FastCopy(tx_buff.addr_, data, tx_len);
+      }
+      return ep_data_in_->Transfer(tx_len) == ErrorCode::OK;
+    }
+    if (tx_len > static_cast<uint16_t>(sizeof(in_tx_multi_storage_)))
+    {
+      tx_len = static_cast<uint16_t>(sizeof(in_tx_multi_storage_));
+    }
+    if (tx_len > 0u && data != in_tx_multi_storage_)
+    {
+      Memory::FastCopy(in_tx_multi_storage_, data, tx_len);
+    }
+    in_tx_multi_buf_.addr_ = in_tx_multi_storage_;
+    in_tx_multi_buf_.size_ = tx_len;
+    return ep_data_in_->TransferMultiBulk(in_tx_multi_buf_) == ErrorCode::OK;
   }
 
   /**
-   * @brief 裁剪响应长度到 DAP 包长与缓冲容量 / Clip response length by DAP packet and
-   * buffer cap
+   * @brief 裁剪响应长度DAP 包长与缓冲容/ Clip response length by DAP packet and buffer cap
    */
   uint16_t ClipResponseLength(uint16_t len, uint16_t cap) const
   {
@@ -653,7 +713,7 @@ class DapLinkV2Class : public DeviceClass
     }
 
     const uint16_t TX_LEN = deferred_in_resp_len_;
-    if (ep_data_in_->Transfer(TX_LEN) != ErrorCode::OK)
+    if (!StartInTransferFromCurrentBuffer(TX_LEN))
     {
       return false;
     }
@@ -666,6 +726,259 @@ class DapLinkV2Class : public DeviceClass
   bool IsResponseQueueEmpty() const { return resp_q_count_ == 0u; }
 
   bool IsResponseQueueFull() const { return resp_q_count_ >= RESP_QUEUE_DEPTH; }
+
+  void ResetQueuedCommandState()
+  {
+    queued_request_length_ = 0u;
+    queued_command_count_ = 0u;
+  }
+
+  // ============================================================================
+  // Queued command helpers
+  // ============================================================================
+
+  /**
+   * @brief Parse one queued command length from a packed queue stream
+   * @param req request pointer
+   * @param avail available bytes in the queue stream
+   * @param cmd_len parsed command length
+   * @return true parse success
+   * @return false parse failure
+   */
+  bool ParseQueuedCommandLength(const uint8_t* req, uint16_t avail,
+                                uint16_t& cmd_len) const
+  {
+    cmd_len = 0u;
+    if (!req || avail < 1u)
+    {
+      return false;
+    }
+
+    const uint8_t CMD = req[0];
+    switch (CMD)
+    {
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::INFO):
+        cmd_len = 2u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::HOST_STATUS):
+        cmd_len = 3u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::CONNECT):
+        cmd_len = 2u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::DISCONNECT):
+        cmd_len = 1u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_CONFIGURE):
+        cmd_len = 6u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_ABORT):
+        cmd_len = 1u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::WRITE_ABORT):
+        cmd_len = 6u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::DELAY):
+        cmd_len = 3u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::RESET_TARGET):
+        cmd_len = 1u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWJ_PINS):
+        cmd_len = 7u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWJ_CLOCK):
+        cmd_len = 5u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWD_CONFIGURE):
+        cmd_len = 2u;
+        return avail >= cmd_len;
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWJ_SEQUENCE):
+      {
+        if (avail < 2u)
+        {
+          return false;
+        }
+        const uint32_t BIT_COUNT = (req[1] == 0u) ? 256u : static_cast<uint32_t>(req[1]);
+        const uint32_t BYTE_COUNT = (BIT_COUNT + 7u) / 8u;
+        const uint32_t NEED = 2u + BYTE_COUNT;
+        if (NEED > avail)
+        {
+          return false;
+        }
+        cmd_len = static_cast<uint16_t>(NEED);
+        return true;
+      }
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWD_SEQUENCE):
+      {
+        if (avail < 2u)
+        {
+          return false;
+        }
+        const uint8_t SEQ_CNT = req[1];
+        uint32_t off = 2u;
+        for (uint32_t i = 0u; i < SEQ_CNT; ++i)
+        {
+          if (off >= avail)
+          {
+            return false;
+          }
+
+          const uint8_t INFO = req[off++];
+          uint32_t cycles = static_cast<uint32_t>(INFO & 0x3Fu);
+          if (cycles == 0u)
+          {
+            cycles = 64u;
+          }
+
+          const bool MODE_IN = ((INFO & 0x80u) != 0u);
+          const uint32_t BYTES = (cycles + 7u) / 8u;
+          if (!MODE_IN)
+          {
+            if (off + BYTES > avail)
+            {
+              return false;
+            }
+            off += BYTES;
+          }
+        }
+        cmd_len = static_cast<uint16_t>(off);
+        return true;
+      }
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER):
+      {
+        if (avail < 3u)
+        {
+          return false;
+        }
+        const uint8_t COUNT = req[2];
+        uint32_t off = 3u;
+        for (uint32_t i = 0u; i < COUNT; ++i)
+        {
+          if (off >= avail)
+          {
+            return false;
+          }
+
+          const uint8_t RQ = req[off++];
+          const bool RNW = LibXR::USB::DapLinkV2Def::req_is_read(RQ);
+          const bool MATCH_VALUE =
+              ((RQ & LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_VALUE) != 0u);
+          if (!RNW || MATCH_VALUE)
+          {
+            if (off + 4u > avail)
+            {
+              return false;
+            }
+            off += 4u;
+          }
+        }
+        cmd_len = static_cast<uint16_t>(off);
+        return true;
+      }
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_BLOCK):
+      {
+        if (avail < 5u)
+        {
+          return false;
+        }
+        uint16_t count = 0u;
+        Memory::FastCopy(&count, &req[2], sizeof(count));
+        const bool RNW = LibXR::USB::DapLinkV2Def::req_is_read(req[4]);
+        uint32_t need = 5u;
+        if (!RNW)
+        {
+          need += static_cast<uint32_t>(count) * 4u;
+        }
+        if (need > avail)
+        {
+          return false;
+        }
+        cmd_len = static_cast<uint16_t>(need);
+        return true;
+      }
+
+      // Reject nested queue/execute in queued stream.
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS):
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * @brief Execute queued commands into one combined EXECUTE_COMMANDS response
+   * @param in_isr current context flag
+   * @param resp response buffer
+   * @param resp_cap response capacity
+   * @param out_len output response length
+   * @return true execute success
+   * @return false execute failure
+   */
+  bool TryExecuteQueuedCommandStream(bool in_isr, uint8_t* resp, uint16_t resp_cap,
+                                     uint16_t& out_len)
+  {
+    out_len = 0u;
+    if (!resp || resp_cap < 1u)
+    {
+      return false;
+    }
+
+    resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS);
+    out_len = 1u;
+
+    if (queued_command_count_ == 0u)
+    {
+      return true;
+    }
+
+    uint16_t req_off = 0u;
+    uint16_t resp_off = 1u;
+    for (uint32_t i = 0u; i < queued_command_count_; ++i)
+    {
+      if (req_off >= queued_request_length_)
+      {
+        return false;
+      }
+
+      uint16_t cmd_len = 0u;
+      if (!ParseQueuedCommandLength(&queued_request_buffer_[req_off],
+                                    static_cast<uint16_t>(queued_request_length_ - req_off),
+                                    cmd_len) ||
+          cmd_len == 0u)
+      {
+        return false;
+      }
+
+      if (resp_off >= resp_cap)
+      {
+        return false;
+      }
+
+      uint16_t cmd_out = 0u;
+      const ErrorCode ans = ProcessOneCommand(
+          in_isr, &queued_request_buffer_[req_off], cmd_len, &resp[resp_off],
+          static_cast<uint16_t>(resp_cap - resp_off), cmd_out);
+      UNUSED(ans);
+
+      if (static_cast<uint32_t>(resp_off) + static_cast<uint32_t>(cmd_out) >
+          static_cast<uint32_t>(resp_cap))
+      {
+        return false;
+      }
+
+      req_off = static_cast<uint16_t>(req_off + cmd_len);
+      resp_off = static_cast<uint16_t>(resp_off + cmd_out);
+    }
+
+    if (req_off != queued_request_length_)
+    {
+      return false;
+    }
+
+    out_len = resp_off;
+    return true;
+  }
 
   bool TryBuildAndEnqueueResponse(bool in_isr, const uint8_t* req, uint16_t req_len)
   {
@@ -721,30 +1034,11 @@ class DapLinkV2Class : public DeviceClass
     {
       return false;
     }
-
-    auto tx_buff = ep_data_in_->GetBuffer();
-    if (!tx_buff.addr_ || tx_buff.size_ == 0u)
-    {
-      return false;
-    }
-
     auto& slot = resp_q_[resp_q_head_];
-    uint16_t tx_len = slot.len;
-    if (tx_len > tx_buff.size_)
-    {
-      tx_len = static_cast<uint16_t>(tx_buff.size_);
-    }
-
-    if (tx_len > 0u)
-    {
-      Memory::FastCopy(tx_buff.addr_, slot.payload, tx_len);
-    }
-
-    if (ep_data_in_->Transfer(tx_len) != ErrorCode::OK)
+    if (!StartInTransferFromPayload(slot.payload, slot.len))
     {
       return false;
     }
-
     resp_q_head_ = NextRespQueueIndex(resp_q_head_);
     --resp_q_count_;
     return true;
@@ -762,19 +1056,45 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    // 对总未完成响应做背压（in-flight + queued）/ Backpressure on total outstanding
+    // 对总未完成响应做背压（in-flight + queued Backpressure on total outstanding
     // responses (in-flight + queued).
     if (OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
     {
       return;
     }
 
-    uint16_t out_rx_len = ep_data_out_->MaxPacketSize();
+    uint16_t out_rx_len = GetDapPacketSize();
     if (out_rx_len == 0u)
     {
-      out_rx_len = ep_data_out_->MaxTransferSize();
+      out_rx_len = DEFAULT_DAP_PACKET_SIZE;
     }
-    (void)ep_data_out_->Transfer(out_rx_len);
+    if (out_rx_len > MAX_DAP_PACKET_SIZE)
+    {
+      out_rx_len = MAX_DAP_PACKET_SIZE;
+    }
+
+    const uint16_t OUT_MAX_XFER = static_cast<uint16_t>(ep_data_out_->MaxTransferSize());
+    if (OUT_MAX_XFER == 0u)
+    {
+      return;
+    }
+
+    if (out_rx_len <= OUT_MAX_XFER)
+    {
+      (void)ep_data_out_->Transfer(out_rx_len);
+      return;
+    }
+
+    if (out_rx_len > static_cast<uint16_t>(sizeof(out_req_multi_storage_)))
+    {
+      out_rx_len = static_cast<uint16_t>(sizeof(out_req_multi_storage_));
+    }
+
+    // Endpoint MPS is capped by hardware (HS bulk = 512), so larger DAP requests
+    // must be received with multi-bulk reassembly.
+    out_req_multi_buf_.addr_ = out_req_multi_storage_;
+    out_req_multi_buf_.size_ = out_rx_len;
+    (void)ep_data_out_->TransferMultiBulk(out_req_multi_buf_);
   }
 
  private:
@@ -851,7 +1171,7 @@ class DapLinkV2Class : public DeviceClass
         return HandleExecuteCommands(in_isr, req, req_len, resp, resp_cap, out_len);
 
       default:
-        (void)BuildUnknowCmdResponse(resp, resp_cap, out_len);
+        (void)BuildUnknownCmdResponse(resp, resp_cap, out_len);
         return ErrorCode::NOT_SUPPORT;
     }
   }
@@ -926,7 +1246,7 @@ class DapLinkV2Class : public DeviceClass
         return BuildInfoU8Response(resp[0], LibXR::USB::DapLinkV2Def::DAP_CAP_SWD, resp,
                                    resp_cap, out_len);
       case ToU8(LibXR::USB::DapLinkV2Def::InfoId::PACKET_COUNT):
-        return BuildInfoU8Response(resp[0], PACKET_COUNT_ADVERTISED, resp, resp_cap,
+        return BuildInfoU8Response(resp[0], PACKET_COUNT_EFFECTIVE, resp, resp_cap,
                                    out_len);
       case ToU8(LibXR::USB::DapLinkV2Def::InfoId::PACKET_SIZE):
       {
@@ -1070,6 +1390,7 @@ class DapLinkV2Class : public DeviceClass
 
       dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::SWD;
       dap_state_.transfer_abort = false;
+      ResetQueuedCommandState();
 
       resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Port::SWD);
     }
@@ -1095,6 +1416,7 @@ class DapLinkV2Class : public DeviceClass
     swd_.Close();
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
     dap_state_.transfer_abort = false;
+    ResetQueuedCommandState();
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::DISCONNECT);
     resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
@@ -1243,7 +1565,7 @@ class DapLinkV2Class : public DeviceClass
       execute = 1u;
     }
 
-    // 关键：无论是否实现 reset，都返回 DAP_OK；未实现则 Execute=0
+    // 关键：无论是否实reset，都返回 DAP_OK；未实现Execute=0
     // Key: Always return DAP_OK; if not implemented, Execute=0.
     resp[1] = DAP_OK;
     resp[2] = execute;
@@ -1441,8 +1763,8 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  ErrorCode HandleSWDConfigure(bool /*in_isr*/, const uint8_t* /*req*/,
-                               uint16_t /*req_len*/, uint8_t* resp, uint16_t resp_cap,
+  ErrorCode HandleSWDConfigure(bool /*in_isr*/, const uint8_t* req,
+                               uint16_t req_len, uint8_t* resp, uint16_t resp_cap,
                                uint16_t& out_len)
   {
     if (resp_cap < 2u)
@@ -1453,7 +1775,17 @@ class DapLinkV2Class : public DeviceClass
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWD_CONFIGURE);
 
-    // Best-effort parse (optional). Keep compatibility by returning OK.
+    if (req == nullptr || req_len < 2u)
+    {
+      resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::ERROR);
+      out_len = 2u;
+      return ErrorCode::ARG_ERR;
+    }
+
+    const uint8_t cfg = req[1];
+    dap_state_.swd_cfg.turnaround = static_cast<uint8_t>((cfg & 0x03u) + 1u);
+    dap_state_.swd_cfg.data_phase = ((cfg & 0x04u) != 0u);
+
     resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
     out_len = 2u;
     return ErrorCode::OK;
@@ -1559,22 +1891,93 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  ErrorCode HandleQueueCommands(bool /*in_isr*/, const uint8_t* /*req*/,
-                                uint16_t /*req_len*/, uint8_t* resp, uint16_t resp_cap,
+  /**
+   * @brief Queue one packed command batch for later EXECUTE_COMMANDS
+   */
+  ErrorCode HandleQueueCommands(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
+                                uint8_t* resp, uint16_t resp_cap,
                                 uint16_t& out_len)
   {
-    return BuildCmdStatusResponse(
-        ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
-        resp_cap, out_len);
+    if (!req || req_len < 2u)
+    {
+      return BuildCmdStatusResponse(
+          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
+          resp_cap, out_len);
+    }
+
+    const uint8_t NUM = req[1];
+    if (NUM == 0u)
+    {
+      return BuildCmdStatusResponse(
+          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_OK, resp, resp_cap,
+          out_len);
+    }
+
+    uint16_t req_off = 2u;
+    for (uint32_t i = 0u; i < NUM; ++i)
+    {
+      if (req_off >= req_len)
+      {
+        return BuildCmdStatusResponse(
+            ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
+            resp_cap, out_len);
+      }
+
+      uint16_t cmd_len = 0u;
+      if (!ParseQueuedCommandLength(&req[req_off],
+                                    static_cast<uint16_t>(req_len - req_off), cmd_len) ||
+          cmd_len == 0u)
+      {
+        return BuildCmdStatusResponse(
+            ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
+            resp_cap, out_len);
+      }
+      req_off = static_cast<uint16_t>(req_off + cmd_len);
+    }
+
+    if (req_off != req_len)
+    {
+      return BuildCmdStatusResponse(
+          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
+          resp_cap, out_len);
+    }
+
+    if (static_cast<uint32_t>(queued_request_length_) + static_cast<uint32_t>(req_len - 2u) >
+            static_cast<uint32_t>(QUEUED_REQ_BUFFER_SIZE) ||
+        static_cast<uint32_t>(queued_command_count_) + static_cast<uint32_t>(NUM) >
+            static_cast<uint32_t>(QUEUED_CMD_COUNT_MAX))
+    {
+      return BuildCmdStatusResponse(
+          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
+          resp_cap, out_len);
+    }
+
+    Memory::FastCopy(&queued_request_buffer_[queued_request_length_], &req[2], req_len - 2u);
+    queued_request_length_ = static_cast<uint16_t>(queued_request_length_ + (req_len - 2u));
+    queued_command_count_ = static_cast<uint16_t>(queued_command_count_ + NUM);
+
+    return BuildCmdStatusResponse(ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS),
+                                  DAP_OK, resp, resp_cap, out_len);
   }
 
-  ErrorCode HandleExecuteCommands(bool /*in_isr*/, const uint8_t* /*req*/,
+  /**
+   * @brief Execute all previously queued commands
+   */
+  ErrorCode HandleExecuteCommands(bool in_isr, const uint8_t* /*req*/,
                                   uint16_t /*req_len*/, uint8_t* resp, uint16_t resp_cap,
                                   uint16_t& out_len)
   {
-    return BuildCmdStatusResponse(
-        ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS), DAP_ERROR, resp,
-        resp_cap, out_len);
+    const bool ok = TryExecuteQueuedCommandStream(in_isr, resp, resp_cap, out_len);
+    ResetQueuedCommandState();
+
+    if (!ok)
+    {
+      return BuildCmdStatusResponse(
+          ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS), DAP_ERROR, resp,
+          resp_cap, out_len);
+    }
+
+    return ErrorCode::OK;
   }
 
  private:
@@ -1588,6 +1991,104 @@ class DapLinkV2Class : public DeviceClass
     return ACK_MAP[static_cast<uint8_t>(ack) & 0x07u];
   }
 
+  static inline uint16_t LoadU16Le(const uint8_t* p)
+  {
+    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) |
+                                 static_cast<uint16_t>(static_cast<uint16_t>(p[1]) << 8u));
+  }
+
+  static inline void StoreU16Le(uint8_t* p, uint16_t v)
+  {
+    p[0] = static_cast<uint8_t>(v & 0xFFu);
+    p[1] = static_cast<uint8_t>((v >> 8u) & 0xFFu);
+  }
+
+  static inline uint32_t LoadU32Le(const uint8_t* p)
+  {
+    return static_cast<uint32_t>(static_cast<uint32_t>(p[0]) |
+                                 (static_cast<uint32_t>(p[1]) << 8u) |
+                                 (static_cast<uint32_t>(p[2]) << 16u) |
+                                 (static_cast<uint32_t>(p[3]) << 24u));
+  }
+
+  static inline void StoreU32Le(uint8_t* p, uint32_t v)
+  {
+    p[0] = static_cast<uint8_t>(v & 0xFFu);
+    p[1] = static_cast<uint8_t>((v >> 8u) & 0xFFu);
+    p[2] = static_cast<uint8_t>((v >> 16u) & 0xFFu);
+    p[3] = static_cast<uint8_t>((v >> 24u) & 0xFFu);
+  }
+
+  ErrorCode TransferTxnFast(const LibXR::Debug::SwdProtocol::Request& req,
+                            LibXR::Debug::SwdProtocol::Response& resp)
+  {
+    const ErrorCode EC0 = swd_.Transfer(req, resp);
+    if (EC0 != ErrorCode::OK)
+    {
+      return EC0;
+    }
+
+    if (resp.ack == LibXR::Debug::SwdProtocol::Ack::WAIT)
+    {
+      return swd_.TransferWithRetry(req, resp);
+    }
+
+    if (resp.ack == LibXR::Debug::SwdProtocol::Ack::FAULT)
+    {
+      const auto POL = swd_.GetTransferPolicy();
+      if (POL.clear_sticky_on_fault)
+      {
+        LibXR::Debug::SwdProtocol::Ack abort_ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+        (void)swd_.WriteAbort(LibXR::Debug::SwdProtocol::DP_ABORT_STKCMPCLR |
+                                  LibXR::Debug::SwdProtocol::DP_ABORT_STKERRCLR |
+                                  LibXR::Debug::SwdProtocol::DP_ABORT_WDERRCLR |
+                                  LibXR::Debug::SwdProtocol::DP_ABORT_ORUNERRCLR,
+                              abort_ack);
+      }
+    }
+
+    return ErrorCode::OK;
+  }
+
+  ErrorCode DpReadRdbuffFast(uint32_t& val,
+                             LibXR::Debug::SwdProtocol::Ack& ack_out)
+  {
+    LibXR::Debug::SwdProtocol::Response swd_resp = {};
+    const auto req = LibXR::Debug::SwdProtocol::make_dp_read_req(
+        LibXR::Debug::SwdProtocol::DpReadReg::RDBUFF);
+    const ErrorCode ec = TransferTxnFast(req, swd_resp);
+    ack_out = swd_resp.ack;
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+    if (swd_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK || !swd_resp.parity_ok)
+    {
+      return ErrorCode::FAILED;
+    }
+    val = swd_resp.rdata;
+    return ErrorCode::OK;
+  }
+
+  ErrorCode ApReadPostedFast(uint8_t addr2b, uint32_t& posted,
+                             LibXR::Debug::SwdProtocol::Ack& ack_out)
+  {
+    LibXR::Debug::SwdProtocol::Response swd_resp = {};
+    const auto req = LibXR::Debug::SwdProtocol::make_ap_read_req(addr2b);
+    const ErrorCode ec = TransferTxnFast(req, swd_resp);
+    ack_out = swd_resp.ack;
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+    if (swd_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK || !swd_resp.parity_ok)
+    {
+      return ErrorCode::FAILED;
+    }
+    posted = swd_resp.rdata;
+    return ErrorCode::OK;
+  }
+
   void SetTransferAbortFlag(bool on) { dap_state_.transfer_abort = on; }
 
  private:
@@ -1595,7 +2096,9 @@ class DapLinkV2Class : public DeviceClass
   // DAP_Transfer / DAP_TransferBlock
   // ============================================================================
 
-  // Shared handlers for DAP_Transfer / DAP_TransferBlock.
+  // 说明：以下长函数保持原样；本 cpp 文件不补充函数级注释，hpp 中再统一给出接口说明
+  // Note: The following long functions are kept as-is; no function-level docs in this
+  // cpp. HPP will carry API docs.
 
   ErrorCode HandleTransfer(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
                            uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
@@ -1654,15 +2157,17 @@ class DapLinkV2Class : public DeviceClass
     { return static_cast<uint16_t>(need_ts ? 8u : 4u); };
 
     uint8_t response_count = 0u;
-    uint8_t response_value = 0u;  // 与参考实现一致：未发生 transfer 时为 0
+    // Keep reference behavior: if no transfer executes, response_value remains 0.
+    uint8_t response_value = 0u;
 
-    bool check_write = false;  // 是否需要末尾 RDBUFF check（用于 write fault 冲刷）
+    // Whether a final DP_RDBUFF flush is required for write-fault cleanup.
+    bool check_write = false;
 
     // -------- posted-read pipeline state (AP read only) --------
     struct PendingApRead
     {
       bool valid = false;
-      bool need_ts = false;  // 该 AP read transfer 是否要求 timestamp
+      bool need_ts = false;  // Whether this AP read transfer needs timestamp.
     } pending;
 
     auto emit_read_with_ts = [&](bool need_ts, uint32_t data) -> bool
@@ -1682,7 +2187,8 @@ class DapLinkV2Class : public DeviceClass
       return true;
     };
 
-    // 通过读 DP_RDBUFF 完成 pending AP read（用于：序列结束/被非 AP-read 打断/异常收尾）
+    // Complete a pending AP read by DP_RDBUFF
+    // (used on sequence tail, AP-read interruption, or abnormal tail handling).
     auto complete_pending_by_rdbuff = [&]() -> bool
     {
       if (!pending.valid)
@@ -1698,7 +2204,7 @@ class DapLinkV2Class : public DeviceClass
 
       uint32_t rdata = 0u;
       LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-      const ErrorCode EC = swd_.DpReadRdbuffTxn(rdata, ack);
+      const ErrorCode EC = DpReadRdbuffFast(rdata, ack);
 
       const uint8_t V = MapAckToDapResp(ack);
       if (V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
@@ -1721,7 +2227,7 @@ class DapLinkV2Class : public DeviceClass
       pending.valid = false;
       pending.need_ts = false;
 
-      // 读过 RDBUFF，等价于做过一次“posted/fault flush”
+      // RDBUFF has been read; equivalent to one posted/fault flush.
       check_write = false;
 
       // 成功路径保持 OK
@@ -1729,8 +2235,8 @@ class DapLinkV2Class : public DeviceClass
       return true;
     };
 
-    // 在处理“非 AP normal read”之前，必须先把 pending flush 掉（保证响应顺序与 pipeline
-    // 不紊乱）
+    // Flush pending AP read before handling non-AP normal read
+    // to keep response ordering stable.
     auto flush_pending_if_any = [&]() -> bool
     { return pending.valid ? complete_pending_by_rdbuff() : true; };
 
@@ -1755,7 +2261,7 @@ class DapLinkV2Class : public DeviceClass
       const bool MATCH_MASK =
           ((RQ & LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_MASK) != 0u);
 
-      // 规范：timestamp 不能与 match 位组合
+      // Spec rule: timestamp cannot be combined with match bits.
       if (TS && (MATCH_VALUE || MATCH_MASK))
       {
         response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -1768,7 +2274,8 @@ class DapLinkV2Class : public DeviceClass
       if (!RNW)
       {
         // ---------------- WRITE ----------------
-        // 写/配置类操作不参与 AP posted pipeline；先 flush pending
+        // Config-like operations do not participate in AP posted pipeline;
+        // flush pending first.
         if (!flush_pending_if_any())
         {
           break;
@@ -1780,8 +2287,7 @@ class DapLinkV2Class : public DeviceClass
           break;
         }
 
-        uint32_t wdata = 0u;
-        Memory::FastCopy(&wdata, &req[req_off], sizeof(wdata));
+        uint32_t wdata = LoadU32Le(&req[req_off]);
         req_off = static_cast<uint16_t>(req_off + 4u);
 
         if (MATCH_MASK)
@@ -1791,7 +2297,6 @@ class DapLinkV2Class : public DeviceClass
           response_count++;  // MATCH_MASK 视为成功 transfer
           continue;
         }
-
         if (AP)
         {
           ec = swd_.ApWriteTxn(ADDR2B, wdata, ack);
@@ -1831,8 +2336,9 @@ class DapLinkV2Class : public DeviceClass
 
         if (MATCH_VALUE)
         {
-          // MATCH_VALUE 不回传 data；为简化语义，先 flush pending，再走原逻辑（AP read
-          // 仍用 ApReadTxn）
+          // MATCH_VALUE does not return read data.
+          // For simpler semantics, flush pending first, then keep using ApReadTxn
+          // for AP reads.
           if (!flush_pending_if_any())
           {
             break;
@@ -1844,8 +2350,7 @@ class DapLinkV2Class : public DeviceClass
             break;
           }
 
-          uint32_t match_val = 0u;
-          Memory::FastCopy(&match_val, &req[req_off], sizeof(match_val));
+          uint32_t match_val = LoadU32Le(&req[req_off]);
           req_off = static_cast<uint16_t>(req_off + 4u);
 
           uint32_t rdata = 0u;
@@ -1859,7 +2364,7 @@ class DapLinkV2Class : public DeviceClass
               ec = swd_.ApReadTxn(ADDR2B, rdata, ack);  // 内含 RDBUFF
               if (ec == ErrorCode::OK && ack == LibXR::Debug::SwdProtocol::Ack::OK)
               {
-                // ApReadTxn 读过 RDBUFF，等价 flush
+                // ApReadTxn already reads RDBUFF; equivalent to a flush.
                 check_write = false;
               }
             }
@@ -1903,7 +2408,7 @@ class DapLinkV2Class : public DeviceClass
             response_value =
                 static_cast<uint8_t>(LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK |
                                      LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MISMATCH);
-            // MISMATCH 不计入 response_count
+            // MISMATCH does not increase response_count.
             break;
           }
 
@@ -1955,10 +2460,10 @@ class DapLinkV2Class : public DeviceClass
         // AP normal read：posted-read pipeline
         if (!pending.valid)
         {
-          // 这是该段连续 AP reads 的第一笔：发起一次 AP read（posted），丢弃其 returned
-          // posted data
+          // First AP read in this contiguous AP-read segment:
+          // start one posted AP read and discard returned posted data.
           uint32_t dummy_posted = 0u;
-          ec = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
+          ec = ApReadPostedFast(ADDR2B, dummy_posted, ack);
 
           response_value = MapAckToDapResp(ack);
           if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
@@ -1976,12 +2481,14 @@ class DapLinkV2Class : public DeviceClass
           pending.valid = true;
           pending.need_ts = TS;
 
-          // 该 transfer 尚未“完成”（数据要等下一次 AP read 或末尾 RDBUFF）
+          // Transfer is not "complete" yet.
+          // Data will be produced by next AP read or tail RDBUFF.
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
         }
         else
         {
-          // pending 存在：本次 AP read 的 returned posted data = 上一笔 AP read 的结果
+          // Pending exists: current AP read returns posted data
+          // from the previous AP read.
           if (!ensure_space(bytes_for_read(pending.need_ts)))
           {
             response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -1989,13 +2496,13 @@ class DapLinkV2Class : public DeviceClass
           }
 
           uint32_t posted_prev = 0u;
-          ec = swd_.ApReadPostedTxn(ADDR2B, posted_prev, ack);
+          ec = ApReadPostedFast(ADDR2B, posted_prev, ack);
 
           const uint8_t CUR_V = MapAckToDapResp(ack);
           if (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK || ec != ErrorCode::OK)
           {
-            // 本次 AP read 没跑通：尽量用 RDBUFF 把 pending 补齐（否则 count 会少一笔且
-            // pipeline 残留）
+            // Current AP read failed: try best effort to complete pending by RDBUFF.
+            // Otherwise, response_count may miss one and pipeline may remain dirty.
             const uint8_t PROOR_FAIL =
                 (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
                     ? CUR_V
@@ -2003,18 +2510,18 @@ class DapLinkV2Class : public DeviceClass
 
             if (!complete_pending_by_rdbuff())
             {
-              // pending 本身失败：按“更早失败”返回（complete_pending_by_rdbuff 已写
-              // response_value）
+              // Pending itself failed: return earlier failure
+              // (complete_pending_by_rdbuff already wrote response_value).
               break;
             }
 
-            // pending 补齐成功：保留“当前失败”
+            // Pending completion succeeded: keep current failure.
             response_value = PROOR_FAIL;
             break;
           }
 
-          // 本次 AP read 成功：先回传 pending（用 posted_prev），再把“本次”设为新的
-          // pending
+          // Current AP read succeeded: emit pending first (using posted_prev),
+          // then mark current read as new pending.
           if (!emit_read_with_ts(pending.need_ts, posted_prev))
           {
             response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -2035,21 +2542,22 @@ class DapLinkV2Class : public DeviceClass
       }
     }
 
-    // 若仍有 pending AP read：
-    // - 若当前 response_value=OK：正常收尾（读一次 RDBUFF）
-    // - 若当前 response_value!=OK：尝试先补齐 pending；补齐成功则保留原失败，否则以
-    // pending 失败为准
+    // If pending AP read still exists at tail:
+    // - when response_value == OK: normal tail by one RDBUFF;
+    // - when response_value != OK: try pending completion first; if completion
+    //   succeeds, keep original failure; otherwise use pending failure.
     if (pending.valid)
     {
       const uint8_t PRIOR_FAIL = response_value;
 
       if (!complete_pending_by_rdbuff())
       {
-        // 以 pending 的失败为准（已写 response_value）
+        // Pending failure wins here (response_value already written).
       }
       else
       {
-        // pending 补齐成功：保留原失败（如果原本就是 OK 则维持 OK）
+        // Pending completion succeeded: keep original failure
+        // (if original was OK, keep OK).
         if (PRIOR_FAIL != 0u && PRIOR_FAIL != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
         {
           response_value = PRIOR_FAIL;
@@ -2057,13 +2565,13 @@ class DapLinkV2Class : public DeviceClass
       }
     }
 
-    // 末尾写入冲刷：若全部 OK 且发生过真实 write，且期间未通过 RDBUFF flush，则做一次
-    // DP_RDBUFF read (discard)
+    // Tail write flush: if all OK and there was a real write, and no RDBUFF
+    // flush happened in between, perform one DP_RDBUFF read (discard).
     if (response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && check_write)
     {
       uint32_t dummy = 0u;
       LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-      const ErrorCode EC = swd_.DpReadRdbuffTxn(dummy, ack);
+      const ErrorCode EC = DpReadRdbuffFast(dummy, ack);
       const uint8_t V = MapAckToDapResp(ack);
 
       if (V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
@@ -2081,7 +2589,6 @@ class DapLinkV2Class : public DeviceClass
     out_len = resp_off;
     return ErrorCode::OK;
   }
-
   ErrorCode HandleTransferBlock(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
                                 uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
@@ -2113,7 +2620,7 @@ class DapLinkV2Class : public DeviceClass
     }
 
     uint16_t count = 0u;
-    Memory::FastCopy(&count, &req[2], sizeof(count));
+    count = LoadU16Le(&req[2]);
 
     const uint8_t DAP_RQ = req[4];
 
@@ -2134,7 +2641,7 @@ class DapLinkV2Class : public DeviceClass
     if (count == 0u)
     {
       const uint16_t DONE0 = 0u;
-      Memory::FastCopy(&resp[1], &DONE0, sizeof(DONE0));
+      StoreU16Le(&resp[1], DONE0);
       resp[3] = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
       out_len = 4u;
       return ErrorCode::OK;
@@ -2158,46 +2665,57 @@ class DapLinkV2Class : public DeviceClass
       if (REQ_NEED > req_len)
       {
         xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-        Memory::FastCopy(&resp[1], &done, sizeof(done));
+        StoreU16Le(&resp[1], done);
         resp[3] = xresp;
         out_len = resp_off;
         return ErrorCode::OK;
-      }
-
-      for (uint32_t i = 0; i < count; ++i)
+      }      if (AP)
       {
-        LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-        ErrorCode ec = ErrorCode::OK;
-
-        uint32_t wdata = 0u;
-        Memory::FastCopy(&wdata, &req[req_off], sizeof(wdata));
-        req_off = static_cast<uint16_t>(req_off + 4u);
-
-        if (AP)
+        auto swd_req = LibXR::Debug::SwdProtocol::make_ap_write_req(ADDR2B, 0u);
+        LibXR::Debug::SwdProtocol::Response swd_resp = {};
+        for (uint32_t i = 0; i < count; ++i)
         {
-          ec = swd_.ApWriteTxn(ADDR2B, wdata, ack);
+          uint32_t wdata = LoadU32Le(&req[req_off]);
+          req_off = static_cast<uint16_t>(req_off + 4u);
+          swd_req.wdata = wdata;
+          const ErrorCode ec = TransferTxnFast(swd_req, swd_resp);
+          xresp = MapAckToDapResp(swd_resp.ack);
+          if (swd_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK)
+          {
+            break;
+          }
+          if (ec != ErrorCode::OK)
+          {
+            xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+            break;
+          }
+          done = static_cast<uint16_t>(i + 1u);
         }
-        else
+      }
+      else
+      {
+        for (uint32_t i = 0; i < count; ++i)
         {
+          LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+          ErrorCode ec = ErrorCode::OK;
+          uint32_t wdata = LoadU32Le(&req[req_off]);
+          req_off = static_cast<uint16_t>(req_off + 4u);
           ec = swd_.DpWriteTxn(static_cast<LibXR::Debug::SwdProtocol::DpWriteReg>(ADDR2B),
                                wdata, ack);
+          xresp = MapAckToDapResp(ack);
+          if (ack != LibXR::Debug::SwdProtocol::Ack::OK)
+          {
+            break;
+          }
+          if (ec != ErrorCode::OK)
+          {
+            xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+            break;
+          }
+          done = static_cast<uint16_t>(i + 1u);
         }
-
-        xresp = MapAckToDapResp(ack);
-        if (ack != LibXR::Debug::SwdProtocol::Ack::OK)
-        {
-          break;
-        }
-        if (ec != ErrorCode::OK)
-        {
-          xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-          break;
-        }
-
-        done = static_cast<uint16_t>(i + 1u);
       }
-
-      Memory::FastCopy(&resp[1], &done, sizeof(done));
+      StoreU16Le(&resp[1], done);
       resp[3] = xresp;
       out_len = resp_off;
       return ErrorCode::OK;
@@ -2211,7 +2729,7 @@ class DapLinkV2Class : public DeviceClass
       if (RESP_NEED > resp_cap)
       {
         xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-        Memory::FastCopy(&resp[1], &done, sizeof(done));
+        StoreU16Le(&resp[1], done);
         resp[3] = xresp;
         out_len = resp_off;
         return ErrorCode::OK;
@@ -2223,90 +2741,81 @@ class DapLinkV2Class : public DeviceClass
         LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
         ErrorCode ec = ErrorCode::OK;
         uint32_t rdata = 0u;
-
         ec = swd_.DpReadTxn(static_cast<LibXR::Debug::SwdProtocol::DpReadReg>(ADDR2B),
                             rdata, ack);
-
         xresp = MapAckToDapResp(ack);
         if (ack != LibXR::Debug::SwdProtocol::Ack::OK)
         {
           break;
         }
-
         if (ec != ErrorCode::OK)
         {
           xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
           break;
         }
-
-        Memory::FastCopy(&resp[resp_off], &rdata, sizeof(rdata));
+        StoreU32Le(&resp[resp_off], rdata);
         resp_off = static_cast<uint16_t>(resp_off + 4u);
         done = static_cast<uint16_t>(i + 1u);
       }
-
-      Memory::FastCopy(&resp[1], &done, sizeof(done));
+      StoreU16Le(&resp[1], done);
       resp[3] = xresp;
       out_len = resp_off;
       return ErrorCode::OK;
     }
 
-    // AP read: posted-read pipeline
+        // AP read: posted-read pipeline
     {
       const uint32_t RESP_NEED =
           static_cast<uint32_t>(resp_off) + (static_cast<uint32_t>(count) * 4u);
       if (RESP_NEED > resp_cap)
       {
         xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-        Memory::FastCopy(&resp[1], &done, sizeof(done));
+        StoreU16Le(&resp[1], done);
         resp[3] = xresp;
         out_len = resp_off;
         return ErrorCode::OK;
       }
 
-      LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-      ErrorCode ec = ErrorCode::OK;
-
-      // 先发第一笔 AP read（posted），其 returned posted data 丢弃
-      uint32_t dummy_posted = 0u;
-      ec = swd_.ApReadPostedTxn(ADDR2B, dummy_posted, ack);
-      xresp = MapAckToDapResp(ack);
-      if (ack != LibXR::Debug::SwdProtocol::Ack::OK)
+      auto ap_read_req = LibXR::Debug::SwdProtocol::make_ap_read_req(ADDR2B);
+      const auto rdbuff_req = LibXR::Debug::SwdProtocol::make_dp_read_req(
+          LibXR::Debug::SwdProtocol::DpReadReg::RDBUFF);
+      LibXR::Debug::SwdProtocol::Response ap_read_resp = {};
+      ErrorCode ec = TransferTxnFast(ap_read_req, ap_read_resp);
+      xresp = MapAckToDapResp(ap_read_resp.ack);
+      if (ap_read_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK)
       {
         goto out_ap_read;  // NOLINT
       }
-      if (ec != ErrorCode::OK)
+      if (ec != ErrorCode::OK || !ap_read_resp.parity_ok)
       {
         xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
         goto out_ap_read;  // NOLINT
       }
 
-      // i=1..COUNT-1：每次 AP read 返回上一笔数据
+      // i=1..COUNT-1: each AP read returns previous posted data.
       for (uint32_t i = 1; i < count; ++i)
       {
-        uint32_t posted_prev = 0u;
-        ec = swd_.ApReadPostedTxn(ADDR2B, posted_prev, ack);
-        const uint8_t CUR = MapAckToDapResp(ack);
+        ec = TransferTxnFast(ap_read_req, ap_read_resp);
+        const uint8_t CUR = MapAckToDapResp(ap_read_resp.ack);
 
-        if (ack != LibXR::Debug::SwdProtocol::Ack::OK || ec != ErrorCode::OK)
+        if (ap_read_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK || ec != ErrorCode::OK ||
+            !ap_read_resp.parity_ok)
         {
-          // 当前失败：尽量用 RDBUFF 把上一笔补齐（done 会更准确）
+          // Current AP read failed; try to flush previous pending data via RDBUFF.
           if (resp_off + 4u <= resp_cap)
           {
-            uint32_t last = 0u;
-            LibXR::Debug::SwdProtocol::Ack ack2 =
-                LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-            const ErrorCode EC2 = swd_.DpReadRdbuffTxn(last, ack2);
-            const uint8_t V2 = MapAckToDapResp(ack2);
+            LibXR::Debug::SwdProtocol::Response rdbuff_resp = {};
+            const ErrorCode EC2 = TransferTxnFast(rdbuff_req, rdbuff_resp);
+            const uint8_t V2 = MapAckToDapResp(rdbuff_resp.ack);
 
-            if (V2 == 1u && EC2 == ErrorCode::OK)
+            if (V2 == 1u && EC2 == ErrorCode::OK && rdbuff_resp.parity_ok)
             {
-              Memory::FastCopy(&resp[resp_off], &last, sizeof(last));
+              StoreU32Le(&resp[resp_off], rdbuff_resp.rdata);
               resp_off = static_cast<uint16_t>(resp_off + 4u);
-              done = static_cast<uint16_t>(i);  // 成功补齐了第 i-1 笔 => done=i
+              done = static_cast<uint16_t>(i);  // done includes transfer [0..i-1]
             }
             else
             {
-              // 更早的 pending 失败：以它为准
               xresp = V2;
               if (EC2 != ErrorCode::OK)
               {
@@ -2316,7 +2825,6 @@ class DapLinkV2Class : public DeviceClass
             }
           }
 
-          // pending 已补齐：保留“当前失败”
           xresp = CUR;
           if (ec != ErrorCode::OK)
           {
@@ -2325,38 +2833,36 @@ class DapLinkV2Class : public DeviceClass
           goto out_ap_read;  // NOLINT
         }
 
-        // 当前成功：posted_prev 是上一笔(i-1)的数据
-        Memory::FastCopy(&resp[resp_off], &posted_prev, sizeof(posted_prev));
+        StoreU32Le(&resp[resp_off], ap_read_resp.rdata);
         resp_off = static_cast<uint16_t>(resp_off + 4u);
-        done = static_cast<uint16_t>(i);  // 已完成 i 笔（0..i-1）
+        done = static_cast<uint16_t>(i);  // completed [0..i-1]
         xresp = CUR;
       }
 
-      // 收尾：读一次 RDBUFF 取回最后一笔
+      // Tail flush: read final posted value from RDBUFF.
       {
-        uint32_t last = 0u;
-        LibXR::Debug::SwdProtocol::Ack ack2 = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-        const ErrorCode EC2 = swd_.DpReadRdbuffTxn(last, ack2);
-        const uint8_t V2 = MapAckToDapResp(ack2);
+        LibXR::Debug::SwdProtocol::Response rdbuff_resp = {};
+        const ErrorCode EC2 = TransferTxnFast(rdbuff_req, rdbuff_resp);
+        const uint8_t V2 = MapAckToDapResp(rdbuff_resp.ack);
 
         xresp = V2;
         if (V2 != 1u)
         {
           goto out_ap_read;  // NOLINT
         }
-        if (EC2 != ErrorCode::OK)
+        if (EC2 != ErrorCode::OK || !rdbuff_resp.parity_ok)
         {
           xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
           goto out_ap_read;  // NOLINT
         }
 
-        Memory::FastCopy(&resp[resp_off], &last, sizeof(last));
+        StoreU32Le(&resp[resp_off], rdbuff_resp.rdata);
         resp_off = static_cast<uint16_t>(resp_off + 4u);
         done = count;
       }
 
     out_ap_read:
-      Memory::FastCopy(&resp[1], &done, sizeof(done));
+      StoreU16Le(&resp[1], done);
       resp[3] = xresp;
       out_len = resp_off;
       return ErrorCode::OK;
@@ -2395,12 +2901,34 @@ class DapLinkV2Class : public DeviceClass
   }
 
  private:
-  static constexpr uint16_t DEFAULT_DAP_PACKET_SIZE = 64u;
-  static constexpr uint8_t PACKET_COUNT_ADVERTISED = 2u;
-  static constexpr uint8_t MAX_OUTSTANDING_RESPONSES = PACKET_COUNT_ADVERTISED;
-  static constexpr uint16_t MAX_DAP_PACKET_SIZE = 512u;  // USB HS bulk max packet size.
+  static constexpr uint16_t DEFAULT_DAP_PACKET_SIZE = DefaultDapPacketSize;
+  static constexpr uint8_t PACKET_COUNT_ADVERTISED = AdvertisedPacketCount;
+  static constexpr uint8_t PACKET_COUNT_EFFECTIVE =
+      (PACKET_COUNT_ADVERTISED > 4u) ? 4u : PACKET_COUNT_ADVERTISED;
+  static constexpr uint8_t MAX_OUTSTANDING_RESPONSES = PACKET_COUNT_EFFECTIVE;
+  // OpenOCD 0.12 computes pending_queue_len = (packet_size - 4) / 5 for CMD_DAP_TFER.
+  // CMD_DAP_TFER transfer_count is u8, so cap host-visible packet size to avoid
+  // transfer_count > 255 and "expected X, got Y" mismatch.
+  static constexpr uint16_t OPENOCD_SAFE_DAP_PACKET_SIZE =
+      static_cast<uint16_t>((255u * 5u) + 4u);
+  // Host-visible CMSIS-DAP packet size; endpoint MPS limits are handled by
+  // TransferMultiBulk segmentation/reassembly.
+  static constexpr uint16_t MAX_DAP_PACKET_SIZE = MaxDapPacketSize;
+  static constexpr uint16_t QUEUED_REQ_BUFFER_SIZE = QueuedRequestBufferSize;
+  static constexpr uint16_t QUEUED_CMD_COUNT_MAX = QueuedCommandCountMax;
   static constexpr uint16_t RESP_SLOT_SIZE = MAX_DAP_PACKET_SIZE;
-  static constexpr uint8_t RESP_QUEUE_DEPTH = PACKET_COUNT_ADVERTISED;
+  static constexpr uint8_t RESP_QUEUE_DEPTH = PACKET_COUNT_EFFECTIVE;
+  static constexpr uint16_t QUEUED_REQ_BUFFER_ALLOC_SIZE = QUEUED_REQ_BUFFER_SIZE;
+  static_assert(PACKET_COUNT_ADVERTISED > 0u, "PACKET_COUNT_ADVERTISED must be > 0");
+  static_assert(PACKET_COUNT_EFFECTIVE > 0u, "PACKET_COUNT_EFFECTIVE must be > 0");
+  static_assert(MAX_DAP_PACKET_SIZE >= DEFAULT_DAP_PACKET_SIZE,
+                "MAX_DAP_PACKET_SIZE must be >= DEFAULT_DAP_PACKET_SIZE");
+  static_assert(MAX_DAP_PACKET_SIZE <= OPENOCD_SAFE_DAP_PACKET_SIZE,
+                "MAX_DAP_PACKET_SIZE exceeds OpenOCD-safe limit");
+  static_assert(((OPENOCD_SAFE_DAP_PACKET_SIZE - 4u) / 5u) <= 255u,
+                "OPENOCD_SAFE_DAP_PACKET_SIZE too large for CMD_DAP_TFER u8 count");
+  static_assert(QUEUED_REQ_BUFFER_SIZE > 0u, "QUEUED_REQ_BUFFER_SIZE must be > 0");
+  static_assert(QUEUED_CMD_COUNT_MAX > 0u, "QUEUED_CMD_COUNT_MAX must be > 0");
   static_assert(RESP_SLOT_SIZE >= DEFAULT_DAP_PACKET_SIZE,
                 "RESP_SLOT_SIZE must cover FS bulk packet size");
   static_assert((RESP_QUEUE_DEPTH & (RESP_QUEUE_DEPTH - 1u)) == 0u,
@@ -2428,6 +2956,16 @@ class DapLinkV2Class : public DeviceClass
   bool deferred_in_resp_valid_ = false;
   uint16_t deferred_in_resp_len_ = 0u;
 
+  uint8_t queued_request_buffer_[QUEUED_REQ_BUFFER_ALLOC_SIZE] = {};
+  uint16_t queued_request_length_ = 0u;
+  uint16_t queued_command_count_ = 0u;
+
+  uint8_t out_req_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
+  LibXR::RawData out_req_multi_buf_{out_req_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
+  uint8_t in_tx_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
+  LibXR::RawData in_tx_multi_buf_{in_tx_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
+  const char* interface_string_ = nullptr;
+
 #pragma pack(push, 1)
   /**
    * @brief MS OS 2.0 描述符集合布局 / MS OS 2.0 descriptor set layout
@@ -2443,7 +2981,7 @@ class DapLinkV2Class : public DeviceClass
         compat;  ///< CompatibleId feature / CompatibleId feature
 
     /**
-     * @brief DeviceInterfaceGUIDs 注册属性 / DeviceInterfaceGUIDs registry property
+     * @brief DeviceInterfaceGUIDs registry property
      */
     struct RegProp
     {
@@ -2462,36 +3000,35 @@ class DapLinkV2Class : public DeviceClass
  private:
   SwdPort& swd_;  ///< SWD 链路 / SWD link
 
-  LibXR::GPIO* nreset_gpio_ = nullptr;  ///< 可选 nRESET GPIO / Optional nRESET GPIO
+  LibXR::GPIO* nreset_gpio_ = nullptr;  ///< Optional nRESET GPIO
 
   uint8_t swj_shadow_ = static_cast<uint8_t>(
       DapLinkV2Def::DAP_SWJ_SWDIO_TMS |
       DapLinkV2Def::DAP_SWJ_NRESET);  ///< Shadow SWJ pin levels / Shadow SWJ pin levels
 
   bool last_nreset_level_high_ =
-      true;  ///< 最近一次 nRESET 电平（高=释放）/ Last nRESET level (high=release)
+      true;  ///< Last nRESET level (high = release)
 
-  LibXR::USB::DapLinkV2Def::State dap_state_{};  ///< DAP 状态 / DAP state
+  LibXR::USB::DapLinkV2Def::State dap_state_{};  ///< DAP state
   InfoStrings info_{
       "XRobot", "DAPLinkV2", "00000001", "2.0.0", "XRUSB",
-      "XRDAP",  "XRobot",    "DAP_DEMO", "0.1.0"};  ///< Info 字符串 / Info strings
+      "XRDAP",  "XRobot",    "DAP_DEMO", "0.1.0"};  ///< Info strings
 
-  uint32_t swj_clock_hz_ = 1000000u;  ///< SWJ 时钟（Hz）/ SWJ clock (Hz)
+  uint32_t swj_clock_hz_ = 1000000u;  ///< SWJ clock (Hz)
 
-  Endpoint::EPNumber data_in_ep_num_;       ///< Bulk IN EP number / Bulk IN EP number
-  Endpoint::EPNumber data_out_ep_num_;      ///< Bulk OUT EP number / Bulk OUT EP number
-  const char* interface_string_ = nullptr;  ///< Interface string / Interface string
+  Endpoint::EPNumber data_in_ep_num_;   ///< Bulk IN EP number / Bulk IN EP number
+  Endpoint::EPNumber data_out_ep_num_;  ///< Bulk OUT EP number / Bulk OUT EP number
 
   Endpoint* ep_data_in_ = nullptr;   ///< Bulk IN endpoint / Bulk IN endpoint
   Endpoint* ep_data_out_ = nullptr;  ///< Bulk OUT endpoint / Bulk OUT endpoint
 
-  bool inited_ = false;        ///< 初始化标志 / Initialized flag
-  uint8_t interface_num_ = 0;  ///< 接口号 / Interface number
+  bool inited_ = false;        ///< Initialized flag
+  uint8_t interface_num_ = 0;  ///< Interface number
 
 #pragma pack(push, 1)
   /**
-   * @brief 配置描述符块（Interface + 2x Endpoint）/ Descriptor block (Interface + 2x
-   * Endpoint)
+   * @brief Descriptor block (Interface + 2x Endpoint)
+   *
    */
   struct DapLinkV2DescBlock
   {

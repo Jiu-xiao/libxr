@@ -436,7 +436,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_ACK;
   }
 
-  OnTransferCompleteCallback(true, size);
+  OnTransferCompleteCallback<true>(size);
 }
 
 void CH32EndpointOtgFs::SwitchBuffer()
