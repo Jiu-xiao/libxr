@@ -11,7 +11,7 @@
 | `Peripheral` | Ubuntu/Debian |
 | ------------ | ------------- |
 | POWER        | ✅             |
-| GPIO         | ❌             |
+| GPIO         | ✅             |
 | FLASH        | ✅             |
 | UART         | ✅             |
 | SPI          | ❌             |
@@ -81,21 +81,21 @@
 
 ## CH32 Support
 
-| `Peripheral` | CH32V307/CH32V203 |
-| ------------ | ----------------- |
-| POWER        | ✅                 |
-| GPIO         | ✅                 |
-| FLASH        | ✅                 |
-| UART         | ✅                 |
-| SPI          | ✅                 |
-| I2C          | ✅                 |
-| CAN          | ✅                 |
-| CANFD        | 🚫                 |
-| ADC          | ❌                 |
-| DAC          | ❌                 |
-| PWM          | ✅                 |
-| USB-DEVICE   | ✅                 |
-| WDG          | ❌                 |
+| `Peripheral` | CH32V305/CH32V307/CH32V203 |
+| ------------ | -------------------------- |
+| POWER        | ✅                          |
+| GPIO         | ✅                          |
+| FLASH        | ✅                          |
+| UART         | ✅                          |
+| SPI          | ✅                          |
+| I2C          | ✅                          |
+| CAN          | ✅                          |
+| CANFD        | 🚫                          |
+| ADC          | ❌                          |
+| DAC          | ❌                          |
+| PWM          | ✅                          |
+| USB-DEVICE   | ✅                          |
+| WDG          | ❌                          |
 
 | `Network`   | CH32V307 |
 | ----------- | -------- |
