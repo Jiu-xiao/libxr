@@ -8,12 +8,14 @@ endif()
 file(GLOB_RECURSE XRUSB_ALL_CPP CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/*.cpp"
 )
+list(SORT XRUSB_ALL_CPP)
 
 # 2. 递归查找所有目录（包括根目录）
 file(GLOB_RECURSE XRUSB_ALL_PATHS
     LIST_DIRECTORIES true
     "${CMAKE_CURRENT_LIST_DIR}/*"
 )
+list(SORT XRUSB_ALL_PATHS)
 
 # 3. 过滤出所有是目录的路径，并加入 include path
 set(XRUSB_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}")
@@ -23,6 +25,7 @@ foreach(path ${XRUSB_ALL_PATHS})
     endif()
 endforeach()
 list(REMOVE_DUPLICATES XRUSB_INCLUDE_DIRS)
+list(SORT XRUSB_INCLUDE_DIRS)
 
 # 4. 添加到 target
 target_include_directories(xr PUBLIC ${XRUSB_INCLUDE_DIRS})

@@ -28,24 +28,31 @@ endif()
 # Source File
 file(
   GLOB ${PROJECT_NAME}_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+list(SORT ${PROJECT_NAME}_SOURCES)
 
 file(
   GLOB ${PROJECT_NAME}_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
+list(SORT ${PROJECT_NAME}_CORE_SOURCES)
 
 file(
   GLOB ${PROJECT_NAME}_SYSTEM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/system/*.cpp")
+list(SORT ${PROJECT_NAME}_SYSTEM_SOURCES)
 
 file(
   GLOB ${PROJECT_NAME}_DRIVER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/driver/*.cpp")
+list(SORT ${PROJECT_NAME}_DRIVER_SOURCES)
 
 file(
   GLOB ${PROJECT_NAME}_UTILS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/utils/*.cpp")
+list(SORT ${PROJECT_NAME}_UTILS_SOURCES)
 
 file(
   GLOB ${PROJECT_NAME}_STRUCTURE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/structure/*.cpp")
+list(SORT ${PROJECT_NAME}_STRUCTURE_SOURCES)
 
 file(
   GLOB ${PROJECT_NAME}_MIDDLEWARE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*.cpp")
+list(SORT ${PROJECT_NAME}_MIDDLEWARE_SOURCES)
 
 target_sources(${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_SOURCES}
@@ -128,6 +135,7 @@ endif()
 # XRobot Module Deps
 if(XROBOT_MODULES_DIR)
   file(GLOB MODULE_DIRS RELATIVE ${XROBOT_MODULES_DIR} ${XROBOT_MODULES_DIR}/*)
+  list(SORT MODULE_DIRS)
 
   foreach(MOD ${MODULE_DIRS})
       if(IS_DIRECTORY "${XROBOT_MODULES_DIR}/${MOD}")
@@ -141,6 +149,7 @@ if(XROBOT_MODULES_DIR)
   get_property(_module_deps GLOBAL PROPERTY XR_MODULE_DEPS)
   if(_module_deps)
     list(REMOVE_DUPLICATES _module_deps)
+    list(SORT _module_deps)
     target_link_libraries(${PROJECT_NAME} PUBLIC ${_module_deps})
   endif()
 endif()
