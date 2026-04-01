@@ -563,750 +563,748 @@ bool MSPM0UART::IsZeroTimeoutPendingBlockRead() const
   return read_port_->info_.op.data.sem_info.timeout == 0U;
 }
 
-  void MSPM0UART::KickTxIfPending()
+void MSPM0UART::KickTxIfPending()
+{
+  if ((write_port_->queue_info_->Size() == 0U) &&
+      !tx_active_valid_.load(std::memory_order_acquire))
   {
-    if ((write_port_->queue_info_->Size() == 0U) &&
-        !tx_active_valid_.load(std::memory_order_acquire))
-    {
-      return;
-    }
-
-    DL_UART_enableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
-    res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
+    return;
   }
 
-  uint16_t MSPM0UART::ResolveLinCompareWindow() const
+  DL_UART_enableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
+  res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
+}
+
+uint16_t MSPM0UART::ResolveLinCompareWindow() const
+{
+  if (!res_.use_lin_compare)
   {
-    if (!res_.use_lin_compare)
-    {
-      return 0U;
-    }
-    return res_.lin_compare_value;
+    return 0U;
+  }
+  return res_.lin_compare_value;
+}
+
+uint32_t MSPM0UART::GetTimeoutInterruptMask() const
+{
+  switch (rx_timeout_mode_.load(std::memory_order_acquire))
+  {
+    // [LIN路径 / LIN path] 使用 LINC0 compare match 作为帧间超时事件 / Use
+    // LINC0 compare match as the frame-gap timeout event.
+    case RxTimeoutMode::LIN_COMPARE:
+      return DL_UART_INTERRUPT_LINC0_MATCH;
+    // [BYTE路径 / BYTE path] 不使用硬件超时中断 / No hardware timeout IRQ is
+    // used in byte-interrupt mode.
+    case RxTimeoutMode::BYTE_INTERRUPT:
+    default:
+      return 0;
+  }
+}
+
+void MSPM0UART::RearmLinCompareTimeout()
+{
+  if (rx_timeout_mode_.load(std::memory_order_acquire) != RxTimeoutMode::LIN_COMPARE)
+  {
+    return;
   }
 
-  uint32_t MSPM0UART::GetTimeoutInterruptMask() const
+  uint16_t lin_compare_window = lin_compare_window_.load(std::memory_order_acquire);
+  if (lin_compare_window == 0U)
   {
-    switch (rx_timeout_mode_.load(std::memory_order_acquire))
-    {
-      // [LIN路径 / LIN path] 使用 LINC0 compare match 作为帧间超时事件 / Use
-      // LINC0 compare match as the frame-gap timeout event.
-      case RxTimeoutMode::LIN_COMPARE:
-        return DL_UART_INTERRUPT_LINC0_MATCH;
-      // [BYTE路径 / BYTE path] 不使用硬件超时中断 / No hardware timeout IRQ is
-      // used in byte-interrupt mode.
-      case RxTimeoutMode::BYTE_INTERRUPT:
-      default:
-        return 0;
-    }
+    lin_compare_window = ResolveLinCompareWindow();
+    lin_compare_window_.store(lin_compare_window, std::memory_order_release);
+  }
+  if (lin_compare_window == 0U)
+  {
+    return;
   }
 
-  void MSPM0UART::RearmLinCompareTimeout()
+  const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
+  DL_UART_disableInterrupt(res_.instance, TIMEOUT_MASK);
+  DL_UART_clearInterruptStatus(res_.instance, TIMEOUT_MASK);
+  NVIC_ClearPendingIRQ(res_.irqn);
+  DL_UART_disableLINCounterCompareMatch(res_.instance);
+  DL_UART_setLINCounterValue(res_.instance, 0U);
+  DL_UART_setLINCounterCompareValue(res_.instance, lin_compare_window);
+  DL_UART_enableLINCounterCompareMatch(res_.instance);
+}
+
+size_t MSPM0UART::ConsumeTimedOutReadData(bool in_isr, bool copy_to_buffer,
+                                          size_t size_limit)
+{
+  const size_t AVAILABLE = read_port_->queue_data_->Size();
+  if (AVAILABLE == 0U)
   {
-    if (rx_timeout_mode_.load(std::memory_order_acquire) != RxTimeoutMode::LIN_COMPARE)
-    {
-      return;
-    }
-
-    uint16_t lin_compare_window = lin_compare_window_.load(std::memory_order_acquire);
-    if (lin_compare_window == 0U)
-    {
-      lin_compare_window = ResolveLinCompareWindow();
-      lin_compare_window_.store(lin_compare_window, std::memory_order_release);
-    }
-    if (lin_compare_window == 0U)
-    {
-      return;
-    }
-
-    const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
-    DL_UART_disableInterrupt(res_.instance, TIMEOUT_MASK);
-    DL_UART_clearInterruptStatus(res_.instance, TIMEOUT_MASK);
-    NVIC_ClearPendingIRQ(res_.irqn);
-    DL_UART_disableLINCounterCompareMatch(res_.instance);
-    DL_UART_setLINCounterValue(res_.instance, 0U);
-    DL_UART_setLINCounterCompareValue(res_.instance, lin_compare_window);
-    DL_UART_enableLINCounterCompareMatch(res_.instance);
+    return 0U;
   }
 
-  size_t MSPM0UART::ConsumeTimedOutReadData(bool in_isr, bool copy_to_buffer,
-                                            size_t size_limit)
+  size_t copy_size = AVAILABLE;
+  if (copy_to_buffer)
   {
-    const size_t AVAILABLE = read_port_->queue_data_->Size();
-    if (AVAILABLE == 0U)
-    {
-      return 0U;
-    }
-
-    size_t copy_size = AVAILABLE;
-    if (copy_to_buffer)
-    {
-      const size_t REQUESTED = read_port_->info_.data.size_;
-      copy_size = (AVAILABLE < REQUESTED) ? AVAILABLE : REQUESTED;
-    }
-    if ((size_limit != static_cast<size_t>(-1)) && (copy_size > size_limit))
-    {
-      copy_size = size_limit;
-    }
-    if (copy_size == 0U)
-    {
-      return 0U;
-    }
-    uint8_t* dst = nullptr;
-    if (copy_to_buffer)
-    {
-      dst = reinterpret_cast<uint8_t*>(read_port_->info_.data.addr_);
-    }
-
-    const ErrorCode POP_ANS = read_port_->queue_data_->PopBatch(dst, copy_size);
-    if (POP_ANS != ErrorCode::OK)
-    {
-      return 0U;
-    }
-
-    last_timeout_consumed_size_.fetch_add(static_cast<uint32_t>(copy_size),
-                                          std::memory_order_acq_rel);
-    UNUSED(in_isr);
-    return copy_size;
+    const size_t REQUESTED = read_port_->info_.data.size_;
+    copy_size = (AVAILABLE < REQUESTED) ? AVAILABLE : REQUESTED;
+  }
+  if ((size_limit != static_cast<size_t>(-1)) && (copy_size > size_limit))
+  {
+    copy_size = size_limit;
+  }
+  if (copy_size == 0U)
+  {
+    return 0U;
+  }
+  uint8_t* dst = nullptr;
+  if (copy_to_buffer)
+  {
+    dst = reinterpret_cast<uint8_t*>(read_port_->info_.data.addr_);
   }
 
-  void MSPM0UART::ResetLinCounter()
+  const ErrorCode POP_ANS = read_port_->queue_data_->PopBatch(dst, copy_size);
+  if (POP_ANS != ErrorCode::OK)
   {
-    if (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE)
-    {
-      DL_UART_setLINCounterValue(res_.instance, 0);
-    }
+    return 0U;
   }
 
-  ErrorCode MSPM0UART::ApplyRxTimeoutMode()
+  last_timeout_consumed_size_.fetch_add(static_cast<uint32_t>(copy_size),
+                                        std::memory_order_acq_rel);
+  UNUSED(in_isr);
+  return copy_size;
+}
+
+void MSPM0UART::ResetLinCounter()
+{
+  if (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE)
   {
-    rx_timeout_mode_.store(ResolveRxTimeoutMode(), std::memory_order_release);
+    DL_UART_setLINCounterValue(res_.instance, 0);
+  }
+}
 
-    // timeout 配置只修改 timeout 相关寄存器，不覆盖通信模式/地址类配置 /
-    // Touch timeout-related registers only; do not override communication mode
-    // or address settings configured elsewhere.
+ErrorCode MSPM0UART::ApplyRxTimeoutMode()
+{
+  rx_timeout_mode_.store(ResolveRxTimeoutMode(), std::memory_order_release);
 
-    if (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE)
+  // timeout 配置只修改 timeout 相关寄存器，不覆盖通信模式/地址类配置 /
+  // Touch timeout-related registers only; do not override communication mode
+  // or address settings configured elsewhere.
+
+  if (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE)
+  {
+    const uint16_t CURRENT_WINDOW = lin_compare_window_.load(std::memory_order_acquire);
+    const uint16_t RESOLVED_WINDOW =
+        (CURRENT_WINDOW > 0U) ? CURRENT_WINDOW : ResolveLinCompareWindow();
+    if (RESOLVED_WINDOW != 0U)
     {
-      const uint16_t CURRENT_WINDOW = lin_compare_window_.load(std::memory_order_acquire);
-      const uint16_t RESOLVED_WINDOW =
-          (CURRENT_WINDOW > 0U) ? CURRENT_WINDOW : ResolveLinCompareWindow();
-      if (RESOLVED_WINDOW != 0U)
+      // [LIN路径 / LIN path] 仅在有明确 compare 窗口时启用 LIN timeout，避免
+      // compare=0 被强制收敛成 1 / Enable LIN timeout only with a valid compare
+      // window to avoid forcing compare=0 into window=1.
+      if (!DL_UART_isLINCounterEnabled(res_.instance))
       {
-        // [LIN路径 / LIN path] 仅在有明确 compare 窗口时启用 LIN timeout，避免
-        // compare=0 被强制收敛成 1 / Enable LIN timeout only with a valid compare
-        // window to avoid forcing compare=0 into window=1.
-        if (!DL_UART_isLINCounterEnabled(res_.instance))
-        {
-          DL_UART_enableLINCounter(res_.instance);
-        }
-        if (!DL_UART_isLINCounterCompareMatchEnabled(res_.instance))
-        {
-          DL_UART_enableLINCounterCompareMatch(res_.instance);
-        }
-        lin_compare_window_.store(RESOLVED_WINDOW, std::memory_order_release);
-        DL_UART_setLINCounterCompareValue(res_.instance, RESOLVED_WINDOW);
-        DL_UART_disableLINCountWhileLow(res_.instance);
-        ResetLinCounter();
-        return ErrorCode::OK;
+        DL_UART_enableLINCounter(res_.instance);
       }
-      return ErrorCode::ARG_ERR;
-    }
-
-    // [BYTE路径 / BYTE path] 仅保留按字节 RX 中断，不依赖超时中断 / Keep plain
-    // per-byte RX interrupt; no timeout IRQ is used.
-    lin_compare_window_.store(0U, std::memory_order_release);
-    DL_UART_disableLINCounterCompareMatch(res_.instance);
-    DL_UART_disableLINCounter(res_.instance);
-    DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_LINC0_MATCH);
-    DL_UART_setRXFIFOThreshold(res_.instance, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
-    DL_UART_setRXInterruptTimeout(res_.instance, 0U);
-    return ErrorCode::OK;
-  }
-
-  void MSPM0UART::EnsureByteModeBlockTimeoutTask()
-  {
-    if (byte_mode_block_timeout_task_ != nullptr)
-    {
-      return;
-    }
-
-    byte_mode_block_timeout_task_ =
-        Timer::CreateTask<MSPM0UART*>(OnByteModeBlockTimeout, this, 1U);
-    Timer::Add(byte_mode_block_timeout_task_);
-    Timer::Start(byte_mode_block_timeout_task_);
-  }
-
-  void MSPM0UART::ArmByteModeBlockTimeout(uint32_t timeout_ms)
-  {
-    if ((rx_timeout_mode_.load(std::memory_order_acquire) !=
-         RxTimeoutMode::BYTE_INTERRUPT) ||
-        (timeout_ms == UINT32_MAX))
-    {
-      return;
-    }
-
-    EnsureByteModeBlockTimeoutTask();
-
-    const uint32_t CYCLE = NormalizeByteModeBlockTimeout(timeout_ms);
-    const uint32_t NOW = static_cast<uint32_t>(Timebase::GetMilliseconds());
-    byte_mode_block_timeout_start_ms_.store(NOW, std::memory_order_release);
-    byte_mode_block_timeout_cycle_ms_.store(CYCLE, std::memory_order_release);
-    // 使用 epoch 识别 timeout 回调代际，避免旧回调误处理新一轮 Arm。/ Use an epoch
-    // token to distinguish timeout generations and prevent stale callbacks from
-    // touching a newly armed read.
-    uint32_t epoch =
-        byte_mode_block_timeout_epoch_.fetch_add(1U, std::memory_order_acq_rel) + 1U;
-    if (epoch == 0U)
-    {
-      // 0 作为“未装载”哨兵，发生回绕时重新对齐到 1。/ Keep 0 reserved as the
-      // disarmed sentinel and realign on wrap-around.
-      epoch = 1U;
-      byte_mode_block_timeout_epoch_.store(epoch, std::memory_order_release);
-    }
-  }
-
-  void MSPM0UART::CancelByteModeBlockTimeout()
-  {
-    byte_mode_block_timeout_epoch_.store(0U, std::memory_order_release);
-    byte_mode_block_timeout_cycle_ms_.store(0U, std::memory_order_release);
-  }
-
-  void MSPM0UART::OnByteModeBlockTimeout(MSPM0UART * uart)
-  {
-    if (uart == nullptr)
-    {
-      return;
-    }
-
-    AtomicCounterGuard timeout_guard(uart->timeout_cb_inflight_);
-    if (uart->reconfig_in_progress_.load(std::memory_order_acquire))
-    {
-      return;
-    }
-
-    const uint32_t ARMED_EPOCH =
-        uart->byte_mode_block_timeout_epoch_.load(std::memory_order_acquire);
-    if (ARMED_EPOCH == 0U)
-    {
-      return;
-    }
-
-    const uint32_t NOW = static_cast<uint32_t>(Timebase::GetMilliseconds());
-    const uint32_t CYCLE =
-        uart->byte_mode_block_timeout_cycle_ms_.load(std::memory_order_acquire);
-    if (CYCLE == 0U)
-    {
-      return;
-    }
-
-    const uint32_t START =
-        uart->byte_mode_block_timeout_start_ms_.load(std::memory_order_acquire);
-    const uint32_t ELAPSED = static_cast<uint32_t>(NOW - START);
-    if (ELAPSED < CYCLE)
-    {
-      return;
-    }
-
-    uint32_t expected_epoch = ARMED_EPOCH;
-    if (!uart->byte_mode_block_timeout_epoch_.compare_exchange_strong(
-            expected_epoch, 0U, std::memory_order_acq_rel, std::memory_order_acquire))
-    {
-      return;
-    }
-
-    if (uart->rx_timeout_mode_.load(std::memory_order_acquire) !=
-        RxTimeoutMode::BYTE_INTERRUPT)
-    {
-      return;
-    }
-
-    if (uart->read_port_->busy_.load(std::memory_order_acquire) !=
-        ReadPort::BusyState::PENDING)
-    {
-      return;
-    }
-
-    bool expected_completion = false;
-    if (!uart->read_completion_inflight_.compare_exchange_strong(
-            expected_completion, true, std::memory_order_acq_rel,
-            std::memory_order_acquire))
-    {
-      return;
-    }
-    AtomicBoolGuard completion_guard(uart->read_completion_inflight_);
-
-    uart->CompletePendingReadOnTimeout(false);
-  }
-
-  uint32_t MSPM0UART::NormalizeByteModeBlockTimeout(uint32_t timeout_ms) const
-  {
-    return (timeout_ms == 0U) ? 1U : timeout_ms;
-  }
-
-  void MSPM0UART::HandleInterrupt()
-  {
-    AtomicCounterGuard io_guard(io_handler_inflight_);
-
-    if (reconfig_in_progress_.load(std::memory_order_acquire))
-    {
-      const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
-      const uint32_t IRQ_MASK = MSPM0_UART_BASE_INTERRUPT_MASK | TIMEOUT_MASK;
-      uint32_t pending_during_reconfig =
-          DL_UART_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
-      if (TIMEOUT_MASK != 0U)
+      if (!DL_UART_isLINCounterCompareMatchEnabled(res_.instance))
       {
-        pending_during_reconfig |=
-            DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
+        DL_UART_enableLINCounterCompareMatch(res_.instance);
       }
-      if (pending_during_reconfig != 0U)
-      {
-        DL_UART_clearInterruptStatus(res_.instance, pending_during_reconfig);
-      }
-      NVIC_ClearPendingIRQ(res_.irqn);
-      return;
+      lin_compare_window_.store(RESOLVED_WINDOW, std::memory_order_release);
+      DL_UART_setLINCounterCompareValue(res_.instance, RESOLVED_WINDOW);
+      DL_UART_disableLINCountWhileLow(res_.instance);
+      ResetLinCounter();
+      return ErrorCode::OK;
     }
+    return ErrorCode::ARG_ERR;
+  }
 
+  // [BYTE路径 / BYTE path] 仅保留按字节 RX 中断，不依赖超时中断 / Keep plain
+  // per-byte RX interrupt; no timeout IRQ is used.
+  lin_compare_window_.store(0U, std::memory_order_release);
+  DL_UART_disableLINCounterCompareMatch(res_.instance);
+  DL_UART_disableLINCounter(res_.instance);
+  DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_LINC0_MATCH);
+  DL_UART_setRXFIFOThreshold(res_.instance, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
+  DL_UART_setRXInterruptTimeout(res_.instance, 0U);
+  return ErrorCode::OK;
+}
+
+void MSPM0UART::EnsureByteModeBlockTimeoutTask()
+{
+  if (byte_mode_block_timeout_task_ != nullptr)
+  {
+    return;
+  }
+
+  byte_mode_block_timeout_task_ =
+      Timer::CreateTask<MSPM0UART*>(OnByteModeBlockTimeout, this, 1U);
+  Timer::Add(byte_mode_block_timeout_task_);
+  Timer::Start(byte_mode_block_timeout_task_);
+}
+
+void MSPM0UART::ArmByteModeBlockTimeout(uint32_t timeout_ms)
+{
+  if ((rx_timeout_mode_.load(std::memory_order_acquire) !=
+       RxTimeoutMode::BYTE_INTERRUPT) ||
+      (timeout_ms == UINT32_MAX))
+  {
+    return;
+  }
+
+  EnsureByteModeBlockTimeoutTask();
+
+  const uint32_t CYCLE = NormalizeByteModeBlockTimeout(timeout_ms);
+  const uint32_t NOW = static_cast<uint32_t>(Timebase::GetMilliseconds());
+  byte_mode_block_timeout_start_ms_.store(NOW, std::memory_order_release);
+  byte_mode_block_timeout_cycle_ms_.store(CYCLE, std::memory_order_release);
+  // 使用 epoch 识别 timeout 回调代际，避免旧回调误处理新一轮 Arm。/ Use an epoch
+  // token to distinguish timeout generations and prevent stale callbacks from
+  // touching a newly armed read.
+  uint32_t epoch =
+      byte_mode_block_timeout_epoch_.fetch_add(1U, std::memory_order_acq_rel) + 1U;
+  if (epoch == 0U)
+  {
+    // 0 作为“未装载”哨兵，发生回绕时重新对齐到 1。/ Keep 0 reserved as the
+    // disarmed sentinel and realign on wrap-around.
+    epoch = 1U;
+    byte_mode_block_timeout_epoch_.store(epoch, std::memory_order_release);
+  }
+}
+
+void MSPM0UART::CancelByteModeBlockTimeout()
+{
+  byte_mode_block_timeout_epoch_.store(0U, std::memory_order_release);
+  byte_mode_block_timeout_cycle_ms_.store(0U, std::memory_order_release);
+}
+
+void MSPM0UART::OnByteModeBlockTimeout(MSPM0UART* uart)
+{
+  if (uart == nullptr)
+  {
+    return;
+  }
+
+  AtomicCounterGuard timeout_guard(uart->timeout_cb_inflight_);
+  if (uart->reconfig_in_progress_.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  const uint32_t ARMED_EPOCH =
+      uart->byte_mode_block_timeout_epoch_.load(std::memory_order_acquire);
+  if (ARMED_EPOCH == 0U)
+  {
+    return;
+  }
+
+  const uint32_t NOW = static_cast<uint32_t>(Timebase::GetMilliseconds());
+  const uint32_t CYCLE =
+      uart->byte_mode_block_timeout_cycle_ms_.load(std::memory_order_acquire);
+  if (CYCLE == 0U)
+  {
+    return;
+  }
+
+  const uint32_t START =
+      uart->byte_mode_block_timeout_start_ms_.load(std::memory_order_acquire);
+  const uint32_t ELAPSED = static_cast<uint32_t>(NOW - START);
+  if (ELAPSED < CYCLE)
+  {
+    return;
+  }
+
+  uint32_t expected_epoch = ARMED_EPOCH;
+  if (!uart->byte_mode_block_timeout_epoch_.compare_exchange_strong(
+          expected_epoch, 0U, std::memory_order_acq_rel, std::memory_order_acquire))
+  {
+    return;
+  }
+
+  if (uart->rx_timeout_mode_.load(std::memory_order_acquire) !=
+      RxTimeoutMode::BYTE_INTERRUPT)
+  {
+    return;
+  }
+
+  if (uart->read_port_->busy_.load(std::memory_order_acquire) !=
+      ReadPort::BusyState::PENDING)
+  {
+    return;
+  }
+
+  bool expected_completion = false;
+  if (!uart->read_completion_inflight_.compare_exchange_strong(expected_completion, true,
+                                                               std::memory_order_acq_rel,
+                                                               std::memory_order_acquire))
+  {
+    return;
+  }
+  AtomicBoolGuard completion_guard(uart->read_completion_inflight_);
+
+  uart->CompletePendingReadOnTimeout(false);
+}
+
+uint32_t MSPM0UART::NormalizeByteModeBlockTimeout(uint32_t timeout_ms) const
+{
+  return (timeout_ms == 0U) ? 1U : timeout_ms;
+}
+
+void MSPM0UART::HandleInterrupt()
+{
+  AtomicCounterGuard io_guard(io_handler_inflight_);
+
+  if (reconfig_in_progress_.load(std::memory_order_acquire))
+  {
     const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
     const uint32_t IRQ_MASK = MSPM0_UART_BASE_INTERRUPT_MASK | TIMEOUT_MASK;
-
-    uint32_t pending = DL_UART_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
-    if ((TIMEOUT_MASK != 0U) &&
-        ((DL_UART_getEnabledInterrupts(res_.instance, TIMEOUT_MASK) & TIMEOUT_MASK) !=
-         0U))
-    {
-      // LIN compare 在部分路径需要读取 RAW 位，避免漏掉超时事件 / LIN compare
-      // needs raw status on some paths to avoid missing timeout events.
-      pending |= DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
-    }
-
-    const uint32_t PENDING = pending;
-    if (PENDING == 0U)
-    {
-      return;
-    }
-
-    constexpr uint32_t RX_PENDING_MASK =
-        DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_ADDRESS_MATCH;
-    if ((PENDING & RX_PENDING_MASK) != 0U)
-    {
-      HandleRxInterrupt(TIMEOUT_MASK);
-      if ((PENDING & DL_UART_INTERRUPT_ADDRESS_MATCH) != 0U)
-      {
-        DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_ADDRESS_MATCH);
-      }
-    }
-
+    uint32_t pending_during_reconfig =
+        DL_UART_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
     if (TIMEOUT_MASK != 0U)
     {
-      uint32_t timeout_pending = 0U;
-      const uint32_t ENABLED_TIMEOUT =
-          DL_UART_getEnabledInterrupts(res_.instance, TIMEOUT_MASK) & TIMEOUT_MASK;
-      if (ENABLED_TIMEOUT != 0U)
-      {
-        timeout_pending = DL_UART_getEnabledInterruptStatus(res_.instance, TIMEOUT_MASK);
-        timeout_pending |= DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
-      }
-      HandleRxTimeoutInterrupt(timeout_pending, TIMEOUT_MASK);
+      pending_during_reconfig |=
+          DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
     }
-
-    const uint32_t ERROR_PENDING = PENDING & MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
-    if (ERROR_PENDING != 0U)
+    if (pending_during_reconfig != 0U)
     {
-      HandleErrorInterrupt(ERROR_PENDING);
+      DL_UART_clearInterruptStatus(res_.instance, pending_during_reconfig);
     }
+    NVIC_ClearPendingIRQ(res_.irqn);
+    return;
+  }
 
-    if ((PENDING & DL_UART_INTERRUPT_TX) != 0U)
+  const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
+  const uint32_t IRQ_MASK = MSPM0_UART_BASE_INTERRUPT_MASK | TIMEOUT_MASK;
+
+  uint32_t pending = DL_UART_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
+  if ((TIMEOUT_MASK != 0U) &&
+      ((DL_UART_getEnabledInterrupts(res_.instance, TIMEOUT_MASK) & TIMEOUT_MASK) != 0U))
+  {
+    // LIN compare 在部分路径需要读取 RAW 位，避免漏掉超时事件 / LIN compare
+    // needs raw status on some paths to avoid missing timeout events.
+    pending |= DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
+  }
+
+  const uint32_t PENDING = pending;
+  if (PENDING == 0U)
+  {
+    return;
+  }
+
+  constexpr uint32_t RX_PENDING_MASK =
+      DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_ADDRESS_MATCH;
+  if ((PENDING & RX_PENDING_MASK) != 0U)
+  {
+    HandleRxInterrupt(TIMEOUT_MASK);
+    if ((PENDING & DL_UART_INTERRUPT_ADDRESS_MATCH) != 0U)
     {
-      HandleTxInterrupt(true);
+      DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_ADDRESS_MATCH);
     }
   }
 
-  void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
+  if (TIMEOUT_MASK != 0U)
   {
-    bool pushed = false;
-    bool received = false;
-
-    DrainRxFIFO(received, pushed);
-
-    if (!received)
+    uint32_t timeout_pending = 0U;
+    const uint32_t ENABLED_TIMEOUT =
+        DL_UART_getEnabledInterrupts(res_.instance, TIMEOUT_MASK) & TIMEOUT_MASK;
+    if (ENABLED_TIMEOUT != 0U)
     {
-      // [RX路径 / RX path] FIFO 已空但 RX 仍报 pending 时，清一次 RX 状态位以终止
-      // 空转 IRQ / If FIFO is already empty while RX still reports pending,
-      // clear RX once to stop a spin IRQ.
-      DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_RX);
+      timeout_pending = DL_UART_getEnabledInterruptStatus(res_.instance, TIMEOUT_MASK);
+      timeout_pending |= DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
     }
+    HandleRxTimeoutInterrupt(timeout_pending, TIMEOUT_MASK);
+  }
 
-    if (received &&
-        (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE))
+  const uint32_t ERROR_PENDING = PENDING & MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
+  if (ERROR_PENDING != 0U)
+  {
+    HandleErrorInterrupt(ERROR_PENDING);
+  }
+
+  if ((PENDING & DL_UART_INTERRUPT_TX) != 0U)
+  {
+    HandleTxInterrupt(true);
+  }
+}
+
+void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
+{
+  bool pushed = false;
+  bool received = false;
+
+  DrainRxFIFO(received, pushed);
+
+  if (!received)
+  {
+    // [RX路径 / RX path] FIFO 已空但 RX 仍报 pending 时，清一次 RX 状态位以终止
+    // 空转 IRQ / If FIFO is already empty while RX still reports pending,
+    // clear RX once to stop a spin IRQ.
+    DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_RX);
+  }
+
+  if (received &&
+      (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE))
+  {
+    // [LIN路径 / LIN path] 连续接收时重置 LIN 计数器，避免帧内误超时 / Reset the
+    // LIN counter on data reception to avoid in-frame timeout.
+    ResetLinCounter();
+
+    // [LIN路径 / LIN path] 同一 IRQ 内若已收到新字节，则清掉本次 timeout 状态并
+    // 继续按新窗口计时 / If new data arrives in the same IRQ, clear this
+    // timeout state and continue with the refreshed window.
+    if (timeout_mask != 0U)
     {
-      // [LIN路径 / LIN path] 连续接收时重置 LIN 计数器，避免帧内误超时 / Reset the
-      // LIN counter on data reception to avoid in-frame timeout.
-      ResetLinCounter();
-
-      // [LIN路径 / LIN path] 同一 IRQ 内若已收到新字节，则清掉本次 timeout 状态并
-      // 继续按新窗口计时 / If new data arrives in the same IRQ, clear this
-      // timeout state and continue with the refreshed window.
-      if (timeout_mask != 0U)
-      {
-        DL_UART_clearInterruptStatus(res_.instance, timeout_mask);
-      }
-    }
-
-    if (pushed)
-    {
-      bool expected_completion = false;
-      if (read_completion_inflight_.compare_exchange_strong(expected_completion, true,
-                                                            std::memory_order_acq_rel,
-                                                            std::memory_order_acquire))
-      {
-        AtomicBoolGuard completion_guard(read_completion_inflight_);
-        if (IsZeroTimeoutPendingBlockRead())
-        {
-          ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
-          UNUSED(read_port_->busy_.compare_exchange_strong(
-              expected, ReadPort::BusyState::IDLE, std::memory_order_acq_rel,
-              std::memory_order_acquire));
-        }
-        else
-        {
-          read_port_->ProcessPendingReads(true);
-        }
-      }
-    }
-
-    if ((rx_timeout_mode_.load(std::memory_order_acquire) ==
-         RxTimeoutMode::BYTE_INTERRUPT) &&
-        (read_port_->busy_.load(std::memory_order_acquire) !=
-         ReadPort::BusyState::PENDING))
-    {
-      CancelByteModeBlockTimeout();
-    }
-
-    if (timeout_mask != 0U &&
-        read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
-    {
-      // 无挂起读请求时关闭 timeout 中断，减少无意义 IRQ / Disable timeout IRQ when
-      // no pending read remains.
-      DL_UART_disableInterrupt(res_.instance, timeout_mask);
       DL_UART_clearInterruptStatus(res_.instance, timeout_mask);
     }
   }
 
-  void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
+  if (pushed)
   {
-    const bool DROP_DETACHED_BYTE_MODE_RX =
-        (rx_timeout_mode_.load(std::memory_order_acquire) ==
-         RxTimeoutMode::BYTE_INTERRUPT) &&
-        byte_mode_drop_detached_rx_.load(std::memory_order_acquire);
-
-    while (!DL_UART_isRXFIFOEmpty(res_.instance))
+    bool expected_completion = false;
+    if (read_completion_inflight_.compare_exchange_strong(expected_completion, true,
+                                                          std::memory_order_acq_rel,
+                                                          std::memory_order_acquire))
     {
-      const uint8_t RX_BYTE = DL_UART_receiveData(res_.instance);
-      received = true;
-
-      if (DROP_DETACHED_BYTE_MODE_RX)
+      AtomicBoolGuard completion_guard(read_completion_inflight_);
+      if (IsZeroTimeoutPendingBlockRead())
       {
-        UNUSED(RX_BYTE);
-        last_timeout_consumed_size_.fetch_add(1U, std::memory_order_acq_rel);
-        continue;
-      }
-
-      if (read_port_->queue_data_->Push(RX_BYTE) == ErrorCode::OK)
-      {
-        pushed = true;
+        ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
+        UNUSED(read_port_->busy_.compare_exchange_strong(
+            expected, ReadPort::BusyState::IDLE, std::memory_order_acq_rel,
+            std::memory_order_acquire));
       }
       else
       {
-        rx_drop_count_.fetch_add(1U, std::memory_order_acq_rel);
+        read_port_->ProcessPendingReads(true);
       }
     }
   }
 
-  void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask)
+  if ((rx_timeout_mode_.load(std::memory_order_acquire) ==
+       RxTimeoutMode::BYTE_INTERRUPT) &&
+      (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING))
   {
-    // [BYTE路径 / BYTE path] timeout_mask=0 时直接返回，因此本函数实际只在 LIN
-    // 路径生效 / In BYTE path, timeout_mask is 0, so this function is
-    // effectively LIN-only.
-    if ((timeout_mask == 0U) || ((pending & timeout_mask) == 0U))
+    CancelByteModeBlockTimeout();
+  }
+
+  if (timeout_mask != 0U &&
+      read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
+  {
+    // 无挂起读请求时关闭 timeout 中断，减少无意义 IRQ / Disable timeout IRQ when
+    // no pending read remains.
+    DL_UART_disableInterrupt(res_.instance, timeout_mask);
+    DL_UART_clearInterruptStatus(res_.instance, timeout_mask);
+  }
+}
+
+void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
+{
+  const bool DROP_DETACHED_BYTE_MODE_RX =
+      (rx_timeout_mode_.load(std::memory_order_acquire) ==
+       RxTimeoutMode::BYTE_INTERRUPT) &&
+      byte_mode_drop_detached_rx_.load(std::memory_order_acquire);
+
+  while (!DL_UART_isRXFIFOEmpty(res_.instance))
+  {
+    const uint8_t RX_BYTE = DL_UART_receiveData(res_.instance);
+    received = true;
+
+    if (DROP_DETACHED_BYTE_MODE_RX)
     {
-      return;
+      UNUSED(RX_BYTE);
+      last_timeout_consumed_size_.fetch_add(1U, std::memory_order_acq_rel);
+      continue;
     }
 
-    const ReadPort::BusyState BUSY_BEFORE_TIMEOUT =
-        read_port_->busy_.load(std::memory_order_acquire);
-
-    // FULL 阈值模式下短帧可能滞留在 HW FIFO，直到超时中断到来 / In FULL-threshold
-    // modes, short frames may remain in HW FIFO until the timeout IRQ arrives.
-    // 这里先拉取 FIFO，再按超时语义完成挂起读请求 / Drain FIFO first so timeout
-    // can complete pending reads with actual data.
-    bool pushed = false;
-    bool received = false;
-
-    DrainRxFIFO(received, pushed);
-
-    if (BUSY_BEFORE_TIMEOUT != ReadPort::BusyState::PENDING)
+    if (read_port_->queue_data_->Push(RX_BYTE) == ErrorCode::OK)
     {
-      DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
-      if (BUSY_BEFORE_TIMEOUT == ReadPort::BusyState::IDLE)
-      {
-        read_port_->busy_.store(ReadPort::BusyState::EVENT, std::memory_order_release);
-      }
-      DL_UART_disableInterrupt(res_.instance, timeout_mask);
-      NVIC_ClearPendingIRQ(res_.irqn);
-      return;
+      pushed = true;
     }
-
-    bool expected_completion = false;
-    if (!read_completion_inflight_.compare_exchange_strong(expected_completion, true,
-                                                           std::memory_order_acq_rel,
-                                                           std::memory_order_acquire))
+    else
     {
-      DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
-      return;
+      rx_drop_count_.fetch_add(1U, std::memory_order_acq_rel);
     }
-    AtomicBoolGuard completion_guard(read_completion_inflight_);
+  }
+}
 
-    if (IsZeroTimeoutPendingBlockRead())
-    {
-      ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
-      UNUSED(read_port_->busy_.compare_exchange_strong(
-          expected, ReadPort::BusyState::IDLE, std::memory_order_acq_rel,
-          std::memory_order_acquire));
-      DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
-      DL_UART_disableInterrupt(res_.instance, timeout_mask);
-      NVIC_ClearPendingIRQ(res_.irqn);
-      return;
-    }
+void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask)
+{
+  // [BYTE路径 / BYTE path] timeout_mask=0 时直接返回，因此本函数实际只在 LIN
+  // 路径生效 / In BYTE path, timeout_mask is 0, so this function is
+  // effectively LIN-only.
+  if ((timeout_mask == 0U) || ((pending & timeout_mask) == 0U))
+  {
+    return;
+  }
 
-    if (pushed)
-    {
-      read_port_->ProcessPendingReads(true);
-    }
+  const ReadPort::BusyState BUSY_BEFORE_TIMEOUT =
+      read_port_->busy_.load(std::memory_order_acquire);
 
-    rx_timeout_count_.fetch_add(1U, std::memory_order_acq_rel);
+  // FULL 阈值模式下短帧可能滞留在 HW FIFO，直到超时中断到来 / In FULL-threshold
+  // modes, short frames may remain in HW FIFO until the timeout IRQ arrives.
+  // 这里先拉取 FIFO，再按超时语义完成挂起读请求 / Drain FIFO first so timeout
+  // can complete pending reads with actual data.
+  bool pushed = false;
+  bool received = false;
+
+  DrainRxFIFO(received, pushed);
+
+  if (BUSY_BEFORE_TIMEOUT != ReadPort::BusyState::PENDING)
+  {
     DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
-
-    if (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE)
+    if (BUSY_BEFORE_TIMEOUT == ReadPort::BusyState::IDLE)
     {
-      ResetLinCounter();
+      read_port_->busy_.store(ReadPort::BusyState::EVENT, std::memory_order_release);
     }
-
-    if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
-    {
-      DL_UART_disableInterrupt(res_.instance, timeout_mask);
-      return;
-    }
-
-    CompletePendingReadOnTimeout(true);
-
-    if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
-    {
-      DL_UART_disableInterrupt(res_.instance, timeout_mask);
-    }
+    DL_UART_disableInterrupt(res_.instance, timeout_mask);
+    NVIC_ClearPendingIRQ(res_.irqn);
+    return;
   }
 
-  void MSPM0UART::CompletePendingReadOnTimeout(bool in_isr)
+  bool expected_completion = false;
+  if (!read_completion_inflight_.compare_exchange_strong(expected_completion, true,
+                                                         std::memory_order_acq_rel,
+                                                         std::memory_order_acquire))
   {
-    if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
-    {
-      return;
-    }
+    DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
+    return;
+  }
+  AtomicBoolGuard completion_guard(read_completion_inflight_);
 
-    if (IsZeroTimeoutPendingBlockRead())
-    {
-      ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
-      UNUSED(read_port_->busy_.compare_exchange_strong(
-          expected, ReadPort::BusyState::IDLE, std::memory_order_acq_rel,
-          std::memory_order_acquire));
-      read_port_->read_size_ = 0U;
-      return;
-    }
-
-    read_port_->ProcessPendingReads(in_isr);
-    if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
-    {
-      return;
-    }
-
-    if (read_port_->info_.op.type == ReadOperation::OperationType::BLOCK)
-    {
-      if (read_port_->info_.op.data.sem_info.timeout == UINT32_MAX)
-      {
-        // [无限等待阻塞读 / infinite-wait blocking read] 对 timeout 事件不做完成，
-        // 统一 BYTE/LIN 语义：仅在读满目标长度时由正常路径完成 / Do not complete on
-        // timeout for infinite-wait block reads. Keep BYTE/LIN semantics aligned:
-        // completion happens only when the requested length is satisfied.
-        last_timeout_consumed_size_.store(0U, std::memory_order_release);
-        return;
-      }
-
-      // [BLOCK路径 / BLOCK path] 有限超时阻塞读不再主动 Finish/Post，避免在
-      // Wait(timeout) 已返回后产生陈旧信号量令牌；这里只做状态回收和残留字节处理 /
-      // For finite-timeout blocking reads, do not Finish/Post from timeout path to
-      // avoid stale semaphore tokens after Wait(timeout) returns. Only reclaim
-      // state and handle residual bytes here.
-      ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
-      if (read_port_->busy_.compare_exchange_strong(expected, ReadPort::BusyState::IDLE,
-                                                    std::memory_order_acq_rel,
-                                                    std::memory_order_acquire))
-      {
-        if (rx_timeout_mode_.load(std::memory_order_acquire) ==
-            RxTimeoutMode::BYTE_INTERRUPT)
-        {
-          byte_mode_drop_detached_rx_.store(true, std::memory_order_release);
-        }
-        UNUSED(ConsumeTimedOutReadData(in_isr, false));
-        read_port_->read_size_ = 0U;
-      }
-      return;
-    }
-
-    // [非阻塞路径 / non-blocking path] 非阻塞读超时时，保留软件 RX 队列中的字节，
-    // 留给下一次 Read() 消费 / On non-blocking timeout, leave buffered bytes in
-    // the software RX queue for the next Read().
+  if (IsZeroTimeoutPendingBlockRead())
+  {
     ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
-    if (read_port_->busy_.compare_exchange_strong(expected, ReadPort::BusyState::EVENT,
-                                                  std::memory_order_acq_rel,
-                                                  std::memory_order_acquire))
+    UNUSED(read_port_->busy_.compare_exchange_strong(expected, ReadPort::BusyState::IDLE,
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_acquire));
+    DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
+    DL_UART_disableInterrupt(res_.instance, timeout_mask);
+    NVIC_ClearPendingIRQ(res_.irqn);
+    return;
+  }
+
+  if (pushed)
+  {
+    read_port_->ProcessPendingReads(true);
+  }
+
+  rx_timeout_count_.fetch_add(1U, std::memory_order_acq_rel);
+  DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
+
+  if (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE)
+  {
+    ResetLinCounter();
+  }
+
+  if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
+  {
+    DL_UART_disableInterrupt(res_.instance, timeout_mask);
+    return;
+  }
+
+  CompletePendingReadOnTimeout(true);
+
+  if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
+  {
+    DL_UART_disableInterrupt(res_.instance, timeout_mask);
+  }
+}
+
+void MSPM0UART::CompletePendingReadOnTimeout(bool in_isr)
+{
+  if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
+  {
+    return;
+  }
+
+  if (IsZeroTimeoutPendingBlockRead())
+  {
+    ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
+    UNUSED(read_port_->busy_.compare_exchange_strong(expected, ReadPort::BusyState::IDLE,
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_acquire));
+    read_port_->read_size_ = 0U;
+    return;
+  }
+
+  read_port_->ProcessPendingReads(in_isr);
+  if (read_port_->busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
+  {
+    return;
+  }
+
+  if (read_port_->info_.op.type == ReadOperation::OperationType::BLOCK)
+  {
+    if (read_port_->info_.op.data.sem_info.timeout == UINT32_MAX)
     {
+      // [无限等待阻塞读 / infinite-wait blocking read] 对 timeout 事件不做完成，
+      // 统一 BYTE/LIN 语义：仅在读满目标长度时由正常路径完成 / Do not complete on
+      // timeout for infinite-wait block reads. Keep BYTE/LIN semantics aligned:
+      // completion happens only when the requested length is satisfied.
       last_timeout_consumed_size_.store(0U, std::memory_order_release);
-      read_port_->read_size_ = 0U;
-      read_port_->busy_.store(ReadPort::BusyState::IDLE, std::memory_order_release);
-      read_port_->info_.op.UpdateStatus(in_isr, ErrorCode::TIMEOUT);
-    }
-  }
-
-  void MSPM0UART::HandleTxInterrupt(bool in_isr)
-  {
-    // 发送状态机：取一个写请求并尽量填满 TX FIFO，直到该请求完成 / TX state
-    // machine: fetch one write request and keep filling TX FIFO until it
-    // completes.
-    while (true)
-    {
-      if (!tx_active_valid_.load(std::memory_order_acquire))
-      {
-        if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
-        {
-          DisableTxInterrupt();
-
-          if (write_port_->queue_info_->Size() > 0)
-          {
-            DL_UART_enableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
-            res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
-          }
-
-          return;
-        }
-
-        tx_active_total_ = tx_active_info_.data.size_;
-        tx_active_remaining_ = tx_active_total_;
-        tx_active_valid_.store(true, std::memory_order_release);
-      }
-
-      while (tx_active_remaining_ > 0 && !DL_UART_isTXFIFOFull(res_.instance))
-      {
-        uint8_t tx_byte = 0;
-        if (write_port_->queue_data_->Pop(tx_byte) != ErrorCode::OK)
-        {
-          const uint32_t SENT =
-              static_cast<uint32_t>(tx_active_total_ - tx_active_remaining_);
-          write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_, SENT);
-          tx_active_valid_.store(false, std::memory_order_release);
-          tx_active_remaining_ = 0;
-          tx_active_total_ = 0;
-          DisableTxInterrupt();
-          return;
-        }
-
-        DL_UART_transmitData(res_.instance, tx_byte);
-        tx_active_remaining_--;
-      }
-
-      if (tx_active_remaining_ > 0)
-      {
-        return;
-      }
-
-      write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_,
-                          static_cast<uint32_t>(tx_active_total_));
-      tx_active_valid_.store(false, std::memory_order_release);
-      tx_active_remaining_ = 0;
-      tx_active_total_ = 0;
-    }
-  }
-
-  void MSPM0UART::AbortTx(bool in_isr)
-  {
-    DisableTxInterrupt();
-
-    if (tx_active_valid_.exchange(false, std::memory_order_acq_rel))
-    {
-      write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_, 0U);
-    }
-    tx_active_remaining_ = 0U;
-    tx_active_total_ = 0U;
-
-    WriteInfoBlock info;
-    while (write_port_->queue_info_->Pop(info) == ErrorCode::OK)
-    {
-      write_port_->Finish(in_isr, ErrorCode::FAILED, info, 0U);
+      return;
     }
 
-    if (write_port_->queue_data_ != nullptr)
-    {
-      write_port_->queue_data_->Reset();
-    }
-    write_port_->lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
-  }
-
-  void MSPM0UART::AbortRx(bool in_isr)
-  {
-    bool received = false;
-    bool pushed = false;
-    DrainRxFIFO(received, pushed);
-    UNUSED(received);
-    UNUSED(pushed);
-
-    if (read_port_->queue_data_ != nullptr)
-    {
-      read_port_->queue_data_->Reset();
-    }
-
+    // [BLOCK路径 / BLOCK path] 有限超时阻塞读不再主动 Finish/Post，避免在
+    // Wait(timeout) 已返回后产生陈旧信号量令牌；这里只做状态回收和残留字节处理 /
+    // For finite-timeout blocking reads, do not Finish/Post from timeout path to
+    // avoid stale semaphore tokens after Wait(timeout) returns. Only reclaim
+    // state and handle residual bytes here.
     ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
     if (read_port_->busy_.compare_exchange_strong(expected, ReadPort::BusyState::IDLE,
                                                   std::memory_order_acq_rel,
                                                   std::memory_order_acquire))
     {
+      if (rx_timeout_mode_.load(std::memory_order_acquire) ==
+          RxTimeoutMode::BYTE_INTERRUPT)
+      {
+        byte_mode_drop_detached_rx_.store(true, std::memory_order_release);
+      }
+      UNUSED(ConsumeTimedOutReadData(in_isr, false));
       read_port_->read_size_ = 0U;
-      read_port_->info_.op.UpdateStatus(in_isr, ErrorCode::FAILED);
     }
-    else
-    {
-      read_port_->read_size_ = 0U;
-      read_port_->busy_.store(ReadPort::BusyState::IDLE, std::memory_order_release);
-    }
-
-    last_timeout_consumed_size_.store(0U, std::memory_order_release);
+    return;
   }
 
-  void MSPM0UART::HandleErrorInterrupt(uint32_t pending_error_mask)
+  // [非阻塞路径 / non-blocking path] 非阻塞读超时时，保留软件 RX 队列中的字节，
+  // 留给下一次 Read() 消费 / On non-blocking timeout, leave buffered bytes in
+  // the software RX queue for the next Read().
+  ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
+  if (read_port_->busy_.compare_exchange_strong(expected, ReadPort::BusyState::EVENT,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_acquire))
   {
-    const uint32_t CLEAR_MASK = pending_error_mask & MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
-    if (CLEAR_MASK == 0U)
+    last_timeout_consumed_size_.store(0U, std::memory_order_release);
+    read_port_->read_size_ = 0U;
+    read_port_->busy_.store(ReadPort::BusyState::IDLE, std::memory_order_release);
+    read_port_->info_.op.UpdateStatus(in_isr, ErrorCode::TIMEOUT);
+  }
+}
+
+void MSPM0UART::HandleTxInterrupt(bool in_isr)
+{
+  // 发送状态机：取一个写请求并尽量填满 TX FIFO，直到该请求完成 / TX state
+  // machine: fetch one write request and keep filling TX FIFO until it
+  // completes.
+  while (true)
+  {
+    if (!tx_active_valid_.load(std::memory_order_acquire))
+    {
+      if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
+      {
+        DisableTxInterrupt();
+
+        if (write_port_->queue_info_->Size() > 0)
+        {
+          DL_UART_enableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
+          res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
+        }
+
+        return;
+      }
+
+      tx_active_total_ = tx_active_info_.data.size_;
+      tx_active_remaining_ = tx_active_total_;
+      tx_active_valid_.store(true, std::memory_order_release);
+    }
+
+    while (tx_active_remaining_ > 0 && !DL_UART_isTXFIFOFull(res_.instance))
+    {
+      uint8_t tx_byte = 0;
+      if (write_port_->queue_data_->Pop(tx_byte) != ErrorCode::OK)
+      {
+        const uint32_t SENT =
+            static_cast<uint32_t>(tx_active_total_ - tx_active_remaining_);
+        write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_, SENT);
+        tx_active_valid_.store(false, std::memory_order_release);
+        tx_active_remaining_ = 0;
+        tx_active_total_ = 0;
+        DisableTxInterrupt();
+        return;
+      }
+
+      DL_UART_transmitData(res_.instance, tx_byte);
+      tx_active_remaining_--;
+    }
+
+    if (tx_active_remaining_ > 0)
     {
       return;
     }
 
-    DL_UART_clearInterruptStatus(res_.instance, CLEAR_MASK);
-    Abort(true);
+    write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_,
+                        static_cast<uint32_t>(tx_active_total_));
+    tx_active_valid_.store(false, std::memory_order_release);
+    tx_active_remaining_ = 0;
+    tx_active_total_ = 0;
+  }
+}
+
+void MSPM0UART::AbortTx(bool in_isr)
+{
+  DisableTxInterrupt();
+
+  if (tx_active_valid_.exchange(false, std::memory_order_acq_rel))
+  {
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_, 0U);
+  }
+  tx_active_remaining_ = 0U;
+  tx_active_total_ = 0U;
+
+  WriteInfoBlock info;
+  while (write_port_->queue_info_->Pop(info) == ErrorCode::OK)
+  {
+    write_port_->Finish(in_isr, ErrorCode::FAILED, info, 0U);
   }
 
-  void MSPM0UART::DisableTxInterrupt()
+  if (write_port_->queue_data_ != nullptr)
   {
-    DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
-    DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_TX);
-    NVIC_ClearPendingIRQ(res_.irqn);
+    write_port_->queue_data_->Reset();
   }
+  write_port_->lock_.store(WritePort::LockState::UNLOCKED, std::memory_order_release);
+}
+
+void MSPM0UART::AbortRx(bool in_isr)
+{
+  bool received = false;
+  bool pushed = false;
+  DrainRxFIFO(received, pushed);
+  UNUSED(received);
+  UNUSED(pushed);
+
+  if (read_port_->queue_data_ != nullptr)
+  {
+    read_port_->queue_data_->Reset();
+  }
+
+  ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
+  if (read_port_->busy_.compare_exchange_strong(expected, ReadPort::BusyState::IDLE,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_acquire))
+  {
+    read_port_->read_size_ = 0U;
+    read_port_->info_.op.UpdateStatus(in_isr, ErrorCode::FAILED);
+  }
+  else
+  {
+    read_port_->read_size_ = 0U;
+    read_port_->busy_.store(ReadPort::BusyState::IDLE, std::memory_order_release);
+  }
+
+  last_timeout_consumed_size_.store(0U, std::memory_order_release);
+}
+
+void MSPM0UART::HandleErrorInterrupt(uint32_t pending_error_mask)
+{
+  const uint32_t CLEAR_MASK = pending_error_mask & MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
+  if (CLEAR_MASK == 0U)
+  {
+    return;
+  }
+
+  DL_UART_clearInterruptStatus(res_.instance, CLEAR_MASK);
+  Abort(true);
+}
+
+void MSPM0UART::DisableTxInterrupt()
+{
+  DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
+  DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_TX);
+  NVIC_ClearPendingIRQ(res_.irqn);
+}
 
 #ifdef UART0_BASE
 extern "C" void UART0_IRQHandler(void)  // NOLINT
