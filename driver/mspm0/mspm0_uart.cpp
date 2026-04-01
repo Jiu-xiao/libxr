@@ -451,6 +451,83 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port)
   return ErrorCode::BUSY;
 }
 
+void MSPM0UART::Abort(bool in_isr)
+{
+  CancelByteModeBlockTimeout();
+  byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
+
+  const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
+  const uint32_t ABORT_MASK =
+      DL_UART_INTERRUPT_TX | TIMEOUT_MASK | MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
+
+  DL_UART_disableInterrupt(res_.instance, ABORT_MASK);
+  DL_UART_clearInterruptStatus(res_.instance, ABORT_MASK);
+
+  AbortTx(in_isr);
+  AbortRx(in_isr);
+
+  DL_UART_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
+  DL_UART_enableInterrupt(res_.instance, MSPM0_UART_BASE_INTERRUPT_MASK);
+  DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_TX | TIMEOUT_MASK);
+  NVIC_ClearPendingIRQ(res_.irqn);
+}
+
+void MSPM0UART::OnInterrupt(uint8_t index)
+{
+  if (index >= MAX_UART_INSTANCES)
+  {
+    return;
+  }
+
+  auto* uart = instance_map_[index].load(std::memory_order_acquire);
+  if (uart == nullptr)
+  {
+    return;
+  }
+
+  uart->HandleInterrupt();
+}
+
+uint32_t MSPM0UART::GetTimeoutInterruptEnabledMask() const
+{
+  const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
+  if (TIMEOUT_MASK == 0U)
+  {
+    return 0U;
+  }
+  return DL_UART_getEnabledInterrupts(res_.instance, TIMEOUT_MASK);
+}
+
+uint32_t MSPM0UART::GetTimeoutInterruptMaskedStatus() const
+{
+  const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
+  if (TIMEOUT_MASK == 0U)
+  {
+    return 0U;
+  }
+  return DL_UART_getEnabledInterruptStatus(res_.instance, TIMEOUT_MASK);
+}
+
+uint32_t MSPM0UART::GetTimeoutInterruptRawStatus() const
+{
+  const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
+  if (TIMEOUT_MASK == 0U)
+  {
+    return 0U;
+  }
+  return DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
+}
+
+uint32_t MSPM0UART::GetRxInterruptTimeoutValue() const
+{
+  return DL_UART_getRXInterruptTimeout(res_.instance);
+}
+
+uint32_t MSPM0UART::GetRxFifoThresholdValue() const
+{
+  return static_cast<uint32_t>(DL_UART_getRXFIFOThreshold(res_.instance));
+}
+
 MSPM0UART::RxTimeoutMode MSPM0UART::ResolveRxTimeoutMode() const
 {
   // 超时模式由 SysConfig 决定 / Timeout mode is driven by SysConfig.
@@ -521,46 +598,6 @@ bool MSPM0UART::IsZeroTimeoutPendingBlockRead() const
       default:
         return 0;
     }
-  }
-
-  uint32_t MSPM0UART::GetTimeoutInterruptEnabledMask() const
-  {
-    const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
-    if (TIMEOUT_MASK == 0U)
-    {
-      return 0U;
-    }
-    return DL_UART_getEnabledInterrupts(res_.instance, TIMEOUT_MASK);
-  }
-
-  uint32_t MSPM0UART::GetTimeoutInterruptMaskedStatus() const
-  {
-    const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
-    if (TIMEOUT_MASK == 0U)
-    {
-      return 0U;
-    }
-    return DL_UART_getEnabledInterruptStatus(res_.instance, TIMEOUT_MASK);
-  }
-
-  uint32_t MSPM0UART::GetTimeoutInterruptRawStatus() const
-  {
-    const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
-    if (TIMEOUT_MASK == 0U)
-    {
-      return 0U;
-    }
-    return DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
-  }
-
-  uint32_t MSPM0UART::GetRxInterruptTimeoutValue() const
-  {
-    return DL_UART_getRXInterruptTimeout(res_.instance);
-  }
-
-  uint32_t MSPM0UART::GetRxFifoThresholdValue() const
-  {
-    return static_cast<uint32_t>(DL_UART_getRXFIFOThreshold(res_.instance));
   }
 
   void MSPM0UART::RearmLinCompareTimeout()
@@ -804,22 +841,6 @@ bool MSPM0UART::IsZeroTimeoutPendingBlockRead() const
   uint32_t MSPM0UART::NormalizeByteModeBlockTimeout(uint32_t timeout_ms) const
   {
     return (timeout_ms == 0U) ? 1U : timeout_ms;
-  }
-
-  void MSPM0UART::OnInterrupt(uint8_t index)
-  {
-    if (index >= MAX_UART_INSTANCES)
-    {
-      return;
-    }
-
-    auto* uart = instance_map_[index].load(std::memory_order_acquire);
-    if (uart == nullptr)
-    {
-      return;
-    }
-
-    uart->HandleInterrupt();
   }
 
   void MSPM0UART::HandleInterrupt()
@@ -1212,28 +1233,6 @@ bool MSPM0UART::IsZeroTimeoutPendingBlockRead() const
       tx_active_remaining_ = 0;
       tx_active_total_ = 0;
     }
-  }
-
-  void MSPM0UART::Abort(bool in_isr)
-  {
-    // 对齐 STM32 语义：发生 UART 错误时中止当前收发并清理状态，恢复到可继续收发。
-    CancelByteModeBlockTimeout();
-    byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
-
-    const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
-    const uint32_t ABORT_MASK =
-        DL_UART_INTERRUPT_TX | TIMEOUT_MASK | MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
-
-    DL_UART_disableInterrupt(res_.instance, ABORT_MASK);
-    DL_UART_clearInterruptStatus(res_.instance, ABORT_MASK);
-
-    AbortTx(in_isr);
-    AbortRx(in_isr);
-
-    DL_UART_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
-    DL_UART_enableInterrupt(res_.instance, MSPM0_UART_BASE_INTERRUPT_MASK);
-    DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_TX | TIMEOUT_MASK);
-    NVIC_ClearPendingIRQ(res_.irqn);
   }
 
   void MSPM0UART::AbortTx(bool in_isr)

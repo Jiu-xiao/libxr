@@ -36,16 +36,13 @@ class MSPM0UART : public UART
             UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
   ErrorCode SetConfig(UART::Configuration config) override;
-
-  void Abort(bool in_isr = false);
-
-  static ErrorCode WriteFun(WritePort& port);
-
-  static ErrorCode ReadFun(ReadPort& port);
-
-  static void OnInterrupt(uint8_t index);
   static UART::Configuration BuildConfigFromSysCfg(UART_Regs* instance,
                                                    uint32_t baudrate);
+  static ErrorCode WriteFun(WritePort& port);
+  static ErrorCode ReadFun(ReadPort& port);
+
+  void Abort(bool in_isr = false);
+  static void OnInterrupt(uint8_t index);
 
   RxTimeoutMode GetRxTimeoutMode() const
   {
@@ -218,58 +215,39 @@ class MSPM0UART : public UART
   static constexpr uint8_t MAX_UART_INSTANCES = 8;
   static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
 
-  void HandleInterrupt();
-
-  void HandleRxInterrupt(uint32_t timeout_mask);
-
-  void HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask);
-
-  void DrainRxFIFO(bool& received, bool& pushed);
-
-  void HandleTxInterrupt(bool in_isr);
-
-  void HandleErrorInterrupt(uint32_t pending_error_mask);
-
-  void CompletePendingReadOnTimeout(bool in_isr);
-
-  void AbortTx(bool in_isr);
-
-  void AbortRx(bool in_isr);
-
-  ErrorCode ApplyRxTimeoutMode();
-
   RxTimeoutMode ResolveRxTimeoutMode() const;
-
   bool IsTxBusy() const;
-
   bool IsRxBusy() const;
+  bool IsZeroTimeoutPendingBlockRead() const;
 
   void KickTxIfPending();
-
   uint16_t ResolveLinCompareWindow() const;
-
-  void EnsureByteModeBlockTimeoutTask();
-
-  void ArmByteModeBlockTimeout(uint32_t timeout_ms);
-
-  void CancelByteModeBlockTimeout();
-
-  static void OnByteModeBlockTimeout(MSPM0UART* uart);
-
-  uint32_t NormalizeByteModeBlockTimeout(uint32_t timeout_ms) const;
-
   uint32_t GetTimeoutInterruptMask() const;
 
   void RearmLinCompareTimeout();
-
   size_t ConsumeTimedOutReadData(bool in_isr, bool copy_to_buffer,
                                  size_t size_limit = static_cast<size_t>(-1));
-
   void ResetLinCounter();
 
-  void DisableTxInterrupt();
+  ErrorCode ApplyRxTimeoutMode();
 
-  bool IsZeroTimeoutPendingBlockRead() const;
+  void EnsureByteModeBlockTimeoutTask();
+  void ArmByteModeBlockTimeout(uint32_t timeout_ms);
+  void CancelByteModeBlockTimeout();
+  static void OnByteModeBlockTimeout(MSPM0UART* uart);
+  uint32_t NormalizeByteModeBlockTimeout(uint32_t timeout_ms) const;
+
+  void HandleInterrupt();
+  void HandleRxInterrupt(uint32_t timeout_mask);
+  void DrainRxFIFO(bool& received, bool& pushed);
+  void HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask);
+  void CompletePendingReadOnTimeout(bool in_isr);
+  void HandleTxInterrupt(bool in_isr);
+
+  void AbortTx(bool in_isr);
+  void AbortRx(bool in_isr);
+  void HandleErrorInterrupt(uint32_t pending_error_mask);
+  void DisableTxInterrupt();
 
   Resources res_;
   WriteInfoBlock tx_active_info_;
