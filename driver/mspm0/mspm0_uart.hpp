@@ -37,6 +37,8 @@ class MSPM0UART : public UART
 
   ErrorCode SetConfig(UART::Configuration config) override;
 
+  void Abort(bool in_isr = false);
+
   static ErrorCode WriteFun(WritePort& port);
 
   static ErrorCode ReadFun(ReadPort& port);
@@ -78,35 +80,35 @@ class MSPM0UART : public UART
   {
     switch (irqn)
     {
-#if defined(UART0_INT_IRQn)
+#if defined(UART0_BASE)
       case UART0_INT_IRQn:
         return 0;
 #endif
-#if defined(UART1_INT_IRQn)
+#if defined(UART1_BASE)
       case UART1_INT_IRQn:
         return 1;
 #endif
-#if defined(UART2_INT_IRQn)
+#if defined(UART2_BASE)
       case UART2_INT_IRQn:
         return 2;
 #endif
-#if defined(UART3_INT_IRQn)
+#if defined(UART3_BASE)
       case UART3_INT_IRQn:
         return 3;
 #endif
-#if defined(UART4_INT_IRQn)
+#if defined(UART4_BASE)
       case UART4_INT_IRQn:
         return 4;
 #endif
-#if defined(UART5_INT_IRQn)
+#if defined(UART5_BASE)
       case UART5_INT_IRQn:
         return 5;
 #endif
-#if defined(UART6_INT_IRQn)
+#if defined(UART6_BASE)
       case UART6_INT_IRQn:
         return 6;
 #endif
-#if defined(UART7_INT_IRQn)
+#if defined(UART7_BASE)
       case UART7_INT_IRQn:
         return 7;
 #endif
@@ -226,9 +228,13 @@ class MSPM0UART : public UART
 
   void HandleTxInterrupt(bool in_isr);
 
-  void HandleErrorInterrupt(DL_UART_IIDX iidx);
+  void HandleErrorInterrupt(uint32_t pending_error_mask);
 
   void CompletePendingReadOnTimeout(bool in_isr);
+
+  void AbortTx(bool in_isr);
+
+  void AbortRx(bool in_isr);
 
   ErrorCode ApplyRxTimeoutMode();
 
@@ -381,7 +387,7 @@ class MSPM0UART : public UART
       MSPM0_UART_INST_FREQUENCY(name),                                     \
       ::LibXR::MSPM0UART::ResolveIndex(MSPM0_UART_INST_INT_IRQN(name)),    \
       MSPM0_UART_LIN_COMPARE_ENABLED(name),                                \
-      MSPM0_UART_LIN_COMPARE_VALUE(name),                                  \
+      MSPM0_UART_LIN_COMPARE_VALUE(name)},                                 \
       ::LibXR::RawData{(rx_stage_addr), (rx_stage_size)}, (tx_queue_size), \
       (tx_buffer_size),                                                    \
       ::LibXR::MSPM0UART::BuildConfigFromSysCfg(                           \
