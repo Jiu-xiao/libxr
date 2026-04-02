@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "libxr.hpp"
 
 namespace LibXR
@@ -16,6 +18,96 @@ namespace LibXR
 class I2C
 {
  public:
+  struct AsyncBlockWait
+  {
+    enum class State : uint8_t
+    {
+      IDLE = 0,
+      PENDING = 1,
+      CLAIMED = 2,
+      DETACHED = 3,
+    };
+
+    void Start(Semaphore& sem)
+    {
+      sem_ = &sem;
+      result_ = ErrorCode::OK;
+      state_.store(State::PENDING, std::memory_order_release);
+    }
+
+    void Cancel() { state_.store(State::IDLE, std::memory_order_release); }
+
+    ErrorCode Wait(uint32_t timeout)
+    {
+      ASSERT(sem_ != nullptr);
+      auto wait_ans = sem_->Wait(timeout);
+      if (wait_ans == ErrorCode::OK)
+      {
+#ifdef LIBXR_DEBUG_BUILD
+        ASSERT(state_.load(std::memory_order_acquire) == State::CLAIMED);
+#endif
+        state_.store(State::IDLE, std::memory_order_release);
+        return result_;
+      }
+
+      State expected = State::PENDING;
+      if (state_.compare_exchange_strong(expected, State::DETACHED,
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire))
+      {
+        return ErrorCode::TIMEOUT;
+      }
+
+      ASSERT(expected == State::CLAIMED || expected == State::DETACHED ||
+             expected == State::IDLE);
+      if (expected == State::DETACHED)
+      {
+        state_.store(State::IDLE, std::memory_order_release);
+        return ErrorCode::TIMEOUT;
+      }
+      if (expected == State::IDLE)
+      {
+        return ErrorCode::TIMEOUT;
+      }
+
+      auto finish_wait_ans = sem_->Wait(UINT32_MAX);
+      UNUSED(finish_wait_ans);
+      ASSERT(finish_wait_ans == ErrorCode::OK);
+      state_.store(State::IDLE, std::memory_order_release);
+      return result_;
+    }
+
+    bool TryPost(bool in_isr, ErrorCode ec)
+    {
+      ASSERT(sem_ != nullptr);
+
+      State expected = State::PENDING;
+      if (!state_.compare_exchange_strong(expected, State::CLAIMED,
+                                          std::memory_order_acq_rel,
+                                          std::memory_order_acquire))
+      {
+        ASSERT(expected == State::DETACHED || expected == State::IDLE);
+        if (expected == State::DETACHED)
+        {
+          expected = State::DETACHED;
+          (void)state_.compare_exchange_strong(expected, State::IDLE,
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_acquire);
+        }
+        return false;
+      }
+
+      result_ = ec;
+      sem_->PostFromCallback(in_isr);
+      return true;
+    }
+
+   private:
+    Semaphore* sem_ = nullptr;
+    std::atomic<State> state_{State::IDLE};
+    ErrorCode result_ = ErrorCode::OK;
+  };
+
   /**
    * @brief I2C 设备的配置信息结构体。
    *        Configuration structure for an I2C device.
@@ -147,6 +239,9 @@ class I2C
                              ConstRawData write_data, WriteOperation& op,
                              MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
                              bool in_isr = false) = 0;
+
+ protected:
+  AsyncBlockWait block_wait_{};
 };
 
 }  // namespace LibXR

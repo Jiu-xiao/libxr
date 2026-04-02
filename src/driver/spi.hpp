@@ -493,6 +493,9 @@ class SPI
    */
   inline bool IsDoubleBuffer() const { return config_.double_buffer; }
 
+ protected:
+  AsyncBlockWait block_wait_{};
+
  private:
   Configuration config_;
   RawData rx_buffer_, tx_buffer_;
