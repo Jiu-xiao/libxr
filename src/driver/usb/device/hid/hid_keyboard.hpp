@@ -419,14 +419,7 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
     if (data.size_ >= 1)
     {
       led_state_ = *(static_cast<const uint8_t*>(data.addr_));
-      if (in_isr)
-      {
-        on_led_change_cb_.Run<true>(GetNumLock(), GetCapsLock(), GetScrollLock());
-      }
-      else
-      {
-        on_led_change_cb_.Run<false>(GetNumLock(), GetCapsLock(), GetScrollLock());
-      }
+      on_led_change_cb_.Run(in_isr, GetNumLock(), GetCapsLock(), GetScrollLock());
     }
   }
 
@@ -456,14 +449,7 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
   {
     if (data.size_ >= 1)
     {
-      if (in_isr)
-      {
-        on_led_change_cb_.Run<true>(GetNumLock(), GetCapsLock(), GetScrollLock());
-      }
-      else
-      {
-        on_led_change_cb_.Run<false>(GetNumLock(), GetCapsLock(), GetScrollLock());
-      }
+      on_led_change_cb_.Run(in_isr, GetNumLock(), GetCapsLock(), GetScrollLock());
       return ErrorCode::OK;
     }
 

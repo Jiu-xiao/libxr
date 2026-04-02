@@ -514,14 +514,7 @@ class CDCBase : public DeviceClass
         control_line_state_ = wValue;
         result.write_zlp = true;
         SendSerialState();
-        if (in_isr)
-        {
-          on_set_control_line_state_cb_.Run<true>(IsDtrSet(), IsRtsSet());
-        }
-        else
-        {
-          on_set_control_line_state_cb_.Run<false>(IsDtrSet(), IsRtsSet());
-        }
+        on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
         return ErrorCode::OK;
 
       case ClassRequest::SEND_BREAK:
@@ -573,14 +566,7 @@ class CDCBase : public DeviceClass
             cfg.parity = LibXR::UART::Parity::NO_PARITY;
         }
         cfg.data_bits = line_coding_.bDataBits;
-        if (in_isr)
-        {
-          on_set_line_coding_cb_.Run<true>(cfg);
-        }
-        else
-        {
-          on_set_line_coding_cb_.Run<false>(cfg);
-        }
+        on_set_line_coding_cb_.Run(in_isr, cfg);
       }
         return ErrorCode::OK;
       default:

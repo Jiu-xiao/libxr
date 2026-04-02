@@ -37,14 +37,14 @@ void Event::Active(uint32_t event)
 
   auto foreach_fun = [=](Block& block)
   {
-    block.cb.RunGuarded(false, event);
+    block.cb.RunGuarded<false>(event);
     return ErrorCode::OK;
   };
 
   list->data_.Foreach<LibXR::Event::Block>(foreach_fun);
 }
 
-void Event::ActiveFromCallback(CallbackList list, uint32_t event)
+void Event::ActiveFromCallback(CallbackList list, uint32_t event, bool in_isr)
 {
   if (!list)
   {
@@ -53,7 +53,7 @@ void Event::ActiveFromCallback(CallbackList list, uint32_t event)
 
   auto foreach_fun = [=](Block& block)
   {
-    block.cb.RunGuarded(true, event);
+    block.cb.RunGuarded(in_isr, event);
     return ErrorCode::OK;
   };
 
@@ -85,8 +85,8 @@ void Event::Bind(Event& sources, uint32_t source_event, uint32_t target_event)
   auto bind_fun = [](bool in_isr, BindBlock* block, uint32_t event)
   {
     UNUSED(event);
-    UNUSED(in_isr);
-    block->target->ActiveFromCallback(block->target->GetList(block->event), block->event);
+    block->target->ActiveFromCallback(block->target->GetList(block->event), block->event,
+                                      in_isr);
   };
 
   auto cb = Callback::Create(bind_fun, block);

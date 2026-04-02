@@ -269,7 +269,7 @@ void Topic::Publish(void* addr, uint32_t size)
       case SuberType::CALLBACK:
       {
         auto cb_block = reinterpret_cast<CallbackBlock*>(&block);
-        cb_block->cb.RunGuarded(false, data);
+        cb_block->cb.RunGuarded<false>(data);
         break;
       }
     }

@@ -74,7 +74,8 @@ class CallbackBlock
     fun_(in_isr, arg_, std::forward<PassArgs>(args)...);
   }
 
-  void CallGuarded(bool in_isr, Args... args)
+  template <bool kInIsr>
+  void CallGuarded(Args... args)
   {
     if (!fun_)
     {
@@ -90,7 +91,7 @@ class CallbackBlock
       do
       {
         pending_ = false;
-        std::apply([&](auto&... a) { fun_(in_isr, arg_, a...); }, cur_args);
+        std::apply([&](auto&... a) { fun_(kInIsr, arg_, a...); }, cur_args);
 
         if (pending_)
         {
@@ -105,6 +106,18 @@ class CallbackBlock
     // reentrant: cache one pending request (overwrite)
     pending_args_ = std::tuple<std::decay_t<Args>...>{args...};
     pending_ = true;
+  }
+
+  void CallGuarded(bool in_isr, Args... args)
+  {
+    if (in_isr)
+    {
+      CallGuarded<true>(std::forward<Args>(args)...);
+    }
+    else
+    {
+      CallGuarded<false>(std::forward<Args>(args)...);
+    }
   }
 
   /**
@@ -157,7 +170,7 @@ template <typename... Args>
 class Callback
 {
   static void FunctionDefault(void*, Args...) {}
-  static void FunctionGuardedDefault(bool, void*, Args...) {}
+  static void FunctionGuardedDefault(void*, Args...) {}
 
  public:
   /**
@@ -190,13 +203,20 @@ class Callback
       cb->CallDirect(false, std::forward<Args>(args)...);
     };
 
-    auto cb_fun_guarded = [](bool in_isr, void* cb_block, Args... args)
+    auto cb_fun_guarded_true = [](void* cb_block, Args... args)
     {
       auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
-      cb->CallGuarded(in_isr, std::forward<Args>(args)...);
+      cb->template CallGuarded<true>(std::forward<Args>(args)...);
     };
 
-    return Callback(cb_block, cb_fun_true, cb_fun_false, cb_fun_guarded);
+    auto cb_fun_guarded_false = [](void* cb_block, Args... args)
+    {
+      auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
+      cb->template CallGuarded<false>(std::forward<Args>(args)...);
+    };
+
+    return Callback(cb_block, cb_fun_true, cb_fun_false, cb_fun_guarded_true,
+                    cb_fun_guarded_false);
   }
 
   /**
@@ -217,7 +237,8 @@ class Callback
       : cb_block_(std::exchange(other.cb_block_, nullptr)),
         cb_fun_true_(std::exchange(other.cb_fun_true_, nullptr)),
         cb_fun_false_(std::exchange(other.cb_fun_false_, nullptr)),
-        cb_fun_guarded_(std::exchange(other.cb_fun_guarded_, nullptr))
+        cb_fun_guarded_true_(std::exchange(other.cb_fun_guarded_true_, nullptr)),
+        cb_fun_guarded_false_(std::exchange(other.cb_fun_guarded_false_, nullptr))
   {
   }
 
@@ -235,7 +256,8 @@ class Callback
       cb_block_ = std::exchange(other.cb_block_, nullptr);
       cb_fun_true_ = std::exchange(other.cb_fun_true_, nullptr);
       cb_fun_false_ = std::exchange(other.cb_fun_false_, nullptr);
-      cb_fun_guarded_ = std::exchange(other.cb_fun_guarded_, nullptr);
+      cb_fun_guarded_true_ = std::exchange(other.cb_fun_guarded_true_, nullptr);
+      cb_fun_guarded_false_ = std::exchange(other.cb_fun_guarded_false_, nullptr);
     }
     return *this;
   }
@@ -254,9 +276,42 @@ class Callback
   }
 
   template <typename... PassArgs>
+  void Run(bool in_isr, PassArgs&&... args) const
+  {
+    if (in_isr)
+    {
+      cb_fun_true_(cb_block_, std::forward<PassArgs>(args)...);
+    }
+    else
+    {
+      cb_fun_false_(cb_block_, std::forward<PassArgs>(args)...);
+    }
+  }
+
+  template <typename... PassArgs>
   void RunGuarded(bool in_isr, PassArgs&&... args) const
   {
-      cb_fun_guarded_(in_isr, cb_block_, std::forward<PassArgs>(args)...);
+    if (in_isr)
+    {
+      cb_fun_guarded_true_(cb_block_, std::forward<PassArgs>(args)...);
+    }
+    else
+    {
+      cb_fun_guarded_false_(cb_block_, std::forward<PassArgs>(args)...);
+    }
+  }
+
+  template <bool kInIsr, typename... PassArgs>
+  void RunGuarded(PassArgs&&... args) const
+  {
+    if constexpr (kInIsr)
+    {
+      cb_fun_guarded_true_(cb_block_, std::forward<PassArgs>(args)...);
+    }
+    else
+    {
+      cb_fun_guarded_false_(cb_block_, std::forward<PassArgs>(args)...);
+    }
   }
 
   /**
@@ -277,11 +332,13 @@ class Callback
    */
   Callback(void* cb_block, void (*cb_fun_true)(void*, Args...),
            void (*cb_fun_false)(void*, Args...),
-           void (*cb_fun_guarded)(bool, void*, Args...))
+           void (*cb_fun_guarded_true)(void*, Args...),
+           void (*cb_fun_guarded_false)(void*, Args...))
       : cb_block_(cb_block),
         cb_fun_true_(cb_fun_true),
         cb_fun_false_(cb_fun_false),
-        cb_fun_guarded_(cb_fun_guarded)
+        cb_fun_guarded_true_(cb_fun_guarded_true),
+        cb_fun_guarded_false_(cb_fun_guarded_false)
   {
   }
 
@@ -290,8 +347,10 @@ class Callback
       FunctionDefault;  ///< 直通 ISR=true/false 中的 true 分支 / Direct callback true branch
   void (*cb_fun_false_)(void*, Args...) =
       FunctionDefault;  ///< 回调执行函数指针 / Callback invocation function pointer
-  void (*cb_fun_guarded_)(bool, void*, Args...) =
-      FunctionGuardedDefault;  ///< 显式防重入路径 / Explicit guarded callback path
+  void (*cb_fun_guarded_true_)(void*, Args...) =
+      FunctionGuardedDefault;  ///< guarded true 分支 / Guarded callback true branch
+  void (*cb_fun_guarded_false_)(void*, Args...) =
+      FunctionGuardedDefault;  ///< guarded false 分支 / Guarded callback false branch
 };
 
 }  // namespace LibXR
