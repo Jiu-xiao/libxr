@@ -399,8 +399,7 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port)
     {
       bool expected_drop = true;
       if (uart->byte_mode_drop_detached_rx_.compare_exchange_strong(
-              expected_drop, false, std::memory_order_acq_rel,
-              std::memory_order_acquire))
+              expected_drop, false, std::memory_order_acq_rel, std::memory_order_acquire))
       {
         uart->byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
         UNUSED(uart->ConsumeTimedOutReadData(false, false));
