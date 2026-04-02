@@ -29,14 +29,14 @@ class DeviceCore
    */
   enum Context : uint8_t
   {
-    UNKNOWN = 0,         ///< 未知 / Unknown
-    SETUP_BEFORE_STATUS, ///< Setup handled, before STATUS IN ZLP is armed
-    STATUS_IN_ARMED,     ///< STATUS IN ZLP armed, but not yet completed
-    DATA_OUT,            ///< OUT data stage / OUT data stage
-    STATUS_OUT,          ///< OUT status stage / OUT status stage
-    DATA_IN,             ///< IN data stage / IN data stage
-    STATUS_IN_COMPLETE,  ///< IN status stage completed
-    ZLP                  ///< ZLP stage marker / ZLP stage marker
+    UNKNOWN = 0,          ///< 未知 / Unknown
+    SETUP_BEFORE_STATUS,  ///< Setup handled, before STATUS IN ZLP is armed
+    STATUS_IN_ARMED,      ///< STATUS IN ZLP armed, but not yet completed
+    DATA_OUT,             ///< OUT data stage / OUT data stage
+    STATUS_OUT,           ///< OUT status stage / OUT status stage
+    DATA_IN,              ///< IN data stage / IN data stage
+    STATUS_IN_COMPLETE,   ///< IN status stage completed
+    ZLP                   ///< ZLP stage marker / ZLP stage marker
   };
 
   /**
@@ -208,9 +208,9 @@ class DeviceCore
     bool class_in_data_status_pending =
         false;  ///< class IN data 阶段后等待 STATUS OUT / Waiting for STATUS OUT after a
                 ///< class IN data stage
-    DeviceClass* class_ptr = nullptr;      ///< 当前处理类 / Current class handler
-    uint8_t b_request = 0;                 ///< 当前请求码 / Current request code
-    ConstRawData data{nullptr, 0};         ///< 数据阶段数据 / Data stage payload
+    DeviceClass* class_ptr = nullptr;  ///< 当前处理类 / Current class handler
+    uint8_t b_request = 0;             ///< 当前请求码 / Current request code
+    ConstRawData data{nullptr, 0};     ///< 数据阶段数据 / Data stage payload
   } class_req_;
 };
 

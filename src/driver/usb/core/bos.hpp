@@ -130,10 +130,7 @@ class BosManager
   /**
    * @brief 清空已注册能力 / Clear registered capabilities
    */
-  void ClearCapabilities()
-  {
-    count_ = 0;
-  }
+  void ClearCapabilities() { count_ = 0; }
 
   /**
    * @brief 添加能力 / Add capability

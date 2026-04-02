@@ -159,8 +159,9 @@ class DfuBootloaderBackend
       return DFUStatusCode::ERR_NOTDONE;
     }
 
-    if ((block_num == 0u) && (download_.session_started &&
-                              (download_.received_bytes != 0u || download_.expected_block_num != 0u)))
+    if ((block_num == 0u) &&
+        (download_.session_started &&
+         (download_.received_bytes != 0u || download_.expected_block_num != 0u)))
     {
       // Host restarted DNLOAD from block 0 without an explicit ABORT/CLRSTATUS first.
       // Treat that as a fresh session and discard the old partial transfer state.
@@ -379,10 +380,7 @@ class DfuBootloaderBackend
     return true;
   }
 
-  bool HasPendingWork() const
-  {
-    return HasPendingWrite() || HasPendingManifest();
-  }
+  bool HasPendingWork() const { return HasPendingWrite() || HasPendingManifest(); }
 
   bool HasValidImage() const { return image_.ready; }
   size_t ImageSize() const { return image_.stored_size; }
@@ -416,8 +414,8 @@ class DfuBootloaderBackend
 
   void ResetTransferState()
   {
-    // Reset only the protocol-owned transfer sessions; image validity and launch policy are
-    // tracked separately in ImageState.
+    // Reset only the protocol-owned transfer sessions; image validity and launch policy
+    // are tracked separately in ImageState.
     // 这里只重置协议拥有的传输会话状态；镜像有效性和启动策略单独放在 ImageState 里。
     download_ = {};
     write_ = {};
@@ -462,8 +460,8 @@ class DfuBootloaderBackend
       write_.pending = false;
       return;
     }
-    if (flash_.Write(image_offset_ + write_.offset,
-                     {write_buffer_, write_.len}) != ErrorCode::OK)
+    if (flash_.Write(image_offset_ + write_.offset, {write_buffer_, write_.len}) !=
+        ErrorCode::OK)
     {
       download_.last_status = DFUStatusCode::ERR_PROG;
       write_.pending = false;
@@ -696,26 +694,26 @@ class DfuBootloaderBackend
     size_t image_size = 0u;
   };
 
-  Flash& flash_;                   ///< 底层 flash 设备 / Underlying flash device
-  size_t image_offset_ = 0u;       ///< 镜像区起始偏移 / Image base offset
-  size_t image_size_limit_ = 0u;   ///< 镜像区总边界 / Image region limit
-  size_t seal_offset_ = 0u;        ///< seal 相对镜像区偏移 / Seal offset inside image region
+  Flash& flash_;                  ///< 底层 flash 设备 / Underlying flash device
+  size_t image_offset_ = 0u;      ///< 镜像区起始偏移 / Image base offset
+  size_t image_size_limit_ = 0u;  ///< 镜像区总边界 / Image region limit
+  size_t seal_offset_ = 0u;  ///< seal 相对镜像区偏移 / Seal offset inside image region
   JumpCallback jump_to_app_ = nullptr;  ///< 跳 app 回调 / App jump callback
   void* jump_app_ctx_ = nullptr;        ///< 跳转上下文 / Jump callback context
-  bool autorun_ = true;                 ///< manifest 后是否自动请求运行 / Autorun after manifest
-  ImageState image_ = {};               ///< 镜像级状态 / Image-level state
-  size_t erase_block_size_ = 1u;        ///< 最小擦除粒度 / Minimum erase granularity
-  size_t erase_block_count_ = 0u;       ///< 受管块数量 / Number of tracked erase blocks
-  uint8_t* erased_blocks_ = nullptr;    ///< 每块擦除标记 / Per-block erase marks
-  size_t seal_storage_size_ = 0u;       ///< seal 暂存大小 / Seal scratch size
-  uint8_t* seal_storage_ = nullptr;     ///< seal 暂存区 / Seal scratch buffer
-  size_t transfer_size_ = 0u;           ///< 单次 DFU 传输上限 / Per-transfer DFU limit
-  uint8_t* write_buffer_ = nullptr;     ///< 下载块暂存区 / Download chunk buffer
-  uint8_t crc_buffer_[256] = {};        ///< CRC 分块缓冲 / CRC chunk buffer
-  DownloadState download_ = {};         ///< Download 状态 / Download state
-  WriteState write_ = {};               ///< 写入步骤状态 / Write-step state
-  ManifestState manifest_ = {};         ///< Manifest 状态 / Manifest state
-  UploadState upload_ = {};             ///< Upload 状态 / Upload state
+  bool autorun_ = true;    ///< manifest 后是否自动请求运行 / Autorun after manifest
+  ImageState image_ = {};  ///< 镜像级状态 / Image-level state
+  size_t erase_block_size_ = 1u;      ///< 最小擦除粒度 / Minimum erase granularity
+  size_t erase_block_count_ = 0u;     ///< 受管块数量 / Number of tracked erase blocks
+  uint8_t* erased_blocks_ = nullptr;  ///< 每块擦除标记 / Per-block erase marks
+  size_t seal_storage_size_ = 0u;     ///< seal 暂存大小 / Seal scratch size
+  uint8_t* seal_storage_ = nullptr;   ///< seal 暂存区 / Seal scratch buffer
+  size_t transfer_size_ = 0u;         ///< 单次 DFU 传输上限 / Per-transfer DFU limit
+  uint8_t* write_buffer_ = nullptr;   ///< 下载块暂存区 / Download chunk buffer
+  uint8_t crc_buffer_[256] = {};      ///< CRC 分块缓冲 / CRC chunk buffer
+  DownloadState download_ = {};       ///< Download 状态 / Download state
+  WriteState write_ = {};             ///< 写入步骤状态 / Write-step state
+  ManifestState manifest_ = {};       ///< Manifest 状态 / Manifest state
+  UploadState upload_ = {};           ///< Upload 状态 / Upload state
 };
 
 /**
@@ -775,8 +773,8 @@ class DFUClass : public DfuInterfaceClassBase
   };
 
   /**
- * @brief Bootloader DFU 的接口描述符块 / Bootloader DFU descriptor block
- */
+   * @brief Bootloader DFU 的接口描述符块 / Bootloader DFU descriptor block
+   */
   struct DescriptorBlock
   {
     ConfigDescriptorItem::InterfaceDescriptor interface_desc = {
@@ -820,7 +818,8 @@ class DFUClass : public DfuInterfaceClassBase
       Backend& backend, const char* interface_string = DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
       uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
-      : DfuInterfaceClassBase(interface_string, webusb_landing_page_url, webusb_vendor_code),
+      : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
+                              webusb_vendor_code),
         backend_(backend)
   {
   }
@@ -828,8 +827,8 @@ class DFUClass : public DfuInterfaceClassBase
  protected:
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
   {
-    // Firmware DFU publishes one interface and validates backend capabilities during bind.
-    // 固件 DFU 在绑定阶段发布单接口描述符，并校验 backend 能力。
+    // Firmware DFU publishes one interface and validates backend capabilities during
+    // bind. 固件 DFU 在绑定阶段发布单接口描述符，并校验 backend 能力。
     interface_num_ = start_itf_num;
     current_alt_setting_ = 0u;
 
@@ -990,8 +989,8 @@ class DFUClass : public DfuInterfaceClassBase
 
     if (pending_dnload_length_ == 0u)
     {
-      // Zero-length OUT data stage is legal here only for the already-finished DNLOAD path.
-      // 这里出现零长度 OUT data stage 只在“DNLOAD 已结束”的路径上才是合法的。
+      // Zero-length OUT data stage is legal here only for the already-finished DNLOAD
+      // path. 这里出现零长度 OUT data stage 只在“DNLOAD 已结束”的路径上才是合法的。
       return ErrorCode::OK;
     }
 
@@ -1187,8 +1186,8 @@ class DFUClass : public DfuInterfaceClassBase
 
   void AdvanceStateForStatusRead()
   {
-    // GETSTATUS is the synchronization point that advances the standard DFU state machine.
-    // 标准 DFU 状态机是在 GETSTATUS 这个同步点上推进的。
+    // GETSTATUS is the synchronization point that advances the standard DFU state
+    // machine. 标准 DFU 状态机是在 GETSTATUS 这个同步点上推进的。
     switch (state_)
     {
       case DFUState::DFU_DNLOAD_SYNC:
@@ -1292,8 +1291,8 @@ class DFUClass : public DfuInterfaceClassBase
 
   void ResetProtocolState()
   {
-    // Reset only frontend-owned protocol state; image-level bookkeeping stays in backend_.
-    // 这里只重置前端拥有的协议状态；镜像级 bookkeeping 保留在 backend_ 里。
+    // Reset only frontend-owned protocol state; image-level bookkeeping stays in
+    // backend_. 这里只重置前端拥有的协议状态；镜像级 bookkeeping 保留在 backend_ 里。
     pending_block_num_ = 0u;
     pending_dnload_length_ = 0u;
     poll_timeout_ms_ = 0u;
@@ -1311,8 +1310,8 @@ class DFUClass : public DfuInterfaceClassBase
 
   void EnterErrorState(DFUStatusCode status)
   {
-    // Once an error is latched, the frontend stays in DFU_ERROR until CLRSTATUS/ABORT resets it.
-    // 一旦锁存错误，前端会保持在 DFU_ERROR，直到 CLRSTATUS/ABORT 把它清掉。
+    // Once an error is latched, the frontend stays in DFU_ERROR until CLRSTATUS/ABORT
+    // resets it. 一旦锁存错误，前端会保持在 DFU_ERROR，直到 CLRSTATUS/ABORT 把它清掉。
     status_ = status;
     state_ = DFUState::DFU_ERROR;
     poll_timeout_ms_ = 0u;
@@ -1325,18 +1324,19 @@ class DFUClass : public DfuInterfaceClassBase
   }
 
  private:
-  Backend& backend_;                           ///< 后端实现 / Backend implementation
-  DFUCapabilities caps_ = {};                  ///< 能力集缓存 / Capability cache
-  DescriptorBlock desc_block_ = {};            ///< 描述符缓存 / Descriptor cache
-  StatusResponse status_response_ = {};        ///< GETSTATUS 缓冲区 / GETSTATUS buffer
-  uint8_t state_response_ = 0u;                ///< GETSTATE 缓冲字节 / GETSTATE byte buffer
-  uint8_t transfer_buffer_[MAX_TRANSFER_SIZE] = {};  ///< EP0 传输缓冲 / EP0 transfer buffer
-  bool download_started_ = false;              ///< 是否已有有效下载数据 / Whether payload has started
-  uint16_t pending_block_num_ = 0u;            ///< 待提交 block 编号 / Pending block number
-  uint16_t pending_dnload_length_ = 0u;        ///< 待提交 DNLOAD 长度 / Pending DNLOAD length
-  uint32_t poll_timeout_ms_ = 0u;              ///< 当前轮询超时 / Current poll timeout
-  DFUState state_ = DFUState::DFU_IDLE;        ///< DFU 状态 / DFU state
-  DFUStatusCode status_ = DFUStatusCode::OK;   ///< DFU 状态码 / DFU status code
+  Backend& backend_;                     ///< 后端实现 / Backend implementation
+  DFUCapabilities caps_ = {};            ///< 能力集缓存 / Capability cache
+  DescriptorBlock desc_block_ = {};      ///< 描述符缓存 / Descriptor cache
+  StatusResponse status_response_ = {};  ///< GETSTATUS 缓冲区 / GETSTATUS buffer
+  uint8_t state_response_ = 0u;          ///< GETSTATE 缓冲字节 / GETSTATE byte buffer
+  uint8_t transfer_buffer_[MAX_TRANSFER_SIZE] =
+      {};                          ///< EP0 传输缓冲 / EP0 transfer buffer
+  bool download_started_ = false;  ///< 是否已有有效下载数据 / Whether payload has started
+  uint16_t pending_block_num_ = 0u;      ///< 待提交 block 编号 / Pending block number
+  uint16_t pending_dnload_length_ = 0u;  ///< 待提交 DNLOAD 长度 / Pending DNLOAD length
+  uint32_t poll_timeout_ms_ = 0u;        ///< 当前轮询超时 / Current poll timeout
+  DFUState state_ = DFUState::DFU_IDLE;  ///< DFU 状态 / DFU state
+  DFUStatusCode status_ = DFUStatusCode::OK;  ///< DFU 状态码 / DFU status code
 };
 
 /**
@@ -1412,7 +1412,8 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
 
  protected:
   ErrorCode OnVendorRequest(bool, uint8_t bRequest, uint16_t wValue, uint16_t wLength,
-                            uint16_t, typename Base::ControlTransferResult& result) override
+                            uint16_t,
+                            typename Base::ControlTransferResult& result) override
   {
     if (bRequest != kVendorRequestRunApp)
     {

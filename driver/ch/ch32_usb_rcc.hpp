@@ -17,8 +17,8 @@ inline uint32_t GetSysclkHz()
 
 inline void ConfigureUsb48MFromSysclk()
 {
-  // Legacy CH32 parts derive the shared USB 48 MHz clock directly from SYSCLK / PLL dividers.
-  // 传统 CH32 器件直接从 SYSCLK / PLL 分频得到共享 USB 48 MHz 时钟。
+  // Legacy CH32 parts derive the shared USB 48 MHz clock directly from SYSCLK / PLL
+  // dividers. 传统 CH32 器件直接从 SYSCLK / PLL 分频得到共享 USB 48 MHz 时钟。
   const uint32_t sysclk_hz = GetSysclkHz();
 
 #if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && \
@@ -71,12 +71,11 @@ inline void ConfigureUsb48MFromSysclk()
   ASSERT(false);
 }
 
-#if defined(RCC_HSBHSPLLCLKSource_HSE) && defined(RCC_USBPLL_Div1) && \
-    defined(RCC_USBPLL_Div2) && defined(RCC_USBPLL_Div3) &&            \
-    defined(RCC_USBPLL_Div4) && defined(RCC_USBPLL_Div5) &&            \
-    defined(RCC_USBPLL_Div6) && defined(RCC_USBPLL_Div7) &&            \
-    defined(RCC_USBPLL_Div8) && defined(RCC_USBHSPLLCKREFCLK_3M) &&    \
-    defined(RCC_USBHSPLLCKREFCLK_4M) && defined(RCC_USBHSPLLCKREFCLK_5M) && \
+#if defined(RCC_HSBHSPLLCLKSource_HSE) && defined(RCC_USBPLL_Div1) &&                   \
+    defined(RCC_USBPLL_Div2) && defined(RCC_USBPLL_Div3) && defined(RCC_USBPLL_Div4) && \
+    defined(RCC_USBPLL_Div5) && defined(RCC_USBPLL_Div6) && defined(RCC_USBPLL_Div7) && \
+    defined(RCC_USBPLL_Div8) && defined(RCC_USBHSPLLCKREFCLK_3M) &&                     \
+    defined(RCC_USBHSPLLCKREFCLK_4M) && defined(RCC_USBHSPLLCKREFCLK_5M) &&             \
     defined(RCC_USBHSPLLCKREFCLK_8M)
 struct UsbHsPllConfig
 {
@@ -137,9 +136,9 @@ inline bool TryGetUsbHsPllConfigForHse(uint32_t hse_hz, UsbHsPllConfig& cfg)
 
 inline void ConfigureUsbHsPhyFromHse()
 {
-  // USBHS PHY path uses an HSE -> (divider, ref clock) lookup so the legal combinations stay
-  // explicit and auditable.
-  // USBHS PHY 路径通过 HSE -> (分频, 参考时钟) 查表，保证合法组合保持显式且可审计。
+  // USBHS PHY path uses an HSE -> (divider, ref clock) lookup so the legal combinations
+  // stay explicit and auditable. USBHS PHY 路径通过 HSE -> (分频, 参考时钟)
+  // 查表，保证合法组合保持显式且可审计。
   UsbHsPllConfig cfg = {};
   const uint32_t hse_hz = static_cast<uint32_t>(HSE_VALUE);
   ASSERT(TryGetUsbHsPllConfigForHse(hse_hz, cfg));
@@ -155,7 +154,8 @@ inline void ConfigureUsb48M()
 {
 #if defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_HSBHSPLLCLKSource_HSE)
   // Some CH32V30x parts can source the shared 48 MHz USB clock from the USBHS PHY PLL.
-  // In that case, select the PHY path first and let each controller enable its own bus clock.
+  // In that case, select the PHY path first and let each controller enable its own bus
+  // clock.
   ConfigureUsbHsPhyFromHse();
   RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_USBPHY);
 #else

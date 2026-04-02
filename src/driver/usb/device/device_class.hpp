@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+
 #include "libxr_type.hpp"
 #include "usb/core/desc_cfg.hpp"
 
@@ -205,7 +206,8 @@ class DeviceClass : public ConfigDescriptorItem
   friend class DeviceComposition;
   friend class DeviceCore;
 
-  uint8_t interface_string_base_index_ = 0u;  ///< 首个接口字符串索引 / First interface string index
+  uint8_t interface_string_base_index_ =
+      0u;  ///< 首个接口字符串索引 / First interface string index
 };
 
 }  // namespace LibXR::USB

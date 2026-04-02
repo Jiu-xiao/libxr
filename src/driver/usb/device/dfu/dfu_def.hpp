@@ -3,9 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "crc.hpp"
 #include "dev_core.hpp"
 #include "flash.hpp"
-#include "crc.hpp"
 #include "timebase.hpp"
 #include "webusb.hpp"
 
@@ -90,10 +90,9 @@ class DfuInterfaceClassBase : public DeviceClass
   // - 一个接口字符串
   // - 可选 WebUSB BOS capability
   // - 一组当前接口/alt setting 状态
-  DfuInterfaceClassBase(const char* interface_string,
-                        const char* webusb_landing_page_url = nullptr,
-                        uint8_t webusb_vendor_code =
-                            LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+  DfuInterfaceClassBase(
+      const char* interface_string, const char* webusb_landing_page_url = nullptr,
+      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
       : interface_string_(interface_string),
         webusb_cap_(webusb_landing_page_url, webusb_vendor_code)
   {

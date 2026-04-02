@@ -3,334 +3,380 @@
  * and code size stay stable across unrelated C++ changes.
  */
 
-    .section .text.ch32_flash_hot, "ax", @progbits
-    .align 2
+.section.text.ch32_flash_hot, "ax",
+    @progbits
+        .align 2
 
-/* ErrorCode values from libxr_def.hpp */
-.equ CH32_EC_OK,          0
-.equ CH32_EC_STATE_ERR,  -4
-.equ CH32_EC_CHECK_ERR,  -6
-.equ CH32_EC_TIMEOUT,   -12
+        /* ErrorCode values from libxr_def.hpp */
+        .equ CH32_EC_OK,
+    0 .equ CH32_EC_STATE_ERR, -4 .equ CH32_EC_CHECK_ERR, -6 .equ CH32_EC_TIMEOUT,
+    -12
 
-/* FLASH register offsets from FLASH_TypeDef */
-.equ CH32_FLASH_R_BASE,      0x40022000
-.equ CH32_FLASH_STATR_OFF,    12
-.equ CH32_FLASH_CTLR_OFF,     16
-.equ CH32_FLASH_ADDR_OFF,     20
+         /* FLASH register offsets from FLASH_TypeDef */
+         .equ CH32_FLASH_R_BASE,
+    0x40022000 .equ CH32_FLASH_STATR_OFF, 12 .equ CH32_FLASH_CTLR_OFF,
+    16 .equ CH32_FLASH_ADDR_OFF,
+    20
 
-/* FLASH bit definitions */
-.equ CH32_FLASH_BSY_BIT,          0x00000001
-.equ CH32_FLASH_WRBUSY_BIT,       0x00000002
-.equ CH32_FLASH_WRPRTERR_BIT,     0x00000010
-.equ CH32_FLASH_EOP_BIT,          0x00000020
-.equ CH32_FLASH_PG_BIT,           0x00000001
-.equ CH32_FLASH_PER_BIT,          0x00000040
-.equ CH32_FLASH_FAST_ERASE_BIT,   0x00020000
-.equ CH32_FLASH_PAGE_PROG_BIT,    0x00010000
-.equ CH32_FLASH_PROG_START_BIT,   0x00200000
-.equ CH32_FLASH_FAST_PAGE_SIZE,   256
-.equ CH32_FLASH_WAIT_SPIN,        1000000
-.equ CH32_MASK_FF00,              0x0000ff00
-.equ CH32_MASK_00FF,              0x000000ff
+        /* FLASH bit definitions */
+        .equ CH32_FLASH_BSY_BIT,
+    0x00000001 .equ CH32_FLASH_WRBUSY_BIT, 0x00000002 .equ CH32_FLASH_WRPRTERR_BIT,
+    0x00000010 .equ CH32_FLASH_EOP_BIT, 0x00000020 .equ CH32_FLASH_PG_BIT,
+    0x00000001 .equ CH32_FLASH_PER_BIT, 0x00000040 .equ CH32_FLASH_FAST_ERASE_BIT,
+    0x00020000 .equ CH32_FLASH_PAGE_PROG_BIT, 0x00010000 .equ CH32_FLASH_PROG_START_BIT,
+    0x00200000 .equ CH32_FLASH_FAST_PAGE_SIZE, 256 .equ CH32_FLASH_WAIT_SPIN,
+    1000000 .equ CH32_MASK_FF00, 0x0000ff00 .equ CH32_MASK_00FF,
+    0x000000ff
 
-    .global CH32FlashEraseHotPathFlash
-    .type CH32FlashEraseHotPathFlash, @function
-CH32FlashEraseHotPathFlash:
-    bgeu    a0,a1,.L2
-    li      a2,-131072
-    addi    a2,a2,-1
-    li      a3,1073881088
-    li      a6,131072
-    li      a7,32
-.L7:
-    lw      a5,16(a3)
-    li      a4,999424
-    addi    a4,a4,577
-    or      a5,a5,a6
-    sw      a5,16(a3)
-    sw      a0,20(a3)
-    lw      a5,16(a3)
-    ori     a5,a5,64
-    sw      a5,16(a3)
-    j       .L3
-.L5:
-    beq     a4,zero,.L11
-.L3:
-    lw      a5,12(a3)
-    addi    a4,a4,-1
-    andi    a5,a5,1
-    bne     a5,zero,.L5
-    lw      a5,12(a3)
-    andi    a5,a5,16
-    bne     a5,zero,.L12
-    lw      a5,16(a3)
-    addi    a0,a0,256
-    and     a5,a5,a2
-    sw      a5,16(a3)
-    sw      a7,12(a3)
-    bgtu    a1,a0,.L7
-.L2:
-    li      a0,0
-    ret
-.L11:
-    lw      a5,16(a3)
-    li      a4,-131072
-    addi    a4,a4,-1
-    and     a5,a5,a4
-    sw      a5,16(a3)
-    li      a0,-12
-    ret
-.L12:
-    lw      a5,16(a3)
-    li      a4,-131072
-    addi    a4,a4,-1
-    and     a5,a5,a4
-    sw      a5,16(a3)
-    li      a5,48
-    sw      a5,12(a3)
-    li      a0,-4
-    ret
-    .size CH32FlashEraseHotPathFlash, .-CH32FlashEraseHotPathFlash
+        .global CH32FlashEraseHotPathFlash.type CH32FlashEraseHotPathFlash,
+    @function CH32FlashEraseHotPathFlash
+    : bgeu a0,
+      a1,
+      .L2 li a2,
+      -131072 addi a2,
+      a2,
+      -1 li a3,
+      1073881088 li a6,
+      131072 li a7,
+      32 .L7 : lw a5,
+      16(a3)li a4,
+      999424 addi a4,
+      a4,
+      577 or a5,
+      a5,
+      a6 sw a5,
+      16(a3)sw a0,
+      20(a3)lw a5,
+      16(a3)ori a5,
+      a5,
+      64 sw a5,
+      16(a3)j.L3.L5 : beq a4,
+      zero,
+      .L11.L3 : lw a5,
+      12(a3)addi a4,
+      a4,
+      -1 andi a5,
+      a5,
+      1 bne a5,
+      zero,
+      .L5 lw a5,
+      12(a3)andi a5,
+      a5,
+      16 bne a5,
+      zero,
+      .L12 lw a5,
+      16(a3)addi a0,
+      a0,
+      256 and a5,
+      a5,
+      a2 sw a5,
+      16(a3)sw a7,
+      12(a3)bgtu a1,
+      a0,
+      .L7.L2 : li a0,
+      0 ret.L11 : lw a5,
+      16(a3)li a4,
+      -131072 addi a4,
+      a4,
+      -1 and a5,
+      a5,
+      a4 sw a5,
+      16(a3)li a0,
+      -12 ret.L12 : lw a5,
+      16(a3)li a4,
+      -131072 addi a4,
+      a4,
+      -1 and a5,
+      a5,
+      a4 sw a5,
+      16(a3)li a5,
+      48 sw a5,
+      12(a3)li a0,
+      -4 ret.size CH32FlashEraseHotPathFlash,
+      .- CH32FlashEraseHotPathFlash
 
-    .global CH32FlashEraseHotPathFlashEnd
-    .type CH32FlashEraseHotPathFlashEnd, @function
-CH32FlashEraseHotPathFlashEnd:
-    ret
-    .size CH32FlashEraseHotPathFlashEnd, .-CH32FlashEraseHotPathFlashEnd
+              .global CH32FlashEraseHotPathFlashEnd.type CH32FlashEraseHotPathFlashEnd,
+      @function CH32FlashEraseHotPathFlashEnd : ret.size CH32FlashEraseHotPathFlashEnd,
+      .- CH32FlashEraseHotPathFlashEnd
 
-    .global CH32FlashWriteHotLoopFlash
-    .type CH32FlashWriteHotLoopFlash, @function
-CH32FlashWriteHotLoopFlash:
-    andi    a6,a0,-2
-    addi    t3,a1,1
-    sub     a5,a6,a0
-    li      t4,-57344
-    andi    t3,t3,-2
-    add     t1,a2,a5
-    ori     a7,a0,1
-    addi    t4,t4,-825
-    li      a3,1073881088
-    li      t5,32
-    bgeu    a6,t3,.L29
-.L28:
-    lhu     a5,0(a6)
-    slli    a5,a5,16
-    srli    a5,a5,16
-    bgtu    a0,a6,.L32
-    bleu    a1,a6,.L32
-    lbu     a4,0(t1)
-    andi    a2,a5,-256
-    or      a2,a2,a4
-    bgeu    a7,a1,.L22
-.L19:
-    lbu     a4,1(t1)
-    andi    a2,a2,255
-    andi    a4,a4,255
-    slli    a4,a4,8
-    or      a2,a4,a2
-.L22:
-    beq     a2,a5,.L21
-    not     a4,a5
-    and     a4,a4,a2
-    beq     a4,zero,.L33
-    add     a5,a5,t4
-    bne     a5,zero,.L23
-.L33:
-    lw      a5,16(a3)
-    li      a4,999424
-    addi    a4,a4,577
-    ori     a5,a5,1
-    sw      a5,16(a3)
-    sh      a2,0(a6)
-    j       .L25
-.L26:
-    beq     a4,zero,.L46
-.L25:
-    lw      a5,12(a3)
-    addi    a4,a4,-1
-    andi    a5,a5,1
-    bne     a5,zero,.L26
-    lw      a5,16(a3)
-    andi    a5,a5,-2
-    sw      a5,16(a3)
-    lw      a5,12(a3)
-    andi    a5,a5,16
-    bne     a5,zero,.L47
-    lhu     a5,0(a6)
-    bne     a5,a2,.L31
-    sw      t5,12(a3)
-.L21:
-    addi    a6,a6,2
-    addi    a7,a7,2
-    addi    t1,t1,2
-    bgtu    t3,a6,.L28
-.L29:
-    li      a0,0
-    ret
-.L32:
-    bgeu    a7,a1,.L21
-    bltu    a7,a0,.L21
-    mv      a2,a5
-    j       .L19
-.L46:
-    lw      a5,16(a3)
-    li      a0,-12
-    andi    a5,a5,-2
-    sw      a5,16(a3)
-    ret
-.L47:
-    li      a5,48
-    sw      a5,12(a3)
-.L23:
-    li      a0,-4
-    ret
-.L31:
-    li      a0,-6
-    ret
-    .size CH32FlashWriteHotLoopFlash, .-CH32FlashWriteHotLoopFlash
+              .global CH32FlashWriteHotLoopFlash.type CH32FlashWriteHotLoopFlash,
+      @function CH32FlashWriteHotLoopFlash
+    : andi a6,
+      a0,
+      -2 addi t3,
+      a1,
+      1 sub a5,
+      a6,
+      a0 li t4,
+      -57344 andi t3,
+      t3,
+      -2 add t1,
+      a2,
+      a5 ori a7,
+      a0,
+      1 addi t4,
+      t4,
+      -825 li a3,
+      1073881088 li t5,
+      32 bgeu a6,
+      t3,
+      .L29.L28 : lhu a5,
+      0(a6)slli a5,
+      a5,
+      16 srli a5,
+      a5,
+      16 bgtu a0,
+      a6,
+      .L32 bleu a1,
+      a6,
+      .L32 lbu a4,
+      0(t1)andi a2,
+      a5,
+      -256 or a2,
+      a2,
+      a4 bgeu a7,
+      a1,
+      .L22.L19 : lbu a4,
+      1(t1)andi a2,
+      a2,
+      255 andi a4,
+      a4,
+      255 slli a4,
+      a4,
+      8 or a2,
+      a4,
+      a2.L22 : beq a2,
+      a5,
+      .L21 not a4,
+      a5 and a4,
+      a4,
+      a2 beq a4,
+      zero,
+      .L33 add a5,
+      a5,
+      t4 bne a5,
+      zero,
+      .L23.L33 : lw a5,
+      16(a3)li a4,
+      999424 addi a4,
+      a4,
+      577 ori a5,
+      a5,
+      1 sw a5,
+      16(a3)sh a2,
+      0(a6)j.L25.L26 : beq a4,
+      zero,
+      .L46.L25 : lw a5,
+      12(a3)addi a4,
+      a4,
+      -1 andi a5,
+      a5,
+      1 bne a5,
+      zero,
+      .L26 lw a5,
+      16(a3)andi a5,
+      a5,
+      -2 sw a5,
+      16(a3)lw a5,
+      12(a3)andi a5,
+      a5,
+      16 bne a5,
+      zero,
+      .L47 lhu a5,
+      0(a6)bne a5,
+      a2,
+      .L31 sw t5,
+      12(a3).L21 : addi a6,
+      a6,
+      2 addi a7,
+      a7,
+      2 addi t1,
+      t1,
+      2 bgtu t3,
+      a6,
+      .L28.L29 : li a0,
+      0 ret.L32 : bgeu a7,
+      a1,
+      .L21 bltu a7,
+      a0,
+      .L21 mv a2,
+      a5 j.L19.L46 : lw a5,
+      16(a3)li a0,
+      -12 andi a5,
+      a5,
+      -2 sw a5,
+      16(a3)ret.L47 : li a5,
+      48 sw a5,
+      12(a3).L23 : li a0,
+      -4 ret.L31 : li a0,
+      -6 ret.size CH32FlashWriteHotLoopFlash,
+      .- CH32FlashWriteHotLoopFlash
 
-    .global CH32FlashWriteHotLoopFlashEnd
-    .type CH32FlashWriteHotLoopFlashEnd, @function
-CH32FlashWriteHotLoopFlashEnd:
-    ret
-    .size CH32FlashWriteHotLoopFlashEnd, .-CH32FlashWriteHotLoopFlashEnd
+              .global CH32FlashWriteHotLoopFlashEnd.type CH32FlashWriteHotLoopFlashEnd,
+      @function CH32FlashWriteHotLoopFlashEnd : ret.size CH32FlashWriteHotLoopFlashEnd,
+      .- CH32FlashWriteHotLoopFlashEnd
 
-    .global CH32FlashWritePageFlash
-    .type CH32FlashWritePageFlash, @function
-CH32FlashWritePageFlash:
-    bgeu    a0,a1,.L50
-    addi    t3,a2,256
-    li      a7,1073881088
-    li      t4,65536
-.L63:
-    lw      a5,16(a7)
-    li      a4,999424
-    addi    a4,a4,577
-    or      a5,a5,t4
-    sw      a5,16(a7)
-    j       .L51
-.L53:
-    beq     a4,zero,.L74
-.L51:
-    lw      a5,12(a7)
-    addi    a4,a4,-1
-    andi    a5,a5,1
-    bne     a5,zero,.L53
-    li      a4,999424
-    addi    a4,a4,577
-    li      a3,1073881088
-    j       .L54
-.L56:
-    beq     a4,zero,.L73
-.L54:
-    lw      a5,12(a3)
-    addi    a4,a4,-1
-    andi    a5,a5,2
-    bne     a5,zero,.L56
-    mv      a6,a2
-    sub     t6,a0,a2
-    li      a3,1073881088
-.L59:
-    lbu     a5,1(a6)
-    lbu     t1,2(a6)
-    lbu     t5,0(a6)
-    lbu     a4,3(a6)
-    slli    t1,t1,16
-    slli    a5,a5,8
-    or      a5,a5,t1
-    slli    a4,a4,24
-    or      a5,a5,t5
-    or      a5,a5,a4
-    add     t1,t6,a6
-    li      a4,999424
-    sw      a5,0(t1)
-    addi    a4,a4,577
-    j       .L57
-.L58:
-    beq     a4,zero,.L73
-.L57:
-    lw      a5,12(a3)
-    addi    a4,a4,-1
-    andi    a5,a5,2
-    bne     a5,zero,.L58
-    addi    a6,a6,4
-    bne     t3,a6,.L59
-    lw      a5,16(a3)
-    li      a6,2097152
-    li      a4,999424
-    or      a5,a5,a6
-    sw      a5,16(a3)
-    addi    a4,a4,577
-    li      a3,1073881088
-    j       .L60
-.L61:
-    beq     a4,zero,.L73
-.L60:
-    lw      a5,12(a3)
-    addi    a4,a4,-1
-    andi    a5,a5,1
-    bne     a5,zero,.L61
-    lw      a5,16(a3)
-    li      a4,-65536
-    addi    a4,a4,-1
-    and     a5,a5,a4
-    sw      a5,16(a3)
-    lw      a5,12(a3)
-    andi    a5,a5,16
-    bne     a5,zero,.L75
-    mv      a4,a2
-    j       .L62
-.L77:
-    beq     a4,t3,.L76
-.L62:
-    lbu     a5,1(a4)
-    lbu     a6,0(a4)
-    add     a3,a4,t6
-    slli    a5,a5,8
-    or      a5,a5,a6
-    lhu     a3,0(a3)
-    slli    a5,a5,16
-    srli    a5,a5,16
-    addi    a4,a4,2
-    beq     a5,a3,.L77
-    li      a0,-6
-    ret
-.L73:
-    lw      a5,16(a3)
-    li      a4,-65536
-    addi    a4,a4,-1
-    and     a5,a5,a4
-    sw      a5,16(a3)
-    li      a0,-12
-    ret
-.L74:
-    lw      a5,16(a7)
-    li      a4,-65536
-    addi    a4,a4,-1
-    and     a5,a5,a4
-    sw      a5,16(a7)
-    li      a0,-12
-    ret
-.L76:
-    li      a5,1073881088
-    li      a4,32
-    addi    a0,a0,256
-    sw      a4,12(a5)
-    addi    t3,t3,256
-    addi    a2,a2,256
-    bgtu    a1,a0,.L63
-.L50:
-    li      a0,0
-    ret
-.L75:
-    li      a5,48
-    sw      a5,12(a3)
-    li      a0,-4
-    ret
-    .size CH32FlashWritePageFlash, .-CH32FlashWritePageFlash
+              .global CH32FlashWritePageFlash.type CH32FlashWritePageFlash,
+      @function CH32FlashWritePageFlash
+    : bgeu a0,
+      a1,
+      .L50 addi t3,
+      a2,
+      256 li a7,
+      1073881088 li t4,
+      65536 .L63 : lw a5,
+      16(a7)li a4,
+      999424 addi a4,
+      a4,
+      577 or a5,
+      a5,
+      t4 sw a5,
+      16(a7)j.L51.L53 : beq a4,
+      zero,
+      .L74.L51 : lw a5,
+      12(a7)addi a4,
+      a4,
+      -1 andi a5,
+      a5,
+      1 bne a5,
+      zero,
+      .L53 li a4,
+      999424 addi a4,
+      a4,
+      577 li a3,
+      1073881088 j.L54.L56 : beq a4,
+      zero,
+      .L73.L54 : lw a5,
+      12(a3)addi a4,
+      a4,
+      -1 andi a5,
+      a5,
+      2 bne a5,
+      zero,
+      .L56 mv a6,
+      a2 sub t6,
+      a0,
+      a2 li a3,
+      1073881088 .L59 : lbu a5,
+      1(a6)lbu t1,
+      2(a6)lbu t5,
+      0(a6)lbu a4,
+      3(a6)slli t1,
+      t1,
+      16 slli a5,
+      a5,
+      8 or a5,
+      a5,
+      t1 slli a4,
+      a4,
+      24 or a5,
+      a5,
+      t5 or a5,
+      a5,
+      a4 add t1,
+      t6,
+      a6 li a4,
+      999424 sw a5,
+      0(t1)addi a4,
+      a4,
+      577 j.L57.L58 : beq a4,
+      zero,
+      .L73.L57 : lw a5,
+      12(a3)addi a4,
+      a4,
+      -1 andi a5,
+      a5,
+      2 bne a5,
+      zero,
+      .L58 addi a6,
+      a6,
+      4 bne t3,
+      a6,
+      .L59 lw a5,
+      16(a3)li a6,
+      2097152 li a4,
+      999424 or a5,
+      a5,
+      a6 sw a5,
+      16(a3)addi a4,
+      a4,
+      577 li a3,
+      1073881088 j.L60.L61 : beq a4,
+      zero,
+      .L73.L60 : lw a5,
+      12(a3)addi a4,
+      a4,
+      -1 andi a5,
+      a5,
+      1 bne a5,
+      zero,
+      .L61 lw a5,
+      16(a3)li a4,
+      -65536 addi a4,
+      a4,
+      -1 and a5,
+      a5,
+      a4 sw a5,
+      16(a3)lw a5,
+      12(a3)andi a5,
+      a5,
+      16 bne a5,
+      zero,
+      .L75 mv a4,
+      a2 j.L62.L77 : beq a4,
+      t3,
+      .L76.L62 : lbu a5,
+      1(a4)lbu a6,
+      0(a4)add a3,
+      a4,
+      t6 slli a5,
+      a5,
+      8 or a5,
+      a5,
+      a6 lhu a3,
+      0(a3)slli a5,
+      a5,
+      16 srli a5,
+      a5,
+      16 addi a4,
+      a4,
+      2 beq a5,
+      a3,
+      .L77 li a0,
+      -6 ret.L73 : lw a5,
+      16(a3)li a4,
+      -65536 addi a4,
+      a4,
+      -1 and a5,
+      a5,
+      a4 sw a5,
+      16(a3)li a0,
+      -12 ret.L74 : lw a5,
+      16(a7)li a4,
+      -65536 addi a4,
+      a4,
+      -1 and a5,
+      a5,
+      a4 sw a5,
+      16(a7)li a0,
+      -12 ret.L76 : li a5,
+      1073881088 li a4,
+      32 addi a0,
+      a0,
+      256 sw a4,
+      12(a5)addi t3,
+      t3,
+      256 addi a2,
+      a2,
+      256 bgtu a1,
+      a0,
+      .L63.L50 : li a0,
+      0 ret.L75 : li a5,
+      48 sw a5,
+      12(a3)li a0,
+      -4 ret.size CH32FlashWritePageFlash,
+      .- CH32FlashWritePageFlash
 
-    .global CH32FlashWritePageFlashEnd
-    .type CH32FlashWritePageFlashEnd, @function
-CH32FlashWritePageFlashEnd:
-    ret
-    .size CH32FlashWritePageFlashEnd, .-CH32FlashWritePageFlashEnd
+              .global CH32FlashWritePageFlashEnd.type CH32FlashWritePageFlashEnd,
+      @function CH32FlashWritePageFlashEnd : ret.size CH32FlashWritePageFlashEnd,
+      .- CH32FlashWritePageFlashEnd

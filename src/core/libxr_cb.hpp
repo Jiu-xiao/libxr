@@ -117,8 +117,7 @@ class Callback
    *
    * @param other 另一个 Callback 实例 / Another Callback instance
    */
-  Callback(Callback&& other) noexcept
-      : cb_block_(std::exchange(other.cb_block_, nullptr))
+  Callback(Callback&& other) noexcept : cb_block_(std::exchange(other.cb_block_, nullptr))
   {
   }
 
@@ -164,12 +163,10 @@ class Callback
    * @param cb_block 回调块对象指针 / Pointer to the callback block
    * @param cb_fun 回调执行函数指针 / Callback invocation function pointer
    */
-  explicit Callback(CallbackBlockHeader<Args...>* cb_block)
-      : cb_block_(cb_block)
-  {
-  }
+  explicit Callback(CallbackBlockHeader<Args...>* cb_block) : cb_block_(cb_block) {}
 
-  CallbackBlockHeader<Args...>* cb_block_ = nullptr;  ///< 回调块指针 / Pointer to the callback block
+  CallbackBlockHeader<Args...>* cb_block_ =
+      nullptr;  ///< 回调块指针 / Pointer to the callback block
 };
 
 template <class CallbackT>

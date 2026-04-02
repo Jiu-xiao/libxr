@@ -23,10 +23,8 @@ namespace LibXR::USB
  * @tparam SwdPort SWD link type
  */
 template <typename SwdPort, uint16_t DefaultDapPacketSize = 512u,
-          uint8_t AdvertisedPacketCount = 8u,
-          uint16_t MaxDapPacketSize = 1024u,
-          uint16_t QueuedRequestBufferSize = 2048u,
-          uint16_t QueuedCommandCountMax = 255u>
+          uint8_t AdvertisedPacketCount = 8u, uint16_t MaxDapPacketSize = 1024u,
+          uint16_t QueuedRequestBufferSize = 2048u, uint16_t QueuedCommandCountMax = 255u>
 class DapLinkV2Class : public DeviceClass
 {
  public:
@@ -662,7 +660,8 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 裁剪响应长度DAP 包长与缓冲容/ Clip response length by DAP packet and buffer cap
+   * @brief 裁剪响应长度DAP 包长与缓冲容/ Clip response length by DAP packet and buffer
+   * cap
    */
   uint16_t ClipResponseLength(uint16_t len, uint16_t cap) const
   {
@@ -942,9 +941,9 @@ class DapLinkV2Class : public DeviceClass
       }
 
       uint16_t cmd_len = 0u;
-      if (!ParseQueuedCommandLength(&queued_request_buffer_[req_off],
-                                    static_cast<uint16_t>(queued_request_length_ - req_off),
-                                    cmd_len) ||
+      if (!ParseQueuedCommandLength(
+              &queued_request_buffer_[req_off],
+              static_cast<uint16_t>(queued_request_length_ - req_off), cmd_len) ||
           cmd_len == 0u)
       {
         return false;
@@ -1763,9 +1762,8 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  ErrorCode HandleSWDConfigure(bool /*in_isr*/, const uint8_t* req,
-                               uint16_t req_len, uint8_t* resp, uint16_t resp_cap,
-                               uint16_t& out_len)
+  ErrorCode HandleSWDConfigure(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
+                               uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
     if (resp_cap < 2u)
     {
@@ -1895,8 +1893,7 @@ class DapLinkV2Class : public DeviceClass
    * @brief Queue one packed command batch for later EXECUTE_COMMANDS
    */
   ErrorCode HandleQueueCommands(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
-                                uint8_t* resp, uint16_t resp_cap,
-                                uint16_t& out_len)
+                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
     if (!req || req_len < 2u)
     {
@@ -1909,8 +1906,8 @@ class DapLinkV2Class : public DeviceClass
     if (NUM == 0u)
     {
       return BuildCmdStatusResponse(
-          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_OK, resp, resp_cap,
-          out_len);
+          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_OK, resp,
+          resp_cap, out_len);
     }
 
     uint16_t req_off = 2u;
@@ -1942,7 +1939,8 @@ class DapLinkV2Class : public DeviceClass
           resp_cap, out_len);
     }
 
-    if (static_cast<uint32_t>(queued_request_length_) + static_cast<uint32_t>(req_len - 2u) >
+    if (static_cast<uint32_t>(queued_request_length_) +
+                static_cast<uint32_t>(req_len - 2u) >
             static_cast<uint32_t>(QUEUED_REQ_BUFFER_SIZE) ||
         static_cast<uint32_t>(queued_command_count_) + static_cast<uint32_t>(NUM) >
             static_cast<uint32_t>(QUEUED_CMD_COUNT_MAX))
@@ -1952,12 +1950,15 @@ class DapLinkV2Class : public DeviceClass
           resp_cap, out_len);
     }
 
-    Memory::FastCopy(&queued_request_buffer_[queued_request_length_], &req[2], req_len - 2u);
-    queued_request_length_ = static_cast<uint16_t>(queued_request_length_ + (req_len - 2u));
+    Memory::FastCopy(&queued_request_buffer_[queued_request_length_], &req[2],
+                     req_len - 2u);
+    queued_request_length_ =
+        static_cast<uint16_t>(queued_request_length_ + (req_len - 2u));
     queued_command_count_ = static_cast<uint16_t>(queued_command_count_ + NUM);
 
-    return BuildCmdStatusResponse(ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS),
-                                  DAP_OK, resp, resp_cap, out_len);
+    return BuildCmdStatusResponse(
+        ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_OK, resp, resp_cap,
+        out_len);
   }
 
   /**
@@ -1993,8 +1994,9 @@ class DapLinkV2Class : public DeviceClass
 
   static inline uint16_t LoadU16Le(const uint8_t* p)
   {
-    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) |
-                                 static_cast<uint16_t>(static_cast<uint16_t>(p[1]) << 8u));
+    return static_cast<uint16_t>(
+        static_cast<uint16_t>(p[0]) |
+        static_cast<uint16_t>(static_cast<uint16_t>(p[1]) << 8u));
   }
 
   static inline void StoreU16Le(uint8_t* p, uint16_t v)
@@ -2005,10 +2007,9 @@ class DapLinkV2Class : public DeviceClass
 
   static inline uint32_t LoadU32Le(const uint8_t* p)
   {
-    return static_cast<uint32_t>(static_cast<uint32_t>(p[0]) |
-                                 (static_cast<uint32_t>(p[1]) << 8u) |
-                                 (static_cast<uint32_t>(p[2]) << 16u) |
-                                 (static_cast<uint32_t>(p[3]) << 24u));
+    return static_cast<uint32_t>(
+        static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8u) |
+        (static_cast<uint32_t>(p[2]) << 16u) | (static_cast<uint32_t>(p[3]) << 24u));
   }
 
   static inline void StoreU32Le(uint8_t* p, uint32_t v)
@@ -2038,7 +2039,8 @@ class DapLinkV2Class : public DeviceClass
       const auto POL = swd_.GetTransferPolicy();
       if (POL.clear_sticky_on_fault)
       {
-        LibXR::Debug::SwdProtocol::Ack abort_ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+        LibXR::Debug::SwdProtocol::Ack abort_ack =
+            LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
         (void)swd_.WriteAbort(LibXR::Debug::SwdProtocol::DP_ABORT_STKCMPCLR |
                                   LibXR::Debug::SwdProtocol::DP_ABORT_STKERRCLR |
                                   LibXR::Debug::SwdProtocol::DP_ABORT_WDERRCLR |
@@ -2050,8 +2052,7 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  ErrorCode DpReadRdbuffFast(uint32_t& val,
-                             LibXR::Debug::SwdProtocol::Ack& ack_out)
+  ErrorCode DpReadRdbuffFast(uint32_t& val, LibXR::Debug::SwdProtocol::Ack& ack_out)
   {
     LibXR::Debug::SwdProtocol::Response swd_resp = {};
     const auto req = LibXR::Debug::SwdProtocol::make_dp_read_req(
@@ -2669,7 +2670,8 @@ class DapLinkV2Class : public DeviceClass
         resp[3] = xresp;
         out_len = resp_off;
         return ErrorCode::OK;
-      }      if (AP)
+      }
+      if (AP)
       {
         auto swd_req = LibXR::Debug::SwdProtocol::make_ap_write_req(ADDR2B, 0u);
         LibXR::Debug::SwdProtocol::Response swd_resp = {};
@@ -2763,7 +2765,7 @@ class DapLinkV2Class : public DeviceClass
       return ErrorCode::OK;
     }
 
-        // AP read: posted-read pipeline
+    // AP read: posted-read pipeline
     {
       const uint32_t RESP_NEED =
           static_cast<uint32_t>(resp_off) + (static_cast<uint32_t>(count) * 4u);
@@ -2798,8 +2800,8 @@ class DapLinkV2Class : public DeviceClass
         ec = TransferTxnFast(ap_read_req, ap_read_resp);
         const uint8_t CUR = MapAckToDapResp(ap_read_resp.ack);
 
-        if (ap_read_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK || ec != ErrorCode::OK ||
-            !ap_read_resp.parity_ok)
+        if (ap_read_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK ||
+            ec != ErrorCode::OK || !ap_read_resp.parity_ok)
         {
           // Current AP read failed; try to flush previous pending data via RDBUFF.
           if (resp_off + 4u <= resp_cap)
@@ -3006,13 +3008,11 @@ class DapLinkV2Class : public DeviceClass
       DapLinkV2Def::DAP_SWJ_SWDIO_TMS |
       DapLinkV2Def::DAP_SWJ_NRESET);  ///< Shadow SWJ pin levels / Shadow SWJ pin levels
 
-  bool last_nreset_level_high_ =
-      true;  ///< Last nRESET level (high = release)
+  bool last_nreset_level_high_ = true;  ///< Last nRESET level (high = release)
 
   LibXR::USB::DapLinkV2Def::State dap_state_{};  ///< DAP state
-  InfoStrings info_{
-      "XRobot", "DAPLinkV2", "00000001", "2.0.0", "XRUSB",
-      "XRDAP",  "XRobot",    "DAP_DEMO", "0.1.0"};  ///< Info strings
+  InfoStrings info_{"XRobot", "DAPLinkV2", "00000001", "2.0.0", "XRUSB",
+                    "XRDAP",  "XRobot",    "DAP_DEMO", "0.1.0"};  ///< Info strings
 
   uint32_t swj_clock_hz_ = 1000000u;  ///< SWJ clock (Hz)
 

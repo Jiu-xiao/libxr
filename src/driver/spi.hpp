@@ -497,7 +497,6 @@ class SPI
   Configuration config_;
   RawData rx_buffer_, tx_buffer_;
   DoubleBuffer double_buffer_rx_, double_buffer_tx_;
-
 };
 
 }  // namespace LibXR

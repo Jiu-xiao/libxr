@@ -27,9 +27,10 @@ class UAC1MicrophoneQ : public DeviceClass
   // Default interface strings for the AC / AS pair.
   // AC / AS 接口对的默认字符串。
   static constexpr const char* DEFAULT_CONTROL_INTERFACE_STRING = "XRUSB UAC1 Control";
-  static constexpr const char* DEFAULT_STREAMING_INTERFACE_STRING = "XRUSB UAC1 Streaming";
+  static constexpr const char* DEFAULT_STREAMING_INTERFACE_STRING =
+      "XRUSB UAC1 Streaming";
 
-private:
+ private:
   /// 每通道每采样的子帧字节数 / Subframe size (bytes per channel per sample)
   static const constexpr uint8_t K_SUBFRAME_SIZE = (BITS_PER_SAMPLE <= 8)    ? 1
                                                    : (BITS_PER_SAMPLE <= 16) ? 2

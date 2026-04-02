@@ -173,17 +173,20 @@ class DeviceComposition
   uint8_t bm_attributes_ = CFG_BUS_POWERED;  ///< 配置属性 / bmAttributes
   uint8_t b_max_power_ = 50;  ///< 最大电流（2mA 单位）/ Max power (2mA units)
 
-  const bool composite_ = false;   ///< 是否为复合设备 / Whether composite device
-  const size_t config_num_ = 0;    ///< 配置数量 / Configuration count
-  ConfigItems* items_ = nullptr;  ///< 配置项集合 / Configuration item set
+  const bool composite_ = false;     ///< 是否为复合设备 / Whether composite device
+  const size_t config_num_ = 0;      ///< 配置数量 / Configuration count
+  ConfigItems* items_ = nullptr;     ///< 配置项集合 / Configuration item set
   DeviceClass** classes_ = nullptr;  ///< 唯一 class 表 / Unique class table
   size_t class_count_ = 0;           ///< 唯一 class 数量 / Unique class count
 
   DescriptorStrings strings_;  ///< 字符串描述符管理 / String descriptor manager
-  const char** interface_strings_ = nullptr;  ///< 接口字符串源表 / Interface string source table
-  size_t interface_string_count_ = 0;  ///< 接口字符串总数量 / Total interface string count
-  RawData interface_string_buffer_{nullptr, 0};  ///< 临时字符串描述符缓冲区 / Temp interface string descriptor buffer
-  BosManager bos_;             ///< BOS 聚合管理 / BOS aggregation manager
+  const char** interface_strings_ =
+      nullptr;  ///< 接口字符串源表 / Interface string source table
+  size_t interface_string_count_ =
+      0;  ///< 接口字符串总数量 / Total interface string count
+  RawData interface_string_buffer_{
+      nullptr, 0};  ///< 临时字符串描述符缓冲区 / Temp interface string descriptor buffer
+  BosManager bos_;  ///< BOS 聚合管理 / BOS aggregation manager
   ConfigDescriptor config_desc_;  ///< 配置描述符构造器 / Configuration descriptor builder
 };
 

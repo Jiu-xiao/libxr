@@ -17,10 +17,7 @@ struct CallbackProbe
   int depth = 0;
   int max_depth = 0;
 
-  CallbackProbe()
-      : cb(LibXR::Callback<int>::Create(OnCallback, this))
-  {
-  }
+  CallbackProbe() : cb(LibXR::Callback<int>::Create(OnCallback, this)) {}
 
   static void OnCallback(bool in_isr, CallbackProbe* self, int value)
   {
@@ -64,10 +61,7 @@ struct DirectCallbackProbe
   int depth = 0;
   int max_depth = 0;
 
-  DirectCallbackProbe()
-      : cb(LibXR::Callback<int>::Create(OnCallback, this))
-  {
-  }
+  DirectCallbackProbe() : cb(LibXR::Callback<int>::Create(OnCallback, this)) {}
 
   static void OnCallback(bool in_isr, DirectCallbackProbe* self, int value)
   {

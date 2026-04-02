@@ -218,10 +218,9 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     {
       block_wait_.Start(*op.data.sem_info.sem);
     }
-    const HAL_StatusTypeDef st =
-        HAL_I2C_Master_Receive_DMA(i2c_handle_, dev_addr,
-                                   reinterpret_cast<uint8_t*>(dma_buff_.addr_),
-                                   read_data.size_);
+    const HAL_StatusTypeDef st = HAL_I2C_Master_Receive_DMA(
+        i2c_handle_, dev_addr, reinterpret_cast<uint8_t*>(dma_buff_.addr_),
+        read_data.size_);
     if (st != HAL_OK)
     {
       if (op.type == ReadOperation::OperationType::BLOCK)
@@ -285,10 +284,9 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(dma_buff_.addr_),
                             write_data.size_);
 #endif
-    const HAL_StatusTypeDef st =
-        HAL_I2C_Master_Transmit_DMA(i2c_handle_, dev_addr,
-                                    reinterpret_cast<uint8_t*>(dma_buff_.addr_),
-                                    write_data.size_);
+    const HAL_StatusTypeDef st = HAL_I2C_Master_Transmit_DMA(
+        i2c_handle_, dev_addr, reinterpret_cast<uint8_t*>(dma_buff_.addr_),
+        write_data.size_);
     if (st != HAL_OK)
     {
       if (op.type == WriteOperation::OperationType::BLOCK)
@@ -347,12 +345,11 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     {
       block_wait_.Start(*op.data.sem_info.sem);
     }
-    const HAL_StatusTypeDef st =
-        HAL_I2C_Mem_Read_DMA(i2c_handle_, dev_addr, mem_addr,
-                             mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
-                                                                    : I2C_MEMADD_SIZE_16BIT,
-                             reinterpret_cast<uint8_t*>(dma_buff_.addr_),
-                             read_data.size_);
+    const HAL_StatusTypeDef st = HAL_I2C_Mem_Read_DMA(
+        i2c_handle_, dev_addr, mem_addr,
+        mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
+                                               : I2C_MEMADD_SIZE_16BIT,
+        reinterpret_cast<uint8_t*>(dma_buff_.addr_), read_data.size_);
     if (st != HAL_OK)
     {
       if (op.type == ReadOperation::OperationType::BLOCK)
@@ -421,12 +418,11 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(dma_buff_.addr_),
                             write_data.size_);
 #endif
-    const HAL_StatusTypeDef st =
-        HAL_I2C_Mem_Write_DMA(i2c_handle_, dev_addr, mem_addr,
-                              mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
-                                                                     : I2C_MEMADD_SIZE_16BIT,
-                              reinterpret_cast<uint8_t*>(dma_buff_.addr_),
-                              write_data.size_);
+    const HAL_StatusTypeDef st = HAL_I2C_Mem_Write_DMA(
+        i2c_handle_, dev_addr, mem_addr,
+        mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
+                                               : I2C_MEMADD_SIZE_16BIT,
+        reinterpret_cast<uint8_t*>(dma_buff_.addr_), write_data.size_);
     if (st != HAL_OK)
     {
       if (op.type == WriteOperation::OperationType::BLOCK)
@@ -496,7 +492,8 @@ extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef* hi2c)
 #endif
     if (ec == ErrorCode::OK)
     {
-      Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
+      Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_,
+                       i2c->read_buff_.size_);
     }
     if (i2c->read_op_.type == ReadOperation::OperationType::BLOCK)
     {
@@ -554,7 +551,8 @@ extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
 #endif
     if (ec == ErrorCode::OK)
     {
-      Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
+      Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_,
+                       i2c->read_buff_.size_);
     }
     if (i2c->read_op_.type == ReadOperation::OperationType::BLOCK)
     {

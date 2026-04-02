@@ -103,7 +103,8 @@ class Event
     uint32_t event;  ///< 与该回调关联的事件 ID。 Event ID associated with this callback.
     Callback
         cb;  ///< 关联该事件的回调函数。 Callback function associated with this event.
-    LibXR::CallbackGuard<Callback> guard;  ///< 该注册点的防重入状态 / Reentry guard for this registration site.
+    LibXR::CallbackGuard<Callback>
+        guard;  ///< 该注册点的防重入状态 / Reentry guard for this registration site.
   };
 
   RBTree<uint32_t> rbt_;  ///< 用于管理已注册事件的红黑树。 Red-black tree for managing

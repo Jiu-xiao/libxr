@@ -231,8 +231,9 @@ class WebUsbBosCapability final : public LibXR::USB::BosCapability
 
   uint8_t vendor_code_ = WEBUSB_VENDOR_CODE_DEFAULT;
   bool enabled_ = false;
-  uint8_t url_descriptor_storage_[255] = {};  ///< URL 描述符静态缓冲 / Static URL descriptor buffer
-  RawData url_descriptor_{nullptr, 0};        ///< 已编码 URL 描述符 / Encoded URL descriptor
+  uint8_t url_descriptor_storage_[255] =
+      {};  ///< URL 描述符静态缓冲 / Static URL descriptor buffer
+  RawData url_descriptor_{nullptr, 0};  ///< 已编码 URL 描述符 / Encoded URL descriptor
   WebUsbPlatformCapability platform_cap_{};
 };
 

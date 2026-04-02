@@ -407,7 +407,8 @@ class Topic
   typedef struct QueueBlock : public SuberBlock
   {
     void* queue;  ///< 指向订阅队列的指针 Pointer to the subscribed queue
-    void (*fun)(RawData&, void*);  ///< 处理数据的回调函数 Callback function to handle data
+    void (*fun)(RawData&,
+                void*);  ///< 处理数据的回调函数 Callback function to handle data
   } QueueBlock;
 
   class QueuedSubscriber

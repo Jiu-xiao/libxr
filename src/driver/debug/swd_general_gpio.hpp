@@ -385,11 +385,10 @@ class SwdGeneralGPIO final : public Swd
   {
     if (swdio_mode_ != SwdioMode::SAMPLE_IN)
     {
-      const ErrorCode EC =
-          swdio_.SetConfig({SwdioGpioType::Direction::INPUT,
-                            (kIoDriveMode == SwdIoDriveMode::OPEN_DRAIN)
-                                ? SwdioGpioType::Pull::UP
-                                : SwdioGpioType::Pull::NONE});
+      const ErrorCode EC = swdio_.SetConfig(
+          {SwdioGpioType::Direction::INPUT, (kIoDriveMode == SwdIoDriveMode::OPEN_DRAIN)
+                                                ? SwdioGpioType::Pull::UP
+                                                : SwdioGpioType::Pull::NONE});
       if (EC != ErrorCode::OK)
       {
         return EC;
@@ -399,10 +398,6 @@ class SwdGeneralGPIO final : public Swd
     swdio_mode_ = SwdioMode::SAMPLE_IN;
     return ErrorCode::OK;
   }
-
-
-
-
 
   inline void DelayHalf() { BusyLoop(half_period_loops_); }
 

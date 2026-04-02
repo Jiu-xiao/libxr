@@ -25,7 +25,8 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
       const char* interface_string = DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
       uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
-      : DfuInterfaceClassBase(interface_string, webusb_landing_page_url, webusb_vendor_code),
+      : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
+                              webusb_vendor_code),
         jump_to_bootloader_(jump_to_bootloader),
         jump_ctx_(jump_ctx),
         default_detach_timeout_ms_(detach_timeout_ms)
@@ -211,8 +212,8 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
         return ErrorCode::OK;
 
       case DFURequest::GETSTATUS:
-        // GETSTATUS is the only place where the host observes the remaining detach timeout.
-        // GETSTATUS 是主机读取剩余 detach 超时的唯一入口。
+        // GETSTATUS is the only place where the host observes the remaining detach
+        // timeout. GETSTATUS 是主机读取剩余 detach 超时的唯一入口。
         status_response_.bStatus = static_cast<uint8_t>(DFUStatusCode::OK);
         status_response_.bState = static_cast<uint8_t>(state_);
         if (detach_pending_)
@@ -244,16 +245,17 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
   }
 
  private:
-  DescriptorBlock desc_block_ = {};      ///< 描述符缓存 / Descriptor cache
-  StatusResponse status_response_ = {};  ///< GETSTATUS 缓冲区 / GETSTATUS buffer
+  DescriptorBlock desc_block_ = {};            ///< 描述符缓存 / Descriptor cache
+  StatusResponse status_response_ = {};        ///< GETSTATUS 缓冲区 / GETSTATUS buffer
   JumpCallback jump_to_bootloader_ = nullptr;  ///< 跳 boot 回调 / Boot jump callback
-  void* jump_ctx_ = nullptr;                    ///< 跳转上下文 / Jump callback context
-  uint8_t state_response_ = 0u;                ///< GETSTATE 缓冲字节 / GETSTATE byte buffer
-  bool detach_pending_ = false;                ///< 是否等待 detach 超时 / Waiting for detach timeout
-  uint16_t default_detach_timeout_ms_ = 50u;   ///< 默认 detach 超时 / Default detach timeout
-  uint16_t detach_timeout_ms_ = 50u;           ///< 当前 detach 超时 / Active detach timeout
-  uint32_t detach_deadline_ms_ = 0u;           ///< detach 截止时刻 / Detach deadline tick
-  DFUState state_ = DFUState::APP_IDLE;        ///< Runtime DFU 状态 / Runtime DFU state
+  void* jump_ctx_ = nullptr;                   ///< 跳转上下文 / Jump callback context
+  uint8_t state_response_ = 0u;  ///< GETSTATE 缓冲字节 / GETSTATE byte buffer
+  bool detach_pending_ = false;  ///< 是否等待 detach 超时 / Waiting for detach timeout
+  uint16_t default_detach_timeout_ms_ =
+      50u;                               ///< 默认 detach 超时 / Default detach timeout
+  uint16_t detach_timeout_ms_ = 50u;     ///< 当前 detach 超时 / Active detach timeout
+  uint32_t detach_deadline_ms_ = 0u;     ///< detach 截止时刻 / Detach deadline tick
+  DFUState state_ = DFUState::APP_IDLE;  ///< Runtime DFU 状态 / Runtime DFU state
 };
 
 }  // namespace LibXR::USB
