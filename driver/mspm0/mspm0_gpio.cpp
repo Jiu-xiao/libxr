@@ -254,7 +254,7 @@ void MSPM0GPIO::OnInterruptDispatch(GPIO_Regs* port, int port_idx)
     auto* instance = instance_map_[port_idx][pin_idx];
     if (instance)
     {
-      instance->callback_.Run<true>();
+      instance->callback_.Run(true);
     }
   }
 }

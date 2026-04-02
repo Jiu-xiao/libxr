@@ -135,18 +135,6 @@ ErrorCode Complete(OperationType& op, bool in_isr, ErrorCode result)
   return result;
 }
 
-template <typename OperationType>
-ErrorCode WaitAsyncIfBlock(OperationType& op, bool in_isr)
-{
-  if (op.type != OperationType::OperationType::BLOCK)
-  {
-    return ErrorCode::OK;
-  }
-
-  ASSERT(!in_isr);
-  return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-}
-
 }  // namespace
 
 ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin, uint32_t clock_speed,
@@ -665,7 +653,14 @@ void ESP32I2C::FinishAsync(bool in_isr, ErrorCode ec)
   async_read_addr_sent_ = false;
 
   Release();
-  op.UpdateStatus(in_isr, ec);
+  if (op.type == ReadOperation::OperationType::BLOCK)
+  {
+    (void)block_wait_.TryPost(in_isr, ec);
+  }
+  else
+  {
+    op.UpdateStatus(in_isr, ec);
+  }
 }
 
 ErrorCode ESP32I2C::InstallInterrupt()
@@ -990,15 +985,28 @@ ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
   const size_t total_size = write_data.size_;
   if (ShouldUseInterruptAsync(total_size))
   {
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     const ErrorCode ans = StartAsyncTransaction(
         slave_addr, nullptr, 0U, static_cast<const uint8_t*>(write_data.addr_),
         write_data.size_, nullptr, 0U, op);
     if (ans != ErrorCode::OK)
     {
+      if (op.type == WriteOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       Release();
       return Complete(op, in_isr, ans);
     }
-    return WaitAsyncIfBlock(op, in_isr);
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return block_wait_.Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
   }
 
   const ErrorCode ans =
@@ -1035,15 +1043,28 @@ ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
   const size_t total_size = read_data.size_;
   if (ShouldUseInterruptAsync(total_size))
   {
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     const ErrorCode ans = StartAsyncTransaction(slave_addr, nullptr, 0U, nullptr, 0U,
                                                 static_cast<uint8_t*>(read_data.addr_),
                                                 read_data.size_, op);
     if (ans != ErrorCode::OK)
     {
+      if (op.type == ReadOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       Release();
       return Complete(op, in_isr, ans);
     }
-    return WaitAsyncIfBlock(op, in_isr);
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return block_wait_.Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
   }
 
   const ErrorCode ans = ExecuteTransaction(
@@ -1089,15 +1110,28 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   const size_t total_size = mem_len + write_data.size_;
   if (ShouldUseInterruptAsync(total_size))
   {
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     const ErrorCode ans = StartAsyncTransaction(
         slave_addr, mem_raw.data(), mem_len,
         static_cast<const uint8_t*>(write_data.addr_), write_data.size_, nullptr, 0U, op);
     if (ans != ErrorCode::OK)
     {
+      if (op.type == WriteOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       Release();
       return Complete(op, in_isr, ans);
     }
-    return WaitAsyncIfBlock(op, in_isr);
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return block_wait_.Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
   }
 
   std::array<uint8_t, kFifoLen> staging = {};
@@ -1169,14 +1203,27 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   const size_t total_size = mem_len + read_data.size_;
   if ((read_data.size_ > 0U) && ShouldUseInterruptAsync(total_size))
   {
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     const ErrorCode ans = StartAsyncTransaction(slave_addr, mem_raw.data(), mem_len,
                                                 nullptr, 0U, dst, read_data.size_, op);
     if (ans != ErrorCode::OK)
     {
+      if (op.type == ReadOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       Release();
       return Complete(op, in_isr, ans);
     }
-    return WaitAsyncIfBlock(op, in_isr);
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      ASSERT(!in_isr);
+      return block_wait_.Wait(op.data.sem_info.timeout);
+    }
+    return ErrorCode::OK;
   }
 
   size_t offset = 0U;

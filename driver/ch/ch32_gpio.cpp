@@ -159,7 +159,7 @@ void CH32GPIO::OnInterrupt()
 {
   if (!callback_.Empty())
   {
-    callback_.Run<true>();
+    callback_.Run(true);
   }
 }
 

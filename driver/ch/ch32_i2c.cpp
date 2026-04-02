@@ -454,11 +454,25 @@ void CH32I2C::AbortTransfer(ErrorCode ec)
 
   if (read_)
   {
-    read_op_.UpdateStatus(true, ec);
+    if (read_op_.type == ReadOperation::OperationType::BLOCK)
+    {
+      (void)block_wait_.TryPost(true, ec);
+    }
+    else
+    {
+      read_op_.UpdateStatus(true, ec);
+    }
   }
   else
   {
-    write_op_.UpdateStatus(true, ec);
+    if (write_op_.type == WriteOperation::OperationType::BLOCK)
+    {
+      (void)block_wait_.TryPost(true, ec);
+    }
+    else
+    {
+      write_op_.UpdateStatus(true, ec);
+    }
   }
 }
 
@@ -467,10 +481,9 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
 {
   if (write_data.size_ == 0)
   {
-    op.UpdateStatus(in_isr, ErrorCode::OK);
-    if (op.type == WriteOperation::OperationType::BLOCK)
+    if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -496,10 +509,9 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
                            write_data.size_);
     I2C_GenerateSTOP(instance_, ENABLE);
 
-    op.UpdateStatus(in_isr, ec);
-    if (op.type == WriteOperation::OperationType::BLOCK)
+    if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ec);
     }
     return ec;
   }
@@ -510,12 +522,16 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
   write_op_ = op;
   busy_ = true;
 
+  if (op.type == WriteOperation::OperationType::BLOCK)
+  {
+    block_wait_.Start(*op.data.sem_info.sem);
+  }
   StartTxDma(write_data.size_);
 
   op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }
@@ -525,10 +541,9 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
 {
   if (read_data.size_ == 0)
   {
-    op.UpdateStatus(in_isr, ErrorCode::OK);
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -551,10 +566,9 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
   if (read_data.size_ <= dma_enable_min_size_)
   {
     ec = PollingReadBytes(reinterpret_cast<uint8_t*>(read_data.addr_), read_data.size_);
-    op.UpdateStatus(in_isr, ec);
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ec);
     }
     return ec;
   }
@@ -564,12 +578,16 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
   read_buff_ = read_data;
   busy_ = true;
 
+  if (op.type == ReadOperation::OperationType::BLOCK)
+  {
+    block_wait_.Start(*op.data.sem_info.sem);
+  }
   StartRxDma(read_data.size_);
 
   op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
-    return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }
@@ -580,10 +598,9 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 {
   if (write_data.size_ == 0)
   {
-    op.UpdateStatus(in_isr, ErrorCode::OK);
-    if (op.type == WriteOperation::OperationType::BLOCK)
+    if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -606,10 +623,9 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   if (ec != ErrorCode::OK)
   {
     I2C_GenerateSTOP(instance_, ENABLE);
-    op.UpdateStatus(in_isr, ec);
-    if (op.type == WriteOperation::OperationType::BLOCK)
+    if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ec);
     }
     return ec;
   }
@@ -620,10 +636,9 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                            write_data.size_);
     I2C_GenerateSTOP(instance_, ENABLE);
 
-    op.UpdateStatus(in_isr, ec);
-    if (op.type == WriteOperation::OperationType::BLOCK)
+    if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ec);
     }
     return ec;
   }
@@ -633,12 +648,16 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   write_op_ = op;
   busy_ = true;
 
+  if (op.type == WriteOperation::OperationType::BLOCK)
+  {
+    block_wait_.Start(*op.data.sem_info.sem);
+  }
   StartTxDma(write_data.size_);
 
   op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }
@@ -648,10 +667,9 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
 {
   if (read_data.size_ == 0)
   {
-    op.UpdateStatus(in_isr, ErrorCode::OK);
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -675,10 +693,9 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   if (ec != ErrorCode::OK)
   {
     I2C_GenerateSTOP(instance_, ENABLE);
-    op.UpdateStatus(in_isr, ec);
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ec);
     }
     return ec;
   }
@@ -693,10 +710,9 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
     {
       I2C_GenerateSTOP(instance_, ENABLE);
       ec = ErrorCode::BUSY;
-      op.UpdateStatus(in_isr, ec);
-      if (op.type == ReadOperation::OperationType::BLOCK)
+      if (op.type != ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        op.UpdateStatus(in_isr, ec);
       }
       return ec;
     }
@@ -706,10 +722,9 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
     {
       I2C_GenerateSTOP(instance_, ENABLE);
       ec = ErrorCode::BUSY;
-      op.UpdateStatus(in_isr, ec);
-      if (op.type == ReadOperation::OperationType::BLOCK)
+      if (op.type != ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        op.UpdateStatus(in_isr, ec);
       }
       return ec;
     }
@@ -725,10 +740,9 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
     {
       I2C_GenerateSTOP(instance_, ENABLE);
       ec = ErrorCode::BUSY;
-      op.UpdateStatus(in_isr, ec);
-      if (op.type == ReadOperation::OperationType::BLOCK)
+      if (op.type != ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        op.UpdateStatus(in_isr, ec);
       }
       return ec;
     }
@@ -738,10 +752,9 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
     {
       I2C_GenerateSTOP(instance_, ENABLE);
       ec = ErrorCode::BUSY;
-      op.UpdateStatus(in_isr, ec);
-      if (op.type == ReadOperation::OperationType::BLOCK)
+      if (op.type != ReadOperation::OperationType::BLOCK)
       {
-        return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+        op.UpdateStatus(in_isr, ec);
       }
       return ec;
     }
@@ -752,10 +765,9 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   if (read_data.size_ <= dma_enable_min_size_)
   {
     ec = PollingReadBytes(reinterpret_cast<uint8_t*>(read_data.addr_), read_data.size_);
-    op.UpdateStatus(in_isr, ec);
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ec);
     }
     return ec;
   }
@@ -765,12 +777,16 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   read_buff_ = read_data;
   busy_ = true;
 
+  if (op.type == ReadOperation::OperationType::BLOCK)
+  {
+    block_wait_.Start(*op.data.sem_info.sem);
+  }
   StartRxDma(read_data.size_);
 
   op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
-    return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }
@@ -790,7 +806,14 @@ void CH32I2C::TxDmaIRQHandler()
   I2C_GenerateSTOP(instance_, ENABLE);
 
   busy_ = false;
-  write_op_.UpdateStatus(true, ErrorCode::OK);
+  if (write_op_.type == WriteOperation::OperationType::BLOCK)
+  {
+    (void)block_wait_.TryPost(true, ErrorCode::OK);
+  }
+  else
+  {
+    write_op_.UpdateStatus(true, ErrorCode::OK);
+  }
 }
 
 void CH32I2C::RxDmaIRQHandler()
@@ -818,7 +841,14 @@ void CH32I2C::RxDmaIRQHandler()
   I2C_NACKPositionConfig(instance_, I2C_NACKPosition_Current);
 
   busy_ = false;
-  read_op_.UpdateStatus(true, ErrorCode::OK);
+  if (read_op_.type == ReadOperation::OperationType::BLOCK)
+  {
+    (void)block_wait_.TryPost(true, ErrorCode::OK);
+  }
+  else
+  {
+    read_op_.UpdateStatus(true, ErrorCode::OK);
+  }
 }
 
 void CH32I2C::ErrorIRQHandler()

@@ -29,6 +29,7 @@ class Operation
 {
  public:
   using Callback = LibXR::Callback<Args>;
+  using CallbackGuard = LibXR::CallbackGuard<Callback>;
 
   /// Operation types.
   /// 操作类型。
@@ -101,6 +102,7 @@ class Operation
   {
     if (this != &op)
     {
+      callback_guard_ = {};
       type = op.type;
       switch (type)
       {
@@ -131,6 +133,7 @@ class Operation
   {
     if (this != &op)
     {
+      callback_guard_ = {};
       type = op.type;
       switch (type)
       {
@@ -187,7 +190,7 @@ class Operation
         // 驱动/核心完成一步异步动作后，软件回调可能在同一调用链里继续调度下一步
         // （例如 CDC<->UART 泵送链）。
         // 这里显式保留防重入语义。
-        data.callback->RunGuarded(in_isr, std::forward<Status>(status));
+        callback_guard_.Run(*data.callback, in_isr, std::forward<Status>(status));
         break;
       case OperationType::BLOCK:
         // BLOCK waits are signaled by semaphore only; the owning port keeps the
@@ -238,6 +241,8 @@ class Operation
     OperationPollingStatus* status;
     // TODO: state
   } data;
+
+  CallbackGuard callback_guard_{};
 
   /// Operation type.
   /// 操作类型。

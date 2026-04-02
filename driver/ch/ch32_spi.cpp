@@ -322,12 +322,16 @@ ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     PrepareTxBuffer(write_data, NEED);
 
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     StartDmaDuplex(NEED);
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -404,12 +408,15 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, boo
     rw_op_ = op;
     busy_ = true;
 
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     StartDmaDuplex(TOTAL);
-
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -471,12 +478,16 @@ ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& 
     rw_op_ = op;
     busy_ = true;
 
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     StartDmaDuplex(TOTAL);
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -559,7 +570,8 @@ void CH32SPI::RxDmaIRQHandler()
   DMA_Cmd(dma_rx_channel_, DISABLE);
 
   // 拷贝读数据（若有）
-  if (read_buff_.size_ > 0)
+  const bool has_user_read_copy = (read_buff_.size_ > 0);
+  if (has_user_read_copy)
   {
     RawData rx = GetRxBuffer();
     uint8_t* rxp = static_cast<uint8_t*>(rx.addr_);
@@ -577,7 +589,14 @@ void CH32SPI::RxDmaIRQHandler()
   // 双缓冲切换与状态更新
   SwitchBuffer();
   busy_ = false;
-  rw_op_.UpdateStatus(true, ErrorCode::OK);
+  if (rw_op_.type == OperationRW::OperationType::BLOCK)
+  {
+    (void)block_wait_.TryPost(true, ErrorCode::OK);
+  }
+  else
+  {
+    rw_op_.UpdateStatus(true, ErrorCode::OK);
+  }
 }
 
 void CH32SPI::TxDmaIRQHandler()
@@ -621,12 +640,16 @@ ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
     mem_read_ = false;
     busy_ = true;
 
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
     StartDmaDuplex(static_cast<uint32_t>(size));
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }

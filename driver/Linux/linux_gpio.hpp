@@ -236,7 +236,7 @@ class LinuxGPIO : public GPIO
       {
         for (int i = 0; i < read; ++i)
         {
-          callback_.Run<false>();
+          callback_.Run(false);
         }
       }
     }

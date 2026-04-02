@@ -8,6 +8,7 @@ namespace
 struct CallbackProbe
 {
   LibXR::Callback<int> cb;
+  LibXR::CallbackGuard<LibXR::Callback<int>> guard;
   bool runtime_in_isr = true;
   bool trigger_reentry = true;
   std::array<int, 4> seen = {};
@@ -40,11 +41,11 @@ struct CallbackProbe
       self->trigger_reentry = false;
       if (self->runtime_in_isr)
       {
-        self->cb.RunGuarded<true>(2);
+        self->guard.Run(self->cb, true, 2);
       }
       else
       {
-        self->cb.RunGuarded<false>(2);
+        self->guard.Run(self->cb, false, 2);
       }
     }
 
@@ -87,11 +88,11 @@ struct DirectCallbackProbe
       self->trigger_reentry = false;
       if (self->runtime_in_isr)
       {
-        self->cb.Run<true>(2);
+        self->cb.Run(true, 2);
       }
       else
       {
-        self->cb.Run<false>(2);
+        self->cb.Run(false, 2);
       }
     }
 
@@ -105,7 +106,7 @@ void test_cb()
   {
     CallbackProbe probe;
     probe.runtime_in_isr = true;
-    probe.cb.RunGuarded(probe.runtime_in_isr, 1);
+    probe.guard.Run(probe.cb, probe.runtime_in_isr, 1);
     ASSERT(probe.seen_count == 2);
     ASSERT(probe.seen[0] == 1);
     ASSERT(probe.seen[1] == 2);
@@ -117,7 +118,7 @@ void test_cb()
   {
     CallbackProbe probe;
     probe.runtime_in_isr = false;
-    probe.cb.RunGuarded(probe.runtime_in_isr, 1);
+    probe.guard.Run(probe.cb, probe.runtime_in_isr, 1);
     ASSERT(probe.seen_count == 2);
     ASSERT(probe.seen[0] == 1);
     ASSERT(probe.seen[1] == 2);
@@ -129,7 +130,7 @@ void test_cb()
   {
     CallbackProbe probe;
     probe.runtime_in_isr = true;
-    probe.cb.RunGuarded<true>(1);
+    probe.guard.Run(probe.cb, true, 1);
     ASSERT(probe.seen_count == 2);
     ASSERT(probe.seen[0] == 1);
     ASSERT(probe.seen[1] == 2);
@@ -141,7 +142,7 @@ void test_cb()
   {
     CallbackProbe probe;
     probe.runtime_in_isr = false;
-    probe.cb.RunGuarded<false>(1);
+    probe.guard.Run(probe.cb, false, 1);
     ASSERT(probe.seen_count == 2);
     ASSERT(probe.seen[0] == 1);
     ASSERT(probe.seen[1] == 2);
@@ -165,7 +166,7 @@ void test_cb()
   {
     DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
-    probe.cb.Run<true>(1);
+    probe.cb.Run(true, 1);
     ASSERT(probe.seen_count == 2);
     ASSERT(probe.seen[0] == 1);
     ASSERT(probe.seen[1] == 2);
@@ -177,7 +178,7 @@ void test_cb()
   {
     DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
-    probe.cb.Run<false>(1);
+    probe.cb.Run(false, 1);
     ASSERT(probe.seen_count == 2);
     ASSERT(probe.seen[0] == 1);
     ASSERT(probe.seen[1] == 2);

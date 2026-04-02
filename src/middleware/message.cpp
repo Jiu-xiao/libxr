@@ -263,13 +263,13 @@ void Topic::Publish(void* addr, uint32_t size)
       case SuberType::QUEUE:
       {
         auto queue_block = reinterpret_cast<QueueBlock*>(&block);
-        queue_block->fun(data, queue_block->queue, false);
+        queue_block->fun(data, queue_block->queue);
         break;
       }
       case SuberType::CALLBACK:
       {
         auto cb_block = reinterpret_cast<CallbackBlock*>(&block);
-        cb_block->cb.RunGuarded<false>(data);
+        cb_block->cb.Run(false, data);
         break;
       }
     }
@@ -330,13 +330,13 @@ void Topic::PublishFromCallback(void* addr, uint32_t size, bool in_isr)
       case SuberType::QUEUE:
       {
         auto queue_block = reinterpret_cast<QueueBlock*>(&block);
-        queue_block->fun(data, queue_block->queue, false);
+        queue_block->fun(data, queue_block->queue);
         break;
       }
       case SuberType::CALLBACK:
       {
         auto cb_block = reinterpret_cast<CallbackBlock*>(&block);
-        cb_block->cb.RunGuarded(in_isr, data);
+        cb_block->cb.Run(in_isr, data);
         break;
       }
     }

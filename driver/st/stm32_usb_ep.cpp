@@ -244,7 +244,7 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   if (size == 0 && GetNumber() == USB::Endpoint::EPNumber::EP0 &&
       GetDirection() == Direction::OUT)
   {
-    OnTransferCompleteCallback<false>(0);
+    OnTransferCompleteCallback(false, 0);
   }
 #endif
 
@@ -358,7 +358,7 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
     return;
   }
 
-  ep->OnTransferCompleteCallback<true>(ep->last_transfer_size_);
+  ep->OnTransferCompleteCallback(true, ep->last_transfer_size_);
 }
 
 extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
@@ -383,7 +383,7 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
                                static_cast<int32_t>(actual_transfer_size));
 #endif
 
-  ep->OnTransferCompleteCallback<true>(actual_transfer_size);
+  ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }
 
 extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
@@ -399,7 +399,7 @@ extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t
     return;
   }
 
-  ep->OnTransferCompleteCallback<true>(0);
+  ep->OnTransferCompleteCallback(true, 0);
 }
 
 extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
@@ -415,6 +415,6 @@ extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_
     return;
   }
 
-  ep->OnTransferCompleteCallback<true>(0);
+  ep->OnTransferCompleteCallback(true, 0);
 }
 #endif

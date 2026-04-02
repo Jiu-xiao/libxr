@@ -386,11 +386,10 @@ class Endpoint
 
   /**
    * @brief 由底层在传输完成时调用 / Called by low-level driver when transfer completes
-   * @tparam in_isr 是否在中断上下文 / Whether in ISR context
+   * @param in_isr 是否在中断上下文 / Whether in ISR context
    * @param actual_transfer_size 实际传输长度 / Actual transferred size
    */
-  template <bool in_isr>
-  void OnTransferCompleteCallback(size_t actual_transfer_size)
+  void OnTransferCompleteCallback(bool in_isr, size_t actual_transfer_size)
   {
     if (GetState() != State::BUSY)
     {
@@ -505,32 +504,7 @@ class Endpoint
       }
     }
 
-    if constexpr (in_isr)
-    {
-      on_transfer_complete_.Run<true>(data);
-    }
-    else
-    {
-      on_transfer_complete_.Run<false>(data);
-    }
-  }
-
-  /**
-   * @brief 由底层在传输完成时调用（运行时上下文包装） /
-   *        Called by low-level driver when transfer completes (runtime context wrapper)
-   * @param in_isr 是否在中断上下文 / Whether in ISR context
-   * @param actual_transfer_size 实际传输长度 / Actual transferred size
-   */
-  void OnTransferCompleteCallback(bool in_isr, size_t actual_transfer_size)
-  {
-    if (in_isr)
-    {
-      OnTransferCompleteCallback<true>(actual_transfer_size);
-    }
-    else
-    {
-      OnTransferCompleteCallback<false>(actual_transfer_size);
-    }
+    on_transfer_complete_.Run(in_isr, data);
   }
 
  protected:

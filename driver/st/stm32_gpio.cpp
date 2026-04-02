@@ -42,7 +42,7 @@ extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   const uint8_t LINE = STM32_GPIO_PinToLine(GPIO_Pin);
   if (auto* gpio = STM32GPIO::map[LINE])
   {
-    gpio->callback_.Run<true>();
+    gpio->callback_.Run(true);
   }
 }
 

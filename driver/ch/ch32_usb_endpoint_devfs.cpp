@@ -486,7 +486,7 @@ void CH32EndpointDevFs::TransferComplete(size_t size)
     size = last_transfer_size_;
   }
 
-  OnTransferCompleteCallback<true>(size);
+  OnTransferCompleteCallback(true, size);
 }
 
 ErrorCode CH32EndpointDevFs::Stall()
