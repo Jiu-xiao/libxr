@@ -3,10 +3,11 @@
 
 using namespace LibXR;
 
-// WCH GCC15 is sensitive to the exact self-programming code shape on CH32V3.
+// WCH GCC15 is sensitive to the exact self-programming code shape on the
+// currently validated CH32V2/V3 flash paths.
 // Keep the erase/write hot loops behind hard noinline boundaries, but leave the
 // surrounding unlock/clock/flag choreography in the original call sites.
-// WCH GCC15 对 CH32V3 自擦写路径的代码形状很敏感。
+// WCH GCC15 对当前已验证可用的 CH32V2/V3 自擦写路径代码形状很敏感。
 // 这里把擦除/写入热循环放到明确的 noinline 边界后面，
 // 但解锁、降频、清标志这些外围时序仍留在原来的调用点。
 extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
@@ -127,6 +128,11 @@ CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t sta
       base_address_(sectors[start_sector - 1].address),
       sector_count_(sector_count)
 {
+  // `Flash` 基类看到的是从 `start_sector` 开始的一整段连续逻辑窗口，
+  // `sectors_` 仍保留原始物理扇区表，用于范围检查和地址换算。
+  // The `Flash` base class sees one contiguous logical window starting at
+  // `start_sector`, while `sectors_` still preserves the physical sector table
+  // for bounds checks and address translation.
   InitHotPathsOnce();
 }
 
@@ -149,7 +155,11 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
   ASSERT(erase_hot_path != nullptr);
   FlashAccessSession session;
 
-  // 4) 计算 256B 对齐区间
+  // 当前已验证的 CH32V2/V3 快速擦除路径都按 256B 页对齐工作，
+  // 因此子页范围的擦除请求进入 SRAM 热路径前必须先扩到整页边界。
+  // The currently validated CH32V2/V3 fast erase path works on 256-byte pages,
+  // so a sub-page erase request must be widened to page boundaries before
+  // entering the SRAM hot path.
   const uint32_t fast_size = 256u;
   const uint32_t ERASE_BEGIN = START_ADDR & ~(fast_size - 1u);
   const uint32_t ERASE_END = (END_ADDR + fast_size - 1u) & ~(fast_size - 1u);
@@ -194,6 +204,14 @@ extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t st
   FlashAccessSession session;
   ErrorCode ec = ErrorCode::OK;
 
+  // 写入路径拆成三段：
+  // 1) 非对齐 head 走半字循环
+  // 2) 对齐的整 256B 页走整页编程
+  // 3) 非对齐 tail 再回到半字循环
+  // Split the write into:
+  // 1) unaligned head halfword loop
+  // 2) fully aligned 256-byte page program loop
+  // 3) unaligned tail halfword loop
   const uint32_t aligned_begin = (start_addr + page_size - 1u) & ~(page_size - 1u);
   const uint32_t aligned_end = end_addr & ~(page_size - 1u);
 
@@ -235,9 +253,14 @@ bool CH32Flash::IsInRange(uint32_t addr, size_t size) const
 
 namespace
 {
-// Verified CH32V30x hot-path machine code blob kept directly in SRAM.
+// Verified CH32 flash hot-path machine code blob kept directly in SRAM.
+// The current validated coverage includes CH32V2/V3 targets exercised in this
+// review line.
 // `.S` remains in the tree as a readable source/reference for future toolchain
 // refreshes, but runtime no longer depends on reassembling and memcpy-ing it.
+// 已验证的 CH32 flash 热路径机器码 blob 直接常驻 SRAM。
+// 这条 review 线当前的实测覆盖包含 CH32V2/V3 目标。
+// `.S` 仍保留在树里作为可读参考，运行时不再依赖重新汇编再 memcpy。
 // clang-format off
 alignas(routine_align) static uint8_t g_ch32_flash_erase_hot[ch32_flash_erase_hot_path_size] = {
     0x63, 0x79, 0xb5, 0x04, 0x01, 0x76, 0x7d, 0x16, 0xb7, 0x26, 0x02, 0x40, 0x37, 0x08,
@@ -301,10 +324,19 @@ static void InitHotPathsOnce()
     return;
   }
 
+  // 这些 blob 被当作固定运行时产物使用；只要字节数漂移，
+  // 下面的函数指针转换就会立刻失效。
+  // These blobs are treated as fixed runtime artifacts. If any byte count
+  // drifts, the corresponding function pointer cast below becomes invalid
+  // immediately.
   static_assert(sizeof(g_ch32_flash_erase_hot) == ch32_flash_erase_hot_path_size);
   static_assert(sizeof(g_ch32_flash_write_hot) == ch32_flash_write_hot_loop_size);
   static_assert(sizeof(g_ch32_flash_write_page) == ch32_flash_write_page_size);
 
+  // 这些 blob 实际驻留在可写 SRAM 数组里，因此在发布函数指针前
+  // 需要先做一次指令缓存刷新。
+  // The blobs live in writable SRAM arrays, so flush the instruction cache once
+  // before publishing the function pointers.
   __builtin___clear_cache(
       reinterpret_cast<char*>(g_ch32_flash_erase_hot),
       reinterpret_cast<char*>(g_ch32_flash_erase_hot + sizeof(g_ch32_flash_erase_hot)));
