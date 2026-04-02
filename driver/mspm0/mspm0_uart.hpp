@@ -263,10 +263,13 @@ class MSPM0UART : public UART
   std::atomic<uint32_t> io_handler_inflight_{0U};
   std::atomic<uint32_t> timeout_cb_inflight_{0U};
   std::atomic<bool> read_completion_inflight_{false};
+  std::atomic<uint32_t> read_request_epoch_{0U};
+  std::atomic<uint32_t> active_read_request_epoch_{0U};
   Timer::TimerHandle byte_mode_block_timeout_task_ = nullptr;
   std::atomic<uint32_t> byte_mode_block_timeout_epoch_{0U};
   std::atomic<uint32_t> byte_mode_block_timeout_start_ms_{0U};
   std::atomic<uint32_t> byte_mode_block_timeout_cycle_ms_{0U};
+  std::atomic<uint32_t> byte_mode_drop_detached_rx_epoch_{0U};
   std::atomic<bool> byte_mode_drop_detached_rx_{false};
 
   static std::atomic<MSPM0UART*> instance_map_[MAX_UART_INSTANCES];

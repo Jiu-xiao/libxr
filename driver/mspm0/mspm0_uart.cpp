@@ -46,6 +46,29 @@ class AtomicCounterGuard
  private:
   std::atomic<uint32_t>& counter_;
 };
+
+uint32_t NextNonZeroEpoch(std::atomic<uint32_t>& epoch)
+{
+  uint32_t next_epoch = epoch.fetch_add(1U, std::memory_order_acq_rel) + 1U;
+  if (next_epoch == 0U)
+  {
+    // Keep 0 reserved as the sentinel value of "no epoch".
+    next_epoch = 1U;
+    epoch.store(next_epoch, std::memory_order_release);
+  }
+  return next_epoch;
+}
+
+bool IsInDetachedDropWindow(uint32_t active_epoch, uint32_t drop_epoch)
+{
+  if ((active_epoch == 0U) || (drop_epoch == 0U))
+  {
+    return false;
+  }
+  // Keep dropping in the timeout epoch and its immediate retry epoch so late
+  // completion bytes from the previous request cannot leak into the next one.
+  return (active_epoch == drop_epoch) || (active_epoch == (drop_epoch + 1U));
+}
 }  // namespace
 
 MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_size,
@@ -256,6 +279,8 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   // DL_UART_changeConfig.
   CancelByteModeBlockTimeout();
   byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
+  byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
+  active_read_request_epoch_.store(0U, std::memory_order_release);
   DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_LINC0_MATCH);
   DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_LINC0_MATCH);
   DL_UART_disableLINCounterCompareMatch(res_.instance);
@@ -334,7 +359,7 @@ ErrorCode MSPM0UART::WriteFun(WritePort& port)
 
   DL_UART_enableInterrupt(uart->res_.instance, DL_UART_INTERRUPT_TX);
   uart->res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
-  return ErrorCode::BUSY;
+  return ErrorCode::PENDING;
 }
 
 ErrorCode MSPM0UART::ReadFun(ReadPort& port)
@@ -352,6 +377,9 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port)
     return ErrorCode::BUSY;
   }
 
+  const uint32_t ACTIVE_READ_EPOCH = NextNonZeroEpoch(uart->read_request_epoch_);
+  uart->active_read_request_epoch_.store(ACTIVE_READ_EPOCH, std::memory_order_release);
+
   const uint32_t TIMEOUT_MASK = uart->GetTimeoutInterruptMask();
   const bool IS_BLOCK_INFINITE =
       (port.info_.op.type == ReadOperation::OperationType::BLOCK) &&
@@ -360,16 +388,29 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port)
       (port.info_.op.type == ReadOperation::OperationType::BLOCK) &&
       (port.info_.op.data.sem_info.timeout == 0U);
   uart->last_timeout_consumed_size_.store(0U, std::memory_order_release);
-  if ((uart->rx_timeout_mode_.load(std::memory_order_acquire) ==
-       RxTimeoutMode::BYTE_INTERRUPT) &&
-      uart->byte_mode_drop_detached_rx_.exchange(false, std::memory_order_acq_rel))
-  {
-    UNUSED(uart->ConsumeTimedOutReadData(false, false));
-  }
-  if (uart->rx_timeout_mode_.load(std::memory_order_acquire) !=
+
+  if (uart->rx_timeout_mode_.load(std::memory_order_acquire) ==
       RxTimeoutMode::BYTE_INTERRUPT)
   {
+    const uint32_t DROP_EPOCH =
+        uart->byte_mode_drop_detached_rx_epoch_.load(std::memory_order_acquire);
+    if (uart->byte_mode_drop_detached_rx_.load(std::memory_order_acquire) &&
+        !IsInDetachedDropWindow(ACTIVE_READ_EPOCH, DROP_EPOCH))
+    {
+      bool expected_drop = true;
+      if (uart->byte_mode_drop_detached_rx_.compare_exchange_strong(
+              expected_drop, false, std::memory_order_acq_rel,
+              std::memory_order_acquire))
+      {
+        uart->byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
+        UNUSED(uart->ConsumeTimedOutReadData(false, false));
+      }
+    }
+  }
+  else
+  {
     uart->byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
+    uart->byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
   }
 
   if (IS_BLOCK_ZERO_TIMEOUT)
@@ -455,6 +496,8 @@ void MSPM0UART::Abort(bool in_isr)
 {
   CancelByteModeBlockTimeout();
   byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
+  byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
+  active_read_request_epoch_.store(0U, std::memory_order_release);
 
   const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
   const uint32_t ABORT_MASK =
@@ -992,35 +1035,38 @@ bool MSPM0UART::IsZeroTimeoutPendingBlockRead() const
     }
   }
 
-  void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
+void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
+{
+  const bool DROP_DETACHED_BYTE_MODE_RX =
+      (rx_timeout_mode_.load(std::memory_order_acquire) ==
+       RxTimeoutMode::BYTE_INTERRUPT) &&
+      IsInDetachedDropWindow(
+          active_read_request_epoch_.load(std::memory_order_acquire),
+          byte_mode_drop_detached_rx_epoch_.load(std::memory_order_acquire)) &&
+      byte_mode_drop_detached_rx_.load(std::memory_order_acquire);
+
+  while (!DL_UART_isRXFIFOEmpty(res_.instance))
   {
-    const bool DROP_DETACHED_BYTE_MODE_RX =
-        (rx_timeout_mode_.load(std::memory_order_acquire) ==
-         RxTimeoutMode::BYTE_INTERRUPT) &&
-        byte_mode_drop_detached_rx_.load(std::memory_order_acquire);
+    const uint8_t RX_BYTE = DL_UART_receiveData(res_.instance);
+    received = true;
 
-    while (!DL_UART_isRXFIFOEmpty(res_.instance))
+    if (DROP_DETACHED_BYTE_MODE_RX)
     {
-      const uint8_t RX_BYTE = DL_UART_receiveData(res_.instance);
-      received = true;
+      UNUSED(RX_BYTE);
+      last_timeout_consumed_size_.fetch_add(1U, std::memory_order_acq_rel);
+      continue;
+    }
 
-      if (DROP_DETACHED_BYTE_MODE_RX)
-      {
-        UNUSED(RX_BYTE);
-        last_timeout_consumed_size_.fetch_add(1U, std::memory_order_acq_rel);
-        continue;
-      }
-
-      if (read_port_->queue_data_->Push(RX_BYTE) == ErrorCode::OK)
-      {
-        pushed = true;
-      }
-      else
-      {
-        rx_drop_count_.fetch_add(1U, std::memory_order_acq_rel);
-      }
+    if (read_port_->queue_data_->Push(RX_BYTE) == ErrorCode::OK)
+    {
+      pushed = true;
+    }
+    else
+    {
+      rx_drop_count_.fetch_add(1U, std::memory_order_acq_rel);
     }
   }
+}
 
   void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask)
   {
@@ -1153,6 +1199,9 @@ bool MSPM0UART::IsZeroTimeoutPendingBlockRead() const
         if (rx_timeout_mode_.load(std::memory_order_acquire) ==
             RxTimeoutMode::BYTE_INTERRUPT)
         {
+          byte_mode_drop_detached_rx_epoch_.store(
+              active_read_request_epoch_.load(std::memory_order_acquire),
+              std::memory_order_release);
           byte_mode_drop_detached_rx_.store(true, std::memory_order_release);
         }
         UNUSED(ConsumeTimedOutReadData(in_isr, false));
