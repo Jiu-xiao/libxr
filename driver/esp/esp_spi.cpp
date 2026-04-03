@@ -376,13 +376,6 @@ void IRAM_ATTR ESP32SPI::HandleInterrupt()
     return;
   }
 
-  if (recovering_)
-  {
-    spi_ll_disable_int(hw_);
-    spi_ll_clear_int_stat(hw_);
-    return;
-  }
-
   if (!async_running_)
   {
     spi_ll_clear_int_stat(hw_);
@@ -399,7 +392,7 @@ void IRAM_ATTR ESP32SPI::HandleInterrupt()
 
 void IRAM_ATTR ESP32SPI::FinishAsync(bool in_isr, ErrorCode ec)
 {
-  if (recovering_ || !async_running_)
+  if (!async_running_)
   {
     return;
   }
@@ -472,40 +465,6 @@ void IRAM_ATTR ESP32SPI::FinishAsync(bool in_isr, ErrorCode ec)
   {
     rw_op_.UpdateStatus(in_isr, ec);
   }
-}
-
-void ESP32SPI::RecoverAfterBlockTimeout()
-{
-  recovering_ = true;
-  if (hw_ != nullptr)
-  {
-    spi_ll_disable_int(hw_);
-    spi_ll_clear_int_stat(hw_);
-  }
-
-  if (dma_enabled_)
-  {
-    spi_dma_ctx_t* ctx = ToDmaCtx(dma_ctx_);
-    if (ctx != nullptr)
-    {
-      (void)DmaStop(ctx->rx_dma_chan);
-      (void)DmaStop(ctx->tx_dma_chan);
-      (void)DmaReset(ctx->rx_dma_chan);
-      (void)DmaReset(ctx->tx_dma_chan);
-#if CONFIG_IDF_TARGET_ESP32
-      spicommon_dmaworkaround_idle(ctx->tx_dma_chan.chan_id);
-#endif
-    }
-  }
-
-  async_running_ = false;
-  async_dma_size_ = 0U;
-  async_dma_rx_enabled_ = false;
-  mem_read_ = false;
-  read_back_ = {nullptr, 0};
-  rw_op_ = {};
-  Release();
-  recovering_ = false;
 }
 
 ErrorCode ESP32SPI::SetConfig(SPI::Configuration config)
@@ -747,12 +706,7 @@ ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t si
   op.MarkAsRunning();
   if (op.type == OperationRW::OperationType::BLOCK)
   {
-    const ErrorCode wait_ans = block_wait_.Wait(op.data.sem_info.timeout);
-    if (wait_ans == ErrorCode::TIMEOUT)
-    {
-      RecoverAfterBlockTimeout();
-    }
-    return wait_ans;
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }

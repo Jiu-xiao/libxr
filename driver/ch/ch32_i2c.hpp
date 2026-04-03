@@ -97,7 +97,7 @@ class CH32I2C : public I2C
   void StartRxDma(uint32_t len);
 
   void AbortTransfer(ErrorCode ec);
-  void RecoverAfterBlockTimeout();
+  void RecoverAfterImmediateFailure();
 
  public:
   I2C_TypeDef* instance_;

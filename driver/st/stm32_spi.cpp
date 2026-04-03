@@ -8,43 +8,6 @@ using namespace LibXR;
 
 STM32SPI* STM32SPI::map[STM32_SPI_NUMBER] = {nullptr};
 
-namespace
-{
-
-void RecoverAfterBlockFailure(STM32SPI* spi)
-{
-  ASSERT(spi != nullptr);
-
-  auto* hspi = spi->spi_handle_;
-  spi->recovering_ = true;
-  if (hspi->hdmarx != nullptr)
-  {
-    (void)HAL_DMA_Abort(hspi->hdmarx);
-  }
-  if (hspi->hdmatx != nullptr)
-  {
-    (void)HAL_DMA_Abort(hspi->hdmatx);
-  }
-
-  (void)HAL_SPI_DeInit(hspi);
-  (void)HAL_SPI_Init(hspi);
-
-  hspi->Lock = HAL_UNLOCKED;
-  hspi->State = HAL_SPI_STATE_READY;
-#ifdef HAL_SPI_ERROR_NONE
-  hspi->ErrorCode = HAL_SPI_ERROR_NONE;
-#else
-  hspi->ErrorCode = 0;
-#endif
-  spi->SwitchBuffer();
-  spi->rw_op_ = {};
-  spi->read_buff_ = {nullptr, 0};
-  spi->mem_read_ = false;
-  spi->recovering_ = false;
-}
-
-}  // namespace
-
 stm32_spi_id_t STM32_SPI_GetID(SPI_TypeDef* addr)
 {
   if (addr == nullptr)
@@ -212,12 +175,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -440,12 +398,7 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -525,12 +478,7 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -781,12 +729,7 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -814,7 +757,7 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 extern "C" void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef* hspi)
 {
   STM32SPI* spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
-  if (spi->recovering_ || spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
   {
     return;
   }
@@ -832,7 +775,7 @@ extern "C" void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef* hspi)
 extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef* hspi)
 {
   STM32SPI* spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
-  if (spi->recovering_ || spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
   {
     return;
   }
@@ -879,7 +822,7 @@ extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef* hspi)
 extern "C" void HAL_SPI_ErrorCallback(SPI_HandleTypeDef* hspi)
 {
   STM32SPI* spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
-  if (spi->recovering_ || spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
   {
     return;
   }

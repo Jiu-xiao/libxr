@@ -624,7 +624,7 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
 
 void ESP32I2C::FinishAsync(bool in_isr, ErrorCode ec)
 {
-  if (recovering_ || !async_running_)
+  if (!async_running_)
   {
     return;
   }
@@ -663,36 +663,6 @@ void ESP32I2C::FinishAsync(bool in_isr, ErrorCode ec)
   }
 }
 
-void ESP32I2C::RecoverAfterBlockTimeout()
-{
-  recovering_ = true;
-  if (hal_.dev != nullptr)
-  {
-    i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
-    i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
-  }
-
-  async_op_ = {};
-  async_running_ = false;
-  async_write_prefix_size_ = 0U;
-  async_write_prefix_offset_ = 0U;
-  async_write_payload_ = nullptr;
-  async_write_size_ = 0U;
-  async_write_offset_ = 0U;
-  async_read_payload_ = nullptr;
-  async_read_size_ = 0U;
-  async_read_offset_ = 0U;
-  async_pending_read_chunk_ = 0U;
-  async_write_phase_done_ = true;
-  async_write_addr_sent_ = false;
-  async_write_stop_sent_ = false;
-  async_read_addr_sent_ = false;
-
-  Release();
-  (void)RecoverController();
-  recovering_ = false;
-}
-
 ErrorCode ESP32I2C::InstallInterrupt()
 {
   if (intr_installed_)
@@ -729,13 +699,6 @@ void ESP32I2C::HandleInterrupt()
 {
   if (hal_.dev == nullptr)
   {
-    return;
-  }
-
-  if (recovering_)
-  {
-    i2c_ll_disable_intr_mask(hal_.dev, I2C_LL_MASTER_EVENT_INTR);
-    i2c_ll_clear_intr_mask(hal_.dev, I2C_LL_INTR_MASK);
     return;
   }
 
@@ -1041,12 +1004,7 @@ ErrorCode ESP32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
       ASSERT(!in_isr);
-      const ErrorCode wait_ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (wait_ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return wait_ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -1104,12 +1062,7 @@ ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       ASSERT(!in_isr);
-      const ErrorCode wait_ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (wait_ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return wait_ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -1176,12 +1129,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
       ASSERT(!in_isr);
-      const ErrorCode wait_ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (wait_ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return wait_ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -1273,12 +1221,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       ASSERT(!in_isr);
-      const ErrorCode wait_ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (wait_ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return wait_ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }

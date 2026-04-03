@@ -11,6 +11,16 @@ using namespace LibXR;
 
 CH32I2C* CH32I2C::map_[CH32_I2C_NUMBER] = {nullptr};
 
+namespace
+{
+
+constexpr uint32_t kCh32I2CErrorFlags =
+    ((I2C_FLAG_BERR & 0xFFFFu) | (I2C_FLAG_ARLO & 0xFFFFu) | (I2C_FLAG_AF & 0xFFFFu) |
+     (I2C_FLAG_OVR & 0xFFFFu) | (I2C_FLAG_PECERR & 0xFFFFu) |
+     (I2C_FLAG_TIMEOUT & 0xFFFFu) | (I2C_FLAG_SMBALERT & 0xFFFFu));
+
+}  // namespace
+
 static inline void ch32_i2c_enable_clocks(ch32_i2c_id_t id)
 {
   RCC_APB1PeriphClockCmd(CH32_I2C_RCC_PERIPH_MAP[id], ENABLE);
@@ -158,6 +168,10 @@ bool CH32I2C::WaitEvent(uint32_t evt, uint32_t timeout_us)
   const uint64_t START = static_cast<uint64_t>(Timebase::GetMicroseconds());
   while ((static_cast<uint64_t>(Timebase::GetMicroseconds()) - START) < timeout_us)
   {
+    if ((instance_->STAR1 & kCh32I2CErrorFlags) != 0u)
+    {
+      return false;
+    }
     if (I2C_CheckEvent(instance_, evt) == READY)
     {
       return true;
@@ -171,6 +185,10 @@ bool CH32I2C::WaitFlag(uint32_t flag, FlagStatus st, uint32_t timeout_us)
   const uint64_t START = static_cast<uint64_t>(Timebase::GetMicroseconds());
   while ((static_cast<uint64_t>(Timebase::GetMicroseconds()) - START) < timeout_us)
   {
+    if ((flag != I2C_FLAG_BUSY) && ((instance_->STAR1 & kCh32I2CErrorFlags) != 0u))
+    {
+      return false;
+    }
     if (I2C_GetFlagStatus(instance_, flag) == st)
     {
       return true;
@@ -194,6 +212,7 @@ ErrorCode CH32I2C::MasterStartAndAddress10Bit(uint16_t addr10, uint8_t final_dir
   // 等待 BUSY 释放
   if (!WaitFlag(I2C_FLAG_BUSY, RESET))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
 
@@ -201,6 +220,7 @@ ErrorCode CH32I2C::MasterStartAndAddress10Bit(uint16_t addr10, uint8_t final_dir
   I2C_GenerateSTART(instance_, ENABLE);
   if (!WaitEvent(I2C_EVENT_MASTER_MODE_SELECT))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
 
@@ -212,6 +232,7 @@ ErrorCode CH32I2C::MasterStartAndAddress10Bit(uint16_t addr10, uint8_t final_dir
   // 等待 EVT9（ADD10）
   if (!WaitEvent(I2C_EVENT_MASTER_MODE_ADDRESS10))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
 
@@ -221,6 +242,7 @@ ErrorCode CH32I2C::MasterStartAndAddress10Bit(uint16_t addr10, uint8_t final_dir
   // 等待 EVT6（作为 Transmitter 完成地址阶段）
   if (!WaitEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
   ClearAddrFlag();
@@ -234,12 +256,14 @@ ErrorCode CH32I2C::MasterStartAndAddress10Bit(uint16_t addr10, uint8_t final_dir
   I2C_GenerateSTART(instance_, ENABLE);
   if (!WaitEvent(I2C_EVENT_MASTER_MODE_SELECT))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
 
   I2C_Send7bitAddress(instance_, HEADER, I2C_Direction_Receiver);
   if (!WaitEvent(I2C_EVENT_MASTER_RECEIVER_MODE_SELECTED))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
   ClearAddrFlag();
@@ -256,12 +280,14 @@ ErrorCode CH32I2C::MasterStartAndAddress(uint16_t slave_addr, uint8_t dir)
 
     if (!WaitFlag(I2C_FLAG_BUSY, RESET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
 
     I2C_GenerateSTART(instance_, ENABLE);
     if (!WaitEvent(I2C_EVENT_MASTER_MODE_SELECT))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
 
@@ -271,6 +297,7 @@ ErrorCode CH32I2C::MasterStartAndAddress(uint16_t slave_addr, uint8_t dir)
     {
       if (!WaitEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED))
       {
+        RecoverAfterImmediateFailure();
         return ErrorCode::BUSY;
       }
     }
@@ -278,6 +305,7 @@ ErrorCode CH32I2C::MasterStartAndAddress(uint16_t slave_addr, uint8_t dir)
     {
       if (!WaitEvent(I2C_EVENT_MASTER_RECEIVER_MODE_SELECTED))
       {
+        RecoverAfterImmediateFailure();
         return ErrorCode::BUSY;
       }
     }
@@ -296,11 +324,13 @@ ErrorCode CH32I2C::SendMemAddr(uint16_t mem_addr, MemAddrLength len)
   {
     if (!WaitFlag(I2C_FLAG_TXE, SET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
     I2C_SendData(instance_, static_cast<uint8_t>((mem_addr >> 8) & 0xFF));
     if (!WaitFlag(I2C_FLAG_TXE, SET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
     I2C_SendData(instance_, static_cast<uint8_t>(mem_addr & 0xFF));
@@ -309,6 +339,7 @@ ErrorCode CH32I2C::SendMemAddr(uint16_t mem_addr, MemAddrLength len)
   {
     if (!WaitFlag(I2C_FLAG_TXE, SET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
     I2C_SendData(instance_, static_cast<uint8_t>(mem_addr & 0xFF));
@@ -316,6 +347,7 @@ ErrorCode CH32I2C::SendMemAddr(uint16_t mem_addr, MemAddrLength len)
 
   if (!WaitFlag(I2C_FLAG_BTF, SET))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
   return ErrorCode::OK;
@@ -327,12 +359,14 @@ ErrorCode CH32I2C::PollingWriteBytes(const uint8_t* data, uint32_t len)
   {
     if (!WaitFlag(I2C_FLAG_TXE, SET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
     I2C_SendData(instance_, data[i]);
   }
   if (!WaitFlag(I2C_FLAG_BTF, SET))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
   return ErrorCode::OK;
@@ -352,6 +386,7 @@ ErrorCode CH32I2C::PollingReadBytes(uint8_t* data, uint32_t len)
     I2C_GenerateSTOP(instance_, ENABLE);
     if (!WaitFlag(I2C_FLAG_RXNE, SET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
     data[0] = I2C_ReceiveData(instance_);
@@ -367,6 +402,7 @@ ErrorCode CH32I2C::PollingReadBytes(uint8_t* data, uint32_t len)
 
     if (!WaitFlag(I2C_FLAG_BTF, SET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
     I2C_GenerateSTOP(instance_, ENABLE);
@@ -388,6 +424,7 @@ ErrorCode CH32I2C::PollingReadBytes(uint8_t* data, uint32_t len)
   {
     if (!WaitFlag(I2C_FLAG_RXNE, SET))
     {
+      RecoverAfterImmediateFailure();
       return ErrorCode::BUSY;
     }
     data[idx++] = I2C_ReceiveData(instance_);
@@ -397,6 +434,7 @@ ErrorCode CH32I2C::PollingReadBytes(uint8_t* data, uint32_t len)
   // 剩余 3 字节处理
   if (!WaitFlag(I2C_FLAG_BTF, SET))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
   I2C_AcknowledgeConfig(instance_, DISABLE);
@@ -406,6 +444,7 @@ ErrorCode CH32I2C::PollingReadBytes(uint8_t* data, uint32_t len)
 
   if (!WaitFlag(I2C_FLAG_RXNE, SET))
   {
+    RecoverAfterImmediateFailure();
     return ErrorCode::BUSY;
   }
   data[idx++] = I2C_ReceiveData(instance_);
@@ -476,7 +515,7 @@ void CH32I2C::AbortTransfer(ErrorCode ec)
   }
 }
 
-void CH32I2C::RecoverAfterBlockTimeout()
+void CH32I2C::RecoverAfterImmediateFailure()
 {
   recovering_ = true;
   I2C_ITConfig(instance_, I2C_IT_ERR, DISABLE);
@@ -490,10 +529,23 @@ void CH32I2C::RecoverAfterBlockTimeout()
   DMA_ClearITPendingBit(CH32_I2C_TX_DMA_IT_MAP[id_]);
   DMA_ClearITPendingBit(CH32_I2C_RX_DMA_IT_MAP[id_]);
 
-  I2C_AcknowledgeConfig(instance_, ENABLE);
-  I2C_NACKPositionConfig(instance_, I2C_NACKPosition_Current);
+  const uint32_t err_its[] = {I2C_IT_BERR, I2C_IT_ARLO, I2C_IT_AF, I2C_IT_OVR,
+                              I2C_IT_PECERR, I2C_IT_TIMEOUT, I2C_IT_SMBALERT};
+  for (uint32_t it : err_its)
+  {
+    I2C_ClearITPendingBit(instance_, it);
+  }
+
   I2C_GenerateSTOP(instance_, ENABLE);
-  (void)WaitFlag(I2C_FLAG_BUSY, RESET, K_DEFAULT_TIMEOUT_US);
+  if (!WaitFlag(I2C_FLAG_BUSY, RESET, K_DEFAULT_TIMEOUT_US))
+  {
+    (void)SetConfig(cfg_);
+  }
+  else
+  {
+    I2C_AcknowledgeConfig(instance_, ENABLE);
+    I2C_NACKPositionConfig(instance_, I2C_NACKPosition_Current);
+  }
 
   busy_ = false;
   read_ = false;
@@ -523,6 +575,7 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
   }
 
   read_ = false;
+  I2C_ITConfig(instance_, I2C_IT_ERR, DISABLE);
 
   ErrorCode ec = MasterStartAndAddress(slave_addr, I2C_Direction_Transmitter);
   if (ec != ErrorCode::OK)
@@ -536,6 +589,7 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
     ec = PollingWriteBytes(reinterpret_cast<const uint8_t*>(write_data.addr_),
                            write_data.size_);
     I2C_GenerateSTOP(instance_, ENABLE);
+    I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
 
     if (op.type != WriteOperation::OperationType::BLOCK)
     {
@@ -554,17 +608,13 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartTxDma(write_data.size_);
 
   op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-    if (ans == ErrorCode::TIMEOUT)
-    {
-      RecoverAfterBlockTimeout();
-    }
-    return ans;
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }
@@ -588,6 +638,7 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
   }
 
   read_ = true;
+  I2C_ITConfig(instance_, I2C_IT_ERR, DISABLE);
 
   ErrorCode ec = MasterStartAndAddress(slave_addr, I2C_Direction_Receiver);
   if (ec != ErrorCode::OK)
@@ -599,6 +650,7 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
   if (read_data.size_ <= dma_enable_min_size_)
   {
     ec = PollingReadBytes(reinterpret_cast<uint8_t*>(read_data.addr_), read_data.size_);
+    I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
     if (op.type != ReadOperation::OperationType::BLOCK)
     {
       op.UpdateStatus(in_isr, ec);
@@ -615,17 +667,13 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartRxDma(read_data.size_);
 
   op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
-    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-    if (ans == ErrorCode::TIMEOUT)
-    {
-      RecoverAfterBlockTimeout();
-    }
-    return ans;
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }
@@ -650,6 +698,7 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   }
 
   read_ = false;
+  I2C_ITConfig(instance_, I2C_IT_ERR, DISABLE);
 
   ErrorCode ec = MasterStartAndAddress(slave_addr, I2C_Direction_Transmitter);
   if (ec != ErrorCode::OK)
@@ -673,6 +722,7 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     ec = PollingWriteBytes(reinterpret_cast<const uint8_t*>(write_data.addr_),
                            write_data.size_);
     I2C_GenerateSTOP(instance_, ENABLE);
+    I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
 
     if (op.type != WriteOperation::OperationType::BLOCK)
     {
@@ -690,17 +740,13 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartTxDma(write_data.size_);
 
   op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-    if (ans == ErrorCode::TIMEOUT)
-    {
-      RecoverAfterBlockTimeout();
-    }
-    return ans;
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }
@@ -724,6 +770,7 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   }
 
   read_ = true;
+  I2C_ITConfig(instance_, I2C_IT_ERR, DISABLE);
 
   // 1) 地址阶段：发送写地址 + mem addr
   ErrorCode ec = MasterStartAndAddress(slave_addr, I2C_Direction_Transmitter);
@@ -808,6 +855,7 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   if (read_data.size_ <= dma_enable_min_size_)
   {
     ec = PollingReadBytes(reinterpret_cast<uint8_t*>(read_data.addr_), read_data.size_);
+    I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
     if (op.type != ReadOperation::OperationType::BLOCK)
     {
       op.UpdateStatus(in_isr, ec);
@@ -824,17 +872,13 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartRxDma(read_data.size_);
 
   op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
-    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-    if (ans == ErrorCode::TIMEOUT)
-    {
-      RecoverAfterBlockTimeout();
-    }
-    return ans;
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }

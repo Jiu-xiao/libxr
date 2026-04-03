@@ -331,12 +331,7 @@ ErrorCode CH32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -421,12 +416,7 @@ ErrorCode CH32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, boo
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -497,12 +487,7 @@ ErrorCode CH32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -572,31 +557,6 @@ void CH32SPI::StopDma()
   DMA_Cmd(dma_rx_channel_, DISABLE);
 }
 
-void CH32SPI::RecoverAfterBlockTimeout()
-{
-  recovering_ = true;
-  SPI_I2S_DMACmd(instance_, SPI_I2S_DMAReq_Rx, DISABLE);
-  SPI_I2S_DMACmd(instance_, SPI_I2S_DMAReq_Tx, DISABLE);
-  StopDma();
-  dma_tx_channel_->CNTR = 0;
-  dma_rx_channel_->CNTR = 0;
-  DMA_ClearITPendingBit(CH32_SPI_TX_DMA_IT_MAP[id_]);
-  DMA_ClearITPendingBit(CH32_SPI_RX_DMA_IT_MAP[id_]);
-#ifdef SPI_I2S_FLAG_BSY
-  uint32_t spin = 100000U;
-  while ((SPI_I2S_GetFlagStatus(instance_, SPI_I2S_FLAG_BSY) != RESET) && (spin > 0U))
-  {
-    --spin;
-  }
-#endif
-  SwitchBuffer();
-  busy_ = false;
-  mem_read_ = false;
-  rw_op_ = {};
-  read_buff_ = {nullptr, 0};
-  recovering_ = false;
-}
-
 void CH32SPI::RxDmaIRQHandler()
 {
   if (DMA_GetITStatus(CH32_SPI_RX_DMA_IT_MAP[id_]) == RESET)
@@ -609,7 +569,7 @@ void CH32SPI::RxDmaIRQHandler()
   SPI_I2S_DMACmd(instance_, SPI_I2S_DMAReq_Rx, DISABLE);
   DMA_Cmd(dma_rx_channel_, DISABLE);
 
-  if (recovering_ || !busy_)
+  if (!busy_)
   {
     return;
   }
@@ -655,7 +615,7 @@ void CH32SPI::TxDmaIRQHandler()
   SPI_I2S_DMACmd(instance_, SPI_I2S_DMAReq_Tx, DISABLE);
   DMA_Cmd(dma_tx_channel_, DISABLE);
 
-  if (recovering_ || !busy_)
+  if (!busy_)
   {
     return;
   }
@@ -699,12 +659,7 @@ ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockTimeout();
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
