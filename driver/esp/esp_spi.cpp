@@ -60,20 +60,12 @@ uint64_t CalcPollingTimeoutUs(size_t size, uint32_t bus_hz)
 #if SOC_GDMA_SUPPORTED
 esp_err_t DmaReset(gdma_channel_handle_t chan) { return gdma_reset(chan); }
 
-esp_err_t DmaStop(gdma_channel_handle_t chan) { return gdma_stop(chan); }
-
 esp_err_t DmaStart(gdma_channel_handle_t chan, const void* desc)
 {
   return gdma_start(chan, reinterpret_cast<intptr_t>(desc));
 }
 #else
 esp_err_t DmaReset(spi_dma_chan_handle_t chan)
-{
-  spi_dma_reset(chan);
-  return ESP_OK;
-}
-
-esp_err_t DmaStop(spi_dma_chan_handle_t chan)
 {
   spi_dma_reset(chan);
   return ESP_OK;

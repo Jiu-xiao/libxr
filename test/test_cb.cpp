@@ -98,6 +98,12 @@ struct DirectCallbackProbe
 void test_cb()
 {
   {
+    LibXR::Callback<int> empty_cb;
+    ASSERT(empty_cb.Empty());
+    empty_cb.Run(false, 1);
+  }
+
+  {
     CallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.guard.Run(probe.cb, probe.runtime_in_isr, 1);

@@ -81,6 +81,7 @@ template <typename... Args>
 class Callback
 {
   static void FunctionDefault(void*, bool, Args...) {}
+  inline static CallbackBlockHeader<Args...> empty_cb_block_ = {&FunctionDefault};
 
  public:
   /**
@@ -106,7 +107,7 @@ class Callback
   /**
    * @brief 默认构造函数，创建空回调对象 / Default constructor creating an empty callback
    */
-  Callback() {}
+  Callback() : cb_block_(&empty_cb_block_) {}
 
   Callback(const Callback&) = default;
   Callback& operator=(const Callback&) = default;
@@ -117,7 +118,8 @@ class Callback
    *
    * @param other 另一个 Callback 实例 / Another Callback instance
    */
-  Callback(Callback&& other) noexcept : cb_block_(std::exchange(other.cb_block_, nullptr))
+  Callback(Callback&& other) noexcept
+      : cb_block_(std::exchange(other.cb_block_, &empty_cb_block_))
   {
   }
 
@@ -132,7 +134,7 @@ class Callback
   {
     if (this != &other)
     {
-      cb_block_ = std::exchange(other.cb_block_, nullptr);
+      cb_block_ = std::exchange(other.cb_block_, &empty_cb_block_);
     }
     return *this;
   }
@@ -140,10 +142,6 @@ class Callback
   template <typename... PassArgs>
   void Run(bool in_isr, PassArgs&&... args) const
   {
-    if (cb_block_ == nullptr)
-    {
-      return;
-    }
     cb_block_->run_fun_(cb_block_, in_isr, std::forward<PassArgs>(args)...);
   }
 
@@ -153,7 +151,7 @@ class Callback
    * @return true 回调为空 / Callback is empty
    * @return false 回调非空 / Callback is not empty
    */
-  bool Empty() const { return cb_block_ == nullptr; }
+  bool Empty() const { return cb_block_ == &empty_cb_block_; }
 
  private:
   /**
@@ -163,10 +161,13 @@ class Callback
    * @param cb_block 回调块对象指针 / Pointer to the callback block
    * @param cb_fun 回调执行函数指针 / Callback invocation function pointer
    */
-  explicit Callback(CallbackBlockHeader<Args...>* cb_block) : cb_block_(cb_block) {}
+  explicit Callback(CallbackBlockHeader<Args...>* cb_block)
+      : cb_block_((cb_block != nullptr) ? cb_block : &empty_cb_block_)
+  {
+  }
 
   CallbackBlockHeader<Args...>* cb_block_ =
-      nullptr;  ///< 回调块指针 / Pointer to the callback block
+      &empty_cb_block_;  ///< 回调块指针 / Pointer to the callback block
 };
 
 template <class CallbackT>
