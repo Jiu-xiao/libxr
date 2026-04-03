@@ -121,6 +121,33 @@ static inline ErrorCode MapHalStartFailure(const I2C_HandleTypeDef* hi2c,
   return (st == HAL_BUSY) ? ErrorCode::BUSY : ErrorCode::FAILED;
 }
 
+static void RecoverAfterBlockTimeout(STM32I2C* i2c)
+{
+  ASSERT(i2c != nullptr);
+
+  auto* hi2c = i2c->i2c_handle_;
+  i2c->recovering_ = true;
+  if (hi2c->hdmarx != nullptr)
+  {
+    (void)HAL_DMA_Abort(hi2c->hdmarx);
+  }
+  if (hi2c->hdmatx != nullptr)
+  {
+    (void)HAL_DMA_Abort(hi2c->hdmatx);
+  }
+
+  // Re-open the HAL handle after a detached BLOCK timeout without touching
+  // the larger software-side callback/semaphore semantics.
+  (void)HAL_I2C_DeInit(hi2c);
+  (void)HAL_I2C_Init(hi2c);
+
+  i2c->read_ = false;
+  i2c->read_op_ = {};
+  i2c->write_op_ = {};
+  i2c->read_buff_ = {nullptr, 0};
+  i2c->recovering_ = false;
+}
+
 }  // namespace
 
 STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
@@ -170,7 +197,12 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      return block_wait_.Wait(op.data.sem_info.timeout);
+      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+      if (ans == ErrorCode::TIMEOUT)
+      {
+        RecoverAfterBlockTimeout(this);
+      }
+      return ans;
     }
     return ErrorCode::OK;
   }
@@ -232,7 +264,12 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      return block_wait_.Wait(op.data.sem_info.timeout);
+      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+      if (ans == ErrorCode::TIMEOUT)
+      {
+        RecoverAfterBlockTimeout(this);
+      }
+      return ans;
     }
     return ErrorCode::OK;
   }
@@ -291,7 +328,12 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      return block_wait_.Wait(op.data.sem_info.timeout);
+      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+      if (ans == ErrorCode::TIMEOUT)
+      {
+        RecoverAfterBlockTimeout(this);
+      }
+      return ans;
     }
     return ErrorCode::OK;
   }
@@ -360,7 +402,12 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      return block_wait_.Wait(op.data.sem_info.timeout);
+      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+      if (ans == ErrorCode::TIMEOUT)
+      {
+        RecoverAfterBlockTimeout(this);
+      }
+      return ans;
     }
     return ErrorCode::OK;
   }
@@ -404,7 +451,8 @@ ErrorCode STM32I2C::SetConfig(Configuration config)
 extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->read_op_.type != ReadOperation::OperationType::NONE))
   {
     const ErrorCode ec = HalTransferResult(hi2c);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -429,7 +477,8 @@ extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef* hi2c)
 extern "C" void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->write_op_.type != WriteOperation::OperationType::NONE))
   {
     const ErrorCode ec = HalTransferResult(hi2c);
     if (i2c->write_op_.type == WriteOperation::OperationType::BLOCK)
@@ -446,7 +495,8 @@ extern "C" void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef* hi2c)
 extern "C" void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->write_op_.type != WriteOperation::OperationType::NONE))
   {
     const ErrorCode ec = HalTransferResult(hi2c);
     if (i2c->write_op_.type == WriteOperation::OperationType::BLOCK)
@@ -463,7 +513,8 @@ extern "C" void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef* hi2c)
 extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->read_op_.type != ReadOperation::OperationType::NONE))
   {
     const ErrorCode ec = HalTransferResult(hi2c);
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -489,7 +540,7 @@ extern "C" void HAL_I2C_ErrorCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
 
-  if (i2c)
+  if (i2c && !i2c->recovering_)
   {
     if (i2c->read_)
     {
