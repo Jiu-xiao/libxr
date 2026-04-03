@@ -240,7 +240,7 @@ class I2C
                              MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
                              bool in_isr = false) = 0;
 
- protected:
+ public:
   AsyncBlockWait block_wait_{};
 };
 

@@ -78,6 +78,7 @@ class ESP32I2C : public I2C
                                   ReadOperation& op);
   ErrorCode KickAsyncTransaction();
   void FinishAsync(bool in_isr, ErrorCode ec);
+  void RecoverAfterBlockTimeout();
   static bool IsValid7BitAddr(uint16_t addr);
   ErrorCode InstallInterrupt();
   static void I2cIsrEntry(void* arg);
@@ -96,6 +97,7 @@ class ESP32I2C : public I2C
   Flag::Plain busy_;
   intr_handle_t intr_handle_ = nullptr;
   bool intr_installed_ = false;
+  bool recovering_ = false;
 
   bool async_running_ = false;
   ReadOperation async_op_{};

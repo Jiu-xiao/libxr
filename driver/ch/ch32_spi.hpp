@@ -59,6 +59,7 @@ class CH32SPI : public SPI
 
   void StartDmaDuplex(uint32_t count);
   void StopDma();
+  void RecoverAfterBlockTimeout();
 
   void PrepareTxBuffer(ConstRawData write_data, uint32_t need_len, uint32_t prefix = 0,
                        uint8_t dummy = 0x00);
@@ -78,6 +79,7 @@ class CH32SPI : public SPI
   RawData read_buff_;
   bool mem_read_ = false;
   bool busy_ = false;
+  bool recovering_ = false;
 
   /// SPI 寄存器配置缓存 / Cached SPI register configuration
   uint16_t mode_;       ///< SPI_Mode_Master / SPI_Mode_Slave

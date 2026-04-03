@@ -88,6 +88,7 @@ class STM32SPI : public SPI
   RawData read_buff_;
 
   bool mem_read_ = false;
+  bool recovering_ = false;
 
   static STM32SPI* map[STM32_SPI_NUMBER];  // NOLINT
 };

@@ -493,7 +493,7 @@ class SPI
    */
   inline bool IsDoubleBuffer() const { return config_.double_buffer; }
 
- protected:
+ public:
   AsyncBlockWait block_wait_{};
 
  private:

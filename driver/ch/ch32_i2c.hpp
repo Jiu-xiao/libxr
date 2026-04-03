@@ -97,6 +97,7 @@ class CH32I2C : public I2C
   void StartRxDma(uint32_t len);
 
   void AbortTransfer(ErrorCode ec);
+  void RecoverAfterBlockTimeout();
 
  public:
   I2C_TypeDef* instance_;
@@ -112,6 +113,7 @@ class CH32I2C : public I2C
   RawData read_buff_;
   bool read_ = false;
   bool busy_ = false;
+  bool recovering_ = false;
 
   GPIO_TypeDef* scl_port_;
   uint16_t scl_pin_;

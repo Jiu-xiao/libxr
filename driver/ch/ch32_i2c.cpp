@@ -476,6 +476,34 @@ void CH32I2C::AbortTransfer(ErrorCode ec)
   }
 }
 
+void CH32I2C::RecoverAfterBlockTimeout()
+{
+  recovering_ = true;
+  I2C_ITConfig(instance_, I2C_IT_ERR, DISABLE);
+  I2C_DMACmd(instance_, DISABLE);
+  I2C_DMALastTransferCmd(instance_, DISABLE);
+  DMA_Cmd(dma_tx_channel_, DISABLE);
+  DMA_Cmd(dma_rx_channel_, DISABLE);
+  dma_tx_channel_->CNTR = 0;
+  dma_rx_channel_->CNTR = 0;
+
+  DMA_ClearITPendingBit(CH32_I2C_TX_DMA_IT_MAP[id_]);
+  DMA_ClearITPendingBit(CH32_I2C_RX_DMA_IT_MAP[id_]);
+
+  I2C_AcknowledgeConfig(instance_, ENABLE);
+  I2C_NACKPositionConfig(instance_, I2C_NACKPosition_Current);
+  I2C_GenerateSTOP(instance_, ENABLE);
+  (void)WaitFlag(I2C_FLAG_BUSY, RESET, K_DEFAULT_TIMEOUT_US);
+
+  busy_ = false;
+  read_ = false;
+  read_op_ = {};
+  write_op_ = {};
+  read_buff_ = {nullptr, 0};
+  I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
+  recovering_ = false;
+}
+
 ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOperation& op,
                          bool in_isr)
 {
@@ -531,7 +559,12 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
   op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    return block_wait_.Wait(op.data.sem_info.timeout);
+    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+    if (ans == ErrorCode::TIMEOUT)
+    {
+      RecoverAfterBlockTimeout();
+    }
+    return ans;
   }
   return ErrorCode::OK;
 }
@@ -587,7 +620,12 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
   op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
-    return block_wait_.Wait(op.data.sem_info.timeout);
+    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+    if (ans == ErrorCode::TIMEOUT)
+    {
+      RecoverAfterBlockTimeout();
+    }
+    return ans;
   }
   return ErrorCode::OK;
 }
@@ -657,7 +695,12 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    return block_wait_.Wait(op.data.sem_info.timeout);
+    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+    if (ans == ErrorCode::TIMEOUT)
+    {
+      RecoverAfterBlockTimeout();
+    }
+    return ans;
   }
   return ErrorCode::OK;
 }
@@ -786,7 +829,12 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
-    return block_wait_.Wait(op.data.sem_info.timeout);
+    const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
+    if (ans == ErrorCode::TIMEOUT)
+    {
+      RecoverAfterBlockTimeout();
+    }
+    return ans;
   }
   return ErrorCode::OK;
 }
@@ -801,6 +849,11 @@ void CH32I2C::TxDmaIRQHandler()
 
   DMA_Cmd(dma_tx_channel_, DISABLE);
   I2C_DMACmd(instance_, DISABLE);
+
+  if (recovering_ || !busy_)
+  {
+    return;
+  }
 
   (void)WaitFlag(I2C_FLAG_BTF, SET, 20000);
   I2C_GenerateSTOP(instance_, ENABLE);
@@ -827,6 +880,11 @@ void CH32I2C::RxDmaIRQHandler()
   DMA_Cmd(dma_rx_channel_, DISABLE);
   I2C_DMACmd(instance_, DISABLE);
   I2C_DMALastTransferCmd(instance_, DISABLE);
+
+  if (recovering_ || !busy_)
+  {
+    return;
+  }
 
   I2C_GenerateSTOP(instance_, ENABLE);
 
@@ -867,7 +925,7 @@ void CH32I2C::ErrorIRQHandler()
     }
   }
 
-  if (has_err && busy_)
+  if (has_err && busy_ && !recovering_)
   {
     AbortTransfer(ErrorCode::FAILED);
   }

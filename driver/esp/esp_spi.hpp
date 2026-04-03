@@ -78,6 +78,7 @@ class ESP32SPI : public SPI
   void HandleInterrupt();
 
   void FinishAsync(bool in_isr, ErrorCode ec);
+  void RecoverAfterBlockTimeout();
 
   bool CanUseDma(size_t size) const;
 
@@ -121,6 +122,7 @@ class ESP32SPI : public SPI
   bool dbuf_enabled_ = false;
   intr_handle_t intr_handle_ = nullptr;
   bool intr_installed_ = false;
+  bool recovering_ = false;
   bool dma_enabled_ = false;
   void* dma_ctx_ = nullptr;
   size_t dma_max_transfer_bytes_ = 0;
