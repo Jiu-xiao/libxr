@@ -277,6 +277,11 @@ ErrorCode MSPM0SPI::CompleteDmaOperation(OperationRW& op, bool in_isr)
     dma_mode_ = DmaMode::DUPLEX;
     dma_result_ = ErrorCode::TIMEOUT;
     rw_op_ = OperationRW();
+    // Drain any timeout-race semaphore credits posted right before IRQ disable,
+    // so the next BLOCK transfer cannot consume a stale completion signal.
+    while (op.data.sem_info.sem->Wait(0U) == ErrorCode::OK)
+    {
+    }
 
     if (IRQ_WAS_ENABLED)
     {
