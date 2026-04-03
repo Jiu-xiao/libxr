@@ -6,6 +6,14 @@
 
 using namespace LibXR;
 
+namespace
+{
+constexpr uint32_t MSPM0_SPI_DMA_INTERRUPT_MASK =
+    DL_SPI_INTERRUPT_DMA_DONE_RX | DL_SPI_INTERRUPT_DMA_DONE_TX |
+    DL_SPI_INTERRUPT_TX_UNDERFLOW | DL_SPI_INTERRUPT_PARITY_ERROR |
+    DL_SPI_INTERRUPT_RX_OVERFLOW | DL_SPI_INTERRUPT_RX_TIMEOUT;
+}  // namespace
+
 MSPM0SPI* MSPM0SPI::instance_map_[MAX_SPI_INSTANCES] = {nullptr};
 
 MSPM0SPI::MSPM0SPI(Resources res, RawData dma_rx_buffer, RawData dma_tx_buffer,
@@ -255,11 +263,25 @@ ErrorCode MSPM0SPI::CompleteDmaOperation(OperationRW& op, bool in_isr)
   const ErrorCode WAIT_ANS = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
   if (WAIT_ANS == ErrorCode::TIMEOUT)
   {
+    const bool IRQ_WAS_ENABLED = (NVIC_GetEnableIRQ(res_.irqn) != 0U);
+    if (IRQ_WAS_ENABLED)
+    {
+      NVIC_DisableIRQ(res_.irqn);
+    }
+
     StopDma();
+    DL_SPI_clearInterruptStatus(res_.instance, MSPM0_SPI_DMA_INTERRUPT_MASK);
+    NVIC_ClearPendingIRQ(res_.irqn);
+
     busy_ = false;
     dma_mode_ = DmaMode::DUPLEX;
     dma_result_ = ErrorCode::TIMEOUT;
     rw_op_ = OperationRW();
+
+    if (IRQ_WAS_ENABLED)
+    {
+      NVIC_EnableIRQ(res_.irqn);
+    }
     return ErrorCode::TIMEOUT;
   }
 
@@ -325,6 +347,9 @@ ErrorCode MSPM0SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
   if (NEED > dma_enable_min_size_)
   {
+    DL_SPI_clearInterruptStatus(res_.instance, MSPM0_SPI_DMA_INTERRUPT_MASK);
+    NVIC_ClearPendingIRQ(res_.irqn);
+
     mem_read_ = false;
     read_buff_ = read_data;
     rw_op_ = op;
@@ -388,6 +413,9 @@ ErrorCode MSPM0SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 
   if (size > dma_enable_min_size_)
   {
+    DL_SPI_clearInterruptStatus(res_.instance, MSPM0_SPI_DMA_INTERRUPT_MASK);
+    NVIC_ClearPendingIRQ(res_.irqn);
+
     mem_read_ = false;
     dma_mode_ = DmaMode::DUPLEX;
     read_buff_ = {nullptr, 0};
@@ -444,6 +472,9 @@ ErrorCode MSPM0SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
 
   if (TOTAL > dma_enable_min_size_)
   {
+    DL_SPI_clearInterruptStatus(res_.instance, MSPM0_SPI_DMA_INTERRUPT_MASK);
+    NVIC_ClearPendingIRQ(res_.irqn);
+
     mem_read_ = true;
     dma_mode_ = DmaMode::DUPLEX;
     read_buff_ = read_data;
@@ -502,6 +533,9 @@ ErrorCode MSPM0SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
 
   if (TOTAL > dma_enable_min_size_)
   {
+    DL_SPI_clearInterruptStatus(res_.instance, MSPM0_SPI_DMA_INTERRUPT_MASK);
+    NVIC_ClearPendingIRQ(res_.irqn);
+
     mem_read_ = false;
     dma_mode_ = DmaMode::TX_ONLY;
     read_buff_ = {nullptr, 0};
@@ -544,6 +578,12 @@ void MSPM0SPI::OnInterrupt(uint8_t index)
 
 void MSPM0SPI::HandleInterrupt()
 {
+  if (!busy_)
+  {
+    DL_SPI_clearInterruptStatus(res_.instance, MSPM0_SPI_DMA_INTERRUPT_MASK);
+    return;
+  }
+
   auto drain_rx_fifo = [this]() -> bool
   {
     constexpr uint32_t RX_FIFO_DRAIN_MAX_ITERATIONS = 1024U;
