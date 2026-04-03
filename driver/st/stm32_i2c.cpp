@@ -100,6 +100,7 @@ static inline ErrorCode HalTransferResult(const I2C_HandleTypeDef* hi2c)
 static inline ErrorCode MapHalStartFailure(const I2C_HandleTypeDef* hi2c,
                                            HAL_StatusTypeDef st)
 {
+  // Preserve HAL's immediate start-failure signal without forcing a full controller reset.
 #ifdef HAL_I2C_ERROR_NONE
   const uint32_t err = hi2c->ErrorCode;
 #ifdef HAL_I2C_WRONG_START
@@ -118,71 +119,6 @@ static inline ErrorCode MapHalStartFailure(const I2C_HandleTypeDef* hi2c,
   UNUSED(hi2c);
 #endif
   return (st == HAL_BUSY) ? ErrorCode::BUSY : ErrorCode::FAILED;
-}
-
-static void RecoverAfterBlockFailure(STM32I2C* i2c)
-{
-  ASSERT(i2c != nullptr);
-
-  auto* hi2c = i2c->i2c_handle_;
-
-#if defined(I2C_IT_EVT) && defined(I2C_IT_BUF) && defined(I2C_IT_ERR)
-  __HAL_I2C_DISABLE_IT(hi2c, I2C_IT_EVT | I2C_IT_BUF | I2C_IT_ERR);
-#endif
-
-  if (hi2c->hdmarx != nullptr)
-  {
-    (void)HAL_DMA_Abort(hi2c->hdmarx);
-  }
-  if (hi2c->hdmatx != nullptr)
-  {
-    (void)HAL_DMA_Abort(hi2c->hdmatx);
-  }
-
-#ifdef __HAL_I2C_DISABLE
-  __HAL_I2C_DISABLE(hi2c);
-#endif
-#ifdef I2C_CR1_SWRST
-  SET_BIT(hi2c->Instance->CR1, I2C_CR1_SWRST);
-  CLEAR_BIT(hi2c->Instance->CR1, I2C_CR1_SWRST);
-#endif
-
-  (void)HAL_I2C_DeInit(hi2c);
-  (void)HAL_I2C_Init(hi2c);
-
-  hi2c->pBuffPtr = nullptr;
-  hi2c->XferSize = 0;
-  hi2c->XferCount = 0;
-  hi2c->XferOptions = 0;
-  hi2c->PreviousState = 0;
-  hi2c->Lock = HAL_UNLOCKED;
-  hi2c->State = HAL_I2C_STATE_READY;
-  hi2c->Mode = HAL_I2C_MODE_NONE;
-#ifdef HAL_I2C_ERROR_NONE
-  hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
-#else
-  hi2c->ErrorCode = 0;
-#endif
-  hi2c->Devaddress = 0;
-  hi2c->Memaddress = 0;
-  hi2c->MemaddSize = 0;
-#if defined(STM32F1)
-  hi2c->EventCount = 0;
-#endif
-
-#ifdef __HAL_I2C_ENABLE
-  __HAL_I2C_ENABLE(hi2c);
-#endif
-
-  i2c->read_ = false;
-  i2c->read_buff_ = {nullptr, 0};
-}
-
-static inline ErrorCode HandleBlockStartFailure(STM32I2C* i2c, HAL_StatusTypeDef st)
-{
-  const ErrorCode ans = MapHalStartFailure(i2c->i2c_handle_, st);
-  RecoverAfterBlockFailure(i2c);
-  return ans;
 }
 
 }  // namespace
@@ -216,6 +152,7 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     read_buff_ = read_data;
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
       block_wait_.Start(*op.data.sem_info.sem);
     }
     const HAL_StatusTypeDef st = HAL_I2C_Master_Receive_DMA(
@@ -226,19 +163,14 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
         block_wait_.Cancel();
-        return HandleBlockStartFailure(this, st);
+        return MapHalStartFailure(i2c_handle_, st);
       }
       return ErrorCode::BUSY;
     }
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -278,6 +210,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     write_op_ = op;
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
       block_wait_.Start(*op.data.sem_info.sem);
     }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -292,19 +225,14 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
         block_wait_.Cancel();
-        return HandleBlockStartFailure(this, st);
+        return MapHalStartFailure(i2c_handle_, st);
       }
       return ErrorCode::BUSY;
     }
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -343,6 +271,7 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     read_buff_ = read_data;
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
       block_wait_.Start(*op.data.sem_info.sem);
     }
     const HAL_StatusTypeDef st = HAL_I2C_Mem_Read_DMA(
@@ -355,19 +284,14 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
       if (op.type == ReadOperation::OperationType::BLOCK)
       {
         block_wait_.Cancel();
-        return HandleBlockStartFailure(this, st);
+        return MapHalStartFailure(i2c_handle_, st);
       }
       return ErrorCode::BUSY;
     }
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -412,6 +336,7 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     write_op_ = op;
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
       block_wait_.Start(*op.data.sem_info.sem);
     }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -428,19 +353,14 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
       if (op.type == WriteOperation::OperationType::BLOCK)
       {
         block_wait_.Cancel();
-        return HandleBlockStartFailure(this, st);
+        return MapHalStartFailure(i2c_handle_, st);
       }
       return ErrorCode::BUSY;
     }
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      const ErrorCode ans = block_wait_.Wait(op.data.sem_info.timeout);
-      if (ans == ErrorCode::TIMEOUT)
-      {
-        RecoverAfterBlockFailure(this);
-      }
-      return ans;
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
