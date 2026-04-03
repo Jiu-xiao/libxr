@@ -14,7 +14,7 @@ CH32I2C* CH32I2C::map_[CH32_I2C_NUMBER] = {nullptr};
 namespace
 {
 
-constexpr uint32_t kCh32I2CErrorFlags =
+constexpr uint32_t CH32_I2C_ERROR_FLAGS =
     ((I2C_FLAG_BERR & 0xFFFFu) | (I2C_FLAG_ARLO & 0xFFFFu) | (I2C_FLAG_AF & 0xFFFFu) |
      (I2C_FLAG_OVR & 0xFFFFu) | (I2C_FLAG_PECERR & 0xFFFFu) |
      (I2C_FLAG_TIMEOUT & 0xFFFFu) | (I2C_FLAG_SMBALERT & 0xFFFFu));
@@ -168,7 +168,7 @@ bool CH32I2C::WaitEvent(uint32_t evt, uint32_t timeout_us)
   const uint64_t START = static_cast<uint64_t>(Timebase::GetMicroseconds());
   while ((static_cast<uint64_t>(Timebase::GetMicroseconds()) - START) < timeout_us)
   {
-    if ((instance_->STAR1 & kCh32I2CErrorFlags) != 0u)
+    if ((instance_->STAR1 & CH32_I2C_ERROR_FLAGS) != 0u)
     {
       return false;
     }
@@ -185,7 +185,7 @@ bool CH32I2C::WaitFlag(uint32_t flag, FlagStatus st, uint32_t timeout_us)
   const uint64_t START = static_cast<uint64_t>(Timebase::GetMicroseconds());
   while ((static_cast<uint64_t>(Timebase::GetMicroseconds()) - START) < timeout_us)
   {
-    if ((flag != I2C_FLAG_BUSY) && ((instance_->STAR1 & kCh32I2CErrorFlags) != 0u))
+    if ((flag != I2C_FLAG_BUSY) && ((instance_->STAR1 & CH32_I2C_ERROR_FLAGS) != 0u))
     {
       return false;
     }
