@@ -89,11 +89,11 @@ class MSPM0I2C : public I2C
   bool dma_enabled_ = false;
 };
 
-#define MSPM0_I2C_INIT(name, stage_addr, stage_size, irq_min_size)                          \
+#define MSPM0_I2C_INIT(name, stage_addr, stage_size, dma_min_size)                          \
   ::LibXR::MSPM0I2C::Resources{name##_INST, name##_INST_INT_IRQN,                           \
                                static_cast<uint32_t>(CPUCLK_FREQ),                           \
                                static_cast<uint32_t>(name##_BUS_SPEED_HZ),                   \
                                ::LibXR::MSPM0I2C::ResolveIndex(name##_INST_INT_IRQN)},       \
-      ::LibXR::RawData{(stage_addr), (stage_size)}, (irq_min_size)
+      ::LibXR::RawData{(stage_addr), (stage_size)}, (dma_min_size)
 
 }  // namespace LibXR

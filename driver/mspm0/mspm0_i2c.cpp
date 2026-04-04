@@ -651,6 +651,10 @@ ErrorCode MSPM0I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 {
   const size_t ADDR_SIZE = (mem_addr_size == MemAddrLength::BYTE_8) ? 1 : 2;
   const size_t TOTAL_SIZE = ADDR_SIZE + write_data.size_;
+  if (TOTAL_SIZE > MSPM0_I2C_MAX_TRANSFER_SIZE)
+  {
+    return ErrorCode::ARG_ERR;
+  }
   if (TOTAL_SIZE > stage_buffer_.size_)
   {
     return ErrorCode::ARG_ERR;
