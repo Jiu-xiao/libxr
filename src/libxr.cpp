@@ -20,7 +20,7 @@ extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr)
 
       if (!LibXR::Assert::libxr_fatal_error_callback_.Empty())
       {
-        LibXR::Assert::libxr_fatal_error_callback_.Run(in_isr, file, line);
+        LibXR::Assert::libxr_fatal_error_callback_.Run(false, file, line);
       }
 
       LibXR::Thread::Sleep(500);

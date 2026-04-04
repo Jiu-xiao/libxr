@@ -263,7 +263,7 @@ void Topic::Publish(void* addr, uint32_t size)
       case SuberType::QUEUE:
       {
         auto queue_block = reinterpret_cast<QueueBlock*>(&block);
-        queue_block->fun(data, queue_block->queue, false);
+        queue_block->fun(data, queue_block->queue);
         break;
       }
       case SuberType::CALLBACK:
@@ -330,7 +330,7 @@ void Topic::PublishFromCallback(void* addr, uint32_t size, bool in_isr)
       case SuberType::QUEUE:
       {
         auto queue_block = reinterpret_cast<QueueBlock*>(&block);
-        queue_block->fun(data, queue_block->queue, false);
+        queue_block->fun(data, queue_block->queue);
         break;
       }
       case SuberType::CALLBACK:

@@ -407,8 +407,8 @@ class Topic
   typedef struct QueueBlock : public SuberBlock
   {
     void* queue;  ///< 指向订阅队列的指针 Pointer to the subscribed queue
-    void (*fun)(RawData&, void*,
-                bool);  ///< 处理数据的回调函数 Callback function to handle data
+    void (*fun)(RawData&,
+                void*);  ///< 处理数据的回调函数 Callback function to handle data
   } QueueBlock;
 
   class QueuedSubscriber
@@ -458,9 +458,8 @@ class Topic
       auto block = new LockFreeList::Node<QueueBlock>;
       block->data_.type = SuberType::QUEUE;
       block->data_.queue = &queue;
-      block->data_.fun = [](RawData& data, void* arg, bool in_isr)
+      block->data_.fun = [](RawData& data, void* arg)
       {
-        UNUSED(in_isr);
         LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(arg);
         queue->Push(*reinterpret_cast<Data*>(data.addr_));
       };

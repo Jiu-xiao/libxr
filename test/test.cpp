@@ -33,6 +33,7 @@ static void run_libxr_tests()
   XR_LOG_INFO("Running LibXR Tests...\n");
 
   TestCase core_tests[] = {
+      {"callback", test_cb},
       {"pipe", test_pipe},
       {"rw", test_rw},
       {"memory", test_memory},
