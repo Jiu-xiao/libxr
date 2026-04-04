@@ -116,7 +116,8 @@ void ESP32USBEndpoint::Close()
 
 ErrorCode ESP32USBEndpoint::Stall()
 {
-  if (GetState() == State::BUSY)
+  const bool is_in = (GetDirection() == Direction::IN);
+  if ((GetState() == State::BUSY) && is_in)
   {
     return ErrorCode::BUSY;
   }
@@ -124,7 +125,7 @@ ErrorCode ESP32USBEndpoint::Stall()
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
-  if (GetDirection() == Direction::IN)
+  if (is_in)
   {
     if (ep_num == 0U)
     {

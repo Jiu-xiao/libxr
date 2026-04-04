@@ -22,6 +22,11 @@ namespace LibXR::USB
  */
 class CDCBase : public DeviceClass
 {
+ public:
+  static constexpr const char* DEFAULT_CONTROL_INTERFACE_STRING = "XRUSB CDC Control";
+  static constexpr const char* DEFAULT_DATA_INTERFACE_STRING = "XRUSB CDC Data";
+
+ private:
   /// CDC功能描述符子类型定义 / CDC functional descriptor subtypes
   enum class DescriptorSubtype : uint8_t
   {
@@ -130,11 +135,28 @@ class CDCBase : public DeviceClass
    */
   CDCBase(Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
           Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-          Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO)
+          Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO,
+          const char* control_interface_string = DEFAULT_CONTROL_INTERFACE_STRING,
+          const char* data_interface_string = DEFAULT_DATA_INTERFACE_STRING)
       : data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
-        comm_ep_num_(comm_ep_num)
+        comm_ep_num_(comm_ep_num),
+        control_interface_string_(control_interface_string),
+        data_interface_string_(data_interface_string)
   {
+  }
+
+  const char* GetInterfaceString(size_t local_interface_index) const override
+  {
+    switch (local_interface_index)
+    {
+      case 0:
+        return control_interface_string_;
+      case 1:
+        return data_interface_string_;
+      default:
+        return nullptr;
+    }
   }
 
   /**
@@ -272,7 +294,7 @@ class CDCBase : public DeviceClass
                              static_cast<uint8_t>(Class::COMM),
                              static_cast<uint8_t>(Subclass::ABSTRACT_CONTROL_MODEL),
                              static_cast<uint8_t>(Protocol::NONE),
-                             0};
+                             GetInterfaceStringIndex(COMM_INTERFACE)};
 
     // CDC头功能描述符
     desc_block_.cdc_header = {5, DescriptorType::CS_INTERFACE, DescriptorSubtype::HEADER,
@@ -302,7 +324,7 @@ class CDCBase : public DeviceClass
                              static_cast<uint8_t>(Class::DATA),
                              0x00,  // 无子类
                              0x00,  // 无协议
-                             0};
+                             GetInterfaceStringIndex(DATA_INTERFACE)};
 
     // 数据OUT端点描述符
     desc_block_.data_ep_out = {7,
@@ -626,6 +648,10 @@ class CDCBase : public DeviceClass
   Endpoint::EPNumber data_in_ep_num_;   ///< 数据IN端点号 / Data IN endpoint number
   Endpoint::EPNumber data_out_ep_num_;  ///< 数据OUT端点号 / Data OUT endpoint number
   Endpoint::EPNumber comm_ep_num_;      ///< 通信端点号 / Communication endpoint number
+  const char* control_interface_string_ =
+      nullptr;  ///< 控制接口字符串 / Control interface string
+  const char* data_interface_string_ =
+      nullptr;  ///< 数据接口字符串 / Data interface string
 
   // 端点指针
   Endpoint* ep_data_in_ = nullptr;   ///< 数据IN端点 / Data IN endpoint

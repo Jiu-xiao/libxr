@@ -38,11 +38,14 @@ class HIDGamepadT
   /**
    * @brief 构造函数 / Constructor
    * @param in_ep_num IN 端点号（默认自动） / IN endpoint number (auto by default)
+   * @param interface_string 接口字符串 / Interface string
    * @note 仅启用 IN 端点，默认 1ms 轮询 / IN-only, 1 ms polling by default
    */
-  explicit HIDGamepadT(Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO)
+  explicit HIDGamepadT(
+      Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
+      const char* interface_string = HID<50, 9, 0>::DEFAULT_INTERFACE_STRING)
       : HID<50, 9, 0>(false, IN_EP_INTERVAL_MS, /*out_ep_interval*/ 1, in_ep_num,
-                      Endpoint::EPNumber::EP_AUTO)
+                      Endpoint::EPNumber::EP_AUTO, interface_string)
   {
     // 初始化上一帧：轴置中，按钮清零 / Initialize last report: axes to mid, buttons
     // cleared

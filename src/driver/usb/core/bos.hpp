@@ -55,8 +55,6 @@ struct BosVendorResult
 class BosCapability
 {
  public:
-  virtual ~BosCapability() = default;
-
   /**
    * @brief 返回能力块（不含 BOS 头）
    *        Return capability block (without BOS header).
@@ -86,8 +84,6 @@ class BosCapability
 class BosCapabilityProvider
 {
  public:
-  virtual ~BosCapabilityProvider() = default;
-
   /**
    * @brief 获取 BOS 能力数量 / Get BOS capability count
    * @return 能力数量 / Capability count
@@ -128,33 +124,13 @@ class BosManager
   {
   }
 
-  /**
-   * @brief 析构函数 / Destructor
-   */
-  ~BosManager()
-  {
-    delete[] caps_;
-    caps_ = nullptr;
-
-    delete[] reinterpret_cast<uint8_t*>(bos_buffer_.addr_);
-    bos_buffer_ = {nullptr, 0};
-
-    cap_capacity_ = 0;
-    count_ = 0;
-    bos_desc_size_ = 0;
-  }
-
   BosManager(const BosManager&) = delete;
   BosManager& operator=(const BosManager&) = delete;
 
   /**
    * @brief 清空已注册能力 / Clear registered capabilities
    */
-  void ClearCapabilities()
-  {
-    count_ = 0;
-    bos_desc_size_ = 0;
-  }
+  void ClearCapabilities() { count_ = 0; }
 
   /**
    * @brief 添加能力 / Add capability
@@ -243,7 +219,6 @@ class BosManager
       offset += sizeof(USB2_EXT_CAP);
     }
 
-    bos_desc_size_ = offset;
     return {buffer, offset};
   }
 
@@ -292,7 +267,6 @@ class BosManager
   BosCapability** caps_ = nullptr;  ///< 能力指针表 / Capability pointer table
   size_t count_ = 0;                ///< 已注册能力数量 / Registered capability count
 
-  size_t bos_desc_size_ = 0;           ///< 最近一次构建大小 / Last built size
   RawData bos_buffer_ = {nullptr, 0};  ///< BOS 缓冲区 / BOS buffer
 };
 

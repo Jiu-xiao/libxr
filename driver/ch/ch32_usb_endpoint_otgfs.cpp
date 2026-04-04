@@ -347,12 +347,12 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
 
 ErrorCode CH32EndpointOtgFs::Stall()
 {
-  if (GetState() != State::IDLE)
+  const bool is_in = (GetDirection() == Direction::IN);
+  if (GetState() != State::IDLE && !(GetState() == State::BUSY && !is_in))
   {
     return ErrorCode::BUSY;
   }
 
-  bool is_in = (GetDirection() == Direction::IN);
   if (is_in)
   {
     *get_tx_ctrl_addr(GetNumber()) |= USBFS_UEP_T_RES_STALL;

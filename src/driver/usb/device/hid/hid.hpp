@@ -22,6 +22,10 @@ template <size_t REPORT_DESC_LEN, size_t TX_REPORT_LEN, size_t RX_REPORT_LEN = 0
 class HID : public DeviceClass
 {
  public:
+  // Default interface string for HID functions that expose one interface.
+  // 暴露单接口的 HID 功能默认使用这个接口字符串。
+  static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB HID";
+
   /** @brief HID 描述符类型 / HID Descriptor Types */
   enum class HIDDescriptorType : uint8_t
   {
@@ -106,17 +110,27 @@ class HID : public DeviceClass
    * @param out_ep_interval OUT 端点间隔 / OUT endpoint interval
    * @param in_ep_num IN 端点号 / IN endpoint number
    * @param out_ep_num OUT 端点号 / OUT endpoint number
+   * @param interface_string 接口字符串 / Interface string
    */
   HID(bool enable_out_endpoint = false, uint8_t in_ep_interval = 10,
       uint8_t out_ep_interval = 10,
       Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO)
+      Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO,
+      const char* interface_string = DEFAULT_INTERFACE_STRING)
       : in_ep_interval_(in_ep_interval),
         out_ep_interval_(out_ep_interval),
         in_ep_num_(in_ep_num),
         out_ep_num_(out_ep_num),
-        enable_out_endpoint_(enable_out_endpoint)
+        enable_out_endpoint_(enable_out_endpoint),
+        interface_string_(interface_string)
   {
+  }
+
+  const char* GetInterfaceString(size_t local_interface_index) const override
+  {
+    // HID contributes exactly one interface.
+    // HID 只暴露一个接口。
+    return (local_interface_index == 0u) ? interface_string_ : nullptr;
   }
 
  protected:
@@ -157,8 +171,8 @@ class HID : public DeviceClass
         static_cast<uint8_t>(enable_out_endpoint_ ? 2 : 1),  // bNumEndpoints
         0x03,                                                // bInterfaceClass (HID)
         0x00,                                                // bInterfaceSubClass
-        0x00,  // bInterfaceProtocol (可选键盘/鼠标设置1/2)
-        0      // iInterface
+        0x00,                        // bInterfaceProtocol (可选键盘/鼠标设置1/2)
+        GetInterfaceStringIndex(0u)  // iInterface
     };
 
     // 填充HID描述符
@@ -644,6 +658,7 @@ class HID : public DeviceClass
   bool enable_out_endpoint_;  ///< 是否启用 OUT 端点 / Whether OUT endpoint is enabled
   bool inited_ = false;       ///< 初始化标志 / Initialization flag
   size_t itf_num_;            ///< 接口号 / Interface number
+  const char* interface_string_ = nullptr;  ///< 接口字符串 / Interface string
 
   Protocol protocol_ = Protocol::REPORT;  ///< 当前协议类型 / Current protocol
   uint8_t idle_rate_ = 0;                 ///< 当前空闲率/ Current idle rate (unit 4ms)
