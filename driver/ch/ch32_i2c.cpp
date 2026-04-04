@@ -847,6 +847,7 @@ void CH32I2C::ErrorIRQHandler()
 extern "C"
 {
 #if defined(I2C1)
+  void i2_c1_er_irq_handler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
   void i2_c1_er_irq_handler(void)
   {
     auto* p = LibXR::CH32I2C::map_[ch32_i2c_get_id(I2C1)];
@@ -858,6 +859,7 @@ extern "C"
 #endif
 
 #if defined(I2C2)
+  void i2_c2_er_irq_handler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
   void i2_c2_er_irq_handler(void)
   {
     auto* p = LibXR::CH32I2C::map_[ch32_i2c_get_id(I2C2)];
