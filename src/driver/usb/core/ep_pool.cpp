@@ -60,21 +60,21 @@ ErrorCode EndpointPool::Release(Endpoint* ep_info)
 
 ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
 {
-  Endpoint::Direction direction = Endpoint::Direction::OUT;
+  const Endpoint::Direction direction =
+      (ep_addr & 0x80) ? Endpoint::Direction::IN : Endpoint::Direction::OUT;
 
-  if (ep_addr & 0x80)
+  if ((ep_addr & 0x7F) == 0)
   {
-    ep_addr &= 0x7F;  // IN端点地址
-    direction = Endpoint::Direction::IN;
+    ans = (direction == Endpoint::Direction::IN) ? ep0_in_ : ep0_out_;
+    return (ans != nullptr) ? ErrorCode::OK : ErrorCode::NOT_FOUND;
   }
 
   for (uint32_t i = 0; i < SlotCount(); ++i)
   {
     auto& slot_container = (*this)[i];
     auto state = slot_container.slot.state.load(std::memory_order_acquire);
-    if (state == SlotState::READY &&
-        Endpoint::EPNumberToAddr(slot_container.slot.data->GetNumber(),
-                                 slot_container.slot.data->GetDirection()) == ep_addr &&
+    if (state == SlotState::RECYCLE &&
+        slot_container.slot.data->GetAddress() == ep_addr &&
         slot_container.slot.data->GetDirection() == direction)
     {
       ans = slot_container.slot.data;

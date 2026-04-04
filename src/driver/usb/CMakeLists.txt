@@ -7,11 +7,12 @@ endif()
 # Recursively collect translation units; file changes trigger reconfigure.
 file(GLOB_RECURSE XRUSB_ALL_CPP CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
+list(SORT XRUSB_ALL_CPP)
 
 # Recursively collect include directories, including the root directory.
 file(GLOB_RECURSE XRUSB_ALL_PATHS LIST_DIRECTORIES true
      "${CMAKE_CURRENT_LIST_DIR}/*")
-
+list(SORT XRUSB_ALL_PATHS)
 set(XRUSB_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}")
 foreach(path ${XRUSB_ALL_PATHS})
   if(IS_DIRECTORY "${path}")
@@ -19,6 +20,7 @@ foreach(path ${XRUSB_ALL_PATHS})
   endif()
 endforeach()
 list(REMOVE_DUPLICATES XRUSB_INCLUDE_DIRS)
+list(SORT XRUSB_INCLUDE_DIRS)
 
 target_include_directories(xr PUBLIC ${XRUSB_INCLUDE_DIRS})
 target_sources(xr PRIVATE ${XRUSB_ALL_CPP})

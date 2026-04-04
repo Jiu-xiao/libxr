@@ -261,7 +261,8 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
 
 ErrorCode STM32Endpoint::Stall()
 {
-  if (GetState() != State::IDLE)
+  const bool is_in = (GetDirection() == Direction::IN);
+  if (GetState() != State::IDLE && !(GetState() == State::BUSY && !is_in))
   {
     return ErrorCode::BUSY;
   }

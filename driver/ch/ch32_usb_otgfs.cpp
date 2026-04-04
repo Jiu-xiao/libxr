@@ -2,88 +2,13 @@
 // ch32_usb_otgfs.cpp  (OTG FS)
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
+#include "ch32_usb_rcc.hpp"
 #include "ep.hpp"
 
 using namespace LibXR;
 using namespace LibXR::USB;
 
 #if defined(USBFSD)
-
-namespace
-{
-
-static void ch32_usb_clock48_m_config()
-{
-  RCC_ClocksTypeDef clk{};
-  RCC_GetClocksFreq(&clk);
-
-  const uint32_t SYSCLK_HZ = clk.SYSCLK_Frequency;
-
-#if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && \
-    defined(RCC_USBCLKSource_PLLCLK_Div3)
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div1);
-  }
-#if defined(RCC_USB5PRE_JUDGE) && defined(RCC_USBCLKSource_PLLCLK_Div5)
-  else if (SYSCLK_HZ == 240000000u)
-  {
-    ASSERT(RCC_USB5PRE_JUDGE() == SET);
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div5);
-  }
-#endif
-  else
-  {
-    ASSERT(false);
-  }
-
-#elif defined(RCC_USBCLK48MCLKSource_PLLCLK) && \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div1) &&  \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div2) && defined(RCC_USBFSCLKSource_PLLCLK_Div3)
-  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_PLLCLK);
-
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div1);
-  }
-  else
-  {
-    ASSERT(false);
-  }
-
-#else
-  (void)SYSCLK_HZ;
-#endif
-}
-
-static void ch32_usbfs_rcc_enable()
-{
-  ch32_usb_clock48_m_config();
-
-#if defined(RCC_AHBPeriph_USBFS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
-#elif defined(RCC_AHBPeriph_USBOTGFS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
-#endif
-}
-
-}  // namespace
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandler(void)
@@ -96,7 +21,17 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
   constexpr uint8_t CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
                                      USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                      USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
+  auto* out0 = map[0][OUT_IDX];
+  auto* in0 = map[0][IN_IDX];
+  ASSERT(out0 != nullptr);
+  ASSERT(in0 != nullptr);
 
+  // Handle order matches the control-transfer lifecycle:
+  // 1) bus-level recovery
+  // 2) token completion / setup dispatch
+  // 处理顺序与控制传输生命周期保持一致：
+  // 1) 总线级恢复
+  // 2) token 完成与 setup 分发
   while (true)
   {
     const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
@@ -113,6 +48,8 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     uint8_t clear_mask = 0;
 
+    // Reset rebuilds EP0 state and returns the device to "waiting for setup".
+    // reset 会重建 EP0 状态，并把设备恢复到“等待 setup”的初始形态。
     if (PENDING & USBFS_UIF_BUS_RST)
     {
       USBFSD->DEV_ADDR = 0;
@@ -120,23 +57,10 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       LibXR::CH32USBOtgFS::self_->Deinit(true);
       LibXR::CH32USBOtgFS::self_->Init(true);
 
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->tog_ = true;
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->tog_ = true;
-      }
+      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      out0->tog_ = true;
+      in0->tog_ = true;
 
       USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
       USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
@@ -144,28 +68,17 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       clear_mask |= USBFS_UIF_BUS_RST;
     }
 
+    // Suspend follows the same EP0 recovery path; resume is observed later by the host.
+    // suspend 走与 reset 相同的 EP0 恢复路径；resume 由后续主机时序体现。
     if (PENDING & USBFS_UIF_SUSPEND)
     {
       LibXR::CH32USBOtgFS::self_->Deinit(true);
       LibXR::CH32USBOtgFS::self_->Init(true);
 
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-      }
-
-      if (map[0][OUT_IDX])
-      {
-        map[0][OUT_IDX]->tog_ = true;
-      }
-      if (map[0][IN_IDX])
-      {
-        map[0][IN_IDX]->tog_ = true;
-      }
+      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      out0->tog_ = true;
+      in0->tog_ = true;
 
       USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
       USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
@@ -184,35 +97,27 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       {
         case USBFS_UIS_TOKEN_SETUP:
         {
+          // A fresh setup cancels the previous EP0 transaction, so both directions are
+          // reset to IDLE/TOG0 before handing the setup packet to DeviceCore.
+          // 新的 setup 会中断前一笔 EP0 事务，因此这里在把 setup 包交给 DeviceCore
+          // 之前，先把 EP0 的双向状态恢复到 IDLE/TOG0。
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
-          if (map[0][OUT_IDX])
-          {
-            map[0][OUT_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-          }
-          if (map[0][IN_IDX])
-          {
-            map[0][IN_IDX]->SetState(LibXR::USB::Endpoint::State::IDLE);
-          }
-
-          if (map[0][OUT_IDX])
-          {
-            map[0][OUT_IDX]->tog_ = true;
-          }
-          if (map[0][IN_IDX])
-          {
-            map[0][IN_IDX]->tog_ = true;
-          }
+          out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+          in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+          out0->tog_ = true;
+          in0->tog_ = true;
 
           LibXR::CH32USBOtgFS::self_->OnSetupPacket(
-              true,
-              reinterpret_cast<const SetupPacket*>(map[0][OUT_IDX]->GetBuffer().addr_));
+              true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
           break;
         }
 
         case USBFS_UIS_TOKEN_OUT:
         {
+          // OTGFS hardware already reports the completed RX length for this token.
+          // OTGFS 硬件已经给出了本次 token 的完成 RX 长度。
           const uint16_t LEN = USBFSD->RX_LEN;
           if (ep[OUT_IDX])
           {
@@ -223,6 +128,8 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_IN:
         {
+          // IN token completion has no payload length; completion itself is enough.
+          // IN token 完成不需要额外 payload 长度，事件本身就足够了。
           if (ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);
@@ -307,7 +214,17 @@ ErrorCode CH32USBOtgFS::SetAddress(uint8_t address, USB::DeviceCore::Context con
 
 void CH32USBOtgFS::Start(bool)
 {
-  ch32_usbfs_rcc_enable();
+  // OTGFS uses the same shared USB 48 MHz clock selection as FSDEV.
+  // OTGFS 与 FSDEV 共用同一套 USB 48 MHz 时钟选择规则。
+  LibXR::CH32UsbRcc::ConfigureUsb48M();
+#if defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+#endif
+#if defined(RCC_AHBPeriph_USBFS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
+#elif defined(RCC_AHBPeriph_USBOTGFS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
+#endif
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
   USBFSH->BASE_CTRL = 0x00;
   USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;

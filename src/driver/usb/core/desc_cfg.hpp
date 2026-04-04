@@ -21,7 +21,6 @@ constexpr uint8_t CFG_SELF_POWERED = 0x40;   ///< 自供电 / Self-powered
 constexpr uint8_t CFG_REMOTE_WAKEUP = 0x20;  ///< 远程唤醒 / Remote wakeup
 
 class ConfigDescriptor;
-class DeviceCore;
 
 /**
  * @brief USB 配置项基类（功能块）/ USB configuration item base (functional block)
@@ -200,91 +199,51 @@ class ConfigDescriptorItem : public BosCapabilityProvider
 };
 
 /**
- * @brief 配置描述符管理与构建器，并聚合 BOS 能力
- *        Configuration descriptor builder with BOS aggregation.
+ * @brief 配置描述符字节构造器
+ *        Configuration descriptor byte builder.
+ *
+ * @note 该类只负责把已经准备好的配置项描述符块拼成一个 configuration descriptor。
+ *       端点绑定、BOS 聚合、字符串分配、配置切换等职责应由上层 composition 管理。
  */
-class ConfigDescriptor : public BosManager
+class ConfigDescriptor
 {
   using Header = ConfigDescriptorItem::Header;
-
-  /**
-   * @brief 单个 configuration 的配置项集合 / Item set for one configuration
-   */
-  struct Config
-  {
-    ConfigDescriptorItem** items = nullptr;  ///< 配置项指针表 / Item pointer table
-    size_t item_num = 0;                     ///< 配置项数量 / Item count
-  };
-
-  static bool IsCompositeConfig(
-      const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
-          configs);
 
  public:
   /**
    * @brief 构造函数 / Constructor
    *
-   * @param endpoint_pool 端点池 / Endpoint pool
-   * @param configs configuration 列表（每个子列表为一个 configuration）
-   *                Config list (each sub-list is one configuration)
+   * @param buffer_size 配置描述符缓冲区大小 / Configuration descriptor buffer size
    * @param bmAttributes 配置属性 / bmAttributes
    * @param bMaxPower 最大电流（单位 2mA）/ Max power (2mA units)
    */
-  ConfigDescriptor(
-      EndpointPool& endpoint_pool,
+  explicit ConfigDescriptor(size_t buffer_size, uint8_t bmAttributes = CFG_BUS_POWERED,
+                            uint8_t bMaxPower = 50);
+
+  ConfigDescriptor(const ConfigDescriptor&) = delete;
+  ConfigDescriptor& operator=(const ConfigDescriptor&) = delete;
+
+  /**
+   * @brief 计算所有 configuration 中需要的最大缓冲区大小
+   *        Calculate the maximum buffer size required across all configurations.
+   */
+  static size_t CalcMaxConfigSize(
       const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
-          configs,
-      uint8_t bmAttributes = CFG_BUS_POWERED, uint8_t bMaxPower = 50);
+          configs);
 
   /**
-   * @brief 切换当前 configuration / Switch current configuration
-   * @param index 配置索引 / Configuration index
-   * @param in_isr 是否在中断中 / Whether in ISR
+   * @brief 构建指定 configuration 的描述符
+   *        Build the descriptor for the specified configuration.
+   *
+   * @param items 配置项列表 / Configuration item list
+   * @param item_num 配置项数量 / Configuration item count
+   * @param configuration_value 配置值 / Configuration value
+   * @param i_configuration 配置字符串索引 / Configuration string index
    * @return 错误码 / Error code
    */
-  ErrorCode SwitchConfig(size_t index, bool in_isr);
-
-  /**
-   * @brief 绑定当前配置端点 / Bind endpoints for current configuration
-   * @param in_isr 是否在中断中 / Whether in ISR
-   */
-  void BindEndpoints(bool in_isr);
-
-  /**
-   * @brief 解绑当前配置端点 / Unbind endpoints for current configuration
-   * @param in_isr 是否在中断中 / Whether in ISR
-   */
-  void UnbindEndpoints(bool in_isr);
-
-  /**
-   * @brief 构建当前配置描述符 / Build current configuration descriptor
-   * @return 错误码 / Error code
-   */
-  ErrorCode BuildConfigDescriptor();
-
-  /**
-   * @brief 是否为复合设备 / Whether composite device
-   * @return true：复合设备；false：非复合 / true: composite; false: non-composite
-   */
-  [[nodiscard]] bool IsComposite() const;
-
-  /**
-   * @brief 重建 BOS 缓存 / Rebuild BOS cache
-   */
-  void RebuildBosCache();
-
-  /**
-   * @brief 是否允许覆盖设备描述符 / Whether device descriptor override is allowed
-   * @return true：允许；false：不允许 / true: allowed; false: disallowed
-   */
-  [[nodiscard]] bool CanOverrideDeviceDescriptor() const;
-
-  /**
-   * @brief 覆盖设备描述符 / Override device descriptor
-   * @param descriptor 设备描述符 / Device descriptor
-   * @return 错误码 / Error code
-   */
-  ErrorCode OverrideDeviceDescriptor(DeviceDescriptor& descriptor);
+  ErrorCode BuildConfigDescriptor(ConfigDescriptorItem* const* items, size_t item_num,
+                                  uint8_t configuration_value,
+                                  uint8_t i_configuration = 0);
 
   /**
    * @brief 获取配置描述符数据 / Get configuration descriptor data
@@ -292,53 +251,12 @@ class ConfigDescriptor : public BosManager
    */
   [[nodiscard]] RawData GetData() const;
 
-  /**
-   * @brief 配置数量 / Number of configurations
-   * @return 配置数量 / Configuration count
-   */
-  [[nodiscard]] size_t GetConfigNum() const;
-
-  /**
-   * @brief 当前配置索引 / Current configuration index
-   * @return 配置索引 / Configuration index
-   */
-  [[nodiscard]] size_t GetCurrentConfig() const;
-
-  /**
-   * @brief 设备状态（GET_STATUS）/ Device status (GET_STATUS)
-   * @return 设备状态位 / Device status bits
-   */
-  [[nodiscard]] uint16_t GetDeviceStatus() const;
-
-  /**
-   * @brief 按接口号查找配置项 / Find item by interface number
-   * @param index 接口号 / Interface number
-   * @return 配置项指针（可能为空）/ Item pointer (nullable)
-   */
-  [[nodiscard]] ConfigDescriptorItem* FindItemByInterfaceNumber(size_t index) const;
-
-  /**
-   * @brief 按端点地址查找配置项 / Find item by endpoint address
-   * @param addr 端点地址 / Endpoint address
-   * @return 配置项指针（可能为空）/ Item pointer (nullable)
-   */
-  [[nodiscard]] ConfigDescriptorItem* FindItemByEndpointAddress(uint8_t addr) const;
-
  private:
-  bool ep_assigned_ = false;  ///< 端点是否已绑定 / Whether endpoints are assigned
-
-  EndpointPool& endpoint_pool_;  ///< 端点池引用 / Endpoint pool reference
-  uint8_t current_cfg_ = 0;      ///< 当前配置索引 / Current configuration index
-  uint8_t i_configuration_ = 0;  ///< 配置字符串索引 / Configuration string index
   uint8_t bm_attributes_ = CFG_BUS_POWERED;  ///< 配置属性 / bmAttributes
   uint8_t b_max_power_ = 50;  ///< 最大电流（2mA 单位）/ Max power (2mA units)
 
-  const bool COMPOSITE = false;  ///< 是否为复合设备 / Whether composite device
-  const size_t CFG_NUM = 0;      ///< 配置数量 / Configuration count
-  Config* items_ = nullptr;      ///< 配置项集合 / Configuration item set
-
   RawData buffer_{nullptr, 0};  ///< 配置描述符缓冲区 / Configuration descriptor buffer
-  size_t buffer_index_ = 0;     ///< 缓冲区写入位置 / Buffer write index
+  size_t buffer_index_ = 0;     ///< 当前有效字节数 / Current valid byte count
 };
 
 }  // namespace LibXR::USB
