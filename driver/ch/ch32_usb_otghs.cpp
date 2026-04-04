@@ -95,7 +95,7 @@ static void ch32_usbhs_rcc_enable()
 }  // namespace
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" __attribute__((interrupt)) void USBHS_IRQHandler(void)
+extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandler(void)
 {
   auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 

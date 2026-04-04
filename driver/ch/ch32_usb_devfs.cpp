@@ -418,7 +418,8 @@ static void usbdev_fs_irqhandler()
 static void usb_irq_thunk() { usbdev_fs_irqhandler(); }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" __attribute__((interrupt)) void USBWakeUp_IRQHandler(void)
+extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBWakeUp_IRQHandler(
+    void)
 {
 #if defined(EXTI_Line18)
   EXTI_ClearITPendingBit(EXTI_Line18);

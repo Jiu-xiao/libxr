@@ -86,7 +86,7 @@ static void ch32_usbfs_rcc_enable()
 }  // namespace
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
+extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandler(void)
 {
   auto& map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
 
