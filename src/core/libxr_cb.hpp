@@ -9,27 +9,24 @@
 namespace LibXR
 {
 
+template <typename... Args>
+struct CallbackBlockHeader
+{
+  using InvokeFunType = void (*)(void*, bool, Args...);
+
+  InvokeFunType run_fun_ = nullptr;
+};
+
 /**
- * @brief 回调函数封装块，提供重入保护与参数绑定 / Callback block with argument binding
- * and reentrancy guard
- *
- * @details
- *        当回调正在执行时再次触发（重入），不会递归调用回调函数，而是缓存一次“待执行请求”；
- *        待当前执行结束后在同一调用点以循环方式补跑，从而避免无限嵌套（trampoline
- * 扁平化）。 When reentered while running, the callback is not invoked recursively.
- * Instead, one pending request is cached and replayed in a loop after the current
- * invocation completes, flattening recursion via a trampoline-style execution.
+ * @brief 回调函数封装块，提供参数绑定与擦除调用入口 / Callback block with bound argument
+ * and erased invoke entry
  *
  * @tparam ArgType 绑定的第一个参数类型 / Type of the first bound argument
  * @tparam Args 额外的参数类型列表 / Additional argument types
  */
 template <typename ArgType, typename... Args>
-class CallbackBlock
+class CallbackBlock : public CallbackBlockHeader<Args...>
 {
-  bool running_ = false;
-  bool pending_ = false;
-  std::tuple<std::decay_t<Args>...> pending_args_{};
-
  public:
   /**
    * @brief 回调函数类型定义 / Callback function type definition
@@ -47,53 +44,10 @@ class CallbackBlock
    */
   template <typename FunType, typename ArgT>
   CallbackBlock(FunType&& fun, ArgT&& arg)
-      : fun_(std::forward<FunType>(fun)), arg_(std::forward<ArgT>(arg))
+      : CallbackBlockHeader<Args...>{&InvokeThunk},
+        fun_(std::forward<FunType>(fun)),
+        arg_(std::forward<ArgT>(arg))
   {
-  }
-
-  /**
-   * @brief 触发回调执行（带重入保护） / Trigger callback execution with reentrancy guard
-   *
-   * @param in_isr 是否在中断上下文中执行 / Whether executed in ISR context
-   * @param args 额外参数 / Additional arguments
-   *
-   * @note
-   *       若在执行过程中发生重入，本次重入不会递归执行回调，而是写入待执行参数并置
-   * pending 标志；当前执行结束后将补跑一次。
-   *       On reentry, the callback is not invoked recursively. A pending flag is set and
-   * arguments are stored for a single replay after the current run.
-   */
-  void Call(bool in_isr, Args... args)
-  {
-    if (!fun_)
-    {
-      return;
-    }
-
-    if (!running_)
-    {
-      running_ = true;
-
-      auto cur_args = std::tuple<std::decay_t<Args>...>{args...};
-
-      do
-      {
-        pending_ = false;
-        std::apply([&](auto&... a) { fun_(in_isr, arg_, a...); }, cur_args);
-
-        if (pending_)
-        {
-          cur_args = pending_args_;  // overwrite pending args on reentry
-        }
-      } while (pending_);
-
-      running_ = false;
-      return;
-    }
-
-    // reentrant: cache one pending request (overwrite)
-    pending_args_ = std::tuple<std::decay_t<Args>...>{args...};
-    pending_ = true;
   }
 
   /**
@@ -102,41 +56,70 @@ class CallbackBlock
   CallbackBlock(const CallbackBlock& other) = delete;
   CallbackBlock& operator=(const CallbackBlock& other) = delete;
 
-  /**
-   * @brief 移动构造函数，转移回调函数与参数 / Move constructor transferring function and
-   * argument
-   *
-   * @param other 另一个 CallbackBlock 实例 / Another CallbackBlock instance
-   */
-  CallbackBlock(CallbackBlock&& other) noexcept
-      : fun_(std::exchange(other.fun_, nullptr)),
-        arg_(std::move(other.arg_)),
-        in_isr_(other.in_isr_)
+  static void InvokeThunk(void* cb_block, bool in_isr, Args... args)
   {
+    auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
+    cb->Invoke(in_isr, std::forward<Args>(args)...);
   }
 
-  /**
-   * @brief 移动赋值运算符，转移回调函数与参数 / Move assignment operator transferring
-   * function and argument
-   *
-   * @param other 另一个 CallbackBlock 实例 / Another CallbackBlock instance
-   * @return 当前对象引用 / Reference to the current object
-   */
-  CallbackBlock& operator=(CallbackBlock&& other) noexcept
+ protected:
+  void Invoke(bool in_isr, Args... args)
   {
-    if (this != &other)
+    if (!fun_)
     {
-      fun_ = std::exchange(other.fun_, nullptr);
-      arg_ = std::move(other.arg_);
-      in_isr_ = other.in_isr_;
+      return;
     }
-    return *this;
+    fun_(in_isr, arg_, std::forward<Args>(args)...);
+  }
+
+  void (*fun_)(bool, ArgType, Args...);  ///< 绑定的回调函数 / Bound callback function
+  ArgType arg_;                          ///< 绑定的参数 / Bound argument
+};
+
+template <typename ArgType, typename... Args>
+class GuardedCallbackBlock : public CallbackBlock<ArgType, Args...>
+{
+ public:
+  /**
+   * @brief 带防重入保护的回调块 / Callback block with reentry guard
+   */
+  template <typename FunType, typename ArgT>
+  GuardedCallbackBlock(FunType&& fun, ArgT&& arg)
+      : CallbackBlock<ArgType, Args...>(std::forward<FunType>(fun),
+                                        std::forward<ArgT>(arg))
+  {
+    this->run_fun_ = &InvokeThunk;
+  }
+
+  static void InvokeThunk(void* cb_block, bool in_isr, Args... args)
+  {
+    auto* cb = static_cast<GuardedCallbackBlock<ArgType, Args...>*>(cb_block);
+
+    if (!cb->running_)
+    {
+      cb->running_ = true;
+      auto cur_args = std::tuple<std::decay_t<Args>...>{std::forward<Args>(args)...};
+      do
+      {
+        cb->pending_ = false;
+        std::apply([&](auto&... a) { cb->Invoke(in_isr, a...); }, cur_args);
+        if (cb->pending_)
+        {
+          cur_args = cb->pending_args_;
+        }
+      } while (cb->pending_);
+      cb->running_ = false;
+      return;
+    }
+
+    cb->pending_args_ = std::tuple<std::decay_t<Args>...>{std::forward<Args>(args)...};
+    cb->pending_ = true;
   }
 
  private:
-  void (*fun_)(bool, ArgType, Args...);  ///< 绑定的回调函数 / Bound callback function
-  ArgType arg_;                          ///< 绑定的参数 / Bound argument
-  bool in_isr_ = false;  ///< 是否在中断上下文中执行 / Whether executed in ISR context
+  bool running_ = false;
+  bool pending_ = false;
+  std::tuple<std::decay_t<Args>...> pending_args_{};
 };
 
 /**
@@ -148,7 +131,8 @@ class CallbackBlock
 template <typename... Args>
 class Callback
 {
-  static void FunctionDefault(bool, void*, Args...) {}
+  static void FunctionDefault(void*, bool, Args...) {}
+  inline static CallbackBlockHeader<Args...> empty_cb_block_ = {&FunctionDefault};
 
  public:
   /**
@@ -168,20 +152,24 @@ class Callback
   {
     void (*fun_ptr)(bool, ArgType, Args...) = fun;
     auto cb_block = new CallbackBlock<ArgType, Args...>(fun_ptr, arg);
+    return Callback(cb_block);
+  }
 
-    auto cb_fun = [](bool in_isr, void* cb_block, Args... args)
-    {
-      auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
-      cb->Call(in_isr, std::forward<Args>(args)...);
-    };
-
-    return Callback(cb_block, cb_fun);
+  /**
+   * @brief 创建带防重入保护的回调 / Create a guarded callback
+   */
+  template <typename FunType, typename ArgType>
+  [[nodiscard]] static Callback CreateGuarded(FunType fun, ArgType arg)
+  {
+    void (*fun_ptr)(bool, ArgType, Args...) = fun;
+    auto cb_block = new GuardedCallbackBlock<ArgType, Args...>(fun_ptr, arg);
+    return Callback(cb_block);
   }
 
   /**
    * @brief 默认构造函数，创建空回调对象 / Default constructor creating an empty callback
    */
-  Callback() {}
+  Callback() : cb_block_(&empty_cb_block_) {}
 
   Callback(const Callback&) = default;
   Callback& operator=(const Callback&) = default;
@@ -193,8 +181,7 @@ class Callback
    * @param other 另一个 Callback 实例 / Another Callback instance
    */
   Callback(Callback&& other) noexcept
-      : cb_block_(std::exchange(other.cb_block_, nullptr)),
-        cb_fun_(std::exchange(other.cb_fun_, nullptr))
+      : cb_block_(std::exchange(other.cb_block_, &empty_cb_block_))
   {
   }
 
@@ -209,22 +196,15 @@ class Callback
   {
     if (this != &other)
     {
-      cb_block_ = std::exchange(other.cb_block_, nullptr);
-      cb_fun_ = std::exchange(other.cb_fun_, nullptr);
+      cb_block_ = std::exchange(other.cb_block_, &empty_cb_block_);
     }
     return *this;
   }
 
-  /**
-   * @brief 执行回调函数并传递参数 / Execute the callback with arguments
-   *
-   * @param in_isr 是否在中断上下文中执行 / Whether executed in ISR context
-   * @param args 额外传递的参数 / Additional arguments to pass
-   */
   template <typename... PassArgs>
   void Run(bool in_isr, PassArgs&&... args) const
   {
-    cb_fun_(in_isr, cb_block_, std::forward<PassArgs>(args)...);
+    cb_block_->run_fun_(cb_block_, in_isr, std::forward<PassArgs>(args)...);
   }
 
   /**
@@ -233,7 +213,7 @@ class Callback
    * @return true 回调为空 / Callback is empty
    * @return false 回调非空 / Callback is not empty
    */
-  bool Empty() const { return cb_block_ == nullptr; }
+  bool Empty() const { return cb_block_ == &empty_cb_block_; }
 
  private:
   /**
@@ -243,14 +223,13 @@ class Callback
    * @param cb_block 回调块对象指针 / Pointer to the callback block
    * @param cb_fun 回调执行函数指针 / Callback invocation function pointer
    */
-  Callback(void* cb_block, void (*cb_fun)(bool, void*, Args...))
-      : cb_block_(cb_block), cb_fun_(cb_fun)
+  explicit Callback(CallbackBlockHeader<Args...>* cb_block)
+      : cb_block_((cb_block != nullptr) ? cb_block : &empty_cb_block_)
   {
   }
 
-  void* cb_block_ = nullptr;  ///< 回调块指针 / Pointer to the callback block
-  void (*cb_fun_)(bool, void*, Args...) =
-      FunctionDefault;  ///< 回调执行函数指针 / Callback invocation function pointer
+  CallbackBlockHeader<Args...>* cb_block_ =
+      &empty_cb_block_;  ///< 回调块指针 / Pointer to the callback block
 };
 
 }  // namespace LibXR

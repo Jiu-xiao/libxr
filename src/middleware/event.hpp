@@ -53,15 +53,21 @@ class Event
   void Active(uint32_t event);
 
   /**
-   * @brief 从回调函数中触发与特定事件关联的所有回调函数。
-   *        Triggers all callbacks associated with a specific event (interrupt
-   * context).
+   * @brief 从 callback-safe 路径触发与特定事件关联的所有回调函数。
+   *        Triggers all callbacks associated with a specific event from a callback-safe
+   * path.
    *
    * @param list 在非回调函数中获取的事件回调链表指针。 The event callback list pointer
    * obtained from the non-callback function.
    * @param event 要激活的事件 ID。 The event ID to activate.
+   * @param in_isr 当前 callback-safe 路径是否实际位于 ISR。 Whether the current
+   * callback-safe path is actually in ISR context.
+   *
+   * @note 默认值为 true，用于兼容旧代码中“FromCallback 等价于 ISR=true”的调用习惯。
+   *       The default remains true for backward compatibility with older callers that
+   * treated FromCallback as ISR=true.
    */
-  void ActiveFromCallback(CallbackList list, uint32_t event);
+  void ActiveFromCallback(CallbackList list, uint32_t event, bool in_isr = true);
 
   /**
    * @brief 获取指定事件的回调链表指针（必须在非中断上下文中调用）。

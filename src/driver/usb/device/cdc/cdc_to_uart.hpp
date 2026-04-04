@@ -57,7 +57,8 @@ class CDCToUart : public CDCUart
 
     // 1) CDC 读完成回调：从 CDC 读一段数据并写入 UART。
     // 1) CDC read callback: read one chunk from CDC and write it into UART.
-    cb_read_cdc_ = Callback<ErrorCode>::Create(
+    // Guarded to flatten the bridge pump chain.
+    cb_read_cdc_ = Callback<ErrorCode>::CreateGuarded(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
           auto size =
@@ -78,7 +79,8 @@ class CDCToUart : public CDCUart
 
     // 2) UART 写完成回调：继续触发下一次 CDC 读。
     // 2) UART write-complete callback: trigger the next CDC read.
-    cb_uart_write_ = Callback<ErrorCode>::Create(
+    // Guarded to flatten the bridge pump chain.
+    cb_uart_write_ = Callback<ErrorCode>::CreateGuarded(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
           auto ans = cdc_to_uart->Read({nullptr, 0}, cdc_to_uart->op_read_cdc_, in_isr);
@@ -90,7 +92,8 @@ class CDCToUart : public CDCUart
 
     // 3) UART 读完成回调：从 UART 读一段数据并写入 CDC。
     // 3) UART read callback: read one chunk from UART and write it into CDC.
-    cb_uart_read_ = Callback<ErrorCode>::Create(
+    // Guarded to flatten the bridge pump chain.
+    cb_uart_read_ = Callback<ErrorCode>::CreateGuarded(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
           auto size = LibXR::min(cdc_to_uart->uart_.read_port_->Size(),
@@ -111,7 +114,8 @@ class CDCToUart : public CDCUart
 
     // 4) CDC 写完成回调：继续触发下一次 UART 读。
     // 4) CDC write-complete callback: trigger the next UART read.
-    cb_cdc_write_ = Callback<ErrorCode>::Create(
+    // Guarded to flatten the bridge pump chain.
+    cb_cdc_write_ = Callback<ErrorCode>::CreateGuarded(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
           auto ans_uart_read =
