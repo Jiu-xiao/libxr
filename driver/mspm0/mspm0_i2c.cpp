@@ -585,13 +585,14 @@ ErrorCode MSPM0I2C::DmaRead7(uint16_t addr7, RawData read_data)
   return last_error;
 }
 
-ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op)
+ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
+                         bool in_isr)
 {
   if (read_data.size_ == 0)
   {
     if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -609,19 +610,19 @@ ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
 
   if (op.type != ReadOperation::OperationType::BLOCK)
   {
-    op.UpdateStatus(false, ans);
+    op.UpdateStatus(in_isr, ans);
   }
   return ans;
 }
 
 ErrorCode MSPM0I2C::Write(uint16_t slave_addr, ConstRawData write_data,
-                          WriteOperation& op)
+                          WriteOperation& op, bool in_isr)
 {
   if (write_data.size_ == 0)
   {
     if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -640,14 +641,14 @@ ErrorCode MSPM0I2C::Write(uint16_t slave_addr, ConstRawData write_data,
 
   if (op.type != WriteOperation::OperationType::BLOCK)
   {
-    op.UpdateStatus(false, ans);
+    op.UpdateStatus(in_isr, ans);
   }
   return ans;
 }
 
 ErrorCode MSPM0I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                              ConstRawData write_data, WriteOperation& op,
-                             MemAddrLength mem_addr_size)
+                             MemAddrLength mem_addr_size, bool in_isr)
 {
   const size_t ADDR_SIZE = (mem_addr_size == MemAddrLength::BYTE_8) ? 1 : 2;
   const size_t TOTAL_SIZE = ADDR_SIZE + write_data.size_;
@@ -675,11 +676,12 @@ ErrorCode MSPM0I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     memcpy(tx + ADDR_SIZE, write_data.addr_, write_data.size_);
   }
 
-  return Write(slave_addr, ConstRawData(tx, TOTAL_SIZE), op);
+  return Write(slave_addr, ConstRawData(tx, TOTAL_SIZE), op, in_isr);
 }
 
 ErrorCode MSPM0I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
-                            ReadOperation& op, MemAddrLength mem_addr_size)
+                            ReadOperation& op, MemAddrLength mem_addr_size,
+                            bool in_isr)
 {
   if (read_data.size_ > MSPM0_I2C_MAX_TRANSFER_SIZE)
   {
@@ -689,7 +691,7 @@ ErrorCode MSPM0I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   {
     if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      op.UpdateStatus(false, ErrorCode::OK);
+      op.UpdateStatus(in_isr, ErrorCode::OK);
     }
     return ErrorCode::OK;
   }
@@ -716,7 +718,7 @@ ErrorCode MSPM0I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   {
     if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      op.UpdateStatus(false, code);
+      op.UpdateStatus(in_isr, code);
     }
     return code;
   };

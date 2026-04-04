@@ -22,17 +22,21 @@ class MSPM0I2C : public I2C
   MSPM0I2C(Resources res, RawData stage_buffer, uint32_t dma_enable_min_size = 8,
            I2C::Configuration config = {100000});
 
-  ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op) override;
+  ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
+                 bool in_isr = false) override;
 
-  ErrorCode Write(uint16_t slave_addr, ConstRawData write_data, WriteOperation& op) override;
+  ErrorCode Write(uint16_t slave_addr, ConstRawData write_data, WriteOperation& op,
+                  bool in_isr = false) override;
 
   ErrorCode MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
                     ReadOperation& op,
-                    MemAddrLength mem_addr_size = MemAddrLength::BYTE_8) override;
+                    MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
+                    bool in_isr = false) override;
 
   ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr, ConstRawData write_data,
                      WriteOperation& op,
-                     MemAddrLength mem_addr_size = MemAddrLength::BYTE_8) override;
+                     MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
+                     bool in_isr = false) override;
 
   ErrorCode SetConfig(Configuration config) override;
 
