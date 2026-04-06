@@ -405,6 +405,8 @@ void IRAM_ATTR ESP32SPI::FinishAsync(bool in_isr, ErrorCode ec)
   spi_ll_clear_int_stat(hw_);
 
   RawData rx = {nullptr, 0U};
+  const RawData read_back = read_back_;
+  const bool mem_read = mem_read_;
   if ((ec == ErrorCode::OK) && async_dma_rx_enabled_)
   {
     rx = GetRxBuffer();
@@ -416,23 +418,23 @@ void IRAM_ATTR ESP32SPI::FinishAsync(bool in_isr, ErrorCode ec)
 #endif
   }
 
-  if ((ec == ErrorCode::OK) && (read_back_.size_ > 0U))
+  if ((ec == ErrorCode::OK) && (read_back.size_ > 0U))
   {
     if (rx.addr_ == nullptr)
     {
       rx = GetRxBuffer();
     }
     uint8_t* src = static_cast<uint8_t*>(rx.addr_);
-    if (mem_read_)
+    if (mem_read)
     {
-      ASSERT(rx.size_ >= (read_back_.size_ + 1U));
+      ASSERT(rx.size_ >= (read_back.size_ + 1U));
       src += 1;
     }
     else
     {
-      ASSERT(rx.size_ >= read_back_.size_);
+      ASSERT(rx.size_ >= read_back.size_);
     }
-    Memory::FastCopy(read_back_.addr_, src, read_back_.size_);
+    Memory::FastCopy(read_back.addr_, src, read_back.size_);
   }
 
   if (ec == ErrorCode::OK)
@@ -446,7 +448,14 @@ void IRAM_ATTR ESP32SPI::FinishAsync(bool in_isr, ErrorCode ec)
   mem_read_ = false;
   read_back_ = {nullptr, 0};
   Release();
-  rw_op_.UpdateStatus(in_isr, ec);
+  if (rw_op_.type == OperationRW::OperationType::BLOCK)
+  {
+    (void)block_wait_.TryPost(in_isr, ec);
+  }
+  else
+  {
+    rw_op_.UpdateStatus(in_isr, ec);
+  }
 }
 
 ErrorCode ESP32SPI::SetConfig(SPI::Configuration config)
@@ -670,6 +679,10 @@ ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t si
   mem_read_ = mem_read;
   async_dma_size_ = size;
   async_dma_rx_enabled_ = rx_enabled;
+  if (op.type == OperationRW::OperationType::BLOCK)
+  {
+    block_wait_.Start(*op.data.sem_info.sem);
+  }
   started = true;
 
   // On ESP32 classic, enable data lines only after DMA descriptors/channels are ready.
@@ -684,7 +697,7 @@ ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t si
   op.MarkAsRunning();
   if (op.type == OperationRW::OperationType::BLOCK)
   {
-    return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+    return block_wait_.Wait(op.data.sem_info.timeout);
   }
   return ErrorCode::OK;
 }

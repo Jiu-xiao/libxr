@@ -118,6 +118,7 @@ class ESP32SPI : public SPI
   size_t dbuf_rx_block_size_ = 0;
   size_t dbuf_tx_block_size_ = 0;
   uint8_t dbuf_active_block_ = 0;
+  AsyncBlockWait block_wait_{};
   bool dbuf_enabled_ = false;
   intr_handle_t intr_handle_ = nullptr;
   bool intr_installed_ = false;

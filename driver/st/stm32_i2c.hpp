@@ -106,6 +106,8 @@ class STM32I2C : public I2C
   RawData read_buff_;
 
   bool read_ = false;
+  bool recovering_ = false;
+  AsyncBlockWait block_wait_{};
 
   static STM32I2C* map[STM32_I2C_NUMBER];  // NOLINT
 };

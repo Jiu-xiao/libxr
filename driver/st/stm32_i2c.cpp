@@ -87,6 +87,69 @@ static inline uint16_t EncodeHalDevAddress(const I2C_HandleTypeDef* hi2c,
   return static_cast<uint16_t>((slave_addr & 0x007F) << 1);
 }
 
+static inline ErrorCode MapHalStartFailure(const I2C_HandleTypeDef* hi2c,
+                                           HAL_StatusTypeDef st)
+{
+  // Preserve HAL's immediate start-failure signal without forcing a full controller
+  // reset.
+#ifdef HAL_I2C_ERROR_NONE
+  const uint32_t err = hi2c->ErrorCode;
+#ifdef HAL_I2C_WRONG_START
+  if ((err & (HAL_I2C_ERROR_TIMEOUT | HAL_I2C_WRONG_START)) != 0U)
+#else
+  if ((err & HAL_I2C_ERROR_TIMEOUT) != 0U)
+#endif
+  {
+    return ErrorCode::TIMEOUT;
+  }
+  if (err != HAL_I2C_ERROR_NONE)
+  {
+    return ErrorCode::FAILED;
+  }
+#else
+  UNUSED(hi2c);
+#endif
+  return (st == HAL_BUSY) ? ErrorCode::BUSY : ErrorCode::FAILED;
+}
+
+static void RecoverAfterBlockTimeout(STM32I2C* i2c)
+{
+  ASSERT(i2c != nullptr);
+
+  auto* hi2c = i2c->i2c_handle_;
+  i2c->recovering_ = true;
+  if (hi2c->hdmarx != nullptr)
+  {
+    (void)HAL_DMA_Abort(hi2c->hdmarx);
+  }
+  if (hi2c->hdmatx != nullptr)
+  {
+    (void)HAL_DMA_Abort(hi2c->hdmatx);
+  }
+
+  // Re-open the HAL handle after a detached BLOCK timeout without touching
+  // the larger software-side callback/semaphore semantics.
+  (void)HAL_I2C_DeInit(hi2c);
+  (void)HAL_I2C_Init(hi2c);
+
+  i2c->read_ = false;
+  i2c->read_op_ = {};
+  i2c->write_op_ = {};
+  i2c->read_buff_ = {nullptr, 0};
+  i2c->recovering_ = false;
+}
+
+static inline ErrorCode WaitBlockResultAndRecoverTimeout(STM32I2C* i2c, uint32_t timeout)
+{
+  ASSERT(i2c != nullptr);
+  const ErrorCode ans = i2c->block_wait_.Wait(timeout);
+  if (ans == ErrorCode::TIMEOUT)
+  {
+    RecoverAfterBlockTimeout(i2c);
+  }
+  return ans;
+}
+
 }  // namespace
 
 STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
@@ -115,14 +178,28 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
   if (read_data.size_ > dma_enable_min_size_)
   {
     read_op_ = op;
-    HAL_I2C_Master_Receive_DMA(i2c_handle_, dev_addr,
-                               reinterpret_cast<uint8_t*>(dma_buff_.addr_),
-                               read_data.size_);
     read_buff_ = read_data;
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
+    const HAL_StatusTypeDef st = HAL_I2C_Master_Receive_DMA(
+        i2c_handle_, dev_addr, reinterpret_cast<uint8_t*>(dma_buff_.addr_),
+        read_data.size_);
+    if (st != HAL_OK)
+    {
+      if (op.type == ReadOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+        return MapHalStartFailure(i2c_handle_, st);
+      }
+      return ErrorCode::BUSY;
+    }
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -135,10 +212,9 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
                    : ErrorCode::BUSY;
     // BLOCK 模式下沿用统一状态更新路径。
     // Reuse the same status update path for BLOCK mode.
-    op.UpdateStatus(in_isr, ans);
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ans);
     }
     return ans;
   }
@@ -161,17 +237,31 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
   if (write_data.size_ > dma_enable_min_size_)
   {
     write_op_ = op;
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(dma_buff_.addr_),
                             write_data.size_);
 #endif
-    HAL_I2C_Master_Transmit_DMA(i2c_handle_, dev_addr,
-                                reinterpret_cast<uint8_t*>(dma_buff_.addr_),
-                                write_data.size_);
+    const HAL_StatusTypeDef st = HAL_I2C_Master_Transmit_DMA(
+        i2c_handle_, dev_addr, reinterpret_cast<uint8_t*>(dma_buff_.addr_),
+        write_data.size_);
+    if (st != HAL_OK)
+    {
+      if (op.type == WriteOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+        return MapHalStartFailure(i2c_handle_, st);
+      }
+      return ErrorCode::BUSY;
+    }
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -182,10 +272,9 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
                                        write_data.size_, 20) == HAL_OK
                    ? ErrorCode::OK
                    : ErrorCode::BUSY;
-    op.UpdateStatus(in_isr, ans);
-    if (op.type == WriteOperation::OperationType::BLOCK)
+    if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ans);
     }
     return ans;
   }
@@ -208,15 +297,30 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   if (read_data.size_ > dma_enable_min_size_)
   {
     read_op_ = op;
-    HAL_I2C_Mem_Read_DMA(i2c_handle_, dev_addr, mem_addr,
-                         mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
-                                                                : I2C_MEMADD_SIZE_16BIT,
-                         reinterpret_cast<uint8_t*>(dma_buff_.addr_), read_data.size_);
     read_buff_ = read_data;
+    if (op.type == ReadOperation::OperationType::BLOCK)
+    {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
+    const HAL_StatusTypeDef st = HAL_I2C_Mem_Read_DMA(
+        i2c_handle_, dev_addr, mem_addr,
+        mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
+                                               : I2C_MEMADD_SIZE_16BIT,
+        reinterpret_cast<uint8_t*>(dma_buff_.addr_), read_data.size_);
+    if (st != HAL_OK)
+    {
+      if (op.type == ReadOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+        return MapHalStartFailure(i2c_handle_, st);
+      }
+      return ErrorCode::BUSY;
+    }
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -231,10 +335,9 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
             ? ErrorCode::OK
             : ErrorCode::BUSY;
 
-    op.UpdateStatus(in_isr, ans);
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    if (op.type != ReadOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ans);
     }
     return ans;
   }
@@ -260,18 +363,33 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   if (write_data.size_ > dma_enable_min_size_)
   {
     write_op_ = op;
+    if (op.type == WriteOperation::OperationType::BLOCK)
+    {
+      // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(dma_buff_.addr_),
                             write_data.size_);
 #endif
-    HAL_I2C_Mem_Write_DMA(i2c_handle_, dev_addr, mem_addr,
-                          mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
-                                                                 : I2C_MEMADD_SIZE_16BIT,
-                          reinterpret_cast<uint8_t*>(dma_buff_.addr_), write_data.size_);
+    const HAL_StatusTypeDef st = HAL_I2C_Mem_Write_DMA(
+        i2c_handle_, dev_addr, mem_addr,
+        mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
+                                               : I2C_MEMADD_SIZE_16BIT,
+        reinterpret_cast<uint8_t*>(dma_buff_.addr_), write_data.size_);
+    if (st != HAL_OK)
+    {
+      if (op.type == WriteOperation::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+        return MapHalStartFailure(i2c_handle_, st);
+      }
+      return ErrorCode::BUSY;
+    }
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -286,10 +404,9 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
             ? ErrorCode::OK
             : ErrorCode::BUSY;
 
-    op.UpdateStatus(in_isr, ans);
-    if (op.type == WriteOperation::OperationType::BLOCK)
+    if (op.type != WriteOperation::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      op.UpdateStatus(in_isr, ans);
     }
     return ans;
   }
@@ -316,44 +433,100 @@ ErrorCode STM32I2C::SetConfig(Configuration config)
 extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->read_op_.type != ReadOperation::OperationType::NONE))
   {
+    ErrorCode ec = ErrorCode::OK;
+#ifdef HAL_I2C_ERROR_NONE
+    ec = (hi2c->ErrorCode == HAL_I2C_ERROR_NONE) ? ErrorCode::OK : ErrorCode::FAILED;
+#endif
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
-    Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
-    i2c->read_op_.UpdateStatus(true, ErrorCode::OK);
+    if (ec == ErrorCode::OK)
+    {
+      Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_,
+                       i2c->read_buff_.size_);
+    }
+    if (i2c->read_op_.type == ReadOperation::OperationType::BLOCK)
+    {
+      (void)i2c->block_wait_.TryPost(true, ec);
+    }
+    else
+    {
+      i2c->read_op_.UpdateStatus(true, ec);
+    }
   }
 }
 
 extern "C" void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->write_op_.type != WriteOperation::OperationType::NONE))
   {
-    i2c->write_op_.UpdateStatus(true, ErrorCode::OK);
+    ErrorCode ec = ErrorCode::OK;
+#ifdef HAL_I2C_ERROR_NONE
+    ec = (hi2c->ErrorCode == HAL_I2C_ERROR_NONE) ? ErrorCode::OK : ErrorCode::FAILED;
+#endif
+    if (i2c->write_op_.type == WriteOperation::OperationType::BLOCK)
+    {
+      (void)i2c->block_wait_.TryPost(true, ec);
+    }
+    else
+    {
+      i2c->write_op_.UpdateStatus(true, ec);
+    }
   }
 }
 
 extern "C" void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->write_op_.type != WriteOperation::OperationType::NONE))
   {
-    i2c->write_op_.UpdateStatus(true, ErrorCode::OK);
+    ErrorCode ec = ErrorCode::OK;
+#ifdef HAL_I2C_ERROR_NONE
+    ec = (hi2c->ErrorCode == HAL_I2C_ERROR_NONE) ? ErrorCode::OK : ErrorCode::FAILED;
+#endif
+    if (i2c->write_op_.type == WriteOperation::OperationType::BLOCK)
+    {
+      (void)i2c->block_wait_.TryPost(true, ec);
+    }
+    else
+    {
+      i2c->write_op_.UpdateStatus(true, ec);
+    }
   }
 }
 
 extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
-  if (i2c)
+  if (i2c && !i2c->recovering_ &&
+      (i2c->read_op_.type != ReadOperation::OperationType::NONE))
   {
+    ErrorCode ec = ErrorCode::OK;
+#ifdef HAL_I2C_ERROR_NONE
+    ec = (hi2c->ErrorCode == HAL_I2C_ERROR_NONE) ? ErrorCode::OK : ErrorCode::FAILED;
+#endif
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
-    Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_, i2c->read_buff_.size_);
-    i2c->read_op_.UpdateStatus(true, ErrorCode::OK);
+    if (ec == ErrorCode::OK)
+    {
+      Memory::FastCopy(i2c->read_buff_.addr_, i2c->dma_buff_.addr_,
+                       i2c->read_buff_.size_);
+    }
+    if (i2c->read_op_.type == ReadOperation::OperationType::BLOCK)
+    {
+      (void)i2c->block_wait_.TryPost(true, ec);
+    }
+    else
+    {
+      i2c->read_op_.UpdateStatus(true, ec);
+    }
   }
 }
 
@@ -361,15 +534,29 @@ extern "C" void HAL_I2C_ErrorCallback(I2C_HandleTypeDef* hi2c)
 {
   STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
 
-  if (i2c)
+  if (i2c && !i2c->recovering_)
   {
     if (i2c->read_)
     {
-      i2c->read_op_.UpdateStatus(true, ErrorCode::FAILED);
+      if (i2c->read_op_.type == ReadOperation::OperationType::BLOCK)
+      {
+        (void)i2c->block_wait_.TryPost(true, ErrorCode::FAILED);
+      }
+      else
+      {
+        i2c->read_op_.UpdateStatus(true, ErrorCode::FAILED);
+      }
     }
     else
     {
-      i2c->write_op_.UpdateStatus(true, ErrorCode::FAILED);
+      if (i2c->write_op_.type == WriteOperation::OperationType::BLOCK)
+      {
+        (void)i2c->block_wait_.TryPost(true, ErrorCode::FAILED);
+      }
+      else
+      {
+        i2c->write_op_.UpdateStatus(true, ErrorCode::FAILED);
+      }
     }
   }
 }

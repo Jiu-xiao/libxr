@@ -78,6 +78,9 @@ class CH32I2C : public I2C
 
   bool WaitEvent(uint32_t evt, uint32_t timeout_us = K_DEFAULT_TIMEOUT_US);
   bool WaitFlag(uint32_t flag, FlagStatus st, uint32_t timeout_us = K_DEFAULT_TIMEOUT_US);
+  ErrorCode WaitEventOrRecover(uint32_t evt, uint32_t timeout_us = K_DEFAULT_TIMEOUT_US);
+  ErrorCode WaitFlagOrRecover(uint32_t flag, FlagStatus st,
+                              uint32_t timeout_us = K_DEFAULT_TIMEOUT_US);
 
   void ClearAddrFlag();
 
@@ -97,6 +100,7 @@ class CH32I2C : public I2C
   void StartRxDma(uint32_t len);
 
   void AbortTransfer(ErrorCode ec);
+  void RecoverAfterImmediateFailure();
 
  public:
   I2C_TypeDef* instance_;
@@ -112,6 +116,7 @@ class CH32I2C : public I2C
   RawData read_buff_;
   bool read_ = false;
   bool busy_ = false;
+  bool recovering_ = false;
 
   GPIO_TypeDef* scl_port_;
   uint16_t scl_pin_;
@@ -121,6 +126,7 @@ class CH32I2C : public I2C
   Configuration cfg_{400000};
 
   bool ten_bit_addr_ = false;
+  AsyncBlockWait block_wait_{};
 };
 
 }  // namespace LibXR
