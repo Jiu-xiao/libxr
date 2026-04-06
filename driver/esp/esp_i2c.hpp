@@ -114,6 +114,7 @@ class ESP32I2C : public I2C
   bool async_write_addr_sent_ = false;
   bool async_write_stop_sent_ = false;
   bool async_read_addr_sent_ = false;
+  AsyncBlockWait block_wait_{};
 };
 
 }  // namespace LibXR

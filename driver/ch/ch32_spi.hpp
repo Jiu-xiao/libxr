@@ -93,6 +93,8 @@ class CH32SPI : public SPI
   uint16_t miso_pin_;
   GPIO_TypeDef* mosi_port_;
   uint16_t mosi_pin_;
+
+  AsyncBlockWait block_wait_{};
 };
 
 }  // namespace LibXR

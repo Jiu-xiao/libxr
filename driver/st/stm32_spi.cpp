@@ -107,6 +107,10 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   if (need_write > dma_enable_min_size_)
   {
     rw_op_ = op;
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
 
     HAL_StatusTypeDef st = HAL_OK;
 
@@ -161,13 +165,17 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     if (st != HAL_OK)
     {
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       return ErrorCode::BUSY;
     }
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -360,6 +368,10 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
   {
     mem_read_ = true;
     rw_op_ = op;
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
 
     uint8_t* txb = reinterpret_cast<uint8_t*>(tx.addr_);
     Memory::FastSet(txb, 0, need_read + 1);
@@ -376,13 +388,17 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
 
     if (st != HAL_OK)
     {
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       return ErrorCode::BUSY;
     }
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -433,6 +449,10 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
   {
     mem_read_ = false;
     rw_op_ = op;
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
 
     uint8_t* txb = reinterpret_cast<uint8_t*>(tx.addr_);
     txb[0] = static_cast<uint8_t>(reg & 0x7F);
@@ -448,13 +468,17 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
 
     if (st != HAL_OK)
     {
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       return ErrorCode::BUSY;
     }
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -678,6 +702,10 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   if (size > dma_enable_min_size_)
   {
     rw_op_ = op;
+    if (op.type == OperationRW::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
 
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_), static_cast<int32_t>(xfer));
@@ -691,13 +719,17 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 
     if (st != HAL_OK)
     {
+      if (op.type == OperationRW::OperationType::BLOCK)
+      {
+        block_wait_.Cancel();
+      }
       return ErrorCode::BUSY;
     }
 
     op.MarkAsRunning();
     if (op.type == OperationRW::OperationType::BLOCK)
     {
-      return op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+      return block_wait_.Wait(op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -725,17 +757,35 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 extern "C" void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef* hspi)
 {
   STM32SPI* spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
+  ASSERT(spi != nullptr);
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
+  {
+    return;
+  }
   spi->SwitchBuffer();
-  spi->rw_op_.UpdateStatus(true, ErrorCode::OK);
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::BLOCK)
+  {
+    (void)spi->block_wait_.TryPost(true, ErrorCode::OK);
+  }
+  else
+  {
+    spi->rw_op_.UpdateStatus(true, ErrorCode::OK);
+  }
 }
 
 extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef* hspi)
 {
   STM32SPI* spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
+  ASSERT(spi != nullptr);
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
+  {
+    return;
+  }
 
   RawData rx = spi->GetRxBuffer();
+  const bool has_user_read_copy = (spi->read_buff_.size_ > 0);
 
-  if (spi->read_buff_.size_ > 0)
+  if (has_user_read_copy)
   {
     if (!spi->mem_read_)
     {
@@ -756,7 +806,14 @@ extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef* hspi)
   }
 
   spi->SwitchBuffer();
-  spi->rw_op_.UpdateStatus(true, ErrorCode::OK);
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::BLOCK)
+  {
+    (void)spi->block_wait_.TryPost(true, ErrorCode::OK);
+  }
+  else
+  {
+    spi->rw_op_.UpdateStatus(true, ErrorCode::OK);
+  }
 }
 
 extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef* hspi)
@@ -767,7 +824,19 @@ extern "C" void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef* hspi)
 extern "C" void HAL_SPI_ErrorCallback(SPI_HandleTypeDef* hspi)
 {
   STM32SPI* spi = STM32SPI::map[STM32_SPI_GetID(hspi->Instance)];
-  spi->rw_op_.UpdateStatus(true, ErrorCode::FAILED);
+  ASSERT(spi != nullptr);
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::NONE)
+  {
+    return;
+  }
+  if (spi->rw_op_.type == STM32SPI::OperationRW::OperationType::BLOCK)
+  {
+    (void)spi->block_wait_.TryPost(true, ErrorCode::FAILED);
+  }
+  else
+  {
+    spi->rw_op_.UpdateStatus(true, ErrorCode::FAILED);
+  }
 }
 
 #endif
