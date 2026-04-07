@@ -409,23 +409,39 @@ void DeviceComposition::Init(bool in_isr)
 {
   // Init binds endpoints first, then rebuilds the BOS view for the now-active config.
   // Init 先绑定端点，再按当前激活配置重建 BOS 视图。
+  configured_ = false;
   BindEndpoints(in_isr);
   RebuildBosCache();
 }
 
-void DeviceComposition::Deinit(bool in_isr) { UnbindEndpoints(in_isr); }
+void DeviceComposition::Deinit(bool in_isr)
+{
+  UnbindEndpoints(in_isr);
+  configured_ = false;
+  current_cfg_ = 0;
+}
 
 ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
 {
-  if (index == 0 || index > config_num_)
+  if (index > config_num_)
   {
     return ErrorCode::NOT_FOUND;
+  }
+
+  if (index == 0)
+  {
+    UnbindEndpoints(in_isr);
+    configured_ = false;
+    current_cfg_ = 0;
+    RebuildBosCache();
+    return ErrorCode::OK;
   }
 
   // USB configuration values are 1-based, while current_cfg_ stores a 0-based slot index.
   // USB configuration value 从 1 开始，而 current_cfg_ 内部保存的是从 0 开始的槽位。
   UnbindEndpoints(in_isr);
   current_cfg_ = static_cast<uint8_t>(index - 1);
+  configured_ = true;
   BindEndpoints(in_isr);
   RebuildBosCache();
   return ErrorCode::OK;
@@ -505,7 +521,10 @@ ErrorCode DeviceComposition::TryOverrideDeviceDescriptor(DeviceDescriptor& descr
 
 size_t DeviceComposition::GetConfigNum() const { return config_num_; }
 
-size_t DeviceComposition::GetCurrentConfig() const { return current_cfg_ + 1; }
+size_t DeviceComposition::GetCurrentConfig() const
+{
+  return configured_ ? static_cast<size_t>(current_cfg_ + 1u) : 0u;
+}
 
 uint16_t DeviceComposition::GetDeviceStatus() const
 {
@@ -515,6 +534,11 @@ uint16_t DeviceComposition::GetDeviceStatus() const
 
 DeviceClass* DeviceComposition::FindClassByInterfaceNumber(size_t index) const
 {
+  if (!configured_)
+  {
+    return nullptr;
+  }
+
   const auto& config = CurrentConfigItems();
 
   // Each item reports how many interfaces it occupies; walk the flattened list until
@@ -541,6 +565,11 @@ DeviceClass* DeviceComposition::FindClassByInterfaceNumber(size_t index) const
 
 DeviceClass* DeviceComposition::FindClassByEndpointAddress(uint8_t addr) const
 {
+  if (!configured_)
+  {
+    return nullptr;
+  }
+
   const auto& config = CurrentConfigItems();
 
   for (size_t i = 0; i < config.item_num; ++i)

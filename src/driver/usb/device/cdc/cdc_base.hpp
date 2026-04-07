@@ -519,6 +519,7 @@ class CDCBase : public DeviceClass
 
       case ClassRequest::SEND_BREAK:
         // BREAK信号通常忽略
+        result.write_zlp = true;
         return ErrorCode::OK;
 
       default:

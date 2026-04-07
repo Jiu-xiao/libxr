@@ -37,10 +37,7 @@ struct WebUsbPlatformCapability
   uint8_t bDescriptorType = 0x10u;
   uint8_t bDevCapabilityType = 0x05u;
   uint8_t bReserved = 0x00u;
-  uint8_t PlatformCapabilityUUID[16] = {
-      0x38, 0xB6, 0x08, 0x34, 0xA9, 0x09, 0xA0, 0x47,
-      0x8B, 0xFD, 0xA0, 0x76, 0x88, 0x15, 0xB6, 0x65,
-  };
+  uint8_t PlatformCapabilityUUID[16] = {};
   uint16_t bcdVersion = 0x0100u;
   uint8_t bVendorCode = WEBUSB_VENDOR_CODE_DEFAULT;
   uint8_t iLandingPage = 0u;
@@ -70,6 +67,9 @@ class WebUsbBosCapability final : public LibXR::USB::BosCapability
       : vendor_code_(vendor_code)
   {
     url_descriptor_.addr_ = url_descriptor_storage_;
+    LibXR::Memory::FastCopy(platform_cap_.PlatformCapabilityUUID,
+                            WEBUSB_PLATFORM_CAPABILITY_UUID,
+                            sizeof(WEBUSB_PLATFORM_CAPABILITY_UUID));
     platform_cap_.bVendorCode = vendor_code_;
     (void)SetLandingPageUrl(landing_page_url);
   }

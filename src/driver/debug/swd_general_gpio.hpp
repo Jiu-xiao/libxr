@@ -12,8 +12,8 @@ namespace LibXR::Debug
 {
 enum class SwdIoDriveMode : uint8_t
 {
-  PUSH_PULL = 0,
-  OPEN_DRAIN = 1,
+  PUSH_PULL = 0,  ///< Drive phase uses push-pull output.
+  OPEN_DRAIN = 1  ///< Drive phase uses open-drain output.
 };
 
 /**
@@ -385,10 +385,12 @@ class SwdGeneralGPIO final : public Swd
   {
     if (swdio_mode_ != SwdioMode::SAMPLE_IN)
     {
-      const ErrorCode EC = swdio_.SetConfig(
-          {SwdioGpioType::Direction::INPUT, (kIoDriveMode == SwdIoDriveMode::OPEN_DRAIN)
-                                                ? SwdioGpioType::Pull::UP
-                                                : SwdioGpioType::Pull::NONE});
+      // Sampling should always leave SWDIO as a pulled-up input so the line has a
+      // defined idle level before the target actively drives ACK/data.
+      // 采样阶段统一把 SWDIO 置为上拉输入，这样目标开始驱动 ACK/数据之前，
+      // 总线空闲电平始终有明确定义。
+      const ErrorCode EC =
+          swdio_.SetConfig({SwdioGpioType::Direction::INPUT, SwdioGpioType::Pull::UP});
       if (EC != ErrorCode::OK)
       {
         return EC;
