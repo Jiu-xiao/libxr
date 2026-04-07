@@ -762,7 +762,7 @@ class GsUsbClass : public DeviceClass
    */
   static void OnDataOutCompleteStatic(bool in_isr, GsUsbClass* self, ConstRawData& data)
   {
-    if (!self->inited_)
+    if (self == nullptr || !self->inited_)
     {
       return;
     }
@@ -777,7 +777,7 @@ class GsUsbClass : public DeviceClass
    */
   static void OnDataInCompleteStatic(bool in_isr, GsUsbClass* self, ConstRawData& data)
   {
-    if (!self->inited_)
+    if (self == nullptr || !self->inited_)
     {
       return;
     }
@@ -795,6 +795,11 @@ class GsUsbClass : public DeviceClass
 
     if (!ep_data_out_)
     {
+      return;
+    }
+    if (!host_format_ok_)
+    {
+      MaybeArmOutTransfer();
       return;
     }
 

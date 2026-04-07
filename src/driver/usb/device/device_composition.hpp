@@ -45,6 +45,11 @@ class DeviceComposition
       ConstRawData uid = {nullptr, 0}, uint8_t bmAttributes = CFG_BUS_POWERED,
       uint8_t bMaxPower = 50);
 
+  DeviceComposition(const DeviceComposition&) = delete;
+  DeviceComposition& operator=(const DeviceComposition&) = delete;
+  DeviceComposition(DeviceComposition&&) = delete;
+  DeviceComposition& operator=(DeviceComposition&&) = delete;
+
   /**
    * @brief 初始化当前 configuration 的运行态资源
    *        Initialize runtime resources for the active configuration.
@@ -165,6 +170,7 @@ class DeviceComposition
    */
   ErrorCode GenerateInterfaceString(uint8_t string_index, ConstRawData& data);
 
+  bool configured_ = false;   ///< 是否已进入非 0 配置态 / Whether a non-zero config is active
   bool ep_assigned_ = false;  ///< 端点是否已绑定 / Whether endpoints are assigned
 
   EndpointPool& endpoint_pool_;  ///< 端点池引用 / Endpoint pool reference

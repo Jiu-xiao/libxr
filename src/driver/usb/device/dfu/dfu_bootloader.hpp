@@ -486,7 +486,13 @@ class DfuBootloaderBackend
       return;
     }
 
-    const uint32_t crc32 = ComputeImageCrc32(download_.received_bytes);
+    uint32_t crc32 = 0u;
+    if (!ComputeImageCrc32(download_.received_bytes, crc32))
+    {
+      manifest_.last_status = DFUStatusCode::ERR_VERIFY;
+      manifest_.pending = false;
+      return;
+    }
     if (!WriteSeal(download_.received_bytes, crc32))
     {
       manifest_.last_status = DFUStatusCode::ERR_VERIFY;
@@ -510,7 +516,7 @@ class DfuBootloaderBackend
 
   // Compute the fixed CRC32 used by the seal record over the payload area only.
   // 计算 seal 记录使用的固定 CRC32，只覆盖 payload 区域。
-  uint32_t ComputeImageCrc32(size_t image_size)
+  bool ComputeImageCrc32(size_t image_size, uint32_t& crc32_out)
   {
     if (!LibXR::CRC32::inited_)
     {
@@ -527,7 +533,7 @@ class DfuBootloaderBackend
       }
       if (flash_.Read(image_offset_ + offset, {crc_buffer_, chunk}) != ErrorCode::OK)
       {
-        return 0u;
+        return false;
       }
       const uint8_t* buf = crc_buffer_;
       size_t remain = chunk;
@@ -537,7 +543,8 @@ class DfuBootloaderBackend
       }
       offset += chunk;
     }
-    return crc;
+    crc32_out = crc;
+    return true;
   }
 
   // Read the current seal record from flash.
@@ -595,7 +602,11 @@ class DfuBootloaderBackend
     {
       return false;
     }
-    const uint32_t actual_crc = ComputeImageCrc32(image_size);
+    uint32_t actual_crc = 0u;
+    if (!ComputeImageCrc32(image_size, actual_crc))
+    {
+      return false;
+    }
     if (actual_crc != seal.crc32)
     {
       return false;

@@ -228,12 +228,20 @@ class HID : public DeviceClass
 
   static void OnDataOutCompleteStatic(bool in_isr, HID* self, LibXR::ConstRawData& data)
   {
+    if (self == nullptr || !self->inited_ || self->ep_out_ == nullptr)
+    {
+      return;
+    }
     self->OnDataOutComplete(in_isr, data);
     self->ep_out_->Transfer(RX_REPORT_LEN);
   }
 
   static void OnDataInCompleteStatic(bool in_isr, HID* self, LibXR::ConstRawData& data)
   {
+    if (self == nullptr || !self->inited_ || self->ep_in_ == nullptr)
+    {
+      return;
+    }
     self->OnDataInComplete(in_isr, data);
   }
 

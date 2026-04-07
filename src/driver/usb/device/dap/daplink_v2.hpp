@@ -65,9 +65,9 @@ class DapLinkV2Class : public DeviceClass
       : DeviceClass(),
         swd_(swd_link),
         nreset_gpio_(nreset_gpio),
+        interface_string_(interface_string),
         data_in_ep_num_(data_in_ep_num),
-        data_out_ep_num_(data_out_ep_num),
-        interface_string_(interface_string)
+        data_out_ep_num_(data_out_ep_num)
   {
     (void)swd_.SetClockHz(swj_clock_hz_);
 
@@ -369,6 +369,8 @@ class DapLinkV2Class : public DeviceClass
 
   void InitWinUsbDescriptors()
   {
+    static constexpr uint8_t kConfigurationValue = 1u;
+
     winusb_msos20_.set.wLength = static_cast<uint16_t>(sizeof(winusb_msos20_.set));
     winusb_msos20_.set.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SET_HEADER_DESCRIPTOR;
@@ -379,7 +381,7 @@ class DapLinkV2Class : public DeviceClass
     winusb_msos20_.cfg.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SUBSET_HEADER_CONFIGURATION;
 
-    winusb_msos20_.cfg.bConfigurationValue = 0;
+    winusb_msos20_.cfg.bConfigurationValue = kConfigurationValue;
     winusb_msos20_.cfg.bReserved = 0;
     winusb_msos20_.cfg.wTotalLength = static_cast<uint16_t>(
         sizeof(winusb_msos20_) - offsetof(WinUsbMsOs20DescSet, cfg));
@@ -2966,7 +2968,6 @@ class DapLinkV2Class : public DeviceClass
   LibXR::RawData out_req_multi_buf_{out_req_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
   uint8_t in_tx_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
   LibXR::RawData in_tx_multi_buf_{in_tx_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
-  const char* interface_string_ = nullptr;
 
 #pragma pack(push, 1)
   /**
@@ -3015,6 +3016,8 @@ class DapLinkV2Class : public DeviceClass
                     "XRDAP",  "XRobot",    "DAP_DEMO", "0.1.0"};  ///< Info strings
 
   uint32_t swj_clock_hz_ = 1000000u;  ///< SWJ clock (Hz)
+
+  const char* interface_string_ = nullptr;  ///< Interface string
 
   Endpoint::EPNumber data_in_ep_num_;   ///< Bulk IN EP number / Bulk IN EP number
   Endpoint::EPNumber data_out_ep_num_;  ///< Bulk OUT EP number / Bulk OUT EP number

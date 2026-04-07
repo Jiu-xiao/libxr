@@ -817,12 +817,6 @@ ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
 
 ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
 {
-  if (value == 0)  // reset
-  {
-    // TODO: reset
-    return ErrorCode::NOT_SUPPORT;
-  }
-
   if (composition_.SwitchConfig(value, in_isr) != ErrorCode::OK)
   {
     return ErrorCode::NOT_FOUND;

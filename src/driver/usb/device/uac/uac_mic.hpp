@@ -780,8 +780,12 @@ class UAC1MicrophoneQ : public DeviceClass
     {
       pcm_queue_.PopBatch(reinterpret_cast<uint8_t*>(buf.addr_), take);
     }
+    if (take < to_send)
+    {
+      LibXR::Memory::FastSet(static_cast<uint8_t*>(buf.addr_) + take, 0, to_send - take);
+    }
 
-    ep_iso_in_->Transfer(take);
+    ep_iso_in_->Transfer(to_send);
   }
 
   /**
