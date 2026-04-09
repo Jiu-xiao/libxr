@@ -402,7 +402,8 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   bool enable_double = (GetNumber() != EPNumber::EP0) && hw_double_buffer_;
   if (enable_double && HAS_IN && HAS_OUT)
   {
-    ASSERT(false);  // 双缓冲端点必须是单向 / Double-buffer endpoints must be single-direction.
+    ASSERT(false);  // 双缓冲端点必须是单向
+                    // / Double-buffer endpoints must be single-direction.
     enable_double = false;
   }
   ep_cfg.double_buffer = enable_double;
