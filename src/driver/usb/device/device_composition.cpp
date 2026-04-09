@@ -28,7 +28,8 @@ static size_t calc_total_item_num(
         configs)
 {
   // 这里先统计原始 item 数量；最终唯一 class 表会在构造函数里去重。
-  // Count raw items first; the final unique-class table is deduplicated in the constructor.
+  // Count raw items first; the final unique-class table is deduplicated in the
+  // constructor.
   size_t total = 0;
   for (const auto& group : configs)
   {
@@ -38,7 +39,8 @@ static size_t calc_total_item_num(
 }
 
 // 构造期唯一 class 表很小，线性查重已经足够。
-// The constructor-time unique-class table is tiny, so a linear contains check is sufficient.
+// The constructor-time unique-class table is tiny, so a linear contains check is
+// sufficient.
 static bool contains_class(DeviceClass* const* list, size_t count,
                            const DeviceClass* item)
 {
@@ -150,7 +152,8 @@ static void to_utf16le(const char* str, uint8_t* buffer)
 }
 
 // 预先算出接口字符串总数，以及运行时生成描述符所需的最大缓冲区。
-// Pre-compute the interface-string count and the largest runtime descriptor buffer needed.
+// Pre-compute the interface-string count and the largest runtime descriptor
+// buffer needed.
 static InterfaceStringLayout calc_interface_string_layout(DeviceClass* const* classes,
                                                           size_t class_count)
 {
@@ -277,7 +280,8 @@ static size_t calc_bos_capability_num_max(
 // 统计所有 configuration 中 BOS 描述符尺寸的最大值；
 // 若没有类提供 USB 2.0 Extension capability，则为自动补上的那项预留空间。
 // Count the worst-case BOS descriptor size among all configurations.
-// If no class provides a USB 2.0 Extension capability, reserve space for the auto-added one.
+// If no class provides a USB 2.0 Extension capability, reserve space for the
+// auto-added one.
 static size_t calc_bos_descriptor_size_max(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
@@ -453,7 +457,8 @@ ErrorCode DeviceComposition::BuildConfigDescriptor()
   // ConfigDescriptor 只构建当前激活的 configuration；
   // current_cfg_ 同时决定 item 表和对外可见的 bConfigurationValue。
   // ConfigDescriptor builds the active configuration only;
-  // current_cfg_ supplies both the item table and the externally visible bConfigurationValue.
+  // current_cfg_ supplies both the item table and the externally visible
+  // bConfigurationValue.
   const auto& config = CurrentConfigItems();
   return config_desc_.BuildConfigDescriptor(config.items, config.item_num,
                                             static_cast<uint8_t>(current_cfg_ + 1),
