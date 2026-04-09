@@ -196,28 +196,30 @@ static LibXR::RawData select_buffer(USB::Endpoint::EPNumber ep_num,
   {
     return buffer;
   }
-  else
+
+  const size_t half = buffer.size_ / 2u;
+  ASSERT(half > 0u);
+
+  if (dir == USB::Endpoint::Direction::OUT)
   {
-    if (dir == USB::Endpoint::Direction::OUT)
-    {
-      return LibXR::RawData(buffer.addr_, 128);
-    }
-    else
-    {
-      return LibXR::RawData(reinterpret_cast<uint8_t*>(buffer.addr_) + 128, 128);
-    }
+    return LibXR::RawData(buffer.addr_, half);
   }
+
+  return LibXR::RawData(reinterpret_cast<uint8_t*>(buffer.addr_) + half, half);
 }
 
 CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
-                                     LibXR::RawData buffer, bool is_isochronous)
-    : Endpoint(ep_num, dir, is_isochronous ? buffer : select_buffer(ep_num, dir, buffer)),
-      is_isochronous_(is_isochronous),
+                                     LibXR::RawData buffer, bool single_direction)
+    : Endpoint(ep_num, dir,
+               (single_direction || ep_num == EPNumber::EP0)
+                   ? buffer
+                   : select_buffer(ep_num, dir, buffer)),
+      single_direction_(single_direction),
       dma_buffer_(buffer)
 {
   map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
-  set_dma_buffer(GetNumber(), dma_buffer_.addr_, is_isochronous ? false : true);
+  set_dma_buffer(GetNumber(), dma_buffer_.addr_, false);
 
   if (dir == Direction::IN)
   {
@@ -234,17 +236,27 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
 {
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
+  is_isochronous_ = (cfg.type == Type::ISOCHRONOUS);
 
-  if (GetNumber() != EPNumber::EP0 && !is_isochronous_)
+  const bool is_ep0 = (GetNumber() == EPNumber::EP0);
+  const bool is_bidir_noniso = !is_ep0 && !single_direction_ && !is_isochronous_;
+  const bool is_single_noniso = !is_ep0 && single_direction_ && !is_isochronous_;
+  const uint16_t type_limit = is_isochronous_ ? 1023u : 64u;
+  const uint16_t requested_mps = LibXR::min<uint16_t>(cfg.max_packet_size, type_limit);
+
+  if (is_bidir_noniso)
   {
-    ep_cfg.double_buffer = true;
-  }
-  else
-  {
-    ep_cfg.double_buffer = false;
+    // Current shared bidirectional non-iso OTGFS path only splits raw memory by direction.
+    // 当前共享双向非等时 OTGFS 路径现在只按方向二分原始内存。
+    ASSERT(dma_buffer_.size_ >= static_cast<size_t>(requested_mps) * 2u);
   }
 
-  ep_cfg.max_packet_size = GetBuffer().size_;
+  ep_cfg.double_buffer = is_single_noniso;
+
+  // OTGFS MPS is clamped by request, effective buffer, and USB FS type limit.
+  // OTGFS 包长同时受请求值、当前有效缓冲区和 USB FS 类型上限约束。
+  ep_cfg.max_packet_size = LibXR::min<uint16_t>(
+      requested_mps, LibXR::min<uint16_t>(static_cast<uint16_t>(GetBuffer().size_), type_limit));
 
   set_tx_len(GetNumber(), 0);
 
@@ -269,7 +281,7 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
     }
   }
 
-  set_dma_buffer(GetNumber(), dma_buffer_.addr_, is_isochronous_ ? false : true);
+  set_dma_buffer(GetNumber(), dma_buffer_.addr_, ep_cfg.double_buffer);
 
   SetState(State::IDLE);
 }
