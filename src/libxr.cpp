@@ -20,6 +20,9 @@ extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr)
 
       if (!LibXR::Assert::libxr_fatal_error_callback_.Empty())
       {
+        // The fatal callback is executed only on the non-ISR fatal path here.
+        // Normalize the user callback to thread context instead of forwarding the
+        // original fault source flag.
         LibXR::Assert::libxr_fatal_error_callback_.Run(false, file, line);
       }
 

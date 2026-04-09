@@ -5,50 +5,6 @@
 
 namespace
 {
-struct CallbackProbe
-{
-  LibXR::Callback<int> cb;
-  bool runtime_in_isr = true;
-  bool trigger_reentry = true;
-  std::array<int, 4> seen = {};
-  std::array<bool, 4> seen_in_isr = {};
-  int seen_count = 0;
-  int depth = 0;
-  int max_depth = 0;
-
-  CallbackProbe() : cb(LibXR::Callback<int>::Create(OnCallback, this)) {}
-
-  static void OnCallback(bool in_isr, CallbackProbe* self, int value)
-  {
-    if (self->seen_count < static_cast<int>(self->seen.size()))
-    {
-      self->seen[static_cast<size_t>(self->seen_count++)] = value;
-      self->seen_in_isr[static_cast<size_t>(self->seen_count - 1)] = in_isr;
-    }
-
-    self->depth++;
-    if (self->depth > self->max_depth)
-    {
-      self->max_depth = self->depth;
-    }
-
-    if (self->trigger_reentry && value == 1)
-    {
-      self->trigger_reentry = false;
-      if (self->runtime_in_isr)
-      {
-        self->cb.Run(true, 2);
-      }
-      else
-      {
-        self->cb.Run(false, 2);
-      }
-    }
-
-    self->depth--;
-  }
-};
-
 struct DirectCallbackProbe
 {
   LibXR::Callback<int> cb;
@@ -134,13 +90,15 @@ struct GuardedCreationProbe
 void test_cb()
 {
   {
+    // Empty callbacks stay cheap no-ops.
     LibXR::Callback<int> empty_cb;
     ASSERT(empty_cb.Empty());
     empty_cb.Run(false, 1);
   }
 
   {
-    CallbackProbe probe;
+    // Direct callbacks preserve ISR=true and recurse with real stack depth.
+    DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.cb.Run(probe.runtime_in_isr, 1);
     ASSERT(probe.seen_count == 2);
@@ -152,7 +110,8 @@ void test_cb()
   }
 
   {
-    CallbackProbe probe;
+    // Direct callbacks preserve ISR=false and recurse with real stack depth.
+    DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(probe.runtime_in_isr, 1);
     ASSERT(probe.seen_count == 2);
@@ -164,7 +123,8 @@ void test_cb()
   }
 
   {
-    CallbackProbe probe;
+    // Passing the runtime flag directly keeps the observed callback context.
+    DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.cb.Run(true, 1);
     ASSERT(probe.seen_count == 2);
@@ -176,7 +136,8 @@ void test_cb()
   }
 
   {
-    CallbackProbe probe;
+    // Direct non-ISR calls also keep their original callback context.
+    DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(false, 1);
     ASSERT(probe.seen_count == 2);
@@ -188,6 +149,7 @@ void test_cb()
   }
 
   {
+    // Guarded callbacks flatten one-step bounded reentry back to one stack frame.
     GuardedCreationProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(false, 1);
