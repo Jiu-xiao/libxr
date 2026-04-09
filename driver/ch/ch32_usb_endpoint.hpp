@@ -17,7 +17,7 @@ class CH32EndpointOtgFs : public USB::Endpoint
 {
  public:
   CH32EndpointOtgFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
-                    bool is_isochronous);
+                    bool single_direction);
 
   void Configure(const Config& cfg) override;
   void Close() override;
@@ -31,6 +31,7 @@ class CH32EndpointOtgFs : public USB::Endpoint
 
   bool tog_ = false;
   bool is_isochronous_ = false;
+  bool single_direction_ = false;
 
   size_t last_transfer_size_ = 0;
   RawData dma_buffer_;
