@@ -79,17 +79,20 @@ struct DFUCapabilities
   uint16_t transfer_size = 1024u;
 };
 
+/**
+ * @brief DFU 单接口类公共基类 / Common base for single-interface DFU classes
+ */
 class DfuInterfaceClassBase : public DeviceClass
 {
  protected:
-  // Shared single-interface DFU class state:
-  // - one interface string
-  // - optional WebUSB BOS capability
-  // - one active interface/alt setting pair
   // DFU 单接口类共享的公共状态：
   // - 一个接口字符串
   // - 可选 WebUSB BOS capability
-  // - 一组当前接口/alt setting 状态
+  // - 一组当前 interface/alt setting 状态
+  // Shared single-interface DFU class state:
+  // - one interface string
+  // - optional WebUSB BOS capability
+  // - one active interface/alt-setting pair
   DfuInterfaceClassBase(
       const char* interface_string, const char* webusb_landing_page_url = nullptr,
       uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)

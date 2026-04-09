@@ -397,11 +397,12 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   const bool HAS_IN = (map_otg_hs_[EP_IDX][IN_IDX] != nullptr);
   const bool HAS_OUT = (map_otg_hs_[EP_IDX][OUT_IDX] != nullptr);
 
+  // 双缓冲策略：EP0 不使用 double buffer。
   // Double-buffer policy: EP0 does not use double buffering.
   bool enable_double = (GetNumber() != EPNumber::EP0) && hw_double_buffer_;
   if (enable_double && HAS_IN && HAS_OUT)
   {
-    ASSERT(false);  // Double-buffer endpoints must be single-direction.
+    ASSERT(false);  // 双缓冲端点必须是单向 / Double-buffer endpoints must be single-direction.
     enable_double = false;
   }
   ep_cfg.double_buffer = enable_double;
@@ -416,8 +417,8 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   }
   else if (ep_cfg.max_packet_size > buffer_size)
   {
-    // Clamp non-bulk packet sizes to the endpoint buffer size.
     // 非 BULK 端点的包长按缓冲区大小截断。
+    // Clamp non-bulk packet sizes to the endpoint buffer size.
     ep_cfg.max_packet_size = buffer_size;
   }
 
@@ -590,19 +591,18 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
       {
         if (size == 0u)
         {
-          // Control status OUT always starts from DATA1.
           // 控制传输的 status OUT 固定从 DATA1 开始。
+          // Control status OUT always starts from DATA1.
           *addr = USBHS_UEP_R_RES_ACK |
                   (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
                   USBHS_UEP_R_TOG_DATA1;
         }
         else
         {
-          // For EP0 multi-packet OUT, keep the current hardware DATA0/DATA1 phase and
-          // only reopen ACK here. The packet-complete path advances the RX toggle after
-          // each successfully received packet.
           // EP0 多包 OUT 续挂时，这里只重新打开 ACK，不再用软件重算 DATA0/DATA1。
           // 每个包成功收完后，由完成路径推进一次硬件 RX toggle。
+          // For EP0 multi-packet OUT, only reopen ACK here and keep the current
+          // hardware DATA0/DATA1 phase; the packet-complete path advances RX toggle.
           *addr = (*addr & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_ACK;
         }
       }
@@ -669,6 +669,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
   const bool IS_ISO = (GetType() == Type::ISOCHRONOUS);
 
+  // UIF_TRANSFER/INT_FG 会在 IRQ handler 完成分发后统一清掉。
   // UIF_TRANSFER/INT_FG are cleared by the IRQ handler after dispatch.
 
   if (IS_IN)
@@ -686,6 +687,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   }
   else
   {
+    // 对 non-EP0 OUT 端点，完成后恢复到 NAK。
     // For non-EP0 OUT endpoints, restore NAK on completion.
     if (!IS_EP0)
     {
@@ -694,6 +696,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     }
   }
 
+  // TOG 不匹配表示数据同步失败。
   // TOG mismatch indicates data synchronization failure.
   if (IS_OUT && !IS_EP0)
   {
@@ -718,12 +721,12 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     // 否则下一轮 session 可能撞上陈旧的 EP0 软件状态，导致 DFU 数据块重复或丢失。
     if (size > 0u)
     {
-      // Advance the RX DATA0/DATA1 phase once per successfully received EP0 OUT packet.
-      // CH32 USBHS does not reliably keep EP0 multi-packet OUT flowing if we only reopen
-      // ACK without consuming the current hardware toggle.
       // 每成功收完一个 EP0 OUT 包，都要推进一次 RX DATA0/DATA1 相位。
       // CH32 USBHS 在多包 EP0 OUT 上，如果这里只是重新开 ACK 而不消费当前 toggle，
       // 后续包会停在这里。
+      // Advance the RX DATA0/DATA1 phase once per successfully received EP0 OUT packet.
+      // On CH32 USBHS, EP0 multi-packet OUT will stall if we only reopen ACK
+      // without consuming the current hardware toggle.
       *rx_ctrl = static_cast<uint8_t>(
           ((*rx_ctrl ^ USBHS_UEP_R_TOG_DATA1) & ~USBHS_UEP_R_RES_MASK) |
           USBHS_UEP_R_RES_NAK);

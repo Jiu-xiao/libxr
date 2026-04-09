@@ -51,12 +51,12 @@ class CDCToUart : public CDCUart
         tx_buffer_(new uint8_t[tx_buffer_size], tx_buffer_size),
         uart_(uart)
   {
-    // CDC->UART：CDC RX 缓冲必须能写入 UART 的 data 队列
-    // CDC->UART: UART TX data queue must accept at least rx_buffer_size bytes
+    // CDC->UART：CDC RX 缓冲必须能写入 UART 的 data 队列。
+    // CDC->UART: the UART TX data queue must accept at least rx_buffer_size bytes.
     ASSERT(uart_.write_port_->queue_data_->MaxSize() >= rx_buffer_size);
 
-    // 1) CDC 读完成回调：从 CDC 读一段数据并写入 UART
-    // CDC read callback: read from CDC and write into UART
+    // 1) CDC 读完成回调：从 CDC 读一段数据并写入 UART。
+    // 1) CDC read callback: read one chunk from CDC and write it into UART.
     cb_read_cdc_ = Callback<ErrorCode>::Create(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
@@ -76,8 +76,8 @@ class CDCToUart : public CDCUart
 
     op_read_cdc_ = ReadOperation(cb_read_cdc_);
 
-    // 2) UART 写完成回调：继续触发下一次 CDC 读
-    // UART write complete callback: trigger the next CDC read
+    // 2) UART 写完成回调：继续触发下一次 CDC 读。
+    // 2) UART write-complete callback: trigger the next CDC read.
     cb_uart_write_ = Callback<ErrorCode>::Create(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
@@ -88,8 +88,8 @@ class CDCToUart : public CDCUart
 
     op_write_uart_ = WriteOperation(cb_uart_write_);
 
-    // 3) UART 读完成回调：从 UART 读一段数据并写入 CDC
-    // UART read callback: read from UART and write into CDC
+    // 3) UART 读完成回调：从 UART 读一段数据并写入 CDC。
+    // 3) UART read callback: read one chunk from UART and write it into CDC.
     cb_uart_read_ = Callback<ErrorCode>::Create(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
@@ -109,8 +109,8 @@ class CDCToUart : public CDCUart
 
     op_read_uart_ = ReadOperation(cb_uart_read_);
 
-    // 4) CDC 写完成回调：继续触发下一次 UART 读
-    // CDC write complete callback: trigger the next UART read
+    // 4) CDC 写完成回调：继续触发下一次 UART 读。
+    // 4) CDC write-complete callback: trigger the next UART read.
     cb_cdc_write_ = Callback<ErrorCode>::Create(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
@@ -122,16 +122,16 @@ class CDCToUart : public CDCUart
 
     op_write_cdc_ = WriteOperation(cb_cdc_write_);
 
-    // 5) LineCoding 回调：USB CDC 侧配置变化同步到 UART
-    // LineCoding callback: forward CDC line coding changes to UART configuration
+    // 5) LineCoding 回调：USB CDC 侧配置变化同步到 UART。
+    // 5) LineCoding callback: forward CDC line-coding changes to UART configuration.
     set_line_coding_cb_ = LibXR::Callback<LibXR::UART::Configuration>::Create(
         [](bool, CDCToUart* self, LibXR::UART::Configuration cfg)
         { self->uart_.SetConfig(cfg); }, this);
 
     SetOnSetLineCodingCallback(set_line_coding_cb_);
 
-    // 启动搬运：挂起一次 CDC 读与 UART 读，以进入回调链
-    // Kick the pump: schedule one CDC read and one UART read to enter the callback chain
+    // 启动搬运：挂起一次 CDC 读与 UART 读，以进入回调链。
+    // Kick the pump: schedule one CDC read and one UART read to enter the callback chain.
     this->Read({nullptr, 0}, op_read_cdc_, false);
     uart_.Read({nullptr, 0}, op_read_uart_, false);
   }

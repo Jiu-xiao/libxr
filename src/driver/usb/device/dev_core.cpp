@@ -102,12 +102,12 @@ void DeviceCore::WriteZLP(Context context)
 
 void DeviceCore::ResetControlTransferState()
 {
-  // USB reset/re-enumeration can rebuild DeviceCore while a previous control transfer
-  // is still partially remembered in software. If these fields leak across sessions,
-  // the next DFU DNLOAD may inherit stale EP0 state and break only on the second run.
   // USB reset / 重枚举会重建 DeviceCore，但软件侧前一笔控制传输
   // 不一定已经自然清干净。这里必须把 EP0 软状态全部清零，
   // 否则下一轮 DFU DNLOAD 可能继承陈旧状态，只在“第二次传输”时才坏。
+  // USB reset / re-enumeration can rebuild DeviceCore while a previous control
+  // transfer is still partially remembered in software. If these fields leak
+  // across sessions, the next DFU DNLOAD may fail only on the second run.
   state_.in0 = Context::UNKNOWN;
   state_.out0 = Context::UNKNOWN;
   state_.write_remain = {nullptr, 0};
@@ -447,7 +447,7 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
   UNUSED(direction);
   UNUSED(recipient);
 
-  // 根据 recipient 处理不同目标的请求
+  // 根据 recipient 处理不同目标的请求。
   // Handle requests for different recipients.
   StandardRequest req = static_cast<StandardRequest>(setup->bRequest);
 
@@ -456,31 +456,31 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
   switch (req)
   {
     case StandardRequest::GET_STATUS:
-      // 设备/接口/端点的状态请求
+      // 设备 / 接口 / 端点的状态请求。
       // GET_STATUS for device/interface/endpoint.
       ans = RespondWithStatus(setup, recipient);
       break;
 
     case StandardRequest::CLEAR_FEATURE:
-      // 解除某个特性（如端点的 HALT）
+      // 解除某个特性（如端点 HALT）。
       // Clear a feature (e.g., endpoint HALT).
       ans = ClearFeature(setup, recipient);
       break;
 
     case StandardRequest::SET_FEATURE:
-      // 设置特性（如 Remote Wakeup/端点 STALL）
+      // 设置特性（如 Remote Wakeup / 端点 STALL）。
       // Set a feature (e.g., remote wakeup/endpoint STALL).
       ans = ApplyFeature(setup, recipient);
       break;
 
     case StandardRequest::SET_ADDRESS:
-      // 设置 USB 地址，status 阶段后生效
+      // 设置 USB 地址，status 阶段后生效。
       // Set USB address; takes effect after status stage.
       ans = PrepareAddressChange(setup->wValue);
       break;
 
     case StandardRequest::GET_DESCRIPTOR:
-      // 返回设备/配置/字符串等描述符
+      // 返回设备 / 配置 / 字符串等描述符。
       // Return device/config/string descriptors.
       ans = SendDescriptor(in_isr, setup, recipient);
       break;
@@ -491,13 +491,13 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
       break;
 
     case StandardRequest::GET_CONFIGURATION:
-      // 返回当前配置
+      // 返回当前配置。
       // Return current configuration.
       ans = SendConfiguration();
       break;
 
     case StandardRequest::SET_CONFIGURATION:
-      // 设置当前配置（切换 config 描述符索引）
+      // 设置当前配置（切换 config 描述符索引）。
       // Set current configuration (switch configuration index).
       ans = SwitchConfiguration(setup->wValue, in_isr);
       break;
@@ -854,7 +854,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
                                           RequestDirection /*direction*/,
                                           Recipient recipient)
 {
-  // 只处理 Class 请求（bmRequestType bits[6:5] == 01）
+  // 只处理 Class 请求（bmRequestType bits[6:5] == 01）。
   // Only handle Class requests (bmRequestType bits[6:5] == 01).
   if ((setup->bmRequestType & 0x60) != 0x20)
   {
@@ -867,7 +867,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
   {
     case Recipient::INTERFACE:
     {
-      // 低字节 = 接口号
+      // 低字节 = 接口号。
       // Low byte = interface number.
       uint8_t if_num = static_cast<uint8_t>(setup->wIndex & 0xFF);
       item = composition_.FindClassByInterfaceNumber(if_num);
@@ -875,14 +875,14 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
     }
     case Recipient::ENDPOINT:
     {
-      // 低字节 = 端点地址（含 0x80 方向位）
+      // 低字节 = 端点地址（含 0x80 方向位）。
       // Low byte = endpoint address (including 0x80 direction bit).
       uint8_t ep_addr = static_cast<uint8_t>(setup->wIndex & 0xFF);
       item = composition_.FindClassByEndpointAddress(ep_addr);
       break;
     }
     default:
-      // Device/Other 一般不在这里处理
+      // Device / Other 一般不在这里处理。
       // Device/Other is typically not handled here.
       return ErrorCode::NOT_SUPPORT;
   }
@@ -945,9 +945,12 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
     class_req_.b_request = setup->bRequest;
     class_req_.data = result.write_data;
 
-    // Class IN transfers need the host-requested wLength so EP0 can decide whether
-    // a terminating ZLP is required when the payload is shorter than the request
-    // but still an exact multiple of bMaxPacketSize0 (for example DFU UPLOAD tails).
+    // Class IN 传输需要主机请求的 wLength，
+    // 这样 EP0 才能判断当 payload 短于请求值、但又恰好整除 bMaxPacketSize0 时，
+    // 是否还需要补一个结束 ZLP（例如 DFU UPLOAD 尾包）。
+    // Class IN transfers need the host-requested wLength so EP0 can decide
+    // whether a terminating ZLP is required when the payload is shorter than
+    // the request but still an exact multiple of bMaxPacketSize0.
     DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize(), setup->wLength);
     return ErrorCode::OK;
   }
@@ -979,7 +982,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     return ErrorCode::NOT_SUPPORT;
   }
 
-  // 先交给 BOS capabilities 尝试处理（WinUSB / WebUSB / ContainerID 等）
+  // 先交给 BOS capabilities 尝试处理（WinUSB / WebUSB / ContainerID 等）。
   // First, try BOS capabilities (WinUSB / WebUSB / ContainerID, etc.).
   {
     BosVendorResult bos_ret{};
@@ -1036,7 +1039,8 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     }
     default:
       // 先不处理 DEVICE/OTHER 级别的 Vendor 请求
-      // Do not handle DEVICE/OTHER vendor requests for now
+      // 暂不处理 DEVICE / OTHER 级别的 Vendor 请求。
+      // Do not handle DEVICE / OTHER vendor requests for now.
       return ErrorCode::NOT_SUPPORT;
   }
 
@@ -1061,7 +1065,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     return ErrorCode::ARG_ERR;
   }
 
-  // Host -> Device（OUT）路径：从主机读数据进 read_data
+  // Host -> Device（OUT）路径：从主机读数据进 read_data。
   // Host->Device (OUT): read host data into read_data.
   if (HAS_READ_BUF)
   {
@@ -1081,7 +1085,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     return ErrorCode::OK;
   }
 
-  // Device -> Host（IN）路径：从 write_data 发数据给主机
+  // Device -> Host（IN）路径：从 write_data 发数据给主机。
   // Device->Host (IN): send write_data to host.
   if (HAS_WRITE_BUF)
   {

@@ -13,8 +13,8 @@ static size_t calc_max_config_size(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
 {
-  // Reserve enough space for the largest configuration once during initialization.
   // 初始化时一次性为最大的 configuration 预留缓冲区。
+  // Reserve enough space for the largest configuration during initialization.
   size_t max_config_size = 0;
 
   for (const auto& cfg_group : configs)
@@ -70,8 +70,8 @@ ErrorCode ConfigDescriptor::BuildConfigDescriptor(ConfigDescriptorItem* const* i
   uint8_t* buffer = reinterpret_cast<uint8_t*>(buffer_.addr_);
   Header* header = reinterpret_cast<Header*>(buffer);
 
-  // Start from a clean configuration header, then append each item block in order.
   // 先清空配置头，再按顺序拼接每个配置项的数据块。
+  // Start from a clean configuration header, then append each item block in order.
   *header = Header{};
   header->bLength = sizeof(Header);
   header->bDescriptorType = 0x02;

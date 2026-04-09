@@ -85,6 +85,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
 
   map_[id] = this;
 
+  // 时钟配置。
   // Clock configuration.
   if (CH32_SPI_APB_MAP[id] == 1)
   {
@@ -100,12 +101,14 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
   }
   RCC_AHBPeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP_DMA[id], ENABLE);
 
+  // GPIO 配置。
   // GPIO configuration.
   {
     GPIO_InitTypeDef gpio = {};
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
 
-    // SCK
+    // SCK 引脚。
+    // SCK.
     RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(sck_port_), ENABLE);
     if (mode_ == SPI_Mode_Master)
     {
@@ -119,7 +122,8 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     }
     GPIO_Init(sck_port_, &gpio);
 
-    // MISO
+    // MISO 引脚。
+    // MISO.
     RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(miso_port_), ENABLE);
     if (mode_ == SPI_Mode_Master)
     {
@@ -133,7 +137,8 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     }
     GPIO_Init(miso_port_, &gpio);
 
-    // MOSI
+    // MOSI 引脚。
+    // MOSI.
     RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(mosi_port_), ENABLE);
     if (mode_ == SPI_Mode_Master)
     {
@@ -154,6 +159,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     }
   }
 
+  // SPI 基础配置。
   // SPI base configuration.
   {
     SPI_InitTypeDef init = {};
@@ -173,9 +179,11 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     SPI_Cmd(instance_, ENABLE);
   }
 
+  // DMA 通道基础配置（MADDR/CNTR 在运行时设置）。
   // DMA channel base configuration (MADDR/CNTR set at runtime).
   {
-    // RX
+    // RX 通道。
+    // RX.
     {
       ch32_dma_callback_t cb = [](void* arg)
       { reinterpret_cast<CH32SPI*>(arg)->RxDmaIRQHandler(); };
@@ -198,7 +206,8 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
       DMA_ITConfig(dma_rx_channel_, DMA_IT_TC, ENABLE);
       NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_rx_channel_)]);
     }
-    // TX
+    // TX 通道。
+    // TX.
     {
       ch32_dma_callback_t cb = [](void* arg)
       { reinterpret_cast<CH32SPI*>(arg)->TxDmaIRQHandler(); };
@@ -223,12 +232,14 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
     }
   }
 
-  // Sync base-class configuration for rate query helpers.
+  // 同步基类配置，供速率查询辅助逻辑使用。
+  // Sync the base-class configuration for rate-query helpers.
   GetConfig() = config;
   GetConfig().prescaler = MapCH32PrescalerToEnum(prescaler_);
 }
 
-// SetConfig updates polarity/phase and synchronizes base-class configuration.
+// SetConfig 会更新 polarity / phase，并同步基类配置。
+// SetConfig updates polarity / phase and synchronizes the base-class configuration.
 ErrorCode CH32SPI::SetConfig(SPI::Configuration config)
 {
   // 1) 把 SPI::Prescaler → CH32 Prescaler 宏
@@ -621,6 +632,7 @@ void CH32SPI::TxDmaIRQHandler()
   }
 }
 
+// 零拷贝传输路径。
 // Zero-copy transfer path.
 ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 {
@@ -678,6 +690,7 @@ ErrorCode CH32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   return ec;
 }
 
+// 总线最大时钟频率（Hz）。
 // Maximum bus clock in Hz.
 uint32_t CH32SPI::GetMaxBusSpeed() const
 {
@@ -695,6 +708,7 @@ uint32_t CH32SPI::GetMaxBusSpeed() const
   return 0u;
 }
 
+// 可用的最大分频枚举值。
 // Maximum available prescaler enumeration.
 SPI::Prescaler CH32SPI::GetMaxPrescaler() const
 {

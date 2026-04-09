@@ -24,8 +24,8 @@ class UAC1MicrophoneQ : public DeviceClass
   static_assert(CHANNELS >= 1 && CHANNELS <= 8, "CHANNELS out of range");
   static_assert(BITS_PER_SAMPLE == 8 || BITS_PER_SAMPLE == 16 || BITS_PER_SAMPLE == 24,
                 "BITS_PER_SAMPLE must be 8/16/24");
-  // Default interface strings for the AC / AS pair.
   // AC / AS 接口对的默认字符串。
+  // Default interface strings for the AC / AS pair.
   static constexpr const char* DEFAULT_CONTROL_INTERFACE_STRING = "XRUSB UAC1 Control";
   static constexpr const char* DEFAULT_STREAMING_INTERFACE_STRING =
       "XRUSB UAC1 Streaming";
@@ -88,8 +88,8 @@ class UAC1MicrophoneQ : public DeviceClass
 
   const char* GetInterfaceString(size_t local_interface_index) const override
   {
-    // UAC microphone contributes AC + AS interfaces.
     // UAC 麦克风暴露 AC + AS 两个接口。
+    // The UAC microphone exposes AC + AS interfaces.
     switch (local_interface_index)
     {
       case 0:
@@ -110,11 +110,11 @@ class UAC1MicrophoneQ : public DeviceClass
   {
     return pcm_queue_.PushBatch(reinterpret_cast<const uint8_t*>(data), nbytes);
   }
-  /** @brief 获取队列当前字节数 | Get current queued bytes */
+  /** @brief 获取队列当前字节数 / Get current queued bytes */
   size_t QueueSize() const { return pcm_queue_.Size(); }
-  /** @brief 获取队列剩余空间 | Get remaining queue capacity (bytes) */
+  /** @brief 获取队列剩余空间 / Get remaining queue capacity (bytes) */
   size_t QueueSpace() { return pcm_queue_.EmptySize(); }
-  /** @brief 重置队列为空 | Reset queue to empty */
+  /** @brief 重置队列为空 / Reset queue to empty */
   void ResetQueue() { pcm_queue_.Reset(); }
 
   // ===== UAC1 常量 / UAC1 constants =====
@@ -202,7 +202,7 @@ class UAC1MicrophoneQ : public DeviceClass
     uint8_t bLength = 12, bDescriptorType = CS_INTERFACE,
             bDescriptorSubtype = AC_INPUT_TERMINAL;
     uint8_t bTerminalID = ID_IT_MIC;
-    uint16_t wTerminalType = 0x0201;  // Microphone
+    uint16_t wTerminalType = 0x0201;  // 麦克风 / Microphone
     uint8_t bAssocTerminal = 0, bNrChannels = CHANNELS;
     uint16_t wChannelConfig = 0x0000;  // 根据 CHANNELS 设定 / Set per CHANNELS
     uint8_t iChannelNames = 0, iTerminal = 0;
@@ -217,8 +217,8 @@ class UAC1MicrophoneQ : public DeviceClass
     uint8_t bLength = static_cast<uint8_t>(7 + (CHANNELS + 1) * 1);
     uint8_t bDescriptorType = CS_INTERFACE, bDescriptorSubtype = AC_FEATURE_UNIT;
     uint8_t bUnitID = ID_FU, bSourceID = ID_IT_MIC, bControlSize = 1;
-    uint8_t bmaControlsMaster = 0x03;          // Mute + Volume
-    uint8_t bmaControlsCh[CHANNELS] = {0x03};  // Per‑channel supported
+    uint8_t bmaControlsMaster = 0x03;          // 静音 + 音量 / Mute + Volume
+    uint8_t bmaControlsCh[CHANNELS] = {0x03};  // 每通道支持 / Per-channel supported
     uint8_t iFeature = 0;
   };
 
@@ -231,7 +231,7 @@ class UAC1MicrophoneQ : public DeviceClass
     uint8_t bLength = 9, bDescriptorType = CS_INTERFACE,
             bDescriptorSubtype = AC_OUTPUT_TERMINAL;
     uint8_t bTerminalID = ID_OT_USB;
-    uint16_t wTerminalType = 0x0101;  // USB Streaming
+    uint16_t wTerminalType = 0x0101;  // USB 流 / USB Streaming
     uint8_t bAssocTerminal = 0, bSourceID = ID_FU, iTerminal = 0;
   };
 
@@ -333,7 +333,9 @@ class UAC1MicrophoneQ : public DeviceClass
       ASSERT(w_max_packet_size_ <= 1023);
     }
 
-    // 仅分配端点，不立即开启（在 AS Alt=1 时开启）
+    // 这里只分配端点，不立即开启；真正开启放在 AS Alt=1 切换时。
+    // Allocate the endpoint here without starting transfers;
+    // actual streaming begins when AS Alt=1 is selected.
     auto ans = endpoint_pool.Get(ep_iso_in_, Endpoint::Direction::IN, iso_in_ep_num_);
     ASSERT(ans == ErrorCode::OK);
 
@@ -343,7 +345,8 @@ class UAC1MicrophoneQ : public DeviceClass
     itf_ac_num_ = start_itf_num;
     itf_as_num_ = static_cast<uint8_t>(start_itf_num + 1);
 
-    // IAD
+    // IAD（把 AC + AS 这组接口关联成一个音频功能）
+    // IAD for grouping the AC + AS interfaces into one audio function.
     desc_block_.iad = {8,
                        static_cast<uint8_t>(DescriptorType::IAD),
                        itf_ac_num_,
@@ -364,13 +367,15 @@ class UAC1MicrophoneQ : public DeviceClass
                            0x00,
                            GetInterfaceStringIndex(0u)};
 
-    // AC Header
+    // AC Header（声明 AC 类描述符块总长）
+    // AC header describing the total AC class-specific descriptor size.
     desc_block_.ac_hdr.baInterfaceNr = itf_as_num_;
     desc_block_.ac_hdr.wTotalLength =
         static_cast<uint16_t>(sizeof(CSACHeader) + sizeof(ACInputTerminal) +
                               sizeof(ACFeatureUnit) + sizeof(ACOutputTerminal));
 
-    // AC Input Terminal 的 wChannelConfig 按通道数设置
+    // AC Input Terminal 的 wChannelConfig 按通道数设置。
+    // Program the AC Input Terminal wChannelConfig from the channel count.
     if constexpr (CHANNELS == 2)
     {
       desc_block_.it_mic.wChannelConfig = 0x0003;  // Left Front | Right Front
@@ -380,7 +385,8 @@ class UAC1MicrophoneQ : public DeviceClass
       desc_block_.it_mic.wChannelConfig = 0x0000;  // 未声明或单声道 / unspecified or mono
     }
 
-    // AS Alt 0（无端点）
+    // AS Alt 0：空闲态，不暴露数据端点。
+    // AS Alt 0: idle alternate setting with no data endpoint.
     desc_block_.as_alt0 = {9,
                            static_cast<uint8_t>(DescriptorType::INTERFACE),
                            itf_as_num_,
@@ -391,7 +397,8 @@ class UAC1MicrophoneQ : public DeviceClass
                            0x00,
                            GetInterfaceStringIndex(1u)};
 
-    // AS Alt 1（1 个 Iso IN 端点）
+    // AS Alt 1：工作态，暴露 1 个 Iso IN 端点。
+    // AS Alt 1: active streaming alternate setting with one Iso IN endpoint.
     desc_block_.as_alt1 = {9,
                            static_cast<uint8_t>(DescriptorType::INTERFACE),
                            itf_as_num_,
@@ -402,13 +409,15 @@ class UAC1MicrophoneQ : public DeviceClass
                            0x00,
                            GetInterfaceStringIndex(1u)};
 
-    // AS General
+    // AS General（把 AS 接口绑定到 USB 输出端子）
+    // AS general descriptor linking the AS interface to the USB output terminal.
     desc_block_.as_gen = {};
     desc_block_.as_gen.bTerminalLink = ID_OT_USB;
     desc_block_.as_gen.bDelay = 1;
     desc_block_.as_gen.wFormatTag = WFORMAT_PCM;
 
-    // Type I Format（单一离散采样率）
+    // Type I Format：当前实现只暴露一个离散采样率。
+    // Type I format descriptor: the current implementation exposes one discrete rate.
     desc_block_.fmt.bFormatType = FORMAT_TYPE_I;
     desc_block_.fmt.bNrChannels = CHANNELS;
     desc_block_.fmt.bSubframeSize = K_SUBFRAME_SIZE;
@@ -418,7 +427,8 @@ class UAC1MicrophoneQ : public DeviceClass
     desc_block_.fmt.tSamFreq[1] = static_cast<uint8_t>((sr_hz_ >> 8) & 0xFF);
     desc_block_.fmt.tSamFreq[2] = static_cast<uint8_t>((sr_hz_ >> 16) & 0xFF);
 
-    // 标准 ISO IN 端点（9 字节）
+    // 标准 ISO IN 端点（9 字节，含 bRefresh/bSynchAddress）
+    // Standard 9-byte ISO IN endpoint descriptor, including refresh/sync fields.
     desc_block_.ep_in = {};
     desc_block_.ep_in.bEndpointAddress = static_cast<uint8_t>(
         Endpoint::EPNumberToAddr(ep_iso_in_->GetNumber(), Endpoint::Direction::IN));
@@ -430,10 +440,12 @@ class UAC1MicrophoneQ : public DeviceClass
 
     desc_block_.ep_cs = {};
     desc_block_.ep_cs.bmAttributes = 0x00;
-    // IN 传输完成回调 → 继续投下一帧
+    // IN 传输完成后继续投下一帧。
+    // Kick the next frame after each IN transfer completes.
     ep_iso_in_->SetOnTransferCompleteCallback(on_in_complete_cb_);
 
-    // 设置整块配置数据
+    // 把整块描述符数据交给 DeviceClass。
+    // Publish the full descriptor block to DeviceClass.
     SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
 
     inited_ = true;
@@ -479,7 +491,7 @@ class UAC1MicrophoneQ : public DeviceClass
     // ===== 端点采样率控制（收件人：端点地址） / EP sampling‑freq control =====
     const uint8_t EP_ADDR = static_cast<uint8_t>(wIndex & 0xFF);
     const uint8_t CS_EP =
-        static_cast<uint8_t>((wValue >> 8) & 0xFF);  // 0x01 = Sampling Freq
+        static_cast<uint8_t>((wValue >> 8) & 0xFF);  // 0x01 = 采样率 / Sampling Freq
 
     if (EP_ADDR == desc_block_.ep_in.bEndpointAddress && CS_EP == 0x01)
     {
@@ -506,7 +518,7 @@ class UAC1MicrophoneQ : public DeviceClass
           {
             r.write_data = ConstRawData{sf_cur_, 3};
             return ErrorCode::OK;
-          }  // 单一频点
+          }  // 单一频点 / single discrete rate
           break;
         case GET_RES:
         {
@@ -522,12 +534,12 @@ class UAC1MicrophoneQ : public DeviceClass
           break;
       }
       ASSERT(false);
-      return ErrorCode::ARG_ERR;  // 长度不符等 / length mismatch etc.
+      return ErrorCode::ARG_ERR;  // 长度不符等 / length mismatch, etc.
     }
 
     // ===== Feature Unit（收件人：Interface / AC 接口） / Feature Unit =====
     const uint8_t CS = static_cast<uint8_t>((wValue >> 8) & 0xFF);  // FU_MUTE / FU_VOLUME
-    const uint8_t CH = static_cast<uint8_t>(wValue & 0xFF);         // 0=master, 1..N
+    const uint8_t CH = static_cast<uint8_t>(wValue & 0xFF);         // 0=主控, 1..N / 0=master, 1..N
     const uint8_t ENT =
         static_cast<uint8_t>((wIndex >> 8) & 0xFF);           // 实体 ID / entity ID
     const uint8_t ITF = static_cast<uint8_t>(wIndex & 0xFF);  // 接口号 / interface num
@@ -672,13 +684,13 @@ class UAC1MicrophoneQ : public DeviceClass
 
     switch (alt)
     {
-      case 0:  // Alt 0：无端点
+      case 0:  // Alt 0：无端点 / Alt 0: no endpoint
         streaming_ = false;
         ep_iso_in_->SetActiveLength(0);
         ep_iso_in_->Close();
         return ErrorCode::OK;
 
-      case 1:  // Alt 1：一个 Iso IN 端点
+      case 1:  // Alt 1：一个 Iso IN 端点 / Alt 1: one Iso IN endpoint
         ep_iso_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::ISOCHRONOUS,
                                static_cast<uint16_t>(w_max_packet_size_), false});
         ep_iso_in_->SetActiveLength(0);
@@ -693,11 +705,11 @@ class UAC1MicrophoneQ : public DeviceClass
     }
   }
 
-  /** @brief 返回接口数量（AC+AS=2）| Get number of interfaces (AC+AS=2) */
+  /** @brief 返回接口数量（AC+AS=2） / Get number of interfaces (AC+AS=2) */
   size_t GetInterfaceCount() override { return 2; }
-  /** @brief 包含 IAD | Has IAD */
+  /** @brief 包含 IAD / Has IAD */
   bool HasIAD() override { return true; }
-  /** @brief 配置描述符最大尺寸 | Get maximum configuration size */
+  /** @brief 配置描述符最大尺寸 / Get maximum configuration size */
   size_t GetMaxConfigSize() override { return sizeof(UAC1DescBlock); }
 
   bool OwnsEndpoint(uint8_t ep_addr) const override
@@ -745,14 +757,15 @@ class UAC1MicrophoneQ : public DeviceClass
   {
     if (!streaming_)
     {
-      return;  // Alt=1 才允许
+      return;  // 仅 Alt=1 允许 / Only allowed at Alt=1
     }
     if (!ep_iso_in_ || ep_iso_in_->GetState() != Endpoint::State::IDLE)
     {
       return;
     }
 
-    // 本帧应发送字节数 = floor + 余数累加决定是否 +1
+    // 本帧应发送字节数 = floor + 余数累加决定是否 +1。
+    // Bytes sent this frame = floor(bytes/service) plus one when remainder carries.
     uint16_t to_send = static_cast<uint16_t>(base_bytes_per_service_);
     acc_rem_ += rem_bytes_per_service_;
     if (acc_rem_ >= service_hz_)
@@ -794,7 +807,8 @@ class UAC1MicrophoneQ : public DeviceClass
    */
   void RecomputeTiming()
   {
-    // 1) 计算每秒服务次数（FS=1000Hz；HS=8000/2^(bInterval-1)）
+    // 1) 计算每秒服务次数（FS=1000Hz；HS=8000/2^(bInterval-1)）。
+    // 1) Compute service frequency (FS=1000Hz; HS=8000/2^(bInterval-1)).
     if (speed_ == Speed::HIGH)
     {
       uint8_t eff = interval_ ? interval_ : 1;
@@ -802,21 +816,23 @@ class UAC1MicrophoneQ : public DeviceClass
       {
         eff = 16;
       }
-      const uint32_t MICROFRAMES = 1u << (eff - 1u);  // 2^(bInterval-1) 个微帧
-      service_hz_ = 8000u / MICROFRAMES;              // 8000 微帧/秒
+      const uint32_t MICROFRAMES = 1u << (eff - 1u);  // 2^(bInterval-1) 个微帧 / microframes
+      service_hz_ = 8000u / MICROFRAMES;              // 8000 微帧/秒 / microframes per second
     }
     else
     {
-      service_hz_ = 1000u;  // FS 等时：规范上 bInterval 必须为 1 帧 => 1kHz
+      service_hz_ = 1000u;  // FS 等时：规范上 bInterval 必须为 1 帧 / FS isochronous requires bInterval=1
     }
 
-    // 2) 计算每服务周期应送字节
+    // 2) 计算每服务周期应送字节。
+    // 2) Compute the target bytes per service interval.
     bytes_per_sec_ = static_cast<uint32_t>(sr_hz_) * CHANNELS * K_SUBFRAME_SIZE;
     base_bytes_per_service_ = bytes_per_sec_ / service_hz_;
     rem_bytes_per_service_ = bytes_per_sec_ % service_hz_;
     uint32_t ceil_bpt = base_bytes_per_service_ + (rem_bytes_per_service_ ? 1u : 0u);
 
-    // 3) 钳制每事务上限（FS 1023，HS 1024；此处只做单事务上限，未用 HS multiplier）
+    // 3) 钳制每事务上限（FS 1023，HS 1024；此处只做单事务上限，未用 HS multiplier）。
+    // 3) Clamp the per-transaction limit (FS 1023, HS 1024; no HS multiplier here).
     const uint32_t PER_TX_LIMIT = (speed_ == Speed::HIGH) ? 1024u : 1023u;
     if (ceil_bpt > PER_TX_LIMIT)
     {
@@ -825,7 +841,8 @@ class UAC1MicrophoneQ : public DeviceClass
 
     w_max_packet_size_ = static_cast<uint16_t>(ceil_bpt);
 
-    // 4) 若已构建过描述符，则运行时能力不得超过宣告值
+    // 4) 若已构建过描述符，则运行时能力不得超过宣告值。
+    // 4) Once descriptors are built, runtime capability must not exceed the advertised value.
     if (desc_block_.ep_in.wMaxPacketSize != 0 &&
         w_max_packet_size_ > desc_block_.ep_in.wMaxPacketSize)
     {
@@ -833,7 +850,8 @@ class UAC1MicrophoneQ : public DeviceClass
     }
   }
 
-  // 端点/接口 / Endpoints & interfaces
+  // 端点与接口状态。
+  // Endpoint and interface state.
   Endpoint::EPNumber iso_in_ep_num_;
   Endpoint* ep_iso_in_ = nullptr;
   uint8_t itf_ac_num_ = 0;
@@ -843,37 +861,43 @@ class UAC1MicrophoneQ : public DeviceClass
   const char* streaming_interface_string_ =
       nullptr;  ///< 流接口字符串 / Streaming interface string
 
-  // 状态 / State
+  // 运行态状态。
+  // Runtime state.
   bool inited_ = false;
   bool streaming_ = false;
 
-  // 音量/静音 / Volume & mute
+  // 音量与静音状态。
+  // Volume and mute state.
   uint8_t mute_ = 0;
-  int16_t vol_cur_ = 0;  // 0 dB
+  int16_t vol_cur_ = 0;  // 0 dB / 0 dB
   int16_t vol_min_, vol_max_, vol_res_;
 
   uint8_t interval_;
   Speed speed_;
 
-  // 采样与帧切分 / Sampling & framing
+  // 采样与分帧参数。
+  // Sampling and framing parameters.
   uint32_t sr_hz_;
   uint32_t bytes_per_sec_ = 0;
   uint32_t base_bytes_per_service_ = 0;
   uint32_t rem_bytes_per_service_ = 0;
-  uint32_t acc_rem_ = 0;  // 0..999
+  uint32_t acc_rem_ = 0;  // 0..999 / fixed-point remainder accumulator
   uint16_t w_max_packet_size_ = 0;
   uint32_t service_hz_ = 1000;
 
   UAC1DescBlock desc_block_;
 
-  // 端点采样率缓存（Hz，小端 3 字节）与状态 / EP sampling‑freq cache & flag
+  // 端点采样率缓存（Hz，小端 3 字节）与状态。
+  // Endpoint sampling-frequency cache (3-byte LE) and flags.
   uint8_t sf_cur_[3] = {0, 0, 0};
   bool pending_set_sf_ = false;
 
-  // PCM 队列（字节） / PCM byte queue
+  // PCM 字节队列。
+  // PCM byte queue.
   LibXR::LockFreeQueue<uint8_t> pcm_queue_;
 
-  // 端点回调包装 / Endpoint callback wrapper
+  // 端点回调包装。
+  // Endpoint callback wrapper.
   LibXR::Callback<LibXR::ConstRawData&> on_in_complete_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnInCompleteStatic, this);
 };

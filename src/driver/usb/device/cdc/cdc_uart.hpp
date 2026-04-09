@@ -544,7 +544,8 @@ class CDCUart : public CDCBase, public LibXR::UART
         auto pop_ok = cdc->tx_deq_.PopCompleted(nullptr);
         ASSERT(pop_ok == ErrorCode::OK);
 
-        // ZLP 判定 / ZLP decision
+        // ZLP 判定。
+        // ZLP decision.
         const std::size_t MPS = ep->MaxPacketSize();
         if (MPS > 0 && (TO_SEND % MPS) == 0 && ep->GetActiveLength() == 0 &&
             !cdc->tx_deq_.HasOp())
@@ -552,11 +553,11 @@ class CDCUart : public CDCBase, public LibXR::UART
           cdc->need_write_zlp_ = true;
         }
 
-        return ErrorCode::OK;  // 非 PENDING -> 上层 finish 一次 / Non-PENDING triggers
-                               // one finish upstream
+        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one upstream finish
       }
 
-      // 预写下一段 / Prefill next segment
+      // 预写下一段。
+      // Prefill the next segment.
       if (!cdc->tx_deq_.HasOp())
       {
         return ErrorCode::PENDING;
@@ -577,7 +578,8 @@ class CDCUart : public CDCBase, public LibXR::UART
       }
 
       ep->SetActiveLength(len2);
-      // 下一轮继续检查是否可立即发送 / Next iteration checks sendability again
+      // 下一轮继续检查是否可立即发送。
+      // The next iteration checks whether sending can continue immediately.
     }
   }
 
@@ -644,8 +646,8 @@ class CDCUart : public CDCBase, public LibXR::UART
       return;
     }
 
-    // ZLP：仅在此刻跨-op 无数据时发送 / ZLP: send only if no data across ops at this
-    // moment
+    // ZLP：仅在此刻跨-op 无数据时发送。
+    // Send the ZLP only when there is no data left across ops at this moment.
     if (need_write_zlp_)
     {
       if (ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
@@ -658,21 +660,22 @@ class CDCUart : public CDCBase, public LibXR::UART
       need_write_zlp_ = false;
     }
 
-    // ActiveLength==0 时不读取队列 / Do not read queues when ActiveLength==0
+    // ActiveLength==0 时不读取队列。
+    // Do not read queues when ActiveLength==0.
     const std::size_t PENDING_LEN = ep->GetActiveLength();
     if (PENDING_LEN == 0)
     {
       return;
     }
 
-    // 1) 续发：本 ISR 仅启动一次 Transfer / Continue: only one Transfer is kicked in this
-    // ISR
+    // 1) 续发：本 ISR 仅启动一次 Transfer。
+    // 1) Continue: kick only one Transfer in this ISR.
     ep->SetActiveLength(0);
     auto ans = ep->Transfer(PENDING_LEN);
     ASSERT(ans == ErrorCode::OK);
 
-    // 2) 若为 head op 最后一段：启动后 pop+Finish（一次）/ If last segment: pop+Finish
-    // once
+    // 2) 若为 head op 最后一段：启动后 pop + Finish 一次。
+    // 2) If this is the last segment of the head op, pop + Finish once after kick-off.
     if (tx_deq_.HeadCompleted())
     {
       WriteInfoBlock completed{};
@@ -681,8 +684,8 @@ class CDCUart : public CDCBase, public LibXR::UART
       write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
     }
 
-    // 3) 预写：仅在已启动 Transfer 后允许读取队列 / Prefill: allowed only after kicking
-    // Transfer
+    // 3) 预写：仅在已启动 Transfer 后允许读取队列。
+    // 3) Prefill: queue reads are allowed only after a Transfer has been kicked.
     bool primed = false;
     if (tx_deq_.HasOp())
     {

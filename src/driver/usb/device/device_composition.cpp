@@ -21,14 +21,14 @@ struct InterfaceStringLayout
   size_t max_len = 0;
 };
 
-// Count the raw number of config items before unique-class deduplication.
 // 在 class 去重前，先统计原始配置项数量。
+// Count the raw number of config items before unique-class deduplication.
 static size_t calc_total_item_num(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
 {
-  // Count raw items first; the final unique-class table is deduplicated in the
-  // constructor. 这里先统计原始 item 数量；最终唯一 class 表会在构造函数里去重。
+  // 这里先统计原始 item 数量；最终唯一 class 表会在构造函数里去重。
+  // Count raw items first; the final unique-class table is deduplicated in the constructor.
   size_t total = 0;
   for (const auto& group : configs)
   {
@@ -37,8 +37,8 @@ static size_t calc_total_item_num(
   return total;
 }
 
-// Constructor-time unique-class table is tiny, so a linear contains check is sufficient.
 // 构造期唯一 class 表很小，线性查重已经足够。
+// The constructor-time unique-class table is tiny, so a linear contains check is sufficient.
 static bool contains_class(DeviceClass* const* list, size_t count,
                            const DeviceClass* item)
 {
@@ -52,8 +52,8 @@ static bool contains_class(DeviceClass* const* list, size_t count,
   return false;
 }
 
-// Compute the UTF-16LE payload size produced from a UTF-8 interface string.
 // 计算 UTF-8 接口字符串转换成 UTF-16LE 后的有效载荷长度。
+// Compute the UTF-16LE payload size produced from a UTF-8 interface string.
 static size_t calc_utf16le_len_runtime(const char* input)
 {
   if (input == nullptr)
@@ -149,15 +149,15 @@ static void to_utf16le(const char* str, uint8_t* buffer)
   }
 }
 
-// Pre-compute how many interface strings exist and the largest descriptor buffer needed.
 // 预先算出接口字符串总数，以及运行时生成描述符所需的最大缓冲区。
+// Pre-compute the interface-string count and the largest runtime descriptor buffer needed.
 static InterfaceStringLayout calc_interface_string_layout(DeviceClass* const* classes,
                                                           size_t class_count)
 {
-  // Interface strings are generated at runtime, but their source pointers and the maximum
-  // UTF-16LE descriptor size can be fixed up front during composition construction.
   // 接口字符串描述符在运行时生成，但其源字符串指针和最大 UTF-16LE
   // 空间可在构造期一次算清。
+  // Interface strings are generated at runtime, but their source pointers and
+  // maximum UTF-16LE descriptor size can be fixed up front during construction.
   InterfaceStringLayout layout{};
   for (size_t class_index = 0; class_index < class_count; ++class_index)
   {
@@ -206,9 +206,10 @@ static bool is_composite_config(const std::initializer_list<ConfigDescriptorItem
   return (group.size() > 1) || config_contains_iad(group);
 }
 
-// Device descriptor override is only valid for the simple "single class, single
-// interface, no IAD" shape. 只有“单 class、单接口、无 IAD”的简单形态，才允许覆盖 device
-// descriptor 的类字段。
+// 只有“单 class、单接口、无 IAD”的简单形态，
+// 才允许覆盖 device descriptor 的类字段。
+// Device-descriptor override is only valid for the simple
+// "single class, single interface, no IAD" shape.
 static bool is_device_descriptor_override_eligible(ConfigDescriptorItem* const* items,
                                                    size_t item_num)
 {
@@ -245,10 +246,10 @@ static bool is_composite_device(
   return false;
 }
 
-// Count the worst-case BOS capability count among all configurations so the BosManager
-// scratch storage can be allocated once.
 // 统计所有 configuration 中 BOS capability 数量的最大值，
 // 这样 BosManager 的暂存空间只需分配一次。
+// Count the worst-case BOS capability count among all configurations so the
+// BosManager scratch storage can be allocated once.
 static size_t calc_bos_capability_num_max(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
@@ -273,10 +274,10 @@ static size_t calc_bos_capability_num_max(
   return max_num;
 }
 
+// 统计所有 configuration 中 BOS 描述符尺寸的最大值；
+// 若没有类提供 USB 2.0 Extension capability，则为自动补上的那项预留空间。
 // Count the worst-case BOS descriptor size among all configurations.
-// If no class provides a USB 2.0 Extension capability, reserve space for the auto-added
-// one. 统计所有 configuration 中 BOS 描述符尺寸的最大值； 若没有类提供 USB 2.0 Extension
-// capability，则为自动补上的那项预留空间。
+// If no class provides a USB 2.0 Extension capability, reserve space for the auto-added one.
 static size_t calc_bos_descriptor_size_max(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
@@ -356,12 +357,12 @@ DeviceComposition::DeviceComposition(
 {
   ASSERT(config_num_ > 0);
 
-  // Flatten every configuration item into:
-  // 1) per-config item tables used for descriptor building/binding
-  // 2) one unique class table used by string registration
   // 将所有配置项整理成：
   // 1) 每个 configuration 自己的 item 表
   // 2) 一份用于字符串注册的唯一 class 表
+  // Flatten every configuration item into:
+  // 1) per-config item tables for descriptor building / binding
+  // 2) one unique class table for string registration
   size_t config_index = 0;
   for (const auto& cfg_group : configs)
   {
@@ -383,8 +384,8 @@ DeviceComposition::DeviceComposition(
     ++config_index;
   }
 
-  // Pre-compute interface-string storage once during initialization.
   // 初始化阶段一次性算出接口字符串容量和最大描述符空间。
+  // Pre-compute interface-string storage once during initialization.
   const auto interface_string_layout =
       calc_interface_string_layout(classes_, class_count_);
   interface_string_count_ = interface_string_layout.count;
@@ -407,8 +408,8 @@ const DeviceComposition::ConfigItems& DeviceComposition::CurrentConfigItems() co
 
 void DeviceComposition::Init(bool in_isr)
 {
-  // Init binds endpoints first, then rebuilds the BOS view for the now-active config.
   // Init 先绑定端点，再按当前激活配置重建 BOS 视图。
+  // Init binds endpoints first, then rebuilds the BOS view for the active configuration.
   configured_ = false;
   BindEndpoints(in_isr);
   RebuildBosCache();
@@ -437,8 +438,8 @@ ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
     return ErrorCode::OK;
   }
 
-  // USB configuration values are 1-based, while current_cfg_ stores a 0-based slot index.
   // USB configuration value 从 1 开始，而 current_cfg_ 内部保存的是从 0 开始的槽位。
+  // USB configuration values are 1-based, while current_cfg_ stores a 0-based slot index.
   UnbindEndpoints(in_isr);
   current_cfg_ = static_cast<uint8_t>(index - 1);
   configured_ = true;
@@ -449,10 +450,10 @@ ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
 
 ErrorCode DeviceComposition::BuildConfigDescriptor()
 {
-  // ConfigDescriptor builds the active configuration only; current_cfg_ supplies both
-  // the item table and the externally visible bConfigurationValue.
   // ConfigDescriptor 只构建当前激活的 configuration；
   // current_cfg_ 同时决定 item 表和对外可见的 bConfigurationValue。
+  // ConfigDescriptor builds the active configuration only;
+  // current_cfg_ supplies both the item table and the externally visible bConfigurationValue.
   const auto& config = CurrentConfigItems();
   return config_desc_.BuildConfigDescriptor(config.items, config.item_num,
                                             static_cast<uint8_t>(current_cfg_ + 1),
@@ -481,8 +482,8 @@ ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index, uint16_t 
 
   if (string_index > static_cast<uint8_t>(DescriptorStrings::Index::SERIAL_NUMBER_STRING))
   {
-    // Interface strings share the same language gate as the built-in string set.
     // 接口字符串与内建字符串集合共用同一套语言号校验。
+    // Interface strings share the same language gate as the built-in string set.
     if (!strings_.HasLanguage(lang))
     {
       return ErrorCode::NOT_FOUND;
@@ -541,9 +542,10 @@ DeviceClass* DeviceComposition::FindClassByInterfaceNumber(size_t index) const
 
   const auto& config = CurrentConfigItems();
 
-  // Each item reports how many interfaces it occupies; walk the flattened list until
-  // the requested interface falls into one item's local range.
-  // 每个 item 都声明自己占用的接口数量；沿扁平表前进，直到目标接口落入某个 item 的区间。
+  // 每个 item 都声明自己占用的接口数量；
+  // 沿扁平表前进，直到目标接口落入某个 item 的区间。
+  // Each item reports how many interfaces it occupies; walk the flattened list
+  // until the requested interface falls into one item's local range.
   int interface_index = -1;
   for (size_t i = 0; i < config.item_num; ++i)
   {
@@ -623,8 +625,8 @@ void DeviceComposition::UnbindEndpoints(bool in_isr)
   }
   ep_assigned_ = false;
 
-  // Unbind walks the same active item table, but no interface renumbering is needed here.
   // Unbind 走的仍是当前激活 item 表，但这里不再需要重新分配接口号。
+  // Unbind walks the same active item table, but no interface renumbering is needed here.
   const auto& config = CurrentConfigItems();
   for (size_t i = 0; i < config.item_num; ++i)
   {
@@ -640,8 +642,8 @@ void DeviceComposition::UnbindEndpoints(bool in_isr)
 
 void DeviceComposition::RebuildBosCache()
 {
-  // BOS capabilities are collected from the active configuration only.
   // BOS capability 只从当前激活的 configuration 收集。
+  // BOS capabilities are collected from the active configuration only.
   bos_.ClearCapabilities();
   const auto& config = CurrentConfigItems();
   for (size_t i = 0; i < config.item_num; ++i)
@@ -669,8 +671,8 @@ void DeviceComposition::RebuildBosCache()
 ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
                                                      ConstRawData& data)
 {
-  // Interface strings live after the built-in manufacturer/product/serial range.
   // 接口字符串位于内建 manufacturer/product/serial 之后的索引区间。
+  // Interface strings live after the built-in manufacturer/product/serial range.
   const size_t base_index =
       static_cast<uint8_t>(DescriptorStrings::Index::SERIAL_NUMBER_STRING);
   if (string_index <= base_index)
@@ -689,8 +691,8 @@ ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
   const size_t utf16_len = calc_utf16le_len_runtime(str);
   ASSERT(utf16_len + 2 <= 255);
 
-  // USB string descriptor layout: [bLength][bDescriptorType=0x03][UTF-16LE payload...]
   // USB 字符串描述符格式：[bLength][bDescriptorType=0x03][UTF-16LE payload...]
+  // USB string descriptor layout: [bLength][bDescriptorType=0x03][UTF-16LE payload...]
   buffer[1] = 0x03;
   buffer[0] = static_cast<uint8_t>(utf16_len + 2);
   to_utf16le(str, buffer + 2);
@@ -705,8 +707,8 @@ void DeviceComposition::RegisterInterfaceStrings()
     return;
   }
 
-  // USB string indices 1..3 are reserved for manufacturer/product/serial.
   // USB 字符串索引 1..3 保留给厂商/产品/序列号。
+  // USB string indices 1..3 are reserved for manufacturer/product/serial.
   uint8_t next_index =
       static_cast<uint8_t>(DescriptorStrings::Index::SERIAL_NUMBER_STRING) + 1u;
   size_t registered_count = 0u;
@@ -731,10 +733,12 @@ void DeviceComposition::RegisterInterfaceStrings()
         continue;
       }
 
+      // 这里保留一张扁平源字符串表，
+      // 这样 DeviceCore 之后按索引取接口字符串时，不必再重新遍历全部 class。
+      // 保留一张扁平源字符串表，
+      // 这样 DeviceCore 之后可以按索引重新生成任意接口字符串，而不必重扫全部 class。
       // Keep a flat source-string table so DeviceCore can later regenerate any
-      // interface descriptor by index without re-scanning all classes.
-      // 这里保留一张扁平源字符串表，这样 DeviceCore 之后按索引取接口字符串时，
-      // 不必再重新遍历全部 class。
+      // interface string by index without re-scanning all classes.
       ASSERT(registered_count < interface_string_count_);
       if (!class_has_string)
       {

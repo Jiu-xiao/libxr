@@ -22,8 +22,8 @@ template <size_t REPORT_DESC_LEN, size_t TX_REPORT_LEN, size_t RX_REPORT_LEN = 0
 class HID : public DeviceClass
 {
  public:
-  // Default interface string for HID functions that expose one interface.
   // 暴露单接口的 HID 功能默认使用这个接口字符串。
+  // Default interface string for HID functions that expose one interface.
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB HID";
 
   /** @brief HID 描述符类型 / HID Descriptor Types */
@@ -128,8 +128,8 @@ class HID : public DeviceClass
 
   const char* GetInterfaceString(size_t local_interface_index) const override
   {
-    // HID contributes exactly one interface.
     // HID 只暴露一个接口。
+    // HID contributes exactly one interface.
     return (local_interface_index == 0u) ? interface_string_ : nullptr;
   }
 
