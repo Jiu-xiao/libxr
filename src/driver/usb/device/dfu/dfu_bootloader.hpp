@@ -30,14 +30,14 @@ class DfuBootloaderBackend
   };
 #pragma pack(pop)
 
-  // Backend responsibilities:
-  // - own download/upload/manifest bookkeeping
-  // - drive flash erase/write/read through Flash base interface
-  // - maintain image validity / seal metadata
   // Backend 负责：
   // - 管理 download/upload/manifest 状态
   // - 通过 Flash 基类接口驱动擦写读
-  // - 维护镜像有效性和 seal 元数据
+  // - 维护镜像有效性与 seal 元数据
+  // Backend responsibilities:
+  // - own download/upload/manifest bookkeeping
+  // - drive flash erase/write/read through the Flash base interface
+  // - maintain image validity and seal metadata
   DfuBootloaderBackend(Flash& flash, size_t image_offset, size_t image_size_limit,
                        size_t seal_offset, JumpCallback jump_to_app,
                        void* jump_app_ctx = nullptr, bool autorun = true)
@@ -163,10 +163,11 @@ class DfuBootloaderBackend
         (download_.session_started &&
          (download_.received_bytes != 0u || download_.expected_block_num != 0u)))
     {
-      // Host restarted DNLOAD from block 0 without an explicit ABORT/CLRSTATUS first.
-      // Treat that as a fresh session and discard the old partial transfer state.
       // 主机没有先发 ABORT/CLRSTATUS，就直接从 block 0 重启 DNLOAD；
       // 这里把它视为新会话，并丢弃旧的部分传输状态。
+      // The host restarted DNLOAD from block 0 without an explicit
+      // ABORT/CLRSTATUS first; treat that as a fresh session and discard the
+      // old partial transfer state.
       ResetTransferState();
     }
 
@@ -319,10 +320,10 @@ class DfuBootloaderBackend
 
   void Process()
   {
-    // The backend only advances protocol-owned asynchronous work here.
-    // App launch stays an explicit board/application policy decision.
     // 这里仅推进协议自身拥有的异步工作；
-    // App launch 仍然保持为显式的板级/应用层策略决策。
+    // app launch 仍然保持为显式的板级/应用层策略决策。
+    // Only protocol-owned asynchronous work advances here;
+    // app launch remains an explicit board/application policy decision.
     if (write_.pending)
     {
       ProcessPendingWrite();
@@ -336,10 +337,10 @@ class DfuBootloaderBackend
 
   bool TryRequestRunApp()
   {
-    // Run-app request does not mutate DFU transfer state; it only records an image-backed
-    // launch request for the outer boot/application loop to consume.
     // Run-app 请求不修改 DFU 传输状态；它只记录一个待消费的镜像启动请求，
     // 由外层 boot/application 循环决定何时真正跳转。
+    // The run-app request does not mutate DFU transfer state; it only records
+    // an image-backed launch request for the outer boot/application loop.
     if (!image_.ready)
     {
       size_t image_size = 0u;
@@ -386,8 +387,8 @@ class DfuBootloaderBackend
   size_t ImageSize() const { return image_.stored_size; }
 
  private:
-  // Download/upload operate only on the payload area before the seal record.
   // download/upload 只允许访问 seal 记录之前的 payload 区域。
+  // Download/upload only operate on the payload area before the seal record.
   size_t PayloadLimit() const
   {
     if (seal_offset_ > image_size_limit_)
@@ -397,8 +398,8 @@ class DfuBootloaderBackend
     return seal_offset_;
   }
 
-  // Start a fresh download session and invalidate any previously cached image view.
   // 开启新的下载会话，并使之前缓存的镜像有效性视图失效。
+  // Start a fresh download session and invalidate any previously cached image view.
   void StartDownloadSession()
   {
     ResetTransferState();
@@ -414,9 +415,10 @@ class DfuBootloaderBackend
 
   void ResetTransferState()
   {
-    // Reset only the protocol-owned transfer sessions; image validity and launch policy
-    // are tracked separately in ImageState.
-    // 这里只重置协议拥有的传输会话状态；镜像有效性和启动策略单独放在 ImageState 里。
+    // 这里只重置协议拥有的传输会话状态；
+    // 镜像有效性和启动策略单独放在 ImageState 里。
+    // Reset only protocol-owned transfer session state;
+    // image validity and launch policy are tracked separately in ImageState.
     download_ = {};
     write_ = {};
     manifest_ = {};
@@ -427,10 +429,10 @@ class DfuBootloaderBackend
 
   bool HasPendingManifest() const { return manifest_.pending; }
 
-  // Return a coarse host-visible poll timeout for the next GETSTATUS.
-  // Blocks that still need erase are reported slower than pure program-only writes.
   // 为下一次 GETSTATUS 返回一个粗粒度的 host-visible poll timeout；
   // 仍需擦除的块会比纯写入步骤报告更长的等待时间。
+  // Return a coarse host-visible poll timeout for the next GETSTATUS;
+  // blocks that still need erase are reported slower than pure program-only writes.
   uint32_t ComputeWritePollTimeout(size_t offset, size_t len) const
   {
     const size_t first_block = offset / erase_block_size_;
@@ -446,12 +448,12 @@ class DfuBootloaderBackend
     return 10u;
   }
 
-  // Execute one deferred write step:
-  // 1) erase every newly touched erase block once
-  // 2) program the just-received payload chunk
   // 执行一次延迟写入步骤：
   // 1) 对新覆盖到的擦除块各擦一次
   // 2) 再把刚收到的 payload 分片编程进去
+  // Execute one deferred write step:
+  // 1) erase each newly touched erase block once
+  // 2) program the just-received payload chunk
   void ProcessPendingWrite()
   {
     if (!EnsureBlocksErased(write_.offset, write_.len))
@@ -474,8 +476,8 @@ class DfuBootloaderBackend
     write_.pending = false;
   }
 
-  // Finalize the image by computing the fixed CRC32 and writing the seal record.
   // 通过计算固定 CRC32 并写入 seal 记录来完成镜像定稿。
+  // Finalize the image by computing the fixed CRC32 and writing the seal record.
   void ProcessPendingManifest()
   {
     const size_t payload_limit = PayloadLimit();
@@ -514,8 +516,8 @@ class DfuBootloaderBackend
     manifest_.pending = false;
   }
 
-  // Compute the fixed CRC32 used by the seal record over the payload area only.
   // 计算 seal 记录使用的固定 CRC32，只覆盖 payload 区域。
+  // Compute the fixed CRC32 used by the seal record over the payload area only.
   bool ComputeImageCrc32(size_t image_size, uint32_t& crc32_out)
   {
     if (!LibXR::CRC32::inited_)
@@ -547,17 +549,18 @@ class DfuBootloaderBackend
     return true;
   }
 
-  // Read the current seal record from flash.
   // 从 flash 中读取当前 seal 记录。
+  // Read the current seal record from flash.
   bool ReadSeal(SealRecord& seal)
   {
     return flash_.Read(image_offset_ + seal_offset_, {reinterpret_cast<uint8_t*>(&seal),
                                                       sizeof(seal)}) == ErrorCode::OK;
   }
 
-  // Seal is staged in an erase-block-sized scratch buffer, so callers do not need
-  // board-specific side storage.
-  // seal 先写入一个擦除块大小的临时缓冲区，因此调用方不需要板级专用 side storage。
+  // seal 先写入一个擦除块大小的临时缓冲区，
+  // 因此调用方不需要板级专用 side storage。
+  // The seal is staged in an erase-block-sized scratch buffer, so callers do
+  // not need board-specific side storage.
   bool WriteSeal(size_t image_size, uint32_t crc32)
   {
     if (seal_storage_ == nullptr)
@@ -579,9 +582,10 @@ class DfuBootloaderBackend
                         {seal_storage_, seal_storage_size_}) == ErrorCode::OK;
   }
 
-  // Probe whether flash already contains a valid sealed image, and optionally return
-  // its stored payload size.
-  // 探测 flash 当前是否已有有效的已封印镜像，并可选返回它记录的 payload 大小。
+  // 探测 flash 当前是否已有有效的已封印镜像，
+  // 并可选返回它记录的 payload 大小。
+  // Probe whether flash already contains a valid sealed image, and optionally
+  // return its stored payload size.
   bool ProbeStoredImage(size_t* out_image_size)
   {
     SealRecord seal = {};
@@ -618,8 +622,10 @@ class DfuBootloaderBackend
     return true;
   }
 
-  // Erase every block touched by [offset, offset+len) at most once per download session.
-  // 对 [offset, offset+len) 覆盖到的每个块，在一次下载会话里最多只擦除一次。
+  // 对 [offset, offset+len) 覆盖到的每个块，
+  // 在一次下载会话里最多只擦除一次。
+  // Erase every block touched by [offset, offset+len) at most once per
+  // download session.
   bool EnsureBlocksErased(size_t offset, size_t len)
   {
     if (len == 0u)
@@ -810,7 +816,8 @@ class DFUClass : public DfuInterfaceClassBase
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB DFU";
 
   /**
-   * Backend contract:
+   * @brief Backend 需要满足的接口契约 / Backend contract requirements
+   *
    * - `DFUCapabilities GetDfuCapabilities() const`
    * - `ErrorCode DfuSetAlternate(uint8_t alt)`
    * - `void DfuAbort(uint8_t alt)`
@@ -838,8 +845,8 @@ class DFUClass : public DfuInterfaceClassBase
  protected:
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
   {
-    // Firmware DFU publishes one interface and validates backend capabilities during
-    // bind. 固件 DFU 在绑定阶段发布单接口描述符，并校验 backend 能力。
+    // 固件态 DFU 在绑定阶段发布单接口描述符，并校验 backend 能力。
+    // Firmware DFU publishes one interface and validates backend capabilities during bind.
     interface_num_ = start_itf_num;
     current_alt_setting_ = 0u;
 
@@ -874,9 +881,10 @@ class DFUClass : public DfuInterfaceClassBase
   {
     if (inited_)
     {
-      // Unbind must leave the backend in an aborted state so the next bind always starts
-      // from a clean protocol session.
-      // 解绑时先把 backend 置回 abort 状态，这样下一次绑定总是从干净的协议会话开始。
+      // 解绑时先把 backend 置回 abort 状态，
+      // 这样下一次绑定总是从干净的协议会话开始。
+      // Unbind must leave the backend in an aborted state so the next bind
+      // always starts from a clean protocol session.
       backend_.DfuAbort(current_alt_setting_);
     }
     inited_ = false;
@@ -907,8 +915,8 @@ class DFUClass : public DfuInterfaceClassBase
     if (state_ == DFUState::DFU_DNBUSY || state_ == DFUState::DFU_MANIFEST ||
         state_ == DFUState::DFU_MANIFEST_WAIT_RESET)
     {
-      // Alternate setting cannot change while the protocol is in a non-idle phase.
       // 协议仍处于非空闲阶段时，不允许切换 alternate setting。
+      // Alternate setting cannot change while the protocol is in a non-idle phase.
       return ErrorCode::BUSY;
     }
 
@@ -1000,8 +1008,9 @@ class DFUClass : public DfuInterfaceClassBase
 
     if (pending_dnload_length_ == 0u)
     {
-      // Zero-length OUT data stage is legal here only for the already-finished DNLOAD
-      // path. 这里出现零长度 OUT data stage 只在“DNLOAD 已结束”的路径上才是合法的。
+      // 这里出现零长度 OUT data stage 只在“DNLOAD 已结束”的路径上才是合法的。
+      // A zero-length OUT data stage is legal here only for the already-finished
+      // DNLOAD path.
       return ErrorCode::OK;
     }
 
@@ -1032,10 +1041,10 @@ class DFUClass : public DfuInterfaceClassBase
     }
     if (state_ == DFUState::DFU_MANIFEST_WAIT_RESET)
     {
-      // Commit autorun only after the host has completed the STATUS OUT of the
-      // GETSTATUS request that reported MANIFEST-WAIT-RESET.
       // 只有在主机完成了报告 MANIFEST-WAIT-RESET 的那笔 GETSTATUS 的 STATUS OUT 后，
       // 才真正提交 autorun。
+      // Commit autorun only after the host completes the STATUS OUT of the
+      // GETSTATUS request that reported MANIFEST-WAIT-RESET.
       backend_.DfuCommitManifestWaitReset(current_alt_setting_);
     }
   }
@@ -1052,8 +1061,8 @@ class DFUClass : public DfuInterfaceClassBase
 
   ErrorCode HandleDetach(ControlTransferResult&)
   {
-    // Firmware-mode DFU does not implement DETACH; runtime DFU owns that request.
     // 固件态 DFU 不实现 DETACH；该请求由 runtime DFU 处理。
+    // Firmware-mode DFU does not implement DETACH; runtime DFU owns that request.
     return ProtocolStall(DFUStatusCode::ERR_STALLEDPKT);
   }
 
@@ -1075,10 +1084,10 @@ class DFUClass : public DfuInterfaceClassBase
 
     if (wLength == 0u)
     {
-      // Zero-length DNLOAD terminates the data phase and requests manifest,
-      // but only after at least one payload block was accepted.
       // 零长度 DNLOAD 表示结束数据阶段并进入 manifest，
       // 但前提是之前至少成功接收过一个 payload block。
+      // A zero-length DNLOAD terminates the data phase and requests manifest,
+      // but only after at least one payload block was accepted.
       pending_dnload_length_ = 0u;
       pending_block_num_ = block_num;
       if (!download_started_)
@@ -1197,8 +1206,8 @@ class DFUClass : public DfuInterfaceClassBase
 
   void AdvanceStateForStatusRead()
   {
-    // GETSTATUS is the synchronization point that advances the standard DFU state
-    // machine. 标准 DFU 状态机是在 GETSTATUS 这个同步点上推进的。
+    // 标准 DFU 状态机是在 GETSTATUS 这个同步点上推进的。
+    // GETSTATUS is the synchronization point that advances the standard DFU state machine.
     switch (state_)
     {
       case DFUState::DFU_DNLOAD_SYNC:
@@ -1261,10 +1270,10 @@ class DFUClass : public DfuInterfaceClassBase
       return;
     }
 
-    // A backend-reported busy maps to DFU_DNBUSY; otherwise the host may continue
-    // sending the next DNLOAD block from DFU_DNLOAD_IDLE.
-    // backend 报 busy 时映射到 DFU_DNBUSY；否则主机可以从 DFU_DNLOAD_IDLE
-    // 继续发送下一块 DNLOAD。
+    // backend 报 busy 时映射到 DFU_DNBUSY；
+    // 否则主机可以从 DFU_DNLOAD_IDLE 继续发送下一块 DNLOAD。
+    // A backend-reported busy maps to DFU_DNBUSY; otherwise the host may
+    // continue sending the next DNLOAD block from DFU_DNLOAD_IDLE.
     state_ = busy ? DFUState::DFU_DNBUSY : DFUState::DFU_DNLOAD_IDLE;
   }
 
@@ -1293,8 +1302,8 @@ class DFUClass : public DfuInterfaceClassBase
       return;
     }
 
-    // Manifest complete returns either to IDLE (tolerant) or WAIT_RESET (non-tolerant).
     // manifest 完成后，要么回到 IDLE（tolerant），要么进入 WAIT_RESET（non-tolerant）。
+    // Manifest completion returns either to IDLE (tolerant) or WAIT_RESET (non-tolerant).
     download_started_ = false;
     state_ = caps_.manifestation_tolerant ? DFUState::DFU_IDLE
                                           : DFUState::DFU_MANIFEST_WAIT_RESET;
@@ -1302,8 +1311,10 @@ class DFUClass : public DfuInterfaceClassBase
 
   void ResetProtocolState()
   {
-    // Reset only frontend-owned protocol state; image-level bookkeeping stays in
-    // backend_. 这里只重置前端拥有的协议状态；镜像级 bookkeeping 保留在 backend_ 里。
+    // 这里只重置前端拥有的协议状态；
+    // 镜像级 bookkeeping 保留在 backend_ 里。
+    // Reset only frontend-owned protocol state;
+    // image-level bookkeeping stays in backend_.
     pending_block_num_ = 0u;
     pending_dnload_length_ = 0u;
     poll_timeout_ms_ = 0u;
@@ -1321,8 +1332,10 @@ class DFUClass : public DfuInterfaceClassBase
 
   void EnterErrorState(DFUStatusCode status)
   {
-    // Once an error is latched, the frontend stays in DFU_ERROR until CLRSTATUS/ABORT
-    // resets it. 一旦锁存错误，前端会保持在 DFU_ERROR，直到 CLRSTATUS/ABORT 把它清掉。
+    // 一旦锁存错误，前端会保持在 DFU_ERROR，
+    // 直到 CLRSTATUS/ABORT 把它清掉。
+    // Once an error is latched, the frontend stays in DFU_ERROR
+    // until CLRSTATUS/ABORT clears it.
     status_ = status;
     state_ = DFUState::DFU_ERROR;
     poll_timeout_ms_ = 0u;
@@ -1404,8 +1417,8 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
   {
   }
 
-  // Process only backend-owned async work; actual app launch remains explicit.
   // 这里只推进 backend 拥有的异步工作；真正跳 app 仍保持显式调用。
+  // Process only backend-owned async work; actual app launch remains explicit.
   void Process() { Storage::backend_.Process(); }
   bool RequestRunApp() { return Storage::backend_.TryRequestRunApp(); }
 
@@ -1436,14 +1449,14 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
     }
     if (Storage::backend_.HasPendingWork())
     {
-      // Do not launch the app while protocol-owned async work is still pending.
       // 协议拥有的异步工作尚未完成时，不允许启动 app。
+      // Do not launch the app while protocol-owned async work is still pending.
       return ErrorCode::BUSY;
     }
     if (!Storage::backend_.TryRequestRunApp())
     {
-      // RUN_APP is only accepted when a valid sealed image is known.
       // RUN_APP 只在已知存在有效 seal 镜像时才会接受。
+      // RUN_APP is only accepted when a valid sealed image is known.
       return ErrorCode::FAILED;
     }
     result.SendStatusInZLP() = true;

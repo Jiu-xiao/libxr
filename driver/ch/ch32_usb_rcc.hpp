@@ -17,8 +17,9 @@ inline uint32_t GetSysclkHz()
 
 inline void ConfigureUsb48MFromSysclk()
 {
+  // 传统 CH32 器件直接从 SYSCLK / PLL 分频得到共享 USB 48 MHz 时钟。
   // Legacy CH32 parts derive the shared USB 48 MHz clock directly from SYSCLK / PLL
-  // dividers. 传统 CH32 器件直接从 SYSCLK / PLL 分频得到共享 USB 48 MHz 时钟。
+  // dividers.
   const uint32_t sysclk_hz = GetSysclkHz();
 
 #if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && \
@@ -92,8 +93,10 @@ struct UsbHsPllTableEntry
 
 inline bool TryGetUsbHsPllConfigForHse(uint32_t hse_hz, UsbHsPllConfig& cfg)
 {
-  // Keep this as an explicit lookup table instead of inferring combinations dynamically.
-  // The legal USBHS reference clocks are discrete, and an exact table is easier to audit.
+  // 这里保留显式查表，不做动态推导；
+  // USBHS 合法参考时钟是离散集合，精确表更容易审计。
+  // Keep this as an explicit lookup table instead of inferring combinations dynamically;
+  // legal USBHS reference clocks are discrete and easier to audit in table form.
   constexpr UsbHsPllTableEntry table[] = {
       {3000000u, RCC_USBPLL_Div1, RCC_USBHSPLLCKREFCLK_3M},
       {4000000u, RCC_USBPLL_Div1, RCC_USBHSPLLCKREFCLK_4M},
@@ -136,9 +139,10 @@ inline bool TryGetUsbHsPllConfigForHse(uint32_t hse_hz, UsbHsPllConfig& cfg)
 
 inline void ConfigureUsbHsPhyFromHse()
 {
-  // USBHS PHY path uses an HSE -> (divider, ref clock) lookup so the legal combinations
-  // stay explicit and auditable. USBHS PHY 路径通过 HSE -> (分频, 参考时钟)
-  // 查表，保证合法组合保持显式且可审计。
+  // USBHS PHY 路径通过 HSE -> (分频, 参考时钟) 查表，
+  // 保证合法组合保持显式且可审计。
+  // The USBHS PHY path uses an HSE -> (divider, ref clock) lookup so the
+  // legal combinations stay explicit and auditable.
   UsbHsPllConfig cfg = {};
   const uint32_t hse_hz = static_cast<uint32_t>(HSE_VALUE);
   ASSERT(TryGetUsbHsPllConfigForHse(hse_hz, cfg));
@@ -153,13 +157,15 @@ inline void ConfigureUsbHsPhyFromHse()
 inline void ConfigureUsb48M()
 {
 #if defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_HSBHSPLLCLKSource_HSE)
-  // Some CH32V30x parts can source the shared 48 MHz USB clock from the USBHS PHY PLL.
-  // In that case, select the PHY path first and let each controller enable its own bus
-  // clock.
+  // 部分 CH32V30x 可以从 USBHS PHY PLL 提供共享 48 MHz USB 时钟；
+  // 这种情况下先选 PHY 路径，再让各控制器自己打开总线时钟。
+  // Some CH32V30x parts can source the shared 48 MHz USB clock from the USBHS PHY PLL;
+  // in that case, select the PHY path first and let each controller enable its own bus clock.
   ConfigureUsbHsPhyFromHse();
   RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_USBPHY);
 #else
-  // Classic path: derive the shared 48 MHz clock directly from SYSCLK/PLL dividers.
+  // 经典路径：直接从 SYSCLK / PLL 分频得到共享 48 MHz 时钟。
+  // Classic path: derive the shared 48 MHz clock directly from SYSCLK / PLL dividers.
   ConfigureUsb48MFromSysclk();
 #endif
 }

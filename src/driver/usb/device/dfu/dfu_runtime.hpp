@@ -33,9 +33,9 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
   {
   }
 
-  // Runtime DFU only has one delayed action: after DETACH timeout expires, jump to the
-  // board-specific bootloader entry.
   // Runtime DFU 只有一个延迟动作：DETACH 超时后跳到板级 bootloader 入口。
+  // Runtime DFU only has one deferred action: jump to the board-specific
+  // bootloader entry after the DETACH timeout expires.
   void Process()
   {
     if (!detach_pending_)
@@ -105,9 +105,9 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
 
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
   {
-    // Runtime DFU has no data endpoints; binding only publishes interface + functional
-    // descriptors and resets the detach state machine.
     // Runtime DFU 没有数据端点；绑定阶段只发布接口/功能描述符，并重置 detach 状态机。
+    // Runtime DFU has no data endpoints; bind only publishes the interface /
+    // functional descriptors and resets the detach state machine.
     interface_num_ = start_itf_num;
     current_alt_setting_ = 0u;
     detach_pending_ = false;
@@ -126,8 +126,8 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
 
   void UnbindEndpoints(EndpointPool&, bool) override
   {
-    // Unbind only clears runtime detach state; no backend resources are owned here.
     // 解绑阶段只清理 runtime detach 状态；这里不持有额外 backend 资源。
+    // Unbind only clears runtime detach state; no backend-owned resources live here.
     detach_pending_ = false;
     state_ = DFUState::APP_IDLE;
     inited_ = false;
@@ -190,10 +190,10 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
     switch (static_cast<DFURequest>(bRequest))
     {
       case DFURequest::DETACH:
-        // Runtime DFU only accepts DETACH from APP_IDLE. The actual jump is delayed
-        // and performed by Process() after the advertised timeout expires.
         // Runtime DFU 只在 APP_IDLE 接受 DETACH；真正跳转由 Process() 在
         // 广播给主机的超时到期后再执行。
+        // Runtime DFU only accepts DETACH from APP_IDLE; the actual jump is
+        // deferred to Process() after the advertised timeout expires.
         if (jump_to_bootloader_ == nullptr)
         {
           return ErrorCode::NOT_SUPPORT;
@@ -212,8 +212,9 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
         return ErrorCode::OK;
 
       case DFURequest::GETSTATUS:
-        // GETSTATUS is the only place where the host observes the remaining detach
-        // timeout. GETSTATUS 是主机读取剩余 detach 超时的唯一入口。
+        // GETSTATUS 是主机读取剩余 detach 超时的唯一入口。
+        // GETSTATUS is the only point where the host observes the remaining
+        // detach timeout.
         status_response_.bStatus = static_cast<uint8_t>(DFUStatusCode::OK);
         status_response_.bState = static_cast<uint8_t>(state_);
         if (detach_pending_)

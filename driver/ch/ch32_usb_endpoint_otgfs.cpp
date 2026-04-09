@@ -404,10 +404,12 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
   const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
   const bool IS_ISO = (GetType() == Type::ISOCHRONOUS);
 
+  // UIF_TRANSFER/INT_FG 会在 IRQ handler 完成分发后统一清掉。
   // UIF_TRANSFER/INT_FG are cleared by the IRQ handler after dispatch.
 
   if (IS_IN)
   {
+    // 完成后恢复到 NAK。
     // Restore NAK on completion.
     *get_tx_ctrl_addr(GetNumber()) =
         (*get_tx_ctrl_addr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
@@ -416,6 +418,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
   }
   else
   {
+    // 对 non-EP0 OUT 端点，完成后恢复到 NAK。
     // For non-EP0 OUT endpoints, restore NAK on completion.
     if (!IS_EP0)
     {
@@ -424,6 +427,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     }
   }
 
+  // TOG 不匹配表示数据同步失败。
   // TOG mismatch indicates data synchronization failure.
   if (IS_OUT)
   {
@@ -436,7 +440,8 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     }
   }
 
-  // Update software data toggle for non-EP0 non-ISO endpoints.
+  // 对 non-EP0、non-ISO 端点推进软件侧 data toggle。
+  // Update the software data toggle for non-EP0 non-ISO endpoints.
   if (GetState() == State::BUSY && !IS_EP0 && !IS_ISO)
   {
     tog_ = !tog_;

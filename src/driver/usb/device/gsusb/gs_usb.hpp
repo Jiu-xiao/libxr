@@ -31,13 +31,13 @@ class GsUsbClass : public DeviceClass
  public:
   static_assert(CanChNum > 0 && CanChNum <= 255, "CanChNum must be in (0, 255]");
   static constexpr uint8_t CAN_CH_NUM = static_cast<uint8_t>(CanChNum);
-  // Default interface string for the GS USB function.
   // GS USB 功能的默认接口字符串。
+  // Default interface string for the GS USB function.
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB GS USB";
 
  private:
-  // ===== Linux gs_usb 线缆格式（header 固定 12 字节） / Linux gs_usb wire format
-  // (12-byte header) =====
+  // ===== Linux gs_usb 线缆格式（固定 12 字节头） / Linux gs_usb wire format
+  // (fixed 12-byte header) =====
 #pragma pack(push, 1)
 
   /**
@@ -134,8 +134,8 @@ class GsUsbClass : public DeviceClass
 
   const char* GetInterfaceString(size_t local_interface_index) const override
   {
-    // GS USB contributes one vendor-specific interface.
     // GS USB 暴露一个 vendor-specific 接口。
+    // GS USB contributes one vendor-specific interface.
     return (local_interface_index == 0u) ? interface_string_ : nullptr;
   }
 
@@ -224,7 +224,8 @@ class GsUsbClass : public DeviceClass
     ans = endpoint_pool.Get(ep_data_out_, Endpoint::Direction::OUT, data_out_ep_num_);
     ASSERT(ans == ErrorCode::OK);
 
-    // UINT16_MAX 只是上限，底层会选不超过该值的可用最大长度
+    // UINT16_MAX 只是上限，底层会选不超过该值的可用最大长度。
+    // UINT16_MAX is only an upper bound; the backend still chooses the largest valid length.
     ep_data_in_->Configure(
         {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
     ep_data_out_->Configure(
@@ -860,8 +861,8 @@ class GsUsbClass : public DeviceClass
       (void)cans_[CH]->AddMessage(pack);
     }
 
-    // TX echo：Host 通过 echo_id 跟踪 TX buffer；设备需回送 echo_id
-    // TX echo: host tracks TX buffer via echo_id; device should echo it back
+    // TX echo：host 通过 echo_id 跟踪 TX buffer；设备需回送 echo_id。
+    // TX echo: the host tracks TX buffers via echo_id, and the device should echo it back.
     if (wh.echo_id != ECHO_ID_RX)
     {
       QueueItem qi;
@@ -1741,7 +1742,8 @@ class GsUsbClass : public DeviceClass
       return false;
     }
 
-    // Linux can/error.h 对齐（同你之前版本）
+    // 与 Linux can/error.h 对齐（沿用之前版本的映射）。
+    // Keep these definitions aligned with Linux can/error.h, matching the previous mapping.
     constexpr uint8_t LNX_CAN_ERR_CRTL_UNSPEC = 0x00;
     constexpr uint8_t LNX_CAN_ERR_CRTL_RX_WARNING = 0x04;
     constexpr uint8_t LNX_CAN_ERR_CRTL_TX_WARNING = 0x08;

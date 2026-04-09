@@ -43,6 +43,7 @@ static inline uint8_t ch32_can_mode_macro(const CAN::Mode& m)
 
 static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
 {
+  // TX 中断线。
   // TX interrupt line.
   switch (id)
   {
@@ -61,6 +62,7 @@ static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
       break;
   }
 
+  // RX 中断线：FIFO0 -> RX0 vector，FIFO1 -> RX1 vector。
   // RX interrupt line: FIFO0 -> RX0 vector, FIFO1 -> RX1 vector.
   if (fifo == 0u)
   {
@@ -102,6 +104,7 @@ static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
     }
   }
 
+  // SCE 中断线。
   // SCE interrupt line.
   switch (id)
   {
@@ -130,6 +133,7 @@ CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
 #if defined(CAN1) && !defined(CAN2)
     const bool USB_ALREADY_INITED =
         LibXR::CH32UsbCanShared::usb_inited.load(std::memory_order_acquire);
+    // 在 USB/CAN 共享中断拓扑下，CAN1 必须先于 USB 初始化。
     // On shared USB/CAN interrupt configurations, CAN1 must initialize before USB.
     ASSERT(USB_ALREADY_INITED == false);
 #endif
@@ -156,13 +160,16 @@ CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
 
   map[id_] = this;
 
-  // Enable peripheral clock.
+  // 打开外设时钟。
+  // Enable the peripheral clock.
   RCC_APB1PeriphClockCmd(CH32_CAN_RCC_PERIPH_MAP[id_], ENABLE);
 
+  // 在调用 SetConfig() 之前，保持 CAN 处于初始化模式。
   // Keep CAN in initialization mode until SetConfig() is called.
   (void)CAN_OperatingModeRequest(instance_, CAN_OperatingMode_Initialization);
 
 #if defined(CAN2)
+  // 在双 CAN 变体上，配置默认的共享过滤器分界点。
   // On dual-CAN variants, configure the default shared filter split point.
   CAN_SlaveStartBank(CH32_CAN_DEFAULT_SLAVE_START_BANK);
 #endif
@@ -177,6 +184,7 @@ ErrorCode CH32CAN::Init()
     return ErrorCode::ARG_ERR;
   }
 
+  // 默认全接收过滤器（ID-mask 模式，全 0）。
   // Default accept-all filter (ID-mask mode, all zeros).
   CAN_FilterInitTypeDef f = {};
   f.CAN_FilterIdHigh = 0u;
@@ -193,6 +201,7 @@ ErrorCode CH32CAN::Init()
 
   EnableIRQs();
 
+  // 为当前 CAN 实例打开 NVIC。
   // Enable NVIC for this CAN instance.
   ch32_can_enable_nvic(id_, fifo_);
 
@@ -347,6 +356,7 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     return ErrorCode::ARG_ERR;
   }
 
+  // 保证所有返回路径都会恢复 IRQ 状态。
   // Ensure IRQ state restoration on all return paths.
   struct IrqGuard
   {
@@ -358,6 +368,7 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
   ErrorCode ec = ErrorCode::OK;
   bool entered_init = false;
 
+  // 构造实际使用的时序参数；为 0 的字段复用缓存配置。
   // Build effective timing values; zero fields reuse cached configuration.
   CAN::Configuration cfg = cfg_in;
 
@@ -366,6 +377,7 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     return ErrorCode::ARG_ERR;
   }
 
+  // 校验 bxCAN 时序约束。
   // Validate bxCAN timing constraints.
   const CAN::BitTiming& bt = cfg.bit_timing;
 
@@ -398,6 +410,7 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     return ErrorCode::ARG_ERR;
   }
 
+  // 进入初始化模式。
   // Enter initialization mode.
   if (CAN_OperatingModeRequest(instance_, CAN_OperatingMode_Initialization) ==
       CAN_ModeStatus_Failed)
@@ -406,7 +419,8 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
   }
   entered_init = true;
 
-  // Apply initialization structure.
+  // 填充并应用初始化结构体。
+  // Apply the initialization structure.
   CAN_InitTypeDef init;
   std::memset(&init, 0, sizeof(init));
   CAN_StructInit(&init);
@@ -418,9 +432,11 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
   init.CAN_BS1 = static_cast<uint8_t>(BS1 - 1u);
   init.CAN_BS2 = static_cast<uint8_t>(bt.phase_seg2 - 1u);
 
+  // 工作模式映射。
   // Mode mapping.
   init.CAN_NART = cfg.mode.one_shot ? ENABLE : DISABLE;
 
+  // 控制器默认选项。
   // Default controller options.
   init.CAN_TTCM = DISABLE;
   init.CAN_ABOM = ENABLE;   // auto bus-off management
@@ -441,12 +457,14 @@ ErrorCode CH32CAN::SetConfig(const CAN::Configuration& cfg_in)
     }
     else
     {
-      // Update cache only on successful configuration.
+      // 仅在配置成功后更新缓存。
+      // Update the cache only on successful configuration.
       cfg_cache_ = cfg;
       ec = ErrorCode::OK;
     }
   }
 
+  // 如果进入 init 模式后配置失败，则请求回到 normal 模式。
   // If configuration fails after entering init mode, request normal mode.
   if (ec != ErrorCode::OK && entered_init)
   {
@@ -574,7 +592,8 @@ void CH32CAN::ProcessRxInterrupt()
     return;
   }
 
-  // Drain RX FIFO first, then acknowledge RX pending flags.
+  // 先排空 RX FIFO，再确认 RX 挂起标志。
+  // Drain the RX FIFO first, then acknowledge RX pending flags.
   while (CAN_MessagePending(instance_, fifo_) != 0u)
   {
     CAN_Receive(instance_, fifo_, &rx_msg_);
@@ -602,6 +621,7 @@ void CH32CAN::ProcessRxInterrupt()
     OnMessage(p, true);
   }
 
+  // 确认 RX 挂起标志。
   // Acknowledge RX pending flags.
 #ifdef CAN_IT_FMP0
   if (fifo_ == 0u)
@@ -630,6 +650,7 @@ void CH32CAN::ProcessErrorInterrupt()
     return;
   }
 
+  // 在清 pending 位前先快照错误标志和 LEC。
   // Snapshot error flags and LEC before clearing pending bits.
   const bool BOF = (CAN_GetFlagStatus(instance_, CAN_FLAG_BOF) != RESET);
   const bool EPV = (CAN_GetFlagStatus(instance_, CAN_FLAG_EPV) != RESET);

@@ -89,8 +89,8 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
 
   if (index == Index::SERIAL_NUMBER_STRING && serial_uid_ != nullptr)
   {
-    // Serial string = configured prefix + UID rendered as UTF-16LE hex pairs.
     // 序列号字符串 = 配置前缀 + UID 的 UTF-16LE 十六进制表示。
+    // Serial string = configured prefix + UID rendered as UTF-16LE hex pairs.
     const LanguagePack* pack = string_list_[ans];
     constexpr size_t IDX = static_cast<size_t>(Index::SERIAL_NUMBER_STRING) - 1;
 
@@ -150,8 +150,8 @@ LibXR::RawData DescriptorStrings::GetLangIDData()
 
 bool DescriptorStrings::HasLanguage(uint16_t lang) const
 {
-  // Interface strings follow the same language gating as the built-in string table.
   // 接口字符串与内建字符串表共用同一套语言门控。
+  // Interface strings follow the same language gating as the built-in string table.
   for (size_t i = 0; i < LANG_NUM; ++i)
   {
     if (land_id_[i] == lang)
@@ -193,8 +193,8 @@ void DescriptorStrings::ToUTF16LE(const char* str, uint8_t* buffer)
     }
     else if ((*s & 0xF8) == 0xF0)
     {
-      // Ignore code points outside BMP to keep descriptor generation simple and bounded.
       // 忽略 BMP 之外的字符，保持描述符生成逻辑简单且有界。
+      // Ignore code points outside BMP to keep descriptor generation simple and bounded.
       s++;
       if (*s)
       {
