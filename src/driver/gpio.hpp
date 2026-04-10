@@ -61,6 +61,11 @@ class GPIO
   GPIO() {}
 
   /**
+   * @brief 虚析构函数。Virtual destructor.
+   */
+  virtual ~GPIO() = default;
+
+  /**
    * @brief 读取 GPIO 引脚状态。Reads the GPIO pin state.
    * @return 返回引脚状态，true 表示高电平，false 表示低电平。Returns the pin state, true
    * for high, false for low.
