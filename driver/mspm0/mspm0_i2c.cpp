@@ -680,8 +680,7 @@ ErrorCode MSPM0I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 }
 
 ErrorCode MSPM0I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
-                            ReadOperation& op, MemAddrLength mem_addr_size,
-                            bool in_isr)
+                            ReadOperation& op, MemAddrLength mem_addr_size, bool in_isr)
 {
   if (read_data.size_ > MSPM0_I2C_MAX_TRANSFER_SIZE)
   {
