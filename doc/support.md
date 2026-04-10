@@ -90,7 +90,7 @@
 | SPI | ✅ |
 | I2C | ✅ |
 | CAN | ✅ |
-| CANFD | 🚫 |
+| CANFD | ❌ |
 | ADC | ❌ |
 | DAC | ❌ |
 | PWM | ✅ |
