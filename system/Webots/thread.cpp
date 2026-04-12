@@ -4,6 +4,7 @@
 #include <webots/robot.h>
 
 #include "libxr_system.hpp"
+#include "monotonic_time.hpp"
 
 using namespace LibXR;
 
@@ -13,21 +14,14 @@ Thread Thread::Current(void) { return Thread(pthread_self()); }
 
 static ErrorCode ConditionVarWait(uint32_t timeout)
 {
-  uint32_t start_time = _libxr_webots_time_count;
+  const uint64_t deadline_ms = MonotonicTime::NowMilliseconds() + timeout;
 
-  struct timespec ts;
-  UNUSED(clock_gettime(CLOCK_REALTIME, &ts));
-
-  uint32_t add = 0;
-  int64_t raw_time = static_cast<__syscall_slong_t>(1U * 1000U * 1000U) + ts.tv_nsec;
-  add = raw_time / (static_cast<int64_t>(1000U * 1000U * 1000U));
-
-  ts.tv_sec += add;
-  ts.tv_nsec = raw_time % (static_cast<int64_t>(1000U * 1000U * 1000U));
-
-  while (_libxr_webots_time_count - start_time < timeout)
+  while (MonotonicTime::RemainingMilliseconds(deadline_ms) > 0)
   {
     pthread_mutex_lock(&_libxr_webots_time_notify->mutex);
+    const timespec ts =
+        MonotonicTime::RealtimeDeadlineFromNow(MonotonicTime::WaitSliceMilliseconds(
+            MonotonicTime::RemainingMilliseconds(deadline_ms)));
     auto ans = pthread_cond_timedwait(&_libxr_webots_time_notify->cond,
                                       &_libxr_webots_time_notify->mutex, &ts);
     pthread_mutex_unlock(&_libxr_webots_time_notify->mutex);
@@ -42,10 +36,11 @@ static ErrorCode ConditionVarWait(uint32_t timeout)
 
 void Thread::Sleep(uint32_t milliseconds)
 {
-  uint32_t now = _libxr_webots_time_count;
-  while (_libxr_webots_time_count - now < milliseconds)
+  const uint64_t deadline_ms = MonotonicTime::NowMilliseconds() + milliseconds;
+  while (MonotonicTime::RemainingMilliseconds(deadline_ms) > 0)
   {
-    ConditionVarWait(1);
+    ConditionVarWait(MonotonicTime::WaitSliceMilliseconds(
+        MonotonicTime::RemainingMilliseconds(deadline_ms)));
   }
 }
 
@@ -53,12 +48,13 @@ void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to
 {
   last_waskup_time = last_waskup_time + time_to_sleep;
 
-  while (_libxr_webots_time_count < last_waskup_time)
+  while (MonotonicTime::NowMilliseconds() < last_waskup_time)
   {
-    ConditionVarWait(1);
+    ConditionVarWait(MonotonicTime::WaitSliceMilliseconds(
+        MonotonicTime::RemainingMilliseconds(last_waskup_time)));
   }
 }
 
-uint32_t Thread::GetTime() { return _libxr_webots_time_count; }
+uint32_t Thread::GetTime() { return static_cast<uint32_t>(MonotonicTime::NowMilliseconds()); }
 
 void Thread::Yield() { sched_yield(); }

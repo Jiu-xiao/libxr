@@ -1,8 +1,8 @@
-#include <sys/time.h>
+#include <time.h>
 
 #include "timebase.hpp"
 
-extern struct timeval libxr_linux_start_time;
+extern struct timespec libxr_linux_start_time_spec;
 
 namespace LibXR
 {
@@ -36,10 +36,10 @@ class LinuxTimebase : public Timebase
  private:
   static int64_t GetElapsedMicroseconds()
   {
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    return static_cast<int64_t>(tv.tv_sec - libxr_linux_start_time.tv_sec) * 1000000LL +
-           static_cast<int64_t>(tv.tv_usec - libxr_linux_start_time.tv_usec);
+    struct timespec ts = {};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<int64_t>(ts.tv_sec - libxr_linux_start_time_spec.tv_sec) * 1000000LL +
+           static_cast<int64_t>(ts.tv_nsec - libxr_linux_start_time_spec.tv_nsec) / 1000LL;
   }
 };
 }  // namespace LibXR

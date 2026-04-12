@@ -6,6 +6,7 @@
 
 #include "libxr_def.hpp"
 #include "libxr_system.hpp"
+#include "monotonic_time.hpp"
 
 using namespace LibXR;
 
@@ -34,23 +35,15 @@ ErrorCode Semaphore::Wait(uint32_t timeout)
     return ErrorCode::TIMEOUT;
   }
 
-  uint32_t start_time = _libxr_webots_time_count;
-  bool ans = false;
+  const uint64_t deadline_ms = MonotonicTime::NowMilliseconds() + timeout;
 
-  struct timespec ts;
-  UNUSED(clock_gettime(CLOCK_REALTIME, &ts));
-
-  uint32_t add = 0;
-  int64_t raw_time = static_cast<__syscall_slong_t>(1U * 1000U * 1000U) + ts.tv_nsec;
-  add = raw_time / (static_cast<int64_t>(1000U * 1000U * 1000U));
-
-  ts.tv_sec += add;
-  ts.tv_nsec = raw_time % (static_cast<int64_t>(1000U * 1000U * 1000U));
-
-  while (_libxr_webots_time_count - start_time < timeout)
+  while (MonotonicTime::RemainingMilliseconds(deadline_ms) > 0)
   {
-    ans = !sem_timedwait(semaphore_handle_, &ts);
-    if (ans)
+    const timespec ts =
+        MonotonicTime::RealtimeDeadlineFromNow(MonotonicTime::WaitSliceMilliseconds(
+            MonotonicTime::RemainingMilliseconds(deadline_ms)));
+
+    if (!sem_timedwait(semaphore_handle_, &ts))
     {
       return ErrorCode::OK;
     }

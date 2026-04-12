@@ -25,6 +25,9 @@
 #include "lockfree_queue.hpp"
 #include "logger.hpp"
 #include "message.hpp"
+#if defined(LIBXR_SYSTEM_Linux) || defined(LIBXR_SYSTEM_Webots)
+#include "linux_shared_topic.hpp"
+#endif
 #include "mutex.hpp"
 #include "queue.hpp"
 #include "ramfs.hpp"
