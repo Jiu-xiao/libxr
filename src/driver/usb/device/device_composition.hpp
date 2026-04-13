@@ -177,7 +177,6 @@ class DeviceComposition
   uint8_t current_cfg_ = 0;      ///< 当前配置索引 / Current configuration index
   uint8_t i_configuration_ = 0;  ///< 配置字符串索引 / Configuration string index
   uint8_t bm_attributes_ = CFG_BUS_POWERED;  ///< 配置属性 / bmAttributes
-  uint8_t b_max_power_ = 50;  ///< 最大电流（2mA 单位）/ Max power (2mA units)
 
   const bool composite_ = false;     ///< 是否为复合设备 / Whether composite device
   const size_t config_num_ = 0;      ///< 配置数量 / Configuration count

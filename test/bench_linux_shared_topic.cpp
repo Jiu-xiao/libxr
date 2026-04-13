@@ -167,6 +167,85 @@ BenchStats BuildStats(const std::vector<double>& lat_us, uint64_t sequence_error
   return stats;
 }
 
+bool WriteAll(int fd, const void* buffer, size_t size)
+{
+  const auto* bytes = static_cast<const uint8_t*>(buffer);
+  size_t written_total = 0;
+  while (written_total < size)
+  {
+    const ssize_t written = write(fd, bytes + written_total, size - written_total);
+    if (written > 0)
+    {
+      written_total += static_cast<size_t>(written);
+      continue;
+    }
+    if (written < 0 && errno == EINTR)
+    {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool ReadAll(int fd, void* buffer, size_t size)
+{
+  auto* bytes = static_cast<uint8_t*>(buffer);
+  size_t read_total = 0;
+  while (read_total < size)
+  {
+    const ssize_t read_size = read(fd, bytes + read_total, size - read_total);
+    if (read_size > 0)
+    {
+      read_total += static_cast<size_t>(read_size);
+      continue;
+    }
+    if (read_size < 0 && errno == EINTR)
+    {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+template <typename TopicType>
+bool WaitForSubscriberAttach(TopicType& topic, uint32_t expected_num, const char* case_label)
+{
+  for (int retry = 0; retry < 500 && topic.GetSubscriberNum() < expected_num; ++retry)
+  {
+    usleep(1000);
+  }
+  if (topic.GetSubscriberNum() < expected_num)
+  {
+    std::fprintf(stderr, "%s subscriber attach timeout: expected=%u actual=%u\n", case_label,
+                 expected_num, topic.GetSubscriberNum());
+    return false;
+  }
+  return true;
+}
+
+template <size_t PayloadBytes>
+uint64_t LatencyCountForPayload()
+{
+  if constexpr (PayloadBytes <= 64)
+  {
+    return 20000;
+  }
+  else if constexpr (PayloadBytes <= 4096)
+  {
+    return 10000;
+  }
+  else if constexpr (PayloadBytes <= 65536)
+  {
+    return 2000;
+  }
+  else
+  {
+    return 128;
+  }
+}
+
 template <size_t PayloadBytes, bool TouchPayload>
 int RunBenchCase()
 {
@@ -183,7 +262,8 @@ int RunBenchCase()
   (void)Topic::Remove(topic_name);
 
   int stats_pipe[2] = {-1, -1};
-  if (pipe(stats_pipe) != 0)
+  int ready_pipe[2] = {-1, -1};
+  if (pipe(stats_pipe) != 0 || pipe(ready_pipe) != 0)
   {
     std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
     return 1;
@@ -206,6 +286,7 @@ int RunBenchCase()
   if (child == 0)
   {
     close(stats_pipe[0]);
+    close(ready_pipe[0]);
 
     Subscriber subscriber(topic_name);
     if (!subscriber.Valid())
@@ -218,6 +299,12 @@ int RunBenchCase()
     uint64_t sequence_errors = 0;
     uint64_t timeout_errors = 0;
     uint64_t expected_seq = 1;
+    const uint8_t ready = 1;
+    if (!WriteAll(ready_pipe[1], &ready, sizeof(ready)))
+    {
+      _exit(3);
+    }
+    close(ready_pipe[1]);
 
     for (uint64_t i = 0; i < count; ++i)
     {
@@ -248,18 +335,22 @@ int RunBenchCase()
     }
 
     BenchStats stats = BuildStats<PayloadBytes>(lat_us, sequence_errors, timeout_errors);
-    const ssize_t written = write(stats_pipe[1], &stats, sizeof(stats));
-    (void)written;
+    (void)WriteAll(stats_pipe[1], &stats, sizeof(stats));
     close(stats_pipe[1]);
     _exit(0);
   }
 
   close(stats_pipe[1]);
+  close(ready_pipe[1]);
 
-  for (int retry = 0; retry < 500 && publisher.GetSubscriberNum() == 0; ++retry)
+  uint8_t ready = 0;
+  if (!ReadAll(ready_pipe[0], &ready, sizeof(ready)) ||
+      !WaitForSubscriberAttach(publisher, 1, "standard"))
   {
-    usleep(1000);
+    close(ready_pipe[0]);
+    return 1;
   }
+  close(ready_pipe[0]);
 
   uint64_t create_retries = 0;
   uint64_t publish_retries = 0;
@@ -275,22 +366,21 @@ int RunBenchCase()
     }
 
     auto* frame = data.GetData();
-      frame->seq = seq;
-      frame->pub_ns = NowNs();
-      if constexpr (TouchPayload)
+    frame->seq = seq;
+    frame->pub_ns = NowNs();
+    if constexpr (TouchPayload)
+    {
+      std::memset(frame->payload.data(), static_cast<int>(seq & 0xFFU), frame->payload.size());
+    }
+    else
+    {
+      if constexpr (PayloadBytes > 0)
       {
-        std::memset(frame->payload.data(), static_cast<int>(seq & 0xFFU), frame->payload.size());
+        frame->payload[0] = static_cast<uint8_t>(seq & 0xFFU);
+        frame->payload[PayloadBytes - 1U] = static_cast<uint8_t>((seq >> 8U) & 0xFFU);
       }
-      else
-      {
-        if constexpr (PayloadBytes > 0)
-        {
-          frame->payload[0] = static_cast<uint8_t>(seq & 0xFFU);
-          frame->payload[PayloadBytes - 1U] =
-              static_cast<uint8_t>((seq >> 8U) & 0xFFU);
-        }
-      }
-      frame->checksum = ComputeChecksum(*frame);
+    }
+    frame->checksum = ComputeChecksum(*frame);
 
     while (publisher.Publish(data) != LibXR::ErrorCode::OK)
     {
@@ -301,14 +391,13 @@ int RunBenchCase()
   const uint64_t end_ns = NowNs();
 
   BenchStats stats = {};
-  const ssize_t read_ans = read(stats_pipe[0], &stats, sizeof(stats));
+  const bool read_ok = ReadAll(stats_pipe[0], &stats, sizeof(stats));
   close(stats_pipe[0]);
 
   int status = 0;
   waitpid(child, &status, 0);
 
-  if (read_ans != static_cast<ssize_t>(sizeof(stats)) || !WIFEXITED(status) ||
-      WEXITSTATUS(status) != 0)
+  if (!read_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
   {
     std::fprintf(stderr, "bench child failed for payload=%zu\n", PayloadBytes);
     return 1;
@@ -324,7 +413,7 @@ int RunBenchCase()
                                 static_cast<double>(count);
 
   std::printf(
-      "[RESULT] mode=%s payload=%zuB count=%" PRIu64
+      "[BENCH] shared_standard mode=%s payload=%zuB count=%" PRIu64
       " publish_avg=%.3f us throughput=%.0f msg/s bandwidth=%.2f MiB/s "
       "create_retry=%" PRIu64 " publish_retry=%" PRIu64
       " latency_avg=%.3f us p50=%.3f us p95=%.3f us p99=%.3f us max=%.3f us "
@@ -333,6 +422,181 @@ int RunBenchCase()
       publish_avg_us, msg_per_s, mib_per_s,
       create_retries, publish_retries, stats.avg_us, stats.p50_us, stats.p95_us, stats.p99_us,
       stats.max_us, stats.sequence_errors, stats.timeout_errors);
+  std::fflush(stdout);
+
+  (void)Topic::Remove(topic_name);
+  return 0;
+}
+
+// Measure one-way delivery with at most one outstanding message so queueing backlog
+// and startup burst do not pollute the latency distribution.
+template <size_t PayloadBytes, bool TouchPayload>
+int RunLatencyCase()
+{
+  using Topic = LibXR::LinuxSharedTopic<BenchFrame<PayloadBytes>>;
+  using Data = typename Topic::Data;
+  using Subscriber = typename Topic::SyncSubscriber;
+
+  const uint64_t count = LatencyCountForPayload<PayloadBytes>();
+
+  LibXR::LinuxSharedTopicConfig config = {};
+  config.slot_num = 4;
+  config.subscriber_num = 1;
+  config.queue_num = 4;
+
+  char topic_name[96] = {};
+  std::snprintf(topic_name, sizeof(topic_name), "linux_shared_latency_%zu_%d", PayloadBytes,
+                static_cast<int>(getpid()));
+  (void)Topic::Remove(topic_name);
+
+  int ready_pipe[2] = {-1, -1};
+  int ack_pipe[2] = {-1, -1};
+  if (pipe(ready_pipe) != 0 || pipe(ack_pipe) != 0)
+  {
+    std::fprintf(stderr, "latency pipe failed: %s\n", std::strerror(errno));
+    return 1;
+  }
+
+  Topic publisher(topic_name, config);
+  if (!publisher.Valid())
+  {
+    std::fprintf(stderr, "latency publisher open failed for payload=%zu\n", PayloadBytes);
+    return 1;
+  }
+
+  pid_t child = fork();
+  if (child < 0)
+  {
+    std::fprintf(stderr, "latency fork failed: %s\n", std::strerror(errno));
+    return 1;
+  }
+
+  if (child == 0)
+  {
+    close(ready_pipe[0]);
+    close(ack_pipe[0]);
+
+    Subscriber subscriber(topic_name);
+    if (!subscriber.Valid())
+    {
+      _exit(70);
+    }
+
+    const uint8_t ready = 1;
+    if (!WriteAll(ready_pipe[1], &ready, sizeof(ready)))
+    {
+      _exit(71);
+    }
+    close(ready_pipe[1]);
+
+    uint64_t expected_seq = 1;
+    for (uint64_t i = 0; i < count; ++i)
+    {
+      Data data;
+      if (subscriber.Wait(data, 5000) != LibXR::ErrorCode::OK)
+      {
+        _exit(72);
+      }
+
+      const auto* frame = data.GetData();
+      if (frame == nullptr || frame->seq != expected_seq ||
+          frame->checksum != ComputeChecksum(*frame))
+      {
+        _exit(73);
+      }
+      expected_seq = frame->seq + 1U;
+
+      const uint64_t latency_ns = NowNs() - frame->pub_ns;
+      if (!WriteAll(ack_pipe[1], &latency_ns, sizeof(latency_ns)))
+      {
+        _exit(74);
+      }
+    }
+
+    close(ack_pipe[1]);
+    _exit(0);
+  }
+
+  close(ready_pipe[1]);
+  close(ack_pipe[1]);
+
+  uint8_t ready = 0;
+  if (!ReadAll(ready_pipe[0], &ready, sizeof(ready)) ||
+      !WaitForSubscriberAttach(publisher, 1, "latency"))
+  {
+    close(ready_pipe[0]);
+    close(ack_pipe[0]);
+    return 1;
+  }
+  close(ready_pipe[0]);
+
+  std::vector<double> lat_us;
+  lat_us.reserve(static_cast<size_t>(count));
+  uint64_t create_retries = 0;
+  uint64_t publish_retries = 0;
+
+  const uint64_t start_ns = NowNs();
+  for (uint64_t seq = 1; seq <= count; ++seq)
+  {
+    Data data;
+    while (publisher.CreateData(data) != LibXR::ErrorCode::OK)
+    {
+      ++create_retries;
+      sched_yield();
+    }
+
+    auto* frame = data.GetData();
+    frame->seq = seq;
+    frame->pub_ns = NowNs();
+    if constexpr (TouchPayload)
+    {
+      std::memset(frame->payload.data(), static_cast<int>(seq & 0xFFU), frame->payload.size());
+    }
+    else if constexpr (PayloadBytes > 0)
+    {
+      frame->payload[0] = static_cast<uint8_t>(seq & 0xFFU);
+      frame->payload[PayloadBytes - 1U] = static_cast<uint8_t>((seq >> 8U) & 0xFFU);
+    }
+    frame->checksum = ComputeChecksum(*frame);
+
+    while (publisher.Publish(data) != LibXR::ErrorCode::OK)
+    {
+      ++publish_retries;
+      sched_yield();
+    }
+
+    uint64_t latency_ns = 0;
+    if (!ReadAll(ack_pipe[0], &latency_ns, sizeof(latency_ns)))
+    {
+      close(ack_pipe[0]);
+      waitpid(child, nullptr, 0);
+      std::fprintf(stderr, "latency child ack failed for payload=%zu\n", PayloadBytes);
+      return 1;
+    }
+    lat_us.push_back(static_cast<double>(latency_ns) / 1000.0);
+  }
+  const uint64_t end_ns = NowNs();
+
+  close(ack_pipe[0]);
+
+  int status = 0;
+  waitpid(child, &status, 0);
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+  {
+    std::fprintf(stderr, "latency child failed for payload=%zu\n", PayloadBytes);
+    return 1;
+  }
+
+  const BenchStats stats = BuildStats<PayloadBytes>(lat_us, 0, 0);
+  const double total_s = static_cast<double>(end_ns - start_ns) / 1e9;
+  const double exchange_rate = static_cast<double>(count) / total_s;
+  std::printf(
+      "[BENCH] shared_latency mode=%s payload=%zuB count=%" PRIu64
+      " exchange_rate=%.0f msg/s create_retry=%" PRIu64 " publish_retry=%" PRIu64
+      " one_way_avg=%.3f us p50=%.3f us p95=%.3f us p99=%.3f us max=%.3f us\n",
+      TouchPayload ? "full-touch" : "transport", sizeof(BenchFrame<PayloadBytes>), count,
+      exchange_rate, create_retries, publish_retries, stats.avg_us, stats.p50_us, stats.p95_us,
+      stats.p99_us, stats.max_us);
   std::fflush(stdout);
 
   (void)Topic::Remove(topic_name);
@@ -369,7 +633,8 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
 
   int done_pipe[2] = {-1, -1};
   int stats_pipe[2] = {-1, -1};
-  if (pipe(done_pipe) != 0 || pipe(stats_pipe) != 0)
+  int ready_pipe[2] = {-1, -1};
+  if (pipe(done_pipe) != 0 || pipe(stats_pipe) != 0 || pipe(ready_pipe) != 0)
   {
     std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
     return 1;
@@ -393,6 +658,7 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   {
     close(done_pipe[1]);
     close(stats_pipe[0]);
+    close(ready_pipe[0]);
 
     const int flags = fcntl(done_pipe[0], F_GETFL, 0);
     (void)fcntl(done_pipe[0], F_SETFL, flags | O_NONBLOCK);
@@ -408,6 +674,12 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
     uint64_t expected_seq = 1;
     uint64_t sequence_gap = 0;
     uint64_t timeout_errors = 0;
+    const uint8_t ready = 1;
+    if (!WriteAll(ready_pipe[1], &ready, sizeof(ready)))
+    {
+      _exit(31);
+    }
+    close(ready_pipe[1]);
 
     while (true)
     {
@@ -457,8 +729,7 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
     stats.latency = BuildStats<PayloadBytes>(lat_us, 0, timeout_errors);
     stats.sequence_gap = sequence_gap;
     stats.subscriber_drop_num = subscriber.GetDropNum();
-    const ssize_t written = write(stats_pipe[1], &stats, sizeof(stats));
-    (void)written;
+    (void)WriteAll(stats_pipe[1], &stats, sizeof(stats));
     close(done_pipe[0]);
     close(stats_pipe[1]);
     _exit(0);
@@ -466,11 +737,16 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
 
   close(done_pipe[0]);
   close(stats_pipe[1]);
+  close(ready_pipe[1]);
 
-  for (int retry = 0; retry < 500 && publisher.GetSubscriberNum() == 0; ++retry)
+  uint8_t ready = 0;
+  if (!ReadAll(ready_pipe[0], &ready, sizeof(ready)) ||
+      !WaitForSubscriberAttach(publisher, 1, "overload"))
   {
-    usleep(1000);
+    close(ready_pipe[0]);
+    return 1;
   }
+  close(ready_pipe[0]);
 
   uint64_t create_fail = 0;
   uint64_t publish_fail = 0;
@@ -504,13 +780,12 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   close(done_pipe[1]);
 
   OverloadStats stats = {};
-  const ssize_t read_ans = read(stats_pipe[0], &stats, sizeof(stats));
+  const bool read_ok = ReadAll(stats_pipe[0], &stats, sizeof(stats));
   close(stats_pipe[0]);
 
   int status = 0;
   waitpid(child, &status, 0);
-  if (read_ans != static_cast<ssize_t>(sizeof(stats)) || !WIFEXITED(status) ||
-      WEXITSTATUS(status) != 0)
+  if (!read_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
   {
     std::fprintf(stderr, "overload child failed for payload=%zu\n", PayloadBytes);
     return 1;
@@ -520,7 +795,7 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   const double attempt_rate = static_cast<double>(count) / total_s;
   const double ok_rate = static_cast<double>(publish_ok) / total_s;
   std::printf(
-      "[RESULT] overload policy=%s payload=%zuB count=%" PRIu64
+      "[BENCH] shared_overload policy=%s payload=%zuB count=%" PRIu64
       " delay=%u us attempt_rate=%.0f msg/s ok_rate=%.0f msg/s create_fail=%" PRIu64
       " publish_fail=%" PRIu64 " recv=%" PRIu64 " sub_drop=%" PRIu64
       " seq_gap=%" PRIu64 " lat_avg=%.3f us p50=%.3f us p95=%.3f us p99=%.3f us max=%.3f us\n",
@@ -564,6 +839,7 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
   struct ChildRuntime
   {
     pid_t pid = -1;
+    int ready_pipe[2] = {-1, -1};
     int done_pipe[2] = {-1, -1};
     int stats_pipe[2] = {-1, -1};
   };
@@ -572,7 +848,8 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
 
   for (size_t i = 0; i < subscribers.size(); ++i)
   {
-    if (pipe(runtimes[i].done_pipe) != 0 || pipe(runtimes[i].stats_pipe) != 0)
+    if (pipe(runtimes[i].ready_pipe) != 0 || pipe(runtimes[i].done_pipe) != 0 ||
+        pipe(runtimes[i].stats_pipe) != 0)
     {
       std::fprintf(stderr, "pipe failed for %s[%zu]: %s\n", case_label, i, std::strerror(errno));
       return 1;
@@ -588,6 +865,7 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
 
     if (child == 0)
     {
+      close(runtimes[i].ready_pipe[0]);
       close(runtimes[i].done_pipe[1]);
       close(runtimes[i].stats_pipe[0]);
 
@@ -604,6 +882,12 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
       lat_us.reserve(static_cast<size_t>(count));
 
       ModeSubResult result = {};
+      const uint8_t ready = 1;
+      if (!WriteAll(runtimes[i].ready_pipe[1], &ready, sizeof(ready)))
+      {
+        _exit(61);
+      }
+      close(runtimes[i].ready_pipe[1]);
       while (true)
       {
         Data data;
@@ -647,21 +931,33 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
 
       result.latency = BuildStats<PayloadBytes>(lat_us, 0, result.timeout_errors);
       result.drop_count = subscriber.GetDropNum();
-      const ssize_t written = write(runtimes[i].stats_pipe[1], &result, sizeof(result));
-      (void)written;
+      (void)WriteAll(runtimes[i].stats_pipe[1], &result, sizeof(result));
       close(runtimes[i].done_pipe[0]);
       close(runtimes[i].stats_pipe[1]);
       _exit(0);
     }
 
     runtimes[i].pid = child;
+    close(runtimes[i].ready_pipe[1]);
     close(runtimes[i].done_pipe[0]);
     close(runtimes[i].stats_pipe[1]);
   }
 
-  for (int retry = 0; retry < 500 && publisher.GetSubscriberNum() < subscribers.size(); ++retry)
+  for (size_t i = 0; i < subscribers.size(); ++i)
   {
-    usleep(1000);
+    uint8_t ready = 0;
+    if (!ReadAll(runtimes[i].ready_pipe[0], &ready, sizeof(ready)))
+    {
+      close(runtimes[i].ready_pipe[0]);
+      std::fprintf(stderr, "mode ready failed: %s[%zu]\n", case_label, i);
+      return 1;
+    }
+    close(runtimes[i].ready_pipe[0]);
+  }
+
+  if (!WaitForSubscriberAttach(publisher, static_cast<uint32_t>(subscribers.size()), case_label))
+  {
+    return 1;
   }
 
   uint64_t create_fail = 0;
@@ -701,12 +997,11 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
   std::vector<ModeSubResult> results(subscribers.size());
   for (size_t i = 0; i < subscribers.size(); ++i)
   {
-    const ssize_t read_ans = read(runtimes[i].stats_pipe[0], &results[i], sizeof(results[i]));
+    const bool read_ok = ReadAll(runtimes[i].stats_pipe[0], &results[i], sizeof(results[i]));
     close(runtimes[i].stats_pipe[0]);
     int status = 0;
     waitpid(runtimes[i].pid, &status, 0);
-    if (read_ans != static_cast<ssize_t>(sizeof(results[i])) || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 0)
+    if (!read_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
     {
       std::fprintf(stderr, "mode child failed: %s[%zu]\n", case_label, i);
       return 1;
@@ -715,14 +1010,14 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
 
   const double total_s = static_cast<double>(end_ns - start_ns) / 1e9;
   const double ok_rate = static_cast<double>(publish_ok) / total_s;
-  std::printf("[RESULT] modes case=%s payload=%zuB count=%" PRIu64
+  std::printf("[BENCH] shared_mode_summary case=%s payload=%zuB count=%" PRIu64
               " ok_rate=%.0f msg/s create_fail=%" PRIu64 " publish_fail=%" PRIu64 "\n",
               case_label, sizeof(BenchFrame<PayloadBytes>), count, ok_rate, create_fail,
               publish_fail);
 
   for (size_t i = 0; i < subscribers.size(); ++i)
   {
-    std::printf("[RESULT] modes case=%s sub=%s mode=%u recv=%" PRIu64
+    std::printf("[BENCH] shared_mode_subscriber case=%s sub=%s mode=%u recv=%" PRIu64
                 " drop=%" PRIu64 " first=%" PRIu64 " last=%" PRIu64
                 " lat_avg=%.3f us p95=%.3f us\n",
                 case_label, subscribers[i].label, static_cast<unsigned>(subscribers[i].mode),
@@ -744,6 +1039,7 @@ int main()
   int status = 0;
   const char* bench_set = std::getenv("BENCH_SET");
   const bool run_standard = (bench_set == nullptr) || (std::strcmp(bench_set, "standard") == 0);
+  const bool run_latency = (bench_set == nullptr) || (std::strcmp(bench_set, "latency") == 0);
   const bool run_overload = (bench_set == nullptr) || (std::strcmp(bench_set, "overload") == 0);
   const bool run_modes = (bench_set == nullptr) || (std::strcmp(bench_set, "modes") == 0);
 
@@ -757,6 +1053,18 @@ int main()
     status |= RunBenchCase<65536, true>();
     status |= RunBenchCase<1048576, false>();
     status |= RunBenchCase<1048576, true>();
+  }
+
+  if (run_latency)
+  {
+    status |= RunLatencyCase<64, false>();
+    status |= RunLatencyCase<64, true>();
+    status |= RunLatencyCase<4096, false>();
+    status |= RunLatencyCase<4096, true>();
+    status |= RunLatencyCase<65536, false>();
+    status |= RunLatencyCase<65536, true>();
+    status |= RunLatencyCase<1048576, false>();
+    status |= RunLatencyCase<1048576, true>();
   }
 
   if (run_overload)

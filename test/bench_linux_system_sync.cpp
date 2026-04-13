@@ -160,7 +160,7 @@ int RunMutexStress()
     return 3;
   }
 
-  std::printf("[RESULT] mutex_stress threads=%zu iterations=%" PRIu64
+  std::printf("[BENCH] sync_mutex threads=%zu iterations=%" PRIu64
               " counter=%" PRIu64 " wall_ms=%.3f\n",
               kThreadNum, kIterationsPerThread, counter.load(std::memory_order_relaxed),
               static_cast<double>(end_ns - start_ns) / 1000000.0);
@@ -238,7 +238,7 @@ int RunSemaphoreStress()
     }
   }
 
-  std::printf("[RESULT] semaphore_stress producers=%zu consumers=%zu posts=%" PRIu64
+  std::printf("[BENCH] sync_semaphore producers=%zu consumers=%zu posts=%" PRIu64
               " consumed=%" PRIu64 " wall_ms=%.3f\n",
               kProducerNum, kConsumerNum, kTotalPosts, kTotalPosts,
               static_cast<double>(end_ns - start_ns) / 1000000.0);
@@ -272,7 +272,7 @@ int RunThreadSleepStress()
     return 21;
   }
 
-  std::printf("[RESULT] thread_sleep_stress iterations=%u step_ms=%u elapsed_ms=%" PRIu64 "\n",
+  std::printf("[BENCH] sync_sleep_until iterations=%u step_ms=%u elapsed_ms=%" PRIu64 "\n",
               kIterations, kStepMs, elapsed_ms);
   return 0;
 }

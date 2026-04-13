@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -87,6 +88,7 @@ class LinuxSharedTopic : public Topic
  public:
   class SharedData;
   using Data = SharedData;
+  static constexpr const char* DEFAULT_DOMAIN_NAME = "libxr_def_domain";
 
   /**
    * @class Subscriber
@@ -115,6 +117,28 @@ class LinuxSharedTopic : public Topic
                         LinuxSharedSubscriberMode mode =
                             LinuxSharedSubscriberMode::BROADCAST_FULL)
         : owned_topic_(new LinuxSharedTopic(name))
+    {
+      if (Attach(*owned_topic_, mode) != ErrorCode::OK)
+      {
+        delete owned_topic_;
+        owned_topic_ = nullptr;
+      }
+    }
+
+    Subscriber(const char* name, const char* domain_name,
+               LinuxSharedSubscriberMode mode = LinuxSharedSubscriberMode::BROADCAST_FULL)
+        : owned_topic_(new LinuxSharedTopic(name, domain_name))
+    {
+      if (Attach(*owned_topic_, mode) != ErrorCode::OK)
+      {
+        delete owned_topic_;
+        owned_topic_ = nullptr;
+      }
+    }
+
+    Subscriber(const char* name, Topic::Domain& domain,
+               LinuxSharedSubscriberMode mode = LinuxSharedSubscriberMode::BROADCAST_FULL)
+        : owned_topic_(new LinuxSharedTopic(name, domain))
     {
       if (Attach(*owned_topic_, mode) != ErrorCode::OK)
       {
@@ -594,7 +618,31 @@ class LinuxSharedTopic : public Topic
    * @param topic_name 主题名称。Topic name.
    */
   explicit LinuxSharedTopic(const char* topic_name)
-      : create_(false), publisher_(false), config_(), shm_name_(BuildShmName(topic_name))
+      : LinuxSharedTopic(topic_name, DEFAULT_DOMAIN_NAME)
+  {
+  }
+
+  LinuxSharedTopic(const char* topic_name, const char* domain_name)
+      : create_(false),
+        publisher_(false),
+        config_(),
+        domain_crc32_(ResolveDomainKey(domain_name)),
+        topic_name_(ResolveTopicName(topic_name)),
+        name_key_(BuildNameKey(domain_crc32_, topic_name_)),
+        shm_name_(BuildShmName(name_key_))
+  {
+    (void)ReadProcessIdentity(static_cast<uint32_t>(getpid()), self_identity_);
+    Open();
+  }
+
+  LinuxSharedTopic(const char* topic_name, Topic::Domain& domain)
+      : create_(false),
+        publisher_(false),
+        config_(),
+        domain_crc32_(domain.node_ != nullptr ? domain.node_->key : 0),
+        topic_name_(ResolveTopicName(topic_name)),
+        name_key_(BuildNameKey(domain_crc32_, topic_name_)),
+        shm_name_(BuildShmName(name_key_))
   {
     (void)ReadProcessIdentity(static_cast<uint32_t>(getpid()), self_identity_);
     Open();
@@ -607,7 +655,33 @@ class LinuxSharedTopic : public Topic
    * @param config 创建配置。Creation config.
    */
   LinuxSharedTopic(const char* topic_name, const LinuxSharedTopicConfig& config)
-      : create_(true), publisher_(true), config_(config), shm_name_(BuildShmName(topic_name))
+      : LinuxSharedTopic(topic_name, DEFAULT_DOMAIN_NAME, config)
+  {
+  }
+
+  LinuxSharedTopic(const char* topic_name, const char* domain_name,
+                   const LinuxSharedTopicConfig& config)
+      : create_(true),
+        publisher_(true),
+        config_(config),
+        domain_crc32_(ResolveDomainKey(domain_name)),
+        topic_name_(ResolveTopicName(topic_name)),
+        name_key_(BuildNameKey(domain_crc32_, topic_name_)),
+        shm_name_(BuildShmName(name_key_))
+  {
+    (void)ReadProcessIdentity(static_cast<uint32_t>(getpid()), self_identity_);
+    Open();
+  }
+
+  LinuxSharedTopic(const char* topic_name, Topic::Domain& domain,
+                   const LinuxSharedTopicConfig& config)
+      : create_(true),
+        publisher_(true),
+        config_(config),
+        domain_crc32_(domain.node_ != nullptr ? domain.node_->key : 0),
+        topic_name_(ResolveTopicName(topic_name)),
+        name_key_(BuildNameKey(domain_crc32_, topic_name_)),
+        shm_name_(BuildShmName(name_key_))
   {
     (void)ReadProcessIdentity(static_cast<uint32_t>(getpid()), self_identity_);
     Open();
@@ -752,7 +826,25 @@ class LinuxSharedTopic : public Topic
    */
   static ErrorCode Remove(const char* topic_name)
   {
-    const std::string shm_name = BuildShmName(topic_name);
+    return Remove(topic_name, DEFAULT_DOMAIN_NAME);
+  }
+
+  static ErrorCode Remove(const char* topic_name, const char* domain_name)
+  {
+    const std::string shm_name = BuildShmName(
+        BuildNameKey(ResolveDomainKey(domain_name), ResolveTopicName(topic_name)));
+    if (shm_unlink(shm_name.c_str()) == 0 || errno == ENOENT)
+    {
+      return ErrorCode::OK;
+    }
+    return ErrorCode::FAILED;
+  }
+
+  static ErrorCode Remove(const char* topic_name, Topic::Domain& domain)
+  {
+    const uint32_t domain_crc32 = (domain.node_ != nullptr) ? domain.node_->key : 0;
+    const std::string shm_name =
+        BuildShmName(BuildNameKey(domain_crc32, ResolveTopicName(topic_name)));
     if (shm_unlink(shm_name.c_str()) == 0 || errno == ENOENT)
     {
       return ErrorCode::OK;
@@ -764,12 +856,14 @@ class LinuxSharedTopic : public Topic
   struct alignas(64) SharedHeader
   {
     uint64_t magic = 0;
+    uint64_t name_key = 0;
+    uint32_t domain_crc32 = 0;
     uint32_t version = 0;
     uint32_t data_size = 0;
     uint32_t slot_count = 0;
     uint32_t subscriber_capacity = 0;
     uint32_t queue_capacity = 0;
-    uint32_t reserved = 0;
+    uint32_t topic_name_len = 0;
     std::atomic<uint32_t> init_state;
     std::atomic<uint32_t> publisher_pid;
     std::atomic<uint64_t> publisher_starttime;
@@ -828,11 +922,34 @@ class LinuxSharedTopic : public Topic
   static constexpr uint32_t kInitReady = 1;
   static constexpr uint32_t kInvalidIndex = UINT32_MAX;
 
-  static std::string BuildShmName(const char* topic_name)
+  static uint32_t ResolveDomainKey(const char* domain_name)
+  {
+    const std::string resolved =
+        (domain_name == nullptr || domain_name[0] == '\0') ? std::string(DEFAULT_DOMAIN_NAME)
+                                                            : std::string(domain_name);
+    return CRC32::Calculate(resolved.data(), resolved.size());
+  }
+
+  static std::string ResolveTopicName(const char* topic_name)
+  {
+    return (topic_name != nullptr) ? std::string(topic_name) : std::string();
+  }
+
+  static uint64_t BuildNameKey(uint32_t domain_crc32, const std::string& topic_name)
+  {
+    const uint32_t topic_len = static_cast<uint32_t>(topic_name.size());
+    std::string key_material;
+    key_material.reserve(sizeof(domain_crc32) + sizeof(topic_len) + topic_len);
+    key_material.append(reinterpret_cast<const char*>(&domain_crc32), sizeof(domain_crc32));
+    key_material.append(reinterpret_cast<const char*>(&topic_len), sizeof(topic_len));
+    key_material.append(topic_name.data(), topic_name.size());
+    return CRC64::Calculate(key_material.data(), key_material.size());
+  }
+
+  static std::string BuildShmName(uint64_t name_key)
   {
     char buffer[64] = {};
-    std::snprintf(buffer, sizeof(buffer), "/libxr_ipc_%08x",
-                  CRC32::Calculate(topic_name, std::strlen(topic_name)));
+    std::snprintf(buffer, sizeof(buffer), "/libxr_ipc_%016" PRIx64, name_key);
     return std::string(buffer);
   }
 
@@ -922,11 +1039,14 @@ class LinuxSharedTopic : public Topic
 
   static size_t ComputeSharedBytes(uint32_t slot_count,
                                    uint32_t subscriber_capacity,
-                                   uint32_t queue_capacity)
+                                   uint32_t queue_capacity,
+                                   uint32_t topic_name_len)
   {
     size_t offset = 0;
     offset = AlignUp(offset, alignof(SharedHeader));
     offset += sizeof(SharedHeader);
+
+    offset += static_cast<size_t>(topic_name_len) + 1U;
 
     offset = AlignUp(offset, alignof(SlotControl));
     offset += sizeof(SlotControl) * slot_count;
@@ -959,6 +1079,9 @@ class LinuxSharedTopic : public Topic
     header_ = reinterpret_cast<SharedHeader*>(base_ + offset);
     offset += sizeof(SharedHeader);
 
+    topic_name_ptr_ = reinterpret_cast<char*>(base_ + offset);
+    offset += static_cast<size_t>(header_->topic_name_len) + 1U;
+
     offset = AlignUp(offset, alignof(SlotControl));
     slots_ = reinterpret_cast<SlotControl*>(base_ + offset);
     offset += sizeof(SlotControl) * slot_count_;
@@ -987,6 +1110,27 @@ class LinuxSharedTopic : public Topic
     payloads_ = reinterpret_cast<TopicData*>(base_ + offset);
   }
 
+  bool HeaderMatchesIdentity() const
+  {
+    if (header_->name_key != name_key_)
+    {
+      return false;
+    }
+    if (header_->domain_crc32 != domain_crc32_)
+    {
+      return false;
+    }
+    if (header_->topic_name_len != topic_name_.size())
+    {
+      return false;
+    }
+    if (std::memcmp(topic_name_ptr_, topic_name_.c_str(), topic_name_.size() + 1U) != 0)
+    {
+      return false;
+    }
+    return true;
+  }
+
   ErrorCode InitializeLayout()
   {
     if (config_.slot_num == 0 || config_.subscriber_num == 0 || config_.queue_num < 2)
@@ -995,7 +1139,8 @@ class LinuxSharedTopic : public Topic
     }
 
     const size_t bytes =
-        ComputeSharedBytes(config_.slot_num, config_.subscriber_num, config_.queue_num);
+        ComputeSharedBytes(config_.slot_num, config_.subscriber_num, config_.queue_num,
+                           static_cast<uint32_t>(topic_name_.size()));
 
     if (ftruncate(fd_, static_cast<off_t>(bytes)) != 0)
     {
@@ -1020,14 +1165,19 @@ class LinuxSharedTopic : public Topic
     slot_count_ = config_.slot_num;
     subscriber_capacity_ = config_.subscriber_num;
     queue_capacity_ = config_.queue_num;
+    header_ = reinterpret_cast<SharedHeader*>(base_ + AlignUp(0, alignof(SharedHeader)));
+    header_->topic_name_len = static_cast<uint32_t>(topic_name_.size());
     SetupPointers();
 
     header_->magic = kMagic;
+    header_->name_key = name_key_;
+    header_->domain_crc32 = domain_crc32_;
     header_->version = kVersion;
     header_->data_size = sizeof(TopicData);
     header_->slot_count = slot_count_;
     header_->subscriber_capacity = subscriber_capacity_;
     header_->queue_capacity = queue_capacity_;
+    std::memcpy(topic_name_ptr_, topic_name_.c_str(), topic_name_.size() + 1U);
     header_->publisher_pid.store(self_identity_.pid, std::memory_order_release);
     header_->publisher_starttime.store(self_identity_.starttime, std::memory_order_release);
     header_->free_queue_head.store(0, std::memory_order_release);
@@ -1105,6 +1255,10 @@ class LinuxSharedTopic : public Topic
     subscriber_capacity_ = header_->subscriber_capacity;
     queue_capacity_ = header_->queue_capacity;
     SetupPointers();
+    if (!HeaderMatchesIdentity())
+    {
+      return ErrorCode::CHECK_ERR;
+    }
     return ErrorCode::OK;
   }
 
@@ -1130,18 +1284,40 @@ class LinuxSharedTopic : public Topic
     }
     else
     {
-      void* mapping = mmap(nullptr, sizeof(SharedHeader), PROT_READ | PROT_WRITE, MAP_SHARED,
-                           stale_fd, 0);
+      void* mapping = mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ | PROT_WRITE,
+                           MAP_SHARED, stale_fd, 0);
       if (mapping != MAP_FAILED)
       {
+        uint8_t* base = static_cast<uint8_t*>(mapping);
         auto* header = reinterpret_cast<SharedHeader*>(mapping);
         const uint32_t init_state = header->init_state.load(std::memory_order_acquire);
+        bool identity_match = false;
+        const size_t mapping_size = static_cast<size_t>(st.st_size);
+        const size_t topic_name_bytes = topic_name_.size() + 1U;
+        if (header->magic == kMagic && header->version == kVersion &&
+            header->domain_crc32 == domain_crc32_ &&
+            header->topic_name_len == topic_name_.size())
+        {
+          size_t offset = AlignUp(0, alignof(SharedHeader));
+          offset += sizeof(SharedHeader);
+          if (offset <= mapping_size && topic_name_bytes <= (mapping_size - offset))
+          {
+            const char* mapped_topic = reinterpret_cast<const char*>(base + offset);
+            identity_match =
+                (header->name_key == name_key_) &&
+                (std::memcmp(mapped_topic, topic_name_.c_str(), topic_name_bytes) == 0);
+          }
+        }
         const ProcessIdentity publisher_identity = {
             header->publisher_pid.load(std::memory_order_acquire),
             header->publisher_starttime.load(std::memory_order_acquire),
         };
 
-        if (init_state != kInitReady)
+        if (!identity_match)
+        {
+          reclaim = false;
+        }
+        else if (init_state != kInitReady)
         {
           reclaim = !ProcessAlive(publisher_identity);
         }
@@ -1150,7 +1326,7 @@ class LinuxSharedTopic : public Topic
           reclaim = true;
         }
 
-        munmap(mapping, sizeof(SharedHeader));
+        munmap(mapping, static_cast<size_t>(st.st_size));
       }
     }
 
@@ -1695,6 +1871,9 @@ class LinuxSharedTopic : public Topic
   bool create_ = false;
   bool publisher_ = false;
   LinuxSharedTopicConfig config_;
+  uint32_t domain_crc32_ = 0;
+  std::string topic_name_;
+  uint64_t name_key_ = 0;
   std::string shm_name_;
   ProcessIdentity self_identity_ = {};
 
@@ -1704,6 +1883,7 @@ class LinuxSharedTopic : public Topic
   size_t mapping_size_ = 0;
 
   SharedHeader* header_ = nullptr;
+  char* topic_name_ptr_ = nullptr;
   SlotControl* slots_ = nullptr;
   SubscriberControl* subscribers_ = nullptr;
   BalancedGroupControl* balanced_group_ = nullptr;
