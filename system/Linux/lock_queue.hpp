@@ -41,7 +41,12 @@ class LockQueue
    */
   ErrorCode Push(const Data &data)
   {
-    mutex_.Lock();
+    const ErrorCode lock_ans = mutex_.Lock();
+    if (lock_ans != ErrorCode::OK)
+    {
+      return lock_ans;
+    }
+
     auto ans = queue_handle_.Push(data);
     if (ans == ErrorCode::OK)
     {
@@ -60,17 +65,22 @@ class LockQueue
    */
   ErrorCode Pop(Data &data, uint32_t timeout)
   {
-    if (semaphore_handle_.Wait(timeout) == ErrorCode::OK)
+    const ErrorCode wait_ans = semaphore_handle_.Wait(timeout);
+    if (wait_ans == ErrorCode::OK)
     {
-      mutex_.Lock();
+      const ErrorCode lock_ans = mutex_.Lock();
+      if (lock_ans != ErrorCode::OK)
+      {
+        semaphore_handle_.Post();
+        return lock_ans;
+      }
+
       auto ans = queue_handle_.Pop(data);
       mutex_.Unlock();
       return ans;
     }
-    else
-    {
-      return ErrorCode::TIMEOUT;
-    }
+
+    return wait_ans;
   }
 
   /**
@@ -80,7 +90,11 @@ class LockQueue
    */
   ErrorCode Pop()
   {
-    mutex_.Lock();
+    const ErrorCode lock_ans = mutex_.Lock();
+    if (lock_ans != ErrorCode::OK)
+    {
+      return lock_ans;
+    }
     auto ans = queue_handle_.Pop();
     mutex_.Unlock();
     return ans;
@@ -94,17 +108,22 @@ class LockQueue
    */
   ErrorCode Pop(uint32_t timeout)
   {
-    if (semaphore_handle_.Wait(timeout) == ErrorCode::OK)
+    const ErrorCode wait_ans = semaphore_handle_.Wait(timeout);
+    if (wait_ans == ErrorCode::OK)
     {
-      mutex_.Lock();
+      const ErrorCode lock_ans = mutex_.Lock();
+      if (lock_ans != ErrorCode::OK)
+      {
+        semaphore_handle_.Post();
+        return lock_ans;
+      }
+
       auto ans = queue_handle_.Pop();
       mutex_.Unlock();
       return ans;
     }
-    else
-    {
-      return ErrorCode::TIMEOUT;
-    }
+
+    return wait_ans;
   }
 
   /**
@@ -127,7 +146,10 @@ class LockQueue
    */
   size_t Size()
   {
-    mutex_.Lock();
+    if (mutex_.Lock() != ErrorCode::OK)
+    {
+      return 0;
+    }
     auto ans = queue_handle_.Size();
     mutex_.Unlock();
     return ans;
@@ -140,7 +162,10 @@ class LockQueue
    */
   size_t EmptySize()
   {
-    mutex_.Lock();
+    if (mutex_.Lock() != ErrorCode::OK)
+    {
+      return 0;
+    }
     auto ans = queue_handle_.EmptySize();
     mutex_.Unlock();
     return ans;

@@ -2,6 +2,8 @@
 
 #include <climits>
 
+#include <cstring>
+
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "logger.hpp"
@@ -68,10 +70,7 @@ class Thread
   {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-
-    // 线程栈大小设定，至少满足 PTHREAD_STACK_MIN
-    size_t stack_size = LibXR::max(static_cast<size_t>(PTHREAD_STACK_MIN), stack_depth);
-    pthread_attr_setstacksize(&attr, stack_size);
+    ConfigureAttributes(attr, stack_depth, priority);
 
     /**
      * @brief  线程数据封装类
@@ -89,13 +88,14 @@ class Thread
        */
       ThreadBlock(decltype(function) fun, ArgType arg, const char *name)
           : fun_(fun),
-            arg_(arg),
-            name_(reinterpret_cast<char *>(malloc(strlen(name) + 1)))
+            arg_(arg)
       {
-        strcpy(name_, name);
+        std::memset(name_, 0, sizeof(name_));
+        if (name != nullptr)
+        {
+          std::strncpy(name_, name, sizeof(name_) - 1);
+        }
       }
-
-      ~ThreadBlock() { free(name_); }
 
       /**
        * @brief  线程入口函数，执行用户定义的线程函数
@@ -108,62 +108,22 @@ class Thread
       {
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
 
-        if (block->name_ && block->name_[0] != '\0')
+        if (block->name_[0] != '\0')
         {
-          char name_buf[16];
-          std::strncpy(name_buf, block->name_, sizeof(name_buf) - 1);
-          name_buf[sizeof(name_buf) - 1] = '\0';
-          pthread_setname_np(pthread_self(), name_buf);
+          pthread_setname_np(pthread_self(), block->name_);
         }
 
-        volatile const char *thread_name = block->name_;
         block->fun_(block->arg_);
-
-        UNUSED(thread_name);
         delete block;
         return static_cast<void *>(nullptr);
       }
 
       decltype(function) fun_;  ///< 线程执行的函数 Function executed by the thread
       ArgType arg_;  ///< 线程函数的参数 Argument passed to the thread function
-      char *name_;   ///< 线程名称 Thread name
+      char name_[16];  ///< 线程名称 Thread name
     };
 
     auto block = new ThreadBlock(function, arg, name);
-
-    // 优先尝试设置 SCHED_FIFO 和线程优先级
-    int min_priority = sched_get_priority_min(SCHED_FIFO);
-    int max_priority = sched_get_priority_max(SCHED_FIFO);
-    bool scheduling_set = false;
-
-    UNUSED(scheduling_set);
-
-    if (max_priority - min_priority >= static_cast<int>(Priority::REALTIME))
-    {
-      pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
-      pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
-
-      struct sched_param sp;
-      Memory::FastSet(&sp, 0, sizeof(sp));
-      sp.sched_priority = min_priority + static_cast<int>(priority);
-
-      if (pthread_attr_setschedparam(&attr, &sp) == 0)
-      {
-        scheduling_set = true;
-      }
-      else
-      {
-        XR_LOG_WARN("Failed to set thread priority. Falling back to default policy.");
-        pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
-        pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
-      }
-    }
-    else
-    {
-      XR_LOG_WARN(
-          "SCHED_FIFO not supported or insufficient range. Using default policy.");
-      pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
-    }
 
     // 创建线程
     int ans = pthread_create(&this->thread_handle_, &attr, ThreadBlock::Port, block);
@@ -229,6 +189,43 @@ class Thread
   operator libxr_thread_handle() { return thread_handle_; }
 
  private:
+  static void ConfigureAttributes(pthread_attr_t& attr, size_t stack_depth,
+                                  Thread::Priority priority)
+  {
+    const size_t stack_size = LibXR::max(static_cast<size_t>(PTHREAD_STACK_MIN), stack_depth);
+    pthread_attr_setstacksize(&attr, stack_size);
+    ConfigureScheduling(attr, priority);
+  }
+
+  static void ConfigureScheduling(pthread_attr_t& attr, Thread::Priority priority)
+  {
+    const int min_priority = sched_get_priority_min(SCHED_FIFO);
+    const int max_priority = sched_get_priority_max(SCHED_FIFO);
+    if (max_priority - min_priority < static_cast<int>(Priority::REALTIME))
+    {
+      XR_LOG_WARN(
+          "SCHED_FIFO not supported or insufficient range. Using default policy.");
+      pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
+      return;
+    }
+
+    pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+    pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+
+    struct sched_param sp;
+    Memory::FastSet(&sp, 0, sizeof(sp));
+    sp.sched_priority = min_priority + static_cast<int>(priority);
+
+    if (pthread_attr_setschedparam(&attr, &sp) == 0)
+    {
+      return;
+    }
+
+    XR_LOG_WARN("Failed to set thread priority. Falling back to default policy.");
+    pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
+    pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
+  }
+
   libxr_thread_handle thread_handle_;  ///< POSIX 线程句柄 POSIX thread handle
 };
 

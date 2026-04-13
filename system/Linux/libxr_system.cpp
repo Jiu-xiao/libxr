@@ -1,9 +1,7 @@
 #include "libxr_system.hpp"
 
-#include <bits/types/FILE.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
@@ -17,8 +15,6 @@
 #include "logger.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
-
-struct timeval libxr_linux_start_time;
 
 struct timespec libxr_linux_start_time_spec;  // NOLINT
 
@@ -124,8 +120,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 
   *LibXR::STDIO::read_ = read_fun;
 
-  gettimeofday(&libxr_linux_start_time, nullptr);
-  UNUSED(clock_gettime(CLOCK_REALTIME, &libxr_linux_start_time_spec));
+  UNUSED(clock_gettime(CLOCK_MONOTONIC, &libxr_linux_start_time_spec));
 
   struct termios tty;
   tcgetattr(STDIN_FILENO, &tty);           // 获取当前终端属性

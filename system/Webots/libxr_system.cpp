@@ -1,6 +1,5 @@
 #include "libxr_system.hpp"
 
-#include <bits/types/FILE.h>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>

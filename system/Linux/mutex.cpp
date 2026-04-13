@@ -2,6 +2,8 @@
 
 #include <pthread.h>
 
+#include <cerrno>
+
 #include "libxr_def.hpp"
 #include "libxr_system.hpp"
 
@@ -13,18 +15,24 @@ Mutex::~Mutex() { pthread_mutex_destroy(&mutex_handle_); }
 
 ErrorCode Mutex::Lock()
 {
-  if (pthread_mutex_lock(&mutex_handle_) != 0)
+  const int ans = pthread_mutex_lock(&mutex_handle_);
+  if (ans != 0)
   {
-    return ErrorCode::BUSY;
+    return ErrorCode::FAILED;
   }
   return ErrorCode::OK;
 }
 
 ErrorCode Mutex::TryLock()
 {
-  if (pthread_mutex_trylock(&mutex_handle_) != 0)
+  const int ans = pthread_mutex_trylock(&mutex_handle_);
+  if (ans == EBUSY)
   {
     return ErrorCode::BUSY;
+  }
+  if (ans != 0)
+  {
+    return ErrorCode::FAILED;
   }
   return ErrorCode::OK;
 }

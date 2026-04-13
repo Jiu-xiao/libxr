@@ -1,40 +1,33 @@
 #include "thread.hpp"
 
-#include <sys/time.h>
-
 #include <cerrno>
 
 #include "libxr_def.hpp"
+#include "monotonic_time.hpp"
 #include "timebase.hpp"
 
 using namespace LibXR;
 
-extern struct timeval libxr_linux_start_time;
 extern struct timespec libxr_linux_start_time_spec;
 
 Thread Thread::Current(void) { return Thread(pthread_self()); }
 
 void Thread::Sleep(uint32_t milliseconds)
 {
-  struct timespec ts;
-  ts.tv_sec = milliseconds / 1000;
-  ts.tv_nsec = static_cast<__syscall_slong_t>((milliseconds % 1000) * 1000000);
-  UNUSED(clock_nanosleep(CLOCK_REALTIME, 0, &ts, nullptr));
+  timespec ts = MonotonicTime::RelativeFromMilliseconds(milliseconds);
+  while (clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts) == EINTR)
+  {
+  }
 }
 
 void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep)
 {
   last_waskup_time = last_waskup_time + time_to_sleep;
 
-  struct timespec ts = libxr_linux_start_time_spec;
-  uint32_t add = 0;
-  uint32_t secs = last_waskup_time / 1000;
-  int64_t raw_time = static_cast<int64_t>(last_waskup_time) * 1000U * 1000U;
-  add = raw_time / (static_cast<int64_t>(1000U * 1000U * 1000U));
-  ts.tv_sec += (add + secs);
-  ts.tv_nsec = raw_time % (static_cast<int64_t>(1000U * 1000U * 1000U));
+  const timespec ts =
+      MonotonicTime::AddMilliseconds(libxr_linux_start_time_spec, last_waskup_time);
 
-  while (clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, &ts) && errno == EINTR)
+  while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr) == EINTR)
   {
   }
 }

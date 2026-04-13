@@ -1,14 +1,19 @@
 #pragma once
 
 #include <pthread.h>
-#include <semaphore.h>
+
+#include <atomic>
 
 #include <cstdint>
 
 namespace LibXR
 {
 typedef pthread_mutex_t libxr_mutex_handle;
-typedef sem_t* libxr_semaphore_handle;
+struct libxr_linux_futex_semaphore
+{
+  std::atomic<uint32_t> count;
+};
+typedef libxr_linux_futex_semaphore* libxr_semaphore_handle;
 typedef pthread_t libxr_thread_handle;
 
 /**
@@ -21,12 +26,19 @@ typedef pthread_t libxr_thread_handle;
  *                            Timer task stack depth (default: 65536)
  *
  * @details
- * 该函数用于初始化 POSIX 线程相关的资源，例如互斥锁、信号量和条件变量。
- * 在使用 `LibXR` 线程库之前，应调用该函数进行必要的系统初始化。
+ * 该函数用于初始化 Linux 主机运行时，包括：
+ * - 定时器线程默认参数
+ * - 标准输入输出端口
+ * - 终端模式
+ * - 后台 STDIO 线程
+ * 在使用依赖主机运行时的 `LibXR` 组件之前，应调用该函数。
  *
- * This function initializes POSIX thread-related resources such as mutexes,
- * semaphores, and condition variables. It should be called before using the
- * `LibXR` threading library for proper system setup.
+ * This function initializes the Linux host runtime, including:
+ * - default timer-thread parameters
+ * - STDIO ports
+ * - terminal mode
+ * - background STDIO threads
+ * It should be called before using `LibXR` components that depend on the host runtime.
  *
  */
 void PlatformInit(uint32_t timer_pri = 2, uint32_t timer_stack_depth = 65536);
