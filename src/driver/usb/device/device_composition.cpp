@@ -350,7 +350,6 @@ DeviceComposition::DeviceComposition(
     ConstRawData uid, uint8_t bmAttributes, uint8_t bMaxPower)
     : endpoint_pool_(endpoint_pool),
       bm_attributes_(bmAttributes),
-      b_max_power_(bMaxPower),
       composite_(is_composite_device(configs)),
       config_num_(configs.size()),
       items_(new ConfigItems[config_num_]),

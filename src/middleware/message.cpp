@@ -87,6 +87,8 @@ void Topic::UnlockFromCallback(Topic::TopicHandle topic)
 
 Topic::Domain::Domain(const char* name)
 {
+  ASSERT(name != nullptr);
+
   if (!domain_)
   {
     if (!domain_)

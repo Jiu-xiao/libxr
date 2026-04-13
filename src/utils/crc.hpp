@@ -289,4 +289,72 @@ class CRC32
                            buf + (len % 4)))[len / sizeof(uint32_t) - 1];
   }
 };
+
+/**
+ * @class CRC64
+ * @brief 64 位循环冗余校验（CRC-64）计算类 / CRC-64 checksum computation class
+ *
+ * 该类实现了 CRC-64 校验算法，支持计算数据的 64 位校验值。
+ * This class implements the CRC-64 checksum algorithm and supports computing
+ * 64-bit checksums for input data.
+ */
+class CRC64
+{
+ private:
+  static const uint64_t INIT = 0xFFFFFFFFFFFFFFFFULL;  ///< CRC64 初始值 / CRC64 initial value
+
+ public:
+  static inline uint64_t tab_[256];  ///< CRC64 查找表 / CRC64 lookup table
+  static inline bool inited_ =
+      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
+
+  CRC64() {}
+
+  /**
+   * @brief 生成 CRC64 查找表 / Generates the CRC64 lookup table
+   */
+  static void GenerateTable()
+  {
+    uint64_t crc = 0;
+    for (int i = 0; i < 256; ++i)
+    {
+      crc = static_cast<uint64_t>(i);
+      for (int j = 0; j < 8; ++j)
+      {
+        if (crc & 1ULL)
+        {
+          crc = (crc >> 1U) ^ 0xC96C5795D7870F42ULL;
+        }
+        else
+        {
+          crc >>= 1U;
+        }
+      }
+      tab_[i] = crc;
+    }
+    inited_ = true;
+  }
+
+  /**
+   * @brief 计算数据的 CRC64 校验码 / Computes the CRC64 checksum for the given data
+   * @param raw 输入数据指针 / Pointer to input data
+   * @param len 数据长度 / Length of the data
+   * @return 计算得到的 CRC64 值 / Computed CRC64 value
+   */
+  static uint64_t Calculate(const void* raw, size_t len)
+  {
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
+    if (!inited_)
+    {
+      GenerateTable();
+    }
+
+    uint64_t crc = INIT;
+    while (len--)
+    {
+      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8U);
+    }
+    return crc;
+  }
+};
 }  // namespace LibXR

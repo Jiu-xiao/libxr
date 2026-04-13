@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cstdint>
-
 #include "crc.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"

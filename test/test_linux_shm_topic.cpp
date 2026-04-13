@@ -11,12 +11,19 @@
 namespace
 {
 
+constexpr uint32_t kShortWaitMs = 100;
+constexpr uint32_t kLongWaitMs = 2000;
+
 struct IPCFrame
 {
   uint32_t seq = 0;
   uint32_t checksum = 0;
   std::array<uint8_t, 128> payload = {};
 };
+
+using SharedTopic = LibXR::LinuxSharedTopic<IPCFrame>;
+using SharedData = SharedTopic::Data;
+using SharedSubscriber = SharedTopic::SyncSubscriber;
 
 uint32_t ComputeChecksum(const IPCFrame& frame)
 {
@@ -44,18 +51,36 @@ void AssertFrame(const IPCFrame& frame, uint32_t expected_seq)
   ASSERT(frame.checksum == ComputeChecksum(frame));
 }
 
+void MakeTopicName(char* topic_name, size_t topic_name_size, const char* prefix)
+{
+  std::snprintf(topic_name, topic_name_size, "%s_%d", prefix, static_cast<int>(getpid()));
+}
+
+void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
+{
+  for (int retry = 0; retry < 200 && topic.GetSubscriberNum() < expected_num; ++retry)
+  {
+    usleep(10000);
+  }
+  ASSERT(topic.GetSubscriberNum() == expected_num);
+}
+
+void ExpectChildExit(pid_t child, int expected_code = 0)
+{
+  int status = 0;
+  ASSERT(waitpid(child, &status, 0) == child);
+  ASSERT(WIFEXITED(status));
+  ASSERT(WEXITSTATUS(status) == expected_code);
+}
+
 }  // namespace
 
 void test_linux_shm_topic()
 {
-  using SharedTopic = LibXR::LinuxSharedTopic<IPCFrame>;
-  using SharedData = SharedTopic::Data;
-  using SharedSubscriber = SharedTopic::SyncSubscriber;
-
   char topic_name[96] = {};
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_local_%d",
-                static_cast<int>(getpid()));
+  // Basic attach-only semantics and slot backpressure.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_local");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -89,7 +114,7 @@ void test_linux_shm_topic()
     SharedData data2;
     ASSERT(publisher.CreateData(data2) == ErrorCode::FULL);
 
-    ASSERT(subscriber.Wait(100) == ErrorCode::OK);
+    ASSERT(subscriber.Wait(kShortWaitMs) == ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 100);
     ASSERT(subscriber.GetPendingNum() == 1);
@@ -99,22 +124,21 @@ void test_linux_shm_topic()
     FillFrame(*data2.GetData(), 102);
     ASSERT(publisher.Publish(data2) == ErrorCode::OK);
 
-    ASSERT(subscriber.Wait(100) == ErrorCode::OK);
+    ASSERT(subscriber.Wait(kShortWaitMs) == ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 101);
     subscriber.Release();
 
-    ASSERT(subscriber.Wait(100) == ErrorCode::OK);
+    ASSERT(subscriber.Wait(kShortWaitMs) == ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 102);
     ASSERT(subscriber.GetPendingNum() == 0);
     subscriber.Release();
   }
 
+  // Stale publisher takeover should allow a fresh creator to reopen the segment.
   UNUSED(SharedTopic::Remove(topic_name));
-
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_takeover_%d",
-                static_cast<int>(getpid()));
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_takeover");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -144,10 +168,7 @@ void test_linux_shm_topic()
       _exit(0);
     }
 
-    int status = 0;
-    ASSERT(waitpid(child, &status, 0) == child);
-    ASSERT(WIFEXITED(status));
-    ASSERT(WEXITSTATUS(status) == 0);
+    ExpectChildExit(child);
 
     SharedTopic publisher(topic_name, config);
     ASSERT(publisher.Valid());
@@ -157,10 +178,9 @@ void test_linux_shm_topic()
     ASSERT(publisher.Publish(frame) == ErrorCode::OK);
   }
 
+  // BROADCAST_FULL should fail publish when the subscriber queue is saturated.
   UNUSED(SharedTopic::Remove(topic_name));
-
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_queue_%d",
-                static_cast<int>(getpid()));
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_queue");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -188,21 +208,20 @@ void test_linux_shm_topic()
     ASSERT(publisher.GetPublishFailedNum() == 1);
 
     SharedData recv_data;
-    ASSERT(subscriber.Wait(recv_data, 100) == ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 1);
     AssertFrame(*recv_data.GetData(), 201);
     recv_data.Reset();
 
-    ASSERT(subscriber.Wait(recv_data, 100) == ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 2);
     AssertFrame(*recv_data.GetData(), 202);
     recv_data.Reset();
   }
 
+  // BROADCAST_DROP_OLD should keep the newest descriptors without failing publish.
   UNUSED(SharedTopic::Remove(topic_name));
-
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_drop_old_%d",
-                static_cast<int>(getpid()));
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_drop_old");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -230,21 +249,20 @@ void test_linux_shm_topic()
     ASSERT(publisher.GetPublishFailedNum() == 0);
 
     SharedData recv_data;
-    ASSERT(subscriber.Wait(recv_data, 100) == ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 2);
     AssertFrame(*recv_data.GetData(), 212);
     recv_data.Reset();
 
-    ASSERT(subscriber.Wait(recv_data, 100) == ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 3);
     AssertFrame(*recv_data.GetData(), 213);
     recv_data.Reset();
   }
 
+  // A slot must stay pinned until every subscriber releases it.
   UNUSED(SharedTopic::Remove(topic_name));
-
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_ref_%d",
-                static_cast<int>(getpid()));
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_ref");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -265,8 +283,8 @@ void test_linux_shm_topic()
     FillFrame(frame, 301);
     ASSERT(publisher.Publish(frame) == ErrorCode::OK);
 
-    ASSERT(subscriber_a.Wait(100) == ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(100) == ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(kShortWaitMs) == ErrorCode::OK);
     AssertFrame(*subscriber_a.GetData(), 301);
     AssertFrame(*subscriber_b.GetData(), 301);
 
@@ -280,8 +298,8 @@ void test_linux_shm_topic()
     FillFrame(*blocked_data.GetData(), 302);
     ASSERT(publisher.Publish(blocked_data) == ErrorCode::OK);
 
-    ASSERT(subscriber_a.Wait(100) == ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(100) == ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(kShortWaitMs) == ErrorCode::OK);
     AssertFrame(*subscriber_a.GetData(), 302);
     AssertFrame(*subscriber_b.GetData(), 302);
     subscriber_a.Release();
@@ -290,8 +308,52 @@ void test_linux_shm_topic()
 
   UNUSED(SharedTopic::Remove(topic_name));
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_bal_rr_%d",
-                static_cast<int>(getpid()));
+  // The same topic name in different domains must stay isolated.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_domain");
+
+  {
+    LibXR::Topic::Domain domain_a("linux_shm_domain_a");
+    LibXR::Topic::Domain domain_b("linux_shm_domain_b");
+
+    UNUSED(SharedTopic::Remove(topic_name, domain_a));
+    UNUSED(SharedTopic::Remove(topic_name, domain_b));
+
+    LibXR::LinuxSharedTopicConfig config;
+    config.slot_num = 4;
+    config.subscriber_num = 1;
+    config.queue_num = 4;
+
+    SharedTopic publisher_a(topic_name, domain_a, config);
+    SharedTopic publisher_b(topic_name, "linux_shm_domain_b", config);
+    ASSERT(publisher_a.Valid());
+    ASSERT(publisher_b.Valid());
+
+    SharedSubscriber subscriber_a(topic_name, "linux_shm_domain_a");
+    SharedSubscriber subscriber_b(topic_name, domain_b);
+    ASSERT(subscriber_a.Valid());
+    ASSERT(subscriber_b.Valid());
+
+    IPCFrame frame = {};
+    FillFrame(frame, 331);
+    ASSERT(publisher_a.Publish(frame) == ErrorCode::OK);
+    FillFrame(frame, 441);
+    ASSERT(publisher_b.Publish(frame) == ErrorCode::OK);
+
+    SharedData recv_a;
+    SharedData recv_b;
+    ASSERT(subscriber_a.Wait(recv_a, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(recv_a.GetData()->seq == 331);
+    ASSERT(recv_b.GetData()->seq == 441);
+    recv_a.Reset();
+    recv_b.Reset();
+
+    UNUSED(SharedTopic::Remove(topic_name, domain_a));
+    UNUSED(SharedTopic::Remove(topic_name, domain_b));
+  }
+
+  // BALANCE_RR should rotate delivery between active balanced subscribers.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_bal_rr");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -323,10 +385,10 @@ void test_linux_shm_topic()
     SharedData recv_b1;
     SharedData recv_b2;
 
-    ASSERT(subscriber_a.Wait(recv_a1, 100) == ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b1, 100) == ErrorCode::OK);
-    ASSERT(subscriber_a.Wait(recv_a2, 100) == ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b2, 100) == ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(recv_a1, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b1, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(recv_a2, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b2, kShortWaitMs) == ErrorCode::OK);
 
     ASSERT(recv_a1.GetData()->seq == 351);
     ASSERT(recv_b1.GetData()->seq == 352);
@@ -336,8 +398,8 @@ void test_linux_shm_topic()
 
   UNUSED(SharedTopic::Remove(topic_name));
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_bal_rr_dead_%d",
-                static_cast<int>(getpid()));
+  // A dead balanced subscriber must be recycled so the group can keep running.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_bal_rr_dead");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -369,7 +431,7 @@ void test_linux_shm_topic()
       }
 
       SharedData data;
-      if (subscriber.Wait(data, 2000) != ErrorCode::OK)
+      if (subscriber.Wait(data, kLongWaitMs) != ErrorCode::OK)
       {
         _exit(41);
       }
@@ -407,10 +469,7 @@ void test_linux_shm_topic()
     uint8_t cmd = 0xA5;
     ASSERT(write(cmd_pipe[1], &cmd, sizeof(cmd)) == static_cast<ssize_t>(sizeof(cmd)));
 
-    int status = 0;
-    ASSERT(waitpid(child, &status, 0) == child);
-    ASSERT(WIFEXITED(status));
-    ASSERT(WEXITSTATUS(status) == 0);
+    ExpectChildExit(child);
 
     FillFrame(frame, 362);
     ASSERT(publisher.Publish(frame) == ErrorCode::OK);
@@ -419,8 +478,8 @@ void test_linux_shm_topic()
 
     SharedData recv_alive1;
     SharedData recv_alive2;
-    ASSERT(subscriber_alive.Wait(recv_alive1, 2000) == ErrorCode::OK);
-    ASSERT(subscriber_alive.Wait(recv_alive2, 2000) == ErrorCode::OK);
+    ASSERT(subscriber_alive.Wait(recv_alive1, kLongWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_alive.Wait(recv_alive2, kLongWaitMs) == ErrorCode::OK);
     ASSERT(recv_alive1.GetData()->seq == 362);
     ASSERT(recv_alive2.GetData()->seq == 363);
 
@@ -430,8 +489,8 @@ void test_linux_shm_topic()
 
   UNUSED(SharedTopic::Remove(topic_name));
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_bal_rr_skip_full_%d",
-                static_cast<int>(getpid()));
+  // BALANCE_RR should skip a full member when another balanced subscriber can accept.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_bal_rr_skip_full");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -459,7 +518,7 @@ void test_linux_shm_topic()
     ASSERT(publisher.Publish(frame) == ErrorCode::OK);
 
     SharedData recv_b0;
-    ASSERT(subscriber_b.Wait(recv_b0, 100) == ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b0, kShortWaitMs) == ErrorCode::OK);
     ASSERT(recv_b0.GetData()->seq == 372);
     recv_b0.Reset();
 
@@ -469,9 +528,9 @@ void test_linux_shm_topic()
     SharedData recv_a;
     SharedData recv_b1;
     SharedData recv_c;
-    ASSERT(subscriber_a.Wait(recv_a, 100) == ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b1, 100) == ErrorCode::OK);
-    ASSERT(subscriber_c.Wait(recv_c, 100) == ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(recv_a, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b1, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_c.Wait(recv_c, kShortWaitMs) == ErrorCode::OK);
 
     ASSERT(recv_a.GetData()->seq == 371);
     ASSERT(recv_b1.GetData()->seq == 374);
@@ -480,8 +539,8 @@ void test_linux_shm_topic()
 
   UNUSED(SharedTopic::Remove(topic_name));
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_mixed_modes_%d",
-                static_cast<int>(getpid()));
+  // Broadcast subscribers and balanced subscribers should coexist on one topic.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_mixed_modes");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -511,9 +570,9 @@ void test_linux_shm_topic()
     SharedData bc0;
     SharedData bc1;
     SharedData bc2;
-    ASSERT(subscriber_broadcast.Wait(bc0, 100) == ErrorCode::OK);
-    ASSERT(subscriber_broadcast.Wait(bc1, 100) == ErrorCode::OK);
-    ASSERT(subscriber_broadcast.Wait(bc2, 100) == ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc0, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc1, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc2, kShortWaitMs) == ErrorCode::OK);
     ASSERT(bc0.GetData()->seq == 381);
     ASSERT(bc1.GetData()->seq == 382);
     ASSERT(bc2.GetData()->seq == 383);
@@ -521,9 +580,9 @@ void test_linux_shm_topic()
     SharedData rr_a0;
     SharedData rr_b0;
     SharedData rr_a1;
-    ASSERT(subscriber_rr_a.Wait(rr_a0, 100) == ErrorCode::OK);
-    ASSERT(subscriber_rr_b.Wait(rr_b0, 100) == ErrorCode::OK);
-    ASSERT(subscriber_rr_a.Wait(rr_a1, 100) == ErrorCode::OK);
+    ASSERT(subscriber_rr_a.Wait(rr_a0, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_rr_b.Wait(rr_b0, kShortWaitMs) == ErrorCode::OK);
+    ASSERT(subscriber_rr_a.Wait(rr_a1, kShortWaitMs) == ErrorCode::OK);
     ASSERT(rr_a0.GetData()->seq == 381);
     ASSERT(rr_b0.GetData()->seq == 382);
     ASSERT(rr_a1.GetData()->seq == 383);
@@ -531,8 +590,8 @@ void test_linux_shm_topic()
 
   UNUSED(SharedTopic::Remove(topic_name));
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_rr_group_required_%d",
-                static_cast<int>(getpid()));
+  // If the balanced group exists but cannot accept, publish should fail for everyone.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_rr_group_required");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -557,18 +616,18 @@ void test_linux_shm_topic()
     ASSERT(publisher.Publish(frame) == ErrorCode::FULL);
 
     SharedData bc0;
-    ASSERT(subscriber_broadcast.Wait(bc0, 100) == ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc0, kShortWaitMs) == ErrorCode::OK);
     ASSERT(bc0.GetData()->seq == 391);
 
     SharedData rr0;
-    ASSERT(subscriber_rr.Wait(rr0, 100) == ErrorCode::OK);
+    ASSERT(subscriber_rr.Wait(rr0, kShortWaitMs) == ErrorCode::OK);
     ASSERT(rr0.GetData()->seq == 391);
   }
 
   UNUSED(SharedTopic::Remove(topic_name));
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_dead_sub_%d",
-                static_cast<int>(getpid()));
+  // A dead subscriber should be reclaimed together with its held slot state.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_dead_sub");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -600,7 +659,7 @@ void test_linux_shm_topic()
       }
 
       SharedData recv_data;
-      if (subscriber.Wait(recv_data, 2000) != ErrorCode::OK)
+      if (subscriber.Wait(recv_data, kLongWaitMs) != ErrorCode::OK)
       {
         _exit(11);
       }
@@ -623,11 +682,7 @@ void test_linux_shm_topic()
     close(ack_pipe[1]);
     close(cmd_pipe[0]);
 
-    for (int retry = 0; retry < 200 && publisher.GetSubscriberNum() == 0; ++retry)
-    {
-      usleep(10000);
-    }
-    ASSERT(publisher.GetSubscriberNum() == 1);
+    WaitForSubscriberNum(publisher, 1);
 
     IPCFrame frame = {};
     FillFrame(frame, 401);
@@ -642,10 +697,7 @@ void test_linux_shm_topic()
     uint8_t cmd = 0x5A;
     ASSERT(write(cmd_pipe[1], &cmd, sizeof(cmd)) == static_cast<ssize_t>(sizeof(cmd)));
 
-    int status = 0;
-    ASSERT(waitpid(child, &status, 0) == child);
-    ASSERT(WIFEXITED(status));
-    ASSERT(WEXITSTATUS(status) == 0);
+    ExpectChildExit(child);
     ASSERT(publisher.GetSubscriberNum() == 0);
 
     SharedData data0;
@@ -661,8 +713,8 @@ void test_linux_shm_topic()
 
   UNUSED(SharedTopic::Remove(topic_name));
 
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shm_fork_%d",
-                static_cast<int>(getpid()));
+  // Cross-process publish/subscribe should preserve ordering and payload integrity.
+  MakeTopicName(topic_name, sizeof(topic_name), "linux_shm_fork");
   UNUSED(SharedTopic::Remove(topic_name));
 
   {
@@ -688,7 +740,7 @@ void test_linux_shm_topic()
       for (uint32_t seq = 1; seq <= 32; ++seq)
       {
         SharedData recv_data;
-        if (subscriber.Wait(recv_data, 2000) != ErrorCode::OK)
+        if (subscriber.Wait(recv_data, kLongWaitMs) != ErrorCode::OK)
         {
           _exit(3);
         }
@@ -709,11 +761,7 @@ void test_linux_shm_topic()
       _exit(0);
     }
 
-    for (int retry = 0; retry < 200 && publisher.GetSubscriberNum() == 0; ++retry)
-    {
-      usleep(10000);
-    }
-    ASSERT(publisher.GetSubscriberNum() == 1);
+    WaitForSubscriberNum(publisher, 1);
 
     for (uint32_t seq = 1; seq <= 32; ++seq)
     {
@@ -723,10 +771,7 @@ void test_linux_shm_topic()
       ASSERT(publisher.Publish(data) == ErrorCode::OK);
     }
 
-    int status = 0;
-    ASSERT(waitpid(child, &status, 0) == child);
-    ASSERT(WIFEXITED(status));
-    ASSERT(WEXITSTATUS(status) == 0);
+    ExpectChildExit(child);
   }
 
   UNUSED(SharedTopic::Remove(topic_name));
