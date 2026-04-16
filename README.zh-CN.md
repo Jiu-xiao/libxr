@@ -49,6 +49,13 @@
 | Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 
+## Webots 时间语义说明
+
+- `LibXR::PlatformInit(webots::Robot*, double sim_flow_rate)` 在 Webots 后端中以仿真时间作为单调时间源。
+- Webots 轮询片长为 `max(1, round(basicTimeStep / sim_flow_rate))` 毫秒。例如 `basicTimeStep=1 ms`、`sim_flow_rate=0.1` 时，轮询周期为 `10 ms`。
+- 阻塞等待会按这个轮询片长不断重建真实时间 deadline，避免旧的绝对超时戳失效，同时仍然按仿真时间推进。
+- 如果 `Robot::step()` 返回 `< 0`，控制器会立刻退出，而不会继续推进 `_libxr_webots_time_count`。
+
 ## 数据结构支持
 
 | `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |

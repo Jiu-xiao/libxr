@@ -49,6 +49,13 @@ See [XRUSB](https://github.com/Jiu-xiao/XRUSB)
 | Webots(Linux)             | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 | WebAssembly(SingleThread) | ✅      | ✅     | ✅         | ✅     | ✅     | ✅     |
 
+## Webots Timing Notes
+
+- `LibXR::PlatformInit(webots::Robot*, double sim_flow_rate)` uses simulation time as the monotonic time source on the Webots backend.
+- The Webots poll slice is `max(1, round(basicTimeStep / sim_flow_rate))` milliseconds. Example: `basicTimeStep=1 ms`, `sim_flow_rate=0.1` gives `poll=10 ms`.
+- Blocking waits rebuild real-time deadlines from that poll slice to avoid stale absolute deadlines while still advancing in simulation time.
+- If `Robot::step()` returns `< 0`, the controller terminates immediately instead of continuing to advance `_libxr_webots_time_count`.
+
 ## Data structure
 
 | `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
