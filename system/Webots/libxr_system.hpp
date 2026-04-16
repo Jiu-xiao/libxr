@@ -13,6 +13,12 @@
 extern uint64_t _libxr_webots_time_count;  // NOLINT
 
 /**
+ * @brief  Webots 轮询等待周期（毫秒）
+ *         Webots poll wait period in milliseconds
+ */
+extern uint32_t _libxr_webots_poll_period_ms;  // NOLINT
+
+/**
  * @brief  Webots 机器人句柄
  *         Webots robot handle
  */
@@ -71,5 +77,15 @@ typedef struct
  */
 void PlatformInit(webots::Robot *robot = nullptr, uint32_t timer_pri = 2,
                   uint32_t timer_stack_depth = 65536);  // NOLINT
+
+/**
+ * @brief  使用显式仿真流速初始化 Webots 平台
+ *         Initializes Webots platform with an explicit simulation flow rate
+ * @param  robot Webots 机器人对象指针 Webots robot object pointer
+ * @param  sim_flow_rate 仿真流速倍率（1.0 为 1:1 仿真时间）
+ *                       Simulation flow-rate multiplier (1.0 means 1:1 sim time)
+ */
+void PlatformInit(webots::Robot *robot,
+                  double sim_flow_rate);  // NOLINT
 
 }  // namespace LibXR

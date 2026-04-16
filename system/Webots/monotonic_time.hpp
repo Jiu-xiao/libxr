@@ -29,8 +29,13 @@ inline uint32_t RemainingMilliseconds(uint64_t deadline_ms)
 
 inline uint32_t WaitSliceMilliseconds(uint32_t remaining_ms)
 {
-  UNUSED(remaining_ms);
-  return 1;
+  if (remaining_ms == 0)
+  {
+    return 0;
+  }
+
+  const uint32_t poll_ms = _libxr_webots_poll_period_ms ? _libxr_webots_poll_period_ms : 1U;
+  return remaining_ms < poll_ms ? remaining_ms : poll_ms;
 }
 
 inline timespec RealtimeDeadlineFromNow(uint32_t milliseconds)
