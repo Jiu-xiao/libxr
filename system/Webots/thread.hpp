@@ -92,7 +92,10 @@ class Thread
         std::memset(name_, 0, sizeof(name_));
         if (name != nullptr)
         {
-          std::strncpy(name_, name, sizeof(name_) - 1);
+          const size_t src_len = std::strlen(name);
+          const size_t copy_len =
+              src_len < (sizeof(name_) - 1U) ? src_len : (sizeof(name_) - 1U);
+          std::memcpy(name_, name, copy_len);
         }
       }
 
