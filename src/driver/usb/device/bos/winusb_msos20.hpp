@@ -35,6 +35,8 @@ static constexpr uint8_t MSOS20_PLATFORM_CAPABILITY_UUID[16] = {
 // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}" + UTF-16 NUL
 static constexpr uint16_t GUID_CHARS_WITH_BRACES = 38;
 static constexpr uint16_t GUID_STR_UTF16_BYTES = (GUID_CHARS_WITH_BRACES + 1) * 2;  // 78
+static constexpr uint16_t GUID_MULTI_SZ_UTF16_BYTES =
+    static_cast<uint16_t>(GUID_STR_UTF16_BYTES + 2u);
 
 // "DeviceInterfaceGUIDs" (UTF-16LE) + NUL terminator
 static constexpr uint8_t PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16[] = {
@@ -121,6 +123,119 @@ struct MsOs20PlatformCapability
   uint8_t bAltEnumCode = 0x00;                 // optional, often 0
 };
 
+template <uint16_t PropertyDataBytes>
+struct DeviceInterfaceGuidsRegProperty
+{
+  MsOs20FeatureRegPropertyHeader header;
+  uint8_t name[PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES];
+  uint16_t wPropertyDataLength = 0;
+  uint8_t data[PropertyDataBytes] = {};
+
+  void Init(const char* guid)
+  {
+    *this = DeviceInterfaceGuidsRegProperty<PropertyDataBytes>{};
+    header.wDescriptorType = MS_OS_20_FEATURE_REG_PROPERTY;
+    header.wPropertyDataType = REG_MULTI_SZ;
+    header.wPropertyNameLength = PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES;
+    Memory::FastCopy(name, PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16,
+                     PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
+
+    const size_t max_guid_chars =
+        (PropertyDataBytes >= 4u) ? ((PropertyDataBytes - 4u) / 2u) : 0u;
+    size_t guid_len = 0u;
+    if (guid != nullptr)
+    {
+      while (guid[guid_len] != '\0' && guid_len < GUID_CHARS_WITH_BRACES &&
+             guid_len < max_guid_chars)
+      {
+        data[guid_len * 2u] = static_cast<uint8_t>(guid[guid_len]);
+        data[guid_len * 2u + 1u] = 0x00u;
+        ++guid_len;
+      }
+    }
+
+    if (PropertyDataBytes >= 4u)
+    {
+      data[guid_len * 2u] = 0x00u;
+      data[guid_len * 2u + 1u] = 0x00u;
+      data[guid_len * 2u + 2u] = 0x00u;
+      data[guid_len * 2u + 3u] = 0x00u;
+    }
+
+    wPropertyDataLength = static_cast<uint16_t>((guid_len * 2u) + 4u);
+    header.wLength = static_cast<uint16_t>(sizeof(*this));
+  }
+};
+
+template <uint16_t PropertyDataBytes>
+struct DeviceScopedWinUsbMsOs20DescSet
+{
+  MsOs20SetHeader set;
+  MsOs20FeatureCompatibleId compat;
+  DeviceInterfaceGuidsRegProperty<PropertyDataBytes> prop;
+
+  void Init(const char* guid, uint32_t windows_version = 0x06030000)
+  {
+    *this = DeviceScopedWinUsbMsOs20DescSet<PropertyDataBytes>{};
+
+    set.wLength = static_cast<uint16_t>(sizeof(MsOs20SetHeader));
+    set.wDescriptorType = MS_OS_20_SET_HEADER_DESCRIPTOR;
+    set.dwWindowsVersion = windows_version;
+    set.wTotalLength = static_cast<uint16_t>(sizeof(*this));
+
+    compat.wLength = static_cast<uint16_t>(sizeof(MsOs20FeatureCompatibleId));
+    compat.wDescriptorType = MS_OS_20_FEATURE_COMPATIBLE_ID;
+
+    prop.Init(guid);
+  }
+};
+
+template <uint16_t PropertyDataBytes>
+struct FunctionScopedWinUsbMsOs20DescSet
+{
+  MsOs20SetHeader set;
+  MsOs20SubsetHeaderConfiguration cfg;
+  MsOs20SubsetHeaderFunction func;
+  MsOs20FeatureCompatibleId compat;
+  DeviceInterfaceGuidsRegProperty<PropertyDataBytes> prop;
+
+  void Init(uint8_t configuration_value, uint8_t first_interface, const char* guid,
+            uint32_t windows_version = 0x06030000)
+  {
+    *this = FunctionScopedWinUsbMsOs20DescSet<PropertyDataBytes>{};
+
+    set.wLength = static_cast<uint16_t>(sizeof(MsOs20SetHeader));
+    set.wDescriptorType = MS_OS_20_SET_HEADER_DESCRIPTOR;
+    set.dwWindowsVersion = windows_version;
+    set.wTotalLength = static_cast<uint16_t>(sizeof(*this));
+
+    cfg.wLength = static_cast<uint16_t>(sizeof(cfg));
+    cfg.wDescriptorType = MS_OS_20_SUBSET_HEADER_CONFIGURATION;
+    cfg.bConfigurationValue = configuration_value;
+    cfg.bReserved = 0u;
+    cfg.wTotalLength = static_cast<uint16_t>(sizeof(*this) - offsetof(
+                                                               FunctionScopedWinUsbMsOs20DescSet<
+                                                                   PropertyDataBytes>,
+                                                               cfg));
+
+    func.wLength = static_cast<uint16_t>(sizeof(func));
+    func.wDescriptorType = MS_OS_20_SUBSET_HEADER_FUNCTION;
+    func.bFirstInterface = first_interface;
+    func.bReserved = 0u;
+    func.wTotalLength = static_cast<uint16_t>(sizeof(*this) - offsetof(
+                                                               FunctionScopedWinUsbMsOs20DescSet<
+                                                                   PropertyDataBytes>,
+                                                               func));
+
+    compat.wLength = static_cast<uint16_t>(sizeof(MsOs20FeatureCompatibleId));
+    compat.wDescriptorType = MS_OS_20_FEATURE_COMPATIBLE_ID;
+
+    prop.Init(guid);
+  }
+
+  void SetFirstInterface(uint8_t first_interface) { func.bFirstInterface = first_interface; }
+};
+
 #pragma pack(pop)
 
 // ---- sanity checks ----
@@ -129,11 +244,13 @@ static_assert(sizeof(MsOs20SubsetHeaderConfiguration) == 8, "CfgHeader size mism
 static_assert(sizeof(MsOs20SubsetHeaderFunction) == 8, "FuncHeader size mismatch");
 static_assert(sizeof(MsOs20FeatureCompatibleId) == 20, "CompatibleId size mismatch");
 static_assert(sizeof(MsOs20PlatformCapability) == 28, "PlatformCapability size mismatch");
+static_assert(sizeof(DeviceScopedWinUsbMsOs20DescSet<GUID_MULTI_SZ_UTF16_BYTES>) == 0x00A2,
+              "Device-scoped WinUSB MS OS 2.0 set size mismatch");
+static_assert(sizeof(FunctionScopedWinUsbMsOs20DescSet<GUID_MULTI_SZ_UTF16_BYTES>) == 0x00B2,
+              "Function-scoped WinUSB MS OS 2.0 set size mismatch");
 
-// ---- helpers ----
+// ---- platform capability helper ----
 
-// Initialize MsOs20PlatformCapability with given descriptor-set length / vendor code /
-// version.
 inline void init_msos20_platform_capability(MsOs20PlatformCapability& cap,
                                             uint16_t msos_descriptor_set_total_length,
                                             uint8_t vendor_code = 0x20,
@@ -270,24 +387,10 @@ class MsOs20BosCapability final : public LibXR::USB::BosCapability
  private:
   void RefreshPlatformCap()
   {
-    // Keep Platform Capability synchronized with descriptor set length / vendor code.
-    platform_cap_ = MsOs20PlatformCapability{};
-    Memory::FastCopy(platform_cap_.PlatformCapabilityUUID,
-                     MSOS20_PLATFORM_CAPABILITY_UUID,
-                     sizeof(MSOS20_PLATFORM_CAPABILITY_UUID));
-    platform_cap_.dwWindowsVersion = windows_version_;
-    platform_cap_.bMS_VendorCode = vendor_code_;
-    platform_cap_.bAltEnumCode = 0x00;
-
-    if (descriptor_set_.size_ <= 0xFFFF)
-    {
-      platform_cap_.wMSOSDescriptorSetTotalLength =
-          static_cast<uint16_t>(descriptor_set_.size_);
-    }
-    else
-    {
-      platform_cap_.wMSOSDescriptorSetTotalLength = 0;
-    }
+    const uint16_t total_length =
+        (descriptor_set_.size_ <= 0xFFFF) ? static_cast<uint16_t>(descriptor_set_.size_) : 0u;
+    init_msos20_platform_capability(platform_cap_, total_length, vendor_code_,
+                                    windows_version_);
   }
 
   // Cached MS OS 2.0 descriptor set bytes.

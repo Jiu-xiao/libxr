@@ -103,6 +103,10 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
   };
 #pragma pack(pop)
 
+  // Runtime DFU stays class-driver based inside composite apps; keep WinUSB scoped
+  // to the dedicated DFU bootloader path.
+  bool ExposeWinUsbBosCapability() const override { return false; }
+
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
   {
     // Runtime DFU 没有数据端点；绑定阶段只发布接口/功能描述符，并重置 detach 状态机。

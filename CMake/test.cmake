@@ -39,7 +39,8 @@ set(LIBXR_UNION_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_thread.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_timebase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_timer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_transform.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_transform.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_usb_descriptor_policy.cpp)
 
 function(libxr_add_test_target target_name)
   add_executable(${target_name} ${ARGN})

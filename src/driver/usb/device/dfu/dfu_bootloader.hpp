@@ -814,6 +814,10 @@ class DFUClass : public DfuInterfaceClassBase
 
  public:
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB DFU";
+  static constexpr const char* DEFAULT_WINUSB_DEVICE_INTERFACE_GUID =
+      DfuInterfaceClassBase::DEFAULT_WINUSB_DEVICE_INTERFACE_GUID;
+  static constexpr uint8_t DEFAULT_WINUSB_VENDOR_CODE =
+      DfuInterfaceClassBase::DEFAULT_WINUSB_VENDOR_CODE;
 
   /**
    * @brief Backend 需要满足的接口契约 / Backend contract requirements
@@ -835,9 +839,12 @@ class DFUClass : public DfuInterfaceClassBase
   explicit DFUClass(
       Backend& backend, const char* interface_string = DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
-      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT,
+      const char* winusb_device_interface_guid = DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+      uint8_t winusb_vendor_code = DEFAULT_WINUSB_VENDOR_CODE)
       : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
-                              webusb_vendor_code),
+                              webusb_vendor_code, winusb_device_interface_guid,
+                              winusb_vendor_code),
         backend_(backend)
   {
   }
@@ -848,6 +855,7 @@ class DFUClass : public DfuInterfaceClassBase
     // 固件态 DFU 在绑定阶段发布单接口描述符，并校验 backend 能力。
     // Firmware DFU publishes one interface and validates backend capabilities during bind.
     interface_num_ = start_itf_num;
+    SyncWinUsbInterfaceNumber();
     current_alt_setting_ = 0u;
 
     caps_ = backend_.GetDfuCapabilities();
@@ -1409,11 +1417,13 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
       JumpCallback jump_to_app, void* jump_app_ctx = nullptr, bool autorun = true,
       const char* interface_string = Base::DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
-      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT,
+      const char* winusb_device_interface_guid = Base::DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+      uint8_t winusb_vendor_code = Base::DEFAULT_WINUSB_VENDOR_CODE)
       : Storage(flash, image_base, image_limit, seal_offset, jump_to_app, jump_app_ctx,
                 autorun),
         Base(Storage::backend_, interface_string, webusb_landing_page_url,
-             webusb_vendor_code)
+             webusb_vendor_code, winusb_device_interface_guid, winusb_vendor_code)
   {
   }
 

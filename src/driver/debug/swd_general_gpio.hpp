@@ -10,12 +10,6 @@
 
 namespace LibXR::Debug
 {
-enum class SwdIoDriveMode : uint8_t
-{
-  PUSH_PULL = 0,  ///< Drive phase uses push-pull output.
-  OPEN_DRAIN = 1  ///< Drive phase uses open-drain output.
-};
-
 /**
  * @brief 基于 GpioType 轮询 bit-bang 的 SWD 探针。
  *        SWD probe based on polling bit-bang using GpioType.
@@ -26,8 +20,7 @@ enum class SwdIoDriveMode : uint8_t
  * @note 推荐外围电路：SWCLK/SWDIO 均串联 33Ω 限流电阻，SWDIO 端接 10k 上拉电阻。
  *       Recommended circuit: 33Ω series resistors on SWCLK/SWDIO, 10k pull-up on SWDIO.
  */
-template <typename SwclkGpioType, typename SwdioGpioType,
-          SwdIoDriveMode kIoDriveMode = SwdIoDriveMode::PUSH_PULL>
+template <typename SwclkGpioType, typename SwdioGpioType>
 class SwdGeneralGPIO final : public Swd
 {
   static constexpr uint32_t MIN_HZ = 10'000u;
@@ -206,18 +199,15 @@ class SwdGeneralGPIO final : public Swd
 
   void IdleClocks(uint32_t cycles) override
   {
-    // CMSIS-DAP 空闲周期插入。CMSIS-DAP idle cycles insertion.
-    // 保留历史序列：周期内驱动 SWDIO 高电平，结束后拉低。Keep the legacy sequence: drive
-    // SWDIO high during cycles, then pull low.
+    // CMSIS-DAP idle cycles keep SWDIO low while the extra clocks are inserted.
+    // Match the host-side SWJ idle sequence so the next request starts from a stable low line.
     (void)SetSwdioDriveMode();
-    swdio_.Write(true);
+    swdio_.Write(false);
 
     for (uint32_t i = 0; i < cycles; ++i)
     {
       GenOneClk();
     }
-
-    swdio_.Write(false);
   }
 
   ErrorCode SeqWriteBits(uint32_t cycles, const uint8_t* data_lsb_first) override
@@ -358,26 +348,23 @@ class SwdGeneralGPIO final : public Swd
   enum class SwdioMode : uint8_t
   {
     UNKNOWN = 0,  ///< 未知/未初始化。Unknown / uninitialized.
-    DRIVE,        ///< 输出驱动阶段。Drive phase.
-    SAMPLE_IN,    ///< 输入采样阶段。Sample phase.
+    DRIVE_OUT,    ///< 输出驱动阶段。Output drive phase.
+    SAMPLE_IN,    ///< 输入采样阶段。Input sampling phase.
   };
 
   ErrorCode SetSwdioDriveMode()
   {
-    if (swdio_mode_ != SwdioMode::DRIVE)
+    if (swdio_mode_ != SwdioMode::DRIVE_OUT)
     {
-      const ErrorCode EC =
-          swdio_.SetConfig({(kIoDriveMode == SwdIoDriveMode::OPEN_DRAIN)
-                                ? SwdioGpioType::Direction::OUTPUT_OPEN_DRAIN
-                                : SwdioGpioType::Direction::OUTPUT_PUSH_PULL,
-                            SwdioGpioType::Pull::NONE});
+      const ErrorCode EC = swdio_.SetConfig(
+          {SwdioGpioType::Direction::OUTPUT_PUSH_PULL, SwdioGpioType::Pull::NONE});
       if (EC != ErrorCode::OK)
       {
         return EC;
       }
     }
 
-    swdio_mode_ = SwdioMode::DRIVE;
+    swdio_mode_ = SwdioMode::DRIVE_OUT;
     return ErrorCode::OK;
   }
 
@@ -385,10 +372,6 @@ class SwdGeneralGPIO final : public Swd
   {
     if (swdio_mode_ != SwdioMode::SAMPLE_IN)
     {
-      // Sampling should always leave SWDIO as a pulled-up input so the line has a
-      // defined idle level before the target actively drives ACK/data.
-      // 采样阶段统一把 SWDIO 置为上拉输入，这样目标开始驱动 ACK/数据之前，
-      // 总线空闲电平始终有明确定义。
       const ErrorCode EC =
           swdio_.SetConfig({SwdioGpioType::Direction::INPUT, SwdioGpioType::Pull::UP});
       if (EC != ErrorCode::OK)
@@ -479,14 +462,13 @@ class SwdGeneralGPIO final : public Swd
   inline uint8_t ReadByteLSBWithoutDelay()
   {
     uint8_t v = 0u;
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x01u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x02u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x04u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x08u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x10u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x20u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x40u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x80u : 0u);
+    for (uint32_t i = 0; i < BYTE_BITS; ++i)
+    {
+      if (ReadBitAndClockWithoutDelay())
+      {
+        v = static_cast<uint8_t>(v | (1u << i));
+      }
+    }
     return v;
   }
 

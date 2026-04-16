@@ -77,6 +77,7 @@ static void run_libxr_tests()
       {"crc", test_crc, false},
       {"encoder", test_float_encoder, false},
       {"cycle_value", test_cycle_value, false},
+      {"usb_descriptor_policy", test_usb_descriptor_policy, false},
   };
 
   TestCase data_structure_tests[] = {{"rbt", test_rbt, false},

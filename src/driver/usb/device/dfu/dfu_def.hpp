@@ -7,6 +7,7 @@
 #include "dev_core.hpp"
 #include "flash.hpp"
 #include "timebase.hpp"
+#include "winusb_msos20.hpp"
 #include "webusb.hpp"
 
 namespace LibXR::USB
@@ -85,20 +86,30 @@ struct DFUCapabilities
 class DfuInterfaceClassBase : public DeviceClass
 {
  protected:
-  // DFU 单接口类共享的公共状态：
-  // - 一个接口字符串
-  // - 可选 WebUSB BOS capability
-  // - 一组当前 interface/alt setting 状态
-  // Shared single-interface DFU class state:
+  static constexpr const char* DEFAULT_WINUSB_DEVICE_INTERFACE_GUID =
+      "{4066E5F4-3B02-4B90-9475-12F770A7841B}";
+  static constexpr uint8_t DEFAULT_WINUSB_VENDOR_CODE = 0x20u;
+  using WinUsbMsOs20DescSet =
+      LibXR::USB::WinUsbMsOs20::DeviceScopedWinUsbMsOs20DescSet<
+          LibXR::USB::WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
+
+  // Shared single-interface DFU state:
   // - one interface string
   // - optional WebUSB BOS capability
-  // - one active interface/alt-setting pair
-  DfuInterfaceClassBase(
-      const char* interface_string, const char* webusb_landing_page_url = nullptr,
-      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+  // - WinUSB BOS capability enabled by default
+  // - current interface/alt-setting pair
+  DfuInterfaceClassBase(const char* interface_string,
+                        const char* webusb_landing_page_url = nullptr,
+                        uint8_t webusb_vendor_code =
+                            LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT,
+                        const char* winusb_device_interface_guid =
+                            DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+                        uint8_t winusb_vendor_code = DEFAULT_WINUSB_VENDOR_CODE)
       : interface_string_(interface_string),
         webusb_cap_(webusb_landing_page_url, webusb_vendor_code)
   {
+    InitWinUsbDescriptors(ResolveWinUsbDeviceInterfaceGuid(winusb_device_interface_guid),
+                          winusb_vendor_code);
   }
 
   const char* GetInterfaceString(size_t local_interface_index) const override
@@ -106,21 +117,68 @@ class DfuInterfaceClassBase : public DeviceClass
     return (local_interface_index == 0u) ? interface_string_ : nullptr;
   }
 
-  size_t GetBosCapabilityCount() override { return webusb_cap_.Enabled() ? 1u : 0u; }
+  size_t GetBosCapabilityCount() override
+  {
+    return (ExposeWinUsbBosCapability() ? 1u : 0u) + (webusb_cap_.Enabled() ? 1u : 0u);
+  }
 
   BosCapability* GetBosCapability(size_t index) override
   {
+    if (ExposeWinUsbBosCapability())
+    {
+      if (index == 0u)
+      {
+        return &winusb_msos20_cap_;
+      }
+      return (index == 1u && webusb_cap_.Enabled()) ? &webusb_cap_ : nullptr;
+    }
+
     return (index == 0u && webusb_cap_.Enabled()) ? &webusb_cap_ : nullptr;
+  }
+
+  void SyncWinUsbInterfaceNumber()
+  {
+    if (!ExposeWinUsbBosCapability())
+    {
+      return;
+    }
+    winusb_msos20_cap_.SetDescriptorSet(GetWinUsbMsOs20DescriptorSet());
   }
 
   uint8_t interface_num_ = 0u;
   uint8_t current_alt_setting_ = 0u;
   bool inited_ = false;
 
+  // Runtime DFU overrides this to keep WinUSB scoped to the dedicated bootloader path.
+  virtual bool ExposeWinUsbBosCapability() const { return true; }
+
  private:
+  static const char* ResolveWinUsbDeviceInterfaceGuid(const char* guid)
+  {
+    return (guid != nullptr && guid[0] != '\0') ? guid
+                                                : DEFAULT_WINUSB_DEVICE_INTERFACE_GUID;
+  }
+
+  ConstRawData GetWinUsbMsOs20DescriptorSet() const
+  {
+    return ConstRawData{reinterpret_cast<const uint8_t*>(&winusb_msos20_),
+                        sizeof(winusb_msos20_)};
+  }
+
+  void InitWinUsbDescriptors(const char* guid, uint8_t vendor_code)
+  {
+    winusb_msos20_.Init(guid);
+    winusb_msos20_cap_.SetVendorCode(vendor_code);
+    winusb_msos20_cap_.SetDescriptorSet(GetWinUsbMsOs20DescriptorSet());
+  }
+
   const char* interface_string_ = nullptr;
+  WinUsbMsOs20DescSet winusb_msos20_{};
 
  protected:
+  LibXR::USB::WinUsbMsOs20::MsOs20BosCapability winusb_msos20_cap_{
+      LibXR::ConstRawData{nullptr, 0},
+      DEFAULT_WINUSB_VENDOR_CODE};
   LibXR::USB::WebUsb::WebUsbBosCapability webusb_cap_;
 };
 
