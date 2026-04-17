@@ -99,7 +99,7 @@ class Atomic
   Atomic& operator=(const Atomic&) = delete;
 
  private:
-  std::atomic<uint8_t> value_{
+  std::atomic<uint32_t> value_{
       0u};  ///< 标志值（0=clear, 1=set）/ Flag value (0=clear, 1=set)
 };
 

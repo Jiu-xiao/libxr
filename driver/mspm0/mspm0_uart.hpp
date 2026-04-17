@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "dl_uart_main.h"
+#include "flag.hpp"
 #include "ti_msp_dl_config.h"
 #include "timer.hpp"
 #include "uart.hpp"
@@ -15,7 +16,7 @@ class MSPM0UART : public UART
  public:
   using UART::Write;
 
-  enum class RxTimeoutMode : uint8_t
+  enum class RxTimeoutMode : uint32_t
   {
     LIN_COMPARE,
     BYTE_INTERRUPT
@@ -58,7 +59,7 @@ class MSPM0UART : public UART
   }
   uint16_t GetLinCompareWindow() const
   {
-    return lin_compare_window_.load(std::memory_order_acquire);
+    return static_cast<uint16_t>(lin_compare_window_.load(std::memory_order_acquire));
   }
   uint32_t GetLastTimeoutConsumedSize() const
   {
@@ -251,18 +252,18 @@ class MSPM0UART : public UART
 
   Resources res_;
   WriteInfoBlock tx_active_info_;
-  std::atomic<bool> tx_active_valid_{false};
+  Flag::Atomic tx_active_valid_{};
   size_t tx_active_remaining_ = 0;
   size_t tx_active_total_ = 0;
   std::atomic<RxTimeoutMode> rx_timeout_mode_{RxTimeoutMode::BYTE_INTERRUPT};
-  std::atomic<uint16_t> lin_compare_window_{0U};
+  std::atomic<uint32_t> lin_compare_window_{0U};
   std::atomic<uint32_t> rx_drop_count_{0U};
   std::atomic<uint32_t> rx_timeout_count_{0U};
   std::atomic<uint32_t> last_timeout_consumed_size_{0U};
-  std::atomic<bool> reconfig_in_progress_{false};
+  Flag::Atomic reconfig_in_progress_{};
   std::atomic<uint32_t> io_handler_inflight_{0U};
   std::atomic<uint32_t> timeout_cb_inflight_{0U};
-  std::atomic<bool> read_completion_inflight_{false};
+  Flag::Atomic read_completion_inflight_{};
   std::atomic<uint32_t> read_request_epoch_{0U};
   std::atomic<uint32_t> active_read_request_epoch_{0U};
   Timer::TimerHandle byte_mode_block_timeout_task_ = nullptr;
@@ -270,7 +271,7 @@ class MSPM0UART : public UART
   std::atomic<uint32_t> byte_mode_block_timeout_start_ms_{0U};
   std::atomic<uint32_t> byte_mode_block_timeout_cycle_ms_{0U};
   std::atomic<uint32_t> byte_mode_drop_detached_rx_epoch_{0U};
-  std::atomic<bool> byte_mode_drop_detached_rx_{false};
+  Flag::Atomic byte_mode_drop_detached_rx_{};
 
   static std::atomic<MSPM0UART*> instance_map_[MAX_UART_INSTANCES];
 };

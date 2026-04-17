@@ -126,7 +126,7 @@ void IRAM_ATTR ESP32CDCJtag::ResetTxState(bool)
 {
   ClearActiveTx();
   ClearPendingTx();
-  tx_busy_.store(false, std::memory_order_release);
+  tx_busy_.Clear();
 }
 
 bool IRAM_ATTR ESP32CDCJtag::DequeueTxToSlot(uint8_t* slot, size_t& size,
@@ -206,12 +206,12 @@ bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
 
 bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)
 {
-  while (tx_busy_.load(std::memory_order_acquire))
+  while (tx_busy_.IsSet())
   {
     if (!tx_active_valid_ || (tx_active_ptr_ == nullptr) ||
         (tx_active_offset_ >= tx_active_size_))
     {
-      tx_busy_.store(false, std::memory_order_release);
+      tx_busy_.Clear();
       return true;
     }
 
@@ -226,7 +226,7 @@ bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)
     tx_active_offset_ += static_cast<size_t>(written);
     if (tx_active_offset_ >= tx_active_size_)
     {
-      tx_busy_.store(false, std::memory_order_release);
+      tx_busy_.Clear();
       return true;
     }
   }
@@ -270,9 +270,7 @@ bool IRAM_ATTR ESP32CDCJtag::StartActiveTransfer(bool in_isr)
     return false;
   }
 
-  bool expected = false;
-  if (!tx_busy_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
+  if (tx_busy_.TestAndSet())
   {
     return true;
   }
@@ -294,7 +292,7 @@ bool IRAM_ATTR ESP32CDCJtag::StartAndReportActive(bool in_isr)
 
   // Keep aligned with STM/CH: once next op is kicked to HW, report it finished.
   write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-  if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
+  if (!tx_busy_.IsSet() && tx_active_valid_)
   {
     OnTxTransferDone(in_isr, ErrorCode::OK);
   }
@@ -310,7 +308,7 @@ void IRAM_ATTR ESP32CDCJtag::StopTxTransfer()
 void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 {
   Flag::ScopedRestore tx_flag(in_tx_isr_);
-  tx_busy_.store(false, std::memory_order_release);
+  tx_busy_.Clear();
 
   ClearActiveTx();
 
@@ -348,8 +346,7 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
     (void)LoadPendingTxFromQueue(in_isr);
   }
 
-  if (!tx_busy_.load(std::memory_order_acquire) && !tx_active_valid_ &&
-      !tx_pending_valid_)
+  if (!tx_busy_.IsSet() && !tx_active_valid_ && !tx_pending_valid_)
   {
     StopTxTransfer();
   }
@@ -367,7 +364,7 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
     (void)LoadActiveTxFromQueue(in_isr);
   }
 
-  if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
+  if (!tx_busy_.IsSet() && tx_active_valid_)
   {
     if (!StartActiveTransfer(in_isr))
     {
@@ -375,7 +372,7 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
       return ErrorCode::FAILED;
     }
 
-    if (!tx_busy_.load(std::memory_order_acquire) && tx_active_valid_)
+    if (!tx_busy_.IsSet() && tx_active_valid_)
     {
       OnTxTransferDone(in_isr, ErrorCode::OK);
     }
@@ -421,9 +418,9 @@ void IRAM_ATTR ESP32CDCJtag::HandleInterrupt()
   usb_serial_jtag_ll_clr_intsts_mask(tx_status);
 
   Flag::ScopedRestore tx_flag(in_tx_isr_);
-  const bool was_busy = tx_busy_.load(std::memory_order_acquire);
+  const bool was_busy = tx_busy_.IsSet();
   (void)PumpTx(true);
-  if (was_busy && !tx_busy_.load(std::memory_order_acquire))
+  if (was_busy && !tx_busy_.IsSet())
   {
     OnTxTransferDone(true, ErrorCode::OK);
   }

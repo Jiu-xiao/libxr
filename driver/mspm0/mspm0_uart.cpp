@@ -22,15 +22,15 @@ static constexpr uint32_t MSPM0_UART_BASE_INTERRUPT_MASK =
 
 namespace
 {
-class AtomicBoolGuard
+class AtomicFlagGuard
 {
  public:
-  explicit AtomicBoolGuard(std::atomic<bool>& flag) : flag_(flag) {}
+  explicit AtomicFlagGuard(Flag::Atomic& flag) : flag_(flag) {}
 
-  ~AtomicBoolGuard() { flag_.store(false, std::memory_order_release); }
+  ~AtomicFlagGuard() { flag_.Clear(); }
 
  private:
-  std::atomic<bool>& flag_;
+  Flag::Atomic& flag_;
 };
 
 class AtomicCounterGuard
@@ -220,13 +220,11 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
     return ErrorCode::ARG_ERR;
   }
 
-  bool expected_reconfig = false;
-  if (!reconfig_in_progress_.compare_exchange_strong(
-          expected_reconfig, true, std::memory_order_acq_rel, std::memory_order_acquire))
+  if (reconfig_in_progress_.TestAndSet())
   {
     return ErrorCode::BUSY;
   }
-  AtomicBoolGuard reconfig_guard(reconfig_in_progress_);
+  AtomicFlagGuard reconfig_guard(reconfig_in_progress_);
 
   const bool IRQ_WAS_ENABLED = (NVIC_GetEnableIRQ(res_.irqn) != 0U);
   if (IRQ_WAS_ENABLED)
@@ -278,7 +276,7 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   // prevent a stale LINC0_MATCH from causing a spurious IRQ during
   // DL_UART_changeConfig.
   CancelByteModeBlockTimeout();
-  byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
+  byte_mode_drop_detached_rx_.Clear();
   byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
   active_read_request_epoch_.store(0U, std::memory_order_release);
   DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_LINC0_MATCH);
@@ -321,7 +319,7 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   DL_UART_disableInterrupt(res_.instance,
                            DL_UART_INTERRUPT_TX | GetTimeoutInterruptMask());
 
-  tx_active_valid_.store(false, std::memory_order_release);
+  tx_active_valid_.Clear();
   tx_active_remaining_ = 0;
   tx_active_total_ = 0;
 
@@ -347,7 +345,7 @@ ErrorCode MSPM0UART::WriteFun(WritePort& port, bool)
   auto* uart = CONTAINER_OF(&port, MSPM0UART, _write_port);
   AtomicCounterGuard io_guard(uart->io_handler_inflight_);
 
-  if (uart->reconfig_in_progress_.load(std::memory_order_acquire))
+  if (uart->reconfig_in_progress_.IsSet())
   {
     return ErrorCode::BUSY;
   }
@@ -367,7 +365,7 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
   auto* uart = CONTAINER_OF(&port, MSPM0UART, _read_port);
   AtomicCounterGuard io_guard(uart->io_handler_inflight_);
 
-  if (uart->reconfig_in_progress_.load(std::memory_order_acquire))
+  if (uart->reconfig_in_progress_.IsSet())
   {
     // 在重配窗口内阻止 read 进入 pending：把 busy 标记为 EVENT，让
     // ReadPort::operator() 的 IDLE->PENDING CAS 失败并重试 / During
@@ -394,12 +392,10 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
   {
     const uint32_t DROP_EPOCH =
         uart->byte_mode_drop_detached_rx_epoch_.load(std::memory_order_acquire);
-    if (uart->byte_mode_drop_detached_rx_.load(std::memory_order_acquire) &&
+    if (uart->byte_mode_drop_detached_rx_.IsSet() &&
         !IsInDetachedDropWindow(ACTIVE_READ_EPOCH, DROP_EPOCH))
     {
-      bool expected_drop = true;
-      if (uart->byte_mode_drop_detached_rx_.compare_exchange_strong(
-              expected_drop, false, std::memory_order_acq_rel, std::memory_order_acquire))
+      if (uart->byte_mode_drop_detached_rx_.TestAndClear())
       {
         uart->byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
         UNUSED(uart->ConsumeTimedOutReadData(false, false));
@@ -408,7 +404,7 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
   }
   else
   {
-    uart->byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
+    uart->byte_mode_drop_detached_rx_.Clear();
     uart->byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
   }
 
@@ -494,7 +490,7 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
 void MSPM0UART::Abort(bool in_isr)
 {
   CancelByteModeBlockTimeout();
-  byte_mode_drop_detached_rx_.store(false, std::memory_order_release);
+  byte_mode_drop_detached_rx_.Clear();
   byte_mode_drop_detached_rx_epoch_.store(0U, std::memory_order_release);
   active_read_request_epoch_.store(0U, std::memory_order_release);
 
@@ -579,8 +575,7 @@ MSPM0UART::RxTimeoutMode MSPM0UART::ResolveRxTimeoutMode() const
 
 bool MSPM0UART::IsTxBusy() const
 {
-  return tx_active_valid_.load(std::memory_order_acquire) ||
-         (write_port_->queue_info_->Size() > 0U) ||
+  return tx_active_valid_.IsSet() || (write_port_->queue_info_->Size() > 0U) ||
          (write_port_->queue_data_->Size() > 0U) || DL_UART_isBusy(res_.instance);
 }
 
@@ -607,8 +602,7 @@ bool MSPM0UART::IsZeroTimeoutPendingBlockRead() const
 
 void MSPM0UART::KickTxIfPending()
 {
-  if ((write_port_->queue_info_->Size() == 0U) &&
-      !tx_active_valid_.load(std::memory_order_acquire))
+  if ((write_port_->queue_info_->Size() == 0U) && !tx_active_valid_.IsSet())
   {
     return;
   }
@@ -649,7 +643,8 @@ void MSPM0UART::RearmLinCompareTimeout()
     return;
   }
 
-  uint16_t lin_compare_window = lin_compare_window_.load(std::memory_order_acquire);
+  uint16_t lin_compare_window =
+      static_cast<uint16_t>(lin_compare_window_.load(std::memory_order_acquire));
   if (lin_compare_window == 0U)
   {
     lin_compare_window = ResolveLinCompareWindow();
@@ -729,7 +724,8 @@ ErrorCode MSPM0UART::ApplyRxTimeoutMode()
 
   if (rx_timeout_mode_.load(std::memory_order_acquire) == RxTimeoutMode::LIN_COMPARE)
   {
-    const uint16_t CURRENT_WINDOW = lin_compare_window_.load(std::memory_order_acquire);
+    const uint16_t CURRENT_WINDOW =
+        static_cast<uint16_t>(lin_compare_window_.load(std::memory_order_acquire));
     const uint16_t RESOLVED_WINDOW =
         (CURRENT_WINDOW > 0U) ? CURRENT_WINDOW : ResolveLinCompareWindow();
     if (RESOLVED_WINDOW != 0U)
@@ -821,7 +817,7 @@ void MSPM0UART::OnByteModeBlockTimeout(MSPM0UART* uart)
   }
 
   AtomicCounterGuard timeout_guard(uart->timeout_cb_inflight_);
-  if (uart->reconfig_in_progress_.load(std::memory_order_acquire))
+  if (uart->reconfig_in_progress_.IsSet())
   {
     return;
   }
@@ -868,14 +864,11 @@ void MSPM0UART::OnByteModeBlockTimeout(MSPM0UART* uart)
     return;
   }
 
-  bool expected_completion = false;
-  if (!uart->read_completion_inflight_.compare_exchange_strong(expected_completion, true,
-                                                               std::memory_order_acq_rel,
-                                                               std::memory_order_acquire))
+  if (uart->read_completion_inflight_.TestAndSet())
   {
     return;
   }
-  AtomicBoolGuard completion_guard(uart->read_completion_inflight_);
+  AtomicFlagGuard completion_guard(uart->read_completion_inflight_);
 
   uart->CompletePendingReadOnTimeout(false);
 }
@@ -889,7 +882,7 @@ void MSPM0UART::HandleInterrupt()
 {
   AtomicCounterGuard io_guard(io_handler_inflight_);
 
-  if (reconfig_in_progress_.load(std::memory_order_acquire))
+  if (reconfig_in_progress_.IsSet())
   {
     const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
     const uint32_t IRQ_MASK = MSPM0_UART_BASE_INTERRUPT_MASK | TIMEOUT_MASK;
@@ -995,12 +988,9 @@ void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
 
   if (pushed)
   {
-    bool expected_completion = false;
-    if (read_completion_inflight_.compare_exchange_strong(expected_completion, true,
-                                                          std::memory_order_acq_rel,
-                                                          std::memory_order_acquire))
+    if (!read_completion_inflight_.TestAndSet())
     {
-      AtomicBoolGuard completion_guard(read_completion_inflight_);
+      AtomicFlagGuard completion_guard(read_completion_inflight_);
       if (IsZeroTimeoutPendingBlockRead())
       {
         ReadPort::BusyState expected = ReadPort::BusyState::PENDING;
@@ -1040,7 +1030,7 @@ void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
       IsInDetachedDropWindow(
           active_read_request_epoch_.load(std::memory_order_acquire),
           byte_mode_drop_detached_rx_epoch_.load(std::memory_order_acquire)) &&
-      byte_mode_drop_detached_rx_.load(std::memory_order_acquire);
+      byte_mode_drop_detached_rx_.IsSet();
 
   while (!DL_UART_isRXFIFOEmpty(res_.instance))
   {
@@ -1099,15 +1089,12 @@ void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask
     return;
   }
 
-  bool expected_completion = false;
-  if (!read_completion_inflight_.compare_exchange_strong(expected_completion, true,
-                                                         std::memory_order_acq_rel,
-                                                         std::memory_order_acquire))
+  if (read_completion_inflight_.TestAndSet())
   {
     DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
     return;
   }
-  AtomicBoolGuard completion_guard(read_completion_inflight_);
+  AtomicFlagGuard completion_guard(read_completion_inflight_);
 
   if (IsZeroTimeoutPendingBlockRead())
   {
@@ -1199,7 +1186,7 @@ void MSPM0UART::CompletePendingReadOnTimeout(bool in_isr)
         byte_mode_drop_detached_rx_epoch_.store(
             active_read_request_epoch_.load(std::memory_order_acquire),
             std::memory_order_release);
-        byte_mode_drop_detached_rx_.store(true, std::memory_order_release);
+        byte_mode_drop_detached_rx_.Set();
       }
       UNUSED(ConsumeTimedOutReadData(in_isr, false));
       read_port_->read_size_ = 0U;
@@ -1229,7 +1216,7 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
   // completes.
   while (true)
   {
-    if (!tx_active_valid_.load(std::memory_order_acquire))
+    if (!tx_active_valid_.IsSet())
     {
       if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
       {
@@ -1246,7 +1233,7 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
 
       tx_active_total_ = tx_active_info_.data.size_;
       tx_active_remaining_ = tx_active_total_;
-      tx_active_valid_.store(true, std::memory_order_release);
+      tx_active_valid_.Set();
     }
 
     while (tx_active_remaining_ > 0 && !DL_UART_isTXFIFOFull(res_.instance))
@@ -1255,7 +1242,7 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
       if (write_port_->queue_data_->Pop(tx_byte) != ErrorCode::OK)
       {
         write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
-        tx_active_valid_.store(false, std::memory_order_release);
+        tx_active_valid_.Clear();
         tx_active_remaining_ = 0;
         tx_active_total_ = 0;
         DisableTxInterrupt();
@@ -1272,7 +1259,7 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
     }
 
     write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-    tx_active_valid_.store(false, std::memory_order_release);
+    tx_active_valid_.Clear();
     tx_active_remaining_ = 0;
     tx_active_total_ = 0;
   }
@@ -1282,7 +1269,7 @@ void MSPM0UART::AbortTx(bool in_isr)
 {
   DisableTxInterrupt();
 
-  if (tx_active_valid_.exchange(false, std::memory_order_acq_rel))
+  if (tx_active_valid_.TestAndClear())
   {
     write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
   }
