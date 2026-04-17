@@ -4,6 +4,9 @@ target_sources(${PROJECT_NAME} PRIVATE ${${PROJECT_NAME}_SYSTEM_SOURCES})
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 
+find_package(Threads REQUIRED)
+target_link_libraries(${PROJECT_NAME} PUBLIC Threads::Threads)
+
 if(NOT LIBXR_PRINTF_BUFFER_SIZE)
   set(LIBXR_PRINTF_BUFFER_SIZE 1024)
 endif()
