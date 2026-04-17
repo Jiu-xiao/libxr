@@ -119,7 +119,7 @@ set(LIBXR_DRIVER Linux)
 
 ### Build as Shared/Static Library
 
-By default, the library is built as an object target. You can explicitly set the build type in the CMake command line or your own CMakeLists.txt:
+LibXR now requires CMake 3.12 or newer. By default, the library is built as an object target. You can explicitly set the build type in the CMake command line or your own CMakeLists.txt:
 
 ```cmake
 # Build as a shared library

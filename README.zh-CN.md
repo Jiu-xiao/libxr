@@ -119,7 +119,7 @@ set(LIBXR_DRIVER Linux)
 
 ### 编译为共享/静态库
 
-默认编译为object目标，可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定
+LibXR 现在要求 CMake 3.12 或更新版本。默认编译为 object 目标，可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定
 
 ```cmake
 # 编译为共享库

@@ -14,10 +14,8 @@ else()
   add_library(${PROJECT_NAME} OBJECT)
 endif()
 
-target_compile_options(
-  xr
-  PUBLIC -Wno-psabi
-  PUBLIC -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.)
+include(CMake/compile_options.cmake)
+target_compile_options(xr PUBLIC ${LIBXR_COMMON_COMPILE_OPTIONS})
 
 include(CMake/config.cmake)
 

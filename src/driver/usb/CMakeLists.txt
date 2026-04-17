@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.12)
 
 if(NOT TARGET xr)
   message(FATAL_ERROR "Need LibXR to build.")

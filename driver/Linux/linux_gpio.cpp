@@ -12,6 +12,30 @@
 
 #include "logger.hpp"
 
+#if !defined(XR_LINUX_GPIO_DISABLE_V2) && defined(GPIO_V2_LINE_FLAG_INPUT) &&            \
+    defined(GPIO_V2_GET_LINEINFO_IOCTL) && defined(GPIO_V2_GET_LINE_IOCTL) &&            \
+    defined(GPIO_V2_LINE_SET_CONFIG_IOCTL) && defined(GPIO_V2_LINE_GET_VALUES_IOCTL) &&  \
+    defined(GPIO_V2_LINE_SET_VALUES_IOCTL) && defined(GPIO_V2_LINE_EVENT_RISING_EDGE) && \
+    defined(GPIO_V2_LINE_EVENT_FALLING_EDGE)
+#define XR_LINUX_GPIO_HAS_V2 1
+#else
+#define XR_LINUX_GPIO_HAS_V2 0
+#endif
+
+#if defined(GPIOHANDLE_REQUEST_BIAS_DISABLE) && \
+    defined(GPIOHANDLE_REQUEST_BIAS_PULL_UP) && \
+    defined(GPIOHANDLE_REQUEST_BIAS_PULL_DOWN)
+#define XR_LINUX_GPIO_V1_HAS_BIAS_FLAGS 1
+#else
+#define XR_LINUX_GPIO_V1_HAS_BIAS_FLAGS 0
+#endif
+
+#if defined(GPIOHANDLE_SET_CONFIG_IOCTL)
+#define XR_LINUX_GPIO_V1_HAS_SET_CONFIG 1
+#else
+#define XR_LINUX_GPIO_V1_HAS_SET_CONFIG 0
+#endif
+
 namespace
 {
 constexpr const char* kLinuxGPIOConsumer = "LinuxGPIO";
@@ -37,6 +61,7 @@ void CopyConsumer(char (&dst)[N], const char* src)
   dst[N - 1U] = '\0';
 }
 
+#if XR_LINUX_GPIO_HAS_V2
 uint64_t BuildLineFlagsV2(LibXR::GPIO::Configuration config)
 {
   uint64_t flags = 0U;
@@ -79,6 +104,7 @@ uint64_t BuildLineFlagsV2(LibXR::GPIO::Configuration config)
 
   return flags;
 }
+#endif
 
 uint32_t BuildHandleFlagsV1(LibXR::GPIO::Configuration config)
 {
@@ -103,13 +129,19 @@ uint32_t BuildHandleFlagsV1(LibXR::GPIO::Configuration config)
   switch (config.pull)
   {
     case LibXR::GPIO::Pull::NONE:
+#if XR_LINUX_GPIO_V1_HAS_BIAS_FLAGS
       flags |= GPIOHANDLE_REQUEST_BIAS_DISABLE;
+#endif
       break;
     case LibXR::GPIO::Pull::UP:
+#if XR_LINUX_GPIO_V1_HAS_BIAS_FLAGS
       flags |= GPIOHANDLE_REQUEST_BIAS_PULL_UP;
+#endif
       break;
     case LibXR::GPIO::Pull::DOWN:
+#if XR_LINUX_GPIO_V1_HAS_BIAS_FLAGS
       flags |= GPIOHANDLE_REQUEST_BIAS_PULL_DOWN;
+#endif
       break;
   }
 
@@ -175,19 +207,17 @@ PollReadableResult PollReadable(int fd, int wake_fd, int timeout_ms)
   std::array<pollfd, 2> poll_fds = {};
   nfds_t nfds = 0;
 
-  poll_fds[nfds++] = {
-      .fd = fd,
-      .events = POLLIN,
-      .revents = 0,
-  };
+  poll_fds[nfds] = {};
+  poll_fds[nfds].fd = fd;
+  poll_fds[nfds].events = POLLIN;
+  ++nfds;
 
   if (wake_fd >= 0)
   {
-    poll_fds[nfds++] = {
-        .fd = wake_fd,
-        .events = POLLIN,
-        .revents = 0,
-    };
+    poll_fds[nfds] = {};
+    poll_fds[nfds].fd = wake_fd;
+    poll_fds[nfds].events = POLLIN;
+    ++nfds;
   }
 
   while (true)
@@ -231,17 +261,27 @@ PollReadableResult PollReadable(int fd, int wake_fd, int timeout_ms)
 
 bool IsKnownGPIOEvent(uint32_t event_id)
 {
-  if (event_id == GPIO_V2_LINE_EVENT_RISING_EDGE ||
-      event_id == GPIOEVENT_EVENT_RISING_EDGE)
+  if (event_id == GPIOEVENT_EVENT_RISING_EDGE)
   {
     return true;
   }
 
-  if (event_id == GPIO_V2_LINE_EVENT_FALLING_EDGE ||
-      event_id == GPIOEVENT_EVENT_FALLING_EDGE)
+  if (event_id == GPIOEVENT_EVENT_FALLING_EDGE)
   {
     return true;
   }
+
+#if XR_LINUX_GPIO_HAS_V2
+  if (event_id == GPIO_V2_LINE_EVENT_RISING_EDGE)
+  {
+    return true;
+  }
+
+  if (event_id == GPIO_V2_LINE_EVENT_FALLING_EDGE)
+  {
+    return true;
+  }
+#endif
 
   XR_LOG_WARN("Unknown GPIO event id: %u", event_id);
   return false;
@@ -281,6 +321,7 @@ bool LinuxGPIO::Read()
   const int request_fd = request_fd_.load();
   if (abi_version_.load() == AbiVersion::V2)
   {
+#if XR_LINUX_GPIO_HAS_V2
     gpio_v2_line_values values = {};
     values.mask = 1ULL;
     if (ioctl(request_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &values) < 0)
@@ -289,6 +330,10 @@ bool LinuxGPIO::Read()
       return false;
     }
     return (values.bits & 1ULL) != 0U;
+#else
+    ASSERT(false);
+    return false;
+#endif
   }
 
   gpiohandle_data values = {};
@@ -311,6 +356,7 @@ void LinuxGPIO::Write(bool value)
   const int request_fd = request_fd_.load();
   if (abi_version_.load() == AbiVersion::V2)
   {
+#if XR_LINUX_GPIO_HAS_V2
     gpio_v2_line_values values = {};
     values.mask = 1ULL;
     values.bits = value ? 1ULL : 0ULL;
@@ -319,6 +365,10 @@ void LinuxGPIO::Write(bool value)
       XR_LOG_WARN("Failed to write GPIO value: %s", std::strerror(errno));
     }
     return;
+#else
+    ASSERT(false);
+    return;
+#endif
   }
 
   gpiohandle_data values = {};
@@ -691,6 +741,7 @@ ErrorCode LinuxGPIO::DetectAbiVersion()
     return ErrorCode::FAILED;
   }
 
+#if XR_LINUX_GPIO_HAS_V2
   gpio_v2_line_info info = {};
   info.offset = (line_offset_ < chip_info.lines) ? line_offset_ : 0U;
   if (ioctl(chip_fd_, GPIO_V2_GET_LINEINFO_IOCTL, &info) == 0)
@@ -711,6 +762,10 @@ ErrorCode LinuxGPIO::DetectAbiVersion()
 
   XR_LOG_ERROR("Failed to probe GPIO chardev ABI: %s", std::strerror(errno));
   return ErrorCode::FAILED;
+#else
+  abi_version_.store(AbiVersion::V1);
+  return ErrorCode::OK;
+#endif
 }
 
 ErrorCode LinuxGPIO::ReopenRequest(Configuration config)
@@ -727,6 +782,7 @@ ErrorCode LinuxGPIO::ReopenRequest(Configuration config)
 
 ErrorCode LinuxGPIO::OpenRequestV2(Configuration config)
 {
+#if XR_LINUX_GPIO_HAS_V2
   gpio_v2_line_request request = {};
   request.offsets[0] = line_offset_;
   request.num_lines = 1U;
@@ -753,10 +809,16 @@ ErrorCode LinuxGPIO::OpenRequestV2(Configuration config)
   }
 
   return ErrorCode::OK;
+#else
+  (void)config;
+  ASSERT(false);
+  return ErrorCode::FAILED;
+#endif
 }
 
 ErrorCode LinuxGPIO::ReconfigureRequestV2(Configuration config)
 {
+#if XR_LINUX_GPIO_HAS_V2
   const bool was_interrupt_request =
       (request_kind_.load() == RequestKind::EVENT) && interrupt_enabled_.load();
   if (was_interrupt_request)
@@ -783,6 +845,11 @@ ErrorCode LinuxGPIO::ReconfigureRequestV2(Configuration config)
     interrupt_enabled_.store(true);
   }
   return ErrorCode::OK;
+#else
+  (void)config;
+  ASSERT(false);
+  return ErrorCode::FAILED;
+#endif
 }
 
 ErrorCode LinuxGPIO::OpenRequestV1(Configuration config)
@@ -840,6 +907,7 @@ ErrorCode LinuxGPIO::ReconfigureRequestV1(Configuration config)
     return ReopenRequest(config);
   }
 
+#if XR_LINUX_GPIO_V1_HAS_SET_CONFIG
   gpiohandle_config handle_config = {};
   handle_config.flags = BuildHandleFlagsV1(config);
   if (ioctl(request_fd_.load(), GPIOHANDLE_SET_CONFIG_IOCTL, &handle_config) < 0)
@@ -849,6 +917,9 @@ ErrorCode LinuxGPIO::ReconfigureRequestV1(Configuration config)
   }
 
   return ErrorCode::OK;
+#else
+  return ReopenRequest(config);
+#endif
 }
 
 ErrorCode LinuxGPIO::PumpEventQueue(int fd, AbiVersion abi_version, size_t& event_count,
@@ -885,6 +956,7 @@ ErrorCode LinuxGPIO::PumpEventQueue(int fd, AbiVersion abi_version, size_t& even
 
 ErrorCode LinuxGPIO::ReadEventsV2(int fd, size_t& event_count) const
 {
+#if XR_LINUX_GPIO_HAS_V2
   bool received = false;
   while (true)
   {
@@ -930,6 +1002,12 @@ ErrorCode LinuxGPIO::ReadEventsV2(int fd, size_t& event_count) const
   }
 
   return received ? ErrorCode::OK : ErrorCode::EMPTY;
+#else
+  (void)fd;
+  event_count = 0U;
+  ASSERT(false);
+  return ErrorCode::FAILED;
+#endif
 }
 
 ErrorCode LinuxGPIO::ReadEventsV1(int fd, size_t& event_count) const
