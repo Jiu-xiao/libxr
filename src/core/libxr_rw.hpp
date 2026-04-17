@@ -245,7 +245,9 @@ class Operation
 class AsyncBlockWait
 {
  public:
-  enum class State : uint8_t
+  // Keep the waiter state 32-bit wide so STM32 builds stay within the
+  // project-wide atomic shim boundary.
+  enum class State : uint32_t
   {
     IDLE = 0,
     PENDING = 1,

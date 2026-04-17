@@ -2,7 +2,6 @@
 
 #include "esp_def.hpp"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -78,7 +77,7 @@ class ESP32CDCJtag : public UART
   size_t tx_pending_size_ = 0;
   bool tx_pending_valid_ = false;
   WriteInfoBlock tx_pending_info_ = {};
-  std::atomic<bool> tx_busy_{false};
+  Flag::Atomic tx_busy_{};
   Flag::Plain in_tx_isr_;
 
   ReadPort _read_port;

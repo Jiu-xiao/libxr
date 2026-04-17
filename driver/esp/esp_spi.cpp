@@ -168,14 +168,9 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
   }
 }
 
-bool ESP32SPI::Acquire()
-{
-  bool expected = false;
-  return busy_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                       std::memory_order_acquire);
-}
+bool ESP32SPI::Acquire() { return !busy_.TestAndSet(); }
 
-void ESP32SPI::Release() { busy_.store(false, std::memory_order_release); }
+void ESP32SPI::Release() { busy_.Clear(); }
 
 ErrorCode ESP32SPI::InitializeHardware()
 {
@@ -464,7 +459,7 @@ ErrorCode ESP32SPI::SetConfig(SPI::Configuration config)
   {
     return ErrorCode::STATE_ERR;
   }
-  if (busy_.load(std::memory_order_acquire))
+  if (busy_.IsSet())
   {
     return ErrorCode::BUSY;
   }

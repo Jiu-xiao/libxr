@@ -2,12 +2,12 @@
 
 #include "esp_def.hpp"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "driver/gpio.h"
 #include "esp_intr_alloc.h"
+#include "flag.hpp"
 #include "hal/spi_ll.h"
 #include "hal/spi_types.h"
 #include "soc/soc_caps.h"
@@ -109,7 +109,7 @@ class ESP32SPI : public SPI
   int miso_pin_;
   int mosi_pin_;
   uint32_t source_clock_hz_ = 0;
-  std::atomic<bool> busy_{false};
+  Flag::Atomic busy_{};
   bool initialized_ = false;
   uint32_t dma_enable_min_size_ = 3U;
   bool dma_requested_ = true;
