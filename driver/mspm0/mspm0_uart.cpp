@@ -342,7 +342,7 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
-ErrorCode MSPM0UART::WriteFun(WritePort& port)
+ErrorCode MSPM0UART::WriteFun(WritePort& port, bool)
 {
   auto* uart = CONTAINER_OF(&port, MSPM0UART, _write_port);
   AtomicCounterGuard io_guard(uart->io_handler_inflight_);
@@ -362,7 +362,7 @@ ErrorCode MSPM0UART::WriteFun(WritePort& port)
   return ErrorCode::PENDING;
 }
 
-ErrorCode MSPM0UART::ReadFun(ReadPort& port)
+ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
 {
   auto* uart = CONTAINER_OF(&port, MSPM0UART, _read_port);
   AtomicCounterGuard io_guard(uart->io_handler_inflight_);
@@ -1254,9 +1254,7 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
       uint8_t tx_byte = 0;
       if (write_port_->queue_data_->Pop(tx_byte) != ErrorCode::OK)
       {
-        const uint32_t SENT =
-            static_cast<uint32_t>(tx_active_total_ - tx_active_remaining_);
-        write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_, SENT);
+        write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
         tx_active_valid_.store(false, std::memory_order_release);
         tx_active_remaining_ = 0;
         tx_active_total_ = 0;
@@ -1273,8 +1271,7 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
       return;
     }
 
-    write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_,
-                        static_cast<uint32_t>(tx_active_total_));
+    write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
     tx_active_valid_.store(false, std::memory_order_release);
     tx_active_remaining_ = 0;
     tx_active_total_ = 0;
@@ -1287,7 +1284,7 @@ void MSPM0UART::AbortTx(bool in_isr)
 
   if (tx_active_valid_.exchange(false, std::memory_order_acq_rel))
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_, 0U);
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
   }
   tx_active_remaining_ = 0U;
   tx_active_total_ = 0U;
@@ -1295,7 +1292,7 @@ void MSPM0UART::AbortTx(bool in_isr)
   WriteInfoBlock info;
   while (write_port_->queue_info_->Pop(info) == ErrorCode::OK)
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, info, 0U);
+    write_port_->Finish(in_isr, ErrorCode::FAILED, info);
   }
 
   if (write_port_->queue_data_ != nullptr)

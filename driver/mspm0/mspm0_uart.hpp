@@ -38,8 +38,8 @@ class MSPM0UART : public UART
   ErrorCode SetConfig(UART::Configuration config) override;
   static UART::Configuration BuildConfigFromSysCfg(UART_Regs* instance,
                                                    uint32_t baudrate);
-  static ErrorCode WriteFun(WritePort& port);
-  static ErrorCode ReadFun(ReadPort& port);
+  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
   void Abort(bool in_isr = false);
   static void OnInterrupt(uint8_t index);

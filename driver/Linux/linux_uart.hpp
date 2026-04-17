@@ -13,7 +13,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
 #include <filesystem>
+#include <system_error>
+#include <vector>
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -22,12 +25,11 @@
 
 namespace LibXR
 {
-
 /**
  * @brief Linux UART 串口驱动实现 / Linux UART driver implementation
  *
- * 支持按设备路径或 USB VID/PID 自动发现并创建 UART 通道。
- * Supports UART creation by device path or USB VID/PID auto discovery.
+ * 支持按设备路径或 USB VID/PID(/serial) 自动发现并创建 UART 通道。
+ * Supports UART creation by device path or USB VID/PID(/serial) auto discovery.
  */
 class LinuxUART : public UART
 {
@@ -67,10 +69,11 @@ class LinuxUART : public UART
       XR_LOG_PASS("Open UART device: %s", device_path_.c_str());
     }
 
-    config_ = {.baudrate = baudrate,
-               .parity = parity,
-               .data_bits = data_bits,
-               .stop_bits = stop_bits};
+    config_ = {};
+    config_.baudrate = baudrate;
+    config_.parity = parity;
+    config_.data_bits = data_bits;
+    config_.stop_bits = stop_bits;
 
     SetConfig(config_);
 
@@ -93,6 +96,18 @@ class LinuxUART : public UART
             unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
             size_t buffer_size = 512, size_t thread_stack_size = 65536)
+      : LinuxUART(vid, pid, "", baudrate, parity, data_bits, stop_bits, tx_queue_size,
+                  buffer_size, thread_stack_size)
+  {
+  }
+
+  /**
+   * @brief 通过 USB VID/PID/序列号构造 UART / Construct UART by USB VID/PID/serial
+   */
+  LinuxUART(const std::string& vid, const std::string& pid, const std::string& serial,
+            unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
+            uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
+            size_t buffer_size = 512, size_t thread_stack_size = 65536)
       : UART(&_read_port, &_write_port),
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
@@ -100,10 +115,18 @@ class LinuxUART : public UART
         _read_port(buffer_size),
         _write_port(tx_queue_size, buffer_size)
   {
-    while (!FindUSBTTYByVidPid(vid, pid, device_path_))
+    while (!FindUSBTTYByVidPid(vid, pid, serial, device_path_))
     {
-      XR_LOG_WARN("Cannot find USB TTY device with VID=%s PID=%s, retrying...",
-                  vid.c_str(), pid.c_str());
+      if (serial.empty())
+      {
+        XR_LOG_WARN("Cannot find USB TTY device with VID=%s PID=%s, retrying...",
+                    vid.c_str(), pid.c_str());
+      }
+      else
+      {
+        XR_LOG_WARN("Cannot find USB TTY device with VID=%s PID=%s SERIAL=%s, retrying...",
+                    vid.c_str(), pid.c_str(), serial.c_str());
+      }
       Thread::Sleep(100);
     }
 
@@ -129,10 +152,11 @@ class LinuxUART : public UART
       XR_LOG_PASS("Open UART device: %s", device_path_.c_str());
     }
 
-    config_ = {.baudrate = baudrate,
-               .parity = parity,
-               .data_bits = data_bits,
-               .stop_bits = stop_bits};
+    config_ = {};
+    config_.baudrate = baudrate;
+    config_.parity = parity;
+    config_.data_bits = data_bits;
+    config_.stop_bits = stop_bits;
 
     SetConfig(config_);
 
@@ -158,17 +182,23 @@ class LinuxUART : public UART
     }
     for (const auto& entry : std::filesystem::directory_iterator(BASE))
     {
-      std::string full = std::filesystem::canonical(entry.path());
+      std::error_code ec;
+      const auto full = std::filesystem::canonical(entry.path(), ec);
+      if (ec)
+      {
+        continue;
+      }
       if (full == tty_name)
       {
-        return entry.path();  // 返回符号链接路径
+        return entry.path().string();  // 返回符号链接路径
       }
     }
-    return "";  // 没找到
+    return tty_name;  // 未命中 by-path 时保留原始 tty 路径
   }
 
   static bool FindUSBTTYByVidPid(const std::string& target_vid,
-                                 const std::string& target_pid, std::string& tty_path)
+                                 const std::string& target_pid,
+                                 const std::string& target_serial, std::string& tty_path)
   {
     struct udev* udev = udev_new();
     if (!udev)
@@ -183,7 +213,7 @@ class LinuxUART : public UART
 
     struct udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
     struct udev_list_entry* entry = nullptr;
-    bool found = false;
+    std::vector<std::string> matches;
 
     udev_list_entry_foreach(entry, devices)
     {
@@ -201,16 +231,15 @@ class LinuxUART : public UART
       {
         const char* vid = udev_device_get_sysattr_value(usb_dev, "idVendor");
         const char* pid = udev_device_get_sysattr_value(usb_dev, "idProduct");
+        const char* serial = udev_device_get_sysattr_value(usb_dev, "serial");
 
-        if (vid && pid && target_vid == vid && target_pid == pid)
+        if (vid && pid && target_vid == vid && target_pid == pid &&
+            (target_serial.empty() || (serial && target_serial == serial)))
         {
           const char* devnode = udev_device_get_devnode(tty_dev);
           if (devnode)
           {
-            tty_path = devnode;
-            found = true;
-            udev_device_unref(tty_dev);
-            break;
+            matches.emplace_back(devnode);
           }
         }
       }
@@ -220,7 +249,22 @@ class LinuxUART : public UART
 
     udev_enumerate_unref(enumerate);
     udev_unref(udev);
-    return found;
+    if (matches.empty())
+    {
+      return false;
+    }
+
+    std::sort(matches.begin(), matches.end());
+    tty_path = matches.front();
+
+    if (matches.size() > 1 && target_serial.empty())
+    {
+      XR_LOG_WARN(
+          "Multiple USB TTY devices found with VID=%s PID=%s, using %s. Specify serial to disambiguate.",
+          target_vid.c_str(), target_pid.c_str(), tty_path.c_str());
+    }
+
+    return true;
   }
 
   void SetLowLatency(int fd)
@@ -342,9 +386,9 @@ class LinuxUART : public UART
     return ErrorCode::OK;
   }
 
-  static ErrorCode ReadFun(ReadPort&) { return ErrorCode::EMPTY; }
+  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::EMPTY; }
 
-  static ErrorCode WriteFun(WritePort& port)
+  static ErrorCode WriteFun(WritePort& port, bool)
   {
     auto uart = CONTAINER_OF(&port, LinuxUART, _write_port);
     uart->write_sem_.Post();
@@ -418,7 +462,7 @@ class LinuxUART : public UART
                               (written == static_cast<int>(info.data.size_))
                                   ? ErrorCode::OK
                                   : ErrorCode::FAILED,
-                              info, written);
+                              info);
         }
         else
         {
