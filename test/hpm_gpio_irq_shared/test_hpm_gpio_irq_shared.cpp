@@ -85,6 +85,20 @@ int main()
   Expect(LibXRHpmTest::g_interrupt_state.disable_calls[shared_irq] == 1u,
          "repeated disable must not touch the shared port IRQ");
 
+  const auto enable_calls_before_never_enabled =
+      LibXRHpmTest::g_interrupt_state.enable_calls[shared_irq];
+  const auto disable_calls_before_never_enabled =
+      LibXRHpmTest::g_interrupt_state.disable_calls[shared_irq];
+  HPMGPIO never_enabled_pin(HPM_GPIO0, shared_port, 7u, shared_irq);
+  Expect(never_enabled_pin.DisableInterrupt() == ErrorCode::OK,
+         "DisableInterrupt on a never-enabled pin must succeed");
+  Expect(LibXRHpmTest::g_interrupt_state.enable_calls[shared_irq] ==
+             enable_calls_before_never_enabled,
+         "DisableInterrupt on a never-enabled pin must not change shared IRQ enable count");
+  Expect(LibXRHpmTest::g_interrupt_state.disable_calls[shared_irq] ==
+             disable_calls_before_never_enabled,
+         "DisableInterrupt on a never-enabled pin must not change shared IRQ disable count");
+
   constexpr uint32_t mismatch_port = GPIO_DI_GPIOB;
   constexpr uint32_t port_b_irq = 11u;
   constexpr uint32_t mismatched_irq = 12u;
