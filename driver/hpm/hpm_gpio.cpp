@@ -1,6 +1,6 @@
-#include <atomic>
-
 #include "hpm_gpio.hpp"
+
+#include <atomic>
 
 #include "hpm_interrupt.h"
 #include "hpm_ioc_regs.h"
