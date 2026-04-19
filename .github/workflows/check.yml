@@ -6,29 +6,36 @@ on:
   pull_request:
     branches: [ "master" ]
 
+env:
+  XR_CI_IMAGE: ghcr.io/xrobot-org/docker-image-linux:main
+
 jobs:
   build:
-
     runs-on: ubuntu-latest
+    container:
+      image: ${{ env.XR_CI_IMAGE }}
 
     steps:
     - uses: actions/checkout@v4
     - name: setup deps
-      run: sudo apt-get update && sudo apt-get install -y libwpa-client-dev libnm-dev libudev-dev
+      run: apt-get update && apt-get install -y libwpa-client-dev libnm-dev libudev-dev
     - name: configure
-      run: mkdir build && cd build && cmake -DLIBXR_TEST_BUILD=True ..
-    - name: make
-      run: cd build && make
+      run: cmake -S . -B build -DLIBXR_TEST_BUILD=True
+    - name: build
+      run: cmake --build build
     - name: check
-      run: script -q -c "./build/test"
+      run: ./build/test
 
   clang-format:
-
     needs: build
     runs-on: ubuntu-latest
+    container:
+      image: ${{ env.XR_CI_IMAGE }}
 
     steps:
     - uses: actions/checkout@v4
+    - name: install format deps
+      run: apt-get update && apt-get install -y python3-venv
     - name: install clang-format 21.1.8
       shell: bash
       run: |
