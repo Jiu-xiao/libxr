@@ -13,6 +13,7 @@ using namespace LibXR;
  */
 HPMGPIO* HPMGPIO::map[HPMGPIO::kPortCount][HPMGPIO::kPinCount] = {};
 GPIO_Type* HPMGPIO::port_controller_map[HPMGPIO::kPortCount] = {};
+HPMGPIO::PortIrqRouteState HPMGPIO::port_irq_route_map[HPMGPIO::kPortCount] = {};
 
 /**
  * @brief 将 PAD 复用切换为 GPIO 功能 / Route PAD mux to GPIO function.
@@ -68,39 +69,90 @@ HPMGPIO::HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq,
 /**
  * @brief 使能当前引脚中断 / Enable interrupt for current pin.
  *
- * 对于从 STM32 迁移的开发者：
- * - `gpio_enable_pin_interrupt()` 只打开 GPIO 侧事件；
- * - `intc_m_enable_irq_with_priority()` 打开 PLIC 路由并设置优先级。
- * For STM32-oriented users:
- * - `gpio_enable_pin_interrupt()` enables GPIO-side event generation only.
- * - `intc_m_enable_irq_with_priority()` enables PLIC routing and IRQ priority.
+ * 对于共享同一 port IRQ 的多个 pin：
+ * - `gpio_enable_pin_interrupt()` 始终按 pin 开事件；
+ * - PLIC 路由只在该 port 首次进入“已使能”状态时打开一次。
+ * For multiple pins sharing one port IRQ:
+ * - `gpio_enable_pin_interrupt()` always operates per pin;
+ * - PLIC routing is enabled only once when the first pin on that port becomes active.
  */
 ErrorCode HPMGPIO::EnableInterrupt()
 {
-  if (irq_ == kInvalidIrq)
+  if (irq_ == kInvalidIrq || port_ >= kPortCount || pin_ >= kPinCount)
   {
     return ErrorCode::ARG_ERR;
   }
+
+  if (interrupt_enabled_)
+  {
+    return ErrorCode::OK;
+  }
+
+  PortIrqRouteState& route = port_irq_route_map[port_];
+  const bool needs_port_irq_enable = (route.enabled_pin_count == 0u);
+  if (!needs_port_irq_enable && (route.controller != gpio_ || route.irq != irq_))
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
   gpio_enable_pin_interrupt(gpio_, port_, pin_);
-  intc_m_enable_irq_with_priority(irq_, 1);
+
+  if (needs_port_irq_enable)
+  {
+    route.controller = gpio_;
+    route.irq = irq_;
+    intc_m_enable_irq_with_priority(irq_, 1);
+  }
+
+  ++route.enabled_pin_count;
+  interrupt_enabled_ = true;
   return ErrorCode::OK;
 }
 
 /**
  * @brief 失能当前引脚中断 / Disable interrupt for current pin.
  *
- * 先关闭 GPIO 事件，再关闭 PLIC 路由，避免在关中断过程中出现残留触发。
- * Disable GPIO event first, then PLIC routing, to avoid residual triggers while
- * disabling.
+ * 先关闭当前 pin 的 GPIO 事件；
+ * 仅当该 port 最后一个已使能 pin 被释放时，才关闭共享的 PLIC 路由。
+ * Disable the current pin's GPIO event first; the shared PLIC route is disabled only
+ * after the last enabled pin on the same port is released.
  */
 ErrorCode HPMGPIO::DisableInterrupt()
 {
-  if (irq_ == kInvalidIrq)
+  if (irq_ == kInvalidIrq || port_ >= kPortCount || pin_ >= kPinCount)
   {
     return ErrorCode::ARG_ERR;
   }
+
+  if (!interrupt_enabled_)
+  {
+    return ErrorCode::OK;
+  }
+
   gpio_disable_pin_interrupt(gpio_, port_, pin_);
-  intc_m_disable_irq(irq_);
+
+  PortIrqRouteState& route = port_irq_route_map[port_];
+  const bool route_matches = (route.controller == gpio_) && (route.irq == irq_);
+  if (route.enabled_pin_count == 0u)
+  {
+    interrupt_enabled_ = false;
+    return ErrorCode::STATE_ERR;
+  }
+
+  --route.enabled_pin_count;
+  if (route.enabled_pin_count == 0u)
+  {
+    const uint32_t route_irq = route.irq;
+    route = {};
+    intc_m_disable_irq(route_irq);
+  }
+
+  interrupt_enabled_ = false;
+  if (!route_matches)
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
   return ErrorCode::OK;
 }
 
