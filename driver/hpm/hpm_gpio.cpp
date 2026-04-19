@@ -15,6 +15,36 @@ HPMGPIO* HPMGPIO::map[HPMGPIO::kPortCount][HPMGPIO::kPinCount] = {};
 GPIO_Type* HPMGPIO::port_controller_map[HPMGPIO::kPortCount] = {};
 HPMGPIO::PortIrqRouteState HPMGPIO::port_irq_route_map[HPMGPIO::kPortCount] = {};
 
+namespace
+{
+// Serialize shared per-port IRQ routing updates against task/ISR races on the local core.
+std::atomic_flag g_hpm_gpio_irq_route_lock = ATOMIC_FLAG_INIT;
+
+class HPMGPIOIrqRouteGuard
+{
+ public:
+  HPMGPIOIrqRouteGuard()
+      : irq_state_(disable_global_irq(CSR_MSTATUS_MIE_MASK) & CSR_MSTATUS_MIE_MASK)
+  {
+    while (g_hpm_gpio_irq_route_lock.test_and_set(std::memory_order_acquire))
+    {
+    }
+  }
+
+  ~HPMGPIOIrqRouteGuard()
+  {
+    g_hpm_gpio_irq_route_lock.clear(std::memory_order_release);
+    restore_global_irq(irq_state_);
+  }
+
+  HPMGPIOIrqRouteGuard(const HPMGPIOIrqRouteGuard&) = delete;
+  HPMGPIOIrqRouteGuard& operator=(const HPMGPIOIrqRouteGuard&) = delete;
+
+ private:
+  uint32_t irq_state_;
+};
+}  // namespace
+
 /**
  * @brief 将 PAD 复用切换为 GPIO 功能 / Route PAD mux to GPIO function.
  * @param gpio GPIO 控制器基地址 / GPIO controller base address.
@@ -83,6 +113,7 @@ ErrorCode HPMGPIO::EnableInterrupt()
     return ErrorCode::ARG_ERR;
   }
 
+  HPMGPIOIrqRouteGuard guard;
   if (interrupt_enabled_)
   {
     return ErrorCode::OK;
@@ -124,6 +155,7 @@ ErrorCode HPMGPIO::DisableInterrupt()
     return ErrorCode::ARG_ERR;
   }
 
+  HPMGPIOIrqRouteGuard guard;
   if (!interrupt_enabled_)
   {
     return ErrorCode::OK;
@@ -355,3 +387,4 @@ extern "C" void libxr_hpm_gpio_check_interrupt(uint32_t port)
 {
   HPMGPIO::CheckInterrupt(port);
 }
+#include <atomic>
