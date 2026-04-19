@@ -1,4 +1,6 @@
-﻿#include "hpm_gpio.hpp"
+#include <atomic>
+
+#include "hpm_gpio.hpp"
 
 #include "hpm_interrupt.h"
 #include "hpm_ioc_regs.h"
@@ -387,4 +389,3 @@ extern "C" void libxr_hpm_gpio_check_interrupt(uint32_t port)
 {
   HPMGPIO::CheckInterrupt(port);
 }
-#include <atomic>
