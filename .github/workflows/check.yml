@@ -6,14 +6,11 @@ on:
   pull_request:
     branches: [ "master" ]
 
-env:
-  XR_CI_IMAGE: ghcr.io/xrobot-org/docker-image-linux:main
-
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.XR_CI_IMAGE }}
+      image: ghcr.io/xrobot-org/docker-image-linux:main
 
     steps:
     - uses: actions/checkout@v4
@@ -30,7 +27,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.XR_CI_IMAGE }}
+      image: ghcr.io/xrobot-org/docker-image-linux:main
 
     steps:
     - uses: actions/checkout@v4
