@@ -132,8 +132,14 @@ ErrorCode HPMGPIO::DisableInterrupt()
   gpio_disable_pin_interrupt(gpio_, port_, pin_);
 
   PortIrqRouteState& route = port_irq_route_map[port_];
-  const bool route_matches = (route.controller == gpio_) && (route.irq == irq_);
   if (route.enabled_pin_count == 0u)
+  {
+    route = {};
+    interrupt_enabled_ = false;
+    return ErrorCode::STATE_ERR;
+  }
+
+  if (route.controller != gpio_ || route.irq != irq_)
   {
     interrupt_enabled_ = false;
     return ErrorCode::STATE_ERR;
@@ -148,11 +154,6 @@ ErrorCode HPMGPIO::DisableInterrupt()
   }
 
   interrupt_enabled_ = false;
-  if (!route_matches)
-  {
-    return ErrorCode::STATE_ERR;
-  }
-
   return ErrorCode::OK;
 }
 
