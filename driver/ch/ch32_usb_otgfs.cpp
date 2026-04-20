@@ -201,7 +201,7 @@ CH32USBOtgFS::CH32USBOtgFS(
   }
 }
 
-ErrorCode CH32USBOtgFS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
+LibXR::ErrorCode CH32USBOtgFS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
   if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {
@@ -209,7 +209,7 @@ ErrorCode CH32USBOtgFS::SetAddress(uint8_t address, USB::DeviceCore::Context con
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
     USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;
   }
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 void CH32USBOtgFS::Start(bool)

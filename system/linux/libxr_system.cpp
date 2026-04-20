@@ -1,35 +1,39 @@
 #include "libxr_system.hpp"
 
-#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
+#include <cstddef>
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
+#include "linux_timebase.hpp"
+#include "logger.hpp"
 #include "thread.hpp"
 #include "timer.hpp"
-#include "webots/Robot.hpp"
-#include "webots_timebase.hpp"
 
-uint64_t _libxr_webots_time_count = 0;
-webots::Robot* _libxr_webots_robot_handle = nullptr;  // NOLINT
-static float time_step = 0.0f;
-LibXR::condition_var_handle* _libxr_webots_time_notify = nullptr;
+struct timespec libxr_linux_start_time_spec;  // NOLINT
+
+static LibXR::LinuxTimebase libxr_linux_timebase;
 
 static LibXR::Semaphore stdo_sem;
 
 void StdiThread(LibXR::ReadPort* read_port)
 {
   static uint8_t read_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
+
+  if (!isatty(STDIN_FILENO))
+  {
+    XR_LOG_WARN("STDIO.read_: stdin is not a TTY, parking thread forever");
+    while (true)
+    {
+      LibXR::Thread::Sleep(UINT32_MAX);
+    }
+  }
 
   while (true)
   {
@@ -63,16 +67,16 @@ void StdoThread(LibXR::WritePort* write_port)
 
   while (true)
   {
-    if (stdo_sem.Wait() == ErrorCode::OK)
+    if (stdo_sem.Wait() == LibXR::ErrorCode::OK)
     {
       auto ans = write_port->queue_info_->Pop(info);
-      if (ans != ErrorCode::OK)
+      if (ans != LibXR::ErrorCode::OK)
       {
         continue;
       }
 
       ans = write_port->queue_data_->PopBatch(write_buff, info.data.size_);
-      if (ans != ErrorCode::OK)
+      if (ans != LibXR::ErrorCode::OK)
       {
         continue;
       }
@@ -84,13 +88,12 @@ void StdoThread(LibXR::WritePort* write_port)
       UNUSED(fflush_ans);
 
       write_port->Finish(
-          false, write_size == info.data.size_ ? ErrorCode::OK : ErrorCode::FAILED, info);
+          false, write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED, info);
     }
   }
 }
 
-void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
-                         uint32_t timer_stack_depth)
+void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
   LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
   LibXR::Timer::stack_depth_ = timer_stack_depth;
@@ -98,7 +101,7 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
   {
     UNUSED(port);
     stdo_sem.Post();
-    return ErrorCode::PENDING;
+    return LibXR::ErrorCode::PENDING;
   };
 
   LibXR::STDIO::write_ =
@@ -109,13 +112,15 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
   auto read_fun = [](ReadPort& port, bool)
   {
     UNUSED(port);
-    return ErrorCode::PENDING;
+    return LibXR::ErrorCode::PENDING;
   };
 
   LibXR::STDIO::read_ =
       new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
 
   *LibXR::STDIO::read_ = read_fun;
+
+  UNUSED(clock_gettime(CLOCK_MONOTONIC, &libxr_linux_start_time_spec));
 
   struct termios tty;
   tcgetattr(STDIN_FILENO, &tty);           // 获取当前终端属性
@@ -128,46 +133,4 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
 
   stdo_thread.Create<LibXR::WritePort*>(LibXR::STDIO::write_, StdoThread, "STDIO.write_",
                                         1024, LibXR::Thread::Priority::MEDIUM);
-  if (robot == nullptr)
-  {
-    _libxr_webots_robot_handle = new webots::Robot();
-  }
-  else
-  {
-    _libxr_webots_robot_handle = robot;
-  }
-
-  time_step = _libxr_webots_robot_handle->getBasicTimeStep();
-
-  if (_libxr_webots_robot_handle == nullptr)
-  {
-    printf("webots robot handle is null.\n");
-    exit(-1);
-  }
-
-  _libxr_webots_time_notify = new condition_var_handle;
-  pthread_mutex_init(&_libxr_webots_time_notify->mutex, nullptr);
-  pthread_cond_init(&_libxr_webots_time_notify->cond, nullptr);
-
-  auto webots_timebase_thread_fun = [](void*)
-  {
-    poll(nullptr, 0, 100);
-
-    while (true)
-    {
-      poll(nullptr, 0, 1);
-      _libxr_webots_robot_handle->step(time_step);
-      _libxr_webots_time_count++;
-      pthread_mutex_lock(&_libxr_webots_time_notify->mutex);
-      pthread_cond_broadcast(&_libxr_webots_time_notify->cond);
-      pthread_mutex_unlock(&_libxr_webots_time_notify->mutex);
-    }
-  };
-
-  LibXR::Thread webots_timebase_thread;
-  webots_timebase_thread.Create<void*>(
-      reinterpret_cast<void*>(0), webots_timebase_thread_fun, "webots_timebase_thread",
-      1024, Thread::Priority::REALTIME);
-
-  static LibXR::WebotsTimebase timebase;
 }

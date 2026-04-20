@@ -319,13 +319,13 @@ CH32USBOtgHS::CH32USBOtgHS(
   }
 }
 
-ErrorCode CH32USBOtgHS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
+LibXR::ErrorCode CH32USBOtgHS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
   if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {
     USBHSD->DEV_AD = address;
   }
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 void CH32USBOtgHS::Start(bool)

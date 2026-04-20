@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 
 namespace LibXR
 {

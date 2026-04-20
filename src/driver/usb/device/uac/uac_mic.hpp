@@ -7,6 +7,7 @@
 #include "dev_core.hpp"
 #include "ep.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 
 namespace LibXR::USB
 {

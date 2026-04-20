@@ -6,6 +6,7 @@
 #include <Eigen/Dense>
 #include <type_traits>
 
+#include "libxr_mem.hpp"
 #include "transform.hpp"
 
 namespace LibXR

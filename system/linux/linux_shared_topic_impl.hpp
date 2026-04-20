@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(LIBXR_SYSTEM_Linux) || defined(LIBXR_SYSTEM_Webots)
+#if defined(LIBXR_SYSTEM_POSIX_HOST)
 
 #include <atomic>
 #include <cerrno>

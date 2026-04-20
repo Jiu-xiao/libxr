@@ -88,7 +88,7 @@ Some useful tools for debugging, robotics, and communication.
 ## Usage
 
 ```sh
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # LibXR
@@ -109,6 +109,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 ### System and Driver Platform Selection
 
+LibXR currently targets C++20. Use a compiler/toolchain that already supports `CMAKE_CXX_STANDARD 20`.
+
 By default, the host system (Linux, Windows) is automatically detected, and `LIBXR_SYSTEM` and `LIBXR_DRIVER` are set accordingly. You can also manually specify them via the CMake command line or in an external `CMakeLists.txt`, corresponding to the different folders under [system](./system) and [driver](./driver).
 
 ```cmake
@@ -119,7 +121,7 @@ set(LIBXR_DRIVER Linux)
 
 ### Build as Shared/Static Library
 
-LibXR now requires CMake 3.12 or newer. By default, the library is built as an object target. You can explicitly set the build type in the CMake command line or your own CMakeLists.txt:
+By default, the library is built as an object target. You can explicitly set the build type in the CMake command line or your own CMakeLists.txt:
 
 ```cmake
 # Build as a shared library

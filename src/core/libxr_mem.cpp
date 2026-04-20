@@ -1,3 +1,5 @@
+#include "libxr_mem.hpp"
+
 #include "libxr_def.hpp"
 
 void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
@@ -29,61 +31,64 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
       }
     }
 
-#if LIBXR_ALIGN_SIZE == 8
-    /// Burst copy 8 bytes per cycle (64-bit), using 8x unrolled loop.
-    auto* dw = reinterpret_cast<uint64_t*>(d);
-    auto* sw = reinterpret_cast<const uint64_t*>(s);
-
-    while (size >= 64)
+    if constexpr (LIBXR_ALIGN_SIZE == 8)
     {
-      dw[0] = sw[0];
-      dw[1] = sw[1];
-      dw[2] = sw[2];
-      dw[3] = sw[3];
-      dw[4] = sw[4];
-      dw[5] = sw[5];
-      dw[6] = sw[6];
-      dw[7] = sw[7];
-      dw += 8;
-      sw += 8;
-      size -= 64;
-    }
-    while (size >= 8)
-    {
-      *dw++ = *sw++;
-      size -= 8;
-    }
+      /// Burst copy 8 bytes per cycle (64-bit), using 8x unrolled loop.
+      auto* dw = reinterpret_cast<uint64_t*>(d);
+      auto* sw = reinterpret_cast<const uint64_t*>(s);
 
-    d = reinterpret_cast<uint8_t*>(dw);
-    s = reinterpret_cast<const uint8_t*>(sw);
-#else
-    /// Burst copy 4 bytes per cycle (32-bit), using 8x unrolled loop.
-    auto* dw = reinterpret_cast<uint32_t*>(d);
-    auto* sw = reinterpret_cast<const uint32_t*>(s);
+      while (size >= 64)
+      {
+        dw[0] = sw[0];
+        dw[1] = sw[1];
+        dw[2] = sw[2];
+        dw[3] = sw[3];
+        dw[4] = sw[4];
+        dw[5] = sw[5];
+        dw[6] = sw[6];
+        dw[7] = sw[7];
+        dw += 8;
+        sw += 8;
+        size -= 64;
+      }
+      while (size >= 8)
+      {
+        *dw++ = *sw++;
+        size -= 8;
+      }
 
-    while (size >= 32)
-    {
-      dw[0] = sw[0];
-      dw[1] = sw[1];
-      dw[2] = sw[2];
-      dw[3] = sw[3];
-      dw[4] = sw[4];
-      dw[5] = sw[5];
-      dw[6] = sw[6];
-      dw[7] = sw[7];
-      dw += 8;
-      sw += 8;
-      size -= 32;
+      d = reinterpret_cast<uint8_t*>(dw);
+      s = reinterpret_cast<const uint8_t*>(sw);
     }
-    while (size >= 4)
+    else
     {
-      *dw++ = *sw++;
-      size -= 4;
-    }
+      /// Burst copy 4 bytes per cycle (32-bit), using 8x unrolled loop.
+      auto* dw = reinterpret_cast<uint32_t*>(d);
+      auto* sw = reinterpret_cast<const uint32_t*>(s);
 
-    d = reinterpret_cast<uint8_t*>(dw);
-    s = reinterpret_cast<const uint8_t*>(sw);
-#endif
+      while (size >= 32)
+      {
+        dw[0] = sw[0];
+        dw[1] = sw[1];
+        dw[2] = sw[2];
+        dw[3] = sw[3];
+        dw[4] = sw[4];
+        dw[5] = sw[5];
+        dw[6] = sw[6];
+        dw[7] = sw[7];
+        dw += 8;
+        sw += 8;
+        size -= 32;
+      }
+      while (size >= 4)
+      {
+        *dw++ = *sw++;
+        size -= 4;
+      }
+
+      d = reinterpret_cast<uint8_t*>(dw);
+      s = reinterpret_cast<const uint8_t*>(sw);
+    }
   }
   /**
    * If alignments are different, try to maximize word copy size
@@ -93,45 +98,78 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
   {
     uintptr_t addr_diff = reinterpret_cast<uintptr_t>(s) - reinterpret_cast<uintptr_t>(d);
 
-#if LIBXR_ALIGN_SIZE == 8
-    /// If address difference is a multiple of 4, use 4-byte copying.
-    if ((addr_diff & 3) == 0 && size > 0)
+    if constexpr (LIBXR_ALIGN_SIZE == 8)
     {
-      while ((reinterpret_cast<uintptr_t>(d) & 3) && size)
+      /// If address difference is a multiple of 4, use 4-byte copying.
+      if ((addr_diff & 3) == 0 && size > 0)
       {
-        *d++ = *s++;
-        --size;
-      }
-      auto* d32 = reinterpret_cast<uint32_t*>(d);
-      auto* s32 = reinterpret_cast<const uint32_t*>(s);
+        while ((reinterpret_cast<uintptr_t>(d) & 3) && size)
+        {
+          *d++ = *s++;
+          --size;
+        }
+        auto* d32 = reinterpret_cast<uint32_t*>(d);
+        auto* s32 = reinterpret_cast<const uint32_t*>(s);
 
-      while (size >= 32)
-      {
-        d32[0] = s32[0];
-        d32[1] = s32[1];
-        d32[2] = s32[2];
-        d32[3] = s32[3];
-        d32[4] = s32[4];
-        d32[5] = s32[5];
-        d32[6] = s32[6];
-        d32[7] = s32[7];
-        d32 += 8;
-        s32 += 8;
-        size -= 32;
-      }
-      while (size >= 4)
-      {
-        *d32++ = *s32++;
-        size -= 4;
-      }
+        while (size >= 32)
+        {
+          d32[0] = s32[0];
+          d32[1] = s32[1];
+          d32[2] = s32[2];
+          d32[3] = s32[3];
+          d32[4] = s32[4];
+          d32[5] = s32[5];
+          d32[6] = s32[6];
+          d32[7] = s32[7];
+          d32 += 8;
+          s32 += 8;
+          size -= 32;
+        }
+        while (size >= 4)
+        {
+          *d32++ = *s32++;
+          size -= 4;
+        }
 
-      d = reinterpret_cast<uint8_t*>(d32);
-      s = reinterpret_cast<const uint8_t*>(s32);
+        d = reinterpret_cast<uint8_t*>(d32);
+        s = reinterpret_cast<const uint8_t*>(s32);
+      }
+      /// If address difference is even, use 2-byte copying.
+      else if ((addr_diff & 1) == 0 && size > 0)
+      {
+        if (reinterpret_cast<uintptr_t>(d) & 1)
+        {
+          *d++ = *s++;
+          --size;
+        }
+        auto* d16 = reinterpret_cast<uint16_t*>(d);
+        auto* s16 = reinterpret_cast<const uint16_t*>(s);
+
+        while (size >= 16)
+        {
+          d16[0] = s16[0];
+          d16[1] = s16[1];
+          d16[2] = s16[2];
+          d16[3] = s16[3];
+          d16[4] = s16[4];
+          d16[5] = s16[5];
+          d16[6] = s16[6];
+          d16[7] = s16[7];
+          d16 += 8;
+          s16 += 8;
+          size -= 16;
+        }
+        while (size >= 2)
+        {
+          *d16++ = *s16++;
+          size -= 2;
+        }
+
+        d = reinterpret_cast<uint8_t*>(d16);
+        s = reinterpret_cast<const uint8_t*>(s16);
+      }
     }
-    /// If address difference is even, use 2-byte copying.
-    else
-#endif
-        if ((addr_diff & 1) == 0 && size > 0)
+    else if ((addr_diff & 1) == 0 && size > 0)
     {
       if (reinterpret_cast<uintptr_t>(d) & 1)
       {
@@ -200,64 +238,67 @@ void LibXR::Memory::FastSet(void* dst, uint8_t value, size_t size)
     }
   }
 
-#if LIBXR_ALIGN_SIZE == 8
-  // 8-byte pattern
-  uint64_t pat = value;
-  pat |= pat << 8;
-  pat |= pat << 16;
-  pat |= pat << 32;
-
-  auto* dw = reinterpret_cast<uint64_t*>(d);
-
-  while (size >= 64)
+  if constexpr (LIBXR_ALIGN_SIZE == 8)
   {
-    dw[0] = pat;
-    dw[1] = pat;
-    dw[2] = pat;
-    dw[3] = pat;
-    dw[4] = pat;
-    dw[5] = pat;
-    dw[6] = pat;
-    dw[7] = pat;
-    dw += 8;
-    size -= 64;
+    // 8-byte pattern
+    uint64_t pat = value;
+    pat |= pat << 8;
+    pat |= pat << 16;
+    pat |= pat << 32;
+
+    auto* dw = reinterpret_cast<uint64_t*>(d);
+
+    while (size >= 64)
+    {
+      dw[0] = pat;
+      dw[1] = pat;
+      dw[2] = pat;
+      dw[3] = pat;
+      dw[4] = pat;
+      dw[5] = pat;
+      dw[6] = pat;
+      dw[7] = pat;
+      dw += 8;
+      size -= 64;
+    }
+    while (size >= 8)
+    {
+      *dw++ = pat;
+      size -= 8;
+    }
+
+    d = reinterpret_cast<uint8_t*>(dw);
   }
-  while (size >= 8)
+  else
   {
-    *dw++ = pat;
-    size -= 8;
+    // 4-byte pattern
+    uint32_t pat = value;
+    pat |= pat << 8;
+    pat |= pat << 16;
+
+    auto* dw = reinterpret_cast<uint32_t*>(d);
+
+    while (size >= 32)
+    {
+      dw[0] = pat;
+      dw[1] = pat;
+      dw[2] = pat;
+      dw[3] = pat;
+      dw[4] = pat;
+      dw[5] = pat;
+      dw[6] = pat;
+      dw[7] = pat;
+      dw += 8;
+      size -= 32;
+    }
+    while (size >= 4)
+    {
+      *dw++ = pat;
+      size -= 4;
+    }
+
+    d = reinterpret_cast<uint8_t*>(dw);
   }
-
-  d = reinterpret_cast<uint8_t*>(dw);
-#else
-  // 4-byte pattern
-  uint32_t pat = value;
-  pat |= pat << 8;
-  pat |= pat << 16;
-
-  auto* dw = reinterpret_cast<uint32_t*>(d);
-
-  while (size >= 32)
-  {
-    dw[0] = pat;
-    dw[1] = pat;
-    dw[2] = pat;
-    dw[3] = pat;
-    dw[4] = pat;
-    dw[5] = pat;
-    dw[6] = pat;
-    dw[7] = pat;
-    dw += 8;
-    size -= 32;
-  }
-  while (size >= 4)
-  {
-    *dw++ = pat;
-    size -= 4;
-  }
-
-  d = reinterpret_cast<uint8_t*>(dw);
-#endif
 
   // 尾巴
   while (size--)
@@ -312,147 +353,150 @@ int LibXR::Memory::FastCmp(const void* a, const void* b, size_t size)
     }
   }
 
-#if LIBXR_ALIGN_SIZE == 8
-  // 8-byte compare（仅在两者均 8 对齐时才安全/快）
-  if ((((reinterpret_cast<uintptr_t>(p) | reinterpret_cast<uintptr_t>(q)) & 7u) == 0u))
+  if constexpr (LIBXR_ALIGN_SIZE == 8)
   {
-    auto* pw = reinterpret_cast<const uint64_t*>(p);
-    auto* qw = reinterpret_cast<const uint64_t*>(q);
-
-    while (size >= 64)
+    // 8-byte compare（仅在两者均 8 对齐时才安全/快）
+    if ((((reinterpret_cast<uintptr_t>(p) | reinterpret_cast<uintptr_t>(q)) & 7u) == 0u))
     {
-      if (pw[0] != qw[0])
+      auto* pw = reinterpret_cast<const uint64_t*>(p);
+      auto* qw = reinterpret_cast<const uint64_t*>(q);
+
+      while (size >= 64)
       {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 0),
-                        reinterpret_cast<const uint8_t*>(qw + 0), 8);
-      }
-      if (pw[1] != qw[1])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 1),
-                        reinterpret_cast<const uint8_t*>(qw + 1), 8);
-      }
-      if (pw[2] != qw[2])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 2),
-                        reinterpret_cast<const uint8_t*>(qw + 2), 8);
-      }
-      if (pw[3] != qw[3])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 3),
-                        reinterpret_cast<const uint8_t*>(qw + 3), 8);
-      }
-      if (pw[4] != qw[4])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 4),
-                        reinterpret_cast<const uint8_t*>(qw + 4), 8);
-      }
-      if (pw[5] != qw[5])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 5),
-                        reinterpret_cast<const uint8_t*>(qw + 5), 8);
-      }
-      if (pw[6] != qw[6])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 6),
-                        reinterpret_cast<const uint8_t*>(qw + 6), 8);
-      }
-      if (pw[7] != qw[7])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 7),
-                        reinterpret_cast<const uint8_t*>(qw + 7), 8);
+        if (pw[0] != qw[0])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 0),
+                          reinterpret_cast<const uint8_t*>(qw + 0), 8);
+        }
+        if (pw[1] != qw[1])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 1),
+                          reinterpret_cast<const uint8_t*>(qw + 1), 8);
+        }
+        if (pw[2] != qw[2])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 2),
+                          reinterpret_cast<const uint8_t*>(qw + 2), 8);
+        }
+        if (pw[3] != qw[3])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 3),
+                          reinterpret_cast<const uint8_t*>(qw + 3), 8);
+        }
+        if (pw[4] != qw[4])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 4),
+                          reinterpret_cast<const uint8_t*>(qw + 4), 8);
+        }
+        if (pw[5] != qw[5])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 5),
+                          reinterpret_cast<const uint8_t*>(qw + 5), 8);
+        }
+        if (pw[6] != qw[6])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 6),
+                          reinterpret_cast<const uint8_t*>(qw + 6), 8);
+        }
+        if (pw[7] != qw[7])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 7),
+                          reinterpret_cast<const uint8_t*>(qw + 7), 8);
+        }
+
+        pw += 8;
+        qw += 8;
+        size -= 64;
       }
 
-      pw += 8;
-      qw += 8;
-      size -= 64;
+      while (size >= 8)
+      {
+        if (*pw != *qw)
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw),
+                          reinterpret_cast<const uint8_t*>(qw), 8);
+        }
+        ++pw;
+        ++qw;
+        size -= 8;
+      }
+
+      p = reinterpret_cast<const uint8_t*>(pw);
+      q = reinterpret_cast<const uint8_t*>(qw);
     }
-
-    while (size >= 8)
-    {
-      if (*pw != *qw)
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw),
-                        reinterpret_cast<const uint8_t*>(qw), 8);
-      }
-      ++pw;
-      ++qw;
-      size -= 8;
-    }
-
-    p = reinterpret_cast<const uint8_t*>(pw);
-    q = reinterpret_cast<const uint8_t*>(qw);
   }
-#else
-  // 4-byte compare（两者均 4 对齐）
-  if ((((reinterpret_cast<uintptr_t>(p) | reinterpret_cast<uintptr_t>(q)) & 3u) == 0u))
+  else
   {
-    auto* pw = reinterpret_cast<const uint32_t*>(p);
-    auto* qw = reinterpret_cast<const uint32_t*>(q);
-
-    while (size >= 32)
+    // 4-byte compare（两者均 4 对齐）
+    if ((((reinterpret_cast<uintptr_t>(p) | reinterpret_cast<uintptr_t>(q)) & 3u) == 0u))
     {
-      if (pw[0] != qw[0])
+      auto* pw = reinterpret_cast<const uint32_t*>(p);
+      auto* qw = reinterpret_cast<const uint32_t*>(q);
+
+      while (size >= 32)
       {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 0),
-                        reinterpret_cast<const uint8_t*>(qw + 0), 4);
-      }
-      if (pw[1] != qw[1])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 1),
-                        reinterpret_cast<const uint8_t*>(qw + 1), 4);
-      }
-      if (pw[2] != qw[2])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 2),
-                        reinterpret_cast<const uint8_t*>(qw + 2), 4);
-      }
-      if (pw[3] != qw[3])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 3),
-                        reinterpret_cast<const uint8_t*>(qw + 3), 4);
-      }
-      if (pw[4] != qw[4])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 4),
-                        reinterpret_cast<const uint8_t*>(qw + 4), 4);
-      }
-      if (pw[5] != qw[5])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 5),
-                        reinterpret_cast<const uint8_t*>(qw + 5), 4);
-      }
-      if (pw[6] != qw[6])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 6),
-                        reinterpret_cast<const uint8_t*>(qw + 6), 4);
-      }
-      if (pw[7] != qw[7])
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 7),
-                        reinterpret_cast<const uint8_t*>(qw + 7), 4);
+        if (pw[0] != qw[0])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 0),
+                          reinterpret_cast<const uint8_t*>(qw + 0), 4);
+        }
+        if (pw[1] != qw[1])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 1),
+                          reinterpret_cast<const uint8_t*>(qw + 1), 4);
+        }
+        if (pw[2] != qw[2])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 2),
+                          reinterpret_cast<const uint8_t*>(qw + 2), 4);
+        }
+        if (pw[3] != qw[3])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 3),
+                          reinterpret_cast<const uint8_t*>(qw + 3), 4);
+        }
+        if (pw[4] != qw[4])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 4),
+                          reinterpret_cast<const uint8_t*>(qw + 4), 4);
+        }
+        if (pw[5] != qw[5])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 5),
+                          reinterpret_cast<const uint8_t*>(qw + 5), 4);
+        }
+        if (pw[6] != qw[6])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 6),
+                          reinterpret_cast<const uint8_t*>(qw + 6), 4);
+        }
+        if (pw[7] != qw[7])
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw + 7),
+                          reinterpret_cast<const uint8_t*>(qw + 7), 4);
+        }
+
+        pw += 8;
+        qw += 8;
+        size -= 32;
       }
 
-      pw += 8;
-      qw += 8;
-      size -= 32;
+      while (size >= 4)
+      {
+        if (*pw != *qw)
+        {
+          return byte_cmp(reinterpret_cast<const uint8_t*>(pw),
+                          reinterpret_cast<const uint8_t*>(qw), 4);
+        }
+        ++pw;
+        ++qw;
+        size -= 4;
+      }
+
+      p = reinterpret_cast<const uint8_t*>(pw);
+      q = reinterpret_cast<const uint8_t*>(qw);
     }
-
-    while (size >= 4)
-    {
-      if (*pw != *qw)
-      {
-        return byte_cmp(reinterpret_cast<const uint8_t*>(pw),
-                        reinterpret_cast<const uint8_t*>(qw), 4);
-      }
-      ++pw;
-      ++qw;
-      size -= 4;
-    }
-
-    p = reinterpret_cast<const uint8_t*>(pw);
-    q = reinterpret_cast<const uint8_t*>(qw);
   }
-#endif
 
   // tail byte compare（包括：未满足宽比较对齐条件的情况）
   while (size--)

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "dl_dma.h"
-#include "dl_spi.h"
+#include <ti/driverlib/dl_dma.h>
+#include <ti/driverlib/dl_spi.h>
 #include "spi.hpp"
 #include "ti_msp_dl_config.h"
 

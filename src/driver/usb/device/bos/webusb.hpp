@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/bos.hpp"
 #include "usb/core/core.hpp"

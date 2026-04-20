@@ -425,11 +425,11 @@ void DeviceComposition::Deinit(bool in_isr)
   current_cfg_ = 0;
 }
 
-ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
+LibXR::ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
 {
   if (index > config_num_)
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   if (index == 0)
@@ -438,7 +438,7 @@ ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
     configured_ = false;
     current_cfg_ = 0;
     RebuildBosCache();
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
   // USB configuration value 从 1 开始，而 current_cfg_ 内部保存的是从 0 开始的槽位。
@@ -448,10 +448,10 @@ ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
   configured_ = true;
   BindEndpoints(in_isr);
   RebuildBosCache();
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
-ErrorCode DeviceComposition::BuildConfigDescriptor()
+LibXR::ErrorCode DeviceComposition::BuildConfigDescriptor()
 {
   // ConfigDescriptor 只构建当前激活的 configuration；
   // current_cfg_ 同时决定 item 表和对外可见的 bConfigurationValue。
@@ -468,20 +468,20 @@ RawData DeviceComposition::GetConfigDescriptor() const { return config_desc_.Get
 
 ConstRawData DeviceComposition::GetBosDescriptor() { return bos_.GetBosDescriptor(); }
 
-ErrorCode DeviceComposition::ProcessBosVendorRequest(bool in_isr,
+LibXR::ErrorCode DeviceComposition::ProcessBosVendorRequest(bool in_isr,
                                                      const SetupPacket* setup,
                                                      BosVendorResult& result)
 {
   return bos_.ProcessVendorRequest(in_isr, setup, result);
 }
 
-ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index, uint16_t lang,
+LibXR::ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index, uint16_t lang,
                                                  ConstRawData& data)
 {
   if (string_index == 0)
   {
     data = ConstRawData(strings_.GetLangIDData());
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
   if (string_index > static_cast<uint8_t>(DescriptorStrings::Index::SERIAL_NUMBER_STRING))
@@ -490,35 +490,35 @@ ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index, uint16_t 
     // Interface strings share the same language gate as the built-in string set.
     if (!strings_.HasLanguage(lang))
     {
-      return ErrorCode::NOT_FOUND;
+      return LibXR::ErrorCode::NOT_FOUND;
     }
     return GenerateInterfaceString(string_index, data);
   }
 
   auto ec =
       strings_.GenerateString(static_cast<DescriptorStrings::Index>(string_index), lang);
-  if (ec != ErrorCode::OK)
+  if (ec != LibXR::ErrorCode::OK)
   {
     return ec;
   }
 
   data = ConstRawData(strings_.GetData());
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 bool DeviceComposition::IsComposite() const { return composite_; }
 
-ErrorCode DeviceComposition::TryOverrideDeviceDescriptor(DeviceDescriptor& descriptor)
+LibXR::ErrorCode DeviceComposition::TryOverrideDeviceDescriptor(DeviceDescriptor& descriptor)
 {
   if (config_num_ != 1)
   {
-    return ErrorCode::NOT_SUPPORT;
+    return LibXR::ErrorCode::NOT_SUPPORT;
   }
 
   const auto config = items_[0];
   if (!is_device_descriptor_override_eligible(config.items, config.item_num))
   {
-    return ErrorCode::NOT_SUPPORT;
+    return LibXR::ErrorCode::NOT_SUPPORT;
   }
 
   return config.items[0]->WriteDeviceDescriptor(descriptor);
@@ -672,7 +672,7 @@ void DeviceComposition::RebuildBosCache()
   (void)bos_.GetBosDescriptor();
 }
 
-ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
+LibXR::ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
                                                      ConstRawData& data)
 {
   // 接口字符串位于内建 manufacturer/product/serial 之后的索引区间。
@@ -681,13 +681,13 @@ ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
       static_cast<uint8_t>(DescriptorStrings::Index::SERIAL_NUMBER_STRING);
   if (string_index <= base_index)
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   const size_t extra_index = static_cast<size_t>(string_index - base_index - 1u);
   if (extra_index >= interface_string_count_ || interface_string_buffer_.addr_ == nullptr)
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   uint8_t* buffer = reinterpret_cast<uint8_t*>(interface_string_buffer_.addr_);
@@ -701,7 +701,7 @@ ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
   buffer[0] = static_cast<uint8_t>(utf16_len + 2);
   to_utf16le(str, buffer + 2);
   data = ConstRawData(interface_string_buffer_.addr_, buffer[0]);
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 void DeviceComposition::RegisterInterfaceStrings()

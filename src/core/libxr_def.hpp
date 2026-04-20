@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <libxr_mem.hpp>
 #include <type_traits>
 
 #ifndef M_PI
@@ -53,6 +53,8 @@ constexpr double M_1G = 9.80665;
 static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
 static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void*));
 
+namespace LibXR
+{
 /**
  * @enum ErrorCode
  * @brief 定义错误码枚举
@@ -93,9 +95,14 @@ enum class SizeLimitMode : uint8_t
   MORE = 2,   ///< 尺寸必须大于 | Size must be more
   NONE = 3    ///< 无限制 | No restriction
 };
+}  // namespace LibXR
 
 #ifdef ASSERT
 #undef ASSERT
+#endif
+
+#ifdef ASSERT_FROM_CALLBACK
+#undef ASSERT_FROM_CALLBACK
 #endif
 
 #ifdef LIBXR_DEBUG_BUILD
@@ -149,9 +156,6 @@ extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {
-using ErrorCode = ErrorCode;
-using SizeLimitMode = SizeLimitMode;
-
 /**
  * @brief 计算两个数的最大值
  * @brief Computes the maximum of two numbers

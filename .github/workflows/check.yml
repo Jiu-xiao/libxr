@@ -23,7 +23,6 @@ jobs:
       run: script -q -c "./build/test"
 
   clang-format:
-
     needs: build
     runs-on: ubuntu-latest
 
@@ -40,3 +39,21 @@ jobs:
       shell: bash
       run: |
         tools/format_driver_src.sh --check
+
+  cmake-format:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: install cmake-format 0.6.13
+      shell: bash
+      run: |
+        python3 -m venv .venv-cmake-format
+        .venv-cmake-format/bin/python -m pip install --upgrade pip
+        .venv-cmake-format/bin/python -m pip install "cmakelang[YAML]==0.6.13"
+        .venv-cmake-format/bin/cmake-format --version
+    - name: check cmake-format via script
+      shell: bash
+      run: |
+        tools/format_cmake_files.sh --check

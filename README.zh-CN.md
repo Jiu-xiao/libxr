@@ -88,7 +88,7 @@
 ## 使用方法示例
 
 ```sh
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 配置 LibXR
@@ -109,6 +109,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 ### 系统和驱动平台选择
 
+LibXR 当前以 C++20 为目标标准，请使用已经支持 `CMAKE_CXX_STANDARD 20` 的编译器/工具链。
+
 默认会自动识别宿主系统（Linux、Windows），自动设置 LIBXR_SYSTEM 和 LIBXR_DRIVER。你也可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定，分别对应[system](./system)和[driver](./driver)下的不同文件夹。
 
 ```cmake
@@ -119,7 +121,7 @@ set(LIBXR_DRIVER Linux)
 
 ### 编译为共享/静态库
 
-LibXR 现在要求 CMake 3.12 或更新版本。默认编译为 object 目标，可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定
+默认编译为object目标，可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定
 
 ```cmake
 # 编译为共享库

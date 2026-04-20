@@ -5,6 +5,7 @@
 
 #include "gpio.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "swd.hpp"
 #include "timebase.hpp"
 

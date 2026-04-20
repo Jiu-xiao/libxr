@@ -9,6 +9,7 @@
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_queue.hpp"
 #include "mutex.hpp"

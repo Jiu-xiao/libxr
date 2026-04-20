@@ -9,6 +9,7 @@
 #include "dev_core.hpp"
 #include "gpio.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"

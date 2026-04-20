@@ -423,7 +423,7 @@ CH32USBDeviceFS::CH32USBDeviceFS(
   }
 }
 
-ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
+LibXR::ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
   if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {
@@ -438,7 +438,7 @@ ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context 
     CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
     CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
   }
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 void CH32USBDeviceFS::Start(bool)

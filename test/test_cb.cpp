@@ -90,14 +90,12 @@ struct GuardedCreationProbe
 void test_cb()
 {
   {
-    // Empty callbacks stay cheap no-ops.
     LibXR::Callback<int> empty_cb;
     ASSERT(empty_cb.Empty());
     empty_cb.Run(false, 1);
   }
 
   {
-    // Direct callbacks preserve ISR=true and recurse with real stack depth.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.cb.Run(probe.runtime_in_isr, 1);
@@ -110,7 +108,6 @@ void test_cb()
   }
 
   {
-    // Direct callbacks preserve ISR=false and recurse with real stack depth.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(probe.runtime_in_isr, 1);
@@ -123,7 +120,6 @@ void test_cb()
   }
 
   {
-    // Passing the runtime flag directly keeps the observed callback context.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.cb.Run(true, 1);
@@ -136,7 +132,6 @@ void test_cb()
   }
 
   {
-    // Direct non-ISR calls also keep their original callback context.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(false, 1);
@@ -149,7 +144,6 @@ void test_cb()
   }
 
   {
-    // Guarded callbacks flatten one-step bounded reentry back to one stack frame.
     GuardedCreationProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(false, 1);

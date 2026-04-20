@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 
 using namespace LibXR;
 

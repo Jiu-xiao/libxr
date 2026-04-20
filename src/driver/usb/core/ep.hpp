@@ -5,6 +5,7 @@
 #include "double_buffer.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 
