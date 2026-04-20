@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "libxr_def.hpp"
@@ -37,16 +38,11 @@ class CallbackBlock : public CallbackBlockHeader<Args...>
    * @brief 构造回调块，绑定回调函数与参数 / Construct a callback block with bound
    * function and argument
    *
-   * @tparam FunType 函数类型 / Function type
-   * @tparam ArgT 绑定参数类型 / Bound argument type
    * @param fun 需要调用的回调函数 / Callback function to be invoked
    * @param arg 绑定的参数值 / Bound argument value
    */
-  template <typename FunType, typename ArgT>
-  CallbackBlock(FunType&& fun, ArgT&& arg)
-      : CallbackBlockHeader<Args...>{&InvokeThunk},
-        fun_(std::forward<FunType>(fun)),
-        arg_(std::forward<ArgT>(arg))
+  CallbackBlock(FunctionType fun, ArgType&& arg)
+      : CallbackBlockHeader<Args...>{&InvokeThunk}, fun_(fun), arg_(std::move(arg))
   {
   }
 
@@ -72,8 +68,8 @@ class CallbackBlock : public CallbackBlockHeader<Args...>
     fun_(in_isr, arg_, std::forward<Args>(args)...);
   }
 
-  void (*fun_)(bool, ArgType, Args...);  ///< 绑定的回调函数 / Bound callback function
-  ArgType arg_;                          ///< 绑定的参数 / Bound argument
+  FunctionType fun_;  ///< 绑定的回调函数 / Bound callback function
+  ArgType arg_;       ///< 绑定的参数 / Bound argument
 };
 
 template <typename ArgType, typename... Args>
@@ -83,10 +79,9 @@ class GuardedCallbackBlock : public CallbackBlock<ArgType, Args...>
   /**
    * @brief 带防重入保护的回调块 / Callback block with reentry guard
    */
-  template <typename FunType, typename ArgT>
-  GuardedCallbackBlock(FunType&& fun, ArgT&& arg)
-      : CallbackBlock<ArgType, Args...>(std::forward<FunType>(fun),
-                                        std::forward<ArgT>(arg))
+  GuardedCallbackBlock(typename CallbackBlock<ArgType, Args...>::FunctionType fun,
+                       ArgType&& arg)
+      : CallbackBlock<ArgType, Args...>(fun, std::move(arg))
   {
     this->run_fun_ = &InvokeThunk;
   }
@@ -139,7 +134,6 @@ class Callback
    * @brief 创建回调对象并绑定回调函数与参数 / Create a callback instance with bound
    * function and argument
    *
-   * @tparam FunType 回调函数类型 / Callback function type
    * @tparam ArgType 绑定参数类型 / Bound argument type
    * @param fun 需要绑定的回调函数 / Callback function to bind
    * @param arg 绑定的参数值 / Bound argument value
@@ -147,22 +141,24 @@ class Callback
    *
    * @note 包含动态内存分配 / Contains dynamic memory allocation
    */
-  template <typename FunType, typename ArgType>
-  [[nodiscard]] static Callback Create(FunType fun, ArgType arg)
+  template <typename ArgType>
+  [[nodiscard]] static Callback Create(
+      std::type_identity_t<typename CallbackBlock<ArgType, Args...>::FunctionType> fun,
+      ArgType arg)
   {
-    void (*fun_ptr)(bool, ArgType, Args...) = fun;
-    auto cb_block = new CallbackBlock<ArgType, Args...>(fun_ptr, arg);
+    auto cb_block = new CallbackBlock<ArgType, Args...>(fun, std::move(arg));
     return Callback(cb_block);
   }
 
   /**
    * @brief 创建带防重入保护的回调 / Create a guarded callback
    */
-  template <typename FunType, typename ArgType>
-  [[nodiscard]] static Callback CreateGuarded(FunType fun, ArgType arg)
+  template <typename ArgType>
+  [[nodiscard]] static Callback CreateGuarded(
+      std::type_identity_t<typename CallbackBlock<ArgType, Args...>::FunctionType> fun,
+      ArgType arg)
   {
-    void (*fun_ptr)(bool, ArgType, Args...) = fun;
-    auto cb_block = new GuardedCallbackBlock<ArgType, Args...>(fun_ptr, arg);
+    auto cb_block = new GuardedCallbackBlock<ArgType, Args...>(fun, std::move(arg));
     return Callback(cb_block);
   }
 
