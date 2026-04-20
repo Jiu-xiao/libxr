@@ -38,9 +38,9 @@ void LibXR::PlatformInit()
     WriteInfoBlock info;
     while (true)
     {
-      if (port.queue_info_->Pop(info) != ErrorCode::OK)
+      if (port.queue_info_->Pop(info) != LibXR::ErrorCode::OK)
       {
-        return ErrorCode::OK;
+        return LibXR::ErrorCode::OK;
       }
 
       port.queue_data_->PopBatch(write_buff, info.data.size_);
@@ -57,10 +57,10 @@ void LibXR::PlatformInit()
 
       port.queue_info_->Pop(info);
 
-      port.Finish(false, ErrorCode::OK, info);
+      port.Finish(false, LibXR::ErrorCode::OK, info);
     }
 
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   };
 
   LibXR::STDIO::write_ =
@@ -68,7 +68,7 @@ void LibXR::PlatformInit()
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort&, bool) { return ErrorCode::EMPTY; };
+  auto read_fun = [](ReadPort&, bool) { return LibXR::ErrorCode::EMPTY; };
 
   LibXR::STDIO::read_ =
       new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));

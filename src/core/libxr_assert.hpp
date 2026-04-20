@@ -7,22 +7,6 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 
-/**
- * @brief 触发致命错误并停止程序执行。
- *        Triggers a fatal error and halts execution.
- *
- * 该函数用于指示系统发生严重故障，并立即终止程序执行。
- * 它可用于普通运行环境和 ISR（中断服务例程）环境中。
- * This function is used to indicate a critical failure in the system.
- * It can be called from both normal and ISR (Interrupt Service Routine) contexts.
- *
- * @param file 发生错误的源文件名。 The file where the error occurred.
- * @param line 发生错误的行号。 The line number where the error occurred.
- * @param in_isr 指示错误是否发生在 ISR 上下文中。 Indicates whether the error occurred in
- * an ISR context.
- */
-extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr);
-
 namespace LibXR
 {
 /**

@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "logger.hpp"
 #include "mutex.hpp"
 

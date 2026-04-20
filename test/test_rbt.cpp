@@ -30,7 +30,7 @@ void test_rbt()
       {
         rbt_arg = rbt_arg + 1;
         ASSERT(rbt_arg == node + 1);
-        return ErrorCode::OK;
+        return LibXR::ErrorCode::OK;
       });
 
   for (int i = 0; i < 100; i++)

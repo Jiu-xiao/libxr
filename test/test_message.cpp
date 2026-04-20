@@ -20,7 +20,7 @@ void test_message()
 
   msg[0] = 16.16;
   topic.Publish(msg[0]);
-  ASSERT(sync_suber.Wait(10) == ErrorCode::OK);
+  ASSERT(sync_suber.Wait(10) == LibXR::ErrorCode::OK);
   ASSERT(msg[1] == msg[0]);
   ASSERT(msg_queue.Size() == 1);
   msg_queue.Pop(msg[2]);

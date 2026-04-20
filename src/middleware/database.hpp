@@ -6,6 +6,7 @@
 #include "flash.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 
 namespace LibXR

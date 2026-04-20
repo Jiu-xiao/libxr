@@ -4,6 +4,7 @@
 
 #include "core.hpp"
 #include "device_composition.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 
 using namespace LibXR::USB;
@@ -415,7 +416,7 @@ void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket* setup)
     endpoint_.out0->ClearStall();
   }
 
-  ErrorCode ans = ErrorCode::OK;
+  LibXR::ErrorCode ans = LibXR::ErrorCode::OK;
 
   switch (type)
   {
@@ -429,19 +430,20 @@ void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket* setup)
       ans = ProcessVendorRequest(in_isr, setup, direction, recipient);
       break;
     default:
-      ans = ErrorCode::ARG_ERR;
+      ans = LibXR::ErrorCode::ARG_ERR;
       break;
   }
 
-  if (ans != ErrorCode::OK)
+  if (ans != LibXR::ErrorCode::OK)
   {
     StallControlEndpoint();
   }
 }
 
-ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& setup,
-                                             RequestDirection direction,
-                                             Recipient recipient)
+LibXR::ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr,
+                                                    const SetupPacket*& setup,
+                                                    RequestDirection direction,
+                                                    Recipient recipient)
 {
   UNUSED(in_isr);
   UNUSED(direction);
@@ -451,7 +453,7 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
   // Handle requests for different recipients.
   StandardRequest req = static_cast<StandardRequest>(setup->bRequest);
 
-  ErrorCode ans = ErrorCode::OK;
+  LibXR::ErrorCode ans = LibXR::ErrorCode::OK;
 
   switch (req)
   {
@@ -506,7 +508,7 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
     {
       if (recipient != Recipient::INTERFACE)
       {
-        ans = ErrorCode::ARG_ERR;
+        ans = LibXR::ErrorCode::ARG_ERR;
         break;
       }
 
@@ -521,19 +523,19 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
       }
       else
       {
-        ans = ErrorCode::NOT_FOUND;
+        ans = LibXR::ErrorCode::NOT_FOUND;
         break;
       }
 
       DevWriteEP0Data(LibXR::ConstRawData(&alt, 1), endpoint_.in0->MaxTransferSize(), 1);
-      return ErrorCode::OK;
+      return LibXR::ErrorCode::OK;
     }
 
     case StandardRequest::SET_INTERFACE:
     {
       if (recipient != Recipient::INTERFACE)
       {
-        ans = ErrorCode::ARG_ERR;
+        ans = LibXR::ErrorCode::ARG_ERR;
         break;
       }
 
@@ -543,12 +545,12 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
       auto* item = composition_.FindClassByInterfaceNumber(interface_index);
       if (item == nullptr)
       {
-        ans = ErrorCode::NOT_FOUND;
+        ans = LibXR::ErrorCode::NOT_FOUND;
         break;
       }
 
       ans = item->SetAltSetting(interface_index, alt_setting);
-      if (ans == ErrorCode::OK)
+      if (ans == LibXR::ErrorCode::OK)
       {
         WriteZLP();
       }
@@ -558,24 +560,25 @@ ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& se
     case StandardRequest::SYNCH_FRAME:
       // TODO: 一般仅用于同步端点
       // TODO: typically used for isochronous endpoint sync.
-      ans = ErrorCode::NOT_SUPPORT;
+      ans = LibXR::ErrorCode::NOT_SUPPORT;
       break;
 
     default:
       // 未知请求，直接 STALL
       // Unknown request; STALL.
-      ans = ErrorCode::ARG_ERR;
+      ans = LibXR::ErrorCode::ARG_ERR;
       break;
   }
 
   return ans;
 }
 
-ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup, Recipient recipient)
+LibXR::ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup,
+                                               Recipient recipient)
 {
   if (setup->wLength != 2)
   {
-    return ErrorCode::ARG_ERR;
+    return LibXR::ErrorCode::ARG_ERR;
   }
 
   uint16_t status = 0;
@@ -597,7 +600,7 @@ ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup, Recipient reci
 
       if (ep == nullptr)
       {
-        return ErrorCode::NOT_FOUND;
+        return LibXR::ErrorCode::NOT_FOUND;
       }
 
       if (ep->GetState() == Endpoint::State::STALLED)
@@ -608,16 +611,16 @@ ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup, Recipient reci
     }
 
     default:
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
   }
 
   LibXR::ConstRawData data(&status, 2);
   DevWriteEP0Data(data, endpoint_.in0->MaxTransferSize(), setup->wLength);
 
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
-ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient)
+LibXR::ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient)
 {
   switch (recipient)
   {
@@ -634,7 +637,7 @@ ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient
         if (ep)
         {
           auto ans = ep->ClearStall();
-          if (ans != ErrorCode::OK)
+          if (ans != LibXR::ErrorCode::OK)
           {
             return ans;
           }
@@ -642,12 +645,12 @@ ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient
         }
         else
         {
-          return ErrorCode::NOT_FOUND;
+          return LibXR::ErrorCode::NOT_FOUND;
         }
       }
       else
       {
-        return ErrorCode::ARG_ERR;
+        return LibXR::ErrorCode::ARG_ERR;
       }
       break;
     }
@@ -662,18 +665,18 @@ ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient
       }
       else
       {
-        return ErrorCode::ARG_ERR;
+        return LibXR::ErrorCode::ARG_ERR;
       }
       break;
 
     default:
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
   }
 
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
-ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient recipient)
+LibXR::ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient recipient)
 {
   switch (recipient)
   {
@@ -687,7 +690,7 @@ ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient recipient
         if (ep)
         {
           auto ans = ep->Stall();
-          if (ans != ErrorCode::OK)
+          if (ans != LibXR::ErrorCode::OK)
           {
             return ans;
           }
@@ -695,12 +698,12 @@ ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient recipient
         }
         else
         {
-          return ErrorCode::NOT_FOUND;
+          return LibXR::ErrorCode::NOT_FOUND;
         }
       }
       else
       {
-        return ErrorCode::ARG_ERR;
+        return LibXR::ErrorCode::ARG_ERR;
       }
       break;
     }
@@ -713,19 +716,19 @@ ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient recipient
       }
       else
       {
-        return ErrorCode::ARG_ERR;
+        return LibXR::ErrorCode::ARG_ERR;
       }
       break;
 
     default:
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
   }
 
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
-ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
-                                     Recipient recipient)
+LibXR::ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
+                                            Recipient recipient)
 {
   uint8_t desc_type = (setup->wValue >> 8) & 0xFF;
   uint8_t desc_idx = (setup->wValue) & 0xFF;
@@ -746,7 +749,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
     case 0x02:  // CONFIGURATION
     {
       auto ec = composition_.BuildConfigDescriptor();
-      if (ec != ErrorCode::OK)
+      if (ec != LibXR::ErrorCode::OK)
       {
         return ec;
       }
@@ -759,7 +762,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
       uint8_t string_idx = desc_idx;
       uint16_t lang = setup->wIndex;
       auto ec = composition_.GetStringDescriptor(string_idx, lang, data);
-      if (ec != ErrorCode::OK)
+      if (ec != LibXR::ErrorCode::OK)
       {
         return ec;
       }
@@ -776,7 +779,7 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
 
     case 0x06:  // Device Qualifier
     case 0x07:  // Other Speed Configurations
-      return ErrorCode::NOT_SUPPORT;
+      return LibXR::ErrorCode::NOT_SUPPORT;
 
     default:
     {
@@ -788,54 +791,54 @@ ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
       }
       else
       {
-        return ErrorCode::ARG_ERR;
+        return LibXR::ErrorCode::ARG_ERR;
       }
 
       auto* item = composition_.FindClassByInterfaceNumber(intf_num);
       if (item && item->OnGetDescriptor(in_isr, setup->bRequest, setup->wValue,
-                                        setup->wLength, data) == ErrorCode::OK)
+                                        setup->wLength, data) == LibXR::ErrorCode::OK)
       {
         break;
       }
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
     }
   }
 
   DevWriteEP0Data(data, endpoint_.in0->MaxTransferSize(), setup->wLength, early_read_zlp);
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
-ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
+LibXR::ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
 {
   state_.pending_addr = static_cast<uint8_t>(address & 0x7F);
 
-  const ErrorCode pre_status = SetAddress(address, Context::SETUP_BEFORE_STATUS);
+  const LibXR::ErrorCode pre_status = SetAddress(address, Context::SETUP_BEFORE_STATUS);
   WriteZLP(Context::STATUS_IN_COMPLETE);
-  const ErrorCode armed = SetAddress(address, Context::STATUS_IN_ARMED);
-  return (pre_status != ErrorCode::OK) ? pre_status : armed;
+  const LibXR::ErrorCode armed = SetAddress(address, Context::STATUS_IN_ARMED);
+  return (pre_status != LibXR::ErrorCode::OK) ? pre_status : armed;
 }
 
-ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
+LibXR::ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
 {
-  if (composition_.SwitchConfig(value, in_isr) != ErrorCode::OK)
+  if (composition_.SwitchConfig(value, in_isr) != LibXR::ErrorCode::OK)
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   // ACK status 阶段
   // ACK status stage.
   WriteZLP();
 
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
-ErrorCode DeviceCore::SendConfiguration()
+LibXR::ErrorCode DeviceCore::SendConfiguration()
 {
   uint8_t cfg = composition_.GetCurrentConfig();
   LibXR::ConstRawData data(&cfg, 1);
   DevWriteEP0Data(data, endpoint_.in0->MaxTransferSize(), 1);
 
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 void DeviceCore::StallControlEndpoint()
@@ -850,15 +853,15 @@ void DeviceCore::ClearControlEndpointStall()
   endpoint_.pool.GetEndpoint0In()->ClearStall();
 }
 
-ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
-                                          RequestDirection /*direction*/,
-                                          Recipient recipient)
+LibXR::ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
+                                                 RequestDirection /*direction*/,
+                                                 Recipient recipient)
 {
   // 只处理 Class 请求（bmRequestType bits[6:5] == 01）。
   // Only handle Class requests (bmRequestType bits[6:5] == 01).
   if ((setup->bmRequestType & 0x60) != 0x20)
   {
-    return ErrorCode::NOT_SUPPORT;
+    return LibXR::ErrorCode::NOT_SUPPORT;
   }
 
   DeviceClass* item = nullptr;
@@ -884,18 +887,18 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
     default:
       // Device / Other 一般不在这里处理。
       // Device/Other is typically not handled here.
-      return ErrorCode::NOT_SUPPORT;
+      return LibXR::ErrorCode::NOT_SUPPORT;
   }
 
   if (!item)
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   DeviceClass::ControlTransferResult result{};
   auto ec = item->OnClassRequest(in_isr, setup->bRequest, setup->wValue, setup->wLength,
                                  setup->wIndex, result);
-  if (ec != ErrorCode::OK)
+  if (ec != LibXR::ErrorCode::OK)
   {
     return ec;
   }
@@ -906,7 +909,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
   const bool HAS_WRITE_BUF = (result.write_data.size_ > 0);
   if (HAS_READ_BUF && HAS_WRITE_BUF)
   {
-    return ErrorCode::ARG_ERR;
+    return LibXR::ErrorCode::ARG_ERR;
   }
 
   // Host->Device（OUT）：从主机读数据进 read_data
@@ -915,7 +918,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
   {
     if (setup->wLength == 0 || result.read_data.size_ < setup->wLength)
     {
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
     }
 
     class_req_.read = true;
@@ -926,7 +929,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
     class_req_.data = result.read_data;
 
     DevReadEP0Data(result.read_data, endpoint_.in0->MaxTransferSize());
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
   // Device->Host（IN）：从 write_data 发数据给主机
@@ -935,7 +938,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
   {
     if (setup->wLength == 0)
     {
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
     }
 
     class_req_.write = true;
@@ -952,7 +955,7 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
     // whether a terminating ZLP is required when the payload is shorter than
     // the request but still an exact multiple of bMaxPacketSize0.
     DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize(), setup->wLength);
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
   // 无数据阶段：按类的意愿发送/接收 ZLP（如果有）
@@ -960,26 +963,26 @@ ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
   if (result.read_zlp)
   {
     ReadZLP();
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
   if (result.write_zlp)
   {
     WriteZLP();
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
-ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setup,
-                                           RequestDirection /*direction*/,
-                                           Recipient recipient)
+LibXR::ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setup,
+                                                  RequestDirection /*direction*/,
+                                                  Recipient recipient)
 {
   // 只处理 Vendor 请求（bmRequestType bits[6:5] == 10）
   // Only handle Vendor requests (bmRequestType bits[6:5] == 10).
   if ((setup->bmRequestType & 0x60) != 0x40)
   {
-    return ErrorCode::NOT_SUPPORT;
+    return LibXR::ErrorCode::NOT_SUPPORT;
   }
 
   // 先交给 BOS capabilities 尝试处理（WinUSB / WebUSB / ContainerID 等）。
@@ -987,35 +990,35 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
   {
     BosVendorResult bos_ret{};
     auto bec = composition_.ProcessBosVendorRequest(in_isr, setup, bos_ret);
-    if (bec == ErrorCode::OK && bos_ret.handled)
+    if (bec == LibXR::ErrorCode::OK && bos_ret.handled)
     {
       if (bos_ret.in_data.addr_ != nullptr && bos_ret.in_data.size_ > 0)
       {
         if (setup->wLength == 0)
         {
-          return ErrorCode::ARG_ERR;
+          return LibXR::ErrorCode::ARG_ERR;
         }
 
         DevWriteEP0Data(bos_ret.in_data, endpoint_.in0->MaxTransferSize(), setup->wLength,
                         bos_ret.early_read_zlp);
-        return ErrorCode::OK;
+        return LibXR::ErrorCode::OK;
       }
 
       if (bos_ret.write_zlp)
       {
         WriteZLP();
-        return ErrorCode::OK;
+        return LibXR::ErrorCode::OK;
       }
 
       // handled 但既没有 in_data 也没有 write_zlp：默认 ACK
       // handled but no in_data and no write_zlp: default ACK.
       WriteZLP();
-      return ErrorCode::OK;
+      return LibXR::ErrorCode::OK;
     }
 
     // bec != OK：匹配但错误，直接返回让上层 STALL
     // bec != OK: matched but failed; return to upper layer to STALL.
-    if (bec != ErrorCode::NOT_SUPPORT && bec != ErrorCode::OK)
+    if (bec != LibXR::ErrorCode::NOT_SUPPORT && bec != LibXR::ErrorCode::OK)
     {
       return bec;
     }
@@ -1041,18 +1044,18 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
       // 先不处理 DEVICE/OTHER 级别的 Vendor 请求
       // 暂不处理 DEVICE / OTHER 级别的 Vendor 请求。
       // Do not handle DEVICE / OTHER vendor requests for now.
-      return ErrorCode::NOT_SUPPORT;
+      return LibXR::ErrorCode::NOT_SUPPORT;
   }
 
   if (!item)
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   DeviceClass::ControlTransferResult result{};
   auto ec = item->OnVendorRequest(in_isr, setup->bRequest, setup->wValue, setup->wLength,
                                   setup->wIndex, result);
-  if (ec != ErrorCode::OK)
+  if (ec != LibXR::ErrorCode::OK)
   {
     return ec;
   }
@@ -1062,7 +1065,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
 
   if (HAS_READ_BUF && HAS_WRITE_BUF)
   {
-    return ErrorCode::ARG_ERR;
+    return LibXR::ErrorCode::ARG_ERR;
   }
 
   // Host -> Device（OUT）路径：从主机读数据进 read_data。
@@ -1071,7 +1074,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
   {
     if (setup->wLength == 0 || result.read_data.size_ < setup->wLength)
     {
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
     }
 
     class_req_.read = true;
@@ -1082,7 +1085,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     class_req_.data = result.read_data;
 
     DevReadEP0Data(result.read_data, endpoint_.in0->MaxTransferSize());
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
   // Device -> Host（IN）路径：从 write_data 发数据给主机。
@@ -1091,7 +1094,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
   {
     if (setup->wLength == 0)
     {
-      return ErrorCode::ARG_ERR;
+      return LibXR::ErrorCode::ARG_ERR;
     }
 
     class_req_.write = true;
@@ -1102,7 +1105,7 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
     class_req_.data = result.write_data;
 
     DevWriteEP0Data(result.write_data, endpoint_.in0->MaxTransferSize(), setup->wLength);
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
   // 无数据阶段，只需要 ZLP 的情况
@@ -1110,15 +1113,15 @@ ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setu
   if (result.read_zlp)
   {
     ReadZLP();
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
   if (result.write_zlp)
   {
     WriteZLP();
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 Speed DeviceCore::GetSpeed() const { return state_.speed; }

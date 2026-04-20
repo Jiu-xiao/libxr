@@ -8,8 +8,8 @@ EndpointPool::EndpointPool(size_t endpoint_num)
   ASSERT(endpoint_num >= 2);
 }
 
-ErrorCode EndpointPool::Get(Endpoint*& ep_info, Endpoint::Direction direction,
-                            Endpoint::EPNumber ep_num)
+LibXR::ErrorCode EndpointPool::Get(Endpoint*& ep_info, Endpoint::Direction direction,
+                                   Endpoint::EPNumber ep_num)
 {
   for (uint32_t i = 0; i < SlotCount(); ++i)
   {
@@ -27,14 +27,14 @@ ErrorCode EndpointPool::Get(Endpoint*& ep_info, Endpoint::Direction direction,
           slot_container.slot.data->AvailableDirection() == Endpoint::Direction::BOTH)
       {
         LockFreePool<Endpoint*>::Get(ep_info, i);
-        return ErrorCode::OK;
+        return LibXR::ErrorCode::OK;
       }
     }
   }
-  return ErrorCode::NOT_FOUND;
+  return LibXR::ErrorCode::NOT_FOUND;
 }
 
-ErrorCode EndpointPool::Release(Endpoint* ep_info)
+LibXR::ErrorCode EndpointPool::Release(Endpoint* ep_info)
 {
   for (uint32_t i = 0; i < SlotCount(); ++i)
   {
@@ -45,7 +45,7 @@ ErrorCode EndpointPool::Release(Endpoint* ep_info)
       if (slot.slot.data == ep_info)
       {
         slot.slot.state.store(SlotState::READY, std::memory_order_release);
-        return ErrorCode::OK;
+        return LibXR::ErrorCode::OK;
       }
     }
 
@@ -55,10 +55,10 @@ ErrorCode EndpointPool::Release(Endpoint* ep_info)
     }
   }
 
-  return ErrorCode::NOT_FOUND;
+  return LibXR::ErrorCode::NOT_FOUND;
 }
 
-ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
+LibXR::ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
 {
   const Endpoint::Direction direction =
       (ep_addr & 0x80) ? Endpoint::Direction::IN : Endpoint::Direction::OUT;
@@ -66,7 +66,7 @@ ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
   if ((ep_addr & 0x7F) == 0)
   {
     ans = (direction == Endpoint::Direction::IN) ? ep0_in_ : ep0_out_;
-    return (ans != nullptr) ? ErrorCode::OK : ErrorCode::NOT_FOUND;
+    return (ans != nullptr) ? LibXR::ErrorCode::OK : LibXR::ErrorCode::NOT_FOUND;
   }
 
   for (uint32_t i = 0; i < SlotCount(); ++i)
@@ -78,7 +78,7 @@ ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
         slot_container.slot.data->GetDirection() == direction)
     {
       ans = slot_container.slot.data;
-      return ErrorCode::OK;
+      return LibXR::ErrorCode::OK;
     }
     if (state == SlotState::FREE)
     {
@@ -86,7 +86,7 @@ ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
     }
   }
 
-  return ErrorCode::NOT_FOUND;
+  return LibXR::ErrorCode::NOT_FOUND;
 }
 
 Endpoint* EndpointPool::GetEndpoint0Out() { return ep0_out_; }

@@ -5,6 +5,7 @@
 #include "crc.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "lock_queue.hpp"
 #include "lockfree_list.hpp"

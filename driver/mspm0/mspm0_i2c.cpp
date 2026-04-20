@@ -1,9 +1,9 @@
 #include "mspm0_i2c.hpp"
 
+#include <ti/driverlib/dl_dma.h>
+
 #include <cstdint>
 #include <cstring>
-
-#include "dl_dma.h"
 
 using namespace LibXR;
 
