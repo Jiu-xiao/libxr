@@ -9,7 +9,7 @@ EndpointPool::EndpointPool(size_t endpoint_num)
 }
 
 LibXR::ErrorCode EndpointPool::Get(Endpoint*& ep_info, Endpoint::Direction direction,
-                            Endpoint::EPNumber ep_num)
+                                   Endpoint::EPNumber ep_num)
 {
   for (uint32_t i = 0; i < SlotCount(); ++i)
   {

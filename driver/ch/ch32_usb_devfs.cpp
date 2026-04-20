@@ -423,7 +423,8 @@ CH32USBDeviceFS::CH32USBDeviceFS(
   }
 }
 
-LibXR::ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::DeviceCore::Context context)
+LibXR::ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address,
+                                             USB::DeviceCore::Context context)
 {
   if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {

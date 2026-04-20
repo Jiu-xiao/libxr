@@ -469,14 +469,14 @@ RawData DeviceComposition::GetConfigDescriptor() const { return config_desc_.Get
 ConstRawData DeviceComposition::GetBosDescriptor() { return bos_.GetBosDescriptor(); }
 
 LibXR::ErrorCode DeviceComposition::ProcessBosVendorRequest(bool in_isr,
-                                                     const SetupPacket* setup,
-                                                     BosVendorResult& result)
+                                                            const SetupPacket* setup,
+                                                            BosVendorResult& result)
 {
   return bos_.ProcessVendorRequest(in_isr, setup, result);
 }
 
-LibXR::ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index, uint16_t lang,
-                                                 ConstRawData& data)
+LibXR::ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index,
+                                                        uint16_t lang, ConstRawData& data)
 {
   if (string_index == 0)
   {
@@ -508,7 +508,8 @@ LibXR::ErrorCode DeviceComposition::GetStringDescriptor(uint8_t string_index, ui
 
 bool DeviceComposition::IsComposite() const { return composite_; }
 
-LibXR::ErrorCode DeviceComposition::TryOverrideDeviceDescriptor(DeviceDescriptor& descriptor)
+LibXR::ErrorCode DeviceComposition::TryOverrideDeviceDescriptor(
+    DeviceDescriptor& descriptor)
 {
   if (config_num_ != 1)
   {
@@ -673,7 +674,7 @@ void DeviceComposition::RebuildBosCache()
 }
 
 LibXR::ErrorCode DeviceComposition::GenerateInterfaceString(uint8_t string_index,
-                                                     ConstRawData& data)
+                                                            ConstRawData& data)
 {
   // 接口字符串位于内建 manufacturer/product/serial 之后的索引区间。
   // Interface strings live after the built-in manufacturer/product/serial range.

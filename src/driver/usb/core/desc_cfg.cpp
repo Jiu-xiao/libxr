@@ -59,10 +59,9 @@ size_t ConfigDescriptor::CalcMaxConfigSize(
   return calc_max_config_size(configs);
 }
 
-LibXR::ErrorCode ConfigDescriptor::BuildConfigDescriptor(ConfigDescriptorItem* const* items,
-                                                  size_t item_num,
-                                                  uint8_t configuration_value,
-                                                  uint8_t i_configuration)
+LibXR::ErrorCode ConfigDescriptor::BuildConfigDescriptor(
+    ConfigDescriptorItem* const* items, size_t item_num, uint8_t configuration_value,
+    uint8_t i_configuration)
 {
   if (items == nullptr || item_num == 0)
   {

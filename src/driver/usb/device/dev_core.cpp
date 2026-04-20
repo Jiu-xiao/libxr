@@ -440,9 +440,10 @@ void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket* setup)
   }
 }
 
-LibXR::ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPacket*& setup,
-                                             RequestDirection direction,
-                                             Recipient recipient)
+LibXR::ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr,
+                                                    const SetupPacket*& setup,
+                                                    RequestDirection direction,
+                                                    Recipient recipient)
 {
   UNUSED(in_isr);
   UNUSED(direction);
@@ -572,7 +573,8 @@ LibXR::ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr, const SetupPack
   return ans;
 }
 
-LibXR::ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup, Recipient recipient)
+LibXR::ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup,
+                                               Recipient recipient)
 {
   if (setup->wLength != 2)
   {
@@ -726,7 +728,7 @@ LibXR::ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient re
 }
 
 LibXR::ErrorCode DeviceCore::SendDescriptor(bool in_isr, const SetupPacket* setup,
-                                     Recipient recipient)
+                                            Recipient recipient)
 {
   uint8_t desc_type = (setup->wValue >> 8) & 0xFF;
   uint8_t desc_idx = (setup->wValue) & 0xFF;
@@ -852,8 +854,8 @@ void DeviceCore::ClearControlEndpointStall()
 }
 
 LibXR::ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket* setup,
-                                          RequestDirection /*direction*/,
-                                          Recipient recipient)
+                                                 RequestDirection /*direction*/,
+                                                 Recipient recipient)
 {
   // 只处理 Class 请求（bmRequestType bits[6:5] == 01）。
   // Only handle Class requests (bmRequestType bits[6:5] == 01).
@@ -973,8 +975,8 @@ LibXR::ErrorCode DeviceCore::ProcessClassRequest(bool in_isr, const SetupPacket*
 }
 
 LibXR::ErrorCode DeviceCore::ProcessVendorRequest(bool in_isr, const SetupPacket*& setup,
-                                           RequestDirection /*direction*/,
-                                           Recipient recipient)
+                                                  RequestDirection /*direction*/,
+                                                  Recipient recipient)
 {
   // 只处理 Vendor 请求（bmRequestType bits[6:5] == 10）
   // Only handle Vendor requests (bmRequestType bits[6:5] == 10).
