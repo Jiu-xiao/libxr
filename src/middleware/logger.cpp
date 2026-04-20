@@ -67,7 +67,7 @@ void Logger::PrintToTerminal(const LogData& data)
 
   STDIO::Printf("%s%s [%u](%s:%u) %s%s\r\n", color, LevelToString(data.level),
                 static_cast<uint32_t>(data.timestamp), data.file, data.line, data.message,
-                LIBXR_FORMAT_STR[static_cast<uint8_t>(Format::RESET)]);
+                LIBXR_STYLE_STR[static_cast<uint8_t>(Style::RESET)]);
 }
 
 const char* Logger::GetColor(LogLevel level)
@@ -75,15 +75,15 @@ const char* Logger::GetColor(LogLevel level)
   switch (level)
   {
     case LogLevel::XR_LOG_LEVEL_DEBUG:
-      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::MAGENTA)];
+      return LIBXR_FOREGROUND_STR[static_cast<uint8_t>(Foreground::MAGENTA)];
     case LogLevel::XR_LOG_LEVEL_INFO:
-      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::CYAN)];
+      return LIBXR_FOREGROUND_STR[static_cast<uint8_t>(Foreground::CYAN)];
     case LogLevel::XR_LOG_LEVEL_PASS:
-      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::GREEN)];
+      return LIBXR_FOREGROUND_STR[static_cast<uint8_t>(Foreground::GREEN)];
     case LogLevel::XR_LOG_LEVEL_WARN:
-      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::YELLOW)];
+      return LIBXR_FOREGROUND_STR[static_cast<uint8_t>(Foreground::YELLOW)];
     case LogLevel::XR_LOG_LEVEL_ERROR:
-      return LIBXR_FONT_STR[static_cast<uint8_t>(Font::RED)];
+      return LIBXR_FOREGROUND_STR[static_cast<uint8_t>(Foreground::RED)];
     default:
       return "";
   }
