@@ -1,5 +1,6 @@
 #include "libxr_system.hpp"
 
+#include <cerrno>
 #include <cmath>
 #include <poll.h>
 #include <signal.h>
@@ -26,6 +27,7 @@ uint64_t _libxr_webots_time_count = 0;
 uint32_t _libxr_webots_poll_period_ms = 1;
 webots::Robot* _libxr_webots_robot_handle = nullptr;  // NOLINT
 static float time_step = 0.0f;
+static uint64_t step_interval_ns = 1000000ULL;
 LibXR::condition_var_handle* _libxr_webots_time_notify = nullptr;
 
 static LibXR::Semaphore stdo_sem;
@@ -94,6 +96,39 @@ void StdoThread(LibXR::WritePort* write_port)
 
 namespace
 {
+uint64_t MonotonicNowNanoseconds()
+{
+  timespec ts = {};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
+timespec MonotonicDeadline(uint64_t deadline_ns)
+{
+  timespec ts = {};
+  ts.tv_sec = static_cast<time_t>(deadline_ns / 1000000000ULL);
+  ts.tv_nsec = static_cast<long>(deadline_ns % 1000000000ULL);
+  return ts;
+}
+
+void SleepUntilNanoseconds(uint64_t deadline_ns)
+{
+  const timespec ts = MonotonicDeadline(deadline_ns);
+  while (true)
+  {
+    const int ans = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
+    if (ans == 0)
+    {
+      return;
+    }
+    if (ans != EINTR)
+    {
+      return;
+    }
+  }
+}
+
 void PlatformInitImpl(webots::Robot* robot, uint32_t timer_pri, uint32_t timer_stack_depth,
                       double sim_flow_rate)
 {
@@ -163,6 +198,10 @@ void PlatformInitImpl(webots::Robot* robot, uint32_t timer_pri, uint32_t timer_s
   _libxr_webots_poll_period_ms =
       LibXR::max(1, static_cast<int>(std::lround(static_cast<double>(time_step) /
                                                  sim_flow_rate)));
+  step_interval_ns =
+      LibXR::max<uint64_t>(1ULL, static_cast<uint64_t>(std::llround(
+                                     static_cast<double>(time_step) * 1000000.0 /
+                                     sim_flow_rate)));
 
   _libxr_webots_time_notify = new LibXR::condition_var_handle;
   pthread_mutex_init(&_libxr_webots_time_notify->mutex, nullptr);
@@ -171,10 +210,12 @@ void PlatformInitImpl(webots::Robot* robot, uint32_t timer_pri, uint32_t timer_s
   auto webots_timebase_thread_fun = [](void*)
   {
     poll(nullptr, 0, static_cast<int>(_libxr_webots_poll_period_ms));
+    uint64_t next_deadline_ns = MonotonicNowNanoseconds() + step_interval_ns;
 
     while (true)
     {
-      poll(nullptr, 0, static_cast<int>(_libxr_webots_poll_period_ms));
+      SleepUntilNanoseconds(next_deadline_ns);
+      next_deadline_ns += step_interval_ns;
       const int step_ret = _libxr_webots_robot_handle->step(time_step);
       if (step_ret < 0)
       {
