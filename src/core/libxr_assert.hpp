@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
@@ -25,22 +26,15 @@ class Assert
   using Callback = LibXR::Callback<const char*, uint32_t>;
 
   /**
-   * @brief 注册致命错误的回调函数（左值引用版本）。
-   *        Register a fatal error callback (lvalue reference version).
+   * @brief 注册致命错误的回调函数。
+   *        Register a fatal error callback.
    *
-   * @param cb 要注册的回调函数（左值引用）。The callback function to register (lvalue
-   * reference).
+   * @param cb 要注册的回调函数。The callback function to register.
    */
-  static void RegisterFatalErrorCallback(const Callback& cb);
-
-  /**
-   * @brief 注册致命错误的回调函数（右值引用版本）。
-   *        Register a fatal error callback (rvalue reference version).
-   *
-   * @param cb 要注册的回调函数（右值引用）。The callback function to register (rvalue
-   * reference).
-   */
-  static void RegisterFatalErrorCallback(Callback&& cb);
+  static void RegisterFatalErrorCallback(Callback cb)
+  {
+    libxr_fatal_error_callback_ = std::move(cb);
+  }
 
 #ifdef LIBXR_DEBUG_BUILD
   /**
