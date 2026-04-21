@@ -507,7 +507,7 @@ class DatabaseRaw : public Database
       tmp_key.SetNameLength(0);
       tmp_key.SetDataSize(0);
       Write(0, flash_info);
-      key_buf_offset = GetNextKey(OFFSET_OF(FlashInfo, key));
+      key_buf_offset = GetNextKey(LibXR::OffsetOf(&FlashInfo::key));
     }
     else
     {
@@ -745,7 +745,7 @@ class DatabaseRaw : public Database
     }
 
     KeyInfo key;
-    size_t key_offset = OFFSET_OF(FlashInfo, key);
+    size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
     if (block != BlockType::MAIN)
     {
       key_offset += block_size_;
@@ -831,7 +831,7 @@ class DatabaseRaw : public Database
     }
 
     KeyInfo key;
-    size_t key_offset = OFFSET_OF(FlashInfo, key);
+    size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
     flash_.Read(key_offset, key);
 
     size_t ans = 0, need_cycle = 0;
@@ -1013,7 +1013,7 @@ class DatabaseRaw : public Database
     }
 
     KeyInfo key;
-    size_t key_offset = OFFSET_OF(FlashInfo, key);
+    size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
     flash_.Read(key_offset, key);
     size_t need_cycle = 0;
     while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key))
@@ -1074,7 +1074,7 @@ class DatabaseRaw : public Database
     }
 
     KeyInfo key;
-    size_t key_offset = OFFSET_OF(FlashInfo, key);
+    size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
     flash_.Read(key_offset, key);
 
     if (!IsBlockEmpty(BlockType::BACKUP))
@@ -1082,7 +1082,7 @@ class DatabaseRaw : public Database
       InitBlock(BlockType::BACKUP);
     }
 
-    size_t write_buff_offset = OFFSET_OF(FlashInfo, key) + block_size_;
+    size_t write_buff_offset = LibXR::OffsetOf(&FlashInfo::key) + block_size_;
 
     auto new_key = KeyInfo{};
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.uninit, false);

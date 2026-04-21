@@ -1,23 +1,10 @@
 #pragma once
 
+#include <concepts>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-#ifndef M_2PI
-#define M_2PI (2.0 * M_PI)
-#endif
-
-#ifndef M_1G
-/// \brief 标准重力加速度（m/s²）
-/// \brief Standard gravitational acceleration (m/s²)
-constexpr double M_1G = 9.80665;
-#endif
 
 #ifndef DEF2STR
 #define XR_TO_STR(_arg) #_arg
@@ -30,31 +17,81 @@ constexpr double M_1G = 9.80665;
 #define UNUSED(_x) ((void)(_x))
 #endif
 
-#ifndef OFFSET_OF
-/// \brief 计算结构体成员在结构体中的偏移量
-/// \brief Computes the offset of a member within a struct
-#define OFFSET_OF(type, member) ((size_t)&((type*)0)->member)
-#endif
-
-#ifndef MEMBER_SIZE_OF
-/// \brief 获取结构体成员的大小
-/// \brief Retrieves the size of a member within a struct
-#define MEMBER_SIZE_OF(type, member) (sizeof(decltype(((type*)0)->member)))
-#endif
-
-#ifndef CONTAINER_OF
-/// \brief 通过成员指针获取包含该成员的结构体指针
-/// \brief Retrieve the pointer to the containing structure from a member pointer
-#define CONTAINER_OF(ptr, type, member) \
-  ((type*)((char*)(ptr) - OFFSET_OF(type, member)))  // NOLINT
-#endif
-
-/// \brief 缓存行大小
-static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
-static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void*));
-
 namespace LibXR
 {
+/// \brief PI 常量 / PI constant
+inline constexpr double PI = 3.14159265358979323846;
+
+/// \brief 2PI 常量 / 2PI constant
+inline constexpr double TWO_PI = 2.0 * PI;
+
+/// \brief 标准重力加速度（m/s²） / Standard gravitational acceleration (m/s²)
+inline constexpr double STANDARD_GRAVITY = 9.80665;
+
+/// \brief 缓存行大小 / Cache line size
+inline constexpr size_t CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
+
+/// \brief 平台自然对齐大小 / Native platform alignment size
+inline constexpr size_t ALIGN_SIZE = sizeof(void*);
+
+/**
+ * @brief 指向非静态数据成员的成员指针
+ * @brief Pointer to a non-static data member
+ */
+template <typename OwnerType, typename MemberType>
+concept MemberObjectPointer = std::is_member_object_pointer_v<MemberType OwnerType::*>;
+
+/**
+ * @brief 具有公共类型且可比较大小的类型对
+ * @brief Type pair with a common type and ordering
+ */
+template <typename LeftType, typename RightType>
+concept CommonOrdered = std::common_with<LeftType, RightType> &&
+                        requires(const LeftType& left, const RightType& right)
+{
+  { left < right } -> std::convertible_to<bool>;
+  { left > right } -> std::convertible_to<bool>;
+};
+
+/**
+ * @brief 计算成员在宿主对象中的偏移量
+ * @brief Computes the offset of a member within the owning object
+ * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as `&Type::member`
+ * @return 成员偏移量 | Member offset
+ */
+template <typename OwnerType, typename MemberType>
+requires MemberObjectPointer<OwnerType, MemberType>
+[[nodiscard]] inline size_t OffsetOf(MemberType OwnerType::*member) noexcept
+{
+  return reinterpret_cast<size_t>(
+      &(reinterpret_cast<const volatile OwnerType*>(0)->*member));
+}
+
+/**
+ * @brief 通过成员指针恢复其所属对象指针
+ * @brief Recover the owning object pointer from a member pointer
+ * @param ptr 指向成员的指针 | Pointer to the member
+ * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as `&Type::member`
+ * @return 所属对象指针 | Pointer to the owning object
+ */
+template <typename OwnerType, typename MemberType>
+requires MemberObjectPointer<OwnerType, MemberType>
+[[nodiscard]] inline OwnerType* ContainerOf(MemberType* ptr,
+                                            MemberType OwnerType::*member) noexcept
+{
+  return reinterpret_cast<OwnerType*>(reinterpret_cast<std::byte*>(ptr) -
+                                      OffsetOf(member));
+}
+
+template <typename OwnerType, typename MemberType>
+requires MemberObjectPointer<OwnerType, MemberType>
+[[nodiscard]] inline const OwnerType* ContainerOf(const MemberType* ptr,
+                                                  MemberType OwnerType::*member) noexcept
+{
+  return reinterpret_cast<const OwnerType*>(reinterpret_cast<const std::byte*>(ptr) -
+                                            OffsetOf(member));
+}
+
 /**
  * @enum ErrorCode
  * @brief 定义错误码枚举
@@ -159,14 +196,15 @@ namespace LibXR
 /**
  * @brief 计算两个数的最大值
  * @brief Computes the maximum of two numbers
- * @tparam T1 第一个数的类型 | Type of the first number
- * @tparam T2 第二个数的类型 | Type of the second number
+ * @tparam LeftType 第一个数的类型 | Type of the first number
+ * @tparam RightType 第二个数的类型 | Type of the second number
  * @param a 第一个数 | First number
  * @param b 第二个数 | Second number
  * @return 两数中的较大值 | The larger of the two numbers
  */
-template <typename T1, typename T2>
-constexpr auto max(T1 a, T2 b) -> typename std::common_type<T1, T2>::type
+template <typename LeftType, typename RightType>
+requires CommonOrdered<LeftType, RightType>
+constexpr auto max(LeftType a, RightType b) -> std::common_type_t<LeftType, RightType>
 {
   return (a > b) ? a : b;
 }
@@ -174,14 +212,15 @@ constexpr auto max(T1 a, T2 b) -> typename std::common_type<T1, T2>::type
 /**
  * @brief 计算两个数的最小值
  * @brief Computes the minimum of two numbers
- * @tparam T1 第一个数的类型 | Type of the first number
- * @tparam T2 第二个数的类型 | Type of the second number
+ * @tparam LeftType 第一个数的类型 | Type of the first number
+ * @tparam RightType 第二个数的类型 | Type of the second number
  * @param a 第一个数 | First number
  * @param b 第二个数 | Second number
  * @return 两数中的较小值 | The smaller of the two numbers
  */
-template <typename T1, typename T2>
-constexpr auto min(T1 a, T2 b) -> typename std::common_type<T1, T2>::type
+template <typename LeftType, typename RightType>
+requires CommonOrdered<LeftType, RightType>
+constexpr auto min(LeftType a, RightType b) -> std::common_type_t<LeftType, RightType>
 {
   return (a < b) ? a : b;
 }

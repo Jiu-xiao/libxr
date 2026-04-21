@@ -176,7 +176,7 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
 
 ErrorCode MSPM0UART::WriteFun(WritePort& port, bool)
 {
-  auto* uart = CONTAINER_OF(&port, MSPM0UART, _write_port);
+  auto* uart = LibXR::ContainerOf(&port, &MSPM0UART::_write_port);
   DL_UART_enableInterrupt(uart->res_.instance, DL_UART_INTERRUPT_TX);
   uart->res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
   return ErrorCode::PENDING;
@@ -184,7 +184,7 @@ ErrorCode MSPM0UART::WriteFun(WritePort& port, bool)
 
 ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
 {
-  auto* uart = CONTAINER_OF(&port, MSPM0UART, _read_port);
+  auto* uart = LibXR::ContainerOf(&port, &MSPM0UART::_read_port);
   const uint32_t TIMEOUT_MASK = uart->GetTimeoutInterruptMask();
   if (TIMEOUT_MASK != 0U)
   {

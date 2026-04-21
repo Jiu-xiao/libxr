@@ -390,7 +390,7 @@ class LinuxUART : public UART
 
   static ErrorCode WriteFun(WritePort& port, bool)
   {
-    auto uart = CONTAINER_OF(&port, LinuxUART, _write_port);
+    auto* uart = LibXR::ContainerOf(&port, &LinuxUART::_write_port);
     uart->write_sem_.Post();
     return ErrorCode::OK;
   }

@@ -122,7 +122,7 @@ void LibXR::Topic::RegisterCallback(Callback& cb)
   CallbackBlock block;
   block.cb = cb;
   block.type = SuberType::CALLBACK;
-  auto node = new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+  auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
       LockFreeList::Node<CallbackBlock>(block);
   block_->data_.subers.Add(*node);
 }

@@ -194,7 +194,7 @@ stm32_uart_id_t stm32_uart_get_id(USART_TypeDef* addr)
 
 ErrorCode STM32UART::WriteFun(WritePort& port, bool)
 {
-  STM32UART* uart = CONTAINER_OF(&port, STM32UART, _write_port);
+  auto* uart = LibXR::ContainerOf(&port, &STM32UART::_write_port);
 
   if (uart->in_tx_isr.IsSet())
   {

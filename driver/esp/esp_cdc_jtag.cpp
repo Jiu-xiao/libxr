@@ -99,7 +99,7 @@ void IRAM_ATTR ESP32CDCJtag::IsrEntry(void* arg)
 
 ErrorCode IRAM_ATTR ESP32CDCJtag::WriteFun(WritePort& port, bool in_isr)
 {
-  auto* cdc = CONTAINER_OF(&port, ESP32CDCJtag, _write_port);
+  auto* cdc = LibXR::ContainerOf(&port, &ESP32CDCJtag::_write_port);
   return cdc->TryStartTx(in_isr);
 }
 

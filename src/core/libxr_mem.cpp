@@ -7,8 +7,8 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
   uint8_t* d = static_cast<uint8_t*>(dst);
   const uint8_t* s = static_cast<const uint8_t*>(src);
 
-  uintptr_t d_offset = reinterpret_cast<uintptr_t>(d) & (LIBXR_ALIGN_SIZE - 1);
-  uintptr_t s_offset = reinterpret_cast<uintptr_t>(s) & (LIBXR_ALIGN_SIZE - 1);
+  uintptr_t d_offset = reinterpret_cast<uintptr_t>(d) & (LibXR::ALIGN_SIZE - 1);
+  uintptr_t s_offset = reinterpret_cast<uintptr_t>(s) & (LibXR::ALIGN_SIZE - 1);
 
   /**
    * If source and destination have the same alignment offset,
@@ -19,7 +19,7 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
     /// Handle unaligned head bytes before reaching alignment.
     if (d_offset)
     {
-      size_t head = LIBXR_ALIGN_SIZE - d_offset;
+      size_t head = LibXR::ALIGN_SIZE - d_offset;
       if (head > size)
       {
         head = size;
@@ -31,7 +31,7 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
       }
     }
 
-    if constexpr (LIBXR_ALIGN_SIZE == 8)
+    if constexpr (LibXR::ALIGN_SIZE == 8)
     {
       /// Burst copy 8 bytes per cycle (64-bit), using 8x unrolled loop.
       auto* dw = reinterpret_cast<uint64_t*>(d);
@@ -98,7 +98,7 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
   {
     uintptr_t addr_diff = reinterpret_cast<uintptr_t>(s) - reinterpret_cast<uintptr_t>(d);
 
-    if constexpr (LIBXR_ALIGN_SIZE == 8)
+    if constexpr (LibXR::ALIGN_SIZE == 8)
     {
       /// If address difference is a multiple of 4, use 4-byte copying.
       if ((addr_diff & 3) == 0 && size > 0)
@@ -221,12 +221,12 @@ void LibXR::Memory::FastSet(void* dst, uint8_t value, size_t size)
 
   uint8_t* d = static_cast<uint8_t*>(dst);
 
-  uintptr_t d_offset = reinterpret_cast<uintptr_t>(d) & (LIBXR_ALIGN_SIZE - 1);
+  uintptr_t d_offset = reinterpret_cast<uintptr_t>(d) & (LibXR::ALIGN_SIZE - 1);
 
   // 先处理头部到对齐
   if (d_offset)
   {
-    size_t head = LIBXR_ALIGN_SIZE - d_offset;
+    size_t head = LibXR::ALIGN_SIZE - d_offset;
     if (head > size)
     {
       head = size;
@@ -238,7 +238,7 @@ void LibXR::Memory::FastSet(void* dst, uint8_t value, size_t size)
     }
   }
 
-  if constexpr (LIBXR_ALIGN_SIZE == 8)
+  if constexpr (LibXR::ALIGN_SIZE == 8)
   {
     // 8-byte pattern
     uint64_t pat = value;
@@ -330,13 +330,13 @@ int LibXR::Memory::FastCmp(const void* a, const void* b, size_t size)
     return 0;
   };
 
-  uintptr_t p_off = reinterpret_cast<uintptr_t>(p) & (LIBXR_ALIGN_SIZE - 1);
-  uintptr_t q_off = reinterpret_cast<uintptr_t>(q) & (LIBXR_ALIGN_SIZE - 1);
+  uintptr_t p_off = reinterpret_cast<uintptr_t>(p) & (LibXR::ALIGN_SIZE - 1);
+  uintptr_t q_off = reinterpret_cast<uintptr_t>(q) & (LibXR::ALIGN_SIZE - 1);
 
-  // 若同相位：先补齐到 LIBXR_ALIGN_SIZE 对齐再做宽比较
+  // 若同相位：先补齐到 LibXR::ALIGN_SIZE 对齐再做宽比较
   if ((p_off == q_off) && (p_off != 0))
   {
-    size_t head = LIBXR_ALIGN_SIZE - p_off;
+    size_t head = LibXR::ALIGN_SIZE - p_off;
     if (head > size)
     {
       head = size;
@@ -353,7 +353,7 @@ int LibXR::Memory::FastCmp(const void* a, const void* b, size_t size)
     }
   }
 
-  if constexpr (LIBXR_ALIGN_SIZE == 8)
+  if constexpr (LibXR::ALIGN_SIZE == 8)
   {
     // 8-byte compare（仅在两者均 8 对齐时才安全/快）
     if ((((reinterpret_cast<uintptr_t>(p) | reinterpret_cast<uintptr_t>(q)) & 7u) == 0u))

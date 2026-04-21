@@ -9,7 +9,7 @@ template class LibXR::LockFreeQueue<WriteInfoBlock>;
 template class LibXR::LockFreeQueue<uint8_t>;
 
 ReadPort::ReadPort(size_t buffer_size)
-    : queue_data_(buffer_size > 0 ? new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+    : queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
                                         LockFreeQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {
@@ -263,9 +263,9 @@ void ReadPort::Reset()
 }
 
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
-    : queue_info_(new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+    : queue_info_(new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
                       LockFreeQueue<WriteInfoBlock>(queue_size)),
-      queue_data_(buffer_size > 0 ? new (std::align_val_t(LIBXR_CACHE_LINE_SIZE))
+      queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
                                         LockFreeQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {

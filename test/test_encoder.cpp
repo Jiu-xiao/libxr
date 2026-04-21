@@ -54,7 +54,7 @@ void test_float_encoder()
 
   // 3. Euler angle test: [-π, π]
   {
-    FloatEncoder<BITS> encoder(-M_PI, M_PI);
+    FloatEncoder<BITS> encoder(-LibXR::PI, LibXR::PI);
 
     struct __attribute__((packed))
     {
@@ -63,7 +63,7 @@ void test_float_encoder()
       float decoded;
     } eulr;
 
-    eulr.input = M_PI / 2.0f;
+    eulr.input = LibXR::PI / 2.0f;
     eulr.encoded = encoder.Encode(eulr.input);
     eulr.decoded = encoder.Decode(eulr.encoded);
 

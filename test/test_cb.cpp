@@ -85,6 +85,24 @@ struct GuardedCreationProbe
     self->depth--;
   }
 };
+
+struct LambdaCreationProbe
+{
+  LibXR::Callback<int> cb;
+  int seen_value = 0;
+  bool seen_in_isr = false;
+
+  LambdaCreationProbe()
+      : cb(LibXR::Callback<int>::Create(
+            [](bool in_isr, LambdaCreationProbe* self, int value)
+            {
+              self->seen_value = value;
+              self->seen_in_isr = in_isr;
+            },
+            this))
+  {
+  }
+};
 }  // namespace
 
 void test_cb()
@@ -153,5 +171,12 @@ void test_cb()
     ASSERT(probe.seen_in_isr[0] == false);
     ASSERT(probe.seen_in_isr[1] == false);
     ASSERT(probe.max_depth == 1);
+  }
+
+  {
+    LambdaCreationProbe probe;
+    probe.cb.Run(true, 7);
+    ASSERT(probe.seen_value == 7);
+    ASSERT(probe.seen_in_isr == true);
   }
 }
