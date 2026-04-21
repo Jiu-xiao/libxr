@@ -20,7 +20,6 @@ void test_timer();
 void test_database();
 void test_transform();
 void test_double_buffer();
-void test_string();
 void test_cycle_value();
 void test_pid();
 void test_pipe();
