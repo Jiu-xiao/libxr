@@ -186,7 +186,7 @@ size_t DatabaseRawSequential::GetLastKey(BlockType block)
     return 0;
   }
 
-  size_t offset = OFFSET_OF(FlashInfo, key);
+  size_t offset = LibXR::OffsetOf(&FlashInfo::key);
   while (HasLastKey(offset))
   {
     offset = GetNextKey(offset);
@@ -245,7 +245,7 @@ ErrorCode DatabaseRawSequential::AddKey(const char* name, const void* data, size
   const uint32_t NAME_LEN = strlen(name) + 1;
   size_t last_key_offset = GetLastKey(BlockType::MAIN);
   size_t key_buf_offset =
-      last_key_offset ? GetNextKey(last_key_offset) : OFFSET_OF(FlashInfo, key);
+      last_key_offset ? GetNextKey(last_key_offset) : LibXR::OffsetOf(&FlashInfo::key);
 
   size_t end_pos_offset = key_buf_offset + sizeof(KeyInfo) + NAME_LEN + size;
   if (end_pos_offset > max_buffer_size_ - 1)
@@ -318,7 +318,7 @@ size_t DatabaseRawSequential::SearchKey(const char* name)
     return 0;
   }
 
-  size_t key_offset = OFFSET_OF(FlashInfo, key);
+  size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
   while (true)
   {
     if (KeyNameCompare(key_offset, name) == 0)

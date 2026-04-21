@@ -38,7 +38,7 @@ class LockFreePool
   // NOLINTEND
 
   /// @brief 单个槽结构体 / Individual slot structure (cache line aligned)
-  union alignas(LIBXR_CACHE_LINE_SIZE) Slot
+  union alignas(LibXR::CACHE_LINE_SIZE) Slot
   {
     struct
     {
@@ -46,7 +46,7 @@ class LockFreePool
       Data data;                     ///< 槽内数据 / Stored data
     } slot;
 
-    uint8_t pad[LIBXR_CACHE_LINE_SIZE];  ///< 缓存行填充 / Cache line padding
+    uint8_t pad[LibXR::CACHE_LINE_SIZE];  ///< 缓存行填充 / Cache line padding
 
     Slot()
     {
@@ -65,7 +65,7 @@ class LockFreePool
    */
   LockFreePool(uint32_t slot_count)
       : SLOT_COUNT(slot_count),
-        slots_(new (std::align_val_t(LIBXR_CACHE_LINE_SIZE)) Slot[slot_count])
+        slots_(new (std::align_val_t(LibXR::CACHE_LINE_SIZE)) Slot[slot_count])
   {
     for (uint32_t index = 0; index < SLOT_COUNT; index++)
     {

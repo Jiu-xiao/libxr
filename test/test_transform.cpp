@@ -6,7 +6,7 @@ void test_transform()
 {
   LibXR::Position pos(1., 8., 0.3);
   LibXR::Position pos_new;
-  LibXR::EulerAngle eulr = {M_PI / 12, M_PI / 6, M_PI / 4}, eulr_new;
+  LibXR::EulerAngle eulr = {LibXR::PI / 12, LibXR::PI / 6, LibXR::PI / 4}, eulr_new;
   LibXR::RotationMatrix rot, rot_new;
   LibXR::Quaternion quat, quat_new;
 

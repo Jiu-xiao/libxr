@@ -122,13 +122,13 @@ class Joint
    */
   void SetState(Scalar state)
   {
-    if (state > M_PI)
+    if (state > LibXR::PI)
     {
-      state -= 2 * M_PI;
+      state -= 2 * LibXR::PI;
     }
-    if (state < -M_PI)
+    if (state < -LibXR::PI)
     {
-      state += 2 * M_PI;
+      state += 2 * LibXR::PI;
     }
     runtime_.state_angle.angle() = state;
     runtime_.state_angle.axis() = param_.axis;
@@ -145,13 +145,13 @@ class Joint
    */
   void SetTarget(Scalar target)
   {
-    if (target > M_PI)
+    if (target > LibXR::PI)
     {
-      target -= 2 * M_PI;
+      target -= 2 * LibXR::PI;
     }
-    if (target < -M_PI)
+    if (target < -LibXR::PI)
     {
-      target += 2 * M_PI;
+      target += 2 * LibXR::PI;
     }
     runtime_.target_angle.angle() = target;
     runtime_.target_angle.axis() = param_.axis;

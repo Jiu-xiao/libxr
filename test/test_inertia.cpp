@@ -85,7 +85,7 @@ void test_inertia()
   /* Original behaviour check */
   auto inertia_new = Inertia(0.1, 1., 1., 1., 0., 0., 0.)
                          .Translate(pos)
-                         .Rotate(LibXR::EulerAngle(0., 0., M_PI / 4).ToQuaternion());
+                         .Rotate(LibXR::EulerAngle(0., 0., LibXR::PI / 4).ToQuaternion());
 
   ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
          equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
@@ -95,7 +95,7 @@ void test_inertia()
 
   inertia_new = Inertia(0.1, 1., 1., 1., 0., 0., 0.)
                     .Translate(pos)
-                    .Rotate(LibXR::EulerAngle(0., 0., M_PI / 4).ToRotationMatrix());
+                    .Rotate(LibXR::EulerAngle(0., 0., LibXR::PI / 4).ToRotationMatrix());
 
   ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
          equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&

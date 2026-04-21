@@ -423,7 +423,7 @@ class CDCUart : public CDCBase, public LibXR::UART
   {
     UNUSED(in_isr);
 
-    CDCUart* cdc = CONTAINER_OF(&port, CDCUart, write_port_cdc_);
+    auto* cdc = LibXR::ContainerOf(&port, &CDCUart::write_port_cdc_);
 
     /**
      * @note

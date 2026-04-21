@@ -106,7 +106,7 @@ class Pipe
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr)
   {
-    Pipe* pipe = CONTAINER_OF(&port, Pipe, write_port_);
+    auto* pipe = LibXR::ContainerOf(&port, &Pipe::write_port_);
     WriteInfoBlock info;
     if (port.queue_info_->Pop(info) != ErrorCode::OK)
     {

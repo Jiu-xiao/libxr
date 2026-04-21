@@ -246,7 +246,7 @@ ErrorCode ESP32UART::SetLoopback(bool enable)
 
 ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
 {
-  auto* uart = CONTAINER_OF(&port, ESP32UART, _write_port);
+  auto* uart = LibXR::ContainerOf(&port, &ESP32UART::_write_port);
   return uart->TryStartTx(in_isr);
 }
 
