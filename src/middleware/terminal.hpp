@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +9,6 @@
 #include <utility>
 
 #include "libxr_rw.hpp"
-#include "libxr_string.hpp"
 #include "ramfs.hpp"
 #include "semaphore.hpp"
 #include "stack.hpp"
@@ -147,7 +147,12 @@ class Terminal
   Stack<char> input_line_;         ///< 输入行缓冲区 Input line buffer
   char* arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 Command argument list
   size_t arg_number_ = 0;          ///< 参数数量 Number of arguments
-  Queue<LibXR::String<MAX_LINE_SIZE>> history_;  ///< 历史命令 History of commands
+  struct HistoryLine
+  {
+    std::array<char, MAX_LINE_SIZE + 1> data{};
+    size_t size = 0;
+  };
+  Queue<HistoryLine> history_;  ///< 历史命令 History of commands
   int history_index_ = -1;                       ///< 当前历史索引 Current history index
   bool linefeed_flag_ = false;                   ///< 换行标志 Line feed flag
 
@@ -342,8 +347,8 @@ class Terminal
     offset_ = 0;
     if (history_index_ >= 0)
     {
-      write_stream_ << ConstRawData(history_[-history_index_ - 1].Raw(),
-                                    history_[-history_index_ - 1].Length());
+      const auto& line = history_[-history_index_ - 1];
+      write_stream_ << ConstRawData(line.data.data(), line.size);
     }
     else
     {
@@ -359,9 +364,10 @@ class Terminal
   void CopyHistoryToInputLine()
   {
     input_line_.Reset();
-    for (size_t i = 0; i < history_[-history_index_ - 1].Length(); i++)
+    const auto& line = history_[-history_index_ - 1];
+    for (size_t i = 0; i < line.size; i++)
     {
-      input_line_.Push(history_[-history_index_ - 1][i]);
+      input_line_.Push(line.data[i]);
     }
     history_index_ = -1;
     offset_ = 0;
@@ -379,7 +385,11 @@ class Terminal
     {
       history_.Pop();
     }
-    history_.Push(*reinterpret_cast<String<MAX_LINE_SIZE>*>(&input_line_[0]));
+
+    HistoryLine history_line{};
+    history_line.size = input_line_.Size() - 1;
+    std::memcpy(history_line.data.data(), &input_line_[0], input_line_.Size());
+    history_.Push(history_line);
   }
 
   /**

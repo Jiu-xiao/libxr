@@ -498,22 +498,7 @@ void WritePort::Reset()
 WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
     : port_(port), op_(op)
 {
-  BusyState expected = BusyState::IDLE;
-  if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
-                                            std::memory_order_acq_rel,
-                                            std::memory_order_acquire))
-  {
-    return;
-  }
-
-  if (port_->queue_info_->EmptySize() < 1)
-  {
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-    return;
-  }
-
-  locked_ = true;
-  cap_ = port_->queue_data_->EmptySize();
+  UNUSED(EnsureLocked());
 }
 
 WritePort::Stream::~Stream()
@@ -539,34 +524,63 @@ WritePort::Stream::~Stream()
 
 WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
 {
-  if (!locked_)
-  {
-    BusyState expected = BusyState::IDLE;
-    if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
-                                              std::memory_order_acq_rel,
-                                              std::memory_order_acquire))
-    {
-      return *this;
-    }
-
-    if (port_->queue_info_->EmptySize() < 1)
-    {
-      port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-      return *this;
-    }
-
-    locked_ = true;
-    cap_ = port_->queue_data_->EmptySize();
-  }
-  if (size_ + data.size_ <= cap_)
-  {
-    auto ans = port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                             data.size_);
-    ASSERT(ans == ErrorCode::OK);
-    size_ += data.size_;
-  }
+  UNUSED(Append(data));
 
   return *this;
+}
+
+ErrorCode WritePort::Stream::EnsureLocked()
+{
+  if (locked_)
+  {
+    return ErrorCode::OK;
+  }
+  if (port_ == nullptr)
+  {
+    return ErrorCode::PTR_NULL;
+  }
+
+  BusyState expected = BusyState::IDLE;
+  if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire))
+  {
+    return ErrorCode::BUSY;
+  }
+
+  if (port_->queue_info_->EmptySize() < 1)
+  {
+    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    return ErrorCode::FULL;
+  }
+
+  locked_ = true;
+  cap_ = port_->queue_data_->EmptySize();
+  return ErrorCode::OK;
+}
+
+ErrorCode WritePort::Stream::Append(ConstRawData data)
+{
+  if (data.size_ == 0)
+  {
+    return ErrorCode::OK;
+  }
+
+  auto ec = EnsureLocked();
+  if (ec != ErrorCode::OK)
+  {
+    return ec;
+  }
+  if (data.size_ > RemainingSize())
+  {
+    return ErrorCode::FULL;
+  }
+
+  auto ans =
+      port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
+  ASSERT(ans == ErrorCode::OK);
+  size_ += data.size_;
+  return ErrorCode::OK;
 }
 
 ErrorCode WritePort::Stream::Commit()

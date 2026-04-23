@@ -5,10 +5,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
+#include <string_view>
 #include <utility>
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
+#include "libxr_format.hpp"
 #include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_queue.hpp"
@@ -607,6 +610,31 @@ class WritePort
      */
     Stream& operator<<(const ConstRawData& data);
 
+    ErrorCode Write(std::string_view text) { return Append(ConstRawData(text)); }
+
+    template <FixedString Text, typename... Args>
+    ErrorCode Write(const LibXR::Format<Text>& format, Args&&... args)
+    {
+      auto ec = EnsureLocked();
+      if (ec != ErrorCode::OK)
+      {
+        return ec;
+      }
+
+      struct StreamSink
+      {
+        ErrorCode Write(std::string_view text)
+        {
+          return stream->Append(ConstRawData(text));
+        }
+
+        Stream* stream;
+      };
+
+      StreamSink stream_sink{this};
+      return LibXR::Print::Write(stream_sink, format, std::forward<Args>(args)...);
+    }
+
     /**
      * @brief 手动提交已写入的数据到队列，并释放当前锁。
      * @brief Manually commit accumulated data to the queue, then release the current
@@ -622,6 +650,10 @@ class WritePort
     ErrorCode Commit();
 
    private:
+    ErrorCode EnsureLocked();
+    ErrorCode Append(ConstRawData data);
+    [[nodiscard]] size_t RemainingSize() const { return locked_ ? cap_ - size_ : 0; }
+
     LibXR::WritePort* port_;    ///< 写端口指针 Pointer to the WritePort
     LibXR::WriteOperation op_;  ///< 写操作对象 Write operation object
     size_t cap_;                ///< 当前队列容量 Current queue capacity
@@ -778,6 +810,65 @@ class STDIO
       printf_buff_[LIBXR_PRINTF_BUFFER_SIZE];  ///< Print buffer. 打印缓冲区。
 #endif
   // NOLINTEND
+
+  template <FixedString Text, typename... Args>
+  static int Printf(const LibXR::Format<Text>& format, Args&&... args)
+  {
+    if (!STDIO::write_ || !STDIO::write_->Writable())
+    {
+      return -1;
+    }
+
+    if (!write_mutex_)
+    {
+      write_mutex_ = new LibXR::Mutex();
+    }
+
+    LibXR::Mutex::LockGuard lock_guard(*write_mutex_);
+
+    struct CountingSink
+    {
+      ErrorCode Write(std::string_view text)
+      {
+        auto ec = stream->Write(text);
+        if (ec == ErrorCode::OK)
+        {
+          size += text.size();
+        }
+        return ec;
+      }
+
+      WritePort::Stream* stream;
+      size_t size = 0;
+    };
+
+    static WriteOperation op;  // NOLINT
+    auto use_stream = [&](WritePort::Stream& stream) -> int
+    {
+      CountingSink sink{&stream};
+      auto ec = LibXR::Print::Write(sink, format, std::forward<Args>(args)...);
+      if (ec != ErrorCode::OK)
+      {
+        return -1;
+      }
+
+      ec = stream.Commit();
+      if (ec != ErrorCode::OK || sink.size > static_cast<size_t>(std::numeric_limits<int>::max()))
+      {
+        return -1;
+      }
+
+      return static_cast<int>(sink.size);
+    };
+
+    if (write_stream_ == nullptr)
+    {
+      WritePort::Stream stream(write_, op);
+      return use_stream(stream);
+    }
+
+    return use_stream(*write_stream_);
+  }
 
   /**
    * @brief Prints a formatted string to the write port (like printf).
