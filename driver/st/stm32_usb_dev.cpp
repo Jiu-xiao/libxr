@@ -1,5 +1,6 @@
 #include "stm32_usb_dev.hpp"
 
+#include "stm32_dcache.hpp"
 #if defined(HAL_PCD_MODULE_ENABLED)
 
 using namespace LibXR;
@@ -32,8 +33,7 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
   }
 
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_InvalidateDCache_by_Addr(hpcd->Setup,
-                               static_cast<int32_t>(sizeof(USB::SetupPacket)));
+  STM32_InvalidateDCacheByAddr(hpcd->Setup, sizeof(USB::SetupPacket));
 #endif
 
   usb->GetEndpoint0In()->SetState(USB::Endpoint::State::IDLE);

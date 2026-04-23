@@ -1,5 +1,6 @@
 #include "stm32_i2c.hpp"
 
+#include "stm32_dcache.hpp"
 #ifdef HAL_I2C_MODULE_ENABLED
 
 using namespace LibXR;
@@ -243,8 +244,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
       block_wait_.Start(*op.data.sem_info.sem);
     }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(dma_buff_.addr_),
-                            write_data.size_);
+    STM32_CleanDCacheByAddr(dma_buff_.addr_, write_data.size_);
 #endif
     const HAL_StatusTypeDef st = HAL_I2C_Master_Transmit_DMA(
         i2c_handle_, dev_addr, reinterpret_cast<uint8_t*>(dma_buff_.addr_),
@@ -369,8 +369,7 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
       block_wait_.Start(*op.data.sem_info.sem);
     }
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(dma_buff_.addr_),
-                            write_data.size_);
+    STM32_CleanDCacheByAddr(dma_buff_.addr_, write_data.size_);
 #endif
     const HAL_StatusTypeDef st = HAL_I2C_Mem_Write_DMA(
         i2c_handle_, dev_addr, mem_addr,
@@ -441,7 +440,7 @@ extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef* hi2c)
     ec = (hi2c->ErrorCode == HAL_I2C_ERROR_NONE) ? ErrorCode::OK : ErrorCode::FAILED;
 #endif
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
+    STM32_InvalidateDCacheByAddr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
     if (ec == ErrorCode::OK)
     {
@@ -512,7 +511,7 @@ extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
     ec = (hi2c->ErrorCode == HAL_I2C_ERROR_NONE) ? ErrorCode::OK : ErrorCode::FAILED;
 #endif
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_InvalidateDCache_by_Addr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
+    STM32_InvalidateDCacheByAddr(i2c->dma_buff_.addr_, i2c->read_buff_.size_);
 #endif
     if (ec == ErrorCode::OK)
     {
