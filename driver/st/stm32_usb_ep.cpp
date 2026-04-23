@@ -218,12 +218,10 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   {
     ep->dma_addr = reinterpret_cast<uint32_t>(ep->xfer_buff);
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     if (is_in == true)
     {
       STM32_CleanDCacheByAddr(buffer.addr_, size);
     }
-#endif
   }
 #endif
 
@@ -378,9 +376,7 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   size_t actual_transfer_size = ep_handle->xfer_count;
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
   STM32_InvalidateDCacheByAddr(ep->GetBuffer().addr_, actual_transfer_size);
-#endif
 
   ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }

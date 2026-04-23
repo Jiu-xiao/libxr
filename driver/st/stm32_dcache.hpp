@@ -72,11 +72,12 @@ inline void STM32_CleanDCacheByAddr(const void* addr, size_t size)
  * @brief Invalidates D-Cache lines covering the specified memory range
  * @brief 失效指定内存范围覆盖的 D-Cache cache line
  */
-inline void STM32_InvalidateDCacheByAddr(void* addr, size_t size)
+inline void STM32_InvalidateDCacheByAddr(const void* addr, size_t size)
 {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+  auto* raw = const_cast<void*>(addr);
   const auto dsize = static_cast<int32_t>(size);
-  STM32_CallDCacheByAddr(&SCB_InvalidateDCache_by_Addr, addr, dsize);
+  STM32_CallDCacheByAddr(&SCB_InvalidateDCache_by_Addr, raw, dsize);
 #else
   (void)addr;
   (void)size;
