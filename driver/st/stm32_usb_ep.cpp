@@ -376,7 +376,10 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   size_t actual_transfer_size = ep_handle->xfer_count;
 
-  STM32_InvalidateDCacheByAddr(ep->GetBuffer().addr_, actual_transfer_size);
+  if (STM32USBUsesDma(hpcd))
+  {
+    STM32_InvalidateDCacheByAddr(ep->GetBuffer().addr_, actual_transfer_size);
+  }
 
   ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }
