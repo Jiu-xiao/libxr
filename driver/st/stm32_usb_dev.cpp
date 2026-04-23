@@ -32,7 +32,10 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
     return;
   }
 
-  STM32_InvalidateDCacheByAddr(hpcd->Setup, sizeof(USB::SetupPacket));
+  if (STM32USBUsesDma(hpcd))
+  {
+    STM32_InvalidateDCacheByAddr(hpcd->Setup, sizeof(USB::SetupPacket));
+  }
 
   usb->GetEndpoint0In()->SetState(USB::Endpoint::State::IDLE);
   usb->GetEndpoint0Out()->SetState(USB::Endpoint::State::IDLE);
