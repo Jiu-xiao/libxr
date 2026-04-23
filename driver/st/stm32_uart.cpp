@@ -1,5 +1,6 @@
 #include "stm32_uart.hpp"
 
+#include "stm32_dcache.hpp"
 #ifdef HAL_UART_MODULE_ENABLED
 
 using namespace LibXR;
@@ -246,10 +247,7 @@ ErrorCode STM32UART::WriteFun(WritePort& port, bool)
 
     port.queue_info_->Pop(uart->write_info_active_);
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(
-        reinterpret_cast<uint32_t*>(uart->dma_buff_tx_.ActiveBuffer()), info.data.size_);
-#endif
+    STM32_CleanDCacheByAddr(uart->dma_buff_tx_.ActiveBuffer(), info.data.size_);
 
     uart->dma_buff_tx_.SetActiveLength(info.data.size_);
     uart->tx_busy_.Set();
@@ -375,9 +373,7 @@ static inline void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef* uart_handle)
       dma_size - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);  // 当前 DMA 写入位置
   size_t last_pos = uart->last_rx_pos_;
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_InvalidateDCache_by_Addr(rx_buf, dma_size);
-#endif
+  STM32_InvalidateDCacheByAddr(rx_buf, dma_size);
 
   if (curr_pos != last_pos)
   {
@@ -416,10 +412,7 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 
   uart->dma_buff_tx_.Switch();
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(uart->dma_buff_tx_.ActiveBuffer()),
-                          pending_len);
-#endif
+  STM32_CleanDCacheByAddr(uart->dma_buff_tx_.ActiveBuffer(), pending_len);
 
   uart->dma_buff_tx_.SetActiveLength(pending_len);
   uart->tx_busy_.Set();

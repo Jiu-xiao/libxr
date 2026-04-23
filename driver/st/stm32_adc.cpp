@@ -1,6 +1,7 @@
 #include "stm32_adc.hpp"
 
 #include "libxr_def.hpp"
+#include "stm32_dcache.hpp"
 
 #ifdef HAL_ADC_MODULE_ENABLED
 
@@ -96,9 +97,7 @@ float STM32ADC::ReadChannel(uint8_t channel)
   uint16_t* buffer = reinterpret_cast<uint16_t*>(dma_buffer_.addr_);
   if (use_dma_)
   {
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_InvalidateDCache_by_Addr(buffer, filter_size_ * NUM_CHANNELS * 2);
-#endif
+    STM32_InvalidateDCacheByAddr(buffer, filter_size_ * NUM_CHANNELS * 2);
     uint32_t sum = 0;
     for (uint8_t i = 0; i < filter_size_; ++i)
     {
