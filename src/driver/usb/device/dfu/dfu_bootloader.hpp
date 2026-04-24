@@ -55,20 +55,15 @@ class DfuBootloaderBackend
       erase_block_size_ = 1u;
     }
     erase_block_count_ = (image_size_limit_ + erase_block_size_ - 1u) / erase_block_size_;
+    if (erase_block_count_ > sizeof(erased_blocks_storage_))
+    {
+      erase_block_count_ = sizeof(erased_blocks_storage_);
+    }
     if (erase_block_count_ > 0u)
     {
-      erased_blocks_ = new (std::nothrow) uint8_t[erase_block_count_];
-      if (erased_blocks_ != nullptr)
-      {
-        std::memset(erased_blocks_, 0, erase_block_count_);
-      }
+      erased_blocks_ = erased_blocks_storage_;
+      std::memset(erased_blocks_, 0, erase_block_count_);
     }
-    seal_storage_size_ = erase_block_size_;
-    if (seal_storage_size_ < sizeof(SealRecord))
-    {
-      seal_storage_size_ = sizeof(SealRecord);
-    }
-    seal_storage_ = new (std::nothrow) uint8_t[seal_storage_size_];
     transfer_size_ = PayloadLimit();
     if (transfer_size_ == 0u)
     {
@@ -78,7 +73,11 @@ class DfuBootloaderBackend
     {
       transfer_size_ = 4096u;
     }
-    write_buffer_ = new (std::nothrow) uint8_t[transfer_size_];
+    if (transfer_size_ > sizeof(write_buffer_storage_))
+    {
+      transfer_size_ = sizeof(write_buffer_storage_);
+    }
+    write_buffer_ = write_buffer_storage_;
     ResetTransferState();
     image_.launch_requested = false;
     image_.ready = false;
@@ -557,29 +556,22 @@ class DfuBootloaderBackend
                                                       sizeof(seal)}) == ErrorCode::OK;
   }
 
-  // seal 先写入一个擦除块大小的临时缓冲区，
-  // 因此调用方不需要板级专用 side storage。
-  // The seal is staged in an erase-block-sized scratch buffer, so callers do
-  // not need board-specific side storage.
+  // Erase the seal sector, then write only the fixed-size seal record.
   bool WriteSeal(size_t image_size, uint32_t crc32)
   {
-    if (seal_storage_ == nullptr)
-    {
-      return false;
-    }
-    std::memset(seal_storage_, 0xFF, seal_storage_size_);
-    auto* seal = reinterpret_cast<SealRecord*>(seal_storage_);
-    seal->magic = kSealMagic;
-    seal->image_size = static_cast<uint32_t>(image_size);
-    seal->crc32 = crc32;
-    seal->crc32_inv = ~crc32;
+    SealRecord seal;
+    seal.magic = kSealMagic;
+    seal.image_size = static_cast<uint32_t>(image_size);
+    seal.crc32 = crc32;
+    seal.crc32_inv = ~crc32;
 
     if (flash_.Erase(image_offset_ + seal_offset_, erase_block_size_) != ErrorCode::OK)
     {
       return false;
     }
     return flash_.Write(image_offset_ + seal_offset_,
-                        {seal_storage_, seal_storage_size_}) == ErrorCode::OK;
+                        {reinterpret_cast<const uint8_t*>(&seal), sizeof(seal)}) ==
+           ErrorCode::OK;
   }
 
   // 探测 flash 当前是否已有有效的已封印镜像，
@@ -719,11 +711,11 @@ class DfuBootloaderBackend
   void* jump_app_ctx_ = nullptr;        ///< 跳转上下文 / Jump callback context
   bool autorun_ = true;    ///< manifest 后是否自动请求运行 / Autorun after manifest
   ImageState image_ = {};  ///< 镜像级状态 / Image-level state
+  uint8_t erased_blocks_storage_[16] = {};
+  uint8_t write_buffer_storage_[1024] = {};
   size_t erase_block_size_ = 1u;      ///< 最小擦除粒度 / Minimum erase granularity
   size_t erase_block_count_ = 0u;     ///< 受管块数量 / Number of tracked erase blocks
   uint8_t* erased_blocks_ = nullptr;  ///< 每块擦除标记 / Per-block erase marks
-  size_t seal_storage_size_ = 0u;     ///< seal 暂存大小 / Seal scratch size
-  uint8_t* seal_storage_ = nullptr;   ///< seal 暂存区 / Seal scratch buffer
   size_t transfer_size_ = 0u;         ///< 单次 DFU 传输上限 / Per-transfer DFU limit
   uint8_t* write_buffer_ = nullptr;   ///< 下载块暂存区 / Download chunk buffer
   uint8_t crc_buffer_[256] = {};      ///< CRC 分块缓冲 / CRC chunk buffer
