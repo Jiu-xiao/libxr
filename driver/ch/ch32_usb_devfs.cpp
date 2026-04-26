@@ -210,8 +210,66 @@ static LibXR::RawData select_buffer_dev_fs(USB::Endpoint::EPNumber ep_num,
   return LibXR::RawData(reinterpret_cast<uint8_t*>(buffer.addr_) + HALF, HALF);
 }
 
+static void drain_usbdev_fs_pending_irqs()
+{
+  while (true)
+  {
+    const uint16_t ISTR = *usbdev_istr();
+
+    if (ISTR & USB_ISTR_RESET)
+    {
+      usbdev_clear_istr(USB_ISTR_RESET);
+      continue;
+    }
+
+    if (ISTR & USB_ISTR_SUSP)
+    {
+      usbdev_clear_istr(USB_ISTR_SUSP);
+      continue;
+    }
+
+    if (ISTR & USB_ISTR_WKUP)
+    {
+      usbdev_clear_istr(USB_ISTR_WKUP);
+      continue;
+    }
+
+    if ((ISTR & USB_ISTR_CTR) == 0)
+    {
+      break;
+    }
+
+    const uint8_t EP_ID = static_cast<uint8_t>(ISTR & USB_ISTR_EP_ID);
+
+    uint16_t epr = *usbdev_ep_reg(EP_ID);
+    if (epr & USB_EP_CTR_RX)
+    {
+      LibXR::CH32EndpointDevFs::ClearEpCtrRx(EP_ID);
+    }
+
+    epr = *usbdev_ep_reg(EP_ID);
+    if (epr & USB_EP_CTR_TX)
+    {
+      LibXR::CH32EndpointDevFs::ClearEpCtrTx(EP_ID);
+    }
+
+    // We only drain the bits that are latched right now. If the host produces a
+    // new event after that point, hardware will assert the IRQ again and the next
+    // handler entry will observe it.
+    // 这里只清掉当前已经锁存的 pending 位；如果主机随后又产生了新事件，
+    // 硬件会重新拉起 IRQ，下一次进入 handler 时再处理。
+  }
+}
+
 static void usbdev_fs_irqhandler()
 {
+  auto* usb = LibXR::CH32USBDeviceFS::self_;
+  if (usb == nullptr || !usb->IsInited())
+  {
+    drain_usbdev_fs_pending_irqs();
+    return;
+  }
+
   auto& map = LibXR::CH32EndpointDevFs::map_dev_fs_;
 
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
@@ -238,8 +296,8 @@ static void usbdev_fs_irqhandler()
 
       LibXR::CH32EndpointDevFs::ResetPMAAllocator();
 
-      LibXR::CH32USBDeviceFS::self_->Deinit(true);
-      LibXR::CH32USBDeviceFS::self_->Init(true);
+      usb->Deinit(true);
+      usb->Init(true);
 
       out0->SetState(LibXR::USB::Endpoint::State::IDLE);
       in0->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -257,8 +315,8 @@ static void usbdev_fs_irqhandler()
     {
       usbdev_clear_istr(USB_ISTR_SUSP);
 
-      LibXR::CH32USBDeviceFS::self_->Deinit(true);
-      LibXR::CH32USBDeviceFS::self_->Init(true);
+      usb->Deinit(true);
+      usb->Init(true);
 
       out0->SetState(LibXR::USB::Endpoint::State::IDLE);
       in0->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -302,9 +360,8 @@ static void usbdev_fs_irqhandler()
           LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
 
           out0->CopyRxDataToBuffer(sizeof(LibXR::USB::SetupPacket));
-          LibXR::CH32USBDeviceFS::self_->OnSetupPacket(
-              true,
-              reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_));
+          usb->OnSetupPacket(true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
+                                       out0->GetBuffer().addr_));
 
           continue;
         }
@@ -378,8 +435,6 @@ CH32USBDeviceFS::CH32USBDeviceFS(
       USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
                       pid, bcd, LANG_LIST, CONFIGS, uid)
 {
-  self_ = this;
-
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -444,9 +499,6 @@ LibXR::ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address,
 
 void CH32USBDeviceFS::Start(bool)
 {
-  LibXR::CH32UsbCanShared::usb_inited.store(true, std::memory_order_release);
-  LibXR::CH32UsbCanShared::register_usb_irq(&usb_irq_thunk);
-
   // FSDEV 使用共享 USB 48 MHz 时钟；如果这个时钟来自 USBHS PHY PLL，
   // 则必须先打开 USBHS 依赖时钟，再打开 USBDEV 本体时钟。
   // FSDEV uses the shared USB 48 MHz clock; when that clock comes from the
@@ -519,12 +571,17 @@ void CH32USBDeviceFS::Start(bool)
     }
     (void)out->Transfer(out->MaxTransferSize());
   }
+
+  self_ = this;
+  LibXR::CH32UsbCanShared::usb_inited.store(true, std::memory_order_release);
+  LibXR::CH32UsbCanShared::register_usb_irq(&usb_irq_thunk);
 }
 
 void CH32USBDeviceFS::Stop(bool)
 {
   LibXR::CH32UsbCanShared::register_usb_irq(nullptr);
   LibXR::CH32UsbCanShared::usb_inited.store(false, std::memory_order_release);
+  self_ = nullptr;
 
 #if defined(EXTEN_USBD_PU_EN)
   EXTEN->EXTEN_CTR &= ~EXTEN_USBD_PU_EN;

@@ -86,14 +86,9 @@ void ESP32USBDevice::Init(bool in_isr)
 {
   ResetFifoState();
   USB::DeviceCore::Init(in_isr);
-  runtime_.core_inited = true;
 }
 
-void ESP32USBDevice::Deinit(bool in_isr)
-{
-  USB::DeviceCore::Deinit(in_isr);
-  runtime_.core_inited = false;
-}
+void ESP32USBDevice::Deinit(bool in_isr) { USB::DeviceCore::Deinit(in_isr); }
 
 ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
@@ -117,7 +112,7 @@ void ESP32USBDevice::Start(bool)
   ASSERT(EnsureInterruptReady());
 
   InitializeCore();
-  if (runtime_.core_inited)
+  if (IsInited())
   {
     USB::DeviceCore::Deinit(false);
     USB::DeviceCore::Init(false);
@@ -494,7 +489,7 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
 
   dev->dcfg_reg.devaddr = 0U;
 
-  if (runtime_.core_inited)
+  if (IsInited())
   {
     Deinit(in_isr);
     Init(in_isr);

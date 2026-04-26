@@ -23,7 +23,10 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 
@@ -47,7 +50,10 @@ extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 
@@ -64,7 +70,10 @@ extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 
@@ -79,7 +88,10 @@ extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 

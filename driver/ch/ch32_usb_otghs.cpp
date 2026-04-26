@@ -185,11 +185,39 @@ static void HandleTransferToken(OtgHsEndpointMap& map, uint8_t int_st)
   }
 }
 
+static void ClearPendingOtgHsInterrupts()
+{
+  while (true)
+  {
+    const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
+        reinterpret_cast<uintptr_t>(&USBHSD->INT_FG));
+    const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
+    if (INTFLAG == 0u)
+    {
+      break;
+    }
+    USBHSD->INT_FG = INTFLAG;
+
+    // This loop drains only the bits already latched in INT_FG. If hardware
+    // observes another bus event later, it will assert a new IRQ and the next
+    // handler entry will clear it.
+    // 这个循环只清理 INT_FG 里已经锁存的位；如果之后又出现新的总线事件，
+    // 硬件会重新触发 IRQ，由下一次进入 handler 时再清。
+  }
+}
+
 }  // namespace
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandler(void)
 {
+  auto* usb = LibXR::CH32USBOtgHS::self_;
+  if (usb == nullptr || !usb->IsInited())
+  {
+    ClearPendingOtgHsInterrupts();
+    return;
+  }
+
   auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 
   // Handle order matters: recover bus-level events first, then settle EP0 setup
@@ -216,16 +244,16 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
     if (INTFLAG & USBHS_UIF_BUS_RST)
     {
       USBHSD->DEV_AD = 0;
-      LibXR::CH32USBOtgHS::self_->Deinit(true);
-      LibXR::CH32USBOtgHS::self_->Init(true);
+      usb->Deinit(true);
+      usb->Init(true);
       ResetEp0State(map);
       clear_mask |= USBHS_UIF_BUS_RST;
     }
 
     if (INTFLAG & USBHS_UIF_SUSPEND)
     {
-      LibXR::CH32USBOtgHS::self_->Deinit(true);
-      LibXR::CH32USBOtgHS::self_->Init(true);
+      usb->Deinit(true);
+      usb->Init(true);
       ResetEp0State(map);
       clear_mask |= USBHS_UIF_SUSPEND;
     }
@@ -247,7 +275,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
       ASSERT(out0 != nullptr);
       const auto* setup =
           reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_);
-      LibXR::CH32USBOtgHS::self_->OnSetupPacket(true, setup);
+      usb->OnSetupPacket(true, setup);
       clear_mask |= USBHS_UIF_SETUP_ACT;
     }
 
@@ -276,7 +304,6 @@ CH32USBOtgHS::CH32USBOtgHS(
                       USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd,
                       LANG_LIST, CONFIGS, uid)
 {
-  self_ = this;
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -345,6 +372,7 @@ void CH32USBOtgHS::Start(bool)
       USBHS_UIE_SETUP_ACT | USBHS_UIE_TRANSFER | USBHS_UIE_DETECT | USBHS_UIE_SUSPEND;
   USBHSD->CONTROL |= USBHS_UC_DEV_PU_EN;
   NVIC_EnableIRQ(USBHS_IRQn);
+  self_ = this;
 }
 
 void CH32USBOtgHS::Stop(bool)
@@ -352,6 +380,7 @@ void CH32USBOtgHS::Stop(bool)
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
   USBHSD->CONTROL = 0;
   NVIC_DisableIRQ(USBHS_IRQn);
+  self_ = nullptr;
 }
 
 #endif  // defined(USBHSD)

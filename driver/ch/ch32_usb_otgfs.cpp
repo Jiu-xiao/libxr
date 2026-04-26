@@ -10,17 +10,51 @@ using namespace LibXR::USB;
 
 #if defined(USBFSD)
 
+namespace
+{
+
+constexpr uint8_t kOtgFsClearableMask = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
+                                        USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
+                                        USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
+
+static void ClearPendingOtgFsInterrupts()
+{
+  while (true)
+  {
+    const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
+        reinterpret_cast<uintptr_t>(&USBFSD->INT_FG));
+    const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
+    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & kOtgFsClearableMask);
+    if (PENDING == 0u)
+    {
+      break;
+    }
+    USBFSD->INT_FG = PENDING;
+
+    // This loop only drains the pending bits visible in the current INT_FG
+    // snapshot. Any later host event will relatch a fresh interrupt and be
+    // handled by the next IRQ entry.
+    // 这个循环只清当前 INT_FG 快照里可见的 pending 位；主机后续的新事件
+    // 会重新锁存成新的中断，并在下一次 IRQ 进入时处理。
+  }
+}
+
+}  // namespace
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandler(void)
 {
+  auto* usb = LibXR::CH32USBOtgFS::self_;
+  if (usb == nullptr || !usb->IsInited())
+  {
+    ClearPendingOtgFsInterrupts();
+    return;
+  }
+
   auto& map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
 
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
   constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
-
-  constexpr uint8_t CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
-                                     USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
-                                     USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
   auto* out0 = map[0][OUT_IDX];
   auto* in0 = map[0][IN_IDX];
   ASSERT(out0 != nullptr);
@@ -40,7 +74,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
     const uint8_t INTST = static_cast<uint8_t>((INTFGST >> 8) & 0x00FFu);
 
-    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & CLEARABLE_MASK);
+    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & kOtgFsClearableMask);
     if (PENDING == 0)
     {
       break;
@@ -54,8 +88,8 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     {
       USBFSD->DEV_ADDR = 0;
 
-      LibXR::CH32USBOtgFS::self_->Deinit(true);
-      LibXR::CH32USBOtgFS::self_->Init(true);
+      usb->Deinit(true);
+      usb->Init(true);
 
       out0->SetState(LibXR::USB::Endpoint::State::IDLE);
       in0->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -72,8 +106,8 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     // suspend 走与 reset 相同的 EP0 恢复路径；resume 由后续主机时序体现。
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      LibXR::CH32USBOtgFS::self_->Deinit(true);
-      LibXR::CH32USBOtgFS::self_->Init(true);
+      usb->Deinit(true);
+      usb->Init(true);
 
       out0->SetState(LibXR::USB::Endpoint::State::IDLE);
       in0->SetState(LibXR::USB::Endpoint::State::IDLE);
@@ -109,7 +143,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
           out0->tog_ = true;
           in0->tog_ = true;
 
-          LibXR::CH32USBOtgFS::self_->OnSetupPacket(
+          usb->OnSetupPacket(
               true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
           break;
         }
@@ -161,7 +195,6 @@ CH32USBOtgFS::CH32USBOtgFS(
       USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
                       pid, bcd, LANG_LIST, CONFIGS, uid)
 {
-  self_ = this;
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgFs::EP_OTG_FS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -232,6 +265,7 @@ void CH32USBOtgFS::Start(bool)
   USBFSD->BASE_CTRL = USBFS_UC_DEV_PU_EN | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
   USBFSD->UDEV_CTRL = USBFS_UD_PD_DIS | USBFS_UD_PORT_EN;
   NVIC_EnableIRQ(USBFS_IRQn);
+  self_ = this;
 }
 
 void CH32USBOtgFS::Stop(bool)
@@ -239,6 +273,7 @@ void CH32USBOtgFS::Stop(bool)
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
   USBFSD->BASE_CTRL = 0x00;
   NVIC_DisableIRQ(USBFS_IRQn);
+  self_ = nullptr;
 }
 
 #endif  // defined(USBFSD)

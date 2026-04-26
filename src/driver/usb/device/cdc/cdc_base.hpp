@@ -228,6 +228,7 @@ class CDCBase : public DeviceClass
    */
   void SetOnSetControlLineStateCallback(LibXR::Callback<bool, bool> cb)
   {
+    has_control_line_state_cb_ = !cb.Empty();
     on_set_control_line_state_cb_ = cb;
   }
 
@@ -237,6 +238,7 @@ class CDCBase : public DeviceClass
    */
   void SetOnSetLineCodingCallback(LibXR::Callback<LibXR::UART::Configuration> cb)
   {
+    has_line_coding_cb_ = !cb.Empty();
     on_set_line_coding_cb_ = cb;
   }
 
@@ -532,7 +534,10 @@ class CDCBase : public DeviceClass
         control_line_state_ = wValue;
         result.write_zlp = true;
         SendSerialState();
-        on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
+        if (has_control_line_state_cb_)
+        {
+          on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
+        }
         return ErrorCode::OK;
 
       case ClassRequest::SEND_BREAK:
@@ -587,7 +592,10 @@ class CDCBase : public DeviceClass
             cfg.parity = LibXR::UART::Parity::NO_PARITY;
         }
         cfg.data_bits = line_coding_.bDataBits;
-        on_set_line_coding_cb_.Run(in_isr, cfg);
+        if (has_line_coding_cb_)
+        {
+          on_set_line_coding_cb_.Run(in_isr, cfg);
+        }
       }
         return ErrorCode::OK;
       default:
@@ -699,7 +707,9 @@ class CDCBase : public DeviceClass
 
   // 状态标志。
   // State flags.
-  bool inited_ = false;  ///< 初始化标志 / Initialization flag
+  bool inited_ = false;                 ///< 初始化标志 / Initialization flag
+  bool has_control_line_state_cb_ = false;  ///< Control-line callback registered
+  bool has_line_coding_cb_ = false;         ///< Line-coding callback registered
 
   // 接口信息。
   // Interface metadata.
