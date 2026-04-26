@@ -360,9 +360,8 @@ static void usbdev_fs_irqhandler()
           LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
 
           out0->CopyRxDataToBuffer(sizeof(LibXR::USB::SetupPacket));
-          usb->OnSetupPacket(
-              true,
-              reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_));
+          usb->OnSetupPacket(true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
+                                       out0->GetBuffer().addr_));
 
           continue;
         }

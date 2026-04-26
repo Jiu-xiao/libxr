@@ -88,10 +88,7 @@ void ESP32USBDevice::Init(bool in_isr)
   USB::DeviceCore::Init(in_isr);
 }
 
-void ESP32USBDevice::Deinit(bool in_isr)
-{
-  USB::DeviceCore::Deinit(in_isr);
-}
+void ESP32USBDevice::Deinit(bool in_isr) { USB::DeviceCore::Deinit(in_isr); }
 
 ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
