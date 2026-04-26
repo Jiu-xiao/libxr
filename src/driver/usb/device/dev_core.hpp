@@ -97,6 +97,8 @@ class DeviceCore
    */
   void OnSetupPacket(bool in_isr, const SetupPacket* setup);
 
+  [[nodiscard]] bool IsInited() const { return state_.inited; }
+
  protected:
   /**
    * @brief 设置设备地址（由子类实现）

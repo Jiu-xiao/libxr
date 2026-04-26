@@ -116,7 +116,6 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
     bool phy_ready = false;
     bool irq_ready = false;
     bool started = false;
-    bool core_inited = false;
     bool rom_usb_cleaned = false;
   };
 

@@ -347,7 +347,10 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, true);
 
@@ -363,7 +366,10 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, false);
 
@@ -388,7 +394,10 @@ extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, true);
 
@@ -404,7 +413,10 @@ extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, false);
 

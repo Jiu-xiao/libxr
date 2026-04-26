@@ -39,15 +39,25 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
         hpcd_(hpcd),
         id_(id)
   {
-    map_[id] = this;
   }
 
   void Init(bool in_isr) override { LibXR::USB::DeviceCore::Init(in_isr); }
 
   void Deinit(bool in_isr) override { LibXR::USB::DeviceCore::Deinit(in_isr); }
 
-  void Start(bool) override { HAL_PCD_Start(hpcd_); }
-  void Stop(bool) override { HAL_PCD_Stop(hpcd_); }
+  void Start(bool) override
+  {
+    map_[id_] = this;
+    HAL_PCD_Start(hpcd_);
+  }
+  void Stop(bool) override
+  {
+    HAL_PCD_Stop(hpcd_);
+    if (map_[id_] == this)
+    {
+      map_[id_] = nullptr;
+    }
+  }
 
   PCD_HandleTypeDef* hpcd_;
   stm32_usb_dev_id_t id_;
