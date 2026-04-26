@@ -197,6 +197,12 @@ static void ClearPendingOtgHsInterrupts()
       break;
     }
     USBHSD->INT_FG = INTFLAG;
+
+    // This loop drains only the bits already latched in INT_FG. If hardware
+    // observes another bus event later, it will assert a new IRQ and the next
+    // handler entry will clear it.
+    // 这个循环只清理 INT_FG 里已经锁存的位；如果之后又出现新的总线事件，
+    // 硬件会重新触发 IRQ，由下一次进入 handler 时再清。
   }
 }
 

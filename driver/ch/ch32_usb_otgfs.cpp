@@ -30,6 +30,12 @@ static void ClearPendingOtgFsInterrupts()
       break;
     }
     USBFSD->INT_FG = PENDING;
+
+    // This loop only drains the pending bits visible in the current INT_FG
+    // snapshot. Any later host event will relatch a fresh interrupt and be
+    // handled by the next IRQ entry.
+    // 这个循环只清当前 INT_FG 快照里可见的 pending 位；主机后续的新事件
+    // 会重新锁存成新的中断，并在下一次 IRQ 进入时处理。
   }
 }
 

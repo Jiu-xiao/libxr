@@ -252,6 +252,12 @@ static void drain_usbdev_fs_pending_irqs()
     {
       LibXR::CH32EndpointDevFs::ClearEpCtrTx(EP_ID);
     }
+
+    // We only drain the bits that are latched right now. If the host produces a
+    // new event after that point, hardware will assert the IRQ again and the next
+    // handler entry will observe it.
+    // 这里只清掉当前已经锁存的 pending 位；如果主机随后又产生了新事件，
+    // 硬件会重新拉起 IRQ，下一次进入 handler 时再处理。
   }
 }
 
