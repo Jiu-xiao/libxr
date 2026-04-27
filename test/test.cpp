@@ -79,6 +79,10 @@ static void run_libxr_tests()
       {"cycle_value", test_cycle_value, false},
   };
 
+  TestCase print_tests[] = {
+      {"print", test_print, false},
+  };
+
   TestCase data_structure_tests[] = {{"rbt", test_rbt, false},
                                      {"queue", test_queue, false},
                                      {"pool", test_lock_free_pool, false},
@@ -117,6 +121,7 @@ static void run_libxr_tests()
   } test_groups[] = {{core_tests, "core_tests"},
                      {synchronization_tests, "synchronization_tests"},
                      {utility_tests, "utility_tests"},
+                     {print_tests, "print_tests"},
                      {data_structure_tests, "data_structure_tests"},
                      {threading_tests, "threading_tests"},
                      {motion_tests, "motion_tests"},
@@ -127,6 +132,7 @@ static void run_libxr_tests()
       sizeof(core_tests) / sizeof(TestCase),
       sizeof(synchronization_tests) / sizeof(TestCase),
       sizeof(utility_tests) / sizeof(TestCase),
+      sizeof(print_tests) / sizeof(TestCase),
       sizeof(data_structure_tests) / sizeof(TestCase),
       sizeof(threading_tests) / sizeof(TestCase),
       sizeof(motion_tests) / sizeof(TestCase),
