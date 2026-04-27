@@ -498,74 +498,131 @@ void WritePort::Reset()
 WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
     : port_(port), op_(op)
 {
+  UNUSED(Acquire());
+}
+
+// Stream batch helpers.
+// Stream 批次辅助逻辑。
+WritePort::Stream::~Stream()
+{
+  if (owns_port_ && buffered_size_ > 0)
+  {
+    UNUSED(SubmitBuffered());
+  }
+
+  if (owns_port_)
+  {
+    Release();
+  }
+}
+
+ErrorCode WritePort::Stream::Acquire()
+{
+  if (owns_port_)
+  {
+    return ErrorCode::OK;
+  }
+
+  if (port_ == nullptr)
+  {
+    return ErrorCode::PTR_NULL;
+  }
+
+  if (!port_->Writable())
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
   BusyState expected = BusyState::IDLE;
   if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
                                             std::memory_order_acq_rel,
                                             std::memory_order_acquire))
   {
-    return;
+    return ErrorCode::BUSY;
   }
 
   if (port_->queue_info_->EmptySize() < 1)
   {
     port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-    return;
+    return ErrorCode::FULL;
   }
 
-  locked_ = true;
-  cap_ = port_->queue_data_->EmptySize();
+  owns_port_ = true;
+  batch_capacity_ = port_->queue_data_->EmptySize();
+  return ErrorCode::OK;
 }
 
-WritePort::Stream::~Stream()
+ErrorCode WritePort::Stream::Write(ConstRawData data)
 {
-  if (locked_ && size_ > 0)
+  if (data.size_ == 0)
   {
-    auto ans =
-        port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
-    ASSERT(ans == ErrorCode::OK);
-    port_->CommitWrite({nullptr, size_}, op_, true);
-    if (op_.type == WriteOperation::OperationType::BLOCK)
-    {
-      // WritePort now owns the BLOCK wait/finish state machine.
-      locked_ = false;
-    }
+    return ErrorCode::OK;
   }
 
-  if (locked_)
+  if (data.addr_ == nullptr)
   {
+    return ErrorCode::PTR_NULL;
+  }
+
+  auto lock_result = Acquire();
+  if (lock_result != ErrorCode::OK)
+  {
+    return lock_result;
+  }
+
+  auto ans =
+      port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
+  if (ans == ErrorCode::OK)
+  {
+    buffered_size_ += data.size_;
+  }
+  return ans;
+}
+
+ErrorCode WritePort::Stream::SubmitBuffered()
+{
+  ASSERT(owns_port_);
+  ASSERT(buffered_size_ > 0);
+
+  auto ans =
+      port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, buffered_size_}, op_});
+  ASSERT(ans == ErrorCode::OK);
+
+  ans = port_->CommitWrite({nullptr, buffered_size_}, op_, true);
+  buffered_size_ = 0;
+
+  if (op_.type == WriteOperation::OperationType::BLOCK)
+  {
+    // WritePort now owns the BLOCK wait/finish state machine.
+    // BLOCK 等待/完成状态机此后由 WritePort 接管。
+    owns_port_ = false;
+  }
+
+  return ans;
+}
+
+void WritePort::Stream::Release()
+{
+  if (owns_port_)
+  {
+    owns_port_ = false;
     port_->busy_.store(BusyState::IDLE, std::memory_order_release);
   }
 }
 
 WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
 {
-  if (!locked_)
+  if (Acquire() != ErrorCode::OK)
   {
-    BusyState expected = BusyState::IDLE;
-    if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
-                                              std::memory_order_acq_rel,
-                                              std::memory_order_acquire))
-    {
-      return *this;
-    }
-
-    if (port_->queue_info_->EmptySize() < 1)
-    {
-      port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-      return *this;
-    }
-
-    locked_ = true;
-    cap_ = port_->queue_data_->EmptySize();
-  }
-  if (size_ + data.size_ <= cap_)
-  {
-    auto ans = port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                             data.size_);
-    ASSERT(ans == ErrorCode::OK);
-    size_ += data.size_;
+    return *this;
   }
 
+  if (EmptySize() < data.size_)
+  {
+    return *this;
+  }
+
+  UNUSED(Write(data));
   return *this;
 }
 
@@ -573,39 +630,80 @@ ErrorCode WritePort::Stream::Commit()
 {
   auto ans = ErrorCode::OK;
 
-  if (locked_ && size_ > 0)
+  if (owns_port_ && buffered_size_ > 0)
   {
-    ans = port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, size_}, op_});
-    ASSERT(ans == ErrorCode::OK);
-    ans = port_->CommitWrite({nullptr, size_}, op_, true);
+    ans = SubmitBuffered();
     if (op_.type == WriteOperation::OperationType::BLOCK)
     {
-      // WritePort will release busy_ after the BLOCK handoff completes.
-      size_ = 0;
-      locked_ = false;
       return ans;
     }
-
-    ASSERT(ans == ErrorCode::OK);
-    size_ = 0;
   }
 
-  if (locked_)
+  if (owns_port_)
   {
-    locked_ = false;
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    Release();
   }
 
   return ans;
 }
 
-// NOLINTNEXTLINE
-int STDIO::Printf(const char* fmt, ...)
+void WritePort::Stream::Discard()
 {
-#if LIBXR_PRINTF_BUFFER_SIZE > 0
+  buffered_size_ = 0;
+  Release();
+}
+
+// STDIO compiled-format bridge.
+// STDIO 编译格式桥接层。
+STDIO::CompiledSink::CompiledSink(WritePort::Stream& stream) : stream_(stream)
+{
+}
+
+ErrorCode STDIO::CompiledSink::Write(std::string_view chunk)
+{
+  if (saturated_)
+  {
+    return ErrorCode::OK;
+  }
+
+  auto ec = stream_.Acquire();
+  if (ec != ErrorCode::OK)
+  {
+    return ec;
+  }
+
+  size_t copy_size = chunk.size();
+  size_t stream_writable = stream_.EmptySize();
+  if (copy_size > stream_writable)
+  {
+    copy_size = stream_writable;
+  }
+
+  if (copy_size == 0)
+  {
+    saturated_ = true;
+    return ErrorCode::OK;
+  }
+
+  ec = stream_.Write(chunk.substr(0, copy_size));
+  if (ec != ErrorCode::OK)
+  {
+    return ec;
+  }
+
+  retained_size_ += copy_size;
+  if (copy_size != chunk.size() || stream_.EmptySize() == 0)
+  {
+    saturated_ = true;
+  }
+  return ErrorCode::OK;
+}
+
+bool STDIO::BeginWriteSession()
+{
   if (!STDIO::write_ || !STDIO::write_->Writable())
   {
-    return -1;
+    return false;
   }
 
   if (!write_mutex_)
@@ -613,49 +711,54 @@ int STDIO::Printf(const char* fmt, ...)
     write_mutex_ = new LibXR::Mutex();
   }
 
-  LibXR::Mutex::LockGuard lock_guard(*write_mutex_);
+  return write_mutex_->Lock() == ErrorCode::OK;
+}
 
-  va_list args;
-  va_start(args, fmt);
-  int len = vsnprintf(STDIO::printf_buff_, LIBXR_PRINTF_BUFFER_SIZE, fmt, args);
-  va_end(args);
+int STDIO::WriteCompiledToStream(WritePort::Stream& stream, void* context,
+                                 CompiledWriteFun write_fun)
+{
+  CompiledSink sink(stream);
+  auto ec = write_fun(context, sink);
+  return FinishWriteSession(stream, sink.RetainedSize(), ec);
+}
 
-  // Check result and limit length
-  if (len < 0)
+int STDIO::WriteCompiledSession(void* context, CompiledWriteFun write_fun)
+{
+  ASSERT(write_mutex_ != nullptr);
+  ASSERT(write_fun != nullptr);
+
+  if (write_stream_ != nullptr)
   {
-    return -1;
+    return WriteCompiledToStream(*write_stream_, context, write_fun);
   }
-  if (static_cast<size_t>(len) >= LIBXR_PRINTF_BUFFER_SIZE)
-  {
-    len = LIBXR_PRINTF_BUFFER_SIZE - 1;
-  }
-
-  ConstRawData data = {reinterpret_cast<const uint8_t*>(STDIO::printf_buff_),
-                       static_cast<size_t>(len)};
 
   static WriteOperation op;  // NOLINT
-  auto ans = ErrorCode::OK;
-  if (write_stream_ == nullptr)
+  WritePort::Stream stream(write_, op);
+  return WriteCompiledToStream(stream, context, write_fun);
+}
+
+int STDIO::FinishWriteSession(WritePort::Stream& stream, size_t retained_size,
+                              ErrorCode format_result)
+{
+  ASSERT(write_mutex_ != nullptr);
+
+  auto ec = format_result;
+  if (ec == ErrorCode::OK)
   {
-    ans = STDIO::write_->operator()(data, op);
+    ec = stream.Commit();
   }
   else
   {
-    (*write_stream_) << data;
-    ans = write_stream_->Commit();
+    stream.Discard();
   }
 
-  if (ans == ErrorCode::OK)
-  {
-    return len;
-  }
-  else
+  write_mutex_->Unlock();
+
+  if (ec != ErrorCode::OK ||
+      retained_size > static_cast<size_t>(std::numeric_limits<int>::max()))
   {
     return -1;
   }
 
-#else
-  UNUSED(fmt);
-  return 0;
-#endif
+  return static_cast<int>(retained_size);
 }
