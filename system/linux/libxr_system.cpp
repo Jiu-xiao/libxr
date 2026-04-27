@@ -21,10 +21,11 @@ struct timespec libxr_linux_start_time_spec;  // NOLINT
 static LibXR::LinuxTimebase libxr_linux_timebase;
 
 static LibXR::Semaphore stdo_sem;
+static constexpr size_t kHostStdioQueueBytes = 4096;
 
 void StdiThread(LibXR::ReadPort* read_port)
 {
-  static uint8_t read_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
+  static uint8_t read_buff[kHostStdioQueueBytes];
 
   if (!isatty(STDIN_FILENO))
   {
@@ -63,7 +64,7 @@ void StdiThread(LibXR::ReadPort* read_port)
 void StdoThread(LibXR::WritePort* write_port)
 {
   LibXR::WriteInfoBlock info;
-  static uint8_t write_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
+  static uint8_t write_buff[kHostStdioQueueBytes];
 
   while (true)
   {
@@ -104,8 +105,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
     return LibXR::ErrorCode::PENDING;
   };
 
-  LibXR::STDIO::write_ =
-      new LibXR::WritePort(32, static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
+  LibXR::STDIO::write_ = new LibXR::WritePort(32, kHostStdioQueueBytes);
 
   *LibXR::STDIO::write_ = write_fun;
 
@@ -115,8 +115,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
     return LibXR::ErrorCode::PENDING;
   };
 
-  LibXR::STDIO::read_ =
-      new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
+  LibXR::STDIO::read_ = new LibXR::ReadPort(kHostStdioQueueBytes);
 
   *LibXR::STDIO::read_ = read_fun;
 
