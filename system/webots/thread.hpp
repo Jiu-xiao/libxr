@@ -4,6 +4,7 @@
 #include "libxr_time.hpp"
 #include "logger.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 namespace LibXR
@@ -67,6 +68,13 @@ class Thread
   void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
               size_t stack_depth, Thread::Priority priority)
   {
+    const bool is_realtime = priority == Thread::Priority::REALTIME;
+    WebotsRealtimeThreadRegistration *realtime_registration = nullptr;
+    if (is_realtime)
+    {
+      realtime_registration = WebotsRegisterRealtimeThread();
+    }
+
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     ConfigureAttributes(attr, stack_depth, priority);
@@ -85,14 +93,18 @@ class Thread
        * @param  arg 线程参数 Thread argument
        * @param  name 线程名称 Thread name
        */
-      ThreadBlock(decltype(function) fun, ArgType arg, const char *name)
+      ThreadBlock(decltype(function) fun, ArgType arg, const char *name, bool is_realtime,
+                  WebotsRealtimeThreadRegistration *realtime_registration)
           : fun_(fun),
-            arg_(arg)
+            arg_(arg),
+            is_realtime_(is_realtime),
+            realtime_registration_(realtime_registration)
       {
         std::memset(name_, 0, sizeof(name_));
         if (name != nullptr)
         {
-          std::strncpy(name_, name, sizeof(name_) - 1);
+          const size_t copy_len = std::min(std::strlen(name), sizeof(name_) - 1U);
+          std::memcpy(name_, name, copy_len);
         }
       }
 
@@ -106,17 +118,28 @@ class Thread
       static void *Port(void *arg)
       {
         ThreadBlock *block = static_cast<ThreadBlock *>(arg);
+        if (block->is_realtime_)
+        {
+          WebotsBindCurrentRealtimeThread(block->realtime_registration_);
+        }
         block->fun_(block->arg_);
+        if (block->is_realtime_)
+        {
+          WebotsReleaseRealtimeThread(block->realtime_registration_);
+        }
         delete block;
         return static_cast<void *>(nullptr);
       }
 
       decltype(function) fun_;  ///< 线程执行的函数 Function executed by the thread
       ArgType arg_;             ///< 线程函数的参数 Argument passed to the thread function
+      bool is_realtime_{false};
+      WebotsRealtimeThreadRegistration *realtime_registration_{nullptr};
       char name_[16];           ///< 线程名称 Thread name
     };
 
-    auto block = new ThreadBlock(function, arg, name);
+    auto block =
+        new ThreadBlock(function, arg, name, is_realtime, realtime_registration);
 
     // 创建线程
     int ans = pthread_create(&this->thread_handle_, &attr, ThreadBlock::Port, block);
@@ -134,7 +157,12 @@ class Thread
       if (ans != 0)
       {
         XR_LOG_ERROR("Failed to create thread: %s (%s)", name, strerror(ans));
+        if (is_realtime)
+        {
+          WebotsReleaseRealtimeThread(realtime_registration);
+        }
         delete block;
+        return;
       }
     }
   }

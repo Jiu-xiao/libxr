@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -1189,7 +1190,7 @@ class LinuxSharedTopic : public Topic
     {
       slots_[i].refcount.store(0, std::memory_order_release);
       slots_[i].sequence.store(0, std::memory_order_release);
-      std::memset(&payloads_[i], 0, sizeof(TopicData));
+      std::construct_at(&payloads_[i], TopicData{});
       free_slots_[i].slot_index = i;
       free_slots_[i].sequence.store(static_cast<uint64_t>(i) + 1U,
                                     std::memory_order_release);
