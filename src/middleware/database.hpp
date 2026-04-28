@@ -468,8 +468,7 @@ class DatabaseRaw : public Database
    */
   size_t AvailableSize()
   {
-    auto offset = GetNextKey(GetLastKey(BlockType::MAIN));
-    return block_size_ - sizeof(CHECKSUM_BYTE) - offset;
+    return GetChecksumOffset() - GetUsedBlockSize(BlockType::MAIN);
   }
 
   ErrorCode AddKeyBody(size_t name_len, size_t size, size_t& key_buf_offset)
@@ -606,12 +605,6 @@ class DatabaseRaw : public Database
     return ErrorCode::FAILED;
   }
 
-  ErrorCode SetKey(size_t name_offset, size_t name_length, const void* data, size_t size)
-  {
-    size_t key_offset = SearchKey(name_offset, name_length);
-    return SetKeyCommon(key_offset, name_length, data, size);
-  }
-
   ErrorCode SetKey(const char* name, const void* data, size_t size, bool recycle = true)
   {
     size_t key_offset = SearchKey(name);
@@ -664,13 +657,18 @@ class DatabaseRaw : public Database
 
   size_t GetKeyName(size_t offset) { return offset + AlignSize(sizeof(KeyInfo)); }
 
+  size_t GetBlockOffset(BlockType block)
+  {
+    return block == BlockType::BACKUP ? block_size_ : 0;
+  }
+
+  size_t GetChecksumOffset() { return block_size_ - GetChecksumSize(); }
+
+  size_t GetChecksumSize() { return AlignSize(sizeof(CHECKSUM_BYTE)); }
+
   void InitBlock(BlockType block)
   {
-    size_t offset = 0;
-    if (block == BlockType::BACKUP)
-    {
-      offset = block_size_;
-    }
+    const size_t offset = GetBlockOffset(block);
     flash_.Erase(offset, block_size_);
 
     FlashInfo info;  // padding filled with 0xFF by constructor
@@ -682,17 +680,12 @@ class DatabaseRaw : public Database
     tmp_key.SetNameLength(0);
     tmp_key.SetDataSize(0);
     Write(offset, {reinterpret_cast<uint8_t*>(&info), sizeof(FlashInfo)});
-    Write(offset + block_size_ - AlignSize(sizeof(CHECKSUM_BYTE)),
-          {&CHECKSUM_BYTE, sizeof(CHECKSUM_BYTE)});
+    Write(offset + GetChecksumOffset(), {&CHECKSUM_BYTE, sizeof(CHECKSUM_BYTE)});
   }
 
   bool IsBlockInited(BlockType block)
   {
-    size_t offset = 0;
-    if (block == BlockType::BACKUP)
-    {
-      offset = block_size_;
-    }
+    const size_t offset = GetBlockOffset(block);
     FlashInfo flash_data;
     flash_.Read(offset, flash_data);
     return flash_data.header == FLASH_HEADER;
@@ -700,11 +693,7 @@ class DatabaseRaw : public Database
 
   bool IsBlockEmpty(BlockType block)
   {
-    size_t offset = 0;
-    if (block == BlockType::BACKUP)
-    {
-      offset = block_size_;
-    }
+    const size_t offset = GetBlockOffset(block);
     FlashInfo flash_data;
     flash_.Read(offset, flash_data);
     return BlockBoolUtil<MinWriteSize>::ReadFlag(flash_data.key.available_flag) == true;
@@ -712,14 +701,23 @@ class DatabaseRaw : public Database
 
   bool IsBlockError(BlockType block)
   {
-    size_t offset = 0;
-    if (block == BlockType::BACKUP)
-    {
-      offset = block_size_;
-    }
+    const size_t offset = GetBlockOffset(block);
     uint32_t checksum = 0;
-    flash_.Read(offset + block_size_ - AlignSize(sizeof(CHECKSUM_BYTE)), checksum);
+    flash_.Read(offset + GetChecksumOffset(), checksum);
     return checksum != CHECKSUM_BYTE;
+  }
+
+  bool IsBlockValid(BlockType block)
+  {
+    return IsBlockInited(block) && !IsBlockError(block);
+  }
+
+  void InvalidateBlock(BlockType block)
+  {
+    const uint32_t invalid_checksum = 0;
+    // Keep startup cleanup erase-free so same-bank MCUs only pay a single program op.
+    Write(GetBlockOffset(block) + GetChecksumOffset(),
+          {&invalid_checksum, sizeof(invalid_checksum)});
   }
 
   size_t GetKeySize(size_t offset)
@@ -745,11 +743,7 @@ class DatabaseRaw : public Database
     }
 
     KeyInfo key;
-    size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
-    if (block != BlockType::MAIN)
-    {
-      key_offset += block_size_;
-    }
+    size_t key_offset = GetBlockOffset(block) + LibXR::OffsetOf(&FlashInfo::key);
     flash_.Read(key_offset, key);
     while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key))
     {
@@ -792,26 +786,59 @@ class DatabaseRaw : public Database
     return false;
   }
 
-  bool KeyNameCompare(size_t offset_a, size_t offset_b)
+  bool TryGetUsedBlockSize(BlockType block, size_t& used_size)
   {
-    KeyInfo key_a, key_b;
-    flash_.Read(offset_a, key_a);
-    flash_.Read(offset_b, key_b);
-    if (key_a.GetNameLength() != key_b.GetNameLength())
+    const size_t block_offset = GetBlockOffset(block);
+    const size_t checksum_offset = block_offset + GetChecksumOffset();
+    size_t key_offset = block_offset + LibXR::OffsetOf(&FlashInfo::key);
+
+    while (true)
     {
-      return true;
-    }
-    for (size_t i = 0; i < key_a.GetNameLength(); i++)
-    {
-      uint8_t data_buffer_a = 0, data_buffer_b = 0;
-      flash_.Read(offset_a + sizeof(KeyInfo) + i, data_buffer_a);
-      flash_.Read(offset_b + sizeof(KeyInfo) + i, data_buffer_b);
-      if (data_buffer_a != data_buffer_b)
+      if (key_offset + AlignSize(sizeof(KeyInfo)) > checksum_offset)
       {
+        return false;
+      }
+
+      KeyInfo key;
+      flash_.Read(key_offset, key);
+
+      // Recovery cannot trust erased or half-written key metadata to bound copies.
+      if (!BlockBoolUtil<MinWriteSize>::Valid(key.no_next_key) ||
+          !BlockBoolUtil<MinWriteSize>::Valid(key.available_flag) ||
+          !BlockBoolUtil<MinWriteSize>::Valid(key.uninit))
+      {
+        return false;
+      }
+
+      const size_t next_key_offset =
+          key_offset + AlignSize(sizeof(KeyInfo)) + AlignSize(key.GetNameLength()) +
+          AlignSize(key.GetDataSize());
+      if (next_key_offset > checksum_offset)
+      {
+        return false;
+      }
+
+      if (BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key))
+      {
+        used_size = next_key_offset - block_offset;
         return true;
       }
+
+      key_offset = next_key_offset;
     }
-    return false;
+  }
+
+  size_t GetUsedBlockSize(BlockType block)
+  {
+    const size_t block_offset = GetBlockOffset(block);
+    const size_t first_key_offset = block_offset + LibXR::OffsetOf(&FlashInfo::key);
+
+    if (IsBlockEmpty(block))
+    {
+      return GetNextKey(first_key_offset) - block_offset;
+    }
+
+    return GetNextKey(GetLastKey(block)) - block_offset;
   }
 
   void CopyFlashData(size_t dst_offset, size_t src_offset, size_t size)
@@ -821,6 +848,20 @@ class DatabaseRaw : public Database
       flash_.Read(src_offset + i, {write_buffer_, MinWriteSize});
       flash_.Write(dst_offset + i, {write_buffer_, MinWriteSize});
     }
+  }
+
+  void CopyBlockPrefixAndChecksum(BlockType dst_block, BlockType src_block,
+                                  size_t used_size)
+  {
+    const size_t dst_offset = GetBlockOffset(dst_block);
+    const size_t src_offset = GetBlockOffset(src_block);
+    const size_t checksum_offset = GetChecksumOffset();
+
+    ASSERT(used_size <= checksum_offset);
+    // Only the live key prefix and checksum are needed; erased tail bytes are irrelevant.
+    CopyFlashData(dst_offset, src_offset, used_size);
+    CopyFlashData(dst_offset + checksum_offset, src_offset + checksum_offset,
+                  GetChecksumSize());
   }
 
   size_t SearchKey(const char* name)
@@ -985,31 +1026,32 @@ class DatabaseRaw : public Database
    */
   void Init()
   {
-    if (!IsBlockInited(BlockType::BACKUP) || IsBlockError(BlockType::BACKUP))
+    if (!IsBlockValid(BlockType::MAIN))
     {
-      InitBlock(BlockType::BACKUP);
-    }
-
-    if (!IsBlockInited(BlockType::MAIN) || IsBlockError(BlockType::MAIN))
-    {
-      if (IsBlockEmpty(BlockType::BACKUP))
+      if (!IsBlockValid(BlockType::BACKUP) || IsBlockEmpty(BlockType::BACKUP))
       {
         InitBlock(BlockType::MAIN);
       }
       else
       {
-        flash_.Erase(0, block_size_);
-        for (uint32_t i = 0; i < block_size_; i += MinWriteSize)
+        size_t used_size = 0;
+        if (!TryGetUsedBlockSize(BlockType::BACKUP, used_size))
         {
-          flash_.Read(i + block_size_, {write_buffer_, MinWriteSize});
-          flash_.Write(i, {write_buffer_, MinWriteSize});
+          InvalidateBlock(BlockType::BACKUP);
+          InitBlock(BlockType::MAIN);
+        }
+        else
+        {
+          flash_.Erase(0, block_size_);
+          CopyBlockPrefixAndChecksum(BlockType::MAIN, BlockType::BACKUP, used_size);
+          InvalidateBlock(BlockType::BACKUP);
         }
       }
     }
-
-    if (!IsBlockEmpty(BlockType::BACKUP))
+    else if (IsBlockValid(BlockType::BACKUP) && !IsBlockEmpty(BlockType::BACKUP))
     {
-      InitBlock(BlockType::BACKUP);
+      // A stale backup must not stay recoverable once the main block is already good.
+      InvalidateBlock(BlockType::BACKUP);
     }
 
     KeyInfo key;
@@ -1020,7 +1062,7 @@ class DatabaseRaw : public Database
     {
       key_offset = GetNextKey(key_offset);
 
-      if (key_offset + sizeof(key) >= flash_.Size())
+      if (key_offset + AlignSize(sizeof(KeyInfo)) > GetChecksumOffset())
       {
         InitBlock(BlockType::MAIN);
         break;
@@ -1077,7 +1119,7 @@ class DatabaseRaw : public Database
     size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
     flash_.Read(key_offset, key);
 
-    if (!IsBlockEmpty(BlockType::BACKUP))
+    if (!IsBlockValid(BlockType::BACKUP) || !IsBlockEmpty(BlockType::BACKUP))
     {
       InitBlock(BlockType::BACKUP);
     }
@@ -1110,12 +1152,9 @@ class DatabaseRaw : public Database
       write_buff_offset += AlignSize(key.GetDataSize());
     } while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key));
 
+    const size_t used_size = write_buff_offset - block_size_;
     flash_.Erase(0, block_size_);
-    for (uint32_t i = 0; i < block_size_; i += MinWriteSize)
-    {
-      flash_.Read(i + block_size_, {write_buffer_, MinWriteSize});
-      flash_.Write(i, {write_buffer_, MinWriteSize});
-    }
+    CopyBlockPrefixAndChecksum(BlockType::MAIN, BlockType::BACKUP, used_size);
 
     InitBlock(BlockType::BACKUP);
 
