@@ -17,10 +17,6 @@ target_compile_definitions(${PROJECT_NAME}
 )
 message(STATUS "Multi-thread support is disabled for system/webasm.")
 
-if(NOT DEFINED LIBXR_PRINTF_BUFFER_SIZE)
-  set(LIBXR_PRINTF_BUFFER_SIZE 1024)
-endif()
-
 if(NOT DEFINED XR_LOG_MESSAGE_MAX_LEN)
   set(XR_LOG_MESSAGE_MAX_LEN 256)
 endif()

@@ -15,7 +15,7 @@ extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr)
     {
       if (LibXR::STDIO::write_ && LibXR::STDIO::write_->Writable())
       {
-        LibXR::STDIO::Printf("Fatal error at %s:%d\r\n", file, static_cast<int>(line));
+        LibXR::STDIO::Print<"Fatal error at {}:{}\r\n">(file, static_cast<int>(line));
       }
 
       if (!LibXR::Assert::libxr_fatal_error_callback_.Empty())

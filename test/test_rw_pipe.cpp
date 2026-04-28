@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cstring>
+#include <string_view>
 #include <vector>
 
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
@@ -1105,6 +1106,69 @@ void test_pipe_stream_api()
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
+void test_pipe_stream_write_string_view()
+{
+  using namespace LibXR;
+
+  Pipe pipe(64);
+  ReadPort& r = pipe.GetReadPort();
+  WritePort& w = pipe.GetWritePort();
+  WriteOperation wop;
+
+  uint8_t rx[5] = {0};
+  ReadOperation rop;
+  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+
+  WritePort::Stream ws(&w, wop);
+  ASSERT(ws.Write(std::string_view("abc")) == ErrorCode::OK);
+  ASSERT(ws.Write(std::string_view("de")) == ErrorCode::OK);
+  ASSERT(ws.Commit() == ErrorCode::OK);
+
+  r.ProcessPendingReads(false);
+  ASSERT(std::memcmp(rx, "abcde", sizeof(rx)) == 0);
+}
+
+void test_pipe_stream_write_full_is_chunk_atomic()
+{
+  using namespace LibXR;
+
+  Pipe pipe(5);
+  ReadPort& r = pipe.GetReadPort();
+  WritePort& w = pipe.GetWritePort();
+  WriteOperation wop;
+
+  static const uint8_t A[] = {0x61, 0x62, 0x63};
+  static const uint8_t B[] = {0x71, 0x72, 0x73};
+  uint8_t rx[sizeof(A)] = {0};
+
+  ReadOperation rop;
+  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+
+  WritePort::Stream ws(&w, wop);
+  ASSERT(ws.Write(ConstRawData{A, sizeof(A)}) == ErrorCode::OK);
+  ASSERT(ws.Write(ConstRawData{B, sizeof(B)}) == ErrorCode::FULL);
+  ASSERT(ws.Commit() == ErrorCode::OK);
+
+  r.ProcessPendingReads(false);
+  ASSERT(std::memcmp(rx, A, sizeof(A)) == 0);
+}
+
+void test_pipe_stream_write_busy_returns_error()
+{
+  using namespace LibXR;
+
+  Pipe pipe(64);
+  WritePort& w = pipe.GetWritePort();
+
+  WriteOperation owner_op;
+  WriteOperation contender_op;
+  WritePort::Stream owner(&w, owner_op);
+  WritePort::Stream contender(&w, contender_op);
+
+  ASSERT(contender.Write(std::string_view("busy")) == ErrorCode::BUSY);
+  owner.Discard();
+}
+
 void test_pipe_stream_block_immediate_path()
 {
   using namespace LibXR;
@@ -1318,6 +1382,9 @@ void test_pipe()
   test_pipe_write_then_read();
   test_pipe_chunked_rw();
   test_pipe_stream_api();
+  test_pipe_stream_write_string_view();
+  test_pipe_stream_write_full_is_chunk_atomic();
+  test_pipe_stream_write_busy_returns_error();
   test_pipe_stream_block_immediate_path();
   test_pipe_stream_commit_releases_lock_for_next_stream();
   test_pipe_stream_commit_allows_persistent_and_external_streams();

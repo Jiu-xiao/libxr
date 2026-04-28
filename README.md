@@ -147,14 +147,6 @@ The default scalar type is `double`. This option only affects the default value 
 set(LIBXR_DEFAULT_SCALAR float)
 ```
 
-### Internal Printf Buffer Size
-
-Defaults to 128 for bare-metal/RTOS platforms, and 1024 for Linux. This option sets the buffer size for the `LibXR::STDIO::Printf` function. Setting this to 0 will disable all log printing.
-
-```cmake
-set(LIBXR_PRINTF_BUFFER_SIZE 256)
-```
-
 ### Maximum Log Message Length
 
 Defaults to 64 for bare-metal/RTOS, and 256 for Linux.

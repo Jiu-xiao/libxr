@@ -147,14 +147,6 @@ set(LIBXR_NO_EIGEN True)
 set(LIBXR_DEFAULT_SCALAR float)
 ```
 
-### 内部Printf缓冲区大小
-
-裸机/RTOS默认为128，Linux下默认为1024。此选项影响了LibXR::STDIO::Printf函数的缓冲区大小，设为0可以禁用所有log打印。
-
-```cmake
-set(LIBXR_PRINTF_BUFFER_SIZE 256)
-```
-
 ### 日志消息最大长度
 
 裸机/RTOS默认为64，Linux下默认为256。

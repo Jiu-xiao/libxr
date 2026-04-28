@@ -31,6 +31,7 @@ static uint64_t step_interval_ns = 1000000ULL;
 LibXR::condition_var_handle* _libxr_webots_time_notify = nullptr;
 
 static LibXR::Semaphore stdo_sem;
+static constexpr size_t kHostStdioQueueBytes = 4096;
 
 struct LibXR::WebotsRealtimeThreadRegistration
 {
@@ -96,7 +97,7 @@ bool AllWebotsRealtimeThreadsParkedUnlocked(
 
 void StdiThread(LibXR::ReadPort* read_port)
 {
-  static uint8_t read_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
+  static uint8_t read_buff[kHostStdioQueueBytes];
 
   while (true)
   {
@@ -126,7 +127,7 @@ void StdiThread(LibXR::ReadPort* read_port)
 void StdoThread(LibXR::WritePort* write_port)
 {
   LibXR::WriteInfoBlock info;
-  static uint8_t write_buff[static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE)];
+  static uint8_t write_buff[kHostStdioQueueBytes];
 
   while (true)
   {
@@ -204,8 +205,7 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
     return LibXR::ErrorCode::PENDING;
   };
 
-  LibXR::STDIO::write_ =
-      new LibXR::WritePort(32, static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
+  LibXR::STDIO::write_ = new LibXR::WritePort(32, kHostStdioQueueBytes);
 
   *LibXR::STDIO::write_ = write_fun;
 
@@ -215,8 +215,7 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
     return LibXR::ErrorCode::PENDING;
   };
 
-  LibXR::STDIO::read_ =
-      new LibXR::ReadPort(static_cast<size_t>(4 * LIBXR_PRINTF_BUFFER_SIZE));
+  LibXR::STDIO::read_ = new LibXR::ReadPort(kHostStdioQueueBytes);
 
   *LibXR::STDIO::read_ = read_fun;
 
