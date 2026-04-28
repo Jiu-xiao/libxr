@@ -28,7 +28,7 @@ extern "C"
   }
 }
 
-static constexpr size_t kWebAsmStdioQueueBytes = 4096;
+static constexpr size_t webasm_stdio_queue_bytes = 4096;
 
 void LibXR::PlatformInit()
 {
@@ -36,7 +36,7 @@ void LibXR::PlatformInit()
 
   auto write_fun = [](WritePort& port, bool)
   {
-    static uint8_t write_buff[kWebAsmStdioQueueBytes];
+    static uint8_t write_buff[webasm_stdio_queue_bytes];
     WriteInfoBlock info;
     while (true)
     {
@@ -65,13 +65,13 @@ void LibXR::PlatformInit()
     return LibXR::ErrorCode::OK;
   };
 
-  LibXR::STDIO::write_ = new LibXR::WritePort(32, kWebAsmStdioQueueBytes);
+  LibXR::STDIO::write_ = new LibXR::WritePort(32, webasm_stdio_queue_bytes);
 
   *LibXR::STDIO::write_ = write_fun;
 
   auto read_fun = [](ReadPort&, bool) { return LibXR::ErrorCode::EMPTY; };
 
-  LibXR::STDIO::read_ = new LibXR::ReadPort(kWebAsmStdioQueueBytes);
+  LibXR::STDIO::read_ = new LibXR::ReadPort(webasm_stdio_queue_bytes);
 
   *LibXR::STDIO::read_ = read_fun;
 }
