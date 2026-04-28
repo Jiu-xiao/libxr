@@ -25,7 +25,7 @@ class HPMGPIO final : public GPIO
    * @param gpio GPIO 控制器基地址 / GPIO controller base address.
    * @param port GPIO 端口号 / GPIO port index.
    * @param pin GPIO 引脚号 / GPIO pin index.
-   * @param irq 该引脚/端口对应的中断号（可选） / IRQ number for this pin/port (optional).
+   * @param irq 当前 port 对应的中断号（可选） / IRQ number for the current port (optional).
    * @param pad_index IOC PAD 编号，默认值表示自动由 `(gpio, port, pin)` 推导 /
    * IOC PAD index. Use default value to auto-resolve from `(gpio, port, pin)`.
    */
@@ -54,15 +54,19 @@ class HPMGPIO final : public GPIO
 
   /**
    * @brief 使能当前引脚中断 / Enable GPIO interrupt for current pin.
-   * @return 成功返回 `ErrorCode::OK`，IRQ 无效返回 `ErrorCode::ARG_ERR` /
-   * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` when IRQ is invalid.
+   * @return 成功返回 `ErrorCode::OK`；IRQ/端口参数无效返回 `ErrorCode::ARG_ERR`；
+   * 同 port 存在冲突 IRQ 路由返回 `ErrorCode::STATE_ERR` /
+   * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` for invalid irq/port/pin,
+   * and `ErrorCode::STATE_ERR` when the same port is already routed to another IRQ.
    */
   ErrorCode EnableInterrupt() override;
 
   /**
    * @brief 失能当前引脚中断 / Disable GPIO interrupt for current pin.
-   * @return 成功返回 `ErrorCode::OK`，IRQ 无效返回 `ErrorCode::ARG_ERR` /
-   * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` when IRQ is invalid.
+   * @return 成功返回 `ErrorCode::OK`；IRQ/端口参数无效返回 `ErrorCode::ARG_ERR`；
+   * 端口路由状态异常返回 `ErrorCode::STATE_ERR` /
+   * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` for invalid irq/port/pin,
+   * and `ErrorCode::STATE_ERR` when shared port-route state is inconsistent.
    */
   ErrorCode DisableInterrupt() override;
 
@@ -105,6 +109,21 @@ class HPMGPIO final : public GPIO
   static constexpr uint16_t kInvalidPadIndex = 0xFFFFu;   ///< 无效 PAD 标记 / Invalid PAD marker.
 
   /**
+   * @brief 端口级 IRQ 路由状态 / Shared port-level IRQ routing state.
+   *
+   * HPM5301 GPIO IRQ 以 port 为单位路由到 PLIC，因此多个 pin 共用同一个 IRQ 时，
+   * 只能在“首个 pin 使能”时打开路由，在“最后一个 pin 失能”时关闭路由。
+   * HPM5301 routes GPIO IRQs per port, so a shared IRQ must only be enabled on
+   * the first pin user and disabled after the last pin user is released.
+   */
+  struct PortIrqRouteState
+  {
+    GPIO_Type* controller = nullptr;
+    uint32_t irq = kInvalidIrq;
+    uint32_t enabled_pin_count = 0u;
+  };
+
+  /**
    * @brief 根据控制器与端口引脚推导 IOC PAD 编号 /
    * Resolve IOC PAD index from controller/port/pin tuple.
    * @param gpio GPIO 控制器基地址 / GPIO controller base address.
@@ -119,12 +138,14 @@ class HPMGPIO final : public GPIO
   ///< Static port-pin to object map for interrupt dispatch.
   static HPMGPIO* map[kPortCount][kPinCount];
   static GPIO_Type* port_controller_map[kPortCount];
+  static PortIrqRouteState port_irq_route_map[kPortCount];
 
   GPIO_Type* gpio_;     ///< GPIO 控制器实例 / GPIO controller instance.
   uint32_t port_;       ///< GPIO 端口号 / GPIO port index.
   uint8_t pin_;         ///< GPIO 引脚号 / GPIO pin index.
-  uint32_t irq_;        ///< 引脚对应 IRQ 号 / IRQ number for this pin.
+  uint32_t irq_;        ///< 当前 port 对应 IRQ 号 / IRQ number for the current port.
   uint16_t pad_index_;  ///< IOC PAD 编号 / IOC PAD index.
+  bool interrupt_enabled_ = false;  ///< 当前 pin IRQ 使能状态 / Per-instance IRQ enabled flag.
 };
 
 }  // namespace LibXR
