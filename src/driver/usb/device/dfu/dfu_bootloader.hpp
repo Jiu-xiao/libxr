@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstring>
-#include <new>
 
 #include "dfu/dfu_def.hpp"
 
@@ -57,18 +56,12 @@ class DfuBootloaderBackend
     erase_block_count_ = (image_size_limit_ + erase_block_size_ - 1u) / erase_block_size_;
     if (erase_block_count_ > 0u)
     {
-      erased_blocks_ = new (std::nothrow) uint8_t[erase_block_count_];
-      if (erased_blocks_ != nullptr)
-      {
-        std::memset(erased_blocks_, 0, erase_block_count_);
-      }
+      erased_blocks_ = new uint8_t[erase_block_count_];
+      std::memset(erased_blocks_, 0, erase_block_count_);
     }
-    seal_storage_size_ = erase_block_size_;
-    if (seal_storage_size_ < sizeof(SealRecord))
-    {
-      seal_storage_size_ = sizeof(SealRecord);
-    }
-    seal_storage_ = new (std::nothrow) uint8_t[seal_storage_size_];
+    seal_storage_size_ =
+        AlignUp(sizeof(SealRecord), NonZeroWriteSize(flash_.MinWriteSize()));
+    seal_storage_ = new uint8_t[seal_storage_size_];
     transfer_size_ = PayloadLimit();
     if (transfer_size_ == 0u)
     {
@@ -78,7 +71,7 @@ class DfuBootloaderBackend
     {
       transfer_size_ = 4096u;
     }
-    write_buffer_ = new (std::nothrow) uint8_t[transfer_size_];
+    write_buffer_ = new uint8_t[transfer_size_];
     ResetTransferState();
     image_.launch_requested = false;
     image_.ready = false;
@@ -148,11 +141,6 @@ class DfuBootloaderBackend
     if (data.addr_ == nullptr || data.size_ == 0u || data.size_ > transfer_size_)
     {
       return DFUStatusCode::ERR_USBR;
-    }
-    if ((erased_blocks_ == nullptr && erase_block_count_ > 0u) ||
-        write_buffer_ == nullptr)
-    {
-      return DFUStatusCode::ERR_VENDOR;
     }
     if (HasPendingWrite() || HasPendingManifest())
     {
@@ -398,12 +386,27 @@ class DfuBootloaderBackend
     return seal_offset_;
   }
 
+  static size_t NonZeroWriteSize(size_t write_size)
+  {
+    return (write_size == 0u) ? 1u : write_size;
+  }
+
+  static size_t AlignUp(size_t value, size_t align)
+  {
+    if (align <= 1u)
+    {
+      return value;
+    }
+    const size_t rem = value % align;
+    return (rem == 0u) ? value : (value + align - rem);
+  }
+
   // 开启新的下载会话，并使之前缓存的镜像有效性视图失效。
   // Start a fresh download session and invalidate any previously cached image view.
   void StartDownloadSession()
   {
     ResetTransferState();
-    if (erased_blocks_ != nullptr)
+    if (erase_block_count_ > 0u)
     {
       std::memset(erased_blocks_, 0, erase_block_count_);
     }
@@ -557,16 +560,11 @@ class DfuBootloaderBackend
                                                       sizeof(seal)}) == ErrorCode::OK;
   }
 
-  // seal 先写入一个擦除块大小的临时缓冲区，
-  // 因此调用方不需要板级专用 side storage。
-  // The seal is staged in an erase-block-sized scratch buffer, so callers do
-  // not need board-specific side storage.
+  // seal 只需要按最小写入粒度对齐；擦除仍按块执行。
+  // The seal scratch buffer only needs minimum-write alignment; erase still
+  // happens at erase-block granularity.
   bool WriteSeal(size_t image_size, uint32_t crc32)
   {
-    if (seal_storage_ == nullptr)
-    {
-      return false;
-    }
     std::memset(seal_storage_, 0xFF, seal_storage_size_);
     auto* seal = reinterpret_cast<SealRecord*>(seal_storage_);
     seal->magic = kSealMagic;
@@ -814,6 +812,10 @@ class DFUClass : public DfuInterfaceClassBase
 
  public:
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB DFU";
+  static constexpr const char* DEFAULT_WINUSB_DEVICE_INTERFACE_GUID =
+      DfuInterfaceClassBase::DEFAULT_WINUSB_DEVICE_INTERFACE_GUID;
+  static constexpr uint8_t DEFAULT_WINUSB_VENDOR_CODE =
+      DfuInterfaceClassBase::DEFAULT_WINUSB_VENDOR_CODE;
 
   /**
    * @brief Backend 需要满足的接口契约 / Backend contract requirements
@@ -835,9 +837,12 @@ class DFUClass : public DfuInterfaceClassBase
   explicit DFUClass(
       Backend& backend, const char* interface_string = DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
-      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT,
+      const char* winusb_device_interface_guid = DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+      uint8_t winusb_vendor_code = DEFAULT_WINUSB_VENDOR_CODE)
       : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
-                              webusb_vendor_code),
+                              webusb_vendor_code, winusb_device_interface_guid,
+                              winusb_vendor_code),
         backend_(backend)
   {
   }
@@ -846,7 +851,8 @@ class DFUClass : public DfuInterfaceClassBase
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
   {
     // 固件态 DFU 在绑定阶段发布单接口描述符，并校验 backend 能力。
-    // Firmware DFU publishes one interface and validates backend capabilities during bind.
+    // Firmware DFU publishes one interface and validates backend capabilities during
+    // bind.
     interface_num_ = start_itf_num;
     current_alt_setting_ = 0u;
 
@@ -1207,7 +1213,8 @@ class DFUClass : public DfuInterfaceClassBase
   void AdvanceStateForStatusRead()
   {
     // 标准 DFU 状态机是在 GETSTATUS 这个同步点上推进的。
-    // GETSTATUS is the synchronization point that advances the standard DFU state machine.
+    // GETSTATUS is the synchronization point that advances the standard DFU state
+    // machine.
     switch (state_)
     {
       case DFUState::DFU_DNLOAD_SYNC:
@@ -1409,11 +1416,14 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
       JumpCallback jump_to_app, void* jump_app_ctx = nullptr, bool autorun = true,
       const char* interface_string = Base::DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
-      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT,
+      const char* winusb_device_interface_guid =
+          Base::DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+      uint8_t winusb_vendor_code = Base::DEFAULT_WINUSB_VENDOR_CODE)
       : Storage(flash, image_base, image_limit, seal_offset, jump_to_app, jump_app_ctx,
                 autorun),
         Base(Storage::backend_, interface_string, webusb_landing_page_url,
-             webusb_vendor_code)
+             webusb_vendor_code, winusb_device_interface_guid, winusb_vendor_code)
   {
   }
 

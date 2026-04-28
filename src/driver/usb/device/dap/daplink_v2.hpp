@@ -370,8 +370,6 @@ class DapLinkV2Class : public DeviceClass
 
   void InitWinUsbDescriptors()
   {
-    static constexpr uint8_t kConfigurationValue = 1u;
-
     winusb_msos20_.set.wLength = static_cast<uint16_t>(sizeof(winusb_msos20_.set));
     winusb_msos20_.set.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SET_HEADER_DESCRIPTOR;
@@ -382,7 +380,8 @@ class DapLinkV2Class : public DeviceClass
     winusb_msos20_.cfg.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SUBSET_HEADER_CONFIGURATION;
 
-    winusb_msos20_.cfg.bConfigurationValue = kConfigurationValue;
+    // MS OS 2.0 configuration subset uses a zero-based configuration index.
+    winusb_msos20_.cfg.bConfigurationValue = 0u;
     winusb_msos20_.cfg.bReserved = 0;
     winusb_msos20_.cfg.wTotalLength = static_cast<uint16_t>(
         sizeof(winusb_msos20_) - offsetof(WinUsbMsOs20DescSet, cfg));

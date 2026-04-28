@@ -26,7 +26,8 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
       const char* webusb_landing_page_url = nullptr,
       uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
       : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
-                              webusb_vendor_code),
+                              webusb_vendor_code, DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+                              DEFAULT_WINUSB_VENDOR_CODE, WinUsbMsOs20Scope::FUNCTION),
         jump_to_bootloader_(jump_to_bootloader),
         jump_ctx_(jump_ctx),
         default_detach_timeout_ms_(detach_timeout_ms)
@@ -109,6 +110,7 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
     // Runtime DFU has no data endpoints; bind only publishes the interface /
     // functional descriptors and resets the detach state machine.
     interface_num_ = start_itf_num;
+    UpdateWinUsbFunctionInterface(interface_num_);
     current_alt_setting_ = 0u;
     detach_pending_ = false;
     detach_timeout_ms_ = default_detach_timeout_ms_;
