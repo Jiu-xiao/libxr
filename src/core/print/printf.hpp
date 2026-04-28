@@ -71,6 +71,7 @@ class Printf
     UnexpectedEnd,       ///< format string ended in the middle of one conversion / 格式串在转换项中途结束
     EmbeddedNul,         ///< format literal contains an embedded NUL byte / 格式串字面量内部包含嵌入式 NUL 字节
     MixedIndexing,       ///< positional and sequential arguments were mixed / 混用了位置参数与顺序参数
+    PositionalArgumentDisabled,  ///< positional n$ indexing is disabled by configuration / 位置参数 n$ 索引已被配置关闭
     DynamicField,        ///< * width / precision is not supported / 不支持 * 宽度或精度
     InvalidArgumentIndex,  ///< positional argument index is invalid / 位置参数索引非法
     InvalidSpecifier,    ///< unsupported or disabled conversion specifier / 转换说明符无效或被禁用
@@ -127,6 +128,8 @@ struct Printf::Compiled
                 "LibXR::Print::Printf: embedded NUL bytes are not supported in the format literal");
   static_assert(result.compile_error != Printf::Error::MixedIndexing,
                 "LibXR::Print::Printf: positional and sequential arguments cannot be mixed");
+  static_assert(result.compile_error != Printf::Error::PositionalArgumentDisabled,
+                "LibXR::Print::Printf: positional argument indexing is disabled in the current profile");
   static_assert(result.compile_error != Printf::Error::DynamicField,
                 "LibXR::Print::Printf: dynamic width and precision are not supported");
   static_assert(result.compile_error != Printf::Error::InvalidArgumentIndex,

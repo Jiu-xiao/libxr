@@ -10,9 +10,15 @@
  * @brief 供直接包含头文件的用户使用的打印功能默认值。
  *
  * CMake exports the same names as 0 or 1 target compile definitions. When the
- * headers are used without CMake, the full print surface stays enabled.
+ * headers are used without CMake, these fallback values match the ordinary
+ * embedded default profile: decimal integers, text, fixed float, base 8/16
+ * integers, width, and precision stay enabled, while alternate form (#),
+ * pointers, explicit argument indexing, 64-bit integer, double, long double,
+ * scientific, and general float formatting stay disabled.
  * CMake 会用同名 0 或 1 编译定义导出这些开关；不经过 CMake 直接使用头文件时，
- * 默认保留完整打印能力。
+ * 这里的回退值与常规嵌入式默认配置一致：保留十进制整数、文本、定点浮点、
+ * 8/16 进制整数、宽度与精度，默认关闭备用格式（#）、指针、显式参数索引、
+ * 64 位整数、double、long double、科学计数法与通用浮点格式。
  */
 #ifndef LIBXR_PRINT_ENABLE_INTEGER
 #define LIBXR_PRINT_ENABLE_INTEGER 1
@@ -23,7 +29,7 @@
 #endif
 
 #ifndef LIBXR_PRINT_ENABLE_POINTER
-#define LIBXR_PRINT_ENABLE_POINTER 1
+#define LIBXR_PRINT_ENABLE_POINTER 0
 #endif
 
 #ifndef LIBXR_PRINT_ENABLE_FLOAT
@@ -47,11 +53,11 @@
 #endif
 
 #ifndef LIBXR_PRINT_FLOAT_ENABLE_SCIENTIFIC
-#define LIBXR_PRINT_FLOAT_ENABLE_SCIENTIFIC 1
+#define LIBXR_PRINT_FLOAT_ENABLE_SCIENTIFIC 0
 #endif
 
 #ifndef LIBXR_PRINT_FLOAT_ENABLE_GENERAL
-#define LIBXR_PRINT_FLOAT_ENABLE_GENERAL 1
+#define LIBXR_PRINT_FLOAT_ENABLE_GENERAL 0
 #endif
 
 #ifndef LIBXR_PRINT_FLOAT_ENABLE_LONG_DOUBLE
@@ -64,6 +70,14 @@
 
 #ifndef LIBXR_PRINT_ENABLE_PRECISION
 #define LIBXR_PRINT_ENABLE_PRECISION 1
+#endif
+
+#ifndef LIBXR_PRINT_ENABLE_ALTERNATE
+#define LIBXR_PRINT_ENABLE_ALTERNATE 0
+#endif
+
+#ifndef LIBXR_PRINT_ENABLE_EXPLICIT_ARGUMENT_INDEXING
+#define LIBXR_PRINT_ENABLE_EXPLICIT_ARGUMENT_INDEXING 0
 #endif
 
 namespace LibXR::Print::Config
@@ -104,6 +118,11 @@ inline constexpr bool enable_float_long_double =
 inline constexpr bool enable_width = LIBXR_PRINT_ENABLE_WIDTH;
 /// Enables constant precision parsing. / 启用常量精度解析
 inline constexpr bool enable_precision = LIBXR_PRINT_ENABLE_PRECISION;
+/// Enables alternate-form syntax such as # for integer prefixes and float decimal-point retention. / 启用备用格式语法，例如用于整数前缀和浮点保留小数点的 #
+inline constexpr bool enable_alternate = LIBXR_PRINT_ENABLE_ALTERNATE;
+/// Enables source-level explicit argument indexing such as printf n$ and format {1}. / 启用源级显式参数索引，例如 printf 的 n$ 和 format 的 {1}
+inline constexpr bool enable_explicit_argument_indexing =
+    LIBXR_PRINT_ENABLE_EXPLICIT_ARGUMENT_INDEXING;
 }  // namespace LibXR::Print::Config
 
 namespace LibXR::Print

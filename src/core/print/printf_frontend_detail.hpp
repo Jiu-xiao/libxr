@@ -313,6 +313,11 @@ struct SourceAnalysis
     return Error::None;
   }
 
+  if (!Config::enable_explicit_argument_indexing)
+  {
+    return Error::PositionalArgumentDisabled;
+  }
+
   if (index == 0)
   {
     return Error::InvalidArgumentIndex;
@@ -678,7 +683,8 @@ namespace Lowering
 }
 
 /// Parses the leading flag cluster of one conversion. / 解析单个转换项前导的标志位簇
-consteval void ParseFlags(std::string_view source, size_t& pos, Conversion& conversion)
+[[nodiscard]] consteval Error ParseFlags(std::string_view source, size_t& pos,
+                                         Conversion& conversion)
 {
   while (pos < source.size())
   {
@@ -694,16 +700,22 @@ consteval void ParseFlags(std::string_view source, size_t& pos, Conversion& conv
         conversion.space_sign = true;
         break;
       case '#':
+        if (!Config::enable_alternate)
+        {
+          return Error::InvalidSpecifier;
+        }
         conversion.alternate = true;
         break;
       case '0':
         conversion.zero_pad = true;
         break;
       default:
-        return;
+        return Error::None;
     }
     ++pos;
   }
+
+  return Error::None;
 }
 
 /// Parses one optional constant width field. / 解析一个可选的常量宽度字段
@@ -842,7 +854,11 @@ consteval void ParseLength(std::string_view source, size_t& pos, Conversion& con
     return error;
   }
 
-  ParseFlags(source, pos, conversion);
+  error = ParseFlags(source, pos, conversion);
+  if (error != Error::None)
+  {
+    return error;
+  }
 
   error = ParseWidth(source, pos, conversion);
   if (error != Error::None)

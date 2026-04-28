@@ -25,6 +25,7 @@ enum class Error : uint8_t
   EmbeddedNul,             ///< embedded NUL before the terminator / 终止字节之前出现嵌入式 NUL
   UnmatchedBrace,          ///< unmatched { or } / 花括号未正确配对
   MixedIndexing,           ///< automatic and manual indexing were mixed / 混用了自动索引与手动索引
+  ManualIndexingDisabled,  ///< explicit {0}/{1} argument indexing is disabled by configuration / 显式 {0}/{1} 参数索引已被配置关闭
   DynamicField,            ///< nested replacement field in width / precision is unsupported / 不支持宽度或精度中的嵌套替换字段
   InvalidArgumentIndex,    ///< field head is not a valid decimal argument index / 字段开头不是合法的十进制参数索引
   InvalidSpecifier,        ///< malformed format-spec grammar / format-spec 语法非法
@@ -287,6 +288,11 @@ struct IndexingState
     return Error::MixedIndexing;
   }
 
+  if (!Config::enable_explicit_argument_indexing)
+  {
+    return Error::ManualIndexingDisabled;
+  }
+
   indexing.uses_manual = true;
   field.arg_index = index;
   return Error::None;
@@ -326,6 +332,10 @@ struct IndexingState
 
   if (pos < source.size() && source[pos] == '#')
   {
+    if (!Config::enable_alternate)
+    {
+      return Error::InvalidSpecifier;
+    }
     field.alternate = true;
     ++pos;
   }
@@ -678,6 +688,23 @@ template <typename... Args>
          presentation == 'x' || presentation == 'X';
 }
 
+[[nodiscard]] constexpr char DefaultFloatPresentation()
+{
+  if (Config::enable_float_general)
+  {
+    return 'g';
+  }
+  if (Config::enable_float_fixed)
+  {
+    return 'f';
+  }
+  if (Config::enable_float_scientific)
+  {
+    return 'e';
+  }
+  return 0;
+}
+
 [[nodiscard]] consteval LoweredField LowerIntegerLike(const ParsedField& parsed,
                                                       bool signed_decimal,
                                                       bool uses_64bit_storage)
@@ -865,7 +892,12 @@ template <typename... Args>
 [[nodiscard]] consteval LoweredField LowerFloat(const ParsedField& parsed,
                                                 BoundKind kind)
 {
-  char presentation = parsed.presentation == 0 ? 'g' : parsed.presentation;
+  char presentation =
+      parsed.presentation == 0 ? DefaultFloatPresentation() : parsed.presentation;
+  if (presentation == 0)
+  {
+    return LoweredField{.error = Error::ArgumentTypeMismatch};
+  }
   bool upper_case =
       presentation == 'F' || presentation == 'E' || presentation == 'G';
 

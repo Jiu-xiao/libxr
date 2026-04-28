@@ -570,8 +570,8 @@ ErrorCode WritePort::Stream::Write(ConstRawData data)
     return lock_result;
   }
 
-  auto ans =
-      port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
+  auto ans = port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
+                                           data.size_);
   if (ans == ErrorCode::OK)
   {
     buffered_size_ += data.size_;
@@ -584,8 +584,8 @@ ErrorCode WritePort::Stream::SubmitBuffered()
   ASSERT(owns_port_);
   ASSERT(buffered_size_ > 0);
 
-  auto ans =
-      port_->queue_info_->Push(WriteInfoBlock{ConstRawData{nullptr, buffered_size_}, op_});
+  auto ans = port_->queue_info_->Push(
+      WriteInfoBlock{ConstRawData{nullptr, buffered_size_}, op_});
   ASSERT(ans == ErrorCode::OK);
 
   ans = port_->CommitWrite({nullptr, buffered_size_}, op_, true);
@@ -655,9 +655,7 @@ void WritePort::Stream::Discard()
 
 // STDIO compiled-format bridge.
 // STDIO 编译格式桥接层。
-STDIO::CompiledSink::CompiledSink(WritePort::Stream& stream) : stream_(stream)
-{
-}
+STDIO::CompiledSink::CompiledSink(WritePort::Stream& stream) : stream_(stream) {}
 
 ErrorCode STDIO::CompiledSink::Write(std::string_view chunk)
 {

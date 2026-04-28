@@ -28,6 +28,8 @@ class Format
                 "LibXR::Format: unmatched brace in format string");
   static_assert(source_analysis.error != SourceError::MixedIndexing,
                 "LibXR::Format: automatic and manual argument indexing cannot be mixed");
+  static_assert(source_analysis.error != SourceError::ManualIndexingDisabled,
+                "LibXR::Format: explicit argument indexing is disabled in the current profile");
   static_assert(source_analysis.error != SourceError::DynamicField,
                 "LibXR::Format: dynamic width and precision are not supported");
   static_assert(source_analysis.error != SourceError::InvalidArgumentIndex,
@@ -72,6 +74,8 @@ class Format
                   "LibXR::Format: unmatched brace in format string");
     static_assert(result.compile_error != Error::MixedIndexing,
                   "LibXR::Format: automatic and manual argument indexing cannot be mixed");
+    static_assert(result.compile_error != Error::ManualIndexingDisabled,
+                  "LibXR::Format: explicit argument indexing is disabled in the current profile");
     static_assert(result.compile_error != Error::DynamicField,
                   "LibXR::Format: dynamic width and precision are not supported");
     static_assert(result.compile_error != Error::InvalidArgumentIndex,
