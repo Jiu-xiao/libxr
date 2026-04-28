@@ -1,11 +1,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <cstdio>
 #include <cstdlib>
-#include <limits>
+#include <cstring>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -17,6 +17,43 @@ static_assert(LibXR::Format<"{1} {0}">::ArgumentCount() == 2);
 static_assert(LibXR::Format<"{:d} {}">::template Matches<int, const char*>());
 static_assert(LibXR::Format<"{}">::template Matches<int, int>());
 static_assert(!LibXR::Format<"{:d} {}">::template Matches<const char*, int>());
+
+using LoggerFrontend = LibXR::Detail::LoggerLiteral::Frontend;
+using LoggerResolution = LibXR::Detail::LoggerLiteral::Resolution;
+
+static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto,
+                                                            "logger {}", int>() ==
+              LoggerResolution::Format);
+static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto,
+                                                            "logger %d", int>() ==
+              LoggerResolution::Printf);
+static_assert(
+    LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{{}}">() ==
+    LoggerResolution::Format);
+static_assert(
+    LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "%%">() ==
+    LoggerResolution::Printf);
+static_assert(
+    LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "plain text">() ==
+    LoggerResolution::Format);
+static_assert(
+    LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{} %d", int>() ==
+    LoggerResolution::Ambiguous);
+static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "%s {}",
+                                                            const char*>() ==
+              LoggerResolution::Ambiguous);
+static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto,
+                                                            "{0}%1$d", int>() ==
+              LoggerResolution::Ambiguous);
+static_assert(
+    LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{%">() ==
+    LoggerResolution::None);
+static_assert(
+    LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{%d}", int>() ==
+    LoggerResolution::Printf);
+static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto,
+                                                            "{123abc} %d", int>() ==
+              LoggerResolution::Printf);
 
 namespace
 {
@@ -73,14 +110,32 @@ struct BrokenGenericFormat
     return std::array<LibXR::Print::FormatArgumentInfo, 0>{};
   }
 
-  [[nodiscard]] static constexpr auto ArgumentOrder()
-  {
-    return std::array<size_t, 0>{};
-  }
+  [[nodiscard]] static constexpr auto ArgumentOrder() { return std::array<size_t, 0>{}; }
 
   [[nodiscard]] static constexpr LibXR::Print::FormatProfile Profile()
   {
     return LibXR::Print::FormatProfile::Generic;
+  }
+};
+
+struct StdioWriteScope
+{
+  explicit StdioWriteScope(LibXR::WritePort& write, LibXR::Mutex& mutex,
+                           LibXR::WritePort::Stream* stream = nullptr)
+  {
+    LibXR::STDIO::write_ = &write;
+    LibXR::STDIO::write_mutex_ = &mutex;
+    LibXR::STDIO::write_stream_ = stream;
+  }
+
+  StdioWriteScope(const StdioWriteScope&) = delete;
+  StdioWriteScope& operator=(const StdioWriteScope&) = delete;
+
+  ~StdioWriteScope()
+  {
+    LibXR::STDIO::write_ = nullptr;
+    LibXR::STDIO::write_mutex_ = nullptr;
+    LibXR::STDIO::write_stream_ = nullptr;
   }
 };
 
@@ -91,16 +146,14 @@ bool SameAsSnprintf(Args... args)
   int expected_size = 0;
   if constexpr (sizeof...(Args) == 0)
   {
-    expected_size =
-        std::snprintf(expected.data(), expected.size(), "%s", Source.Data());
+    expected_size = std::snprintf(expected.data(), expected.size(), "%s", Source.Data());
   }
   else
   {
     expected_size =
         std::snprintf(expected.data(), expected.size(), Source.Data(), args...);
   }
-  if (expected_size < 0 ||
-      static_cast<size_t>(expected_size) >= expected.size())
+  if (expected_size < 0 || static_cast<size_t>(expected_size) >= expected.size())
   {
     return false;
   }
@@ -162,9 +215,8 @@ int Fail(const char* message)
   std::exit(1);
   return 0;
 }
-}  // namespace
 
-void test_print()
+void TestPrintfFrontendSemantics()
 {
   if (!SameAsSnprintf<"abc">())
   {
@@ -206,8 +258,8 @@ void test_print()
     Fail("octal integer semantics mismatch");
   }
 
-  if (!SamePrintfAsExpected<"%b|%B|%#b|%#B|%08b">("101|101|0b101|0B101|00000101", 5U,
-                                                  5U, 5U, 5U, 5U))
+  if (!SamePrintfAsExpected<"%b|%B|%#b|%#B|%08b">("101|101|0b101|0B101|00000101", 5U, 5U,
+                                                  5U, 5U, 5U))
   {
     Fail("binary integer semantics mismatch");
   }
@@ -235,8 +287,7 @@ void test_print()
     Fail("string format mismatch");
   }
 
-  if (!SameAsSnprintf<"%s|%.3s|%6.3s|%-6.3s">("abcdef", "abcdef", "abcdef",
-                                              "abcdef"))
+  if (!SameAsSnprintf<"%s|%.3s|%6.3s|%-6.3s">("abcdef", "abcdef", "abcdef", "abcdef"))
   {
     Fail("string semantics mismatch");
   }
@@ -263,9 +314,9 @@ void test_print()
     ptrdiff_t ptrdiff_signed = -11;
     std::make_unsigned_t<ptrdiff_t> ptrdiff_unsigned = 12;
     if (!SameAsSnprintf<"%hhd %hhu %hd %hu %lld %llu %jd %ju %td %tu">(
-            tiny_signed, tiny_unsigned, short_signed, short_unsigned,
-            long_long_signed, long_long_unsigned, max_signed, max_unsigned,
-            ptrdiff_signed, ptrdiff_unsigned))
+            tiny_signed, tiny_unsigned, short_signed, short_unsigned, long_long_signed,
+            long_long_unsigned, max_signed, max_unsigned, ptrdiff_signed,
+            ptrdiff_unsigned))
     {
       Fail("integer length family mismatch");
     }
@@ -306,20 +357,17 @@ void test_print()
     Fail("negative zero float mismatch");
   }
 
-  if (!SameAsSnprintf<"%f|%F|%e">(
-          std::numeric_limits<double>::infinity(),
-          -std::numeric_limits<double>::infinity(),
-          std::numeric_limits<double>::quiet_NaN()))
+  if (!SameAsSnprintf<"%f|%F|%e">(std::numeric_limits<double>::infinity(),
+                                  -std::numeric_limits<double>::infinity(),
+                                  std::numeric_limits<double>::quiet_NaN()))
   {
     Fail("float inf nan mismatch");
   }
 
   {
     int value = 0;
-    if (!SameAsSnprintf<
-            "a%d 0123456789abcdef %u %o %x %X %p %c %s %f %e %g %Lf %Le %Lg">(
-            -1, 2U, 8U, 42U, 42U, &value, 'Q', "xy", 1.5, 1.5, 1.5, 2.25L,
-            2.25L, 2.25L))
+    if (!SameAsSnprintf<"a%d 0123456789abcdef %u %o %x %X %p %c %s %f %e %g %Lf %Le %Lg">(
+            -1, 2U, 8U, 42U, 42U, &value, 'Q', "xy", 1.5, 1.5, 1.5, 2.25L, 2.25L, 2.25L))
     {
       Fail("full supported family mismatch");
     }
@@ -345,6 +393,14 @@ void test_print()
     }
   }
 
+  if (!SamePrintfAsExpected<"[%s]">("[(null)]", static_cast<const char*>(nullptr)))
+  {
+    Fail("printf null string mismatch");
+  }
+}
+
+void TestFormatFrontendSemantics()
+{
   if (!SameFormatAsExpected<"abc">("abc"))
   {
     Fail("format frontend plain text mismatch");
@@ -366,8 +422,8 @@ void test_print()
     Fail("format frontend non-decimal mismatch");
   }
 
-  if (!SameFormatAsExpected<"[{:.3s}] [{:_>6s}] [{:*^7s}]">(
-          "[abc] [___abc] [**abc**]", "abcdef", "abc", "abc"))
+  if (!SameFormatAsExpected<"[{:.3s}] [{:_>6s}] [{:*^7s}]">("[abc] [___abc] [**abc**]",
+                                                            "abcdef", "abc", "abc"))
   {
     Fail("format frontend string field mismatch");
   }
@@ -377,14 +433,13 @@ void test_print()
     Fail("format frontend character mismatch");
   }
 
-  if (!SameFormatAsExpected<"{:.2f}|{:.1E}|{:g}">("1.25|1.2E+01|12", 1.25, 12.0,
-                                                   12.0))
+  if (!SameFormatAsExpected<"{:.2f}|{:.1E}|{:g}">("1.25|1.2E+01|12", 1.25, 12.0, 12.0))
   {
     Fail("format frontend float mismatch");
   }
 
   if (!SameFormatAsExpected<"{:+d}|{: d}|{:08d}|{:#x}">("+7| 7|00000007|0x2a", 7, 7, 7,
-                                                         42U))
+                                                        42U))
   {
     Fail("format frontend integer flag mismatch");
   }
@@ -395,7 +450,7 @@ void test_print()
   }
 
   if (!SameFormatAsExpected<"{:f}|{:E}|{:g}">("-0.000000|-0.000000E+00|-0", -0.0, -0.0,
-                                               -0.0))
+                                              -0.0))
   {
     Fail("format frontend negative zero mismatch");
   }
@@ -427,11 +482,45 @@ void test_print()
     Fail("format frontend null string mismatch");
   }
 
-  if (!SamePrintfAsExpected<"[%s]">("[(null)]", static_cast<const char*>(nullptr)))
   {
-    Fail("printf null string mismatch");
+    constexpr LibXR::Format<"{:c} {:.3s} {:p}"> format{};
+    int value = 7;
+    StringSink sink;
+    auto ec = format.WriteTo(sink, 'A', "abcdef", &value);
+    if (ec != LibXR::ErrorCode::OK || !sink.buffer.starts_with("A abc 0x"))
+    {
+      Fail("format frontend writeto mismatch");
+    }
   }
 
+  {
+    int value = 0;
+    std::string expected = "ptr=" + PointerText(&value);
+    if (!SameFormatAsExpected<"ptr={}">(expected, &value))
+    {
+      Fail("format frontend pointer default mismatch");
+    }
+  }
+
+  {
+    int value = 0;
+    std::string pointer = PointerText(&value);
+    std::string expected = "[";
+    if (pointer.size() < 32)
+    {
+      expected.append(32 - pointer.size(), ' ');
+    }
+    expected += pointer;
+    expected.push_back(']');
+    if (!SameFormatAsExpected<"[{:32}]">(expected, &value))
+    {
+      Fail("format frontend pointer default alignment mismatch");
+    }
+  }
+}
+
+void TestPrintApiWrappers()
+{
   {
     constexpr LibXR::Format<"x={:+05d} {:#x} {}"> format{};
     StringSink sink;
@@ -495,9 +584,8 @@ void test_print()
 
   {
     char buffer[32] = {};
-    size_t written =
-        LibXR::Print::FormatIntoBuffer<"x={:+05d} {:#x} {}">(buffer, sizeof(buffer), 7,
-                                                            42U, "ok");
+    size_t written = LibXR::Print::FormatIntoBuffer<"x={:+05d} {:#x} {}">(
+        buffer, sizeof(buffer), 7, 42U, "ok");
     if (std::string_view(buffer) != "x=+0007 0x2a ok" ||
         written != std::strlen("x=+0007 0x2a ok"))
     {
@@ -585,8 +673,8 @@ void test_print()
 
   {
     char buffer[8] = {'x', 'x', 'x', '\0'};
-    size_t written = LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer),
-                                                    BrokenGenericFormat{});
+    size_t written =
+        LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), BrokenGenericFormat{});
     if (written != 0 || buffer[0] != '\0')
     {
       Fail("format bounded buffer runtime error mismatch");
@@ -601,18 +689,10 @@ void test_print()
       Fail("snprintf runtime error mismatch");
     }
   }
+}
 
-  {
-    constexpr LibXR::Format<"{:c} {:.3s} {:p}"> format{};
-    int value = 7;
-    StringSink sink;
-    auto ec = format.WriteTo(sink, 'A', "abcdef", &value);
-    if (ec != LibXR::ErrorCode::OK || !sink.buffer.starts_with("A abc 0x"))
-    {
-      Fail("format frontend writeto mismatch");
-    }
-  }
-
+void TestStdioPrintWrappers()
+{
   {
     static constexpr char expected[] = "x=+0007 0x2a ok";
 
@@ -620,10 +700,7 @@ void test_print()
     LibXR::ReadPort& read = pipe.GetReadPort();
     LibXR::WritePort& write = pipe.GetWritePort();
     LibXR::Mutex mutex;
-
-    LibXR::STDIO::write_ = &write;
-    LibXR::STDIO::write_mutex_ = &mutex;
-    LibXR::STDIO::write_stream_ = nullptr;
+    StdioWriteScope stdio_scope(write, mutex);
 
     uint8_t rx[sizeof(expected) - 1] = {0};
     LibXR::ReadOperation read_op;
@@ -643,10 +720,6 @@ void test_print()
     {
       Fail("format frontend stdio output mismatch");
     }
-
-    LibXR::STDIO::write_ = nullptr;
-    LibXR::STDIO::write_mutex_ = nullptr;
-    LibXR::STDIO::write_stream_ = nullptr;
   }
 
   {
@@ -658,10 +731,7 @@ void test_print()
     LibXR::Mutex mutex;
     LibXR::WriteOperation stream_op;
     LibXR::WritePort::Stream stream(&write, stream_op);
-
-    LibXR::STDIO::write_ = &write;
-    LibXR::STDIO::write_mutex_ = &mutex;
-    LibXR::STDIO::write_stream_ = &stream;
+    StdioWriteScope stdio_scope(write, mutex, &stream);
 
     uint8_t rx[sizeof(expected) - 1] = {0};
     LibXR::ReadOperation read_op;
@@ -681,10 +751,6 @@ void test_print()
     {
       Fail("format frontend stdio stream output mismatch");
     }
-
-    LibXR::STDIO::write_ = nullptr;
-    LibXR::STDIO::write_mutex_ = nullptr;
-    LibXR::STDIO::write_stream_ = nullptr;
   }
 
   {
@@ -694,10 +760,7 @@ void test_print()
     LibXR::ReadPort& read = pipe.GetReadPort();
     LibXR::WritePort& write = pipe.GetWritePort();
     LibXR::Mutex mutex;
-
-    LibXR::STDIO::write_ = &write;
-    LibXR::STDIO::write_mutex_ = &mutex;
-    LibXR::STDIO::write_stream_ = nullptr;
+    StdioWriteScope stdio_scope(write, mutex);
 
     uint8_t rx[sizeof(expected) - 1] = {0};
     LibXR::ReadOperation read_op;
@@ -717,10 +780,6 @@ void test_print()
     {
       Fail("printf frontend stdio output mismatch");
     }
-
-    LibXR::STDIO::write_ = nullptr;
-    LibXR::STDIO::write_mutex_ = nullptr;
-    LibXR::STDIO::write_stream_ = nullptr;
   }
 
   {
@@ -732,10 +791,7 @@ void test_print()
     LibXR::Mutex mutex;
     LibXR::WriteOperation stream_op;
     LibXR::WritePort::Stream stream(&write, stream_op);
-
-    LibXR::STDIO::write_ = &write;
-    LibXR::STDIO::write_mutex_ = &mutex;
-    LibXR::STDIO::write_stream_ = &stream;
+    StdioWriteScope stdio_scope(write, mutex, &stream);
 
     uint8_t rx[sizeof(expected) - 1] = {0};
     LibXR::ReadOperation read_op;
@@ -755,12 +811,11 @@ void test_print()
     {
       Fail("printf frontend stdio stream output mismatch");
     }
-
-    LibXR::STDIO::write_ = nullptr;
-    LibXR::STDIO::write_mutex_ = nullptr;
-    LibXR::STDIO::write_stream_ = nullptr;
   }
+}
 
+void TestStdioTruncation()
+{
   {
     constexpr size_t pipe_capacity = 64;
     constexpr size_t payload_size = pipe_capacity + 16;
@@ -777,14 +832,12 @@ void test_print()
     LibXR::WritePort& write = pipe.GetWritePort();
     LibXR::Mutex mutex;
     const size_t expected_retained = write.EmptySize();
-
-    LibXR::STDIO::write_ = &write;
-    LibXR::STDIO::write_mutex_ = &mutex;
-    LibXR::STDIO::write_stream_ = nullptr;
+    StdioWriteScope stdio_scope(write, mutex);
 
     std::array<uint8_t, payload_size> rx{};
     LibXR::ReadOperation read_op;
-    if (read(LibXR::RawData{rx.data(), expected_retained}, read_op) != LibXR::ErrorCode::OK)
+    if (read(LibXR::RawData{rx.data(), expected_retained}, read_op) !=
+        LibXR::ErrorCode::OK)
     {
       Fail("stdio pipe-capacity truncation read arm failed");
     }
@@ -800,10 +853,6 @@ void test_print()
     {
       Fail("stdio pipe-capacity truncation payload mismatch");
     }
-
-    LibXR::STDIO::write_ = nullptr;
-    LibXR::STDIO::write_mutex_ = nullptr;
-    LibXR::STDIO::write_stream_ = nullptr;
   }
 
   {
@@ -824,14 +873,12 @@ void test_print()
     LibXR::WriteOperation stream_op;
     LibXR::WritePort::Stream stream(&write, stream_op);
     const size_t expected_retained = write.EmptySize();
-
-    LibXR::STDIO::write_ = &write;
-    LibXR::STDIO::write_mutex_ = &mutex;
-    LibXR::STDIO::write_stream_ = &stream;
+    StdioWriteScope stdio_scope(write, mutex, &stream);
 
     std::array<uint8_t, payload_size> rx{};
     LibXR::ReadOperation read_op;
-    if (read(LibXR::RawData{rx.data(), expected_retained}, read_op) != LibXR::ErrorCode::OK)
+    if (read(LibXR::RawData{rx.data(), expected_retained}, read_op) !=
+        LibXR::ErrorCode::OK)
     {
       Fail("stdio bound-stream truncation read arm failed");
     }
@@ -847,10 +894,6 @@ void test_print()
     {
       Fail("stdio bound-stream truncation payload mismatch");
     }
-
-    LibXR::STDIO::write_ = nullptr;
-    LibXR::STDIO::write_mutex_ = nullptr;
-    LibXR::STDIO::write_stream_ = nullptr;
   }
 
   {
@@ -871,14 +914,12 @@ void test_print()
     LibXR::WriteOperation stream_op;
     LibXR::WritePort::Stream stream(&write, stream_op);
     const size_t expected_retained = write.EmptySize();
-
-    LibXR::STDIO::write_ = &write;
-    LibXR::STDIO::write_mutex_ = &mutex;
-    LibXR::STDIO::write_stream_ = &stream;
+    StdioWriteScope stdio_scope(write, mutex, &stream);
 
     std::array<uint8_t, payload_size> rx{};
     LibXR::ReadOperation read_op;
-    if (read(LibXR::RawData{rx.data(), expected_retained}, read_op) != LibXR::ErrorCode::OK)
+    if (read(LibXR::RawData{rx.data(), expected_retained}, read_op) !=
+        LibXR::ErrorCode::OK)
     {
       Fail("stdio bound-stream small-capacity truncation read arm failed");
     }
@@ -894,34 +935,16 @@ void test_print()
     {
       Fail("stdio bound-stream small-capacity truncation payload mismatch");
     }
-
-    LibXR::STDIO::write_ = nullptr;
-    LibXR::STDIO::write_mutex_ = nullptr;
-    LibXR::STDIO::write_stream_ = nullptr;
   }
+}
 
-  {
-    int value = 0;
-    std::string expected = "ptr=" + PointerText(&value);
-    if (!SameFormatAsExpected<"ptr={}">(expected, &value))
-    {
-      Fail("format frontend pointer default mismatch");
-    }
-  }
+}  // namespace
 
-  {
-    int value = 0;
-    std::string pointer = PointerText(&value);
-    std::string expected = "[";
-    if (pointer.size() < 32)
-    {
-      expected.append(32 - pointer.size(), ' ');
-    }
-    expected += pointer;
-    expected.push_back(']');
-    if (!SameFormatAsExpected<"[{:32}]">(expected, &value))
-    {
-      Fail("format frontend pointer default alignment mismatch");
-    }
-  }
+void test_print()
+{
+  TestPrintfFrontendSemantics();
+  TestFormatFrontendSemantics();
+  TestPrintApiWrappers();
+  TestStdioPrintWrappers();
+  TestStdioTruncation();
 }

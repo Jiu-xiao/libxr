@@ -11,34 +11,6 @@
 
 const static char* test_name = nullptr;
 
-using LoggerFrontend = LibXR::Detail::LoggerLiteral::Frontend;
-using LoggerResolution = LibXR::Detail::LoggerLiteral::Resolution;
-
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "logger {}",
-                                                            int>() ==
-              LoggerResolution::Format);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "logger %d",
-                                                            int>() ==
-              LoggerResolution::Printf);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{{}}">() ==
-              LoggerResolution::Format);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "%%">() ==
-              LoggerResolution::Printf);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "plain text">() ==
-              LoggerResolution::Format);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{} %d", int>() ==
-              LoggerResolution::Ambiguous);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "%s {}", const char*>() ==
-              LoggerResolution::Ambiguous);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{0}%1$d", int>() ==
-              LoggerResolution::Ambiguous);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{%">() ==
-              LoggerResolution::None);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{%d}", int>() ==
-              LoggerResolution::Printf);
-static_assert(LibXR::Detail::LoggerLiteral::ResolveFrontend<LoggerFrontend::Auto, "{123abc} %d", int>() ==
-              LoggerResolution::Printf);
-
 #define TEST_STEP(_arg)                                \
   do                                                   \
   {                                                    \
@@ -58,14 +30,6 @@ struct TestCase
   void (*function)();
   bool isolated;
 };
-
-static void logger_literal_surface_compile_smoke(const char* name)
-{
-  XR_LOG_INFO("logger smoke [{}]\n", name);
-  XR_LOG_INFO("logger smoke [%s]\n", name);
-  XR_LOG_INFO(XR_FMT("logger smoke explicit [{}]\n"), name);
-  XR_LOG_INFO(XR_PRINTF("logger smoke explicit [%s]\n"), name);
-}
 
 static void run_test_case(const TestCase& test_case)
 {
@@ -94,7 +58,6 @@ static void run_test_case(const TestCase& test_case)
 
 static void run_libxr_tests()
 {
-  logger_literal_surface_compile_smoke("boot");
   XR_LOG_INFO("Running LibXR Tests...\n");
 
   TestCase core_tests[] = {
@@ -114,9 +77,6 @@ static void run_libxr_tests()
       {"crc", test_crc, false},
       {"encoder", test_float_encoder, false},
       {"cycle_value", test_cycle_value, false},
-  };
-
-  TestCase print_tests[] = {
       {"print", test_print, false},
   };
 
@@ -158,7 +118,6 @@ static void run_libxr_tests()
   } test_groups[] = {{core_tests, "core_tests"},
                      {synchronization_tests, "synchronization_tests"},
                      {utility_tests, "utility_tests"},
-                     {print_tests, "print_tests"},
                      {data_structure_tests, "data_structure_tests"},
                      {threading_tests, "threading_tests"},
                      {motion_tests, "motion_tests"},
@@ -169,7 +128,6 @@ static void run_libxr_tests()
       sizeof(core_tests) / sizeof(TestCase),
       sizeof(synchronization_tests) / sizeof(TestCase),
       sizeof(utility_tests) / sizeof(TestCase),
-      sizeof(print_tests) / sizeof(TestCase),
       sizeof(data_structure_tests) / sizeof(TestCase),
       sizeof(threading_tests) / sizeof(TestCase),
       sizeof(motion_tests) / sizeof(TestCase),
