@@ -43,7 +43,10 @@ ErrorCode Semaphore::Wait(uint32_t timeout)
         MonotonicTime::RealtimeDeadlineFromNow(MonotonicTime::WaitSliceMilliseconds(
             MonotonicTime::RemainingMilliseconds(deadline_ms)));
 
-    if (!sem_timedwait(semaphore_handle_, &ts))
+    WebotsMarkCurrentRealtimeThreadParked(false);
+    const int wait_ans = sem_timedwait(semaphore_handle_, &ts);
+    WebotsMarkCurrentRealtimeThreadRunning();
+    if (!wait_ans)
     {
       return ErrorCode::OK;
     }

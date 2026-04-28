@@ -19,11 +19,13 @@ static ErrorCode ConditionVarWait(uint32_t timeout)
   while (MonotonicTime::RemainingMilliseconds(deadline_ms) > 0)
   {
     pthread_mutex_lock(&_libxr_webots_time_notify->mutex);
+    WebotsMarkCurrentRealtimeThreadParked(true);
     const timespec ts =
         MonotonicTime::RealtimeDeadlineFromNow(MonotonicTime::WaitSliceMilliseconds(
             MonotonicTime::RemainingMilliseconds(deadline_ms)));
     auto ans = pthread_cond_timedwait(&_libxr_webots_time_notify->cond,
                                       &_libxr_webots_time_notify->mutex, &ts);
+    WebotsMarkCurrentRealtimeThreadRunning();
     pthread_mutex_unlock(&_libxr_webots_time_notify->mutex);
     if (ans == 0)
     {
