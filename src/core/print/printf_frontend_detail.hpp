@@ -620,6 +620,12 @@ namespace Lowering
                  ? FormatArgumentRule::LongDouble
                  : FormatArgumentRule::Float;
     case ValueKind::None:
+    case ValueKind::Signed:
+    case ValueKind::Unsigned:
+    case ValueKind::Binary:
+    case ValueKind::Octal:
+    case ValueKind::HexLower:
+    case ValueKind::HexUpper:
       break;
   }
 

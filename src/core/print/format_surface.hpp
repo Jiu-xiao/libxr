@@ -64,6 +64,10 @@ class Format
     using Frontend = Compiler<Args...>;
     inline static constexpr auto result = Print::FormatCompiler<Frontend>::Compile();
 
+    static_assert(source_analysis.error != SourceError::None ||
+                      sizeof...(Args) == source_analysis.required_argument_count,
+                  "LibXR::Format: call-site argument count does not match the "
+                  "referenced replacement fields");
     static_assert(result.compile_error != Error::NumberOverflow,
                   "LibXR::Format: index, width, or precision is too large");
     static_assert(result.compile_error != Error::UnexpectedEnd,
@@ -134,7 +138,7 @@ class Format
     }
   };
 
-  /// Returns the minimum number of call-site arguments referenced by this source. / 返回当前源串至少会引用的调用点参数个数
+  /// Returns the required call-site argument count addressed by this source. / 返回当前源串会寻址的调用点参数个数
   [[nodiscard]] static constexpr size_t ArgumentCount()
   {
     return source_analysis.required_argument_count;
@@ -144,8 +148,15 @@ class Format
   template <typename... Args>
   [[nodiscard]] static consteval bool Matches()
   {
-    using Frontend = Compiler<std::remove_cvref_t<Args>...>;
-    return Print::FormatCompiler<Frontend>::Compile().compile_error == Error::None;
+    if constexpr (sizeof...(Args) != source_analysis.required_argument_count)
+    {
+      return false;
+    }
+    else
+    {
+      using Frontend = Compiler<std::remove_cvref_t<Args>...>;
+      return Print::FormatCompiler<Frontend>::Compile().compile_error == Error::None;
+    }
   }
 
   /// Writes this format into one sink and returns only the sink status. / 将当前格式写入一个输出端，并且只返回 sink 状态
