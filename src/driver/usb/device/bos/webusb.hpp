@@ -211,19 +211,19 @@ class WebUsbBosCapability final : public LibXR::USB::BosCapability
    */
   static bool ParseLandingPageUrl(const char* input, uint8_t& scheme, const char*& body)
   {
-    static constexpr const char kHttpsPrefix[] = "https://";
-    static constexpr const char kHttpPrefix[] = "http://";
+    static constexpr const char HTTPS_PREFIX[] = "https://";
+    static constexpr const char HTTP_PREFIX[] = "http://";
 
-    if (std::strncmp(input, kHttpsPrefix, sizeof(kHttpsPrefix) - 1u) == 0)
+    if (std::strncmp(input, HTTPS_PREFIX, sizeof(HTTPS_PREFIX) - 1u) == 0)
     {
       scheme = WEBUSB_URL_SCHEME_HTTPS;
-      body = input + sizeof(kHttpsPrefix) - 1u;
+      body = input + sizeof(HTTPS_PREFIX) - 1u;
       return true;
     }
-    if (std::strncmp(input, kHttpPrefix, sizeof(kHttpPrefix) - 1u) == 0)
+    if (std::strncmp(input, HTTP_PREFIX, sizeof(HTTP_PREFIX) - 1u) == 0)
     {
       scheme = WEBUSB_URL_SCHEME_HTTP;
-      body = input + sizeof(kHttpPrefix) - 1u;
+      body = input + sizeof(HTTP_PREFIX) - 1u;
       return true;
     }
 

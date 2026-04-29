@@ -28,7 +28,7 @@ enum class SwdIoDriveMode : uint8_t
  *       Recommended circuit: 33Ω series resistors on SWCLK/SWDIO, 10k pull-up on SWDIO.
  */
 template <typename SwclkGpioType, typename SwdioGpioType,
-          SwdIoDriveMode kIoDriveMode = SwdIoDriveMode::PUSH_PULL>
+          SwdIoDriveMode IO_DRIVE_MODE = SwdIoDriveMode::PUSH_PULL>
 class SwdGeneralGPIO final : public Swd
 {
   static constexpr uint32_t MIN_HZ = 10'000u;
@@ -368,7 +368,7 @@ class SwdGeneralGPIO final : public Swd
     if (swdio_mode_ != SwdioMode::DRIVE)
     {
       const ErrorCode EC =
-          swdio_.SetConfig({(kIoDriveMode == SwdIoDriveMode::OPEN_DRAIN)
+          swdio_.SetConfig({(IO_DRIVE_MODE == SwdIoDriveMode::OPEN_DRAIN)
                                 ? SwdioGpioType::Direction::OUTPUT_OPEN_DRAIN
                                 : SwdioGpioType::Direction::OUTPUT_PUSH_PULL,
                             SwdioGpioType::Pull::NONE});

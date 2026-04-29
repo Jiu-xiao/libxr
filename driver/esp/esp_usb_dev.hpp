@@ -70,11 +70,11 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
  private:
   friend class ESP32USBEndpoint;
 
-  static constexpr uint8_t kEndpointCount = 7;
-  static constexpr uint8_t kInEndpointLimit = 5;
-  static constexpr uint32_t kInterruptDispatchGuard = 64U;
-  static constexpr size_t kSetupPacketBytes = 8U;
-  static constexpr size_t kSetupDmaBufferBytes = 64U;
+  static constexpr uint8_t ENDPOINT_COUNT = 7;
+  static constexpr uint8_t IN_ENDPOINT_LIMIT = 5;
+  static constexpr uint32_t INTERRUPT_DISPATCH_GUARD = 64U;
+  static constexpr size_t SETUP_PACKET_BYTES = 8U;
+  static constexpr size_t SETUP_DMA_BUFFER_BYTES = 64U;
 
   /**
    * @brief Minimal EP0 setup facts shared with the endpoint layer
@@ -89,8 +89,8 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
    */
   struct EndpointMap
   {
-    USB::Endpoint* in[kEndpointCount] = {};
-    USB::Endpoint* out[kEndpointCount] = {};
+    USB::Endpoint* in[ENDPOINT_COUNT] = {};
+    USB::Endpoint* out[ENDPOINT_COUNT] = {};
   };
 
   /**
@@ -101,8 +101,8 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
     uint16_t depth_words = 0U;
     uint16_t rx_words = 0U;
     uint16_t tx_next_words = 0U;
-    uint16_t tx_words[kEndpointCount] = {};
-    bool tx_bound[kEndpointCount] = {};
+    uint16_t tx_words[ENDPOINT_COUNT] = {};
+    bool tx_bound[ENDPOINT_COUNT] = {};
     uint8_t allocated_in = 0U;
   };
 
@@ -150,7 +150,7 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   // Runtime resource ownership and global flags.
   RuntimeState runtime_ = {};
   // Shared DMA-visible setup packet buffer.
-  alignas(kSetupDmaBufferBytes) uint8_t setup_packet_[kSetupDmaBufferBytes] = {};
+  alignas(SETUP_DMA_BUFFER_BYTES) uint8_t setup_packet_[SETUP_DMA_BUFFER_BYTES] = {};
   // Functional EP0 setup state that must survive until status completion.
   ControlState control_ = {};
 };

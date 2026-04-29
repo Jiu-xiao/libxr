@@ -14,9 +14,9 @@
 
 namespace
 {
-constexpr uint32_t kTxIntrMask = USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY;
-constexpr uint32_t kRxIntrMask = USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT;
-constexpr uint32_t kAllIntrMask = kTxIntrMask | kRxIntrMask;
+constexpr uint32_t TX_INTR_MASK = USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY;
+constexpr uint32_t RX_INTR_MASK = USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT;
+constexpr uint32_t ALL_INTR_MASK = TX_INTR_MASK | RX_INTR_MASK;
 }  // namespace
 
 namespace LibXR
@@ -81,8 +81,8 @@ ErrorCode ESP32CDCJtag::InitHardware()
     return ErrorCode::INIT_ERR;
   }
 
-  usb_serial_jtag_ll_clr_intsts_mask(kAllIntrMask);
-  usb_serial_jtag_ll_ena_intr_mask(kRxIntrMask);
+  usb_serial_jtag_ll_clr_intsts_mask(ALL_INTR_MASK);
+  usb_serial_jtag_ll_ena_intr_mask(RX_INTR_MASK);
 
   hw_inited_ = true;
   return ErrorCode::OK;
@@ -276,7 +276,7 @@ bool IRAM_ATTR ESP32CDCJtag::StartActiveTransfer(bool in_isr)
   }
 
   tx_active_offset_ = 0;
-  usb_serial_jtag_ll_ena_intr_mask(kTxIntrMask);
+  usb_serial_jtag_ll_ena_intr_mask(TX_INTR_MASK);
   (void)PumpTx(in_isr);
   return true;
 }
@@ -302,7 +302,7 @@ bool IRAM_ATTR ESP32CDCJtag::StartAndReportActive(bool in_isr)
 void IRAM_ATTR ESP32CDCJtag::StopTxTransfer()
 {
   usb_serial_jtag_ll_txfifo_flush();
-  usb_serial_jtag_ll_disable_intr_mask(kTxIntrMask);
+  usb_serial_jtag_ll_disable_intr_mask(TX_INTR_MASK);
 }
 
 void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
@@ -396,7 +396,7 @@ void IRAM_ATTR ESP32CDCJtag::HandleInterrupt()
 {
   const uint32_t status = usb_serial_jtag_ll_get_intsts_mask();
 
-  const uint32_t rx_status = status & kRxIntrMask;
+  const uint32_t rx_status = status & RX_INTR_MASK;
   if (rx_status != 0U)
   {
     usb_serial_jtag_ll_clr_intsts_mask(rx_status);
@@ -409,7 +409,7 @@ void IRAM_ATTR ESP32CDCJtag::HandleInterrupt()
     }
   }
 
-  const uint32_t tx_status = status & kTxIntrMask;
+  const uint32_t tx_status = status & TX_INTR_MASK;
   if (tx_status == 0U)
   {
     return;

@@ -15,10 +15,10 @@ namespace LibXR
 namespace
 {
 
-constexpr uint8_t kAckValue = I2C_MASTER_ACK;
-constexpr uint8_t kNackValue = I2C_MASTER_NACK;
-constexpr uint8_t kCheckAck = 1U;
-constexpr uint8_t kNoCheckAck = 0U;
+constexpr uint8_t ACK_VALUE = I2C_MASTER_ACK;
+constexpr uint8_t NACK_VALUE = I2C_MASTER_NACK;
+constexpr uint8_t CHECK_ACK = 1U;
+constexpr uint8_t NO_CHECK_ACK = 0U;
 
 uint64_t ToTimeoutUs(uint32_t timeout_ms)
 {
@@ -153,7 +153,7 @@ ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin, uint32_t clock
   ASSERT(GPIO_IS_VALID_OUTPUT_GPIO(static_cast<gpio_num_t>(scl_pin_)));
   ASSERT(GPIO_IS_VALID_OUTPUT_GPIO(static_cast<gpio_num_t>(sda_pin_)));
   ASSERT(config_.clock_speed > 0U);
-  ASSERT(kFifoLen > 2U);
+  ASSERT(FIFO_LEN > 2U);
 
   if (InitHardware() != ErrorCode::OK)
   {
@@ -474,7 +474,7 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
       static_cast<uint8_t>((async_slave_addr_ << 1U) | I2C_MASTER_WRITE);
   const uint8_t read_addr =
       static_cast<uint8_t>((async_slave_addr_ << 1U) | I2C_MASTER_READ);
-  const size_t fifo_len = kFifoLen;
+  const size_t fifo_len = FIFO_LEN;
   const size_t write_chunk_cap = (fifo_len > 1U) ? (fifo_len - 1U) : 0U;
   ASSERT(write_chunk_cap > 0U);
 
@@ -494,11 +494,11 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
     {
       if (!async_write_addr_sent_)
       {
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
         i2c_ll_write_txfifo(hal_.dev, &write_addr, 1U);
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
-                     kCheckAck, 1U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, ACK_VALUE, ACK_VALUE,
+                     CHECK_ACK, 1U);
         async_write_addr_sent_ = true;
       }
 
@@ -511,10 +511,10 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
                             static_cast<uint8_t>(chunk));
         async_write_prefix_offset_ += chunk;
 
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
-                     kCheckAck, static_cast<uint8_t>(chunk));
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, ACK_VALUE, ACK_VALUE,
+                     CHECK_ACK, static_cast<uint8_t>(chunk));
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
       }
       else if (async_write_offset_ < async_write_size_)
       {
@@ -524,20 +524,20 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
                             static_cast<uint8_t>(chunk));
         async_write_offset_ += chunk;
 
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
-                     kCheckAck, static_cast<uint8_t>(chunk));
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, ACK_VALUE, ACK_VALUE,
+                     CHECK_ACK, static_cast<uint8_t>(chunk));
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
       }
       else if (async_read_size_ == 0U)
       {
         if (!async_write_stop_sent_)
         {
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, kAckValue, kAckValue,
-                       kNoCheckAck, 0U);
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, ACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, 0U);
 #if SOC_I2C_STOP_INDEPENDENT
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                       kNoCheckAck, 0U);
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, 0U);
 #endif
           async_write_stop_sent_ = true;
         }
@@ -563,11 +563,11 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
     {
       if (!async_read_addr_sent_)
       {
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
         i2c_ll_write_txfifo(hal_.dev, &read_addr, 1U);
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue,
-                     kCheckAck, 1U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, ACK_VALUE, ACK_VALUE,
+                     CHECK_ACK, 1U);
         async_read_addr_sent_ = true;
       }
 
@@ -578,31 +578,31 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
 
         if (!is_last)
         {
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kAckValue, kAckValue,
-                       kNoCheckAck, static_cast<uint8_t>(chunk));
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                       kNoCheckAck, 0U);
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, ACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, static_cast<uint8_t>(chunk));
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, 0U);
         }
         else if (chunk == 1U)
         {
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kNackValue, kAckValue,
-                       kNoCheckAck, 1U);
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, NACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, 1U);
         }
         else
         {
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kAckValue, kAckValue,
-                       kNoCheckAck, static_cast<uint8_t>(chunk - 1U));
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kNackValue, kAckValue,
-                       kNoCheckAck, 1U);
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, ACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, static_cast<uint8_t>(chunk - 1U));
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, NACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, 1U);
         }
 
         if (is_last)
         {
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, kAckValue, kAckValue,
-                       kNoCheckAck, 0U);
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, ACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, 0U);
 #if SOC_I2C_STOP_INDEPENDENT
-          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                       kNoCheckAck, 0U);
+          WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                       NO_CHECK_ACK, 0U);
 #endif
         }
 
@@ -791,7 +791,7 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
   const uint64_t timeout_us = ToTimeoutUs(timeout_ms_);
   const uint8_t write_addr = static_cast<uint8_t>((slave_addr << 1U) | I2C_MASTER_WRITE);
   const uint8_t read_addr = static_cast<uint8_t>((slave_addr << 1U) | I2C_MASTER_READ);
-  const size_t fifo_len = kFifoLen;
+  const size_t fifo_len = FIFO_LEN;
   const size_t write_chunk_cap = (fifo_len > 1U) ? (fifo_len - 1U) : 0U;
   ASSERT(write_chunk_cap > 0U);
 
@@ -802,11 +802,11 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
 
   if ((write_size > 0U) || (read_size == 0U))
   {
-    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, kAckValue, kAckValue,
-                 kNoCheckAck, 0U);
+    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, ACK_VALUE, ACK_VALUE,
+                 NO_CHECK_ACK, 0U);
 
     i2c_ll_write_txfifo(hal_.dev, &write_addr, 1U);
-    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue, kCheckAck,
+    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, ACK_VALUE, ACK_VALUE, CHECK_ACK,
                  1U);
 
     size_t write_offset = 0U;
@@ -818,10 +818,10 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
                           static_cast<uint8_t>(chunk));
       write_offset += chunk;
 
-      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue, kCheckAck,
+      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, ACK_VALUE, ACK_VALUE, CHECK_ACK,
                    static_cast<uint8_t>(chunk));
-      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue, kNoCheckAck,
-                   0U);
+      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                   NO_CHECK_ACK, 0U);
 
       const ErrorCode ec = start_and_wait(cmd_idx - 1);
       if (ec != ErrorCode::OK)
@@ -836,11 +836,11 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
     {
       if (read_size == 0U)
       {
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
 #if SOC_I2C_STOP_INDEPENDENT
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
 #endif
       }
       const ErrorCode ec = start_and_wait(cmd_idx - 1);
@@ -853,11 +853,11 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
     }
     else if (read_size == 0U)
     {
-      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, kAckValue, kAckValue,
-                   kNoCheckAck, 0U);
+      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, ACK_VALUE, ACK_VALUE,
+                   NO_CHECK_ACK, 0U);
 #if SOC_I2C_STOP_INDEPENDENT
-      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue, kNoCheckAck,
-                   0U);
+      WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                   NO_CHECK_ACK, 0U);
 #endif
       const ErrorCode ec = start_and_wait(cmd_idx - 1);
       if (ec != ErrorCode::OK)
@@ -871,10 +871,10 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
 
   if (read_size > 0U)
   {
-    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, kAckValue, kAckValue,
-                 kNoCheckAck, 0U);
+    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_RESTART, ACK_VALUE, ACK_VALUE,
+                 NO_CHECK_ACK, 0U);
     i2c_ll_write_txfifo(hal_.dev, &read_addr, 1U);
-    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, kAckValue, kAckValue, kCheckAck,
+    WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_WRITE, ACK_VALUE, ACK_VALUE, CHECK_ACK,
                  1U);
 
     size_t read_offset = 0U;
@@ -885,31 +885,31 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
 
       if (!is_last)
       {
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kAckValue, kAckValue,
-                     kNoCheckAck, static_cast<uint8_t>(chunk));
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, static_cast<uint8_t>(chunk));
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
       }
       else if (chunk == 1U)
       {
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kNackValue, kAckValue,
-                     kNoCheckAck, 1U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, NACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 1U);
       }
       else
       {
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kAckValue, kAckValue,
-                     kNoCheckAck, static_cast<uint8_t>(chunk - 1U));
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, kNackValue, kAckValue,
-                     kNoCheckAck, 1U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, static_cast<uint8_t>(chunk - 1U));
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_READ, NACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 1U);
       }
 
       if (is_last)
       {
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_STOP, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
 #if SOC_I2C_STOP_INDEPENDENT
-        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, kAckValue, kAckValue,
-                     kNoCheckAck, 0U);
+        WriteCommand(hal_.dev, cmd_idx++, I2C_LL_CMD_END, ACK_VALUE, ACK_VALUE,
+                     NO_CHECK_ACK, 0U);
 #endif
       }
 
@@ -1094,7 +1094,7 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   }
 
   const size_t mem_len = MemAddrBytes(mem_addr_size);
-  if (mem_len > kMaxWritePayload)
+  if (mem_len > MAX_WRITE_PAYLOAD)
   {
     return Complete(op, in_isr, ErrorCode::SIZE_ERR);
   }
@@ -1134,8 +1134,8 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     return ErrorCode::OK;
   }
 
-  std::array<uint8_t, kFifoLen> staging = {};
-  const size_t max_chunk = kMaxWritePayload - mem_len;
+  std::array<uint8_t, FIFO_LEN> staging = {};
+  const size_t max_chunk = MAX_WRITE_PAYLOAD - mem_len;
   auto* src = static_cast<const uint8_t*>(write_data.addr_);
   size_t offset = 0U;
   ErrorCode ans = ErrorCode::OK;
@@ -1186,7 +1186,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
   }
 
   const size_t mem_len = MemAddrBytes(mem_addr_size);
-  if (mem_len > kMaxWriteReadPrefix)
+  if (mem_len > MAX_WRITE_READ_PREFIX)
   {
     return Complete(op, in_isr, ErrorCode::SIZE_ERR);
   }
@@ -1231,7 +1231,7 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
 
   while (offset < read_data.size_)
   {
-    const size_t chunk = std::min(read_data.size_ - offset, kMaxReadPayload);
+    const size_t chunk = std::min(read_data.size_ - offset, MAX_READ_PAYLOAD);
     const uint16_t cur_mem = static_cast<uint16_t>(mem_addr + offset);
     EncodeMemAddr(cur_mem, mem_len, mem_raw.data());
 

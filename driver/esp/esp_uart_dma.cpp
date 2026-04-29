@@ -17,8 +17,8 @@ namespace
 {
 // RX uses a circular DMA descriptor ring, similar to STM/CH circular RX DMA
 // behavior (continuous receive + software consumer index).
-constexpr uint32_t kDmaRxNodeCount = 8;
-constexpr size_t kDmaMaxBufferSizePerLinkItem = 4095U;
+constexpr uint32_t DMA_RX_NODE_COUNT = 8;
+constexpr size_t DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM = 4095U;
 
 struct GdmaLinkItem
 {
@@ -36,8 +36,8 @@ struct GdmaLinkItem
   GdmaLinkItem* next;
 };
 
-constexpr uint32_t kGdmaOwnerCpu = 0U;
-constexpr uint32_t kGdmaOwnerDma = 1U;
+constexpr uint32_t GDMA_OWNER_CPU = 0U;
+constexpr uint32_t GDMA_OWNER_DMA = 1U;
 
 size_t AlignUp(size_t value, size_t align)
 {
@@ -65,9 +65,9 @@ GdmaLinkItem* LinkItemFromHeadAddr(uintptr_t head_addr)
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
 extern "C" esp_err_t esp_cache_msync(void* addr, size_t size, int flags);
 
-constexpr int kCacheSyncFlagUnaligned = (1 << 1);
-constexpr int kCacheSyncFlagDirC2M = (1 << 2);
-constexpr int kCacheSyncFlagDirM2C = (1 << 3);
+constexpr int CACHE_SYNC_FLAG_UNALIGNED = (1 << 1);
+constexpr int CACHE_SYNC_FLAG_DIR_C2M = (1 << 2);
+constexpr int CACHE_SYNC_FLAG_DIR_M2C = (1 << 3);
 
 bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 {
@@ -83,8 +83,8 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
   }
 #endif
 
-  int flags = cache_to_mem ? kCacheSyncFlagDirC2M : kCacheSyncFlagDirM2C;
-  flags |= kCacheSyncFlagUnaligned;
+  int flags = cache_to_mem ? CACHE_SYNC_FLAG_DIR_C2M : CACHE_SYNC_FLAG_DIR_M2C;
+  flags |= CACHE_SYNC_FLAG_UNALIGNED;
 
   const esp_err_t ret = esp_cache_msync(const_cast<void*>(addr), size, flags);
   // Non-cacheable regions can return ESP_ERR_INVALID_ARG; treat as no-op success.
@@ -282,7 +282,7 @@ ErrorCode ESP32UART::InitDmaBackend()
   rx_dma_alignment_ = std::max<size_t>(1, std::max(rx_int_alignment, rx_ext_alignment));
 
   gdma_link_list_config_t rx_link_cfg = {
-      .num_items = kDmaRxNodeCount,
+      .num_items = DMA_RX_NODE_COUNT,
       .item_alignment = 4,
       .flags = {},
   };
@@ -292,10 +292,10 @@ ErrorCode ESP32UART::InitDmaBackend()
   }
 
   // Keep one ring window reasonably large to lower ISR pressure at high baud.
-  const size_t rx_chunk_target =
-      std::min<size_t>(std::max<size_t>(32, rx_isr_buffer_size_ / kDmaRxNodeCount), 512);
+  const size_t rx_chunk_target = std::min<size_t>(
+      std::max<size_t>(32, rx_isr_buffer_size_ / DMA_RX_NODE_COUNT), 512);
   rx_dma_chunk_size_ = std::max<size_t>(AlignUp(rx_chunk_target, 4), 32);
-  rx_dma_node_count_ = kDmaRxNodeCount;
+  rx_dma_node_count_ = DMA_RX_NODE_COUNT;
   const size_t rx_storage_alignment = std::max<size_t>(4, rx_dma_alignment_);
   const size_t rx_storage_bytes =
       AlignUp(rx_dma_chunk_size_ * rx_dma_node_count_, rx_storage_alignment);
@@ -308,8 +308,8 @@ ErrorCode ESP32UART::InitDmaBackend()
     return ErrorCode::NO_MEM;
   }
 
-  std::array<gdma_buffer_mount_config_t, kDmaRxNodeCount> rx_mount = {};
-  for (uint32_t i = 0; i < kDmaRxNodeCount; ++i)
+  std::array<gdma_buffer_mount_config_t, DMA_RX_NODE_COUNT> rx_mount = {};
+  for (uint32_t i = 0; i < DMA_RX_NODE_COUNT; ++i)
   {
     rx_mount[i] = gdma_buffer_mount_config_t{
         .buffer = rx_dma_storage_ + (static_cast<size_t>(i) * rx_dma_chunk_size_),
@@ -324,7 +324,7 @@ ErrorCode ESP32UART::InitDmaBackend()
     };
   }
 
-  if (gdma_link_mount_buffers(rx_dma_link_, 0, rx_mount.data(), kDmaRxNodeCount,
+  if (gdma_link_mount_buffers(rx_dma_link_, 0, rx_mount.data(), DMA_RX_NODE_COUNT,
                               nullptr) != ESP_OK)
   {
     return ErrorCode::INIT_ERR;
@@ -365,7 +365,7 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
   uint8_t* const active_buffer = tx_active_buffer_;
   const size_t active_len = tx_active_length_;
   if ((active_buffer == nullptr) || (active_len == 0) ||
-      (active_len > kDmaMaxBufferSizePerLinkItem))
+      (active_len > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM))
   {
     return false;
   }
@@ -401,7 +401,7 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
   desc->dw0.length = static_cast<uint32_t>(active_len);
   desc->dw0.err_eof = 0U;
   desc->dw0.suc_eof = 1U;
-  desc->dw0.owner = kGdmaOwnerDma;
+  desc->dw0.owner = GDMA_OWNER_DMA;
   desc->next = nullptr;
   std::atomic_thread_fence(std::memory_order_release);
 

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstring>
-#include <new>
 
 #include "dfu/dfu_def.hpp"
 
@@ -15,7 +14,7 @@ class DfuBootloaderBackend
 {
  public:
   using JumpCallback = void (*)(void*);
-  static constexpr uint32_t kSealMagic = 0x4C414553u;  // "SEAL"
+  static constexpr uint32_t SEAL_MAGIC = 0x4C414553u;  // "SEAL"
 
 #pragma pack(push, 1)
   /**
@@ -23,7 +22,7 @@ class DfuBootloaderBackend
    */
   struct SealRecord
   {
-    uint32_t magic = kSealMagic;
+    uint32_t magic = SEAL_MAGIC;
     uint32_t image_size = 0u;
     uint32_t crc32 = 0u;
     uint32_t crc32_inv = 0u;
@@ -57,18 +56,12 @@ class DfuBootloaderBackend
     erase_block_count_ = (image_size_limit_ + erase_block_size_ - 1u) / erase_block_size_;
     if (erase_block_count_ > 0u)
     {
-      erased_blocks_ = new (std::nothrow) uint8_t[erase_block_count_];
-      if (erased_blocks_ != nullptr)
-      {
-        std::memset(erased_blocks_, 0, erase_block_count_);
-      }
+      erased_blocks_ = new uint8_t[erase_block_count_];
+      std::memset(erased_blocks_, 0, erase_block_count_);
     }
-    seal_storage_size_ = erase_block_size_;
-    if (seal_storage_size_ < sizeof(SealRecord))
-    {
-      seal_storage_size_ = sizeof(SealRecord);
-    }
-    seal_storage_ = new (std::nothrow) uint8_t[seal_storage_size_];
+    seal_storage_size_ =
+        AlignUp(sizeof(SealRecord), NonZeroWriteSize(flash_.MinWriteSize()));
+    seal_storage_ = new uint8_t[seal_storage_size_];
     transfer_size_ = PayloadLimit();
     if (transfer_size_ == 0u)
     {
@@ -78,7 +71,7 @@ class DfuBootloaderBackend
     {
       transfer_size_ = 4096u;
     }
-    write_buffer_ = new (std::nothrow) uint8_t[transfer_size_];
+    write_buffer_ = new uint8_t[transfer_size_];
     ResetTransferState();
     image_.launch_requested = false;
     image_.ready = false;
@@ -148,11 +141,6 @@ class DfuBootloaderBackend
     if (data.addr_ == nullptr || data.size_ == 0u || data.size_ > transfer_size_)
     {
       return DFUStatusCode::ERR_USBR;
-    }
-    if ((erased_blocks_ == nullptr && erase_block_count_ > 0u) ||
-        write_buffer_ == nullptr)
-    {
-      return DFUStatusCode::ERR_VENDOR;
     }
     if (HasPendingWrite() || HasPendingManifest())
     {
@@ -398,12 +386,27 @@ class DfuBootloaderBackend
     return seal_offset_;
   }
 
+  static size_t NonZeroWriteSize(size_t write_size)
+  {
+    return (write_size == 0u) ? 1u : write_size;
+  }
+
+  static size_t AlignUp(size_t value, size_t align)
+  {
+    if (align <= 1u)
+    {
+      return value;
+    }
+    const size_t rem = value % align;
+    return (rem == 0u) ? value : (value + align - rem);
+  }
+
   // 开启新的下载会话，并使之前缓存的镜像有效性视图失效。
   // Start a fresh download session and invalidate any previously cached image view.
   void StartDownloadSession()
   {
     ResetTransferState();
-    if (erased_blocks_ != nullptr)
+    if (erase_block_count_ > 0u)
     {
       std::memset(erased_blocks_, 0, erase_block_count_);
     }
@@ -557,19 +560,14 @@ class DfuBootloaderBackend
                                                       sizeof(seal)}) == ErrorCode::OK;
   }
 
-  // seal 先写入一个擦除块大小的临时缓冲区，
-  // 因此调用方不需要板级专用 side storage。
-  // The seal is staged in an erase-block-sized scratch buffer, so callers do
-  // not need board-specific side storage.
+  // seal 只需要按最小写入粒度对齐；擦除仍按块执行。
+  // The seal scratch buffer only needs minimum-write alignment; erase still
+  // happens at erase-block granularity.
   bool WriteSeal(size_t image_size, uint32_t crc32)
   {
-    if (seal_storage_ == nullptr)
-    {
-      return false;
-    }
     std::memset(seal_storage_, 0xFF, seal_storage_size_);
     auto* seal = reinterpret_cast<SealRecord*>(seal_storage_);
-    seal->magic = kSealMagic;
+    seal->magic = SEAL_MAGIC;
     seal->image_size = static_cast<uint32_t>(image_size);
     seal->crc32 = crc32;
     seal->crc32_inv = ~crc32;
@@ -593,7 +591,7 @@ class DfuBootloaderBackend
     {
       return false;
     }
-    if (seal.magic != kSealMagic)
+    if (seal.magic != SEAL_MAGIC)
     {
       return false;
     }
@@ -745,15 +743,15 @@ class DFUClass : public DfuInterfaceClassBase
   static_assert(MAX_TRANSFER_SIZE <= 0xFFFFu,
                 "DFU transfer size must fit in wTransferSize.");
 
-  static constexpr uint8_t kInterfaceClass = 0xFEu;
-  static constexpr uint8_t kInterfaceSubClass = 0x01u;
-  static constexpr uint8_t kInterfaceProtocol = 0x02u;
-  static constexpr uint16_t kDfuVersion = 0x0110u;
+  static constexpr uint8_t INTERFACE_CLASS = 0xFEu;
+  static constexpr uint8_t INTERFACE_SUB_CLASS = 0x01u;
+  static constexpr uint8_t INTERFACE_PROTOCOL = 0x02u;
+  static constexpr uint16_t DFU_VERSION = 0x0110u;
 
-  static constexpr uint8_t kAttrCanDownload = 0x01u;
-  static constexpr uint8_t kAttrCanUpload = 0x02u;
-  static constexpr uint8_t kAttrManifestationTolerant = 0x04u;
-  static constexpr uint8_t kAttrWillDetach = 0x08u;
+  static constexpr uint8_t ATTR_CAN_DOWNLOAD = 0x01u;
+  static constexpr uint8_t ATTR_CAN_UPLOAD = 0x02u;
+  static constexpr uint8_t ATTR_MANIFESTATION_TOLERANT = 0x04u;
+  static constexpr uint8_t ATTR_WILL_DETACH = 0x08u;
 
  public:
 #pragma pack(push, 1)
@@ -768,7 +766,7 @@ class DFUClass : public DfuInterfaceClassBase
     uint8_t bmAttributes = 0;
     uint16_t wDetachTimeOut = 0;
     uint16_t wTransferSize = 0;
-    uint16_t bcdDFUVersion = kDfuVersion;
+    uint16_t bcdDFUVersion = DFU_VERSION;
   };
 
   /**
@@ -800,9 +798,9 @@ class DFUClass : public DfuInterfaceClassBase
         0,
         0,
         0,
-        kInterfaceClass,
-        kInterfaceSubClass,
-        kInterfaceProtocol,
+        INTERFACE_CLASS,
+        INTERFACE_SUB_CLASS,
+        INTERFACE_PROTOCOL,
         0};
     FunctionalDescriptor func_desc = {};
   };
@@ -814,6 +812,10 @@ class DFUClass : public DfuInterfaceClassBase
 
  public:
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB DFU";
+  static constexpr const char* DEFAULT_WINUSB_DEVICE_INTERFACE_GUID =
+      DfuInterfaceClassBase::DEFAULT_WINUSB_DEVICE_INTERFACE_GUID;
+  static constexpr uint8_t DEFAULT_WINUSB_VENDOR_CODE =
+      DfuInterfaceClassBase::DEFAULT_WINUSB_VENDOR_CODE;
 
   /**
    * @brief Backend 需要满足的接口契约 / Backend contract requirements
@@ -835,9 +837,12 @@ class DFUClass : public DfuInterfaceClassBase
   explicit DFUClass(
       Backend& backend, const char* interface_string = DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
-      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT,
+      const char* winusb_device_interface_guid = DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+      uint8_t winusb_vendor_code = DEFAULT_WINUSB_VENDOR_CODE)
       : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
-                              webusb_vendor_code),
+                              webusb_vendor_code, winusb_device_interface_guid,
+                              winusb_vendor_code),
         backend_(backend)
   {
   }
@@ -846,7 +851,8 @@ class DFUClass : public DfuInterfaceClassBase
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
   {
     // 固件态 DFU 在绑定阶段发布单接口描述符，并校验 backend 能力。
-    // Firmware DFU publishes one interface and validates backend capabilities during bind.
+    // Firmware DFU publishes one interface and validates backend capabilities during
+    // bind.
     interface_num_ = start_itf_num;
     current_alt_setting_ = 0u;
 
@@ -862,7 +868,7 @@ class DFUClass : public DfuInterfaceClassBase
     desc_block_.func_desc.bmAttributes = BuildAttributeBitmap(caps_);
     desc_block_.func_desc.wDetachTimeOut = caps_.detach_timeout_ms;
     desc_block_.func_desc.wTransferSize = caps_.transfer_size;
-    desc_block_.func_desc.bcdDFUVersion = kDfuVersion;
+    desc_block_.func_desc.bcdDFUVersion = DFU_VERSION;
 
     SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
 
@@ -897,8 +903,8 @@ class DFUClass : public DfuInterfaceClassBase
   ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) override
   {
     header.data_.bDeviceClass = DeviceDescriptor::ClassID::APPLICATION_SPECIFIC;
-    header.data_.bDeviceSubClass = kInterfaceSubClass;
-    header.data_.bDeviceProtocol = kInterfaceProtocol;
+    header.data_.bDeviceSubClass = INTERFACE_SUB_CLASS;
+    header.data_.bDeviceProtocol = INTERFACE_PROTOCOL;
     return ErrorCode::OK;
   }
 
@@ -1053,10 +1059,10 @@ class DFUClass : public DfuInterfaceClassBase
   static constexpr uint8_t BuildAttributeBitmap(const DFUCapabilities& caps)
   {
     return static_cast<uint8_t>(
-        (caps.can_download ? kAttrCanDownload : 0u) |
-        (caps.can_upload ? kAttrCanUpload : 0u) |
-        (caps.manifestation_tolerant ? kAttrManifestationTolerant : 0u) |
-        (caps.will_detach ? kAttrWillDetach : 0u));
+        (caps.can_download ? ATTR_CAN_DOWNLOAD : 0u) |
+        (caps.can_upload ? ATTR_CAN_UPLOAD : 0u) |
+        (caps.manifestation_tolerant ? ATTR_MANIFESTATION_TOLERANT : 0u) |
+        (caps.will_detach ? ATTR_WILL_DETACH : 0u));
   }
 
   ErrorCode HandleDetach(ControlTransferResult&)
@@ -1207,7 +1213,8 @@ class DFUClass : public DfuInterfaceClassBase
   void AdvanceStateForStatusRead()
   {
     // 标准 DFU 状态机是在 GETSTATUS 这个同步点上推进的。
-    // GETSTATUS is the synchronization point that advances the standard DFU state machine.
+    // GETSTATUS is the synchronization point that advances the standard DFU state
+    // machine.
     switch (state_)
     {
       case DFUState::DFU_DNLOAD_SYNC:
@@ -1402,18 +1409,21 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
 
  public:
   using JumpCallback = DfuBootloaderBackend::JumpCallback;
-  static constexpr uint8_t kVendorRequestRunApp = 0x5Au;
+  static constexpr uint8_t VENDOR_REQUEST_RUN_APP = 0x5Au;
 
   DfuBootloaderClassT(
       Flash& flash, size_t image_base, size_t image_limit, size_t seal_offset,
       JumpCallback jump_to_app, void* jump_app_ctx = nullptr, bool autorun = true,
       const char* interface_string = Base::DEFAULT_INTERFACE_STRING,
       const char* webusb_landing_page_url = nullptr,
-      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
+      uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT,
+      const char* winusb_device_interface_guid =
+          Base::DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
+      uint8_t winusb_vendor_code = Base::DEFAULT_WINUSB_VENDOR_CODE)
       : Storage(flash, image_base, image_limit, seal_offset, jump_to_app, jump_app_ctx,
                 autorun),
         Base(Storage::backend_, interface_string, webusb_landing_page_url,
-             webusb_vendor_code)
+             webusb_vendor_code, winusb_device_interface_guid, winusb_vendor_code)
   {
   }
 
@@ -1439,7 +1449,7 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
                             uint16_t,
                             typename Base::ControlTransferResult& result) override
   {
-    if (bRequest != kVendorRequestRunApp)
+    if (bRequest != VENDOR_REQUEST_RUN_APP)
     {
       return ErrorCode::NOT_SUPPORT;
     }

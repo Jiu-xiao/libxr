@@ -11,8 +11,8 @@ using namespace LibXR;
  * 按端口和引脚保存对象指针，供中断入口快速找到具体实例并触发回调。
  * Stores instance pointers by port/pin so IRQ entry can dispatch callbacks quickly.
  */
-HPMGPIO* HPMGPIO::map[HPMGPIO::kPortCount][HPMGPIO::kPinCount] = {};
-GPIO_Type* HPMGPIO::port_controller_map[HPMGPIO::kPortCount] = {};
+HPMGPIO* HPMGPIO::map[HPMGPIO::PORT_COUNT][HPMGPIO::PIN_COUNT] = {};
+GPIO_Type* HPMGPIO::port_controller_map[HPMGPIO::PORT_COUNT] = {};
 
 /**
  * @brief 将 PAD 复用切换为 GPIO 功能 / Route PAD mux to GPIO function.
@@ -52,10 +52,10 @@ HPMGPIO::HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq,
       port_(port),
       pin_(pin),
       irq_(irq),
-      pad_index_(pad_index == kInvalidPadIndex ? ResolvePadIndex(gpio, port, pin)
-                                               : pad_index)
+      pad_index_(pad_index == INVALID_PAD_INDEX ? ResolvePadIndex(gpio, port, pin)
+                                                : pad_index)
 {
-  if (port_ < kPortCount && pin_ < kPinCount)
+  if (port_ < PORT_COUNT && pin_ < PIN_COUNT)
   {
     map[port_][pin_] = this;
     if (port_controller_map[port_] == nullptr)
@@ -77,7 +77,7 @@ HPMGPIO::HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq,
  */
 ErrorCode HPMGPIO::EnableInterrupt()
 {
-  if (irq_ == kInvalidIrq)
+  if (irq_ == INVALID_IRQ)
   {
     return ErrorCode::ARG_ERR;
   }
@@ -95,7 +95,7 @@ ErrorCode HPMGPIO::EnableInterrupt()
  */
 ErrorCode HPMGPIO::DisableInterrupt()
 {
-  if (irq_ == kInvalidIrq)
+  if (irq_ == INVALID_IRQ)
   {
     return ErrorCode::ARG_ERR;
   }
@@ -117,12 +117,12 @@ ErrorCode HPMGPIO::DisableInterrupt()
  */
 ErrorCode HPMGPIO::SetConfig(Configuration config)
 {
-  if (port_ >= kPortCount || pin_ >= kPinCount)
+  if (port_ >= PORT_COUNT || pin_ >= PIN_COUNT)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  if (pad_index_ != kInvalidPadIndex)
+  if (pad_index_ != INVALID_PAD_INDEX)
   {
     // 保持接口自洽：先确保 PAD 复用到 GPIO / Keep API self-contained: force GPIO mux
     // first.
@@ -154,7 +154,7 @@ ErrorCode HPMGPIO::SetConfig(Configuration config)
       return ErrorCode::ARG_ERR;
   }
 
-  if (pad_index_ != kInvalidPadIndex)
+  if (pad_index_ != INVALID_PAD_INDEX)
   {
     uint32_t pad_ctl = HPM_IOC->PAD[pad_index_].PAD_CTL;
 
@@ -199,12 +199,12 @@ ErrorCode HPMGPIO::SetConfig(Configuration config)
  */
 ErrorCode HPMGPIO::SetAnalogHighImpedance()
 {
-  if (port_ >= kPortCount || pin_ >= kPinCount)
+  if (port_ >= PORT_COUNT || pin_ >= PIN_COUNT)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  if (pad_index_ == kInvalidPadIndex)
+  if (pad_index_ == INVALID_PAD_INDEX)
   {
     return ErrorCode::NOT_SUPPORT;
   }
@@ -237,7 +237,7 @@ ErrorCode HPMGPIO::SetAnalogHighImpedance()
  */
 void HPMGPIO::CheckInterrupt(uint32_t port)
 {
-  if (port >= kPortCount)
+  if (port >= PORT_COUNT)
   {
     return;
   }
@@ -254,7 +254,7 @@ void HPMGPIO::CheckInterrupt(uint32_t port)
     return;
   }
 
-  for (uint8_t pin = 0; pin < kPinCount; ++pin)
+  for (uint8_t pin = 0; pin < PIN_COUNT; ++pin)
   {
     if ((flags & (1u << pin)) == 0u)
     {
@@ -276,7 +276,7 @@ uint16_t HPMGPIO::ResolvePadIndex(GPIO_Type* gpio, uint32_t port, uint8_t pin)
 {
   if (gpio != HPM_GPIO0 && gpio != HPM_FGPIO)
   {
-    return kInvalidPadIndex;
+    return INVALID_PAD_INDEX;
   }
 
   switch (port)
@@ -286,11 +286,11 @@ uint16_t HPMGPIO::ResolvePadIndex(GPIO_Type* gpio, uint32_t port, uint8_t pin)
     case GPIO_DI_GPIOB:
       return static_cast<uint16_t>(IOC_PAD_PB00 + pin);
     case GPIO_DI_GPIOX:
-      return pin < 8u ? static_cast<uint16_t>(IOC_PAD_PX00 + pin) : kInvalidPadIndex;
+      return pin < 8u ? static_cast<uint16_t>(IOC_PAD_PX00 + pin) : INVALID_PAD_INDEX;
     case GPIO_DI_GPIOY:
-      return pin < 8u ? static_cast<uint16_t>(IOC_PAD_PY00 + pin) : kInvalidPadIndex;
+      return pin < 8u ? static_cast<uint16_t>(IOC_PAD_PY00 + pin) : INVALID_PAD_INDEX;
     default:
-      return kInvalidPadIndex;
+      return INVALID_PAD_INDEX;
   }
 }
 
