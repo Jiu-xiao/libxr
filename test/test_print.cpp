@@ -405,9 +405,9 @@ void TestPrintfFrontendSemantics()
   {
     enum PlainHex : unsigned
     {
-      kPlainHex = 42U
+      PLAIN_HEX = 42U
     };
-    if (!SameAsSnprintf<"%#x|%u">(kPlainHex, kPlainHex))
+    if (!SameAsSnprintf<"%#x|%u">(PLAIN_HEX, PLAIN_HEX))
     {
       Fail("printf enum mismatch");
     }

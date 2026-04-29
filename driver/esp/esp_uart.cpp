@@ -16,12 +16,12 @@
 
 namespace
 {
-constexpr uint32_t kUartRxIntrMask =
+constexpr uint32_t UART_RX_INTR_MASK =
     UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF;
-constexpr uint32_t kUartTxIntrMask = UART_INTR_TXFIFO_EMPTY;
+constexpr uint32_t UART_TX_INTR_MASK = UART_INTR_TXFIFO_EMPTY;
 
-constexpr uint8_t kRxToutThreshold = 2;
-constexpr uint16_t kTxEmptyThreshold = 24;
+constexpr uint8_t RX_TOUT_THRESHOLD = 2;
+constexpr uint16_t TX_EMPTY_THRESHOLD = 24;
 
 bool IsConsoleUartInUse(uart_port_t uart_num)
 {
@@ -149,9 +149,9 @@ void ESP32UART::ConfigureRxInterruptPath()
       rx_full_ceil, std::max<size_t>(rx_full_floor, rx_isr_buffer_size_ / 16)));
 
   uart_hal_set_rxfifo_full_thr(&uart_hal_, full_thr);
-  uart_hal_set_rx_timeout(&uart_hal_, kRxToutThreshold);
-  uart_hal_clr_intsts_mask(&uart_hal_, kUartRxIntrMask);
-  uart_hal_ena_intr_mask(&uart_hal_, kUartRxIntrMask);
+  uart_hal_set_rx_timeout(&uart_hal_, RX_TOUT_THRESHOLD);
+  uart_hal_clr_intsts_mask(&uart_hal_, UART_RX_INTR_MASK);
+  uart_hal_ena_intr_mask(&uart_hal_, UART_RX_INTR_MASK);
 }
 
 ErrorCode ESP32UART::SetConfig(UART::Configuration config)
@@ -196,7 +196,7 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   uart_hal_set_parity(&uart_hal_, ResolveParity(config.parity));
   uart_hal_set_hw_flow_ctrl(&uart_hal_, UART_HW_FLOWCTRL_DISABLE, 0);
   uart_hal_set_mode(&uart_hal_, UART_MODE_UART);
-  uart_hal_set_txfifo_empty_thr(&uart_hal_, kTxEmptyThreshold);
+  uart_hal_set_txfifo_empty_thr(&uart_hal_, TX_EMPTY_THRESHOLD);
   // Drop stale hardware RX FIFO bytes from the previous baud.
   // Keep software read queue semantics aligned with ST/CH (no read_port reset).
   uart_hal_rxfifo_rst(&uart_hal_);
@@ -223,8 +223,8 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
     else
 #endif
     {
-      uart_hal_clr_intsts_mask(&uart_hal_, kUartTxIntrMask);
-      uart_hal_ena_intr_mask(&uart_hal_, kUartTxIntrMask);
+      uart_hal_clr_intsts_mask(&uart_hal_, UART_TX_INTR_MASK);
+      uart_hal_ena_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
       FillTxFifo(false);
     }
   }
@@ -563,8 +563,8 @@ bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
   }
 #endif
 
-  uart_hal_clr_intsts_mask(&uart_hal_, kUartTxIntrMask);
-  uart_hal_ena_intr_mask(&uart_hal_, kUartTxIntrMask);
+  uart_hal_clr_intsts_mask(&uart_hal_, UART_TX_INTR_MASK);
+  uart_hal_ena_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
   FillTxFifo(false);
 
   return true;

@@ -188,8 +188,8 @@ class LinuxSharedTopic : public Topic
 
       other.topic_ = nullptr;
       other.owned_topic_ = nullptr;
-      other.subscriber_index_ = kInvalidIndex;
-      other.current_slot_index_ = kInvalidIndex;
+      other.subscriber_index_ = INVALID_INDEX;
+      other.current_slot_index_ = INVALID_INDEX;
       other.current_sequence_ = 0;
       return *this;
     }
@@ -201,7 +201,7 @@ class LinuxSharedTopic : public Topic
      */
     bool Valid() const
     {
-      return topic_ != nullptr && subscriber_index_ != kInvalidIndex;
+      return topic_ != nullptr && subscriber_index_ != INVALID_INDEX;
     }
 
     /**
@@ -318,7 +318,7 @@ class LinuxSharedTopic : public Topic
      */
     const TopicData* GetData() const
     {
-      if (!Valid() || current_slot_index_ == kInvalidIndex)
+      if (!Valid() || current_slot_index_ == INVALID_INDEX)
       {
         return nullptr;
       }
@@ -370,14 +370,14 @@ class LinuxSharedTopic : public Topic
      */
     void Release()
     {
-      if (!Valid() || current_slot_index_ == kInvalidIndex)
+      if (!Valid() || current_slot_index_ == INVALID_INDEX)
       {
         return;
       }
 
       topic_->ClearHeldSlot(subscriber_index_, current_slot_index_);
       topic_->ReleaseSlot(current_slot_index_);
-      current_slot_index_ = kInvalidIndex;
+      current_slot_index_ = INVALID_INDEX;
       current_sequence_ = 0;
     }
 
@@ -409,8 +409,8 @@ class LinuxSharedTopic : public Topic
       topic_ = nullptr;
       delete owned_topic_;
       owned_topic_ = nullptr;
-      subscriber_index_ = kInvalidIndex;
-      current_slot_index_ = kInvalidIndex;
+      subscriber_index_ = INVALID_INDEX;
+      current_slot_index_ = INVALID_INDEX;
       current_sequence_ = 0;
     }
 
@@ -444,7 +444,7 @@ class LinuxSharedTopic : public Topic
                                                 std::memory_order_release);
           topic.subscribers_[i].owner_starttime.store(topic.self_identity_.starttime,
                                                       std::memory_order_release);
-          topic.subscribers_[i].held_slot.store(kInvalidIndex, std::memory_order_release);
+          topic.subscribers_[i].held_slot.store(INVALID_INDEX, std::memory_order_release);
           topic.subscribers_[i].mode.store(static_cast<uint32_t>(mode),
                                            std::memory_order_release);
           if (mode == LinuxSharedSubscriberMode::BALANCE_RR)
@@ -464,7 +464,7 @@ class LinuxSharedTopic : public Topic
           }
           topic_ = &topic;
           subscriber_index_ = i;
-          current_slot_index_ = kInvalidIndex;
+          current_slot_index_ = INVALID_INDEX;
           current_sequence_ = 0;
           return ErrorCode::OK;
         }
@@ -475,8 +475,8 @@ class LinuxSharedTopic : public Topic
 
     LinuxSharedTopic* topic_ = nullptr;
     LinuxSharedTopic* owned_topic_ = nullptr;
-    uint32_t subscriber_index_ = kInvalidIndex;
-    uint32_t current_slot_index_ = kInvalidIndex;
+    uint32_t subscriber_index_ = INVALID_INDEX;
+    uint32_t current_slot_index_ = INVALID_INDEX;
     uint64_t current_sequence_ = 0;
   };
 
@@ -527,17 +527,17 @@ class LinuxSharedTopic : public Topic
       subscriber_index_ = other.subscriber_index_;
 
       other.topic_ = nullptr;
-      other.slot_index_ = kInvalidIndex;
+      other.slot_index_ = INVALID_INDEX;
       other.sequence_ = 0;
       other.state_ = SharedDataState::EMPTY;
-      other.subscriber_index_ = kInvalidIndex;
+      other.subscriber_index_ = INVALID_INDEX;
       return *this;
     }
 
     /**
      * @brief 检查句柄是否有效。Checks whether the handle is valid.
      */
-    bool Valid() const { return topic_ != nullptr && slot_index_ != kInvalidIndex; }
+    bool Valid() const { return topic_ != nullptr && slot_index_ != INVALID_INDEX; }
 
     /**
      * @brief 检查句柄是否为空。Checks whether the handle is empty.
@@ -597,10 +597,10 @@ class LinuxSharedTopic : public Topic
         topic_->ReleaseSlot(slot_index_);
       }
       topic_ = nullptr;
-      slot_index_ = kInvalidIndex;
+      slot_index_ = INVALID_INDEX;
       sequence_ = 0;
       state_ = SharedDataState::EMPTY;
-      subscriber_index_ = kInvalidIndex;
+      subscriber_index_ = INVALID_INDEX;
     }
 
    private:
@@ -608,10 +608,10 @@ class LinuxSharedTopic : public Topic
     friend class Subscriber;
 
     LinuxSharedTopic* topic_ = nullptr;
-    uint32_t slot_index_ = kInvalidIndex;
+    uint32_t slot_index_ = INVALID_INDEX;
     uint64_t sequence_ = 0;
     SharedDataState state_ = SharedDataState::EMPTY;
-    uint32_t subscriber_index_ = kInvalidIndex;
+    uint32_t subscriber_index_ = INVALID_INDEX;
   };
 
   /**
@@ -757,7 +757,7 @@ class LinuxSharedTopic : public Topic
 
     data.Reset();
 
-    uint32_t slot_index = kInvalidIndex;
+    uint32_t slot_index = INVALID_INDEX;
     ErrorCode pop_ans = PopFreeSlot(slot_index);
     if (pop_ans != ErrorCode::OK)
     {
@@ -776,7 +776,7 @@ class LinuxSharedTopic : public Topic
     data.slot_index_ = slot_index;
     data.sequence_ = 0;
     data.state_ = SharedDataState::PUBLISHER;
-    data.subscriber_index_ = kInvalidIndex;
+    data.subscriber_index_ = INVALID_INDEX;
     return ErrorCode::OK;
   }
 
@@ -889,7 +889,7 @@ class LinuxSharedTopic : public Topic
 
   struct Descriptor
   {
-    uint32_t slot_index = kInvalidIndex;
+    uint32_t slot_index = INVALID_INDEX;
     uint32_t reserved = 0;
     uint64_t sequence = 0;
   };
@@ -918,10 +918,10 @@ class LinuxSharedTopic : public Topic
     uint64_t starttime = 0;
   };
 
-  static constexpr uint64_t kMagic = 0x4c58524950435348ULL;
-  static constexpr uint32_t kVersion = 1;
-  static constexpr uint32_t kInitReady = 1;
-  static constexpr uint32_t kInvalidIndex = UINT32_MAX;
+  static constexpr uint64_t MAGIC = 0x4c58524950435348ULL;
+  static constexpr uint32_t VERSION = 1;
+  static constexpr uint32_t INIT_READY = 1;
+  static constexpr uint32_t INVALID_INDEX = UINT32_MAX;
 
   static uint32_t ResolveDomainKey(const char* domain_name)
   {
@@ -1170,10 +1170,10 @@ class LinuxSharedTopic : public Topic
     header_->topic_name_len = static_cast<uint32_t>(topic_name_.size());
     SetupPointers();
 
-    header_->magic = kMagic;
+    header_->magic = MAGIC;
     header_->name_key = name_key_;
     header_->domain_crc32 = domain_crc32_;
-    header_->version = kVersion;
+    header_->version = VERSION;
     header_->data_size = sizeof(TopicData);
     header_->slot_count = slot_count_;
     header_->subscriber_capacity = subscriber_capacity_;
@@ -1207,8 +1207,8 @@ class LinuxSharedTopic : public Topic
       subscribers_[i].dropped_messages.store(0, std::memory_order_release);
       subscribers_[i].owner_pid.store(0, std::memory_order_release);
       subscribers_[i].owner_starttime.store(0, std::memory_order_release);
-      subscribers_[i].held_slot.store(kInvalidIndex, std::memory_order_release);
-      balanced_members_[i].store(kInvalidIndex, std::memory_order_release);
+      subscribers_[i].held_slot.store(INVALID_INDEX, std::memory_order_release);
+      balanced_members_[i].store(INVALID_INDEX, std::memory_order_release);
     }
 
     balanced_group_->rr_cursor.store(0, std::memory_order_release);
@@ -1218,7 +1218,7 @@ class LinuxSharedTopic : public Topic
       descriptors_[i] = Descriptor{};
     }
 
-    header_->init_state.store(kInitReady, std::memory_order_release);
+    header_->init_state.store(INIT_READY, std::memory_order_release);
     return ErrorCode::OK;
   }
 
@@ -1241,12 +1241,12 @@ class LinuxSharedTopic : public Topic
     base_ = static_cast<uint8_t*>(mapping_);
     header_ = reinterpret_cast<SharedHeader*>(base_);
 
-    while (header_->init_state.load(std::memory_order_acquire) != kInitReady)
+    while (header_->init_state.load(std::memory_order_acquire) != INIT_READY)
     {
       usleep(1000);
     }
 
-    if (header_->magic != kMagic || header_->version != kVersion ||
+    if (header_->magic != MAGIC || header_->version != VERSION ||
         header_->data_size != sizeof(TopicData))
     {
       return ErrorCode::CHECK_ERR;
@@ -1295,7 +1295,7 @@ class LinuxSharedTopic : public Topic
         bool identity_match = false;
         const size_t mapping_size = static_cast<size_t>(st.st_size);
         const size_t topic_name_bytes = topic_name_.size() + 1U;
-        if (header->magic == kMagic && header->version == kVersion &&
+        if (header->magic == MAGIC && header->version == VERSION &&
             header->domain_crc32 == domain_crc32_ &&
             header->topic_name_len == topic_name_.size())
         {
@@ -1318,7 +1318,7 @@ class LinuxSharedTopic : public Topic
         {
           reclaim = false;
         }
-        else if (init_state != kInitReady)
+        else if (init_state != INIT_READY)
         {
           reclaim = !ProcessAlive(publisher_identity);
         }
@@ -1457,14 +1457,14 @@ class LinuxSharedTopic : public Topic
   {
     uint32_t expected = slot_index;
     subscribers_[subscriber_index].held_slot.compare_exchange_strong(
-        expected, kInvalidIndex, std::memory_order_acq_rel, std::memory_order_relaxed);
+        expected, INVALID_INDEX, std::memory_order_acq_rel, std::memory_order_relaxed);
   }
 
   ErrorCode RegisterBalancedSubscriber(uint32_t subscriber_index)
   {
     for (uint32_t i = 0; i < subscriber_capacity_; ++i)
     {
-      uint32_t expected = kInvalidIndex;
+      uint32_t expected = INVALID_INDEX;
       if (balanced_members_[i].compare_exchange_strong(expected, subscriber_index,
                                                        std::memory_order_acq_rel,
                                                        std::memory_order_relaxed))
@@ -1480,7 +1480,7 @@ class LinuxSharedTopic : public Topic
     for (uint32_t i = 0; i < subscriber_capacity_; ++i)
     {
       uint32_t expected = subscriber_index;
-      if (balanced_members_[i].compare_exchange_strong(expected, kInvalidIndex,
+      if (balanced_members_[i].compare_exchange_strong(expected, INVALID_INDEX,
                                                        std::memory_order_acq_rel,
                                                        std::memory_order_relaxed))
       {
@@ -1496,7 +1496,7 @@ class LinuxSharedTopic : public Topic
     {
       const uint32_t member_index =
           balanced_members_[(base + offset) % subscriber_capacity_].load(std::memory_order_acquire);
-      if (member_index == kInvalidIndex)
+      if (member_index == INVALID_INDEX)
       {
         continue;
       }
@@ -1613,8 +1613,8 @@ class LinuxSharedTopic : public Topic
       subscribers_[i].owner_starttime.store(0, std::memory_order_release);
 
       const uint32_t held_slot =
-          subscribers_[i].held_slot.exchange(kInvalidIndex, std::memory_order_acq_rel);
-      if (held_slot != kInvalidIndex)
+          subscribers_[i].held_slot.exchange(INVALID_INDEX, std::memory_order_acq_rel);
+      if (held_slot != INVALID_INDEX)
       {
         ReleaseSlot(held_slot);
       }
@@ -1770,7 +1770,7 @@ class LinuxSharedTopic : public Topic
     }
 
     uint32_t active_count = 0;
-    uint32_t balanced_target = kInvalidIndex;
+    uint32_t balanced_target = INVALID_INDEX;
     bool has_balanced_subscriber = false;
     for (uint32_t i = 0; i < subscriber_capacity_; ++i)
     {
@@ -1859,13 +1859,13 @@ class LinuxSharedTopic : public Topic
       PushDescriptor(i, descriptor);
     }
 
-    if (balanced_target != kInvalidIndex)
+    if (balanced_target != INVALID_INDEX)
     {
       PushDescriptor(balanced_target, descriptor);
     }
 
     data.topic_ = nullptr;
-    data.slot_index_ = kInvalidIndex;
+    data.slot_index_ = INVALID_INDEX;
     return ErrorCode::OK;
   }
 

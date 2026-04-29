@@ -16,34 +16,34 @@
 namespace LibXR::ESPUSBDetail
 {
 
-inline constexpr uint32_t kDwc2FsRegBase = 0x60080000UL;
-inline constexpr size_t kFifoBaseOffset = 0x1000U;
-inline constexpr size_t kFifoStride = 0x1000U;
+inline constexpr uint32_t DWC2_FS_REG_BASE = 0x60080000UL;
+inline constexpr size_t FIFO_BASE_OFFSET = 0x1000U;
+inline constexpr size_t FIFO_STRIDE = 0x1000U;
 
-inline constexpr uint8_t kRxStatusGlobalOutNak = 1U;
-inline constexpr uint8_t kRxStatusData = 2U;
-inline constexpr uint8_t kRxStatusTransferComplete = 3U;
-inline constexpr uint8_t kRxStatusSetupDone = 4U;
-inline constexpr uint8_t kRxStatusSetupData = 6U;
+inline constexpr uint8_t RX_STATUS_GLOBAL_OUT_NAK = 1U;
+inline constexpr uint8_t RX_STATUS_DATA = 2U;
+inline constexpr uint8_t RX_STATUS_TRANSFER_COMPLETE = 3U;
+inline constexpr uint8_t RX_STATUS_SETUP_DONE = 4U;
+inline constexpr uint8_t RX_STATUS_SETUP_DATA = 6U;
 
-inline constexpr uint8_t kEnumSpeedFull30To60Mhz = 1U;
-inline constexpr uint8_t kEnumSpeedFull48Mhz = 3U;
+inline constexpr uint8_t ENUM_SPEED_FULL_30_TO_60_MHZ = 1U;
+inline constexpr uint8_t ENUM_SPEED_FULL_48_MHZ = 3U;
 
-inline constexpr size_t kWordSize = sizeof(uint32_t);
-inline constexpr uint8_t kFlushAllTxFifo = 0x10U;
-inline constexpr uint32_t kDmaBurstIncr4 = 4U;
-inline constexpr uint32_t kDmaMemoryCaps =
+inline constexpr size_t WORD_SIZE = sizeof(uint32_t);
+inline constexpr uint8_t FLUSH_ALL_TX_FIFO = 0x10U;
+inline constexpr uint32_t DMA_BURST_INCR4 = 4U;
+inline constexpr uint32_t DMA_MEMORY_CAPS =
     MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT;
-inline constexpr uint16_t kEsp32SxFsDmaMinRxFifoWords = 88U;
-inline constexpr uint16_t kEsp32SxFsMinTxFifoWords = 16U;
-inline constexpr uint32_t kDisableOutWaitGuard = 100000U;
+inline constexpr uint16_t ESP32_SX_FS_DMA_MIN_RX_FIFO_WORDS = 88U;
+inline constexpr uint16_t ESP32_SX_FS_MIN_TX_FIFO_WORDS = 16U;
+inline constexpr uint32_t DISABLE_OUT_WAIT_GUARD = 100000U;
 
 #if defined(CONFIG_USB_ALIGN_SIZE)
-inline constexpr size_t kUsbDmaAlignment = CONFIG_USB_ALIGN_SIZE;
+inline constexpr size_t USB_DMA_ALIGNMENT = CONFIG_USB_ALIGN_SIZE;
 #elif defined(CONFIG_CACHE_L1_CACHE_LINE_SIZE)
-inline constexpr size_t kUsbDmaAlignment = CONFIG_CACHE_L1_CACHE_LINE_SIZE;
+inline constexpr size_t USB_DMA_ALIGNMENT = CONFIG_CACHE_L1_CACHE_LINE_SIZE;
 #else
-inline constexpr size_t kUsbDmaAlignment = 64U;
+inline constexpr size_t USB_DMA_ALIGNMENT = 64U;
 #endif
 
 constexpr uint32_t PackTxFifoSizeReg(uint16_t start, uint16_t words)
@@ -102,7 +102,7 @@ void DisableOutEndpointAndWait(volatile DoepCtl& ctl)
     return;
   }
 
-  uint32_t guard = kDisableOutWaitGuard;
+  uint32_t guard = DISABLE_OUT_WAIT_GUARD;
   while (ctl.epena && guard > 0U)
   {
     --guard;

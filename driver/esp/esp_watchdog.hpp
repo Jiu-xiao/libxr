@@ -28,17 +28,17 @@ namespace LibXR
 #endif
 
 #if (LIBXR_ESP_WDT_MWDT1_RESERVED == 0)
-constexpr wdt_inst_t kESP32WatchdogDefaultInstance = WDT_MWDT1;
+constexpr wdt_inst_t ESP32_WATCHDOG_DEFAULT_INSTANCE = WDT_MWDT1;
 #elif (LIBXR_ESP_WDT_MWDT0_RESERVED == 0)
-constexpr wdt_inst_t kESP32WatchdogDefaultInstance = WDT_MWDT0;
+constexpr wdt_inst_t ESP32_WATCHDOG_DEFAULT_INSTANCE = WDT_MWDT0;
 #else
-constexpr wdt_inst_t kESP32WatchdogDefaultInstance = WDT_RWDT;
+constexpr wdt_inst_t ESP32_WATCHDOG_DEFAULT_INSTANCE = WDT_RWDT;
 #endif
 
-static_assert(!(kESP32WatchdogDefaultInstance == WDT_MWDT0 &&
+static_assert(!(ESP32_WATCHDOG_DEFAULT_INSTANCE == WDT_MWDT0 &&
                 LIBXR_ESP_WDT_MWDT0_RESERVED),
               "LibXR ESP32Watchdog selected MWDT0, but MWDT0 is reserved by ESP-IDF.");
-static_assert(!(kESP32WatchdogDefaultInstance == WDT_MWDT1 &&
+static_assert(!(ESP32_WATCHDOG_DEFAULT_INSTANCE == WDT_MWDT1 &&
                 LIBXR_ESP_WDT_MWDT1_RESERVED),
               "LibXR ESP32Watchdog selected MWDT1, but MWDT1 is reserved by ESP-IDF.");
 
@@ -58,7 +58,7 @@ class ESP32Watchdog : public Watchdog
   ErrorCode ApplyConfiguration();
 
   wdt_hal_context_t hal_{};
-  const wdt_inst_t instance_ = kESP32WatchdogDefaultInstance;
+  const wdt_inst_t instance_ = ESP32_WATCHDOG_DEFAULT_INSTANCE;
   bool initialized_ = false;
   bool started_ = false;
 };

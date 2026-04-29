@@ -11,8 +11,8 @@ namespace LibXR
 namespace
 {
 
-constexpr uint32_t kWdtTickUs = 500;
-constexpr uint32_t kWdtTicksPerMs = 1000 / kWdtTickUs;
+constexpr uint32_t WDT_TICK_US = 500;
+constexpr uint32_t WDT_TICKS_PER_MS = 1000 / WDT_TICK_US;
 
 bool GetMwdtGroupInfo(wdt_inst_t instance, int* group_id, periph_module_t* periph)
 {
@@ -104,7 +104,7 @@ ErrorCode ESP32Watchdog::ApplyConfiguration()
     return ErrorCode::INIT_ERR;
   }
 
-  const uint64_t ticks64 = static_cast<uint64_t>(timeout_ms_) * kWdtTicksPerMs;
+  const uint64_t ticks64 = static_cast<uint64_t>(timeout_ms_) * WDT_TICKS_PER_MS;
   if ((ticks64 == 0) || (ticks64 > UINT32_MAX))
   {
     return ErrorCode::NOT_SUPPORT;

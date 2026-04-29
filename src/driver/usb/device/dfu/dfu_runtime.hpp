@@ -13,7 +13,7 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
  public:
   using JumpCallback = void (*)(void*);
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB DFU RT";
-  static constexpr uint8_t kAttrWillDetach = 0x08u;
+  static constexpr uint8_t ATTR_WILL_DETACH = 0x08u;
 
   /**
    * @brief 构造 Runtime DFU 类
@@ -118,7 +118,7 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
     desc_block_.interface_desc.bInterfaceNumber = interface_num_;
     desc_block_.interface_desc.iInterface = GetInterfaceStringIndex(0u);
     desc_block_.func_desc.bmAttributes =
-        (jump_to_bootloader_ != nullptr) ? kAttrWillDetach : 0u;
+        (jump_to_bootloader_ != nullptr) ? ATTR_WILL_DETACH : 0u;
     desc_block_.func_desc.wDetachTimeOut =
         (jump_to_bootloader_ != nullptr) ? detach_timeout_ms_ : 0u;
     desc_block_.func_desc.wTransferSize = 0u;

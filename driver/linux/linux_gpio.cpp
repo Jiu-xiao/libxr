@@ -38,7 +38,7 @@
 
 namespace
 {
-constexpr const char* kLinuxGPIOConsumer = "LinuxGPIO";
+constexpr const char* LINUX_GPIO_CONSUMER = "LinuxGPIO";
 
 LibXR::GPIO::Configuration ResolveRequestConfig(LibXR::GPIO::Configuration desired,
                                                 bool interrupt_enabled)
@@ -788,7 +788,7 @@ ErrorCode LinuxGPIO::OpenRequestV2(Configuration config)
   request.num_lines = 1U;
   request.event_buffer_size =
       IsInterruptDirection(config.direction) ? EVENT_BUFFER_CAPACITY : 0U;
-  CopyConsumer(request.consumer, kLinuxGPIOConsumer);
+  CopyConsumer(request.consumer, LINUX_GPIO_CONSUMER);
   request.config.flags = BuildLineFlagsV2(config);
 
   if (ioctl(chip_fd_, GPIO_V2_GET_LINE_IOCTL, &request) < 0)
@@ -860,7 +860,7 @@ ErrorCode LinuxGPIO::OpenRequestV1(Configuration config)
     request.lineoffset = line_offset_;
     request.handleflags = BuildHandleFlagsV1(config);
     request.eventflags = BuildEventFlagsV1(config.direction);
-    CopyConsumer(request.consumer_label, kLinuxGPIOConsumer);
+    CopyConsumer(request.consumer_label, LINUX_GPIO_CONSUMER);
 
     if (ioctl(chip_fd_, GPIO_GET_LINEEVENT_IOCTL, &request) < 0)
     {
@@ -877,7 +877,7 @@ ErrorCode LinuxGPIO::OpenRequestV1(Configuration config)
     request.lineoffsets[0] = line_offset_;
     request.lines = 1U;
     request.flags = BuildHandleFlagsV1(config);
-    CopyConsumer(request.consumer_label, kLinuxGPIOConsumer);
+    CopyConsumer(request.consumer_label, LINUX_GPIO_CONSUMER);
 
     if (ioctl(chip_fd_, GPIO_GET_LINEHANDLE_IOCTL, &request) < 0)
     {

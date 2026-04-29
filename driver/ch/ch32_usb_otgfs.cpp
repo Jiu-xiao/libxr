@@ -13,9 +13,9 @@ using namespace LibXR::USB;
 namespace
 {
 
-constexpr uint8_t kOtgFsClearableMask = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
-                                        USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
-                                        USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
+constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
+                                          USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
+                                          USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
 
 static void ClearPendingOtgFsInterrupts()
 {
@@ -24,7 +24,7 @@ static void ClearPendingOtgFsInterrupts()
     const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
         reinterpret_cast<uintptr_t>(&USBFSD->INT_FG));
     const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
-    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & kOtgFsClearableMask);
+    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & OTG_FS_CLEARABLE_MASK);
     if (PENDING == 0u)
     {
       break;
@@ -74,7 +74,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
     const uint8_t INTST = static_cast<uint8_t>((INTFGST >> 8) & 0x00FFu);
 
-    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & kOtgFsClearableMask);
+    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & OTG_FS_CLEARABLE_MASK);
     if (PENDING == 0)
     {
       break;

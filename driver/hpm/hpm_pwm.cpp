@@ -13,7 +13,7 @@ uint8_t HPMPWM::ResolveGptmrReloadCmpIndex(uint8_t duty_cmp_index)
 {
   if (duty_cmp_index >= GPTMR_CH_CMP_COUNT)
   {
-    return kInvalidCmpIndex;
+    return INVALID_CMP_INDEX;
   }
   return static_cast<uint8_t>(duty_cmp_index == 0u ? 1u : 0u);
 }
@@ -155,7 +155,7 @@ ErrorCode HPMPWM::SetConfig(Configuration config)
   }
 
   const uint8_t reload_cmp_index = ResolveGptmrReloadCmpIndex(cmp_index_);
-  if (reload_cmp_index == kInvalidCmpIndex)
+  if (reload_cmp_index == INVALID_CMP_INDEX)
   {
     return ErrorCode::ARG_ERR;
   }

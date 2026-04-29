@@ -99,7 +99,7 @@ class ESP32ADC
   adc_bitwidth_t bitwidth_;
   float reference_voltage_;
   uint16_t max_raw_;
-  static constexpr uint8_t kInvalidChannelIdx = 0xFFU;
+  static constexpr uint8_t INVALID_CHANNEL_IDX = 0xFFU;
 
   Backend backend_ = Backend::NONE;
   adc_oneshot_hal_ctx_t* oneshot_hal_ = nullptr;

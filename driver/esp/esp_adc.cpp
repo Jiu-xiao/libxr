@@ -38,7 +38,7 @@ namespace LibXR
 namespace
 {
 
-constexpr uint32_t kDefaultLineFittingVrefMv = 1100U;
+constexpr uint32_t DEFAULT_LINE_FITTING_VREF_MV = 1100U;
 
 }  // namespace
 
@@ -92,7 +92,7 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
 
   for (uint8_t i = 0; i < SOC_ADC_MAX_CHANNEL_NUM; ++i)
   {
-    channel_idx_map_[i] = kInvalidChannelIdx;
+    channel_idx_map_[i] = INVALID_CHANNEL_IDX;
     cali_handles_[i] = nullptr;
   }
 
@@ -100,8 +100,8 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
   {
     ASSERT(IsValidChannel(channels[i]));
     const uint8_t ch = static_cast<uint8_t>(channels[i]);
-    ASSERT(channel_idx_map_[ch] == kInvalidChannelIdx);
-    if (!IsValidChannel(channels[i]) || (channel_idx_map_[ch] != kInvalidChannelIdx))
+    ASSERT(channel_idx_map_[ch] == INVALID_CHANNEL_IDX);
+    if (!IsValidChannel(channels[i]) || (channel_idx_map_[ch] != INVALID_CHANNEL_IDX))
     {
       return;
     }
@@ -301,7 +301,7 @@ bool ESP32ADC::InitCalibration()
   config.atten = attenuation_;
   config.bitwidth = bitwidth_;
 #if CONFIG_IDF_TARGET_ESP32
-  config.default_vref = kDefaultLineFittingVrefMv;
+  config.default_vref = DEFAULT_LINE_FITTING_VREF_MV;
 #endif
 
   adc_cali_handle_t handle = nullptr;

@@ -11,8 +11,8 @@
 namespace
 {
 
-constexpr uint32_t kShortWaitMs = 100;
-constexpr uint32_t kLongWaitMs = 2000;
+constexpr uint32_t SHORT_WAIT_MS = 100;
+constexpr uint32_t LONG_WAIT_MS = 2000;
 
 struct IPCFrame
 {
@@ -114,7 +114,7 @@ void test_linux_shm_topic()
     SharedData data2;
     ASSERT(publisher.CreateData(data2) == LibXR::ErrorCode::FULL);
 
-    ASSERT(subscriber.Wait(kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 100);
     ASSERT(subscriber.GetPendingNum() == 1);
@@ -124,12 +124,12 @@ void test_linux_shm_topic()
     FillFrame(*data2.GetData(), 102);
     ASSERT(publisher.Publish(data2) == LibXR::ErrorCode::OK);
 
-    ASSERT(subscriber.Wait(kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 101);
     subscriber.Release();
 
-    ASSERT(subscriber.Wait(kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 102);
     ASSERT(subscriber.GetPendingNum() == 0);
@@ -208,12 +208,12 @@ void test_linux_shm_topic()
     ASSERT(publisher.GetPublishFailedNum() == 1);
 
     SharedData recv_data;
-    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 1);
     AssertFrame(*recv_data.GetData(), 201);
     recv_data.Reset();
 
-    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 2);
     AssertFrame(*recv_data.GetData(), 202);
     recv_data.Reset();
@@ -249,12 +249,12 @@ void test_linux_shm_topic()
     ASSERT(publisher.GetPublishFailedNum() == 0);
 
     SharedData recv_data;
-    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 2);
     AssertFrame(*recv_data.GetData(), 212);
     recv_data.Reset();
 
-    ASSERT(subscriber.Wait(recv_data, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber.Wait(recv_data, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 3);
     AssertFrame(*recv_data.GetData(), 213);
     recv_data.Reset();
@@ -283,8 +283,8 @@ void test_linux_shm_topic()
     FillFrame(frame, 301);
     ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
 
-    ASSERT(subscriber_a.Wait(kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     AssertFrame(*subscriber_a.GetData(), 301);
     AssertFrame(*subscriber_b.GetData(), 301);
 
@@ -298,8 +298,8 @@ void test_linux_shm_topic()
     FillFrame(*blocked_data.GetData(), 302);
     ASSERT(publisher.Publish(blocked_data) == LibXR::ErrorCode::OK);
 
-    ASSERT(subscriber_a.Wait(kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     AssertFrame(*subscriber_a.GetData(), 302);
     AssertFrame(*subscriber_b.GetData(), 302);
     subscriber_a.Release();
@@ -341,8 +341,8 @@ void test_linux_shm_topic()
 
     SharedData recv_a;
     SharedData recv_b;
-    ASSERT(subscriber_a.Wait(recv_a, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(recv_a, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_a.GetData()->seq == 331);
     ASSERT(recv_b.GetData()->seq == 441);
     recv_a.Reset();
@@ -385,10 +385,10 @@ void test_linux_shm_topic()
     SharedData recv_b1;
     SharedData recv_b2;
 
-    ASSERT(subscriber_a.Wait(recv_a1, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b1, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_a.Wait(recv_a2, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b2, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(recv_a1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(recv_a2, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b2, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
 
     ASSERT(recv_a1.GetData()->seq == 351);
     ASSERT(recv_b1.GetData()->seq == 352);
@@ -431,7 +431,7 @@ void test_linux_shm_topic()
       }
 
       SharedData data;
-      if (subscriber.Wait(data, kLongWaitMs) != LibXR::ErrorCode::OK)
+      if (subscriber.Wait(data, LONG_WAIT_MS) != LibXR::ErrorCode::OK)
       {
         _exit(41);
       }
@@ -478,8 +478,8 @@ void test_linux_shm_topic()
 
     SharedData recv_alive1;
     SharedData recv_alive2;
-    ASSERT(subscriber_alive.Wait(recv_alive1, kLongWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_alive.Wait(recv_alive2, kLongWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_alive.Wait(recv_alive1, LONG_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_alive.Wait(recv_alive2, LONG_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_alive1.GetData()->seq == 362);
     ASSERT(recv_alive2.GetData()->seq == 363);
 
@@ -518,7 +518,7 @@ void test_linux_shm_topic()
     ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
 
     SharedData recv_b0;
-    ASSERT(subscriber_b.Wait(recv_b0, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_b0.GetData()->seq == 372);
     recv_b0.Reset();
 
@@ -528,9 +528,9 @@ void test_linux_shm_topic()
     SharedData recv_a;
     SharedData recv_b1;
     SharedData recv_c;
-    ASSERT(subscriber_a.Wait(recv_a, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b1, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_c.Wait(recv_c, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_a.Wait(recv_a, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_b.Wait(recv_b1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_c.Wait(recv_c, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
 
     ASSERT(recv_a.GetData()->seq == 371);
     ASSERT(recv_b1.GetData()->seq == 374);
@@ -570,9 +570,9 @@ void test_linux_shm_topic()
     SharedData bc0;
     SharedData bc1;
     SharedData bc2;
-    ASSERT(subscriber_broadcast.Wait(bc0, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_broadcast.Wait(bc1, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_broadcast.Wait(bc2, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc2, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(bc0.GetData()->seq == 381);
     ASSERT(bc1.GetData()->seq == 382);
     ASSERT(bc2.GetData()->seq == 383);
@@ -580,9 +580,9 @@ void test_linux_shm_topic()
     SharedData rr_a0;
     SharedData rr_b0;
     SharedData rr_a1;
-    ASSERT(subscriber_rr_a.Wait(rr_a0, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_rr_b.Wait(rr_b0, kShortWaitMs) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_rr_a.Wait(rr_a1, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_rr_a.Wait(rr_a0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_rr_b.Wait(rr_b0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_rr_a.Wait(rr_a1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(rr_a0.GetData()->seq == 381);
     ASSERT(rr_b0.GetData()->seq == 382);
     ASSERT(rr_a1.GetData()->seq == 383);
@@ -616,11 +616,11 @@ void test_linux_shm_topic()
     ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::FULL);
 
     SharedData bc0;
-    ASSERT(subscriber_broadcast.Wait(bc0, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_broadcast.Wait(bc0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(bc0.GetData()->seq == 391);
 
     SharedData rr0;
-    ASSERT(subscriber_rr.Wait(rr0, kShortWaitMs) == LibXR::ErrorCode::OK);
+    ASSERT(subscriber_rr.Wait(rr0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(rr0.GetData()->seq == 391);
   }
 
@@ -659,7 +659,7 @@ void test_linux_shm_topic()
       }
 
       SharedData recv_data;
-      if (subscriber.Wait(recv_data, kLongWaitMs) != LibXR::ErrorCode::OK)
+      if (subscriber.Wait(recv_data, LONG_WAIT_MS) != LibXR::ErrorCode::OK)
       {
         _exit(11);
       }
@@ -740,7 +740,7 @@ void test_linux_shm_topic()
       for (uint32_t seq = 1; seq <= 32; ++seq)
       {
         SharedData recv_data;
-        if (subscriber.Wait(recv_data, kLongWaitMs) != LibXR::ErrorCode::OK)
+        if (subscriber.Wait(recv_data, LONG_WAIT_MS) != LibXR::ErrorCode::OK)
         {
           _exit(3);
         }

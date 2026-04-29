@@ -14,7 +14,7 @@ class DfuBootloaderBackend
 {
  public:
   using JumpCallback = void (*)(void*);
-  static constexpr uint32_t kSealMagic = 0x4C414553u;  // "SEAL"
+  static constexpr uint32_t SEAL_MAGIC = 0x4C414553u;  // "SEAL"
 
 #pragma pack(push, 1)
   /**
@@ -22,7 +22,7 @@ class DfuBootloaderBackend
    */
   struct SealRecord
   {
-    uint32_t magic = kSealMagic;
+    uint32_t magic = SEAL_MAGIC;
     uint32_t image_size = 0u;
     uint32_t crc32 = 0u;
     uint32_t crc32_inv = 0u;
@@ -567,7 +567,7 @@ class DfuBootloaderBackend
   {
     std::memset(seal_storage_, 0xFF, seal_storage_size_);
     auto* seal = reinterpret_cast<SealRecord*>(seal_storage_);
-    seal->magic = kSealMagic;
+    seal->magic = SEAL_MAGIC;
     seal->image_size = static_cast<uint32_t>(image_size);
     seal->crc32 = crc32;
     seal->crc32_inv = ~crc32;
@@ -591,7 +591,7 @@ class DfuBootloaderBackend
     {
       return false;
     }
-    if (seal.magic != kSealMagic)
+    if (seal.magic != SEAL_MAGIC)
     {
       return false;
     }
@@ -743,15 +743,15 @@ class DFUClass : public DfuInterfaceClassBase
   static_assert(MAX_TRANSFER_SIZE <= 0xFFFFu,
                 "DFU transfer size must fit in wTransferSize.");
 
-  static constexpr uint8_t kInterfaceClass = 0xFEu;
-  static constexpr uint8_t kInterfaceSubClass = 0x01u;
-  static constexpr uint8_t kInterfaceProtocol = 0x02u;
-  static constexpr uint16_t kDfuVersion = 0x0110u;
+  static constexpr uint8_t INTERFACE_CLASS = 0xFEu;
+  static constexpr uint8_t INTERFACE_SUB_CLASS = 0x01u;
+  static constexpr uint8_t INTERFACE_PROTOCOL = 0x02u;
+  static constexpr uint16_t DFU_VERSION = 0x0110u;
 
-  static constexpr uint8_t kAttrCanDownload = 0x01u;
-  static constexpr uint8_t kAttrCanUpload = 0x02u;
-  static constexpr uint8_t kAttrManifestationTolerant = 0x04u;
-  static constexpr uint8_t kAttrWillDetach = 0x08u;
+  static constexpr uint8_t ATTR_CAN_DOWNLOAD = 0x01u;
+  static constexpr uint8_t ATTR_CAN_UPLOAD = 0x02u;
+  static constexpr uint8_t ATTR_MANIFESTATION_TOLERANT = 0x04u;
+  static constexpr uint8_t ATTR_WILL_DETACH = 0x08u;
 
  public:
 #pragma pack(push, 1)
@@ -766,7 +766,7 @@ class DFUClass : public DfuInterfaceClassBase
     uint8_t bmAttributes = 0;
     uint16_t wDetachTimeOut = 0;
     uint16_t wTransferSize = 0;
-    uint16_t bcdDFUVersion = kDfuVersion;
+    uint16_t bcdDFUVersion = DFU_VERSION;
   };
 
   /**
@@ -798,9 +798,9 @@ class DFUClass : public DfuInterfaceClassBase
         0,
         0,
         0,
-        kInterfaceClass,
-        kInterfaceSubClass,
-        kInterfaceProtocol,
+        INTERFACE_CLASS,
+        INTERFACE_SUB_CLASS,
+        INTERFACE_PROTOCOL,
         0};
     FunctionalDescriptor func_desc = {};
   };
@@ -868,7 +868,7 @@ class DFUClass : public DfuInterfaceClassBase
     desc_block_.func_desc.bmAttributes = BuildAttributeBitmap(caps_);
     desc_block_.func_desc.wDetachTimeOut = caps_.detach_timeout_ms;
     desc_block_.func_desc.wTransferSize = caps_.transfer_size;
-    desc_block_.func_desc.bcdDFUVersion = kDfuVersion;
+    desc_block_.func_desc.bcdDFUVersion = DFU_VERSION;
 
     SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
 
@@ -903,8 +903,8 @@ class DFUClass : public DfuInterfaceClassBase
   ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) override
   {
     header.data_.bDeviceClass = DeviceDescriptor::ClassID::APPLICATION_SPECIFIC;
-    header.data_.bDeviceSubClass = kInterfaceSubClass;
-    header.data_.bDeviceProtocol = kInterfaceProtocol;
+    header.data_.bDeviceSubClass = INTERFACE_SUB_CLASS;
+    header.data_.bDeviceProtocol = INTERFACE_PROTOCOL;
     return ErrorCode::OK;
   }
 
@@ -1059,10 +1059,10 @@ class DFUClass : public DfuInterfaceClassBase
   static constexpr uint8_t BuildAttributeBitmap(const DFUCapabilities& caps)
   {
     return static_cast<uint8_t>(
-        (caps.can_download ? kAttrCanDownload : 0u) |
-        (caps.can_upload ? kAttrCanUpload : 0u) |
-        (caps.manifestation_tolerant ? kAttrManifestationTolerant : 0u) |
-        (caps.will_detach ? kAttrWillDetach : 0u));
+        (caps.can_download ? ATTR_CAN_DOWNLOAD : 0u) |
+        (caps.can_upload ? ATTR_CAN_UPLOAD : 0u) |
+        (caps.manifestation_tolerant ? ATTR_MANIFESTATION_TOLERANT : 0u) |
+        (caps.will_detach ? ATTR_WILL_DETACH : 0u));
   }
 
   ErrorCode HandleDetach(ControlTransferResult&)
@@ -1409,7 +1409,7 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
 
  public:
   using JumpCallback = DfuBootloaderBackend::JumpCallback;
-  static constexpr uint8_t kVendorRequestRunApp = 0x5Au;
+  static constexpr uint8_t VENDOR_REQUEST_RUN_APP = 0x5Au;
 
   DfuBootloaderClassT(
       Flash& flash, size_t image_base, size_t image_limit, size_t seal_offset,
@@ -1449,7 +1449,7 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
                             uint16_t,
                             typename Base::ControlTransferResult& result) override
   {
-    if (bRequest != kVendorRequestRunApp)
+    if (bRequest != VENDOR_REQUEST_RUN_APP)
     {
       return ErrorCode::NOT_SUPPORT;
     }
