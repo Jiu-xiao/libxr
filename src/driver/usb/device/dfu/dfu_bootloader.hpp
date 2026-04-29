@@ -560,9 +560,9 @@ class DfuBootloaderBackend
                                                       sizeof(seal)}) == ErrorCode::OK;
   }
 
-  // seal 只需要按最小写入粒度对齐；擦除仍按块执行。
-  // The seal scratch buffer only needs minimum-write alignment; erase still
-  // happens at erase-block granularity.
+  // Seal may share the last erase block with payload. Reuse the per-session
+  // erase map so manifest does not wipe a block that was already erased and
+  // partially programmed by DNLOAD payload chunks.
   bool WriteSeal(size_t image_size, uint32_t crc32)
   {
     std::memset(seal_storage_, 0xFF, seal_storage_size_);
@@ -572,7 +572,7 @@ class DfuBootloaderBackend
     seal->crc32 = crc32;
     seal->crc32_inv = ~crc32;
 
-    if (flash_.Erase(image_offset_ + seal_offset_, erase_block_size_) != ErrorCode::OK)
+    if (!EnsureBlocksErased(seal_offset_, seal_storage_size_))
     {
       return false;
     }
