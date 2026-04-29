@@ -94,6 +94,12 @@ template <Print::Text Source>
  * @brief Returns whether one argument list is accepted by the brace frontend,
  *        guarded by source-level validity first.
  * @brief 判断一组参数是否能被 brace 前端接受；会先做源级合法性保护。
+ *
+ * Logger auto-detection must not treat extra call-site arguments as harmless
+ * for brace literals, otherwise unsupported printf-like sources can fall back
+ * to brace plain text and silently drop their arguments.
+ * logger 自动检测不能把多余实参当作 brace 字面量的无害输入，否则不受支持的
+ * printf 风格源串可能回退成 brace 纯文本并静默丢弃实参。
  */
 template <Print::Text Source, typename... Args>
 [[nodiscard]] consteval bool FormatMatches()
