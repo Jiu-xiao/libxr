@@ -309,14 +309,19 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
     if (cfgs_itr->hw_buffer_size2 == 0)
     {
       ASSERT(cfgs_itr->buffer1.size_ % 2 == 0);
+      const bool hw_double_buffer = cfgs_itr->hw_double_buffer;
+      ASSERT(!hw_double_buffer ||
+             cfgs_itr->buffer1.size_ >= cfgs_itr->hw_buffer_size1 * 2);
       auto ep = new STM32Endpoint(
           ep_index, id_, hpcd_,
           cfgs_itr->double_buffer_is_in ? USB::Endpoint::Direction::IN
                                         : USB::Endpoint::Direction::OUT,
-          buffer_offset, (*cfgs_itr).hw_buffer_size1, (*cfgs_itr).buffer1);
+          buffer_offset, (*cfgs_itr).hw_buffer_size1, (*cfgs_itr).buffer1,
+          hw_double_buffer ? buffer_offset + (*cfgs_itr).hw_buffer_size1 : 0,
+          hw_double_buffer);
       USB::EndpointPool::Put(ep);
       ep_index = USB::Endpoint::NextEPNumber(ep_index);
-      buffer_offset += (*cfgs_itr).hw_buffer_size1;
+      buffer_offset += (*cfgs_itr).hw_buffer_size1 * (hw_double_buffer ? 2U : 1U);
       cfgs_itr++;
     }
     else

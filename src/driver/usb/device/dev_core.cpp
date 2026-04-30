@@ -269,6 +269,10 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
       }
       break;
 
+    case Context::UNKNOWN:
+      // Late completions can arrive after a SETUP packet has reset the EP0 phase.
+      break;
+
     default:
       StallControlEndpoint();
       break;

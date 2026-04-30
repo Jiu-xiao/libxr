@@ -46,20 +46,35 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
 STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
                              PCD_HandleTypeDef* hpcd, Direction dir,
                              size_t hw_buffer_offset, size_t hw_buffer_size,
-                             LibXR::RawData buffer)
-    : Endpoint(ep_num, dir, buffer), hpcd_(hpcd), hw_buffer_size_(hw_buffer_size), id_(id)
+                             LibXR::RawData buffer, size_t hw_buffer_offset2,
+                             bool hw_double_buffer)
+    : Endpoint(ep_num, dir, buffer),
+      hpcd_(hpcd),
+      hw_buffer_size_(hw_buffer_size),
+      hw_buffer_offset_(hw_buffer_offset),
+      hw_buffer_offset2_(hw_buffer_offset2),
+      hw_double_buffer_(hw_double_buffer),
+      id_(id)
 {
   ASSERT(hw_buffer_size >= 8);
 
   ASSERT(is_power_of_two(hw_buffer_size));
   ASSERT(is_power_of_two(buffer.size_) || buffer.size_ % 4 == 0);
+  ASSERT(!hw_double_buffer_ || hw_buffer_offset2_ != 0);
 
   map_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
-  size_t buffer_offset = hw_buffer_offset;
-
-  HAL_PCDEx_PMAConfig(hpcd_, EPNumberToAddr(GetNumber(), dir), PCD_SNG_BUF,
-                      buffer_offset);
+  if (hw_double_buffer_)
+  {
+    const uint32_t pma_addr = static_cast<uint32_t>(hw_buffer_offset_) |
+                              (static_cast<uint32_t>(hw_buffer_offset2_) << 16U);
+    HAL_PCDEx_PMAConfig(hpcd_, EPNumberToAddr(GetNumber(), dir), PCD_DBL_BUF, pma_addr);
+  }
+  else
+  {
+    HAL_PCDEx_PMAConfig(hpcd_, EPNumberToAddr(GetNumber(), dir), PCD_SNG_BUF,
+                        hw_buffer_offset_);
+  }
 }
 #endif
 
@@ -228,14 +243,27 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
 #if defined(USB_BASE)
   if (is_in)
   {
-    ep->xfer_fill_db = 0U;
-    ep->xfer_len_db = 0U;
+    ep->xfer_fill_db = 1U;
+    ep->xfer_len_db = size;
   }
 #endif
 
   SetState(State::BUSY);
 
-#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+#if defined(USB_BASE)
+  size_t transfer_size = size;
+  if (!is_in && GetNumber() == USB::Endpoint::EPNumber::EP0)
+  {
+    transfer_size = MaxPacketSize();
+  }
+
+  HAL_StatusTypeDef ans =
+      is_in
+          ? HAL_PCD_EP_Transmit(hpcd_, ep_addr, reinterpret_cast<uint8_t*>(buffer.addr_),
+                                static_cast<uint32_t>(transfer_size))
+          : HAL_PCD_EP_Receive(hpcd_, ep_addr, reinterpret_cast<uint8_t*>(buffer.addr_),
+                               static_cast<uint32_t>(transfer_size));
+#elif defined(USB_OTG_FS) || defined(USB_OTG_HS)
   auto ans = USB_EPStartXfer(hpcd_->Instance, ep, hpcd_->Init.dma_enable);
 #else
   auto ans = USB_EPStartXfer(hpcd_->Instance, ep);
@@ -286,12 +314,6 @@ ErrorCode STM32Endpoint::ClearStall()
   }
 
   uint8_t addr = EPNumberToAddr(GetNumber(), GetDirection());
-
-  if (GetNumber() == USB::Endpoint::EPNumber::EP0)
-  {
-    SetState(State::IDLE);
-    return ErrorCode::OK;
-  }
 
   if (HAL_PCD_EP_ClrStall(hpcd_, addr) == HAL_OK)
   {
@@ -359,6 +381,15 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
     return;
   }
 
+#if defined(USB_BASE)
+  if (ep->GetType() == USB::Endpoint::Type::ISOCHRONOUS)
+  {
+    // FSDEV ISO IN can otherwise keep advertising the just-consumed PMA bank.
+    PCD_SET_EP_TX_STATUS(hpcd->Instance, epnum & EP_ADDR_MSK, USB_EP_TX_DIS);
+    PCD_SET_EP_TX_CNT(hpcd->Instance, epnum & EP_ADDR_MSK, 0U);
+  }
+#endif
+
   ep->OnTransferCompleteCallback(true, ep->last_transfer_size_);
 }
 
@@ -381,6 +412,10 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
   PCD_EPTypeDef* ep_handle = &hpcd->OUT_ep[epnum & EP_ADDR_MSK];
 
   size_t actual_transfer_size = ep_handle->xfer_count;
+  if (actual_transfer_size > ep->last_transfer_size_)
+  {
+    actual_transfer_size = ep->last_transfer_size_;
+  }
 
   if (STM32USBUsesDma(hpcd))
   {

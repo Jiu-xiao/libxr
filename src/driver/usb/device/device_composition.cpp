@@ -540,7 +540,9 @@ uint16_t DeviceComposition::GetDeviceStatus() const
 
 DeviceClass* DeviceComposition::FindClassByInterfaceNumber(size_t index) const
 {
-  if (!configured_)
+  // During reset/re-enumeration the endpoints may already be rebound before the
+  // host sends SET_CONFIGURATION; class-specific probes still need routing.
+  if (!configured_ && !ep_assigned_)
   {
     return nullptr;
   }
@@ -572,7 +574,8 @@ DeviceClass* DeviceComposition::FindClassByInterfaceNumber(size_t index) const
 
 DeviceClass* DeviceComposition::FindClassByEndpointAddress(uint8_t addr) const
 {
-  if (!configured_)
+  // See FindClassByInterfaceNumber(): endpoint ownership is known once bound.
+  if (!configured_ && !ep_assigned_)
   {
     return nullptr;
   }

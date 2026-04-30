@@ -24,7 +24,8 @@ class STM32Endpoint : public USB::Endpoint
 #if defined(USB_BASE)
   STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd,
                 Direction dir, size_t hw_buffer_offset, size_t hw_buffer_size,
-                LibXR::RawData buffer);
+                LibXR::RawData buffer, size_t hw_buffer_offset2 = 0,
+                bool hw_double_buffer = false);
 #endif
 
   void Configure(const Config& cfg) override;
@@ -45,6 +46,9 @@ class STM32Endpoint : public USB::Endpoint
 #endif
 #if defined(USB_BASE)
   size_t hw_buffer_size_ = 0;
+  size_t hw_buffer_offset_ = 0;
+  size_t hw_buffer_offset2_ = 0;
+  bool hw_double_buffer_ = false;
 #endif
   stm32_usb_dev_id_t id_;
 

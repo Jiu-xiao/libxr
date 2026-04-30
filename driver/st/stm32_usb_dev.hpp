@@ -244,13 +244,23 @@ class STM32USBDeviceDevFs : public STM32USBDevice
     LibXR::RawData buffer1, buffer2;
     size_t hw_buffer_size1, hw_buffer_size2;
     bool double_buffer_is_in = false;
+    bool hw_double_buffer = false;
 
-    EPConfig(LibXR::RawData buffer, size_t hw_buffer_size, bool is_in)
+    /**
+     * @brief Configure one single-direction FSDEV endpoint.
+     *
+     * When use_hw_double_buffer is true, two adjacent PMA banks of hw_buffer_size
+     * bytes are reserved for this endpoint; buffer must be large enough for both
+     * banks because the generic Endpoint double-buffer view can also split it.
+     */
+    EPConfig(LibXR::RawData buffer, size_t hw_buffer_size, bool is_in,
+             bool use_hw_double_buffer = false)
         : buffer1(buffer),
           buffer2(nullptr, 0),
           hw_buffer_size1(hw_buffer_size),
           hw_buffer_size2(0),
-          double_buffer_is_in(is_in)
+          double_buffer_is_in(is_in),
+          hw_double_buffer(use_hw_double_buffer)
     {
     }
 
