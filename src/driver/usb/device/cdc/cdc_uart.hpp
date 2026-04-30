@@ -421,8 +421,6 @@ class CDCUart : public CDCBase, public LibXR::UART
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr)
   {
-    UNUSED(in_isr);
-
     auto* cdc = LibXR::ContainerOf(&port, &CDCUart::write_port_cdc_);
 
     /**
@@ -465,6 +463,16 @@ class CDCUart : public CDCBase, public LibXR::UART
      */
     if (ep->GetActiveLength() != 0)
     {
+      return ErrorCode::PENDING;
+    }
+
+    WriteInfoBlock head_info{};
+    // Non-BLOCK producers often reuse one operation at high rate. Keep BLOCK on the
+    // legacy prefill path, but let non-BLOCK TX have one queue consumer.
+    if (port.queue_info_->Peek(head_info) == ErrorCode::OK &&
+        head_info.op.type != WriteOperation::OperationType::BLOCK)
+    {
+      (void)cdc->StartNextTx(in_isr, true);
       return ErrorCode::PENDING;
     }
 
@@ -665,6 +673,13 @@ class CDCUart : public CDCBase, public LibXR::UART
     const std::size_t PENDING_LEN = ep->GetActiveLength();
     if (PENDING_LEN == 0)
     {
+      WriteInfoBlock head_info{};
+      // Do not let the ISR steal BLOCK writes from the prefilled completion path.
+      if (write_port_cdc_.queue_info_->Peek(head_info) == ErrorCode::OK &&
+          head_info.op.type != WriteOperation::OperationType::BLOCK)
+      {
+        (void)StartNextTx(in_isr, true);
+      }
       return;
     }
 
@@ -708,6 +723,79 @@ class CDCUart : public CDCBase, public LibXR::UART
     {
       need_write_zlp_ = true;
     }
+  }
+
+  ErrorCode StartNextTx(bool in_isr, bool finish_completed)
+  {
+    auto ep = GetDataInEndpoint();
+    if (ep == nullptr)
+    {
+      return ErrorCode::FAILED;
+    }
+
+    if (ep->GetState() != Endpoint::State::IDLE)
+    {
+      return ErrorCode::PENDING;
+    }
+
+    if (tx_deq_.HasOp())
+    {
+      need_write_zlp_ = false;
+    }
+    else if (need_write_zlp_)
+    {
+      auto z = ep->TransferZLP();
+      ASSERT(z == ErrorCode::OK);
+      need_write_zlp_ = false;
+      return z;
+    }
+    else
+    {
+      return ErrorCode::PENDING;
+    }
+
+    auto buffer = ep->GetBuffer();
+    std::size_t len = 0;
+    auto ec = tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len);
+    if (ec == ErrorCode::EMPTY || len == 0)
+    {
+      return ErrorCode::PENDING;
+    }
+    if (ec != ErrorCode::OK && ec != ErrorCode::PENDING)
+    {
+      return ec;
+    }
+
+    auto ans = ep->Transfer(len);
+    ASSERT(ans == ErrorCode::OK);
+    if (ans != ErrorCode::OK)
+    {
+      return ans;
+    }
+
+    if (ec == ErrorCode::OK && tx_deq_.HeadCompleted())
+    {
+      WriteInfoBlock completed{};
+      auto pop_ok = tx_deq_.PopCompleted(&completed);
+      ASSERT(pop_ok == ErrorCode::OK);
+
+      const std::size_t mps = ep->MaxPacketSize();
+      if (mps > 0 && (len % mps) == 0 && !tx_deq_.HasOp())
+      {
+        need_write_zlp_ = true;
+      }
+
+      if (finish_completed)
+      {
+        write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
+      }
+      else
+      {
+        return ErrorCode::OK;
+      }
+    }
+
+    return ErrorCode::PENDING;
   }
 
  private:

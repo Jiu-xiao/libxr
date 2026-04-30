@@ -346,6 +346,10 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
 
   ASSERT(USB::Endpoint::EPNumberToInt8(ep_index) < hpcd->Init.dev_endpoints);
   ASSERT(buffer_offset <= LIBXR_STM32_USB_PMA_SIZE);
+  if (buffer_offset > LIBXR_STM32_USB_PMA_SIZE)
+  {
+    libxr_fatal_error(__FILE__, __LINE__, false);
+  }
 }
 
 ErrorCode STM32USBDeviceDevFs::SetAddress(uint8_t address,

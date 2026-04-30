@@ -281,6 +281,7 @@ class UVCCamera : public DeviceClass
     inited_ = false;
     streaming_ = false;
     frame_active_ = false;
+    frame_id_toggle_pending_ = false;
 
     ASSERT(format_count_ > 0 && frame_count_ > 0);
     ASSERT((speed_ == Speed::HIGH && iso_in_max_packet_size_ <= 1024) ||
@@ -308,6 +309,7 @@ class UVCCamera : public DeviceClass
     inited_ = false;
     streaming_ = false;
     frame_active_ = false;
+    frame_id_toggle_pending_ = false;
     if (ep_iso_in_ != nullptr)
     {
       ep_iso_in_->Close();
@@ -441,6 +443,7 @@ class UVCCamera : public DeviceClass
       case 0:
         streaming_ = false;
         frame_active_ = false;
+        frame_id_toggle_pending_ = false;
         pending_payload_ = 0;
         pending_eof_ = false;
         ep_iso_in_->SetActiveLength(0);
@@ -449,9 +452,9 @@ class UVCCamera : public DeviceClass
         ep_iso_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::ISOCHRONOUS,
                                iso_in_max_packet_size_, false});
         ep_iso_in_->SetActiveLength(0);
-        frame_id_ ^= 0x01;
         active_frame_offset_ = 0;
         frame_active_ = false;
+        frame_id_toggle_pending_ = true;
         pending_payload_ = 0;
         pending_eof_ = false;
         streaming_ = true;
@@ -815,7 +818,7 @@ class UVCCamera : public DeviceClass
       if (pending_eof_)
       {
         frame_active_ = false;
-        frame_id_ ^= 0x01;
+        frame_id_toggle_pending_ = true;
       }
       pending_payload_ = 0;
       pending_eof_ = false;
@@ -866,10 +869,8 @@ class UVCCamera : public DeviceClass
     auto* out = reinterpret_cast<uint8_t*>(buf.addr_);
     if (!frame_active_)
     {
-      FillPayloadHeader(out, false);
       pending_payload_ = 0;
       pending_eof_ = false;
-      ep_iso_in_->Transfer(HEADER_SIZE);
       return;
     }
 
@@ -882,6 +883,12 @@ class UVCCamera : public DeviceClass
     const size_t remaining = active_frame_.size_ - active_frame_offset_;
     const size_t payload = (remaining < payload_capacity) ? remaining : payload_capacity;
     const bool eof = (payload == remaining);
+
+    if (active_frame_offset_ == 0 && frame_id_toggle_pending_)
+    {
+      frame_id_ ^= 0x01;
+      frame_id_toggle_pending_ = false;
+    }
 
     FillPayloadHeader(out, eof);
     LibXR::Memory::FastCopy(out + HEADER_SIZE,
@@ -934,6 +941,7 @@ class UVCCamera : public DeviceClass
   size_t pending_payload_ = 0;
   bool frame_active_ = false;
   bool pending_eof_ = false;
+  bool frame_id_toggle_pending_ = false;
   uint8_t frame_id_ = 0;
 
   LibXR::Callback<LibXR::ConstRawData&> on_in_complete_cb_ =
