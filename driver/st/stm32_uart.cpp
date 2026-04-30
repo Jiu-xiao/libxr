@@ -1,6 +1,7 @@
 #include "stm32_uart.hpp"
 
 #include "stm32_dcache.hpp"
+#include "stm32_rs485.hpp"
 #ifdef HAL_UART_MODULE_ENABLED
 
 using namespace LibXR;
@@ -454,24 +455,50 @@ void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
   uart->dma_buff_tx_.EnablePending();
 }
 
-extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t)
+extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t size)
 {
+  const stm32_uart_id_t id = stm32_uart_get_id(huart->Instance);
+  if (auto* rs485 = STM32RS485::map[id])
+  {
+    rs485->OnRxEvent(size, true);
+    return;
+  }
+
   STM32_UART_RX_ISR_Handler(huart);
 }
 
 extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart)
 {
-  STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_get_id(huart->Instance));
+  const stm32_uart_id_t id = stm32_uart_get_id(huart->Instance);
+  if (auto* rs485 = STM32RS485::map[id])
+  {
+    rs485->OnTxComplete(true);
+    return;
+  }
+
+  STM32_UART_ISR_Handler_TX_CPLT(id);
 }
 
 extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
 {
+  const stm32_uart_id_t id = stm32_uart_get_id(huart->Instance);
+  if (auto* rs485 = STM32RS485::map[id])
+  {
+    rs485->OnError(true);
+  }
   HAL_UART_Abort_IT(huart);
 }
 
 extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef* huart)
 {
-  auto uart = STM32UART::map[stm32_uart_get_id(huart->Instance)];
+  const stm32_uart_id_t id = stm32_uart_get_id(huart->Instance);
+  if (auto* rs485 = STM32RS485::map[id])
+  {
+    rs485->OnAbortComplete();
+    return;
+  }
+
+  auto uart = STM32UART::map[id];
   uart->last_rx_pos_ = 0;
   HAL_UARTEx_ReceiveToIdle_DMA(huart, huart->pRxBuffPtr, uart->dma_buff_rx_.size_);
   if (uart->tx_busy_.IsSet())

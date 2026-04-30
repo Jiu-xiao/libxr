@@ -78,6 +78,7 @@ static void run_libxr_tests()
       {"crc", test_crc, false},
       {"encoder", test_float_encoder, false},
       {"cycle_value", test_cycle_value, false},
+      {"rs485", test_rs485, false},
       {"print", test_print, false},
   };
 

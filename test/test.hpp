@@ -29,5 +29,6 @@ void test_rw();
 void test_cb();
 void test_memory();
 void test_linux_shm_topic();
+void test_rs485();
 
 bool equal(double a, double b);
