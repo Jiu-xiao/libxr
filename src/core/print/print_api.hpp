@@ -39,12 +39,13 @@ namespace LibXR::Print
  * @brief 将编译后的格式写入输出端。
  * @return Returns the sink write status only. / 仅返回 sink 写入状态。
  */
-[[nodiscard]] inline ErrorCode Write(auto& sink, const auto& format, auto&&... args)
+template <typename Sink, typename Format, typename... Args>
+requires OutputSink<Sink> && CompiledFormat<std::remove_cvref_t<Format>>
+[[nodiscard]] inline ErrorCode Write(Sink& sink, const Format& format, Args&&... args)
 {
-  using Sink = std::remove_cvref_t<decltype(sink)>;
-  using Built = std::remove_cvref_t<decltype(format)>;
+  using Built = std::remove_cvref_t<Format>;
   return Writer::template RunArgumentOrder<Sink, Built, Built::ArgumentOrder()>(
-      sink, format, std::forward<decltype(args)>(args)...);
+      sink, format, std::forward<Args>(args)...);
 }
 
 /**
@@ -52,9 +53,10 @@ namespace LibXR::Print
  * @brief 面向用户的便捷包装：将一份编译格式写入一个输出端。
  * @return Returns the sink write status only. / 仅返回 sink 写入状态。
  */
-[[nodiscard]] inline ErrorCode FormatTo(auto& sink, const auto& format, auto&&... args)
+template <OutputSink Sink, typename Format, typename... Args>
+[[nodiscard]] inline ErrorCode FormatTo(Sink& sink, const Format& format, Args&&... args)
 {
-  return Write(sink, format, std::forward<decltype(args)>(args)...);
+  return Write(sink, format, std::forward<Args>(args)...);
 }
 
 /**
@@ -62,7 +64,7 @@ namespace LibXR::Print
  * @brief 将一条 brace 风格字面量直接写入一个输出端。
  * @return Returns the sink write status only. / 仅返回 sink 写入状态。
  */
-template <Text Source, typename Sink, typename... Args>
+template <Text Source, OutputSink Sink, typename... Args>
 [[nodiscard]] inline ErrorCode FormatTo(Sink& sink, Args&&... args)
 {
   constexpr LibXR::Format<Source> format{};
@@ -74,7 +76,7 @@ template <Text Source, typename Sink, typename... Args>
  * @brief 将一条 printf 风格字面量直接写入一个输出端。
  * @return Returns the sink write status only. / 仅返回 sink 写入状态。
  */
-template <Text Source, typename Sink, typename... Args>
+template <Text Source, OutputSink Sink, typename... Args>
 [[nodiscard]] inline ErrorCode PrintfTo(Sink& sink, Args&&... args)
 {
   constexpr auto format = Printf::Build<Source>();

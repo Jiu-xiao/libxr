@@ -8,6 +8,7 @@
 #include <limits>
 
 #include "format_protocol.hpp"
+#include "print_contract.hpp"
 
 namespace LibXR::Print
 {
@@ -41,13 +42,7 @@ template <typename Frontend>
 class FormatCompiler
 {
  private:
-  static constexpr bool source_contract =
-      requires {
-        typename Frontend::ErrorType;
-        { Frontend::SourceData() } -> std::convertible_to<const char*>;
-        { Frontend::SourceSize() } -> std::convertible_to<size_t>;
-      };
-  static_assert(source_contract,
+  static_assert(SourceFrontend<Frontend>,
                 "LibXR::Print::FormatCompiler: frontend must expose ErrorType, "
                 "SourceData(), and SourceSize()");
 
@@ -405,11 +400,7 @@ class FormatCompiler
     }
   };
 
-  static constexpr bool walk_contract =
-      requires(ScratchBuilder& visitor) {
-        { Frontend::Walk(visitor) } -> std::same_as<Error>;
-      };
-  static_assert(walk_contract,
+  static_assert(WalkableFrontend<Frontend, ScratchBuilder>,
                 "LibXR::Print::FormatCompiler: frontend Walk(visitor) must accept "
                 "the shared builder and return ErrorType");
 
