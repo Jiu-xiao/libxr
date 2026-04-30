@@ -1,7 +1,7 @@
 #pragma once
 
 #include "libxr.hpp"
-#include "message.hpp"
+#include "message/message.hpp"
 
 namespace LibXR
 {

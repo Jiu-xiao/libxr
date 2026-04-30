@@ -24,7 +24,7 @@
 #include "lockfree_pool.hpp"
 #include "lockfree_queue.hpp"
 #include "logger.hpp"
-#include "message.hpp"
+#include "message/message.hpp"
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include "linux_shared_topic.hpp"
 #endif

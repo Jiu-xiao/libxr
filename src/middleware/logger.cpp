@@ -4,7 +4,7 @@
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-#include "message.hpp"
+#include "message/message.hpp"
 
 using namespace LibXR;
 
