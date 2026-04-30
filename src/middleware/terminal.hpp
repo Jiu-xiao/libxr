@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +9,6 @@
 #include <utility>
 
 #include "libxr_rw.hpp"
-#include "libxr_string.hpp"
 #include "ramfs.hpp"
 #include "semaphore.hpp"
 #include "stack.hpp"
@@ -30,6 +30,8 @@ template <size_t READ_BUFF_SIZE = 32, size_t MAX_LINE_SIZE = READ_BUFF_SIZE,
 class Terminal
 {
  private:
+  using HistoryLine = std::array<char, MAX_LINE_SIZE + 1>;
+
   static constexpr char CLEAR_ALL[] =
       "\033[2J\033[1H";  ///< 清屏命令 Clear screen command
   static constexpr char CLEAR_LINE[] =
@@ -147,9 +149,20 @@ class Terminal
   Stack<char> input_line_;         ///< 输入行缓冲区 Input line buffer
   char* arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 Command argument list
   size_t arg_number_ = 0;          ///< 参数数量 Number of arguments
-  Queue<LibXR::String<MAX_LINE_SIZE>> history_;  ///< 历史命令 History of commands
-  int history_index_ = -1;                       ///< 当前历史索引 Current history index
-  bool linefeed_flag_ = false;                   ///< 换行标志 Line feed flag
+  Queue<HistoryLine> history_;     ///< 历史命令 History of commands
+  int history_index_ = -1;         ///< 当前历史索引 Current history index
+  bool linefeed_flag_ = false;     ///< CRLF 抑制标志 CRLF suppression flag
+  char linefeed_char_ = '\0';      ///< 上一个换行字符 Previous line feed character
+
+  static size_t HistoryLineSize(const HistoryLine& line)
+  {
+    size_t size = 0;
+    while (size < MAX_LINE_SIZE && line[size] != '\0')
+    {
+      size++;
+    }
+    return size;
+  }
 
   /**
    * @brief  执行换行操作
@@ -342,8 +355,8 @@ class Terminal
     offset_ = 0;
     if (history_index_ >= 0)
     {
-      write_stream_ << ConstRawData(history_[-history_index_ - 1].Raw(),
-                                    history_[-history_index_ - 1].Length());
+      const auto& line = history_[-history_index_ - 1];
+      write_stream_ << ConstRawData(line.data(), HistoryLineSize(line));
     }
     else
     {
@@ -359,10 +372,12 @@ class Terminal
   void CopyHistoryToInputLine()
   {
     input_line_.Reset();
-    for (size_t i = 0; i < history_[-history_index_ - 1].Length(); i++)
+    const auto& line = history_[-history_index_ - 1];
+    for (size_t i = 0; i < HistoryLineSize(line); i++)
     {
-      input_line_.Push(history_[-history_index_ - 1][i]);
+      input_line_.Push(line[i]);
     }
+    input_line_[input_line_.Size()] = '\0';
     history_index_ = -1;
     offset_ = 0;
   }
@@ -373,13 +388,21 @@ class Terminal
    */
   void AddHistory()
   {
+    HistoryLine line{};
+    const size_t line_size =
+        LibXR::min(static_cast<size_t>(input_line_.Size()), MAX_LINE_SIZE);
     input_line_.Push('\0');
+    if (line_size > 0)
+    {
+      std::memcpy(line.data(), &input_line_[0], line_size);
+    }
+    line[line_size] = '\0';
 
     if (history_.EmptySize() == 0)
     {
       history_.Pop();
     }
-    history_.Push(*reinterpret_cast<String<MAX_LINE_SIZE>*>(&input_line_[0]));
+    history_.Push(line);
   }
 
   /**
@@ -511,7 +534,7 @@ class Terminal
 
     if (strcmp(arg_tab_[0], "cd") == 0)
     {
-      RamFS::Dir* dir = Path2Dir(arg_tab_[1]);
+      RamFS::Dir* dir = arg_number_ >= 2 ? Path2Dir(arg_tab_[1]) : nullptr;
       if (dir != nullptr)
       {
         current_dir_ = dir;
@@ -812,17 +835,21 @@ class Terminal
     if (data != '\r' && data != '\n')
     {
       linefeed_flag_ = false;
+      linefeed_char_ = '\0';
     }
 
     switch (data)
     {
       case '\n':
       case '\r':
-        if (linefeed_flag_)
+        if (linefeed_flag_ && data != linefeed_char_)
         {
           linefeed_flag_ = false;
+          linefeed_char_ = '\0';
           return;
         }
+        linefeed_flag_ = true;
+        linefeed_char_ = data;
         if (history_index_ >= 0)
         {
           CopyHistoryToInputLine();
