@@ -78,9 +78,9 @@ class Pipe
    * @brief 读端回调（占位，无具体操作）。
    * @brief Read-side callback (no-op placeholder).
    *
-   * 仅用于匹配 `ReadPort` 回调签名；实际读取推进通常在 `ProcessPendingReads()` 中进行。
-   * Provided to match the `ReadPort` callback signature; reading is typically advanced
-   * in `ProcessPendingReads()`.
+   * 仅用于匹配 `ReadPort` 通知签名；实际读取完成始终在 `ProcessPendingReads()` 中进行。
+   * Provided to match the `ReadPort` notification signature; read completion is always
+   * advanced in `ProcessPendingReads()`.
    *
    * @param port ReadPort 引用（未使用）。 ReadPort reference (unused).
    * @param in_isr 是否在中断上下文中运行。 Whether running in ISR context.

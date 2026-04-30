@@ -38,29 +38,27 @@ void LibXR::PlatformInit()
   {
     static uint8_t write_buff[webasm_stdio_queue_bytes];
     WriteInfoBlock info;
-    while (true)
+    if (port.queue_info_->Pop(info) != LibXR::ErrorCode::OK)
     {
-      if (port.queue_info_->Pop(info) != LibXR::ErrorCode::OK)
-      {
-        return LibXR::ErrorCode::OK;
-      }
-
-      port.queue_data_->PopBatch(write_buff, info.data.size_);
-      EM_ASM(
-          {
-            var ptr = $0;
-            var len = $1;
-            for (var i = 0; i < len; i++)
-            {
-              Module.put_char(String.fromCharCode(HEAPU8[ptr + i]));
-            }
-          },
-          reinterpret_cast<uintptr_t>(write_buff), info.data.size_);
-
-      port.queue_info_->Pop(info);
-
-      port.Finish(false, LibXR::ErrorCode::OK, info);
+      return LibXR::ErrorCode::EMPTY;
     }
+
+    auto pop_ans = port.queue_data_->PopBatch(write_buff, info.data.size_);
+    if (pop_ans != LibXR::ErrorCode::OK)
+    {
+      return pop_ans;
+    }
+
+    EM_ASM(
+        {
+          var ptr = $0;
+          var len = $1;
+          for (var i = 0; i < len; i++)
+          {
+            Module.put_char(String.fromCharCode(HEAPU8[ptr + i]));
+          }
+        },
+        reinterpret_cast<uintptr_t>(write_buff), info.data.size_);
 
     return LibXR::ErrorCode::OK;
   };
@@ -69,7 +67,7 @@ void LibXR::PlatformInit()
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort&, bool) { return LibXR::ErrorCode::EMPTY; };
+  auto read_fun = [](ReadPort&, bool) { return LibXR::ErrorCode::PENDING; };
 
   LibXR::STDIO::read_ = new LibXR::ReadPort(webasm_stdio_queue_bytes);
 

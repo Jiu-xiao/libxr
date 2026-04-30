@@ -62,6 +62,11 @@ file(GLOB ${PROJECT_NAME}_MIDDLEWARE_SOURCES CONFIGURE_DEPENDS
 )
 list(SORT ${PROJECT_NAME}_MIDDLEWARE_SOURCES)
 
+file(GLOB ${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*/*.cpp"
+)
+list(SORT ${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES)
+
 target_sources(
   ${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_SOURCES}
@@ -72,6 +77,7 @@ target_sources(
   PRIVATE ${${PROJECT_NAME}_UTILS_SOURCES}
   PRIVATE ${${PROJECT_NAME}_STRUCTURE_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SOURCES}
+  PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES}
 )
 
 # The current tree still relies on basename and short subtree includes across major layers.
@@ -86,6 +92,18 @@ set(_xr_public_include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/src/driver
     ${CMAKE_CURRENT_SOURCE_DIR}/system/${_xr_system}
 )
+
+file(GLOB _xr_middleware_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*"
+)
+foreach(_xr_middleware_SUBDIR IN LISTS _xr_middleware_SUBDIRS)
+  if(IS_DIRECTORY "${_xr_middleware_SUBDIR}")
+    get_filename_component(_xr_middleware_NAME "${_xr_middleware_SUBDIR}" NAME)
+    if(EXISTS "${_xr_middleware_SUBDIR}/${_xr_middleware_NAME}.hpp")
+      list(APPEND _xr_public_include_dirs "${_xr_middleware_SUBDIR}")
+    endif()
+  endif()
+endforeach()
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${_xr_public_include_dirs})
 

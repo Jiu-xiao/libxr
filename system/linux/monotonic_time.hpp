@@ -4,10 +4,17 @@
 
 #include <cstdint>
 
+extern struct timespec libxr_linux_start_time_spec;
+
 namespace LibXR
 {
 namespace MonotonicTime
 {
+inline uint64_t SpecMicroseconds(const timespec& ts)
+{
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL +
+         static_cast<uint64_t>(ts.tv_nsec) / 1000ULL;
+}
 
 inline timespec NowSpec()
 {
@@ -16,11 +23,26 @@ inline timespec NowSpec()
   return ts;
 }
 
+inline uint64_t NowMicroseconds()
+{
+  return SpecMicroseconds(NowSpec());
+}
+
 inline uint64_t NowMilliseconds()
 {
-  const timespec ts = NowSpec();
-  return static_cast<uint64_t>(ts.tv_sec) * 1000ULL +
-         static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
+  return NowMicroseconds() / 1000ULL;
+}
+
+inline uint64_t XrToSharedMicroseconds(uint64_t timestamp_us)
+{
+  const uint64_t start_us = SpecMicroseconds(libxr_linux_start_time_spec);
+  return UINT64_MAX - start_us < timestamp_us ? UINT64_MAX : start_us + timestamp_us;
+}
+
+inline uint64_t SharedToXrMicroseconds(uint64_t timestamp_us)
+{
+  const uint64_t start_us = SpecMicroseconds(libxr_linux_start_time_spec);
+  return timestamp_us >= start_us ? timestamp_us - start_us : 0;
 }
 
 inline timespec RelativeFromMilliseconds(uint32_t milliseconds)

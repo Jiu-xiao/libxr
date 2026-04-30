@@ -107,8 +107,6 @@ class MSPM0UART : public UART
 
   void HandleErrorInterrupt(DL_UART_IIDX iidx);
 
-  void CompletePendingReadOnTimeout(bool in_isr);
-
   void ApplyRxTimeoutMode();
 
   RxTimeoutMode ResolveRxTimeoutMode() const;

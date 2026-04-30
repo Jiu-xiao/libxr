@@ -22,6 +22,21 @@ inline uint64_t NowMilliseconds()
   return _libxr_webots_time_count;
 }
 
+inline uint64_t NowMicroseconds()
+{
+  return _libxr_webots_time_count * 1000ULL;
+}
+
+inline uint64_t XrToSharedMicroseconds(uint64_t timestamp_us)
+{
+  return timestamp_us;
+}
+
+inline uint64_t SharedToXrMicroseconds(uint64_t timestamp_us)
+{
+  return timestamp_us;
+}
+
 inline uint32_t RemainingMilliseconds(uint64_t deadline_ms)
 {
   const uint64_t now_ms = NowMilliseconds();

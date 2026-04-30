@@ -102,14 +102,16 @@ void test_linux_shm_topic()
     ASSERT(attach_only.CreateData(attach_data) == LibXR::ErrorCode::STATE_ERR);
 
     SharedData data0;
+    const LibXR::MicrosecondTimestamp timestamp0(101000);
     ASSERT(publisher.CreateData(data0) == LibXR::ErrorCode::OK);
     FillFrame(*data0.GetData(), 100);
-    ASSERT(publisher.Publish(data0) == LibXR::ErrorCode::OK);
+    ASSERT(publisher.Publish(data0, timestamp0) == LibXR::ErrorCode::OK);
 
     SharedData data1;
+    const LibXR::MicrosecondTimestamp timestamp1(102000);
     ASSERT(publisher.CreateData(data1) == LibXR::ErrorCode::OK);
     FillFrame(*data1.GetData(), 101);
-    ASSERT(publisher.Publish(data1) == LibXR::ErrorCode::OK);
+    ASSERT(publisher.Publish(data1, timestamp1) == LibXR::ErrorCode::OK);
 
     SharedData data2;
     ASSERT(publisher.CreateData(data2) == LibXR::ErrorCode::FULL);
@@ -117,21 +119,30 @@ void test_linux_shm_topic()
     ASSERT(subscriber.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 100);
+    ASSERT(static_cast<uint64_t>(subscriber.GetTimestamp()) ==
+           static_cast<uint64_t>(timestamp0));
+    subscriber.GetData()->seq = 1000;
+    ASSERT(subscriber.GetData()->seq == 1000);
     ASSERT(subscriber.GetPendingNum() == 1);
     subscriber.Release();
 
+    const LibXR::MicrosecondTimestamp timestamp2(103000);
     ASSERT(publisher.CreateData(data2) == LibXR::ErrorCode::OK);
     FillFrame(*data2.GetData(), 102);
-    ASSERT(publisher.Publish(data2) == LibXR::ErrorCode::OK);
+    ASSERT(publisher.Publish(data2, timestamp2) == LibXR::ErrorCode::OK);
 
     ASSERT(subscriber.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 101);
+    ASSERT(static_cast<uint64_t>(subscriber.GetTimestamp()) ==
+           static_cast<uint64_t>(timestamp1));
     subscriber.Release();
 
     ASSERT(subscriber.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(subscriber.GetData() != nullptr);
     AssertFrame(*subscriber.GetData(), 102);
+    ASSERT(static_cast<uint64_t>(subscriber.GetTimestamp()) ==
+           static_cast<uint64_t>(timestamp2));
     ASSERT(subscriber.GetPendingNum() == 0);
     subscriber.Release();
   }
@@ -211,6 +222,9 @@ void test_linux_shm_topic()
     ASSERT(subscriber.Wait(recv_data, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     ASSERT(recv_data.GetSequence() == 1);
     AssertFrame(*recv_data.GetData(), 201);
+    const SharedData& const_recv_data = recv_data;
+    const_recv_data.GetData()->seq = 1201;
+    ASSERT(const_recv_data.GetData()->seq == 1201);
     recv_data.Reset();
 
     ASSERT(subscriber.Wait(recv_data, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
@@ -454,8 +468,7 @@ void test_linux_shm_topic()
     close(ack_pipe[1]);
     close(cmd_pipe[0]);
 
-    SharedSubscriber subscriber_alive(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
-    ASSERT(subscriber_alive.Valid());
+    WaitForSubscriberNum(publisher, 1);
 
     IPCFrame frame = {};
     FillFrame(frame, 361);
@@ -465,6 +478,10 @@ void test_linux_shm_topic()
     ASSERT(read(ack_pipe[0], &first_seq, sizeof(first_seq)) ==
            static_cast<ssize_t>(sizeof(first_seq)));
     ASSERT(first_seq == 361);
+
+    SharedSubscriber subscriber_alive(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    ASSERT(subscriber_alive.Valid());
+    WaitForSubscriberNum(publisher, 2);
 
     uint8_t cmd = 0xA5;
     ASSERT(write(cmd_pipe[1], &cmd, sizeof(cmd)) == static_cast<ssize_t>(sizeof(cmd)));
@@ -698,12 +715,13 @@ void test_linux_shm_topic()
     ASSERT(write(cmd_pipe[1], &cmd, sizeof(cmd)) == static_cast<ssize_t>(sizeof(cmd)));
 
     ExpectChildExit(child);
-    ASSERT(publisher.GetSubscriberNum() == 0);
+    ASSERT(publisher.GetSubscriberNum() == 1);
 
     SharedData data0;
     SharedData data1;
     SharedData data2;
     ASSERT(publisher.CreateData(data0) == LibXR::ErrorCode::OK);
+    ASSERT(publisher.GetSubscriberNum() == 0);
     ASSERT(publisher.CreateData(data1) == LibXR::ErrorCode::OK);
     ASSERT(publisher.CreateData(data2) == LibXR::ErrorCode::FULL);
 

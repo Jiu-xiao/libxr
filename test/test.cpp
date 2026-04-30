@@ -1,6 +1,7 @@
 #include "test.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <sys/wait.h>
@@ -148,6 +149,8 @@ static void run_libxr_tests()
   }
 
   XR_LOG_INFO("All tests completed.\n");
+  std::fprintf(stderr, "All tests completed.\n");
+  std::fflush(stderr);
 }
 
 int main()

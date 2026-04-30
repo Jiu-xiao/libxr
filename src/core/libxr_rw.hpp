@@ -351,10 +351,25 @@ typedef Operation<ErrorCode> WriteOperation;
 
 /// @brief Function pointer type for write operations.
 /// @brief 写入操作的函数指针类型。
+///
+/// The current write has already been queued before this function is called. PENDING
+/// means the backend owns later completion through Finish(); non-PENDING means the
+/// current queued op was consumed/completed synchronously. Negative non-PENDING values
+/// report a synchronous start failure and must not leave that op in the queue.
+/// 调用该函数前，当前写入已经进入队列。PENDING 表示后端之后通过 Finish() 完成；
+/// 非 PENDING 表示当前 queued op 已被同步消费/完成。负数非 PENDING 表示同步启动失败，
+/// 且不得把该 op 留在队列中。
 typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
 
-/// @brief Function pointer type for read operations.
-/// @brief 读取操作的函数指针类型。
+/// @brief Function pointer type for read notifications.
+/// @brief 读取通知函数指针类型。
+///
+/// A successful return arms or notifies the backend only. It must not complete the read
+/// directly; producers complete reads by pushing bytes into queue_data_ and calling
+/// ProcessPendingReads(). Any non-negative return means accepted/armed; negative values
+/// mean failure.
+/// 成功返回只表示已通知或挂起底层接收，不得直接完成本次读；producer 必须先把字节写入
+/// queue_data_，再调用 ProcessPendingReads() 完成读取。返回值非负表示已接受/已挂起，负值表示失败。
 typedef ErrorCode (*ReadFun)(ReadPort& port, bool in_isr);
 
 /**
@@ -386,13 +401,13 @@ class ReadPort
   // 是因为 libxr 的底层测试与驱动胶水层会直接检查它们。
 
   // Read BLOCK states:
-  // PENDING = waiting for queue-fed completion
+  // PENDING = waiting for queue-fed completion after read_fun_ was notified
   // BLOCK_CLAIMED = wakeup now belongs to the waiter
   // BLOCK_DETACHED = timeout/reset detached the waiter
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 读 BLOCK 状态：
-  // PENDING = 等待队列侧完成
+  // PENDING = 已通知 read_fun_，等待队列侧完成
   // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
   // BLOCK_DETACHED = timeout/reset 已把 waiter 分离
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
@@ -409,7 +424,7 @@ class ReadPort
                          ///< re-check queue. 数据先到，后续调用者要重查队列。
   };
 
-  ReadFun read_fun_ = nullptr;  ///< Driver/backend read entry. 底层驱动或后端读取入口。
+  ReadFun read_fun_ = nullptr;  ///< Driver/backend read notification entry. 底层驱动或后端读取通知入口。
   LockFreeQueue<uint8_t>* queue_data_ = nullptr;  ///< RX payload queue. 接收数据字节队列。
   ReadInfoBlock info_{};  ///< In-flight read request metadata. 当前在途读取请求的元数据。
   std::atomic<BusyState> busy_{BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
@@ -470,8 +485,8 @@ class ReadPort
   ReadPort& operator=(ReadFun fun);
 
   /**
-   * @brief 更新读取操作的状态。
-   *        Updates the status of the read operation.
+   * @brief 完成已由队列路径认领的读取操作。
+   *        Completes a read operation already claimed by the queue path.
    *
    * @param in_isr 指示是否在中断上下文中执行。
    *               Indicates whether the operation is executed in an interrupt context.
@@ -504,6 +519,12 @@ class ReadPort
    *
    * @param data 包含要读取的数据。
    *             Contains the data to be read.
+   *
+   * @note data.size_ == 0 is a readiness read: it completes when the RX queue is
+   *       non-empty, does not consume bytes, and does not call OnRxDequeue().
+   * @note data.size_ == 0 表示可读通知：RX 队列非空即完成，不消费字节，也不调用
+   *       OnRxDequeue()。
+   *
    * @param op 读取操作对象，包含操作类型和同步机制。
    *           Read operation object containing the operation type and synchronization
    * mechanism.
@@ -553,27 +574,34 @@ class WritePort
 
   // Write BLOCK states:
   // LOCKED = submit path owns queue mutation
+  // BLOCK_PUBLISHING = BLOCK submit path is publishing queue metadata
   // BLOCK_WAITING = waiter armed, completion not claimed yet
   // BLOCK_CLAIMED = final wakeup belongs to the waiter
   // BLOCK_DETACHED = timeout/reset detached the waiter
+  // RESETTING = reset path owns queue mutation
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 写 BLOCK 状态：
   // LOCKED = 提交路径占有队列修改权
+  // BLOCK_PUBLISHING = BLOCK 提交路径正在发布队列元数据
   // BLOCK_WAITING = waiter 已挂起，完成尚未 claim
   // BLOCK_CLAIMED = 最终唤醒已经归 waiter 所有
   // BLOCK_DETACHED = timeout/reset 已把 waiter 分离
+  // RESETTING = reset 路径占有队列修改权
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
   enum class BusyState : uint32_t
   {
     LOCKED =
         0,  ///< Submission path owns queue mutation. 提交路径占有写队列/元数据修改权。
-    BLOCK_WAITING = 1,  ///< One BLOCK waiter is armed and waiting for final completion.
+    BLOCK_PUBLISHING = 1,  ///< BLOCK submitter is publishing queue metadata.
+                           ///< BLOCK 提交者正在发布队列元数据。
+    BLOCK_WAITING = 2,  ///< One BLOCK waiter is armed and waiting for final completion.
                         ///< 一个 BLOCK 等待者已经挂起，等待最终完成。
     BLOCK_CLAIMED =
-        2,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
-    BLOCK_DETACHED = 3,  ///< Waiter already timed out/reset; completion must not post.
+        3,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
+    BLOCK_DETACHED = 4,  ///< Waiter already timed out/reset; completion must not post.
                          ///< 等待者已超时/被分离，完成侧不能再 Post。
+    RESETTING = 5,        ///< Reset owns queue mutation. Reset 占有写队列/元数据修改权。
     IDLE = UINT32_MAX    ///< No active submitter and no armed BLOCK waiter.
                          ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
   };
@@ -816,8 +844,8 @@ class WritePort
    */
   ErrorCode operator()(ConstRawData data, WriteOperation& op, bool in_isr = false);
 
-  /// @brief Resets the WritePort.
-  /// @brief 重置WritePort。
+  /// @brief Resets queued write state when no submitter owns queue mutation.
+  /// @brief 当没有提交者占有队列修改权时，重置写队列状态。
   void Reset();
 
   /**

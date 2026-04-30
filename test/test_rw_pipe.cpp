@@ -53,10 +53,7 @@ struct ModeHarness
   using PollingStatus = typename Op::OperationPollingStatus;
 
   explicit ModeHarness(TestMode mode, uint32_t timeout = ASYNC_TIMEOUT_MS)
-      : mode(mode),
-        callback(CallbackType::Create(OnCallback, this)),
-        sem(0),
-        op()
+      : mode(mode), callback(CallbackType::Create(OnCallback, this)), sem(0), op()
   {
     Bind(timeout);
     Reset();
@@ -161,12 +158,12 @@ inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT
 
 namespace
 {
-using LibXRTest::ExpectWaitOk;
-using LibXRTest::JoinThreadIfNeeded;
 using LibXRTest::ASYNC_MODES;
 using LibXRTest::ASYNC_TIMEOUT_MS;
-using LibXRTest::SHORT_WAIT_MS;
+using LibXRTest::ExpectWaitOk;
+using LibXRTest::JoinThreadIfNeeded;
 using LibXRTest::ReadHarness;
+using LibXRTest::SHORT_WAIT_MS;
 using LibXRTest::TestMode;
 using LibXRTest::WriteHarness;
 
@@ -180,8 +177,18 @@ LibXR::ErrorCode PendingReadFun(LibXR::ReadPort&, bool)
   return LibXR::ErrorCode::PENDING;
 }
 
-LibXR::ErrorCode FailWriteFun(LibXR::WritePort&, bool)
+LibXR::ErrorCode FailWriteFun(LibXR::WritePort& port, bool)
 {
+  LibXR::WriteInfoBlock info;
+  auto pop_ans = port.queue_info_->Pop(info);
+  if (pop_ans != LibXR::ErrorCode::OK)
+  {
+    return pop_ans;
+  }
+
+  auto drop_ans = port.queue_data_->PopBatch(nullptr, info.data.size_);
+  UNUSED(drop_ans);
+  ASSERT(drop_ans == LibXR::ErrorCode::OK);
   return LibXR::ErrorCode::INIT_ERR;
 }
 
@@ -190,14 +197,25 @@ LibXR::ErrorCode FailReadFun(LibXR::ReadPort&, bool)
   return LibXR::ErrorCode::INIT_ERR;
 }
 
-struct ReadFinishContext
+struct ReadQueueCompletionContext
 {
   LibXR::ReadPort* port;
   LibXR::Semaphore* done;
-  LibXR::ErrorCode result;
+  const uint8_t* data;
+  size_t size;
 };
 
-void FinishPendingRead(ReadFinishContext ctx)
+struct TrackingReadPort : LibXR::ReadPort
+{
+  using LibXR::ReadPort::ReadPort;
+  using LibXR::ReadPort::operator=;
+
+  void OnRxDequeue(bool) override { dequeue_count++; }
+
+  uint32_t dequeue_count = 0;
+};
+
+void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
   while (ctx.port->busy_.load(std::memory_order_acquire) !=
          LibXR::ReadPort::BusyState::PENDING)
@@ -205,7 +223,10 @@ void FinishPendingRead(ReadFinishContext ctx)
     LibXR::Thread::Yield();
   }
 
-  ctx.port->Finish(false, ctx.result, ctx.port->info_);
+  auto ans = ctx.port->queue_data_->PushBatch(ctx.data, ctx.size);
+  UNUSED(ans);
+  ASSERT(ans == LibXR::ErrorCode::OK);
+  ctx.port->ProcessPendingReads(false);
   ctx.done->Post();
 }
 
@@ -278,10 +299,12 @@ void BlockingWriteExternalOpCall(BlockingWriteExternalOpCallContext* ctx)
   ctx->done->Post();
 }
 
-void StartReadFinisher(LibXR::Thread& thread, LibXR::ReadPort& port,
-                       LibXR::Semaphore& done, LibXR::ErrorCode result, const char* name)
+void StartReadQueueCompleter(LibXR::Thread& thread, LibXR::ReadPort& port,
+                             LibXR::Semaphore& done, const uint8_t* data, size_t size,
+                             const char* name)
 {
-  thread.Create(ReadFinishContext{&port, &done, result}, FinishPendingRead, name, 1024,
+  thread.Create(ReadQueueCompletionContext{&port, &done, data, size},
+                CompletePendingReadFromQueue, name, 1024,
                 LibXR::Thread::Priority::MEDIUM);
 }
 
@@ -314,24 +337,25 @@ void StartBlockingWriteExternalOpCaller(LibXR::Thread& thread,
       &ctx, BlockingWriteExternalOpCall, name, 1024, LibXR::Thread::Priority::MEDIUM);
 }
 
-void VerifyPendingReadMode(TestMode mode, LibXR::ErrorCode result)
+void VerifyPendingReadMode(TestMode mode)
 {
   using namespace LibXR;
 
   ReadPort r(16);
   r = PendingReadFun;
 
+  std::vector<uint8_t> tx = {0x42, 0x73, 0x8A, 0xC1};
   std::vector<uint8_t> rx(4, 0x7A);
   ReadHarness read(mode);
   Semaphore done;
   Thread finisher;
-  StartReadFinisher(finisher, r, done, result, "rd_finish");
+  StartReadQueueCompleter(finisher, r, done, tx.data(), tx.size(), "rd_queue");
 
   auto call_result = r(RawData{rx.data(), rx.size()}, read.op);
 
   if (mode == TestMode::BLOCK)
   {
-    ASSERT(call_result == result);
+    ASSERT(call_result == ErrorCode::OK);
   }
   else
   {
@@ -343,8 +367,9 @@ void VerifyPendingReadMode(TestMode mode, LibXR::ErrorCode result)
   JoinThreadIfNeeded(finisher);
   if (mode != TestMode::NONE && mode != TestMode::BLOCK)
   {
-    read.ExpectFinal(result);
+    read.ExpectFinal(ErrorCode::OK);
   }
+  ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
   ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
@@ -512,7 +537,7 @@ void test_rw_pending_mode_matrix()
 {
   for (auto mode : ASYNC_MODES)
   {
-    VerifyPendingReadMode(mode, LibXR::ErrorCode::FAILED);
+    VerifyPendingReadMode(mode);
     VerifyPendingWriteMode(mode, LibXR::ErrorCode::FAILED);
   }
 }
@@ -592,6 +617,47 @@ void test_rw_block_read_timeout_detaches_pending()
   ASSERT(std::memcmp(fresh_rx, TX, sizeof(TX)) == 0);
 }
 
+void test_rw_zero_read_pending_notifies_without_dequeue()
+{
+  using namespace LibXR;
+
+  for (auto mode : LibXRTest::ALL_MODES)
+  {
+    TrackingReadPort r(16);
+    r = PendingReadFun;
+
+    uint8_t dummy = 0xA0;
+    ReadHarness read(mode);
+    Semaphore done;
+    Thread finisher;
+
+    static const uint8_t TX[] = {0x31, 0x32};
+    StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_zero_ready");
+
+    auto ec = r(RawData{&dummy, 0}, read.op);
+    ASSERT(ec == ErrorCode::OK);
+    ExpectWaitOk(done, SHORT_WAIT_MS);
+    JoinThreadIfNeeded(finisher);
+
+    if (mode != TestMode::NONE && mode != TestMode::BLOCK)
+    {
+      read.ExpectFinal(ErrorCode::OK);
+    }
+
+    ASSERT(dummy == 0xA0);
+    ASSERT(r.dequeue_count == 0);
+    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+    ASSERT(r.Size() == sizeof(TX));
+
+    uint8_t follow_up[sizeof(TX)] = {};
+    ReadOperation follow_op;
+    ec = r(RawData{follow_up, sizeof(follow_up)}, follow_op);
+    ASSERT(ec == ErrorCode::OK);
+    ASSERT(std::memcmp(follow_up, TX, sizeof(TX)) == 0);
+    ASSERT(r.dequeue_count == 1);
+  }
+}
+
 void test_rw_block_write_timeout_detaches_waiter()
 {
   using namespace LibXR;
@@ -624,27 +690,43 @@ void test_rw_block_write_timeout_detaches_waiter()
   ASSERT(sem2.Value() == 0);
 }
 
-void test_rw_block_immediate_error_propagates()
+void test_rw_immediate_error_propagates()
 {
   using namespace LibXR;
 
-  ReadPort r(16);
-  r = FailReadFun;
+  for (auto mode : LibXRTest::ALL_MODES)
+  {
+    ReadPort r(16);
+    r = FailReadFun;
 
-  uint8_t rx[1] = {0};
-  Semaphore read_sem;
-  ReadOperation rop(read_sem, 0);
-  auto ec = r(RawData{rx, sizeof(rx)}, rop);
-  ASSERT(ec == ErrorCode::INIT_ERR);
-
-  WritePort w(2, 16);
-  w = FailWriteFun;
+    uint8_t rx[1] = {0};
+    LibXRTest::ReadHarness read(mode, 0);
+    auto ec = r(RawData{rx, sizeof(rx)}, read.op);
+    ASSERT(ec == ErrorCode::INIT_ERR);
+    if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
+    {
+      read.ExpectFinal(ErrorCode::INIT_ERR);
+    }
+    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+  }
 
   static const uint8_t TX[] = {0x55};
-  Semaphore write_sem;
-  WriteOperation wop(write_sem, 0);
-  ec = w(ConstRawData{TX, sizeof(TX)}, wop);
-  ASSERT(ec == ErrorCode::INIT_ERR);
+  for (auto mode : LibXRTest::ALL_MODES)
+  {
+    WritePort w(2, 16);
+    w = FailWriteFun;
+
+    LibXRTest::WriteHarness write(mode, 0);
+    auto ec = w(ConstRawData{TX, sizeof(TX)}, write.op);
+    ASSERT(ec == ErrorCode::INIT_ERR);
+    if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
+    {
+      write.ExpectFinal(ErrorCode::INIT_ERR);
+    }
+    ASSERT(w.Size() == 0);
+    ASSERT(w.queue_info_->Size() == 0);
+    ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+  }
 }
 
 void test_rw_read_port_reset_detaches_block_waiter()
@@ -733,6 +815,66 @@ void test_rw_write_port_reset_detaches_block_waiter()
   JoinThreadIfNeeded(finisher);
 }
 
+void test_rw_write_port_reset_clears_idle_queue()
+{
+  using namespace LibXR;
+
+  WritePort w(2, 16);
+  w = PendingWriteFun;
+
+  static const uint8_t TX[] = {0x21, 0x22, 0x23};
+  WriteOperation op;
+  ASSERT(w(ConstRawData{TX, sizeof(TX)}, op) == ErrorCode::OK);
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+  ASSERT(w.Size() == sizeof(TX));
+  ASSERT(w.queue_info_->Size() == 1);
+
+  w.Reset();
+
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+  ASSERT(w.Size() == 0);
+  ASSERT(w.queue_info_->Size() == 0);
+}
+
+void test_rw_write_port_reset_does_not_unlock_active_stream()
+{
+  using namespace LibXR;
+
+  WritePort w(2, 16);
+  w = PendingWriteFun;
+
+  static const uint8_t TX[] = {0x31, 0x32, 0x33, 0x34};
+  static const uint8_t BLOCKED_TX[] = {0x41};
+  WriteOperation stream_op;
+  WritePort::Stream stream(&w, stream_op);
+
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::LOCKED);
+  ASSERT(stream.Write(ConstRawData{TX, sizeof(TX)}) == ErrorCode::OK);
+
+  w.Reset();
+
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::LOCKED);
+  ASSERT(w.Size() == sizeof(TX));
+
+  WriteOperation blocked_op;
+  ASSERT(w(ConstRawData{BLOCKED_TX, sizeof(BLOCKED_TX)}, blocked_op) == ErrorCode::BUSY);
+
+  ASSERT(stream.Commit() == ErrorCode::OK);
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+
+  WriteInfoBlock completed{};
+  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
+  ASSERT(completed.data.size_ == sizeof(TX));
+
+  uint8_t rx[sizeof(TX)] = {};
+  ASSERT(w.queue_data_->PopBatch(rx, sizeof(rx)) == ErrorCode::OK);
+  ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
+
+  w.Finish(false, ErrorCode::OK, completed);
+  ASSERT(w.Size() == 0);
+  ASSERT(w.queue_info_->Size() == 0);
+}
+
 void test_rw_write_port_reset_late_finish_before_timeout_wake()
 {
   using namespace LibXR;
@@ -772,24 +914,68 @@ void test_rw_write_port_reset_late_finish_before_timeout_wake()
   ASSERT(w(ConstRawData{TX2, sizeof(TX2)}, next_op) == ErrorCode::OK);
 }
 
-void test_rw_read_port_block_pending_result_propagates()
+void test_rw_write_port_reset_late_finish_after_timeout_wake()
+{
+  using namespace LibXR;
+
+  WritePort w(2, 16);
+  w = PendingWriteFun;
+
+  static const uint8_t TX1[] = {0x94, 0x95, 0x96};
+  static const uint8_t TX2[] = {0xB1, 0xB2};
+
+  Semaphore sem1(0);
+  WriteOperation op1(sem1, 20);
+  Semaphore done;
+  BlockingWriteExternalOpCallContext ctx{&w, ConstRawData{TX1, sizeof(TX1)}, &op1,
+                                         ErrorCode::FAILED, &done};
+  Thread writer;
+  StartBlockingWriteExternalOpCaller(writer, ctx, "wr_reset_timeout_finish");
+
+  while (w.busy_.load(std::memory_order_acquire) != WritePort::BusyState::BLOCK_WAITING)
+  {
+    Thread::Yield();
+  }
+
+  w.Reset();
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::BLOCK_DETACHED);
+
+  ExpectWaitOk(done, SHORT_WAIT_MS);
+  JoinThreadIfNeeded(writer);
+  ASSERT(ctx.result == ErrorCode::TIMEOUT);
+  ASSERT(sem1.Value() == 0);
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+
+  WriteInfoBlock completed{ConstRawData{TX1, sizeof(TX1)}, op1};
+  w.Finish(false, ErrorCode::OK, completed);
+  ASSERT(sem1.Value() == 0);
+  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+
+  WriteOperation next_op;
+  ASSERT(w(ConstRawData{TX2, sizeof(TX2)}, next_op) == ErrorCode::OK);
+}
+
+void test_rw_read_port_block_queue_completion_copies_data()
 {
   using namespace LibXR;
 
   ReadPort r(16);
   r = PendingReadFun;
 
-  uint8_t rx[1] = {0};
+  static const uint8_t TX[] = {0x5A};
+  uint8_t rx[sizeof(TX)] = {0};
   Semaphore sem;
   ReadOperation op(sem, 100);
   Semaphore done;
   Thread finisher;
-  StartReadFinisher(finisher, r, done, ErrorCode::FAILED, "rd_finish");
+  StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_queue_block");
 
   auto ec = r(RawData{rx, sizeof(rx)}, op);
-  ASSERT(ec == ErrorCode::FAILED);
+  ASSERT(ec == ErrorCode::OK);
   ExpectWaitOk(done, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher);
+  ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
+  ASSERT(sem.Value() == 0);
 }
 
 void test_rw_write_port_block_pending_result_propagates()
@@ -854,12 +1040,16 @@ void test_rw()
   test_rw_stream_block_timeout_detaches_waiter();
   test_rw_stream_block_destructor_autocommit();
   test_rw_block_read_timeout_detaches_pending();
+  test_rw_zero_read_pending_notifies_without_dequeue();
   test_rw_block_write_timeout_detaches_waiter();
-  test_rw_block_immediate_error_propagates();
+  test_rw_immediate_error_propagates();
   test_rw_read_port_reset_detaches_block_waiter();
   test_rw_write_port_reset_detaches_block_waiter();
+  test_rw_write_port_reset_clears_idle_queue();
+  test_rw_write_port_reset_does_not_unlock_active_stream();
   test_rw_write_port_reset_late_finish_before_timeout_wake();
-  test_rw_read_port_block_pending_result_propagates();
+  test_rw_write_port_reset_late_finish_after_timeout_wake();
+  test_rw_read_port_block_queue_completion_copies_data();
   test_rw_write_port_block_pending_result_propagates();
   test_rw_write_port_block_reused_waiter_discards_stale_signal();
 }
@@ -870,11 +1060,11 @@ constexpr size_t PIPE_CAPACITY = 64;
 constexpr size_t MIXED_STRESS_ITERATIONS = 64;
 constexpr size_t BLOCK_STRESS_ITERATIONS = 8;
 
+using LibXRTest::ASYNC_MODES;
 using LibXRTest::ExpectWaitOk;
 using LibXRTest::JoinThreadIfNeeded;
-using LibXRTest::ASYNC_MODES;
-using LibXRTest::SHORT_WAIT_MS;
 using LibXRTest::ReadHarness;
+using LibXRTest::SHORT_WAIT_MS;
 using LibXRTest::TestMode;
 using LibXRTest::WriteHarness;
 

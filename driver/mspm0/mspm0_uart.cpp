@@ -201,7 +201,7 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
     DL_UART_enableInterrupt(uart->res_.instance, TIMEOUT_MASK);
   }
 
-  return ErrorCode::EMPTY;
+  return ErrorCode::PENDING;
 }
 
 MSPM0UART::RxTimeoutMode MSPM0UART::ResolveRxTimeoutMode() const
@@ -479,8 +479,8 @@ void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask
 
   // FULL 阈值模式下短帧可能滞留在 HW FIFO，直到超时中断到来 / In
   // FULL-threshold modes, short frames may remain in HW FIFO until timeout IRQ.
-  // 先拉取 FIFO，再按超时语义完成挂起读请求 / Drain FIFO first so timeout can
-  // complete pending reads with actual data.
+  // 先拉取 FIFO，让已有数据先走正常队列完成路径 / Drain FIFO first so already
+  // received bytes take the normal queue-completion path.
   bool pushed = false;
   bool received = false;
 
@@ -491,42 +491,15 @@ void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask
     read_port_->ProcessPendingReads(true);
   }
 
-  const bool PENDING_READ =
-      (read_port_->busy_.load(std::memory_order_relaxed) == ReadPort::BusyState::PENDING);
-  if (!PENDING_READ)
-  {
-    // 超时到来时若无挂起读请求，仅清理硬件状态并退出 / If timeout arrives
-    // with no pending read, only clear HW state and exit.
-    DL_UART_disableInterrupt(res_.instance, timeout_mask);
-    return;
-  }
-
   if (rx_timeout_mode_ == RxTimeoutMode::LIN_COMPARE)
   {
     ResetLinCounter();
   }
 
-  CompletePendingReadOnTimeout(true);
-  // Current ReadPort contract has no byte-count handoff for driver-side timeout
-  // completion, so one timeout event is enough; later progress is still driven by RX IRQ.
+  // Timeout is a frame/readiness boundary, not a read error. Read(size=0) waiters
+  // complete through ProcessPendingReads() once bytes are queued; exact-size reads keep
+  // waiting until enough bytes arrive or their own BLOCK timeout fires.
   DL_UART_disableInterrupt(res_.instance, timeout_mask);
-}
-
-void MSPM0UART::CompletePendingReadOnTimeout(bool in_isr)
-{
-  if (read_port_->busy_.load(std::memory_order_relaxed) != ReadPort::BusyState::PENDING)
-  {
-    return;
-  }
-
-  if (read_port_->info_.op.type == ReadOperation::OperationType::BLOCK)
-  {
-    return;
-  }
-
-  // ReadPort no longer supports driver-side partial completion with a received-byte
-  // count. Keep queued bytes for a follow-up read and only report an incomplete frame.
-  read_port_->Finish(in_isr, ErrorCode::EMPTY, read_port_->info_);
 }
 
 void MSPM0UART::HandleTxInterrupt(bool in_isr)

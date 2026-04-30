@@ -386,13 +386,13 @@ class LinuxUART : public UART
     return ErrorCode::OK;
   }
 
-  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::EMPTY; }
+  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
   static ErrorCode WriteFun(WritePort& port, bool)
   {
     auto* uart = LibXR::ContainerOf(&port, &LinuxUART::_write_port);
     uart->write_sem_.Post();
-    return ErrorCode::OK;
+    return ErrorCode::PENDING;
   }
 
  private:

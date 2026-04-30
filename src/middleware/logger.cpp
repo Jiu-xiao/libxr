@@ -8,45 +8,11 @@
 
 using namespace LibXR;
 
+namespace
+{
 static Topic log_topic;  ///< 日志发布主题 / Log publish topic
 
-void Logger::Init()
-{
-  log_topic = Topic::CreateTopic<LogData>("/xr/log", nullptr, true, false, false);
-
-  void (*log_cb_fun)(bool in_isr, Topic, RawData& log_data) =
-      [](bool, Topic tp, LibXR::RawData& log_data)
-  {
-    UNUSED(tp);
-
-    auto log = reinterpret_cast<LogData*>(log_data.addr_);
-
-    if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(log->level) && STDIO::write_ &&
-        STDIO::write_->Writable())
-    {
-      PrintToTerminal(*log);
-    }
-  };
-
-  auto log_cb = LibXR::Topic::Callback::Create(log_cb_fun, log_topic);
-  log_topic.RegisterCallback(log_cb);
-
-  initialized_ = true;
-}
-
-MillisecondTimestamp Logger::Now() { return MillisecondTimestamp(Thread::GetTime()); }
-
-void Logger::PublishRecord(LogData& data) { log_topic.Publish(data); }
-
-void Logger::PrintToTerminal(const LogData& data)
-{
-  const char* color = GetColor(data.level);
-  STDIO::Print<"{}{} [{}]({}:{}) {}{}\r\n">(
-      color, LevelToString(data.level), static_cast<uint32_t>(data.timestamp), data.file,
-      data.line, data.message, LIBXR_STYLE_STR[static_cast<uint8_t>(Style::RESET)]);
-}
-
-const char* Logger::GetColor(LogLevel level)
+const char* GetLogColor(LogLevel level)
 {
   switch (level)
   {
@@ -65,7 +31,7 @@ const char* Logger::GetColor(LogLevel level)
   }
 }
 
-const char* Logger::LevelToString(LogLevel level)
+const char* LogLevelToString(LogLevel level)
 {
   switch (level)
   {
@@ -83,3 +49,37 @@ const char* Logger::LevelToString(LogLevel level)
       return "UNKNOWN";
   }
 }
+
+void PrintLogToTerminal(const LogData& data, MicrosecondTimestamp timestamp)
+{
+  const char* color = GetLogColor(data.level);
+  const uint32_t timestamp_ms =
+      static_cast<uint32_t>(static_cast<uint64_t>(timestamp) / 1000U);
+  STDIO::Print<"{}{} [{}]({}:{}) {}{}\r\n">(
+      color, LogLevelToString(data.level), timestamp_ms, data.file, data.line,
+      data.message, LIBXR_STYLE_STR[static_cast<uint8_t>(Style::RESET)]);
+}
+
+void OnLogMessage(bool, Topic tp, const Topic::MessageView<LogData>& log_message)
+{
+  UNUSED(tp);
+
+  if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(log_message.data.level) &&
+      STDIO::write_ && STDIO::write_->Writable())
+  {
+    PrintLogToTerminal(log_message.data, log_message.timestamp);
+  }
+}
+}  // namespace
+
+void Logger::Init()
+{
+  log_topic = Topic::CreateTopic<LogData>("/xr/log", nullptr, true, false, false);
+
+  auto log_cb = LibXR::Topic::Callback::Create(OnLogMessage, log_topic);
+  log_topic.RegisterCallback(log_cb);
+
+  initialized_ = true;
+}
+
+void Logger::PublishToTopic(LogData& data) { log_topic.Publish(data); }

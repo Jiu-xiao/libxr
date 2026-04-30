@@ -251,7 +251,6 @@ enum class LogLevel : uint8_t
  */
 struct LogData
 {
-  MillisecondTimestamp timestamp;        ///< 时间戳 / Timestamp
   LogLevel level;                        ///< 日志级别 / Log level
   const char* file;                      ///< 文件名指针 / Source file name pointer
   uint32_t line;                         ///< 行号 / Line number
@@ -317,7 +316,6 @@ class Logger
     }
 
     LogData data;
-    data.timestamp = Now();
     data.level = level;
     data.file = file;
     data.line = line;
@@ -337,30 +335,10 @@ class Logger
       UNUSED(written);
     }
 
-    PublishRecord(data);
+    PublishToTopic(data);
   }
-  /**
-   * @brief 打印日志到终端 / Print log to terminal
-   * @param data 日志数据 / Log data
-   */
-  static void PrintToTerminal(const LogData& data);
 
-  /**
-   * @brief 根据日志级别获取显示颜色 / Get color code based on log level
-   * @param level 日志级别 / Log level
-   * @return 颜色字符串 / Color string
-   */
-  static const char* GetColor(LogLevel level);
-
-  /**
-   * @brief 将日志级别转换为字符串 / Convert log level to string
-   * @param level 日志级别 / Log level
-   * @return 日志级别字符串 / Log level string
-   */
-  static const char* LevelToString(LogLevel level);
-
-  static MillisecondTimestamp Now();
-  static void PublishRecord(LogData& data);
+  static void PublishToTopic(LogData& data);
   static inline bool initialized_ = false;
 };
 
