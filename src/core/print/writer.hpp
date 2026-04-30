@@ -56,6 +56,9 @@ class Writer
   }
 
  private:
+  template <auto>
+  static constexpr bool ALWAYS_FALSE = false;
+
   /**
    * @brief Emits the stack argument byte blob for one compiled argument list.
    * @brief 为某个已编译参数列表生成栈上参数字节块。
@@ -273,7 +276,7 @@ class Writer
     }
     else
     {
-      static_assert(pack != pack,
+      static_assert(ALWAYS_FALSE<pack>,
                     "LibXR::Print::Writer::PackValue: unsupported packed argument kind");
     }
   }
