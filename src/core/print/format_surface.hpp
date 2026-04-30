@@ -160,7 +160,7 @@ class Format
   }
 
   /// Writes this format into one sink and returns only the sink status. / 将当前格式写入一个输出端，并且只返回 sink 状态
-  template <typename Sink, typename... Args>
+  template <Print::OutputSink Sink, typename... Args>
   [[nodiscard]] ErrorCode WriteTo(Sink& sink, Args&&... args) const
   {
     using Built = Compiled<std::remove_cvref_t<Args>...>;
@@ -177,7 +177,7 @@ namespace LibXR::Print
  *        concrete Args... type list and then executing the shared runtime writer.
  * @brief 写入一份 brace 风格格式包装器：先将其绑定到具体 Args... 类型列表，再执行共享运行期 writer。
  */
-template <Text Source, typename Sink, typename... Args>
+template <Text Source, OutputSink Sink, typename... Args>
 [[nodiscard]] inline ErrorCode Write(Sink& sink, const LibXR::Format<Source>&,
                                      Args&&... args)
 {

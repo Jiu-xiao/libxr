@@ -17,6 +17,7 @@
 #include "format_argument.hpp"
 #include "format_protocol.hpp"
 #include "libxr_def.hpp"
+#include "print_contract.hpp"
 
 namespace LibXR::Print
 {
@@ -39,11 +40,10 @@ class Writer
    * 同时保持运行期字节码流本身仍然严格按源串顺序执行。
    */
   template <typename Sink, typename Format, auto ArgumentOrder, typename... Args>
+  requires OutputSink<Sink> && CompiledFormat<std::remove_cvref_t<Format>>
   [[nodiscard]] static ErrorCode RunArgumentOrder(Sink& sink, const Format&, Args&&... args)
   {
     using Built = std::remove_cvref_t<Format>;
-    CheckSinkContract<Sink>();
-    CheckFormatContract<Built>();
     static_assert(ArgumentOrder.size() == Built::ArgumentList().size(),
                   "LibXR::Print::Writer: argument reorder list must match the "
                   "compiled field count");
@@ -56,50 +56,6 @@ class Writer
   }
 
  private:
-  /**
-   * @brief Shared sink contract used by both direct-order and reordered writes.
-   * @brief direct-order 与 reordered 两条写入路径共用的输出端契约检查。
-   */
-  template <typename Sink>
-  static consteval void CheckSinkContract()
-  {
-    constexpr bool sink_contract =
-        requires(Sink& output, std::string_view text) {
-          { output.Write(text) } -> std::convertible_to<ErrorCode>;
-        };
-    static_assert(sink_contract,
-                  "LibXR::Print::Writer: sink must provide "
-                  "Write(std::string_view) -> ErrorCode");
-  }
-
-  /**
-   * @brief Shared compiled-format contract used by every runtime entrypoint.
-   * @brief 所有运行期入口共用的编译格式契约检查。
-   */
-  template <typename Built>
-  static consteval void CheckFormatContract()
-  {
-    constexpr bool format_contract =
-        requires {
-          typename std::remove_cvref_t<decltype(Built::Codes())>::value_type;
-          typename std::remove_cvref_t<decltype(Built::ArgumentList())>::value_type;
-          { Built::Codes().data() } -> std::convertible_to<const uint8_t*>;
-          { Built::Codes().size() } -> std::convertible_to<size_t>;
-          { Built::ArgumentList().size() } -> std::convertible_to<size_t>;
-          { Built::Profile() } -> std::convertible_to<FormatProfile>;
-        } && requires {
-          requires(std::same_as<
-                   typename std::remove_cvref_t<decltype(Built::Codes())>::value_type,
-                   uint8_t>);
-          requires(std::same_as<typename std::remove_cvref_t<
-                                    decltype(Built::ArgumentList())>::value_type,
-                                FormatArgumentInfo>);
-        };
-    static_assert(format_contract,
-                  "LibXR::Print::Writer: format must expose Codes() bytes and "
-                  "ArgumentList() metadata plus Profile()");
-  }
-
   /**
    * @brief Emits the stack argument byte blob for one compiled argument list.
    * @brief 为某个已编译参数列表生成栈上参数字节块。
@@ -1113,17 +1069,17 @@ class Writer
   class CodeReader;
   class ArgumentReader;
 
-  template <typename Sink, FormatProfile Profile>
+  template <OutputSink Sink, FormatProfile Profile>
   class Executor;
 
-  template <typename Sink, FormatProfile Profile>
+  template <OutputSink Sink, FormatProfile Profile>
   [[nodiscard]] __attribute__((noinline)) static ErrorCode Execute(
       Sink& sink, const uint8_t* codes, const uint8_t* args)
   {
     return Executor<Sink, Profile>(sink, codes, args).Run();
   }
 
-  template <typename Sink, auto ArgumentInfoList, auto ArgumentOrder,
+  template <OutputSink Sink, auto ArgumentInfoList, auto ArgumentOrder,
             FormatProfile Profile, typename... Args>
   [[nodiscard]] __attribute__((noinline)) static ErrorCode RunTaggedArgumentOrder(
       Sink& sink, const uint8_t* codes, Args&&... args)
@@ -1240,7 +1196,7 @@ class Writer::ArgumentReader
  * @brief Per-sink bytecode executor specialized by the compiled format profile.
  * @brief 按编译格式 profile 特化的按输出端类型区分字节码执行器。
  */
-template <typename Sink, FormatProfile Profile>
+template <OutputSink Sink, FormatProfile Profile>
 class Writer::Executor
 {
  public:
