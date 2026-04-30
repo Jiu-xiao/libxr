@@ -21,6 +21,7 @@ set(XRUSB_INCLUDE_DIRS
   ${CMAKE_CURRENT_LIST_DIR}/device/gsusb
   ${CMAKE_CURRENT_LIST_DIR}/device/hid
   ${CMAKE_CURRENT_LIST_DIR}/device/uac
+  ${CMAKE_CURRENT_LIST_DIR}/device/uvc
 )
 
 target_include_directories(${PROJECT_NAME}
