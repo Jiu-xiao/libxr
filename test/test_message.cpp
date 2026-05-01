@@ -71,6 +71,29 @@ void test_message()
 
   ASSERT(msg[1] == msg[0]);
 
+  msg[0] = 48.48;
+  topic.Publish(msg[0]);
+  topic.DumpData(packed_data);
+  msg[1] = -1.0f;
+  msg[3] = -1.0f;
+  cb_in_isr = false;
+  ASSERT(topic_server.ParseDataFromCallback(LibXR::ConstRawData(packed_data), true) == 1);
+  ASSERT(msg[1] == msg[0]);
+  ASSERT(msg[3] == msg[0]);
+  ASSERT(cb_in_isr);
+
+  msg[0] = 56.56;
+  topic.Publish(msg[0]);
+  topic.DumpData(packed_data);
+  msg[1] = -1.0f;
+  msg[3] = -1.0f;
+  cb_in_isr = true;
+  ASSERT(topic_server.ParseDataFromCallback(LibXR::ConstRawData(packed_data), false) ==
+         1);
+  ASSERT(msg[1] == msg[0]);
+  ASSERT(msg[3] == msg[0]);
+  ASSERT(!cb_in_isr);
+
   msg[0] = 64.64;
   topic.Publish(msg[0]);
   topic.DumpData(packed_data);
@@ -121,9 +144,9 @@ void test_message()
 
   auto unknown_topic_packet = packed_data;
   unknown_topic_packet.raw.header_.topic_name_crc32 ^= 0x13572468;
-  unknown_topic_packet.raw.header_.pack_header_crc8 = LibXR::CRC8::Calculate(
-      &unknown_topic_packet.raw,
-      sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  unknown_topic_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&unknown_topic_packet.raw,
+                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
   unknown_topic_packet.crc8_ =
       LibXR::CRC8::Calculate(&unknown_topic_packet, PACKET_SIZE - sizeof(uint8_t));
   msg[1] = -1.0f;

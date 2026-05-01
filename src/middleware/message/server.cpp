@@ -21,6 +21,16 @@ void Topic::Server::Register(TopicHandle topic)
 
 size_t Topic::Server::ParseData(ConstRawData data)
 {
+  return ParseDataRaw(data, false, false);
+}
+
+size_t Topic::Server::ParseDataFromCallback(ConstRawData data, bool in_isr)
+{
+  return ParseDataRaw(data, true, in_isr);
+}
+
+size_t Topic::Server::ParseDataRaw(ConstRawData data, bool from_callback, bool in_isr)
+{
   size_t count = 0;
 
   /* Preserve legacy backpressure behavior: if the parser queue is full, this batch is
@@ -41,7 +51,7 @@ size_t Topic::Server::ParseData(ConstRawData data)
 
     if (status_ == Status::WAIT_DATA_CRC)
     {
-      switch (ReadPayload())
+      switch (ReadPayload(from_callback, in_isr))
       {
         case ParseResult::NEED_MORE:
           return count;
@@ -108,7 +118,7 @@ bool Topic::Server::ReadHeader()
   return true;
 }
 
-Topic::Server::ParseResult Topic::Server::ReadPayload()
+Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool in_isr)
 {
   if (queue_.Size() < data_len_ + sizeof(uint8_t))
   {
@@ -129,7 +139,15 @@ Topic::Server::ParseResult Topic::Server::ReadPayload()
   {
     data_len_ = current_topic_->data_.max_length;
   }
-  Topic(current_topic_).Publish(data, data_len_);
+  auto topic = Topic(current_topic_);
+  if (from_callback)
+  {
+    topic.PublishFromCallback(data, data_len_, in_isr);
+  }
+  else
+  {
+    topic.Publish(data, data_len_);
+  }
   ResetParser();
   return ParseResult::DELIVERED;
 }

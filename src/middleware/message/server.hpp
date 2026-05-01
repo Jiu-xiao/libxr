@@ -61,6 +61,26 @@ class Topic::Server
    */
   size_t ParseData(ConstRawData data);
 
+  /**
+   * @brief  在回调函数中解析接收到的数据
+   *         Parses received data in a callback
+   * @param  data 接收到的原始数据 Received raw data
+   * @param  in_isr 当前回调是否运行在中断上下文 Whether the callback runs in ISR
+   * @return 接收到的话题数量 Received topic count
+   *
+   * @note 解析本身仍使用构造时分配的固定队列和缓冲区；成功解析出的 topic
+   *       会通过 Topic::PublishFromCallback() 同步分发，使订阅者收到正确的
+   *       callback/ISR 语义。
+   *       Parsing still uses the fixed queue and buffer allocated by the constructor;
+   *       successfully parsed topics are synchronously dispatched through
+   *       Topic::PublishFromCallback(), preserving callback/ISR semantics for
+   *       subscribers.
+   * @note 注册到该 Server 的 topic 必须满足 Topic::PublishFromCallback() 的限制。
+   *       Topics registered to this Server must satisfy Topic::PublishFromCallback()
+   *       constraints.
+   */
+  size_t ParseDataFromCallback(ConstRawData data, bool in_isr);
+
  private:
   enum class ParseResult : uint8_t
   {
@@ -69,9 +89,10 @@ class Topic::Server
     DELIVERED
   };
 
+  size_t ParseDataRaw(ConstRawData data, bool from_callback, bool in_isr);
   bool SyncToPacketStart();
   bool ReadHeader();
-  ParseResult ReadPayload();
+  ParseResult ReadPayload(bool from_callback, bool in_isr);
   void ResetParser();
 
   Status status_ =
