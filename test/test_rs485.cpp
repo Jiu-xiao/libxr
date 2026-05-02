@@ -49,7 +49,7 @@ void test_rs485()
   LibXR::RS485::Configuration config;
   config.baudrate = 1000000;
   config.parity = LibXR::UART::Parity::EVEN;
-  config.data_bits = 9;
+  config.data_bits = 8;
   config.stop_bits = 2;
   config.tx_active_level = true;
   config.assert_time_us = 2;
@@ -57,7 +57,7 @@ void test_rs485()
   ASSERT(bus.SetConfig(config) == LibXR::ErrorCode::OK);
   ASSERT(bus.config_.baudrate == 1000000);
   ASSERT(bus.config_.parity == LibXR::UART::Parity::EVEN);
-  ASSERT(bus.config_.data_bits == 9);
+  ASSERT(bus.config_.data_bits == 8);
   ASSERT(bus.config_.stop_bits == 2);
   ASSERT(bus.config_.tx_active_level == true);
   ASSERT(bus.config_.assert_time_us == 2);
@@ -108,14 +108,35 @@ void test_rs485()
       },
       reinterpret_cast<void*>(0));
 
-  bus.Register(wildcard_cb);
-  const uint8_t pattern[] = {0x12, 0x03};
-  bus.Register(pattern_cb, LibXR::RS485::Filter{.offset = 2, .data = {pattern, 2}});
-  const uint8_t masked_data[] = {0xA0};
-  const uint8_t masked_mask[] = {0xF0};
-  bus.Register(masked_cb,
-               LibXR::RS485::Filter{
-                   .offset = 0, .data = {masked_data, 1}, .mask = {masked_mask, 1}});
+  ASSERT(bus.Register(wildcard_cb) == LibXR::ErrorCode::OK);
+  uint8_t pattern[] = {0x12, 0x03};
+  ASSERT(bus.Register(pattern_cb,
+                      LibXR::RS485::Filter{.offset = 2, .data = {pattern, 2}}) ==
+         LibXR::ErrorCode::OK);
+  uint8_t masked_data[] = {0xA0};
+  uint8_t masked_mask[] = {0xF0};
+  ASSERT(bus.Register(masked_cb,
+                      LibXR::RS485::Filter{.offset = 0,
+                                           .data = {masked_data, 1},
+                                           .mask = {masked_mask, 1}}) ==
+         LibXR::ErrorCode::OK);
+  const uint8_t bad_mask[] = {0xFF, 0xFF};
+  ASSERT(bus.Register(masked_cb,
+                      LibXR::RS485::Filter{.offset = 0,
+                                           .data = {masked_data, 1},
+                                           .mask = {bad_mask, 2}}) ==
+         LibXR::ErrorCode::ARG_ERR);
+  ASSERT(bus.Register(masked_cb,
+                      LibXR::RS485::Filter{
+                          .offset = 0, .data = LibXR::ConstRawData(nullptr, 1)}) ==
+         LibXR::ErrorCode::ARG_ERR);
+  ASSERT(bus.Register(masked_cb,
+                      LibXR::RS485::Filter{
+                          .offset = 0, .mask = LibXR::ConstRawData(nullptr, 1)}) ==
+         LibXR::ErrorCode::ARG_ERR);
+  pattern[0] = 0x00;
+  masked_data[0] = 0x00;
+  masked_mask[0] = 0x00;
 
   const uint8_t raw[] = {0xAA, 0x55, 0x12, 0x03, 0x00};
   bus.Publish({raw, sizeof(raw)}, true);

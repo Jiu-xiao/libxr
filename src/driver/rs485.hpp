@@ -30,6 +30,8 @@ class RS485
   {
     uint32_t baudrate = 115200;
     UART::Parity parity = UART::Parity::NO_PARITY;
+    /// Byte-frame mode supports 5..8 data bits. 9-bit address/word modes need a
+    /// derived-driver API because `Write(ConstRawData)` is byte-oriented.
     uint8_t data_bits = 8;
     uint8_t stop_bits = 1;
     bool tx_active_level = true;
@@ -44,6 +46,9 @@ class RS485
    * @struct Filter
    * @brief Match a byte pattern at a fixed raw-frame offset.
    *        在原始帧固定偏移处匹配一段字节。
+   *
+   * Registered subscriptions are permanent. Register() copies pattern/mask data
+   * into permanent subscription storage and does not provide unregister.
    */
   struct Filter
   {
@@ -79,20 +84,23 @@ class RS485
   virtual void Reset() = 0;
 
   /**
-   * @brief Register a parsed-frame callback. / 注册已解析帧回调。
+   * @brief Register a raw-frame callback. / 注册原始帧回调。
    */
-  void Register(Callback cb);
+  ErrorCode Register(Callback cb);
 
   /**
-   * @brief Register a parsed-frame callback with a filter.
-   *        按过滤器注册已解析帧回调。
+   * @brief Register a raw-frame callback with a filter.
+   *        按过滤器注册原始帧回调。
    */
-  void Register(Callback cb, const Filter& filter);
+  ErrorCode Register(Callback cb, const Filter& filter);
 
  protected:
   /**
    * @brief Dispatch one raw frame to matching subscribers.
    *        将一帧原始数据分发给匹配订阅者。
+   *
+   * `frame` is only valid during callback execution unless the derived driver
+   * documents a longer lifetime.
    */
   void OnFrame(ConstRawData frame, bool in_isr);
 

@@ -37,22 +37,23 @@ ErrorCode STM32RS485::SetConfig(const Configuration& config)
   {
     return ErrorCode::BUSY;
   }
-
-  HAL_UART_DeInit(uart_handle_);
-  uart_handle_->Init.BaudRate = config.baudrate;
+  if (config.data_bits < 5 || config.data_bits > 8)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
 
   bool ok = true;
+  uint32_t parity = UART_PARITY_NONE;
+  uint32_t word_length = UART_WORDLENGTH_8B;
+  uint32_t stop_bits = UART_STOPBITS_1;
+
   switch (config.parity)
   {
     case UART::Parity::NO_PARITY:
-      uart_handle_->Init.Parity = UART_PARITY_NONE;
+      parity = UART_PARITY_NONE;
       if (config.data_bits == 8)
       {
-        uart_handle_->Init.WordLength = UART_WORDLENGTH_8B;
-      }
-      else if (config.data_bits == 9)
-      {
-        uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
+        word_length = UART_WORDLENGTH_8B;
       }
       else
       {
@@ -60,15 +61,15 @@ ErrorCode STM32RS485::SetConfig(const Configuration& config)
       }
       break;
     case UART::Parity::EVEN:
-      uart_handle_->Init.Parity = UART_PARITY_EVEN;
+      parity = UART_PARITY_EVEN;
       if (config.data_bits == 8)
       {
-        uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
+        word_length = UART_WORDLENGTH_9B;
       }
 #ifdef UART_WORDLENGTH_8B
       else if (config.data_bits == 7)
       {
-        uart_handle_->Init.WordLength = UART_WORDLENGTH_8B;
+        word_length = UART_WORDLENGTH_8B;
       }
 #endif
       else
@@ -77,15 +78,15 @@ ErrorCode STM32RS485::SetConfig(const Configuration& config)
       }
       break;
     case UART::Parity::ODD:
-      uart_handle_->Init.Parity = UART_PARITY_ODD;
+      parity = UART_PARITY_ODD;
       if (config.data_bits == 8)
       {
-        uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
+        word_length = UART_WORDLENGTH_9B;
       }
 #ifdef UART_WORDLENGTH_8B
       else if (config.data_bits == 7)
       {
-        uart_handle_->Init.WordLength = UART_WORDLENGTH_8B;
+        word_length = UART_WORDLENGTH_8B;
       }
 #endif
       else
@@ -101,10 +102,10 @@ ErrorCode STM32RS485::SetConfig(const Configuration& config)
   switch (config.stop_bits)
   {
     case 1:
-      uart_handle_->Init.StopBits = UART_STOPBITS_1;
+      stop_bits = UART_STOPBITS_1;
       break;
     case 2:
-      uart_handle_->Init.StopBits = UART_STOPBITS_2;
+      stop_bits = UART_STOPBITS_2;
       break;
     default:
       ok = false;
@@ -116,8 +117,23 @@ ErrorCode STM32RS485::SetConfig(const Configuration& config)
     return ErrorCode::NOT_SUPPORT;
   }
 
+  const auto old_init = uart_handle_->Init;
+  (void)HAL_UART_Abort(uart_handle_);
+  HAL_UART_DeInit(uart_handle_);
+
+  uart_handle_->Init.BaudRate = config.baudrate;
+  uart_handle_->Init.Parity = parity;
+  uart_handle_->Init.WordLength = word_length;
+  uart_handle_->Init.StopBits = stop_bits;
+
   if (HAL_UART_Init(uart_handle_) != HAL_OK)
   {
+    uart_handle_->Init = old_init;
+    if (HAL_UART_Init(uart_handle_) == HAL_OK)
+    {
+      SetReceiveDirection();
+      ArmReceive();
+    }
     return ErrorCode::INIT_ERR;
   }
 
@@ -129,6 +145,11 @@ ErrorCode STM32RS485::SetConfig(const Configuration& config)
 
 ErrorCode STM32RS485::Write(ConstRawData frame, WriteOperation& op, bool in_isr)
 {
+  if (in_isr && op.type == WriteOperation::OperationType::BLOCK)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
   if (frame.size_ == 0)
   {
     if (op.type != WriteOperation::OperationType::BLOCK)
@@ -142,6 +163,11 @@ ErrorCode STM32RS485::Write(ConstRawData frame, WriteOperation& op, bool in_isr)
       frame.size_ > UINT16_MAX)
   {
     return ErrorCode::SIZE_ERR;
+  }
+
+  if (config_.data_bits > 8)
+  {
+    return ErrorCode::NOT_SUPPORT;
   }
 
   if (tx_busy_.TestAndSet())
@@ -169,6 +195,7 @@ ErrorCode STM32RS485::Write(ConstRawData frame, WriteOperation& op, bool in_isr)
     Timebase::DelayMicroseconds(config_.assert_time_us);
   }
 
+  op.MarkAsRunning();
   const HAL_StatusTypeDef st =
       HAL_UART_Transmit_DMA(uart_handle_, static_cast<uint8_t*>(tx_buffer_.addr_),
                             static_cast<uint16_t>(frame.size_));
@@ -183,10 +210,13 @@ ErrorCode STM32RS485::Write(ConstRawData frame, WriteOperation& op, bool in_isr)
     write_op_ = WriteOperation();
     SetReceiveDirection();
     ArmReceive();
+    if (op.type != WriteOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::BUSY);
+    }
     return ErrorCode::BUSY;
   }
 
-  op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
     return block_wait_.Wait(op.data.sem_info.timeout);

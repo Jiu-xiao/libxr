@@ -4,6 +4,43 @@ using namespace LibXR;
 
 template class LibXR::Callback<ConstRawData>;
 
+namespace
+{
+
+ConstRawData CopyRawData(ConstRawData data)
+{
+  if (data.addr_ == nullptr || data.size_ == 0)
+  {
+    return {};
+  }
+
+  auto* copy = new uint8_t[data.size_];
+  Memory::FastCopy(copy, data.addr_, data.size_);
+  return {copy, data.size_};
+}
+
+RS485::Filter CopyFilter(const RS485::Filter& filter)
+{
+  return RS485::Filter{filter.offset, CopyRawData(filter.data), CopyRawData(filter.mask)};
+}
+
+bool IsFilterValid(const RS485::Filter& filter)
+{
+  if (filter.data.addr_ == nullptr && filter.data.size_ != 0)
+  {
+    return false;
+  }
+
+  if (filter.mask.addr_ == nullptr)
+  {
+    return filter.mask.size_ == 0;
+  }
+
+  return filter.mask.size_ == 0 || filter.mask.size_ == filter.data.size_;
+}
+
+}  // namespace
+
 bool RS485::Filter::Match(ConstRawData frame) const
 {
   if (data.addr_ == nullptr || data.size_ == 0)
@@ -38,13 +75,18 @@ bool RS485::Filter::Match(ConstRawData frame) const
   return true;
 }
 
-void RS485::Register(Callback cb) { Register(cb, Filter{}); }
+ErrorCode RS485::Register(Callback cb) { return Register(cb, Filter{}); }
 
-void RS485::Register(Callback cb, const Filter& filter)
+ErrorCode RS485::Register(Callback cb, const Filter& filter)
 {
-  auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-      LockFreeList::Node<Subscription>(Subscription{filter, cb});
+  if (!IsFilterValid(filter))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  auto node = new LockFreeList::Node<Subscription>(Subscription{CopyFilter(filter), cb});
   subscriber_list_.Add(*node);
+  return ErrorCode::OK;
 }
 
 void RS485::OnFrame(ConstRawData frame, bool in_isr)
