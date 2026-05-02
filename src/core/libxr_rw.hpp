@@ -56,7 +56,7 @@ class Operation
 
   /// @brief Default constructor, initializes with NONE type.
   /// @brief 默认构造函数，初始化为NONE类型。
-  Operation() : type(OperationType::NONE) { Memory::FastSet(&data, 0, sizeof(data)); }
+  Operation() : data{nullptr}, type(OperationType::NONE) {}
 
   /**
    * @brief Constructs a blocking operation with a semaphore and timeout.
@@ -69,30 +69,36 @@ class Operation
    * @note sem 在任一时刻只能服务一个存活中的 BLOCK 调用；
    *       只有在该调用返回后才能复用。
    */
-  Operation(Semaphore& sem, uint32_t timeout = UINT32_MAX) : type(OperationType::BLOCK)
-  {
-    data.sem_info.sem = &sem;
-    data.sem_info.timeout = timeout;
-  }
+  Operation(Semaphore& sem, uint32_t timeout = UINT32_MAX)
+      : data{.sem_info = {&sem, timeout}}, type(OperationType::BLOCK)
+  {}
 
   /**
    * @brief Constructs a callback-based operation.
    * @brief 构造基于回调的操作。
    * @param callback Callback function reference.
    */
-  Operation(Callback& callback) : type(OperationType::CALLBACK)
-  {
-    data.callback = &callback;
-  }
+  Operation(Callback& callback)
+      : data{.callback = &callback}, type(OperationType::CALLBACK)
+  {}
 
   /**
    * @brief Constructs a polling operation.
    * @brief 构造轮询操作。
    * @param status Reference to polling status.
    */
-  Operation(OperationPollingStatus& status) : type(OperationType::POLLING)
+  Operation(OperationPollingStatus& status)
+      : data{.status = &status}, type(OperationType::POLLING)
+  {}
+
+  Operation(const Operation& op) : data{nullptr}, type(OperationType::NONE)
   {
-    data.status = &status;
+    *this = op;
+  }
+
+  Operation(Operation&& op) noexcept : data{nullptr}, type(OperationType::NONE)
+  {
+    *this = std::move(op);
   }
 
   /**
@@ -119,6 +125,7 @@ class Operation
           data.status = op.data.status;
           break;
         case OperationType::NONE:
+          data.callback = nullptr;
           break;
       }
     }
@@ -149,26 +156,11 @@ class Operation
           data.status = op.data.status;
           break;
         case OperationType::NONE:
+          data.callback = nullptr;
           break;
       }
     }
     return *this;
-  }
-
-  /**
-   * @brief 构造一个新的 Operation 对象（初始化操作）。
-   *        Constructs a new Operation object (initialization operation).
-   *
-   * 该构造函数用于初始化一个 Operation 对象，接收一个初始化操作作为参数。
-   * This constructor initializes an Operation object with an initialization operation as
-   * a parameter.
-   */
-  template <
-      typename InitOperation,
-      typename = std::enable_if_t<std::is_same_v<std::decay_t<InitOperation>, Operation>>>
-  Operation(InitOperation&& op)
-  {
-    *this = std::forward<InitOperation>(op);
   }
 
   /**
