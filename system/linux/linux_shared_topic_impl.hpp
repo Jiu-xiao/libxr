@@ -28,7 +28,6 @@
 #include "crc.hpp"
 #include "libxr_def.hpp"
 #include "message.hpp"
-#include "monotonic_time.hpp"
 
 namespace LibXR
 {
