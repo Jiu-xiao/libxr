@@ -2,6 +2,33 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
+struct ByteStablePayload
+{
+  float data[4];
+
+  ByteStablePayload() : data{0.0f, 0.0f, 0.0f, 0.0f} {}
+
+  ByteStablePayload(float a, float b, float c, float d) : data{a, b, c, d} {}
+
+  ByteStablePayload(const ByteStablePayload& other)
+      : data{other.data[0], other.data[1], other.data[2], other.data[3]}
+  {
+  }
+
+  ByteStablePayload& operator=(const ByteStablePayload& other)
+  {
+    data[0] = other.data[0];
+    data[1] = other.data[1];
+    data[2] = other.data[2];
+    data[3] = other.data[3];
+    return *this;
+  }
+};
+
+static_assert(!std::is_trivially_copyable_v<ByteStablePayload>);
+static_assert(std::is_trivially_destructible_v<ByteStablePayload>);
+static_assert(LibXR::TopicPayload<ByteStablePayload>);
+
 void test_message()
 {
   constexpr size_t PACKET_SIZE = LibXR::Topic::PACK_BASE_SIZE + sizeof(double);
@@ -97,6 +124,36 @@ void test_message()
   ASSERT(raw_cb_size == sizeof(msg[0]));
   ASSERT(timestamp_us(raw_cb_timestamp) == timestamp_us(timestamp0));
   ASSERT(!raw_cb_in_isr);
+
+  auto byte_stable_topic =
+      LibXR::Topic::CreateTopic<ByteStablePayload>("byte_stable_tp", &domain, false,
+                                                   true);
+  ByteStablePayload byte_stable_rx;
+  auto byte_stable_suber =
+      LibXR::Topic::SyncSubscriber<ByteStablePayload>(byte_stable_topic,
+                                                      byte_stable_rx);
+  static LibXR::MicrosecondTimestamp byte_stable_view_timestamp;
+  static float byte_stable_view_value = 0.0f;
+  auto byte_stable_cb = LibXR::Topic::Callback::Create(
+      [](bool, void*, const LibXR::Topic::MessageView<ByteStablePayload>& message)
+      {
+        byte_stable_view_timestamp = message.timestamp;
+        byte_stable_view_value = message.data.data[2];
+      },
+      reinterpret_cast<void*>(0));
+  byte_stable_topic.RegisterCallback(byte_stable_cb);
+  ByteStablePayload byte_stable_tx{1.0f, 2.0f, 3.0f, 4.0f};
+  const LibXR::MicrosecondTimestamp byte_stable_timestamp(1501);
+  byte_stable_topic.Publish(byte_stable_tx, byte_stable_timestamp);
+  ASSERT(byte_stable_suber.Wait(10) == LibXR::ErrorCode::OK);
+  ASSERT(byte_stable_rx.data[0] == byte_stable_tx.data[0]);
+  ASSERT(byte_stable_rx.data[1] == byte_stable_tx.data[1]);
+  ASSERT(byte_stable_rx.data[2] == byte_stable_tx.data[2]);
+  ASSERT(byte_stable_rx.data[3] == byte_stable_tx.data[3]);
+  ASSERT(timestamp_us(byte_stable_suber.GetTimestamp()) ==
+         timestamp_us(byte_stable_timestamp));
+  ASSERT(byte_stable_view_value == byte_stable_tx.data[2]);
+  ASSERT(timestamp_us(byte_stable_view_timestamp) == timestamp_us(byte_stable_timestamp));
 
   msg[0] = 32.32;
   msg[3] = -1.0f;

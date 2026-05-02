@@ -28,16 +28,15 @@ namespace LibXR
 template <typename Data>
 concept TopicPayload =
     !std::is_reference_v<Data> && !std::is_const_v<Data> && !std::is_volatile_v<Data> &&
-    std::is_trivially_copyable_v<Data> && std::is_standard_layout_v<Data> &&
-    std::is_default_constructible_v<Data> && std::is_copy_assignable_v<Data>;
+    std::is_object_v<Data> && std::is_default_constructible_v<Data> &&
+    std::is_copy_assignable_v<Data> && std::is_trivially_destructible_v<Data>;
 
 template <typename Data>
 constexpr void CheckTopicPayload()
 {
   static_assert(TopicPayload<Data>,
-                "LibXR::Topic typed payload must be a non-cv, trivially copyable, "
-                "standard-layout, default-constructible, copy-assignable data type. "
-                "Use raw bytes or explicit serialization for complex objects.");
+                "LibXR::Topic typed payload must be a non-cv/ref object type that is "
+                "default-constructible, copy-assignable, and trivially destructible.");
 }
 
 /**
