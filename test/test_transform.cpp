@@ -11,10 +11,33 @@ void test_transform()
   LibXR::Quaternion quat, quat_new;
   double quat_wxyz[4] = {0.1, 0.2, 0.3, 0.4};
   LibXR::Quaternion quat_from_array(quat_wxyz);
+  double rot_row_major[9] = {1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0};
+  double rot_row_major_2d[3][3] = {{1.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}};
   ASSERT(equal(quat_from_array.w(), quat_wxyz[0]) &&
          equal(quat_from_array.x(), quat_wxyz[1]) &&
          equal(quat_from_array.y(), quat_wxyz[2]) &&
          equal(quat_from_array.z(), quat_wxyz[3]));
+  ASSERT(equal(quat_from_array(0), quat_wxyz[1]) &&
+         equal(quat_from_array(1), quat_wxyz[2]) &&
+         equal(quat_from_array(2), quat_wxyz[3]) &&
+         equal(quat_from_array(3), quat_wxyz[0]));
+
+  LibXR::RotationMatrix rot_from_array(rot_row_major);
+  LibXR::RotationMatrix rot_from_2d_array(rot_row_major_2d);
+  ASSERT(equal(rot_from_array(0, 0), 1.0) && equal(rot_from_array(0, 1), 0.0) &&
+         equal(rot_from_array(0, 2), 0.0) && equal(rot_from_array(1, 0), 0.0) &&
+         equal(rot_from_array(1, 1), 0.0) && equal(rot_from_array(1, 2), -1.0) &&
+         equal(rot_from_array(2, 0), 0.0) && equal(rot_from_array(2, 1), 1.0) &&
+         equal(rot_from_array(2, 2), 0.0));
+  ASSERT(equal(rot_from_2d_array(0, 0), rot_from_array(0, 0)) &&
+         equal(rot_from_2d_array(0, 1), rot_from_array(0, 1)) &&
+         equal(rot_from_2d_array(0, 2), rot_from_array(0, 2)) &&
+         equal(rot_from_2d_array(1, 0), rot_from_array(1, 0)) &&
+         equal(rot_from_2d_array(1, 1), rot_from_array(1, 1)) &&
+         equal(rot_from_2d_array(1, 2), rot_from_array(1, 2)) &&
+         equal(rot_from_2d_array(2, 0), rot_from_array(2, 0)) &&
+         equal(rot_from_2d_array(2, 1), rot_from_array(2, 1)) &&
+         equal(rot_from_2d_array(2, 2), rot_from_array(2, 2)));
 
   /* Position */
   rot = eulr.ToRotationMatrix();
@@ -55,6 +78,32 @@ void test_transform()
   quat_new = quat + quat_new;
   ASSERT(equal(quat_new(0), quat(0)) && equal(quat_new(1), quat(1)) &&
          equal(quat_new(2), quat(2)) && equal(quat_new(3), quat(3)));
+
+  Eigen::Quaternion<double> eigen_quat =
+      LibXR::EulerAngle<double>(LibXR::PI / 8, -LibXR::PI / 9, LibXR::PI / 7)
+          .ToQuaternion();
+  LibXR::RotationMatrix rot_from_eigen_quat(eigen_quat);
+  rot_new = eigen_quat;
+  const Eigen::Matrix3d eigen_rot = eigen_quat.toRotationMatrix();
+  ASSERT(equal(rot_from_eigen_quat(0, 0), eigen_rot(0, 0)) &&
+         equal(rot_from_eigen_quat(0, 1), eigen_rot(0, 1)) &&
+         equal(rot_from_eigen_quat(0, 2), eigen_rot(0, 2)) &&
+         equal(rot_from_eigen_quat(1, 0), eigen_rot(1, 0)) &&
+         equal(rot_from_eigen_quat(1, 1), eigen_rot(1, 1)) &&
+         equal(rot_from_eigen_quat(1, 2), eigen_rot(1, 2)) &&
+         equal(rot_from_eigen_quat(2, 0), eigen_rot(2, 0)) &&
+         equal(rot_from_eigen_quat(2, 1), eigen_rot(2, 1)) &&
+         equal(rot_from_eigen_quat(2, 2), eigen_rot(2, 2)));
+  ASSERT(equal(rot_new(0, 0), eigen_rot(0, 0)) && equal(rot_new(0, 1), eigen_rot(0, 1)) &&
+         equal(rot_new(0, 2), eigen_rot(0, 2)) && equal(rot_new(1, 0), eigen_rot(1, 0)) &&
+         equal(rot_new(1, 1), eigen_rot(1, 1)) && equal(rot_new(1, 2), eigen_rot(1, 2)) &&
+         equal(rot_new(2, 0), eigen_rot(2, 0)) && equal(rot_new(2, 1), eigen_rot(2, 1)) &&
+         equal(rot_new(2, 2), eigen_rot(2, 2)));
+  quat_new = quat / eigen_quat;
+  Eigen::Quaternion<double> eigen_div =
+      Eigen::Quaternion<double>(quat) * eigen_quat.conjugate();
+  ASSERT(equal(quat_new.w(), eigen_div.w()) && equal(quat_new.x(), eigen_div.x()) &&
+         equal(quat_new.y(), eigen_div.y()) && equal(quat_new.z(), eigen_div.z()));
 
   /* ZYX Order */
   rot = eulr.ToRotationMatrixZYX();
