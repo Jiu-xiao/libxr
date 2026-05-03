@@ -251,8 +251,8 @@ class STM32CANFD : public FDCAN
     return free;
   }
 
-  static inline void BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h);
-  static inline void BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h);
+  void BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h);
+  void BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h);
 
   void TxService();
 
@@ -262,6 +262,9 @@ class STM32CANFD : public FDCAN
   FDCAN_HandleTypeDef* hcan_;
 
   stm32_fdcan_id_t id_;
+  uint32_t tx_complete_mask_;
+  bool fd_brs_;
+  bool fd_esi_passive_;
   LockFreePool<ClassicPack> tx_pool_;
   LockFreePool<FDPack> tx_pool_fd_;
 

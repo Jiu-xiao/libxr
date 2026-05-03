@@ -42,6 +42,21 @@ stm32_fdcan_id_t STM32_FDCAN_GetID(FDCAN_GlobalTypeDef* addr)
   }
 }
 
+static uint32_t TxLocationMask(uint32_t tx_elements)
+{
+  if (tx_elements == 0u)
+  {
+    return 0u;
+  }
+
+  if (tx_elements >= 32u)
+  {
+    return 0xFFFFFFFFu;
+  }
+
+  return (1u << tx_elements) - 1u;
+}
+
 static inline uint32_t BytesToDlc(uint32_t n)
 {
   if (n <= 8U)
@@ -111,7 +126,7 @@ static inline uint32_t DlcToBytes(uint32_t dlc)
   }
 }
 
-inline void STM32CANFD::BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h)
+void STM32CANFD::BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h)
 {
   const bool is_ext = (p.type == Type::EXTENDED) || (p.type == Type::REMOTE_EXTENDED);
   const bool is_rtr =
@@ -124,7 +139,7 @@ inline void STM32CANFD::BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDe
   uint32_t bytes = (p.dlc <= 8u) ? p.dlc : 8u;
   h.DataLength = BytesToDlc(bytes);
 
-  h.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
+  h.ErrorStateIndicator = fd_esi_passive_ ? FDCAN_ESI_PASSIVE : FDCAN_ESI_ACTIVE;
   h.BitRateSwitch = FDCAN_BRS_OFF;
   h.FDFormat = FDCAN_CLASSIC_CAN;
 
@@ -132,7 +147,7 @@ inline void STM32CANFD::BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDe
   h.MessageMarker = 0x01;
 }
 
-inline void STM32CANFD::BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h)
+void STM32CANFD::BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h)
 {
   h.Identifier = p.id;
 
@@ -156,8 +171,8 @@ inline void STM32CANFD::BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h)
   ASSERT(p.len <= 64u);
   h.DataLength = BytesToDlc(p.len);
 
-  h.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-  h.BitRateSwitch = FDCAN_BRS_ON;
+  h.ErrorStateIndicator = fd_esi_passive_ ? FDCAN_ESI_PASSIVE : FDCAN_ESI_ACTIVE;
+  h.BitRateSwitch = fd_brs_ ? FDCAN_BRS_ON : FDCAN_BRS_OFF;
   h.FDFormat = FDCAN_FD_CAN;
 
   h.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
@@ -168,6 +183,9 @@ STM32CANFD::STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size)
     : FDCAN(),
       hcan_(hcan),
       id_(STM32_FDCAN_GetID(hcan->Instance)),
+      tx_complete_mask_(TxLocationMask(GetTxFifoTotalElements(hcan))),
+      fd_brs_(true),
+      fd_esi_passive_(false),
       tx_pool_(queue_size),
       tx_pool_fd_(queue_size)
 {
@@ -243,7 +261,10 @@ ErrorCode STM32CANFD::Init(void)
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_ERROR_WARNING, 0);
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_BUS_OFF, 0);
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_FIFO_EMPTY, 0);
-  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_COMPLETE, 0xFFFFFFFF);
+  if (tx_complete_mask_ != 0u)
+  {
+    HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_COMPLETE, tx_complete_mask_);
+  }
 
   return ErrorCode::OK;
 }
@@ -277,7 +298,9 @@ ErrorCode STM32CANFD::SetConfig(const CAN::Configuration& cfg)
   fd_cfg.sample_point = cfg.sample_point;
   fd_cfg.bit_timing = cfg.bit_timing;
   fd_cfg.mode = cfg.mode;
-  // data_timing / fd_mode 全部置 0 → “保持原值”
+  fd_cfg.fd_mode.brs = fd_brs_;
+  fd_cfg.fd_mode.esi = fd_esi_passive_;
+  // data_timing 保持原值，FD 发送标志沿用当前驱动状态。
   return SetConfig(fd_cfg);
 }
 
@@ -585,8 +608,8 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
   (void)dbt;
 #endif  // FDCAN_DBTP_DBRP_Msk
 
-  // 数据相位 FDMode：这里不动寄存器，只保留在上层语义中使用
-  (void)cfg.fd_mode;
+  fd_brs_ = cfg.fd_mode.brs;
+  fd_esi_passive_ = cfg.fd_mode.esi;
 
   // 重新启动 FDCAN
   if (HAL_FDCAN_Start(hcan_) != HAL_OK)
@@ -600,7 +623,10 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_RX_FIFO1_NEW_MESSAGE, 0);
   HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_FIFO_EMPTY, 0);
-  HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_COMPLETE, 0xFFFFFFFF);
+  if (tx_complete_mask_ != 0u)
+  {
+    HAL_FDCAN_ActivateNotification(hcan_, FDCAN_IT_TX_COMPLETE, tx_complete_mask_);
+  }
 
   return ErrorCode::OK;
 }
@@ -649,8 +675,8 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
 
 void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
 {
-  if (HAL_FDCAN_GetRxMessage(hcan_, fifo, &rx_buff_.header, rx_buff_.pack_fd.data) ==
-      HAL_OK)
+  while (HAL_FDCAN_GetRxMessage(hcan_, fifo, &rx_buff_.header, rx_buff_.pack_fd.data) ==
+         HAL_OK)
   {
     if (rx_buff_.header.FDFormat == FDCAN_FD_CAN)
     {

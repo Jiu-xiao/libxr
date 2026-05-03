@@ -649,6 +649,11 @@ extern "C" void HAL_CAN_ErrorCallback(CAN_HandleTypeDef* hcan)
   }
 
   HAL_CAN_ResetError(hcan);
+
+  if (can)
+  {
+    can->TxService();
+  }
 }
 
 extern "C" void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef* hcan)
