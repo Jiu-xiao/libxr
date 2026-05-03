@@ -909,7 +909,10 @@ class Quaternion : public Eigen::Quaternion<Scalar>
                                              std::is_same<T, float>::value ||
                                              std::is_same<T, double>::value,
                                          int> = 0>
-  Quaternion(const T (&data)[4]) : Eigen::Quaternion<Scalar>(data)
+  Quaternion(const T (&data)[4])
+      : Eigen::Quaternion<Scalar>(
+            static_cast<Scalar>(data[0]), static_cast<Scalar>(data[1]),
+            static_cast<Scalar>(data[2]), static_cast<Scalar>(data[3]))
   {
   }
 

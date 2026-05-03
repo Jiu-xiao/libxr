@@ -9,6 +9,12 @@ void test_transform()
   LibXR::EulerAngle eulr = {LibXR::PI / 12, LibXR::PI / 6, LibXR::PI / 4}, eulr_new;
   LibXR::RotationMatrix rot, rot_new;
   LibXR::Quaternion quat, quat_new;
+  double quat_wxyz[4] = {0.1, 0.2, 0.3, 0.4};
+  LibXR::Quaternion quat_from_array(quat_wxyz);
+  ASSERT(equal(quat_from_array.w(), quat_wxyz[0]) &&
+         equal(quat_from_array.x(), quat_wxyz[1]) &&
+         equal(quat_from_array.y(), quat_wxyz[2]) &&
+         equal(quat_from_array.z(), quat_wxyz[3]));
 
   /* Position */
   rot = eulr.ToRotationMatrix();
