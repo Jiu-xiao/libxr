@@ -50,8 +50,19 @@ void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp
     case SuberType::SYNC:
     {
       auto sync = static_cast<SyncBlock*>(&block);
+      uint32_t expected = SyncBlock::WAITING;
+      auto wake_waiter = sync->wait_state.compare_exchange_strong(
+          expected, SyncBlock::WAIT_CLAIMED, std::memory_order_acq_rel,
+          std::memory_order_acquire);
+
+      if (!wake_waiter)
+      {
+        break;
+      }
+
       LibXR::Memory::FastCopy(sync->buff.addr_, data.addr_, data.size_);
       sync->timestamp = timestamp;
+
       if (from_callback)
       {
         sync->sem.PostFromCallback(in_isr);
