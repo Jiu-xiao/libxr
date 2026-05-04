@@ -10,6 +10,11 @@ typedef SemaphoreHandle_t libxr_mutex_handle;
 typedef SemaphoreHandle_t libxr_semaphore_handle;
 typedef TaskHandle_t libxr_thread_handle;
 
+static_assert(sizeof(TickType_t) >= sizeof(uint32_t),
+              "FreeRTOS TickType_t must hold LibXR millisecond timestamps");
+
+extern uint32_t libxr_freertos_timebase_tick_offset;
+
 /**
  * @brief  平台初始化函数
  *         Platform initialization function
