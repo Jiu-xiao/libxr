@@ -196,6 +196,9 @@ void SleepUntilNanoseconds(uint64_t deadline_ns)
 void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
                          uint32_t timer_stack_depth, double sim_flow_rate)
 {
+  // Thread/STDIO 初始化路径可能触发 XR_LOG，日志时间戳依赖全局 Timebase。
+  static LibXR::WebotsTimebase timebase;
+
   LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
   LibXR::Timer::stack_depth_ = timer_stack_depth;
   auto write_fun = [](WritePort& port, bool)
@@ -298,8 +301,6 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
   webots_timebase_thread.Create<void*>(
       reinterpret_cast<void*>(0), webots_timebase_thread_fun, "webots_timebase",
       1024, Thread::Priority::REALTIME);
-
-  static LibXR::WebotsTimebase timebase;
 }
 
 LibXR::WebotsRealtimeThreadRegistration* LibXR::WebotsRegisterRealtimeThread()
