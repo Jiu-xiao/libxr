@@ -1896,7 +1896,13 @@ class LinuxSharedTopic : public Topic
 
         if (mode == LinuxSharedSubscriberMode::BROADCAST_DROP_OLD)
         {
-          if (DropDescriptor(i) != ErrorCode::OK)
+          const ErrorCode drop_ans = DropDescriptor(i);
+          if (drop_ans == ErrorCode::EMPTY && QueueHasSpace(i))
+          {
+            // 消费者可能在 QueueHasSpace() 和 DropDescriptor() 之间弹走旧描述符。
+            // 此时队列已经有空位，发布者继续写入即可，不能把竞态误报成 FULL。
+          }
+          else if (drop_ans != ErrorCode::OK)
           {
             header_->publish_failures.fetch_add(1, std::memory_order_relaxed);
             data.Reset();
