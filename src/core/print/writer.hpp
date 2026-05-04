@@ -62,6 +62,8 @@ class Writer
    */
   static constexpr uint8_t unspecified_precision = 0xFF;
   static constexpr size_t float_buffer_capacity = 512;
+  template <FormatPackKind K>
+  static constexpr bool dependent_false_v = false;
   /// Largest finite float32 value whose integer part still fits in uint32_t. / 整数部分仍可放入 uint32_t 的最大 float32 值上界
   static constexpr float f32_u32_overflow_limit = 4294967296.0f;
   /// Decimal scales used by the narrow float32 fixed-precision fast path. / 窄 float32 定点快路径使用的十进制缩放表
@@ -273,7 +275,7 @@ class Writer
     }
     else
     {
-      static_assert(pack != pack,
+      static_assert(dependent_false_v<pack>,
                     "LibXR::Print::Writer::PackValue: unsupported packed argument kind");
     }
   }
