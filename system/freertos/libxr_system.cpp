@@ -18,11 +18,7 @@ extern "C" __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t
   ASSERT(false);
 }
 
-// NOLINTNEXTLINE
-extern "C" __attribute__((weak)) BaseType_t xTaskCatchUpTicks(TickType_t)
-{
-  return pdFALSE;
-}
+uint32_t LibXR::libxr_freertos_timebase_tick_offset = 0;
 
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
@@ -35,13 +31,10 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
   LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
   LibXR::Timer::stack_depth_ = timer_stack_depth;
 
-  int64_t time_need_to_catch_up = static_cast<int64_t>(Timebase::GetMilliseconds()) -
-                                  static_cast<int64_t>(xTaskGetTickCount());
+  uint32_t rtos_tick = static_cast<uint32_t>(xTaskGetTickCount());
+  uint32_t timebase_tick = static_cast<uint32_t>(Timebase::GetMilliseconds());
 
-  if (time_need_to_catch_up > 0)
-  {
-    xTaskCatchUpTicks(time_need_to_catch_up);
-  }
+  libxr_freertos_timebase_tick_offset = rtos_tick - timebase_tick;
 }
 
 #ifndef ESP_PLATFORM

@@ -2,6 +2,7 @@
 
 #include "libxr_system.hpp"
 #include "libxr_time.hpp"
+#include "timebase.hpp"
 
 #define LIBXR_PRIORITY_STEP ((configMAX_PRIORITIES - 1) / 5)
 
@@ -110,14 +111,20 @@ class Thread
    *         Gets the current system time in milliseconds
    * @return 当前时间（毫秒） Current time in milliseconds
    */
-  static uint32_t GetTime();
+  static uint32_t GetTime()
+  {
+    return static_cast<uint32_t>(Timebase::GetMilliseconds());
+  }
 
   /**
    * @brief  让线程进入休眠状态
    *         Puts the thread to sleep
    * @param  milliseconds 休眠时间（毫秒） Sleep duration in milliseconds
    */
-  static void Sleep(uint32_t milliseconds);
+  static void Sleep(uint32_t milliseconds)
+  {
+    vTaskDelay(static_cast<TickType_t>(milliseconds));
+  }
 
   /**
    * @brief  让线程休眠直到指定时间点
@@ -125,13 +132,30 @@ class Thread
    * @param  last_waskup_time 上次唤醒时间 Last wake-up time
    * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
    */
-  static void SleepUntil(MillisecondTimestamp &last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep)
+  {
+    ASSERT(time_to_sleep > 0U);
+
+    uint32_t current_tick = static_cast<uint32_t>(xTaskGetTickCount());
+    uint32_t previous_wake_time =
+        static_cast<uint32_t>(last_waskup_time) + libxr_freertos_timebase_tick_offset;
+
+    if ((previous_wake_time - current_tick) < (UINT32_MAX / 2U))
+    {
+      previous_wake_time = current_tick;
+    }
+
+    TickType_t wake_time = static_cast<TickType_t>(previous_wake_time);
+    vTaskDelayUntil(&wake_time, static_cast<TickType_t>(time_to_sleep));
+    last_waskup_time = MillisecondTimestamp(static_cast<uint32_t>(wake_time) -
+                                            libxr_freertos_timebase_tick_offset);
+  }
 
   /**
    * @brief  让出 CPU 以执行其他线程
    *         Yields CPU execution to allow other threads to run
    */
-  static void Yield();
+  static void Yield() { portYIELD(); }  // NOLINT
 
   /**
    * @brief  线程对象转换为 FreeRTOS 线程句柄
