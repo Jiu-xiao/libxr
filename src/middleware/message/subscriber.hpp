@@ -31,8 +31,19 @@ struct Topic::SuberBlock
  */
 struct Topic::SyncBlock : public SuberBlock
 {
+  // WAIT_CLAIMED keeps a wakeup owned by the timed-out waiter until it consumes the
+  // semaphore post; otherwise a new Wait() could steal that post.
+  // WAIT_CLAIMED 表示本次唤醒已经归当前 waiter 所有，直到它消费 semaphore post。
+  enum WaitState : uint32_t
+  {
+    WAIT_IDLE = 0,
+    WAITING = 1,
+    WAIT_CLAIMED = 2
+  };
+
   RawData buff;                    ///< 存储的数据缓冲区。Data buffer.
   MicrosecondTimestamp timestamp;  ///< 最近接收的消息时间戳。Latest received timestamp.
+  std::atomic<uint32_t> wait_state = WAIT_IDLE;  ///< 挂起等待状态。Pending wait state.
   Semaphore sem;  ///< 信号量，用于同步等待数据。Semaphore for data synchronization.
 };
 
@@ -79,6 +90,7 @@ class Topic::SyncSubscriber
     block_ = new LockFreeList::Node<SyncBlock>;
     block_->data_.type = SuberType::SYNC;
     block_->data_.timestamp = MicrosecondTimestamp();
+    block_->data_.wait_state.store(SyncBlock::WAIT_IDLE, std::memory_order_relaxed);
     block_->data_.buff = RawData(data);
     topic.block_->data_.subers.Add(*block_);
   }
@@ -108,8 +120,39 @@ class Topic::SyncSubscriber
    */
   ErrorCode Wait(uint32_t timeout = UINT32_MAX)
   {
-    // TODO: Reset sem
-    return block_->data_.sem.Wait(timeout);
+    ASSERT(block_ != nullptr);
+
+    auto& data = block_->data_;
+    uint32_t expected = SyncBlock::WAIT_IDLE;
+    if (!data.wait_state.compare_exchange_strong(expected, SyncBlock::WAITING,
+                                                 std::memory_order_acq_rel,
+                                                 std::memory_order_acquire))
+    {
+      return ErrorCode::BUSY;
+    }
+
+    auto wait_ans = data.sem.Wait(timeout);
+    if (wait_ans == ErrorCode::OK)
+    {
+      data.wait_state.store(SyncBlock::WAIT_IDLE, std::memory_order_release);
+      return ErrorCode::OK;
+    }
+
+    expected = SyncBlock::WAITING;
+    if (data.wait_state.compare_exchange_strong(expected, SyncBlock::WAIT_IDLE,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_acquire))
+    {
+      return wait_ans;
+    }
+
+    ASSERT(data.wait_state.load(std::memory_order_acquire) == SyncBlock::WAIT_CLAIMED);
+
+    auto finish_wait_ans = data.sem.Wait(UINT32_MAX);
+    UNUSED(finish_wait_ans);
+    ASSERT(finish_wait_ans == ErrorCode::OK);
+    data.wait_state.store(SyncBlock::WAIT_IDLE, std::memory_order_release);
+    return ErrorCode::OK;
   }
 
   MicrosecondTimestamp GetTimestamp() const { return block_->data_.timestamp; }
@@ -222,7 +265,11 @@ class Topic::ASyncSubscriber
    */
   Data& GetData()
   {
-    block_->data_.state.store(ASyncSubscriberState::IDLE, std::memory_order_release);
+    if (block_->data_.state.load(std::memory_order_acquire) ==
+        ASyncSubscriberState::DATA_READY)
+    {
+      block_->data_.state.store(ASyncSubscriberState::IDLE, std::memory_order_release);
+    }
     return *reinterpret_cast<Data*>(block_->data_.buff.addr_);
   }
 
@@ -239,7 +286,12 @@ class Topic::ASyncSubscriber
    */
   void StartWaiting()
   {
-    block_->data_.state.store(ASyncSubscriberState::WAITING, std::memory_order_release);
+    if (block_->data_.state.load(std::memory_order_acquire) ==
+        ASyncSubscriberState::IDLE)
+    {
+      block_->data_.state.store(ASyncSubscriberState::WAITING,
+                                std::memory_order_release);
+    }
   }
 
   LockFreeList::Node<ASyncBlock>* block_;  ///< 订阅者数据块。Subscriber data block.
@@ -253,7 +305,6 @@ class Topic::ASyncSubscriber
 struct Topic::QueueBlock : public Topic::SuberBlock
 {
   void* queue;  ///< 指向订阅队列的指针 Pointer to the subscribed queue
-  std::atomic<uint32_t> dropped_count;  ///< 队列满时丢弃的消息数 Dropped message count
   void (*fun)(MicrosecondTimestamp, RawData,
               QueueBlock&);  ///< 处理消息的回调函数 Callback function to handle message
 };
@@ -313,15 +364,10 @@ class Topic::QueuedSubscriber
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;
     block_->data_.queue = &queue;
-    block_->data_.dropped_count.store(0, std::memory_order_relaxed);
     block_->data_.fun = [](MicrosecondTimestamp, RawData data, QueueBlock& block)
     {
       LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(block.queue);
-      const auto ans = queue->Push(*reinterpret_cast<Data*>(data.addr_));
-      if (ans == ErrorCode::FULL)
-      {
-        block.dropped_count.fetch_add(1, std::memory_order_relaxed);
-      }
+      (void)queue->Push(*reinterpret_cast<Data*>(data.addr_));
     };
 
     topic.block_->data_.subers.Add(*block_);
@@ -339,18 +385,12 @@ class Topic::QueuedSubscriber
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;
     block_->data_.queue = &queue;
-    block_->data_.dropped_count.store(0, std::memory_order_relaxed);
     block_->data_.fun =
         [](MicrosecondTimestamp timestamp, RawData data, QueueBlock& block)
     {
       LockFreeQueue<Message<Data>>* queue =
           reinterpret_cast<LockFreeQueue<Message<Data>>*>(block.queue);
-      const auto ans =
-          queue->Push(Message<Data>{timestamp, *reinterpret_cast<Data*>(data.addr_)});
-      if (ans == ErrorCode::FULL)
-      {
-        block.dropped_count.fetch_add(1, std::memory_order_relaxed);
-      }
+      (void)queue->Push(Message<Data>{timestamp, *reinterpret_cast<Data*>(data.addr_)});
     };
 
     topic.block_->data_.subers.Add(*block_);
@@ -372,18 +412,6 @@ class Topic::QueuedSubscriber
       other.block_ = nullptr;
     }
     return *this;
-  }
-
-  uint32_t GetDroppedCount() const
-  {
-    ASSERT(block_ != nullptr);
-    return block_->data_.dropped_count.load(std::memory_order_relaxed);
-  }
-
-  void ResetDroppedCount()
-  {
-    ASSERT(block_ != nullptr);
-    block_->data_.dropped_count.store(0, std::memory_order_relaxed);
   }
 
  private:
