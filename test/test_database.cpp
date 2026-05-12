@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <vector>
 
 #include "database.hpp"
 #include "libxr_def.hpp"
@@ -11,9 +13,136 @@
 
 using namespace LibXR;
 
+namespace
+{
+
+constexpr size_t XR_DB_FLASH_SIZE = 4096;
+constexpr size_t XR_DB_MIN_ERASE_SIZE = 512;
+constexpr size_t XR_DB_MIN_WRITE_SIZE = 16;
+constexpr size_t XR_DB_BLOCK_SIZE = XR_DB_FLASH_SIZE / 2;
+constexpr size_t XR_DB_CHECKSUM_OFFSET = XR_DB_BLOCK_SIZE - XR_DB_MIN_WRITE_SIZE;
+constexpr uint32_t XR_DB_FLASH_HEADER = 0x12345678 + LIBXR_DATABASE_VERSION;
+constexpr uint32_t XR_DB_CHECKSUM = 0x9abcedf0;
+
+enum class MainChecksum
+{
+  VALID,
+  INVALID,
+};
+
+uint32_t ReadLe32(const std::vector<uint8_t>& bytes, size_t offset)
+{
+  return static_cast<uint32_t>(bytes[offset]) |
+         (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
+         (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
+         (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+}
+
+void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value)
+{
+  bytes[offset] = static_cast<uint8_t>(value & 0xFF);
+  bytes[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+  bytes[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+  bytes[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
+std::vector<uint8_t> ReadAllBytes(const char* path)
+{
+  std::ifstream file(path, std::ios::binary);
+  ASSERT(static_cast<bool>(file));
+
+  std::vector<uint8_t> bytes(XR_DB_FLASH_SIZE, 0);
+  file.read(reinterpret_cast<char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+  ASSERT(file.gcount() == static_cast<std::streamsize>(bytes.size()));
+  return bytes;
+}
+
+void WriteAllBytes(const char* path, const std::vector<uint8_t>& bytes)
+{
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  ASSERT(static_cast<bool>(file));
+  file.write(reinterpret_cast<const char*>(bytes.data()),
+             static_cast<std::streamsize>(bytes.size()));
+  ASSERT(static_cast<bool>(file));
+}
+
+void CraftPartialBackup(std::vector<uint8_t>& bytes, size_t partial_len)
+{
+  ASSERT(partial_len < XR_DB_BLOCK_SIZE);
+
+  const size_t backup_offset = XR_DB_BLOCK_SIZE;
+  for (size_t i = 0; i < partial_len; ++i)
+  {
+    bytes[backup_offset + i] = bytes[i];
+  }
+
+  WriteLe32(bytes, backup_offset + XR_DB_CHECKSUM_OFFSET, XR_DB_CHECKSUM);
+}
+
+void InvalidateMainChecksum(std::vector<uint8_t>& bytes)
+{
+  WriteLe32(bytes, XR_DB_CHECKSUM_OFFSET, 0);
+}
+
+void CreateSeedDatabase(const char* path)
+{
+  LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
+                                               XR_DB_MIN_WRITE_SIZE, false, true);
+  DatabaseRaw<16> db(flash, 5);
+  db.Restore();
+  DatabaseRaw<16>::Key<uint32_t> key(db, "key", 1234);
+  ASSERT(key.data_ == 1234);
+}
+
+uint32_t ReopenDatabaseValue(const char* path, uint32_t default_value)
+{
+  LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
+                                               XR_DB_MIN_WRITE_SIZE, false, true);
+  DatabaseRaw<16> db(flash, 5);
+  DatabaseRaw<16>::Key<uint32_t> key(db, "key", default_value);
+  return key.data_;
+}
+
+void AssertMainValidBackupInvalid(const char* path)
+{
+  auto bytes = ReadAllBytes(path);
+  ASSERT(ReadLe32(bytes, 0) == XR_DB_FLASH_HEADER);
+  ASSERT(ReadLe32(bytes, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
+  ASSERT(ReadLe32(bytes, XR_DB_BLOCK_SIZE + XR_DB_CHECKSUM_OFFSET) !=
+         XR_DB_CHECKSUM);
+}
+
+void RunPartialBackupCase(const char* path, MainChecksum main_checksum,
+                          uint32_t default_value, uint32_t expected_value)
+{
+  CreateSeedDatabase(path);
+
+  auto bytes = ReadAllBytes(path);
+  CraftPartialBackup(bytes, 128);
+  if (main_checksum == MainChecksum::INVALID)
+  {
+    InvalidateMainChecksum(bytes);
+  }
+  WriteAllBytes(path, bytes);
+
+  ASSERT(ReopenDatabaseValue(path, default_value) == expected_value);
+  AssertMainValidBackupInvalid(path);
+}
+
+void TestDatabasePartialBackupRecovery()
+{
+  RunPartialBackupCase("/tmp/flash_test_partial_valid_main.bin", MainChecksum::VALID, 0,
+                       1234);
+  RunPartialBackupCase("/tmp/flash_test_partial_broken_main.bin", MainChecksum::INVALID,
+                       55, 55);
+}
+
+}  // namespace
+
 void test_database()
 {
-  constexpr size_t FLASH_SIZE = 4096;
+  constexpr size_t FLASH_SIZE = XR_DB_FLASH_SIZE;
 
   // 1. 初始化 Flash 和 DB
   LinuxBinaryFileFlash<FLASH_SIZE> test_flash("/tmp/flash_test.bin", 512, 8, true, true);
@@ -150,4 +279,6 @@ void test_database()
     ASSERT(memcmp(&data_k3[0], &k3_2.data_[0], sizeof(data_k3)) == 0);
     ASSERT(memcmp(&data_k4[0], &k4_2.data_[0], sizeof(data_k4)) == 0);
   }
+
+  TestDatabasePartialBackupRecovery();
 }

@@ -32,11 +32,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Doxygen
+      - name: Install documentation dependencies
         run: sudo apt-get update && sudo apt-get install -y graphviz wget
 
       - name: Install Doxygen
-        run: wget https://www.doxygen.nl/files/doxygen-1.12.0.linux.bin.tar.gz && tar xzf doxygen-1.12.0.linux.bin.tar.gz && sudo ln -s $(pwd)/doxygen-1.12.0/bin/* /usr/bin
+        run: |
+          wget \
+            --tries=5 \
+            --waitretry=10 \
+            --retry-connrefused \
+            --retry-on-http-error=403,429,500,502,503,504 \
+            --timeout=30 \
+            --continue \
+            https://www.doxygen.nl/files/doxygen-1.12.0.linux.bin.tar.gz
+          echo "3c42c3f3fb206732b503862d9c9c11978920a8214f223a3950bbf2520be5f647  doxygen-1.12.0.linux.bin.tar.gz" | sha256sum -c -
+          tar xzf doxygen-1.12.0.linux.bin.tar.gz
+          sudo ln -sf "$(pwd)"/doxygen-1.12.0/bin/* /usr/bin
 
       - name: Check Doxygen Version
         run: doxygen --version

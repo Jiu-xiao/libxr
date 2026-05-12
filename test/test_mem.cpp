@@ -4,6 +4,7 @@
 
 #include "libxr.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "test.hpp"
 
 static int sign(int v) { return (v > 0) - (v < 0); }

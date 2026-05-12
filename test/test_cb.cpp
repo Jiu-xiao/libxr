@@ -85,19 +85,35 @@ struct GuardedCreationProbe
     self->depth--;
   }
 };
+
+struct LambdaCreationProbe
+{
+  LibXR::Callback<int> cb;
+  int seen_value = 0;
+  bool seen_in_isr = false;
+
+  LambdaCreationProbe()
+      : cb(LibXR::Callback<int>::Create(
+            [](bool in_isr, LambdaCreationProbe* self, int value)
+            {
+              self->seen_value = value;
+              self->seen_in_isr = in_isr;
+            },
+            this))
+  {
+  }
+};
 }  // namespace
 
 void test_cb()
 {
   {
-    // Empty callbacks stay cheap no-ops.
     LibXR::Callback<int> empty_cb;
     ASSERT(empty_cb.Empty());
     empty_cb.Run(false, 1);
   }
 
   {
-    // Direct callbacks preserve ISR=true and recurse with real stack depth.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.cb.Run(probe.runtime_in_isr, 1);
@@ -110,7 +126,6 @@ void test_cb()
   }
 
   {
-    // Direct callbacks preserve ISR=false and recurse with real stack depth.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(probe.runtime_in_isr, 1);
@@ -123,7 +138,6 @@ void test_cb()
   }
 
   {
-    // Passing the runtime flag directly keeps the observed callback context.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.cb.Run(true, 1);
@@ -136,7 +150,6 @@ void test_cb()
   }
 
   {
-    // Direct non-ISR calls also keep their original callback context.
     DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(false, 1);
@@ -149,7 +162,6 @@ void test_cb()
   }
 
   {
-    // Guarded callbacks flatten one-step bounded reentry back to one stack frame.
     GuardedCreationProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(false, 1);
@@ -159,5 +171,12 @@ void test_cb()
     ASSERT(probe.seen_in_isr[0] == false);
     ASSERT(probe.seen_in_isr[1] == false);
     ASSERT(probe.max_depth == 1);
+  }
+
+  {
+    LambdaCreationProbe probe;
+    probe.cb.Run(true, 7);
+    ASSERT(probe.seen_value == 7);
+    ASSERT(probe.seen_in_isr == true);
   }
 }

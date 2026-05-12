@@ -2,12 +2,12 @@
 
 #include "esp_def.hpp"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "driver/gpio.h"
 #include "esp_intr_alloc.h"
+#include "flag.hpp"
 #include "hal/spi_ll.h"
 #include "hal/spi_types.h"
 #include "soc/soc_caps.h"
@@ -53,8 +53,8 @@ class ESP32SPI : public SPI
   RawData GetTxBuffer();
 
  private:
-  static constexpr size_t kMaxPollingTransferBytes = SOC_SPI_MAXIMUM_BUFFER_SIZE;
-  static constexpr size_t kMaxDmaTransferBytes = SPI_LL_DMA_MAX_BIT_LEN / 8U;
+  static constexpr size_t MAX_POLLING_TRANSFER_BYTES = SOC_SPI_MAXIMUM_BUFFER_SIZE;
+  static constexpr size_t MAX_DMA_TRANSFER_BYTES = SPI_LL_DMA_MAX_BIT_LEN / 8U;
 
   bool Acquire();
 
@@ -109,7 +109,7 @@ class ESP32SPI : public SPI
   int miso_pin_;
   int mosi_pin_;
   uint32_t source_clock_hz_ = 0;
-  std::atomic<bool> busy_{false};
+  Flag::Atomic busy_{};
   bool initialized_ = false;
   uint32_t dma_enable_min_size_ = 3U;
   bool dma_requested_ = true;

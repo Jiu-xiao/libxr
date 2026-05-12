@@ -105,9 +105,9 @@ esp_err_t DmaStart(spi_dma_chan_handle_t chan, const void* desc)
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
 extern "C" esp_err_t esp_cache_msync(void* addr, size_t size, int flags);
 
-constexpr int kCacheSyncFlagUnaligned = (1 << 1);
-constexpr int kCacheSyncFlagDirC2M = (1 << 2);
-constexpr int kCacheSyncFlagDirM2C = (1 << 3);
+constexpr int CACHE_SYNC_FLAG_UNALIGNED = (1 << 1);
+constexpr int CACHE_SYNC_FLAG_DIR_C2M = (1 << 2);
+constexpr int CACHE_SYNC_FLAG_DIR_M2C = (1 << 3);
 
 bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 {
@@ -123,8 +123,8 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
   }
 #endif
 
-  int flags = cache_to_mem ? kCacheSyncFlagDirC2M : kCacheSyncFlagDirM2C;
-  flags |= kCacheSyncFlagUnaligned;
+  int flags = cache_to_mem ? CACHE_SYNC_FLAG_DIR_C2M : CACHE_SYNC_FLAG_DIR_M2C;
+  flags |= CACHE_SYNC_FLAG_UNALIGNED;
 
   const esp_err_t ret = esp_cache_msync(const_cast<void*>(addr), size, flags);
   // Non-cacheable regions can return ESP_ERR_INVALID_ARG; treat as no-op success.
@@ -192,14 +192,9 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
   }
 }
 
-bool ESP32SPI::Acquire()
-{
-  bool expected = false;
-  return busy_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                       std::memory_order_acquire);
-}
+bool ESP32SPI::Acquire() { return !busy_.TestAndSet(); }
 
-void ESP32SPI::Release() { busy_.store(false, std::memory_order_release); }
+void ESP32SPI::Release() { busy_.Clear(); }
 
 ErrorCode ESP32SPI::InitializeHardware()
 {
@@ -366,7 +361,7 @@ ErrorCode ESP32SPI::InitDmaBackend()
   dma_enabled_ = true;
   dma_max_transfer_bytes_ =
       std::min<size_t>({static_cast<size_t>(actual_max_size), dma_rx_raw_.size_,
-                        dma_tx_raw_.size_, kMaxDmaTransferBytes});
+                        dma_tx_raw_.size_, MAX_DMA_TRANSFER_BYTES});
 
   if (dma_max_transfer_bytes_ == 0U)
   {
@@ -488,7 +483,7 @@ ErrorCode ESP32SPI::SetConfig(SPI::Configuration config)
   {
     return ErrorCode::STATE_ERR;
   }
-  if (busy_.load(std::memory_order_acquire))
+  if (busy_.IsSet())
   {
     return ErrorCode::BUSY;
   }
@@ -612,14 +607,14 @@ ErrorCode ESP32SPI::ReturnAsyncStartResult(ErrorCode ec, bool started)
 
 void ESP32SPI::ConfigureTransferRegisters(size_t size)
 {
-  static constexpr spi_line_mode_t kLineMode = {
+  static constexpr spi_line_mode_t LINE_MODE = {
       .cmd_lines = 1,
       .addr_lines = 1,
       .data_lines = 1,
   };
   const size_t bitlen = size * 8U;
 
-  spi_ll_master_set_line_mode(hw_, kLineMode);
+  spi_ll_master_set_line_mode(hw_, LINE_MODE);
   spi_ll_set_mosi_bitlen(hw_, bitlen);
   spi_ll_set_miso_bitlen(hw_, bitlen);
   spi_ll_set_command_bitlen(hw_, 0);
@@ -729,13 +724,13 @@ ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t si
 ErrorCode ESP32SPI::ExecuteChunk(const uint8_t* tx, uint8_t* rx, size_t size,
                                  bool enable_rx)
 {
-  if ((size == 0U) || (size > kMaxPollingTransferBytes))
+  if ((size == 0U) || (size > MAX_POLLING_TRANSFER_BYTES))
   {
     return ErrorCode::SIZE_ERR;
   }
 
-  static constexpr std::array<uint8_t, kMaxPollingTransferBytes> kZero = {};
-  const uint8_t* tx_data = (tx != nullptr) ? tx : kZero.data();
+  static constexpr std::array<uint8_t, MAX_POLLING_TRANSFER_BYTES> ZERO = {};
+  const uint8_t* tx_data = (tx != nullptr) ? tx : ZERO.data();
 
   ConfigureTransferRegisters(size);
   spi_ll_enable_mosi(hw_, 1);
@@ -770,7 +765,7 @@ ErrorCode ESP32SPI::ExecuteTransfer(const uint8_t* tx, uint8_t* rx, size_t size,
   while (offset < size)
   {
     const size_t remain = size - offset;
-    const size_t chunk = std::min(remain, kMaxPollingTransferBytes);
+    const size_t chunk = std::min(remain, MAX_POLLING_TRANSFER_BYTES);
     const uint8_t* tx_chunk = (tx != nullptr) ? (tx + offset) : nullptr;
     uint8_t* rx_chunk = (enable_rx && (rx != nullptr)) ? (rx + offset) : nullptr;
 

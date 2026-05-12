@@ -635,7 +635,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    * @param q Eigen 四元数。 The Eigen quaternion.
    */
   RotationMatrix(const Eigen::Quaternion<Scalar>& q)
-      : Eigen::Matrix<Scalar, 3, 3>{q.ToRotationMatrix()}
+      : Eigen::Matrix<Scalar, 3, 3>{q.toRotationMatrix()}
   {
   }
 
@@ -717,7 +717,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
 
   RotationMatrix& operator=(const Eigen::Quaternion<Scalar>& q)
   {
-    *this = q.ToRotationMatrix();
+    *this = q.toRotationMatrix();
     return *this;
   }
 
@@ -909,7 +909,10 @@ class Quaternion : public Eigen::Quaternion<Scalar>
                                              std::is_same<T, float>::value ||
                                              std::is_same<T, double>::value,
                                          int> = 0>
-  Quaternion(const T (&data)[4]) : Eigen::Quaternion<Scalar>(data)
+  Quaternion(const T (&data)[4])
+      : Eigen::Quaternion<Scalar>(
+            static_cast<Scalar>(data[0]), static_cast<Scalar>(data[1]),
+            static_cast<Scalar>(data[2]), static_cast<Scalar>(data[3]))
   {
   }
 
@@ -1006,7 +1009,7 @@ class Quaternion : public Eigen::Quaternion<Scalar>
 
   Quaternion operator/(const Eigen::Quaternion<Scalar>& q) const
   {
-    return (*this) * (-q);
+    return Eigen::Quaternion<Scalar>(*this) * q.conjugate();
   }
 
   template <typename Q,

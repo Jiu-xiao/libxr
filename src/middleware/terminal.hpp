@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +9,6 @@
 #include <utility>
 
 #include "libxr_rw.hpp"
-#include "libxr_string.hpp"
 #include "ramfs.hpp"
 #include "semaphore.hpp"
 #include "stack.hpp"
@@ -30,6 +30,8 @@ template <size_t READ_BUFF_SIZE = 32, size_t MAX_LINE_SIZE = READ_BUFF_SIZE,
 class Terminal
 {
  private:
+  using HistoryLine = std::array<char, MAX_LINE_SIZE + 1>;
+
   static constexpr char CLEAR_ALL[] =
       "\033[2J\033[1H";  ///< 清屏命令 Clear screen command
   static constexpr char CLEAR_LINE[] =
@@ -147,9 +149,20 @@ class Terminal
   Stack<char> input_line_;         ///< 输入行缓冲区 Input line buffer
   char* arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 Command argument list
   size_t arg_number_ = 0;          ///< 参数数量 Number of arguments
-  Queue<LibXR::String<MAX_LINE_SIZE>> history_;  ///< 历史命令 History of commands
-  int history_index_ = -1;                       ///< 当前历史索引 Current history index
-  bool linefeed_flag_ = false;                   ///< 换行标志 Line feed flag
+  Queue<HistoryLine> history_;     ///< 历史命令 History of commands
+  int history_index_ = -1;         ///< 当前历史索引 Current history index
+  bool linefeed_flag_ = false;     ///< CRLF 抑制标志 CRLF suppression flag
+  char linefeed_char_ = '\0';      ///< 上一个换行字符 Previous line feed character
+
+  static size_t HistoryLineSize(const HistoryLine& line)
+  {
+    size_t size = 0;
+    while (size < MAX_LINE_SIZE && line[size] != '\0')
+    {
+      size++;
+    }
+    return size;
+  }
 
   /**
    * @brief  执行换行操作
@@ -306,14 +319,14 @@ class Terminal
    */
   void ShowHeader()
   {
-    write_stream_ << ConstRawData(ramfs_.root_->name, strlen(ramfs_.root_->name));
+    write_stream_ << ConstRawData(ramfs_.root_.GetName(), strlen(ramfs_.root_.GetName()));
     if (current_dir_ == &ramfs_.root_)
     {
       write_stream_ << ConstRawData(":/");
     }
     else
     {
-      write_stream_ << ConstRawData(":") << ConstRawData(current_dir_->data_.name);
+      write_stream_ << ConstRawData(":") << ConstRawData(current_dir_->GetName());
     }
 
     write_stream_ << ConstRawData("$ ");
@@ -342,8 +355,8 @@ class Terminal
     offset_ = 0;
     if (history_index_ >= 0)
     {
-      write_stream_ << ConstRawData(history_[-history_index_ - 1].Raw(),
-                                    history_[-history_index_ - 1].Length());
+      const auto& line = history_[-history_index_ - 1];
+      write_stream_ << ConstRawData(line.data(), HistoryLineSize(line));
     }
     else
     {
@@ -359,10 +372,12 @@ class Terminal
   void CopyHistoryToInputLine()
   {
     input_line_.Reset();
-    for (size_t i = 0; i < history_[-history_index_ - 1].Length(); i++)
+    const auto& line = history_[-history_index_ - 1];
+    for (size_t i = 0; i < HistoryLineSize(line); i++)
     {
-      input_line_.Push(history_[-history_index_ - 1][i]);
+      input_line_.Push(line[i]);
     }
+    input_line_[input_line_.Size()] = '\0';
     history_index_ = -1;
     offset_ = 0;
   }
@@ -373,13 +388,21 @@ class Terminal
    */
   void AddHistory()
   {
+    HistoryLine line{};
+    const size_t line_size =
+        LibXR::min(static_cast<size_t>(input_line_.Size()), MAX_LINE_SIZE);
     input_line_.Push('\0');
+    if (line_size > 0)
+    {
+      std::memcpy(line.data(), &input_line_[0], line_size);
+    }
+    line[line_size] = '\0';
 
     if (history_.EmptySize() == 0)
     {
       history_.Pop();
     }
-    history_.Push(*reinterpret_cast<String<MAX_LINE_SIZE>*>(&input_line_[0]));
+    history_.Push(line);
   }
 
   /**
@@ -426,6 +449,10 @@ class Terminal
     {
       index++;
       dir = &ramfs_.root_;
+      if (path[index] == '\0')
+      {
+        return dir;
+      }
     }
 
     for (size_t i = 0; i < MAX_LINE_SIZE; i++)
@@ -444,7 +471,7 @@ class Terminal
         tmp[0] = '\0';
         dir = dir->FindDir(path + index);
         tmp[0] = '/';
-        index += tmp - path + 1;
+        index = static_cast<size_t>(tmp - path + 1);
         if (path[index] == '\0' || dir == nullptr)
         {
           return dir;
@@ -482,7 +509,7 @@ class Terminal
     }
 
     *name = '\0';
-    RamFS::Dir* dir = Path2Dir(path);
+    RamFS::Dir* dir = name == path ? &ramfs_.root_ : Path2Dir(path);
     *name = '/';
     if (dir != nullptr)
     {
@@ -511,7 +538,7 @@ class Terminal
 
     if (strcmp(arg_tab_[0], "cd") == 0)
     {
-      RamFS::Dir* dir = Path2Dir(arg_tab_[1]);
+      RamFS::Dir* dir = arg_number_ >= 2 ? Path2Dir(arg_tab_[1]) : nullptr;
       if (dir != nullptr)
       {
         current_dir_ = dir;
@@ -522,36 +549,41 @@ class Terminal
 
     if (strcmp(arg_tab_[0], "ls") == 0)
     {
-      auto ls_fun = [&](RBTree<const char*>::Node<RamFS::FsNode>& item)
+      auto ls_fun = [&](RamFS::FsNode& item)
       {
-        switch (item->type)
+        switch (item.GetNodeType())
         {
           case RamFS::FsNodeType::DIR:
             write_stream_ << ConstRawData("d ");
             break;
           case RamFS::FsNodeType::FILE:
-            write_stream_ << ConstRawData("f ");
+            if (static_cast<RamFS::File&>(item).IsExecutable())
+            {
+              write_stream_ << ConstRawData("x ");
+            }
+            else
+            {
+              write_stream_ << ConstRawData("f ");
+            }
             break;
-          case RamFS::FsNodeType::DEVICE:
-            write_stream_ << ConstRawData("c ");
-            break;
-          case RamFS::FsNodeType::STORAGE:
-            write_stream_ << ConstRawData("b ");
+          case RamFS::FsNodeType::CUSTOM:
+            write_stream_ << ConstRawData("? ");
             break;
           default:
             write_stream_ << ConstRawData("? ");
             break;
         }
-        write_stream_ << ConstRawData(item.data_.name);
+        write_stream_ << ConstRawData(item.GetName());
         this->LineFeed();
         return ErrorCode::OK;
       };
 
-      current_dir_->data_.rbt.Foreach<RamFS::FsNode>(ls_fun);
+      current_dir_->Foreach(ls_fun);
       return;
     }
 
-    auto ans = Path2File(arg_tab_[0]);
+    auto* ans = Path2File(arg_tab_[0]);
+
     if (ans == nullptr)
     {
       write_stream_ << ConstRawData("Command not found.");
@@ -559,15 +591,16 @@ class Terminal
       return;
     }
 
-    if ((*ans)->type != RamFS::FileType::EXEC)
+    if (!ans->IsExecutable())
     {
       write_stream_ << ConstRawData("Not an executable file.");
       LineFeed();
       return;
     }
+
     write_stream_.Commit();
     write_mutex_->Unlock();
-    (*ans)->Run(arg_number_, arg_tab_);
+    ans->Run(arg_number_, arg_tab_);
     write_mutex_->Lock();
   }
 
@@ -714,7 +747,7 @@ class Terminal
     }
 
     /* prepre for match */
-    RBTree<const char*>::Node<RamFS::FsNode>* ans_node = nullptr;
+    RamFS::FsNode* ans_node = nullptr;
     uint32_t number = 0;
     size_t same_char_number = 0;
 
@@ -725,9 +758,9 @@ class Terminal
 
     int prefix_len = static_cast<int>(tmp - prefix_start);
 
-    auto foreach_fun_find = [&](RBTree<const char*>::Node<RamFS::FsNode>& node)
+    auto foreach_fun_find = [&](RamFS::FsNode& node)
     {
-      if (strncmp(node->name, prefix_start, prefix_len) == 0)
+      if (strncmp(node.GetName(), prefix_start, prefix_len) == 0)
       {
         ans_node = &node;
         number++;
@@ -737,7 +770,7 @@ class Terminal
     };
 
     /* start match */
-    (*dir)->rbt.Foreach<RamFS::FsNode>(foreach_fun_find);
+    dir->Foreach(foreach_fun_find);
 
     if (number == 0)
     {
@@ -745,10 +778,10 @@ class Terminal
     }
     else if (number == 1)
     {
-      auto name_len = strlen(ans_node->data_.name);
+      auto name_len = strlen(ans_node->GetName());
       for (size_t i = 0; i < name_len - prefix_len; i++)
       {
-        DisplayChar(ans_node->data_.name[i + prefix_len]);
+        DisplayChar(ans_node->GetName()[i + prefix_len]);
       }
     }
     else
@@ -756,12 +789,12 @@ class Terminal
       ans_node = nullptr;
       LineFeed();
 
-      auto foreach_fun_show = [&](RBTree<const char*>::Node<RamFS::FsNode>& node)
+      auto foreach_fun_show = [&](RamFS::FsNode& node)
       {
-        if (strncmp(node->name, prefix_start, prefix_len) == 0)
+        if (strncmp(node.GetName(), prefix_start, prefix_len) == 0)
         {
-          auto name_len = strlen(node->name);
-          write_stream_ << ConstRawData(node->name, name_len);
+          auto name_len = strlen(node.GetName());
+          write_stream_ << ConstRawData(node.GetName(), name_len);
           this->LineFeed();
           if (ans_node == nullptr)
           {
@@ -772,7 +805,7 @@ class Terminal
 
           for (size_t i = 0; i < name_len; i++)
           {
-            if (node->name[i] != ans_node->data_.name[i])
+            if (node.GetName()[i] != ans_node->GetName()[i])
             {
               same_char_number = i;
               break;
@@ -790,14 +823,14 @@ class Terminal
         return ErrorCode::OK;
       };
 
-      (*dir)->rbt.Foreach<RamFS::FsNode>(foreach_fun_show);
+      dir->Foreach(foreach_fun_show);
 
       ShowHeader();
       write_stream_ << ConstRawData(&input_line_[0], input_line_.Size());
 
       for (size_t i = 0; i < same_char_number - prefix_len; i++)
       {
-        DisplayChar(ans_node->data_.name[i + prefix_len]);
+        DisplayChar(ans_node->GetName()[i + prefix_len]);
       }
     }
   }
@@ -812,17 +845,21 @@ class Terminal
     if (data != '\r' && data != '\n')
     {
       linefeed_flag_ = false;
+      linefeed_char_ = '\0';
     }
 
     switch (data)
     {
       case '\n':
       case '\r':
-        if (linefeed_flag_)
+        if (linefeed_flag_ && data != linefeed_char_)
         {
           linefeed_flag_ = false;
+          linefeed_char_ = '\0';
           return;
         }
+        linefeed_flag_ = true;
+        linefeed_char_ = data;
         if (history_index_ >= 0)
         {
           CopyHistoryToInputLine();

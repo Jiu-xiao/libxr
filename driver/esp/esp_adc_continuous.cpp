@@ -89,7 +89,7 @@ void ESP32ADC::DrainContinuousFrames(uint32_t timeout_ms)
       }
 
       const uint8_t sample_idx = channel_idx_map_[sample_channel];
-      if ((sample_idx == kInvalidChannelIdx) || (sample_idx >= num_channels_))
+      if ((sample_idx == INVALID_CHANNEL_IDX) || (sample_idx >= num_channels_))
       {
         continue;
       }

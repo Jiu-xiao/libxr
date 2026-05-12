@@ -42,7 +42,7 @@ void test_kinematic()
                                          t_joint2endpoint);
 
   joint_endpoint.SetState(0.);
-  joint_midpoint.SetState(M_PI / 2);
+  joint_midpoint.SetState(LibXR::PI / 2);
 
   LibXR::Quaternion target_quat(0.7071068, 0., -0.7071068, 0.);
   LibXR::Position target_pos(0., 0., 4.);

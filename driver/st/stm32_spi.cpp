@@ -1,6 +1,7 @@
 #include "stm32_spi.hpp"
 
 #include "libxr_def.hpp"
+#include "stm32_dcache.hpp"
 
 #ifdef HAL_SPI_MODULE_ENABLED
 
@@ -122,10 +123,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
         Memory::FastSet(reinterpret_cast<uint8_t*>(tx.addr_) + write_data.size_, 0,
                         need_write - write_data.size_);
       }
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-      SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                              static_cast<int32_t>(need_write));
-#endif
+      STM32_CleanDCacheByAddr(tx.addr_, need_write);
       read_buff_ = read_data;
 
       st = HAL_SPI_TransmitReceive_DMA(spi_handle_, static_cast<uint8_t*>(tx.addr_),
@@ -139,10 +137,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
         Memory::FastSet(reinterpret_cast<uint8_t*>(tx.addr_) + write_data.size_, 0,
                         need_write - write_data.size_);
       }
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-      SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                              static_cast<int32_t>(need_write));
-#endif
+      STM32_CleanDCacheByAddr(tx.addr_, need_write);
       read_buff_ = {nullptr, 0};
 
       st = HAL_SPI_Transmit_DMA(spi_handle_, static_cast<uint8_t*>(tx.addr_), need_write);
@@ -190,10 +185,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
       Memory::FastSet(reinterpret_cast<uint8_t*>(tx.addr_) + write_data.size_, 0,
                       need_write - write_data.size_);
     }
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                            static_cast<int32_t>(need_write));
-#endif
+    STM32_CleanDCacheByAddr(tx.addr_, need_write);
     ans = (HAL_SPI_TransmitReceive(spi_handle_, static_cast<uint8_t*>(tx.addr_),
                                    static_cast<uint8_t*>(rx.addr_), need_write,
                                    20) == HAL_OK)
@@ -222,10 +214,7 @@ ErrorCode STM32SPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   else if (write_data.size_ > 0)
   {
     Memory::FastCopy(tx.addr_, write_data.addr_, write_data.size_);
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                            static_cast<int32_t>(need_write));
-#endif
+    STM32_CleanDCacheByAddr(tx.addr_, need_write);
     ans = (HAL_SPI_Transmit(spi_handle_, static_cast<uint8_t*>(tx.addr_),
                             write_data.size_, 20) == HAL_OK)
               ? ErrorCode::OK
@@ -376,10 +365,7 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
     uint8_t* txb = reinterpret_cast<uint8_t*>(tx.addr_);
     Memory::FastSet(txb, 0, need_read + 1);
     txb[0] = static_cast<uint8_t>(reg | 0x80);
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                            static_cast<int32_t>(need_read + 1));
-#endif
+    STM32_CleanDCacheByAddr(tx.addr_, need_read + 1);
     read_buff_ = read_data;
 
     HAL_StatusTypeDef st =
@@ -407,10 +393,7 @@ ErrorCode STM32SPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bo
   uint8_t* txb = reinterpret_cast<uint8_t*>(tx.addr_);
   Memory::FastSet(txb, 0, need_read + 1);
   txb[0] = static_cast<uint8_t>(reg | 0x80);
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                          static_cast<int32_t>(need_read + 1));
-#endif
+  STM32_CleanDCacheByAddr(tx.addr_, need_read + 1);
 
   ErrorCode ans = (HAL_SPI_TransmitReceive(spi_handle_, static_cast<uint8_t*>(tx.addr_),
                                            static_cast<uint8_t*>(rx.addr_), need_read + 1,
@@ -457,10 +440,7 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
     uint8_t* txb = reinterpret_cast<uint8_t*>(tx.addr_);
     txb[0] = static_cast<uint8_t>(reg & 0x7F);
     Memory::FastCopy(txb + 1, write_data.addr_, need_write);
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                            static_cast<int32_t>(need_write + 1));
-#endif
+    STM32_CleanDCacheByAddr(tx.addr_, need_write + 1);
     read_buff_ = {nullptr, 0};
 
     HAL_StatusTypeDef st = HAL_SPI_Transmit_DMA(
@@ -486,10 +466,7 @@ ErrorCode STM32SPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW&
   uint8_t* txb = reinterpret_cast<uint8_t*>(tx.addr_);
   txb[0] = static_cast<uint8_t>(reg & 0x7F);
   Memory::FastCopy(txb + 1, write_data.addr_, need_write);
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_),
-                          static_cast<int32_t>(need_write + 1));
-#endif
+  STM32_CleanDCacheByAddr(tx.addr_, need_write + 1);
 
   ErrorCode ans = (HAL_SPI_Transmit(spi_handle_, static_cast<uint8_t*>(tx.addr_),
                                     need_write + 1, 20) == HAL_OK)
@@ -707,11 +684,8 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
       block_wait_.Start(*op.data.sem_info.sem);
     }
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_CleanDCache_by_Addr(static_cast<uint32_t*>(tx.addr_), static_cast<int32_t>(xfer));
-    SCB_InvalidateDCache_by_Addr(static_cast<uint32_t*>(rx.addr_),
-                                 static_cast<int32_t>(xfer));
-#endif
+    STM32_CleanDCacheByAddr(tx.addr_, xfer);
+    STM32_InvalidateDCacheByAddr(rx.addr_, xfer);
 
     HAL_StatusTypeDef st =
         HAL_SPI_TransmitReceive_DMA(spi_handle_, static_cast<uint8_t*>(tx.addr_),
@@ -740,10 +714,7 @@ ErrorCode STM32SPI::Transfer(size_t size, OperationRW& op, bool in_isr)
           ? ErrorCode::OK
           : ErrorCode::BUSY;
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_InvalidateDCache_by_Addr(static_cast<uint32_t*>(rx.addr_),
-                               static_cast<int32_t>(xfer));
-#endif
+  STM32_InvalidateDCacheByAddr(rx.addr_, xfer);
 
   SwitchBuffer();
 
@@ -789,16 +760,12 @@ extern "C" void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef* hspi)
   {
     if (!spi->mem_read_)
     {
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-      SCB_InvalidateDCache_by_Addr(rx.addr_, spi->read_buff_.size_);
-#endif
+      STM32_InvalidateDCacheByAddr(rx.addr_, spi->read_buff_.size_);
       Memory::FastCopy(spi->read_buff_.addr_, rx.addr_, spi->read_buff_.size_);
     }
     else
     {
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-      SCB_InvalidateDCache_by_Addr(rx.addr_, spi->read_buff_.size_ + 1);
-#endif
+      STM32_InvalidateDCacheByAddr(rx.addr_, spi->read_buff_.size_ + 1);
       uint8_t* rx_dma_buff = reinterpret_cast<uint8_t*>(rx.addr_);
       Memory::FastCopy(spi->read_buff_.addr_, rx_dma_buff + 1, spi->read_buff_.size_);
     }

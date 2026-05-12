@@ -1,4 +1,4 @@
-#include "msp.h"
+#include <ti/devices/msp/msp.h>
 
 static inline uint32_t atomic_enter(void)
 {

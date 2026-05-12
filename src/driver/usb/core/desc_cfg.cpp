@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "libxr_mem.hpp"
+
 using namespace LibXR::USB;
 
 namespace
@@ -57,14 +59,13 @@ size_t ConfigDescriptor::CalcMaxConfigSize(
   return calc_max_config_size(configs);
 }
 
-ErrorCode ConfigDescriptor::BuildConfigDescriptor(ConfigDescriptorItem* const* items,
-                                                  size_t item_num,
-                                                  uint8_t configuration_value,
-                                                  uint8_t i_configuration)
+LibXR::ErrorCode ConfigDescriptor::BuildConfigDescriptor(
+    ConfigDescriptorItem* const* items, size_t item_num, uint8_t configuration_value,
+    uint8_t i_configuration)
 {
   if (items == nullptr || item_num == 0)
   {
-    return ErrorCode::ARG_ERR;
+    return LibXR::ErrorCode::ARG_ERR;
   }
 
   uint8_t* buffer = reinterpret_cast<uint8_t*>(buffer_.addr_);
@@ -104,7 +105,7 @@ ErrorCode ConfigDescriptor::BuildConfigDescriptor(ConfigDescriptorItem* const* i
   header->bNumInterfaces = total_interfaces;
 
   buffer_index_ = offset;
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 LibXR::RawData ConfigDescriptor::GetData() const

@@ -90,7 +90,7 @@
 | SPI | ✅ |
 | I2C | ✅ |
 | CAN | ✅ |
-| CANFD | ❌ |
+| CANFD | 🚫 |
 | ADC | ❌ |
 | DAC | ❌ |
 | PWM | ✅ |
@@ -99,30 +99,6 @@
 
 | `Network` | CH32V307 |
 | ----------- | -------- |
-| WIFI Client | ❌ |
-| SmartConfig | ❌ |
-| Bluetooth | ❌ |
-
-## MSPM0 Support
-
-| `Peripheral` | MSPM0 |
-| ------------ | ----- |
-| POWER | ❌ |
-| GPIO | ✅ |
-| FLASH | ❌ |
-| UART | ✅ |
-| SPI | 🔄 |
-| I2C | 🔄 |
-| CAN | ❌ |
-| CANFD | 🚫 |
-| ADC | ❌ |
-| DAC | ❌ |
-| PWM | ✅ |
-| USB-DEVICE | ❌ |
-| WDG | ❌ |
-
-| `Network` | MSPM0 |
-| ----------- | ----- |
 | WIFI Client | ❌ |
 | SmartConfig | ❌ |
 | Bluetooth | ❌ |

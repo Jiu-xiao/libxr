@@ -88,7 +88,7 @@
 ## 使用方法示例
 
 ```sh
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 配置 LibXR
@@ -108,6 +108,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 ## 通用CMake配置
 
 ### 系统和驱动平台选择
+
+LibXR 当前以 C++20 为目标标准，请使用已经支持 `CMAKE_CXX_STANDARD 20` 的编译器/工具链。
 
 默认会自动识别宿主系统（Linux、Windows），自动设置 LIBXR_SYSTEM 和 LIBXR_DRIVER。你也可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定，分别对应[system](./system)和[driver](./driver)下的不同文件夹。
 
@@ -143,14 +145,6 @@ set(LIBXR_NO_EIGEN True)
 
 ```cmake
 set(LIBXR_DEFAULT_SCALAR float)
-```
-
-### 内部Printf缓冲区大小
-
-裸机/RTOS默认为128，Linux下默认为1024。此选项影响了LibXR::STDIO::Printf函数的缓冲区大小，设为0可以禁用所有log打印。
-
-```cmake
-set(LIBXR_PRINTF_BUFFER_SIZE 256)
 ```
 
 ### 日志消息最大长度

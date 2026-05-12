@@ -7,28 +7,28 @@ namespace LibXR
 {
 
 /**
- * @brief Terminal text format (Format) / 终端文本格式 (Format)
- * @details Defines text styles like NONE, RESET, BOLD, DARK, UNDERLINE, etc.
- *          定义文本样式，如NONE（无格式）、RESET（重置）、BOLD（加粗）、DARK（暗色）、UNDERLINE（下划线）等。
+ * @brief Terminal text style / 终端文本样式
+ * @details Defines ANSI text styles such as RESET, BOLD, DIM, and UNDERLINE.
+ *          定义 ANSI 文本样式，如 RESET（重置）、BOLD（加粗）、DIM（弱化）、UNDERLINE（下划线）等。
  */
-enum class Format : uint8_t
+enum class Style : uint8_t
 {
   NONE = 0,
   RESET,
   BOLD,
-  DARK,
+  DIM,
   UNDERLINE,
   BLINK,
   REVERSE,
   CONCEALED,
-  CLEAR_LINE,
+  ERASE_LINE,
   COUNT
 };
 
 /**
- * @brief Terminal font color (Font) / 终端字体颜色 (Font)
+ * @brief Terminal foreground color / 终端前景色
  */
-enum class Font : uint8_t
+enum class Foreground : uint8_t
 {
   NONE = 0,
   BLACK,
@@ -43,7 +43,7 @@ enum class Font : uint8_t
 };
 
 /**
- * @brief Terminal background color (Background) / 终端背景颜色 (Background)
+ * @brief Terminal background color / 终端背景色
  */
 enum class Background : uint8_t
 {
@@ -60,32 +60,32 @@ enum class Background : uint8_t
 };
 
 /**
- * @brief Terminal bold style (Bold) / 终端粗体样式 (Bold)
- * @details Optional bold styles like yellow bold, red bold, red background bold.
- *          可选粗体样式，包括黄色粗体、红色粗体、红色背景粗体等。
+ * @brief Terminal text preset / 终端文本预设
+ * @details Precomposed ANSI presets such as yellow bold, red bold, and bold on red.
+ *          预组合的 ANSI 文本预设，例如黄色粗体、红色粗体、红底粗体等。
  */
-enum class Bold : uint8_t
+enum class Preset : uint8_t
 {
   NONE = 0,
-  YELLOW,
-  RED,
-  ON_RED,
+  YELLOW_BOLD,
+  RED_BOLD,
+  BOLD_ON_RED,
   COUNT
 };
 
 /**
- * @brief ANSI escape sequences for text format / ANSI转义序列 - 文本格式
+ * @brief ANSI escape sequences for text styles / ANSI转义序列 - 文本样式
  */
-inline constexpr const char* LIBXR_FORMAT_STR[] = {"",        "\033[m",  "\033[1m",
-                                                   "\033[2m", "\033[4m", "\033[5m",
-                                                   "\033[7m", "\033[8m", "\033[K"};
+inline constexpr const char* LIBXR_STYLE_STR[] = {"",        "\033[m",  "\033[1m",
+                                                  "\033[2m", "\033[4m", "\033[5m",
+                                                  "\033[7m", "\033[8m", "\033[K"};
 
 /**
- * @brief ANSI escape sequences for font color / ANSI转义序列 - 字体颜色
+ * @brief ANSI escape sequences for foreground colors / ANSI转义序列 - 前景色
  */
-inline constexpr const char* LIBXR_FONT_STR[] = {"",         "\033[30m", "\033[31m",
-                                                 "\033[32m", "\033[33m", "\033[34m",
-                                                 "\033[35m", "\033[36m", "\033[37m"};
+inline constexpr const char* LIBXR_FOREGROUND_STR[] = {
+    "",         "\033[30m", "\033[31m", "\033[32m", "\033[33m",
+    "\033[34m", "\033[35m", "\033[36m", "\033[37m"};
 
 /**
  * @brief ANSI escape sequences for background color / ANSI转义序列 - 背景颜色
@@ -95,10 +95,10 @@ inline constexpr const char* LIBXR_BACKGROUND_STR[] = {
     "\033[44m", "\033[45m", "\033[46m", "\033[47m"};
 
 /**
- * @brief ANSI escape sequences for bold styles / ANSI转义序列 - 粗体样式
+ * @brief ANSI escape sequences for text presets / ANSI转义序列 - 文本预设
  */
-inline constexpr const char* LIBXR_BOLD_STR[] = {"", "\033[33m\033[1m", "\033[31m\033[1m",
-                                                 "\033[1m\033[41m"};
+inline constexpr const char* LIBXR_PRESET_STR[] = {
+    "", "\033[33m\033[1m", "\033[31m\033[1m", "\033[1m\033[41m"};
 
 }  // namespace LibXR
 

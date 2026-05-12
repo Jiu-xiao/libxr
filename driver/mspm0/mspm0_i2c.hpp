@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dl_i2c.h"
+#include <ti/driverlib/dl_i2c.h>
 #include "i2c.hpp"
 #include "ti_msp_dl_config.h"
 

@@ -2,6 +2,7 @@
 #include <cstring>
 
 #include "dev_core.hpp"
+#include "libxr_mem.hpp"
 #include "usb/core/desc_cfg.hpp"
 
 namespace LibXR::USB

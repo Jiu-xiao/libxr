@@ -13,6 +13,7 @@
 #include "gpio.hpp"
 #include "gs_usb_protocol.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"
 

@@ -1,5 +1,7 @@
 #include "double_buffer.hpp"
 
+#include "libxr_mem.hpp"
+
 using namespace LibXR;
 
 DoubleBuffer::DoubleBuffer(const LibXR::RawData& raw_data) : SIZE(raw_data.size_ / 2)

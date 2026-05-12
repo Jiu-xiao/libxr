@@ -75,7 +75,7 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
 
 void ESP32USBEndpoint::Close()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (GetDirection() == Direction::IN)
@@ -122,7 +122,7 @@ ErrorCode ESP32USBEndpoint::Stall()
     return ErrorCode::BUSY;
   }
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (is_in)
@@ -154,7 +154,7 @@ ErrorCode ESP32USBEndpoint::Stall()
 
 ErrorCode ESP32USBEndpoint::ClearStall()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (GetDirection() == Direction::IN)
@@ -249,7 +249,7 @@ void ESP32USBEndpoint::HandleInInterrupt(bool in_isr)
 {
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   usb_dwc_diepint_reg_t intr = {};
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
 
   if (ep_num == 0U)
   {
@@ -315,7 +315,7 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
 {
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   usb_dwc_doepint_reg_t intr = {};
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
 
   if (ep_num == 0U)
   {
@@ -361,7 +361,7 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
     if (device_.DmaEnabled())
     {
       ASSERT(Detail::CacheSyncDmaBuffer(device_.setup_packet_,
-                                        ESP32USBDevice::kSetupDmaBufferBytes, false));
+                                        ESP32USBDevice::SETUP_DMA_BUFFER_BYTES, false));
     }
     device_.UpdateSetupState(device_.setup_packet_);
     const auto* setup = reinterpret_cast<const USB::SetupPacket*>(device_.setup_packet_);
@@ -405,8 +405,8 @@ void ESP32USBEndpoint::HandleRxData(size_t size)
   if (copy_size > 0U)
   {
     Detail::ReadFifoPacket(
-        Detail::GetEndpointFifo(reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase),
-                                0),
+        Detail::GetEndpointFifo(
+            reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE), 0),
         dst, copy_size);
     transfer_actual_size_ += copy_size;
   }
@@ -419,7 +419,7 @@ void ESP32USBEndpoint::HandleRxData(size_t size)
   uint8_t sink[64] = {};
   size_t remain_drop = drop_size;
   auto* fifo = Detail::GetEndpointFifo(
-      reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase), 0);
+      reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE), 0);
   while (remain_drop > 0U)
   {
     const size_t chunk = std::min(remain_drop, sizeof(sink));
@@ -435,7 +435,7 @@ void ESP32USBEndpoint::ObserveDmaRxStatus(uint8_t pktsts, size_t size)
     return;
   }
 
-  if (pktsts != Detail::kRxStatusData)
+  if (pktsts != Detail::RX_STATUS_DATA)
   {
     return;
   }
@@ -459,7 +459,7 @@ void ESP32USBEndpoint::ResetTransferState()
 
 bool ESP32USBEndpoint::EnsureDmaShadow(size_t size)
 {
-  const size_t need = Detail::AlignUp(size, Detail::kUsbDmaAlignment);
+  const size_t need = Detail::AlignUp(size, Detail::USB_DMA_ALIGNMENT);
   if (need == 0U)
   {
     return true;
@@ -471,7 +471,7 @@ bool ESP32USBEndpoint::EnsureDmaShadow(size_t size)
   }
 
   void* new_buffer =
-      heap_caps_aligned_alloc(Detail::kUsbDmaAlignment, need, Detail::kDmaMemoryCaps);
+      heap_caps_aligned_alloc(Detail::USB_DMA_ALIGNMENT, need, Detail::DMA_MEMORY_CAPS);
   if (new_buffer == nullptr)
   {
     return false;
@@ -528,11 +528,11 @@ bool ESP32USBEndpoint::PrepareTransferBuffer(size_t size)
     ASSERT(transfer_buffer_ != nullptr);
     std::memcpy(transfer_hw_buffer_, transfer_buffer_, size);
     return Detail::CacheSyncDmaBuffer(
-        transfer_hw_buffer_, Detail::AlignUp(size, Detail::kUsbDmaAlignment), true);
+        transfer_hw_buffer_, Detail::AlignUp(size, Detail::USB_DMA_ALIGNMENT), true);
   }
 
   return Detail::CacheSyncDmaBuffer(
-      transfer_hw_buffer_, Detail::AlignUp(size, Detail::kUsbDmaAlignment), false);
+      transfer_hw_buffer_, Detail::AlignUp(size, Detail::USB_DMA_ALIGNMENT), false);
 }
 
 bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
@@ -559,7 +559,7 @@ bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
   ASSERT(transfer_buffer_ != nullptr);
 
   if (!Detail::CacheSyncDmaBuffer(transfer_hw_buffer_,
-                                  Detail::AlignUp(actual_size, Detail::kUsbDmaAlignment),
+                                  Detail::AlignUp(actual_size, Detail::USB_DMA_ALIGNMENT),
                                   false))
   {
     return false;
@@ -571,7 +571,7 @@ bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
 
 size_t ESP32USBEndpoint::GetRemainingTransferSize() const
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (GetDirection() == Direction::IN)
@@ -604,7 +604,7 @@ size_t ESP32USBEndpoint::GetCompletedTransferSize() const
 
 void ESP32USBEndpoint::ActivateHardwareEndpoint()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   auto& cfg = GetConfig();
 
@@ -656,7 +656,7 @@ void ESP32USBEndpoint::ActivateHardwareEndpoint()
 
 void ESP32USBEndpoint::ProgramTransfer(size_t size)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   const uint16_t pkt_count = Detail::PacketCount(size, MaxPacketSize());
 
@@ -734,7 +734,7 @@ void ESP32USBEndpoint::WriteMoreTxData()
     return;
   }
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   const volatile uint32_t* fifo = Detail::GetEndpointFifo(dev, ep_num);
 

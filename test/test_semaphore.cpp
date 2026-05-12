@@ -2,14 +2,16 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
+#if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include <pthread.h>
+#endif
 
 namespace
 {
 
 void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
-#if defined(LIBXR_SYSTEM_Linux) || defined(LIBXR_SYSTEM_Webots)
+#if defined(LIBXR_SYSTEM_POSIX_HOST)
   pthread_join(thread, nullptr);
 #else
   UNUSED(thread);
@@ -23,13 +25,13 @@ void test_semaphore()
   LibXR::Semaphore sem(0);
   LibXR::Thread thread;
 
-  ASSERT(sem.Wait(0) == ErrorCode::TIMEOUT);
+  ASSERT(sem.Wait(0) == LibXR::ErrorCode::TIMEOUT);
 
   sem.Post();
   sem.Post();
-  ASSERT(sem.Wait(0) == ErrorCode::OK);
-  ASSERT(sem.Wait(0) == ErrorCode::OK);
-  ASSERT(sem.Wait(0) == ErrorCode::TIMEOUT);
+  ASSERT(sem.Wait(0) == LibXR::ErrorCode::OK);
+  ASSERT(sem.Wait(0) == LibXR::ErrorCode::OK);
+  ASSERT(sem.Wait(0) == LibXR::ErrorCode::TIMEOUT);
 
   thread.Create<LibXR::Semaphore*>(
       &sem,
@@ -41,6 +43,6 @@ void test_semaphore()
       },
       "semaphore_thread", 512, LibXR::Thread::Priority::REALTIME);
 
-  ASSERT(sem.Wait(200) == ErrorCode::OK);
+  ASSERT(sem.Wait(200) == LibXR::ErrorCode::OK);
   JoinThreadIfNeeded(thread);
 }

@@ -6,9 +6,9 @@
 
 namespace
 {
-constexpr uint32_t kUartRxIntrMask =
+constexpr uint32_t UART_RX_INTR_MASK =
     UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF;
-constexpr uint32_t kUartTxIntrMask = UART_INTR_TXFIFO_EMPTY;
+constexpr uint32_t UART_TX_INTR_MASK = UART_INTR_TXFIFO_EMPTY;
 }  // namespace
 
 namespace LibXR
@@ -33,12 +33,12 @@ ErrorCode ESP32UART::InstallUartIsr()
 #if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S3
   // Classic ESP32/S3 can enter cache-disabled flash windows while UART IRQ is active.
   // The current WritePort path is not fully IRAM-safe, so keep this IRQ non-IRAM.
-  constexpr int kUartIntrFlags = 0;
+  constexpr int UART_INTR_FLAGS = 0;
 #else
-  constexpr int kUartIntrFlags = ESP_INTR_FLAG_IRAM;
+  constexpr int UART_INTR_FLAGS = ESP_INTR_FLAG_IRAM;
 #endif
 
-  const esp_err_t err = esp_intr_alloc(uart_periph_signal[uart_num_].irq, kUartIntrFlags,
+  const esp_err_t err = esp_intr_alloc(uart_periph_signal[uart_num_].irq, UART_INTR_FLAGS,
                                        UartIsrEntry, this, &uart_intr_handle_);
   if (err != ESP_OK)
   {
@@ -204,12 +204,12 @@ void IRAM_ATTR ESP32UART::HandleUartInterrupt()
 
   while (uart_intr_status != 0)
   {
-    if (uart_intr_status & kUartRxIntrMask)
+    if (uart_intr_status & UART_RX_INTR_MASK)
     {
       HandleRxInterrupt(uart_intr_status);
     }
 
-    if (uart_intr_status & kUartTxIntrMask)
+    if (uart_intr_status & UART_TX_INTR_MASK)
     {
       HandleTxInterrupt(uart_intr_status);
     }

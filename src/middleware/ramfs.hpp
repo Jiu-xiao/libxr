@@ -1,10 +1,11 @@
 #pragma once
 
-#include <functional>
+#include <cstring>
+#include <type_traits>
+#include <utility>
 
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
-#include "libxr_rw.hpp"
 #include "libxr_type.hpp"
 #include "rbt.hpp"
 
@@ -12,469 +13,503 @@ namespace LibXR
 {
 /**
  * @class RamFS
- * @brief  轻量级的内存文件系统，实现基本的文件、目录和设备管理
- *         A lightweight in-memory file system implementing basic file, directory, and
- * device management
+ * @brief 轻量级内存文件系统 / Lightweight in-memory file system
+ *
+ * RamFS 组织外部内存文件、可执行文件、目录和自定义节点 / RamFS organizes
+ * external-memory files, executable files, directories, and custom nodes.
+ * 文件数据由调用方持有 / File payload storage is owned by the caller.
  */
 class RamFS
 {
  public:
   /**
-   * @brief  构造函数，初始化内存文件系统的根目录
-   *         Constructor that initializes the root directory of the in-memory file system
-   * @param  name 根目录的名称（默认为 "ramfs"）
-   *         Name of the root directory (default: "ramfs")
+   * @brief 构造 RamFS，并创建根目录和 `bin` 目录 / Construct RamFS with root and `bin`
+   * directories
+   * @param name 根目录名称 / Root directory name
+   *
+   * @note 包含动态内存分配 / Contains dynamic memory allocation
    */
   RamFS(const char* name = "ramfs");
 
   /**
-   * @brief  比较两个字符串
-   *         Compares two strings
-   * @param  a 字符串 A String A
-   * @param  b 字符串 B String B
-   * @return int 比较结果 Comparison result
-   */
-  static int CompareStr(const char* const& a, const char* const& b);
-
-  /**
-   * @enum FsNodeType
-   * @brief  文件系统节点类型
-   *         Types of file system nodes
+   * @brief 文件系统节点类型 / File-system node type
    */
   enum class FsNodeType : uint8_t
   {
-    FILE,     ///< 文件 File
-    DIR,      ///< 目录 Directory
-    DEVICE,   ///< 设备 Device
-    STORAGE,  ///< 存储 Storage
-    UNKNOWN,  ///< 未知 Unknown
-  };
-
-  /**
-   * @enum FileType
-   * @brief  文件类型
-   *         Types of files
-   */
-  enum class FileType : uint8_t
-  {
-    READ_ONLY,   ///< 只读 Read-only
-    READ_WRITE,  ///< 读写 Read/Write
-    EXEC,        ///< 可执行 Executable
+    FILE,    ///< 文件 / File
+    DIR,     ///< 目录 / Directory
+    CUSTOM,  ///< 用户自定义节点 / User-defined node
   };
 
   class Dir;
 
+ private:
+  using Tree = RBTree<const char*>;
+  enum class FileType : uint8_t
+  {
+    READ_ONLY,
+    READ_WRITE,
+    EXEC,
+  };
+
+  static int CompareStr(const char* const& a, const char* const& b);
+
+ public:
   /**
    * @class FsNode
-   * @brief  文件系统节点基类，所有文件和目录均继承自该类
-   *         Base class for file system nodes; all files and directories inherit from this
+   * @brief 文件系统节点基类 / Base class for all RamFS nodes
    */
   class FsNode
   {
    public:
-    const char* name;
-    FsNodeType type;
-    Dir* parent;
+    /**
+     * @brief 获取节点类型 / Get the node type
+     * @return 节点类型 / Node type
+     */
+    [[nodiscard]] FsNodeType GetNodeType() const { return type_; }
+
+    /**
+     * @brief 获取节点名称 / Get the node name
+     * @return 节点名称 / Node name
+     */
+    [[nodiscard]] const char* GetName() const { return name_; }
+
+   protected:
+    const char* name_ = nullptr;
+    FsNodeType type_;
+    Dir* parent_ = nullptr;
+
+    explicit FsNode(FsNodeType node_type);
+    FsNode(const FsNode& other);
+    FsNode& operator=(const FsNode&) = delete;
+
+    Tree::Node<FsNode*> tree_node_;
+
+    friend class Dir;
   };
 
   /**
-   * @class FileNode
-   * @brief  文件节点类，继承自 FsNode，表示文件
-   *         File node class, inheriting from FsNode, representing a file
+   * @class File
+   * @brief 内存文件或可执行文件 / Memory file or executable file
    */
-  typedef class FileNode : public FsNode
+  class File : public FsNode
   {
    public:
-    union
-    {
-      void* addr;              ///< 读写地址 Read/Write address
-      const void* addr_const;  ///< 只读地址 Read-only address
-      int (*exec)(void* raw, int argc,
-                  char** argv);  ///< 可执行文件指针 Executable function pointer
-    };
-
-    union
-    {
-      size_t size;  ///< 文件大小 File size
-      void* arg;    ///< 可执行文件参数 Executable file argument
-    };
-
-    FileType type;  ///< 文件类型 File type
+    /**
+     * @brief 判断文件是否只读 / Check whether the file is read-only
+     * @return 只读返回 true / True if the file is read-only
+     */
+    [[nodiscard]] bool IsReadOnly() const { return file_type_ == FileType::READ_ONLY; }
 
     /**
-     * @brief  运行可执行文件
-     *         Runs an executable file
-     * @param  argc 参数数量 Number of arguments
-     * @param  argv 参数列表 Argument list
-     * @return int 执行结果 Execution result
+     * @brief 判断文件是否可写 / Check whether the file is writable
+     * @return 可写返回 true / True if the file is writable
+     */
+    [[nodiscard]] bool IsReadWrite() const { return file_type_ == FileType::READ_WRITE; }
+
+    /**
+     * @brief 判断文件是否可执行 / Check whether the file is executable
+     * @return 可执行返回 true / True if the file is executable
+     */
+    [[nodiscard]] bool IsExecutable() const { return file_type_ == FileType::EXEC; }
+
+    /**
+     * @brief 执行可执行文件 / Run an executable file
+     * @param argc 参数数量 / Argument count
+     * @param argv 参数数组 / Argument vector
+     * @return 执行返回值 / Execution return value
      */
     int Run(int argc, char** argv);
 
     /**
-     * @brief  获取文件数据
-     *         Retrieves file data
-     * @tparam DataType 数据类型 Data type
-     * @tparam LimitMode 大小限制模式 Size limit mode (默认：MORE)
-     * @return const DataType& 数据引用 Reference to the data
+     * @brief 访问类型化数据 / Access typed data
+     *
+     * `Data<T>()` 返回可写引用并要求 READ_WRITE / `Data<T>()` returns a writable
+     * reference and requires READ_WRITE.
+     * `Data<const T>()` 返回只读引用 / `Data<const T>()` returns a read-only
+     * reference for both READ_ONLY and READ_WRITE.
+     *
+     * @tparam DataType 数据类型；使用 const T 表示只读访问 / Data type; use const T
+     *                  for read-only access.
+     * @tparam LimitMode 大小检查模式 / Size-check mode
+     * @return 类型化数据引用 / Typed data reference
      */
     template <typename DataType, SizeLimitMode LimitMode = SizeLimitMode::MORE>
-    const DataType& GetData()
+    decltype(auto) Data()
     {
-      LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(DataType), size);
-      if (type == FileType::READ_WRITE)
+      using RequestedType = std::remove_reference_t<DataType>;
+      using StoredType = std::remove_cv_t<RequestedType>;
+      static_assert(!std::is_reference_v<DataType>);
+      static_assert(!std::is_volatile_v<RequestedType>);
+
+      LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(StoredType), size_);
+      if constexpr (std::is_const_v<RequestedType>)
       {
-        return *reinterpret_cast<DataType*>(addr);
-      }
-      else if (type == FileType::READ_ONLY)
-      {
-        return *reinterpret_cast<const DataType*>(addr_const);
+        if (file_type_ == FileType::READ_WRITE)
+        {
+          return *static_cast<const StoredType*>(addr_);
+        }
+        if (file_type_ == FileType::READ_ONLY)
+        {
+          return *static_cast<const StoredType*>(addr_const_);
+        }
+
+        ASSERT(false);
+        const void* null_data = nullptr;
+        return *static_cast<const StoredType*>(null_data);
       }
       else
       {
-        ASSERT(false);
-        const void* addr = nullptr;
-        return *reinterpret_cast<const DataType*>(addr);
+        ASSERT(file_type_ == FileType::READ_WRITE);
+        return *static_cast<StoredType*>(addr_);
       }
     }
-  } FileNode;
-
-  typedef RBTree<const char*>::Node<FileNode> File;
-
-  /**
-   * @class DeviceNode
-   * @brief  设备节点，继承自 FsNode
-   *         Device node, inheriting from FsNode
-   */
-  struct DeviceNode : public FsNode
-  {
-    ReadPort read_port;    ///< 读端口 Read port
-    WritePort write_port;  ///< 写端口 Write port
-  };
-
-  /**
-   * @class Device
-   * @brief  设备类，继承自红黑树节点 DeviceNode
-   *         Device class inheriting from Red-Black tree node DeviceNode
-   */
-  class Device : public RBTree<const char*>::Node<DeviceNode>
-  {
-   public:
-    /**
-     * @brief  设备构造函数
-     *         Device constructor
-     * @param  name 设备名称 Device name
-     * @param  read_port 读取端口（默认 ReadPort()）Read port (default: ReadPort())
-     * @param  write_port 写入端口（默认 WritePort()）Write port (default: WritePort())
-     */
-    Device(const char* name, const ReadPort& read_port = ReadPort(),
-           const WritePort& write_port = WritePort());
 
     /**
-     * @brief  读取设备数据
-     *         Reads data from the device
-     * @tparam ReadOperation 读取操作类型 Read operation type
-     * @param  op 读取操作 Read operation
-     * @param  data 读取数据 Data to be read
-     * @return ErrorCode 错误码 Error code
+     * @brief 从 const 文件对象访问类型化只读数据 / Access typed read-only data from a
+     * const file object
+     *
+     * @tparam DataType 数据类型 / Data type
+     * @tparam LimitMode 大小检查模式 / Size-check mode
+     * @return 类型化只读数据引用 / Typed read-only data reference
      */
-    template <typename ReadOperation>
-    ErrorCode Read(ReadOperation&& op, RawData data)
+    template <typename DataType, SizeLimitMode LimitMode = SizeLimitMode::MORE>
+    decltype(auto) Data() const
     {
-      return data_.read_port(data, std::forward<ReadOperation>(op));
+      using RequestedType = std::remove_reference_t<DataType>;
+      using StoredType = std::remove_cv_t<RequestedType>;
+      static_assert(!std::is_reference_v<DataType>);
+      static_assert(!std::is_volatile_v<RequestedType>);
+
+      LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(StoredType), size_);
+      if (file_type_ == FileType::READ_WRITE)
+      {
+        return *static_cast<const StoredType*>(addr_);
+      }
+      if (file_type_ == FileType::READ_ONLY)
+      {
+        return *static_cast<const StoredType*>(addr_const_);
+      }
+
+      ASSERT(false);
+      const void* null_data = nullptr;
+      return *static_cast<const StoredType*>(null_data);
     }
 
     /**
-     * @brief  向设备写入数据
-     *         Writes data to the device
-     * @tparam WriteOperation 写入操作类型 Write operation type
-     * @param  op 写入操作 Write operation
-     * @param  data 写入数据 Data to be written
-     * @return ErrorCode 错误码 Error code
+     * @brief 访问可写原始数据，要求文件为 READ_WRITE / Access writable raw data;
+     * requires READ_WRITE
+     * @return 可写原始数据视图 / Writable raw data view
      */
-    template <typename WriteOperation>
-    ErrorCode Write(WriteOperation&& op, ConstRawData data)
+    [[nodiscard]] RawData Data()
     {
-      return data_.write_port(data, std::forward<WriteOperation>(op));
+      ASSERT(file_type_ == FileType::READ_WRITE);
+      return RawData(addr_, size_);
     }
 
-    uint32_t device_type;  ///< 设备类型 Device type
+    /**
+     * @brief 访问只读原始数据 / Access read-only raw data
+     * @return 只读原始数据视图 / Read-only raw data view
+     */
+    [[nodiscard]] ConstRawData Data() const
+    {
+      if (file_type_ == FileType::READ_WRITE)
+      {
+        return ConstRawData(addr_, size_);
+      }
+      if (file_type_ == FileType::READ_ONLY)
+      {
+        return ConstRawData(addr_const_, size_);
+      }
+      ASSERT(false);
+      return ConstRawData();
+    }
+
+   private:
+    using ExecFun = int (*)(void* raw, int argc, char** argv);
+
+    File();
+    explicit File(const char* name);
+
+    union
+    {
+      void* addr_;
+      const void* addr_const_;
+      ExecFun exec_;
+    };
+
+    void* arg_ = nullptr;
+    size_t size_ = 0;
+    FileType file_type_ = FileType::READ_ONLY;
+
+    friend class RamFS;
   };
 
-  typedef struct
-  {
-    // TODO:
-    uint32_t res;
-  } StorageBlock;
-
   /**
-   * @class DirNode
-   * @brief  目录节点，继承自 FsNode
-   *         Directory node, inheriting from FsNode
+   * @class Custom
+   * @brief 用户自定义节点，RamFS 仅负责命名和查找 / User-defined node; RamFS only
+   * stores and finds it by name
    */
-  class DirNode : public FsNode
+  class Custom : public FsNode
   {
    public:
-    DirNode() : rbt(RBTree<const char*>(CompareStr)) {}
+    /**
+     * @brief 构造自定义节点 / Construct a custom node
+     * @param name 节点名称 / Node name
+     * @param kind 用户定义类型 / User-defined kind
+     * @param context 用户上下文指针 / User context pointer
+     *
+     * @note 包含动态内存分配 / Contains dynamic memory allocation
+     */
+    explicit Custom(const char* name, uint32_t kind = 0, void* context = nullptr);
 
-    RBTree<const char*> rbt;  ///< 目录中的文件树 File tree in the directory
+    uint32_t kind_ = 0;        ///< 用户定义类型 / User-defined kind
+    void* context_ = nullptr;  ///< 用户上下文指针 / User context pointer
+
+   private:
+    Custom();
   };
 
   /**
    * @class Dir
-   * @brief  目录类，继承自 RBTree 节点，用于管理文件、子目录和设备
-   *         Directory class, inheriting from RBTree node, used for managing files,
-   * subdirectories, and devices
+   * @brief 目录节点，管理直属子节点 / Directory node that owns a child namespace
    */
-  class Dir : public RBTree<const char*>::Node<DirNode>
+  class Dir : public FsNode
   {
    public:
     /**
-     * @brief  添加文件到当前目录
-     *         Adds a file to the current directory
-     * @param  file 要添加的文件 The file to be added
+     * @brief 添加直属文件节点 / Add a direct child file node
+     * @param file 文件节点 / File node
      */
-    void Add(File& file)
-    {
-      (*this)->rbt.Insert(file, file->name);
-      file->parent = this;
-    }
-    /**
-     * @brief  添加子目录到当前目录
-     *         Adds a subdirectory to the current directory
-     * @param  dir 要添加的子目录 The subdirectory to be added
-     */
-    void Add(Dir& dir)
-    {
-      (*this)->rbt.Insert(dir, dir->name);
-      dir->parent = this;
-    }
-    /**
-     * @brief  添加设备到当前目录
-     *         Adds a device to the current directory
-     * @param  dev 要添加的设备 The device to be added
-     */
-    void Add(Device& dev)
-    {
-      (*this)->rbt.Insert(dev, dev->name);
-      dev->parent = this;
-    }
+    void Add(File& file) { AddNode(file); }
 
     /**
-     * @brief  查找当前目录中的文件
-     *         Finds a file in the current directory
-     * @param  name 文件名 The name of the file
-     * @return File* 指向文件的指针，如果未找到则返回 nullptr
-     *         Pointer to the file, returns nullptr if not found
+     * @brief 添加直属目录节点 / Add a direct child directory node
+     * @param dir 目录节点 / Directory node
+     */
+    void Add(Dir& dir) { AddNode(dir); }
+
+    /**
+     * @brief 添加直属自定义节点 / Add a direct child custom node
+     * @param custom 自定义节点 / Custom node
+     */
+    void Add(Custom& custom) { AddNode(custom); }
+
+    /**
+     * @brief 查找直属子节点 / Find a direct child node
+     * @param name 节点名称 / Node name
+     * @return 子节点指针；未找到返回 nullptr / Child node pointer, or nullptr
+     */
+    FsNode* FindNode(const char* name);
+
+    /**
+     * @brief 查找直属文件 / Find a direct child file
+     * @param name 文件名 / File name
+     * @return 文件指针；未找到返回 nullptr / File pointer, or nullptr
      */
     File* FindFile(const char* name);
 
     /**
-     * @brief  递归查找文件
-     *         Recursively searches for a file
-     * @param  name 文件名 The name of the file
-     * @return File* 指向文件的指针，如果未找到则返回 nullptr
-     *         Pointer to the file, returns nullptr if not found
+     * @brief 递归查找文件 / Find a file recursively
+     * @param name 文件名 / File name
+     * @return 文件指针；未找到返回 nullptr / File pointer, or nullptr
      */
     File* FindFileRev(const char* name);
 
     /**
-     * @brief  查找当前目录中的子目录
-     *         Finds a subdirectory in the current directory
-     * @param  name 目录名 The name of the directory
-     * @return Dir* 指向目录的指针，如果未找到则返回 nullptr
-     *         Pointer to the directory, returns nullptr if not found
+     * @brief 查找直属目录，支持 "." 和 ".." / Find a direct child directory,
+     * supporting "." and ".."
+     * @param name 目录名 / Directory name
+     * @return 目录指针；未找到返回 nullptr / Directory pointer, or nullptr
      */
     Dir* FindDir(const char* name);
 
     /**
-     * @brief  递归查找子目录
-     *         Recursively searches for a subdirectory
-     * @param  name 目录名 The name of the directory
-     * @return Dir* 指向目录的指针，如果未找到则返回 nullptr
-     *         Pointer to the directory, returns nullptr if not found
+     * @brief 递归查找目录，支持 "." 和 ".." / Find a directory recursively,
+     * supporting "." and ".."
+     * @param name 目录名 / Directory name
+     * @return 目录指针；未找到返回 nullptr / Directory pointer, or nullptr
      */
     Dir* FindDirRev(const char* name);
 
     /**
-     * @brief  递归查找设备
-     *         Recursively searches for a device
-     * @param  name 设备名 The name of the device
-     * @return Device* 指向设备的指针，如果未找到则返回 nullptr
-     *         Pointer to the device, returns nullptr if not found
+     * @brief 查找直属自定义节点 / Find a direct child custom node
+     * @param name 节点名称 / Node name
+     * @return 自定义节点指针；未找到返回 nullptr / Custom node pointer, or nullptr
      */
-    Device* FindDeviceRev(const char* name);
+    Custom* FindCustom(const char* name);
 
     /**
-     * @brief  在当前目录中查找设备
-     *         Finds a device in the current directory
-     * @param  name 设备名 The name of the device
-     * @return Device* 指向设备的指针，如果未找到则返回 nullptr
-     *         Pointer to the device, returns nullptr if not found
+     * @brief 递归查找自定义节点 / Find a custom node recursively
+     * @param name 节点名称 / Node name
+     * @return 自定义节点指针；未找到返回 nullptr / Custom node pointer, or nullptr
      */
-    Device* FindDevice(const char* name);
+    Custom* FindCustomRev(const char* name);
+
+    /**
+     * @brief 遍历直属子节点 / Iterate over direct child nodes
+     * @tparam Func 回调类型 / Callback type
+     * @param func 回调函数，返回非 OK 时停止遍历 / Callback; non-OK stops iteration
+     * @return 遍历结果 / Iteration result
+     */
+    template <typename Func>
+    ErrorCode Foreach(Func func)
+    {
+      return rbt_.Foreach<FsNode*>([&](Tree::Node<FsNode*>& node)
+                                   { return func(*node.data_); });
+    }
+
+   private:
+    Dir();
+    explicit Dir(const char* name);
+
+    void AddNode(FsNode& node);
+    FsNode* FindNodeByType(const char* name, FsNodeType type);
+    FsNode* FindNodeRevByType(const char* name, FsNodeType type);
+
+    Tree rbt_;
+
+    friend class RamFS;
   };
 
   /**
-   * @brief  创建一个新的文件
-   *         Creates a new file
-   * @tparam DataType 文件存储的数据类型 Data type stored in the file
-   * @param  name 文件名 The name of the file
-   * @param  raw 文件存储的数据 Data stored in the file
-   * @return File 创建的文件对象 The created file object
+   * @brief 创建引用外部数据的文件 / Create a file referencing external data
+   * @tparam DataType 外部数据类型 / External data type
+   * @param name 文件名 / File name
+   * @param raw 外部数据引用 / External data reference
+   * @return 文件节点 / File node
    *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * @note 包含动态内存分配 / Contains dynamic memory allocation
    */
   template <typename DataType>
   static File CreateFile(const char* name, DataType& raw)
   {
-    File file;
-    char* name_buff = new char[strlen(name) + 1];
-    strcpy(name_buff, name);
-    file->name = name_buff;
+    using StoredType = std::remove_reference_t<DataType>;
 
-    if (std::is_const<DataType>())
+    File file(name);
+    if constexpr (std::is_const_v<StoredType>)
     {
-      file->type = FileType::READ_ONLY;
-      file->addr_const = &raw;
+      file.file_type_ = FileType::READ_ONLY;
+      file.addr_const_ = &raw;
     }
     else
     {
-      file->type = FileType::READ_WRITE;
-      file->addr = &raw;
+      file.file_type_ = FileType::READ_WRITE;
+      file.addr_ = &raw;
     }
 
-    file->size = sizeof(DataType);
-
+    file.size_ = sizeof(StoredType);
     return file;
   }
 
   /**
-   * @brief  创建一个可执行文件
-   *         Creates an executable file
-   * @tparam ArgType 可执行文件的参数类型 The argument type for the executable file
-   * @param  name 文件名 The name of the file
-   * @param  exec 可执行函数 The executable function
-   * @param  arg 可执行文件的参数 The argument for the executable file
-   * @return File 创建的可执行文件对象 The created executable file object
+   * @brief 创建可执行文件 / Create an executable file
+   * @tparam ArgType 执行上下文参数类型 / Execution context argument type
+   * @param name 文件名 / File name
+   * @param exec 执行函数 / Execution function
+   * @param arg 执行上下文参数 / Execution context argument
+   * @return 可执行文件节点 / Executable file node
    *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * @note 包含动态内存分配 / Contains dynamic memory allocation
    */
   template <typename ArgType>
   static File CreateFile(const char* name,
                          int (*exec)(ArgType arg, int argc, char** argv), ArgType&& arg)
   {
-    typedef struct
+    using StoredArgType = std::remove_reference_t<ArgType>;
+    struct ExecutableBlock
     {
-      ArgType arg;
-      decltype(exec) exec_fun;
-    } FileBlock;
-
-    File file;
-
-    char* name_buff = new char[strlen(name) + 1];
-    strcpy(name_buff, name);
-    file->name = name_buff;
-    file->type = FileType::EXEC;
-
-    auto block = new FileBlock;
-    block->arg = std::forward<ArgType>(arg);
-    block->exec_fun = exec;
-    file->arg = block;
-
-    auto fun = [](void* arg, int argc, char** argv)
-    {
-      auto block = reinterpret_cast<FileBlock*>(arg);
-      return block->exec_fun(block->arg, argc, argv);
+      StoredArgType arg_;
+      decltype(exec) exec_fun_;
     };
 
-    file->exec = fun;
+    File file(name);
+
+    auto block = new ExecutableBlock{std::forward<ArgType>(arg), exec};
+    file.file_type_ = FileType::EXEC;
+    file.arg_ = block;
+
+    file.exec_ = [](void* raw, int argc, char** argv)
+    {
+      auto* block = static_cast<ExecutableBlock*>(raw);
+      return block->exec_fun_(block->arg_, argc, argv);
+    };
 
     return file;
   }
 
   /**
-   * @brief  创建一个新的目录
-   *         Creates a new directory
-   * @param  name 目录名称 The name of the directory
-   * @return Dir 创建的目录对象 The created directory object
+   * @brief 创建命令兼容入口，返回可执行文件 / Create a command-compatible executable
+   * file
+   * @tparam ArgType 执行上下文参数类型 / Execution context argument type
+   * @param name 文件名 / File name
+   * @param exec 执行函数 / Execution function
+   * @param arg 执行上下文参数 / Execution context argument
+   * @return 可执行文件节点 / Executable file node
    *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * @note 包含动态内存分配 / Contains dynamic memory allocation
    */
-  static Dir CreateDir(const char* name)
+  template <typename ArgType>
+  static File CreateCommand(const char* name,
+                            int (*exec)(ArgType arg, int argc, char** argv),
+                            ArgType&& arg)
   {
-    Dir dir;
-
-    char* name_buff = new char[strlen(name) + 1];
-    strcpy(name_buff, name);
-    dir->name = name_buff;
-    dir->type = FsNodeType::DIR;
-
-    return dir;
+    return CreateFile(name, exec, std::forward<ArgType>(arg));
   }
 
   /**
-   * @brief  向文件系统的根目录添加文件
-   *         Adds a file to the root directory of the file system
-   * @param  file 要添加的文件 The file to be added
+   * @brief 创建目录节点 / Create a directory node
+   * @param name 目录名称 / Directory name
+   * @return 目录节点 / Directory node
+   *
+   * @note 包含动态内存分配 / Contains dynamic memory allocation
+   */
+  static Dir CreateDir(const char* name) { return Dir(name); }
+
+  /**
+   * @brief 添加文件节点到根目录 / Add a file node to the root directory
+   * @param file 文件节点 / File node
    */
   void Add(File& file) { root_.Add(file); }
+
   /**
-   * @brief  向文件系统的根目录添加子目录
-   *         Adds a subdirectory to the root directory of the file system
-   * @param  dir 要添加的子目录 The subdirectory to be added
+   * @brief 添加目录节点到根目录 / Add a directory node to the root directory
+   * @param dir 目录节点 / Directory node
    */
   void Add(Dir& dir) { root_.Add(dir); }
-  /**
-   * @brief  向文件系统的根目录添加设备
-   *         Adds a device to the root directory of the file system
-   * @param  dev 要添加的设备 The device to be added
-   */
-  void Add(Device& dev) { root_.Add(dev); }
 
   /**
-   * @brief  在整个文件系统中查找文件
-   *         Finds a file in the entire file system
-   * @param  name 文件名 The name of the file
-   * @return File* 指向找到的文件的指针，如果未找到则返回 nullptr
-   *         Pointer to the found file, or nullptr if not found
+   * @brief 添加自定义节点到根目录 / Add a custom node to the root directory
+   * @param custom 自定义节点 / Custom node
+   */
+  void Add(Custom& custom) { root_.Add(custom); }
+
+  /**
+   * @brief 从整个 RamFS 递归查找文件 / Find a file recursively from the RamFS root
+   * @param name 文件名 / File name
+   * @return 文件指针；未找到返回 nullptr / File pointer, or nullptr
    */
   File* FindFile(const char* name) { return root_.FindFileRev(name); }
+
   /**
-   * @brief  在整个文件系统中查找目录
-   *         Finds a directory in the entire file system
-   * @param  name 目录名 The name of the directory
-   * @return Dir* 指向找到的目录的指针，如果未找到则返回 nullptr
-   *         Pointer to the found directory, or nullptr if not found
+   * @brief 从整个 RamFS 递归查找目录 / Find a directory recursively from the RamFS root
+   * @param name 目录名 / Directory name
+   * @return 目录指针；未找到返回 nullptr / Directory pointer, or nullptr
    */
   Dir* FindDir(const char* name) { return root_.FindDirRev(name); }
-  /**
-   * @brief  在整个文件系统中查找设备
-   *         Finds a device in the entire file system
-   * @param  name 设备名 The name of the device
-   * @return Device* 指向找到的设备的指针，如果未找到则返回 nullptr
-   *         Pointer to the found device, or nullptr if not found
-   */
-  Device* FindDevice(const char* name) { return root_.FindDeviceRev(name); }
 
   /**
-   * @brief  文件系统的根目录
-   *         Root directory of the file system
+   * @brief 从整个 RamFS 递归查找自定义节点 / Find a custom node recursively from the
+   * RamFS root
+   * @param name 节点名称 / Node name
+   * @return 自定义节点指针；未找到返回 nullptr / Custom node pointer, or nullptr
    */
-  Dir root_;
+  Custom* FindCustom(const char* name) { return root_.FindCustomRev(name); }
 
-  /**
-   * @brief  `bin` 目录，用于存放可执行文件
-   *         `bin` directory for storing executable files
-   */
-  Dir bin_;
+  Dir root_;  ///< 根目录 / Root directory
+  Dir bin_;   ///< 可执行文件目录 / Executable-file directory
 
-  /**
-   * @brief  `dev` 目录，用于存放设备文件
-   *         `dev` directory for storing device files
-   */
-  Dir dev_;
+ private:
+  static char* DuplicateName(const char* name);
 };
 }  // namespace LibXR

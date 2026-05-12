@@ -3,25 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
-
-/**
- * @brief 触发致命错误并停止程序执行。
- *        Triggers a fatal error and halts execution.
- *
- * 该函数用于指示系统发生严重故障，并立即终止程序执行。
- * 它可用于普通运行环境和 ISR（中断服务例程）环境中。
- * This function is used to indicate a critical failure in the system.
- * It can be called from both normal and ISR (Interrupt Service Routine) contexts.
- *
- * @param file 发生错误的源文件名。 The file where the error occurred.
- * @param line 发生错误的行号。 The line number where the error occurred.
- * @param in_isr 指示错误是否发生在 ISR 上下文中。 Indicates whether the error occurred in
- * an ISR context.
- */
-extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {
@@ -41,22 +26,15 @@ class Assert
   using Callback = LibXR::Callback<const char*, uint32_t>;
 
   /**
-   * @brief 注册致命错误的回调函数（左值引用版本）。
-   *        Register a fatal error callback (lvalue reference version).
+   * @brief 注册致命错误的回调函数。
+   *        Register a fatal error callback.
    *
-   * @param cb 要注册的回调函数（左值引用）。The callback function to register (lvalue
-   * reference).
+   * @param cb 要注册的回调函数。The callback function to register.
    */
-  static void RegisterFatalErrorCallback(const Callback& cb);
-
-  /**
-   * @brief 注册致命错误的回调函数（右值引用版本）。
-   *        Register a fatal error callback (rvalue reference version).
-   *
-   * @param cb 要注册的回调函数（右值引用）。The callback function to register (rvalue
-   * reference).
-   */
-  static void RegisterFatalErrorCallback(Callback&& cb);
+  static void RegisterFatalErrorCallback(Callback cb)
+  {
+    libxr_fatal_error_callback_ = std::move(cb);
+  }
 
 #ifdef LIBXR_DEBUG_BUILD
   /**

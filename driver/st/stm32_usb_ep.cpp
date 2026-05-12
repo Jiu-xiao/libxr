@@ -1,5 +1,6 @@
 #include "stm32_usb_ep.hpp"
 
+#include "stm32_dcache.hpp"
 using namespace LibXR;
 
 #if defined(HAL_PCD_MODULE_ENABLED)
@@ -217,13 +218,10 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   {
     ep->dma_addr = reinterpret_cast<uint32_t>(ep->xfer_buff);
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
     if (is_in == true)
     {
-      SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t*>(buffer.addr_),
-                              static_cast<int32_t>(size));
+      STM32_CleanDCacheByAddr(buffer.addr_, size);
     }
-#endif
   }
 #endif
 
@@ -349,7 +347,10 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, true);
 
@@ -365,7 +366,10 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, false);
 
@@ -378,10 +382,10 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   size_t actual_transfer_size = ep_handle->xfer_count;
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_InvalidateDCache_by_Addr(ep->GetBuffer().addr_,
-                               static_cast<int32_t>(actual_transfer_size));
-#endif
+  if (STM32USBUsesDma(hpcd))
+  {
+    STM32_InvalidateDCacheByAddr(ep->GetBuffer().addr_, actual_transfer_size);
+  }
 
   ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }
@@ -390,7 +394,10 @@ extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, true);
 
@@ -406,7 +413,10 @@ extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
 
   auto ep = GetEndpoint(hpcd, epnum, false);
 

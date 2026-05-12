@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace LibXR
 {
@@ -191,9 +192,11 @@ class CRC16
       return false;
     }
 
+    uint16_t actual = 0;
+    std::memcpy(&actual, buf + len - sizeof(actual), sizeof(actual));
+
     uint16_t expected = Calculate(buf, len - sizeof(uint16_t));
-    return expected == (reinterpret_cast<const uint16_t*>(
-                           buf + (len % 2)))[len / sizeof(uint16_t) - 1];
+    return expected == actual;
   }
 };
 
@@ -284,9 +287,11 @@ class CRC32
       return false;
     }
 
+    uint32_t actual = 0;
+    std::memcpy(&actual, buf + len - sizeof(actual), sizeof(actual));
+
     uint32_t expected = Calculate(buf, len - sizeof(uint32_t));
-    return expected == (reinterpret_cast<const uint32_t*>(
-                           buf + (len % 4)))[len / sizeof(uint32_t) - 1];
+    return expected == actual;
   }
 };
 
@@ -301,7 +306,8 @@ class CRC32
 class CRC64
 {
  private:
-  static const uint64_t INIT = 0xFFFFFFFFFFFFFFFFULL;  ///< CRC64 初始值 / CRC64 initial value
+  static const uint64_t INIT =
+      0xFFFFFFFFFFFFFFFFULL;  ///< CRC64 初始值 / CRC64 initial value
 
  public:
   static inline uint64_t tab_[256];  ///< CRC64 查找表 / CRC64 lookup table

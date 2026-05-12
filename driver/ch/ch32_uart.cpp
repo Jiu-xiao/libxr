@@ -239,7 +239,7 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
 // Write callback (DMA-based transfer).
 ErrorCode CH32UART::WriteFun(WritePort& port, bool)
 {
-  CH32UART* uart = CONTAINER_OF(&port, CH32UART, _write_port);
+  auto* uart = LibXR::ContainerOf(&port, &CH32UART::_write_port);
 
   if (uart->in_tx_isr.IsSet())
   {

@@ -1,5 +1,7 @@
 #include "flash.hpp"
 
+#include "libxr_mem.hpp"
+
 using namespace LibXR;
 
 Flash::Flash(size_t min_erase_size, size_t min_write_size, RawData flash_area)

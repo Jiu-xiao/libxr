@@ -10,7 +10,7 @@ void test_stack()
     stack.Push(i);
   }
 
-  ASSERT(stack.Push(1) == ErrorCode::FULL);
+  ASSERT(stack.Push(1) == LibXR::ErrorCode::FULL);
 
   for (int i = 0; i <= 9; i++)
   {
@@ -19,7 +19,7 @@ void test_stack()
     ASSERT(tmp == 9 - i);
   }
 
-  ASSERT(stack.Pop() == ErrorCode::EMPTY);
+  ASSERT(stack.Pop() == LibXR::ErrorCode::EMPTY);
 
   for (int i = 0; i <= 5; i++)
   {

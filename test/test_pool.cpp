@@ -35,7 +35,7 @@ void write_task(WriterArg arg)
 {
   for (int i = arg.start; i < arg.end; ++i)
   {
-    while (arg.pool->Put(i) != ErrorCode::OK)
+    while (arg.pool->Put(i) != LibXR::ErrorCode::OK)
     {
       LibXR::Thread::Yield();
     }
@@ -50,7 +50,7 @@ void read_task(ReaderArg arg)
   int v = 0;
   while (__atomic_load_n(&pop_cnt, __ATOMIC_RELAXED) < N)
   {
-    if (arg.pool->Get(v) == ErrorCode::OK)
+    if (arg.pool->Get(v) == LibXR::ErrorCode::OK)
     {
       ASSERT(v >= 0 && v < N);
       auto ret = __sync_lock_test_and_set(&pop_taken[v], 1);
@@ -75,18 +75,18 @@ void test_lock_free_pool()
     int tmp = 0;
     ASSERT(pool.Size() == 0);
     ASSERT(pool.EmptySize() == 3);
-    ASSERT(pool.Put(1) == ErrorCode::OK);
-    ASSERT(pool.Put(2) == ErrorCode::OK);
-    ASSERT(pool.Put(3) == ErrorCode::OK);
+    ASSERT(pool.Put(1) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Put(2) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Put(3) == LibXR::ErrorCode::OK);
     ASSERT(pool.Size() == 3);
     ASSERT(pool.EmptySize() == 0);
-    ASSERT(pool.Put(4) == ErrorCode::FULL);
-    ASSERT(pool.Get(tmp) == ErrorCode::OK && tmp == 1);
-    ASSERT(pool.Get(tmp) == ErrorCode::OK && tmp == 2);
-    ASSERT(pool.Get(tmp) == ErrorCode::OK && tmp == 3);
-    ASSERT(pool.Get(tmp) == ErrorCode::EMPTY);
-    ASSERT(pool.Put(5) == ErrorCode::OK);
-    ASSERT(pool.Get(tmp) == ErrorCode::OK && tmp == 5);
+    ASSERT(pool.Put(4) == LibXR::ErrorCode::FULL);
+    ASSERT(pool.Get(tmp) == LibXR::ErrorCode::OK && tmp == 1);
+    ASSERT(pool.Get(tmp) == LibXR::ErrorCode::OK && tmp == 2);
+    ASSERT(pool.Get(tmp) == LibXR::ErrorCode::OK && tmp == 3);
+    ASSERT(pool.Get(tmp) == LibXR::ErrorCode::EMPTY);
+    ASSERT(pool.Put(5) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Get(tmp) == LibXR::ErrorCode::OK && tmp == 5);
   }
 
   // ---- 多线程并发完整性测试 ----
@@ -133,12 +133,12 @@ void test_lock_free_pool()
       for (int i = 0; i < 8; ++i)
       {
         pushed[i] = i + round * 8;
-        ASSERT(pool2.Put(pushed[i]) == ErrorCode::OK);
+        ASSERT(pool2.Put(pushed[i]) == LibXR::ErrorCode::OK);
       }
-      ASSERT(pool2.Put(9999) == ErrorCode::FULL);
+      ASSERT(pool2.Put(9999) == LibXR::ErrorCode::FULL);
       for (int i = 0; i < 8; ++i)
       {
-        ASSERT(pool2.Get(popped[i]) == ErrorCode::OK);
+        ASSERT(pool2.Get(popped[i]) == LibXR::ErrorCode::OK);
       }
       std::sort(pushed, pushed + 8);
       std::sort(popped, popped + 8);
@@ -147,7 +147,7 @@ void test_lock_free_pool()
         ASSERT(pushed[i] == popped[i]);
       }
       int t = 0;
-      ASSERT(pool2.Get(t) == ErrorCode::EMPTY);
+      ASSERT(pool2.Get(t) == LibXR::ErrorCode::EMPTY);
     }
   }
 
@@ -156,9 +156,9 @@ void test_lock_free_pool()
     static Pool pool3(2);
     for (int rep = 0; rep < 1000; ++rep)
     {
-      ASSERT(pool3.Put(rep) == ErrorCode::OK);
+      ASSERT(pool3.Put(rep) == LibXR::ErrorCode::OK);
       int z = 0;
-      ASSERT(pool3.Get(z) == ErrorCode::OK && z == rep);
+      ASSERT(pool3.Get(z) == LibXR::ErrorCode::OK && z == rep);
     }
   }
 }

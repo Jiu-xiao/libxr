@@ -1,5 +1,6 @@
 #include "stm32_usb_dev.hpp"
 
+#include "stm32_dcache.hpp"
 #if defined(HAL_PCD_MODULE_ENABLED)
 
 using namespace LibXR;
@@ -22,7 +23,10 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 
@@ -31,10 +35,10 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
     return;
   }
 
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  SCB_InvalidateDCache_by_Addr(hpcd->Setup,
-                               static_cast<int32_t>(sizeof(USB::SetupPacket)));
-#endif
+  if (STM32USBUsesDma(hpcd))
+  {
+    STM32_InvalidateDCacheByAddr(hpcd->Setup, sizeof(USB::SetupPacket));
+  }
 
   usb->GetEndpoint0In()->SetState(USB::Endpoint::State::IDLE);
   usb->GetEndpoint0Out()->SetState(USB::Endpoint::State::IDLE);
@@ -46,7 +50,10 @@ extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 
@@ -63,7 +70,10 @@ extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 
@@ -78,7 +88,10 @@ extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef* hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
-  ASSERT(id < STM32_USB_DEV_ID_NUM);
+  if (id >= STM32_USB_DEV_ID_NUM)
+  {
+    return;
+  }
 
   auto usb = STM32USBDevice::map_[id];
 

@@ -55,13 +55,13 @@ DescriptorStrings::DescriptorStrings(
   serial_uid_len_ = uid_len;
 }
 
-ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
+LibXR::ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
 {
   ASSERT(buffer_.addr_ != nullptr);
 
   if (index == Index::LANGUAGE_ID)
   {
-    return ErrorCode::NOT_SUPPORT;
+    return LibXR::ErrorCode::NOT_SUPPORT;
   }
 
   int ans = -1;
@@ -75,7 +75,7 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
   }
   if (ans == -1)
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   uint8_t* buffer = reinterpret_cast<uint8_t*>(buffer_.addr_);
@@ -84,7 +84,7 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
   if (INDEX_NUM < static_cast<uint8_t>(Index::MANUFACTURER_STRING) ||
       INDEX_NUM > static_cast<uint8_t>(Index::SERIAL_NUMBER_STRING))
   {
-    return ErrorCode::NOT_FOUND;
+    return LibXR::ErrorCode::NOT_FOUND;
   }
 
   if (index == Index::SERIAL_NUMBER_STRING && serial_uid_ != nullptr)
@@ -125,7 +125,7 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
       *out++ = 0x00;
     }
 
-    return ErrorCode::OK;
+    return LibXR::ErrorCode::OK;
   }
 
   auto data_len = string_list_[ans]->string_lens[INDEX_NUM - 1] + 2;
@@ -133,7 +133,7 @@ ErrorCode DescriptorStrings::GenerateString(Index index, uint16_t lang)
   buffer[0] = static_cast<uint8_t>(data_len);
   const char* str = string_list_[ans]->strings[INDEX_NUM - 1];
   ToUTF16LE(str, buffer + 2);
-  return ErrorCode::OK;
+  return LibXR::ErrorCode::OK;
 }
 
 LibXR::RawData DescriptorStrings::GetData()

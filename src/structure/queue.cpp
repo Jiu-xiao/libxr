@@ -1,5 +1,7 @@
 #include "queue.hpp"
 
+#include "libxr_mem.hpp"
+
 using namespace LibXR;
 
 BaseQueue::BaseQueue(uint16_t element_size, size_t length, uint8_t* buffer)

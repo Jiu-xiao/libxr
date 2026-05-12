@@ -24,6 +24,7 @@ void test_string();
 void test_cycle_value();
 void test_pid();
 void test_pipe();
+void test_print();
 void test_rw();
 void test_cb();
 void test_memory();

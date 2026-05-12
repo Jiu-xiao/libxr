@@ -29,8 +29,8 @@ class HPMGPIO final : public GPIO
    * @param pad_index IOC PAD 编号，默认值表示自动由 `(gpio, port, pin)` 推导 /
    * IOC PAD index. Use default value to auto-resolve from `(gpio, port, pin)`.
    */
-  HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq = kInvalidIrq,
-          uint16_t pad_index = kInvalidPadIndex);
+  HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq = INVALID_IRQ,
+          uint16_t pad_index = INVALID_PAD_INDEX);
 
   /**
    * @brief 读取引脚电平 / Read current pin level.
@@ -99,10 +99,10 @@ class HPMGPIO final : public GPIO
   static void CheckInterrupt(uint32_t port);
 
  private:
-  static constexpr uint32_t kPortCount = 15;  ///< 支持的端口数量 / Supported port count.
-  static constexpr uint32_t kPinCount = 32;   ///< 每个端口引脚数 / Pins per port.
-  static constexpr uint32_t kInvalidIrq = 0xFFFFFFFFu;    ///< 无效 IRQ 标记 / Invalid IRQ marker.
-  static constexpr uint16_t kInvalidPadIndex = 0xFFFFu;   ///< 无效 PAD 标记 / Invalid PAD marker.
+  static constexpr uint32_t PORT_COUNT = 15;  ///< 支持的端口数量 / Supported port count.
+  static constexpr uint32_t PIN_COUNT = 32;   ///< 每个端口引脚数 / Pins per port.
+  static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;    ///< 无效 IRQ 标记 / Invalid IRQ marker.
+  static constexpr uint16_t INVALID_PAD_INDEX = 0xFFFFu;   ///< 无效 PAD 标记 / Invalid PAD marker.
 
   /**
    * @brief 根据控制器与端口引脚推导 IOC PAD 编号 /
@@ -110,15 +110,15 @@ class HPMGPIO final : public GPIO
    * @param gpio GPIO 控制器基地址 / GPIO controller base address.
    * @param port GPIO 端口号 / GPIO port index.
    * @param pin GPIO 引脚号 / GPIO pin index.
-   * @return 有效 PAD 编号，无法推导时返回 `kInvalidPadIndex` /
-   * Resolved PAD index, or `kInvalidPadIndex` if unavailable.
+   * @return 有效 PAD 编号，无法推导时返回 `INVALID_PAD_INDEX` /
+   * Resolved PAD index, or `INVALID_PAD_INDEX` if unavailable.
    */
   static uint16_t ResolvePadIndex(GPIO_Type* gpio, uint32_t port, uint8_t pin);
 
   ///< 端口-引脚到对象实例的静态映射，用于中断分发 /
   ///< Static port-pin to object map for interrupt dispatch.
-  static HPMGPIO* map[kPortCount][kPinCount];
-  static GPIO_Type* port_controller_map[kPortCount];
+  static HPMGPIO* map[PORT_COUNT][PIN_COUNT];
+  static GPIO_Type* port_controller_map[PORT_COUNT];
 
   GPIO_Type* gpio_;     ///< GPIO 控制器实例 / GPIO controller instance.
   uint32_t port_;       ///< GPIO 端口号 / GPIO port index.

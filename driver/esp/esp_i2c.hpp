@@ -55,15 +55,16 @@ class ESP32I2C : public I2C
 
  private:
 #if defined(SOC_I2C_FIFO_LEN)
-  static constexpr size_t kFifoLen = SOC_I2C_FIFO_LEN;
+  static constexpr size_t FIFO_LEN = SOC_I2C_FIFO_LEN;
 #elif defined(I2C_LL_FIFO_LEN)
-  static constexpr size_t kFifoLen = I2C_LL_FIFO_LEN;
+  static constexpr size_t FIFO_LEN = I2C_LL_FIFO_LEN;
 #else
-  static constexpr size_t kFifoLen = 32U;
+  static constexpr size_t FIFO_LEN = 32U;
 #endif
-  static constexpr size_t kMaxWritePayload = (kFifoLen > 4U) ? (kFifoLen - 4U) : 0U;
-  static constexpr size_t kMaxWriteReadPrefix = (kFifoLen > 5U) ? (kFifoLen - 5U) : 0U;
-  static constexpr size_t kMaxReadPayload = (kFifoLen > 4U) ? (kFifoLen - 4U) : kFifoLen;
+  static constexpr size_t MAX_WRITE_PAYLOAD = (FIFO_LEN > 4U) ? (FIFO_LEN - 4U) : 0U;
+  static constexpr size_t MAX_WRITE_READ_PREFIX =
+      (FIFO_LEN > 5U) ? (FIFO_LEN - 5U) : 0U;
+  static constexpr size_t MAX_READ_PAYLOAD = (FIFO_LEN > 4U) ? (FIFO_LEN - 4U) : FIFO_LEN;
 
   bool Acquire();
   void Release();

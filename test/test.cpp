@@ -1,6 +1,7 @@
 #include "test.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <sys/wait.h>
@@ -77,6 +78,7 @@ static void run_libxr_tests()
       {"crc", test_crc, false},
       {"encoder", test_float_encoder, false},
       {"cycle_value", test_cycle_value, false},
+      {"print", test_print, false},
   };
 
   TestCase data_structure_tests[] = {{"rbt", test_rbt, false},
@@ -147,6 +149,8 @@ static void run_libxr_tests()
   }
 
   XR_LOG_INFO("All tests completed.\n");
+  std::fprintf(stderr, "All tests completed.\n");
+  std::fflush(stderr);
 }
 
 int main()

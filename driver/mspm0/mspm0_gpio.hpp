@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dl_gpio.h"
+#include <ti/driverlib/dl_gpio.h>
 #include "gpio.hpp"
 
 namespace LibXR

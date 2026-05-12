@@ -88,7 +88,7 @@ Some useful tools for debugging, robotics, and communication.
 ## Usage
 
 ```sh
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # LibXR
@@ -108,6 +108,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 ## General CMake Configuration
 
 ### System and Driver Platform Selection
+
+LibXR currently targets C++20. Use a compiler/toolchain that already supports `CMAKE_CXX_STANDARD 20`.
 
 By default, the host system (Linux, Windows) is automatically detected, and `LIBXR_SYSTEM` and `LIBXR_DRIVER` are set accordingly. You can also manually specify them via the CMake command line or in an external `CMakeLists.txt`, corresponding to the different folders under [system](./system) and [driver](./driver).
 
@@ -143,14 +145,6 @@ The default scalar type is `double`. This option only affects the default value 
 
 ```cmake
 set(LIBXR_DEFAULT_SCALAR float)
-```
-
-### Internal Printf Buffer Size
-
-Defaults to 128 for bare-metal/RTOS platforms, and 1024 for Linux. This option sets the buffer size for the `LibXR::STDIO::Printf` function. Setting this to 0 will disable all log printing.
-
-```cmake
-set(LIBXR_PRINTF_BUFFER_SIZE 256)
 ```
 
 ### Maximum Log Message Length
