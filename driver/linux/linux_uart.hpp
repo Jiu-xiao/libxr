@@ -28,8 +28,10 @@ namespace LibXR
 /**
  * @brief Linux UART 串口驱动实现 / Linux UART driver implementation
  *
- * 支持按设备路径或 USB VID/PID(/serial) 自动发现并创建 UART 通道。
- * Supports UART creation by device path or USB VID/PID(/serial) auto discovery.
+ * 支持按设备路径或 USB VID/PID(/control interface name[/serial]) 自动发现并创建 UART
+ * 通道。
+ * Supports UART creation by device path or USB VID/PID(/control interface
+ * name[/serial]) auto discovery.
  */
 class LinuxUART : public UART
 {
@@ -96,15 +98,43 @@ class LinuxUART : public UART
             unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
             size_t buffer_size = 512, size_t thread_stack_size = 65536)
-      : LinuxUART(vid, pid, "", baudrate, parity, data_bits, stop_bits, tx_queue_size,
-                  buffer_size, thread_stack_size)
+      : LinuxUART(vid, pid, "", "", baudrate, parity, data_bits, stop_bits,
+                  tx_queue_size, buffer_size, thread_stack_size)
   {
   }
 
   /**
-   * @brief 通过 USB VID/PID/序列号构造 UART / Construct UART by USB VID/PID/serial
+   * @brief 通过 USB VID/PID/control interface name 构造 UART
+   *        Construct UART by USB VID/PID/control interface name
+   *
+   * @note CDC ACM 有 control/data 两个 interface；这里匹配 Linux ttyACM 父级
+   *       usb_interface 的 control interface 名称，不匹配 data interface 名称。
+   *       CDC ACM has control/data interfaces; this selector matches the Linux
+   *       ttyACM parent usb_interface control interface name, not the data
+   *       interface name.
    */
-  LinuxUART(const std::string& vid, const std::string& pid, const std::string& serial,
+  LinuxUART(const std::string& vid, const std::string& pid,
+            const std::string& control_interface_name,
+            unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
+            uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
+            size_t buffer_size = 512, size_t thread_stack_size = 65536)
+      : LinuxUART(vid, pid, control_interface_name, "", baudrate, parity, data_bits,
+                  stop_bits, tx_queue_size, buffer_size, thread_stack_size)
+  {
+  }
+
+  /**
+   * @brief 通过 USB VID/PID/control interface name/serial 构造 UART
+   *        Construct UART by USB VID/PID/control interface name/serial
+   *
+   * @note CDC ACM 有 control/data 两个 interface；这里匹配 Linux ttyACM 父级
+   *       usb_interface 的 control interface 名称，不匹配 data interface 名称。
+   *       CDC ACM has control/data interfaces; this selector matches the Linux
+   *       ttyACM parent usb_interface control interface name, not the data
+   *       interface name.
+   */
+  LinuxUART(const std::string& vid, const std::string& pid,
+            const std::string& control_interface_name, const std::string& serial,
             unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
             size_t buffer_size = 512, size_t thread_stack_size = 65536)
@@ -115,18 +145,12 @@ class LinuxUART : public UART
         _read_port(buffer_size),
         _write_port(tx_queue_size, buffer_size)
   {
-    while (!FindUSBTTYByVidPid(vid, pid, serial, device_path_))
+    while (!FindUSBTTYByVidPid(vid, pid, control_interface_name, serial, device_path_))
     {
-      if (serial.empty())
-      {
-        XR_LOG_WARN("Cannot find USB TTY device with VID=%s PID=%s, retrying...",
-                    vid.c_str(), pid.c_str());
-      }
-      else
-      {
-        XR_LOG_WARN("Cannot find USB TTY device with VID=%s PID=%s SERIAL=%s, retrying...",
-                    vid.c_str(), pid.c_str(), serial.c_str());
-      }
+      XR_LOG_WARN(
+          "Cannot find USB TTY device with VID=%s PID=%s SERIAL=%s CONTROL_INTERFACE=%s, retrying...",
+          vid.c_str(), pid.c_str(), serial.empty() ? "*" : serial.c_str(),
+          control_interface_name.empty() ? "*" : control_interface_name.c_str());
       Thread::Sleep(100);
     }
 
@@ -198,6 +222,23 @@ class LinuxUART : public UART
 
   static bool FindUSBTTYByVidPid(const std::string& target_vid,
                                  const std::string& target_pid,
+                                 std::string& tty_path)
+  {
+    return FindUSBTTYByVidPid(target_vid, target_pid, "", "", tty_path);
+  }
+
+  static bool FindUSBTTYByVidPid(const std::string& target_vid,
+                                 const std::string& target_pid,
+                                 const std::string& target_control_interface_name,
+                                 std::string& tty_path)
+  {
+    return FindUSBTTYByVidPid(target_vid, target_pid, target_control_interface_name, "",
+                              tty_path);
+  }
+
+  static bool FindUSBTTYByVidPid(const std::string& target_vid,
+                                 const std::string& target_pid,
+                                 const std::string& target_control_interface_name,
                                  const std::string& target_serial, std::string& tty_path)
   {
     struct udev* udev = udev_new();
@@ -226,15 +267,28 @@ class LinuxUART : public UART
 
       struct udev_device* usb_dev =
           udev_device_get_parent_with_subsystem_devtype(tty_dev, "usb", "usb_device");
+      struct udev_device* usb_interface = udev_device_get_parent_with_subsystem_devtype(
+          tty_dev, "usb", "usb_interface");
 
       if (usb_dev)
       {
         const char* vid = udev_device_get_sysattr_value(usb_dev, "idVendor");
         const char* pid = udev_device_get_sysattr_value(usb_dev, "idProduct");
         const char* serial = udev_device_get_sysattr_value(usb_dev, "serial");
+        const char* control_interface_name = nullptr;
+        if (usb_interface)
+        {
+          // For Linux cdc_acm tty nodes this parent is the CDC control interface
+          // (for example if00 / if02), not the CDC data interface.
+          control_interface_name =
+              udev_device_get_sysattr_value(usb_interface, "interface");
+        }
 
         if (vid && pid && target_vid == vid && target_pid == pid &&
-            (target_serial.empty() || (serial && target_serial == serial)))
+            (target_serial.empty() || (serial && target_serial == serial)) &&
+            (target_control_interface_name.empty() ||
+             (control_interface_name &&
+              target_control_interface_name == control_interface_name)))
         {
           const char* devnode = udev_device_get_devnode(tty_dev);
           if (devnode)
@@ -257,11 +311,15 @@ class LinuxUART : public UART
     std::sort(matches.begin(), matches.end());
     tty_path = matches.front();
 
-    if (matches.size() > 1 && target_serial.empty())
+    if (matches.size() > 1)
     {
       XR_LOG_WARN(
-          "Multiple USB TTY devices found with VID=%s PID=%s, using %s. Specify serial to disambiguate.",
-          target_vid.c_str(), target_pid.c_str(), tty_path.c_str());
+          "Multiple USB TTY devices found with VID=%s PID=%s SERIAL=%s CONTROL_INTERFACE=%s, using %s. Specify serial or control interface name to disambiguate.",
+          target_vid.c_str(), target_pid.c_str(),
+          target_serial.empty() ? "*" : target_serial.c_str(),
+          target_control_interface_name.empty() ? "*"
+                                                : target_control_interface_name.c_str(),
+          tty_path.c_str());
     }
 
     return true;
