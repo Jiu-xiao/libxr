@@ -43,10 +43,11 @@ class HardwareContainer
   T* Find(const char* alias) const
   {
     T* result = nullptr;
+    const auto wanted_id = TypeID::GetID<T>();
     alias_list_.Foreach<AliasEntry>(
         [&](AliasEntry& entry)
         {
-          if (std::strcmp(entry.name, alias) == 0)
+          if (std::strcmp(entry.name, alias) == 0 && entry.id == wanted_id)
           {
             result = static_cast<T*>(entry.object);
             return ErrorCode::FAILED;
