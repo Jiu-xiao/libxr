@@ -66,11 +66,11 @@ class Database
     Key(Database& database, const char* name, Data init_value)
         : KeyBase(name, RawData(data_)), database_(database)
     {
-      ErrorCode ans = database.Get(*this);
-      if (ans != ErrorCode::OK)
+      ErrorCode status = database.Get(*this);
+      if (status != ErrorCode::OK)
       {
         data_ = init_value;
-        if (ans == ErrorCode::NOT_FOUND)
+        if (status == ErrorCode::NOT_FOUND)
         {
           database.Add(*this);
         }
@@ -90,11 +90,11 @@ class Database
     Key(Database& database, const char* name)
         : KeyBase(name, RawData(data_)), database_(database)
     {
-      ErrorCode ans = database.Get(*this);
-      if (ans != ErrorCode::OK)
+      ErrorCode status = database.Get(*this);
+      if (status != ErrorCode::OK)
       {
         Memory::FastSet(&data_, 0, sizeof(Data));
-        if (ans == ErrorCode::NOT_FOUND)
+        if (status == ErrorCode::NOT_FOUND)
         {
           database.Add(*this);
         }
