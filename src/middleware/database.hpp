@@ -66,10 +66,14 @@ class Database
     Key(Database& database, const char* name, Data init_value)
         : KeyBase(name, RawData(data_)), database_(database)
     {
-      if (database.Get(*this) == ErrorCode::NOT_FOUND)
+      ErrorCode ans = database.Get(*this);
+      if (ans != ErrorCode::OK)
       {
         data_ = init_value;
-        database.Add(*this);
+        if (ans == ErrorCode::NOT_FOUND)
+        {
+          database.Add(*this);
+        }
       }
     }
 
@@ -86,10 +90,14 @@ class Database
     Key(Database& database, const char* name)
         : KeyBase(name, RawData(data_)), database_(database)
     {
-      if (database.Get(*this) == ErrorCode::NOT_FOUND)
+      ErrorCode ans = database.Get(*this);
+      if (ans != ErrorCode::OK)
       {
         Memory::FastSet(&data_, 0, sizeof(Data));
-        database.Add(*this);
+        if (ans == ErrorCode::NOT_FOUND)
+        {
+          database.Add(*this);
+        }
       }
     }
 
@@ -101,11 +109,21 @@ class Database
     operator Data() { return data_; }
 
     /**
+     * @brief 保存当前键值到数据库 (Save the current key value to the database).
+     * @return 操作结果 (Operation result).
+     */
+    ErrorCode Save() { return database_.Set(*this, this->raw_data_); }
+
+    /**
      * @brief 设置键的值并更新数据库 (Set the key's value and update the database).
      * @param data 需要存储的新值 (New value to store).
      * @return 操作结果 (Operation result).
      */
-    ErrorCode Set(Data data) { return database_.Set(*this, RawData(data)); }
+    ErrorCode Set(Data data)
+    {
+      data_ = data;
+      return Save();
+    }
 
     /**
      * @brief 从数据库加载键的值 (Load the key's value from the database).
@@ -975,7 +993,7 @@ class DatabaseRaw : public Database
     KeyInfo key_buffer;
     flash_.Read(ans, key_buffer);
 
-    if (key.raw_data_.size_ < key_buffer.GetDataSize())
+    if (key.raw_data_.size_ != key_buffer.GetDataSize())
     {
       return ErrorCode::FAILED;
     }
@@ -994,7 +1012,6 @@ class DatabaseRaw : public Database
    */
   ErrorCode Set(KeyBase& key, RawData data) override
   {
-    LibXR::Memory::FastCopy(key.raw_data_.addr_, data.addr_, data.size_);
     return SetKey(key.name_, data.addr_, data.size_);
   }
 

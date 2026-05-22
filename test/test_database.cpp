@@ -23,11 +23,73 @@ constexpr size_t XR_DB_BLOCK_SIZE = XR_DB_FLASH_SIZE / 2;
 constexpr size_t XR_DB_CHECKSUM_OFFSET = XR_DB_BLOCK_SIZE - XR_DB_MIN_WRITE_SIZE;
 constexpr uint32_t XR_DB_FLASH_HEADER = 0x12345678 + LIBXR_DATABASE_VERSION;
 constexpr uint32_t XR_DB_CHECKSUM = 0x9abcedf0;
+// White-box layout anchors for current DatabaseRaw<16> block format:
+// - FlashInfo header padding occupies one MinWriteSize block
+// - sentinel key occupies one aligned KeyInfo block with empty name/data
+// - KeyInfo stores 3 flag blocks + 4-byte raw_info, rounded to 4 * MinWriteSize
+constexpr size_t XR_DB_RAW_KEYINFO_ALIGNED_SIZE = XR_DB_MIN_WRITE_SIZE * 4;
+constexpr size_t XR_DB_RAW_SENTINEL_KEY_OFFSET = XR_DB_MIN_WRITE_SIZE;
+constexpr size_t XR_DB_RAW_FIRST_KEY_OFFSET =
+    XR_DB_RAW_SENTINEL_KEY_OFFSET + XR_DB_RAW_KEYINFO_ALIGNED_SIZE;
+constexpr size_t XR_DB_RAW_AVAILABLE_FLAG_OFFSET =
+    XR_DB_RAW_FIRST_KEY_OFFSET + XR_DB_MIN_WRITE_SIZE;
+constexpr size_t XR_DB_RAW_UNINIT_FLAG_LAST_BYTE_OFFSET =
+    XR_DB_RAW_FIRST_KEY_OFFSET + XR_DB_MIN_WRITE_SIZE * 3 - 1;
+constexpr size_t XR_DB_RAW_FIRST_KEY_RAW_INFO_OFFSET =
+    XR_DB_RAW_FIRST_KEY_OFFSET + XR_DB_MIN_WRITE_SIZE * 3;
 
 enum class MainChecksum
 {
   VALID,
   INVALID,
+};
+
+class MemoryDatabase : public Database
+{
+ public:
+  ErrorCode get_result = ErrorCode::NOT_FOUND;
+  ErrorCode set_result = ErrorCode::OK;
+  ErrorCode add_result = ErrorCode::OK;
+  uint32_t stored = 0;
+  size_t get_calls = 0;
+  size_t set_calls = 0;
+  size_t add_calls = 0;
+
+  ErrorCode Get(KeyBase& key) override
+  {
+    get_calls++;
+    if (get_result == ErrorCode::OK)
+    {
+      if (key.raw_data_.size_ != sizeof(stored))
+      {
+        return ErrorCode::FAILED;
+      }
+      Memory::FastCopy(key.raw_data_.addr_, &stored, sizeof(stored));
+    }
+    return get_result;
+  }
+
+  ErrorCode Set(KeyBase&, RawData data) override
+  {
+    set_calls++;
+    if (set_result == ErrorCode::OK)
+    {
+      ASSERT(data.size_ == sizeof(stored));
+      Memory::FastCopy(&stored, data.addr_, sizeof(stored));
+    }
+    return set_result;
+  }
+
+  ErrorCode Add(KeyBase& key) override
+  {
+    add_calls++;
+    if (add_result == ErrorCode::OK)
+    {
+      ASSERT(key.raw_data_.size_ == sizeof(stored));
+      Memory::FastCopy(&stored, key.raw_data_.addr_, sizeof(stored));
+    }
+    return add_result;
+  }
 };
 
 uint32_t ReadLe32(const std::vector<uint8_t>& bytes, size_t offset)
@@ -80,9 +142,32 @@ void CraftPartialBackup(std::vector<uint8_t>& bytes, size_t partial_len)
   WriteLe32(bytes, backup_offset + XR_DB_CHECKSUM_OFFSET, XR_DB_CHECKSUM);
 }
 
+void MirrorMainBlockToBackup(std::vector<uint8_t>& bytes)
+{
+  for (size_t i = 0; i < XR_DB_BLOCK_SIZE; ++i)
+  {
+    bytes[XR_DB_BLOCK_SIZE + i] = bytes[i];
+  }
+}
+
 void InvalidateMainChecksum(std::vector<uint8_t>& bytes)
 {
   WriteLe32(bytes, XR_DB_CHECKSUM_OFFSET, 0);
+}
+
+void MarkMainFirstKeyAsUninitialized(std::vector<uint8_t>& bytes)
+{
+  bytes[XR_DB_RAW_UNINIT_FLAG_LAST_BYTE_OFFSET] = 0xFF;
+}
+
+void CorruptBackupFirstKeyAvailableFlag(std::vector<uint8_t>& bytes)
+{
+  bytes[XR_DB_BLOCK_SIZE + XR_DB_RAW_AVAILABLE_FLAG_OFFSET] = 0x00;
+}
+
+void CorruptMainFirstKeyRawInfo(std::vector<uint8_t>& bytes, uint32_t raw_info)
+{
+  WriteLe32(bytes, XR_DB_RAW_FIRST_KEY_RAW_INFO_OFFSET, raw_info);
 }
 
 void CreateSeedDatabase(const char* path)
@@ -95,12 +180,43 @@ void CreateSeedDatabase(const char* path)
   ASSERT(key.data_ == 1234);
 }
 
+void CreateTwoKeyDatabase(const char* path)
+{
+  LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
+                                               XR_DB_MIN_WRITE_SIZE, false, true);
+  DatabaseRaw<16> db(flash, 5);
+  db.Restore();
+  DatabaseRaw<16>::Key<uint32_t> key1(db, "key1", 1111);
+  DatabaseRaw<16>::Key<uint32_t> key2(db, "key2", 2222);
+  ASSERT(key1.data_ == 1111);
+  ASSERT(key2.data_ == 2222);
+}
+
 uint32_t ReopenDatabaseValue(const char* path, uint32_t default_value)
 {
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
                                                XR_DB_MIN_WRITE_SIZE, false, true);
   DatabaseRaw<16> db(flash, 5);
   DatabaseRaw<16>::Key<uint32_t> key(db, "key", default_value);
+  return key.data_;
+}
+
+uint32_t ReopenDatabaseValue(const char* path, uint32_t default_value,
+                             const char* key_name)
+{
+  LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
+                                               XR_DB_MIN_WRITE_SIZE, false, true);
+  DatabaseRaw<16> db(flash, 5);
+  DatabaseRaw<16>::Key<uint32_t> key(db, key_name, default_value);
+  return key.data_;
+}
+
+uint32_t ReopenSequentialDatabaseValue(const char* path, uint32_t default_value,
+                                       const char* key_name)
+{
+  LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, 512, 8, true, true);
+  DatabaseRawSequential db(flash);
+  DatabaseRawSequential::Key<uint32_t> key(db, key_name, default_value);
   return key.data_;
 }
 
@@ -136,6 +252,166 @@ void TestDatabasePartialBackupRecovery()
                        1234);
   RunPartialBackupCase("/tmp/flash_test_partial_broken_main.bin", MainChecksum::INVALID,
                        55, 55);
+}
+
+void TestDatabaseKeySaveUsesCurrentData()
+{
+  MemoryDatabase db;
+  Database::Key<uint32_t> key(db, "mock", 10);
+  ASSERT(key.data_ == 10);
+  ASSERT(db.add_calls == 1);
+  ASSERT(db.stored == 10);
+
+  key.data_ = 20;
+  ASSERT(key.Save() == ErrorCode::OK);
+  ASSERT(db.stored == 20);
+
+  db.set_result = ErrorCode::FAILED;
+  key.data_ = 30;
+  ASSERT(key.Save() == ErrorCode::FAILED);
+  ASSERT(key.data_ == 30);
+  ASSERT(db.stored == 20);
+}
+
+void TestDatabaseKeySetUpdatesCurrentValueBeforeSave()
+{
+  MemoryDatabase db;
+  Database::Key<uint32_t> key(db, "mock", 10);
+
+  db.set_result = ErrorCode::FAILED;
+  ASSERT(key.Set(40) == ErrorCode::FAILED);
+  ASSERT(key.data_ == 40);
+  ASSERT(db.stored == 10);
+}
+
+void TestDatabaseKeyUsesDefaultOnGetFailure()
+{
+  MemoryDatabase db;
+  db.get_result = ErrorCode::FAILED;
+  db.stored = 55;
+
+  Database::Key<uint32_t> key(db, "mock", 123);
+  ASSERT(key.data_ == 123);
+  ASSERT(db.add_calls == 0);
+
+  MemoryDatabase zero_db;
+  zero_db.get_result = ErrorCode::FAILED;
+  Database::Key<uint32_t> zero_key(zero_db, "mock");
+  ASSERT(zero_key.data_ == 0);
+  ASSERT(zero_db.add_calls == 0);
+}
+
+void TestDatabaseSequentialSaveCurrentValue()
+{
+  const char* path = "/tmp/flash_test_seq_save_current.bin";
+  LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, 512, 8, true, true);
+  DatabaseRawSequential db(flash);
+  db.Restore();
+
+  DatabaseRawSequential::Key<uint32_t> key(db, "seq", 1);
+  key.data_ = 2;
+  ASSERT(key.Save() == ErrorCode::OK);
+  ASSERT(ReopenSequentialDatabaseValue(path, 0, "seq") == 2);
+}
+
+void TestDatabaseRawSaveCurrentValue()
+{
+  const char* path = "/tmp/flash_test_raw_save_current.bin";
+  LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
+                                               XR_DB_MIN_WRITE_SIZE, false, true);
+  DatabaseRaw<16> db(flash, 5);
+  db.Restore();
+
+  DatabaseRaw<16>::Key<uint32_t> key(db, "raw", 1);
+  key.data_ = 2;
+  ASSERT(key.Save() == ErrorCode::OK);
+  ASSERT(ReopenDatabaseValue(path, 0, "raw") == 2);
+}
+
+void TestDatabaseRawRequiresExactStoredSize()
+{
+  const char* path = "/tmp/flash_test_raw_exact_size.bin";
+  {
+    LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
+                                                 XR_DB_MIN_WRITE_SIZE, false, true);
+    DatabaseRaw<16> db(flash, 5);
+    db.Restore();
+    DatabaseRaw<16>::Key<uint32_t> key(db, "shape", 0x11223344U);
+    ASSERT(key.data_ == 0x11223344U);
+  }
+
+  {
+    LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
+                                                 XR_DB_MIN_WRITE_SIZE, false, true);
+    DatabaseRaw<16> db(flash, 5);
+    DatabaseRaw<16>::Key<uint64_t> wider_key(db, "shape", 0ULL);
+    ASSERT(wider_key.data_ == 0ULL);
+    ASSERT(wider_key.Load() == ErrorCode::FAILED);
+  }
+
+  ASSERT(ReopenDatabaseValue(path, 0, "shape") == 0x11223344U);
+}
+
+void TestDatabaseRawInvalidMainKeyMetadataReinitializes()
+{
+  const char* path = "/tmp/flash_test_raw_invalid_main_key_metadata.bin";
+  CreateSeedDatabase(path);
+
+  auto bytes = ReadAllBytes(path);
+  MarkMainFirstKeyAsUninitialized(bytes);
+  WriteAllBytes(path, bytes);
+
+  ASSERT(ReopenDatabaseValue(path, 77) == 77);
+  auto repaired = ReadAllBytes(path);
+  ASSERT(ReadLe32(repaired, 0) == XR_DB_FLASH_HEADER);
+  ASSERT(ReadLe32(repaired, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
+}
+
+void TestDatabaseRawInvalidBackupMetadataDoesNotRestore()
+{
+  const char* path = "/tmp/flash_test_raw_invalid_backup_metadata.bin";
+  CreateSeedDatabase(path);
+
+  auto bytes = ReadAllBytes(path);
+  MirrorMainBlockToBackup(bytes);
+  CorruptBackupFirstKeyAvailableFlag(bytes);
+  InvalidateMainChecksum(bytes);
+  WriteAllBytes(path, bytes);
+
+  ASSERT(ReopenDatabaseValue(path, 55) == 55);
+  AssertMainValidBackupInvalid(path);
+}
+
+void TestDatabaseRawRestoresFromValidBackup()
+{
+  const char* path = "/tmp/flash_test_raw_restore_from_valid_backup.bin";
+  CreateSeedDatabase(path);
+
+  auto bytes = ReadAllBytes(path);
+  MirrorMainBlockToBackup(bytes);
+  InvalidateMainChecksum(bytes);
+  WriteAllBytes(path, bytes);
+
+  ASSERT(ReopenDatabaseValue(path, 55) == 1234);
+  AssertMainValidBackupInvalid(path);
+}
+
+void TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes()
+{
+  const char* path = "/tmp/flash_test_raw_corrupt_first_key_size.bin";
+  CreateTwoKeyDatabase(path);
+
+  auto bytes = ReadAllBytes(path);
+  // Keep the first key's flags but blow up its name/data metadata so the next-key
+  // walk crosses the checksum boundary on the next iteration.
+  CorruptMainFirstKeyRawInfo(bytes, 0x7FFFFFFFU);
+  WriteAllBytes(path, bytes);
+
+  ASSERT(ReopenDatabaseValue(path, 77, "key1") == 77);
+  ASSERT(ReopenDatabaseValue(path, 88, "key2") == 88);
+  auto repaired = ReadAllBytes(path);
+  ASSERT(ReadLe32(repaired, 0) == XR_DB_FLASH_HEADER);
+  ASSERT(ReadLe32(repaired, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
 }
 
 }  // namespace
@@ -281,4 +557,14 @@ void test_database()
   }
 
   TestDatabasePartialBackupRecovery();
+  TestDatabaseKeySaveUsesCurrentData();
+  TestDatabaseKeySetUpdatesCurrentValueBeforeSave();
+  TestDatabaseKeyUsesDefaultOnGetFailure();
+  TestDatabaseSequentialSaveCurrentValue();
+  TestDatabaseRawSaveCurrentValue();
+  TestDatabaseRawRequiresExactStoredSize();
+  TestDatabaseRawInvalidMainKeyMetadataReinitializes();
+  TestDatabaseRawInvalidBackupMetadataDoesNotRestore();
+  TestDatabaseRawRestoresFromValidBackup();
+  TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes();
 }
