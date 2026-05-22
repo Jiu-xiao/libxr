@@ -17,6 +17,7 @@ void test_terminal();
 void test_thread();
 void test_timebase();
 void test_timer();
+void test_app_framework();
 void test_database();
 void test_transform();
 void test_double_buffer();

@@ -106,6 +106,7 @@ static void run_libxr_tests()
   };
 
   TestCase system_tests[] = {{"ramfs", test_ramfs, false},
+                             {"app_framework", test_app_framework, false},
                              {"event", test_event, false},
                              {"message", test_message, false},
                              {"database", test_database, false},
