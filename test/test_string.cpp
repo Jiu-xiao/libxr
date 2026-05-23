@@ -2,6 +2,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #include "libxr_def.hpp"
 #include "libxr_string.hpp"
@@ -25,6 +26,8 @@ static_assert(accepts_uint32_reformat<std::uint32_t>);
 static_assert(!accepts_uint32_reformat<std::uint64_t>);
 static_assert(accepts_uint_reprintf<unsigned int>);
 static_assert(!accepts_uint_reprintf<std::uint64_t>);
+static_assert(std::is_move_constructible_v<LibXR::RuntimeStringView<>>);
+static_assert(!std::is_move_assignable_v<LibXR::RuntimeStringView<>>);
 
 static void TestRuntimeStringText()
 {
