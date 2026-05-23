@@ -55,6 +55,7 @@ class CallbackBlock : public CallbackBlockHeader<Args...>
   CallbackBlock(FunctionType fun, ArgType&& arg)
       : CallbackBlockHeader<Args...>{&InvokeThunk}, fun_(fun), arg_(std::move(arg))
   {
+    ASSERT(fun_ != nullptr);
   }
 
   /**
@@ -72,10 +73,6 @@ class CallbackBlock : public CallbackBlockHeader<Args...>
  protected:
   void Invoke(bool in_isr, Args... args)
   {
-    if (!fun_)
-    {
-      return;
-    }
     fun_(in_isr, arg_, std::forward<Args>(args)...);
   }
 
@@ -111,7 +108,7 @@ class GuardedCallbackBlock : public CallbackBlock<ArgType, Args...>
         std::apply([&](auto&... a) { cb->Invoke(in_isr, a...); }, cur_args);
         if (cb->pending_)
         {
-          cur_args = cb->pending_args_;
+          cur_args = std::move(cb->pending_args_);
         }
       } while (cb->pending_);
       cb->running_ = false;
