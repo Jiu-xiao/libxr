@@ -12,7 +12,9 @@ ASync::ASync(size_t stack_depth, Thread::Priority priority)
 ErrorCode ASync::AssignJob(Job job)
 {
   Status expected = Status::READY;
-  if (!status_.compare_exchange_strong(expected, Status::BUSY))
+  if (!status_.compare_exchange_strong(expected, Status::BUSY,
+                                       std::memory_order_relaxed,
+                                       std::memory_order_relaxed))
   {
     return ErrorCode::BUSY;
   }
