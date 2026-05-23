@@ -53,10 +53,9 @@ class CallbackBlock : public CallbackBlockHeader<Args...>
    * @param arg 绑定的参数值 / Bound argument value
    */
   CallbackBlock(FunctionType fun, ArgType&& arg)
-      : CallbackBlockHeader<Args...>{fun != nullptr ? &InvokeThunk : &InvokeThunkNull},
-        fun_(fun),
-        arg_(std::move(arg))
+      : CallbackBlockHeader<Args...>{&InvokeThunk}, fun_(fun), arg_(std::move(arg))
   {
+    ASSERT(fun_ != nullptr);
   }
 
   /**
@@ -70,8 +69,6 @@ class CallbackBlock : public CallbackBlockHeader<Args...>
     auto* cb = static_cast<CallbackBlock<ArgType, Args...>*>(cb_block);
     cb->Invoke(in_isr, std::forward<Args>(args)...);
   }
-
-  static void InvokeThunkNull(void*, bool, Args...) {}
 
  protected:
   void Invoke(bool in_isr, Args... args)
@@ -94,7 +91,7 @@ class GuardedCallbackBlock : public CallbackBlock<ArgType, Args...>
                        ArgType&& arg)
       : CallbackBlock<ArgType, Args...>(fun, std::move(arg))
   {
-    this->run_fun_ = fun != nullptr ? &InvokeThunk : &InvokeThunkNull;
+    this->run_fun_ = &InvokeThunk;
   }
 
   static void InvokeThunk(void* cb_block, bool in_isr, Args... args)
@@ -124,8 +121,6 @@ class GuardedCallbackBlock : public CallbackBlock<ArgType, Args...>
     cb->pending_args_ = std::tuple<std::decay_t<Args>...>{std::forward<Args>(args)...};
     cb->pending_ = true;
   }
-
-  static void InvokeThunkNull(void*, bool, Args...) {}
 
  private:
   bool running_ = false;
