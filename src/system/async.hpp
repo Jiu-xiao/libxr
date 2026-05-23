@@ -63,7 +63,7 @@ class ASync
       if (async->sem_.Wait() == ErrorCode::OK)
       {
         async->job_.Run(false, async);
-        async->status_ = Status::DONE;
+        async->status_.store(Status::DONE, std::memory_order_relaxed);
       }
     }
   }
@@ -84,12 +84,12 @@ class ASync
    */
   [[nodiscard]] Status GetStatus()
   {
-    Status cur = status_.load();
+    Status cur = status_.load(std::memory_order_relaxed);
     if (cur != Status::DONE)
     {
       return cur;
     }
-    status_ = Status::READY;
+    status_.store(Status::READY, std::memory_order_relaxed);
     return Status::DONE;
   }
 
@@ -128,7 +128,7 @@ class ASync
   void AssignJobFromCallback(Job job, bool in_isr)
   {
     job_ = job;
-    status_.store(Status::BUSY);
+    status_.store(Status::BUSY, std::memory_order_relaxed);
     sem_.PostFromCallback(in_isr);
   }
 
