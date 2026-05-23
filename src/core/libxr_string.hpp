@@ -265,22 +265,7 @@ class RuntimeStringView
     other.status_ = ErrorCode::OK;
   }
 
-  /// Move-assigns by taking the retained storage handle. / 移动赋值并接管保留存储句柄。
-  RuntimeStringView& operator=(RuntimeStringView&& other) noexcept
-  {
-    if (this != &other)
-    {
-      data_ = other.data_;
-      size_ = other.size_;
-      capacity_ = other.capacity_;
-      status_ = other.status_;
-      other.data_ = nullptr;
-      other.size_ = 0;
-      other.capacity_ = 0;
-      other.status_ = ErrorCode::OK;
-    }
-    return *this;
-  }
+  RuntimeStringView& operator=(RuntimeStringView&&) = delete;
 
   /// Copies text into retained storage. / 拷贝文本到保留存储。
   explicit RuntimeStringView(std::string_view text)
