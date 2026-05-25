@@ -93,6 +93,18 @@ set(_xr_public_include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/system/${_xr_system}
 )
 
+file(GLOB _xr_core_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*"
+)
+foreach(_xr_core_SUBDIR IN LISTS _xr_core_SUBDIRS)
+  if(IS_DIRECTORY "${_xr_core_SUBDIR}")
+    get_filename_component(_xr_core_NAME "${_xr_core_SUBDIR}" NAME)
+    if(EXISTS "${_xr_core_SUBDIR}/${_xr_core_NAME}.hpp")
+      list(APPEND _xr_public_include_dirs "${_xr_core_SUBDIR}")
+    endif()
+  endif()
+endforeach()
+
 file(GLOB _xr_middleware_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
      "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*"
 )
