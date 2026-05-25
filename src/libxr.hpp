@@ -13,6 +13,7 @@
 #include "libxr_color.hpp"
 #include "libxr_def.hpp"
 #include "libxr_pipe.hpp"
+#include "print.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_string.hpp"
 #include "libxr_system.hpp"
