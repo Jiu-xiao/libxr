@@ -4,7 +4,6 @@
 #include <utility>
 
 #include "libxr_assert.hpp"
-#include "libxr_def.hpp"
 
 namespace LibXR
 {
@@ -163,7 +162,7 @@ class LockFreeList
     for (auto pos = head_.next_.load(std::memory_order_acquire); pos != &head_;
          pos = pos->next_.load(std::memory_order_relaxed))
     {
-      Assert::SizeLimitCheck<LimitMode>(sizeof(Data), pos->size_);
+      ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(Data), pos->size_));
       if (auto res = func(static_cast<Node<Data>*>(pos)->data_); res != ErrorCode::OK)
       {
         return res;

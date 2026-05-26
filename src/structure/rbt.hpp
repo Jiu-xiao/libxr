@@ -3,7 +3,6 @@
 #include <cstring>
 
 #include "libxr_assert.hpp"
-#include "libxr_def.hpp"
 #include "mutex.hpp"
 
 namespace LibXR
@@ -638,7 +637,7 @@ class RBTree
   {
     if (node)
     {
-      Assert::SizeLimitCheck<LimitMode>(sizeof(Data), node->size);
+      ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(Data), node->size));
     }
     return static_cast<Node<Data>*>(node);
   }

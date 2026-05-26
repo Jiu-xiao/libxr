@@ -645,7 +645,8 @@ class Topic
       return ErrorCode::EMPTY;
     }
 
-    Assert::SizeLimitCheck<Mode>(PACK_BASE_SIZE + block_->data_.data.size_, buffer.size_);
+    ASSERT(LibXR::SizeLimitCheck(Mode, PACK_BASE_SIZE + block_->data_.data.size_,
+                                 buffer.size_));
     Lock(block_);
     PackData(block_->data_.crc32, buffer, block_->data_.timestamp, block_->data_.data);
     Unlock(block_);

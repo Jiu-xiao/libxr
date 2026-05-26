@@ -5,6 +5,8 @@ project(xr LANGUAGES C CXX ASM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(LIBXR_DEV_ASSERT_BUILD "Enable LibXR maintainer-only development assertions" OFF)
+
 if(LIBXR_SHARED_BUILD)
   add_library(${PROJECT_NAME} SHARED)
 elseif(LIBXR_STATIC_BUILD)
@@ -25,6 +27,10 @@ include(cmake/config.cmake)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEBUG_BUILD)
+endif()
+
+if(LIBXR_DEV_ASSERT_BUILD)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEV_ASSERT_BUILD)
 endif()
 
 file(GLOB ${PROJECT_NAME}_SOURCES CONFIGURE_DEPENDS
@@ -99,7 +105,8 @@ file(GLOB _xr_core_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
 foreach(_xr_core_SUBDIR IN LISTS _xr_core_SUBDIRS)
   if(IS_DIRECTORY "${_xr_core_SUBDIR}")
     get_filename_component(_xr_core_NAME "${_xr_core_SUBDIR}" NAME)
-    if(EXISTS "${_xr_core_SUBDIR}/${_xr_core_NAME}.hpp")
+    if(EXISTS "${_xr_core_SUBDIR}/${_xr_core_NAME}.hpp" OR
+       EXISTS "${_xr_core_SUBDIR}/libxr_${_xr_core_NAME}.hpp")
       list(APPEND _xr_public_include_dirs "${_xr_core_SUBDIR}")
     endif()
   endif()

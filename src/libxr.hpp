@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app_framework.hpp"
+#include "libxr_assert.hpp"
 #include "async.hpp"
 #include "database.hpp"
 #include "double_buffer.hpp"
@@ -8,7 +9,6 @@
 #include "flag.hpp"
 #include "inertia.hpp"
 #include "kinematic.hpp"
-#include "libxr_assert.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_color.hpp"
 #include "libxr_def.hpp"

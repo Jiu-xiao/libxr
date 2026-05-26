@@ -158,7 +158,7 @@ int main()
 {
   LibXR::PlatformInit();
 
-  auto err_cb = LibXR::Assert::Callback::Create(
+  auto err_cb = LibXR::Assert::FatalCallback::Create(
       [](bool in_isr, void* arg, const char* file, uint32_t line)
       {
         UNUSED(in_isr);
