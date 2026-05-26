@@ -128,11 +128,54 @@ enum class ErrorCode : int8_t
 enum class SizeLimitMode : uint8_t
 {
   EQUAL = 0,  ///< 尺寸必须相等 | Size must be equal
-  LESS = 1,   ///< 尺寸必须小于 | Size must be less
-  MORE = 2,   ///< 尺寸必须大于 | Size must be more
+  LESS = 1,   ///< 尺寸必须小于等于 | Size must be less than or equal
+  MORE = 2,   ///< 尺寸必须大于等于 | Size must be greater than or equal
   NONE = 3    ///< 无限制 | No restriction
 };
+
+/**
+ * @brief 尺寸约束的纯判断函数
+ * @brief Pure predicate for size-limit comparisons
+ *
+ * This helper only answers whether the requested size relation holds.
+ * It does not decide whether the caller should assert, require, or return an
+ * error code.
+ * 这个辅助函数只判断尺寸关系是否成立；
+ * 它本身不决定调用方应该断言、强约束终止，还是返回错误码。
+ */
+[[nodiscard]] constexpr bool SizeLimitCheck(SizeLimitMode mode, size_t limit,
+                                            size_t size) noexcept
+{
+  switch (mode)
+  {
+    case SizeLimitMode::EQUAL:
+      return limit == size;
+    case SizeLimitMode::LESS:
+      return limit >= size;
+    case SizeLimitMode::MORE:
+      return limit <= size;
+    case SizeLimitMode::NONE:
+      return true;
+  }
+  return false;
+}
 }  // namespace LibXR
+
+#ifdef DEV_ASSERT
+#undef DEV_ASSERT
+#endif
+
+#ifdef DEV_ASSERT_FROM_CALLBACK
+#undef DEV_ASSERT_FROM_CALLBACK
+#endif
+
+#ifdef REQUIRE
+#undef REQUIRE
+#endif
+
+#ifdef REQUIRE_FROM_CALLBACK
+#undef REQUIRE_FROM_CALLBACK
+#endif
 
 #ifdef ASSERT
 #undef ASSERT
@@ -142,12 +185,12 @@ enum class SizeLimitMode : uint8_t
 #undef ASSERT_FROM_CALLBACK
 #endif
 
-#ifdef LIBXR_DEBUG_BUILD
 /**
- * @brief 断言宏，在调试模式下检查条件是否满足
- * @brief Assertion macro to check conditions in debug mode
+ * @brief 面向 LibXR 用户的断言宏
+ * @brief Assertion macro for LibXR users
  * @param arg 要检查的条件 | Condition to check
  */
+#ifdef LIBXR_DEBUG_BUILD
 #define ASSERT(arg)                                 \
   do                                                \
   {                                                 \
@@ -158,19 +201,19 @@ enum class SizeLimitMode : uint8_t
   } while (0)
 
 /**
- * @brief 回调环境下使用的断言宏（可来自中断或线程）
- * @brief Assertion macro for callbacks (may run in ISR or thread context).
+ * @brief 回调/ISR 上下文中的 LibXR 用户断言
+ * @brief Assertion macro for LibXR users in callback/ISR contexts
  *
  * @param arg    要检查的条件 | Condition to check
  * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
  */
-#define ASSERT_FROM_CALLBACK(arg, in_isr)              \
-  do                                                   \
-  {                                                    \
-    if (!(arg))                                        \
-    {                                                  \
+#define ASSERT_FROM_CALLBACK(arg, in_isr)             \
+  do                                                  \
+  {                                                   \
+    if (!(arg))                                       \
+    {                                                 \
       libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
-    }                                                  \
+    }                                                 \
   } while (0)
 #else
 #define ASSERT(arg) (void(arg), (void)0)
@@ -181,6 +224,76 @@ enum class SizeLimitMode : uint8_t
     (void)(in_isr);                       \
   } while (0)
 #endif
+
+/**
+ * @brief 仅供 LibXR 本体开发使用的开发期断言
+ * @brief Development-only assertion for LibXR maintainers
+ * @param arg 要检查的条件 | Condition to check
+ */
+#ifdef LIBXR_DEV_ASSERT_BUILD
+#define DEV_ASSERT(arg)                            \
+  do                                               \
+  {                                                \
+    if (!(arg))                                    \
+    {                                              \
+      libxr_fatal_error(__FILE__, __LINE__, false); \
+    }                                              \
+  } while (0)
+
+/**
+ * @brief 仅供 LibXR 本体开发使用的回调/ISR 开发期断言
+ * @brief Development-only callback/ISR assertion for LibXR maintainers
+ *
+ * @param arg    要检查的条件 | Condition to check
+ * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
+ */
+#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr)        \
+  do                                                 \
+  {                                                  \
+    if (!(arg))                                      \
+    {                                                \
+      libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
+    }                                                \
+  } while (0)
+#else
+#define DEV_ASSERT(arg) (void(arg), (void)0)
+#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr) \
+  do                                          \
+  {                                           \
+    (void)(arg);                              \
+    (void)(in_isr);                           \
+  } while (0)
+#endif
+
+/**
+ * @brief 与编译开关无关的强约束检查
+ * @brief Strong requirement check independent of build switches
+ * @param arg 要检查的条件 | Condition to check
+ */
+#define REQUIRE(arg)                                \
+  do                                                \
+  {                                                 \
+    if (!(arg))                                     \
+    {                                               \
+      libxr_fatal_error(__FILE__, __LINE__, false); \
+    }                                               \
+  } while (0)
+
+/**
+ * @brief 回调/ISR 上下文中的强约束检查
+ * @brief Strong requirement check in callback/ISR contexts
+ *
+ * @param arg    要检查的条件 | Condition to check
+ * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
+ */
+#define REQUIRE_FROM_CALLBACK(arg, in_isr)          \
+  do                                                \
+  {                                                 \
+    if (!(arg))                                     \
+    {                                               \
+      libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
+    }                                               \
+  } while (0)
 
 /**
  * @brief 处理致命错误

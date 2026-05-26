@@ -5,7 +5,6 @@
 #include <utility>
 
 #include "libxr_assert.hpp"
-#include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "rbt.hpp"
 
@@ -142,7 +141,7 @@ class RamFS
       static_assert(!std::is_reference_v<DataType>);
       static_assert(!std::is_volatile_v<RequestedType>);
 
-      LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(StoredType), size_);
+      ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(StoredType), size_));
       if constexpr (std::is_const_v<RequestedType>)
       {
         if (file_type_ == FileType::READ_WRITE)
@@ -181,7 +180,7 @@ class RamFS
       static_assert(!std::is_reference_v<DataType>);
       static_assert(!std::is_volatile_v<RequestedType>);
 
-      LibXR::Assert::SizeLimitCheck<LimitMode>(sizeof(StoredType), size_);
+      ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(StoredType), size_));
       if (file_type_ == FileType::READ_WRITE)
       {
         return *static_cast<const StoredType*>(addr_);

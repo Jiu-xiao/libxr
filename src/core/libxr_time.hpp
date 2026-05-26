@@ -3,7 +3,6 @@
 #include <cstdint>
 
 #include "libxr_assert.hpp"
-#include "libxr_def.hpp"
 
 /**
  * @brief 微秒时间基准的最大有效值 / Maximum valid value of the microsecond timebase
