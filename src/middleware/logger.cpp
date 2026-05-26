@@ -56,8 +56,9 @@ void PrintLogToTerminal(const LogData& data, MicrosecondTimestamp timestamp)
   const uint32_t timestamp_ms =
       static_cast<uint32_t>(static_cast<uint64_t>(timestamp) / 1000U);
   STDIO::Print<"{}{} [{}]({}:{}) {}{}\r\n">(
-      color, LogLevelToString(data.level), timestamp_ms, data.file, data.line,
-      data.message, LIBXR_STYLE_STR[static_cast<uint8_t>(Style::RESET)]);
+    color, LogLevelToString(data.level), timestamp_ms, data.file, data.line,
+      data.message,
+      LIBXR_TERMINAL_CONTROL_STR[static_cast<uint8_t>(TerminalControl::RESET)]);
 }
 
 void OnLogMessage(bool, Topic tp, const Topic::MessageView<LogData>& log_message)
