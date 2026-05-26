@@ -8,19 +8,30 @@ namespace LibXR
 
 /**
  * @brief Terminal text style / 终端文本样式
- * @details Defines ANSI text styles such as RESET, BOLD, DIM, and UNDERLINE.
- *          定义 ANSI 文本样式，如 RESET（重置）、BOLD（加粗）、DIM（弱化）、UNDERLINE（下划线）等。
+ * @details Defines ANSI text styles such as BOLD, DIM, and UNDERLINE.
+ *          定义 ANSI 文本样式，如 BOLD（加粗）、DIM（弱化）、UNDERLINE（下划线）等。
  */
-enum class Style : uint8_t
+enum class TextStyle : uint8_t
 {
   NONE = 0,
-  RESET,
   BOLD,
   DIM,
   UNDERLINE,
   BLINK,
   REVERSE,
   CONCEALED,
+  COUNT
+};
+
+/**
+ * @brief Terminal control sequence / 终端控制序列
+ * @details Defines ANSI terminal control commands such as RESET and ERASE_LINE.
+ *          定义 ANSI 终端控制命令，如 RESET（重置）和 ERASE_LINE（清除当前行）。
+ */
+enum class TerminalControl : uint8_t
+{
+  NONE = 0,
+  RESET,
   ERASE_LINE,
   COUNT
 };
@@ -76,9 +87,14 @@ enum class Preset : uint8_t
 /**
  * @brief ANSI escape sequences for text styles / ANSI转义序列 - 文本样式
  */
-inline constexpr const char* LIBXR_STYLE_STR[] = {"",        "\033[m",  "\033[1m",
-                                                  "\033[2m", "\033[4m", "\033[5m",
-                                                  "\033[7m", "\033[8m", "\033[K"};
+inline constexpr const char* LIBXR_TEXT_STYLE_STR[] = {"",        "\033[1m", "\033[2m",
+                                                       "\033[4m", "\033[5m", "\033[7m",
+                                                       "\033[8m"};
+
+/**
+ * @brief ANSI escape sequences for terminal controls / ANSI转义序列 - 终端控制
+ */
+inline constexpr const char* LIBXR_TERMINAL_CONTROL_STR[] = {"", "\033[m", "\033[K"};
 
 /**
  * @brief ANSI escape sequences for foreground colors / ANSI转义序列 - 前景色
