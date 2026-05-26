@@ -86,6 +86,11 @@ class GuardedCallbackBlock : public CallbackBlock<ArgType, Args...>
  public:
   /**
    * @brief 带防重入保护的回调块 / Callback block with reentry guard
+   *
+   * @note 该保护层只负责压平同一回调的递归重入链路，
+   *       不承担通用的跨上下文同步语义。
+   *       This guard only flattens self-recursive callback chains and does not
+   *       provide general cross-context synchronization semantics.
    */
   GuardedCallbackBlock(typename CallbackBlock<ArgType, Args...>::FunctionType fun,
                        ArgType&& arg)
@@ -150,6 +155,12 @@ class Callback
    * @param fun 需要绑定的回调函数 / Callback function to bind
    * @param arg 绑定的参数值 / Bound argument value
    * @return Callback 实例 / Created Callback instance
+   *
+   * @note 预期用法是初始化阶段创建并长期持有；
+   *       运行时高频创建/销毁不属于设计目标。
+   *       Intended usage is initialization-time creation with long-lived
+   *       retention; runtime churn-style create/destroy patterns are outside
+   *       the intended model.
    */
   template <typename BoundArgType, typename CallableType>
   requires CallbackFunctionCompatible<CallableType, BoundArgType, Args...>
@@ -170,6 +181,11 @@ class Callback
    * @param fun 需要绑定的回调函数 / Callback function to bind
    * @param arg 绑定的参数值 / Bound argument value
    * @return Callback 实例 / Created Callback instance
+   *
+   * @note 该 guarded callback 预期用于单条逻辑回调链上的递归压平，
+   *       不承担任意多上下文串行化。
+   *       Guarded callbacks are meant for self-recursive flattening on one
+   *       logical callback chain, not arbitrary multi-context serialization.
    */
   template <typename BoundArgType, typename CallableType>
   requires CallbackFunctionCompatible<CallableType, BoundArgType, Args...>
