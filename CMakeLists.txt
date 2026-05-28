@@ -86,6 +86,8 @@ target_sources(
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES}
 )
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/core/CMakeLists.txt)
+
 # The current tree still relies on basename and short subtree includes across major layers.
 # Keep the exported roots explicit here until the include-style migration lands.
 set(_xr_public_include_dirs
