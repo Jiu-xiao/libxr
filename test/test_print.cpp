@@ -138,6 +138,48 @@ struct BrokenGenericFormat
   }
 };
 
+struct PrefixThenBrokenFormat
+{
+  template <typename... Args>
+  [[nodiscard]] static consteval bool Matches()
+  {
+    return sizeof...(Args) == 0;
+  }
+
+  [[nodiscard]] static constexpr auto Codes()
+  {
+    return std::to_array<uint8_t>({
+        static_cast<uint8_t>(LibXR::Print::FormatOp::TextInline),
+        static_cast<uint8_t>('h'),
+        static_cast<uint8_t>('e'),
+        static_cast<uint8_t>('l'),
+        static_cast<uint8_t>('l'),
+        static_cast<uint8_t>('o'),
+        static_cast<uint8_t>(' '),
+        0,
+        static_cast<uint8_t>(LibXR::Print::FormatOp::GenericField),
+        static_cast<uint8_t>(LibXR::Print::FormatType::End),
+        0,
+        static_cast<uint8_t>(' '),
+        0,
+        0xFF,
+        static_cast<uint8_t>(LibXR::Print::FormatOp::End),
+    });
+  }
+
+  [[nodiscard]] static constexpr auto ArgumentList()
+  {
+    return std::array<LibXR::Print::FormatArgumentInfo, 0>{};
+  }
+
+  [[nodiscard]] static constexpr auto ArgumentOrder() { return std::array<size_t, 0>{}; }
+
+  [[nodiscard]] static constexpr LibXR::Print::FormatProfile Profile()
+  {
+    return LibXR::Print::FormatProfile::Generic;
+  }
+};
+
 struct StdioWriteScope
 {
   explicit StdioWriteScope(LibXR::WritePort& write, LibXR::Mutex& mutex,
@@ -958,6 +1000,41 @@ void TestStdioTruncation()
   }
 }
 
+void TestStreamBackedPrintFailureKeepsPrefix()
+{
+  static constexpr char expected[] = "hello ";
+
+  LibXR::Pipe pipe(64);
+  LibXR::ReadPort& read = pipe.GetReadPort();
+  LibXR::WritePort& write = pipe.GetWritePort();
+
+  uint8_t rx[sizeof(expected) - 1] = {0};
+  LibXR::ReadOperation read_op;
+  if (read(LibXR::RawData{rx, sizeof(rx)}, read_op) != LibXR::ErrorCode::OK)
+  {
+    Fail("stream-backed print failure read arm failed");
+  }
+
+  LibXR::WriteOperation write_op;
+  LibXR::WritePort::Stream stream(&write, write_op);
+  auto ec = LibXR::Print::Write(stream, PrefixThenBrokenFormat{});
+  if (ec != LibXR::ErrorCode::STATE_ERR)
+  {
+    Fail("stream-backed print failure status mismatch");
+  }
+
+  if (stream.Commit() != LibXR::ErrorCode::OK)
+  {
+    Fail("stream-backed print failure commit mismatch");
+  }
+
+  read.ProcessPendingReads(false);
+  if (std::memcmp(rx, expected, sizeof(rx)) != 0)
+  {
+    Fail("stream-backed print failure prefix mismatch");
+  }
+}
+
 }  // namespace
 
 void test_print()
@@ -967,4 +1044,5 @@ void test_print()
   TestPrintApiWrappers();
   TestStdioPrintWrappers();
   TestStdioTruncation();
+  TestStreamBackedPrintFailureKeepsPrefix();
 }

@@ -395,7 +395,7 @@ class ReadPort
   // Read BLOCK states:
   // PENDING = waiting for queue-fed completion after read_fun_ was notified
   // BLOCK_CLAIMED = wakeup now belongs to the waiter
-  // BLOCK_DETACHED = timeout/reset detached the waiter
+  // BLOCK_DETACHED = timeout detached the waiter
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 读 BLOCK 状态：
@@ -410,8 +410,8 @@ class ReadPort
                   ///< 请求已交给底层推进。
     BLOCK_CLAIMED = 2,   ///< BLOCK wakeup already belongs to the current waiter. 当前
                          ///< BLOCK 唤醒已被本次等待者认领。
-    BLOCK_DETACHED = 3,  ///< Timeout/reset detached the waiter; completion must stay
-                         ///< silent. 超时或 Reset 已分离等待者，完成侧不得再唤醒。
+    BLOCK_DETACHED = 3,  ///< Timeout detached the waiter; completion must stay silent.
+                         ///< 超时已分离等待者，完成侧不得再唤醒。
     EVENT = UINT32_MAX   ///< Data arrived before a waiter was armed; next caller must
                          ///< re-check queue. 数据先到，后续调用者要重查队列。
   };
@@ -545,9 +545,22 @@ class ReadPort
    */
   void ProcessPendingReads(bool in_isr);
 
-  /// @brief Resets the ReadPort.
-  /// @brief 重置ReadPort。
-  void Reset();
+  /**
+   * @brief 失败完成并清空当前所有挂起读操作。
+   * @brief Fail-complete and clear all currently pending read operations.
+   *
+   * @note Driver-only: call this only after the backend is known to be unavailable.
+   * @note 仅供驱动层在后端已明确不可用后调用。
+   * @note The surrounding driver must already guarantee that no new front-end
+   *       submissions or back-end completion/data events can still arrive for
+   *       this port.
+   * @note 外围驱动还必须先保证：这条端口后续不会再收到新的前端提交，也不会再收到
+   *       新的后端完成或数据事件。
+   *
+   * @param reason 最终失败原因 / Final failure reason
+   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
+   */
+  void FailAndClearAll(ErrorCode reason, bool in_isr);
 };
 
 /**
@@ -569,8 +582,8 @@ class WritePort
   // BLOCK_PUBLISHING = BLOCK submit path is publishing queue metadata
   // BLOCK_WAITING = waiter armed, completion not claimed yet
   // BLOCK_CLAIMED = final wakeup belongs to the waiter
-  // BLOCK_DETACHED = timeout/reset detached the waiter
-  // RESETTING = reset path owns queue mutation
+  // BLOCK_DETACHED = timeout detached the waiter
+  // RESETTING = fail-and-clear path owns queue mutation
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 写 BLOCK 状态：
@@ -591,9 +604,10 @@ class WritePort
                         ///< 一个 BLOCK 等待者已经挂起，等待最终完成。
     BLOCK_CLAIMED =
         3,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
-    BLOCK_DETACHED = 4,  ///< Waiter already timed out/reset; completion must not post.
+    BLOCK_DETACHED = 4,  ///< Waiter already timed out/detached; completion must not post.
                          ///< 等待者已超时/被分离，完成侧不能再 Post。
-    RESETTING = 5,        ///< Reset owns queue mutation. Reset 占有写队列/元数据修改权。
+    RESETTING = 5,        ///< Fail-and-clear owns queue mutation.
+                          ///< Fail-and-clear 路径占有写队列/元数据修改权。
     IDLE = UINT32_MAX    ///< No active submitter and no armed BLOCK waiter.
                          ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
   };
@@ -836,9 +850,28 @@ class WritePort
    */
   ErrorCode operator()(ConstRawData data, WriteOperation& op, bool in_isr = false);
 
-  /// @brief Resets queued write state when no submitter owns queue mutation.
-  /// @brief 当没有提交者占有队列修改权时，重置写队列状态。
-  void Reset();
+  /**
+   * @brief 失败完成并清空当前所有挂起写操作。
+   * @brief Fail-complete and clear all currently pending write operations.
+   *
+   * @note Driver-only: call this only after the backend is known to be unavailable.
+   * @note 仅供驱动层在后端已明确不可用后调用。
+   * @note The surrounding driver must already guarantee that no new front-end
+   *       submissions or back-end completion/data events can still arrive for
+   *       this port.
+   * @note 外围驱动还必须先保证：这条端口后续不会再收到新的前端提交，也不会再收到
+   *       新的后端完成或数据事件。
+   * @note Seeing LOCKED / BLOCK_PUBLISHING / RESETTING here means the caller
+   *       violated that driver-side precondition.
+   * @note 若此时仍看到 LOCKED / BLOCK_PUBLISHING / RESETTING，说明调用方违反了
+   *       上述驱动层前提。
+   * @note Dev builds fire DEV_ASSERT, while release builds still back off.
+   * @note 开发期会触发 DEV_ASSERT，发布构建仍保持直接退回。
+   *
+   * @param reason 最终失败原因 / Final failure reason
+   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
+   */
+  void FailAndClearAll(ErrorCode reason, bool in_isr);
 
   /**
    * @brief 提交写入操作。

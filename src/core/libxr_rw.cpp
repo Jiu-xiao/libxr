@@ -168,8 +168,8 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
       if (expected == BusyState::BLOCK_DETACHED)
       {
-        // Reset detached this waiter before the timeout-side cancel won.
-        // Reset 先分离了当前 waiter；超时侧负责把端口收回 IDLE。
+        // The waiter had already detached before the timeout-side cancel won.
+        // 当前 waiter 已经先分离；超时侧负责把端口收回 IDLE。
         busy_.store(BusyState::IDLE, std::memory_order_release);
         return ErrorCode::TIMEOUT;
       }
@@ -258,25 +258,36 @@ void ReadPort::ProcessPendingReads(bool in_isr)
   }
 }
 
-void ReadPort::Reset()
+void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
   queue_data_->Reset();
 
   auto state = busy_.load(std::memory_order_acquire);
-  if (state == BusyState::PENDING && info_.op.type == ReadOperation::OperationType::BLOCK)
+  if (state == BusyState::PENDING)
   {
-    // Reset detaches the BLOCK waiter instead of reopening the port directly.
-    // Reset 先分离 BLOCK waiter，不直接重开端口。
-    BusyState expected = BusyState::PENDING;
-    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire))
+    if (info_.op.type == ReadOperation::OperationType::BLOCK)
     {
+      // Backend is already unavailable. Claim the waiter and complete it with
+      // the requested failure reason instead of leaving it to timeout.
+      // 后端已经不可用。这里直接 claim waiter，并用指定错误收口，
+      // 而不是让它继续超时等待。
+      BusyState expected = BusyState::PENDING;
+      if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
+                                        std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
+      {
+        Finish(in_isr, reason, info_);
+        return;
+      }
+      state = expected;
+    }
+    else
+    {
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      info_.op.UpdateStatus(in_isr, reason);
       return;
     }
-
-    state = busy_.load(std::memory_order_acquire);
   }
 
   if (state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_DETACHED)
@@ -334,9 +345,9 @@ void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
       return;
     }
 
-    // The waiter may have timed out and released a reset-detached operation before
-    // this late completion is reported.
-    // waiter 可能已经超时并释放了 Reset 分离的操作，随后迟到完成才上报。
+    // The waiter may have timed out and detached before this late completion is
+    // reported.
+    // waiter 可能已经先超时分离，随后迟到完成才上报。
     if (expected == BusyState::BLOCK_PUBLISHING)
     {
       expected = BusyState::BLOCK_PUBLISHING;
@@ -562,17 +573,30 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
   return ErrorCode::OK;
 }
 
-void WritePort::Reset()
+void WritePort::FailAndClearAll(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
+  WriteInfoBlock info{};
 
   while (true)
   {
     auto state = busy_.load(std::memory_order_acquire);
 
-    if (state == BusyState::LOCKED || state == BusyState::BLOCK_PUBLISHING ||
-        state == BusyState::RESETTING)
+    if (state == BusyState::LOCKED)
     {
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+      return;
+    }
+
+    if (state == BusyState::BLOCK_PUBLISHING)
+    {
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+      return;
+    }
+
+    if (state == BusyState::RESETTING)
+    {
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
       return;
     }
 
@@ -587,7 +611,10 @@ void WritePort::Reset()
       }
 
       queue_data_->Reset();
-      queue_info_->Reset();
+      while (queue_info_->Pop(info) == ErrorCode::OK)
+      {
+        Finish(in_isr, reason, info);
+      }
       block_result_ = ErrorCode::OK;
       busy_.store(BusyState::IDLE, std::memory_order_release);
       return;
@@ -595,25 +622,38 @@ void WritePort::Reset()
 
     if (state == BusyState::BLOCK_WAITING)
     {
-      // Claim reset ownership before touching queues; late Finish() must not reopen
-      // the port while Reset() is clearing queue state.
-      // 先取得 reset 所有权再清队列；迟到 Finish() 不能在 Reset() 清队列期间重开端口。
-      BusyState expected = BusyState::BLOCK_WAITING;
-      if (!busy_.compare_exchange_strong(expected, BusyState::RESETTING,
-                                         std::memory_order_acq_rel,
-                                         std::memory_order_acquire))
-      {
-        continue;
-      }
-
+      // Keep BLOCK_WAITING visible until Finish() hands the terminal wakeup to
+      // the blocked caller. Switching to RESETTING here would break that
+      // existing waiter handoff.
+      // 这里必须保留 BLOCK_WAITING，直到 Finish() 把最终唤醒交给当前
+      // BLOCK waiter；若先切成 RESETTING，会破坏既有 waiter 交接。
       queue_data_->Reset();
-      queue_info_->Reset();
-      block_result_ = ErrorCode::OK;
-      busy_.store(BusyState::BLOCK_DETACHED, std::memory_order_release);
+      while (queue_info_->Pop(info) == ErrorCode::OK)
+      {
+        Finish(in_isr, reason, info);
+      }
       return;
     }
 
-    if (state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_DETACHED)
+    if (state == BusyState::BLOCK_DETACHED)
+    {
+      // The waiter is already gone, but BLOCK_DETACHED still blocks reentrant
+      // submissions while old queue entries are drained.
+      // waiter 已经离开，但 BLOCK_DETACHED 仍能在清理旧队列期间挡住重入提交。
+      queue_data_->Reset();
+      while (queue_info_->Pop(info) == ErrorCode::OK)
+      {
+        // The waiter has already detached. Finish() will clear the local state
+        // without re-posting that waiter.
+        // waiter 已经分离。Finish() 会清理本地状态，但不会重新唤醒该 waiter。
+        Finish(in_isr, reason, info);
+      }
+      block_result_ = ErrorCode::OK;
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return;
+    }
+
+    if (state == BusyState::BLOCK_CLAIMED)
     {
       return;
     }
@@ -780,12 +820,6 @@ ErrorCode WritePort::Stream::Commit()
   return ans;
 }
 
-void WritePort::Stream::Discard()
-{
-  buffered_size_ = 0;
-  Release();
-}
-
 // STDIO compiled-format bridge.
 // STDIO 编译格式桥接层。
 STDIO::CompiledSink::CompiledSink(WritePort::Stream& stream) : stream_(stream) {}
@@ -873,19 +907,16 @@ int STDIO::FinishWriteSession(WritePort::Stream& stream, size_t retained_size,
 {
   ASSERT(write_mutex_ != nullptr);
 
-  auto ec = format_result;
-  if (ec == ErrorCode::OK)
-  {
-    ec = stream.Commit();
-  }
-  else
-  {
-    stream.Discard();
-  }
+  // Stream-backed STDIO is now explicitly prefix-preserving on formatting
+  // failure: any bytes already retained in this session are committed instead
+  // of being pseudo-rolled-back.
+  // 基于 Stream 的 STDIO 现在明确采用“前缀保留”语义：格式化失败时，
+  // 本会话已保留的字节仍然提交，不再尝试伪回滚。
+  auto ec = stream.Commit();
 
   write_mutex_->Unlock();
 
-  if (ec != ErrorCode::OK ||
+  if (format_result != ErrorCode::OK || ec != ErrorCode::OK ||
       retained_size > static_cast<size_t>(std::numeric_limits<int>::max()))
   {
     return -1;
