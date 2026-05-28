@@ -41,6 +41,25 @@ static void TestRuntimeStringText()
   ASSERT(copied_view == std::string_view("camera"));
   ASSERT(copied_cstr == copied.CStr());
 
+  char single_bounded_name[3] = {'i', 'm', 'u'};
+  LibXR::RuntimeStringView<> single_bounded(single_bounded_name);
+  ASSERT(single_bounded.Ok());
+  ASSERT(single_bounded.View() == std::string_view("imu"));
+
+  const char const_single_bounded_name[3] = {'g', 'p', 'u'};
+  LibXR::RuntimeStringView<> const_single_bounded(const_single_bounded_name);
+  ASSERT(const_single_bounded.Ok());
+  ASSERT(const_single_bounded.View() == std::string_view("gpu"));
+
+  LibXR::RuntimeStringView<> text_embedded("ab\0cd");
+  ASSERT(text_embedded.Ok());
+  ASSERT(text_embedded.View() == std::string_view("ab"));
+
+  LibXR::RuntimeStringView<> raw_embedded(std::string_view("ab\0cd", 5));
+  ASSERT(raw_embedded.Ok());
+  ASSERT(raw_embedded.View() == std::string_view("ab\0cd", 5));
+  ASSERT(raw_embedded.CStr()[raw_embedded.Size()] == '\0');
+
   LibXR::RuntimeStringView gyro(std::string_view("camera"), "_gyro");
   ASSERT(gyro.Ok());
   ASSERT(gyro.View() == std::string_view("camera_gyro"));
@@ -53,6 +72,25 @@ static void TestRuntimeStringText()
   LibXR::RuntimeStringView<> quat(copied, "_quat");
   ASSERT(quat.Ok());
   ASSERT(quat.View() == std::string_view("camera_quat"));
+
+  char bounded_name[3] = {'i', 'm', 'u'};
+  LibXR::RuntimeStringView<> bounded(bounded_name, "_rx");
+  ASSERT(bounded.Ok());
+  ASSERT(bounded.View() == std::string_view("imu_rx"));
+
+  const char const_bounded_name[3] = {'g', 'p', 'u'};
+  LibXR::RuntimeStringView<> const_bounded(const_bounded_name, "_tx");
+  ASSERT(const_bounded.Ok());
+  ASSERT(const_bounded.View() == std::string_view("gpu_tx"));
+
+  char padded_name[8] = {'a', '\0', 'x', 'x'};
+  LibXR::RuntimeStringView<> padded(padded_name, "_1");
+  ASSERT(padded.Ok());
+  ASSERT(padded.View() == std::string_view("a_1"));
+
+  LibXR::RuntimeStringView<> embedded_text_suffix("ab\0cd", "_x");
+  ASSERT(embedded_text_suffix.Ok());
+  ASSERT(embedded_text_suffix.View() == std::string_view("ab_x"));
 }
 
 static void TestRuntimeStringErrors()
@@ -68,6 +106,16 @@ static void TestRuntimeStringErrors()
   ASSERT(null_copy.Size() == 0);
   ASSERT(null_copy.View().empty());
   ASSERT(null_copy.CStr()[0] == '\0');
+
+  LibXR::RuntimeStringView<> bare_null(nullptr);
+  ASSERT(!bare_null.Ok());
+  ASSERT(bare_null.Status() == LibXR::ErrorCode::PTR_NULL);
+  ASSERT(bare_null.View().empty());
+
+  LibXR::RuntimeStringView<> bare_null_part("camera", nullptr);
+  ASSERT(!bare_null_part.Ok());
+  ASSERT(bare_null_part.Status() == LibXR::ErrorCode::PTR_NULL);
+  ASSERT(bare_null_part.View().empty());
 }
 
 static void TestRuntimeStringFormat()
