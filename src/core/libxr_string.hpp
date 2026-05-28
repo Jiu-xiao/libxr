@@ -15,6 +15,9 @@
 
 namespace LibXR
 {
+template <Print::Text Source, typename... Args>
+class RuntimeStringView;
+
 namespace Detail
 {
 
@@ -190,6 +193,20 @@ struct RuntimeStringTextPart
   ErrorCode status = ErrorCode::OK;
 };
 
+template <typename T>
+struct RuntimeStringViewTag : std::false_type
+{
+};
+
+template <Print::Text Source, typename... Args>
+struct RuntimeStringViewTag<RuntimeStringView<Source, Args...>> : std::true_type
+{
+};
+
+template <typename T>
+inline constexpr bool runtime_string_is_view_v =
+    RuntimeStringViewTag<std::remove_cvref_t<T>>::value;
+
 /**
  * @brief Sink used by the second formatting pass to fill retained storage.
  * @brief 格式化第二遍使用的保留存储写入端。
@@ -274,11 +291,36 @@ class RuntimeStringView
     static_cast<void>(AssignCopy(text));
   }
 
-  /// Copies a C string into retained storage. / 拷贝 C 字符串到保留存储。
-  explicit RuntimeStringView(const char* text)
+  /// Copies one bounded mutable char array as text. / 按文本语义拷贝一个有界可变字符数组。
+  template <size_t N>
+  explicit RuntimeStringView(char (&text)[N])
     requires(Source.Size() == 0 && sizeof...(Args) == 0)
   {
+    static_cast<void>(AssignCopy(std::string_view(text, BoundedTextLength(text, N))));
+  }
+
+  /// Copies one bounded const char array as text. / 按文本语义拷贝一个有界只读字符数组。
+  template <size_t N>
+  explicit RuntimeStringView(const char (&text)[N])
+    requires(Source.Size() == 0 && sizeof...(Args) == 0)
+  {
+    static_cast<void>(AssignCopy(std::string_view(text, BoundedTextLength(text, N))));
+  }
+
+  /// Copies a NUL-terminated C-string pointer into retained storage. / 拷贝 NUL 结尾 C 字符串指针到保留存储。
+  template <typename CharPtr>
+  requires(Source.Size() == 0 && sizeof...(Args) == 0 &&
+           (std::is_same_v<CharPtr, char*> || std::is_same_v<CharPtr, const char*>))
+  explicit RuntimeStringView(CharPtr text)
+  {
     static_cast<void>(AssignCopy(text));
+  }
+
+  /// Preserves the old bare-nullptr entry for runtime null checks. / 保留裸 nullptr 入口以维持运行期空指针检查语义。
+  explicit RuntimeStringView(std::nullptr_t text)
+    requires(Source.Size() == 0 && sizeof...(Args) == 0)
+  {
+    static_cast<void>(AssignCopy(static_cast<const char*>(text)));
   }
 
   /// Concatenates text parts into retained storage. / 拼接多个文本片段到保留存储。
@@ -474,7 +516,7 @@ class RuntimeStringView
       }
 
       Detail::RuntimeStringTextPart text =
-          ToTextPart(std::forward<decltype(part)>(part));
+          NormalizeConcatPart(std::forward<decltype(part)>(part));
       if (text.status != ErrorCode::OK)
       {
         status = text.status;
@@ -504,7 +546,7 @@ class RuntimeStringView
     auto copy = [&](auto&& part)
     {
       Detail::RuntimeStringTextPart text =
-          ToTextPart(std::forward<decltype(part)>(part));
+          NormalizeConcatPart(std::forward<decltype(part)>(part));
       if (!text.view.empty())
       {
         std::memcpy(data_ + offset, text.view.data(), text.view.size());
@@ -560,87 +602,69 @@ class RuntimeStringView
   }
 
   /**
-   * @brief 将 `string_view` 归一化为拼接片段，不接管其所有权。
-   * @brief Normalize `string_view` as a concatenation part without taking
-   *        ownership.
+   * @brief 在已知边界内查找文本长度；遇到首个 `\0` 截断，否则使用整个数组长度。
+   * @brief Find text length within a known bound; stop at the first `\0`,
+   *        otherwise use the whole array extent.
    */
-  [[nodiscard]] static constexpr Detail::RuntimeStringTextPart ToTextPart(
-      std::string_view text)
+  [[nodiscard]] static constexpr size_t BoundedTextLength(const char* text,
+                                                          size_t bound) noexcept
   {
-    return {.view = text};
+    size_t size = 0;
+    while (size < bound && text[size] != '\0')
+    {
+      ++size;
+    }
+    return size;
   }
 
   /**
-   * @brief 将 `std::string` 归一化为只读片段，真实拷贝由调用方统一完成。
-   * @brief Normalize `std::string` as a read-only part; the caller performs the
-   *        actual copy.
-   */
-  [[nodiscard]] static Detail::RuntimeStringTextPart ToTextPart(
-      const std::string& text)
-  {
-    return {.view = std::string_view(text.data(), text.size())};
-  }
-
-  /**
-   * @brief 将 C 字符串归一化为拼接片段，并把空指针转换为 `PTR_NULL`。
-   * @brief Normalize a C string as a concatenation part and convert null pointers
-   *        to `PTR_NULL`.
-   */
-  [[nodiscard]] static Detail::RuntimeStringTextPart ToTextPart(const char* text)
-  {
-    return text == nullptr
-               ? Detail::RuntimeStringTextPart{.status = ErrorCode::PTR_NULL}
-               : Detail::RuntimeStringTextPart{
-                     .view = std::string_view(text, std::strlen(text))};
-  }
-
-  /**
-   * @brief 可变 C 字符串与 const C 字符串使用同一套长度和空指针规则。
-   * @brief Mutable C strings share the same length and null-pointer rules as
-   *        const C strings.
-   */
-  [[nodiscard]] static Detail::RuntimeStringTextPart ToTextPart(char* text)
-  {
-    return ToTextPart(static_cast<const char*>(text));
-  }
-
-  /**
-   * @brief 字符串字面量直接使用数组长度，避免运行期 `strlen()`。
-   * @brief String literals use their array length directly and avoid runtime
-   *        `strlen()`.
-   */
-  template <size_t N>
-  [[nodiscard]] static constexpr Detail::RuntimeStringTextPart ToTextPart(
-      const char (&text)[N])
-  {
-    return {.view = std::string_view(text, N > 0 ? N - 1U : 0U)};
-  }
-
-  /**
-   * @brief 允许已保留字符串参与拼接，同时传播其失败状态。
-   * @brief Allow another retained string to join concatenation while propagating
-   *        its failure status.
-   */
-  template <Print::Text OtherSource, typename... OtherArgs>
-  [[nodiscard]] static constexpr Detail::RuntimeStringTextPart ToTextPart(
-      const RuntimeStringView<OtherSource, OtherArgs...>& text)
-  {
-    return text.Ok() ? Detail::RuntimeStringTextPart{.view = text.View()}
-                     : Detail::RuntimeStringTextPart{.status = text.Status()};
-  }
-
-  /**
-   * @brief 普通拼接只接受文本片段，数值格式化必须显式走 `Reformat()` 或 `Reprintf()`。
-   * @brief Plain concatenation accepts text parts only; numeric formatting must
-   *        go through `Reformat()` or `Reprintf()`.
+   * @brief 把拼接构造支持的输入统一归一化为只读文本片段；普通拼接只接受文本类输入，
+   *        数值格式化必须显式走 `Reformat()` 或 `Reprintf()`。
+   * @brief Normalize one supported concatenation input into a read-only text
+   *        part. Plain concatenation accepts text-like inputs only; numeric
+   *        formatting must go through `Reformat()` or `Reprintf()`.
    */
   template <typename T>
-  [[nodiscard]] static constexpr Detail::RuntimeStringTextPart ToTextPart(const T&)
+  [[nodiscard]] static constexpr Detail::RuntimeStringTextPart NormalizeConcatPart(T&& text)
   {
-    static_assert(Detail::runtime_string_always_false<T>,
-                  "RuntimeStringView constructor only accepts text-like parts. "
-                  "Use Reformat() or Reprintf() for numeric formatting.");
-    return {.status = ErrorCode::ARG_ERR};
+    using Bare = std::remove_cvref_t<T>;
+    if constexpr (Detail::runtime_string_is_view_v<T>)
+    {
+      const auto& retained = text;
+      return retained.Ok() ? Detail::RuntimeStringTextPart{.view = retained.View()}
+                           : Detail::RuntimeStringTextPart{.status = retained.Status()};
+    }
+    else if constexpr (std::is_array_v<Bare> &&
+                       std::is_same_v<std::remove_cv_t<std::remove_extent_t<Bare>>, char>)
+    {
+      return {.view = std::string_view(text, BoundedTextLength(text, std::extent_v<Bare>))};
+    }
+    else if constexpr (std::is_same_v<Bare, std::string_view>)
+    {
+      return {.view = text};
+    }
+    else if constexpr (std::is_same_v<Bare, std::string>)
+    {
+      return {.view = std::string_view(text.data(), text.size())};
+    }
+    else if constexpr (std::is_same_v<Bare, std::nullptr_t>)
+    {
+      return {.status = ErrorCode::PTR_NULL};
+    }
+    else if constexpr (std::is_same_v<Bare, char*> || std::is_same_v<Bare, const char*>)
+    {
+      return text == nullptr
+                 ? Detail::RuntimeStringTextPart{.status = ErrorCode::PTR_NULL}
+                 : Detail::RuntimeStringTextPart{
+                       .view = std::string_view(text, std::strlen(text))};
+    }
+    else
+    {
+      static_assert(Detail::runtime_string_always_false<T>,
+                    "RuntimeStringView constructor only accepts text-like parts. "
+                    "Use Reformat() or Reprintf() for numeric formatting.");
+      return {.status = ErrorCode::ARG_ERR};
+    }
   }
 
   /// 长期保留的 NUL 结尾存储；对象析构时不释放。 / Retained NUL-terminated storage; not released by the destructor.
