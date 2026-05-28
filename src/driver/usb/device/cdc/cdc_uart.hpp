@@ -427,23 +427,14 @@ class CDCUart : public CDCBase, public LibXR::UART
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
     CDCBase::UnbindEndpoints(endpoint_pool, in_isr);
-
-    WriteInfoBlock info{};
-
-    write_port_cdc_.queue_data_->Reset();
     tx_deq_.Reset();
-
-    while (write_port_cdc_.queue_info_->Pop(info) == ErrorCode::OK)
-    {
-      write_port_cdc_.Finish(in_isr, ErrorCode::INIT_ERR, info);
-    }
+    write_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
+    read_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
 
     need_write_zlp_ = false;
 
     read_port_cdc_.recv_pause_ = false;
     read_port_cdc_.pending_data_ = {nullptr, 0};
-
-    write_port_cdc_.Reset();
   }
 
   /**
@@ -678,15 +669,8 @@ class CDCUart : public CDCBase, public LibXR::UART
 
     if (!Inited())
     {
-      WriteInfoBlock info{};
       tx_deq_.Reset();
-
-      while (write_port_cdc_.queue_info_->Pop(info) == ErrorCode::OK)
-      {
-        write_port_cdc_.queue_data_->Reset();
-        ASSERT(write_port_cdc_.queue_data_->Size() == 0);
-        write_port_cdc_.Finish(in_isr, ErrorCode::INIT_ERR, info);
-      }
+      write_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
       return;
     }
 
