@@ -10,6 +10,27 @@
 namespace LibXR
 {
 
+namespace Detail
+{
+/**
+ * @brief 仅裁掉数组末尾的一个 `\\0`；其余字节按原始数据保留。
+ * @brief Trim at most one trailing `\\0` from a bounded char array and keep all
+ *        preceding bytes untouched.
+ */
+template <size_t N>
+[[nodiscard]] constexpr size_t TrailingNulTrimmedArraySize(char (&data)[N]) noexcept
+{
+  return (data[N - 1] == '\0') ? (N - 1) : N;
+}
+
+template <size_t N>
+[[nodiscard]] constexpr size_t TrailingNulTrimmedArraySize(
+    const char (&data)[N]) noexcept
+{
+  return (data[N - 1] == '\0') ? (N - 1) : N;
+}
+}  // namespace Detail
+
 /**
  * @brief 可写原始数据视图 / Mutable raw data view
  *
@@ -75,12 +96,12 @@ class RawData
    * @tparam N 数组长度 / Array length
    * @param data 被引用字符数组 / Referenced char array
    *
-   * @note 返回长度为 `N - 1`，默认忽略结尾的 `\\0`。
-   *       / The resulting size is `N - 1`, so the trailing `\\0` is ignored by
-   *       default.
+   * @note 若数组最后一个字符恰为 `\\0`，则仅裁掉这一个尾随终止符；否则保留整个数组长度。
+   *       / If the last array element is `\\0`, only that trailing terminator is
+   *       trimmed; otherwise the full array extent is kept.
    */
   template <size_t N>
-  RawData(char (&data)[N]) : addr_(data), size_(N - 1)
+  RawData(char (&data)[N]) : addr_(data), size_(Detail::TrailingNulTrimmedArraySize(data))
   {
   }
 
@@ -143,6 +164,9 @@ class ConstRawData
    * @param data 被引用对象 / Referenced object
    */
   template <typename DataType>
+    requires(!std::is_pointer_v<std::remove_cvref_t<DataType>> &&
+             !std::is_same_v<std::remove_cvref_t<DataType>, ConstRawData> &&
+             !std::is_same_v<std::remove_cvref_t<DataType>, RawData>)
   ConstRawData(const DataType& data)
       : addr_(reinterpret_cast<const DataType*>(&data)), size_(sizeof(DataType))
   {
@@ -168,24 +192,22 @@ class ConstRawData
   ConstRawData(const RawData& data) : addr_(data.addr_), size_(data.size_) {}
 
   /**
-   * @brief 从 `char *` 指针构造 `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
-   *        Constructs `ConstRawData` from a `char *` pointer,
+   * @brief 从 `char*` / `const char*` 文本指针构造 `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
+   *        Constructs `ConstRawData` from a `char*` / `const char*` text pointer,
    *        with size set to the string length (excluding `\0`).
    *
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  ConstRawData(char* data) : addr_(data), size_(data != nullptr ? std::strlen(data) : 0) {}
-
-  /**
-   * @brief 从 `char *` 指针构造 `ConstRawData`（常量版本）。
-   *        Constructs `ConstRawData` from a `const char *` pointer.
-   *
-   * @param data C 风格字符串指针。
-   *             A C-style string pointer.
-   */
-  ConstRawData(const char* data)
-      : addr_(data), size_(data != nullptr ? std::strlen(data) : 0)
+  template <typename CharPtr>
+    requires(std::is_pointer_v<std::remove_reference_t<CharPtr>> &&
+             std::is_same_v<std::remove_cv_t<
+                                std::remove_pointer_t<std::remove_reference_t<CharPtr>>>,
+                            char> &&
+             !std::is_volatile_v<std::remove_pointer_t<std::remove_reference_t<CharPtr>>>)
+  ConstRawData(CharPtr data)
+      : addr_(data),
+        size_(data != nullptr ? std::strlen(static_cast<const char*>(data)) : 0)
   {
   }
 
@@ -208,9 +230,9 @@ class ConstRawData
   }
 
   /**
-   * @brief 从字符数组构造 `ConstRawData`，数据大小为数组长度减 1（不含 `\0`）。
-   *        Constructs `ConstRawData` from a character array,
-   *        with size set to array length minus 1 (excluding `\0`).
+   * @brief 从字符数组构造 `ConstRawData`；若最后一个字符是 `\\0`，仅忽略这一尾随终止符。
+   * @brief Constructs `ConstRawData` from a character array; if the last element
+   *        is `\\0`, only that trailing terminator is ignored.
    *
    * @tparam N 数组大小。
    *           The array size.
@@ -218,8 +240,16 @@ class ConstRawData
    *             The character array to be stored.
    */
   template <size_t N>
+  ConstRawData(char (&data)[N])
+      : addr_(reinterpret_cast<const void*>(data)),
+        size_(Detail::TrailingNulTrimmedArraySize(data))
+  {
+  }
+
+  template <size_t N>
   ConstRawData(const char (&data)[N])
-      : addr_(reinterpret_cast<const void*>(data)), size_(N - 1)
+      : addr_(reinterpret_cast<const void*>(data)),
+        size_(Detail::TrailingNulTrimmedArraySize(data))
   {
   }
 
