@@ -87,6 +87,7 @@ static void run_libxr_tests()
                                      {"stack", test_stack, false},
                                      {"list", test_list, false},
                                      {"double_buffer", test_double_buffer, false},
+                                     {"type", test_type, false},
                                      {"string", test_string, false}};
 
   TestCase threading_tests[] = {

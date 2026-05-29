@@ -21,6 +21,7 @@ void test_app_framework();
 void test_database();
 void test_transform();
 void test_double_buffer();
+void test_type();
 void test_string();
 void test_cycle_value();
 void test_pid();
