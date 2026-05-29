@@ -32,7 +32,8 @@ static_assert(!std::is_move_assignable_v<LibXR::RuntimeStringView<>>);
 static void TestRuntimeStringText()
 {
   LibXR::RuntimeStringView<> copied("camera");
-  ASSERT(copied.Ok());
+  ASSERT(copied.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!copied.Empty());
   ASSERT(copied.View() == std::string_view("camera"));
   ASSERT(copied.CStr()[copied.Size()] == '\0');
 
@@ -41,79 +42,95 @@ static void TestRuntimeStringText()
   ASSERT(copied_view == std::string_view("camera"));
   ASSERT(copied_cstr == copied.CStr());
 
+  LibXR::RuntimeStringView<> empty_text("");
+  ASSERT(empty_text.Status() == LibXR::ErrorCode::OK);
+  ASSERT(empty_text.Empty());
+  ASSERT(empty_text.View().empty());
+
   char single_bounded_name[3] = {'i', 'm', 'u'};
   LibXR::RuntimeStringView<> single_bounded(single_bounded_name);
-  ASSERT(single_bounded.Ok());
+  ASSERT(single_bounded.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!single_bounded.Empty());
   ASSERT(single_bounded.View() == std::string_view("imu"));
 
   const char const_single_bounded_name[3] = {'g', 'p', 'u'};
   LibXR::RuntimeStringView<> const_single_bounded(const_single_bounded_name);
-  ASSERT(const_single_bounded.Ok());
+  ASSERT(const_single_bounded.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!const_single_bounded.Empty());
   ASSERT(const_single_bounded.View() == std::string_view("gpu"));
 
   LibXR::RuntimeStringView<> text_embedded("ab\0cd");
-  ASSERT(text_embedded.Ok());
+  ASSERT(text_embedded.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!text_embedded.Empty());
   ASSERT(text_embedded.View() == std::string_view("ab"));
 
   LibXR::RuntimeStringView<> raw_embedded(std::string_view("ab\0cd", 5));
-  ASSERT(raw_embedded.Ok());
+  ASSERT(raw_embedded.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!raw_embedded.Empty());
   ASSERT(raw_embedded.View() == std::string_view("ab\0cd", 5));
   ASSERT(raw_embedded.CStr()[raw_embedded.Size()] == '\0');
 
   LibXR::RuntimeStringView gyro(std::string_view("camera"), "_gyro");
-  ASSERT(gyro.Ok());
+  ASSERT(gyro.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!gyro.Empty());
   ASSERT(gyro.View() == std::string_view("camera_gyro"));
 
   std::string base = "camera";
   LibXR::RuntimeStringView<> accl(base, "_accl");
-  ASSERT(accl.Ok());
+  ASSERT(accl.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!accl.Empty());
   ASSERT(accl.View() == std::string_view("camera_accl"));
 
   LibXR::RuntimeStringView<> quat(copied, "_quat");
-  ASSERT(quat.Ok());
+  ASSERT(quat.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!quat.Empty());
   ASSERT(quat.View() == std::string_view("camera_quat"));
 
   char bounded_name[3] = {'i', 'm', 'u'};
   LibXR::RuntimeStringView<> bounded(bounded_name, "_rx");
-  ASSERT(bounded.Ok());
+  ASSERT(bounded.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!bounded.Empty());
   ASSERT(bounded.View() == std::string_view("imu_rx"));
 
   const char const_bounded_name[3] = {'g', 'p', 'u'};
   LibXR::RuntimeStringView<> const_bounded(const_bounded_name, "_tx");
-  ASSERT(const_bounded.Ok());
+  ASSERT(const_bounded.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!const_bounded.Empty());
   ASSERT(const_bounded.View() == std::string_view("gpu_tx"));
 
   char padded_name[8] = {'a', '\0', 'x', 'x'};
   LibXR::RuntimeStringView<> padded(padded_name, "_1");
-  ASSERT(padded.Ok());
+  ASSERT(padded.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!padded.Empty());
   ASSERT(padded.View() == std::string_view("a_1"));
 
   LibXR::RuntimeStringView<> embedded_text_suffix("ab\0cd", "_x");
-  ASSERT(embedded_text_suffix.Ok());
+  ASSERT(embedded_text_suffix.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!embedded_text_suffix.Empty());
   ASSERT(embedded_text_suffix.View() == std::string_view("ab_x"));
 }
 
 static void TestRuntimeStringErrors()
 {
   LibXR::RuntimeStringView<> null_part("camera", static_cast<const char*>(nullptr));
-  ASSERT(!null_part.Ok());
+  ASSERT(null_part.Empty());
   ASSERT(null_part.Status() == LibXR::ErrorCode::PTR_NULL);
   ASSERT(null_part.Size() == 0);
 
   LibXR::RuntimeStringView<> null_copy(static_cast<const char*>(nullptr));
-  ASSERT(!null_copy.Ok());
+  ASSERT(null_copy.Empty());
   ASSERT(null_copy.Status() == LibXR::ErrorCode::PTR_NULL);
   ASSERT(null_copy.Size() == 0);
   ASSERT(null_copy.View().empty());
   ASSERT(null_copy.CStr()[0] == '\0');
 
   LibXR::RuntimeStringView<> bare_null(nullptr);
-  ASSERT(!bare_null.Ok());
+  ASSERT(bare_null.Empty());
   ASSERT(bare_null.Status() == LibXR::ErrorCode::PTR_NULL);
   ASSERT(bare_null.View().empty());
 
   LibXR::RuntimeStringView<> bare_null_part("camera", nullptr);
-  ASSERT(!bare_null_part.Ok());
+  ASSERT(bare_null_part.Empty());
   ASSERT(bare_null_part.Status() == LibXR::ErrorCode::PTR_NULL);
   ASSERT(bare_null_part.View().empty());
 }
@@ -122,13 +139,15 @@ static void TestRuntimeStringFormat()
 {
   LibXR::RuntimeStringView<"camera_{}", unsigned int> formatted;
   ASSERT(formatted.Reformat(7U) == LibXR::ErrorCode::OK);
-  ASSERT(formatted.Ok());
+  ASSERT(formatted.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!formatted.Empty());
   ASSERT(formatted.View() == std::string_view("camera_7"));
   ASSERT(formatted.CStr()[formatted.Size()] == '\0');
 
   LibXR::RuntimeStringView<"frame_%03u", unsigned int> printf_formatted;
   ASSERT(printf_formatted.Reprintf(5U) == LibXR::ErrorCode::OK);
-  ASSERT(printf_formatted.Ok());
+  ASSERT(printf_formatted.Status() == LibXR::ErrorCode::OK);
+  ASSERT(!printf_formatted.Empty());
   ASSERT(printf_formatted.View() == std::string_view("frame_005"));
   ASSERT(printf_formatted.CStr()[printf_formatted.Size()] == '\0');
 
