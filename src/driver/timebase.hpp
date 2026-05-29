@@ -29,8 +29,7 @@ class Timebase
    */
   Timebase(uint64_t max_valid_us = UINT64_MAX, uint32_t max_valid_ms = UINT32_MAX)
   {
-    libxr_timebase_max_valid_ms = max_valid_ms;
-    libxr_timebase_max_valid_us = max_valid_us;
+    ConfigureWrapRange(max_valid_us, max_valid_ms);
     timebase = this;
   }
 
@@ -117,6 +116,22 @@ class Timebase
    * and all static time functions access the actual implementation through this pointer.
    */
   static inline Timebase* timebase = nullptr;  // NOLINT
+
+ protected:
+  static void ConfigureWrapRange(uint64_t max_valid_us, uint32_t max_valid_ms) noexcept
+  {
+    Detail::ConfigureTimebaseWrapRange(max_valid_us, max_valid_ms);
+  }
+
+  [[nodiscard]] static uint64_t GetConfiguredWrapRangeUs() noexcept
+  {
+    return Detail::TimebaseMaxValidUs();
+  }
+
+  [[nodiscard]] static uint32_t GetConfiguredWrapRangeMs() noexcept
+  {
+    return Detail::TimebaseMaxValidMs();
+  }
 };
 
 }  // namespace LibXR

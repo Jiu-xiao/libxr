@@ -4,32 +4,41 @@
 
 #include "libxr_assert.hpp"
 
-/**
- * @brief 微秒时间基准的最大有效值 / Maximum valid value of the microsecond timebase
- *
- * @note 当微秒时间基准发生回绕时，`MicrosecondTimestamp::operator-` 使用该值恢复跨回绕的
- *       时间差。默认值为 `UINT64_MAX`，表示 64 位时间基准的完整计数范围。
- *       / When the microsecond timebase wraps around,
- *       `MicrosecondTimestamp::operator-` uses this value to recover the elapsed
- *       time across the wrap. The default `UINT64_MAX` means the full range of a
- *       64-bit timebase.
- */
-inline uint64_t libxr_timebase_max_valid_us = UINT64_MAX;  // NOLINT
-
-/**
- * @brief 毫秒时间基准的最大有效值 / Maximum valid value of the millisecond timebase
- *
- * @note 当毫秒时间基准发生回绕时，`MillisecondTimestamp::operator-` 使用该值恢复跨回绕的
- *       时间差。默认值为 `UINT32_MAX`，表示 32 位时间基准的完整计数范围。
- *       / When the millisecond timebase wraps around,
- *       `MillisecondTimestamp::operator-` uses this value to recover the elapsed
- *       time across the wrap. The default `UINT32_MAX` means the full range of a
- *       32-bit timebase.
- */
-inline uint32_t libxr_timebase_max_valid_ms = UINT32_MAX;  // NOLINT
-
 namespace LibXR
 {
+namespace Detail
+{
+
+[[nodiscard]] inline uint64_t& TimebaseMaxValidUsStorage() noexcept
+{
+  static uint64_t value = UINT64_MAX;
+  return value;
+}
+
+[[nodiscard]] inline uint32_t& TimebaseMaxValidMsStorage() noexcept
+{
+  static uint32_t value = UINT32_MAX;
+  return value;
+}
+
+[[nodiscard]] inline uint64_t TimebaseMaxValidUs() noexcept
+{
+  return TimebaseMaxValidUsStorage();
+}
+
+[[nodiscard]] inline uint32_t TimebaseMaxValidMs() noexcept
+{
+  return TimebaseMaxValidMsStorage();
+}
+
+inline void ConfigureTimebaseWrapRange(uint64_t max_valid_us,
+                                       uint32_t max_valid_ms) noexcept
+{
+  TimebaseMaxValidUsStorage() = max_valid_us;
+  TimebaseMaxValidMsStorage() = max_valid_ms;
+}
+
+}  // namespace Detail
 
 /**
  * @brief 微秒时间戳 / Microsecond timestamp
@@ -112,14 +121,15 @@ class MicrosecondTimestamp
    * @return 当前时间戳相对旧时间戳的时长 / Elapsed duration from the older timestamp
    *
    * @note 若当前时间戳小于旧时间戳，则按一次时间基准回绕处理，回绕上界由
-   *       `libxr_timebase_max_valid_us` 指定。
+   *       当前已配置的微秒时间基准有效上界指定。
    *       / If the current timestamp is smaller than the older one, the function
-   *       treats it as one wraparound event whose upper bound is defined by
-   *       `libxr_timebase_max_valid_us`.
+   *       treats it as one wraparound event whose upper bound is defined by the
+   *       currently configured microsecond timebase limit.
    */
   [[nodiscard]] Duration operator-(const MicrosecondTimestamp& old_timestamp) const
   {
     uint64_t elapsed = 0;
+    const uint64_t max_valid = Detail::TimebaseMaxValidUs();
 
     if (microsecond_ >= old_timestamp.microsecond_)
     {
@@ -127,11 +137,10 @@ class MicrosecondTimestamp
     }
     else
     {
-      elapsed = microsecond_ + (libxr_timebase_max_valid_us - old_timestamp.microsecond_) +
-                1ULL;
+      elapsed = microsecond_ + (max_valid - old_timestamp.microsecond_) + 1ULL;
     }
 
-    ASSERT(elapsed <= libxr_timebase_max_valid_us);
+    ASSERT(elapsed <= max_valid);
 
     return Duration(elapsed);
   }
@@ -231,14 +240,15 @@ class MillisecondTimestamp
    * @return 当前时间戳相对旧时间戳的时长 / Elapsed duration from the older timestamp
    *
    * @note 若当前时间戳小于旧时间戳，则按一次时间基准回绕处理，回绕上界由
-   *       `libxr_timebase_max_valid_ms` 指定。
+   *       当前已配置的毫秒时间基准有效上界指定。
    *       / If the current timestamp is smaller than the older one, the function
-   *       treats it as one wraparound event whose upper bound is defined by
-   *       `libxr_timebase_max_valid_ms`.
+   *       treats it as one wraparound event whose upper bound is defined by the
+   *       currently configured millisecond timebase limit.
    */
   [[nodiscard]] Duration operator-(const MillisecondTimestamp& old_timestamp) const
   {
     uint32_t elapsed = 0;
+    const uint32_t max_valid = Detail::TimebaseMaxValidMs();
 
     if (millisecond_ >= old_timestamp.millisecond_)
     {
@@ -246,11 +256,10 @@ class MillisecondTimestamp
     }
     else
     {
-      elapsed =
-          millisecond_ + (libxr_timebase_max_valid_ms - old_timestamp.millisecond_) + 1U;
+      elapsed = millisecond_ + (max_valid - old_timestamp.millisecond_) + 1U;
     }
 
-    ASSERT(elapsed <= libxr_timebase_max_valid_ms);
+    ASSERT(elapsed <= max_valid);
 
     return Duration(elapsed);
   }
