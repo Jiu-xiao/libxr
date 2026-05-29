@@ -391,8 +391,8 @@ class RuntimeStringView
   [[nodiscard]] const char* CStr() const { return data_ == nullptr ? "" : data_; }
   /// Returns the text size excluding the trailing NUL. / 返回不含结尾 NUL 的文本长度。
   [[nodiscard]] constexpr size_t Size() const { return size_; }
-  /// Returns whether the latest operation succeeded. / 返回最近一次操作是否成功。
-  [[nodiscard]] constexpr bool Ok() const { return status_ == ErrorCode::OK; }
+  /// Returns whether the current visible text is empty. / 返回当前可见文本是否为空。
+  [[nodiscard]] constexpr bool Empty() const { return size_ == 0; }
   /// Returns the latest operation status. / 返回最近一次操作状态。
   [[nodiscard]] constexpr ErrorCode Status() const { return status_; }
   /// Converts to a read-only string view. / 转换为只读字符串视图。
@@ -631,8 +631,9 @@ class RuntimeStringView
     if constexpr (Detail::runtime_string_is_view_v<T>)
     {
       const auto& retained = text;
-      return retained.Ok() ? Detail::RuntimeStringTextPart{.view = retained.View()}
-                           : Detail::RuntimeStringTextPart{.status = retained.Status()};
+      return retained.Status() == ErrorCode::OK
+                 ? Detail::RuntimeStringTextPart{.view = retained.View()}
+                 : Detail::RuntimeStringTextPart{.status = retained.Status()};
     }
     else if constexpr (std::is_array_v<Bare> &&
                        std::is_same_v<std::remove_cv_t<std::remove_extent_t<Bare>>, char>)
