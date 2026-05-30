@@ -1,8 +1,7 @@
 #pragma once
 
+#include "ch32_defs.hpp"
 #include "libxr.hpp"
-
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 extern uint32_t SystemCoreClock;
 

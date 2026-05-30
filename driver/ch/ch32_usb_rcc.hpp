@@ -72,6 +72,55 @@ inline void ConfigureUsb48MFromSysclk()
   ASSERT(false);
 }
 
+inline void ConfigureUsb48MForH417()
+{
+#if defined(RCC_USBFSCLKSource_USBHSPLL) && defined(RCC_USBHS_PLLCmd) && \
+    defined(RCC_USBHSPLLSource_HSE) && defined(RCC_USBHSPLLRefer_20M) && \
+    defined(RCC_USBHSPLLRefer_24M) && defined(RCC_USBHSPLLRefer_25M) && \
+    defined(RCC_USBHSPLLRefer_32M) && defined(RCC_USBHSPLL_IN_Div1) && \
+    defined(RCC_USBFS_Div10) && defined(RCC_SYSPLL_SEL) && defined(RCC_SYSPLL_USBHS) && \
+    defined(RCC_HSERDY) && defined(RCC_USBHS_PLLRDY)
+  if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
+  {
+    ASSERT((RCC->CTLR & RCC_HSERDY) != 0u);
+
+    uint32_t ref_cfg = 0u;
+    switch (static_cast<uint32_t>(HSE_VALUE))
+    {
+      case 20000000u:
+        ref_cfg = RCC_USBHSPLLRefer_20M;
+        break;
+      case 24000000u:
+        ref_cfg = RCC_USBHSPLLRefer_24M;
+        break;
+      case 25000000u:
+        ref_cfg = RCC_USBHSPLLRefer_25M;
+        break;
+      case 32000000u:
+        ref_cfg = RCC_USBHSPLLRefer_32M;
+        break;
+      default:
+        ASSERT(false);
+        return;
+    }
+
+    RCC_USBHS_PLLCmd(DISABLE);
+    RCC_USBHSPLLCLKConfig(RCC_USBHSPLLSource_HSE);
+    RCC_USBHSPLLReferConfig(ref_cfg);
+    RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
+    RCC_USBHS_PLLCmd(ENABLE);
+    while ((RCC->CTLR & RCC_USBHS_PLLRDY) == 0u)
+    {
+    }
+  }
+
+  RCC_USBFSCLKConfig(RCC_USBFSCLKSource_USBHSPLL);
+  RCC_USBFS48ClockSourceDivConfig(RCC_USBFS_Div10);
+#else
+  ASSERT(false);
+#endif
+}
+
 #if defined(RCC_HSBHSPLLCLKSource_HSE) && defined(RCC_USBPLL_Div1) &&                   \
     defined(RCC_USBPLL_Div2) && defined(RCC_USBPLL_Div3) && defined(RCC_USBPLL_Div4) && \
     defined(RCC_USBPLL_Div5) && defined(RCC_USBPLL_Div6) && defined(RCC_USBPLL_Div7) && \
@@ -156,7 +205,11 @@ inline void ConfigureUsbHsPhyFromHse()
 
 inline void ConfigureUsb48M()
 {
-#if defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_HSBHSPLLCLKSource_HSE)
+#if defined(__CH32H417_H)
+  // CH32H417 routes USBFS 48 MHz from the dedicated USBHS PLL path.
+  // CH32H417 的 USBFS 48 MHz 走专用 USBHS PLL 路径。
+  ConfigureUsb48MForH417();
+#elif defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_HSBHSPLLCLKSource_HSE)
   // 部分 CH32V30x 可以从 USBHS PHY PLL 提供共享 48 MHz USB 时钟；
   // 这种情况下先选 PHY 路径，再让各控制器自己打开总线时钟。
   // Some CH32V30x parts can source the shared 48 MHz USB clock from the USBHS PHY PLL;

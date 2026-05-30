@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ch32_defs.hpp"
 #include "libxr.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 #include <cstring>
 
@@ -26,7 +26,8 @@ class CH32SPI : public SPI
           uint16_t sck_pin, GPIO_TypeDef* miso_port, uint16_t miso_pin,
           GPIO_TypeDef* mosi_port, uint16_t mosi_pin, uint32_t pin_remap = 0,
           bool master_mode = true, bool firstbit_msb = true,
-          uint16_t prescaler = SPI_BaudRatePrescaler_64, uint32_t dma_enable_min_size = 3,
+          uint16_t prescaler = CH32_SPI_DEFAULT_PRESCALER,
+          uint32_t dma_enable_min_size = 3,
           SPI::Configuration config = {SPI::ClockPolarity::LOW, SPI::ClockPhase::EDGE_1});
 
   /// SPI 接口实现 / SPI interface overrides

@@ -41,88 +41,31 @@ static inline uint8_t ch32_can_mode_macro(const CAN::Mode& m)
   return CAN_Mode_Normal;
 }
 
+static inline void ch32_clock_bus1_enable(uint32_t periph)
+{
+  RCC_APB1PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_can_set_slave_start_bank(uint8_t bank)
+{
+  CAN_SlaveStartBank(bank);
+}
+
+static inline uint32_t ch32_clock_pclk1(const RCC_ClocksTypeDef& clocks)
+{
+  return clocks.PCLK1_Frequency;
+}
+
 static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
 {
-  // TX 中断线。
-  // TX interrupt line.
-  switch (id)
+  if (id >= CH32_CAN_NUMBER)
   {
-#if defined(CAN1)
-    case CH32_CAN1:
-      NVIC_EnableIRQ(USB_HP_CAN1_TX_IRQn);
-      break;
-#endif
-
-#if defined(CAN2)
-    case CH32_CAN2:
-      NVIC_EnableIRQ(CAN2_TX_IRQn);
-      break;
-#endif
-    default:
-      break;
+    return;
   }
 
-  // RX 中断线：FIFO0 -> RX0 vector，FIFO1 -> RX1 vector。
-  // RX interrupt line: FIFO0 -> RX0 vector, FIFO1 -> RX1 vector.
-  if (fifo == 0u)
-  {
-    switch (id)
-    {
-#if defined(CAN1)
-      case CH32_CAN1:
-        NVIC_EnableIRQ(USB_LP_CAN1_RX0_IRQn);
-        break;
-#endif
-
-#if defined(CAN2)
-      case CH32_CAN2:
-        NVIC_EnableIRQ(CAN2_RX0_IRQn);
-        break;
-#endif
-      default:
-        break;
-    }
-  }
-  else
-  {
-    switch (id)
-    {
-#if defined(CAN1)
-      case CH32_CAN1:
-        NVIC_EnableIRQ(CAN1_RX1_IRQn);
-        break;
-#endif
-
-#if defined(CAN2)
-      case CH32_CAN2:
-        NVIC_EnableIRQ(CAN2_RX1_IRQn);
-        break;
-#endif
-
-      default:
-        break;
-    }
-  }
-
-  // SCE 中断线。
-  // SCE interrupt line.
-  switch (id)
-  {
-#if defined(CAN1)
-    case CH32_CAN1:
-      NVIC_EnableIRQ(CAN1_SCE_IRQn);
-      break;
-#endif
-
-#if defined(CAN2)
-    case CH32_CAN2:
-      NVIC_EnableIRQ(CAN2_SCE_IRQn);
-      break;
-#endif
-
-    default:
-      break;
-  }
+  NVIC_EnableIRQ(CH32_CAN_TX_IRQ_MAP[id]);
+  NVIC_EnableIRQ((fifo == 0u) ? CH32_CAN_RX0_IRQ_MAP[id] : CH32_CAN_RX1_IRQ_MAP[id]);
+  NVIC_EnableIRQ(CH32_CAN_SCE_IRQ_MAP[id]);
 }
 
 CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
@@ -143,16 +86,28 @@ CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
   if (id == CH32_CAN1)
   {
     filter_bank_ = 0;
+#if defined(CAN_FilterFIFO0)
     fifo_ = CAN_FilterFIFO0;  // 0
+#else
+    fifo_ = CAN_Filter_FIFO0;  // 0
+#endif
   }
   else
   {
     filter_bank_ = 14;
+#if defined(CAN_FilterFIFO1)
     fifo_ = CAN_FilterFIFO1;  // 1
+#else
+    fifo_ = CAN_Filter_FIFO1;  // 1
+#endif
   }
 #else
   filter_bank_ = 0;
+#if defined(CAN_FilterFIFO0)
   fifo_ = CAN_FilterFIFO0;  // 0
+#else
+  fifo_ = CAN_Filter_FIFO0;  // 0
+#endif
 #endif
 
   ASSERT(id_ < CH32_CAN_NUMBER);
@@ -162,7 +117,7 @@ CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
 
   // 打开外设时钟。
   // Enable the peripheral clock.
-  RCC_APB1PeriphClockCmd(CH32_CAN_RCC_PERIPH_MAP[id_], ENABLE);
+  ch32_clock_bus1_enable(CH32_CAN_RCC_PERIPH_MAP[id_]);
 
   // 在调用 SetConfig() 之前，保持 CAN 处于初始化模式。
   // Keep CAN in initialization mode until SetConfig() is called.
@@ -171,7 +126,7 @@ CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
 #if defined(CAN2)
   // 在双 CAN 变体上，配置默认的共享过滤器分界点。
   // On dual-CAN variants, configure the default shared filter split point.
-  CAN_SlaveStartBank(CH32_CAN_DEFAULT_SLAVE_START_BANK);
+  ch32_can_set_slave_start_bank(CH32_CAN_DEFAULT_SLAVE_START_BANK);
 #endif
 
   (void)Init();
@@ -478,7 +433,7 @@ uint32_t CH32CAN::GetClockFreq() const
 {
   RCC_ClocksTypeDef clocks{};
   RCC_GetClocksFreq(&clocks);
-  return clocks.PCLK1_Frequency;
+  return ch32_clock_pclk1(clocks);
 }
 
 inline void CH32CAN::BuildTxMsg(const ClassicPack& p, CanTxMsg& m)

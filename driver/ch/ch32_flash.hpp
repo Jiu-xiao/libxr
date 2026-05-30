@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <cstring>
 
+#include "ch32_defs.hpp"
 #include "flash.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 namespace LibXR
 {

@@ -18,6 +18,15 @@ using OtgHsEndpointMap = decltype(LibXR::CH32EndpointOtgHs::map_otg_hs_);
 constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
 constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
 
+static void EnableUsbHsControllerClock()
+{
+#if defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+#elif defined(RCC_HBPeriph_USBHS)
+  RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, ENABLE);
+#endif
+}
+
 static void ResetEp0State(OtgHsEndpointMap& map)
 {
   auto* out0 = map[0][OUT_IDX];
@@ -361,9 +370,7 @@ void CH32USBOtgHS::Start(bool)
   // OTGHS selects the shared 48 MHz source first, then enables its own bus clock.
   // OTGHS 先选择共享 48 MHz 时钟源，再打开 USBHS 自己的总线时钟。
   LibXR::CH32UsbRcc::ConfigureUsb48M();
-#if defined(RCC_AHBPeriph_USBHS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
-#endif
+  EnableUsbHsControllerClock();
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
   USBHSD->CONTROL &= ~USBHS_UC_RESET_SIE;
   USBHSD->HOST_CTRL = USBHS_UH_PHY_SUSPENDM;

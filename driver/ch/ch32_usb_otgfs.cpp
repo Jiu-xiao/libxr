@@ -17,6 +17,150 @@ constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF 
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
 
+static void ch32_usbfs_delay_short();
+static void EnableUsbFsControllerClock()
+{
+#if defined(__CH32H417_H) && defined(RCC_HBPeriph_OTG_FS)
+  RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
+#elif defined(RCC_AHBPeriph_USBFS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
+#elif defined(RCC_AHBPeriph_USBOTGFS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
+#elif defined(RCC_HBPeriph_OTG_FS)
+  RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
+#endif
+}
+
+static void ch32_usb_clock48_m_config()
+{
+#if defined(__CH32H417_H)
+  if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
+  {
+    RCC_USBHS_PLLCmd(DISABLE);
+    RCC_USBHSPLLCLKConfig((RCC->CTLR & RCC_HSERDY) ? RCC_USBHSPLLSource_HSE
+                                                   : RCC_USBHSPLLSource_HSI);
+    RCC_USBHSPLLReferConfig(RCC_USBHSPLLRefer_25M);
+    RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
+    RCC_USBHS_PLLCmd(ENABLE);
+    while ((RCC->CTLR & RCC_USBHS_PLLRDY) == 0)
+    {
+    }
+  }
+
+  RCC_USBFSCLKConfig(RCC_USBFSCLKSource_USBHSPLL);
+  RCC_USBFS48ClockSourceDivConfig(RCC_USBFS_Div10);
+#else
+  RCC_ClocksTypeDef clk{};
+  RCC_GetClocksFreq(&clk);
+
+  const uint32_t SYSCLK_HZ = clk.SYSCLK_Frequency;
+
+#if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && \
+    defined(RCC_USBCLKSource_PLLCLK_Div3)
+  if (SYSCLK_HZ == 144000000u)
+  {
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div3);
+  }
+  else if (SYSCLK_HZ == 96000000u)
+  {
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div2);
+  }
+  else if (SYSCLK_HZ == 48000000u)
+  {
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div1);
+  }
+#if defined(RCC_USB5PRE_JUDGE) && defined(RCC_USBCLKSource_PLLCLK_Div5)
+  else if (SYSCLK_HZ == 240000000u)
+  {
+    ASSERT(RCC_USB5PRE_JUDGE() == SET);
+    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div5);
+  }
+#endif
+  else
+  {
+    ASSERT(false);
+  }
+
+#elif defined(RCC_USBCLK48MCLKSource_PLLCLK) && \
+    defined(RCC_USBFSCLKSource_PLLCLK_Div1) &&  \
+    defined(RCC_USBFSCLKSource_PLLCLK_Div2) && defined(RCC_USBFSCLKSource_PLLCLK_Div3)
+  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_PLLCLK);
+
+  if (SYSCLK_HZ == 144000000u)
+  {
+    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div3);
+  }
+  else if (SYSCLK_HZ == 96000000u)
+  {
+    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div2);
+  }
+  else if (SYSCLK_HZ == 48000000u)
+  {
+    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div1);
+  }
+  else
+  {
+    ASSERT(false);
+  }
+
+#else
+  (void)SYSCLK_HZ;
+#endif
+#endif
+}
+
+static void ch32_usbfs_rcc_enable()
+{
+  ch32_usb_clock48_m_config();
+  EnableUsbFsControllerClock();
+}
+
+static void ch32_usbfs_delay_short()
+{
+  for (volatile uint32_t i = 0; i < 8000u; ++i)
+  {
+    asm volatile("nop");
+  }
+}
+
+static void ResetEp0AfterRecover(CH32EndpointOtgFs* out0, CH32EndpointOtgFs* in0)
+{
+  ASSERT(out0 != nullptr);
+  ASSERT(in0 != nullptr);
+
+  out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+  in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+  out0->tog_ = true;
+  in0->tog_ = true;
+  USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
+  USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;
+}
+
+static void ch32_usbfs_apply_device_registers()
+{
+#if defined(USBFS_CR_OTG_EN) && defined(USBFS_CR_IDPU)
+  USBFSD->OTG_CR = USBFS_CR_OTG_EN | USBFS_CR_IDPU;
+#endif
+  USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;
+}
+
+static void ch32_usbfs_detach_device()
+{
+  USBFSD->UDEV_CTRL = 0x00;
+  USBFSD->BASE_CTRL = USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
+}
+
+static void ch32_usbfs_enable_device_logic()
+{
+  USBFSD->BASE_CTRL = USBFS_UC_DEV_PU_EN | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
+}
+
+static void ch32_usbfs_enable_device_port()
+{
+  USBFSD->UDEV_CTRL = USBFS_UD_PD_DIS | USBFS_UD_PORT_EN;
+}
+
+static void ch32_usbfs_clear_pending_flags() { USBFSD->INT_FG = OTG_FS_CLEARABLE_MASK; }
 static void ClearPendingOtgFsInterrupts()
 {
   while (true)
@@ -30,12 +174,59 @@ static void ClearPendingOtgFsInterrupts()
       break;
     }
     USBFSD->INT_FG = PENDING;
+  }
+}
 
-    // This loop only drains the pending bits visible in the current INT_FG
-    // snapshot. Any later host event will relatch a fresh interrupt and be
-    // handled by the next IRQ entry.
-    // 这个循环只清当前 INT_FG 快照里可见的 pending 位；主机后续的新事件
-    // 会重新锁存成新的中断，并在下一次 IRQ 进入时处理。
+static void RestoreUsbFsEndpointState()
+{
+  auto& ep_map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
+  constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
+  constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
+  constexpr uint8_t N_EP =
+      static_cast<uint8_t>(LibXR::CH32EndpointOtgFs::EP_OTG_FS_MAX_SIZE);
+
+  bool rearm_out[N_EP] = {};
+
+  for (uint8_t ep = 0; ep < N_EP; ++ep)
+  {
+    auto* out = ep_map[ep][OUT_IDX];
+    auto* in = ep_map[ep][IN_IDX];
+
+    if (out != nullptr)
+    {
+      rearm_out[ep] = out->GetState() == LibXR::USB::Endpoint::State::BUSY;
+      out->Configure({out->GetDirection(), out->GetType(), out->MaxPacketSize(),
+                      out->UseDoubleBuffer()});
+    }
+
+    if (in != nullptr)
+    {
+      in->Configure({in->GetDirection(), in->GetType(), in->MaxPacketSize(),
+                     in->UseDoubleBuffer()});
+    }
+  }
+
+  auto* out0 = ep_map[0][OUT_IDX];
+  auto* in0 = ep_map[0][IN_IDX];
+  if (out0 != nullptr && in0 != nullptr)
+  {
+    ResetEp0AfterRecover(out0, in0);
+  }
+
+  for (uint8_t ep = 1; ep < N_EP; ++ep)
+  {
+    if (!rearm_out[ep])
+    {
+      continue;
+    }
+
+    auto* out = ep_map[ep][OUT_IDX];
+    if (out == nullptr)
+    {
+      continue;
+    }
+
+    (void)out->Transfer(out->MaxTransferSize());
   }
 }
 
@@ -60,62 +251,37 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
   ASSERT(out0 != nullptr);
   ASSERT(in0 != nullptr);
 
-  // Handle order matches the control-transfer lifecycle:
-  // 1) bus-level recovery
-  // 2) token completion / setup dispatch
-  // 处理顺序与控制传输生命周期保持一致：
-  // 1) 总线级恢复
-  // 2) token 完成与 setup 分发
   while (true)
   {
     const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
         reinterpret_cast<uintptr_t>(&USBFSD->INT_FG));
-
     const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
     const uint8_t INTST = static_cast<uint8_t>((INTFGST >> 8) & 0x00FFu);
-
     const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & OTG_FS_CLEARABLE_MASK);
-    if (PENDING == 0)
+
+    if (PENDING == 0u)
     {
       break;
     }
 
     uint8_t clear_mask = 0;
 
-    // Reset rebuilds EP0 state and returns the device to "waiting for setup".
-    // reset 会重建 EP0 状态，并把设备恢复到“等待 setup”的初始形态。
     if (PENDING & USBFS_UIF_BUS_RST)
     {
       USBFSD->DEV_ADDR = 0;
 
       usb->Deinit(true);
       usb->Init(true);
-
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      out0->tog_ = true;
-      in0->tog_ = true;
-
-      USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
-      USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
+      RestoreUsbFsEndpointState();
 
       clear_mask |= USBFS_UIF_BUS_RST;
     }
 
-    // Suspend follows the same EP0 recovery path; resume is observed later by the host.
-    // suspend 走与 reset 相同的 EP0 恢复路径；resume 由后续主机时序体现。
     if (PENDING & USBFS_UIF_SUSPEND)
     {
       usb->Deinit(true);
       usb->Init(true);
-
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      out0->tog_ = true;
-      in0->tog_ = true;
-
-      USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
-      USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
+      RestoreUsbFsEndpointState();
 
       clear_mask |= USBFS_UIF_SUSPEND;
     }
@@ -131,10 +297,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       {
         case USBFS_UIS_TOKEN_SETUP:
         {
-          // A fresh setup cancels the previous EP0 transaction, so both directions are
-          // reset to IDLE/TOG0 before handing the setup packet to DeviceCore.
-          // 新的 setup 会中断前一笔 EP0 事务，因此这里在把 setup 包交给 DeviceCore
-          // 之前，先把 EP0 的双向状态恢复到 IDLE/TOG0。
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
@@ -143,15 +305,12 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
           out0->tog_ = true;
           in0->tog_ = true;
 
-          usb->OnSetupPacket(
-              true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
+          usb->OnSetupPacket(true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
           break;
         }
 
         case USBFS_UIS_TOKEN_OUT:
         {
-          // OTGFS hardware already reports the completed RX length for this token.
-          // OTGFS 硬件已经给出了本次 token 的完成 RX 长度。
           const uint16_t LEN = USBFSD->RX_LEN;
           if (ep[OUT_IDX])
           {
@@ -162,8 +321,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_IN:
         {
-          // IN token completion has no payload length; completion itself is enough.
-          // IN token 完成不需要额外 payload 长度，事件本身就足够了。
           if (ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);
@@ -248,31 +405,29 @@ LibXR::ErrorCode CH32USBOtgFS::SetAddress(uint8_t address,
 
 void CH32USBOtgFS::Start(bool)
 {
-  // OTGFS uses the same shared USB 48 MHz clock selection as FSDEV.
-  // OTGFS 与 FSDEV 共用同一套 USB 48 MHz 时钟选择规则。
-  LibXR::CH32UsbRcc::ConfigureUsb48M();
-#if defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_AHBPeriph_USBHS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
-#endif
-#if defined(RCC_AHBPeriph_USBFS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
-#elif defined(RCC_AHBPeriph_USBOTGFS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
-#endif
-  USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
-  USBFSH->BASE_CTRL = 0x00;
-  USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;
-  USBFSD->BASE_CTRL = USBFS_UC_DEV_PU_EN | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
-  USBFSD->UDEV_CTRL = USBFS_UD_PD_DIS | USBFS_UD_PORT_EN;
+  ch32_usbfs_rcc_enable();
+  ch32_usbfs_apply_device_registers();
+  ch32_usbfs_enable_device_logic();
+  RestoreUsbFsEndpointState();
+
+  ch32_usbfs_enable_device_port();
+
   NVIC_EnableIRQ(USBFS_IRQn);
   self_ = this;
 }
 
 void CH32USBOtgFS::Stop(bool)
 {
-  USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
-  USBFSD->BASE_CTRL = 0x00;
   NVIC_DisableIRQ(USBFS_IRQn);
+  NVIC_ClearPendingIRQ(USBFS_IRQn);
+
+  USBFSD->INT_EN = 0x00;
+  ch32_usbfs_detach_device();
+  USBFSD->UDEV_CTRL = 0x00;
+  ch32_usbfs_clear_pending_flags();
+  USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
+  ch32_usbfs_delay_short();
+  USBFSD->BASE_CTRL = 0x00;
   self_ = nullptr;
 }
 

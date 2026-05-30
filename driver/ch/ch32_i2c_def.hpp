@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ch32_defs.hpp"
 #include "libxr.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 /**
  * @brief CH32 I2C 实例编号 / CH32 I2C instance identifier
@@ -20,19 +20,35 @@ typedef enum
 
 static constexpr uint32_t CH32_I2C_RCC_PERIPH_MAP[] = {
 #if defined(I2C1)
+#if defined(RCC_HB1Periph_I2C1)
+    RCC_HB1Periph_I2C1,
+#else
     RCC_APB1Periph_I2C1,
 #endif
+#endif
 #if defined(I2C2)
+#if defined(RCC_HB1Periph_I2C2)
+    RCC_HB1Periph_I2C2,
+#else
     RCC_APB1Periph_I2C2,
+#endif
 #endif
 };
 
 static constexpr uint32_t CH32_I2C_RCC_PERIPH_MAP_DMA[] = {
 #if defined(I2C1)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
 #endif
+#endif
 #if defined(I2C2)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 };
 

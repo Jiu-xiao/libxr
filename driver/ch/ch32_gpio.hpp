@@ -2,11 +2,15 @@
 
 #include "gpio.hpp"
 #include "libxr.hpp"
-
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
+#include "ch32_defs.hpp"
 
 namespace LibXR
 {
+
+static inline GPIOSpeed_TypeDef ch32_gpio_speed_fast()
+{
+  return GPIO_Speed_50MHz;
+}
 
 typedef enum
 {
@@ -77,7 +81,7 @@ class CH32GPIO final : public GPIO
   {
     GPIO_InitTypeDef gpio_init = {};
     gpio_init.GPIO_Pin = pin_;
-    gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio_init.GPIO_Speed = ch32_gpio_speed_fast();
 
     switch (config.direction)
     {

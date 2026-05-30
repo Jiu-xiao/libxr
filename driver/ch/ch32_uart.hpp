@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ch32_defs.hpp"
 #include "libxr.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 #include "ch32_uart_def.hpp"
 #include "double_buffer.hpp"

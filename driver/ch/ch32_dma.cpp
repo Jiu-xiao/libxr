@@ -290,6 +290,104 @@ DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id)
   return NULL;
 }
 
+DMA_TypeDef* ch32_dma_get_controller(DMA_Channel_TypeDef* channel)
+{
+  switch (ch32_dma_get_id(channel))
+  {
+#if defined(DMA1_Channel1)
+    case CH32_DMA1_CHANNEL1:
+#endif
+#if defined(DMA1_Channel2)
+    case CH32_DMA1_CHANNEL2:
+#endif
+#if defined(DMA1_Channel3)
+    case CH32_DMA1_CHANNEL3:
+#endif
+#if defined(DMA1_Channel4)
+    case CH32_DMA1_CHANNEL4:
+#endif
+#if defined(DMA1_Channel5)
+    case CH32_DMA1_CHANNEL5:
+#endif
+#if defined(DMA1_Channel6)
+    case CH32_DMA1_CHANNEL6:
+#endif
+#if defined(DMA1_Channel7)
+    case CH32_DMA1_CHANNEL7:
+#endif
+#if defined(DMA1_Channel8)
+    case CH32_DMA1_CHANNEL8:
+#endif
+#if defined(DMA1)
+      return DMA1;
+#else
+      return nullptr;
+#endif
+
+#if defined(DMA2_Channel1)
+    case CH32_DMA2_CHANNEL1:
+#endif
+#if defined(DMA2_Channel2)
+    case CH32_DMA2_CHANNEL2:
+#endif
+#if defined(DMA2_Channel3)
+    case CH32_DMA2_CHANNEL3:
+#endif
+#if defined(DMA2_Channel4)
+    case CH32_DMA2_CHANNEL4:
+#endif
+#if defined(DMA2_Channel5)
+    case CH32_DMA2_CHANNEL5:
+#endif
+#if defined(DMA2_Channel6)
+    case CH32_DMA2_CHANNEL6:
+#endif
+#if defined(DMA2_Channel7)
+    case CH32_DMA2_CHANNEL7:
+#endif
+#if defined(DMA2_Channel8)
+    case CH32_DMA2_CHANNEL8:
+#endif
+#if defined(DMA2_Channel9)
+    case CH32_DMA2_CHANNEL9:
+#endif
+#if defined(DMA2_Channel10)
+    case CH32_DMA2_CHANNEL10:
+#endif
+#if defined(DMA2_Channel11)
+    case CH32_DMA2_CHANNEL11:
+#endif
+#if defined(DMA2)
+      return DMA2;
+#else
+      return nullptr;
+#endif
+
+    default:
+      return nullptr;
+  }
+}
+
+ITStatus ch32_dma_get_it_status(DMA_Channel_TypeDef* channel, uint32_t dma_it)
+{
+  DMA_TypeDef* dma = ch32_dma_get_controller(channel);
+  if (dma == nullptr)
+  {
+    return RESET;
+  }
+  return DMA_GetITStatus(dma, dma_it);
+}
+
+void ch32_dma_clear_it_pending(DMA_Channel_TypeDef* channel, uint32_t dma_it)
+{
+  DMA_TypeDef* dma = ch32_dma_get_controller(channel);
+  if (dma == nullptr)
+  {
+    return;
+  }
+  DMA_ClearITPendingBit(dma, dma_it);
+}
+
 #if defined(DMA1_Channel1)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void DMA1_Channel1_IRQHandler(void)

@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ch32_defs.hpp"
 #include "libxr.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 /**
  * @brief CH32 UART 实例编号 / CH32 UART instance identifier
@@ -71,19 +71,39 @@ static constexpr uint8_t CH32_UART_APB_MAP[] = {
     1,
 #endif
 #if defined(USART4)
+#if defined(RCC_HB1Periph_USART4) || defined(RCC_APB1Periph_USART4)
+    1,
+#else
     0,
+#endif
 #endif
 #if defined(USART5)
+#if defined(RCC_HB1Periph_USART5) || defined(RCC_APB1Periph_USART5)
+    1,
+#else
     0,
+#endif
 #endif
 #if defined(USART6)
+#if defined(RCC_HB1Periph_USART6) || defined(RCC_APB1Periph_USART6)
+    1,
+#else
     0,
+#endif
 #endif
 #if defined(USART7)
+#if defined(RCC_HB1Periph_USART7) || defined(RCC_APB1Periph_USART7)
+    1,
+#else
     0,
 #endif
+#endif
 #if defined(USART8)
+#if defined(RCC_HB1Periph_USART8) || defined(RCC_APB1Periph_USART8)
+    1,
+#else
     0,
+#endif
 #endif
 #if defined(UART1)
     0,
@@ -113,28 +133,70 @@ static constexpr uint8_t CH32_UART_APB_MAP[] = {
 
 static constexpr uint32_t CH32_UART_RCC_PERIPH_MAP[] = {
 #if defined(USART1)
+#if defined(RCC_HB2Periph_USART1)
+    RCC_HB2Periph_USART1,
+#else
     RCC_APB2Periph_USART1,
 #endif
+#endif
 #if defined(USART2)
+#if defined(RCC_HB1Periph_USART2)
+    RCC_HB1Periph_USART2,
+#else
     RCC_APB1Periph_USART2,
 #endif
+#endif
 #if defined(USART3)
+#if defined(RCC_HB1Periph_USART3)
+    RCC_HB1Periph_USART3,
+#else
     RCC_APB1Periph_USART3,
 #endif
+#endif
 #if defined(USART4)
+#if defined(RCC_HB1Periph_USART4)
+    RCC_HB1Periph_USART4,
+#elif defined(RCC_APB1Periph_USART4)
+    RCC_APB1Periph_USART4,
+#else
     0,
+#endif
 #endif
 #if defined(USART5)
+#if defined(RCC_HB1Periph_USART5)
+    RCC_HB1Periph_USART5,
+#elif defined(RCC_APB1Periph_USART5)
+    RCC_APB1Periph_USART5,
+#else
     0,
+#endif
 #endif
 #if defined(USART6)
+#if defined(RCC_HB1Periph_USART6)
+    RCC_HB1Periph_USART6,
+#elif defined(RCC_APB1Periph_USART6)
+    RCC_APB1Periph_USART6,
+#else
     0,
+#endif
 #endif
 #if defined(USART7)
+#if defined(RCC_HB1Periph_USART7)
+    RCC_HB1Periph_USART7,
+#elif defined(RCC_APB1Periph_USART7)
+    RCC_APB1Periph_USART7,
+#else
     0,
 #endif
+#endif
 #if defined(USART8)
+#if defined(RCC_HB1Periph_USART8)
+    RCC_HB1Periph_USART8,
+#elif defined(RCC_APB1Periph_USART8)
+    RCC_APB1Periph_USART8,
+#else
     0,
+#endif
 #endif
 #if defined(UART1)
     0,
@@ -146,70 +208,154 @@ static constexpr uint32_t CH32_UART_RCC_PERIPH_MAP[] = {
     0,
 #endif
 #if defined(UART4)
+#if defined(RCC_HB1Periph_UART4)
+    RCC_HB1Periph_UART4,
+#else
     RCC_APB1Periph_UART4,
 #endif
+#endif
 #if defined(UART5)
+#if defined(RCC_HB1Periph_UART5)
+    RCC_HB1Periph_UART5,
+#else
     RCC_APB1Periph_UART5,
 #endif
+#endif
 #if defined(UART6)
+#if defined(RCC_HB1Periph_UART6)
+    RCC_HB1Periph_UART6,
+#else
     RCC_APB1Periph_UART6,
 #endif
+#endif
 #if defined(UART7)
+#if defined(RCC_HB1Periph_UART7)
+    RCC_HB1Periph_UART7,
+#else
     RCC_APB1Periph_UART7,
 #endif
+#endif
 #if defined(UART8)
+#if defined(RCC_HB1Periph_UART8)
+    RCC_HB1Periph_UART8,
+#else
     RCC_APB1Periph_UART8,
+#endif
 #endif
 };
 
 static constexpr uint32_t CH32_UART_RCC_PERIPH_MAP_DMA[] = {
 #if defined(USART1)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(USART2)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(USART3)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(USART4)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(USART5)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(USART6)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(USART7)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(USART8)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
 #endif
+#endif
 #if defined(UART1)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 #if defined(UART2)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 #if defined(UART3)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 #if defined(UART4)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 #if defined(UART5)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 #if defined(UART6)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 #if defined(UART7)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
 #endif
+#endif
 #if defined(UART8)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 };
 

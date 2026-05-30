@@ -7,8 +7,7 @@
 #include "can.hpp"
 #include "ch32_can_def.hpp"
 #include "libxr.hpp"
-
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
+#include "ch32_defs.hpp"
 
 namespace LibXR
 {

@@ -10,6 +10,41 @@ using namespace LibXR;
 
 CH32SPI* CH32SPI::map_[CH32_SPI_NUMBER] = {nullptr};
 
+static inline void ch32_clock_bus1_enable(uint32_t periph)
+{
+  RCC_APB1PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_clock_bus2_enable(uint32_t periph)
+{
+  RCC_APB2PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_clock_ahb_enable(uint32_t periph)
+{
+  RCC_AHBPeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_enable_afio_clock()
+{
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+}
+
+static inline void ch32_dma_set_memory_base(DMA_InitTypeDef& dma, uint32_t addr)
+{
+  dma.DMA_MemoryBaseAddr = addr;
+}
+
+static inline uint32_t ch32_clock_pclk1(const RCC_ClocksTypeDef& clocks)
+{
+  return clocks.PCLK1_Frequency;
+}
+
+static inline uint32_t ch32_clock_pclk2(const RCC_ClocksTypeDef& clocks)
+{
+  return clocks.PCLK2_Frequency;
+}
+
 bool CH32SPI::MapEnumToCH32Prescaler(SPI::Prescaler p, uint16_t& out)
 {
   switch (p)
@@ -18,40 +53,72 @@ bool CH32SPI::MapEnumToCH32Prescaler(SPI::Prescaler p, uint16_t& out)
     case SPI::Prescaler::DIV_2:
       out = SPI_BaudRatePrescaler_2;
       return true;
+#elif defined(SPI_BaudRatePrescaler_Mode0)
+    case SPI::Prescaler::DIV_2:
+      out = SPI_BaudRatePrescaler_Mode0;
+      return true;
 #endif
 #if defined(SPI_BaudRatePrescaler_4)
     case SPI::Prescaler::DIV_4:
       out = SPI_BaudRatePrescaler_4;
+      return true;
+#elif defined(SPI_BaudRatePrescaler_Mode1)
+    case SPI::Prescaler::DIV_4:
+      out = SPI_BaudRatePrescaler_Mode1;
       return true;
 #endif
 #if defined(SPI_BaudRatePrescaler_8)
     case SPI::Prescaler::DIV_8:
       out = SPI_BaudRatePrescaler_8;
       return true;
+#elif defined(SPI_BaudRatePrescaler_Mode2)
+    case SPI::Prescaler::DIV_8:
+      out = SPI_BaudRatePrescaler_Mode2;
+      return true;
 #endif
 #if defined(SPI_BaudRatePrescaler_16)
     case SPI::Prescaler::DIV_16:
       out = SPI_BaudRatePrescaler_16;
+      return true;
+#elif defined(SPI_BaudRatePrescaler_Mode3)
+    case SPI::Prescaler::DIV_16:
+      out = SPI_BaudRatePrescaler_Mode3;
       return true;
 #endif
 #if defined(SPI_BaudRatePrescaler_32)
     case SPI::Prescaler::DIV_32:
       out = SPI_BaudRatePrescaler_32;
       return true;
+#elif defined(SPI_BaudRatePrescaler_Mode4)
+    case SPI::Prescaler::DIV_32:
+      out = SPI_BaudRatePrescaler_Mode4;
+      return true;
 #endif
 #if defined(SPI_BaudRatePrescaler_64)
     case SPI::Prescaler::DIV_64:
       out = SPI_BaudRatePrescaler_64;
+      return true;
+#elif defined(SPI_BaudRatePrescaler_Mode5)
+    case SPI::Prescaler::DIV_64:
+      out = SPI_BaudRatePrescaler_Mode5;
       return true;
 #endif
 #if defined(SPI_BaudRatePrescaler_128)
     case SPI::Prescaler::DIV_128:
       out = SPI_BaudRatePrescaler_128;
       return true;
+#elif defined(SPI_BaudRatePrescaler_Mode6)
+    case SPI::Prescaler::DIV_128:
+      out = SPI_BaudRatePrescaler_Mode6;
+      return true;
 #endif
 #if defined(SPI_BaudRatePrescaler_256)
     case SPI::Prescaler::DIV_256:
       out = SPI_BaudRatePrescaler_256;
+      return true;
+#elif defined(SPI_BaudRatePrescaler_Mode7)
+    case SPI::Prescaler::DIV_256:
+      out = SPI_BaudRatePrescaler_Mode7;
       return true;
 #endif
     default:
@@ -89,27 +156,27 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
   // Clock configuration.
   if (CH32_SPI_APB_MAP[id] == 1)
   {
-    RCC_APB1PeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP[id], ENABLE);
+    ch32_clock_bus1_enable(CH32_SPI_RCC_PERIPH_MAP[id]);
   }
   else if (CH32_SPI_APB_MAP[id] == 2)
   {
-    RCC_APB2PeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP[id], ENABLE);
+    ch32_clock_bus2_enable(CH32_SPI_RCC_PERIPH_MAP[id]);
   }
   else
   {
     ASSERT(false);
   }
-  RCC_AHBPeriphClockCmd(CH32_SPI_RCC_PERIPH_MAP_DMA[id], ENABLE);
+  ch32_clock_ahb_enable(CH32_SPI_RCC_PERIPH_MAP_DMA[id]);
 
   // GPIO 配置。
   // GPIO configuration.
   {
     GPIO_InitTypeDef gpio = {};
-    gpio.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio.GPIO_Speed = ch32_gpio_speed_fast();
 
     // SCK 引脚。
     // SCK.
-    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(sck_port_), ENABLE);
+    ch32_clock_bus2_enable(ch32_get_gpio_periph(sck_port_));
     if (mode_ == SPI_Mode_Master)
     {
       gpio.GPIO_Pin = sck_pin_;
@@ -124,7 +191,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
 
     // MISO 引脚。
     // MISO.
-    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(miso_port_), ENABLE);
+    ch32_clock_bus2_enable(ch32_get_gpio_periph(miso_port_));
     if (mode_ == SPI_Mode_Master)
     {
       gpio.GPIO_Pin = miso_pin_;
@@ -139,7 +206,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
 
     // MOSI 引脚。
     // MOSI.
-    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(mosi_port_), ENABLE);
+    ch32_clock_bus2_enable(ch32_get_gpio_periph(mosi_port_));
     if (mode_ == SPI_Mode_Master)
     {
       gpio.GPIO_Pin = mosi_pin_;
@@ -154,7 +221,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
 
     if (pin_remap != 0)
     {
-      RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+      ch32_enable_afio_clock();
       GPIO_PinRemapConfig(pin_remap, ENABLE);
     }
   }
@@ -192,7 +259,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
       DMA_InitTypeDef di = {};
       DMA_DeInit(dma_rx_channel_);
       di.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
-      di.DMA_MemoryBaseAddr = (uint32_t)dma_rx.addr_;
+      ch32_dma_set_memory_base(di, (uint32_t)dma_rx.addr_);
       di.DMA_DIR = DMA_DIR_PeripheralSRC;
       di.DMA_BufferSize = 0;
       di.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
@@ -216,7 +283,7 @@ CH32SPI::CH32SPI(ch32_spi_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef*
       DMA_InitTypeDef di = {};
       DMA_DeInit(dma_tx_channel_);
       di.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
-      di.DMA_MemoryBaseAddr = 0;
+      ch32_dma_set_memory_base(di, 0);
       di.DMA_DIR = DMA_DIR_PeripheralDST;
       di.DMA_BufferSize = 0;
       di.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
@@ -570,12 +637,12 @@ void CH32SPI::StopDma()
 
 void CH32SPI::RxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_SPI_RX_DMA_IT_MAP[id_]) == RESET)
+  if (ch32_dma_get_it_status(dma_rx_channel_, CH32_SPI_RX_DMA_IT_MAP[id_]) == RESET)
   {
     return;
   }
 
-  DMA_ClearITPendingBit(CH32_SPI_RX_DMA_IT_MAP[id_]);
+  ch32_dma_clear_it_pending(dma_rx_channel_, CH32_SPI_RX_DMA_IT_MAP[id_]);
 
   SPI_I2S_DMACmd(instance_, SPI_I2S_DMAReq_Rx, DISABLE);
   DMA_Cmd(dma_rx_channel_, DISABLE);
@@ -617,11 +684,11 @@ void CH32SPI::RxDmaIRQHandler()
 
 void CH32SPI::TxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_SPI_TX_DMA_IT_MAP[id_]) == RESET)
+  if (ch32_dma_get_it_status(dma_tx_channel_, CH32_SPI_TX_DMA_IT_MAP[id_]) == RESET)
   {
     return;
   }
-  DMA_ClearITPendingBit(CH32_SPI_TX_DMA_IT_MAP[id_]);
+  ch32_dma_clear_it_pending(dma_tx_channel_, CH32_SPI_TX_DMA_IT_MAP[id_]);
 
   SPI_I2S_DMACmd(instance_, SPI_I2S_DMAReq_Tx, DISABLE);
   DMA_Cmd(dma_tx_channel_, DISABLE);
@@ -699,11 +766,11 @@ uint32_t CH32SPI::GetMaxBusSpeed() const
 
   if (CH32_SPI_APB_MAP[id_] == 2)
   {
-    return clocks.PCLK2_Frequency;
+    return ch32_clock_pclk2(clocks);
   }
   else if (CH32_SPI_APB_MAP[id_] == 1)
   {
-    return clocks.PCLK1_Frequency;
+    return ch32_clock_pclk1(clocks);
   }
   return 0u;
 }
@@ -744,33 +811,57 @@ SPI::Prescaler CH32SPI::MapCH32PrescalerToEnum(uint16_t p)
 #if defined(SPI_BaudRatePrescaler_2)
     case SPI_BaudRatePrescaler_2:
       return SPI::Prescaler::DIV_2;
+#elif defined(SPI_BaudRatePrescaler_Mode0)
+    case SPI_BaudRatePrescaler_Mode0:
+      return SPI::Prescaler::DIV_2;
 #endif
 #if defined(SPI_BaudRatePrescaler_4)
     case SPI_BaudRatePrescaler_4:
+      return SPI::Prescaler::DIV_4;
+#elif defined(SPI_BaudRatePrescaler_Mode1)
+    case SPI_BaudRatePrescaler_Mode1:
       return SPI::Prescaler::DIV_4;
 #endif
 #if defined(SPI_BaudRatePrescaler_8)
     case SPI_BaudRatePrescaler_8:
       return SPI::Prescaler::DIV_8;
+#elif defined(SPI_BaudRatePrescaler_Mode2)
+    case SPI_BaudRatePrescaler_Mode2:
+      return SPI::Prescaler::DIV_8;
 #endif
 #if defined(SPI_BaudRatePrescaler_16)
     case SPI_BaudRatePrescaler_16:
+      return SPI::Prescaler::DIV_16;
+#elif defined(SPI_BaudRatePrescaler_Mode3)
+    case SPI_BaudRatePrescaler_Mode3:
       return SPI::Prescaler::DIV_16;
 #endif
 #if defined(SPI_BaudRatePrescaler_32)
     case SPI_BaudRatePrescaler_32:
       return SPI::Prescaler::DIV_32;
+#elif defined(SPI_BaudRatePrescaler_Mode4)
+    case SPI_BaudRatePrescaler_Mode4:
+      return SPI::Prescaler::DIV_32;
 #endif
 #if defined(SPI_BaudRatePrescaler_64)
     case SPI_BaudRatePrescaler_64:
+      return SPI::Prescaler::DIV_64;
+#elif defined(SPI_BaudRatePrescaler_Mode5)
+    case SPI_BaudRatePrescaler_Mode5:
       return SPI::Prescaler::DIV_64;
 #endif
 #if defined(SPI_BaudRatePrescaler_128)
     case SPI_BaudRatePrescaler_128:
       return SPI::Prescaler::DIV_128;
+#elif defined(SPI_BaudRatePrescaler_Mode6)
+    case SPI_BaudRatePrescaler_Mode6:
+      return SPI::Prescaler::DIV_128;
 #endif
 #if defined(SPI_BaudRatePrescaler_256)
     case SPI_BaudRatePrescaler_256:
+      return SPI::Prescaler::DIV_256;
+#elif defined(SPI_BaudRatePrescaler_Mode7)
+    case SPI_BaudRatePrescaler_Mode7:
       return SPI::Prescaler::DIV_256;
 #endif
     default:
