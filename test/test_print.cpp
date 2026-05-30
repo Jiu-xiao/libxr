@@ -642,10 +642,10 @@ void TestPrintApiWrappers()
   {
     constexpr LibXR::Format<"x={:+05d} {:#x} {}"> format{};
     char buffer[32] = {};
-    size_t written =
+    int written =
         LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), format, 7, 42U, "ok");
     if (std::string_view(buffer) != "x=+0007 0x2a ok" ||
-        written != std::strlen("x=+0007 0x2a ok"))
+        written != static_cast<int>(std::strlen("x=+0007 0x2a ok")))
     {
       Fail("format to bounded buffer mismatch");
     }
@@ -654,9 +654,10 @@ void TestPrintApiWrappers()
   {
     constexpr auto format = LibXR::Print::Printf::Build<"%d %s">();
     char buffer[6] = {};
-    size_t written =
+    int written =
         LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), format, 123, "xy");
-    if (std::string_view(buffer) != "123 x" || written != std::strlen("123 xy"))
+    if (std::string_view(buffer) != "123 x" ||
+        written != static_cast<int>(std::strlen("123 xy")))
     {
       Fail("printf truncating bounded buffer mismatch");
     }
@@ -664,10 +665,10 @@ void TestPrintApiWrappers()
 
   {
     char buffer[32] = {};
-    size_t written = LibXR::Print::FormatIntoBuffer<"x={:+05d} {:#x} {}">(
+    int written = LibXR::Print::FormatIntoBuffer<"x={:+05d} {:#x} {}">(
         buffer, sizeof(buffer), 7, 42U, "ok");
     if (std::string_view(buffer) != "x=+0007 0x2a ok" ||
-        written != std::strlen("x=+0007 0x2a ok"))
+        written != static_cast<int>(std::strlen("x=+0007 0x2a ok")))
     {
       Fail("format literal bounded buffer mismatch");
     }
@@ -675,9 +676,10 @@ void TestPrintApiWrappers()
 
   {
     char buffer[16] = {};
-    size_t written =
+    int written =
         LibXR::Print::PrintfIntoBuffer<"%d %s">(buffer, sizeof(buffer), 123, "xy");
-    if (std::string_view(buffer) != "123 xy" || written != std::strlen("123 xy"))
+    if (std::string_view(buffer) != "123 xy" ||
+        written != static_cast<int>(std::strlen("123 xy")))
     {
       Fail("printf literal bounded buffer mismatch");
     }
@@ -686,8 +688,8 @@ void TestPrintApiWrappers()
   {
     constexpr LibXR::Format<"{} {}"> format{};
     char buffer[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', '\0'};
-    size_t written = LibXR::Print::FormatIntoBuffer(buffer, 0, format, 123, "xy");
-    if (written != std::strlen("123 xy") || buffer[0] != 'x')
+    int written = LibXR::Print::FormatIntoBuffer(buffer, 0, format, 123, "xy");
+    if (written != static_cast<int>(std::strlen("123 xy")) || buffer[0] != 'x')
     {
       Fail("format zero-capacity buffer mismatch");
     }
@@ -695,8 +697,8 @@ void TestPrintApiWrappers()
 
   {
     char buffer[4] = {'x', 'x', 'x', '\0'};
-    size_t written = LibXR::Print::PrintfIntoBuffer<"%d %s">(buffer, 1, 123, "xy");
-    if (written != std::strlen("123 xy") || buffer[0] != '\0')
+    int written = LibXR::Print::PrintfIntoBuffer<"%d %s">(buffer, 1, 123, "xy");
+    if (written != static_cast<int>(std::strlen("123 xy")) || buffer[0] != '\0')
     {
       Fail("printf single-capacity buffer mismatch");
     }
@@ -704,8 +706,8 @@ void TestPrintApiWrappers()
 
   {
     constexpr LibXR::Format<"{} {}"> format{};
-    size_t written = LibXR::Print::FormatIntoBuffer(nullptr, 0, format, 123, "xy");
-    if (written != std::strlen("123 xy"))
+    int written = LibXR::Print::FormatIntoBuffer(nullptr, 0, format, 123, "xy");
+    if (written != static_cast<int>(std::strlen("123 xy")))
     {
       Fail("format null counting buffer mismatch");
     }
@@ -753,9 +755,8 @@ void TestPrintApiWrappers()
 
   {
     char buffer[8] = {'x', 'x', 'x', '\0'};
-    size_t written =
-        LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), BrokenGenericFormat{});
-    if (written != 0 || buffer[0] != '\0')
+    int written = LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), BrokenGenericFormat{});
+    if (written != -1 || buffer[0] != '\0')
     {
       Fail("format bounded buffer runtime error mismatch");
     }
@@ -764,9 +765,19 @@ void TestPrintApiWrappers()
   {
     char buffer[8] = {'x', 'x', 'x', '\0'};
     int written = LibXR::Print::SNPrintf(buffer, sizeof(buffer), BrokenGenericFormat{});
-    if (written != 0 || buffer[0] != '\0')
+    if (written != -1 || buffer[0] != '\0')
     {
       Fail("snprintf runtime error mismatch");
+    }
+  }
+
+  {
+    constexpr LibXR::Format<""> format{};
+    char buffer[4] = {'x', 'x', 'x', '\0'};
+    int written = LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), format);
+    if (written != 0 || buffer[0] != '\0')
+    {
+      Fail("format bounded buffer empty output mismatch");
     }
   }
 }

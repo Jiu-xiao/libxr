@@ -22,16 +22,17 @@ namespace LibXR::Print
  * ErrorCode，只表达成败，不暴露长度。
  *
  * Bounded-buffer helpers such as FormatIntoBuffer() and PrintfIntoBuffer()
- * return the full formatted size excluding the trailing zero byte, following
- * snprintf-style length semantics even when truncation occurs.
- * 像 FormatIntoBuffer()、PrintfIntoBuffer() 这样的有界缓冲区接口返回
- * 完整格式化长度，不含结尾零字节；即使发生截断，也遵循 snprintf 风格的
- * 完整长度语义。
+ * return int and follow snprintf-style length semantics on success: the full
+ * formatted size excluding the trailing zero byte, even when truncation
+ * occurs. Runtime errors, including formatting failures and full sizes that no
+ * longer fit in int, are reported as -1.
+ * 像 FormatIntoBuffer()、PrintfIntoBuffer() 这样的有界缓冲区接口返回 int；
+ * 成功时采用 snprintf 风格的完整长度语义：返回未截断时本应产生的完整字符数，
+ * 不含结尾零字节，即使发生截断也如此。运行期错误（包括格式化失败，以及完整长度
+ * 已无法放入 int）返回 -1。
  *
- * SNPrintf() keeps the same full-size rule but narrows the result to int and
- * returns -1 when the full size no longer fits in int.
- * SNPrintf() 保持同样的完整长度语义，但会把结果收窄为 int；若完整长度
- * 已无法放入 int，则返回 -1。
+ * SNPrintf() keeps the same contract.
+ * SNPrintf() 保持同样的契约。
  */
 
 /**
@@ -100,8 +101,8 @@ template <Text Source, OutputSink Sink, typename... Args>
  * NUL-terminated.
  * 当 capacity 非零时，目标缓冲区始终保持 NUL 结尾。
  */
-[[nodiscard]] inline size_t FormatIntoBuffer(char* buffer, size_t capacity, const auto& format,
-                                             auto&&... args)
+[[nodiscard]] inline int FormatIntoBuffer(char* buffer, size_t capacity, const auto& format,
+                                          auto&&... args)
 {
   struct BufferSink
   {
@@ -141,7 +142,7 @@ template <Text Source, OutputSink Sink, typename... Args>
     {
       buffer[0] = '\0';
     }
-    return 0;
+    return -1;
   }
 
   if (capacity > 0 && buffer != nullptr)
@@ -149,17 +150,23 @@ template <Text Source, OutputSink Sink, typename... Args>
     buffer[sink.retained_size] = '\0';
   }
 
-  return sink.total_size;
+  if (sink.total_size > static_cast<size_t>(std::numeric_limits<int>::max()))
+  {
+    return -1;
+  }
+
+  return static_cast<int>(sink.total_size);
 }
 
 /**
  * @brief Formats one brace-style literal directly into one bounded char buffer.
  * @brief 将一条 brace 风格字面量直接写入一个有界 char 缓冲区。
- * @return Returns the full formatted size excluding the trailing zero byte.
- *         返回完整格式化长度，不含结尾零字节。
+ * @return Returns the full formatted size excluding the trailing zero byte, or
+ *         -1 on runtime error (including size overflow).
+ *         返回完整格式化长度，不含结尾零字节；运行期错误（包括尺寸溢出）返回 -1。
  */
 template <Text Source, typename... Args>
-[[nodiscard]] inline size_t FormatIntoBuffer(char* buffer, size_t capacity, Args&&... args)
+[[nodiscard]] inline int FormatIntoBuffer(char* buffer, size_t capacity, Args&&... args)
 {
   constexpr LibXR::Format<Source> format{};
   return FormatIntoBuffer(buffer, capacity, format, std::forward<Args>(args)...);
@@ -168,11 +175,12 @@ template <Text Source, typename... Args>
 /**
  * @brief Formats one printf-style literal directly into one bounded char buffer.
  * @brief 将一条 printf 风格字面量直接写入一个有界 char 缓冲区。
- * @return Returns the full formatted size excluding the trailing zero byte.
- *         返回完整格式化长度，不含结尾零字节。
+ * @return Returns the full formatted size excluding the trailing zero byte, or
+ *         -1 on runtime error (including size overflow).
+ *         返回完整格式化长度，不含结尾零字节；运行期错误（包括尺寸溢出）返回 -1。
  */
 template <Text Source, typename... Args>
-[[nodiscard]] inline size_t PrintfIntoBuffer(char* buffer, size_t capacity, Args&&... args)
+[[nodiscard]] inline int PrintfIntoBuffer(char* buffer, size_t capacity, Args&&... args)
 {
   constexpr auto format = Printf::Build<Source>();
   return FormatIntoBuffer(buffer, capacity, format, std::forward<Args>(args)...);
@@ -182,31 +190,24 @@ template <Text Source, typename... Args>
  * @brief snprintf-style wrapper built on top of the compiled-format path.
  * @brief 基于编译格式路径实现的 snprintf 风格包装。
  *
- * Returns the full formatted size excluding the trailing zero byte, or -1 when
- * that size no longer fits in int.
- * 返回完整格式化长度（不含结尾零字节）；若该长度已无法放入 int，则返回 -1。
+ * Returns the full formatted size excluding the trailing zero byte, or -1 on
+ * runtime error (including size overflow).
+ * 返回完整格式化长度（不含结尾零字节）；运行期错误（包括尺寸溢出）返回 -1。
  * Truncation is not an error and still returns the full size.
  * 截断不算错误，返回值仍然是完整长度。
  */
 [[nodiscard]] inline int SNPrintf(char* buffer, size_t capacity, const auto& format,
                                   auto&&... args)
 {
-  auto total_size =
-      FormatIntoBuffer(buffer, capacity, format, std::forward<decltype(args)>(args)...);
-  if (total_size > static_cast<size_t>(std::numeric_limits<int>::max()))
-  {
-    return -1;
-  }
-  return static_cast<int>(total_size);
+  return FormatIntoBuffer(buffer, capacity, format, std::forward<decltype(args)>(args)...);
 }
 
 /**
  * @brief snprintf-style wrapper for one printf-style literal.
  * @brief 面向一条 printf 风格字面量的 snprintf 风格包装。
  * @return Returns the full formatted size excluding the trailing zero byte, or
- *         -1 when that size no longer fits in int.
- *         返回完整格式化长度，不含结尾零字节；若该长度已无法放入 int，
- *         则返回 -1。
+ *         -1 on runtime error (including size overflow).
+ *         返回完整格式化长度，不含结尾零字节；运行期错误（包括尺寸溢出）返回 -1。
  */
 template <Text Source, typename... Args>
 [[nodiscard]] inline int SNPrintf(char* buffer, size_t capacity, Args&&... args)
