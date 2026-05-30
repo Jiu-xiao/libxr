@@ -2,6 +2,7 @@
 
 #include "ch32_usb.hpp"
 #include "ch32_usb_endpoint.hpp"
+#include "ch32h41x_usb_otghs.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/ep_pool.hpp"
@@ -127,6 +128,7 @@ class CH32USBOtgFS : public USB::EndpointPool, public USB::DeviceCore
 /**
  * @brief CH32 OTG HS 设备驱动 / CH32 OTG HS device driver
  */
+#if !defined(LIBXR_CH32_USB_OTGHS_DEVICE_SPECIALIZED)
 class CH32USBOtgHS : public USB::EndpointPool, public USB::DeviceCore
 {
  public:
@@ -174,6 +176,7 @@ class CH32USBOtgHS : public USB::EndpointPool, public USB::DeviceCore
 
   static inline CH32USBOtgHS* self_ = nullptr;
 };
+#endif
 
 #endif  // defined(USBHSD)
 

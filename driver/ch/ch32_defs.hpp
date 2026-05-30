@@ -327,6 +327,10 @@
 #define RCC_AHBPeriph_USBHS RCC_HBPeriph_USBHS
 #endif
 
+#if !defined(RCC_AHBPeriph_USBSS) && defined(RCC_HBPeriph_USBSS)
+#define RCC_AHBPeriph_USBSS RCC_HBPeriph_USBSS
+#endif
+
 #if !defined(RCC_AHBPeriph_USBFS) && defined(RCC_HBPeriph_USBFS)
 #define RCC_AHBPeriph_USBFS RCC_HBPeriph_USBFS
 #endif
@@ -472,8 +476,11 @@
 // The current OTG-HS backend requires the newer USBHSD endpoint-configuration
 // register layout. V205/H417 expose a same-named USBHSD block with a different
 // register shape, so USBHSD alone is not a sufficient capability check.
-#if defined(USBHSD) && !defined(__CH32V205_H) && !defined(__CH32H417_H) && \
-    defined(USBHS_UIF_SETUP_ACT) && defined(USBHS_UC_SPEED_HIGH) &&        \
+#if defined(USBHSD) && defined(__CH32H417_H) && defined(USBHS_UD_DEV_EN) && \
+    defined(USBHS_UDIF_TRANSFER) && defined(USBHS_UDIS_EP_ID_MASK)
+#define LIBXR_CH32_HAS_USB_OTG_HS 1
+#elif defined(USBHSD) && !defined(__CH32V205_H) && !defined(__CH32H417_H) && \
+    defined(USBHS_UIF_SETUP_ACT) && defined(USBHS_UC_SPEED_HIGH) &&          \
     defined(USBHS_UEP0_T_TYPE) && defined(USBHS_UEP0_R_TYPE)
 #define LIBXR_CH32_HAS_USB_OTG_HS 1
 #endif

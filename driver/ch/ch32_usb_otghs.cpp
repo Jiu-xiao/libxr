@@ -27,6 +27,21 @@ static void EnableUsbHsControllerClock()
 #endif
 }
 
+static void DisableUsbHsControllerClock()
+{
+#if defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, DISABLE);
+#elif defined(RCC_HBPeriph_USBHS)
+  RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, DISABLE);
+#endif
+}
+
+static uint16_t GetOtgHsRxLen(uint8_t ep_num)
+{
+  UNUSED(ep_num);
+  return USBHSD->RX_LEN;
+}
+
 static void ResetEp0State(OtgHsEndpointMap& map)
 {
   auto* out0 = map[0][OUT_IDX];
@@ -107,7 +122,7 @@ static void HandleTransferOut(CH32EndpointOtgHs* ep_out, uint8_t ep_num, uint8_t
 
   const bool is_nak = ((int_st & USBHS_UIS_IS_NAK) != 0u);
   const bool busy = (ep_out->GetState() == LibXR::USB::Endpoint::State::BUSY);
-  const uint16_t rx_len = USBHSD->RX_LEN;
+  const uint16_t rx_len = GetOtgHsRxLen(ep_num);
 
   if (ep_num == 0u)
   {
@@ -378,8 +393,8 @@ void CH32USBOtgHS::Start(bool)
   USBHSD->INT_EN =
       USBHS_UIE_SETUP_ACT | USBHS_UIE_TRANSFER | USBHS_UIE_DETECT | USBHS_UIE_SUSPEND;
   USBHSD->CONTROL |= USBHS_UC_DEV_PU_EN;
-  NVIC_EnableIRQ(USBHS_IRQn);
   self_ = this;
+  NVIC_EnableIRQ(USBHS_IRQn);
 }
 
 void CH32USBOtgHS::Stop(bool)

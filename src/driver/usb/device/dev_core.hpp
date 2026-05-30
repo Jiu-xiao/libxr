@@ -105,6 +105,12 @@ class DeviceCore
    */
   [[nodiscard]] bool IsInited() const { return state_.inited; }
 
+  /**
+   * @brief 处理 USB bus reset / Handle a USB bus reset
+   * @param in_isr 是否在 ISR / Whether in ISR context
+   */
+  void OnBusReset(bool in_isr);
+
  protected:
   /**
    * @brief 设置设备地址（由子类实现）

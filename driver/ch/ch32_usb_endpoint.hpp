@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ch32_usb.hpp"
+#include "ch32h41x_usb_endpoint_otghs.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/ep.hpp"
@@ -90,6 +91,7 @@ class CH32EndpointDevFs : public USB::Endpoint
 /**
  * @brief CH32 OTG HS 端点实现 / CH32 OTG HS endpoint implementation
  */
+#if !defined(LIBXR_CH32_USB_OTGHS_ENDPOINT_SPECIALIZED)
 class CH32EndpointOtgHs : public USB::Endpoint
 {
  public:
@@ -117,6 +119,7 @@ class CH32EndpointOtgHs : public USB::Endpoint
   static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 16;
   static inline CH32EndpointOtgHs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
 };
+#endif
 
 #endif  // defined(USBHSD)
 

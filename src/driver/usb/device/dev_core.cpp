@@ -9,6 +9,8 @@
 
 using namespace LibXR::USB;
 
+extern "C" __attribute__((weak)) void H417UsbHsDebugStage(uint32_t);
+
 DeviceCore::DeviceCore(
     EndpointPool& ep_pool, USBSpec spec, Speed speed,
     DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
@@ -144,6 +146,18 @@ void DeviceCore::Deinit(bool in_isr)
   endpoint_.out0->Close();
   ResetControlTransferState();
   ResetClassRequestState();
+}
+
+void DeviceCore::OnBusReset(bool in_isr)
+{
+  if (!state_.inited)
+  {
+    return;
+  }
+
+  ResetControlTransferState();
+  ResetClassRequestState();
+  (void)composition_.SwitchConfig(0, in_isr);
 }
 
 void DeviceCore::ResetClassRequestState()
@@ -827,6 +841,10 @@ LibXR::ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
 
   // ACK status 阶段
   // ACK status stage.
+  if (GetSpeed() == Speed::HIGH && H417UsbHsDebugStage != nullptr)
+  {
+    H417UsbHsDebugStage(0x4326u);
+  }
   WriteZLP();
 
   return LibXR::ErrorCode::OK;
