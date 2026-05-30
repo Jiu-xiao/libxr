@@ -142,6 +142,18 @@ class Writer
     }
   };
 
+  template <size_t N>
+  [[nodiscard]] static constexpr size_t BoundedTextLength(const char (&text)[N]) noexcept
+  {
+    size_t size = 0;
+    while (size < N && text[size] != '\0')
+    {
+      ++size;
+    }
+    ASSERT(size < N);
+    return size;
+  }
+
   template <typename T>
   [[nodiscard]] static constexpr std::string_view ToStringView(const T& text)
   {
@@ -166,7 +178,7 @@ class Writer
     }
     else if constexpr (Traits::is_char_array)
     {
-      return std::string_view(text, std::strlen(text));
+      return std::string_view(text, BoundedTextLength(text));
     }
     else
     {

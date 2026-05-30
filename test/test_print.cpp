@@ -445,6 +445,15 @@ void TestPrintfFrontendSemantics()
   }
 
   {
+    char bounded_text[4] = {'i', 'm', 'u', '\0'};
+    const char embedded_text[5] = {'a', 'b', '\0', 'c', 'd'};
+    if (!SamePrintfAsExpected<"[%s][%s]">("[imu][ab]", bounded_text, embedded_text))
+    {
+      Fail("printf bounded char array mismatch");
+    }
+  }
+
+  {
     enum PlainHex : unsigned
     {
       PLAIN_HEX = 42U
@@ -536,6 +545,15 @@ void TestFormatFrontendSemantics()
     if (!SameFormatAsExpected<"[{}][{}]">("[hello][xy]", text, view))
     {
       Fail("format frontend string object mismatch");
+    }
+  }
+
+  {
+    char bounded_text[4] = {'i', 'm', 'u', '\0'};
+    const char embedded_text[5] = {'a', 'b', '\0', 'c', 'd'};
+    if (!SameFormatAsExpected<"[{}][{}]">("[imu][ab]", bounded_text, embedded_text))
+    {
+      Fail("format frontend bounded char array mismatch");
     }
   }
 
