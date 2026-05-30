@@ -2,7 +2,7 @@
 
 #include "gpio.hpp"
 #include "libxr.hpp"
-#include "ch32_defs.hpp"
+#include "ch32_def.hpp"
 
 namespace LibXR
 {

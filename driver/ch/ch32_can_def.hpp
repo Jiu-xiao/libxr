@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "ch32_defs.hpp"
+#include "ch32_def.hpp"
 #include "libxr.hpp"
 
 /**

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "ch32_defs.hpp"
+#include "ch32_def.hpp"
 #include "flash.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"

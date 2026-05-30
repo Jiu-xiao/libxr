@@ -1,7 +1,7 @@
 #pragma once
 
 #include "pwm.hpp"
-#include "ch32_defs.hpp"
+#include "ch32_def.hpp"
 
 namespace LibXR
 {

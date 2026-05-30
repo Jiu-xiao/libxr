@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ch32_defs.hpp"
+#include "ch32_def.hpp"
 #include "libxr.hpp"
 
 typedef void (*ch32_dma_callback_t)(void*);
