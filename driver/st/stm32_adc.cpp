@@ -34,8 +34,7 @@ uint8_t CalculateFilterSize(RawData dma_buff, std::size_t channel_count)
     return 0U;
   }
 
-  const std::size_t filter_size =
-      dma_buff.size_ / channel_count / sizeof(uint16_t);
+  const std::size_t filter_size = dma_buff.size_ / channel_count / sizeof(uint16_t);
   ASSERT(filter_size > 0U);
   ASSERT(filter_size <= std::numeric_limits<uint8_t>::max());
   return static_cast<uint8_t>(filter_size);
