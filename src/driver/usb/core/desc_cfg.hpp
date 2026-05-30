@@ -96,6 +96,21 @@ class ConfigDescriptorItem : public BosCapabilityProvider
     uint16_t wMaxPacketSize;         ///< 最大包长 / Maximum packet size
     uint8_t bInterval;               ///< 轮询间隔 / Polling interval
   };
+
+  /**
+   * @brief SuperSpeed 端点伴随描述符（6 字节）
+   *        SuperSpeed endpoint companion descriptor (6 bytes)
+   */
+  struct SuperSpeedEndpointCompanionDescriptor
+  {
+    uint8_t bLength = 6;  ///< 描述符长度 / Descriptor length
+    uint8_t bDescriptorType =
+        static_cast<uint8_t>(DescriptorType::ENDPOINT_COMPANION);  ///< 描述符类型
+                                                                   ///< / Descriptor type
+    uint8_t bMaxBurst = 0;         ///< 最大 burst-1 / Maximum burst minus 1
+    uint8_t bmAttributes = 0;      ///< 属性 / Attributes
+    uint16_t wBytesPerInterval = 0;  ///< 每服务间隔字节数 / Bytes per service interval
+  };
 #pragma pack(pop)
 
   /**

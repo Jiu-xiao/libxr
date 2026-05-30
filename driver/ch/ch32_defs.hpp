@@ -10,7 +10,7 @@
 // 部分系列把 GPIO 速度枚举改名为 High，驱动侧统一使用传统 50MHz 名称。
 // Some series rename the GPIO speed enum to High; keep the traditional 50MHz
 // spelling in drivers.
-#if !defined(GPIO_Speed_50MHz) && (defined(__CH32V205_H) || defined(__CH32H417_H))
+#if !defined(GPIO_Speed_50MHz) && (defined(__CH32V205_H) || defined(LIBXR_CH32_IS_H41X))
 #define GPIO_Speed_50MHz GPIO_Speed_High
 #endif
 
@@ -25,10 +25,10 @@
 #define GPIO_Mode_AF_OD GPIO_Mode_AF_PP
 #endif
 
-// H417 设备头把 I3C 外设实例定义成宏，会与 libxr USB 描述符枚举项重名。
-// The H417 device header defines the I3C peripheral instance as a macro, which
+// CH32H41x 设备头把 I3C 外设实例定义成宏，会与 libxr USB 描述符枚举项重名。
+// The CH32H41x device header defines the I3C peripheral instance as a macro, which
 // collides with the libxr USB descriptor enum item.
-#if defined(__CH32H417_H) && defined(I3C)
+#if defined(LIBXR_CH32_IS_H41X) && defined(I3C)
 #undef I3C
 #endif
 
@@ -50,8 +50,8 @@
 #endif
 #endif
 
-// V205/H417 使用 PB2/HB2 命名 GPIO/AFIO 等高速外设总线，驱动统一使用 APB2 名称。
-// V205/H417 name the GPIO/AFIO high-speed peripheral bus PB2/HB2; drivers use
+// V205/CH32H41x 使用 PB2/HB2 命名 GPIO/AFIO 等高速外设总线，驱动统一使用 APB2 名称。
+// V205/CH32H41x name the GPIO/AFIO high-speed peripheral bus PB2/HB2; drivers use
 // the common APB2 spelling.
 #if !defined(RCC_APB2Periph_AFIO) && defined(RCC_PB2Periph_AFIO)
 #define RCC_APB2PeriphClockCmd RCC_PB2PeriphClockCmd
@@ -145,8 +145,8 @@
 #define RCC_APB2Periph_USART1 RCC_HB2Periph_USART1
 #endif
 
-// V205/H417 使用 PB1/HB1 命名低速外设总线，驱动统一使用 APB1 名称。
-// V205/H417 name the low-speed peripheral bus PB1/HB1; drivers use the common
+// V205/CH32H41x 使用 PB1/HB1 命名低速外设总线，驱动统一使用 APB1 名称。
+// V205/CH32H41x name the low-speed peripheral bus PB1/HB1; drivers use the common
 // APB1 spelling.
 #if !defined(RCC_APB1Periph_TIM2) && defined(RCC_PB1Periph_TIM2)
 #define RCC_APB1PeriphClockCmd RCC_PB1PeriphClockCmd
@@ -300,8 +300,8 @@
 #define RCC_APB1Periph_PWR RCC_HB1Periph_PWR
 #endif
 
-// V205/H417 使用 HB 命名 AHB 外设总线，驱动统一使用 AHB 名称。
-// V205/H417 name the AHB peripheral bus HB; drivers use the common AHB
+// V205/CH32H41x 使用 HB 命名 AHB 外设总线，驱动统一使用 AHB 名称。
+// V205/CH32H41x name the AHB peripheral bus HB; drivers use the common AHB
 // spelling.
 #if !defined(RCC_AHBPeriph_DMA1) && defined(RCC_HBPeriph_DMA1)
 #define RCC_AHBPeriphClockCmd RCC_HBPeriphClockCmd
@@ -343,20 +343,20 @@
 // MemoryBaseAddr 名称。
 // Some SPL variants name the DMA init memory address field Memory0; drivers use
 // the common MemoryBaseAddr spelling.
-#if !defined(DMA_MemoryBaseAddr) && (defined(__CH32V205_H) || defined(__CH32H417_H))
+#if !defined(DMA_MemoryBaseAddr) && (defined(__CH32V205_H) || defined(LIBXR_CH32_IS_H41X))
 #define DMA_MemoryBaseAddr DMA_Memory0BaseAddr
 #endif
 
-// H417 的 RCC_ClocksTypeDef 只暴露 HCLK；CH32 驱动中 APB1/APB2 时钟读法保持统一。
-// H417 only exposes HCLK in RCC_ClocksTypeDef; keep APB1/APB2 clock reads
+// CH32H41x 的 RCC_ClocksTypeDef 只暴露 HCLK；CH32 驱动中 APB1/APB2 时钟读法保持统一。
+// CH32H41x only exposes HCLK in RCC_ClocksTypeDef; keep APB1/APB2 clock reads
 // spelled uniformly in CH32 drivers.
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
 #define PCLK1_Frequency HCLK_Frequency
 #define PCLK2_Frequency HCLK_Frequency
 #endif
 
-// H417 的 SPI 分频宏使用 Mode0..Mode7 命名，驱动统一使用数值分频命名。
-// H417 names SPI prescalers Mode0..Mode7 while the driver uses numeric divider
+// CH32H41x 的 SPI 分频宏使用 Mode0..Mode7 命名，驱动统一使用数值分频命名。
+// CH32H41x names SPI prescalers Mode0..Mode7 while the driver uses numeric divider
 // names.
 #if !defined(SPI_BaudRatePrescaler_2) && defined(SPI_BaudRatePrescaler_Mode0)
 #define SPI_BaudRatePrescaler_2 SPI_BaudRatePrescaler_Mode0
@@ -369,10 +369,10 @@
 #define SPI_BaudRatePrescaler_256 SPI_BaudRatePrescaler_Mode7
 #endif
 
-// H417 CAN IRQ/FIFO 命名与 V205/V30x 不同，兼容到驱动使用的旧名称。
-// H417 CAN IRQ/FIFO names differ from V205/V30x; normalize them to the legacy
+// CH32H41x CAN IRQ/FIFO 命名与 V205/V30x 不同，兼容到驱动使用的旧名称。
+// CH32H41x CAN IRQ/FIFO names differ from V205/V30x; normalize them to the legacy
 // spellings used by the driver.
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
 #define USB_HP_CAN1_TX_IRQn CAN1_TX_IRQn
 #define USB_LP_CAN1_RX0_IRQn CAN1_RX0_IRQn
 #if !defined(CAN_FilterFIFO0) && defined(CAN_Filter_FIFO0)
@@ -426,7 +426,7 @@
 #define LIBXR_CH32_HAS_DMA 1
 #endif
 
-#if defined(__CH32V205_H) || defined(__CH32H417_H)
+#if defined(__CH32V205_H) || defined(LIBXR_CH32_IS_H41X)
 #define LIBXR_CH32_DMA_IT_REQUIRES_CONTROLLER 1
 #endif
 
@@ -454,12 +454,12 @@
 #endif
 
 #if defined(__CH32V205_PWR_H) || defined(__CH32X035_PWR_H) || \
-    defined(__CH32V30x_PWR_H) || defined(__CH32H417_PWR_H)
+    defined(__CH32V30x_PWR_H) || defined(LIBXR_CH32_IS_H41X)
 #define LIBXR_CH32_HAS_POWER 1
 #endif
 
 #if defined(__CH32V205_FLASH_H) || defined(__CH32X035_FLASH_H) || \
-    defined(__CH32V30x_FLASH_H) || defined(__CH32H417_FLASH_H)
+    defined(__CH32V30x_FLASH_H) || defined(LIBXR_CH32_IS_H41X)
 #define LIBXR_CH32_HAS_FLASH 1
 #endif
 
@@ -471,16 +471,21 @@
 #define LIBXR_CH32_HAS_USB_OTG_FS 1
 #endif
 
-// 当前 OTG-HS 实现依赖新版 USBHSD 端点配置寄存器；V205/H417 的 USBHSD
+// 当前 OTG-HS 实现依赖新版 USBHSD 端点配置寄存器；V205/CH32H41x 的 USBHSD
 // 结构同名但寄存器形态不同，因此不能仅以 USBHSD 是否存在作为能力判断。
 // The current OTG-HS backend requires the newer USBHSD endpoint-configuration
-// register layout. V205/H417 expose a same-named USBHSD block with a different
+// register layout. V205/CH32H41x expose a same-named USBHSD block with a different
 // register shape, so USBHSD alone is not a sufficient capability check.
-#if defined(USBHSD) && defined(__CH32H417_H) && defined(USBHS_UD_DEV_EN) && \
+#if defined(USBHSD) && defined(LIBXR_CH32_IS_H41X) && defined(USBHS_UD_DEV_EN) && \
     defined(USBHS_UDIF_TRANSFER) && defined(USBHS_UDIS_EP_ID_MASK)
 #define LIBXR_CH32_HAS_USB_OTG_HS 1
-#elif defined(USBHSD) && !defined(__CH32V205_H) && !defined(__CH32H417_H) && \
+#elif defined(USBHSD) && !defined(__CH32V205_H) && !defined(LIBXR_CH32_IS_H41X) && \
     defined(USBHS_UIF_SETUP_ACT) && defined(USBHS_UC_SPEED_HIGH) &&          \
     defined(USBHS_UEP0_T_TYPE) && defined(USBHS_UEP0_R_TYPE)
 #define LIBXR_CH32_HAS_USB_OTG_HS 1
+#endif
+
+#if defined(LIBXR_CH32_IS_H41X) && defined(USBSSD) && defined(USBSSH) && \
+    defined(USBSS_UIF_TRANSFER) && defined(LINK_IE_TX_LMP)
+#define LIBXR_CH32_HAS_USB_OTG_SS 1
 #endif

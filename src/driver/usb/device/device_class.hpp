@@ -56,6 +56,16 @@ class DeviceClass : public ConfigDescriptorItem
 
  protected:
   /**
+   * @brief 获取当前设备 USB 规范版本 / Get current device USB specification
+   */
+  [[nodiscard]] USBSpec GetUsbSpec() const { return usb_spec_; }
+
+  /**
+   * @brief 获取当前设备运行速度 / Get current device operating speed
+   */
+  [[nodiscard]] Speed GetUsbSpeed() const { return usb_speed_; }
+
+  /**
    * @brief 返回已分配的接口字符串索引
    *        Return the assigned USB string index for a local interface.
    *
@@ -198,6 +208,12 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
  private:
+  void SetUsbProfile(USBSpec spec, Speed speed)
+  {
+    usb_spec_ = spec;
+    usb_speed_ = speed;
+  }
+
   // These helpers are driven by DeviceComposition during initialization-time string
   // registration and are not part of the public class contract.
   // 这些辅助函数只在初始化期由 DeviceComposition 调用，不属于对外类接口。
@@ -206,6 +222,8 @@ class DeviceClass : public ConfigDescriptorItem
   friend class DeviceComposition;
   friend class DeviceCore;
 
+  USBSpec usb_spec_ = USBSpec::USB_2_0;  ///< 当前 USB 规范版本 / Current USB spec
+  Speed usb_speed_ = Speed::FULL;        ///< 当前 USB 速度 / Current USB speed
   uint8_t interface_string_base_index_ =
       0u;  ///< 首个接口字符串索引 / First interface string index
 };

@@ -5,7 +5,7 @@ using namespace LibXR;
 
 static inline SysTick_Type* ch32_systick_reg()
 {
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
   return SysTick0;
 #else
   return SysTick;

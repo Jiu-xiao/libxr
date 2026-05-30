@@ -7,13 +7,13 @@
 using namespace LibXR;
 using namespace LibXR::USB;
 
-#if defined(USBHSD) && defined(__CH32H417_H)
+#if defined(USBHSD) && defined(LIBXR_CH32_IS_H41X)
 
-extern "C" __attribute__((weak)) void H417UsbHsDebugStage(uint32_t)
+extern "C" __attribute__((weak)) void CH32H41xUsbHsDebugStage(uint32_t)
 {
 }
 
-extern "C" __attribute__((weak)) void H417UsbHsDebugSnapshot(uint32_t, uint32_t,
+extern "C" __attribute__((weak)) void CH32H41xUsbHsDebugSnapshot(uint32_t, uint32_t,
                                                              uint32_t, uint32_t,
                                                              uint32_t, uint32_t)
 {
@@ -45,7 +45,7 @@ static void DisableUsbHsControllerClock()
 #endif
 }
 
-static void PrepareUsbHsPinsForH417()
+static void PrepareUsbHsPinsForCH32H41x()
 {
 #if defined(RCC_HB2Periph_AFIO) || defined(RCC_HB2Periph_GPIOB)
   uint32_t hb2_bits = 0u;
@@ -73,9 +73,9 @@ static void PrepareUsbHsPinsForH417()
   }
 #endif
 #if defined(GPIO_Remap_SWJ_Disable)
-  // H417 USBHS device examples explicitly release the SWJ mux before enabling
+  // CH32H41x USBHS device examples explicitly release the SWJ mux before enabling
   // USBHS; otherwise the shared HS pins never leave the debug function.
-  // H417 的 USBHS 设备例程会先释放 SWJ 复用，否则与调试口复用的 HS
+  // CH32H41x 的 USBHS 设备例程会先释放 SWJ 复用，否则与调试口复用的 HS
   // 管脚不会切回 USB 功能。
   GPIO_PinRemapConfig(GPIO_Remap_SWJ_Disable, ENABLE);
 #endif
@@ -304,7 +304,7 @@ static void ClearPendingOtgHsInterrupts()
 
 static void CaptureUsbHsSnapshot(uint8_t intflag, uint8_t intst)
 {
-  H417UsbHsDebugSnapshot(intflag, intst, USBHSD->MIS_ST, USBHSD->BUS,
+  CH32H41xUsbHsDebugSnapshot(intflag, intst, USBHSD->MIS_ST, USBHSD->BUS,
                          USBHSD->FRAME_NO, USBHSD->CONTROL);
 }
 
@@ -343,7 +343,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
     if (INTFLAG & USBHS_UDIF_BUS_RST)
     {
       CaptureUsbHsSnapshot(INTFLAG, INTST);
-      H417UsbHsDebugStage(0x4320u);
+      CH32H41xUsbHsDebugStage(0x4320u);
       USBHSD->DEV_AD = 0;
       usb->OnBusReset(true);
       USBHSD->UEP_TX_EN = 0u;
@@ -357,14 +357,14 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
     if (INTFLAG & USBHS_UDIF_SUSPEND)
     {
       CaptureUsbHsSnapshot(INTFLAG, INTST);
-      H417UsbHsDebugStage(0x4321u);
+      CH32H41xUsbHsDebugStage(0x4321u);
       clear_mask |= USBHS_UDIF_SUSPEND;
     }
 
     if (INTFLAG & USBHS_UDIF_LINK_RDY)
     {
       CaptureUsbHsSnapshot(INTFLAG, INTST);
-      H417UsbHsDebugStage(0x4322u);
+      CH32H41xUsbHsDebugStage(0x4322u);
       clear_mask |= USBHS_UDIF_LINK_RDY;
     }
 
@@ -375,7 +375,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
           ((USBHSD->UEP0_RX_CTRL & USBHS_UEP_R_SETUP_IS) == USBHS_UEP_R_SETUP_IS))
       {
         CaptureUsbHsSnapshot(INTFLAG, INTST);
-        H417UsbHsDebugStage(0x4323u);
+        CH32H41xUsbHsDebugStage(0x4323u);
         USBHSD->UEP0_RX_CTRL &= static_cast<uint8_t>(~USBHS_UEP_R_DONE);
         PrepareEp0ForSetup(map);
 
@@ -388,7 +388,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
       else
       {
         CaptureUsbHsSnapshot(INTFLAG, INTST);
-        H417UsbHsDebugStage(((INTST & USBHS_UDIS_EP_DIR) != 0u) ? 0x4324u : 0x4325u);
+        CH32H41xUsbHsDebugStage(((INTST & USBHS_UDIS_EP_DIR) != 0u) ? 0x4324u : 0x4325u);
         HandleTransferToken(map, INTST);
       }
       clear_mask |= USBHS_UDIF_TRANSFER;
@@ -407,9 +407,9 @@ CH32H41xUSBOtgHS::CH32H41xUSBOtgHS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      // Align H417 USBHS enumeration baseline with the official SimulateCDC
+      // Align CH32H41x USBHS enumeration baseline with the official SimulateCDC
       // examples first. They expose a USB 2.0 HS CDC device, not a USB 2.1 one.
-      // 先把 H417 USBHS 的枚举基线对齐官方 SimulateCDC：它导出的是 USB 2.0
+      // 先把 CH32H41x USBHS 的枚举基线对齐官方 SimulateCDC：它导出的是 USB 2.0
       // HS CDC 设备，而不是 USB 2.1。
       USB::DeviceCore(*this, USB::USBSpec::USB_2_0, USB::Speed::HIGH,
                       USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd,
@@ -469,33 +469,40 @@ LibXR::ErrorCode CH32H41xUSBOtgHS::SetAddress(uint8_t address,
   return LibXR::ErrorCode::OK;
 }
 
+void CH32H41xUSBOtgHS::OnConfigurationSwitched(uint16_t value, bool in_isr)
+{
+  UNUSED(value);
+  UNUSED(in_isr);
+  CH32H41xUsbHsDebugStage(0x4326u);
+}
+
 void CH32H41xUSBOtgHS::Start(bool)
 {
-  H417UsbHsDebugStage(0x4310u);
+  CH32H41xUsbHsDebugStage(0x4310u);
   NVIC_DisableIRQ(USBHS_IRQn);
-  H417UsbHsDebugStage(0x4311u);
+  CH32H41xUsbHsDebugStage(0x4311u);
   NVIC_ClearPendingIRQ(USBHS_IRQn);
-  H417UsbHsDebugStage(0x4312u);
+  CH32H41xUsbHsDebugStage(0x4312u);
   AllocateUsbHsIrqToV3f();
 
-  H417UsbHsDebugStage(0x4313u);
-  PrepareUsbHsPinsForH417();
-  H417UsbHsDebugStage(0x4314u);
-  LibXR::CH32UsbRcc::ConfigureUsbHsForH417();
-  H417UsbHsDebugStage(0x4315u);
+  CH32H41xUsbHsDebugStage(0x4313u);
+  PrepareUsbHsPinsForCH32H41x();
+  CH32H41xUsbHsDebugStage(0x4314u);
+  LibXR::CH32UsbRcc::ConfigureUsbHsForCH32H41x();
+  CH32H41xUsbHsDebugStage(0x4315u);
   RCC_UTMIcmd(ENABLE);
-  H417UsbHsDebugStage(0x4316u);
+  CH32H41xUsbHsDebugStage(0x4316u);
   EnableUsbHsControllerClock();
 
-  H417UsbHsDebugStage(0x4317u);
+  CH32H41xUsbHsDebugStage(0x4317u);
   USBHSD->CONTROL = USBHS_UD_CLR_ALL | USBHS_UD_RST_SIE | USBHS_UD_PHY_SUSPENDM;
-  H417UsbHsDebugStage(0x4318u);
+  CH32H41xUsbHsDebugStage(0x4318u);
   USBHSD->CONTROL = USBHS_UD_PHY_SUSPENDM;
-  H417UsbHsDebugStage(0x4319u);
+  CH32H41xUsbHsDebugStage(0x4319u);
   USBHSD->CONTROL = USBHS_UD_RST_LINK | USBHS_UD_PHY_SUSPENDM;
-  H417UsbHsDebugStage(0x431Au);
+  CH32H41xUsbHsDebugStage(0x431Au);
   USBHSD->INT_FG = 0xFFu;
-  // Rebuild the H417 endpoint image from scratch. The official USBHS examples
+  // Rebuild the CH32H41x endpoint image from scratch. The official USBHS examples
   // program the global direction-enable masks explicitly on every init; doing
   // the same here avoids carrying stale endpoint enables across failed HS runs.
   // 每次 HS 启动都从干净的端点全局使能状态重建。官方例程每轮初始化都会显式
@@ -504,21 +511,21 @@ void CH32H41xUSBOtgHS::Start(bool)
   USBHSD->UEP_RX_EN = 0u;
   USBHSD->UEP_TX_ISO = 0u;
   USBHSD->UEP_RX_ISO = 0u;
-  H417UsbHsDebugStage(0x431Bu);
+  CH32H41xUsbHsDebugStage(0x431Bu);
   RestoreUsbHsEndpointState();
-  H417UsbHsDebugStage(0x431Cu);
+  CH32H41xUsbHsDebugStage(0x431Cu);
   USBHSD->BASE_MODE = USBHS_UD_SPEED_HIGH;
-  H417UsbHsDebugStage(0x431Du);
+  CH32H41xUsbHsDebugStage(0x431Du);
   USBHSD->INT_EN = USBHS_UDIE_BUS_RST | USBHS_UDIE_SUSPEND | USBHS_UDIE_BUS_SLEEP |
                    USBHS_UDIE_LPM_ACT | USBHS_UDIE_TRANSFER | USBHS_UDIE_LINK_RDY;
-  H417UsbHsDebugStage(0x431Eu);
+  CH32H41xUsbHsDebugStage(0x431Eu);
   USBHSD->CONTROL =
       USBHS_UD_DEV_EN | USBHS_UD_DMA_EN | USBHS_UD_LPM_EN | USBHS_UD_PHY_SUSPENDM;
-  H417UsbHsDebugStage(0x431Fu);
+  CH32H41xUsbHsDebugStage(0x431Fu);
   self_ = this;
-  H417UsbHsDebugStage(0x4327u);
+  CH32H41xUsbHsDebugStage(0x4327u);
   NVIC_EnableIRQ(USBHS_IRQn);
-  H417UsbHsDebugStage(0x4328u);
+  CH32H41xUsbHsDebugStage(0x4328u);
 }
 
 void CH32H41xUSBOtgHS::Stop(bool)
@@ -536,6 +543,6 @@ void CH32H41xUSBOtgHS::Stop(bool)
   self_ = nullptr;
 }
 
-#endif  // defined(USBHSD) && defined(__CH32H417_H)
+#endif  // defined(USBHSD) && defined(LIBXR_CH32_IS_H41X)
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

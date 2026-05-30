@@ -27,6 +27,7 @@ enum class DescriptorType : uint8_t
   IAD = 0x0B,                ///< 接口关联描述符（Interface Association Descriptor）
   BOS = 0x0F,                ///< 设备能力描述符（BOS Descriptor）
   DEVICE_CAPABILITY = 0x10,  ///< 设备能力子描述符（Device Capability Descriptor）
+  ENDPOINT_COMPANION = 0x30,  ///< SuperSpeed 端点伴随描述符 / SS endpoint companion
   CS_INTERFACE = 0x24,       ///< 类特定接口描述符（Class-Specific Interface Descriptor）
 
 };
@@ -92,7 +93,7 @@ class DeviceDescriptor
     SIZE_16 = 16,  ///< 16字节 / 16 bytes    (Full Speed)
     SIZE_32 = 32,  ///< 32字节 / 32 bytes    (Full Speed)
     SIZE_64 = 64,  ///< 64字节 / 64 bytes    (Full Speed / High Speed)
-    SIZE_512 = 0,  ///< 512字节 / 512 bytes  (SuperSpeed)
+    SIZE_512 = 9,  ///< 512字节 / 512 bytes  (SuperSpeed uses exponent encoding)
   };
 
   static constexpr uint8_t DEVICE_DESC_LENGTH =

@@ -123,4 +123,39 @@ class CH32EndpointOtgHs : public USB::Endpoint
 
 #endif  // defined(USBHSD)
 
+#if defined(LIBXR_CH32_HAS_USB_OTG_SS)
+
+/**
+ * @brief CH32 OTG SS 端点实现 / CH32 OTG SS endpoint implementation
+ */
+class CH32EndpointOtgSs : public USB::Endpoint
+{
+ public:
+  CH32EndpointOtgSs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
+                    uint8_t max_burst = 1);
+
+  void Configure(const Config& cfg) override;
+  void Close() override;
+  size_t MaxTransferSize() const override;
+  uint8_t MaxBurst() const override;
+  ErrorCode Transfer(size_t size) override;
+
+  void TransferComplete(size_t size);
+  ErrorCode Stall() override;
+  ErrorCode ClearStall() override;
+  void SwitchBuffer() override;
+
+  uint8_t seq_ = 0u;
+  uint8_t max_burst_ = 1u;
+  RawData dma_buffer_;
+  size_t bank_size_ = 0u;
+  uint8_t active_bank_ = 0u;
+  size_t last_transfer_size_ = 0u;
+
+  static constexpr uint8_t EP_OTG_SS_MAX_SIZE = 8;
+  static inline CH32EndpointOtgSs* map_otg_ss_[EP_OTG_SS_MAX_SIZE][2] = {};
+};
+
+#endif  // defined(LIBXR_CH32_HAS_USB_OTG_SS)
+
 }  // namespace LibXR

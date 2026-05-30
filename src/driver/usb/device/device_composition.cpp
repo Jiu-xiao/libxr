@@ -7,6 +7,7 @@ namespace
 {
 using LibXR::USB::BOS_HEADER_SIZE;
 using LibXR::USB::BosCapability;
+using LibXR::USB::BosCapabilityProvider;
 using LibXR::USB::CFG_REMOTE_WAKEUP;
 using LibXR::USB::CFG_SELF_POWERED;
 using LibXR::USB::ConfigDescriptorItem;
@@ -14,12 +15,17 @@ using LibXR::USB::DESCRIPTOR_TYPE_DEVICE_CAPABILITY;
 using LibXR::USB::DescriptorStrings;
 using LibXR::USB::DEV_CAPABILITY_TYPE_USB20EXT;
 using LibXR::USB::DeviceClass;
+using LibXR::USB::SUPERSPEED_USB_CAP_SIZE;
+using LibXR::USB::USB2_EXT_CAP_SIZE;
 
 struct InterfaceStringLayout
 {
   size_t count = 0;
   size_t max_len = 0;
 };
+
+constexpr size_t BUILTIN_BOS_CAPABILITY_HEADROOM = 1u;
+constexpr size_t BUILTIN_BOS_DESCRIPTOR_HEADROOM = SUPERSPEED_USB_CAP_SIZE;
 
 // 在 class 去重前，先统计原始配置项数量。
 // Count the raw number of config items before unique-class deduplication.
@@ -274,7 +280,7 @@ static size_t calc_bos_capability_num_max(
       max_num = num;
     }
   }
-  return max_num;
+  return max_num + BUILTIN_BOS_CAPABILITY_HEADROOM;
 }
 
 // 统计所有 configuration 中 BOS 描述符尺寸的最大值；
@@ -286,8 +292,6 @@ static size_t calc_bos_descriptor_size_max(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs)
 {
-  static constexpr size_t usb2_ext_size = 7;
-
   size_t max_total = BOS_HEADER_SIZE;
   for (const auto& group : configs)
   {
@@ -325,7 +329,9 @@ static size_t calc_bos_descriptor_size_max(
       }
     }
 
-    const size_t total = BOS_HEADER_SIZE + cap_bytes + (has_usb2_ext ? 0 : usb2_ext_size);
+    const size_t total =
+        BOS_HEADER_SIZE + cap_bytes +
+        (has_usb2_ext ? 0 : USB2_EXT_CAP_SIZE) + BUILTIN_BOS_DESCRIPTOR_HEADROOM;
     if (total > max_total)
     {
       max_total = total;
@@ -418,6 +424,17 @@ void DeviceComposition::Init(bool in_isr)
   RebuildBosCache();
 }
 
+void DeviceComposition::SetDeviceProfile(USBSpec spec, Speed speed)
+{
+  for (size_t i = 0; i < class_count_; ++i)
+  {
+    if (classes_[i] != nullptr)
+    {
+      classes_[i]->SetUsbProfile(spec, speed);
+    }
+  }
+}
+
 void DeviceComposition::Deinit(bool in_isr)
 {
   UnbindEndpoints(in_isr);
@@ -467,6 +484,12 @@ LibXR::ErrorCode DeviceComposition::BuildConfigDescriptor()
 RawData DeviceComposition::GetConfigDescriptor() const { return config_desc_.GetData(); }
 
 ConstRawData DeviceComposition::GetBosDescriptor() { return bos_.GetBosDescriptor(); }
+
+void DeviceComposition::SetExtraBosCapabilityProvider(BosCapabilityProvider* provider)
+{
+  extra_bos_provider_ = provider;
+  RebuildBosCache();
+}
 
 LibXR::ErrorCode DeviceComposition::ProcessBosVendorRequest(bool in_isr,
                                                             const SetupPacket* setup,
@@ -663,6 +686,19 @@ void DeviceComposition::RebuildBosCache()
     for (size_t j = 0; j < capability_num; ++j)
     {
       auto* cap = item->GetBosCapability(j);
+      if (cap != nullptr)
+      {
+        bos_.AddCapability(cap);
+      }
+    }
+  }
+
+  if (extra_bos_provider_ != nullptr)
+  {
+    const size_t capability_num = extra_bos_provider_->GetBosCapabilityCount();
+    for (size_t i = 0; i < capability_num; ++i)
+    {
+      auto* cap = extra_bos_provider_->GetBosCapability(i);
       if (cap != nullptr)
       {
         bos_.AddCapability(cap);

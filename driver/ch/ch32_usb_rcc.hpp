@@ -8,8 +8,8 @@
 namespace LibXR::CH32UsbRcc
 {
 
-#if defined(__CH32H417_H)
-extern "C" void H417UsbHsDebugStage(uint32_t stage);
+#if defined(LIBXR_CH32_IS_H41X)
+extern "C" void CH32H41xUsbHsDebugStage(uint32_t stage);
 extern "C" __attribute__((weak)) volatile uint32_t g_v3f_app_stage;
 
 inline void ReportUsbHsDebugStage(uint32_t stage)
@@ -18,7 +18,7 @@ inline void ReportUsbHsDebugStage(uint32_t stage)
   {
     g_v3f_app_stage = stage;
   }
-  H417UsbHsDebugStage(stage);
+  CH32H41xUsbHsDebugStage(stage);
 }
 
 inline bool WaitForRccCtlrBits(uint32_t mask, uint32_t timeout)
@@ -42,7 +42,7 @@ inline bool WaitForRccPllCfgr2MaskedValue(uint32_t mask, uint32_t expected,
   return (RCC->PLLCFGR2 & mask) == expected;
 }
 
-inline bool TryGetUsbHsH417RefConfig(bool use_hse, uint32_t& ref_cfg)
+inline bool TryGetUsbHsCH32H41xRefConfig(bool use_hse, uint32_t& ref_cfg)
 {
   if (!use_hse)
   {
@@ -138,7 +138,7 @@ inline void ConfigureUsb48MFromSysclk()
   ASSERT(false);
 }
 
-inline void ConfigureUsb48MForH417()
+inline void ConfigureUsb48MForCH32H41x()
 {
 #if defined(RCC_USBFSCLKSource_USBHSPLL) && defined(RCC_USBHSPLLSource_HSE) && \
     defined(RCC_USBHSPLLRefer_20M) && \
@@ -187,7 +187,7 @@ inline void ConfigureUsb48MForH417()
 #endif
 }
 
-inline void ConfigureUsbHsForH417()
+inline void ConfigureUsbHsForCH32H41x()
 {
 #if defined(RCC_USBHSPLLSource_HSE) && defined(RCC_USBHSPLLRefer_20M) && \
     defined(RCC_USBHSPLLRefer_24M) && \
@@ -204,10 +204,10 @@ inline void ConfigureUsbHsForH417()
     constexpr uint32_t kCfgTimeout = 200000u;
     constexpr uint32_t kUsbHsPllTimeout = 200000u;
 
-    // USBFS on H417 can already be running from USBHS PLL / 10. Reconfiguring the
+    // USBFS on CH32H41x can already be running from USBHS PLL / 10. Reconfiguring the
     // shared PLL under an active FS runtime is unsafe, so reuse the locked PLL when
     // it is already on.
-    // H417 上 USBFS 可能已经在使用 USBHS PLL / 10；此时再次关闭并重配共享 PLL
+    // CH32H41x 上 USBFS 可能已经在使用 USBHS PLL / 10；此时再次关闭并重配共享 PLL
     // 会直接干扰正在工作的 FS 运行时，因此 PLL 已锁定时直接复用。
     if ((RCC->CTLR & RCC_USBHS_PLLRDY) != 0u)
     {
@@ -226,7 +226,7 @@ inline void ConfigureUsbHsForH417()
     ReportUsbHsDebugStage(use_hse ? 0x4332u : 0x4333u);
 
     uint32_t ref_cfg = 0u;
-    ASSERT(TryGetUsbHsH417RefConfig(use_hse, ref_cfg));
+    ASSERT(TryGetUsbHsCH32H41xRefConfig(use_hse, ref_cfg));
     ReportUsbHsDebugStage(0x4334u);
 
     RCC_USBHS_PLLCmd(DISABLE);
@@ -341,10 +341,10 @@ inline void ConfigureUsbHsPhyFromHse()
 
 inline void ConfigureUsb48M()
 {
-#if defined(__CH32H417_H)
-  // CH32H417 routes USBFS 48 MHz from the dedicated USBHS PLL path.
-  // CH32H417 的 USBFS 48 MHz 走专用 USBHS PLL 路径。
-  ConfigureUsb48MForH417();
+#if defined(LIBXR_CH32_IS_H41X)
+  // CH32H41x routes USBFS 48 MHz from the dedicated USBHS PLL path.
+  // CH32H41x 的 USBFS 48 MHz 走专用 USBHS PLL 路径。
+  ConfigureUsb48MForCH32H41x();
 #elif defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_HSBHSPLLCLKSource_HSE)
   // 部分 CH32V30x 可以从 USBHS PHY PLL 提供共享 48 MHz USB 时钟；
   // 这种情况下先选 PHY 路径，再让各控制器自己打开总线时钟。

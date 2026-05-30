@@ -9,7 +9,17 @@
 
 using namespace LibXR::USB;
 
-extern "C" __attribute__((weak)) void H417UsbHsDebugStage(uint32_t);
+namespace
+{
+
+static uint16_t DecodePacketSize0(DeviceDescriptor::PacketSize0 packet_size)
+{
+  return (packet_size == DeviceDescriptor::PacketSize0::SIZE_512)
+             ? 512u
+             : static_cast<uint16_t>(static_cast<uint8_t>(packet_size));
+}
+
+}  // namespace
 
 DeviceCore::DeviceCore(
     EndpointPool& ep_pool, USBSpec spec, Speed speed,
@@ -20,6 +30,8 @@ DeviceCore::DeviceCore(
     ConstRawData uid)
     : composition_(ep_pool, lang_list, configs, uid),
       device_desc_(spec, packet_size, vid, pid, bcd, composition_.GetConfigNum()),
+      superspeed_bos_capability_(),
+      superspeed_bos_provider_(&superspeed_bos_capability_),
       endpoint_({ep_pool, nullptr, nullptr, {}, {}}),
       state_({false,
               speed,
@@ -29,15 +41,26 @@ DeviceCore::DeviceCore(
               {nullptr, 0},
               0xff,
               nullptr,
-              false})
+              false,
+              false,
+              false,
+              false,
+              0,
+              {}})
 {
   ASSERT(IsValidUSBCombination(spec, speed, packet_size));
+  composition_.SetDeviceProfile(spec, speed);
 
   endpoint_.ep0_in_cb =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnEP0InCompleteStatic, this);
 
   endpoint_.ep0_out_cb =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnEP0OutCompleteStatic, this);
+
+  if (speed == Speed::SUPER)
+  {
+    composition_.SetExtraBosCapabilityProvider(&superspeed_bos_provider_);
+  }
 }
 
 void DeviceCore::OnEP0OutCompleteStatic(bool in_isr, DeviceCore* self,
@@ -83,6 +106,12 @@ bool DeviceCore::IsValidUSBCombination(USBSpec spec, Speed speed,
       return SIZE == 64;
 
     case Speed::SUPER:  // NOLINT
+      if (spec < USBSpec::USB_3_0)
+      {
+        return false;
+      }
+      return packet_size == DeviceDescriptor::PacketSize0::SIZE_512;
+
     case Speed::SUPER_PLUS:
       return false;
 
@@ -119,6 +148,9 @@ void DeviceCore::ResetControlTransferState()
   state_.out0_buffer = nullptr;
   state_.need_write_zlp = false;
   state_.status_out_armed = false;
+  state_.set_sel_pending = false;
+  state_.pending_isoch_delay_valid = false;
+  state_.pending_isoch_delay = 0;
 }
 
 void DeviceCore::Init(bool in_isr)
@@ -126,8 +158,12 @@ void DeviceCore::Init(bool in_isr)
   endpoint_.in0 = endpoint_.pool.GetEndpoint0In();
   endpoint_.out0 = endpoint_.pool.GetEndpoint0Out();
 
-  endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
-  endpoint_.out0->Configure({Endpoint::Direction::OUT, Endpoint::Type::CONTROL, 64});
+  const uint16_t ep0_packet_size = DecodePacketSize0(device_desc_.data_.bMaxPacketSize0);
+
+  endpoint_.in0->Configure(
+      {Endpoint::Direction::IN, Endpoint::Type::CONTROL, ep0_packet_size});
+  endpoint_.out0->Configure(
+      {Endpoint::Direction::OUT, Endpoint::Type::CONTROL, ep0_packet_size});
 
   endpoint_.in0->SetOnTransferCompleteCallback(endpoint_.ep0_in_cb);
   endpoint_.out0->SetOnTransferCompleteCallback(endpoint_.ep0_out_cb);
@@ -191,7 +227,8 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData& data)
       if (endpoint_.in0->GetState() == Endpoint::State::BUSY)
       {
         endpoint_.in0->Close();
-        endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, 64});
+        endpoint_.in0->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL,
+                                  endpoint_.in0->MaxPacketSize()});
         state_.in0 = Context::ZLP;
         state_.write_remain = {nullptr, 0};
       }
@@ -225,6 +262,11 @@ void DeviceCore::OnEP0OutComplete(bool in_isr, LibXR::ConstRawData& data)
       }
       else
       {
+        if (state_.set_sel_pending)
+        {
+          OnSetSelData(state_.set_sel_data, SET_SEL_DATA_SIZE);
+          state_.set_sel_pending = false;
+        }
         WriteZLP();
       }
       break;
@@ -258,6 +300,12 @@ void DeviceCore::OnEP0InComplete(bool in_isr, LibXR::ConstRawData& data)
       {
         SetAddress(state_.pending_addr, Context::STATUS_IN_COMPLETE);
         state_.pending_addr = 0xFF;
+      }
+      if (state_.pending_isoch_delay_valid)
+      {
+        SetIsochronousDelay(state_.pending_isoch_delay);
+        state_.pending_isoch_delay_valid = false;
+        state_.pending_isoch_delay = 0;
       }
       break;
 
@@ -413,6 +461,7 @@ void DeviceCore::OnSetupPacket(bool in_isr, const SetupPacket* setup)
   {
     return;
   }
+  ResetControlTransferState();
   ResetClassRequestState();
 
   RequestDirection direction =
@@ -459,10 +508,6 @@ LibXR::ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr,
                                                     RequestDirection direction,
                                                     Recipient recipient)
 {
-  UNUSED(in_isr);
-  UNUSED(direction);
-  UNUSED(recipient);
-
   // 根据 recipient 处理不同目标的请求。
   // Handle requests for different recipients.
   StandardRequest req = static_cast<StandardRequest>(setup->bRequest);
@@ -571,6 +616,14 @@ LibXR::ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr,
       break;
     }
 
+    case StandardRequest::SET_SEL:
+      ans = PrepareSetSel(setup, direction, recipient);
+      break;
+
+    case StandardRequest::SET_ISOCH_DELAY:
+      ans = PrepareIsochronousDelay(setup, direction, recipient);
+      break;
+
     case StandardRequest::SYNCH_FRAME:
       // TODO: 一般仅用于同步端点
       // TODO: typically used for isochronous endpoint sync.
@@ -600,6 +653,10 @@ LibXR::ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup,
   {
     case Recipient::DEVICE:
       status = composition_.GetDeviceStatus();
+      if (GetSpeed() == Speed::SUPER)
+      {
+        status |= GetSuperSpeedDeviceStatus();
+      }
       break;
 
     case Recipient::INTERFACE:
@@ -672,9 +729,15 @@ LibXR::ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient re
     case Recipient::DEVICE:
       // 可选：处理 Remote Wakeup 等设备级特性
       // Optional: device-level feature handling (e.g., remote wakeup).
-      if (setup->wValue == 1)  // 1 = DEVICE_REMOTE_WAKEUP
+      if (setup->wValue == FEATURE_REMOTE_WAKEUP)
       {
         DisableRemoteWakeup();
+        WriteZLP();
+      }
+      else if (GetSpeed() == Speed::SUPER &&
+               (setup->wValue == FEATURE_U1_ENABLE || setup->wValue == FEATURE_U2_ENABLE))
+      {
+        SetSuperSpeedFeature(setup->wValue, false);
         WriteZLP();
       }
       else
@@ -696,7 +759,7 @@ LibXR::ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient re
   {
     case Recipient::ENDPOINT:
     {
-      if (setup->wValue == 0)  // 0 = ENDPOINT_HALT
+      if (setup->wValue == FEATURE_ENDPOINT_HALT)
       {
         uint8_t ep_addr = setup->wIndex & 0xFF;
         Endpoint* ep = nullptr;
@@ -723,9 +786,15 @@ LibXR::ErrorCode DeviceCore::ApplyFeature(const SetupPacket* setup, Recipient re
     }
 
     case Recipient::DEVICE:
-      if (setup->wValue == 1)  // 1 = DEVICE_REMOTE_WAKEUP
+      if (setup->wValue == FEATURE_REMOTE_WAKEUP)
       {
         EnableRemoteWakeup();
+        WriteZLP();
+      }
+      else if (GetSpeed() == Speed::SUPER &&
+               (setup->wValue == FEATURE_U1_ENABLE || setup->wValue == FEATURE_U2_ENABLE))
+      {
+        SetSuperSpeedFeature(setup->wValue, true);
         WriteZLP();
       }
       else
@@ -832,6 +901,38 @@ LibXR::ErrorCode DeviceCore::PrepareAddressChange(uint16_t address)
   return (pre_status != LibXR::ErrorCode::OK) ? pre_status : armed;
 }
 
+LibXR::ErrorCode DeviceCore::PrepareSetSel(const SetupPacket* setup,
+                                           RequestDirection direction,
+                                           Recipient recipient)
+{
+  if (GetSpeed() != Speed::SUPER || direction != RequestDirection::OUT ||
+      recipient != Recipient::DEVICE || setup->wLength != SET_SEL_DATA_SIZE)
+  {
+    return LibXR::ErrorCode::ARG_ERR;
+  }
+
+  state_.set_sel_pending = true;
+  DevReadEP0Data({state_.set_sel_data, SET_SEL_DATA_SIZE},
+                 endpoint_.out0->MaxTransferSize());
+  return LibXR::ErrorCode::OK;
+}
+
+LibXR::ErrorCode DeviceCore::PrepareIsochronousDelay(const SetupPacket* setup,
+                                                     RequestDirection direction,
+                                                     Recipient recipient)
+{
+  if (GetSpeed() != Speed::SUPER || direction != RequestDirection::OUT ||
+      recipient != Recipient::DEVICE || setup->wLength != 0u)
+  {
+    return LibXR::ErrorCode::ARG_ERR;
+  }
+
+  state_.pending_isoch_delay = setup->wValue;
+  state_.pending_isoch_delay_valid = true;
+  WriteZLP(Context::STATUS_IN_COMPLETE);
+  return LibXR::ErrorCode::OK;
+}
+
 LibXR::ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
 {
   if (composition_.SwitchConfig(value, in_isr) != LibXR::ErrorCode::OK)
@@ -841,10 +942,7 @@ LibXR::ErrorCode DeviceCore::SwitchConfiguration(uint16_t value, bool in_isr)
 
   // ACK status 阶段
   // ACK status stage.
-  if (GetSpeed() == Speed::HIGH && H417UsbHsDebugStage != nullptr)
-  {
-    H417UsbHsDebugStage(0x4326u);
-  }
+  OnConfigurationSwitched(value, in_isr);
   WriteZLP();
 
   return LibXR::ErrorCode::OK;

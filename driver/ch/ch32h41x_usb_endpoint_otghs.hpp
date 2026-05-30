@@ -5,7 +5,7 @@
 #include "libxr_type.hpp"
 #include "usb/core/ep.hpp"
 
-#if defined(USBHSD) && defined(__CH32H417_H)
+#if defined(USBHSD) && defined(LIBXR_CH32_IS_H41X)
 
 #define LIBXR_CH32_USB_OTGHS_ENDPOINT_SPECIALIZED 1
 

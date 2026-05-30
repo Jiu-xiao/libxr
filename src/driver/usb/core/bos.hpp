@@ -19,6 +19,7 @@ namespace LibXR::USB
 enum class DevCapabilityType : uint8_t
 {
   USB20_EXTENSION = 0x02,  ///< USB 2.0 扩展能力 / USB 2.0 Extension capability
+  SUPERSPEED_USB = 0x03,   ///< SuperSpeed USB 能力 / SuperSpeed USB capability
 };
 
 static constexpr uint8_t DESCRIPTOR_TYPE_BOS =
@@ -31,11 +32,15 @@ static constexpr uint8_t DESCRIPTOR_TYPE_DEVICE_CAPABILITY = static_cast<uint8_t
 static constexpr uint8_t DEV_CAPABILITY_TYPE_USB20EXT = static_cast<uint8_t>(
     DevCapabilityType::USB20_EXTENSION);  ///< USB2.0 扩展能力类型 / USB 2.0 extension
                                           ///< capability type
+static constexpr uint8_t DEV_CAPABILITY_TYPE_SUPERSPEED_USB = static_cast<uint8_t>(
+    DevCapabilityType::SUPERSPEED_USB);  ///< SuperSpeed USB capability type
 
 static constexpr size_t BOS_HEADER_SIZE =
     5;  ///< BOS 头部长度（字节）/ BOS header size (bytes)
 static constexpr size_t USB2_EXT_CAP_SIZE =
     7;  ///< USB2.0 扩展能力块长度（字节）/ USB 2.0 extension block size (bytes)
+static constexpr size_t SUPERSPEED_USB_CAP_SIZE =
+    10;  ///< SuperSpeed USB capability block size
 
 /**
  * @brief Vendor 请求处理结果（EP0 控制传输）
@@ -80,6 +85,48 @@ class BosCapability
 };
 
 /**
+ * @brief 标准 SuperSpeed USB Device Capability
+ *        Standard SuperSpeed USB Device Capability block.
+ */
+class SuperSpeedUsbBosCapability : public BosCapability
+{
+ public:
+#pragma pack(push, 1)
+  struct Descriptor
+  {
+    uint8_t bLength = static_cast<uint8_t>(SUPERSPEED_USB_CAP_SIZE);
+    uint8_t bDescriptorType = DESCRIPTOR_TYPE_DEVICE_CAPABILITY;
+    uint8_t bDevCapabilityType = DEV_CAPABILITY_TYPE_SUPERSPEED_USB;
+    uint8_t bmAttributes = 0x00u;
+    uint16_t wSpeedsSupported = 0x000Eu;
+    uint8_t bFunctionalitySupport = 0x01u;
+    uint8_t bU1DevExitLat = 0x0Au;
+    uint16_t wU2DevExitLat = 0x07FFu;
+  };
+#pragma pack(pop)
+
+  static_assert(sizeof(Descriptor) == SUPERSPEED_USB_CAP_SIZE,
+                "SuperSpeed capability descriptor size mismatch.");
+
+  explicit SuperSpeedUsbBosCapability(uint8_t functionality_support = 0x01u,
+                                      uint8_t u1_exit_latency = 0x0Au,
+                                      uint16_t u2_exit_latency = 0x07FFu)
+  {
+    desc_.bFunctionalitySupport = functionality_support;
+    desc_.bU1DevExitLat = u1_exit_latency;
+    desc_.wU2DevExitLat = u2_exit_latency;
+  }
+
+  ConstRawData GetCapabilityDescriptor() const override
+  {
+    return {reinterpret_cast<const uint8_t*>(&desc_), sizeof(desc_)};
+  }
+
+ private:
+  Descriptor desc_ = {};
+};
+
+/**
  * @brief BOS 能力提供者接口 / BOS capability provider interface
  */
 class BosCapabilityProvider
@@ -101,6 +148,30 @@ class BosCapabilityProvider
     UNUSED(index);
     return nullptr;
   }
+};
+
+/**
+ * @brief 单能力包装器 / Wrapper for one built-in BOS capability
+ */
+class SingleBosCapabilityProvider : public BosCapabilityProvider
+{
+ public:
+  explicit SingleBosCapabilityProvider(BosCapability* capability = nullptr)
+      : capability_(capability)
+  {
+  }
+
+  void SetCapability(BosCapability* capability) { capability_ = capability; }
+
+  size_t GetBosCapabilityCount() override { return capability_ ? 1u : 0u; }
+
+  BosCapability* GetBosCapability(size_t index) override
+  {
+    return (capability_ != nullptr && index == 0u) ? capability_ : nullptr;
+  }
+
+ private:
+  BosCapability* capability_ = nullptr;
 };
 
 /**

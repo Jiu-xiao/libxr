@@ -97,7 +97,7 @@ static inline void flash_clear_flags_once()
 class FlashAccessSession
 {
  public:
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
   FlashAccessSession()
       : saved_actlr_(FLASH->ACTLR)
   {
@@ -147,7 +147,7 @@ class FlashAccessSession
   FlashAccessSession& operator=(const FlashAccessSession&) = delete;
 
  private:
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
   uint32_t saved_actlr_ = 0u;
 #endif
 };
@@ -168,7 +168,7 @@ CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t sta
   // The `Flash` base class sees one contiguous logical window starting at
   // `start_sector`, while `sectors_` still preserves the physical sector table
   // for bounds checks and address translation.
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
 #else
   InitHotPathsOnce();
 #endif
@@ -187,7 +187,7 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
     return ErrorCode::OUT_OF_RANGE;
   }
 
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
   const auto erase_size = static_cast<uint32_t>(MinEraseSize());
   if ((erase_size == 0u) || ((START_ADDR & (erase_size - 1u)) != 0u) ||
       ((static_cast<uint32_t>(size) & (erase_size - 1u)) != 0u))
@@ -241,7 +241,7 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
 
   const uint8_t* src = reinterpret_cast<const uint8_t*>(data.addr_);
   const uint32_t END_ADDR = START_ADDR + static_cast<uint32_t>(data.size_);
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
 #else
   ASSERT(SystemCoreClock <= 120000000);
 #endif
@@ -252,7 +252,7 @@ extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t st
                                                                      uint32_t end_addr,
                                                                      const uint8_t* src)
 {
-#if defined(__CH32H417_H)
+#if defined(LIBXR_CH32_IS_H41X)
   const uint32_t size = end_addr - start_addr;
   FlashAccessSession session;
 

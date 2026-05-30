@@ -7,12 +7,12 @@
 
 using namespace LibXR;
 
-#if defined(USBHSD) && defined(__CH32H417_H)
+#if defined(USBHSD) && defined(LIBXR_CH32_IS_H41X)
 
 // NOLINTBEGIN
 static constexpr bool normalize_h417_device_double_buffer(bool)
 {
-  // CH32H417 RM 25.2.1.21/23/24 exposes one RX DMA and one TX DMA register
+  // CH32H41x RM 25.2.1.21/23/24 exposes one RX DMA and one TX DMA register
   // per device endpoint. R32_UEP_AF_MODE selects endpoint 1..7 vs 9..15
   // multiplexing; it is not a device-side double-buffer switch.
   return false;
@@ -111,34 +111,34 @@ static void set_rx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer,
   }
 }
 
-static inline uint16_t h417_otghs_ep_bit(USB::Endpoint::EPNumber ep_num)
+static inline uint16_t ch32h41x_otghs_ep_bit(USB::Endpoint::EPNumber ep_num)
 {
   return static_cast<uint16_t>(1u << USB::Endpoint::EPNumberToInt8(ep_num));
 }
 
 static void enable_tx(USB::Endpoint::EPNumber ep_num)
 {
-  USBHSD->UEP_TX_EN |= h417_otghs_ep_bit(ep_num);
+  USBHSD->UEP_TX_EN |= ch32h41x_otghs_ep_bit(ep_num);
 }
 
 static void disable_tx(USB::Endpoint::EPNumber ep_num)
 {
-  USBHSD->UEP_TX_EN &= static_cast<uint16_t>(~h417_otghs_ep_bit(ep_num));
+  USBHSD->UEP_TX_EN &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(ep_num));
 }
 
 static void enable_rx(USB::Endpoint::EPNumber ep_num)
 {
-  USBHSD->UEP_RX_EN |= h417_otghs_ep_bit(ep_num);
+  USBHSD->UEP_RX_EN |= ch32h41x_otghs_ep_bit(ep_num);
 }
 
 static void disable_rx(USB::Endpoint::EPNumber ep_num)
 {
-  USBHSD->UEP_RX_EN &= static_cast<uint16_t>(~h417_otghs_ep_bit(ep_num));
+  USBHSD->UEP_RX_EN &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(ep_num));
 }
 
 static void set_tx_toggle_auto(USB::Endpoint::EPNumber ep_num, bool enable)
 {
-  const uint16_t ep_bit = h417_otghs_ep_bit(ep_num);
+  const uint16_t ep_bit = ch32h41x_otghs_ep_bit(ep_num);
   if (enable)
   {
     USBHSD->UEP_TX_TOG_AUTO |= ep_bit;
@@ -151,7 +151,7 @@ static void set_tx_toggle_auto(USB::Endpoint::EPNumber ep_num, bool enable)
 
 static void set_rx_toggle_auto(USB::Endpoint::EPNumber ep_num, bool enable)
 {
-  const uint16_t ep_bit = h417_otghs_ep_bit(ep_num);
+  const uint16_t ep_bit = ch32h41x_otghs_ep_bit(ep_num);
   if (enable)
   {
     USBHSD->UEP_RX_TOG_AUTO |= ep_bit;
@@ -211,7 +211,7 @@ void CH32H41xEndpointOtgHs::Configure(const Config& cfg)
 
   // 双缓冲策略：EP0 不使用 double buffer。
   // Double-buffer policy: EP0 does not use double buffering.
-  // CH32H417 USBHS device mode does not expose a device-side DB selector here:
+  // CH32H41x USBHS device mode does not expose a device-side DB selector here:
   // RM 25.2.1.21 defines UEP_AF_MODE as endpoint 1..7 vs 9..15 multiplexing.
   bool enable_double = false;
   if (enable_double && HAS_IN && HAS_OUT)
@@ -237,10 +237,10 @@ void CH32H41xEndpointOtgHs::Configure(const Config& cfg)
     ep_cfg.max_packet_size = buffer_size;
   }
 
-  // H417 USBHS examples always publish UEPn_MAX_LEN for every active endpoint,
+  // CH32H41x USBHS examples always publish UEPn_MAX_LEN for every active endpoint,
   // including IN-only ones. Keep the hardware packet-size image aligned with the
   // configured endpoint shape before touching direction-specific control bits.
-  // H417 USBHS 官方例程会给每个已用端点都写 UEPn_MAX_LEN，包括仅 IN 端点；
+  // CH32H41x USBHS 官方例程会给每个已用端点都写 UEPn_MAX_LEN，包括仅 IN 端点；
   // 这里先把硬件里的包长镜像写齐，再处理方向相关控制位。
   *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
 
@@ -270,22 +270,22 @@ void CH32H41xEndpointOtgHs::Configure(const Config& cfg)
   {
     if (GetType() == Type::ISOCHRONOUS)
     {
-      USBHSD->UEP_TX_ISO |= h417_otghs_ep_bit(GetNumber());
+      USBHSD->UEP_TX_ISO |= ch32h41x_otghs_ep_bit(GetNumber());
     }
     else
     {
-      USBHSD->UEP_TX_ISO &= static_cast<uint16_t>(~h417_otghs_ep_bit(GetNumber()));
+      USBHSD->UEP_TX_ISO &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(GetNumber()));
     }
   }
   else
   {
     if (GetType() == Type::ISOCHRONOUS)
     {
-      USBHSD->UEP_RX_ISO |= h417_otghs_ep_bit(GetNumber());
+      USBHSD->UEP_RX_ISO |= ch32h41x_otghs_ep_bit(GetNumber());
     }
     else
     {
-      USBHSD->UEP_RX_ISO &= static_cast<uint16_t>(~h417_otghs_ep_bit(GetNumber()));
+      USBHSD->UEP_RX_ISO &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(GetNumber()));
     }
   }
 

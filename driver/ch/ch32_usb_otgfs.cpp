@@ -17,34 +17,12 @@ constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF 
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
 
-#if defined(__CH32H417_H)
-struct H417UsbDebugState
-{
-  uint32_t magic;
-  uint32_t magic_inv;
-  uint32_t debug_magic;
-  uint32_t debug_source;
-  uint32_t debug_stage;
-};
-
-static inline void H417UsbDebugSetStage(uint32_t stage)
-{
-  auto* const state = reinterpret_cast<volatile H417UsbDebugState*>(0x20110100u);
-  if (state->debug_magic == 0x47425544u)
-  {
-    state->debug_stage = stage;
-  }
-}
-#else
-static inline void H417UsbDebugSetStage(uint32_t) {}
-#endif
+static inline void UsbFsDebugSetStage(uint32_t) {}
 
 static void ch32_usbfs_delay_short();
 static void EnableUsbFsControllerClock()
 {
-#if defined(__CH32H417_H) && defined(RCC_HBPeriph_OTG_FS)
-  RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
-#elif defined(RCC_AHBPeriph_USBFS)
+#if defined(RCC_AHBPeriph_USBFS)
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
 #elif defined(RCC_AHBPeriph_USBOTGFS)
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
@@ -60,87 +38,9 @@ static void EnableUsbFsIoClock()
 #endif
 }
 
-static void ch32_usb_clock48_m_config()
-{
-#if defined(__CH32H417_H)
-  if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
-  {
-    RCC_USBHS_PLLCmd(DISABLE);
-    RCC_USBHSPLLCLKConfig((RCC->CTLR & RCC_HSERDY) ? RCC_USBHSPLLSource_HSE
-                                                   : RCC_USBHSPLLSource_HSI);
-    RCC_USBHSPLLReferConfig(RCC_USBHSPLLRefer_25M);
-    RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
-    RCC_USBHS_PLLCmd(ENABLE);
-    while ((RCC->CTLR & RCC_USBHS_PLLRDY) == 0)
-    {
-    }
-  }
-
-  RCC_USBFSCLKConfig(RCC_USBFSCLKSource_USBHSPLL);
-  RCC_USBFS48ClockSourceDivConfig(RCC_USBFS_Div10);
-#else
-  RCC_ClocksTypeDef clk{};
-  RCC_GetClocksFreq(&clk);
-
-  const uint32_t SYSCLK_HZ = clk.SYSCLK_Frequency;
-
-#if defined(RCC_USBCLKSource_PLLCLK_Div1) && defined(RCC_USBCLKSource_PLLCLK_Div2) && \
-    defined(RCC_USBCLKSource_PLLCLK_Div3)
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div1);
-  }
-#if defined(RCC_USB5PRE_JUDGE) && defined(RCC_USBCLKSource_PLLCLK_Div5)
-  else if (SYSCLK_HZ == 240000000u)
-  {
-    ASSERT(RCC_USB5PRE_JUDGE() == SET);
-    RCC_USBCLKConfig(RCC_USBCLKSource_PLLCLK_Div5);
-  }
-#endif
-  else
-  {
-    ASSERT(false);
-  }
-
-#elif defined(RCC_USBCLK48MCLKSource_PLLCLK) && \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div1) &&  \
-    defined(RCC_USBFSCLKSource_PLLCLK_Div2) && defined(RCC_USBFSCLKSource_PLLCLK_Div3)
-  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_PLLCLK);
-
-  if (SYSCLK_HZ == 144000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div3);
-  }
-  else if (SYSCLK_HZ == 96000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div2);
-  }
-  else if (SYSCLK_HZ == 48000000u)
-  {
-    RCC_USBFSCLKConfig(RCC_USBFSCLKSource_PLLCLK_Div1);
-  }
-  else
-  {
-    ASSERT(false);
-  }
-
-#else
-  (void)SYSCLK_HZ;
-#endif
-#endif
-}
-
 static void ch32_usbfs_rcc_enable()
 {
-  ch32_usb_clock48_m_config();
+  LibXR::CH32UsbRcc::ConfigureUsb48M();
   EnableUsbFsControllerClock();
   EnableUsbFsIoClock();
 }
@@ -168,7 +68,7 @@ static void ResetEp0AfterRecover(CH32EndpointOtgFs* out0, CH32EndpointOtgFs* in0
 
 static void ch32_usbfs_apply_device_registers()
 {
-#if defined(USBFS_CR_OTG_EN) && defined(USBFS_CR_IDPU) && !defined(__CH32H417_H)
+#if defined(USBFS_CR_OTG_EN) && defined(USBFS_CR_IDPU)
   USBFSD->OTG_CR = USBFS_CR_OTG_EN | USBFS_CR_IDPU;
 #endif
   USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;
@@ -298,7 +198,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_BUS_RST)
     {
-      H417UsbDebugSetStage(0x81u);
+      UsbFsDebugSetStage(0x81u);
       USBFSD->DEV_ADDR = 0;
 
       usb->Deinit(true);
@@ -310,7 +210,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      H417UsbDebugSetStage(0x82u);
+      UsbFsDebugSetStage(0x82u);
       usb->Deinit(true);
       usb->Init(true);
       RestoreUsbFsEndpointState();
@@ -329,7 +229,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       {
         case USBFS_UIS_TOKEN_SETUP:
         {
-          H417UsbDebugSetStage(0x83u);
+          UsbFsDebugSetStage(0x83u);
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
@@ -344,7 +244,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_OUT:
         {
-          H417UsbDebugSetStage(0x84u);
+          UsbFsDebugSetStage(0x84u);
           const uint16_t LEN = USBFSD->RX_LEN;
           if (ep[OUT_IDX])
           {
@@ -355,7 +255,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_IN:
         {
-          H417UsbDebugSetStage(0x85u);
+          UsbFsDebugSetStage(0x85u);
           if (ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);

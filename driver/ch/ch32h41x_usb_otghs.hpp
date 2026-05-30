@@ -7,7 +7,7 @@
 #include "usb/core/ep_pool.hpp"
 #include "usb/device/dev_core.hpp"
 
-#if defined(USBHSD) && defined(__CH32H417_H)
+#if defined(USBHSD) && defined(LIBXR_CH32_IS_H41X)
 
 #define LIBXR_CH32_USB_OTGHS_DEVICE_SPECIALIZED 1
 
@@ -49,6 +49,7 @@ class CH32H41xUSBOtgHS : public USB::EndpointPool, public USB::DeviceCore
       ConstRawData uid = {nullptr, 0});
 
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  void OnConfigurationSwitched(uint16_t value, bool in_isr) override;
 
   void Start(bool in_isr) override;
   void Stop(bool in_isr) override;

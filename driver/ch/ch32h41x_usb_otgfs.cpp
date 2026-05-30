@@ -8,7 +8,7 @@
 using namespace LibXR;
 using namespace LibXR::USB;
 
-#if defined(USBFSD) && defined(__CH32H417_H)
+#if defined(USBFSD) && defined(LIBXR_CH32_IS_H41X)
 
 namespace
 {
@@ -17,7 +17,7 @@ constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF 
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
 
-struct H417UsbDebugState
+struct CH32H41xUsbDebugState
 {
   uint32_t magic;
   uint32_t magic_inv;
@@ -26,9 +26,9 @@ struct H417UsbDebugState
   uint32_t debug_stage;
 };
 
-static inline void H417UsbDebugSetStage(uint32_t stage)
+static inline void CH32H41xUsbDebugSetStage(uint32_t stage)
 {
-  auto* const state = reinterpret_cast<volatile H417UsbDebugState*>(0x20110100u);
+  auto* const state = reinterpret_cast<volatile CH32H41xUsbDebugState*>(0x20110100u);
   if (state->debug_magic == 0x47425544u)
   {
     state->debug_stage = stage;
@@ -230,7 +230,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_BUS_RST)
     {
-      H417UsbDebugSetStage(0x81u);
+      CH32H41xUsbDebugSetStage(0x81u);
       USBFSD->DEV_ADDR = 0;
 
       usb->Deinit(true);
@@ -242,7 +242,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      H417UsbDebugSetStage(0x82u);
+      CH32H41xUsbDebugSetStage(0x82u);
       usb->Deinit(true);
       usb->Init(true);
       RestoreUsbFsEndpointState();
@@ -261,7 +261,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       {
         case USBFS_UIS_TOKEN_SETUP:
         {
-          H417UsbDebugSetStage(0x83u);
+          CH32H41xUsbDebugSetStage(0x83u);
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
@@ -276,7 +276,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_OUT:
         {
-          H417UsbDebugSetStage(0x84u);
+          CH32H41xUsbDebugSetStage(0x84u);
           const uint16_t LEN = USBFSD->RX_LEN;
           if (ep[OUT_IDX])
           {
@@ -287,7 +287,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_IN:
         {
-          H417UsbDebugSetStage(0x85u);
+          CH32H41xUsbDebugSetStage(0x85u);
           if (ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);
@@ -405,6 +405,6 @@ void CH32USBOtgFS::Stop(bool)
   self_ = nullptr;
 }
 
-#endif  // defined(USBFSD) && defined(__CH32H417_H)
+#endif  // defined(USBFSD) && defined(LIBXR_CH32_IS_H41X)
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
