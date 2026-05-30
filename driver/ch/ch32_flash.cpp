@@ -97,6 +97,35 @@ static inline void flash_clear_flags_once()
 class FlashAccessSession
 {
  public:
+#if defined(__CH32H417_H)
+  FlashAccessSession()
+      : saved_actlr_(FLASH->ACTLR)
+  {
+    __disable_irq();
+    FLASH_Unlock();
+    FLASH_Unlock_Fast();
+    if ((FLASH->ACTLR & FLASH_ACTLR_EHMOD) != 0u)
+    {
+      FLASH_Enhance_Mode(DISABLE);
+    }
+    if ((FLASH->ACTLR & FLASH_ACTLR_SCK_CFG) != FLASH_ACTLR_LATENCY_HCLK_DIV2)
+    {
+      FLASH_Access_Clock_Cfg(FLASH_ACTLR_LATENCY_HCLK_DIV2);
+    }
+    flash_clear_flags_once();
+  }
+
+  ~FlashAccessSession()
+  {
+    FLASH_Unlock();
+    const uint32_t actlr = FLASH->ACTLR;
+    FLASH->ACTLR = (actlr & ~(FLASH_ACTLR_SCK_CFG | FLASH_ACTLR_EHMOD)) |
+                   (saved_actlr_ & (FLASH_ACTLR_SCK_CFG | FLASH_ACTLR_EHMOD));
+    FLASH_Lock_Fast();
+    FLASH_Lock();
+    __enable_irq();
+  }
+#else
   FlashAccessSession()
   {
     flash_exit_enhanced_read_if_enabled();
@@ -112,9 +141,15 @@ class FlashAccessSession
     __enable_irq();
     flash_set_access_clock_sysclk();
   }
+#endif
 
   FlashAccessSession(const FlashAccessSession&) = delete;
   FlashAccessSession& operator=(const FlashAccessSession&) = delete;
+
+ private:
+#if defined(__CH32H417_H)
+  uint32_t saved_actlr_ = 0u;
+#endif
 };
 
 inline void CH32Flash::ClearFlashFlagsOnce() { flash_clear_flags_once(); }
@@ -133,7 +168,10 @@ CH32Flash::CH32Flash(const FlashSector* sectors, size_t sector_count, size_t sta
   // The `Flash` base class sees one contiguous logical window starting at
   // `start_sector`, while `sectors_` still preserves the physical sector table
   // for bounds checks and address translation.
+#if defined(__CH32H417_H)
+#else
   InitHotPathsOnce();
+#endif
 }
 
 ErrorCode CH32Flash::Erase(size_t offset, size_t size)
@@ -143,13 +181,27 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
     return ErrorCode::ARG_ERR;
   }
 
-  ASSERT(SystemCoreClock <= 120000000);
-
   const uint32_t START_ADDR = base_address_ + static_cast<uint32_t>(offset);
   if (!IsInRange(START_ADDR, size))
   {
     return ErrorCode::OUT_OF_RANGE;
   }
+
+#if defined(__CH32H417_H)
+  const auto erase_size = static_cast<uint32_t>(MinEraseSize());
+  if ((erase_size == 0u) || ((START_ADDR & (erase_size - 1u)) != 0u) ||
+      ((static_cast<uint32_t>(size) & (erase_size - 1u)) != 0u))
+  {
+    return ErrorCode::OUT_OF_RANGE;
+  }
+
+  FlashAccessSession session;
+  return (FLASH_ROM_ERASE(START_ADDR, static_cast<uint32_t>(size)) == FLASH_COMPLETE)
+             ? ErrorCode::OK
+             : ErrorCode::FAILED;
+#else
+  ASSERT(SystemCoreClock <= 120000000);
+
   const uint32_t END_ADDR = START_ADDR + static_cast<uint32_t>(size);
   const auto erase_hot_path = g_ch32_flash_hot_paths.erase;
   ASSERT(erase_hot_path != nullptr);
@@ -169,12 +221,11 @@ ErrorCode CH32Flash::Erase(size_t offset, size_t size)
   }
 
   return erase_hot_path(ERASE_BEGIN, ERASE_END);
+#endif
 }
 
 ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
 {
-  ASSERT(SystemCoreClock <= 120000000);
-
   if (!data.addr_ || data.size_ == 0)
   {
     ASSERT(false);
@@ -190,6 +241,10 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
 
   const uint8_t* src = reinterpret_cast<const uint8_t*>(data.addr_);
   const uint32_t END_ADDR = START_ADDR + static_cast<uint32_t>(data.size_);
+#if defined(__CH32H417_H)
+#else
+  ASSERT(SystemCoreClock <= 120000000);
+#endif
   return CH32FlashWriteHotPath(START_ADDR, END_ADDR, src);
 }
 
@@ -197,6 +252,39 @@ extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t st
                                                                      uint32_t end_addr,
                                                                      const uint8_t* src)
 {
+#if defined(__CH32H417_H)
+  const uint32_t size = end_addr - start_addr;
+  FlashAccessSession session;
+
+  if ((((start_addr | size) & (CH32Flash::PageSize() - 1u)) == 0u) &&
+      ((reinterpret_cast<uintptr_t>(src) & (alignof(uint32_t) - 1u)) == 0u))
+  {
+    auto* words = reinterpret_cast<uint32_t*>(const_cast<uint8_t*>(src));
+    return (FLASH_ROM_WRITE(start_addr, words, size) == FLASH_COMPLETE) ? ErrorCode::OK
+                                                                        : ErrorCode::FAILED;
+  }
+
+  for (uint32_t addr = start_addr; addr < end_addr; addr += 2u)
+  {
+    const auto byte_offset = addr - start_addr;
+    uint16_t value = src[byte_offset];
+    if ((addr + 1u) < end_addr)
+    {
+      value |= static_cast<uint16_t>(static_cast<uint16_t>(src[byte_offset + 1u]) << 8u);
+    }
+    else
+    {
+      value |= 0xFF00u;
+    }
+
+    if (FLASH_ProgramHalfWord(addr, value) != FLASH_COMPLETE)
+    {
+      return ErrorCode::FAILED;
+    }
+  }
+
+  return ErrorCode::OK;
+#else
   const auto write_hot_loop = g_ch32_flash_hot_paths.write_halfword;
   const auto write_page = g_ch32_flash_hot_paths.write_page;
   constexpr uint32_t page_size = 256u;
@@ -240,6 +328,7 @@ extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t st
   }
 
   return ec;
+#endif
 }
 
 bool CH32Flash::IsInRange(uint32_t addr, size_t size) const

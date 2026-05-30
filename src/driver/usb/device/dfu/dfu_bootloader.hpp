@@ -338,6 +338,8 @@ class DfuBootloaderBackend
     if (image_.ready)
     {
       image_.launch_requested = true;
+      image_.launch_request_time_ms =
+          static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
       return true;
     }
     return false;
@@ -352,12 +354,19 @@ class DfuBootloaderBackend
     if (autorun_ && image_.ready)
     {
       image_.launch_requested = true;
+      image_.launch_request_time_ms =
+          static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
     }
   }
 
-  bool TryConsumeAppLaunch(uint32_t)
+  bool TryConsumeAppLaunch(uint32_t now_ms)
   {
     if (!image_.launch_requested || !image_.ready)
+    {
+      return false;
+    }
+    if (static_cast<uint32_t>(now_ms - image_.launch_request_time_ms) <
+        kLaunchDelayAfterRequestMs)
     {
       return false;
     }
@@ -414,6 +423,7 @@ class DfuBootloaderBackend
     image_.ready = false;
     image_.stored_size = 0u;
     image_.launch_requested = false;
+    image_.launch_request_time_ms = 0u;
   }
 
   void ResetTransferState()
@@ -508,6 +518,7 @@ class DfuBootloaderBackend
     image_.stored_size = download_.received_bytes;
     image_.ready = true;
     image_.launch_requested = false;
+    image_.launch_request_time_ms = 0u;
     manifest_.last_status = DFUStatusCode::OK;
     download_.session_started = false;
     download_.received_bytes = 0u;
@@ -663,7 +674,10 @@ class DfuBootloaderBackend
     bool launch_requested = false;
     bool ready = false;
     size_t stored_size = 0u;
+    uint32_t launch_request_time_ms = 0u;
   };
+
+  static constexpr uint32_t kLaunchDelayAfterRequestMs = 50u;
 
   /**
    * @brief Download 会话状态 / Download session state
@@ -842,7 +856,7 @@ class DFUClass : public DfuInterfaceClassBase
       uint8_t winusb_vendor_code = DEFAULT_WINUSB_VENDOR_CODE)
       : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
                               webusb_vendor_code, winusb_device_interface_guid,
-                              winusb_vendor_code),
+                              winusb_vendor_code, WinUsbMsOs20Scope::DEVICE),
         backend_(backend)
   {
   }
@@ -902,9 +916,13 @@ class DFUClass : public DfuInterfaceClassBase
   size_t GetMaxConfigSize() override { return sizeof(desc_block_); }
   ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) override
   {
-    header.data_.bDeviceClass = DeviceDescriptor::ClassID::APPLICATION_SPECIFIC;
-    header.data_.bDeviceSubClass = INTERFACE_SUB_CLASS;
-    header.data_.bDeviceProtocol = INTERFACE_PROTOCOL;
+    // Keep the device descriptor classless and let the DFU interface descriptor
+    // carry the class/subclass/protocol identity. This matches the working
+    // runtime composite path and avoids relying on Windows to accept a
+    // whole-device DFU class declaration for an EP0-only device.
+    header.data_.bDeviceClass = DeviceDescriptor::ClassID::PER_INTERFACE;
+    header.data_.bDeviceSubClass = 0u;
+    header.data_.bDeviceProtocol = 0u;
     return ErrorCode::OK;
   }
 

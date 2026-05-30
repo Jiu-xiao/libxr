@@ -17,6 +17,28 @@ constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF 
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
 
+#if defined(__CH32H417_H)
+struct H417UsbDebugState
+{
+  uint32_t magic;
+  uint32_t magic_inv;
+  uint32_t debug_magic;
+  uint32_t debug_source;
+  uint32_t debug_stage;
+};
+
+static inline void H417UsbDebugSetStage(uint32_t stage)
+{
+  auto* const state = reinterpret_cast<volatile H417UsbDebugState*>(0x20110100u);
+  if (state->debug_magic == 0x47425544u)
+  {
+    state->debug_stage = stage;
+  }
+}
+#else
+static inline void H417UsbDebugSetStage(uint32_t) {}
+#endif
+
 static void ch32_usbfs_delay_short();
 static void EnableUsbFsControllerClock()
 {
@@ -28,6 +50,13 @@ static void EnableUsbFsControllerClock()
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
 #elif defined(RCC_HBPeriph_OTG_FS)
   RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
+#endif
+}
+
+static void EnableUsbFsIoClock()
+{
+#if defined(RCC_APB2Periph_GPIOA)
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
 #endif
 }
 
@@ -113,6 +142,7 @@ static void ch32_usbfs_rcc_enable()
 {
   ch32_usb_clock48_m_config();
   EnableUsbFsControllerClock();
+  EnableUsbFsIoClock();
 }
 
 static void ch32_usbfs_delay_short()
@@ -138,7 +168,7 @@ static void ResetEp0AfterRecover(CH32EndpointOtgFs* out0, CH32EndpointOtgFs* in0
 
 static void ch32_usbfs_apply_device_registers()
 {
-#if defined(USBFS_CR_OTG_EN) && defined(USBFS_CR_IDPU)
+#if defined(USBFS_CR_OTG_EN) && defined(USBFS_CR_IDPU) && !defined(__CH32H417_H)
   USBFSD->OTG_CR = USBFS_CR_OTG_EN | USBFS_CR_IDPU;
 #endif
   USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;
@@ -268,6 +298,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_BUS_RST)
     {
+      H417UsbDebugSetStage(0x81u);
       USBFSD->DEV_ADDR = 0;
 
       usb->Deinit(true);
@@ -279,6 +310,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_SUSPEND)
     {
+      H417UsbDebugSetStage(0x82u);
       usb->Deinit(true);
       usb->Init(true);
       RestoreUsbFsEndpointState();
@@ -297,6 +329,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       {
         case USBFS_UIS_TOKEN_SETUP:
         {
+          H417UsbDebugSetStage(0x83u);
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
@@ -311,6 +344,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_OUT:
         {
+          H417UsbDebugSetStage(0x84u);
           const uint16_t LEN = USBFSD->RX_LEN;
           if (ep[OUT_IDX])
           {
@@ -321,6 +355,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_IN:
         {
+          H417UsbDebugSetStage(0x85u);
           if (ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);
@@ -405,15 +440,22 @@ LibXR::ErrorCode CH32USBOtgFS::SetAddress(uint8_t address,
 
 void CH32USBOtgFS::Start(bool)
 {
+  NVIC_DisableIRQ(USBFS_IRQn);
+  NVIC_ClearPendingIRQ(USBFS_IRQn);
+  NVIC_SetAllocateIRQ(USBFS_IRQn, Core_ID_V3F);
+
   ch32_usbfs_rcc_enable();
+  USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
+  ch32_usbfs_delay_short();
+  USBFSH->BASE_CTRL = 0x00;
+  ch32_usbfs_clear_pending_flags();
   ch32_usbfs_apply_device_registers();
   ch32_usbfs_enable_device_logic();
   RestoreUsbFsEndpointState();
-
   ch32_usbfs_enable_device_port();
 
-  NVIC_EnableIRQ(USBFS_IRQn);
   self_ = this;
+  NVIC_EnableIRQ(USBFS_IRQn);
 }
 
 void CH32USBOtgFS::Stop(bool)
