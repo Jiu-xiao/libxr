@@ -29,10 +29,6 @@ namespace
 uint8_t CalculateFilterSize(RawData dma_buff, std::size_t channel_count)
 {
   ASSERT(channel_count > 0U);
-  if (channel_count == 0U)
-  {
-    return 0U;
-  }
 
   const std::size_t filter_size = dma_buff.size_ / channel_count / sizeof(uint16_t);
   ASSERT(filter_size > 0U);
