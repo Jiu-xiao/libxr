@@ -1,6 +1,7 @@
+#include "ch32h41x_usb_endpoint_otghs.hpp"
+
 #include <cstdint>
 
-#include "ch32h41x_usb_endpoint_otghs.hpp"
 #include "ep.hpp"
 #include "libxr_time.hpp"
 #include "timebase.hpp"
@@ -164,8 +165,7 @@ static void set_rx_toggle_auto(USB::Endpoint::EPNumber ep_num, bool enable)
 // NOLINTEND
 
 CH32H41xEndpointOtgHs::CH32H41xEndpointOtgHs(EPNumber ep_num, Direction dir,
-                                             LibXR::RawData buffer,
-                                             bool double_buffer)
+                                             LibXR::RawData buffer, bool double_buffer)
     : Endpoint(ep_num, dir, buffer),
       hw_double_buffer_(normalize_h417_device_double_buffer(double_buffer)),
       dma_buffer_(buffer)
@@ -174,11 +174,13 @@ CH32H41xEndpointOtgHs::CH32H41xEndpointOtgHs(EPNumber ep_num, Direction dir,
 
   if (dir == Direction::IN)
   {
-    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, hw_double_buffer_);
+    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_,
+                      hw_double_buffer_);
   }
   else
   {
-    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, hw_double_buffer_);
+    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_,
+                      hw_double_buffer_);
   }
 
   if (dir == Direction::IN)

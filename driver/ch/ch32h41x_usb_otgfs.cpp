@@ -36,28 +36,9 @@ static void EnableUsbFsIoClock()
 #endif
 }
 
-static void ch32_usb_clock48_m_config()
-{
-  if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
-  {
-    RCC_USBHS_PLLCmd(DISABLE);
-    RCC_USBHSPLLCLKConfig((RCC->CTLR & RCC_HSERDY) ? RCC_USBHSPLLSource_HSE
-                                                   : RCC_USBHSPLLSource_HSI);
-    RCC_USBHSPLLReferConfig(RCC_USBHSPLLRefer_25M);
-    RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
-    RCC_USBHS_PLLCmd(ENABLE);
-    while ((RCC->CTLR & RCC_USBHS_PLLRDY) == 0)
-    {
-    }
-  }
-
-  RCC_USBFSCLKConfig(RCC_USBFSCLKSource_USBHSPLL);
-  RCC_USBFS48ClockSourceDivConfig(RCC_USBFS_Div10);
-}
-
 static void ch32_usbfs_rcc_enable()
 {
-  ch32_usb_clock48_m_config();
+  LibXR::CH32UsbRcc::ConfigureUsb48M();
   EnableUsbFsControllerClock();
   EnableUsbFsIoClock();
 }
@@ -85,6 +66,9 @@ static void ResetEp0AfterRecover(CH32EndpointOtgFs* out0, CH32EndpointOtgFs* in0
 
 static void ch32_usbfs_apply_device_registers()
 {
+#if defined(USBFS_CR_OTG_EN) && defined(USBFS_CR_IDPU)
+  USBFSD->OTG_CR = USBFS_CR_OTG_EN | USBFS_CR_IDPU;
+#endif
   USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;
 }
 
@@ -213,9 +197,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     if (PENDING & USBFS_UIF_BUS_RST)
     {
       USBFSD->DEV_ADDR = 0;
-
-      usb->Deinit(true);
-      usb->Init(true);
+      usb->OnBusReset(true);
       RestoreUsbFsEndpointState();
 
       clear_mask |= USBFS_UIF_BUS_RST;
@@ -223,10 +205,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      usb->Deinit(true);
-      usb->Init(true);
-      RestoreUsbFsEndpointState();
-
       clear_mask |= USBFS_UIF_SUSPEND;
     }
 

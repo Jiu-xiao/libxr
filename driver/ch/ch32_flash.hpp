@@ -37,6 +37,7 @@ class CH32Flash : public Flash
 
   ErrorCode Erase(size_t offset, size_t size) override;
   ErrorCode Write(size_t offset, ConstRawData data) override;
+  ErrorCode Read(size_t offset, RawData data) override;
 
   static constexpr size_t MinWriteSize()
   {

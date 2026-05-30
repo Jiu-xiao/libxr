@@ -448,6 +448,12 @@ class DfuBootloaderBackend
   // blocks that still need erase are reported slower than pure program-only writes.
   uint32_t ComputeWritePollTimeout(size_t offset, size_t len) const
   {
+    // H41x flash program/erase temporarily blocks the USB control path while
+    // the hot path runs with interrupts disabled. Report a conservative host
+    // poll timeout so GETSTATUS does not race the first large sector erase.
+    static constexpr uint32_t kProgramPollTimeoutMs = 20u;
+    static constexpr uint32_t kErasePollTimeoutMs = 200u;
+
     const size_t first_block = offset / erase_block_size_;
     const size_t last_block = (offset + len - 1u) / erase_block_size_;
     for (size_t block = first_block; block <= last_block && block < erase_block_count_;
@@ -455,10 +461,10 @@ class DfuBootloaderBackend
     {
       if (erased_blocks_[block] == 0u)
       {
-        return 25u;
+        return kErasePollTimeoutMs;
       }
     }
-    return 10u;
+    return kProgramPollTimeoutMs;
   }
 
   // 执行一次延迟写入步骤：
@@ -708,7 +714,7 @@ class DfuBootloaderBackend
   struct ManifestState
   {
     bool pending = false;
-    uint32_t poll_timeout_ms = 50u;
+    uint32_t poll_timeout_ms = 250u;
     DFUStatusCode last_status = DFUStatusCode::OK;
   };
 

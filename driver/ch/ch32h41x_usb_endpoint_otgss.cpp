@@ -147,15 +147,15 @@ static size_t GetRxTransferSize(EPNumber ep_num)
 
 static void ArmEp0In(uint8_t seq, size_t size)
 {
-  uint32_t ctrl = (static_cast<uint32_t>(seq & 0x1Fu) << 16) |
-                  USBSS_EP0_TX_DPH | static_cast<uint32_t>(size & USBSS_EP0_TX_LEN_MASK);
+  uint32_t ctrl = (static_cast<uint32_t>(seq & 0x1Fu) << 16) | USBSS_EP0_TX_DPH |
+                  static_cast<uint32_t>(size & USBSS_EP0_TX_LEN_MASK);
   USBSSD->UEP0_TX_CTRL = ctrl | USBSS_EP0_TX_ERDY;
 }
 
 static void ArmEp0Out(uint8_t seq)
 {
-  USBSSD->UEP0_RX_CTRL = (static_cast<uint32_t>(seq & 0x1Fu) << 16) | USBSS_EP0_RX_ERDY |
-                         USBSS_EP0_RX_ACK;
+  USBSSD->UEP0_RX_CTRL =
+      (static_cast<uint32_t>(seq & 0x1Fu) << 16) | USBSS_EP0_RX_ERDY | USBSS_EP0_RX_ACK;
 }
 
 }  // namespace
@@ -373,7 +373,8 @@ ErrorCode CH32EndpointOtgSs::Transfer(size_t size)
 
 ErrorCode CH32EndpointOtgSs::Stall()
 {
-  if (GetState() != State::IDLE && !(GetNumber() == EPNumber::EP0 && GetState() == State::BUSY))
+  if (GetState() != State::IDLE &&
+      !(GetNumber() == EPNumber::EP0 && GetState() == State::BUSY))
   {
     return ErrorCode::BUSY;
   }

@@ -248,6 +248,31 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
   return CH32FlashWriteHotPath(START_ADDR, END_ADDR, src);
 }
 
+ErrorCode CH32Flash::Read(size_t offset, RawData data)
+{
+  if ((data.addr_ == nullptr) && (data.size_ != 0u))
+  {
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uint32_t start_addr = base_address_ + static_cast<uint32_t>(offset);
+  if (!IsInRange(start_addr, data.size_))
+  {
+    ASSERT(false);
+    return ErrorCode::OUT_OF_RANGE;
+  }
+
+  auto* dst = reinterpret_cast<uint8_t*>(data.addr_);
+  auto* src = reinterpret_cast<volatile const uint8_t*>(start_addr);
+  for (size_t i = 0; i < data.size_; ++i)
+  {
+    dst[i] = src[i];
+  }
+
+  return ErrorCode::OK;
+}
+
 extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
                                                                      uint32_t end_addr,
                                                                      const uint8_t* src)
