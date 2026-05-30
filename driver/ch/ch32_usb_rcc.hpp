@@ -9,18 +9,6 @@ namespace LibXR::CH32UsbRcc
 {
 
 #if defined(LIBXR_CH32_IS_H41X)
-extern "C" void CH32H41xUsbHsDebugStage(uint32_t stage);
-extern "C" __attribute__((weak)) volatile uint32_t g_v3f_app_stage;
-
-inline void ReportUsbHsDebugStage(uint32_t stage)
-{
-  if (&g_v3f_app_stage != nullptr)
-  {
-    g_v3f_app_stage = stage;
-  }
-  CH32H41xUsbHsDebugStage(stage);
-}
-
 inline bool WaitForRccCtlrBits(uint32_t mask, uint32_t timeout)
 {
   while (((RCC->CTLR & mask) != mask) && timeout != 0u)
@@ -197,7 +185,6 @@ inline void ConfigureUsbHsForCH32H41x()
     defined(RCC_SYSPLL_SEL) && defined(RCC_SYSPLL_USBHS) &&             \
     defined(RCC_HSEON) && defined(RCC_HSERDY) && defined(RCC_USBHS_PLLRDY) && \
     defined(RCC_USBHSPLLSource_HSI)
-  ReportUsbHsDebugStage(0x4330u);
   if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
   {
     constexpr uint32_t kHseTimeout = 200000u;
@@ -211,47 +198,32 @@ inline void ConfigureUsbHsForCH32H41x()
     // 会直接干扰正在工作的 FS 运行时，因此 PLL 已锁定时直接复用。
     if ((RCC->CTLR & RCC_USBHS_PLLRDY) != 0u)
     {
-      ReportUsbHsDebugStage(0x433Eu);
-      ReportUsbHsDebugStage(0x433Fu);
       return;
     }
 
     bool use_hse = (RCC->CTLR & RCC_HSERDY) != 0u;
     if (!use_hse)
     {
-      ReportUsbHsDebugStage(0x4331u);
       RCC->CTLR |= RCC_HSEON;
       use_hse = WaitForRccCtlrBits(RCC_HSERDY, kHseTimeout);
     }
-    ReportUsbHsDebugStage(use_hse ? 0x4332u : 0x4333u);
 
     uint32_t ref_cfg = 0u;
     ASSERT(TryGetUsbHsCH32H41xRefConfig(use_hse, ref_cfg));
-    ReportUsbHsDebugStage(0x4334u);
 
     RCC_USBHS_PLLCmd(DISABLE);
-    ReportUsbHsDebugStage(0x4335u);
     RCC_USBHSPLLCLKConfig(use_hse ? RCC_USBHSPLLSource_HSE : RCC_USBHSPLLSource_HSI);
-    ReportUsbHsDebugStage(0x4336u);
     ASSERT(WaitForRccPllCfgr2MaskedValue(
         RCC_USBHSPLLSRC,
         use_hse ? RCC_USBHSPLLSource_HSE : RCC_USBHSPLLSource_HSI, kCfgTimeout));
-    ReportUsbHsDebugStage(0x433Au);
     RCC_USBHSPLLReferConfig(ref_cfg);
-    ReportUsbHsDebugStage(0x4337u);
     ASSERT(WaitForRccPllCfgr2MaskedValue(RCC_USBHSPLL_REFSEL, ref_cfg, kCfgTimeout));
-    ReportUsbHsDebugStage(0x433Bu);
     RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
-    ReportUsbHsDebugStage(0x4338u);
     ASSERT(WaitForRccPllCfgr2MaskedValue(RCC_USBHSPLL_IN_DIV, RCC_USBHSPLL_IN_Div1,
                                          kCfgTimeout));
-    ReportUsbHsDebugStage(0x433Cu);
     RCC_USBHS_PLLCmd(ENABLE);
-    ReportUsbHsDebugStage(0x4339u);
     ASSERT(WaitForRccCtlrBits(RCC_USBHS_PLLRDY, kUsbHsPllTimeout));
-    ReportUsbHsDebugStage(0x433Du);
   }
-  ReportUsbHsDebugStage(0x433Fu);
 #else
   ASSERT(false);
 #endif

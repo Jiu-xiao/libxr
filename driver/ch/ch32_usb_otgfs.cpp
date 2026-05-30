@@ -17,8 +17,6 @@ constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF 
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
 
-static inline void UsbFsDebugSetStage(uint32_t) {}
-
 static void ch32_usbfs_delay_short();
 static void EnableUsbFsControllerClock()
 {
@@ -198,7 +196,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_BUS_RST)
     {
-      UsbFsDebugSetStage(0x81u);
       USBFSD->DEV_ADDR = 0;
 
       usb->Deinit(true);
@@ -210,7 +207,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      UsbFsDebugSetStage(0x82u);
       usb->Deinit(true);
       usb->Init(true);
       RestoreUsbFsEndpointState();
@@ -229,7 +225,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       {
         case USBFS_UIS_TOKEN_SETUP:
         {
-          UsbFsDebugSetStage(0x83u);
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
@@ -244,7 +239,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_OUT:
         {
-          UsbFsDebugSetStage(0x84u);
           const uint16_t LEN = USBFSD->RX_LEN;
           if (ep[OUT_IDX])
           {
@@ -255,7 +249,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_IN:
         {
-          UsbFsDebugSetStage(0x85u);
           if (ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);

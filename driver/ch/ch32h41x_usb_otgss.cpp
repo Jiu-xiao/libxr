@@ -1,22 +1,12 @@
-#include "ch32_usb_dev.hpp"
-
 #include <cstdint>
 
+#include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
 #include "ep.hpp"
 
 using namespace LibXR;
 
 #if defined(LIBXR_CH32_HAS_USB_OTG_SS)
-
-extern "C" __attribute__((weak)) void H41xUsbSsDiagStage(uint32_t stage,
-                                                         uint32_t link_status,
-                                                         uint32_t usb_status)
-{
-  UNUSED(stage);
-  UNUSED(link_status);
-  UNUSED(usb_status);
-}
 
 namespace
 {
@@ -51,15 +41,6 @@ struct UsbSsRuntimeState
 };
 
 UsbSsRuntimeState usb_ss_runtime_state{};
-
-static void UsbSsDebugCaptureRegs(uint32_t) {}
-static void UsbSsDebugCaptureRegs() {}
-static void UsbSsDebugRecordStage(uint32_t stage)
-{
-  H41xUsbSsDiagStage(stage, USBSSD->LINK_STATUS, USBSSD->USB_STATUS);
-}
-static void UsbSsDebugReset() {}
-static void UsbSsDebugNoteSetup(const LibXR::USB::SetupPacket*) {}
 
 inline volatile uint32_t& UsbSsPhyCfgCr()
 {
@@ -213,9 +194,8 @@ static void ResetUsbSsDataPath()
 {
   USBSSD->USB_CONTROL |= USBSS_FORCE_RST;
   USBSSD->USB_STATUS = USBSS_UIF_TRANSFER;
-  USBSSD->USB_CONTROL =
-      USBSS_UIE_TRANSFER | USBSS_UDIE_SETUP | USBSS_UDIE_STATUS | USBSS_DMA_EN |
-      USBSS_SETUP_FLOW;
+  USBSSD->USB_CONTROL = USBSS_UIE_TRANSFER | USBSS_UDIE_SETUP | USBSS_UDIE_STATUS |
+                        USBSS_DMA_EN | USBSS_SETUP_FLOW;
 }
 
 static void SetUsbSsLowPowerFeatures(bool u1_enable, bool u2_enable)
@@ -314,7 +294,6 @@ static void HandleLinkInterrupt()
   if (link_int & LINK_IF_STATE_CHG)
   {
     USBSSD->LINK_INT_FLAG = LINK_IF_STATE_CHG;
-    UsbSsDebugRecordStage(0x5310u | (link_state & 0x0Fu));
 
     if (link_state == LINK_STATE_RXDET)
     {
@@ -348,7 +327,6 @@ static void HandleLinkInterrupt()
   if (link_int & LINK_IF_TERM_PRES)
   {
     USBSSD->LINK_INT_FLAG = LINK_IF_TERM_PRES;
-    UsbSsDebugRecordStage(0x5321u);
   }
 
   if (link_int & LINK_IF_RX_LMP_TOUT)
@@ -356,25 +334,22 @@ static void HandleLinkInterrupt()
     USBSSD->LINK_INT_FLAG = LINK_IF_RX_LMP_TOUT;
     USBSSD->LINK_CTRL |= LINK_GO_DISABLED;
     USBSSD->LINK_CTRL |= LINK_GO_RX_DET;
-    UsbSsDebugRecordStage(0x5322u);
   }
 
   if (link_int & LINK_IF_TX_LMP)
   {
     USBSSD->LINK_INT_FLAG = LINK_IF_TX_LMP;
     USBSSD->LINK_LMP_TX_DATA0 = LMP_LINK_SPEED | LMP_PORT_CAP | LMP_HP;
-    USBSSD->LINK_LMP_TX_DATA1 =
-        (USBSSD->LINK_CFG & LINK_DOWN_MODE) ? (DOWN_STREAM | NUM_HP_BUF)
-                                            : (UP_STREAM | NUM_HP_BUF);
+    USBSSD->LINK_LMP_TX_DATA1 = (USBSSD->LINK_CFG & LINK_DOWN_MODE)
+                                    ? (DOWN_STREAM | NUM_HP_BUF)
+                                    : (UP_STREAM | NUM_HP_BUF);
     USBSSD->LINK_LMP_TX_DATA2 = 0u;
-    UsbSsDebugRecordStage(0x5323u);
   }
 
   if (link_int & LINK_IF_RX_LMP)
   {
     USBSSD->LINK_INT_FLAG = LINK_IF_RX_LMP;
     const uint32_t lmp_data0 = USBSSD->LINK_LMP_RX_DATA0;
-    UsbSsDebugRecordStage(0x5324u);
 
     if ((USBSSD->LINK_CFG & LINK_DOWN_MODE) == 0u)
     {
@@ -413,23 +388,21 @@ static void HandleLinkInterrupt()
       __NOP();
       USBSSD->LINK_CTRL &= ~LINK_GO_DISABLED;
     }
-    UsbSsDebugRecordStage(0x5325u);
   }
-
-  UsbSsDebugCaptureRegs();
 }
 
 static void ClearUsbSsInterrupts()
 {
-  USBSSD->USB_STATUS = USBSSD->USB_STATUS &
-                       (USBSS_UIF_FIFO_RXOV | USBSS_UIF_FIFO_TXOV | USBSS_UIF_ITP |
-                        USBSS_UIF_RX_PING | USBSS_UDIF_STATUS | USBSS_UDIF_SETUP |
-                        USBSS_UIF_TRANSFER);
+  USBSSD->USB_STATUS =
+      USBSSD->USB_STATUS &
+      (USBSS_UIF_FIFO_RXOV | USBSS_UIF_FIFO_TXOV | USBSS_UIF_ITP | USBSS_UIF_RX_PING |
+       USBSS_UDIF_STATUS | USBSS_UDIF_SETUP | USBSS_UIF_TRANSFER);
 }
 
 }  // namespace
 
-extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBSS_LINK_IRQHandler(void)
+extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBSS_LINK_IRQHandler(
+    void)
 {
   if (LibXR::CH32USBOtgSS::self_ == nullptr)
   {
@@ -450,7 +423,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBSS_IRQHandle
 
   auto& map = LibXR::CH32EndpointOtgSs::map_otg_ss_;
   const uint32_t status = USBSSD->USB_STATUS;
-  UsbSsDebugCaptureRegs(status);
 
   if (((status & USBSS_UDIF_SETUP) != 0u) && ((status & USBSS_UDIF_STATUS) == 0u))
   {
@@ -459,8 +431,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBSS_IRQHandle
     auto* out0 = map[0][OUT_IDX];
     const auto* setup =
         reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_);
-    UsbSsDebugNoteSetup(setup);
-    UsbSsDebugRecordStage(0x5330u);
     usb->OnSetupPacket(true, setup);
     USBSSD->USB_STATUS = USBSS_UDIF_SETUP;
     return;
@@ -468,7 +438,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBSS_IRQHandle
 
   if ((status & USBSS_UDIF_STATUS) != 0u)
   {
-    UsbSsDebugRecordStage(0x5331u);
     auto* in0 = map[0][IN_IDX];
     auto* out0 = map[0][OUT_IDX];
     if (in0 != nullptr && in0->GetState() == LibXR::USB::Endpoint::State::BUSY)
@@ -482,16 +451,14 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBSS_IRQHandle
 
     USBSSD->UEP0_TX_CTRL = 0u;
     USBSSD->UEP0_RX_CTRL = 0u;
-    UsbSsDebugCaptureRegs();
     USBSSD->USB_STATUS = USBSS_UDIF_STATUS;
     return;
   }
 
   if ((status & USBSS_UIF_TRANSFER) == 0u)
   {
-    USBSSD->USB_STATUS = status &
-                         (USBSS_UIF_FIFO_RXOV | USBSS_UIF_FIFO_TXOV | USBSS_UIF_ITP |
-                          USBSS_UIF_RX_PING);
+    USBSSD->USB_STATUS = status & (USBSS_UIF_FIFO_RXOV | USBSS_UIF_FIFO_TXOV |
+                                   USBSS_UIF_ITP | USBSS_UIF_RX_PING);
     return;
   }
 
@@ -512,19 +479,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBSS_IRQHandle
 
   const size_t transfer_size =
       is_in ? 0u : GetRxTransferSize(static_cast<EPNumber>(ep_num));
-  if (ep_num == 0u)
-  {
-    if (is_in)
-    {
-      UsbSsDebugRecordStage(0x5332u);
-    }
-    else
-    {
-      UsbSsDebugRecordStage(0x5333u);
-    }
-  }
   ep->TransferComplete(transfer_size);
-  UsbSsDebugCaptureRegs();
   USBSSD->USB_STATUS = USBSS_UIF_TRANSFER;
 }
 
@@ -547,12 +502,10 @@ CH32USBOtgSS::CH32USBOtgSS(
   ASSERT(cfgs_itr->buffer_tx.addr_ != nullptr && cfgs_itr->buffer_rx.addr_ != nullptr);
   ASSERT(cfgs_itr->buffer_tx.size_ >= 512u && cfgs_itr->buffer_rx.size_ >= 512u);
 
-  auto* ep0_out =
-      new CH32EndpointOtgSs(USB::Endpoint::EPNumber::EP0, Direction::OUT,
-                            cfgs_itr->buffer_rx, cfgs_itr->rx_max_burst);
-  auto* ep0_in =
-      new CH32EndpointOtgSs(USB::Endpoint::EPNumber::EP0, Direction::IN,
-                            cfgs_itr->buffer_tx, cfgs_itr->tx_max_burst);
+  auto* ep0_out = new CH32EndpointOtgSs(USB::Endpoint::EPNumber::EP0, Direction::OUT,
+                                        cfgs_itr->buffer_rx, cfgs_itr->rx_max_burst);
+  auto* ep0_in = new CH32EndpointOtgSs(USB::Endpoint::EPNumber::EP0, Direction::IN,
+                                       cfgs_itr->buffer_tx, cfgs_itr->tx_max_burst);
   USB::EndpointPool::SetEndpoint0(ep0_in, ep0_out);
 
   USB::Endpoint::EPNumber ep_index = USB::Endpoint::EPNumber::EP1;
@@ -561,15 +514,15 @@ CH32USBOtgSS::CH32USBOtgSS(
   {
     if (cfgs_itr->buffer_rx.addr_ != nullptr && cfgs_itr->buffer_rx.size_ > 0u)
     {
-      auto* ep_out = new CH32EndpointOtgSs(ep_index, Direction::OUT,
-                                           cfgs_itr->buffer_rx, cfgs_itr->rx_max_burst);
+      auto* ep_out = new CH32EndpointOtgSs(ep_index, Direction::OUT, cfgs_itr->buffer_rx,
+                                           cfgs_itr->rx_max_burst);
       USB::EndpointPool::Put(ep_out);
     }
 
     if (cfgs_itr->buffer_tx.addr_ != nullptr && cfgs_itr->buffer_tx.size_ > 0u)
     {
-      auto* ep_in = new CH32EndpointOtgSs(ep_index, Direction::IN,
-                                          cfgs_itr->buffer_tx, cfgs_itr->tx_max_burst);
+      auto* ep_in = new CH32EndpointOtgSs(ep_index, Direction::IN, cfgs_itr->buffer_tx,
+                                          cfgs_itr->tx_max_burst);
       USB::EndpointPool::Put(ep_in);
     }
   }
@@ -578,36 +531,16 @@ CH32USBOtgSS::CH32USBOtgSS(
 LibXR::ErrorCode CH32USBOtgSS::SetAddress(uint8_t address,
                                           USB::DeviceCore::Context context)
 {
-  switch (context)
-  {
-    case USB::DeviceCore::Context::SETUP_BEFORE_STATUS:
-      UsbSsDebugRecordStage(0x5341u);
-      break;
-
-    case USB::DeviceCore::Context::STATUS_IN_ARMED:
-      UsbSsDebugRecordStage(0x5342u);
-      break;
-
-    case USB::DeviceCore::Context::STATUS_IN_COMPLETE:
-      UsbSsDebugRecordStage(0x5343u);
-      break;
-
-    default:
-      break;
-  }
   if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
   {
     USBSSD->USB_CONTROL &= 0x00FFFFFFu;
     USBSSD->USB_CONTROL |= static_cast<uint32_t>(address) << 24;
-    UsbSsDebugCaptureRegs();
   }
   return LibXR::ErrorCode::OK;
 }
 
 void CH32USBOtgSS::Start(bool)
 {
-  UsbSsDebugReset();
-  UsbSsDebugRecordStage(0x5301u);
   EnableUsbSsClockTree();
   ConfigureUsbSsPhyDefaults();
   usb_ss_runtime_state = {};
@@ -629,7 +562,6 @@ void CH32USBOtgSS::Start(bool)
   ResetUsbSsDataPath();
   ReconfigureUsbSsEndpoints(false);
   self_ = this;
-  UsbSsDebugRecordStage(0x5302u);
 
   NVIC_SetAllocateIRQ(USBSS_IRQn, Core_ID_V5F);
   NVIC_SetAllocateIRQ(USBSS_LINK_IRQn, Core_ID_V5F);
@@ -637,12 +569,10 @@ void CH32USBOtgSS::Start(bool)
   NVIC_ClearPendingIRQ(USBSS_LINK_IRQn);
   NVIC_EnableIRQ(USBSS_IRQn);
   NVIC_EnableIRQ(USBSS_LINK_IRQn);
-  UsbSsDebugRecordStage(0x5303u);
 }
 
 void CH32USBOtgSS::Stop(bool)
 {
-  UsbSsDebugRecordStage(0x5304u);
   NVIC_DisableIRQ(USBSS_LINK_IRQn);
   NVIC_DisableIRQ(USBSS_IRQn);
   self_ = nullptr;
@@ -655,7 +585,6 @@ void CH32USBOtgSS::Stop(bool)
 
   DisableUsbSsClockTree();
   usb_ss_runtime_state = {};
-  UsbSsDebugRecordStage(0x5305u);
 }
 
 void CH32USBOtgSS::SetSuperSpeedFeature(uint16_t selector, bool enable)

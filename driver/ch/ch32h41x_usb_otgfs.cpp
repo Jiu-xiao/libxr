@@ -17,24 +17,6 @@ constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF 
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
 
-struct CH32H41xUsbDebugState
-{
-  uint32_t magic;
-  uint32_t magic_inv;
-  uint32_t debug_magic;
-  uint32_t debug_source;
-  uint32_t debug_stage;
-};
-
-static inline void CH32H41xUsbDebugSetStage(uint32_t stage)
-{
-  auto* const state = reinterpret_cast<volatile CH32H41xUsbDebugState*>(0x20110100u);
-  if (state->debug_magic == 0x47425544u)
-  {
-    state->debug_stage = stage;
-  }
-}
-
 static void ch32_usbfs_delay_short();
 static void EnableUsbFsControllerClock()
 {
@@ -230,7 +212,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_BUS_RST)
     {
-      CH32H41xUsbDebugSetStage(0x81u);
       USBFSD->DEV_ADDR = 0;
 
       usb->Deinit(true);
@@ -242,7 +223,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      CH32H41xUsbDebugSetStage(0x82u);
       usb->Deinit(true);
       usb->Init(true);
       RestoreUsbFsEndpointState();
@@ -261,7 +241,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
       {
         case USBFS_UIS_TOKEN_SETUP:
         {
-          CH32H41xUsbDebugSetStage(0x83u);
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
@@ -270,13 +249,13 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
           out0->tog_ = true;
           in0->tog_ = true;
 
-          usb->OnSetupPacket(true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
+          usb->OnSetupPacket(
+              true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
           break;
         }
 
         case USBFS_UIS_TOKEN_OUT:
         {
-          CH32H41xUsbDebugSetStage(0x84u);
           const uint16_t LEN = USBFSD->RX_LEN;
           if (ep[OUT_IDX])
           {
@@ -287,7 +266,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
         case USBFS_UIS_TOKEN_IN:
         {
-          CH32H41xUsbDebugSetStage(0x85u);
           if (ep[IN_IDX])
           {
             ep[IN_IDX]->TransferComplete(0);

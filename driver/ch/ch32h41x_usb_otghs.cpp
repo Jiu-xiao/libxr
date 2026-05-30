@@ -1,6 +1,7 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 // ch32_usb_otghs_h41x.cpp  (OTG HS, CH32H41x)
 #include "ch32h41x_usb_otghs.hpp"
+
 #include "ch32_usb_rcc.hpp"
 #include "ep.hpp"
 
@@ -8,16 +9,6 @@ using namespace LibXR;
 using namespace LibXR::USB;
 
 #if defined(USBHSD) && defined(LIBXR_CH32_IS_H41X)
-
-extern "C" __attribute__((weak)) void CH32H41xUsbHsDebugStage(uint32_t)
-{
-}
-
-extern "C" __attribute__((weak)) void CH32H41xUsbHsDebugSnapshot(uint32_t, uint32_t,
-                                                             uint32_t, uint32_t,
-                                                             uint32_t, uint32_t)
-{
-}
 
 namespace
 {
@@ -251,8 +242,7 @@ static void HandleTransferOut(CH32H41xEndpointOtgHs* ep_out, uint8_t ep_num,
   }
 }
 
-static void HandleTransferIn(CH32H41xEndpointOtgHs* ep_in, uint8_t ep_num,
-                             uint8_t int_st)
+static void HandleTransferIn(CH32H41xEndpointOtgHs* ep_in, uint8_t ep_num, uint8_t int_st)
 {
   if (ep_in == nullptr)
   {
@@ -260,8 +250,7 @@ static void HandleTransferIn(CH32H41xEndpointOtgHs* ep_in, uint8_t ep_num,
   }
 
   UNUSED(int_st);
-  if (ep_in->GetState() == LibXR::USB::Endpoint::State::BUSY &&
-      IsOtgHsTxDone(ep_num))
+  if (ep_in->GetState() == LibXR::USB::Endpoint::State::BUSY && IsOtgHsTxDone(ep_num))
   {
     ep_in->TransferComplete(0u);
   }
@@ -302,12 +291,6 @@ static void ClearPendingOtgHsInterrupts()
   }
 }
 
-static void CaptureUsbHsSnapshot(uint8_t intflag, uint8_t intst)
-{
-  CH32H41xUsbHsDebugSnapshot(intflag, intst, USBHSD->MIS_ST, USBHSD->BUS,
-                         USBHSD->FRAME_NO, USBHSD->CONTROL);
-}
-
 }  // namespace
 
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -342,8 +325,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
     // 1) 总线级恢复：reset/suspend 必须优先重建 EP0。
     if (INTFLAG & USBHS_UDIF_BUS_RST)
     {
-      CaptureUsbHsSnapshot(INTFLAG, INTST);
-      CH32H41xUsbHsDebugStage(0x4320u);
       USBHSD->DEV_AD = 0;
       usb->OnBusReset(true);
       USBHSD->UEP_TX_EN = 0u;
@@ -356,15 +337,11 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
 
     if (INTFLAG & USBHS_UDIF_SUSPEND)
     {
-      CaptureUsbHsSnapshot(INTFLAG, INTST);
-      CH32H41xUsbHsDebugStage(0x4321u);
       clear_mask |= USBHS_UDIF_SUSPEND;
     }
 
     if (INTFLAG & USBHS_UDIF_LINK_RDY)
     {
-      CaptureUsbHsSnapshot(INTFLAG, INTST);
-      CH32H41xUsbHsDebugStage(0x4322u);
       clear_mask |= USBHS_UDIF_LINK_RDY;
     }
 
@@ -374,8 +351,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
       if (((INTST & USBHS_UDIS_EP_DIR) == 0u) && ep_num == 0u &&
           ((USBHSD->UEP0_RX_CTRL & USBHS_UEP_R_SETUP_IS) == USBHS_UEP_R_SETUP_IS))
       {
-        CaptureUsbHsSnapshot(INTFLAG, INTST);
-        CH32H41xUsbHsDebugStage(0x4323u);
         USBHSD->UEP0_RX_CTRL &= static_cast<uint8_t>(~USBHS_UEP_R_DONE);
         PrepareEp0ForSetup(map);
 
@@ -387,8 +362,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
       }
       else
       {
-        CaptureUsbHsSnapshot(INTFLAG, INTST);
-        CH32H41xUsbHsDebugStage(((INTST & USBHS_UDIS_EP_DIR) != 0u) ? 0x4324u : 0x4325u);
         HandleTransferToken(map, INTST);
       }
       clear_mask |= USBHS_UDIF_TRANSFER;
@@ -422,14 +395,12 @@ CH32H41xUSBOtgHS::CH32H41xUSBOtgHS(
   ASSERT(cfgs_itr->buffer_tx.size_ >= 64 && cfgs_itr->buffer_rx.size_ >= 64 &&
          cfgs_itr->double_buffer == false);
 
-  auto ep0_out =
-      new CH32H41xEndpointOtgHs(USB::Endpoint::EPNumber::EP0,
-                                USB::Endpoint::Direction::OUT, cfgs_itr->buffer_rx,
-                                false);
+  auto ep0_out = new CH32H41xEndpointOtgHs(USB::Endpoint::EPNumber::EP0,
+                                           USB::Endpoint::Direction::OUT,
+                                           cfgs_itr->buffer_rx, false);
   auto ep0_in =
       new CH32H41xEndpointOtgHs(USB::Endpoint::EPNumber::EP0,
-                                USB::Endpoint::Direction::IN, cfgs_itr->buffer_tx,
-                                false);
+                                USB::Endpoint::Direction::IN, cfgs_itr->buffer_tx, false);
 
   USB::EndpointPool::SetEndpoint0(ep0_in, ep0_out);
 
@@ -440,12 +411,12 @@ CH32H41xUSBOtgHS::CH32H41xUSBOtgHS(
   {
     if (!cfgs_itr->double_buffer)
     {
-      auto ep_out = new CH32H41xEndpointOtgHs(
-          ep_index, USB::Endpoint::Direction::OUT, cfgs_itr->buffer_rx, false);
+      auto ep_out = new CH32H41xEndpointOtgHs(ep_index, USB::Endpoint::Direction::OUT,
+                                              cfgs_itr->buffer_rx, false);
       USB::EndpointPool::Put(ep_out);
 
-      auto ep_in = new CH32H41xEndpointOtgHs(
-          ep_index, USB::Endpoint::Direction::IN, cfgs_itr->buffer_tx, false);
+      auto ep_in = new CH32H41xEndpointOtgHs(ep_index, USB::Endpoint::Direction::IN,
+                                             cfgs_itr->buffer_tx, false);
       USB::EndpointPool::Put(ep_in);
     }
     else
@@ -473,34 +444,22 @@ void CH32H41xUSBOtgHS::OnConfigurationSwitched(uint16_t value, bool in_isr)
 {
   UNUSED(value);
   UNUSED(in_isr);
-  CH32H41xUsbHsDebugStage(0x4326u);
 }
 
 void CH32H41xUSBOtgHS::Start(bool)
 {
-  CH32H41xUsbHsDebugStage(0x4310u);
   NVIC_DisableIRQ(USBHS_IRQn);
-  CH32H41xUsbHsDebugStage(0x4311u);
   NVIC_ClearPendingIRQ(USBHS_IRQn);
-  CH32H41xUsbHsDebugStage(0x4312u);
   AllocateUsbHsIrqToV3f();
 
-  CH32H41xUsbHsDebugStage(0x4313u);
   PrepareUsbHsPinsForCH32H41x();
-  CH32H41xUsbHsDebugStage(0x4314u);
   LibXR::CH32UsbRcc::ConfigureUsbHsForCH32H41x();
-  CH32H41xUsbHsDebugStage(0x4315u);
   RCC_UTMIcmd(ENABLE);
-  CH32H41xUsbHsDebugStage(0x4316u);
   EnableUsbHsControllerClock();
 
-  CH32H41xUsbHsDebugStage(0x4317u);
   USBHSD->CONTROL = USBHS_UD_CLR_ALL | USBHS_UD_RST_SIE | USBHS_UD_PHY_SUSPENDM;
-  CH32H41xUsbHsDebugStage(0x4318u);
   USBHSD->CONTROL = USBHS_UD_PHY_SUSPENDM;
-  CH32H41xUsbHsDebugStage(0x4319u);
   USBHSD->CONTROL = USBHS_UD_RST_LINK | USBHS_UD_PHY_SUSPENDM;
-  CH32H41xUsbHsDebugStage(0x431Au);
   USBHSD->INT_FG = 0xFFu;
   // Rebuild the CH32H41x endpoint image from scratch. The official USBHS examples
   // program the global direction-enable masks explicitly on every init; doing
@@ -511,21 +470,14 @@ void CH32H41xUSBOtgHS::Start(bool)
   USBHSD->UEP_RX_EN = 0u;
   USBHSD->UEP_TX_ISO = 0u;
   USBHSD->UEP_RX_ISO = 0u;
-  CH32H41xUsbHsDebugStage(0x431Bu);
   RestoreUsbHsEndpointState();
-  CH32H41xUsbHsDebugStage(0x431Cu);
   USBHSD->BASE_MODE = USBHS_UD_SPEED_HIGH;
-  CH32H41xUsbHsDebugStage(0x431Du);
   USBHSD->INT_EN = USBHS_UDIE_BUS_RST | USBHS_UDIE_SUSPEND | USBHS_UDIE_BUS_SLEEP |
                    USBHS_UDIE_LPM_ACT | USBHS_UDIE_TRANSFER | USBHS_UDIE_LINK_RDY;
-  CH32H41xUsbHsDebugStage(0x431Eu);
   USBHSD->CONTROL =
       USBHS_UD_DEV_EN | USBHS_UD_DMA_EN | USBHS_UD_LPM_EN | USBHS_UD_PHY_SUSPENDM;
-  CH32H41xUsbHsDebugStage(0x431Fu);
   self_ = this;
-  CH32H41xUsbHsDebugStage(0x4327u);
   NVIC_EnableIRQ(USBHS_IRQn);
-  CH32H41xUsbHsDebugStage(0x4328u);
 }
 
 void CH32H41xUSBOtgHS::Stop(bool)
