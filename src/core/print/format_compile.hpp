@@ -13,9 +13,7 @@
 namespace LibXR::Print
 {
 /**
- * @brief Shared compile-time backend that lowers frontend text/field events into
- *        one final compiled format.
- * @brief 共享编译期后端，将前端产生的文本/字段事件直接降为最终编译格式。
+ * @brief 共享编译期后端，把前端事件整理成最终字节流和参数表。 / Shared compile-time backend that turns frontend events into the final byte stream plus argument table.
  *
  * Frontend contract:
  * The frontend must provide the members using ErrorType, static constexpr
@@ -26,17 +24,27 @@ namespace LibXR::Print
  * SourceData()、static constexpr size_t SourceSize()、以及
  * static consteval ErrorType Walk(visitor)。
  *
- * Walk(visitor) must emit source-ordered events through visitor.Text(offset,
- * text_size) and visitor.Field(const FormatField&).
- * Walk(visitor) 必须按源串顺序通过 visitor.Text(offset, text_size) 与
- * visitor.Field(const FormatField&) 发射事件。
+ * Walk(visitor) must emit source-ordered events through:
+ * - visitor.Text(offset, text_size)
+ * - visitor.Field(const FormatField&)
+ * Walk(visitor) 必须按源串顺序发射两类事件：
+ * - visitor.Text(offset, text_size)
+ * - visitor.Field(const FormatField&)
  *
- * The shared backend now walks the frontend exactly once. During that walk it
- * accumulates code bytes, text-pool bytes, argument metadata, and packed-argument
- * layout into one scratch builder, then materializes the final tightly-sized
- * result in one local finalize step.
- * 共享后端现在只遍历前端一次：遍历时同步累积码流、文本池、参数元信息与参数打包布局，
- * 然后在本地收尾阶段生成最终精确尺寸结果。
+ * The backend only walks the frontend once. During that single walk it collects:
+ * - output bytecode
+ * - long literal-text storage
+ * - runtime argument metadata
+ * - the runtime executor profile
+ *
+ * Then it packs those scratch buffers into the final exact-size result.
+ * 这个后端只遍历前端一次。那一遍里会同时收集：
+ * - 输出字节码
+ * - 长字面文本存储
+ * - 运行期参数元信息
+ * - 运行期执行器摘要
+ *
+ * 最后再把这些临时缓冲收拢成精确尺寸的最终结果。
  */
 template <typename Frontend>
 class FormatCompiler
@@ -49,8 +57,9 @@ class FormatCompiler
   using Error = typename Frontend::ErrorType;
 
   /**
-   * @brief Final tightly-sized compiled format emitted by this backend instance.
-   * @brief 当前后端实例发射出的最终精确尺寸编译格式。
+   * @brief 当前后端实例产出的最终精确尺寸编译格式 / Final exact-size compiled format produced by this backend instance
+   * @tparam BlobBytes 最终保留字节块大小 / Final retained byte-block size
+   * @tparam ArgCount 最终参数元信息个数 / Final argument metadata count
    */
   template <size_t BlobBytes, size_t ArgCount>
   struct ResultData
@@ -70,7 +79,9 @@ class FormatCompiler
   template <size_t BlobBytes, size_t ArgCount>
   using Result = ResultData<BlobBytes, ArgCount>;
 
-  /// Maximum inline literal size before the backend spills to TextRef. / 超过该长度后，字面文本会从内嵌模式切换为 TextRef
+  /**
+   * @brief 超过该长度后，字面文本会从内嵌模式切换为 TextRef / Maximum inline literal size before the backend spills to TextRef.
+   */
   static constexpr size_t inline_text_limit = 2 * sizeof(size_t) - 1;
 
   // Conservative single-pass scratch bounds derived from the original source:
@@ -88,11 +99,24 @@ class FormatCompiler
   static constexpr uint8_t unspecified_precision =
       std::numeric_limits<uint8_t>::max();
 
+  /**
+   * @brief 向临时或最终字节缓冲区追加一个原始字节 / Append one raw byte into a scratch or final byte buffer
+   * @param data 目标字节缓冲区 / Target byte buffer
+   * @param out 当前写位置；会前进一个字节 / Current write position; advanced by one byte
+   * @param value 待追加的字节值 / Byte value to append
+   */
   static consteval void EmitByte(auto& data, size_t& out, uint8_t value)
   {
     data[out++] = value;
   }
 
+  /**
+   * @brief 向临时或最终字节缓冲区追加一个按本机字节序编码的 POD 值 / Append one native-endian POD value into a scratch or final byte buffer
+   * @tparam T 待编码的 POD 类型 / POD type to encode
+   * @param data 目标字节缓冲区 / Target byte buffer
+   * @param out 当前写位置；会前进 `sizeof(T)` / Current write position; advanced by `sizeof(T)`
+   * @param value 待追加的 POD 值 / POD value to append
+   */
   template <typename T>
   static consteval void EmitNative(auto& data, size_t& out, T value)
   {
@@ -103,6 +127,13 @@ class FormatCompiler
     }
   }
 
+  /**
+   * @brief 从临时字节缓冲区读取一个按本机字节序编码的 POD 值 / Read one native-endian POD value from a scratch byte buffer
+   * @tparam T 待读取的 POD 类型 / POD type to decode
+   * @param data 源字节缓冲区 / Source byte buffer
+   * @param pos 当前读取位置；会前进 `sizeof(T)` / Current read position; advanced by `sizeof(T)`
+   * @return 返回解码后的 POD 值 / Returns the decoded POD value
+   */
   template <typename T>
   [[nodiscard]] static consteval T ReadNative(const auto& data, size_t& pos)
   {
@@ -114,6 +145,11 @@ class FormatCompiler
     return std::bit_cast<T>(bytes);
   }
 
+  /**
+   * @brief 构造只携带编译错误的最小失败结果。 / Builds the minimal failed result carrying only the compile error.
+   * @param error Compile-time failure category. / 编译期失败类别。
+   * @return Returns a minimal failed result object. / 返回最小失败结果对象。
+   */
   [[nodiscard]] static consteval auto Failed(Error error)
   {
     Result<1, 0> result{};
@@ -122,8 +158,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief Maps one opcode family to the runtime executor profile bit it requires.
-   * @brief 将一个操作码族映射到它所需的运行期执行器 profile 位。
+   * @brief 指出某个操作码族需要打开哪一个 writer-profile 位。 / Says which writer-profile bit one opcode family needs.
    */
   [[nodiscard]] static consteval FormatProfile ProfileForOp(FormatOp op)
   {
@@ -151,8 +186,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief Chooses the narrowest opcode that preserves one normalized field's behavior.
-   * @brief 为一个规范化字段选择在行为不变前提下最窄的操作码。
+   * @brief 为一个字段选择仍能正确打印它的最小操作码。 / Chooses the smallest opcode that can still print this field correctly.
    */
   [[nodiscard]] static consteval FormatOp FastFieldOp(const FormatField& field)
   {
@@ -197,8 +231,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief Single-pass scratch builder driven directly by frontend events.
-   * @brief 由前端事件直接驱动的单遍临时构建器。
+   * @brief 由前端文本/字段事件直接喂给的单遍临时构建器。 / One-pass scratch builder fed directly by frontend text/field events.
    */
   struct ScratchBuilder
   {
@@ -213,8 +246,13 @@ class FormatCompiler
     Error frontend_error = Error::None;   ///< first frontend failure / 首个前端失败原因
 
     /**
-     * @brief Appends one literal-text span into the scratch buffers.
-     * @brief 将单个字面文本片段追加到临时缓冲区。
+     * @brief 将单个字面文本片段追加到临时缓冲区。 / Appends one literal-text span into the scratch buffers.
+     * @param offset Text offset inside `Frontend::SourceData()`. /
+     *        文本在 `Frontend::SourceData()` 中的偏移。
+     * @param text_size Text byte count. / 文本字节数。
+     * @return Returns the first source-to-scratch conversion error, or
+     *         `Error::None` on success. / 成功返回 `Error::None`；
+     *         写入临时缓冲区失败时返回对应错误。
      */
     [[nodiscard]] consteval Error Text(size_t offset, size_t text_size)
     {
@@ -264,9 +302,10 @@ class FormatCompiler
     }
 
     /**
-     * @brief Appends one normalized value field into the scratch record stream and
-     *        argument metadata table.
-     * @brief 将单个规范化值字段追加到临时记录流和参数元信息表。
+     * @brief 将一个值字段追加到临时字节流和临时参数表中。 / Appends one value field into the scratch byte stream and scratch argument table.
+     * @param field Shared field record produced by the frontend. /
+     *        前端产出的共享字段记录。
+     * @return Returns the field append result. / 返回字段追加结果。
      */
     [[nodiscard]] consteval Error Field(const FormatField& field)
     {
@@ -308,23 +347,33 @@ class FormatCompiler
       return Error::None;
     }
 
-    /// Final record-stream size including the End marker. / 含 End 结束标记在内的最终记录流字节数
+    /**
+     * @brief 含 End 结束标记在内的最终记录流字节数 / Final record-stream size including the End marker.
+     * @return Returns the final record-stream byte count. / 返回最终记录流字节数。
+     */
     [[nodiscard]] constexpr size_t FinalCodeBytes() const { return code_bytes + 1; }
-    /// Final retained byte-block size including the trailing text pool. / 含尾部文本池在内的最终保留字节块大小
+    /**
+     * @brief 含尾部文本池在内的最终保留字节块大小 / Final retained byte-block size including the trailing text pool.
+     * @return Returns the total retained byte-block size. / 返回最终保留字节块总大小。
+     */
     [[nodiscard]] constexpr size_t FinalBlobBytes() const
     {
       return FinalCodeBytes() + text_pool_bytes;
     }
 
     /**
-     * @brief Materializes the exact final compiled format from the scratch buffers.
-     * @brief 从临时缓冲区收敛出最终精确尺寸的编译格式。
+     * @brief 把临时缓冲打包成最终精确尺寸的编译格式。 / Packs the scratch buffers into the final exact-size compiled format.
      *
      * TextRef records store temporary offsets relative to the text scratch pool.
      * Finalization rebases those offsets so they point at the trailing text pool
      * inside the final codes byte block.
      * TextRef 记录在临时阶段保存的是相对文本池起点的偏移；收尾阶段会把它们重定位为
      * 指向最终 codes 字节块尾部文本池的绝对偏移。
+     * @tparam CodeBytes Final record-stream byte count including `End`. /
+     *         含 `End` 在内的最终记录流字节数。
+     * @tparam BlobBytes 最终总字节块大小 / Final total byte-block size
+     * @tparam ArgCount 最终参数元信息个数 / Final argument metadata count
+     * @return 精确尺寸的编译结果 / Returns the exact-size compiled result
      */
     template <size_t CodeBytes, size_t BlobBytes, size_t ArgCount>
     [[nodiscard]] consteval auto Finish() const
@@ -406,8 +455,10 @@ class FormatCompiler
 
  public:
   /**
-   * @brief Compiles the frontend into one final compiled format.
-   * @brief 将前端编译为一份最终编译格式。
+   * @brief 把一个前端编译成最终字节流、参数表和 writer 摘要。 / Compiles one frontend into the final byte stream, argument table, and writer profile.
+   * @return Returns the final compiled result object, or a failed result that
+   *         carries the first compile-time error. / 返回最终编译结果对象；
+   *         若失败则返回携带首个编译期错误的失败结果。
    */
   [[nodiscard]] static consteval auto Compile()
   {

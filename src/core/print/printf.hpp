@@ -9,18 +9,19 @@
 namespace LibXR::Print
 {
 /**
- * @brief Structural literal wrapper used as the NTTP source for printf formats.
- * @brief 作为 printf 格式源的结构化字符串字面量包装。
+ * @brief 作为 printf 格式源的结构化字符串字面量包装 / Structural literal wrapper used as the NTTP source for printf formats
  */
 template <size_t N>
 struct Text
 {
-  /// Literal bytes including the terminating zero byte. / 含结尾零字节的字面量字节序列
+  /**
+   * @brief 含结尾零字节的字面量字节序列 / Literal bytes including the terminating zero byte
+   */
   char data[N]{};
 
   /**
-   * @brief Copies the string literal into the structural NTTP object.
-   * @brief 将字符串字面量复制到结构化 NTTP 对象中。
+   * @brief 将字符串字面量复制到结构化 NTTP 对象中 / Copy the string literal into the structural NTTP object
+   * @param text 原始字符串字面量 / Source string literal
    */
   constexpr Text(const char (&text)[N])
   {
@@ -30,22 +31,26 @@ struct Text
     }
   }
 
-  /// Returns the format length without the terminating zero byte. / 返回不含结尾零字节的格式串长度
+  /**
+   * @brief 返回不含结尾零字节的格式串长度 / Return the format length without the terminating zero byte
+   * @return 不含结尾零字节的字面量长度 / Returns the literal size without the trailing zero byte
+   */
   [[nodiscard]] constexpr size_t Size() const { return N - 1; }
-  /// Returns the literal bytes including the terminating zero byte. / 返回含结尾零字节的字面量指针
+  /**
+   * @brief 返回含结尾零字节的字面量指针 / Return the literal bytes including the terminating zero byte
+   * @return 指向含结尾零字节的字面量字节序列 / Returns a pointer to the literal bytes including the trailing zero byte
+   */
   [[nodiscard]] constexpr const char* Data() const { return data; }
 };
 
 /**
- * @brief Printf-style frontend that emits the internal format representation.
- * @brief printf 风格前端，输出内部格式表示。
+ * @brief printf 风格前端，输出内部格式表示 / Printf-style frontend that emits the internal format representation
  */
 class Printf
 {
  public:
   /**
-   * @brief Supported printf length modifiers after normalization.
-   * @brief 归一化后的 printf 长度修饰符。
+   * @brief 归一化后的 printf 长度修饰符 / Supported printf length modifiers after normalization
    */
   enum class Length : uint8_t
   {
@@ -61,13 +66,13 @@ class Printf
   };
 
   /**
-   * @brief Compile-time parse/build failure categories surfaced through static_assert.
-   * @brief 通过 static_assert 暴露的编译期解析/构建失败类别。
+   * @brief 通过 static_assert 暴露的编译期解析或构建失败类别 / Compile-time parse or build failure categories surfaced through static_assert
    */
   enum class Error : uint8_t
   {
     None,                ///< success / 成功
     NumberOverflow,      ///< width / precision literal does not fit in its field / 宽度或精度字面量超出字段范围
+    FloatPrecisionLimitExceeded,  ///< float precision exceeds the configured frontend limit / 浮点精度超出当前配置的前端上限
     UnexpectedEnd,       ///< format string ended in the middle of one conversion / 格式串在转换项中途结束
     EmbeddedNul,         ///< format literal contains an embedded NUL byte / 格式串字面量内部包含嵌入式 NUL 字节
     MixedIndexing,       ///< positional and sequential arguments were mixed / 混用了位置参数与顺序参数
@@ -88,8 +93,9 @@ class Printf
   struct Compiled;
 
   /**
-   * @brief Parses and validates a printf format at compile time.
-   * @brief 在编译期解析并校验 printf 格式串。
+   * @brief 在编译期解析并校验 printf 格式串 / Parse and validate a printf format at compile time
+   * @tparam Source printf 风格格式串字面量 / Printf-style format literal
+   * @return 编译后的 printf 格式对象 / Returns the compiled printf format object
    */
   template <Text Source>
   [[nodiscard]] static consteval Compiled<Source> Build()
@@ -98,8 +104,10 @@ class Printf
   }
 
   /**
-   * @brief Returns true when Args... exactly match the enabled conversions.
-   * @brief 当 Args... 与启用的转换项精确匹配时返回 true。
+   * @brief 判断 `Args...` 是否与启用的转换项精确匹配 / Return whether `Args...` exactly match the enabled conversions
+   * @tparam Source printf 风格格式串字面量 / Printf-style format literal
+   * @tparam Args 待检查的 C++ 实参类型列表 / C++ argument types to test
+   * @return 完全匹配返回 `true`，否则返回 `false` / Returns `true` when the enabled conversions match `Args...` exactly, otherwise `false`
    */
   template <Text Source, typename... Args>
   [[nodiscard]] static consteval bool Matches()
@@ -109,7 +117,7 @@ class Printf
 };
 }  // namespace LibXR::Print
 
-#include "printf_frontend_detail.hpp"
+#include "printf/printf_frontend_detail.hpp"
 namespace LibXR::Print
 {
 template <Text Source>
@@ -122,6 +130,8 @@ struct Printf::Compiled
 
   static_assert(result.compile_error != Printf::Error::NumberOverflow,
                 "LibXR::Print::Printf: numeric field is too large");
+  static_assert(result.compile_error != Printf::Error::FloatPrecisionLimitExceeded,
+                "LibXR::Print::Printf: float precision exceeds the configured print limit");
   static_assert(result.compile_error != Printf::Error::UnexpectedEnd,
                 "LibXR::Print::Printf: unexpected end of format string");
   static_assert(result.compile_error != Printf::Error::EmbeddedNul,
@@ -148,42 +158,61 @@ struct Printf::Compiled
                 "LibXR::Print::Printf: one positional argument is reused with incompatible conversions");
 
  public:
-  /// Final runtime byte block kept by the compiled surface. / 编译格式表面保留的最终运行期字节块
+  /**
+   * @brief 返回运行期 writer 最终会执行的字节流。 / Returns the final byte stream that the runtime writer will execute.
+   */
   inline static constexpr auto codes = result.codes;
-  /// Compile-time executor profile used to specialize the runtime bytecode interpreter. / 用于特化运行期字节码解释器的编译期执行器配置
+  /**
+   * @brief 返回当前格式需要哪些 writer 分支的编译期摘要。 / Returns the compile-time summary of which writer branches this format needs.
+   */
   inline static constexpr FormatProfile profile = result.profile;
 
-  /// Field-ordered argument metadata used by runtime argument packing. / 按字段顺序排列、供运行期参数打包使用的元信息表
+  /**
+   * @brief 返回运行期参数打包时要按字段顺序读取的参数列表。 / Returns the field-ordered argument list the runtime packer will follow.
+   */
   [[nodiscard]] static constexpr auto ArgumentList()
   {
     return result.arg_info;
   }
 
-  /// Field-ordered source argument references, including duplicates and reordering. / 按字段顺序排列的源参数引用，可包含重复与重排
+  /**
+   * @brief 返回每个字段对应的是第几个源参数。 / Returns, for each field, which source argument index it refers to.
+   */
   [[nodiscard]] static constexpr auto ArgumentOrder()
   {
     return source_analysis.order;
   }
 
-  /// Source-ordered argument metadata used only by compile-time type matching. / 按源参数顺序排列、仅供编译期类型匹配使用的元信息
+  /**
+   * @brief 返回仅供编译期类型匹配使用的源参数列表。 / Returns the source-argument list used only for compile-time type matching.
+   */
   [[nodiscard]] static constexpr auto SourceArgumentList()
   {
     return source_analysis.args;
   }
 
-  /// Final compiled bytes consumed directly by the runtime writer. / 供运行期 writer 直接消费的最终编译字节块
+  /**
+   * @brief 返回与 `codes` 相同的最终字节流。 / Returns the same final byte stream as `codes`.
+   */
   [[nodiscard]] static constexpr const auto& Codes()
   {
     return codes;
   }
 
-  /// Returns the compile-time executor profile. / 返回编译期执行器配置
+  /**
+   * @brief 返回当前编译格式携带的 writer 分支摘要。 / Returns the writer-branch summary carried by this compiled format.
+   */
   [[nodiscard]] static constexpr FormatProfile Profile()
   {
     return profile;
   }
 
-  /// Returns true when Args... exactly match this compiled format. / 判断 Args... 是否与当前编译格式完全匹配
+  /**
+   * @brief 判断 `Args...` 是否就是当前编译格式期望的那组 C++ 参数类型。 / Returns whether `Args...` are exactly the C++ argument types this compiled format expects.
+   * @tparam Args C++ argument types to compare. / 待比较的 C++ 实参类型列表。
+   * @return Returns `true` when the type list matches exactly, otherwise
+   *         `false`. / 完全匹配返回 `true`，否则返回 `false`。
+   */
   template <typename... Args>
   [[nodiscard]] static consteval bool Matches()
   {

@@ -5,7 +5,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "format_frontend_detail.hpp"
+#include "format/format_frontend_detail.hpp"
 #include "writer.hpp"
 
 namespace LibXR
@@ -41,21 +41,20 @@ class Format
 
  public:
   /**
-   * @brief Public brace-style compile-time failure categories.
-   * @brief 面向用户的 brace 风格编译期失败类别。
+   * @brief 面向用户的 brace 风格编译期失败类别 / Public brace-style compile-time failure categories
    */
   using Error = Print::Detail::FormatFrontend::Error;
 
   /**
-   * @brief Frontend adapter bound to one concrete C++ argument list.
-   * @brief 绑定到一组具体 C++ 参数类型上的前端适配器。
+   * @brief 绑定到一组具体 C++ 参数类型上的前端适配器 / Frontend adapter bound to one concrete C++ argument list
+   * @tparam Args 这次调用点对应的 C++ 实参类型列表 / Concrete C++ argument types at one call site
    */
   template <typename... Args>
   using Compiler = Print::Detail::FormatFrontend::Compiler<Source, Args...>;
 
   /**
-   * @brief One brace-style source bound to a concrete call-site argument list.
-   * @brief 一条 brace 风格源串绑定到具体调用点参数后的编译结果。
+   * @brief 一条 brace 风格源串绑定到具体调用点参数后的编译结果 / One brace-style source bound to a concrete call-site argument list
+   * @tparam Args 这份编译结果对应的 C++ 实参类型列表 / Concrete C++ argument types bound into this compiled result
    */
   template <typename... Args>
   struct Compiled
@@ -70,6 +69,8 @@ class Format
                   "referenced replacement fields");
     static_assert(result.compile_error != Error::NumberOverflow,
                   "LibXR::Format: index, width, or precision is too large");
+    static_assert(result.compile_error != Error::FloatPrecisionLimitExceeded,
+                  "LibXR::Format: float precision exceeds the configured print limit");
     static_assert(result.compile_error != Error::UnexpectedEnd,
                   "LibXR::Format: unexpected end of format string");
     static_assert(result.compile_error != Error::EmbeddedNul,
@@ -100,36 +101,54 @@ class Format
                   "LibXR::Format: text span is too large");
 
    public:
-    /// Final runtime byte block kept by the compiled surface. / 编译格式表面保留的最终运行期字节块
+    /**
+     * @brief 返回运行期 writer 最终会执行的字节流。 / Returns the final byte stream that the runtime writer will execute.
+     */
     inline static constexpr auto codes = result.codes;
-    /// Compile-time executor profile used to specialize the runtime bytecode interpreter. / 用于特化运行期字节码解释器的编译期执行器配置
+    /**
+     * @brief 返回当前格式需要哪些 writer 分支的编译期摘要。 / Returns the compile-time summary of which writer branches this format needs.
+     */
     inline static constexpr Print::FormatProfile profile = result.profile;
 
-    /// Ordered field metadata used by runtime argument packing. / 按字段顺序排列、供运行期参数打包使用的元信息
+    /**
+     * @brief 返回运行期参数打包时要按字段顺序读取的参数列表。 / Returns the field-ordered argument list the runtime packer will follow.
+     */
     [[nodiscard]] static constexpr auto ArgumentList()
     {
       return result.arg_info;
     }
 
-    /// Field-ordered source argument references, including duplicates and reordering. / 按字段顺序排列的源参数引用，可包含重复与重排
+    /**
+     * @brief 返回每个字段对应的是第几个源参数。 / Returns, for each field, which source argument index it refers to.
+     */
     [[nodiscard]] static constexpr auto ArgumentOrder()
     {
       return source_analysis.argument_order;
     }
 
-    /// Final compiled bytes consumed directly by the runtime writer. / 供运行期 writer 直接消费的最终编译字节块
+    /**
+     * @brief 返回与 `codes` 相同的最终字节流。 / Returns the same final byte stream as `codes`.
+     */
     [[nodiscard]] static constexpr const auto& Codes()
     {
       return codes;
     }
 
-    /// Returns the compile-time executor profile. / 返回编译期执行器配置
+    /**
+     * @brief 返回当前编译格式携带的 writer 分支摘要。 / Returns the writer-branch summary carried by this compiled format.
+     */
     [[nodiscard]] static constexpr Print::FormatProfile Profile()
     {
       return profile;
     }
 
-    /// Returns true when Actual... exactly match this bound compiled surface. / 判断 Actual... 是否与当前已绑定的编译格式完全一致
+    /**
+     * @brief 判断另一组 C++ 参数类型是否与当前格式绑定时的参数列表完全一致。 / Returns whether another C++ argument list is exactly the one this format was built for.
+     * @tparam Actual Another C++ argument-type list to compare against. /
+     *         待比较的另一组 C++ 实参类型。
+     * @return Returns `true` when the type lists match exactly, otherwise
+     *         `false`. / 完全一致返回 `true`，否则返回 `false`。
+     */
     template <typename... Actual>
     [[nodiscard]] static consteval bool Matches()
     {
@@ -138,13 +157,22 @@ class Format
     }
   };
 
-  /// Returns the required call-site argument count addressed by this source. / 返回当前源串会寻址的调用点参数个数
+  /**
+   * @brief 返回当前源串会寻址的调用点参数个数 / Returns the required call-site argument count addressed by this source.
+   * @return Returns the number of call-site arguments actually referenced by
+   *         this source. / 当前源串实际引用到的调用点参数个数。
+   */
   [[nodiscard]] static constexpr size_t ArgumentCount()
   {
     return source_analysis.required_argument_count;
   }
 
-  /// Returns true when Args... are accepted by this brace frontend. / 判断 Args... 是否能被当前 brace 前端接受
+  /**
+   * @brief 判断这条源格式串能否和 `Args...` 一起通过编译。 / Returns whether this source string can be compiled with `Args...`.
+   * @tparam Args C++ argument types to test. / 待检查的 C++ 实参类型列表。
+   * @return Returns `true` when the source can compile with `Args...`,
+   *         otherwise `false`. / 可编译返回 `true`，否则返回 `false`。
+   */
   template <typename... Args>
   [[nodiscard]] static consteval bool Matches()
   {
@@ -159,7 +187,14 @@ class Format
     }
   }
 
-  /// Writes this format into one sink and returns only the sink status. / 将当前格式写入一个输出端，并且只返回 sink 状态
+  /**
+   * @brief 将当前格式写入一个输出端，并且只返回 sink 状态 / Write this format into one sink and return only the sink status
+   * @tparam Sink 输出端类型，需满足 `Print::OutputSink` / Sink type satisfying `Print::OutputSink`
+   * @tparam Args 调用点实参类型列表 / Call-site argument types
+   * @param sink 输出端 / Destination sink
+   * @param args 本次写出使用的实参 / Arguments used by this write
+   * @return sink 写入状态 / Returns the sink write status
+   */
   template <Print::OutputSink Sink, typename... Args>
   [[nodiscard]] ErrorCode WriteTo(Sink& sink, Args&&... args) const
   {
@@ -173,9 +208,13 @@ class Format
 namespace LibXR::Print
 {
 /**
- * @brief Writes one brace-style format wrapper by first binding it to the
- *        concrete Args... type list and then executing the shared runtime writer.
- * @brief 写入一份 brace 风格格式包装器：先将其绑定到具体 Args... 类型列表，再执行共享运行期 writer。
+ * @brief 写出一条 brace 格式：先确定它对应的具体参数类型，再交给共享 writer 执行 / Write one brace format by first fixing its concrete argument types, then run the shared writer
+ * @tparam Source brace 风格格式串字面量 / Brace-style format literal
+ * @tparam Sink 输出端类型，需满足 `OutputSink` / Sink type satisfying `OutputSink`
+ * @tparam Args 调用点实参类型列表 / Call-site argument types
+ * @param sink 输出端 / Destination sink
+ * @param args 本次写出使用的实参 / Arguments used by this write
+ * @return sink 写入状态 / Returns the sink write status
  */
 template <Text Source, OutputSink Sink, typename... Args>
 [[nodiscard]] inline ErrorCode Write(Sink& sink, const LibXR::Format<Source>&,
