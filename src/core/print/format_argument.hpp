@@ -20,6 +20,7 @@ namespace LibXR::Print::Detail::FormatArgument
  * Everything in this namespace is implementation detail and should not leak into
  * the public LibXR::Print surface.
  * 此命名空间内的内容全部属于实现细节，不应泄漏到公开 LibXR::Print 接口中。
+ * @tparam T Source C++ argument type being classified. / 待归类的源 C++ 实参类型。
  */
 template <typename T>
 struct TypeTraits
@@ -58,8 +59,10 @@ struct TypeTraits
   static constexpr bool is_long_double = std::is_same_v<Decayed, long double>;
 
   /**
-   * @brief Returns whether this C++ argument type satisfies one compile-time rule.
-   * @brief 判断当前 C++ 实参类型是否满足某条编译期匹配规则。
+   * @brief 判断当前 C++ 实参类型是否满足某条编译期匹配规则。 / Returns whether this C++ argument type satisfies one compile-time rule.
+   * @param rule Compile-time matching rule to test. / 待测试的编译期匹配规则。
+   * @return Returns `true` when the current type satisfies `rule`, otherwise
+   *         `false`. / 当前类型满足 `rule` 时返回 `true`，否则返回 `false`。
    */
   [[nodiscard]] static consteval bool MatchesRule(FormatArgumentRule rule)
   {
@@ -119,8 +122,12 @@ struct TypeTraits
 };
 
 /**
- * @brief Expands one argument list against one rule array.
- * @brief 将一组模板实参与一组规则数组逐项展开比对。
+ * @brief 将一组模板实参与一组规则数组逐项展开比对 / Expand one argument list against one rule array
+ * @tparam Args 参与匹配的 C++ 实参类型列表 / C++ argument types being matched
+ * @tparam N 规则数组元素个数 / Rule-array element count
+ * @tparam I 展开的索引序列 / Expanded index sequence
+ * @param arguments 编译后的参数元信息数组 / Compiled argument metadata array
+ * @return 仅当每个参数都满足对应规则时返回 `true` / Returns `true` only when every argument satisfies its matching rule
  */
 template <typename... Args, size_t N, size_t... I>
 [[nodiscard]] consteval bool MatchesImpl(
@@ -130,9 +137,11 @@ template <typename... Args, size_t N, size_t... I>
 }
 
 /**
- * @brief Returns whether the provided argument list exactly matches the compiled
- *        argument metadata array.
- * @brief 判断给定实参列表是否与编译得到的参数元信息数组完全匹配。
+ * @brief 判断给定实参列表是否与编译得到的参数元信息数组完全匹配 / Return whether the provided argument list exactly matches the compiled argument metadata array
+ * @tparam Args 参与匹配的 C++ 实参类型列表 / C++ argument types being matched
+ * @tparam N 元信息数组元素个数 / Metadata-array element count
+ * @param arguments 编译后的参数元信息数组 / Compiled argument metadata array
+ * @return 当参数个数和每一项规则都完全匹配时返回 `true`，否则返回 `false` / Returns `true` when the argument count and every argument rule match exactly, otherwise `false`
  */
 template <typename... Args, size_t N>
 [[nodiscard]] consteval bool Matches(const std::array<FormatArgumentInfo, N>& arguments)

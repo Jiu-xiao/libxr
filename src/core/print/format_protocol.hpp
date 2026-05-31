@@ -2,12 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 #include <type_traits>
 
 /**
- * @brief Print feature defaults for direct header consumers.
- * @brief 供直接包含头文件的用户使用的打印功能默认值。
+ * @brief 供直接包含头文件的用户使用的打印功能默认值。 / Print feature defaults for direct header consumers.
  *
  * CMake exports the same names as 0 or 1 target compile definitions. When the
  * headers are used without CMake, these fallback values match the ordinary
@@ -64,6 +64,14 @@
 #define LIBXR_PRINT_FLOAT_ENABLE_LONG_DOUBLE 0
 #endif
 
+#ifndef LIBXR_PRINT_FLOAT_MAX_PRECISION
+#define LIBXR_PRINT_FLOAT_MAX_PRECISION 32
+#endif
+
+#ifndef LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS
+#define LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS 32
+#endif
+
 #ifndef LIBXR_PRINT_ENABLE_WIDTH
 #define LIBXR_PRINT_ENABLE_WIDTH 1
 #endif
@@ -82,45 +90,91 @@
 
 namespace LibXR::Print::Config
 {
-/// Enables signed and unsigned decimal integer conversions. / 启用有符号与无符号十进制整数转换
+/**
+ * @brief 启用有符号与无符号十进制整数转换 / Enables signed and unsigned decimal integer conversions.
+ */
 inline constexpr bool enable_integer = LIBXR_PRINT_ENABLE_INTEGER;
-/// Enables character and string conversions. / 启用字符与字符串转换
+/**
+ * @brief 启用字符与字符串转换 / Enables character and string conversions.
+ */
 inline constexpr bool enable_text = LIBXR_PRINT_ENABLE_TEXT;
-/// Enables pointer conversions. / 启用指针转换
+/**
+ * @brief 启用指针转换 / Enables pointer conversions.
+ */
 inline constexpr bool enable_pointer = LIBXR_PRINT_ENABLE_POINTER;
-/// Master switch for all floating-point conversions. / 所有浮点转换的总开关
+/**
+ * @brief 所有浮点转换的总开关 / Master switch for all floating-point conversions.
+ */
 inline constexpr bool enable_float = LIBXR_PRINT_ENABLE_FLOAT;
 
-/// Enables binary, octal, and hexadecimal integer conversions when integers are enabled. / 在整数功能开启时启用二进制、八进制和十六进制转换
+/**
+ * @brief 在整数功能开启时启用二进制、八进制和十六进制转换 / Enables binary, octal, and hexadecimal integer conversions when integers are enabled.
+ */
 inline constexpr bool enable_integer_base8_16 =
     enable_integer && LIBXR_PRINT_INTEGER_ENABLE_BASE8_16;
-/// Enables 64-bit integer formatting families when integers are enabled. / 在整数功能开启时启用 64 位整数格式化族
+/**
+ * @brief 在整数功能开启时启用 64 位整数格式化族 / Enables 64-bit integer formatting families when integers are enabled.
+ */
 inline constexpr bool enable_integer_64bit =
     enable_integer && LIBXR_PRINT_INTEGER_ENABLE_64BIT;
 
-/// Enables %f / %F when floating-point support is enabled. / 在浮点功能开启时启用 %f / %F
+/**
+ * @brief 在浮点功能开启时启用 %f / %F / Enables %f / %F when floating-point support is enabled.
+ */
 inline constexpr bool enable_float_fixed =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_FIXED;
-/// Enables double-backed default float formatting when floating-point support is enabled. / 在浮点功能开启时启用基于 double 的默认浮点格式化
+/**
+ * @brief 在浮点功能开启时启用基于 double 的默认浮点格式化 / Enables double-backed default float formatting when floating-point support is enabled.
+ */
 inline constexpr bool enable_float_double =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_DOUBLE;
-/// Enables %e / %E when floating-point support is enabled. / 在浮点功能开启时启用 %e / %E
+/**
+ * @brief 在浮点功能开启时启用 %e / %E / Enables %e / %E when floating-point support is enabled.
+ */
 inline constexpr bool enable_float_scientific =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_SCIENTIFIC;
-/// Enables %g / %G when floating-point support is enabled. / 在浮点功能开启时启用 %g / %G
+/**
+ * @brief 在浮点功能开启时启用 %g / %G / Enables %g / %G when floating-point support is enabled.
+ */
 inline constexpr bool enable_float_general =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_GENERAL;
-/// Enables the L floating-point length modifier when floating-point support is enabled. / 在浮点功能开启时启用 L 长度修饰
+/**
+ * @brief 在浮点功能开启时启用 L 长度修饰 / Enables the L floating-point length modifier when floating-point support is enabled.
+ */
 inline constexpr bool enable_float_long_double =
     enable_float_double && LIBXR_PRINT_FLOAT_ENABLE_LONG_DOUBLE;
+static_assert(LIBXR_PRINT_FLOAT_MAX_PRECISION <=
+                  static_cast<int>(std::numeric_limits<uint8_t>::max() - 1),
+              "LibXR::Print: LIBXR_PRINT_FLOAT_MAX_PRECISION must fit in uint8_t "
+              "and stay below the unspecified-precision sentinel");
+static_assert(LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS > 0,
+              "LibXR::Print: LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS must be positive");
+/**
+ * @brief 前端接受的浮点显式精度上限 / Maximum explicit float precision accepted by the frontend.
+ */
+inline constexpr uint8_t max_float_precision =
+    static_cast<uint8_t>(LIBXR_PRINT_FLOAT_MAX_PRECISION);
+/**
+ * @brief 定点浮点格式接受的整数位数上限 / Maximum integer-digit count accepted by fixed float formatting.
+ */
+inline constexpr size_t max_float_integer_digits =
+    static_cast<size_t>(LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS);
 
-/// Enables constant field width parsing. / 启用常量字段宽度解析
+/**
+ * @brief 启用常量字段宽度解析 / Enables constant field width parsing.
+ */
 inline constexpr bool enable_width = LIBXR_PRINT_ENABLE_WIDTH;
-/// Enables constant precision parsing. / 启用常量精度解析
+/**
+ * @brief 启用常量精度解析 / Enables constant precision parsing.
+ */
 inline constexpr bool enable_precision = LIBXR_PRINT_ENABLE_PRECISION;
-/// Enables alternate-form syntax such as # for integer prefixes and float decimal-point retention. / 启用备用格式语法，例如用于整数前缀和浮点保留小数点的 #
+/**
+ * @brief 启用备用格式语法，例如用于整数前缀和浮点保留小数点的 # / Enables alternate-form syntax such as # for integer prefixes and float decimal-point retention.
+ */
 inline constexpr bool enable_alternate = LIBXR_PRINT_ENABLE_ALTERNATE;
-/// Enables source-level explicit argument indexing such as printf n$ and format {1}. / 启用源级显式参数索引，例如 printf 的 n$ 和 format 的 {1}
+/**
+ * @brief 启用源级显式参数索引，例如 printf 的 n$ 和 format 的 {1} / Enables source-level explicit argument indexing such as printf n$ and format {1}.
+ */
 inline constexpr bool enable_explicit_argument_indexing =
     LIBXR_PRINT_ENABLE_EXPLICIT_ARGUMENT_INDEXING;
 }  // namespace LibXR::Print::Config
@@ -128,23 +182,24 @@ inline constexpr bool enable_explicit_argument_indexing =
 namespace LibXR::Print
 {
 /**
- * @brief Core format protocol vocabulary shared by every frontend and the runtime writer.
- * @brief 所有前端与运行期 writer 共用的核心格式协议词汇。
+ * @brief 编译期解析层与运行期写出层之间共用的打印格式协议。 / Shared print-format protocol used between compile-time parsing and runtime writing.
  *
- * FormatArgumentRule answers which C++ argument types are accepted at compile time.
- * FormatPackKind answers how one accepted argument is packed into the runtime
- * argument blob. FormatType answers which semantic render path the runtime should
- * take after unpacking. FormatOp answers which concrete bytecode record is stored
- * in Codes(). FormatProfile is the coarse summary used to specialize the runtime
- * executor for the op families that actually appear.
- * FormatArgumentRule 回答编译期允许哪些 C++ 实参类型；FormatPackKind 回答已接受
- * 的实参在运行期参数字节块里如何打包；FormatType 回答运行期解包后应走哪条语义写出
- * 路径；FormatOp 回答 Codes() 里实际存的是哪种字节码记录；FormatProfile 则是对
- * 当前字节码里实际出现了哪些操作码族的粗粒度汇总，用来特化运行期执行器。
+ * The frontends first decide:
+ * - which C++ argument types are allowed
+ * - how each accepted argument is packed for runtime use
+ * - which text-writing path the runtime writer should take later
+ *
+ * The runtime writer then reads that protocol directly instead of reparsing the
+ * original format string.
+ * 前端会先决定：
+ * - 允许哪些 C++ 实参类型
+ * - 每个实参在运行期该怎样打包
+ * - 运行期最终该走哪条文本写出路径
+ *
+ * 运行期 writer 随后直接读取这套协议，不再重新解析原始格式串。
  */
 /**
- * @brief Compile-time argument matching rules attached to each runtime argument.
- * @brief 每个运行期参数附带的编译期匹配规则。
+ * @brief 每个运行期参数附带的编译期匹配规则。 / Compile-time argument matching rules attached to each runtime argument.
  */
 enum class FormatArgumentRule : uint8_t
 {
@@ -173,8 +228,7 @@ enum class FormatArgumentRule : uint8_t
 };
 
 /**
- * @brief Bit flags stored in a value record's field-spec byte.
- * @brief 保存在值记录字段描述字节中的位标志。
+ * @brief 保存在值记录字段描述字节中的位标志。 / Bit flags stored in a value record's field-spec byte.
  *
  * These bits are not stored in the record-op byte, so their numeric values may
  * overlap with FormatOp values.
@@ -192,8 +246,7 @@ enum class FormatFlag : uint8_t
 };
 
 /**
- * @brief Runtime bytecode operations consumed by Writer.
- * @brief Writer 消费的运行期字节码操作。
+ * @brief Writer 消费的运行期字节码操作。 / Runtime bytecode operations consumed by Writer.
  *
  * Small common cases lower directly to narrow opcodes with only the immediates
  * they actually need. Everything else falls back to GenericField, which keeps
@@ -217,8 +270,7 @@ enum class FormatOp : uint8_t
 };
 
 /**
- * @brief Semantic handler categories used by compile-time analysis and runtime dispatch.
- * @brief 编译期分析和运行期分发共用的语义处理类别。
+ * @brief 编译期分析和运行期分发共用的语义处理类别。 / Semantic handler categories used by compile-time analysis and runtime dispatch.
  */
 enum class FormatType : uint8_t
 {
@@ -253,8 +305,7 @@ enum class FormatType : uint8_t
 };
 
 /**
- * @brief Packed storage categories for runtime arguments.
- * @brief 运行期参数的打包存储类别。
+ * @brief 运行期参数的打包存储类别。 / Packed storage categories for runtime arguments.
  *
  * This only answers "how is one argument stored in the packed argument blob".
  * It does not describe how the final text is rendered.
@@ -275,8 +326,7 @@ enum class FormatPackKind : uint8_t
 };
 
 /**
- * @brief Coarse runtime executor profiles selected at compile time.
- * @brief 编译期选出的粗粒度运行期执行器配置。
+ * @brief 编译期选出的粗粒度运行期执行器配置。 / Coarse runtime executor profiles selected at compile time.
  *
  * The low bits describe which narrow fast-path families appear in the bytecode.
  * Generic marks that at least one field still requires the old wide fallback.
@@ -292,29 +342,43 @@ enum class FormatProfile : uint8_t
   Generic = 1U << 7,   ///< at least one field uses generic fallback / 至少有一个字段使用通用回退
 };
 
-/// Combines two profile bit sets. / 合并两组 profile 位
+/**
+ * @brief 合并两组 profile 位 / Combine two profile bit sets
+ * @param left 左侧 profile 位集合 / Left profile bit set
+ * @param right 右侧 profile 位集合 / Right profile bit set
+ * @return 合并后的 profile 位集合 / Returns the merged profile bit set
+ */
 [[nodiscard]] constexpr FormatProfile operator|(FormatProfile left, FormatProfile right)
 {
   return static_cast<FormatProfile>(static_cast<uint8_t>(left) |
                                     static_cast<uint8_t>(right));
 }
 
-/// Accumulates one profile bit set into another. / 将一组 profile 位累加到另一组
+/**
+ * @brief 将一组 profile 位累加到另一组 / Accumulate one profile bit set into another
+ * @param left 累加目标 / Accumulation target
+ * @param right 待并入的 profile 位 / Profile bits to merge in
+ * @return 并入 `right` 后的 `left` / Returns `left` after merging `right`
+ */
 constexpr FormatProfile& operator|=(FormatProfile& left, FormatProfile right)
 {
   left = left | right;
   return left;
 }
 
-/// Tests whether one profile bit is present. / 判断某个 profile 位是否存在
+/**
+ * @brief 判断某个 profile 位是否存在 / Test whether one profile bit is present
+ * @param profile 待检查的 profile 位集合 / Profile bit set to inspect
+ * @param bit 待测试的单个 profile 位 / Single profile bit to test
+ * @return `profile` 中存在 `bit` 时返回 `true`，否则返回 `false` / Returns `true` when `bit` is present in `profile`, otherwise `false`
+ */
 [[nodiscard]] constexpr bool HasProfile(FormatProfile profile, FormatProfile bit)
 {
   return (static_cast<uint8_t>(profile) & static_cast<uint8_t>(bit)) != 0;
 }
 
 /**
- * @brief Compiled-format runtime contract consumed by Writer.
- * @brief Writer 消费的编译格式运行期协议。
+ * @brief Writer 消费的编译格式运行期协议。 / Compiled-format runtime contract consumed by Writer.
  *
  * A compiled format source always provides Codes(), one contiguous uint8_t byte
  * block terminated in-band by FormatOp::End; ArgumentList(), one field-ordered
@@ -330,14 +394,12 @@ constexpr FormatProfile& operator|=(FormatProfile& left, FormatProfile right)
  */
 
 /**
- * @brief Packed argument metadata shared by compile-time matching and runtime packing.
- * @brief 编译期匹配与运行期打包共用的参数元信息。
+ * @brief 每个参数对应的元信息，同时用于编译期类型检查和运行期打包。 / Per-argument metadata used both for compile-time type checking and runtime packing.
  *
- * pack is the runtime storage contract for the packed argument blob. rule is
- * the compile-time type-matching contract and never appears in the runtime
- * bytecode stream.
- * pack 描述运行期参数字节块里的存储契约；rule 描述编译期类型匹配契约，不会出现在
- * 运行期字节码流里。
+ * `pack` says how the runtime argument blob stores this argument.
+ * `rule` says which C++ types are accepted at compile time.
+ * `pack` 描述运行期参数字节块里如何存这个参数。
+ * `rule` 描述编译期允许哪些 C++ 类型匹配这个参数。
  */
 struct FormatArgumentInfo
 {
@@ -349,19 +411,18 @@ static_assert(sizeof(FormatArgumentInfo) == 2,
               "LibXR::Print::FormatArgumentInfo must stay tightly packed");
 
 /**
- * @brief Normalized value-field semantics shared by all formatting frontends.
- * @brief 所有格式前端共用的规范化值字段语义。
+ * @brief 一条已经决定完毕、运行期 writer 知道如何打印的值字段。 / One fully-decided value field that the runtime writer knows how to print.
  *
- * Each FormatField still describes one source value conversion. The compile-time
- * backend may lower it either to a narrow opcode with only the required
- * immediates, or to GenericField plus the full
- * type/flags/fill/width/precision payload.
- * type chooses the runtime render semantics, pack chooses the packed argument
- * storage, and rule chooses the compile-time argument matching rule.
- * 每个 FormatField 仍然描述一个源级值转换。编译期后端可以把它降为只携带必要
- * 立即数的窄操作码，也可以降为 GenericField 加完整的
- * type/flags/fill/width/precision 载荷。type 决定运行期写出语义，pack 决定参数如何
- * 打包，rule 决定编译期实参匹配规则。
+ * It says:
+ * - which printing path to use
+ * - how the argument was packed
+ * - which compile-time rule accepted that argument
+ * - which width/fill/precision flags still matter at runtime
+ * 它描述的是：
+ * - 该走哪条打印路径
+ * - 参数当时是怎么打包的
+ * - 编译期是按哪条规则接受这个参数的
+ * - 以及运行期仍然需要的宽度/填充/精度信息
  */
 struct FormatField
 {
@@ -376,12 +437,13 @@ struct FormatField
 };
 
 /**
- * @brief Returns the packed runtime byte count for one normalized argument type.
- * @brief 返回单个规范化参数类型在运行期打包后的字节数。
+ * @brief 返回一个运行期已打包参数会占多少字节。 / Returns how many bytes one packed runtime argument occupies.
  *
- * This function only answers "how many bytes does one packed runtime argument of
- * this semantic type occupy", not "how many bytes does one byte-code record use".
- * 这个函数只回答“某种语义参数在运行期打包后占多少字节”，不回答“某条字节码记录占多少字节”。
+ * This answers "how big is one packed argument", not "how long is one opcode".
+ * 这里回答的是“一个参数打包后有多大”，不是“某条操作码记录有多长”。
+ * @param pack Packed storage kind to inspect. / 待检查的打包存储类型。
+ * @return Returns the byte size of one packed argument in this storage kind. /
+ *         返回该存储类型下单个已打包参数的字节数。
  */
 [[nodiscard]] constexpr size_t FormatArgumentBytes(FormatPackKind pack)
 {
