@@ -1,7 +1,8 @@
+#include "topic.hpp"
+
 #include <atomic>
 
 #include "libxr_def.hpp"
-#include "message.hpp"
 #include "mutex.hpp"
 
 using namespace LibXR;
@@ -38,7 +39,7 @@ void Topic::Lock(Topic::TopicHandle topic)
     LockState expected = LockState::UNLOCKED;
     if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
     {
-      /* Multiple threads are trying to lock the same topic */
+      // 非 mutex topic 禁止并发发布
       ASSERT(false);
       return;
     }
@@ -68,7 +69,7 @@ void Topic::LockFromCallback(Topic::TopicHandle topic)
     LockState expected = LockState::UNLOCKED;
     if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
     {
-      /* Multiple threads are trying to lock the same topic */
+      // 回调发布路径要求外围先串行化
       ASSERT(false);
       return;
     }
@@ -108,25 +109,6 @@ Topic::Domain::Domain(const char* name)
       { return static_cast<int>(a) - static_cast<int>(b); });
 
   domain_->Insert(*node_, crc32);
-}
-
-void LibXR::Topic::RegisterCallback(Callback& cb)
-{
-  if (cb.PayloadSize() != 0)
-  {
-    if (block_->data_.check_length)
-    {
-      ASSERT(block_->data_.max_length == cb.PayloadSize());
-    }
-    else
-    {
-      ASSERT(block_->data_.max_length <= cb.PayloadSize());
-    }
-  }
-
-  auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-      LockFreeList::Node<CallbackBlock>(cb);
-  block_->data_.subers.Add(*node);
 }
 
 Topic::Topic() {}

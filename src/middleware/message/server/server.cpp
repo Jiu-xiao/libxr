@@ -1,4 +1,6 @@
-#include "message.hpp"
+#include "server.hpp"
+
+#include "../packet/packet.hpp"
 
 using namespace LibXR;
 
@@ -7,7 +9,7 @@ Topic::Server::Server(size_t buffer_length)
                  { return static_cast<int>(a) - static_cast<int>(b); }),
       queue_(1, buffer_length)
 {
-  /* Minimum size: header8 + crc32 + length24 + crc8 + data +  crc8 = 10 */
+  // 至少容纳空 payload 包
   ASSERT(buffer_length > PACK_BASE_SIZE);
   parse_buff_.size_ = buffer_length;
   parse_buff_.addr_ = new uint8_t[buffer_length];
@@ -33,8 +35,7 @@ size_t Topic::Server::ParseDataRaw(ConstRawData data, bool from_callback, bool i
 {
   size_t count = 0;
 
-  /* Preserve legacy backpressure behavior: if the parser queue is full, this batch is
-   * not appended and parsing continues with bytes that were already buffered. */
+  // 队列不足时整批丢弃新字节
   queue_.PushBatch(data.addr_, data.size_);
 
   while (true)

@@ -1,0 +1,184 @@
+#pragma once
+
+#include "base.hpp"
+
+namespace LibXR
+{
+/**
+ * @struct Topic::QueueBlock
+ * @brief 队列订阅者自己挂的数据块 / Data block owned by one queued subscriber
+ */
+struct Topic::QueueBlock : public Topic::SuberBlock
+{
+  void* queue;  ///< 指向订阅队列实例的擦除指针。Erased pointer to the subscribed queue instance.
+  void (*fun)(MicrosecondTimestamp, RawData,
+              QueueBlock&);  ///< 把一条发布转发进具体队列类型的适配函数。Adapter that forwards one publish into the concrete queue type.
+};
+
+/**
+ * @class Topic::QueuedSubscriber
+ * @brief 每次发布都往队列里塞一份数据的订阅者 / Subscriber that pushes one entry into
+ *        a queue on each publish
+ */
+class Topic::QueuedSubscriber
+{
+ public:
+  /**
+   * @brief 通过主题名称构造队列订阅者 / Construct a queue subscriber by topic name
+   * @tparam Data 队列存储的数据类型 / Data type stored in the queue
+   * @param name 订阅的主题名称 / Name of the subscribed topic
+   * @param queue 订阅的数据队列 / Subscribed data queue
+   * @param domain 可选的域指针，默认为 `nullptr` / Optional domain pointer, default `nullptr`
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @note 队列订阅者只保存 `queue` 的指针；队列对象本身必须至少活到订阅者不再使用
+   *       为止 /
+   *       Queued subscribers keep only a pointer to `queue`; the queue object
+   *       itself must outlive the subscriber's use of it
+   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   *       这次发布就直接丢掉 /
+   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       if that push cannot fit, this publish is dropped immediately
+   */
+  template <typename Data>
+  QueuedSubscriber(const char* name, LockFreeQueue<Data>& queue, Domain* domain = nullptr)
+      : QueuedSubscriber(Topic(WaitTopic(name, UINT32_MAX, domain)), queue)
+  {
+  }
+
+  /**
+   * @brief 通过主题名称构造带时间戳消息队列订阅者 / Construct a queue subscriber for timestamped messages by topic name
+   * @tparam Data 队列消息的数据类型 / Data type stored in the queue message
+   * @param name 订阅的主题名称 / Name of the subscribed topic
+   * @param queue 订阅的消息队列 / Subscribed message queue
+   * @param domain 可选的域指针，默认为 `nullptr` / Optional domain pointer, default `nullptr`
+   * @note 队列订阅者只保存 `queue` 的指针；队列对象本身必须至少活到订阅者不再使用
+   *       为止 /
+   *       Queued subscribers keep only a pointer to `queue`; the queue object
+   *       itself must outlive the subscriber's use of it
+   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   *       这次发布就直接丢掉 /
+   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       if that push cannot fit, this publish is dropped immediately
+   */
+  template <typename Data>
+  QueuedSubscriber(const char* name, LockFreeQueue<Message<Data>>& queue,
+                   Domain* domain = nullptr)
+      : QueuedSubscriber(Topic(WaitTopic(name, UINT32_MAX, domain)), queue)
+  {
+  }
+
+  /**
+   * @brief 使用 `Topic` 和无锁队列构造订阅者 / Construct a subscriber from a `Topic` and a lock-free queue
+   * @tparam Data 队列存储的数据类型 / Data type stored in the queue
+   * @param topic 订阅的主题 / Subscribed topic
+   * @param queue 订阅的数据队列 / Subscribed data queue
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @note 队列订阅者只保存 `queue` 的指针；队列对象本身必须至少活到订阅者不再使用
+   *       为止 /
+   *       Queued subscribers keep only a pointer to `queue`; the queue object
+   *       itself must outlive the subscriber's use of it
+   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   *       这次发布就直接丢掉 /
+   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       if that push cannot fit, this publish is dropped immediately
+   */
+  template <typename Data>
+  QueuedSubscriber(Topic topic, LockFreeQueue<Data>& queue)
+  {
+    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+
+    block_ = new LockFreeList::Node<QueueBlock>;
+    block_->data_.type = SuberType::QUEUE;
+    block_->data_.queue = &queue;
+    block_->data_.fun = [](MicrosecondTimestamp, RawData data, QueueBlock& block)
+    {
+      LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(block.queue);
+      (void)queue->Push(*reinterpret_cast<Data*>(data.addr_));
+    };
+
+    topic.block_->data_.subers.Add(*block_);
+  }
+
+  /**
+   * @brief 使用 `Topic` 和带时间戳消息队列构造订阅者 / Construct a subscriber from a `Topic` and a timestamped message queue
+   * @tparam Data 队列消息的数据类型 / Data type stored in the queue message
+   * @param topic 订阅的主题 / Subscribed topic
+   * @param queue 订阅的消息队列 / Subscribed message queue
+   * @note 队列订阅者只保存 `queue` 的指针；队列对象本身必须至少活到订阅者不再使用
+   *       为止 /
+   *       Queued subscribers keep only a pointer to `queue`; the queue object
+   *       itself must outlive the subscriber's use of it
+   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   *       这次发布就直接丢掉 /
+   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       if that push cannot fit, this publish is dropped immediately
+   */
+  template <typename Data>
+  QueuedSubscriber(Topic topic, LockFreeQueue<Message<Data>>& queue)
+  {
+    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+
+    block_ = new LockFreeList::Node<QueueBlock>;
+    block_->data_.type = SuberType::QUEUE;
+    block_->data_.queue = &queue;
+    block_->data_.fun =
+        [](MicrosecondTimestamp timestamp, RawData data, QueueBlock& block)
+    {
+      LockFreeQueue<Message<Data>>* queue =
+          reinterpret_cast<LockFreeQueue<Message<Data>>*>(block.queue);
+      (void)queue->Push(Message<Data>{timestamp, *reinterpret_cast<Data*>(data.addr_)});
+    };
+
+    topic.block_->data_.subers.Add(*block_);
+  }
+
+  /**
+   * @brief 禁止拷贝队列订阅者 / Copy construction is disabled for queued subscribers
+   * @param other 待拷贝的队列订阅者 / Queued subscriber to copy from
+   */
+  QueuedSubscriber(const QueuedSubscriber& other) = delete;
+
+  /**
+   * @brief 禁止拷贝赋值队列订阅者 / Copy assignment is disabled for queued subscribers
+   * @param other 待拷贝的队列订阅者 / Queued subscriber to copy from
+   * @return 当前队列订阅者 / Returns the current queued subscriber
+   */
+  QueuedSubscriber& operator=(const QueuedSubscriber& other) = delete;
+
+  /**
+   * @brief 移动构造队列订阅者 / Move-construct one queued subscriber
+   * @param other 被转移的队列订阅者 / Queued subscriber to move from
+   * @note 这里只移动本地句柄指针；底层订阅块仍留在 topic 的订阅链表里，`other`
+   *       会被清成空句柄 /
+   *       This moves only the local handle pointer; the underlying subscriber
+   *       block stays registered in the topic list and `other` becomes empty
+   */
+  QueuedSubscriber(QueuedSubscriber&& other) noexcept : block_(other.block_)
+  {
+    other.block_ = nullptr;
+  }
+
+  /**
+   * @brief 移动赋值队列订阅者 / Move-assign one queued subscriber
+   * @param other 被转移的队列订阅者 / Queued subscriber to move from
+   * @return 当前队列订阅者 / Returns the current queued subscriber
+   * @note 这里只改当前包装对象指向的订阅块，不会注销旧块；底层订阅块仍留在 topic
+   *       的订阅链表里，`other` 会被清成空句柄 /
+   *       This only changes which subscriber block the current wrapper points
+   *       to and does not unregister the old block; the underlying subscriber
+   *       blocks stay in the topic list and `other` becomes empty
+   */
+  QueuedSubscriber& operator=(QueuedSubscriber&& other) noexcept
+  {
+    if (this != &other)
+    {
+      block_ = other.block_;
+      other.block_ = nullptr;
+    }
+    return *this;
+  }
+
+ private:
+  LockFreeList::Node<QueueBlock>* block_ = nullptr;  ///< 订阅者数据块。Subscriber data block.
+};
+}  // namespace LibXR
