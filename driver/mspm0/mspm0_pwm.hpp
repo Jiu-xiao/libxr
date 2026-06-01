@@ -1,6 +1,5 @@
 #pragma once
 
-#include "mspm0_conf.hpp"
 #include "pwm.hpp"
 #include "ti_msp_dl_config.h"
 
@@ -33,13 +32,12 @@ class MSPM0PWM : public PWM
   uint32_t clock_freq_;
 };
 
-// Helper macro to define PWM instance resources from SysConfig macros
-#define MSPM0_PWM_CH(name, ch)                                          \
-  LibXR::MSPM0PWM::Resources                                            \
-  {                                                                     \
-    name##_INST, DL_TIMER_CC_##ch##_INDEX,                              \
-        name##_INST_CLK_FREQ* LibXR::MSPM0Config::name##_INST_CLK_DIV*( \
-            LibXR::MSPM0Config::name##_INST_CLK_PSC + 1)                \
+// SysConfig splits the timer instance and output channel into two macro groups.
+#define MSPM0_PWM_INIT(timer_name, output_name)                               \
+  ::LibXR::MSPM0PWM::Resources                                                \
+  {                                                                           \
+    timer_name##_INST, output_name##_IDX,                                     \
+        static_cast<uint32_t>(timer_name##_INST_CLK_FREQ)                     \
   }
 
 }  // namespace LibXR
