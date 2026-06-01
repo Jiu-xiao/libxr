@@ -32,12 +32,12 @@ class MSPM0PWM : public PWM
   uint32_t clock_freq_;
 };
 
-// SysConfig splits the timer instance and output channel into two macro groups.
-#define MSPM0_PWM_INIT(timer_name, output_name)                               \
-  ::LibXR::MSPM0PWM::Resources                                                \
-  {                                                                           \
-    timer_name##_INST, output_name##_IDX,                                     \
-        static_cast<uint32_t>(timer_name##_INST_CLK_FREQ)                     \
+// SysConfig splits the timer instance and GPIO channel into two macro groups.
+#define MSPM0_PWM_INIT(timer_name, gpio_name)             \
+  ::LibXR::MSPM0PWM::Resources                            \
+  {                                                       \
+    timer_name##_INST, gpio_name##_IDX,                   \
+        static_cast<uint32_t>(timer_name##_INST_CLK_FREQ) \
   }
 
 }  // namespace LibXR
