@@ -417,6 +417,22 @@ void mspm0_can_pack_to_tx_elem(const CAN::ClassicPack& pack, DL_MCAN_TxBufElemen
 
 extern "C"
 {
+  volatile uint32_t g_mspm0_can_irq_line1_count = 0;
+  volatile uint32_t g_mspm0_can_irq_unexpected_iidx_count = 0;
+  volatile uint32_t g_mspm0_can_irq_last_iidx = 0;
+  volatile uint32_t g_mspm0_can_irq_last_ir = 0;
+  volatile uint32_t g_mspm0_can_irq_last_ris = 0;
+  volatile uint32_t g_mspm0_can_irq_last_mis = 0;
+  volatile uint32_t g_mspm0_can_irq_rf0n_count = 0;
+  volatile uint32_t g_mspm0_can_irq_rf1n_count = 0;
+  volatile uint32_t g_mspm0_can_irq_tc_count = 0;
+  volatile uint32_t g_mspm0_can_irq_ara_count = 0;
+  volatile uint32_t g_mspm0_can_irq_mraf_count = 0;
+  volatile uint32_t g_mspm0_can_drv_init_stage = 0;
+  volatile uint32_t g_mspm0_can_drv_init_first_fault_stage = 0;
+  volatile uint32_t g_mspm0_can_drv_init_last_ir = 0;
+  volatile uint32_t g_mspm0_can_drv_init_last_ris = 0;
+  volatile uint32_t g_mspm0_can_drv_init_last_mis = 0;
   volatile uint32_t g_mspm0_can_clk_dbg_sysosc_hz = 0;
   volatile uint32_t g_mspm0_can_clk_dbg_syspll_ref_hz = 0;
   volatile uint32_t g_mspm0_can_clk_dbg_syspll_clk1_hz = 0;
