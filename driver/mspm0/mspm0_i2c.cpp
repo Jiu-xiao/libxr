@@ -225,9 +225,9 @@ ErrorCode MSPM0I2C::SetConfig(Configuration config)
 
   uint8_t dma_tx_trigger = 0U;
   uint8_t dma_rx_trigger = 0U;
-  const bool USE_DMA = MSPM0_I2C_HAS_DMA_CHANNELS &&
-                       mspm0_i2c_resolve_dma_triggers(res_.instance, dma_tx_trigger,
-                                                      dma_rx_trigger);
+  const bool USE_DMA =
+      MSPM0_I2C_HAS_DMA_CHANNELS &&
+      mspm0_i2c_resolve_dma_triggers(res_.instance, dma_tx_trigger, dma_rx_trigger);
   dma_enabled_ = USE_DMA;
 
   DL_I2C_disableController(res_.instance);
@@ -249,9 +249,9 @@ ErrorCode MSPM0I2C::SetConfig(Configuration config)
   {
     DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_TX_CHANNEL);
     DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_RX_CHANNEL);
-    DL_DMA_clearInterruptStatus(
-        DMA, mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL) |
-                 mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL));
+    DL_DMA_clearInterruptStatus(DMA,
+                                mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL) |
+                                    mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL));
   }
 
   if (USE_DMA)
@@ -441,8 +441,7 @@ ErrorCode MSPM0I2C::DmaWrite7(uint16_t addr7, ConstRawData write_data)
 
   auto stop_dma = [&]()
   {
-    const uint32_t DMA_TX_MASK =
-        mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL);
+    const uint32_t DMA_TX_MASK = mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL);
     DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_TX_CHANNEL);
     DL_DMA_clearInterruptStatus(DMA, DMA_TX_MASK);
   };
@@ -458,8 +457,7 @@ ErrorCode MSPM0I2C::DmaWrite7(uint16_t addr7, ConstRawData write_data)
     DL_I2C_disableInterrupt(res_.instance, 0xFFFFFFFFU);
     DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
 
-    const uint32_t DMA_TX_MASK =
-        mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL);
+    const uint32_t DMA_TX_MASK = mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL);
     DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_TX_CHANNEL);
     DL_DMA_clearInterruptStatus(DMA, DMA_TX_MASK);
     DL_DMA_setSrcAddr(
@@ -527,8 +525,7 @@ ErrorCode MSPM0I2C::DmaRead7(uint16_t addr7, RawData read_data)
 
   auto stop_dma = [&]()
   {
-    const uint32_t DMA_RX_MASK =
-        mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL);
+    const uint32_t DMA_RX_MASK = mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL);
     DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_RX_CHANNEL);
     DL_DMA_clearInterruptStatus(DMA, DMA_RX_MASK);
   };
@@ -544,8 +541,7 @@ ErrorCode MSPM0I2C::DmaRead7(uint16_t addr7, RawData read_data)
     DL_I2C_disableInterrupt(res_.instance, 0xFFFFFFFFU);
     DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
 
-    const uint32_t DMA_RX_MASK =
-        mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL);
+    const uint32_t DMA_RX_MASK = mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL);
     DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_RX_CHANNEL);
     DL_DMA_clearInterruptStatus(DMA, DMA_RX_MASK);
     DL_DMA_setSrcAddr(DMA, MSPM0_I2C_DMA_RX_CHANNEL,

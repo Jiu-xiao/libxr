@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "can.hpp"
 #include "ti_msp_dl_config.h"
 
@@ -25,6 +27,8 @@ class MSPM0CAN : public CAN
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
   uint32_t GetClockFreq() const override;
+
+  static uint32_t ResolveClockFreq(MCAN_Regs* instance);
 
   ErrorCode Init();
 
@@ -56,9 +60,11 @@ class MSPM0CAN : public CAN
   static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
   static constexpr uint32_t INIT_TIMEOUT = 300000U;
 
-  ErrorCode TrySendImmediate(const ClassicPack& pack);
+  ErrorCode SendImmediate(const ClassicPack& pack);
 
   void ProcessTxInterrupt();
+
+  void ProcessErrorInterrupt(uint32_t intr_status);
 
   void ProcessRxFIFO(uint32_t fifo_num);
 
@@ -68,13 +74,15 @@ class MSPM0CAN : public CAN
 
   Resources res_;
   LockFreePool<ClassicPack> tx_pool_;
+  std::atomic<uint32_t> tx_lock_{0};
+  std::atomic<uint32_t> tx_pend_{0};
 
   static MSPM0CAN* instance_map_[MAX_CAN_INSTANCES];
 };
 
-#define MSPM0_CAN_INIT(name, tx_pool_size)                                                \
-  ::LibXR::MSPM0CAN::Resources{name##_INST, name##_INST_INT_IRQN,                        \
-                                ::LibXR::MSPM0CAN::ResolveIndex(name##_INST_INT_IRQN)},  \
+#define MSPM0_CAN_INIT(name, tx_pool_size)                                             \
+  ::LibXR::MSPM0CAN::Resources{name##_INST, name##_INST_INT_IRQN,                      \
+                               ::LibXR::MSPM0CAN::ResolveIndex(name##_INST_INT_IRQN)}, \
       (tx_pool_size)
 
 }  // namespace LibXR

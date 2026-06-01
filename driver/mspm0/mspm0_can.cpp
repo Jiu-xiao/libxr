@@ -8,28 +8,28 @@ using namespace LibXR;
 
 extern "C"
 {
-extern volatile uint32_t g_mspm0_can_irq_line1_count;
-extern volatile uint32_t g_mspm0_can_irq_unexpected_iidx_count;
-extern volatile uint32_t g_mspm0_can_irq_last_iidx;
-extern volatile uint32_t g_mspm0_can_irq_last_ir;
-extern volatile uint32_t g_mspm0_can_irq_last_ris;
-extern volatile uint32_t g_mspm0_can_irq_last_mis;
-extern volatile uint32_t g_mspm0_can_irq_rf0n_count;
-extern volatile uint32_t g_mspm0_can_irq_rf1n_count;
-extern volatile uint32_t g_mspm0_can_irq_tc_count;
-extern volatile uint32_t g_mspm0_can_irq_ara_count;
-extern volatile uint32_t g_mspm0_can_irq_mraf_count;
-extern volatile uint32_t g_mspm0_can_drv_init_stage;
-extern volatile uint32_t g_mspm0_can_drv_init_first_fault_stage;
-extern volatile uint32_t g_mspm0_can_drv_init_last_ir;
-extern volatile uint32_t g_mspm0_can_drv_init_last_ris;
-extern volatile uint32_t g_mspm0_can_drv_init_last_mis;
-extern volatile uint32_t g_mspm0_can_clk_dbg_sysosc_hz;
-extern volatile uint32_t g_mspm0_can_clk_dbg_syspll_ref_hz;
-extern volatile uint32_t g_mspm0_can_clk_dbg_syspll_clk1_hz;
-extern volatile uint32_t g_mspm0_can_clk_dbg_canclksrc_raw;
-extern volatile uint32_t g_mspm0_can_clk_dbg_clkdiv_raw;
-extern volatile uint32_t g_mspm0_can_clk_dbg_fclk_hz;
+  extern volatile uint32_t g_mspm0_can_irq_line1_count;
+  extern volatile uint32_t g_mspm0_can_irq_unexpected_iidx_count;
+  extern volatile uint32_t g_mspm0_can_irq_last_iidx;
+  extern volatile uint32_t g_mspm0_can_irq_last_ir;
+  extern volatile uint32_t g_mspm0_can_irq_last_ris;
+  extern volatile uint32_t g_mspm0_can_irq_last_mis;
+  extern volatile uint32_t g_mspm0_can_irq_rf0n_count;
+  extern volatile uint32_t g_mspm0_can_irq_rf1n_count;
+  extern volatile uint32_t g_mspm0_can_irq_tc_count;
+  extern volatile uint32_t g_mspm0_can_irq_ara_count;
+  extern volatile uint32_t g_mspm0_can_irq_mraf_count;
+  extern volatile uint32_t g_mspm0_can_drv_init_stage;
+  extern volatile uint32_t g_mspm0_can_drv_init_first_fault_stage;
+  extern volatile uint32_t g_mspm0_can_drv_init_last_ir;
+  extern volatile uint32_t g_mspm0_can_drv_init_last_ris;
+  extern volatile uint32_t g_mspm0_can_drv_init_last_mis;
+  extern volatile uint32_t g_mspm0_can_clk_dbg_sysosc_hz;
+  extern volatile uint32_t g_mspm0_can_clk_dbg_syspll_ref_hz;
+  extern volatile uint32_t g_mspm0_can_clk_dbg_syspll_clk1_hz;
+  extern volatile uint32_t g_mspm0_can_clk_dbg_canclksrc_raw;
+  extern volatile uint32_t g_mspm0_can_clk_dbg_clkdiv_raw;
+  extern volatile uint32_t g_mspm0_can_clk_dbg_fclk_hz;
 }
 
 namespace
@@ -45,12 +45,16 @@ constexpr uint32_t MSPM0_CAN_INTR_MASK =
     DL_MCAN_INTR_SRC_PROTOCOL_ERR_ARB | DL_MCAN_INTR_SRC_PROTOCOL_ERR_DATA |
     DL_MCAN_INTR_SRC_MSG_RAM_ACCESS_FAILURE;
 
+constexpr uint32_t MSPM0_CAN_ERROR_INTR_MASK =
+    DL_MCAN_INTR_SRC_BUS_OFF_STATUS | DL_MCAN_INTR_SRC_PROTOCOL_ERR_ARB |
+    DL_MCAN_INTR_SRC_PROTOCOL_ERR_DATA | DL_MCAN_INTR_SRC_RES_ADDR_ACCESS |
+    DL_MCAN_INTR_SRC_MSG_RAM_ACCESS_FAILURE;
+
 constexpr uint32_t MSPM0_SYSOSC_FREQ_4M_HZ = 4000000U;
 constexpr uint32_t MSPM0_SYSOSC_FREQ_16M_HZ = 16000000U;
 constexpr uint32_t MSPM0_SYSOSC_FREQ_24M_HZ = 24000000U;
 constexpr uint32_t MSPM0_SYSOSC_FREQ_32M_HZ = 32000000U;
-constexpr uint32_t MSPM0_SAMPLE_POINT_SCALE = 1000U;
-constexpr uint32_t MSPM0_SAMPLE_POINT_TOLERANCE = 2U;
+constexpr uint32_t MSPM0_CAN_CONFIG_TIMEOUT = 300000U;
 
 void mspm0_can_capture_init_state(MCAN_Regs* instance, uint32_t stage)
 {
@@ -70,9 +74,15 @@ void mspm0_can_capture_init_state(MCAN_Regs* instance, uint32_t stage)
 
 constexpr uint32_t mspm0_can_dlc_to_len(uint32_t dlc)
 {
-  constexpr uint8_t LENGTH_TABLE[16] = {0, 1, 2, 3, 4, 5, 6, 7,
+  constexpr uint8_t LENGTH_TABLE[16] = {0, 1,  2,  3,  4,  5,  6,  7,
                                         8, 12, 16, 20, 24, 32, 48, 64};
   return LENGTH_TABLE[(dlc < 16U) ? dlc : 15U];
+}
+
+constexpr uint32_t mspm0_can_update_field(uint32_t reg, uint32_t mask, uint32_t ofs,
+                                          uint32_t value)
+{
+  return (reg & ~mask) | ((value << ofs) & mask);
 }
 
 constexpr ErrorCode mspm0_can_status_to_error(int32_t status)
@@ -94,6 +104,50 @@ constexpr ErrorCode mspm0_can_status_to_error(int32_t status)
     case -1:
     default:
       return ErrorCode::FAILED;
+  }
+}
+
+CAN::ErrorID mspm0_can_error_id_from_status(const DL_MCAN_ProtocolStatus& protocol_status)
+{
+  if (protocol_status.busOffStatus != 0U)
+  {
+    return CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
+  }
+
+  if (protocol_status.errPassive != 0U)
+  {
+    return CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
+  }
+
+  if (protocol_status.warningStatus != 0U)
+  {
+    return CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
+  }
+
+  switch (protocol_status.lastErrCode)
+  {
+    case DL_MCAN_ERR_CODE_STUFF_ERROR:
+      return CAN::ErrorID::CAN_ERROR_ID_STUFF;
+
+    case DL_MCAN_ERR_CODE_FORM_ERROR:
+      return CAN::ErrorID::CAN_ERROR_ID_FORM;
+
+    case DL_MCAN_ERR_CODE_ACK_ERROR:
+      return CAN::ErrorID::CAN_ERROR_ID_ACK;
+
+    case DL_MCAN_ERR_CODE_BIT1_ERROR:
+      return CAN::ErrorID::CAN_ERROR_ID_BIT1;
+
+    case DL_MCAN_ERR_CODE_BIT0_ERROR:
+      return CAN::ErrorID::CAN_ERROR_ID_BIT0;
+
+    case DL_MCAN_ERR_CODE_CRC_ERROR:
+      return CAN::ErrorID::CAN_ERROR_ID_CRC;
+
+    case DL_MCAN_ERR_CODE_NO_ERROR:
+    case DL_MCAN_ERR_CODE_NO_CHANGE:
+    default:
+      return CAN::ErrorID::CAN_ERROR_ID_GENERIC;
   }
 }
 
@@ -211,17 +265,17 @@ uint32_t mspm0_can_syspll_clk1_freq_hz()
     return 0U;
   }
 
-  const uint32_t qdiv =
-      ((SYSCTL->SOCLOCK.SYSPLLCFG1 & SYSCTL_SYSPLLCFG1_QDIV_MASK) >>
-       SYSCTL_SYSPLLCFG1_QDIV_OFS) +
-      1U;
+  const uint32_t qdiv = ((SYSCTL->SOCLOCK.SYSPLLCFG1 & SYSCTL_SYSPLLCFG1_QDIV_MASK) >>
+                         SYSCTL_SYSPLLCFG1_QDIV_OFS) +
+                        1U;
   const uint32_t rdiv_clk1 =
       ((cfg0 & SYSCTL_SYSPLLCFG0_RDIVCLK1_MASK) >> SYSCTL_SYSPLLCFG0_RDIVCLK1_OFS) + 1U;
   const uint32_t clk1_div = 2U * rdiv_clk1;
   const uint64_t vco_hz = (static_cast<uint64_t>(ref_hz) * static_cast<uint64_t>(qdiv)) /
                           static_cast<uint64_t>(pdiv);
 
-  const uint32_t clk1_hz = static_cast<uint32_t>(vco_hz / static_cast<uint64_t>(clk1_div));
+  const uint32_t clk1_hz =
+      static_cast<uint32_t>(vco_hz / static_cast<uint64_t>(clk1_div));
   g_mspm0_can_clk_dbg_syspll_clk1_hz = clk1_hz;
   return clk1_hz;
 }
@@ -247,15 +301,12 @@ uint32_t mspm0_can_fclk_divider_hz(DL_MCAN_FCLK_DIV divider)
   }
 }
 
-const MCAN_MCAN_Regs* mspm0_can_core(const MCAN_Regs* instance)
-{
-  return &instance->MCANSS.MCAN;
-}
-
 uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
 {
-  const uint32_t canclksrc_raw = SYSCTL->SOCLOCK.GENCLKCFG & SYSCTL_GENCLKCFG_CANCLKSRC_MASK;
-  const uint32_t clkdiv_raw = instance->MCANSS.TI_WRAPPER.MSP.MCANSS_CLKDIV & MCAN_CLKDIV_RATIO_MASK;
+  const uint32_t canclksrc_raw =
+      SYSCTL->SOCLOCK.GENCLKCFG & SYSCTL_GENCLKCFG_CANCLKSRC_MASK;
+  const uint32_t clkdiv_raw =
+      instance->MCANSS.TI_WRAPPER.MSP.MCANSS_CLKDIV & MCAN_CLKDIV_RATIO_MASK;
   g_mspm0_can_clk_dbg_canclksrc_raw = canclksrc_raw;
   g_mspm0_can_clk_dbg_clkdiv_raw = clkdiv_raw;
 
@@ -266,12 +317,12 @@ uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
     {
       const uint32_t cfg0 = SYSCTL->SOCLOCK.SYSPLLCFG0;
       const uint32_t pdiv = mspm0_can_syspll_pdiv_value();
-      const uint32_t qdiv =
-          ((SYSCTL->SOCLOCK.SYSPLLCFG1 & SYSCTL_SYSPLLCFG1_QDIV_MASK) >>
-           SYSCTL_SYSPLLCFG1_QDIV_OFS) +
-          1U;
+      const uint32_t qdiv = ((SYSCTL->SOCLOCK.SYSPLLCFG1 & SYSCTL_SYSPLLCFG1_QDIV_MASK) >>
+                             SYSCTL_SYSPLLCFG1_QDIV_OFS) +
+                            1U;
       const uint32_t rdiv_clk1 =
-          ((cfg0 & SYSCTL_SYSPLLCFG0_RDIVCLK1_MASK) >> SYSCTL_SYSPLLCFG0_RDIVCLK1_OFS) + 1U;
+          ((cfg0 & SYSCTL_SYSPLLCFG0_RDIVCLK1_MASK) >> SYSCTL_SYSPLLCFG0_RDIVCLK1_OFS) +
+          1U;
       const uint32_t clk1_div = 2U * rdiv_clk1;
 
       g_mspm0_can_clk_dbg_sysosc_hz = CPUCLK_FREQ;
@@ -296,7 +347,8 @@ uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
       return 0U;
   }
 
-  const uint32_t divider = mspm0_can_fclk_divider_hz(static_cast<DL_MCAN_FCLK_DIV>(clkdiv_raw));
+  const uint32_t divider =
+      mspm0_can_fclk_divider_hz(static_cast<DL_MCAN_FCLK_DIV>(clkdiv_raw));
   if ((src_hz == 0U) || (divider == 0U))
   {
     g_mspm0_can_clk_dbg_fclk_hz = 0U;
@@ -308,22 +360,14 @@ uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
   return fclk_hz;
 }
 
-bool mspm0_can_is_loopback_enabled(const MCAN_Regs* instance)
+uint32_t mspm0_can_tx_dedicated_buf_count(const MCAN_Regs* instance)
 {
-  const MCAN_MCAN_Regs* core = mspm0_can_core(instance);
-  return ((core->MCAN_CCCR & MCAN_CCCR_TEST_MASK) != 0U) &&
-         ((core->MCAN_TEST & MCAN_TEST_LBCK_MASK) != 0U);
+  return (instance->MCANSS.MCAN.MCAN_TXBC & MCAN_TXBC_NDTB_MASK) >> MCAN_TXBC_NDTB_OFS;
 }
 
-uint32_t mspm0_can_sample_point_permille(uint32_t tseg1, uint32_t tseg2)
+uint32_t mspm0_can_tx_fifo_size(const MCAN_Regs* instance)
 {
-  const uint32_t tq_num = 1U + tseg1 + tseg2;
-  if (tq_num == 0U)
-  {
-    return 0U;
-  }
-
-  return (((1U + tseg1) * MSPM0_SAMPLE_POINT_SCALE) + (tq_num / 2U)) / tq_num;
+  return (instance->MCANSS.MCAN.MCAN_TXBC & MCAN_TXBC_TFQS_MASK) >> MCAN_TXBC_TFQS_OFS;
 }
 
 void mspm0_can_pack_to_tx_elem(const CAN::ClassicPack& pack, DL_MCAN_TxBufElement& elem)
@@ -373,12 +417,12 @@ void mspm0_can_pack_to_tx_elem(const CAN::ClassicPack& pack, DL_MCAN_TxBufElemen
 
 extern "C"
 {
-volatile uint32_t g_mspm0_can_clk_dbg_sysosc_hz = 0;
-volatile uint32_t g_mspm0_can_clk_dbg_syspll_ref_hz = 0;
-volatile uint32_t g_mspm0_can_clk_dbg_syspll_clk1_hz = 0;
-volatile uint32_t g_mspm0_can_clk_dbg_canclksrc_raw = 0;
-volatile uint32_t g_mspm0_can_clk_dbg_clkdiv_raw = 0;
-volatile uint32_t g_mspm0_can_clk_dbg_fclk_hz = 0;
+  volatile uint32_t g_mspm0_can_clk_dbg_sysosc_hz = 0;
+  volatile uint32_t g_mspm0_can_clk_dbg_syspll_ref_hz = 0;
+  volatile uint32_t g_mspm0_can_clk_dbg_syspll_clk1_hz = 0;
+  volatile uint32_t g_mspm0_can_clk_dbg_canclksrc_raw = 0;
+  volatile uint32_t g_mspm0_can_clk_dbg_clkdiv_raw = 0;
+  volatile uint32_t g_mspm0_can_clk_dbg_fclk_hz = 0;
 }
 
 MSPM0CAN* MSPM0CAN::instance_map_[MAX_CAN_INSTANCES] = {nullptr};
@@ -459,152 +503,307 @@ ErrorCode MSPM0CAN::SetConfig(const CAN::Configuration& cfg)
     return ErrorCode::ARG_ERR;
   }
 
-  if (cfg.mode.triple_sampling)
+  (void)cfg.bitrate;
+  (void)cfg.sample_point;
+  (void)cfg.mode.triple_sampling;
+
+  const auto& bt = cfg.bit_timing;
+
+  constexpr uint32_t BRP_FIELD_MAX =
+      (MCAN_NBTP_NBRP_MASK >> MCAN_NBTP_NBRP_OFS);  // stores brp-1
+  constexpr uint32_t TSEG1_FIELD_MAX =
+      (MCAN_NBTP_NTSEG1_MASK >> MCAN_NBTP_NTSEG1_OFS);  // stores tseg1-1
+  constexpr uint32_t TSEG2_FIELD_MAX =
+      (MCAN_NBTP_NTSEG2_MASK >> MCAN_NBTP_NTSEG2_OFS);  // stores tseg2-1
+  constexpr uint32_t SJW_FIELD_MAX =
+      (MCAN_NBTP_NSJW_MASK >> MCAN_NBTP_NSJW_OFS);  // stores sjw-1
+
+  constexpr uint32_t BRP_MAX = BRP_FIELD_MAX + 1U;
+  constexpr uint32_t TSEG1_MAX = TSEG1_FIELD_MAX + 1U;
+  constexpr uint32_t TSEG2_MAX = TSEG2_FIELD_MAX + 1U;
+  constexpr uint32_t SJW_MAX = SJW_FIELD_MAX + 1U;
+
+  if ((bt.brp != 0U) && ((bt.brp < 1U) || (bt.brp > BRP_MAX)))
   {
-    return ErrorCode::NOT_SUPPORT;
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
   }
 
-  const bool loopback_enabled = mspm0_can_is_loopback_enabled(res_.instance);
-  const MCAN_MCAN_Regs* core = mspm0_can_core(res_.instance);
-  const bool listen_only_enabled = ((core->MCAN_CCCR & MCAN_CCCR_MON_MASK) != 0U);
-  const bool one_shot_enabled = ((core->MCAN_CCCR & MCAN_CCCR_DAR_MASK) != 0U);
-
-  if ((cfg.mode.loopback != loopback_enabled) ||
-      (cfg.mode.listen_only != listen_only_enabled) ||
-      (cfg.mode.one_shot != one_shot_enabled))
+  const uint32_t requested_tseg1 = bt.prop_seg + bt.phase_seg1;
+  if ((bt.prop_seg != 0U) || (bt.phase_seg1 != 0U))
   {
-    return ErrorCode::CHECK_ERR;
+    if ((requested_tseg1 < 1U) || (requested_tseg1 > TSEG1_MAX))
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
   }
 
-  const uint32_t fclk_hz = GetClockFreq();
-  if (fclk_hz == 0U)
+  if ((bt.phase_seg2 != 0U) && ((bt.phase_seg2 < 1U) || (bt.phase_seg2 > TSEG2_MAX)))
   {
-    return ErrorCode::NOT_SUPPORT;
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
+  }
+
+  if (bt.sjw != 0U)
+  {
+    if ((bt.sjw < 1U) || (bt.sjw > SJW_MAX))
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
+
+    if ((bt.phase_seg2 != 0U) && (bt.sjw > bt.phase_seg2))
+    {
+      ASSERT(false);
+      return ErrorCode::ARG_ERR;
+    }
   }
 
   DL_MCAN_BitTimingParams hw_timing = {};
   DL_MCAN_getBitTime(res_.instance, &hw_timing);
 
-  const uint32_t actual_brp = hw_timing.nomRatePrescalar + 1U;
-  const uint32_t actual_tseg1 = hw_timing.nomTimeSeg1 + 1U;
-  const uint32_t actual_tseg2 = hw_timing.nomTimeSeg2 + 1U;
-  const uint32_t actual_sjw = hw_timing.nomSynchJumpWidth + 1U;
-  const uint32_t actual_tq_num = 1U + actual_tseg1 + actual_tseg2;
-  const uint32_t actual_bitrate = fclk_hz / (actual_brp * actual_tq_num);
-  const uint32_t actual_sample_point =
-      mspm0_can_sample_point_permille(actual_tseg1, actual_tseg2);
+  const uint32_t effective_brp =
+      (bt.brp != 0U) ? bt.brp : (hw_timing.nomRatePrescalar + 1U);
+  const uint32_t effective_tseg1 =
+      (requested_tseg1 != 0U) ? requested_tseg1 : (hw_timing.nomTimeSeg1 + 1U);
+  const uint32_t effective_tseg2 =
+      (bt.phase_seg2 != 0U) ? bt.phase_seg2 : (hw_timing.nomTimeSeg2 + 1U);
+  const uint32_t effective_sjw =
+      (bt.sjw != 0U) ? bt.sjw : (hw_timing.nomSynchJumpWidth + 1U);
 
-  if ((cfg.bitrate != 0U) && (cfg.bitrate != actual_bitrate))
+  if (effective_sjw > effective_tseg2)
   {
-    return ErrorCode::CHECK_ERR;
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
   }
 
-  if (cfg.sample_point > 0.0f)
+  const uint32_t irqn_enabled = NVIC_GetEnableIRQ(res_.irqn);
+  NVIC_DisableIRQ(res_.irqn);
+  NVIC_ClearPendingIRQ(res_.irqn);
+
+  DL_MCAN_enableIntr(res_.instance, MSPM0_CAN_INTR_MASK, false);
+  DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_0, false);
+  DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_1, false);
+  DL_MCAN_disableInterrupt(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
+
+  ErrorCode ec = ErrorCode::FAILED;
+  bool controller_normal = false;
+
+  do
   {
-    const uint32_t requested_sample_point =
-        static_cast<uint32_t>(cfg.sample_point * static_cast<float>(MSPM0_SAMPLE_POINT_SCALE) +
-                              0.5f);
-    const uint32_t delta = (requested_sample_point > actual_sample_point)
-                               ? (requested_sample_point - actual_sample_point)
-                               : (actual_sample_point - requested_sample_point);
-    if (delta > MSPM0_SAMPLE_POINT_TOLERANCE)
+    DL_MCAN_setOpMode(res_.instance, DL_MCAN_OPERATION_MODE_SW_INIT);
+
+    uint32_t timeout = MSPM0_CAN_CONFIG_TIMEOUT;
+    while (DL_MCAN_getOpMode(res_.instance) != DL_MCAN_OPERATION_MODE_SW_INIT)
     {
-      return ErrorCode::CHECK_ERR;
+      if (timeout-- == 0U)
+      {
+        ec = ErrorCode::BUSY;
+        break;
+      }
     }
-  }
+    if (ec != ErrorCode::FAILED)
+    {
+      break;
+    }
 
-  if ((cfg.bit_timing.brp != 0U) && (cfg.bit_timing.brp != actual_brp))
+    MCAN_MCAN_Regs* core = &res_.instance->MCANSS.MCAN;
+
+    uint32_t cccr = core->MCAN_CCCR;
+    cccr = mspm0_can_update_field(cccr, MCAN_CCCR_CCE_MASK, MCAN_CCCR_CCE_OFS, 1U);
+    core->MCAN_CCCR = cccr;
+
+    timeout = MSPM0_CAN_CONFIG_TIMEOUT;
+    while ((core->MCAN_CCCR & MCAN_CCCR_CCE_MASK) == 0U)
+    {
+      if (timeout-- == 0U)
+      {
+        ec = ErrorCode::BUSY;
+        break;
+      }
+    }
+    if (ec != ErrorCode::FAILED)
+    {
+      break;
+    }
+
+    cccr = core->MCAN_CCCR;
+    cccr = cfg.mode.one_shot ? (cccr | MCAN_CCCR_DAR_MASK) : (cccr & ~MCAN_CCCR_DAR_MASK);
+
+    const bool internal_loopback = cfg.mode.loopback;
+    const bool monitor_mode = cfg.mode.listen_only;
+    cccr = monitor_mode ? (cccr | MCAN_CCCR_MON_MASK) : (cccr & ~MCAN_CCCR_MON_MASK);
+
+    if (internal_loopback)
+    {
+      cccr |= MCAN_CCCR_TEST_MASK;
+      core->MCAN_CCCR = cccr;
+      core->MCAN_TEST |= MCAN_TEST_LBCK_MASK;
+    }
+    else
+    {
+      core->MCAN_TEST &= ~MCAN_TEST_LBCK_MASK;
+      cccr &= ~MCAN_CCCR_TEST_MASK;
+      core->MCAN_CCCR = cccr;
+    }
+
+    DL_MCAN_BitTimingParams new_timing = hw_timing;
+    new_timing.nomRatePrescalar = effective_brp - 1U;
+    new_timing.nomTimeSeg1 = effective_tseg1 - 1U;
+    new_timing.nomTimeSeg2 = effective_tseg2 - 1U;
+    new_timing.nomSynchJumpWidth = effective_sjw - 1U;
+    new_timing.dataRatePrescalar = 0U;
+    new_timing.dataTimeSeg1 = 0U;
+    new_timing.dataTimeSeg2 = 0U;
+    new_timing.dataSynchJumpWidth = 0U;
+
+    ec = mspm0_can_status_to_error(DL_MCAN_setBitTime(res_.instance, &new_timing));
+    if (ec != ErrorCode::OK)
+    {
+      break;
+    }
+
+    DL_MCAN_setOpMode(res_.instance, DL_MCAN_OPERATION_MODE_NORMAL);
+
+    timeout = MSPM0_CAN_CONFIG_TIMEOUT;
+    while (DL_MCAN_getOpMode(res_.instance) != DL_MCAN_OPERATION_MODE_NORMAL)
+    {
+      if (timeout-- == 0U)
+      {
+        ec = ErrorCode::BUSY;
+        break;
+      }
+    }
+    if (ec != ErrorCode::OK)
+    {
+      break;
+    }
+
+    controller_normal = true;
+  } while (false);
+
+  if (!controller_normal)
   {
-    return ErrorCode::CHECK_ERR;
+    DL_MCAN_setOpMode(res_.instance, DL_MCAN_OPERATION_MODE_NORMAL);
+
+    uint32_t timeout = MSPM0_CAN_CONFIG_TIMEOUT;
+    while (DL_MCAN_getOpMode(res_.instance) != DL_MCAN_OPERATION_MODE_NORMAL)
+    {
+      if (timeout-- == 0U)
+      {
+        controller_normal = false;
+        break;
+      }
+    }
+    controller_normal =
+        (DL_MCAN_getOpMode(res_.instance) == DL_MCAN_OPERATION_MODE_NORMAL);
   }
 
-  const uint32_t requested_tseg1 = cfg.bit_timing.prop_seg + cfg.bit_timing.phase_seg1;
-  if ((requested_tseg1 != 0U) && (requested_tseg1 != actual_tseg1))
+  if (controller_normal)
   {
-    return ErrorCode::CHECK_ERR;
+    DL_MCAN_clearIntrStatus(res_.instance, DL_MCAN_INTR_MASK_ALL,
+                            DL_MCAN_INTR_SRC_MCAN_LINE_0);
+    DL_MCAN_clearIntrStatus(res_.instance, DL_MCAN_INTR_MASK_ALL,
+                            DL_MCAN_INTR_SRC_MCAN_LINE_1);
+    DL_MCAN_clearInterruptStatus(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
+
+    DL_MCAN_enableIntr(res_.instance, MSPM0_CAN_INTR_MASK, true);
+    DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_0, true);
+    DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_1, true);
+    DL_MCAN_enableInterrupt(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
   }
 
-  if ((cfg.bit_timing.phase_seg2 != 0U) && (cfg.bit_timing.phase_seg2 != actual_tseg2))
+  NVIC_ClearPendingIRQ(res_.irqn);
+  if (irqn_enabled != 0U)
   {
-    return ErrorCode::CHECK_ERR;
+    NVIC_EnableIRQ(res_.irqn);
   }
 
-  if ((cfg.bit_timing.sjw != 0U) && (cfg.bit_timing.sjw != actual_sjw))
-  {
-    return ErrorCode::CHECK_ERR;
-  }
-
-  return ErrorCode::OK;
+  return ec;
 }
 
-uint32_t MSPM0CAN::GetClockFreq() const
+uint32_t MSPM0CAN::GetClockFreq() const { return ResolveClockFreq(res_.instance); }
+
+uint32_t MSPM0CAN::ResolveClockFreq(MCAN_Regs* instance)
 {
-  if (res_.instance == nullptr)
+  if (instance == nullptr)
   {
     return 0U;
   }
 
-  return mspm0_can_mcan_fclk_hz(res_.instance);
+  return mspm0_can_mcan_fclk_hz(instance);
 }
 
-ErrorCode MSPM0CAN::TrySendImmediate(const ClassicPack& pack)
+ErrorCode MSPM0CAN::SendImmediate(const ClassicPack& pack)
 {
-  DL_MCAN_TxFIFOStatus tx_status = {};
-  DL_MCAN_getTxFIFOQueStatus(res_.instance, &tx_status);
+  DL_MCAN_TxBufElement tx_elem = {};
+  mspm0_can_pack_to_tx_elem(pack, tx_elem);
 
-  if (tx_status.freeLvl == 0U)
+  if (mspm0_can_tx_fifo_size(res_.instance) != 0U)
+  {
+    DL_MCAN_TxFIFOStatus tx_status = {};
+    DL_MCAN_getTxFIFOQueStatus(res_.instance, &tx_status);
+
+    if (tx_status.freeLvl == 0U)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    DL_MCAN_writeMsgRam(res_.instance, DL_MCAN_MEM_TYPE_FIFO, 0U, &tx_elem);
+
+    const uint32_t tx_index = tx_status.putIdx;
+    const int32_t tx_intr_ans =
+        DL_MCAN_TXBufTransIntrEnable(res_.instance, tx_index, true);
+    ASSERT(tx_intr_ans == 0);
+    UNUSED(tx_intr_ans);
+    return mspm0_can_status_to_error(DL_MCAN_TXBufAddReq(res_.instance, tx_index));
+  }
+
+  const uint32_t dedicated_buf_count = mspm0_can_tx_dedicated_buf_count(res_.instance);
+  if (dedicated_buf_count == 0U)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  const uint32_t req_pending = DL_MCAN_getTxBufReqPend(res_.instance);
+  uint32_t tx_index = 0U;
+  bool found_free_buf = false;
+  for (; tx_index < dedicated_buf_count; ++tx_index)
+  {
+    if ((req_pending & (1UL << tx_index)) == 0U)
+    {
+      found_free_buf = true;
+      break;
+    }
+  }
+
+  if (!found_free_buf)
   {
     return ErrorCode::BUSY;
   }
 
-  DL_MCAN_TxBufElement tx_elem = {};
-  mspm0_can_pack_to_tx_elem(pack, tx_elem);
+  DL_MCAN_writeMsgRam(res_.instance, DL_MCAN_MEM_TYPE_BUF, tx_index, &tx_elem);
+  const int32_t tx_intr_ans = DL_MCAN_TXBufTransIntrEnable(res_.instance, tx_index, true);
+  ASSERT(tx_intr_ans == 0);
+  UNUSED(tx_intr_ans);
 
-  const uint32_t TX_INDEX = tx_status.putIdx;
-  DL_MCAN_writeMsgRam(res_.instance, DL_MCAN_MEM_TYPE_FIFO, TX_INDEX, &tx_elem);
-
-  return mspm0_can_status_to_error(DL_MCAN_TXBufAddReq(res_.instance, TX_INDEX));
+  return mspm0_can_status_to_error(DL_MCAN_TXBufAddReq(res_.instance, tx_index));
 }
 
 ErrorCode MSPM0CAN::AddMessage(const ClassicPack& pack)
 {
-  const uint32_t primask = __get_PRIMASK();
-  __disable_irq();
-
-  const ErrorCode SEND_ANS = TrySendImmediate(pack);
-  if (SEND_ANS == ErrorCode::OK)
+  if (pack.type == Type::ERROR)
   {
-    if (primask == 0U)
-    {
-      __enable_irq();
-    }
-    return ErrorCode::OK;
+    return ErrorCode::ARG_ERR;
   }
 
-  if (SEND_ANS != ErrorCode::BUSY)
-  {
-    if (primask == 0U)
-    {
-      __enable_irq();
-    }
-    return SEND_ANS;
-  }
-
-  uint32_t slot = 0U;
-  const ErrorCode PUT_ANS = tx_pool_.Put(pack, slot);
-
-  ProcessTxInterrupt();
-
-  if (primask == 0U)
-  {
-    __enable_irq();
-  }
-
-  if (PUT_ANS != ErrorCode::OK)
+  if (tx_pool_.Put(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }
 
+  ProcessTxInterrupt();
   return ErrorCode::OK;
 }
 
@@ -632,33 +831,70 @@ ErrorCode MSPM0CAN::GetErrorState(CAN::ErrorState& state) const
 
 void MSPM0CAN::ProcessTxInterrupt()
 {
-  DL_MCAN_TxFIFOStatus tx_status = {};
+  tx_pend_.store(1U, std::memory_order_release);
 
-  while (true)
+  uint32_t expected = 0U;
+  if (!tx_lock_.compare_exchange_strong(expected, 1U, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
   {
-    DL_MCAN_getTxFIFOQueStatus(res_.instance, &tx_status);
-    if (tx_status.freeLvl == 0U)
+    return;
+  }
+
+  for (;;)
+  {
+    tx_pend_.store(0U, std::memory_order_release);
+
+    while (true)
+    {
+      ClassicPack next_pack = {};
+      if (tx_pool_.Get(next_pack) != ErrorCode::OK)
+      {
+        break;
+      }
+
+      const ErrorCode send_ans = SendImmediate(next_pack);
+      if (send_ans != ErrorCode::OK)
+      {
+        (void)tx_pool_.Put(next_pack);
+        break;
+      }
+    }
+
+    tx_lock_.store(0U, std::memory_order_release);
+
+    if (tx_pend_.load(std::memory_order_acquire) == 0U)
     {
       return;
     }
 
-    ClassicPack next_pack = {};
-    if (tx_pool_.Get(next_pack) != ErrorCode::OK)
+    expected = 0U;
+    if (!tx_lock_.compare_exchange_strong(expected, 1U, std::memory_order_acquire,
+                                          std::memory_order_relaxed))
     {
-      return;
-    }
-
-    const ErrorCode SEND_ANS = TrySendImmediate(next_pack);
-    if (SEND_ANS != ErrorCode::OK)
-    {
-      ASSERT(SEND_ANS == ErrorCode::BUSY);
-      uint32_t slot = 0U;
-      const ErrorCode REQUEUE_ANS = tx_pool_.Put(next_pack, slot);
-      ASSERT(REQUEUE_ANS == ErrorCode::OK);
-      UNUSED(REQUEUE_ANS);
       return;
     }
   }
+}
+
+void MSPM0CAN::ProcessErrorInterrupt(uint32_t intr_status)
+{
+  ClassicPack pack = {};
+  pack.type = Type::ERROR;
+  pack.dlc = 0U;
+
+  DL_MCAN_ProtocolStatus protocol_status = {};
+  DL_MCAN_getProtocolStatus(res_.instance, &protocol_status);
+
+  if ((intr_status & MSPM0_CAN_ERROR_INTR_MASK) != 0U)
+  {
+    pack.id = CAN::FromErrorID(mspm0_can_error_id_from_status(protocol_status));
+  }
+  else
+  {
+    pack.id = CAN::FromErrorID(CAN::ErrorID::CAN_ERROR_ID_GENERIC);
+  }
+
+  OnMessage(pack, true);
 }
 
 void MSPM0CAN::ProcessRxFIFO(uint32_t fifo_num)
@@ -675,10 +911,10 @@ void MSPM0CAN::ProcessRxFIFO(uint32_t fifo_num)
     }
 
     DL_MCAN_RxBufElement rx_elem = {};
-    DL_MCAN_readMsgRam(res_.instance, DL_MCAN_MEM_TYPE_FIFO, 0U, fifo_num,
-                       &rx_elem);
+    DL_MCAN_readMsgRam(res_.instance, DL_MCAN_MEM_TYPE_FIFO, 0U, fifo_num, &rx_elem);
 
-    const int32_t ACK_ANS = DL_MCAN_writeRxFIFOAck(res_.instance, fifo_num, fifo_status.getIdx);
+    const int32_t ACK_ANS =
+        DL_MCAN_writeRxFIFOAck(res_.instance, fifo_num, fifo_status.getIdx);
     ASSERT(ACK_ANS == 0);
     UNUSED(ACK_ANS);
 
@@ -696,9 +932,10 @@ void MSPM0CAN::ProcessRxFIFO(uint32_t fifo_num)
     }
 
     const uint32_t payload_len = mspm0_can_dlc_to_len(rx_elem.dlc);
-    pack.dlc = static_cast<uint8_t>((payload_len <= sizeof(pack.data)) ? payload_len
-                                                                       : sizeof(pack.data));
-    const size_t copy_len = (payload_len < sizeof(pack.data)) ? payload_len : sizeof(pack.data);
+    pack.dlc = static_cast<uint8_t>(
+        (payload_len <= sizeof(pack.data)) ? payload_len : sizeof(pack.data));
+    const size_t copy_len =
+        (payload_len < sizeof(pack.data)) ? payload_len : sizeof(pack.data);
     if (copy_len > 0U)
     {
       memcpy(pack.data, rx_elem.data, copy_len);
@@ -744,6 +981,11 @@ void MSPM0CAN::HandleMcanLineInterrupt(DL_MCAN_INTR_SRC_MCAN line)
 
   DL_MCAN_clearIntrStatus(res_.instance, intr_status, line);
 
+  if ((intr_status & MSPM0_CAN_ERROR_INTR_MASK) != 0U)
+  {
+    ProcessErrorInterrupt(intr_status);
+  }
+
   if ((intr_status & DL_MCAN_INTR_SRC_RX_FIFO0_NEW_MSG) != 0U)
   {
     ProcessRxFIFO(DL_MCAN_RX_FIFO_NUM_0);
@@ -754,9 +996,9 @@ void MSPM0CAN::HandleMcanLineInterrupt(DL_MCAN_INTR_SRC_MCAN line)
     ProcessRxFIFO(DL_MCAN_RX_FIFO_NUM_1);
   }
 
-  if ((intr_status & (DL_MCAN_INTR_SRC_TRANS_COMPLETE |
-                      DL_MCAN_INTR_SRC_TRANS_CANCEL_FINISH |
-                      DL_MCAN_INTR_SRC_TX_FIFO_EMPTY)) != 0U)
+  if ((intr_status &
+       (DL_MCAN_INTR_SRC_TRANS_COMPLETE | DL_MCAN_INTR_SRC_TRANS_CANCEL_FINISH |
+        DL_MCAN_INTR_SRC_TX_FIFO_EMPTY)) != 0U)
   {
     ProcessTxInterrupt();
   }

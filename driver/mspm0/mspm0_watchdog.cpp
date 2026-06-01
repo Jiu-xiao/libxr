@@ -42,7 +42,8 @@ MSPM0Watchdog::MSPM0Watchdog(WWDT_Regs* wwdt, uint32_t timeout_ms, uint32_t feed
 
 ErrorCode MSPM0Watchdog::SetConfig(const Configuration& config)
 {
-  if (config.feed_ms == 0U || config.timeout_ms == 0U || config.feed_ms > config.timeout_ms)
+  if (config.feed_ms == 0U || config.timeout_ms == 0U ||
+      config.feed_ms > config.timeout_ms)
   {
     return ErrorCode::ARG_ERR;
   }

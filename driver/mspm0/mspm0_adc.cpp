@@ -1,8 +1,9 @@
 #include "mspm0_adc.hpp"
 
+#include <ti/driverlib/dl_dma.h>
+
 #include <cstdint>
 
-#include <ti/driverlib/dl_dma.h>
 
 using namespace LibXR;
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "can.hpp"
 #include "ti_msp_dl_config.h"
 
@@ -22,25 +24,19 @@ class MSPM0CANFD : public FDCAN
 
   MSPM0CANFD(Resources res, uint32_t tx_pool_size = 8);
 
-  ErrorCode SetConfig(const CAN::Configuration& cfg) override
-  {
-    (void)cfg;
-    return ErrorCode::NOT_SUPPORT;
-  }
+  ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
-  ErrorCode SetConfig(const FDCAN::Configuration& cfg) override
-  {
-    (void)cfg;
-    return ErrorCode::NOT_SUPPORT;
-  }
+  ErrorCode SetConfig(const FDCAN::Configuration& cfg) override;
 
-  uint32_t GetClockFreq() const override { return CPUCLK_FREQ; }
+  uint32_t GetClockFreq() const override;
 
   ErrorCode Init();
 
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
   ErrorCode AddMessage(const FDPack& pack) override;
+
+  ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   static void OnInterrupt(uint8_t index);
 
@@ -66,11 +62,13 @@ class MSPM0CANFD : public FDCAN
   static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
   static constexpr uint32_t INIT_TIMEOUT = 300000U;
 
-  ErrorCode TrySendImmediateClassic(const ClassicPack& pack);
+  ErrorCode SendImmediateClassic(const ClassicPack& pack);
 
-  ErrorCode TrySendImmediateFD(const FDPack& pack);
+  ErrorCode SendImmediateFD(const FDPack& pack);
 
   void ProcessTxInterrupt();
+
+  void ProcessErrorStatusInterrupt(uint32_t intr_status);
 
   void ProcessRxFIFO(uint32_t fifo_num);
 
@@ -81,16 +79,18 @@ class MSPM0CANFD : public FDCAN
   Resources res_;
   LockFreePool<ClassicPack> tx_pool_;
   LockFreePool<FDPack> tx_pool_fd_;
+  std::atomic<uint32_t> tx_lock_{0};
+  std::atomic<uint32_t> tx_pend_{0};
 
   static MSPM0CANFD* instance_map_[MAX_CAN_INSTANCES];
 };
 
-#define MSPM0_CANFD_INIT(name, tx_pool_size)                                                \
-  ::LibXR::MSPM0CANFD::Resources{name##_INST, name##_INST_INT_IRQN,                        \
-                                  ::LibXR::MSPM0CANFD::ResolveIndex(name##_INST_INT_IRQN)},\
+#define MSPM0_CANFD_INIT(name, tx_pool_size)                    \
+  ::LibXR::MSPM0CANFD::Resources{                               \
+      name##_INST, name##_INST_INT_IRQN,                        \
+      ::LibXR::MSPM0CANFD::ResolveIndex(name##_INST_INT_IRQN)}, \
       (tx_pool_size)
 
 }  // namespace LibXR
 
 #endif
-
