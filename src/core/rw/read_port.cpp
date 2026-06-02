@@ -311,12 +311,6 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
   queue_data_->Reset();
 
   auto state = busy_.load(std::memory_order_acquire);
-  if (state == BusyState::CLEARING)
-  {
-    busy_.store(BusyState::IDLE, std::memory_order_release);
-    return;
-  }
-
   if (state == BusyState::PENDING)
   {
     if (info_.op.type == ReadOperation::OperationType::BLOCK)
