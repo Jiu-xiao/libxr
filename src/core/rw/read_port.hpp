@@ -167,6 +167,27 @@ class ReadPort
   virtual void OnRxDequeue(bool) {}
 
   /**
+   * @brief 清空当前已排队的 RX 字节。
+   * @brief Discards the RX bytes currently queued in software.
+   *
+   * 该接口只丢弃当前 queue_data_ 中已经排队的字节，不参与 backend teardown，也不会
+   * 失败完成挂起读请求。若存在正在推进的读请求，则返回 BUSY。
+   * This API only discards the bytes already queued in queue_data_. It does not
+   * participate in backend teardown and does not fail-complete an in-flight read.
+   * Returns BUSY when a read request is currently in progress.
+   *
+   * @note The discard is snapshot-based: bytes that arrive after this call claims the
+   *       queue may remain queued for a later reader/clear call.
+   * @note 丢弃按快照进行：本次 claim 队列之后再到达的字节，可以留给后续读取或下次清队列。
+   *
+   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
+   * @return `OK` 表示本次清队列成功完成；`BUSY` 表示当前有读请求占有该端口。
+   *         `OK` means the clear operation completed; `BUSY` means an active read still
+   *         owns this port.
+   */
+  [[nodiscard]] ErrorCode ClearQueuedData(bool in_isr = false);
+
+  /**
    * @brief Processes pending reads.
    * @brief 处理挂起的读取请求。
    *

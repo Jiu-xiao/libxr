@@ -254,6 +254,34 @@ void ReadPort::ProcessPendingReads(bool in_isr)
   }
 }
 
+ErrorCode ReadPort::ClearQueuedData(bool in_isr)
+{
+  ASSERT(queue_data_ != nullptr);
+
+  while (true)
+  {
+    auto state = busy_.load(std::memory_order_acquire);
+    if (state != BusyState::IDLE && state != BusyState::EVENT)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    busy_.store(BusyState::IDLE, std::memory_order_release);
+
+    const size_t queued_size = queue_data_->Size();
+    if (queued_size == 0)
+    {
+      return ErrorCode::OK;
+    }
+
+    const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
+    ASSERT(pop_ans == ErrorCode::OK);
+    OnRxDequeue(in_isr);
+
+    return ErrorCode::OK;
+  }
+}
+
 void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
