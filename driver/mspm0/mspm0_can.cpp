@@ -6,32 +6,6 @@
 
 using namespace LibXR;
 
-extern "C"
-{
-  extern volatile uint32_t g_mspm0_can_irq_line1_count;
-  extern volatile uint32_t g_mspm0_can_irq_unexpected_iidx_count;
-  extern volatile uint32_t g_mspm0_can_irq_last_iidx;
-  extern volatile uint32_t g_mspm0_can_irq_last_ir;
-  extern volatile uint32_t g_mspm0_can_irq_last_ris;
-  extern volatile uint32_t g_mspm0_can_irq_last_mis;
-  extern volatile uint32_t g_mspm0_can_irq_rf0n_count;
-  extern volatile uint32_t g_mspm0_can_irq_rf1n_count;
-  extern volatile uint32_t g_mspm0_can_irq_tc_count;
-  extern volatile uint32_t g_mspm0_can_irq_ara_count;
-  extern volatile uint32_t g_mspm0_can_irq_mraf_count;
-  extern volatile uint32_t g_mspm0_can_drv_init_stage;
-  extern volatile uint32_t g_mspm0_can_drv_init_first_fault_stage;
-  extern volatile uint32_t g_mspm0_can_drv_init_last_ir;
-  extern volatile uint32_t g_mspm0_can_drv_init_last_ris;
-  extern volatile uint32_t g_mspm0_can_drv_init_last_mis;
-  extern volatile uint32_t g_mspm0_can_clk_dbg_sysosc_hz;
-  extern volatile uint32_t g_mspm0_can_clk_dbg_syspll_ref_hz;
-  extern volatile uint32_t g_mspm0_can_clk_dbg_syspll_clk1_hz;
-  extern volatile uint32_t g_mspm0_can_clk_dbg_canclksrc_raw;
-  extern volatile uint32_t g_mspm0_can_clk_dbg_clkdiv_raw;
-  extern volatile uint32_t g_mspm0_can_clk_dbg_fclk_hz;
-}
-
 namespace
 {
 
@@ -55,22 +29,6 @@ constexpr uint32_t MSPM0_SYSOSC_FREQ_16M_HZ = 16000000U;
 constexpr uint32_t MSPM0_SYSOSC_FREQ_24M_HZ = 24000000U;
 constexpr uint32_t MSPM0_SYSOSC_FREQ_32M_HZ = 32000000U;
 constexpr uint32_t MSPM0_CAN_CONFIG_TIMEOUT = 300000U;
-
-void mspm0_can_capture_init_state(MCAN_Regs* instance, uint32_t stage)
-{
-  g_mspm0_can_drv_init_stage = stage;
-  g_mspm0_can_drv_init_last_ir = DL_MCAN_getIntrStatus(instance);
-  g_mspm0_can_drv_init_last_ris =
-      DL_MCAN_getRawInterruptStatus(instance, MSPM0_CAN_MSP_LINE_MASK);
-  g_mspm0_can_drv_init_last_mis =
-      DL_MCAN_getEnabledInterruptStatus(instance, MSPM0_CAN_MSP_LINE_MASK);
-
-  if ((g_mspm0_can_drv_init_first_fault_stage == 0U) &&
-      ((g_mspm0_can_drv_init_last_ir & DL_MCAN_INTR_SRC_RES_ADDR_ACCESS) != 0U))
-  {
-    g_mspm0_can_drv_init_first_fault_stage = stage;
-  }
-}
 
 constexpr uint32_t mspm0_can_dlc_to_len(uint32_t dlc)
 {
@@ -187,7 +145,6 @@ uint32_t mspm0_can_sysosc_freq_hz()
       break;
   }
 
-  g_mspm0_can_clk_dbg_sysosc_hz = sysosc_hz;
   return sysosc_hz;
 }
 
@@ -213,19 +170,15 @@ uint32_t mspm0_can_syspll_ref_freq_hz()
   {
     const uint32_t sysosc_hz = mspm0_can_sysosc_freq_hz();
     const uint32_t ref_hz = (sysosc_hz != 0U) ? sysosc_hz : CPUCLK_FREQ;
-    g_mspm0_can_clk_dbg_syspll_ref_hz = ref_hz;
     return ref_hz;
   }
 
   if (pll_ref == static_cast<uint32_t>(DL_SYSCTL_SYSPLL_REF_HFCLK))
   {
-    const uint32_t ref_hz = mspm0_can_hfclk_freq_hz();
-    g_mspm0_can_clk_dbg_syspll_ref_hz = ref_hz;
-    return ref_hz;
+    return mspm0_can_hfclk_freq_hz();
   }
 #endif
 
-  g_mspm0_can_clk_dbg_syspll_ref_hz = 0U;
   return 0U;
 }
 
@@ -274,10 +227,7 @@ uint32_t mspm0_can_syspll_clk1_freq_hz()
   const uint64_t vco_hz = (static_cast<uint64_t>(ref_hz) * static_cast<uint64_t>(qdiv)) /
                           static_cast<uint64_t>(pdiv);
 
-  const uint32_t clk1_hz =
-      static_cast<uint32_t>(vco_hz / static_cast<uint64_t>(clk1_div));
-  g_mspm0_can_clk_dbg_syspll_clk1_hz = clk1_hz;
-  return clk1_hz;
+  return static_cast<uint32_t>(vco_hz / static_cast<uint64_t>(clk1_div));
 }
 
 uint32_t mspm0_can_fclk_divider_hz(DL_MCAN_FCLK_DIV divider)
@@ -307,8 +257,6 @@ uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
       SYSCTL->SOCLOCK.GENCLKCFG & SYSCTL_GENCLKCFG_CANCLKSRC_MASK;
   const uint32_t clkdiv_raw =
       instance->MCANSS.TI_WRAPPER.MSP.MCANSS_CLKDIV & MCAN_CLKDIV_RATIO_MASK;
-  g_mspm0_can_clk_dbg_canclksrc_raw = canclksrc_raw;
-  g_mspm0_can_clk_dbg_clkdiv_raw = clkdiv_raw;
 
   uint32_t src_hz = 0U;
   switch (canclksrc_raw)
@@ -325,17 +273,12 @@ uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
           1U;
       const uint32_t clk1_div = 2U * rdiv_clk1;
 
-      g_mspm0_can_clk_dbg_sysosc_hz = CPUCLK_FREQ;
-      g_mspm0_can_clk_dbg_syspll_ref_hz = CPUCLK_FREQ;
-
       if ((pdiv != 0U) && (clk1_div != 0U))
       {
         src_hz = static_cast<uint32_t>(
             (static_cast<uint64_t>(CPUCLK_FREQ) * static_cast<uint64_t>(qdiv)) /
             (static_cast<uint64_t>(pdiv) * static_cast<uint64_t>(clk1_div)));
       }
-
-      g_mspm0_can_clk_dbg_syspll_clk1_hz = src_hz;
       break;
     }
 
@@ -351,13 +294,10 @@ uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
       mspm0_can_fclk_divider_hz(static_cast<DL_MCAN_FCLK_DIV>(clkdiv_raw));
   if ((src_hz == 0U) || (divider == 0U))
   {
-    g_mspm0_can_clk_dbg_fclk_hz = 0U;
     return 0U;
   }
 
-  const uint32_t fclk_hz = src_hz / divider;
-  g_mspm0_can_clk_dbg_fclk_hz = fclk_hz;
-  return fclk_hz;
+  return src_hz / divider;
 }
 
 uint32_t mspm0_can_tx_dedicated_buf_count(const MCAN_Regs* instance)
@@ -415,32 +355,6 @@ void mspm0_can_pack_to_tx_elem(const CAN::ClassicPack& pack, DL_MCAN_TxBufElemen
 
 }  // namespace
 
-extern "C"
-{
-  volatile uint32_t g_mspm0_can_irq_line1_count = 0;
-  volatile uint32_t g_mspm0_can_irq_unexpected_iidx_count = 0;
-  volatile uint32_t g_mspm0_can_irq_last_iidx = 0;
-  volatile uint32_t g_mspm0_can_irq_last_ir = 0;
-  volatile uint32_t g_mspm0_can_irq_last_ris = 0;
-  volatile uint32_t g_mspm0_can_irq_last_mis = 0;
-  volatile uint32_t g_mspm0_can_irq_rf0n_count = 0;
-  volatile uint32_t g_mspm0_can_irq_rf1n_count = 0;
-  volatile uint32_t g_mspm0_can_irq_tc_count = 0;
-  volatile uint32_t g_mspm0_can_irq_ara_count = 0;
-  volatile uint32_t g_mspm0_can_irq_mraf_count = 0;
-  volatile uint32_t g_mspm0_can_drv_init_stage = 0;
-  volatile uint32_t g_mspm0_can_drv_init_first_fault_stage = 0;
-  volatile uint32_t g_mspm0_can_drv_init_last_ir = 0;
-  volatile uint32_t g_mspm0_can_drv_init_last_ris = 0;
-  volatile uint32_t g_mspm0_can_drv_init_last_mis = 0;
-  volatile uint32_t g_mspm0_can_clk_dbg_sysosc_hz = 0;
-  volatile uint32_t g_mspm0_can_clk_dbg_syspll_ref_hz = 0;
-  volatile uint32_t g_mspm0_can_clk_dbg_syspll_clk1_hz = 0;
-  volatile uint32_t g_mspm0_can_clk_dbg_canclksrc_raw = 0;
-  volatile uint32_t g_mspm0_can_clk_dbg_clkdiv_raw = 0;
-  volatile uint32_t g_mspm0_can_clk_dbg_fclk_hz = 0;
-}
-
 MSPM0CAN* MSPM0CAN::instance_map_[MAX_CAN_INSTANCES] = {nullptr};
 
 MSPM0CAN::MSPM0CAN(Resources res, uint32_t tx_pool_size)
@@ -461,53 +375,35 @@ MSPM0CAN::MSPM0CAN(Resources res, uint32_t tx_pool_size)
 
 ErrorCode MSPM0CAN::Init()
 {
-  g_mspm0_can_drv_init_stage = 0U;
-  g_mspm0_can_drv_init_first_fault_stage = 0U;
-  g_mspm0_can_drv_init_last_ir = 0U;
-  g_mspm0_can_drv_init_last_ris = 0U;
-  g_mspm0_can_drv_init_last_mis = 0U;
-  mspm0_can_capture_init_state(res_.instance, 10U);
-
   uint32_t timeout = INIT_TIMEOUT;
   while (!DL_MCAN_isMemInitDone(res_.instance))
   {
     if (timeout-- == 0U)
     {
-      mspm0_can_capture_init_state(res_.instance, 11U);
       return ErrorCode::BUSY;
     }
   }
-  mspm0_can_capture_init_state(res_.instance, 20U);
 
   timeout = INIT_TIMEOUT;
   while (DL_MCAN_getOpMode(res_.instance) != DL_MCAN_OPERATION_MODE_NORMAL)
   {
     if (timeout-- == 0U)
     {
-      mspm0_can_capture_init_state(res_.instance, 21U);
       return ErrorCode::BUSY;
     }
   }
-  mspm0_can_capture_init_state(res_.instance, 30U);
 
   DL_MCAN_enableIntr(res_.instance, MSPM0_CAN_INTR_MASK, true);
-  mspm0_can_capture_init_state(res_.instance, 40U);
   DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_0, true);
-  mspm0_can_capture_init_state(res_.instance, 50U);
   DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_1, true);
-  mspm0_can_capture_init_state(res_.instance, 60U);
 
   DL_MCAN_clearIntrStatus(res_.instance, DL_MCAN_INTR_MASK_ALL,
                           DL_MCAN_INTR_SRC_MCAN_LINE_0);
-  mspm0_can_capture_init_state(res_.instance, 70U);
   DL_MCAN_clearIntrStatus(res_.instance, DL_MCAN_INTR_MASK_ALL,
                           DL_MCAN_INTR_SRC_MCAN_LINE_1);
-  mspm0_can_capture_init_state(res_.instance, 80U);
 
   DL_MCAN_clearInterruptStatus(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
-  mspm0_can_capture_init_state(res_.instance, 90U);
   DL_MCAN_enableInterrupt(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
-  mspm0_can_capture_init_state(res_.instance, 100U);
 
   return ErrorCode::OK;
 }
@@ -964,35 +860,9 @@ void MSPM0CAN::ProcessRxFIFO(uint32_t fifo_num)
 void MSPM0CAN::HandleMcanLineInterrupt(DL_MCAN_INTR_SRC_MCAN line)
 {
   const uint32_t intr_status = DL_MCAN_getIntrStatus(res_.instance);
-  g_mspm0_can_irq_last_ir = intr_status;
   if (intr_status == 0U)
   {
     return;
-  }
-
-  if ((intr_status & DL_MCAN_INTR_SRC_RX_FIFO0_NEW_MSG) != 0U)
-  {
-    g_mspm0_can_irq_rf0n_count++;
-  }
-
-  if ((intr_status & DL_MCAN_INTR_SRC_RX_FIFO1_NEW_MSG) != 0U)
-  {
-    g_mspm0_can_irq_rf1n_count++;
-  }
-
-  if ((intr_status & DL_MCAN_INTR_SRC_TRANS_COMPLETE) != 0U)
-  {
-    g_mspm0_can_irq_tc_count++;
-  }
-
-  if ((intr_status & DL_MCAN_INTR_SRC_RES_ADDR_ACCESS) != 0U)
-  {
-    g_mspm0_can_irq_ara_count++;
-  }
-
-  if ((intr_status & DL_MCAN_INTR_SRC_MSG_RAM_ACCESS_FAILURE) != 0U)
-  {
-    g_mspm0_can_irq_mraf_count++;
   }
 
   DL_MCAN_clearIntrStatus(res_.instance, intr_status, line);
@@ -1026,11 +896,6 @@ void MSPM0CAN::HandleInterrupt()
   {
     const uint32_t msp_status =
         DL_MCAN_getRawInterruptStatus(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
-    g_mspm0_can_irq_last_ris = msp_status;
-    g_mspm0_can_irq_last_mis =
-        DL_MCAN_getEnabledInterruptStatus(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
-    g_mspm0_can_irq_last_iidx = 0U;
-
     if (msp_status == 0U)
     {
       return;
@@ -1044,14 +909,8 @@ void MSPM0CAN::HandleInterrupt()
 
     if ((msp_status & DL_MCAN_MSP_INTERRUPT_LINE1) != 0U)
     {
-      g_mspm0_can_irq_line1_count++;
       DL_MCAN_clearInterruptStatus(res_.instance, DL_MCAN_MSP_INTERRUPT_LINE1);
       HandleMcanLineInterrupt(DL_MCAN_INTR_SRC_MCAN_LINE_1);
-    }
-
-    if ((msp_status & ~MSPM0_CAN_MSP_LINE_MASK) != 0U)
-    {
-      g_mspm0_can_irq_unexpected_iidx_count++;
     }
   }
 }
