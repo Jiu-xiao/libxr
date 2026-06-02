@@ -275,10 +275,19 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
     }
 
     const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
-    ASSERT(pop_ans == ErrorCode::OK);
-    OnRxDequeue(in_isr);
+    if (pop_ans == ErrorCode::OK)
+    {
+      OnRxDequeue(in_isr);
+      return ErrorCode::OK;
+    }
 
-    return ErrorCode::OK;
+    // Without a dedicated busy state, ClearQueuedData() can race with a
+    // concurrent ready-read that consumes part or all of the snapshot after
+    // the size check. Treat that as a normal concurrent outcome and retry.
+    // 在不引入专用 busy 状态的前提下，ClearQueuedData() 可能和并发的
+    // ready-read 竞争：对方会在本次 size 快照之后先消费掉部分或全部字节。
+    // 这属于正常并发结果，这里重试即可。
+    ASSERT(pop_ans == ErrorCode::EMPTY);
   }
 }
 
