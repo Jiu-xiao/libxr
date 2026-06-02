@@ -156,6 +156,14 @@ inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT
 
 }  // namespace LibXRTest
 
+#if defined(LIBXR_TEST_BUILD)
+namespace LibXR::Detail
+{
+void SetReadPortClearQueuedDataBeforePopTestHook(
+    void (*hook)(ReadPort& port, size_t queued_size, bool in_isr));
+}
+#endif
+
 namespace
 {
 using LibXRTest::ASYNC_MODES;
@@ -218,15 +226,16 @@ struct TrackingReadPort : LibXR::ReadPort
 #if defined(LIBXR_TEST_BUILD)
 struct ScopedClearQueuedDataBeforePopHook
 {
-  explicit ScopedClearQueuedDataBeforePopHook(
-      LibXR::ReadPort::ClearQueuedDataBeforePopHook hook)
+  explicit ScopedClearQueuedDataBeforePopHook(void (*hook)(LibXR::ReadPort& port,
+                                                           size_t queued_size,
+                                                           bool in_isr))
   {
-    LibXR::ReadPort::clear_queued_data_before_pop_hook_ = hook;
+    LibXR::Detail::SetReadPortClearQueuedDataBeforePopTestHook(hook);
   }
 
   ~ScopedClearQueuedDataBeforePopHook()
   {
-    LibXR::ReadPort::clear_queued_data_before_pop_hook_ = nullptr;
+    LibXR::Detail::SetReadPortClearQueuedDataBeforePopTestHook(nullptr);
   }
 
   ScopedClearQueuedDataBeforePopHook(const ScopedClearQueuedDataBeforePopHook&) = delete;

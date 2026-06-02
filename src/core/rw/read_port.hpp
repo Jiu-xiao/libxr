@@ -52,12 +52,6 @@ class ReadPort
   std::atomic<BusyState> busy_{BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
 
-#if defined(LIBXR_TEST_BUILD)
-  using ClearQueuedDataBeforePopHook =
-      void (*)(ReadPort& port, size_t queued_size, bool in_isr);
-  static ClearQueuedDataBeforePopHook clear_queued_data_before_pop_hook_;
-#endif
-
   /**
    * @brief Constructs a ReadPort with queue sizes.
    * @brief 以指定队列大小构造ReadPort。

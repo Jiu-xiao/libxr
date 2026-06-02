@@ -20,6 +20,7 @@ add_executable(test ${TEST_SOURCES})
 add_dependencies(test xr)
 
 target_link_libraries(test PUBLIC xr)
+target_compile_definitions(test PRIVATE LIBXR_TEST_BUILD)
 
 target_include_directories(
   test

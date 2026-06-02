@@ -5,7 +5,22 @@
 using namespace LibXR;
 
 #if defined(LIBXR_TEST_BUILD)
-ReadPort::ClearQueuedDataBeforePopHook ReadPort::clear_queued_data_before_pop_hook_ = nullptr;
+namespace
+{
+using ClearQueuedDataBeforePopHook = void (*)(ReadPort& port, size_t queued_size,
+                                              bool in_isr);
+
+ClearQueuedDataBeforePopHook g_clear_queued_data_before_pop_hook = nullptr;
+}  // namespace
+
+namespace LibXR::Detail
+{
+void SetReadPortClearQueuedDataBeforePopTestHook(
+    void (*hook)(ReadPort& port, size_t queued_size, bool in_isr))
+{
+  g_clear_queued_data_before_pop_hook = hook;
+}
+}  // namespace LibXR::Detail
 #endif
 
 ReadPort::ReadPort(size_t buffer_size)
@@ -279,9 +294,9 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
     }
 
 #if defined(LIBXR_TEST_BUILD)
-    if (clear_queued_data_before_pop_hook_ != nullptr)
+    if (g_clear_queued_data_before_pop_hook != nullptr)
     {
-      clear_queued_data_before_pop_hook_(*this, queued_size, in_isr);
+      g_clear_queued_data_before_pop_hook(*this, queued_size, in_isr);
     }
 #endif
 

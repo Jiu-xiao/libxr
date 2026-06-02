@@ -34,7 +34,7 @@ if(LIBXR_DEV_ASSERT_BUILD)
 endif()
 
 if(LIBXR_TEST_BUILD)
-  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_TEST_BUILD)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE LIBXR_TEST_BUILD)
 endif()
 
 file(GLOB ${PROJECT_NAME}_SOURCES CONFIGURE_DEPENDS
