@@ -4,25 +4,6 @@
 
 using namespace LibXR;
 
-#if defined(LIBXR_TEST_BUILD)
-namespace
-{
-using ClearQueuedDataBeforePopHook = void (*)(ReadPort& port, size_t queued_size,
-                                              bool in_isr);
-
-ClearQueuedDataBeforePopHook g_clear_queued_data_before_pop_hook = nullptr;
-}  // namespace
-
-namespace LibXR::Detail
-{
-void SetReadPortClearQueuedDataBeforePopTestHook(
-    void (*hook)(ReadPort& port, size_t queued_size, bool in_isr))
-{
-  g_clear_queued_data_before_pop_hook = hook;
-}
-}  // namespace LibXR::Detail
-#endif
-
 ReadPort::ReadPort(size_t buffer_size)
     : queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
                                         LockFreeQueue<uint8_t>(buffer_size)
@@ -292,13 +273,6 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
     {
       return ErrorCode::OK;
     }
-
-#if defined(LIBXR_TEST_BUILD)
-    if (g_clear_queued_data_before_pop_hook != nullptr)
-    {
-      g_clear_queued_data_before_pop_hook(*this, queued_size, in_isr);
-    }
-#endif
 
     const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
     if (pop_ans == ErrorCode::OK)
