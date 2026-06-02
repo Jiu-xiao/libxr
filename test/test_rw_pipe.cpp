@@ -215,6 +215,41 @@ struct TrackingReadPort : LibXR::ReadPort
   uint32_t dequeue_count = 0;
 };
 
+#if defined(LIBXR_TEST_BUILD)
+struct ScopedClearQueuedDataBeforePopHook
+{
+  explicit ScopedClearQueuedDataBeforePopHook(
+      LibXR::ReadPort::ClearQueuedDataBeforePopHook hook)
+  {
+    LibXR::ReadPort::clear_queued_data_before_pop_hook_ = hook;
+  }
+
+  ~ScopedClearQueuedDataBeforePopHook()
+  {
+    LibXR::ReadPort::clear_queued_data_before_pop_hook_ = nullptr;
+  }
+
+  ScopedClearQueuedDataBeforePopHook(const ScopedClearQueuedDataBeforePopHook&) = delete;
+  ScopedClearQueuedDataBeforePopHook& operator=(
+      const ScopedClearQueuedDataBeforePopHook&) = delete;
+};
+
+void ConsumeQueuedSnapshotBeforeClearPop(LibXR::ReadPort& port, size_t queued_size, bool)
+{
+  auto* old_read_fun = port.read_fun_;
+  if (old_read_fun == nullptr)
+  {
+    port.read_fun_ = PendingReadFun;
+  }
+
+  std::vector<uint8_t> rx(queued_size, 0);
+  LibXR::ReadOperation op;
+  ASSERT(port(LibXR::RawData{rx.data(), rx.size()}, op) == LibXR::ErrorCode::OK);
+
+  port.read_fun_ = old_read_fun;
+}
+#endif
+
 void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
   while (ctx.port->busy_.load(std::memory_order_acquire) !=
@@ -488,6 +523,24 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   r.FailAndClearAll(ErrorCode::INIT_ERR, false);
   read.ExpectFinal(ErrorCode::INIT_ERR);
   ASSERT(r.Size() == 0);
+}
+
+void test_rw_read_port_clear_queued_data_retries_after_competing_ready_read()
+{
+  using namespace LibXR;
+
+  TrackingReadPort r(16);
+
+  static const uint8_t TX[] = {0x81, 0x82, 0x83, 0x84};
+  ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+
+#if defined(LIBXR_TEST_BUILD)
+  ScopedClearQueuedDataBeforePopHook hook(ConsumeQueuedSnapshotBeforeClearPop);
+#endif
+  ASSERT(r.ClearQueuedData() == ErrorCode::OK);
+  ASSERT(r.Size() == 0);
+  ASSERT(r.dequeue_count == 1);
+  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
@@ -1080,6 +1133,7 @@ void test_rw()
   test_rw_read_port_clear_queued_data_clears_idle_queue();
   test_rw_read_port_clear_queued_data_clears_event_queue();
   test_rw_read_port_clear_queued_data_busy_pending_read();
+  test_rw_read_port_clear_queued_data_retries_after_competing_ready_read();
   test_rw_zero_read_pending_notifies_without_dequeue();
   test_rw_block_write_timeout_detaches_waiter();
   test_rw_immediate_error_propagates();

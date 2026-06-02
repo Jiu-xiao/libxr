@@ -52,6 +52,12 @@ class ReadPort
   std::atomic<BusyState> busy_{BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
 
+#if defined(LIBXR_TEST_BUILD)
+  using ClearQueuedDataBeforePopHook =
+      void (*)(ReadPort& port, size_t queued_size, bool in_isr);
+  static ClearQueuedDataBeforePopHook clear_queued_data_before_pop_hook_;
+#endif
+
   /**
    * @brief Constructs a ReadPort with queue sizes.
    * @brief 以指定队列大小构造ReadPort。
@@ -176,9 +182,9 @@ class ReadPort
    * participate in backend teardown and does not fail-complete an in-flight read.
    * Returns BUSY when a read request is currently in progress.
    *
-   * @note The discard is snapshot-based: bytes that arrive after this call claims the
-   *       queue may remain queued for a later reader/clear call.
-   * @note 丢弃按快照进行：本次 claim 队列之后再到达的字节，可以留给后续读取或下次清队列。
+   * @note The discard is snapshot-based: bytes that arrive after this call takes its
+   *       queue-size snapshot may remain queued for a later reader/clear call.
+   * @note 丢弃按快照进行：本次获取队列长度快照之后再到达的字节，可以留给后续读取或下次清队列。
    *
    * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
    * @return `OK` 表示本次清队列成功完成；`BUSY` 表示当前有读请求占有该端口。
