@@ -72,7 +72,7 @@ class Database
         data_ = init_value;
         if (status == ErrorCode::NOT_FOUND)
         {
-          database.Add(*this);
+          REQUIRE(database.Add(*this) == ErrorCode::OK);
         }
       }
     }
@@ -96,10 +96,38 @@ class Database
         Memory::FastSet(&data_, 0, sizeof(Data));
         if (status == ErrorCode::NOT_FOUND)
         {
-          database.Add(*this);
+          REQUIRE(database.Add(*this) == ErrorCode::OK);
         }
       }
     }
+
+    /**
+     * @brief 禁止拷贝数据库键对象 (Copy construction is disabled for database keys).
+     * @param other 被拷贝的键对象 (Database key to copy from).
+     */
+    Key(const Key&) = delete;
+
+    /**
+     * @brief 禁止移动数据库键对象 (Move construction is disabled for database keys).
+     * @param other 被转移的键对象 (Database key to move from).
+     */
+    Key(Key&&) = delete;
+
+    /**
+     * @brief 禁止拷贝赋值数据库键对象
+     *        (Copy assignment is disabled for database keys).
+     * @param other 被拷贝的键对象 (Database key to copy from).
+     * @return 当前键对象引用 (Reference to the current key object).
+     */
+    Key& operator=(const Key&) = delete;
+
+    /**
+     * @brief 禁止移动赋值数据库键对象
+     *        (Move assignment is disabled for database keys).
+     * @param other 被转移的键对象 (Database key to move from).
+     * @return 当前键对象引用 (Reference to the current key object).
+     */
+    Key& operator=(Key&&) = delete;
 
     /**
      * @brief 类型转换运算符，返回存储的数据 (Type conversion operator returning stored
@@ -173,6 +201,11 @@ class Database
  * to prevent data corruption.
  * 此类管理 Flash 内存区域中的键值存储，其中数据只能顺序写入。
  * 它维护一个备份系统，以防止数据损坏。
+ *
+ * @note 若底层 Flash 读写擦失败，当前实现视为不可恢复故障并直接触发 `REQUIRE`。
+ *       If the underlying Flash read, write, or erase operation fails, the
+ *       current implementation treats it as an unrecoverable fault and triggers
+ *       `REQUIRE` immediately.
  */
 class DatabaseRawSequential : public Database
 {
@@ -187,6 +220,8 @@ class DatabaseRawSequential : public Database
    *
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
+   * @note `max_buffer_size` 必须不超过整片 Flash 容量的一半。
+   *       `max_buffer_size` must not exceed half of the total flash capacity.
    */
   explicit DatabaseRawSequential(Flash& flash, size_t max_buffer_size = 256);
 
@@ -248,6 +283,15 @@ class DatabaseRawSequential : public Database
   }
 
  private:
+  /**
+   * @brief 存储块类型 (Storage block type).
+   */
+  /**
+   * @brief 存储块类型 (Storage block type).
+   */
+  /**
+   * @brief 存储块类型 (Storage block type).
+   */
   enum class BlockType : uint8_t
   {
     MAIN = 0,   ///< 主块 (Main block).
@@ -263,8 +307,17 @@ class DatabaseRawSequential : public Database
   {
     uint32_t raw_data;
 
+    /**
+     * @brief 构造一个擦除态键头 (Construct one erased-state key header).
+     */
     KeyInfo() : raw_data(0xFFFFFFFF) {}
 
+    /**
+     * @brief 构造一个指定元数据的键头 (Construct one key header with explicit metadata).
+     * @param nextKey 是否还有后继键 (Whether another key follows this one).
+     * @param nameLength 键名长度 (Key name length).
+     * @param dataSize 数据字节数 (Payload size in bytes).
+     */
     KeyInfo(bool nextKey, uint8_t nameLength, uint32_t dataSize) : raw_data(0)
     {
       SetNextKeyExist(nextKey);
@@ -272,22 +325,49 @@ class DatabaseRawSequential : public Database
       SetDataSize(dataSize);
     }
 
+    /**
+     * @brief 设置是否存在后继键 (Set whether another key follows).
+     * @param value 是否存在后继键 (Whether another key follows).
+     */
     void SetNextKeyExist(bool value)
     {
       raw_data = (raw_data & 0x7FFFFFFF) | (static_cast<uint32_t>(value & 0x1) << 31);
     }
+
+    /**
+     * @brief 获取是否存在后继键 (Get whether another key follows).
+     * @return 若存在后继键则返回 `true` (Returns `true` when another key follows).
+     */
     bool GetNextKeyExist() const { return (raw_data >> 31) & 0x1; }
 
+    /**
+     * @brief 设置键名长度 (Set the key name length).
+     * @param len 键名长度 (Key name length).
+     */
     void SetNameLength(uint8_t len)
     {
       raw_data = (raw_data & 0x80FFFFFF) | (static_cast<uint32_t>(len & 0x7F) << 24);
     }
+
+    /**
+     * @brief 获取键名长度 (Get the key name length).
+     * @return 键名长度 (Key name length).
+     */
     uint8_t GetNameLength() const { return (raw_data >> 24) & 0x7F; }
 
+    /**
+     * @brief 设置数据字节数 (Set the payload size in bytes).
+     * @param size 数据字节数 (Payload size in bytes).
+     */
     void SetDataSize(uint32_t size)
     {
       raw_data = (raw_data & 0xFF000000) | (size & 0x00FFFFFF);
     }
+
+    /**
+     * @brief 获取数据字节数 (Get the payload size in bytes).
+     * @return 数据字节数 (Payload size in bytes).
+     */
     uint32_t GetDataSize() const { return raw_data & 0x00FFFFFF; }
   };
 
@@ -304,21 +384,171 @@ class DatabaseRawSequential : public Database
     KeyInfo key;      ///< 该块的键信息 (Key metadata in this block).
   };
 
+  /**
+   * @brief 按名称新增一个键 (Add one key by name).
+   * @param name 键名 (Key name).
+   * @param data 键数据地址 (Address of the key payload).
+   * @param size 键数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode AddKey(const char* name, const void* data, size_t size);
+
+  /**
+   * @brief 按名称更新一个键 (Update one key by name).
+   * @param name 键名 (Key name).
+   * @param data 键数据地址 (Address of the key payload).
+   * @param size 键数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode SetKey(const char* name, const void* data, size_t size);
+
+  /**
+   * @brief 按存储偏移更新一个键 (Update one key by storage offset).
+   * @param offset 键头偏移 (Key-header offset).
+   * @param data 键数据地址 (Address of the key payload).
+   * @param size 键数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode SetKey(size_t offset, const void* data, size_t size);
+
+  /**
+   * @brief 读取一个键的数据区 (Read one key payload).
+   * @param offset 键头偏移 (Key-header offset).
+   * @param data 接收数据的缓冲区 (Destination buffer receiving the payload).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode GetKeyData(size_t offset, RawData data);
+
+  /**
+   * @brief 把指定块初始化为空数据库块 (Initialize one block as an empty database block).
+   * @param block 目标块类型 (Target block type).
+   */
   void InitBlock(BlockType block);
+
+  /**
+   * @brief 读取 Flash 数据，失败则直接触发强约束
+   *        (Read flash data and fail fast on error).
+   * @param offset 读取偏移 (Read offset).
+   * @param data 接收数据的缓冲区 (Destination buffer receiving the data).
+   */
+  void ReadFlashOrExit(size_t offset, RawData data);
+
+  /**
+   * @brief 读取 Flash 数据到对象里，失败则直接触发强约束
+   *        (Read flash data into one object and fail fast on error).
+   * @tparam Data 接收对象类型 (Destination object type).
+   * @param offset 读取偏移 (Read offset).
+   * @param data 接收数据的对象 (Destination object receiving the data).
+   */
+  template <typename Data>
+  void ReadFlashOrExit(size_t offset, Data& data)
+  {
+    ReadFlashOrExit(offset, RawData(data));
+  }
+
+  /**
+   * @brief 写入 Flash 数据，失败则直接触发强约束
+   *        (Write flash data and fail fast on error).
+   * @param offset 写入偏移 (Write offset).
+   * @param data 待写入数据 (Data to write).
+   */
+  void WriteFlashOrExit(size_t offset, ConstRawData data);
+
+  /**
+   * @brief 擦除 Flash 区域，失败则直接触发强约束
+   *        (Erase a flash range and fail fast on error).
+   * @param offset 擦除偏移 (Erase offset).
+   * @param size 擦除字节数 (Erase size in bytes).
+   */
+  void EraseFlashOrExit(size_t offset, size_t size);
+
+  /**
+   * @brief 判断块头是否已初始化 (Check whether the block header is initialized).
+   * @param block 目标块类型 (Target block type).
+   * @return 若块头有效则返回 `true` (Returns `true` when the block header is valid).
+   */
   bool IsBlockInited(BlockType block);
+
+  /**
+   * @brief 判断块当前是否为空 (Check whether the block is currently empty).
+   * @param block 目标块类型 (Target block type).
+   * @return 若块内没有有效键则返回 `true`
+   *         (Returns `true` when the block contains no valid key).
+   */
   bool IsBlockEmpty(BlockType block);
+
+  /**
+   * @brief 判断块尾校验是否损坏 (Check whether the block checksum is corrupted).
+   * @param block 目标块类型 (Target block type).
+   * @return 若块尾校验不符则返回 `true`
+   *         (Returns `true` when the trailing checksum is invalid).
+   */
   bool IsBlockError(BlockType block);
+
+  /**
+   * @brief 判断指定键后面是否还有下一键 (Check whether another key follows).
+   * @param offset 当前键头偏移 (Current key-header offset).
+   * @return 若后面还有下一键则返回 `true`
+   *         (Returns `true` when another key follows this one).
+   */
   bool HasLastKey(size_t offset);
+
+  /**
+   * @brief 计算一个键总共占用的字节数 (Compute the total byte span of one key).
+   * @param offset 键头偏移 (Key-header offset).
+   * @return 该键占用的总字节数 (Total byte size occupied by the key).
+   */
   size_t GetKeySize(size_t offset);
+
+  /**
+   * @brief 计算下一键的起始偏移 (Compute the starting offset of the next key).
+   * @param offset 当前键头偏移 (Current key-header offset).
+   * @return 下一键的起始偏移 (Starting offset of the next key).
+   */
   size_t GetNextKey(size_t offset);
+
+  /**
+   * @brief 计算当前块里最后一个键的偏移 (Locate the last key in the current block).
+   * @param block 目标块类型 (Target block type).
+   * @return 最后一个键的偏移；若块为空则返回 `0`
+   *         (Offset of the last key, or `0` when the block is empty).
+   */
   size_t GetLastKey(BlockType block);
+
+  /**
+   * @brief 回写上一键的“存在后继键”标志 (Rewrite the next-key-exists flag of one key).
+   * @param offset 目标键头偏移 (Target key-header offset).
+   * @param exist 是否存在后继键 (Whether another key follows).
+   */
   void SetNestKeyExist(size_t offset, bool exist);
+
+  /**
+   * @brief 比较存储中的键数据和给定数据是否不同
+   *        (Compare whether the stored payload differs from the given payload).
+   * @param offset 键头偏移 (Key-header offset).
+   * @param data 待比较数据地址 (Address of the candidate payload).
+   * @param size 待比较数据字节数 (Payload size in bytes).
+   * @return 若内容不同则返回 `true`
+   *         (Returns `true` when the payloads differ).
+   */
   bool KeyDataCompare(size_t offset, const void* data, size_t size);
+
+  /**
+   * @brief 比较存储中的键名和给定名称是否不同
+   *        (Compare whether the stored key name differs from the given name).
+   * @param offset 键头偏移 (Key-header offset).
+   * @param name 待比较键名 (Key name to compare against).
+   * @return 若名称不同则返回 `true`
+   *         (Returns `true` when the names differ).
+   */
   bool KeyNameCompare(size_t offset, const char* name);
+
+  /**
+   * @brief 在主块里按名称查找键 (Search one key by name in the main block).
+   * @param name 待查找键名 (Key name to search for).
+   * @return 找到时返回键头偏移，找不到返回 `0`
+   *         (Returns the key-header offset when found, otherwise `0`).
+   */
   size_t SearchKey(const char* name);
 
   static constexpr uint32_t FLASH_HEADER =
@@ -340,6 +570,11 @@ class DatabaseRawSequential : public Database
  * requires data to be written in fixed-size blocks.
  * 此类提供适用于 Flash 存储的键值存储管理，该存储要求数据以固定大小块写入。
  *
+ * @note 若底层 Flash 读写擦失败，当前实现视为不可恢复故障并直接触发 `REQUIRE`。
+ *       If the underlying Flash read, write, or erase operation fails, the
+ *       current implementation treats it as an unrecoverable fault and triggers
+ *       `REQUIRE` immediately.
+ *
  * @tparam MinWriteSize Flash 的最小写入单元大小 (Minimum write unit size for Flash
  * storage).
  */
@@ -358,6 +593,11 @@ class DatabaseRaw : public Database
   };
 
 #pragma pack(push, 1)
+  /**
+   * @brief 按最小写入单元存放布尔位图块
+   *        (Boolean flag block stored in one aligned write unit span).
+   * @tparam BlockSize 位图块字节数 (Flag-block size in bytes).
+   */
   template <size_t BlockSize>
   struct BlockBoolData
   {
@@ -365,10 +605,20 @@ class DatabaseRaw : public Database
   };
 #pragma pack(pop)
 
+  /**
+   * @brief 读写对齐布尔位图块的工具
+   *        (Helpers for reading and writing aligned boolean flag blocks).
+   * @tparam BlockSize 位图块字节数 (Flag-block size in bytes).
+   */
   template <size_t BlockSize>
   class BlockBoolUtil
   {
    public:
+    /**
+     * @brief 把一个布尔值编码进位图块 (Encode one boolean value into a flag block).
+     * @param obj 目标位图块 (Target flag block).
+     * @param value 待编码布尔值 (Boolean value to encode).
+     */
     static void SetFlag(BlockBoolData<BlockSize>& obj, bool value)
     {
       Memory::FastSet(obj.data, 0xFF, BlockSize);
@@ -378,12 +628,23 @@ class DatabaseRaw : public Database
       }
     }
 
+    /**
+     * @brief 从位图块读取布尔值 (Decode one boolean value from a flag block).
+     * @param obj 待读取位图块 (Flag block to inspect).
+     * @return 解码出的布尔值 (Decoded boolean value).
+     */
     static bool ReadFlag(const BlockBoolData<BlockSize>& obj)
     {
       uint8_t last_4bits = obj.data[BlockSize - 1] & 0x0F;
       return last_4bits == 0x0F;
     }
 
+    /**
+     * @brief 检查位图块内容是否仍是合法编码 (Check whether a flag block still contains
+     *        a valid encoding).
+     * @param obj 待检查位图块 (Flag block to validate).
+     * @return 若编码合法则返回 `true` (Returns `true` when the encoding is valid).
+     */
     static bool Valid(const BlockBoolData<BlockSize>& obj)
     {
       if (BlockSize == 0)
@@ -428,7 +689,10 @@ class DatabaseRaw : public Database
 
     uint32_t raw_info = 0;  ///< 高7位为 nameLength，低25位为 dataSize
 
-    // 默认构造
+    /**
+     * @brief 构造一个默认可写的键头元数据
+     *        (Construct one default writable key-header metadata object).
+     */
     KeyInfo()
     {
       BlockBoolUtil<MinWriteSize>::SetFlag(no_next_key, true);
@@ -436,18 +700,34 @@ class DatabaseRaw : public Database
       BlockBoolUtil<MinWriteSize>::SetFlag(uninit, true);
     }
 
+    /**
+     * @brief 设置键名长度 (Set the key name length).
+     * @param len 键名长度 (Key name length).
+     */
     void SetNameLength(uint8_t len)
     {
       raw_info = (raw_info & 0x01FFFFFF) | ((len & 0x7F) << 25);
     }
 
+    /**
+     * @brief 获取键名长度 (Get the key name length).
+     * @return 键名长度 (Key name length).
+     */
     uint8_t GetNameLength() const { return (raw_info >> 25) & 0x7F; }
 
+    /**
+     * @brief 设置数据字节数 (Set the payload size in bytes).
+     * @param size 数据字节数 (Payload size in bytes).
+     */
     void SetDataSize(uint32_t size)
     {
       raw_info = (raw_info & 0xFE000000) | (size & 0x01FFFFFF);
     }
 
+    /**
+     * @brief 获取数据字节数 (Get the payload size in bytes).
+     * @return 数据字节数 (Payload size in bytes).
+     */
     uint32_t GetDataSize() const { return raw_info & 0x01FFFFFF; }
   };
 #pragma pack(pop)
@@ -459,6 +739,10 @@ class DatabaseRaw : public Database
    */
   struct FlashInfo
   {
+    /**
+     * @brief 构造一个擦除态 FlashInfo 缓冲对象
+     *        (Construct one erased-state FlashInfo buffer object).
+     */
     FlashInfo()
     {
       header = 0xFFFFFFFF;
@@ -480,6 +764,65 @@ class DatabaseRaw : public Database
   uint8_t write_buffer_[MinWriteSize];  ///< 写入缓冲区 (Write buffer).
 
   /**
+   * @brief 读取 Flash 数据，失败则直接触发强约束
+   *        (Read flash data and fail fast on error).
+   * @param offset 读取偏移 (Read offset).
+   * @param data 接收数据的缓冲区 (Destination buffer receiving the data).
+   */
+  void ReadFlashOrExit(size_t offset, RawData data)
+  {
+    REQUIRE(flash_.Read(offset, data) == ErrorCode::OK);
+  }
+
+  /**
+   * @brief 读取 Flash 数据到对象里，失败则直接触发强约束
+   *        (Read flash data into one object and fail fast on error).
+   * @tparam Data 接收对象类型 (Destination object type).
+   * @param offset 读取偏移 (Read offset).
+   * @param data 接收数据的对象 (Destination object receiving the data).
+   */
+  template <typename Data>
+  void ReadFlashOrExit(size_t offset, Data& data)
+  {
+    ReadFlashOrExit(offset, RawData(data));
+  }
+
+  /**
+   * @brief 写入 Flash 数据，失败则直接触发强约束
+   *        (Write flash data and fail fast on error).
+   * @param offset 写入偏移 (Write offset).
+   * @param data 待写入数据 (Data to write).
+   */
+  void WriteFlashOrExit(size_t offset, ConstRawData data)
+  {
+    REQUIRE(Write(offset, data) == ErrorCode::OK);
+  }
+
+  /**
+   * @brief 写入一个对象到 Flash，失败则直接触发强约束
+   *        (Write one object to flash and fail fast on error).
+   * @tparam Data 待写入对象类型 (Object type to write).
+   * @param offset 写入偏移 (Write offset).
+   * @param data 待写入对象 (Object to write).
+   */
+  template <typename Data>
+  void WriteFlashOrExit(size_t offset, const Data& data)
+  {
+    WriteFlashOrExit(offset, ConstRawData(data));
+  }
+
+  /**
+   * @brief 擦除 Flash 区域，失败则直接触发强约束
+   *        (Erase a flash range and fail fast on error).
+   * @param offset 擦除偏移 (Erase offset).
+   * @param size 擦除字节数 (Erase size in bytes).
+   */
+  void EraseFlashOrExit(size_t offset, size_t size)
+  {
+    REQUIRE(flash_.Erase(offset, size) == ErrorCode::OK);
+  }
+
+  /**
    * @brief 计算可用的存储空间大小
    *        (Calculate the available storage size).
    * @return 剩余的可用字节数 (Remaining available bytes).
@@ -489,6 +832,14 @@ class DatabaseRaw : public Database
     return GetChecksumOffset() - GetUsedBlockSize(BlockType::MAIN);
   }
 
+  /**
+   * @brief 为新增键预留空间并写入元数据头
+   *        (Reserve space for one new key and write its metadata header).
+   * @param name_len 键名长度 (Key name length).
+   * @param size 数据字节数 (Payload size in bytes).
+   * @param key_buf_offset 返回新键头偏移 (Receives the new key-header offset).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode AddKeyBody(size_t name_len, size_t size, size_t& key_buf_offset)
   {
     bool recycle = false;
@@ -523,7 +874,7 @@ class DatabaseRaw : public Database
       BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.uninit, false);
       tmp_key.SetNameLength(0);
       tmp_key.SetDataSize(0);
-      Write(0, flash_info);
+      WriteFlashOrExit(0, flash_info);
       key_buf_offset = GetNextKey(LibXR::OffsetOf(&FlashInfo::key));
     }
     else
@@ -538,13 +889,13 @@ class DatabaseRaw : public Database
     new_key.SetNameLength(name_len);
     new_key.SetDataSize(size);
 
-    Write(key_buf_offset, new_key);
+    WriteFlashOrExit(key_buf_offset, new_key);
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.uninit, false);
 
     if (last_key_offset != 0)
     {
       KeyInfo last_key;
-      flash_.Read(last_key_offset, last_key);
+      ReadFlashOrExit(last_key_offset, last_key);
       KeyInfo new_last_key = {};
       BlockBoolUtil<MinWriteSize>::SetFlag(new_last_key.no_next_key, false);
       BlockBoolUtil<MinWriteSize>::SetFlag(
@@ -555,14 +906,32 @@ class DatabaseRaw : public Database
       new_last_key.SetNameLength(last_key.GetNameLength());
       new_last_key.SetDataSize(last_key.GetDataSize());
 
-      Write(last_key_offset, new_last_key);
+      WriteFlashOrExit(last_key_offset, new_last_key);
     }
 
-    Write(key_buf_offset, new_key);
+    WriteFlashOrExit(key_buf_offset, new_key);
 
     return ErrorCode::OK;
   }
 
+  /**
+   * @brief 使用现有名字数据新增一个键
+   *        (Add one key using an existing name already stored in flash).
+   * @param name_offset 已存键名在 Flash 中的偏移 (Flash offset of the already stored name).
+   * @param name_len 键名长度 (Key name length).
+   * @param data 键数据地址 (Address of the key payload).
+   * @param size 键数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
+  /**
+   * @brief 使用现有名字数据新增一个键
+   *        (Add one key using an existing name already stored in flash).
+   * @param name_offset 已存键名在 Flash 中的偏移 (Flash offset of the already stored name).
+   * @param name_len 键名长度 (Key name length).
+   * @param data 键数据地址 (Address of the key payload).
+   * @param size 键数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode AddKey(size_t name_offset, size_t name_len, const void* data, size_t size)
   {
     size_t key_buf_offset = 0;
@@ -572,10 +941,25 @@ class DatabaseRaw : public Database
       return ec;
     }
     CopyFlashData(GetKeyName(key_buf_offset), name_offset, name_len);
-    Write(GetKeyData(key_buf_offset), {reinterpret_cast<const uint8_t*>(data), size});
+    WriteFlashOrExit(GetKeyData(key_buf_offset),
+                     {reinterpret_cast<const uint8_t*>(data), size});
     return ErrorCode::OK;
   }
 
+  /**
+   * @brief 按名称新增一个键 (Add one key by name).
+   * @param name 键名 (Key name).
+   * @param data 键数据地址 (Address of the key payload).
+   * @param size 键数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
+  /**
+   * @brief 按名称新增一个键 (Add one key by name).
+   * @param name 键名 (Key name).
+   * @param data 键数据地址 (Address of the key payload).
+   * @param size 键数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode AddKey(const char* name, const void* data, size_t size)
   {
     size_t name_len = strlen(name) + 1;
@@ -589,18 +973,29 @@ class DatabaseRaw : public Database
     {
       return ec;
     }
-    Write(GetKeyName(key_buf_offset), {reinterpret_cast<const uint8_t*>(name), name_len});
-    Write(GetKeyData(key_buf_offset), {reinterpret_cast<const uint8_t*>(data), size});
+    WriteFlashOrExit(GetKeyName(key_buf_offset),
+                     {reinterpret_cast<const uint8_t*>(name), name_len});
+    WriteFlashOrExit(GetKeyData(key_buf_offset),
+                     {reinterpret_cast<const uint8_t*>(data), size});
     return ErrorCode::OK;
   }
 
+  /**
+   * @brief 复用现有键名元数据并尝试写入新值
+   *        (Reuse the existing key-name metadata and try to write a new value).
+   * @param key_offset 目标键头偏移 (Target key-header offset).
+   * @param name_len 键名长度 (Key name length).
+   * @param data 新数据地址 (Address of the new payload).
+   * @param size 新数据字节数 (Payload size in bytes).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode SetKeyCommon(size_t key_offset, size_t name_len, const void* data,
                          size_t size)
   {
     if (key_offset)
     {
       KeyInfo key;
-      flash_.Read(key_offset, key);
+      ReadFlashOrExit(key_offset, key);
       if (key.GetDataSize() == size)
       {
         if (KeyDataCompare(key_offset, data, size))
@@ -614,7 +1009,7 @@ class DatabaseRaw : public Database
               new_key.uninit, BlockBoolUtil<MinWriteSize>::ReadFlag(key.uninit));
           new_key.SetNameLength(name_len);
           new_key.SetDataSize(size);
-          Write(key_offset, new_key);
+          WriteFlashOrExit(key_offset, new_key);
           return AddKey(GetKeyName(key_offset), name_len, data, size);
         }
         return ErrorCode::OK;
@@ -623,13 +1018,23 @@ class DatabaseRaw : public Database
     return ErrorCode::FAILED;
   }
 
+  /**
+   * @brief 按名称更新一个键，并在需要时触发回收
+   *        (Update one key by name and recycle storage when needed).
+   * @param name 键名 (Key name).
+   * @param data 新数据地址 (Address of the new payload).
+   * @param size 新数据字节数 (Payload size in bytes).
+   * @param recycle 是否允许本次调用触发回收
+   *                (Whether this call may trigger recycle).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode SetKey(const char* name, const void* data, size_t size, bool recycle = true)
   {
     size_t key_offset = SearchKey(name);
     if (key_offset)
     {
       KeyInfo key;
-      flash_.Read(key_offset, key);
+      ReadFlashOrExit(key_offset, key);
       if (key.GetDataSize() == size)
       {
         if (KeyDataCompare(key_offset, data, size))
@@ -657,7 +1062,7 @@ class DatabaseRaw : public Database
               new_key.uninit, BlockBoolUtil<MinWriteSize>::ReadFlag(key.uninit));
           new_key.SetNameLength(key.GetNameLength());
           new_key.SetDataSize(size);
-          Write(key_offset, new_key);
+          WriteFlashOrExit(key_offset, new_key);
           return AddKey(GetKeyName(key_offset), key.GetNameLength(), data, size);
         }
         return ErrorCode::OK;
@@ -666,28 +1071,57 @@ class DatabaseRaw : public Database
     return ErrorCode::FAILED;
   }
 
+  /**
+   * @brief 计算某个键的数据区起始偏移
+   *        (Compute the starting offset of one key payload).
+   * @param offset 键头偏移 (Key-header offset).
+   * @return 数据区起始偏移 (Starting offset of the payload).
+   */
   size_t GetKeyData(size_t offset)
   {
     KeyInfo key;
-    flash_.Read(offset, key);
+    ReadFlashOrExit(offset, key);
     return offset + AlignSize(sizeof(KeyInfo)) + AlignSize(key.GetNameLength());
   }
 
+  /**
+   * @brief 计算某个键名字区起始偏移
+   *        (Compute the starting offset of one key name).
+   * @param offset 键头偏移 (Key-header offset).
+   * @return 名字区起始偏移 (Starting offset of the key name).
+   */
   size_t GetKeyName(size_t offset) { return offset + AlignSize(sizeof(KeyInfo)); }
 
+  /**
+   * @brief 计算指定块的起始偏移 (Compute the starting offset of one block).
+   * @param block 目标块类型 (Target block type).
+   * @return 块起始偏移 (Starting offset of the block).
+   */
   size_t GetBlockOffset(BlockType block)
   {
     return block == BlockType::BACKUP ? block_size_ : 0;
   }
 
+  /**
+   * @brief 计算块尾校验区起始偏移 (Compute the starting offset of the checksum area).
+   * @return 块尾校验区起始偏移 (Starting offset of the checksum area).
+   */
   size_t GetChecksumOffset() { return block_size_ - GetChecksumSize(); }
 
+  /**
+   * @brief 计算块尾校验区字节数 (Compute the byte size of the checksum area).
+   * @return 块尾校验区字节数 (Byte size of the checksum area).
+   */
   size_t GetChecksumSize() { return AlignSize(sizeof(CHECKSUM_BYTE)); }
 
+  /**
+   * @brief 把指定块初始化为空数据库块 (Initialize one block as an empty database block).
+   * @param block 目标块类型 (Target block type).
+   */
   void InitBlock(BlockType block)
   {
     const size_t offset = GetBlockOffset(block);
-    flash_.Erase(offset, block_size_);
+    EraseFlashOrExit(offset, block_size_);
 
     FlashInfo info;  // padding filled with 0xFF by constructor
     info.header = FLASH_HEADER;
@@ -697,62 +1131,107 @@ class DatabaseRaw : public Database
     BlockBoolUtil<MinWriteSize>::SetFlag(tmp_key.uninit, false);
     tmp_key.SetNameLength(0);
     tmp_key.SetDataSize(0);
-    Write(offset, {reinterpret_cast<uint8_t*>(&info), sizeof(FlashInfo)});
-    Write(offset + GetChecksumOffset(), {&CHECKSUM_BYTE, sizeof(CHECKSUM_BYTE)});
+    WriteFlashOrExit(offset, {reinterpret_cast<uint8_t*>(&info), sizeof(FlashInfo)});
+    WriteFlashOrExit(offset + GetChecksumOffset(),
+                     {&CHECKSUM_BYTE, sizeof(CHECKSUM_BYTE)});
   }
 
+  /**
+   * @brief 判断块头是否已初始化 (Check whether the block header is initialized).
+   * @param block 目标块类型 (Target block type).
+   * @return 若块头有效则返回 `true` (Returns `true` when the block header is valid).
+   */
   bool IsBlockInited(BlockType block)
   {
     const size_t offset = GetBlockOffset(block);
     FlashInfo flash_data;
-    flash_.Read(offset, flash_data);
+    ReadFlashOrExit(offset, flash_data);
     return flash_data.header == FLASH_HEADER;
   }
 
+  /**
+   * @brief 判断块当前是否为空 (Check whether the block is currently empty).
+   * @param block 目标块类型 (Target block type).
+   * @return 若块内没有有效键则返回 `true`
+   *         (Returns `true` when the block contains no valid key).
+   */
   bool IsBlockEmpty(BlockType block)
   {
     const size_t offset = GetBlockOffset(block);
     FlashInfo flash_data;
-    flash_.Read(offset, flash_data);
+    ReadFlashOrExit(offset, flash_data);
     return BlockBoolUtil<MinWriteSize>::ReadFlag(flash_data.key.available_flag) == true;
   }
 
+  /**
+   * @brief 判断块尾校验是否损坏 (Check whether the block checksum is corrupted).
+   * @param block 目标块类型 (Target block type).
+   * @return 若块尾校验不符则返回 `true`
+   *         (Returns `true` when the trailing checksum is invalid).
+   */
   bool IsBlockError(BlockType block)
   {
     const size_t offset = GetBlockOffset(block);
     uint32_t checksum = 0;
-    flash_.Read(offset + GetChecksumOffset(), checksum);
+    ReadFlashOrExit(offset + GetChecksumOffset(), checksum);
     return checksum != CHECKSUM_BYTE;
   }
 
+  /**
+   * @brief 判断块整体是否处于可用状态
+   *        (Check whether the block as a whole is currently usable).
+   * @param block 目标块类型 (Target block type).
+   * @return 若块头和校验都有效则返回 `true`
+   *         (Returns `true` when both header and checksum are valid).
+   */
   bool IsBlockValid(BlockType block)
   {
     return IsBlockInited(block) && !IsBlockError(block);
   }
 
+  /**
+   * @brief 使指定块尾校验失效 (Invalidate the checksum of one block).
+   * @param block 目标块类型 (Target block type).
+   */
   void InvalidateBlock(BlockType block)
   {
     const uint32_t invalid_checksum = 0;
     // Keep startup cleanup erase-free so same-bank MCUs only pay a single program op.
-    Write(GetBlockOffset(block) + GetChecksumOffset(),
-          {&invalid_checksum, sizeof(invalid_checksum)});
+    WriteFlashOrExit(GetBlockOffset(block) + GetChecksumOffset(),
+                     {&invalid_checksum, sizeof(invalid_checksum)});
   }
 
+  /**
+   * @brief 计算一个键总共占用的字节数 (Compute the total byte span of one key).
+   * @param offset 键头偏移 (Key-header offset).
+   * @return 该键占用的总字节数 (Total byte size occupied by the key).
+   */
   size_t GetKeySize(size_t offset)
   {
     KeyInfo key;
-    flash_.Read(offset, key);
+    ReadFlashOrExit(offset, key);
     return AlignSize(sizeof(KeyInfo)) + AlignSize(key.GetNameLength()) +
            AlignSize(key.GetDataSize());
   }
 
+  /**
+   * @brief 计算下一键的起始偏移 (Compute the starting offset of the next key).
+   * @param offset 当前键头偏移 (Current key-header offset).
+   * @return 下一键的起始偏移 (Starting offset of the next key).
+   */
   size_t GetNextKey(size_t offset)
   {
     KeyInfo key;
-    flash_.Read(offset, key);
+    ReadFlashOrExit(offset, key);
     return offset + GetKeySize(offset);
   }
 
+  /**
+   * @brief 计算当前块里最后一个键的偏移 (Locate the last key in the current block).
+   * @param block 目标块类型 (Target block type).
+   * @return 最后一个键的偏移；若块为空则返回 `0`
+   *         (Offset of the last key, or `0` when the block is empty).
+   */
   size_t GetLastKey(BlockType block)
   {
     if (IsBlockEmpty(block))
@@ -762,24 +1241,33 @@ class DatabaseRaw : public Database
 
     KeyInfo key;
     size_t key_offset = GetBlockOffset(block) + LibXR::OffsetOf(&FlashInfo::key);
-    flash_.Read(key_offset, key);
+    ReadFlashOrExit(key_offset, key);
     while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key))
     {
       key_offset = GetNextKey(key_offset);
-      flash_.Read(key_offset, key);
+      ReadFlashOrExit(key_offset, key);
     }
     return key_offset;
   }
 
+  /**
+   * @brief 比较存储中的键数据和给定数据是否不同
+   *        (Compare whether the stored payload differs from the given payload).
+   * @param offset 键头偏移 (Key-header offset).
+   * @param data 待比较数据地址 (Address of the candidate payload).
+   * @param size 待比较数据字节数 (Payload size in bytes).
+   * @return 若内容不同则返回 `true`
+   *         (Returns `true` when the payloads differ).
+   */
   bool KeyDataCompare(size_t offset, const void* data, size_t size)
   {
     KeyInfo key;
-    flash_.Read(offset, key);
+    ReadFlashOrExit(offset, key);
     size_t key_data_offset = GetKeyData(offset);
     uint8_t data_buffer = 0;
     for (size_t i = 0; i < size; i++)
     {
-      flash_.Read(key_data_offset + i, data_buffer);
+      ReadFlashOrExit(key_data_offset + i, data_buffer);
       if (data_buffer != (reinterpret_cast<const uint8_t*>(data))[i])
       {
         return true;
@@ -788,14 +1276,22 @@ class DatabaseRaw : public Database
     return false;
   }
 
+  /**
+   * @brief 比较存储中的键名和给定名称是否不同
+   *        (Compare whether the stored key name differs from the given name).
+   * @param offset 键头偏移 (Key-header offset).
+   * @param name 待比较键名 (Key name to compare against).
+   * @return 若名称不同则返回 `true`
+   *         (Returns `true` when the names differ).
+   */
   bool KeyNameCompare(size_t offset, const char* name)
   {
     KeyInfo key;
-    flash_.Read(offset, key);
+    ReadFlashOrExit(offset, key);
     for (size_t i = 0; i < key.GetNameLength(); i++)
     {
       uint8_t data_buffer = 0;
-      flash_.Read(offset + AlignSize(sizeof(KeyInfo)) + i, data_buffer);
+      ReadFlashOrExit(offset + AlignSize(sizeof(KeyInfo)) + i, data_buffer);
       if (data_buffer != name[i])
       {
         return true;
@@ -804,6 +1300,14 @@ class DatabaseRaw : public Database
     return false;
   }
 
+  /**
+   * @brief 试算一个块里已用空间，并在发现布局损坏时提前失败
+   *        (Try to compute used block size and fail early on invalid layout).
+   * @param block 目标块类型 (Target block type).
+   * @param used_size 输出已用字节数 (Receives the used byte size).
+   * @return 若成功计算则返回 `true`
+   *         (Returns `true` when the used size is computed successfully).
+   */
   bool TryGetUsedBlockSize(BlockType block, size_t& used_size)
   {
     const size_t block_offset = GetBlockOffset(block);
@@ -818,7 +1322,7 @@ class DatabaseRaw : public Database
       }
 
       KeyInfo key;
-      flash_.Read(key_offset, key);
+      ReadFlashOrExit(key_offset, key);
 
       // Recovery cannot trust erased or half-written key metadata to bound copies.
       if (!BlockBoolUtil<MinWriteSize>::Valid(key.no_next_key) ||
@@ -846,6 +1350,11 @@ class DatabaseRaw : public Database
     }
   }
 
+  /**
+   * @brief 计算一个块当前已用的总字节数 (Compute the currently used byte span of one block).
+   * @param block 目标块类型 (Target block type).
+   * @return 当前已用的总字节数 (Currently used byte span of the block).
+   */
   size_t GetUsedBlockSize(BlockType block)
   {
     const size_t block_offset = GetBlockOffset(block);
@@ -859,15 +1368,28 @@ class DatabaseRaw : public Database
     return GetNextKey(GetLastKey(block)) - block_offset;
   }
 
+  /**
+   * @brief 在两个块之间按最小写入单元复制数据
+   *        (Copy data between blocks in minimum-write-size chunks).
+   * @param dst_offset 目标偏移 (Destination offset).
+   * @param src_offset 源偏移 (Source offset).
+   * @param size 待复制字节数 (Byte count to copy).
+   */
   void CopyFlashData(size_t dst_offset, size_t src_offset, size_t size)
   {
     for (size_t i = 0; i < size; i += MinWriteSize)
     {
-      flash_.Read(src_offset + i, {write_buffer_, MinWriteSize});
-      flash_.Write(dst_offset + i, {write_buffer_, MinWriteSize});
+      ReadFlashOrExit(src_offset + i, {write_buffer_, MinWriteSize});
+      WriteFlashOrExit(dst_offset + i, {write_buffer_, MinWriteSize});
     }
   }
 
+  /**
+   * @brief 复制活跃键前缀和块尾校验 (Copy the live key prefix and trailing checksum).
+   * @param dst_block 目标块类型 (Destination block type).
+   * @param src_block 源块类型 (Source block type).
+   * @param used_size 活跃前缀总字节数 (Byte size of the live prefix).
+   */
   void CopyBlockPrefixAndChecksum(BlockType dst_block, BlockType src_block,
                                   size_t used_size)
   {
@@ -882,6 +1404,14 @@ class DatabaseRaw : public Database
                   GetChecksumSize());
   }
 
+  /**
+   * @brief 在主块里按名称查找键，并在删除项过多时触发回收
+   *        (Search one key by name in the main block and trigger recycle when
+   *        too many tombstones are observed).
+   * @param name 待查找键名 (Key name to search for).
+   * @return 找到时返回键头偏移，找不到返回 `0`
+   *         (Returns the key-header offset when found, otherwise `0`).
+   */
   size_t SearchKey(const char* name)
   {
     if (IsBlockEmpty(BlockType::MAIN))
@@ -891,7 +1421,7 @@ class DatabaseRaw : public Database
 
     KeyInfo key;
     size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
-    flash_.Read(key_offset, key);
+    ReadFlashOrExit(key_offset, key);
 
     size_t ans = 0, need_cycle = 0;
 
@@ -900,7 +1430,7 @@ class DatabaseRaw : public Database
       if (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.available_flag))
       {
         key_offset = GetNextKey(key_offset);
-        flash_.Read(key_offset, key);
+        ReadFlashOrExit(key_offset, key);
         need_cycle++;
         continue;
       }
@@ -917,7 +1447,7 @@ class DatabaseRaw : public Database
       }
 
       key_offset = GetNextKey(key_offset);
-      flash_.Read(key_offset, key);
+      ReadFlashOrExit(key_offset, key);
     }
 
     if (need_cycle > recycle_threshold_)
@@ -963,7 +1493,11 @@ class DatabaseRaw : public Database
       auto final_block_index = data.size_ - data.size_ % MinWriteSize;
       if (final_block_index != 0)
       {
-        flash_.Write(offset, {data.addr_, final_block_index});
+        auto ec = flash_.Write(offset, {data.addr_, final_block_index});
+        if (ec != ErrorCode::OK)
+        {
+          return ec;
+        }
       }
       Memory::FastSet(write_buffer_, 0xff, MinWriteSize);
       LibXR::Memory::FastCopy(
@@ -991,14 +1525,14 @@ class DatabaseRaw : public Database
     }
 
     KeyInfo key_buffer;
-    flash_.Read(ans, key_buffer);
+    ReadFlashOrExit(ans, key_buffer);
 
     if (key.raw_data_.size_ != key_buffer.GetDataSize())
     {
       return ErrorCode::FAILED;
     }
 
-    flash_.Read(GetKeyData(ans), key.raw_data_);
+    ReadFlashOrExit(GetKeyData(ans), key.raw_data_);
 
     return ErrorCode::OK;
   }
@@ -1015,6 +1549,11 @@ class DatabaseRaw : public Database
     return SetKey(key.name_, data.addr_, data.size_);
   }
 
+  /**
+   * @brief 添加新键到数据库 (Add a new key to the database).
+   * @param key 需要添加的键 (Key to add).
+   * @return 操作结果 (Operation result).
+   */
   ErrorCode Add(KeyBase& key) override
   {
     return AddKey(key.name_, key.raw_data_.addr_, key.raw_data_.size_);
@@ -1059,7 +1598,7 @@ class DatabaseRaw : public Database
         }
         else
         {
-          flash_.Erase(0, block_size_);
+          EraseFlashOrExit(0, block_size_);
           CopyBlockPrefixAndChecksum(BlockType::MAIN, BlockType::BACKUP, used_size);
           InvalidateBlock(BlockType::BACKUP);
         }
@@ -1073,7 +1612,7 @@ class DatabaseRaw : public Database
 
     KeyInfo key;
     size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
-    flash_.Read(key_offset, key);
+    ReadFlashOrExit(key_offset, key);
     size_t need_cycle = 0;
     while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key))
     {
@@ -1085,7 +1624,7 @@ class DatabaseRaw : public Database
         break;
       }
 
-      flash_.Read(key_offset, key);
+      ReadFlashOrExit(key_offset, key);
 
       // TODO: 恢复损坏数据
       if (BlockBoolUtil<MinWriteSize>::ReadFlag(key.uninit))
@@ -1134,7 +1673,7 @@ class DatabaseRaw : public Database
 
     KeyInfo key;
     size_t key_offset = LibXR::OffsetOf(&FlashInfo::key);
-    flash_.Read(key_offset, key);
+    ReadFlashOrExit(key_offset, key);
 
     if (!IsBlockValid(BlockType::BACKUP) || !IsBlockEmpty(BlockType::BACKUP))
     {
@@ -1147,21 +1686,21 @@ class DatabaseRaw : public Database
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.uninit, false);
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.available_flag, false);
     BlockBoolUtil<MinWriteSize>::SetFlag(new_key.no_next_key, false);
-    Write(write_buff_offset, new_key);
+    WriteFlashOrExit(write_buff_offset, new_key);
 
     write_buff_offset += GetKeySize(write_buff_offset);
 
     do
     {
       key_offset = GetNextKey(key_offset);
-      flash_.Read(key_offset, key);
+      ReadFlashOrExit(key_offset, key);
 
       if (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.available_flag))
       {
         continue;
       }
 
-      Write(write_buff_offset, key);
+      WriteFlashOrExit(write_buff_offset, key);
       write_buff_offset += AlignSize(sizeof(KeyInfo));
       CopyFlashData(write_buff_offset, GetKeyName(key_offset), key.GetNameLength());
       write_buff_offset += AlignSize(key.GetNameLength());
@@ -1170,7 +1709,7 @@ class DatabaseRaw : public Database
     } while (!BlockBoolUtil<MinWriteSize>::ReadFlag(key.no_next_key));
 
     const size_t used_size = write_buff_offset - block_size_;
-    flash_.Erase(0, block_size_);
+    EraseFlashOrExit(0, block_size_);
     CopyBlockPrefixAndChecksum(BlockType::MAIN, BlockType::BACKUP, used_size);
 
     InitBlock(BlockType::BACKUP);
