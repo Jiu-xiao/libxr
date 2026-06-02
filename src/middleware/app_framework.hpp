@@ -12,6 +12,9 @@ namespace LibXR
 /**
  * 硬件条目模板 / Hardware entry template
  * @tparam T 设备类型 / Device type
+ *
+ * @note `aliases` 中的每个别名都必须是非空字符串指针。
+ *       Every alias in `aliases` must be a non-null string pointer.
  */
 template <typename T>
 struct Entry
@@ -38,10 +41,13 @@ class HardwareContainer
 
   /**
    * 查找设备（单个别名） / Find device by alias
+   * @note `alias` 必须非空。
+   *       `alias` must be non-null.
    */
   template <typename T>
   T* Find(const char* alias) const
   {
+    ASSERT(alias != nullptr);
     T* result = nullptr;
     const auto wanted_id = TypeID::GetID<T>();
     alias_list_.Foreach<AliasEntry>(
@@ -59,12 +65,15 @@ class HardwareContainer
 
   /**
    * 查找设备（多个别名） / Find device with fallback aliases
+   * @note `ALIASES` 中的每个别名都必须非空。
+   *       Every alias in `ALIASES` must be non-null.
    */
   template <typename T>
   T* Find(const std::initializer_list<const char*> ALIASES) const
   {
     for (const auto& alias : ALIASES)
     {
+      ASSERT(alias != nullptr);
       if (T* obj = Find<T>(alias))
       {
         return obj;
@@ -74,13 +83,15 @@ class HardwareContainer
   }
 
   /**
-   * 查找或报错 / Find or ASSERT if not found
+   * 查找或强约束失败 / Find or REQUIRE if not found
+   * @note `aliases` 中的每个别名都必须非空。
+   *       Every alias in `aliases` must be non-null.
    */
   template <typename T>
   T* FindOrExit(std::initializer_list<const char*> aliases) const
   {
     T* result = Find<T>(aliases);
-    ASSERT(result != nullptr);
+    REQUIRE(result != nullptr);
     return result;
   }
 
@@ -90,12 +101,15 @@ class HardwareContainer
    *
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
+   * @note `entry.aliases` 中的每个别名都必须非空。
+   *       Every alias in `entry.aliases` must be non-null.
    */
   template <typename T>
   void Register(const Entry<T>& entry)
   {
     for (const auto& alias : entry.aliases)
     {
+      ASSERT(alias != nullptr);
       auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
           LibXR::LockFreeList::Node<AliasEntry>{alias, static_cast<void*>(&entry.object),
                                                 TypeID::GetID<T>()};
@@ -153,6 +167,10 @@ class ApplicationManager
   /**
    * @brief 调用所有模块的 OnMonitor
    * @brief Call OnMonitor for all registered modules
+   *
+   * @note 不保证模块执行顺序；当前实现按 `app_list_` 当下的链表遍历顺序调用。
+   *       No module execution order is guaranteed; the current implementation
+   *       follows the list traversal order of `app_list_` at the time of the call.
    */
   void MonitorAll()
   {
