@@ -266,11 +266,22 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
       return ErrorCode::BUSY;
     }
 
-    busy_.store(BusyState::IDLE, std::memory_order_release);
+    BusyState expected = state;
+    if (!busy_.compare_exchange_strong(expected, BusyState::CLEARING,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+    {
+      if (expected != BusyState::IDLE && expected != BusyState::EVENT)
+      {
+        return ErrorCode::BUSY;
+      }
+      continue;
+    }
 
     const size_t queued_size = queue_data_->Size();
     if (queued_size == 0)
     {
+      busy_.store(BusyState::IDLE, std::memory_order_release);
       return ErrorCode::OK;
     }
 
@@ -278,16 +289,19 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
     if (pop_ans == ErrorCode::OK)
     {
       OnRxDequeue(in_isr);
-      return ErrorCode::OK;
+    }
+    else
+    {
+      // With CLEARING, ordinary reads cannot race this pop. EMPTY here means a
+      // stronger path such as FailAndClearAll() reset the queue concurrently.
+      // 有了 CLEARING 之后，普通读不会再与本次 Pop 竞争。这里如果是 EMPTY，
+      // 说明是 FailAndClearAll() 之类更强的路径并发 reset 了队列。
+      ASSERT(pop_ans == ErrorCode::EMPTY);
     }
 
-    // Without a dedicated busy state, ClearQueuedData() can race with a
-    // concurrent ready-read that consumes part or all of the snapshot after
-    // the size check. Treat that as a normal concurrent outcome and retry.
-    // 在不引入专用 busy 状态的前提下，ClearQueuedData() 可能和并发的
-    // ready-read 竞争：对方会在本次 size 快照之后先消费掉部分或全部字节。
-    // 这属于正常并发结果，这里重试即可。
-    ASSERT(pop_ans == ErrorCode::EMPTY);
+    busy_.store(queue_data_->Size() > 0 ? BusyState::EVENT : BusyState::IDLE,
+                std::memory_order_release);
+    return ErrorCode::OK;
   }
 }
 
@@ -297,6 +311,12 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
   queue_data_->Reset();
 
   auto state = busy_.load(std::memory_order_acquire);
+  if (state == BusyState::CLEARING)
+  {
+    busy_.store(BusyState::IDLE, std::memory_order_release);
+    return;
+  }
+
   if (state == BusyState::PENDING)
   {
     if (info_.op.type == ReadOperation::OperationType::BLOCK)
