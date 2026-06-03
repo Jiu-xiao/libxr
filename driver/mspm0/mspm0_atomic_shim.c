@@ -165,4 +165,3 @@ __attribute__((weak)) unsigned int __atomic_fetch_sub_4(volatile void* ptr,
   atomic_exit(primask);
   return old_val;
 }
-

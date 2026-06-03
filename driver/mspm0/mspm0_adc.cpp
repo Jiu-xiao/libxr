@@ -4,7 +4,6 @@
 
 #include <cstdint>
 
-
 using namespace LibXR;
 
 namespace
