@@ -4,8 +4,8 @@
 
 using namespace LibXR;
 
-MSPM0DAC::MSPM0DAC(Resources res, float init_voltage)
-    : instance_(res.instance), vref_(res.vref), resolution_(4095)
+MSPM0DAC::MSPM0DAC(Resources res, float init_voltage, float vref)
+    : instance_(res.instance), vref_(vref), resolution_(4095)
 {
   ASSERT(instance_ != nullptr);
   ASSERT(vref_ > 0.0f);
