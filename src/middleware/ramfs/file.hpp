@@ -1,0 +1,156 @@
+  /**
+   * @class File
+   * @brief 内存文件或可执行文件 / Memory file or executable file
+   */
+  class File : public FsNode
+  {
+   public:
+    /**
+     * @brief 判断文件是否只读 / Check whether the file is read-only
+     * @return 只读返回 true / True if the file is read-only
+     */
+    [[nodiscard]] bool IsReadOnly() const { return file_type_ == FileType::READ_ONLY; }
+
+    /**
+     * @brief 判断文件是否可写 / Check whether the file is writable
+     * @return 可写返回 true / True if the file is writable
+     */
+    [[nodiscard]] bool IsReadWrite() const { return file_type_ == FileType::READ_WRITE; }
+
+    /**
+     * @brief 判断文件是否可执行 / Check whether the file is executable
+     * @return 可执行返回 true / True if the file is executable
+     */
+    [[nodiscard]] bool IsExecutable() const { return file_type_ == FileType::EXEC; }
+
+    /**
+     * @brief 执行可执行文件 / Run an executable file
+     * @param argc 参数数量 / Argument count
+     * @param argv 参数数组 / Argument vector
+     * @return 执行返回值 / Execution return value
+     */
+    int Run(int argc, char** argv);
+
+    /**
+     * @brief 访问类型化数据 / Access typed data
+     *
+     * `Data<T>()` 返回可写引用并要求 READ_WRITE / `Data<T>()` returns a writable
+     * reference and requires READ_WRITE.
+     * `Data<const T>()` 返回只读引用 / `Data<const T>()` returns a read-only
+     * reference for both READ_ONLY and READ_WRITE.
+     *
+     * @tparam DataType 数据类型；使用 const T 表示只读访问 / Data type; use const T
+     *                  for read-only access.
+     * @tparam LimitMode 大小检查模式 / Size-check mode
+     * @return 类型化数据引用 / Typed data reference
+     */
+    template <typename DataType, SizeLimitMode LimitMode = SizeLimitMode::MORE>
+    decltype(auto) Data()
+    {
+      using RequestedType = std::remove_reference_t<DataType>;
+      using StoredType = std::remove_cv_t<RequestedType>;
+      static_assert(!std::is_reference_v<DataType>);
+      static_assert(!std::is_volatile_v<RequestedType>);
+
+      ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(StoredType), size_));
+      if constexpr (std::is_const_v<RequestedType>)
+      {
+        if (file_type_ == FileType::READ_WRITE)
+        {
+          return *static_cast<const StoredType*>(addr_);
+        }
+        if (file_type_ == FileType::READ_ONLY)
+        {
+          return *static_cast<const StoredType*>(addr_const_);
+        }
+
+        ASSERT(false);
+        const void* null_data = nullptr;
+        return *static_cast<const StoredType*>(null_data);
+      }
+      else
+      {
+        ASSERT(file_type_ == FileType::READ_WRITE);
+        return *static_cast<StoredType*>(addr_);
+      }
+    }
+
+    /**
+     * @brief 从 const 文件对象访问类型化只读数据 / Access typed read-only data from a
+     * const file object
+     *
+     * @tparam DataType 数据类型 / Data type
+     * @tparam LimitMode 大小检查模式 / Size-check mode
+     * @return 类型化只读数据引用 / Typed read-only data reference
+     */
+    template <typename DataType, SizeLimitMode LimitMode = SizeLimitMode::MORE>
+    decltype(auto) Data() const
+    {
+      using RequestedType = std::remove_reference_t<DataType>;
+      using StoredType = std::remove_cv_t<RequestedType>;
+      static_assert(!std::is_reference_v<DataType>);
+      static_assert(!std::is_volatile_v<RequestedType>);
+
+      ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(StoredType), size_));
+      if (file_type_ == FileType::READ_WRITE)
+      {
+        return *static_cast<const StoredType*>(addr_);
+      }
+      if (file_type_ == FileType::READ_ONLY)
+      {
+        return *static_cast<const StoredType*>(addr_const_);
+      }
+
+      ASSERT(false);
+      const void* null_data = nullptr;
+      return *static_cast<const StoredType*>(null_data);
+    }
+
+    /**
+     * @brief 访问可写原始数据，要求文件为 READ_WRITE / Access writable raw data;
+     * requires READ_WRITE
+     * @return 可写原始数据视图 / Writable raw data view
+     */
+    [[nodiscard]] RawData Data()
+    {
+      ASSERT(file_type_ == FileType::READ_WRITE);
+      return RawData(addr_, size_);
+    }
+
+    /**
+     * @brief 访问只读原始数据 / Access read-only raw data
+     * @return 只读原始数据视图 / Read-only raw data view
+     */
+    [[nodiscard]] ConstRawData Data() const
+    {
+      if (file_type_ == FileType::READ_WRITE)
+      {
+        return ConstRawData(addr_, size_);
+      }
+      if (file_type_ == FileType::READ_ONLY)
+      {
+        return ConstRawData(addr_const_, size_);
+      }
+      ASSERT(false);
+      return ConstRawData();
+    }
+
+   private:
+    using ExecFun = int (*)(void* raw, int argc, char** argv);
+
+    File();
+    explicit File(const char* name);
+
+    union
+    {
+      void* addr_;
+      const void* addr_const_;
+      ExecFun exec_;
+    };
+
+    void* arg_ = nullptr;
+    size_t size_ = 0;
+    FileType file_type_ = FileType::READ_ONLY;
+
+    friend class RamFS;
+  };
