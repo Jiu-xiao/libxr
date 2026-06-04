@@ -68,20 +68,17 @@ void test_terminal()
     ASSERT(false);
   };
 
-  auto write_line = [&](const char* command_line)
-  {
-    LibXR::WriteOperation write_op;
-    ASSERT(input.GetWritePort()(LibXR::ConstRawData{command_line}, write_op) ==
-           LibXR::ErrorCode::OK);
-    run_terminal_until_idle();
-  };
-
-  auto write_bytes = [&](const void* data, size_t size)
+  auto write_raw = [&](const void* data, size_t size)
   {
     LibXR::WriteOperation write_op;
     ASSERT(input.GetWritePort()(LibXR::ConstRawData{data, size}, write_op) ==
            LibXR::ErrorCode::OK);
     run_terminal_until_idle();
+  };
+
+  auto write_line = [&](const char* command_line)
+  {
+    write_raw(command_line, std::strlen(command_line));
   };
 
   write_line("dir1/dir2/dir3/run\n");
@@ -94,7 +91,7 @@ void test_terminal()
   write_line("alph\t\n");
   const unsigned char non_printable_unknown[] = {0xFF, 'u', 'n', 'k', 'n',
                                                  'o', 'w', 'n', '\n'};
-  write_bytes(non_printable_unknown, sizeof(non_printable_unknown));
+  write_raw(non_printable_unknown, sizeof(non_printable_unknown));
 
   const size_t output_size = output.GetReadPort().Size();
   ASSERT(output_size > 0);
