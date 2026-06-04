@@ -65,10 +65,12 @@ void OnLogMessage(bool, Topic tp, const Topic::MessageView<LogData>& log_message
 {
   UNUSED(tp);
 
-  if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(log_message.data.level) &&
+  ASSERT(log_message.data != nullptr);
+
+  if (LIBXR_LOG_OUTPUT_LEVEL >= static_cast<uint8_t>(log_message.data->level) &&
       STDIO::write_ && STDIO::write_->Writable())
   {
-    PrintLogToTerminal(log_message.data, log_message.timestamp);
+    PrintLogToTerminal(*log_message.data, log_message.timestamp);
   }
 }
 }  // namespace

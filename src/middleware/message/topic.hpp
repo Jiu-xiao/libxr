@@ -68,7 +68,7 @@ class Topic
   {
     static_assert(TopicPayload<Data>);
     MicrosecondTimestamp timestamp;
-    Data& data;
+    Data* data;
   };
 
   template <typename Data>

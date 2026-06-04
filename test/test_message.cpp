@@ -73,7 +73,8 @@ void TestTopicCore()
       [](bool, void*, const LibXR::Topic::MessageView<double>& message)
       {
         view_cb_timestamp = message.timestamp;
-        view_cb_value = message.data;
+        ASSERT(message.data != nullptr);
+        view_cb_value = *message.data;
       },
       reinterpret_cast<void*>(0));
 
@@ -112,7 +113,8 @@ void TestTopicCore()
       [](bool, void*, const LibXR::Topic::MessageView<ByteStablePayload>& message)
       {
         byte_stable_view_timestamp = message.timestamp;
-        byte_stable_view_value = message.data.data[2];
+        ASSERT(message.data != nullptr);
+        byte_stable_view_value = message.data->data[2];
       },
       reinterpret_cast<void*>(0));
   byte_stable_topic.RegisterCallback(byte_stable_cb);

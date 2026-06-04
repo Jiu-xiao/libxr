@@ -149,8 +149,17 @@ class Topic::Callback
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
       using Data = typename View::DataType;
-      MessageView<Data> message{timestamp, *reinterpret_cast<Data*>(data.addr_)};
-      fun(in_isr, arg, message);
+      if constexpr (std::is_lvalue_reference_v<PayloadArg> &&
+                    !std::is_const_v<std::remove_reference_t<PayloadArg>>)
+      {
+        MessageView<Data> message{timestamp, reinterpret_cast<Data*>(data.addr_)};
+        fun(in_isr, arg, message);
+      }
+      else
+      {
+        fun(in_isr, arg,
+            MessageView<Data>{timestamp, reinterpret_cast<Data*>(data.addr_)});
+      }
     }
     else
     {
@@ -242,7 +251,7 @@ class Topic::Callback
       {
         using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
         using Data = typename View::DataType;
-        MessageView<Data> message{timestamp, *reinterpret_cast<Data*>(data.addr_)};
+        MessageView<Data> message{timestamp, reinterpret_cast<Data*>(data.addr_)};
         block->fun_(in_isr, block->arg_, timestamp, message);
       }
       else
