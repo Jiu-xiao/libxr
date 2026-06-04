@@ -114,8 +114,8 @@ Topic::Domain::Domain(const char* name)
 
 Topic::Topic() {}
 
-Topic::Topic(const char* name, uint32_t payload_size, TypeID::ID payload_type_id,
-             Domain* domain, bool multi_publisher)
+Topic::Topic(const char* name, TypeID::ID payload_type_id, Domain* domain,
+             bool multi_publisher)
 {
   ASSERT(name != nullptr);
   ASSERT(payload_type_id != nullptr);
@@ -131,7 +131,6 @@ Topic::Topic(const char* name, uint32_t payload_size, TypeID::ID payload_type_id
 
   if (topic)
   {
-    ASSERT(topic->data_.payload_size == payload_size);
     ASSERT(topic->data_.payload_type_id == payload_type_id);
 
     if (multi_publisher && !topic->data_.mutex)
@@ -144,7 +143,6 @@ Topic::Topic(const char* name, uint32_t payload_size, TypeID::ID payload_type_id
   else
   {
     block_ = new RBTree<uint32_t>::Node<Block>;
-    block_->data_.payload_size = payload_size;
     block_->data_.payload_type_id = payload_type_id;
     block_->data_.crc32 = crc32;
 

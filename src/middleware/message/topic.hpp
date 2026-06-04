@@ -56,7 +56,6 @@ class Topic
   {
     std::atomic<LockState> busy;
     LockFreeList subers;
-    uint32_t payload_size;
     TypeID::ID payload_type_id;
     uint32_t crc32;
     Mutex* mutex;
@@ -121,15 +120,15 @@ class Topic
   static MicrosecondTimestamp NowTimestamp();
 
   Topic();
-  Topic(const char* name, uint32_t payload_size, TypeID::ID payload_type_id,
-        Domain* domain = nullptr, bool multi_publisher = false);
+  Topic(const char* name, TypeID::ID payload_type_id, Domain* domain = nullptr,
+        bool multi_publisher = false);
 
   template <typename Data>
   static Topic CreateTopic(const char* name, Domain* domain = nullptr,
                            bool multi_publisher = false)
   {
     CheckTopicPayload<Data>();
-    return Topic(name, sizeof(Data), TypeID::GetID<Data>(), domain, multi_publisher);
+    return Topic(name, TypeID::GetID<Data>(), domain, multi_publisher);
   }
 
   Topic(TopicHandle topic);
@@ -152,33 +151,25 @@ class Topic
   template <typename Data>
   void Publish(Data& data)
   {
-    CheckTopicPayload<Data>();
-    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-               TypeID::GetID<Data>(), NowTimestamp(), false, false);
+    PublishTyped(data, NowTimestamp(), false, false);
   }
 
   template <typename Data>
   void Publish(Data& data, MicrosecondTimestamp timestamp)
   {
-    CheckTopicPayload<Data>();
-    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-               TypeID::GetID<Data>(), timestamp, false, false);
+    PublishTyped(data, timestamp, false, false);
   }
 
   template <typename Data>
   void PublishFromCallback(Data& data, bool in_isr)
   {
-    CheckTopicPayload<Data>();
-    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-               TypeID::GetID<Data>(), NowTimestamp(), true, in_isr);
+    PublishTyped(data, NowTimestamp(), true, in_isr);
   }
 
   template <typename Data>
   void PublishFromCallback(Data& data, MicrosecondTimestamp timestamp, bool in_isr)
   {
-    CheckTopicPayload<Data>();
-    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-               TypeID::GetID<Data>(), timestamp, true, in_isr);
+    PublishTyped(data, timestamp, true, in_isr);
   }
 
   static TopicHandle WaitTopic(const char* name, uint32_t timeout = UINT32_MAX,
@@ -202,7 +193,6 @@ class Topic
     CheckTopicPayload<Data>();
     ASSERT(topic.block_ != nullptr);
     ASSERT(topic.block_->data_.payload_type_id == TypeID::GetID<Data>());
-    ASSERT(topic.block_->data_.payload_size == sizeof(Data));
   }
 
   template <typename Data>
@@ -213,11 +203,36 @@ class Topic
     return RawData(*data);
   }
 
-  void PublishRaw(void* addr, uint32_t size, TypeID::ID payload_type_id,
-                  MicrosecondTimestamp timestamp, bool from_callback, bool in_isr);
+  template <typename Data>
+  void PublishTyped(Data& data, MicrosecondTimestamp timestamp, bool from_callback,
+                    bool in_isr)
+  {
+    CheckTopicPayload<Data>();
 
-  static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
-                                   uint32_t size);
+    if (from_callback)
+    {
+      LockFromCallback(block_);
+    }
+    else
+    {
+      Lock(block_);
+    }
+
+    CheckPublishContract(block_, TypeID::GetID<Data>());
+    RawData raw(data);
+    DispatchSubscribers(block_, timestamp, raw, from_callback, in_isr);
+
+    if (from_callback)
+    {
+      UnlockFromCallback(block_);
+    }
+    else
+    {
+      Unlock(block_);
+    }
+  }
+
+  static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id);
   static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
                                  RawData data, bool from_callback, bool in_isr);
   static void DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestamp,

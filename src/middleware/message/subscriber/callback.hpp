@@ -94,13 +94,13 @@ class Topic::Callback
    * @brief 回调句柄真正指向的那块数据的公共头 / Common header of the data block actually
    *        pointed to by one callback handle
    *
-   * 一个 `Callback` 最终只保存一个 `BlockHeader*`。真正的回调函数、绑定参数和负载大小
-   * 都放在派生块里；发布路径先看 `payload_size` 做尺寸检查，再通过 `run` 调到那块具体
-   * 数据。
+ * 一个 `Callback` 最终只保存一个 `BlockHeader*`。真正的回调函数、绑定参数和负载类型
+ * 都放在派生块里；发布路径先看 `payload_type_id` 做契约检查，再通过 `run`
+ * 调到那块具体数据。
    * One `Callback` finally stores only one `BlockHeader*`. The real callback
-   * function, bound argument, and expected payload size live in derived blocks;
-   * the publish path first checks `payload_size` and then jumps through `run`
-   * into that concrete block.
+ * function, bound argument, and expected payload type live in derived blocks;
+ * the publish path first checks `payload_type_id` and then jumps through `run`
+ * into that concrete block.
    */
   struct BlockHeader
   {
@@ -108,37 +108,8 @@ class Topic::Callback
                             RawData&);  ///< 所有具体回调块共用的执行入口。Shared execution entry used by all concrete callback blocks.
 
     RunFun run = nullptr;  ///< 当前块的执行函数。Execution function of the current block.
-    uint32_t payload_size = 0;  ///< 该回调期望的主题负载字节数。Expected topic payload size in bytes.
     TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识。Expected topic payload type identifier.
   };
-
-  /**
-   * @brief 计算回调期望的主题负载大小 / Compute the topic payload size expected by the
-   *        callback
-   * @tparam PayloadArg 负载参数类型 / Payload argument type
-   * @return 该回调负载期望的字节数 / Returns the payload byte size expected by the callback
-   *
-   * @note 当前 exact-typed message bus 只允许 `MessageView<T>` 或直接 `T` 负载；
-   *       两者都必须和主题负载大小精确一致 /
-   *       The current exact-typed message bus only allows `MessageView<T>` or a
-   *       direct `T` payload; both must match the topic payload size exactly
-   */
-  template <typename PayloadArg>
-  static consteval uint32_t PayloadSize()
-  {
-    if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
-    {
-      using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
-      return sizeof(typename View::DataType);
-    }
-    else
-    {
-      static_assert(IS_TYPED_DATA<PayloadArg>,
-                    "LibXR::Topic::Callback payload must be Topic::MessageView<T>, "
-                    "T, T&, or const T&.");
-      return sizeof(RemoveCVRef<PayloadArg>);
-    }
-  }
 
   template <typename PayloadArg>
   static TypeID::ID PayloadTypeID()
@@ -205,7 +176,7 @@ class Topic::Callback
      * @param arg 绑定到回调中的参数 / Argument bound into the callback
      */
     PayloadOnlyBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadSize<PayloadArg>(), PayloadTypeID<PayloadArg>()},
+        : BlockHeader{&Run, PayloadTypeID<PayloadArg>()},
           fun_(fun),
           arg_(std::move(arg))
     {
@@ -249,7 +220,7 @@ class Topic::Callback
      * @param arg 绑定到回调中的参数 / Argument bound into the callback
      */
     TimestampPayloadBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadSize<PayloadArg>(), PayloadTypeID<PayloadArg>()},
+        : BlockHeader{&Run, PayloadTypeID<PayloadArg>()},
           fun_(fun),
           arg_(std::move(arg))
     {
@@ -376,7 +347,6 @@ class Topic::Callback
 
   inline static BlockHeader empty_block_{
       &EmptyRun,
-      0,
       nullptr};  ///< 空回调句柄共用的静态空执行块。Shared static empty execution block used by empty callback handles.
 
  public:
@@ -438,11 +408,6 @@ class Topic::Callback
     block_->run(block_, in_isr, timestamp, data);
   }
 
-  /**
-   * @brief 获取该回调期望的负载大小 / Get the payload size expected by the callback
-   * @return 该回调期望的负载大小 / Returns the payload size expected by the callback
-   */
-  uint32_t PayloadSize() const { return block_->payload_size; }
   TypeID::ID PayloadTypeID() const { return block_->payload_type_id; }
 
  private:
@@ -486,7 +451,6 @@ struct Topic::CallbackBlock : public Topic::SuberBlock
 inline void Topic::RegisterCallback(Callback& cb)
 {
   ASSERT(block_->data_.payload_type_id == cb.PayloadTypeID());
-  ASSERT(block_->data_.payload_size == cb.PayloadSize());
 
   auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
       LockFreeList::Node<CallbackBlock>(cb);

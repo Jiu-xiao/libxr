@@ -13,9 +13,9 @@ namespace Detail::MessageSubscriber
  * @param topic 待校验的主题 / Topic to validate against
  *
  * @note 当前 message bus 只允许精确类型契约：
- *       订阅类型必须和 topic 绑定的 payload 类型与大小都完全一致 /
+ *       订阅类型必须和 topic 绑定的 payload 类型完全一致 /
  *       The current message bus allows exact type contracts only:
- *       the subscriber type must exactly match both the topic payload type and size
+ *       the subscriber type must exactly match the topic payload type
  */
 template <typename Data>
 void CheckSubscriberType(Topic topic)
@@ -23,7 +23,6 @@ void CheckSubscriberType(Topic topic)
   CheckTopicPayload<Data>();
   auto topic_handle = static_cast<Topic::TopicHandle>(topic);
   ASSERT(topic_handle->data_.payload_type_id == TypeID::GetID<Data>());
-  ASSERT(topic_handle->data_.payload_size == sizeof(Data));
 }
 
 /**

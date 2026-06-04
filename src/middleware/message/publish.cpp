@@ -84,36 +84,8 @@ MicrosecondTimestamp Topic::NowTimestamp()
   return Timebase::GetMicroseconds();
 }
 
-void Topic::CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
-                                 uint32_t size)
+void Topic::CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id)
 {
   ASSERT(payload_type_id != nullptr);
   ASSERT(topic->data_.payload_type_id == payload_type_id);
-  ASSERT(size == topic->data_.payload_size);
-}
-
-void Topic::PublishRaw(void* addr, uint32_t size, TypeID::ID payload_type_id,
-                       MicrosecondTimestamp timestamp, bool from_callback, bool in_isr)
-{
-  if (from_callback)
-  {
-    LockFromCallback(block_);
-  }
-  else
-  {
-    Lock(block_);
-  }
-
-  CheckPublishContract(block_, payload_type_id, size);
-  RawData data(addr, size);
-  DispatchSubscribers(block_, timestamp, data, from_callback, in_isr);
-
-  if (from_callback)
-  {
-    UnlockFromCallback(block_);
-  }
-  else
-  {
-    Unlock(block_);
-  }
 }
