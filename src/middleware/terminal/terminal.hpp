@@ -30,8 +30,20 @@ template <size_t READ_BUFF_SIZE = 32, size_t MAX_LINE_SIZE = READ_BUFF_SIZE,
 class Terminal
 {
  private:
+  /**
+   * @brief  一条历史命令的固定存储单元
+   *         Fixed storage slot for one history command line
+   */
   using HistoryLine = std::array<char, MAX_LINE_SIZE + 1>;
 
+  /**
+   * @brief  终端控制序列常量
+   *         Terminal control-sequence constants
+   *
+   * These literals are emitted directly into the write stream to implement
+   * clear-screen, clear-line, cursor-save/restore, and simple cursor motion.
+   * 这些字面量会被直接写进终端输出流，用来实现清屏、清行、保存/恢复光标和基础光标移动。
+   */
   static constexpr char CLEAR_ALL[] =
       "\033[2J\033[1H";  ///< 清屏命令 Clear screen command
   static constexpr char CLEAR_LINE[] =
@@ -129,7 +141,8 @@ class Terminal
   }
 
   ReadOperation::OperationPollingStatus read_status_;
-  WriteOperation::OperationPollingStatus write_status_;
+  WriteOperation::OperationPollingStatus
+      write_status_;  ///< 当前读/写轮询状态 / Current polling status of the read / write side.
 
   const Mode MODE;                  ///< 终端换行模式 Terminal line feed mode
   WriteOperation write_op_;         ///< 终端写操作 Terminal write operation
@@ -142,7 +155,7 @@ class Terminal
   RamFS& ramfs_;                    ///< 关联的文件系统 Associated file system
   char read_buff_[READ_BUFF_SIZE];  ///< 读取缓冲区 Read buffer
 
-  size_t request_read_size_ = 0;
+  size_t request_read_size_ = 0;   ///< 本轮计划读取的字节数 / Byte count requested for the current read attempt.
   RamFS::Dir* current_dir_;        ///< 当前目录 Current directory
   uint8_t flag_ansi_ = 0;          ///< ANSI 控制字符状态 ANSI control character state
   int offset_ = 0;                 ///< 光标偏移 Cursor offset
@@ -154,20 +167,28 @@ class Terminal
   bool linefeed_flag_ = false;     ///< CRLF 抑制标志 CRLF suppression flag
   char linefeed_char_ = '\0';      ///< 上一个换行字符 Previous line feed character
 
-  // 行编辑、显示、历史记录。
-  // Line editing, display, and history management.
+  /**
+   * @brief  行编辑、显示与历史记录片段
+   *         Line-editing, display, and history-management fragment
+   */
 #include "display.hpp"
 
-  // 路径解析、命令执行、自动补全。
-  // Path resolution, command execution, and auto-completion.
+  /**
+   * @brief  路径解析、命令执行与自动补全片段
+   *         Path-resolution, command-execution, and auto-completion fragment
+   */
 #include "command.hpp"
 
-  // 输入字符解析与 ANSI / 控制字符分发。
-  // Input-byte parsing plus ANSI / control-character dispatch.
+  /**
+   * @brief  输入字节解析与 ANSI / 控制字符分发片段
+   *         Input-byte parsing plus ANSI / control-character dispatch fragment
+   */
 #include "input.hpp"
 
-  // 线程 / 轮询驱动入口。
-  // Threaded / polling driver entry points.
+  /**
+   * @brief  线程 / 轮询驱动入口片段
+   *         Threaded / polling driver-entry fragment
+   */
 #include "driver.hpp"
 };
 

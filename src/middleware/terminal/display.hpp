@@ -1,3 +1,19 @@
+  /**
+   * @brief  `Terminal` 的显示与历史记录片段
+   *         Display and history fragment of `Terminal`
+   *
+   * @note 这一组函数只负责行编辑、提示符显示、光标移动，以及历史记录的展示/拷回。
+   *       This group is responsible only for line editing, prompt rendering,
+   *       cursor movement, and displaying / restoring history entries.
+   */
+
+  /**
+   * @brief  计算一条历史命令的实际文本长度
+   *         Calculates the actual text length of one stored history line
+   * @param  line 历史命令缓存 / Stored history line
+   * @return size_t 历史命令的实际长度
+   *         Actual length of the history line
+   */
   static size_t HistoryLineSize(const HistoryLine& line)
   {
     size_t size = 0;
@@ -32,6 +48,10 @@
   /**
    * @brief  执行换行操作
    *         Performs a line feed operation
+   *
+   * @note 具体输出 `\r\n`、`\n` 还是 `\r` 由构造时选定的 `MODE` 决定。
+   *       The actual emitted line ending is selected by the `MODE` chosen at
+   *       construction time.
    */
   void LineFeed()
   {
@@ -52,6 +72,10 @@
   /**
    * @brief  更新光标位置
    *         Updates cursor position
+   *
+   * @note 这里只重绘光标右侧的可见后缀；光标左侧的内容已经在输入缓冲区中保留。
+   *       This redraws only the visible suffix to the right of the cursor; the
+   *       left side is already preserved in the input buffer.
    */
   void UpdateDisplayPosition()
   {
@@ -212,6 +236,10 @@
   /**
    * @brief  显示历史记录中的输入行，更新终端显示
    *         Displays the input line from history and updates the terminal display
+   *
+   * @note 当 `history_index_ < 0` 时，这里回显的是当前尚未提交的输入行，而不是历史项。
+   *       When `history_index_ < 0`, this echoes the current in-progress input
+   *       line rather than one history entry.
    */
   void ShowHistory()
   {
@@ -250,6 +278,10 @@
   /**
    * @brief  将当前输入行添加到历史记录
    *         Adds the current input line to the history
+   *
+   * @note 超过 `MAX_HISTORY_NUMBER` 时，当前实现会丢掉最旧的一条，再压入最新输入。
+   *       When `MAX_HISTORY_NUMBER` is exceeded, the current implementation
+   *       drops the oldest entry before pushing the newest input line.
    */
   void AddHistory()
   {

@@ -1,6 +1,21 @@
   /**
+   * @brief  `Terminal` 的命令解析片段
+   *         Command-parsing fragment of `Terminal`
+   *
+   * @note 这一组函数只负责把当前输入行解释成命令：参数切分、路径解析、内建命令执行、
+   *       可执行文件查找以及自动补全。
+   *       This group is responsible only for interpreting the current input
+   *       line as a command: argument tokenization, path resolution, built-in
+   *       command execution, executable lookup, and auto-completion.
+   */
+
+  /**
    * @brief  解析输入行，将其拆分为参数数组
    *         Parses the input line and splits it into argument array
+   *
+   * @note 该过程会原地把空格改成 `\0`，并把每个参数起始位置填进 `arg_tab_`。
+   *       This process overwrites spaces in-place with `\0` and stores each
+   *       argument start pointer into `arg_tab_`.
    */
   void GetArgs()
   {
@@ -27,6 +42,11 @@
    * @param  path 目录路径字符串 The directory path string
    * @return RamFS::Dir* 解析出的目录指针，若找不到则返回 nullptr
    *         Pointer to the resolved directory, or nullptr if not found
+   *
+   * @note 解析过程中会暂时把路径中的 `/` 改写成 `\0` 再恢复，所以调用方必须传入可写
+   *       缓冲区，而不是字符串常量。
+   *       The resolver temporarily rewrites `/` to `\0` and restores it later,
+   *       so callers must provide a writable buffer rather than a string literal.
    */
   RamFS::Dir* Path2Dir(char* path)
   {
@@ -81,6 +101,10 @@
    * @param  path 文件路径字符串 The file path string
    * @return RamFS::File* 解析出的文件指针，若找不到则返回 nullptr
    *         Pointer to the resolved file, or nullptr if not found
+   *
+   * @note 这个解析同样会临时切开路径字符串，因此也要求 `path` 可写。
+   *       This resolver also temporarily splits the path string and therefore
+   *       requires `path` to be writable.
    */
   RamFS::File* Path2File(char* path)
   {
@@ -117,6 +141,12 @@
   /**
    * @brief  解析并执行输入的命令
    *         Parses and executes the entered command
+   *
+   * @note 当前实现只内建了 `cd` 和 `ls`；其它命令都按“把第一个参数当 RamFS 可执行文件
+   *       路径”来处理。
+   *       The current implementation provides only the built-in `cd` and `ls`;
+   *       every other command is handled by treating the first argument as the
+   *       path of an executable RamFS file.
    */
   void ExecuteCommand()
   {
@@ -200,6 +230,10 @@
   /**
    * @brief  实现命令自动补全，匹配目录或文件名
    *         Implements command auto-completion by matching directories or file names
+   *
+   * @note 当前自动补全只处理“第一参数且光标在该参数尾部”这一种情况，不会解析后续参数。
+   *       The current auto-completion handles only the first argument when the
+   *       cursor is at that argument's tail; it does not parse later arguments.
    */
   void AutoComplete()
   {

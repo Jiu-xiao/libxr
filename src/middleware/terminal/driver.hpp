@@ -1,4 +1,15 @@
   /**
+   * @brief  `Terminal` 的驱动入口片段
+   *         Driver-entry fragment of `Terminal`
+   *
+   * @note 这一组函数只决定“什么时候读、什么时候解析、什么时候提交输出”，不负责
+   *       行编辑、命令语义或显示细节。
+   *       This group decides only when to read, when to parse, and when to
+   *       commit output; it does not own line editing, command semantics, or
+   *       display details.
+   */
+
+  /**
    * @brief  终端线程函数，以独立线程方式持续驱动终端
    *         Terminal thread function, continuously drives the terminal as an independent
    * thread
@@ -13,6 +24,11 @@
    * available.
    *
    * @param  term 指向 Terminal 实例的指针 Pointer to the Terminal instance
+   * @note 每次真正拿到一批输入后，解析和输出提交都在 `write_mutex_` 保护下完成，
+   *       以免和外部写口共享同一个输出流时交错。
+   *       Once one input batch is actually obtained, parsing and output commit
+   *       are both completed under `write_mutex_` so they do not interleave
+   *       with other writers sharing the same output stream.
    */
   static void ThreadFun(Terminal* term)
   {
@@ -51,6 +67,11 @@
    * (e.g., triggered by a timer) and processes available input data before returning.
    *
    * @param  term 指向 Terminal 实例的指针 Pointer to the Terminal instance
+   * @note `TaskFun()` 每次只推进有限一步状态机：发起读取、等待完成、消费完成结果，
+   *       然后立即返回给调度方。
+   *       `TaskFun()` advances the state machine by only a bounded step each
+   *       time: start one read, wait for completion, consume one completed
+   *       result, then return to the scheduler immediately.
    */
   static void TaskFun(Terminal* term)
   {
