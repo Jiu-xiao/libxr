@@ -196,11 +196,19 @@ class Topic
   }
 
   template <typename Data>
-  static RawData NewSubscriberBuffer()
+  static void* AllocateSubscriberBuffer()
   {
     CheckTopicPayload<Data>();
-    auto* data = new Data;
-    return RawData(*data);
+    return new Data;
+  }
+
+  template <typename Data>
+  static void CopyPayload(void* dst, void* payload_addr)
+  {
+    CheckTopicPayload<Data>();
+    ASSERT(dst != nullptr);
+    ASSERT(payload_addr != nullptr);
+    *reinterpret_cast<Data*>(dst) = *reinterpret_cast<Data*>(payload_addr);
   }
 
   template <typename Data>
@@ -219,8 +227,7 @@ class Topic
     }
 
     CheckPublishContract(block_, TypeID::GetID<Data>());
-    RawData raw(data);
-    DispatchSubscribers(block_, timestamp, raw, from_callback, in_isr);
+    DispatchSubscribers(block_, timestamp, &data, from_callback, in_isr);
 
     if (from_callback)
     {
@@ -234,13 +241,12 @@ class Topic
 
   static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id);
   static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
-                                 RawData data, bool from_callback, bool in_isr);
+                                 void* payload_addr, bool from_callback, bool in_isr);
   static void DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestamp,
-                                  RawData data, bool from_callback, bool in_isr);
+                                  void* payload_addr, bool from_callback, bool in_isr);
 };
 }  // namespace LibXR
 
-#include "subscriber/base.hpp"
 #include "subscriber/async.hpp"
 #include "subscriber/callback.hpp"
 #include "subscriber/queue.hpp"

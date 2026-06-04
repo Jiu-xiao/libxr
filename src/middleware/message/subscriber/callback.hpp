@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base.hpp"
+#include "../topic.hpp"
 
 namespace LibXR
 {
@@ -110,7 +110,7 @@ class Topic::Callback
   struct BlockHeader
   {
     using RunFun = void (*)(const BlockHeader*, bool, MicrosecondTimestamp,
-                            RawData&);  ///< 所有具体回调块共用的执行入口。Shared execution entry used by all concrete callback blocks.
+                            void*);  ///< 所有具体回调块共用的执行入口。Shared execution entry used by all concrete callback blocks.
 
     RunFun run = nullptr;  ///< 当前块的执行函数。Execution function of the current block.
     TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识。Expected topic payload type identifier.
@@ -152,19 +152,19 @@ class Topic::Callback
    */
   template <typename Function, typename BoundArg, typename PayloadArg>
   static void InvokePayload(Function fun, BoundArg& arg, bool in_isr,
-                            MicrosecondTimestamp timestamp, RawData& data)
+                            MicrosecondTimestamp timestamp, void* payload_addr)
   {
     if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
       using Data = typename View::DataType;
       fun(in_isr, arg,
-          MessageView<Data>{timestamp, reinterpret_cast<Data*>(data.addr_)});
+          MessageView<Data>{timestamp, reinterpret_cast<Data*>(payload_addr)});
     }
     else
     {
       using Data = RemoveCVRef<PayloadArg>;
-      fun(in_isr, arg, *reinterpret_cast<Data*>(data.addr_));
+      fun(in_isr, arg, *reinterpret_cast<Data*>(payload_addr));
     }
   }
 
@@ -200,11 +200,12 @@ class Topic::Callback
      * @param data 当前消息数据视图 / Current message payload view
      */
     static void Run(const BlockHeader* header, bool in_isr,
-                    MicrosecondTimestamp timestamp, RawData& data)
+                    MicrosecondTimestamp timestamp, void* payload_addr)
     {
       auto* block = static_cast<const PayloadOnlyBlock*>(header);
       InvokePayload<Function, BoundArg, PayloadArg>(
-          block->fun_, const_cast<BoundArg&>(block->arg_), in_isr, timestamp, data);
+          block->fun_, const_cast<BoundArg&>(block->arg_), in_isr, timestamp,
+          payload_addr);
     }
 
     Function fun_;  ///< 目标回调函数。Target callback function.
@@ -244,20 +245,22 @@ class Topic::Callback
      * @param data 当前消息数据视图 / Current message payload view
      */
     static void Run(const BlockHeader* header, bool in_isr,
-                    MicrosecondTimestamp timestamp, RawData& data)
+                    MicrosecondTimestamp timestamp, void* payload_addr)
     {
       auto* block = static_cast<const TimestampPayloadBlock*>(header);
       if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
       {
         using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
         using Data = typename View::DataType;
-        MessageView<Data> message{timestamp, reinterpret_cast<Data*>(data.addr_)};
-        block->fun_(in_isr, block->arg_, timestamp, message);
+        block->fun_(
+            in_isr, block->arg_, timestamp,
+            MessageView<Data>{timestamp, reinterpret_cast<Data*>(payload_addr)});
       }
       else
       {
         using Data = RemoveCVRef<PayloadArg>;
-        block->fun_(in_isr, block->arg_, timestamp, *reinterpret_cast<Data*>(data.addr_));
+        block->fun_(in_isr, block->arg_, timestamp,
+                    *reinterpret_cast<Data*>(payload_addr));
       }
     }
 
@@ -352,7 +355,7 @@ class Topic::Callback
    * @param timestamp 当前消息时间戳 / Current message timestamp
    * @param data 当前消息数据视图 / Current message payload view
    */
-  static void EmptyRun(const BlockHeader*, bool, MicrosecondTimestamp, RawData&) {}
+  static void EmptyRun(const BlockHeader*, bool, MicrosecondTimestamp, void*) {}
 
   inline static BlockHeader empty_block_{
       &EmptyRun,
@@ -412,9 +415,9 @@ class Topic::Callback
    * @param timestamp 当前消息时间戳 / Current message timestamp
    * @param data 当前消息数据视图 / Current message payload view
    */
-  void Run(bool in_isr, MicrosecondTimestamp timestamp, RawData& data) const
+  void Run(bool in_isr, MicrosecondTimestamp timestamp, void* payload_addr) const
   {
-    block_->run(block_, in_isr, timestamp, data);
+    block_->run(block_, in_isr, timestamp, payload_addr);
   }
 
   TypeID::ID PayloadTypeID() const { return block_->payload_type_id; }

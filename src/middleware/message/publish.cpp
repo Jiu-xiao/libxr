@@ -1,6 +1,5 @@
 #include <atomic>
 
-#include "libxr_mem.hpp"
 #include "subscriber/async.hpp"
 #include "subscriber/callback.hpp"
 #include "subscriber/queue.hpp"
@@ -11,7 +10,7 @@
 using namespace LibXR;
 
 void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
-                               RawData data, bool from_callback, bool in_isr)
+                               void* payload_addr, bool from_callback, bool in_isr)
 {
   switch (block.type)
   {
@@ -28,7 +27,7 @@ void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp
         break;
       }
 
-      LibXR::Memory::FastCopy(sync->buff.addr_, data.addr_, data.size_);
+      sync->copy_payload(sync->buff_addr, payload_addr);
       sync->timestamp = timestamp;
 
       if (from_callback)
@@ -46,7 +45,7 @@ void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp
       auto async = static_cast<ASyncBlock*>(&block);
       if (async->state.load(std::memory_order_acquire) == ASyncSubscriberState::WAITING)
       {
-        LibXR::Memory::FastCopy(async->buff.addr_, data.addr_, data.size_);
+        async->copy_payload(async->buff_addr, payload_addr);
         async->timestamp = timestamp;
         async->state.store(ASyncSubscriberState::DATA_READY, std::memory_order_release);
       }
@@ -55,25 +54,25 @@ void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp
     case SuberType::QUEUE:
     {
       auto queue_block = static_cast<QueueBlock*>(&block);
-      queue_block->fun(timestamp, data, *queue_block);
+      queue_block->fun(timestamp, payload_addr, *queue_block);
       break;
     }
     case SuberType::CALLBACK:
     {
       auto cb_block = static_cast<CallbackBlock*>(&block);
-      cb_block->cb.Run(from_callback && in_isr, timestamp, data);
+      cb_block->cb.Run(from_callback && in_isr, timestamp, payload_addr);
       break;
     }
   }
 }
 
 void Topic::DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestamp,
-                                RawData data, bool from_callback, bool in_isr)
+                                void* payload_addr, bool from_callback, bool in_isr)
 {
   topic->data_.subers.Foreach<SuberBlock>(
       [=](SuberBlock& block)
       {
-        DispatchSubscriber(block, timestamp, data, from_callback, in_isr);
+        DispatchSubscriber(block, timestamp, payload_addr, from_callback, in_isr);
         return ErrorCode::OK;
       });
 }

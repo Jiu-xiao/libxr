@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base.hpp"
+#include "../topic.hpp"
 
 namespace LibXR
 {
@@ -21,7 +21,9 @@ enum class Topic::ASyncSubscriberState : uint32_t
  */
 struct Topic::ASyncBlock : public Topic::SuberBlock
 {
-  RawData buff;                    ///< 长期存在的本地接收缓冲区。Long-lived local receive buffer.
+  void* buff_addr;                 ///< 长期存在的本地接收对象地址。Long-lived local receive object address.
+  void (*copy_payload)(void* dst,
+                       void* payload_addr);    ///< 按订阅精确类型执行负载拷贝的适配函数。Adapter that copies one payload using the subscriber's exact type.
   MicrosecondTimestamp timestamp;  ///< 最近接收的消息时间戳。Latest received message timestamp.
   std::atomic<ASyncSubscriberState> state =
       ASyncSubscriberState::IDLE;  ///< 当前异步订阅状态。Current async subscriber state.
@@ -61,7 +63,8 @@ class Topic::ASyncSubscriber
     block_ = new LockFreeList::Node<ASyncBlock>;
     block_->data_.type = SuberType::ASYNC;
     block_->data_.timestamp = MicrosecondTimestamp();
-    block_->data_.buff = Topic::NewSubscriberBuffer<Data>();
+    block_->data_.buff_addr = Topic::AllocateSubscriberBuffer<Data>();
+    block_->data_.copy_payload = &Topic::CopyPayload<Data>;
     topic.block_->data_.subers.Add(*block_);
   }
 
@@ -140,7 +143,7 @@ class Topic::ASyncSubscriber
     {
       block_->data_.state.store(ASyncSubscriberState::IDLE, std::memory_order_release);
     }
-    return *reinterpret_cast<Data*>(block_->data_.buff.addr_);
+    return *reinterpret_cast<Data*>(block_->data_.buff_addr);
   }
 
   /**
