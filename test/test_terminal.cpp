@@ -31,8 +31,12 @@ void test_terminal()
       },
       &command_count);
   auto data_file = LibXR::RamFS::CreateFile("data", data_value);
+  auto alpha_file = LibXR::RamFS::CreateFile("alpha", data_value);
+  auto alphabet_file = LibXR::RamFS::CreateFile("alphabet", data_value);
 
   ramfs.Add(dir_1);
+  ramfs.Add(alpha_file);
+  ramfs.Add(alphabet_file);
   dir_1.Add(dir_2);
   dir_2.Add(dir_3);
   dir_3.Add(command);
@@ -64,12 +68,17 @@ void test_terminal()
     ASSERT(false);
   };
 
-  auto write_line = [&](const char* command_line)
+  auto write_raw = [&](const void* data, size_t size)
   {
     LibXR::WriteOperation write_op;
-    ASSERT(input.GetWritePort()(LibXR::ConstRawData{command_line}, write_op) ==
+    ASSERT(input.GetWritePort()(LibXR::ConstRawData{data, size}, write_op) ==
            LibXR::ErrorCode::OK);
     run_terminal_until_idle();
+  };
+
+  auto write_line = [&](const char* command_line)
+  {
+    write_raw(command_line, std::strlen(command_line));
   };
 
   write_line("dir1/dir2/dir3/run\n");
@@ -79,6 +88,10 @@ void test_terminal()
   write_line("/dir1/dir2/dir3/data\n");
   ASSERT(command_count == 2);
   write_line("unknown\n");
+  write_line("alph\t\n");
+  const unsigned char non_printable_unknown[] = {0xFF, 'u', 'n', 'k', 'n',
+                                                 'o', 'w', 'n', '\n'};
+  write_raw(non_printable_unknown, sizeof(non_printable_unknown));
 
   const size_t output_size = output.GetReadPort().Size();
   ASSERT(output_size > 0);
@@ -89,4 +102,17 @@ void test_terminal()
                               read_op) == LibXR::ErrorCode::OK);
   ASSERT(std::strstr(terminal_output.data(), "Not an executable file.") != nullptr);
   ASSERT(std::strstr(terminal_output.data(), "Command not found.") != nullptr);
+  ASSERT(std::memchr(terminal_output.data(), static_cast<unsigned char>(0xFF),
+                     output_size) == nullptr);
+  ASSERT(std::strstr(terminal_output.data(), "alpha") != nullptr);
+  ASSERT(std::strstr(terminal_output.data(), "alphabet") != nullptr);
+
+  size_t command_not_found_count = 0;
+  const char* search = terminal_output.data();
+  while ((search = std::strstr(search, "Command not found.")) != nullptr)
+  {
+    command_not_found_count++;
+    search += std::strlen("Command not found.");
+  }
+  ASSERT(command_not_found_count == 2);
 }
