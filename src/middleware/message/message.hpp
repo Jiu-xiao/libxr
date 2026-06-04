@@ -11,8 +11,6 @@
  */
 
 #include "topic.hpp"
-#include "packet/packet.hpp"
-#include "server/server.hpp"
 #include "subscriber/async.hpp"
 #include "subscriber/base.hpp"
 #include "subscriber/callback.hpp"

@@ -85,7 +85,7 @@ class Topic::QueuedSubscriber
   template <typename Data>
   QueuedSubscriber(Topic topic, LockFreeQueue<Data>& queue)
   {
-    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+    Topic::CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;
@@ -116,7 +116,7 @@ class Topic::QueuedSubscriber
   template <typename Data>
   QueuedSubscriber(Topic topic, LockFreeQueue<Message<Data>>& queue)
   {
-    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+    Topic::CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;

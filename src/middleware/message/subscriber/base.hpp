@@ -7,30 +7,23 @@ namespace LibXR
 namespace Detail::MessageSubscriber
 {
 /**
- * @brief 校验订阅者接收类型是否满足当前主题的尺寸规则 / Check whether the subscriber
- *        receive type satisfies the current topic size rule
+ * @brief 校验订阅者接收类型是否满足当前主题的精确类型契约 / Check whether the subscriber
+ *        receive type satisfies the topic's exact type contract
  * @tparam Data 待校验的数据类型 / Data type to validate
  * @param topic 待校验的主题 / Topic to validate against
  *
- * @note 若主题启用了 `check_length`，订阅类型必须与主题负载等长；否则允许订阅类型更大，
- *       只要求它至少能容纳主题当前声明的最大负载前缀 /
- *       When the topic enables `check_length`, the subscriber type must have the
- *       exact same size as the topic payload; otherwise a larger subscriber type
- *       is allowed as long as it can hold at least the declared payload prefix
+ * @note 当前 message bus 只允许精确类型契约：
+ *       订阅类型必须和 topic 绑定的 payload 类型与大小都完全一致 /
+ *       The current message bus allows exact type contracts only:
+ *       the subscriber type must exactly match both the topic payload type and size
  */
 template <typename Data>
-void CheckSubscriberDataSize(Topic topic)
+void CheckSubscriberType(Topic topic)
 {
   CheckTopicPayload<Data>();
   auto topic_handle = static_cast<Topic::TopicHandle>(topic);
-  if (topic_handle->data_.check_length)
-  {
-    ASSERT(topic_handle->data_.max_length == sizeof(Data));
-  }
-  else
-  {
-    ASSERT(topic_handle->data_.max_length <= sizeof(Data));
-  }
+  ASSERT(topic_handle->data_.payload_type_id == TypeID::GetID<Data>());
+  ASSERT(topic_handle->data_.payload_size == sizeof(Data));
 }
 
 /**
@@ -52,26 +45,4 @@ RawData NewSubscriberBuffer()
 }
 }  // namespace Detail::MessageSubscriber
 
-/**
- * @enum Topic::SuberType
- * @brief 这一条订阅记录属于哪种订阅方式 / Which subscription style one subscriber record
- *        uses
- */
-enum class Topic::SuberType : uint8_t
-{
-  SYNC,      ///< 同步订阅者。Synchronous subscriber.
-  ASYNC,     ///< 异步订阅者。Asynchronous subscriber.
-  QUEUE,     ///< 队列订阅者。Queued subscriber.
-  CALLBACK,  ///< 回调订阅者。Callback subscriber.
-};
-
-/**
- * @struct Topic::SuberBlock
- * @brief 每种订阅块前面都有的公共头 / Common header stored at the front of every
- *        subscriber block
- */
-struct Topic::SuberBlock
-{
-  SuberType type;  ///< 订阅者类型。Type of subscriber.
-};
 }  // namespace LibXR

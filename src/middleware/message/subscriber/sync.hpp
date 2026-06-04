@@ -73,7 +73,7 @@ class Topic::SyncSubscriber
    */
   SyncSubscriber(Topic topic, Data& data)
   {
-    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+    Topic::CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<SyncBlock>;
     block_->data_.type = SuberType::SYNC;

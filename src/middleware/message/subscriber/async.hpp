@@ -56,12 +56,12 @@ class Topic::ASyncSubscriber
    */
   ASyncSubscriber(Topic topic)
   {
-    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+    Topic::CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<ASyncBlock>;
     block_->data_.type = SuberType::ASYNC;
     block_->data_.timestamp = MicrosecondTimestamp();
-    block_->data_.buff = Detail::MessageSubscriber::NewSubscriberBuffer<Data>();
+    block_->data_.buff = Topic::NewSubscriberBuffer<Data>();
     topic.block_->data_.subers.Add(*block_);
   }
 
