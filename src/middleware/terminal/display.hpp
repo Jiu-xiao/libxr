@@ -9,6 +9,27 @@
   }
 
   /**
+   * @brief  按“从最新到最旧”的顺序取历史记录
+   *         Fetches one history entry counting from newest to oldest
+   * @param  index_from_newest 从最新一条开始的偏移；0 表示最新一条
+   *         Offset counted from the newest entry; 0 means the newest one
+   * @return const HistoryLine& 对应的历史记录
+   *         Reference to the requested history entry
+   *
+   * @note `Queue::operator[]` 支持负索引从尾部反向访问，但这里把这个细节包起来，
+   *       避免调用点直接暴露 `history_[-index - 1]` 这种难读写法。
+   *       `Queue::operator[]` supports negative indices to walk backward from
+   *       the tail, but this helper hides that detail so call sites do not have
+   *       to expose the hard-to-read `history_[-index - 1]` form directly.
+   */
+  const HistoryLine& HistoryFromNewest(int index_from_newest)
+  {
+    ASSERT(index_from_newest >= 0);
+    ASSERT(index_from_newest < static_cast<int>(history_.Size()));
+    return history_[-index_from_newest - 1];
+  }
+
+  /**
    * @brief  执行换行操作
    *         Performs a line feed operation
    */
@@ -199,7 +220,7 @@
     offset_ = 0;
     if (history_index_ >= 0)
     {
-      const auto& line = history_[-history_index_ - 1];
+      const auto& line = HistoryFromNewest(history_index_);
       write_stream_ << ConstRawData(line.data(), HistoryLineSize(line));
     }
     else
@@ -216,7 +237,7 @@
   void CopyHistoryToInputLine()
   {
     input_line_.Reset();
-    const auto& line = history_[-history_index_ - 1];
+    const auto& line = HistoryFromNewest(history_index_);
     for (size_t i = 0; i < HistoryLineSize(line); i++)
     {
       input_line_.Push(line[i]);
