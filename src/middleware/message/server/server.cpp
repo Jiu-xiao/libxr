@@ -25,6 +25,7 @@ void Topic::Server::Register(TopicHandle topic)
   ASSERT(topic->data_.payload_size != 0);
   ASSERT(topic->data_.payload_alignment != 0);
   ASSERT(topic->data_.payload_alignment <= alignof(std::max_align_t));
+  ASSERT(topic->data_.payload_size + PACK_BASE_SIZE <= parse_buff_.size_);
 
   auto* node = new RBTree<uint32_t>::Node<TopicHandle>(topic);
   topic_map_.Insert(*node, topic->key);
@@ -117,8 +118,9 @@ bool Topic::Server::ReadHeader()
   data_len_ = header->GetDataLen();
   current_timestamp_ = header->GetTimestamp();
   current_topic_ = *node;
+  const auto target_size = current_topic_->data_.payload_size;
 
-  if (data_len_ != current_topic_->data_.payload_size)
+  if (target_size + PACK_BASE_SIZE > parse_buff_.size_)
   {
     ResetParser();
     return true;
@@ -152,17 +154,27 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
     return ParseResult::DROPPED;
   }
 
-  std::memmove(parse_buff_.addr_, payload_addr, data_len_);
+  const auto target_size = current_topic_->data_.payload_size;
+  if (data_len_ >= target_size)
+  {
+    std::memmove(parse_buff_.addr_, payload_addr, target_size);
+  }
+  else
+  {
+    std::memmove(parse_buff_.addr_, payload_addr, data_len_);
+    std::memset(reinterpret_cast<uint8_t*>(parse_buff_.addr_) + data_len_, 0,
+                target_size - data_len_);
+  }
 
   auto topic = Topic(current_topic_);
   if (from_callback)
   {
-    topic.PublishBytesFromServerCallback(parse_buff_.addr_, data_len_, current_timestamp_,
-                                         in_isr);
+    topic.PublishBytesFromServerCallback(parse_buff_.addr_, target_size,
+                                         current_timestamp_, in_isr);
   }
   else
   {
-    topic.PublishBytesFromServer(parse_buff_.addr_, data_len_, current_timestamp_);
+    topic.PublishBytesFromServer(parse_buff_.addr_, target_size, current_timestamp_);
   }
 
   ResetParser();
