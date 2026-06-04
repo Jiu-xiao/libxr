@@ -89,6 +89,11 @@ class Topic::Callback
       IS_MESSAGE_VIEW<T> ||
       IS_TYPED_DATA<T>;  ///< 是否是这个回调接口允许的负载参数写法。Whether this callback interface accepts this payload argument form.
 
+  template <typename T>
+  static constexpr bool IS_MUTABLE_MESSAGE_VIEW_REF =
+      IS_MESSAGE_VIEW<T> && std::is_lvalue_reference_v<T> &&
+      !std::is_const_v<std::remove_reference_t<T>>;
+
   /**
    * @struct BlockHeader
    * @brief 回调句柄真正指向的那块数据的公共头 / Common header of the data block actually
@@ -114,6 +119,10 @@ class Topic::Callback
   template <typename PayloadArg>
   static TypeID::ID PayloadTypeID()
   {
+    static_assert(!IS_MUTABLE_MESSAGE_VIEW_REF<PayloadArg>,
+                  "LibXR::Topic::Callback does not accept MessageView<T>&; "
+                  "use MessageView<T> or const MessageView<T>& instead.");
+
     if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
@@ -149,17 +158,8 @@ class Topic::Callback
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
       using Data = typename View::DataType;
-      if constexpr (std::is_lvalue_reference_v<PayloadArg> &&
-                    !std::is_const_v<std::remove_reference_t<PayloadArg>>)
-      {
-        MessageView<Data> message{timestamp, reinterpret_cast<Data*>(data.addr_)};
-        fun(in_isr, arg, message);
-      }
-      else
-      {
-        fun(in_isr, arg,
-            MessageView<Data>{timestamp, reinterpret_cast<Data*>(data.addr_)});
-      }
+      fun(in_isr, arg,
+          MessageView<Data>{timestamp, reinterpret_cast<Data*>(data.addr_)});
     }
     else
     {
