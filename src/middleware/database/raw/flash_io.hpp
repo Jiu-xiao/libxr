@@ -1,4 +1,15 @@
   /**
+   * @brief `DatabaseRaw` 的底层 Flash IO 片段 / Low-level Flash-I/O fragment of
+   *        `DatabaseRaw`
+   *
+   * @note 这一组函数只处理“怎么按最小写入单元安全读写 Flash”，不负责数据库条目或
+   *       块级语义。
+   *       This group handles only "how to read and write Flash safely under
+   *       the minimum write-unit rule"; it does not own database-entry or
+   *       block-level semantics.
+   */
+
+  /**
    * @brief 读取 Flash 数据，失败则直接触发强约束
    *        (Read flash data and fail fast on error).
    * @param offset 读取偏移 (Read offset).
@@ -90,6 +101,9 @@
    * @param offset 写入偏移量 (Write offset).
    * @param data 要写入的数据 (Data to write).
    * @return 操作结果 (Operation result).
+   * @note 当末尾不足一个最小写入单元时，当前实现会用 `0xFF` 补齐尾块后再写入。
+   *       When the tail is shorter than one minimum write unit, the current
+   *       implementation pads that final unit with `0xFF` before writing it.
    */
   ErrorCode Write(size_t offset, ConstRawData data)
   {

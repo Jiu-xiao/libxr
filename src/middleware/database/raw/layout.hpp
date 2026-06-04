@@ -1,3 +1,12 @@
+  /**
+   * @enum BlockType
+   * @brief 当前 raw 数据库使用的两个物理块角色 / Two physical block roles used by the
+   *        current raw database
+   *
+   * One block is treated as the current main data block, while the other acts
+   * as the scratch / backup block during recovery and recycle.
+   * 一个块承载当前主数据，另一个块在恢复和回收流程里充当暂存 / 备份块。
+   */
   enum class BlockType : uint8_t
   {
     MAIN = 0,   ///< 主块 (Main block).
@@ -99,7 +108,8 @@
     BlockBoolData<MinWriteSize> available_flag;  ///< 该键是否有效
     BlockBoolData<MinWriteSize> uninit;          ///< 该键是否未初始化
 
-    uint32_t raw_info = 0;  ///< 高7位为 nameLength，低25位为 dataSize
+    uint32_t raw_info = 0;  ///< 高 7 位保存 nameLength，低 25 位保存 dataSize。
+                            ///< Upper 7 bits store nameLength and lower 25 bits store dataSize.
 
     /**
      * @brief 构造一个默认可写的键头元数据
@@ -161,11 +171,16 @@
       Memory::FastSet(padding, 0xFF, MinWriteSize);
     }
 
+    /**
+     * @brief 让块前缀既能按签名读取，也能按最小写入单元整体写入 /
+     *        Expose the block prefix both as a signature field and as one full
+     *        minimum-write-unit write span
+     */
     union
     {
-      uint32_t header;  ///< Flash block header
-      uint8_t padding[MinWriteSize];
+      uint32_t header;  ///< Flash 块头签名 / Flash block-header signature.
+      uint8_t padding[MinWriteSize];  ///< 按最小写入单元对齐的原始块前缀 / Raw block prefix aligned to one minimum write unit.
     };
-    KeyInfo key;  ///< Align KeyInfo to MinWriteSize
+    KeyInfo key;  ///< 紧跟在块头后的首个键头 / First key header stored right after the block header.
   };
 #pragma pack(pop)

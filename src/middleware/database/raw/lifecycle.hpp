@@ -1,4 +1,15 @@
   /**
+   * @brief `DatabaseRaw` 的生命周期与主流程片段 / Lifecycle and main-flow fragment of
+   *        `DatabaseRaw`
+   *
+   * @note 这一组函数组成后端真正对外可见的行为：构造时约束检查、启动恢复、运行期
+   *       读写、显式还原，以及回收流程。
+   *       This group forms the backend's externally visible behavior: contract
+   *       checks during construction, startup recovery, runtime read/write,
+   *       explicit restore, and recycling flow.
+   */
+
+  /**
    * @brief 获取数据库中的键值
    *        (Retrieve the key's value from the database).
    * @param key 需要获取的键 (Key to retrieve).
@@ -69,6 +80,12 @@
   /**
    * @brief 初始化数据库存储区，确保主备块正确
    *        (Initialize database storage, ensuring main and backup blocks are valid).
+   * @note 启动策略是：优先相信合法主块；主块损坏时才尝试从合法且非空的备份块恢复；若
+   *       主块已好而备份块仍残留，则把备份块失效掉，避免它继续被当作恢复来源。
+   *       The startup policy is: trust a valid main block first; recover from a
+   *       valid non-empty backup block only when the main block is broken; and
+   *       invalidate any stale backup once the main block is already good so it
+   *       cannot remain a recovery source.
    */
   void Init()
   {
@@ -116,7 +133,10 @@
 
       ReadFlashOrExit(key_offset, key);
 
-      // TODO: 恢复损坏数据
+      // 当前策略仍然是“看到未完成键就整块重建”，还没有实现更细粒度的坏数据恢复。
+      // The current policy still rebuilds the whole block when it sees an
+      // incomplete key; finer-grained damaged-data recovery is not implemented
+      // yet.
       if (BlockBoolUtil<MinWriteSize>::ReadFlag(key.uninit))
       {
         InitBlock(BlockType::MAIN);
@@ -137,6 +157,9 @@
   /**
    * @brief 还原存储数据，清空 Flash 区域
    *        (Restore storage data, clearing Flash memory area).
+   * @note 这里会把主块和备份块都重新初始化为空块，不保留任何旧键。
+   *       This reinitializes both the main block and the backup block into
+   *       empty blocks and keeps no previous key.
    */
   void Restore()
   {
@@ -153,6 +176,12 @@
    * 将主存储块中的有效键移动到备份块，并擦除主存储块。
    *
    * @return 操作结果 (Operation result).
+   * @note 当前流程把备份块当作临时整理区：先把主块中的活跃键顺序搬过去，再用备份块的
+   *       活跃前缀回写主块，最后把备份块重新清为空块。
+   *       The current flow treats the backup block as a temporary compaction
+   *       area: it first copies live keys from the main block into the backup
+   *       block in order, then rewrites the main block from the backup's live
+   *       prefix, and finally clears the backup block back to empty.
    */
   ErrorCode Recycle()
   {

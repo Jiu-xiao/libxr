@@ -1,7 +1,20 @@
   /**
+   * @brief `DatabaseRaw` 的块级操作片段 / Block-operation fragment of `DatabaseRaw`
+   *
+   * @note 这一组函数只负责整块语义：块头、尾校验、空块初始化、损坏判断、已用空间计算、
+   *       以及块间前缀复制。
+   *       This group owns only block-level semantics: block headers, trailing
+   *       checksums, empty-block initialization, corruption checks, used-space
+   *       accounting, and block-prefix copying.
+   */
+
+  /**
    * @brief 计算可用的存储空间大小
    *        (Calculate the available storage size).
    * @return 剩余的可用字节数 (Remaining available bytes).
+   * @note 这里统计的是主块当前已用前缀到块尾校验区之间还剩多少可写空间。
+   *       This counts how much writable space remains between the current live
+   *       prefix of the main block and its trailing checksum area.
    */
   size_t AvailableSize()
   {
@@ -33,6 +46,10 @@
   /**
    * @brief 把指定块初始化为空数据库块 (Initialize one block as an empty database block).
    * @param block 目标块类型 (Target block type).
+   * @note 初始化后的块是“结构合法但没有任何用户键”的空块：块头有效、首个哨兵键有效、
+   *       尾校验有效。
+   *       After initialization, the block is a structurally valid empty block:
+   *       valid header, valid sentinel key, and valid trailing checksum.
    */
   void InitBlock(BlockType block)
   {
@@ -70,6 +87,9 @@
    * @param block 目标块类型 (Target block type).
    * @return 若块内没有有效键则返回 `true`
    *         (Returns `true` when the block contains no valid key).
+   * @note 这里的“空”指只有初始化哨兵，没有任何可发布的用户键。
+   *       Here, "empty" means the block contains only the initialized sentinel
+   *       and no publishable user key.
    */
   bool IsBlockEmpty(BlockType block)
   {
@@ -124,6 +144,11 @@
    * @param used_size 输出已用字节数 (Receives the used byte size).
    * @return 若成功计算则返回 `true`
    *         (Returns `true` when the used size is computed successfully).
+   * @note 这个版本给恢复路径用；它不会假设块内键布局一定合法，而是逐步验证每个键头的
+   *       位图编码和边界。
+   *       This variant is used by recovery paths; it does not assume the key
+   *       layout is valid and instead verifies each key header's bitmap
+   *       encoding and bounds incrementally.
    */
   bool TryGetUsedBlockSize(BlockType block, size_t& used_size)
   {
@@ -190,6 +215,9 @@
    * @param dst_block 目标块类型 (Destination block type).
    * @param src_block 源块类型 (Source block type).
    * @param used_size 活跃前缀总字节数 (Byte size of the live prefix).
+   * @note 已擦除尾部不参与复制；只要活跃前缀和块尾校验能重建块语义就够了。
+   *       The erased tail is not copied; reproducing the live prefix plus the
+   *       trailing checksum is sufficient to rebuild the block semantics.
    */
   void CopyBlockPrefixAndChecksum(BlockType dst_block, BlockType src_block,
                                   size_t used_size)

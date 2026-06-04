@@ -1,10 +1,26 @@
   /**
+   * @brief `DatabaseRaw` 的键级操作片段 / Key-operation fragment of `DatabaseRaw`
+   *
+   * @note 这一组函数只负责单个键条目的语义：地址计算、名称比较、数据比较、逻辑追加、
+   *       以及按名称查找。
+   *       This group owns only per-entry semantics: address calculations, name
+   *       comparisons, data comparisons, logical appends, and name-based
+   *       lookup.
+   */
+
+  /**
    * @brief 为新增键预留空间并写入元数据头
    *        (Reserve space for one new key and write its metadata header).
    * @param name_len 键名长度 (Key name length).
    * @param size 数据字节数 (Payload size in bytes).
    * @param key_buf_offset 返回新键头偏移 (Receives the new key-header offset).
    * @return 操作结果 (Operation result).
+   * @note 这个阶段只负责把新键头放到主块尾部，并在必要时把上一键改成“后面还有下一键”；
+   *       名字区和数据区由调用方随后写入。
+   *       This stage only places the new key header at the tail of the main
+   *       block and, when needed, rewrites the previous key into "has next
+   *       key"; the name bytes and payload bytes are written by the caller
+   *       afterwards.
    */
   ErrorCode AddKeyBody(size_t name_len, size_t size, size_t& key_buf_offset)
   {
@@ -88,6 +104,9 @@
    * @param data 键数据地址 (Address of the key payload).
    * @param size 键数据字节数 (Payload size in bytes).
    * @return 操作结果 (Operation result).
+   * @note 这个重载给“逻辑更新旧键、但复用旧名字字节”那条路径使用。
+   *       This overload is used by the logical-update path that reuses the
+   *       existing key-name bytes already stored in Flash.
    */
   ErrorCode AddKey(size_t name_offset, size_t name_len, const void* data, size_t size)
   {
@@ -139,6 +158,12 @@
    * @param recycle 是否允许本次调用触发回收
    *                (Whether this call may trigger recycle).
    * @return 操作结果 (Operation result).
+   * @note 当前实现只支持“同名且同尺寸”的逻辑更新；尺寸不一致时直接返回
+   *       `ErrorCode::FAILED`，不会自动改写布局。
+   *       The current implementation supports only logical replacement of the
+   *       same named key with the same payload size; when the size differs, it
+   *       returns `ErrorCode::FAILED` directly and does not rewrite the
+   *       on-flash layout automatically.
    */
   ErrorCode SetKey(const char* name, const void* data, size_t size, bool recycle = true)
   {
@@ -310,6 +335,11 @@
    * @param name 待查找键名 (Key name to search for).
    * @return 找到时返回键头偏移，找不到返回 `0`
    *         (Returns the key-header offset when found, otherwise `0`).
+   * @note 这里会顺手统计沿途遇到的失效键数量；超过阈值时，查找结束后会先做一次回收，
+   *       再重新查一遍。
+   *       This also counts invalidated keys seen along the scan; when that
+   *       count exceeds the threshold, it recycles first and then retries the
+   *       lookup once.
    */
   size_t SearchKey(const char* name)
   {
