@@ -42,6 +42,14 @@ struct alignas(16) WideAlignedPayload
 static_assert(LibXR::TopicPayload<WideAlignedPayload>);
 static_assert(alignof(WideAlignedPayload) == 16);
 
+struct PrefixIntPayload
+{
+  int32_t value;
+  int32_t reserved;
+};
+
+static_assert(LibXR::TopicPayload<PrefixIntPayload>);
+
 namespace
 {
 
@@ -209,15 +217,18 @@ void TestTopicCore()
   ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_topic_packet)) == 0);
   ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
 
-  auto bad_size_packet = packed_data;
-  bad_size_packet.raw.header_.SetDataLen(sizeof(double) - 1);
-  bad_size_packet.raw.header_.pack_header_crc8 =
-      LibXR::CRC8::Calculate(&bad_size_packet.raw,
+  auto truncated_packet = packed_data;
+  truncated_packet.raw.header_.SetDataLen(sizeof(double) - 1);
+  truncated_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&truncated_packet.raw,
                              sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
-  bad_size_packet.crc8_ =
-      LibXR::CRC8::Calculate(&bad_size_packet, PACKET_SIZE - sizeof(uint8_t));
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_size_packet)) == 0);
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
+  truncated_packet.crc8_ =
+      LibXR::CRC8::Calculate(&truncated_packet, PACKET_SIZE - sizeof(uint8_t) - 1);
+  msg[3] = -1.0;
+  ASSERT(topic_server.ParseData(
+             LibXR::ConstRawData(&truncated_packet, PACKET_SIZE - 1)) == 1);
+  ASSERT(msg[3] != msg[0]);
+  ASSERT(timestamp_us(cb_timestamp) == timestamp_us(timestamp4));
 
   auto legacy_prefix_packet = packed_data;
   legacy_prefix_packet.raw.header_.prefix = 0xA5;
@@ -260,6 +271,34 @@ void TestTopicCore()
   aligned_view_value = 0;
   ASSERT(aligned_server.ParseData(LibXR::ConstRawData(aligned_packet)) == 1);
   ASSERT(aligned_view_value == aligned_tx.right);
+
+  auto prefix_topic =
+      LibXR::Topic::CreateTopic<PrefixIntPayload>("prefix_int_tp", &domain);
+  static PrefixIntPayload prefix_rx{};
+  auto prefix_cb = LibXR::Topic::Callback::Create(
+      [](bool, void*, PrefixIntPayload& data) { prefix_rx = data; },
+      reinterpret_cast<void*>(0));
+  prefix_topic.RegisterCallback(prefix_cb);
+  LibXR::Topic::Server prefix_server(512);
+  prefix_server.Register(prefix_topic);
+  PrefixIntPayload prefix_tx{0x11223344, 0x55667788};
+  LibXR::Topic::PackedData<PrefixIntPayload> prefix_packet;
+  ASSERT(prefix_topic.PackData(prefix_tx, prefix_packet,
+                               LibXR::MicrosecondTimestamp(6116)) ==
+         LibXR::ErrorCode::OK);
+  prefix_packet.raw.header_.SetDataLen(sizeof(int32_t));
+  prefix_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&prefix_packet.raw,
+                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  prefix_packet.crc8_ =
+      LibXR::CRC8::Calculate(&prefix_packet, LibXR::Topic::PACK_BASE_SIZE - 1 +
+                                                 sizeof(int32_t));
+  prefix_rx = PrefixIntPayload{-1, -1};
+  ASSERT(prefix_server.ParseData(
+             LibXR::ConstRawData(&prefix_packet, LibXR::Topic::PACK_BASE_SIZE +
+                                                     sizeof(int32_t))) == 1);
+  ASSERT(prefix_rx.value == prefix_tx.value);
+  ASSERT(prefix_rx.reserved == 0);
 
   auto mutable_topic = LibXR::Topic::CreateTopic<int>("mutable_payload_tp", &domain);
   auto mutable_cb = LibXR::Topic::Callback::Create(
