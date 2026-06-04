@@ -24,12 +24,14 @@ class ReadPort
 
   // Read BLOCK states:
   // PENDING = waiting for queue-fed completion after read_fun_ was notified
+  // CLEARING = ClearQueuedData() owns software dequeue progress
   // BLOCK_CLAIMED = wakeup now belongs to the waiter
   // BLOCK_DETACHED = timeout detached the waiter
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 读 BLOCK 状态：
   // PENDING = 已通知 read_fun_，等待队列侧完成
+  // CLEARING = ClearQueuedData() 占有软件出队进度
   // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
   // BLOCK_DETACHED = timeout 已把 waiter 分离
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
@@ -38,9 +40,11 @@ class ReadPort
     IDLE = 0,     ///< No active waiter and no pending completion. 无等待者、无挂起完成。
     PENDING = 1,  ///< Driver accepted the request; completion still owns progress.
                   ///< 请求已交给底层推进。
-    BLOCK_CLAIMED = 2,   ///< BLOCK wakeup already belongs to the current waiter. 当前
+    CLEARING = 2,  ///< ClearQueuedData() owns software dequeue progress.
+                   ///< ClearQueuedData() 占有软件出队进度。
+    BLOCK_CLAIMED = 3,   ///< BLOCK wakeup already belongs to the current waiter. 当前
                          ///< BLOCK 唤醒已被本次等待者认领。
-    BLOCK_DETACHED = 3,  ///< Timeout detached the waiter; completion must stay silent.
+    BLOCK_DETACHED = 4,  ///< Timeout detached the waiter; completion must stay silent.
                          ///< 超时已分离等待者，完成侧不得再唤醒。
     EVENT = UINT32_MAX   ///< Data arrived before a waiter was armed; next caller must
                          ///< re-check queue. 数据先到，后续调用者要重查队列。
@@ -165,6 +169,29 @@ class ReadPort
    *               Indicates whether the operation is executed in an interrupt context.
    */
   virtual void OnRxDequeue(bool) {}
+
+  /**
+   * @brief 清空当前已排队的 RX 字节。
+   * @brief Discards the RX bytes currently queued in software.
+   *
+   * 该接口只丢弃当前 queue_data_ 中已经排队的字节，不参与 backend teardown，也不会
+   * 失败完成挂起读请求。若存在正在推进的读请求，则返回 BUSY。
+   * This API only discards the bytes already queued in queue_data_. It does not
+   * participate in backend teardown and does not fail-complete an in-flight read.
+   * Returns BUSY when a read request is currently in progress.
+   *
+   * @note After this call claims CLEARING, ordinary reads can no longer consume the
+   *       current software-queue snapshot. Bytes that arrive after the snapshot may
+   *       remain queued for a later reader/clear call.
+   * @note 本次调用 claim `CLEARING` 之后，普通读不会再消费当前软件队列快照；在快照
+   *       之后新到达的字节，可以留给后续读取或下次清队列。
+   *
+   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
+   * @return `OK` 表示本次清队列成功完成；`BUSY` 表示当前有读请求占有该端口。
+   *         `OK` means the clear operation completed; `BUSY` means an active read still
+   *         owns this port.
+   */
+  [[nodiscard]] ErrorCode ClearQueuedData(bool in_isr = false);
 
   /**
    * @brief Processes pending reads.

@@ -254,6 +254,57 @@ void ReadPort::ProcessPendingReads(bool in_isr)
   }
 }
 
+ErrorCode ReadPort::ClearQueuedData(bool in_isr)
+{
+  ASSERT(queue_data_ != nullptr);
+
+  while (true)
+  {
+    auto state = busy_.load(std::memory_order_acquire);
+    if (state != BusyState::IDLE && state != BusyState::EVENT)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    BusyState expected = state;
+    if (!busy_.compare_exchange_strong(expected, BusyState::CLEARING,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+    {
+      if (expected != BusyState::IDLE && expected != BusyState::EVENT)
+      {
+        return ErrorCode::BUSY;
+      }
+      continue;
+    }
+
+    const size_t queued_size = queue_data_->Size();
+    if (queued_size == 0)
+    {
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return ErrorCode::OK;
+    }
+
+    const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
+    if (pop_ans == ErrorCode::OK)
+    {
+      OnRxDequeue(in_isr);
+    }
+    else
+    {
+      // With CLEARING, ordinary reads cannot race this pop. EMPTY here means a
+      // stronger path such as FailAndClearAll() reset the queue concurrently.
+      // 有了 CLEARING 之后，普通读不会再与本次 Pop 竞争。这里如果是 EMPTY，
+      // 说明是 FailAndClearAll() 之类更强的路径并发 reset 了队列。
+      ASSERT(pop_ans == ErrorCode::EMPTY);
+    }
+
+    busy_.store(queue_data_->Size() > 0 ? BusyState::EVENT : BusyState::IDLE,
+                std::memory_order_release);
+    return ErrorCode::OK;
+  }
+}
+
 void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);

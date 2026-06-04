@@ -432,6 +432,64 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   ASSERT(r.Size() == 0);
 }
 
+void test_rw_read_port_clear_queued_data_clears_idle_queue()
+{
+  using namespace LibXR;
+
+  TrackingReadPort r(16);
+
+  static const uint8_t TX[] = {0x21, 0x43, 0x65, 0x87};
+  ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+  ASSERT(r.Size() == sizeof(TX));
+
+  ASSERT(r.ClearQueuedData() == ErrorCode::OK);
+  ASSERT(r.Size() == 0);
+  ASSERT(r.dequeue_count == 1);
+  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+}
+
+void test_rw_read_port_clear_queued_data_clears_event_queue()
+{
+  using namespace LibXR;
+
+  TrackingReadPort r(16);
+
+  static const uint8_t TX[] = {0x12, 0x34, 0x56};
+  ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+
+  r.ProcessPendingReads(false);
+  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::EVENT);
+
+  ASSERT(r.ClearQueuedData() == ErrorCode::OK);
+  ASSERT(r.Size() == 0);
+  ASSERT(r.dequeue_count == 1);
+  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+}
+
+void test_rw_read_port_clear_queued_data_busy_pending_read()
+{
+  using namespace LibXR;
+
+  TrackingReadPort r(16);
+  r = PendingReadFun;
+
+  uint8_t queued = 0x5A;
+  ASSERT(r.queue_data_->PushBatch(&queued, 1) == ErrorCode::OK);
+
+  uint8_t rx[2] = {0xA1, 0xA2};
+  ReadHarness read(TestMode::POLLING);
+  ASSERT(r(RawData{rx, sizeof(rx)}, read.op) == ErrorCode::OK);
+  read.ExpectPendingSubmitted();
+
+  ASSERT(r.ClearQueuedData() == ErrorCode::BUSY);
+  ASSERT(r.Size() == 1);
+  ASSERT(r.dequeue_count == 0);
+
+  r.FailAndClearAll(ErrorCode::INIT_ERR, false);
+  read.ExpectFinal(ErrorCode::INIT_ERR);
+  ASSERT(r.Size() == 0);
+}
+
 void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
 {
   using namespace LibXR;
@@ -1019,6 +1077,9 @@ void test_rw()
   test_rw_stream_block_timeout_detaches_waiter();
   test_rw_stream_block_destructor_autocommit();
   test_rw_block_read_timeout_detaches_pending();
+  test_rw_read_port_clear_queued_data_clears_idle_queue();
+  test_rw_read_port_clear_queued_data_clears_event_queue();
+  test_rw_read_port_clear_queued_data_busy_pending_read();
   test_rw_zero_read_pending_notifies_without_dequeue();
   test_rw_block_write_timeout_detaches_waiter();
   test_rw_immediate_error_propagates();
