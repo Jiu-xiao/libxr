@@ -749,7 +749,7 @@ class Terminal
     /* prepre for match */
     RamFS::FsNode* ans_node = nullptr;
     uint32_t number = 0;
-    size_t same_char_number = 0;
+    size_t shared_prefix_len = 0;
 
     if (*prefix_start == '/')
     {
@@ -799,7 +799,7 @@ class Terminal
           if (ans_node == nullptr)
           {
             ans_node = &node;
-            same_char_number = name_len;
+            shared_prefix_len = name_len;
             return ErrorCode::OK;
           }
 
@@ -807,14 +807,16 @@ class Terminal
           {
             if (node.GetName()[i] != ans_node->GetName()[i])
             {
-              same_char_number = i;
+              shared_prefix_len = i;
               break;
             }
           }
 
-          if (same_char_number > name_len)
+          // Once one candidate is shorter than the previously retained shared
+          // prefix, the shared prefix must shrink to this candidate length.
+          if (shared_prefix_len > name_len)
           {
-            same_char_number = name_len;
+            shared_prefix_len = name_len;
           }
 
           ans_node = &node;
@@ -828,7 +830,7 @@ class Terminal
       ShowHeader();
       write_stream_ << ConstRawData(&input_line_[0], input_line_.Size());
 
-      for (size_t i = 0; i < same_char_number - prefix_len; i++)
+      for (size_t i = 0; i < shared_prefix_len - prefix_len; i++)
       {
         DisplayChar(ans_node->GetName()[i + prefix_len]);
       }

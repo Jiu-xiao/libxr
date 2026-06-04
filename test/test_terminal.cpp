@@ -76,6 +76,14 @@ void test_terminal()
     run_terminal_until_idle();
   };
 
+  auto write_bytes = [&](const void* data, size_t size)
+  {
+    LibXR::WriteOperation write_op;
+    ASSERT(input.GetWritePort()(LibXR::ConstRawData{data, size}, write_op) ==
+           LibXR::ErrorCode::OK);
+    run_terminal_until_idle();
+  };
+
   write_line("dir1/dir2/dir3/run\n");
   ASSERT(command_count == 1);
   write_line("/dir1/dir2/dir3/run\n");
@@ -84,7 +92,9 @@ void test_terminal()
   ASSERT(command_count == 2);
   write_line("unknown\n");
   write_line("alph\t\n");
-  write_line("\xFFunknown\n");
+  const unsigned char non_printable_unknown[] = {0xFF, 'u', 'n', 'k', 'n',
+                                                 'o', 'w', 'n', '\n'};
+  write_bytes(non_printable_unknown, sizeof(non_printable_unknown));
 
   const size_t output_size = output.GetReadPort().Size();
   ASSERT(output_size > 0);
@@ -95,6 +105,17 @@ void test_terminal()
                               read_op) == LibXR::ErrorCode::OK);
   ASSERT(std::strstr(terminal_output.data(), "Not an executable file.") != nullptr);
   ASSERT(std::strstr(terminal_output.data(), "Command not found.") != nullptr);
+  ASSERT(std::memchr(terminal_output.data(), static_cast<unsigned char>(0xFF),
+                     output_size) == nullptr);
   ASSERT(std::strstr(terminal_output.data(), "alpha") != nullptr);
   ASSERT(std::strstr(terminal_output.data(), "alphabet") != nullptr);
+
+  size_t command_not_found_count = 0;
+  const char* search = terminal_output.data();
+  while ((search = std::strstr(search, "Command not found.")) != nullptr)
+  {
+    command_not_found_count++;
+    search += std::strlen("Command not found.");
+  }
+  ASSERT(command_not_found_count == 2);
 }
