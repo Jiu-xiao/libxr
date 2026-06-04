@@ -12,34 +12,12 @@ MicrosecondTimestamp Topic::NowTimestamp()
   return Timebase::GetMicroseconds();
 }
 
-void Topic::CheckPublishSize(TopicHandle topic, uint32_t size)
+void Topic::CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
+                                 uint32_t size)
 {
-  if (topic->data_.check_length)
-  {
-    ASSERT(size == topic->data_.max_length);
-  }
-  else
-  {
-    ASSERT(size <= topic->data_.max_length);
-  }
-}
-
-RawData Topic::StorePublishedData(TopicHandle topic, void* addr, uint32_t size,
-                                  MicrosecondTimestamp timestamp)
-{
-  if (topic->data_.cache)
-  {
-    LibXR::Memory::FastCopy(topic->data_.data.addr_, addr, size);
-    topic->data_.data.size_ = size;
-  }
-  else
-  {
-    topic->data_.data.addr_ = addr;
-    topic->data_.data.size_ = size;
-  }
-
-  topic->data_.timestamp = timestamp;
-  return topic->data_.data;
+  ASSERT(payload_type_id != nullptr);
+  ASSERT(topic->data_.payload_type_id == payload_type_id);
+  ASSERT(size == topic->data_.payload_size);
 }
 
 void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
@@ -110,8 +88,8 @@ void Topic::DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestam
       });
 }
 
-void Topic::PublishRaw(void* addr, uint32_t size, MicrosecondTimestamp timestamp,
-                       bool from_callback, bool in_isr)
+void Topic::PublishRaw(void* addr, uint32_t size, TypeID::ID payload_type_id,
+                       MicrosecondTimestamp timestamp, bool from_callback, bool in_isr)
 {
   if (from_callback)
   {
@@ -122,8 +100,8 @@ void Topic::PublishRaw(void* addr, uint32_t size, MicrosecondTimestamp timestamp
     Lock(block_);
   }
 
-  CheckPublishSize(block_, size);
-  RawData data = StorePublishedData(block_, addr, size, timestamp);
+  CheckPublishContract(block_, payload_type_id, size);
+  RawData data(addr, size);
   DispatchSubscribers(block_, timestamp, data, from_callback, in_isr);
 
   if (from_callback)
@@ -134,22 +112,4 @@ void Topic::PublishRaw(void* addr, uint32_t size, MicrosecondTimestamp timestamp
   {
     Unlock(block_);
   }
-}
-
-void Topic::Publish(void* addr, uint32_t size) { Publish(addr, size, NowTimestamp()); }
-
-void Topic::Publish(void* addr, uint32_t size, MicrosecondTimestamp timestamp)
-{
-  PublishRaw(addr, size, timestamp, false, false);
-}
-
-void Topic::PublishFromCallback(void* addr, uint32_t size, bool in_isr)
-{
-  PublishFromCallback(addr, size, NowTimestamp(), in_isr);
-}
-
-void Topic::PublishFromCallback(void* addr, uint32_t size, MicrosecondTimestamp timestamp,
-                                bool in_isr)
-{
-  PublishRaw(addr, size, timestamp, true, in_isr);
 }

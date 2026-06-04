@@ -85,7 +85,7 @@ class Topic::SyncSubscriber
    */
   SyncSubscriber(Topic topic, Data& data)
   {
-    CheckSubscriberDataSize<Data>(topic);
+    CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<SyncBlock>;
     block_->data_.type = SuberType::SYNC;
@@ -216,7 +216,7 @@ class Topic::ASyncSubscriber
    */
   ASyncSubscriber(Topic topic)
   {
-    CheckSubscriberDataSize<Data>(topic);
+    CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<ASyncBlock>;
     block_->data_.type = SuberType::ASYNC;
@@ -359,7 +359,7 @@ class Topic::QueuedSubscriber
   template <typename Data>
   QueuedSubscriber(Topic topic, LockFreeQueue<Data>& queue)
   {
-    CheckSubscriberDataSize<Data>(topic);
+    CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;
@@ -380,7 +380,7 @@ class Topic::QueuedSubscriber
   template <typename Data>
   QueuedSubscriber(Topic topic, LockFreeQueue<Message<Data>>& queue)
   {
-    CheckSubscriberDataSize<Data>(topic);
+    CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;
@@ -450,19 +450,14 @@ class Topic::Callback
   using RemoveCVRef = std::remove_cv_t<std::remove_reference_t<T>>;
 
   template <typename T>
-  static constexpr bool IS_RAW_DATA =
-      std::same_as<RemoveCVRef<T>, RawData> || std::same_as<RemoveCVRef<T>, ConstRawData>;
-
-  template <typename T>
   static constexpr bool IS_MESSAGE_VIEW = MessageViewTraits<RemoveCVRef<T>>::VALUE;
 
   template <typename T>
   static constexpr bool IS_TYPED_DATA =
-      !IS_RAW_DATA<T> && !IS_MESSAGE_VIEW<T> && TopicPayload<RemoveCVRef<T>>;
+      !IS_MESSAGE_VIEW<T> && TopicPayload<RemoveCVRef<T>>;
 
   template <typename T>
-  static constexpr bool IS_CALLBACK_PAYLOAD =
-      IS_RAW_DATA<T> || IS_MESSAGE_VIEW<T> || IS_TYPED_DATA<T>;
+  static constexpr bool IS_CALLBACK_PAYLOAD = IS_MESSAGE_VIEW<T> || IS_TYPED_DATA<T>;
 
   struct BlockHeader
   {
@@ -470,16 +465,13 @@ class Topic::Callback
 
     RunFun run = nullptr;
     uint32_t payload_size = 0;
+    TypeID::ID payload_type_id = nullptr;
   };
 
   template <typename PayloadArg>
   static consteval uint32_t PayloadSize()
   {
-    if constexpr (IS_RAW_DATA<PayloadArg>)
-    {
-      return 0;
-    }
-    else if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
+    if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
       return sizeof(typename View::DataType);
@@ -487,9 +479,26 @@ class Topic::Callback
     else
     {
       static_assert(IS_TYPED_DATA<PayloadArg>,
-                    "LibXR::Topic::Callback payload must be RawData, ConstRawData, "
-                    "Topic::MessageView<T>, T, T&, or const T&.");
+                    "LibXR::Topic::Callback payload must be Topic::MessageView<T>, "
+                    "T, T&, or const T&.");
       return sizeof(RemoveCVRef<PayloadArg>);
+    }
+  }
+
+  template <typename PayloadArg>
+  static TypeID::ID PayloadTypeID()
+  {
+    if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
+    {
+      using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
+      return TypeID::GetID<typename View::DataType>();
+    }
+    else
+    {
+      static_assert(IS_TYPED_DATA<PayloadArg>,
+                    "LibXR::Topic::Callback payload must be Topic::MessageView<T>, "
+                    "T, T&, or const T&.");
+      return TypeID::GetID<RemoveCVRef<PayloadArg>>();
     }
   }
 
@@ -497,16 +506,7 @@ class Topic::Callback
   static void InvokePayload(Function fun, BoundArg& arg, bool in_isr,
                             MicrosecondTimestamp timestamp, RawData& data)
   {
-    if constexpr (std::same_as<RemoveCVRef<PayloadArg>, RawData>)
-    {
-      fun(in_isr, arg, data);
-    }
-    else if constexpr (std::same_as<RemoveCVRef<PayloadArg>, ConstRawData>)
-    {
-      ConstRawData const_data(data);
-      fun(in_isr, arg, const_data);
-    }
-    else if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
+    if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
       using Data = typename View::DataType;
@@ -524,7 +524,9 @@ class Topic::Callback
   struct PayloadOnlyBlock : public BlockHeader
   {
     PayloadOnlyBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadSize<PayloadArg>()}, fun_(fun), arg_(std::move(arg))
+        : BlockHeader{&Run, PayloadSize<PayloadArg>(), PayloadTypeID<PayloadArg>()},
+          fun_(fun),
+          arg_(std::move(arg))
     {
     }
 
@@ -544,7 +546,9 @@ class Topic::Callback
   struct TimestampPayloadBlock : public BlockHeader
   {
     TimestampPayloadBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadSize<PayloadArg>()}, fun_(fun), arg_(std::move(arg))
+        : BlockHeader{&Run, PayloadSize<PayloadArg>(), PayloadTypeID<PayloadArg>()},
+          fun_(fun),
+          arg_(std::move(arg))
     {
     }
 
@@ -552,16 +556,7 @@ class Topic::Callback
                     MicrosecondTimestamp timestamp, RawData& data)
     {
       auto* block = static_cast<const TimestampPayloadBlock*>(header);
-      if constexpr (std::same_as<RemoveCVRef<PayloadArg>, RawData>)
-      {
-        block->fun_(in_isr, block->arg_, timestamp, data);
-      }
-      else if constexpr (std::same_as<RemoveCVRef<PayloadArg>, ConstRawData>)
-      {
-        ConstRawData const_data(data);
-        block->fun_(in_isr, block->arg_, timestamp, const_data);
-      }
-      else if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
+      if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
       {
         using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
         using Data = typename View::DataType;
@@ -624,7 +619,7 @@ class Topic::Callback
 
   static void EmptyRun(const BlockHeader*, bool, MicrosecondTimestamp, RawData&) {}
 
-  inline static BlockHeader empty_block_{&EmptyRun, 0};
+  inline static BlockHeader empty_block_{&EmptyRun, 0, nullptr};
 
  public:
   Callback() = default;
@@ -649,6 +644,7 @@ class Topic::Callback
   }
 
   uint32_t PayloadSize() const { return block_->payload_size; }
+  TypeID::ID PayloadTypeID() const { return block_->payload_type_id; }
 
  private:
   explicit Callback(BlockHeader* block) : block_(block ? block : &empty_block_) {}

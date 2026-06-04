@@ -8,17 +8,13 @@
 #include <type_traits>
 #include <utility>
 
-#include "crc.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
-#include "libxr_mem.hpp"
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
-#include "lock_queue.hpp"
 #include "lockfree_list.hpp"
 #include "lockfree_queue.hpp"
 #include "mutex.hpp"
-#include "queue.hpp"
 #include "rbt.hpp"
 #include "semaphore.hpp"
 #include "thread.hpp"
@@ -43,19 +39,20 @@ constexpr void CheckTopicPayload()
  * @class Topic
  * @brief 主题（Topic）管理类 / Topic management class
  *
- * 该类提供了基于发布-订阅模式的主题管理，支持同步、异步、队列和回调订阅者，以及数据的缓存和校验机制。
+ * 该类提供了基于发布-订阅模式的主题管理，支持同步、异步、队列和回调订阅者。
+ * 一个 Topic 对应一个精确的 payload 类型；Topic 自身不缓存最近一次消息。
  * This class provides topic management based on the publish-subscribe model, supporting
- * synchronous, asynchronous, queue-based, and callback subscribers, as well as data
- * caching and validation mechanisms.
+ * synchronous, asynchronous, queue-based, and callback subscribers.
+ * One Topic maps to one exact payload type, and the Topic itself does not cache the
+ * latest message.
  *
- * @note Topic、subscriber 和 server 应在初始化阶段创建，并在应用运行期间长期存在。
+ * @note Topic 和 subscriber 应在初始化阶段创建，并在应用运行期间长期存在。
  *       该消息系统遵循 libxr 的静态生命周期模型：
- *       初始化阶段允许分配，发布、回调和解析热路径不应产生动态分配。
- *       Topics, subscribers, and servers are expected to be created during
- *       initialization and kept alive for the application lifetime. The message system
- *       follows libxr's static lifetime model: allocation is allowed during
- *       initialization, while publish, callback, and parser hot paths should not
- *       allocate dynamically.
+ *       初始化阶段允许分配，发布和回调热路径不应产生动态分配。
+ *       Topics and subscribers are expected to be created during initialization and
+ *       kept alive for the application lifetime. The message system follows libxr's
+ *       static lifetime model: allocation is allowed during initialization, while
+ *       publish and callback hot paths should not allocate dynamically.
  */
 class Topic
 {
@@ -72,60 +69,19 @@ class Topic
    * @brief 存储主题运行状态和静态配置。Stores topic runtime state and static
    * configuration.
    *
-   * subers 通常只在初始化期追加，发布热路径只遍历；busy/mutex 保护 data 和订阅者分发。
+   * subers 通常只在初始化期追加，发布热路径只遍历；busy/mutex 保护一次发布和订阅者分发。
    * subers is normally appended during initialization and traversed on the publish hot
-   * path; busy/mutex protects data storage and subscriber dispatch.
+   * path; busy/mutex protects one publish and subscriber dispatch.
    */
   struct Block
   {
     std::atomic<LockState> busy;  ///< 是否忙碌。Indicates whether it is busy.
     LockFreeList subers;          ///< 订阅者列表。List of subscribers.
-    uint32_t max_length;          ///< 数据的最大长度。Maximum length of data.
+    uint32_t payload_size;        ///< 该 topic 的精确 payload 长度。Exact payload size of this topic.
+    TypeID::ID payload_type_id;   ///< 该 topic 绑定的 payload 类型标识。Bound payload type identifier of this topic.
     uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
     Mutex* mutex;    ///< 线程同步互斥锁。Mutex for thread synchronization.
-    RawData data;    ///< 最近一次发布的数据视图。Latest published data view.
-    MicrosecondTimestamp timestamp;  ///< 最近一次消息时间戳。Latest message timestamp.
-    bool cache;         ///< 是否启用数据缓存。Indicates whether data caching is enabled.
-    bool check_length;  ///< 是否检查数据长度。Indicates whether data length is checked.
   };
-
-#ifndef __DOXYGEN__
-#pragma pack(push, 1)
-  /**
-   * @struct PackedDataHeader
-   * @brief 主题数据包头，用于网络传输。Packed data header for network transmission.
-   */
-  struct PackedDataHeader
-  {
-    uint8_t prefix;  ///< 数据包前缀（固定为 0x5A）。Packet prefix (fixed at 0x5A).
-    uint8_t data_len_raw[3];  ///< 数据长度（最多 16MB）。Data length (up to 16MB).
-    uint32_t
-        topic_name_crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    uint8_t timestamp_us_raw[8];  ///< 微秒时间戳。Microsecond timestamp.
-    uint8_t pack_header_crc8;     ///< 头部 CRC8 校验码。CRC8 checksum of the header.
-
-    void SetDataLen(uint32_t len);
-
-    uint32_t GetDataLen() const;
-
-    void SetTimestamp(MicrosecondTimestamp timestamp);
-
-    MicrosecondTimestamp GetTimestamp() const;
-  };
-#pragma pack(pop)
-
-  template <typename Data>
-  class PackedData;
-
-  static constexpr uint8_t PACKET_PREFIX = 0x5A;
-  static constexpr size_t PACK_BASE_SIZE = sizeof(PackedDataHeader) + sizeof(uint8_t);
-  static_assert(sizeof(PackedDataHeader) == 17);
-  static_assert(offsetof(PackedDataHeader, prefix) == 0);
-  static_assert(offsetof(PackedDataHeader, data_len_raw) == 1);
-  static_assert(offsetof(PackedDataHeader, topic_name_crc32) == 4);
-  static_assert(offsetof(PackedDataHeader, timestamp_us_raw) == 8);
-  static_assert(offsetof(PackedDataHeader, pack_header_crc8) == 16);
-#endif
 
   /**
    * @typedef TopicHandle
@@ -256,30 +212,28 @@ class Topic
   Topic();
 
   /**
-   * @brief  构造函数，使用指定名称、最大长度、域及其他选项初始化主题
-   *         Constructor to initialize a topic with the specified name, maximum length,
-   * domain, and options
+   * @brief  构造函数，使用指定名称、payload 契约和域初始化主题
+   *         Constructor to initialize a topic with the specified name, payload
+   *         contract, and domain
    * @param  name 主题名称 Topic name
-   * @param  max_length 数据的最大长度 Maximum length of data
+   * @param  payload_size 主题 payload 的精确长度 Exact topic payload size
+   * @param  payload_type_id 主题 payload 的类型标识 Topic payload type identifier
    * @param  domain 主题所属的域（默认为 nullptr）Domain to which the topic belongs
    * (default: nullptr)
    * @param  multi_publisher 是否允许多个订阅者（默认为 false）Whether to allow multiple
    * subscribers (default: false)
-   * @param  cache 是否启用缓存（默认为 false）Whether to enable caching (default: false)
-   * @param  check_length 是否检查数据长度（默认为 false）Whether to check data length
-   * (default: false)
    *
    * @note 包含初始化期动态内存分配，主题应长期存在。
    *       Contains initialization-time dynamic allocation; topics are expected to be
    *       long-lived.
-   * @note 未启用缓存时，Topic 只保留最近一次发布数据的地址；调用者必须保证该地址在
-   *       DumpData() 前仍然有效。多发布者主题使用 mutex，不支持 PublishFromCallback()。
-   *       Without cache, Topic keeps only the last published address; the caller must
-   *       keep it valid until DumpData(). Multi-publisher topics use a mutex and do not
-   *       support PublishFromCallback().
+   * @note Topic 只做发布时同步分发，不缓存最近一条消息。多发布者主题使用 mutex，
+   *       不支持 PublishFromCallback()。
+   *       Topics only dispatch synchronously during publish and do not retain the
+   *       latest message. Multi-publisher topics use a mutex and do not support
+   *       PublishFromCallback().
    */
-  Topic(const char* name, uint32_t max_length, Domain* domain = nullptr,
-        bool multi_publisher = false, bool cache = false, bool check_length = false);
+  Topic(const char* name, uint32_t payload_size, TypeID::ID payload_type_id,
+        Domain* domain = nullptr, bool multi_publisher = false);
 
   /**
    * @brief  创建一个新的主题
@@ -290,9 +244,6 @@ class Topic
    * (default: nullptr)
    * @param  multi_publisher 是否允许多个订阅者（默认为 false）Whether to allow multiple
    * subscribers (default: false)
-   * @param  cache 是否启用缓存（默认为 false）Whether to enable caching (default: false)
-   * @param  check_length 是否检查数据长度（默认为 false）Whether to check data length
-   * (default: false)
    * @return 创建的 Topic 实例 The created Topic instance
    *
    * @note 包含初始化期动态内存分配，主题应长期存在。
@@ -301,11 +252,10 @@ class Topic
    */
   template <typename Data>
   static Topic CreateTopic(const char* name, Domain* domain = nullptr,
-                           bool multi_publisher = false, bool cache = false,
-                           bool check_length = false)
+                           bool multi_publisher = false)
   {
     CheckTopicPayload<Data>();
-    return Topic(name, sizeof(Data), domain, multi_publisher, cache, check_length);
+    return Topic(name, sizeof(Data), TypeID::GetID<Data>(), domain, multi_publisher);
   }
 
   /**
@@ -337,9 +287,6 @@ class Topic
    * @param name 话题名称 Topic name
    * @param domain 可选的域指针 Optional domain pointer (default: nullptr)
    * @param multi_publisher 可选的多发布标志位 Optional multi-publisher flag
-   * @param cache  可选的缓存标志位 Optional cache flag (default: false)
-   * @param check_length 可选的数据长度检查标志位 Optional data length check flag
-   * (default: false)
    * @return TopicHandle 主题句柄 Topic handle
    *
    * @note 包含初始化期动态内存分配，主题应长期存在。
@@ -348,28 +295,16 @@ class Topic
    */
   template <typename Data>
   static TopicHandle FindOrCreate(const char* name, Domain* domain = nullptr,
-                                  bool multi_publisher = false, bool cache = false,
-                                  bool check_length = false)
+                                  bool multi_publisher = false)
   {
     CheckTopicPayload<Data>();
     auto topic = Find(name, domain);
     if (topic == nullptr)
     {
-      topic =
-          CreateTopic<Data>(name, domain, multi_publisher, cache, check_length).block_;
+      topic = CreateTopic<Data>(name, domain, multi_publisher).block_;
     }
     return topic;
   }
-
-  /**
-   * @brief  启用主题的缓存功能
-   *         Enables caching for the topic
-   *
-   * @note 包含初始化期动态内存分配，缓存启用后应长期存在。
-   *       Contains initialization-time dynamic allocation; the cache is expected to
-   *       remain enabled for the topic lifetime.
-   */
-  void EnableCache();
 
   /**
    * @brief  发布数据
@@ -381,25 +316,17 @@ class Topic
   void Publish(Data& data)
   {
     CheckTopicPayload<Data>();
-    Publish(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)));
+    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
+               TypeID::GetID<Data>(), NowTimestamp(), false, false);
   }
 
   template <typename Data>
   void Publish(Data& data, MicrosecondTimestamp timestamp)
   {
     CheckTopicPayload<Data>();
-    Publish(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)), timestamp);
+    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
+               TypeID::GetID<Data>(), timestamp, false, false);
   }
-
-  /**
-   * @brief  以原始地址和大小发布数据
-   *         Publishes data using raw address and size
-   * @param  addr 数据的地址 Address of the data
-   * @param  size 数据大小 Size of the data
-   */
-  void Publish(void* addr, uint32_t size);
-
-  void Publish(void* addr, uint32_t size, MicrosecondTimestamp timestamp);
 
   /**
    * @brief  在回调函数中发布数据
@@ -412,101 +339,17 @@ class Topic
   void PublishFromCallback(Data& data, bool in_isr)
   {
     CheckTopicPayload<Data>();
-    PublishFromCallback(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-                        in_isr);
+    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
+               TypeID::GetID<Data>(), NowTimestamp(), true, in_isr);
   }
 
   template <typename Data>
   void PublishFromCallback(Data& data, MicrosecondTimestamp timestamp, bool in_isr)
   {
     CheckTopicPayload<Data>();
-    PublishFromCallback(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-                        timestamp, in_isr);
+    PublishRaw(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
+               TypeID::GetID<Data>(), timestamp, true, in_isr);
   }
-
-  /**
-   * @brief  在回调函数中以原始地址和大小发布数据
-   *         Publishes data using raw address and size in a callback
-   * @param  addr 数据的地址 Address of the data
-   * @param  size 数据大小 Size of the data
-   * @param  in_isr 是否在中断中发布数据 Whether to publish data in an interrupt
-   *
-   * @note 仅适用于非 mutex 主题。multi_publisher 主题会在回调发布路径触发断言。
-   *       Only valid for non-mutex topics. Multi-publisher topics assert on the
-   *       callback publish path.
-   * @note 回调发布路径不分配内存，但仍会同步分发到该主题的订阅者。
-   *       The callback publish path does not allocate, but still dispatches to the
-   *       topic subscribers synchronously.
-   */
-  void PublishFromCallback(void* addr, uint32_t size, bool in_isr);
-  void PublishFromCallback(void* addr, uint32_t size, MicrosecondTimestamp timestamp,
-                           bool in_isr);
-
-  /**
-   * @brief 打包数据
-   *
-   * @param topic_name_crc32 话题名称的 CRC32 校验码
-   * @param buffer 等待写入的包 Packed data to be written
-   * @param timestamp 需要打包的消息时间戳 Message timestamp to be packed
-   * @param data 需要打包的消息数据 Message data to be packed
-   */
-  static void PackData(uint32_t topic_name_crc32, RawData buffer,
-                       MicrosecondTimestamp timestamp, ConstRawData data);
-
-  /**
-   * @brief  转储数据到 PackedData
-   *         Dumps data into PackedData format
-   * @tparam Data 数据类型 Data type
-   * @param  data 存储数据的 PackedData 结构 PackedData structure to store data
-   */
-  template <typename Data>
-  ErrorCode DumpData(PackedData<Data>& data);
-
-  /**
-   * @brief 转储数据到原始缓冲区。Dumps data into a raw buffer.
-   */
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpData(RawData data)
-  {
-    MicrosecondTimestamp timestamp;
-    return DumpPayload<Mode>(data, timestamp);
-  }
-
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpData(RawData data, MicrosecondTimestamp& timestamp)
-  {
-    return DumpPayload<Mode>(data, timestamp);
-  }
-
-  /**
-   * @brief  转储数据到普通数据结构
-   *         Dumps data into a normal data structure
-   *
-   * @note 允许目标类型只覆盖当前 payload 的前缀，例如把扩展 payload 转储到基础
-   *       payload 结构。若目标类型大于当前 payload，则返回 SIZE_ERR。
-   *       The destination type may cover only a prefix of the current payload, for
-   *       example dumping an extended payload into a base payload structure. SIZE_ERR
-   *       is returned if the destination type is larger than the current payload.
-   * @tparam Data 数据类型 Data type
-   * @param  data 存储数据的变量 Variable to store the data
-   */
-  template <typename Data>
-    requires(!std::same_as<std::remove_cv_t<Data>, RawData>)
-  ErrorCode DumpData(Data& data)
-  {
-    MicrosecondTimestamp timestamp;
-    return DumpData(data, timestamp);
-  }
-
-  template <typename Data>
-    requires(!std::same_as<std::remove_cv_t<Data>, RawData>)
-  ErrorCode DumpData(Data& data, MicrosecondTimestamp& timestamp)
-  {
-    CheckTopicPayload<Data>();
-    return DumpPayload<SizeLimitMode::LESS>(RawData(data), timestamp);
-  }
-
-  MicrosecondTimestamp GetTimestamp() const;
 
   /**
    * @brief  等待主题的创建并返回其句柄
@@ -537,8 +380,6 @@ class Topic
    */
   uint32_t GetKey() const;
 
-  class Server;
-
  private:
   /**
    * @brief  主题句柄，指向当前主题的内存块
@@ -566,21 +407,16 @@ class Topic
   static Domain* EnsureDefaultDomain();
 
   /**
-   * @brief 校验订阅者数据类型和主题最大长度是否兼容。
-   *        Checks whether subscriber data type is compatible with topic max length.
+   * @brief 校验订阅者数据类型和主题类型契约是否一致。
+   *        Checks whether the subscriber data type matches the topic type contract.
    */
   template <typename Data>
-  static void CheckSubscriberDataSize(Topic topic)
+  static void CheckSubscriberType(Topic topic)
   {
     CheckTopicPayload<Data>();
-    if (topic.block_->data_.check_length)
-    {
-      ASSERT(topic.block_->data_.max_length == sizeof(Data));
-    }
-    else
-    {
-      ASSERT(topic.block_->data_.max_length <= sizeof(Data));
-    }
+    ASSERT(topic.block_ != nullptr);
+    ASSERT(topic.block_->data_.payload_type_id == TypeID::GetID<Data>());
+    ASSERT(topic.block_->data_.payload_size == sizeof(Data));
   }
 
   /**
@@ -595,78 +431,15 @@ class Topic
     return RawData(*data);
   }
 
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpPayload(RawData buffer, MicrosecondTimestamp& timestamp)
-  {
-    if (block_->data_.data.addr_ == nullptr)
-    {
-      return ErrorCode::EMPTY;
-    }
+  void PublishRaw(void* addr, uint32_t size, TypeID::ID payload_type_id,
+                  MicrosecondTimestamp timestamp, bool from_callback, bool in_isr);
 
-    const size_t payload_size = block_->data_.data.size_;
-    size_t copy_size = payload_size;
-
-    if constexpr (Mode == SizeLimitMode::EQUAL)
-    {
-      if (payload_size != buffer.size_)
-      {
-        return ErrorCode::SIZE_ERR;
-      }
-    }
-    else if constexpr (Mode == SizeLimitMode::LESS)
-    {
-      if (payload_size < buffer.size_)
-      {
-        return ErrorCode::SIZE_ERR;
-      }
-      copy_size = buffer.size_;
-    }
-    else if constexpr (Mode == SizeLimitMode::MORE)
-    {
-      if (payload_size > buffer.size_)
-      {
-        return ErrorCode::SIZE_ERR;
-      }
-    }
-
-    Lock(block_);
-    timestamp = block_->data_.timestamp;
-    LibXR::Memory::FastCopy(buffer.addr_, block_->data_.data.addr_, copy_size);
-    Unlock(block_);
-
-    return ErrorCode::OK;
-  }
-
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpPacket(RawData buffer)
-  {
-    if (block_->data_.data.addr_ == nullptr)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    ASSERT(LibXR::SizeLimitCheck(Mode, PACK_BASE_SIZE + block_->data_.data.size_,
-                                 buffer.size_));
-    Lock(block_);
-    PackData(block_->data_.crc32, buffer, block_->data_.timestamp, block_->data_.data);
-    Unlock(block_);
-
-    return ErrorCode::OK;
-  }
-
-  void PublishRaw(void* addr, uint32_t size, MicrosecondTimestamp timestamp,
-                  bool from_callback, bool in_isr);
-
-  static void CheckPublishSize(TopicHandle topic, uint32_t size);
-  static RawData StorePublishedData(TopicHandle topic, void* addr, uint32_t size,
-                                    MicrosecondTimestamp timestamp);
+  static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
+                                   uint32_t size);
   static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
                                  RawData data, bool from_callback, bool in_isr);
   static void DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestamp,
                                   RawData data, bool from_callback, bool in_isr);
 };
 }  // namespace LibXR
-
-#include "message/packet.hpp"
-#include "message/server.hpp"
 #include "message/subscriber.hpp"

@@ -75,7 +75,7 @@ void OnLogMessage(bool, Topic tp, const Topic::MessageView<LogData>& log_message
 
 void Logger::Init()
 {
-  log_topic = Topic::CreateTopic<LogData>("/xr/log", nullptr, true, false, false);
+  log_topic = Topic::CreateTopic<LogData>("/xr/log", nullptr, true);
 
   auto log_cb = LibXR::Topic::Callback::Create(OnLogMessage, log_topic);
   log_topic.RegisterCallback(log_cb);
