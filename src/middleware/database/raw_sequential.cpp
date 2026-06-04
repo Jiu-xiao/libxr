@@ -1,4 +1,4 @@
-#include "database.hpp"
+#include "raw_sequential.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +18,47 @@ DatabaseRawSequential::DatabaseRawSequential(Flash& flash, size_t max_buffer_siz
   buffer_ = new uint8_t[max_buffer_size];
 
   Init();
+}
+
+DatabaseRawSequential::KeyInfo::KeyInfo() : raw_data(0xFFFFFFFF) {}
+
+DatabaseRawSequential::KeyInfo::KeyInfo(bool nextKey, uint8_t nameLength,
+                                        uint32_t dataSize)
+    : raw_data(0)
+{
+  SetNextKeyExist(nextKey);
+  SetNameLength(nameLength);
+  SetDataSize(dataSize);
+}
+
+void DatabaseRawSequential::KeyInfo::SetNextKeyExist(bool value)
+{
+  raw_data = (raw_data & 0x7FFFFFFF) | (static_cast<uint32_t>(value & 0x1) << 31);
+}
+
+bool DatabaseRawSequential::KeyInfo::GetNextKeyExist() const
+{
+  return (raw_data >> 31) & 0x1;
+}
+
+void DatabaseRawSequential::KeyInfo::SetNameLength(uint8_t len)
+{
+  raw_data = (raw_data & 0x80FFFFFF) | (static_cast<uint32_t>(len & 0x7F) << 24);
+}
+
+uint8_t DatabaseRawSequential::KeyInfo::GetNameLength() const
+{
+  return (raw_data >> 24) & 0x7F;
+}
+
+void DatabaseRawSequential::KeyInfo::SetDataSize(uint32_t size)
+{
+  raw_data = (raw_data & 0xFF000000) | (size & 0x00FFFFFF);
+}
+
+uint32_t DatabaseRawSequential::KeyInfo::GetDataSize() const
+{
+  return raw_data & 0x00FFFFFF;
 }
 
 void DatabaseRawSequential::ReadFlashOrExit(size_t offset, RawData data)
