@@ -12,15 +12,27 @@ DatabaseRawSequential::DatabaseRawSequential(Flash& flash, size_t max_buffer_siz
     : flash_(flash), max_buffer_size_(max_buffer_size)
 {
   ASSERT(flash.MinEraseSize() * 2 <= flash.Size());
-  if (max_buffer_size * 2 > flash.Size())
-  {
-    max_buffer_size = flash.Size() / 2;
-  }
+  ASSERT(max_buffer_size <= flash.Size() / 2);
   auto block_num = static_cast<size_t>(flash.Size() / flash.MinEraseSize());
   block_size_ = block_num / 2 * flash.MinEraseSize();
   buffer_ = new uint8_t[max_buffer_size];
 
   Init();
+}
+
+void DatabaseRawSequential::ReadFlashOrExit(size_t offset, RawData data)
+{
+  REQUIRE(flash_.Read(offset, data) == ErrorCode::OK);
+}
+
+void DatabaseRawSequential::WriteFlashOrExit(size_t offset, ConstRawData data)
+{
+  REQUIRE(flash_.Write(offset, data) == ErrorCode::OK);
+}
+
+void DatabaseRawSequential::EraseFlashOrExit(size_t offset, size_t size)
+{
+  REQUIRE(flash_.Erase(offset, size) == ErrorCode::OK);
 }
 
 void DatabaseRawSequential::Init()
@@ -44,9 +56,9 @@ void DatabaseRawSequential::Init()
     }
     else
     {
-      flash_.Read(block_size_, {buffer_, max_buffer_size_});
-      flash_.Erase(0, block_size_);
-      flash_.Write(0, {buffer_, max_buffer_size_});
+      ReadFlashOrExit(block_size_, {buffer_, max_buffer_size_});
+      EraseFlashOrExit(0, block_size_);
+      WriteFlashOrExit(0, {buffer_, max_buffer_size_});
     }
   }
 
@@ -55,14 +67,14 @@ void DatabaseRawSequential::Init()
 
 void DatabaseRawSequential::Save()
 {
-  flash_.Erase(block_size_, block_size_);
-  flash_.Write(block_size_, {buffer_, max_buffer_size_});
+  EraseFlashOrExit(block_size_, block_size_);
+  WriteFlashOrExit(block_size_, {buffer_, max_buffer_size_});
 
-  flash_.Erase(0, block_size_);
-  flash_.Write(0, {buffer_, max_buffer_size_});
+  EraseFlashOrExit(0, block_size_);
+  WriteFlashOrExit(0, {buffer_, max_buffer_size_});
 }
 
-void DatabaseRawSequential::Load() { flash_.Read(0, {buffer_, max_buffer_size_}); }
+void DatabaseRawSequential::Load() { ReadFlashOrExit(0, {buffer_, max_buffer_size_}); }
 
 void DatabaseRawSequential::Restore()
 {
@@ -71,8 +83,10 @@ void DatabaseRawSequential::Restore()
   flash_data_->header = FLASH_HEADER;
   flash_data_->key = {0, 0, 0};
   buffer_[max_buffer_size_ - 1] = CHECKSUM_BYTE;
-  flash_.Write(0, {buffer_, max_buffer_size_});
-  flash_.Write(block_size_, {buffer_, max_buffer_size_});
+  EraseFlashOrExit(0, block_size_);
+  EraseFlashOrExit(block_size_, block_size_);
+  WriteFlashOrExit(0, {buffer_, max_buffer_size_});
+  WriteFlashOrExit(block_size_, {buffer_, max_buffer_size_});
 }
 
 ErrorCode DatabaseRawSequential::Get(Database::KeyBase& key)
@@ -84,7 +98,7 @@ ErrorCode DatabaseRawSequential::Get(Database::KeyBase& key)
   }
 
   KeyInfo key_buffer;
-  flash_.Read(ans, key_buffer);
+  ReadFlashOrExit(ans, key_buffer);
 
   if (key.raw_data_.size_ != key_buffer.GetDataSize())
   {
@@ -104,8 +118,8 @@ void DatabaseRawSequential::InitBlock(BlockType block)
     offset = block_size_;
   }
 
-  flash_.Erase(offset, block_size_);
-  flash_.Write(offset, {buffer_, max_buffer_size_});
+  EraseFlashOrExit(offset, block_size_);
+  WriteFlashOrExit(offset, {buffer_, max_buffer_size_});
 }
 
 /**
@@ -122,7 +136,7 @@ bool DatabaseRawSequential::IsBlockInited(BlockType block)
     offset = block_size_;
   }
   FlashInfo flash_data_;
-  flash_.Read(offset, flash_data_);
+  ReadFlashOrExit(offset, flash_data_);
   return flash_data_.header == FLASH_HEADER;
 }
 
@@ -139,7 +153,7 @@ bool DatabaseRawSequential::IsBlockEmpty(BlockType block)
     offset = block_size_;
   }
   FlashInfo flash_data_;
-  flash_.Read(offset, flash_data_);
+  ReadFlashOrExit(offset, flash_data_);
   return flash_data_.key.GetNameLength() == 0;
 }
 
@@ -156,21 +170,21 @@ bool DatabaseRawSequential::IsBlockError(BlockType block)
     offset = block_size_;
   }
   uint8_t checksum_byte = 0;
-  flash_.Read(offset + max_buffer_size_ / sizeof(CHECKSUM_BYTE) - 1, checksum_byte);
+  ReadFlashOrExit(offset + max_buffer_size_ / sizeof(CHECKSUM_BYTE) - 1, checksum_byte);
   return checksum_byte != CHECKSUM_BYTE;
 }
 
 bool DatabaseRawSequential::HasLastKey(size_t offset)
 {
   KeyInfo key;
-  flash_.Read(offset, key);
+  ReadFlashOrExit(offset, key);
   return key.GetNextKeyExist();
 }
 
 size_t DatabaseRawSequential::GetKeySize(size_t offset)
 {
   KeyInfo key;
-  flash_.Read(offset, key);
+  ReadFlashOrExit(offset, key);
   return sizeof(KeyInfo) + key.GetNameLength() + key.GetDataSize();
 }
 
@@ -197,7 +211,7 @@ size_t DatabaseRawSequential::GetLastKey(BlockType block)
 void DatabaseRawSequential::SetNestKeyExist(size_t offset, bool exist)
 {
   KeyInfo key;
-  flash_.Read(offset, key);
+  ReadFlashOrExit(offset, key);
   key.SetNextKeyExist(exist);
   LibXR::Memory::FastCopy(buffer_ + offset, &key, sizeof(KeyInfo));
 }
@@ -205,12 +219,12 @@ void DatabaseRawSequential::SetNestKeyExist(size_t offset, bool exist)
 bool DatabaseRawSequential::KeyDataCompare(size_t offset, const void* data, size_t size)
 {
   KeyInfo key;
-  flash_.Read(offset, key);
+  ReadFlashOrExit(offset, key);
   size_t key_data_offset = offset + sizeof(KeyInfo) + key.GetNameLength();
   uint8_t data_buffer;
   for (size_t i = 0; i < size; i++)
   {
-    flash_.Read(key_data_offset + i, data_buffer);
+    ReadFlashOrExit(key_data_offset + i, data_buffer);
     if (data_buffer != ((uint8_t*)data)[i])
     {
       return true;
@@ -222,11 +236,11 @@ bool DatabaseRawSequential::KeyDataCompare(size_t offset, const void* data, size
 bool DatabaseRawSequential::KeyNameCompare(size_t offset, const char* name)
 {
   KeyInfo key;
-  flash_.Read(offset, key);
+  ReadFlashOrExit(offset, key);
   for (size_t i = 0; i < key.GetNameLength(); i++)
   {
     uint8_t data_buffer;
-    flash_.Read(offset + sizeof(KeyInfo) + i, data_buffer);
+    ReadFlashOrExit(offset + sizeof(KeyInfo) + i, data_buffer);
     if (data_buffer != name[i])
     {
       return true;
@@ -282,7 +296,7 @@ ErrorCode DatabaseRawSequential::SetKey(size_t offset, const void* data, size_t 
   ASSERT(offset != 0);
 
   KeyInfo key;
-  flash_.Read(offset, key);
+  ReadFlashOrExit(offset, key);
 
   if (key.GetDataSize() == size)
   {
@@ -301,13 +315,13 @@ ErrorCode DatabaseRawSequential::SetKey(size_t offset, const void* data, size_t 
 ErrorCode DatabaseRawSequential::GetKeyData(size_t offset, RawData data)
 {
   KeyInfo key;
-  flash_.Read(offset, key);
+  ReadFlashOrExit(offset, key);
   if (key.GetDataSize() > data.size_)
   {
     return ErrorCode::FAILED;
   }
   auto data_offset = offset + sizeof(KeyInfo) + key.GetNameLength();
-  flash_.Read(data_offset, {data.addr_, key.GetDataSize()});
+  ReadFlashOrExit(data_offset, {data.addr_, key.GetDataSize()});
   return ErrorCode::OK;
 }
 

@@ -1,5 +1,8 @@
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +26,7 @@ constexpr size_t XR_DB_BLOCK_SIZE = XR_DB_FLASH_SIZE / 2;
 constexpr size_t XR_DB_CHECKSUM_OFFSET = XR_DB_BLOCK_SIZE - XR_DB_MIN_WRITE_SIZE;
 constexpr uint32_t XR_DB_FLASH_HEADER = 0x12345678 + LIBXR_DATABASE_VERSION;
 constexpr uint32_t XR_DB_CHECKSUM = 0x9abcedf0;
+constexpr uint8_t XR_DB_SEQ_CHECKSUM = 0x56;
 // White-box layout anchors for current DatabaseRaw<16> block format:
 // - FlashInfo header padding occupies one MinWriteSize block
 // - sentinel key occupies one aligned KeyInfo block with empty name/data
@@ -37,6 +41,13 @@ constexpr size_t XR_DB_RAW_UNINIT_FLAG_LAST_BYTE_OFFSET =
     XR_DB_RAW_FIRST_KEY_OFFSET + XR_DB_MIN_WRITE_SIZE * 3 - 1;
 constexpr size_t XR_DB_RAW_FIRST_KEY_RAW_INFO_OFFSET =
     XR_DB_RAW_FIRST_KEY_OFFSET + XR_DB_MIN_WRITE_SIZE * 3;
+constexpr int XR_DB_FATAL_KEY_ADD = 97;
+constexpr int XR_DB_FATAL_SEQ_READ = 91;
+constexpr int XR_DB_FATAL_SEQ_WRITE = 92;
+constexpr int XR_DB_FATAL_SEQ_ERASE = 93;
+constexpr int XR_DB_FATAL_RAW_READ = 94;
+constexpr int XR_DB_FATAL_RAW_WRITE = 95;
+constexpr int XR_DB_FATAL_RAW_ERASE = 96;
 
 enum class MainChecksum
 {
@@ -92,6 +103,84 @@ class MemoryDatabase : public Database
   }
 };
 
+class FailingFlash : public Flash
+{
+ public:
+  enum class FailOp
+  {
+    NONE,
+    READ,
+    WRITE,
+    ERASE,
+  };
+
+  explicit FailingFlash(size_t min_erase_size = 512, size_t min_write_size = 8,
+                        size_t sequential_buffer_size = 256)
+      : Flash(min_erase_size, min_write_size,
+              RawData(flash_area_.data(), flash_area_.size())),
+        sequential_buffer_size_(sequential_buffer_size)
+  {
+    SeedValidSequentialBlocks();
+  }
+
+  void SetFailOp(FailOp op) { fail_op_ = op; }
+
+  ErrorCode Erase(size_t offset, size_t size) override
+  {
+    if (fail_op_ == FailOp::ERASE)
+    {
+      return ErrorCode::FAILED;
+    }
+    ASSERT(offset + size <= flash_area_.size());
+    std::memset(flash_area_.data() + offset, 0xFF, size);
+    return ErrorCode::OK;
+  }
+
+  ErrorCode Write(size_t offset, ConstRawData data) override
+  {
+    if (fail_op_ == FailOp::WRITE)
+    {
+      return ErrorCode::FAILED;
+    }
+    ASSERT(offset + data.size_ <= flash_area_.size());
+    std::memcpy(flash_area_.data() + offset, data.addr_, data.size_);
+    return ErrorCode::OK;
+  }
+
+  ErrorCode Read(size_t offset, RawData data) override
+  {
+    if (fail_op_ == FailOp::READ)
+    {
+      return ErrorCode::FAILED;
+    }
+    return Flash::Read(offset, data);
+  }
+
+ private:
+  void SeedValidSequentialBlocks()
+  {
+    std::memset(flash_area_.data(), 0xFF, flash_area_.size());
+
+    const size_t block_size = flash_area_.size() / 2;
+    const uint32_t empty_key = 0;
+
+    std::memcpy(flash_area_.data(), &XR_DB_FLASH_HEADER, sizeof(XR_DB_FLASH_HEADER));
+    std::memcpy(flash_area_.data() + sizeof(XR_DB_FLASH_HEADER), &empty_key,
+                sizeof(empty_key));
+    flash_area_[sequential_buffer_size_ - 1] = XR_DB_SEQ_CHECKSUM;
+
+    std::memcpy(flash_area_.data() + block_size, &XR_DB_FLASH_HEADER,
+                sizeof(XR_DB_FLASH_HEADER));
+    std::memcpy(flash_area_.data() + block_size + sizeof(XR_DB_FLASH_HEADER), &empty_key,
+                sizeof(empty_key));
+    flash_area_[block_size + sequential_buffer_size_ - 1] = XR_DB_SEQ_CHECKSUM;
+  }
+
+  std::array<uint8_t, XR_DB_FLASH_SIZE> flash_area_{};
+  size_t sequential_buffer_size_ = 0;
+  FailOp fail_op_ = FailOp::NONE;
+};
+
 uint32_t ReadLe32(const std::vector<uint8_t>& bytes, size_t offset)
 {
   return static_cast<uint32_t>(bytes[offset]) |
@@ -106,6 +195,32 @@ void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value)
   bytes[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
   bytes[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
   bytes[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
+template <typename Func>
+void ExpectFatalExit(int exit_code, Func&& func)
+{
+  pid_t child = fork();
+  ASSERT(child >= 0);
+
+  if (child == 0)
+  {
+    auto cb = LibXR::Assert::FatalCallback::Create(
+        [](bool in_isr, int code, const char*, uint32_t)
+        {
+          UNUSED(in_isr);
+          _exit(code);
+        },
+        exit_code);
+    LibXR::Assert::RegisterFatalErrorCallback(cb);
+    func();
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT(waitpid(child, &status, 0) == child);
+  ASSERT(WIFEXITED(status));
+  ASSERT(WEXITSTATUS(status) == exit_code);
 }
 
 std::vector<uint8_t> ReadAllBytes(const char* path)
@@ -301,6 +416,22 @@ void TestDatabaseKeyUsesDefaultOnGetFailure()
   ASSERT(zero_db.add_calls == 0);
 }
 
+void TestDatabaseKeyAddFailureRequires()
+{
+#if defined(LIBXR_SYSTEM_Linux)
+  ExpectFatalExit(
+      XR_DB_FATAL_KEY_ADD,
+      []
+      {
+        MemoryDatabase db;
+        db.get_result = ErrorCode::NOT_FOUND;
+        db.add_result = ErrorCode::FAILED;
+        Database::Key<uint32_t> key(db, "mock", 123);
+        UNUSED(key);
+      });
+#endif
+}
+
 void TestDatabaseSequentialSaveCurrentValue()
 {
   const char* path = "/tmp/flash_test_seq_save_current.bin";
@@ -312,6 +443,96 @@ void TestDatabaseSequentialSaveCurrentValue()
   key.data_ = 2;
   ASSERT(key.Save() == ErrorCode::OK);
   ASSERT(ReopenSequentialDatabaseValue(path, 0, "seq") == 2);
+}
+
+void TestDatabaseSequentialReadFailureRequires()
+{
+#if defined(LIBXR_SYSTEM_Linux)
+  ExpectFatalExit(
+      XR_DB_FATAL_SEQ_READ,
+      []
+      {
+        FailingFlash flash;
+        DatabaseRawSequential db(flash);
+        flash.SetFailOp(FailingFlash::FailOp::READ);
+        db.Load();
+      });
+#endif
+}
+
+void TestDatabaseSequentialWriteFailureRequires()
+{
+#if defined(LIBXR_SYSTEM_Linux)
+  ExpectFatalExit(
+      XR_DB_FATAL_SEQ_WRITE,
+      []
+      {
+        FailingFlash flash;
+        DatabaseRawSequential db(flash);
+        flash.SetFailOp(FailingFlash::FailOp::WRITE);
+        db.Restore();
+      });
+#endif
+}
+
+void TestDatabaseSequentialEraseFailureRequires()
+{
+#if defined(LIBXR_SYSTEM_Linux)
+  ExpectFatalExit(
+      XR_DB_FATAL_SEQ_ERASE,
+      []
+      {
+        FailingFlash flash;
+        DatabaseRawSequential db(flash);
+        flash.SetFailOp(FailingFlash::FailOp::ERASE);
+        db.Save();
+      });
+#endif
+}
+
+void TestDatabaseRawReadFailureRequires()
+{
+#if defined(LIBXR_SYSTEM_Linux)
+  ExpectFatalExit(
+      XR_DB_FATAL_RAW_READ,
+      []
+      {
+        FailingFlash flash(XR_DB_MIN_ERASE_SIZE, XR_DB_MIN_WRITE_SIZE);
+        flash.SetFailOp(FailingFlash::FailOp::READ);
+        DatabaseRaw<XR_DB_MIN_WRITE_SIZE> db(flash, 5);
+        UNUSED(db);
+      });
+#endif
+}
+
+void TestDatabaseRawWriteFailureRequires()
+{
+#if defined(LIBXR_SYSTEM_Linux)
+  ExpectFatalExit(
+      XR_DB_FATAL_RAW_WRITE,
+      []
+      {
+        FailingFlash flash(XR_DB_MIN_ERASE_SIZE, XR_DB_MIN_WRITE_SIZE);
+        flash.SetFailOp(FailingFlash::FailOp::WRITE);
+        DatabaseRaw<XR_DB_MIN_WRITE_SIZE> db(flash, 5);
+        UNUSED(db);
+      });
+#endif
+}
+
+void TestDatabaseRawEraseFailureRequires()
+{
+#if defined(LIBXR_SYSTEM_Linux)
+  ExpectFatalExit(
+      XR_DB_FATAL_RAW_ERASE,
+      []
+      {
+        FailingFlash flash(XR_DB_MIN_ERASE_SIZE, XR_DB_MIN_WRITE_SIZE);
+        flash.SetFailOp(FailingFlash::FailOp::ERASE);
+        DatabaseRaw<XR_DB_MIN_WRITE_SIZE> db(flash, 5);
+        UNUSED(db);
+      });
+#endif
 }
 
 void TestDatabaseRawSaveCurrentValue()
@@ -560,7 +781,14 @@ void test_database()
   TestDatabaseKeySaveUsesCurrentData();
   TestDatabaseKeySetUpdatesCurrentValueBeforeSave();
   TestDatabaseKeyUsesDefaultOnGetFailure();
+  TestDatabaseKeyAddFailureRequires();
   TestDatabaseSequentialSaveCurrentValue();
+  TestDatabaseSequentialReadFailureRequires();
+  TestDatabaseSequentialWriteFailureRequires();
+  TestDatabaseSequentialEraseFailureRequires();
+  TestDatabaseRawReadFailureRequires();
+  TestDatabaseRawWriteFailureRequires();
+  TestDatabaseRawEraseFailureRequires();
   TestDatabaseRawSaveCurrentValue();
   TestDatabaseRawRequiresExactStoredSize();
   TestDatabaseRawInvalidMainKeyMetadataReinitializes();
