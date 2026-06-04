@@ -4,6 +4,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstddef>
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
@@ -57,9 +58,19 @@ class Topic
     std::atomic<LockState> busy;
     LockFreeList subers;
     TypeID::ID payload_type_id;
+    uint32_t payload_size;
+    uint32_t payload_alignment;
     uint32_t crc32;
     Mutex* mutex;
   };
+
+#ifndef __DOXYGEN__
+  struct PackedDataHeader;
+  template <typename Data>
+  class PackedData;
+  static constexpr uint8_t PACKET_PREFIX = 0x5A;
+  static constexpr size_t PACK_BASE_SIZE = 18;
+#endif
 
   typedef RBTree<uint32_t>::Node<Block>* TopicHandle;
 
@@ -114,13 +125,15 @@ class Topic
   class QueuedSubscriber;
   class Callback;
   struct CallbackBlock;
+  class Server;
 
   void RegisterCallback(Callback& cb);
 
   static MicrosecondTimestamp NowTimestamp();
 
   Topic();
-  Topic(const char* name, TypeID::ID payload_type_id, Domain* domain = nullptr,
+  Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
+        size_t payload_alignment, Domain* domain = nullptr,
         bool multi_publisher = false);
 
   template <typename Data>
@@ -128,7 +141,8 @@ class Topic
                            bool multi_publisher = false)
   {
     CheckTopicPayload<Data>();
-    return Topic(name, TypeID::GetID<Data>(), domain, multi_publisher);
+    return Topic(name, TypeID::GetID<Data>(), sizeof(Data), alignof(Data), domain,
+                 multi_publisher);
   }
 
   Topic(TopicHandle topic);
@@ -146,6 +160,18 @@ class Topic
       topic = CreateTopic<Data>(name, domain, multi_publisher).block_;
     }
     return topic;
+  }
+
+  [[nodiscard]] size_t PayloadSize() const
+  {
+    ASSERT(block_ != nullptr);
+    return block_->data_.payload_size;
+  }
+
+  [[nodiscard]] size_t PayloadAlignment() const
+  {
+    ASSERT(block_ != nullptr);
+    return block_->data_.payload_alignment;
   }
 
   template <typename Data>
@@ -172,6 +198,28 @@ class Topic
     PublishTyped(data, timestamp, true, in_isr);
   }
 
+  void PublishBytesFromServer(void* payload_addr, size_t payload_size,
+                              MicrosecondTimestamp timestamp)
+  {
+    PublishServerBytes(payload_addr, payload_size, timestamp, false, false);
+  }
+
+  void PublishBytesFromServerCallback(void* payload_addr, size_t payload_size,
+                                      MicrosecondTimestamp timestamp, bool in_isr)
+  {
+    PublishServerBytes(payload_addr, payload_size, timestamp, true, in_isr);
+  }
+
+  template <typename Data>
+  ErrorCode PackData(const Data& data, PackedData<Data>& packet)
+  {
+    return PackData(data, packet, NowTimestamp());
+  }
+
+  template <typename Data>
+  ErrorCode PackData(const Data& data, PackedData<Data>& packet,
+                     MicrosecondTimestamp timestamp);
+
   static TopicHandle WaitTopic(const char* name, uint32_t timeout = UINT32_MAX,
                                Domain* domain = nullptr);
 
@@ -186,6 +234,17 @@ class Topic
 
   static void EnsureDomainRegistry();
   static Domain* EnsureDefaultDomain();
+
+  static void CheckServerPublishContract(TopicHandle topic, void* payload_addr,
+                                         size_t payload_size)
+  {
+    ASSERT(topic != nullptr);
+    ASSERT(payload_addr != nullptr);
+    ASSERT(payload_size == topic->data_.payload_size);
+    ASSERT(topic->data_.payload_alignment != 0);
+    ASSERT(reinterpret_cast<uintptr_t>(payload_addr) % topic->data_.payload_alignment ==
+           0);
+  }
 
   template <typename Data>
   static void CheckSubscriberType(Topic topic)
@@ -240,13 +299,44 @@ class Topic
   }
 
   static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id);
+  static void PackBytes(uint32_t topic_name_crc32, RawData buffer,
+                        MicrosecondTimestamp timestamp, ConstRawData data);
   static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
                                  void* payload_addr, bool from_callback, bool in_isr);
   static void DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestamp,
                                   void* payload_addr, bool from_callback, bool in_isr);
+
+  void PublishServerBytes(void* payload_addr, size_t payload_size,
+                          MicrosecondTimestamp timestamp, bool from_callback,
+                          bool in_isr)
+  {
+    CheckServerPublishContract(block_, payload_addr, payload_size);
+
+    if (from_callback)
+    {
+      LockFromCallback(block_);
+    }
+    else
+    {
+      Lock(block_);
+    }
+
+    DispatchSubscribers(block_, timestamp, payload_addr, from_callback, in_isr);
+
+    if (from_callback)
+    {
+      UnlockFromCallback(block_);
+    }
+    else
+    {
+      Unlock(block_);
+    }
+  }
 };
 }  // namespace LibXR
 
+#include "packet/packet.hpp"
+#include "server/server.hpp"
 #include "subscriber/async.hpp"
 #include "subscriber/callback.hpp"
 #include "subscriber/queue.hpp"
