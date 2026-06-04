@@ -629,7 +629,7 @@ class Terminal
   {
     if (flag_ansi_ == 1)
     {
-      if (isprint(data))
+      if (std::isprint(static_cast<unsigned char>(data)))
       {
         flag_ansi_++;
       }
@@ -814,7 +814,7 @@ class Terminal
 
           if (same_char_number > name_len)
           {
-            name_len = same_char_number;
+            same_char_number = name_len;
           }
 
           ans_node = &node;
@@ -901,7 +901,7 @@ class Terminal
     {
       HandleAnsiCharacter(data);
     }
-    else if (isprint(data))
+    else if (std::isprint(static_cast<unsigned char>(data)))
     {
       DisplayChar(data);
     }
