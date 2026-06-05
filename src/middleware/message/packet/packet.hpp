@@ -11,19 +11,19 @@ namespace LibXR
  * @brief 打包消息的固定 16 字节头 / Fixed 16-byte header of one packed message
  *
  * @note 当前头布局固定为：
- *       `prefix(1) + version(1) + data_len(3) + topic_crc32(4) + timestamp_us(6) +
+ *       `prefix(1) + data_len(3) + topic_crc32(4) + timestamp_us(6) + version(1) +
  *       crc8(1)`。
  *       The current header layout is fixed as:
- *       `prefix(1) + version(1) + data_len(3) + topic_crc32(4) + timestamp_us(6) +
+ *       `prefix(1) + data_len(3) + topic_crc32(4) + timestamp_us(6) + version(1) +
  *       crc8(1)`.
  */
 struct Topic::PackedDataHeader
 {
   uint8_t prefix;               ///< 包前缀字节。Packet prefix byte.
-  uint8_t version;              ///< 包协议版本。Packet protocol version.
   uint8_t data_len_raw[3];      ///< 小端 24 位 payload 长度。Little-endian 24-bit payload length.
   uint32_t topic_name_crc32;    ///< 目标 topic 名称 CRC32 键。CRC32 key of the target topic name.
   uint8_t timestamp_us_raw[6];  ///< 小端 48 位微秒时间戳。Little-endian 48-bit microsecond timestamp.
+  uint8_t version;              ///< 包协议版本。Packet protocol version.
   uint8_t pack_header_crc8;     ///< 头部 CRC8。Header CRC8.
 
   /**
@@ -53,10 +53,10 @@ struct Topic::PackedDataHeader
 
 static_assert(sizeof(Topic::PackedDataHeader) == 16);
 static_assert(offsetof(Topic::PackedDataHeader, prefix) == 0);
-static_assert(offsetof(Topic::PackedDataHeader, version) == 1);
-static_assert(offsetof(Topic::PackedDataHeader, data_len_raw) == 2);
-static_assert(offsetof(Topic::PackedDataHeader, topic_name_crc32) == 5);
-static_assert(offsetof(Topic::PackedDataHeader, timestamp_us_raw) == 9);
+static_assert(offsetof(Topic::PackedDataHeader, data_len_raw) == 1);
+static_assert(offsetof(Topic::PackedDataHeader, topic_name_crc32) == 4);
+static_assert(offsetof(Topic::PackedDataHeader, timestamp_us_raw) == 8);
+static_assert(offsetof(Topic::PackedDataHeader, version) == 14);
 static_assert(offsetof(Topic::PackedDataHeader, pack_header_crc8) == 15);
 
 /**
