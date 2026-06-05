@@ -17,9 +17,8 @@ Topic::Server::Server(size_t buffer_length)
 {
   ASSERT(buffer_length > PACK_BASE_SIZE);
   parse_buff_.size_ = buffer_length;
-  parse_buff_storage_ =
+  parse_buff_.addr_ =
       new (std::align_val_t(LibXR::CACHE_LINE_SIZE)) uint8_t[parse_buff_.size_];
-  parse_buff_.addr_ = parse_buff_storage_;
 }
 
 void Topic::Server::Register(TopicHandle topic)
@@ -159,26 +158,39 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
   }
 
   const auto target_size = current_topic_->data_.payload_size;
-  if (data_len_ >= target_size)
+  void* publish_addr = payload_addr;
+  if (reinterpret_cast<uintptr_t>(payload_addr) % current_topic_->data_.payload_alignment !=
+      0)
   {
-    LibXR::Memory::FastMove(parse_buff_.addr_, payload_addr, target_size);
+    publish_addr = parse_buff_.addr_;
+    if (data_len_ >= target_size)
+    {
+      LibXR::Memory::FastMove(publish_addr, payload_addr, target_size);
+    }
+    else
+    {
+      LibXR::Memory::FastMove(publish_addr, payload_addr, data_len_);
+      std::memset(reinterpret_cast<uint8_t*>(publish_addr) + data_len_, 0,
+                  target_size - data_len_);
+    }
   }
-  else
+  else if (data_len_ < target_size)
   {
-    LibXR::Memory::FastMove(parse_buff_.addr_, payload_addr, data_len_);
-    std::memset(reinterpret_cast<uint8_t*>(parse_buff_.addr_) + data_len_, 0,
+    publish_addr = parse_buff_.addr_;
+    LibXR::Memory::FastMove(publish_addr, payload_addr, data_len_);
+    std::memset(reinterpret_cast<uint8_t*>(publish_addr) + data_len_, 0,
                 target_size - data_len_);
   }
 
   auto topic = Topic(current_topic_);
   if (from_callback)
   {
-    topic.PublishBytesFromServerCallback(parse_buff_.addr_, target_size,
+    topic.PublishBytesFromServerCallback(publish_addr, target_size,
                                          current_timestamp_, in_isr);
   }
   else
   {
-    topic.PublishBytesFromServer(parse_buff_.addr_, target_size, current_timestamp_);
+    topic.PublishBytesFromServer(publish_addr, target_size, current_timestamp_);
   }
 
   ResetParser();
