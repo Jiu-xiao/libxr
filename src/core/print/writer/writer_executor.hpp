@@ -45,6 +45,17 @@ class Writer::Executor
   template <FormatType Type, std::unsigned_integral UInt>
   [[nodiscard]] ErrorCode WriteUnsigned(const Spec& spec, UInt value);
 
+  /**
+   * @brief 按编译期进制/大小写/八进制备用格式参数复用无符号数字载荷写出逻辑 / Reuse the unsigned-digit payload writer with compile-time radix, case, and octal-alternate parameters
+   * @tparam Base 整数进制 / Integer radix
+   * @tparam UpperCase 十六进制数字是否使用大写字符 / Whether hexadecimal digits should use uppercase characters
+   * @tparam InlineAlternateOctal 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
+   * @tparam UInt 无符号整数类型 / Unsigned integer type
+   * @param prefix 脱离数字载荷输出的前缀 / Prefix emitted outside the digit payload
+   * @param spec 解码后的字段规格 / Decoded field spec
+   * @param value 待写出的整数值 / Integer value to write
+   * @return 返回共享无符号数字写出路径的结果 / Returns the shared unsigned-digit write result
+   */
   template <uint8_t Base, bool UpperCase = false,
             bool InlineAlternateOctal = false, std::unsigned_integral UInt>
   [[nodiscard]] ErrorCode WriteUnsignedDigits(std::string_view prefix, const Spec& spec,

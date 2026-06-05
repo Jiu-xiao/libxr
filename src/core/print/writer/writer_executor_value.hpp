@@ -124,6 +124,11 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view 
  * @param spec 解码后的字段规格 / Decoded field spec
  * @param value 待写出的整数值 / Integer value to write
  * @return 返回共享整数字段路径的写出结果 / Returns the shared integer-field write result
+ *
+ * This bridge does not format digits itself; it only maps one runtime integer
+ * semantic type onto the shared compile-time radix/case helper above.
+ * 这个桥接函数本身不直接格式化数字；它只负责把运行期整数语义类型映射到上面的
+ * 编译期进制/大小写共享辅助路径。
  */
 template <OutputSink Sink, FormatProfile Profile>
 template <FormatType Type, std::unsigned_integral UInt>
