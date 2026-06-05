@@ -1,14 +1,14 @@
-#pragma once
-
-#include <cstdint>
-#include <utility>
-
-#include "libxr_color.hpp"
-#include "libxr_rw.hpp"
-#include "libxr_time.hpp"
-
-namespace LibXR
-{
+/**
+ * @brief `Logger` 的字面量前端选择片段
+ *        Literal-frontend selection fragment of `Logger`
+ *
+ * @note 这一组 helper 只负责在编译期判断一条日志字面量和一组参数应该落到
+ *       brace 前端还是 printf 前端，不直接处理运行时 topic 发布。
+ *       This helper set is responsible only for deciding at compile time
+ *       whether one log literal plus one argument list should route to the
+ *       brace frontend or the printf frontend; it does not perform runtime
+ *       topic publication directly.
+ */
 namespace Detail::LoggerLiteral
 {
 /**
@@ -87,7 +87,8 @@ template <Print::Text Source>
 template <Print::Text Source>
 [[nodiscard]] consteval bool PrintfSourceValid()
 {
-  return Print::Detail::PrintfCompile::Analyze<Source>().error == Print::Printf::Error::None;
+  return Print::Detail::PrintfCompile::Analyze<Source>().error ==
+         Print::Printf::Error::None;
 }
 
 /**
@@ -205,8 +206,9 @@ template <Frontend Forced, Print::Text Source, typename... Args>
   }
   else if constexpr (Forced == Frontend::Printf)
   {
-    static_assert(resolution == Resolution::Printf,
-                  "LibXR::Logger: XR_PRINTF(...) literal is not accepted by the printf frontend");
+    static_assert(
+        resolution == Resolution::Printf,
+        "LibXR::Logger: XR_PRINTF(...) literal is not accepted by the printf frontend");
     return Frontend::Printf;
   }
   else if constexpr (resolution == Resolution::Format)
@@ -231,180 +233,3 @@ template <Frontend Forced, Print::Text Source, typename... Args>
   }
 }
 }  // namespace Detail::LoggerLiteral
-
-/**
- * @enum LogLevel
- * @brief 日志级别枚举 / Log level enumeration
- */
-enum class LogLevel : uint8_t
-{
-  XR_LOG_LEVEL_ERROR = 0,  ///< 错误信息 / Error message
-  XR_LOG_LEVEL_WARN = 1,   ///< 警告信息 / Warning message
-  XR_LOG_LEVEL_PASS = 2,   ///< 通过信息 / Pass message
-  XR_LOG_LEVEL_INFO = 3,   ///< 一般信息 / Informational message
-  XR_LOG_LEVEL_DEBUG = 4,  ///< 调试信息 / Debug message
-};
-
-/**
- * @struct LogData
- * @brief 日志数据结构体 / Log data structure
- */
-struct LogData
-{
-  LogLevel level;                        ///< 日志级别 / Log level
-  const char* file;                      ///< 文件名指针 / Source file name pointer
-  uint32_t line;                         ///< 行号 / Line number
-  char message[XR_LOG_MESSAGE_MAX_LEN];  ///< 日志消息内容 / Log message content
-};
-
-/**
- * @class Logger
- * @brief 日志管理器 / LibXR Logger Manager
- */
-class Logger
-{
- public:
-  /**
-   * @brief 初始化日志主题 / Initialize the log topic
-   */
-  static void Init();
-
-  /**
-   * @brief 发布一条字面量日志 / Publish one literal log message
-   * @param level 日志级别 / Log level
-   * @param file 来源文件名 / Source file name
-   * @param line 行号 / Line number
-   * @param args 格式参数 / Format arguments
-   */
-  template <Print::Text Source, typename... Args>
-  static void Publish(LogLevel level, const char* file, uint32_t line, Args&&... args)
-  {
-    constexpr auto frontend =
-        Detail::LoggerLiteral::SelectFrontend<Detail::LoggerLiteral::Frontend::Auto, Source,
-                                              Args...>();
-    PublishSelected<frontend, Source>(level, file, line, std::forward<Args>(args)...);
-  }
-
-  /**
-   * @brief 发布一条带显式前端标签的字面量日志 / Publish one literal log message
-   *        with an explicit frontend tag
-   * @param level 日志级别 / Log level
-   * @param file 来源文件名 / Source file name
-   * @param line 行号 / Line number
-   * @param args 格式参数 / Format arguments
-   */
-  template <Detail::LoggerLiteral::Frontend Forced, Print::Text Source, typename... Args>
-  static void Publish(LogLevel level, const char* file, uint32_t line, Args&&... args)
-  {
-    static_assert(Forced != Detail::LoggerLiteral::Frontend::Auto,
-                  "LibXR::Logger: explicit literal tag must be XR_FMT(...) or XR_PRINTF(...)");
-
-    constexpr auto frontend =
-        Detail::LoggerLiteral::SelectFrontend<Forced, Source, Args...>();
-    PublishSelected<frontend, Source>(level, file, line, std::forward<Args>(args)...);
-  }
-
- private:
-  template <Detail::LoggerLiteral::Frontend FrontendMode, Print::Text Source,
-            typename... Args>
-  static void PublishSelected(LogLevel level, const char* file, uint32_t line,
-                              Args&&... args)
-  {
-    if (!initialized_)
-    {
-      Init();
-    }
-
-    LogData data;
-    data.level = level;
-    data.file = file;
-    data.line = line;
-
-    if constexpr (FrontendMode == Detail::LoggerLiteral::Frontend::Format)
-    {
-      constexpr LibXR::Format<Source> format{};
-      auto written = Print::FormatIntoBuffer(data.message, sizeof(data.message), format,
-                                             std::forward<Args>(args)...);
-      UNUSED(written);
-    }
-    else
-    {
-      constexpr auto format = Print::Printf::Build<Source>();
-      auto written = Print::FormatIntoBuffer(data.message, sizeof(data.message), format,
-                                             std::forward<Args>(args)...);
-      UNUSED(written);
-    }
-
-    PublishToTopic(data);
-  }
-
-  static void PublishToTopic(LogData& data);
-  static inline bool initialized_ = false;
-};
-
-}  // namespace LibXR
-
-/**
- * @brief 显式指定 logger 使用 brace 风格前端 / Explicitly force the logger brace frontend
- */
-#define XR_FMT(fmt) LibXR::Detail::LoggerLiteral::Frontend::Format, fmt
-
-/**
- * @brief 显式指定 logger 使用 printf 风格前端 / Explicitly force the logger printf frontend
- */
-#define XR_PRINTF(fmt) LibXR::Detail::LoggerLiteral::Frontend::Printf, fmt
-
-#if LIBXR_LOG_LEVEL >= 4
-/**
- * @brief 输出调试日志 / Output debug log
- */
-#define XR_LOG_DEBUG(fmt, ...)                                                         \
-  LibXR::Logger::Publish<fmt>(LibXR::LogLevel::XR_LOG_LEVEL_DEBUG, __FILE__, __LINE__, \
-                              ##__VA_ARGS__)
-#else
-#define XR_LOG_DEBUG(...)
-#endif
-
-#if LIBXR_LOG_LEVEL >= 3
-/**
- * @brief 输出一般信息日志 / Output info log
- */
-#define XR_LOG_INFO(fmt, ...)                                                         \
-  LibXR::Logger::Publish<fmt>(LibXR::LogLevel::XR_LOG_LEVEL_INFO, __FILE__, __LINE__, \
-                              ##__VA_ARGS__)
-#else
-#define XR_LOG_INFO(...)
-#endif
-
-#if LIBXR_LOG_LEVEL >= 2
-/**
- * @brief 输出通过测试日志 / Output pass log
- */
-#define XR_LOG_PASS(fmt, ...)                                                         \
-  LibXR::Logger::Publish<fmt>(LibXR::LogLevel::XR_LOG_LEVEL_PASS, __FILE__, __LINE__, \
-                              ##__VA_ARGS__)
-#else
-#define XR_LOG_PASS(...)
-#endif
-
-#if LIBXR_LOG_LEVEL >= 1
-/**
- * @brief 输出警告日志 / Output warning log
- */
-#define XR_LOG_WARN(fmt, ...)                                                         \
-  LibXR::Logger::Publish<fmt>(LibXR::LogLevel::XR_LOG_LEVEL_WARN, __FILE__, __LINE__, \
-                              ##__VA_ARGS__)
-#else
-#define XR_LOG_WARN(...)
-#endif
-
-#if LIBXR_LOG_LEVEL >= 0
-/**
- * @brief 输出错误日志 / Output error log
- */
-#define XR_LOG_ERROR(fmt, ...)                                                         \
-  LibXR::Logger::Publish<fmt>(LibXR::LogLevel::XR_LOG_LEVEL_ERROR, __FILE__, __LINE__, \
-                              ##__VA_ARGS__)
-#else
-#define XR_LOG_ERROR(...)
-#endif
