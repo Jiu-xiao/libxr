@@ -1,3 +1,14 @@
+/**
+ * @brief `Logger` 的字面量前端选择片段
+ *        Literal-frontend selection fragment of `Logger`
+ *
+ * @note 这一组 helper 只负责在编译期判断一条日志字面量和一组参数应该落到
+ *       brace 前端还是 printf 前端，不直接处理运行时 topic 发布。
+ *       This helper set is responsible only for deciding at compile time
+ *       whether one log literal plus one argument list should route to the
+ *       brace frontend or the printf frontend; it does not perform runtime
+ *       topic publication directly.
+ */
 namespace Detail::LoggerLiteral
 {
 /**

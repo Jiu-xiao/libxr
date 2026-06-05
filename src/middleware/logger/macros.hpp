@@ -1,4 +1,14 @@
 /**
+ * @brief `Logger` 的宏表面片段
+ *        Macro-surface fragment of `Logger`
+ *
+ * @note 这一组宏只是对 `Logger::Publish()` 的便捷包装；真实的前端选择和运行时发布
+ *       逻辑仍由 `Logger` 类壳及其内部 helper 完成。
+ *       These macros are only convenience wrappers over `Logger::Publish()`;
+ *       actual frontend selection and runtime publication are still handled by
+ *       the `Logger` shell and its internal helpers.
+ */
+/**
  * @brief 显式指定 logger 使用 brace 风格前端 / Explicitly force the logger brace frontend
  */
 #define XR_FMT(fmt) LibXR::Detail::LoggerLiteral::Frontend::Format, fmt

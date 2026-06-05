@@ -19,6 +19,9 @@ namespace LibXR
  *       in the same directory.
  */
 
+/**
+ * @brief logger 字面量前端解析片段 / Logger literal-frontend resolution fragment
+ */
 #include "literal.hpp"
 
 /**
@@ -94,6 +97,23 @@ class Logger
   }
 
  private:
+  /**
+   * @brief 按已确定前端发布一条日志
+   *        Publish one log entry under the already selected frontend
+   * @tparam FrontendMode 已选定的日志字面量前端 / Already selected literal frontend
+   * @tparam Source 日志源串 / Log source literal
+   * @tparam Args 格式参数类型 / Format argument types
+   * @param level 日志级别 / Log level
+   * @param file 来源文件名 / Source file name
+   * @param line 行号 / Line number
+   * @param args 格式参数 / Format arguments
+   *
+   * @note 这里负责惰性初始化日志主题，并把格式化后的文本写进固定 `LogData` 缓冲区；
+   *       真正的 topic 发布留给 `PublishToTopic()`。
+   *       This path performs lazy logger-topic initialization and formats the
+   *       final text into the fixed `LogData` buffer; the actual topic publish
+   *       is delegated to `PublishToTopic()`.
+   */
   template <Detail::LoggerLiteral::Frontend FrontendMode, Print::Text Source,
             typename... Args>
   static void PublishSelected(LogLevel level, const char* file, uint32_t line,
@@ -127,10 +147,19 @@ class Logger
     PublishToTopic(data);
   }
 
+  /**
+   * @brief 把一条日志数据发布到内部日志 topic
+   *        Publish one log record into the internal log topic
+   * @param data 待发布日志 / Log record to publish
+   */
   static void PublishToTopic(LogData& data);
-  static inline bool initialized_ = false;
+
+  static inline bool initialized_ = false;  ///< 是否已经完成日志 topic 初始化 / Whether logger-topic initialization has completed.
 };
 
 }  // namespace LibXR
 
+/**
+ * @brief logger 宏表面片段 / Logger macro-surface fragment
+ */
 #include "macros.hpp"
