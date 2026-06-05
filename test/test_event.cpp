@@ -6,6 +6,7 @@ void test_event()
 {
   static int event_arg = 0;
   static bool last_in_isr = false;
+  static int high_event_arg = 0;
 
   auto event_cb = LibXR::Event::Callback::Create(
       [](bool in_isr, int* arg, uint32_t event)
@@ -15,6 +16,15 @@ void test_event()
         ASSERT(event == 0x1234);
       },
       &event_arg);
+
+  auto high_event_cb = LibXR::Event::Callback::Create(
+      [](bool in_isr, int* arg, uint32_t event)
+      {
+        last_in_isr = in_isr;
+        *arg = *arg + 1;
+        ASSERT(event == 0xF0001234);
+      },
+      &high_event_arg);
 
   LibXR::Event event, event_bind;
 
@@ -58,4 +68,10 @@ void test_event()
   event_bind.ActiveFromCallback(event_bind.GetList(0x4321), 0x4321, true);
   ASSERT(event_arg == 8);
   ASSERT(last_in_isr == true);
+
+  // High-value event IDs must still compare and dispatch correctly.
+  event.Register(0xF0001234, high_event_cb);
+  event.Active(0xF0001234);
+  ASSERT(high_event_arg == 1);
+  ASSERT(last_in_isr == false);
 }
