@@ -1,32 +1,27 @@
 #pragma once
 
 #include "libxr.hpp"
-#include "message.hpp"
 
 namespace LibXR
 {
 
 /**
  * @class CAN
- * @brief CAN 通信抽象类，定义经典 CAN 帧与订阅接口。
- *        Abstract class for CAN communication with classic CAN frames and subscription
- * API.
+ * @brief CAN controller abstraction with classic-frame TX plus RX/error
+ *        subscription hooks.
+ *        CAN 控制器抽象：提供经典帧发送接口，以及接收/错误订阅钩子。
  */
 class CAN
 {
  public:
   /**
-   * @enum Type
-   * @brief CAN 消息类型。CAN frame type.
+   * @enum IDFormat
+   * @brief CAN ID 格式。CAN identifier format.
    */
-  enum class Type : uint8_t
+  enum class IDFormat : uint8_t
   {
-    STANDARD = 0,         ///< 标准数据帧（11-bit ID）。Standard data frame (11-bit ID).
-    EXTENDED = 1,         ///< 扩展数据帧（29-bit ID）。Extended data frame (29-bit ID).
-    REMOTE_STANDARD = 2,  ///< 标准远程帧。Standard remote frame.
-    REMOTE_EXTENDED = 3,  ///< 扩展远程帧。Extended remote frame.
-    ERROR = 4,            ///< 错误帧（虚拟事件）。Error frame (virtual event).
-    TYPE_NUM = 5          ///< 类型数量上界。Number of frame types.
+    STANDARD = 0,  ///< 11-bit 标准 ID。11-bit standard identifier.
+    EXTENDED = 1,  ///< 29-bit 扩展 ID。29-bit extended identifier.
   };
 
   /**
@@ -120,64 +115,53 @@ class CAN
    */
   virtual ~CAN() = default;
 
-#pragma pack(push, 1)
   /**
    * @struct ClassicPack
    * @brief 经典 CAN 帧数据结构。Classic CAN frame structure.
    */
   struct ClassicPack
   {
-    uint32_t id;      ///< CAN ID（11/29 bit 或 ErrorID）。CAN ID (11/29 bits or ErrorID).
-    Type type;        ///< 帧类型。Frame type.
-    uint8_t dlc;      ///< 有效数据长度（0~8）。Data length code (0–8).
-    uint8_t data[8];  ///< 数据载荷。Data payload (up to 8 bytes).
+    uint32_t id = 0;                           ///< 纯 11/29-bit ID。Raw 11/29-bit identifier.
+    IDFormat format = IDFormat::STANDARD;      ///< ID 格式。Identifier format.
+    bool remote = false;                       ///< 是否为 remote frame。Whether this is a remote frame.
+    uint8_t dlc = 0;                           ///< classic DLC（0~8）。Classic DLC (0–8).
+    uint8_t data[8]{};                         ///< 数据载荷。Data payload.
   };
-#pragma pack(pop)
-
-  /// 错误 ID 前缀 Error ID prefix.
-  static constexpr uint32_t CAN_ERROR_ID_PREFIX = 0xFFFF0000u;
 
   /**
    * @enum ErrorID
-   * @brief ClassicPack::type == Type::ERROR 时使用的虚拟 ID。
-   *        Virtual IDs used when ClassicPack::type == Type::ERROR.
+   * @brief CAN 错误事件标识。CAN error-event identifier.
    */
   enum class ErrorID : uint32_t
   {
-    CAN_ERROR_ID_GENERIC = CAN_ERROR_ID_PREFIX,
-    CAN_ERROR_ID_BUS_OFF = CAN_ERROR_ID_PREFIX + 1,
-    CAN_ERROR_ID_ERROR_PASSIVE = CAN_ERROR_ID_PREFIX + 2,
-    CAN_ERROR_ID_ERROR_WARNING = CAN_ERROR_ID_PREFIX + 3,
-    CAN_ERROR_ID_PROTOCOL = CAN_ERROR_ID_PREFIX + 4,
-    CAN_ERROR_ID_ACK = CAN_ERROR_ID_PREFIX + 5,
-    CAN_ERROR_ID_STUFF = CAN_ERROR_ID_PREFIX + 6,
-    CAN_ERROR_ID_FORM = CAN_ERROR_ID_PREFIX + 7,
-    CAN_ERROR_ID_BIT0 = CAN_ERROR_ID_PREFIX + 8,
-    CAN_ERROR_ID_BIT1 = CAN_ERROR_ID_PREFIX + 9,
-    CAN_ERROR_ID_CRC = CAN_ERROR_ID_PREFIX + 10,
-    CAN_ERROR_ID_OTHER = CAN_ERROR_ID_PREFIX + 11
+    CAN_ERROR_ID_GENERIC = 0,
+    CAN_ERROR_ID_BUS_OFF,
+    CAN_ERROR_ID_ERROR_PASSIVE,
+    CAN_ERROR_ID_ERROR_WARNING,
+    CAN_ERROR_ID_PROTOCOL,
+    CAN_ERROR_ID_ACK,
+    CAN_ERROR_ID_STUFF,
+    CAN_ERROR_ID_FORM,
+    CAN_ERROR_ID_BIT0,
+    CAN_ERROR_ID_BIT1,
+    CAN_ERROR_ID_CRC,
+    CAN_ERROR_ID_OTHER,
   };
 
-  /// 将 ErrorID 转为 id。Convert ErrorID to ClassicPack::id.
-  static constexpr uint32_t FromErrorID(ErrorID e) noexcept
+  /**
+   * @struct ErrorEvent
+   * @brief 控制器错误事件。Controller error event.
+   */
+  struct ErrorEvent
   {
-    return static_cast<uint32_t>(e);
-  }
+    ErrorID id = ErrorID::CAN_ERROR_ID_GENERIC;  ///< 错误类型。Error identifier.
+    ErrorState state{};                          ///< 错误状态快照。Error-state snapshot.
+  };
 
-  /// 判断 id 是否处于错误 ID 空间。Check if id is in error ID space.
-  static constexpr bool IsErrorId(uint32_t id) noexcept
-  {
-    return (id & 0xFFFF0000u) == CAN_ERROR_ID_PREFIX;
-  }
-
-  /// 将 id 解释为 ErrorID。Interpret id as ErrorID.
-  static constexpr ErrorID ToErrorID(uint32_t id) noexcept
-  {
-    return static_cast<ErrorID>(id);
-  }
-
-  /// 回调类型。Callback type.
+  /// classic CAN 帧回调类型。Classic CAN frame callback type.
   using Callback = LibXR::Callback<const ClassicPack&>;
+  /// CAN 错误事件回调类型。CAN error-event callback type.
+  using ErrorCallback = LibXR::Callback<const ErrorEvent&>;
 
   /**
    * @enum FilterMode
@@ -197,25 +181,43 @@ class CAN
    */
   struct Filter
   {
-    FilterMode mode;         ///< 过滤模式。Filter mode.
-    uint32_t start_id_mask;  ///< 起始 ID 或掩码。Start ID or mask.
-    uint32_t end_id_mask;    ///< 结束 ID 或匹配值。End ID or match value.
-    Type type;               ///< 帧类型。Frame type.
-    Callback cb;             ///< 回调函数。Callback function.
+    FilterMode mode = FilterMode::ID_RANGE;  ///< 过滤模式。Filter mode.
+    uint32_t start_id_mask = 0;              ///< 起始 ID 或掩码。Start ID or mask.
+    uint32_t end_id_mask = UINT32_MAX;       ///< 结束 ID 或匹配值。End ID or match value.
+    IDFormat format = IDFormat::STANDARD;    ///< ID 格式。Identifier format.
+    bool remote = false;                     ///< 是否只匹配 remote frame。Whether to match remote frames.
+    Callback cb;                             ///< 回调函数。Callback function.
+  };
+
+  /**
+   * @struct ErrorSubscriber
+   * @brief 错误事件订阅项。Error-event subscriber entry.
+   */
+  struct ErrorSubscriber
+  {
+    ErrorCallback cb;  ///< 回调函数。Callback function.
   };
 
   /**
    * @brief 注册经典 CAN 消息回调。
-   *        Register classic CAN message callback.
+   *        Register classic CAN frame callback.
    *
    * @param cb 回调函数。Callback function.
-   * @param type 帧类型。Frame type.
+   * @param format 目标 ID 格式。Target identifier format.
+   * @param remote 是否匹配 remote frame。Whether to match remote frames.
    * @param mode 过滤器模式。Filter mode.
    * @param start_id_mask 起始 ID 或掩码。Start ID or mask.
    * @param end_id_mask 结束 ID 或匹配值。End ID or match value.
    */
-  void Register(Callback cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
-                uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX);
+  void Register(Callback cb, IDFormat format, bool remote = false,
+                FilterMode mode = FilterMode::ID_RANGE, uint32_t start_id_mask = 0,
+                uint32_t end_id_mask = UINT32_MAX);
+
+  /**
+   * @brief 注册控制器错误事件回调。Register controller error-event callback.
+   * @param cb 回调函数。Callback function.
+   */
+  void RegisterError(ErrorCallback cb);
 
   /**
    * @brief 添加经典 CAN 消息。Add classic CAN message.
@@ -233,15 +235,29 @@ class CAN
    */
   void OnMessage(const ClassicPack& pack, bool in_isr);
 
+  /**
+   * @brief 分发控制器错误事件。Dispatch one controller error event.
+   * @param event 错误事件。Error event.
+   * @param in_isr 是否在中断上下文中。True if called in ISR context.
+   */
+  void OnError(const ErrorEvent& event, bool in_isr);
+
  private:
-  /// 按帧类型划分的订阅者链表数组。Subscriber lists per frame type.
-  LockFreeList subscriber_list_[static_cast<uint8_t>(Type::TYPE_NUM)];
+  [[nodiscard]] static constexpr size_t ClassicBucketIndex(IDFormat format, bool remote)
+  {
+    return static_cast<size_t>(format) + (remote ? 2u : 0u);
+  }
+
+  /// 按 format/remote 维度划分的 classic 订阅者链表。Classic subscriber lists by format/remote bucket.
+  LockFreeList subscriber_list_[4];
+  /// 错误事件订阅者链表。Error-event subscriber list.
+  LockFreeList error_subscriber_list_;
 };
 
 /**
  * @class FDCAN
- * @brief FDCAN 通信抽象类，扩展支持 CAN FD 帧。
- *        Abstract class for FDCAN communication with CAN FD frame support.
+ * @brief FDCAN 通信抽象类，扩展支持 CAN FD 数据帧。
+ *        Abstract class for FDCAN communication with CAN FD data-frame support.
  */
 class FDCAN : public CAN
 {
@@ -256,23 +272,24 @@ class FDCAN : public CAN
    */
   virtual ~FDCAN() = default;
 
-#pragma pack(push, 1)
   /**
    * @struct FDPack
-   * @brief CAN FD 帧数据结构。CAN FD frame structure.
+   * @brief CAN FD 数据帧数据结构。CAN FD data-frame structure.
    */
   struct FDPack
   {
-    uint32_t id;       ///< CAN ID。CAN ID.
-    Type type;         ///< 帧类型。Frame type.
-    uint8_t len;       ///< 数据长度（0~64）。Data length (0–64 bytes).
-    uint8_t data[64];  ///< 数据载荷。Data payload.
+    uint32_t id = 0;                           ///< 纯 11/29-bit ID。Raw 11/29-bit identifier.
+    IDFormat format = IDFormat::STANDARD;      ///< ID 格式。Identifier format.
+    bool brs = false;                          ///< 该帧是否启用 BRS。Whether this frame uses BRS.
+    bool esi = false;                          ///< 该帧的 ESI 值。ESI observed/carried by this frame.
+    uint8_t len = 0;                           ///< 数据长度（0~64）。Payload length (0–64 bytes).
+    uint8_t data[64]{};                        ///< 数据载荷。Data payload.
   };
-#pragma pack(pop)
 
   using CAN::AddMessage;
   using CAN::FilterMode;
   using CAN::Register;
+  using CAN::RegisterError;
 
   /// FD 帧回调类型。Callback type for FD frames.
   using CallbackFD = LibXR::Callback<const FDPack&>;
@@ -283,11 +300,11 @@ class FDCAN : public CAN
    */
   struct Filter
   {
-    FilterMode mode;         ///< 过滤模式。Filter mode.
-    uint32_t start_id_mask;  ///< 起始 ID 或掩码。Start ID or mask.
-    uint32_t end_id_mask;    ///< 结束 ID 或匹配值。End ID or match value.
-    Type type;               ///< 帧类型。Frame type.
-    CallbackFD cb;           ///< 回调函数。Callback function.
+    FilterMode mode = FilterMode::ID_RANGE;  ///< 过滤模式。Filter mode.
+    uint32_t start_id_mask = 0;              ///< 起始 ID 或掩码。Start ID or mask.
+    uint32_t end_id_mask = UINT32_MAX;       ///< 结束 ID 或匹配值。End ID or match value.
+    IDFormat format = IDFormat::STANDARD;    ///< ID 格式。Identifier format.
+    CallbackFD cb;                           ///< 回调函数。Callback function.
   };
 
   /**
@@ -305,13 +322,11 @@ class FDCAN : public CAN
 
   /**
    * @struct FDMode
-   * @brief FDCAN FD 模式配置。FDCAN FD mode configuration.
+   * @brief FDCAN 通道级 FD 模式配置。Channel-level FD mode configuration.
    */
   struct FDMode
   {
     bool fd_enabled = false;  ///< 是否启用 CAN FD。Enable CAN FD.
-    bool brs = false;         ///< 是否启用 BRS。Enable Bit Rate Switch.
-    bool esi = false;         ///< 全局 ESI 标志。Global ESI flag.
   };
 
   /**
@@ -324,7 +339,7 @@ class FDCAN : public CAN
     uint32_t data_bitrate = 0;       ///< 数据相位波特率。Data-phase bitrate.
     float data_sample_point = 0.0f;  ///< 数据相位采样点。Data-phase sample point.
     DataBitTiming data_timing;       ///< 数据相位位时序。Data-phase bit timing.
-    FDMode fd_mode;                  ///< FD 模式配置。FD mode configuration.
+    FDMode fd_mode;                  ///< FD 通道模式配置。FD channel-mode configuration.
   };
 
   /**
@@ -350,12 +365,12 @@ class FDCAN : public CAN
    * @brief 注册 FDCAN FD 帧回调。
    *        Register FDCAN FD frame callback.
    * @param cb 回调函数。Callback function.
-   * @param type 帧类型。Frame type.
+   * @param format 目标 ID 格式。Target identifier format.
    * @param mode 过滤器模式。Filter mode.
    * @param start_id_mask 起始 ID 或掩码。Start ID or mask.
    * @param end_id_mask 结束 ID 或匹配值。End ID or match value.
    */
-  void Register(CallbackFD cb, Type type, FilterMode mode = FilterMode::ID_RANGE,
+  void Register(CallbackFD cb, IDFormat format, FilterMode mode = FilterMode::ID_RANGE,
                 uint32_t start_id_mask = 0, uint32_t end_id_mask = UINT32_MAX);
 
   /**
@@ -377,8 +392,8 @@ class FDCAN : public CAN
   void OnMessage(const FDPack& pack, bool in_isr);
 
  private:
-  /// 按帧类型划分的 FD 订阅者链表数组。FD subscriber lists per frame type.
-  LockFreeList subscriber_list_fd_[static_cast<uint8_t>(Type::REMOTE_STANDARD)];
+  /// 按 format 维度划分的 FD 订阅者链表。FD subscriber lists by identifier format.
+  LockFreeList subscriber_list_fd_[2];
 };
 
 }  // namespace LibXR

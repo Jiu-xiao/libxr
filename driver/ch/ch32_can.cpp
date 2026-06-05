@@ -483,9 +483,8 @@ uint32_t CH32CAN::GetClockFreq() const
 
 inline void CH32CAN::BuildTxMsg(const ClassicPack& p, CanTxMsg& m)
 {
-  const bool IS_EXT = (p.type == Type::EXTENDED) || (p.type == Type::REMOTE_EXTENDED);
-  const bool IS_RTR =
-      (p.type == Type::REMOTE_STANDARD) || (p.type == Type::REMOTE_EXTENDED);
+  const bool IS_EXT = (p.format == IDFormat::EXTENDED);
+  const bool IS_RTR = p.remote;
 
   m.DLC = (p.dlc <= 8u) ? static_cast<uint8_t>(p.dlc) : 8u;
   m.IDE = IS_EXT ? CAN_ID_EXT : CAN_ID_STD;
@@ -553,10 +552,7 @@ void CH32CAN::TxService()
 
 ErrorCode CH32CAN::AddMessage(const ClassicPack& pack)
 {
-  if (pack.type == Type::ERROR)
-  {
-    return ErrorCode::ARG_ERR;
-  }
+  ASSERT(pack.dlc <= 8u);
 
   if (tx_pool_.Put(pack) != ErrorCode::OK)
   {
@@ -602,18 +598,15 @@ void CH32CAN::ProcessRxInterrupt()
     if (rx_msg_.IDE == CAN_ID_STD)
     {
       p.id = rx_msg_.StdId;
-      p.type = Type::STANDARD;
+      p.format = IDFormat::STANDARD;
     }
     else
     {
       p.id = rx_msg_.ExtId;
-      p.type = Type::EXTENDED;
+      p.format = IDFormat::EXTENDED;
     }
 
-    if (rx_msg_.RTR == CAN_RTR_REMOTE)
-    {
-      p.type = (p.type == Type::STANDARD) ? Type::REMOTE_STANDARD : Type::REMOTE_EXTENDED;
-    }
+    p.remote = (rx_msg_.RTR == CAN_RTR_REMOTE);
 
     p.dlc = (rx_msg_.DLC <= 8u) ? rx_msg_.DLC : 8u;
     std::memcpy(p.data, rx_msg_.Data, 8);
@@ -688,54 +681,54 @@ void CH32CAN::ProcessErrorInterrupt()
   }
 #endif
 
-  ClassicPack p{};
-  p.type = Type::ERROR;
-  p.dlc = 0u;
-
-  CAN::ErrorID eid = CAN::ErrorID::CAN_ERROR_ID_GENERIC;
+  CAN::ErrorEvent event{};
 
   if (BOF)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
   }
   else if (EPV)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
   }
   else if (EWG)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
   }
   else
   {
     switch (LEC)
     {
       case CAN_ErrorCode_StuffErr:
-        eid = CAN::ErrorID::CAN_ERROR_ID_STUFF;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_STUFF;
         break;
       case CAN_ErrorCode_FormErr:
-        eid = CAN::ErrorID::CAN_ERROR_ID_FORM;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_FORM;
         break;
       case CAN_ErrorCode_ACKErr:
-        eid = CAN::ErrorID::CAN_ERROR_ID_ACK;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_ACK;
         break;
       case CAN_ErrorCode_BitRecessiveErr:
-        eid = CAN::ErrorID::CAN_ERROR_ID_BIT1;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_BIT1;
         break;
       case CAN_ErrorCode_BitDominantErr:
-        eid = CAN::ErrorID::CAN_ERROR_ID_BIT0;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_BIT0;
         break;
       case CAN_ErrorCode_CRCErr:
-        eid = CAN::ErrorID::CAN_ERROR_ID_CRC;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_CRC;
         break;
       default:
-        eid = CAN::ErrorID::CAN_ERROR_ID_OTHER;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_OTHER;
         break;
     }
   }
 
-  p.id = static_cast<uint32_t>(eid);
-  OnMessage(p, true);
+  event.state.rx_error_counter = CAN_GetReceiveErrorCounter(instance_);
+  event.state.tx_error_counter = CAN_GetLSBTransmitErrorCounter(instance_);
+  event.state.bus_off = BOF;
+  event.state.error_passive = EPV;
+  event.state.error_warning = EWG;
+  OnError(event, true);
 }
 
 ErrorCode CH32CAN::GetErrorState(CAN::ErrorState& state) const

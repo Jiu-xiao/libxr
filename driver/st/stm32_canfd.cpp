@@ -113,9 +113,8 @@ static inline uint32_t DlcToBytes(uint32_t dlc)
 
 inline void STM32CANFD::BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDef& h)
 {
-  const bool is_ext = (p.type == Type::EXTENDED) || (p.type == Type::REMOTE_EXTENDED);
-  const bool is_rtr =
-      (p.type == Type::REMOTE_STANDARD) || (p.type == Type::REMOTE_EXTENDED);
+  const bool is_ext = (p.format == IDFormat::EXTENDED);
+  const bool is_rtr = p.remote;
 
   h.Identifier = p.id;
   h.IdType = is_ext ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
@@ -124,7 +123,7 @@ inline void STM32CANFD::BuildTxHeader(const ClassicPack& p, FDCAN_TxHeaderTypeDe
   uint32_t bytes = (p.dlc <= 8u) ? p.dlc : 8u;
   h.DataLength = BytesToDlc(bytes);
 
-  h.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
+  h.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
   h.BitRateSwitch = FDCAN_BRS_OFF;
   h.FDFormat = FDCAN_CLASSIC_CAN;
 
@@ -136,16 +135,14 @@ inline void STM32CANFD::BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h)
 {
   h.Identifier = p.id;
 
-  switch (p.type)
+  switch (p.format)
   {
-    case Type::STANDARD:
+    case IDFormat::STANDARD:
       h.IdType = FDCAN_STANDARD_ID;
-      h.TxFrameType = FDCAN_DATA_FRAME;
       break;
 
-    case Type::EXTENDED:
+    case IDFormat::EXTENDED:
       h.IdType = FDCAN_EXTENDED_ID;
-      h.TxFrameType = FDCAN_DATA_FRAME;
       break;
 
     default:
@@ -153,11 +150,12 @@ inline void STM32CANFD::BuildTxHeader(const FDPack& p, FDCAN_TxHeaderTypeDef& h)
       return;
   }
 
+  h.TxFrameType = FDCAN_DATA_FRAME;
   ASSERT(p.len <= 64u);
   h.DataLength = BytesToDlc(p.len);
 
-  h.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-  h.BitRateSwitch = FDCAN_BRS_ON;
+  h.ErrorStateIndicator = p.esi ? FDCAN_ESI_PASSIVE : FDCAN_ESI_ACTIVE;
+  h.BitRateSwitch = p.brs ? FDCAN_BRS_ON : FDCAN_BRS_OFF;
   h.FDFormat = FDCAN_FD_CAN;
 
   h.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
@@ -250,10 +248,7 @@ ErrorCode STM32CANFD::Init(void)
 
 ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
 {
-  if (pack.type == Type::ERROR)
-  {
-    return ErrorCode::ARG_ERR;
-  }
+  ASSERT(pack.dlc <= 8u);
 
   // 先入池；满则先服务一次再 Put 一次
   if (tx_pool_.Put(pack) != ErrorCode::OK)
@@ -621,17 +616,7 @@ uint32_t STM32CANFD::GetClockFreq() const
 
 ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
 {
-  if (pack.type == Type::ERROR)
-  {
-    return ErrorCode::ARG_ERR;
-  }
-
   ASSERT(pack.len <= 64u);
-  if (pack.type != Type::STANDARD && pack.type != Type::EXTENDED)
-  {
-    ASSERT(false);
-    return ErrorCode::FAILED;
-  }
 
   // 先入池；满则先服务一次再 Put 一次
   if (tx_pool_fd_.Put(pack) != ErrorCode::OK)
@@ -655,20 +640,11 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
     if (rx_buff_.header.FDFormat == FDCAN_FD_CAN)
     {
       rx_buff_.pack_fd.id = rx_buff_.header.Identifier;
-      rx_buff_.pack_fd.type =
-          (rx_buff_.header.IdType == FDCAN_EXTENDED_ID) ? Type::EXTENDED : Type::STANDARD;
-
-      if (rx_buff_.header.RxFrameType != FDCAN_DATA_FRAME)
-      {
-        if (rx_buff_.pack_fd.type == Type::STANDARD)
-        {
-          rx_buff_.pack_fd.type = Type::REMOTE_STANDARD;
-        }
-        else
-        {
-          rx_buff_.pack_fd.type = Type::REMOTE_EXTENDED;
-        }
-      }
+      rx_buff_.pack_fd.format = (rx_buff_.header.IdType == FDCAN_EXTENDED_ID)
+                                    ? IDFormat::EXTENDED
+                                    : IDFormat::STANDARD;
+      rx_buff_.pack_fd.brs = (rx_buff_.header.BitRateSwitch != FDCAN_BRS_OFF);
+      rx_buff_.pack_fd.esi = (rx_buff_.header.ErrorStateIndicator == FDCAN_ESI_PASSIVE);
 
       rx_buff_.pack_fd.len = DlcToBytes(rx_buff_.header.DataLength);
 
@@ -677,8 +653,9 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
     else
     {
       rx_buff_.pack.id = rx_buff_.header.Identifier;
-      rx_buff_.pack.type =
-          (rx_buff_.header.IdType == FDCAN_EXTENDED_ID) ? Type::EXTENDED : Type::STANDARD;
+      rx_buff_.pack.format = (rx_buff_.header.IdType == FDCAN_EXTENDED_ID)
+                                 ? IDFormat::EXTENDED
+                                 : IDFormat::STANDARD;
 
       uint32_t bytes = DlcToBytes(rx_buff_.header.DataLength);
       if (bytes > 8u)
@@ -686,21 +663,10 @@ void STM32CANFD::ProcessRxInterrupt(uint32_t fifo)
         bytes = 8u;
       }
 
-      if (rx_buff_.header.RxFrameType != FDCAN_DATA_FRAME)
+      rx_buff_.pack.remote = (rx_buff_.header.RxFrameType != FDCAN_DATA_FRAME);
+      rx_buff_.pack.dlc = static_cast<uint8_t>(bytes);
+      if (!rx_buff_.pack.remote)
       {
-        if (rx_buff_.pack.type == Type::STANDARD)
-        {
-          rx_buff_.pack.type = Type::REMOTE_STANDARD;
-        }
-        else
-        {
-          rx_buff_.pack.type = Type::REMOTE_EXTENDED;
-        }
-        rx_buff_.pack.dlc = static_cast<uint8_t>(bytes);
-      }
-      else
-      {
-        rx_buff_.pack.dlc = static_cast<uint8_t>(bytes);
         if (bytes > 0u)
         {
           Memory::FastCopy(rx_buff_.pack.data, rx_buff_.pack_fd.data, bytes);
@@ -794,6 +760,8 @@ void STM32CANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
 {
   FDCAN_ProtocolStatusTypeDef protocol_status = {};
   HAL_FDCAN_GetProtocolStatus(hcan_, &protocol_status);
+  FDCAN_ErrorCountersTypeDef counters{};
+  (void)HAL_FDCAN_GetErrorCounters(hcan_, &counters);
 
 #ifdef FDCAN_IT_BUS_OFF
 #ifdef FDCAN_CCCR_INIT
@@ -804,23 +772,19 @@ void STM32CANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
 #endif
 #endif
 
-  CAN::ClassicPack pack{};
-  pack.type = CAN::Type::ERROR;
-  pack.dlc = 0;
-
-  CAN::ErrorID eid = CAN::ErrorID::CAN_ERROR_ID_GENERIC;
+  CAN::ErrorEvent event{};
 
   if (protocol_status.BusOff != 0u)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
   }
   else if (protocol_status.ErrorPassive != 0u)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
   }
   else if (protocol_status.Warning != 0u)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
   }
   else
   {
@@ -833,32 +797,36 @@ void STM32CANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
     switch (lec)
     {
       case 0x01u:
-        eid = CAN::ErrorID::CAN_ERROR_ID_STUFF;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_STUFF;
         break;
       case 0x02u:
-        eid = CAN::ErrorID::CAN_ERROR_ID_FORM;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_FORM;
         break;
       case 0x03u:
-        eid = CAN::ErrorID::CAN_ERROR_ID_ACK;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_ACK;
         break;
       case 0x04u:
-        eid = CAN::ErrorID::CAN_ERROR_ID_BIT1;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_BIT1;
         break;
       case 0x05u:
-        eid = CAN::ErrorID::CAN_ERROR_ID_BIT0;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_BIT0;
         break;
       case 0x06u:
-        eid = CAN::ErrorID::CAN_ERROR_ID_CRC;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_CRC;
         break;
       default:
-        eid = CAN::ErrorID::CAN_ERROR_ID_OTHER;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_OTHER;
         break;
     }
   }
 
-  pack.id = static_cast<uint32_t>(eid);
+  event.state.tx_error_counter = counters.TxErrorCnt;
+  event.state.rx_error_counter = counters.RxErrorCnt;
+  event.state.bus_off = (protocol_status.BusOff != 0u);
+  event.state.error_passive = (protocol_status.ErrorPassive != 0u);
+  event.state.error_warning = (protocol_status.Warning != 0u);
 
-  OnMessage(pack, true);
+  OnError(event, true);
 }
 
 ErrorCode STM32CANFD::GetErrorState(CAN::ErrorState& state) const

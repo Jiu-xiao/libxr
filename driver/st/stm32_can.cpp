@@ -401,9 +401,8 @@ uint32_t STM32CAN::GetClockFreq() const
 
 inline void STM32CAN::BuildTxHeader(const ClassicPack& p, CAN_TxHeaderTypeDef& h)
 {
-  const bool IS_EXT = (p.type == Type::EXTENDED) || (p.type == Type::REMOTE_EXTENDED);
-  const bool IS_RTR =
-      (p.type == Type::REMOTE_STANDARD) || (p.type == Type::REMOTE_EXTENDED);
+  const bool IS_EXT = (p.format == IDFormat::EXTENDED);
+  const bool IS_RTR = p.remote;
 
   h.DLC = (p.dlc <= 8u) ? p.dlc : 8u;
   h.IDE = IS_EXT ? CAN_ID_EXT : CAN_ID_STD;
@@ -486,10 +485,7 @@ void STM32CAN::TxService()
 
 ErrorCode STM32CAN::AddMessage(const ClassicPack& pack)
 {
-  if (pack.type == Type::ERROR)
-  {
-    return ErrorCode::ARG_ERR;
-  }
+  ASSERT(pack.dlc <= 8u);
 
   // 池满直接返回 FULL，不做补救
   if (tx_pool_.Put(pack) != ErrorCode::OK)
@@ -510,25 +506,15 @@ void STM32CAN::ProcessRxInterrupt()
     if (rx_buff_.header.IDE == CAN_ID_STD)
     {
       rx_buff_.pack.id = rx_buff_.header.StdId;
-      rx_buff_.pack.type = Type::STANDARD;
+      rx_buff_.pack.format = IDFormat::STANDARD;
     }
     else
     {
       rx_buff_.pack.id = rx_buff_.header.ExtId;
-      rx_buff_.pack.type = Type::EXTENDED;
+      rx_buff_.pack.format = IDFormat::EXTENDED;
     }
 
-    if (rx_buff_.header.RTR == CAN_RTR_REMOTE)
-    {
-      if (rx_buff_.pack.type == Type::STANDARD)
-      {
-        rx_buff_.pack.type = Type::REMOTE_STANDARD;
-      }
-      else
-      {
-        rx_buff_.pack.type = Type::REMOTE_EXTENDED;
-      }
-    }
+    rx_buff_.pack.remote = (rx_buff_.header.RTR == CAN_RTR_REMOTE);
 
     uint8_t dlc = (rx_buff_.header.DLC <= 8u) ? rx_buff_.header.DLC : 8u;
     rx_buff_.pack.dlc = dlc;
@@ -546,23 +532,19 @@ void STM32CAN::ProcessErrorInterrupt()
 
   uint32_t esr = hcan_->Instance->ESR;
 
-  CAN::ClassicPack pack{};
-  pack.type = CAN::Type::ERROR;
-  pack.dlc = 0;
-
-  CAN::ErrorID eid = CAN::ErrorID::CAN_ERROR_ID_GENERIC;
+  CAN::ErrorEvent event{};
 
   if (esr & CAN_ESR_BOFF)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_BUS_OFF;
   }
   else if (esr & CAN_ESR_EPVF)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_ERROR_PASSIVE;
   }
   else if (esr & CAN_ESR_EWGF)
   {
-    eid = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
+    event.id = CAN::ErrorID::CAN_ERROR_ID_ERROR_WARNING;
   }
   else
   {
@@ -571,33 +553,37 @@ void STM32CAN::ProcessErrorInterrupt()
     switch (lec)
     {
       case 0x01:
-        eid = CAN::ErrorID::CAN_ERROR_ID_STUFF;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_STUFF;
         break;
       case 0x02:
-        eid = CAN::ErrorID::CAN_ERROR_ID_FORM;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_FORM;
         break;
       case 0x03:
-        eid = CAN::ErrorID::CAN_ERROR_ID_ACK;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_ACK;
         break;
       case 0x04:
-        eid = CAN::ErrorID::CAN_ERROR_ID_BIT1;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_BIT1;
         break;
       case 0x05:
-        eid = CAN::ErrorID::CAN_ERROR_ID_BIT0;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_BIT0;
         break;
       case 0x06:
-        eid = CAN::ErrorID::CAN_ERROR_ID_CRC;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_CRC;
         break;
       default:
-        eid = CAN::ErrorID::CAN_ERROR_ID_OTHER;
+        event.id = CAN::ErrorID::CAN_ERROR_ID_OTHER;
         break;
     }
   }
 
-  pack.id = static_cast<uint32_t>(eid);
+  event.state.tx_error_counter = static_cast<uint8_t>((esr >> 16) & 0xFFu);
+  event.state.rx_error_counter = static_cast<uint8_t>((esr >> 24) & 0xFFu);
+  event.state.bus_off = (esr & CAN_ESR_BOFF) != 0u;
+  event.state.error_passive = (esr & CAN_ESR_EPVF) != 0u;
+  event.state.error_warning = (esr & CAN_ESR_EWGF) != 0u;
 
-  // 在中断上下文中分发错误帧
-  OnMessage(pack, true);
+  // 在中断上下文中分发错误事件
+  OnError(event, true);
 }
 
 ErrorCode STM32CAN::GetErrorState(CAN::ErrorState& state) const

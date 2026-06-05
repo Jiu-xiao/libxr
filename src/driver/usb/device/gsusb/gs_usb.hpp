@@ -285,12 +285,14 @@ class GsUsbClass : public DeviceClass
         can_rx_ctx_[ch].self = this;
         can_rx_ctx_[ch].ch = ch;
         can_rx_cb_[ch] = LibXR::CAN::Callback::Create(OnCanRxStatic, &can_rx_ctx_[ch]);
+        can_error_cb_[ch] =
+            LibXR::CAN::ErrorCallback::Create(OnCanErrorStatic, &can_rx_ctx_[ch]);
 
-        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::STANDARD);
-        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::EXTENDED);
-        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_STANDARD);
-        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::REMOTE_EXTENDED);
-        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::Type::ERROR);
+        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::IDFormat::STANDARD, false);
+        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::IDFormat::EXTENDED, false);
+        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::IDFormat::STANDARD, true);
+        cans_[ch]->Register(can_rx_cb_[ch], LibXR::CAN::IDFormat::EXTENDED, true);
+        cans_[ch]->RegisterError(can_error_cb_[ch]);
       }
       can_rx_registered_ = true;
     }
@@ -309,8 +311,8 @@ class GsUsbClass : public DeviceClass
         fd_can_rx_cb_[ch] =
             LibXR::FDCAN::CallbackFD::Create(OnFdCanRxStatic, &fd_can_rx_ctx_[ch]);
 
-        fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::STANDARD);
-        fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::Type::EXTENDED);
+        fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::IDFormat::STANDARD);
+        fdcans_[ch]->Register(fd_can_rx_cb_[ch], LibXR::CAN::IDFormat::EXTENDED);
       }
       fd_can_rx_registered_ = true;
     }
@@ -1008,6 +1010,8 @@ class GsUsbClass : public DeviceClass
   CanRxCtx can_rx_ctx_[CanChNum]{};  ///< classic RX 上下文数组 / Classic RX contexts
   LibXR::CAN::Callback
       can_rx_cb_[CanChNum]{};  ///< classic RX 回调数组 / Classic RX callbacks
+  LibXR::CAN::ErrorCallback
+      can_error_cb_[CanChNum]{};  ///< classic 错误回调数组 / Classic error callbacks
 
   bool fd_can_rx_registered_ =
       false;  ///< FD RX 回调是否已注册 / FD RX callback registered
@@ -1026,6 +1030,19 @@ class GsUsbClass : public DeviceClass
       return;
     }
     ctx->self->OnCanRx(in_isr, ctx->ch, pack);
+  }
+
+  /**
+   * @brief classic CAN 错误静态回调入口 / Static entry for classic CAN error callback
+   */
+  static void OnCanErrorStatic(bool in_isr, CanRxCtx* ctx,
+                               const LibXR::CAN::ErrorEvent& event)
+  {
+    if (!ctx || !ctx->self || !ctx->self->inited_)
+    {
+      return;
+    }
+    ctx->self->OnCanError(in_isr, ctx->ch, event);
   }
 
   /**
@@ -1069,16 +1086,6 @@ class GsUsbClass : public DeviceClass
       return;
     }
 
-    if (pack.type == LibXR::CAN::Type::ERROR)
-    {
-      QueueItem qi;
-      if (ErrorPackToHostErrorFrame(ch, pack, qi))
-      {
-        (void)EnqueueFrame(qi, false, in_isr);
-      }
-      return;
-    }
-
     if (!can_enabled_[ch])
     {
       return;
@@ -1087,6 +1094,23 @@ class GsUsbClass : public DeviceClass
     QueueItem qi;
     ClassicPackToQueueItem(pack, ch, qi);
     (void)EnqueueFrame(qi, false, in_isr);
+  }
+
+  /**
+   * @brief classic CAN 错误处理 / Handle classic CAN error event
+   */
+  void OnCanError(bool in_isr, uint8_t ch, const LibXR::CAN::ErrorEvent& event)
+  {
+    if (ch >= can_count_ || !ep_data_in_)
+    {
+      return;
+    }
+
+    QueueItem qi;
+    if (ErrorPackToHostErrorFrame(ch, event, qi))
+    {
+      (void)EnqueueFrame(qi, false, in_isr);
+    }
   }
 
   /**
@@ -1101,16 +1125,6 @@ class GsUsbClass : public DeviceClass
 
     QueueItem qi;
     FdPackToQueueItem(pack, ch, qi);
-
-    const auto& fd_cfg = fd_config_[ch];
-    if (fd_cfg.fd_mode.brs)
-    {
-      qi.hdr.flags |= GsUsb::CAN_FLAG_BRS;
-    }
-    if (fd_cfg.fd_mode.esi)
-    {
-      qi.hdr.flags |= GsUsb::CAN_FLAG_ESI;
-    }
 
     (void)EnqueueFrame(qi, false, in_isr);
   }
@@ -1532,16 +1546,10 @@ class GsUsbClass : public DeviceClass
     const bool IS_EFF = (CID & GsUsb::CAN_EFF_FLAG) != 0;
     const bool IS_RTR = (CID & GsUsb::CAN_RTR_FLAG) != 0;
 
-    if (IS_EFF)
-    {
-      pack.id = CID & GsUsb::CAN_EFF_MASK;
-      pack.type = IS_RTR ? LibXR::CAN::Type::REMOTE_EXTENDED : LibXR::CAN::Type::EXTENDED;
-    }
-    else
-    {
-      pack.id = CID & GsUsb::CAN_SFF_MASK;
-      pack.type = IS_RTR ? LibXR::CAN::Type::REMOTE_STANDARD : LibXR::CAN::Type::STANDARD;
-    }
+    pack.id = IS_EFF ? (CID & GsUsb::CAN_EFF_MASK) : (CID & GsUsb::CAN_SFF_MASK);
+    pack.format = IS_EFF ? LibXR::CAN::IDFormat::EXTENDED
+                         : LibXR::CAN::IDFormat::STANDARD;
+    pack.remote = IS_RTR;
 
     uint8_t dlc = wh.can_dlc;
     if (dlc > 8u)
@@ -1565,17 +1573,13 @@ class GsUsbClass : public DeviceClass
     const uint32_t CID = wh.can_id;
     const bool IS_EFF = (CID & GsUsb::CAN_EFF_FLAG) != 0;
     const bool IS_RTR = (CID & GsUsb::CAN_RTR_FLAG) != 0;
+    ASSERT(IS_RTR == false);
 
-    if (IS_EFF)
-    {
-      pack.id = CID & GsUsb::CAN_EFF_MASK;
-      pack.type = IS_RTR ? LibXR::CAN::Type::REMOTE_EXTENDED : LibXR::CAN::Type::EXTENDED;
-    }
-    else
-    {
-      pack.id = CID & GsUsb::CAN_SFF_MASK;
-      pack.type = IS_RTR ? LibXR::CAN::Type::REMOTE_STANDARD : LibXR::CAN::Type::STANDARD;
-    }
+    pack.id = IS_EFF ? (CID & GsUsb::CAN_EFF_MASK) : (CID & GsUsb::CAN_SFF_MASK);
+    pack.format = IS_EFF ? LibXR::CAN::IDFormat::EXTENDED
+                         : LibXR::CAN::IDFormat::STANDARD;
+    pack.brs = (wh.flags & GsUsb::CAN_FLAG_BRS) != 0;
+    pack.esi = (wh.flags & GsUsb::CAN_FLAG_ESI) != 0;
 
     uint8_t len = DlcToLen(wh.can_dlc);
     if (len > 64)
@@ -1596,24 +1600,12 @@ class GsUsbClass : public DeviceClass
   void ClassicPackToQueueItem(const LibXR::CAN::ClassicPack& pack, uint8_t ch,
                               QueueItem& qi)
   {
-    uint32_t cid = 0;
-    switch (pack.type)
+    uint32_t cid = (pack.format == LibXR::CAN::IDFormat::EXTENDED)
+                       ? ((pack.id & GsUsb::CAN_EFF_MASK) | GsUsb::CAN_EFF_FLAG)
+                       : (pack.id & GsUsb::CAN_SFF_MASK);
+    if (pack.remote)
     {
-      case LibXR::CAN::Type::STANDARD:
-        cid = (pack.id & GsUsb::CAN_SFF_MASK);
-        break;
-      case LibXR::CAN::Type::EXTENDED:
-        cid = (pack.id & GsUsb::CAN_EFF_MASK) | GsUsb::CAN_EFF_FLAG;
-        break;
-      case LibXR::CAN::Type::REMOTE_STANDARD:
-        cid = (pack.id & GsUsb::CAN_SFF_MASK) | GsUsb::CAN_RTR_FLAG;
-        break;
-      case LibXR::CAN::Type::REMOTE_EXTENDED:
-        cid = (pack.id & GsUsb::CAN_EFF_MASK) | GsUsb::CAN_EFF_FLAG | GsUsb::CAN_RTR_FLAG;
-        break;
-      default:
-        cid = pack.id & GsUsb::CAN_SFF_MASK;
-        break;
+      cid |= GsUsb::CAN_RTR_FLAG;
     }
 
     qi.hdr.echo_id = ECHO_ID_RX;
@@ -1639,31 +1631,23 @@ class GsUsbClass : public DeviceClass
    */
   void FdPackToQueueItem(const LibXR::FDCAN::FDPack& pack, uint8_t ch, QueueItem& qi)
   {
-    uint32_t cid = 0;
-    switch (pack.type)
-    {
-      case LibXR::CAN::Type::STANDARD:
-        cid = (pack.id & GsUsb::CAN_SFF_MASK);
-        break;
-      case LibXR::CAN::Type::EXTENDED:
-        cid = (pack.id & GsUsb::CAN_EFF_MASK) | GsUsb::CAN_EFF_FLAG;
-        break;
-      case LibXR::CAN::Type::REMOTE_STANDARD:
-        cid = (pack.id & GsUsb::CAN_SFF_MASK) | GsUsb::CAN_RTR_FLAG;
-        break;
-      case LibXR::CAN::Type::REMOTE_EXTENDED:
-        cid = (pack.id & GsUsb::CAN_EFF_MASK) | GsUsb::CAN_EFF_FLAG | GsUsb::CAN_RTR_FLAG;
-        break;
-      default:
-        cid = pack.id & GsUsb::CAN_SFF_MASK;
-        break;
-    }
+    uint32_t cid = (pack.format == LibXR::CAN::IDFormat::EXTENDED)
+                       ? ((pack.id & GsUsb::CAN_EFF_MASK) | GsUsb::CAN_EFF_FLAG)
+                       : (pack.id & GsUsb::CAN_SFF_MASK);
 
     qi.hdr.echo_id = ECHO_ID_RX;
     qi.hdr.can_id = cid;
     qi.hdr.can_dlc = LenToDlc(pack.len);
     qi.hdr.channel = ch;
     qi.hdr.flags = GsUsb::CAN_FLAG_FD;
+    if (pack.brs)
+    {
+      qi.hdr.flags |= GsUsb::CAN_FLAG_BRS;
+    }
+    if (pack.esi)
+    {
+      qi.hdr.flags |= GsUsb::CAN_FLAG_ESI;
+    }
     qi.hdr.reserved = 0;
 
     qi.is_fd = true;
@@ -1719,15 +1703,15 @@ class GsUsbClass : public DeviceClass
   }
 
   /**
-   * @brief 将 LibXR 错误帧转换为 Host 错误帧（SocketCAN 语义） /
-   *        Convert LibXR error pack to host error frame (SocketCAN semantics)
+   * @brief 将 LibXR 错误事件转换为 Host 错误帧（SocketCAN 语义） /
+   *        Convert one LibXR error event to a host error frame (SocketCAN semantics)
    * @param ch 通道号 / Channel index
-   * @param err_pack 错误帧 / Error pack
+   * @param event 错误事件 / Error event
    * @param qi 输出队列元素 / Output queue item
    * @return true 转换成功并应上报 / Converted and should report
    * @return false 不上报 / Do not report
    */
-  bool ErrorPackToHostErrorFrame(uint8_t ch, const LibXR::CAN::ClassicPack& err_pack,
+  bool ErrorPackToHostErrorFrame(uint8_t ch, const LibXR::CAN::ErrorEvent& event,
                                  QueueItem& qi)
   {
     if (ch >= can_count_ || !cans_[ch])
@@ -1735,10 +1719,6 @@ class GsUsbClass : public DeviceClass
       return false;
     }
     if (!berr_enabled_[ch])
-    {
-      return false;
-    }
-    if (!LibXR::CAN::IsErrorId(err_pack.id))
     {
       return false;
     }
@@ -1763,22 +1743,15 @@ class GsUsbClass : public DeviceClass
 
     constexpr uint32_t LNX_CAN_ERR_CNT = 0x00000200U;
 
-    bool ec_valid = false;
-    uint32_t txerr = 0, rxerr = 0;
-    {
-      LibXR::CAN::ErrorState es;
-      if (cans_[ch]->GetErrorState(es) == ErrorCode::OK)
-      {
-        ec_valid = true;
-        txerr = es.tx_error_counter;
-        rxerr = es.rx_error_counter;
-      }
-    }
+    const uint32_t txerr = event.state.tx_error_counter;
+    const uint32_t rxerr = event.state.rx_error_counter;
+    const bool ec_valid = event.state.bus_off || event.state.error_passive ||
+                          event.state.error_warning || txerr != 0u || rxerr != 0u;
 
     const uint8_t TXERR_U8 = (txerr > 255U) ? 255U : static_cast<uint8_t>(txerr);
     const uint8_t RXERR_U8 = (rxerr > 255U) ? 255U : static_cast<uint8_t>(rxerr);
 
-    const auto EID = LibXR::CAN::ToErrorID(err_pack.id);
+    const auto EID = event.id;
 
     uint32_t cid = GsUsb::CAN_ERR_FLAG;
     std::array<uint8_t, 8> d{};

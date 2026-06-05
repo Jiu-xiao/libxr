@@ -3,22 +3,27 @@
 using namespace LibXR;
 
 template class LibXR::Callback<const CAN::ClassicPack&>;
+template class LibXR::Callback<const CAN::ErrorEvent&>;
 template class LibXR::Callback<const FDCAN::FDPack&>;
 
-void CAN::Register(Callback cb, Type type, FilterMode mode, uint32_t start_id_mask,
-                   uint32_t end_id_mask)
+void CAN::Register(Callback cb, IDFormat format, bool remote, FilterMode mode,
+                   uint32_t start_id_mask, uint32_t end_id_mask)
 {
-  ASSERT(type < Type::TYPE_NUM);
+  auto node = new LockFreeList::Node<Filter>(
+      Filter{mode, start_id_mask, end_id_mask, format, remote, cb});
+  subscriber_list_[ClassicBucketIndex(format, remote)].Add(*node);
+}
 
-  auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-      LockFreeList::Node<Filter>(Filter{mode, start_id_mask, end_id_mask, type, cb});
-  subscriber_list_[static_cast<uint8_t>(type)].Add(*node);
+void CAN::RegisterError(ErrorCallback cb)
+{
+  auto node = new LockFreeList::Node<ErrorSubscriber>(ErrorSubscriber{cb});
+  error_subscriber_list_.Add(*node);
 }
 
 void CAN::OnMessage(const ClassicPack& pack, bool in_isr)
 {
-  ASSERT(pack.type < Type::TYPE_NUM);
-  subscriber_list_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
+  ASSERT(pack.dlc <= 8u);
+  subscriber_list_[ClassicBucketIndex(pack.format, pack.remote)].Foreach<Filter>(
       [&](Filter& node)
       {
         switch (node.mode)
@@ -41,20 +46,28 @@ void CAN::OnMessage(const ClassicPack& pack, bool in_isr)
       });
 }
 
-void FDCAN::Register(CallbackFD cb, Type type, FilterMode mode, uint32_t start_id_mask,
-                     uint32_t end_id_mask)
+void CAN::OnError(const ErrorEvent& event, bool in_isr)
 {
-  ASSERT(type < Type::REMOTE_STANDARD);
+  error_subscriber_list_.Foreach<ErrorSubscriber>(
+      [&](ErrorSubscriber& node)
+      {
+        node.cb.Run(in_isr, event);
+        return ErrorCode::OK;
+      });
+}
 
-  auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-      LockFreeList::Node<Filter>(Filter{mode, start_id_mask, end_id_mask, type, cb});
-  subscriber_list_fd_[static_cast<uint8_t>(type)].Add(*node);
+void FDCAN::Register(CallbackFD cb, IDFormat format, FilterMode mode,
+                     uint32_t start_id_mask, uint32_t end_id_mask)
+{
+  auto node = new LockFreeList::Node<Filter>(
+      Filter{mode, start_id_mask, end_id_mask, format, cb});
+  subscriber_list_fd_[static_cast<size_t>(format)].Add(*node);
 }
 
 void FDCAN::OnMessage(const FDPack& pack, bool in_isr)
 {
-  ASSERT(pack.type < Type::TYPE_NUM);
-  subscriber_list_fd_[static_cast<uint8_t>(pack.type)].Foreach<Filter>(
+  ASSERT(pack.len <= 64u);
+  subscriber_list_fd_[static_cast<size_t>(pack.format)].Foreach<Filter>(
       [&](Filter& node)
       {
         switch (node.mode)
