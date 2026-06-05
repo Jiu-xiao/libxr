@@ -40,12 +40,10 @@ class MSPM0GPIO : public GPIO
 
   static constexpr int GetPortIndex(uint32_t base_addr)
   {
-#ifdef GPIOA_BASE
     if (base_addr == GPIOA_BASE)
     {
       return 0;
     }
-#endif
 #ifdef GPIOB_BASE
     if (base_addr == GPIOB_BASE)
     {

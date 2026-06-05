@@ -18,7 +18,7 @@ MicrosecondTimestamp MSPM0Timebase::_get_microseconds()
 
     auto tick_diff = tick_new - tick_old;
 
-    uint32_t cycles_per_ms = DL_SYSTICK_getPeriod();
+    uint32_t cycles_per_ms = DL_SYSTICK_getPeriod() + 1;
 
     switch (tick_diff)
     {
