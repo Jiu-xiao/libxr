@@ -271,6 +271,30 @@ std::string PointerText(const void* value)
   return std::string(buffer.data(), static_cast<size_t>(size));
 }
 
+template <typename UInt>
+std::string UnsignedBaseText(UInt value, uint8_t base, bool upper_case = false)
+{
+  static_assert(std::is_unsigned_v<UInt>);
+  constexpr char lower_digits[] = "0123456789abcdef";
+  constexpr char upper_digits[] = "0123456789ABCDEF";
+  const char* digits = upper_case ? upper_digits : lower_digits;
+
+  if (value == 0)
+  {
+    return "0";
+  }
+
+  std::string reversed;
+  while (value != 0)
+  {
+    reversed.push_back(
+        digits[static_cast<size_t>(value % static_cast<UInt>(base))]);
+    value /= static_cast<UInt>(base);
+  }
+
+  return std::string(reversed.rbegin(), reversed.rend());
+}
+
 int Fail(const char* message)
 {
   std::cerr << message << '\n';
@@ -324,6 +348,21 @@ void TestPrintfFrontendSemantics()
                                                   5U, 5U, 5U))
   {
     Fail("binary integer semantics mismatch");
+  }
+
+  {
+    unsigned long long max_value = std::numeric_limits<unsigned long long>::max();
+    std::string binary = UnsignedBaseText(max_value, 2);
+    std::string octal = UnsignedBaseText(max_value, 8);
+    std::string hex_lower = UnsignedBaseText(max_value, 16);
+    std::string hex_upper = UnsignedBaseText(max_value, 16, true);
+    std::string expected = binary + "|0b" + binary + "|0" + octal + "|" + hex_lower +
+                           "|" + hex_upper;
+    if (!SamePrintfAsExpected<"%llb|%#llb|%#llo|%llx|%llX">(
+            expected, max_value, max_value, max_value, max_value, max_value))
+    {
+      Fail("64-bit integer base semantics mismatch");
+    }
   }
 
   if (!SameAsSnprintf<"x=%+08d y=%-4s z=%#x %% %.2f">(-12, "ok", 42U, 1.25))
@@ -491,6 +530,21 @@ void TestFormatFrontendSemantics()
   if (!SameFormatAsExpected<"{:#b} {:#B} {:#o}">("0b101 0B101 010", 5U, 5U, 8U))
   {
     Fail("format frontend non-decimal mismatch");
+  }
+
+  {
+    uint64_t max_value = std::numeric_limits<uint64_t>::max();
+    std::string binary = UnsignedBaseText(max_value, 2);
+    std::string octal = UnsignedBaseText(max_value, 8);
+    std::string hex_lower = UnsignedBaseText(max_value, 16);
+    std::string hex_upper = UnsignedBaseText(max_value, 16, true);
+    std::string expected = binary + "|0b" + binary + "|0" + octal + "|" + hex_lower +
+                           "|" + hex_upper;
+    if (!SameFormatAsExpected<"{:b}|{:#b}|{:#o}|{:x}|{:X}">(
+            expected, max_value, max_value, max_value, max_value, max_value))
+    {
+      Fail("format frontend 64-bit base mismatch");
+    }
   }
 
   if (!SameFormatAsExpected<"[{:.3s}] [{:_>6s}] [{:*^7s}]">("[abc] [___abc] [**abc**]",

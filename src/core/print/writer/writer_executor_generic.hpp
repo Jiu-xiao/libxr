@@ -26,7 +26,7 @@ template <OutputSink Sink, FormatProfile Profile>
 template <FormatType Type, std::unsigned_integral UInt>
 ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsignedField()
 {
-  return WriteUnsigned(Type, codes_.ReadSpec(), args_.Read<UInt>());
+  return WriteUnsigned<Type>(codes_.ReadSpec(), args_.Read<UInt>());
 }
 
 /**

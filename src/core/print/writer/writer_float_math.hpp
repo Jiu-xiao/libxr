@@ -222,10 +222,10 @@ inline bool Writer::AppendExponentText(char* out, size_t& out_size, int exponent
     return false;
   }
 
-  char digits[16];
+  char digits[UnsignedDigitCapacity<unsigned int, 10>()];
   unsigned int magnitude =
       static_cast<unsigned int>(exponent < 0 ? -exponent : exponent);
-  size_t digit_count = AppendUnsigned(digits, magnitude, 10, false);
+  size_t digit_count = AppendUnsigned<10>(digits, magnitude);
   if (digit_count < 2 &&
       !AppendBufferChar(out, float_buffer_capacity, out_size, '0'))
   {
