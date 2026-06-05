@@ -104,7 +104,8 @@ class Topic
   template <typename Data>
   class PackedData;
   static constexpr uint8_t PACKET_PREFIX = 0x5A;  ///< 打包消息前缀字节。Packed-message prefix byte.
-  static constexpr size_t PACK_BASE_SIZE = 18;  ///< 固定非 payload 开销：17 字节头 + 1 字节尾 CRC8。Fixed non-payload overhead: 17-byte header plus 1-byte trailing CRC8.
+  static constexpr uint8_t PACKET_VERSION = 0x01;  ///< 打包消息协议版本。Packed-message protocol version.
+  static constexpr size_t PACK_BASE_SIZE = 17;  ///< 固定非 payload 开销：16 字节头 + 1 字节尾 CRC8。Fixed non-payload overhead: 16-byte header plus 1-byte trailing CRC8.
 #endif
 
   /**

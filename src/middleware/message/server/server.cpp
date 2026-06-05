@@ -111,6 +111,12 @@ bool Topic::Server::ReadHeader()
   }
 
   auto* header = reinterpret_cast<PackedDataHeader*>(parse_buff_.addr_);
+  if (header->version != PACKET_VERSION)
+  {
+    ResetParser();
+    return true;
+  }
+
   auto* node = topic_map_.Search<TopicHandle>(header->topic_name_crc32);
   if (node == nullptr)
   {
@@ -177,8 +183,6 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
   }
   else if (data_len_ < target_size)
   {
-    publish_addr = parse_buff_.addr_;
-    LibXR::Memory::FastMove(publish_addr, payload_addr, data_len_);
     std::memset(reinterpret_cast<uint8_t*>(publish_addr) + data_len_, 0,
                 target_size - data_len_);
   }

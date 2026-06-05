@@ -22,6 +22,7 @@ uint32_t Topic::PackedDataHeader::GetDataLen() const
 void Topic::PackedDataHeader::SetTimestamp(MicrosecondTimestamp timestamp)
 {
   uint64_t value = static_cast<uint64_t>(timestamp);
+  ASSERT((value >> 48U) == 0);
   for (size_t i = 0; i < sizeof(timestamp_us_raw); i++)
   {
     timestamp_us_raw[i] = static_cast<uint8_t>(value >> (i * 8U));
@@ -49,6 +50,7 @@ void Topic::PackBytes(uint32_t topic_name_crc32, RawData buffer,
   LibXR::Memory::FastCopy(&pack->raw.data_, data.addr_, data.size_);
 
   pack->raw.header_.prefix = PACKET_PREFIX;
+  pack->raw.header_.version = PACKET_VERSION;
   pack->raw.header_.topic_name_crc32 = topic_name_crc32;
   pack->raw.header_.SetDataLen(data.size_);
   pack->raw.header_.SetTimestamp(timestamp);
