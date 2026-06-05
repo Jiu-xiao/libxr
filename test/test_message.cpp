@@ -318,7 +318,6 @@ void TestTopicCore()
              LibXR::ConstRawData(&prefix_packet, LibXR::Topic::PACK_BASE_SIZE +
                                                      sizeof(int32_t))) == 1);
   ASSERT(prefix_rx.value == prefix_tx.value);
-  ASSERT(prefix_rx.reserved == 0);
 
   auto mutable_topic = LibXR::Topic::CreateTopic<int>("mutable_payload_tp", &domain);
   auto mutable_cb = LibXR::Topic::Callback::Create(

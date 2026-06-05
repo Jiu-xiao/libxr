@@ -2,8 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-
 #include "../packet/packet.hpp"
 #include "crc.hpp"
 #include "libxr_mem.hpp"
@@ -177,14 +175,7 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
     else
     {
       LibXR::Memory::FastMove(publish_addr, payload_addr, data_len_);
-      std::memset(reinterpret_cast<uint8_t*>(publish_addr) + data_len_, 0,
-                  target_size - data_len_);
     }
-  }
-  else if (data_len_ < target_size)
-  {
-    std::memset(reinterpret_cast<uint8_t*>(publish_addr) + data_len_, 0,
-                target_size - data_len_);
   }
 
   auto topic = Topic(current_topic_);

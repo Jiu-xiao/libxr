@@ -17,12 +17,13 @@ namespace LibXR
  *       itself; it relies only on each registered topic's `payload_size`,
  *       `payload_alignment`, and name CRC key.
  * @note 当前兼容规则：
- *       收到的 packet payload 短于 topic 固定大小时，后半段补零；
+ *       收到的 packet payload 短于 topic 固定大小时，仅保证前缀部分有效，后半段保持未定义；
  *       长于 topic 固定大小时，仅保留前缀部分，其余字节直接截断。
  *       Current compatibility rule:
  *       when an incoming packet payload is shorter than the topic's fixed size,
- *       the remaining tail is zero-filled; when it is longer, only the prefix
- *       matching the topic size is kept and the rest is truncated.
+ *       only the leading prefix is guaranteed valid and the remaining tail stays
+ *       unspecified; when it is longer, only the prefix matching the topic size
+ *       is kept and the rest is truncated.
  */
 class Topic::Server
 {
