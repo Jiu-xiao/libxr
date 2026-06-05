@@ -17,7 +17,12 @@ Topic::Server::Server(size_t buffer_length)
 {
   ASSERT(buffer_length > PACK_BASE_SIZE);
   parse_buff_.size_ = buffer_length;
-  AllocateParseBuffer(alignof(std::max_align_t));
+  const size_t alloc_size = parse_buff_.size_ + LibXR::CACHE_LINE_SIZE - 1;
+  parse_buff_storage_ = new uint8_t[alloc_size];
+  const uintptr_t addr = reinterpret_cast<uintptr_t>(parse_buff_storage_);
+  const uintptr_t aligned_addr =
+      (addr + LibXR::CACHE_LINE_SIZE - 1) & ~(LibXR::CACHE_LINE_SIZE - 1);
+  parse_buff_.addr_ = reinterpret_cast<void*>(aligned_addr);
 }
 
 void Topic::Server::Register(TopicHandle topic)
@@ -25,13 +30,7 @@ void Topic::Server::Register(TopicHandle topic)
   ASSERT(topic != nullptr);
   ASSERT(topic->data_.payload_size != 0);
   ASSERT(topic->data_.payload_alignment != 0);
-
-  if (topic->data_.payload_alignment > parse_buff_alignment_)
-  {
-    ASSERT(status_ == Status::WAIT_START);
-    ASSERT(data_len_ == 0);
-    AllocateParseBuffer(topic->data_.payload_alignment);
-  }
+  ASSERT(topic->data_.payload_alignment <= LibXR::CACHE_LINE_SIZE);
 
   ASSERT(topic->data_.payload_size + PACK_BASE_SIZE <= parse_buff_.size_);
 
@@ -195,20 +194,4 @@ void Topic::Server::ResetParser()
   data_len_ = 0;
   current_topic_ = nullptr;
   current_timestamp_ = MicrosecondTimestamp();
-}
-
-void Topic::Server::AllocateParseBuffer(size_t alignment)
-{
-  ASSERT(alignment != 0);
-  ASSERT((alignment & (alignment - 1)) == 0);
-
-  const size_t alloc_size = parse_buff_.size_ + alignment - 1;
-  auto* storage = new uint8_t[alloc_size];
-  const uintptr_t addr = reinterpret_cast<uintptr_t>(storage);
-  const uintptr_t aligned_addr = (addr + alignment - 1) & ~(alignment - 1);
-
-  delete[] parse_buff_storage_;
-  parse_buff_storage_ = storage;
-  parse_buff_alignment_ = alignment;
-  parse_buff_.addr_ = reinterpret_cast<void*>(aligned_addr);
 }

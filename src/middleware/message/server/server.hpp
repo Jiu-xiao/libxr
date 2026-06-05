@@ -55,11 +55,11 @@ class Topic::Server
    *       暂存缓冲区。
    *       Registration asserts that the topic's `payload_size + PACK_BASE_SIZE`
    *       fits in this server's staging buffer.
-   * @note 若新注册 topic 需要更高 payload 对齐，server 会在注册时重配内部暂存缓冲区，
-   *       以满足当前已注册 topic 里的最高对齐要求。
-   *       If the newly registered topic requires a higher payload alignment, the
-   *       server reallocates its internal staging buffer during registration to
-   *       satisfy the maximum alignment required by all registered topics.
+   * @note server 的内部暂存缓冲区在构造时固定按 `CACHE_LINE_SIZE` 对齐分配；注册时还会
+   *       断言该 topic 的 `payload_alignment <= CACHE_LINE_SIZE`。
+   *       The server's internal staging buffer is allocated once at
+   *       `CACHE_LINE_SIZE` alignment during construction; registration also
+   *       asserts that the topic's `payload_alignment <= CACHE_LINE_SIZE`.
    */
   void Register(TopicHandle topic);
 
@@ -132,20 +132,12 @@ class Topic::Server
    */
   void ResetParser();
 
-  /**
-   * @brief 分配或重配对齐后的暂存缓冲区 / Allocate or reallocate the aligned staging
-   *        buffer
-   * @param alignment 需要满足的目标对齐 / Target alignment to satisfy
-   */
-  void AllocateParseBuffer(size_t alignment);
-
   Status status_ = Status::WAIT_START;  ///< 当前 parser 阶段。Current parser stage.
   uint32_t data_len_ = 0;               ///< 当前包头声明的 payload 长度。Payload length declared by the current header.
   RBTree<uint32_t> topic_map_;          ///< 从 topic 名称 CRC32 到 topic 句柄的映射。Map from topic-name CRC32 to topic handle.
   BaseQueue queue_;                     ///< 输入字节 FIFO。Input byte FIFO.
   RawData parse_buff_;                  ///< 当前包头和 payload 的暂存缓冲区。Staging buffer holding the current header and payload.
   uint8_t* parse_buff_storage_ = nullptr;  ///< 暂存缓冲区原始分配块。Raw allocation backing the staging buffer.
-  size_t parse_buff_alignment_ = alignof(std::max_align_t);  ///< 暂存缓冲区当前满足的对齐要求。Current satisfied alignment of the staging buffer.
   TopicHandle current_topic_ = nullptr;  ///< 当前包命中的目标 topic。Target topic matched by the current packet.
   MicrosecondTimestamp current_timestamp_;  ///< 当前包头里的时间戳。Timestamp carried by the current packet header.
 };
