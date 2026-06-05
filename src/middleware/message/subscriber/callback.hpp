@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base.hpp"
+#include "../topic.hpp"
 
 namespace LibXR
 {
@@ -75,77 +75,91 @@ class Topic::Callback
   template <typename T>
   using RemoveCVRef = std::remove_cv_t<std::remove_reference_t<T>>;
 
-  template <typename T>
-  static constexpr bool IS_RAW_DATA =
-      std::same_as<RemoveCVRef<T>, RawData> ||
-      std::same_as<RemoveCVRef<T>, ConstRawData>;  ///< 是否为原始数据视图参数。Whether the argument is a raw-data view.
-
+  /**
+   * @brief 是否为带时间戳的类型化消息视图参数 / Whether one callback payload argument
+   *        is a timestamped typed message view
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
   template <typename T>
   static constexpr bool IS_MESSAGE_VIEW =
       MessageViewTraits<RemoveCVRef<T>>::VALUE;  ///< 是否为带时间戳的类型化消息视图参数。Whether the argument is a timestamped typed message view.
 
+  /**
+   * @brief 是否把 payload 直接当成一个对象接收 / Whether one callback payload argument
+   *        receives the payload directly as one object
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
   template <typename T>
   static constexpr bool IS_TYPED_DATA =
-      !IS_RAW_DATA<T> && !IS_MESSAGE_VIEW<T> &&
+      !IS_MESSAGE_VIEW<T> &&
       TopicPayload<RemoveCVRef<T>>;  ///< 是否把负载直接当成一个对象来接收。Whether the payload is received directly as one typed object.
 
+  /**
+   * @brief 是否是回调接口允许的 payload 参数写法 / Whether one payload argument form is
+   *        accepted by this callback interface
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
   template <typename T>
   static constexpr bool IS_CALLBACK_PAYLOAD =
-      IS_RAW_DATA<T> || IS_MESSAGE_VIEW<T> ||
+      IS_MESSAGE_VIEW<T> ||
       IS_TYPED_DATA<T>;  ///< 是否是这个回调接口允许的负载参数写法。Whether this callback interface accepts this payload argument form.
+
+  /**
+   * @brief 是否错误地使用了可变 `MessageView<T>&` / Whether one payload argument is an
+   *        invalid mutable `MessageView<T>&`
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
+  template <typename T>
+  static constexpr bool IS_MUTABLE_MESSAGE_VIEW_REF =
+      IS_MESSAGE_VIEW<T> && std::is_lvalue_reference_v<T> &&
+      !std::is_const_v<std::remove_reference_t<T>>;
 
   /**
    * @struct BlockHeader
    * @brief 回调句柄真正指向的那块数据的公共头 / Common header of the data block actually
    *        pointed to by one callback handle
    *
-   * 一个 `Callback` 最终只保存一个 `BlockHeader*`。真正的回调函数、绑定参数和负载大小
-   * 都放在派生块里；发布路径先看 `payload_size` 做尺寸检查，再通过 `run` 调到那块具体
-   * 数据。
+   * 一个 `Callback` 最终只保存一个 `BlockHeader*`。真正的回调函数、绑定参数和负载类型
+   * 都放在派生块里；发布路径先看 `payload_type_id` 做契约检查，再通过 `run`
+   * 调到那块具体数据。
    * One `Callback` finally stores only one `BlockHeader*`. The real callback
-   * function, bound argument, and expected payload size live in derived blocks;
-   * the publish path first checks `payload_size` and then jumps through `run`
+   * function, bound argument, and expected payload type live in derived blocks;
+   * the publish path first checks `payload_type_id` and then jumps through `run`
    * into that concrete block.
    */
   struct BlockHeader
   {
     using RunFun = void (*)(const BlockHeader*, bool, MicrosecondTimestamp,
-                            RawData&);  ///< 所有具体回调块共用的执行入口。Shared execution entry used by all concrete callback blocks.
+                            void*);  ///< 所有具体回调块共用的执行入口。Shared execution entry used by all concrete callback blocks.
 
     RunFun run = nullptr;  ///< 当前块的执行函数。Execution function of the current block.
-    uint32_t payload_size = 0;  ///< 该回调期望的主题负载字节数。Expected topic payload size in bytes.
+    TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识。Expected topic payload type identifier.
   };
 
   /**
-   * @brief 计算回调期望的主题负载大小 / Compute the topic payload size expected by the
-   *        callback
-   * @tparam PayloadArg 负载参数类型 / Payload argument type
-   * @return 该回调负载期望的字节数 / Returns the payload byte size expected by the callback
-   *
-   * @note `RawData` 和 `ConstRawData` 直接接收运行时长度的数据视图，因此这里返回 `0`
-   *       表示“不做编译期固定长度约束”；其余类型都需要和主题负载大小匹配 /
-   *       `RawData` and `ConstRawData` accept a runtime-sized data view directly,
-   *       so this returns `0` to mean "no fixed compile-time payload length";
-   *       all other argument forms must match the topic payload size
+   * @brief 取回调 payload 参数对应的精确类型标识 / Get the exact type ID expected by
+   *        one callback payload argument
+   * @tparam PayloadArg 回调 payload 参数类型 / Callback payload argument type
+   * @return 对应的精确类型标识 / Exact type ID expected by this callback payload argument
    */
   template <typename PayloadArg>
-  static consteval uint32_t PayloadSize()
+  static TypeID::ID PayloadTypeID()
   {
-    if constexpr (IS_RAW_DATA<PayloadArg>)
-    {
-      return 0;
-    }
-    else if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
+    static_assert(!IS_MUTABLE_MESSAGE_VIEW_REF<PayloadArg>,
+                  "LibXR::Topic::Callback does not accept MessageView<T>&; "
+                  "use MessageView<T> or const MessageView<T>& instead.");
+
+    if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
-      return sizeof(typename View::DataType);
+      return TypeID::GetID<typename View::DataType>();
     }
     else
     {
       static_assert(IS_TYPED_DATA<PayloadArg>,
-                    "LibXR::Topic::Callback payload must be RawData, ConstRawData, "
-                    "Topic::MessageView<T>, T, T&, or const T&.");
-      return sizeof(RemoveCVRef<PayloadArg>);
+                    "LibXR::Topic::Callback payload must be Topic::MessageView<T>, "
+                    "T, T&, or const T&.");
+      return TypeID::GetID<RemoveCVRef<PayloadArg>>();
     }
   }
 
@@ -160,32 +174,24 @@ class Topic::Callback
    * @param arg 绑定参数 / Bound argument
    * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
    * @param timestamp 当前消息时间戳 / Current message timestamp
-   * @param data 当前消息数据视图 / Current message payload view
+   * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+   *        object
    */
   template <typename Function, typename BoundArg, typename PayloadArg>
   static void InvokePayload(Function fun, BoundArg& arg, bool in_isr,
-                            MicrosecondTimestamp timestamp, RawData& data)
+                            MicrosecondTimestamp timestamp, void* payload_addr)
   {
-    if constexpr (std::same_as<RemoveCVRef<PayloadArg>, RawData>)
-    {
-      fun(in_isr, arg, data);
-    }
-    else if constexpr (std::same_as<RemoveCVRef<PayloadArg>, ConstRawData>)
-    {
-      ConstRawData const_data(data);
-      fun(in_isr, arg, const_data);
-    }
-    else if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
+    if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
     {
       using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
       using Data = typename View::DataType;
-      MessageView<Data> message{timestamp, *reinterpret_cast<Data*>(data.addr_)};
-      fun(in_isr, arg, message);
+      fun(in_isr, arg,
+          MessageView<Data>{timestamp, reinterpret_cast<Data*>(payload_addr)});
     }
     else
     {
       using Data = RemoveCVRef<PayloadArg>;
-      fun(in_isr, arg, *reinterpret_cast<Data*>(data.addr_));
+      fun(in_isr, arg, *reinterpret_cast<Data*>(payload_addr));
     }
   }
 
@@ -206,7 +212,9 @@ class Topic::Callback
      * @param arg 绑定到回调中的参数 / Argument bound into the callback
      */
     PayloadOnlyBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadSize<PayloadArg>()}, fun_(fun), arg_(std::move(arg))
+        : BlockHeader{&Run, PayloadTypeID<PayloadArg>()},
+          fun_(fun),
+          arg_(std::move(arg))
     {
     }
 
@@ -216,14 +224,16 @@ class Topic::Callback
      * @param header 回调块头指针 / Callback block header pointer
      * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
      * @param timestamp 当前消息时间戳 / Current message timestamp
-     * @param data 当前消息数据视图 / Current message payload view
+     * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+     *        object
      */
     static void Run(const BlockHeader* header, bool in_isr,
-                    MicrosecondTimestamp timestamp, RawData& data)
+                    MicrosecondTimestamp timestamp, void* payload_addr)
     {
       auto* block = static_cast<const PayloadOnlyBlock*>(header);
       InvokePayload<Function, BoundArg, PayloadArg>(
-          block->fun_, const_cast<BoundArg&>(block->arg_), in_isr, timestamp, data);
+          block->fun_, const_cast<BoundArg&>(block->arg_), in_isr, timestamp,
+          payload_addr);
     }
 
     Function fun_;  ///< 目标回调函数。Target callback function.
@@ -248,7 +258,9 @@ class Topic::Callback
      * @param arg 绑定到回调中的参数 / Argument bound into the callback
      */
     TimestampPayloadBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadSize<PayloadArg>()}, fun_(fun), arg_(std::move(arg))
+        : BlockHeader{&Run, PayloadTypeID<PayloadArg>()},
+          fun_(fun),
+          arg_(std::move(arg))
     {
     }
 
@@ -258,32 +270,26 @@ class Topic::Callback
      * @param header 回调块头指针 / Callback block header pointer
      * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
      * @param timestamp 当前消息时间戳 / Current message timestamp
-     * @param data 当前消息数据视图 / Current message payload view
+     * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+     *        object
      */
     static void Run(const BlockHeader* header, bool in_isr,
-                    MicrosecondTimestamp timestamp, RawData& data)
+                    MicrosecondTimestamp timestamp, void* payload_addr)
     {
       auto* block = static_cast<const TimestampPayloadBlock*>(header);
-      if constexpr (std::same_as<RemoveCVRef<PayloadArg>, RawData>)
-      {
-        block->fun_(in_isr, block->arg_, timestamp, data);
-      }
-      else if constexpr (std::same_as<RemoveCVRef<PayloadArg>, ConstRawData>)
-      {
-        ConstRawData const_data(data);
-        block->fun_(in_isr, block->arg_, timestamp, const_data);
-      }
-      else if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
+      if constexpr (IS_MESSAGE_VIEW<PayloadArg>)
       {
         using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
         using Data = typename View::DataType;
-        MessageView<Data> message{timestamp, *reinterpret_cast<Data*>(data.addr_)};
-        block->fun_(in_isr, block->arg_, timestamp, message);
+        block->fun_(
+            in_isr, block->arg_, timestamp,
+            MessageView<Data>{timestamp, reinterpret_cast<Data*>(payload_addr)});
       }
       else
       {
         using Data = RemoveCVRef<PayloadArg>;
-        block->fun_(in_isr, block->arg_, timestamp, *reinterpret_cast<Data*>(data.addr_));
+        block->fun_(in_isr, block->arg_, timestamp,
+                    *reinterpret_cast<Data*>(payload_addr));
       }
     }
 
@@ -376,13 +382,21 @@ class Topic::Callback
    * @param header 空块头指针 / Empty block header pointer
    * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
    * @param timestamp 当前消息时间戳 / Current message timestamp
-   * @param data 当前消息数据视图 / Current message payload view
+   * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+   *        object
    */
-  static void EmptyRun(const BlockHeader*, bool, MicrosecondTimestamp, RawData&) {}
+  static void EmptyRun(const BlockHeader* header, bool in_isr,
+                       MicrosecondTimestamp timestamp, void* payload_addr)
+  {
+    UNUSED(header);
+    UNUSED(in_isr);
+    UNUSED(timestamp);
+    UNUSED(payload_addr);
+  }
 
   inline static BlockHeader empty_block_{
       &EmptyRun,
-      0};  ///< 空回调句柄共用的静态空执行块。Shared static empty execution block used by empty callback handles.
+      nullptr};  ///< 空回调句柄共用的静态空执行块。Shared static empty execution block used by empty callback handles.
 
  public:
   /**
@@ -436,18 +450,20 @@ class Topic::Callback
    * @brief 执行回调 / Run the callback
    * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
    * @param timestamp 当前消息时间戳 / Current message timestamp
-   * @param data 当前消息数据视图 / Current message payload view
+   * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+   *        object
    */
-  void Run(bool in_isr, MicrosecondTimestamp timestamp, RawData& data) const
+  void Run(bool in_isr, MicrosecondTimestamp timestamp, void* payload_addr) const
   {
-    block_->run(block_, in_isr, timestamp, data);
+    block_->run(block_, in_isr, timestamp, payload_addr);
   }
 
   /**
-   * @brief 获取该回调期望的负载大小 / Get the payload size expected by the callback
-   * @return 该回调期望的负载大小 / Returns the payload size expected by the callback
+   * @brief 读取这个回调句柄期望的 payload 类型标识 / Read the payload type ID expected
+   *        by this callback handle
+   * @return payload 类型标识 / Payload type ID
    */
-  uint32_t PayloadSize() const { return block_->payload_size; }
+  TypeID::ID PayloadTypeID() const { return block_->payload_type_id; }
 
  private:
   /**
@@ -489,17 +505,7 @@ struct Topic::CallbackBlock : public Topic::SuberBlock
  */
 inline void Topic::RegisterCallback(Callback& cb)
 {
-  if (cb.PayloadSize() != 0)
-  {
-    if (block_->data_.check_length)
-    {
-      ASSERT(block_->data_.max_length == cb.PayloadSize());
-    }
-    else
-    {
-      ASSERT(block_->data_.max_length <= cb.PayloadSize());
-    }
-  }
+  ASSERT(block_->data_.payload_type_id == cb.PayloadTypeID());
 
   auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
       LockFreeList::Node<CallbackBlock>(cb);

@@ -212,6 +212,241 @@ void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
   }
 }
 
+void LibXR::Memory::FastMove(void* dst, const void* src, size_t size)
+{
+  if (size == 0 || dst == src)
+  {
+    return;
+  }
+
+  auto* d = static_cast<uint8_t*>(dst);
+  const auto* s = static_cast<const uint8_t*>(src);
+
+  if (!(d < s + size && s < d + size))
+  {
+    FastCopy(dst, src, size);
+    return;
+  }
+
+  if (d > s)
+  {
+    // Backward-overlap move: consume from the tail first so we never overwrite
+    // bytes that still need to be read from the source window.
+    uintptr_t d_end_offset =
+        reinterpret_cast<uintptr_t>(d + size) & (LibXR::ALIGN_SIZE - 1);
+    uintptr_t s_end_offset =
+        reinterpret_cast<uintptr_t>(s + size) & (LibXR::ALIGN_SIZE - 1);
+
+    d += size;
+    s += size;
+
+    if (d_end_offset == s_end_offset)
+    {
+      // Once both ends share the same alignment, we can peel the unaligned tail
+      // bytes and then switch to wide backward copies safely.
+      if (d_end_offset)
+      {
+        size_t tail = d_end_offset;
+        if (tail > size)
+        {
+          tail = size;
+        }
+        while (tail--)
+        {
+          *--d = *--s;
+          --size;
+        }
+      }
+
+      if constexpr (LibXR::ALIGN_SIZE == 8)
+      {
+        auto* dw = reinterpret_cast<uint64_t*>(d);
+        auto* sw = reinterpret_cast<const uint64_t*>(s);
+
+        while (size >= 64)
+        {
+          uint64_t a0 = sw[-1];
+          uint64_t a1 = sw[-2];
+          uint64_t a2 = sw[-3];
+          uint64_t a3 = sw[-4];
+          uint64_t a4 = sw[-5];
+          uint64_t a5 = sw[-6];
+          uint64_t a6 = sw[-7];
+          uint64_t a7 = sw[-8];
+          dw[-1] = a0;
+          dw[-2] = a1;
+          dw[-3] = a2;
+          dw[-4] = a3;
+          dw[-5] = a4;
+          dw[-6] = a5;
+          dw[-7] = a6;
+          dw[-8] = a7;
+          dw -= 8;
+          sw -= 8;
+          size -= 64;
+        }
+        while (size >= 8)
+        {
+          uint64_t a = *--sw;
+          *--dw = a;
+          size -= 8;
+        }
+
+        d = reinterpret_cast<uint8_t*>(dw);
+        s = reinterpret_cast<const uint8_t*>(sw);
+      }
+      else
+      {
+        auto* dw = reinterpret_cast<uint32_t*>(d);
+        auto* sw = reinterpret_cast<const uint32_t*>(s);
+
+        while (size >= 32)
+        {
+          uint32_t a0 = sw[-1];
+          uint32_t a1 = sw[-2];
+          uint32_t a2 = sw[-3];
+          uint32_t a3 = sw[-4];
+          uint32_t a4 = sw[-5];
+          uint32_t a5 = sw[-6];
+          uint32_t a6 = sw[-7];
+          uint32_t a7 = sw[-8];
+          dw[-1] = a0;
+          dw[-2] = a1;
+          dw[-3] = a2;
+          dw[-4] = a3;
+          dw[-5] = a4;
+          dw[-6] = a5;
+          dw[-7] = a6;
+          dw[-8] = a7;
+          dw -= 8;
+          sw -= 8;
+          size -= 32;
+        }
+        while (size >= 4)
+        {
+          uint32_t a = *--sw;
+          *--dw = a;
+          size -= 4;
+        }
+
+        d = reinterpret_cast<uint8_t*>(dw);
+        s = reinterpret_cast<const uint8_t*>(sw);
+      }
+    }
+
+    while (size--)
+    {
+      *--d = *--s;
+    }
+    return;
+  }
+
+  // Forward-overlap move: valid only when destination starts before source, so
+  // consuming from the head cannot destroy unread source bytes.
+  uintptr_t d_offset = reinterpret_cast<uintptr_t>(d) & (LibXR::ALIGN_SIZE - 1);
+  uintptr_t s_offset = reinterpret_cast<uintptr_t>(s) & (LibXR::ALIGN_SIZE - 1);
+
+  if (d_offset == s_offset)
+  {
+    // Same-alignment forward overlap can reuse the same "align head, then burst"
+    // strategy as FastCopy because source bytes are always read before they are
+    // overwritten.
+    if (d_offset)
+    {
+      size_t head = LibXR::ALIGN_SIZE - d_offset;
+      if (head > size)
+      {
+        head = size;
+      }
+      while (head--)
+      {
+        *d++ = *s++;
+        --size;
+      }
+    }
+
+    if constexpr (LibXR::ALIGN_SIZE == 8)
+    {
+      auto* dw = reinterpret_cast<uint64_t*>(d);
+      auto* sw = reinterpret_cast<const uint64_t*>(s);
+
+      while (size >= 64)
+      {
+        uint64_t a0 = sw[0];
+        uint64_t a1 = sw[1];
+        uint64_t a2 = sw[2];
+        uint64_t a3 = sw[3];
+        uint64_t a4 = sw[4];
+        uint64_t a5 = sw[5];
+        uint64_t a6 = sw[6];
+        uint64_t a7 = sw[7];
+        dw[0] = a0;
+        dw[1] = a1;
+        dw[2] = a2;
+        dw[3] = a3;
+        dw[4] = a4;
+        dw[5] = a5;
+        dw[6] = a6;
+        dw[7] = a7;
+        dw += 8;
+        sw += 8;
+        size -= 64;
+      }
+      while (size >= 8)
+      {
+        uint64_t a = *sw++;
+        *dw++ = a;
+        size -= 8;
+      }
+
+      d = reinterpret_cast<uint8_t*>(dw);
+      s = reinterpret_cast<const uint8_t*>(sw);
+    }
+    else
+    {
+      auto* dw = reinterpret_cast<uint32_t*>(d);
+      auto* sw = reinterpret_cast<const uint32_t*>(s);
+
+      while (size >= 32)
+      {
+        uint32_t a0 = sw[0];
+        uint32_t a1 = sw[1];
+        uint32_t a2 = sw[2];
+        uint32_t a3 = sw[3];
+        uint32_t a4 = sw[4];
+        uint32_t a5 = sw[5];
+        uint32_t a6 = sw[6];
+        uint32_t a7 = sw[7];
+        dw[0] = a0;
+        dw[1] = a1;
+        dw[2] = a2;
+        dw[3] = a3;
+        dw[4] = a4;
+        dw[5] = a5;
+        dw[6] = a6;
+        dw[7] = a7;
+        dw += 8;
+        sw += 8;
+        size -= 32;
+      }
+      while (size >= 4)
+      {
+        uint32_t a = *sw++;
+        *dw++ = a;
+        size -= 4;
+      }
+
+      d = reinterpret_cast<uint8_t*>(dw);
+      s = reinterpret_cast<const uint8_t*>(sw);
+    }
+  }
+
+  while (size--)
+  {
+    *d++ = *s++;
+  }
+}
+
 void LibXR::Memory::FastSet(void* dst, uint8_t value, size_t size)
 {
   if (size == 0)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base.hpp"
+#include "../topic.hpp"
 
 namespace LibXR
 {
@@ -11,7 +11,7 @@ namespace LibXR
 struct Topic::QueueBlock : public Topic::SuberBlock
 {
   void* queue;  ///< 指向订阅队列实例的擦除指针。Erased pointer to the subscribed queue instance.
-  void (*fun)(MicrosecondTimestamp, RawData,
+  void (*fun)(MicrosecondTimestamp, void*,
               QueueBlock&);  ///< 把一条发布转发进具体队列类型的适配函数。Adapter that forwards one publish into the concrete queue type.
 };
 
@@ -85,15 +85,15 @@ class Topic::QueuedSubscriber
   template <typename Data>
   QueuedSubscriber(Topic topic, LockFreeQueue<Data>& queue)
   {
-    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+    Topic::CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;
     block_->data_.queue = &queue;
-    block_->data_.fun = [](MicrosecondTimestamp, RawData data, QueueBlock& block)
+    block_->data_.fun = [](MicrosecondTimestamp, void* payload_addr, QueueBlock& block)
     {
       LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(block.queue);
-      (void)queue->Push(*reinterpret_cast<Data*>(data.addr_));
+      (void)queue->Push(*reinterpret_cast<Data*>(payload_addr));
     };
 
     topic.block_->data_.subers.Add(*block_);
@@ -116,17 +116,18 @@ class Topic::QueuedSubscriber
   template <typename Data>
   QueuedSubscriber(Topic topic, LockFreeQueue<Message<Data>>& queue)
   {
-    Detail::MessageSubscriber::CheckSubscriberDataSize<Data>(topic);
+    Topic::CheckSubscriberType<Data>(topic);
 
     block_ = new LockFreeList::Node<QueueBlock>;
     block_->data_.type = SuberType::QUEUE;
     block_->data_.queue = &queue;
     block_->data_.fun =
-        [](MicrosecondTimestamp timestamp, RawData data, QueueBlock& block)
+        [](MicrosecondTimestamp timestamp, void* payload_addr, QueueBlock& block)
     {
       LockFreeQueue<Message<Data>>* queue =
           reinterpret_cast<LockFreeQueue<Message<Data>>*>(block.queue);
-      (void)queue->Push(Message<Data>{timestamp, *reinterpret_cast<Data*>(data.addr_)});
+      (void)queue->Push(
+          Message<Data>{timestamp, *reinterpret_cast<Data*>(payload_addr)});
     };
 
     topic.block_->data_.subers.Add(*block_);

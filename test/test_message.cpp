@@ -2,6 +2,7 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
+#include <cstdint>
 #include <atomic>
 #include <thread>
 
@@ -32,6 +33,23 @@ static_assert(!std::is_trivially_copyable_v<ByteStablePayload>);
 static_assert(std::is_trivially_destructible_v<ByteStablePayload>);
 static_assert(LibXR::TopicPayload<ByteStablePayload>);
 
+struct alignas(LibXR::CACHE_LINE_SIZE) WideAlignedPayload
+{
+  uint64_t left;
+  uint64_t right;
+};
+
+static_assert(LibXR::TopicPayload<WideAlignedPayload>);
+static_assert(alignof(WideAlignedPayload) == LibXR::CACHE_LINE_SIZE);
+
+struct PrefixIntPayload
+{
+  int32_t value;
+  int32_t reserved;
+};
+
+static_assert(LibXR::TopicPayload<PrefixIntPayload>);
+
 namespace
 {
 
@@ -44,21 +62,20 @@ void TestTopicCore()
   { return static_cast<uint64_t>(timestamp); };
 
   auto domain = LibXR::Topic::Domain("test_domain");
-  auto topic = LibXR::Topic::CreateTopic<double>("test_tp", &domain, false, true);
+  auto topic = LibXR::Topic::CreateTopic<double>("test_tp", &domain);
   static double msg[4];
   auto async_suber = LibXR::Topic::ASyncSubscriber<double>(topic);
   LibXR::LockFreeQueue<double> msg_queue(10);
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
   LibXR::LockFreeQueue<LibXR::Topic::Message<double>> timed_msg_queue(10);
   auto timed_queue_suber = LibXR::Topic::QueuedSubscriber(topic, timed_msg_queue);
+  UNUSED(queue_suber);
+  UNUSED(timed_queue_suber);
+
   static bool cb_in_isr = false;
   static LibXR::MicrosecondTimestamp cb_timestamp;
   static LibXR::MicrosecondTimestamp view_cb_timestamp;
   static double view_cb_value = 0.0;
-  static bool raw_cb_in_isr = false;
-  static LibXR::MicrosecondTimestamp raw_cb_timestamp;
-  static size_t raw_cb_size = 0;
-  static double raw_cb_value = 0.0;
 
   auto msg_cb = LibXR::Topic::Callback::Create(
       [](bool in_isr, void*, LibXR::MicrosecondTimestamp timestamp, double& data)
@@ -75,28 +92,12 @@ void TestTopicCore()
       [](bool, void*, const LibXR::Topic::MessageView<double>& message)
       {
         view_cb_timestamp = message.timestamp;
-        view_cb_value = message.data;
+        ASSERT(message.data != nullptr);
+        view_cb_value = *message.data;
       },
       reinterpret_cast<void*>(0));
 
   topic.RegisterCallback(view_cb);
-
-  auto raw_cb = LibXR::Topic::Callback::Create(
-      [](bool in_isr, void*, LibXR::RawData& data)
-      {
-        raw_cb_in_isr = in_isr;
-        raw_cb_size = data.size_;
-        LibXR::Memory::FastCopy(&raw_cb_value, data.addr_, sizeof(raw_cb_value));
-      },
-      reinterpret_cast<void*>(0));
-
-  topic.RegisterCallback(raw_cb);
-
-  auto raw_timestamp_cb = LibXR::Topic::Callback::Create(
-      [](bool, void*, LibXR::MicrosecondTimestamp timestamp, LibXR::RawData&)
-      { raw_cb_timestamp = timestamp; }, reinterpret_cast<void*>(0));
-
-  topic.RegisterCallback(raw_timestamp_cb);
 
   ASSERT(!async_suber.Available());
 
@@ -122,20 +123,17 @@ void TestTopicCore()
   ASSERT(view_cb_value == msg[0]);
   ASSERT(timestamp_us(view_cb_timestamp) == timestamp_us(timestamp0));
   ASSERT(!cb_in_isr);
-  ASSERT(raw_cb_value == msg[0]);
-  ASSERT(raw_cb_size == sizeof(msg[0]));
-  ASSERT(timestamp_us(raw_cb_timestamp) == timestamp_us(timestamp0));
-  ASSERT(!raw_cb_in_isr);
 
-  auto byte_stable_topic = LibXR::Topic::CreateTopic<ByteStablePayload>(
-      "byte_stable_tp", &domain, false, true);
+  auto byte_stable_topic =
+      LibXR::Topic::CreateTopic<ByteStablePayload>("byte_stable_tp", &domain);
   static LibXR::MicrosecondTimestamp byte_stable_view_timestamp;
   static float byte_stable_view_value = 0.0f;
   auto byte_stable_cb = LibXR::Topic::Callback::Create(
       [](bool, void*, const LibXR::Topic::MessageView<ByteStablePayload>& message)
       {
         byte_stable_view_timestamp = message.timestamp;
-        byte_stable_view_value = message.data.data[2];
+        ASSERT(message.data != nullptr);
+        byte_stable_view_value = message.data->data[2];
       },
       reinterpret_cast<void*>(0));
   byte_stable_topic.RegisterCallback(byte_stable_cb);
@@ -143,7 +141,8 @@ void TestTopicCore()
   const LibXR::MicrosecondTimestamp byte_stable_timestamp(1501);
   byte_stable_topic.Publish(byte_stable_tx, byte_stable_timestamp);
   ASSERT(byte_stable_view_value == byte_stable_tx.data[2]);
-  ASSERT(timestamp_us(byte_stable_view_timestamp) == timestamp_us(byte_stable_timestamp));
+  ASSERT(timestamp_us(byte_stable_view_timestamp) ==
+         timestamp_us(byte_stable_timestamp));
 
   msg[0] = 32.32;
   msg[3] = -1.0f;
@@ -163,28 +162,17 @@ void TestTopicCore()
   ASSERT(msg[3] == msg[0]);
   ASSERT(timestamp_us(cb_timestamp) == timestamp_us(timestamp1));
   ASSERT(cb_in_isr);
-  ASSERT(raw_cb_value == msg[0]);
-  ASSERT(raw_cb_size == sizeof(msg[0]));
-  ASSERT(timestamp_us(raw_cb_timestamp) == timestamp_us(timestamp1));
-  ASSERT(raw_cb_in_isr);
+  ASSERT(view_cb_value == msg[0]);
+  ASSERT(timestamp_us(view_cb_timestamp) == timestamp_us(timestamp1));
 
-  topic.Publish(msg[0], LibXR::MicrosecondTimestamp(3003));
-  ASSERT(!async_suber.Available());
   LibXR::Topic::PackedData<double> packed_data;
   LibXR::Topic::Server topic_server(512);
-
-  topic.DumpData(packed_data);
   topic_server.Register(topic);
-
-  topic_server.ParseData(LibXR::ConstRawData(packed_data));
-  ASSERT(msg[3] == msg[0]);
-  ASSERT(timestamp_us(cb_timestamp) == timestamp_us(packed_data.GetTimestamp()));
 
   msg[0] = 48.48;
   const LibXR::MicrosecondTimestamp timestamp2(4004);
-  topic.Publish(msg[0], timestamp2);
-  topic.DumpData(packed_data);
-  msg[3] = -1.0f;
+  ASSERT(topic.PackData(msg[0], packed_data, timestamp2) == LibXR::ErrorCode::OK);
+  msg[3] = -1.0;
   cb_in_isr = false;
   ASSERT(topic_server.ParseDataFromCallback(LibXR::ConstRawData(packed_data), true) == 1);
   ASSERT(msg[3] == msg[0]);
@@ -193,9 +181,8 @@ void TestTopicCore()
 
   msg[0] = 56.56;
   const LibXR::MicrosecondTimestamp timestamp3(5005);
-  topic.Publish(msg[0], timestamp3);
-  topic.DumpData(packed_data);
-  msg[3] = -1.0f;
+  ASSERT(topic.PackData(msg[0], packed_data, timestamp3) == LibXR::ErrorCode::OK);
+  msg[3] = -1.0;
   cb_in_isr = true;
   ASSERT(topic_server.ParseDataFromCallback(LibXR::ConstRawData(packed_data), false) ==
          1);
@@ -204,10 +191,20 @@ void TestTopicCore()
   ASSERT(!cb_in_isr);
 
   msg[0] = 64.64;
-  const LibXR::MicrosecondTimestamp timestamp4(6006);
-  topic.Publish(msg[0], timestamp4);
-  topic.DumpData(packed_data);
+  const LibXR::MicrosecondTimestamp timestamp4(0x010203040506ULL);
+  ASSERT(topic.PackData(msg[0], packed_data, timestamp4) == LibXR::ErrorCode::OK);
   ASSERT(packed_data.raw.header_.prefix == LibXR::Topic::PACKET_PREFIX);
+  ASSERT(packed_data.raw.header_.version == LibXR::Topic::PACKET_VERSION);
+  ASSERT(packed_data.raw.header_.data_len_raw[0] == sizeof(double));
+  ASSERT(packed_data.raw.header_.data_len_raw[1] == 0);
+  ASSERT(packed_data.raw.header_.data_len_raw[2] == 0);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[0] == 0x06);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[1] == 0x05);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[2] == 0x04);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[3] == 0x03);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[4] == 0x02);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[5] == 0x01);
+  ASSERT(timestamp_us(packed_data.GetTimestamp()) == timestamp_us(timestamp4));
   auto* packet = reinterpret_cast<uint8_t*>(&packed_data);
   ASSERT(topic_server.ParseData(LibXR::ConstRawData(packet, 3)) == 0);
   ASSERT(topic_server.ParseData(LibXR::ConstRawData(packet + 3, PACKET_SIZE - 3)) == 1);
@@ -220,72 +217,117 @@ void TestTopicCore()
   ASSERT(msg[3] == msg[0]);
   ASSERT(timestamp_us(cb_timestamp) == timestamp_us(timestamp4));
 
-  auto borrowed_topic =
-      LibXR::Topic::CreateTopic<double>("borrowed_tp", &domain, false, false, true);
-  double borrowed_source = 11.11;
-  double borrowed_dump = 0.0;
-  LibXR::MicrosecondTimestamp borrowed_dump_timestamp;
-  const LibXR::MicrosecondTimestamp borrowed_timestamp(7007);
-  borrowed_topic.Publish(borrowed_source, borrowed_timestamp);
-  ASSERT(borrowed_topic.DumpData(borrowed_dump, borrowed_dump_timestamp) ==
-         LibXR::ErrorCode::OK);
-  ASSERT(borrowed_dump == borrowed_source);
-  ASSERT(timestamp_us(borrowed_dump_timestamp) == timestamp_us(borrowed_timestamp));
-  borrowed_dump = 0.0;
-  ASSERT(borrowed_topic.DumpData(LibXR::RawData(borrowed_dump),
-                                 borrowed_dump_timestamp) == LibXR::ErrorCode::OK);
-  ASSERT(borrowed_dump == borrowed_source);
-  ASSERT(timestamp_us(borrowed_dump_timestamp) == timestamp_us(borrowed_timestamp));
-  borrowed_source = 22.22;
-  ASSERT(borrowed_topic.DumpData(borrowed_dump, borrowed_dump_timestamp) ==
-         LibXR::ErrorCode::OK);
-  ASSERT(borrowed_dump == borrowed_source);
-  ASSERT(timestamp_us(borrowed_dump_timestamp) == timestamp_us(borrowed_timestamp));
+  auto unknown_topic_packet = packed_data;
+  unknown_topic_packet.raw.header_.topic_name_crc32 ^= 0x13572468;
+  unknown_topic_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&unknown_topic_packet.raw,
+                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  unknown_topic_packet.crc8_ =
+      LibXR::CRC8::Calculate(&unknown_topic_packet, PACKET_SIZE - sizeof(uint8_t));
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_topic_packet)) == 0);
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
 
-  struct BasePayload
-  {
-    uint32_t value;
-  };
+  auto unknown_version_packet = packed_data;
+  unknown_version_packet.raw.header_.version ^= 0x5A;
+  unknown_version_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&unknown_version_packet.raw,
+                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  unknown_version_packet.crc8_ =
+      LibXR::CRC8::Calculate(&unknown_version_packet, PACKET_SIZE - sizeof(uint8_t));
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_version_packet)) == 0);
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
 
-  struct ExtendedPayload
-  {
-    BasePayload base;
-    uint32_t extra;
-  };
+  auto truncated_packet = packed_data;
+  truncated_packet.raw.header_.SetDataLen(sizeof(double) - 1);
+  truncated_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&truncated_packet.raw,
+                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  truncated_packet.crc8_ =
+      LibXR::CRC8::Calculate(&truncated_packet, PACKET_SIZE - sizeof(uint8_t) - 1);
+  msg[3] = -1.0;
+  ASSERT(topic_server.ParseData(
+             LibXR::ConstRawData(&truncated_packet, PACKET_SIZE - 1)) == 1);
+  ASSERT(msg[3] != msg[0]);
+  ASSERT(timestamp_us(cb_timestamp) == timestamp_us(timestamp4));
+
+  auto legacy_prefix_packet = packed_data;
+  legacy_prefix_packet.raw.header_.prefix = 0xA5;
+  legacy_prefix_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&legacy_prefix_packet.raw,
+                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  legacy_prefix_packet.crc8_ =
+      LibXR::CRC8::Calculate(&legacy_prefix_packet, PACKET_SIZE - sizeof(uint8_t));
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(legacy_prefix_packet)) == 0);
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
+
+  auto bad_header_packet = packed_data;
+  bad_header_packet.raw.header_.pack_header_crc8 ^= 0x5A;
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_header_packet)) == 0);
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
+
+  auto bad_payload_packet = packed_data;
+  bad_payload_packet.crc8_ ^= 0xA5;
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_payload_packet)) == 0);
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
+
+  auto aligned_topic =
+      LibXR::Topic::CreateTopic<WideAlignedPayload>("aligned_packet_tp", &domain);
+  static uint64_t aligned_view_value = 0;
+  auto aligned_cb = LibXR::Topic::Callback::Create(
+      [](bool, void*, const LibXR::Topic::MessageView<WideAlignedPayload>& message)
+      {
+        ASSERT(message.data != nullptr);
+        aligned_view_value = message.data->right;
+      },
+      reinterpret_cast<void*>(0));
+  aligned_topic.RegisterCallback(aligned_cb);
+  LibXR::Topic::Server aligned_server(512);
+  aligned_server.Register(aligned_topic);
+  WideAlignedPayload aligned_tx{0x1122334455667788ULL, 0x8877665544332211ULL};
+  LibXR::Topic::PackedData<WideAlignedPayload> aligned_packet;
+  ASSERT(aligned_topic.PackData(aligned_tx, aligned_packet,
+                                LibXR::MicrosecondTimestamp(6106)) ==
+         LibXR::ErrorCode::OK);
+  aligned_view_value = 0;
+  ASSERT(aligned_server.ParseData(LibXR::ConstRawData(aligned_packet)) == 1);
+  ASSERT(aligned_view_value == aligned_tx.right);
 
   auto prefix_topic =
-      LibXR::Topic::CreateTopic<ExtendedPayload>("prefix_tp", &domain, false, true);
-  ExtendedPayload extended_source{{0x13572468}, 0x24681357};
-  BasePayload prefix_dump{};
-  LibXR::MicrosecondTimestamp prefix_dump_timestamp;
-  const LibXR::MicrosecondTimestamp prefix_timestamp(7017);
-  prefix_topic.Publish(extended_source, prefix_timestamp);
-  ASSERT(prefix_topic.DumpData(prefix_dump, prefix_dump_timestamp) ==
+      LibXR::Topic::CreateTopic<PrefixIntPayload>("prefix_int_tp", &domain);
+  static PrefixIntPayload prefix_rx{};
+  auto prefix_cb = LibXR::Topic::Callback::Create(
+      [](bool, void*, PrefixIntPayload& data) { prefix_rx = data; },
+      reinterpret_cast<void*>(0));
+  prefix_topic.RegisterCallback(prefix_cb);
+  LibXR::Topic::Server prefix_server(512);
+  prefix_server.Register(prefix_topic);
+  PrefixIntPayload prefix_tx{0x11223344, 0x55667788};
+  LibXR::Topic::PackedData<PrefixIntPayload> prefix_packet;
+  ASSERT(prefix_topic.PackData(prefix_tx, prefix_packet,
+                               LibXR::MicrosecondTimestamp(6116)) ==
          LibXR::ErrorCode::OK);
-  ASSERT(prefix_dump.value == extended_source.base.value);
-  ASSERT(timestamp_us(prefix_dump_timestamp) == timestamp_us(prefix_timestamp));
+  prefix_packet.raw.header_.SetDataLen(sizeof(int32_t));
+  prefix_packet.raw.header_.pack_header_crc8 =
+      LibXR::CRC8::Calculate(&prefix_packet.raw,
+                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  prefix_packet.crc8_ =
+      LibXR::CRC8::Calculate(&prefix_packet, LibXR::Topic::PACK_BASE_SIZE - 1 +
+                                                 sizeof(int32_t));
+  prefix_rx = PrefixIntPayload{-1, -1};
+  ASSERT(prefix_server.ParseData(
+             LibXR::ConstRawData(&prefix_packet, LibXR::Topic::PACK_BASE_SIZE +
+                                                     sizeof(int32_t))) == 1);
+  ASSERT(prefix_rx.value == prefix_tx.value);
 
-  auto base_topic =
-      LibXR::Topic::CreateTopic<BasePayload>("base_tp", &domain, false, true);
-  BasePayload base_source{0x89ABCDEF};
-  ExtendedPayload oversized_dump{};
-  base_topic.Publish(base_source, LibXR::MicrosecondTimestamp(7027));
-  ASSERT(base_topic.DumpData(oversized_dump, prefix_dump_timestamp) ==
-         LibXR::ErrorCode::SIZE_ERR);
-
-  auto mutable_topic =
-      LibXR::Topic::CreateTopic<int>("mutable_payload_tp", &domain, false, true);
+  auto mutable_topic = LibXR::Topic::CreateTopic<int>("mutable_payload_tp", &domain);
   auto mutable_cb = LibXR::Topic::Callback::Create(
       [](bool, void*, int& data) { data = 5678; }, reinterpret_cast<void*>(0));
   mutable_topic.RegisterCallback(mutable_cb);
   int mutable_payload = 1234;
-  int mutable_dump = 0;
   mutable_topic.Publish(mutable_payload, LibXR::MicrosecondTimestamp(7037));
-  ASSERT(mutable_topic.DumpData(mutable_dump) == LibXR::ErrorCode::OK);
-  ASSERT(mutable_dump == 5678);
+  ASSERT(mutable_payload == 5678);
 
-  auto queue_drop_topic =
-      LibXR::Topic::CreateTopic<int>("queue_drop_tp", &domain, false, false, true);
+  auto queue_drop_topic = LibXR::Topic::CreateTopic<int>("queue_drop_tp", &domain);
   LibXR::LockFreeQueue<int> drop_queue(1);
   auto drop_suber = LibXR::Topic::QueuedSubscriber(queue_drop_topic, drop_queue);
   UNUSED(drop_suber);
@@ -306,77 +348,12 @@ void TestTopicCore()
   }
   int dropped_message = 0;
   ASSERT(drop_queue.Pop(dropped_message) == LibXR::ErrorCode::EMPTY);
-
-  auto unknown_topic_packet = packed_data;
-  unknown_topic_packet.raw.header_.topic_name_crc32 ^= 0x13572468;
-  unknown_topic_packet.raw.header_.pack_header_crc8 =
-      LibXR::CRC8::Calculate(&unknown_topic_packet.raw,
-                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
-  unknown_topic_packet.crc8_ =
-      LibXR::CRC8::Calculate(&unknown_topic_packet, PACKET_SIZE - sizeof(uint8_t));
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_topic_packet)) == 0);
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
-  ASSERT(msg[3] == msg[0]);
-
-  auto legacy_prefix_packet = packed_data;
-  legacy_prefix_packet.raw.header_.prefix = 0xA5;
-  legacy_prefix_packet.raw.header_.pack_header_crc8 =
-      LibXR::CRC8::Calculate(&legacy_prefix_packet.raw,
-                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
-  legacy_prefix_packet.crc8_ =
-      LibXR::CRC8::Calculate(&legacy_prefix_packet, PACKET_SIZE - sizeof(uint8_t));
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(legacy_prefix_packet)) == 0);
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
-  ASSERT(msg[3] == msg[0]);
-
-  auto bad_header_packet = packed_data;
-  bad_header_packet.raw.header_.pack_header_crc8 ^= 0x5A;
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_header_packet)) == 0);
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
-  ASSERT(msg[3] == msg[0]);
-
-  auto bad_payload_packet = packed_data;
-  bad_payload_packet.crc8_ ^= 0xA5;
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_payload_packet)) == 0);
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
-  ASSERT(msg[3] == msg[0]);
-
-  for (int i = 0; i < 1000; i++)
-  {
-    msg[0] = i * 0.1;
-    const LibXR::MicrosecondTimestamp timestamp(10000 + i);
-    topic.Publish(msg[0], timestamp);
-    topic.DumpData(packed_data);
-    topic_server.ParseData(LibXR::ConstRawData(packed_data));
-    ASSERT(msg[3] == msg[0]);
-    ASSERT(timestamp_us(cb_timestamp) == timestamp_us(timestamp));
-  }
-
-  for (int i = 0; i < 1000; i++)
-  {
-    msg[0] = i * 0.1;
-    const LibXR::MicrosecondTimestamp timestamp(20000 + i);
-    topic.Publish(msg[0], timestamp);
-    topic.DumpData(packed_data);
-    for (uint8_t j = 0; j < 255; j++)
-    {
-      topic_server.ParseData(LibXR::ConstRawData(j));
-    }
-    for (int j = 0; j < static_cast<int>(sizeof(packed_data)); j++)
-    {
-      auto tmp = reinterpret_cast<uint8_t*>(&packed_data);
-      topic_server.ParseData(LibXR::ConstRawData(tmp[j]));
-    }
-    ASSERT(msg[3] == msg[0]);
-    ASSERT(timestamp_us(cb_timestamp) == timestamp_us(timestamp));
-  }
 }
 
 void TestASyncSubscriberFreshWait()
 {
   auto domain = LibXR::Topic::Domain("message_async_wait_domain");
-  auto topic =
-      LibXR::Topic::CreateTopic<int>("message_async_wait_tp", &domain, false, true);
+  auto topic = LibXR::Topic::CreateTopic<int>("message_async_wait_tp", &domain);
   auto suber = LibXR::Topic::ASyncSubscriber<int>(topic);
 
   int value = 41;
@@ -406,8 +383,7 @@ void TestASyncSubscriberFreshWait()
 void TestSyncSubscriberFreshWait()
 {
   auto domain = LibXR::Topic::Domain("message_sync_wait_domain");
-  auto topic =
-      LibXR::Topic::CreateTopic<int>("message_sync_wait_tp", &domain, false, true);
+  auto topic = LibXR::Topic::CreateTopic<int>("message_sync_wait_tp", &domain);
   int rx = -1;
   auto suber = LibXR::Topic::SyncSubscriber<int>(topic, rx);
 
@@ -458,8 +434,7 @@ void TestSyncSubscriberFreshWait()
   ASSERT(suber.Wait(0) == LibXR::ErrorCode::TIMEOUT);
 
   value = 8;
-  wait_and_publish(
-      [&]() { topic.Publish(value, LibXR::MicrosecondTimestamp(7108)); });
+  wait_and_publish([&]() { topic.Publish(value, LibXR::MicrosecondTimestamp(7108)); });
   ASSERT(rx == value);
   ASSERT(static_cast<uint64_t>(suber.GetTimestamp()) == 7108);
   ASSERT(suber.Wait(0) == LibXR::ErrorCode::TIMEOUT);

@@ -4,21 +4,15 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <tuple>
-#include <type_traits>
-#include <utility>
+#include <cstddef>
 
-#include "crc.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
-#include "libxr_mem.hpp"
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
-#include "lock_queue.hpp"
 #include "lockfree_list.hpp"
 #include "lockfree_queue.hpp"
 #include "mutex.hpp"
-#include "queue.hpp"
 #include "rbt.hpp"
 #include "semaphore.hpp"
 #include "thread.hpp"
@@ -26,9 +20,9 @@
 namespace LibXR
 {
 /**
- * @brief 可直接拿来发 topic 的数据类型要求 / Data-type requirements for values that can
- *        be published through a topic directly
- * @tparam Data 待检查的数据类型 / Data type to check
+ * @brief topic 可承载 payload 的类型约束 / Type constraint for payloads carried by one
+ *        topic
+ * @tparam Data 待检查的 payload 类型 / Payload type to validate
  */
 template <typename Data>
 concept TopicPayload =
@@ -37,14 +31,9 @@ concept TopicPayload =
     std::is_copy_assignable_v<Data> && std::is_trivially_destructible_v<Data>;
 
 /**
- * @brief 编译期校验主题负载类型 / Check the topic payload type at compile time
- * @tparam Data 待校验的数据类型 / Data type to validate
- *
- * @note 当前 topic 负载会被直接按对象字节拷贝、缓存、排队和打包，因此这里只接受
- *       默认构造、可赋值、平凡析构的普通对象类型 /
- *       Topic payloads are currently copied, cached, queued, and packed directly
- *       as object bytes, so only regular object types that are default
- *       constructible, assignable, and trivially destructible are accepted here
+ * @brief 在模板上下文里断言 payload 类型满足 topic 契约 / Assert in template
+ *        context that one payload type satisfies the topic contract
+ * @tparam Data 待检查的 payload 类型 / Payload type to validate
  */
 template <typename Data>
 constexpr void CheckTopicPayload()
@@ -58,197 +47,178 @@ constexpr void CheckTopicPayload()
  * @class Topic
  * @brief 发布订阅主题 / Publish-subscribe topic
  *
- * 一个 `Topic` 表示一种消息：它保存最近一次发布的内容，并在每次发布时同步通知挂在
- * 上面的同步、异步、队列或回调订阅者。
- * One `Topic` represents one message stream: it keeps the latest published value
- * and synchronously notifies the attached synchronous, asynchronous, queued, or
- * callback subscribers on each publish.
- *
- * @note Topic、subscriber 和 server 应在初始化阶段创建，并在应用运行期间长期存在 /
- *       Topics, subscribers, and servers are expected to be created during
- *       initialization and kept alive for the application lifetime
- * @note 该消息系统遵循 libxr 的静态生命周期模型：初始化阶段允许分配，发布、回调和解析热路径不应产生动态分配 /
- *       The message system follows libxr's static lifetime model: allocation is
- *       allowed during initialization, while publish, callback, and parser hot
- *       paths should not allocate dynamically
+ * 一个 `Topic` 表示一种精确类型的消息通道：它在每次发布时同步通知挂在上面的同步、
+ * 异步、队列或回调订阅者，但自身不缓存最近一次消息。
+ * One `Topic` represents one exact-typed message channel: it synchronously notifies
+ * the attached synchronous, asynchronous, queued, or callback subscribers on each
+ * publish, but does not cache the latest message itself.
  */
 class Topic
 {
   /**
    * @enum LockState
-   * @brief 主题发布锁状态 / Topic publish-lock state
+   * @brief topic 发布路径的内部锁状态 / Internal lock state of the topic publish path
    */
   enum class LockState : uint32_t
   {
-    UNLOCKED = 0,        ///< 当前未被发布路径持有。Not currently held by a publish path.
-    LOCKED = 1,          ///< 当前正被无 mutex 主题的一次发布持有。Currently held by one publish on a non-mutex topic.
-    USE_MUTEX = UINT32_MAX, ///< 当前主题改用外部 mutex 进行串行化。This topic is serialized by an external mutex instead.
+    UNLOCKED = 0,          ///< 当前未持有发布锁。The publish path is currently unlocked.
+    LOCKED = 1,            ///< 当前通过原子快路径持有发布权。The publish path is locked through the atomic fast path.
+    USE_MUTEX = UINT32_MAX ///< 当前主题改走互斥量串行化。This topic currently serializes publishers through a mutex.
   };
 
  public:
   /**
    * @struct Block
-   * @brief topic 自己手里那份状态和参数 / The state and settings held by the topic
-   *        itself
+   * @brief topic 运行时状态块 / Runtime state block of one topic
    *
-   * @note `subers` 通常只在初始化期追加，发布热路径只遍历；`busy/mutex` 保护数据存储和订阅者分发 /
-   *       `subers` is normally appended during initialization and traversed on
-   *       the publish hot path; `busy/mutex` protects data storage and
-   *       subscriber dispatch
+   * @note 当前 topic 自身不缓存最近一次消息值；这里只保存类型契约、名称键值、发布串行化
+   *       状态以及订阅链表。
+   *       The topic no longer caches the latest payload value itself; this block
+   *       keeps only the type contract, topic key, publish-serialization state,
+   *       and subscriber list.
    */
   struct Block
   {
-    std::atomic<LockState> busy;  ///< 非 mutex 主题的发布锁状态。Publish-lock state for non-mutex topics.
-    LockFreeList subers;          ///< 当前挂接的订阅者块列表。List of subscriber blocks currently attached to the topic.
-    uint32_t max_length;          ///< 该主题声明允许的最大负载长度。Declared maximum payload length of this topic.
-    uint32_t crc32;  ///< 主题名称的 CRC32 校验码。CRC32 checksum of the topic name.
-    Mutex* mutex;    ///< 多发布者主题使用的串行化 mutex。Serialization mutex used by multi-publisher topics.
-    RawData data;    ///< 当前 topic 保存的最近一次负载视图。View of the latest payload currently retained by the topic.
-    MicrosecondTimestamp timestamp;  ///< 最近一次消息时间戳。Latest message timestamp.
-    bool cache;         ///< 是否把最近一次负载复制进 topic 自有缓存。Whether the latest payload is copied into topic-owned cache storage.
-    bool check_length;  ///< 是否要求发布/订阅尺寸与 `max_length` 精确相等。Whether publish/subscribe sizes must match `max_length` exactly.
+    std::atomic<LockState> busy;  ///< 发布路径串行化状态。Publish-path serialization state.
+    LockFreeList subers;          ///< 已挂接订阅者链表。List of attached subscribers.
+    TypeID::ID payload_type_id;   ///< 精确 payload 类型标识。Exact payload type identifier.
+    uint32_t payload_size;        ///< 该 topic 固定 payload 字节数。Fixed payload size in bytes of this topic.
+    uint32_t payload_alignment;   ///< 该 topic payload 所需对齐。Required payload alignment of this topic.
+    uint32_t crc32;               ///< 主题名 CRC32 键。CRC32 key of the topic name.
+    Mutex* mutex;                 ///< 多发布者主题使用的互斥量。Mutex used by multi-publisher topics.
   };
 
 #ifndef __DOXYGEN__
   /**
    * @struct PackedDataHeader
-   * @brief 打包消息固定头，具体定义见 `packet/packet.hpp` / Packed-message fixed
-   *        header; the full definition lives in `packet/packet.hpp`
+   * @brief 打包消息固定头 / Fixed header of one packed message
    */
   struct PackedDataHeader;
 
   /**
    * @class PackedData
-   * @brief 打包消息对象模板，具体定义见 `packet/packet.hpp` / Packed-message object
-   *        template; the full definition lives in `packet/packet.hpp`
-   * @tparam Data 打包负载的数据类型 / Packed payload data type
+   * @brief 带固定头和尾 CRC 的打包消息对象 / Packed message object with fixed header
+   *        and trailing CRC
+   * @tparam Data 负载类型 / Payload type
    */
   template <typename Data>
   class PackedData;
-
-  static constexpr uint8_t PACKET_PREFIX = 0x5A;  ///< 打包消息固定前缀字节。Fixed prefix byte of packed messages.
-  static constexpr size_t PACK_BASE_SIZE = 18;  ///< 不含 payload 的包固定开销：17 字节头加 1 字节尾 CRC8。Fixed non-payload packet overhead: 17-byte header plus 1-byte trailing CRC8.
+  static constexpr uint8_t PACKET_PREFIX = 0x5A;  ///< 打包消息前缀字节。Packed-message prefix byte.
+  static constexpr uint8_t PACKET_VERSION = 0x01;  ///< 打包消息协议版本。Packed-message protocol version.
+  static constexpr size_t PACK_BASE_SIZE = 17;  ///< 固定非 payload 开销：16 字节头 + 1 字节尾 CRC8。Fixed non-payload overhead: 16-byte header plus 1-byte trailing CRC8.
 #endif
 
   /**
    * @typedef TopicHandle
-   * @brief 指向某个 topic 节点的句柄 / Handle pointing to one topic node
+   * @brief 指向一个 topic 运行时状态块的句柄 / Handle pointing to one topic runtime
+   *        state block
    */
   typedef RBTree<uint32_t>::Node<Block>* TopicHandle;
 
   /**
    * @struct MessageView
-   * @brief 带时间戳的类型化消息视图 / Timestamped typed message view
-   * @tparam Data 消息里的数据类型 / Payload data type stored in the message
+   * @brief 带时间戳和 payload 指针的只读消息视图 / Read-only message view carrying a
+   *        timestamp and a payload pointer
+   * @tparam Data payload 类型 / Payload type
    */
   template <typename Data>
   struct MessageView
   {
     static_assert(TopicPayload<Data>);
-
     MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
-    Data& data;                      ///< 消息数据引用。Message data reference.
+    Data* data;                      ///< 指向本次发布 payload 对象的指针。Pointer to the payload object of this publish.
   };
 
   /**
    * @struct Message
-   * @brief 带时间戳的类型化消息 / Timestamped typed message
-   * @tparam Data 消息里的数据类型 / Payload data type stored in the message
+   * @brief 带时间戳和 payload 副本的消息对象 / Message object carrying a timestamp and
+   *        a payload copy
+   * @tparam Data payload 类型 / Payload type
    */
   template <typename Data>
   struct Message
   {
     static_assert(TopicPayload<Data>);
-
     MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
-    Data data;                       ///< 消息数据。Message payload.
+    Data data;                       ///< payload 对象副本。Copied payload object.
   };
 
   /**
-   * @brief 锁定一次普通发布路径 / Lock one normal publish path
-   * @param topic 要锁定的主题 / Topic to be locked
-   *
-   * @note 这把锁保护“写入当前负载 + 同步分发订阅者”这整个发布临界区；它不是给订阅者读取
-   *       单独使用的外部互斥量 /
-   *       This lock protects the whole publish critical section of "store the
-   *       current payload + synchronously dispatch subscribers"; it is not an
-   *       external mutex for subscriber-side reads
+   * @brief 在普通上下文里锁住一个 topic 发布路径 / Lock one topic publish path in normal
+   *        context
+   * @param topic 目标 topic 句柄 / Target topic handle
    */
   static void Lock(TopicHandle topic);
 
   /**
-   * @brief 结束一次普通发布路径 / Finish one normal publish path
-   * @param topic 要解锁的主题 / Topic to be unlocked
+   * @brief 在普通上下文里释放一个 topic 发布路径 / Unlock one topic publish path in
+   *        normal context
+   * @param topic 目标 topic 句柄 / Target topic handle
    */
   static void Unlock(TopicHandle topic);
 
   /**
-   * @brief 锁定一次回调发布路径 / Lock one callback-originated publish path
-   * @param topic 要锁定的主题 / Topic to be locked
-   *
-   * @note 仅适用于非 mutex 主题；这条路径要求外围上下文自己保证不会与普通发布或另一条
-   *       回调发布并发进入同一个 topic /
-   *       This is valid only for non-mutex topics; the surrounding context must
-   *       already guarantee that neither a normal publish nor another callback
-   *       publish can enter the same topic concurrently
+   * @brief 在回调或 ISR 路径里锁住一个 topic 发布路径 / Lock one topic publish path from
+   *        callback or ISR context
+   * @param topic 目标 topic 句柄 / Target topic handle
    */
   static void LockFromCallback(TopicHandle topic);
 
   /**
-   * @brief 结束一次回调发布路径 / Finish one callback-originated publish path
-   * @param topic 要解锁的主题 / Topic to be unlocked
+   * @brief 在回调或 ISR 路径里释放一个 topic 发布路径 / Unlock one topic publish path
+   *        from callback or ISR context
+   * @param topic 目标 topic 句柄 / Target topic handle
    */
   static void UnlockFromCallback(TopicHandle topic);
 
   /**
    * @class Domain
-   * @brief 一组 topic 共用的查找范围 / Shared lookup scope for one group of topics
+   * @brief topic 所属的命名域 / Naming domain that groups topics
    */
   class Domain
   {
    public:
     /**
-     * @brief 初始化或查找指定名称的主题域 / Initialize or look up a domain by name
-     * @param name 主题域的名称 / Name of the domain
-     *
-     * @note 包含初始化期动态内存分配，domain 应长期存在 /
-     *       Contains initialization-time dynamic allocation; domains are
-     *       expected to be long-lived
+     * @brief 构造一个 topic 域 / Construct one topic domain
+     * @param name 域名称 / Domain name
      */
     Domain(const char* name);
 
-    /**
-     * @brief 这个域下面那棵 topic 树的根节点 / Root node of the topic tree owned by
-     *        this domain
-     */
-    RBTree<uint32_t>::Node<RBTree<uint32_t>>* node_;
+    RBTree<uint32_t>::Node<RBTree<uint32_t>>* node_;  ///< 该域在全局域表里的节点。This domain's node inside the global domain tree.
   };
 
   /**
    * @enum SuberType
-   * @brief 订阅记录类型枚举，具体定义见 `subscriber/base.hpp` / Subscriber-record
-   *        type enum; the full definition lives in `subscriber/base.hpp`
+   * @brief topic 支持的订阅者种类 / Subscriber kinds supported by a topic
    */
-  enum class SuberType : uint8_t;
+  enum class SuberType : uint8_t
+  {
+    SYNC,     ///< 同步等待型订阅者。Synchronous wait-based subscriber.
+    ASYNC,    ///< 异步本地缓冲型订阅者。Asynchronous local-buffer subscriber.
+    QUEUE,    ///< 队列转发型订阅者。Queue-forwarding subscriber.
+    CALLBACK, ///< 回调执行型订阅者。Callback-executing subscriber.
+  };
 
   /**
    * @struct SuberBlock
-   * @brief 订阅记录公共头，具体定义见 `subscriber/base.hpp` / Common subscriber-block
-   *        header; the full definition lives in `subscriber/base.hpp`
+   * @brief 所有订阅块共用的公共头 / Common header shared by all subscriber blocks
    */
-  struct SuberBlock;
+  struct SuberBlock
+  {
+    SuberType type;  ///< 订阅块的具体种类。Concrete kind of this subscriber block.
+  };
 
   /**
    * @struct SyncBlock
-   * @brief 同步订阅块，具体定义见 `subscriber/sync.hpp` / Synchronous subscriber
-   *        block; the full definition lives in `subscriber/sync.hpp`
+   * @brief 同步订阅者挂在 topic 链表里的数据块 / Subscriber block used by one
+   *        synchronous subscriber inside the topic list
    */
   struct SyncBlock;
 
   /**
    * @class SyncSubscriber
-   * @brief 同步订阅者模板，具体定义见 `subscriber/sync.hpp` / Synchronous subscriber
-   *        template; the full definition lives in `subscriber/sync.hpp`
+   * @brief 通过 `Wait()` 接收消息的同步订阅者 / Synchronous subscriber receiving
+   *        messages via `Wait()`
    * @tparam Data 订阅的数据类型 / Subscribed data type
    */
   template <typename Data>
@@ -256,22 +226,21 @@ class Topic
 
   /**
    * @enum ASyncSubscriberState
-   * @brief 异步订阅状态枚举，具体定义见 `subscriber/async.hpp` / Async subscriber
-   *        state enum; the full definition lives in `subscriber/async.hpp`
+   * @brief 异步订阅者本地缓冲区状态 / State of one asynchronous subscriber local buffer
    */
   enum class ASyncSubscriberState : uint32_t;
 
   /**
    * @struct ASyncBlock
-   * @brief 异步订阅块，具体定义见 `subscriber/async.hpp` / Asynchronous subscriber
-   *        block; the full definition lives in `subscriber/async.hpp`
+   * @brief 异步订阅者挂在 topic 链表里的数据块 / Subscriber block used by one
+   *        asynchronous subscriber inside the topic list
    */
   struct ASyncBlock;
 
   /**
    * @class ASyncSubscriber
-   * @brief 异步订阅者模板，具体定义见 `subscriber/async.hpp` / Asynchronous subscriber
-   *        template; the full definition lives in `subscriber/async.hpp`
+   * @brief 先等待再主动取数据的异步订阅者 / Asynchronous subscriber that waits first
+   *        and then pulls data explicitly
    * @tparam Data 订阅的数据类型 / Subscribed data type
    */
   template <typename Data>
@@ -279,559 +248,499 @@ class Topic
 
   /**
    * @struct QueueBlock
-   * @brief 队列订阅块，具体定义见 `subscriber/queue.hpp` / Queued subscriber block;
-   *        the full definition lives in `subscriber/queue.hpp`
+   * @brief 队列订阅者挂在 topic 链表里的数据块 / Subscriber block used by one queued
+   *        subscriber inside the topic list
    */
   struct QueueBlock;
 
   /**
    * @class QueuedSubscriber
-   * @brief 队列订阅者，具体定义见 `subscriber/queue.hpp` / Queued subscriber; the full
-   *        definition lives in `subscriber/queue.hpp`
+   * @brief 把每次发布推入队列的订阅者 / Subscriber that pushes each publish into a queue
    */
   class QueuedSubscriber;
 
   /**
    * @class Callback
-   * @brief 回调订阅句柄，具体定义见 `subscriber/callback.hpp` / Callback subscription
-   *        handle; the full definition lives in `subscriber/callback.hpp`
+   * @brief 每次发布时直接执行函数的回调订阅句柄 / Callback subscription handle that
+   *        runs a function on each publish
    */
   class Callback;
 
   /**
    * @struct CallbackBlock
-   * @brief 回调订阅块，具体定义见 `subscriber/callback.hpp` / Callback subscriber
-   *        block; the full definition lives in `subscriber/callback.hpp`
+   * @brief 回调订阅者挂在 topic 链表里的数据块 / Subscriber block used by one callback
+   *        subscriber inside the topic list
    */
   struct CallbackBlock;
 
   /**
-   * @brief 注册回调函数 / Register a callback function
-   * @param cb 需要注册的回调函数 / The callback function to register
-   *
-   * @note 包含初始化期动态内存分配，回调订阅应长期存在 /
-   *       Contains initialization-time dynamic allocation; callback
-   *       subscriptions are expected to be long-lived
-   * @note 回调在发布锁内运行，不应重入发布同一个主题 /
-   *       The callback runs while the publish lock is held and should not
-   *       re-enter publishing on the same topic
+   * @class Server
+   * @brief 把字节流解析成 packet 并投递到 topic 的 parser / Parser that turns byte
+   *        streams into packets and delivers them into topics
+   */
+  class Server;
+
+  /**
+   * @brief 注册一个回调订阅者 / Register one callback subscriber
+   * @param cb 要注册的回调句柄 / Callback handle to register
    */
   void RegisterCallback(Callback& cb);
 
   /**
-   * @brief 取默认发布时间戳 / Get the default publish timestamp
-   * @return 当前 Timebase 微秒时间戳 / Current Timebase microsecond timestamp
+   * @brief 读取当前时间戳 / Read the current timestamp
+   * @return 当前时间戳 / Current timestamp
    */
   static MicrosecondTimestamp NowTimestamp();
 
   /**
-   * @brief 构造一个空 topic 句柄 / Construct one empty topic handle
+   * @brief 构造一个空 topic 视图 / Construct one empty topic view
    */
   Topic();
 
   /**
-   * @brief 按名字查找或创建一个 topic / Find or create one topic by name
-   * @param name 主题名称 / Topic name
-   * @param max_length 数据的最大长度 / Maximum length of data
-   * @param domain 主题所属的域，默认为 `nullptr` / Domain to which the topic belongs, default `nullptr`
-   * @param multi_publisher 是否允许多个发布者，默认为 `false` / Whether to allow multiple publishers, default `false`
-   * @param cache 是否启用缓存，默认为 `false` / Whether to enable caching, default `false`
-   * @param check_length 是否检查数据长度，默认为 `false` / Whether to check data length, default `false`
-   *
-   * @note 包含初始化期动态内存分配，主题应长期存在 /
-   *       Contains initialization-time dynamic allocation; topics are expected
-   *       to be long-lived
-   * @note 未启用缓存时，Topic 只保留最近一次发布数据的地址；调用者必须保证该地址在 `DumpData()` 前仍然有效 /
-   *       Without cache, Topic keeps only the last published address; the
-   *       caller must keep it valid until `DumpData()`
-   * @note 多发布者主题使用 mutex，不支持 `PublishFromCallback()` /
-   *       Multi-publisher topics use a mutex and do not support
-   *       `PublishFromCallback()`
+   * @brief 用显式类型契约构造或查找一个 topic / Construct or look up one topic with
+   *        an explicit runtime type contract
+   * @param name topic 名称 / Topic name
+   * @param payload_type_id payload 类型标识 / Payload type identifier
+   * @param payload_size 该 topic 固定 payload 字节数 / Fixed payload size of this topic
+   * @param payload_alignment 该 topic payload 所需对齐，必须是非零 2 次幂 /
+   *        Required payload alignment of this topic; must be a non-zero power of
+   *        two
+   * @param domain 可选主题域 / Optional topic domain
+   * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized multi-publisher use
    */
-  Topic(const char* name, uint32_t max_length, Domain* domain = nullptr,
-        bool multi_publisher = false, bool cache = false, bool check_length = false);
+  Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
+        size_t payload_alignment, Domain* domain = nullptr,
+        bool multi_publisher = false);
 
   /**
-   * @brief 按数据类型创建一个 topic / Create one topic from a payload type
-   * @tparam Data 主题数据类型 / Topic data type
-   * @param name 主题名称 / Topic name
-   * @param domain 主题所属的域，默认为 `nullptr` / Domain to which the topic belongs, default `nullptr`
-   * @param multi_publisher 是否允许多个发布者，默认为 `false` / Whether to allow multiple publishers, default `false`
-   * @param cache 是否启用缓存，默认为 `false` / Whether to enable caching, default `false`
-   * @param check_length 是否检查数据长度，默认为 `false` / Whether to check data length, default `false`
-   * @return 创建的 Topic 实例 / Returns the created Topic instance
-   * @note 包含初始化期动态内存分配，主题应长期存在 / Contains initialization-time dynamic allocation; topics are expected to be long-lived
+   * @brief 用精确类型创建或查找一个 topic / Create or look up one topic using one
+   *        exact payload type
+   * @tparam Data payload 类型 / Payload type
+   * @param name topic 名称 / Topic name
+   * @param domain 可选主题域 / Optional topic domain
+   * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized
+   *        multi-publisher use
+   * @return 对应的 topic 视图 / Topic view of the requested topic
    */
   template <typename Data>
   static Topic CreateTopic(const char* name, Domain* domain = nullptr,
-                           bool multi_publisher = false, bool cache = false,
-                           bool check_length = false)
+                           bool multi_publisher = false)
   {
     CheckTopicPayload<Data>();
-    return Topic(name, sizeof(Data), domain, multi_publisher, cache, check_length);
+    return Topic(name, TypeID::GetID<Data>(), sizeof(Data), alignof(Data), domain,
+                 multi_publisher);
   }
 
   /**
-   * @brief 通过句柄构造主题 / Construct a topic from a topic handle
-   * @param topic 主题句柄 / Topic handle
-   * @note 这只是一个轻量包装，不创建、不校验、也不接管该句柄的生命周期 /
-   *       This is only one lightweight wrapper; it neither creates, validates,
-   *       nor takes ownership of the handle lifetime
+   * @brief 从已有句柄构造一个 topic 视图 / Construct one topic view from an existing
+   *        handle
+   * @param topic 既有 topic 句柄 / Existing topic handle
    */
   Topic(TopicHandle topic);
 
   /**
-   * @brief 在指定域中查找主题 / Find a topic in the specified domain
-   * @param name 主题名称 / Topic name
-   * @param domain 待查找的主题域，默认为 `nullptr` / Domain to search in, default `nullptr`
-   * @return 如果找到则返回主题句柄，否则返回 `nullptr` / Returns the topic handle if found, otherwise returns `nullptr`
-   * @note 查询不会创建默认域；默认域尚未初始化时返回 `nullptr` / Lookup does not create the default domain; it returns `nullptr` when the default domain has not been initialized
+   * @brief 按名称查找一个已存在 topic / Find one existing topic by name
+   * @param name topic 名称 / Topic name
+   * @param domain 可选主题域 / Optional topic domain
+   * @return 找到则返回句柄，否则返回空 / Returns the handle when found, otherwise null
    */
   static TopicHandle Find(const char* name, Domain* domain = nullptr);
 
   /**
-   * @brief 在指定域中查找或创建主题 / Find or create a topic in the specified domain
-   * @tparam Data 数据类型 / Data type
-   * @param name 主题名称 / Topic name
-   * @param domain 可选的域指针，默认为 `nullptr` / Optional domain pointer, default
-   *        `nullptr`
-   * @param multi_publisher 是否允许多个发布者，默认为 `false` / Whether to allow
-   *        multiple publishers, default `false`
-   * @param cache 是否启用缓存，默认为 `false` / Whether to enable caching, default
-   *        `false`
-   * @param check_length 是否检查数据长度，默认为 `false` / Whether to check data
-   *        length, default `false`
-   * @return 主题句柄 / Returns the topic handle
-   * @note 包含初始化期动态内存分配，主题应长期存在 / Contains initialization-time dynamic allocation; topics are expected to be long-lived
-   * @note 若该名称的 topic 已存在，这里直接返回现有句柄，不会重新检查这些创建参数 /
-   *       If a topic with the same name already exists, this returns the
-   *       existing handle directly and does not re-check these creation options
+   * @brief 按精确类型查找或创建一个 topic / Find or create one topic with an exact
+   *        payload type
+   * @tparam Data payload 类型 / Payload type
+   * @param name topic 名称 / Topic name
+   * @param domain 可选主题域 / Optional topic domain
+   * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized
+   *        multi-publisher use
+   * @return topic 句柄 / Topic handle
    */
   template <typename Data>
   static TopicHandle FindOrCreate(const char* name, Domain* domain = nullptr,
-                                  bool multi_publisher = false, bool cache = false,
-                                  bool check_length = false)
+                                  bool multi_publisher = false)
   {
     CheckTopicPayload<Data>();
     auto topic = Find(name, domain);
-    if (topic == nullptr)
+    if (topic != nullptr)
     {
-      topic =
-          CreateTopic<Data>(name, domain, multi_publisher, cache, check_length).block_;
+      CheckSubscriberType<Data>(Topic(topic));
+      if (multi_publisher && !topic->data_.mutex)
+      {
+        ASSERT(false);
+      }
+    }
+    else
+    {
+      topic = CreateTopic<Data>(name, domain, multi_publisher).block_;
     }
     return topic;
   }
 
   /**
-   * @brief 启用主题的缓存功能 / Enable caching for the topic
-   * @note 包含初始化期动态内存分配，缓存启用后应长期存在 / Contains initialization-time dynamic allocation; the cache is expected to remain enabled for the topic lifetime
-   * @note 若缓存原本已经启用，这里不会重复分配 /
-   *       If caching is already enabled, this does not allocate again
-   * @note 该操作只负责分配 topic 自有缓存；若之前已经有“未缓存”的最近一次发布地址，
-   *       这里不会回填旧数据 /
-   *       This only allocates topic-owned cache storage; if the latest publish
-   *       was previously retained as a non-cached external address, that old
-   *       payload is not backfilled here
+   * @brief 获取该 topic 固定 payload 字节数 / Get the fixed payload size of this topic
+   * @return payload 字节数 / Payload size in bytes
    */
-  void EnableCache();
+  [[nodiscard]] size_t PayloadSize() const
+  {
+    ASSERT(block_ != nullptr);
+    return block_->data_.payload_size;
+  }
 
   /**
-   * @brief 发布类型化数据 / Publish typed data
-   * @tparam Data 数据类型 / Data type
-   * @param data 需要发布的数据 / Data to be published
-   * @note 对于未启用缓存的 topic，若这里传入的是外部对象，topic 只保留它的地址直到下一次
-   *       发布或 `DumpData()` 读取 /
-   *       For a non-cached topic, when this publishes an external object the
-   *       topic retains only its address until the next publish or `DumpData()`
+   * @brief 获取该 topic payload 的对齐要求 / Get the payload alignment requirement of
+   *        this topic
+   * @return payload 对齐要求 / Payload alignment requirement
+   */
+  [[nodiscard]] size_t PayloadAlignment() const
+  {
+    ASSERT(block_ != nullptr);
+    return block_->data_.payload_alignment;
+  }
+
+  /**
+   * @brief 在普通上下文里发布一条消息，并自动取当前时间戳 / Publish one message in
+   *        normal context and stamp it with the current time
+   * @tparam Data payload 类型 / Payload type
+   * @param data 待发布的 payload 对象 / Payload object to publish
    */
   template <typename Data>
   void Publish(Data& data)
   {
-    CheckTopicPayload<Data>();
-    Publish(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)));
+    PublishTyped(data, NowTimestamp(), false, false);
   }
 
   /**
-   * @brief 发布带显式时间戳的类型化数据 / Publish typed data with an explicit timestamp
-   * @tparam Data 数据类型 / Data type
-   * @param data 需要发布的数据 / Data to be published
-   * @param timestamp 发布使用的时间戳 / Timestamp used for publishing
-   * @note 对于未启用缓存的 topic，若这里传入的是外部对象，topic 只保留它的地址直到下一次
-   *       发布或 `DumpData()` 读取 /
-   *       For a non-cached topic, when this publishes an external object the
-   *       topic retains only its address until the next publish or `DumpData()`
+   * @brief 在普通上下文里按指定时间戳发布一条消息 / Publish one message in normal
+   *        context with an explicit timestamp
+   * @tparam Data payload 类型 / Payload type
+   * @param data 待发布的 payload 对象 / Payload object to publish
+   * @param timestamp 消息时间戳 / Message timestamp
    */
   template <typename Data>
   void Publish(Data& data, MicrosecondTimestamp timestamp)
   {
-    CheckTopicPayload<Data>();
-    Publish(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)), timestamp);
+    PublishTyped(data, timestamp, false, false);
   }
 
   /**
-   * @brief 以原始地址和大小发布数据 / Publish data using raw address and size
-   * @param addr 数据的地址 / Address of the data
-   * @param size 数据大小 / Size of the data
-   * @note `size` 必须满足该 topic 的尺寸规则：`check_length=true` 时要求等于
-   *       `max_length`，否则要求不超过 `max_length` /
-   *       `size` must satisfy the topic's size rule: it must equal
-   *       `max_length` when `check_length=true`, otherwise it must not exceed
-   *       `max_length`
-   * @note 未启用缓存时，topic 只保留 `addr` 指向的那段外部数据地址，直到下一次发布或
-   *       `DumpData()` 读取 /
-   *       Without cache, the topic keeps only the external address pointed to
-   *       by `addr` until the next publish or `DumpData()`
-   */
-  void Publish(void* addr, uint32_t size);
-
-  /**
-   * @brief 以原始地址和大小发布带显式时间戳的数据 / Publish raw data with an explicit timestamp
-   * @param addr 数据的地址 / Address of the data
-   * @param size 数据大小 / Size of the data
-   * @param timestamp 发布使用的时间戳 / Timestamp used for publishing
-   * @note 未启用缓存时，topic 只保留 `addr` 指向的那段外部数据地址，直到下一次发布或
-   *       `DumpData()` 读取 /
-   *       Without cache, the topic keeps only the external address pointed to
-   *       by `addr` until the next publish or `DumpData()`
-   */
-  void Publish(void* addr, uint32_t size, MicrosecondTimestamp timestamp);
-
-  /**
-   * @brief 在回调函数中发布类型化数据 / Publish typed data in a callback
-   * @tparam Data 数据类型 / Data type
-   * @param data 需要发布的数据 / Data to be published
-   * @param in_isr 是否在中断中发布数据 / Whether to publish data in an interrupt
-   * @note 对于未启用缓存的 topic，若这里传入的是外部对象，topic 只保留它的地址直到下一次
-   *       发布或 `DumpData()` 读取 /
-   *       For a non-cached topic, when this publishes an external object the
-   *       topic retains only its address until the next publish or `DumpData()`
+   * @brief 在回调或 ISR 路径里发布一条消息，并自动取当前时间戳 / Publish one message
+   *        from callback or ISR context and stamp it with the current time
+   * @tparam Data payload 类型 / Payload type
+   * @param data 待发布的 payload 对象 / Payload object to publish
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
   template <typename Data>
   void PublishFromCallback(Data& data, bool in_isr)
   {
-    CheckTopicPayload<Data>();
-    PublishFromCallback(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-                        in_isr);
+    PublishTyped(data, NowTimestamp(), true, in_isr);
   }
 
   /**
-   * @brief 在回调函数中发布带显式时间戳的类型化数据 / Publish typed data with an explicit timestamp in a callback
-   * @tparam Data 数据类型 / Data type
-   * @param data 需要发布的数据 / Data to be published
-   * @param timestamp 发布使用的时间戳 / Timestamp used for publishing
-   * @param in_isr 是否在中断中发布数据 / Whether to publish data in an interrupt
-   * @note 对于未启用缓存的 topic，若这里传入的是外部对象，topic 只保留它的地址直到下一次
-   *       发布或 `DumpData()` 读取 /
-   *       For a non-cached topic, when this publishes an external object the
-   *       topic retains only its address until the next publish or `DumpData()`
+   * @brief 在回调或 ISR 路径里按指定时间戳发布一条消息 / Publish one message from
+   *        callback or ISR context with an explicit timestamp
+   * @tparam Data payload 类型 / Payload type
+   * @param data 待发布的 payload 对象 / Payload object to publish
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
   template <typename Data>
   void PublishFromCallback(Data& data, MicrosecondTimestamp timestamp, bool in_isr)
   {
-    CheckTopicPayload<Data>();
-    PublishFromCallback(static_cast<void*>(&data), static_cast<uint32_t>(sizeof(Data)),
-                        timestamp, in_isr);
+    PublishTyped(data, timestamp, true, in_isr);
   }
 
   /**
-   * @brief 在回调函数中以原始地址和大小发布数据 / Publish data using raw address and size in a callback
-   * @param addr 数据的地址 / Address of the data
-   * @param size 数据大小 / Size of the data
-   * @param in_isr 是否在中断中发布数据 / Whether to publish data in an interrupt
-   * @note 仅适用于非 mutex 主题；multi_publisher 主题会在回调发布路径触发断言 / Only valid for non-mutex topics; multi-publisher topics assert on the callback publish path
-   * @note 未启用缓存时，topic 只保留 `addr` 指向的那段外部数据地址，直到下一次发布或
-   *       `DumpData()` 读取 /
-   *       Without cache, the topic keeps only the external address pointed to
-   *       by `addr` until the next publish or `DumpData()`
-   * @note 回调发布路径不分配内存，但仍会同步分发到该主题的订阅者 / The callback publish path does not allocate, but still dispatches to the topic subscribers synchronously
+   * @brief 供 packet/server 路径按字节发布一条消息 / Publish one message from the
+   *        packet/server path using bytes already arranged as the exact payload object
+   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the already-aligned payload object
+   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must equal the fixed topic size
+   * @param timestamp 这条消息的时间戳 / Timestamp of this message
    */
-  void PublishFromCallback(void* addr, uint32_t size, bool in_isr);
+  void PublishBytesFromServer(void* payload_addr, size_t payload_size,
+                              MicrosecondTimestamp timestamp)
+  {
+    PublishServerBytes(payload_addr, payload_size, timestamp, false, false);
+  }
 
   /**
-   * @brief 在回调函数中以原始地址和大小发布带显式时间戳的数据 / Publish raw data with an explicit timestamp in a callback
-   * @param addr 数据的地址 / Address of the data
-   * @param size 数据大小 / Size of the data
-   * @param timestamp 发布使用的时间戳 / Timestamp used for publishing
-   * @param in_isr 是否在中断中发布数据 / Whether to publish data in an interrupt
-   * @note 仅适用于非 mutex 主题；multi_publisher 主题会在回调发布路径触发断言 / Only valid for non-mutex topics; multi-publisher topics assert on the callback publish path
-   * @note 未启用缓存时，topic 只保留 `addr` 指向的那段外部数据地址，直到下一次发布或
-   *       `DumpData()` 读取 /
-   *       Without cache, the topic keeps only the external address pointed to
-   *       by `addr` until the next publish or `DumpData()`
-   * @note 回调发布路径不分配内存，但仍会同步分发到该主题的订阅者 / The callback publish path does not allocate, but still dispatches to the topic subscribers synchronously
+   * @brief 供回调/ISR 上下文里的 packet/server 路径按字节发布一条消息 / Publish one
+   *        packet/server message from callback/ISR context using bytes already arranged as
+   *        the exact payload object
+   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the already-aligned payload object
+   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must equal the fixed topic size
+   * @param timestamp 这条消息的时间戳 / Timestamp of this message
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
-  void PublishFromCallback(void* addr, uint32_t size, MicrosecondTimestamp timestamp,
-                           bool in_isr);
+  void PublishBytesFromServerCallback(void* payload_addr, size_t payload_size,
+                                      MicrosecondTimestamp timestamp, bool in_isr)
+  {
+    PublishServerBytes(payload_addr, payload_size, timestamp, true, in_isr);
+  }
 
   /**
-   * @brief 打包数据 / Pack topic data into a packet buffer
-   * @param topic_name_crc32 话题名称的 CRC32 校验码 / CRC32 checksum of the topic name
-   * @param buffer 等待写入的包 / Packed data buffer to be written
-   * @param timestamp 需要打包的消息时间戳 / Message timestamp to be packed
-   * @param data 需要打包的消息数据 / Message data to be packed
-   *
-   * @note 这一步只负责按 message 的打包报文格式写字节，不查 topic、不分发订阅者 /
-   *       This step only writes bytes in the message packet format; it does not
-   *       look up topics or dispatch subscribers
-   * @note `buffer` 必须至少提供 `PACK_BASE_SIZE + data.size_` 字节 /
-   *       `buffer` must provide at least `PACK_BASE_SIZE + data.size_` bytes
-   */
-  static void PackData(uint32_t topic_name_crc32, RawData buffer,
-                       MicrosecondTimestamp timestamp, ConstRawData data);
-
-  /**
-   * @brief 把最近一次发布的数据拷成一个打包报文 / Copy the latest published data into
-   *        one packed message object
-   * @tparam Data 数据类型 / Data type
-   * @param data 用来接收结果的 `PackedData` / `PackedData` object that receives the result
-   * @return 操作结果错误码 / Error code indicating the operation result
+   * @brief 将一个精确类型消息打包成 packet / Pack one exact-typed message into one
+   *        packet using the topic's runtime contract and current timestamp
+   * @tparam Data 负载类型 / Payload type
+   * @param data 待打包 payload / Payload to pack
+   * @param packet 输出 packet 对象 / Output packed message object
+   * @return 操作结果错误码 / Error code
    */
   template <typename Data>
-  ErrorCode DumpData(PackedData<Data>& data);
-
-  /**
-   * @brief 把最近一次发布的 payload 拷到原始缓冲区 / Copy the latest published payload
-   *        into a raw buffer
-   * @tparam Mode 尺寸检查模式 / Size check mode
-   * @param data 存储数据的原始缓冲区 / Raw buffer used to store data
-   * @return 操作结果错误码 / Error code indicating the operation result
-   */
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpData(RawData data)
+  ErrorCode PackData(const Data& data, PackedData<Data>& packet)
   {
-    MicrosecondTimestamp timestamp;
-    return DumpPayload<Mode>(data, timestamp);
+    return PackData(data, packet, NowTimestamp());
   }
 
   /**
-   * @brief 把最近一次发布的 payload 拷到原始缓冲区，并带回时间戳 / Copy the latest
-   *        published payload into a raw buffer and return its timestamp
-   * @tparam Mode 尺寸检查模式 / Size check mode
-   * @param data 存储数据的原始缓冲区 / Raw buffer used to store data
-   * @param timestamp 用来带回消息时间戳 / Receives the message timestamp
-   * @return 操作结果错误码 / Error code indicating the operation result
-   */
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpData(RawData data, MicrosecondTimestamp& timestamp)
-  {
-    return DumpPayload<Mode>(data, timestamp);
-  }
-
-  /**
-   * @brief 把最近一次发布的数据拷到普通对象里 / Copy the latest published data into a
-   *        typed object
-   * @tparam Data 数据类型 / Data type
-   * @param data 用来接收结果的对象 / Destination object receiving the result
-   * @return 操作结果错误码 / Error code indicating the operation result
-   * @note 目标对象可以只接前面一段字节，例如用一个更小的结构去接一份更大的 payload；
-   *       但如果目标对象反而比当前 payload 更大，就会返回 `SIZE_ERR` /
-   *       The destination object may receive only the leading bytes, for example
-   *       using a smaller base struct to receive a larger payload; but if the
-   *       destination object is larger than the current payload,
-   *       `SIZE_ERR` is returned
+   * @brief 将一个精确类型消息按指定时间戳打包成 packet / Pack one exact-typed message
+   *        into one packet with the given timestamp
+   * @tparam Data 负载类型 / Payload type
+   * @param data 待打包 payload / Payload to pack
+   * @param packet 输出 packet 对象 / Output packed message object
+   * @param timestamp 指定时间戳 / Explicit timestamp
+   * @return 操作结果错误码 / Error code
    */
   template <typename Data>
-    requires(!std::same_as<std::remove_cv_t<Data>, RawData>)
-  ErrorCode DumpData(Data& data)
-  {
-    MicrosecondTimestamp timestamp;
-    return DumpData(data, timestamp);
-  }
+  ErrorCode PackData(const Data& data, PackedData<Data>& packet,
+                     MicrosecondTimestamp timestamp);
 
   /**
-   * @brief 把最近一次发布的数据拷到普通对象里，并带回时间戳 / Copy the latest
-   *        published data into a typed object and return its timestamp
-   * @tparam Data 数据类型 / Data type
-   * @param data 用来接收结果的对象 / Destination object receiving the result
-   * @param timestamp 用来带回消息时间戳 / Receives the message timestamp
-   * @return 操作结果错误码 / Error code indicating the operation result
-   */
-  template <typename Data>
-    requires(!std::same_as<std::remove_cv_t<Data>, RawData>)
-  ErrorCode DumpData(Data& data, MicrosecondTimestamp& timestamp)
-  {
-    CheckTopicPayload<Data>();
-    return DumpPayload<SizeLimitMode::LESS>(RawData(data), timestamp);
-  }
-
-  /**
-   * @brief 取这个 topic 记着的最近一次时间戳 / Get the latest timestamp currently kept
-   *        by this topic
-   * @return 最近一次消息时间戳 / Returns the latest message timestamp
-   * @note 若当前句柄为空，则返回默认构造的时间戳 /
-   *       Returns a default-constructed timestamp when the current handle is empty
-   */
-  MicrosecondTimestamp GetTimestamp() const;
-
-  /**
-   * @brief 等待主题创建并返回其句柄 / Wait for a topic to be created and return its handle
-   * @param name 主题名称 / Topic name
-   * @param timeout 等待超时时间，默认为 `UINT32_MAX` / Timeout duration to wait, default `UINT32_MAX`
-   * @param domain 待查找的主题域，默认为 `nullptr` / Domain in which to search for the topic, default `nullptr`
-   * @return 如果找到主题则返回其句柄，否则返回 `nullptr` / Returns the topic handle if found, otherwise returns `nullptr`
-   * @note 该等待通过 `Find()` + `Thread::Sleep(1)` 轮询实现，不是事件驱动注册通知 /
-   *       This wait is implemented by polling `Find()` plus `Thread::Sleep(1)`,
-   *       not by an event-driven registration notification
+   * @brief 等待指定名称的 topic 出现 / Wait until a topic with the given name exists
+   * @param name topic 名称 / Topic name
+   * @param timeout 等待超时，默认永久等待 / Timeout in ticks, default wait forever
+   * @param domain 可选主题域 / Optional topic domain
+   * @return 找到则返回句柄，否则返回空 / Returns the handle when found, otherwise null
    */
   static TopicHandle WaitTopic(const char* name, uint32_t timeout = UINT32_MAX,
                                Domain* domain = nullptr);
 
   /**
-   * @brief 将 `Topic` 转换为 `TopicHandle` / Convert `Topic` to `TopicHandle`
-   * @return 主题句柄 / Returns the topic handle
+   * @brief 把 topic 视图转换为底层句柄 / Convert this topic view to the underlying
+   *        handle
+   * @return topic 句柄 / Topic handle
    */
   operator TopicHandle() { return block_; }
 
   /**
-   * @brief 获取主题的键值 / Get the topic key value
-   * @return 主题键值 / Returns the topic key value
-   * @note 若当前句柄为空，则返回 `0` /
-   *       Returns `0` when the current handle is empty
+   * @brief 读取 topic 键值 / Read the key value of this topic
+   * @return topic 键值 / Topic key value
    */
   uint32_t GetKey() const;
 
-  /**
-   * @class Server
-   * @brief 把字节流拼成消息再发布的解析器 / Parser that assembles byte streams into
-   *        messages and then publishes them
-   * @note 具体定义见 `server/server.hpp` / The full definition lives in
-   *       `server/server.hpp`
-   */
-  class Server;
-
  private:
-  /**
-   * @brief 当前这个 `Topic` 视图指向的节点 / Node currently pointed to by this
-   *        `Topic` view
-   */
-  TopicHandle block_ = nullptr;
+  TopicHandle block_ = nullptr;  ///< 当前 topic 视图绑定的状态块。Runtime state block bound to the current topic view.
+
+  static inline RBTree<uint32_t>* domain_ = nullptr;  ///< 全局 topic 域注册表。Global registry of topic domains.
+  static inline Domain* def_domain_ = nullptr;        ///< 缺省 topic 域。Default topic domain.
 
   /**
-   * @brief 全局 domain 表 / Global table of domains
-   * @note 初始化期懒创建；调用者应在并发发布前完成 topic 和 domain 创建 /
-   *       Lazily created during initialization; callers should finish topic and
-   *       domain creation before concurrent publishing starts
-   */
-  static inline RBTree<uint32_t>* domain_ = nullptr;
-
-  /**
-   * @brief 没显式指定 domain 时使用的默认 domain / Default domain used when no domain
-   *        is specified explicitly
-   */
-  static inline Domain* def_domain_ = nullptr;
-
-  /**
-   * @brief 确保主题域注册表已创建 / Ensure the topic-domain registry exists
+   * @brief 确保全局域注册表已创建 / Ensure the global domain registry exists
    */
   static void EnsureDomainRegistry();
 
   /**
-   * @brief 确保默认主题域已创建 / Ensure the default topic domain exists
-   * @return 默认主题域指针 / Returns the default topic domain pointer
+   * @brief 确保默认域已创建 / Ensure the default domain exists
+   * @return 默认域指针 / Default domain pointer
    */
   static Domain* EnsureDefaultDomain();
 
   /**
-   * @brief 按尺寸规则把最近一次发布的 payload 拷到原始缓冲区 / Copy the latest
-   *        published payload into a raw buffer under one size rule
-   * @tparam Mode 尺寸检查模式 / Size check mode
-   * @param buffer 接收结果的原始缓冲区 / Raw buffer receiving the copied payload
-   * @param timestamp 用来带回消息时间戳 / Receives the message timestamp
-   * @return 操作结果错误码 / Error code indicating the operation result
-   * @note `EQUAL` 要求缓冲区和当前 payload 等长；`LESS` 允许只把 payload 前缀拷到
-   *       更小的目标；`MORE` 要求目标至少完整容纳当前 payload /
-   *       `EQUAL` requires the buffer to match the current payload size exactly;
-   *       `LESS` allows dumping only the payload prefix into a smaller
-   *       destination; `MORE` requires the destination to hold the full current
-   *       payload
+   * @brief 校验 server 侧字节发布前提 / Check the preconditions of one server-side byte
+   *        publish
+   * @param topic 目标 topic / Target topic
+   * @param payload_addr 已满足对齐的 payload 地址 / Already-aligned payload address
+   * @param payload_size payload 字节数 / Payload size in bytes
    */
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpPayload(RawData buffer, MicrosecondTimestamp& timestamp)
+  static void CheckServerPublishContract(TopicHandle topic, void* payload_addr,
+                                         size_t payload_size)
   {
-    if (block_->data_.data.addr_ == nullptr)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    const size_t payload_size = block_->data_.data.size_;
-    size_t copy_size = payload_size;
-
-    if constexpr (Mode == SizeLimitMode::EQUAL)
-    {
-      if (payload_size != buffer.size_)
-      {
-        return ErrorCode::SIZE_ERR;
-      }
-    }
-    else if constexpr (Mode == SizeLimitMode::LESS)
-    {
-      if (payload_size < buffer.size_)
-      {
-        return ErrorCode::SIZE_ERR;
-      }
-      copy_size = buffer.size_;
-    }
-    else if constexpr (Mode == SizeLimitMode::MORE)
-    {
-      if (payload_size > buffer.size_)
-      {
-        return ErrorCode::SIZE_ERR;
-      }
-    }
-
-    Lock(block_);
-    timestamp = block_->data_.timestamp;
-    LibXR::Memory::FastCopy(buffer.addr_, block_->data_.data.addr_, copy_size);
-    Unlock(block_);
-
-    return ErrorCode::OK;
+    ASSERT(topic != nullptr);
+    ASSERT(payload_addr != nullptr);
+    ASSERT(payload_size == topic->data_.payload_size);
+    ASSERT(topic->data_.payload_alignment != 0);
+    ASSERT(reinterpret_cast<uintptr_t>(payload_addr) % topic->data_.payload_alignment ==
+           0);
   }
 
   /**
-   * @brief 按尺寸规则把最近一次发布的数据拷成打包报文 / Copy the latest published
-   *        data into a packed message under one size rule
-   * @tparam Mode 尺寸检查模式 / Size check mode
-   * @param buffer 存储打包报文的原始缓冲区 / Raw buffer receiving the packed message
-   * @return 操作结果错误码 / Error code indicating the operation result
+   * @brief 断言订阅者看到的精确 payload 类型与 topic 契约一致 / Assert that the exact
+   *        payload type seen by a subscriber matches the topic contract
+   * @tparam Data 订阅类型 / Subscriber payload type
+   * @param topic 目标 topic 视图 / Target topic view
    */
-  template <SizeLimitMode Mode = SizeLimitMode::MORE>
-  ErrorCode DumpPacket(RawData buffer);
+  template <typename Data>
+  static void CheckSubscriberType(Topic topic)
+  {
+    CheckTopicPayload<Data>();
+    ASSERT(topic.block_ != nullptr);
+    ASSERT(topic.block_->data_.payload_type_id == TypeID::GetID<Data>());
+    ASSERT(topic.block_->data_.payload_size == sizeof(Data));
+    ASSERT(topic.block_->data_.payload_alignment == alignof(Data));
+  }
 
   /**
-   * @brief 执行一次底层发布流程 / Run one low-level publish flow
-   * @param addr 数据地址 / Address of the data
-   * @param size 数据大小 / Size of the data
-   * @param timestamp 本次发布使用的时间戳 / Timestamp used for this publish
-   * @param from_callback 是否来自回调发布路径 / Whether the publish comes from a callback path
-   * @param in_isr 当前回调是否运行在中断上下文 / Whether the current callback runs in ISR context
+   * @brief 为订阅者分配一个长期存在的本地接收对象 / Allocate one long-lived local
+   *        receive object for a subscriber
+   * @tparam Data 对象类型 / Object type
+   * @return 新分配对象的地址 / Address of the newly allocated object
    */
-  void PublishRaw(void* addr, uint32_t size, MicrosecondTimestamp timestamp,
-                  bool from_callback, bool in_isr);
+  template <typename Data>
+  static void* AllocateSubscriberBuffer()
+  {
+    CheckTopicPayload<Data>();
+    return new Data;
+  }
 
   /**
-   * @brief 检查这次发布的字节数能不能发到这个 topic / Check whether this publish size
-   *        is acceptable for the topic
-   * @param topic 目标主题句柄 / Target topic handle
-   * @param size 本次发布数据大小 / Size of the published data
-   * @note `check_length=true` 时要求精确等长，否则只要求 `size <= max_length` /
-   *       When `check_length=true`, the size must match exactly; otherwise the
-   *       only requirement is `size <= max_length`
+   * @brief 按精确类型把一份 payload 拷到订阅者缓冲区 / Copy one payload into a
+   *        subscriber buffer using the exact type
+   * @tparam Data payload 类型 / Payload type
+   * @param dst 订阅者缓冲区地址 / Subscriber buffer address
+   * @param payload_addr 本次发布 payload 地址 / Address of the payload object of the
+   *        current publish
    */
-  static void CheckPublishSize(TopicHandle topic, uint32_t size);
+  template <typename Data>
+  static void CopyPayload(void* dst, void* payload_addr)
+  {
+    CheckTopicPayload<Data>();
+    ASSERT(dst != nullptr);
+    ASSERT(payload_addr != nullptr);
+    *reinterpret_cast<Data*>(dst) = *reinterpret_cast<Data*>(payload_addr);
+  }
 
   /**
-   * @brief 按这个 topic 的缓存设置，留下这次发布的数据和时间戳 / Keep the data and
-   *        timestamp of this publish according to the topic's cache setting
-   * @param topic 目标主题句柄 / Target topic handle
-   * @param addr 数据地址 / Address of the data
-   * @param size 数据大小 / Size of the data
-   * @param timestamp 本次发布使用的时间戳 / Timestamp used for this publish
-   * @return 当前主题内最终保存的数据视图 / Returns the final data view stored in the topic
-   * @note 启用缓存时会把 payload 拷入 topic 自有缓冲区；否则只保留调用者传入的原始地址 /
-   *       With cache enabled the payload is copied into topic-owned storage;
-   *       otherwise only the caller-provided raw address is retained
+   * @brief 强类型发布入口的共享实现 / Shared implementation of typed publish entry
+   *        points
+   * @tparam Data payload 类型 / Payload type
+   * @param data 待发布 payload / Payload to publish
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param from_callback 是否来自回调路径 / Whether this publish comes from callback
+   *        path
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
-  static RawData StorePublishedData(TopicHandle topic, void* addr, uint32_t size,
-                                    MicrosecondTimestamp timestamp);
+  template <typename Data>
+  void PublishTyped(Data& data, MicrosecondTimestamp timestamp, bool from_callback,
+                    bool in_isr)
+  {
+    CheckTopicPayload<Data>();
+
+    if (from_callback)
+    {
+      LockFromCallback(block_);
+    }
+    else
+    {
+      Lock(block_);
+    }
+
+    CheckPublishContract(block_, TypeID::GetID<Data>(), sizeof(Data), alignof(Data));
+    DispatchSubscribers(block_, timestamp, &data, from_callback, in_isr);
+
+    if (from_callback)
+    {
+      UnlockFromCallback(block_);
+    }
+    else
+    {
+      Unlock(block_);
+    }
+  }
+
+  /**
+   * @brief 校验一次强类型发布的运行时契约 / Check the runtime contract of one typed
+   *        publish
+   * @param topic 目标 topic 句柄 / Target topic handle
+   * @param payload_type_id 本次发布的精确 payload 类型标识 / Exact payload type ID of
+   *        this publish
+   * @param payload_size 本次发布的 payload 固定字节数 / Fixed payload size of this
+   *        publish
+   * @param payload_alignment 本次发布的 payload 对齐要求 / Payload alignment
+   *        requirement of this publish
+   */
+  static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
+                                   size_t payload_size, size_t payload_alignment);
+
+  /**
+   * @brief 将一段 payload 字节和 topic 元数据拼成 packet / Pack one payload byte range
+   *        together with topic metadata into one packet
+   * @param topic_name_crc32 目标 topic 的 CRC32 键 / CRC32 key of the target topic
+   * @param buffer 输出原始缓冲区 / Output raw buffer
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param data 待打包的 payload 字节 / Payload bytes to pack
+   */
+  static void PackBytes(uint32_t topic_name_crc32, RawData buffer,
+                        MicrosecondTimestamp timestamp, ConstRawData data);
+
+  /**
+   * @brief 将一条消息分发给一个订阅块 / Dispatch one message to one subscriber block
+   * @param block 目标订阅块 / Target subscriber block
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param payload_addr 本次发布 payload 地址 / Address of the payload object of the
+   *        current publish
+   * @param from_callback 是否来自回调路径 / Whether this publish comes from callback
+   *        path
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
+   */
+  static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
+                                 void* payload_addr, bool from_callback, bool in_isr);
+
+  /**
+   * @brief 将一条消息分发给一个 topic 上的全部订阅者 / Dispatch one message to all
+   *        subscribers attached to one topic
+   * @param topic 目标 topic 句柄 / Target topic handle
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param payload_addr 本次发布 payload 地址 / Address of the payload object of the
+   *        current publish
+   * @param from_callback 是否来自回调路径 / Whether this publish comes from callback
+   *        path
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
+   */
+  static void DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestamp,
+                                  void* payload_addr, bool from_callback, bool in_isr);
+
+  /**
+   * @brief `PublishBytesFromServer*()` 的共享实现 / Shared implementation behind
+   *        `PublishBytesFromServer*()`
+   * @param payload_addr 已满足对齐的 payload 地址 / Already-aligned payload address
+   * @param payload_size payload 字节数 / Payload size in bytes
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param from_callback 是否来自回调发布路径 / Whether this publish comes from callback path
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
+   */
+  void PublishServerBytes(void* payload_addr, size_t payload_size,
+                          MicrosecondTimestamp timestamp, bool from_callback,
+                          bool in_isr)
+  {
+    CheckServerPublishContract(block_, payload_addr, payload_size);
+
+    if (from_callback)
+    {
+      LockFromCallback(block_);
+    }
+    else
+    {
+      Lock(block_);
+    }
+
+    DispatchSubscribers(block_, timestamp, payload_addr, from_callback, in_isr);
+
+    if (from_callback)
+    {
+      UnlockFromCallback(block_);
+    }
+    else
+    {
+      Unlock(block_);
+    }
+  }
 };
 }  // namespace LibXR
+
+#include "packet/packet.hpp"
+#include "server/server.hpp"
+#include "subscriber/async.hpp"
+#include "subscriber/callback.hpp"
+#include "subscriber/queue.hpp"
+#include "subscriber/sync.hpp"
