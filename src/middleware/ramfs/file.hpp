@@ -1,4 +1,7 @@
   /**
+   * @brief `RamFS` 的文件节点片段 / File-node fragment of `RamFS`
+   */
+  /**
    * @class File
    * @brief 内存文件或可执行文件 / Memory file or executable file
    */
@@ -138,6 +141,9 @@
     }
 
    private:
+    /**
+     * @brief 可执行文件调用入口类型 / Executable entry function type
+     */
     using ExecFun = int (*)(void* raw, int argc, char** argv);
 
     /**
@@ -162,19 +168,34 @@
 #endif
     }
 
+    /**
+     * @brief 构造一个空文件壳 / Construct one empty file shell
+     */
     File();
+
+    /**
+     * @brief 构造一个具名文件壳 / Construct one named file shell
+     * @param name 文件名 / File name
+     */
     explicit File(const char* name);
 
+    /**
+     * @brief 文件负载联合体 / File payload union
+     *
+     * The same storage is interpreted either as mutable data, const data, or an
+     * executable entry depending on `file_type_`.
+     * 这块存储会根据 `file_type_` 被解释成可写数据、只读数据或可执行入口。
+     */
     union
     {
-      void* addr_;
-      const void* addr_const_;
-      ExecFun exec_;
+      void* addr_;              ///< 可写数据地址 / Writable payload address.
+      const void* addr_const_;  ///< 只读数据地址 / Read-only payload address.
+      ExecFun exec_;            ///< 可执行入口函数 / Executable entry function.
     };
 
-    void* arg_ = nullptr;
-    size_t size_ = 0;
-    FileType file_type_ = FileType::READ_ONLY;
+    void* arg_ = nullptr;                       ///< 可执行文件上下文块 / Executable context block.
+    size_t size_ = 0;                          ///< 数据负载字节数 / Payload size in bytes.
+    FileType file_type_ = FileType::READ_ONLY;  ///< 当前文件存储形态 / Current file storage kind.
 
     friend class RamFS;
   };

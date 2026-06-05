@@ -1,4 +1,7 @@
   /**
+   * @brief `RamFS` 的目录节点片段 / Directory-node fragment of `RamFS`
+   */
+  /**
    * @class Dir
    * @brief 目录节点，管理直属子节点 / Directory node that owns a child namespace
    */
@@ -88,14 +91,40 @@
     }
 
    private:
+    /**
+     * @brief 构造一个空目录壳 / Construct one empty directory shell
+     */
     Dir();
+
+    /**
+     * @brief 构造一个具名目录壳 / Construct one named directory shell
+     * @param name 目录名称 / Directory name
+     */
     explicit Dir(const char* name);
 
+    /**
+     * @brief 把一个节点挂到当前目录下 / Attach one node under the current directory
+     * @param node 待挂接节点 / Node to attach
+     */
     void AddNode(FsNode& node);
+
+    /**
+     * @brief 在当前目录按类型查找直属节点 / Find one direct child node of a given type
+     * @param name 节点名称 / Node name
+     * @param type 目标节点类型 / Desired node type
+     * @return 找到的节点；未找到返回 nullptr / Matching node, or nullptr
+     */
     FsNode* FindNodeByType(const char* name, FsNodeType type);
+
+    /**
+     * @brief 递归查找指定类型节点 / Find one node of a given type recursively
+     * @param name 节点名称 / Node name
+     * @param type 目标节点类型 / Desired node type
+     * @return 找到的节点；未找到返回 nullptr / Matching node, or nullptr
+     */
     FsNode* FindNodeRevByType(const char* name, FsNodeType type);
 
-    Tree rbt_;
+    Tree rbt_;  ///< 当前目录直属子节点的名称索引树 / Name index tree of direct child nodes.
 
     friend class RamFS;
   };

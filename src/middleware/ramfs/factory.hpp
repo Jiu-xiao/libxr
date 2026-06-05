@@ -1,4 +1,7 @@
   /**
+   * @brief `RamFS` 的工厂与根入口片段 / Factory and root-entry fragment of `RamFS`
+   */
+  /**
    * @brief 创建引用外部数据的文件 / Create a file referencing external data
    * @tparam DataType 外部数据类型 / External data type
    * @param name 文件名 / File name
@@ -141,5 +144,5 @@
    */
   Custom* FindCustom(const char* name) { return root_.FindCustomRev(name); }
 
-  Dir root_;  ///< 根目录 / Root directory
-  Dir bin_;   ///< 可执行文件目录 / Executable-file directory
+  Dir root_;  ///< 根目录；所有外部 Add()/Find*() 默认都从这里进入 / Root directory; all external Add()/Find*() entry through here.
+  Dir bin_;   ///< 预留的可执行文件目录 / Reserved executable-file directory.

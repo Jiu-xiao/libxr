@@ -4,8 +4,14 @@ using namespace LibXR;
 
 RamFS::RamFS(const char* name) : root_(name), bin_("bin") { root_.Add(bin_); }
 
+// RamFS 目录树里所有名称比较最终都落回标准 C 字符串比较。
+// All name comparisons in the RamFS directory tree ultimately fall back to
+// standard C-string comparison.
 int RamFS::CompareStr(const char* const& a, const char* const& b) { return strcmp(a, b); }
 
+// 为节点名分配独立缓冲区，避免目录树里保留悬空外部名称指针。
+// Allocate one dedicated buffer for the node name so the directory tree does
+// not retain a dangling external name pointer.
 char* RamFS::DuplicateName(const char* name)
 {
   ASSERT(name != nullptr);
@@ -79,6 +85,9 @@ RamFS::FsNode* RamFS::Dir::FindNodeByType(const char* name, FsNodeType type)
   return ans;
 }
 
+// 递归查找通过一个局部访问器在直属子目录上继续下钻，直到找到匹配类型或遍历完成。
+// Recursive lookup continues descending into direct child directories through a
+// local visitor until a matching node type is found or traversal finishes.
 RamFS::FsNode* RamFS::Dir::FindNodeRevByType(const char* name, FsNodeType type)
 {
   auto* ans = FindNodeByType(name, type);

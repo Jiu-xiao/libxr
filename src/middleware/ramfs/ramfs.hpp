@@ -43,25 +43,62 @@ class RamFS
   class Dir;
 
  private:
+  /**
+   * @brief RamFS 目录索引树类型 / Directory index tree type used by RamFS
+   */
   using Tree = RBTree<const char*>;
 
+  /**
+   * @brief 文件内部存储形态 / Internal storage kind of one file node
+   */
   enum class FileType : uint8_t
   {
-    READ_ONLY,
-    READ_WRITE,
-    EXEC,
+    READ_ONLY,   ///< 只读外部数据映射 / Read-only external-data view
+    READ_WRITE,  ///< 可写外部数据映射 / Read-write external-data view
+    EXEC,        ///< 可执行命令入口 / Executable command entry
   };
 
+  /**
+   * @brief RamFS 名称比较函数 / Name comparator used by RamFS trees
+   * @param a 左侧名称 / Left name
+   * @param b 右侧名称 / Right name
+   * @return 比较结果，遵循 `strcmp()` 语义 / Comparison result following `strcmp()`
+   *         semantics
+   */
   static int CompareStr(const char* const& a, const char* const& b);
 
  public:
+  /**
+   * @brief 节点基类片段 / Base-node fragment
+   */
 #include "fs_node.hpp"
+  /**
+   * @brief 文件节点片段 / File-node fragment
+   */
 #include "file.hpp"
+  /**
+   * @brief 自定义节点片段 / Custom-node fragment
+   */
 #include "custom.hpp"
+  /**
+   * @brief 目录节点片段 / Directory-node fragment
+   */
 #include "dir.hpp"
+  /**
+   * @brief 工厂与根入口片段 / Factory and root-entry fragment
+   */
 #include "factory.hpp"
 
  private:
+  /**
+   * @brief 复制并持有一个节点名称 / Duplicate and retain one node name
+   * @param name 原始名称 / Source name
+   * @return 新分配的名称缓冲区 / Newly allocated name buffer
+   *
+   * @note 当前 RamFS 通过复制名称来保证节点名在文件系统生命周期内稳定存在。
+   *       The current RamFS duplicates names so each node keeps a stable name
+   *       pointer for the lifetime of the filesystem structure.
+   */
   static char* DuplicateName(const char* name);
 };
 }  // namespace LibXR
