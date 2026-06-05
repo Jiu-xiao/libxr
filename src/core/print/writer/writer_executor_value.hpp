@@ -84,6 +84,41 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int val
 
 /**
  * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer semantic value through the shared integer-field path
+ * @tparam Base 整数进制 / Integer radix
+ * @tparam UpperCase 十六进制数字是否使用大写字符 / Whether hexadecimal digits should use uppercase characters
+ * @tparam InlineAlternateOctal 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
+ * @tparam UInt 无符号整数类型 / Unsigned integer type
+ * @param prefix 脱离数字载荷输出的前缀 / Prefix emitted outside the digit payload
+ * @param spec 解码后的字段规格 / Decoded field spec
+ * @param value 待写出的整数值 / Integer value to write
+ * @return 返回共享整数字段路径的写出结果 / Returns the shared integer-field write result
+ */
+template <OutputSink Sink, FormatProfile Profile>
+template <uint8_t Base, bool UpperCase, bool InlineAlternateOctal,
+          std::unsigned_integral UInt>
+ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view prefix,
+                                                               const Spec& spec,
+                                                               UInt value)
+{
+  char digit_buffer[UnsignedDigitCapacity<UInt, Base>() +
+                    (InlineAlternateOctal ? 1U : 0U)];
+  size_t digit_count = AppendUnsigned<Base, UpperCase>(digit_buffer, value);
+
+  if constexpr (InlineAlternateOctal)
+  {
+    digit_count = ApplyAlternateOctal(digit_buffer, digit_count, spec, value);
+  }
+  else if (value == 0 && spec.precision == 0)
+  {
+    digit_count = 0;
+  }
+
+  return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
+                           spec);
+}
+
+/**
+ * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer semantic value through the shared integer-field path
  * @tparam Type 运行期整数语义类型 / Runtime integer semantic type
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -98,55 +133,23 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteUnsigned(const Spec& spec, UInt 
 
   if constexpr (Type == FormatType::Unsigned32 || Type == FormatType::Unsigned64)
   {
-    char digit_buffer[UnsignedDigitCapacity<UInt, 10>()];
-    size_t digit_count = AppendUnsigned<10>(digit_buffer, value);
-    if (value == 0 && spec.precision == 0)
-    {
-      digit_count = 0;
-    }
-    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
-                             spec);
+    return WriteUnsignedDigits<10>(prefix, spec, value);
   }
   if constexpr (Type == FormatType::Binary32 || Type == FormatType::Binary64)
   {
-    char digit_buffer[UnsignedDigitCapacity<UInt, 2>()];
-    size_t digit_count = AppendUnsigned<2>(digit_buffer, value);
-    if (value == 0 && spec.precision == 0)
-    {
-      digit_count = 0;
-    }
-    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
-                             spec);
+    return WriteUnsignedDigits<2>(prefix, spec, value);
   }
   if constexpr (Type == FormatType::Octal32 || Type == FormatType::Octal64)
   {
-    char digit_buffer[UnsignedDigitCapacity<UInt, 8>() + 1];
-    size_t digit_count = AppendUnsigned<8>(digit_buffer, value);
-    digit_count = ApplyAlternateOctal(digit_buffer, digit_count, spec, value);
-    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
-                             spec);
+    return WriteUnsignedDigits<8, false, true>(prefix, spec, value);
   }
   if constexpr (Type == FormatType::HexLower32 || Type == FormatType::HexLower64)
   {
-    char digit_buffer[UnsignedDigitCapacity<UInt, 16>()];
-    size_t digit_count = AppendUnsigned<16>(digit_buffer, value);
-    if (value == 0 && spec.precision == 0)
-    {
-      digit_count = 0;
-    }
-    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
-                             spec);
+    return WriteUnsignedDigits<16>(prefix, spec, value);
   }
   if constexpr (Type == FormatType::HexUpper32 || Type == FormatType::HexUpper64)
   {
-    char digit_buffer[UnsignedDigitCapacity<UInt, 16>()];
-    size_t digit_count = AppendUnsigned<16, true>(digit_buffer, value);
-    if (value == 0 && spec.precision == 0)
-    {
-      digit_count = 0;
-    }
-    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
-                             spec);
+    return WriteUnsignedDigits<16, true>(prefix, spec, value);
   }
 
   return ErrorCode::ARG_ERR;

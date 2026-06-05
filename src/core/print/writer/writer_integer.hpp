@@ -5,7 +5,7 @@
  */
 
 template <std::unsigned_integral UInt, uint8_t Base>
-constexpr size_t Writer::UnsignedDigitCapacity()
+consteval size_t Writer::UnsignedDigitCapacity()
 {
   static_assert(Base == 2 || Base == 8 || Base == 10 || Base == 16,
                 "LibXR::Print::Writer only supports base 2, 8, 10, and 16");

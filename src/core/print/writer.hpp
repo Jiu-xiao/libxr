@@ -327,12 +327,20 @@ class Writer
 
   /**
    * @brief 返回某个无符号整数在指定进制下所需的最大数字个数 / Return the maximum digit count required for one unsigned integer under the selected radix
+   *
+   * This helper intentionally uses a short exact integer division loop instead
+   * of a floating-point approximation. It is `consteval`, so it can only be
+   * used in immediate compile-time contexts such as array extents and
+   * `static_assert`, and therefore adds no runtime cost.
+   * 本辅助函数有意使用一个简短且精确的整数除法循环，而不是浮点近似公式。
+   * 它被声明为 `consteval`，只能用于数组长度、`static_assert` 等立即编译期
+   * 场景，因此不会引入任何运行期开销。
    * @tparam UInt 无符号整数类型 / Unsigned integer type
    * @tparam Base 整数进制 / Integer radix
    * @return 返回该整型在所选进制下的最大数字个数 / Returns the maximum digit count under the selected radix
    */
   template <std::unsigned_integral UInt, uint8_t Base>
-  [[nodiscard]] static constexpr size_t UnsignedDigitCapacity();
+  [[nodiscard]] static consteval size_t UnsignedDigitCapacity();
 
   /**
    * @brief 把一个无符号整数写进调用方提供的定长数字缓冲区 / Append one unsigned integer into a caller-provided fixed-size digit buffer

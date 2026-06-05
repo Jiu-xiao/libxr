@@ -44,6 +44,11 @@ class Writer::Executor
 
   template <FormatType Type, std::unsigned_integral UInt>
   [[nodiscard]] ErrorCode WriteUnsigned(const Spec& spec, UInt value);
+
+  template <uint8_t Base, bool UpperCase = false,
+            bool InlineAlternateOctal = false, std::unsigned_integral UInt>
+  [[nodiscard]] ErrorCode WriteUnsignedDigits(std::string_view prefix, const Spec& spec,
+                                              UInt value);
   [[nodiscard]] ErrorCode WritePointer(const Spec& spec, uintptr_t value);
   [[nodiscard]] ErrorCode WriteCharacter(const Spec& spec, char ch);
   [[nodiscard]] ErrorCode WriteString(const Spec& spec, std::string_view text);
