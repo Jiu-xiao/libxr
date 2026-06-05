@@ -83,8 +83,12 @@ MicrosecondTimestamp Topic::NowTimestamp()
   return Timebase::GetMicroseconds();
 }
 
-void Topic::CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id)
+void Topic::CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
+                                 size_t payload_size, size_t payload_alignment)
 {
+  ASSERT(topic != nullptr);
   ASSERT(payload_type_id != nullptr);
   ASSERT(topic->data_.payload_type_id == payload_type_id);
+  ASSERT(topic->data_.payload_size == payload_size);
+  ASSERT(topic->data_.payload_alignment == payload_alignment);
 }

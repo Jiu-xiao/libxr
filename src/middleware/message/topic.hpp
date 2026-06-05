@@ -565,6 +565,8 @@ class Topic
     CheckTopicPayload<Data>();
     ASSERT(topic.block_ != nullptr);
     ASSERT(topic.block_->data_.payload_type_id == TypeID::GetID<Data>());
+    ASSERT(topic.block_->data_.payload_size == sizeof(Data));
+    ASSERT(topic.block_->data_.payload_alignment == alignof(Data));
   }
 
   /**
@@ -622,7 +624,7 @@ class Topic
       Lock(block_);
     }
 
-    CheckPublishContract(block_, TypeID::GetID<Data>());
+    CheckPublishContract(block_, TypeID::GetID<Data>(), sizeof(Data), alignof(Data));
     DispatchSubscribers(block_, timestamp, &data, from_callback, in_isr);
 
     if (from_callback)
@@ -641,8 +643,13 @@ class Topic
    * @param topic 目标 topic 句柄 / Target topic handle
    * @param payload_type_id 本次发布的精确 payload 类型标识 / Exact payload type ID of
    *        this publish
+   * @param payload_size 本次发布的 payload 固定字节数 / Fixed payload size of this
+   *        publish
+   * @param payload_alignment 本次发布的 payload 对齐要求 / Payload alignment
+   *        requirement of this publish
    */
-  static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id);
+  static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
+                                   size_t payload_size, size_t payload_alignment);
 
   /**
    * @brief 将一段 payload 字节和 topic 元数据拼成 packet / Pack one payload byte range

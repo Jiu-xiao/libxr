@@ -222,7 +222,11 @@ void LibXR::Memory::FastMove(void* dst, const void* src, size_t size)
   auto* d = static_cast<uint8_t*>(dst);
   const auto* s = static_cast<const uint8_t*>(src);
 
-  ASSERT((d >= s && d < s + size) || (s >= d && s < d + size));
+  if (!(d < s + size && s < d + size))
+  {
+    FastCopy(dst, src, size);
+    return;
+  }
 
   if (d > s)
   {
