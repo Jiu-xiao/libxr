@@ -17,12 +17,9 @@ Topic::Server::Server(size_t buffer_length)
 {
   ASSERT(buffer_length > PACK_BASE_SIZE);
   parse_buff_.size_ = buffer_length;
-  const size_t alloc_size = parse_buff_.size_ + LibXR::CACHE_LINE_SIZE - 1;
-  parse_buff_storage_ = new uint8_t[alloc_size];
-  const uintptr_t addr = reinterpret_cast<uintptr_t>(parse_buff_storage_);
-  const uintptr_t aligned_addr =
-      (addr + LibXR::CACHE_LINE_SIZE - 1) & ~(LibXR::CACHE_LINE_SIZE - 1);
-  parse_buff_.addr_ = reinterpret_cast<void*>(aligned_addr);
+  parse_buff_storage_ =
+      new (std::align_val_t(LibXR::CACHE_LINE_SIZE)) uint8_t[parse_buff_.size_];
+  parse_buff_.addr_ = parse_buff_storage_;
 }
 
 void Topic::Server::Register(TopicHandle topic)
