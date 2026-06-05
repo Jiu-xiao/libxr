@@ -7,16 +7,16 @@ using namespace LibXR;
 
 void Topic::PackedDataHeader::SetDataLen(uint32_t len)
 {
-  data_len_raw[0] = static_cast<uint8_t>(len >> 16);
+  data_len_raw[0] = static_cast<uint8_t>(len);
   data_len_raw[1] = static_cast<uint8_t>(len >> 8);
-  data_len_raw[2] = static_cast<uint8_t>(len);
+  data_len_raw[2] = static_cast<uint8_t>(len >> 16);
 }
 
 uint32_t Topic::PackedDataHeader::GetDataLen() const
 {
-  return static_cast<uint32_t>(data_len_raw[0]) << 16 |
+  return static_cast<uint32_t>(data_len_raw[0]) |
          static_cast<uint32_t>(data_len_raw[1]) << 8 |
-         static_cast<uint32_t>(data_len_raw[2]);
+         static_cast<uint32_t>(data_len_raw[2]) << 16;
 }
 
 void Topic::PackedDataHeader::SetTimestamp(MicrosecondTimestamp timestamp)
@@ -24,17 +24,16 @@ void Topic::PackedDataHeader::SetTimestamp(MicrosecondTimestamp timestamp)
   uint64_t value = static_cast<uint64_t>(timestamp);
   for (size_t i = 0; i < sizeof(timestamp_us_raw); i++)
   {
-    timestamp_us_raw[i] =
-        static_cast<uint8_t>(value >> ((sizeof(timestamp_us_raw) - 1U - i) * 8U));
+    timestamp_us_raw[i] = static_cast<uint8_t>(value >> (i * 8U));
   }
 }
 
 MicrosecondTimestamp Topic::PackedDataHeader::GetTimestamp() const
 {
   uint64_t value = 0;
-  for (uint8_t byte : timestamp_us_raw)
+  for (size_t i = 0; i < sizeof(timestamp_us_raw); i++)
   {
-    value = (value << 8U) | static_cast<uint64_t>(byte);
+    value |= static_cast<uint64_t>(timestamp_us_raw[i]) << (i * 8U);
   }
   return MicrosecondTimestamp(value);
 }

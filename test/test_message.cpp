@@ -191,9 +191,20 @@ void TestTopicCore()
   ASSERT(!cb_in_isr);
 
   msg[0] = 64.64;
-  const LibXR::MicrosecondTimestamp timestamp4(6006);
+  const LibXR::MicrosecondTimestamp timestamp4(0x0102030405060708ULL);
   ASSERT(topic.PackData(msg[0], packed_data, timestamp4) == LibXR::ErrorCode::OK);
   ASSERT(packed_data.raw.header_.prefix == LibXR::Topic::PACKET_PREFIX);
+  ASSERT(packed_data.raw.header_.data_len_raw[0] == sizeof(double));
+  ASSERT(packed_data.raw.header_.data_len_raw[1] == 0);
+  ASSERT(packed_data.raw.header_.data_len_raw[2] == 0);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[0] == 0x08);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[1] == 0x07);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[2] == 0x06);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[3] == 0x05);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[4] == 0x04);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[5] == 0x03);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[6] == 0x02);
+  ASSERT(packed_data.raw.header_.timestamp_us_raw[7] == 0x01);
   ASSERT(timestamp_us(packed_data.GetTimestamp()) == timestamp_us(timestamp4));
   auto* packet = reinterpret_cast<uint8_t*>(&packed_data);
   ASSERT(topic_server.ParseData(LibXR::ConstRawData(packet, 3)) == 0);

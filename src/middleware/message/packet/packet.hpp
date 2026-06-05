@@ -18,9 +18,9 @@ namespace LibXR
 struct Topic::PackedDataHeader
 {
   uint8_t prefix;               ///< 包前缀字节。Packet prefix byte.
-  uint8_t data_len_raw[3];      ///< 大端 24 位 payload 长度。Big-endian 24-bit payload length.
+  uint8_t data_len_raw[3];      ///< 小端 24 位 payload 长度。Little-endian 24-bit payload length.
   uint32_t topic_name_crc32;    ///< 目标 topic 名称 CRC32 键。CRC32 key of the target topic name.
-  uint8_t timestamp_us_raw[8];  ///< 大端 64 位微秒时间戳。Big-endian 64-bit microsecond timestamp.
+  uint8_t timestamp_us_raw[8];  ///< 小端 64 位微秒时间戳。Little-endian 64-bit microsecond timestamp.
   uint8_t pack_header_crc8;     ///< 头部 CRC8。Header CRC8.
 
   /**
