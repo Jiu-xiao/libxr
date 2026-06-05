@@ -159,7 +159,8 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
 
   const auto target_size = current_topic_->data_.payload_size;
   void* publish_addr = payload_addr;
-  if (reinterpret_cast<uintptr_t>(payload_addr) % current_topic_->data_.payload_alignment !=
+  if (reinterpret_cast<uintptr_t>(payload_addr) %
+          current_topic_->data_.payload_alignment !=
       0)
   {
     publish_addr = parse_buff_.addr_;
@@ -185,8 +186,8 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
   auto topic = Topic(current_topic_);
   if (from_callback)
   {
-    topic.PublishBytesFromServerCallback(publish_addr, target_size,
-                                         current_timestamp_, in_isr);
+    topic.PublishBytesFromServerCallback(publish_addr, target_size, current_timestamp_,
+                                         in_isr);
   }
   else
   {
