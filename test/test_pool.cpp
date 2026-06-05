@@ -91,10 +91,7 @@ void test_lock_free_pool()
 
   // ---- 多线程并发完整性测试 ----
   {
-    push_sum = 0;
-    pop_sum = 0;
-    push_cnt = 0;
-    pop_cnt = 0;
+    push_sum = pop_sum = push_cnt = pop_cnt = 0;
     for (int i = 0; i < N; ++i)
     {
       pop_taken[i] = 0;
