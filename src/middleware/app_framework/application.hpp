@@ -5,6 +5,15 @@
 
 namespace LibXR
 {
+/**
+ * @brief `app_framework` 的应用模块管理片段
+ *        Application-module management fragment of `app_framework`
+ *
+ * @note 这一组类型只负责“模块对象注册并统一调用 `OnMonitor()`”，不处理硬件别名查找。
+ *       This group is responsible only for registering module objects and
+ *       dispatching `OnMonitor()` across them; it does not handle hardware
+ *       alias lookup.
+ */
 
 /**
  * @brief 应用模块抽象类，需实现 OnMonitor 方法
@@ -13,7 +22,16 @@ namespace LibXR
 class Application
 {
  public:
+  /**
+   * @brief 周期性模块入口
+   *        Periodic module entry point
+   */
   virtual void OnMonitor() = 0;  ///< 周期性任务 / Periodic update
+
+  /**
+   * @brief 虚析构函数
+   *        Virtual destructor
+   */
   virtual ~Application() = default;
 };
 
@@ -24,7 +42,7 @@ class Application
 class ApplicationManager
 {
  public:
-  LibXR::LockFreeList app_list_;  ///< 模块链表 / Module list
+  LibXR::LockFreeList app_list_;  ///< 当前已注册模块链表 / List of currently registered modules.
 
   /**
    * @brief 注册一个应用模块

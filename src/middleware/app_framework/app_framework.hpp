@@ -9,5 +9,11 @@
  *       fragments in the same directory.
  */
 
+/**
+ * @brief 硬件别名注册片段 / Hardware-alias registration fragment
+ */
 #include "hardware.hpp"
+/**
+ * @brief 应用模块管理片段 / Application-module management fragment
+ */
 #include "application.hpp"

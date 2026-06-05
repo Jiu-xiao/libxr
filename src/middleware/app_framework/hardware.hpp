@@ -10,6 +10,15 @@
 namespace LibXR
 {
 /**
+ * @brief `app_framework` 的硬件注册片段
+ *        Hardware-registration fragment of `app_framework`
+ *
+ * @note 这一组类型只负责“设备对象通过别名注册并按类型查找”，不处理模块执行调度。
+ *       This group is responsible only for registering device objects under
+ *       aliases and looking them up by type; it does not handle application
+ *       execution scheduling.
+ */
+/**
  * 硬件条目模板 / Hardware entry template
  * @tparam T 设备类型 / Device type
  *
@@ -19,12 +28,18 @@ namespace LibXR
 template <typename T>
 struct Entry
 {
-  T& object;                                   ///< 设备对象 / Device object
-  std::initializer_list<const char*> aliases;  ///< 别名列表 / Alias list
+  T& object;  ///< 被注册的设备对象引用 / Reference to the device object being registered.
+  std::initializer_list<const char*>
+      aliases;  ///< 指向同一设备的别名集合 / Alias set pointing to the same device.
 };
 
 /**
  * 硬件容器类 / Hardware container
+ *
+ * Each registered alias is stored together with the object's erased pointer and
+ * its `TypeID`, so name lookup and type filtering happen in one pass.
+ * 每个注册别名都会连同对象的擦除指针和对应 `TypeID` 一起存储，因此名称匹配和类型过滤
+ * 会在一次遍历里同时完成。
  */
 class HardwareContainer
 {
@@ -118,14 +133,18 @@ class HardwareContainer
   }
 
  protected:
+  /**
+   * @brief 一条硬件别名记录
+   *        One registered hardware-alias record
+   */
   struct AliasEntry
   {
-    const char* name;
-    void* object;
-    TypeID::ID id;
+    const char* name;  ///< 硬件别名 / Hardware alias string.
+    void* object;      ///< 擦除类型后的设备对象指针 / Type-erased device object pointer.
+    TypeID::ID id;     ///< 设备对象类型 ID / Device object type ID.
   };
 
-  mutable LibXR::LockFreeList alias_list_;
+  mutable LibXR::LockFreeList alias_list_;  ///< 当前已注册的全部别名链表 / List of all currently registered aliases.
 };
 
 }  // namespace LibXR
