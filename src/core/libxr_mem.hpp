@@ -21,6 +21,19 @@ class Memory
   static void FastCopy(void* dst, const void* src, size_t size);
 
   /**
+   * @brief 重叠区域内存搬移 / Memory move for overlapping regions
+   *
+   * @note 这个接口只面向可能重叠的搬移场景；不把它当成普通拷贝接口使用。
+   *       This interface is meant only for move operations where overlap may
+   *       happen; it should not be used as a general-purpose copy API.
+   *
+   * @param dst 目标地址 / Destination address
+   * @param src 源地址 / Source address
+   * @param size 搬移大小 / Move size
+   */
+  static void FastMove(void* dst, const void* src, size_t size);
+
+  /**
    * @brief 快速内存填充 / Fast memory fill
    *
    * @param dst 目标地址 / Destination address

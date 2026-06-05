@@ -6,6 +6,7 @@
 
 #include "../packet/packet.hpp"
 #include "crc.hpp"
+#include "libxr_mem.hpp"
 
 using namespace LibXR;
 
@@ -157,11 +158,11 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
   const auto target_size = current_topic_->data_.payload_size;
   if (data_len_ >= target_size)
   {
-    std::memmove(parse_buff_.addr_, payload_addr, target_size);
+    LibXR::Memory::FastMove(parse_buff_.addr_, payload_addr, target_size);
   }
   else
   {
-    std::memmove(parse_buff_.addr_, payload_addr, data_len_);
+    LibXR::Memory::FastMove(parse_buff_.addr_, payload_addr, data_len_);
     std::memset(reinterpret_cast<uint8_t*>(parse_buff_.addr_) + data_len_, 0,
                 target_size - data_len_);
   }
