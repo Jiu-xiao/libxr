@@ -53,23 +53,44 @@ class Topic
   };
 
  public:
+  /**
+   * @struct Block
+   * @brief topic 运行时状态块 / Runtime state block of one topic
+   *
+   * @note 当前 topic 自身不缓存最近一次消息值；这里只保存类型契约、名称键值、发布串行化
+   *       状态以及订阅链表。
+   *       The topic no longer caches the latest payload value itself; this block
+   *       keeps only the type contract, topic key, publish-serialization state,
+   *       and subscriber list.
+   */
   struct Block
   {
-    std::atomic<LockState> busy;
-    LockFreeList subers;
-    TypeID::ID payload_type_id;
-    uint32_t payload_size;
-    uint32_t payload_alignment;
-    uint32_t crc32;
-    Mutex* mutex;
+    std::atomic<LockState> busy;  ///< 发布路径串行化状态。Publish-path serialization state.
+    LockFreeList subers;          ///< 已挂接订阅者链表。List of attached subscribers.
+    TypeID::ID payload_type_id;   ///< 精确 payload 类型标识。Exact payload type identifier.
+    uint32_t payload_size;        ///< 该 topic 固定 payload 字节数。Fixed payload size in bytes of this topic.
+    uint32_t payload_alignment;   ///< 该 topic payload 所需对齐。Required payload alignment of this topic.
+    uint32_t crc32;               ///< 主题名 CRC32 键。CRC32 key of the topic name.
+    Mutex* mutex;                 ///< 多发布者主题使用的互斥量。Mutex used by multi-publisher topics.
   };
 
 #ifndef __DOXYGEN__
+  /**
+   * @struct PackedDataHeader
+   * @brief 打包消息固定头 / Fixed header of one packed message
+   */
   struct PackedDataHeader;
+
+  /**
+   * @class PackedData
+   * @brief 带固定头和尾 CRC 的打包消息对象 / Packed message object with fixed header
+   *        and trailing CRC
+   * @tparam Data 负载类型 / Payload type
+   */
   template <typename Data>
   class PackedData;
-  static constexpr uint8_t PACKET_PREFIX = 0x5A;
-  static constexpr size_t PACK_BASE_SIZE = 18;
+  static constexpr uint8_t PACKET_PREFIX = 0x5A;  ///< 打包消息前缀字节。Packed-message prefix byte.
+  static constexpr size_t PACK_BASE_SIZE = 18;  ///< 固定非 payload 开销：17 字节头 + 1 字节尾 CRC8。Fixed non-payload overhead: 17-byte header plus 1-byte trailing CRC8.
 #endif
 
   typedef RBTree<uint32_t>::Node<Block>* TopicHandle;
@@ -132,6 +153,16 @@ class Topic
   static MicrosecondTimestamp NowTimestamp();
 
   Topic();
+  /**
+   * @brief 用显式类型契约构造或查找一个 topic / Construct or look up one topic with
+   *        an explicit runtime type contract
+   * @param name topic 名称 / Topic name
+   * @param payload_type_id payload 类型标识 / Payload type identifier
+   * @param payload_size 该 topic 固定 payload 字节数 / Fixed payload size of this topic
+   * @param payload_alignment 该 topic payload 所需对齐 / Required payload alignment of this topic
+   * @param domain 可选主题域 / Optional topic domain
+   * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized multi-publisher use
+   */
   Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
         size_t payload_alignment, Domain* domain = nullptr,
         bool multi_publisher = false);
@@ -162,12 +193,21 @@ class Topic
     return topic;
   }
 
+  /**
+   * @brief 获取该 topic 固定 payload 字节数 / Get the fixed payload size of this topic
+   * @return payload 字节数 / Payload size in bytes
+   */
   [[nodiscard]] size_t PayloadSize() const
   {
     ASSERT(block_ != nullptr);
     return block_->data_.payload_size;
   }
 
+  /**
+   * @brief 获取该 topic payload 的对齐要求 / Get the payload alignment requirement of
+   *        this topic
+   * @return payload 对齐要求 / Payload alignment requirement
+   */
   [[nodiscard]] size_t PayloadAlignment() const
   {
     ASSERT(block_ != nullptr);
@@ -198,12 +238,28 @@ class Topic
     PublishTyped(data, timestamp, true, in_isr);
   }
 
+  /**
+   * @brief 供 packet/server 路径按字节发布一条消息 / Publish one message from the
+   *        packet/server path using bytes already arranged as the exact payload object
+   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the already-aligned payload object
+   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must equal the fixed topic size
+   * @param timestamp 这条消息的时间戳 / Timestamp of this message
+   */
   void PublishBytesFromServer(void* payload_addr, size_t payload_size,
                               MicrosecondTimestamp timestamp)
   {
     PublishServerBytes(payload_addr, payload_size, timestamp, false, false);
   }
 
+  /**
+   * @brief 供回调/ISR 上下文里的 packet/server 路径按字节发布一条消息 / Publish one
+   *        packet/server message from callback/ISR context using bytes already arranged as
+   *        the exact payload object
+   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the already-aligned payload object
+   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must equal the fixed topic size
+   * @param timestamp 这条消息的时间戳 / Timestamp of this message
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
+   */
   void PublishBytesFromServerCallback(void* payload_addr, size_t payload_size,
                                       MicrosecondTimestamp timestamp, bool in_isr)
   {
@@ -211,12 +267,29 @@ class Topic
   }
 
   template <typename Data>
+  /**
+   * @brief 将一个精确类型消息打包成 packet / Pack one exact-typed message into one
+   *        packet using the topic's runtime contract and current timestamp
+   * @tparam Data 负载类型 / Payload type
+   * @param data 待打包 payload / Payload to pack
+   * @param packet 输出 packet 对象 / Output packed message object
+   * @return 操作结果错误码 / Error code
+   */
   ErrorCode PackData(const Data& data, PackedData<Data>& packet)
   {
     return PackData(data, packet, NowTimestamp());
   }
 
   template <typename Data>
+  /**
+   * @brief 将一个精确类型消息按指定时间戳打包成 packet / Pack one exact-typed message
+   *        into one packet with the given timestamp
+   * @tparam Data 负载类型 / Payload type
+   * @param data 待打包 payload / Payload to pack
+   * @param packet 输出 packet 对象 / Output packed message object
+   * @param timestamp 指定时间戳 / Explicit timestamp
+   * @return 操作结果错误码 / Error code
+   */
   ErrorCode PackData(const Data& data, PackedData<Data>& packet,
                      MicrosecondTimestamp timestamp);
 
@@ -235,6 +308,13 @@ class Topic
   static void EnsureDomainRegistry();
   static Domain* EnsureDefaultDomain();
 
+  /**
+   * @brief 校验 server 侧字节发布前提 / Check the preconditions of one server-side byte
+   *        publish
+   * @param topic 目标 topic / Target topic
+   * @param payload_addr 已满足对齐的 payload 地址 / Already-aligned payload address
+   * @param payload_size payload 字节数 / Payload size in bytes
+   */
   static void CheckServerPublishContract(TopicHandle topic, void* payload_addr,
                                          size_t payload_size)
   {
@@ -299,6 +379,15 @@ class Topic
   }
 
   static void CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id);
+
+  /**
+   * @brief 将一段 payload 字节和 topic 元数据拼成 packet / Pack one payload byte range
+   *        together with topic metadata into one packet
+   * @param topic_name_crc32 目标 topic 的 CRC32 键 / CRC32 key of the target topic
+   * @param buffer 输出原始缓冲区 / Output raw buffer
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param data 待打包的 payload 字节 / Payload bytes to pack
+   */
   static void PackBytes(uint32_t topic_name_crc32, RawData buffer,
                         MicrosecondTimestamp timestamp, ConstRawData data);
   static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
@@ -306,6 +395,15 @@ class Topic
   static void DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestamp,
                                   void* payload_addr, bool from_callback, bool in_isr);
 
+  /**
+   * @brief `PublishBytesFromServer*()` 的共享实现 / Shared implementation behind
+   *        `PublishBytesFromServer*()`
+   * @param payload_addr 已满足对齐的 payload 地址 / Already-aligned payload address
+   * @param payload_size payload 字节数 / Payload size in bytes
+   * @param timestamp 消息时间戳 / Message timestamp
+   * @param from_callback 是否来自回调发布路径 / Whether this publish comes from callback path
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
+   */
   void PublishServerBytes(void* payload_addr, size_t payload_size,
                           MicrosecondTimestamp timestamp, bool from_callback,
                           bool in_isr)

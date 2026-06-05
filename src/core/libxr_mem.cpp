@@ -226,6 +226,8 @@ void LibXR::Memory::FastMove(void* dst, const void* src, size_t size)
 
   if (d > s)
   {
+    // Backward-overlap move: consume from the tail first so we never overwrite
+    // bytes that still need to be read from the source window.
     uintptr_t d_end_offset =
         reinterpret_cast<uintptr_t>(d + size) & (LibXR::ALIGN_SIZE - 1);
     uintptr_t s_end_offset =
@@ -236,6 +238,8 @@ void LibXR::Memory::FastMove(void* dst, const void* src, size_t size)
 
     if (d_end_offset == s_end_offset)
     {
+      // Once both ends share the same alignment, we can peel the unaligned tail
+      // bytes and then switch to wide backward copies safely.
       if (d_end_offset)
       {
         size_t tail = d_end_offset;
@@ -333,11 +337,16 @@ void LibXR::Memory::FastMove(void* dst, const void* src, size_t size)
     return;
   }
 
+  // Forward-overlap move: valid only when destination starts before source, so
+  // consuming from the head cannot destroy unread source bytes.
   uintptr_t d_offset = reinterpret_cast<uintptr_t>(d) & (LibXR::ALIGN_SIZE - 1);
   uintptr_t s_offset = reinterpret_cast<uintptr_t>(s) & (LibXR::ALIGN_SIZE - 1);
 
   if (d_offset == s_offset)
   {
+    // Same-alignment forward overlap can reuse the same "align head, then burst"
+    // strategy as FastCopy because source bytes are always read before they are
+    // overwritten.
     if (d_offset)
     {
       size_t head = LibXR::ALIGN_SIZE - d_offset;

@@ -26,6 +26,10 @@ class Memory
    * @note 这个接口只面向可能重叠的搬移场景；不把它当成普通拷贝接口使用。
    *       This interface is meant only for move operations where overlap may
    *       happen; it should not be used as a general-purpose copy API.
+   * @note 调用者必须保证 `dst` 和 `src` 指向的区间确实重叠；若两段区间其实不重叠，
+   *       应改用 `FastCopy()`。
+   *       The caller must ensure the `dst` and `src` ranges really overlap; if
+   *       they do not overlap, use `FastCopy()` instead.
    *
    * @param dst 目标地址 / Destination address
    * @param src 源地址 / Source address
