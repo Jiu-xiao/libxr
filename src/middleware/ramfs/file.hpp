@@ -64,13 +64,14 @@
           return *static_cast<const StoredType*>(addr_const_);
         }
 
-        ASSERT(false);
-        const void* null_data = nullptr;
-        return *static_cast<const StoredType*>(null_data);
+        DataAccessPanic();
       }
       else
       {
-        ASSERT(file_type_ == FileType::READ_WRITE);
+        if (file_type_ != FileType::READ_WRITE)
+        {
+          DataAccessPanic();
+        }
         return *static_cast<StoredType*>(addr_);
       }
     }
@@ -101,9 +102,7 @@
         return *static_cast<const StoredType*>(addr_const_);
       }
 
-      ASSERT(false);
-      const void* null_data = nullptr;
-      return *static_cast<const StoredType*>(null_data);
+      DataAccessPanic();
     }
 
     /**
@@ -113,7 +112,10 @@
      */
     [[nodiscard]] RawData Data()
     {
-      ASSERT(file_type_ == FileType::READ_WRITE);
+      if (file_type_ != FileType::READ_WRITE)
+      {
+        DataAccessPanic();
+      }
       return RawData(addr_, size_);
     }
 
@@ -131,12 +133,34 @@
       {
         return ConstRawData(addr_const_, size_);
       }
-      ASSERT(false);
+      DataAccessPanic();
       return ConstRawData();
     }
 
    private:
     using ExecFun = int (*)(void* raw, int argc, char** argv);
+
+    /**
+     * @brief 处理不应到达的 File 数据访问路径
+     *        Handle one File data-access path that should be unreachable
+     *
+     * @note 这里保留强约束终止语义，但不再依赖“断言后继续解引用空指针”来满足返回类型，
+     *       从而避免发布构建中的未定义行为。
+     *       This keeps the strong-failure semantics while no longer relying on
+     *       "assert then dereference a null pointer" to satisfy the return
+     *       type, avoiding undefined behavior in release builds.
+     */
+    [[noreturn]] static void DataAccessPanic()
+    {
+      REQUIRE(false);
+#if defined(__GNUC__) || defined(__clang__)
+      __builtin_unreachable();
+#else
+      while (true)
+      {
+      }
+#endif
+    }
 
     File();
     explicit File(const char* name);

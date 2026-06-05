@@ -37,6 +37,11 @@
    * @return 可执行文件节点 / Executable file node
    *
    * @note 包含动态内存分配 / Contains dynamic memory allocation
+   * @note 可执行块按当前 RamFS 设计属于初始化后常驻状态；
+   *       当前实现不提供运行期回收路径。
+   *       Executable blocks are retained for startup / lifetime registration in
+   *       the current RamFS design; the implementation does not provide a
+   *       runtime reclamation path for them.
    */
   template <typename ArgType>
   static File CreateFile(const char* name,
@@ -74,6 +79,10 @@
    * @return 可执行文件节点 / Executable file node
    *
    * @note 包含动态内存分配 / Contains dynamic memory allocation
+   * @note 运行期持久化语义与上面的 executable factory 相同；
+   *       命令块按当前设计默认常驻。
+   *       This follows the same lifetime-retained semantics as the executable
+   *       factory above; command blocks are intentionally retained by design.
    */
   template <typename ArgType>
   static File CreateCommand(const char* name,
