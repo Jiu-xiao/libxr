@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+
 #include "../packet/packet.hpp"
 #include "crc.hpp"
 #include "libxr_mem.hpp"
