@@ -23,9 +23,28 @@ struct Topic::PackedDataHeader
   uint8_t timestamp_us_raw[8];  ///< 大端 64 位微秒时间戳。Big-endian 64-bit microsecond timestamp.
   uint8_t pack_header_crc8;     ///< 头部 CRC8。Header CRC8.
 
+  /**
+   * @brief 设置数据区长度 / Set the payload length
+   * @param len 数据区长度 / Payload length
+   */
   void SetDataLen(uint32_t len);
+
+  /**
+   * @brief 获取数据区长度 / Get the payload length
+   * @return 数据区长度 / Returns the payload length
+   */
   uint32_t GetDataLen() const;
+
+  /**
+   * @brief 设置报文时间戳 / Set the packet timestamp
+   * @param timestamp 报文时间戳 / Packet timestamp
+   */
   void SetTimestamp(MicrosecondTimestamp timestamp);
+
+  /**
+   * @brief 获取报文时间戳 / Get the packet timestamp
+   * @return 报文时间戳 / Returns the packet timestamp
+   */
   MicrosecondTimestamp GetTimestamp() const;
 };
 
@@ -51,11 +70,15 @@ class Topic::PackedData
   static_assert(TopicPayload<Data>);
 
  public:
+  /**
+   * @brief `PackedDataHeader + payload` 的原始字节布局 / Raw byte layout consisting of
+   *        `PackedDataHeader + payload`
+   */
   struct
   {
     PackedDataHeader header_;     ///< 固定头。Fixed packet header.
     uint8_t data_[sizeof(Data)];  ///< payload 原始字节区。Raw payload byte area.
-  } raw;
+  } raw;                          ///< 固定头和 payload 组成的原始字节布局。Raw byte layout made of the fixed header and payload.
 
   uint8_t crc8_;  ///< 尾部 CRC8。Trailing CRC8.
 
@@ -68,7 +91,6 @@ class Topic::PackedData
 #pragma pack(pop)
 #endif
 
-template <typename Data>
 /**
  * @brief 按当前 topic 的名字和类型契约把一条消息打包成 packet / Pack one message into
  *        one packet using the current topic name and type contract
@@ -78,6 +100,7 @@ template <typename Data>
  * @param timestamp 要写入包头的时间戳 / Timestamp to store into the packet header
  * @return 操作结果错误码 / Error code
  */
+template <typename Data>
 ErrorCode Topic::PackData(const Data& data, PackedData<Data>& packet,
                           MicrosecondTimestamp timestamp)
 {

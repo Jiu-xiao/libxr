@@ -85,10 +85,46 @@ class Topic::Server
     DELIVERED   ///< 当前包已发布。Current packet is delivered.
   };
 
+  /**
+   * @brief `ParseData*()` 的共享实现 / Shared implementation behind `ParseData*()`
+   * @param data 新收到的原始字节 / Newly received raw bytes
+   * @param from_callback 是否来自回调路径 / Whether the current parse comes from
+   *        callback path
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
+   * @return 成功解析并发布的包数量 / Number of packets parsed and published
+   */
   size_t ParseDataRaw(ConstRawData data, bool from_callback, bool in_isr);
+
+  /**
+   * @brief 把输入流同步到下一条 packet 起点 / Synchronize the input stream to the next
+   *        packet start
+   * @return 若已找到起始字节则返回 `true`，否则返回 `false` / Returns `true` when a
+   *         packet start byte is found, otherwise `false`
+   */
   bool SyncToPacketStart();
+
+  /**
+   * @brief 在已对齐前缀后继续读取并校验完整头部 / Read and validate the full header
+   *        after the prefix is aligned
+   * @return 头部有效返回 `true`，否则返回 `false` / Returns `true` when the header is
+   *         valid, otherwise `false`
+   */
   bool ReadHeader();
+
+  /**
+   * @brief 读取当前包的 payload 和尾 CRC，并在成功时发布 / Read the payload and
+   *        trailing CRC of the current packet and publish it on success
+   * @param from_callback 是否来自回调路径 / Whether the current parse comes from
+   *        callback path
+   * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
+   * @return 当前 payload 阶段的处理结果 / Result of the current payload stage
+   */
   ParseResult ReadPayload(bool from_callback, bool in_isr);
+
+  /**
+   * @brief 清空当前包的解析上下文并回到找起点状态 / Clear the current packet parsing
+   *        context and return to the start-search state
+   */
   void ResetParser();
 
   Status status_ = Status::WAIT_START;  ///< 当前 parser 阶段。Current parser stage.

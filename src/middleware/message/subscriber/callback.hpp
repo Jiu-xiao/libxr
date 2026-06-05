@@ -75,20 +75,40 @@ class Topic::Callback
   template <typename T>
   using RemoveCVRef = std::remove_cv_t<std::remove_reference_t<T>>;
 
+  /**
+   * @brief 是否为带时间戳的类型化消息视图参数 / Whether one callback payload argument
+   *        is a timestamped typed message view
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
   template <typename T>
   static constexpr bool IS_MESSAGE_VIEW =
       MessageViewTraits<RemoveCVRef<T>>::VALUE;  ///< 是否为带时间戳的类型化消息视图参数。Whether the argument is a timestamped typed message view.
 
+  /**
+   * @brief 是否把 payload 直接当成一个对象接收 / Whether one callback payload argument
+   *        receives the payload directly as one object
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
   template <typename T>
   static constexpr bool IS_TYPED_DATA =
       !IS_MESSAGE_VIEW<T> &&
       TopicPayload<RemoveCVRef<T>>;  ///< 是否把负载直接当成一个对象来接收。Whether the payload is received directly as one typed object.
 
+  /**
+   * @brief 是否是回调接口允许的 payload 参数写法 / Whether one payload argument form is
+   *        accepted by this callback interface
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
   template <typename T>
   static constexpr bool IS_CALLBACK_PAYLOAD =
       IS_MESSAGE_VIEW<T> ||
       IS_TYPED_DATA<T>;  ///< 是否是这个回调接口允许的负载参数写法。Whether this callback interface accepts this payload argument form.
 
+  /**
+   * @brief 是否错误地使用了可变 `MessageView<T>&` / Whether one payload argument is an
+   *        invalid mutable `MessageView<T>&`
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
   template <typename T>
   static constexpr bool IS_MUTABLE_MESSAGE_VIEW_REF =
       IS_MESSAGE_VIEW<T> && std::is_lvalue_reference_v<T> &&
@@ -99,13 +119,13 @@ class Topic::Callback
    * @brief 回调句柄真正指向的那块数据的公共头 / Common header of the data block actually
    *        pointed to by one callback handle
    *
- * 一个 `Callback` 最终只保存一个 `BlockHeader*`。真正的回调函数、绑定参数和负载类型
- * 都放在派生块里；发布路径先看 `payload_type_id` 做契约检查，再通过 `run`
- * 调到那块具体数据。
+   * 一个 `Callback` 最终只保存一个 `BlockHeader*`。真正的回调函数、绑定参数和负载类型
+   * 都放在派生块里；发布路径先看 `payload_type_id` 做契约检查，再通过 `run`
+   * 调到那块具体数据。
    * One `Callback` finally stores only one `BlockHeader*`. The real callback
- * function, bound argument, and expected payload type live in derived blocks;
- * the publish path first checks `payload_type_id` and then jumps through `run`
- * into that concrete block.
+   * function, bound argument, and expected payload type live in derived blocks;
+   * the publish path first checks `payload_type_id` and then jumps through `run`
+   * into that concrete block.
    */
   struct BlockHeader
   {
@@ -116,6 +136,12 @@ class Topic::Callback
     TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识。Expected topic payload type identifier.
   };
 
+  /**
+   * @brief 取回调 payload 参数对应的精确类型标识 / Get the exact type ID expected by
+   *        one callback payload argument
+   * @tparam PayloadArg 回调 payload 参数类型 / Callback payload argument type
+   * @return 对应的精确类型标识 / Exact type ID expected by this callback payload argument
+   */
   template <typename PayloadArg>
   static TypeID::ID PayloadTypeID()
   {
@@ -148,7 +174,8 @@ class Topic::Callback
    * @param arg 绑定参数 / Bound argument
    * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
    * @param timestamp 当前消息时间戳 / Current message timestamp
-   * @param data 当前消息数据视图 / Current message payload view
+   * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+   *        object
    */
   template <typename Function, typename BoundArg, typename PayloadArg>
   static void InvokePayload(Function fun, BoundArg& arg, bool in_isr,
@@ -197,7 +224,8 @@ class Topic::Callback
      * @param header 回调块头指针 / Callback block header pointer
      * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
      * @param timestamp 当前消息时间戳 / Current message timestamp
-     * @param data 当前消息数据视图 / Current message payload view
+     * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+     *        object
      */
     static void Run(const BlockHeader* header, bool in_isr,
                     MicrosecondTimestamp timestamp, void* payload_addr)
@@ -242,7 +270,8 @@ class Topic::Callback
      * @param header 回调块头指针 / Callback block header pointer
      * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
      * @param timestamp 当前消息时间戳 / Current message timestamp
-     * @param data 当前消息数据视图 / Current message payload view
+     * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+     *        object
      */
     static void Run(const BlockHeader* header, bool in_isr,
                     MicrosecondTimestamp timestamp, void* payload_addr)
@@ -353,9 +382,17 @@ class Topic::Callback
    * @param header 空块头指针 / Empty block header pointer
    * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
    * @param timestamp 当前消息时间戳 / Current message timestamp
-   * @param data 当前消息数据视图 / Current message payload view
+   * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+   *        object
    */
-  static void EmptyRun(const BlockHeader*, bool, MicrosecondTimestamp, void*) {}
+  static void EmptyRun(const BlockHeader* header, bool in_isr,
+                       MicrosecondTimestamp timestamp, void* payload_addr)
+  {
+    UNUSED(header);
+    UNUSED(in_isr);
+    UNUSED(timestamp);
+    UNUSED(payload_addr);
+  }
 
   inline static BlockHeader empty_block_{
       &EmptyRun,
@@ -413,13 +450,19 @@ class Topic::Callback
    * @brief 执行回调 / Run the callback
    * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
    * @param timestamp 当前消息时间戳 / Current message timestamp
-   * @param data 当前消息数据视图 / Current message payload view
+   * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload
+   *        object
    */
   void Run(bool in_isr, MicrosecondTimestamp timestamp, void* payload_addr) const
   {
     block_->run(block_, in_isr, timestamp, payload_addr);
   }
 
+  /**
+   * @brief 读取这个回调句柄期望的 payload 类型标识 / Read the payload type ID expected
+   *        by this callback handle
+   * @return payload 类型标识 / Payload type ID
+   */
   TypeID::ID PayloadTypeID() const { return block_->payload_type_id; }
 
  private:

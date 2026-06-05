@@ -5,8 +5,8 @@
 namespace LibXR
 {
 /**
- * @brief 内存操作类 / Memory operation class
- *
+ * @class Memory
+ * @brief 静态内存操作工具 / Static memory-operation utilities
  */
 class Memory
 {
