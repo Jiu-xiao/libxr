@@ -58,24 +58,11 @@
       ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(StoredType), size_));
       if constexpr (std::is_const_v<RequestedType>)
       {
-        if (file_type_ == FileType::READ_WRITE)
-        {
-          return *static_cast<const StoredType*>(addr_);
-        }
-        if (file_type_ == FileType::READ_ONLY)
-        {
-          return *static_cast<const StoredType*>(addr_const_);
-        }
-
-        DataAccessPanic();
+        return *ReadableDataPtr<StoredType>();
       }
       else
       {
-        if (file_type_ != FileType::READ_WRITE)
-        {
-          DataAccessPanic();
-        }
-        return *static_cast<StoredType*>(addr_);
+        return *WritableDataPtr<StoredType>();
       }
     }
 
@@ -96,16 +83,7 @@
       static_assert(!std::is_volatile_v<RequestedType>);
 
       ASSERT(LibXR::SizeLimitCheck(LimitMode, sizeof(StoredType), size_));
-      if (file_type_ == FileType::READ_WRITE)
-      {
-        return *static_cast<const StoredType*>(addr_);
-      }
-      if (file_type_ == FileType::READ_ONLY)
-      {
-        return *static_cast<const StoredType*>(addr_const_);
-      }
-
-      DataAccessPanic();
+      return *ReadableDataPtr<StoredType>();
     }
 
     /**
@@ -115,11 +93,7 @@
      */
     [[nodiscard]] RawData Data()
     {
-      if (file_type_ != FileType::READ_WRITE)
-      {
-        DataAccessPanic();
-      }
-      return RawData(addr_, size_);
+      return RawData(WritableDataPtr<void>(), size_);
     }
 
     /**
@@ -128,16 +102,7 @@
      */
     [[nodiscard]] ConstRawData Data() const
     {
-      if (file_type_ == FileType::READ_WRITE)
-      {
-        return ConstRawData(addr_, size_);
-      }
-      if (file_type_ == FileType::READ_ONLY)
-      {
-        return ConstRawData(addr_const_, size_);
-      }
-      DataAccessPanic();
-      return ConstRawData();
+      return ConstRawData(ReadableDataPtr<void>(), size_);
     }
 
    private:
@@ -159,13 +124,43 @@
     [[noreturn]] static void DataAccessPanic()
     {
       REQUIRE(false);
-#if defined(__GNUC__) || defined(__clang__)
-      __builtin_unreachable();
-#else
-      while (true)
+      std::abort();
+    }
+
+    /**
+     * @brief 获取只读数据地址
+     *        Get the readable data pointer
+     * @tparam DataType 目标数据类型 / Target data type
+     * @return 只读数据指针 / Read-only data pointer
+     */
+    template <typename DataType>
+    const DataType* ReadableDataPtr() const
+    {
+      if (file_type_ == FileType::READ_WRITE)
       {
+        return static_cast<const DataType*>(addr_);
       }
-#endif
+      if (file_type_ == FileType::READ_ONLY)
+      {
+        return static_cast<const DataType*>(addr_const_);
+      }
+      DataAccessPanic();
+    }
+
+    /**
+     * @brief 获取可写数据地址
+     *        Get the writable data pointer
+     * @tparam DataType 目标数据类型 / Target data type
+     * @return 可写数据指针 / Writable data pointer
+     */
+    template <typename DataType>
+    DataType* WritableDataPtr()
+    {
+      if (file_type_ != FileType::READ_WRITE)
+      {
+        DataAccessPanic();
+      }
+      return static_cast<DataType*>(addr_);
     }
 
     /**
