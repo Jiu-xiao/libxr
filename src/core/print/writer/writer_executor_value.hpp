@@ -68,10 +68,10 @@ template <std::signed_integral Int>
 ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int value)
 {
   using UInt = std::make_unsigned_t<Int>;
-  char digit_buffer[32];
+  char digit_buffer[UnsignedDigitCapacity<UInt, 10>()];
   UInt bits = static_cast<UInt>(value);
   UInt magnitude = (value < 0) ? (UInt{0} - bits) : bits;
-  size_t digit_count = AppendUnsigned(digit_buffer, magnitude, 10, false);
+  size_t digit_count = AppendUnsigned<10>(digit_buffer, magnitude);
 
   std::string_view digits(digit_buffer, digit_count);
   if (value == 0 && spec.precision == 0)
@@ -84,40 +84,72 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int val
 
 /**
  * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer semantic value through the shared integer-field path
+ * @tparam Type 运行期整数语义类型 / Runtime integer semantic type
  * @tparam UInt 无符号整数类型 / Unsigned integer type
- * @param type 运行期整数语义类型 / Runtime integer semantic type
  * @param spec 解码后的字段规格 / Decoded field spec
  * @param value 待写出的整数值 / Integer value to write
  * @return 返回共享整数字段路径的写出结果 / Returns the shared integer-field write result
  */
 template <OutputSink Sink, FormatProfile Profile>
-template <std::unsigned_integral UInt>
-ErrorCode Writer::Executor<Sink, Profile>::WriteUnsigned(FormatType type,
-                                                         const Spec& spec, UInt value)
+template <FormatType Type, std::unsigned_integral UInt>
+ErrorCode Writer::Executor<Sink, Profile>::WriteUnsigned(const Spec& spec, UInt value)
 {
-  uint8_t base = IntegerBase(type);
-  if (base == 0)
+  auto prefix = IntegerPrefix(Type, spec, value);
+
+  if constexpr (Type == FormatType::Unsigned32 || Type == FormatType::Unsigned64)
   {
-    return ErrorCode::ARG_ERR;
+    char digit_buffer[UnsignedDigitCapacity<UInt, 10>()];
+    size_t digit_count = AppendUnsigned<10>(digit_buffer, value);
+    if (value == 0 && spec.precision == 0)
+    {
+      digit_count = 0;
+    }
+    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
+                             spec);
   }
-
-  bool upper_case = IntegerUpperCase(type);
-  auto prefix = IntegerPrefix(type, spec, value);
-
-  char digit_buffer[33];
-  size_t digit_count = AppendUnsigned(digit_buffer, value, base, upper_case);
-
-  if (type == FormatType::Octal32 || type == FormatType::Octal64)
+  if constexpr (Type == FormatType::Binary32 || Type == FormatType::Binary64)
   {
+    char digit_buffer[UnsignedDigitCapacity<UInt, 2>()];
+    size_t digit_count = AppendUnsigned<2>(digit_buffer, value);
+    if (value == 0 && spec.precision == 0)
+    {
+      digit_count = 0;
+    }
+    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
+                             spec);
+  }
+  if constexpr (Type == FormatType::Octal32 || Type == FormatType::Octal64)
+  {
+    char digit_buffer[UnsignedDigitCapacity<UInt, 8>() + 1];
+    size_t digit_count = AppendUnsigned<8>(digit_buffer, value);
     digit_count = ApplyAlternateOctal(digit_buffer, digit_count, spec, value);
+    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
+                             spec);
   }
-  else if (value == 0 && spec.precision == 0)
+  if constexpr (Type == FormatType::HexLower32 || Type == FormatType::HexLower64)
   {
-    digit_count = 0;
+    char digit_buffer[UnsignedDigitCapacity<UInt, 16>()];
+    size_t digit_count = AppendUnsigned<16>(digit_buffer, value);
+    if (value == 0 && spec.precision == 0)
+    {
+      digit_count = 0;
+    }
+    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
+                             spec);
+  }
+  if constexpr (Type == FormatType::HexUpper32 || Type == FormatType::HexUpper64)
+  {
+    char digit_buffer[UnsignedDigitCapacity<UInt, 16>()];
+    size_t digit_count = AppendUnsigned<16, true>(digit_buffer, value);
+    if (value == 0 && spec.precision == 0)
+    {
+      digit_count = 0;
+    }
+    return WriteIntegerField('\0', prefix, std::string_view(digit_buffer, digit_count),
+                             spec);
   }
 
-  std::string_view digits(digit_buffer, digit_count);
-  return WriteIntegerField('\0', prefix, digits, spec);
+  return ErrorCode::ARG_ERR;
 }
 
 /**
@@ -130,8 +162,8 @@ template <OutputSink Sink, FormatProfile Profile>
 ErrorCode Writer::Executor<Sink, Profile>::WritePointer(const Spec& spec,
                                                         uintptr_t value)
 {
-  char digit_buffer[2 * sizeof(uintptr_t)];
-  size_t digit_count = AppendUnsigned(digit_buffer, value, 16, false);
+  char digit_buffer[UnsignedDigitCapacity<uintptr_t, 16>()];
+  size_t digit_count = AppendUnsigned<16>(digit_buffer, value);
   Spec actual = spec;
 
   if (!actual.HasPrecision() || actual.precision == 0)
@@ -240,8 +272,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
 template <OutputSink Sink, FormatProfile Profile>
 ErrorCode Writer::Executor<Sink, Profile>::WriteU32Dec(uint32_t value)
 {
-  char digit_buffer[10];
-  size_t digit_count = AppendUnsigned(digit_buffer, value, 10, false);
+  char digit_buffer[UnsignedDigitCapacity<uint32_t, 10>()];
+  size_t digit_count = AppendUnsigned<10>(digit_buffer, value);
   return WriteRaw(std::string_view(digit_buffer, digit_count));
 }
 
@@ -255,8 +287,8 @@ template <OutputSink Sink, FormatProfile Profile>
 ErrorCode Writer::Executor<Sink, Profile>::WriteU32ZeroPadWidth(uint8_t width,
                                                                 uint32_t value)
 {
-  char digit_buffer[10];
-  size_t digit_count = AppendUnsigned(digit_buffer, value, 10, false);
+  char digit_buffer[UnsignedDigitCapacity<uint32_t, 10>()];
+  size_t digit_count = AppendUnsigned<10>(digit_buffer, value);
   size_t zeros = FieldPadding(width, digit_count);
   if (auto ec = WritePadding('0', zeros); ec != ErrorCode::OK)
   {

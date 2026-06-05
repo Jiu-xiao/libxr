@@ -42,8 +42,8 @@ class Writer::Executor
   template <std::signed_integral Int>
   [[nodiscard]] ErrorCode WriteSigned(const Spec& spec, Int value);
 
-  template <std::unsigned_integral UInt>
-  [[nodiscard]] ErrorCode WriteUnsigned(FormatType type, const Spec& spec, UInt value);
+  template <FormatType Type, std::unsigned_integral UInt>
+  [[nodiscard]] ErrorCode WriteUnsigned(const Spec& spec, UInt value);
   [[nodiscard]] ErrorCode WritePointer(const Spec& spec, uintptr_t value);
   [[nodiscard]] ErrorCode WriteCharacter(const Spec& spec, char ch);
   [[nodiscard]] ErrorCode WriteString(const Spec& spec, std::string_view text);

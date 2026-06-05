@@ -148,8 +148,8 @@ inline bool Writer::AppendBufferText(char* buffer, size_t capacity, size_t& size
 inline bool Writer::AppendBufferU32ZeroPad(char* buffer, size_t capacity, size_t& size,
                                            uint32_t value, uint8_t width)
 {
-  char digits[10];
-  size_t digit_count = AppendUnsigned(digits, value, 10, false);
+  char digits[UnsignedDigitCapacity<uint32_t, 10>()];
+  size_t digit_count = AppendUnsigned<10>(digits, value);
   size_t zero_count = (width > digit_count) ? static_cast<size_t>(width) - digit_count : 0;
 
   for (size_t i = 0; i < zero_count; ++i)

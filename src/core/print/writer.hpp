@@ -326,17 +326,26 @@ class Writer
   static void StoreArgumentsOrdered(uint8_t*& out, Tuple& tuple);
 
   /**
-   * @brief 把一个无符号整数写进调用方提供的数字缓冲区 / Append one unsigned integer into a caller-provided digit buffer
+   * @brief 返回某个无符号整数在指定进制下所需的最大数字个数 / Return the maximum digit count required for one unsigned integer under the selected radix
+   * @tparam UInt 无符号整数类型 / Unsigned integer type
+   * @tparam Base 整数进制 / Integer radix
+   * @return 返回该整型在所选进制下的最大数字个数 / Returns the maximum digit count under the selected radix
+   */
+  template <std::unsigned_integral UInt, uint8_t Base>
+  [[nodiscard]] static constexpr size_t UnsignedDigitCapacity();
+
+  /**
+   * @brief 把一个无符号整数写进调用方提供的定长数字缓冲区 / Append one unsigned integer into a caller-provided fixed-size digit buffer
+   * @tparam Base 整数进制 / Integer radix
+   * @tparam UpperCase 十六进制数字是否使用大写字母 / Whether hexadecimal digits should use uppercase letters
+   * @tparam N 目标缓冲区长度 / Destination buffer size
    * @tparam UInt 无符号整数类型 / Unsigned integer type
    * @param out 目标数字缓冲区 / Destination digit buffer
    * @param value 待编码的无符号值 / Unsigned value to encode
-   * @param base 整数进制 / Integer radix
-   * @param upper_case 十六进制数字是否使用大写字母 / Whether hexadecimal digits should use uppercase letters
    * @return 返回输出的数字个数 / Returns the emitted digit count
    */
-  template <std::unsigned_integral UInt>
-  [[nodiscard]] static size_t AppendUnsigned(char* out, UInt value, uint8_t base,
-                                             bool upper_case);
+  template <uint8_t Base, bool UpperCase = false, size_t N, std::unsigned_integral UInt>
+  [[nodiscard]] static size_t AppendUnsigned(char (&out)[N], UInt value);
 
   /**
    * @brief 以十进制形式追加一个较小的无符号整数 / Append one small unsigned integer in base 10
@@ -344,7 +353,8 @@ class Writer
    * @param value 待编码的无符号值 / Unsigned value to encode
    * @return 返回输出的数字个数 / Returns the emitted digit count
    */
-  [[nodiscard]] static size_t AppendSmallUnsigned(char* out, uint8_t value);
+  template <size_t N>
+  [[nodiscard]] static size_t AppendSmallUnsigned(char (&out)[N], uint8_t value);
 
   /**
    * @brief 返回把某段载荷扩展到目标字段宽度所需的填充长度 / Return the padding width needed to expand one payload to the requested field width
@@ -362,21 +372,6 @@ class Writer
    */
   [[nodiscard]] static constexpr size_t IntegerPrecisionZeros(const Spec& spec,
                                                               size_t digit_count);
-
-  /**
-   * @brief 返回某个无符号运行期类型对应的整数进制 / Returns the integer radix selected by one unsigned runtime type.
-   * @param type Runtime field type. / 运行期字段类型。
-   * @return Returns the selected integer radix. / 返回选中的整数进制。
-   */
-  [[nodiscard]] static constexpr uint8_t IntegerBase(FormatType type);
-
-  /**
-   * @brief 判断某个无符号运行期类型是否应输出大写十六进制数字 / Returns whether one unsigned runtime type should emit uppercase hex digits.
-   * @param type Runtime field type. / 运行期字段类型。
-   * @return Returns `true` when uppercase hex digits are required, otherwise
-   *         `false`. / 需要输出大写十六进制数字时返回 `true`，否则返回 `false`。
-   */
-  [[nodiscard]] static constexpr bool IntegerUpperCase(FormatType type);
 
   /**
    * @brief 返回放在数字载荷之外的备用格式前缀 / Return the alternate-form prefix carried outside the digit payload
