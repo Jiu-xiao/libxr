@@ -121,6 +121,7 @@ Topic::Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
   ASSERT(payload_type_id != nullptr);
   ASSERT(payload_size != 0);
   ASSERT(payload_alignment != 0);
+  ASSERT((payload_alignment & (payload_alignment - 1)) == 0);
 
   if (domain == nullptr)
   {

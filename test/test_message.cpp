@@ -33,14 +33,14 @@ static_assert(!std::is_trivially_copyable_v<ByteStablePayload>);
 static_assert(std::is_trivially_destructible_v<ByteStablePayload>);
 static_assert(LibXR::TopicPayload<ByteStablePayload>);
 
-struct alignas(16) WideAlignedPayload
+struct alignas(LibXR::CACHE_LINE_SIZE) WideAlignedPayload
 {
   uint64_t left;
   uint64_t right;
 };
 
 static_assert(LibXR::TopicPayload<WideAlignedPayload>);
-static_assert(alignof(WideAlignedPayload) == 16);
+static_assert(alignof(WideAlignedPayload) == LibXR::CACHE_LINE_SIZE);
 
 struct PrefixIntPayload
 {

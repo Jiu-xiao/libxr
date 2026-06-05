@@ -302,7 +302,9 @@ class Topic
    * @param name topic 名称 / Topic name
    * @param payload_type_id payload 类型标识 / Payload type identifier
    * @param payload_size 该 topic 固定 payload 字节数 / Fixed payload size of this topic
-   * @param payload_alignment 该 topic payload 所需对齐 / Required payload alignment of this topic
+   * @param payload_alignment 该 topic payload 所需对齐，必须是非零 2 次幂 /
+   *        Required payload alignment of this topic; must be a non-zero power of
+   *        two
    * @param domain 可选主题域 / Optional topic domain
    * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized multi-publisher use
    */
@@ -360,7 +362,15 @@ class Topic
   {
     CheckTopicPayload<Data>();
     auto topic = Find(name, domain);
-    if (topic == nullptr)
+    if (topic != nullptr)
+    {
+      CheckSubscriberType<Data>(Topic(topic));
+      if (multi_publisher && !topic->data_.mutex)
+      {
+        ASSERT(false);
+      }
+    }
+    else
     {
       topic = CreateTopic<Data>(name, domain, multi_publisher).block_;
     }
