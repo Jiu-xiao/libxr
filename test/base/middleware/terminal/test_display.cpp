@@ -1,16 +1,16 @@
 /**
  * @file test_display.cpp
- * @brief `Terminal` display and history-rendering helper tests.
+ * @brief `Terminal` 显示与历史渲染辅助测试。 `Terminal` display and history-rendering helper tests.
  *
- * Test items:
- * 1. Line-feed modes: verify `CRLF`, `LF` and `CR` render the correct line ending.
- * 2. Prompt and clear sequences: verify header rendering, clear-line and clear-screen escape output.
- * 3. History display/restore: verify history recall renders the selected line and `CopyHistoryToInputLine()` restores the buffer state.
- * 4. Mid-line redraw: verify insertion and deletion with a non-zero cursor offset emit the expected redraw suffix.
+ * 测试项目 / Test items:
+ * 1. 三种换行模式输出。 Line-feed modes: verify `CRLF`, `LF` and `CR` render the correct line ending.
+ * 2. prompt、清行和清屏序列。 Prompt and clear sequences: verify header rendering, clear-line and clear-screen escape output.
+ * 3. 历史显示与恢复。 History display/restore: verify history recall renders the selected line and `CopyHistoryToInputLine()` restores the buffer state.
+ * 4. 中途插入/删除时的重绘后缀。 Mid-line redraw: verify insertion and deletion with a non-zero cursor offset emit the expected redraw suffix.
  *
- * Test principle:
- * 1. Flush the real terminal write stream into a pipe and inspect the emitted bytes, because this layer's contract is defined by exact rendered escape sequences.
- * 2. Pair rendered output checks with internal buffer/cursor checks so the test covers both visible and retained editor state.
+ * 测试原理 / Test principles:
+ * 1. 把真实 write stream 刷到 pipe 后检查输出字节，因为这一层的契约是精确 escape 序列。 Flush the real terminal write stream into a pipe and inspect the emitted bytes, because this layer's contract is defined by exact rendered escape sequences.
+ * 2. 配合内部 buffer/cursor 状态检查，保证可见输出和保留状态一致。 Pair rendered output checks with internal buffer/cursor checks so the test covers both visible and retained editor state.
  */
 #include <cstring>
 #include <string>
@@ -58,6 +58,8 @@ struct TerminalDisplayFixture
 
 void FillInputLine(LibXR::Terminal<>& terminal, const char* text)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   terminal.input_line_.Reset();
   const size_t len = std::strlen(text);
   for (size_t i = 0; i < len; ++i)
@@ -69,6 +71,8 @@ void FillInputLine(LibXR::Terminal<>& terminal, const char* text)
 
 void TestLineFeedModes()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> crlf_fixture;
   crlf_fixture.terminal.LineFeed();
   ASSERT(crlf_fixture.FlushOutput() == "\r\n");
@@ -84,6 +88,8 @@ void TestLineFeedModes()
 
 void TestHeaderAndClearSequences()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> fixture;
 
   fixture.terminal.ShowHeader();
@@ -104,6 +110,8 @@ void TestHeaderAndClearSequences()
 
 void TestHistoryDisplayAndRestore()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> fixture;
 
   FillInputLine(fixture.terminal, "alpha");
@@ -130,6 +138,8 @@ void TestHistoryDisplayAndRestore()
 
 void TestMidLineDisplayEditing()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> fixture;
 
   FillInputLine(fixture.terminal, "ab");
@@ -147,6 +157,8 @@ void TestMidLineDisplayEditing()
 
 void test_terminal_display()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestLineFeedModes();
   TestHeaderAndClearSequences();
   TestHistoryDisplayAndRestore();

@@ -1,15 +1,15 @@
 /**
  * @file test_input.cpp
- * @brief `Terminal` input parsing, history navigation and in-line editing tests.
+ * @brief `Terminal` 输入解析、历史导航与行内编辑测试。 `Terminal` input parsing, history navigation and in-line editing tests.
  *
- * Test items:
- * 1. CRLF suppression: verify one `\r\n` command submission is not executed twice.
- * 2. History navigation: verify `Up` / `Down` ANSI sequences recall the newest and older commands correctly.
- * 3. Mid-line insertion after cursor movement: verify left-arrow movement followed by typed input edits the in-flight command at the correct location.
+ * 测试项目 / Test items:
+ * 1. CRLF 双字节抑制。 CRLF suppression: verify one `\r\n` command submission is not executed twice.
+ * 2. 上下箭头历史导航。 History navigation: verify `Up` / `Down` ANSI sequences recall the newest and older commands correctly.
+ * 3. 左移后中间插入编辑。 Mid-line insertion after cursor movement: verify left-arrow movement followed by typed input edits the in-flight command at the correct location.
  *
- * Test principle:
- * 1. Send raw ANSI/control bytes through the real read path so the parser, history logic and command execution stay coupled exactly as in runtime use.
- * 2. Verify both command side effects and rendered terminal output, because input correctness includes editor state and executed command content together.
+ * 测试原理 / Test principles:
+ * 1. 通过真实读路径发送 ANSI/控制字节，保证 parser、history 和 command 执行耦合验证。 Send raw ANSI/control bytes through the real read path so the parser, history logic and command execution stay coupled exactly as in runtime use.
+ * 2. 同时看命令副作用和终端输出，因为输入正确性包含编辑状态和执行内容。 Verify both command side effects and rendered terminal output, because input correctness includes editor state and executed command content together.
  */
 #include <cstring>
 #include <string>
@@ -31,6 +31,8 @@ struct CommandState
 
 int CountCommand(CommandState* state, int argc, char** argv)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   ASSERT(state != nullptr);
   ASSERT(state->count != nullptr);
   ASSERT(argc == 1);
@@ -41,6 +43,8 @@ int CountCommand(CommandState* state, int argc, char** argv)
 
 size_t CountSubstring(std::string_view text, std::string_view needle)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   size_t count = 0;
   size_t pos = 0;
   while ((pos = text.find(needle, pos)) != std::string_view::npos)
@@ -67,6 +71,8 @@ struct TerminalFixture
 
   void RunUntilIdle()
   {
+  // 基准内容：执行当前子场景或 case。
+  // Benchmark coverage: execute the current benchmark sub-case.
     for (size_t i = 0; i < 8; ++i)
     {
       LibXR::Terminal<>::TaskFun(&terminal);
@@ -110,6 +116,8 @@ struct TerminalFixture
 
 void test_terminal_input()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TerminalFixture fixture;
 
   int one_count = 0;

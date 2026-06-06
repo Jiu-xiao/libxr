@@ -1,13 +1,13 @@
 /**
  * @file main.cpp
- * @brief Main runner for base/runtime test binaries.
+ * @brief base/runtime 测试主执行器。 Main runner for base/runtime test binaries.
  *
- * Responsibilities:
- * 1. Register the fatal test callback used to convert assertion failures into process failure.
- * 2. Execute grouped test entries and isolate selected cases with `fork()` where state sharing would pollute subsequent tests.
+ * 职责 / Responsibilities:
+ * 1. 安装把断言失败转换成进程失败的 fatal 测试回调。 Register the fatal test callback that converts assertion failures into process failure.
+ * 2. 按分组执行测试入口，并对需要隔离状态的案例使用 `fork()`。 Execute grouped test entries and isolate selected cases with `fork()` where shared state would pollute later tests.
  *
- * Organization principle:
- * 1. Keep execution grouping explicit in one place so the test tree layout and the runnable matrix stay synchronized.
+ * 组织原理 / Organization principle:
+ * 1. 把执行分组集中在一个入口里，保证测试树结构和可运行矩阵始终同步。 Keep execution grouping explicit in one place so the test tree layout and the runnable matrix stay synchronized.
  */
 #include "test_base.hpp"
 

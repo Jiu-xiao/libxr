@@ -1,14 +1,14 @@
 /**
  * @file test_application.cpp
- * @brief `ApplicationManager` registration and dispatch tests.
+ * @brief `ApplicationManager` 注册与调度测试。 `ApplicationManager` registration and dispatch tests.
  *
- * Test items:
- * 1. Registration accounting: verify manager size grows with each registered application.
- * 2. Monitor dispatch coverage: verify `MonitorAll()` reaches every registered application and can be called repeatedly.
+ * 测试项目 / Test items:
+ * 1. 注册计数行为。 Registration accounting: verify manager size grows with each registered application.
+ * 2. `MonitorAll()` 的覆盖与重复调用行为。 Monitor dispatch coverage: verify `MonitorAll()` reaches every registered application and can be called repeatedly.
  *
- * Test principle:
- * 1. Record a seen-bitmask and hit count instead of asserting callback order, because the source contract explicitly does not guarantee traversal order.
- * 2. Call `MonitorAll()` more than once so the test documents steady-state repeatability rather than only first-use behavior.
+ * 测试原理 / Test principles:
+ * 1. 使用 seen bitmask 和 hit count，而不是假定遍历顺序，因为源码本身不保证顺序。 Record a seen-bitmask and hit count instead of asserting callback order, because the source contract explicitly does not guarantee traversal order.
+ * 2. 重复调用 `MonitorAll()`，验证 steady-state 行为而不只是一轮调用。 Call `MonitorAll()` more than once so the test documents steady-state repeatability rather than only first-use behavior.
  */
 #include "libxr.hpp"
 #include "test.hpp"
@@ -40,6 +40,8 @@ class CountingApp : public LibXR::Application
 
 void test_app_framework_application()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   int seen_mask = 0;
   int hit_count = 0;
 

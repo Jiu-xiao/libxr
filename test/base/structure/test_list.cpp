@@ -1,14 +1,14 @@
 /**
  * @file test_list.cpp
- * @brief Ordered list and lock-free list traversal tests.
+ * @brief 普通链表与 lock-free 链表遍历测试。 Ordered list and lock-free list traversal tests.
  *
- * Test items:
- * 1. Ordinary `List`: verify add, foreach, delete and not-found delete behavior.
- * 2. `LockFreeList` basic traversal: verify append count and foreach coverage on the lock-free variant.
+ * 测试项目 / Test items:
+ * 1. 普通 `List` 的增删遍历行为。 Ordinary `List`: verify add, foreach, delete and not-found delete behavior.
+ * 2. `LockFreeList` 的基本遍历覆盖。 `LockFreeList` basic traversal: verify append count and foreach coverage on the lock-free variant.
  *
- * Test principle:
- * 1. Reuse the same callback counter across both list types so the test compares the observable traversal contract directly.
- * 2. Check deletion results after each mutation, because size/accounting is the key caller-visible contract of the ordinary list.
+ * 测试原理 / Test principles:
+ * 1. 复用同一个回调计数器，直接比较两类链表对外可见的遍历契约。 Reuse the same callback counter across both list types so the test compares the observable traversal contract directly.
+ * 2. 每次删除后都检查返回值和 size，因为这是普通链表最核心的调用方语义。 Check deletion results after each mutation, because size/accounting is the key caller-visible contract of the ordinary list.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -18,6 +18,8 @@ static uint32_t counter = 0;
 
 void test_list()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::List::Node<int> node1(10);
   LibXR::List::Node<int> node2(20);
   LibXR::List::Node<int> node3(30);

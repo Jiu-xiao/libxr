@@ -1,14 +1,14 @@
 /**
  * @file test_kinematic.cpp
- * @brief Forward/backward kinematic chain solve test.
+ * @brief 前向/反向运动链求解测试。 Forward/backward kinematic chain solve test.
  *
- * Test items:
- * 1. Forward propagation: build a start-point, intermediate object and end-point chain with two joints.
- * 2. Backward solve: verify the endpoint target position/quaternion can be reached with small residual error after backward computation.
+ * 测试项目 / Test items:
+ * 1. 两关节链的前向传播。 Forward propagation: build a start-point, intermediate object and end-point chain with two joints.
+ * 2. 端点目标位姿的反向求解残差。 Backward solve: verify the endpoint target position/quaternion can be reached with small residual error after backward computation.
  *
- * Test principle:
- * 1. Use a concrete two-joint chain instead of isolated algebra checks so the test covers object/joint composition on the real API surface.
- * 2. Assert residual error rather than exact internal state, because the public contract is geometric convergence at the endpoint.
+ * 测试原理 / Test principles:
+ * 1. 用具体两关节链而不是孤立公式，覆盖对象/关节在真实 API 上的组合行为。 Use a concrete two-joint chain instead of isolated algebra checks so the test covers object/joint composition on the real API surface.
+ * 2. 以端点残差为准，而不是强行断言内部中间状态。 Assert residual error rather than exact internal state, because the public contract is geometric convergence at the endpoint.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -16,6 +16,8 @@
 
 void test_kinematic()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::Inertia inertia_endpoint(1.0, 0.1, 0.1, 0.1, 0., 0., 0.);
   LibXR::Inertia inertia_midpoint(1.0, 0.1, 0.1, 0.1, 0., 0., 0.);
   LibXR::Inertia inertia_startpoint(1000., 100., 100., 100., 0., 0., 0.);

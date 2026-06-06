@@ -1,14 +1,14 @@
 /**
  * @file test_thread.cpp
- * @brief Runtime thread creation and sleep primitive tests.
+ * @brief runtime thread 创建与 sleep 原语测试。 Runtime thread creation and sleep primitive tests.
  *
- * Test items:
- * 1. Thread creation/wakeup: verify a created runtime thread can signal completion through a semaphore.
- * 2. Relative sleep: verify `Thread::Sleep()` waits for approximately the requested duration.
- * 3. Periodic sleep-until: verify `SleepUntil()` advances wakeups monotonically across successive periods.
+ * 测试项目 / Test items:
+ * 1. 线程创建后的信号唤醒。 Thread creation/wakeup: verify a created runtime thread can signal completion through a semaphore.
+ * 2. 相对睡眠 `Sleep()`。 Relative sleep: verify `Thread::Sleep()` waits for approximately the requested duration.
+ * 3. 周期性 `SleepUntil()`。 Periodic sleep-until: verify `SleepUntil()` advances wakeups monotonically across successive periods.
  *
- * Test principle:
- * 1. Use monotonic host time alongside LibXR timestamps so the test checks both external elapsed time and LibXR's own periodic wakeup surface.
+ * 测试原理 / Test principles:
+ * 1. 同时使用宿主单调时钟和 LibXR 时间戳，双重验证外部时长与内部周期唤醒表面。 Use monotonic host time alongside LibXR timestamps so the test checks both external elapsed time and LibXR's own periodic wakeup surface.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -25,6 +25,8 @@ namespace
 
 void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
   pthread_join(thread, nullptr);
 #else
@@ -34,6 +36,8 @@ void JoinThreadIfNeeded(LibXR::Thread& thread)
 
 uint64_t NowMonotonicMs()
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   struct timespec ts = {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return static_cast<uint64_t>(ts.tv_sec) * 1000ULL +
@@ -44,6 +48,8 @@ uint64_t NowMonotonicMs()
 
 void test_thread()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::Thread thread;
   LibXR::Semaphore sem(0);
 

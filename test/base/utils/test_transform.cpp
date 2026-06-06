@@ -1,15 +1,15 @@
 /**
  * @file test_transform.cpp
- * @brief Position, quaternion, rotation-matrix and Euler-order conversion tests.
+ * @brief 位置、四元数、旋转矩阵与欧拉角转换测试。 Position, quaternion, rotation-matrix and Euler-order conversion tests.
  *
- * Test items:
- * 1. Basic constructors and algebra: verify quaternion/rotation-matrix construction from arrays and basic position/quaternion arithmetic.
- * 2. Cross-frontend equivalence: verify Eigen quaternion input, quaternion division and rotation-matrix conversion agree with LibXR representations.
- * 3. Euler-order coverage: verify multiple Euler conversion orders round-trip between Euler angle, quaternion and rotation matrix consistently.
+ * 测试项目 / Test items:
+ * 1. 基础构造与代数运算。 Basic constructors and algebra: verify quaternion/rotation-matrix construction from arrays and basic position/quaternion arithmetic.
+ * 2. Eigen 前端和 LibXR 表示的一致性。 Cross-frontend equivalence: verify Eigen quaternion input, quaternion division and rotation-matrix conversion agree with LibXR representations.
+ * 3. 多种欧拉顺序的 round-trip。 Euler-order coverage: verify multiple Euler conversion orders round-trip between Euler angle, quaternion and rotation matrix consistently.
  *
- * Test principle:
- * 1. Compare multiple mathematically equivalent representations of the same pose, because this module's contract is representation consistency.
- * 2. Cover several Euler orders explicitly so order-specific regressions do not hide behind one default convention.
+ * 测试原理 / Test principles:
+ * 1. 对比同一姿态的多种数学表示，因为这个模块的核心契约就是表示一致性。 Compare multiple mathematically equivalent representations of the same pose, because this module's contract is representation consistency.
+ * 2. 显式覆盖多种欧拉顺序，避免默认顺序掩盖 order-specific 回归。 Cover several Euler orders explicitly so order-specific regressions do not hide behind one default convention.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -17,6 +17,8 @@
 
 void test_transform()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::Position pos(1., 8., 0.3);
   LibXR::Position pos_new;
   LibXR::EulerAngle eulr = {LibXR::PI / 12, LibXR::PI / 6, LibXR::PI / 4}, eulr_new;

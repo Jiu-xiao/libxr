@@ -1,14 +1,14 @@
 /**
  * @file test_rw_pipe_runtime.cpp
- * @brief Runtime-plane `rw` / `pipe` blocking and timeout tests.
+ * @brief runtime 平面 `rw` / `pipe` 阻塞与超时测试。 Runtime-plane `rw` / `pipe` blocking and timeout tests.
  *
- * Test items:
- * 1. RW block/stream runtime semantics: verify pending-result propagation, timeout detach, stale waiter reuse and zero-length completion on the runtime plane.
- * 2. Pipe blocking semantics: verify stream block immediate path and block-reuse stress through the runtime-backed pipe path.
+ * 测试项目 / Test items:
+ * 1. RW block/stream 的 runtime 语义。 RW block/stream runtime semantics: verify pending-result propagation, timeout detach, stale waiter reuse and zero-length completion on the runtime plane.
+ * 2. Pipe 阻塞 immediate path 与复用压力。 Pipe blocking semantics: verify stream block immediate path and block-reuse stress through the runtime-backed pipe path.
  *
- * Test principle:
- * 1. Keep only the timing-sensitive/blocking scenarios here, because they depend on the runtime system implementation rather than on the base queue logic alone.
- * 2. Reuse the same harness patterns as the base test but execute them on the runtime plane so backend-sensitive behavior is isolated clearly.
+ * 测试原理 / Test principles:
+ * 1. 把只依赖 runtime 后端的阻塞/超时场景单独放在 runtime 平面，和 base 逻辑解耦。 Keep only the timing-sensitive/blocking scenarios here, because they depend on the runtime system implementation rather than on the base queue logic alone.
+ * 2. 沿用 base harness 模式，但在 runtime 后端上复现，从而隔离 backend-sensitive 行为。 Reuse the same harness patterns as the base test but execute them on the runtime plane so backend-sensitive behavior is isolated clearly.
  */
 #include <atomic>
 #include <cstring>
@@ -77,6 +77,8 @@ struct ModeHarness
 
   void ExpectFinal(LibXR::ErrorCode expected)
   {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
     switch (mode)
     {
       case TestMode::NONE:
@@ -136,6 +138,8 @@ using WriteHarness = ModeHarness<LibXR::WriteOperation>;
 
 inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
   pthread_join(thread, nullptr);
 #else
@@ -145,6 +149,8 @@ inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 
 inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT_MS)
 {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
   ASSERT(sem.Wait(timeout) == LibXR::ErrorCode::OK);
 }
 
@@ -355,20 +361,28 @@ void VerifyStreamBlockTimeout()
 
 void test_rw_stream_block_pending_result_propagates()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   VerifyStreamBlockPendingCompletion(LibXR::ErrorCode::FAILED, LibXR::ErrorCode::FAILED,
                                      StreamSubmitMode::COMMIT);
 }
 
 void test_rw_stream_block_timeout_detaches_waiter() { VerifyStreamBlockTimeout(); }
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
 
 void test_rw_stream_block_destructor_autocommit()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   VerifyStreamBlockPendingCompletion(LibXR::ErrorCode::OK, LibXR::ErrorCode::OK,
                                      StreamSubmitMode::DESTRUCT);
 }
 
 void test_rw_block_read_timeout_detaches_pending()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -403,6 +417,8 @@ void test_rw_block_read_timeout_detaches_pending()
 
 void test_rw_zero_read_pending_notifies_without_dequeue()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   for (auto mode : ALL_MODES)
@@ -444,6 +460,8 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
 
 void test_rw_block_write_timeout_detaches_waiter()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 64);
@@ -476,6 +494,8 @@ void test_rw_block_write_timeout_detaches_waiter()
 
 void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   ReadPort r(16);
@@ -513,6 +533,8 @@ void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
 
 void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -554,6 +576,8 @@ void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
 
 void test_rw_read_port_block_queue_completion_copies_data()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   ReadPort r(16);
@@ -577,6 +601,8 @@ void test_rw_read_port_block_queue_completion_copies_data()
 
 void test_rw_write_port_block_pending_result_propagates()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -597,6 +623,8 @@ void test_rw_write_port_block_pending_result_propagates()
 
 void test_rw_write_port_block_reused_waiter_discards_stale_signal()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -654,6 +682,8 @@ void StartDelayedPipeWriter(LibXR::Thread& thread, DelayedPipeWriteContext& ctx,
 
 void FillPattern(std::vector<uint8_t>& buffer, uint8_t seed)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   for (size_t i = 0; i < buffer.size(); ++i)
   {
     buffer[i] = static_cast<uint8_t>(seed + i * 17u + (i % 5u));
@@ -664,6 +694,8 @@ template <typename Harness>
 void ExpectCallResult(Harness& harness, LibXR::ErrorCode call_result,
                       LibXR::ErrorCode final_result)
 {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
   if (harness.mode == TestMode::BLOCK)
   {
     ASSERT(call_result == final_result);
@@ -677,6 +709,8 @@ void ExpectCallResult(Harness& harness, LibXR::ErrorCode call_result,
 
 void test_pipe_stream_block_immediate_path()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -705,6 +739,8 @@ void test_pipe_stream_block_immediate_path()
 
 void test_pipe_block_reuse_stress()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   constexpr size_t PIPE_CAPACITY = 64;
@@ -757,6 +793,8 @@ void test_pipe_block_reuse_stress()
 
 void test_rw_runtime()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   test_rw_stream_block_pending_result_propagates();
   test_rw_stream_block_timeout_detaches_waiter();
   test_rw_stream_block_destructor_autocommit();
@@ -772,6 +810,8 @@ void test_rw_runtime()
 
 void test_pipe_runtime()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   test_pipe_stream_block_immediate_path();
   test_pipe_block_reuse_stress();
 }

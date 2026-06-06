@@ -1,14 +1,14 @@
 /**
  * @file test_runtime.cpp
- * @brief Runtime-plane subscriber waiting tests for `Topic`.
+ * @brief runtime 平面 `Topic` 订阅等待测试。 Runtime-plane subscriber waiting tests for `Topic`.
  *
- * Test items:
- * 1. Async subscriber wait semantics: verify `StartWaiting()` only arms fresh notifications and preserves timestamp/data for the next publish.
- * 2. Sync subscriber wait semantics: verify blocking waits, busy reentry rejection, timeout behavior and callback-context publish wakeups.
+ * 测试项目 / Test items:
+ * 1. ASyncSubscriber 的 fresh wait 语义。 Async subscriber wait semantics: verify `StartWaiting()` only arms fresh notifications and preserves timestamp/data for the next publish.
+ * 2. SyncSubscriber 的阻塞等待、忙重入和 callback-context 唤醒。 Sync subscriber wait semantics: verify blocking waits, busy reentry rejection, timeout behavior and callback-context publish wakeups.
  *
- * Test principle:
- * 1. Use real runtime threads for the blocking wait path, because these semantics do not exist on the base plane alone.
- * 2. Check both wait return codes and received payload/timestamp values so synchronization and data delivery are validated together.
+ * 测试原理 / Test principles:
+ * 1. 使用真实 runtime 线程驱动阻塞等待，因为这些语义在 base 平面不存在。 Use real runtime threads for the blocking wait path, because these semantics do not exist on the base plane alone.
+ * 2. 同时检查 wait 返回码和收到的数据/时间戳，保证同步和数据传递一起被验证。 Check both wait return codes and received payload/timestamp values so synchronization and data delivery are validated together.
  */
 #include <thread>
 
@@ -21,6 +21,8 @@ namespace
 
 void TestASyncSubscriberFreshWait()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   auto domain = LibXR::Topic::Domain("message_async_wait_domain");
   auto topic = LibXR::Topic::CreateTopic<int>("message_async_wait_tp", &domain);
   auto suber = LibXR::Topic::ASyncSubscriber<int>(topic);
@@ -51,6 +53,8 @@ void TestASyncSubscriberFreshWait()
 
 void TestSyncSubscriberFreshWait()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   auto domain = LibXR::Topic::Domain("message_sync_wait_domain");
   auto topic = LibXR::Topic::CreateTopic<int>("message_sync_wait_tp", &domain);
   int rx = -1;
@@ -113,6 +117,8 @@ void TestSyncSubscriberFreshWait()
 
 void test_message_runtime()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestASyncSubscriberFreshWait();
   TestSyncSubscriberFreshWait();
 }

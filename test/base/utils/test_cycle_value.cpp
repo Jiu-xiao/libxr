@@ -1,13 +1,13 @@
 /**
  * @file test_cycle_value.cpp
- * @brief Cyclic-angle normalization arithmetic tests.
+ * @brief 循环角值归一化与算术测试。 Cyclic-angle normalization arithmetic tests.
  *
- * Test items:
- * 1. Constructor normalization: verify values outside one full period are wrapped into the canonical range.
- * 2. Arithmetic updates: verify `+=`, `-=`, unary negation and subtraction-based reconstruction preserve cyclic semantics.
+ * 测试项目 / Test items:
+ * 1. 构造时超周期归一化。 Constructor normalization: verify values outside one full period are wrapped into the canonical range.
+ * 2. 加减、取反与差值重建后的循环语义。 Arithmetic updates: verify `+=`, `-=`, unary negation and subtraction-based reconstruction preserve cyclic semantics.
  *
- * Test principle:
- * 1. Use multiples of `PI` so the expected wrapped values stay easy to reason about and compare numerically.
+ * 测试原理 / Test principles:
+ * 1. 选用 `PI` 的整倍数组合，让期望 wrap 结果容易推导和比较。 Use multiples of `PI` so the expected wrapped values stay easy to reason about and compare numerically.
  */
 #include "cycle_value.hpp"
 #include "libxr.hpp"
@@ -16,6 +16,8 @@
 
 void test_cycle_value()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using LibXR::CycleValue;
   CycleValue<> val(4 * LibXR::PI + LibXR::PI / 2);
   ASSERT(equal(static_cast<double>(val), LibXR::PI / 2));

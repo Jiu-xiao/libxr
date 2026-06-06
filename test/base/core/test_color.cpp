@@ -1,14 +1,14 @@
 /**
  * @file test_color.cpp
- * @brief ANSI color/style/control lookup-table tests for `libxr_color.hpp`.
+ * @brief `libxr_color.hpp` ANSI 颜色/样式/控制表测试。 ANSI color/style/control lookup-table tests for `libxr_color.hpp`.
  *
- * Test items:
- * 1. Enum/table cardinality: verify every exported enum `COUNT` matches its corresponding string table length.
- * 2. Representative escape values: verify key style, terminal-control, foreground, background and preset entries map to the expected ANSI sequences.
+ * 测试项目 / Test items:
+ * 1. 枚举与查表数组的数量对应关系。 Enum/table cardinality: verify every exported enum `COUNT` matches its corresponding string table length.
+ * 2. 关键 ANSI 转义序列的取值。 Representative escape values: verify key style, terminal-control, foreground, background and preset entries map to the expected ANSI sequences.
  *
- * Test principle:
- * 1. Check the compile-time table sizes first, because a silent enum/table drift would invalidate every runtime user of these lookup tables.
- * 2. Check representative strings at runtime to confirm the published textual contract, not just the numeric enum layout.
+ * 测试原理 / Test principles:
+ * 1. 先检查编译期表长，避免枚举和字符串表静默漂移。 Check the compile-time table sizes first, because a silent enum/table drift would invalidate every runtime user of these lookup tables.
+ * 2. 再检查代表性运行时字符串，确认公开文本契约而不只是数值布局。 Check representative strings at runtime to confirm the published textual contract, not just the numeric enum layout.
  */
 #include <cstddef>
 #include <iterator>
@@ -20,6 +20,8 @@
 
 void test_color()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   static_assert(std::size(LibXR::LIBXR_TEXT_STYLE_STR) ==
                 static_cast<size_t>(LibXR::TextStyle::COUNT));
   static_assert(std::size(LibXR::LIBXR_TERMINAL_CONTROL_STR) ==

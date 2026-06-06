@@ -1,15 +1,15 @@
 /**
  * @file test_raw.cpp
- * @brief Binding-plane tests for `DatabaseRaw`.
+ * @brief binding 平面 `DatabaseRaw` 测试。 Binding-plane tests for `DatabaseRaw`.
  *
- * Test items:
- * 1. Raw database smoke traffic: verify repeated write/load cycles preserve multiple keys through the file-backed flash binding.
- * 2. Failure semantics: verify raw flash read/write/erase failures and key-add failures escalate through the expected fatal path.
- * 3. Recovery semantics: verify exact-size loads, partial backup recovery and several corrupted-metadata scenarios reopen to the documented repaired state.
+ * 测试项目 / Test items:
+ * 1. raw 数据库烟雾流量。 Raw database smoke traffic: verify repeated write/load cycles preserve multiple keys through the file-backed flash binding.
+ * 2. 读写擦失败与 key-add failure 的 fatal 语义。 Failure semantics: verify raw flash read/write/erase failures and key-add failures escalate through the expected fatal path.
+ * 3. 备份/尺寸/元数据损坏后的恢复语义。 Recovery semantics: verify exact-size loads, partial backup recovery and several corrupted-metadata scenarios reopen to the documented repaired state.
  *
- * Test principle:
- * 1. Use the Linux binary-file flash binding and direct on-disk corruption helpers, because this suite is about persistence semantics under a real host binding.
- * 2. Reopen databases after each crafted corruption so the test checks externally visible recovery behavior rather than internal transient state.
+ * 测试原理 / Test principles:
+ * 1. 使用 Linux 二进制文件 flash 绑定和真实磁盘字节篡改 helper，验证宿主绑定下的持久化行为。 Use the Linux binary-file flash binding and direct on-disk corruption helpers, because this suite is about persistence semantics under a real host binding.
+ * 2. 每次损坏后都通过 reopen 检查外部可见恢复结果，而不是只看瞬时内部状态。 Reopen databases after each crafted corruption so the test checks externally visible recovery behavior rather than internal transient state.
  */
 #include "database_binding_test_common.hpp"
 
@@ -20,6 +20,8 @@ using namespace DatabaseBindingTestCommon;
 
 void TestDatabaseBindingRawSmoke()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   constexpr size_t FLASH_SIZE = XR_DB_FLASH_SIZE;
 
   std::array<uint32_t, 1> data_k1 = {1};
@@ -89,6 +91,8 @@ void TestDatabaseBindingRawSmoke()
 
 void TestDatabasePartialBackupRecovery()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   RunPartialBackupCase("/tmp/flash_test_partial_valid_main.bin", MainChecksum::VALID, 0,
                        1234);
   RunPartialBackupCase("/tmp/flash_test_partial_broken_main.bin", MainChecksum::INVALID,
@@ -97,6 +101,8 @@ void TestDatabasePartialBackupRecovery()
 
 void TestDatabaseKeyAddFailureRequires()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
 #if defined(LIBXR_SYSTEM_Linux)
   ExpectFatalExit(
       XR_DB_FATAL_KEY_ADD,
@@ -121,6 +127,8 @@ void TestDatabaseKeyAddFailureRequires()
 
 void TestDatabaseRawReadFailureRequires()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
 #if defined(LIBXR_SYSTEM_Linux)
   ExpectFatalExit(
       XR_DB_FATAL_RAW_READ,
@@ -136,6 +144,8 @@ void TestDatabaseRawReadFailureRequires()
 
 void TestDatabaseRawWriteFailureRequires()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
 #if defined(LIBXR_SYSTEM_Linux)
   ExpectFatalExit(
       XR_DB_FATAL_RAW_WRITE,
@@ -151,6 +161,8 @@ void TestDatabaseRawWriteFailureRequires()
 
 void TestDatabaseRawEraseFailureRequires()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
 #if defined(LIBXR_SYSTEM_Linux)
   ExpectFatalExit(
       XR_DB_FATAL_RAW_ERASE,
@@ -166,6 +178,8 @@ void TestDatabaseRawEraseFailureRequires()
 
 void TestDatabaseRawSaveCurrentValue()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   const char* path = "/tmp/flash_test_raw_save_current.bin";
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
                                                XR_DB_MIN_WRITE_SIZE, false, true);
@@ -180,6 +194,8 @@ void TestDatabaseRawSaveCurrentValue()
 
 void TestDatabaseRawRequiresExactStoredSize()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   const char* path = "/tmp/flash_test_raw_exact_size.bin";
   {
     LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
@@ -204,6 +220,8 @@ void TestDatabaseRawRequiresExactStoredSize()
 
 void TestDatabaseRawInvalidMainKeyMetadataReinitializes()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   const char* path = "/tmp/flash_test_raw_invalid_main_key_metadata.bin";
   CreateSeedDatabase(path);
 
@@ -219,6 +237,8 @@ void TestDatabaseRawInvalidMainKeyMetadataReinitializes()
 
 void TestDatabaseRawInvalidBackupMetadataDoesNotRestore()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   const char* path = "/tmp/flash_test_raw_invalid_backup_metadata.bin";
   CreateSeedDatabase(path);
 
@@ -234,6 +254,8 @@ void TestDatabaseRawInvalidBackupMetadataDoesNotRestore()
 
 void TestDatabaseRawRestoresFromValidBackup()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   const char* path = "/tmp/flash_test_raw_restore_from_valid_backup.bin";
   CreateSeedDatabase(path);
 
@@ -248,6 +270,8 @@ void TestDatabaseRawRestoresFromValidBackup()
 
 void TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   const char* path = "/tmp/flash_test_raw_corrupt_first_key_size.bin";
   CreateTwoKeyDatabase(path);
 
@@ -266,6 +290,8 @@ void TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes()
 
 void test_database_binding_raw()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestDatabaseBindingRawSmoke();
   TestDatabasePartialBackupRecovery();
   TestDatabaseKeyAddFailureRequires();

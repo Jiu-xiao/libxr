@@ -1,15 +1,15 @@
 /**
  * @file test_double_buffer.cpp
- * @brief `DoubleBuffer` pending/active half-switch tests.
+ * @brief `DoubleBuffer` pending/active 双半区切换测试。 `DoubleBuffer` pending/active half-switch tests.
  *
- * Test items:
- * 1. Initial split and pending state: verify the raw buffer is divided evenly and starts without pending data.
- * 2. Pending fill semantics: verify `FillPending()` stores bytes and rejects a second pending fill before switch.
- * 3. Switch semantics and bounds: verify active-half toggling and oversized pending writes are rejected.
+ * 测试项目 / Test items:
+ * 1. 初始分块与 pending 初始状态。 Initial split and pending state: verify the raw buffer is divided evenly and starts without pending data.
+ * 2. `FillPending()` 的写入与重复写保护。 Pending fill semantics: verify `FillPending()` stores bytes and rejects a second pending fill before switch.
+ * 3. `Switch()` 切换和越界长度拒绝。 Switch semantics and bounds: verify active-half toggling and oversized pending writes are rejected.
  *
- * Test principle:
- * 1. Use one concrete backing buffer and inspect both addresses and lengths, because this utility is a pure storage-layout primitive.
- * 2. Check both accepted and rejected writes so the test documents the state machine, not just the happy path.
+ * 测试原理 / Test principles:
+ * 1. 使用一个具体后备缓冲区，同时检查地址和长度，因为它是纯存储布局原语。 Use one concrete backing buffer and inspect both addresses and lengths, because this utility is a pure storage-layout primitive.
+ * 2. 同时覆盖成功和拒绝分支，明确状态机而不只看 happy path。 Check both accepted and rejected writes so the test documents the state machine, not just the happy path.
  */
 #include "double_buffer.hpp"
 #include "libxr_def.hpp"
@@ -18,6 +18,8 @@
 
 void test_double_buffer()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   uint8_t buff[128] = {};  // 预分配大缓冲区
   LibXR::RawData raw(buff, sizeof(buff));
 

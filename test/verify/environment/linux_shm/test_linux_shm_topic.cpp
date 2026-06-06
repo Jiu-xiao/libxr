@@ -1,15 +1,15 @@
 /**
  * @file test_linux_shm_topic.cpp
- * @brief Cross-process environment verification for `LinuxSharedTopic`.
+ * @brief `LinuxSharedTopic` 跨进程环境验证。 Cross-process environment verification for `LinuxSharedTopic`.
  *
- * Test items:
- * 1. Local attach/backpressure semantics: verify slot exhaustion, subscriber pending counts and payload/timestamp delivery on one shared-memory topic.
- * 2. Stale publisher takeover: verify a fresh creator can reopen and reuse the segment after an older publisher process exits.
- * 3. Queue saturation behavior: verify publish failure/drop accounting when the subscriber queue is full.
+ * 测试项目 / Test items:
+ * 1. 本地 attach/backpressure 语义。 Local attach/backpressure semantics: verify slot exhaustion, subscriber pending counts and payload/timestamp delivery on one shared-memory topic.
+ * 2. stale publisher takeover。 Stale publisher takeover: verify a fresh creator can reopen and reuse the segment after an older publisher process exits.
+ * 3. subscriber queue 饱和后的 publish/drop 记账。 Queue saturation behavior: verify publish failure/drop accounting when the subscriber queue is full.
  *
- * Test principle:
- * 1. Use real forked processes and shared-memory segments, because this is an environment verification target rather than a pure unit test.
- * 2. Check both data integrity and resource-accounting counters so IPC correctness includes payload and queue semantics together.
+ * 测试原理 / Test principles:
+ * 1. 使用真实 fork 进程和共享内存段，因为这是环境验证而不是纯单元测试。 Use real forked processes and shared-memory segments, because this is an environment verification target rather than a pure unit test.
+ * 2. 同时检查数据完整性和资源计数，因为 IPC 契约既有 payload 也有队列语义。 Check both data integrity and resource-accounting counters so IPC correctness includes payload and queue semantics together.
  */
 #include <array>
 #include <cstdio>
@@ -50,6 +50,8 @@ uint32_t ComputeChecksum(const IPCFrame& frame)
 
 void FillFrame(IPCFrame& frame, uint32_t seq)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   frame.seq = seq;
   for (size_t i = 0; i < frame.payload.size(); ++i)
   {
@@ -60,17 +62,23 @@ void FillFrame(IPCFrame& frame, uint32_t seq)
 
 void AssertFrame(const IPCFrame& frame, uint32_t expected_seq)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   ASSERT(frame.seq == expected_seq);
   ASSERT(frame.checksum == ComputeChecksum(frame));
 }
 
 void MakeTopicName(char* topic_name, size_t topic_name_size, const char* prefix)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   std::snprintf(topic_name, topic_name_size, "%s_%d", prefix, static_cast<int>(getpid()));
 }
 
 void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   for (int retry = 0; retry < 200 && topic.GetSubscriberNum() < expected_num; ++retry)
   {
     usleep(10000);
@@ -80,6 +88,8 @@ void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
 
 void ExpectChildExit(pid_t child, int expected_code = 0)
 {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
   int status = 0;
   ASSERT(waitpid(child, &status, 0) == child);
   ASSERT(WIFEXITED(status));
@@ -90,6 +100,8 @@ void ExpectChildExit(pid_t child, int expected_code = 0)
 
 void test_linux_shm_topic()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   char topic_name[96] = {};
 
   // Basic attach-only semantics and slot backpressure.

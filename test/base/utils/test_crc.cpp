@@ -1,13 +1,13 @@
 /**
  * @file test_crc.cpp
- * @brief CRC8 / CRC16 / CRC32 calculation and verification tests.
+ * @brief CRC8 / CRC16 / CRC32 计算与校验测试。 CRC8 / CRC16 / CRC32 calculation and verification tests.
  *
- * Test items:
- * 1. Packed structure checksum generation: verify each CRC helper computes the trailer field over the intended prefix bytes.
- * 2. Checksum verification: verify the generated trailer makes the corresponding `Verify()` helper succeed.
+ * 测试项目 / Test items:
+ * 1. 带尾校验字段的 packed 结构计算。 Packed structure checksum generation: verify each CRC helper computes the trailer field over the intended prefix bytes.
+ * 2. 对应 `Verify()` 校验通过。 Checksum verification: verify the generated trailer makes the corresponding `Verify()` helper succeed.
  *
- * Test principle:
- * 1. Use packed payloads with trailing checksum fields, because this matches the dominant in-repo usage pattern for CRC helpers.
+ * 测试原理 / Test principles:
+ * 1. 使用末尾 CRC 字段的 packed 载荷，贴近仓库内最主要的真实用法。 Use packed payloads with trailing checksum fields, because this matches the dominant in-repo usage pattern for CRC helpers.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -15,6 +15,8 @@
 
 void test_crc()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   struct __attribute__((packed))
   {
     double a;

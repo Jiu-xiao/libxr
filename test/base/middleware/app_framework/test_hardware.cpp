@@ -1,15 +1,15 @@
 /**
  * @file test_hardware.cpp
- * @brief `HardwareContainer` alias registration and typed lookup tests.
+ * @brief `HardwareContainer` 别名注册与类型化查找测试。 `HardwareContainer` alias registration and typed lookup tests.
  *
- * Test items:
- * 1. Direct alias lookup: verify each registered device is found by its primary alias.
- * 2. Shared alias filtering: verify the same alias can resolve different objects only when the requested type matches.
- * 3. Fallback-alias search and post-construction registration: verify multi-alias search and later `Register()` calls both become visible to typed lookup.
+ * 测试项目 / Test items:
+ * 1. 主别名直接查找。 Direct alias lookup: verify each registered device is found by its primary alias.
+ * 2. 共享别名下的类型过滤。 Shared alias filtering: verify the same alias can resolve different objects only when the requested type matches.
+ * 3. 回退别名与运行时追加注册。 Fallback-alias search and post-construction registration: verify multi-alias search and later `Register()` calls both become visible to typed lookup.
  *
- * Test principle:
- * 1. Cross-check the same alias under multiple requested types, because the core contract is "name + exact type" rather than name alone.
- * 2. Exercise both constructor-time and runtime registration so the test covers both alias population paths.
+ * 测试原理 / Test principles:
+ * 1. 用同名别名在不同类型下交叉查找，验证真正契约是“名字 + 精确类型”。 Cross-check the same alias under multiple requested types, because the core contract is "name + exact type" rather than name alone.
+ * 2. 同时覆盖构造期和运行时注册路径，避免两条别名填充路径漂移。 Exercise both constructor-time and runtime registration so the test covers both alias population paths.
  */
 #include "libxr.hpp"
 #include "test.hpp"
@@ -41,6 +41,8 @@ struct DeviceD
 
 void test_app_framework_hardware()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   DeviceA dev_a;
   DeviceB dev_b;
   DeviceC dev_c;

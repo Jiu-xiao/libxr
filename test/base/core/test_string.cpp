@@ -1,15 +1,15 @@
 /**
  * @file test_string.cpp
- * @brief Runtime string-view construction and reformatting tests.
+ * @brief 运行时字符串视图构造与重格式化测试。 Runtime string-view construction and reformatting tests.
  *
- * Test items:
- * 1. Text construction: verify plain text, bounded arrays, embedded-NUL spans and suffix concatenation keep the expected retained view.
- * 2. Error handling: verify null-pointer inputs report `PTR_NULL` and collapse to empty runtime strings safely.
- * 3. Reformat/reprintf: verify compiled `format` and `printf` refresh the same storage and produce the expected textual output.
+ * 测试项目 / Test items:
+ * 1. 普通文本、定长数组、嵌入 NUL 与后缀拼接。 Text construction: verify plain text, bounded arrays, embedded-NUL spans and suffix concatenation keep the expected retained view.
+ * 2. 空指针错误路径。 Error handling: verify null-pointer inputs report `PTR_NULL` and collapse to empty runtime strings safely.
+ * 3. `format` / `printf` 重格式化。 Reformat/reprintf: verify compiled `format` and `printf` refresh the same storage and produce the expected textual output.
  *
- * Test principle:
- * 1. Observe status, `View()` and `CStr()` together, because this type couples content and lifetime-stable storage.
- * 2. Use bounded arrays and embedded-NUL inputs deliberately, since those are the cases where string/text abstractions usually drift from byte-span semantics.
+ * 测试原理 / Test principles:
+ * 1. 联合观察状态、`View()` 和 `CStr()`，因为该类型把内容和稳定存储绑在一起。 Observe status, `View()` and `CStr()` together, because this type couples content and lifetime-stable storage.
+ * 2. 故意使用定长数组和嵌入 NUL 输入，覆盖最容易和文本抽象冲突的场景。 Use bounded arrays and embedded-NUL inputs deliberately, since those are the cases where string/text abstractions usually drift from byte-span semantics.
  */
 #include <cstdint>
 #include <limits>
@@ -44,6 +44,8 @@ static_assert(!std::is_move_assignable_v<LibXR::RuntimeStringView<>>);
 
 static void TestRuntimeStringText()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   LibXR::RuntimeStringView<> copied("camera");
   ASSERT(copied.Status() == LibXR::ErrorCode::OK);
   ASSERT(!copied.Empty());
@@ -125,6 +127,8 @@ static void TestRuntimeStringText()
 
 static void TestRuntimeStringErrors()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   LibXR::RuntimeStringView<> null_part("camera", static_cast<const char*>(nullptr));
   ASSERT(null_part.Empty());
   ASSERT(null_part.Status() == LibXR::ErrorCode::PTR_NULL);
@@ -150,6 +154,8 @@ static void TestRuntimeStringErrors()
 
 static void TestRuntimeStringFormat()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   LibXR::RuntimeStringView<"camera_{}", unsigned int> formatted;
   ASSERT(formatted.Reformat(7U) == LibXR::ErrorCode::OK);
   ASSERT(formatted.Status() == LibXR::ErrorCode::OK);
@@ -190,6 +196,8 @@ static void TestRuntimeStringFormat()
 
 void test_string()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestRuntimeStringText();
   TestRuntimeStringErrors();
   TestRuntimeStringFormat();

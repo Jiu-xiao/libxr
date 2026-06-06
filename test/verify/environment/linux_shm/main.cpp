@@ -1,10 +1,10 @@
 /**
  * @file main.cpp
- * @brief Runner for Linux shared-memory environment verification.
+ * @brief Linux shared-memory 环境验证执行器。 Runner for Linux shared-memory environment verification.
  *
- * Responsibilities:
- * 1. Install the fatal assertion callback for the verification binary.
- * 2. Execute the `LinuxSharedTopic` environment verification entrypoint.
+ * 职责 / Responsibilities:
+ * 1. 安装验证二进制的 fatal assertion 回调。 Install the fatal assertion callback for the verification binary.
+ * 2. 执行 `LinuxSharedTopic` 的环境验证入口。 Execute the `LinuxSharedTopic` environment verification entrypoint.
  */
 #include "test_verify.hpp"
 

@@ -1,16 +1,16 @@
 /**
  * @file test_rw_pipe.cpp
- * @brief Base-plane tests for `ReadPort`, `WritePort` and `Pipe` state machines.
+ * @brief base 平面 `ReadPort` / `WritePort` / `Pipe` 状态机测试。 Base-plane tests for `ReadPort`, `WritePort` and `Pipe` state machines.
  *
- * Test items:
- * 1. Read-side queue semantics: queued-data clearing, pending-mode matrix, zero-length completion and edge-case dequeue behavior.
- * 2. Block/stream semantics: immediate completion, pending-result propagation, timeout detach and stale waiter reuse.
- * 3. Fail-and-clear semantics: async pending completion, blocked waiter failure, idle queue cleanup and active-stream preservation.
- * 4. Pipe integration: basic read/write, chunked transport, stream commit flow, mode matrix and reuse stress.
+ * 测试项目 / Test items:
+ * 1. 读侧队列与 pending 语义。 Read-side queue semantics: queued-data clearing, pending-mode matrix, zero-length completion and edge-case dequeue behavior.
+ * 2. block/stream 路径语义。 Block/stream semantics: immediate completion, pending-result propagation, timeout detach and stale waiter reuse.
+ * 3. fail-and-clear 清理语义。 Fail-and-clear semantics: async pending completion, blocked waiter failure, idle queue cleanup and active-stream preservation.
+ * 4. `Pipe` 端到端集成与复用压力。 Pipe integration: basic read/write, chunked transport, stream commit flow, mode matrix and reuse stress.
  *
- * Test principle:
- * 1. Drive the real queue-backed port state machines rather than mocks so timeout, detach and cleanup paths execute on the production code path.
- * 2. Check both returned status codes and internal queue/status transitions, because correctness here depends on lifecycle semantics as much as on copied payload bytes.
+ * 测试原理 / Test principles:
+ * 1. 直接驱动真实队列和端口状态机，而不是用 mock 绕开超时/分离/清理路径。 Drive the real queue-backed port state machines rather than mocks so timeout, detach and cleanup paths execute on the production code path.
+ * 2. 同时检查返回码和内部状态变化，因为这里的正确性依赖生命周期语义。 Check both returned status codes and internal queue/status transitions, because correctness here depends on lifecycle semantics as much as on copied payload bytes.
  */
 #include <atomic>
 #include <cstring>
@@ -84,6 +84,8 @@ struct ModeHarness
 
   void ExpectPendingSubmitted() const
   {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
     if (mode == TestMode::POLLING)
     {
       ASSERT(polling_status == PollingStatus::RUNNING);
@@ -96,6 +98,8 @@ struct ModeHarness
 
   void ExpectFinal(LibXR::ErrorCode expected)
   {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
     switch (mode)
     {
       case TestMode::NONE:
@@ -156,6 +160,8 @@ using WriteHarness = ModeHarness<LibXR::WriteOperation>;
 
 inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
   pthread_join(thread, nullptr);
 #else
@@ -165,6 +171,8 @@ inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 
 inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT_MS)
 {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
   ASSERT(sem.Wait(timeout) == LibXR::ErrorCode::OK);
 }
 
@@ -448,6 +456,8 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
 
 void test_rw_read_port_clear_queued_data_clears_idle_queue()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   TrackingReadPort r(16);
@@ -464,6 +474,8 @@ void test_rw_read_port_clear_queued_data_clears_idle_queue()
 
 void test_rw_read_port_clear_queued_data_clears_event_queue()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   TrackingReadPort r(16);
@@ -482,6 +494,8 @@ void test_rw_read_port_clear_queued_data_clears_event_queue()
 
 void test_rw_read_port_clear_queued_data_busy_pending_read()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   TrackingReadPort r(16);
@@ -658,6 +672,8 @@ void VerifyStreamBlockTimeout()
 
 void test_rw_pending_mode_matrix()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   for (auto mode : ASYNC_MODES)
   {
     VerifyPendingReadMode(mode);
@@ -667,6 +683,8 @@ void test_rw_pending_mode_matrix()
 
 void test_rw_edge_cases()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   for (auto mode : ASYNC_MODES)
@@ -694,20 +712,28 @@ void test_rw_edge_cases()
 
 void test_rw_stream_block_pending_result_propagates()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   VerifyStreamBlockPendingCompletion(LibXR::ErrorCode::FAILED, LibXR::ErrorCode::FAILED,
                                      StreamSubmitMode::COMMIT);
 }
 
 void test_rw_stream_block_timeout_detaches_waiter() { VerifyStreamBlockTimeout(); }
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
 
 void test_rw_stream_block_destructor_autocommit()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   VerifyStreamBlockPendingCompletion(LibXR::ErrorCode::OK, LibXR::ErrorCode::OK,
                                      StreamSubmitMode::DESTRUCT);
 }
 
 void test_rw_block_read_timeout_detaches_pending()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -742,6 +768,8 @@ void test_rw_block_read_timeout_detaches_pending()
 
 void test_rw_zero_read_pending_notifies_without_dequeue()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   for (auto mode : LibXRTest::ALL_MODES)
@@ -783,6 +811,8 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
 
 void test_rw_block_write_timeout_detaches_waiter()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 64);
@@ -815,6 +845,8 @@ void test_rw_block_write_timeout_detaches_waiter()
 
 void test_rw_immediate_error_propagates()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   for (auto mode : LibXRTest::ALL_MODES)
@@ -854,6 +886,8 @@ void test_rw_immediate_error_propagates()
 
 void test_rw_read_port_fail_and_clear_all_completes_async_pending()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   for (auto mode : LibXRTest::ASYNC_MODES)
   {
     VerifyPendingReadFailAndClearMode(mode, LibXR::ErrorCode::INIT_ERR);
@@ -862,6 +896,8 @@ void test_rw_read_port_fail_and_clear_all_completes_async_pending()
 
 void test_rw_write_port_fail_and_clear_all_completes_async_pending()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   for (auto mode : LibXRTest::ASYNC_MODES)
   {
     VerifyPendingWriteFailAndClearMode(mode, LibXR::ErrorCode::INIT_ERR);
@@ -870,6 +906,8 @@ void test_rw_write_port_fail_and_clear_all_completes_async_pending()
 
 void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   ReadPort r(16);
@@ -907,6 +945,8 @@ void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
 
 void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -948,6 +988,8 @@ void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
 
 void test_rw_write_port_fail_and_clear_all_clears_idle_queue()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -969,6 +1011,8 @@ void test_rw_write_port_fail_and_clear_all_clears_idle_queue()
 
 void test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -1008,6 +1052,8 @@ void test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream()
 
 void test_rw_read_port_block_queue_completion_copies_data()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   ReadPort r(16);
@@ -1031,6 +1077,8 @@ void test_rw_read_port_block_queue_completion_copies_data()
 
 void test_rw_write_port_block_pending_result_propagates()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -1051,6 +1099,8 @@ void test_rw_write_port_block_pending_result_propagates()
 
 void test_rw_write_port_block_reused_waiter_discards_stale_signal()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -1085,6 +1135,8 @@ void test_rw_write_port_block_reused_waiter_discards_stale_signal()
 
 void test_rw()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   test_rw_pending_mode_matrix();
   test_rw_edge_cases();
   test_rw_read_port_clear_queued_data_clears_idle_queue();
@@ -1138,6 +1190,8 @@ void StartDelayedPipeWriter(LibXR::Thread& thread, DelayedPipeWriteContext& ctx,
 
 void FillPattern(std::vector<uint8_t>& buffer, uint8_t seed)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   for (size_t i = 0; i < buffer.size(); ++i)
   {
     buffer[i] = static_cast<uint8_t>(seed + i * 17u + (i % 5u));
@@ -1148,6 +1202,8 @@ template <typename Harness>
 void ExpectCallResult(Harness& harness, LibXR::ErrorCode call_result,
                       LibXR::ErrorCode final_result)
 {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
   if (harness.mode == TestMode::BLOCK)
   {
     ASSERT(call_result == final_result);
@@ -1234,6 +1290,8 @@ void VerifyWriteThenRead(TestMode write_mode, TestMode read_mode, size_t size,
 
 void test_pipe_basic()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -1258,6 +1316,8 @@ void test_pipe_basic()
 
 void test_pipe_write_then_read()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -1282,6 +1342,8 @@ void test_pipe_write_then_read()
 
 void test_pipe_chunked_rw()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -1312,6 +1374,8 @@ void test_pipe_chunked_rw()
 
 void test_pipe_stream_api()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -1340,6 +1404,8 @@ void test_pipe_stream_api()
 
 void test_pipe_stream_block_immediate_path()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -1368,6 +1434,8 @@ void test_pipe_stream_block_immediate_path()
 
 void test_pipe_stream_commit_releases_lock_for_next_stream()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -1398,6 +1466,8 @@ void test_pipe_stream_commit_releases_lock_for_next_stream()
 
 void test_pipe_stream_commit_allows_persistent_and_external_streams()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -1432,6 +1502,8 @@ void test_pipe_stream_commit_allows_persistent_and_external_streams()
 
 void test_pipe_mode_matrix()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   uint8_t seed = 0x21;
 
   for (auto read_mode : ASYNC_MODES)
@@ -1446,6 +1518,8 @@ void test_pipe_mode_matrix()
 
 void test_pipe_reuse_stress()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(PIPE_CAPACITY);
@@ -1488,6 +1562,8 @@ void test_pipe_reuse_stress()
 
 void test_pipe_block_reuse_stress()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(PIPE_CAPACITY);
@@ -1535,6 +1611,8 @@ void test_pipe_block_reuse_stress()
 
 void test_pipe_edge_cases()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   for (auto read_mode : ASYNC_MODES)
   {
     for (auto write_mode : ASYNC_MODES)
@@ -1547,6 +1625,8 @@ void test_pipe_edge_cases()
 
 void test_pipe()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   test_pipe_basic();
   test_pipe_write_then_read();
   test_pipe_chunked_rw();

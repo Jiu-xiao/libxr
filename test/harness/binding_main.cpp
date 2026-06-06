@@ -1,10 +1,10 @@
 /**
  * @file binding_main.cpp
- * @brief Main runner for binding-plane tests.
+ * @brief binding 平面测试主执行器。 Main runner for binding-plane tests.
  *
- * Responsibilities:
- * 1. Install the fatal assertion callback for binding tests.
- * 2. Run the binding-specific test entrypoints in a deterministic order.
+ * 职责 / Responsibilities:
+ * 1. 安装 binding 测试的 fatal assertion 回调。 Install the fatal assertion callback for binding tests.
+ * 2. 按确定顺序执行 binding 平面测试入口。 Run the binding-specific test entrypoints in a deterministic order.
  */
 #include "test_binding.hpp"
 

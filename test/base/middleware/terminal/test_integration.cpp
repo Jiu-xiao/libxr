@@ -1,15 +1,15 @@
 /**
  * @file test_integration.cpp
- * @brief Integrated `Terminal` command-path test over a mixed RamFS tree.
+ * @brief 混合 RamFS 树上的 `Terminal` 集成命令路径测试。 Integrated `Terminal` command-path test over a mixed RamFS tree.
  *
- * Test items:
- * 1. Executable-path dispatch: verify relative and absolute executable paths both run the target command.
- * 2. Non-executable and unknown command handling: verify ordinary files and unknown commands emit the expected error text.
- * 3. Auto-complete and input sanitization: verify tab-complete lists matching entries and non-printable bytes are filtered from command parsing.
+ * 测试项目 / Test items:
+ * 1. 相对/绝对可执行路径执行。 Executable-path dispatch: verify relative and absolute executable paths both run the target command.
+ * 2. 非可执行文件和未知命令报错。 Non-executable and unknown command handling: verify ordinary files and unknown commands emit the expected error text.
+ * 3. 自动补全与非打印字符过滤。 Auto-complete and input sanitization: verify tab-complete lists matching entries and non-printable bytes are filtered from command parsing.
  *
- * Test principle:
- * 1. Run a realistic RamFS tree through `Terminal::TaskFun()` so path resolution, input parsing and output reporting stay integrated.
- * 2. Inspect the final terminal transcript rather than helper internals, because this test covers the end-to-end shell behavior contract.
+ * 测试原理 / Test principles:
+ * 1. 在真实 RamFS 树上驱动 `TaskFun()`，让路径解析、输入解析和输出报告保持集成。 Run a realistic RamFS tree through `Terminal::TaskFun()` so path resolution, input parsing and output reporting stay integrated.
+ * 2. 以最终终端 transcript 为准，而不是只看局部 helper 状态。 Inspect the final terminal transcript rather than helper internals, because this test covers the end-to-end shell behavior contract.
  */
 #include <cstring>
 #include <vector>
@@ -21,6 +21,8 @@
 
 void test_terminal()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::RamFS ramfs;
   LibXR::Pipe input(64);
   LibXR::Pipe output(256);

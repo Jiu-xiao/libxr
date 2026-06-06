@@ -1,14 +1,14 @@
 /**
  * @file test_lockfree_list.cpp
- * @brief Focused `LockFreeList` traversal and early-stop tests.
+ * @brief `LockFreeList` 聚焦遍历与提前终止测试。 Focused `LockFreeList` traversal and early-stop tests.
  *
- * Test items:
- * 1. Insertion order observation: verify the lock-free list exposes the expected head-first traversal order after repeated `Add()` calls.
- * 2. Early termination: verify `Foreach()` stops and returns the callback's first non-`OK` result.
+ * 测试项目 / Test items:
+ * 1. 插入后头插遍历顺序。 Insertion order observation: verify the lock-free list exposes the expected head-first traversal order after repeated `Add()` calls.
+ * 2. `Foreach()` 非 `OK` 提前停止。 Early termination: verify `Foreach()` stops and returns the callback's first non-`OK` result.
  *
- * Test principle:
- * 1. Observe only the public traversal API, because the lock-free list contract is about visible iteration behavior rather than internal link layout.
- * 2. Use a non-`OK` callback return to drive the cancellation branch explicitly.
+ * 测试原理 / Test principles:
+ * 1. 只观察公开遍历 API，因为 lock-free list 的契约是可见迭代行为。 Observe only the public traversal API, because the lock-free list contract is about visible iteration behavior rather than internal link layout.
+ * 2. 用显式非 `OK` 返回击中取消分支。 Use a non-`OK` callback return to drive the cancellation branch explicitly.
  */
 #include <cstdint>
 
@@ -18,6 +18,8 @@
 
 void test_lockfree_list()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::LockFreeList list;
   LibXR::LockFreeList::Node<int> node1(10);
   LibXR::LockFreeList::Node<int> node2(20);

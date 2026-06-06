@@ -1,15 +1,15 @@
 /**
  * @file test_sequential.cpp
- * @brief Binding-plane tests for `DatabaseRawSequential`.
+ * @brief binding 平面 `DatabaseRawSequential` 测试。 Binding-plane tests for `DatabaseRawSequential`.
  *
- * Test items:
- * 1. Sequential smoke traffic: verify repeated multi-key save/load cycles preserve data through the sequential file-backed binding.
- * 2. Save-current-value behavior: verify `Save()` persists the key object's current value.
- * 3. Failure semantics: verify sequential read/write/erase backend failures take the expected fatal path.
+ * 测试项目 / Test items:
+ * 1. sequential 数据库烟雾流量。 Sequential smoke traffic: verify repeated multi-key save/load cycles preserve data through the sequential file-backed binding.
+ * 2. `Save()` 保存当前值语义。 Save-current-value behavior: verify `Save()` persists the key object's current value.
+ * 3. 读写擦失败的 fatal 路径。 Failure semantics: verify sequential read/write/erase backend failures take the expected fatal path.
  *
- * Test principle:
- * 1. Stress the real sequential database over the Linux flash binding so the test covers binding-plane persistence, not a mock backend.
- * 2. Combine long-running smoke traffic with fatal-path probes so both steady-state and hard-failure contracts are documented.
+ * 测试原理 / Test principles:
+ * 1. 在 Linux flash 绑定上跑真实 sequential 数据库，验证的是 binding 平面的持久化契约。 Stress the real sequential database over the Linux flash binding so the test covers binding-plane persistence, not a mock backend.
+ * 2. 把长时间烟雾流量和 fatal-path probe 放在一起，兼顾稳态和硬失败语义。 Combine long-running smoke traffic with fatal-path probes so both steady-state and hard-failure contracts are documented.
  */
 #include "database_binding_test_common.hpp"
 
@@ -20,6 +20,8 @@ using namespace DatabaseBindingTestCommon;
 
 void TestDatabaseBindingSequentialSmoke()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   constexpr size_t FLASH_SIZE = XR_DB_FLASH_SIZE;
 
   LinuxBinaryFileFlash<FLASH_SIZE> test_flash("/tmp/flash_test.bin", 512, 8, true, true);
@@ -98,6 +100,8 @@ void TestDatabaseBindingSequentialSmoke()
 
 void TestDatabaseSequentialSaveCurrentValue()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   const char* path = "/tmp/flash_test_seq_save_current.bin";
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, 512, 8, true, true);
   DatabaseRawSequential db(flash);
@@ -111,6 +115,8 @@ void TestDatabaseSequentialSaveCurrentValue()
 
 void TestDatabaseSequentialReadFailureRequires()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
 #if defined(LIBXR_SYSTEM_Linux)
   ExpectFatalExit(
       XR_DB_FATAL_SEQ_READ,
@@ -126,6 +132,8 @@ void TestDatabaseSequentialReadFailureRequires()
 
 void TestDatabaseSequentialWriteFailureRequires()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
 #if defined(LIBXR_SYSTEM_Linux)
   ExpectFatalExit(
       XR_DB_FATAL_SEQ_WRITE,
@@ -141,6 +149,8 @@ void TestDatabaseSequentialWriteFailureRequires()
 
 void TestDatabaseSequentialEraseFailureRequires()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
 #if defined(LIBXR_SYSTEM_Linux)
   ExpectFatalExit(
       XR_DB_FATAL_SEQ_ERASE,
@@ -158,6 +168,8 @@ void TestDatabaseSequentialEraseFailureRequires()
 
 void test_database_binding_sequential()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestDatabaseBindingSequentialSmoke();
   TestDatabaseSequentialSaveCurrentValue();
   TestDatabaseSequentialReadFailureRequires();

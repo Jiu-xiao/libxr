@@ -1,14 +1,14 @@
 /**
  * @file test_command.cpp
- * @brief `Terminal` built-in command tests.
+ * @brief `Terminal` 内建命令测试。 `Terminal` built-in command tests.
  *
- * Test items:
- * 1. `cd` built-ins: verify relative path, `.`, `..`, root-path and invalid-path transitions update `current_dir_` and prompt output correctly.
- * 2. `ls` built-in: verify node-type markers for directory, executable file, ordinary file and custom node, and verify listing scope follows the current directory.
+ * 测试项目 / Test items:
+ * 1. `cd` 的相对、`.`、`..`、根路径和无效路径行为。 `cd` built-ins: verify relative path, `.`, `..`, root-path and invalid-path transitions update `current_dir_` and prompt output correctly.
+ * 2. `ls` 对目录/可执行/普通文件/自定义节点的输出标记。 `ls` built-in: verify node-type markers for directory, executable file, ordinary file and custom node, and verify listing scope follows the current directory.
  *
- * Test principle:
- * 1. Feed commands through a `Pipe` and drive `Terminal::TaskFun()` so parsing, execution and prompt refresh all happen on the production path.
- * 2. Check both internal directory state and rendered output, because command correctness here is both semantic state change and user-visible terminal behavior.
+ * 测试原理 / Test principles:
+ * 1. 通过 `Pipe` 喂命令并驱动 `TaskFun()`，保证解析、执行和 prompt 刷新走真实路径。 Feed commands through a `Pipe` and drive `Terminal::TaskFun()` so parsing, execution and prompt refresh all happen on the production path.
+ * 2. 同时检查内部目录状态和终端输出，因为命令契约既有状态变化也有用户可见文本。 Check both internal directory state and rendered output, because command correctness here is both semantic state change and user-visible terminal behavior.
  */
 #include <cstring>
 #include <string>
@@ -37,6 +37,8 @@ struct TerminalCommandFixture
 
   void RunUntilIdle()
   {
+  // 基准内容：执行当前子场景或 case。
+  // Benchmark coverage: execute the current benchmark sub-case.
     for (size_t i = 0; i < 8; ++i)
     {
       LibXR::Terminal<>::TaskFun(&terminal);
@@ -76,6 +78,8 @@ struct TerminalCommandFixture
 
 void TestCdBuiltins()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   TerminalCommandFixture fixture;
 
   auto dir1 = LibXR::RamFS::CreateDir("dir1");
@@ -111,6 +115,8 @@ void TestCdBuiltins()
 
 void TestLsBuiltin()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   TerminalCommandFixture fixture;
 
   int file_value = 42;
@@ -155,6 +161,8 @@ void TestLsBuiltin()
 
 void test_terminal_command()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestCdBuiltins();
   TestLsBuiltin();
 }

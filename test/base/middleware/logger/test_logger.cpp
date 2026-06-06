@@ -1,14 +1,14 @@
 /**
  * @file test_logger.cpp
- * @brief Logger frontend resolution and terminal-output rendering tests.
+ * @brief logger 前端选择与终端输出渲染测试。 Logger frontend resolution and terminal-output rendering tests.
  *
- * Test items:
- * 1. Frontend selection: verify brace-style and printf-style literals resolve to the expected logger frontend at compile time.
- * 2. Runtime publish path: verify published logs carry level color, file/line prefix, formatted message text and terminal reset suffix.
+ * 测试项目 / Test items:
+ * 1. brace/printf 字面量前端选择。 Frontend selection: verify brace-style and printf-style literals resolve to the expected logger frontend at compile time.
+ * 2. 运行时日志发布后的颜色、前缀和消息输出。 Runtime publish path: verify published logs carry level color, file/line prefix, formatted message text and terminal reset suffix.
  *
- * Test principle:
- * 1. Bind `STDIO` to a `Pipe` so the test reads the logger's real output bytes instead of inspecting intermediate buffers.
- * 2. Validate both compile-time frontend choice and runtime rendered text, because logger correctness spans both layers.
+ * 测试原理 / Test principles:
+ * 1. 把 `STDIO` 绑定到 `Pipe`，直接读 logger 真正输出的字节流。 Bind `STDIO` to a `Pipe` so the test reads the logger's real output bytes instead of inspecting intermediate buffers.
+ * 2. 同时验证编译期前端选择和运行时渲染文本，因为 logger 跨两层工作。 Validate both compile-time frontend choice and runtime rendered text, because logger correctness spans both layers.
  */
 #include <cstddef>
 #include <string>
@@ -33,6 +33,8 @@ namespace
 
 size_t CountSubstring(std::string_view text, std::string_view needle)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   size_t count = 0;
   size_t pos = 0;
   while ((pos = text.find(needle, pos)) != std::string_view::npos)
@@ -45,6 +47,8 @@ size_t CountSubstring(std::string_view text, std::string_view needle)
 
 std::string ReadPipeText(LibXR::Pipe& pipe)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   const size_t output_size = pipe.GetReadPort().Size();
   ASSERT(output_size > 0);
 
@@ -59,6 +63,8 @@ std::string ReadPipeText(LibXR::Pipe& pipe)
 
 void test_logger()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::Pipe output(2048);
   auto* old_write = LibXR::STDIO::write_;
   auto* old_stream = LibXR::STDIO::write_stream_;

@@ -1,10 +1,10 @@
 /**
  * @file test_base.hpp
- * @brief Base/runtime test entrypoint declarations.
+ * @brief base/runtime 测试入口声明。 Base/runtime test entrypoint declarations.
  *
- * Purpose:
- * 1. Collect the callable entry symbols used by the main test runner.
- * 2. Keep the execution matrix explicit at the declaration boundary so moved files do not silently disappear from the runner.
+ * 作用 / Purpose:
+ * 1. 收集主测试执行器要调用的入口符号。 Collect the callable entry symbols used by the main test runner.
+ * 2. 把执行矩阵保持在一个显式声明边界上，避免文件搬动后悄悄脱离 runner。 Keep the execution matrix explicit at the declaration boundary so moved files do not silently disappear from the runner.
  */
 void test_async();
 void test_assert();

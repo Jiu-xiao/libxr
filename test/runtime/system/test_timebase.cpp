@@ -1,13 +1,13 @@
 /**
  * @file test_timebase.cpp
- * @brief Runtime timebase progression and wrap-range configuration tests.
+ * @brief runtime timebase 递进与 wrap-range 配置测试。 Runtime timebase progression and wrap-range configuration tests.
  *
- * Test items:
- * 1. Live progression: verify runtime microsecond and millisecond clocks advance by roughly the expected amount across a sleep interval.
- * 2. Configured wrap semantics: verify custom wrap ranges are applied to timestamp subtraction on both millisecond and microsecond scales.
+ * 测试项目 / Test items:
+ * 1. live 时钟递进。 Live progression: verify runtime microsecond and millisecond clocks advance by roughly the expected amount across a sleep interval.
+ * 2. 自定义 wrap range 下的时间差语义。 Configured wrap semantics: verify custom wrap ranges are applied to timestamp subtraction on both millisecond and microsecond scales.
  *
- * Test principle:
- * 1. Pair live time progression with explicit wrap-range overrides so the test covers both backend clock sourcing and static arithmetic policy.
+ * 测试原理 / Test principles:
+ * 1. 把 live progression 和显式 wrap 覆盖放在同一文件，兼顾后端取时和静态算术策略。 Pair live time progression with explicit wrap-range overrides so the test covers both backend clock sourcing and static arithmetic policy.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -41,6 +41,8 @@ struct TimebaseWrapProbe : LibXR::Timebase
 
 void test_timebase()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::MillisecondTimestamp start_ms(1000), end_ms(2005);
   LibXR::MicrosecondTimestamp start_us(1000), end_us(2005);
   const uint64_t old_max_valid_us = TimebaseWrapProbe::GetUs();

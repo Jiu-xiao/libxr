@@ -1,15 +1,15 @@
 /**
  * @file test_queue.cpp
- * @brief Queue-family tests for lock-free, blocking and batch queue operations.
+ * @brief 队列家族的无锁、阻塞与批量操作测试。 Queue-family tests for lock-free, blocking and batch queue operations.
  *
- * Test items:
- * 1. `LockFreeQueue` threaded push/pop: verify producer/consumer transfer order and empty detection.
- * 2. `LockQueue` blocking waits: verify timed pop waits for producer posts and reports timeout when no data arrives.
- * 3. Plain `Queue` batch helpers: verify `PushBatch()`, `PopBatch()` and `PeekBatch()` preserve wraparound ordering.
+ * 测试项目 / Test items:
+ * 1. `LockFreeQueue` 线程间 push/pop 顺序。 `LockFreeQueue` threaded push/pop: verify producer/consumer transfer order and empty detection.
+ * 2. `LockQueue` 的阻塞等待与超时。 `LockQueue` blocking waits: verify timed pop waits for producer posts and reports timeout when no data arrives.
+ * 3. 普通 `Queue` 的批量 push/pop/peek。 Plain `Queue` batch helpers: verify `PushBatch()`, `PopBatch()` and `PeekBatch()` preserve wraparound ordering.
  *
- * Test principle:
- * 1. Exercise each queue family through the API style callers actually use, because these types differ mainly in synchronization semantics.
- * 2. Validate ordering after wraparound, since queue correctness is not just capacity but FIFO preservation under rollover.
+ * 测试原理 / Test principles:
+ * 1. 按调用方真实使用方式分别驱动不同队列家族，因为它们的差异主要在同步语义。 Exercise each queue family through the API style callers actually use, because these types differ mainly in synchronization semantics.
+ * 2. 显式验证 wraparound 后的顺序，避免只验证容量不验证 FIFO。 Validate ordering after wraparound, since queue correctness is not just capacity but FIFO preservation under rollover.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -17,6 +17,8 @@
 
 void test_queue()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::Thread thread1, thread2;
   static auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
 

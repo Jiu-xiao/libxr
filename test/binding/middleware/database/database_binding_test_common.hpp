@@ -1,14 +1,14 @@
 /**
  * @file database_binding_test_common.hpp
- * @brief Shared flash-image helpers for database binding tests.
+ * @brief database binding 测试共用 flash/损坏注入辅助。 Shared flash-image helpers for database binding tests.
  *
- * Shared responsibilities:
- * 1. Synthetic flash backends and fatal-exit helpers for failure-path tests.
- * 2. Raw flash-image mutation helpers for backup/checksum/metadata corruption scenarios.
- * 3. Reopen helpers that validate persisted data through the public database APIs.
+ * 共享职责 / Shared responsibilities:
+ * 1. 合成 flash 后端与 fatal-exit helper。 Synthetic flash backends and fatal-exit helpers.
+ * 2. 原始 flash 映像的备份/校验/元数据损坏注入 helper。 Raw flash-image mutation helpers for backup/checksum/metadata corruption scenarios.
+ * 3. 通过公开 database API reopen 后校验持久化结果。 Reopen helpers that validate persisted data through the public database APIs.
  *
- * Design principle:
- * 1. Keep destructive flash-manipulation helpers in one place so sequential/raw binding tests share the same crafted corruption model and do not diverge semantically.
+ * 设计原理 / Design principle:
+ * 1. 把 destructive flash 操作 helper 集中在一个头里，让 sequential/raw 两套 binding 测试共享同一套损坏模型。 Keep destructive flash-manipulation helpers in one place so sequential/raw binding tests share the same crafted corruption model.
  */
 #pragma once
 
@@ -153,6 +153,8 @@ class FailingFlash : public Flash
 
 inline void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   bytes[offset] = static_cast<uint8_t>(value & 0xFF);
   bytes[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
   bytes[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
@@ -162,6 +164,8 @@ inline void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value
 template <typename Func>
 void ExpectFatalExit(int exit_code, Func&& func)
 {
+  // 辅助内容：验证当前失败或退出预期。
+  // Helper coverage: validate the current expected failure or exit condition.
   pid_t child = fork();
   ASSERT(child >= 0);
 
@@ -199,6 +203,8 @@ void ExpectFatalExit(int exit_code, Func&& func)
 
 inline void WriteAllBytes(const char* path, const std::vector<uint8_t>& bytes)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   ASSERT(static_cast<bool>(file));
   file.write(reinterpret_cast<const char*>(bytes.data()),
@@ -208,6 +214,8 @@ inline void WriteAllBytes(const char* path, const std::vector<uint8_t>& bytes)
 
 inline void CraftPartialBackup(std::vector<uint8_t>& bytes, size_t partial_len)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   ASSERT(partial_len < XR_DB_BLOCK_SIZE);
 
   const size_t backup_offset = XR_DB_BLOCK_SIZE;
@@ -221,6 +229,8 @@ inline void CraftPartialBackup(std::vector<uint8_t>& bytes, size_t partial_len)
 
 inline void MirrorMainBlockToBackup(std::vector<uint8_t>& bytes)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   for (size_t i = 0; i < XR_DB_BLOCK_SIZE; ++i)
   {
     bytes[XR_DB_BLOCK_SIZE + i] = bytes[i];
@@ -229,21 +239,29 @@ inline void MirrorMainBlockToBackup(std::vector<uint8_t>& bytes)
 
 inline void InvalidateMainChecksum(std::vector<uint8_t>& bytes)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   WriteLe32(bytes, XR_DB_CHECKSUM_OFFSET, 0);
 }
 
 inline void MarkMainFirstKeyAsUninitialized(std::vector<uint8_t>& bytes)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   bytes[XR_DB_RAW_UNINIT_FLAG_LAST_BYTE_OFFSET] = 0xFF;
 }
 
 inline void CorruptBackupFirstKeyAvailableFlag(std::vector<uint8_t>& bytes)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   bytes[XR_DB_BLOCK_SIZE + XR_DB_RAW_AVAILABLE_FLAG_OFFSET] = 0x00;
 }
 
 inline void CorruptMainFirstKeyRawInfo(std::vector<uint8_t>& bytes, uint32_t raw_info)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   WriteLe32(bytes, XR_DB_RAW_FIRST_KEY_RAW_INFO_OFFSET, raw_info);
 }
 
@@ -300,6 +318,8 @@ inline void CreateTwoKeyDatabase(const char* path)
 
 inline void AssertMainValidBackupInvalid(const char* path)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   auto bytes = ReadAllBytes(path);
   ASSERT(ReadLe32(bytes, 0) == XR_DB_FLASH_HEADER);
   ASSERT(ReadLe32(bytes, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
@@ -309,6 +329,8 @@ inline void AssertMainValidBackupInvalid(const char* path)
 inline void RunPartialBackupCase(const char* path, MainChecksum main_checksum,
                                  uint32_t default_value, uint32_t expected_value)
 {
+  // 基准内容：执行当前子场景或 case。
+  // Benchmark coverage: execute the current benchmark sub-case.
   CreateSeedDatabase(path);
 
   auto bytes = ReadAllBytes(path);

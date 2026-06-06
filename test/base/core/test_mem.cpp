@@ -1,15 +1,15 @@
 /**
  * @file test_mem.cpp
- * @brief `LibXR::Memory` fast set/copy/compare tests.
+ * @brief `LibXR::Memory` 快速 set/copy/compare 测试。 `LibXR::Memory` fast set/copy/compare tests.
  *
- * Test items:
- * 1. `FastSet`: verify full-buffer fill and zero-length no-op behavior.
- * 2. `FastCopy`: verify basic copy, self-copy, unaligned copy and a width sweep over small copy lengths.
- * 3. `FastCmp`: verify equality, first/middle/last-byte differences and sign alignment with `std::memcmp`, including unaligned spans.
+ * 测试项目 / Test items:
+ * 1. `FastSet` 的填充与零长度空操作。 `FastSet`: verify full-buffer fill and zero-length no-op behavior.
+ * 2. `FastCopy` 的普通拷贝、自拷贝、非对齐拷贝和小尺寸扫宽。 `FastCopy`: verify basic copy, self-copy, unaligned copy and a width sweep over small copy lengths.
+ * 3. `FastCmp` 与 `std::memcmp` 的一致性。 `FastCmp`: verify equality, first/middle/last-byte differences and sign alignment with `std::memcmp`, including unaligned spans.
  *
- * Test principle:
- * 1. Compare against standard-library semantics at the byte level, because these routines are performance-focused replacements for well-known contracts.
- * 2. Stress unaligned addresses and zero-length cases explicitly, since those are the edge conditions most likely to diverge from the reference behavior.
+ * 测试原理 / Test principles:
+ * 1. 把标准库语义当参照，因为这些函数本质上是在优化一个已知契约。 Compare against standard-library semantics at the byte level, because these routines are performance-focused replacements for well-known contracts.
+ * 2. 显式压非对齐地址和零长度边界，因为最容易在这里偏离参考行为。 Stress unaligned addresses and zero-length cases explicitly, since those are the edge conditions most likely to diverge from the reference behavior.
  */
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +24,8 @@ static int sign(int v) { return (v > 0) - (v < 0); }
 
 void test_memory()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   // --------------------------
   // FastSet: 基础填充与 size=0
   // --------------------------

@@ -1,15 +1,15 @@
 /**
  * @file test_packet.cpp
- * @brief Packed topic packet and server parsing tests.
+ * @brief 消息总线打包报文与 server 解析测试。 Packed topic packet and server parsing tests.
  *
- * Test items:
- * 1. Header encoding and callback parse: verify packet prefix/version/timestamp encoding and callback-context propagation through `Server` parsing.
- * 2. Validation failures: verify unknown topic/version, truncated payload, legacy prefix and CRC corruption are handled on the intended branches.
- * 3. Alignment and short-length compatibility: verify over-aligned payload parsing and shorter packet payload lengths still dispatch correctly under the supported contract.
+ * 测试项目 / Test items:
+ * 1. 头部编码与回调上下文解析。 Header encoding and callback parse: verify packet prefix/version/timestamp encoding and callback-context propagation through `Server` parsing.
+ * 2. 版本/topic/CRC/截断等失败分支。 Validation failures: verify unknown topic/version, truncated payload, legacy prefix and CRC corruption are handled on the intended branches.
+ * 3. 对齐和短 payload 长度兼容。 Alignment and short-length compatibility: verify over-aligned payload parsing and shorter packet payload lengths still dispatch correctly under the supported contract.
  *
- * Test principle:
- * 1. Build packets through the real `Topic::PackData()` path, then mutate the serialized bytes to drive specific parser branches deliberately.
- * 2. Check both decoded payloads and metadata fields, because this subsystem's contract is part data transport and part wire-format compatibility.
+ * 测试原理 / Test principles:
+ * 1. 先走真实 `Topic::PackData()`，再精确篡改序列化字节去击中特定分支。 Build packets through the real `Topic::PackData()` path, then mutate the serialized bytes to drive specific parser branches deliberately.
+ * 2. 同时检查解包后的 payload 和元数据字段，因为这个子系统既是传输契约也是线格式契约。 Check both decoded payloads and metadata fields, because this subsystem's contract is part data transport and part wire-format compatibility.
  */
 #include <cstdint>
 
@@ -28,6 +28,8 @@ uint64_t TimestampUs(const LibXR::MicrosecondTimestamp& timestamp)
 
 void TestPacketHeaderAndServerParse()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   constexpr size_t PACKET_SIZE = LibXR::Topic::PACK_BASE_SIZE + sizeof(double);
 
   auto domain = LibXR::Topic::Domain("message_packet_domain");
@@ -103,6 +105,8 @@ void TestPacketHeaderAndServerParse()
 
 void TestPacketValidationFailures()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   constexpr size_t PACKET_SIZE = LibXR::Topic::PACK_BASE_SIZE + sizeof(double);
 
   auto domain = LibXR::Topic::Domain("message_packet_validation_domain");
@@ -174,6 +178,8 @@ void TestPacketValidationFailures()
 
 void TestPacketAlignmentAndLengthCompatibility()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   auto domain = LibXR::Topic::Domain("message_packet_alignment_domain");
 
   auto aligned_topic =
@@ -230,6 +236,8 @@ void TestPacketAlignmentAndLengthCompatibility()
 
 void test_message_packet()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestPacketHeaderAndServerParse();
   TestPacketValidationFailures();
   TestPacketAlignmentAndLengthCompatibility();

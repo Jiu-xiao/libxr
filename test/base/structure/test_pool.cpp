@@ -1,15 +1,15 @@
 /**
  * @file test_pool.cpp
- * @brief `LockFreePool` single-thread and multi-thread integrity tests.
+ * @brief `LockFreePool` 单线程与并发完整性测试。 `LockFreePool` single-thread and multi-thread integrity tests.
  *
- * Test items:
- * 1. Basic slot lifecycle: verify put/get/full/empty behavior and slot reuse in a small pool.
- * 2. Concurrent integrity: verify multi-writer and multi-reader traffic preserves uniqueness, counts and aggregate sums.
- * 3. Reuse stress: verify repeated fill-drain cycles and tiny-pool churn do not leak stale state.
+ * 测试项目 / Test items:
+ * 1. 基础槽位生命周期。 Basic slot lifecycle: verify put/get/full/empty behavior and slot reuse in a small pool.
+ * 2. 多线程唯一性与总量完整性。 Concurrent integrity: verify multi-writer and multi-reader traffic preserves uniqueness, counts and aggregate sums.
+ * 3. 重复填充/排空和小池复用压力。 Reuse stress: verify repeated fill-drain cycles and tiny-pool churn do not leak stale state.
  *
- * Test principle:
- * 1. Combine deterministic single-thread checks with contention-heavy runtime traffic, because this container's core promise is concurrent correctness.
- * 2. Track uniqueness and aggregate sums simultaneously so the test catches both duplication and loss.
+ * 测试原理 / Test principles:
+ * 1. 把确定性单线程检查和竞争态并发流量结合，覆盖这个容器最核心的并发正确性承诺。 Combine deterministic single-thread checks with contention-heavy runtime traffic, because this container's core promise is concurrent correctness.
+ * 2. 同时跟踪唯一性和总和，捕获重复与丢失两类错误。 Track uniqueness and aggregate sums simultaneously so the test catches both duplication and loss.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -82,6 +82,8 @@ void read_task(ReaderArg arg)
 
 void test_lock_free_pool()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   // ---- 单线程基本功能测试 ----
   {
     static Pool pool(3);

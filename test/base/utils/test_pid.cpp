@@ -1,15 +1,15 @@
 /**
  * @file test_pid.cpp
- * @brief PID step-response, anti-windup and state-accessor tests.
+ * @brief PID 步响应、防积分饱和与状态访问器测试。 PID step-response, anti-windup and state-accessor tests.
  *
- * Test items:
- * 1. Nominal control response: verify basic step output, saturation clamp and external-derivative overload behavior.
- * 2. Anti-windup semantics: verify saturated outputs reject windup but still allow integral unwind when the error changes sign.
- * 3. State accessors and reset: verify `Last*()` accessors, disabled-integral semantics, invalid-input fallback and `Reset()` behavior.
+ * 测试项目 / Test items:
+ * 1. 标称控制响应与输出钳位。 Nominal control response: verify basic step output, saturation clamp and external-derivative overload behavior.
+ * 2. 防积分饱和与反向卸载。 Anti-windup semantics: verify saturated outputs reject windup but still allow integral unwind when the error changes sign.
+ * 3. 状态访问器、非法输入回退与 `Reset()` 行为。 State accessors and reset: verify `Last*()` accessors, disabled-integral semantics, invalid-input fallback and `Reset()` behavior.
  *
- * Test principle:
- * 1. Use analytically tractable scenarios where the expected output can be derived by hand, because PID regressions often hide in sign and state-update details.
- * 2. Check both output values and retained controller state, since caller-visible semantics include the diagnostic/state accessors.
+ * 测试原理 / Test principles:
+ * 1. 选择可手算期望值的场景，避免 PID 回归隐藏在符号和状态更新细节里。 Use analytically tractable scenarios where the expected output can be derived by hand, because PID regressions often hide in sign and state-update details.
+ * 2. 同时检查输出和保留状态，因为调用方可见契约包含诊断访问器。 Check both output values and retained controller state, since caller-visible semantics include the diagnostic/state accessors.
  */
 #include <cmath>
 #include <limits>
@@ -25,6 +25,8 @@ static inline bool near(double a, double b, double eps = 1e-6)
 
 void test_pid()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   // -----------------------
   // 1) Basic step response
   // -----------------------

@@ -1,13 +1,13 @@
 /**
  * @file test_timer.cpp
- * @brief Runtime periodic timer start/stop behavior test.
+ * @brief runtime 周期 timer start/stop 测试。 Runtime periodic timer start/stop behavior test.
  *
- * Test items:
- * 1. Timer periodic execution: verify a started timer repeatedly invokes its callback.
- * 2. Stop/restart behavior: verify stopping and restarting the same timer handle still yields the expected periodic count.
+ * 测试项目 / Test items:
+ * 1. timer 周期回调执行。 Timer periodic execution: verify a started timer repeatedly invokes its callback.
+ * 2. stop/restart 后的重复可用性。 Stop/restart behavior: verify stopping and restarting the same timer handle still yields the expected periodic count.
  *
- * Test principle:
- * 1. Use the real timer thread and repeated restart attempts so the test checks runtime scheduling rather than a simulated callback loop.
+ * 测试原理 / Test principles:
+ * 1. 使用真实 timer thread 和重复 restart 尝试，验证 runtime 调度而不是模拟回调循环。 Use the real timer thread and repeated restart attempts so the test checks runtime scheduling rather than a simulated callback loop.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -16,6 +16,8 @@
 
 void test_timer()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   int timer_arg = 0;
 
   auto handle =

@@ -1,16 +1,16 @@
 /**
  * @file test_topic.cpp
- * @brief Typed topic publish/subscribe dispatch tests.
+ * @brief 类型化 Topic 发布/订阅分发测试。 Typed topic publish/subscribe dispatch tests.
  *
- * Test items:
- * 1. Subscriber fan-out: verify async, queue and callback subscribers all observe the same publish on the same topic.
- * 2. Byte-stable payload delivery: verify non-trivially-copyable but topic-legal payloads still reach typed callbacks correctly.
- * 3. Callback-context publish and mutable payload semantics: verify callback-context publish preserves timestamps/ISR state and mutable callback subscribers can modify the caller-visible payload.
- * 4. Queue backpressure: verify queued subscribers drop overflow publishes once the target queue is full.
+ * 测试项目 / Test items:
+ * 1. 多种订阅者 fan-out。 Subscriber fan-out: verify async, queue and callback subscribers all observe the same publish on the same topic.
+ * 2. 非平凡 payload 的 typed 传输。 Byte-stable payload delivery: verify non-trivially-copyable but topic-legal payloads still reach typed callbacks correctly.
+ * 3. callback 上下文发布与可变 payload 语义。 Callback-context publish and mutable payload semantics: verify callback-context publish preserves timestamps/ISR state and mutable callback subscribers can modify the caller-visible payload.
+ * 4. 队列订阅者的背压丢弃。 Queue backpressure: verify queued subscribers drop overflow publishes once the target queue is full.
  *
- * Test principle:
- * 1. Publish through the real `Topic` API and observe each subscriber flavor independently, because the bus contract is defined by the aggregate fan-out behavior.
- * 2. Check both timestamp metadata and payload value changes so the test covers semantic, not just byte-copy, correctness.
+ * 测试原理 / Test principles:
+ * 1. 通过真实 `Topic` API 逐个观察订阅者类型，因为总线契约定义在聚合分发行为上。 Publish through the real `Topic` API and observe each subscriber flavor independently, because the bus contract is defined by the aggregate fan-out behavior.
+ * 2. 同时检查时间戳和 payload 变化，避免只验证字节复制不验证语义。 Check both timestamp metadata and payload value changes so the test covers semantic, not just byte-copy, correctness.
  */
 #include <cstdint>
 
@@ -29,6 +29,8 @@ uint64_t TimestampUs(const LibXR::MicrosecondTimestamp& timestamp)
 
 void TestTopicSubscriberDispatch()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   ASSERT(LibXR::Topic::Find("missing_default_topic") == nullptr);
 
   auto domain = LibXR::Topic::Domain("message_topic_domain");
@@ -136,6 +138,8 @@ void TestTopicSubscriberDispatch()
 
 void TestTopicMutationAndQueueDrop()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   auto domain = LibXR::Topic::Domain("message_topic_mutation_domain");
 
   auto mutable_topic = LibXR::Topic::CreateTopic<int>("mutable_payload_tp", &domain);
@@ -173,6 +177,8 @@ void TestTopicMutationAndQueueDrop()
 
 void test_message_topic()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestTopicSubscriberDispatch();
   TestTopicMutationAndQueueDrop();
 }

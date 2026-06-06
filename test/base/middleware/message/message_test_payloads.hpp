@@ -1,14 +1,14 @@
 /**
  * @file message_test_payloads.hpp
- * @brief Shared payload types for message-bus tests.
+ * @brief 消息总线测试共用 payload 类型。 / Shared payload types for message-bus tests.
  *
- * Provided payload shapes:
- * 1. `ByteStablePayload`: non-trivially-copyable but topic-legal payload used to verify typed topic transport without cache assumptions.
- * 2. `WideAlignedPayload`: cache-line aligned payload used to verify packet/server alignment handling.
- * 3. `PrefixIntPayload`: prefix-sized payload used to verify shorter packet-length compatibility.
+ * 提供的测试载荷 / Provided payload shapes:
+ * 1. `ByteStablePayload`：用于验证非平凡但 topic 合法 payload 的 typed 传输。 *    `ByteStablePayload`: used to verify typed topic transport for a non-trivially-copyable but topic-legal payload.
+ * 2. `WideAlignedPayload`：用于验证 packet/server 的高对齐处理。 *    `WideAlignedPayload`: used to verify packet/server alignment handling.
+ * 3. `PrefixIntPayload`：用于验证更短 packet payload 长度兼容路径。 *    `PrefixIntPayload`: used to verify shorter packet-length compatibility.
  *
- * Design principle:
- * 1. Keep message test payloads in one shared header so topic-side and packet-side tests exercise the same contract shapes instead of drifting independently.
+ * 设计原理 / Design principle:
+ * 1. 把 message 测试里复用的 payload 形状集中到一个头里，避免 topic 侧和 packet 侧各自漂移。 *    Keep shared message-test payload shapes in one header so topic-side and packet-side tests do not drift independently.
  */
 #pragma once
 

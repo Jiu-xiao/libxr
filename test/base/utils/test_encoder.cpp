@@ -1,15 +1,15 @@
 /**
  * @file test_encoder.cpp
- * @brief `FloatEncoder` quantization, clamp and robustness tests.
+ * @brief `FloatEncoder` 量化、夹紧与稳健性测试。 `FloatEncoder` quantization, clamp and robustness tests.
  *
- * Test items:
- * 1. Nominal encode/decode accuracy: verify representative gyroscope, accelerometer and Euler-angle ranges decode within the expected tolerance.
- * 2. Clamp and boundary behavior: verify out-of-range inputs clamp to min/max and exact boundary values round-trip correctly.
- * 3. Special cases: verify center-point encoding, minimum bit width and non-finite inputs do not break the encoder contract.
+ * 测试项目 / Test items:
+ * 1. 标称 encode/decode 精度。 Nominal encode/decode accuracy: verify representative gyroscope, accelerometer and Euler-angle ranges decode within the expected tolerance.
+ * 2. 越界输入夹紧与边界值回环。 Clamp and boundary behavior: verify out-of-range inputs clamp to min/max and exact boundary values round-trip correctly.
+ * 3. 中心点、最小位宽和非有限值路径。 Special cases: verify center-point encoding, minimum bit width and non-finite inputs do not break the encoder contract.
  *
- * Test principle:
- * 1. Check decoded numeric error against scenario-specific tolerances, because this utility exists to trade bits for bounded reconstruction error.
- * 2. Exercise explicit clamp and special-value paths so robustness is documented alongside nominal accuracy.
+ * 测试原理 / Test principles:
+ * 1. 按场景误差容忍度比较 decode 误差，因为它本来就是位宽和误差的交换器。 Check decoded numeric error against scenario-specific tolerances, because this utility exists to trade bits for bounded reconstruction error.
+ * 2. 显式压夹紧和特殊值分支，把稳健性和精度一起写清。 Exercise explicit clamp and special-value paths so robustness is documented alongside nominal accuracy.
  */
 #include "float_encoder.hpp"
 #include "libxr_def.hpp"
@@ -17,6 +17,8 @@
 
 void test_float_encoder()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   constexpr int BITS = 21;

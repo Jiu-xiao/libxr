@@ -1,15 +1,15 @@
 /**
  * @file bench_linux_shared_topic.cpp
- * @brief Performance benchmark for `LinuxSharedTopic` latency and overload behavior.
+ * @brief `LinuxSharedTopic` 延迟与过载性能基准。 Performance benchmark for `LinuxSharedTopic` latency and overload behavior.
  *
- * Benchmark items:
- * 1. Throughput/latency sweep: run payload-size-dependent benchmark cases and summarize latency percentiles.
- * 2. Overload scenarios: measure latency, drops and sequence gaps under subscriber delay and mode variations.
- * 3. Mode comparison: compare shared-subscriber modes under the same traffic pattern.
+ * 基准项目 / Benchmark items:
+ * 1. 不同 payload 尺寸的吞吐/延迟扫宽。 Throughput/latency sweep across payload-size-dependent benchmark cases.
+ * 2. subscriber delay 和 mode variation 下的过载场景。 Overload scenarios under subscriber delay and mode variations.
+ * 3. 不同 subscriber mode 的模式对比。 Mode comparison across shared-subscriber modes.
  *
- * Benchmark principle:
- * 1. Measure through the real cross-process shared-topic path so the reported numbers reflect the actual IPC stack instead of synthetic microbench primitives.
- * 2. Collect percentile and error counters together, because performance regressions here often show up as both latency drift and delivery loss.
+ * 基准原理 / Benchmark principles:
+ * 1. 通过真实跨进程 shared-topic 路径计时，避免退化成无意义微基准。 Measure through the real cross-process shared-topic path instead of synthetic microbench primitives.
+ * 2. 同时采集延迟分位数和错误计数，因为这里的性能回归通常伴随时延和投递损失。 Collect percentile and error counters together because regressions here usually show up as both latency drift and delivery loss.
  */
 #include <algorithm>
 #include <array>
@@ -35,6 +35,8 @@ using Clock = std::chrono::steady_clock;
 
 uint64_t NowNs()
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   return static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch())
           .count());
@@ -97,6 +99,8 @@ uint32_t ComputeChecksum(const BenchFrame<PayloadBytes>& frame)
 template <size_t PayloadBytes>
 uint64_t CountForPayload()
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   if constexpr (PayloadBytes <= 64)
   {
     return 100000;
@@ -182,6 +186,8 @@ BenchStats BuildStats(const std::vector<double>& lat_us, uint64_t sequence_error
 
 bool WriteAll(int fd, const void* buffer, size_t size)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   const auto* bytes = static_cast<const uint8_t*>(buffer);
   size_t written_total = 0;
   while (written_total < size)
@@ -203,6 +209,8 @@ bool WriteAll(int fd, const void* buffer, size_t size)
 
 bool ReadAll(int fd, void* buffer, size_t size)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   auto* bytes = static_cast<uint8_t*>(buffer);
   size_t read_total = 0;
   while (read_total < size)
@@ -225,6 +233,8 @@ bool ReadAll(int fd, void* buffer, size_t size)
 template <typename TopicType>
 bool WaitForSubscriberAttach(TopicType& topic, uint32_t expected_num, const char* case_label)
 {
+  // 辅助内容：为后续测试准备或校验共享状态。
+  // Helper coverage: prepare or validate shared state for later tests.
   for (int retry = 0; retry < 500 && topic.GetSubscriberNum() < expected_num; ++retry)
   {
     usleep(1000);
@@ -262,6 +272,8 @@ uint64_t LatencyCountForPayload()
 template <size_t PayloadBytes, bool TouchPayload>
 int RunBenchCase()
 {
+  // 基准内容：执行当前子场景或 case。
+  // Benchmark coverage: execute the current benchmark sub-case.
   using Topic = LibXR::LinuxSharedTopic<BenchFrame<PayloadBytes>>;
   using Data = typename Topic::Data;
   using Subscriber = typename Topic::SyncSubscriber;
@@ -446,6 +458,8 @@ int RunBenchCase()
 template <size_t PayloadBytes, bool TouchPayload>
 int RunLatencyCase()
 {
+  // 基准内容：执行当前子场景或 case。
+  // Benchmark coverage: execute the current benchmark sub-case.
   using Topic = LibXR::LinuxSharedTopic<BenchFrame<PayloadBytes>>;
   using Data = typename Topic::Data;
   using Subscriber = typename Topic::SyncSubscriber;
@@ -620,6 +634,8 @@ template <size_t PayloadBytes>
 int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
                     uint32_t subscriber_delay_us)
 {
+  // 基准内容：执行当前子场景或 case。
+  // Benchmark coverage: execute the current benchmark sub-case.
   using Topic = LibXR::LinuxSharedTopic<BenchFrame<PayloadBytes>>;
   using Data = typename Topic::Data;
   using Subscriber = typename Topic::SyncSubscriber;
@@ -827,6 +843,8 @@ template <size_t PayloadBytes>
 int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscribers,
                 uint64_t count, uint32_t slot_num, uint32_t queue_num)
 {
+  // 基准内容：执行当前子场景或 case。
+  // Benchmark coverage: execute the current benchmark sub-case.
   using Topic = LibXR::LinuxSharedTopic<BenchFrame<PayloadBytes>>;
   using Data = typename Topic::Data;
   using Subscriber = typename Topic::SyncSubscriber;

@@ -1,15 +1,15 @@
 /**
  * @file test_database.cpp
- * @brief Base-plane `Database::Key` contract tests.
+ * @brief base 平面 `Database::Key` 契约测试。 Base-plane `Database::Key` contract tests.
  *
- * Test items:
- * 1. Save path: verify `Save()` writes the key's current in-memory value, not a stale constructor value.
- * 2. Set path: verify `Set()` updates the local cached value before delegating persistence.
- * 3. Get/default path: verify constructor fallback to explicit default or zero when `Get()` fails.
+ * 测试项目 / Test items:
+ * 1. `Save()` 使用当前内存值。 Save path: verify `Save()` writes the key's current in-memory value, not a stale constructor value.
+ * 2. `Set()` 先更新本地缓存再落库。 Set path: verify `Set()` updates the local cached value before delegating persistence.
+ * 3. `Get()` 失败时的默认值回退。 Get/default path: verify constructor fallback to explicit default or zero when `Get()` fails.
  *
- * Test principle:
- * 1. Use a tiny in-memory database stub so the test isolates key-object semantics from flash layout or backend persistence behavior.
- * 2. Observe both backend call counters and local cached values, because the key contract covers caller-visible state as well as backend dispatch.
+ * 测试原理 / Test principles:
+ * 1. 用极小的内存数据库 stub 隔离 key 对象语义，不把 flash 布局问题混进来。 Use a tiny in-memory database stub so the test isolates key-object semantics from flash layout or backend persistence behavior.
+ * 2. 同时观察后端调用计数和本地缓存值，因为 key 契约涵盖两者。 Observe both backend call counters and local cached values, because the key contract covers caller-visible state as well as backend dispatch.
  */
 #include <cstdint>
 
@@ -71,6 +71,8 @@ class MemoryDatabase : public Database
 
 void TestDatabaseKeySaveUsesCurrentData()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   MemoryDatabase db;
   Database::Key<uint32_t> key(db, "mock", 10);
   ASSERT(key.data_ == 10);
@@ -90,6 +92,8 @@ void TestDatabaseKeySaveUsesCurrentData()
 
 void TestDatabaseKeySetUpdatesCurrentValueBeforeSave()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   MemoryDatabase db;
   Database::Key<uint32_t> key(db, "mock", 10);
 
@@ -101,6 +105,8 @@ void TestDatabaseKeySetUpdatesCurrentValueBeforeSave()
 
 void TestDatabaseKeyUsesDefaultOnGetFailure()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   MemoryDatabase db;
   db.get_result = ErrorCode::FAILED;
   db.stored = 55;
@@ -120,6 +126,8 @@ void TestDatabaseKeyUsesDefaultOnGetFailure()
 
 void test_database()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestDatabaseKeySaveUsesCurrentData();
   TestDatabaseKeySetUpdatesCurrentValueBeforeSave();
   TestDatabaseKeyUsesDefaultOnGetFailure();

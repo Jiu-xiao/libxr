@@ -1,14 +1,14 @@
 /**
  * @file test_rbt.cpp
- * @brief Red-black tree insertion, traversal and deletion tests.
+ * @brief 红黑树插入、遍历与删除测试。 Red-black tree insertion, traversal and deletion tests.
  *
- * Test items:
- * 1. Ordered traversal: verify inserted keys are returned in ascending order through discrete and callback traversal.
- * 2. Node counting and deletion: verify the tree count grows to the inserted size and shrinks monotonically during deletion.
+ * 测试项目 / Test items:
+ * 1. 有序遍历顺序。 Ordered traversal: verify inserted keys are returned in ascending order through discrete and callback traversal.
+ * 2. 节点数量与删除收缩行为。 Node counting and deletion: verify the tree count grows to the inserted size and shrinks monotonically during deletion.
  *
- * Test principle:
- * 1. Use sequential integer keys so ordering mistakes become obvious without additional decoding.
- * 2. Check count after every delete so balancing-side regressions still surface as observable cardinality errors.
+ * 测试原理 / Test principles:
+ * 1. 用顺序整数键让排序错误立即可见。 Use sequential integer keys so ordering mistakes become obvious without additional decoding.
+ * 2. 每次删除后都检查数量，确保平衡和删除路径的可见结果正确。 Check count after every delete so balancing-side regressions still surface as observable cardinality errors.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -16,6 +16,8 @@
 
 void test_rbt()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::RBTree<int> rbtree([](const int& a, const int& b) { return a - b; });
 
   LibXR::RBTree<int>::Node<int> nodes[100];

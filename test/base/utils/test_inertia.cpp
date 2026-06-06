@@ -1,14 +1,14 @@
 /**
  * @file test_inertia.cpp
- * @brief Inertia construction, translation, rotation and center-of-mass composition tests.
+ * @brief 惯量构造、平移、旋转与质心组合测试。 Inertia construction, translation, rotation and center-of-mass composition tests.
  *
- * Test items:
- * 1. Constructor forms: verify array, matrix, symmetric and explicit-value constructors produce equivalent inertia tensors.
- * 2. Translation/rotation transforms: verify translated and rotated tensors match expected coefficients and quaternion/matrix rotation paths agree.
- * 3. Composite center of mass: verify adding mass properties produces the expected combined mass and centroid.
+ * 测试项目 / Test items:
+ * 1. 多种构造形式的一致性。 Constructor forms: verify array, matrix, symmetric and explicit-value constructors produce equivalent inertia tensors.
+ * 2. 平移/旋转后的张量变换。 Translation/rotation transforms: verify translated and rotated tensors match expected coefficients and quaternion/matrix rotation paths agree.
+ * 3. 组合质心后的总质量和位置。 Composite center of mass: verify adding mass properties produces the expected combined mass and centroid.
  *
- * Test principle:
- * 1. Compare multiple construction and rotation frontends against the same expected tensor so the test documents semantic equivalence between APIs.
+ * 测试原理 / Test principles:
+ * 1. 用同一组期望张量对比多种前端，说明不同 API 的语义等价性。 Compare multiple construction and rotation frontends against the same expected tensor so the test documents semantic equivalence between APIs.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -16,6 +16,8 @@
 
 void test_inertia()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   using LibXR::CenterOfMass;
   using LibXR::Inertia;
   using LibXR::Position;

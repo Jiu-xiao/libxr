@@ -1,15 +1,15 @@
 /**
  * @file test_ramfs.cpp
- * @brief `RamFS` node creation, hierarchy and typed-file access tests.
+ * @brief `RamFS` 节点创建、层级查找与类型化文件访问测试。 `RamFS` node creation, hierarchy and typed-file access tests.
  *
- * Test items:
- * 1. Executable file behavior: verify executable files run, mutate bound state and stay distinguishable from ordinary files.
- * 2. Read/write and read-only data views: verify typed access, const access and raw view sizing for writable and read-only files.
- * 3. Hierarchy lookup: verify recursive file/dir/custom lookup, `.` / `..` directory traversal and direct-child enumeration counts.
+ * 测试项目 / Test items:
+ * 1. 可执行文件行为。 Executable file behavior: verify executable files run, mutate bound state and stay distinguishable from ordinary files.
+ * 2. 可写/只读文件的数据访问视图。 Read/write and read-only data views: verify typed access, const access and raw view sizing for writable and read-only files.
+ * 3. 目录、文件、自定义节点的层级查找与遍历。 Hierarchy lookup: verify recursive file/dir/custom lookup, `.` / `..` directory traversal and direct-child enumeration counts.
  *
- * Test principle:
- * 1. Construct a real mixed node tree containing file, dir, exec and custom nodes so lookup and traversal execute on the same structure users build at runtime.
- * 2. Observe both typed data access and structural queries, because RamFS correctness spans storage semantics and namespace semantics together.
+ * 测试原理 / Test principles:
+ * 1. 构造一个混合节点树，让查找和遍历都跑在真实运行时结构上。 Construct a real mixed node tree containing file, dir, exec and custom nodes so lookup and traversal execute on the same structure users build at runtime.
+ * 2. 同时检查数据访问和结构查询，因为 RamFS 契约覆盖存储和命名空间两部分。 Observe both typed data access and structural queries, because RamFS correctness spans storage semantics and namespace semantics together.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -17,6 +17,8 @@
 
 void test_ramfs()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   auto ramfs = LibXR::RamFS();
 
   int ramfs_arg = 0;

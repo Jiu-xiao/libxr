@@ -1,15 +1,15 @@
 /**
  * @file test_lockfree_queue.cpp
- * @brief Focused `LockFreeQueue` writer/reader helper tests.
+ * @brief `LockFreeQueue` writer/reader helper 聚焦测试。 Focused `LockFreeQueue` writer/reader helper tests.
  *
- * Test items:
- * 1. Capacity/accounting: verify empty size, peek/pop on empty queue and full detection after writer-based fill.
- * 2. Reader/writer callback helpers: verify `PushWithWriter()` and `PopWithReader()` handle wraparound, callback failure and non-committed reads correctly.
- * 3. Reset semantics: verify `Reset()` drops all queued items and restores empty capacity.
+ * 测试项目 / Test items:
+ * 1. 容量与空/满计数行为。 Capacity/accounting: verify empty size, peek/pop on empty queue and full detection after writer-based fill.
+ * 2. `PushWithWriter()` / `PopWithReader()` 的 wraparound 与失败路径。 Reader/writer callback helpers: verify `PushWithWriter()` and `PopWithReader()` handle wraparound, callback failure and non-committed reads correctly.
+ * 3. `Reset()` 清空语义。 Reset semantics: verify `Reset()` drops all queued items and restores empty capacity.
  *
- * Test principle:
- * 1. Use the public callback-based batch helpers, because they are the queue surface most likely to hide partial-commit bugs.
- * 2. Check both queue contents and queue size after failure branches to confirm that unsuccessful callbacks do not advance head/tail.
+ * 测试原理 / Test principles:
+ * 1. 通过公开的回调式批量 helper 驱动，因为这一层最容易隐藏部分提交 bug。 Use the public callback-based batch helpers, because they are the queue surface most likely to hide partial-commit bugs.
+ * 2. 在失败分支后同时检查队列内容和 size，确认 head/tail 没被错误推进。 Check both queue contents and queue size after failure branches to confirm that unsuccessful callbacks do not advance head/tail.
  */
 #include <cstddef>
 #include <vector>
@@ -20,6 +20,8 @@
 
 void test_lockfree_queue()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::LockFreeQueue<int> queue(5);
   const size_t max_size = queue.MaxSize();
 

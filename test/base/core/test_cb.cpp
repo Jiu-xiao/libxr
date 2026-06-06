@@ -1,16 +1,16 @@
 /**
  * @file test_cb.cpp
- * @brief `LibXR::Callback` binding and reentry behavior tests.
+ * @brief `LibXR::Callback` 绑定与重入行为测试。 `LibXR::Callback` binding and reentry behavior tests.
  *
- * Test items:
- * 1. Empty callback: verify the default-constructed callback reports empty and accepts no-op dispatch.
- * 2. Direct callback recursion: verify unguarded callbacks reenter immediately and preserve the runtime ISR flag.
- * 3. Guarded callback flattening: verify `CreateGuarded()` serializes self-recursive dispatch into one-depth replay.
- * 4. Lambda binding: verify callable-object binding still forwards the bound context and runtime ISR flag correctly.
+ * 测试项目 / Test items:
+ * 1. 空回调默认行为。 Empty callback: verify the default-constructed callback reports empty and accepts no-op dispatch.
+ * 2. 直接回调的递归重入路径。 Direct callback recursion: verify unguarded callbacks reenter immediately and preserve the runtime ISR flag.
+ * 3. Guarded 回调的递归压平行为。 Guarded callback flattening: verify `CreateGuarded()` serializes self-recursive dispatch into one-depth replay.
+ * 4. Lambda 绑定与上下文透传。 Lambda binding: verify callable-object binding still forwards the bound context and runtime ISR flag correctly.
  *
- * Test principle:
- * 1. Drive the public callback wrapper directly instead of going through another subsystem, so the test isolates callback semantics themselves.
- * 2. Record both payload order and call depth, because this module's correctness depends on reentry behavior as much as value forwarding.
+ * 测试原理 / Test principles:
+ * 1. 直接驱动公开回调包装器，而不是借用别的子系统间接验证回调。 Drive the public callback wrapper directly instead of going through another subsystem, so the test isolates callback semantics themselves.
+ * 2. 同时记录值顺序和调用深度，因为这个模块的风险点就在重入语义。 Record both payload order and call depth, because this module's correctness depends on reentry behavior as much as value forwarding.
  */
 #include <array>
 
@@ -121,6 +121,8 @@ struct LambdaCreationProbe
 
 void test_cb()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   {
     LibXR::Callback<int> empty_cb;
     ASSERT(empty_cb.Empty());

@@ -1,16 +1,16 @@
 /**
  * @file test_print.cpp
- * @brief `print` frontends and writer execution tests on the base plane.
+ * @brief base 平面 `print` 前端与 writer 执行测试。 `print` frontends and writer execution tests on the base plane.
  *
- * Test items:
- * 1. `printf` frontend lowering: verify integer, float, width, precision and flag semantics after compile-time parsing.
- * 2. `format` frontend lowering: verify brace-style field parsing, opcode generation and rendered output semantics.
- * 3. Print API wrappers: verify the public formatting helpers route the compiled format into the expected sink behavior.
- * 4. Failure-path prefix retention: verify stream-backed output keeps the already-written prefix when later formatting fails.
+ * 测试项目 / Test items:
+ * 1. `printf` 前端 lowering 语义。 `printf` frontend lowering: verify integer, float, width, precision and flag semantics after compile-time parsing.
+ * 2. `format` 前端 lowering 语义。 `format` frontend lowering: verify brace-style field parsing, opcode generation and rendered output semantics.
+ * 3. 公开 print API 包装层行为。 Print API wrappers: verify the public formatting helpers route the compiled format into the expected sink behavior.
+ * 4. 失败路径下的前缀保留语义。 Failure-path prefix retention: verify stream-backed output keeps the already-written prefix when later formatting fails.
  *
- * Test principle:
- * 1. Validate rendered text instead of parser internals alone, because the real contract of this subsystem is the final byte stream.
- * 2. Cover both successful and failing write sessions, since the observable error-handling semantics are part of the API surface.
+ * 测试原理 / Test principles:
+ * 1. 以最终渲染文本为主验证对象，因为这个子系统最终契约就是输出字节流。 Validate rendered text instead of parser internals alone, because the real contract of this subsystem is the final byte stream.
+ * 2. 同时覆盖成功和失败写会话，因为失败时的可观察语义也是 API 的一部分。 Cover both successful and failing write sessions, since the observable error-handling semantics are part of the API surface.
  */
 #include <array>
 #include <cstddef>
@@ -297,6 +297,8 @@ int Fail(const char* message)
 
 void TestPrintfFrontendSemantics()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   if (!SameAsSnprintf<"abc">())
   {
     Fail("plain text mismatch");
@@ -504,6 +506,8 @@ void TestPrintfFrontendSemantics()
 
 void TestFormatFrontendSemantics()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   if (!SameFormatAsExpected<"abc">("abc"))
   {
     Fail("format frontend plain text mismatch");
@@ -648,6 +652,8 @@ void TestFormatFrontendSemantics()
 
 void TestPrintApiWrappers()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   {
     constexpr LibXR::Format<"x={:+05d} {:#x} {}"> format{};
     StringSink sink;
@@ -831,6 +837,8 @@ void TestPrintApiWrappers()
 
 void TestStreamBackedPrintFailureKeepsPrefix()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   static constexpr char expected[] = "hello ";
 
   LibXR::Pipe pipe(64);
@@ -868,6 +876,8 @@ void TestStreamBackedPrintFailureKeepsPrefix()
 
 void test_print()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestPrintfFrontendSemantics();
   TestFormatFrontendSemantics();
   TestPrintApiWrappers();

@@ -1,14 +1,14 @@
 /**
  * @file test_flag.cpp
- * @brief Plain/atomic flag and scoped-restore tests.
+ * @brief 普通/原子 flag 与 scoped restore 测试。 Plain/atomic flag and scoped-restore tests.
  *
- * Test items:
- * 1. Plain flag state transitions: verify set/clear/test-and-set/test-and-clear/exchange semantics.
- * 2. Atomic flag state transitions: verify the atomic variant exposes the same visible contract.
- * 3. Scoped restore: verify nested scoped guards restore the previous flag value on scope exit.
+ * 测试项目 / Test items:
+ * 1. Plain flag 的状态迁移。 Plain flag state transitions: verify set/clear/test-and-set/test-and-clear/exchange semantics.
+ * 2. Atomic flag 的同构语义。 Atomic flag state transitions: verify the atomic variant exposes the same visible contract.
+ * 3. 嵌套 scoped restore 的恢复行为。 Scoped restore: verify nested scoped guards restore the previous flag value on scope exit.
  *
- * Test principle:
- * 1. Check the returned previous-state values as well as the final flag state, because the API contract is about both.
+ * 测试原理 / Test principles:
+ * 1. 同时检查返回的旧状态和值最终状态，因为这个 API 的契约覆盖两者。 Check the returned previous-state values as well as the final flag state, because the API contract is about both.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -16,6 +16,8 @@
 
 void test_flag()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::Flag::Plain plain;
   ASSERT(!plain.IsSet());
   ASSERT(!plain.TestAndSet());

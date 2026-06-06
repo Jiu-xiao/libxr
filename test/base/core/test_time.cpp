@@ -1,14 +1,14 @@
 /**
  * @file test_time.cpp
- * @brief `MicrosecondTimestamp` and `MillisecondTimestamp` arithmetic tests.
+ * @brief `MicrosecondTimestamp` / `MillisecondTimestamp` 算术测试。 `MicrosecondTimestamp` and `MillisecondTimestamp` arithmetic tests.
  *
- * Test items:
- * 1. Straight-line subtraction: verify elapsed microsecond and millisecond durations and their unit-conversion helpers.
- * 2. Single-wrap subtraction: verify configured wrap ranges are used when the new timestamp is numerically smaller than the old one.
+ * 测试项目 / Test items:
+ * 1. 直线时间差与单位换算。 Straight-line subtraction: verify elapsed microsecond and millisecond durations and their unit-conversion helpers.
+ * 2. 单次回绕后的时间差计算。 Single-wrap subtraction: verify configured wrap ranges are used when the new timestamp is numerically smaller than the old one.
  *
- * Test principle:
- * 1. Check both raw duration values and converted unit helpers, because callers use both surfaces.
- * 2. Override the wrap configuration in-test so the wraparound branch is exercised deterministically instead of depending on platform timebase limits.
+ * 测试原理 / Test principles:
+ * 1. 同时检查原始 duration 和换算辅助接口，因为调用方会同时使用两者。 Check both raw duration values and converted unit helpers, because callers use both surfaces.
+ * 2. 在测试内主动改 wrap 配置，让回绕分支可确定复现。 Override the wrap configuration in-test so the wraparound branch is exercised deterministically instead of depending on platform timebase limits.
  */
 #include <cstdint>
 
@@ -31,6 +31,8 @@ struct TimebaseWrapGuard
 
 void test_time()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TimebaseWrapGuard guard;
 
   const auto us_elapsed =

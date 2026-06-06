@@ -1,13 +1,13 @@
 /**
  * @file test_print_binding.cpp
- * @brief Binding-plane STDIO/print wrapper tests.
+ * @brief binding 平面 STDIO/print 包装层测试。 Binding-plane STDIO/print wrapper tests.
  *
- * Test items:
- * 1. STDIO print wrappers: verify public `Print`/`Printf` wrappers emit the expected bytes through the bound write port.
- * 2. Truncation behavior: verify output larger than the sink capacity is truncated according to the binding-side stream contract.
+ * 测试项目 / Test items:
+ * 1. STDIO `Print` / `Printf` 包装输出。 STDIO print wrappers: verify public `Print`/`Printf` wrappers emit the expected bytes through the bound write port.
+ * 2. 超出 sink 容量时的截断行为。 Truncation behavior: verify output larger than the sink capacity is truncated according to the binding-side stream contract.
  *
- * Test principle:
- * 1. Bind print output to the real STDIO stream path instead of bypassing it, because this plane exists specifically to verify host/runtime binding behavior.
+ * 测试原理 / Test principles:
+ * 1. 通过真实 STDIO 流路径驱动，而不是绕过 binding 层直接检查内部缓冲。 Bind print output to the real STDIO stream path instead of bypassing it, because this plane exists specifically to verify host/runtime binding behavior.
  */
 #include <array>
 #include <cstddef>
@@ -52,6 +52,8 @@ int Fail(const char* message)
 
 void TestStdioPrintWrappers()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   {
     static constexpr char expected[] = "x=+0007 0x2a ok";
 
@@ -175,6 +177,8 @@ void TestStdioPrintWrappers()
 
 void TestStdioTruncation()
 {
+  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
+  // Test coverage: execute the current helper-scoped test item from this file.
   {
     constexpr size_t pipe_capacity = 64;
     constexpr size_t payload_size = pipe_capacity + 16;
@@ -301,6 +305,8 @@ void TestStdioTruncation()
 
 void test_print_binding()
 {
+  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
+  // Test coverage: execute the test items listed in this file header in sequence.
   TestStdioPrintWrappers();
   TestStdioTruncation();
 }
