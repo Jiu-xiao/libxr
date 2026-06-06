@@ -2,7 +2,7 @@
 
 #include "libxr_def.hpp"
 
-LIBXR_FORCE_OPTIMIZE_O3 void LibXR::Memory::FastCopy(void *dst, const void *src,
+LIBXR_FORCE_OPTIMIZE_O3 void LibXR::Memory::FastCopy(void* dst, const void* src,
                                                      size_t size)
 {
   uint8_t* d = static_cast<uint8_t*>(dst);
@@ -213,7 +213,7 @@ LIBXR_FORCE_OPTIMIZE_O3 void LibXR::Memory::FastCopy(void *dst, const void *src,
   }
 }
 
-LIBXR_FORCE_OPTIMIZE_O3 void LibXR::Memory::FastMove(void *dst, const void *src,
+LIBXR_FORCE_OPTIMIZE_O3 void LibXR::Memory::FastMove(void* dst, const void* src,
                                                      size_t size)
 {
   if (size == 0 || dst == src)
