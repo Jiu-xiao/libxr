@@ -202,5 +202,7 @@ if(XROBOT_MODULES_DIR)
 endif()
 
 if(LIBXR_TEST_BUILD)
-  include(cmake/test.cmake)
+  add_subdirectory(test)
+  add_subdirectory(verify)
+  add_subdirectory(measure)
 endif()

@@ -1073,25 +1073,14 @@ void test_rw()
 {
   test_rw_pending_mode_matrix();
   test_rw_edge_cases();
-  test_rw_stream_block_pending_result_propagates();
-  test_rw_stream_block_timeout_detaches_waiter();
-  test_rw_stream_block_destructor_autocommit();
-  test_rw_block_read_timeout_detaches_pending();
   test_rw_read_port_clear_queued_data_clears_idle_queue();
   test_rw_read_port_clear_queued_data_clears_event_queue();
   test_rw_read_port_clear_queued_data_busy_pending_read();
-  test_rw_zero_read_pending_notifies_without_dequeue();
-  test_rw_block_write_timeout_detaches_waiter();
   test_rw_immediate_error_propagates();
   test_rw_read_port_fail_and_clear_all_completes_async_pending();
   test_rw_write_port_fail_and_clear_all_completes_async_pending();
-  test_rw_read_port_fail_and_clear_all_fails_block_waiter();
-  test_rw_write_port_fail_and_clear_all_fails_block_waiter();
   test_rw_write_port_fail_and_clear_all_clears_idle_queue();
   test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream();
-  test_rw_read_port_block_queue_completion_copies_data();
-  test_rw_write_port_block_pending_result_propagates();
-  test_rw_write_port_block_reused_waiter_discards_stale_signal();
 }
 
 namespace
@@ -1548,11 +1537,9 @@ void test_pipe()
   test_pipe_write_then_read();
   test_pipe_chunked_rw();
   test_pipe_stream_api();
-  test_pipe_stream_block_immediate_path();
   test_pipe_stream_commit_releases_lock_for_next_stream();
   test_pipe_stream_commit_allows_persistent_and_external_streams();
   test_pipe_mode_matrix();
   test_pipe_reuse_stress();
-  test_pipe_block_reuse_stress();
   test_pipe_edge_cases();
 }

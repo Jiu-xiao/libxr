@@ -1,4 +1,4 @@
-#include "test.hpp"
+#include "test_base.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -62,10 +62,14 @@ static void run_libxr_tests()
   XR_LOG_INFO("Running LibXR Tests...\n");
 
   TestCase core_tests[] = {
+      {"assert", test_assert, false},
+      {"def", test_def, false},
       {"callback", test_cb, false},
       {"pipe", test_pipe, false},
       {"rw", test_rw, false},
       {"memory", test_memory, false},
+      {"color", test_color, false},
+      {"time", test_time, false},
   };
 
   TestCase synchronization_tests[] = {
@@ -79,11 +83,14 @@ static void run_libxr_tests()
       {"encoder", test_float_encoder, false},
       {"cycle_value", test_cycle_value, false},
       {"print", test_print, false},
+      {"flag", test_flag, false},
   };
 
   TestCase data_structure_tests[] = {{"rbt", test_rbt, false},
                                      {"queue", test_queue, false},
+                                     {"lockfree_queue", test_lockfree_queue, false},
                                      {"pool", test_lock_free_pool, false},
+                                     {"lockfree_list", test_lockfree_list, false},
                                      {"stack", test_stack, false},
                                      {"list", test_list, false},
                                      {"double_buffer", test_double_buffer, false},
@@ -94,6 +101,12 @@ static void run_libxr_tests()
       {"thread", test_thread, false},
       {"timebase", test_timebase, false},
       {"timer", test_timer, false},
+  };
+
+  TestCase runtime_tests[] = {
+      {"rw_runtime", test_rw_runtime, false},
+      {"pipe_runtime", test_pipe_runtime, false},
+      {"message_runtime", test_message_runtime, false},
   };
 
   TestCase motion_tests[] = {
@@ -107,12 +120,19 @@ static void run_libxr_tests()
   };
 
   TestCase system_tests[] = {{"ramfs", test_ramfs, false},
-                             {"app_framework", test_app_framework, false},
+                             {"app_framework_application",
+                              test_app_framework_application, false},
+                             {"app_framework_hardware",
+                              test_app_framework_hardware, false},
                              {"event", test_event, false},
-                             {"message", test_message, false},
+                             {"message_topic", test_message_topic, false},
+                             {"message_packet", test_message_packet, false},
                              {"database", test_database, false},
-                             {"terminal", test_terminal, true},
-                             {"linux_shm_topic", test_linux_shm_topic, true}};
+                             {"logger", test_logger, true},
+                             {"terminal_command", test_terminal_command, true},
+                             {"terminal_display", test_terminal_display, false},
+                             {"terminal_input", test_terminal_input, true},
+                             {"terminal", test_terminal, true}};
 
   struct
   {
@@ -123,6 +143,7 @@ static void run_libxr_tests()
                      {utility_tests, "utility_tests"},
                      {data_structure_tests, "data_structure_tests"},
                      {threading_tests, "threading_tests"},
+                     {runtime_tests, "runtime_tests"},
                      {motion_tests, "motion_tests"},
                      {control_tests, "control_tests"},
                      {system_tests, "system_tests"}};
@@ -133,6 +154,7 @@ static void run_libxr_tests()
       sizeof(utility_tests) / sizeof(TestCase),
       sizeof(data_structure_tests) / sizeof(TestCase),
       sizeof(threading_tests) / sizeof(TestCase),
+      sizeof(runtime_tests) / sizeof(TestCase),
       sizeof(motion_tests) / sizeof(TestCase),
       sizeof(control_tests) / sizeof(TestCase),
       sizeof(system_tests) / sizeof(TestCase),
