@@ -1,6 +1,5 @@
-#include "libxr_mem.hpp"
-
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 
 int LibXR::Memory::FastCmp(const void* a, const void* b, size_t size)
 {

@@ -1,6 +1,5 @@
-#include "libxr_mem.hpp"
-
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 
 void LibXR::Memory::FastCopy(void* dst, const void* src, size_t size)
 {
