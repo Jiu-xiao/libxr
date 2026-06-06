@@ -32,6 +32,11 @@ struct DirectCallbackProbe
 
   DirectCallbackProbe() : cb(LibXR::Callback<int>::Create(OnCallback, this)) {}
 
+  /**
+   * @brief 辅助函数 `OnCallback`。 Helper function `OnCallback`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   static void OnCallback(bool in_isr, DirectCallbackProbe* self, int value)
   {
     if (self->seen_count < static_cast<int>(self->seen.size()))
@@ -76,6 +81,11 @@ struct GuardedCreationProbe
 
   GuardedCreationProbe() : cb(LibXR::Callback<int>::CreateGuarded(OnCallback, this)) {}
 
+  /**
+   * @brief 辅助函数 `OnCallback`。 Helper function `OnCallback`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   static void OnCallback(bool in_isr, GuardedCreationProbe* self, int value)
   {
     if (self->seen_count < static_cast<int>(self->seen.size()))
@@ -119,6 +129,11 @@ struct LambdaCreationProbe
 };
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_cb`。 Test entry function `test_cb`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_cb()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。

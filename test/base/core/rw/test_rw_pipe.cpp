@@ -53,6 +53,11 @@ struct CompletionProbe
 
   CompletionProbe() : sem(0) {}
 
+  /**
+   * @brief 辅助函数 `Reset`。 Helper function `Reset`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   void Reset()
   {
     count.store(0, std::memory_order_release);
@@ -76,12 +81,22 @@ struct ModeHarness
   ModeHarness(const ModeHarness&) = delete;
   ModeHarness& operator=(const ModeHarness&) = delete;
 
+  /**
+   * @brief 辅助函数 `Reset`。 Helper function `Reset`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   void Reset()
   {
     polling_status = PollingStatus::READY;
     probe.Reset();
   }
 
+  /**
+   * @brief 断言辅助函数 `ExpectPendingSubmitted`。 Assertion helper function `ExpectPendingSubmitted`.
+   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
+   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+   */
   void ExpectPendingSubmitted() const
   {
   // 辅助内容：验证当前失败或退出预期。
@@ -96,6 +111,11 @@ struct ModeHarness
     }
   }
 
+  /**
+   * @brief 断言辅助函数 `ExpectFinal`。 Assertion helper function `ExpectFinal`.
+   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
+   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+   */
   void ExpectFinal(LibXR::ErrorCode expected)
   {
   // 辅助内容：验证当前失败或退出预期。
@@ -121,6 +141,11 @@ struct ModeHarness
     }
   }
 
+  /**
+   * @brief 辅助函数 `OnCallback`。 Helper function `OnCallback`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   static void OnCallback(bool in_isr, ModeHarness* self, LibXR::ErrorCode status)
   {
     self->probe.last.store(static_cast<int>(status), std::memory_order_release);
@@ -128,6 +153,11 @@ struct ModeHarness
     self->probe.sem.PostFromCallback(in_isr);
   }
 
+  /**
+   * @brief 辅助函数 `Bind`。 Helper function `Bind`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   void Bind(uint32_t timeout)
   {
     switch (mode)
@@ -158,6 +188,11 @@ struct ModeHarness
 using ReadHarness = ModeHarness<LibXR::ReadOperation>;
 using WriteHarness = ModeHarness<LibXR::WriteOperation>;
 
+/**
+ * @brief 辅助函数 `JoinThreadIfNeeded`。 Helper function `JoinThreadIfNeeded`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -169,6 +204,11 @@ inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 #endif
 }
 
+/**
+ * @brief 断言辅助函数 `ExpectWaitOk`。 Assertion helper function `ExpectWaitOk`.
+ * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
+ *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+ */
 inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT_MS)
 {
   // 辅助内容：验证当前失败或退出预期。
@@ -237,6 +277,11 @@ struct TrackingReadPort : LibXR::ReadPort
   uint32_t dequeue_count = 0;
 };
 
+/**
+ * @brief 辅助函数 `CompletePendingReadFromQueue`。 Helper function `CompletePendingReadFromQueue`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
   while (ctx.port->busy_.load(std::memory_order_acquire) !=
@@ -259,6 +304,11 @@ struct WriteFinishContext
   LibXR::ErrorCode result;
 };
 
+/**
+ * @brief 辅助函数 `FinishPendingWrite`。 Helper function `FinishPendingWrite`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void FinishPendingWrite(WriteFinishContext ctx)
 {
   LibXR::WriteInfoBlock completed{};
@@ -281,6 +331,11 @@ struct BlockingReadCallContext
   LibXR::Semaphore* done;
 };
 
+/**
+ * @brief 辅助函数 `BlockingReadCall`。 Helper function `BlockingReadCall`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void BlockingReadCall(BlockingReadCallContext* ctx)
 {
   LibXR::Semaphore sem(0);
@@ -298,6 +353,11 @@ struct BlockingWriteCallContext
   LibXR::Semaphore* done;
 };
 
+/**
+ * @brief 辅助函数 `BlockingWriteCall`。 Helper function `BlockingWriteCall`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void BlockingWriteCall(BlockingWriteCallContext* ctx)
 {
   LibXR::Semaphore sem(0);
@@ -315,6 +375,11 @@ struct BlockingWriteExternalOpCallContext
   LibXR::Semaphore* done;
 };
 
+/**
+ * @brief 辅助函数 `BlockingWriteExternalOpCall`。 Helper function `BlockingWriteExternalOpCall`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void BlockingWriteExternalOpCall(BlockingWriteExternalOpCallContext* ctx)
 {
   ctx->result = (*ctx->port)(ctx->data, *ctx->op);
@@ -359,6 +424,11 @@ void StartBlockingWriteExternalOpCaller(LibXR::Thread& thread,
       &ctx, BlockingWriteExternalOpCall, name, 1024, LibXR::Thread::Priority::MEDIUM);
 }
 
+/**
+ * @brief 辅助函数 `VerifyPendingReadMode`。 Helper function `VerifyPendingReadMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void VerifyPendingReadMode(TestMode mode)
 {
   using namespace LibXR;
@@ -395,6 +465,11 @@ void VerifyPendingReadMode(TestMode mode)
   ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
+/**
+ * @brief 辅助函数 `VerifyPendingWriteMode`。 Helper function `VerifyPendingWriteMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
 {
   using namespace LibXR;
@@ -428,6 +503,11 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
   ASSERT(w.queue_info_->Size() == 0);
 }
 
+/**
+ * @brief 辅助函数 `VerifyPendingReadFailAndClearMode`。 Helper function `VerifyPendingReadFailAndClearMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
 {
   using namespace LibXR;
@@ -454,6 +534,11 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   ASSERT(r.Size() == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_read_port_clear_queued_data_clears_idle_queue`。 Test entry function `test_rw_read_port_clear_queued_data_clears_idle_queue`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_read_port_clear_queued_data_clears_idle_queue()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -472,6 +557,11 @@ void test_rw_read_port_clear_queued_data_clears_idle_queue()
   ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_read_port_clear_queued_data_clears_event_queue`。 Test entry function `test_rw_read_port_clear_queued_data_clears_event_queue`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_read_port_clear_queued_data_clears_event_queue()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -492,6 +582,11 @@ void test_rw_read_port_clear_queued_data_clears_event_queue()
   ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_read_port_clear_queued_data_busy_pending_read`。 Test entry function `test_rw_read_port_clear_queued_data_busy_pending_read`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_read_port_clear_queued_data_busy_pending_read()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -518,6 +613,11 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   ASSERT(r.Size() == 0);
 }
 
+/**
+ * @brief 辅助函数 `VerifyPendingWriteFailAndClearMode`。 Helper function `VerifyPendingWriteFailAndClearMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
 {
   using namespace LibXR;
@@ -543,6 +643,11 @@ void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   ASSERT(w.queue_info_->Size() == 0);
 }
 
+/**
+ * @brief 辅助函数 `VerifyZeroWriteMode`。 Helper function `VerifyZeroWriteMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void VerifyZeroWriteMode(TestMode mode)
 {
   using namespace LibXR;
@@ -573,6 +678,11 @@ void VerifyZeroWriteMode(TestMode mode)
   ASSERT(rx == tx);
 }
 
+/**
+ * @brief 辅助函数 `VerifyZeroReadMode`。 Helper function `VerifyZeroReadMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void VerifyZeroReadMode(TestMode mode)
 {
   using namespace LibXR;
@@ -644,6 +754,11 @@ void VerifyStreamBlockPendingCompletion(LibXR::ErrorCode finish_result,
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
+/**
+ * @brief 辅助函数 `VerifyStreamBlockTimeout`。 Helper function `VerifyStreamBlockTimeout`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void VerifyStreamBlockTimeout()
 {
   using namespace LibXR;
@@ -670,6 +785,11 @@ void VerifyStreamBlockTimeout()
 }
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_rw_pending_mode_matrix`。 Test entry function `test_rw_pending_mode_matrix`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_pending_mode_matrix()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -681,6 +801,11 @@ void test_rw_pending_mode_matrix()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_edge_cases`。 Test entry function `test_rw_edge_cases`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_edge_cases()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -710,6 +835,11 @@ void test_rw_edge_cases()
   w.Finish(false, ErrorCode::OK, completed);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_stream_block_pending_result_propagates`。 Test entry function `test_rw_stream_block_pending_result_propagates`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_stream_block_pending_result_propagates()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -722,6 +852,11 @@ void test_rw_stream_block_timeout_detaches_waiter() { VerifyStreamBlockTimeout()
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
   // Test coverage: execute the test items listed in this file header in sequence.
 
+/**
+ * @brief 测试入口函数 `test_rw_stream_block_destructor_autocommit`。 Test entry function `test_rw_stream_block_destructor_autocommit`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_stream_block_destructor_autocommit()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -730,6 +865,11 @@ void test_rw_stream_block_destructor_autocommit()
                                      StreamSubmitMode::DESTRUCT);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_block_read_timeout_detaches_pending`。 Test entry function `test_rw_block_read_timeout_detaches_pending`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_block_read_timeout_detaches_pending()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -766,6 +906,11 @@ void test_rw_block_read_timeout_detaches_pending()
   ASSERT(std::memcmp(fresh_rx, TX, sizeof(TX)) == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_zero_read_pending_notifies_without_dequeue`。 Test entry function `test_rw_zero_read_pending_notifies_without_dequeue`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_zero_read_pending_notifies_without_dequeue()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -809,6 +954,11 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_block_write_timeout_detaches_waiter`。 Test entry function `test_rw_block_write_timeout_detaches_waiter`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_block_write_timeout_detaches_waiter()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -843,6 +993,11 @@ void test_rw_block_write_timeout_detaches_waiter()
   ASSERT(sem2.Value() == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_immediate_error_propagates`。 Test entry function `test_rw_immediate_error_propagates`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_immediate_error_propagates()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -884,6 +1039,11 @@ void test_rw_immediate_error_propagates()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_read_port_fail_and_clear_all_completes_async_pending`。 Test entry function `test_rw_read_port_fail_and_clear_all_completes_async_pending`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_read_port_fail_and_clear_all_completes_async_pending()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -894,6 +1054,11 @@ void test_rw_read_port_fail_and_clear_all_completes_async_pending()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_write_port_fail_and_clear_all_completes_async_pending`。 Test entry function `test_rw_write_port_fail_and_clear_all_completes_async_pending`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_write_port_fail_and_clear_all_completes_async_pending()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -904,6 +1069,11 @@ void test_rw_write_port_fail_and_clear_all_completes_async_pending()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_read_port_fail_and_clear_all_fails_block_waiter`。 Test entry function `test_rw_read_port_fail_and_clear_all_fails_block_waiter`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -943,6 +1113,11 @@ void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
   ASSERT(fresh_rx[0] == tx);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_write_port_fail_and_clear_all_fails_block_waiter`。 Test entry function `test_rw_write_port_fail_and_clear_all_fails_block_waiter`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -986,6 +1161,11 @@ void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
   JoinThreadIfNeeded(finisher);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_write_port_fail_and_clear_all_clears_idle_queue`。 Test entry function `test_rw_write_port_fail_and_clear_all_clears_idle_queue`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_write_port_fail_and_clear_all_clears_idle_queue()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1009,6 +1189,11 @@ void test_rw_write_port_fail_and_clear_all_clears_idle_queue()
   ASSERT(w.queue_info_->Size() == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream`。 Test entry function `test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1050,6 +1235,11 @@ void test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream()
   ASSERT(w.queue_info_->Size() == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_read_port_block_queue_completion_copies_data`。 Test entry function `test_rw_read_port_block_queue_completion_copies_data`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_read_port_block_queue_completion_copies_data()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1075,6 +1265,11 @@ void test_rw_read_port_block_queue_completion_copies_data()
   ASSERT(sem.Value() == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_write_port_block_pending_result_propagates`。 Test entry function `test_rw_write_port_block_pending_result_propagates`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_write_port_block_pending_result_propagates()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1097,6 +1292,11 @@ void test_rw_write_port_block_pending_result_propagates()
   JoinThreadIfNeeded(finisher);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw_write_port_block_reused_waiter_discards_stale_signal`。 Test entry function `test_rw_write_port_block_reused_waiter_discards_stale_signal`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw_write_port_block_reused_waiter_discards_stale_signal()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1133,6 +1333,11 @@ void test_rw_write_port_block_reused_waiter_discards_stale_signal()
   ASSERT(sem.Value() == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_rw`。 Test entry function `test_rw`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_rw()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1174,6 +1379,11 @@ struct DelayedPipeWriteContext
   LibXR::Semaphore* done;
 };
 
+/**
+ * @brief 辅助函数 `DelayedPipeWrite`。 Helper function `DelayedPipeWrite`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void DelayedPipeWrite(DelayedPipeWriteContext* ctx)
 {
   LibXR::Thread::Sleep(ctx->delay_ms);
@@ -1188,6 +1398,11 @@ void StartDelayedPipeWriter(LibXR::Thread& thread, DelayedPipeWriteContext& ctx,
                                           LibXR::Thread::Priority::MEDIUM);
 }
 
+/**
+ * @brief 辅助函数 `FillPattern`。 Helper function `FillPattern`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void FillPattern(std::vector<uint8_t>& buffer, uint8_t seed)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -1288,6 +1503,11 @@ void VerifyWriteThenRead(TestMode write_mode, TestMode read_mode, size_t size,
 
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_pipe_basic`。 Test entry function `test_pipe_basic`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_basic()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1314,6 +1534,11 @@ void test_pipe_basic()
   ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_write_then_read`。 Test entry function `test_pipe_write_then_read`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_write_then_read()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1340,6 +1565,11 @@ void test_pipe_write_then_read()
   ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_chunked_rw`。 Test entry function `test_pipe_chunked_rw`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_chunked_rw()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1372,6 +1602,11 @@ void test_pipe_chunked_rw()
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_stream_api`。 Test entry function `test_pipe_stream_api`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_stream_api()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1402,6 +1637,11 @@ void test_pipe_stream_api()
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_stream_block_immediate_path`。 Test entry function `test_pipe_stream_block_immediate_path`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_stream_block_immediate_path()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1432,6 +1672,11 @@ void test_pipe_stream_block_immediate_path()
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_stream_commit_releases_lock_for_next_stream`。 Test entry function `test_pipe_stream_commit_releases_lock_for_next_stream`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_stream_commit_releases_lock_for_next_stream()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1464,6 +1709,11 @@ void test_pipe_stream_commit_releases_lock_for_next_stream()
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_stream_commit_allows_persistent_and_external_streams`。 Test entry function `test_pipe_stream_commit_allows_persistent_and_external_streams`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_stream_commit_allows_persistent_and_external_streams()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1500,6 +1750,11 @@ void test_pipe_stream_commit_allows_persistent_and_external_streams()
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_mode_matrix`。 Test entry function `test_pipe_mode_matrix`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_mode_matrix()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1516,6 +1771,11 @@ void test_pipe_mode_matrix()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_reuse_stress`。 Test entry function `test_pipe_reuse_stress`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_reuse_stress()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1560,6 +1820,11 @@ void test_pipe_reuse_stress()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_block_reuse_stress`。 Test entry function `test_pipe_block_reuse_stress`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_block_reuse_stress()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1609,6 +1874,11 @@ void test_pipe_block_reuse_stress()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe_edge_cases`。 Test entry function `test_pipe_edge_cases`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe_edge_cases()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
@@ -1623,6 +1893,11 @@ void test_pipe_edge_cases()
   }
 }
 
+/**
+ * @brief 测试入口函数 `test_pipe`。 Test entry function `test_pipe`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_pipe()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。

@@ -33,6 +33,11 @@ namespace
 
 using Clock = std::chrono::steady_clock;
 
+/**
+ * @brief 辅助函数 `NowNs`。 Helper function `NowNs`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 uint64_t NowNs()
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -90,6 +95,11 @@ struct BenchFrame
 };
 
 template <size_t PayloadBytes>
+/**
+ * @brief 辅助函数 `ComputeChecksum`。 Helper function `ComputeChecksum`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 uint32_t ComputeChecksum(const BenchFrame<PayloadBytes>& frame)
 {
   return static_cast<uint32_t>((frame.seq * 1315423911ULL) ^
@@ -97,6 +107,11 @@ uint32_t ComputeChecksum(const BenchFrame<PayloadBytes>& frame)
 }
 
 template <size_t PayloadBytes>
+/**
+ * @brief 辅助函数 `CountForPayload`。 Helper function `CountForPayload`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 uint64_t CountForPayload()
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -184,6 +199,11 @@ BenchStats BuildStats(const std::vector<double>& lat_us, uint64_t sequence_error
   return stats;
 }
 
+/**
+ * @brief 辅助函数 `WriteAll`。 Helper function `WriteAll`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 bool WriteAll(int fd, const void* buffer, size_t size)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -207,6 +227,11 @@ bool WriteAll(int fd, const void* buffer, size_t size)
   return true;
 }
 
+/**
+ * @brief 辅助函数 `ReadAll`。 Helper function `ReadAll`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 bool ReadAll(int fd, void* buffer, size_t size)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -231,6 +256,11 @@ bool ReadAll(int fd, void* buffer, size_t size)
 }
 
 template <typename TopicType>
+/**
+ * @brief 辅助函数 `WaitForSubscriberAttach`。 Helper function `WaitForSubscriberAttach`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 bool WaitForSubscriberAttach(TopicType& topic, uint32_t expected_num, const char* case_label)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -249,6 +279,11 @@ bool WaitForSubscriberAttach(TopicType& topic, uint32_t expected_num, const char
 }
 
 template <size_t PayloadBytes>
+/**
+ * @brief 辅助函数 `LatencyCountForPayload`。 Helper function `LatencyCountForPayload`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 uint64_t LatencyCountForPayload()
 {
   if constexpr (PayloadBytes <= 64)
@@ -270,6 +305,11 @@ uint64_t LatencyCountForPayload()
 }
 
 template <size_t PayloadBytes, bool TouchPayload>
+/**
+ * @brief 执行辅助函数 `RunBenchCase`。 Execution helper function `RunBenchCase`.
+ * @details 测试内容：执行一个子 case、子流程或基准场景。 Execute one sub-case, sub-flow, or benchmark scenario.
+ *          测试原理：把重复执行逻辑集中封装，保证不同 case 走同一执行路径。 Centralize repeated execution logic so different cases use the same execution path.
+ */
 int RunBenchCase()
 {
   // 基准内容：执行当前子场景或 case。
@@ -456,6 +496,11 @@ int RunBenchCase()
 // Measure one-way delivery with at most one outstanding message so queueing backlog
 // and startup burst do not pollute the latency distribution.
 template <size_t PayloadBytes, bool TouchPayload>
+/**
+ * @brief 执行辅助函数 `RunLatencyCase`。 Execution helper function `RunLatencyCase`.
+ * @details 测试内容：执行一个子 case、子流程或基准场景。 Execute one sub-case, sub-flow, or benchmark scenario.
+ *          测试原理：把重复执行逻辑集中封装，保证不同 case 走同一执行路径。 Centralize repeated execution logic so different cases use the same execution path.
+ */
 int RunLatencyCase()
 {
   // 基准内容：执行当前子场景或 case。
@@ -1063,6 +1108,11 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
 
 }  // namespace
 
+/**
+ * @brief 辅助函数 `main`。 Helper function `main`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 int main()
 {
   LibXR::PlatformInit();

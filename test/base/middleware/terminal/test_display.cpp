@@ -38,6 +38,11 @@ struct TerminalDisplayFixture
   {
   }
 
+  /**
+   * @brief 辅助函数 `FlushOutput`。 Helper function `FlushOutput`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   std::string FlushOutput()
   {
     ASSERT(terminal.write_stream_.Commit() == LibXR::ErrorCode::OK);
@@ -56,6 +61,11 @@ struct TerminalDisplayFixture
   }
 };
 
+/**
+ * @brief 辅助函数 `FillInputLine`。 Helper function `FillInputLine`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void FillInputLine(LibXR::Terminal<>& terminal, const char* text)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -69,6 +79,11 @@ void FillInputLine(LibXR::Terminal<>& terminal, const char* text)
   terminal.input_line_[terminal.input_line_.Size()] = '\0';
 }
 
+/**
+ * @brief 测试项函数 `TestLineFeedModes`。 Test-item function `TestLineFeedModes`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestLineFeedModes()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -86,6 +101,11 @@ void TestLineFeedModes()
   ASSERT(cr_fixture.FlushOutput() == "\r");
 }
 
+/**
+ * @brief 测试项函数 `TestHeaderAndClearSequences`。 Test-item function `TestHeaderAndClearSequences`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestHeaderAndClearSequences()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -108,6 +128,11 @@ void TestHeaderAndClearSequences()
   ASSERT(fixture.FlushOutput() == "\033[2J\033[1H");
 }
 
+/**
+ * @brief 测试项函数 `TestHistoryDisplayAndRestore`。 Test-item function `TestHistoryDisplayAndRestore`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestHistoryDisplayAndRestore()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -136,6 +161,11 @@ void TestHistoryDisplayAndRestore()
   ASSERT(std::strcmp(&fixture.terminal.input_line_[0], "alpha") == 0);
 }
 
+/**
+ * @brief 测试项函数 `TestMidLineDisplayEditing`。 Test-item function `TestMidLineDisplayEditing`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestMidLineDisplayEditing()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -155,6 +185,11 @@ void TestMidLineDisplayEditing()
 
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_terminal_display`。 Test entry function `test_terminal_display`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_terminal_display()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。

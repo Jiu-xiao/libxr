@@ -119,6 +119,11 @@ class FailingFlash : public Flash
   }
 
  private:
+  /**
+   * @brief 辅助函数 `SeedValidSequentialBlocks`。 Helper function `SeedValidSequentialBlocks`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   void SeedValidSequentialBlocks()
   {
     std::memset(flash_area_.data(), 0xFF, flash_area_.size());
@@ -151,6 +156,11 @@ class FailingFlash : public Flash
          (static_cast<uint32_t>(bytes[offset + 3]) << 24);
 }
 
+/**
+ * @brief 辅助函数 `WriteLe32`。 Helper function `WriteLe32`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -162,6 +172,11 @@ inline void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value
 }
 
 template <typename Func>
+/**
+ * @brief 断言辅助函数 `ExpectFatalExit`。 Assertion helper function `ExpectFatalExit`.
+ * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
+ *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+ */
 void ExpectFatalExit(int exit_code, Func&& func)
 {
   // 辅助内容：验证当前失败或退出预期。
@@ -201,6 +216,11 @@ void ExpectFatalExit(int exit_code, Func&& func)
   return bytes;
 }
 
+/**
+ * @brief 辅助函数 `WriteAllBytes`。 Helper function `WriteAllBytes`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void WriteAllBytes(const char* path, const std::vector<uint8_t>& bytes)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -212,6 +232,11 @@ inline void WriteAllBytes(const char* path, const std::vector<uint8_t>& bytes)
   ASSERT(static_cast<bool>(file));
 }
 
+/**
+ * @brief 辅助函数 `CraftPartialBackup`。 Helper function `CraftPartialBackup`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void CraftPartialBackup(std::vector<uint8_t>& bytes, size_t partial_len)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -227,6 +252,11 @@ inline void CraftPartialBackup(std::vector<uint8_t>& bytes, size_t partial_len)
   WriteLe32(bytes, backup_offset + XR_DB_CHECKSUM_OFFSET, XR_DB_CHECKSUM);
 }
 
+/**
+ * @brief 辅助函数 `MirrorMainBlockToBackup`。 Helper function `MirrorMainBlockToBackup`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void MirrorMainBlockToBackup(std::vector<uint8_t>& bytes)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -237,6 +267,11 @@ inline void MirrorMainBlockToBackup(std::vector<uint8_t>& bytes)
   }
 }
 
+/**
+ * @brief 辅助函数 `InvalidateMainChecksum`。 Helper function `InvalidateMainChecksum`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void InvalidateMainChecksum(std::vector<uint8_t>& bytes)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -244,6 +279,11 @@ inline void InvalidateMainChecksum(std::vector<uint8_t>& bytes)
   WriteLe32(bytes, XR_DB_CHECKSUM_OFFSET, 0);
 }
 
+/**
+ * @brief 辅助函数 `MarkMainFirstKeyAsUninitialized`。 Helper function `MarkMainFirstKeyAsUninitialized`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void MarkMainFirstKeyAsUninitialized(std::vector<uint8_t>& bytes)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -251,6 +291,11 @@ inline void MarkMainFirstKeyAsUninitialized(std::vector<uint8_t>& bytes)
   bytes[XR_DB_RAW_UNINIT_FLAG_LAST_BYTE_OFFSET] = 0xFF;
 }
 
+/**
+ * @brief 辅助函数 `CorruptBackupFirstKeyAvailableFlag`。 Helper function `CorruptBackupFirstKeyAvailableFlag`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void CorruptBackupFirstKeyAvailableFlag(std::vector<uint8_t>& bytes)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -258,6 +303,11 @@ inline void CorruptBackupFirstKeyAvailableFlag(std::vector<uint8_t>& bytes)
   bytes[XR_DB_BLOCK_SIZE + XR_DB_RAW_AVAILABLE_FLAG_OFFSET] = 0x00;
 }
 
+/**
+ * @brief 辅助函数 `CorruptMainFirstKeyRawInfo`。 Helper function `CorruptMainFirstKeyRawInfo`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void CorruptMainFirstKeyRawInfo(std::vector<uint8_t>& bytes, uint32_t raw_info)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -265,6 +315,11 @@ inline void CorruptMainFirstKeyRawInfo(std::vector<uint8_t>& bytes, uint32_t raw
   WriteLe32(bytes, XR_DB_RAW_FIRST_KEY_RAW_INFO_OFFSET, raw_info);
 }
 
+/**
+ * @brief 辅助函数 `CreateSeedDatabase`。 Helper function `CreateSeedDatabase`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void CreateSeedDatabase(const char* path)
 {
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
@@ -275,6 +330,11 @@ inline void CreateSeedDatabase(const char* path)
   ASSERT(key.data_ == 1234);
 }
 
+/**
+ * @brief 辅助函数 `CreateTwoKeyDatabase`。 Helper function `CreateTwoKeyDatabase`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 inline void CreateTwoKeyDatabase(const char* path)
 {
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
@@ -316,6 +376,11 @@ inline void CreateTwoKeyDatabase(const char* path)
   return key.data_;
 }
 
+/**
+ * @brief 断言辅助函数 `AssertMainValidBackupInvalid`。 Assertion helper function `AssertMainValidBackupInvalid`.
+ * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
+ *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+ */
 inline void AssertMainValidBackupInvalid(const char* path)
 {
   // 辅助内容：为后续测试准备或校验共享状态。

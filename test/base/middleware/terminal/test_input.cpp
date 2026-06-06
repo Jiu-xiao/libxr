@@ -29,6 +29,11 @@ struct CommandState
   int* count = nullptr;
 };
 
+/**
+ * @brief 辅助函数 `CountCommand`。 Helper function `CountCommand`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 int CountCommand(CommandState* state, int argc, char** argv)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -41,6 +46,11 @@ int CountCommand(CommandState* state, int argc, char** argv)
   return 0;
 }
 
+/**
+ * @brief 辅助函数 `CountSubstring`。 Helper function `CountSubstring`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 size_t CountSubstring(std::string_view text, std::string_view needle)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -69,6 +79,11 @@ struct TerminalFixture
   {
   }
 
+  /**
+   * @brief 执行辅助函数 `RunUntilIdle`。 Execution helper function `RunUntilIdle`.
+   * @details 测试内容：执行一个子 case、子流程或基准场景。 Execute one sub-case, sub-flow, or benchmark scenario.
+   *          测试原理：把重复执行逻辑集中封装，保证不同 case 走同一执行路径。 Centralize repeated execution logic so different cases use the same execution path.
+   */
   void RunUntilIdle()
   {
   // 基准内容：执行当前子场景或 case。
@@ -85,6 +100,11 @@ struct TerminalFixture
     ASSERT(false);
   }
 
+  /**
+   * @brief 辅助函数 `DrainOutput`。 Helper function `DrainOutput`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   std::string DrainOutput()
   {
     const size_t output_size = output.GetReadPort().Size();
@@ -100,6 +120,11 @@ struct TerminalFixture
     return text;
   }
 
+  /**
+   * @brief 辅助函数 `SendRaw`。 Helper function `SendRaw`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   std::string SendRaw(const void* data, size_t size)
   {
     LibXR::WriteOperation write_op;
@@ -114,6 +139,11 @@ struct TerminalFixture
 
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_terminal_input`。 Test entry function `test_terminal_input`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_terminal_input()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。

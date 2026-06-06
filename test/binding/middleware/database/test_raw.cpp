@@ -18,6 +18,11 @@ namespace
 
 using namespace DatabaseBindingTestCommon;
 
+/**
+ * @brief 测试项函数 `TestDatabaseBindingRawSmoke`。 Test-item function `TestDatabaseBindingRawSmoke`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseBindingRawSmoke()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -89,6 +94,11 @@ void TestDatabaseBindingRawSmoke()
   }
 }
 
+/**
+ * @brief 测试项函数 `TestDatabasePartialBackupRecovery`。 Test-item function `TestDatabasePartialBackupRecovery`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabasePartialBackupRecovery()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -99,6 +109,11 @@ void TestDatabasePartialBackupRecovery()
                        55, 55);
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseKeyAddFailureRequires`。 Test-item function `TestDatabaseKeyAddFailureRequires`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseKeyAddFailureRequires()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -125,6 +140,11 @@ void TestDatabaseKeyAddFailureRequires()
 #endif
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawReadFailureRequires`。 Test-item function `TestDatabaseRawReadFailureRequires`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawReadFailureRequires()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -142,6 +162,11 @@ void TestDatabaseRawReadFailureRequires()
 #endif
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawWriteFailureRequires`。 Test-item function `TestDatabaseRawWriteFailureRequires`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawWriteFailureRequires()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -159,6 +184,11 @@ void TestDatabaseRawWriteFailureRequires()
 #endif
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawEraseFailureRequires`。 Test-item function `TestDatabaseRawEraseFailureRequires`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawEraseFailureRequires()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -176,6 +206,11 @@ void TestDatabaseRawEraseFailureRequires()
 #endif
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawSaveCurrentValue`。 Test-item function `TestDatabaseRawSaveCurrentValue`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawSaveCurrentValue()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -192,6 +227,11 @@ void TestDatabaseRawSaveCurrentValue()
   ASSERT(ReopenDatabaseValue(path, 0, "raw") == 2);
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawRequiresExactStoredSize`。 Test-item function `TestDatabaseRawRequiresExactStoredSize`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawRequiresExactStoredSize()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -218,6 +258,11 @@ void TestDatabaseRawRequiresExactStoredSize()
   ASSERT(ReopenDatabaseValue(path, 0, "shape") == 0x11223344U);
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawInvalidMainKeyMetadataReinitializes`。 Test-item function `TestDatabaseRawInvalidMainKeyMetadataReinitializes`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawInvalidMainKeyMetadataReinitializes()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -235,6 +280,11 @@ void TestDatabaseRawInvalidMainKeyMetadataReinitializes()
   ASSERT(ReadLe32(repaired, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawInvalidBackupMetadataDoesNotRestore`。 Test-item function `TestDatabaseRawInvalidBackupMetadataDoesNotRestore`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawInvalidBackupMetadataDoesNotRestore()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -252,6 +302,11 @@ void TestDatabaseRawInvalidBackupMetadataDoesNotRestore()
   AssertMainValidBackupInvalid(path);
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawRestoresFromValidBackup`。 Test-item function `TestDatabaseRawRestoresFromValidBackup`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawRestoresFromValidBackup()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -268,6 +323,11 @@ void TestDatabaseRawRestoresFromValidBackup()
   AssertMainValidBackupInvalid(path);
 }
 
+/**
+ * @brief 测试项函数 `TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes`。 Test-item function `TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -288,6 +348,11 @@ void TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes()
 
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_database_binding_raw`。 Test entry function `test_database_binding_raw`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_database_binding_raw()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。

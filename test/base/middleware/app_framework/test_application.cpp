@@ -24,6 +24,11 @@ class CountingApp : public LibXR::Application
   {
   }
 
+  /**
+   * @brief 辅助函数 `OnMonitor`。 Helper function `OnMonitor`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   void OnMonitor() override
   {
     *seen_mask_ |= (1 << id_);
@@ -38,6 +43,11 @@ class CountingApp : public LibXR::Application
 
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_app_framework_application`。 Test entry function `test_app_framework_application`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_app_framework_application()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。

@@ -38,6 +38,11 @@ using SharedTopic = LibXR::LinuxSharedTopic<IPCFrame>;
 using SharedData = SharedTopic::Data;
 using SharedSubscriber = SharedTopic::SyncSubscriber;
 
+/**
+ * @brief 辅助函数 `ComputeChecksum`。 Helper function `ComputeChecksum`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 uint32_t ComputeChecksum(const IPCFrame& frame)
 {
   uint32_t sum = frame.seq;
@@ -48,6 +53,11 @@ uint32_t ComputeChecksum(const IPCFrame& frame)
   return sum;
 }
 
+/**
+ * @brief 辅助函数 `FillFrame`。 Helper function `FillFrame`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void FillFrame(IPCFrame& frame, uint32_t seq)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -60,6 +70,11 @@ void FillFrame(IPCFrame& frame, uint32_t seq)
   frame.checksum = ComputeChecksum(frame);
 }
 
+/**
+ * @brief 断言辅助函数 `AssertFrame`。 Assertion helper function `AssertFrame`.
+ * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
+ *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+ */
 void AssertFrame(const IPCFrame& frame, uint32_t expected_seq)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -68,6 +83,11 @@ void AssertFrame(const IPCFrame& frame, uint32_t expected_seq)
   ASSERT(frame.checksum == ComputeChecksum(frame));
 }
 
+/**
+ * @brief 辅助函数 `MakeTopicName`。 Helper function `MakeTopicName`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void MakeTopicName(char* topic_name, size_t topic_name_size, const char* prefix)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -75,6 +95,11 @@ void MakeTopicName(char* topic_name, size_t topic_name_size, const char* prefix)
   std::snprintf(topic_name, topic_name_size, "%s_%d", prefix, static_cast<int>(getpid()));
 }
 
+/**
+ * @brief 辅助函数 `WaitForSubscriberNum`。 Helper function `WaitForSubscriberNum`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ */
 void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
@@ -86,6 +111,11 @@ void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
   ASSERT(topic.GetSubscriberNum() == expected_num);
 }
 
+/**
+ * @brief 断言辅助函数 `ExpectChildExit`。 Assertion helper function `ExpectChildExit`.
+ * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
+ *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+ */
 void ExpectChildExit(pid_t child, int expected_code = 0)
 {
   // 辅助内容：验证当前失败或退出预期。
@@ -98,6 +128,11 @@ void ExpectChildExit(pid_t child, int expected_code = 0)
 
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_linux_shm_topic`。 Test entry function `test_linux_shm_topic`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_linux_shm_topic()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。

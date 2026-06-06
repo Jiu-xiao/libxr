@@ -35,6 +35,11 @@ struct TerminalCommandFixture
   {
   }
 
+  /**
+   * @brief 执行辅助函数 `RunUntilIdle`。 Execution helper function `RunUntilIdle`.
+   * @details 测试内容：执行一个子 case、子流程或基准场景。 Execute one sub-case, sub-flow, or benchmark scenario.
+   *          测试原理：把重复执行逻辑集中封装，保证不同 case 走同一执行路径。 Centralize repeated execution logic so different cases use the same execution path.
+   */
   void RunUntilIdle()
   {
   // 基准内容：执行当前子场景或 case。
@@ -51,6 +56,11 @@ struct TerminalCommandFixture
     ASSERT(false);
   }
 
+  /**
+   * @brief 辅助函数 `DrainOutput`。 Helper function `DrainOutput`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   std::string DrainOutput()
   {
     const size_t output_size = output.GetReadPort().Size();
@@ -66,6 +76,11 @@ struct TerminalCommandFixture
     return text;
   }
 
+  /**
+   * @brief 辅助函数 `SendText`。 Helper function `SendText`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   */
   std::string SendText(const char* text)
   {
     LibXR::WriteOperation write_op;
@@ -76,6 +91,11 @@ struct TerminalCommandFixture
   }
 };
 
+/**
+ * @brief 测试项函数 `TestCdBuiltins`。 Test-item function `TestCdBuiltins`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestCdBuiltins()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -113,6 +133,11 @@ void TestCdBuiltins()
   ASSERT(output.find("ramfs:/$ ") != std::string::npos);
 }
 
+/**
+ * @brief 测试项函数 `TestLsBuiltin`。 Test-item function `TestLsBuiltin`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ */
 void TestLsBuiltin()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
@@ -159,6 +184,11 @@ void TestLsBuiltin()
 
 }  // namespace
 
+/**
+ * @brief 测试入口函数 `test_terminal_command`。 Test entry function `test_terminal_command`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
+ *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ */
 void test_terminal_command()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
