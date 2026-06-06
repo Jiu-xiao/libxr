@@ -13,7 +13,7 @@
     BACKUP = 1  ///< 备份块 (Backup block).
   };
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief 按最小写入单元存放布尔位图块
    *        (Boolean flag block stored in one aligned write unit span).
@@ -24,7 +24,7 @@ LIBXR_PACK_PUSH_1
   {
     uint8_t data[BlockSize];
   };
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
   /**
    * @brief 读写对齐布尔位图块的工具
@@ -97,7 +97,7 @@ LIBXR_PACK_POP()
     }
   };
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief 键信息结构，存储键的元数据
    *        (Structure containing key metadata).
@@ -152,9 +152,9 @@ LIBXR_PACK_PUSH_1
      */
     uint32_t GetDataSize() const { return raw_info & 0x01FFFFFF; }
   };
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief Flash 存储的块信息结构
    *        (Structure representing a Flash storage block).
@@ -183,4 +183,4 @@ LIBXR_PACK_PUSH_1
     };
     KeyInfo key;  ///< 紧跟在块头后的首个键头 / First key header stored right after the block header.
   };
-LIBXR_PACK_POP()
+LIBXR_PACKED_END

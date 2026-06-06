@@ -5,7 +5,7 @@
 namespace LibXR
 {
 #ifndef __DOXYGEN__
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
 /**
  * @struct Topic::PackedDataHeader
  * @brief 打包消息的固定 16 字节头 / Fixed 16-byte header of one packed message
@@ -92,7 +92,7 @@ class Topic::PackedData
    */
   MicrosecondTimestamp GetTimestamp() const { return raw.header_.GetTimestamp(); }
 };
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 #endif
 
 /**

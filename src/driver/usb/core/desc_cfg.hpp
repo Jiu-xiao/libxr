@@ -37,7 +37,7 @@ class ConfigDescriptorItem : public BosCapabilityProvider
  public:
   virtual ~ConfigDescriptorItem() = default;
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief 配置描述符头（9 字节）/ Configuration descriptor header (9 bytes)
    */
@@ -96,7 +96,7 @@ LIBXR_PACK_PUSH_1
     uint16_t wMaxPacketSize;         ///< 最大包长 / Maximum packet size
     uint8_t bInterval;               ///< 轮询间隔 / Polling interval
   };
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
   /**
    * @brief 绑定端点资源 / Bind endpoint resources

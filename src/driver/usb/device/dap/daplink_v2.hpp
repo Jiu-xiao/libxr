@@ -2969,7 +2969,7 @@ class DapLinkV2Class : public DeviceClass
   uint8_t in_tx_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
   LibXR::RawData in_tx_multi_buf_{in_tx_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief MS OS 2.0 描述符集合布局 / MS OS 2.0 descriptor set layout
    */
@@ -2998,7 +2998,7 @@ LIBXR_PACK_PUSH_1
           data[GUID_MULTI_SZ_UTF_16_BYTES];  ///< REG_MULTI_SZ 数据 / REG_MULTI_SZ data
     } prop;
   } winusb_msos20_{};
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
  private:
   SwdPort& swd_;  ///< SWD 链路 / SWD link
@@ -3028,7 +3028,7 @@ LIBXR_PACK_POP()
   bool inited_ = false;        ///< Initialized flag
   uint8_t interface_num_ = 0;  ///< Interface number
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief Descriptor block (Interface + 2x Endpoint)
    *
@@ -3039,7 +3039,7 @@ LIBXR_PACK_PUSH_1
     EndpointDescriptor ep_out;  ///< OUT endpoint descriptor / OUT endpoint descriptor
     EndpointDescriptor ep_in;   ///< IN endpoint descriptor / IN endpoint descriptor
   } desc_block_{};
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
  private:
   LibXR::USB::WinUsbMsOs20::MsOs20BosCapability winusb_msos20_cap_{

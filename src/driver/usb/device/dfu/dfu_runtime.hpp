@@ -58,7 +58,7 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
   }
 
  protected:
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief DFU Functional Descriptor（Runtime 变体）
    *        DFU Functional Descriptor for the runtime variant.
@@ -102,7 +102,7 @@ LIBXR_PACK_PUSH_1
         0};
     FunctionalDescriptor func_desc = {};
   };
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
   {

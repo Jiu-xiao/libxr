@@ -81,7 +81,7 @@ class CDCBase : public DeviceClass
                           ///< (required for CDC-ACM)
   };
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief CDC线路编码参数结构体
    *        CDC line coding parameters structure
@@ -115,7 +115,7 @@ LIBXR_PACK_PUSH_1
     uint16_t wLength;       ///< 数据长度（固定为2）| Data length (fixed to 2)
     uint16_t serialState;   ///< 串行状态位图 / Serial state bitmap
   };
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
   // 确保 CDCLineCoding 结构体大小为 7 字节。
   // Ensure CDCLineCoding is exactly 7 bytes.
@@ -603,7 +603,7 @@ LIBXR_PACK_POP()
     }
   }
 
-LIBXR_PACK_PUSH_1
+LIBXR_PACKED_BEGIN
   /**
    * @brief CDC描述符块结构
    *        CDC descriptor block structure
@@ -659,7 +659,7 @@ LIBXR_PACK_PUSH_1
     EndpointDescriptor data_ep_out;  ///< 数据OUT端点描述符 / Data OUT endpoint descriptor
     EndpointDescriptor data_ep_in;   ///< 数据IN端点描述符 / Data IN endpoint descriptor
   } desc_block_;
-LIBXR_PACK_POP()
+LIBXR_PACKED_END
 
  protected:
   CDCLineCoding& GetLineCoding() { return line_coding_; }
