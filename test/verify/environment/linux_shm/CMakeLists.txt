@@ -1,7 +1,9 @@
-add_executable(test_linux_shm_topic
-  "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/test_linux_shm_topic.cpp"
+file(GLOB XR_TEST_LINUX_SHM_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
+list(SORT XR_TEST_LINUX_SHM_SOURCES)
+
+add_executable(test_linux_shm_topic ${XR_TEST_LINUX_SHM_SOURCES})
 add_dependencies(test_linux_shm_topic xr)
 
 target_link_libraries(test_linux_shm_topic PUBLIC xr)
