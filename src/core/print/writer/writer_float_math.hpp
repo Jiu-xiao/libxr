@@ -10,37 +10,6 @@
  * @param scale 十进制缩放因子 / Decimal scale factor
  * @return 舍入后的缩放整数 / Returns the rounded scaled integer
  */
-inline uint64_t Writer::RoundScaledF32(float value, uint32_t scale)
-{
-  uint32_t bits = std::bit_cast<uint32_t>(value);
-  uint32_t exponent_bits = (bits >> 23) & 0xFFU;
-  uint32_t fraction_bits = bits & 0x7FFFFFU;
-  uint32_t significand =
-      (exponent_bits == 0) ? fraction_bits : ((1U << 23) | fraction_bits);
-  int exponent2 =
-      (exponent_bits == 0) ? -149 : static_cast<int>(exponent_bits) - 150;
-  uint64_t numerator = static_cast<uint64_t>(significand) * scale;
-
-  if (exponent2 >= 0)
-  {
-    return numerator << exponent2;
-  }
-
-  unsigned int shift = static_cast<unsigned int>(-exponent2);
-  if (shift >= 64)
-  {
-    return 0;
-  }
-  uint64_t quotient = numerator >> shift;
-  uint64_t remainder = numerator & ((uint64_t{1} << shift) - 1U);
-  uint64_t halfway = uint64_t{1} << (shift - 1);
-  if (remainder > halfway || (remainder == halfway && (quotient & 1U) != 0U))
-  {
-    ++quotient;
-  }
-  return quotient;
-}
-
 /**
  * @brief 浮点文本输出归一化过程中使用的十进制缩放对 / Decimal-scale pair used while normalizing one float for text output.
  * @tparam Float Float type. / 浮点类型。
@@ -169,69 +138,3 @@ uint8_t Writer::ExtractDigit(Float& value, Float scale)
  * @param size 当前文本长度 / Current text size
  * @return 返回修剪后的文本长度 / Returns the trimmed text size
  */
-inline size_t Writer::TrimGeneralText(char* text, size_t size)
-{
-  size_t exponent_pos = size;
-  for (size_t i = 0; i < size; ++i)
-  {
-    if (text[i] == 'e' || text[i] == 'E')
-    {
-      exponent_pos = i;
-      break;
-    }
-  }
-
-  size_t mantissa_end = exponent_pos;
-  while (mantissa_end > 0 && text[mantissa_end - 1] == '0')
-  {
-    --mantissa_end;
-  }
-  if (mantissa_end > 0 && text[mantissa_end - 1] == '.')
-  {
-    --mantissa_end;
-  }
-
-  if (exponent_pos == size)
-  {
-    return mantissa_end;
-  }
-
-  std::memmove(text + mantissa_end, text + exponent_pos, size - exponent_pos);
-  return mantissa_end + (size - exponent_pos);
-}
-
-/**
- * @brief 追加形如 `e+03` 或 `E-12` 的指数后缀 / Append an exponent suffix like `e+03` or `E-12`
- * @param out 目标文本缓冲区 / Destination text buffer
- * @param out_size 当前输出长度；成功时会推进 / Current output size; advanced on success
- * @param exponent 十进制指数 / Decimal exponent
- * @param upper_case 指数标记是否使用 `E` / Whether the exponent marker should use `E`
- * @return 成功返回 `true`，否则返回 `false` / Returns `true` on success, otherwise `false`
- */
-inline bool Writer::AppendExponentText(char* out, size_t& out_size, int exponent,
-                                       bool upper_case)
-{
-  if (!AppendBufferChar(out, float_buffer_capacity, out_size,
-                        upper_case ? 'E' : 'e'))
-  {
-    return false;
-  }
-  if (!AppendBufferChar(out, float_buffer_capacity, out_size,
-                        exponent < 0 ? '-' : '+'))
-  {
-    return false;
-  }
-
-  char digits[UnsignedDigitCapacity<unsigned int, 10>()];
-  unsigned int magnitude =
-      static_cast<unsigned int>(exponent < 0 ? -exponent : exponent);
-  size_t digit_count = AppendUnsigned<10>(digits, magnitude);
-  if (digit_count < 2 &&
-      !AppendBufferChar(out, float_buffer_capacity, out_size, '0'))
-  {
-    return false;
-  }
-
-  return AppendBufferText(out, float_buffer_capacity, out_size,
-                          std::string_view(digits, digit_count));
-}
