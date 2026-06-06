@@ -104,11 +104,11 @@ list(SORT _xr_force_os_sources)
 
 if(_xr_force_o3_sources)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set_source_files_properties(${_xr_force_o3_sources} PROPERTIES COMPILE_OPTIONS "/O2")
+    set_property(SOURCE ${_xr_force_o3_sources} APPEND PROPERTY COMPILE_OPTIONS "/O2")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
          CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
          CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    set_source_files_properties(${_xr_force_o3_sources} PROPERTIES COMPILE_OPTIONS "-O3")
+    set_property(SOURCE ${_xr_force_o3_sources} APPEND PROPERTY COMPILE_OPTIONS "-O3")
   else()
     message(WARNING
             "LibXR file-level optimized sources are not configured for compiler: "
@@ -118,11 +118,11 @@ endif()
 
 if(_xr_force_os_sources)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set_source_files_properties(${_xr_force_os_sources} PROPERTIES COMPILE_OPTIONS "/O1")
+    set_property(SOURCE ${_xr_force_os_sources} APPEND PROPERTY COMPILE_OPTIONS "/O1")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
          CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
          CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    set_source_files_properties(${_xr_force_os_sources} PROPERTIES COMPILE_OPTIONS "-Os")
+    set_property(SOURCE ${_xr_force_os_sources} APPEND PROPERTY COMPILE_OPTIONS "-Os")
   else()
     message(WARNING
             "LibXR file-level size-optimized sources are not configured for compiler: "

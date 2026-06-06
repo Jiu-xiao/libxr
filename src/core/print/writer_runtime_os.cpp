@@ -4,10 +4,7 @@ namespace LibXR::Print
 {
 Writer::CodeReader::CodeReader(const uint8_t* codes) : pos_(codes), base_(codes) {}
 
-FormatOp Writer::CodeReader::ReadOp()
-{
-  return static_cast<FormatOp>(*pos_++);
-}
+FormatOp Writer::CodeReader::ReadOp() { return static_cast<FormatOp>(*pos_++); }
 
 FormatType Writer::CodeReader::ReadFormatType()
 {
@@ -53,7 +50,7 @@ bool Writer::AppendBufferChar(char* buffer, size_t capacity, size_t& size, char 
 bool Writer::AppendBufferText(char* buffer, size_t capacity, size_t& size,
                               std::string_view text)
 {
-  if (text.size() > capacity - size)
+  if (size > capacity || text.size() > capacity - size)
   {
     return false;
   }
@@ -88,8 +85,7 @@ uint64_t Writer::RoundScaledF32(float value, uint32_t scale)
   uint32_t fraction_bits = bits & 0x7FFFFFU;
   uint32_t significand =
       (exponent_bits == 0) ? fraction_bits : ((1U << 23) | fraction_bits);
-  int exponent2 =
-      (exponent_bits == 0) ? -149 : static_cast<int>(exponent_bits) - 150;
+  int exponent2 = (exponent_bits == 0) ? -149 : static_cast<int>(exponent_bits) - 150;
   uint64_t numerator = static_cast<uint64_t>(significand) * scale;
 
   if (exponent2 >= 0)
@@ -147,23 +143,19 @@ size_t Writer::TrimGeneralText(char* text, size_t size)
 bool Writer::AppendExponentText(char* out, size_t& out_size, int exponent,
                                 bool upper_case)
 {
-  if (!AppendBufferChar(out, float_buffer_capacity, out_size,
-                        upper_case ? 'E' : 'e'))
+  if (!AppendBufferChar(out, float_buffer_capacity, out_size, upper_case ? 'E' : 'e'))
   {
     return false;
   }
-  if (!AppendBufferChar(out, float_buffer_capacity, out_size,
-                        exponent < 0 ? '-' : '+'))
+  if (!AppendBufferChar(out, float_buffer_capacity, out_size, exponent < 0 ? '-' : '+'))
   {
     return false;
   }
 
   char digits[UnsignedDigitCapacity<unsigned int, 10>()];
-  unsigned int magnitude =
-      static_cast<unsigned int>(exponent < 0 ? -exponent : exponent);
+  unsigned int magnitude = static_cast<unsigned int>(exponent < 0 ? -exponent : exponent);
   size_t digit_count = AppendUnsigned<10>(digits, magnitude);
-  if (digit_count < 2 &&
-      !AppendBufferChar(out, float_buffer_capacity, out_size, '0'))
+  if (digit_count < 2 && !AppendBufferChar(out, float_buffer_capacity, out_size, '0'))
   {
     return false;
   }
@@ -192,10 +184,9 @@ bool Writer::FormatF32FixedPrecText(float value, uint8_t precision, char* out,
     uint32_t scale = f32_decimal_scales_u32[precision];
     uint64_t scaled_total = RoundScaledF32(value, scale);
     uint64_t scaled_integer = static_cast<uint64_t>(integer_part) * scale;
-    uint32_t fractional_part =
-        (scaled_total >= scaled_integer)
-            ? static_cast<uint32_t>(scaled_total - scaled_integer)
-            : 0U;
+    uint32_t fractional_part = (scaled_total >= scaled_integer)
+                                   ? static_cast<uint32_t>(scaled_total - scaled_integer)
+                                   : 0U;
 
     if (fractional_part >= scale)
     {
