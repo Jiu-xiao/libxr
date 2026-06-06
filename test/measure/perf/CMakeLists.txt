@@ -8,5 +8,5 @@ target_link_libraries(bench_linux_shared_topic PUBLIC xr)
 target_include_directories(
   bench_linux_shared_topic
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Eigen
+  PUBLIC "${CMAKE_SOURCE_DIR}/lib/Eigen"
 )

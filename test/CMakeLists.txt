@@ -50,3 +50,6 @@ target_include_directories(
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
 )
+
+add_subdirectory(verify)
+add_subdirectory(measure)

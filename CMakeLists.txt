@@ -203,6 +203,4 @@ endif()
 
 if(LIBXR_TEST_BUILD)
   add_subdirectory(test)
-  add_subdirectory(verify)
-  add_subdirectory(measure)
 endif()

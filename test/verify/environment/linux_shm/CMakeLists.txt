@@ -8,7 +8,7 @@ target_link_libraries(test_linux_shm_topic PUBLIC xr)
 
 target_include_directories(
   test_linux_shm_topic
-  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../../test/harness"
+  PUBLIC "${CMAKE_SOURCE_DIR}/test/harness"
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/Eigen
+  PUBLIC "${CMAKE_SOURCE_DIR}/lib/Eigen"
 )
