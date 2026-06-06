@@ -120,7 +120,7 @@ class CAN
    */
   virtual ~CAN() = default;
 
-#pragma pack(push, 1)
+LIBXR_PACK_PUSH_1
   /**
    * @struct ClassicPack
    * @brief 经典 CAN 帧数据结构。Classic CAN frame structure.
@@ -132,7 +132,7 @@ class CAN
     uint8_t dlc;      ///< 有效数据长度（0~8）。Data length code (0–8).
     uint8_t data[8];  ///< 数据载荷。Data payload (up to 8 bytes).
   };
-#pragma pack(pop)
+LIBXR_PACK_POP()
 
   /// 错误 ID 前缀 Error ID prefix.
   static constexpr uint32_t CAN_ERROR_ID_PREFIX = 0xFFFF0000u;
@@ -256,7 +256,7 @@ class FDCAN : public CAN
    */
   virtual ~FDCAN() = default;
 
-#pragma pack(push, 1)
+LIBXR_PACK_PUSH_1
   /**
    * @struct FDPack
    * @brief CAN FD 帧数据结构。CAN FD frame structure.
@@ -268,7 +268,7 @@ class FDCAN : public CAN
     uint8_t len;       ///< 数据长度（0~64）。Data length (0–64 bytes).
     uint8_t data[64];  ///< 数据载荷。Data payload.
   };
-#pragma pack(pop)
+LIBXR_PACK_POP()
 
   using CAN::AddMessage;
   using CAN::FilterMode;

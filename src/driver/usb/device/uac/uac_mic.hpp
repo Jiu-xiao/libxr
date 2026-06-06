@@ -182,7 +182,7 @@ class UAC1MicrophoneQ : public DeviceClass
     ID_OT_USB = 3
   };
 
-#pragma pack(push, 1)
+LIBXR_PACK_PUSH_1
   /**
    * @brief AC 头描述符
    *        AC header descriptor
@@ -308,7 +308,7 @@ class UAC1MicrophoneQ : public DeviceClass
     EndpointDescriptorIso9 ep_in;  ///< 标准 IN 端点（9B）/ Std IN EP (9B)
     CSEndpointGeneral ep_cs;       ///< 类特定端点 / CS EP
   };
-#pragma pack(pop)
+LIBXR_PACK_POP()
 
   // ===== DeviceClass 接口实现 / DeviceClass implementation =====
   /**

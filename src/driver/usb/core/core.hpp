@@ -1,4 +1,5 @@
 #pragma once
+#include "libxr_def.hpp"
 #include <cstdint>
 
 namespace LibXR::USB
@@ -45,7 +46,7 @@ constexpr uint8_t REQ_DIRECTION_MASK = 0x80;  ///< 位7：方向 / Bit 7: Direct
 constexpr uint8_t REQ_TYPE_MASK = 0x60;       ///< 位6-5：类型 / Bits 6-5: Type
 constexpr uint8_t REQ_RECIPIENT_MASK = 0x1F;  ///< 位4-0：接收对象 / Bits 4-0: Recipient
 
-#pragma pack(push, 1)
+LIBXR_PACK_PUSH_1
 /**
  * @brief USB 标准请求 SETUP 包（固定8字节）
  *        Standard USB setup packet (8 bytes)
@@ -63,7 +64,7 @@ struct SetupPacket
   uint16_t wIndex;   ///< 对象索引，如接口号或端点号 / Index (e.g., interface or endpoint)
   uint16_t wLength;  ///< 数据阶段长度 / Number of bytes in data stage
 };
-#pragma pack(pop)
+LIBXR_PACK_POP()
 
 // 标准请求枚举
 enum class StandardRequest : uint8_t

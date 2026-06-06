@@ -109,7 +109,7 @@ class DatabaseRawSequential : public Database
     BACKUP = 1  ///< 备份块 (Backup block).
   };
 
-#pragma pack(push, 1)
+LIBXR_PACK_PUSH_1
   /**
    * @brief 键信息结构，存储键的元数据
    *        (Structure containing key metadata).
@@ -172,7 +172,7 @@ class DatabaseRawSequential : public Database
   };
 
   static_assert(sizeof(KeyInfo) == 4, "KeyInfo size must be 4 bytes");
-#pragma pack(pop)
+LIBXR_PACK_POP()
 
   /**
    * @brief Flash 存储的块信息结构

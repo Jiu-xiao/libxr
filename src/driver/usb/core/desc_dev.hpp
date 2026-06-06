@@ -83,7 +83,7 @@ class DeviceDescriptor
   static constexpr uint8_t DEVICE_DESC_LENGTH =
       18;  ///< 设备描述符长度（固定18字节）/ Device descriptor length (18 bytes)
 
-#pragma pack(push, 1)
+LIBXR_PACK_PUSH_1
   struct Data
   {
     uint8_t bLength;  ///< 描述符长度（固定18）/ Descriptor length (always 18)
@@ -102,7 +102,7 @@ class DeviceDescriptor
     uint8_t iSerialNumber;        ///< 序列号字符串索引 / Index of serial number string
     uint8_t bNumConfigurations;   ///< 支持的配置数 / Number of possible configurations
   };
-#pragma pack(pop)
+LIBXR_PACK_POP()
 
   static_assert(sizeof(Data) == 18, "DeviceDescriptor must be 18 bytes");
 
