@@ -17,6 +17,30 @@
 #define UNUSED(_x) ((void)(_x))
 #endif
 
+#if defined(_MSC_VER)
+#define LIBXR_FORCE_OPTIMIZE_O3
+#define LIBXR_FORCE_OPTIMIZE_OS
+#define LIBXR_NOINLINE __declspec(noinline)
+#define LIBXR_PACKED_BEGIN __pragma(pack(push, 1))
+#define LIBXR_PACKED_END __pragma(pack(pop))
+#define LIBXR_PACKED
+#elif defined(__clang__) || defined(__GNUC__)
+#define LIBXR_FORCE_OPTIMIZE_O3 __attribute__((optimize("O3")))
+#define LIBXR_FORCE_OPTIMIZE_OS __attribute__((optimize("Os")))
+#define LIBXR_NOINLINE __attribute__((noinline))
+#define LIBXR_PACKED_BEGIN _Pragma("pack(push, 1)")
+#define LIBXR_PACKED_END _Pragma("pack(pop)")
+#define LIBXR_PACKED __attribute__((packed))
+#else
+#warning "LibXR compiler compatibility macros fallback to no-op on unknown compiler"
+#define LIBXR_FORCE_OPTIMIZE_O3
+#define LIBXR_FORCE_OPTIMIZE_OS
+#define LIBXR_NOINLINE
+#define LIBXR_PACKED_BEGIN
+#define LIBXR_PACKED_END
+#define LIBXR_PACKED
+#endif
+
 namespace LibXR
 {
 /// \brief PI 常量 / PI constant

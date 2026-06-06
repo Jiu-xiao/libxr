@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "libxr_def.hpp"
+
 namespace LibXR
 {
 /**
@@ -64,7 +66,7 @@ class CRC8
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC8 值 / Computed CRC8 value
    */
-  static uint8_t Calculate(const void* raw, size_t len)
+  LIBXR_FORCE_OPTIMIZE_O3 static uint8_t Calculate(const void* raw, size_t len)
   {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
@@ -156,7 +158,7 @@ class CRC16
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC16 值 / Computed CRC16 value
    */
-  static uint16_t Calculate(const void* raw, size_t len)
+  LIBXR_FORCE_OPTIMIZE_O3 static uint16_t Calculate(const void* raw, size_t len)
   {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
@@ -251,7 +253,7 @@ class CRC32
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC32 值 / Computed CRC32 value
    */
-  static uint32_t Calculate(const void* raw, size_t len)
+  LIBXR_FORCE_OPTIMIZE_O3 static uint32_t Calculate(const void* raw, size_t len)
   {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)
@@ -347,7 +349,7 @@ class CRC64
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC64 值 / Computed CRC64 value
    */
-  static uint64_t Calculate(const void* raw, size_t len)
+  LIBXR_FORCE_OPTIMIZE_O3 static uint64_t Calculate(const void* raw, size_t len)
   {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
     if (!inited_)

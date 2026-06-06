@@ -27,7 +27,7 @@ static constexpr uint8_t WEBUSB_PLATFORM_CAPABILITY_UUID[16] = {
     0x8B, 0xFD, 0xA0, 0x76, 0x88, 0x15, 0xB6, 0x65,
 };
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
 
 /**
  * @brief WebUSB BOS 平台能力描述符 / WebUSB BOS platform capability descriptor
@@ -43,7 +43,7 @@ struct WebUsbPlatformCapability
   uint8_t bVendorCode = WEBUSB_VENDOR_CODE_DEFAULT;
   uint8_t iLandingPage = 0u;
 };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
 static_assert(sizeof(WebUsbPlatformCapability) == 24,
               "WebUSB platform capability size mismatch.");

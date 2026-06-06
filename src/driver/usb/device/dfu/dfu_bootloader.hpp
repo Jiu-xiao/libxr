@@ -16,7 +16,7 @@ class DfuBootloaderBackend
   using JumpCallback = void (*)(void*);
   static constexpr uint32_t SEAL_MAGIC = 0x4C414553u;  // "SEAL"
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief seal 区固定记录 / Fixed record stored in the seal region
    */
@@ -27,7 +27,7 @@ class DfuBootloaderBackend
     uint32_t crc32 = 0u;
     uint32_t crc32_inv = 0u;
   };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   // Backend 负责：
   // - 管理 download/upload/manifest 状态
@@ -754,7 +754,7 @@ class DFUClass : public DfuInterfaceClassBase
   static constexpr uint8_t ATTR_WILL_DETACH = 0x08u;
 
  public:
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief DFU Functional Descriptor（固件模式）
    *        DFU Functional Descriptor for firmware mode.
@@ -804,7 +804,7 @@ class DFUClass : public DfuInterfaceClassBase
         0};
     FunctionalDescriptor func_desc = {};
   };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   static_assert(sizeof(FunctionalDescriptor) == 9,
                 "DFU functional descriptor size mismatch.");
