@@ -1,3 +1,17 @@
+/**
+ * @file test_topic.cpp
+ * @brief Typed topic publish/subscribe dispatch tests.
+ *
+ * Test items:
+ * 1. Subscriber fan-out: verify async, queue and callback subscribers all observe the same publish on the same topic.
+ * 2. Byte-stable payload delivery: verify non-trivially-copyable but topic-legal payloads still reach typed callbacks correctly.
+ * 3. Callback-context publish and mutable payload semantics: verify callback-context publish preserves timestamps/ISR state and mutable callback subscribers can modify the caller-visible payload.
+ * 4. Queue backpressure: verify queued subscribers drop overflow publishes once the target queue is full.
+ *
+ * Test principle:
+ * 1. Publish through the real `Topic` API and observe each subscriber flavor independently, because the bus contract is defined by the aggregate fan-out behavior.
+ * 2. Check both timestamp metadata and payload value changes so the test covers semantic, not just byte-copy, correctness.
+ */
 #include <cstdint>
 
 #include "libxr.hpp"

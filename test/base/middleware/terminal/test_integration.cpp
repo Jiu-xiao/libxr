@@ -1,3 +1,16 @@
+/**
+ * @file test_integration.cpp
+ * @brief Integrated `Terminal` command-path test over a mixed RamFS tree.
+ *
+ * Test items:
+ * 1. Executable-path dispatch: verify relative and absolute executable paths both run the target command.
+ * 2. Non-executable and unknown command handling: verify ordinary files and unknown commands emit the expected error text.
+ * 3. Auto-complete and input sanitization: verify tab-complete lists matching entries and non-printable bytes are filtered from command parsing.
+ *
+ * Test principle:
+ * 1. Run a realistic RamFS tree through `Terminal::TaskFun()` so path resolution, input parsing and output reporting stay integrated.
+ * 2. Inspect the final terminal transcript rather than helper internals, because this test covers the end-to-end shell behavior contract.
+ */
 #include <cstring>
 #include <vector>
 

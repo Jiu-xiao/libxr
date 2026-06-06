@@ -1,3 +1,16 @@
+/**
+ * @file test_pid.cpp
+ * @brief PID step-response, anti-windup and state-accessor tests.
+ *
+ * Test items:
+ * 1. Nominal control response: verify basic step output, saturation clamp and external-derivative overload behavior.
+ * 2. Anti-windup semantics: verify saturated outputs reject windup but still allow integral unwind when the error changes sign.
+ * 3. State accessors and reset: verify `Last*()` accessors, disabled-integral semantics, invalid-input fallback and `Reset()` behavior.
+ *
+ * Test principle:
+ * 1. Use analytically tractable scenarios where the expected output can be derived by hand, because PID regressions often hide in sign and state-update details.
+ * 2. Check both output values and retained controller state, since caller-visible semantics include the diagnostic/state accessors.
+ */
 #include <cmath>
 #include <limits>
 

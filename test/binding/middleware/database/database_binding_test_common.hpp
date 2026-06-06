@@ -1,3 +1,15 @@
+/**
+ * @file database_binding_test_common.hpp
+ * @brief Shared flash-image helpers for database binding tests.
+ *
+ * Shared responsibilities:
+ * 1. Synthetic flash backends and fatal-exit helpers for failure-path tests.
+ * 2. Raw flash-image mutation helpers for backup/checksum/metadata corruption scenarios.
+ * 3. Reopen helpers that validate persisted data through the public database APIs.
+ *
+ * Design principle:
+ * 1. Keep destructive flash-manipulation helpers in one place so sequential/raw binding tests share the same crafted corruption model and do not diverge semantically.
+ */
 #pragma once
 
 #include <sys/types.h>

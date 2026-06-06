@@ -1,3 +1,15 @@
+/**
+ * @file test_time.cpp
+ * @brief `MicrosecondTimestamp` and `MillisecondTimestamp` arithmetic tests.
+ *
+ * Test items:
+ * 1. Straight-line subtraction: verify elapsed microsecond and millisecond durations and their unit-conversion helpers.
+ * 2. Single-wrap subtraction: verify configured wrap ranges are used when the new timestamp is numerically smaller than the old one.
+ *
+ * Test principle:
+ * 1. Check both raw duration values and converted unit helpers, because callers use both surfaces.
+ * 2. Override the wrap configuration in-test so the wraparound branch is exercised deterministically instead of depending on platform timebase limits.
+ */
 #include <cstdint>
 
 #include "libxr.hpp"

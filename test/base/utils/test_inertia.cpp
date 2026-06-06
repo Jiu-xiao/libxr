@@ -1,3 +1,15 @@
+/**
+ * @file test_inertia.cpp
+ * @brief Inertia construction, translation, rotation and center-of-mass composition tests.
+ *
+ * Test items:
+ * 1. Constructor forms: verify array, matrix, symmetric and explicit-value constructors produce equivalent inertia tensors.
+ * 2. Translation/rotation transforms: verify translated and rotated tensors match expected coefficients and quaternion/matrix rotation paths agree.
+ * 3. Composite center of mass: verify adding mass properties produces the expected combined mass and centroid.
+ *
+ * Test principle:
+ * 1. Compare multiple construction and rotation frontends against the same expected tensor so the test documents semantic equivalence between APIs.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

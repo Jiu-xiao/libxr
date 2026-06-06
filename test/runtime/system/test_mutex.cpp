@@ -1,3 +1,15 @@
+/**
+ * @file test_mutex.cpp
+ * @brief Runtime mutex lock, try-lock and waiter handoff tests.
+ *
+ * Test items:
+ * 1. Immediate lock semantics: verify `Lock()` succeeds and `TryLock()` reports `BUSY` while held.
+ * 2. Waiter handoff: verify a blocked runtime thread acquires the mutex only after the owner unlocks it.
+ * 3. Post-handoff reuse: verify `TryLock()` succeeds again after the waiter completes.
+ *
+ * Test principle:
+ * 1. Use a real waiter thread and a completion semaphore so ownership transfer is checked on the runtime synchronization path itself.
+ */
 #include <atomic>
 
 #if defined(LIBXR_SYSTEM_POSIX_HOST)

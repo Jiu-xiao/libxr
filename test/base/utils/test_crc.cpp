@@ -1,3 +1,14 @@
+/**
+ * @file test_crc.cpp
+ * @brief CRC8 / CRC16 / CRC32 calculation and verification tests.
+ *
+ * Test items:
+ * 1. Packed structure checksum generation: verify each CRC helper computes the trailer field over the intended prefix bytes.
+ * 2. Checksum verification: verify the generated trailer makes the corresponding `Verify()` helper succeed.
+ *
+ * Test principle:
+ * 1. Use packed payloads with trailing checksum fields, because this matches the dominant in-repo usage pattern for CRC helpers.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

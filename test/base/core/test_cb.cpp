@@ -1,3 +1,17 @@
+/**
+ * @file test_cb.cpp
+ * @brief `LibXR::Callback` binding and reentry behavior tests.
+ *
+ * Test items:
+ * 1. Empty callback: verify the default-constructed callback reports empty and accepts no-op dispatch.
+ * 2. Direct callback recursion: verify unguarded callbacks reenter immediately and preserve the runtime ISR flag.
+ * 3. Guarded callback flattening: verify `CreateGuarded()` serializes self-recursive dispatch into one-depth replay.
+ * 4. Lambda binding: verify callable-object binding still forwards the bound context and runtime ISR flag correctly.
+ *
+ * Test principle:
+ * 1. Drive the public callback wrapper directly instead of going through another subsystem, so the test isolates callback semantics themselves.
+ * 2. Record both payload order and call depth, because this module's correctness depends on reentry behavior as much as value forwarding.
+ */
 #include <array>
 
 #include "libxr.hpp"

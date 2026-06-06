@@ -1,3 +1,14 @@
+/**
+ * @file test_timebase.cpp
+ * @brief Runtime timebase progression and wrap-range configuration tests.
+ *
+ * Test items:
+ * 1. Live progression: verify runtime microsecond and millisecond clocks advance by roughly the expected amount across a sleep interval.
+ * 2. Configured wrap semantics: verify custom wrap ranges are applied to timestamp subtraction on both millisecond and microsecond scales.
+ *
+ * Test principle:
+ * 1. Pair live time progression with explicit wrap-range overrides so the test covers both backend clock sourcing and static arithmetic policy.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

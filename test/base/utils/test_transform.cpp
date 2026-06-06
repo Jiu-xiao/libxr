@@ -1,3 +1,16 @@
+/**
+ * @file test_transform.cpp
+ * @brief Position, quaternion, rotation-matrix and Euler-order conversion tests.
+ *
+ * Test items:
+ * 1. Basic constructors and algebra: verify quaternion/rotation-matrix construction from arrays and basic position/quaternion arithmetic.
+ * 2. Cross-frontend equivalence: verify Eigen quaternion input, quaternion division and rotation-matrix conversion agree with LibXR representations.
+ * 3. Euler-order coverage: verify multiple Euler conversion orders round-trip between Euler angle, quaternion and rotation matrix consistently.
+ *
+ * Test principle:
+ * 1. Compare multiple mathematically equivalent representations of the same pose, because this module's contract is representation consistency.
+ * 2. Cover several Euler orders explicitly so order-specific regressions do not hide behind one default convention.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

@@ -1,3 +1,14 @@
+/**
+ * @file test_cycle_value.cpp
+ * @brief Cyclic-angle normalization arithmetic tests.
+ *
+ * Test items:
+ * 1. Constructor normalization: verify values outside one full period are wrapped into the canonical range.
+ * 2. Arithmetic updates: verify `+=`, `-=`, unary negation and subtraction-based reconstruction preserve cyclic semantics.
+ *
+ * Test principle:
+ * 1. Use multiples of `PI` so the expected wrapped values stay easy to reason about and compare numerically.
+ */
 #include "cycle_value.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"

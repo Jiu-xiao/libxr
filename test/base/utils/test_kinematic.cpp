@@ -1,3 +1,15 @@
+/**
+ * @file test_kinematic.cpp
+ * @brief Forward/backward kinematic chain solve test.
+ *
+ * Test items:
+ * 1. Forward propagation: build a start-point, intermediate object and end-point chain with two joints.
+ * 2. Backward solve: verify the endpoint target position/quaternion can be reached with small residual error after backward computation.
+ *
+ * Test principle:
+ * 1. Use a concrete two-joint chain instead of isolated algebra checks so the test covers object/joint composition on the real API surface.
+ * 2. Assert residual error rather than exact internal state, because the public contract is geometric convergence at the endpoint.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

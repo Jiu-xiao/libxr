@@ -1,3 +1,16 @@
+/**
+ * @file bench_linux_shared_topic.cpp
+ * @brief Performance benchmark for `LinuxSharedTopic` latency and overload behavior.
+ *
+ * Benchmark items:
+ * 1. Throughput/latency sweep: run payload-size-dependent benchmark cases and summarize latency percentiles.
+ * 2. Overload scenarios: measure latency, drops and sequence gaps under subscriber delay and mode variations.
+ * 3. Mode comparison: compare shared-subscriber modes under the same traffic pattern.
+ *
+ * Benchmark principle:
+ * 1. Measure through the real cross-process shared-topic path so the reported numbers reflect the actual IPC stack instead of synthetic microbench primitives.
+ * 2. Collect percentile and error counters together, because performance regressions here often show up as both latency drift and delivery loss.
+ */
 #include <algorithm>
 #include <array>
 #include <cerrno>

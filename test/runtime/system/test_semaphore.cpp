@@ -1,3 +1,14 @@
+/**
+ * @file test_semaphore.cpp
+ * @brief Runtime semaphore post/wait tests.
+ *
+ * Test items:
+ * 1. Immediate timeout and queued posts: verify zero-time waits time out on empty state and consume pre-posted counts correctly.
+ * 2. Delayed post wakeup: verify a runtime thread can wake a blocking wait by posting later.
+ *
+ * Test principle:
+ * 1. Check both preloaded counts and delayed runtime wakeup, because the semaphore contract spans cached tokens and blocking synchronization.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

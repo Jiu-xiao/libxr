@@ -1,3 +1,16 @@
+/**
+ * @file test_database.cpp
+ * @brief Base-plane `Database::Key` contract tests.
+ *
+ * Test items:
+ * 1. Save path: verify `Save()` writes the key's current in-memory value, not a stale constructor value.
+ * 2. Set path: verify `Set()` updates the local cached value before delegating persistence.
+ * 3. Get/default path: verify constructor fallback to explicit default or zero when `Get()` fails.
+ *
+ * Test principle:
+ * 1. Use a tiny in-memory database stub so the test isolates key-object semantics from flash layout or backend persistence behavior.
+ * 2. Observe both backend call counters and local cached values, because the key contract covers caller-visible state as well as backend dispatch.
+ */
 #include <cstdint>
 
 #include "database.hpp"

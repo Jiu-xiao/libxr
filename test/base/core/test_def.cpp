@@ -1,3 +1,16 @@
+/**
+ * @file test_def.cpp
+ * @brief Foundational helpers in `libxr_def.hpp` tests.
+ *
+ * Test items:
+ * 1. Numeric constants and macros: verify `PI`, `TWO_PI`, gravity and `DEF2STR` behave as declared.
+ * 2. Layout helpers: verify `OffsetOf()` and `ContainerOf()` recover the owning object correctly for mutable and const member pointers.
+ * 3. Size-limit predicate semantics: verify `SizeLimitCheck()` matches the documented `EQUAL / LESS / MORE / NONE` rules.
+ *
+ * Test principle:
+ * 1. Use concrete layout objects and stringized macro tokens, because these helpers are small but widely reused contract surfaces.
+ * 2. Check both positive and negative predicate cases so the test documents the exact boundary semantics rather than a single happy path.
+ */
 #include <cstddef>
 #include <cstdint>
 #include <string_view>

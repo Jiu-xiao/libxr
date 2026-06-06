@@ -1,3 +1,14 @@
+/**
+ * @file test_stack.cpp
+ * @brief `Stack` push/pop and indexed edit tests.
+ *
+ * Test items:
+ * 1. Capacity behavior: verify push fills the stack, the extra push reports `FULL`, and pop returns LIFO order.
+ * 2. In-place editing helpers: verify indexed `Insert()` and `Delete()` shift the expected elements and update size.
+ *
+ * Test principle:
+ * 1. Check both top-of-stack order and indexed edit side effects, because this container combines stack semantics with random-position maintenance helpers.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

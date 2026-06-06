@@ -1,3 +1,16 @@
+/**
+ * @file test_linux_shm_topic.cpp
+ * @brief Cross-process environment verification for `LinuxSharedTopic`.
+ *
+ * Test items:
+ * 1. Local attach/backpressure semantics: verify slot exhaustion, subscriber pending counts and payload/timestamp delivery on one shared-memory topic.
+ * 2. Stale publisher takeover: verify a fresh creator can reopen and reuse the segment after an older publisher process exits.
+ * 3. Queue saturation behavior: verify publish failure/drop accounting when the subscriber queue is full.
+ *
+ * Test principle:
+ * 1. Use real forked processes and shared-memory segments, because this is an environment verification target rather than a pure unit test.
+ * 2. Check both data integrity and resource-accounting counters so IPC correctness includes payload and queue semantics together.
+ */
 #include <array>
 #include <cstdio>
 #include <cstdlib>

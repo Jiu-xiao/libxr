@@ -1,3 +1,14 @@
+/**
+ * @file test_async.cpp
+ * @brief Runtime `ASync` worker lifecycle tests.
+ *
+ * Test items:
+ * 1. Job assignment lifecycle: verify the worker transitions through `READY -> BUSY -> DONE -> READY` on repeated assignments.
+ * 2. Job execution side effect: verify the bound job actually runs and mutates the target state once per assignment.
+ *
+ * Test principle:
+ * 1. Observe the public status machine around a real worker thread, because runtime correctness here is primarily scheduling/lifecycle semantics.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

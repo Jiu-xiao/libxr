@@ -1,3 +1,17 @@
+/**
+ * @file test_event.cpp
+ * @brief `Event` registration, binding and callback-context propagation tests.
+ *
+ * Test items:
+ * 1. Direct activation: verify normal `Active()` dispatch reaches the registered callback in non-ISR context.
+ * 2. Callback-safe activation: verify `ActiveFromCallback()` preserves the explicit or legacy-default ISR flag.
+ * 3. Bound-event forwarding: verify event binding preserves the source callback context when one event triggers another.
+ * 4. High-value event IDs: verify large event IDs still compare and dispatch correctly.
+ *
+ * Test principle:
+ * 1. Check the callback's observed `in_isr` flag directly, because context propagation is the high-risk semantic in this subsystem.
+ * 2. Exercise both direct lookup and bound forwarding paths so the event tree and callback chain are both covered.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

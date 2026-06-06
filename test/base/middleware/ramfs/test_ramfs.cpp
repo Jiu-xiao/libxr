@@ -1,3 +1,16 @@
+/**
+ * @file test_ramfs.cpp
+ * @brief `RamFS` node creation, hierarchy and typed-file access tests.
+ *
+ * Test items:
+ * 1. Executable file behavior: verify executable files run, mutate bound state and stay distinguishable from ordinary files.
+ * 2. Read/write and read-only data views: verify typed access, const access and raw view sizing for writable and read-only files.
+ * 3. Hierarchy lookup: verify recursive file/dir/custom lookup, `.` / `..` directory traversal and direct-child enumeration counts.
+ *
+ * Test principle:
+ * 1. Construct a real mixed node tree containing file, dir, exec and custom nodes so lookup and traversal execute on the same structure users build at runtime.
+ * 2. Observe both typed data access and structural queries, because RamFS correctness spans storage semantics and namespace semantics together.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

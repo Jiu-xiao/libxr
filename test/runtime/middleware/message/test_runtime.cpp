@@ -1,3 +1,15 @@
+/**
+ * @file test_runtime.cpp
+ * @brief Runtime-plane subscriber waiting tests for `Topic`.
+ *
+ * Test items:
+ * 1. Async subscriber wait semantics: verify `StartWaiting()` only arms fresh notifications and preserves timestamp/data for the next publish.
+ * 2. Sync subscriber wait semantics: verify blocking waits, busy reentry rejection, timeout behavior and callback-context publish wakeups.
+ *
+ * Test principle:
+ * 1. Use real runtime threads for the blocking wait path, because these semantics do not exist on the base plane alone.
+ * 2. Check both wait return codes and received payload/timestamp values so synchronization and data delivery are validated together.
+ */
 #include <thread>
 
 #include "libxr.hpp"

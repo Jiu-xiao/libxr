@@ -1,3 +1,15 @@
+/**
+ * @file test_color.cpp
+ * @brief ANSI color/style/control lookup-table tests for `libxr_color.hpp`.
+ *
+ * Test items:
+ * 1. Enum/table cardinality: verify every exported enum `COUNT` matches its corresponding string table length.
+ * 2. Representative escape values: verify key style, terminal-control, foreground, background and preset entries map to the expected ANSI sequences.
+ *
+ * Test principle:
+ * 1. Check the compile-time table sizes first, because a silent enum/table drift would invalidate every runtime user of these lookup tables.
+ * 2. Check representative strings at runtime to confirm the published textual contract, not just the numeric enum layout.
+ */
 #include <cstddef>
 #include <iterator>
 #include <string_view>

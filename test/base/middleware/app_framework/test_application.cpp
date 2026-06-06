@@ -1,3 +1,15 @@
+/**
+ * @file test_application.cpp
+ * @brief `ApplicationManager` registration and dispatch tests.
+ *
+ * Test items:
+ * 1. Registration accounting: verify manager size grows with each registered application.
+ * 2. Monitor dispatch coverage: verify `MonitorAll()` reaches every registered application and can be called repeatedly.
+ *
+ * Test principle:
+ * 1. Record a seen-bitmask and hit count instead of asserting callback order, because the source contract explicitly does not guarantee traversal order.
+ * 2. Call `MonitorAll()` more than once so the test documents steady-state repeatability rather than only first-use behavior.
+ */
 #include "libxr.hpp"
 #include "test.hpp"
 

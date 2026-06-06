@@ -1,3 +1,15 @@
+/**
+ * @file test_flag.cpp
+ * @brief Plain/atomic flag and scoped-restore tests.
+ *
+ * Test items:
+ * 1. Plain flag state transitions: verify set/clear/test-and-set/test-and-clear/exchange semantics.
+ * 2. Atomic flag state transitions: verify the atomic variant exposes the same visible contract.
+ * 3. Scoped restore: verify nested scoped guards restore the previous flag value on scope exit.
+ *
+ * Test principle:
+ * 1. Check the returned previous-state values as well as the final flag state, because the API contract is about both.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

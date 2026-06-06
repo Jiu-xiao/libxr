@@ -1,3 +1,14 @@
+/**
+ * @file test_print_binding.cpp
+ * @brief Binding-plane STDIO/print wrapper tests.
+ *
+ * Test items:
+ * 1. STDIO print wrappers: verify public `Print`/`Printf` wrappers emit the expected bytes through the bound write port.
+ * 2. Truncation behavior: verify output larger than the sink capacity is truncated according to the binding-side stream contract.
+ *
+ * Test principle:
+ * 1. Bind print output to the real STDIO stream path instead of bypassing it, because this plane exists specifically to verify host/runtime binding behavior.
+ */
 #include <array>
 #include <cstddef>
 #include <cstdint>

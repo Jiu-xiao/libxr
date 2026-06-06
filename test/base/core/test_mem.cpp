@@ -1,3 +1,16 @@
+/**
+ * @file test_mem.cpp
+ * @brief `LibXR::Memory` fast set/copy/compare tests.
+ *
+ * Test items:
+ * 1. `FastSet`: verify full-buffer fill and zero-length no-op behavior.
+ * 2. `FastCopy`: verify basic copy, self-copy, unaligned copy and a width sweep over small copy lengths.
+ * 3. `FastCmp`: verify equality, first/middle/last-byte differences and sign alignment with `std::memcmp`, including unaligned spans.
+ *
+ * Test principle:
+ * 1. Compare against standard-library semantics at the byte level, because these routines are performance-focused replacements for well-known contracts.
+ * 2. Stress unaligned addresses and zero-length cases explicitly, since those are the edge conditions most likely to diverge from the reference behavior.
+ */
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

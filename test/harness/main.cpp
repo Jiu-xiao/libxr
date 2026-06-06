@@ -1,3 +1,14 @@
+/**
+ * @file main.cpp
+ * @brief Main runner for base/runtime test binaries.
+ *
+ * Responsibilities:
+ * 1. Register the fatal test callback used to convert assertion failures into process failure.
+ * 2. Execute grouped test entries and isolate selected cases with `fork()` where state sharing would pollute subsequent tests.
+ *
+ * Organization principle:
+ * 1. Keep execution grouping explicit in one place so the test tree layout and the runnable matrix stay synchronized.
+ */
 #include "test_base.hpp"
 
 #include <cmath>

@@ -1,3 +1,16 @@
+/**
+ * @file test_lockfree_queue.cpp
+ * @brief Focused `LockFreeQueue` writer/reader helper tests.
+ *
+ * Test items:
+ * 1. Capacity/accounting: verify empty size, peek/pop on empty queue and full detection after writer-based fill.
+ * 2. Reader/writer callback helpers: verify `PushWithWriter()` and `PopWithReader()` handle wraparound, callback failure and non-committed reads correctly.
+ * 3. Reset semantics: verify `Reset()` drops all queued items and restores empty capacity.
+ *
+ * Test principle:
+ * 1. Use the public callback-based batch helpers, because they are the queue surface most likely to hide partial-commit bugs.
+ * 2. Check both queue contents and queue size after failure branches to confirm that unsuccessful callbacks do not advance head/tail.
+ */
 #include <cstddef>
 #include <vector>
 

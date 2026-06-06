@@ -1,3 +1,16 @@
+/**
+ * @file test_queue.cpp
+ * @brief Queue-family tests for lock-free, blocking and batch queue operations.
+ *
+ * Test items:
+ * 1. `LockFreeQueue` threaded push/pop: verify producer/consumer transfer order and empty detection.
+ * 2. `LockQueue` blocking waits: verify timed pop waits for producer posts and reports timeout when no data arrives.
+ * 3. Plain `Queue` batch helpers: verify `PushBatch()`, `PopBatch()` and `PeekBatch()` preserve wraparound ordering.
+ *
+ * Test principle:
+ * 1. Exercise each queue family through the API style callers actually use, because these types differ mainly in synchronization semantics.
+ * 2. Validate ordering after wraparound, since queue correctness is not just capacity but FIFO preservation under rollover.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

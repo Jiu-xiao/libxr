@@ -1,3 +1,15 @@
+/**
+ * @file test_lockfree_list.cpp
+ * @brief Focused `LockFreeList` traversal and early-stop tests.
+ *
+ * Test items:
+ * 1. Insertion order observation: verify the lock-free list exposes the expected head-first traversal order after repeated `Add()` calls.
+ * 2. Early termination: verify `Foreach()` stops and returns the callback's first non-`OK` result.
+ *
+ * Test principle:
+ * 1. Observe only the public traversal API, because the lock-free list contract is about visible iteration behavior rather than internal link layout.
+ * 2. Use a non-`OK` callback return to drive the cancellation branch explicitly.
+ */
 #include <cstdint>
 
 #include "libxr.hpp"

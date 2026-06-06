@@ -1,3 +1,16 @@
+/**
+ * @file test_encoder.cpp
+ * @brief `FloatEncoder` quantization, clamp and robustness tests.
+ *
+ * Test items:
+ * 1. Nominal encode/decode accuracy: verify representative gyroscope, accelerometer and Euler-angle ranges decode within the expected tolerance.
+ * 2. Clamp and boundary behavior: verify out-of-range inputs clamp to min/max and exact boundary values round-trip correctly.
+ * 3. Special cases: verify center-point encoding, minimum bit width and non-finite inputs do not break the encoder contract.
+ *
+ * Test principle:
+ * 1. Check decoded numeric error against scenario-specific tolerances, because this utility exists to trade bits for bounded reconstruction error.
+ * 2. Exercise explicit clamp and special-value paths so robustness is documented alongside nominal accuracy.
+ */
 #include "float_encoder.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

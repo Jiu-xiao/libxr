@@ -1,3 +1,11 @@
+/**
+ * @file test_base.hpp
+ * @brief Base/runtime test entrypoint declarations.
+ *
+ * Purpose:
+ * 1. Collect the callable entry symbols used by the main test runner.
+ * 2. Keep the execution matrix explicit at the declaration boundary so moved files do not silently disappear from the runner.
+ */
 void test_async();
 void test_assert();
 void test_def();

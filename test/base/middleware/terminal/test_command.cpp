@@ -1,3 +1,15 @@
+/**
+ * @file test_command.cpp
+ * @brief `Terminal` built-in command tests.
+ *
+ * Test items:
+ * 1. `cd` built-ins: verify relative path, `.`, `..`, root-path and invalid-path transitions update `current_dir_` and prompt output correctly.
+ * 2. `ls` built-in: verify node-type markers for directory, executable file, ordinary file and custom node, and verify listing scope follows the current directory.
+ *
+ * Test principle:
+ * 1. Feed commands through a `Pipe` and drive `Terminal::TaskFun()` so parsing, execution and prompt refresh all happen on the production path.
+ * 2. Check both internal directory state and rendered output, because command correctness here is both semantic state change and user-visible terminal behavior.
+ */
 #include <cstring>
 #include <string>
 

@@ -1,3 +1,16 @@
+/**
+ * @file test_raw.cpp
+ * @brief Binding-plane tests for `DatabaseRaw`.
+ *
+ * Test items:
+ * 1. Raw database smoke traffic: verify repeated write/load cycles preserve multiple keys through the file-backed flash binding.
+ * 2. Failure semantics: verify raw flash read/write/erase failures and key-add failures escalate through the expected fatal path.
+ * 3. Recovery semantics: verify exact-size loads, partial backup recovery and several corrupted-metadata scenarios reopen to the documented repaired state.
+ *
+ * Test principle:
+ * 1. Use the Linux binary-file flash binding and direct on-disk corruption helpers, because this suite is about persistence semantics under a real host binding.
+ * 2. Reopen databases after each crafted corruption so the test checks externally visible recovery behavior rather than internal transient state.
+ */
 #include "database_binding_test_common.hpp"
 
 namespace

@@ -1,3 +1,16 @@
+/**
+ * @file test_packet.cpp
+ * @brief Packed topic packet and server parsing tests.
+ *
+ * Test items:
+ * 1. Header encoding and callback parse: verify packet prefix/version/timestamp encoding and callback-context propagation through `Server` parsing.
+ * 2. Validation failures: verify unknown topic/version, truncated payload, legacy prefix and CRC corruption are handled on the intended branches.
+ * 3. Alignment and short-length compatibility: verify over-aligned payload parsing and shorter packet payload lengths still dispatch correctly under the supported contract.
+ *
+ * Test principle:
+ * 1. Build packets through the real `Topic::PackData()` path, then mutate the serialized bytes to drive specific parser branches deliberately.
+ * 2. Check both decoded payloads and metadata fields, because this subsystem's contract is part data transport and part wire-format compatibility.
+ */
 #include <cstdint>
 
 #include "libxr.hpp"

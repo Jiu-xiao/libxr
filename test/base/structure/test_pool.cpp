@@ -1,3 +1,16 @@
+/**
+ * @file test_pool.cpp
+ * @brief `LockFreePool` single-thread and multi-thread integrity tests.
+ *
+ * Test items:
+ * 1. Basic slot lifecycle: verify put/get/full/empty behavior and slot reuse in a small pool.
+ * 2. Concurrent integrity: verify multi-writer and multi-reader traffic preserves uniqueness, counts and aggregate sums.
+ * 3. Reuse stress: verify repeated fill-drain cycles and tiny-pool churn do not leak stale state.
+ *
+ * Test principle:
+ * 1. Combine deterministic single-thread checks with contention-heavy runtime traffic, because this container's core promise is concurrent correctness.
+ * 2. Track uniqueness and aggregate sums simultaneously so the test catches both duplication and loss.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

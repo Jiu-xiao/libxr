@@ -1,3 +1,14 @@
+/**
+ * @file test_timer.cpp
+ * @brief Runtime periodic timer start/stop behavior test.
+ *
+ * Test items:
+ * 1. Timer periodic execution: verify a started timer repeatedly invokes its callback.
+ * 2. Stop/restart behavior: verify stopping and restarting the same timer handle still yields the expected periodic count.
+ *
+ * Test principle:
+ * 1. Use the real timer thread and repeated restart attempts so the test checks runtime scheduling rather than a simulated callback loop.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

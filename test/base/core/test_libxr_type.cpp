@@ -1,3 +1,15 @@
+/**
+ * @file test_libxr_type.cpp
+ * @brief Raw-data view construction tests for `libxr_type.hpp`.
+ *
+ * Test items:
+ * 1. Mutable array views: verify `RawData` captures the original address and byte count for writable bounded arrays.
+ * 2. Const array and string views: verify `ConstRawData` preserves bounded-array length, embedded-NUL payloads and explicit `std::string_view` sizes.
+ *
+ * Test principle:
+ * 1. Use bounded arrays and embedded-NUL payloads, because this API must distinguish true byte spans from ordinary C-string termination.
+ * 2. Check both address identity and size, since downstream code relies on the pair rather than on textual interpretation.
+ */
 #include <string_view>
 
 #include "libxr_def.hpp"

@@ -1,3 +1,16 @@
+/**
+ * @file test_sequential.cpp
+ * @brief Binding-plane tests for `DatabaseRawSequential`.
+ *
+ * Test items:
+ * 1. Sequential smoke traffic: verify repeated multi-key save/load cycles preserve data through the sequential file-backed binding.
+ * 2. Save-current-value behavior: verify `Save()` persists the key object's current value.
+ * 3. Failure semantics: verify sequential read/write/erase backend failures take the expected fatal path.
+ *
+ * Test principle:
+ * 1. Stress the real sequential database over the Linux flash binding so the test covers binding-plane persistence, not a mock backend.
+ * 2. Combine long-running smoke traffic with fatal-path probes so both steady-state and hard-failure contracts are documented.
+ */
 #include "database_binding_test_common.hpp"
 
 namespace

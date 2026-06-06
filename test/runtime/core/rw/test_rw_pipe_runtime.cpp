@@ -1,3 +1,15 @@
+/**
+ * @file test_rw_pipe_runtime.cpp
+ * @brief Runtime-plane `rw` / `pipe` blocking and timeout tests.
+ *
+ * Test items:
+ * 1. RW block/stream runtime semantics: verify pending-result propagation, timeout detach, stale waiter reuse and zero-length completion on the runtime plane.
+ * 2. Pipe blocking semantics: verify stream block immediate path and block-reuse stress through the runtime-backed pipe path.
+ *
+ * Test principle:
+ * 1. Keep only the timing-sensitive/blocking scenarios here, because they depend on the runtime system implementation rather than on the base queue logic alone.
+ * 2. Reuse the same harness patterns as the base test but execute them on the runtime plane so backend-sensitive behavior is isolated clearly.
+ */
 #include <atomic>
 #include <cstring>
 #include <vector>

@@ -1,3 +1,16 @@
+/**
+ * @file test_string.cpp
+ * @brief Runtime string-view construction and reformatting tests.
+ *
+ * Test items:
+ * 1. Text construction: verify plain text, bounded arrays, embedded-NUL spans and suffix concatenation keep the expected retained view.
+ * 2. Error handling: verify null-pointer inputs report `PTR_NULL` and collapse to empty runtime strings safely.
+ * 3. Reformat/reprintf: verify compiled `format` and `printf` refresh the same storage and produce the expected textual output.
+ *
+ * Test principle:
+ * 1. Observe status, `View()` and `CStr()` together, because this type couples content and lifetime-stable storage.
+ * 2. Use bounded arrays and embedded-NUL inputs deliberately, since those are the cases where string/text abstractions usually drift from byte-span semantics.
+ */
 #include <cstdint>
 #include <limits>
 #include <string>

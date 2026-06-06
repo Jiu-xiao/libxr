@@ -1,3 +1,17 @@
+/**
+ * @file test_display.cpp
+ * @brief `Terminal` display and history-rendering helper tests.
+ *
+ * Test items:
+ * 1. Line-feed modes: verify `CRLF`, `LF` and `CR` render the correct line ending.
+ * 2. Prompt and clear sequences: verify header rendering, clear-line and clear-screen escape output.
+ * 3. History display/restore: verify history recall renders the selected line and `CopyHistoryToInputLine()` restores the buffer state.
+ * 4. Mid-line redraw: verify insertion and deletion with a non-zero cursor offset emit the expected redraw suffix.
+ *
+ * Test principle:
+ * 1. Flush the real terminal write stream into a pipe and inspect the emitted bytes, because this layer's contract is defined by exact rendered escape sequences.
+ * 2. Pair rendered output checks with internal buffer/cursor checks so the test covers both visible and retained editor state.
+ */
 #include <cstring>
 #include <string>
 

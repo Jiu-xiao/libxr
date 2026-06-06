@@ -1,3 +1,16 @@
+/**
+ * @file test_hardware.cpp
+ * @brief `HardwareContainer` alias registration and typed lookup tests.
+ *
+ * Test items:
+ * 1. Direct alias lookup: verify each registered device is found by its primary alias.
+ * 2. Shared alias filtering: verify the same alias can resolve different objects only when the requested type matches.
+ * 3. Fallback-alias search and post-construction registration: verify multi-alias search and later `Register()` calls both become visible to typed lookup.
+ *
+ * Test principle:
+ * 1. Cross-check the same alias under multiple requested types, because the core contract is "name + exact type" rather than name alone.
+ * 2. Exercise both constructor-time and runtime registration so the test covers both alias population paths.
+ */
 #include "libxr.hpp"
 #include "test.hpp"
 

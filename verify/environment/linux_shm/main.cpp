@@ -1,3 +1,11 @@
+/**
+ * @file main.cpp
+ * @brief Runner for Linux shared-memory environment verification.
+ *
+ * Responsibilities:
+ * 1. Install the fatal assertion callback for the verification binary.
+ * 2. Execute the `LinuxSharedTopic` environment verification entrypoint.
+ */
 #include "test_verify.hpp"
 
 #include <cstdlib>

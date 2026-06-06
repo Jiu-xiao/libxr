@@ -1,3 +1,11 @@
+/**
+ * @file binding_main.cpp
+ * @brief Main runner for binding-plane tests.
+ *
+ * Responsibilities:
+ * 1. Install the fatal assertion callback for binding tests.
+ * 2. Run the binding-specific test entrypoints in a deterministic order.
+ */
 #include "test_binding.hpp"
 
 #include <cstdlib>

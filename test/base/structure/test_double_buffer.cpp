@@ -1,3 +1,16 @@
+/**
+ * @file test_double_buffer.cpp
+ * @brief `DoubleBuffer` pending/active half-switch tests.
+ *
+ * Test items:
+ * 1. Initial split and pending state: verify the raw buffer is divided evenly and starts without pending data.
+ * 2. Pending fill semantics: verify `FillPending()` stores bytes and rejects a second pending fill before switch.
+ * 3. Switch semantics and bounds: verify active-half toggling and oversized pending writes are rejected.
+ *
+ * Test principle:
+ * 1. Use one concrete backing buffer and inspect both addresses and lengths, because this utility is a pure storage-layout primitive.
+ * 2. Check both accepted and rejected writes so the test documents the state machine, not just the happy path.
+ */
 #include "double_buffer.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"

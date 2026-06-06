@@ -1,3 +1,17 @@
+/**
+ * @file test_rw_pipe.cpp
+ * @brief Base-plane tests for `ReadPort`, `WritePort` and `Pipe` state machines.
+ *
+ * Test items:
+ * 1. Read-side queue semantics: queued-data clearing, pending-mode matrix, zero-length completion and edge-case dequeue behavior.
+ * 2. Block/stream semantics: immediate completion, pending-result propagation, timeout detach and stale waiter reuse.
+ * 3. Fail-and-clear semantics: async pending completion, blocked waiter failure, idle queue cleanup and active-stream preservation.
+ * 4. Pipe integration: basic read/write, chunked transport, stream commit flow, mode matrix and reuse stress.
+ *
+ * Test principle:
+ * 1. Drive the real queue-backed port state machines rather than mocks so timeout, detach and cleanup paths execute on the production code path.
+ * 2. Check both returned status codes and internal queue/status transitions, because correctness here depends on lifecycle semantics as much as on copied payload bytes.
+ */
 #include <atomic>
 #include <cstring>
 #include <vector>

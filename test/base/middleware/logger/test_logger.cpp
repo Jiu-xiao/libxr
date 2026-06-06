@@ -1,3 +1,15 @@
+/**
+ * @file test_logger.cpp
+ * @brief Logger frontend resolution and terminal-output rendering tests.
+ *
+ * Test items:
+ * 1. Frontend selection: verify brace-style and printf-style literals resolve to the expected logger frontend at compile time.
+ * 2. Runtime publish path: verify published logs carry level color, file/line prefix, formatted message text and terminal reset suffix.
+ *
+ * Test principle:
+ * 1. Bind `STDIO` to a `Pipe` so the test reads the logger's real output bytes instead of inspecting intermediate buffers.
+ * 2. Validate both compile-time frontend choice and runtime rendered text, because logger correctness spans both layers.
+ */
 #include <cstddef>
 #include <string>
 #include <string_view>

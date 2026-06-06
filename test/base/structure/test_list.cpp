@@ -1,3 +1,15 @@
+/**
+ * @file test_list.cpp
+ * @brief Ordered list and lock-free list traversal tests.
+ *
+ * Test items:
+ * 1. Ordinary `List`: verify add, foreach, delete and not-found delete behavior.
+ * 2. `LockFreeList` basic traversal: verify append count and foreach coverage on the lock-free variant.
+ *
+ * Test principle:
+ * 1. Reuse the same callback counter across both list types so the test compares the observable traversal contract directly.
+ * 2. Check deletion results after each mutation, because size/accounting is the key caller-visible contract of the ordinary list.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

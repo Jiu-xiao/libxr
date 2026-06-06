@@ -1,3 +1,15 @@
+/**
+ * @file test_assert.cpp
+ * @brief `LibXR::Assert` fatal-callback surface tests.
+ *
+ * Test items:
+ * 1. Fatal callback registration and replacement: verify the global fatal callback handle can be installed and restored cleanly.
+ * 2. Fatal callback dispatch argument propagation: verify `Run()` forwards the ISR flag, file name and line number to the bound callback.
+ *
+ * Test principle:
+ * 1. Operate only through the public `LibXR::Assert` callback API, so the test documents the stable contract instead of private storage details.
+ * 2. Observe the callback side effects after a real dispatch to confirm both registration and parameter forwarding paths.
+ */
 #include <cstdint>
 #include <string_view>
 

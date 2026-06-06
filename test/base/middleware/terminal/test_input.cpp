@@ -1,3 +1,16 @@
+/**
+ * @file test_input.cpp
+ * @brief `Terminal` input parsing, history navigation and in-line editing tests.
+ *
+ * Test items:
+ * 1. CRLF suppression: verify one `\r\n` command submission is not executed twice.
+ * 2. History navigation: verify `Up` / `Down` ANSI sequences recall the newest and older commands correctly.
+ * 3. Mid-line insertion after cursor movement: verify left-arrow movement followed by typed input edits the in-flight command at the correct location.
+ *
+ * Test principle:
+ * 1. Send raw ANSI/control bytes through the real read path so the parser, history logic and command execution stay coupled exactly as in runtime use.
+ * 2. Verify both command side effects and rendered terminal output, because input correctness includes editor state and executed command content together.
+ */
 #include <cstring>
 #include <string>
 #include <string_view>

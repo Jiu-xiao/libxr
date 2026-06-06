@@ -1,3 +1,15 @@
+/**
+ * @file test_thread.cpp
+ * @brief Runtime thread creation and sleep primitive tests.
+ *
+ * Test items:
+ * 1. Thread creation/wakeup: verify a created runtime thread can signal completion through a semaphore.
+ * 2. Relative sleep: verify `Thread::Sleep()` waits for approximately the requested duration.
+ * 3. Periodic sleep-until: verify `SleepUntil()` advances wakeups monotonically across successive periods.
+ *
+ * Test principle:
+ * 1. Use monotonic host time alongside LibXR timestamps so the test checks both external elapsed time and LibXR's own periodic wakeup surface.
+ */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

@@ -1,3 +1,17 @@
+/**
+ * @file test_print.cpp
+ * @brief `print` frontends and writer execution tests on the base plane.
+ *
+ * Test items:
+ * 1. `printf` frontend lowering: verify integer, float, width, precision and flag semantics after compile-time parsing.
+ * 2. `format` frontend lowering: verify brace-style field parsing, opcode generation and rendered output semantics.
+ * 3. Print API wrappers: verify the public formatting helpers route the compiled format into the expected sink behavior.
+ * 4. Failure-path prefix retention: verify stream-backed output keeps the already-written prefix when later formatting fails.
+ *
+ * Test principle:
+ * 1. Validate rendered text instead of parser internals alone, because the real contract of this subsystem is the final byte stream.
+ * 2. Cover both successful and failing write sessions, since the observable error-handling semantics are part of the API surface.
+ */
 #include <array>
 #include <cstddef>
 #include <cstdint>
