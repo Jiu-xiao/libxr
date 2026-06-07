@@ -23,16 +23,6 @@ namespace LibXR
 template <typename Data>
 class SPSCQueue
 {
-  /// @brief 仅接受可默认构造 payload / Accepts only default-constructible payloads.
-  static_assert(std::is_default_constructible_v<Data>,
-                "SPSCQueue requires default-constructible payloads");
-  /// @brief 仅接受可析构 payload / Accepts only destructible payloads.
-  static_assert(std::is_destructible_v<Data>,
-                "SPSCQueue requires destructible payloads");
-  /// @brief 仅接受可赋值 payload / Accepts only assignable payloads.
-  static_assert(std::is_copy_assignable_v<Data> || std::is_move_assignable_v<Data>,
-                "SPSCQueue requires assignable payloads");
-
  public:
   using ValueType = Data;  ///< 队列元素类型 / Queue element type.
 
@@ -128,6 +118,10 @@ class SPSCQueue
   template <typename Writer>
   ErrorCode PushWithWriter(Writer&& writer)
   {
+    static_assert(std::is_default_constructible_v<Data>,
+                  "SPSCQueue::PushWithWriter requires default-constructible payloads");
+    static_assert(std::is_destructible_v<Data>,
+                  "SPSCQueue::PushWithWriter requires destructible payloads");
     static_assert(std::is_invocable_v<Writer&, Data*, size_t>,
                   "PushWithWriter writer must be callable as "
                   "ErrorCode(Data* buffer, size_t count)");
@@ -166,6 +160,10 @@ class SPSCQueue
   template <typename Reader>
   ErrorCode PopWithReader(Reader&& reader)
   {
+    static_assert(std::is_default_constructible_v<Data>,
+                  "SPSCQueue::PopWithReader requires default-constructible payloads");
+    static_assert(std::is_destructible_v<Data>,
+                  "SPSCQueue::PopWithReader requires destructible payloads");
     static_assert(std::is_invocable_v<Reader&, const Data*, size_t>,
                   "PopWithReader reader must be callable as "
                   "ErrorCode(const Data* buffer, size_t count)");

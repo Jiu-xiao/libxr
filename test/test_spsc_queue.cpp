@@ -11,6 +11,19 @@ namespace
 using Queue = LibXR::SPSCQueue<uint32_t>;  ///< 默认测试用 32 位 payload 队列 / Default test queue using 32-bit payloads.
 
 /**
+ * @struct NoDefaultPayload
+ * @brief 无默认构造 payload，用于验证普通 Push/Pop 不依赖默认构造
+ *        / Payload without default construction, used to verify normal Push/Pop
+ *        do not depend on default construction
+ */
+struct NoDefaultPayload
+{
+  explicit NoDefaultPayload(uint32_t value_in) : value(value_in) {}
+
+  uint32_t value;  ///< 有效载荷值 / Payload value.
+};
+
+/**
  * @struct ProducerArg
  * @brief 生产者线程参数 / Producer-thread arguments
  */
@@ -120,6 +133,17 @@ void test_spsc_queue()
     }
     uint32_t value = 0;
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+  }
+
+  // Normal Push/Pop remain byte-payload operations and do not require Data{}.
+  {
+    LibXR::SPSCQueue<NoDefaultPayload> queue(2);
+    NoDefaultPayload pushed(88);
+    NoDefaultPayload popped(0);
+
+    ASSERT(queue.Push(pushed) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Pop(popped) == LibXR::ErrorCode::OK);
+    ASSERT(popped.value == 88);
   }
 
   // Callback failures must not commit a partially produced or consumed element.

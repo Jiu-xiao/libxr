@@ -2,10 +2,8 @@
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <limits>
 #include <new>
-#include <type_traits>
 
 #include "libxr_def.hpp"
 #include "libxr_mem.hpp"
@@ -28,9 +26,6 @@ namespace LibXR
 class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
 {
  public:
-  template <typename Data>
-  friend class SPSCQueue;
-
   using IndexType = size_t;  ///< 环形缓冲区索引类型 / Ring-buffer index type.
 
   /**
