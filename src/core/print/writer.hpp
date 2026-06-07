@@ -609,8 +609,8 @@ class Writer
    * @return 执行器运行结果 / Returns the executor result
   */
   template <OutputSink Sink, FormatProfile Profile>
-  LIBXR_FORCE_OPTIMIZE_OS LIBXR_NOINLINE [[nodiscard]] static ErrorCode Execute(
-      Sink& sink, const uint8_t* codes, const uint8_t* args)
+  [[nodiscard]] static LIBXR_NOINLINE ErrorCode Execute(Sink& sink, const uint8_t* codes,
+                                                        const uint8_t* args)
   {
     return Executor<Sink, Profile>(sink, codes, args).Run();
   }
@@ -629,7 +629,7 @@ class Writer
   */
   template <OutputSink Sink, auto ArgumentInfoList, auto ArgumentOrder,
             FormatProfile Profile, typename... Args>
-  LIBXR_FORCE_OPTIMIZE_OS LIBXR_NOINLINE [[nodiscard]] static ErrorCode RunTaggedArgumentOrder(
+  [[nodiscard]] static LIBXR_NOINLINE ErrorCode RunTaggedArgumentOrder(
       Sink& sink, const uint8_t* codes, Args&&... args)
   {
     if constexpr (ArgumentInfoList.size() == 0)
