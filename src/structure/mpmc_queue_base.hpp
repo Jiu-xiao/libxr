@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +12,7 @@
 namespace LibXR
 {
 /**
- * @class MPMCQueueCore
+ * @class MPMCQueueBase
  * @brief 有界 MPMC 字节队列内核 / Bounded MPMC byte-queue core
  *
  * 这个内核把并发协议和字节搬运集中在一个非模板实现里，以减少不同 payload
@@ -23,7 +24,7 @@ namespace LibXR
  * a full copy of the lock-free protocol. It only moves fixed-size, word-aligned
  * byte payloads; type semantics are handled by thin wrappers above it.
  */
-class MPMCQueueCore
+class MPMCQueueBase
 {
  public:
   using SequenceType = size_t;  ///< 单调递增的逻辑序号类型 / Monotonic logical sequence type.
@@ -35,20 +36,20 @@ class MPMCQueueCore
    * @param element_size 单个 payload 的字节数 / Byte size of one payload
    * @param capacity 队列容量 / Queue capacity
    */
-  MPMCQueueCore(size_t element_size, size_t capacity);
+  MPMCQueueBase(size_t element_size, size_t capacity);
   /**
    * @brief 析构字节队列内核 / Destroy the byte-queue core
    */
-  ~MPMCQueueCore();
+  ~MPMCQueueBase();
 
   /// @brief 禁止拷贝构造 / Non-copyable.
-  MPMCQueueCore(const MPMCQueueCore&) = delete;
+  MPMCQueueBase(const MPMCQueueBase&) = delete;
   /// @brief 禁止拷贝赋值 / Non-copy-assignable.
-  MPMCQueueCore& operator=(const MPMCQueueCore&) = delete;
+  MPMCQueueBase& operator=(const MPMCQueueBase&) = delete;
   /// @brief 禁止移动构造 / Non-movable.
-  MPMCQueueCore(MPMCQueueCore&&) = delete;
+  MPMCQueueBase(MPMCQueueBase&&) = delete;
   /// @brief 禁止移动赋值 / Non-move-assignable.
-  MPMCQueueCore& operator=(MPMCQueueCore&&) = delete;
+  MPMCQueueBase& operator=(MPMCQueueBase&&) = delete;
 
   /**
    * @brief 按字节入队一个 payload / Enqueue one payload by bytes

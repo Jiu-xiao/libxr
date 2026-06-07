@@ -51,7 +51,7 @@ See [XRUSB](https://github.com/Jiu-xiao/XRUSB)
 
 ## Data structure
 
-| `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
+| `Structure` | List | Stack | RBTree | SPMCQueue | LockFreeList |
 | ----------- | ---- | ----- | ------ | ------------- | ------------ |
 |             | ✅    | ✅     | ✅      | ✅             | ✅            |
 

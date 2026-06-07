@@ -47,7 +47,7 @@ size_t Topic::Server::ParseDataRaw(ConstRawData data, bool from_callback, bool i
 {
   size_t count = 0;
 
-  (void)queue_.PushBatch(data.addr_, data.size_);
+  (void)queue_.PushBatchBytes(data.addr_, data.size_);
 
   while (true)
   {
@@ -83,13 +83,13 @@ bool Topic::Server::SyncToPacketStart()
   for (uint32_t i = 0; i < queue_size; i++)
   {
     uint8_t prefix = 0;
-    queue_.Peek(&prefix);
+    queue_.PeekBytes(&prefix);
     if (prefix == PACKET_PREFIX)
     {
       status_ = Status::WAIT_TOPIC;
       return true;
     }
-    queue_.Pop();
+    queue_.PopBytes();
   }
 
   return false;
@@ -102,7 +102,7 @@ bool Topic::Server::ReadHeader()
     return false;
   }
 
-  queue_.PopBatch(parse_buff_.addr_, sizeof(PackedDataHeader));
+  queue_.PopBatchBytes(parse_buff_.addr_, sizeof(PackedDataHeader));
   if (!CRC8::Verify(parse_buff_.addr_, sizeof(PackedDataHeader)))
   {
     ResetParser();
@@ -153,7 +153,7 @@ Topic::Server::ParseResult Topic::Server::ReadPayload(bool from_callback, bool i
 
   auto* payload_addr =
       reinterpret_cast<uint8_t*>(parse_buff_.addr_) + sizeof(PackedDataHeader);
-  queue_.PopBatch(payload_addr, data_len_ + sizeof(uint8_t));
+  queue_.PopBatchBytes(payload_addr, data_len_ + sizeof(uint8_t));
 
   if (!CRC8::Verify(parse_buff_.addr_,
                     data_len_ + sizeof(PackedDataHeader) + sizeof(uint8_t)))

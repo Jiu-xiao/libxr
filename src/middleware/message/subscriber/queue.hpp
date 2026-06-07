@@ -34,13 +34,13 @@ class Topic::QueuedSubscriber
    *       为止 /
    *       Queued subscribers keep only a pointer to `queue`; the queue object
    *       itself must outlive the subscriber's use of it
-   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   * @note 每次发布都会直接调一次底层 `SPMCQueue::Push()`；如果 push 不进去，
    *       这次发布就直接丢掉 /
-   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       Each publish directly calls one underlying `SPMCQueue::Push()`;
    *       if that push cannot fit, this publish is dropped immediately
    */
   template <typename Data>
-  QueuedSubscriber(const char* name, LockFreeQueue<Data>& queue, Domain* domain = nullptr)
+  QueuedSubscriber(const char* name, SPMCQueue<Data>& queue, Domain* domain = nullptr)
       : QueuedSubscriber(Topic(WaitTopic(name, UINT32_MAX, domain)), queue)
   {
   }
@@ -55,13 +55,13 @@ class Topic::QueuedSubscriber
    *       为止 /
    *       Queued subscribers keep only a pointer to `queue`; the queue object
    *       itself must outlive the subscriber's use of it
-   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   * @note 每次发布都会直接调一次底层 `SPMCQueue::Push()`；如果 push 不进去，
    *       这次发布就直接丢掉 /
-   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       Each publish directly calls one underlying `SPMCQueue::Push()`;
    *       if that push cannot fit, this publish is dropped immediately
    */
   template <typename Data>
-  QueuedSubscriber(const char* name, LockFreeQueue<Message<Data>>& queue,
+  QueuedSubscriber(const char* name, SPMCQueue<Message<Data>>& queue,
                    Domain* domain = nullptr)
       : QueuedSubscriber(Topic(WaitTopic(name, UINT32_MAX, domain)), queue)
   {
@@ -77,13 +77,13 @@ class Topic::QueuedSubscriber
    *       为止 /
    *       Queued subscribers keep only a pointer to `queue`; the queue object
    *       itself must outlive the subscriber's use of it
-   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   * @note 每次发布都会直接调一次底层 `SPMCQueue::Push()`；如果 push 不进去，
    *       这次发布就直接丢掉 /
-   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       Each publish directly calls one underlying `SPMCQueue::Push()`;
    *       if that push cannot fit, this publish is dropped immediately
    */
   template <typename Data>
-  QueuedSubscriber(Topic topic, LockFreeQueue<Data>& queue)
+  QueuedSubscriber(Topic topic, SPMCQueue<Data>& queue)
   {
     Topic::CheckSubscriberType<Data>(topic);
 
@@ -92,7 +92,7 @@ class Topic::QueuedSubscriber
     block_->data_.queue = &queue;
     block_->data_.fun = [](MicrosecondTimestamp, void* payload_addr, QueueBlock& block)
     {
-      LockFreeQueue<Data>* queue = reinterpret_cast<LockFreeQueue<Data>*>(block.queue);
+      SPMCQueue<Data>* queue = reinterpret_cast<SPMCQueue<Data>*>(block.queue);
       (void)queue->Push(*reinterpret_cast<Data*>(payload_addr));
     };
 
@@ -108,13 +108,13 @@ class Topic::QueuedSubscriber
    *       为止 /
    *       Queued subscribers keep only a pointer to `queue`; the queue object
    *       itself must outlive the subscriber's use of it
-   * @note 每次发布都会直接调一次底层 `LockFreeQueue::Push()`；如果 push 不进去，
+   * @note 每次发布都会直接调一次底层 `SPMCQueue::Push()`；如果 push 不进去，
    *       这次发布就直接丢掉 /
-   *       Each publish directly calls one underlying `LockFreeQueue::Push()`;
+   *       Each publish directly calls one underlying `SPMCQueue::Push()`;
    *       if that push cannot fit, this publish is dropped immediately
    */
   template <typename Data>
-  QueuedSubscriber(Topic topic, LockFreeQueue<Message<Data>>& queue)
+  QueuedSubscriber(Topic topic, SPMCQueue<Message<Data>>& queue)
   {
     Topic::CheckSubscriberType<Data>(topic);
 
@@ -124,8 +124,8 @@ class Topic::QueuedSubscriber
     block_->data_.fun =
         [](MicrosecondTimestamp timestamp, void* payload_addr, QueueBlock& block)
     {
-      LockFreeQueue<Message<Data>>* queue =
-          reinterpret_cast<LockFreeQueue<Message<Data>>*>(block.queue);
+      SPMCQueue<Message<Data>>* queue =
+          reinterpret_cast<SPMCQueue<Message<Data>>*>(block.queue);
       (void)queue->Push(
           Message<Data>{timestamp, *reinterpret_cast<Data*>(payload_addr)});
     };

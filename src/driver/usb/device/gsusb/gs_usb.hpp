@@ -1054,9 +1054,9 @@ LIBXR_PACKED_END
     std::array<uint8_t, 64> data;  ///< 数据段 / Data bytes
   };
 
-  LibXR::LockFreeQueue<QueueItem>
+  LibXR::SPMCQueue<QueueItem>
       rx_queue_;  ///< RX 队列（Device->Host） / RX queue (Device->Host)
-  LibXR::LockFreeQueue<QueueItem>
+  LibXR::SPMCQueue<QueueItem>
       echo_queue_;  ///< Echo 队列（回送 echo_id） / Echo queue (echo back echo_id)
 
   /**

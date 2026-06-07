@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <limits>
@@ -11,7 +12,7 @@
 namespace LibXR
 {
 /**
- * @class SPSCQueueCore
+ * @class SPSCQueueBase
  * @brief 单生产者单消费者字节队列内核 / Single-producer single-consumer byte-queue core
  *
  * 这个内核只负责 SPSC ring 的索引推进、容量判断与原始字节存储，不包含多消费者
@@ -23,7 +24,7 @@ namespace LibXR
  * any CAS-based path. The upper `SPSCQueue<Data>` wrapper is responsible only
  * for mapping the concrete `Data` type onto these byte slots.
  */
-class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
+class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
 {
  public:
   using IndexType = size_t;  ///< 环形缓冲区索引类型 / Ring-buffer index type.
@@ -33,7 +34,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
    * @param element_size 单个 payload 的字节数 / Byte size of one payload
    * @param capacity 队列容量 / Queue capacity
    */
-  SPSCQueueCore(size_t element_size, size_t capacity)
+  SPSCQueueBase(size_t element_size, size_t capacity)
       : element_size_(element_size),
         capacity_(capacity),
         payload_stride_(AlignUpChecked(element_size_, alignof(size_t))),
@@ -54,19 +55,19 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
   /**
    * @brief 析构 SPSC 字节队列内核 / Destroy the SPSC byte-queue core
    */
-  ~SPSCQueueCore()
+  ~SPSCQueueBase()
   {
     ::operator delete[](payloads_, std::align_val_t(PAYLOAD_ALLOC_ALIGN));
   }
 
   /// @brief 禁止拷贝构造 / Non-copyable.
-  SPSCQueueCore(const SPSCQueueCore&) = delete;
+  SPSCQueueBase(const SPSCQueueBase&) = delete;
   /// @brief 禁止拷贝赋值 / Non-copy-assignable.
-  SPSCQueueCore& operator=(const SPSCQueueCore&) = delete;
+  SPSCQueueBase& operator=(const SPSCQueueBase&) = delete;
   /// @brief 禁止移动构造 / Non-movable.
-  SPSCQueueCore(SPSCQueueCore&&) = delete;
+  SPSCQueueBase(SPSCQueueBase&&) = delete;
   /// @brief 禁止移动赋值 / Non-move-assignable.
-  SPSCQueueCore& operator=(SPSCQueueCore&&) = delete;
+  SPSCQueueBase& operator=(SPSCQueueBase&&) = delete;
 
   /**
    * @brief 按字节入队一个 payload / Enqueue one payload by bytes

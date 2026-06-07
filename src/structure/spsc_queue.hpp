@@ -3,7 +3,8 @@
 #include <cstddef>
 #include <type_traits>
 
-#include "spsc_queue_core.hpp"
+#include "queue_typed_base.hpp"
+#include "spsc_queue_base.hpp"
 
 namespace LibXR
 {
@@ -11,20 +12,23 @@ namespace LibXR
  * @class SPSCQueue
  * @brief 单生产者单消费者无锁队列 / Single-producer single-consumer lock-free queue
  *
- * 模板壳只把 `Data` 映射为固定大小的字节 payload 并复用 `SPSCQueueCore`，
+ * 模板壳只把 `Data` 映射为固定大小的字节 payload 并复用 `SPSCQueueBase`，
  * 不在队列内部管理 `Data` 对象生命周期。调用方必须保证 payload 可以按该
  * 项目的队列契约进行字节搬运。
  *
  * This template wrapper maps `Data` to a fixed-size byte payload and reuses
- * `SPSCQueueCore`. It does not manage `Data` object lifetime inside the queue.
+ * `SPSCQueueBase`. It does not manage `Data` object lifetime inside the queue.
  * The caller must ensure that the payload is valid for this project's
  * byte-moving queue contract.
  */
 template <typename Data>
-class SPSCQueue
+class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
+                        public SPSCQueueBase
 {
  public:
   using ValueType = Data;  ///< 队列元素类型 / Queue element type.
+  using QueueTypedBase<SPSCQueue<Data>, Data>::Pop;
+  using QueueTypedBase<SPSCQueue<Data>, Data>::Push;
 
   /**
    * @brief 构造一个 SPSC 队列 / Construct one SPSC queue
@@ -33,7 +37,7 @@ class SPSCQueue
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  explicit SPSCQueue(size_t length) : core_(sizeof(Data), length)
+  explicit SPSCQueue(size_t length) : SPSCQueueBase(sizeof(Data), length)
   {
   }
 
@@ -41,41 +45,6 @@ class SPSCQueue
    * @brief 析构一个 SPSC 队列 / Destroy one SPSC queue
    */
   ~SPSCQueue() = default;
-
-  /**
-   * @brief 向队列尾部推入一个 payload / Push one payload into the queue tail
-   * @param item 待入队 payload / Payload to enqueue
-   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when
-   *         the queue is full
-   */
-  ErrorCode Push(const Data& item)
-  {
-    return core_.PushBytes(&item);
-  }
-
-  /**
-   * @brief 从队列头部弹出一个 payload / Pop one payload from the queue head
-   * @param item 用于接收 payload / Receives the dequeued payload
-   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
-   *         the queue is empty
-   */
-  ErrorCode Pop(Data& item)
-  {
-    return core_.PopBytes(&item);
-  }
-
-  /**
-   * @brief 丢弃一个队头 payload / Discard one front payload
-   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
-   *         the queue is empty
-   */
-  ErrorCode Pop()
-  {
-    return core_.PopBytes(nullptr);
-  }
 
   /**
    * @brief 查看一个队头 payload 但不出队 / Peek one front payload without dequeuing it
@@ -86,7 +55,7 @@ class SPSCQueue
    */
   ErrorCode Peek(Data& item)
   {
-    return core_.PeekBytes(&item);
+    return SPSCQueueBase::PeekBytes(&item);
   }
 
   /**
@@ -99,7 +68,7 @@ class SPSCQueue
    */
   ErrorCode PushBatch(const Data* data, size_t size)
   {
-    return core_.PushBatchBytes(data, size);
+    return SPSCQueueBase::PushBatchBytes(data, size);
   }
 
   /**
@@ -129,7 +98,7 @@ class SPSCQueue
     static_assert(std::is_convertible_v<WriterRet, ErrorCode>,
                   "PushWithWriter writer return type must be convertible to ErrorCode");
 
-    if (core_.EmptySize() == 0)
+    if (SPSCQueueBase::EmptySize() == 0)
     {
       return ErrorCode::FULL;
     }
@@ -141,7 +110,7 @@ class SPSCQueue
     {
       return ec;
     }
-    return core_.PushBytes(&tmp);
+    return SPSCQueueBase::PushBytes(&tmp);
   }
 
   /**
@@ -172,7 +141,7 @@ class SPSCQueue
                   "PopWithReader reader return type must be convertible to ErrorCode");
 
     Data tmp{};
-    auto ec = core_.PeekBytes(&tmp);
+    auto ec = SPSCQueueBase::PeekBytes(&tmp);
     if (ec != ErrorCode::OK)
     {
       return ec;
@@ -184,7 +153,7 @@ class SPSCQueue
     {
       return ec;
     }
-    return core_.PopBytes(nullptr);
+    return SPSCQueueBase::PopBytes(nullptr);
   }
 
   /**
@@ -197,7 +166,7 @@ class SPSCQueue
    */
   ErrorCode PopBatch(Data* data, size_t size)
   {
-    return core_.PopBatchBytes(data, size);
+    return SPSCQueueBase::PopBatchBytes(data, size);
   }
 
   /**
@@ -210,33 +179,12 @@ class SPSCQueue
    */
   ErrorCode PeekBatch(Data* data, size_t size)
   {
-    return core_.PeekBatchBytes(data, size);
+    return SPSCQueueBase::PeekBatchBytes(data, size);
   }
 
   /**
    * @brief 重置队列状态 / Reset the queue state
    */
-  void Reset() { core_.Reset(); }
-
-  /**
-   * @brief 获取当前已用元素数 / Get the current element count
-   * @return 当前元素个数 / Current number of stored payloads
-   */
-  size_t Size() const { return core_.Size(); }
-
-  /**
-   * @brief 获取剩余空槽数 / Get the current free-slot count
-   * @return 当前空槽个数 / Current number of free slots
-   */
-  size_t EmptySize() const { return core_.EmptySize(); }
-
-  /**
-   * @brief 获取队列最大容量 / Get the maximum queue capacity
-   * @return 队列容量 / Queue capacity
-   */
-  size_t MaxSize() const { return core_.MaxSize(); }
-
- private:
-  SPSCQueueCore core_;  ///< 共享单生产者字节内核 / Shared single-producer byte core.
+  void Reset() { SPSCQueueBase::Reset(); }
 };
 }  // namespace LibXR

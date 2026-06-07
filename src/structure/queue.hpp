@@ -1,22 +1,25 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
 #include "libxr_def.hpp"
+#include "queue_typed_base.hpp"
 
 namespace LibXR
 {
 /**
- * @brief 基础队列类，提供固定大小的循环缓冲区
- *        (Base queue class providing a fixed-size circular buffer).
+ * @class QueueBase
+ * @brief 字节 FIFO 队列，提供固定大小的循环缓冲区
+ *        (Byte FIFO queue providing a fixed-size circular buffer).
  *
- * This class implements a circular queue that supports element insertion,
- * retrieval, and batch operations.
- * 该类实现了一个循环队列，支持元素插入、读取和批量操作。
+ * 该类只按固定 element size 搬运字节，不管理强类型对象生命周期。
+ * This class moves fixed-size byte elements only and does not manage typed
+ * object lifetime.
  */
-class BaseQueue
+class QueueBase
 {
  public:
   /**
@@ -25,7 +28,7 @@ class BaseQueue
    * @param length 队列的最大容量 (Maximum capacity of the queue).
    * @param buffer 指向缓冲区的指针 (Pointer to the buffer).
    */
-  BaseQueue(uint16_t element_size, size_t length, uint8_t* buffer);
+  QueueBase(uint16_t element_size, size_t length, uint8_t* buffer);
 
   /**
    * @brief 构造函数，初始化队列 (Constructor to initialize the queue).
@@ -35,12 +38,12 @@ class BaseQueue
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
-  BaseQueue(uint16_t element_size, size_t length);
+  QueueBase(uint16_t element_size, size_t length);
 
   /**
    * @brief 析构函数，释放队列内存 (Destructor to free queue memory).
    */
-  ~BaseQueue();
+  ~QueueBase();
 
   /**
    * @brief 访问指定索引的元素 (Access an element at a specified index).
@@ -55,7 +58,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列满时返回 `ErrorCode::FULL`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::FULL` if full).
    */
-  ErrorCode Push(const void* data);
+  ErrorCode PushBytes(const void* data);
 
   /**
    * @brief 获取队列头部的元素但不移除 (Peek at the front element without removing it).
@@ -63,7 +66,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode Peek(void* data);
+  ErrorCode PeekBytes(void* data);
 
   /**
    * @brief 移除队列头部的元素 (Pop the front element from the queue).
@@ -72,7 +75,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode Pop(void* data = nullptr);
+  ErrorCode PopBytes(void* data = nullptr);
 
   /**
    * @brief 获取队列中最后一个元素的索引 (Get the index of the last element in the queue).
@@ -97,7 +100,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列满时返回 `ErrorCode::FULL`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::FULL` if full).
    */
-  ErrorCode PushBatch(const void* data, size_t size);
+  ErrorCode PushBatchBytes(const void* data, size_t size);
 
   /**
    * @brief 批量移除多个元素 (Pop multiple elements from the queue).
@@ -107,7 +110,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode PopBatch(void* data, size_t size);
+  ErrorCode PopBatchBytes(void* data, size_t size);
 
   /**
    * @brief 批量获取多个元素但不移除 (Peek at multiple elements without removing them).
@@ -116,7 +119,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空时返回 `ErrorCode::EMPTY`
    *         (Operation result: `ErrorCode::OK` on success, `ErrorCode::EMPTY` if empty).
    */
-  ErrorCode PeekBatch(void* data, size_t size);
+  ErrorCode PeekBatchBytes(void* data, size_t size);
 
   /**
    * @brief 覆盖队列中的数据 (Overwrite the queue with new data).
@@ -124,7 +127,7 @@ class BaseQueue
    * @return 操作结果，成功返回 `ErrorCode::OK`
    *         (Operation result: `ErrorCode::OK` on success).
    */
-  ErrorCode Overwrite(const void* data);
+  ErrorCode OverwriteBytes(const void* data);
 
   /**
    * @brief 重置队列，清空所有数据 (Reset the queue and clear all data).
@@ -149,11 +152,11 @@ class BaseQueue
    */
   [[nodiscard]] size_t MaxSize() const { return length_; }
 
-  BaseQueue(const BaseQueue&) = delete;
-  BaseQueue& operator=(const BaseQueue&) = delete;
-  BaseQueue& operator=(BaseQueue&) = delete;
-  BaseQueue& operator=(const BaseQueue&&) = delete;
-  BaseQueue& operator=(BaseQueue&&) = delete;
+  QueueBase(const QueueBase&) = delete;
+  QueueBase& operator=(const QueueBase&) = delete;
+  QueueBase& operator=(QueueBase&) = delete;
+  QueueBase& operator=(const QueueBase&&) = delete;
+  QueueBase& operator=(QueueBase&&) = delete;
 
   uint8_t* queue_array_;        ///< 存储队列数据的数组 (Array storing queue data).
   const uint16_t ELEMENT_SIZE;  ///< 每个元素的大小 (Size of each element).
@@ -165,8 +168,8 @@ class BaseQueue
 };
 
 /**
- * @brief 基于 BaseQueue 的泛型队列模板类
- *        (Generic queue template class based on BaseQueue).
+ * @brief 基于 QueueBase 的泛型队列模板类
+ *        (Generic queue template class based on QueueBase).
  *
  * This class provides a type-safe queue for storing elements of type `Data`.
  * It supports standard queue operations such as push, pop, peek, and batch operations.
@@ -176,17 +179,19 @@ class BaseQueue
  * @tparam Data 队列存储的数据类型 (Type of data stored in the queue).
  */
 template <typename Data>
-class Queue : public BaseQueue
+class Queue final : public QueueTypedBase<Queue<Data>, Data>, public QueueBase
 {
  public:
   using ValueType = Data;  ///< 队列元素类型 / Queue element type.
+  using QueueTypedBase<Queue<Data>, Data>::Pop;
+  using QueueTypedBase<Queue<Data>, Data>::Push;
 
   /**
    * @brief 构造函数，初始化队列
    *        (Constructor to initialize the queue).
    * @param length 队列的最大容量 (Maximum capacity of the queue).
    */
-  Queue(size_t length) : BaseQueue(sizeof(Data), length) {}
+  explicit Queue(size_t length) : QueueBase(sizeof(Data), length) {}
 
   /**
    * @brief 构造函数，初始化队列
@@ -194,7 +199,7 @@ class Queue : public BaseQueue
    * @param length 队列的最大容量 (Maximum capacity of the queue).
    * @param buffer 指向缓冲区的指针 (Pointer to the buffer).
    */
-  Queue(size_t length, uint8_t* buffer) : BaseQueue(sizeof(Data), length, buffer) {}
+  Queue(size_t length, uint8_t* buffer) : QueueBase(sizeof(Data), length, buffer) {}
 
   /**
    * @brief 访问队列中的元素
@@ -225,35 +230,6 @@ class Queue : public BaseQueue
   }
 
   /**
-   * @brief 向队列中添加一个元素
-   *        (Push an element into the queue).
-   * @param data 要推入的元素 (Element to push).
-   * @return 操作结果 (Operation result):
-   *         - `ErrorCode::OK` 表示成功 (`ErrorCode::OK` on success).
-   *         - `ErrorCode::FULL` 表示队列已满 (`ErrorCode::FULL` if the queue is full).
-   */
-  ErrorCode Push(const Data& data) { return BaseQueue::Push(&data); }
-
-  /**
-   * @brief 从队列中移除头部元素，并获取该元素的数据
-   *        (Remove the front element from the queue and retrieve its data).
-   * @param data 用于存储弹出元素的引用 (Reference to store the popped element).
-   * @return 操作结果 (Operation result):
-   *         - `ErrorCode::OK` 表示成功 (`ErrorCode::OK` on success).
-   *         - `ErrorCode::EMPTY` 表示队列为空 (`ErrorCode::EMPTY` if the queue is empty).
-   */
-  ErrorCode Pop(Data& data) { return BaseQueue::Pop(&data); }
-
-  /**
-   * @brief 仅从队列中移除头部元素，不获取数据
-   *        (Remove the front element from the queue without retrieving data).
-   * @return 操作结果 (Operation result):
-   *         - `ErrorCode::OK` 表示成功 (`ErrorCode::OK` on success).
-   *         - `ErrorCode::EMPTY` 表示队列为空 (`ErrorCode::EMPTY` if the queue is empty).
-   */
-  ErrorCode Pop() { return BaseQueue::Pop(); }
-
-  /**
    * @brief 查看队列头部的元素但不移除
    *        (Peek at the front element without removing it).
    * @param data 用于存储查看到的元素的引用 (Reference to store the peeked element).
@@ -261,7 +237,7 @@ class Queue : public BaseQueue
    *         - `ErrorCode::OK` 表示成功 (`ErrorCode::OK` on success).
    *         - `ErrorCode::EMPTY` 表示队列为空 (`ErrorCode::EMPTY` if the queue is empty).
    */
-  ErrorCode Peek(Data& data) { return BaseQueue::Peek(&data); }
+  ErrorCode Peek(Data& data) { return QueueBase::PeekBytes(&data); }
 
   /**
    * @brief 批量推入多个元素
@@ -274,7 +250,7 @@ class Queue : public BaseQueue
    */
   ErrorCode PushBatch(const Data* data, size_t size)
   {
-    return BaseQueue::PushBatch(data, size);
+    return QueueBase::PushBatchBytes(data, size);
   }
 
   /**
@@ -287,7 +263,10 @@ class Queue : public BaseQueue
    *         - `ErrorCode::OK` 表示成功 (`ErrorCode::OK` on success).
    *         - `ErrorCode::EMPTY` 表示队列为空 (`ErrorCode::EMPTY` if the queue is empty).
    */
-  ErrorCode PopBatch(Data* data, size_t size) { return BaseQueue::PopBatch(data, size); }
+  ErrorCode PopBatch(Data* data, size_t size)
+  {
+    return QueueBase::PopBatchBytes(data, size);
+  }
 
   /**
    * @brief 批量查看多个元素但不移除
@@ -301,7 +280,7 @@ class Queue : public BaseQueue
    */
   ErrorCode PeekBatch(Data* data, size_t size)
   {
-    return BaseQueue::PeekBatch(data, size);
+    return QueueBase::PeekBatchBytes(data, size);
   }
 
   /**
@@ -311,14 +290,14 @@ class Queue : public BaseQueue
    * @return 操作结果 (Operation result):
    *         - `ErrorCode::OK` 表示成功 (`ErrorCode::OK` on success).
    */
-  ErrorCode Overwrite(const Data& data) { return BaseQueue::Overwrite(&data); }
+  ErrorCode Overwrite(const Data& data) { return QueueBase::OverwriteBytes(&data); }
 
   /**
    * @brief 获取队列的最大容量
    *        (Get the maximum capacity of the queue).
    * @return 队列的最大容量 (Maximum capacity of the queue).
    */
-  [[nodiscard]] size_t MaxSize() const { return length_; }
+  [[nodiscard]] size_t MaxSize() const { return QueueBase::MaxSize(); }
 };
 
 }  // namespace LibXR

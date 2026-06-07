@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "lockfree_queue.hpp"
+#include "spmc_queue.hpp"
 #include "operation.hpp"
 
 namespace LibXR
@@ -61,9 +61,9 @@ class WritePort
   };
 
   WriteFun write_fun_ = nullptr;  ///< Driver/backend write entry. 底层驱动或后端写入入口。
-  LockFreeQueue<WriteInfoBlock>* queue_info_ =
+  SPMCQueue<WriteInfoBlock>* queue_info_ =
       nullptr;  ///< Metadata queue for pending write batches. 挂起写批次的元数据队列。
-  LockFreeQueue<uint8_t>* queue_data_ =
+  SPMCQueue<uint8_t>* queue_data_ =
       nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
   std::atomic<BusyState> busy_{BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write. 当前 BLOCK 写入的最终结果。

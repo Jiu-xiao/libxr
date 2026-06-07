@@ -1,4 +1,4 @@
-#include "mpmc_queue_core.hpp"
+#include "mpmc_queue_base.hpp"
 
 #include <algorithm>
 #include <new>
@@ -12,7 +12,7 @@ namespace LibXR
  * @param element_size 单个 payload 的字节数 / Byte size of one payload
  * @param capacity 队列容量 / Queue capacity
  */
-MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
+MPMCQueueBase::MPMCQueueBase(size_t element_size, size_t capacity)
     : element_size_(element_size),
       capacity_(capacity),
       payload_stride_(AlignUpChecked(element_size_, alignof(size_t))),
@@ -44,7 +44,7 @@ MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
 /**
  * @brief 析构字节队列内核 / Destroy the byte-queue core
  */
-MPMCQueueCore::~MPMCQueueCore()
+MPMCQueueBase::~MPMCQueueBase()
 {
   ::operator delete[](payloads_, std::align_val_t(PAYLOAD_ALLOC_ALIGN));
   delete[] sequences_;
@@ -54,7 +54,7 @@ MPMCQueueCore::~MPMCQueueCore()
  * @brief 按字节入队一个 payload / Enqueue one payload by bytes
  * @param value 指向待入队 payload 的指针 / Pointer to the payload to enqueue
  */
-ErrorCode MPMCQueueCore::PushBytes(const void* value)
+ErrorCode MPMCQueueBase::PushBytes(const void* value)
 {
   if (value == nullptr)
   {
@@ -96,7 +96,7 @@ ErrorCode MPMCQueueCore::PushBytes(const void* value)
  *        / Buffer that receives the payload; pass `nullptr` to discard the
  *        front element only
  */
-ErrorCode MPMCQueueCore::PopBytes(void* value)
+ErrorCode MPMCQueueBase::PopBytes(void* value)
 {
   SequenceType position = head_.load(std::memory_order_relaxed);
 
@@ -139,7 +139,7 @@ ErrorCode MPMCQueueCore::PopBytes(void* value)
  *         Approximate element count from a concurrent snapshot, clamped to
  *         `[0, MaxSize()]`
  */
-size_t MPMCQueueCore::Size() const
+size_t MPMCQueueBase::Size() const
 {
   const SequenceType head_snapshot = head_.load(std::memory_order_acquire);
   const SequenceType tail_snapshot = tail_.load(std::memory_order_acquire);
@@ -151,7 +151,7 @@ size_t MPMCQueueCore::Size() const
  * @brief 获取指定槽位 payload 起始地址 / Get the payload base address of one slot
  * @param index 槽位下标 / Slot index
  */
-void* MPMCQueueCore::PayloadPtr(size_t index)
+void* MPMCQueueBase::PayloadPtr(size_t index)
 {
   return payloads_ + index * payload_stride_;
 }
@@ -161,7 +161,7 @@ void* MPMCQueueCore::PayloadPtr(size_t index)
  *        / Get the payload base address of one slot (const)
  * @param index 槽位下标 / Slot index
  */
-const void* MPMCQueueCore::PayloadPtr(size_t index) const
+const void* MPMCQueueBase::PayloadPtr(size_t index) const
 {
   return payloads_ + index * payload_stride_;
 }
@@ -171,7 +171,7 @@ const void* MPMCQueueCore::PayloadPtr(size_t index) const
  * @param value 待对齐字节数 / Byte count to align
  * @param align 目标对齐粒度 / Target alignment granularity
  */
-size_t MPMCQueueCore::AlignUpChecked(size_t value, size_t align)
+size_t MPMCQueueBase::AlignUpChecked(size_t value, size_t align)
 {
   REQUIRE(align > 0);
   REQUIRE(value <= std::numeric_limits<size_t>::max() - (align - 1));
@@ -184,7 +184,7 @@ size_t MPMCQueueCore::AlignUpChecked(size_t value, size_t align)
  * @param rhs 右操作数 / Right operand
  * @return 乘积结果 / Product result
  */
-size_t MPMCQueueCore::MultiplyChecked(size_t lhs, size_t rhs)
+size_t MPMCQueueBase::MultiplyChecked(size_t lhs, size_t rhs)
 {
   if (lhs == 0 || rhs == 0)
   {
