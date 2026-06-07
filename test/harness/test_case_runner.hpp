@@ -10,7 +10,6 @@
  */
 #pragma once
 
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <sys/wait.h>
@@ -36,7 +35,7 @@ bool equal(double a, double b);
 struct TestCase
 {
   const char* name;
-  void (*function)();
+  int (*function)();
   bool isolated;
 };
 
@@ -51,7 +50,7 @@ inline void run_test_case(const TestCase& test_case)
 
   if (!test_case.isolated)
   {
-    test_case.function();
+    ASSERT(test_case.function() == 0);
     return;
   }
 
@@ -60,8 +59,8 @@ inline void run_test_case(const TestCase& test_case)
 
   if (child == 0)
   {
-    test_case.function();
-    _exit(0);
+    const int child_status = test_case.function();
+    _exit(child_status);
   }
 
   int status = 0;

@@ -6,7 +6,7 @@
  * 1. 安装 binding 测试的 fatal assertion 回调。 Install the fatal assertion callback for binding tests.
  * 2. 按确定顺序执行 binding 平面测试入口。 Run the binding-specific test entrypoints in a deterministic order.
  */
-#include "test_binding.hpp"
+#include "test_matrix.hpp"
 
 #include <cstdlib>
 
@@ -36,9 +36,5 @@ int main()
       reinterpret_cast<void*>(0));
 
   LibXR::Assert::RegisterFatalErrorCallback(err_cb);
-
-  test_print_binding();
-  test_database_binding_sequential();
-  test_database_binding_raw();
-  return 0;
+  return RunBindingTestBinary();
 }
