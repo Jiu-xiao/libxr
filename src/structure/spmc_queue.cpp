@@ -59,10 +59,7 @@ SPMCQueueBase::~SPMCQueueBase()
  * @brief 按字节入队一个 payload / Enqueue one payload by bytes
  * @param value 指向待入队 payload 的指针 / Pointer to the payload to enqueue
  */
-ErrorCode SPMCQueueBase::PushBytes(const void* value)
-{
-  return PushBatchBytes(value, 1);
-}
+ErrorCode SPMCQueueBase::PushBytes(const void* value) { return PushBatchBytes(value, 1); }
 
 /**
  * @brief 按字节批量入队多个 payload / Enqueue multiple payloads by bytes
@@ -98,8 +95,7 @@ ErrorCode SPMCQueueBase::PushBatchBytes(const void* data, size_t count)
     const SequenceType slot_position = position + index;
     SequenceCell& slot = sequences_[slot_position % capacity_];
     const SequenceType sequence = slot.value.load(std::memory_order_acquire);
-    const SequenceDiffType diff =
-        static_cast<SequenceDiffType>(sequence - slot_position);
+    const SequenceDiffType diff = static_cast<SequenceDiffType>(sequence - slot_position);
     if (diff != 0)
     {
       return ErrorCode::FULL;
@@ -124,10 +120,7 @@ ErrorCode SPMCQueueBase::PushBatchBytes(const void* data, size_t count)
  * @param value 用于接收 payload 的缓冲区；传 `nullptr` 时仅丢弃
  *        / Buffer receiving the payload; pass `nullptr` to discard only
  */
-ErrorCode SPMCQueueBase::PopBytes(void* value)
-{
-  return PopBatchBytes(value, 1);
-}
+ErrorCode SPMCQueueBase::PopBytes(void* value) { return PopBatchBytes(value, 1); }
 
 /**
  * @brief 按字节批量出队多个 payload / Dequeue multiple payloads by bytes
@@ -157,8 +150,7 @@ ErrorCode SPMCQueueBase::PopBatchBytes(void* data, size_t count)
     }
 
     if (head_.compare_exchange_weak(position, position + static_cast<SequenceType>(count),
-                                    std::memory_order_relaxed,
-                                    std::memory_order_relaxed))
+                                    std::memory_order_relaxed, std::memory_order_relaxed))
     {
       break;
     }
