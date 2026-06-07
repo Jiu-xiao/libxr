@@ -1,9 +1,7 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <type_traits>
-#include <utility>
 
 #include "spsc_queue_core.hpp"
 
@@ -56,19 +54,14 @@ class SPSCQueue
 
   /**
    * @brief 向队列尾部推入一个 payload / Push one payload into the queue tail
-   * @tparam ElementData 实参类型 / Argument type
    * @param item 待入队 payload / Payload to enqueue
    * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when
    *         the queue is full
    */
-  template <typename ElementData = Data>
-  ErrorCode Push(ElementData&& item)
+  ErrorCode Push(const Data& item)
   {
-    static_assert(std::is_convertible_v<ElementData, Data>,
-                  "SPSCQueue::Push element type must be convertible to Data");
-    Data tmp = std::forward<ElementData>(item);
-    return core_.PushBytes(&tmp);
+    return core_.PushBytes(&item);
   }
 
   /**
