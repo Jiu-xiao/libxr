@@ -1,8 +1,9 @@
 #include "mpmc_queue_core.hpp"
 
 #include <algorithm>
-#include <cstring>
 #include <new>
+
+#include "libxr_mem.hpp"
 
 namespace LibXR
 {
@@ -80,7 +81,7 @@ ErrorCode MPMCQueueCore::PushBytes(const void* value)
       if (tail_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed,
                                       std::memory_order_relaxed))
       {
-        std::memcpy(PayloadPtr(position % capacity_), value, element_size_);
+        LibXR::Memory::FastCopy(PayloadPtr(position % capacity_), value, element_size_);
         slot.value.store(position + 1, std::memory_order_release);
         return ErrorCode::OK;
       }
@@ -122,7 +123,7 @@ ErrorCode MPMCQueueCore::PopBytes(void* value)
       if (head_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed,
                                       std::memory_order_relaxed))
       {
-        std::memcpy(value, PayloadPtr(position % capacity_), element_size_);
+        LibXR::Memory::FastCopy(value, PayloadPtr(position % capacity_), element_size_);
         slot.value.store(position + static_cast<SequenceType>(capacity_),
                          std::memory_order_release);
         return ErrorCode::OK;
