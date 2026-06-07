@@ -1,9 +1,8 @@
-#include "spmc_queue.hpp"
-
 #include <algorithm>
 #include <new>
 
 #include "libxr_mem.hpp"
+#include "spmc_queue.hpp"
 
 namespace LibXR
 {
