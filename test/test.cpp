@@ -83,6 +83,7 @@ static void run_libxr_tests()
 
   TestCase data_structure_tests[] = {{"rbt", test_rbt, false},
                                      {"queue", test_queue, false},
+                                     {"mpmc_queue", test_mpmc_queue, false},
                                      {"pool", test_lock_free_pool, false},
                                      {"stack", test_stack, false},
                                      {"list", test_list, false},

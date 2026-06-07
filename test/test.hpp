@@ -6,6 +6,7 @@ void test_inertia();
 void test_list();
 void test_kinematic();
 void test_message();
+void test_mpmc_queue();
 void test_queue();
 void test_lock_free_pool();
 void test_rbt();
