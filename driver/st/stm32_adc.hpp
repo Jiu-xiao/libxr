@@ -11,6 +11,7 @@
 #endif
 
 #include "adc.hpp"
+#include "libxr_def.hpp"
 #include "libxr.hpp"
 
 namespace LibXR
