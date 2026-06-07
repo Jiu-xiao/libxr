@@ -55,7 +55,7 @@ class ApplicationManager
    */
   void Register(Application& app)
   {
-    auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
+    auto node = new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
         LibXR::LockFreeList::Node<Application*>(&app);
     app_list_.Add(*node);
   }
