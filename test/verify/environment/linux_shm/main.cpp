@@ -6,7 +6,7 @@
  * 1. 安装验证二进制的 fatal assertion 回调。 Install the fatal assertion callback for the verification binary.
  * 2. 执行 `LinuxSharedTopic` 的环境验证入口。 Execute the `LinuxSharedTopic` environment verification entrypoint.
  */
-#include "../../../harness/test_matrix.hpp"
+#include "../../../framework/test_matrix.hpp"
 
 #include <cstdlib>
 

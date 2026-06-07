@@ -2,7 +2,7 @@
  * @file bench_linux_shared_topic.cpp
  * @brief `LinuxSharedTopic` 基准聚合入口。 Aggregation entry for split `LinuxSharedTopic` benchmarks.
  */
-#include "../../harness/test_matrix.hpp"
+#include "../../framework/test_matrix.hpp"
 
 /**
  * @brief 辅助函数 `main`。 Helper function `main`.
