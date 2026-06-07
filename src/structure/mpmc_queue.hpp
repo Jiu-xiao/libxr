@@ -21,13 +21,15 @@ namespace LibXR
 template <typename Payload>
 class MPMCQueue
 {
+  /// @brief 仅接受平凡可拷贝 payload / Accepts only trivially copyable payloads.
   static_assert(std::is_trivially_copyable_v<Payload>,
                 "MPMCQueue requires trivially copyable payloads");
+  /// @brief 仅接受平凡可析构 payload / Accepts only trivially destructible payloads.
   static_assert(std::is_trivially_destructible_v<Payload>,
                 "MPMCQueue requires trivially destructible payloads");
 
  public:
-  using ValueType = Payload;
+  using ValueType = Payload;  ///< 队列元素类型 / Queue element type.
 
   /**
    * @brief 构造一个 MPMC 队列 / Construct one MPMC queue
@@ -86,6 +88,6 @@ class MPMCQueue
   [[nodiscard]] size_t EmptySize() const { return core_.EmptySize(); }
 
  protected:
-  MPMCQueueCore core_;
+  MPMCQueueCore core_;  ///< 共享字节队列内核 / Shared byte-queue core.
 };
 }  // namespace LibXR

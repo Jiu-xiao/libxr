@@ -26,18 +26,48 @@ namespace LibXR
 class MPMCQueueCore
 {
  public:
-  using SequenceType = size_t;
-  using SequenceDiffType = std::make_signed_t<SequenceType>;
+  using SequenceType = size_t;  ///< 单调递增的逻辑序号类型 / Monotonic logical sequence type.
+  using SequenceDiffType =
+      std::make_signed_t<SequenceType>;  ///< 序号差值判定类型 / Signed type used for sequence-delta checks.
 
+  /**
+   * @brief 构造一个字节队列内核 / Construct one byte-queue core
+   * @param element_size 单个 payload 的字节数 / Byte size of one payload
+   * @param capacity 队列容量 / Queue capacity
+   */
   MPMCQueueCore(size_t element_size, size_t capacity);
+  /**
+   * @brief 析构字节队列内核 / Destroy the byte-queue core
+   */
   ~MPMCQueueCore();
 
+  /// @brief 禁止拷贝构造 / Non-copyable.
   MPMCQueueCore(const MPMCQueueCore&) = delete;
+  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
   MPMCQueueCore& operator=(const MPMCQueueCore&) = delete;
+  /// @brief 禁止移动构造 / Non-movable.
   MPMCQueueCore(MPMCQueueCore&&) = delete;
+  /// @brief 禁止移动赋值 / Non-move-assignable.
   MPMCQueueCore& operator=(MPMCQueueCore&&) = delete;
 
+  /**
+   * @brief 按字节入队一个 payload / Enqueue one payload by bytes
+   * @param value 指向待入队 payload 的指针 / Pointer to the payload to enqueue
+   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`；空指针返回
+   *         `ErrorCode::PTR_NULL`
+   *         Returns `ErrorCode::OK` on success; `ErrorCode::FULL` when the
+   *         queue is full; `ErrorCode::PTR_NULL` when `value` is null
+   */
   ErrorCode PushBytes(const void* value);
+  /**
+   * @brief 按字节出队一个 payload；传空指针时只丢弃队头元素
+   *        / Dequeue one payload by bytes; pass null to discard the front item only
+   * @param value 用于接收 payload 的缓冲区；传 `nullptr` 时仅丢弃
+   *        / Buffer that receives the payload; pass `nullptr` to discard only
+   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
+   *         the queue is empty
+   */
   ErrorCode PopBytes(void* value = nullptr);
 
   [[nodiscard]] size_t MaxSize() const { return capacity_; }
@@ -59,25 +89,33 @@ class MPMCQueueCore
   [[nodiscard]] size_t ElementSize() const { return element_size_; }
 
  private:
+  /// @brief 每个逻辑槽对应的序号单元 / Sequence cell for one logical slot.
   struct alignas(LibXR::CONCURRENCY_ALIGNMENT) SequenceCell
   {
-    std::atomic<SequenceType> value;
+    std::atomic<SequenceType> value;  ///< 当前槽的逻辑序号 / Current logical sequence of the slot.
   };
 
+  /// @brief 获取指定槽位 payload 起始地址 / Get the payload base address of one slot.
   [[nodiscard]] void* PayloadPtr(size_t index);
+  /// @brief 获取指定槽位 payload 起始地址（只读） / Get the payload base address of one slot (const).
   [[nodiscard]] const void* PayloadPtr(size_t index) const;
+  /// @brief 安全地向上对齐字节数 / Safely align one byte count upward.
   [[nodiscard]] static size_t AlignUpChecked(size_t value, size_t align);
+  /// @brief 安全地计算乘积 / Safely multiply two size values.
   [[nodiscard]] static size_t MultiplyChecked(size_t lhs, size_t rhs);
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
-      std::max(alignof(size_t), alignof(std::max_align_t));
+      std::max(alignof(size_t),
+               alignof(std::max_align_t));  ///< payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer.
 
-  const size_t element_size_;
-  const size_t capacity_;
-  const size_t payload_stride_;
-  SequenceCell* sequences_;
-  std::byte* payloads_;
+  const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
+  const size_t capacity_;        ///< 队列容量 / Queue capacity.
+  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长 / Byte stride between adjacent payload slots.
+  SequenceCell* sequences_;      ///< 槽序号数组 / Array of per-slot sequence cells.
+  std::byte* payloads_;          ///< payload 字节缓冲区 / Byte buffer storing payloads.
 
-  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType> head_;
-  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType> tail_;
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType>
+      head_;  ///< 下一个待出队的逻辑位置 / Next logical dequeue position.
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType>
+      tail_;  ///< 下一个待入队的逻辑位置 / Next logical enqueue position.
 };
 }  // namespace LibXR

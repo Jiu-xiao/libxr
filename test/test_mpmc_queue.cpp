@@ -9,30 +9,44 @@
 
 namespace
 {
-using Queue = LibXR::MPMCQueue<uint16_t>;
+using Queue = LibXR::MPMCQueue<uint16_t>;  ///< 默认压力用 16 位 payload 队列 / Default stress-test queue using 16-bit payloads.
 
+/**
+ * @brief 比较两个双精度值是否足够接近 / Check whether two doubles are close enough
+ */
 bool EqualDouble(double a, double b) { return std::abs(a - b) < 1e-9; }
 
+/**
+ * @struct ProducerArg
+ * @brief 生产者线程参数 / Producer-thread arguments
+ */
 struct ProducerArg
 {
-  size_t begin;
-  size_t count;
-  Queue* queue;
-  std::atomic<size_t>* done_count;
+  size_t begin;                    ///< 本生产者负责的起始值 / First value owned by this producer.
+  size_t count;                    ///< 本生产者负责推送的元素数 / Number of items pushed by this producer.
+  Queue* queue;                    ///< 共享队列 / Shared queue instance.
+  std::atomic<size_t>* done_count;  ///< 完成计数器 / Producer completion counter.
 };
 
+/**
+ * @struct ConsumerArg
+ * @brief 消费者线程参数 / Consumer-thread arguments
+ */
 struct ConsumerArg
 {
-  Queue* queue;
-  size_t total_items;
-  size_t producer_count;
-  std::atomic<size_t>* produced_done_count;
-  std::atomic<size_t>* consumed_done_count;
-  std::atomic<size_t>* pop_count;
-  std::atomic<unsigned long long>* pop_sum;
-  std::atomic<uint8_t>* seen;
+  Queue* queue;                                 ///< 共享队列 / Shared queue instance.
+  size_t total_items;                           ///< 目标总元素数 / Expected total item count.
+  size_t producer_count;                        ///< 生产者总数 / Total number of producers.
+  std::atomic<size_t>* produced_done_count;     ///< 生产者完成计数 / Producer completion counter.
+  std::atomic<size_t>* consumed_done_count;     ///< 消费者完成计数 / Consumer completion counter.
+  std::atomic<size_t>* pop_count;               ///< 已消费元素数 / Total consumed item count.
+  std::atomic<unsigned long long>* pop_sum;     ///< 已消费元素和 / Running sum of consumed values.
+  std::atomic<uint8_t>* seen;                   ///< 去重标记表 / Deduplication mark table.
 };
 
+/**
+ * @brief 生产者线程函数 / Producer-thread entry
+ */
 void ProducerTask(ProducerArg arg)
 {
   for (size_t offset = 0; offset < arg.count; ++offset)
@@ -48,6 +62,9 @@ void ProducerTask(ProducerArg arg)
   arg.done_count->fetch_add(1, std::memory_order_release);
 }
 
+/**
+ * @brief 消费者线程函数 / Consumer-thread entry
+ */
 void ConsumerTask(ConsumerArg arg)
 {
   while (true)
@@ -80,8 +97,13 @@ void ConsumerTask(ConsumerArg arg)
 }
 }  // namespace
 
+/**
+ * @brief 验证有界 MPMC 队列的基础行为和并发语义 / Verify basic behavior and
+ *        concurrent semantics of the bounded MPMC queue
+ */
 void test_mpmc_queue()
 {
+  // Basic empty/full behavior on a tiny queue.
   {
     Queue queue(3);
     Queue::ValueType value = 0;
@@ -109,6 +131,7 @@ void test_mpmc_queue()
     ASSERT(queue.EmptySize() == 3);
   }
 
+  // Repeat fill-and-drain cycles to verify FIFO order stays stable.
   {
     Queue queue(4);
     Queue::ValueType value = 0;
@@ -133,6 +156,7 @@ void test_mpmc_queue()
     }
   }
 
+  // Verify naturally aligned non-integer payloads also work.
   {
     LibXR::MPMCQueue<double> queue(2);
     double value = 0.0;
@@ -148,6 +172,7 @@ void test_mpmc_queue()
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
+  // Two producers and two consumers with the smallest legal capacity.
   {
     constexpr size_t PRODUCER_COUNT = 2;
     constexpr size_t CONSUMER_COUNT = 2;
@@ -206,6 +231,7 @@ void test_mpmc_queue()
     }
   }
 
+  // Wider producer/consumer fan-in/fan-out on a moderate queue capacity.
   {
     constexpr size_t PRODUCER_COUNT = 4;
     constexpr size_t CONSUMER_COUNT = 4;
