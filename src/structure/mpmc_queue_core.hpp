@@ -24,7 +24,7 @@ namespace LibXR
 class MPMCQueueCore
 {
  public:
-  using SequenceType = uint32_t;
+  using SequenceType = size_t;
 
   MPMCQueueCore(size_t element_size, size_t capacity);
   ~MPMCQueueCore();
@@ -39,6 +39,19 @@ class MPMCQueueCore
   ErrorCode PopBytes();
 
   [[nodiscard]] size_t MaxSize() const { return capacity_; }
+  /**
+   * @brief 获取并发快照下的当前元素数 / Get the current approximate element count
+   *
+   * @note 该值是近似快照：
+   *       - 在并发入队/出队时，该值可能已经过期；
+   *       - 这里按 `SequenceType` 的模差值估算已用槽数，再钳到 `[0, MaxSize()]`，
+   *         因此即使极端长寿命下序号回绕后，它仍然只是近似值，而不是精确值。
+   *       This value is an approximate snapshot:
+   *       - it may already be stale while producers/consumers are progressing;
+   *       - it is computed from modular `SequenceType` differences and then
+   *         clamped to `[0, MaxSize()]`, so it remains approximate rather than
+   *         exact even after very long-lived sequence wraparound.
+   */
   [[nodiscard]] size_t Size() const;
   [[nodiscard]] size_t EmptySize() const { return capacity_ - Size(); }
   [[nodiscard]] size_t ElementSize() const { return element_size_; }

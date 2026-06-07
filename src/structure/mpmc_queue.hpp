@@ -10,6 +10,13 @@ namespace LibXR
 /**
  * @class MPMCQueue
  * @brief 带固定 payload 类型的有界 MPMC 队列 / Bounded MPMC queue with a fixed payload type
+ *
+ * 队列内部只把 payload 当成原始字节块搬运，不会在内部形成 `Payload*` 指针，
+ * 因此 `Payload` 的对齐要求不会额外约束队列内部字节缓冲区的语义边界。
+ *
+ * The queue moves payloads only as raw byte blocks and never forms internal
+ * `Payload*` pointers, so `Payload` alignment does not add an extra semantic
+ * constraint on the internal byte-buffer contract.
  */
 template <typename Payload>
 class MPMCQueue
@@ -18,8 +25,6 @@ class MPMCQueue
                 "MPMCQueue requires trivially copyable payloads");
   static_assert(std::is_trivially_destructible_v<Payload>,
                 "MPMCQueue requires trivially destructible payloads");
-  static_assert(alignof(Payload) <= alignof(size_t),
-                "MPMCQueue only supports payloads aligned no stricter than size_t");
 
  public:
   using ValueType = Payload;

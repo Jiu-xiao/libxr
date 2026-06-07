@@ -17,9 +17,8 @@ MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
       payload_stride_(AlignUp(element_size_, alignof(size_t))),
       payload_alloc_align_(std::max(alignof(size_t), alignof(std::max_align_t))),
       sequences_(new (std::align_val_t(alignof(SequenceCell))) SequenceCell[capacity_]),
-      payloads_(static_cast<std::byte*>(
-          ::operator new[](payload_stride_ * capacity_,
-                           std::align_val_t(payload_alloc_align_)))),
+      payloads_(static_cast<std::byte*>(::operator new[](
+          payload_stride_* capacity_, std::align_val_t(payload_alloc_align_)))),
       head_(0),
       tail_(0)
 {
@@ -166,8 +165,7 @@ size_t MPMCQueueCore::Size() const
 {
   const SequenceType head_snapshot = head_.load(std::memory_order_acquire);
   const SequenceType tail_snapshot = tail_.load(std::memory_order_acquire);
-  const SequenceType used =
-      (tail_snapshot >= head_snapshot) ? (tail_snapshot - head_snapshot) : 0;
+  const SequenceType used = tail_snapshot - head_snapshot;
   return (used <= capacity_) ? used : capacity_;
 }
 
@@ -181,7 +179,8 @@ void* MPMCQueueCore::PayloadPtr(size_t index)
 }
 
 /**
- * @brief 获取指定槽位 payload 起始地址（只读） / Get the payload base address of one slot (const)
+ * @brief 获取指定槽位 payload 起始地址（只读）
+ *        / Get the payload base address of one slot (const)
  * @param index 槽位下标 / Slot index
  */
 const void* MPMCQueueCore::PayloadPtr(size_t index) const

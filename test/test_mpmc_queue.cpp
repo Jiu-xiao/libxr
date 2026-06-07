@@ -3,12 +3,15 @@
 #include "test.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
 namespace
 {
 using Queue = LibXR::MPMCQueue<uint16_t>;
+
+bool EqualDouble(double a, double b) { return std::abs(a - b) < 1e-9; }
 
 struct ProducerArg
 {
@@ -128,6 +131,21 @@ void test_mpmc_queue()
       ASSERT(value == round * 4 + 3);
       ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
     }
+  }
+
+  {
+    LibXR::MPMCQueue<double> queue(2);
+    double value = 0.0;
+
+    ASSERT(queue.Push(1.25) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Push(2.5) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Push(3.75) == LibXR::ErrorCode::FULL);
+
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(EqualDouble(value, 1.25));
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(EqualDouble(value, 2.5));
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
   {
