@@ -17,15 +17,18 @@
 inline int RunVerifyLinuxShmBinary()
 {
   TestRuntimeSet runtime_set;
-  if (!LoadRuntimeSetFromEnv(runtime_set))
+  const LibXR::ErrorCode load_result = LoadRuntimeSetFromEnv(runtime_set);
+  if (!IsOk(load_result))
   {
-    return 2;
+    return ErrorCodeToExitStatus(load_result);
   }
-  if (RequireRuntimeSet(runtime_set, TestRuntimeSet::FULL_OS, "test_linux_shm_topic") != 0)
+  const LibXR::ErrorCode require_result = RequireRuntimeSet(
+      runtime_set, TestRuntimeSet::FULL_OS, "test_linux_shm_topic");
+  if (!IsOk(require_result))
   {
-    return 1;
+    return ErrorCodeToExitStatus(require_result);
   }
 
   test_linux_shm_topic();
-  return 0;
+  return ErrorCodeToExitStatus(LibXR::ErrorCode::OK);
 }

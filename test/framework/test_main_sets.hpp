@@ -117,9 +117,10 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
 inline int RunMainTestBinary()
 {
   TestRuntimeSet runtime_set;
-  if (!LoadRuntimeSetFromEnv(runtime_set))
+  const LibXR::ErrorCode load_result = LoadRuntimeSetFromEnv(runtime_set);
+  if (!IsOk(load_result))
   {
-    return 2;
+    return ErrorCodeToExitStatus(load_result);
   }
 
   XR_LOG_INFO("Running LibXR Tests...\n");
@@ -148,11 +149,11 @@ inline int RunMainTestBinary()
   {
     std::fprintf(stderr, "no matching main tests for XR_TEST_SET=%s\n",
                  RuntimeSetName(runtime_set));
-    return 1;
+    return ErrorCodeToExitStatus(LibXR::ErrorCode::NOT_FOUND);
   }
 
   XR_LOG_INFO("All tests completed.\n");
   std::fprintf(stderr, "All tests completed.\n");
   std::fflush(stderr);
-  return 0;
+  return ErrorCodeToExitStatus(LibXR::ErrorCode::OK);
 }

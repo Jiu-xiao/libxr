@@ -23,18 +23,21 @@ inline constexpr TestCase kBindingTests[] = {
 inline int RunBindingTestBinary()
 {
   TestRuntimeSet runtime_set;
-  if (!LoadRuntimeSetFromEnv(runtime_set))
+  const LibXR::ErrorCode load_result = LoadRuntimeSetFromEnv(runtime_set);
+  if (!IsOk(load_result))
   {
-    return 2;
+    return ErrorCodeToExitStatus(load_result);
   }
-  if (RequireRuntimeSet(runtime_set, TestRuntimeSet::FULL_OS, "test_binding") != 0)
+  const LibXR::ErrorCode require_result =
+      RequireRuntimeSet(runtime_set, TestRuntimeSet::FULL_OS, "test_binding");
+  if (!IsOk(require_result))
   {
-    return 1;
+    return ErrorCodeToExitStatus(require_result);
   }
 
   for (const auto& test_case : kBindingTests)
   {
     run_test_case(test_case);
   }
-  return 0;
+  return ErrorCodeToExitStatus(LibXR::ErrorCode::OK);
 }
