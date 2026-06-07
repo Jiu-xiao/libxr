@@ -53,13 +53,7 @@ void TestPacketAlignmentAndLengthCompatibility()
   ASSERT(prefix_topic.PackData(prefix_tx, prefix_packet,
                                LibXR::MicrosecondTimestamp(6116)) ==
          LibXR::ErrorCode::OK);
-  prefix_packet.raw.header_.SetDataLen(sizeof(int32_t));
-  prefix_packet.raw.header_.pack_header_crc8 =
-      LibXR::CRC8::Calculate(&prefix_packet.raw,
-                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
-  prefix_packet.crc8_ =
-      LibXR::CRC8::Calculate(&prefix_packet, LibXR::Topic::PACK_BASE_SIZE - 1 +
-                                                 sizeof(int32_t));
+  RewritePacketPayloadLengthForTest(prefix_packet, sizeof(int32_t));
   prefix_rx = PrefixIntPayload{-1, -1};
   ASSERT(prefix_server.ParseData(
              LibXR::ConstRawData(&prefix_packet, LibXR::Topic::PACK_BASE_SIZE +

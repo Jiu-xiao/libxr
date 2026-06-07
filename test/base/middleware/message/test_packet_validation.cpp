@@ -52,12 +52,7 @@ void TestPacketValidationFailures()
   ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_version_packet)) == 0);
 
   auto truncated_packet = packed_data;
-  truncated_packet.raw.header_.SetDataLen(sizeof(double) - 1);
-  truncated_packet.raw.header_.pack_header_crc8 =
-      LibXR::CRC8::Calculate(&truncated_packet.raw,
-                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
-  truncated_packet.crc8_ =
-      LibXR::CRC8::Calculate(&truncated_packet, PACKET_SIZE - sizeof(uint8_t) - 1);
+  RewritePacketPayloadLengthForTest(truncated_packet, sizeof(double) - 1);
   rx_value = -1.0;
   ASSERT(topic_server.ParseData(
              LibXR::ConstRawData(&truncated_packet, PACKET_SIZE - 1)) == 1);
