@@ -10,14 +10,27 @@
  * 1. 使用真实 runtime 线程驱动阻塞等待，因为这些语义在 base 平面不存在。 Use real runtime threads for the blocking wait path, because these semantics do not exist on the base plane alone.
  * 2. 同时检查 wait 返回码和收到的数据/时间戳，保证同步和数据传递一起被验证。 Check both wait return codes and received payload/timestamp values so synchronization and data delivery are validated together.
  */
-#include <thread>
-
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
 
 namespace
 {
+struct WaitContext
+{
+  LibXR::Topic::SyncSubscriber<int>* subscriber;
+  LibXR::ErrorCode result;
+};
+
+/**
+ * @brief 辅助函数 `WaitForSyncSubscriber`。 Helper function `WaitForSyncSubscriber`.
+ * @details 测试内容：在 LibXR 线程中执行同步订阅等待。 Execute sync-subscriber waiting inside a LibXR thread.
+ *          测试原理：只通过 LibXR thread API 构造等待者，避免测试体依赖宿主线程库。 Use only LibXR's thread API to construct the waiter, avoiding host-thread-library dependencies in the test body.
+ */
+void WaitForSyncSubscriber(WaitContext* ctx)
+{
+  ctx->result = ctx->subscriber->Wait(200);
+}
 
 /**
  * @brief 测试项函数 `TestASyncSubscriberFreshWait`。 Test-item function `TestASyncSubscriberFreshWait`.
@@ -81,8 +94,10 @@ void TestSyncSubscriberFreshWait()
 
   auto wait_and_publish = [&](auto publish)
   {
-    LibXR::ErrorCode wait_result = LibXR::ErrorCode::FAILED;
-    std::thread wait_thread([&]() { wait_result = suber.Wait(200); });
+    WaitContext ctx{&suber, LibXR::ErrorCode::FAILED};
+    LibXR::Thread wait_thread;
+    wait_thread.Create<WaitContext*>(&ctx, WaitForSyncSubscriber, "msg_sync_wait",
+                                     1024, LibXR::Thread::Priority::MEDIUM);
 
     for (uint32_t i = 0;
          i < 1000000 &&
@@ -90,15 +105,19 @@ void TestSyncSubscriberFreshWait()
              LibXR::Topic::SyncBlock::WAITING;
          i++)
     {
-      std::this_thread::yield();
+      LibXR::Thread::Yield();
     }
 
     ASSERT(suber.block_->data_.wait_state.load(std::memory_order_acquire) ==
            LibXR::Topic::SyncBlock::WAITING);
     ASSERT(suber.Wait(0) == LibXR::ErrorCode::BUSY);
     publish();
-    wait_thread.join();
-    ASSERT(wait_result == LibXR::ErrorCode::OK);
+    for (uint32_t i = 0; i < 1000000 && ctx.result != LibXR::ErrorCode::OK; i++)
+    {
+      LibXR::Thread::Yield();
+    }
+    LibXR::Thread::Sleep(1);
+    ASSERT(ctx.result == LibXR::ErrorCode::OK);
   };
 
   int value = 6;
