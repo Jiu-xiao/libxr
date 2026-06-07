@@ -13,6 +13,9 @@ list(SORT XR_TEST_RUNTIME_SOURCES)
 set(XR_TEST_HARNESS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/harness/main.cpp"
 )
+set(XR_TEST_MATRIX_TOOL_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/harness/test_matrix_tool.cpp"
+)
 
 add_executable(test
   ${XR_TEST_HARNESS_SOURCES}
@@ -25,6 +28,20 @@ target_link_libraries(test PUBLIC xr)
 
 target_include_directories(
   test
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/harness"
+  PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
+)
+
+add_executable(test_matrix_tool
+  ${XR_TEST_MATRIX_TOOL_SOURCES}
+)
+add_dependencies(test_matrix_tool xr)
+
+target_link_libraries(test_matrix_tool PUBLIC xr)
+
+target_include_directories(
+  test_matrix_tool
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/harness"
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
