@@ -6,7 +6,7 @@
  * 1. 安装验证二进制的 fatal assertion 回调。 Install the fatal assertion callback for the verification binary.
  * 2. 执行 `LinuxSharedTopic` 的环境验证入口。 Execute the `LinuxSharedTopic` environment verification entrypoint.
  */
-#include "../../../framework/test_verify_registry.hpp"
+#include "../../../framework/test_verify_sets.hpp"
 
 #include <cstdlib>
 
@@ -36,5 +36,5 @@ int main()
       reinterpret_cast<void*>(0));
 
   LibXR::Assert::RegisterFatalErrorCallback(err_cb);
-  return RunVerifyTestBinary(TestBinary::VERIFY_LINUX_SHM);
+  return RunVerifyLinuxShmBinary();
 }

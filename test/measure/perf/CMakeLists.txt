@@ -5,7 +5,6 @@ list(SORT XR_BENCH_LINUX_SHARED_TOPIC_SOURCES)
 
 add_executable(bench_linux_shared_topic ${XR_BENCH_LINUX_SHARED_TOPIC_SOURCES})
 add_dependencies(bench_linux_shared_topic xr)
-add_dependencies(bench_linux_shared_topic test_matrix_validate)
 
 target_link_libraries(bench_linux_shared_topic PUBLIC xr)
 

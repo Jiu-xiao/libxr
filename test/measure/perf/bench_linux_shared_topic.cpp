@@ -2,7 +2,7 @@
  * @file bench_linux_shared_topic.cpp
  * @brief `LinuxSharedTopic` 基准聚合入口。 Aggregation entry for split `LinuxSharedTopic` benchmarks.
  */
-#include "../../framework/test_bench_registry.hpp"
+#include "../../framework/test_bench_sets.hpp"
 
 /**
  * @brief 辅助函数 `main`。 Helper function `main`.
@@ -13,5 +13,5 @@ int main()
 {
   LibXR::PlatformInit();
   const char* bench_set = std::getenv("BENCH_SET");
-  return RunBenchTestBinary(bench_set);
+  return RunBenchLinuxSharedTopicBinary(bench_set);
 }

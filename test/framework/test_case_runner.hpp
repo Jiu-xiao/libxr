@@ -39,6 +39,13 @@ struct TestCase
   bool isolated;
 };
 
+template <void (*Fn)()>
+int RunVoidEntry()
+{
+  Fn();
+  return 0;
+}
+
 /**
  * @brief 辅助函数 `run_test_case`。 Helper function `run_test_case`.
  * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.

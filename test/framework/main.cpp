@@ -8,7 +8,7 @@
  *          1. Register the fatal test callback that converts assertion failures into process failure.
  *          2. Invoke the split test-group registry.
  */
-#include "test_group_registry.hpp"
+#include "test_main_sets.hpp"
 
 #include <cmath>
 
@@ -40,9 +40,7 @@ int main()
 
   LibXR::Assert::RegisterFatalErrorCallback(err_cb);
 
-  run_libxr_tests();
-
-  exit(0);
-
-  return 0;
+  const int status = RunMainTestBinary();
+  exit(status);
+  return status;
 }

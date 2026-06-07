@@ -6,7 +6,7 @@
  * 1. 安装 binding 测试的 fatal assertion 回调。 Install the fatal assertion callback for binding tests.
  * 2. 按确定顺序执行 binding 平面测试入口。 Run the binding-specific test entrypoints in a deterministic order.
  */
-#include "test_binding_registry.hpp"
+#include "test_binding_sets.hpp"
 
 #include <cstdlib>
 
