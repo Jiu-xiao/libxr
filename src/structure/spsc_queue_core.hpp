@@ -6,7 +6,6 @@
 #include <limits>
 #include <new>
 #include <type_traits>
-#include <utility>
 
 #include "libxr_def.hpp"
 #include "libxr_mem.hpp"
@@ -29,6 +28,9 @@ namespace LibXR
 class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
 {
  public:
+  template <typename Data>
+  friend class SPSCQueue;
+
   using IndexType = size_t;  ///< 环形缓冲区索引类型 / Ring-buffer index type.
 
   /**
@@ -72,41 +74,19 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
   SPSCQueueCore& operator=(SPSCQueueCore&&) = delete;
 
   /**
-   * @brief 获取指定槽位 payload 起始地址 / Get the payload base address of one slot
-   * @param index 目标槽位下标 / Target slot index
-   */
-  std::byte* PayloadPtr(IndexType index)
-  {
-    return payloads_ + index * payload_stride_;
-  }
-
-  /**
-   * @brief 获取指定槽位 payload 起始地址（只读）
-   *        / Get the payload base address of one slot (const)
-   * @param index 目标槽位下标 / Target slot index
-   */
-  const std::byte* PayloadPtr(IndexType index) const
-  {
-    return payloads_ + index * payload_stride_;
-  }
-
-  /**
-   * @brief 通过单槽写入器推进一次入队 / Enqueue one payload via a single-slot writer
-   * @tparam Writer 写入器类型 / Writer callback type
-   * @param writer 写入器回调，签名为 `ErrorCode(std::byte* slot)`
-   *        / Writer callback with signature `ErrorCode(std::byte* slot)`
-   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`
+   * @brief 按字节入队一个 payload / Enqueue one payload by bytes
+   * @param value 指向待入队 payload 的指针 / Pointer to the payload to enqueue
+   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`；空指针返回
+   *         `ErrorCode::PTR_NULL`
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when
-   *         the queue is full
+   *         the queue is full; returns `ErrorCode::PTR_NULL` when `value` is null
    */
-  template <typename Writer>
-  ErrorCode PushWithSlot(Writer&& writer)
+  ErrorCode PushBytes(const void* value)
   {
-    static_assert(std::is_invocable_v<Writer&, std::byte*>,
-                  "PushWithSlot writer must be callable as ErrorCode(std::byte*)");
-    using WriterRet = std::invoke_result_t<Writer&, std::byte*>;
-    static_assert(std::is_convertible_v<WriterRet, ErrorCode>,
-                  "PushWithSlot writer return type must be convertible to ErrorCode");
+    if (value == nullptr)
+    {
+      return ErrorCode::PTR_NULL;
+    }
 
     const auto current_tail = tail_.load(std::memory_order_relaxed);
     const auto next_tail = Increment(current_tail);
@@ -116,79 +96,9 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
       return ErrorCode::FULL;
     }
 
-    Writer& writer_ref = writer;
-    const ErrorCode ec = writer_ref(PayloadPtr(current_tail));
-    if (ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-
+    LibXR::Memory::FastCopy(PayloadPtr(current_tail), value, element_size_);
     tail_.store(next_tail, std::memory_order_release);
     return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 通过单槽读取器推进一次出队 / Dequeue one payload via a single-slot reader
-   * @tparam Reader 读取器类型 / Reader callback type
-   * @param reader 读取器回调，签名为 `ErrorCode(const std::byte* slot)`
-   *        / Reader callback with signature `ErrorCode(const std::byte* slot)`
-   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
-   *         the queue is empty
-   */
-  template <typename Reader>
-  ErrorCode PopWithSlot(Reader&& reader)
-  {
-    static_assert(std::is_invocable_v<Reader&, const std::byte*>,
-                  "PopWithSlot reader must be callable as ErrorCode(const std::byte*)");
-    using ReaderRet = std::invoke_result_t<Reader&, const std::byte*>;
-    static_assert(std::is_convertible_v<ReaderRet, ErrorCode>,
-                  "PopWithSlot reader return type must be convertible to ErrorCode");
-
-    const auto current_head = head_.load(std::memory_order_relaxed);
-
-    if (current_head == tail_.load(std::memory_order_acquire))
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    Reader& reader_ref = reader;
-    const ErrorCode ec = reader_ref(PayloadPtr(current_head));
-    if (ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-
-    head_.store(Increment(current_head), std::memory_order_release);
-    return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 通过单槽读取器查看队头但不出队 / Peek the front payload via a single-slot reader
-   * @tparam Reader 读取器类型 / Reader callback type
-   * @param reader 读取器回调，签名为 `ErrorCode(const std::byte* slot)`
-   *        / Reader callback with signature `ErrorCode(const std::byte* slot)`
-   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
-   *         the queue is empty
-   */
-  template <typename Reader>
-  ErrorCode PeekWithSlot(Reader&& reader)
-  {
-    static_assert(std::is_invocable_v<Reader&, const std::byte*>,
-                  "PeekWithSlot reader must be callable as ErrorCode(const std::byte*)");
-    using ReaderRet = std::invoke_result_t<Reader&, const std::byte*>;
-    static_assert(std::is_convertible_v<ReaderRet, ErrorCode>,
-                  "PeekWithSlot reader return type must be convertible to ErrorCode");
-
-    const auto current_head = head_.load(std::memory_order_relaxed);
-    if (current_head == tail_.load(std::memory_order_acquire))
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    Reader& reader_ref = reader;
-    return reader_ref(PayloadPtr(current_head));
   }
 
   /**
@@ -202,15 +112,172 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
    */
   ErrorCode PopBytes(void* value = nullptr)
   {
-    return PopWithSlot(
-        [&](const std::byte* slot)
-        {
-          if (value != nullptr)
-          {
-            LibXR::Memory::FastCopy(value, slot, element_size_);
-          }
-          return ErrorCode::OK;
-        });
+    const auto current_head = head_.load(std::memory_order_relaxed);
+
+    if (current_head == tail_.load(std::memory_order_acquire))
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    if (value != nullptr)
+    {
+      LibXR::Memory::FastCopy(value, PayloadPtr(current_head), element_size_);
+    }
+
+    head_.store(Increment(current_head), std::memory_order_release);
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 按字节查看一个队头 payload 但不出队 / Peek one front payload by bytes without dequeuing it
+   * @param value 用于接收 payload 的缓冲区 / Buffer that receives the payload
+   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`；空指针返回
+   *         `ErrorCode::PTR_NULL`
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
+   *         the queue is empty; returns `ErrorCode::PTR_NULL` when `value` is null
+   */
+  ErrorCode PeekBytes(void* value)
+  {
+    if (value == nullptr)
+    {
+      return ErrorCode::PTR_NULL;
+    }
+
+    const auto current_head = head_.load(std::memory_order_relaxed);
+    if (current_head == tail_.load(std::memory_order_acquire))
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    LibXR::Memory::FastCopy(value, PayloadPtr(current_head), element_size_);
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 按字节批量入队多个 payload / Enqueue multiple payloads by bytes
+   * @param data 指向 payload 数组的字节指针 / Byte pointer to the payload array
+   * @param count payload 个数 / Number of payloads
+   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when
+   *         the queue is full
+   */
+  ErrorCode PushBatchBytes(const void* data, size_t count)
+  {
+    if (count == 0U)
+    {
+      return ErrorCode::OK;
+    }
+    if (data == nullptr)
+    {
+      return ErrorCode::PTR_NULL;
+    }
+
+    const auto current_tail = tail_.load(std::memory_order_relaxed);
+    const auto current_head = head_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t free_space =
+        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
+                                       : (current_head - current_tail - 1);
+
+    if (free_space < count)
+    {
+      return ErrorCode::FULL;
+    }
+
+    const auto* src = static_cast<const std::byte*>(data);
+    for (size_t index = 0; index < count; ++index)
+    {
+      LibXR::Memory::FastCopy(PayloadPtr((current_tail + index) % capacity),
+                              src + index * element_size_, element_size_);
+    }
+
+    tail_.store((current_tail + count) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 按字节批量出队多个 payload / Dequeue multiple payloads by bytes
+   * @param data 用于接收 payload 的字节缓冲区；传 `nullptr` 时仅丢弃
+   *        / Byte buffer receiving payloads; pass `nullptr` to discard only
+   * @param count payload 个数 / Number of payloads
+   * @return 成功返回 `ErrorCode::OK`；元素不足返回 `ErrorCode::EMPTY`
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
+   *         there are not enough payloads available
+   */
+  ErrorCode PopBatchBytes(void* data, size_t count)
+  {
+    if (count == 0U)
+    {
+      return ErrorCode::OK;
+    }
+
+    const auto current_head = head_.load(std::memory_order_relaxed);
+    const auto current_tail = tail_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+
+    if (available < count)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    auto* dst = static_cast<std::byte*>(data);
+    if (dst != nullptr)
+    {
+      for (size_t index = 0; index < count; ++index)
+      {
+        LibXR::Memory::FastCopy(dst + index * element_size_,
+                                PayloadPtr((current_head + index) % capacity),
+                                element_size_);
+      }
+    }
+
+    head_.store((current_head + count) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 按字节批量查看多个 payload 但不出队
+   *        / Peek multiple payloads by bytes without dequeuing them
+   * @param data 用于接收 payload 的字节缓冲区 / Byte buffer receiving payloads
+   * @param count payload 个数 / Number of payloads
+   * @return 成功返回 `ErrorCode::OK`；元素不足返回 `ErrorCode::EMPTY`
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
+   *         there are not enough payloads available
+   */
+  ErrorCode PeekBatchBytes(void* data, size_t count)
+  {
+    if (count == 0U)
+    {
+      return ErrorCode::OK;
+    }
+    if (data == nullptr)
+    {
+      return ErrorCode::PTR_NULL;
+    }
+
+    const auto current_head = head_.load(std::memory_order_relaxed);
+    const auto current_tail = tail_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+
+    if (available < count)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    auto* dst = static_cast<std::byte*>(data);
+    for (size_t index = 0; index < count; ++index)
+    {
+      LibXR::Memory::FastCopy(dst + index * element_size_,
+                              PayloadPtr((current_head + index) % capacity),
+                              element_size_);
+    }
+    return ErrorCode::OK;
   }
 
   /**
@@ -246,6 +313,26 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
    */
   size_t MaxSize() const { return capacity_; }
 
+ private:
+  /**
+   * @brief 获取指定槽位 payload 起始地址 / Get the payload base address of one slot
+   * @param index 目标槽位下标 / Target slot index
+   */
+  std::byte* PayloadPtr(IndexType index)
+  {
+    return payloads_ + index * payload_stride_;
+  }
+
+  /**
+   * @brief 获取指定槽位 payload 起始地址（只读）
+   *        / Get the payload base address of one slot (const)
+   * @param index 目标槽位下标 / Target slot index
+   */
+  const std::byte* PayloadPtr(IndexType index) const
+  {
+    return payloads_ + index * payload_stride_;
+  }
+
   /**
    * @brief 获取环形缓冲区的物理槽位总数 / Get the physical ring-slot count
    * @return 物理环形槽位总数（含一个保留空槽）
@@ -253,45 +340,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
    */
   size_t RingCapacity() const { return capacity_ + 1; }
 
-  /**
-   * @brief 以 relaxed 语义读取 head / Load head with relaxed ordering
-   */
-  IndexType LoadHeadRelaxed() const { return head_.load(std::memory_order_relaxed); }
-
-  /**
-   * @brief 以 acquire 语义读取 head / Load head with acquire ordering
-   */
-  IndexType LoadHeadAcquire() const { return head_.load(std::memory_order_acquire); }
-
-  /**
-   * @brief 以 relaxed 语义读取 tail / Load tail with relaxed ordering
-   */
-  IndexType LoadTailRelaxed() const { return tail_.load(std::memory_order_relaxed); }
-
-  /**
-   * @brief 以 acquire 语义读取 tail / Load tail with acquire ordering
-   */
-  IndexType LoadTailAcquire() const { return tail_.load(std::memory_order_acquire); }
-
-  /**
-   * @brief 以 release 语义写入 head / Store head with release ordering
-   * @param value 新的 head 值 / New head value
-   */
-  void StoreHeadRelease(IndexType value)
-  {
-    head_.store(value, std::memory_order_release);
-  }
-
-  /**
-   * @brief 以 release 语义写入 tail / Store tail with release ordering
-   * @param value 新的 tail 值 / New tail value
-   */
-  void StoreTailRelease(IndexType value)
-  {
-    tail_.store(value, std::memory_order_release);
-  }
-
- protected:
   /**
    * @brief 沿环形缓冲区推进一个槽位 / Advance one slot along the ring
    * @param index 当前槽位下标 / Current slot index
@@ -302,17 +350,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
     return (index + 1) % RingCapacity();
   }
 
-  const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
-  const size_t capacity_;        ///< 队列容量 / Queue capacity.
-  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长 / Byte stride between adjacent payload slots.
-  std::byte* payloads_;          ///< payload 字节缓冲区 / Byte buffer storing payloads.
-
-  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
-      head_;  ///< 下一个待出队的环形下标 / Next ring index to dequeue.
-  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
-      tail_;  ///< 下一个待入队的环形下标 / Next ring index to enqueue.
-
- private:
   /**
    * @brief payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer
    */
@@ -348,5 +385,15 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueCore
     REQUIRE(lhs <= std::numeric_limits<size_t>::max() / rhs);
     return lhs * rhs;
   }
+
+  const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
+  const size_t capacity_;        ///< 队列容量 / Queue capacity.
+  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长 / Byte stride between adjacent payload slots.
+  std::byte* payloads_;          ///< payload 字节缓冲区 / Byte buffer storing payloads.
+
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
+      head_;  ///< 下一个待出队的环形下标 / Next ring index to dequeue.
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
+      tail_;  ///< 下一个待入队的环形下标 / Next ring index to enqueue.
 };
 }  // namespace LibXR

@@ -40,7 +40,7 @@ class SPSCQueue
    */
   explicit SPSCQueue(size_t length) : core_(sizeof(Data), length)
   {
-    for (size_t index = 0; index < core_.RingCapacity(); ++index)
+    for (size_t index = 0; index <= core_.MaxSize(); ++index)
     {
       std::construct_at(SlotPtr(index));
     }
@@ -51,7 +51,7 @@ class SPSCQueue
    */
   ~SPSCQueue()
   {
-    for (size_t index = 0; index < core_.RingCapacity(); ++index)
+    for (size_t index = 0; index <= core_.MaxSize(); ++index)
     {
       std::destroy_at(SlotPtr(index));
     }
@@ -77,12 +77,8 @@ class SPSCQueue
   {
     static_assert(std::is_convertible_v<ElementData, Data>,
                   "SPSCQueue::Push element type must be convertible to Data");
-    return core_.PushWithSlot(
-        [&](std::byte* slot)
-        {
-          *reinterpret_cast<Data*>(slot) = std::forward<ElementData>(item);
-          return ErrorCode::OK;
-        });
+    Data tmp = std::forward<ElementData>(item);
+    return core_.PushBytes(&tmp);
   }
 
   /**
@@ -94,12 +90,7 @@ class SPSCQueue
    */
   ErrorCode Pop(Data& item)
   {
-    return core_.PopWithSlot(
-        [&](const std::byte* slot)
-        {
-          item = *reinterpret_cast<const Data*>(slot);
-          return ErrorCode::OK;
-        });
+    return core_.PopBytes(&item);
   }
 
   /**
@@ -122,12 +113,7 @@ class SPSCQueue
    */
   ErrorCode Peek(Data& item)
   {
-    return core_.PeekWithSlot(
-        [&](const std::byte* slot)
-        {
-          item = *reinterpret_cast<const Data*>(slot);
-          return ErrorCode::OK;
-        });
+    return core_.PeekBytes(&item);
   }
 
   /**
@@ -140,30 +126,7 @@ class SPSCQueue
    */
   ErrorCode PushBatch(const Data* data, size_t size)
   {
-    if (data == nullptr && size > 0)
-    {
-      return ErrorCode::PTR_NULL;
-    }
-
-    auto current_tail = core_.LoadTailRelaxed();
-    auto current_head = core_.LoadHeadAcquire();
-    const size_t capacity = core_.RingCapacity();
-    const size_t free_space = (current_tail >= current_head)
-                                  ? (capacity - (current_tail - current_head) - 1)
-                                  : (current_head - current_tail - 1);
-
-    if (free_space < size)
-    {
-      return ErrorCode::FULL;
-    }
-
-    for (size_t index = 0; index < size; ++index)
-    {
-      *SlotPtr((current_tail + index) % capacity) = data[index];
-    }
-
-    core_.StoreTailRelease((current_tail + size) % capacity);
-    return ErrorCode::OK;
+    return core_.PushBatchBytes(data, size);
   }
 
   /**
@@ -178,11 +141,13 @@ class SPSCQueue
   {
     for (size_t index = 0; index < size; ++index)
     {
-      auto ec = core_.PushWithSlot(
-          [&](std::byte* slot) -> ErrorCode
-          {
-            return writer(std::launder(reinterpret_cast<Data*>(slot)), 1);
-          });
+      Data tmp{};
+      auto ec = writer(&tmp, 1);
+      if (ec != ErrorCode::OK)
+      {
+        return ec;
+      }
+      ec = core_.PushBytes(&tmp);
       if (ec != ErrorCode::OK)
       {
         return ec;
@@ -203,11 +168,13 @@ class SPSCQueue
   {
     for (size_t index = 0; index < size; ++index)
     {
-      auto ec = core_.PopWithSlot(
-          [&](const std::byte* slot) -> ErrorCode
-          {
-            return reader(std::launder(reinterpret_cast<const Data*>(slot)), 1);
-          });
+      Data tmp{};
+      auto ec = core_.PopBytes(&tmp);
+      if (ec != ErrorCode::OK)
+      {
+        return ec;
+      }
+      ec = reader(&tmp, 1);
       if (ec != ErrorCode::OK)
       {
         return ec;
@@ -226,28 +193,7 @@ class SPSCQueue
    */
   ErrorCode PopBatch(Data* data, size_t size)
   {
-    const auto current_head = core_.LoadHeadRelaxed();
-    const auto current_tail = core_.LoadTailAcquire();
-    const size_t capacity = core_.RingCapacity();
-    const size_t available = (current_tail >= current_head)
-                                 ? (current_tail - current_head)
-                                 : (capacity - current_head + current_tail);
-
-    if (available < size)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    if (data != nullptr)
-    {
-      for (size_t index = 0; index < size; ++index)
-      {
-        data[index] = *ConstSlotPtr((current_head + index) % capacity);
-      }
-    }
-
-    core_.StoreHeadRelease((current_head + size) % capacity);
-    return ErrorCode::OK;
+    return core_.PopBatchBytes(data, size);
   }
 
   /**
@@ -260,27 +206,7 @@ class SPSCQueue
    */
   ErrorCode PeekBatch(Data* data, size_t size)
   {
-    if (data == nullptr && size > 0)
-    {
-      return ErrorCode::PTR_NULL;
-    }
-    const auto current_head = core_.LoadHeadRelaxed();
-    const auto current_tail = core_.LoadTailAcquire();
-    const size_t capacity = core_.RingCapacity();
-    const size_t available = (current_tail >= current_head)
-                                 ? (current_tail - current_head)
-                                 : (capacity - current_head + current_tail);
-
-    if (available < size)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    for (size_t index = 0; index < size; ++index)
-    {
-      data[index] = *ConstSlotPtr((current_head + index) % capacity);
-    }
-    return ErrorCode::OK;
+    return core_.PeekBatchBytes(data, size);
   }
 
   /**
