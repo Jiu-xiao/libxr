@@ -18,6 +18,9 @@ namespace LibXR
 template <typename Data>
 class SPSCQueue
 {
+  /// @brief payload 对齐必须不超过槽位步长对齐 / Payload alignment must not exceed the slot-stride alignment.
+  static_assert(alignof(Data) <= alignof(size_t),
+                "SPSCQueue requires payload alignment no greater than alignof(size_t)");
   /// @brief 仅接受可默认构造 payload / Accepts only default-constructible payloads.
   static_assert(std::is_default_constructible_v<Data>,
                 "SPSCQueue requires default-constructible payloads");
@@ -75,10 +78,19 @@ class SPSCQueue
   template <typename ElementData = Data>
   ErrorCode Push(ElementData&& item)
   {
-    static_assert(std::is_convertible_v<ElementData, Data>,
-                  "SPSCQueue::Push element type must be convertible to Data");
-    Data tmp = std::forward<ElementData>(item);
-    return core_.PushBytes(&tmp);
+    static_assert(std::is_assignable_v<Data&, ElementData&&>,
+                  "SPSCQueue::Push element type must be assignable to Data");
+
+    const auto current_tail = core_.tail_.load(std::memory_order_relaxed);
+    const auto next_tail = core_.Increment(current_tail);
+    if (next_tail == core_.head_.load(std::memory_order_acquire))
+    {
+      return ErrorCode::FULL;
+    }
+
+    *SlotPtr(current_tail) = std::forward<ElementData>(item);
+    core_.tail_.store(next_tail, std::memory_order_release);
+    return ErrorCode::OK;
   }
 
   /**
@@ -90,7 +102,15 @@ class SPSCQueue
    */
   ErrorCode Pop(Data& item)
   {
-    return core_.PopBytes(&item);
+    const auto current_head = core_.head_.load(std::memory_order_relaxed);
+    if (current_head == core_.tail_.load(std::memory_order_acquire))
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    item = std::move(*SlotPtr(current_head));
+    core_.head_.store(core_.Increment(current_head), std::memory_order_release);
+    return ErrorCode::OK;
   }
 
   /**
@@ -101,7 +121,14 @@ class SPSCQueue
    */
   ErrorCode Pop()
   {
-    return core_.PopBytes(nullptr);
+    const auto current_head = core_.head_.load(std::memory_order_relaxed);
+    if (current_head == core_.tail_.load(std::memory_order_acquire))
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    core_.head_.store(core_.Increment(current_head), std::memory_order_release);
+    return ErrorCode::OK;
   }
 
   /**
@@ -113,7 +140,14 @@ class SPSCQueue
    */
   ErrorCode Peek(Data& item)
   {
-    return core_.PeekBytes(&item);
+    const auto current_head = core_.head_.load(std::memory_order_relaxed);
+    if (current_head == core_.tail_.load(std::memory_order_acquire))
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    item = *ConstSlotPtr(current_head);
+    return ErrorCode::OK;
   }
 
   /**
@@ -126,60 +160,114 @@ class SPSCQueue
    */
   ErrorCode PushBatch(const Data* data, size_t size)
   {
-    return core_.PushBatchBytes(data, size);
-  }
+    if (size == 0U)
+    {
+      return ErrorCode::OK;
+    }
+    if (data == nullptr)
+    {
+      return ErrorCode::PTR_NULL;
+    }
 
-  /**
-   * @brief 通过写入器回调批量推入 payload / Push payloads via a writer callback
-   * @tparam Writer 写入器类型 / Writer callback type
-   * @param size 需要写入的 payload 个数 / Number of payloads to write
-   * @param writer 写入器回调 / Writer callback
-   * @return 返回写入结果 / Returns the writer result
-   */
-  template <typename Writer>
-  ErrorCode PushWithWriter(size_t size, Writer&& writer)
-  {
+    const auto current_tail = core_.tail_.load(std::memory_order_relaxed);
+    const auto current_head = core_.head_.load(std::memory_order_acquire);
+    const size_t capacity = core_.RingCapacity();
+    const size_t free_space =
+        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
+                                       : (current_head - current_tail - 1);
+
+    if (free_space < size)
+    {
+      return ErrorCode::FULL;
+    }
+
     for (size_t index = 0; index < size; ++index)
     {
-      Data tmp{};
-      auto ec = writer(&tmp, 1);
-      if (ec != ErrorCode::OK)
-      {
-        return ec;
-      }
-      ec = core_.PushBytes(&tmp);
-      if (ec != ErrorCode::OK)
-      {
-        return ec;
-      }
+      *SlotPtr((current_tail + index) % capacity) = data[index];
     }
+
+    core_.tail_.store((current_tail + size) % capacity, std::memory_order_release);
     return ErrorCode::OK;
   }
 
   /**
-   * @brief 通过读取器回调批量弹出 payload / Pop payloads via a reader callback
+   * @brief 通过写入器回调写入一个 payload / Write one payload via a writer callback
+   * @tparam Writer 写入器类型 / Writer callback type
+   * @param writer 写入器回调，签名为 `ErrorCode(Data* slot, size_t count)`
+   *        / Writer callback with signature `ErrorCode(Data* slot, size_t count)`
+   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`；否则返回写入器错误码
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when the
+   *         queue is full; otherwise returns the writer error code
+   *
+   * @note 回调中的 `count` 固定为 1，且 `slot` 只在本次回调期间有效。
+   *       The callback always receives `count == 1`, and `slot` remains valid
+   *       only during that callback invocation.
+   */
+  template <typename Writer>
+  ErrorCode PushWithWriter(Writer&& writer)
+  {
+    static_assert(std::is_invocable_v<Writer&, Data*, size_t>,
+                  "PushWithWriter writer must be callable as "
+                  "ErrorCode(Data* slot, size_t count)");
+    using WriterRet = std::invoke_result_t<Writer&, Data*, size_t>;
+    static_assert(std::is_convertible_v<WriterRet, ErrorCode>,
+                  "PushWithWriter writer return type must be convertible to ErrorCode");
+
+    const auto current_tail = core_.tail_.load(std::memory_order_relaxed);
+    const auto next_tail = core_.Increment(current_tail);
+    if (next_tail == core_.head_.load(std::memory_order_acquire))
+    {
+      return ErrorCode::FULL;
+    }
+
+    Writer& writer_ref = writer;
+    const auto ec = writer_ref(SlotPtr(current_tail), 1);
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    core_.tail_.store(next_tail, std::memory_order_release);
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 通过读取器回调读取一个队头 payload / Read one front payload via a reader callback
    * @tparam Reader 读取器类型 / Reader callback type
-   * @param size 需要读取的 payload 个数 / Number of payloads to read
-   * @param reader 读取器回调 / Reader callback
-   * @return 返回读取结果 / Returns the reader result
+   * @param reader 读取器回调，签名为 `ErrorCode(const Data* slot, size_t count)`
+   *        / Reader callback with signature `ErrorCode(const Data* slot, size_t count)`
+   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`；否则返回读取器错误码
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when the
+   *         queue is empty; otherwise returns the reader error code
+   *
+   * @note 回调中的 `count` 固定为 1，且 `slot` 只在本次回调期间有效。
+   *       The callback always receives `count == 1`, and `slot` remains valid
+   *       only during that callback invocation.
    */
   template <typename Reader>
-  ErrorCode PopWithReader(size_t size, Reader&& reader)
+  ErrorCode PopWithReader(Reader&& reader)
   {
-    for (size_t index = 0; index < size; ++index)
+    static_assert(std::is_invocable_v<Reader&, const Data*, size_t>,
+                  "PopWithReader reader must be callable as "
+                  "ErrorCode(const Data* slot, size_t count)");
+    using ReaderRet = std::invoke_result_t<Reader&, const Data*, size_t>;
+    static_assert(std::is_convertible_v<ReaderRet, ErrorCode>,
+                  "PopWithReader reader return type must be convertible to ErrorCode");
+
+    const auto current_head = core_.head_.load(std::memory_order_relaxed);
+    if (current_head == core_.tail_.load(std::memory_order_acquire))
     {
-      Data tmp{};
-      auto ec = core_.PopBytes(&tmp);
-      if (ec != ErrorCode::OK)
-      {
-        return ec;
-      }
-      ec = reader(&tmp, 1);
-      if (ec != ErrorCode::OK)
-      {
-        return ec;
-      }
+      return ErrorCode::EMPTY;
     }
+
+    Reader& reader_ref = reader;
+    const auto ec = reader_ref(ConstSlotPtr(current_head), 1);
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    core_.head_.store(core_.Increment(current_head), std::memory_order_release);
     return ErrorCode::OK;
   }
 
@@ -193,7 +281,33 @@ class SPSCQueue
    */
   ErrorCode PopBatch(Data* data, size_t size)
   {
-    return core_.PopBatchBytes(data, size);
+    if (size == 0U)
+    {
+      return ErrorCode::OK;
+    }
+
+    const auto current_head = core_.head_.load(std::memory_order_relaxed);
+    const auto current_tail = core_.tail_.load(std::memory_order_acquire);
+    const size_t capacity = core_.RingCapacity();
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+
+    if (available < size)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    if (data != nullptr)
+    {
+      for (size_t index = 0; index < size; ++index)
+      {
+        data[index] = std::move(*SlotPtr((current_head + index) % capacity));
+      }
+    }
+
+    core_.head_.store((current_head + size) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
   }
 
   /**
@@ -206,7 +320,33 @@ class SPSCQueue
    */
   ErrorCode PeekBatch(Data* data, size_t size)
   {
-    return core_.PeekBatchBytes(data, size);
+    if (size == 0U)
+    {
+      return ErrorCode::OK;
+    }
+    if (data == nullptr)
+    {
+      return ErrorCode::PTR_NULL;
+    }
+
+    const auto current_head = core_.head_.load(std::memory_order_relaxed);
+    const auto current_tail = core_.tail_.load(std::memory_order_acquire);
+    const size_t capacity = core_.RingCapacity();
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+
+    if (available < size)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    for (size_t index = 0; index < size; ++index)
+    {
+      data[index] = *ConstSlotPtr((current_head + index) % capacity);
+    }
+
+    return ErrorCode::OK;
   }
 
   /**

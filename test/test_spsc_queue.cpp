@@ -5,10 +5,30 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace
 {
 using Queue = LibXR::SPSCQueue<uint32_t>;  ///< 默认测试用 32 位 payload 队列 / Default test queue using 32-bit payloads.
+
+/**
+ * @struct NonTrivialPayload
+ * @brief 非平凡 payload，用于验证 SPSC 包装层不会退化成字节拷贝
+ *        / Non-trivial payload used to verify the SPSC wrapper does not degrade
+ *        into raw byte copying
+ */
+struct NonTrivialPayload
+{
+  uint32_t value = 0;        ///< 有效载荷值 / Payload value.
+  const uint32_t* tag = {};  ///< 附带指针成员 / Attached pointer member.
+
+  NonTrivialPayload() = default;
+  NonTrivialPayload(uint32_t value_in, const uint32_t* tag_in) : value(value_in), tag(tag_in) {}
+  ~NonTrivialPayload() {}
+};
+
+static_assert(!std::is_trivially_copyable_v<NonTrivialPayload>,
+              "NonTrivialPayload must stay non-trivially-copyable");
 
 /**
  * @struct ProducerArg
@@ -96,26 +116,46 @@ void test_spsc_queue()
     size_t write_cursor = 100;
     queue.Reset();
     ASSERT(queue.Size() == 0);
-    ASSERT(queue.PushWithWriter(
-               3,
-               [&](uint32_t* slot, size_t count)
-               {
-                 ASSERT(count == 1);
-                 slot[0] = static_cast<uint32_t>(write_cursor++);
-                 return LibXR::ErrorCode::OK;
-               }) == LibXR::ErrorCode::OK);
+    for (size_t index = 0; index < 3; ++index)
+    {
+      ASSERT(queue.PushWithWriter(
+                 [&](uint32_t* slot, size_t count)
+                 {
+                   ASSERT(count == 1);
+                   slot[0] = static_cast<uint32_t>(write_cursor++);
+                   return LibXR::ErrorCode::OK;
+                 }) == LibXR::ErrorCode::OK);
+    }
 
-    ASSERT(queue.PopWithReader(
-               3,
-               [&](const uint32_t* slot, size_t count)
-               {
-                 ASSERT(count == 1);
-                 static uint32_t expected_value = 100;
-                 ASSERT(slot[0] == expected_value++);
-                 return LibXR::ErrorCode::OK;
-               }) == LibXR::ErrorCode::OK);
+    uint32_t expected_value = 100;
+    for (size_t index = 0; index < 3; ++index)
+    {
+      ASSERT(queue.PopWithReader(
+                 [&](const uint32_t* slot, size_t count)
+                 {
+                   ASSERT(count == 1);
+                   ASSERT(slot[0] == expected_value++);
+                   return LibXR::ErrorCode::OK;
+                 }) == LibXR::ErrorCode::OK);
+    }
     uint32_t value = 0;
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+  }
+
+  // Non-trivial payloads must remain valid when the wrapper uses typed slot assignment.
+  {
+    constexpr uint32_t TAG = 0x1234ABCDU;
+    LibXR::SPSCQueue<NonTrivialPayload> queue(2);
+    NonTrivialPayload pushed(77, &TAG);
+    NonTrivialPayload popped;
+
+    ASSERT(queue.Push(pushed) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Peek(popped) == LibXR::ErrorCode::OK);
+    ASSERT(popped.value == 77);
+    ASSERT(popped.tag == &TAG);
+    ASSERT(queue.Pop(popped) == LibXR::ErrorCode::OK);
+    ASSERT(popped.value == 77);
+    ASSERT(popped.tag == &TAG);
   }
 
   // End-to-end producer/consumer handoff under sustained contention.
@@ -138,7 +178,10 @@ void test_spsc_queue()
       ASSERT(value == expected);
     }
 
-    ASSERT(producer_done.load(std::memory_order_acquire));
+    while (!producer_done.load(std::memory_order_acquire))
+    {
+      LibXR::Thread::Yield();
+    }
     uint32_t value = 0;
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
     ASSERT(queue.Size() == 0);
