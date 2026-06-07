@@ -65,7 +65,7 @@ class MPMCQueue
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
    *         the queue is empty
    */
-  ErrorCode Pop() { return core_.PopBytes(); }
+  ErrorCode Pop() { return core_.PopBytes(nullptr); }
 
   /**
    * @brief 获取队列最大容量 / Get the maximum queue capacity

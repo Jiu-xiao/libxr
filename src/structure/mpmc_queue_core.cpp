@@ -99,15 +99,12 @@ ErrorCode MPMCQueueCore::PushBytes(const void* value)
 
 /**
  * @brief 按字节出队一个 payload / Dequeue one payload by bytes
- * @param value 用于接收 payload 的缓冲区 / Buffer that receives the payload
+ * @param value 用于接收 payload 的缓冲区；传 `nullptr` 时仅丢弃队头元素
+ *        / Buffer that receives the payload; pass `nullptr` to discard the
+ *        front element only
  */
 ErrorCode MPMCQueueCore::PopBytes(void* value)
 {
-  if (value == nullptr)
-  {
-    return ErrorCode::PTR_NULL;
-  }
-
   SequenceType position = head_.load(std::memory_order_relaxed);
 
   while (true)
@@ -123,43 +120,10 @@ ErrorCode MPMCQueueCore::PopBytes(void* value)
       if (head_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed,
                                       std::memory_order_relaxed))
       {
-        LibXR::Memory::FastCopy(value, PayloadPtr(position % capacity_), element_size_);
-        slot.value.store(position + static_cast<SequenceType>(capacity_),
-                         std::memory_order_release);
-        return ErrorCode::OK;
-      }
-      continue;
-    }
-
-    if (diff < 0)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    position = head_.load(std::memory_order_relaxed);
-  }
-}
-
-/**
- * @brief 丢弃一个队头 payload / Discard one front payload
- */
-ErrorCode MPMCQueueCore::PopBytes()
-{
-  SequenceType position = head_.load(std::memory_order_relaxed);
-
-  while (true)
-  {
-    SequenceCell& slot = sequences_[position % capacity_];
-    const SequenceType sequence = slot.value.load(std::memory_order_acquire);
-    const SequenceType expected_ready = position + 1;
-    const SequenceDiffType diff =
-        static_cast<SequenceDiffType>(sequence - expected_ready);
-
-    if (diff == 0)
-    {
-      if (head_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed,
-                                      std::memory_order_relaxed))
-      {
+        if (value != nullptr)
+        {
+          LibXR::Memory::FastCopy(value, PayloadPtr(position % capacity_), element_size_);
+        }
         slot.value.store(position + static_cast<SequenceType>(capacity_),
                          std::memory_order_release);
         return ErrorCode::OK;

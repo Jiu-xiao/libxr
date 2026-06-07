@@ -38,8 +38,7 @@ class MPMCQueueCore
   MPMCQueueCore& operator=(MPMCQueueCore&&) = delete;
 
   ErrorCode PushBytes(const void* value);
-  ErrorCode PopBytes(void* value);
-  ErrorCode PopBytes();
+  ErrorCode PopBytes(void* value = nullptr);
 
   [[nodiscard]] size_t MaxSize() const { return capacity_; }
   /**
