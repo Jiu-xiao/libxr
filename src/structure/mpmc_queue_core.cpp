@@ -16,7 +16,6 @@ MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
     : element_size_(element_size),
       capacity_(capacity),
       payload_stride_(AlignUpChecked(element_size_, alignof(size_t))),
-      payload_alloc_align_(std::max(alignof(size_t), alignof(std::max_align_t))),
       sequences_(nullptr),
       payloads_(nullptr),
       head_(0),
@@ -32,7 +31,7 @@ MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
   try
   {
     payloads_ = static_cast<std::byte*>(
-        ::operator new[](payload_bytes, std::align_val_t(payload_alloc_align_)));
+        ::operator new[](payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN)));
   }
   catch (...)
   {
@@ -53,7 +52,7 @@ MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
  */
 MPMCQueueCore::~MPMCQueueCore()
 {
-  ::operator delete[](payloads_, std::align_val_t(payload_alloc_align_));
+  ::operator delete[](payloads_, std::align_val_t(PAYLOAD_ALLOC_ALIGN));
   delete[] sequences_;
 }
 

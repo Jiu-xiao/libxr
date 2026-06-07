@@ -68,11 +68,12 @@ class MPMCQueueCore
   [[nodiscard]] const void* PayloadPtr(size_t index) const;
   [[nodiscard]] static size_t AlignUpChecked(size_t value, size_t align);
   [[nodiscard]] static size_t MultiplyChecked(size_t lhs, size_t rhs);
+  static constexpr size_t PAYLOAD_ALLOC_ALIGN =
+      std::max(alignof(size_t), alignof(std::max_align_t));
 
   const size_t element_size_;
   const size_t capacity_;
   const size_t payload_stride_;
-  const size_t payload_alloc_align_;
   SequenceCell* sequences_;
   std::byte* payloads_;
 
