@@ -20,7 +20,6 @@
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "list.hpp"
-#include "lock_queue.hpp"
 #include "lockfree_list.hpp"
 #include "lockfree_pool.hpp"
 #include "lockfree_queue.hpp"

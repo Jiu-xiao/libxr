@@ -179,6 +179,8 @@ template <typename Data>
 class Queue : public BaseQueue
 {
  public:
+  using ValueType = Data;  ///< 队列元素类型 / Queue element type.
+
   /**
    * @brief 构造函数，初始化队列
    *        (Constructor to initialize the queue).

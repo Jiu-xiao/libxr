@@ -34,6 +34,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) LockFreeQueue
   }
 
  public:
+  using ValueType = Data;  ///< 队列元素类型 / Queue element type.
+
   /**
    * @brief 构造函数 / Constructor
    * @param length 队列的最大容量 / Maximum capacity of the queue
@@ -74,8 +76,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) LockFreeQueue
    *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::FULL` if
    * the queue is full
    */
-  template <typename ElementData = Data>
-  ErrorCode Push(ElementData&& item)
+  ErrorCode Push(const Data& item)
   {
     const auto CURRENT_TAIL = tail_.load(std::memory_order_relaxed);
     const auto NEXT_TAIL = Increment(CURRENT_TAIL);
@@ -85,39 +86,9 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) LockFreeQueue
       return ErrorCode::FULL;
     }
 
-    queue_handle_[CURRENT_TAIL] = std::forward<ElementData>(item);
+    queue_handle_[CURRENT_TAIL] = item;
     tail_.store(NEXT_TAIL, std::memory_order_release);
     return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 从队列中弹出数据 / Pops data from the queue
-   * @param item 用于存储弹出数据的变量 / Variable to store the popped data
-   * @return 操作结果，成功返回 `ErrorCode::OK`，队列为空返回 `ErrorCode::EMPTY` /
-   *         Operation result: returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` if
-   * the queue is empty
-   */
-  template <typename ElementData = Data>
-  ErrorCode Pop(ElementData& item)
-  {
-    auto current_head = head_.load(std::memory_order_relaxed);
-
-    while (true)
-    {
-      if (current_head == tail_.load(std::memory_order_acquire))
-      {
-        return ErrorCode::EMPTY;
-      }
-
-      item = queue_handle_[current_head];
-
-      if (head_.compare_exchange_weak(current_head, Increment(current_head),
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_relaxed))
-      {
-        return ErrorCode::OK;
-      }
-    }
   }
 
   /**
@@ -506,7 +477,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) LockFreeQueue
   /**
    * @brief 计算队列剩余可用空间 / Calculates the remaining available space in the queue
    */
-  size_t EmptySize() { return LENGTH - Size(); }
+  size_t EmptySize() const { return LENGTH - Size(); }
 
   /**
    * @brief 获取队列的最大容量 / Returns the maximum capacity of the queue
