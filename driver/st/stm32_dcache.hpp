@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "libxr_def.hpp"
 #include "main.h"
 
 namespace LibXR
@@ -59,8 +60,16 @@ inline void STM32_CallDCacheByAddr(FunctionType function, void* addr, int32_t ds
 inline void STM32_CleanDCacheByAddr(const void* addr, size_t size)
 {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  auto* raw = const_cast<void*>(addr);
-  const auto dsize = static_cast<int32_t>(size);
+  if (addr == nullptr || size == 0u)
+  {
+    return;
+  }
+
+  const auto align = static_cast<uintptr_t>(LibXR::HW_CACHE_LINE_SIZE);
+  const auto start = reinterpret_cast<uintptr_t>(addr) & ~(align - 1u);
+  const auto end = (reinterpret_cast<uintptr_t>(addr) + size + align - 1u) & ~(align - 1u);
+  auto* raw = reinterpret_cast<void*>(start);
+  const auto dsize = static_cast<int32_t>(end - start);
   STM32_CallDCacheByAddr(&SCB_CleanDCache_by_Addr, raw, dsize);
 #else
   (void)addr;
@@ -75,8 +84,16 @@ inline void STM32_CleanDCacheByAddr(const void* addr, size_t size)
 inline void STM32_InvalidateDCacheByAddr(const void* addr, size_t size)
 {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  auto* raw = const_cast<void*>(addr);
-  const auto dsize = static_cast<int32_t>(size);
+  if (addr == nullptr || size == 0u)
+  {
+    return;
+  }
+
+  const auto align = static_cast<uintptr_t>(LibXR::HW_CACHE_LINE_SIZE);
+  const auto start = reinterpret_cast<uintptr_t>(addr) & ~(align - 1u);
+  const auto end = (reinterpret_cast<uintptr_t>(addr) + size + align - 1u) & ~(align - 1u);
+  auto* raw = reinterpret_cast<void*>(start);
+  const auto dsize = static_cast<int32_t>(end - start);
   STM32_CallDCacheByAddr(&SCB_InvalidateDCache_by_Addr, raw, dsize);
 #else
   (void)addr;

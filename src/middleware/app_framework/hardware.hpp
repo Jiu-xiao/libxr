@@ -125,7 +125,7 @@ class HardwareContainer
     for (const auto& alias : entry.aliases)
     {
       ASSERT(alias != nullptr);
-      auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
+      auto node = new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
           LibXR::LockFreeList::Node<AliasEntry>{alias, static_cast<void*>(&entry.object),
                                                 TypeID::GetID<T>()};
       alias_list_.Add(*node);

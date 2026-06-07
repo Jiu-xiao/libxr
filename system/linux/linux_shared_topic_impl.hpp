@@ -901,7 +901,7 @@ class LinuxSharedTopic : public Topic
   }
 
  private:
-  struct alignas(64) SharedHeader
+  struct alignas(LibXR::CONCURRENCY_ALIGNMENT) SharedHeader
   {
     uint64_t magic = 0;
     uint64_t name_key = 0;
@@ -921,7 +921,7 @@ class LinuxSharedTopic : public Topic
     std::atomic<uint64_t> publish_failures;
   };
 
-  struct alignas(64) SlotControl
+  struct alignas(LibXR::CONCURRENCY_ALIGNMENT) SlotControl
   {
     std::atomic<uint32_t> refcount;
     std::atomic<uint64_t> sequence;
@@ -942,7 +942,7 @@ class LinuxSharedTopic : public Topic
     uint64_t sequence = 0;
   };
 
-  struct alignas(64) SubscriberControl
+  struct alignas(LibXR::CONCURRENCY_ALIGNMENT) SubscriberControl
   {
     std::atomic<uint32_t> active;
     std::atomic<uint32_t> mode;
@@ -955,7 +955,7 @@ class LinuxSharedTopic : public Topic
     std::atomic<uint32_t> held_slot;
   };
 
-  struct alignas(64) BalancedGroupControl
+  struct alignas(LibXR::CONCURRENCY_ALIGNMENT) BalancedGroupControl
   {
     std::atomic<uint64_t> rr_cursor;
   };

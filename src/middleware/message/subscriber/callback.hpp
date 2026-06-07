@@ -507,7 +507,7 @@ inline void Topic::RegisterCallback(Callback& cb)
 {
   ASSERT(block_->data_.payload_type_id == cb.PayloadTypeID());
 
-  auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
+  auto node = new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
       LockFreeList::Node<CallbackBlock>(cb);
   block_->data_.subers.Add(*node);
 }
