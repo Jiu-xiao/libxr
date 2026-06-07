@@ -11,10 +11,7 @@
  */
 int main()
 {
-  if (!TestListOnlyRequested())
-  {
-    LibXR::PlatformInit();
-  }
+  LibXR::PlatformInit();
   const char* bench_set = std::getenv("BENCH_SET");
   return RunBenchTestBinary(bench_set);
 }

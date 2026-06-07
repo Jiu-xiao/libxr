@@ -33,33 +33,22 @@ inline TestRunFunction CheckedResolveVerifyLinuxShmEntry(TestEntryId entry_id)
 
 inline int RunVerifyTestBinary(TestBinary binary)
 {
-  TestFilter filter;
-  if (!LoadTestFilterFromEnv(filter))
+  TestSelection selection;
+  if (!LoadTestSelectionFromEnv(selection))
   {
     return 2;
-  }
-
-  if (filter.list_only)
-  {
-    std::printf("id\tbinary\tgroup\tplane\tmodule\ttags\tisolated\tselector\n");
   }
 
   size_t matched = 0;
   int status = 0;
   for (const auto& entry : kTestManifest)
   {
-    if (entry.binary != binary || !EntryMatchesFilter(entry, filter))
+    if (entry.binary != binary || !EntryMatchesSelection(entry, selection))
     {
       continue;
     }
 
     ++matched;
-    if (filter.list_only)
-    {
-      PrintEntryTsv(stdout, entry);
-      continue;
-    }
-
     switch (binary)
     {
       case TestBinary::VERIFY_LINUX_SHM:
@@ -72,7 +61,7 @@ inline int RunVerifyTestBinary(TestBinary binary)
 
   if (matched == 0)
   {
-    return ReportNoMatchingEntries(binary, filter);
+    return ReportNoMatchingEntries(binary, selection);
   }
   return status;
 }

@@ -137,38 +137,23 @@ inline TestRunFunction CheckedResolveMainEntry(TestEntryId entry_id)
 
 inline int RunMainTestBinary()
 {
-  TestFilter filter;
-  if (!LoadTestFilterFromEnv(filter))
+  TestSelection selection;
+  if (!LoadTestSelectionFromEnv(selection))
   {
     return 2;
   }
-
-  if (!filter.list_only)
-  {
-    XR_LOG_INFO("Running LibXR Tests...\n");
-  }
-
-  if (filter.list_only)
-  {
-    std::printf("id\tbinary\tgroup\tplane\tmodule\ttags\tisolated\tselector\n");
-  }
+  XR_LOG_INFO("Running LibXR Tests...\n");
 
   const char* current_group = nullptr;
   size_t matched = 0;
   for (const auto& entry : kTestManifest)
   {
-    if (entry.binary != TestBinary::MAIN || !EntryMatchesFilter(entry, filter))
+    if (entry.binary != TestBinary::MAIN || !EntryMatchesSelection(entry, selection))
     {
       continue;
     }
 
     ++matched;
-    if (filter.list_only)
-    {
-      PrintEntryTsv(stdout, entry);
-      continue;
-    }
-
     if (current_group == nullptr || std::strcmp(current_group, entry.group) != 0)
     {
       current_group = entry.group;
@@ -181,14 +166,11 @@ inline int RunMainTestBinary()
 
   if (matched == 0)
   {
-    return ReportNoMatchingEntries(TestBinary::MAIN, filter);
+    return ReportNoMatchingEntries(TestBinary::MAIN, selection);
   }
 
-  if (!filter.list_only)
-  {
-    XR_LOG_INFO("All tests completed.\n");
-    std::fprintf(stderr, "All tests completed.\n");
-    std::fflush(stderr);
-  }
+  XR_LOG_INFO("All tests completed.\n");
+  std::fprintf(stderr, "All tests completed.\n");
+  std::fflush(stderr);
   return 0;
 }

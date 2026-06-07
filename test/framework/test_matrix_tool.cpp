@@ -1,8 +1,8 @@
 /**
  * @file test_matrix_tool.cpp
- * @brief test 统一入口矩阵校验/导出工具。 Validation/export tool for the unified test manifest.
+ * @brief test 统一入口矩阵校验/导出工具。 Validation/export tool for the unified runtime-set manifest.
  * @details 职责：
- *          1. 校验 manifest 的 id/group/module/tag/selector/isolated 规则。
+ *          1. 校验 manifest 的 id/group/module/runtime-set/tag/selector/isolated 规则。
  *          2. 导出矩阵清单，作为 runner 外部的可读事实表。
  *          Responsibilities:
  *          1. Validate id/group/module/tag/selector/isolated rules of the manifest.
@@ -98,6 +98,11 @@ bool HasInvalidIsolationPolicy()
       std::fprintf(stderr, "isolated flag/tag mismatch on entry: %s\n", entry.id);
       return true;
     }
+    if (entry.isolated && entry.minimum_runtime != TestRuntimeSet::FULL_OS)
+    {
+      std::fprintf(stderr, "isolated entry is not full_os: %s\n", entry.id);
+      return true;
+    }
   }
   return false;
 }
@@ -133,6 +138,28 @@ bool HasInvalidPlaneTagPolicy()
         if ((entry.tags & ToMask(TestTag::MEASURE)) == 0)
         {
           std::fprintf(stderr, "bench entry missing measure tag: %s\n", entry.id);
+          return true;
+        }
+        break;
+    }
+  }
+  return false;
+}
+
+bool HasInvalidRuntimeSetPolicy()
+{
+  for (const auto& entry : kTestManifest)
+  {
+    switch (entry.binary)
+    {
+      case TestBinary::MAIN:
+        break;
+      case TestBinary::BINDING:
+      case TestBinary::VERIFY_LINUX_SHM:
+      case TestBinary::BENCH_LINUX_SHARED_TOPIC:
+        if (entry.minimum_runtime != TestRuntimeSet::FULL_OS)
+        {
+          std::fprintf(stderr, "non-main entry is not full_os: %s\n", entry.id);
           return true;
         }
         break;
@@ -182,19 +209,18 @@ int ValidateMatrix()
   failed |= HasInvalidSelectorPolicy();
   failed |= HasInvalidIsolationPolicy();
   failed |= HasInvalidPlaneTagPolicy();
+  failed |= HasInvalidRuntimeSetPolicy();
   failed |= HasEmptyBinary();
   return failed ? 1 : 0;
 }
 
 int PrintTsv(FILE* out)
 {
-  std::fprintf(out, "id\tbinary\tgroup\tplane\tmodule\ttags\tisolated\tselector\n");
+  std::fprintf(out,
+               "id\tbinary\tgroup\tplane\truntime_set\tmodule\ttags\tisolated\tselector\n");
   for (const auto& entry : kTestManifest)
   {
-    std::fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", entry.id,
-                 BinaryName(entry.binary), entry.group, PlaneName(entry.plane), entry.module,
-                 TagsText(entry.tags).c_str(), entry.isolated ? "true" : "false",
-                 (entry.selector != nullptr) ? entry.selector : "");
+    PrintEntryTsv(out, entry);
   }
   return 0;
 }

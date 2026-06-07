@@ -39,15 +39,10 @@ inline TestRunFunction CheckedResolveBenchLinuxSharedTopicEntry(TestEntryId entr
 
 inline int RunBenchTestBinary(const char* selector)
 {
-  TestFilter filter;
-  if (!LoadTestFilterFromEnv(filter))
+  TestSelection selection;
+  if (!LoadTestSelectionFromEnv(selection))
   {
     return 2;
-  }
-
-  if (filter.list_only)
-  {
-    std::printf("id\tbinary\tgroup\tplane\tmodule\ttags\tisolated\tselector\n");
   }
 
   size_t matched = 0;
@@ -62,24 +57,18 @@ inline int RunBenchTestBinary(const char* selector)
     {
       continue;
     }
-    if (!EntryMatchesFilter(entry, filter))
+    if (!EntryMatchesSelection(entry, selection))
     {
       continue;
     }
 
     ++matched;
-    if (filter.list_only)
-    {
-      PrintEntryTsv(stdout, entry);
-      continue;
-    }
-
     status |= CheckedResolveBenchLinuxSharedTopicEntry(entry.entry_id)();
   }
 
   if (matched == 0)
   {
-    return ReportNoMatchingEntries(TestBinary::BENCH_LINUX_SHARED_TOPIC, filter);
+    return ReportNoMatchingEntries(TestBinary::BENCH_LINUX_SHARED_TOPIC, selection);
   }
   return status;
 }

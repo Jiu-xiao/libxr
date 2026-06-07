@@ -37,39 +37,28 @@ inline TestRunFunction CheckedResolveBindingEntry(TestEntryId entry_id)
 
 inline int RunBindingTestBinary()
 {
-  TestFilter filter;
-  if (!LoadTestFilterFromEnv(filter))
+  TestSelection selection;
+  if (!LoadTestSelectionFromEnv(selection))
   {
     return 2;
-  }
-
-  if (filter.list_only)
-  {
-    std::printf("id\tbinary\tgroup\tplane\tmodule\ttags\tisolated\tselector\n");
   }
 
   size_t matched = 0;
   int status = 0;
   for (const auto& entry : kTestManifest)
   {
-    if (entry.binary != TestBinary::BINDING || !EntryMatchesFilter(entry, filter))
+    if (entry.binary != TestBinary::BINDING || !EntryMatchesSelection(entry, selection))
     {
       continue;
     }
 
     ++matched;
-    if (filter.list_only)
-    {
-      PrintEntryTsv(stdout, entry);
-      continue;
-    }
-
     status |= CheckedResolveBindingEntry(entry.entry_id)();
   }
 
   if (matched == 0)
   {
-    return ReportNoMatchingEntries(TestBinary::BINDING, filter);
+    return ReportNoMatchingEntries(TestBinary::BINDING, selection);
   }
   return status;
 }

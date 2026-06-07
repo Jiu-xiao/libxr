@@ -20,24 +20,21 @@
  */
 int main()
 {
-  if (!TestListOnlyRequested())
-  {
-    LibXR::PlatformInit();
+  LibXR::PlatformInit();
 
-    auto err_cb = LibXR::Assert::FatalCallback::Create(
-        [](bool in_isr, void* arg, const char* file, uint32_t line)
-        {
-          UNUSED(in_isr);
-          UNUSED(arg);
-          UNUSED(file);
-          UNUSED(line);
+  auto err_cb = LibXR::Assert::FatalCallback::Create(
+      [](bool in_isr, void* arg, const char* file, uint32_t line)
+      {
+        UNUSED(in_isr);
+        UNUSED(arg);
+        UNUSED(file);
+        UNUSED(line);
 
-          XR_LOG_ERROR("Error: linux_shm_topic verification failed.\r\n");
-          exit(-1);
-        },
-        reinterpret_cast<void*>(0));
+        XR_LOG_ERROR("Error: linux_shm_topic verification failed.\r\n");
+        exit(-1);
+      },
+      reinterpret_cast<void*>(0));
 
-    LibXR::Assert::RegisterFatalErrorCallback(err_cb);
-  }
+  LibXR::Assert::RegisterFatalErrorCallback(err_cb);
   return RunVerifyTestBinary(TestBinary::VERIFY_LINUX_SHM);
 }
