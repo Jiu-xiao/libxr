@@ -106,7 +106,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"system_tests", TestRuntimeSet::FULL_OS, {"logger", &RunVoidEntry<test_logger>, true}},
     {"system_tests", TestRuntimeSet::FULL_OS,
      {"terminal_command", &RunVoidEntry<test_terminal_command>, true}},
-    {"system_tests", TestRuntimeSet::RTOS,
+    {"system_tests", TestRuntimeSet::BARE_METAL,
      {"terminal_display", &RunVoidEntry<test_terminal_display>, false}},
     {"system_tests", TestRuntimeSet::FULL_OS,
      {"terminal_input", &RunVoidEntry<test_terminal_input>, true}},
