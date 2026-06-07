@@ -178,6 +178,12 @@ size_t MPMCQueueCore::AlignUpChecked(size_t value, size_t align)
   return ((value + align - 1) / align) * align;
 }
 
+/**
+ * @brief 安全地计算两个字节数的乘积 / Safely multiply two byte counts
+ * @param lhs 左操作数 / Left operand
+ * @param rhs 右操作数 / Right operand
+ * @return 乘积结果 / Product result
+ */
 size_t MPMCQueueCore::MultiplyChecked(size_t lhs, size_t rhs)
 {
   if (lhs == 0 || rhs == 0)

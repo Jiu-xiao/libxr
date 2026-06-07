@@ -70,6 +70,10 @@ class MPMCQueueCore
    */
   ErrorCode PopBytes(void* value = nullptr);
 
+  /**
+   * @brief 获取队列最大容量 / Get the maximum queue capacity
+   * @return 队列容量 / Queue capacity
+   */
   [[nodiscard]] size_t MaxSize() const { return capacity_; }
   /**
    * @brief 获取并发快照下的当前元素数 / Get the current approximate element count
@@ -85,7 +89,15 @@ class MPMCQueueCore
    *         exact even after very long-lived sequence wraparound.
    */
   [[nodiscard]] size_t Size() const;
+  /**
+   * @brief 获取剩余空槽数 / Get the current free-slot count
+   * @return 当前空槽个数 / Current number of free slots
+   */
   [[nodiscard]] size_t EmptySize() const { return capacity_ - Size(); }
+  /**
+   * @brief 获取单个 payload 的字节数 / Get the byte size of one payload
+   * @return 单个 payload 的字节数 / Byte size of one payload
+   */
   [[nodiscard]] size_t ElementSize() const { return element_size_; }
 
  private:
