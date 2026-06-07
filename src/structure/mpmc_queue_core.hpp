@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <type_traits>
 
 #include "libxr_def.hpp"
 
@@ -25,6 +27,7 @@ class MPMCQueueCore
 {
  public:
   using SequenceType = size_t;
+  using SequenceDiffType = std::make_signed_t<SequenceType>;
 
   MPMCQueueCore(size_t element_size, size_t capacity);
   ~MPMCQueueCore();
@@ -64,7 +67,8 @@ class MPMCQueueCore
 
   [[nodiscard]] void* PayloadPtr(size_t index);
   [[nodiscard]] const void* PayloadPtr(size_t index) const;
-  [[nodiscard]] static size_t AlignUp(size_t value, size_t align);
+  [[nodiscard]] static size_t AlignUpChecked(size_t value, size_t align);
+  [[nodiscard]] static size_t MultiplyChecked(size_t lhs, size_t rhs);
 
   const size_t element_size_;
   const size_t capacity_;

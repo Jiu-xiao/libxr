@@ -14,16 +14,31 @@ namespace LibXR
 MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
     : element_size_(element_size),
       capacity_(capacity),
-      payload_stride_(AlignUp(element_size_, alignof(size_t))),
+      payload_stride_(AlignUpChecked(element_size_, alignof(size_t))),
       payload_alloc_align_(std::max(alignof(size_t), alignof(std::max_align_t))),
-      sequences_(new (std::align_val_t(alignof(SequenceCell))) SequenceCell[capacity_]),
-      payloads_(static_cast<std::byte*>(::operator new[](
-          payload_stride_* capacity_, std::align_val_t(payload_alloc_align_)))),
+      sequences_(nullptr),
+      payloads_(nullptr),
       head_(0),
       tail_(0)
 {
-  ASSERT(element_size_ > 0);
+  REQUIRE(element_size_ > 0);
   REQUIRE(capacity_ > 1);
+  REQUIRE(capacity_ <= static_cast<size_t>(std::numeric_limits<SequenceDiffType>::max()));
+
+  const size_t payload_bytes = MultiplyChecked(payload_stride_, capacity_);
+  sequences_ = new (std::align_val_t(alignof(SequenceCell))) SequenceCell[capacity_];
+
+  try
+  {
+    payloads_ = static_cast<std::byte*>(
+        ::operator new[](payload_bytes, std::align_val_t(payload_alloc_align_)));
+  }
+  catch (...)
+  {
+    delete[] sequences_;
+    sequences_ = nullptr;
+    throw;
+  }
 
   for (size_t index = 0; index < capacity_; ++index)
   {
@@ -58,8 +73,9 @@ ErrorCode MPMCQueueCore::PushBytes(const void* value)
   {
     SequenceCell& slot = sequences_[position % capacity_];
     const SequenceType sequence = slot.value.load(std::memory_order_acquire);
+    const SequenceDiffType diff = static_cast<SequenceDiffType>(sequence - position);
 
-    if (sequence == position)
+    if (diff == 0)
     {
       if (tail_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed,
                                       std::memory_order_relaxed))
@@ -71,7 +87,7 @@ ErrorCode MPMCQueueCore::PushBytes(const void* value)
       continue;
     }
 
-    if (sequence < position)
+    if (diff < 0)
     {
       return ErrorCode::FULL;
     }
@@ -98,8 +114,10 @@ ErrorCode MPMCQueueCore::PopBytes(void* value)
     SequenceCell& slot = sequences_[position % capacity_];
     const SequenceType sequence = slot.value.load(std::memory_order_acquire);
     const SequenceType expected_ready = position + 1;
+    const SequenceDiffType diff =
+        static_cast<SequenceDiffType>(sequence - expected_ready);
 
-    if (sequence == expected_ready)
+    if (diff == 0)
     {
       if (head_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed,
                                       std::memory_order_relaxed))
@@ -112,7 +130,7 @@ ErrorCode MPMCQueueCore::PopBytes(void* value)
       continue;
     }
 
-    if (sequence < expected_ready)
+    if (diff < 0)
     {
       return ErrorCode::EMPTY;
     }
@@ -133,8 +151,10 @@ ErrorCode MPMCQueueCore::PopBytes()
     SequenceCell& slot = sequences_[position % capacity_];
     const SequenceType sequence = slot.value.load(std::memory_order_acquire);
     const SequenceType expected_ready = position + 1;
+    const SequenceDiffType diff =
+        static_cast<SequenceDiffType>(sequence - expected_ready);
 
-    if (sequence == expected_ready)
+    if (diff == 0)
     {
       if (head_.compare_exchange_weak(position, position + 1, std::memory_order_relaxed,
                                       std::memory_order_relaxed))
@@ -146,7 +166,7 @@ ErrorCode MPMCQueueCore::PopBytes()
       continue;
     }
 
-    if (sequence < expected_ready)
+    if (diff < 0)
     {
       return ErrorCode::EMPTY;
     }
@@ -193,8 +213,21 @@ const void* MPMCQueueCore::PayloadPtr(size_t index) const
  * @param value 待对齐字节数 / Byte count to align
  * @param align 目标对齐粒度 / Target alignment granularity
  */
-size_t MPMCQueueCore::AlignUp(size_t value, size_t align)
+size_t MPMCQueueCore::AlignUpChecked(size_t value, size_t align)
 {
+  REQUIRE(align > 0);
+  REQUIRE(value <= std::numeric_limits<size_t>::max() - (align - 1));
   return ((value + align - 1) / align) * align;
+}
+
+size_t MPMCQueueCore::MultiplyChecked(size_t lhs, size_t rhs)
+{
+  if (lhs == 0 || rhs == 0)
+  {
+    return 0;
+  }
+
+  REQUIRE(lhs <= std::numeric_limits<size_t>::max() / rhs);
+  return lhs * rhs;
 }
 }  // namespace LibXR

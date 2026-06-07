@@ -30,7 +30,7 @@ struct ConsumerArg
   std::atomic<size_t>* consumed_done_count;
   std::atomic<size_t>* pop_count;
   std::atomic<unsigned long long>* pop_sum;
-  uint8_t* seen;
+  std::atomic<uint8_t>* seen;
 };
 
 void ProducerTask(ProducerArg arg)
@@ -57,7 +57,7 @@ void ConsumerTask(ConsumerArg arg)
     if (ec == LibXR::ErrorCode::OK)
     {
       ASSERT(value < arg.total_items);
-      const auto previous = __sync_lock_test_and_set(&arg.seen[value], 1);
+      const auto previous = arg.seen[value].exchange(1, std::memory_order_relaxed);
       ASSERT(previous == 0);
 
       arg.pop_sum->fetch_add(static_cast<unsigned long long>(value),
@@ -160,7 +160,7 @@ void test_mpmc_queue()
     static_assert(TOTAL_ITEMS - 1 <= UINT16_MAX);
 
     Queue queue(2);
-    uint8_t seen[TOTAL_ITEMS] = {};
+    std::atomic<uint8_t> seen[TOTAL_ITEMS] = {};
     std::atomic<size_t> produced_done_count = 0;
     std::atomic<size_t> consumed_done_count = 0;
     std::atomic<size_t> pop_count = 0;
@@ -202,7 +202,7 @@ void test_mpmc_queue()
 
     for (size_t index = 0; index < TOTAL_ITEMS; ++index)
     {
-      ASSERT(seen[index] == 1);
+      ASSERT(seen[index].load(std::memory_order_relaxed) == 1);
     }
   }
 
@@ -218,7 +218,7 @@ void test_mpmc_queue()
     static_assert(TOTAL_ITEMS - 1 <= UINT16_MAX);
 
     Queue queue(64);
-    uint8_t seen[TOTAL_ITEMS] = {};
+    std::atomic<uint8_t> seen[TOTAL_ITEMS] = {};
     std::atomic<size_t> produced_done_count = 0;
     std::atomic<size_t> consumed_done_count = 0;
     std::atomic<size_t> pop_count = 0;
@@ -260,7 +260,7 @@ void test_mpmc_queue()
 
     for (size_t index = 0; index < TOTAL_ITEMS; ++index)
     {
-      ASSERT(seen[index] == 1);
+      ASSERT(seen[index].load(std::memory_order_relaxed) == 1);
     }
   }
 }
