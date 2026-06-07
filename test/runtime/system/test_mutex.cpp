@@ -12,33 +12,12 @@
  */
 #include <atomic>
 
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-#include <pthread.h>
-#endif
-
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
 
 namespace
 {
-
-/**
- * @brief 辅助函数 `JoinThreadIfNeeded`。 Helper function `JoinThreadIfNeeded`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
- */
-void JoinThreadIfNeeded(LibXR::Thread& thread)
-{
-  // 辅助内容：为后续测试准备或校验共享状态。
-  // Helper coverage: prepare or validate shared state for later tests.
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-  pthread_join(thread, nullptr);
-#else
-  UNUSED(thread);
-#endif
-}
-
 struct MutexAcquireContext
 {
   LibXR::Mutex* mutex;
@@ -88,7 +67,7 @@ void test_mutex()
   mutex.Unlock();
 
   ASSERT(done.Wait(500) == LibXR::ErrorCode::OK);
-  JoinThreadIfNeeded(waiter);
+  LibXR::Thread::Sleep(1);
   ASSERT(acquired.load(std::memory_order_acquire));
 
   ASSERT(mutex.TryLock() == LibXR::ErrorCode::OK);

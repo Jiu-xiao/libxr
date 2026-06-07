@@ -3,17 +3,16 @@
  * @brief base `FailAndClearAll` 场景聚合入口。 Aggregation entry for split base `FailAndClearAll` scenarios.
  * @details 测试项目：
  *          1. 聚合异步完成子场景。
- *          2. 聚合阻塞等待者子场景。
- *          3. 聚合队列清理与 stream 锁保持子场景。
+ *          2. 聚合队列清理与 stream 锁保持子场景。
+ *          3. 阻塞等待者子场景由 runtime `rw` 入口覆盖。
  *          Test items:
  *          1. Aggregate asynchronous completion sub-scenarios.
- *          2. Aggregate blocking-waiter sub-scenarios.
- *          3. Aggregate queue-cleanup and stream-lock preservation sub-scenarios.
+ *          2. Aggregate queue-cleanup and stream-lock preservation sub-scenarios.
+ *          3. Runtime `rw` covers blocking-waiter sub-scenarios.
  */
 #include "rw_test_common.hpp"
 
 void RunBaseRwFailAndClearAsyncTests();
-void RunBaseRwFailAndClearBlockTests();
 void RunBaseRwFailAndClearStreamTests();
 
 /**
@@ -24,6 +23,5 @@ void RunBaseRwFailAndClearStreamTests();
 void RunBaseRwFailAndClearTests()
 {
   RunBaseRwFailAndClearAsyncTests();
-  RunBaseRwFailAndClearBlockTests();
   RunBaseRwFailAndClearStreamTests();
 }

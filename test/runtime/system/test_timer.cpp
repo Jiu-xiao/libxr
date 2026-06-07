@@ -7,7 +7,7 @@
  * 2. stop/restart 后的重复可用性。 Stop/restart behavior: verify stopping and restarting the same timer handle still yields the expected periodic count.
  *
  * 测试原理 / Test principles:
- * 1. 使用真实 timer thread 和重复 restart 尝试，验证 runtime 调度而不是模拟回调循环。 Use the real timer thread and repeated restart attempts so the test checks runtime scheduling rather than a simulated callback loop.
+ * 1. 使用真实 timer 推进路径和重复 restart 尝试，验证 runtime 调度而不是模拟回调循环。 Use the real timer progression path and repeated restart attempts so the test checks runtime scheduling rather than a simulated callback loop.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -46,6 +46,4 @@ void test_timer()
   }
 
   ASSERT(timer_arg == 20);
-
-  pthread_cancel(LibXR::Timer::thread_handle_);
 }

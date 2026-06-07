@@ -47,6 +47,4 @@ void test_async()
     ASSERT(async.GetStatus() == LibXR::ASync::Status::DONE);
     ASSERT(async.GetStatus() == LibXR::ASync::Status::READY);
   }
-
-  pthread_cancel(async.thread_handle_);
 }

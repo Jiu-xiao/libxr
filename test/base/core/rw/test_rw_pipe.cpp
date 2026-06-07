@@ -6,14 +6,13 @@
 
 /**
  * @brief 测试入口函数 `test_rw`。 Test entry function `test_rw`.
- * @details 测试内容：聚合执行拆分后的 base `rw` 子测试组。 Aggregate and execute the split base `rw` subtest groups.
- *          测试原理：把端口状态机验证拆成多个主题文件后，仍通过单一入口保持 runner 契约。 Preserve the runner contract after splitting port-state-machine verification into themed files.
+ * @details 测试内容：聚合执行拆分后的 base `rw` 裸机可跑子测试组。 Aggregate and execute the split base `rw` subtest groups that can run on the bare-metal backend.
+ *          测试原理：把纯端口状态机验证留在 base 入口，阻塞等待者和后台补齐场景交给 runtime 入口。 Keep pure port-state-machine verification in the base entry and leave blocking-waiter/background-completion scenarios to the runtime entry.
  */
 void test_rw()
 {
   RunBaseRwReadQueueTests();
   RunBaseRwPendingTests();
-  RunBaseRwBlockTests();
   RunBaseRwFailAndClearTests();
 }
 

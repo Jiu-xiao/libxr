@@ -72,25 +72,30 @@ void VerifyPendingReadMode(TestMode mode)
   std::vector<uint8_t> tx = {0x42, 0x73, 0x8A, 0xC1};
   std::vector<uint8_t> rx(4, 0x7A);
   ReadHarness read(mode);
-  Semaphore done;
-  Thread finisher;
-  StartReadQueueCompleter(finisher, r, done, tx.data(), tx.size(), "rd_queue");
-
-  auto call_result = r(RawData{rx.data(), rx.size()}, read.op);
 
   if (mode == TestMode::BLOCK)
   {
-    ASSERT(call_result == ErrorCode::OK);
-  }
-  else
-  {
-    ASSERT(call_result == ErrorCode::OK);
-    read.ExpectPendingSubmitted();
+    Semaphore done;
+    Thread finisher;
+    StartReadQueueCompleter(finisher, r, done, tx.data(), tx.size(), "rd_queue");
+
+    auto block_result = r(RawData{rx.data(), rx.size()}, read.op);
+    ASSERT(block_result == ErrorCode::OK);
+
+    ExpectWaitOk(done);
+    JoinThreadIfNeeded(finisher);
+    ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+    return;
   }
 
-  ExpectWaitOk(done);
-  JoinThreadIfNeeded(finisher);
-  if (mode != TestMode::NONE && mode != TestMode::BLOCK)
+  auto call_result = r(RawData{rx.data(), rx.size()}, read.op);
+  ASSERT(call_result == ErrorCode::OK);
+  read.ExpectPendingSubmitted();
+
+  ASSERT(r.queue_data_->PushBatch(tx.data(), tx.size()) == ErrorCode::OK);
+  r.ProcessPendingReads(false);
+  if (mode != TestMode::NONE)
   {
     read.ExpectFinal(ErrorCode::OK);
   }
@@ -112,24 +117,30 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
 
   std::vector<uint8_t> tx = {0x31, 0x41, 0x59, 0x26};
   WriteHarness write(mode);
-  Semaphore done;
-  Thread finisher;
-  StartWriteFinisher(finisher, w, done, result, "wr_finish");
-
-  auto call_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
 
   if (mode == TestMode::BLOCK)
   {
-    ASSERT(call_result == result);
-  }
-  else
-  {
-    ASSERT(call_result == ErrorCode::OK);
+    Semaphore done;
+    Thread finisher;
+    StartWriteFinisher(finisher, w, done, result, "wr_finish");
+
+    auto block_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
+    ASSERT(block_result == result);
+
+    ExpectWaitOk(done);
+    JoinThreadIfNeeded(finisher);
+    ASSERT(w.queue_info_->Size() == 0);
+    return;
   }
 
-  ExpectWaitOk(done);
-  JoinThreadIfNeeded(finisher);
-  if (mode != TestMode::NONE && mode != TestMode::BLOCK)
+  auto call_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
+  ASSERT(call_result == ErrorCode::OK);
+
+  WriteInfoBlock info{};
+  ASSERT(w.queue_info_->Pop(info) == ErrorCode::OK);
+  ASSERT(w.queue_data_->PopBatch(nullptr, info.data.size_) == ErrorCode::OK);
+  w.Finish(false, result, info);
+  if (mode != TestMode::NONE)
   {
     write.ExpectFinal(result);
   }

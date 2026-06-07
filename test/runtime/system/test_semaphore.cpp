@@ -13,31 +13,6 @@
 #include "libxr_def.hpp"
 #include "test.hpp"
 
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-#include <pthread.h>
-#endif
-
-namespace
-{
-
-/**
- * @brief 辅助函数 `JoinThreadIfNeeded`。 Helper function `JoinThreadIfNeeded`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
- */
-void JoinThreadIfNeeded(LibXR::Thread& thread)
-{
-  // 辅助内容：为后续测试准备或校验共享状态。
-  // Helper coverage: prepare or validate shared state for later tests.
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-  pthread_join(thread, nullptr);
-#else
-  UNUSED(thread);
-#endif
-}
-
-}  // namespace
-
 /**
  * @brief 测试入口函数 `test_semaphore`。 Test entry function `test_semaphore`.
  * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
@@ -69,5 +44,5 @@ void test_semaphore()
       "semaphore_thread", 512, LibXR::Thread::Priority::REALTIME);
 
   ASSERT(sem.Wait(200) == LibXR::ErrorCode::OK);
-  JoinThreadIfNeeded(thread);
+  LibXR::Thread::Sleep(1);
 }

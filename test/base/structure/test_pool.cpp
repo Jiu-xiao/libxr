@@ -4,7 +4,7 @@
  *
  * 测试项目 / Test items:
  * 1. 基础槽位生命周期。 Basic slot lifecycle: verify put/get/full/empty behavior and slot reuse in a small pool.
- * 2. 多线程唯一性与总量完整性。 Concurrent integrity: verify multi-writer and multi-reader traffic preserves uniqueness, counts and aggregate sums.
+ * 2. 多线程唯一性与总量完整性。 Concurrent integrity: verify multi-writer and multi-reader traffic preserves uniqueness, counts and aggregate sums when the backend supports threads.
  * 3. 重复填充/排空和小池复用压力。 Reuse stress: verify repeated fill-drain cycles and tiny-pool churn do not leak stale state.
  *
  * 测试原理 / Test principles:
@@ -119,6 +119,7 @@ void test_lock_free_pool()
     ASSERT(pool.Get(tmp) == LibXR::ErrorCode::OK && tmp == 5);
   }
 
+#if !defined(LIBXR_NOT_SUPPORT_MUTI_THREAD)
   // ---- 多线程并发完整性测试 ----
   {
     push_sum = 0;
@@ -156,6 +157,7 @@ void test_lock_free_pool()
       ASSERT(pop_taken[i] == 1);
     }
   }
+#endif
 
   // ---- 边界填满循环压力测试 ----
   {

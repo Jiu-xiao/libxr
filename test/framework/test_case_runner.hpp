@@ -12,22 +12,25 @@
 
 #include <cstdio>
 #include <cstdlib>
+
+#if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include "libxr.hpp"
-#include "logger.hpp"
 
 inline const char* test_name = nullptr;
 
-#define TEST_STEP(_arg)                                \
-  do                                                   \
-  {                                                    \
-    test_name = _arg;                                  \
-    if (test_name)                                     \
-    {                                                  \
-      XR_LOG_PASS("\tTest [%s] Passed.\n", test_name); \
-    }                                                  \
+#define TEST_STEP(_arg)                                           \
+  do                                                              \
+  {                                                               \
+    test_name = _arg;                                             \
+    if (test_name)                                                \
+    {                                                             \
+      std::fprintf(stderr, "\tTest [%s] Passed.\n", test_name);   \
+      std::fflush(stderr);                                        \
+    }                                                             \
   } while (0)
 
 bool equal(double a, double b);
@@ -61,6 +64,7 @@ inline void run_test_case(const TestCase& test_case)
     return;
   }
 
+#if defined(LIBXR_SYSTEM_POSIX_HOST)
   pid_t child = fork();
   ASSERT(child >= 0);
 
@@ -74,4 +78,7 @@ inline void run_test_case(const TestCase& test_case)
   ASSERT(waitpid(child, &status, 0) == child);
   ASSERT(WIFEXITED(status));
   ASSERT(WEXITSTATUS(status) == 0);
+#else
+  ASSERT(false);
+#endif
 }

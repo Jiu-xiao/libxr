@@ -25,10 +25,10 @@ void test_lockfree_list()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
   // Test coverage: execute the test items listed in this file header in sequence.
-  LibXR::LockFreeList list;
   LibXR::LockFreeList::Node<int> node1(10);
   LibXR::LockFreeList::Node<int> node2(20);
   LibXR::LockFreeList::Node<int> node3(30);
+  LibXR::LockFreeList list;
 
   list.Add(node1);
   list.Add(node2);

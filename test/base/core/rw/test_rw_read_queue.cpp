@@ -3,15 +3,14 @@
  * @brief base `ReadPort` 读队列场景聚合入口。 Aggregation entry for split base `ReadPort` queue scenarios.
  * @details 测试项目：
  *          1. 聚合 `ClearQueuedData` 子场景。
- *          2. 聚合挂起完成与零长度读子场景。
+ *          2. 挂起完成与零长度读子场景由 runtime `rw` 入口覆盖。
  *          Test items:
  *          1. Aggregate `ClearQueuedData` sub-scenarios.
- *          2. Aggregate pending-completion and zero-length read sub-scenarios.
+ *          2. Runtime `rw` covers pending-completion and zero-length read sub-scenarios.
  */
 #include "rw_test_common.hpp"
 
 void RunBaseRwReadQueueClearTests();
-void RunBaseRwReadQueuePendingTests();
 
 /**
  * @brief 测试项函数 `RunBaseRwReadQueueTests`。 Test-item function `RunBaseRwReadQueueTests`.
@@ -21,5 +20,4 @@ void RunBaseRwReadQueuePendingTests();
 void RunBaseRwReadQueueTests()
 {
   RunBaseRwReadQueueClearTests();
-  RunBaseRwReadQueuePendingTests();
 }

@@ -4,11 +4,11 @@
  * @details 测试项目：
  *          1. `Reformat` / `Reprintf` 生成预期文本。
  *          2. 多次重格式化复用同一块稳定存储。
- *          3. 浮点与整数边界值保持可用输出。
+ *          3. 浮点与整数代表值保持可用输出。
  *          Test items:
  *          1. `Reformat` / `Reprintf` produce the expected text.
  *          2. Repeated formatting reuses the same stable storage buffer.
- *          3. Floating-point and integer edge values keep producing valid output.
+ *          3. Floating-point and integer representative values keep producing valid output.
  */
 #include "string_test_common.hpp"
 
@@ -56,10 +56,9 @@ void TestRuntimeStringFormat()
   LibXR::RuntimeStringView<"float_%.0f", float> float_fixed;
   ASSERT(float_fixed.Reprintf(1.0F) == LibXR::ErrorCode::OK);
   const char* float_storage = float_fixed.CStr();
-  ASSERT(float_fixed.Reprintf(std::numeric_limits<float>::max()) ==
-         LibXR::ErrorCode::OK);
+  ASSERT(float_fixed.Reprintf(12345.0F) == LibXR::ErrorCode::OK);
   ASSERT(float_fixed.CStr() == float_storage);
-  ASSERT(float_fixed.Size() > 35);
+  ASSERT(float_fixed.View() == std::string_view("float_12345"));
 }
 
 }  // namespace

@@ -3,8 +3,8 @@
  * @brief 队列家族的无锁、阻塞与批量操作测试。 Queue-family tests for lock-free, blocking and batch queue operations.
  *
  * 测试项目 / Test items:
- * 1. `LockFreeQueue` 线程间 push/pop 顺序。 `LockFreeQueue` threaded push/pop: verify producer/consumer transfer order and empty detection.
- * 2. `LockQueue` 的阻塞等待与超时。 `LockQueue` blocking waits: verify timed pop waits for producer posts and reports timeout when no data arrives.
+ * 1. `LockFreeQueue` 线程间 push/pop 顺序。 `LockFreeQueue` threaded push/pop: verify producer/consumer transfer order and empty detection when the backend supports threads.
+ * 2. `LockQueue` 的阻塞等待与超时。 `LockQueue` blocking waits: verify timed pop waits for producer posts and reports timeout when the backend supports threads.
  * 3. 普通 `Queue` 的批量 push/pop/peek。 Plain `Queue` batch helpers: verify `PushBatch()`, `PopBatch()` and `PeekBatch()` preserve wraparound ordering.
  *
  * 测试原理 / Test principles:
@@ -24,6 +24,7 @@ void test_queue()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
   // Test coverage: execute the test items listed in this file header in sequence.
+#if !defined(LIBXR_NOT_SUPPORT_MUTI_THREAD)
   LibXR::Thread thread1, thread2;
   static auto lock_free_queue = LibXR::LockFreeQueue<float>(3);
 
@@ -94,6 +95,7 @@ void test_queue()
   auto ret2 = queue.Pop(tmp, 20);
   ASSERT(ret2 != LibXR::ErrorCode::OK);
   ASSERT(tmp == 2.1f);
+#endif
 
   // Test batch operations on the basic Queue implementation
   LibXR::Queue<int> batch_queue(5);

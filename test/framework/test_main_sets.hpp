@@ -25,8 +25,8 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"core_tests", TestRuntimeSet::BARE_METAL, {"assert", &RunVoidEntry<test_assert>, false}},
     {"core_tests", TestRuntimeSet::BARE_METAL, {"def", &RunVoidEntry<test_def>, false}},
     {"core_tests", TestRuntimeSet::BARE_METAL, {"callback", &RunVoidEntry<test_cb>, false}},
-    {"core_tests", TestRuntimeSet::RTOS, {"pipe", &RunVoidEntry<test_pipe>, false}},
-    {"core_tests", TestRuntimeSet::RTOS, {"rw", &RunVoidEntry<test_rw>, false}},
+    {"core_tests", TestRuntimeSet::BARE_METAL, {"pipe", &RunVoidEntry<test_pipe>, false}},
+    {"core_tests", TestRuntimeSet::BARE_METAL, {"rw", &RunVoidEntry<test_rw>, false}},
     {"core_tests", TestRuntimeSet::BARE_METAL, {"memory", &RunVoidEntry<test_memory>, false}},
     {"core_tests", TestRuntimeSet::BARE_METAL, {"color", &RunVoidEntry<test_color>, false}},
     {"core_tests", TestRuntimeSet::BARE_METAL, {"time", &RunVoidEntry<test_time>, false}},
@@ -48,11 +48,11 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
 
     {"data_structure_tests", TestRuntimeSet::BARE_METAL,
      {"rbt", &RunVoidEntry<test_rbt>, false}},
-    {"data_structure_tests", TestRuntimeSet::RTOS,
+    {"data_structure_tests", TestRuntimeSet::BARE_METAL,
      {"queue", &RunVoidEntry<test_queue>, false}},
     {"data_structure_tests", TestRuntimeSet::BARE_METAL,
      {"lockfree_queue", &RunVoidEntry<test_lockfree_queue>, false}},
-    {"data_structure_tests", TestRuntimeSet::RTOS,
+    {"data_structure_tests", TestRuntimeSet::BARE_METAL,
      {"pool", &RunVoidEntry<test_lock_free_pool>, false}},
     {"data_structure_tests", TestRuntimeSet::BARE_METAL,
      {"lockfree_list", &RunVoidEntry<test_lockfree_list>, false}},
@@ -69,9 +69,9 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
 
     {"threading_tests", TestRuntimeSet::RTOS,
      {"thread", &RunVoidEntry<test_thread>, false}},
-    {"threading_tests", TestRuntimeSet::RTOS,
+    {"threading_tests", TestRuntimeSet::BARE_METAL,
      {"timebase", &RunVoidEntry<test_timebase>, false}},
-    {"threading_tests", TestRuntimeSet::RTOS,
+    {"threading_tests", TestRuntimeSet::BARE_METAL,
      {"timer", &RunVoidEntry<test_timer>, false}},
 
     {"runtime_tests", TestRuntimeSet::RTOS,
@@ -123,7 +123,8 @@ inline int RunMainTestBinary()
     return ErrorCodeToExitStatus(load_result);
   }
 
-  XR_LOG_INFO("Running LibXR Tests...\n");
+  std::fprintf(stderr, "Running LibXR Tests...\n");
+  std::fflush(stderr);
 
   const char* current_group = nullptr;
   size_t matched = 0;
@@ -138,7 +139,8 @@ inline int RunMainTestBinary()
     if (current_group == nullptr || std::strcmp(current_group, entry.group) != 0)
     {
       current_group = entry.group;
-      XR_LOG_INFO("Test Group [%s]\n", current_group);
+      std::fprintf(stderr, "Test Group [%s]\n", current_group);
+      std::fflush(stderr);
     }
 
     run_test_case(entry.test_case);
@@ -152,7 +154,6 @@ inline int RunMainTestBinary()
     return ErrorCodeToExitStatus(LibXR::ErrorCode::NOT_FOUND);
   }
 
-  XR_LOG_INFO("All tests completed.\n");
   std::fprintf(stderr, "All tests completed.\n");
   std::fflush(stderr);
   return ErrorCodeToExitStatus(LibXR::ErrorCode::OK);

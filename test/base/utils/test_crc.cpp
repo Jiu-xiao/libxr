@@ -9,6 +9,7 @@
  * 测试原理 / Test principles:
  * 1. 使用末尾 CRC 字段的 packed 载荷，贴近仓库内最主要的真实用法。 Use packed payloads with trailing checksum fields, because this matches the dominant in-repo usage pattern for CRC helpers.
  */
+#include "crc.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"

@@ -2,11 +2,11 @@
  * @file rw_thread_test_common.hpp
  * @brief `rw` / `pipe` 线程与等待同步测试 helper。 Shared thread and waiter helpers for `rw` / `pipe` tests.
  * @details 测试项目：
- *          1. 提供线程回收与等待断言 helper。
+ *          1. 提供线程收尾与等待断言 helper。
  *          2. 提供挂起读写完成、阻塞读写调用的上下文与线程启动封装。
  *          3. 提供把后台补数据/补完成的动作统一包装成可复用 helper。
  *          Test items:
- *          1. Provide thread-join and wait assertion helpers.
+ *          1. Provide thread-settle and wait assertion helpers.
  *          2. Provide contexts and starters for pending completion and blocking read/write calls.
  *          3. Wrap background completion actions into reusable helpers.
  */
@@ -33,11 +33,8 @@ inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-  pthread_join(thread, nullptr);
-#else
   UNUSED(thread);
-#endif
+  LibXR::Thread::Sleep(1);
 }
 
 /**

@@ -30,26 +30,28 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
 )
 
-file(GLOB_RECURSE XR_TEST_BINDING_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/binding/*.cpp"
-)
-list(SORT XR_TEST_BINDING_SOURCES)
+if(_xr_system STREQUAL "linux")
+  file(GLOB_RECURSE XR_TEST_BINDING_SOURCES CONFIGURE_DEPENDS
+       "${CMAKE_CURRENT_SOURCE_DIR}/binding/*.cpp"
+  )
+  list(SORT XR_TEST_BINDING_SOURCES)
 
-list(PREPEND XR_TEST_BINDING_SOURCES
-     "${CMAKE_CURRENT_SOURCE_DIR}/framework/binding_main.cpp"
-)
+  list(PREPEND XR_TEST_BINDING_SOURCES
+       "${CMAKE_CURRENT_SOURCE_DIR}/framework/binding_main.cpp"
+  )
 
-add_executable(test_binding ${XR_TEST_BINDING_SOURCES})
-add_dependencies(test_binding xr)
+  add_executable(test_binding ${XR_TEST_BINDING_SOURCES})
+  add_dependencies(test_binding xr)
 
-target_link_libraries(test_binding PUBLIC xr)
+  target_link_libraries(test_binding PUBLIC xr)
 
-target_include_directories(
-  test_binding
-  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/framework"
-  PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
-)
+  target_include_directories(
+    test_binding
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/framework"
+    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
+  )
 
-add_subdirectory(verify)
-add_subdirectory(measure)
+  add_subdirectory(verify)
+  add_subdirectory(measure)
+endif()

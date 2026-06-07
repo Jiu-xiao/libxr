@@ -8,53 +8,11 @@
  * 3. 周期性 `SleepUntil()`。 Periodic sleep-until: verify `SleepUntil()` advances wakeups monotonically across successive periods.
  *
  * 测试原理 / Test principles:
- * 1. 同时使用宿主单调时钟和 LibXR 时间戳，双重验证外部时长与内部周期唤醒表面。 Use monotonic host time alongside LibXR timestamps so the test checks both external elapsed time and LibXR's own periodic wakeup surface.
+ * 1. 只通过 LibXR 时间 API 观察线程睡眠与周期唤醒语义，避免测试体依赖宿主平台调用。 Observe sleep and periodic wakeup semantics only through LibXR time APIs, so the test body does not depend on host platform calls.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
-
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-#include <pthread.h>
-#endif
-
-#include <time.h>
-
-namespace
-{
-
-/**
- * @brief 辅助函数 `JoinThreadIfNeeded`。 Helper function `JoinThreadIfNeeded`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
- */
-void JoinThreadIfNeeded(LibXR::Thread& thread)
-{
-  // 辅助内容：为后续测试准备或校验共享状态。
-  // Helper coverage: prepare or validate shared state for later tests.
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-  pthread_join(thread, nullptr);
-#else
-  UNUSED(thread);
-#endif
-}
-
-/**
- * @brief 辅助函数 `NowMonotonicMs`。 Helper function `NowMonotonicMs`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
- */
-uint64_t NowMonotonicMs()
-{
-  // 辅助内容：为后续测试准备或校验共享状态。
-  // Helper coverage: prepare or validate shared state for later tests.
-  struct timespec ts = {};
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return static_cast<uint64_t>(ts.tv_sec) * 1000ULL +
-         static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
-}
-
-}  // namespace
 
 /**
  * @brief 测试入口函数 `test_thread`。 Test entry function `test_thread`.
@@ -80,11 +38,11 @@ void test_thread()
       "test_task", 512, LibXR::Thread::Priority::REALTIME);
 
   ASSERT(sem.Wait(200) == LibXR::ErrorCode::OK);
-  JoinThreadIfNeeded(thread);
+  LibXR::Thread::Sleep(1);
 
-  const uint64_t sleep_start_ms = NowMonotonicMs();
+  const uint32_t sleep_start_ms = LibXR::Thread::GetTime();
   LibXR::Thread::Sleep(20);
-  const uint64_t sleep_elapsed_ms = NowMonotonicMs() - sleep_start_ms;
+  const uint32_t sleep_elapsed_ms = LibXR::Thread::GetTime() - sleep_start_ms;
   ASSERT(sleep_elapsed_ms >= 15);
 
   LibXR::MillisecondTimestamp wakeup = LibXR::Thread::GetTime();

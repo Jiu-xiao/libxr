@@ -53,6 +53,7 @@ void test_time()
   ASSERT(static_cast<uint64_t>(us_wrap) == 5);
   ASSERT(us_wrap.ToMicrosecond() == 5);
 
+  LibXR::Detail::ConfigureTimebaseWrapRange(UINT64_MAX, UINT32_MAX);
   const auto ms_elapsed =
       LibXR::MillisecondTimestamp(2500) - LibXR::MillisecondTimestamp(1000);
   ASSERT(static_cast<uint32_t>(ms_elapsed) == 1500);

@@ -4,19 +4,15 @@
  * @details 测试项目：
  *          1. 统一封装 `NONE` / `POLLING` / `CALLBACK` / `BLOCK` 四类操作模式。
  *          2. 统一维护异步回调计数、最终错误码和等待信号量。
- *          3. 统一提供线程回收与等待断言，避免各测试文件重复展开样板代码。
+ *          3. 统一提供等待断言，避免各测试文件重复展开样板代码。
  *          Test items:
  *          1. Provide one shared wrapper for `NONE` / `POLLING` / `CALLBACK` / `BLOCK` modes.
  *          2. Keep callback counts, final status, and semaphores in one reusable probe.
- *          3. Centralize thread-join and wait assertions so scenario files stay focused.
+ *          3. Centralize wait assertions so scenario files stay focused.
  */
 #pragma once
 
 #include <atomic>
-
-#if defined(LIBXR_SYSTEM_POSIX_HOST)
-#include <pthread.h>
-#endif
 
 #include "libxr.hpp"
 #include "libxr_def.hpp"

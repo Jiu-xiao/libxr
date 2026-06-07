@@ -156,6 +156,8 @@ void RunBasePipeStressTests()
 {
   test_pipe_mode_matrix();
   test_pipe_reuse_stress();
+#if !defined(LIBXR_NOT_SUPPORT_MUTI_THREAD)
   test_pipe_block_reuse_stress();
+#endif
   test_pipe_edge_cases();
 }

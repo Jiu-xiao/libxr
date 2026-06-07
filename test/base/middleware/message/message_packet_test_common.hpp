@@ -6,6 +6,7 @@
 
 #include <cstdint>
 
+#include "crc.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "message_test_payloads.hpp"
