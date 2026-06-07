@@ -46,7 +46,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPQueueCoreImpl
   {
     REQUIRE(element_size_ > 0);
     REQUIRE(capacity_ > 0);
-    REQUIRE(RingCapacity() > capacity_);
+    REQUIRE(capacity_ <= std::numeric_limits<size_t>::max() - 1);
 
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
     payloads_ = static_cast<std::byte*>(::operator new[](

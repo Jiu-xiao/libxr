@@ -144,6 +144,7 @@ class SPSCQueue
     {
       return ErrorCode::PTR_NULL;
     }
+
     auto current_tail = core_.LoadTailRelaxed();
     auto current_head = core_.LoadHeadAcquire();
     const size_t capacity = core_.RingCapacity();
@@ -158,7 +159,7 @@ class SPSCQueue
 
     for (size_t index = 0; index < size; ++index)
     {
-      *SlotPtr((current_tail + index) % static_cast<uint32_t>(capacity)) = data[index];
+      *SlotPtr((current_tail + index) % capacity) = data[index];
     }
 
     core_.StoreTailRelease((current_tail + size) % capacity);
@@ -241,8 +242,7 @@ class SPSCQueue
     {
       for (size_t index = 0; index < size; ++index)
       {
-        data[index] =
-            *ConstSlotPtr((current_head + index) % static_cast<uint32_t>(capacity));
+        data[index] = *ConstSlotPtr((current_head + index) % capacity);
       }
     }
 
@@ -278,8 +278,7 @@ class SPSCQueue
 
     for (size_t index = 0; index < size; ++index)
     {
-      data[index] =
-          *ConstSlotPtr((current_head + index) % static_cast<uint32_t>(capacity));
+      data[index] = *ConstSlotPtr((current_head + index) % capacity);
     }
     return ErrorCode::OK;
   }
