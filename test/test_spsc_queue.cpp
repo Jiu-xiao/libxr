@@ -5,30 +5,10 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 
 namespace
 {
 using Queue = LibXR::SPSCQueue<uint32_t>;  ///< 默认测试用 32 位 payload 队列 / Default test queue using 32-bit payloads.
-
-/**
- * @struct NonTrivialPayload
- * @brief 非平凡 payload，用于验证 SPSC 包装层不会退化成字节拷贝
- *        / Non-trivial payload used to verify the SPSC wrapper does not degrade
- *        into raw byte copying
- */
-struct NonTrivialPayload
-{
-  uint32_t value = 0;        ///< 有效载荷值 / Payload value.
-  const uint32_t* tag = {};  ///< 附带指针成员 / Attached pointer member.
-
-  NonTrivialPayload() = default;
-  NonTrivialPayload(uint32_t value_in, const uint32_t* tag_in) : value(value_in), tag(tag_in) {}
-  ~NonTrivialPayload() {}
-};
-
-static_assert(!std::is_trivially_copyable_v<NonTrivialPayload>,
-              "NonTrivialPayload must stay non-trivially-copyable");
 
 /**
  * @struct ProducerArg
@@ -142,20 +122,45 @@ void test_spsc_queue()
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
-  // Non-trivial payloads must remain valid when the wrapper uses typed slot assignment.
+  // Callback failures must not commit a partially produced or consumed element.
   {
-    constexpr uint32_t TAG = 0x1234ABCDU;
-    LibXR::SPSCQueue<NonTrivialPayload> queue(2);
-    NonTrivialPayload pushed(77, &TAG);
-    NonTrivialPayload popped;
+    Queue queue(2);
+    uint32_t value = 0;
+    bool writer_called = false;
 
-    ASSERT(queue.Push(pushed) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Peek(popped) == LibXR::ErrorCode::OK);
-    ASSERT(popped.value == 77);
-    ASSERT(popped.tag == &TAG);
-    ASSERT(queue.Pop(popped) == LibXR::ErrorCode::OK);
-    ASSERT(popped.value == 77);
-    ASSERT(popped.tag == &TAG);
+    ASSERT(queue.PushWithWriter(
+               [](uint32_t* slot, size_t count)
+               {
+                 ASSERT(count == 1);
+                 slot[0] = 42;
+                 return LibXR::ErrorCode::FAILED;
+               }) == LibXR::ErrorCode::FAILED);
+    ASSERT(queue.Size() == 0);
+
+    ASSERT(queue.Push(1) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Push(2) == LibXR::ErrorCode::OK);
+    ASSERT(queue.PushWithWriter(
+               [&](uint32_t* slot, size_t count)
+               {
+                 UNUSED(slot);
+                 UNUSED(count);
+                 writer_called = true;
+                 return LibXR::ErrorCode::OK;
+               }) == LibXR::ErrorCode::FULL);
+    ASSERT(!writer_called);
+    ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+    ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+
+    ASSERT(queue.Push(55) == LibXR::ErrorCode::OK);
+    ASSERT(queue.PopWithReader(
+               [](const uint32_t* slot, size_t count)
+               {
+                 ASSERT(count == 1);
+                 ASSERT(slot[0] == 55);
+                 return LibXR::ErrorCode::FAILED;
+               }) == LibXR::ErrorCode::FAILED);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 55);
   }
 
   // End-to-end producer/consumer handoff under sustained contention.
