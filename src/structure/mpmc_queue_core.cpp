@@ -26,19 +26,13 @@ MPMCQueueCore::MPMCQueueCore(size_t element_size, size_t capacity)
   REQUIRE(capacity_ <= static_cast<size_t>(std::numeric_limits<SequenceDiffType>::max()));
 
   const size_t payload_bytes = MultiplyChecked(payload_stride_, capacity_);
-  sequences_ = new (std::align_val_t(alignof(SequenceCell))) SequenceCell[capacity_];
+  sequences_ =
+      new (std::align_val_t(alignof(SequenceCell)), std::nothrow) SequenceCell[capacity_];
+  REQUIRE(sequences_ != nullptr);
 
-  try
-  {
-    payloads_ = static_cast<std::byte*>(
-        ::operator new[](payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN)));
-  }
-  catch (...)
-  {
-    delete[] sequences_;
-    sequences_ = nullptr;
-    throw;
-  }
+  payloads_ = static_cast<std::byte*>(::operator new[](
+      payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN), std::nothrow));
+  REQUIRE(payloads_ != nullptr);
 
   for (size_t index = 0; index < capacity_; ++index)
   {
