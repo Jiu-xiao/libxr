@@ -47,6 +47,26 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
 )
 
+set(XR_TEST_MATRIX_TSV "${CMAKE_CURRENT_BINARY_DIR}/test_matrix.tsv")
+
+add_custom_command(
+  OUTPUT ${XR_TEST_MATRIX_TSV}
+  COMMAND $<TARGET_FILE:test_matrix_tool> --write-tsv ${XR_TEST_MATRIX_TSV}
+  DEPENDS test_matrix_tool
+  COMMENT "Exporting test matrix manifest"
+  VERBATIM
+)
+
+add_custom_target(test_matrix_export ALL DEPENDS ${XR_TEST_MATRIX_TSV})
+
+add_custom_target(
+  test_matrix_validate ALL
+  COMMAND $<TARGET_FILE:test_matrix_tool> --validate
+  DEPENDS test_matrix_tool
+  COMMENT "Validating test matrix manifest"
+  VERBATIM
+)
+
 file(GLOB_RECURSE XR_TEST_BINDING_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/binding/*.cpp"
 )
@@ -58,6 +78,8 @@ list(PREPEND XR_TEST_BINDING_SOURCES
 
 add_executable(test_binding ${XR_TEST_BINDING_SOURCES})
 add_dependencies(test_binding xr)
+add_dependencies(test test_matrix_validate)
+add_dependencies(test_binding test_matrix_validate)
 
 target_link_libraries(test_binding PUBLIC xr)
 

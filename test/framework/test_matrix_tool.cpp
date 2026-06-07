@@ -1,96 +1,31 @@
 /**
  * @file test_matrix_tool.cpp
- * @brief test 统一入口矩阵校验/导出工具。 Validation/export tool for the unified test entry matrix.
+ * @brief test 统一入口矩阵校验/导出工具。 Validation/export tool for the unified test manifest.
  * @details 职责：
- *          1. 校验矩阵的 id/group/selector/isolated 规则。
+ *          1. 校验 manifest 的 id/group/module/tag/selector/isolated 规则。
  *          2. 导出矩阵清单，作为 runner 外部的可读事实表。
  *          Responsibilities:
- *          1. Validate id/group/selector/isolated rules of the matrix.
- *          2. Export the matrix manifest as a human-readable fact table outside the runners.
+ *          1. Validate id/group/module/tag/selector/isolated rules of the manifest.
+ *          2. Export the manifest as a human-readable fact table outside the runners.
  */
 #include <cstdio>
 #include <cstring>
 #include <set>
 #include <string_view>
-#include <vector>
 
 #include "test_matrix.hpp"
 
 namespace
 {
 
-struct MatrixRecord
-{
-  const char* id;
-  const char* group;
-  TestBinary binary;
-  TestPlane plane;
-  const char* module;
-  bool isolated;
-  const char* selector;
-};
-
-#define XR_TOOL_MAIN_RECORD(id, group, plane, module, isolated, fn) \
-  {id, group, TestBinary::MAIN, plane, module, isolated, nullptr},
-#define XR_TOOL_BINDING_RECORD(id, group, plane, module, isolated, fn) \
-  {id, group, TestBinary::BINDING, plane, module, isolated, nullptr},
-#define XR_TOOL_VERIFY_RECORD(id, group, plane, module, isolated, fn) \
-  {id, group, TestBinary::VERIFY_LINUX_SHM, plane, module, isolated, nullptr},
-#define XR_TOOL_BENCH_RECORD(id, group, plane, module, isolated, selector_name, fn) \
-  {id, group, TestBinary::BENCH_LINUX_SHARED_TOPIC, plane, module, isolated, selector_name},
-
-const MatrixRecord kMatrixRecords[] = {
-    XR_MATRIX_MAIN_ENTRY_LIST(XR_TOOL_MAIN_RECORD)
-    XR_MATRIX_BINDING_ENTRY_LIST(XR_TOOL_BINDING_RECORD)
-    XR_MATRIX_VERIFY_LINUX_SHM_ENTRY_LIST(XR_TOOL_VERIFY_RECORD)
-    XR_MATRIX_BENCH_LINUX_SHARED_TOPIC_ENTRY_LIST(XR_TOOL_BENCH_RECORD)
-};
-
-#undef XR_TOOL_MAIN_RECORD
-#undef XR_TOOL_BINDING_RECORD
-#undef XR_TOOL_VERIFY_RECORD
-#undef XR_TOOL_BENCH_RECORD
-
-const char* BinaryName(TestBinary binary)
-{
-  switch (binary)
-  {
-    case TestBinary::MAIN:
-      return "test";
-    case TestBinary::BINDING:
-      return "test_binding";
-    case TestBinary::VERIFY_LINUX_SHM:
-      return "test_linux_shm_topic";
-    case TestBinary::BENCH_LINUX_SHARED_TOPIC:
-      return "bench_linux_shared_topic";
-  }
-  return "unknown";
-}
-
-const char* PlaneName(TestPlane plane)
-{
-  switch (plane)
-  {
-    case TestPlane::MAIN_HOST:
-      return "main_host";
-    case TestPlane::BINDING_HOST:
-      return "binding_host";
-    case TestPlane::VERIFY_ENVIRONMENT:
-      return "verify_environment";
-    case TestPlane::MEASURE_PERF:
-      return "measure_perf";
-  }
-  return "unknown";
-}
-
 bool HasDuplicateIds()
 {
   std::set<std::string_view> ids;
-  for (const auto& record : kMatrixRecords)
+  for (const auto& entry : kTestManifest)
   {
-    if (!ids.insert(record.id).second)
+    if (!ids.insert(entry.id).second)
     {
-      std::fprintf(stderr, "duplicate id: %s\n", record.id);
+      std::fprintf(stderr, "duplicate id: %s\n", entry.id);
       return true;
     }
   }
@@ -99,21 +34,21 @@ bool HasDuplicateIds()
 
 bool HasEmptyFields()
 {
-  for (const auto& record : kMatrixRecords)
+  for (const auto& entry : kTestManifest)
   {
-    if (record.id == nullptr || record.id[0] == '\0')
+    if (entry.id == nullptr || entry.id[0] == '\0')
     {
-      std::fprintf(stderr, "empty id on binary=%s\n", BinaryName(record.binary));
+      std::fprintf(stderr, "empty id on binary=%s\n", BinaryName(entry.binary));
       return true;
     }
-    if (record.group == nullptr || record.group[0] == '\0')
+    if (entry.group == nullptr || entry.group[0] == '\0')
     {
-      std::fprintf(stderr, "empty group on id=%s\n", record.id);
+      std::fprintf(stderr, "empty group on id=%s\n", entry.id);
       return true;
     }
-    if (record.module == nullptr || record.module[0] == '\0')
+    if (entry.module == nullptr || entry.module[0] == '\0')
     {
-      std::fprintf(stderr, "empty module on id=%s\n", record.id);
+      std::fprintf(stderr, "empty module on id=%s\n", entry.id);
       return true;
     }
   }
@@ -123,25 +58,25 @@ bool HasEmptyFields()
 bool HasInvalidSelectorPolicy()
 {
   std::set<std::string_view> selectors;
-  for (const auto& record : kMatrixRecords)
+  for (const auto& entry : kTestManifest)
   {
-    const bool selector_present = record.selector != nullptr && record.selector[0] != '\0';
-    if (record.binary == TestBinary::BENCH_LINUX_SHARED_TOPIC)
+    const bool selector_present = entry.selector != nullptr && entry.selector[0] != '\0';
+    if (entry.binary == TestBinary::BENCH_LINUX_SHARED_TOPIC)
     {
       if (!selector_present)
       {
-        std::fprintf(stderr, "bench entry missing selector: %s\n", record.id);
+        std::fprintf(stderr, "bench entry missing selector: %s\n", entry.id);
         return true;
       }
-      if (!selectors.insert(record.selector).second)
+      if (!selectors.insert(entry.selector).second)
       {
-        std::fprintf(stderr, "duplicate selector: %s\n", record.selector);
+        std::fprintf(stderr, "duplicate selector: %s\n", entry.selector);
         return true;
       }
     }
     else if (selector_present)
     {
-      std::fprintf(stderr, "non-bench entry has selector: %s\n", record.id);
+      std::fprintf(stderr, "non-bench entry has selector: %s\n", entry.id);
       return true;
     }
   }
@@ -150,13 +85,91 @@ bool HasInvalidSelectorPolicy()
 
 bool HasInvalidIsolationPolicy()
 {
-  for (const auto& record : kMatrixRecords)
+  for (const auto& entry : kTestManifest)
   {
-    if (record.isolated && record.binary != TestBinary::MAIN)
+    const bool isolated_tag = (entry.tags & ToMask(TestTag::ISOLATED)) != 0;
+    if (entry.isolated && entry.binary != TestBinary::MAIN)
     {
-      std::fprintf(stderr, "isolated entry outside main binary: %s\n", record.id);
+      std::fprintf(stderr, "isolated entry outside main binary: %s\n", entry.id);
       return true;
     }
+    if (entry.isolated != isolated_tag)
+    {
+      std::fprintf(stderr, "isolated flag/tag mismatch on entry: %s\n", entry.id);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasInvalidPlaneTagPolicy()
+{
+  for (const auto& entry : kTestManifest)
+  {
+    switch (entry.binary)
+    {
+      case TestBinary::MAIN:
+        if ((entry.tags & ToMask(TestTag::CORE)) == 0)
+        {
+          std::fprintf(stderr, "main entry missing core tag: %s\n", entry.id);
+          return true;
+        }
+        break;
+      case TestBinary::BINDING:
+        if ((entry.tags & ToMask(TestTag::BINDING)) == 0)
+        {
+          std::fprintf(stderr, "binding entry missing binding tag: %s\n", entry.id);
+          return true;
+        }
+        break;
+      case TestBinary::VERIFY_LINUX_SHM:
+        if ((entry.tags & ToMask(TestTag::VERIFY)) == 0)
+        {
+          std::fprintf(stderr, "verify entry missing verify tag: %s\n", entry.id);
+          return true;
+        }
+        break;
+      case TestBinary::BENCH_LINUX_SHARED_TOPIC:
+        if ((entry.tags & ToMask(TestTag::MEASURE)) == 0)
+        {
+          std::fprintf(stderr, "bench entry missing measure tag: %s\n", entry.id);
+          return true;
+        }
+        break;
+    }
+  }
+  return false;
+}
+
+bool HasEmptyBinary()
+{
+  bool seen_main = false;
+  bool seen_binding = false;
+  bool seen_verify = false;
+  bool seen_bench = false;
+  for (const auto& entry : kTestManifest)
+  {
+    switch (entry.binary)
+    {
+      case TestBinary::MAIN:
+        seen_main = true;
+        break;
+      case TestBinary::BINDING:
+        seen_binding = true;
+        break;
+      case TestBinary::VERIFY_LINUX_SHM:
+        seen_verify = true;
+        break;
+      case TestBinary::BENCH_LINUX_SHARED_TOPIC:
+        seen_bench = true;
+        break;
+    }
+  }
+
+  if (!seen_main || !seen_binding || !seen_verify || !seen_bench)
+  {
+    std::fprintf(stderr, "one or more binaries have no entries\n");
+    return true;
   }
   return false;
 }
@@ -168,41 +181,54 @@ int ValidateMatrix()
   failed |= HasEmptyFields();
   failed |= HasInvalidSelectorPolicy();
   failed |= HasInvalidIsolationPolicy();
+  failed |= HasInvalidPlaneTagPolicy();
+  failed |= HasEmptyBinary();
   return failed ? 1 : 0;
 }
 
-int PrintTsv()
+int PrintTsv(FILE* out)
 {
-  std::printf("id\tbinary\tgroup\tplane\tmodule\tisolated\tselector\n");
-  for (const auto& record : kMatrixRecords)
+  std::fprintf(out, "id\tbinary\tgroup\tplane\tmodule\ttags\tisolated\tselector\n");
+  for (const auto& entry : kTestManifest)
   {
-    std::printf("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", record.id, BinaryName(record.binary),
-                record.group, PlaneName(record.plane), record.module,
-                record.isolated ? "true" : "false",
-                (record.selector != nullptr) ? record.selector : "");
+    std::fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", entry.id,
+                 BinaryName(entry.binary), entry.group, PlaneName(entry.plane), entry.module,
+                 TagsText(entry.tags).c_str(), entry.isolated ? "true" : "false",
+                 (entry.selector != nullptr) ? entry.selector : "");
   }
   return 0;
+}
+
+int WriteTsv(const char* path)
+{
+  std::FILE* file = std::fopen(path, "wb");
+  if (file == nullptr)
+  {
+    std::fprintf(stderr, "failed to open output: %s\n", path);
+    return 1;
+  }
+  const int rc = PrintTsv(file);
+  std::fclose(file);
+  return rc;
 }
 
 }  // namespace
 
 int main(int argc, char** argv)
 {
-  if (argc != 2)
-  {
-    std::fprintf(stderr, "usage: %s --validate|--tsv\n", argv[0]);
-    return 2;
-  }
-
-  if (std::strcmp(argv[1], "--validate") == 0)
+  if (argc == 2 && std::strcmp(argv[1], "--validate") == 0)
   {
     return ValidateMatrix();
   }
-  if (std::strcmp(argv[1], "--tsv") == 0)
+  if (argc == 2 && std::strcmp(argv[1], "--tsv") == 0)
   {
-    return PrintTsv();
+    return PrintTsv(stdout);
+  }
+  if (argc == 3 && std::strcmp(argv[1], "--write-tsv") == 0)
+  {
+    return WriteTsv(argv[2]);
   }
 
-  std::fprintf(stderr, "unknown option: %s\n", argv[1]);
+  std::fprintf(stderr, "usage: %s --validate | --tsv | --write-tsv <path>\n", argv[0]);
   return 2;
 }

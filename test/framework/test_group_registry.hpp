@@ -10,6 +10,6 @@
  */
 #pragma once
 
-#include "test_matrix.hpp"
+#include "test_main_registry.hpp"
 
 inline void run_libxr_tests() { (void)RunMainTestBinary(); }

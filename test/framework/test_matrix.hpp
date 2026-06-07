@@ -1,24 +1,23 @@
 /**
  * @file test_matrix.hpp
- * @brief test 二进制统一入口矩阵。 Unified entry matrix for test binaries.
+ * @brief test 二进制统一入口 manifest 与过滤 helper。 Unified manifest and filter helpers for test binaries.
  * @details 作用：
- *          1. 以单一事实源列出 `test` / `test_binding` / `verify` / `measure` 四类入口。
- *          2. 让主 runner、binding runner、verify runner、benchmark runner 都从同一份注册表取入口。
- *          3. 把入口的 binary/group/module/plane 元信息固定下来，避免文件拆分后 runner 漂移。
+ *          1. 以单一事实源列出 `test` / `test_binding` / `verify` / `measure` 四类入口元信息。
+ *          2. 提供 runner 与工具共用的 binary/plane/tag/filter helper。
+ *          3. 保持 manifest 纯元信息，不直接绑定跨二进制函数符号。
  *          Purpose:
- *          1. List the four entry families of `test` / `test_binding` / `verify` / `measure` from one source of truth.
- *          2. Make the main, binding, verify, and benchmark runners consume one shared registry.
- *          3. Fix binary/group/module/plane metadata at the entry boundary so runner wiring does not drift after file splits.
+ *          1. List unified entry metadata for the `test` / `test_binding` / `verify` / `measure` binaries from one source of truth.
+ *          2. Provide shared binary/plane/tag/filter helpers used by both runners and tools.
+ *          3. Keep the manifest metadata-only instead of directly binding cross-binary function symbols.
  */
 #pragma once
 
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
-
-#include "test_base.hpp"
-#include "test_binding.hpp"
-#include "test_case_runner.hpp"
-#include "../measure/perf/linux_shared_topic_bench_common.hpp"
-#include "../verify/environment/linux_shm/test_verify.hpp"
+#include <string>
+#include <string_view>
 
 enum class TestBinary
 {
@@ -36,200 +35,468 @@ enum class TestPlane
   MEASURE_PERF,
 };
 
-struct TestEntryMeta
+enum class TestTag : uint32_t
 {
+  NONE = 0,
+  CORE = 1u << 0,
+  BINDING = 1u << 1,
+  VERIFY = 1u << 2,
+  MEASURE = 1u << 3,
+  ISOLATED = 1u << 4,
+  CROSS_PROCESS = 1u << 5,
+  SLOW = 1u << 6,
+};
+
+constexpr uint32_t ToMask(TestTag tag)
+{
+  return static_cast<uint32_t>(tag);
+}
+
+enum class TestEntryId
+{
+  ASSERT_CASE,
+  DEF_CASE,
+  CALLBACK_CASE,
+  PIPE_CASE,
+  RW_CASE,
+  MEMORY_CASE,
+  COLOR_CASE,
+  TIME_CASE,
+  SEMAPHORE_CASE,
+  MUTEX_CASE,
+  ASYNC_CASE,
+  CRC_CASE,
+  ENCODER_CASE,
+  CYCLE_VALUE_CASE,
+  PRINT_CASE,
+  FLAG_CASE,
+  RBT_CASE,
+  QUEUE_CASE,
+  LOCKFREE_QUEUE_CASE,
+  POOL_CASE,
+  LOCKFREE_LIST_CASE,
+  STACK_CASE,
+  LIST_CASE,
+  DOUBLE_BUFFER_CASE,
+  TYPE_CASE,
+  STRING_CASE,
+  THREAD_CASE,
+  TIMEBASE_CASE,
+  TIMER_CASE,
+  RW_RUNTIME_CASE,
+  PIPE_RUNTIME_CASE,
+  MESSAGE_RUNTIME_CASE,
+  INERTIA_CASE,
+  KINEMATIC_CASE,
+  TRANSFORM_CASE,
+  PID_CASE,
+  RAMFS_CASE,
+  APP_FRAMEWORK_APPLICATION_CASE,
+  APP_FRAMEWORK_HARDWARE_CASE,
+  EVENT_CASE,
+  MESSAGE_TOPIC_CASE,
+  MESSAGE_PACKET_CASE,
+  DATABASE_CASE,
+  LOGGER_CASE,
+  TERMINAL_COMMAND_CASE,
+  TERMINAL_DISPLAY_CASE,
+  TERMINAL_INPUT_CASE,
+  TERMINAL_CASE,
+  PRINT_BINDING_CASE,
+  DATABASE_BINDING_SEQUENTIAL_CASE,
+  DATABASE_BINDING_RAW_CASE,
+  LINUX_SHM_TOPIC_CASE,
+  SHARED_STANDARD_BENCH,
+  SHARED_LATENCY_BENCH,
+  SHARED_OVERLOAD_BENCH,
+  SHARED_MODES_BENCH,
+};
+
+struct TestManifestEntry
+{
+  TestEntryId entry_id;
   const char* id;
+  TestBinary binary;
   const char* group;
   TestPlane plane;
   const char* module;
+  uint32_t tags;
   bool isolated;
   const char* selector;
-  int (*run)();
 };
 
-template <void (*Fn)()>
-int RunVoidEntry()
+inline constexpr TestManifestEntry kTestManifest[] = {
+    {TestEntryId::ASSERT_CASE, "assert", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::DEF_CASE, "def", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::CALLBACK_CASE, "callback", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::PIPE_CASE, "pipe", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core/rw", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::RW_CASE, "rw", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core/rw", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::MEMORY_CASE, "memory", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::COLOR_CASE, "color", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::TIME_CASE, "time", TestBinary::MAIN, "core_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::SEMAPHORE_CASE, "semaphore", TestBinary::MAIN,
+     "synchronization_tests", TestPlane::MAIN_HOST, "runtime/system",
+     ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::MUTEX_CASE, "mutex", TestBinary::MAIN, "synchronization_tests",
+     TestPlane::MAIN_HOST, "runtime/system", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::ASYNC_CASE, "async", TestBinary::MAIN, "synchronization_tests",
+     TestPlane::MAIN_HOST, "runtime/system", ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::CRC_CASE, "crc", TestBinary::MAIN, "utility_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::ENCODER_CASE, "encoder", TestBinary::MAIN, "utility_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::CYCLE_VALUE_CASE, "cycle_value", TestBinary::MAIN, "utility_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::PRINT_CASE, "print", TestBinary::MAIN, "utility_tests",
+     TestPlane::MAIN_HOST, "base/core/print", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::FLAG_CASE, "flag", TestBinary::MAIN, "utility_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::RBT_CASE, "rbt", TestBinary::MAIN, "data_structure_tests",
+     TestPlane::MAIN_HOST, "base/structure", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::QUEUE_CASE, "queue", TestBinary::MAIN, "data_structure_tests",
+     TestPlane::MAIN_HOST, "base/structure", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::LOCKFREE_QUEUE_CASE, "lockfree_queue", TestBinary::MAIN,
+     "data_structure_tests", TestPlane::MAIN_HOST, "base/structure",
+     ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::POOL_CASE, "pool", TestBinary::MAIN, "data_structure_tests",
+     TestPlane::MAIN_HOST, "base/structure", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::LOCKFREE_LIST_CASE, "lockfree_list", TestBinary::MAIN,
+     "data_structure_tests", TestPlane::MAIN_HOST, "base/structure",
+     ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::STACK_CASE, "stack", TestBinary::MAIN, "data_structure_tests",
+     TestPlane::MAIN_HOST, "base/structure", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::LIST_CASE, "list", TestBinary::MAIN, "data_structure_tests",
+     TestPlane::MAIN_HOST, "base/structure", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::DOUBLE_BUFFER_CASE, "double_buffer", TestBinary::MAIN,
+     "data_structure_tests", TestPlane::MAIN_HOST, "base/structure",
+     ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::TYPE_CASE, "type", TestBinary::MAIN, "data_structure_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::STRING_CASE, "string", TestBinary::MAIN, "data_structure_tests",
+     TestPlane::MAIN_HOST, "base/core", ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::THREAD_CASE, "thread", TestBinary::MAIN, "threading_tests",
+     TestPlane::MAIN_HOST, "runtime/system", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::TIMEBASE_CASE, "timebase", TestBinary::MAIN, "threading_tests",
+     TestPlane::MAIN_HOST, "runtime/system", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::TIMER_CASE, "timer", TestBinary::MAIN, "threading_tests",
+     TestPlane::MAIN_HOST, "runtime/system", ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::RW_RUNTIME_CASE, "rw_runtime", TestBinary::MAIN, "runtime_tests",
+     TestPlane::MAIN_HOST, "runtime/core/rw", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::PIPE_RUNTIME_CASE, "pipe_runtime", TestBinary::MAIN, "runtime_tests",
+     TestPlane::MAIN_HOST, "runtime/core/rw", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::MESSAGE_RUNTIME_CASE, "message_runtime", TestBinary::MAIN,
+     "runtime_tests", TestPlane::MAIN_HOST, "runtime/middleware/message",
+     ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::INERTIA_CASE, "inertia", TestBinary::MAIN, "motion_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::KINEMATIC_CASE, "kinematic", TestBinary::MAIN, "motion_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::TRANSFORM_CASE, "transform", TestBinary::MAIN, "motion_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::PID_CASE, "pid", TestBinary::MAIN, "control_tests",
+     TestPlane::MAIN_HOST, "base/utils", ToMask(TestTag::CORE), false, nullptr},
+
+    {TestEntryId::RAMFS_CASE, "ramfs", TestBinary::MAIN, "system_tests",
+     TestPlane::MAIN_HOST, "base/middleware/ramfs", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::APP_FRAMEWORK_APPLICATION_CASE, "app_framework_application",
+     TestBinary::MAIN, "system_tests", TestPlane::MAIN_HOST,
+     "base/middleware/app_framework", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::APP_FRAMEWORK_HARDWARE_CASE, "app_framework_hardware",
+     TestBinary::MAIN, "system_tests", TestPlane::MAIN_HOST,
+     "base/middleware/app_framework", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::EVENT_CASE, "event", TestBinary::MAIN, "system_tests",
+     TestPlane::MAIN_HOST, "base/middleware/event", ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::MESSAGE_TOPIC_CASE, "message_topic", TestBinary::MAIN,
+     "system_tests", TestPlane::MAIN_HOST, "base/middleware/message",
+     ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::MESSAGE_PACKET_CASE, "message_packet", TestBinary::MAIN,
+     "system_tests", TestPlane::MAIN_HOST, "base/middleware/message",
+     ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::DATABASE_CASE, "database", TestBinary::MAIN, "system_tests",
+     TestPlane::MAIN_HOST, "base/middleware/database", ToMask(TestTag::CORE), false,
+     nullptr},
+    {TestEntryId::LOGGER_CASE, "logger", TestBinary::MAIN, "system_tests",
+     TestPlane::MAIN_HOST, "base/middleware/logger",
+     ToMask(TestTag::CORE) | ToMask(TestTag::ISOLATED), true, nullptr},
+    {TestEntryId::TERMINAL_COMMAND_CASE, "terminal_command", TestBinary::MAIN,
+     "system_tests", TestPlane::MAIN_HOST, "base/middleware/terminal",
+     ToMask(TestTag::CORE) | ToMask(TestTag::ISOLATED), true, nullptr},
+    {TestEntryId::TERMINAL_DISPLAY_CASE, "terminal_display", TestBinary::MAIN,
+     "system_tests", TestPlane::MAIN_HOST, "base/middleware/terminal",
+     ToMask(TestTag::CORE), false, nullptr},
+    {TestEntryId::TERMINAL_INPUT_CASE, "terminal_input", TestBinary::MAIN,
+     "system_tests", TestPlane::MAIN_HOST, "base/middleware/terminal",
+     ToMask(TestTag::CORE) | ToMask(TestTag::ISOLATED), true, nullptr},
+    {TestEntryId::TERMINAL_CASE, "terminal", TestBinary::MAIN, "system_tests",
+     TestPlane::MAIN_HOST, "base/middleware/terminal",
+     ToMask(TestTag::CORE) | ToMask(TestTag::ISOLATED), true, nullptr},
+
+    {TestEntryId::PRINT_BINDING_CASE, "print_binding", TestBinary::BINDING,
+     "binding_tests", TestPlane::BINDING_HOST, "binding/core/print",
+     ToMask(TestTag::BINDING), false, nullptr},
+    {TestEntryId::DATABASE_BINDING_SEQUENTIAL_CASE, "database_binding_sequential",
+     TestBinary::BINDING, "binding_tests", TestPlane::BINDING_HOST,
+     "binding/middleware/database",
+     ToMask(TestTag::BINDING) | ToMask(TestTag::SLOW), false, nullptr},
+    {TestEntryId::DATABASE_BINDING_RAW_CASE, "database_binding_raw", TestBinary::BINDING,
+     "binding_tests", TestPlane::BINDING_HOST, "binding/middleware/database",
+     ToMask(TestTag::BINDING), false, nullptr},
+
+    {TestEntryId::LINUX_SHM_TOPIC_CASE, "linux_shm_topic", TestBinary::VERIFY_LINUX_SHM,
+     "verify_linux_shm", TestPlane::VERIFY_ENVIRONMENT, "verify/environment/linux_shm",
+     ToMask(TestTag::VERIFY) | ToMask(TestTag::CROSS_PROCESS) | ToMask(TestTag::SLOW),
+     false, nullptr},
+
+    {TestEntryId::SHARED_STANDARD_BENCH, "shared_standard",
+     TestBinary::BENCH_LINUX_SHARED_TOPIC, "bench_linux_shared_topic",
+     TestPlane::MEASURE_PERF, "measure/perf",
+     ToMask(TestTag::MEASURE) | ToMask(TestTag::SLOW), false, "standard"},
+    {TestEntryId::SHARED_LATENCY_BENCH, "shared_latency",
+     TestBinary::BENCH_LINUX_SHARED_TOPIC, "bench_linux_shared_topic",
+     TestPlane::MEASURE_PERF, "measure/perf",
+     ToMask(TestTag::MEASURE) | ToMask(TestTag::SLOW), false, "latency"},
+    {TestEntryId::SHARED_OVERLOAD_BENCH, "shared_overload",
+     TestBinary::BENCH_LINUX_SHARED_TOPIC, "bench_linux_shared_topic",
+     TestPlane::MEASURE_PERF, "measure/perf",
+     ToMask(TestTag::MEASURE) | ToMask(TestTag::SLOW), false, "overload"},
+    {TestEntryId::SHARED_MODES_BENCH, "shared_modes",
+     TestBinary::BENCH_LINUX_SHARED_TOPIC, "bench_linux_shared_topic",
+     TestPlane::MEASURE_PERF, "measure/perf",
+     ToMask(TestTag::MEASURE) | ToMask(TestTag::SLOW), false, "modes"},
+};
+
+struct TestFilter
 {
-  Fn();
-  return 0;
+  const char* id = nullptr;
+  const char* group = nullptr;
+  const char* module = nullptr;
+  const char* plane = nullptr;
+  uint32_t required_tags = 0;
+  bool list_only = false;
+  bool has_any_filter = false;
+};
+
+inline bool IsTruthyEnvValue(const char* value)
+{
+  return value != nullptr &&
+         (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
+          std::strcmp(value, "yes") == 0);
 }
 
-#define XR_MATRIX_MAIN_ENTRY_LIST(X)                                                         \
-  X("assert", "core_tests", TestPlane::MAIN_HOST, "base/core", false, test_assert)          \
-  X("def", "core_tests", TestPlane::MAIN_HOST, "base/core", false, test_def)                \
-  X("callback", "core_tests", TestPlane::MAIN_HOST, "base/core", false, test_cb)            \
-  X("pipe", "core_tests", TestPlane::MAIN_HOST, "base/core/rw", false, test_pipe)           \
-  X("rw", "core_tests", TestPlane::MAIN_HOST, "base/core/rw", false, test_rw)               \
-  X("memory", "core_tests", TestPlane::MAIN_HOST, "base/core", false, test_memory)          \
-  X("color", "core_tests", TestPlane::MAIN_HOST, "base/core", false, test_color)            \
-  X("time", "core_tests", TestPlane::MAIN_HOST, "base/core", false, test_time)              \
-  X("semaphore", "synchronization_tests", TestPlane::MAIN_HOST, "runtime/system", false,    \
-    test_semaphore)                                                                          \
-  X("mutex", "synchronization_tests", TestPlane::MAIN_HOST, "runtime/system", false,        \
-    test_mutex)                                                                              \
-  X("async", "synchronization_tests", TestPlane::MAIN_HOST, "runtime/system", false,        \
-    test_async)                                                                              \
-  X("crc", "utility_tests", TestPlane::MAIN_HOST, "base/utils", false, test_crc)            \
-  X("encoder", "utility_tests", TestPlane::MAIN_HOST, "base/utils", false,                  \
-    test_float_encoder)                                                                      \
-  X("cycle_value", "utility_tests", TestPlane::MAIN_HOST, "base/utils", false,              \
-    test_cycle_value)                                                                        \
-  X("print", "utility_tests", TestPlane::MAIN_HOST, "base/core/print", false, test_print)   \
-  X("flag", "utility_tests", TestPlane::MAIN_HOST, "base/utils", false, test_flag)          \
-  X("rbt", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure", false, test_rbt) \
-  X("queue", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure", false,         \
-    test_queue)                                                                              \
-  X("lockfree_queue", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure",       \
-    false, test_lockfree_queue)                                                              \
-  X("pool", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure", false,          \
-    test_lock_free_pool)                                                                     \
-  X("lockfree_list", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure", false, \
-    test_lockfree_list)                                                                      \
-  X("stack", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure", false,         \
-    test_stack)                                                                              \
-  X("list", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure", false,          \
-    test_list)                                                                               \
-  X("double_buffer", "data_structure_tests", TestPlane::MAIN_HOST, "base/structure", false, \
-    test_double_buffer)                                                                      \
-  X("type", "data_structure_tests", TestPlane::MAIN_HOST, "base/core", false, test_type)    \
-  X("string", "data_structure_tests", TestPlane::MAIN_HOST, "base/core", false,             \
-    test_string)                                                                             \
-  X("thread", "threading_tests", TestPlane::MAIN_HOST, "runtime/system", false, test_thread) \
-  X("timebase", "threading_tests", TestPlane::MAIN_HOST, "runtime/system", false,           \
-    test_timebase)                                                                           \
-  X("timer", "threading_tests", TestPlane::MAIN_HOST, "runtime/system", false, test_timer)  \
-  X("rw_runtime", "runtime_tests", TestPlane::MAIN_HOST, "runtime/core/rw", false,          \
-    test_rw_runtime)                                                                         \
-  X("pipe_runtime", "runtime_tests", TestPlane::MAIN_HOST, "runtime/core/rw", false,        \
-    test_pipe_runtime)                                                                       \
-  X("message_runtime", "runtime_tests", TestPlane::MAIN_HOST,                               \
-    "runtime/middleware/message", false, test_message_runtime)                              \
-  X("inertia", "motion_tests", TestPlane::MAIN_HOST, "base/utils", false, test_inertia)     \
-  X("kinematic", "motion_tests", TestPlane::MAIN_HOST, "base/utils", false, test_kinematic) \
-  X("transform", "motion_tests", TestPlane::MAIN_HOST, "base/utils", false, test_transform) \
-  X("pid", "control_tests", TestPlane::MAIN_HOST, "base/utils", false, test_pid)            \
-  X("ramfs", "system_tests", TestPlane::MAIN_HOST, "base/middleware/ramfs", false,          \
-    test_ramfs)                                                                              \
-  X("app_framework_application", "system_tests", TestPlane::MAIN_HOST,                      \
-    "base/middleware/app_framework", false, test_app_framework_application)                  \
-  X("app_framework_hardware", "system_tests", TestPlane::MAIN_HOST,                         \
-    "base/middleware/app_framework", false, test_app_framework_hardware)                     \
-  X("event", "system_tests", TestPlane::MAIN_HOST, "base/middleware/event", false,          \
-    test_event)                                                                              \
-  X("message_topic", "system_tests", TestPlane::MAIN_HOST, "base/middleware/message",       \
-    false, test_message_topic)                                                               \
-  X("message_packet", "system_tests", TestPlane::MAIN_HOST, "base/middleware/message",      \
-    false, test_message_packet)                                                              \
-  X("database", "system_tests", TestPlane::MAIN_HOST, "base/middleware/database", false,    \
-    test_database)                                                                           \
-  X("logger", "system_tests", TestPlane::MAIN_HOST, "base/middleware/logger", true,         \
-    test_logger)                                                                             \
-  X("terminal_command", "system_tests", TestPlane::MAIN_HOST, "base/middleware/terminal",   \
-    true, test_terminal_command)                                                             \
-  X("terminal_display", "system_tests", TestPlane::MAIN_HOST, "base/middleware/terminal",   \
-    false, test_terminal_display)                                                            \
-  X("terminal_input", "system_tests", TestPlane::MAIN_HOST, "base/middleware/terminal",     \
-    true, test_terminal_input)                                                               \
-  X("terminal", "system_tests", TestPlane::MAIN_HOST, "base/middleware/terminal", true,     \
-    test_terminal)
-
-#define XR_MATRIX_BINDING_ENTRY_LIST(X)                                                        \
-  X("print_binding", "binding_tests", TestPlane::BINDING_HOST, "binding/core/print", false,  \
-    test_print_binding)                                                                        \
-  X("database_binding_sequential", "binding_tests", TestPlane::BINDING_HOST,                  \
-    "binding/middleware/database", false, test_database_binding_sequential)                    \
-  X("database_binding_raw", "binding_tests", TestPlane::BINDING_HOST,                          \
-    "binding/middleware/database", false, test_database_binding_raw)
-
-#define XR_MATRIX_VERIFY_LINUX_SHM_ENTRY_LIST(X)                                                \
-  X("linux_shm_topic", "verify_linux_shm", TestPlane::VERIFY_ENVIRONMENT,                      \
-    "verify/environment/linux_shm", false, test_linux_shm_topic)
-
-#define XR_MATRIX_BENCH_LINUX_SHARED_TOPIC_ENTRY_LIST(X)                                        \
-  X("shared_standard", "bench_linux_shared_topic", TestPlane::MEASURE_PERF,                    \
-    "measure/perf", false, "standard", LinuxSharedTopicBench::RunStandardBenchmarks)           \
-  X("shared_latency", "bench_linux_shared_topic", TestPlane::MEASURE_PERF,                     \
-    "measure/perf", false, "latency", LinuxSharedTopicBench::RunLatencyBenchmarks)             \
-  X("shared_overload", "bench_linux_shared_topic", TestPlane::MEASURE_PERF,                    \
-    "measure/perf", false, "overload", LinuxSharedTopicBench::RunOverloadBenchmarks)           \
-  X("shared_modes", "bench_linux_shared_topic", TestPlane::MEASURE_PERF,                       \
-    "measure/perf", false, "modes", LinuxSharedTopicBench::RunModeBenchmarks)
-
-inline int RunMainTestBinary()
+inline bool TestListOnlyRequested()
 {
-  XR_LOG_INFO("Running LibXR Tests...\n");
+  return IsTruthyEnvValue(std::getenv("XR_TEST_LIST"));
+}
 
-  #define XR_BUILD_MAIN_ENTRY(id, group, plane, module, isolated, fn) \
-    {id, group, plane, module, isolated, nullptr, &RunVoidEntry<fn>},
-  const TestEntryMeta entries[] = {XR_MATRIX_MAIN_ENTRY_LIST(XR_BUILD_MAIN_ENTRY)};
-  #undef XR_BUILD_MAIN_ENTRY
-
-  const char* current_group = nullptr;
-  for (const auto& entry : entries)
+inline const char* BinaryName(TestBinary binary)
+{
+  switch (binary)
   {
-    if (current_group == nullptr || std::strcmp(current_group, entry.group) != 0)
+    case TestBinary::MAIN:
+      return "test";
+    case TestBinary::BINDING:
+      return "test_binding";
+    case TestBinary::VERIFY_LINUX_SHM:
+      return "test_linux_shm_topic";
+    case TestBinary::BENCH_LINUX_SHARED_TOPIC:
+      return "bench_linux_shared_topic";
+  }
+  return "unknown";
+}
+
+inline const char* PlaneName(TestPlane plane)
+{
+  switch (plane)
+  {
+    case TestPlane::MAIN_HOST:
+      return "main_host";
+    case TestPlane::BINDING_HOST:
+      return "binding_host";
+    case TestPlane::VERIFY_ENVIRONMENT:
+      return "verify_environment";
+    case TestPlane::MEASURE_PERF:
+      return "measure_perf";
+  }
+  return "unknown";
+}
+
+inline bool ParseTagName(std::string_view text, uint32_t& mask)
+{
+  if (text == "core")
+  {
+    mask |= ToMask(TestTag::CORE);
+    return true;
+  }
+  if (text == "binding")
+  {
+    mask |= ToMask(TestTag::BINDING);
+    return true;
+  }
+  if (text == "verify")
+  {
+    mask |= ToMask(TestTag::VERIFY);
+    return true;
+  }
+  if (text == "measure")
+  {
+    mask |= ToMask(TestTag::MEASURE);
+    return true;
+  }
+  if (text == "isolated")
+  {
+    mask |= ToMask(TestTag::ISOLATED);
+    return true;
+  }
+  if (text == "cross_process")
+  {
+    mask |= ToMask(TestTag::CROSS_PROCESS);
+    return true;
+  }
+  if (text == "slow")
+  {
+    mask |= ToMask(TestTag::SLOW);
+    return true;
+  }
+  return false;
+}
+
+inline std::string TagsText(uint32_t tags)
+{
+  std::string text;
+  auto append = [&](const char* token, uint32_t mask) {
+    if ((tags & mask) == 0)
     {
-      current_group = entry.group;
-      XR_LOG_INFO("Test Group [%s]\n", current_group);
+      return;
     }
-
-    run_test_case(TestCase{entry.id, entry.run, entry.isolated});
-    TEST_STEP(entry.id);
-  }
-
-  XR_LOG_INFO("All tests completed.\n");
-  std::fprintf(stderr, "All tests completed.\n");
-  std::fflush(stderr);
-  return 0;
-}
-
-inline int RunBindingTestBinary()
-{
-  #define XR_BUILD_BINDING_ENTRY(id, group, plane, module, isolated, fn) \
-    {id, group, plane, module, isolated, nullptr, &RunVoidEntry<fn>},
-  const TestEntryMeta entries[] = {XR_MATRIX_BINDING_ENTRY_LIST(XR_BUILD_BINDING_ENTRY)};
-  #undef XR_BUILD_BINDING_ENTRY
-
-  int status = 0;
-  for (const auto& entry : entries)
-  {
-    status |= entry.run();
-  }
-  return status;
-}
-
-inline int RunVerifyTestBinary(TestBinary binary)
-{
-  (void)binary;
-  #define XR_BUILD_VERIFY_ENTRY(id, group, plane, module, isolated, fn) \
-    {id, group, plane, module, isolated, nullptr, &RunVoidEntry<fn>},
-  const TestEntryMeta entries[] = {XR_MATRIX_VERIFY_LINUX_SHM_ENTRY_LIST(XR_BUILD_VERIFY_ENTRY)};
-  #undef XR_BUILD_VERIFY_ENTRY
-
-  int status = 0;
-  for (const auto& entry : entries)
-  {
-    status |= entry.run();
-  }
-  return status;
-}
-
-inline int RunBenchTestBinary(const char* selector)
-{
-  #define XR_BUILD_BENCH_ENTRY(id, group, plane, module, isolated, selector_name, fn) \
-    {id, group, plane, module, isolated, selector_name, &fn},
-  const TestEntryMeta entries[] = {
-      XR_MATRIX_BENCH_LINUX_SHARED_TOPIC_ENTRY_LIST(XR_BUILD_BENCH_ENTRY)};
-  #undef XR_BUILD_BENCH_ENTRY
-
-  int status = 0;
-  for (const auto& entry : entries)
-  {
-    if (selector != nullptr && std::strcmp(selector, entry.selector) != 0)
+    if (!text.empty())
     {
-      continue;
+      text.push_back(',');
     }
-    status |= entry.run();
+    text += token;
+  };
+
+  append("core", ToMask(TestTag::CORE));
+  append("binding", ToMask(TestTag::BINDING));
+  append("verify", ToMask(TestTag::VERIFY));
+  append("measure", ToMask(TestTag::MEASURE));
+  append("isolated", ToMask(TestTag::ISOLATED));
+  append("cross_process", ToMask(TestTag::CROSS_PROCESS));
+  append("slow", ToMask(TestTag::SLOW));
+  return text;
+}
+
+inline bool ParseTagCsv(const char* csv, uint32_t& mask, FILE* err)
+{
+  mask = 0;
+  if (csv == nullptr || csv[0] == '\0')
+  {
+    return true;
   }
-  return status;
+
+  const char* begin = csv;
+  const char* end = csv;
+  while (true)
+  {
+    if (*end == ',' || *end == '\0')
+    {
+      const std::string_view token(begin, static_cast<size_t>(end - begin));
+      if (!token.empty() && !ParseTagName(token, mask))
+      {
+        std::fprintf(err, "unknown tag filter: %.*s\n", static_cast<int>(token.size()),
+                     token.data());
+        return false;
+      }
+      if (*end == '\0')
+      {
+        break;
+      }
+      begin = end + 1;
+    }
+    ++end;
+  }
+  return true;
+}
+
+inline bool LoadTestFilterFromEnv(TestFilter& filter, FILE* err = stderr)
+{
+  filter = {};
+  filter.id = std::getenv("XR_TEST_ID");
+  filter.group = std::getenv("XR_TEST_GROUP");
+  filter.module = std::getenv("XR_TEST_MODULE");
+  filter.plane = std::getenv("XR_TEST_PLANE");
+  const char* tags = std::getenv("XR_TEST_TAG");
+  const char* list_only = std::getenv("XR_TEST_LIST");
+
+  filter.has_any_filter = (filter.id != nullptr && filter.id[0] != '\0') ||
+                          (filter.group != nullptr && filter.group[0] != '\0') ||
+                          (filter.module != nullptr && filter.module[0] != '\0') ||
+                          (filter.plane != nullptr && filter.plane[0] != '\0') ||
+                          (tags != nullptr && tags[0] != '\0');
+  filter.list_only = IsTruthyEnvValue(list_only);
+
+  return ParseTagCsv(tags, filter.required_tags, err);
+}
+
+inline bool EntryMatchesFilter(const TestManifestEntry& entry, const TestFilter& filter)
+{
+  if (filter.id != nullptr && filter.id[0] != '\0' && std::strcmp(filter.id, entry.id) != 0)
+  {
+    return false;
+  }
+  if (filter.group != nullptr && filter.group[0] != '\0' &&
+      std::strcmp(filter.group, entry.group) != 0)
+  {
+    return false;
+  }
+  if (filter.module != nullptr && filter.module[0] != '\0' &&
+      std::strcmp(filter.module, entry.module) != 0)
+  {
+    return false;
+  }
+  if (filter.plane != nullptr && filter.plane[0] != '\0' &&
+      std::strcmp(filter.plane, PlaneName(entry.plane)) != 0)
+  {
+    return false;
+  }
+  if (filter.required_tags != 0 && (entry.tags & filter.required_tags) != filter.required_tags)
+  {
+    return false;
+  }
+  return true;
+}
+
+inline void PrintEntryTsv(FILE* out, const TestManifestEntry& entry)
+{
+  const std::string tags = TagsText(entry.tags);
+  std::fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", entry.id,
+               BinaryName(entry.binary), entry.group, PlaneName(entry.plane), entry.module,
+               tags.c_str(), entry.isolated ? "true" : "false",
+               entry.selector != nullptr ? entry.selector : "");
+}
+
+inline int ReportNoMatchingEntries(TestBinary binary, const TestFilter& filter)
+{
+  std::fprintf(stderr,
+               "no matching entries for binary=%s id=%s group=%s module=%s plane=%s tags=%s\n",
+               BinaryName(binary), filter.id != nullptr ? filter.id : "",
+               filter.group != nullptr ? filter.group : "",
+               filter.module != nullptr ? filter.module : "",
+               filter.plane != nullptr ? filter.plane : "",
+               TagsText(filter.required_tags).c_str());
+  return 1;
 }

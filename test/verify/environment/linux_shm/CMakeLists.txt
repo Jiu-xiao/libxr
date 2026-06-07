@@ -5,6 +5,7 @@ list(SORT XR_TEST_LINUX_SHM_SOURCES)
 
 add_executable(test_linux_shm_topic ${XR_TEST_LINUX_SHM_SOURCES})
 add_dependencies(test_linux_shm_topic xr)
+add_dependencies(test_linux_shm_topic test_matrix_validate)
 
 target_link_libraries(test_linux_shm_topic PUBLIC xr)
 

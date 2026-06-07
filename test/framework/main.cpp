@@ -10,6 +10,8 @@
  */
 #include "test_group_registry.hpp"
 
+#include <cmath>
+
 /**
  * @brief 辅助函数 `main`。 Helper function `main`.
  * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
@@ -19,24 +21,27 @@ bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
 int main()
 {
-  LibXR::PlatformInit();
+  if (!TestListOnlyRequested())
+  {
+    LibXR::PlatformInit();
 
-  auto err_cb = LibXR::Assert::FatalCallback::Create(
-      [](bool in_isr, void* arg, const char* file, uint32_t line)
-      {
-        UNUSED(in_isr);
-        UNUSED(arg);
-        UNUSED(file);
-        UNUSED(line);
+    auto err_cb = LibXR::Assert::FatalCallback::Create(
+        [](bool in_isr, void* arg, const char* file, uint32_t line)
+        {
+          UNUSED(in_isr);
+          UNUSED(arg);
+          UNUSED(file);
+          UNUSED(line);
 
-        XR_LOG_ERROR("Error: Union test failed at step [%s].\r\n", test_name);
-        // NOLINTNEXTLINE
-        *(volatile long long*)(nullptr) = 0;
-        exit(-1);
-      },
-      reinterpret_cast<void*>(0));
+          XR_LOG_ERROR("Error: Union test failed at step [%s].\r\n", test_name);
+          // NOLINTNEXTLINE
+          *(volatile long long*)(nullptr) = 0;
+          exit(-1);
+        },
+        reinterpret_cast<void*>(0));
 
-  LibXR::Assert::RegisterFatalErrorCallback(err_cb);
+    LibXR::Assert::RegisterFatalErrorCallback(err_cb);
+  }
 
   run_libxr_tests();
 

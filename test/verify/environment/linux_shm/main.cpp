@@ -6,7 +6,7 @@
  * 1. 安装验证二进制的 fatal assertion 回调。 Install the fatal assertion callback for the verification binary.
  * 2. 执行 `LinuxSharedTopic` 的环境验证入口。 Execute the `LinuxSharedTopic` environment verification entrypoint.
  */
-#include "../../../framework/test_matrix.hpp"
+#include "../../../framework/test_verify_registry.hpp"
 
 #include <cstdlib>
 
@@ -20,21 +20,24 @@
  */
 int main()
 {
-  LibXR::PlatformInit();
+  if (!TestListOnlyRequested())
+  {
+    LibXR::PlatformInit();
 
-  auto err_cb = LibXR::Assert::FatalCallback::Create(
-      [](bool in_isr, void* arg, const char* file, uint32_t line)
-      {
-        UNUSED(in_isr);
-        UNUSED(arg);
-        UNUSED(file);
-        UNUSED(line);
+    auto err_cb = LibXR::Assert::FatalCallback::Create(
+        [](bool in_isr, void* arg, const char* file, uint32_t line)
+        {
+          UNUSED(in_isr);
+          UNUSED(arg);
+          UNUSED(file);
+          UNUSED(line);
 
-        XR_LOG_ERROR("Error: linux_shm_topic verification failed.\r\n");
-        exit(-1);
-      },
-      reinterpret_cast<void*>(0));
+          XR_LOG_ERROR("Error: linux_shm_topic verification failed.\r\n");
+          exit(-1);
+        },
+        reinterpret_cast<void*>(0));
 
-  LibXR::Assert::RegisterFatalErrorCallback(err_cb);
+    LibXR::Assert::RegisterFatalErrorCallback(err_cb);
+  }
   return RunVerifyTestBinary(TestBinary::VERIFY_LINUX_SHM);
 }
