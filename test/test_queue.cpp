@@ -3,12 +3,26 @@
 #include "test.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
 namespace
 {
 using SPMCStressQueue = LibXR::SPMCQueue<uint16_t>;
+
+/**
+ * @struct NoDefaultPayload
+ * @brief 无默认构造 payload，用于验证 SPMC 普通 Push/Pop 仅搬运字节
+ *        / Payload without default construction, used to verify SPMC normal
+ *        Push/Pop only move bytes
+ */
+struct NoDefaultPayload
+{
+  explicit NoDefaultPayload(uint32_t value_in) : value(value_in) {}
+
+  uint32_t value;  ///< 有效载荷值 / Payload value.
+};
 
 /**
  * @struct SPMCConsumerArg
@@ -73,6 +87,8 @@ static_assert(std::is_base_of_v<LibXR::QueueTypedBase<LibXR::SPMCQueue<int>, int
                                 LibXR::SPMCQueue<int>>);
 static_assert(std::is_base_of_v<LibXR::QueueTypedBase<LibXR::MPMCQueue<int>, int>,
                                 LibXR::MPMCQueue<int>>);
+static_assert(!std::is_default_constructible_v<NoDefaultPayload>);
+static_assert(std::is_trivially_copyable_v<NoDefaultPayload>);
 
 void test_queue()
 {
@@ -103,6 +119,24 @@ void test_queue()
     ASSERT(mpmc_base.PushBytes(&input) == LibXR::ErrorCode::OK);
     ASSERT(mpmc_base.PopBytes(&output) == LibXR::ErrorCode::OK);
     ASSERT(output == input);
+  }
+
+  // Queue::Overwrite replaces the queue contents with exactly one new element.
+  {
+    LibXR::Queue<uint32_t> queue(16);
+    uint32_t value = 0;
+
+    for (uint32_t item = 0; item < queue.MaxSize(); ++item)
+    {
+      ASSERT(queue.Push(item) == LibXR::ErrorCode::OK);
+    }
+    ASSERT(queue.Size() == queue.MaxSize());
+
+    ASSERT(queue.Overwrite(0xA5A5A5A5U) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Size() == 1);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 0xA5A5A5A5U);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
   LibXR::Thread thread1;
@@ -139,6 +173,30 @@ void test_queue()
   auto ret = spmc_queue.Pop(tmp);
   ASSERT(ret == LibXR::ErrorCode::EMPTY);
   ASSERT(tmp == 2.1f);
+
+  // SPMC supports capacity 1 and no-default payloads for normal byte Push/Pop.
+  {
+    LibXR::SPMCQueue<uint32_t> queue(1);
+    uint32_t value = 0;
+    uint32_t batch[1] = {44};
+
+    ASSERT(queue.Push(11) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Push(22) == LibXR::ErrorCode::FULL);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 11);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+
+    ASSERT(queue.PushBatch(batch, 1) == LibXR::ErrorCode::OK);
+    ASSERT(queue.PopBatch(&value, 1) == LibXR::ErrorCode::OK);
+    ASSERT(value == 44);
+
+    LibXR::SPMCQueue<NoDefaultPayload> no_default_queue(1);
+    NoDefaultPayload pushed(88);
+    NoDefaultPayload popped(0);
+    ASSERT(no_default_queue.Push(pushed) == LibXR::ErrorCode::OK);
+    ASSERT(no_default_queue.Pop(popped) == LibXR::ErrorCode::OK);
+    ASSERT(popped.value == 88);
+  }
 
   // Single producer with multiple consumers must not duplicate or lose payloads.
   {

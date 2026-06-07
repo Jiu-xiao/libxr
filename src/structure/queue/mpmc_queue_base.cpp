@@ -32,6 +32,11 @@ MPMCQueueBase::MPMCQueueBase(size_t element_size, size_t capacity)
 
   payloads_ = static_cast<std::byte*>(::operator new[](
       payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN), std::nothrow));
+  if (payloads_ == nullptr)
+  {
+    delete[] sequences_;
+    sequences_ = nullptr;
+  }
   REQUIRE(payloads_ != nullptr);
 
   for (size_t index = 0; index < capacity_; ++index)

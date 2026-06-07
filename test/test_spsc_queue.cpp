@@ -77,6 +77,29 @@ void test_spsc_queue()
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
+  // Capacity 1 is a valid SPSC queue and zero-length batches are no-ops.
+  {
+    Queue queue(1);
+    uint32_t value = 0;
+    uint32_t batch[1] = {33};
+
+    ASSERT(queue.PushBatch(nullptr, 0) == LibXR::ErrorCode::OK);
+    ASSERT(queue.PopBatch(nullptr, 0) == LibXR::ErrorCode::OK);
+    ASSERT(queue.PeekBatch(nullptr, 0) == LibXR::ErrorCode::OK);
+
+    ASSERT(queue.Push(11) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Push(22) == LibXR::ErrorCode::FULL);
+    ASSERT(queue.Peek(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 11);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 11);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+
+    ASSERT(queue.PushBatch(batch, 1) == LibXR::ErrorCode::OK);
+    ASSERT(queue.PopBatch(&value, 1) == LibXR::ErrorCode::OK);
+    ASSERT(value == 33);
+  }
+
   // Batch APIs, wraparound, writer callback, and reset behavior.
   {
     Queue queue(5);

@@ -195,7 +195,7 @@ ErrorCode QueueBase::OverwriteBytes(const void* data)
   head_ = tail_ = 0;
   is_full_ = false;
 
-  LibXR::Memory::FastCopy(queue_array_, data, ELEMENT_SIZE * length_);
+  LibXR::Memory::FastCopy(queue_array_, data, ELEMENT_SIZE);
 
   tail_ = (tail_ + 1) % length_;
   if (head_ == tail_)
