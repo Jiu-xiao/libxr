@@ -26,7 +26,7 @@ namespace LibXR
  * @tparam Data 队列存储的数据类型 / The type of data stored in the queue.
  */
 template <typename Data>
-class alignas(LibXR::CACHE_LINE_SIZE) LockFreeQueue
+class alignas(LibXR::CONCURRENCY_ALIGNMENT) LockFreeQueue
 {
   inline constexpr size_t AlignUp(size_t size, size_t align)
   {
@@ -514,8 +514,8 @@ class alignas(LibXR::CACHE_LINE_SIZE) LockFreeQueue
   size_t MaxSize() const { return LENGTH; }
 
  private:
-  alignas(LibXR::CACHE_LINE_SIZE) std::atomic<uint32_t> head_;
-  alignas(LibXR::CACHE_LINE_SIZE) std::atomic<uint32_t> tail_;
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<uint32_t> head_;
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<uint32_t> tail_;
   const size_t LENGTH;
   Data* queue_handle_;
 

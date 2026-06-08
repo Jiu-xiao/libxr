@@ -17,6 +17,28 @@
 #define UNUSED(_x) ((void)(_x))
 #endif
 
+#ifndef LIBXR_SINGLE_CORE
+#define LIBXR_SINGLE_CORE 0
+#endif
+
+#if defined(_MSC_VER)
+#define LIBXR_NOINLINE __declspec(noinline)
+#define LIBXR_PACKED_BEGIN __pragma(pack(push, 1))
+#define LIBXR_PACKED_END __pragma(pack(pop))
+#define LIBXR_PACKED
+#elif defined(__clang__) || defined(__GNUC__)
+#define LIBXR_NOINLINE __attribute__((noinline))
+#define LIBXR_PACKED_BEGIN _Pragma("pack(push, 1)")
+#define LIBXR_PACKED_END _Pragma("pack(pop)")
+#define LIBXR_PACKED __attribute__((packed))
+#else
+#warning "LibXR compiler compatibility macros fallback to no-op on unknown compiler"
+#define LIBXR_NOINLINE
+#define LIBXR_PACKED_BEGIN
+#define LIBXR_PACKED_END
+#define LIBXR_PACKED
+#endif
+
 namespace LibXR
 {
 /// \brief PI 常量 / PI constant
@@ -28,8 +50,18 @@ inline constexpr double TWO_PI = 2.0 * PI;
 /// \brief 标准重力加速度（m/s²） / Standard gravitational acceleration (m/s²)
 inline constexpr double STANDARD_GRAVITY = 9.80665;
 
-/// \brief 缓存行大小 / Cache line size
-inline constexpr size_t CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
+/// \brief 真实硬件缓存行大小（用于 DMA / cache coherency） / Hardware cache-line size used for DMA/cache-coherency boundaries
+inline constexpr size_t HW_CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
+
+/// \brief 并发结构对齐粒度（用于降低多核伪共享） / Alignment policy used by concurrency-oriented structures
+#if LIBXR_SINGLE_CORE
+inline constexpr size_t CONCURRENCY_ALIGNMENT = sizeof(size_t);
+#else
+inline constexpr size_t CONCURRENCY_ALIGNMENT = HW_CACHE_LINE_SIZE;
+#endif
+
+/// \brief 兼容旧代码的缓存行别名 / Backward-compatible cache-line alias for existing code
+inline constexpr size_t CACHE_LINE_SIZE = HW_CACHE_LINE_SIZE;
 
 /// \brief 平台自然对齐大小 / Native platform alignment size
 inline constexpr size_t ALIGN_SIZE = sizeof(void*);

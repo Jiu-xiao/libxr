@@ -61,7 +61,7 @@ class HID : public DeviceClass
     FEATURE = 3  ///< 特征报告 / Feature report
   };
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief HID描述符结构体
    *        HID descriptor structure
@@ -100,7 +100,7 @@ class HID : public DeviceClass
     EndpointDescriptor ep_in;   ///< IN 端点描述符 / IN endpoint descriptor
     EndpointDescriptor ep_out;  ///< OUT 端点描述符 / OUT endpoint descriptor
   };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   /**
    * @brief HID 构造函数

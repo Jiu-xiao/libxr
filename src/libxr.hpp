@@ -26,6 +26,7 @@
 #include "lockfree_queue.hpp"
 #include "logger.hpp"
 #include "message.hpp"
+#include "mpmc_queue.hpp"
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include "linux_shared_topic.hpp"
 #endif

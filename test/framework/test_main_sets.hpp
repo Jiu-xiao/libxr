@@ -52,6 +52,8 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
      {"queue", &RunVoidEntry<test_queue>, false}},
     {"data_structure_tests", TestRuntimeSet::BARE_METAL,
      {"lockfree_queue", &RunVoidEntry<test_lockfree_queue>, false}},
+    {"data_structure_tests", TestRuntimeSet::RTOS,
+     {"mpmc_queue", &RunVoidEntry<test_mpmc_queue>, false}},
     {"data_structure_tests", TestRuntimeSet::BARE_METAL,
      {"pool", &RunVoidEntry<test_lock_free_pool>, false}},
     {"data_structure_tests", TestRuntimeSet::BARE_METAL,

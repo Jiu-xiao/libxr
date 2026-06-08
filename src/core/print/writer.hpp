@@ -607,10 +607,10 @@ class Writer
    * @param codes 指向编译字节流的指针 / Pointer to the compiled byte stream
    * @param args 指向已打包参数字节块的指针；无参数时可为空 / Pointer to the packed argument blob, or null when no arguments exist
    * @return 执行器运行结果 / Returns the executor result
-   */
+  */
   template <OutputSink Sink, FormatProfile Profile>
-  [[nodiscard]] __attribute__((noinline)) static ErrorCode Execute(
-      Sink& sink, const uint8_t* codes, const uint8_t* args)
+  [[nodiscard]] static LIBXR_NOINLINE ErrorCode Execute(Sink& sink, const uint8_t* codes,
+                                                        const uint8_t* args)
   {
     return Executor<Sink, Profile>(sink, codes, args).Run();
   }
@@ -626,10 +626,10 @@ class Writer
    * @param codes 指向编译字节流的指针 / Pointer to the compiled byte stream
    * @param args 转发后的运行期实参 / Forwarded runtime arguments
    * @return 执行器运行结果 / Returns the executor result
-   */
+  */
   template <OutputSink Sink, auto ArgumentInfoList, auto ArgumentOrder,
             FormatProfile Profile, typename... Args>
-  [[nodiscard]] __attribute__((noinline)) static ErrorCode RunTaggedArgumentOrder(
+  [[nodiscard]] static LIBXR_NOINLINE ErrorCode RunTaggedArgumentOrder(
       Sink& sink, const uint8_t* codes, Args&&... args)
   {
     if constexpr (ArgumentInfoList.size() == 0)

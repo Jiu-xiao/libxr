@@ -10,9 +10,9 @@ using namespace LibXR;
 // WCH GCC15 对当前已验证可用的 CH32V2/V3 自擦写路径代码形状很敏感。
 // 这里把擦除/写入热循环放到明确的 noinline 边界后面，
 // 但解锁、降频、清标志这些外围时序仍留在原来的调用点。
-extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
-                                                                     uint32_t end_addr,
-                                                                     const uint8_t* src);
+extern "C" LIBXR_NOINLINE ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
+                                                          uint32_t end_addr,
+                                                          const uint8_t* src);
 
 namespace
 {
@@ -193,9 +193,9 @@ ErrorCode CH32Flash::Write(size_t offset, ConstRawData data)
   return CH32FlashWriteHotPath(START_ADDR, END_ADDR, src);
 }
 
-extern "C" __attribute__((noinline)) ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
-                                                                     uint32_t end_addr,
-                                                                     const uint8_t* src)
+extern "C" LIBXR_NOINLINE ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
+                                                          uint32_t end_addr,
+                                                          const uint8_t* src)
 {
   const auto write_hot_loop = g_ch32_flash_hot_paths.write_halfword;
   const auto write_page = g_ch32_flash_hot_paths.write_page;

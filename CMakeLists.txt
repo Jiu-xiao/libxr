@@ -33,6 +33,8 @@ if(LIBXR_DEV_ASSERT_BUILD)
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEV_ASSERT_BUILD)
 endif()
 
+target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_SINGLE_CORE=$<BOOL:${LIBXR_SINGLE_CORE}>)
+
 file(GLOB ${PROJECT_NAME}_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
@@ -91,6 +93,44 @@ target_sources(
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_NESTED_SUBDIR_SOURCES}
 )
+
+file(GLOB_RECURSE _xr_force_o3_sources CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/*_o3.cpp"
+)
+list(SORT _xr_force_o3_sources)
+
+file(GLOB_RECURSE _xr_force_os_sources CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/*_os.cpp"
+)
+list(SORT _xr_force_os_sources)
+
+if(_xr_force_o3_sources)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    set_property(SOURCE ${_xr_force_o3_sources} APPEND PROPERTY COMPILE_OPTIONS "/O2")
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    set_property(SOURCE ${_xr_force_o3_sources} APPEND PROPERTY COMPILE_OPTIONS "-O3")
+  else()
+    message(WARNING
+            "LibXR file-level optimized sources are not configured for compiler: "
+            "${CMAKE_CXX_COMPILER_ID}")
+  endif()
+endif()
+
+if(_xr_force_os_sources)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    set_property(SOURCE ${_xr_force_os_sources} APPEND PROPERTY COMPILE_OPTIONS "/O1")
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    set_property(SOURCE ${_xr_force_os_sources} APPEND PROPERTY COMPILE_OPTIONS "-Os")
+  else()
+    message(WARNING
+            "LibXR file-level size-optimized sources are not configured for compiler: "
+            "${CMAKE_CXX_COMPILER_ID}")
+  endif()
+endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/core/CMakeLists.txt)
 
