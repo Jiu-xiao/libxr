@@ -108,6 +108,9 @@ class MPMCQueueBase
   [[nodiscard]] static size_t AlignUpChecked(size_t value, size_t align);
   /// @brief 安全地计算乘积 / Safely multiply two size values.
   [[nodiscard]] static size_t MultiplyChecked(size_t lhs, size_t rhs);
+  /**
+   * @brief payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer
+   */
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
       std::max(alignof(size_t),
                alignof(std::max_align_t));  ///< payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer.

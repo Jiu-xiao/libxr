@@ -304,6 +304,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   /**
    * @brief 获取指定槽位 payload 起始地址 / Get the payload base address of one slot
    * @param index 目标槽位下标 / Target slot index
+   * @return 指向目标槽位 payload 起始地址的指针 / Pointer to the slot payload base address
    */
   std::byte* PayloadPtr(IndexType index)
   {
@@ -314,6 +315,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    * @brief 获取指定槽位 payload 起始地址（只读）
    *        / Get the payload base address of one slot (const)
    * @param index 目标槽位下标 / Target slot index
+   * @return 指向目标槽位 payload 起始地址的只读指针
+   *         / Read-only pointer to the slot payload base address
    */
   const std::byte* PayloadPtr(IndexType index) const
   {

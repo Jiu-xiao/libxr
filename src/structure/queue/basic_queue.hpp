@@ -9,8 +9,8 @@
 namespace LibXR
 {
 /**
- * @brief 基于 QueueBase 的泛型队列模板类
- *        (Generic queue template class based on QueueBase).
+ * @class Queue
+ * @brief 基于 QueueBase 的泛型队列模板类 / Generic queue template class based on QueueBase
  *
  * This class provides a type-safe queue for storing elements of type `Data`.
  * It supports standard queue operations such as push, pop, peek, and batch operations.
@@ -31,6 +31,9 @@ class Queue final : public QueueTypedBase<Queue<Data>, Data>, public QueueBase
    * @brief 构造函数，初始化队列
    *        (Constructor to initialize the queue).
    * @param length 队列的最大容量 (Maximum capacity of the queue).
+   *
+   * @note 包含动态内存分配。
+   *       Contains dynamic memory allocation.
    */
   explicit Queue(size_t length) : QueueBase(sizeof(Data), length) {}
 
@@ -39,6 +42,10 @@ class Queue final : public QueueTypedBase<Queue<Data>, Data>, public QueueBase
    *        (Constructor to initialize the queue).
    * @param length 队列的最大容量 (Maximum capacity of the queue).
    * @param buffer 指向缓冲区的指针 (Pointer to the buffer).
+   *
+   * @note 调用方负责保证外部缓冲区至少能容纳 `length * sizeof(Data)` 字节。
+   *       The caller must ensure that the external buffer can hold at least
+   *       `length * sizeof(Data)` bytes.
    */
   Queue(size_t length, uint8_t* buffer) : QueueBase(sizeof(Data), length, buffer) {}
 
