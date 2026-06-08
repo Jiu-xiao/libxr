@@ -20,13 +20,13 @@ namespace LibXR
  * - `ValueType`
  * - `Push(const ValueType&)`
  * - `Pop(ValueType&)`
- * - `Pop()`
+ * - `Size()`
  *
  * This constraint requires only the minimal typed queue interface:
  * - `ValueType`
  * - `Push(const ValueType&)`
  * - `Pop(ValueType&)`
- * - `Pop()`
+ * - `Size()`
  */
 template <typename QueueType>
 concept PoolIndexQueue = requires(QueueType queue,
@@ -36,7 +36,6 @@ concept PoolIndexQueue = requires(QueueType queue,
   typename QueueType::ValueType;
   { queue.Push(index_const) } -> std::same_as<ErrorCode>;
   { queue.Pop(index_mut) } -> std::same_as<ErrorCode>;
-  { queue.Pop() } -> std::same_as<ErrorCode>;
   { queue.Size() } -> std::convertible_to<size_t>;
 };
 
@@ -271,6 +270,8 @@ class BasicObjectPool
    *
    * @note 调用方传入的 `free_queue` 必须是空队列，并且只供当前 pool 独占使用。
    *       The caller-provided `free_queue` must be empty and dedicated to this pool.
+   * @note 调用方必须保证 `free_queue` 的容量至少为 `slot_count`。
+   *       The caller must ensure that `free_queue` capacity is at least `slot_count`.
    */
   template <typename T = Data>
   requires std::is_default_constructible_v<T>
@@ -292,6 +293,8 @@ class BasicObjectPool
    *
    * @note 调用方传入的 `free_queue` 必须是空队列，并且只供当前 pool 独占使用。
    *       The caller-provided `free_queue` must be empty and dedicated to this pool.
+   * @note 调用方必须保证 `free_queue` 的容量至少为 `slot_count`。
+   *       The caller must ensure that `free_queue` capacity is at least `slot_count`.
    * @note 调用方必须保证 `slots` 指向至少 `slot_count` 个 `Data` 槽位。
    *       The caller must ensure that `slots` points to at least `slot_count`
    *       `Data` slots.
@@ -311,6 +314,8 @@ class BasicObjectPool
    */
   ~BasicObjectPool()
   {
+    ASSERT(EmptySize() == slot_count_);
+
     if (owns_slots_)
     {
       delete[] slots_;
@@ -369,24 +374,36 @@ class BasicObjectPool
   [[nodiscard]] size_t Size() const { return slot_count_; }
 
   /**
-   * @brief 通过槽位索引访问对象。
-   * @brief Access an object by slot index.
+   * @brief 通过槽位索引直接访问对象，不参与所有权检查。
+   * @brief Access an object by slot index without ownership checks.
    * @param index 槽位索引。 Slot index.
    * @return 对应槽位对象的引用。 Reference to the object stored in the slot.
+   *
+   * @note 该接口会绕过 `Acquire()` / `Handle` 的所有权语义，只适合调试、检查
+   *       外部存储区或其他明确知道槽位状态的场景。
+   *       This API bypasses the ownership semantics of `Acquire()` / `Handle`,
+   *       and is intended only for debugging, external-storage inspection, or
+   *       other cases where the caller already knows the slot state.
    */
-  [[nodiscard]] Data& operator[](size_t index)
+  [[nodiscard]] Data& UnsafeAt(size_t index)
   {
     ASSERT(index < slot_count_);
     return slots_[index];
   }
 
   /**
-   * @brief 通过槽位索引只读访问对象。
-   * @brief Access an object by slot index as const.
+   * @brief 通过槽位索引只读直接访问对象，不参与所有权检查。
+   * @brief Access an object by slot index as const without ownership checks.
    * @param index 槽位索引。 Slot index.
    * @return 对应槽位对象的常量引用。 Const reference to the object stored in the slot.
+   *
+   * @note 该接口会绕过 `Acquire()` / `Handle` 的所有权语义，只适合调试、检查
+   *       外部存储区或其他明确知道槽位状态的场景。
+   *       This API bypasses the ownership semantics of `Acquire()` / `Handle`,
+   *       and is intended only for debugging, external-storage inspection, or
+   *       other cases where the caller already knows the slot state.
    */
-  [[nodiscard]] const Data& operator[](size_t index) const
+  [[nodiscard]] const Data& UnsafeAt(size_t index) const
   {
     ASSERT(index < slot_count_);
     return slots_[index];

@@ -83,7 +83,7 @@ void test_object_pool()
     ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
     ASSERT(d.Index() == a_index);
     d->value = 44;
-    ASSERT(pool[d.Index()].value == 44);
+    ASSERT(pool.UnsafeAt(d.Index()).value == 44);
   }
 
   // The same pool contract should work with the typed SPSC free-index queue.
@@ -114,7 +114,7 @@ void test_object_pool()
     ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
     ASSERT(d.Index() == a_index);
     d->value = 44;
-    ASSERT(pool[d.Index()].value == 44);
+    ASSERT(pool.UnsafeAt(d.Index()).value == 44);
   }
 
   // The same pool contract should work with the typed SPMC free-index queue.
@@ -205,7 +205,7 @@ void test_object_pool()
     ASSERT(!first.Valid());
     ASSERT(second.Valid());
     second->value = 99;
-    ASSERT(pool[second.Index()].value == 99);
+    ASSERT(pool.UnsafeAt(second.Index()).value == 99);
 
     second.Reset();
     ASSERT(pool.EmptySize() == 1);
