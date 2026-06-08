@@ -346,13 +346,13 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
       std::max(alignof(size_t), alignof(std::max_align_t));
 
-  /// @brief 禁止拷贝构造 / Non-copyable.
+  /// @brief 禁止拷贝构造。 Non-copyable.
   SPSCQueueBase(const SPSCQueueBase&);
-  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
+  /// @brief 禁止拷贝赋值。 Non-copy-assignable.
   SPSCQueueBase& operator=(const SPSCQueueBase&);
-  /// @brief 禁止移动构造 / Non-movable.
+  /// @brief 禁止移动构造。 Non-movable.
   SPSCQueueBase(SPSCQueueBase&&);
-  /// @brief 禁止移动赋值 / Non-move-assignable.
+  /// @brief 禁止移动赋值。 Non-move-assignable.
   SPSCQueueBase& operator=(SPSCQueueBase&&);
 
   /**
@@ -385,14 +385,14 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     return lhs * rhs;
   }
 
-  const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
-  const size_t capacity_;        ///< 队列容量 / Queue capacity.
-  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长 / Byte stride between adjacent payload slots.
-  std::byte* payloads_;          ///< payload 字节缓冲区 / Byte buffer storing payloads.
+  const size_t element_size_;    ///< 单个 payload 的字节数。 Byte size of one payload.
+  const size_t capacity_;        ///< 队列容量。 Queue capacity.
+  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
+  std::byte* payloads_;          ///< payload 字节缓冲区。 Byte buffer storing payloads.
 
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
-      head_;  ///< 下一个待出队的环形下标 / Next ring index to dequeue.
+      head_;  ///< 下一个待出队的环形下标。 Next ring index to dequeue.
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
-      tail_;  ///< 下一个待入队的环形下标 / Next ring index to enqueue.
+      tail_;  ///< 下一个待入队的环形下标。 Next ring index to enqueue.
 };
 }  // namespace LibXR

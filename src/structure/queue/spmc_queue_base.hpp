@@ -13,7 +13,8 @@ namespace LibXR
 {
 /**
  * @class SPMCQueueBase
- * @brief 单生产者多消费者字节队列 / Single-producer multiple-consumer byte queue
+ * @brief 单生产者多消费者字节队列。
+ * @brief Single-producer multiple-consumer byte queue.
  *
  * 该队列允许一个生产者按 FIFO 顺序发布固定大小字节 payload，多个消费者通过
  * CAS 抢占出队位置。每个槽位带独立序号，消费者成功 claim 后先复制 payload，
@@ -27,9 +28,9 @@ namespace LibXR
 class SPMCQueueBase
 {
  public:
-  using SequenceType = size_t;  ///< 单调递增的逻辑序号类型 / Monotonic sequence type.
+  using SequenceType = size_t;  ///< 单调递增的逻辑序号类型。 Monotonic sequence type.
   using SequenceDiffType =
-      std::make_signed_t<SequenceType>;  ///< 序号差值类型 / Signed sequence-delta type.
+      std::make_signed_t<SequenceType>;  ///< 序号差值类型。 Signed sequence-delta type.
 
   /**
    * @brief 构造 SPMC 字节队列 / Construct an SPMC byte queue
@@ -122,42 +123,41 @@ class SPMCQueueBase
   [[nodiscard]] size_t ElementSize() const { return element_size_; }
 
  private:
-  /// @brief 每个逻辑槽对应的序号单元 / Sequence cell for one logical slot.
+  /// @brief 每个逻辑槽对应的序号单元。 Sequence cell for one logical slot.
   struct alignas(LibXR::CONCURRENCY_ALIGNMENT) SequenceCell
   {
-    std::atomic<SequenceType> value;  ///< 当前槽的逻辑序号 / Current slot sequence.
+    std::atomic<SequenceType> value;  ///< 当前槽的逻辑序号。 Current slot sequence.
   };
 
-  /// @brief 获取指定槽位 payload 起始地址 / Get one slot payload address.
+  /// @brief 获取指定槽位 payload 起始地址。 Get one slot payload address.
   [[nodiscard]] void* PayloadPtr(size_t index);
-  /// @brief 获取指定槽位 payload 起始地址（只读） / Get one slot payload address (const).
+  /// @brief 获取指定槽位 payload 起始地址（只读）。 Get one slot payload address (const).
   [[nodiscard]] const void* PayloadPtr(size_t index) const;
-  /// @brief 安全地向上对齐字节数 / Safely align one byte count upward.
+  /// @brief 安全地向上对齐字节数。 Safely align one byte count upward.
   [[nodiscard]] static size_t AlignUpChecked(size_t value, size_t align);
-  /// @brief 安全地计算乘积 / Safely multiply two size values.
+  /// @brief 安全地计算乘积。 Safely multiply two size values.
   [[nodiscard]] static size_t MultiplyChecked(size_t lhs, size_t rhs);
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
-      std::max(alignof(size_t),
-               alignof(std::max_align_t));  ///< payload 缓冲区整体分配对齐 / Payload buffer allocation alignment.
+      std::max(alignof(size_t), alignof(std::max_align_t));  ///< payload 缓冲区整体分配对齐。 Payload buffer allocation alignment.
 
-  /// @brief 禁止拷贝构造 / Non-copyable.
+  /// @brief 禁止拷贝构造。 Non-copyable.
   SPMCQueueBase(const SPMCQueueBase&);
-  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
+  /// @brief 禁止拷贝赋值。 Non-copy-assignable.
   SPMCQueueBase& operator=(const SPMCQueueBase&);
-  /// @brief 禁止移动构造 / Non-movable.
+  /// @brief 禁止移动构造。 Non-movable.
   SPMCQueueBase(SPMCQueueBase&&);
-  /// @brief 禁止移动赋值 / Non-move-assignable.
+  /// @brief 禁止移动赋值。 Non-move-assignable.
   SPMCQueueBase& operator=(SPMCQueueBase&&);
 
-  const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
-  const size_t capacity_;        ///< 队列容量 / Queue capacity.
-  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长 / Byte stride between adjacent payload slots.
-  SequenceCell* sequences_;      ///< 槽序号数组 / Array of per-slot sequence cells.
-  std::byte* payloads_;          ///< payload 字节缓冲区 / Byte buffer storing payloads.
+  const size_t element_size_;    ///< 单个 payload 的字节数。 Byte size of one payload.
+  const size_t capacity_;        ///< 队列容量。 Queue capacity.
+  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
+  SequenceCell* sequences_;      ///< 槽序号数组。 Array of per-slot sequence cells.
+  std::byte* payloads_;          ///< payload 字节缓冲区。 Byte buffer storing payloads.
 
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType>
-      head_;  ///< 下一个待出队的逻辑位置 / Next logical dequeue position.
+      head_;  ///< 下一个待出队的逻辑位置。 Next logical dequeue position.
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType>
-      tail_;  ///< 下一个待入队的逻辑位置 / Next logical enqueue position.
+      tail_;  ///< 下一个待入队的逻辑位置。 Next logical enqueue position.
 };
 }  // namespace LibXR
