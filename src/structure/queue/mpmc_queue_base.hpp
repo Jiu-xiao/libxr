@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <type_traits>
 
 #include "libxr_def.hpp"
@@ -41,15 +42,6 @@ class MPMCQueueBase
    * @brief 析构字节队列内核 / Destroy the byte-queue core
    */
   ~MPMCQueueBase();
-
-  /// @brief 禁止拷贝构造 / Non-copyable.
-  MPMCQueueBase(const MPMCQueueBase&) = delete;
-  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
-  MPMCQueueBase& operator=(const MPMCQueueBase&) = delete;
-  /// @brief 禁止移动构造 / Non-movable.
-  MPMCQueueBase(MPMCQueueBase&&) = delete;
-  /// @brief 禁止移动赋值 / Non-move-assignable.
-  MPMCQueueBase& operator=(MPMCQueueBase&&) = delete;
 
   /**
    * @brief 按字节入队一个 payload / Enqueue one payload by bytes
@@ -119,6 +111,15 @@ class MPMCQueueBase
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
       std::max(alignof(size_t),
                alignof(std::max_align_t));  ///< payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer.
+
+  /// @brief 禁止拷贝构造 / Non-copyable.
+  MPMCQueueBase(const MPMCQueueBase&);
+  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
+  MPMCQueueBase& operator=(const MPMCQueueBase&);
+  /// @brief 禁止移动构造 / Non-movable.
+  MPMCQueueBase(MPMCQueueBase&&);
+  /// @brief 禁止移动赋值 / Non-move-assignable.
+  MPMCQueueBase& operator=(MPMCQueueBase&&);
 
   const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
   const size_t capacity_;        ///< 队列容量 / Queue capacity.

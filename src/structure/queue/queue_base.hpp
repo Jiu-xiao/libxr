@@ -149,12 +149,14 @@ class QueueBase
    */
   [[nodiscard]] size_t MaxSize() const { return length_; }
 
-  QueueBase(const QueueBase&) = delete;
-  QueueBase& operator=(const QueueBase&) = delete;
-  QueueBase& operator=(QueueBase&) = delete;
-  QueueBase& operator=(const QueueBase&&) = delete;
-  QueueBase& operator=(QueueBase&&) = delete;
+ private:
+  QueueBase(const QueueBase&);
+  QueueBase& operator=(const QueueBase&);
+  QueueBase& operator=(QueueBase&);
+  QueueBase& operator=(const QueueBase&&);
+  QueueBase& operator=(QueueBase&&);
 
+ public:
   uint8_t* queue_array_;        ///< 存储队列数据的数组 (Array storing queue data).
   const uint16_t ELEMENT_SIZE;  ///< 每个元素的大小 (Size of each element).
   size_t head_ = 0;             ///< 头部索引 (Head index).

@@ -31,11 +31,6 @@ SPMCQueueBase::SPMCQueueBase(size_t element_size, size_t capacity)
 
   payloads_ = static_cast<std::byte*>(::operator new[](
       payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN), std::nothrow));
-  if (payloads_ == nullptr)
-  {
-    delete[] sequences_;
-    sequences_ = nullptr;
-  }
   REQUIRE(payloads_ != nullptr);
 
   for (size_t index = 0; index < capacity_; ++index)
@@ -250,4 +245,5 @@ size_t SPMCQueueBase::MultiplyChecked(size_t lhs, size_t rhs)
   REQUIRE(lhs <= std::numeric_limits<size_t>::max() / rhs);
   return lhs * rhs;
 }
+
 }  // namespace LibXR

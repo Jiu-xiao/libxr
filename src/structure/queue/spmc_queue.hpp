@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <limits>
+#include <new>
 #include <type_traits>
 
 #include "libxr_def.hpp"
@@ -42,15 +43,6 @@ class SPMCQueueBase
    * @brief 析构 SPMC 字节队列 / Destroy the SPMC byte queue
    */
   ~SPMCQueueBase();
-
-  /// @brief 禁止拷贝构造 / Non-copyable.
-  SPMCQueueBase(const SPMCQueueBase&) = delete;
-  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
-  SPMCQueueBase& operator=(const SPMCQueueBase&) = delete;
-  /// @brief 禁止移动构造 / Non-movable.
-  SPMCQueueBase(SPMCQueueBase&&) = delete;
-  /// @brief 禁止移动赋值 / Non-move-assignable.
-  SPMCQueueBase& operator=(SPMCQueueBase&&) = delete;
 
   /**
    * @brief 按字节入队一个 payload / Enqueue one payload by bytes
@@ -142,10 +134,18 @@ class SPMCQueueBase
   [[nodiscard]] static size_t AlignUpChecked(size_t value, size_t align);
   /// @brief 安全地计算乘积 / Safely multiply two size values.
   [[nodiscard]] static size_t MultiplyChecked(size_t lhs, size_t rhs);
-
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
       std::max(alignof(size_t),
                alignof(std::max_align_t));  ///< payload 缓冲区整体分配对齐 / Payload buffer allocation alignment.
+
+  /// @brief 禁止拷贝构造 / Non-copyable.
+  SPMCQueueBase(const SPMCQueueBase&);
+  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
+  SPMCQueueBase& operator=(const SPMCQueueBase&);
+  /// @brief 禁止移动构造 / Non-movable.
+  SPMCQueueBase(SPMCQueueBase&&);
+  /// @brief 禁止移动赋值 / Non-move-assignable.
+  SPMCQueueBase& operator=(SPMCQueueBase&&);
 
   const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
   const size_t capacity_;        ///< 队列容量 / Queue capacity.

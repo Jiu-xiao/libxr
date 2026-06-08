@@ -60,15 +60,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     ::operator delete[](payloads_, std::align_val_t(PAYLOAD_ALLOC_ALIGN));
   }
 
-  /// @brief 禁止拷贝构造 / Non-copyable.
-  SPSCQueueBase(const SPSCQueueBase&) = delete;
-  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
-  SPSCQueueBase& operator=(const SPSCQueueBase&) = delete;
-  /// @brief 禁止移动构造 / Non-movable.
-  SPSCQueueBase(SPSCQueueBase&&) = delete;
-  /// @brief 禁止移动赋值 / Non-move-assignable.
-  SPSCQueueBase& operator=(SPSCQueueBase&&) = delete;
-
   /**
    * @brief 按字节入队一个 payload / Enqueue one payload by bytes
    * @param value 指向待入队 payload 的指针 / Pointer to the payload to enqueue
@@ -351,6 +342,15 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    */
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
       std::max(alignof(size_t), alignof(std::max_align_t));
+
+  /// @brief 禁止拷贝构造 / Non-copyable.
+  SPSCQueueBase(const SPSCQueueBase&);
+  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
+  SPSCQueueBase& operator=(const SPSCQueueBase&);
+  /// @brief 禁止移动构造 / Non-movable.
+  SPSCQueueBase(SPSCQueueBase&&);
+  /// @brief 禁止移动赋值 / Non-move-assignable.
+  SPSCQueueBase& operator=(SPSCQueueBase&&);
 
   /**
    * @brief 安全地向上对齐字节数 / Safely align one byte count upward
