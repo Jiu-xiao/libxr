@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <type_traits>
 
 #include "libxr_def.hpp"
@@ -11,7 +13,7 @@
 namespace LibXR
 {
 /**
- * @class MPMCQueueCore
+ * @class MPMCQueueBase
  * @brief 有界 MPMC 字节队列内核 / Bounded MPMC byte-queue core
  *
  * 这个内核把并发协议和字节搬运集中在一个非模板实现里，以减少不同 payload
@@ -23,7 +25,7 @@ namespace LibXR
  * a full copy of the lock-free protocol. It only moves fixed-size, word-aligned
  * byte payloads; type semantics are handled by thin wrappers above it.
  */
-class MPMCQueueCore
+class MPMCQueueBase
 {
  public:
   using SequenceType = size_t;  ///< 单调递增的逻辑序号类型 / Monotonic logical sequence type.
@@ -35,20 +37,11 @@ class MPMCQueueCore
    * @param element_size 单个 payload 的字节数 / Byte size of one payload
    * @param capacity 队列容量 / Queue capacity
    */
-  MPMCQueueCore(size_t element_size, size_t capacity);
+  MPMCQueueBase(size_t element_size, size_t capacity);
   /**
    * @brief 析构字节队列内核 / Destroy the byte-queue core
    */
-  ~MPMCQueueCore();
-
-  /// @brief 禁止拷贝构造 / Non-copyable.
-  MPMCQueueCore(const MPMCQueueCore&) = delete;
-  /// @brief 禁止拷贝赋值 / Non-copy-assignable.
-  MPMCQueueCore& operator=(const MPMCQueueCore&) = delete;
-  /// @brief 禁止移动构造 / Non-movable.
-  MPMCQueueCore(MPMCQueueCore&&) = delete;
-  /// @brief 禁止移动赋值 / Non-move-assignable.
-  MPMCQueueCore& operator=(MPMCQueueCore&&) = delete;
+  ~MPMCQueueBase();
 
   /**
    * @brief 按字节入队一个 payload / Enqueue one payload by bytes
@@ -101,33 +94,44 @@ class MPMCQueueCore
   [[nodiscard]] size_t ElementSize() const { return element_size_; }
 
  private:
-  /// @brief 每个逻辑槽对应的序号单元 / Sequence cell for one logical slot.
+  /// @brief 每个逻辑槽对应的序号单元。 Sequence cell for one logical slot.
   struct alignas(LibXR::CONCURRENCY_ALIGNMENT) SequenceCell
   {
-    std::atomic<SequenceType> value;  ///< 当前槽的逻辑序号 / Current logical sequence of the slot.
+    std::atomic<SequenceType> value;  ///< 当前槽的逻辑序号。 Current logical sequence of the slot.
   };
 
-  /// @brief 获取指定槽位 payload 起始地址 / Get the payload base address of one slot.
+  /// @brief 获取指定槽位 payload 起始地址。 Get the payload base address of one slot.
   [[nodiscard]] void* PayloadPtr(size_t index);
-  /// @brief 获取指定槽位 payload 起始地址（只读） / Get the payload base address of one slot (const).
+  /// @brief 获取指定槽位 payload 起始地址（只读）。 Get the payload base address of one slot (const).
   [[nodiscard]] const void* PayloadPtr(size_t index) const;
-  /// @brief 安全地向上对齐字节数 / Safely align one byte count upward.
+  /// @brief 安全地向上对齐字节数。 Safely align one byte count upward.
   [[nodiscard]] static size_t AlignUpChecked(size_t value, size_t align);
-  /// @brief 安全地计算乘积 / Safely multiply two size values.
+  /// @brief 安全地计算乘积。 Safely multiply two size values.
   [[nodiscard]] static size_t MultiplyChecked(size_t lhs, size_t rhs);
+  /**
+   * @brief payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer
+   */
   static constexpr size_t PAYLOAD_ALLOC_ALIGN =
-      std::max(alignof(size_t),
-               alignof(std::max_align_t));  ///< payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer.
+      std::max(alignof(size_t), alignof(std::max_align_t));
 
-  const size_t element_size_;    ///< 单个 payload 的字节数 / Byte size of one payload.
-  const size_t capacity_;        ///< 队列容量 / Queue capacity.
-  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长 / Byte stride between adjacent payload slots.
-  SequenceCell* sequences_;      ///< 槽序号数组 / Array of per-slot sequence cells.
-  std::byte* payloads_;          ///< payload 字节缓冲区 / Byte buffer storing payloads.
+  /// @brief 禁止拷贝构造。 Non-copyable.
+  MPMCQueueBase(const MPMCQueueBase&);
+  /// @brief 禁止拷贝赋值。 Non-copy-assignable.
+  MPMCQueueBase& operator=(const MPMCQueueBase&);
+  /// @brief 禁止移动构造。 Non-movable.
+  MPMCQueueBase(MPMCQueueBase&&);
+  /// @brief 禁止移动赋值。 Non-move-assignable.
+  MPMCQueueBase& operator=(MPMCQueueBase&&);
+
+  const size_t element_size_;    ///< 单个 payload 的字节数。 Byte size of one payload.
+  const size_t capacity_;        ///< 队列容量。 Queue capacity.
+  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
+  SequenceCell* sequences_;      ///< 槽序号数组。 Array of per-slot sequence cells.
+  std::byte* payloads_;          ///< payload 字节缓冲区。 Byte buffer storing payloads.
 
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType>
-      head_;  ///< 下一个待出队的逻辑位置 / Next logical dequeue position.
+      head_;  ///< 下一个待出队的逻辑位置。 Next logical dequeue position.
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<SequenceType>
-      tail_;  ///< 下一个待入队的逻辑位置 / Next logical enqueue position.
+      tail_;  ///< 下一个待入队的逻辑位置。 Next logical enqueue position.
 };
 }  // namespace LibXR

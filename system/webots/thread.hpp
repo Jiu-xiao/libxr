@@ -1,6 +1,7 @@
 #pragma once
 
 #include "libxr_system.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_time.hpp"
 #include "logger.hpp"
 

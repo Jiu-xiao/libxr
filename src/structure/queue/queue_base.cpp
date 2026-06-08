@@ -1,10 +1,10 @@
-#include "queue.hpp"
+#include "queue_base.hpp"
 
 #include "libxr_mem.hpp"
 
 using namespace LibXR;
 
-BaseQueue::BaseQueue(uint16_t element_size, size_t length, uint8_t* buffer)
+QueueBase::QueueBase(uint16_t element_size, size_t length, uint8_t* buffer)
     : queue_array_(buffer),
       ELEMENT_SIZE(element_size),
       length_(length),
@@ -12,7 +12,7 @@ BaseQueue::BaseQueue(uint16_t element_size, size_t length, uint8_t* buffer)
 {
 }
 
-BaseQueue::BaseQueue(uint16_t element_size, size_t length)
+QueueBase::QueueBase(uint16_t element_size, size_t length)
     : queue_array_(new uint8_t[length * element_size]),
       ELEMENT_SIZE(element_size),
       length_(length),
@@ -20,7 +20,7 @@ BaseQueue::BaseQueue(uint16_t element_size, size_t length)
 {
 }
 
-BaseQueue::~BaseQueue()
+QueueBase::~QueueBase()
 {
   if (own_buffer_)
   {
@@ -28,12 +28,12 @@ BaseQueue::~BaseQueue()
   }
 }
 
-[[nodiscard]] void* BaseQueue::operator[](uint32_t index)
+[[nodiscard]] void* QueueBase::operator[](uint32_t index)
 {
   return &queue_array_[static_cast<size_t>(index * ELEMENT_SIZE)];
 }
 
-ErrorCode BaseQueue::Push(const void* data)
+ErrorCode QueueBase::PushBytes(const void* data)
 {
   ASSERT(data != nullptr);
 
@@ -53,7 +53,7 @@ ErrorCode BaseQueue::Push(const void* data)
   return ErrorCode::OK;
 }
 
-ErrorCode BaseQueue::Peek(void* data)
+ErrorCode QueueBase::PeekBytes(void* data)
 {
   ASSERT(data != nullptr);
 
@@ -68,7 +68,7 @@ ErrorCode BaseQueue::Peek(void* data)
   }
 }
 
-ErrorCode BaseQueue::Pop(void* data)
+ErrorCode QueueBase::PopBytes(void* data)
 {
   if (Size() == 0)
   {
@@ -84,7 +84,7 @@ ErrorCode BaseQueue::Pop(void* data)
   return ErrorCode::OK;
 }
 
-int BaseQueue::GetLastElementIndex() const
+int QueueBase::GetLastElementIndex() const
 {
   if (Size() == 0)
   {
@@ -93,7 +93,7 @@ int BaseQueue::GetLastElementIndex() const
   return static_cast<int>((tail_ + length_ - 1) % length_);
 }
 
-int BaseQueue::GetFirstElementIndex() const
+int QueueBase::GetFirstElementIndex() const
 {
   if (Size() == 0)
   {
@@ -102,7 +102,7 @@ int BaseQueue::GetFirstElementIndex() const
   return static_cast<int>(head_);
 }
 
-ErrorCode BaseQueue::PushBatch(const void* data, size_t size)
+ErrorCode QueueBase::PushBatchBytes(const void* data, size_t size)
 {
   ASSERT(data != nullptr);
 
@@ -132,7 +132,7 @@ ErrorCode BaseQueue::PushBatch(const void* data, size_t size)
   return ErrorCode::OK;
 }
 
-ErrorCode BaseQueue::PopBatch(void* data, size_t size)
+ErrorCode QueueBase::PopBatchBytes(void* data, size_t size)
 {
   if (Size() < size)
   {
@@ -162,7 +162,7 @@ ErrorCode BaseQueue::PopBatch(void* data, size_t size)
   return ErrorCode::OK;
 }
 
-ErrorCode BaseQueue::PeekBatch(void* data, size_t size)
+ErrorCode QueueBase::PeekBatchBytes(void* data, size_t size)
 {
   ASSERT(data != nullptr);
 
@@ -188,14 +188,14 @@ ErrorCode BaseQueue::PeekBatch(void* data, size_t size)
   return ErrorCode::OK;
 }
 
-ErrorCode BaseQueue::Overwrite(const void* data)
+ErrorCode QueueBase::OverwriteBytes(const void* data)
 {
   ASSERT(data != nullptr);
 
   head_ = tail_ = 0;
   is_full_ = false;
 
-  LibXR::Memory::FastCopy(queue_array_, data, ELEMENT_SIZE * length_);
+  LibXR::Memory::FastCopy(queue_array_, data, ELEMENT_SIZE);
 
   tail_ = (tail_ + 1) % length_;
   if (head_ == tail_)
@@ -206,13 +206,13 @@ ErrorCode BaseQueue::Overwrite(const void* data)
   return ErrorCode::OK;
 }
 
-void BaseQueue::Reset()
+void QueueBase::Reset()
 {
   head_ = tail_ = 0;
   is_full_ = false;
 }
 
-[[nodiscard]] size_t BaseQueue::Size() const
+[[nodiscard]] size_t QueueBase::Size() const
 {
   if (is_full_)
   {
@@ -228,4 +228,4 @@ void BaseQueue::Reset()
   }
 }
 
-[[nodiscard]] size_t BaseQueue::EmptySize() const { return length_ - Size(); }
+[[nodiscard]] size_t QueueBase::EmptySize() const { return length_ - Size(); }
