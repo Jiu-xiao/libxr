@@ -10,6 +10,7 @@ void test_mpmc_queue();
 void test_queue();
 void test_spsc_queue();
 void test_lock_free_pool();
+void test_object_pool();
 void test_rbt();
 void test_ramfs();
 void test_semaphore();
