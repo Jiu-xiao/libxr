@@ -14,6 +14,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <vector>
 
@@ -23,6 +24,35 @@ namespace LinuxSharedTopicBench
 {
 
 using Clock = std::chrono::steady_clock;
+
+inline uint64_t BenchScaleDivisor()
+{
+  const char* text = std::getenv("LIBXR_BENCH_SCALE_DIV");
+  if (text == nullptr || text[0] == '\0')
+  {
+    return 1;
+  }
+
+  char* end = nullptr;
+  const unsigned long long parsed = std::strtoull(text, &end, 10);
+  if (end == text || (end != nullptr && *end != '\0') || parsed == 0)
+  {
+    return 1;
+  }
+  return static_cast<uint64_t>(parsed);
+}
+
+inline uint64_t ScaleBenchCount(uint64_t base_count, uint64_t minimum_count)
+{
+  const uint64_t divisor = BenchScaleDivisor();
+  if (divisor <= 1)
+  {
+    return base_count;
+  }
+
+  const uint64_t scaled = base_count / divisor;
+  return (scaled >= minimum_count) ? scaled : minimum_count;
+}
 
 inline uint64_t NowNs()
 {
@@ -92,19 +122,19 @@ uint64_t CountForPayload()
 {
   if constexpr (PayloadBytes <= 64)
   {
-    return 100000;
+    return ScaleBenchCount(100000, 64);
   }
   else if constexpr (PayloadBytes <= 4096)
   {
-    return 50000;
+    return ScaleBenchCount(50000, 64);
   }
   else if constexpr (PayloadBytes <= 65536)
   {
-    return 5000;
+    return ScaleBenchCount(5000, 32);
   }
   else
   {
-    return 256;
+    return ScaleBenchCount(256, 8);
   }
 }
 
@@ -141,19 +171,19 @@ uint64_t LatencyCountForPayload()
 {
   if constexpr (PayloadBytes <= 64)
   {
-    return 20000;
+    return ScaleBenchCount(20000, 64);
   }
   else if constexpr (PayloadBytes <= 4096)
   {
-    return 10000;
+    return ScaleBenchCount(10000, 64);
   }
   else if constexpr (PayloadBytes <= 65536)
   {
-    return 2000;
+    return ScaleBenchCount(2000, 32);
   }
   else
   {
-    return 128;
+    return ScaleBenchCount(128, 8);
   }
 }
 

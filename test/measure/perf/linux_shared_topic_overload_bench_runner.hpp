@@ -30,7 +30,8 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   using Data = typename Topic::Data;
   using Subscriber = typename Topic::SyncSubscriber;
 
-  const uint64_t count = (PayloadBytes >= 1048576U) ? 256U : 4000U;
+  const uint64_t count =
+      (PayloadBytes >= 1048576U) ? ScaleBenchCount(256U, 8U) : ScaleBenchCount(4000U, 32U);
 
   LibXR::LinuxSharedTopicConfig config = {};
   config.subscriber_num = 1;

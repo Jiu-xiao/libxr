@@ -13,36 +13,39 @@ namespace LinuxSharedTopicBench
 int RunModeBenchmarks()
 {
   int status = 0;
+  const uint64_t count_64k = ScaleBenchCount(4000, 32);
+  const uint64_t count_1m = ScaleBenchCount(256, 8);
+
   status |= RunModeCase<65536>(
       "broadcast_full_64k",
       {{LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_a"},
        {LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_b"}},
-      4000, 512, 32);
+      count_64k, 512, 32);
   status |= RunModeCase<65536>(
       "broadcast_drop_old_64k",
       {{LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD, 50, "sub_slow"},
        {LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD, 0, "sub_fast"}},
-      4000, 512, 8);
+      count_64k, 512, 8);
   status |= RunModeCase<65536>(
       "balance_rr_64k",
       {{LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_a"},
        {LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_b"}},
-      4000, 512, 32);
+      count_64k, 512, 32);
   status |= RunModeCase<1048576>(
       "broadcast_full_1m",
       {{LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_a"},
        {LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_b"}},
-      256, 64, 8);
+      count_1m, 64, 8);
   status |= RunModeCase<1048576>(
       "broadcast_drop_old_1m",
       {{LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD, 50, "sub_slow"},
        {LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD, 0, "sub_fast"}},
-      256, 64, 4);
+      count_1m, 64, 4);
   status |= RunModeCase<1048576>(
       "balance_rr_1m",
       {{LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_a"},
        {LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_b"}},
-      256, 64, 8);
+      count_1m, 64, 8);
   return status;
 }
 
