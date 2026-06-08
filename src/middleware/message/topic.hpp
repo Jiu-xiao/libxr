@@ -11,7 +11,7 @@
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_list.hpp"
-#include "spmc_queue.hpp"
+#include "queue.hpp"
 #include "mutex.hpp"
 #include "rbt.hpp"
 #include "semaphore.hpp"

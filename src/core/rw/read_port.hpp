@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "spmc_queue.hpp"
+#include "queue.hpp"
 #include "operation.hpp"
 
 namespace LibXR
