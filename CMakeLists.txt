@@ -65,10 +65,10 @@ file(GLOB ${PROJECT_NAME}_STRUCTURE_SOURCES CONFIGURE_DEPENDS
 )
 list(SORT ${PROJECT_NAME}_STRUCTURE_SOURCES)
 
-file(GLOB ${PROJECT_NAME}_STRUCTURE_QUEUE_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/src/structure/queue/*.cpp"
+file(GLOB ${PROJECT_NAME}_STRUCTURE_SUBDIR_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/structure/*/*.cpp"
 )
-list(SORT ${PROJECT_NAME}_STRUCTURE_QUEUE_SOURCES)
+list(SORT ${PROJECT_NAME}_STRUCTURE_SUBDIR_SOURCES)
 
 file(GLOB ${PROJECT_NAME}_MIDDLEWARE_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*.cpp"
@@ -94,7 +94,7 @@ target_sources(
   PRIVATE ${${PROJECT_NAME}_SYSTEM_EXT_SOURCES}
   PRIVATE ${${PROJECT_NAME}_UTILS_SOURCES}
   PRIVATE ${${PROJECT_NAME}_STRUCTURE_SOURCES}
-  PRIVATE ${${PROJECT_NAME}_STRUCTURE_QUEUE_SOURCES}
+  PRIVATE ${${PROJECT_NAME}_STRUCTURE_SUBDIR_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_NESTED_SUBDIR_SOURCES}
@@ -148,7 +148,6 @@ set(_xr_public_include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/src/system
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${CMAKE_CURRENT_SOURCE_DIR}/src/structure
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/structure/queue
     ${CMAKE_CURRENT_SOURCE_DIR}/src/middleware
     ${CMAKE_CURRENT_SOURCE_DIR}/src/driver
     ${CMAKE_CURRENT_SOURCE_DIR}/system/${_xr_system}
@@ -170,6 +169,18 @@ endforeach()
 file(GLOB _xr_middleware_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
      "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*"
 )
+file(GLOB _xr_structure_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/structure/*"
+)
+foreach(_xr_structure_SUBDIR IN LISTS _xr_structure_SUBDIRS)
+  if(IS_DIRECTORY "${_xr_structure_SUBDIR}")
+    get_filename_component(_xr_structure_NAME "${_xr_structure_SUBDIR}" NAME)
+    if(EXISTS "${_xr_structure_SUBDIR}/${_xr_structure_NAME}.hpp")
+      list(APPEND _xr_public_include_dirs "${_xr_structure_SUBDIR}")
+    endif()
+  endif()
+endforeach()
+
 foreach(_xr_middleware_SUBDIR IN LISTS _xr_middleware_SUBDIRS)
   if(IS_DIRECTORY "${_xr_middleware_SUBDIR}")
     get_filename_component(_xr_middleware_NAME "${_xr_middleware_SUBDIR}" NAME)
