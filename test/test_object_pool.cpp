@@ -18,9 +18,9 @@ void RunExternalQueueChecks()
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle b;
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle c;
 
-  ASSERT(pool.TryAcquire(a) == LibXR::ErrorCode::OK);
-  ASSERT(pool.TryAcquire(b) == LibXR::ErrorCode::OK);
-  ASSERT(pool.TryAcquire(c) == LibXR::ErrorCode::OK);
+  ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+  ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+  ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
   ASSERT(pool.EmptySize() == 0);
 
   b.Reset();
@@ -34,7 +34,7 @@ void RunExternalSlotChecks()
   LibXR::BasicObjectPool<Payload, QueueType> pool(3, slots);
 
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle handle;
-  ASSERT(pool.TryAcquire(handle) == LibXR::ErrorCode::OK);
+  ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
   handle->value = 123;
   ASSERT(slots[handle.Index()].value == 123);
 }
@@ -47,7 +47,7 @@ void RunExternalQueueAndSlotChecks()
   LibXR::BasicObjectPool<Payload, QueueType> pool(free_queue, 3, slots);
 
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle handle;
-  ASSERT(pool.TryAcquire(handle) == LibXR::ErrorCode::OK);
+  ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
   handle->value = 456;
   ASSERT(slots[handle.Index()].value == 456);
 }
@@ -64,11 +64,11 @@ void test_object_pool()
     LibXR::ObjectPool<Payload>::Handle c;
     LibXR::ObjectPool<Payload>::Handle d;
 
-    ASSERT(pool.TryAcquire(a) == LibXR::ErrorCode::OK);
-    ASSERT(pool.TryAcquire(b) == LibXR::ErrorCode::OK);
-    ASSERT(pool.TryAcquire(c) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
     ASSERT(pool.EmptySize() == 0);
-    ASSERT(pool.TryAcquire(d) == LibXR::ErrorCode::EMPTY);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
 
     a->value = 11;
     b->value = 22;
@@ -80,7 +80,7 @@ void test_object_pool()
     const auto a_index = a.Index();
     a.Reset();
     ASSERT(pool.EmptySize() == 1);
-    ASSERT(pool.TryAcquire(d) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
     ASSERT(d.Index() == a_index);
     d->value = 44;
     ASSERT(pool[d.Index()].value == 44);
@@ -95,11 +95,11 @@ void test_object_pool()
     LibXR::SPSCObjectPool<Payload>::Handle c;
     LibXR::SPSCObjectPool<Payload>::Handle d;
 
-    ASSERT(pool.TryAcquire(a) == LibXR::ErrorCode::OK);
-    ASSERT(pool.TryAcquire(b) == LibXR::ErrorCode::OK);
-    ASSERT(pool.TryAcquire(c) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
     ASSERT(pool.EmptySize() == 0);
-    ASSERT(pool.TryAcquire(d) == LibXR::ErrorCode::EMPTY);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
 
     a->value = 11;
     b->value = 22;
@@ -111,7 +111,7 @@ void test_object_pool()
     const auto a_index = a.Index();
     a.Reset();
     ASSERT(pool.EmptySize() == 1);
-    ASSERT(pool.TryAcquire(d) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
     ASSERT(d.Index() == a_index);
     d->value = 44;
     ASSERT(pool[d.Index()].value == 44);
@@ -141,7 +141,7 @@ void test_object_pool()
 
     {
       LibXR::ObjectPool<Payload>::Handle handle;
-      ASSERT(pool.TryAcquire(handle) == LibXR::ErrorCode::OK);
+      ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
       handle->value = 77;
       ASSERT(pool.EmptySize() == 1);
     }
@@ -154,7 +154,7 @@ void test_object_pool()
     LibXR::ObjectPool<Payload> pool(1);
 
     LibXR::ObjectPool<Payload>::Handle first;
-    ASSERT(pool.TryAcquire(first) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(first) == LibXR::ErrorCode::OK);
     ASSERT(pool.EmptySize() == 0);
 
     auto second = std::move(first);

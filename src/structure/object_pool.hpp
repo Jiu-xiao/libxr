@@ -331,7 +331,7 @@ class BasicObjectPool
    * @return 成功返回 `ErrorCode::OK`，池空返回 `ErrorCode::EMPTY`。
    *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the pool is empty.
    */
-  ErrorCode Acquire(Handle& handle)
+  [[nodiscard]] ErrorCode Acquire(Handle& handle)
   {
     IndexType index = 0;
     const ErrorCode ec = free_queue_->Pop(index);
@@ -344,15 +344,6 @@ class BasicObjectPool
     handle = Handle(this, index);
     return ErrorCode::OK;
   }
-
-  /**
-   * @brief 尝试获取一个槽位 handle。
-   * @brief Try to acquire one slot handle.
-   * @param handle 用于接收成功获取的 handle。 Handle receiving the acquired slot.
-   * @return 成功返回 `ErrorCode::OK`，池空返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the pool is empty.
-   */
-  [[nodiscard]] ErrorCode TryAcquire(Handle& handle) { return Acquire(handle); }
 
   /**
    * @brief 返回当前仍可获取的空闲槽位数。
