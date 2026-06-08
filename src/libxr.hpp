@@ -22,6 +22,7 @@
 #include "list.hpp"
 #include "lockfree_list.hpp"
 #include "lockfree_pool.hpp"
+#include "object_pool.hpp"
 #include "logger.hpp"
 #include "message.hpp"
 #if defined(LIBXR_SYSTEM_POSIX_HOST)

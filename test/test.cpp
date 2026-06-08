@@ -86,6 +86,7 @@ static void run_libxr_tests()
                                      {"spsc_queue", test_spsc_queue, false},
                                      {"mpmc_queue", test_mpmc_queue, false},
                                      {"pool", test_lock_free_pool, false},
+                                     {"object_pool", test_object_pool, false},
                                      {"stack", test_stack, false},
                                      {"list", test_list, false},
                                      {"double_buffer", test_double_buffer, false},
