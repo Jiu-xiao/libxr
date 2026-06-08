@@ -117,6 +117,50 @@ void test_object_pool()
     ASSERT(pool[d.Index()].value == 44);
   }
 
+  // The same pool contract should work with the typed SPMC free-index queue.
+  {
+    LibXR::SPMCObjectPool<Payload> pool(3);
+
+    LibXR::SPMCObjectPool<Payload>::Handle a;
+    LibXR::SPMCObjectPool<Payload>::Handle b;
+    LibXR::SPMCObjectPool<Payload>::Handle c;
+    LibXR::SPMCObjectPool<Payload>::Handle d;
+
+    ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
+    ASSERT(pool.EmptySize() == 0);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
+
+    const auto a_index = a.Index();
+    a.Reset();
+    ASSERT(pool.EmptySize() == 1);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
+    ASSERT(d.Index() == a_index);
+  }
+
+  // The same pool contract should work with the typed MPMC free-index queue.
+  {
+    LibXR::MPMCObjectPool<Payload> pool(3);
+
+    LibXR::MPMCObjectPool<Payload>::Handle a;
+    LibXR::MPMCObjectPool<Payload>::Handle b;
+    LibXR::MPMCObjectPool<Payload>::Handle c;
+    LibXR::MPMCObjectPool<Payload>::Handle d;
+
+    ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+    ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
+    ASSERT(pool.EmptySize() == 0);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
+
+    const auto a_index = a.Index();
+    a.Reset();
+    ASSERT(pool.EmptySize() == 1);
+    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
+    ASSERT(d.Index() == a_index);
+  }
+
   // External queue should also be supported.
   {
     using FreeQueue = LibXR::Queue<uint32_t>;

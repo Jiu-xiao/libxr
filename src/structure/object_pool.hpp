@@ -37,6 +37,7 @@ concept PoolIndexQueue = requires(QueueType queue,
   { queue.Push(index_const) } -> std::same_as<ErrorCode>;
   { queue.Pop(index_mut) } -> std::same_as<ErrorCode>;
   { queue.Pop() } -> std::same_as<ErrorCode>;
+  { queue.Size() } -> std::convertible_to<size_t>;
 };
 
 /**
@@ -237,6 +238,7 @@ class BasicObjectPool
   requires std::is_default_constructible_v<T>
   explicit BasicObjectPool(size_t slot_count) : slot_count_(slot_count)
   {
+    ASSERT(slot_count_ > 0);
     ConstructOwnedQueue(slot_count_);
     AllocateOwnedSlots();
     InitializeFreeQueue();
@@ -255,6 +257,7 @@ class BasicObjectPool
   BasicObjectPool(size_t slot_count, Data* slots)
       : slot_count_(slot_count), slots_(slots)
   {
+    ASSERT(slot_count_ > 0);
     ASSERT(slots_ != nullptr);
     ConstructOwnedQueue(slot_count_);
     InitializeFreeQueue();
@@ -274,6 +277,8 @@ class BasicObjectPool
   BasicObjectPool(FreeQueue& free_queue, size_t slot_count)
       : free_queue_(&free_queue), slot_count_(slot_count)
   {
+    ASSERT(slot_count_ > 0);
+    ASSERT(free_queue.Size() == 0);
     AllocateOwnedSlots();
     InitializeFreeQueue();
   }
@@ -294,7 +299,9 @@ class BasicObjectPool
   BasicObjectPool(FreeQueue& free_queue, size_t slot_count, Data* slots)
       : free_queue_(&free_queue), slot_count_(slot_count), slots_(slots)
   {
+    ASSERT(slot_count_ > 0);
     ASSERT(slots_ != nullptr);
+    ASSERT(free_queue.Size() == 0);
     InitializeFreeQueue();
   }
 
@@ -333,6 +340,8 @@ class BasicObjectPool
    */
   [[nodiscard]] ErrorCode Acquire(Handle& handle)
   {
+    ASSERT(!handle.Valid());
+
     IndexType index = 0;
     const ErrorCode ec = free_queue_->Pop(index);
     if (ec != ErrorCode::OK)
@@ -424,7 +433,9 @@ class BasicObjectPool
    */
   void InitializeFreeQueue()
   {
-    ASSERT(slot_count_ <= static_cast<size_t>(std::numeric_limits<IndexType>::max()) + 1U);
+    ASSERT(slot_count_ > 0);
+    ASSERT(slot_count_ - 1 <=
+           static_cast<size_t>(std::numeric_limits<IndexType>::max()));
     for (size_t index = 0; index < slot_count_; ++index)
     {
       const ErrorCode ec = free_queue_->Push(static_cast<IndexType>(index));
