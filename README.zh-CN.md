@@ -51,7 +51,7 @@
 
 ## 数据结构支持
 
-| `Structure` | List | Stack | RBTree | SPMCQueue | LockFreeList |
+| `Structure` | List | Stack | RBTree | Queue | LockFreeList |
 | ----------- | ---- | ----- | ------ | ------------- | ------------ |
 |             | ✅    | ✅     | ✅      | ✅             | ✅            |
 

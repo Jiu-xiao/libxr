@@ -116,10 +116,10 @@ void IRAM_ATTR ESP32CDCJtag::ClearActiveTx()
 
 void IRAM_ATTR ESP32CDCJtag::ClearPendingTx()
 {
+  tx_pending_valid_.Clear();
   tx_pending_ptr_ = nullptr;
   tx_pending_size_ = 0;
   tx_pending_info_ = {};
-  tx_pending_valid_ = false;
 }
 
 void IRAM_ATTR ESP32CDCJtag::ResetTxState(bool)
@@ -181,8 +181,14 @@ bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
 
 bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
 {
-  if (tx_pending_valid_)
+  if (tx_pending_valid_.IsSet() || tx_pending_claimed_.TestAndSet())
   {
+    return false;
+  }
+
+  if (tx_pending_valid_.IsSet())
+  {
+    tx_pending_claimed_.Clear();
     return false;
   }
 
@@ -195,13 +201,50 @@ bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
   size_t pending_size = 0U;
   if (!DequeueTxToSlot(pending_slot, pending_size, tx_pending_info_, in_isr))
   {
+    tx_pending_claimed_.Clear();
     return false;
   }
 
   tx_pending_ptr_ = pending_slot;
   tx_pending_size_ = pending_size;
-  tx_pending_valid_ = true;
+  tx_pending_valid_.Set();
+  tx_pending_claimed_.Clear();
   return true;
+}
+
+bool IRAM_ATTR ESP32CDCJtag::StartPendingTxIfIdle(bool in_isr)
+{
+  if (tx_busy_.IsSet() || tx_active_valid_ || !tx_pending_valid_.IsSet())
+  {
+    return false;
+  }
+
+  if (tx_pending_claimed_.TestAndSet())
+  {
+    return false;
+  }
+
+  if (tx_busy_.IsSet() || tx_active_valid_)
+  {
+    tx_pending_claimed_.Clear();
+    return false;
+  }
+
+  if (!tx_pending_valid_.TestAndClear())
+  {
+    tx_pending_claimed_.Clear();
+    return false;
+  }
+
+  tx_active_ptr_ = tx_pending_ptr_;
+  tx_active_size_ = tx_pending_size_;
+  tx_active_info_ = tx_pending_info_;
+  tx_active_valid_ = true;
+  tx_pending_ptr_ = nullptr;
+  tx_pending_size_ = 0;
+  tx_pending_info_ = {};
+  tx_pending_claimed_.Clear();
+  return StartAndReportActive(in_isr);
 }
 
 bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)
@@ -312,7 +355,7 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   ClearActiveTx();
 
-  if ((result != ErrorCode::OK) && tx_pending_valid_)
+  if ((result != ErrorCode::OK) && tx_pending_valid_.IsSet())
   {
     write_port_->Finish(in_isr, ErrorCode::FAILED, tx_pending_info_);
     ClearPendingTx();
@@ -324,29 +367,16 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
     return;
   }
 
-  if (tx_pending_valid_)
+  if (StartPendingTxIfIdle(in_isr))
   {
-    tx_active_ptr_ = tx_pending_ptr_;
-    tx_active_size_ = tx_pending_size_;
-    tx_active_info_ = tx_pending_info_;
-    tx_active_valid_ = true;
-    ClearPendingTx();
-    (void)StartAndReportActive(in_isr);
-  }
-  else
-  {
-    if (LoadActiveTxFromQueue(in_isr))
+    if (!tx_pending_valid_.IsSet())
     {
-      (void)StartAndReportActive(in_isr);
+      (void)LoadPendingTxFromQueue(in_isr);
+      (void)StartPendingTxIfIdle(in_isr);
     }
   }
 
-  if (!tx_pending_valid_)
-  {
-    (void)LoadPendingTxFromQueue(in_isr);
-  }
-
-  if (!tx_busy_.IsSet() && !tx_active_valid_ && !tx_pending_valid_)
+  if (!tx_busy_.IsSet() && !tx_active_valid_ && !tx_pending_valid_.IsSet())
   {
     StopTxTransfer();
   }
@@ -355,6 +385,16 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
 {
   if (in_tx_isr_.IsSet())
+  {
+    return ErrorCode::PENDING;
+  }
+
+  if (StartPendingTxIfIdle(in_isr))
+  {
+    return ErrorCode::PENDING;
+  }
+
+  if (tx_pending_claimed_.IsSet())
   {
     return ErrorCode::PENDING;
   }
@@ -377,16 +417,13 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
       OnTxTransferDone(in_isr, ErrorCode::OK);
     }
 
-    if (!tx_pending_valid_)
-    {
-      (void)LoadPendingTxFromQueue(in_isr);
-    }
     return ErrorCode::OK;
   }
 
-  if (!tx_pending_valid_)
+  if (!tx_pending_valid_.IsSet())
   {
     (void)LoadPendingTxFromQueue(in_isr);
+    (void)StartPendingTxIfIdle(in_isr);
   }
 
   return ErrorCode::PENDING;

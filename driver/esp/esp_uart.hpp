@@ -108,6 +108,8 @@ class ESP32UART : public UART
 
   bool LoadPendingTxFromQueue(bool in_isr);
 
+  bool StartPendingTxIfIdle(bool in_isr);
+
   bool DequeueTxToBuffer(uint8_t* buffer, size_t& size, WriteInfoBlock& info,
                          bool in_isr);
 
@@ -155,7 +157,8 @@ class ESP32UART : public UART
   Flag::Plain tx_busy_;
   Flag::Plain in_tx_isr_;
   bool tx_active_valid_ = false;
-  bool tx_pending_valid_ = false;
+  Flag::Atomic tx_pending_claimed_;
+  Flag::Atomic tx_pending_valid_;
 
   bool uart_hw_enabled_ = false;
   uart_hal_context_t uart_hal_ = {};

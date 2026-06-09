@@ -125,8 +125,8 @@ static inline void ch32_can_enable_nvic(ch32_can_id_t id, uint8_t fifo)
   }
 }
 
-CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t pool_size)
-    : CAN(), instance_(CH32_CAN_GetInstanceID(id)), id_(id), tx_pool_(pool_size)
+CH32CAN::CH32CAN(ch32_can_id_t id, uint32_t queue_size)
+    : CAN(), instance_(CH32_CAN_GetInstanceID(id)), id_(id), tx_queue_(queue_size)
 {
   if constexpr (LibXR::CH32UsbCanShared::usb_can_share_enabled())
   {
@@ -520,7 +520,11 @@ void CH32CAN::TxService()
     for (;;)
     {
       ClassicPack p{};
-      if (tx_pool_.Get(p) != ErrorCode::OK)
+      if (tx_retry_valid_)
+      {
+        p = tx_retry_pack_;
+      }
+      else if (tx_queue_.Pop(p) != ErrorCode::OK)
       {
         break;
       }
@@ -530,9 +534,12 @@ void CH32CAN::TxService()
       uint8_t mb = CAN_Transmit(instance_, &tx_msg_);
       if (mb == CAN_TxStatus_NoMailBox)
       {
-        (void)tx_pool_.Put(p);
+        tx_retry_pack_ = p;
+        tx_retry_valid_ = true;
         break;
       }
+
+      tx_retry_valid_ = false;
     }
 
     tx_lock_.store(0u, std::memory_order_release);
@@ -558,7 +565,7 @@ ErrorCode CH32CAN::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  if (tx_pool_.Put(pack) != ErrorCode::OK)
+  if (tx_queue_.Push(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }

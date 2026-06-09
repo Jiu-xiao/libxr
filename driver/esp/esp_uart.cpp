@@ -409,9 +409,9 @@ void IRAM_ATTR ESP32UART::ClearActiveTx()
 
 void IRAM_ATTR ESP32UART::ClearPendingTx()
 {
+  tx_pending_valid_.Clear();
   tx_pending_length_ = 0;
   tx_pending_info_ = {};
-  tx_pending_valid_ = false;
 }
 
 bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
@@ -435,6 +435,17 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
   {
     return ErrorCode::PENDING;
   }
+
+  if (StartPendingTxIfIdle(in_isr))
+  {
+    return ErrorCode::PENDING;
+  }
+
+  if (tx_pending_claimed_.IsSet())
+  {
+    return ErrorCode::PENDING;
+  }
+
   if (!tx_active_valid_)
   {
     (void)LoadActiveTxFromQueue(in_isr);
@@ -448,17 +459,13 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
       return ErrorCode::FAILED;
     }
 
-    // Current op completion is reported by WritePort when TryStartTx returns OK.
-    if (!tx_pending_valid_)
-    {
-      (void)LoadPendingTxFromQueue(in_isr);
-    }
     return ErrorCode::OK;
   }
 
-  if (!tx_pending_valid_)
+  if (!tx_pending_valid_.IsSet())
   {
     (void)LoadPendingTxFromQueue(in_isr);
+    (void)StartPendingTxIfIdle(in_isr);
   }
 
   return ErrorCode::PENDING;
@@ -483,20 +490,62 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 {
   (void)in_isr;
 
-  if (tx_pending_valid_)
+  if (tx_pending_valid_.IsSet() || tx_pending_claimed_.TestAndSet())
   {
+    return false;
+  }
+
+  if (tx_pending_valid_.IsSet())
+  {
+    tx_pending_claimed_.Clear();
     return false;
   }
 
   size_t pending_length = 0U;
   if (!DequeueTxToBuffer(tx_pending_buffer_, pending_length, tx_pending_info_, in_isr))
   {
+    tx_pending_claimed_.Clear();
     return false;
   }
 
   tx_pending_length_ = pending_length;
-  tx_pending_valid_ = true;
+  tx_pending_valid_.Set();
+  tx_pending_claimed_.Clear();
   return true;
+}
+
+bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
+{
+  if (tx_busy_.IsSet() || tx_active_valid_ || !tx_pending_valid_.IsSet())
+  {
+    return false;
+  }
+
+  if (tx_pending_claimed_.TestAndSet())
+  {
+    return false;
+  }
+
+  if (tx_busy_.IsSet() || tx_active_valid_)
+  {
+    tx_pending_claimed_.Clear();
+    return false;
+  }
+
+  if (!tx_pending_valid_.TestAndClear())
+  {
+    tx_pending_claimed_.Clear();
+    return false;
+  }
+
+  std::swap(tx_active_buffer_, tx_pending_buffer_);
+  tx_active_length_ = tx_pending_length_;
+  tx_pending_length_ = 0;
+  tx_active_info_ = tx_pending_info_;
+  tx_active_valid_ = true;
+  tx_pending_info_ = {};
+  tx_pending_claimed_.Clear();
+  return StartAndReportActive(in_isr);
 }
 
 bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
@@ -604,7 +653,7 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   ClearActiveTx();
 
-  if ((result != ErrorCode::OK) && tx_pending_valid_)
+  if ((result != ErrorCode::OK) && tx_pending_valid_.IsSet())
   {
     write_port_->Finish(in_isr, ErrorCode::FAILED, tx_pending_info_);
     ClearPendingTx();
@@ -616,27 +665,13 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
     return;
   }
 
-  if (tx_pending_valid_)
+  if (StartPendingTxIfIdle(in_isr))
   {
-    std::swap(tx_active_buffer_, tx_pending_buffer_);
-    tx_active_length_ = tx_pending_length_;
-    tx_pending_length_ = 0;
-    tx_active_info_ = tx_pending_info_;
-    tx_active_valid_ = true;
-    ClearPendingTx();
-    (void)StartAndReportActive(in_isr);
-  }
-  else
-  {
-    if (LoadActiveTxFromQueue(in_isr))
+    if (!tx_pending_valid_.IsSet())
     {
-      (void)StartAndReportActive(in_isr);
+      (void)LoadPendingTxFromQueue(in_isr);
+      (void)StartPendingTxIfIdle(in_isr);
     }
-  }
-
-  if (!tx_pending_valid_)
-  {
-    (void)LoadPendingTxFromQueue(in_isr);
   }
 }
 

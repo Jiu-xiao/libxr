@@ -210,6 +210,76 @@ void test_spsc_queue()
     ASSERT(value == 55);
   }
 
+  // Batched byte callbacks receive contiguous chunks even when the ring wraps.
+  {
+    LibXR::SPSCQueue<uint8_t> byte_queue(6);
+    uint8_t value = 0;
+    const uint8_t initial[5] = {10, 11, 12, 13, 14};
+
+    ASSERT(byte_queue.PushBatch(initial, 5) == LibXR::ErrorCode::OK);
+    for (uint8_t expected = 10; expected < 13; ++expected)
+    {
+      ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::OK);
+      ASSERT(value == expected);
+    }
+
+    uint8_t write_next = 20;
+    size_t write_chunks = 0;
+    ASSERT(byte_queue.PushWithWriter(
+               4,
+               [&](uint8_t* chunk, size_t count)
+               {
+                 ASSERT(count == 2);
+                 ++write_chunks;
+                 for (size_t index = 0; index < count; ++index)
+                 {
+                   chunk[index] = write_next++;
+                 }
+                 return LibXR::ErrorCode::OK;
+               }) == LibXR::ErrorCode::OK);
+    ASSERT(write_chunks == 2);
+
+    const uint8_t expected_after_write[6] = {13, 14, 20, 21, 22, 23};
+    uint8_t readback[6] = {};
+    ASSERT(byte_queue.PopBatch(readback, 6) == LibXR::ErrorCode::OK);
+    for (size_t index = 0; index < 6; ++index)
+    {
+      ASSERT(readback[index] == expected_after_write[index]);
+    }
+
+    const uint8_t full[6] = {1, 2, 3, 4, 5, 6};
+    const uint8_t wrap[4] = {7, 8, 9, 10};
+    ASSERT(byte_queue.PushBatch(full, 6) == LibXR::ErrorCode::OK);
+    for (size_t index = 0; index < 4; ++index)
+    {
+      ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::OK);
+      ASSERT(value == static_cast<uint8_t>(index + 1));
+    }
+    ASSERT(byte_queue.PushBatch(wrap, 4) == LibXR::ErrorCode::OK);
+
+    const uint8_t expected_read_chunks[5] = {5, 6, 7, 8, 9};
+    size_t read_cursor = 0;
+    size_t read_chunks = 0;
+    ASSERT(byte_queue.PopWithReader(
+               5,
+               [&](const uint8_t* chunk, size_t count)
+               {
+                 ASSERT((read_chunks == 0 && count == 1) ||
+                        (read_chunks == 1 && count == 4));
+                 for (size_t index = 0; index < count; ++index)
+                 {
+                   ASSERT(chunk[index] == expected_read_chunks[read_cursor++]);
+                 }
+                 ++read_chunks;
+                 return LibXR::ErrorCode::OK;
+               }) == LibXR::ErrorCode::OK);
+    ASSERT(read_chunks == 2);
+    ASSERT(read_cursor == 5);
+    ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 10);
+    ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+  }
+
   // End-to-end producer/consumer handoff under sustained contention.
   {
     constexpr uint32_t TOTAL_ITEMS = 50000;

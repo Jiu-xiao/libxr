@@ -6,7 +6,7 @@ using namespace LibXR;
 
 ReadPort::ReadPort(size_t buffer_size)
     : queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
-                                        SPMCQueue<uint8_t>(buffer_size)
+                                        SPSCQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {
 }

@@ -168,8 +168,8 @@ STM32CANFD::STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size)
     : FDCAN(),
       hcan_(hcan),
       id_(STM32_FDCAN_GetID(hcan->Instance)),
-      tx_pool_(queue_size),
-      tx_pool_fd_(queue_size)
+      tx_queue_(queue_size),
+      tx_fd_queue_(queue_size)
 {
   CheckMessageRAMOffset(hcan);
   map[id_] = this;
@@ -255,11 +255,10 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  // 先入池；满则先服务一次再 Put 一次
-  if (tx_pool_.Put(pack) != ErrorCode::OK)
+  if (tx_queue_.Push(pack) != ErrorCode::OK)
   {
     TxService();
-    if (tx_pool_.Put(pack) != ErrorCode::OK)
+    if (tx_queue_.Push(pack) != ErrorCode::OK)
     {
       return ErrorCode::FULL;
     }
@@ -633,11 +632,10 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
     return ErrorCode::FAILED;
   }
 
-  // 先入池；满则先服务一次再 Put 一次
-  if (tx_pool_fd_.Put(pack) != ErrorCode::OK)
+  if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
   {
     TxService();
-    if (tx_pool_fd_.Put(pack) != ErrorCode::OK)
+    if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
     {
       return ErrorCode::FULL;
     }
@@ -734,44 +732,61 @@ void STM32CANFD::TxService()
 
     while (HardwareTxQueueEmptySize() != 0u)
     {
-      // FD 优先
+      // 保留原有 FD 优先发送策略。
+      // Preserve the existing FD-priority TX policy.
       FDPack pfd{};
-      if (tx_pool_fd_.Get(pfd) == ErrorCode::OK)
+      bool has_fd = tx_fd_retry_valid_;
+      if (has_fd)
+      {
+        pfd = tx_fd_retry_pack_;
+      }
+      else
+      {
+        has_fd = (tx_fd_queue_.Pop(pfd) == ErrorCode::OK);
+      }
+
+      if (has_fd)
       {
         FDCAN_TxHeaderTypeDef hdr{};
         BuildTxHeader(pfd, hdr);
 
         if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &hdr, pfd.data) != HAL_OK)
         {
-          // 发送失败：回队列，必须兜底
-          if (tx_pool_fd_.Put(pfd) != ErrorCode::OK)
-          {
-            ASSERT(false);  // 丢包属于异常：池满/实现问题
-          }
+          tx_fd_retry_pack_ = pfd;
+          tx_fd_retry_valid_ = true;
           break;  // 不做立即 retry
         }
+        tx_fd_retry_valid_ = false;
         continue;
       }
 
-      // Classic
       ClassicPack pc{};
-      if (tx_pool_.Get(pc) == ErrorCode::OK)
+      bool has_classic = tx_classic_retry_valid_;
+      if (has_classic)
+      {
+        pc = tx_classic_retry_pack_;
+      }
+      else
+      {
+        has_classic = (tx_queue_.Pop(pc) == ErrorCode::OK);
+      }
+
+      if (has_classic)
       {
         FDCAN_TxHeaderTypeDef hdr{};
         BuildTxHeader(pc, hdr);
 
         if (HAL_FDCAN_AddMessageToTxFifoQ(hcan_, &hdr, pc.data) != HAL_OK)
         {
-          if (tx_pool_.Put(pc) != ErrorCode::OK)
-          {
-            ASSERT(false);
-          }
+          tx_classic_retry_pack_ = pc;
+          tx_classic_retry_valid_ = true;
           break;
         }
+        tx_classic_retry_valid_ = false;
         continue;
       }
 
-      break;  // 两个池都空
+      break;  // 两个软件队列都空
     }
 
     tx_lock_.store(0u, std::memory_order_release);

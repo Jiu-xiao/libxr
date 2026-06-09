@@ -49,6 +49,7 @@ class ESP32CDCJtag : public UART
   ErrorCode TryStartTx(bool in_isr);
   bool LoadActiveTxFromQueue(bool in_isr);
   bool LoadPendingTxFromQueue(bool in_isr);
+  bool StartPendingTxIfIdle(bool in_isr);
   bool DequeueTxToSlot(uint8_t* slot, size_t& size, WriteInfoBlock& info, bool in_isr);
   bool StartActiveTransfer(bool in_isr);
   bool StartAndReportActive(bool in_isr);
@@ -75,8 +76,9 @@ class ESP32CDCJtag : public UART
   bool tx_active_valid_ = false;
   const uint8_t* tx_pending_ptr_ = nullptr;
   size_t tx_pending_size_ = 0;
-  bool tx_pending_valid_ = false;
   WriteInfoBlock tx_pending_info_ = {};
+  Flag::Atomic tx_pending_claimed_{};
+  Flag::Atomic tx_pending_valid_{};
   Flag::Atomic tx_busy_{};
   Flag::Plain in_tx_isr_;
 

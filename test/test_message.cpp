@@ -65,9 +65,9 @@ void TestTopicCore()
   auto topic = LibXR::Topic::CreateTopic<double>("test_tp", &domain);
   static double msg[4];
   auto async_suber = LibXR::Topic::ASyncSubscriber<double>(topic);
-  LibXR::SPMCQueue<double> msg_queue(10);
+  LibXR::SPSCQueue<double> msg_queue(10);
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
-  LibXR::SPMCQueue<LibXR::Topic::Message<double>> timed_msg_queue(10);
+  LibXR::SPSCQueue<LibXR::Topic::Message<double>> timed_msg_queue(10);
   auto timed_queue_suber = LibXR::Topic::QueuedSubscriber(topic, timed_msg_queue);
   UNUSED(queue_suber);
   UNUSED(timed_queue_suber);
@@ -328,7 +328,7 @@ void TestTopicCore()
   ASSERT(mutable_payload == 5678);
 
   auto queue_drop_topic = LibXR::Topic::CreateTopic<int>("queue_drop_tp", &domain);
-  LibXR::SPMCQueue<int> drop_queue(1);
+  LibXR::SPSCQueue<int> drop_queue(1);
   auto drop_suber = LibXR::Topic::QueuedSubscriber(queue_drop_topic, drop_queue);
   UNUSED(drop_suber);
   for (size_t i = 0; i < drop_queue.MaxSize(); i++)

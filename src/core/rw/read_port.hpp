@@ -51,7 +51,7 @@ class ReadPort
   };
 
   ReadFun read_fun_ = nullptr;  ///< Driver/backend read notification entry. 底层驱动或后端读取通知入口。
-  SPMCQueue<uint8_t>* queue_data_ = nullptr;  ///< RX payload queue. 接收数据字节队列。
+  SPSCQueue<uint8_t>* queue_data_ = nullptr;  ///< RX payload queue. 接收数据字节队列。
   ReadInfoBlock info_{};  ///< In-flight read request metadata. 当前在途读取请求的元数据。
   std::atomic<BusyState> busy_{BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
