@@ -513,11 +513,14 @@ void CH32CAN::TxService()
     return;
   }
 
+  constexpr uint32_t TME_MASK =
+      (CAN_TSTATR_TME0 | CAN_TSTATR_TME1 | CAN_TSTATR_TME2);
+
   for (;;)
   {
     tx_pend_.store(0u, std::memory_order_release);
 
-    for (;;)
+    while ((instance_->TSTATR & TME_MASK) != 0u)
     {
       ClassicPack p{};
       if (tx_retry_valid_)
