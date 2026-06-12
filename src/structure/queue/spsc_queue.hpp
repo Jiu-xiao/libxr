@@ -145,6 +145,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   {
     static_assert(std::is_trivially_copyable_v<Data>,
                   "batched SPSCQueue::PushWithWriter requires trivially copyable payloads");
+    static_assert(std::is_trivially_destructible_v<Data>,
+                  "batched SPSCQueue::PushWithWriter requires trivially destructible payloads");
     static_assert(std::is_invocable_v<Writer&, Data*, size_t>,
                   "PushWithWriter writer must be callable as "
                   "ErrorCode(Data* buffer, size_t count)");
@@ -224,6 +226,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   {
     static_assert(std::is_trivially_copyable_v<Data>,
                   "batched SPSCQueue::PopWithReader requires trivially copyable payloads");
+    static_assert(std::is_trivially_destructible_v<Data>,
+                  "batched SPSCQueue::PopWithReader requires trivially destructible payloads");
     static_assert(std::is_invocable_v<Reader&, const Data*, size_t>,
                   "PopWithReader reader must be callable as "
                   "ErrorCode(const Data* buffer, size_t count)");
