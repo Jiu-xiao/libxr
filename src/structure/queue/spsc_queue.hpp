@@ -29,6 +29,9 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
                         public SPSCQueueBase
 {
  public:
+  static_assert(alignof(Data) <= alignof(std::max_align_t),
+                "SPSCQueue does not support over-aligned payload types");
+
   using ValueType = Data;  ///< 队列元素类型。 Queue element type.
   /// @brief 重新公开强类型出队接口。 Re-expose the typed pop interface.
   using QueueTypedBase<SPSCQueue<Data>, Data>::Pop;

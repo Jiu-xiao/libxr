@@ -37,7 +37,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   SPSCQueueBase(size_t element_size, size_t capacity)
       : element_size_(element_size),
         capacity_(capacity),
-        payload_alloc_align_(ComputeAllocAlign(alignof(std::byte))),
+        payload_alloc_align_(alignof(std::max_align_t)),
         payload_stride_(ComputeStride(element_size, alignof(std::byte))),
         payloads_(nullptr),
         head_(0),
@@ -56,7 +56,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   SPSCQueueBase(size_t element_size, size_t element_align, size_t capacity)
       : element_size_(element_size),
         capacity_(capacity),
-        payload_alloc_align_(ComputeAllocAlign(element_align)),
+        payload_alloc_align_(alignof(std::max_align_t)),
         payload_stride_(ComputeStride(element_size, element_align)),
         payloads_(nullptr),
         head_(0),
@@ -501,13 +501,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     REQUIRE((align & (align - 1)) == 0);
     REQUIRE(size <= std::numeric_limits<size_t>::max() - (align - 1));
     return ((size + align - 1) / align) * align;
-  }
-
-  static size_t ComputeAllocAlign(size_t element_align)
-  {
-    REQUIRE(element_align > 0);
-    REQUIRE((element_align & (element_align - 1)) == 0);
-    return std::max(element_align, alignof(std::max_align_t));
   }
 
   static size_t ComputeStride(size_t element_size, size_t element_align)
