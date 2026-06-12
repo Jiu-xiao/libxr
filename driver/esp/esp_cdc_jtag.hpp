@@ -77,7 +77,6 @@ class ESP32CDCJtag : public UART
   const uint8_t* tx_pending_ptr_ = nullptr;
   size_t tx_pending_size_ = 0;
   WriteInfoBlock tx_pending_info_ = {};
-  Flag::Atomic tx_pending_claimed_{};
   Flag::Atomic tx_pending_valid_{};
   Flag::Atomic tx_busy_{};
   Flag::Plain in_tx_isr_;
