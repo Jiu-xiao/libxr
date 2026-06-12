@@ -37,26 +37,59 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   SPSCQueueBase(size_t element_size, size_t capacity)
       : element_size_(element_size),
         capacity_(capacity),
+        payload_alloc_align_(std::max(alignof(size_t), alignof(std::max_align_t))),
+        payload_stride_(0),
         payloads_(nullptr),
         head_(0),
         tail_(0)
   {
+    InitStorage();
+  }
+
+  /**
+   * @brief 构造 SPSC 字节队列内核并指定元素对齐 / Construct the SPSC byte-queue core
+   *        with explicit element alignment
+   * @param element_size 单个 payload 的字节数 / Byte size of one payload
+   * @param element_align 单个 payload 的对齐要求 / Alignment requirement of one payload
+   * @param capacity 队列容量 / Queue capacity
+   */
+  SPSCQueueBase(size_t element_size, size_t element_align, size_t capacity)
+      : element_size_(element_size),
+        capacity_(capacity),
+        payload_alloc_align_(std::max(element_align, alignof(size_t))),
+        payload_stride_(0),
+        payloads_(nullptr),
+        head_(0),
+        tail_(0)
+  {
+    InitStorage();
+  }
+
+ private:
+  void InitStorage()
+  {
     REQUIRE(element_size_ > 0);
+    REQUIRE(payload_alloc_align_ > 0);
     REQUIRE(capacity_ > 0);
     REQUIRE(capacity_ <= std::numeric_limits<size_t>::max() - 1);
+    REQUIRE((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
 
-    const size_t payload_bytes = MultiplyChecked(element_size_, RingCapacity());
+    payload_stride_ = AlignUpChecked(element_size_, payload_alloc_align_);
+
+    const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
     payloads_ = static_cast<std::byte*>(::operator new[](
-        payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN), std::nothrow));
+        payload_bytes, std::align_val_t(payload_alloc_align_), std::nothrow));
     REQUIRE(payloads_ != nullptr);
   }
+
+ public:
 
   /**
    * @brief 析构 SPSC 字节队列内核 / Destroy the SPSC byte-queue core
    */
   ~SPSCQueueBase()
   {
-    ::operator delete[](payloads_, std::align_val_t(PAYLOAD_ALLOC_ALIGN));
+    ::operator delete[](payloads_, std::align_val_t(payload_alloc_align_));
   }
 
   /**
@@ -417,7 +450,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    */
   std::byte* PayloadPtr(IndexType index)
   {
-    return payloads_ + index * element_size_;
+    return payloads_ + index * payload_stride_;
   }
 
   /**
@@ -429,7 +462,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    */
   const std::byte* PayloadPtr(IndexType index) const
   {
-    return payloads_ + index * element_size_;
+    return payloads_ + index * payload_stride_;
   }
 
   /**
@@ -448,12 +481,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   {
     return (index + 1) % RingCapacity();
   }
-
-  /**
-   * @brief payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer
-   */
-  static constexpr size_t PAYLOAD_ALLOC_ALIGN =
-      std::max(alignof(size_t), alignof(std::max_align_t));
 
   /// @brief 禁止拷贝构造。 Non-copyable.
   SPSCQueueBase(const SPSCQueueBase&);
@@ -483,6 +510,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
 
   const size_t element_size_;    ///< 单个 payload 的字节数。 Byte size of one payload.
   const size_t capacity_;        ///< 队列容量。 Queue capacity.
+  const size_t payload_alloc_align_;  ///< 整体分配对齐。 Allocation alignment for the payload buffer.
+  size_t payload_stride_;        ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
   std::byte* payloads_;          ///< payload 字节缓冲区。 Byte buffer storing payloads.
 
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>

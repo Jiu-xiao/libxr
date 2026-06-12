@@ -42,7 +42,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
    *
    * @note 包含动态内存分配。 Contains dynamic memory allocation.
    */
-  explicit SPSCQueue(size_t length) : SPSCQueueBase(sizeof(Data), length)
+  explicit SPSCQueue(size_t length)
+      : SPSCQueueBase(sizeof(Data), alignof(Data), length)
   {
   }
 
@@ -139,8 +140,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   template <typename Writer>
   ErrorCode PushWithWriter(size_t size, Writer&& writer)
   {
-    static_assert(sizeof(Data) == 1,
-                  "batched SPSCQueue::PushWithWriter exposes contiguous byte chunks");
+    static_assert(std::is_trivially_copyable_v<Data>,
+                  "batched SPSCQueue::PushWithWriter requires trivially copyable payloads");
     static_assert(std::is_invocable_v<Writer&, Data*, size_t>,
                   "PushWithWriter writer must be callable as "
                   "ErrorCode(Data* buffer, size_t count)");
@@ -218,8 +219,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   template <typename Reader>
   ErrorCode PopWithReader(size_t size, Reader&& reader)
   {
-    static_assert(sizeof(Data) == 1,
-                  "batched SPSCQueue::PopWithReader exposes contiguous byte chunks");
+    static_assert(std::is_trivially_copyable_v<Data>,
+                  "batched SPSCQueue::PopWithReader requires trivially copyable payloads");
     static_assert(std::is_invocable_v<Reader&, const Data*, size_t>,
                   "PopWithReader reader must be callable as "
                   "ErrorCode(const Data* buffer, size_t count)");
