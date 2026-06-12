@@ -100,30 +100,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   template <typename Writer>
   ErrorCode PushWithWriter(Writer&& writer)
   {
-    static_assert(std::is_default_constructible_v<Data>,
-                  "SPSCQueue::PushWithWriter requires default-constructible payloads");
-    static_assert(std::is_destructible_v<Data>,
-                  "SPSCQueue::PushWithWriter requires destructible payloads");
-    static_assert(std::is_invocable_v<Writer&, Data*, size_t>,
-                  "PushWithWriter writer must be callable as "
-                  "ErrorCode(Data* buffer, size_t count)");
-    using WriterRet = std::invoke_result_t<Writer&, Data*, size_t>;
-    static_assert(std::is_convertible_v<WriterRet, ErrorCode>,
-                  "PushWithWriter writer return type must be convertible to ErrorCode");
-
-    if (SPSCQueueBase::EmptySize() == 0)
-    {
-      return ErrorCode::FULL;
-    }
-
-    Data tmp{};
-    Writer& writer_ref = writer;
-    const ErrorCode ec = writer_ref(&tmp, 1);
-    if (ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-    return SPSCQueueBase::PushBytes(&tmp);
+    return PushWithWriter(1, std::forward<Writer>(writer));
   }
 
   /**
@@ -180,31 +157,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   template <typename Reader>
   ErrorCode PopWithReader(Reader&& reader)
   {
-    static_assert(std::is_default_constructible_v<Data>,
-                  "SPSCQueue::PopWithReader requires default-constructible payloads");
-    static_assert(std::is_destructible_v<Data>,
-                  "SPSCQueue::PopWithReader requires destructible payloads");
-    static_assert(std::is_invocable_v<Reader&, const Data*, size_t>,
-                  "PopWithReader reader must be callable as "
-                  "ErrorCode(const Data* buffer, size_t count)");
-    using ReaderRet = std::invoke_result_t<Reader&, const Data*, size_t>;
-    static_assert(std::is_convertible_v<ReaderRet, ErrorCode>,
-                  "PopWithReader reader return type must be convertible to ErrorCode");
-
-    Data tmp{};
-    auto ec = SPSCQueueBase::PeekBytes(&tmp);
-    if (ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-
-    Reader& reader_ref = reader;
-    ec = reader_ref(&tmp, 1);
-    if (ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-    return SPSCQueueBase::PopBytes(nullptr);
+    return PopWithReader(1, std::forward<Reader>(reader));
   }
 
   /**
