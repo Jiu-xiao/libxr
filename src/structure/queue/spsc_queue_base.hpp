@@ -68,11 +68,11 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
  private:
   void InitStorage()
   {
-    REQUIRE(element_size_ > 0);
-    REQUIRE(payload_alloc_align_ > 0);
-    REQUIRE(capacity_ > 0);
-    REQUIRE(capacity_ <= std::numeric_limits<size_t>::max() - 1);
-    REQUIRE((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
+    ASSERT(element_size_ > 0);
+    ASSERT(payload_alloc_align_ > 0);
+    ASSERT(capacity_ > 0);
+    ASSERT(capacity_ <= std::numeric_limits<size_t>::max() - 1);
+    ASSERT((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
 
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
     payloads_ = static_cast<std::byte*>(::operator new[](
@@ -497,17 +497,17 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    */
   static size_t AlignUpChecked(size_t size, size_t align)
   {
-    REQUIRE(align > 0);
-    REQUIRE((align & (align - 1)) == 0);
-    REQUIRE(size <= std::numeric_limits<size_t>::max() - (align - 1));
+    ASSERT(align > 0);
+    ASSERT((align & (align - 1)) == 0);
+    ASSERT(size <= std::numeric_limits<size_t>::max() - (align - 1));
     return ((size + align - 1) / align) * align;
   }
 
   static size_t ComputeStride(size_t element_size, size_t element_align)
   {
-    REQUIRE(element_size > 0);
-    REQUIRE(element_align > 0);
-    REQUIRE((element_align & (element_align - 1)) == 0);
+    ASSERT(element_size > 0);
+    ASSERT(element_align > 0);
+    ASSERT((element_align & (element_align - 1)) == 0);
     return AlignUpChecked(element_size, element_align);
   }
 
@@ -524,7 +524,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
       return 0;
     }
 
-    REQUIRE(lhs <= std::numeric_limits<size_t>::max() / rhs);
+    ASSERT(lhs <= std::numeric_limits<size_t>::max() / rhs);
     return lhs * rhs;
   }
 
