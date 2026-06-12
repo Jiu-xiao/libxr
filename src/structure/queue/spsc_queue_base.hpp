@@ -37,8 +37,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   SPSCQueueBase(size_t element_size, size_t capacity)
       : element_size_(element_size),
         capacity_(capacity),
-        payload_alloc_align_(std::max(alignof(size_t), alignof(std::max_align_t))),
-        payload_stride_(0),
+        payload_alloc_align_(ComputeAllocAlign(alignof(std::byte))),
+        payload_stride_(ComputeStride(element_size, alignof(std::byte))),
         payloads_(nullptr),
         head_(0),
         tail_(0)
@@ -56,8 +56,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   SPSCQueueBase(size_t element_size, size_t element_align, size_t capacity)
       : element_size_(element_size),
         capacity_(capacity),
-        payload_alloc_align_(std::max(element_align, alignof(size_t))),
-        payload_stride_(0),
+        payload_alloc_align_(ComputeAllocAlign(element_align)),
+        payload_stride_(ComputeStride(element_size, element_align)),
         payloads_(nullptr),
         head_(0),
         tail_(0)
@@ -73,8 +73,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     REQUIRE(capacity_ > 0);
     REQUIRE(capacity_ <= std::numeric_limits<size_t>::max() - 1);
     REQUIRE((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
-
-    payload_stride_ = AlignUpChecked(element_size_, payload_alloc_align_);
 
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
     payloads_ = static_cast<std::byte*>(::operator new[](
@@ -492,6 +490,35 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   SPSCQueueBase& operator=(SPSCQueueBase&&);
 
   /**
+   * @brief 安全地向上对齐字节数 / Safely align one byte count upward
+   * @param size 待对齐字节数 / Byte count to align
+   * @param align 目标对齐粒度 / Target alignment granularity
+   * @return 对齐后的字节数 / Aligned byte count
+   */
+  static size_t AlignUpChecked(size_t size, size_t align)
+  {
+    REQUIRE(align > 0);
+    REQUIRE((align & (align - 1)) == 0);
+    REQUIRE(size <= std::numeric_limits<size_t>::max() - (align - 1));
+    return ((size + align - 1) / align) * align;
+  }
+
+  static size_t ComputeAllocAlign(size_t element_align)
+  {
+    REQUIRE(element_align > 0);
+    REQUIRE((element_align & (element_align - 1)) == 0);
+    return std::max(element_align, alignof(std::max_align_t));
+  }
+
+  static size_t ComputeStride(size_t element_size, size_t element_align)
+  {
+    REQUIRE(element_size > 0);
+    REQUIRE(element_align > 0);
+    REQUIRE((element_align & (element_align - 1)) == 0);
+    return AlignUpChecked(element_size, element_align);
+  }
+
+  /**
    * @brief 安全地计算两个字节数的乘积 / Safely multiply two byte counts
    * @param lhs 左操作数 / Left operand
    * @param rhs 右操作数 / Right operand
@@ -511,7 +538,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   const size_t element_size_;    ///< 单个 payload 的字节数。 Byte size of one payload.
   const size_t capacity_;        ///< 队列容量。 Queue capacity.
   const size_t payload_alloc_align_;  ///< 整体分配对齐。 Allocation alignment for the payload buffer.
-  size_t payload_stride_;        ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
+  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
   std::byte* payloads_;          ///< payload 字节缓冲区。 Byte buffer storing payloads.
 
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
