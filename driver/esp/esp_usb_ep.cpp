@@ -10,8 +10,6 @@
 #include "esp_usb.hpp"
 #include "esp_usb_dev.hpp"
 
-namespace Detail = LibXR::ESPUSBDetail;
-
 namespace LibXR
 {
 
@@ -27,7 +25,7 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
 
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
-  ep_cfg.max_packet_size = Detail::ClampPacketSize(cfg.type, cfg.max_packet_size);
+  ep_cfg.max_packet_size = ESPUSBDetail::ClampPacketSize(cfg.type, cfg.max_packet_size);
   if (ep_cfg.max_packet_size == 0U)
   {
     ep_cfg.max_packet_size = (cfg.type == Type::ISOCHRONOUS) ? 1023U : 64U;
@@ -75,7 +73,7 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
 
 void ESP32USBEndpoint::Close()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (GetDirection() == Direction::IN)
@@ -84,7 +82,7 @@ void ESP32USBEndpoint::Close()
     {
       if (dev->diepctl0_reg.epena)
       {
-        Detail::DisableInEndpointAndWait(dev);
+        ESPUSBDetail::DisableInEndpointAndWait(dev);
       }
     }
     else
@@ -92,7 +90,7 @@ void ESP32USBEndpoint::Close()
       dev->diepempmsk_reg.val &= ~(1UL << ep_num);
       if (dev->in_eps[ep_num - 1U].diepctl_reg.epena)
       {
-        Detail::DisableInEndpointAndWait(dev, ep_num);
+        ESPUSBDetail::DisableInEndpointAndWait(dev, ep_num);
       }
     }
     dev->daintmsk_reg.val &= ~(1UL << ep_num);
@@ -101,11 +99,11 @@ void ESP32USBEndpoint::Close()
   {
     if (ep_num == 0U)
     {
-      Detail::DisableOutEndpointAndWait(dev->doepctl0_reg);
+      ESPUSBDetail::DisableOutEndpointAndWait(dev->doepctl0_reg);
     }
     else
     {
-      Detail::DisableOutEndpointAndWait(dev->out_eps[ep_num - 1U].doepctl_reg);
+      ESPUSBDetail::DisableOutEndpointAndWait(dev->out_eps[ep_num - 1U].doepctl_reg);
     }
     dev->daintmsk_reg.val &= ~(1UL << (16U + ep_num));
   }
@@ -122,7 +120,7 @@ ErrorCode ESP32USBEndpoint::Stall()
     return ErrorCode::BUSY;
   }
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (is_in)
@@ -154,7 +152,7 @@ ErrorCode ESP32USBEndpoint::Stall()
 
 ErrorCode ESP32USBEndpoint::ClearStall()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (GetDirection() == Direction::IN)
@@ -249,7 +247,7 @@ void ESP32USBEndpoint::HandleInInterrupt(bool in_isr)
 {
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   usb_dwc_diepint_reg_t intr = {};
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   if (ep_num == 0U)
   {
@@ -315,7 +313,7 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
 {
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   usb_dwc_doepint_reg_t intr = {};
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   if (ep_num == 0U)
   {
@@ -360,7 +358,7 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
   {
     if (device_.DmaEnabled())
     {
-      ASSERT(Detail::CacheSyncDmaBuffer(device_.setup_packet_,
+      ASSERT(ESPUSBDetail::CacheSyncDmaBuffer(device_.setup_packet_,
                                         ESP32USBDevice::SETUP_DMA_BUFFER_BYTES, false));
     }
     device_.UpdateSetupState(device_.setup_packet_);
@@ -404,9 +402,9 @@ void ESP32USBEndpoint::HandleRxData(size_t size)
 
   if (copy_size > 0U)
   {
-    Detail::ReadFifoPacket(
-        Detail::GetEndpointFifo(
-            reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE), 0),
+    ESPUSBDetail::ReadFifoPacket(
+        ESPUSBDetail::GetEndpointFifo(
+            reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE), 0),
         dst, copy_size);
     transfer_actual_size_ += copy_size;
   }
@@ -418,12 +416,12 @@ void ESP32USBEndpoint::HandleRxData(size_t size)
 
   uint8_t sink[64] = {};
   size_t remain_drop = drop_size;
-  auto* fifo = Detail::GetEndpointFifo(
-      reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE), 0);
+  auto* fifo = ESPUSBDetail::GetEndpointFifo(
+      reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE), 0);
   while (remain_drop > 0U)
   {
     const size_t chunk = std::min(remain_drop, sizeof(sink));
-    Detail::ReadFifoPacket(fifo, sink, chunk);
+    ESPUSBDetail::ReadFifoPacket(fifo, sink, chunk);
     remain_drop -= chunk;
   }
 }
@@ -435,7 +433,7 @@ void ESP32USBEndpoint::ObserveDmaRxStatus(uint8_t pktsts, size_t size)
     return;
   }
 
-  if (pktsts != Detail::RX_STATUS_DATA)
+  if (pktsts != ESPUSBDetail::RX_STATUS_DATA)
   {
     return;
   }
@@ -459,7 +457,7 @@ void ESP32USBEndpoint::ResetTransferState()
 
 bool ESP32USBEndpoint::EnsureDmaShadow(size_t size)
 {
-  const size_t need = Detail::AlignUp(size, Detail::USB_DMA_ALIGNMENT);
+  const size_t need = ESPUSBDetail::AlignUp(size, ESPUSBDetail::USB_DMA_ALIGNMENT);
   if (need == 0U)
   {
     return true;
@@ -471,7 +469,7 @@ bool ESP32USBEndpoint::EnsureDmaShadow(size_t size)
   }
 
   void* new_buffer =
-      heap_caps_aligned_alloc(Detail::USB_DMA_ALIGNMENT, need, Detail::DMA_MEMORY_CAPS);
+      heap_caps_aligned_alloc(ESPUSBDetail::USB_DMA_ALIGNMENT, need, ESPUSBDetail::DMA_MEMORY_CAPS);
   if (new_buffer == nullptr)
   {
     return false;
@@ -500,15 +498,15 @@ bool ESP32USBEndpoint::PrepareTransferBuffer(size_t size)
 
   if (GetDirection() == Direction::IN)
   {
-    if (Detail::CanUseDirectInDmaBuffer(transfer_buffer_, size))
+    if (ESPUSBDetail::CanUseDirectInDmaBuffer(transfer_buffer_, size))
     {
-      return Detail::CacheSyncDmaBuffer(transfer_hw_buffer_, size, true, true);
+      return ESPUSBDetail::CacheSyncDmaBuffer(transfer_hw_buffer_, size, true, true);
     }
   }
   else
   {
     auto buffer = GetBuffer();
-    if (Detail::CanUseDirectOutDmaBuffer(buffer.addr_, buffer.size_))
+    if (ESPUSBDetail::CanUseDirectOutDmaBuffer(buffer.addr_, buffer.size_))
     {
       transfer_direct_sync_size_ = buffer.size_;
       return true;
@@ -527,12 +525,12 @@ bool ESP32USBEndpoint::PrepareTransferBuffer(size_t size)
   {
     ASSERT(transfer_buffer_ != nullptr);
     std::memcpy(transfer_hw_buffer_, transfer_buffer_, size);
-    return Detail::CacheSyncDmaBuffer(
-        transfer_hw_buffer_, Detail::AlignUp(size, Detail::USB_DMA_ALIGNMENT), true);
+    return ESPUSBDetail::CacheSyncDmaBuffer(
+        transfer_hw_buffer_, ESPUSBDetail::AlignUp(size, ESPUSBDetail::USB_DMA_ALIGNMENT), true);
   }
 
-  return Detail::CacheSyncDmaBuffer(
-      transfer_hw_buffer_, Detail::AlignUp(size, Detail::USB_DMA_ALIGNMENT), false);
+  return ESPUSBDetail::CacheSyncDmaBuffer(
+      transfer_hw_buffer_, ESPUSBDetail::AlignUp(size, ESPUSBDetail::USB_DMA_ALIGNMENT), false);
 }
 
 bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
@@ -552,14 +550,14 @@ bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
     {
       return true;
     }
-    return Detail::CacheSyncDmaBuffer(transfer_hw_buffer_, transfer_direct_sync_size_,
+    return ESPUSBDetail::CacheSyncDmaBuffer(transfer_hw_buffer_, transfer_direct_sync_size_,
                                       false);
   }
 
   ASSERT(transfer_buffer_ != nullptr);
 
-  if (!Detail::CacheSyncDmaBuffer(transfer_hw_buffer_,
-                                  Detail::AlignUp(actual_size, Detail::USB_DMA_ALIGNMENT),
+  if (!ESPUSBDetail::CacheSyncDmaBuffer(transfer_hw_buffer_,
+                                  ESPUSBDetail::AlignUp(actual_size, ESPUSBDetail::USB_DMA_ALIGNMENT),
                                   false))
   {
     return false;
@@ -571,7 +569,7 @@ bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
 
 size_t ESP32USBEndpoint::GetRemainingTransferSize() const
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
   if (GetDirection() == Direction::IN)
@@ -604,7 +602,7 @@ size_t ESP32USBEndpoint::GetCompletedTransferSize() const
 
 void ESP32USBEndpoint::ActivateHardwareEndpoint()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   auto& cfg = GetConfig();
 
@@ -613,7 +611,7 @@ void ESP32USBEndpoint::ActivateHardwareEndpoint()
     if (ep_num == 0U)
     {
       usb_dwc_diepctl0_reg_t ctl = {};
-      ctl.mps = Detail::EncodeEp0Mps(cfg.max_packet_size);
+      ctl.mps = ESPUSBDetail::EncodeEp0Mps(cfg.max_packet_size);
       ctl.usbactep = 1;
       ctl.eptype = static_cast<uint32_t>(cfg.type);
       ctl.txfnum = 0;
@@ -636,7 +634,7 @@ void ESP32USBEndpoint::ActivateHardwareEndpoint()
     if (ep_num == 0U)
     {
       usb_dwc_doepctl0_reg_t ctl = {};
-      ctl.mps = Detail::EncodeEp0Mps(cfg.max_packet_size);
+      ctl.mps = ESPUSBDetail::EncodeEp0Mps(cfg.max_packet_size);
       ctl.usbactep = 1;
       ctl.eptype = static_cast<uint32_t>(cfg.type);
       dev->doepctl0_reg.val = ctl.val;
@@ -656,9 +654,9 @@ void ESP32USBEndpoint::ActivateHardwareEndpoint()
 
 void ESP32USBEndpoint::ProgramTransfer(size_t size)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
-  const uint16_t pkt_count = Detail::PacketCount(size, MaxPacketSize());
+  const uint16_t pkt_count = ESPUSBDetail::PacketCount(size, MaxPacketSize());
 
   if (GetDirection() == Direction::IN)
   {
@@ -671,7 +669,7 @@ void ESP32USBEndpoint::ProgramTransfer(size_t size)
         dev->diepdma0_reg.dmaaddr =
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(transfer_hw_buffer_));
       }
-      Detail::StartEndpointTransfer(dev->diepctl0_reg);
+      ESPUSBDetail::StartEndpointTransfer(dev->diepctl0_reg);
     }
     else
     {
@@ -684,7 +682,7 @@ void ESP32USBEndpoint::ProgramTransfer(size_t size)
         dev->in_eps[ep_num - 1U].diepdma_reg.dmaddr =
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(transfer_hw_buffer_));
       }
-      Detail::StartEndpointTransfer(dev->in_eps[ep_num - 1U].diepctl_reg);
+      ESPUSBDetail::StartEndpointTransfer(dev->in_eps[ep_num - 1U].diepctl_reg);
     }
 
     if (!device_.DmaEnabled() && (size > 0U))
@@ -709,7 +707,7 @@ void ESP32USBEndpoint::ProgramTransfer(size_t size)
         dev->doepdma0_reg.dmaaddr =
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(transfer_hw_buffer_));
       }
-      Detail::StartEndpointTransfer(dev->doepctl0_reg);
+      ESPUSBDetail::StartEndpointTransfer(dev->doepctl0_reg);
     }
     else
     {
@@ -722,7 +720,7 @@ void ESP32USBEndpoint::ProgramTransfer(size_t size)
         dev->out_eps[ep_num - 1U].doepdma_reg.dmaaddr =
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(transfer_hw_buffer_));
       }
-      Detail::StartEndpointTransfer(dev->out_eps[ep_num - 1U].doepctl_reg);
+      ESPUSBDetail::StartEndpointTransfer(dev->out_eps[ep_num - 1U].doepctl_reg);
     }
   }
 }
@@ -734,9 +732,9 @@ void ESP32USBEndpoint::WriteMoreTxData()
     return;
   }
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
-  const volatile uint32_t* fifo = Detail::GetEndpointFifo(dev, ep_num);
+  const volatile uint32_t* fifo = ESPUSBDetail::GetEndpointFifo(dev, ep_num);
 
   while (transfer_queued_size_ < transfer_request_size_)
   {
@@ -757,7 +755,7 @@ void ESP32USBEndpoint::WriteMoreTxData()
       break;
     }
 
-    Detail::WriteFifoPacket(const_cast<volatile uint32_t*>(fifo),
+    ESPUSBDetail::WriteFifoPacket(const_cast<volatile uint32_t*>(fifo),
                             transfer_buffer_ + transfer_queued_size_, packet_size);
     transfer_queued_size_ += packet_size;
   }

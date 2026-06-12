@@ -16,8 +16,6 @@
 #include "esp_usb_ep.hpp"
 #include "soc/interrupts.h"
 
-namespace Detail = LibXR::ESPUSBDetail;
-
 namespace LibXR
 {
 
@@ -94,7 +92,7 @@ ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context c
 {
   if (context == USB::DeviceCore::Context::SETUP_BEFORE_STATUS)
   {
-    auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+    auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
     dev->dcfg_reg.devaddr = address;
   }
   return ErrorCode::OK;
@@ -118,7 +116,7 @@ void ESP32USBDevice::Start(bool)
     USB::DeviceCore::Init(false);
   }
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->dctl_reg.sftdiscon = 0;
   dev->gahbcfg_reg.glbllntrmsk = 1;
   if (runtime_.intr_handle != nullptr)
@@ -130,7 +128,7 @@ void ESP32USBDevice::Start(bool)
 
 void ESP32USBDevice::Stop(bool)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->gahbcfg_reg.glbllntrmsk = 0;
   dev->gintmsk_reg.val = 0;
   if (runtime_.intr_handle != nullptr)
@@ -210,7 +208,7 @@ void ESP32USBDevice::EnsureRomUsbCleaned()
 
 void ESP32USBDevice::InitializeCore()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   dev->gahbcfg_reg.glbllntrmsk = 0;
 
@@ -250,7 +248,7 @@ void ESP32USBDevice::InitializeCore()
   dev->gintsts_reg.val = 0xFFFFFFFFU;
   dev->gotgint_reg.val = 0xFFFFFFFFU;
   dev->gintmsk_reg.val = 0U;
-  dev->gahbcfg_reg.hbstlen = Detail::DMA_BURST_INCR4;
+  dev->gahbcfg_reg.hbstlen = ESPUSBDetail::DMA_BURST_INCR4;
   dev->gahbcfg_reg.dmaen = DmaEnabled() ? 1U : 0U;
   dev->gahbcfg_reg.nptxfemplvl = 1;
   dev->gahbcfg_reg.ptxfemplvl = 1;
@@ -268,7 +266,7 @@ void ESP32USBDevice::InitializeCore()
 
 void ESP32USBDevice::ClearTxFifoRegisters()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->gnptxfsiz_reg.val = 0U;
   const size_t tx_fifo_reg_count =
       sizeof(dev->dieptxf_regs) / sizeof(dev->dieptxf_regs[0]);
@@ -280,8 +278,8 @@ void ESP32USBDevice::ClearTxFifoRegisters()
 
 void ESP32USBDevice::FlushFifos()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
-  dev->grstctl_reg.txfnum = Detail::FLUSH_ALL_TX_FIFO;
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  dev->grstctl_reg.txfnum = ESPUSBDetail::FLUSH_ALL_TX_FIFO;
   dev->grstctl_reg.txfflsh = 1;
   while (dev->grstctl_reg.txfflsh)
   {
@@ -294,10 +292,10 @@ void ESP32USBDevice::FlushFifos()
 
 void ESP32USBDevice::ResetFifoState()
 {
-  fifo_state_.depth_words = Detail::GetHardwareFifoDepthWords();
+  fifo_state_.depth_words = ESPUSBDetail::GetHardwareFifoDepthWords();
   ASSERT(fifo_state_.depth_words > 0U);
   fifo_state_.rx_words =
-      Detail::CalcConfiguredRxFifoWords(64U, ENDPOINT_COUNT, DmaEnabled());
+      ESPUSBDetail::CalcConfiguredRxFifoWords(64U, ENDPOINT_COUNT, DmaEnabled());
   fifo_state_.tx_next_words = fifo_state_.rx_words;
   std::memset(fifo_state_.tx_words, 0, sizeof(fifo_state_.tx_words));
   std::memset(fifo_state_.tx_bound, 0, sizeof(fifo_state_.tx_bound));
@@ -309,7 +307,7 @@ void ESP32USBDevice::ResetDeviceState()
   ResetFifoState();
   ResetControlState();
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->grxfsiz_reg.rxfdep = fifo_state_.rx_words;
   ClearTxFifoRegisters();
 }
@@ -331,14 +329,14 @@ void ESP32USBDevice::ResetEndpointHardwareState()
 
 void ESP32USBDevice::ReloadSetupPacketCount()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->doeptsiz0_reg.val = 0U;
   if (DmaEnabled())
   {
     dev->doeptsiz0_reg.xfersize = 3U * SETUP_PACKET_BYTES;
     dev->doeptsiz0_reg.pktcnt = 1U;
     dev->doeptsiz0_reg.supcnt = 3U;
-    ASSERT(Detail::CacheSyncDmaBuffer(setup_packet_, SETUP_DMA_BUFFER_BYTES, false));
+    ASSERT(ESPUSBDetail::CacheSyncDmaBuffer(setup_packet_, SETUP_DMA_BUFFER_BYTES, false));
     dev->doepdma0_reg.dmaaddr =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(setup_packet_));
     dev->doepctl0_reg.cnak = 1;
@@ -366,7 +364,7 @@ void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
 
 void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   for (uint32_t guard = 0; guard < INTERRUPT_DISPATCH_GUARD; ++guard)
   {
     usb_dwc_gintsts_reg_t pending = {};
@@ -387,8 +385,8 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
     {
       dev->gintsts_reg.enumdone = 1;
       const uint32_t enum_speed = dev->dsts_reg.enumspd;
-      if (enum_speed != Detail::ENUM_SPEED_FULL_30_TO_60_MHZ &&
-          enum_speed != Detail::ENUM_SPEED_FULL_48_MHZ)
+      if (enum_speed != ESPUSBDetail::ENUM_SPEED_FULL_30_TO_60_MHZ &&
+          enum_speed != ESPUSBDetail::ENUM_SPEED_FULL_48_MHZ)
       {
         ASSERT(false);
       }
@@ -434,17 +432,17 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 
 void ESP32USBDevice::HandleBusReset(bool in_isr)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   for (uint8_t i = 0; i < ENDPOINT_COUNT; ++i)
   {
     if (i == 0U)
     {
-      Detail::DisableOutEndpointAndWait(dev->doepctl0_reg);
+      ESPUSBDetail::DisableOutEndpointAndWait(dev->doepctl0_reg);
     }
     else
     {
-      Detail::DisableOutEndpointAndWait(dev->out_eps[i - 1U].doepctl_reg);
+      ESPUSBDetail::DisableOutEndpointAndWait(dev->out_eps[i - 1U].doepctl_reg);
     }
   }
 
@@ -500,7 +498,7 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
 
 void ESP32USBDevice::HandleEndpointInterrupt(bool in_isr, bool in_dir)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint32_t daint = dev->daint_reg.val & dev->daintmsk_reg.val;
   const uint32_t bits = in_dir ? (daint & 0xFFFFU) : ((daint >> 16U) & 0xFFFFU);
 
@@ -531,7 +529,7 @@ void ESP32USBDevice::HandleEndpointInterrupt(bool in_isr, bool in_dir)
 
 void ESP32USBDevice::HandleRxFifoLevel()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   usb_dwc_grxstsp_reg_t status = {};
   status.val = dev->grxstsp_reg.val;
   const uint8_t ep_num = static_cast<uint8_t>(status.chnum);
@@ -548,20 +546,20 @@ void ESP32USBDevice::HandleRxFifoLevel()
 
   switch (status.pktsts)
   {
-    case Detail::RX_STATUS_GLOBAL_OUT_NAK:
+    case ESPUSBDetail::RX_STATUS_GLOBAL_OUT_NAK:
       break;
 
-    case Detail::RX_STATUS_SETUP_DATA:
-      Detail::ReadFifoPacket(Detail::GetEndpointFifo(dev, 0), setup_packet_,
+    case ESPUSBDetail::RX_STATUS_SETUP_DATA:
+      ESPUSBDetail::ReadFifoPacket(ESPUSBDetail::GetEndpointFifo(dev, 0), setup_packet_,
                              sizeof(setup_packet_));
       UpdateSetupState(setup_packet_);
       break;
 
-    case Detail::RX_STATUS_SETUP_DONE:
+    case ESPUSBDetail::RX_STATUS_SETUP_DONE:
       ReloadSetupPacketCount();
       break;
 
-    case Detail::RX_STATUS_DATA:
+    case ESPUSBDetail::RX_STATUS_DATA:
     {
       USB::Endpoint* ep = (ep_num < ENDPOINT_COUNT) ? endpoint_map_.out[ep_num] : nullptr;
       if (ep != nullptr)
@@ -571,12 +569,12 @@ void ESP32USBDevice::HandleRxFifoLevel()
       else
       {
         uint8_t sink[64] = {};
-        Detail::ReadFifoPacket(Detail::GetEndpointFifo(dev, 0), sink, status.bcnt);
+        ESPUSBDetail::ReadFifoPacket(ESPUSBDetail::GetEndpointFifo(dev, 0), sink, status.bcnt);
       }
       break;
     }
 
-    case Detail::RX_STATUS_TRANSFER_COMPLETE:
+    case ESPUSBDetail::RX_STATUS_TRANSFER_COMPLETE:
     default:
       break;
   }
@@ -585,7 +583,7 @@ void ESP32USBDevice::HandleRxFifoLevel()
 bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool is_bulk,
                                     uint16_t& fifo_words)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t max_in_ep_num =
       static_cast<uint8_t>(sizeof(dev->dieptxf_regs) / sizeof(dev->dieptxf_regs[0]));
 
@@ -596,7 +594,7 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
     return false;
   }
 
-  const uint16_t words = Detail::CalcTxFifoWords(packet_size, DmaEnabled());
+  const uint16_t words = ESPUSBDetail::CalcTxFifoWords(packet_size, DmaEnabled());
   if (!fifo_state_.tx_bound[ep_num] && (fifo_state_.allocated_in >= IN_ENDPOINT_LIMIT))
   {
     return false;
@@ -605,7 +603,7 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
   for (uint8_t index = 0U; index <= ep_num; ++index)
   {
     const uint16_t requested_words =
-        (index == ep_num) ? words : Detail::ESP32_SX_FS_MIN_TX_FIFO_WORDS;
+        (index == ep_num) ? words : ESPUSBDetail::ESP32_SX_FS_MIN_TX_FIFO_WORDS;
     if (fifo_state_.tx_words[index] != 0U)
     {
       if (fifo_state_.tx_words[index] < requested_words)
@@ -623,7 +621,7 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
     }
 
     const uint32_t tx_fifo_reg =
-        Detail::PackTxFifoSizeReg(fifo_state_.tx_next_words, requested_words);
+        ESPUSBDetail::PackTxFifoSizeReg(fifo_state_.tx_next_words, requested_words);
     if (index == 0U)
     {
       dev->gnptxfsiz_reg.val = tx_fifo_reg;
@@ -648,9 +646,9 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
 
 bool ESP32USBDevice::EnsureRxFifo(uint16_t packet_size)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint16_t needed =
-      Detail::CalcConfiguredRxFifoWords(packet_size, ENDPOINT_COUNT, DmaEnabled());
+      ESPUSBDetail::CalcConfiguredRxFifoWords(packet_size, ENDPOINT_COUNT, DmaEnabled());
   if (needed <= fifo_state_.rx_words)
   {
     return true;
