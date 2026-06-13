@@ -20,6 +20,8 @@ namespace LibXR
 class DoubleBuffer
 {
  public:
+  DoubleBuffer() = default;
+
   /**
    * @brief 构造函数，使用连续内存构造两个缓冲区
    *        Constructs a double buffer using one continuous memory block
@@ -27,6 +29,8 @@ class DoubleBuffer
    * @param raw_data 连续内存区，大小必须为两个缓冲区之和 / The raw memory to be split
    */
   explicit DoubleBuffer(const LibXR::RawData& raw_data);
+
+  void Init(const LibXR::RawData& raw_data);
 
   /**
    * @brief 获取当前正在使用的缓冲区指针
@@ -140,8 +144,8 @@ class DoubleBuffer
   void SetActiveBlock(bool block) { active_ = block ? 1 : 0; }
 
  private:
-  uint8_t* buffer_[2];  ///< 双缓冲区指针 / Double buffer pointers
-  const size_t SIZE;    ///< 单个缓冲区大小 / Size of each buffer
+  uint8_t* buffer_[2] = {nullptr, nullptr};  ///< 双缓冲区指针 / Double buffer pointers
+  size_t size_ = 0;                          ///< 单个缓冲区大小 / Size of each buffer
   int active_ = 0;      ///< 当前活动缓冲区编号 / Index of active buffer
   bool pending_valid_ =
       false;                ///< 标记备用区是否准备好 / Whether pending buffer is ready

@@ -2,8 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <new>
-
 #include "double_buffer.hpp"
 #include "flag.hpp"
 #include "libxr_assert.hpp"
@@ -23,35 +21,31 @@ class ESPTxDoubleBuffer
     ASSERT((storage.size_ % 2U) == 0U);
     ASSERT(storage.size_ > 0U);
 
-    bytes_ = new (double_buffer_storage_) DoubleBuffer(storage);
+    bytes_.Init(storage);
     Reset();
   }
 
   void Reset()
   {
-    ASSERT(bytes_ != nullptr);
     active_block_ = false;
-    bytes_->SetActiveBlock(false);
+    bytes_.SetActiveBlock(false);
     ClearActive();
     ClearPending();
   }
 
   uint8_t* ActiveBuffer() const
   {
-    ASSERT(bytes_ != nullptr);
-    return bytes_->ActiveBuffer();
+    return bytes_.ActiveBuffer();
   }
 
   uint8_t* PendingBuffer() const
   {
-    ASSERT(bytes_ != nullptr);
-    return bytes_->PendingBuffer();
+    return bytes_.PendingBuffer();
   }
 
   size_t BufferSize() const
   {
-    ASSERT(bytes_ != nullptr);
-    return bytes_->Size();
+    return bytes_.Size();
   }
 
   bool HasActive() const { return active_valid_; }
@@ -94,9 +88,8 @@ class ESPTxDoubleBuffer
       return false;
     }
 
-    ASSERT(bytes_ != nullptr);
     active_block_ = !active_block_;
-    bytes_->SetActiveBlock(active_block_);
+    bytes_.SetActiveBlock(active_block_);
     active_length_ = pending_length_;
     active_offset_ = 0U;
     active_info_ = pending_info_;
@@ -122,8 +115,7 @@ class ESPTxDoubleBuffer
   }
 
  private:
-  alignas(DoubleBuffer) uint8_t double_buffer_storage_[sizeof(DoubleBuffer)] = {};
-  DoubleBuffer* bytes_ = nullptr;
+  DoubleBuffer bytes_{};
   bool active_block_ = false;
   size_t active_length_ = 0U;
   size_t pending_length_ = 0U;

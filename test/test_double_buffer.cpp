@@ -8,6 +8,10 @@ void test_double_buffer()
   uint8_t buff[128] = {};  // 预分配大缓冲区
   LibXR::RawData raw(buff, sizeof(buff));
 
+  LibXR::DoubleBuffer init_later;
+  init_later.Init(raw);
+  ASSERT(init_later.Size() == 64);
+
   LibXR::DoubleBuffer buffer(raw);
 
   ASSERT(buffer.Size() == 64);  // 被平分成两块
