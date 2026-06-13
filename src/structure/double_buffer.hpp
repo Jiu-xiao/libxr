@@ -1,10 +1,10 @@
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
+#include "libxr_assert.hpp"
 #include "libxr_type.hpp"  // RawData
 
 namespace LibXR
