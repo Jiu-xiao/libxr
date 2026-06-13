@@ -5,16 +5,20 @@
 
 void test_double_buffer()
 {
-  uint8_t buff[128] = {};  // 预分配大缓冲区
+  alignas(size_t) uint8_t buff[128] = {};  // 预分配大缓冲区
   LibXR::RawData raw(buff, sizeof(buff));
 
   LibXR::DoubleBuffer init_later;
   init_later.Init(raw);
   ASSERT(init_later.Size() == 64);
+  ASSERT((reinterpret_cast<uintptr_t>(init_later.ActiveBuffer()) % alignof(size_t)) == 0U);
+  ASSERT((reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) == 0U);
 
   LibXR::DoubleBuffer buffer(raw);
 
   ASSERT(buffer.Size() == 64);  // 被平分成两块
+  ASSERT((reinterpret_cast<uintptr_t>(buffer.ActiveBuffer()) % alignof(size_t)) == 0U);
+  ASSERT((reinterpret_cast<uintptr_t>(buffer.PendingBuffer()) % alignof(size_t)) == 0U);
 
   // 1. 检查初始状态
   ASSERT(buffer.HasPending() == false);

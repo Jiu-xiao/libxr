@@ -11,9 +11,13 @@ DoubleBuffer::DoubleBuffer(const LibXR::RawData& raw_data)
 
 void DoubleBuffer::Init(const LibXR::RawData& raw_data)
 {
+  constexpr size_t ALIGN = alignof(size_t);
+
   assert(raw_data.addr_ != nullptr);
   assert((raw_data.size_ % 2U) == 0U);
   assert(raw_data.size_ > 0U);
+  assert((reinterpret_cast<uintptr_t>(raw_data.addr_) % ALIGN) == 0U);
+  assert((raw_data.size_ % (2U * ALIGN)) == 0U);
 
   size_ = raw_data.size_ / 2U;
   buffer_[0] = static_cast<uint8_t*>(raw_data.addr_);
