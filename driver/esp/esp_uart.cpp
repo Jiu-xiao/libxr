@@ -95,7 +95,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   ASSERT(rx_isr_buffer_ != nullptr);
   ASSERT(tx_storage_ != nullptr);
 
-  tx_double_buffer_.Init({tx_storage_, tx_buffer_size * 2U});
+  tx_dma_buffer_.Init({tx_storage_, tx_buffer_size * 2U});
 
   _read_port = ReadFun;
   _write_port = WriteFun;
@@ -207,7 +207,7 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
 
   // Align with ST/CH SetConfig semantics: if TX was in-flight during
   // reconfiguration, keep transfer progression instead of surfacing BUSY.
-  if (tx_busy_.IsSet() && tx_double_buffer_.HasActive())
+  if (tx_busy_.IsSet() && tx_active_valid_)
   {
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
     if (dma_backend_enabled_)
@@ -395,26 +395,34 @@ ErrorCode ESP32UART::ConfigurePins()
 
 void IRAM_ATTR ESP32UART::ClearActiveTx()
 {
-  tx_double_buffer_.ClearActive();
+  tx_active_length_ = 0U;
+  tx_active_offset_ = 0U;
+  tx_active_info_ = {};
+  tx_active_valid_ = false;
 }
 
 void IRAM_ATTR ESP32UART::ClearPendingTx()
 {
-  tx_double_buffer_.ClearPending();
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
+  {
+    tx_dma_buffer_.Reset();
+  }
+#endif
 }
 
 bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
 {
   if (!StartActiveTransfer(in_isr))
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_double_buffer_.ActiveInfo());
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
     ClearActiveTx();
     return false;
   }
 
   // Align with STM/CH semantics: once the active write is kicked to HW,
   // WritePort owns the completion notification and the ISR only advances queues.
-  write_port_->Finish(in_isr, ErrorCode::OK, tx_double_buffer_.ActiveInfo());
+  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
   return true;
 }
 
@@ -425,17 +433,19 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
     return ErrorCode::PENDING;
   }
 
-  if (StartPendingTxIfIdle(in_isr))
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_ && StartPendingTxIfIdle(in_isr))
   {
     return ErrorCode::PENDING;
   }
+#endif
 
-  if (!tx_double_buffer_.HasActive())
+  if (!tx_active_valid_)
   {
     (void)LoadActiveTxFromQueue(in_isr);
   }
 
-  if (!tx_busy_.IsSet() && tx_double_buffer_.HasActive())
+  if (!tx_busy_.IsSet() && tx_active_valid_)
   {
     if (!StartActiveTransfer(in_isr))
     {
@@ -446,11 +456,13 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
     return ErrorCode::OK;
   }
 
-  if (!tx_double_buffer_.HasPending())
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_ && !tx_dma_buffer_.HasPending())
   {
     (void)LoadPendingTxFromQueue(in_isr);
     (void)StartPendingTxIfIdle(in_isr);
   }
+#endif
 
   return ErrorCode::PENDING;
 }
@@ -461,13 +473,31 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 
   size_t active_length = 0U;
   WriteInfoBlock active_info = {};
-  if (!DequeueTxToBuffer(tx_double_buffer_.ActiveBuffer(), active_length, active_info,
-                         in_isr))
+  uint8_t* active_buffer = nullptr;
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
+  {
+    active_buffer = tx_dma_buffer_.ActiveBuffer();
+  }
+#endif
+  if (!DequeueTxToBuffer(active_buffer, active_length, active_info, in_isr))
   {
     return false;
   }
 
-  tx_double_buffer_.LoadActive(active_length, active_info);
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
+  {
+    tx_dma_buffer_.SetActiveLength(active_length);
+  }
+  else
+#endif
+  {
+    tx_active_length_ = active_length;
+  }
+  tx_active_offset_ = 0U;
+  tx_active_info_ = active_info;
+  tx_active_valid_ = true;
   return true;
 }
 
@@ -475,42 +505,60 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 {
   (void)in_isr;
 
-  if (tx_double_buffer_.HasPending())
+#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
+  return false;
+#else
+  if (!dma_backend_enabled_ || tx_dma_buffer_.HasPending())
   {
     return false;
   }
 
   size_t pending_length = 0U;
   WriteInfoBlock pending_info = {};
-  if (!DequeueTxToBuffer(tx_double_buffer_.PendingBuffer(), pending_length,
-                         pending_info, in_isr))
+  if (!DequeueTxToBuffer(tx_dma_buffer_.PendingBuffer(), pending_length, pending_info,
+                         in_isr))
   {
     return false;
   }
 
-  tx_double_buffer_.LoadPending(pending_length, pending_info);
+  tx_dma_buffer_.SetPendingLength(pending_length);
+  tx_dma_buffer_.EnablePending();
   return true;
+#endif
 }
 
 bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
 {
-  if (tx_busy_.IsSet() || tx_double_buffer_.HasActive() ||
-      !tx_double_buffer_.HasPending())
+#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
+  (void)in_isr;
+  return false;
+#else
+  if (!dma_backend_enabled_)
+  {
+    (void)in_isr;
+    return false;
+  }
+
+  if (tx_busy_.IsSet() || tx_active_valid_ || !tx_dma_buffer_.HasPending())
   {
     return false;
   }
 
-  if (tx_busy_.IsSet() || tx_double_buffer_.HasActive())
-  {
-    return false;
-  }
+  const size_t pending_length = tx_dma_buffer_.GetPendingLength();
+  tx_dma_buffer_.Switch();
+  tx_dma_buffer_.SetActiveLength(pending_length);
 
-  if (!tx_double_buffer_.PromotePending())
+  if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
   {
+    ASSERT(false);
     return false;
   }
+  tx_active_length_ = pending_length;
+  tx_active_offset_ = 0U;
+  tx_active_valid_ = true;
 
   return StartAndReportActive(in_isr);
+#endif
 }
 
 bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
@@ -525,7 +573,14 @@ bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
     return false;
   }
 
-  if (peek_info.data.size_ > tx_double_buffer_.BufferSize())
+  size_t max_size = write_port_->queue_data_->MaxSize();
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
+  {
+    max_size = tx_dma_buffer_.Size();
+  }
+#endif
+  if (peek_info.data.size_ > max_size)
   {
     ASSERT(false);
     return false;
@@ -552,7 +607,7 @@ bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
 
 bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
 {
-  if (!tx_double_buffer_.HasActive())
+  if (!tx_active_valid_)
   {
     return false;
   }
@@ -562,7 +617,7 @@ bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
     return true;
   }
 
-  tx_double_buffer_.SetActiveOffset(0U);
+  tx_active_offset_ = 0U;
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (dma_backend_enabled_)
@@ -618,25 +673,58 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   ClearActiveTx();
 
-  if ((result != ErrorCode::OK) && tx_double_buffer_.HasPending())
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_double_buffer_.PendingInfo());
-    ClearPendingTx();
+    if ((result != ErrorCode::OK) && tx_dma_buffer_.HasPending())
+    {
+      WriteInfoBlock dropped_info = {};
+      if (write_port_->queue_info_->Pop(dropped_info) == ErrorCode::OK)
+      {
+        write_port_->Finish(in_isr, ErrorCode::FAILED, dropped_info);
+      }
+      else
+      {
+        ASSERT(false);
+      }
+      tx_dma_buffer_.Reset();
+    }
+
+    if (result != ErrorCode::OK)
+    {
+      return;
+    }
+
+    if (StartPendingTxIfIdle(in_isr))
+    {
+      if (!tx_dma_buffer_.HasPending())
+      {
+        (void)LoadPendingTxFromQueue(in_isr);
+      }
+      return;
+    }
+
+    if (!tx_dma_buffer_.HasPending())
+    {
+      (void)LoadPendingTxFromQueue(in_isr);
+    }
+
+    if (!tx_busy_.IsSet())
+    {
+      (void)StartPendingTxIfIdle(in_isr);
+    }
+    return;
   }
+#endif
 
   if (result != ErrorCode::OK)
   {
-    ClearPendingTx();
     return;
   }
 
-  if (StartPendingTxIfIdle(in_isr))
+  if (LoadActiveTxFromQueue(in_isr))
   {
-    if (!tx_double_buffer_.HasPending())
-    {
-      (void)LoadPendingTxFromQueue(in_isr);
-      (void)StartPendingTxIfIdle(in_isr);
-    }
+    (void)StartAndReportActive(in_isr);
   }
 }
 

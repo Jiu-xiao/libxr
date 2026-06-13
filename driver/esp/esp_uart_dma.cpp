@@ -208,8 +208,8 @@ ErrorCode ESP32UART::InitDmaBackend()
       .item_alignment = 4,
       .flags = {},
   };
-  tx_dma_buffer_addr_[0] = tx_double_buffer_.ActiveBuffer();
-  tx_dma_buffer_addr_[1] = tx_double_buffer_.PendingBuffer();
+  tx_dma_buffer_addr_[0] = tx_dma_buffer_.ActiveBuffer();
+  tx_dma_buffer_addr_[1] = tx_dma_buffer_.PendingBuffer();
 
   for (int i = 0; i < 2; ++i)
   {
@@ -357,13 +357,13 @@ ErrorCode ESP32UART::InitDmaBackend()
 
 bool IRAM_ATTR ESP32UART::StartDmaTx()
 {
-  if ((tx_dma_channel_ == nullptr) || !tx_double_buffer_.HasActive())
+  if ((tx_dma_channel_ == nullptr) || !tx_active_valid_)
   {
     return false;
   }
 
-  uint8_t* const active_buffer = tx_double_buffer_.ActiveBuffer();
-  const size_t active_len = tx_double_buffer_.ActiveLength();
+  uint8_t* const active_buffer = tx_dma_buffer_.ActiveBuffer();
+  const size_t active_len = tx_active_length_;
   if ((active_buffer == nullptr) || (active_len == 0) ||
       (active_len > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM))
   {
