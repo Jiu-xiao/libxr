@@ -8,6 +8,7 @@
 
 #include "driver/gpio.h"
 #include "esp_intr_alloc.h"
+#include "esp_tx_double_buffer.hpp"
 #include "flag.hpp"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
@@ -144,21 +145,9 @@ class ESP32UART : public UART
   size_t rx_isr_buffer_size_ = 0;
 
   uint8_t* tx_storage_ = nullptr;
-  size_t tx_storage_size_ = 0;
-  size_t tx_buffer_size_ = 0;
-  uint8_t* tx_active_buffer_ = nullptr;
-  uint8_t* tx_pending_buffer_ = nullptr;
-  size_t tx_active_length_ = 0;
-  size_t tx_pending_length_ = 0;
-  size_t tx_active_offset_ = 0;
-
-  WriteInfoBlock tx_active_info_ = {};
-  WriteInfoBlock tx_pending_info_ = {};
+  ESPTxDoubleBuffer tx_double_buffer_;
   Flag::Plain tx_busy_;
   Flag::Plain in_tx_isr_;
-  bool tx_active_valid_ = false;
-  Flag::Atomic tx_pending_claimed_;
-  Flag::Atomic tx_pending_valid_;
 
   bool uart_hw_enabled_ = false;
   uart_hal_context_t uart_hal_ = {};

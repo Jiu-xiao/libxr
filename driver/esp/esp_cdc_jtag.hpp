@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "esp_intr_alloc.h"
+#include "esp_tx_double_buffer.hpp"
 #include "flag.hpp"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
@@ -63,21 +64,10 @@ class ESP32CDCJtag : public UART
 
   UART::Configuration config_;
   uint8_t* tx_slot_storage_ = nullptr;
-  size_t tx_slot_size_ = 0;
-  uint8_t* tx_slot_a_ = nullptr;
-  uint8_t* tx_slot_b_ = nullptr;
+  ESPTxDoubleBuffer tx_double_buffer_;
   intr_handle_t intr_handle_ = nullptr;
   bool intr_installed_ = false;
   bool hw_inited_ = false;
-  const uint8_t* tx_active_ptr_ = nullptr;
-  size_t tx_active_size_ = 0;
-  size_t tx_active_offset_ = 0;
-  WriteInfoBlock tx_active_info_ = {};
-  bool tx_active_valid_ = false;
-  const uint8_t* tx_pending_ptr_ = nullptr;
-  size_t tx_pending_size_ = 0;
-  WriteInfoBlock tx_pending_info_ = {};
-  Flag::Atomic tx_pending_valid_{};
   Flag::Atomic tx_busy_{};
   Flag::Plain in_tx_isr_;
 

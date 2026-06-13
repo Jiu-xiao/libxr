@@ -51,7 +51,7 @@ ErrorCode ESP32UART::InstallUartIsr()
 
 void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 {
-  if (!tx_active_valid_)
+  if (!tx_double_buffer_.HasActive())
   {
     return;
   }
@@ -59,17 +59,18 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (dma_backend_enabled_)
   {
-    while (tx_active_offset_ < tx_active_length_)
+    while (tx_double_buffer_.ActiveOffset() < tx_double_buffer_.ActiveLength())
     {
       if (uart_hal_get_txfifo_len(&uart_hal_) == 0)
       {
         break;
       }
 
+      const size_t active_offset = tx_double_buffer_.ActiveOffset();
       uint32_t write_size = 0;
-      const uint8_t* src = tx_active_buffer_ + tx_active_offset_;
+      const uint8_t* src = tx_double_buffer_.ActiveBuffer() + active_offset;
       const uint32_t remaining =
-          static_cast<uint32_t>(tx_active_length_ - tx_active_offset_);
+          static_cast<uint32_t>(tx_double_buffer_.ActiveLength() - active_offset);
 
       uart_hal_write_txfifo(&uart_hal_, src, remaining, &write_size);
       if (write_size == 0)
@@ -77,13 +78,13 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
         break;
       }
 
-      tx_active_offset_ += write_size;
+      tx_double_buffer_.SetActiveOffset(active_offset + write_size);
     }
   }
   else
 #endif
   {
-    while (tx_active_offset_ < tx_active_length_)
+    while (tx_double_buffer_.ActiveOffset() < tx_double_buffer_.ActiveLength())
     {
       const uint32_t fifo_space = uart_hal_get_txfifo_len(&uart_hal_);
       if (fifo_space == 0U)
@@ -91,7 +92,8 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
         break;
       }
 
-      const size_t remaining = tx_active_length_ - tx_active_offset_;
+      const size_t remaining =
+          tx_double_buffer_.ActiveLength() - tx_double_buffer_.ActiveOffset();
       const size_t chunk_size = std::min<size_t>(remaining, fifo_space);
 
       const ErrorCode pop_ec = write_port_->queue_data_->PopWithReader(
@@ -110,11 +112,11 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
         break;
       }
 
-      tx_active_offset_ += chunk_size;
+      tx_double_buffer_.SetActiveOffset(tx_double_buffer_.ActiveOffset() + chunk_size);
     }
   }
 
-  if ((tx_active_offset_ < tx_active_length_) || !in_isr)
+  if ((tx_double_buffer_.ActiveOffset() < tx_double_buffer_.ActiveLength()) || !in_isr)
   {
     return;
   }

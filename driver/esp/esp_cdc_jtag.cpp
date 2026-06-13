@@ -27,15 +27,13 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
     : UART(&_read_port, &_write_port),
       config_(config),
       tx_slot_storage_(new (std::nothrow) uint8_t[tx_buffer_size * 2U]),
-      tx_slot_size_(tx_buffer_size),
       _read_port(rx_buffer_size),
       _write_port(tx_queue_size, tx_buffer_size)
 {
   ASSERT(tx_slot_storage_ != nullptr);
-  ASSERT(tx_slot_size_ > 0U);
+  ASSERT(tx_buffer_size > 0U);
 
-  tx_slot_a_ = tx_slot_storage_;
-  tx_slot_b_ = tx_slot_storage_ + tx_slot_size_;
+  tx_double_buffer_.Init({tx_slot_storage_, tx_buffer_size * 2U});
 
   _read_port = ReadFun;
   _write_port = WriteFun;
@@ -107,25 +105,17 @@ ErrorCode ESP32CDCJtag::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
 void IRAM_ATTR ESP32CDCJtag::ClearActiveTx()
 {
-  tx_active_ptr_ = nullptr;
-  tx_active_size_ = 0;
-  tx_active_offset_ = 0;
-  tx_active_info_ = {};
-  tx_active_valid_ = false;
+  tx_double_buffer_.ClearActive();
 }
 
 void IRAM_ATTR ESP32CDCJtag::ClearPendingTx()
 {
-  tx_pending_valid_.Clear();
-  tx_pending_ptr_ = nullptr;
-  tx_pending_size_ = 0;
-  tx_pending_info_ = {};
+  tx_double_buffer_.ClearPending();
 }
 
 void IRAM_ATTR ESP32CDCJtag::ResetTxState(bool)
 {
-  ClearActiveTx();
-  ClearPendingTx();
+  tx_double_buffer_.Reset();
   tx_busy_.Clear();
 }
 
@@ -140,7 +130,7 @@ bool IRAM_ATTR ESP32CDCJtag::DequeueTxToSlot(uint8_t* slot, size_t& size,
     return false;
   }
 
-  if (peek_info.data.size_ > tx_slot_size_)
+  if (peek_info.data.size_ > tx_double_buffer_.BufferSize())
   {
     ASSERT(false);
     return false;
@@ -162,67 +152,55 @@ bool IRAM_ATTR ESP32CDCJtag::DequeueTxToSlot(uint8_t* slot, size_t& size,
 
 bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
 {
-  if (tx_active_valid_)
+  if (tx_double_buffer_.HasActive())
   {
     return true;
   }
 
   size_t active_size = 0U;
-  if (!DequeueTxToSlot(tx_slot_a_, active_size, tx_active_info_, in_isr))
+  WriteInfoBlock active_info = {};
+  if (!DequeueTxToSlot(tx_double_buffer_.ActiveBuffer(), active_size, active_info,
+                       in_isr))
   {
     return false;
   }
 
-  tx_active_ptr_ = tx_slot_a_;
-  tx_active_size_ = active_size;
-  tx_active_valid_ = true;
+  tx_double_buffer_.LoadActive(active_size, active_info);
   return true;
 }
 
 bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
 {
-  if (tx_pending_valid_.IsSet())
+  if (tx_double_buffer_.HasPending())
   {
     return false;
-  }
-
-  uint8_t* pending_slot = tx_slot_b_;
-  if (tx_active_ptr_ == tx_slot_b_)
-  {
-    pending_slot = tx_slot_a_;
   }
 
   size_t pending_size = 0U;
-  if (!DequeueTxToSlot(pending_slot, pending_size, tx_pending_info_, in_isr))
+  WriteInfoBlock pending_info = {};
+  if (!DequeueTxToSlot(tx_double_buffer_.PendingBuffer(), pending_size, pending_info,
+                       in_isr))
   {
     return false;
   }
 
-  tx_pending_ptr_ = pending_slot;
-  tx_pending_size_ = pending_size;
-  tx_pending_valid_.Set();
+  tx_double_buffer_.LoadPending(pending_size, pending_info);
   return true;
 }
 
 bool IRAM_ATTR ESP32CDCJtag::StartPendingTxIfIdle(bool in_isr)
 {
-  if (tx_busy_.IsSet() || tx_active_valid_ || !tx_pending_valid_.IsSet())
+  if (tx_busy_.IsSet() || tx_double_buffer_.HasActive() ||
+      !tx_double_buffer_.HasPending())
   {
     return false;
   }
 
-  if (!tx_pending_valid_.TestAndClear())
+  if (!tx_double_buffer_.PromotePending())
   {
     return false;
   }
 
-  tx_active_ptr_ = tx_pending_ptr_;
-  tx_active_size_ = tx_pending_size_;
-  tx_active_info_ = tx_pending_info_;
-  tx_active_valid_ = true;
-  tx_pending_ptr_ = nullptr;
-  tx_pending_size_ = 0;
-  tx_pending_info_ = {};
   return StartAndReportActive(in_isr);
 }
 
@@ -230,23 +208,25 @@ bool IRAM_ATTR ESP32CDCJtag::PumpTx(bool)
 {
   while (tx_busy_.IsSet())
   {
-    if (!tx_active_valid_ || (tx_active_ptr_ == nullptr) ||
-        (tx_active_offset_ >= tx_active_size_))
+    if (!tx_double_buffer_.HasActive() || (tx_double_buffer_.ActiveBuffer() == nullptr) ||
+        (tx_double_buffer_.ActiveOffset() >= tx_double_buffer_.ActiveLength()))
     {
       tx_busy_.Clear();
       return true;
     }
 
-    const uint32_t remain = static_cast<uint32_t>(tx_active_size_ - tx_active_offset_);
-    const int written =
-        usb_serial_jtag_ll_write_txfifo(tx_active_ptr_ + tx_active_offset_, remain);
+    const size_t active_offset = tx_double_buffer_.ActiveOffset();
+    const uint32_t remain =
+        static_cast<uint32_t>(tx_double_buffer_.ActiveLength() - active_offset);
+    const int written = usb_serial_jtag_ll_write_txfifo(
+        tx_double_buffer_.ActiveBuffer() + active_offset, remain);
     if (written <= 0)
     {
       return false;
     }
 
-    tx_active_offset_ += static_cast<size_t>(written);
-    if (tx_active_offset_ >= tx_active_size_)
+    tx_double_buffer_.SetActiveOffset(active_offset + static_cast<size_t>(written));
+    if (tx_double_buffer_.ActiveOffset() >= tx_double_buffer_.ActiveLength())
     {
       tx_busy_.Clear();
       return true;
@@ -287,7 +267,8 @@ void IRAM_ATTR ESP32CDCJtag::PushRxBytes(const uint8_t* data, size_t size, bool 
 
 bool IRAM_ATTR ESP32CDCJtag::StartActiveTransfer(bool in_isr)
 {
-  if (!tx_active_valid_ || (tx_active_ptr_ == nullptr) || (tx_active_size_ == 0U))
+  if (!tx_double_buffer_.HasActive() || (tx_double_buffer_.ActiveBuffer() == nullptr) ||
+      (tx_double_buffer_.ActiveLength() == 0U))
   {
     return false;
   }
@@ -297,7 +278,7 @@ bool IRAM_ATTR ESP32CDCJtag::StartActiveTransfer(bool in_isr)
     return true;
   }
 
-  tx_active_offset_ = 0;
+  tx_double_buffer_.SetActiveOffset(0U);
   usb_serial_jtag_ll_ena_intr_mask(TX_INTR_MASK);
   (void)PumpTx(in_isr);
   return true;
@@ -307,14 +288,14 @@ bool IRAM_ATTR ESP32CDCJtag::StartAndReportActive(bool in_isr)
 {
   if (!StartActiveTransfer(in_isr))
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_double_buffer_.ActiveInfo());
     ClearActiveTx();
     return false;
   }
 
   // Keep aligned with STM/CH: once next op is kicked to HW, report it finished.
-  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-  if (!tx_busy_.IsSet() && tx_active_valid_)
+  write_port_->Finish(in_isr, ErrorCode::OK, tx_double_buffer_.ActiveInfo());
+  if (!tx_busy_.IsSet() && tx_double_buffer_.HasActive())
   {
     OnTxTransferDone(in_isr, ErrorCode::OK);
   }
@@ -334,9 +315,9 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   ClearActiveTx();
 
-  if ((result != ErrorCode::OK) && tx_pending_valid_.IsSet())
+  if ((result != ErrorCode::OK) && tx_double_buffer_.HasPending())
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_pending_info_);
+    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_double_buffer_.PendingInfo());
     ClearPendingTx();
   }
 
@@ -348,14 +329,15 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 
   if (StartPendingTxIfIdle(in_isr))
   {
-    if (!tx_pending_valid_.IsSet())
+    if (!tx_double_buffer_.HasPending())
     {
       (void)LoadPendingTxFromQueue(in_isr);
       (void)StartPendingTxIfIdle(in_isr);
     }
   }
 
-  if (!tx_busy_.IsSet() && !tx_active_valid_ && !tx_pending_valid_.IsSet())
+  if (!tx_busy_.IsSet() && !tx_double_buffer_.HasActive() &&
+      !tx_double_buffer_.HasPending())
   {
     StopTxTransfer();
   }
@@ -373,12 +355,12 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
     return ErrorCode::PENDING;
   }
 
-  if (!tx_active_valid_)
+  if (!tx_double_buffer_.HasActive())
   {
     (void)LoadActiveTxFromQueue(in_isr);
   }
 
-  if (!tx_busy_.IsSet() && tx_active_valid_)
+  if (!tx_busy_.IsSet() && tx_double_buffer_.HasActive())
   {
     if (!StartActiveTransfer(in_isr))
     {
@@ -386,7 +368,7 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
       return ErrorCode::FAILED;
     }
 
-    if (!tx_busy_.IsSet() && tx_active_valid_)
+    if (!tx_busy_.IsSet() && tx_double_buffer_.HasActive())
     {
       OnTxTransferDone(in_isr, ErrorCode::OK);
     }
@@ -394,7 +376,7 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
     return ErrorCode::OK;
   }
 
-  if (!tx_pending_valid_.IsSet())
+  if (!tx_double_buffer_.HasPending())
   {
     (void)LoadPendingTxFromQueue(in_isr);
     (void)StartPendingTxIfIdle(in_isr);
