@@ -135,6 +135,8 @@ class DoubleBuffer
    */
   void SetActiveLength(size_t length) { active_len_ = length; }
 
+  void FlipActiveBlock() { active_ ^= 1; }
+
   /**
    * @brief 设置当前活动缓冲区
    *        Sets the active buffer

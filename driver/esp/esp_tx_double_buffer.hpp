@@ -27,7 +27,6 @@ class ESPTxDoubleBuffer
 
   void Reset()
   {
-    active_block_ = false;
     bytes_.SetActiveBlock(false);
     ClearActive();
     ClearPending();
@@ -88,8 +87,7 @@ class ESPTxDoubleBuffer
       return false;
     }
 
-    active_block_ = !active_block_;
-    bytes_.SetActiveBlock(active_block_);
+    bytes_.FlipActiveBlock();
     active_length_ = pending_length_;
     active_offset_ = 0U;
     active_info_ = pending_info_;
@@ -116,7 +114,6 @@ class ESPTxDoubleBuffer
 
  private:
   DoubleBuffer bytes_{};
-  bool active_block_ = false;
   size_t active_length_ = 0U;
   size_t pending_length_ = 0U;
   size_t active_offset_ = 0U;

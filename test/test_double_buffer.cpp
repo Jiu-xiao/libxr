@@ -48,6 +48,9 @@ void test_double_buffer()
   buffer.Switch();
   ASSERT(buffer.ActiveBuffer() == buff);  // 又回到了原来的 A 区
 
+  buffer.FlipActiveBlock();
+  ASSERT(buffer.ActiveBuffer() == buff + 64);
+
   // 6. 不合法长度填充
   ASSERT(buffer.FillPending(test_data, 80) == false);  // 超过单 buffer 长度
 }
