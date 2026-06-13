@@ -50,7 +50,7 @@ class ESPTxDoubleBuffer
    */
   void Reset()
   {
-    bytes_.SetActiveBlock(false);
+    bytes_.Reset();
     ClearActive();
     ClearPending();
   }

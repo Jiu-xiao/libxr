@@ -32,6 +32,8 @@ class DoubleBuffer
 
   void Init(const LibXR::RawData& raw_data);
 
+  void Reset();
+
   /**
    * @brief 获取当前正在使用的缓冲区指针
    *        Returns the currently active buffer

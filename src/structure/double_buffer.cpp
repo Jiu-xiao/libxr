@@ -9,6 +9,14 @@ DoubleBuffer::DoubleBuffer(const LibXR::RawData& raw_data)
   Init(raw_data);
 }
 
+void DoubleBuffer::Reset()
+{
+  active_ = 0;
+  pending_valid_ = false;
+  active_len_ = 0;
+  pending_len_ = 0;
+}
+
 void DoubleBuffer::Init(const LibXR::RawData& raw_data)
 {
   constexpr size_t ALIGN = alignof(size_t);
@@ -21,10 +29,7 @@ void DoubleBuffer::Init(const LibXR::RawData& raw_data)
   size_ = raw_data.size_ / 2U;
   buffer_[0] = static_cast<uint8_t*>(raw_data.addr_);
   buffer_[1] = static_cast<uint8_t*>(raw_data.addr_) + size_;
-  active_ = 0;
-  pending_valid_ = false;
-  active_len_ = 0;
-  pending_len_ = 0;
+  Reset();
 }
 
 uint8_t* DoubleBuffer::ActiveBuffer() const { return buffer_[active_]; }
