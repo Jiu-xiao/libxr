@@ -16,13 +16,25 @@
 
 namespace
 {
+// RX interrupt reasons handled by the FIFO receive path.
+// FIFO 接收路径处理的 RX 中断原因。
 constexpr uint32_t UART_RX_INTR_MASK =
     UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF;
+
+// TX interrupt reason used by the FIFO transmit path.
+// FIFO 发送路径使用的 TX 中断原因。
 constexpr uint32_t UART_TX_INTR_MASK = UART_INTR_TXFIFO_EMPTY;
 
+// RX timeout threshold used to flush short tail fragments from the FIFO.
+// 用于冲刷 RX FIFO 尾部短碎片的超时阈值。
 constexpr uint8_t RX_TOUT_THRESHOLD = 2;
+
+// TX empty threshold that determines when the hardware asks for more bytes.
+// 决定硬件何时请求更多字节的 TX 空阈值。
 constexpr uint16_t TX_EMPTY_THRESHOLD = 24;
 
+// This backend cannot coexist with the ESP-IDF console UART reservation.
+// 该后端不能与 ESP-IDF 的控制台 UART 占用同时存在。
 bool IsConsoleUartInUse(uart_port_t uart_num)
 {
 #if defined(CONFIG_ESP_CONSOLE_UART) && CONFIG_ESP_CONSOLE_UART
@@ -37,6 +49,9 @@ bool IsConsoleUartInUse(uart_port_t uart_num)
 namespace LibXR
 {
 
+// Prefer aligned DMA-capable allocation first, then fall back to the broader
+// DMA-capable heap if the strict aligned allocation API is unavailable.
+// 优先使用对齐的 DMA 可访问分配；若失败，再退回到更宽松的 DMA heap。
 uint8_t* ESP32UART::AllocateTxStorage(size_t size)
 {
   void* aligned = heap_caps_aligned_alloc(
@@ -50,6 +65,8 @@ uint8_t* ESP32UART::AllocateTxStorage(size_t size)
       heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
 }
 
+// Translate the public UART index into the ESP peripheral module gate.
+// 将公开 UART 序号转换为 ESP 外设模块门控对象。
 ErrorCode ESP32UART::ResolveUartPeriph(uart_port_t uart_num, periph_module_t& out)
 {
   switch (uart_num)
@@ -70,6 +87,9 @@ ErrorCode ESP32UART::ResolveUartPeriph(uart_port_t uart_num, periph_module_t& ou
   }
 }
 
+// Construct queue plumbing first, then bind the storage into the TX
+// double-buffer view before touching hardware.
+// 先构造队列连接，再把 storage 绑定到 TX 双缓冲视图，最后再触碰硬件。
 ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
                      int cts_pin, size_t rx_buffer_size, size_t tx_buffer_size,
                      uint32_t tx_queue_size, UART::Configuration config, bool enable_dma)
@@ -135,6 +155,9 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
 #endif
 }
 
+// RX FIFO thresholds are derived from both the hardware FIFO depth and the
+// software ISR scratch-buffer size.
+// RX FIFO 阈值同时受硬件 FIFO 深度和软件 ISR 暂存缓冲大小约束。
 void ESP32UART::ConfigureRxInterruptPath()
 {
   const size_t rx_full_floor = 16;
@@ -148,6 +171,11 @@ void ESP32UART::ConfigureRxInterruptPath()
   uart_hal_ena_intr_mask(&uart_hal_, UART_RX_INTR_MASK);
 }
 
+// Reconfigure framing in place while preserving the current software queue
+// model. If TX is already in progress, resume the backend instead of surfacing
+// a synthetic BUSY state.
+// 原地重配帧格式，同时保持软件队列模型不变。若 TX 已在进行，则恢复后端，
+// 而不是人为抛出 BUSY 状态。
 ErrorCode ESP32UART::SetConfig(UART::Configuration config)
 {
   if (!uart_hw_enabled_)
@@ -227,6 +255,8 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
+// Hardware loopback is exposed as a direct backend toggle.
+// 硬件环回直接作为后端开关暴露。
 ErrorCode ESP32UART::SetLoopback(bool enable)
 {
   if (!uart_hw_enabled_)
@@ -238,14 +268,20 @@ ErrorCode ESP32UART::SetLoopback(bool enable)
   return ErrorCode::OK;
 }
 
+// `WritePort` only needs a trampoline back into the owning UART instance.
+// `WritePort` 只需要一个回跳到所属 UART 实例的跳板。
 ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &ESP32UART::_write_port);
   return uart->TryStartTx(in_isr);
 }
 
+// The current RX path is interrupt-driven, so `ReadPort` has no active kick.
+// 当前 RX 路径是中断驱动的，因此 `ReadPort` 不需要主动启动。
 ErrorCode ESP32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
+// Convert libxr data-bit semantics into the ESP HAL value set.
+// 将 libxr 数据位语义转换为 ESP HAL 取值。
 bool ESP32UART::ResolveWordLength(uint8_t data_bits, uart_word_length_t& out)
 {
   switch (data_bits)
@@ -267,6 +303,8 @@ bool ESP32UART::ResolveWordLength(uint8_t data_bits, uart_word_length_t& out)
   }
 }
 
+// Convert libxr stop-bit semantics into the ESP HAL value set.
+// 将 libxr 停止位语义转换为 ESP HAL 取值。
 bool ESP32UART::ResolveStopBits(uint8_t stop_bits, uart_stop_bits_t& out)
 {
   switch (stop_bits)
@@ -282,6 +320,8 @@ bool ESP32UART::ResolveStopBits(uint8_t stop_bits, uart_stop_bits_t& out)
   }
 }
 
+// Convert libxr parity semantics into the ESP HAL value set.
+// 将 libxr 校验位语义转换为 ESP HAL 取值。
 uart_parity_t ESP32UART::ResolveParity(UART::Parity parity)
 {
   switch (parity)
@@ -297,6 +337,9 @@ uart_parity_t ESP32UART::ResolveParity(UART::Parity parity)
   }
 }
 
+// Bring the UART block into a known idle state before higher-level ISR or DMA
+// plumbing is attached.
+// 在挂接更高层 ISR 或 DMA 连接前，先把 UART 模块拉到已知空闲状态。
 ErrorCode ESP32UART::InitUartHardware()
 {
   if (uart_num_ >= UART_NUM_MAX)
@@ -343,6 +386,8 @@ ErrorCode ESP32UART::InitUartHardware()
   return ErrorCode::OK;
 }
 
+// GPIO mapping stays explicit because ESP UART routing is per-pin configurable.
+// GPIO 映射保持显式写法，因为 ESP UART 路由是逐引脚可配置的。
 ErrorCode ESP32UART::ConfigurePins()
 {
   if (tx_pin_ >= 0)
@@ -393,6 +438,8 @@ ErrorCode ESP32UART::ConfigurePins()
   return ErrorCode::OK;
 }
 
+// Active state is shared by FIFO and DMA TX backends.
+// Active 状态由 FIFO 和 DMA 两条 TX 后端共用。
 void IRAM_ATTR ESP32UART::ClearActiveTx()
 {
   tx_active_length_ = 0U;
@@ -401,6 +448,8 @@ void IRAM_ATTR ESP32UART::ClearActiveTx()
   tx_active_valid_ = false;
 }
 
+// Only the DMA backend carries a distinct pending TX preload state.
+// 只有 DMA 后端维护独立的 pending TX 预装状态。
 void IRAM_ATTR ESP32UART::ClearPendingTx()
 {
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
@@ -411,6 +460,10 @@ void IRAM_ATTR ESP32UART::ClearPendingTx()
 #endif
 }
 
+// Once hardware accepts the active request, completion ownership moves to the
+// backend ISR path and the queued write can be reported as accepted.
+// 一旦硬件接管 active 请求，完成所有权就转移到后端 ISR 路径，队列侧即可
+// 报告该写请求已经被接受。
 bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
 {
   if (!StartActiveTransfer(in_isr))
@@ -426,6 +479,12 @@ bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
   return true;
 }
 
+// TX start logic fans out into two models:
+// 1. DMA mode keeps one active request plus one preloaded pending request.
+// 2. FIFO mode streams directly from the queue with only one active request.
+// TX 启动逻辑分成两种模型：
+// 1. DMA 模式维持一个 active 请求和一个预装 pending 请求。
+// 2. FIFO 模式只保留一个 active 请求并直接从队列流式发送。
 ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 {
   if (in_tx_isr_.IsSet())
@@ -467,6 +526,10 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
   return ErrorCode::PENDING;
 }
 
+// Active TX load is shared by both backends. DMA writes payload bytes into the
+// double buffer, while FIFO mode only claims metadata and length.
+// Active TX 装载由两条后端共用。DMA 会把 payload 写进双缓冲；FIFO 模式只
+// 认领元数据和长度。
 bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 {
   (void)in_isr;
@@ -501,6 +564,10 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
   return true;
 }
 
+// Pending preload exists only for the DMA backend because FIFO mode can stream
+// directly from the queue without staging a second payload block.
+// Pending 预装只存在于 DMA 后端，因为 FIFO 模式可以直接从队列流式发送，
+// 不需要再暂存第二块 payload。
 bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 {
   (void)in_isr;
@@ -527,6 +594,10 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 #endif
 }
 
+// Promote the preloaded DMA payload into the active slot when the hardware is
+// idle and the software state machine has no current active request.
+// 当硬件空闲且软件状态机没有 active 请求时，把预装 DMA payload 提升为
+// active 槽位。
 bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
 {
 #if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
@@ -561,6 +632,10 @@ bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
 #endif
 }
 
+// Queue-data and queue-info stay decoupled, so dequeue first validates the
+// next metadata entry and only then moves bytes or ownership forward.
+// `queue_data_` 和 `queue_info_` 保持解耦，因此这里先验证下一条元数据，
+// 再推进字节或所有权。
 bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
                                             WriteInfoBlock& info, bool in_isr)
 {
@@ -605,6 +680,12 @@ bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
   return true;
 }
 
+// Backend start forks here:
+// - DMA path launches the staged active payload as one DMA transfer.
+// - FIFO path enables TX-empty interrupts and lets ISR-side refill drain data.
+// 后端启动在这里分叉：
+// - DMA 路径把已暂存的 active payload 作为一次 DMA 传输发出去。
+// - FIFO 路径开启 TX-empty 中断，让 ISR 侧补料并持续排空。
 bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
 {
   if (!tx_active_valid_)
@@ -639,6 +720,9 @@ bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
   return true;
 }
 
+// RX bytes are pushed opportunistically until the software queue is full, then
+// pending read callbacks are serviced once per batch.
+// RX 字节会尽量推进软件队列，直到队列满；完成后按批次触发待读回调。
 void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_isr)
 {
   size_t offset = 0;
@@ -666,6 +750,12 @@ void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_
     read_port_->ProcessPendingReads(in_isr);
   }
 }
+// Completion handling also splits by backend model:
+// - DMA mode may already hold one pending preloaded payload.
+// - FIFO mode immediately loads the next request from the queue.
+// 完成处理同样按后端模型分叉：
+// - DMA 模式可能已经持有一个预装的 pending payload。
+// - FIFO 模式则立刻从队列装载下一条请求。
 void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
 {
   Flag::ScopedRestore tx_flag(in_tx_isr_);

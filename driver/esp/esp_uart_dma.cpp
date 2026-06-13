@@ -17,9 +17,16 @@ namespace
 {
 // RX uses a circular DMA descriptor ring, similar to STM/CH circular RX DMA
 // behavior (continuous receive + software consumer index).
+// RX 使用循环 DMA 描述符环，语义接近 STM/CH 的循环 RX DMA：持续接收，
+// 软件侧维护消费索引。
 constexpr uint32_t DMA_RX_NODE_COUNT = 8;
+
+// Current ESP GDMA link items cannot describe more than 4095 bytes in one node.
+// 当前 ESP GDMA link item 单节点最多只能描述 4095 字节。
 constexpr size_t DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM = 4095U;
 
+// Minimal local view of the GDMA link descriptor layout used for in-place patching.
+// 为就地修改描述符长度而保留的 GDMA link descriptor 最小本地视图。
 struct GdmaLinkItem
 {
   struct
@@ -39,6 +46,8 @@ struct GdmaLinkItem
 constexpr uint32_t GDMA_OWNER_CPU = 0U;
 constexpr uint32_t GDMA_OWNER_DMA = 1U;
 
+// Helper used for DMA storage and node-size alignment calculations.
+// 用于 DMA storage 和 node 大小对齐计算的辅助函数。
 size_t AlignUp(size_t value, size_t align)
 {
   if (align <= 1)
@@ -48,6 +57,10 @@ size_t AlignUp(size_t value, size_t align)
   return ((value + align - 1) / align) * align;
 }
 
+// Convert the cached address returned by ESP-IDF into the non-cache alias used
+// by the GDMA descriptors when the target SoC exposes one.
+// 当目标 SoC 提供 non-cache alias 时，把 ESP-IDF 返回的 cache 地址转换成
+// GDMA 描述符使用的 non-cache 地址。
 uintptr_t CacheAddrToNonCache(uintptr_t addr)
 {
 #if SOC_NON_CACHEABLE_OFFSET
@@ -57,6 +70,8 @@ uintptr_t CacheAddrToNonCache(uintptr_t addr)
 #endif
 }
 
+// Recover the first link item from a GDMA list head address.
+// 从 GDMA list head 地址恢复首个 link item。
 GdmaLinkItem* LinkItemFromHeadAddr(uintptr_t head_addr)
 {
   return reinterpret_cast<GdmaLinkItem*>(CacheAddrToNonCache(head_addr));
@@ -69,6 +84,8 @@ constexpr int CACHE_SYNC_FLAG_UNALIGNED = (1 << 1);
 constexpr int CACHE_SYNC_FLAG_DIR_C2M = (1 << 2);
 constexpr int CACHE_SYNC_FLAG_DIR_M2C = (1 << 3);
 
+// Synchronize one DMA window when the active memory region is cacheable.
+// 当当前内存区域可缓存时，同步一个 DMA 窗口。
 bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 {
   if ((addr == nullptr) || (size == 0U))
@@ -96,6 +113,8 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 namespace LibXR
 {
 
+// TX EOF means the current staged active payload has fully left the DMA engine.
+// TX EOF 表示当前暂存的 active payload 已经完整离开 DMA 引擎。
 bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t, gdma_event_data_t*,
                                            void* user_data)
 {
@@ -107,6 +126,8 @@ bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t, gdma_event_dat
   return false;
 }
 
+// TX descriptor error is surfaced as a backend TX failure.
+// TX 描述符错误会被上报为后端 TX 失败。
 bool IRAM_ATTR ESP32UART::DmaTxDescrErrCallback(gdma_channel_handle_t, gdma_event_data_t*,
                                                 void* user_data)
 {
@@ -118,6 +139,8 @@ bool IRAM_ATTR ESP32UART::DmaTxDescrErrCallback(gdma_channel_handle_t, gdma_even
   return false;
 }
 
+// RX done callback only forwards the event into the UART object state machine.
+// RX 完成回调只负责把事件转发到 UART 对象状态机。
 bool IRAM_ATTR ESP32UART::DmaRxDoneCallback(gdma_channel_handle_t,
                                             gdma_event_data_t* event_data,
                                             void* user_data)
@@ -130,6 +153,8 @@ bool IRAM_ATTR ESP32UART::DmaRxDoneCallback(gdma_channel_handle_t,
   return false;
 }
 
+// RX descriptor error requests a full RX ring recovery.
+// RX 描述符错误要求完整恢复 RX 环。
 bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t, gdma_event_data_t*,
                                                 void* user_data)
 {
@@ -141,6 +166,14 @@ bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t, gdma_even
   return false;
 }
 
+// DMA backend bring-up does three things:
+// 1. Bind UHCI to the selected UART.
+// 2. Prepare two TX descriptor lists, one per double-buffer half.
+// 3. Prepare one circular RX descriptor ring.
+// DMA 后端初始化做三件事：
+// 1. 把 UHCI 绑定到选定 UART。
+// 2. 为双缓冲两半各准备一条 TX 描述符链。
+// 3. 准备一条循环 RX 描述符环。
 ErrorCode ESP32UART::InitDmaBackend()
 {
   if (dma_backend_enabled_)
@@ -292,6 +325,7 @@ ErrorCode ESP32UART::InitDmaBackend()
   }
 
   // Keep one ring window reasonably large to lower ISR pressure at high baud.
+  // 保持单个环窗口适度偏大，以降低高波特率下的 ISR 压力。
   const size_t rx_chunk_target = std::min<size_t>(
       std::max<size_t>(32, rx_isr_buffer_size_ / DMA_RX_NODE_COUNT), 512);
   rx_dma_chunk_size_ = std::max<size_t>(AlignUp(rx_chunk_target, 4), 32);
@@ -355,6 +389,9 @@ ErrorCode ESP32UART::InitDmaBackend()
   return ErrorCode::OK;
 }
 
+// TX DMA start only patches the dynamic fields of the pre-mounted descriptor
+// list, so the hot path avoids rebuilding descriptors for every request.
+// TX DMA 启动时只修改预挂载描述符链的动态字段，避免每次请求都重建描述符。
 bool IRAM_ATTR ESP32UART::StartDmaTx()
 {
   if ((tx_dma_channel_ == nullptr) || !tx_active_valid_)
@@ -396,6 +433,7 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
   }
 
   // Keep descriptor list pre-mounted and only patch the dynamic transfer length in-place.
+  // 描述符链保持预挂载，只就地更新本次传输长度。
   desc->buffer = active_buffer;
   desc->dw0.size = static_cast<uint32_t>(active_len);
   desc->dw0.length = static_cast<uint32_t>(active_len);
@@ -415,6 +453,10 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
   return gdma_start(tx_dma_channel_, tx_dma_head_addr_[link_index]) == ESP_OK;
 }
 
+// RX DMA completion can span multiple ring nodes, so consume at most one full
+// ring window per callback and advance the software node cursor in lockstep.
+// 一次 RX DMA 完成可能跨越多个环节点，因此每次回调最多消费一个完整环窗口，
+// 并同步推进软件节点游标。
 void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
 {
   if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) ||
@@ -445,6 +487,8 @@ void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
   }
 }
 
+// RX DMA completion either reports a full node or the final EOF-sized tail.
+// RX DMA 完成要么报告整节点，要么报告带 EOF 的尾段长度。
 void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data)
 {
   if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) ||
@@ -473,6 +517,8 @@ void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data)
   PushDmaRxData(recv_size, true);
 }
 
+// RX DMA recovery restarts the circular ring from node zero.
+// RX DMA 恢复会从节点零重新启动整个环。
 void IRAM_ATTR ESP32UART::HandleDmaRxError()
 {
   if ((rx_dma_channel_ == nullptr) || (rx_dma_link_ == nullptr))
@@ -486,6 +532,9 @@ void IRAM_ATTR ESP32UART::HandleDmaRxError()
   (void)gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_));
 }
 
+// TX DMA recovery aborts the current hardware transfer and lets the common TX
+// completion path clean up the software state.
+// TX DMA 恢复会中止当前硬件传输，再交给公共 TX 完成路径清理软件状态。
 void IRAM_ATTR ESP32UART::HandleDmaTxError()
 {
   if (tx_dma_channel_ != nullptr)
