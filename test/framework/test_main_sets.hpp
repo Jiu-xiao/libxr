@@ -10,6 +10,7 @@
  */
 #pragma once
 
+#include "../measure/perf/linux_shared_topic_bench_common.hpp"
 #include "test_base.hpp"
 #include "test_case_runner.hpp"
 
