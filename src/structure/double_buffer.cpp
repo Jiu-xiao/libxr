@@ -36,6 +36,12 @@ uint8_t* DoubleBuffer::ActiveBuffer() const { return buffer_[active_]; }
 
 uint8_t* DoubleBuffer::PendingBuffer() const { return buffer_[1 - active_]; }
 
+uint8_t* DoubleBuffer::Buffer(int block) const
+{
+  ASSERT((block == 0) || (block == 1));
+  return buffer_[block];
+}
+
 size_t DoubleBuffer::Size() const { return size_; }
 
 void DoubleBuffer::Switch()

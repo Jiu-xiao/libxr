@@ -224,7 +224,8 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     return ErrorCode::INIT_ERR;
   }
-  tx_dma_alignment_ = std::max<size_t>(1, std::max(tx_int_alignment, tx_ext_alignment));
+  const size_t tx_dma_alignment =
+      std::max<size_t>(1, std::max(tx_int_alignment, tx_ext_alignment));
 
   gdma_strategy_config_t tx_strategy = {
       .owner_check = true,
@@ -241,19 +242,18 @@ ErrorCode ESP32UART::InitDmaBackend()
       .item_alignment = 4,
       .flags = {},
   };
-  tx_dma_buffer_addr_[0] = tx_dma_buffer_.ActiveBuffer();
-  tx_dma_buffer_addr_[1] = tx_dma_buffer_.PendingBuffer();
+  gdma_link_list_handle_t tx_dma_links[2] = {nullptr, nullptr};
 
   for (int i = 0; i < 2; ++i)
   {
-    if (gdma_new_link_list(&tx_link_cfg, &tx_dma_links_[i]) != ESP_OK)
+    if (gdma_new_link_list(&tx_link_cfg, &tx_dma_links[i]) != ESP_OK)
     {
       return ErrorCode::INIT_ERR;
     }
 
     gdma_buffer_mount_config_t tx_mount = {
-        .buffer = tx_dma_buffer_addr_[i],
-        .buffer_alignment = tx_dma_alignment_,
+        .buffer = tx_dma_buffer_.Buffer(i),
+        .buffer_alignment = tx_dma_alignment,
         .length = 1,
         .flags =
             {
@@ -263,12 +263,12 @@ ErrorCode ESP32UART::InitDmaBackend()
             },
     };
 
-    if (gdma_link_mount_buffers(tx_dma_links_[i], 0, &tx_mount, 1, nullptr) != ESP_OK)
+    if (gdma_link_mount_buffers(tx_dma_links[i], 0, &tx_mount, 1, nullptr) != ESP_OK)
     {
       return ErrorCode::INIT_ERR;
     }
 
-    tx_dma_head_addr_[i] = gdma_link_get_head_addr(tx_dma_links_[i]);
+    tx_dma_head_addr_[i] = gdma_link_get_head_addr(tx_dma_links[i]);
     if (tx_dma_head_addr_[i] == 0U)
     {
       return ErrorCode::INIT_ERR;
@@ -312,7 +312,8 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     return ErrorCode::INIT_ERR;
   }
-  rx_dma_alignment_ = std::max<size_t>(1, std::max(rx_int_alignment, rx_ext_alignment));
+  const size_t rx_dma_alignment =
+      std::max<size_t>(1, std::max(rx_int_alignment, rx_ext_alignment));
 
   gdma_link_list_config_t rx_link_cfg = {
       .num_items = DMA_RX_NODE_COUNT,
@@ -329,10 +330,9 @@ ErrorCode ESP32UART::InitDmaBackend()
   const size_t rx_chunk_target = std::min<size_t>(
       std::max<size_t>(32, rx_isr_buffer_size_ / DMA_RX_NODE_COUNT), 512);
   rx_dma_chunk_size_ = std::max<size_t>(AlignUp(rx_chunk_target, 4), 32);
-  rx_dma_node_count_ = DMA_RX_NODE_COUNT;
-  const size_t rx_storage_alignment = std::max<size_t>(4, rx_dma_alignment_);
+  const size_t rx_storage_alignment = std::max<size_t>(4, rx_dma_alignment);
   const size_t rx_storage_bytes =
-      AlignUp(rx_dma_chunk_size_ * rx_dma_node_count_, rx_storage_alignment);
+      AlignUp(rx_dma_chunk_size_ * DMA_RX_NODE_COUNT, rx_storage_alignment);
 
   rx_dma_storage_ = static_cast<uint8_t*>(
       heap_caps_aligned_alloc(rx_storage_alignment, rx_storage_bytes,
@@ -347,7 +347,7 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     rx_mount[i] = gdma_buffer_mount_config_t{
         .buffer = rx_dma_storage_ + (static_cast<size_t>(i) * rx_dma_chunk_size_),
-        .buffer_alignment = rx_dma_alignment_,
+        .buffer_alignment = rx_dma_alignment,
         .length = rx_dma_chunk_size_,
         .flags =
             {
@@ -407,21 +407,13 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
     return false;
   }
 
-  int link_index = -1;
-  if (active_buffer == tx_dma_buffer_addr_[0])
-  {
-    link_index = 0;
-  }
-  else if (active_buffer == tx_dma_buffer_addr_[1])
-  {
-    link_index = 1;
-  }
-  else
+  const int link_index = tx_dma_buffer_.ActiveBlock();
+  if ((link_index != 0) && (link_index != 1))
   {
     return false;
   }
 
-  if ((tx_dma_links_[link_index] == nullptr) || (tx_dma_head_addr_[link_index] == 0U))
+  if (tx_dma_head_addr_[link_index] == 0U)
   {
     return false;
   }
@@ -459,13 +451,12 @@ bool IRAM_ATTR ESP32UART::StartDmaTx()
 // 并同步推进软件节点游标。
 void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
 {
-  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) ||
-      (rx_dma_node_count_ == 0))
+  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0))
   {
     return;
   }
 
-  const size_t max_window = rx_dma_chunk_size_ * rx_dma_node_count_;
+  const size_t max_window = rx_dma_chunk_size_ * DMA_RX_NODE_COUNT;
   size_t remaining = std::min(recv_size, max_window);
 
   while (remaining > 0)
@@ -483,7 +474,7 @@ void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
 #endif
     PushRxBytes(chunk_ptr, chunk, in_isr);
     remaining -= chunk;
-    rx_dma_node_index_ = (rx_dma_node_index_ + 1U) % rx_dma_node_count_;
+    rx_dma_node_index_ = (rx_dma_node_index_ + 1U) % DMA_RX_NODE_COUNT;
   }
 }
 
@@ -491,8 +482,7 @@ void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
 // RX DMA 完成要么报告整节点，要么报告带 EOF 的尾段长度。
 void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data)
 {
-  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0) ||
-      (rx_dma_node_count_ == 0))
+  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0))
   {
     return;
   }

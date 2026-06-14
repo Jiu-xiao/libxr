@@ -51,6 +51,15 @@ class DoubleBuffer
   uint8_t* PendingBuffer() const;
 
   /**
+   * @brief 获取指定编号缓冲区的指针
+   *        Returns the pointer of the specified block
+   *
+   * @param block 缓冲区编号，只允许 0 或 1 / Buffer block index, only 0 or 1
+   * @return 指向指定缓冲区的指针 / Pointer to the requested buffer block
+   */
+  uint8_t* Buffer(int block) const;
+
+  /**
    * @brief 获取每个缓冲区的大小（单位：字节）
    *        Gets the size of each buffer in bytes
    *
@@ -138,6 +147,12 @@ class DoubleBuffer
   void SetActiveLength(size_t length) { active_len_ = length; }
 
   void FlipActiveBlock() { active_ ^= 1; }
+
+  /**
+   * @brief 获取当前活动缓冲区编号
+   *        Returns the current active block index
+   */
+  int ActiveBlock() const { return active_; }
 
   /**
    * @brief 设置当前活动缓冲区

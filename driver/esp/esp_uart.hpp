@@ -338,15 +338,10 @@ class ESP32UART : public UART
   uhci_hal_context_t uhci_hal_ = {};   ///< UHCI HAL context bound to this UART.
   gdma_channel_handle_t tx_dma_channel_ = nullptr;  ///< TX GDMA channel handle.
   gdma_channel_handle_t rx_dma_channel_ = nullptr;  ///< RX GDMA channel handle.
-  gdma_link_list_handle_t tx_dma_links_[2] = {nullptr, nullptr};  ///< TX GDMA lists.
   uintptr_t tx_dma_head_addr_[2] = {0U, 0U};   ///< TX list head addresses.
-  uint8_t* tx_dma_buffer_addr_[2] = {nullptr, nullptr};  ///< Cached TX half-buffer addresses.
   gdma_link_list_handle_t rx_dma_link_ = nullptr;  ///< RX GDMA ring list.
-  size_t tx_dma_alignment_ = 1;                  ///< TX DMA alignment requirement.
-  size_t rx_dma_alignment_ = 1;                  ///< RX DMA alignment requirement.
   uint8_t* rx_dma_storage_ = nullptr;            ///< RX DMA ring backing storage.
   size_t rx_dma_chunk_size_ = 0;                 ///< Size of one RX DMA ring node.
-  uint32_t rx_dma_node_count_ = 0;               ///< Number of RX DMA ring nodes.
   uint32_t rx_dma_node_index_ = 0;               ///< Software consumer index in the RX ring.
 #endif
 };
