@@ -428,18 +428,9 @@ class CDCUart : public CDCBase, public LibXR::UART
       return;
     }
 
-    // ZLP：仅在此刻跨-op 无数据时发送。
-    // Send the ZLP only when there is no data left across ops at this moment.
-    if (tx_state_.NeedZlp())
+    if (TrySendPendingZlp(*ep))
     {
-      if (ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
-      {
-        auto z = ep->TransferZLP();
-        ASSERT(z == ErrorCode::OK);
-        tx_state_.ClearZlp();
-        return;
-      }
-      tx_state_.ClearZlp();
+      return;
     }
 
     // ActiveLength==0 时不读取队列。
@@ -450,24 +441,16 @@ class CDCUart : public CDCBase, public LibXR::UART
       return;
     }
 
-    // 1) 续发：本 ISR 仅启动一次 Transfer。
-    // 1) Continue: kick only one Transfer in this ISR.
+    // 续发：本 ISR 仅启动一次 Transfer。
+    // Continue: kick only one Transfer in this ISR.
     ep->SetActiveLength(0);
     auto ans = ep->Transfer(PENDING_LEN);
     ASSERT(ans == ErrorCode::OK);
 
-    // 2) 若为 head op 最后一段：启动后 pop + Finish 一次。
-    // 2) If this is the last segment of the head op, pop + Finish once after kick-off.
-    if (tx_deq_.HeadCompleted())
-    {
-      WriteInfoBlock completed{};
-      auto pop_ok = tx_deq_.PopCompleted(&completed);
-      ASSERT(pop_ok == ErrorCode::OK);
-      write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
-    }
+    FinishCompletedTxHead(in_isr);
 
-    // 3) 预写：仅在已启动 Transfer 后允许读取队列。
-    // 3) Prefill: queue reads are allowed only after a Transfer has been kicked.
+    // 预写：仅在已启动 Transfer 后允许读取队列。
+    // Prefill: queue reads are allowed only after a Transfer has been kicked.
     bool prefilled = false;
     if (tx_deq_.HasOp())
     {
@@ -475,16 +458,71 @@ class CDCUart : public CDCBase, public LibXR::UART
       UNUSED(ec2);
     }
 
-    // 4) ZLP 判定 / ZLP decision
-    const std::size_t MPS = ep->MaxPacketSize();
-    if (!prefilled && PENDING_LEN > 0 && MPS > 0 && (PENDING_LEN % MPS) == 0 &&
-        ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
+    RequestZlpIfNeeded(*ep, PENDING_LEN, prefilled);
+  }
+
+ private:
+  /**
+   * @brief 若存在待发送 ZLP，则在当前无数据时发送一次。
+   * @brief Send one pending ZLP when no data is currently active.
+   * @param ep Data IN endpoint。 Data IN endpoint.
+   * @return true 表示本次已经发送 ZLP，completion 处理应立即返回。
+   * @return true when a ZLP has been sent and completion handling should return.
+   */
+  bool TrySendPendingZlp(Endpoint& ep)
+  {
+    if (!tx_state_.NeedZlp())
+    {
+      return false;
+    }
+
+    if (ep.GetActiveLength() == 0 && !tx_deq_.HasOp())
+    {
+      auto z = ep.TransferZLP();
+      ASSERT(z == ErrorCode::OK);
+      tx_state_.ClearZlp();
+      return true;
+    }
+
+    tx_state_.ClearZlp();
+    return false;
+  }
+
+  /**
+   * @brief 若当前 head op 已完成，则弹出 info 并完成一次 WritePort 请求。
+   * @brief Finish one WritePort request when the current head operation is complete.
+   * @param in_isr 是否在 ISR 上下文。 Whether the call runs in ISR context.
+   */
+  void FinishCompletedTxHead(bool in_isr)
+  {
+    if (!tx_deq_.HeadCompleted())
+    {
+      return;
+    }
+
+    WriteInfoBlock completed{};
+    auto pop_ok = tx_deq_.PopCompleted(&completed);
+    ASSERT(pop_ok == ErrorCode::OK);
+    write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
+  }
+
+  /**
+   * @brief 根据刚发送的数据段和后续预写状态决定是否需要 ZLP。
+   * @brief Decide whether a ZLP is required after the just-started data segment.
+   * @param ep Data IN endpoint。 Data IN endpoint.
+   * @param sent_length 刚启动 transfer 的数据长度。 Length of the just-started transfer.
+   * @param prefilled 是否已经预写下一段。 Whether the next segment was prefetched.
+   */
+  void RequestZlpIfNeeded(Endpoint& ep, std::size_t sent_length, bool prefilled)
+  {
+    const std::size_t MPS = ep.MaxPacketSize();
+    if (!prefilled && sent_length > 0 && MPS > 0 && (sent_length % MPS) == 0 &&
+        ep.GetActiveLength() == 0 && !tx_deq_.HasOp())
     {
       tx_state_.RequestZlp();
     }
   }
 
- private:
   /**
    * @brief 从 TX queue 预写一段数据到 endpoint active buffer。
    * @brief Prefill one TX segment into the endpoint active buffer.
