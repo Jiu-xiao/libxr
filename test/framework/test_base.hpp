@@ -17,8 +17,6 @@ void test_flag();
 void test_inertia();
 void test_list();
 void test_kinematic();
-void test_lockfree_list();
-void test_lockfree_queue();
 void test_mpmc_queue();
 void test_object_pool();
 void test_message_packet();
