@@ -3,6 +3,7 @@
 #include "cdc_base.hpp"
 #include "cdc_uart_rx_backpressure.hpp"
 #include "cdc_uart_tx_dequeue.hpp"
+#include "cdc_uart_tx_state.hpp"
 #include "ep.hpp"
 #include "flag.hpp"
 #include "libxr_def.hpp"
@@ -209,7 +210,7 @@ class CDCUart : public CDCBase, public LibXR::UART
     write_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
     read_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
 
-    need_write_zlp_ = false;
+    tx_state_.ClearZlp();
 
     read_port_cdc_.rx_backpressure_.Reset();
   }
@@ -242,7 +243,7 @@ class CDCUart : public CDCBase, public LibXR::UART
      * 不在 IN ISR；否则由 IN ISR 处理。
      * Not in IN ISR; otherwise handled by IN ISR.
      */
-    if (cdc->in_write_isr_.IsSet())
+    if (cdc->tx_state_.InCompletion())
     {
       return ErrorCode::PENDING;
     }
@@ -287,7 +288,7 @@ class CDCUart : public CDCBase, public LibXR::UART
      */
     if (cdc->tx_deq_.HasOp())
     {
-      cdc->need_write_zlp_ = false;
+      cdc->tx_state_.ClearZlp();
     }
 
     /**
@@ -362,7 +363,7 @@ class CDCUart : public CDCBase, public LibXR::UART
         if (MPS > 0 && (TO_SEND % MPS) == 0 && ep->GetActiveLength() == 0 &&
             !cdc->tx_deq_.HasOp())
         {
-          cdc->need_write_zlp_ = true;
+          cdc->tx_state_.RequestZlp();
         }
 
         return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one
@@ -426,7 +427,7 @@ class CDCUart : public CDCBase, public LibXR::UART
   {
     UNUSED(data);
 
-    Flag::ScopedRestore isr_flag(in_write_isr_);
+    auto isr_flag = tx_state_.EnterCompletion();
 
     auto ep = GetDataInEndpoint();
     if (ep == nullptr)
@@ -443,16 +444,16 @@ class CDCUart : public CDCBase, public LibXR::UART
 
     // ZLP：仅在此刻跨-op 无数据时发送。
     // Send the ZLP only when there is no data left across ops at this moment.
-    if (need_write_zlp_)
+    if (tx_state_.NeedZlp())
     {
       if (ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
       {
         auto z = ep->TransferZLP();
         ASSERT(z == ErrorCode::OK);
-        need_write_zlp_ = false;
+        tx_state_.ClearZlp();
         return;
       }
-      need_write_zlp_ = false;
+      tx_state_.ClearZlp();
     }
 
     // ActiveLength==0 时不读取队列。
@@ -501,7 +502,7 @@ class CDCUart : public CDCBase, public LibXR::UART
     if (!primed && PENDING_LEN > 0 && MPS > 0 && (PENDING_LEN % MPS) == 0 &&
         ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
     {
-      need_write_zlp_ = true;
+      tx_state_.RequestZlp();
     }
   }
 
@@ -511,9 +512,7 @@ class CDCUart : public CDCBase, public LibXR::UART
 
   LibXR::CDCUartTxOpDequeueHelper tx_deq_;  ///< TX 出队辅助器 / TX dequeue helper
 
-  Flag::Plain in_write_isr_;  ///< 写 ISR 保护标志 / Write ISR guard flag
-
-  bool need_write_zlp_{false};  ///< ZLP 需求标志 / ZLP required flag
+  CDCUartTxState tx_state_;  ///< CDC TX 控制状态 / CDC TX control state
 };
 
 inline void CDCUartReadPort::OnRxDequeue(bool in_isr)
