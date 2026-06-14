@@ -25,13 +25,14 @@ constexpr uint32_t UART_RX_INTR_MASK =
 // FIFO 发送路径使用的 TX 中断原因。
 constexpr uint32_t UART_TX_INTR_MASK = UART_INTR_TXFIFO_EMPTY;
 
-// RX timeout threshold used to flush short tail fragments from the FIFO.
-// 用于冲刷 RX FIFO 尾部短碎片的超时阈值。
-constexpr uint8_t RX_TOUT_THRESHOLD = 2;
+// Use the minimum non-zero timeout so short RX tails are flushed as close as
+// possible to an idle-style boundary.
+// 使用最小非零 timeout，让短 RX 尾包尽量贴近 idle 风格边界被冲刷出来。
+constexpr uint8_t RX_TOUT_THRESHOLD = 1;
 
-// TX empty threshold that determines when the hardware asks for more bytes.
-// 决定硬件何时请求更多字节的 TX 空阈值。
-constexpr uint16_t TX_EMPTY_THRESHOLD = 24;
+// Ask for more TX bytes once the hardware FIFO drops to roughly half depth.
+// 当硬件 FIFO 下降到约一半深度时，请求补充更多 TX 字节。
+constexpr uint16_t TX_EMPTY_THRESHOLD = SOC_UART_FIFO_LEN / 2U;
 
 // This backend cannot coexist with the ESP-IDF console UART reservation.
 // 该后端不能与 ESP-IDF 的控制台 UART 占用同时存在。
@@ -155,15 +156,12 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
 #endif
 }
 
-// RX FIFO thresholds are derived from both the hardware FIFO depth and the
-// software ISR scratch-buffer size.
-// RX FIFO 阈值同时受硬件 FIFO 深度和软件 ISR 暂存缓冲大小约束。
+// Use a half-FIFO RX threshold in FIFO mode. Short residual tails are handled
+// by the minimum non-zero RX timeout above.
+// FIFO 模式下使用半 FIFO 的 RX 阈值，剩余短尾包交给上面的最小非零 RX timeout。
 void ESP32UART::ConfigureRxInterruptPath()
 {
-  const size_t rx_full_floor = 16;
-  const size_t rx_full_ceil = std::max<size_t>(rx_full_floor, SOC_UART_FIFO_LEN / 4);
-  const uint16_t full_thr = static_cast<uint16_t>(std::min<size_t>(
-      rx_full_ceil, std::max<size_t>(rx_full_floor, rx_isr_buffer_size_ / 16)));
+  const uint16_t full_thr = static_cast<uint16_t>(SOC_UART_FIFO_LEN / 2U);
 
   uart_hal_set_rxfifo_full_thr(&uart_hal_, full_thr);
   uart_hal_set_rx_timeout(&uart_hal_, RX_TOUT_THRESHOLD);
