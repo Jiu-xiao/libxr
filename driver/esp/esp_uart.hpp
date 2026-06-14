@@ -25,6 +25,45 @@
 namespace LibXR
 {
 
+class ESP32UART;
+
+/**
+ * @brief ESP32 UART 读端口 / ESP32 UART read port
+ *
+ * 当上层从软件 RX 队列成功出队后，该读端口会回调所属 UART 后端继续尝试排空
+ * 硬件 FIFO。
+ * After software dequeues bytes from the RX queue, this read port calls back
+ * into the owning UART backend so the hardware FIFO can be drained again.
+ */
+class ESP32UARTReadPort : public ReadPort
+{
+ public:
+  /**
+   * @brief 构造读端口 / Construct the read port
+   *
+   * @param size RX 队列容量（字节） / RX queue capacity in bytes
+   * @param owner 所属 UART 后端 / Owning UART backend
+   */
+  explicit ESP32UARTReadPort(size_t size, ESP32UART& owner)
+      : ReadPort(size), owner_(owner)
+  {
+  }
+
+  /**
+   * @brief 软件队列出队后的回调 / Callback after software RX dequeue
+   */
+  void OnRxDequeue(bool in_isr) override;
+
+  ESP32UARTReadPort& operator=(ReadFun fun)
+  {
+    ReadPort::operator=(fun);
+    return *this;
+  }
+
+ private:
+  ESP32UART& owner_;  ///< 所属 UART 后端 / Owning UART backend
+};
+
 /**
  * @brief ESP32 UART backend with FIFO and optional GDMA fast paths.
  * @brief ESP32 UART 后端，支持 FIFO 和可选 GDMA 快路径。
@@ -36,6 +75,8 @@ namespace LibXR
  */
 class ESP32UART : public UART
 {
+  friend class ESP32UARTReadPort;
+
  public:
   static constexpr int PIN_NO_CHANGE = -1;  ///< Sentinel for an unmapped GPIO.
 
@@ -226,8 +267,14 @@ class ESP32UART : public UART
   bool LoadPendingTxFromQueue(bool in_isr);
 
   /**
-   * @brief Promote pending DMA work when hardware becomes idle.
-   * @brief 在硬件空闲时提升 pending DMA 工作。
+   * @brief Promote one preloaded DMA pending request into the active slot.
+   * @brief 将一个已经预装的 DMA pending 请求提升到 active 槽位。
+   */
+  bool PromotePendingTxToActive();
+
+  /**
+   * @brief Start the current pending DMA request when TX is fully idle.
+   * @brief 在 TX 完全空闲时启动当前 pending DMA 请求。
    */
   bool StartPendingTxIfIdle(bool in_isr);
 
@@ -278,7 +325,7 @@ class ESP32UART : public UART
    * @brief Drain pending bytes from the hardware RX FIFO.
    * @brief 从硬件 RX FIFO 中取出待处理字节。
    */
-  void DrainRxFifoFromIsr();
+  void DrainRxFifo(bool in_isr);
 
   /**
    * @brief Handle RX-side UART interrupt reasons.
@@ -330,7 +377,7 @@ class ESP32UART : public UART
   bool uart_isr_installed_ = false;         ///< UART ISR installation state.
   bool dma_requested_ = true;               ///< Constructor preference for DMA mode.
 
-  ReadPort _read_port;   ///< Read-side queue bridge exposed to `UART`.
+  ESP32UARTReadPort _read_port;   ///< Read-side queue bridge exposed to `UART`.
   WritePort _write_port; ///< Write-side queue bridge exposed to `UART`.
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
@@ -344,6 +391,8 @@ class ESP32UART : public UART
   size_t rx_dma_chunk_size_ = 0;                 ///< Size of one RX DMA ring node.
   uint32_t rx_dma_node_index_ = 0;               ///< Software consumer index in the RX ring.
 #endif
+
+  Flag::Atomic rx_fifo_draining_{};  ///< RX FIFO drain reentry gate.
 };
 
 }  // namespace LibXR

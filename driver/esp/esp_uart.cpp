@@ -50,6 +50,17 @@ bool IsConsoleUartInUse(uart_port_t uart_num)
 namespace LibXR
 {
 
+void ESP32UARTReadPort::OnRxDequeue(bool in_isr)
+{
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (owner_.dma_backend_enabled_)
+  {
+    return;
+  }
+#endif
+  owner_.DrainRxFifo(in_isr);
+}
+
 // Prefer aligned DMA-capable allocation first, then fall back to the broader
 // DMA-capable heap if the strict aligned allocation API is unavailable.
 // 优先使用对齐的 DMA 可访问分配；若失败，再退回到更宽松的 DMA heap。
@@ -105,7 +116,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       rx_isr_buffer_size_(rx_buffer_size),
       tx_storage_(AllocateTxStorage(tx_buffer_size * 2)),
       dma_requested_(enable_dma),
-      _read_port(rx_buffer_size),
+      _read_port(rx_buffer_size, *this),
       _write_port(tx_queue_size, tx_buffer_size)
 {
   ASSERT(!IsConsoleUartInUse(uart_num_));
@@ -275,8 +286,9 @@ ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
   return uart->TryStartTx(in_isr);
 }
 
-// The current RX path is interrupt-driven, so `ReadPort` has no active kick.
-// 当前 RX 路径是中断驱动的，因此 `ReadPort` 不需要主动启动。
+// RX is interrupt-driven. Publishing a read waiter does not need any extra
+// backend kick here.
+// RX 由中断驱动，因此这里只需要表明：发布读 waiter 时不需要额外 kick 后端。
 ErrorCode ESP32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
 // Convert libxr data-bit semantics into the ESP HAL value set.
@@ -478,12 +490,12 @@ bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
   return true;
 }
 
-// TX start logic fans out into two models:
-// 1. DMA mode keeps one active request plus one preloaded pending request.
-// 2. FIFO mode streams directly from the queue with only one active request.
-// TX 启动逻辑分成两种模型：
-// 1. DMA 模式维持一个 active 请求和一个预装 pending 请求。
-// 2. FIFO 模式只保留一个 active 请求并直接从队列流式发送。
+// TX start only does two things:
+// 1. when TX is fully idle, start one active request;
+// 2. when DMA TX is busy and no pending request is preloaded yet, preload one.
+// TX 发起路径只做两件事：
+// 1. TX 完全空闲时，启动一个 active 请求；
+// 2. DMA TX 已忙且还没有预装 pending 时，补装一个。
 ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
 {
   if (in_tx_isr_.IsSet())
@@ -492,7 +504,7 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
   }
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_ && StartPendingTxIfIdle(in_isr))
+  if (dma_backend_enabled_ && !tx_busy_.IsSet() && StartPendingTxIfIdle(in_isr))
   {
     return ErrorCode::PENDING;
   }
@@ -515,10 +527,9 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
   }
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_ && !tx_dma_buffer_.HasPending())
+  if (dma_backend_enabled_ && tx_busy_.IsSet() && !tx_dma_buffer_.HasPending())
   {
     (void)LoadPendingTxFromQueue(in_isr);
-    (void)StartPendingTxIfIdle(in_isr);
   }
 #endif
 
@@ -581,35 +592,45 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
 
   size_t pending_length = 0U;
   WriteInfoBlock pending_info = {};
-  if (!DequeueTxToBuffer(tx_dma_buffer_.PendingBuffer(), pending_length, pending_info,
-                         in_isr))
+  if (write_port_->queue_info_->Peek(pending_info) != ErrorCode::OK)
   {
     return false;
   }
 
+  if (pending_info.data.size_ > tx_dma_buffer_.Size())
+  {
+    ASSERT(false);
+    return false;
+  }
+
+  if (write_port_->queue_data_->PopBatch(tx_dma_buffer_.PendingBuffer(),
+                                         pending_info.data.size_) != ErrorCode::OK)
+  {
+    return false;
+  }
+
+  pending_length = pending_info.data.size_;
   tx_dma_buffer_.SetPendingLength(pending_length);
   tx_dma_buffer_.EnablePending();
   return true;
 #endif
 }
 
-// Promote the preloaded DMA payload into the active slot when the hardware is
-// idle and the software state machine has no current active request.
-// 当硬件空闲且软件状态机没有 active 请求时，把预装 DMA payload 提升为
-// active 槽位。
-bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
+// Promotion only moves one preloaded pending request into the active slot.
+// Hardware start is a separate step.
+// 提升步骤只负责把一个已经预装的 pending 请求转成 active；
+// 真正启动硬件传输是单独一步。
+bool IRAM_ATTR ESP32UART::PromotePendingTxToActive()
 {
 #if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
-  (void)in_isr;
   return false;
 #else
   if (!dma_backend_enabled_)
   {
-    (void)in_isr;
     return false;
   }
 
-  if (tx_busy_.IsSet() || tx_active_valid_ || !tx_dma_buffer_.HasPending())
+  if (tx_active_valid_ || !tx_dma_buffer_.HasPending())
   {
     return false;
   }
@@ -626,6 +647,34 @@ bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
   tx_active_length_ = pending_length;
   tx_active_offset_ = 0U;
   tx_active_valid_ = true;
+
+  return true;
+#endif
+}
+
+// Starting the pending DMA request is allowed only when TX is fully idle.
+// 启动 pending DMA 请求只允许发生在 TX 完全空闲时。
+bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
+{
+#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
+  (void)in_isr;
+  return false;
+#else
+  if (!dma_backend_enabled_)
+  {
+    (void)in_isr;
+    return false;
+  }
+
+  if (tx_busy_.IsSet())
+  {
+    return false;
+  }
+
+  if (!tx_active_valid_ && !PromotePendingTxToActive())
+  {
+    return false;
+  }
 
   return StartAndReportActive(in_isr);
 #endif
@@ -750,12 +799,14 @@ void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_
   }
 }
 
-// Completion handling also splits by backend model:
-// - DMA mode may already hold one pending preloaded payload.
-// - FIFO mode immediately loads the next request from the queue.
-// 完成处理同样按后端模型分叉：
-// - DMA 模式可能已经持有一个预装的 pending payload。
-// - FIFO 模式则立刻从队列装载下一条请求。
+// Completion does the complementary TX handoff work:
+// - if DMA has no pending request, TX is done here;
+// - if DMA has one pending request, start it and then try to preload the next one;
+// - FIFO mode directly loads and starts the next active request.
+// 完成路径负责与发起路径互补的交接工作：
+// - DMA 若没有 pending，请求链在这里结束；
+// - DMA 若有一个 pending，就先启动它，再尝试补装下一个；
+// - FIFO 模式则直接装载并启动下一个 active 请求。
 void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
 {
   Flag::ScopedRestore tx_flag(in_tx_isr_);
@@ -785,23 +836,19 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
       return;
     }
 
-    if (StartPendingTxIfIdle(in_isr))
+    if (!PromotePendingTxToActive())
     {
-      if (!tx_dma_buffer_.HasPending())
-      {
-        (void)LoadPendingTxFromQueue(in_isr);
-      }
+      return;
+    }
+
+    if (!StartAndReportActive(in_isr))
+    {
       return;
     }
 
     if (!tx_dma_buffer_.HasPending())
     {
       (void)LoadPendingTxFromQueue(in_isr);
-    }
-
-    if (!tx_busy_.IsSet())
-    {
-      (void)StartPendingTxIfIdle(in_isr);
     }
     return;
   }

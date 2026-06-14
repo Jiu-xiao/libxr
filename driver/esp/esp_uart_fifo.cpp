@@ -114,8 +114,13 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 // absorb, then stop without resetting the whole hardware FIFO.
 // RX FIFO 清空采用尽力而为策略：尽量读取软件队列还能容纳的部分，然后停止，
 // 不会粗暴重置整个硬件 FIFO。
-void IRAM_ATTR ESP32UART::DrainRxFifoFromIsr()
+void IRAM_ATTR ESP32UART::DrainRxFifo(bool in_isr)
 {
+  if (rx_fifo_draining_.TestAndSet())
+  {
+    return;
+  }
+
   bool pushed_any = false;
   while (uart_hal_get_rxfifo_len(&uart_hal_) > 0U)
   {
@@ -151,8 +156,10 @@ void IRAM_ATTR ESP32UART::DrainRxFifoFromIsr()
 
   if (pushed_any)
   {
-    read_port_->ProcessPendingReads(true);
+    read_port_->ProcessPendingReads(in_isr);
   }
+
+  rx_fifo_draining_.Clear();
 }
 
 // RX interrupt handling distinguishes overflow from ordinary data-ready events
@@ -177,7 +184,7 @@ void IRAM_ATTR ESP32UART::HandleRxInterrupt(uint32_t uart_intr_status)
     uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_OVF);
   }
 
-  DrainRxFifoFromIsr();
+  DrainRxFifo(true);
   uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
 }
 
