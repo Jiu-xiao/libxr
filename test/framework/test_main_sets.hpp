@@ -113,7 +113,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"system_tests", TestRuntimeSet::FULL_OS,
      {"linux_shm_topic", &RunVerifyLinuxShmSet, false}},
     {"system_tests", TestRuntimeSet::FULL_OS,
-     {"linux_shm_bench", &RunBenchLinuxSharedTopicSet, false}},
+     {"linux_shm_bench", &RunBenchLinuxSharedTopicAllSet, false}},
     {"system_tests", TestRuntimeSet::FULL_OS,
      {"terminal_command", &RunVoidEntry<test_terminal_command>, true}},
     {"system_tests", TestRuntimeSet::BARE_METAL,

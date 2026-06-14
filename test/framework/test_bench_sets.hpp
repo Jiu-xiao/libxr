@@ -42,3 +42,8 @@ inline int RunBenchLinuxSharedTopicSet(const char* selector)
   }
   return status;
 }
+
+inline int RunBenchLinuxSharedTopicAllSet()
+{
+  return RunBenchLinuxSharedTopicSet(nullptr);
+}
