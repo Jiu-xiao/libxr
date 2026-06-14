@@ -11,10 +11,68 @@
 #pragma once
 
 #include "test_base.hpp"
-#include "test_bench_sets.hpp"
-#include "test_binding_sets.hpp"
 #include "test_case_runner.hpp"
-#include "test_verify_sets.hpp"
+
+void test_print_binding();
+void test_database_binding_raw();
+void test_database_binding_sequential();
+void test_linux_shm_topic();
+
+inline int RunBindingTestSet()
+{
+  static constexpr TestCase kBindingTests[] = {
+      {"print_binding", &RunVoidEntry<test_print_binding>, false},
+      {"database_binding_sequential", &RunVoidEntry<test_database_binding_sequential>, false},
+      {"database_binding_raw", &RunVoidEntry<test_database_binding_raw>, false},
+  };
+
+  for (const auto& test_case : kBindingTests)
+  {
+    run_test_case(test_case);
+  }
+  return 0;
+}
+
+inline int RunVerifyLinuxShmSet()
+{
+  test_linux_shm_topic();
+  return 0;
+}
+
+inline int RunBenchLinuxSharedTopicSet(const char* selector)
+{
+  int status = 0;
+  const bool run_standard =
+      (selector == nullptr) || (std::strcmp(selector, "standard") == 0);
+  const bool run_latency =
+      (selector == nullptr) || (std::strcmp(selector, "latency") == 0);
+  const bool run_overload =
+      (selector == nullptr) || (std::strcmp(selector, "overload") == 0);
+  const bool run_modes = (selector == nullptr) || (std::strcmp(selector, "modes") == 0);
+
+  if (run_standard)
+  {
+    status |= LinuxSharedTopicBench::RunStandardBenchmarks();
+  }
+  if (run_latency)
+  {
+    status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
+  }
+  if (run_overload)
+  {
+    status |= LinuxSharedTopicBench::RunOverloadBenchmarks();
+  }
+  if (run_modes)
+  {
+    status |= LinuxSharedTopicBench::RunModeBenchmarks();
+  }
+  return status;
+}
+
+inline int RunBenchLinuxSharedTopicAllSet()
+{
+  return RunBenchLinuxSharedTopicSet(nullptr);
+}
 
 struct GroupedTestCase
 {
