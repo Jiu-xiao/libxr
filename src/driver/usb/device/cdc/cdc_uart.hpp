@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cdc_base.hpp"
+#include "cdc_uart_rx_backpressure.hpp"
 #include "cdc_uart_tx_dequeue.hpp"
 #include "ep.hpp"
 #include "flag.hpp"
@@ -26,7 +27,8 @@ class CDCUartReadPort : public ReadPort
    * @param size  RX 缓冲区大小 / RX buffer size
    * @param owner 所属 CDCUart 实例 / Owning CDCUart instance
    */
-  explicit CDCUartReadPort(uint32_t size, CDCUart& owner) : ReadPort(size), owner_(owner)
+  explicit CDCUartReadPort(uint32_t size, CDCUart& owner)
+      : ReadPort(size), owner_(owner), rx_backpressure_(*this)
   {
   }
 
@@ -45,12 +47,8 @@ class CDCUartReadPort : public ReadPort
   }
 
   CDCUart& owner_;  ///< 所属 CDCUart / Owning CDCUart
-
-  bool recv_pause_ =
-      false;  ///< 背压标志：true 表示 OUT 未 rearm / Backpressure flag: OUT not rearmed
-  ConstRawData pending_data_{
-      nullptr,
-      0};  ///< pending 数据（指向底层 USB buffer）/ Pending data pointing to USB buffer
+  CDCUartRxBackpressureHelper
+      rx_backpressure_;  ///< RX 背压辅助器 / RX backpressure helper
 };
 
 /**
@@ -173,23 +171,9 @@ class CDCUart : public CDCBase, public LibXR::UART
       return false;
     }
 
-    if (read_port_cdc_.recv_pause_)
+    if (read_port_cdc_.rx_backpressure_.Paused())
     {
-      if (read_port_cdc_.queue_data_->EmptySize() >= read_port_cdc_.pending_data_.size_)
-      {
-        auto push_ans = read_port_cdc_.queue_data_->PushBatch(
-            reinterpret_cast<const uint8_t*>(read_port_cdc_.pending_data_.addr_),
-            read_port_cdc_.pending_data_.size_);
-        if (push_ans == ErrorCode::OK)
-        {
-          read_port_cdc_.ProcessPendingReads(in_isr);
-        }
-        else
-        {
-          return false;
-        }
-      }
-      else
+      if (!read_port_cdc_.rx_backpressure_.FlushPending(in_isr))
       {
         return false;
       }
@@ -203,7 +187,7 @@ class CDCUart : public CDCBase, public LibXR::UART
     auto ans = ep_data_out->Transfer(MPS);
     if (ans == ErrorCode::OK)
     {
-      read_port_cdc_.recv_pause_ = false;
+      read_port_cdc_.rx_backpressure_.MarkRearmed();
       return true;
     }
 
@@ -227,8 +211,7 @@ class CDCUart : public CDCBase, public LibXR::UART
 
     need_write_zlp_ = false;
 
-    read_port_cdc_.recv_pause_ = false;
-    read_port_cdc_.pending_data_ = {nullptr, 0};
+    read_port_cdc_.rx_backpressure_.Reset();
   }
 
   /**
@@ -424,20 +407,9 @@ class CDCUart : public CDCBase, public LibXR::UART
    */
   void OnDataOutComplete(bool in_isr, ConstRawData& data) override
   {
-    if (data.size_ > 0)
+    if (!read_port_cdc_.rx_backpressure_.PushOrPause(data, in_isr))
     {
-      auto push_ans = read_port_cdc_.queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
-      if (push_ans == ErrorCode::OK)
-      {
-        read_port_cdc_.ProcessPendingReads(in_isr);
-      }
-      else
-      {
-        read_port_cdc_.recv_pause_ = true;
-        read_port_cdc_.pending_data_ = data;
-        return;
-      }
+      return;
     }
 
     (void)TryRearmOut(in_isr);
@@ -546,32 +518,14 @@ class CDCUart : public CDCBase, public LibXR::UART
 
 inline void CDCUartReadPort::OnRxDequeue(bool in_isr)
 {
-  if (!recv_pause_)
+  if (!rx_backpressure_.Paused())
   {
     return;
   }
 
-  // pending_data_ 回填 / Push pending_data_ back into queue
-  if (pending_data_.size_ > 0)
+  if (!rx_backpressure_.FlushPending(in_isr))
   {
-    if (queue_data_->EmptySize() >= pending_data_.size_)
-    {
-      auto ans = queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t*>(pending_data_.addr_), pending_data_.size_);
-      if (ans == ErrorCode::OK)
-      {
-        pending_data_ = {nullptr, 0};
-        ProcessPendingReads(in_isr);
-      }
-      else
-      {
-        return;
-      }
-    }
-    else
-    {
-      return;
-    }
+    return;
   }
 
   // 尝试恢复 rearm / Try to rearm OUT
