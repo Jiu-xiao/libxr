@@ -72,20 +72,4 @@ add_custom_target(
           "${_xr_test_linux_build_dir}/test/test"
   COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=full_os
           "${_xr_test_linux_build_dir}/test/test"
-  COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=full_os
-          "${_xr_test_linux_build_dir}/test/test_binding"
-  COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=full_os
-          "${_xr_test_linux_build_dir}/test/verify/environment/linux_shm/test_linux_shm_topic"
-  COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=full_os LIBXR_BENCH_SCALE_DIV=1024
-          BENCH_SET=standard
-          "${_xr_test_linux_build_dir}/test/measure/perf/bench_linux_shared_topic"
-  COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=full_os LIBXR_BENCH_SCALE_DIV=1024
-          BENCH_SET=latency
-          "${_xr_test_linux_build_dir}/test/measure/perf/bench_linux_shared_topic"
-  COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=full_os LIBXR_BENCH_SCALE_DIV=1024
-          BENCH_SET=overload
-          "${_xr_test_linux_build_dir}/test/measure/perf/bench_linux_shared_topic"
-  COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=full_os LIBXR_BENCH_SCALE_DIV=1024
-          BENCH_SET=modes
-          "${_xr_test_linux_build_dir}/test/measure/perf/bench_linux_shared_topic"
   USES_TERMINAL)

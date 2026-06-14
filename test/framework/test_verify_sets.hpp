@@ -14,21 +14,8 @@
 #include "test_case_runner.hpp"
 #include "test_runtime_set.hpp"
 
-inline int RunVerifyLinuxShmBinary()
+inline int RunVerifyLinuxShmSet()
 {
-  TestRuntimeSet runtime_set;
-  const LibXR::ErrorCode load_result = LoadRuntimeSetFromEnv(runtime_set);
-  if (!IsOk(load_result))
-  {
-    return ErrorCodeToExitStatus(load_result);
-  }
-  const LibXR::ErrorCode require_result = RequireRuntimeSet(
-      runtime_set, TestRuntimeSet::FULL_OS, "test_linux_shm_topic");
-  if (!IsOk(require_result))
-  {
-    return ErrorCodeToExitStatus(require_result);
-  }
-
   test_linux_shm_topic();
   return ErrorCodeToExitStatus(LibXR::ErrorCode::OK);
 }

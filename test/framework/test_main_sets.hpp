@@ -11,8 +11,11 @@
 #pragma once
 
 #include "test_base.hpp"
+#include "test_bench_sets.hpp"
+#include "test_binding_sets.hpp"
 #include "test_case_runner.hpp"
 #include "test_runtime_set.hpp"
+#include "test_verify_sets.hpp"
 
 struct GroupedTestCase
 {
@@ -105,7 +108,12 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
      {"message_packet", &RunVoidEntry<test_message_packet>, false}},
     {"system_tests", TestRuntimeSet::BARE_METAL,
      {"database", &RunVoidEntry<test_database>, false}},
+    {"system_tests", TestRuntimeSet::FULL_OS, {"binding", &RunBindingTestSet, false}},
     {"system_tests", TestRuntimeSet::FULL_OS, {"logger", &RunVoidEntry<test_logger>, true}},
+    {"system_tests", TestRuntimeSet::FULL_OS,
+     {"linux_shm_topic", &RunVerifyLinuxShmSet, false}},
+    {"system_tests", TestRuntimeSet::FULL_OS,
+     {"linux_shm_bench", &RunBenchLinuxSharedTopicSet, false}},
     {"system_tests", TestRuntimeSet::FULL_OS,
      {"terminal_command", &RunVoidEntry<test_terminal_command>, true}},
     {"system_tests", TestRuntimeSet::BARE_METAL,

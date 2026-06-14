@@ -20,21 +20,8 @@ inline constexpr TestCase kBindingTests[] = {
     {"database_binding_raw", &RunVoidEntry<test_database_binding_raw>, false},
 };
 
-inline int RunBindingTestBinary()
+inline int RunBindingTestSet()
 {
-  TestRuntimeSet runtime_set;
-  const LibXR::ErrorCode load_result = LoadRuntimeSetFromEnv(runtime_set);
-  if (!IsOk(load_result))
-  {
-    return ErrorCodeToExitStatus(load_result);
-  }
-  const LibXR::ErrorCode require_result =
-      RequireRuntimeSet(runtime_set, TestRuntimeSet::FULL_OS, "test_binding");
-  if (!IsOk(require_result))
-  {
-    return ErrorCodeToExitStatus(require_result);
-  }
-
   for (const auto& test_case : kBindingTests)
   {
     run_test_case(test_case);

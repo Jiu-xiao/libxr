@@ -13,21 +13,8 @@
 #include "../measure/perf/linux_shared_topic_bench_common.hpp"
 #include "test_runtime_set.hpp"
 
-inline int RunBenchLinuxSharedTopicBinary(const char* selector)
+inline int RunBenchLinuxSharedTopicSet(const char* selector)
 {
-  TestRuntimeSet runtime_set;
-  const LibXR::ErrorCode load_result = LoadRuntimeSetFromEnv(runtime_set);
-  if (!IsOk(load_result))
-  {
-    return ErrorCodeToExitStatus(load_result);
-  }
-  const LibXR::ErrorCode require_result = RequireRuntimeSet(
-      runtime_set, TestRuntimeSet::FULL_OS, "bench_linux_shared_topic");
-  if (!IsOk(require_result))
-  {
-    return ErrorCodeToExitStatus(require_result);
-  }
-
   int status = 0;
   const bool run_standard =
       (selector == nullptr) || (std::strcmp(selector, "standard") == 0);

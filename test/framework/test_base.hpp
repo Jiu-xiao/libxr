@@ -8,6 +8,8 @@
  */
 void test_async();
 void test_assert();
+void test_database_binding_raw();
+void test_database_binding_sequential();
 void test_def();
 void test_color();
 void test_crc();
@@ -19,6 +21,7 @@ void test_list();
 void test_kinematic();
 void test_mpmc_queue();
 void test_object_pool();
+void test_print_binding();
 void test_message_packet();
 void test_message_topic();
 void test_queue();
@@ -55,3 +58,4 @@ void test_print();
 void test_rw();
 void test_cb();
 void test_memory();
+void test_linux_shm_topic();
