@@ -37,27 +37,57 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   SPSCQueueBase(size_t element_size, size_t capacity)
       : element_size_(element_size),
         capacity_(capacity),
-        payload_stride_(AlignUpChecked(element_size_, alignof(size_t))),
+        payload_alloc_align_(alignof(std::max_align_t)),
+        payload_stride_(ComputeStride(element_size, alignof(std::byte))),
         payloads_(nullptr),
         head_(0),
         tail_(0)
   {
-    REQUIRE(element_size_ > 0);
-    REQUIRE(capacity_ > 0);
-    REQUIRE(capacity_ <= std::numeric_limits<size_t>::max() - 1);
+    InitStorage();
+  }
+
+  /**
+   * @brief 构造 SPSC 字节队列内核并指定元素对齐 / Construct the SPSC byte-queue core
+   *        with explicit element alignment
+   * @param element_size 单个 payload 的字节数 / Byte size of one payload
+   * @param element_align 单个 payload 的对齐要求 / Alignment requirement of one payload
+   * @param capacity 队列容量 / Queue capacity
+   */
+  SPSCQueueBase(size_t element_size, size_t element_align, size_t capacity)
+      : element_size_(element_size),
+        capacity_(capacity),
+        payload_alloc_align_(alignof(std::max_align_t)),
+        payload_stride_(ComputeStride(element_size, element_align)),
+        payloads_(nullptr),
+        head_(0),
+        tail_(0)
+  {
+    InitStorage();
+  }
+
+ private:
+  void InitStorage()
+  {
+    ASSERT(element_size_ > 0);
+    ASSERT(payload_alloc_align_ > 0);
+    ASSERT(capacity_ > 0);
+    ASSERT(capacity_ <= std::numeric_limits<size_t>::max() - 1);
+    ASSERT((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
 
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
     payloads_ = static_cast<std::byte*>(::operator new[](
-        payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN), std::nothrow));
+        payload_bytes, std::align_val_t(payload_alloc_align_), std::nothrow));
     REQUIRE(payloads_ != nullptr);
   }
+
+ public:
 
   /**
    * @brief 析构 SPSC 字节队列内核 / Destroy the SPSC byte-queue core
    */
   ~SPSCQueueBase()
   {
-    ::operator delete[](payloads_, std::align_val_t(PAYLOAD_ALLOC_ALIGN));
+    ::operator delete[](payloads_, std::align_val_t(payload_alloc_align_));
   }
 
   /**
@@ -183,6 +213,61 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   }
 
   /**
+   * @brief 通过写入器回调批量入队 payload / Enqueue payloads through a writer callback
+   * @tparam Writer 写入器类型 / Writer callback type
+   * @param count payload 个数 / Number of payloads
+   * @param writer 写入器，签名为 `ErrorCode(void* buffer, size_t chunk_count)`
+   *               / Writer with signature `ErrorCode(void* buffer, size_t chunk_count)`
+   * @return 成功返回 `ErrorCode::OK`；空间不足返回 `ErrorCode::FULL`；否则返回写入器错误码
+   *         / Returns `ErrorCode::OK` on success, `ErrorCode::FULL` when free space
+   *         is insufficient, otherwise returns the writer error code
+   * @note 写入器每次收到一段连续 payload 存储区，字节长度为
+   *       `chunk_count * element_size` / The writer receives one contiguous
+   *       payload storage chunk each time, with byte length
+   *       `chunk_count * element_size`
+   */
+  template <typename Writer>
+  ErrorCode PushBytesWithWriter(size_t count, Writer&& writer)
+  {
+    if (count == 0U)
+    {
+      return ErrorCode::OK;
+    }
+
+    const auto current_tail = tail_.load(std::memory_order_relaxed);
+    const auto current_head = head_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t free_space =
+        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
+                                       : (current_head - current_tail - 1);
+
+    if (free_space < count)
+    {
+      return ErrorCode::FULL;
+    }
+
+    const size_t first_chunk = std::min(count, capacity - current_tail);
+    Writer& writer_ref = writer;
+    const ErrorCode first_ec = writer_ref(PayloadPtr(current_tail), first_chunk);
+    if (first_ec != ErrorCode::OK)
+    {
+      return first_ec;
+    }
+
+    if (count > first_chunk)
+    {
+      const ErrorCode second_ec = writer_ref(PayloadPtr(0), count - first_chunk);
+      if (second_ec != ErrorCode::OK)
+      {
+        return second_ec;
+      }
+    }
+
+    tail_.store((current_tail + count) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
+  }
+
+  /**
    * @brief 按字节批量出队多个 payload / Dequeue multiple payloads by bytes
    * @param data 用于接收 payload 的字节缓冲区；传 `nullptr` 时仅丢弃
    *        / Byte buffer receiving payloads; pass `nullptr` to discard only
@@ -218,6 +303,61 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
         LibXR::Memory::FastCopy(dst + index * element_size_,
                                 PayloadPtr((current_head + index) % capacity),
                                 element_size_);
+      }
+    }
+
+    head_.store((current_head + count) % capacity, std::memory_order_release);
+    return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 通过读取器回调批量出队 payload / Dequeue payloads through a reader callback
+   * @tparam Reader 读取器类型 / Reader callback type
+   * @param count payload 个数 / Number of payloads
+   * @param reader 读取器，签名为 `ErrorCode(const void* buffer, size_t chunk_count)`
+   *               / Reader with signature `ErrorCode(const void* buffer, size_t chunk_count)`
+   * @return 成功返回 `ErrorCode::OK`；元素不足返回 `ErrorCode::EMPTY`；否则返回读取器错误码
+   *         / Returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` when there are
+   *         not enough payloads, otherwise returns the reader error code
+   * @note 读取器每次收到一段连续 payload 存储区，字节长度为
+   *       `chunk_count * element_size` / The reader receives one contiguous
+   *       payload storage chunk each time, with byte length
+   *       `chunk_count * element_size`
+   */
+  template <typename Reader>
+  ErrorCode PopBytesWithReader(size_t count, Reader&& reader)
+  {
+    if (count == 0U)
+    {
+      return ErrorCode::OK;
+    }
+
+    const auto current_head = head_.load(std::memory_order_relaxed);
+    const auto current_tail = tail_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+
+    if (available < count)
+    {
+      return ErrorCode::EMPTY;
+    }
+
+    const size_t first_chunk = std::min(count, capacity - current_head);
+    Reader& reader_ref = reader;
+    const ErrorCode first_ec = reader_ref(PayloadPtr(current_head), first_chunk);
+    if (first_ec != ErrorCode::OK)
+    {
+      return first_ec;
+    }
+
+    if (count > first_chunk)
+    {
+      const ErrorCode second_ec = reader_ref(PayloadPtr(0), count - first_chunk);
+      if (second_ec != ErrorCode::OK)
+      {
+        return second_ec;
       }
     }
 
@@ -340,12 +480,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     return (index + 1) % RingCapacity();
   }
 
-  /**
-   * @brief payload 缓冲区整体分配对齐 / Allocation alignment used for the whole payload buffer
-   */
-  static constexpr size_t PAYLOAD_ALLOC_ALIGN =
-      std::max(alignof(size_t), alignof(std::max_align_t));
-
   /// @brief 禁止拷贝构造。 Non-copyable.
   SPSCQueueBase(const SPSCQueueBase&);
   /// @brief 禁止拷贝赋值。 Non-copy-assignable.
@@ -363,9 +497,18 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    */
   static size_t AlignUpChecked(size_t size, size_t align)
   {
-    REQUIRE(align > 0);
-    REQUIRE(size <= std::numeric_limits<size_t>::max() - (align - 1));
+    ASSERT(align > 0);
+    ASSERT((align & (align - 1)) == 0);
+    ASSERT(size <= std::numeric_limits<size_t>::max() - (align - 1));
     return ((size + align - 1) / align) * align;
+  }
+
+  static size_t ComputeStride(size_t element_size, size_t element_align)
+  {
+    ASSERT(element_size > 0);
+    ASSERT(element_align > 0);
+    ASSERT((element_align & (element_align - 1)) == 0);
+    return AlignUpChecked(element_size, element_align);
   }
 
   /**
@@ -381,12 +524,13 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
       return 0;
     }
 
-    REQUIRE(lhs <= std::numeric_limits<size_t>::max() / rhs);
+    ASSERT(lhs <= std::numeric_limits<size_t>::max() / rhs);
     return lhs * rhs;
   }
 
   const size_t element_size_;    ///< 单个 payload 的字节数。 Byte size of one payload.
   const size_t capacity_;        ///< 队列容量。 Queue capacity.
+  const size_t payload_alloc_align_;  ///< 整体分配对齐。 Allocation alignment for the payload buffer.
   const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
   std::byte* payloads_;          ///< payload 字节缓冲区。 Byte buffer storing payloads.
 

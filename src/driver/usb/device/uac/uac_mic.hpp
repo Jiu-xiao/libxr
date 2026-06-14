@@ -895,7 +895,7 @@ LIBXR_PACKED_END
 
   // PCM 字节队列。
   // PCM byte queue.
-  LibXR::SPMCQueue<uint8_t> pcm_queue_;
+  LibXR::SPSCQueue<uint8_t> pcm_queue_;
 
   // 端点回调包装。
   // Endpoint callback wrapper.

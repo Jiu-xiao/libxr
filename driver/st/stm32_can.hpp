@@ -12,7 +12,7 @@
 #endif
 
 #include "can.hpp"
-#include "libxr.hpp"
+#include "queue.hpp"
 
 typedef enum
 {
@@ -45,9 +45,10 @@ class STM32CAN : public CAN
    * @brief 构造 CAN 驱动对象 / Construct CAN driver object
    *
    * @param hcan HAL CAN 句柄 / HAL CAN handle
-   * @param pool_size 发送池大小 / TX pool size
+   * @param queue_size 发送队列大小 / TX queue size
+   * @pre queue_size 必须大于 1。 queue_size must be greater than 1.
    */
-  STM32CAN(CAN_HandleTypeDef* hcan, uint32_t pool_size);
+  STM32CAN(CAN_HandleTypeDef* hcan, uint32_t queue_size);
 
   /**
    * @brief 初始化驱动 / Initialize driver
@@ -102,7 +103,12 @@ class STM32CAN : public CAN
 
   uint32_t txMailbox;
 
-  LockFreePool<ClassicPack> tx_pool_;
+  /// 发送软件队列。 TX software queue.
+  MPMCQueue<ClassicPack> tx_queue_;
+  /// 待重试帧有效标记。 Pending retry frame flag.
+  bool tx_retry_valid_{false};
+  /// 待重试帧。 Pending retry frame.
+  ClassicPack tx_retry_pack_{};
 
   std::atomic<uint32_t> tx_lock_{0};
   std::atomic<uint32_t> tx_pend_{0};

@@ -488,15 +488,6 @@ template <typename Data, typename IndexType = uint32_t>
 using SPSCObjectPool = BasicObjectPool<Data, SPSCQueue<IndexType>>;
 
 /**
- * @brief 基于 SPMC 空闲索引队列的 RAII pool 别名。
- * @brief RAII pool alias backed by the SPMC free-index queue.
- * @tparam Data 槽内对象类型。 Slot object type.
- * @tparam IndexType 槽索引类型，默认 `uint32_t`。 Slot index type, default `uint32_t`.
- */
-template <typename Data, typename IndexType = uint32_t>
-using SPMCObjectPool = BasicObjectPool<Data, SPMCQueue<IndexType>>;
-
-/**
  * @brief 基于 MPMC 空闲索引队列的 RAII pool 别名。
  * @brief RAII pool alias backed by the MPMC free-index queue.
  * @tparam Data 槽内对象类型。 Slot object type.

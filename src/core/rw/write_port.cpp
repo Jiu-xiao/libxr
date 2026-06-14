@@ -4,14 +4,14 @@
 
 using namespace LibXR;
 
-template class LibXR::SPMCQueue<WriteInfoBlock>;
-template class LibXR::SPMCQueue<uint8_t>;
+template class LibXR::SPSCQueue<WriteInfoBlock>;
+template class LibXR::SPSCQueue<uint8_t>;
 
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
     : queue_info_(new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
-                      SPMCQueue<WriteInfoBlock>(queue_size)),
+                      SPSCQueue<WriteInfoBlock>(queue_size)),
       queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
-                                        SPMCQueue<uint8_t>(buffer_size)
+                                        SPSCQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {
 }
