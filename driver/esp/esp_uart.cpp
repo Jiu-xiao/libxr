@@ -255,8 +255,9 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
-// Hardware loopback is exposed as a direct backend toggle.
-// 硬件环回直接作为后端开关暴露。
+// Internal UART loopback is exposed as a direct peripheral toggle for backend
+// self-test and board-free link checks.
+// UART 内部环回直接作为外设开关暴露，用于后端自测和无需外部短接的链路检查。
 ErrorCode ESP32UART::SetLoopback(bool enable)
 {
   if (!uart_hw_enabled_)
@@ -750,6 +751,7 @@ void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_
     read_port_->ProcessPendingReads(in_isr);
   }
 }
+
 // Completion handling also splits by backend model:
 // - DMA mode may already hold one pending preloaded payload.
 // - FIFO mode immediately loads the next request from the queue.

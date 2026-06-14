@@ -57,8 +57,8 @@ class ESP32UART : public UART
   ErrorCode SetConfig(UART::Configuration config) override;
 
   /**
-   * @brief Toggle hardware loopback mode.
-   * @brief 切换硬件环回模式。
+   * @brief Toggle UART peripheral internal loopback mode.
+   * @brief 切换 UART 外设内部环回模式。
    */
   ErrorCode SetLoopback(bool enable);
 

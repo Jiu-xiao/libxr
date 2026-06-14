@@ -8,18 +8,23 @@
 #include "libxr_type.hpp"  // RawData
 
 namespace LibXR
-{ /**
-   * @class DoubleBuffer
-   * @brief 双缓冲区管理类 / Double buffer manager class
-   *
-   * 该类用于在嵌入式场景中管理双缓冲传输结构，支持主动缓冲、备用缓冲切换与填充。
-   * 用于实现无缝 DMA 或 USB 数据流水线发送，提高吞吐效率。
-   * This class provides double-buffer control for efficient pipelined transmission
-   * such as USB or DMA streaming.
-   */
+{
+/**
+ * @class DoubleBuffer
+ * @brief 双缓冲区管理类 / Double buffer manager class
+ *
+ * 该类用于在嵌入式场景中管理双缓冲传输结构，支持主动缓冲、备用缓冲切换与填充。
+ * 用于实现无缝 DMA 或 USB 数据流水线发送，提高吞吐效率。
+ * This class provides double-buffer control for efficient pipelined transmission
+ * such as USB or DMA streaming.
+ */
 class DoubleBuffer
 {
  public:
+  /**
+   * @brief 默认构造一个未初始化的双缓冲对象
+   *        Constructs one uninitialized double buffer object
+   */
   DoubleBuffer() = default;
 
   /**
@@ -30,8 +35,19 @@ class DoubleBuffer
    */
   explicit DoubleBuffer(const LibXR::RawData& raw_data);
 
+  /**
+   * @brief 绑定连续 backing storage 并重置双缓冲状态
+   *        Binds continuous backing storage and resets double-buffer state
+   *
+   * @param raw_data 连续内存区，大小必须满足双缓冲对半切分约束
+   * @param raw_data Continuous memory block satisfying the half-split contract
+   */
   void Init(const LibXR::RawData& raw_data);
 
+  /**
+   * @brief 重置 active/pending 状态，但保留已绑定的 backing storage
+   *        Resets active/pending state while keeping bound backing storage
+   */
   void Reset();
 
   /**
@@ -146,6 +162,10 @@ class DoubleBuffer
    */
   void SetActiveLength(size_t length) { active_len_ = length; }
 
+  /**
+   * @brief 翻转当前活动缓冲区编号
+   *        Flips the current active block index
+   */
   void FlipActiveBlock() { active_ ^= 1; }
 
   /**
