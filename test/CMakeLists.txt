@@ -59,7 +59,7 @@ add_custom_target(
   COMMAND ${CMAKE_COMMAND} -S "${CMAKE_SOURCE_DIR}" -B "${_xr_test_none_build_dir}"
           -DLIBXR_TEST_BUILD=True -DLIBXR_TEST_DRIVER_MODE=ON -DLIBXR_SYSTEM=None
           -DCMAKE_BUILD_TYPE=$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>
-  COMMAND ${CMAKE_COMMAND} --build "${_xr_test_none_build_dir}" --target test -j
+  COMMAND ${CMAKE_COMMAND} --build "${_xr_test_none_build_dir}" --target test -j4
   COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=bare_metal
           "${_xr_test_none_build_dir}/test/test"
   USES_TERMINAL)
@@ -69,7 +69,7 @@ add_custom_target(
   COMMAND ${CMAKE_COMMAND} -S "${CMAKE_SOURCE_DIR}" -B "${_xr_test_linux_build_dir}"
           -DLIBXR_TEST_BUILD=True -DLIBXR_TEST_DRIVER_MODE=ON -DLIBXR_SYSTEM=Linux -DLIBXR_DRIVER=Linux
           -DCMAKE_BUILD_TYPE=$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>
-  COMMAND ${CMAKE_COMMAND} --build "${_xr_test_linux_build_dir}" -j
+  COMMAND ${CMAKE_COMMAND} --build "${_xr_test_linux_build_dir}" -j4
   COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=bare_metal
           "${_xr_test_linux_build_dir}/test/test"
   COMMAND ${CMAKE_COMMAND} -E env XR_TEST_SET=rtos
