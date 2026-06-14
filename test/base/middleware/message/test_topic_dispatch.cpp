@@ -30,9 +30,9 @@ void TestTopicSubscriberDispatch()
   auto topic = LibXR::Topic::CreateTopic<double>("message_topic_tp", &domain);
   static double msg[4];
   auto async_suber = LibXR::Topic::ASyncSubscriber<double>(topic);
-  LibXR::LockFreeQueue<double> msg_queue(10);
+  LibXR::SPSCQueue<double> msg_queue(10);
   auto queue_suber = LibXR::Topic::QueuedSubscriber(topic, msg_queue);
-  LibXR::LockFreeQueue<LibXR::Topic::Message<double>> timed_msg_queue(10);
+  LibXR::SPSCQueue<LibXR::Topic::Message<double>> timed_msg_queue(10);
   auto timed_queue_suber = LibXR::Topic::QueuedSubscriber(topic, timed_msg_queue);
   UNUSED(queue_suber);
   UNUSED(timed_queue_suber);

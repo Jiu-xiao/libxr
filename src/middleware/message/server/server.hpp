@@ -136,7 +136,7 @@ class Topic::Server
   Status status_ = Status::WAIT_START;  ///< 当前 parser 阶段。Current parser stage.
   uint32_t data_len_ = 0;               ///< 当前包头声明的 payload 长度。Payload length declared by the current header.
   RBTree<uint32_t> topic_map_;          ///< 从 topic 名称 CRC32 到 topic 句柄的映射。Map from topic-name CRC32 to topic handle.
-  BaseQueue queue_;                     ///< 输入字节 FIFO。Input byte FIFO.
+  QueueBase queue_;                     ///< 输入字节 FIFO。Input byte FIFO.
   RawData parse_buff_;                  ///< 当前包头和 payload 的暂存缓冲区。Staging buffer holding the current header and payload.
   TopicHandle current_topic_ = nullptr;  ///< 当前包命中的目标 topic。Target topic matched by the current packet.
   MicrosecondTimestamp current_timestamp_;  ///< 当前包头里的时间戳。Timestamp carried by the current packet header.

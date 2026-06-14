@@ -16,11 +16,11 @@
 #include "esp_usb_ep.hpp"
 #include "soc/interrupts.h"
 
-namespace Detail = LibXR::ESPUSBDetail;
-
 namespace LibXR
 {
 
+// 构造时先建立 endpoint 对象映射，再交给上层 USB core 统一驱动 / Build the
+// endpoint-object map first, then hand it to the shared USB core.
 ESP32USBDevice::ESP32USBDevice(
     const std::initializer_list<EPConfig> ep_cfgs,
     USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
@@ -84,17 +84,21 @@ ESP32USBDevice::ESP32USBDevice(
 
 void ESP32USBDevice::Init(bool in_isr)
 {
+  // 每次重新 Init 前先重置 FIFO 账本，避免复用旧的分配状态 / Reset FIFO bookkeeping
+  // before each re-init so stale allocation state is not reused.
   ResetFifoState();
   USB::DeviceCore::Init(in_isr);
 }
 
 void ESP32USBDevice::Deinit(bool in_isr) { USB::DeviceCore::Deinit(in_isr); }
 
+// 地址只在 SETUP status 之前写入硬件，保持 control-transfer 时序正确 / Write the device
+// address only at the setup-before-status point to preserve control-transfer timing.
 ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context context)
 {
   if (context == USB::DeviceCore::Context::SETUP_BEFORE_STATUS)
   {
-    auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+    auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
     dev->dcfg_reg.devaddr = address;
   }
   return ErrorCode::OK;
@@ -102,6 +106,9 @@ ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context c
 
 void ESP32USBDevice::Start(bool)
 {
+  // Start 是幂等的；PHY/IRQ/ROM 清理只做一次，core 寄存器则按当前状态重建 / Start is
+  // idempotent: PHY/IRQ/ROM cleanup are one-time, while core registers are rebuilt for
+  // the current state.
   if (runtime_.started)
   {
     return;
@@ -118,7 +125,7 @@ void ESP32USBDevice::Start(bool)
     USB::DeviceCore::Init(false);
   }
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->dctl_reg.sftdiscon = 0;
   dev->gahbcfg_reg.glbllntrmsk = 1;
   if (runtime_.intr_handle != nullptr)
@@ -130,7 +137,9 @@ void ESP32USBDevice::Start(bool)
 
 void ESP32USBDevice::Stop(bool)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // Stop 只关中断和软断开，不回收一次性 runtime 资源 / Stop only masks interrupts and
+  // soft-disconnects; it does not release one-time runtime resources.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->gahbcfg_reg.glbllntrmsk = 0;
   dev->gintmsk_reg.val = 0;
   if (runtime_.intr_handle != nullptr)
@@ -152,6 +161,8 @@ void IRAM_ATTR ESP32USBDevice::IsrEntry(void* arg)
 
 bool ESP32USBDevice::EnsurePhyReady()
 {
+  // 内部 PHY 生命周期按整个设备实例保留，不做反复创建销毁 / Keep the internal PHY for the
+  // lifetime of the device instance instead of repeatedly recreating it.
   if (runtime_.phy_ready)
   {
     return true;
@@ -179,6 +190,8 @@ bool ESP32USBDevice::EnsurePhyReady()
 
 bool ESP32USBDevice::EnsureInterruptReady()
 {
+  // 中断句柄按实例生命周期保留，只在第一次 Start 前注册一次 / Keep the interrupt handle
+  // for the instance lifetime and register it only once before the first start.
   if (runtime_.irq_ready)
   {
     return true;
@@ -197,6 +210,8 @@ bool ESP32USBDevice::EnsureInterruptReady()
 
 void ESP32USBDevice::EnsureRomUsbCleaned()
 {
+  // 先清掉 ROM 默认 USB/CDC ACM 状态，再接管 DWC2 device core / Tear down the
+  // ROM-provided default USB/CDC ACM state before taking over the DWC2 device core.
   if (runtime_.rom_usb_cleaned)
   {
     return;
@@ -210,7 +225,10 @@ void ESP32USBDevice::EnsureRomUsbCleaned()
 
 void ESP32USBDevice::InitializeCore()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // 这里直接重建 DWC2 device-mode 寄存器基线：先停总中断，复位 core，再重建 FIFO/中断
+  // mask / Rebuild the DWC2 device-mode register baseline directly: stop global
+  // interrupts, reset the core, then rebuild FIFO and interrupt masks.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   dev->gahbcfg_reg.glbllntrmsk = 0;
 
@@ -250,7 +268,7 @@ void ESP32USBDevice::InitializeCore()
   dev->gintsts_reg.val = 0xFFFFFFFFU;
   dev->gotgint_reg.val = 0xFFFFFFFFU;
   dev->gintmsk_reg.val = 0U;
-  dev->gahbcfg_reg.hbstlen = Detail::DMA_BURST_INCR4;
+  dev->gahbcfg_reg.hbstlen = ESPUSBDetail::DMA_BURST_INCR4;
   dev->gahbcfg_reg.dmaen = DmaEnabled() ? 1U : 0U;
   dev->gahbcfg_reg.nptxfemplvl = 1;
   dev->gahbcfg_reg.ptxfemplvl = 1;
@@ -268,7 +286,9 @@ void ESP32USBDevice::InitializeCore()
 
 void ESP32USBDevice::ClearTxFifoRegisters()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // 所有 TX FIFO 尺寸寄存器先清零，再按 endpoint 配置重新分配 / Clear all TX-FIFO size
+  // registers first, then reallocate them per endpoint configuration.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->gnptxfsiz_reg.val = 0U;
   const size_t tx_fifo_reg_count =
       sizeof(dev->dieptxf_regs) / sizeof(dev->dieptxf_regs[0]);
@@ -280,8 +300,10 @@ void ESP32USBDevice::ClearTxFifoRegisters()
 
 void ESP32USBDevice::FlushFifos()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
-  dev->grstctl_reg.txfnum = Detail::FLUSH_ALL_TX_FIFO;
+  // 复位后先冲刷所有 FIFO，避免旧 payload / setup 残留 / Flush all FIFOs after reset so
+  // no stale payload or setup bytes survive.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  dev->grstctl_reg.txfnum = ESPUSBDetail::FLUSH_ALL_TX_FIFO;
   dev->grstctl_reg.txfflsh = 1;
   while (dev->grstctl_reg.txfflsh)
   {
@@ -294,10 +316,13 @@ void ESP32USBDevice::FlushFifos()
 
 void ESP32USBDevice::ResetFifoState()
 {
-  fifo_state_.depth_words = Detail::GetHardwareFifoDepthWords();
+  // FIFO 账本完全由当前硬件深度和 DMA 模式重新推导，不依赖旧运行态 / Recompute the FIFO
+  // bookkeeping solely from the current hardware depth and DMA mode, without relying on
+  // stale runtime state.
+  fifo_state_.depth_words = ESPUSBDetail::GetHardwareFifoDepthWords();
   ASSERT(fifo_state_.depth_words > 0U);
   fifo_state_.rx_words =
-      Detail::CalcConfiguredRxFifoWords(64U, ENDPOINT_COUNT, DmaEnabled());
+      ESPUSBDetail::CalcConfiguredRxFifoWords(64U, ENDPOINT_COUNT, DmaEnabled());
   fifo_state_.tx_next_words = fifo_state_.rx_words;
   std::memset(fifo_state_.tx_words, 0, sizeof(fifo_state_.tx_words));
   std::memset(fifo_state_.tx_bound, 0, sizeof(fifo_state_.tx_bound));
@@ -306,16 +331,21 @@ void ESP32USBDevice::ResetFifoState()
 
 void ESP32USBDevice::ResetDeviceState()
 {
+  // 总线复位后先清 device 级寄存器，再由 endpoint 层各自重建具体硬件配置 / After bus
+  // reset, clear the device-level register state first; each endpoint later rebuilds its
+  // own concrete hardware configuration.
   ResetFifoState();
   ResetControlState();
 
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->grxfsiz_reg.rxfdep = fifo_state_.rx_words;
   ClearTxFifoRegisters();
 }
 
 void ESP32USBDevice::ResetEndpointHardwareState()
 {
+  // endpoint 对象本身保留，但它们的硬件绑定状态必须全部失效 / Keep the endpoint objects,
+  // but invalidate all of their hardware-bound state.
   for (uint8_t i = 0; i < ENDPOINT_COUNT; ++i)
   {
     if (endpoint_map_.in[i] != nullptr)
@@ -331,14 +361,17 @@ void ESP32USBDevice::ResetEndpointHardwareState()
 
 void ESP32USBDevice::ReloadSetupPacketCount()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // EP0 setup 接收窗口在 reset/setup-done 之后都要重新装填 / Reload the EP0 setup receive
+  // window after reset and after each setup-done transition.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->doeptsiz0_reg.val = 0U;
   if (DmaEnabled())
   {
     dev->doeptsiz0_reg.xfersize = 3U * SETUP_PACKET_BYTES;
     dev->doeptsiz0_reg.pktcnt = 1U;
     dev->doeptsiz0_reg.supcnt = 3U;
-    ASSERT(Detail::CacheSyncDmaBuffer(setup_packet_, SETUP_DMA_BUFFER_BYTES, false));
+    ASSERT(
+        ESPUSBDetail::CacheSyncDmaBuffer(setup_packet_, SETUP_DMA_BUFFER_BYTES, false));
     dev->doepdma0_reg.dmaaddr =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(setup_packet_));
     dev->doepctl0_reg.cnak = 1;
@@ -359,6 +392,8 @@ void ESP32USBDevice::ReloadSetupPacketCount()
 
 void ESP32USBDevice::ResetControlState() { control_ = {}; }
 
+// 只跟踪 setup 请求的 data-stage 方向，供 EP0 OUT/STATUS 判定复用 / Track only the
+// setup-request data-stage direction for later EP0 OUT/STATUS decisions.
 void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
 {
   control_.setup_direction_out = (setup != nullptr) && ((setup[0] & 0x80U) == 0U);
@@ -366,7 +401,9 @@ void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
 
 void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // 统一从 gintsts & gintmsk 取当前批次待处理中断，并在有限 guard 内排空 / Pull one
+  // interrupt batch from gintsts & gintmsk and drain it under a bounded guard.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   for (uint32_t guard = 0; guard < INTERRUPT_DISPATCH_GUARD; ++guard)
   {
     usb_dwc_gintsts_reg_t pending = {};
@@ -387,8 +424,8 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
     {
       dev->gintsts_reg.enumdone = 1;
       const uint32_t enum_speed = dev->dsts_reg.enumspd;
-      if (enum_speed != Detail::ENUM_SPEED_FULL_30_TO_60_MHZ &&
-          enum_speed != Detail::ENUM_SPEED_FULL_48_MHZ)
+      if (enum_speed != ESPUSBDetail::ENUM_SPEED_FULL_30_TO_60_MHZ &&
+          enum_speed != ESPUSBDetail::ENUM_SPEED_FULL_48_MHZ)
       {
         ASSERT(false);
       }
@@ -434,17 +471,20 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 
 void ESP32USBDevice::HandleBusReset(bool in_isr)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // 总线复位路径先停所有 endpoint，再清 mask/FIFO/状态，最后把 setup 接收窗口重新挂回去 /
+  // The bus-reset path stops all endpoints first, then clears masks/FIFOs/state, and
+  // finally rearms the setup receive window.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   for (uint8_t i = 0; i < ENDPOINT_COUNT; ++i)
   {
     if (i == 0U)
     {
-      Detail::DisableOutEndpointAndWait(dev->doepctl0_reg);
+      ESPUSBDetail::DisableOutEndpointAndWait(dev->doepctl0_reg);
     }
     else
     {
-      Detail::DisableOutEndpointAndWait(dev->out_eps[i - 1U].doepctl_reg);
+      ESPUSBDetail::DisableOutEndpointAndWait(dev->out_eps[i - 1U].doepctl_reg);
     }
   }
 
@@ -500,7 +540,10 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
 
 void ESP32USBDevice::HandleEndpointInterrupt(bool in_isr, bool in_dir)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // daint 里只保留当前方向且已使能的 endpoint 位，然后逐个转发给 endpoint 对象 / Keep
+  // only enabled endpoint bits for the current direction from daint, then forward them
+  // one by one to the endpoint objects.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint32_t daint = dev->daint_reg.val & dev->daintmsk_reg.val;
   const uint32_t bits = in_dir ? (daint & 0xFFFFU) : ((daint >> 16U) & 0xFFFFU);
 
@@ -531,7 +574,10 @@ void ESP32USBDevice::HandleEndpointInterrupt(bool in_isr, bool in_dir)
 
 void ESP32USBDevice::HandleRxFifoLevel()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // 非 DMA 模式下直接消费 grxstsp；DMA 模式下只把状态转发给 OUT endpoint / In non-DMA
+  // mode, consume grxstsp directly; in DMA mode, only forward the status to the OUT
+  // endpoint.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   usb_dwc_grxstsp_reg_t status = {};
   status.val = dev->grxstsp_reg.val;
   const uint8_t ep_num = static_cast<uint8_t>(status.chnum);
@@ -548,20 +594,20 @@ void ESP32USBDevice::HandleRxFifoLevel()
 
   switch (status.pktsts)
   {
-    case Detail::RX_STATUS_GLOBAL_OUT_NAK:
+    case ESPUSBDetail::RX_STATUS_GLOBAL_OUT_NAK:
       break;
 
-    case Detail::RX_STATUS_SETUP_DATA:
-      Detail::ReadFifoPacket(Detail::GetEndpointFifo(dev, 0), setup_packet_,
-                             sizeof(setup_packet_));
+    case ESPUSBDetail::RX_STATUS_SETUP_DATA:
+      ESPUSBDetail::ReadFifoPacket(ESPUSBDetail::GetEndpointFifo(dev, 0), setup_packet_,
+                                   sizeof(setup_packet_));
       UpdateSetupState(setup_packet_);
       break;
 
-    case Detail::RX_STATUS_SETUP_DONE:
+    case ESPUSBDetail::RX_STATUS_SETUP_DONE:
       ReloadSetupPacketCount();
       break;
 
-    case Detail::RX_STATUS_DATA:
+    case ESPUSBDetail::RX_STATUS_DATA:
     {
       USB::Endpoint* ep = (ep_num < ENDPOINT_COUNT) ? endpoint_map_.out[ep_num] : nullptr;
       if (ep != nullptr)
@@ -571,12 +617,13 @@ void ESP32USBDevice::HandleRxFifoLevel()
       else
       {
         uint8_t sink[64] = {};
-        Detail::ReadFifoPacket(Detail::GetEndpointFifo(dev, 0), sink, status.bcnt);
+        ESPUSBDetail::ReadFifoPacket(ESPUSBDetail::GetEndpointFifo(dev, 0), sink,
+                                     status.bcnt);
       }
       break;
     }
 
-    case Detail::RX_STATUS_TRANSFER_COMPLETE:
+    case ESPUSBDetail::RX_STATUS_TRANSFER_COMPLETE:
     default:
       break;
   }
@@ -585,7 +632,10 @@ void ESP32USBDevice::HandleRxFifoLevel()
 bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool is_bulk,
                                     uint16_t& fifo_words)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // TX FIFO 分配保持“前缀连续”布局；若中间某级无法满足，就整体拒绝，避免留下稀疏映射 /
+  // Keep TX-FIFO allocation prefix-contiguous; if any intermediate level cannot be
+  // satisfied, reject the whole request to avoid sparse mappings.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t max_in_ep_num =
       static_cast<uint8_t>(sizeof(dev->dieptxf_regs) / sizeof(dev->dieptxf_regs[0]));
 
@@ -596,7 +646,7 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
     return false;
   }
 
-  const uint16_t words = Detail::CalcTxFifoWords(packet_size, DmaEnabled());
+  const uint16_t words = ESPUSBDetail::CalcTxFifoWords(packet_size, DmaEnabled());
   if (!fifo_state_.tx_bound[ep_num] && (fifo_state_.allocated_in >= IN_ENDPOINT_LIMIT))
   {
     return false;
@@ -605,7 +655,7 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
   for (uint8_t index = 0U; index <= ep_num; ++index)
   {
     const uint16_t requested_words =
-        (index == ep_num) ? words : Detail::ESP32_SX_FS_MIN_TX_FIFO_WORDS;
+        (index == ep_num) ? words : ESPUSBDetail::ESP32_SX_FS_MIN_TX_FIFO_WORDS;
     if (fifo_state_.tx_words[index] != 0U)
     {
       if (fifo_state_.tx_words[index] < requested_words)
@@ -623,7 +673,7 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
     }
 
     const uint32_t tx_fifo_reg =
-        Detail::PackTxFifoSizeReg(fifo_state_.tx_next_words, requested_words);
+        ESPUSBDetail::PackTxFifoSizeReg(fifo_state_.tx_next_words, requested_words);
     if (index == 0U)
     {
       dev->gnptxfsiz_reg.val = tx_fifo_reg;
@@ -648,9 +698,12 @@ bool ESP32USBDevice::AllocateTxFifo(uint8_t ep_num, uint16_t packet_size, bool i
 
 bool ESP32USBDevice::EnsureRxFifo(uint16_t packet_size)
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(Detail::DWC2_FS_REG_BASE);
+  // RX FIFO 只允许单调扩张，不做在线收缩，避免影响已经配置的 OUT endpoint / RX FIFO is
+  // allowed to grow monotonically only; it is not shrunk online, so already configured
+  // OUT endpoints are not disturbed.
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint16_t needed =
-      Detail::CalcConfiguredRxFifoWords(packet_size, ENDPOINT_COUNT, DmaEnabled());
+      ESPUSBDetail::CalcConfiguredRxFifoWords(packet_size, ENDPOINT_COUNT, DmaEnabled());
   if (needed <= fifo_state_.rx_words)
   {
     return true;

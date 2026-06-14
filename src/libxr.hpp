@@ -20,13 +20,11 @@
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "list.hpp"
-#include "lock_queue.hpp"
 #include "lockfree_list.hpp"
 #include "lockfree_pool.hpp"
-#include "lockfree_queue.hpp"
+#include "object_pool.hpp"
 #include "logger.hpp"
 #include "message.hpp"
-#include "mpmc_queue.hpp"
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include "linux_shared_topic.hpp"
 #endif

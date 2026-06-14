@@ -33,7 +33,7 @@ void TestTopicMutationAndQueueDrop()
   ASSERT(mutable_payload == 5678);
 
   auto queue_drop_topic = LibXR::Topic::CreateTopic<int>("queue_drop_tp", &domain);
-  LibXR::LockFreeQueue<int> drop_queue(1);
+  LibXR::SPSCQueue<int> drop_queue(1);
   auto drop_suber = LibXR::Topic::QueuedSubscriber(queue_drop_topic, drop_queue);
   UNUSED(drop_suber);
   for (size_t i = 0; i < drop_queue.MaxSize(); ++i)

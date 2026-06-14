@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -42,6 +43,19 @@ struct ConsumerArg
   std::atomic<size_t>* pop_count;               ///< 已消费元素数 / Total consumed item count.
   std::atomic<unsigned long long>* pop_sum;     ///< 已消费元素和 / Running sum of consumed values.
   std::atomic<uint8_t>* seen;                   ///< 去重标记表 / Deduplication mark table.
+};
+
+/**
+ * @struct NoDefaultPayload
+ * @brief 无默认构造 payload，用于验证普通 Push/Pop 不依赖默认构造
+ *        / Payload without default construction, used to verify normal Push/Pop
+ *        do not depend on default construction
+ */
+struct NoDefaultPayload
+{
+  explicit NoDefaultPayload(uint32_t value_in) : value(value_in) {}
+
+  uint32_t value;  ///< 有效载荷值 / Payload value.
 };
 
 /**
@@ -96,6 +110,9 @@ void ConsumerTask(ConsumerArg arg)
   arg.consumed_done_count->fetch_add(1, std::memory_order_release);
 }
 }  // namespace
+
+static_assert(!std::is_default_constructible_v<NoDefaultPayload>);
+static_assert(std::is_trivially_copyable_v<NoDefaultPayload>);
 
 /**
  * @brief 验证有界 MPMC 队列的基础行为和并发语义。 Verify basic and
@@ -173,6 +190,18 @@ void test_mpmc_queue()
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
     ASSERT(EqualDouble(value, 2.5));
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+  }
+
+  // Normal Push/Pop use byte payloads and do not require Payload{}.
+  {
+    LibXR::MPMCQueue<NoDefaultPayload> queue(2);
+    NoDefaultPayload pushed(77);
+    NoDefaultPayload popped(0);
+
+    ASSERT(queue.Push(pushed) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Pop(popped) == LibXR::ErrorCode::OK);
+    ASSERT(popped.value == 77);
+    ASSERT(queue.Pop(popped) == LibXR::ErrorCode::EMPTY);
   }
 
   // Two producers and two consumers with the smallest legal capacity.

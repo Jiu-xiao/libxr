@@ -25,12 +25,20 @@ void test_double_buffer()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
   // Test coverage: execute the test items listed in this file header in sequence.
-  uint8_t buff[128] = {};  // 预分配大缓冲区
+  alignas(size_t) uint8_t buff[128] = {};  // 预分配大缓冲区
   LibXR::RawData raw(buff, sizeof(buff));
+
+  LibXR::DoubleBuffer init_later;
+  init_later.Init(raw);
+  ASSERT(init_later.Size() == 64);
+  ASSERT((reinterpret_cast<uintptr_t>(init_later.ActiveBuffer()) % alignof(size_t)) == 0U);
+  ASSERT((reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) == 0U);
 
   LibXR::DoubleBuffer buffer(raw);
 
   ASSERT(buffer.Size() == 64);  // 被平分成两块
+  ASSERT((reinterpret_cast<uintptr_t>(buffer.ActiveBuffer()) % alignof(size_t)) == 0U);
+  ASSERT((reinterpret_cast<uintptr_t>(buffer.PendingBuffer()) % alignof(size_t)) == 0U);
 
   // 1. 检查初始状态
   ASSERT(buffer.HasPending() == false);
@@ -59,6 +67,9 @@ void test_double_buffer()
 
   buffer.Switch();
   ASSERT(buffer.ActiveBuffer() == buff);  // 又回到了原来的 A 区
+
+  buffer.FlipActiveBlock();
+  ASSERT(buffer.ActiveBuffer() == buff + 64);
 
   // 6. 不合法长度填充
   ASSERT(buffer.FillPending(test_data, 80) == false);  // 超过单 buffer 长度
