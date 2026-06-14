@@ -297,23 +297,15 @@ class CDCUart : public CDCBase, public LibXR::UART
      */
     ErrorCode slot_ec = ErrorCode::PENDING;
 
-    // 预写第一段 / Prefill first segment
+    bool prefilled = false;
+    slot_ec = cdc->PrefillTxEndpoint(*ep, prefilled);
+    if (!prefilled)
     {
-      auto buffer = ep->GetBuffer();
-      std::size_t len = 0;
-
-      slot_ec =
-          cdc->tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len);
-      if (slot_ec == ErrorCode::EMPTY || len == 0)
-      {
-        return ErrorCode::PENDING;
-      }
-      if (slot_ec != ErrorCode::OK && slot_ec != ErrorCode::PENDING)
-      {
-        return slot_ec;
-      }
-
-      ep->SetActiveLength(len);
+      return ErrorCode::PENDING;
+    }
+    if (slot_ec != ErrorCode::OK && slot_ec != ErrorCode::PENDING)
+    {
+      return slot_ec;
     }
 
     std::atomic_signal_fence(std::memory_order_seq_cst);
@@ -377,12 +369,8 @@ class CDCUart : public CDCBase, public LibXR::UART
         return ErrorCode::PENDING;
       }
 
-      auto buffer = ep->GetBuffer();
-      std::size_t len2 = 0;
-
-      slot_ec =
-          cdc->tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len2);
-      if (slot_ec == ErrorCode::EMPTY || len2 == 0)
+      slot_ec = cdc->PrefillTxEndpoint(*ep, prefilled);
+      if (!prefilled)
       {
         return ErrorCode::PENDING;
       }
@@ -390,8 +378,6 @@ class CDCUart : public CDCBase, public LibXR::UART
       {
         return slot_ec;
       }
-
-      ep->SetActiveLength(len2);
       // 下一轮继续检查是否可立即发送。
       // The next iteration checks whether sending can continue immediately.
     }
@@ -482,24 +468,16 @@ class CDCUart : public CDCBase, public LibXR::UART
 
     // 3) 预写：仅在已启动 Transfer 后允许读取队列。
     // 3) Prefill: queue reads are allowed only after a Transfer has been kicked.
-    bool primed = false;
+    bool prefilled = false;
     if (tx_deq_.HasOp())
     {
-      auto buffer = ep->GetBuffer();
-      std::size_t len2 = 0;
-
-      auto ec2 =
-          tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len2);
-      if ((ec2 == ErrorCode::OK || ec2 == ErrorCode::PENDING) && len2 > 0)
-      {
-        ep->SetActiveLength(len2);
-        primed = true;
-      }
+      auto ec2 = PrefillTxEndpoint(*ep, prefilled);
+      UNUSED(ec2);
     }
 
     // 4) ZLP 判定 / ZLP decision
     const std::size_t MPS = ep->MaxPacketSize();
-    if (!primed && PENDING_LEN > 0 && MPS > 0 && (PENDING_LEN % MPS) == 0 &&
+    if (!prefilled && PENDING_LEN > 0 && MPS > 0 && (PENDING_LEN % MPS) == 0 &&
         ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
     {
       tx_state_.RequestZlp();
@@ -507,6 +485,36 @@ class CDCUart : public CDCBase, public LibXR::UART
   }
 
  private:
+  /**
+   * @brief 从 TX queue 预写一段数据到 endpoint active buffer。
+   * @brief Prefill one TX segment into the endpoint active buffer.
+   * @param ep Data IN endpoint。 Data IN endpoint.
+   * @param prefilled 输出是否写入了 active length。 Outputs whether active length was
+   * set.
+   * @return `OK` 表示该 op 已全部预写；`PENDING` 表示该 op 仍有剩余。
+   * @return `OK` when the operation is fully prefetched; `PENDING` when bytes remain.
+   */
+  ErrorCode PrefillTxEndpoint(Endpoint& ep, bool& prefilled)
+  {
+    prefilled = false;
+    auto buffer = ep.GetBuffer();
+    std::size_t len = 0;
+
+    auto ec = tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len);
+    if (ec == ErrorCode::EMPTY || len == 0)
+    {
+      return ErrorCode::PENDING;
+    }
+    if (ec != ErrorCode::OK && ec != ErrorCode::PENDING)
+    {
+      return ec;
+    }
+
+    ep.SetActiveLength(len);
+    prefilled = true;
+    return ec;
+  }
+
   CDCUartReadPort read_port_cdc_;    ///< CDC RX 读端口 / CDC RX read port
   LibXR::WritePort write_port_cdc_;  ///< CDC TX 写端口 / CDC TX write port
 
