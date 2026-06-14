@@ -18,6 +18,44 @@
 namespace LibXR
 {
 
+class ESP32CDCJtag;
+
+/**
+ * @brief ESP32 USB Serial/JTAG 读端口 / ESP32 USB Serial/JTAG read port
+ *
+ * 该读端口在软件队列出队后，回调所属 CDC/JTAG 后端继续尝试排空硬件 RX FIFO。
+ * This read port calls back into the owning CDC/JTAG backend after software
+ * dequeues so the hardware RX FIFO can be drained again.
+ */
+class ESP32CDCJtagReadPort : public ReadPort
+{
+ public:
+  /**
+   * @brief 构造读端口 / Construct the read port
+   *
+   * @param size RX 队列容量（字节） / RX queue capacity in bytes
+   * @param owner 所属 CDC/JTAG 后端 / Owning CDC/JTAG backend
+   */
+  explicit ESP32CDCJtagReadPort(size_t size, ESP32CDCJtag& owner)
+      : ReadPort(size), owner_(owner)
+  {
+  }
+
+  /**
+   * @brief 软件队列出队后的回调 / Callback after software RX dequeue
+   */
+  void OnRxDequeue(bool in_isr) override;
+
+  ESP32CDCJtagReadPort& operator=(ReadFun fun)
+  {
+    ReadPort::operator=(fun);
+    return *this;
+  }
+
+ private:
+  ESP32CDCJtag& owner_;  ///< 所属 CDC/JTAG 后端 / Owning CDC/JTAG backend
+};
+
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG) && CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 static_assert(false,
               "ESP32CDCJtag conflicts with ESP-IDF primary USB Serial/JTAG console. "
@@ -34,6 +72,8 @@ static_assert(false,
  */
 class ESP32CDCJtag : public UART
 {
+  friend class ESP32CDCJtagReadPort;
+
  public:
   /**
    * @brief 构造并初始化 USB Serial/JTAG 后端状态 / Construct and initialize the USB Serial/JTAG backend state
@@ -78,6 +118,11 @@ class ESP32CDCJtag : public UART
    * @brief 分发一批 USB Serial/JTAG 中断 / Dispatch one USB Serial/JTAG interrupt batch
    */
   void HandleInterrupt();
+
+  /**
+   * @brief 尝试将硬件 RX FIFO 数据推进软件队列 / Try draining hardware RX FIFO into the software queue
+   */
+  void DrainRxToQueue(bool in_isr);
 
   /**
    * @brief 从队列化的 TX 状态启动发送工作 / Start transmit work from the queued TX state
@@ -156,9 +201,10 @@ class ESP32CDCJtag : public UART
   bool intr_installed_ = false;          ///< Whether the interrupt was installed.
   bool hw_inited_ = false;               ///< Whether hardware initialization completed.
   Flag::Atomic tx_busy_{};               ///< Hardware TX engine busy flag.
+  Flag::Atomic rx_draining_{};           ///< RX FIFO draining gate.
   Flag::Plain in_tx_isr_;                ///< Reentry guard while servicing TX IRQs.
 
-  ReadPort _read_port;   ///< Read-side queue bridge exposed to `UART`.
+  ESP32CDCJtagReadPort _read_port;   ///< Read-side queue bridge exposed to `UART`.
   WritePort _write_port; ///< Write-side queue bridge exposed to `UART`.
 };
 

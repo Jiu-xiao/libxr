@@ -30,6 +30,11 @@ constexpr uint32_t ALL_INTR_MASK = TX_INTR_MASK | RX_INTR_MASK;
 namespace LibXR
 {
 
+void ESP32CDCJtagReadPort::OnRxDequeue(bool in_isr)
+{
+  owner_.DrainRxToQueue(in_isr);
+}
+
 // Construct queue bridges first, then bind the TX helper storage before
 // touching the hardware interrupt source.
 // 先构造队列桥，再绑定 TX helper storage，最后再触碰硬件中断源。
@@ -38,7 +43,7 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
     : UART(&_read_port, &_write_port),
       config_(config),
       tx_slot_storage_(new (std::nothrow) uint8_t[tx_buffer_size * 2U]),
-      _read_port(rx_buffer_size),
+      _read_port(rx_buffer_size, *this),
       _write_port(tx_queue_size, tx_buffer_size)
 {
   ASSERT(tx_slot_storage_ != nullptr);
@@ -310,6 +315,37 @@ void IRAM_ATTR ESP32CDCJtag::PushRxBytes(const uint8_t* data, size_t size, bool 
   }
 }
 
+// RX draining is shared by the IRQ path and the dequeue callback path. A small
+// atomic gate keeps both contexts from consuming the hardware FIFO concurrently.
+// RX 排空由 IRQ 路径和出队回调路径共享。一个轻量原子 gate 防止两个上下文并发
+// 消费同一个硬件 FIFO。
+void IRAM_ATTR ESP32CDCJtag::DrainRxToQueue(bool in_isr)
+{
+  if (rx_draining_.TestAndSet())
+  {
+    return;
+  }
+
+  while (usb_serial_jtag_ll_rxfifo_data_available())
+  {
+    uint8_t rx_tmp[64] = {};
+    const int got = usb_serial_jtag_ll_read_rxfifo(rx_tmp, sizeof(rx_tmp));
+    if (got <= 0)
+    {
+      break;
+    }
+
+    PushRxBytes(rx_tmp, static_cast<size_t>(got), in_isr);
+
+    if (read_port_->queue_data_->EmptySize() == 0U)
+    {
+      break;
+    }
+  }
+
+  rx_draining_.Clear();
+}
+
 // Starting active TX arms the TX interrupt and immediately tries one local
 // pump so very short payloads can complete in the same context.
 // 启动 active TX 时会先使能 TX 中断，并立即做一次本地补料，这样很短的
@@ -461,13 +497,7 @@ void IRAM_ATTR ESP32CDCJtag::HandleInterrupt()
   if (rx_status != 0U)
   {
     usb_serial_jtag_ll_clr_intsts_mask(rx_status);
-
-    uint8_t rx_tmp[64] = {};
-    const int got = usb_serial_jtag_ll_read_rxfifo(rx_tmp, sizeof(rx_tmp));
-    if (got > 0)
-    {
-      PushRxBytes(rx_tmp, static_cast<size_t>(got), true);
-    }
+    DrainRxToQueue(true);
   }
 
   const uint32_t tx_status = status & TX_INTR_MASK;
