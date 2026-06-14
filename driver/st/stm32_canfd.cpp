@@ -257,11 +257,7 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
 
   if (tx_queue_.Push(pack) != ErrorCode::OK)
   {
-    TxService();
-    if (tx_queue_.Push(pack) != ErrorCode::OK)
-    {
-      return ErrorCode::FULL;
-    }
+    return ErrorCode::FULL;
   }
 
   TxService();
@@ -634,11 +630,7 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
 
   if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
   {
-    TxService();
-    if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
-    {
-      return ErrorCode::FULL;
-    }
+    return ErrorCode::FULL;
   }
 
   TxService();
