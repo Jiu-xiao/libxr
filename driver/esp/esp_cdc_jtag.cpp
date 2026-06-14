@@ -385,23 +385,27 @@ void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
     return;
   }
 
+  if (!tx_double_buffer_.HasPending())
+  {
+    StopTxTransfer();
+    return;
+  }
+
   if (StartPendingTxIfIdle(in_isr))
   {
     if (!tx_double_buffer_.HasPending())
     {
       (void)LoadPendingTxFromQueue(in_isr);
-      (void)StartPendingTxIfIdle(in_isr);
     }
+    return;
   }
 
-  if (!tx_busy_.IsSet() && !tx_double_buffer_.HasActive() &&
-      !tx_double_buffer_.HasPending())
-  {
-    StopTxTransfer();
-  }
+  StopTxTransfer();
 }
 
-// TX 按 active/pending 模型启动 / TX starts with the active/pending model.
+// TX 发起路径只做两件事：空闲时启动新的 active，或忙时补一个 pending。
+// TX initiation only does two things: start a new active when idle, or preload
+// one pending request while busy.
 ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
 {
   if (in_tx_isr_.IsSet())
@@ -409,18 +413,14 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
     return ErrorCode::PENDING;
   }
 
-  if (StartPendingTxIfIdle(in_isr))
+  if (!tx_busy_.IsSet() && !tx_double_buffer_.HasActive() &&
+      !tx_double_buffer_.HasPending())
   {
-    return ErrorCode::PENDING;
-  }
+    if (!LoadActiveTxFromQueue(in_isr))
+    {
+      return ErrorCode::PENDING;
+    }
 
-  if (!tx_double_buffer_.HasActive())
-  {
-    (void)LoadActiveTxFromQueue(in_isr);
-  }
-
-  if (!tx_busy_.IsSet() && tx_double_buffer_.HasActive())
-  {
     if (!StartActiveTransfer(in_isr))
     {
       ClearActiveTx();
@@ -435,10 +435,9 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::TryStartTx(bool in_isr)
     return ErrorCode::OK;
   }
 
-  if (!tx_double_buffer_.HasPending())
+  if (tx_busy_.IsSet() && !tx_double_buffer_.HasPending())
   {
     (void)LoadPendingTxFromQueue(in_isr);
-    (void)StartPendingTxIfIdle(in_isr);
   }
 
   return ErrorCode::PENDING;
