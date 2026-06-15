@@ -21,6 +21,7 @@ void test_linux_shm_topic();
 
 enum class BenchSelector
 {
+  Smoke,
   All,
   Standard,
   Latency,
@@ -54,6 +55,12 @@ inline int RunBenchLinuxSharedTopicSet(BenchSelector selector)
   int status = 0;
   switch (selector)
   {
+    case BenchSelector::Smoke:
+      status |= LinuxSharedTopicBench::RunStandardBenchmarksSmoke();
+      status |= LinuxSharedTopicBench::RunLatencyBenchmarksSmoke();
+      status |= LinuxSharedTopicBench::RunOverloadBenchmarksSmoke();
+      status |= LinuxSharedTopicBench::RunModeBenchmarksSmoke();
+      break;
     case BenchSelector::All:
       status |= LinuxSharedTopicBench::RunStandardBenchmarks();
       status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
@@ -76,19 +83,9 @@ inline int RunBenchLinuxSharedTopicSet(BenchSelector selector)
   return status;
 }
 
-inline int RunBenchLinuxSharedTopicAllSet()
+inline int RunBenchLinuxSharedTopicDefaultSet()
 {
-  return RunBenchLinuxSharedTopicSet(BenchSelector::All);
-}
-
-inline int RunBenchLinuxSharedTopicSmokeSet()
-{
-  int status = 0;
-  status |= LinuxSharedTopicBench::RunStandardBenchmarksSmoke();
-  status |= LinuxSharedTopicBench::RunLatencyBenchmarksSmoke();
-  status |= LinuxSharedTopicBench::RunOverloadBenchmarksSmoke();
-  status |= LinuxSharedTopicBench::RunModeBenchmarksSmoke();
-  return status;
+  return RunBenchLinuxSharedTopicSet(BenchSelector::Smoke);
 }
 
 struct GroupedTestCase
@@ -153,7 +150,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"linux_host_tests", {"stdio_and_database", &RunLinuxStdioAndDatabaseSet, false}},
     {"system_tests", {"logger", &RunVoidEntry<test_logger>, true}},
     {"system_tests", {"linux_shm_topic", &RunLinuxShmSet, false}},
-    {"system_tests", {"linux_shm_bench", &RunBenchLinuxSharedTopicSmokeSet, false}},
+    {"system_tests", {"linux_shm_bench", &RunBenchLinuxSharedTopicDefaultSet, false}},
     {"system_tests", {"terminal_command", &RunVoidEntry<test_terminal_command>, true}},
     {"system_tests", {"terminal_display", &RunVoidEntry<test_terminal_display>, false}},
     {"system_tests", {"terminal_input", &RunVoidEntry<test_terminal_input>, true}},
