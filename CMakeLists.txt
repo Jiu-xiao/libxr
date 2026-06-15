@@ -6,7 +6,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(LIBXR_DEV_ASSERT_BUILD "Enable LibXR maintainer-only development assertions" OFF)
-
 if(LIBXR_SHARED_BUILD)
   add_library(${PROJECT_NAME} SHARED)
 elseif(LIBXR_STATIC_BUILD)
@@ -260,5 +259,5 @@ if(XROBOT_MODULES_DIR)
 endif()
 
 if(LIBXR_TEST_BUILD)
-  include(cmake/test.cmake)
+  add_subdirectory(test)
 endif()
