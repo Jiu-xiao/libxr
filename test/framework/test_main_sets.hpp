@@ -19,6 +19,15 @@ void test_linux_database_raw();
 void test_linux_database_sequential();
 void test_linux_shm_topic();
 
+enum class BenchSelector
+{
+  All,
+  Standard,
+  Latency,
+  Overload,
+  Modes,
+};
+
 inline int RunLinuxStdioAndDatabaseSet()
 {
   static constexpr TestCase kLinuxHostTests[] = {
@@ -40,50 +49,36 @@ inline int RunLinuxShmSet()
   return 0;
 }
 
-inline int RunBenchLinuxSharedTopicSet(const char* selector)
+inline int RunBenchLinuxSharedTopicSet(BenchSelector selector)
 {
   int status = 0;
-  bool matched = false;
-  const bool run_standard =
-      (selector == nullptr) || (std::strcmp(selector, "standard") == 0);
-  const bool run_latency =
-      (selector == nullptr) || (std::strcmp(selector, "latency") == 0);
-  const bool run_overload =
-      (selector == nullptr) || (std::strcmp(selector, "overload") == 0);
-  const bool run_modes = (selector == nullptr) || (std::strcmp(selector, "modes") == 0);
-
-  if (run_standard)
+  switch (selector)
   {
-    matched = true;
-    status |= LinuxSharedTopicBench::RunStandardBenchmarks();
-  }
-  if (run_latency)
-  {
-    matched = true;
-    status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
-  }
-  if (run_overload)
-  {
-    matched = true;
-    status |= LinuxSharedTopicBench::RunOverloadBenchmarks();
-  }
-  if (run_modes)
-  {
-    matched = true;
-    status |= LinuxSharedTopicBench::RunModeBenchmarks();
-  }
-  if (!matched)
-  {
-    std::fprintf(stderr, "Unknown bench selector: %s\n",
-                 selector == nullptr ? "<null>" : selector);
-    return 1;
+    case BenchSelector::All:
+      status |= LinuxSharedTopicBench::RunStandardBenchmarks();
+      status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
+      status |= LinuxSharedTopicBench::RunOverloadBenchmarks();
+      status |= LinuxSharedTopicBench::RunModeBenchmarks();
+      break;
+    case BenchSelector::Standard:
+      status |= LinuxSharedTopicBench::RunStandardBenchmarks();
+      break;
+    case BenchSelector::Latency:
+      status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
+      break;
+    case BenchSelector::Overload:
+      status |= LinuxSharedTopicBench::RunOverloadBenchmarks();
+      break;
+    case BenchSelector::Modes:
+      status |= LinuxSharedTopicBench::RunModeBenchmarks();
+      break;
   }
   return status;
 }
 
 inline int RunBenchLinuxSharedTopicAllSet()
 {
-  return RunBenchLinuxSharedTopicSet(nullptr);
+  return RunBenchLinuxSharedTopicSet(BenchSelector::All);
 }
 
 inline int RunBenchLinuxSharedTopicSmokeSet()
