@@ -22,7 +22,7 @@ uint32_t LibXR::libxr_freertos_timebase_tick_offset = 0;
 
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
-  if (Timebase::timebase == nullptr)
+  if (!Timebase::IsReady())
   {
     /* You should initialize Timebase first */
     ASSERT(false);

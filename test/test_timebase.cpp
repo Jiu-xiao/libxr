@@ -14,17 +14,6 @@ struct TimebaseWrapProbe : LibXR::Timebase
   static uint64_t GetUs() { return GetConfiguredWrapRangeUs(); }
   static uint32_t GetMs() { return GetConfiguredWrapRangeMs(); }
 
-  LibXR::MicrosecondTimestamp _get_microseconds() override
-  {
-    ASSERT(false);
-    return 0;
-  }
-
-  LibXR::MillisecondTimestamp _get_milliseconds() override
-  {
-    ASSERT(false);
-    return 0;
-  }
 };
 }  // namespace
 
