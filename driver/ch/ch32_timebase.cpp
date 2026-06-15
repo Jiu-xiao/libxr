@@ -13,9 +13,9 @@ MicrosecondTimestamp Timebase::GetMicroseconds()
 {
   do
   {
-    uint32_t tick_old = sys_tick_ms_;
+    uint32_t tick_old = CH32Timebase::sys_tick_ms_;
     uint32_t cnt_old = SysTick->CNT;
-    uint32_t tick_new = sys_tick_ms_;
+    uint32_t tick_new = CH32Timebase::sys_tick_ms_;
     uint32_t cnt_new = SysTick->CNT;
 
     auto tick_diff = tick_new - tick_old;
