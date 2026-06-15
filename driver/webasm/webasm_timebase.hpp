@@ -1,8 +1,5 @@
 #pragma once
 
-#include <chrono>
-#include <cstdint>
-
 #include "timebase.hpp"
 
 namespace LibXR
@@ -14,38 +11,13 @@ namespace LibXR
 class WebAsmTimebase : public Timebase
 {
  public:
-  WebAsmTimebase()
-  {
-    // Initialize reference timestamp.
-    start_time_ = std::chrono::system_clock::now();
-  }
-
   /**
-   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
-   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
+   * @brief 构造函数 / Constructor
+   *
+   * 记录 WebAssembly 运行时的时间参考点。
+   * Captures the WebAssembly runtime reference timestamp.
    */
-  MicrosecondTimestamp _get_microseconds() override
-  {
-    auto now = std::chrono::system_clock::now();
-    auto us =
-        std::chrono::duration_cast<std::chrono::microseconds>(now - start_time_).count();
-    return MicrosecondTimestamp(static_cast<uint64_t>(us));
-  }
-
-  /**
-   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
-   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
-   */
-  MillisecondTimestamp _get_milliseconds() override
-  {
-    auto now = std::chrono::system_clock::now();
-    auto ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time_).count();
-    return MillisecondTimestamp(static_cast<uint32_t>(ms));
-  }
-
- private:
-  std::chrono::system_clock::time_point start_time_;
+  WebAsmTimebase();
 };
 
 }  // namespace LibXR

@@ -26,14 +26,7 @@ uint64_t ToTimeoutUs(uint32_t timeout_ms)
                                     : static_cast<uint64_t>(timeout_ms) * 1000ULL;
 }
 
-uint64_t GetNowUs()
-{
-  if (Timebase::timebase != nullptr)
-  {
-    return static_cast<uint64_t>(Timebase::GetMicroseconds());
-  }
-  return static_cast<uint64_t>(esp_timer_get_time());
-}
+uint64_t GetNowUs() { return static_cast<uint64_t>(Timebase::GetMicroseconds()); }
 
 inline void SetBusClockAtomic(i2c_port_t port, bool enable)
 {
@@ -127,7 +120,8 @@ ErrorCode StartAndWaitSegment(i2c_hal_context_t& hal, int done_cmd_idx,
 template <typename OperationType>
 ErrorCode Complete(OperationType& op, bool in_isr, ErrorCode result)
 {
-  // Synchronous fast path: BLOCK ops return directly without post+wait round-trip.
+  // Synchronous fast path: BLOCK ops return directly without post+wait
+  // round-trip.
   if (op.type != OperationType::OperationType::BLOCK)
   {
     op.UpdateStatus(in_isr, result);

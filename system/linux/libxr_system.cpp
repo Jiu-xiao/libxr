@@ -119,8 +119,6 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 
   *LibXR::STDIO::read_ = read_fun;
 
-  UNUSED(clock_gettime(CLOCK_MONOTONIC, &libxr_linux_start_time_spec));
-
   struct termios tty;
   tcgetattr(STDIN_FILENO, &tty);           // 获取当前终端属性
   tty.c_lflag &= ~(ICANON | ECHO);         // 禁用规范模式和回显

@@ -1900,8 +1900,7 @@ LIBXR_PACKED_END
    */
   uint32_t MakeTimestampUs(uint8_t ch) const
   {
-    if (ch < can_count_ && timestamps_enabled_ch_[ch] &&
-        LibXR::Timebase::timebase != nullptr)
+    if (ch < can_count_ && timestamps_enabled_ch_[ch])
     {
       return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
     }
@@ -1914,11 +1913,7 @@ LIBXR_PACKED_END
    */
   uint32_t MakeTimestampUsGlobal() const
   {
-    if (LibXR::Timebase::timebase != nullptr)
-    {
-      return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
-    }
-    return 0u;
+    return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
   }
 
   /**

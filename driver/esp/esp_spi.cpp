@@ -39,21 +39,15 @@ uint8_t ResolveSpiMode(SPI::ClockPolarity polarity, SPI::ClockPhase phase)
 
 spi_dma_ctx_t* ToDmaCtx(void* ctx) { return reinterpret_cast<spi_dma_ctx_t*>(ctx); }
 
-uint64_t GetNowUs()
-{
-  if (Timebase::timebase != nullptr)
-  {
-    return static_cast<uint64_t>(Timebase::GetMicroseconds());
-  }
-  return static_cast<uint64_t>(esp_timer_get_time());
-}
+uint64_t GetNowUs() { return static_cast<uint64_t>(Timebase::GetMicroseconds()); }
 
 uint64_t CalcPollingTimeoutUs(size_t size, uint32_t bus_hz)
 {
   const uint32_t safe_hz = (bus_hz == 0U) ? 1U : bus_hz;
   const uint64_t bits = static_cast<uint64_t>(size) * 8ULL;
   const uint64_t wire_time_us = (bits * 1000000ULL + safe_hz - 1ULL) / safe_hz;
-  // Keep a generous margin for bus contention / APB jitter while staying time-based.
+  // Keep a generous margin for bus contention / APB jitter while staying
+  // time-based.
   return std::max<uint64_t>(100ULL, wire_time_us * 8ULL + 50ULL);
 }
 
@@ -103,7 +97,8 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
   flags |= CACHE_SYNC_FLAG_UNALIGNED;
 
   const esp_err_t ret = esp_cache_msync(const_cast<void*>(addr), size, flags);
-  // Non-cacheable regions can return ESP_ERR_INVALID_ARG; treat as no-op success.
+  // Non-cacheable regions can return ESP_ERR_INVALID_ARG; treat as no-op
+  // success.
   return (ret == ESP_OK) || (ret == ESP_ERR_INVALID_ARG);
 }
 #endif
@@ -680,7 +675,8 @@ ErrorCode ESP32SPI::StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t si
   }
   started = true;
 
-  // On ESP32 classic, enable data lines only after DMA descriptors/channels are ready.
+  // On ESP32 classic, enable data lines only after DMA descriptors/channels are
+  // ready.
   spi_ll_enable_mosi(hw_, 1);
   spi_ll_enable_miso(hw_, rx_enabled ? 1 : 0);
   spi_ll_clear_int_stat(hw_);
