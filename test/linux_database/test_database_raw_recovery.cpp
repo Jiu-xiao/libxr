@@ -1,14 +1,14 @@
 /**
  * @file test_raw_recovery.cpp
- * @brief binding `DatabaseRaw` recovery 场景子测试。 Split test unit for binding `DatabaseRaw` recovery scenarios.
+ * @brief linux file-backed `DatabaseRaw` recovery 场景子测试。 Split test unit for linux file-backed `DatabaseRaw` recovery scenarios.
  */
-#include "database_binding_test_common.hpp"
-#include "raw_binding_test_groups.hpp"
+#include "linux_database_test_common.hpp"
+#include "raw_database_test_groups.hpp"
 
 namespace
 {
 
-using namespace DatabaseBindingTestCommon;
+using namespace LinuxDatabaseTestCommon;
 
 /**
  * @brief 测试项函数 `TestDatabaseRawInvalidMainKeyMetadataReinitializes`。 Test-item function `TestDatabaseRawInvalidMainKeyMetadataReinitializes`.
@@ -101,11 +101,11 @@ void TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunDatabaseBindingRawRecoveryTests`。 Test-item function `RunDatabaseBindingRawRecoveryTests`.
- * @details 测试内容：执行当前分组里的 `DatabaseRaw` binding 子场景。 Execute the grouped `DatabaseRaw` binding sub-scenarios.
+ * @brief 测试项函数 `RunLinuxDatabaseRawRecoveryTests`。 Test-item function `RunLinuxDatabaseRawRecoveryTests`.
+ * @details 测试内容：执行当前分组里的 `DatabaseRaw` linux database 子场景。 Execute the grouped `DatabaseRaw` linux database sub-scenarios.
  *          测试原理：把 smoke / failure / recovery 三类路径拆开，避免一个原始大文件持续膨胀。 Split smoke, failure, and recovery paths so one raw monolithic file does not keep growing.
  */
-void RunDatabaseBindingRawRecoveryTests()
+void RunLinuxDatabaseRawRecoveryTests()
 {
   TestDatabaseRawInvalidMainKeyMetadataReinitializes();
   TestDatabaseRawInvalidBackupMetadataDoesNotRestore();

@@ -1,6 +1,6 @@
 /**
- * @file database_binding_flash_test_common.hpp
- * @brief database binding 测试共用 flash/fatal helper。 Shared flash and fatal-path helpers for database binding tests.
+ * @file linux_database_flash_test_common.hpp
+ * @brief linux database 测试共用 flash/fatal helper。 Shared flash and fatal-path helpers for linux database tests.
  * @details 共享职责：
  *          1. 定义 flash 布局常量和 main/backup 校验元数据常量。
  *          2. 提供可注入读写擦失败的 `FailingFlash`。
@@ -26,7 +26,7 @@
 #include "linux_flash.hpp"
 #include "test.hpp"
 
-namespace DatabaseBindingTestCommon
+namespace LinuxDatabaseTestCommon
 {
 
 using namespace LibXR;
@@ -174,4 +174,4 @@ void ExpectFatalExit(int exit_code, Func&& func)
   ASSERT(WEXITSTATUS(status) == exit_code);
 }
 
-}  // namespace DatabaseBindingTestCommon
+}  // namespace LinuxDatabaseTestCommon

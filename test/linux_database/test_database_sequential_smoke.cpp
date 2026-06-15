@@ -1,6 +1,6 @@
 /**
  * @file test_sequential_smoke.cpp
- * @brief binding `DatabaseRawSequential` smoke/save 场景子测试。 Split test unit for binding `DatabaseRawSequential` smoke/save scenarios.
+ * @brief linux file-backed `DatabaseRawSequential` smoke/save 场景子测试。 Split test unit for linux file-backed `DatabaseRawSequential` smoke/save scenarios.
  * @details 测试项目：
  *          1. 多 key sequential 数据库烟雾流量与重复 load/store。
  *          2. `Save()` 保存当前值语义。
@@ -8,17 +8,17 @@
  *          1. Multi-key sequential smoke traffic with repeated load/store.
  *          2. `Save()` persists the key object's current value.
  */
-#include "database_binding_test_common.hpp"
+#include "linux_database_test_common.hpp"
 
 namespace
 {
 
-using namespace DatabaseBindingTestCommon;
+using namespace LinuxDatabaseTestCommon;
 
-void TestDatabaseBindingSequentialSmoke()
+void TestLinuxDatabaseSequentialSmoke()
 {
-  // 测试内容：验证 sequential binding 在长时间多 key 读写流量下保持持久化一致性。
-  // Test coverage: verify that the sequential binding preserves persistence consistency under long-running multi-key traffic.
+  // 测试内容：验证 linux database sequential 在长时间多 key 读写流量下保持持久化一致性。
+  // Test coverage: verify that the linux database sequential keeps persistence consistency under long-running multi-key traffic.
   constexpr size_t FLASH_SIZE = XR_DB_FLASH_SIZE;
 
   LinuxBinaryFileFlash<FLASH_SIZE> test_flash("/tmp/flash_test.bin", 512, 8, true, true);
@@ -112,8 +112,8 @@ void TestDatabaseSequentialSaveCurrentValue()
 
 }  // namespace
 
-void RunDatabaseBindingSequentialSmokeTests()
+void RunLinuxDatabaseSequentialSmokeTests()
 {
-  TestDatabaseBindingSequentialSmoke();
+  TestLinuxDatabaseSequentialSmoke();
   TestDatabaseSequentialSaveCurrentValue();
 }

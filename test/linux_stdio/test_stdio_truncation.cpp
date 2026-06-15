@@ -1,10 +1,10 @@
 /**
  * @file test_stdio_truncation.cpp
- * @brief binding `print` 截断语义子测试。 Split test unit for binding `print` truncation semantics.
+ * @brief linux stdio `print` 截断语义子测试。 Split test unit for linux stdio `print` truncation semantics.
  */
-#include "print_binding_test_common.hpp"
+#include "linux_stdio_print_test_common.hpp"
 
-namespace LibXRBindingPrintTest
+namespace LibXRLinuxStdioPrintTest
 {
 /**
  * @brief 测试项函数 `TestStdioTruncation`。 Test-item function `TestStdioTruncation`.
@@ -137,4 +137,4 @@ void TestStdioTruncation()
   }
 }
 
-}  // namespace LibXRBindingPrintTest
+}  // namespace LibXRLinuxStdioPrintTest

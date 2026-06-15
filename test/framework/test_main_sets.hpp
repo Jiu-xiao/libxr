@@ -10,31 +10,31 @@
  */
 #pragma once
 
-#include "../measure/perf/linux_shared_topic_bench_common.hpp"
+#include "../linux_bench/linux_shared_topic_bench_common.hpp"
 #include "test_base.hpp"
 #include "test_case_runner.hpp"
 
-void test_print_binding();
-void test_database_binding_raw();
-void test_database_binding_sequential();
+void test_linux_stdio_print();
+void test_linux_database_raw();
+void test_linux_database_sequential();
 void test_linux_shm_topic();
 
-inline int RunBindingTestSet()
+inline int RunLinuxStdioAndDatabaseSet()
 {
-  static constexpr TestCase kBindingTests[] = {
-      {"print_binding", &RunVoidEntry<test_print_binding>, false},
-      {"database_binding_sequential", &RunVoidEntry<test_database_binding_sequential>, false},
-      {"database_binding_raw", &RunVoidEntry<test_database_binding_raw>, false},
+  static constexpr TestCase kLinuxHostTests[] = {
+      {"linux_stdio_print", &RunVoidEntry<test_linux_stdio_print>, false},
+      {"linux_database_sequential", &RunVoidEntry<test_linux_database_sequential>, false},
+      {"linux_database_raw", &RunVoidEntry<test_linux_database_raw>, false},
   };
 
-  for (const auto& test_case : kBindingTests)
+  for (const auto& test_case : kLinuxHostTests)
   {
     run_test_case(test_case);
   }
   return 0;
 }
 
-inline int RunVerifyLinuxShmSet()
+inline int RunLinuxShmSet()
 {
   test_linux_shm_topic();
   return 0;
@@ -134,9 +134,9 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"system_tests", {"message_topic", &RunVoidEntry<test_message_topic>, false}},
     {"system_tests", {"message_packet", &RunVoidEntry<test_message_packet>, false}},
     {"system_tests", {"database", &RunVoidEntry<test_database>, false}},
-    {"system_tests", {"binding", &RunBindingTestSet, false}},
+    {"linux_host_tests", {"stdio_and_database", &RunLinuxStdioAndDatabaseSet, false}},
     {"system_tests", {"logger", &RunVoidEntry<test_logger>, true}},
-    {"system_tests", {"linux_shm_topic", &RunVerifyLinuxShmSet, false}},
+    {"system_tests", {"linux_shm_topic", &RunLinuxShmSet, false}},
     {"system_tests", {"linux_shm_bench", &RunBenchLinuxSharedTopicAllSet, false}},
     {"system_tests", {"terminal_command", &RunVoidEntry<test_terminal_command>, true}},
     {"system_tests", {"terminal_display", &RunVoidEntry<test_terminal_display>, false}},

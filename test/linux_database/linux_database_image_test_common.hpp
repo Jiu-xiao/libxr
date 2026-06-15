@@ -1,6 +1,6 @@
 /**
- * @file database_binding_image_test_common.hpp
- * @brief database binding 测试共用 flash 映像注入 helper。 Shared flash-image mutation helpers for database binding tests.
+ * @file linux_database_image_test_common.hpp
+ * @brief linux database 测试共用 flash 映像注入 helper。 Shared flash-image mutation helpers for linux database tests.
  * @details 共享职责：
  *          1. 读取/写回原始 flash 映像并注入 main/backup 损坏。
  *          2. 生成 seed 数据库与双 key 数据库。
@@ -15,9 +15,9 @@
 #include <fstream>
 #include <vector>
 
-#include "database_binding_flash_test_common.hpp"
+#include "linux_database_flash_test_common.hpp"
 
-namespace DatabaseBindingTestCommon
+namespace LinuxDatabaseTestCommon
 {
 
 [[nodiscard]] inline uint32_t ReadLe32(const std::vector<uint8_t>& bytes, size_t offset)
@@ -146,4 +146,4 @@ inline void CreateTwoKeyDatabase(const char* path)
   ASSERT(key2.data_ == 2222);
 }
 
-}  // namespace DatabaseBindingTestCommon
+}  // namespace LinuxDatabaseTestCommon

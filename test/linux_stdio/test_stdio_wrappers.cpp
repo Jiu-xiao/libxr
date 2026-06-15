@@ -1,10 +1,10 @@
 /**
  * @file test_stdio_wrappers.cpp
- * @brief binding `print` STDIO 包装层子测试。 Split test unit for binding `print` STDIO wrappers.
+ * @brief linux stdio `print` STDIO 包装层子测试。 Split test unit for linux stdio `print` STDIO wrappers.
  */
-#include "print_binding_test_common.hpp"
+#include "linux_stdio_print_test_common.hpp"
 
-namespace LibXRBindingPrintTest
+namespace LibXRLinuxStdioPrintTest
 {
 /**
  * @brief 测试项函数 `TestStdioPrintWrappers`。 Test-item function `TestStdioPrintWrappers`.
@@ -135,4 +135,4 @@ void TestStdioPrintWrappers()
     }
   }
 }
-}  // namespace LibXRBindingPrintTest
+}  // namespace LibXRLinuxStdioPrintTest

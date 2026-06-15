@@ -1,6 +1,6 @@
 /**
  * @file test_sequential_failures.cpp
- * @brief binding `DatabaseRawSequential` fatal 失败路径子测试。 Split test unit for binding `DatabaseRawSequential` fatal failure paths.
+ * @brief linux file-backed `DatabaseRawSequential` fatal 失败路径子测试。 Split test unit for linux file-backed `DatabaseRawSequential` fatal failure paths.
  * @details 测试项目：
  *          1. backend 读失败触发预期 fatal exit。
  *          2. backend 写失败触发预期 fatal exit。
@@ -10,12 +10,12 @@
  *          2. Backend write failures trigger the expected fatal exit.
  *          3. Backend erase failures trigger the expected fatal exit.
  */
-#include "database_binding_test_common.hpp"
+#include "linux_database_test_common.hpp"
 
 namespace
 {
 
-using namespace DatabaseBindingTestCommon;
+using namespace LinuxDatabaseTestCommon;
 
 void TestDatabaseSequentialReadFailureRequires()
 {
@@ -70,7 +70,7 @@ void TestDatabaseSequentialEraseFailureRequires()
 
 }  // namespace
 
-void RunDatabaseBindingSequentialFailureTests()
+void RunLinuxDatabaseSequentialFailureTests()
 {
   TestDatabaseSequentialReadFailureRequires();
   TestDatabaseSequentialWriteFailureRequires();

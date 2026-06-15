@@ -1,6 +1,6 @@
 /**
- * @file database_binding_reopen_test_common.hpp
- * @brief database binding 测试共用 reopen/断言 helper。 Shared reopen/assertion helpers for database binding tests.
+ * @file linux_database_reopen_test_common.hpp
+ * @brief linux database 测试共用 reopen/断言 helper。 Shared reopen/assertion helpers for linux database tests.
  * @details 共享职责：
  *          1. 通过公开 database API reopen 后读取持久化值。
  *          2. 校验 main 有效/backup 无效的持久化状态。
@@ -12,9 +12,9 @@
  */
 #pragma once
 
-#include "database_binding_image_test_common.hpp"
+#include "linux_database_image_test_common.hpp"
 
-namespace DatabaseBindingTestCommon
+namespace LinuxDatabaseTestCommon
 {
 
 [[nodiscard]] inline uint32_t ReopenDatabaseValue(const char* path, uint32_t default_value)
@@ -75,4 +75,4 @@ inline void RunPartialBackupCase(const char* path, MainChecksum main_checksum,
   AssertMainValidBackupInvalid(path);
 }
 
-}  // namespace DatabaseBindingTestCommon
+}  // namespace LinuxDatabaseTestCommon

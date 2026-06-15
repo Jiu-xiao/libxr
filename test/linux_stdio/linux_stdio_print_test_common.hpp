@@ -1,12 +1,12 @@
 /**
- * @file print_binding_test_common.hpp
- * @brief binding `print` 测试共用 helper。 Shared helpers for binding `print` tests.
+ * @file linux_stdio_print_test_common.hpp
+ * @brief linux stdio `print` 测试共用 helper。 Shared helpers for linux stdio `print` tests.
  *
  * 作用 / Purpose:
  * 1. 集中 STDIO 绑定作用域和失败辅助函数。
- *    Centralize STDIO binding scope and failure helpers.
- * 2. 让 split 后的 binding print 测试文件只保留各自场景。
- *    Keep each split binding-print test file focused on its own scenario.
+ *    Centralize STDIO linux scope and failure helpers.
+ * 2. 让 split 后的 linux print 测试文件只保留各自场景。
+ *    Keep each split linux-stdio-print test file focused on its own scenario.
  */
 #pragma once
 
@@ -20,7 +20,7 @@
 #include "libxr.hpp"
 #include "test.hpp"
 
-namespace LibXRBindingPrintTest
+namespace LibXRLinuxStdioPrintTest
 {
 
 struct StdioWriteScope
@@ -58,4 +58,4 @@ inline int Fail(const char* message)
 
 void TestStdioPrintWrappers();
 void TestStdioTruncation();
-}  // namespace LibXRBindingPrintTest
+}  // namespace LibXRLinuxStdioPrintTest

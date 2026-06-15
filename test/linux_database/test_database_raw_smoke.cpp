@@ -1,21 +1,21 @@
 /**
  * @file test_raw_smoke.cpp
- * @brief binding `DatabaseRaw` smoke/save 场景子测试。 Split test unit for binding `DatabaseRaw` smoke/save scenarios.
+ * @brief linux file-backed `DatabaseRaw` smoke/save 场景子测试。 Split test unit for linux file-backed `DatabaseRaw` smoke/save scenarios.
  */
-#include "database_binding_test_common.hpp"
-#include "raw_binding_test_groups.hpp"
+#include "linux_database_test_common.hpp"
+#include "raw_database_test_groups.hpp"
 
 namespace
 {
 
-using namespace DatabaseBindingTestCommon;
+using namespace LinuxDatabaseTestCommon;
 
 /**
- * @brief 测试项函数 `TestDatabaseBindingRawSmoke`。 Test-item function `TestDatabaseBindingRawSmoke`.
+ * @brief 测试项函数 `TestLinuxDatabaseRawSmoke`。 Test-item function `TestLinuxDatabaseRawSmoke`.
  * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
  *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
  */
-void TestDatabaseBindingRawSmoke()
+void TestLinuxDatabaseRawSmoke()
 {
   // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
   // Test coverage: execute the current helper-scoped test item from this file.
@@ -156,13 +156,13 @@ void TestDatabaseRawRequiresExactStoredSize()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunDatabaseBindingRawSmokeTests`。 Test-item function `RunDatabaseBindingRawSmokeTests`.
- * @details 测试内容：执行当前分组里的 `DatabaseRaw` binding 子场景。 Execute the grouped `DatabaseRaw` binding sub-scenarios.
+ * @brief 测试项函数 `RunLinuxDatabaseRawSmokeTests`。 Test-item function `RunLinuxDatabaseRawSmokeTests`.
+ * @details 测试内容：执行当前分组里的 `DatabaseRaw` linux database 子场景。 Execute the grouped `DatabaseRaw` linux database sub-scenarios.
  *          测试原理：把 smoke / failure / recovery 三类路径拆开，避免一个原始大文件持续膨胀。 Split smoke, failure, and recovery paths so one raw monolithic file does not keep growing.
  */
-void RunDatabaseBindingRawSmokeTests()
+void RunLinuxDatabaseRawSmokeTests()
 {
-  TestDatabaseBindingRawSmoke();
+  TestLinuxDatabaseRawSmoke();
   TestDatabasePartialBackupRecovery();
   TestDatabaseRawSaveCurrentValue();
   TestDatabaseRawRequiresExactStoredSize();
