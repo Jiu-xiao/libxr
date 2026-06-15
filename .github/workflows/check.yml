@@ -20,7 +20,7 @@ jobs:
     - name: make
       run: cd build && cmake --build . -j"$(nproc)"
     - name: check
-      run: script -q -c "./build/test"
+      run: script -q -e -c "./build/test/test" /dev/null
 
   clang-format:
     needs: build
