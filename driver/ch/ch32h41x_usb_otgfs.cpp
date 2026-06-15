@@ -16,6 +16,8 @@ namespace
 constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
+constexpr uint8_t OTG_FS_DEVICE_BASE_CTRL =
+    USBFS_UC_SYS_CTRL1 | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
 
 static void ch32_usbfs_delay_short();
 static void EnableUsbFsControllerClock()
@@ -75,12 +77,12 @@ static void ch32_usbfs_apply_device_registers()
 static void ch32_usbfs_detach_device()
 {
   USBFSD->UDEV_CTRL = 0x00;
-  USBFSD->BASE_CTRL = USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
+  USBFSD->BASE_CTRL = OTG_FS_DEVICE_BASE_CTRL;
 }
 
 static void ch32_usbfs_enable_device_logic()
 {
-  USBFSD->BASE_CTRL = USBFS_UC_DEV_PU_EN | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
+  USBFSD->BASE_CTRL = OTG_FS_DEVICE_BASE_CTRL | USBFS_UC_DEV_PU_EN;
 }
 
 static void ch32_usbfs_enable_device_port()
