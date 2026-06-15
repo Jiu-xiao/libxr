@@ -25,26 +25,12 @@ class ESP32Timebase : public Timebase
  public:
   /**
    * @brief 构造函数 / Constructor
+   *
+   * 初始化 ESP 时间基，并在支持的芯片上启用 systimer 快速路径。
+   * Initializes the ESP timebase and enables the systimer fast path when the
+   * target supports it.
    */
   ESP32Timebase();
-
-  /**
-   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
-   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
-   */
-  MicrosecondTimestamp _get_microseconds() override;
-
-  /**
-   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
-   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
-   */
-  MillisecondTimestamp _get_milliseconds() override;
-
- private:
-#if SOC_SYSTIMER_SUPPORTED
-  systimer_hal_context_t systimer_hal_ = {};  ///< Systimer HAL context
-  bool systimer_ready_ = false;               ///< Systimer fast path status
-#endif
 };
 
 }  // namespace LibXR

@@ -15,17 +15,12 @@ class WebotsTimebase : public Timebase
 {
  public:
   /**
-   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
+   * @brief 构造函数 / Constructor
    *
-   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
+   * 标记 Webots 时间基已就绪；具体计数由仿真时钟提供。
+   * Marks the Webots timebase ready; the actual counter is driven by the
+   * simulator clock.
    */
-  MicrosecondTimestamp _get_microseconds() { return _libxr_webots_time_count * 1000; }
-
-  /**
-   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
-   *
-   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
-   */
-  MillisecondTimestamp _get_milliseconds() { return _libxr_webots_time_count; }
+  WebotsTimebase();
 };
 }  // namespace LibXR

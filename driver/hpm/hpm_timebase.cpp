@@ -4,6 +4,9 @@ using namespace LibXR;
 
 namespace
 {
+MCHTMR_Type* g_timer = HPM_MCHTMR;
+uint32_t g_clock_hz = 0u;
+
 static inline uint64_t ConvertTicksToTime(uint64_t ticks, uint32_t freq_hz,
                                           uint64_t scale)
 {
@@ -17,20 +20,21 @@ static inline uint64_t ConvertTicksToTime(uint64_t ticks, uint32_t freq_hz,
 }  // namespace
 
 HPMTimebase::HPMTimebase(MCHTMR_Type* timer, clock_name_t clock)
-    : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX),
-      timer_(timer),
-      clock_hz_(clock_get_frequency(clock))
 {
+  g_timer = timer;
+  g_clock_hz = clock_get_frequency(clock);
+  ConfigureWrapRange(static_cast<uint64_t>(UINT32_MAX) * 1000ULL + 999ULL, UINT32_MAX);
+  SetReady();
 }
 
-MicrosecondTimestamp HPMTimebase::_get_microseconds()
+MicrosecondTimestamp Timebase::GetMicroseconds()
 {
-  const uint64_t ticks = mchtmr_get_count(timer_);
-  return MicrosecondTimestamp(ConvertTicksToTime(ticks, clock_hz_, 1000000ULL));
+  const uint64_t ticks = mchtmr_get_count(g_timer);
+  return MicrosecondTimestamp(ConvertTicksToTime(ticks, g_clock_hz, 1000000ULL));
 }
 
-MillisecondTimestamp HPMTimebase::_get_milliseconds()
+MillisecondTimestamp Timebase::GetMilliseconds()
 {
-  const uint64_t ticks = mchtmr_get_count(timer_);
-  return MillisecondTimestamp(ConvertTicksToTime(ticks, clock_hz_, 1000ULL));
+  const uint64_t ticks = mchtmr_get_count(g_timer);
+  return MillisecondTimestamp(ConvertTicksToTime(ticks, g_clock_hz, 1000ULL));
 }

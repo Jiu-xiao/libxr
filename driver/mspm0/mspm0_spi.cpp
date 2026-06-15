@@ -87,25 +87,20 @@ ErrorCode MSPM0SPI::PollingTransfer(uint8_t* rx, const uint8_t* tx, uint32_t len
     return ErrorCode::OK;
   }
 
-  const bool HAS_TIMEBASE = (Timebase::timebase != nullptr);
-  const uint64_t START_US =
-      HAS_TIMEBASE ? static_cast<uint64_t>(Timebase::GetMicroseconds()) : 0ULL;
+  const uint64_t START_US = static_cast<uint64_t>(Timebase::GetMicroseconds());
 
   uint32_t spin_budget = POLLING_FALLBACK_SPIN_BUDGET;
   auto polling_timed_out = [&]() -> bool
   {
-    if (HAS_TIMEBASE)
-    {
-      const uint64_t NOW_US = static_cast<uint64_t>(Timebase::GetMicroseconds());
-      return (NOW_US - START_US) >= POLLING_TIMEOUT_US;
-    }
-    // timebase 未就绪时的最后兜底策略 / Last-resort fallback when timebase is
-    // not ready yet.
-    if (spin_budget == 0U)
+    const uint64_t NOW_US = static_cast<uint64_t>(Timebase::GetMicroseconds());
+    if ((NOW_US - START_US) >= POLLING_TIMEOUT_US)
     {
       return true;
     }
-    --spin_budget;
+    if (spin_budget > 0U)
+    {
+      --spin_budget;
+    }
     return false;
   };
 

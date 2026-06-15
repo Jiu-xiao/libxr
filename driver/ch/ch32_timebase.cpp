@@ -3,15 +3,19 @@
 
 using namespace LibXR;
 
-CH32Timebase::CH32Timebase() : Timebase(UINT32_MAX * 1000 + 999, UINT32_MAX) {}
+CH32Timebase::CH32Timebase()
+{
+  ConfigureWrapRange(static_cast<uint64_t>(UINT32_MAX) * 1000ULL + 999ULL, UINT32_MAX);
+  SetReady();
+}
 
-MicrosecondTimestamp CH32Timebase::_get_microseconds()
+MicrosecondTimestamp Timebase::GetMicroseconds()
 {
   do
   {
-    uint32_t tick_old = sys_tick_ms_;
+    uint32_t tick_old = CH32Timebase::sys_tick_ms_;
     uint32_t cnt_old = SysTick->CNT;
-    uint32_t tick_new = sys_tick_ms_;
+    uint32_t tick_new = CH32Timebase::sys_tick_ms_;
     uint32_t cnt_new = SysTick->CNT;
 
     auto tick_diff = tick_new - tick_old;
@@ -26,14 +30,14 @@ MicrosecondTimestamp CH32Timebase::_get_microseconds()
         return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 +
                                     static_cast<uint64_t>(cnt_new) * 1000 / tick_cmp);
       default:
-        /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
-         * 1ms, an error case */
+        /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more
+         * than 1ms, an error case */
         continue;
     }
   } while (true);
 }
 
-MillisecondTimestamp CH32Timebase::_get_milliseconds() { return sys_tick_ms_; }
+MillisecondTimestamp Timebase::GetMilliseconds() { return CH32Timebase::sys_tick_ms_; }
 
 void CH32Timebase::OnSysTickInterrupt() { sys_tick_ms_++; }
 

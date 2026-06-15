@@ -77,11 +77,7 @@ void Topic::DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestam
       });
 }
 
-MicrosecondTimestamp Topic::NowTimestamp()
-{
-  ASSERT(Timebase::timebase != nullptr);
-  return Timebase::GetMicroseconds();
-}
+MicrosecondTimestamp Topic::NowTimestamp() { return Timebase::GetMicroseconds(); }
 
 void Topic::CheckPublishContract(TopicHandle topic, TypeID::ID payload_type_id,
                                  size_t payload_size, size_t payload_alignment)
