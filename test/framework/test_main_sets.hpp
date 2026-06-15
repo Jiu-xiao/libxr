@@ -19,16 +19,6 @@ void test_linux_database_raw();
 void test_linux_database_sequential();
 void test_linux_shm_topic();
 
-enum class BenchSelector
-{
-  Smoke,
-  All,
-  Standard,
-  Latency,
-  Overload,
-  Modes,
-};
-
 inline int RunLinuxStdioAndDatabaseSet()
 {
   static constexpr TestCase kLinuxHostTests[] = {
@@ -50,42 +40,14 @@ inline int RunLinuxShmSet()
   return 0;
 }
 
-inline int RunBenchLinuxSharedTopicSet(BenchSelector selector)
+inline int RunBenchLinuxSharedTopicSet()
 {
   int status = 0;
-  switch (selector)
-  {
-    case BenchSelector::Smoke:
-      status |= LinuxSharedTopicBench::RunStandardBenchmarksSmoke();
-      status |= LinuxSharedTopicBench::RunLatencyBenchmarksSmoke();
-      status |= LinuxSharedTopicBench::RunOverloadBenchmarksSmoke();
-      status |= LinuxSharedTopicBench::RunModeBenchmarksSmoke();
-      break;
-    case BenchSelector::All:
-      status |= LinuxSharedTopicBench::RunStandardBenchmarks();
-      status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
-      status |= LinuxSharedTopicBench::RunOverloadBenchmarks();
-      status |= LinuxSharedTopicBench::RunModeBenchmarks();
-      break;
-    case BenchSelector::Standard:
-      status |= LinuxSharedTopicBench::RunStandardBenchmarks();
-      break;
-    case BenchSelector::Latency:
-      status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
-      break;
-    case BenchSelector::Overload:
-      status |= LinuxSharedTopicBench::RunOverloadBenchmarks();
-      break;
-    case BenchSelector::Modes:
-      status |= LinuxSharedTopicBench::RunModeBenchmarks();
-      break;
-  }
+  status |= LinuxSharedTopicBench::RunStandardBenchmarksSmoke();
+  status |= LinuxSharedTopicBench::RunLatencyBenchmarksSmoke();
+  status |= LinuxSharedTopicBench::RunOverloadBenchmarksSmoke();
+  status |= LinuxSharedTopicBench::RunModeBenchmarksSmoke();
   return status;
-}
-
-inline int RunBenchLinuxSharedTopicDefaultSet()
-{
-  return RunBenchLinuxSharedTopicSet(BenchSelector::Smoke);
 }
 
 struct GroupedTestCase
@@ -150,7 +112,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"linux_host_tests", {"stdio_and_database", &RunLinuxStdioAndDatabaseSet, false}},
     {"system_tests", {"logger", &RunVoidEntry<test_logger>, true}},
     {"system_tests", {"linux_shm_topic", &RunLinuxShmSet, false}},
-    {"system_tests", {"linux_shm_bench", &RunBenchLinuxSharedTopicDefaultSet, false}},
+    {"system_tests", {"linux_shm_bench", &RunBenchLinuxSharedTopicSet, false}},
     {"system_tests", {"terminal_command", &RunVoidEntry<test_terminal_command>, true}},
     {"system_tests", {"terminal_display", &RunVoidEntry<test_terminal_display>, false}},
     {"system_tests", {"terminal_input", &RunVoidEntry<test_terminal_input>, true}},
