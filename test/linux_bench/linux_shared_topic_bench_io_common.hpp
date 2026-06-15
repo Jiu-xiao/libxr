@@ -10,15 +10,76 @@
  */
 #pragma once
 
+#include <csignal>
 #include <cerrno>
 #include <cstdio>
 #include <cstdint>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <type_traits>
+#include <utility>
 
 #include "linux_shared_topic_bench_stats_common.hpp"
 
 namespace LinuxSharedTopicBench
 {
+
+template <typename Fn>
+class ScopeExit
+{
+ public:
+  explicit ScopeExit(Fn fn) : fn_(std::move(fn)) {}
+
+  ScopeExit(const ScopeExit&) = delete;
+  ScopeExit& operator=(const ScopeExit&) = delete;
+
+  ScopeExit(ScopeExit&& other) noexcept : fn_(std::move(other.fn_)), active_(other.active_)
+  {
+    other.active_ = false;
+  }
+
+  ~ScopeExit()
+  {
+    if (active_)
+    {
+      fn_();
+    }
+  }
+
+ private:
+  Fn fn_;
+  bool active_ = true;
+};
+
+template <typename Fn>
+auto MakeScopeExit(Fn&& fn)
+{
+  return ScopeExit<std::decay_t<Fn>>(std::forward<Fn>(fn));
+}
+
+inline void CloseFd(int& fd)
+{
+  if (fd >= 0)
+  {
+    close(fd);
+    fd = -1;
+  }
+}
+
+inline void KillAndReapChild(pid_t& child)
+{
+  if (child <= 0)
+  {
+    return;
+  }
+
+  (void)::kill(child, SIGTERM);
+  int child_status = 0;
+  while (waitpid(child, &child_status, 0) == -1 && errno == EINTR)
+  {
+  }
+  child = -1;
+}
 
 inline bool WriteAll(int fd, const void* buffer, size_t size)
 {

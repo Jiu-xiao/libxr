@@ -10,6 +10,11 @@
 
 namespace LinuxSharedTopicBench
 {
+int RunOverloadBenchmarksSmoke()
+{
+  return RunOverloadCase<65536>(LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 50, 256);
+}
+
 int RunOverloadBenchmarks()
 {
   int status = 0;

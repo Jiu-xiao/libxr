@@ -19,8 +19,12 @@
 
 namespace LinuxSharedTopicBench
 {
+int RunStandardBenchmarksSmoke();
 int RunStandardBenchmarks();
+int RunLatencyBenchmarksSmoke();
 int RunLatencyBenchmarks();
+int RunOverloadBenchmarksSmoke();
 int RunOverloadBenchmarks();
+int RunModeBenchmarksSmoke();
 int RunModeBenchmarks();
 }  // namespace LinuxSharedTopicBench

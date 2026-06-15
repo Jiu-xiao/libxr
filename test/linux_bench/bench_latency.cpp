@@ -10,6 +10,11 @@
 
 namespace LinuxSharedTopicBench
 {
+int RunLatencyBenchmarksSmoke()
+{
+  return RunLatencyCase<64, false>(128);
+}
+
 int RunLatencyBenchmarks()
 {
   int status = 0;

@@ -10,6 +10,11 @@
 
 namespace LinuxSharedTopicBench
 {
+int RunStandardBenchmarksSmoke()
+{
+  return RunBenchCase<64, false>(256);
+}
+
 int RunStandardBenchmarks()
 {
   int status = 0;

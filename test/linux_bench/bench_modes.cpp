@@ -10,6 +10,15 @@
 
 namespace LinuxSharedTopicBench
 {
+int RunModeBenchmarksSmoke()
+{
+  return RunModeCase<65536>(
+      "broadcast_full_64k_smoke",
+      {{LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_a"},
+       {LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_b"}},
+      256, 512, 32);
+}
+
 int RunModeBenchmarks()
 {
   int status = 0;
