@@ -11,10 +11,7 @@
 #pragma once
 
 #include <cerrno>
-#include <csignal>
 #include <cstring>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include "linux_shared_topic_bench_common.hpp"
 
@@ -22,7 +19,7 @@ namespace LinuxSharedTopicBench
 {
 
 template <size_t PayloadBytes, bool TouchPayload>
-int RunLatencyCase()
+int RunLatencyCase(uint64_t count_override = 0)
 {
   // 基准内容：执行当前子场景或 case。
   // Benchmark coverage: execute the current benchmark sub-case.
@@ -30,7 +27,8 @@ int RunLatencyCase()
   using Data = typename Topic::Data;
   using Subscriber = typename Topic::SyncSubscriber;
 
-  const uint64_t count = LatencyCountForPayload<PayloadBytes>();
+  const uint64_t count = (count_override == 0) ? LatencyCountForPayload<PayloadBytes>()
+                                                : count_override;
 
   LibXR::LinuxSharedTopicConfig config = {};
   config.slot_num = 4;
@@ -45,36 +43,19 @@ int RunLatencyCase()
   int ready_pipe[2] = {-1, -1};
   int ack_pipe[2] = {-1, -1};
   pid_t child = -1;
-  auto close_fd = [](int& fd)
+  auto cleanup = MakeScopeExit([&]()
   {
-    if (fd >= 0)
-    {
-      close(fd);
-      fd = -1;
-    }
-  };
-  auto cleanup = [&]()
-  {
-    close_fd(ready_pipe[0]);
-    close_fd(ready_pipe[1]);
-    close_fd(ack_pipe[0]);
-    close_fd(ack_pipe[1]);
-    if (child > 0)
-    {
-      (void)::kill(child, SIGTERM);
-      int child_status = 0;
-      while (waitpid(child, &child_status, 0) == -1 && errno == EINTR)
-      {
-      }
-      child = -1;
-    }
+    CloseFd(ready_pipe[0]);
+    CloseFd(ready_pipe[1]);
+    CloseFd(ack_pipe[0]);
+    CloseFd(ack_pipe[1]);
+    KillAndReapChild(child);
     (void)Topic::Remove(topic_name);
-  };
+  });
 
   if (pipe(ready_pipe) != 0 || pipe(ack_pipe) != 0)
   {
     std::fprintf(stderr, "latency pipe failed: %s\n", std::strerror(errno));
-    cleanup();
     return 1;
   }
 
@@ -82,7 +63,6 @@ int RunLatencyCase()
   if (!publisher.Valid())
   {
     std::fprintf(stderr, "latency publisher open failed for payload=%zu\n", PayloadBytes);
-    cleanup();
     return 1;
   }
 
@@ -90,14 +70,13 @@ int RunLatencyCase()
   if (child < 0)
   {
     std::fprintf(stderr, "latency fork failed: %s\n", std::strerror(errno));
-    cleanup();
     return 1;
   }
 
   if (child == 0)
   {
-    close_fd(ready_pipe[0]);
-    close_fd(ack_pipe[0]);
+    CloseFd(ready_pipe[0]);
+    CloseFd(ack_pipe[0]);
 
     Subscriber subscriber(topic_name);
     if (!subscriber.Valid())
@@ -110,7 +89,7 @@ int RunLatencyCase()
     {
       _exit(71);
     }
-    close_fd(ready_pipe[1]);
+    CloseFd(ready_pipe[1]);
 
     uint64_t expected_seq = 1;
     for (uint64_t i = 0; i < count; ++i)
@@ -136,21 +115,20 @@ int RunLatencyCase()
       }
     }
 
-    close_fd(ack_pipe[1]);
+    CloseFd(ack_pipe[1]);
     _exit(0);
   }
 
-  close_fd(ready_pipe[1]);
-  close_fd(ack_pipe[1]);
+  CloseFd(ready_pipe[1]);
+  CloseFd(ack_pipe[1]);
 
   uint8_t ready = 0;
   if (!ReadAll(ready_pipe[0], &ready, sizeof(ready)) ||
       !WaitForSubscriberAttach(publisher, 1, "latency"))
   {
-    cleanup();
     return 1;
   }
-  close_fd(ready_pipe[0]);
+  CloseFd(ready_pipe[0]);
 
   std::vector<double> lat_us;
   lat_us.reserve(static_cast<size_t>(count));
@@ -190,7 +168,6 @@ int RunLatencyCase()
     uint64_t latency_ns = 0;
     if (!ReadAll(ack_pipe[0], &latency_ns, sizeof(latency_ns)))
     {
-      cleanup();
       std::fprintf(stderr, "latency child ack failed for payload=%zu\n", PayloadBytes);
       return 1;
     }
@@ -198,7 +175,7 @@ int RunLatencyCase()
   }
   const uint64_t end_ns = NowNs();
 
-  close_fd(ack_pipe[0]);
+  CloseFd(ack_pipe[0]);
 
   int status = 0;
   while (waitpid(child, &status, 0) == -1 && errno == EINTR)
@@ -208,7 +185,6 @@ int RunLatencyCase()
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
   {
     std::fprintf(stderr, "latency child failed for payload=%zu\n", PayloadBytes);
-    cleanup();
     return 1;
   }
 
@@ -224,7 +200,6 @@ int RunLatencyCase()
       stats.p99_us, stats.max_us);
   std::fflush(stdout);
 
-  cleanup();
   return 0;
 }
 

@@ -11,10 +11,7 @@
 #pragma once
 
 #include <cerrno>
-#include <csignal>
 #include <cstring>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include "linux_shared_topic_overload_child_common.hpp"
 
@@ -23,7 +20,7 @@ namespace LinuxSharedTopicBench
 
 template <size_t PayloadBytes>
 int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
-                    uint32_t subscriber_delay_us)
+                    uint32_t subscriber_delay_us, uint64_t count_override = 0)
 {
   // 基准内容：执行当前子场景或 case。
   // Benchmark coverage: execute the current benchmark sub-case.
@@ -32,7 +29,9 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   using Subscriber = typename Topic::SyncSubscriber;
 
   const uint64_t count =
-      (PayloadBytes >= 1048576U) ? ScaleBenchCount(256U, 8U) : ScaleBenchCount(4000U, 32U);
+      (count_override != 0)
+          ? count_override
+          : ((PayloadBytes >= 1048576U) ? ScaleBenchCount(256U, 8U) : ScaleBenchCount(4000U, 32U));
 
   LibXR::LinuxSharedTopicConfig config = {};
   config.subscriber_num = 1;
@@ -56,38 +55,21 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   int stats_pipe[2] = {-1, -1};
   int ready_pipe[2] = {-1, -1};
   pid_t child = -1;
-  auto close_fd = [](int& fd)
+  auto cleanup = MakeScopeExit([&]()
   {
-    if (fd >= 0)
-    {
-      close(fd);
-      fd = -1;
-    }
-  };
-  auto cleanup = [&]()
-  {
-    close_fd(done_pipe[0]);
-    close_fd(done_pipe[1]);
-    close_fd(stats_pipe[0]);
-    close_fd(stats_pipe[1]);
-    close_fd(ready_pipe[0]);
-    close_fd(ready_pipe[1]);
-    if (child > 0)
-    {
-      (void)::kill(child, SIGTERM);
-      int child_status = 0;
-      while (waitpid(child, &child_status, 0) == -1 && errno == EINTR)
-      {
-      }
-      child = -1;
-    }
+    CloseFd(done_pipe[0]);
+    CloseFd(done_pipe[1]);
+    CloseFd(stats_pipe[0]);
+    CloseFd(stats_pipe[1]);
+    CloseFd(ready_pipe[0]);
+    CloseFd(ready_pipe[1]);
+    KillAndReapChild(child);
     (void)Topic::Remove(topic_name);
-  };
+  });
 
   if (pipe(done_pipe) != 0 || pipe(stats_pipe) != 0 || pipe(ready_pipe) != 0)
   {
     std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
-    cleanup();
     return 1;
   }
 
@@ -95,7 +77,6 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   if (!publisher.Valid())
   {
     std::fprintf(stderr, "overload publisher open failed for payload=%zu\n", PayloadBytes);
-    cleanup();
     return 1;
   }
 
@@ -103,36 +84,34 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   if (child < 0)
   {
     std::fprintf(stderr, "fork failed: %s\n", std::strerror(errno));
-    cleanup();
     return 1;
   }
 
   if (child == 0)
   {
-    close_fd(done_pipe[1]);
-    close_fd(stats_pipe[0]);
-    close_fd(ready_pipe[0]);
+    CloseFd(done_pipe[1]);
+    CloseFd(stats_pipe[0]);
+    CloseFd(ready_pipe[0]);
     const int child_status = RunOverloadSubscriberChild<PayloadBytes, Subscriber, Data>(
         topic_name, subscriber_mode, subscriber_delay_us, count, done_pipe[0], stats_pipe[1],
         ready_pipe[1]);
-    close_fd(done_pipe[0]);
-    close_fd(stats_pipe[1]);
-    close_fd(ready_pipe[1]);
+    CloseFd(done_pipe[0]);
+    CloseFd(stats_pipe[1]);
+    CloseFd(ready_pipe[1]);
     _exit(child_status);
   }
 
-  close_fd(done_pipe[0]);
-  close_fd(stats_pipe[1]);
-  close_fd(ready_pipe[1]);
+  CloseFd(done_pipe[0]);
+  CloseFd(stats_pipe[1]);
+  CloseFd(ready_pipe[1]);
 
   uint8_t ready = 0;
   if (!ReadAll(ready_pipe[0], &ready, sizeof(ready)) ||
       !WaitForSubscriberAttach(publisher, 1, "overload"))
   {
-    cleanup();
     return 1;
   }
-  close_fd(ready_pipe[0]);
+  CloseFd(ready_pipe[0]);
 
   uint64_t create_fail = 0;
   uint64_t publish_fail = 0;
@@ -163,11 +142,11 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   }
   const uint64_t end_ns = NowNs();
 
-  close_fd(done_pipe[1]);
+  CloseFd(done_pipe[1]);
 
   OverloadStats stats = {};
   const bool read_ok = ReadAll(stats_pipe[0], &stats, sizeof(stats));
-  close_fd(stats_pipe[0]);
+  CloseFd(stats_pipe[0]);
 
   int status = 0;
   while (waitpid(child, &status, 0) == -1 && errno == EINTR)
@@ -177,7 +156,6 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
   if (!read_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
   {
     std::fprintf(stderr, "overload child failed for payload=%zu\n", PayloadBytes);
-    cleanup();
     return 1;
   }
 
@@ -196,7 +174,6 @@ int RunOverloadCase(LibXR::LinuxSharedSubscriberMode subscriber_mode,
       stats.latency.p99_us, stats.latency.max_us);
   std::fflush(stdout);
 
-  cleanup();
   return 0;
 }
 

@@ -86,6 +86,16 @@ inline int RunBenchLinuxSharedTopicAllSet()
   return RunBenchLinuxSharedTopicSet(nullptr);
 }
 
+inline int RunBenchLinuxSharedTopicSmokeSet()
+{
+  int status = 0;
+  status |= LinuxSharedTopicBench::RunStandardBenchmarksSmoke();
+  status |= LinuxSharedTopicBench::RunLatencyBenchmarksSmoke();
+  status |= LinuxSharedTopicBench::RunOverloadBenchmarksSmoke();
+  status |= LinuxSharedTopicBench::RunModeBenchmarksSmoke();
+  return status;
+}
+
 struct GroupedTestCase
 {
   const char* group;
@@ -148,7 +158,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"linux_host_tests", {"stdio_and_database", &RunLinuxStdioAndDatabaseSet, false}},
     {"system_tests", {"logger", &RunVoidEntry<test_logger>, true}},
     {"system_tests", {"linux_shm_topic", &RunLinuxShmSet, false}},
-    {"system_tests", {"linux_shm_bench", &RunBenchLinuxSharedTopicAllSet, false}},
+    {"system_tests", {"linux_shm_bench", &RunBenchLinuxSharedTopicSmokeSet, false}},
     {"system_tests", {"terminal_command", &RunVoidEntry<test_terminal_command>, true}},
     {"system_tests", {"terminal_display", &RunVoidEntry<test_terminal_display>, false}},
     {"system_tests", {"terminal_input", &RunVoidEntry<test_terminal_input>, true}},
