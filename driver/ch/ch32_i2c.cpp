@@ -21,10 +21,35 @@ constexpr uint32_t CH32_I2C_ERROR_FLAGS =
 
 }  // namespace
 
+static inline void ch32_clock_bus1_enable(uint32_t periph)
+{
+  RCC_APB1PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_clock_bus2_enable(uint32_t periph)
+{
+  RCC_APB2PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_clock_ahb_enable(uint32_t periph)
+{
+  RCC_AHBPeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_enable_afio_clock()
+{
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+}
+
+static inline void ch32_dma_set_memory_base(DMA_InitTypeDef& dma, uint32_t addr)
+{
+  dma.DMA_MemoryBaseAddr = addr;
+}
+
 static inline void ch32_i2c_enable_clocks(ch32_i2c_id_t id)
 {
-  RCC_APB1PeriphClockCmd(CH32_I2C_RCC_PERIPH_MAP[id], ENABLE);
-  RCC_AHBPeriphClockCmd(CH32_I2C_RCC_PERIPH_MAP_DMA[id], ENABLE);
+  ch32_clock_bus1_enable(CH32_I2C_RCC_PERIPH_MAP[id]);
+  ch32_clock_ahb_enable(CH32_I2C_RCC_PERIPH_MAP_DMA[id]);
 }
 
 CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
@@ -55,11 +80,11 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
   // GPIO configuration (I2C alternate-function open-drain).
   {
     GPIO_InitTypeDef gpio = {};
-    gpio.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio.GPIO_Speed = ch32_gpio_speed_fast();
     gpio.GPIO_Mode = GPIO_Mode_AF_OD;
 
-    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(scl_port_), ENABLE);
-    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(sda_port_), ENABLE);
+    ch32_clock_bus2_enable(ch32_get_gpio_periph(scl_port_));
+    ch32_clock_bus2_enable(ch32_get_gpio_periph(sda_port_));
 
     GPIO_SetBits(scl_port_, scl_pin_);
     GPIO_SetBits(sda_port_, sda_pin_);
@@ -72,7 +97,7 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
 
     if (pin_remap != 0)
     {
-      RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+      ch32_enable_afio_clock();
       GPIO_PinRemapConfig(pin_remap, ENABLE);
     }
   }
@@ -88,7 +113,7 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
       DMA_InitTypeDef di = {};
       DMA_DeInit(dma_rx_channel_);
       di.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
-      di.DMA_MemoryBaseAddr = (uint32_t)dma_buff_.addr_;
+      ch32_dma_set_memory_base(di, (uint32_t)dma_buff_.addr_);
       di.DMA_DIR = DMA_DIR_PeripheralSRC;
       di.DMA_BufferSize = 0;
       di.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
@@ -112,7 +137,7 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
       DMA_InitTypeDef di = {};
       DMA_DeInit(dma_tx_channel_);
       di.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
-      di.DMA_MemoryBaseAddr = (uint32_t)dma_buff_.addr_;
+      ch32_dma_set_memory_base(di, (uint32_t)dma_buff_.addr_);
       di.DMA_DIR = DMA_DIR_PeripheralDST;
       di.DMA_BufferSize = 0;
       di.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
@@ -529,8 +554,8 @@ void CH32I2C::RecoverAfterImmediateFailure()
   dma_tx_channel_->CNTR = 0;
   dma_rx_channel_->CNTR = 0;
 
-  DMA_ClearITPendingBit(CH32_I2C_TX_DMA_IT_MAP[id_]);
-  DMA_ClearITPendingBit(CH32_I2C_RX_DMA_IT_MAP[id_]);
+  ch32_dma_clear_it_pending(dma_tx_channel_, CH32_I2C_TX_DMA_IT_MAP[id_]);
+  ch32_dma_clear_it_pending(dma_rx_channel_, CH32_I2C_RX_DMA_IT_MAP[id_]);
 
   const uint32_t err_its[] = {I2C_IT_BERR,   I2C_IT_ARLO,    I2C_IT_AF,      I2C_IT_OVR,
                               I2C_IT_PECERR, I2C_IT_TIMEOUT, I2C_IT_SMBALERT};
@@ -888,11 +913,11 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
 
 void CH32I2C::TxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_I2C_TX_DMA_IT_MAP[id_]) == RESET)
+  if (ch32_dma_get_it_status(dma_tx_channel_, CH32_I2C_TX_DMA_IT_MAP[id_]) == RESET)
   {
     return;
   }
-  DMA_ClearITPendingBit(CH32_I2C_TX_DMA_IT_MAP[id_]);
+  ch32_dma_clear_it_pending(dma_tx_channel_, CH32_I2C_TX_DMA_IT_MAP[id_]);
 
   DMA_Cmd(dma_tx_channel_, DISABLE);
   I2C_DMACmd(instance_, DISABLE);
@@ -918,11 +943,11 @@ void CH32I2C::TxDmaIRQHandler()
 
 void CH32I2C::RxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_I2C_RX_DMA_IT_MAP[id_]) == RESET)
+  if (ch32_dma_get_it_status(dma_rx_channel_, CH32_I2C_RX_DMA_IT_MAP[id_]) == RESET)
   {
     return;
   }
-  DMA_ClearITPendingBit(CH32_I2C_RX_DMA_IT_MAP[id_]);
+  ch32_dma_clear_it_pending(dma_rx_channel_, CH32_I2C_RX_DMA_IT_MAP[id_]);
 
   DMA_Cmd(dma_rx_channel_, DISABLE);
   I2C_DMACmd(instance_, DISABLE);

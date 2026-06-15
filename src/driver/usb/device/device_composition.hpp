@@ -51,6 +51,12 @@ class DeviceComposition
   DeviceComposition& operator=(DeviceComposition&&) = delete;
 
   /**
+   * @brief 设置当前设备的 USB 规格和速度信息
+   *        Set the USB profile visible to bound device classes.
+   */
+  void SetDeviceProfile(USBSpec spec, Speed speed);
+
+  /**
    * @brief 初始化当前 configuration 的运行态资源
    *        Initialize runtime resources for the active configuration.
    */
@@ -84,6 +90,12 @@ class DeviceComposition
    * @brief 获取当前 BOS 描述符缓存 / Get the current BOS descriptor cache
    */
   [[nodiscard]] ConstRawData GetBosDescriptor();
+
+  /**
+   * @brief 设置内建 BOS capability 提供者
+   *        Set the built-in BOS capability provider owned by the device core.
+   */
+  void SetExtraBosCapabilityProvider(BosCapabilityProvider* provider);
 
   /**
    * @brief 分发 BOS vendor request / Dispatch BOS vendor requests
@@ -191,6 +203,8 @@ class DeviceComposition
       0;  ///< 接口字符串总数量 / Total interface string count
   RawData interface_string_buffer_{
       nullptr, 0};  ///< 临时字符串描述符缓冲区 / Temp interface string descriptor buffer
+  BosCapabilityProvider* extra_bos_provider_ =
+      nullptr;          ///< 额外 BOS capability provider / Extra BOS capability provider
   BosManager bos_;  ///< BOS 聚合管理 / BOS aggregation manager
   ConfigDescriptor config_desc_;  ///< 配置描述符构造器 / Configuration descriptor builder
 };

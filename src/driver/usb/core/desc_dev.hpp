@@ -27,6 +27,7 @@ enum class DescriptorType : uint8_t
   IAD = 0x0B,                ///< 接口关联描述符（Interface Association Descriptor）
   BOS = 0x0F,                ///< 设备能力描述符（BOS Descriptor）
   DEVICE_CAPABILITY = 0x10,  ///< 设备能力子描述符（Device Capability Descriptor）
+  ENDPOINT_COMPANION = 0x30,  ///< SuperSpeed 端点伴随描述符 / SS endpoint companion
   CS_INTERFACE = 0x24,       ///< 类特定接口描述符（Class-Specific Interface Descriptor）
 
 };
@@ -39,6 +40,16 @@ enum class DescriptorType : uint8_t
 class DeviceDescriptor
 {
  public:
+  // Some vendor MCU headers define I3C as a peripheral macro,
+  // for example `#define I3C ((I3C_TypeDef *) I3C_BASE)`. That
+  // would break the USB class enum entry named I3C below after
+  // macro expansion, so save/undef the macro locally and restore
+  // it right after the enum declaration.
+#if defined(I3C)
+#pragma push_macro("I3C")
+#undef I3C
+#define LIBXR_RESTORE_I3C_MACRO
+#endif
   enum class ClassID : uint8_t
   {
     PER_INTERFACE = 0x00,         ///< 每个接口自定义类 / Per-interface
@@ -66,6 +77,11 @@ class DeviceDescriptor
     APPLICATION_SPECIFIC = 0xFE,  ///< 应用专用类 / Application Specific
     VENDOR_SPECIFIC = 0xFF        ///< 厂商自定义类 / Vendor Specific
   };
+#if defined(LIBXR_RESTORE_I3C_MACRO)
+  // Restore the vendor macro state for any code that follows.
+#pragma pop_macro("I3C")
+#undef LIBXR_RESTORE_I3C_MACRO
+#endif
 
   /**
    * @brief 控制端点0最大包长度枚举
@@ -77,7 +93,7 @@ class DeviceDescriptor
     SIZE_16 = 16,  ///< 16字节 / 16 bytes    (Full Speed)
     SIZE_32 = 32,  ///< 32字节 / 32 bytes    (Full Speed)
     SIZE_64 = 64,  ///< 64字节 / 64 bytes    (Full Speed / High Speed)
-    SIZE_512 = 0,  ///< 512字节 / 512 bytes  (SuperSpeed)
+    SIZE_512 = 9,  ///< 512字节 / 512 bytes  (SuperSpeed uses exponent encoding)
   };
 
   static constexpr uint8_t DEVICE_DESC_LENGTH =

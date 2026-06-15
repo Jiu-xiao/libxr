@@ -17,9 +17,9 @@ static inline volatile uint8_t* get_rx_ctrl_addr(USB::Endpoint::EPNumber ep)
 {
   return &USBFSD->UEP0_RX_CTRL + 4 * (USB::Endpoint::EPNumberToInt8(ep));
 }
-static inline volatile uint16_t* get_tx_len_addr(USB::Endpoint::EPNumber ep)
+static inline volatile uint8_t* get_tx_len_addr(USB::Endpoint::EPNumber ep)
 {
-  return &USBFSD->UEP0_TX_LEN + 2 * (USB::Endpoint::EPNumberToInt8(ep));
+  return &USBFSD->UEP0_TX_LEN + 4 * (USB::Endpoint::EPNumberToInt8(ep));
 }
 static inline volatile uint32_t* get_dma_addr(USB::Endpoint::EPNumber ep)
 {
@@ -31,33 +31,77 @@ static void set_dma_buffer(USB::Endpoint::EPNumber ep_num, void* value,
 {
   *get_dma_addr(ep_num) = (uint32_t)value;
 
-  if (!double_buffer)
-  {
-    return;
-  }
-
   switch (ep_num)
   {
     case USB::Endpoint::EPNumber::EP1:
-      USBFSD->UEP4_1_MOD |= USBFS_UEP1_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP4_1_MOD |= USBFS_UEP1_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP4_1_MOD &= ~USBFS_UEP1_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP2:
-      USBFSD->UEP2_3_MOD |= USBFS_UEP2_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP2_3_MOD |= USBFS_UEP2_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP2_3_MOD &= ~USBFS_UEP2_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP3:
-      USBFSD->UEP2_3_MOD |= USBFS_UEP3_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP2_3_MOD |= USBFS_UEP3_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP2_3_MOD &= ~USBFS_UEP3_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP4:
-      USBFSD->UEP4_1_MOD |= USBFS_UEP4_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP4_1_MOD |= USBFS_UEP4_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP4_1_MOD &= ~USBFS_UEP4_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP5:
-      USBFSD->UEP5_6_MOD |= USBFS_UEP5_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP5_6_MOD |= USBFS_UEP5_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP5_6_MOD &= ~USBFS_UEP5_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP6:
-      USBFSD->UEP5_6_MOD |= USBFS_UEP6_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP5_6_MOD |= USBFS_UEP6_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP5_6_MOD &= ~USBFS_UEP6_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP7:
-      USBFSD->UEP7_MOD |= USBFS_UEP7_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP7_MOD |= USBFS_UEP7_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP7_MOD &= ~USBFS_UEP7_BUF_MOD;
+      }
       break;
     default:
       break;
@@ -66,7 +110,7 @@ static void set_dma_buffer(USB::Endpoint::EPNumber ep_num, void* value,
 
 static void set_tx_len(USB::Endpoint::EPNumber ep_num, uint32_t value)
 {
-  *get_tx_len_addr(ep_num) = value;
+  *get_tx_len_addr(ep_num) = static_cast<uint8_t>(value);
 }
 
 static void enable_tx(USB::Endpoint::EPNumber ep_num)
@@ -417,6 +461,16 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
         (*get_tx_ctrl_addr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
 
     size = last_transfer_size_;
+
+    if (IS_EP0)
+    {
+      // EP0 上的无数据控制写请求会在这里结束 STATUS IN；如果不重新打开 RX，
+      // 后续紧跟着的下一笔 SETUP（例如 DFU 的 GETSTATUS）会直接超时。
+      // On EP0, no-data control writes finish with STATUS IN here; reopen RX so
+      // the very next SETUP (for example DFU GETSTATUS) can be accepted.
+      *get_rx_ctrl_addr(GetNumber()) =
+          (*get_rx_ctrl_addr(GetNumber()) & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_ACK;
+    }
   }
   else
   {
@@ -431,7 +485,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
 
   // TOG 不匹配表示数据同步失败。
   // TOG mismatch indicates data synchronization failure.
-  if (IS_OUT)
+  if (IS_OUT && !IS_EP0)
   {
     const bool TOG_OK = ((USBFSD->INT_ST & USBFS_U_TOG_OK) == USBFS_U_TOG_OK);  // NOLINT
     if (!TOG_OK)
@@ -451,8 +505,25 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
 
   if (IS_EP0 && IS_OUT)
   {
-    tog_ = true;
-    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_ACK;
+    auto* rx_ctrl = get_rx_ctrl_addr(GetNumber());
+
+    // 不要在这里直接把 EP0 OUT 留在 ACK。
+    // 多包控制 OUT 需要先消费当前 DATA0/DATA1 相位，再由上层在真正准备好
+    // 下一包缓存后显式重新挂接收；否则 DFU DNLOAD 会卡在首包之后。
+    // Do not leave EP0 OUT in ACK here.
+    // Multi-packet control OUT must consume the current DATA0/DATA1 phase first,
+    // then let the upper control stack re-arm reception once the next packet
+    // buffer is ready; otherwise DFU DNLOAD stalls after the first packet.
+    if (size > 0u)
+    {
+      *rx_ctrl = static_cast<uint8_t>(
+          ((*rx_ctrl ^ USBFS_UEP_R_TOG) & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_NAK);
+    }
+    else
+    {
+      *rx_ctrl =
+          static_cast<uint8_t>((*rx_ctrl & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_NAK);
+    }
   }
 
   OnTransferCompleteCallback(true, size);

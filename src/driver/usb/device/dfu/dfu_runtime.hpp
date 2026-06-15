@@ -27,7 +27,8 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
       uint8_t webusb_vendor_code = LibXR::USB::WebUsb::WEBUSB_VENDOR_CODE_DEFAULT)
       : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
                               webusb_vendor_code, DEFAULT_WINUSB_DEVICE_INTERFACE_GUID,
-                              DEFAULT_WINUSB_VENDOR_CODE, WinUsbMsOs20Scope::FUNCTION),
+                              DEFAULT_WINUSB_VENDOR_CODE,
+                              WinUsbMsOs20Scope::FUNCTION),
         jump_to_bootloader_(jump_to_bootloader),
         jump_ctx_(jump_ctx),
         default_detach_timeout_ms_(detach_timeout_ms)

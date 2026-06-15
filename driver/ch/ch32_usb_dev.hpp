@@ -2,6 +2,7 @@
 
 #include "ch32_usb.hpp"
 #include "ch32_usb_endpoint.hpp"
+#include "ch32h41x_usb_otghs.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/ep_pool.hpp"
@@ -127,6 +128,7 @@ class CH32USBOtgFS : public USB::EndpointPool, public USB::DeviceCore
 /**
  * @brief CH32 OTG HS 设备驱动 / CH32 OTG HS device driver
  */
+#if !defined(LIBXR_CH32_USB_OTGHS_DEVICE_SPECIALIZED)
 class CH32USBOtgHS : public USB::EndpointPool, public USB::DeviceCore
 {
  public:
@@ -174,7 +176,70 @@ class CH32USBOtgHS : public USB::EndpointPool, public USB::DeviceCore
 
   static inline CH32USBOtgHS* self_ = nullptr;
 };
+#endif
 
 #endif  // defined(USBHSD)
+
+#if defined(LIBXR_CH32_HAS_USB_OTG_SS)
+
+/**
+ * @brief CH32 OTG SS 设备驱动 / CH32 OTG SS device driver
+ */
+class CH32USBOtgSS : public USB::EndpointPool, public USB::DeviceCore
+{
+ public:
+  struct EPConfig
+  {
+    RawData buffer_tx;
+    RawData buffer_rx;
+    uint8_t tx_max_burst;
+    uint8_t rx_max_burst;
+
+    explicit EPConfig(RawData ep0_buffer)
+        : buffer_tx(ep0_buffer), buffer_rx(ep0_buffer), tx_max_burst(1u), rx_max_burst(1u)
+    {
+    }
+
+    EPConfig(RawData buffer, bool is_in, uint8_t max_burst = 1u)
+        : buffer_tx(is_in ? buffer : RawData{nullptr, 0}),
+          buffer_rx(is_in ? RawData{nullptr, 0} : buffer),
+          tx_max_burst(is_in ? max_burst : 0u),
+          rx_max_burst(is_in ? 0u : max_burst)
+    {
+    }
+
+    EPConfig(RawData buffer_tx, RawData buffer_rx, uint8_t tx_max_burst = 1u,
+             uint8_t rx_max_burst = 1u)
+        : buffer_tx(buffer_tx),
+          buffer_rx(buffer_rx),
+          tx_max_burst(tx_max_burst),
+          rx_max_burst(rx_max_burst)
+    {
+    }
+  };
+
+  CH32USBOtgSS(
+      const std::initializer_list<EPConfig> EP_CFGS, uint16_t vid, uint16_t pid,
+      uint16_t bcd,
+      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
+      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
+          CONFIGS,
+      USB::USBSpec spec = USB::USBSpec::USB_3_0, ConstRawData uid = {nullptr, 0});
+
+  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+
+  void Start(bool in_isr) override;
+  void Stop(bool in_isr) override;
+
+  static inline CH32USBOtgSS* self_ = nullptr;
+
+ protected:
+  void SetSuperSpeedFeature(uint16_t selector, bool enable) override;
+  uint16_t GetSuperSpeedDeviceStatus() const override;
+  void SetIsochronousDelay(uint16_t delay) override;
+  void OnSetSelData(const uint8_t* data, size_t size) override;
+};
+
+#endif  // defined(LIBXR_CH32_HAS_USB_OTG_SS)
 
 }  // namespace LibXR

@@ -3,6 +3,15 @@
 
 using namespace LibXR;
 
+static inline SysTick_Type* ch32_systick_reg()
+{
+#if defined(LIBXR_CH32_IS_H41X)
+  return SysTick0;
+#else
+  return SysTick;
+#endif
+}
+
 CH32Timebase::CH32Timebase()
 {
   ConfigureWrapRange(static_cast<uint64_t>(UINT32_MAX) * 1000ULL + 999ULL, UINT32_MAX);
@@ -13,13 +22,14 @@ MicrosecondTimestamp Timebase::GetMicroseconds()
 {
   do
   {
+    auto* const SYSTICK = ch32_systick_reg();
     uint32_t tick_old = CH32Timebase::sys_tick_ms_;
-    uint32_t cnt_old = SysTick->CNT;
+    uint32_t cnt_old = SYSTICK->CNT;
     uint32_t tick_new = CH32Timebase::sys_tick_ms_;
-    uint32_t cnt_new = SysTick->CNT;
+    uint32_t cnt_new = SYSTICK->CNT;
 
     auto tick_diff = tick_new - tick_old;
-    uint32_t tick_cmp = SysTick->CMP + 1;
+    uint32_t tick_cmp = SYSTICK->CMP + 1;
     switch (tick_diff)
     {
       case 0:

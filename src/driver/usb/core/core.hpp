@@ -79,8 +79,16 @@ enum class StandardRequest : uint8_t
   SET_CONFIGURATION = 9,  ///< 设置配置值 / Set Configuration
   GET_INTERFACE = 10,     ///< 获取接口设置 / Get Interface
   SET_INTERFACE = 11,     ///< 设置接口设置 / Set Interface
-  SYNCH_FRAME = 12        ///< 同步帧 / Synch Frame (仅限ISO端点)
+  SYNCH_FRAME = 12,       ///< 同步帧 / Synch Frame (仅限ISO端点)
+  SET_SEL = 0x30,         ///< USB 3.0 Set SEL
+  SET_ISOCH_DELAY = 0x31  ///< USB 3.0 Set Isochronous Delay
 };
+
+constexpr uint16_t FEATURE_ENDPOINT_HALT = 0x0000;   ///< Endpoint halt
+constexpr uint16_t FEATURE_REMOTE_WAKEUP = 0x0001;   ///< Device remote wakeup
+constexpr uint16_t FEATURE_U1_ENABLE = 0x0030;       ///< USB 3.0 U1 enable
+constexpr uint16_t FEATURE_U2_ENABLE = 0x0031;       ///< USB 3.0 U2 enable
+constexpr size_t SET_SEL_DATA_SIZE = 6u;             ///< USB 3.0 SET_SEL payload size
 
 /**
  * @brief USB 传输速率等级（用于描述符或控制器初始化）
