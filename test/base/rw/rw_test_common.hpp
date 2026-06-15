@@ -12,7 +12,7 @@
  */
 #pragma once
 
-#include "../../common/core/rw/pipe_test_common.hpp"
+#include "../../common/rw/pipe_test_common.hpp"
 
 
 void RunBaseRwReadQueueTests();
