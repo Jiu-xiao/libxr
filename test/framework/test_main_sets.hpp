@@ -43,6 +43,7 @@ inline int RunLinuxShmSet()
 inline int RunBenchLinuxSharedTopicSet(const char* selector)
 {
   int status = 0;
+  bool matched = false;
   const bool run_standard =
       (selector == nullptr) || (std::strcmp(selector, "standard") == 0);
   const bool run_latency =
@@ -53,19 +54,29 @@ inline int RunBenchLinuxSharedTopicSet(const char* selector)
 
   if (run_standard)
   {
+    matched = true;
     status |= LinuxSharedTopicBench::RunStandardBenchmarks();
   }
   if (run_latency)
   {
+    matched = true;
     status |= LinuxSharedTopicBench::RunLatencyBenchmarks();
   }
   if (run_overload)
   {
+    matched = true;
     status |= LinuxSharedTopicBench::RunOverloadBenchmarks();
   }
   if (run_modes)
   {
+    matched = true;
     status |= LinuxSharedTopicBench::RunModeBenchmarks();
+  }
+  if (!matched)
+  {
+    std::fprintf(stderr, "Unknown bench selector: %s\n",
+                 selector == nullptr ? "<null>" : selector);
+    return 1;
   }
   return status;
 }

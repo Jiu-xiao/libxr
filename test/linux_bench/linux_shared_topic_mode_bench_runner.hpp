@@ -11,6 +11,7 @@
 #pragma once
 
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -57,6 +58,37 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
   };
 
   std::vector<ChildRuntime> runtimes(subscribers.size());
+  auto close_fd = [](int& fd)
+  {
+    if (fd >= 0)
+    {
+      close(fd);
+      fd = -1;
+    }
+  };
+  auto cleanup = [&]()
+  {
+    for (auto& runtime : runtimes)
+    {
+      close_fd(runtime.ready_pipe[0]);
+      close_fd(runtime.ready_pipe[1]);
+      close_fd(runtime.done_pipe[0]);
+      close_fd(runtime.done_pipe[1]);
+      close_fd(runtime.stats_pipe[0]);
+      close_fd(runtime.stats_pipe[1]);
+      if (runtime.pid > 0)
+      {
+        (void)::kill(runtime.pid, SIGTERM);
+        int child_status = 0;
+        while (waitpid(runtime.pid, &child_status, 0) == -1 && errno == EINTR)
+        {
+        }
+        runtime.pid = -1;
+      }
+    }
+    (void)Topic::Remove(topic_name);
+  };
+
   for (size_t i = 0; i < subscribers.size(); ++i)
   {
     if (pipe(runtimes[i].ready_pipe) != 0 || pipe(runtimes[i].done_pipe) != 0 ||
@@ -64,6 +96,7 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
     {
       std::fprintf(stderr, "pipe failed for %s[%zu]: %s\n", case_label, i,
                    std::strerror(errno));
+      cleanup();
       return 1;
     }
 
@@ -72,27 +105,28 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
     {
       std::fprintf(stderr, "fork failed for %s[%zu]: %s\n", case_label, i,
                    std::strerror(errno));
+      cleanup();
       return 1;
     }
 
     if (child == 0)
     {
-      close(runtimes[i].ready_pipe[0]);
-      close(runtimes[i].done_pipe[1]);
-      close(runtimes[i].stats_pipe[0]);
+      close_fd(runtimes[i].ready_pipe[0]);
+      close_fd(runtimes[i].done_pipe[1]);
+      close_fd(runtimes[i].stats_pipe[0]);
       const int child_status = RunModeSubscriberChild<PayloadBytes, Subscriber, Data>(
           topic_name, subscribers[i], count, runtimes[i].done_pipe[0], runtimes[i].stats_pipe[1],
           runtimes[i].ready_pipe[1]);
-      close(runtimes[i].done_pipe[0]);
-      close(runtimes[i].stats_pipe[1]);
-      close(runtimes[i].ready_pipe[1]);
+      close_fd(runtimes[i].done_pipe[0]);
+      close_fd(runtimes[i].stats_pipe[1]);
+      close_fd(runtimes[i].ready_pipe[1]);
       _exit(child_status);
     }
 
     runtimes[i].pid = child;
-    close(runtimes[i].ready_pipe[1]);
-    close(runtimes[i].done_pipe[0]);
-    close(runtimes[i].stats_pipe[1]);
+    close_fd(runtimes[i].ready_pipe[1]);
+    close_fd(runtimes[i].done_pipe[0]);
+    close_fd(runtimes[i].stats_pipe[1]);
   }
 
   for (size_t i = 0; i < subscribers.size(); ++i)
@@ -100,15 +134,16 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
     uint8_t ready = 0;
     if (!ReadAll(runtimes[i].ready_pipe[0], &ready, sizeof(ready)))
     {
-      close(runtimes[i].ready_pipe[0]);
       std::fprintf(stderr, "mode ready failed: %s[%zu]\n", case_label, i);
+      cleanup();
       return 1;
     }
-    close(runtimes[i].ready_pipe[0]);
+    close_fd(runtimes[i].ready_pipe[0]);
   }
 
   if (!WaitForSubscriberAttach(publisher, static_cast<uint32_t>(subscribers.size()), case_label))
   {
+    cleanup();
     return 1;
   }
 
@@ -141,21 +176,25 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
   }
   const uint64_t end_ns = NowNs();
 
-  for (const auto& runtime : runtimes)
+  for (auto& runtime : runtimes)
   {
-    close(runtime.done_pipe[1]);
+    close_fd(runtime.done_pipe[1]);
   }
 
   std::vector<ModeSubResult> results(subscribers.size());
   for (size_t i = 0; i < subscribers.size(); ++i)
   {
     const bool read_ok = ReadAll(runtimes[i].stats_pipe[0], &results[i], sizeof(results[i]));
-    close(runtimes[i].stats_pipe[0]);
+    close_fd(runtimes[i].stats_pipe[0]);
     int status = 0;
-    waitpid(runtimes[i].pid, &status, 0);
+    while (waitpid(runtimes[i].pid, &status, 0) == -1 && errno == EINTR)
+    {
+    }
+    runtimes[i].pid = -1;
     if (!read_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
     {
       std::fprintf(stderr, "mode child failed: %s[%zu]\n", case_label, i);
+      cleanup();
       return 1;
     }
   }
@@ -178,7 +217,7 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
   }
   std::fflush(stdout);
 
-  (void)Topic::Remove(topic_name);
+  cleanup();
   return 0;
 }
 
