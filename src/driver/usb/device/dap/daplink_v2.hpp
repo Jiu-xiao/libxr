@@ -3984,6 +3984,22 @@ class DapLinkV2Class : public DeviceClass
     }
   }
 
+  void ResetJtagChainState()
+  {
+    jtag_chain_.ir_length = jtag_ir_len_;
+    jtag_chain_.ir_before = jtag_ir_before_;
+    jtag_chain_.ir_after = jtag_ir_after_;
+    jtag_chain_.count = 0u;
+    jtag_chain_.index = 0u;
+    jtag_chain_.ir_before_bits_len = 0u;
+    jtag_chain_.ir_after_bits_len = 0u;
+    jtag_chain_.dr_before_bits_len = 0u;
+    jtag_chain_.dr_after_bits_len = 0u;
+    Memory::FastSet(jtag_ir_len_, 0, sizeof(jtag_ir_len_));
+    Memory::FastSet(jtag_ir_before_, 0, sizeof(jtag_ir_before_));
+    Memory::FastSet(jtag_ir_after_, 0, sizeof(jtag_ir_after_));
+  }
+
   void DelayUsIfAllowed(bool /*in_isr*/, uint32_t us)
   {
     LibXR::Timebase::DelayMicroseconds(us);
@@ -4000,6 +4016,7 @@ class DapLinkV2Class : public DeviceClass
   // transfer_count > 255 and "expected X, got Y" mismatch.
   static constexpr uint16_t OPENOCD_SAFE_DAP_PACKET_SIZE =
       static_cast<uint16_t>((255u * 5u) + 4u);
+  static constexpr uint8_t JTAG_MAX_DEVICES = 16u;
   // Host-visible CMSIS-DAP packet size; endpoint MPS limits are handled by
   // TransferMultiBulk segmentation/reassembly.
   static constexpr uint16_t MAX_DAP_PACKET_SIZE = MaxDapPacketSize;
@@ -4087,6 +4104,12 @@ LIBXR_PACKED_END
 
  private:
   SwdPort& swd_;  ///< SWD 链路 / SWD link
+
+  LibXR::Debug::Jtag* jtag_ = nullptr;  ///< JTAG 链路 / JTAG link
+  LibXR::Debug::JtagProtocol::ChainConfig jtag_chain_{};  ///< JTAG 链状态 / JTAG chain state
+  uint8_t jtag_ir_len_[JTAG_MAX_DEVICES] = {};  ///< JTAG IR 长度 / JTAG IR lengths
+  uint16_t jtag_ir_before_[JTAG_MAX_DEVICES] = {};  ///< 目标前 IR 位数 / IR bits before target
+  uint16_t jtag_ir_after_[JTAG_MAX_DEVICES] = {};  ///< 目标后 IR 位数 / IR bits after target
 
   LibXR::GPIO* nreset_gpio_ = nullptr;  ///< Optional nRESET GPIO
 
