@@ -507,10 +507,6 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    // 尽早 re-arm OUT 以覆盖 host->probe 流水 /
-    // Re-arm OUT early to overlap the host->probe pipeline.
-    ArmOutTransferIfIdle();
-
     const auto* req = static_cast<const uint8_t*>(data.addr_);
     const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
 
