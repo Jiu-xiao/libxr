@@ -39,8 +39,10 @@ class DoubleBuffer
    * @brief 绑定连续 backing storage 并重置双缓冲状态
    *        Binds continuous backing storage and resets double-buffer state
    *
-   * @param raw_data 连续内存区，大小必须满足双缓冲对半切分约束
-   * @param raw_data Continuous memory block satisfying the half-split contract
+   * @param raw_data 连续内存区，大小必须满足双缓冲对半切分约束；空双缓冲允许
+   *        传入 `nullptr + 0`
+   * @param raw_data Continuous memory block satisfying the half-split contract;
+   *        an empty double buffer may be initialized with `nullptr + 0`
    */
   void Init(const LibXR::RawData& raw_data);
 
