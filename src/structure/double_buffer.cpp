@@ -25,15 +25,20 @@ void DoubleBuffer::Reset()
 void DoubleBuffer::Init(const LibXR::RawData& raw_data)
 {
   constexpr size_t ALIGN = alignof(size_t);
+  const bool EMPTY_STORAGE = (raw_data.addr_ == nullptr) && (raw_data.size_ == 0U);
 
-  ASSERT(raw_data.addr_ != nullptr);
-  ASSERT(raw_data.size_ > 0U);
-  ASSERT((reinterpret_cast<uintptr_t>(raw_data.addr_) % ALIGN) == 0U);
-  ASSERT((raw_data.size_ % (2U * ALIGN)) == 0U);
+  ASSERT(EMPTY_STORAGE || (raw_data.addr_ != nullptr));
+
+  if (!EMPTY_STORAGE)
+  {
+    ASSERT(raw_data.size_ > 0U);
+    ASSERT((reinterpret_cast<uintptr_t>(raw_data.addr_) % ALIGN) == 0U);
+    ASSERT((raw_data.size_ % (2U * ALIGN)) == 0U);
+  }
 
   size_ = raw_data.size_ / 2U;
   buffer_[0] = static_cast<uint8_t*>(raw_data.addr_);
-  buffer_[1] = static_cast<uint8_t*>(raw_data.addr_) + size_;
+  buffer_[1] = EMPTY_STORAGE ? nullptr : (static_cast<uint8_t*>(raw_data.addr_) + size_);
   Reset();
 }
 
@@ -84,6 +89,7 @@ bool DoubleBuffer::FillPending(const uint8_t* data, size_t len)
   {
     return false;
   }
+
   LibXR::Memory::FastCopy(PendingBuffer(), data, len);
   pending_len_ = len;
   pending_valid_ = true;
@@ -99,6 +105,7 @@ bool DoubleBuffer::FillActive(const uint8_t* data, size_t len)
   {
     return false;
   }
+
   LibXR::Memory::FastCopy(ActiveBuffer(), data, len);
   return true;
 }

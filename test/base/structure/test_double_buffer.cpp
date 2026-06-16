@@ -4,8 +4,9 @@
  *
  * 测试项目 / Test items:
  * 1. 初始分块与 pending 初始状态。 Initial split and pending state: verify the raw buffer is divided evenly and starts without pending data.
- * 2. `FillPending()` 的写入与重复写保护。 Pending fill semantics: verify `FillPending()` stores bytes and rejects a second pending fill before switch.
- * 3. `Switch()` 切换和越界长度拒绝。 Switch semantics and bounds: verify active-half toggling and oversized pending writes are rejected.
+ * 2. `nullptr + 0` 空 backing storage。 Empty backing storage: verify an empty raw view can initialize the object without forcing a dummy pointer.
+ * 3. `FillPending()` 的写入与重复写保护。 Pending fill semantics: verify `FillPending()` stores bytes and rejects a second pending fill before switch.
+ * 4. `Switch()` 切换和越界长度拒绝。 Switch semantics and bounds: verify active-half toggling and oversized pending writes are rejected.
  *
  * 测试原理 / Test principles:
  * 1. 使用一个具体后备缓冲区，同时检查地址和长度，因为它是纯存储布局原语。 Use one concrete backing buffer and inspect both addresses and lengths, because this utility is a pure storage-layout primitive.
@@ -33,6 +34,20 @@ void test_double_buffer()
   ASSERT(init_later.Size() == 64);
   ASSERT((reinterpret_cast<uintptr_t>(init_later.ActiveBuffer()) % alignof(size_t)) == 0U);
   ASSERT((reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) == 0U);
+
+  LibXR::DoubleBuffer empty_buffer;
+  LibXR::RawData empty_raw(nullptr, 0);
+  empty_buffer.Init(empty_raw);
+  ASSERT(empty_buffer.Size() == 0);
+  ASSERT(empty_buffer.ActiveBuffer() == nullptr);
+  ASSERT(empty_buffer.PendingBuffer() == nullptr);
+  ASSERT(empty_buffer.HasPending() == false);
+  ASSERT(empty_buffer.FillPending(nullptr, 0) == true);
+  ASSERT(empty_buffer.HasPending() == true);
+  ASSERT(empty_buffer.GetPendingLength() == 0);
+  empty_buffer.Switch();
+  ASSERT(empty_buffer.ActiveBuffer() == nullptr);
+  ASSERT(empty_buffer.FillActive(nullptr, 0) == true);
 
   LibXR::DoubleBuffer buffer(raw);
 
