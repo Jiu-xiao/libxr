@@ -31,7 +31,7 @@ template <typename SwclkGpioType, typename SwdioGpioType,
           SwdIoDriveMode IO_DRIVE_MODE = SwdIoDriveMode::PUSH_PULL>
 class SwdGeneralGPIO final : public Swd
 {
-  static constexpr uint32_t MIN_HZ = 10'000u;
+  static constexpr uint32_t MIN_HZ = 50'000u;
   static constexpr uint32_t MAX_HZ = 100'000'000u;
 
   static constexpr uint32_t NS_PER_SEC = 1'000'000'000u;
@@ -243,12 +243,13 @@ class SwdGeneralGPIO final : public Swd
       const bool BIT = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
       swdio_.Write(BIT);
 
-      // one clock cycle: low->high (with DelayHalf inside GenOneClk)
-      // NOTE: your GenOneClk ends at high; to keep "end low" legacy for SeqWrite,
-      // we explicitly pull low after each cycle (no extra DelayHalf added).
+      // Match the DAP_Transfer request path: one bit owns one complete
+      // low-high clock cycle. Do not add an un-timed low pulse after every bit.
+      // 匹配 DAP_Transfer 请求路径：每个 bit 只产生一个完整低-高时钟周期，
+      // 不在每 bit 末尾额外插入无定时低脉冲。
       GenOneClk();
-      swclk_.Write(false);
     }
+    swclk_.Write(false);
 
     return ErrorCode::OK;
   }
