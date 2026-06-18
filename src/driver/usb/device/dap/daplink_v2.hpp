@@ -2349,6 +2349,24 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
+  ErrorCode RecoverAfterApWriteFast(LibXR::Debug::SwdProtocol::Ack& ack_out)
+  {
+    LibXR::Debug::SwdProtocol::Response swd_resp = {};
+    const auto req = LibXR::Debug::SwdProtocol::make_dp_read_req(
+        LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT);
+    const ErrorCode ec = TransferTxnFast(req, swd_resp);
+    ack_out = swd_resp.ack;
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+    if (swd_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK || !swd_resp.parity_ok)
+    {
+      return ErrorCode::FAILED;
+    }
+    return ErrorCode::OK;
+  }
+
   ErrorCode ApReadPostedFast(uint8_t addr2b, uint32_t& posted,
                              LibXR::Debug::SwdProtocol::Ack& ack_out)
   {
@@ -2595,6 +2613,21 @@ class DapLinkV2Class : public DeviceClass
         {
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
           break;
+        }
+
+        if (AP)
+        {
+          ec = RecoverAfterApWriteFast(ack);
+          response_value = MapAckToDapResp(ack);
+          if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
+          {
+            break;
+          }
+          if (ec != ErrorCode::OK)
+          {
+            response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+            break;
+          }
         }
 
         if (TS)
@@ -2844,25 +2877,7 @@ class DapLinkV2Class : public DeviceClass
       }
     }
 
-    // Tail write flush: if all OK and there was a real write, and no RDBUFF
-    // flush happened in between, perform one DP_RDBUFF read (discard).
-    if (response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && check_write)
-    {
-      uint32_t dummy = 0u;
-      LibXR::Debug::SwdProtocol::Ack ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-      const ErrorCode EC = DpReadRdbuffFast(dummy, ack);
-      const uint8_t V = MapAckToDapResp(ack);
-
-      if (V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
-      {
-        response_value = V;
-      }
-      else if (EC != ErrorCode::OK)
-      {
-        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-      }
-    }
-
+    (void)check_write;
     resp[1] = response_count;
     resp[2] = response_value;
     out_len = resp_off;
@@ -2965,6 +2980,19 @@ class DapLinkV2Class : public DeviceClass
             break;
           }
           if (ec != ErrorCode::OK)
+          {
+            xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+            break;
+          }
+          LibXR::Debug::SwdProtocol::Ack recover_ack =
+              LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+          const ErrorCode RECOVER_EC = RecoverAfterApWriteFast(recover_ack);
+          xresp = MapAckToDapResp(recover_ack);
+          if (recover_ack != LibXR::Debug::SwdProtocol::Ack::OK)
+          {
+            break;
+          }
+          if (RECOVER_EC != ErrorCode::OK)
           {
             xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
             break;
