@@ -2457,8 +2457,9 @@ class DapLinkV2Class : public DeviceClass
     // Keep reference behavior: if no transfer executes, response_value remains 0.
     uint8_t response_value = 0u;
 
-    // Whether a final DP_RDBUFF flush is required for write-fault cleanup.
-    bool check_write = false;
+    // AP writes are posted by the target.  Keep the write batch fast and
+    // recover once at a transfer boundary instead of after every AP write.
+    bool check_ap_write = false;
 
     // -------- posted-read pipeline state (AP read only) --------
     struct PendingApRead
@@ -2524,11 +2525,33 @@ class DapLinkV2Class : public DeviceClass
       pending.valid = false;
       pending.need_ts = false;
 
-      // RDBUFF has been read; equivalent to one posted/fault flush.
-      check_write = false;
+      // RDBUFF completes an AP read; it does not validate posted AP writes.
 
       // 成功路径保持 OK
       response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
+      return true;
+    };
+
+    auto recover_ap_write_if_any = [&]() -> bool
+    {
+      if (!check_ap_write)
+      {
+        return true;
+      }
+      LibXR::Debug::SwdProtocol::Ack recover_ack =
+          LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+      const ErrorCode recover_ec = RecoverAfterApWriteFast(recover_ack);
+      response_value = MapAckToDapResp(recover_ack);
+      if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
+      {
+        return false;
+      }
+      if (recover_ec != ErrorCode::OK)
+      {
+        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+        return false;
+      }
+      check_ap_write = false;
       return true;
     };
 
@@ -2536,6 +2559,9 @@ class DapLinkV2Class : public DeviceClass
     // to keep response ordering stable.
     auto flush_pending_if_any = [&]() -> bool
     { return pending.valid ? complete_pending_by_rdbuff() : true; };
+
+    auto close_posted_state = [&]() -> bool
+    { return flush_pending_if_any() && recover_ap_write_if_any(); };
 
     // -------- main loop --------
     for (uint32_t i = 0; i < COUNT; ++i)
@@ -2571,8 +2597,8 @@ class DapLinkV2Class : public DeviceClass
       if (!RNW)
       {
         // ---------------- WRITE ----------------
-        // Config-like operations do not participate in AP posted pipeline;
-        // flush pending first.
+        // A write can follow previous AP writes without forcing a recovery.
+        // Only close an AP-read pipeline before consuming write data.
         if (!flush_pending_if_any())
         {
           break;
@@ -2617,17 +2643,7 @@ class DapLinkV2Class : public DeviceClass
 
         if (AP)
         {
-          ec = RecoverAfterApWriteFast(ack);
-          response_value = MapAckToDapResp(ack);
-          if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
-          {
-            break;
-          }
-          if (ec != ErrorCode::OK)
-          {
-            response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-            break;
-          }
+          check_ap_write = true;
         }
 
         if (TS)
@@ -2640,7 +2656,6 @@ class DapLinkV2Class : public DeviceClass
         }
 
         response_count++;
-        check_write = true;
       }
       else
       {
@@ -2648,10 +2663,9 @@ class DapLinkV2Class : public DeviceClass
 
         if (MATCH_VALUE)
         {
-          // MATCH_VALUE does not return read data.
-          // For simpler semantics, flush pending first, then keep using ApReadTxn
-          // for AP reads.
-          if (!flush_pending_if_any())
+          // MATCH_VALUE performs real reads and can observe earlier AP writes,
+          // so close both posted read and posted AP-write state first.
+          if (!close_posted_state())
           {
             break;
           }
@@ -2676,8 +2690,7 @@ class DapLinkV2Class : public DeviceClass
               ec = swd_.ApReadTxn(ADDR2B, rdata, ack);  // 内含 RDBUFF
               if (ec == ErrorCode::OK && ack == LibXR::Debug::SwdProtocol::Ack::OK)
               {
-                // ApReadTxn already reads RDBUFF; equivalent to a flush.
-                check_write = false;
+                // ApReadTxn completes the AP read pipeline only.
               }
             }
             else
@@ -2732,8 +2745,8 @@ class DapLinkV2Class : public DeviceClass
         // ---- Normal read ----
         if (!AP)
         {
-          // DP read：不参与 pipeline；先 flush pending
-          if (!flush_pending_if_any())
+          // DP read does not participate in posted pipelines.
+          if (!close_posted_state())
           {
             break;
           }
@@ -2767,6 +2780,13 @@ class DapLinkV2Class : public DeviceClass
 
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
           continue;
+        }
+
+        // AP reads can observe previous AP writes, so close posted writes
+        // before starting or extending the posted-read pipeline.
+        if (!recover_ap_write_if_any())
+        {
+          break;
         }
 
         // AP normal read：posted-read pipeline
@@ -2877,7 +2897,11 @@ class DapLinkV2Class : public DeviceClass
       }
     }
 
-    (void)check_write;
+    if (response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK &&
+        !recover_ap_write_if_any())
+    {
+      // response_value is already set by the recovery helper.
+    }
     resp[1] = response_count;
     resp[2] = response_value;
     out_len = resp_off;
@@ -2984,20 +3008,18 @@ class DapLinkV2Class : public DeviceClass
             xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
             break;
           }
+          done = static_cast<uint16_t>(i + 1u);
+        }
+        if (xresp == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && done != 0u)
+        {
           LibXR::Debug::SwdProtocol::Ack recover_ack =
               LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
-          const ErrorCode RECOVER_EC = RecoverAfterApWriteFast(recover_ack);
+          const ErrorCode recover_ec = RecoverAfterApWriteFast(recover_ack);
           xresp = MapAckToDapResp(recover_ack);
-          if (recover_ack != LibXR::Debug::SwdProtocol::Ack::OK)
-          {
-            break;
-          }
-          if (RECOVER_EC != ErrorCode::OK)
+          if (recover_ack == LibXR::Debug::SwdProtocol::Ack::OK && recover_ec != ErrorCode::OK)
           {
             xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-            break;
           }
-          done = static_cast<uint16_t>(i + 1u);
         }
       }
       else
