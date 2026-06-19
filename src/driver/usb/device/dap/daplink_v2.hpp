@@ -3110,8 +3110,6 @@ class DapLinkV2Class : public DeviceClass
       }
 
       auto ap_read_req = LibXR::Debug::SwdProtocol::make_ap_read_req(ADDR2B);
-      const auto rdbuff_req = LibXR::Debug::SwdProtocol::make_dp_read_req(
-          LibXR::Debug::SwdProtocol::DpReadReg::RDBUFF);
       LibXR::Debug::SwdProtocol::Response ap_read_resp = {};
       ErrorCode ec = TransferTxnFast(ap_read_req, ap_read_resp);
       xresp = MapAckToDapResp(ap_read_resp.ack);
@@ -3134,23 +3132,25 @@ class DapLinkV2Class : public DeviceClass
         if (ap_read_resp.ack != LibXR::Debug::SwdProtocol::Ack::OK ||
             ec != ErrorCode::OK || !ap_read_resp.parity_ok)
         {
-          // Current AP read failed; try to flush previous pending data via RDBUFF.
+          // Current AP read failed; try to complete the previous AP read result.
           if (resp_off + 4u <= resp_cap)
           {
-            LibXR::Debug::SwdProtocol::Response rdbuff_resp = {};
-            const ErrorCode EC2 = TransferTxnFast(rdbuff_req, rdbuff_resp);
-            const uint8_t V2 = MapAckToDapResp(rdbuff_resp.ack);
+            uint32_t rdbuff_data = 0u;
+            LibXR::Debug::SwdProtocol::Ack rdbuff_ack =
+                LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+            const ErrorCode ec2 = CompletePendingApReadFast(rdbuff_data, rdbuff_ack);
+            const uint8_t v2 = MapAckToDapResp(rdbuff_ack);
 
-            if (V2 == 1u && EC2 == ErrorCode::OK && rdbuff_resp.parity_ok)
+            if (v2 == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && ec2 == ErrorCode::OK)
             {
-              StoreU32Le(&resp[resp_off], rdbuff_resp.rdata);
+              StoreU32Le(&resp[resp_off], rdbuff_data);
               resp_off = static_cast<uint16_t>(resp_off + 4u);
               done = static_cast<uint16_t>(i);  // done includes transfer [0..i-1]
             }
             else
             {
-              xresp = V2;
-              if (EC2 != ErrorCode::OK)
+              xresp = v2;
+              if (ec2 != ErrorCode::OK)
               {
                 xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
               }
@@ -3172,24 +3172,26 @@ class DapLinkV2Class : public DeviceClass
         xresp = CUR;
       }
 
-      // Tail flush: read final posted value from RDBUFF.
+      // Complete the final posted AP read by DP RDBUFF.
       {
-        LibXR::Debug::SwdProtocol::Response rdbuff_resp = {};
-        const ErrorCode EC2 = TransferTxnFast(rdbuff_req, rdbuff_resp);
-        const uint8_t V2 = MapAckToDapResp(rdbuff_resp.ack);
+        uint32_t rdbuff_data = 0u;
+        LibXR::Debug::SwdProtocol::Ack rdbuff_ack =
+            LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+        const ErrorCode ec2 = CompletePendingApReadFast(rdbuff_data, rdbuff_ack);
+        const uint8_t v2 = MapAckToDapResp(rdbuff_ack);
 
-        xresp = V2;
-        if (V2 != 1u)
+        xresp = v2;
+        if (v2 != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
         {
           goto out_ap_read;  // NOLINT
         }
-        if (EC2 != ErrorCode::OK || !rdbuff_resp.parity_ok)
+        if (ec2 != ErrorCode::OK)
         {
           xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
           goto out_ap_read;  // NOLINT
         }
 
-        StoreU32Le(&resp[resp_off], rdbuff_resp.rdata);
+        StoreU32Le(&resp[resp_off], rdbuff_data);
         resp_off = static_cast<uint16_t>(resp_off + 4u);
         done = count;
       }
@@ -3375,7 +3377,7 @@ class DapLinkV2Class : public DeviceClass
       bool need_ts = false;
     } pending;
 
-    auto complete_pending_by_rdbuff = [&]() -> bool
+    auto complete_pending_ap_read_by_rdbuff = [&]() -> bool
     {
       if (!pending.valid)
       {
@@ -3417,7 +3419,8 @@ class DapLinkV2Class : public DeviceClass
       return true;
     };
 
-    auto flush_pending_if_any = [&]() -> bool { return pending.valid ? complete_pending_by_rdbuff() : true; };
+    auto complete_pending_ap_read_if_any = [&]() -> bool
+    { return pending.valid ? complete_pending_ap_read_by_rdbuff() : true; };
 
     for (uint32_t i = 0; i < COUNT; ++i)
     {
@@ -3446,7 +3449,7 @@ class DapLinkV2Class : public DeviceClass
 
       if (!RNW)
       {
-        if (!flush_pending_if_any())
+        if (!complete_pending_ap_read_if_any())
         {
           break;
         }
@@ -3504,7 +3507,7 @@ class DapLinkV2Class : public DeviceClass
       {
         if (MATCH_VALUE)
         {
-          if (!flush_pending_if_any())
+          if (!complete_pending_ap_read_if_any())
           {
             break;
           }
@@ -3577,7 +3580,7 @@ class DapLinkV2Class : public DeviceClass
 
         if (!AP)
         {
-          if (!flush_pending_if_any())
+          if (!complete_pending_ap_read_if_any())
           {
             break;
           }
@@ -3649,7 +3652,7 @@ class DapLinkV2Class : public DeviceClass
             const uint8_t FAIL = (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
                                      ? CUR_V
                                      : LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-            if (!complete_pending_by_rdbuff())
+            if (!complete_pending_ap_read_by_rdbuff())
             {
               break;
             }
@@ -3679,7 +3682,7 @@ class DapLinkV2Class : public DeviceClass
     if (pending.valid)
     {
       const uint8_t PRIOR_FAIL = response_value;
-      if (!complete_pending_by_rdbuff())
+      if (!complete_pending_ap_read_by_rdbuff())
       {
         // pending failure already recorded in response_value
       }
