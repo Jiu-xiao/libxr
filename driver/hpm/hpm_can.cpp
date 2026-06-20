@@ -8,17 +8,16 @@ using namespace LibXR;
 
 namespace
 {
-constexpr uint8_t TX_RX_IRQ_MASK =
-    CAN_EVENT_RECEIVE | CAN_EVENT_RX_BUF_OVERRUN | CAN_EVENT_TX_SECONDARY_BUF;
+constexpr uint32_t MCAN_RX_IRQ_MASK =
+    MCAN_INT_RXFIFO0_NEW_MSG | MCAN_INT_RXFIFO1_NEW_MSG | MCAN_INT_RXFIFO0_MSG_LOST |
+    MCAN_INT_RXFIFO1_MSG_LOST;
 
-constexpr uint8_t ERROR_IRQ_MASK = CAN_ERROR_PASSIVE_INT_ENABLE |
-                                   CAN_ERROR_ARBITRATION_LOST_INT_ENABLE |
-                                   CAN_ERROR_BUS_ERROR_INT_ENABLE;
+constexpr uint32_t MCAN_TX_IRQ_MASK = MCAN_INT_TX_COMPLETED | MCAN_INT_TXFIFO_EMPTY;
 
-constexpr uint8_t ERROR_FLAG_MASK =
-    CAN_ERROR_PASSIVE_INT_FLAG | CAN_ERROR_ARBITRATION_LOST_INT_FLAG |
-    CAN_ERROR_BUS_ERROR_INT_FLAG | CAN_ERROR_PASSIVE_MODE_ACTIVE_FLAG |
-    CAN_ERROR_WARNING_LIMIT_FLAG;
+constexpr uint32_t MCAN_ERR_IRQ_MASK =
+    MCAN_INT_BUS_OFF_STATUS | MCAN_INT_WARNING_STATUS | MCAN_INT_ERROR_PASSIVE |
+    MCAN_INT_PROTOCOL_ERR_IN_ARB_PHASE | MCAN_INT_PROTOCOL_ERR_IN_DATA_PHASE |
+    MCAN_INT_MSG_RAM_ACCESS_FAILURE;
 
 static uint16_t sample_point_to_hpm_range(float sample_point, bool upper)
 {
@@ -47,8 +46,19 @@ static uint16_t sample_point_to_hpm_range(float sample_point, bool upper)
 }
 }  // namespace
 
-HPMCAN::HPMCAN(CAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size)
+HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size)
     : can_(can), clock_(clock), irq_(irq), tx_queue_(queue_size)
+{
+}
+
+HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
+                 void* msg_buf, uint32_t msg_buf_size)
+    : can_(can),
+      clock_(clock),
+      irq_(irq),
+      msg_buf_(msg_buf),
+      msg_buf_size_(msg_buf_size),
+      tx_queue_(queue_size)
 {
 }
 
@@ -62,8 +72,18 @@ ErrorCode HPMCAN::ConvertStatus(LibXRHpmCanStatus status)
       return ErrorCode::TIMEOUT;
     case status_invalid_argument:
       return ErrorCode::ARG_ERR;
-    case status_can_tx_fifo_full:
+    case status_mcan_txfifo_full:
+    case status_mcan_txbuf_full:
       return ErrorCode::FULL;
+    case status_mcan_rxfifo_empty:
+    case status_mcan_rxbuf_empty:
+      return ErrorCode::EMPTY;
+    case status_mcan_ram_out_of_range:
+      return ErrorCode::OUT_OF_RANGE;
+    case status_mcan_timeout:
+      return ErrorCode::TIMEOUT;
+    case status_mcan_invalid_bit_timing:
+      return ErrorCode::ARG_ERR;
     default:
       return ErrorCode::FAILED;
   }
@@ -73,17 +93,17 @@ LibXRHpmCanMode HPMCAN::ConvertMode(const CAN::Mode& mode)
 {
   if (mode.loopback && mode.listen_only)
   {
-    return can_mode_loopback_internal;
+    return mcan_mode_loopback_internal;
   }
   if (mode.loopback)
   {
-    return can_mode_loopback_internal;
+    return mcan_mode_loopback_internal;
   }
   if (mode.listen_only)
   {
-    return can_mode_listen_only;
+    return mcan_mode_listen_only;
   }
-  return can_mode_normal;
+  return mcan_mode_normal;
 }
 
 ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
@@ -93,21 +113,28 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     return ErrorCode::ARG_ERR;
   }
 
-  DisableCanInterrupts();
-
-  can_config_t config{};
-  if (can_get_default_config(&config) != status_success)
+  const ErrorCode msg_buf_status = ApplyMessageBuffer();
+  if (msg_buf_status != ErrorCode::OK)
   {
-    EnableCanInterrupts();
-    return ErrorCode::FAILED;
+    return msg_buf_status;
   }
+
+  DisableCanInterrupts();
+  tx_lock_.store(0u, std::memory_order_release);
+  tx_pend_.store(0u, std::memory_order_release);
+  tx_retry_valid_ = false;
+  while (tx_queue_.Pop() == ErrorCode::OK)
+  {
+  }
+
+  mcan_config_t config{};
+  mcan_get_default_config(can_, &config);
 
   config.enable_canfd = false;
   config.mode = ConvertMode(cfg.mode);
-  config.disable_ptb_retransmission = cfg.mode.one_shot;
-  config.disable_stb_retransmission = cfg.mode.one_shot;
-  config.irq_txrx_enable_mask = TX_RX_IRQ_MASK;
-  config.irq_error_enable_mask = ERROR_IRQ_MASK;
+  config.disable_auto_retransmission = cfg.mode.one_shot;
+  config.interrupt_mask = MCAN_RX_IRQ_MASK | MCAN_TX_IRQ_MASK | MCAN_ERR_IRQ_MASK;
+  config.txbuf_trans_interrupt_mask = ~0UL;
 
   const bool use_low_level = cfg.bit_timing.brp != 0u || cfg.bit_timing.prop_seg != 0u ||
                              cfg.bit_timing.phase_seg1 != 0u ||
@@ -125,9 +152,9 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
 
     config.use_lowlevel_timing_setting = true;
     config.can_timing.prescaler = static_cast<uint16_t>(cfg.bit_timing.brp);
-    config.can_timing.num_seg1 = static_cast<uint16_t>(seg1);
+    config.can_timing.num_seg1 = static_cast<uint16_t>(seg1 - 1u);
     config.can_timing.num_seg2 = static_cast<uint16_t>(cfg.bit_timing.phase_seg2);
-    config.can_timing.num_sjw = static_cast<uint16_t>(cfg.bit_timing.sjw);
+    config.can_timing.num_sjw = static_cast<uint8_t>(cfg.bit_timing.sjw);
   }
   else if (cfg.bitrate != 0u)
   {
@@ -137,9 +164,10 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     config.can20_samplepoint_max = sample_point_to_hpm_range(cfg.sample_point, true);
   }
 
-  const ErrorCode result = ConvertStatus(can_init(can_, &config, GetClockFreq()));
+  const ErrorCode result = ConvertStatus(mcan_init(can_, &config, GetClockFreq()));
   if (result == ErrorCode::OK)
   {
+    mcan_disable_standby_pin(can_);
     EnableCanInterrupts();
     (void)EnableInterrupt();
   }
@@ -152,33 +180,73 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
 
 uint32_t HPMCAN::GetClockFreq() const { return clock_get_frequency(clock_); }
 
-void HPMCAN::BuildTxMessage(const ClassicPack& pack, LibXRHpmCanTxMessage& message)
+ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
 {
-  std::memset(&message, 0, sizeof(message));
+  if (msg_buf == nullptr && msg_buf_size != 0u)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  if (msg_buf != nullptr && msg_buf_size == 0u)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+#if defined(MCAN_SOC_MSG_BUF_IN_AHB_RAM) && (MCAN_SOC_MSG_BUF_IN_AHB_RAM == 1)
+  if (msg_buf == nullptr)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+#if defined(MCAN_MSG_BUF_ALIGNMENT_SIZE)
+  if ((reinterpret_cast<uintptr_t>(msg_buf) % MCAN_MSG_BUF_ALIGNMENT_SIZE) != 0u ||
+      (msg_buf_size % MCAN_MSG_BUF_ALIGNMENT_SIZE) != 0u)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+#endif
+#endif
+
+  msg_buf_ = msg_buf;
+  msg_buf_size_ = msg_buf_size;
+  return ErrorCode::OK;
+}
+
+void HPMCAN::BuildTxFrame(const ClassicPack& pack, LibXRHpmCanTxFrame& frame)
+{
+  std::memset(&frame, 0, sizeof(frame));
 
   const bool IS_EXT = pack.type == Type::EXTENDED || pack.type == Type::REMOTE_EXTENDED;
   const bool IS_RTR =
       pack.type == Type::REMOTE_STANDARD || pack.type == Type::REMOTE_EXTENDED;
 
-  message.id = IS_EXT ? (pack.id & 0x1FFFFFFFu) : (pack.id & 0x7FFu);
-  message.dlc = pack.dlc <= 8u ? pack.dlc : 8u;
-  message.canfd_frame = 0u;
-  message.bitrate_switch = 0u;
-  message.remote_frame = IS_RTR ? 1u : 0u;
-  message.extend_id = IS_EXT ? 1u : 0u;
+  frame.use_ext_id = IS_EXT ? 1u : 0u;
+  frame.rtr = IS_RTR ? 1u : 0u;
+  frame.dlc = pack.dlc <= 8u ? pack.dlc : 8u;
+  frame.canfd_frame = 0u;
+  frame.bitrate_switch = 0u;
+
+  if (IS_EXT)
+  {
+    frame.ext_id = pack.id & 0x1FFFFFFFu;
+  }
+  else
+  {
+    frame.std_id = pack.id & 0x7FFu;
+  }
 
   if (!IS_RTR)
   {
-    std::memcpy(message.data, pack.data, message.dlc);
+    std::memcpy(frame.data_8, pack.data, frame.dlc);
   }
 }
 
-void HPMCAN::BuildRxPack(const LibXRHpmCanRxMessage& message, ClassicPack& pack)
+void HPMCAN::BuildRxPack(const LibXRHpmCanRxFrame& frame, ClassicPack& pack)
 {
-  const bool IS_EXT = message.extend_id != 0u;
-  const bool IS_RTR = message.remote_frame != 0u;
+  const bool IS_EXT = frame.use_ext_id != 0u;
+  const bool IS_RTR = frame.rtr != 0u;
 
-  pack.id = IS_EXT ? (message.id & 0x1FFFFFFFu) : (message.id & 0x7FFu);
+  pack.id = IS_EXT ? (frame.ext_id & 0x1FFFFFFFu) : (frame.std_id & 0x7FFu);
   if (IS_RTR)
   {
     pack.type = IS_EXT ? Type::REMOTE_EXTENDED : Type::REMOTE_STANDARD;
@@ -188,29 +256,29 @@ void HPMCAN::BuildRxPack(const LibXRHpmCanRxMessage& message, ClassicPack& pack)
     pack.type = IS_EXT ? Type::EXTENDED : Type::STANDARD;
   }
 
-  pack.dlc = message.dlc <= 8u ? message.dlc : 8u;
+  pack.dlc = frame.dlc <= 8u ? frame.dlc : 8u;
   std::memset(pack.data, 0, sizeof(pack.data));
   if (!IS_RTR)
   {
-    std::memcpy(pack.data, message.data, pack.dlc);
+    std::memcpy(pack.data, frame.data_8, pack.dlc);
   }
 }
 
-CAN::ErrorID HPMCAN::ConvertErrorKind(uint8_t kind)
+CAN::ErrorID HPMCAN::ConvertLastError(uint8_t last_error)
 {
-  switch (kind)
+  switch (last_error)
   {
-    case CAN_KIND_OF_ERROR_BUS_OFF:
-      return ErrorID::CAN_ERROR_ID_BUS_OFF;
-    case CAN_KIND_OF_ERROR_BIT_ERROR:
-      return ErrorID::CAN_ERROR_ID_BIT0;
-    case CAN_KIND_OF_ERROR_FORM_ERROR:
-      return ErrorID::CAN_ERROR_ID_FORM;
-    case CAN_KIND_OF_ERROR_STUFF_ERROR:
+    case mcan_last_error_code_stuff_error:
       return ErrorID::CAN_ERROR_ID_STUFF;
-    case CAN_KIND_OF_ERROR_ACK_ERROR:
+    case mcan_last_error_code_format_error:
+      return ErrorID::CAN_ERROR_ID_FORM;
+    case mcan_last_error_code_ack_error:
       return ErrorID::CAN_ERROR_ID_ACK;
-    case CAN_KIND_OF_ERROR_CRC_ERROR:
+    case mcan_last_error_code_bit1_error:
+      return ErrorID::CAN_ERROR_ID_BIT1;
+    case mcan_last_error_code_bit0_error:
+      return ErrorID::CAN_ERROR_ID_BIT0;
+    case mcan_last_error_code_crc_error:
       return ErrorID::CAN_ERROR_ID_CRC;
     default:
       return ErrorID::CAN_ERROR_ID_OTHER;
@@ -237,7 +305,7 @@ void HPMCAN::TxService()
   {
     tx_pend_.store(0u, std::memory_order_release);
 
-    while (can_get_secondary_transmit_buffer_status(can_) != CAN_STB_IS_FULL)
+    while (!mcan_is_txfifo_full(can_))
     {
       ClassicPack pack{};
       if (tx_retry_valid_)
@@ -249,11 +317,13 @@ void HPMCAN::TxService()
         break;
       }
 
-      LibXRHpmCanTxMessage tx{};
-      BuildTxMessage(pack, tx);
+      LibXRHpmCanTxFrame frame{};
+      BuildTxFrame(pack, frame);
 
-      const LibXRHpmCanStatus status = can_send_message_nonblocking(can_, &tx);
-      if (status == status_can_tx_fifo_full)
+      uint32_t fifo_index = 0u;
+      const LibXRHpmCanStatus status =
+          mcan_transmit_via_txfifo_nonblocking(can_, &frame, &fifo_index);
+      if (status == status_mcan_txfifo_full)
       {
         tx_retry_pack_ = pack;
         tx_retry_valid_ = true;
@@ -300,38 +370,46 @@ ErrorCode HPMCAN::AddMessage(const ClassicPack& pack)
   return ErrorCode::OK;
 }
 
-void HPMCAN::ProcessRx()
+void HPMCAN::ProcessRxFifo(uint32_t fifo_index)
 {
   if (can_ == nullptr)
   {
     return;
   }
 
-  while (can_is_data_available_in_receive_buffer(can_))
+  for (;;)
   {
-    LibXRHpmCanRxMessage rx{};
-    const LibXRHpmCanStatus status = can_read_received_message(can_, &rx);
+    LibXRHpmCanRxFrame frame{};
+    const LibXRHpmCanStatus status = mcan_read_rxfifo(can_, fifo_index, &frame);
+    if (status == status_mcan_rxfifo_empty)
+    {
+      break;
+    }
 
     if (status == status_success)
     {
       ClassicPack pack{};
-      BuildRxPack(rx, pack);
+      BuildRxPack(frame, pack);
       OnMessage(pack, true);
-      continue;
     }
-
-    ClassicPack error_pack{};
-    error_pack.type = Type::ERROR;
-    error_pack.id = FromErrorID(ConvertErrorKind(can_get_last_error_kind(can_)));
-    OnMessage(error_pack, true);
+    else
+    {
+      break;
+    }
   }
 }
 
 void HPMCAN::ProcessTx() { TxService(); }
 
-void HPMCAN::ProcessError(uint8_t error_flags, uint8_t last_error_kind)
+void HPMCAN::ProcessError()
 {
-  if (error_flags == 0u && last_error_kind == CAN_KIND_OF_ERROR_NO_ERROR)
+  if (can_ == nullptr)
+  {
+    return;
+  }
+
+  mcan_protocol_status_t protocol{};
+  if (mcan_get_protocol_status(can_, &protocol) != status_success)
   {
     return;
   }
@@ -339,22 +417,21 @@ void HPMCAN::ProcessError(uint8_t error_flags, uint8_t last_error_kind)
   ClassicPack pack{};
   pack.type = Type::ERROR;
 
-  if (can_is_in_bus_off_mode(can_))
+  if (protocol.in_bus_off_state)
   {
     pack.id = FromErrorID(ErrorID::CAN_ERROR_ID_BUS_OFF);
   }
-  else if ((error_flags & CAN_ERROR_PASSIVE_MODE_ACTIVE_FLAG) != 0u ||
-           (error_flags & CAN_ERROR_PASSIVE_INT_FLAG) != 0u)
+  else if (protocol.in_error_passive_state)
   {
     pack.id = FromErrorID(ErrorID::CAN_ERROR_ID_ERROR_PASSIVE);
   }
-  else if ((error_flags & CAN_ERROR_WARNING_LIMIT_FLAG) != 0u)
+  else if (protocol.in_warning_state)
   {
     pack.id = FromErrorID(ErrorID::CAN_ERROR_ID_ERROR_WARNING);
   }
   else
   {
-    pack.id = FromErrorID(ConvertErrorKind(last_error_kind));
+    pack.id = FromErrorID(ConvertLastError(protocol.last_error_code));
   }
 
   OnMessage(pack, true);
@@ -367,32 +444,28 @@ void HPMCAN::ProcessInterrupt()
     return;
   }
 
-  const uint8_t tx_rx_flags = can_get_tx_rx_flags(can_);
-  const uint8_t error_flags = can_get_error_interrupt_flags(can_);
-  const uint8_t last_error_kind = can_get_last_error_kind(can_);
+  const uint32_t flags = mcan_get_interrupt_flags(can_);
 
-  if ((tx_rx_flags & (CAN_EVENT_RECEIVE | CAN_EVENT_RX_BUF_OVERRUN)) != 0u)
+  if ((flags & (MCAN_INT_RXFIFO0_NEW_MSG | MCAN_INT_RXFIFO0_MSG_LOST)) != 0u)
   {
-    ProcessRx();
+    ProcessRxFifo(0u);
   }
-
-  if ((tx_rx_flags & CAN_EVENT_TX_SECONDARY_BUF) != 0u)
+  if ((flags & (MCAN_INT_RXFIFO1_NEW_MSG | MCAN_INT_RXFIFO1_MSG_LOST)) != 0u)
+  {
+    ProcessRxFifo(1u);
+  }
+  if ((flags & MCAN_TX_IRQ_MASK) != 0u)
   {
     ProcessTx();
   }
-
-  if ((tx_rx_flags & CAN_EVENT_ERROR) != 0u || (error_flags & ERROR_FLAG_MASK) != 0u)
+  if ((flags & MCAN_ERR_IRQ_MASK) != 0u)
   {
-    ProcessError(error_flags, last_error_kind);
+    ProcessError();
   }
 
-  if (tx_rx_flags != 0u)
+  if (flags != 0u)
   {
-    can_clear_tx_rx_flags(can_, tx_rx_flags);
-  }
-  if (error_flags != 0u)
-  {
-    can_clear_error_interrupt_flags(can_, error_flags);
+    mcan_clear_interrupt_flags(can_, flags);
   }
 }
 
@@ -402,8 +475,7 @@ void HPMCAN::EnableCanInterrupts()
   {
     return;
   }
-  can_enable_tx_rx_irq(can_, TX_RX_IRQ_MASK);
-  can_enable_error_irq(can_, ERROR_IRQ_MASK);
+  mcan_enable_interrupts(can_, MCAN_RX_IRQ_MASK | MCAN_TX_IRQ_MASK | MCAN_ERR_IRQ_MASK);
 }
 
 void HPMCAN::DisableCanInterrupts()
@@ -412,8 +484,28 @@ void HPMCAN::DisableCanInterrupts()
   {
     return;
   }
-  can_disable_tx_rx_irq(can_, 0xFFu);
-  can_disable_error_irq(can_, 0xFFu);
+  mcan_disable_interrupts(can_, MCAN_RX_IRQ_MASK | MCAN_TX_IRQ_MASK | MCAN_ERR_IRQ_MASK);
+}
+
+ErrorCode HPMCAN::ApplyMessageBuffer()
+{
+#if defined(MCAN_SOC_MSG_BUF_IN_AHB_RAM) && (MCAN_SOC_MSG_BUF_IN_AHB_RAM == 1)
+  if (can_ == nullptr || msg_buf_ == nullptr || msg_buf_size_ == 0u)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uintptr_t msg_buf_addr = reinterpret_cast<uintptr_t>(msg_buf_);
+  if (msg_buf_addr > UINT32_MAX)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  const mcan_msg_buf_attr_t attr = {static_cast<uint32_t>(msg_buf_addr), msg_buf_size_};
+  return ConvertStatus(mcan_set_msg_buf_attr(can_, &attr));
+#else
+  return ErrorCode::OK;
+#endif
 }
 
 ErrorCode HPMCAN::EnableInterrupt()
@@ -445,21 +537,42 @@ ErrorCode HPMCAN::GetErrorState(CAN::ErrorState& state) const
     return ErrorCode::ARG_ERR;
   }
 
-  state.tx_error_counter = can_get_transmit_error_count(can_);
-  state.rx_error_counter = can_get_receive_error_count(can_);
-  state.bus_off = can_is_in_bus_off_mode(can_);
-  state.error_passive =
-      (can_get_error_interrupt_flags(can_) & CAN_ERROR_PASSIVE_MODE_ACTIVE_FLAG) != 0u;
-  state.error_warning =
-      (can_get_error_interrupt_flags(can_) & CAN_ERROR_WARNING_LIMIT_FLAG) != 0u;
+  mcan_error_count_t err{};
+  mcan_get_error_counter(can_, &err);
+
+  mcan_protocol_status_t protocol{};
+  const ErrorCode protocol_status =
+      ConvertStatus(mcan_get_protocol_status(can_, &protocol));
+
+  state.tx_error_counter = err.transmit_error_count;
+  state.rx_error_counter = err.receive_error_count;
+  state.bus_off = protocol_status == ErrorCode::OK ? protocol.in_bus_off_state
+                                                   : mcan_is_in_busoff_state(can_);
+  state.error_passive = protocol_status == ErrorCode::OK
+                            ? protocol.in_error_passive_state
+                            : mcan_is_in_err_passive_state(can_);
+  state.error_warning = protocol_status == ErrorCode::OK
+                            ? protocol.in_warning_state
+                            : mcan_is_in_error_warning_state(can_);
 
   return ErrorCode::OK;
 }
 
 #else
 
-HPMCAN::HPMCAN(CAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size)
+HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size)
     : can_(can), clock_(clock), irq_(irq), tx_queue_(queue_size)
+{
+}
+
+HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
+                 void* msg_buf, uint32_t msg_buf_size)
+    : can_(can),
+      clock_(clock),
+      irq_(irq),
+      msg_buf_(msg_buf),
+      msg_buf_size_(msg_buf_size),
+      tx_queue_(queue_size)
 {
 }
 
@@ -489,6 +602,13 @@ ErrorCode HPMCAN::EnableInterrupt() { return ErrorCode::NOT_SUPPORT; }
 
 ErrorCode HPMCAN::DisableInterrupt() { return ErrorCode::NOT_SUPPORT; }
 
+ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
+{
+  (void)msg_buf;
+  (void)msg_buf_size;
+  return ErrorCode::NOT_SUPPORT;
+}
+
 ErrorCode HPMCAN::ConvertStatus(LibXRHpmCanStatus status)
 {
   (void)status;
@@ -501,33 +621,30 @@ LibXRHpmCanMode HPMCAN::ConvertMode(const CAN::Mode& mode)
   return {};
 }
 
-void HPMCAN::BuildTxMessage(const ClassicPack& pack, LibXRHpmCanTxMessage& message)
+void HPMCAN::BuildTxFrame(const ClassicPack& pack, LibXRHpmCanTxFrame& frame)
 {
   (void)pack;
-  (void)message;
+  (void)frame;
 }
 
-void HPMCAN::BuildRxPack(const LibXRHpmCanRxMessage& message, ClassicPack& pack)
+void HPMCAN::BuildRxPack(const LibXRHpmCanRxFrame& frame, ClassicPack& pack)
 {
-  (void)message;
+  (void)frame;
   (void)pack;
 }
 
-CAN::ErrorID HPMCAN::ConvertErrorKind(uint8_t kind)
+CAN::ErrorID HPMCAN::ConvertLastError(uint8_t last_error)
 {
-  (void)kind;
+  (void)last_error;
   return ErrorID::CAN_ERROR_ID_GENERIC;
 }
 
 void HPMCAN::EnableCanInterrupts() {}
 void HPMCAN::DisableCanInterrupts() {}
+ErrorCode HPMCAN::ApplyMessageBuffer() { return ErrorCode::NOT_SUPPORT; }
 void HPMCAN::TxService() {}
-void HPMCAN::ProcessRx() {}
+void HPMCAN::ProcessRxFifo(uint32_t fifo_index) { (void)fifo_index; }
 void HPMCAN::ProcessTx() {}
-void HPMCAN::ProcessError(uint8_t error_flags, uint8_t last_error_kind)
-{
-  (void)error_flags;
-  (void)last_error_kind;
-}
+void HPMCAN::ProcessError() {}
 
 #endif
