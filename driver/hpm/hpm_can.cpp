@@ -439,6 +439,12 @@ void HPMCAN::ProcessInterrupt()
   }
 
   const uint32_t flags = mcan_get_interrupt_flags(can_);
+  if (flags == 0u)
+  {
+    return;
+  }
+
+  mcan_clear_interrupt_flags(can_, flags);
 
   if ((flags & (MCAN_INT_RXFIFO0_NEW_MSG | MCAN_INT_RXFIFO0_MSG_LOST)) != 0u)
   {
@@ -455,11 +461,6 @@ void HPMCAN::ProcessInterrupt()
   if ((flags & MCAN_ERR_IRQ_MASK) != 0u)
   {
     ProcessError();
-  }
-
-  if (flags != 0u)
-  {
-    mcan_clear_interrupt_flags(can_, flags);
   }
 }
 
