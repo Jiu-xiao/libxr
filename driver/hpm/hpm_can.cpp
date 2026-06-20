@@ -120,12 +120,6 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   }
 
   DisableCanInterrupts();
-  tx_lock_.store(0u, std::memory_order_release);
-  tx_pend_.store(0u, std::memory_order_release);
-  tx_retry_valid_ = false;
-  while (tx_queue_.Pop() == ErrorCode::OK)
-  {
-  }
 
   mcan_config_t config{};
   mcan_get_default_config(can_, &config);
@@ -144,7 +138,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   {
     const uint32_t seg1 = cfg.bit_timing.prop_seg + cfg.bit_timing.phase_seg1;
     if (cfg.bit_timing.brp == 0u || seg1 == 0u || cfg.bit_timing.phase_seg2 == 0u ||
-        cfg.bit_timing.sjw == 0u)
+        cfg.bit_timing.sjw == 0u || cfg.bit_timing.sjw > cfg.bit_timing.phase_seg2)
     {
       EnableCanInterrupts();
       return ErrorCode::ARG_ERR;
@@ -152,7 +146,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
 
     config.use_lowlevel_timing_setting = true;
     config.can_timing.prescaler = static_cast<uint16_t>(cfg.bit_timing.brp);
-    config.can_timing.num_seg1 = static_cast<uint16_t>(seg1 - 1u);
+    config.can_timing.num_seg1 = static_cast<uint16_t>(seg1);
     config.can_timing.num_seg2 = static_cast<uint16_t>(cfg.bit_timing.phase_seg2);
     config.can_timing.num_sjw = static_cast<uint8_t>(cfg.bit_timing.sjw);
   }
