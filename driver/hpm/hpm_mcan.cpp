@@ -120,6 +120,12 @@ ErrorCode HPMMCAN::SetConfig(const CAN::Configuration& cfg)
   }
 
   DisableMcanInterrupts();
+  tx_lock_.store(0u, std::memory_order_release);
+  tx_pend_.store(0u, std::memory_order_release);
+  tx_retry_valid_ = false;
+  while (tx_queue_.Pop() == ErrorCode::OK)
+  {
+  }
 
   mcan_config_t config{};
   mcan_get_default_config(mcan_, &config);
@@ -161,6 +167,7 @@ ErrorCode HPMMCAN::SetConfig(const CAN::Configuration& cfg)
   const ErrorCode result = ConvertStatus(mcan_init(mcan_, &config, GetClockFreq()));
   if (result == ErrorCode::OK)
   {
+    mcan_disable_standby_pin(mcan_);
     EnableMcanInterrupts();
     (void)EnableInterrupt();
   }
