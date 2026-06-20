@@ -1,10 +1,10 @@
 #include "hpm_can.hpp"
 
+#if LIBXR_HPM_CAN_SUPPORTED
+
 #include "hpm_interrupt.h"
 
 using namespace LibXR;
-
-#if LIBXR_HPM_CAN_SUPPORTED
 
 namespace
 {
@@ -52,7 +52,7 @@ HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_
 }
 
 HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
-                 void* msg_buf, uint32_t msg_buf_size)
+               void* msg_buf, uint32_t msg_buf_size)
     : can_(can),
       clock_(clock),
       irq_(irq),
@@ -62,7 +62,7 @@ HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_
 {
 }
 
-ErrorCode HPMCAN::ConvertStatus(LibXRHpmCanStatus status)
+ErrorCode HPMCAN::ConvertStatus(hpm_stat_t status)
 {
   switch (status)
   {
@@ -89,7 +89,7 @@ ErrorCode HPMCAN::ConvertStatus(LibXRHpmCanStatus status)
   }
 }
 
-LibXRHpmCanMode HPMCAN::ConvertMode(const CAN::Mode& mode)
+mcan_node_mode_t HPMCAN::ConvertMode(const CAN::Mode& mode)
 {
   if (mode.loopback && mode.listen_only)
   {
@@ -206,7 +206,7 @@ ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
   return ErrorCode::OK;
 }
 
-void HPMCAN::BuildTxFrame(const ClassicPack& pack, LibXRHpmCanTxFrame& frame)
+void HPMCAN::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame)
 {
   std::memset(&frame, 0, sizeof(frame));
 
@@ -235,7 +235,7 @@ void HPMCAN::BuildTxFrame(const ClassicPack& pack, LibXRHpmCanTxFrame& frame)
   }
 }
 
-void HPMCAN::BuildRxPack(const LibXRHpmCanRxFrame& frame, ClassicPack& pack)
+void HPMCAN::BuildRxPack(const mcan_rx_message_t& frame, ClassicPack& pack)
 {
   const bool IS_EXT = frame.use_ext_id != 0u;
   const bool IS_RTR = frame.rtr != 0u;
@@ -311,11 +311,11 @@ void HPMCAN::TxService()
         break;
       }
 
-      LibXRHpmCanTxFrame frame{};
+      mcan_tx_frame_t frame{};
       BuildTxFrame(pack, frame);
 
       uint32_t fifo_index = 0u;
-      const LibXRHpmCanStatus status =
+      const hpm_stat_t status =
           mcan_transmit_via_txfifo_nonblocking(can_, &frame, &fifo_index);
       if (status == status_mcan_txfifo_full)
       {
@@ -373,8 +373,8 @@ void HPMCAN::ProcessRxFifo(uint32_t fifo_index)
 
   for (;;)
   {
-    LibXRHpmCanRxFrame frame{};
-    const LibXRHpmCanStatus status = mcan_read_rxfifo(can_, fifo_index, &frame);
+    mcan_rx_message_t frame{};
+    const hpm_stat_t status = mcan_read_rxfifo(can_, fifo_index, &frame);
     if (status == status_mcan_rxfifo_empty)
     {
       break;
@@ -551,94 +551,5 @@ ErrorCode HPMCAN::GetErrorState(CAN::ErrorState& state) const
 
   return ErrorCode::OK;
 }
-
-#else
-
-HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size)
-    : can_(can), clock_(clock), irq_(irq), tx_queue_(queue_size)
-{
-}
-
-HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
-                 void* msg_buf, uint32_t msg_buf_size)
-    : can_(can),
-      clock_(clock),
-      irq_(irq),
-      msg_buf_(msg_buf),
-      msg_buf_size_(msg_buf_size),
-      tx_queue_(queue_size)
-{
-}
-
-ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
-{
-  (void)cfg;
-  return ErrorCode::NOT_SUPPORT;
-}
-
-uint32_t HPMCAN::GetClockFreq() const { return 0; }
-
-ErrorCode HPMCAN::AddMessage(const ClassicPack& pack)
-{
-  (void)pack;
-  return ErrorCode::NOT_SUPPORT;
-}
-
-ErrorCode HPMCAN::GetErrorState(CAN::ErrorState& state) const
-{
-  (void)state;
-  return ErrorCode::NOT_SUPPORT;
-}
-
-void HPMCAN::ProcessInterrupt() {}
-
-ErrorCode HPMCAN::EnableInterrupt() { return ErrorCode::NOT_SUPPORT; }
-
-ErrorCode HPMCAN::DisableInterrupt() { return ErrorCode::NOT_SUPPORT; }
-
-ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
-{
-  (void)msg_buf;
-  (void)msg_buf_size;
-  return ErrorCode::NOT_SUPPORT;
-}
-
-ErrorCode HPMCAN::ConvertStatus(LibXRHpmCanStatus status)
-{
-  (void)status;
-  return ErrorCode::NOT_SUPPORT;
-}
-
-LibXRHpmCanMode HPMCAN::ConvertMode(const CAN::Mode& mode)
-{
-  (void)mode;
-  return {};
-}
-
-void HPMCAN::BuildTxFrame(const ClassicPack& pack, LibXRHpmCanTxFrame& frame)
-{
-  (void)pack;
-  (void)frame;
-}
-
-void HPMCAN::BuildRxPack(const LibXRHpmCanRxFrame& frame, ClassicPack& pack)
-{
-  (void)frame;
-  (void)pack;
-}
-
-CAN::ErrorID HPMCAN::ConvertLastError(uint8_t last_error)
-{
-  (void)last_error;
-  return ErrorID::CAN_ERROR_ID_GENERIC;
-}
-
-void HPMCAN::EnableCanInterrupts() {}
-void HPMCAN::DisableCanInterrupts() {}
-ErrorCode HPMCAN::ApplyMessageBuffer() { return ErrorCode::NOT_SUPPORT; }
-void HPMCAN::TxService() {}
-void HPMCAN::ProcessRxFifo(uint32_t fifo_index) { (void)fifo_index; }
-void HPMCAN::ProcessTx() {}
-void HPMCAN::ProcessError() {}
 
 #endif
