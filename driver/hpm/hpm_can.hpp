@@ -1,21 +1,11 @@
 #pragma once
 
-#include <atomic>
-#include <cstdint>
-#include <cstring>
-
-#include "can.hpp"
 #include "hpm_clock_drv.h"
 #include "hpm_soc.h"
-#include "queue.hpp"
 
 #if __has_include("hpm_mcan_drv.h") && __has_include("hpm_mcan_regs.h") && \
                                                      __has_include("hpm_mcan_soc.h")
 #include "hpm_mcan_drv.h"
-using LibXRHpmCanStatus = hpm_stat_t;
-using LibXRHpmCanMode = mcan_node_mode_t;
-using LibXRHpmCanTxFrame = mcan_tx_frame_t;
-using LibXRHpmCanRxFrame = mcan_rx_message_t;
 #if ((defined(MCAN_SOC_MAX_COUNT) && (MCAN_SOC_MAX_COUNT > 0)) || \
      (defined(CAN_SOC_MAX_COUNT) && (CAN_SOC_MAX_COUNT > 0))) &&  \
     defined(HPM_MCAN0)
@@ -25,18 +15,16 @@ using LibXRHpmCanRxFrame = mcan_rx_message_t;
 #endif
 #else
 #define LIBXR_HPM_CAN_SUPPORTED 0
-using MCAN_Type = void;
-using LibXRHpmCanStatus = int;
-enum LibXRHpmCanMode : int
-{
-};
-struct LibXRHpmCanTxFrame
-{
-};
-struct LibXRHpmCanRxFrame
-{
-};
 #endif
+
+#if LIBXR_HPM_CAN_SUPPORTED
+
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+
+#include "can.hpp"
+#include "queue.hpp"
 
 namespace LibXR
 {
@@ -94,10 +82,10 @@ class HPMCAN final : public CAN
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
  private:
-  static ErrorCode ConvertStatus(LibXRHpmCanStatus status);
-  static LibXRHpmCanMode ConvertMode(const CAN::Mode& mode);
-  static void BuildTxFrame(const ClassicPack& pack, LibXRHpmCanTxFrame& frame);
-  static void BuildRxPack(const LibXRHpmCanRxFrame& frame, ClassicPack& pack);
+  static ErrorCode ConvertStatus(hpm_stat_t status);
+  static mcan_node_mode_t ConvertMode(const CAN::Mode& mode);
+  static void BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame);
+  static void BuildRxPack(const mcan_rx_message_t& frame, ClassicPack& pack);
   static ErrorID ConvertLastError(uint8_t last_error);
 
   void EnableCanInterrupts();
@@ -123,3 +111,5 @@ class HPMCAN final : public CAN
 };
 
 }  // namespace LibXR
+
+#endif
