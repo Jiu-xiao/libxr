@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <new>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -424,15 +423,13 @@ class RuntimeStringView
    *
    * RuntimeStringView 的容量策略是一次分配后复用。格式化路径会先从编译格式
    * 元数据计算最大容量，因此已有存储不足表示设计边界被突破，不能在这里静默
-   * new 第二块内存。
-   * 第一次保留分配若失败，开发期应直接暴露问题；发布构建仍保留 `NO_MEM`
-   * 回退状态。
+   * new 第二块内存。首次保留分配失败属于硬资源错误，交给 LibXR 分配边界处理。
    *
    * RuntimeStringView reuses one allocation. The formatted path computes maximum
    * capacity from compiled format metadata first, so an oversized later write is
-   * a boundary error rather than a reason to allocate again.
-   * If the first retained allocation fails, debug builds should surface it
-   * immediately; release builds still keep the `NO_MEM` fallback status.
+   * a boundary error rather than a reason to allocate again. First retained
+   * allocation failure is a hard resource error and is handled at the LibXR
+   * allocation boundary.
    */
   [[nodiscard]] ErrorCode EnsureCapacity(size_t payload_size)
   {
@@ -453,12 +450,7 @@ class RuntimeStringView
       return ErrorCode::OK;
     }
 
-    data_ = new (std::nothrow) char[payload_size + 1U];
-    if (data_ == nullptr)
-    {
-      ASSERT(data_ != nullptr);
-      return ErrorCode::NO_MEM;
-    }
+    data_ = new char[payload_size + 1U];
     capacity_ = payload_size;
     return ErrorCode::OK;
   }
