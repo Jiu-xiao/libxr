@@ -46,11 +46,6 @@ static uint16_t sample_point_to_hpm_range(float sample_point, bool upper)
 }
 }  // namespace
 
-HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size)
-    : can_(can), clock_(clock), irq_(irq), tx_queue_(queue_size)
-{
-}
-
 HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
                void* msg_buf, uint32_t msg_buf_size)
     : can_(can),
@@ -113,10 +108,10 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     return ErrorCode::ARG_ERR;
   }
 
-  const ErrorCode msg_buf_status = ApplyMessageBuffer();
-  if (msg_buf_status != ErrorCode::OK)
+  const ErrorCode MSG_BUF_STATUS = ApplyMessageBuffer();
+  if (MSG_BUF_STATUS != ErrorCode::OK)
   {
-    return msg_buf_status;
+    return MSG_BUF_STATUS;
   }
 
   DisableCanInterrupts();
@@ -130,14 +125,14 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   config.interrupt_mask = MCAN_RX_IRQ_MASK | MCAN_TX_IRQ_MASK | MCAN_ERR_IRQ_MASK;
   config.txbuf_trans_interrupt_mask = ~0UL;
 
-  const bool use_low_level = cfg.bit_timing.brp != 0u || cfg.bit_timing.prop_seg != 0u ||
+  const bool USE_LOW_LEVEL = cfg.bit_timing.brp != 0u || cfg.bit_timing.prop_seg != 0u ||
                              cfg.bit_timing.phase_seg1 != 0u ||
                              cfg.bit_timing.phase_seg2 != 0u || cfg.bit_timing.sjw != 0u;
 
-  if (use_low_level)
+  if (USE_LOW_LEVEL)
   {
-    const uint32_t seg1 = cfg.bit_timing.prop_seg + cfg.bit_timing.phase_seg1;
-    if (cfg.bit_timing.brp == 0u || seg1 == 0u || cfg.bit_timing.phase_seg2 == 0u ||
+    const uint32_t SEG1 = cfg.bit_timing.prop_seg + cfg.bit_timing.phase_seg1;
+    if (cfg.bit_timing.brp == 0u || SEG1 == 0u || cfg.bit_timing.phase_seg2 == 0u ||
         cfg.bit_timing.sjw == 0u || cfg.bit_timing.sjw > cfg.bit_timing.phase_seg2)
     {
       EnableCanInterrupts();
@@ -146,7 +141,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
 
     config.use_lowlevel_timing_setting = true;
     config.can_timing.prescaler = static_cast<uint16_t>(cfg.bit_timing.brp);
-    config.can_timing.num_seg1 = static_cast<uint16_t>(seg1);
+    config.can_timing.num_seg1 = static_cast<uint16_t>(SEG1);
     config.can_timing.num_seg2 = static_cast<uint16_t>(cfg.bit_timing.phase_seg2);
     config.can_timing.num_sjw = static_cast<uint8_t>(cfg.bit_timing.sjw);
   }
@@ -158,8 +153,8 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     config.can20_samplepoint_max = sample_point_to_hpm_range(cfg.sample_point, true);
   }
 
-  const ErrorCode result = ConvertStatus(mcan_init(can_, &config, GetClockFreq()));
-  if (result == ErrorCode::OK)
+  const ErrorCode RESULT = ConvertStatus(mcan_init(can_, &config, GetClockFreq()));
+  if (RESULT == ErrorCode::OK)
   {
     mcan_disable_standby_pin(can_);
     EnableCanInterrupts();
@@ -169,7 +164,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   {
     EnableCanInterrupts();
   }
-  return result;
+  return RESULT;
 }
 
 uint32_t HPMCAN::GetClockFreq() const { return clock_get_frequency(clock_); }
@@ -186,7 +181,6 @@ ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
     return ErrorCode::ARG_ERR;
   }
 
-#if defined(MCAN_SOC_MSG_BUF_IN_AHB_RAM) && (MCAN_SOC_MSG_BUF_IN_AHB_RAM == 1)
   if (msg_buf == nullptr)
   {
     return ErrorCode::ARG_ERR;
@@ -198,7 +192,6 @@ ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
   {
     return ErrorCode::ARG_ERR;
   }
-#endif
 #endif
 
   msg_buf_ = msg_buf;
@@ -315,15 +308,15 @@ void HPMCAN::TxService()
       BuildTxFrame(pack, frame);
 
       uint32_t fifo_index = 0u;
-      const hpm_stat_t status =
+      const hpm_stat_t STATUS =
           mcan_transmit_via_txfifo_nonblocking(can_, &frame, &fifo_index);
-      if (status == status_mcan_txfifo_full)
+      if (STATUS == status_mcan_txfifo_full)
       {
         tx_retry_pack_ = pack;
         tx_retry_valid_ = true;
         break;
       }
-      if (status != status_success)
+      if (STATUS != status_success)
       {
         tx_retry_valid_ = false;
         break;
@@ -374,13 +367,13 @@ void HPMCAN::ProcessRxFifo(uint32_t fifo_index)
   for (;;)
   {
     mcan_rx_message_t frame{};
-    const hpm_stat_t status = mcan_read_rxfifo(can_, fifo_index, &frame);
-    if (status == status_mcan_rxfifo_empty)
+    const hpm_stat_t STATUS = mcan_read_rxfifo(can_, fifo_index, &frame);
+    if (STATUS == status_mcan_rxfifo_empty)
     {
       break;
     }
 
-    if (status == status_success)
+    if (STATUS == status_success)
     {
       ClassicPack pack{};
       BuildRxPack(frame, pack);
@@ -438,27 +431,27 @@ void HPMCAN::ProcessInterrupt()
     return;
   }
 
-  const uint32_t flags = mcan_get_interrupt_flags(can_);
-  if (flags == 0u)
+  const uint32_t FLAGS = mcan_get_interrupt_flags(can_);
+  if (FLAGS == 0u)
   {
     return;
   }
 
-  mcan_clear_interrupt_flags(can_, flags);
+  mcan_clear_interrupt_flags(can_, FLAGS);
 
-  if ((flags & (MCAN_INT_RXFIFO0_NEW_MSG | MCAN_INT_RXFIFO0_MSG_LOST)) != 0u)
+  if ((FLAGS & (MCAN_INT_RXFIFO0_NEW_MSG | MCAN_INT_RXFIFO0_MSG_LOST)) != 0u)
   {
     ProcessRxFifo(0u);
   }
-  if ((flags & (MCAN_INT_RXFIFO1_NEW_MSG | MCAN_INT_RXFIFO1_MSG_LOST)) != 0u)
+  if ((FLAGS & (MCAN_INT_RXFIFO1_NEW_MSG | MCAN_INT_RXFIFO1_MSG_LOST)) != 0u)
   {
     ProcessRxFifo(1u);
   }
-  if ((flags & MCAN_TX_IRQ_MASK) != 0u)
+  if ((FLAGS & MCAN_TX_IRQ_MASK) != 0u)
   {
     ProcessTx();
   }
-  if ((flags & MCAN_ERR_IRQ_MASK) != 0u)
+  if ((FLAGS & MCAN_ERR_IRQ_MASK) != 0u)
   {
     ProcessError();
   }
@@ -484,23 +477,19 @@ void HPMCAN::DisableCanInterrupts()
 
 ErrorCode HPMCAN::ApplyMessageBuffer()
 {
-#if defined(MCAN_SOC_MSG_BUF_IN_AHB_RAM) && (MCAN_SOC_MSG_BUF_IN_AHB_RAM == 1)
   if (can_ == nullptr || msg_buf_ == nullptr || msg_buf_size_ == 0u)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  const uintptr_t msg_buf_addr = reinterpret_cast<uintptr_t>(msg_buf_);
-  if (msg_buf_addr > UINT32_MAX)
+  const uintptr_t MSG_BUF_ADDR = reinterpret_cast<uintptr_t>(msg_buf_);
+  if (MSG_BUF_ADDR > UINT32_MAX)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  const mcan_msg_buf_attr_t attr = {static_cast<uint32_t>(msg_buf_addr), msg_buf_size_};
-  return ConvertStatus(mcan_set_msg_buf_attr(can_, &attr));
-#else
-  return ErrorCode::OK;
-#endif
+  const mcan_msg_buf_attr_t ATTR = {static_cast<uint32_t>(MSG_BUF_ADDR), msg_buf_size_};
+  return ConvertStatus(mcan_set_msg_buf_attr(can_, &ATTR));
 }
 
 ErrorCode HPMCAN::EnableInterrupt()
@@ -536,17 +525,17 @@ ErrorCode HPMCAN::GetErrorState(CAN::ErrorState& state) const
   mcan_get_error_counter(can_, &err);
 
   mcan_protocol_status_t protocol{};
-  const ErrorCode protocol_status =
+  const ErrorCode PROTOCOL_STATUS =
       ConvertStatus(mcan_get_protocol_status(can_, &protocol));
 
   state.tx_error_counter = err.transmit_error_count;
   state.rx_error_counter = err.receive_error_count;
-  state.bus_off = protocol_status == ErrorCode::OK ? protocol.in_bus_off_state
+  state.bus_off = PROTOCOL_STATUS == ErrorCode::OK ? protocol.in_bus_off_state
                                                    : mcan_is_in_busoff_state(can_);
-  state.error_passive = protocol_status == ErrorCode::OK
+  state.error_passive = PROTOCOL_STATUS == ErrorCode::OK
                             ? protocol.in_error_passive_state
                             : mcan_is_in_err_passive_state(can_);
-  state.error_warning = protocol_status == ErrorCode::OK
+  state.error_warning = PROTOCOL_STATUS == ErrorCode::OK
                             ? protocol.in_warning_state
                             : mcan_is_in_error_warning_state(can_);
 
