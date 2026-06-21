@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <new>
 
 #include "esp_attr.h"
 #include "esp_clk_tree.h"
@@ -112,7 +111,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       rts_pin_(rts_pin),
       cts_pin_(cts_pin),
       config_(config),
-      rx_isr_buffer_(new (std::nothrow) uint8_t[rx_buffer_size]),
+      rx_isr_buffer_(new uint8_t[rx_buffer_size]),
       rx_isr_buffer_size_(rx_buffer_size),
       tx_storage_(AllocateTxStorage(tx_buffer_size * 2)),
       dma_requested_(enable_dma),
@@ -124,8 +123,8 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   ASSERT(uart_num_ < SOC_UART_HP_NUM);
   ASSERT(rx_isr_buffer_size_ > 0);
   ASSERT(tx_buffer_size > 0);
-  ASSERT(rx_isr_buffer_ != nullptr);
-  ASSERT(tx_storage_ != nullptr);
+  REQUIRE(rx_isr_buffer_ != nullptr);
+  REQUIRE(tx_storage_ != nullptr);
 
   tx_dma_buffer_.Init({tx_storage_, tx_buffer_size * 2U});
 

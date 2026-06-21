@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <new>
 
 #include "esp_attr.h"
 #include "hal/usb_serial_jtag_ll.h"
@@ -34,11 +33,11 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
                            uint32_t tx_queue_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
       config_(config),
-      tx_slot_storage_(new (std::nothrow) uint8_t[tx_buffer_size * 2U]),
+      tx_slot_storage_(new uint8_t[tx_buffer_size * 2U]),
       _read_port(rx_buffer_size, *this),
       _write_port(tx_queue_size, tx_buffer_size)
 {
-  ASSERT(tx_slot_storage_ != nullptr);
+  REQUIRE(tx_slot_storage_ != nullptr);
   ASSERT(tx_buffer_size > 0U);
 
   tx_double_buffer_.Init({tx_slot_storage_, tx_buffer_size * 2U});

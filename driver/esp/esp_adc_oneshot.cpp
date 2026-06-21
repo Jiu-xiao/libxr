@@ -1,5 +1,3 @@
-#include <new>
-
 #include "esp_adc.hpp"
 #include "esp_clk_tree.h"
 #include "esp_private/adc_share_hw_ctrl.h"
@@ -26,12 +24,8 @@ bool ESP32ADC::InitOneshot()
     return false;
   }
 
-  oneshot_hal_ = new (std::nothrow) adc_oneshot_hal_ctx_t{};
-  ASSERT(oneshot_hal_ != nullptr);
-  if (oneshot_hal_ == nullptr)
-  {
-    return false;
-  }
+  oneshot_hal_ = new adc_oneshot_hal_ctx_t{};
+  REQUIRE(oneshot_hal_ != nullptr);
 
   adc_oneshot_hal_cfg_t unit_cfg = {};
   unit_cfg.unit = unit_;
