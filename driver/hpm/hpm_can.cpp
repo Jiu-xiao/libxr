@@ -186,14 +186,6 @@ ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
     return ErrorCode::ARG_ERR;
   }
 
-#if defined(MCAN_MSG_BUF_ALIGNMENT_SIZE)
-  if ((reinterpret_cast<uintptr_t>(msg_buf) % MCAN_MSG_BUF_ALIGNMENT_SIZE) != 0u ||
-      (msg_buf_size % MCAN_MSG_BUF_ALIGNMENT_SIZE) != 0u)
-  {
-    return ErrorCode::ARG_ERR;
-  }
-#endif
-
   msg_buf_ = msg_buf;
   msg_buf_size_ = msg_buf_size;
   return ErrorCode::OK;
