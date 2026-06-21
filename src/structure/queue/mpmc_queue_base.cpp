@@ -29,8 +29,8 @@ MPMCQueueBase::MPMCQueueBase(size_t element_size, size_t capacity)
   sequences_ = new (std::align_val_t(alignof(SequenceCell))) SequenceCell[capacity_];
   REQUIRE(sequences_ != nullptr);
 
-  payloads_ = static_cast<std::byte*>(::operator new[](
-      payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN)));
+  payloads_ = static_cast<std::byte*>(
+      ::operator new[](payload_bytes, std::align_val_t(PAYLOAD_ALLOC_ALIGN)));
   REQUIRE(payloads_ != nullptr);
 
   for (size_t index = 0; index < capacity_; ++index)
