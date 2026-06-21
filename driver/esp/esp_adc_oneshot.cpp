@@ -25,7 +25,6 @@ bool ESP32ADC::InitOneshot()
   }
 
   oneshot_hal_ = new adc_oneshot_hal_ctx_t{};
-  REQUIRE(oneshot_hal_ != nullptr);
 
   adc_oneshot_hal_cfg_t unit_cfg = {};
   unit_cfg.unit = unit_;

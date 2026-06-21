@@ -139,7 +139,6 @@ ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
 
   continuous_read_buf_ = new uint8_t[frame_size];
   continuous_parsed_buf_ = new adc_continuous_data_t[parsed_capacity];
-  REQUIRE((continuous_read_buf_ != nullptr) && (continuous_parsed_buf_ != nullptr));
 
   adc_continuous_handle_cfg_t handle_cfg = {};
   handle_cfg.max_store_buf_size = store_size;

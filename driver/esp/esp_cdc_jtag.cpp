@@ -37,7 +37,6 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
       _read_port(rx_buffer_size, *this),
       _write_port(tx_queue_size, tx_buffer_size)
 {
-  REQUIRE(tx_slot_storage_ != nullptr);
   ASSERT(tx_buffer_size > 0U);
 
   tx_double_buffer_.Init({tx_slot_storage_, tx_buffer_size * 2U});

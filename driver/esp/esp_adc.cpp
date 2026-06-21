@@ -75,11 +75,6 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
   channel_ready_ = new bool[num_channels_];
   latest_values_ = new float[num_channels_];
   latest_raw_ = new uint16_t[num_channels_];
-  REQUIRE(channels_ != nullptr);
-  REQUIRE(channel_ids_ != nullptr);
-  REQUIRE(channel_ready_ != nullptr);
-  REQUIRE(latest_values_ != nullptr);
-  REQUIRE(latest_raw_ != nullptr);
 
   for (uint8_t i = 0; i < SOC_ADC_MAX_CHANNEL_NUM; ++i)
   {

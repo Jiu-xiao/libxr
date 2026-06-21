@@ -451,7 +451,6 @@ class RuntimeStringView
     }
 
     data_ = new char[payload_size + 1U];
-    REQUIRE(data_ != nullptr);
     capacity_ = payload_size;
     return ErrorCode::OK;
   }

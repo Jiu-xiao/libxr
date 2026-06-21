@@ -77,7 +77,6 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
     payloads_ = static_cast<std::byte*>(::operator new[](
         payload_bytes, std::align_val_t(payload_alloc_align_)));
-    REQUIRE(payloads_ != nullptr);
   }
 
  public:
