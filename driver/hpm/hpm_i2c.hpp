@@ -457,10 +457,13 @@ class HPMI2C final : public I2C
     ConstRawData write_data = {nullptr, 0};
     ReadOperation read_op = {};
     WriteOperation write_op = {};
-    hpm_stat_t final_status = status_success;
-    bool should_recover = false;
-    bool dma_done = false;
-    bool cmpl_done = false;
+    std::atomic<hpm_stat_t> final_status{
+        status_success};  ///< DMA/IRQ 共享最终状态 / Final status shared by DMA/IRQ.
+    std::atomic<bool> should_recover{
+        false};  ///< DMA/IRQ 共享恢复标志 / Recovery flag shared by DMA/IRQ.
+    std::atomic<bool> dma_done{
+        false};  ///< DMA 回调完成标志 / DMA callback completion flag.
+    std::atomic<bool> cmpl_done{false};  ///< I2C IRQ 完成标志 / I2C IRQ completion flag.
   };
 #endif
 
@@ -597,6 +600,12 @@ class HPMI2C final : public I2C
    * @brief Reset async bookkeeping after a start path aborts or completes.
    */
   void ResetAsyncState();
+
+  /**
+   * @brief 清空异步事务上下文但不改变 busy 标志 /
+   * Clear async transaction context without changing the busy flag.
+   */
+  void ClearAsyncContext();
 
   /**
    * @brief Shared cleanup for async submit failures before the operation is running.

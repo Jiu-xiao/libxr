@@ -356,12 +356,29 @@ static bool ResolveDCacheRange(const void* addr, uint32_t size, uint32_t& start,
     return false;
   }
 
-  const uint32_t line_size = HPM_L1C_CACHELINE_SIZE;
-  const uint32_t address = ToHpmI2cDmaAddress(addr);
-  const uint32_t end = address + size;
-  start = address - (address % line_size);
-  const uint32_t aligned_end = ((end + line_size - 1U) / line_size) * line_size;
-  aligned_size = aligned_end - start;
+  const uint64_t line_size = HPM_L1C_CACHELINE_SIZE;
+  const uint64_t address = ToHpmI2cDmaAddress(addr);
+  const uint64_t end = address + static_cast<uint64_t>(size);
+  constexpr uint64_t kAddressSpaceSize = static_cast<uint64_t>(UINT32_MAX) + 1ULL;
+  if (end > kAddressSpaceSize)
+  {
+    start = 0U;
+    aligned_size = 0U;
+    return false;
+  }
+
+  const uint64_t aligned_start = address - (address % line_size);
+  const uint64_t aligned_end = ((end + line_size - 1U) / line_size) * line_size;
+  const uint64_t range_size = aligned_end - aligned_start;
+  if (aligned_end > kAddressSpaceSize || range_size > UINT32_MAX)
+  {
+    start = 0U;
+    aligned_size = 0U;
+    return false;
+  }
+
+  start = static_cast<uint32_t>(aligned_start);
+  aligned_size = static_cast<uint32_t>(range_size);
   return aligned_size > 0U;
 }
 #endif
@@ -1233,9 +1250,29 @@ void HPMI2C::StopAsyncDma()
   }
 }
 
+void HPMI2C::ClearAsyncContext()
+{
+  async_ctx_.kind = AsyncTransferKind::NONE;
+  async_ctx_.slave_addr = 0U;
+  async_ctx_.mem_addr_size = MemAddrLength::BYTE_8;
+  async_ctx_.mem_addr = 0U;
+  async_ctx_.mem_addr_size_in_byte = 0U;
+  async_ctx_.mem_addr_bytes[0] = 0U;
+  async_ctx_.mem_addr_bytes[1] = 0U;
+  async_ctx_.flags = 0U;
+  async_ctx_.read_data = {nullptr, 0};
+  async_ctx_.write_data = {nullptr, 0};
+  async_ctx_.read_op = {};
+  async_ctx_.write_op = {};
+  async_ctx_.final_status.store(status_success, std::memory_order_release);
+  async_ctx_.should_recover.store(false, std::memory_order_release);
+  async_ctx_.dma_done.store(false, std::memory_order_release);
+  async_ctx_.cmpl_done.store(false, std::memory_order_release);
+}
+
 void HPMI2C::ResetAsyncState()
 {
-  async_ctx_ = {};
+  ClearAsyncContext();
   async_busy_.store(0U, std::memory_order_release);
   async_completion_claim_.store(0U, std::memory_order_release);
 }
@@ -1273,7 +1310,7 @@ void HPMI2C::CompleteAsyncTransfer(bool in_isr, ErrorCode ans)
   StopAsyncDma();
   ReleaseAsyncBus();
 
-  const bool should_recover = async_ctx_.should_recover;
+  const bool should_recover = async_ctx_.should_recover.load(std::memory_order_acquire);
   if (ans != ErrorCode::OK && should_recover)
   {
     RecoverController();
@@ -1310,16 +1347,12 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   }
 
   async_busy_.store(1U, std::memory_order_release);
-  async_ctx_ = {};
+  ClearAsyncContext();
   async_ctx_.kind = AsyncTransferKind::WRITE;
   async_ctx_.slave_addr = slave_addr;
   async_ctx_.write_data = write_data;
   async_ctx_.write_op = op;
   async_ctx_.flags = 0U;
-  async_ctx_.final_status = status_success;
-  async_ctx_.should_recover = false;
-  async_ctx_.dma_done = false;
-  async_ctx_.cmpl_done = false;
   async_completion_claim_.store(0U, std::memory_order_release);
 
   StartAsyncBlockWaitIfNeeded(op);
@@ -1327,7 +1360,7 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
@@ -1337,7 +1370,7 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   ans = StartAsyncWriteDma(write_data.addr_, static_cast<uint32_t>(write_data.size_));
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(false, true, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1348,7 +1381,7 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   ans = ConvertStatus(start_status);
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(true, true, ShouldRecover(start_status));
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1377,16 +1410,12 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   }
 
   async_busy_.store(1U, std::memory_order_release);
-  async_ctx_ = {};
+  ClearAsyncContext();
   async_ctx_.kind = AsyncTransferKind::READ;
   async_ctx_.slave_addr = slave_addr;
   async_ctx_.read_data = read_data;
   async_ctx_.read_op = op;
   async_ctx_.flags = kI2CFlagRead;
-  async_ctx_.final_status = status_success;
-  async_ctx_.should_recover = false;
-  async_ctx_.dma_done = false;
-  async_ctx_.cmpl_done = false;
   async_completion_claim_.store(0U, std::memory_order_release);
 
   StartAsyncBlockWaitIfNeeded(op);
@@ -1394,7 +1423,7 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
@@ -1404,7 +1433,7 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   ans = StartAsyncReadDma(read_data.addr_, static_cast<uint32_t>(read_data.size_));
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(false, true, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1415,7 +1444,7 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   ans = ConvertStatus(start_status);
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(true, true, ShouldRecover(start_status));
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1456,7 +1485,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   }
 
   async_busy_.store(1U, std::memory_order_release);
-  async_ctx_ = {};
+  ClearAsyncContext();
   async_ctx_.kind = AsyncTransferKind::MEM_READ;
   async_ctx_.slave_addr = slave_addr;
   async_ctx_.mem_addr = mem_addr;
@@ -1466,10 +1495,6 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   async_ctx_.read_data = read_data;
   async_ctx_.read_op = op;
   async_ctx_.flags = kI2CFlagRead;
-  async_ctx_.final_status = status_success;
-  async_ctx_.should_recover = false;
-  async_ctx_.dma_done = false;
-  async_ctx_.cmpl_done = false;
   async_completion_claim_.store(0U, std::memory_order_release);
 
   StartAsyncBlockWaitIfNeeded(op);
@@ -1493,7 +1518,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
                 kDefaultWaitPolicy.transfer_timeout_us);
   if (!mem_addr_complete)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::TIMEOUT;
@@ -1518,7 +1543,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
@@ -1527,7 +1552,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   ans = StartAsyncReadDma(read_data.addr_, static_cast<uint32_t>(read_data.size_));
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(false, true, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1539,7 +1564,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
       kDefaultWaitPolicy.addr_hit_timeout_us);
   if (!addr_hit)
   {
-    async_ctx_.should_recover = true;
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     AbortAsyncStart(true, true, true);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NO_RESPONSE;
@@ -1653,8 +1678,8 @@ ErrorCode HPMI2C::WaitForAsyncBlockResult(uint32_t timeout)
   const ErrorCode ans = block_wait_.Wait(timeout);
   if (ans == ErrorCode::TIMEOUT && AsyncTransferActive())
   {
-    async_ctx_.final_status = status_timeout;
-    async_ctx_.should_recover = true;
+    async_ctx_.final_status.store(status_timeout, std::memory_order_release);
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     CompleteAsyncTransfer(false, ErrorCode::TIMEOUT);
   }
   return ans;
@@ -1732,9 +1757,9 @@ void HPMI2C::HandleAsyncInterrupt(bool in_isr)
   if ((status & I2C_STATUS_ARBLOSE_MASK) != 0U)
   {
     i2c_clear_status(i2c_, I2C_STATUS_ARBLOSE_MASK);
-    async_ctx_.cmpl_done = true;
-    async_ctx_.final_status = status_timeout;
-    async_ctx_.should_recover = true;
+    async_ctx_.cmpl_done.store(true, std::memory_order_release);
+    async_ctx_.final_status.store(status_timeout, std::memory_order_release);
+    async_ctx_.should_recover.store(true, std::memory_order_release);
     CompleteAsyncTransfer(in_isr, ErrorCode::TIMEOUT);
     return;
   }
@@ -1742,17 +1767,17 @@ void HPMI2C::HandleAsyncInterrupt(bool in_isr)
   if ((status & I2C_STATUS_CMPL_MASK) != 0U)
   {
     i2c_clear_status(i2c_, I2C_STATUS_CMPL_MASK);
-    async_ctx_.cmpl_done = true;
+    async_ctx_.cmpl_done.store(true, std::memory_order_release);
 
     if (async_ctx_.kind == AsyncTransferKind::WRITE &&
         (async_ctx_.flags & kI2CFlagWriteCheckAck) != 0U && !I2C_STATUS_ACK_GET(status))
     {
-      async_ctx_.final_status = status_i2c_no_ack;
-      async_ctx_.should_recover = true;
+      async_ctx_.final_status.store(status_i2c_no_ack, std::memory_order_release);
+      async_ctx_.should_recover.store(true, std::memory_order_release);
     }
     else
     {
-      async_ctx_.final_status = status_success;
+      async_ctx_.final_status.store(status_success, std::memory_order_release);
     }
   }
 
@@ -1761,7 +1786,8 @@ void HPMI2C::HandleAsyncInterrupt(bool in_isr)
 
 void HPMI2C::MaybeCompleteAsyncTransfer(bool in_isr)
 {
-  if (!AsyncTransferActive() || !async_ctx_.dma_done || !async_ctx_.cmpl_done)
+  if (!AsyncTransferActive() || !async_ctx_.dma_done.load(std::memory_order_acquire) ||
+      !async_ctx_.cmpl_done.load(std::memory_order_acquire))
   {
     return;
   }
@@ -1772,11 +1798,13 @@ void HPMI2C::MaybeCompleteAsyncTransfer(bool in_isr)
     InvalidateDCacheIfNeeded(async_ctx_.read_data.addr_,
                              static_cast<uint32_t>(async_ctx_.read_data.size_));
   }
-  if (async_ctx_.final_status == status_success && i2c_get_data_count(i2c_) != 0U)
+  hpm_stat_t final_status = async_ctx_.final_status.load(std::memory_order_acquire);
+  if (final_status == status_success && i2c_get_data_count(i2c_) != 0U)
   {
-    async_ctx_.final_status = status_i2c_transmit_not_completed;
+    final_status = status_i2c_transmit_not_completed;
+    async_ctx_.final_status.store(final_status, std::memory_order_release);
   }
-  CompleteAsyncTransfer(in_isr, ConvertStatus(async_ctx_.final_status));
+  CompleteAsyncTransfer(in_isr, ConvertStatus(final_status));
 }
 
 bool HPMI2C::TryClaimAsyncCompletion()
@@ -1796,7 +1824,7 @@ void HPMI2C::OnDmaTcCallback(DMA_Type* base, uint32_t channel, void* cb_data_ptr
     return;
   }
 
-  self->async_ctx_.dma_done = true;
+  self->async_ctx_.dma_done.store(true, std::memory_order_release);
   self->MaybeCompleteAsyncTransfer(true);
 }
 
@@ -1809,12 +1837,12 @@ void HPMI2C::OnDmaErrorCallback(DMA_Type* base, uint32_t channel, void* cb_data_
   {
     return;
   }
-  if (self->async_ctx_.dma_done)
+  if (self->async_ctx_.dma_done.load(std::memory_order_acquire))
   {
     return;
   }
-  self->async_ctx_.final_status = status_fail;
-  self->async_ctx_.should_recover = true;
+  self->async_ctx_.final_status.store(status_fail, std::memory_order_release);
+  self->async_ctx_.should_recover.store(true, std::memory_order_release);
   self->CompleteAsyncTransfer(true, ErrorCode::FAILED);
 }
 
@@ -1827,12 +1855,12 @@ void HPMI2C::OnDmaAbortCallback(DMA_Type* base, uint32_t channel, void* cb_data_
   {
     return;
   }
-  if (self->async_ctx_.dma_done)
+  if (self->async_ctx_.dma_done.load(std::memory_order_acquire))
   {
     return;
   }
-  self->async_ctx_.final_status = status_fail;
-  self->async_ctx_.should_recover = true;
+  self->async_ctx_.final_status.store(status_fail, std::memory_order_release);
+  self->async_ctx_.should_recover.store(true, std::memory_order_release);
   self->CompleteAsyncTransfer(true, ErrorCode::FAILED);
 }
 #endif
