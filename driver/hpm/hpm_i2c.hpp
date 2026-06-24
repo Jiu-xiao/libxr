@@ -583,6 +583,56 @@ class HPMI2C final : public I2C
   void StopAsyncDma();
 
   /**
+   * @brief Reset async bookkeeping after a start path aborts or completes.
+   */
+  void ResetAsyncState();
+
+  /**
+   * @brief Shared cleanup for async submit failures before the operation is running.
+   */
+  void AbortAsyncStart(bool stop_dma, bool disable_irq, bool recover_controller);
+
+  /**
+   * @brief Start BLOCK wait state only for blocking operation descriptors.
+   */
+  template <typename Op>
+  void StartAsyncBlockWaitIfNeeded(Op& op)
+  {
+    if (op.type == Op::OperationType::BLOCK)
+    {
+      block_wait_.Start(*op.data.sem_info.sem);
+    }
+  }
+
+  /**
+   * @brief Cancel BLOCK wait state only for blocking operation descriptors.
+   */
+  template <typename Op>
+  void CancelAsyncBlockWaitIfNeeded(Op& op)
+  {
+    if (op.type == Op::OperationType::BLOCK)
+    {
+      block_wait_.Cancel();
+    }
+  }
+
+  /**
+   * @brief Dispatch a completed async operation to its LibXR completion target.
+   */
+  template <typename Op>
+  void CompleteAsyncOperation(Op& op, bool in_isr, ErrorCode ans)
+  {
+    if (op.type == Op::OperationType::BLOCK)
+    {
+      (void)block_wait_.TryPost(in_isr, ans);
+    }
+    else
+    {
+      op.UpdateStatus(in_isr, ans);
+    }
+  }
+
+  /**
    * @brief 后台主机写事务提交 /
    * Submit one asynchronous master write transaction.
    */

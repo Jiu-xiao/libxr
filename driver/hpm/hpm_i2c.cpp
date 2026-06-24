@@ -38,10 +38,21 @@ constexpr uint16_t kI2CFlagNoStart = I2C_NO_START;
 constexpr uint16_t kI2CFlagNoAddress = I2C_NO_ADDRESS;
 constexpr uint16_t kI2CFlagNoStop = I2C_NO_STOP;
 constexpr uint16_t kI2CFlagWriteCheckAck = I2C_WRITE_CHECK_ACK;
-constexpr uint64_t kAddrHitTimeoutUs = 500ULL;
-constexpr uint64_t kStopTimeoutUs = 1000ULL;
-constexpr uint64_t kBusIdleTimeoutUs = 1000ULL;
-constexpr uint64_t kAsyncTransferTimeoutUs = 500000ULL;
+
+struct I2cWaitPolicy
+{
+  uint64_t addr_hit_timeout_us;
+  uint64_t stop_timeout_us;
+  uint64_t bus_idle_timeout_us;
+  uint64_t transfer_timeout_us;
+};
+
+constexpr I2cWaitPolicy kDefaultWaitPolicy{
+    500ULL,
+    1000ULL,
+    1000ULL,
+    500000ULL,
+};
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
 #if defined(HPM_I2C7)
@@ -312,11 +323,13 @@ bool WaitUntil(const Predicate& predicate, uint64_t timeout_us)
     {
       return false;
     }
+    __asm volatile("nop");
   }
   return true;
 }
 
-bool WaitForBusIdle(I2C_Type* i2c, uint64_t timeout_us = kBusIdleTimeoutUs)
+bool WaitForBusIdle(I2C_Type* i2c,
+                    uint64_t timeout_us = kDefaultWaitPolicy.bus_idle_timeout_us)
 {
   return WaitUntil(
       [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_BUSBUSY_MASK) == 0U; },
@@ -339,7 +352,7 @@ void IssueStopAndWait(I2C_Type* i2c)
         return ((status & I2C_STATUS_CMPL_MASK) != 0U) ||
                ((status & I2C_STATUS_BUSBUSY_MASK) == 0U);
       },
-      kStopTimeoutUs);
+      kDefaultWaitPolicy.stop_timeout_us);
   i2c_clear_status(
       i2c, I2C_STATUS_CMPL_MASK | I2C_STATUS_ADDRHIT_MASK | I2C_STATUS_BYTETRANS_MASK);
   i2c_clear_fifo(i2c);
@@ -408,7 +421,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
   {
     const bool addr_hit = WaitUntil(
         [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_ADDRHIT_MASK) != 0U; },
-        kAddrHitTimeoutUs);
+        kDefaultWaitPolicy.addr_hit_timeout_us);
     if (!addr_hit)
     {
       raw_status = status_i2c_no_addr_hit;
@@ -425,7 +438,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
     {
       const bool ready = WaitUntil(
           [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_FIFOEMPTY_MASK) == 0U; },
-          kAsyncTransferTimeoutUs);
+          kDefaultWaitPolicy.transfer_timeout_us);
       if (!ready)
       {
         raw_status = status_timeout;
@@ -455,7 +468,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
 
         const bool ready = WaitUntil(
             [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_BYTETRANS_MASK) != 0U; },
-            kAsyncTransferTimeoutUs);
+            kDefaultWaitPolicy.transfer_timeout_us);
         if (!ready)
         {
           raw_status = status_timeout;
@@ -474,7 +487,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
       {
         const bool ready = WaitUntil(
             [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_FIFOFULL_MASK) == 0U; },
-            kAsyncTransferTimeoutUs);
+            kDefaultWaitPolicy.transfer_timeout_us);
         if (!ready)
         {
           raw_status = status_timeout;
@@ -491,7 +504,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
   {
     const bool complete =
         WaitUntil([i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_CMPL_MASK) != 0U; },
-                  kAsyncTransferTimeoutUs);
+                  kDefaultWaitPolicy.transfer_timeout_us);
     if (!complete)
     {
       raw_status = status_timeout;
@@ -909,20 +922,11 @@ ErrorCode HPMI2C::PrepareAsyncTransfer(uint16_t slave_addr, uint16_t flags, uint
 
   if (require_bus_idle)
   {
-    uint32_t ticks_per_us = clock_get_core_clock_ticks_per_us();
-    uint64_t expected_ticks =
-        hpm_csr_get_core_cycle() + (ticks_per_us * kAsyncTransferTimeoutUs);
-    while ((i2c_get_status(i2c_) & I2C_STATUS_BUSBUSY_MASK) != 0U)
+    if (!WaitForBusIdle(i2c_, kDefaultWaitPolicy.transfer_timeout_us))
     {
-      if (hpm_csr_get_core_cycle() > expected_ticks)
-      {
-        return ErrorCode::BUSY;
-      }
+      return ErrorCode::BUSY;
     }
   }
-
-  uint32_t ticks_per_us = clock_get_core_clock_ticks_per_us();
-  uint64_t expected_ticks = hpm_csr_get_core_cycle() + ticks_per_us * kAddrHitTimeoutUs;
 
   i2c_clear_status(i2c_, I2C_STATUS_CMPL_MASK);
   if (clear_fifo)
@@ -983,13 +987,15 @@ ErrorCode HPMI2C::PrepareAsyncTransfer(uint16_t slave_addr, uint16_t flags, uint
 
   if ((final_flags & I2C_NO_ADDRESS) == 0U)
   {
-    while ((i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) == 0U)
+    const bool addr_hit = WaitUntil(
+        [this]() {
+          return (i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) != 0U;
+        },
+        kDefaultWaitPolicy.addr_hit_timeout_us);
+    if (!addr_hit)
     {
-      if (hpm_csr_get_core_cycle() > expected_ticks)
-      {
-        ReleaseAsyncBus();
-        return ErrorCode::NO_RESPONSE;
-      }
+      ReleaseAsyncBus();
+      return ErrorCode::NO_RESPONSE;
     }
     i2c_clear_status(i2c_, I2C_STATUS_ADDRHIT_MASK);
   }
@@ -1163,6 +1169,36 @@ void HPMI2C::StopAsyncDma()
   }
 }
 
+void HPMI2C::ResetAsyncState()
+{
+  async_ctx_ = {};
+  async_busy_.store(0U, std::memory_order_release);
+  async_completion_claim_.store(0U, std::memory_order_release);
+}
+
+void HPMI2C::AbortAsyncStart(bool stop_dma, bool disable_irq, bool recover_controller)
+{
+  if (stop_dma)
+  {
+    StopAsyncDma();
+  }
+  if (disable_irq)
+  {
+    DisableAsyncI2cIrq();
+  }
+
+  if (recover_controller)
+  {
+    RecoverController();
+  }
+  else
+  {
+    ReleaseAsyncBus();
+  }
+
+  ResetAsyncState();
+}
+
 void HPMI2C::CompleteAsyncTransfer(bool in_isr, ErrorCode ans)
 {
   if (!TryClaimAsyncCompletion())
@@ -1183,31 +1219,15 @@ void HPMI2C::CompleteAsyncTransfer(bool in_isr, ErrorCode ans)
   ReadOperation read_op = async_ctx_.read_op;
   WriteOperation write_op = async_ctx_.write_op;
   async_ctx_.kind = AsyncTransferKind::NONE;
-  async_ctx_ = {};
-  async_busy_.store(0U, std::memory_order_release);
-  async_completion_claim_.store(0U, std::memory_order_release);
+  ResetAsyncState();
 
   if (kind == AsyncTransferKind::WRITE)
   {
-    if (write_op.type == WriteOperation::OperationType::BLOCK)
-    {
-      (void)block_wait_.TryPost(in_isr, ans);
-    }
-    else
-    {
-      write_op.UpdateStatus(in_isr, ans);
-    }
+    CompleteAsyncOperation(write_op, in_isr, ans);
   }
   else
   {
-    if (read_op.type == ReadOperation::OperationType::BLOCK)
-    {
-      (void)block_wait_.TryPost(in_isr, ans);
-    }
-    else
-    {
-      read_op.UpdateStatus(in_isr, ans);
-    }
+    CompleteAsyncOperation(read_op, in_isr, ans);
   }
 }
 
@@ -1238,22 +1258,14 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   async_ctx_.cmpl_done = false;
   async_completion_claim_.store(0U, std::memory_order_release);
 
-  if (op.type == WriteOperation::OperationType::BLOCK)
-  {
-    block_wait_.Start(*op.data.sem_info.sem);
-  }
+  StartAsyncBlockWaitIfNeeded(op);
 
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
     async_ctx_.should_recover = true;
-    ReleaseAsyncBus();
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(false, false, false);
+    CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
   }
 
@@ -1262,14 +1274,8 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   if (ans != ErrorCode::OK)
   {
     async_ctx_.should_recover = true;
-    ReleaseAsyncBus();
-    DisableAsyncI2cIrq();
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(false, true, false);
+    CancelAsyncBlockWaitIfNeeded(op);
     return ans;
   }
 
@@ -1278,23 +1284,9 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   ans = ConvertStatus(start_status);
   if (ans != ErrorCode::OK)
   {
-    StopAsyncDma();
     async_ctx_.should_recover = true;
-    DisableAsyncI2cIrq();
-    if (ShouldRecover(start_status))
-    {
-      RecoverController();
-    }
-    else
-    {
-      ReleaseAsyncBus();
-    }
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(true, true, ShouldRecover(start_status));
+    CancelAsyncBlockWaitIfNeeded(op);
     return ans;
   }
 
@@ -1333,22 +1325,14 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   async_ctx_.cmpl_done = false;
   async_completion_claim_.store(0U, std::memory_order_release);
 
-  if (op.type == ReadOperation::OperationType::BLOCK)
-  {
-    block_wait_.Start(*op.data.sem_info.sem);
-  }
+  StartAsyncBlockWaitIfNeeded(op);
 
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
     async_ctx_.should_recover = true;
-    ReleaseAsyncBus();
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(false, false, false);
+    CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
   }
 
@@ -1357,14 +1341,8 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   if (ans != ErrorCode::OK)
   {
     async_ctx_.should_recover = true;
-    ReleaseAsyncBus();
-    DisableAsyncI2cIrq();
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(false, true, false);
+    CancelAsyncBlockWaitIfNeeded(op);
     return ans;
   }
 
@@ -1373,23 +1351,9 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   ans = ConvertStatus(start_status);
   if (ans != ErrorCode::OK)
   {
-    StopAsyncDma();
     async_ctx_.should_recover = true;
-    DisableAsyncI2cIrq();
-    if (ShouldRecover(start_status))
-    {
-      RecoverController();
-    }
-    else
-    {
-      ReleaseAsyncBus();
-    }
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(true, true, ShouldRecover(start_status));
+    CancelAsyncBlockWaitIfNeeded(op);
     return ans;
   }
 
@@ -1444,21 +1408,14 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   async_ctx_.cmpl_done = false;
   async_completion_claim_.store(0U, std::memory_order_release);
 
-  if (op.type == ReadOperation::OperationType::BLOCK)
-  {
-    block_wait_.Start(*op.data.sem_info.sem);
-  }
+  StartAsyncBlockWaitIfNeeded(op);
 
   ans = PrepareAsyncTransfer(slave_addr, kI2CFlagNoStop, async_ctx_.mem_addr_size_in_byte,
                              true, true);
   if (ans != ErrorCode::OK)
   {
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    ResetAsyncState();
+    CancelAsyncBlockWaitIfNeeded(op);
     return ans;
   }
 
@@ -1467,23 +1424,15 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
     i2c_write_byte(i2c_, async_ctx_.mem_addr_bytes[i]);
   }
 
-  uint32_t ticks_per_us = clock_get_core_clock_ticks_per_us();
-  uint64_t expected_ticks =
-      hpm_csr_get_core_cycle() + (ticks_per_us * kAsyncTransferTimeoutUs);
-  while ((i2c_get_status(i2c_) & I2C_STATUS_CMPL_MASK) == 0U)
+  const bool mem_addr_complete = WaitUntil(
+      [this]() { return (i2c_get_status(i2c_) & I2C_STATUS_CMPL_MASK) != 0U; },
+      kDefaultWaitPolicy.transfer_timeout_us);
+  if (!mem_addr_complete)
   {
-    if (hpm_csr_get_core_cycle() > expected_ticks)
-    {
-      async_ctx_.should_recover = true;
-      ReleaseAsyncBus();
-      async_busy_.store(0U, std::memory_order_release);
-      async_ctx_ = {};
-      if (op.type == ReadOperation::OperationType::BLOCK)
-      {
-        block_wait_.Cancel();
-      }
-      return ErrorCode::TIMEOUT;
-    }
+    async_ctx_.should_recover = true;
+    AbortAsyncStart(false, false, false);
+    CancelAsyncBlockWaitIfNeeded(op);
+    return ErrorCode::TIMEOUT;
   }
   i2c_clear_status(i2c_, I2C_STATUS_CMPL_MASK);
   i2c_clear_fifo(i2c_);
@@ -1506,49 +1455,30 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   if (ans != ErrorCode::OK)
   {
     async_ctx_.should_recover = true;
-    ReleaseAsyncBus();
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(false, false, false);
+    CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
   }
 
   ans = StartAsyncReadDma(read_data.addr_, static_cast<uint32_t>(read_data.size_));
   if (ans != ErrorCode::OK)
   {
-    DisableAsyncI2cIrq();
     async_ctx_.should_recover = true;
-    ReleaseAsyncBus();
-    async_busy_.store(0U, std::memory_order_release);
-    async_ctx_ = {};
-    if (op.type == ReadOperation::OperationType::BLOCK)
-    {
-      block_wait_.Cancel();
-    }
+    AbortAsyncStart(false, true, false);
+    CancelAsyncBlockWaitIfNeeded(op);
     return ans;
   }
 
   i2c_master_issue_data_transmission(i2c_);
-  expected_ticks = hpm_csr_get_core_cycle() + (ticks_per_us * kAddrHitTimeoutUs);
-  while ((i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) == 0U)
+  const bool addr_hit = WaitUntil(
+      [this]() { return (i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) != 0U; },
+      kDefaultWaitPolicy.addr_hit_timeout_us);
+  if (!addr_hit)
   {
-    if (hpm_csr_get_core_cycle() > expected_ticks)
-    {
-      StopAsyncDma();
-      DisableAsyncI2cIrq();
-      async_ctx_.should_recover = true;
-      RecoverController();
-      async_busy_.store(0U, std::memory_order_release);
-      async_ctx_ = {};
-      if (op.type == ReadOperation::OperationType::BLOCK)
-      {
-        block_wait_.Cancel();
-      }
-      return ErrorCode::NO_RESPONSE;
-    }
+    async_ctx_.should_recover = true;
+    AbortAsyncStart(true, true, true);
+    CancelAsyncBlockWaitIfNeeded(op);
+    return ErrorCode::NO_RESPONSE;
   }
   i2c_clear_status(i2c_, I2C_STATUS_ADDRHIT_MASK);
 
