@@ -1,5 +1,76 @@
 #include "hpm_i2c.hpp"
 
+using namespace LibXR;
+
+namespace
+{
+
+constexpr uint16_t kSharedMax7BitAddress = 0x7FU;
+constexpr uint16_t kSharedMax10BitAddress = 0x3FFU;
+
+uint16_t ResolveHpmI2cMaxSlaveAddress(HPMI2C::AddressMode mode)
+{
+  return mode == HPMI2C::AddressMode::ADDR_10BIT ? kSharedMax10BitAddress
+                                                 : kSharedMax7BitAddress;
+}
+
+ErrorCode ValidateHpmI2cSlaveAddress(HPMI2C::AddressMode mode, uint16_t slave_addr)
+{
+  return (slave_addr <= ResolveHpmI2cMaxSlaveAddress(mode)) ? ErrorCode::OK
+                                                            : ErrorCode::ARG_ERR;
+}
+
+ErrorCode ResolveHpmI2cMemAddressSize(I2C::MemAddrLength len, uint32_t& addr_size)
+{
+  switch (len)
+  {
+    case I2C::MemAddrLength::BYTE_8:
+      addr_size = 1U;
+      return ErrorCode::OK;
+    case I2C::MemAddrLength::BYTE_16:
+      addr_size = 2U;
+      return ErrorCode::OK;
+    default:
+      addr_size = 0U;
+      return ErrorCode::ARG_ERR;
+  }
+}
+
+void FillHpmI2cMemAddress(uint16_t mem_addr, I2C::MemAddrLength len, uint8_t out[2])
+{
+  if (len == I2C::MemAddrLength::BYTE_16)
+  {
+    out[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
+    out[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
+  }
+  else
+  {
+    out[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
+  }
+}
+
+}  // namespace
+
+uint16_t HPMI2C::GetMaxSlaveAddress(AddressMode mode)
+{
+  return ResolveHpmI2cMaxSlaveAddress(mode);
+}
+
+ErrorCode HPMI2C::ValidateSlaveAddress(uint16_t slave_addr) const
+{
+  return ValidateHpmI2cSlaveAddress(address_mode_, slave_addr);
+}
+
+ErrorCode HPMI2C::ResolveMemAddressSize(MemAddrLength len, uint32_t& addr_size)
+{
+  return ResolveHpmI2cMemAddressSize(len, addr_size);
+}
+
+void HPMI2C::FillMemAddress(uint16_t mem_addr, MemAddrLength len, uint8_t out[2])
+{
+  FillHpmI2cMemAddress(mem_addr, len, out);
+}
+
 #if LIBXR_HPM_I2C_SUPPORTED
 
 #if __has_include("board.h")
@@ -27,11 +98,22 @@ extern "C"
 #define LIBXR_HPM_I2C_HAS_L1C 0
 #endif
 
-using namespace LibXR;
+#if defined(__GNUC__) || defined(__clang__)
+/**
+ * @brief 可选等待放松钩子，工程可提供强定义以在 I2C 忙等路径中让出 CPU /
+ * Optional wait relaxation hook; projects may provide a strong definition to yield
+ * CPU time inside I2C busy-wait paths.
+ */
+extern "C" void libxr_hpm_i2c_wait_relax_hook(void) __attribute__((weak));
+#define LIBXR_HPM_I2C_HAS_WAIT_RELAX_HOOK 1
+#else
+#define LIBXR_HPM_I2C_HAS_WAIT_RELAX_HOOK 0
+#endif
 
 namespace
 {
 
+// Core blocking flags and timeout policy shared by polling and async setup paths.
 constexpr uint16_t kI2CFlagRead = I2C_RD;
 constexpr uint16_t kI2CFlagAddr10Bit = I2C_ADDR_10BIT;
 constexpr uint16_t kI2CFlagNoStart = I2C_NO_START;
@@ -54,6 +136,8 @@ constexpr I2cWaitPolicy kDefaultWaitPolicy{
     500000ULL,
 };
 
+// DMA manager and IRQ platform glue. Kept in this file to avoid changing build
+// integration while making the backend boundaries explicit.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
 #if defined(HPM_I2C7)
 constexpr size_t kHpmI2cInstanceCount = 8U;
@@ -311,6 +395,18 @@ static void InvalidateDCacheIfNeeded(const void* addr, uint32_t size)
 }
 #endif
 
+void I2cWaitRelax()
+{
+#if LIBXR_HPM_I2C_HAS_WAIT_RELAX_HOOK
+  if (libxr_hpm_i2c_wait_relax_hook != nullptr)
+  {
+    libxr_hpm_i2c_wait_relax_hook();
+    return;
+  }
+#endif
+  __asm volatile("nop");
+}
+
 template <typename Predicate>
 bool WaitUntil(const Predicate& predicate, uint64_t timeout_us)
 {
@@ -322,7 +418,7 @@ bool WaitUntil(const Predicate& predicate, uint64_t timeout_us)
     {
       return false;
     }
-    __asm volatile("nop");
+    I2cWaitRelax();
   }
   return true;
 }
@@ -732,49 +828,9 @@ i2c_seq_transfer_opt_t HPMI2C::ConvertSequenceFrame(SequenceFrame frame)
   }
 }
 
-uint16_t HPMI2C::GetMaxSlaveAddress(AddressMode mode)
-{
-  return mode == AddressMode::ADDR_10BIT ? kMax10BitAddress : kMax7BitAddress;
-}
-
 uint16_t HPMI2C::BuildTransferFlags(uint16_t flags) const
 {
   return (address_mode_ == AddressMode::ADDR_10BIT) ? (flags | kI2CFlagAddr10Bit) : flags;
-}
-
-ErrorCode HPMI2C::ValidateSlaveAddress(uint16_t slave_addr) const
-{
-  return (slave_addr <= GetMaxSlaveAddress(address_mode_)) ? ErrorCode::OK
-                                                           : ErrorCode::ARG_ERR;
-}
-
-ErrorCode HPMI2C::ResolveMemAddressSize(MemAddrLength len, uint32_t& addr_size)
-{
-  switch (len)
-  {
-    case MemAddrLength::BYTE_8:
-      addr_size = 1U;
-      return ErrorCode::OK;
-    case MemAddrLength::BYTE_16:
-      addr_size = 2U;
-      return ErrorCode::OK;
-    default:
-      addr_size = 0;
-      return ErrorCode::ARG_ERR;
-  }
-}
-
-void HPMI2C::FillMemAddress(uint16_t mem_addr, MemAddrLength len, uint8_t out[2])
-{
-  if (len == MemAddrLength::BYTE_16)
-  {
-    out[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFu);
-    out[1] = static_cast<uint8_t>(mem_addr & 0xFFu);
-  }
-  else
-  {
-    out[0] = static_cast<uint8_t>(mem_addr & 0xFFu);
-  }
 }
 
 ErrorCode HPMI2C::EnsureClockReady()
@@ -2245,8 +2301,6 @@ ErrorCode HPMI2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
 #else
 
-using namespace LibXR;
-
 extern "C" void libxr_hpm_i2c_process_interrupt(LibXRHpmI2cType* ptr) { UNUSED(ptr); }
 
 HPMI2C::HPMI2C(LibXRHpmI2cType* i2c, clock_name_t clock, bool auto_board_init,
@@ -2270,47 +2324,7 @@ ErrorCode HPMI2C::ConvertStatus(hpm_stat_t status)
   return ErrorCode::NOT_SUPPORT;
 }
 
-uint16_t HPMI2C::GetMaxSlaveAddress(AddressMode mode)
-{
-  return mode == AddressMode::ADDR_10BIT ? kMax10BitAddress : kMax7BitAddress;
-}
-
 uint16_t HPMI2C::BuildTransferFlags(uint16_t flags) const { return flags; }
-
-ErrorCode HPMI2C::ValidateSlaveAddress(uint16_t slave_addr) const
-{
-  return (slave_addr <= GetMaxSlaveAddress(address_mode_)) ? ErrorCode::OK
-                                                           : ErrorCode::ARG_ERR;
-}
-
-ErrorCode HPMI2C::ResolveMemAddressSize(MemAddrLength len, uint32_t& addr_size)
-{
-  switch (len)
-  {
-    case MemAddrLength::BYTE_8:
-      addr_size = 1U;
-      return ErrorCode::OK;
-    case MemAddrLength::BYTE_16:
-      addr_size = 2U;
-      return ErrorCode::OK;
-    default:
-      addr_size = 0U;
-      return ErrorCode::ARG_ERR;
-  }
-}
-
-void HPMI2C::FillMemAddress(uint16_t mem_addr, MemAddrLength len, uint8_t out[2])
-{
-  if (len == MemAddrLength::BYTE_16)
-  {
-    out[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
-    out[1] = static_cast<uint8_t>(mem_addr & 0xFFU);
-  }
-  else
-  {
-    out[0] = static_cast<uint8_t>(mem_addr & 0xFFU);
-  }
-}
 
 ErrorCode HPMI2C::DoSequenceWrite(uint16_t slave_addr, ConstRawData write_data,
                                   SequenceFrame frame, bool check_ack)

@@ -88,6 +88,17 @@ namespace LibXR
  * driver still verifies I2C `CMPL` and post-transfer status before reporting the
  * final result through UpdateStatus() or AsyncBlockWait.
  *
+ * 忙等路径统一经实现文件内部的 `WaitUntil()` 处理；工程可提供强定义
+ * `extern "C" void libxr_hpm_i2c_wait_relax_hook(void)`，在等待 `ADDRHIT`、`CMPL`
+ * 或 FIFO 状态时插入调度让出、低功耗等待或板级短延时。默认实现仅执行一个 `nop`，
+ * 不改变无 RTOS 裸机场景的时序假设。
+ * Busy-wait paths are centralized through the implementation-local `WaitUntil()`.
+ * A project may provide a strong
+ * `extern "C" void libxr_hpm_i2c_wait_relax_hook(void)` definition to yield to a
+ * scheduler, enter a low-power wait, or add a board-level short delay while waiting
+ * for `ADDRHIT`, `CMPL`, or FIFO status. The default fallback only executes one
+ * `nop`, preserving bare-metal timing assumptions when no hook is supplied.
+ *
  * 默认 ISR wrapper 按 `HPM_I2Cn`、`IRQn_I2Cn` 和 `HPM_DMA_SRC_I2Cn` 等 HPM SDK
  * header 宏适配多系列实例；若项目层后续要自行接管同一 IRQ，需要单独调整 ownership
  * 方案。
