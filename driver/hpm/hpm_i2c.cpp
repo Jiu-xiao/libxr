@@ -533,7 +533,8 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
 
   i2c_master_enable_data_phase(i2c);
   i2c_set_data_count(i2c, static_cast<uint32_t>(data.size_));
-  i2c->INTEN |= I2C_EVENT_BYTE_RECEIVED;
+  const uint32_t saved_inten = i2c->INTEN;
+  i2c->INTEN = saved_inten | I2C_EVENT_BYTE_RECEIVED;
   i2c_master_issue_data_transmission(i2c);
 
   hpm_stat_t raw_status = status_success;
@@ -653,7 +654,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
     i2c_master_disable_stop_phase(i2c);
   }
 
-  i2c->INTEN &= ~I2C_EVENT_BYTE_RECEIVED;
+  i2c->INTEN = saved_inten;
   return raw_status;
 }
 
