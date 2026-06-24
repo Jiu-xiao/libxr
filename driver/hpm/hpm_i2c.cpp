@@ -112,6 +112,10 @@ extern "C" void libxr_hpm_i2c_wait_relax_hook(void) __attribute__((weak));
 #define LIBXR_HPM_I2C_HAS_WAIT_RELAX_HOOK 0
 #endif
 
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+#include "hpm_i2c_platform.hpp"
+#endif
+
 namespace
 {
 
@@ -138,8 +142,8 @@ constexpr I2cWaitPolicy kDefaultWaitPolicy{
     500000ULL,
 };
 
-// DMA manager and IRQ platform glue. Kept in this file to avoid changing build
-// integration while making the backend boundaries explicit.
+// DMA manager state and ISR instance slots stay in this TU to avoid build-system
+// churn; platform resource resolution lives in hpm_i2c_platform.hpp.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
 static_assert(sizeof(uintptr_t) <= sizeof(uint32_t),
               "HPM I2C DMA helper assumes a 32-bit address space.");
@@ -162,212 +166,10 @@ constexpr size_t kHpmI2cInstanceCount = 4U;
 #endif
 HPMI2C* g_hpm_i2c_instance_map[kHpmI2cInstanceCount] = {};
 
-constexpr uint8_t kInvalidDmaSource = 0xFFU;
-constexpr int32_t kInvalidIndex = -1;
-constexpr int32_t kInvalidIrq = -1;
-
-struct I2cPlatformResource
-{
-  I2C_Type* base;
-  int32_t index;
-  uint8_t dma_source;
-  int32_t irq;
-};
-
-#if defined(HPM_DMA_SRC_I2C0)
-#define LIBXR_HPM_I2C_DMA_SRC_0 HPM_DMA_SRC_I2C0
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_0 kInvalidDmaSource
-#endif
-#if defined(HPM_DMA_SRC_I2C1)
-#define LIBXR_HPM_I2C_DMA_SRC_1 HPM_DMA_SRC_I2C1
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_1 kInvalidDmaSource
-#endif
-#if defined(HPM_DMA_SRC_I2C2)
-#define LIBXR_HPM_I2C_DMA_SRC_2 HPM_DMA_SRC_I2C2
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_2 kInvalidDmaSource
-#endif
-#if defined(HPM_DMA_SRC_I2C3)
-#define LIBXR_HPM_I2C_DMA_SRC_3 HPM_DMA_SRC_I2C3
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_3 kInvalidDmaSource
-#endif
-#if defined(HPM_DMA_SRC_I2C4)
-#define LIBXR_HPM_I2C_DMA_SRC_4 HPM_DMA_SRC_I2C4
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_4 kInvalidDmaSource
-#endif
-#if defined(HPM_DMA_SRC_I2C5)
-#define LIBXR_HPM_I2C_DMA_SRC_5 HPM_DMA_SRC_I2C5
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_5 kInvalidDmaSource
-#endif
-#if defined(HPM_DMA_SRC_I2C6)
-#define LIBXR_HPM_I2C_DMA_SRC_6 HPM_DMA_SRC_I2C6
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_6 kInvalidDmaSource
-#endif
-#if defined(HPM_DMA_SRC_I2C7)
-#define LIBXR_HPM_I2C_DMA_SRC_7 HPM_DMA_SRC_I2C7
-#else
-#define LIBXR_HPM_I2C_DMA_SRC_7 kInvalidDmaSource
-#endif
-
-#if defined(IRQn_I2C0)
-#define LIBXR_HPM_I2C_IRQ_0 IRQn_I2C0
-#else
-#define LIBXR_HPM_I2C_IRQ_0 kInvalidIrq
-#endif
-#if defined(IRQn_I2C1)
-#define LIBXR_HPM_I2C_IRQ_1 IRQn_I2C1
-#else
-#define LIBXR_HPM_I2C_IRQ_1 kInvalidIrq
-#endif
-#if defined(IRQn_I2C2)
-#define LIBXR_HPM_I2C_IRQ_2 IRQn_I2C2
-#else
-#define LIBXR_HPM_I2C_IRQ_2 kInvalidIrq
-#endif
-#if defined(IRQn_I2C3)
-#define LIBXR_HPM_I2C_IRQ_3 IRQn_I2C3
-#else
-#define LIBXR_HPM_I2C_IRQ_3 kInvalidIrq
-#endif
-#if defined(IRQn_I2C4)
-#define LIBXR_HPM_I2C_IRQ_4 IRQn_I2C4
-#else
-#define LIBXR_HPM_I2C_IRQ_4 kInvalidIrq
-#endif
-#if defined(IRQn_I2C5)
-#define LIBXR_HPM_I2C_IRQ_5 IRQn_I2C5
-#else
-#define LIBXR_HPM_I2C_IRQ_5 kInvalidIrq
-#endif
-#if defined(IRQn_I2C6)
-#define LIBXR_HPM_I2C_IRQ_6 IRQn_I2C6
-#else
-#define LIBXR_HPM_I2C_IRQ_6 kInvalidIrq
-#endif
-#if defined(IRQn_I2C7)
-#define LIBXR_HPM_I2C_IRQ_7 IRQn_I2C7
-#else
-#define LIBXR_HPM_I2C_IRQ_7 kInvalidIrq
-#endif
-
-#define LIBXR_HPM_I2C_RESOURCE_ENTRY(index_value)             \
-  {HPM_I2C##index_value, static_cast<int32_t>(index_value),   \
-   static_cast<uint8_t>(LIBXR_HPM_I2C_DMA_SRC_##index_value), \
-   static_cast<int32_t>(LIBXR_HPM_I2C_IRQ_##index_value)}
-
-static const I2cPlatformResource kI2cPlatformResources[] = {
-#if defined(HPM_I2C0)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(0),
-#endif
-#if defined(HPM_I2C1)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(1),
-#endif
-#if defined(HPM_I2C2)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(2),
-#endif
-#if defined(HPM_I2C3)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(3),
-#endif
-#if defined(HPM_I2C4)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(4),
-#endif
-#if defined(HPM_I2C5)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(5),
-#endif
-#if defined(HPM_I2C6)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(6),
-#endif
-#if defined(HPM_I2C7)
-    LIBXR_HPM_I2C_RESOURCE_ENTRY(7),
-#endif
-};
-
-#undef LIBXR_HPM_I2C_RESOURCE_ENTRY
-#undef LIBXR_HPM_I2C_IRQ_7
-#undef LIBXR_HPM_I2C_IRQ_6
-#undef LIBXR_HPM_I2C_IRQ_5
-#undef LIBXR_HPM_I2C_IRQ_4
-#undef LIBXR_HPM_I2C_IRQ_3
-#undef LIBXR_HPM_I2C_IRQ_2
-#undef LIBXR_HPM_I2C_IRQ_1
-#undef LIBXR_HPM_I2C_IRQ_0
-#undef LIBXR_HPM_I2C_DMA_SRC_7
-#undef LIBXR_HPM_I2C_DMA_SRC_6
-#undef LIBXR_HPM_I2C_DMA_SRC_5
-#undef LIBXR_HPM_I2C_DMA_SRC_4
-#undef LIBXR_HPM_I2C_DMA_SRC_3
-#undef LIBXR_HPM_I2C_DMA_SRC_2
-#undef LIBXR_HPM_I2C_DMA_SRC_1
-#undef LIBXR_HPM_I2C_DMA_SRC_0
-
-static const I2cPlatformResource* FindI2cPlatformResource(I2C_Type* i2c)
-{
-  for (size_t i = 0U;
-       i < (sizeof(kI2cPlatformResources) / sizeof(kI2cPlatformResources[0])); ++i)
-  {
-    if (i2c == kI2cPlatformResources[i].base)
-    {
-      return &kI2cPlatformResources[i];
-    }
-  }
-  return nullptr;
-}
-
-static uint8_t ResolveBoardI2cDmaSource(I2C_Type* i2c)
-{
-#if LIBXR_HPM_I2C_HAS_BOARD_HELPER
-#ifdef BOARD_APP_I2C_BASE
-  if (i2c == BOARD_APP_I2C_BASE)
-  {
-    return BOARD_APP_I2C_DMA_SRC;
-  }
-#endif
-#endif
-
-  const I2cPlatformResource* resource = FindI2cPlatformResource(i2c);
-  if (resource != nullptr)
-  {
-    return resource->dma_source;
-  }
-
-  return kInvalidDmaSource;
-}
-
-static int32_t ResolveI2cIndex(I2C_Type* i2c)
-{
-  const I2cPlatformResource* resource = FindI2cPlatformResource(i2c);
-  if (resource != nullptr)
-  {
-    return resource->index;
-  }
-  return kInvalidIndex;
-}
-#endif
-
-#if LIBXR_HPM_I2C_HAS_DMA_MGR
-static int32_t ResolveBoardI2cIrq(I2C_Type* i2c)
-{
-#if LIBXR_HPM_I2C_HAS_BOARD_HELPER
-#ifdef BOARD_APP_I2C_BASE
-  if (i2c == BOARD_APP_I2C_BASE)
-  {
-    return BOARD_APP_I2C_IRQ;
-  }
-#endif
-#endif
-  const I2cPlatformResource* resource = FindI2cPlatformResource(i2c);
-  if (resource != nullptr)
-  {
-    return resource->irq;
-  }
-  return kInvalidIrq;
-}
+using HPMI2CPlatform::kInvalidDmaSource;
+using HPMI2CPlatform::ResolveBoardI2cDmaSource;
+using HPMI2CPlatform::ResolveBoardI2cIrq;
+using HPMI2CPlatform::ResolveI2cIndex;
 #endif
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
@@ -470,16 +272,26 @@ uint32_t GetI2cWaitTicksPerUs()
   return ticks_per_us;
 }
 
+uint64_t GetI2cWaitTimeoutTicks(uint64_t timeout_us)
+{
+  const uint64_t ticks_per_us = GetI2cWaitTicksPerUs();
+  if (ticks_per_us != 0U && timeout_us > (UINT64_MAX / ticks_per_us))
+  {
+    return UINT64_MAX;
+  }
+  return ticks_per_us * timeout_us;
+}
+
 uint64_t GetI2cWaitCycle() { return hpm_csr_get_core_cycle(); }
 
 template <typename Predicate>
 bool WaitUntil(const Predicate& predicate, uint64_t timeout_us)
 {
-  const uint32_t ticks_per_us = GetI2cWaitTicksPerUs();
-  const uint64_t deadline = GetI2cWaitCycle() + (ticks_per_us * timeout_us);
+  const uint64_t start = GetI2cWaitCycle();
+  const uint64_t timeout_ticks = GetI2cWaitTimeoutTicks(timeout_us);
   while (!predicate())
   {
-    if (GetI2cWaitCycle() > deadline)
+    if ((GetI2cWaitCycle() - start) > timeout_ticks)
     {
       return false;
     }

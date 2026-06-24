@@ -102,8 +102,9 @@ namespace LibXR
  * `extern "C" void libxr_hpm_i2c_wait_relax_hook(void)`，在等待 `ADDRHIT`、`CMPL`
  * 或 FIFO 状态时插入调度让出、低功耗等待或板级短延时。默认实现仅执行一个 `nop`，
  * 不改变无 RTOS 裸机场景的时序假设。`WaitUntil()` 缓存首次读取的
- * `clock_get_core_clock_ticks_per_us()` 结果，假设 I2C 事务期间 core clock 不被动态
- * 改频。
+ * `clock_get_core_clock_ticks_per_us()` 结果，并使用 unsigned elapsed ticks 比较以
+ * 避免 deadline 加法回绕；HPM SDK `hpm_csr_get_core_cycle()` 返回 64-bit CYCLE 值，
+ * 事务期间仍假设 core clock 不被动态改频。
  * Busy-wait paths are centralized through the implementation-local `WaitUntil()`.
  * A project may provide a strong
  * `extern "C" void libxr_hpm_i2c_wait_relax_hook(void)` definition to yield to a
@@ -111,16 +112,19 @@ namespace LibXR
  * for `ADDRHIT`, `CMPL`, or FIFO status. The default fallback only executes one
  * `nop`, preserving bare-metal timing assumptions when no hook is supplied.
  * `WaitUntil()` caches the first `clock_get_core_clock_ticks_per_us()` result and
- * assumes the core clock is not dynamically retuned during I2C transactions.
+ * uses an unsigned elapsed-tick comparison to avoid deadline-addition wrap-around.
+ * The HPM SDK `hpm_csr_get_core_cycle()` API returns a 64-bit CYCLE value; the
+ * core clock is still assumed not to be dynamically retuned during I2C transfers.
  *
  * 默认 ISR wrapper 按 `HPM_I2Cn`、`IRQn_I2Cn` 和 `HPM_DMA_SRC_I2Cn` 等 HPM SDK
- * header 宏构建同一个实例资源表，并由该表解析 index、IRQ 和 DMA request source；
- * 若项目层后续要自行接管同一 IRQ，需要单独调整 ownership 方案。
+ * header 宏构建同一个实例资源表；该表已拆到 `hpm_i2c_platform.hpp` 内部 helper，
+ * 并由该 helper 解析 index、IRQ 和 DMA request source；若项目层后续要自行接管同一
+ * IRQ，需要单独调整 ownership 方案。
  * The default ISR wrapper adapts to multi-series instances through HPM SDK header
- * macros such as `HPM_I2Cn`, `IRQn_I2Cn`, and `HPM_DMA_SRC_I2Cn`, building one
- * instance resource table that resolves index, IRQ, and DMA request source. If
- * project code needs to own the same IRQ later, the ownership scheme should be
- * revised in a separate change.
+ * macros such as `HPM_I2Cn`, `IRQn_I2Cn`, and `HPM_DMA_SRC_I2Cn`. The shared
+ * instance resource table lives in the internal `hpm_i2c_platform.hpp` helper,
+ * which resolves index, IRQ, and DMA request source. If project code needs to own
+ * the same IRQ later, the ownership scheme should be revised in a separate change.
  *
  * 编译期支持由 `HPMSOC_HAS_HPMSDK_I2C` 和 `__has_include("hpm_i2c_drv.h")`
  * 同时 gate；缺少能力宏或裁剪 SDK 头时仍保留 LibXR API 形状，但所有事务返回
