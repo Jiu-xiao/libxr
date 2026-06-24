@@ -163,6 +163,161 @@ constexpr size_t kHpmI2cInstanceCount = 4U;
 HPMI2C* g_hpm_i2c_instance_map[kHpmI2cInstanceCount] = {};
 
 constexpr uint8_t kInvalidDmaSource = 0xFFU;
+constexpr int32_t kInvalidIndex = -1;
+constexpr int32_t kInvalidIrq = -1;
+
+struct I2cPlatformResource
+{
+  I2C_Type* base;
+  int32_t index;
+  uint8_t dma_source;
+  int32_t irq;
+};
+
+#if defined(HPM_DMA_SRC_I2C0)
+#define LIBXR_HPM_I2C_DMA_SRC_0 HPM_DMA_SRC_I2C0
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_0 kInvalidDmaSource
+#endif
+#if defined(HPM_DMA_SRC_I2C1)
+#define LIBXR_HPM_I2C_DMA_SRC_1 HPM_DMA_SRC_I2C1
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_1 kInvalidDmaSource
+#endif
+#if defined(HPM_DMA_SRC_I2C2)
+#define LIBXR_HPM_I2C_DMA_SRC_2 HPM_DMA_SRC_I2C2
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_2 kInvalidDmaSource
+#endif
+#if defined(HPM_DMA_SRC_I2C3)
+#define LIBXR_HPM_I2C_DMA_SRC_3 HPM_DMA_SRC_I2C3
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_3 kInvalidDmaSource
+#endif
+#if defined(HPM_DMA_SRC_I2C4)
+#define LIBXR_HPM_I2C_DMA_SRC_4 HPM_DMA_SRC_I2C4
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_4 kInvalidDmaSource
+#endif
+#if defined(HPM_DMA_SRC_I2C5)
+#define LIBXR_HPM_I2C_DMA_SRC_5 HPM_DMA_SRC_I2C5
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_5 kInvalidDmaSource
+#endif
+#if defined(HPM_DMA_SRC_I2C6)
+#define LIBXR_HPM_I2C_DMA_SRC_6 HPM_DMA_SRC_I2C6
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_6 kInvalidDmaSource
+#endif
+#if defined(HPM_DMA_SRC_I2C7)
+#define LIBXR_HPM_I2C_DMA_SRC_7 HPM_DMA_SRC_I2C7
+#else
+#define LIBXR_HPM_I2C_DMA_SRC_7 kInvalidDmaSource
+#endif
+
+#if defined(IRQn_I2C0)
+#define LIBXR_HPM_I2C_IRQ_0 IRQn_I2C0
+#else
+#define LIBXR_HPM_I2C_IRQ_0 kInvalidIrq
+#endif
+#if defined(IRQn_I2C1)
+#define LIBXR_HPM_I2C_IRQ_1 IRQn_I2C1
+#else
+#define LIBXR_HPM_I2C_IRQ_1 kInvalidIrq
+#endif
+#if defined(IRQn_I2C2)
+#define LIBXR_HPM_I2C_IRQ_2 IRQn_I2C2
+#else
+#define LIBXR_HPM_I2C_IRQ_2 kInvalidIrq
+#endif
+#if defined(IRQn_I2C3)
+#define LIBXR_HPM_I2C_IRQ_3 IRQn_I2C3
+#else
+#define LIBXR_HPM_I2C_IRQ_3 kInvalidIrq
+#endif
+#if defined(IRQn_I2C4)
+#define LIBXR_HPM_I2C_IRQ_4 IRQn_I2C4
+#else
+#define LIBXR_HPM_I2C_IRQ_4 kInvalidIrq
+#endif
+#if defined(IRQn_I2C5)
+#define LIBXR_HPM_I2C_IRQ_5 IRQn_I2C5
+#else
+#define LIBXR_HPM_I2C_IRQ_5 kInvalidIrq
+#endif
+#if defined(IRQn_I2C6)
+#define LIBXR_HPM_I2C_IRQ_6 IRQn_I2C6
+#else
+#define LIBXR_HPM_I2C_IRQ_6 kInvalidIrq
+#endif
+#if defined(IRQn_I2C7)
+#define LIBXR_HPM_I2C_IRQ_7 IRQn_I2C7
+#else
+#define LIBXR_HPM_I2C_IRQ_7 kInvalidIrq
+#endif
+
+#define LIBXR_HPM_I2C_RESOURCE_ENTRY(index_value)             \
+  {HPM_I2C##index_value, static_cast<int32_t>(index_value),   \
+   static_cast<uint8_t>(LIBXR_HPM_I2C_DMA_SRC_##index_value), \
+   static_cast<int32_t>(LIBXR_HPM_I2C_IRQ_##index_value)}
+
+static const I2cPlatformResource kI2cPlatformResources[] = {
+#if defined(HPM_I2C0)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(0),
+#endif
+#if defined(HPM_I2C1)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(1),
+#endif
+#if defined(HPM_I2C2)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(2),
+#endif
+#if defined(HPM_I2C3)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(3),
+#endif
+#if defined(HPM_I2C4)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(4),
+#endif
+#if defined(HPM_I2C5)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(5),
+#endif
+#if defined(HPM_I2C6)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(6),
+#endif
+#if defined(HPM_I2C7)
+    LIBXR_HPM_I2C_RESOURCE_ENTRY(7),
+#endif
+};
+
+#undef LIBXR_HPM_I2C_RESOURCE_ENTRY
+#undef LIBXR_HPM_I2C_IRQ_7
+#undef LIBXR_HPM_I2C_IRQ_6
+#undef LIBXR_HPM_I2C_IRQ_5
+#undef LIBXR_HPM_I2C_IRQ_4
+#undef LIBXR_HPM_I2C_IRQ_3
+#undef LIBXR_HPM_I2C_IRQ_2
+#undef LIBXR_HPM_I2C_IRQ_1
+#undef LIBXR_HPM_I2C_IRQ_0
+#undef LIBXR_HPM_I2C_DMA_SRC_7
+#undef LIBXR_HPM_I2C_DMA_SRC_6
+#undef LIBXR_HPM_I2C_DMA_SRC_5
+#undef LIBXR_HPM_I2C_DMA_SRC_4
+#undef LIBXR_HPM_I2C_DMA_SRC_3
+#undef LIBXR_HPM_I2C_DMA_SRC_2
+#undef LIBXR_HPM_I2C_DMA_SRC_1
+#undef LIBXR_HPM_I2C_DMA_SRC_0
+
+static const I2cPlatformResource* FindI2cPlatformResource(I2C_Type* i2c)
+{
+  for (size_t i = 0U;
+       i < (sizeof(kI2cPlatformResources) / sizeof(kI2cPlatformResources[0])); ++i)
+  {
+    if (i2c == kI2cPlatformResources[i].base)
+    {
+      return &kI2cPlatformResources[i];
+    }
+  }
+  return nullptr;
+}
 
 static uint8_t ResolveBoardI2cDmaSource(I2C_Type* i2c)
 {
@@ -175,109 +330,23 @@ static uint8_t ResolveBoardI2cDmaSource(I2C_Type* i2c)
 #endif
 #endif
 
-#if defined(HPM_I2C0) && defined(HPM_DMA_SRC_I2C0)
-  if (i2c == HPM_I2C0)
+  const I2cPlatformResource* resource = FindI2cPlatformResource(i2c);
+  if (resource != nullptr)
   {
-    return HPM_DMA_SRC_I2C0;
+    return resource->dma_source;
   }
-#endif
-#if defined(HPM_I2C1) && defined(HPM_DMA_SRC_I2C1)
-  if (i2c == HPM_I2C1)
-  {
-    return HPM_DMA_SRC_I2C1;
-  }
-#endif
-#if defined(HPM_I2C2) && defined(HPM_DMA_SRC_I2C2)
-  if (i2c == HPM_I2C2)
-  {
-    return HPM_DMA_SRC_I2C2;
-  }
-#endif
-#if defined(HPM_I2C3) && defined(HPM_DMA_SRC_I2C3)
-  if (i2c == HPM_I2C3)
-  {
-    return HPM_DMA_SRC_I2C3;
-  }
-#endif
-#if defined(HPM_I2C4) && defined(HPM_DMA_SRC_I2C4)
-  if (i2c == HPM_I2C4)
-  {
-    return HPM_DMA_SRC_I2C4;
-  }
-#endif
-#if defined(HPM_I2C5) && defined(HPM_DMA_SRC_I2C5)
-  if (i2c == HPM_I2C5)
-  {
-    return HPM_DMA_SRC_I2C5;
-  }
-#endif
-#if defined(HPM_I2C6) && defined(HPM_DMA_SRC_I2C6)
-  if (i2c == HPM_I2C6)
-  {
-    return HPM_DMA_SRC_I2C6;
-  }
-#endif
-#if defined(HPM_I2C7) && defined(HPM_DMA_SRC_I2C7)
-  if (i2c == HPM_I2C7)
-  {
-    return HPM_DMA_SRC_I2C7;
-  }
-#endif
 
   return kInvalidDmaSource;
 }
 
 static int32_t ResolveI2cIndex(I2C_Type* i2c)
 {
-#if defined(HPM_I2C0)
-  if (i2c == HPM_I2C0)
+  const I2cPlatformResource* resource = FindI2cPlatformResource(i2c);
+  if (resource != nullptr)
   {
-    return 0;
+    return resource->index;
   }
-#endif
-#if defined(HPM_I2C1)
-  if (i2c == HPM_I2C1)
-  {
-    return 1;
-  }
-#endif
-#if defined(HPM_I2C2)
-  if (i2c == HPM_I2C2)
-  {
-    return 2;
-  }
-#endif
-#if defined(HPM_I2C3)
-  if (i2c == HPM_I2C3)
-  {
-    return 3;
-  }
-#endif
-#if defined(HPM_I2C4)
-  if (i2c == HPM_I2C4)
-  {
-    return 4;
-  }
-#endif
-#if defined(HPM_I2C5)
-  if (i2c == HPM_I2C5)
-  {
-    return 5;
-  }
-#endif
-#if defined(HPM_I2C6)
-  if (i2c == HPM_I2C6)
-  {
-    return 6;
-  }
-#endif
-#if defined(HPM_I2C7)
-  if (i2c == HPM_I2C7)
-  {
-    return 7;
-  }
-#endif
-  return -1;
+  return kInvalidIndex;
 }
 #endif
 
@@ -292,55 +361,12 @@ static int32_t ResolveBoardI2cIrq(I2C_Type* i2c)
   }
 #endif
 #endif
-#if defined(HPM_I2C0) && defined(IRQn_I2C0)
-  if (i2c == HPM_I2C0)
+  const I2cPlatformResource* resource = FindI2cPlatformResource(i2c);
+  if (resource != nullptr)
   {
-    return IRQn_I2C0;
+    return resource->irq;
   }
-#endif
-#if defined(HPM_I2C1) && defined(IRQn_I2C1)
-  if (i2c == HPM_I2C1)
-  {
-    return IRQn_I2C1;
-  }
-#endif
-#if defined(HPM_I2C2) && defined(IRQn_I2C2)
-  if (i2c == HPM_I2C2)
-  {
-    return IRQn_I2C2;
-  }
-#endif
-#if defined(HPM_I2C3) && defined(IRQn_I2C3)
-  if (i2c == HPM_I2C3)
-  {
-    return IRQn_I2C3;
-  }
-#endif
-#if defined(HPM_I2C4) && defined(IRQn_I2C4)
-  if (i2c == HPM_I2C4)
-  {
-    return IRQn_I2C4;
-  }
-#endif
-#if defined(HPM_I2C5) && defined(IRQn_I2C5)
-  if (i2c == HPM_I2C5)
-  {
-    return IRQn_I2C5;
-  }
-#endif
-#if defined(HPM_I2C6) && defined(IRQn_I2C6)
-  if (i2c == HPM_I2C6)
-  {
-    return IRQn_I2C6;
-  }
-#endif
-#if defined(HPM_I2C7) && defined(IRQn_I2C7)
-  if (i2c == HPM_I2C7)
-  {
-    return IRQn_I2C7;
-  }
-#endif
-  return -1;
+  return kInvalidIrq;
 }
 #endif
 
@@ -434,14 +460,26 @@ void I2cWaitRelax()
   __asm volatile("nop");
 }
 
+uint32_t GetI2cWaitTicksPerUs()
+{
+  static uint32_t ticks_per_us = 0U;
+  if (ticks_per_us == 0U)
+  {
+    ticks_per_us = clock_get_core_clock_ticks_per_us();
+  }
+  return ticks_per_us;
+}
+
+uint64_t GetI2cWaitCycle() { return hpm_csr_get_core_cycle(); }
+
 template <typename Predicate>
 bool WaitUntil(const Predicate& predicate, uint64_t timeout_us)
 {
-  const uint32_t ticks_per_us = clock_get_core_clock_ticks_per_us();
-  const uint64_t deadline = hpm_csr_get_core_cycle() + (ticks_per_us * timeout_us);
+  const uint32_t ticks_per_us = GetI2cWaitTicksPerUs();
+  const uint64_t deadline = GetI2cWaitCycle() + (ticks_per_us * timeout_us);
   while (!predicate())
   {
-    if (hpm_csr_get_core_cycle() > deadline)
+    if (GetI2cWaitCycle() > deadline)
     {
       return false;
     }
@@ -1898,6 +1936,11 @@ ErrorCode HPMI2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op
   }
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+
   if (op.type != ReadOperation::OperationType::BLOCK)
   {
     const ErrorCode ans = StartReadAsync(slave_addr, read_data, op);
@@ -1929,6 +1972,13 @@ ErrorCode HPMI2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op
 ErrorCode HPMI2C::DoSequenceWrite(uint16_t slave_addr, ConstRawData write_data,
                                   SequenceFrame frame, bool check_ack)
 {
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return ErrorCode::BUSY;
+  }
+#endif
+
   ErrorCode ans = EnsureControllerReady();
   if (ans != ErrorCode::OK)
   {
@@ -1982,6 +2032,13 @@ ErrorCode HPMI2C::DoSequenceWrite(uint16_t slave_addr, ConstRawData write_data,
 ErrorCode HPMI2C::DoSequenceRead(uint16_t slave_addr, RawData read_data,
                                  SequenceFrame frame)
 {
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return ErrorCode::BUSY;
+  }
+#endif
+
   ErrorCode ans = EnsureControllerReady();
   if (ans != ErrorCode::OK)
   {
@@ -2024,6 +2081,13 @@ ErrorCode HPMI2C::DoSequenceRead(uint16_t slave_addr, RawData read_data,
 
 ErrorCode HPMI2C::DoTransferWithFlags(uint16_t slave_addr, RawData data, uint16_t flags)
 {
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return ErrorCode::BUSY;
+  }
+#endif
+
   ErrorCode ans = EnsureControllerReady();
   if (ans != ErrorCode::OK)
   {
@@ -2043,6 +2107,13 @@ ErrorCode HPMI2C::DoTransferWithFlags(uint16_t slave_addr, RawData data, uint16_
 hpm_stat_t HPMI2C::DoManualTransferWithFlags(uint16_t slave_addr, RawData data,
                                              uint16_t flags)
 {
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return status_i2c_bus_busy;
+  }
+#endif
+
   return DoManualTransferWithFlagsImpl(i2c_, slave_addr, data, flags);
 }
 
@@ -2069,6 +2140,12 @@ ErrorCode HPMI2C::SequenceWrite(uint16_t slave_addr, ConstRawData write_data,
   {
     return FinishOperation(op, in_isr, addr_ans);
   }
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+#endif
   return FinishOperation(op, in_isr,
                          DoSequenceWrite(slave_addr, write_data, frame, check_ack));
 }
@@ -2095,6 +2172,12 @@ ErrorCode HPMI2C::SequenceRead(uint16_t slave_addr, RawData read_data,
   {
     return FinishOperation(op, in_isr, addr_ans);
   }
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+#endif
   return FinishOperation(op, in_isr, DoSequenceRead(slave_addr, read_data, frame));
 }
 
@@ -2118,6 +2201,12 @@ ErrorCode HPMI2C::TransferWithFlags(uint16_t slave_addr, RawData data, uint16_t 
   {
     return FinishOperation(op, in_isr, addr_ans);
   }
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+#endif
   return FinishOperation(op, in_isr, DoTransferWithFlags(slave_addr, data, flags));
 }
 
@@ -2141,6 +2230,12 @@ ErrorCode HPMI2C::TransferWithFlags(uint16_t slave_addr, ConstRawData data,
   {
     return FinishOperation(op, in_isr, addr_ans);
   }
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+#endif
   return FinishOperation(
       op, in_isr,
       DoTransferWithFlags(slave_addr, RawData(const_cast<void*>(data.addr_), data.size_),
@@ -2169,6 +2264,11 @@ ErrorCode HPMI2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOpera
   }
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+
   if (op.type != WriteOperation::OperationType::BLOCK)
   {
     const ErrorCode ans = StartWriteAsync(slave_addr, write_data, op);
@@ -2220,6 +2320,11 @@ ErrorCode HPMI2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_d
   }
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+
   if (op.type != ReadOperation::OperationType::BLOCK)
   {
     const ErrorCode ans =
@@ -2299,6 +2404,13 @@ ErrorCode HPMI2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   {
     return FinishOperation(op, in_isr, addr_ans);
   }
+
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+#endif
 
   ans = EnsureControllerReady();
   if (ans != ErrorCode::OK)

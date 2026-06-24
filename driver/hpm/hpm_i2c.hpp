@@ -88,24 +88,39 @@ namespace LibXR
  * driver still verifies I2C `CMPL` and post-transfer status before reporting the
  * final result through UpdateStatus() or AsyncBlockWait.
  *
+ * 当 DMA 后台事务正在进行时，同步 Read / Write / MemRead / MemWrite、顺序
+ * SequenceRead / SequenceWrite 以及扩展 flags 手动 phase 入口会返回 `BUSY`；
+ * 低层手动 helper 在清 FIFO、改 CTRL/INTEN 或发 START 前返回 HPM SDK 的
+ * `status_i2c_bus_busy`，再由 ConvertStatus() 映射到 LibXR 错误码。
+ * While a DMA-backed transfer is active, synchronous Read / Write / MemRead /
+ * MemWrite, sequential SequenceRead / SequenceWrite, and extended-flag manual
+ * phase entry points return `BUSY`. The low-level manual helper returns the HPM SDK
+ * `status_i2c_bus_busy` before clearing FIFO, changing CTRL/INTEN, or issuing START,
+ * and ConvertStatus() maps that status to the LibXR error code.
+ *
  * 忙等路径统一经实现文件内部的 `WaitUntil()` 处理；工程可提供强定义
  * `extern "C" void libxr_hpm_i2c_wait_relax_hook(void)`，在等待 `ADDRHIT`、`CMPL`
  * 或 FIFO 状态时插入调度让出、低功耗等待或板级短延时。默认实现仅执行一个 `nop`，
- * 不改变无 RTOS 裸机场景的时序假设。
+ * 不改变无 RTOS 裸机场景的时序假设。`WaitUntil()` 缓存首次读取的
+ * `clock_get_core_clock_ticks_per_us()` 结果，假设 I2C 事务期间 core clock 不被动态
+ * 改频。
  * Busy-wait paths are centralized through the implementation-local `WaitUntil()`.
  * A project may provide a strong
  * `extern "C" void libxr_hpm_i2c_wait_relax_hook(void)` definition to yield to a
  * scheduler, enter a low-power wait, or add a board-level short delay while waiting
  * for `ADDRHIT`, `CMPL`, or FIFO status. The default fallback only executes one
  * `nop`, preserving bare-metal timing assumptions when no hook is supplied.
+ * `WaitUntil()` caches the first `clock_get_core_clock_ticks_per_us()` result and
+ * assumes the core clock is not dynamically retuned during I2C transactions.
  *
  * 默认 ISR wrapper 按 `HPM_I2Cn`、`IRQn_I2Cn` 和 `HPM_DMA_SRC_I2Cn` 等 HPM SDK
- * header 宏适配多系列实例；若项目层后续要自行接管同一 IRQ，需要单独调整 ownership
- * 方案。
+ * header 宏构建同一个实例资源表，并由该表解析 index、IRQ 和 DMA request source；
+ * 若项目层后续要自行接管同一 IRQ，需要单独调整 ownership 方案。
  * The default ISR wrapper adapts to multi-series instances through HPM SDK header
- * macros such as `HPM_I2Cn`, `IRQn_I2Cn`, and `HPM_DMA_SRC_I2Cn`. If project code
- * needs to own the same IRQ later, the ownership scheme should be revised in a
- * separate change.
+ * macros such as `HPM_I2Cn`, `IRQn_I2Cn`, and `HPM_DMA_SRC_I2Cn`, building one
+ * instance resource table that resolves index, IRQ, and DMA request source. If
+ * project code needs to own the same IRQ later, the ownership scheme should be
+ * revised in a separate change.
  *
  * 编译期支持由 `HPMSOC_HAS_HPMSDK_I2C` 和 `__has_include("hpm_i2c_drv.h")`
  * 同时 gate；缺少能力宏或裁剪 SDK 头时仍保留 LibXR API 形状，但所有事务返回
