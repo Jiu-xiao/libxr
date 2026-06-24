@@ -1,5 +1,7 @@
 #include "hpm_i2c.hpp"
 
+#include <cstdint>
+
 using namespace LibXR;
 
 namespace
@@ -139,6 +141,14 @@ constexpr I2cWaitPolicy kDefaultWaitPolicy{
 // DMA manager and IRQ platform glue. Kept in this file to avoid changing build
 // integration while making the backend boundaries explicit.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
+static_assert(sizeof(uintptr_t) <= sizeof(uint32_t),
+              "HPM I2C DMA helper assumes a 32-bit address space.");
+
+uint32_t ToHpmI2cDmaAddress(const volatile void* addr)
+{
+  return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addr));
+}
+
 #if defined(HPM_I2C7)
 constexpr size_t kHpmI2cInstanceCount = 8U;
 #elif defined(HPM_I2C6)
@@ -347,7 +357,7 @@ static bool ResolveDCacheRange(const void* addr, uint32_t size, uint32_t& start,
   }
 
   const uint32_t line_size = HPM_L1C_CACHELINE_SIZE;
-  const uint32_t address = reinterpret_cast<uint32_t>(addr);
+  const uint32_t address = ToHpmI2cDmaAddress(addr);
   const uint32_t end = address + size;
   start = address - (address % line_size);
   const uint32_t aligned_end = ((end + line_size - 1U) / line_size) * line_size;
@@ -965,7 +975,7 @@ void HPMI2C::TryRecoverBusLines()
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
 uint32_t HPMI2C::ToSystemAddress(const void* addr)
 {
-  return core_local_mem_to_sys_address(HPM_CORE0, reinterpret_cast<uint32_t>(addr));
+  return core_local_mem_to_sys_address(HPM_CORE0, ToHpmI2cDmaAddress(addr));
 }
 
 ErrorCode HPMI2C::PrepareAsyncTransfer(uint16_t slave_addr, uint16_t flags, uint32_t size,
@@ -1089,8 +1099,8 @@ ErrorCode HPMI2C::StartAsyncReadDma(void* dst, uint32_t size)
   {
     return ConvertDmaStatus(status);
   }
-  status = dma_mgr_set_chn_src_addr(&async_dma_resource_,
-                                    reinterpret_cast<uint32_t>(&i2c_->DATA));
+  status =
+      dma_mgr_set_chn_src_addr(&async_dma_resource_, ToHpmI2cDmaAddress(&i2c_->DATA));
   if (status != status_success)
   {
     return ConvertDmaStatus(status);
@@ -1166,8 +1176,8 @@ ErrorCode HPMI2C::StartAsyncWriteDma(const void* src, uint32_t size)
   {
     return ConvertDmaStatus(status);
   }
-  status = dma_mgr_set_chn_dst_addr(&async_dma_resource_,
-                                    reinterpret_cast<uint32_t>(&i2c_->DATA));
+  status =
+      dma_mgr_set_chn_dst_addr(&async_dma_resource_, ToHpmI2cDmaAddress(&i2c_->DATA));
   if (status != status_success)
   {
     return ConvertDmaStatus(status);
@@ -2013,6 +2023,8 @@ ErrorCode HPMI2C::SequenceWrite(uint16_t slave_addr, ConstRawData write_data,
 {
   if (write_data.size_ == 0)
   {
+    // 顺序接口表示真实总线分段，零长度分段无法推进 START/NEXT/LAST 状态。
+    // Sequence APIs model real bus frames; a zero-length frame is rejected.
     return FinishOperation(op, in_isr, ErrorCode::ARG_ERR);
   }
   if (write_data.addr_ == nullptr)
@@ -2037,6 +2049,8 @@ ErrorCode HPMI2C::SequenceRead(uint16_t slave_addr, RawData read_data,
 {
   if (read_data.size_ == 0)
   {
+    // 顺序接口表示真实总线分段，零长度分段无法推进 START/NEXT/LAST 状态。
+    // Sequence APIs model real bus frames; a zero-length frame is rejected.
     return FinishOperation(op, in_isr, ErrorCode::ARG_ERR);
   }
   if (read_data.addr_ == nullptr)
@@ -2268,11 +2282,25 @@ ErrorCode HPMI2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
   if (address_mode_ == AddressMode::ADDR_10BIT)
   {
-    ans = DoSequenceWrite(slave_addr, ConstRawData(addr, addr_size), SequenceFrame::FIRST,
-                          true);
-    if (ans == ErrorCode::OK && write_data.size_ > 0)
+    if (write_data.size_ == 0)
     {
-      ans = DoSequenceWrite(slave_addr, write_data, SequenceFrame::LAST, true);
+      hpm_stat_t status =
+          DoManualTransferWithFlags(slave_addr, RawData(addr, addr_size),
+                                    kI2CFlagAddr10Bit | kI2CFlagWriteCheckAck);
+      ans = ConvertStatus(status);
+      if (ShouldRecover(status))
+      {
+        RecoverController();
+      }
+    }
+    else
+    {
+      ans = DoSequenceWrite(slave_addr, ConstRawData(addr, addr_size),
+                            SequenceFrame::FIRST, true);
+      if (ans == ErrorCode::OK)
+      {
+        ans = DoSequenceWrite(slave_addr, write_data, SequenceFrame::LAST, true);
+      }
     }
   }
   else
