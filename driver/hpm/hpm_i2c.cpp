@@ -266,8 +266,7 @@ static bool ResolveDCacheRange(const void* addr, uint32_t size, uint32_t& start,
   const uint32_t address = reinterpret_cast<uint32_t>(addr);
   const uint32_t end = address + size;
   start = address - (address % line_size);
-  const uint32_t aligned_end =
-      ((end + line_size - 1U) / line_size) * line_size;
+  const uint32_t aligned_end = ((end + line_size - 1U) / line_size) * line_size;
   aligned_size = aligned_end - start;
   return aligned_size > 0U;
 }
@@ -331,9 +330,9 @@ bool WaitUntil(const Predicate& predicate, uint64_t timeout_us)
 bool WaitForBusIdle(I2C_Type* i2c,
                     uint64_t timeout_us = kDefaultWaitPolicy.bus_idle_timeout_us)
 {
-  return WaitUntil(
-      [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_BUSBUSY_MASK) == 0U; },
-      timeout_us);
+  return WaitUntil([i2c]()
+                   { return (i2c_get_status(i2c) & I2C_STATUS_BUSBUSY_MASK) == 0U; },
+                   timeout_us);
 }
 
 void IssueStopAndWait(I2C_Type* i2c)
@@ -347,7 +346,8 @@ void IssueStopAndWait(I2C_Type* i2c)
   i2c->CTRL = I2C_CTRL_PHASE_STOP_MASK;
   i2c_master_issue_data_transmission(i2c);
   (void)WaitUntil(
-      [i2c]() {
+      [i2c]()
+      {
         const uint32_t status = i2c_get_status(i2c);
         return ((status & I2C_STATUS_CMPL_MASK) != 0U) ||
                ((status & I2C_STATUS_BUSBUSY_MASK) == 0U);
@@ -988,9 +988,7 @@ ErrorCode HPMI2C::PrepareAsyncTransfer(uint16_t slave_addr, uint16_t flags, uint
   if ((final_flags & I2C_NO_ADDRESS) == 0U)
   {
     const bool addr_hit = WaitUntil(
-        [this]() {
-          return (i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) != 0U;
-        },
+        [this]() { return (i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) != 0U; },
         kDefaultWaitPolicy.addr_hit_timeout_us);
     if (!addr_hit)
     {
@@ -1346,8 +1344,8 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
     return ans;
   }
 
-  hpm_stat_t start_status = i2c_master_start_dma_read(
-      i2c_, slave_addr, static_cast<uint32_t>(read_data.size_));
+  hpm_stat_t start_status =
+      i2c_master_start_dma_read(i2c_, slave_addr, static_cast<uint32_t>(read_data.size_));
   ans = ConvertStatus(start_status);
   if (ans != ErrorCode::OK)
   {
@@ -1424,9 +1422,9 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
     i2c_write_byte(i2c_, async_ctx_.mem_addr_bytes[i]);
   }
 
-  const bool mem_addr_complete = WaitUntil(
-      [this]() { return (i2c_get_status(i2c_) & I2C_STATUS_CMPL_MASK) != 0U; },
-      kDefaultWaitPolicy.transfer_timeout_us);
+  const bool mem_addr_complete =
+      WaitUntil([this]() { return (i2c_get_status(i2c_) & I2C_STATUS_CMPL_MASK) != 0U; },
+                kDefaultWaitPolicy.transfer_timeout_us);
   if (!mem_addr_complete)
   {
     async_ctx_.should_recover = true;

@@ -786,7 +786,7 @@ class HPMI2C final : public I2C
       100000};  ///< 最近一次成功总线时序配置 / Most recent successful bus-timing config.
   AddressMode address_mode_ =
       AddressMode::ADDR_7BIT;  ///< 当前主机寻址模式 / Current master addressing mode.
-  bool configured_ = false;  ///< 是否已有成功配置 / Whether a valid config was applied.
+  bool configured_ = false;    ///< 是否已有成功配置 / Whether a valid config was applied.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
   std::atomic<uint32_t> async_busy_{
       0U};  ///< 后台事务活动标志 / Asynchronous transfer active flag.
