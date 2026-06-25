@@ -73,6 +73,25 @@ void HPMI2C::FillMemAddress(uint16_t mem_addr, MemAddrLength len, uint8_t out[2]
   FillHpmI2cMemAddress(mem_addr, len, out);
 }
 
+ErrorCode HPMI2C::SetWaitPolicy(WaitPolicy policy)
+{
+  if (policy.addr_hit_timeout_us == 0U || policy.stop_timeout_us == 0U ||
+      policy.bus_idle_timeout_us == 0U || policy.transfer_timeout_us == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return ErrorCode::BUSY;
+  }
+#endif
+
+  wait_policy_ = policy;
+  return ErrorCode::OK;
+}
+
 #if LIBXR_HPM_I2C_SUPPORTED
 
 #if __has_include("board.h")
@@ -126,21 +145,6 @@ constexpr uint16_t kI2CFlagNoStart = I2C_NO_START;
 constexpr uint16_t kI2CFlagNoAddress = I2C_NO_ADDRESS;
 constexpr uint16_t kI2CFlagNoStop = I2C_NO_STOP;
 constexpr uint16_t kI2CFlagWriteCheckAck = I2C_WRITE_CHECK_ACK;
-
-struct I2cWaitPolicy
-{
-  uint64_t addr_hit_timeout_us;
-  uint64_t stop_timeout_us;
-  uint64_t bus_idle_timeout_us;
-  uint64_t transfer_timeout_us;
-};
-
-constexpr I2cWaitPolicy kDefaultWaitPolicy{
-    500ULL,
-    1000ULL,
-    1000ULL,
-    500000ULL,
-};
 
 // DMA manager state and ISR instance slots stay in this TU to avoid build-system
 // churn; platform resource resolution lives in hpm_i2c_platform.hpp.
@@ -300,15 +304,14 @@ bool WaitUntil(const Predicate& predicate, uint64_t timeout_us)
   return true;
 }
 
-bool WaitForBusIdle(I2C_Type* i2c,
-                    uint64_t timeout_us = kDefaultWaitPolicy.bus_idle_timeout_us)
+bool WaitForBusIdle(I2C_Type* i2c, uint64_t timeout_us)
 {
   return WaitUntil([i2c]()
                    { return (i2c_get_status(i2c) & I2C_STATUS_BUSBUSY_MASK) == 0U; },
                    timeout_us);
 }
 
-void IssueStopAndWait(I2C_Type* i2c)
+void IssueStopAndWait(I2C_Type* i2c, const HPMI2C::WaitPolicy& policy)
 {
   if (i2c == nullptr)
   {
@@ -325,14 +328,14 @@ void IssueStopAndWait(I2C_Type* i2c)
         return ((status & I2C_STATUS_CMPL_MASK) != 0U) ||
                ((status & I2C_STATUS_BUSBUSY_MASK) == 0U);
       },
-      kDefaultWaitPolicy.stop_timeout_us);
+      policy.stop_timeout_us);
   i2c_clear_status(
       i2c, I2C_STATUS_CMPL_MASK | I2C_STATUS_ADDRHIT_MASK | I2C_STATUS_BYTETRANS_MASK);
   i2c_clear_fifo(i2c);
 }
 
 hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, RawData data,
-                                         uint16_t flags)
+                                         uint16_t flags, const HPMI2C::WaitPolicy& policy)
 {
   if (i2c == nullptr || data.addr_ == nullptr || data.size_ == 0U)
   {
@@ -395,7 +398,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
   {
     const bool addr_hit = WaitUntil(
         [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_ADDRHIT_MASK) != 0U; },
-        kDefaultWaitPolicy.addr_hit_timeout_us);
+        policy.addr_hit_timeout_us);
     if (!addr_hit)
     {
       raw_status = status_i2c_no_addr_hit;
@@ -412,7 +415,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
     {
       const bool ready = WaitUntil(
           [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_FIFOEMPTY_MASK) == 0U; },
-          kDefaultWaitPolicy.transfer_timeout_us);
+          policy.transfer_timeout_us);
       if (!ready)
       {
         raw_status = status_timeout;
@@ -442,7 +445,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
 
         const bool ready = WaitUntil(
             [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_BYTETRANS_MASK) != 0U; },
-            kDefaultWaitPolicy.transfer_timeout_us);
+            policy.transfer_timeout_us);
         if (!ready)
         {
           raw_status = status_timeout;
@@ -461,7 +464,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
       {
         const bool ready = WaitUntil(
             [i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_FIFOFULL_MASK) == 0U; },
-            kDefaultWaitPolicy.transfer_timeout_us);
+            policy.transfer_timeout_us);
         if (!ready)
         {
           raw_status = status_timeout;
@@ -478,7 +481,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
   {
     const bool complete =
         WaitUntil([i2c]() { return (i2c_get_status(i2c) & I2C_STATUS_CMPL_MASK) != 0U; },
-                  kDefaultWaitPolicy.transfer_timeout_us);
+                  policy.transfer_timeout_us);
     if (!complete)
     {
       raw_status = status_timeout;
@@ -495,7 +498,7 @@ hpm_stat_t DoManualTransferWithFlagsImpl(I2C_Type* i2c, uint16_t slave_addr, Raw
 
   if (raw_status != status_success)
   {
-    IssueStopAndWait(i2c);
+    IssueStopAndWait(i2c, policy);
     i2c_clear_status(
         i2c, I2C_STATUS_CMPL_MASK | I2C_STATUS_ADDRHIT_MASK | I2C_STATUS_BYTETRANS_MASK);
     i2c_master_disable_data_phase(i2c);
@@ -605,13 +608,13 @@ ErrorCode HPMI2C::SetAddressMode(AddressMode mode)
   DisableAsyncI2cIrq();
   StopAsyncDma();
 #endif
-  IssueStopAndWait(i2c_);
-  (void)WaitForBusIdle(i2c_);
+  IssueStopAndWait(i2c_, wait_policy_);
+  (void)WaitForBusIdle(i2c_, wait_policy_.bus_idle_timeout_us);
 
   const AddressMode previous_mode = address_mode_;
   address_mode_ = mode;
   const ErrorCode ans = ApplyConfig(current_config_);
-  (void)WaitForBusIdle(i2c_);
+  (void)WaitForBusIdle(i2c_, wait_policy_.bus_idle_timeout_us);
   if (ans != ErrorCode::OK)
   {
     address_mode_ = previous_mode;
@@ -803,15 +806,15 @@ void HPMI2C::RecoverController()
     return;
   }
 
-  IssueStopAndWait(i2c_);
-  (void)WaitForBusIdle(i2c_);
+  IssueStopAndWait(i2c_, wait_policy_);
+  (void)WaitForBusIdle(i2c_, wait_policy_.bus_idle_timeout_us);
   TryRecoverBusLines();
   i2c_reset(i2c_);
   if (configured_)
   {
     (void)ApplyConfig(current_config_);
   }
-  (void)WaitForBusIdle(i2c_);
+  (void)WaitForBusIdle(i2c_, wait_policy_.bus_idle_timeout_us);
 }
 
 void HPMI2C::TryRecoverBusLines()
@@ -856,7 +859,7 @@ ErrorCode HPMI2C::PrepareAsyncTransfer(uint16_t slave_addr, uint16_t flags, uint
 
   if (require_bus_idle)
   {
-    if (!WaitForBusIdle(i2c_, kDefaultWaitPolicy.transfer_timeout_us))
+    if (!WaitForBusIdle(i2c_, wait_policy_.transfer_timeout_us))
     {
       return ErrorCode::BUSY;
     }
@@ -923,7 +926,7 @@ ErrorCode HPMI2C::PrepareAsyncTransfer(uint16_t slave_addr, uint16_t flags, uint
   {
     const bool addr_hit = WaitUntil(
         [this]() { return (i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) != 0U; },
-        kDefaultWaitPolicy.addr_hit_timeout_us);
+        wait_policy_.addr_hit_timeout_us);
     if (!addr_hit)
     {
       ReleaseAsyncBus();
@@ -1101,6 +1104,61 @@ void HPMI2C::StopAsyncDma()
   }
 }
 
+void HPMI2C::AsyncCompletionStateMachine::Reset(AsyncTransferContext& ctx)
+{
+  ctx.final_status.store(status_success, std::memory_order_release);
+  ctx.should_recover.store(false, std::memory_order_release);
+  ctx.dma_done.store(false, std::memory_order_release);
+  ctx.cmpl_done.store(false, std::memory_order_release);
+}
+
+void HPMI2C::AsyncCompletionStateMachine::MarkDmaDone(AsyncTransferContext& ctx)
+{
+  ctx.dma_done.store(true, std::memory_order_release);
+}
+
+void HPMI2C::AsyncCompletionStateMachine::MarkI2cDone(AsyncTransferContext& ctx,
+                                                      hpm_stat_t status, bool recover)
+{
+  ctx.cmpl_done.store(true, std::memory_order_release);
+  ctx.final_status.store(status, std::memory_order_release);
+  ctx.should_recover.store(recover, std::memory_order_release);
+}
+
+void HPMI2C::AsyncCompletionStateMachine::MarkFailure(AsyncTransferContext& ctx,
+                                                      hpm_stat_t status, bool recover)
+{
+  ctx.final_status.store(status, std::memory_order_release);
+  ctx.should_recover.store(recover, std::memory_order_release);
+}
+
+void HPMI2C::AsyncCompletionStateMachine::SetFinalStatus(AsyncTransferContext& ctx,
+                                                         hpm_stat_t status)
+{
+  ctx.final_status.store(status, std::memory_order_release);
+}
+
+bool HPMI2C::AsyncCompletionStateMachine::DmaDone(const AsyncTransferContext& ctx)
+{
+  return ctx.dma_done.load(std::memory_order_acquire);
+}
+
+bool HPMI2C::AsyncCompletionStateMachine::Ready(const AsyncTransferContext& ctx)
+{
+  return DmaDone(ctx) && ctx.cmpl_done.load(std::memory_order_acquire);
+}
+
+hpm_stat_t HPMI2C::AsyncCompletionStateMachine::FinalStatus(
+    const AsyncTransferContext& ctx)
+{
+  return ctx.final_status.load(std::memory_order_acquire);
+}
+
+bool HPMI2C::AsyncCompletionStateMachine::ShouldRecover(const AsyncTransferContext& ctx)
+{
+  return ctx.should_recover.load(std::memory_order_acquire);
+}
+
 void HPMI2C::ClearAsyncContext()
 {
   async_ctx_.kind = AsyncTransferKind::NONE;
@@ -1115,10 +1173,7 @@ void HPMI2C::ClearAsyncContext()
   async_ctx_.write_data = {nullptr, 0};
   async_ctx_.read_op = {};
   async_ctx_.write_op = {};
-  async_ctx_.final_status.store(status_success, std::memory_order_release);
-  async_ctx_.should_recover.store(false, std::memory_order_release);
-  async_ctx_.dma_done.store(false, std::memory_order_release);
-  async_ctx_.cmpl_done.store(false, std::memory_order_release);
+  AsyncCompletionStateMachine::Reset(async_ctx_);
 }
 
 void HPMI2C::ResetAsyncState()
@@ -1161,7 +1216,7 @@ void HPMI2C::CompleteAsyncTransfer(bool in_isr, ErrorCode ans)
   StopAsyncDma();
   ReleaseAsyncBus();
 
-  const bool should_recover = async_ctx_.should_recover.load(std::memory_order_acquire);
+  const bool should_recover = AsyncCompletionStateMachine::ShouldRecover(async_ctx_);
   if (ans != ErrorCode::OK && should_recover)
   {
     RecoverController();
@@ -1211,7 +1266,7 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
@@ -1221,7 +1276,7 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   ans = StartAsyncWriteDma(write_data.addr_, static_cast<uint32_t>(write_data.size_));
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
     AbortAsyncStart(false, true, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1232,7 +1287,8 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   ans = ConvertStatus(start_status);
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, start_status,
+                                             ShouldRecover(start_status));
     AbortAsyncStart(true, true, ShouldRecover(start_status));
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1274,7 +1330,7 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
@@ -1284,7 +1340,7 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   ans = StartAsyncReadDma(read_data.addr_, static_cast<uint32_t>(read_data.size_));
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
     AbortAsyncStart(false, true, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1295,7 +1351,8 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   ans = ConvertStatus(start_status);
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, start_status,
+                                             ShouldRecover(start_status));
     AbortAsyncStart(true, true, ShouldRecover(start_status));
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1366,10 +1423,10 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
 
   const bool mem_addr_complete =
       WaitUntil([this]() { return (i2c_get_status(i2c_) & I2C_STATUS_CMPL_MASK) != 0U; },
-                kDefaultWaitPolicy.transfer_timeout_us);
+                wait_policy_.transfer_timeout_us);
   if (!mem_addr_complete)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_timeout, true);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::TIMEOUT;
@@ -1394,7 +1451,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   ans = EnableAsyncI2cIrq();
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
     AbortAsyncStart(false, false, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
@@ -1403,7 +1460,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   ans = StartAsyncReadDma(read_data.addr_, static_cast<uint32_t>(read_data.size_));
   if (ans != ErrorCode::OK)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
     AbortAsyncStart(false, true, false);
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
@@ -1412,10 +1469,10 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   i2c_master_issue_data_transmission(i2c_);
   const bool addr_hit = WaitUntil(
       [this]() { return (i2c_get_status(i2c_) & I2C_STATUS_ADDRHIT_MASK) != 0U; },
-      kDefaultWaitPolicy.addr_hit_timeout_us);
+      wait_policy_.addr_hit_timeout_us);
   if (!addr_hit)
   {
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_i2c_no_addr_hit, true);
     AbortAsyncStart(true, true, true);
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NO_RESPONSE;
@@ -1529,8 +1586,7 @@ ErrorCode HPMI2C::WaitForAsyncBlockResult(uint32_t timeout)
   const ErrorCode ans = block_wait_.Wait(timeout);
   if (ans == ErrorCode::TIMEOUT && AsyncTransferActive())
   {
-    async_ctx_.final_status.store(status_timeout, std::memory_order_release);
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_timeout, true);
     CompleteAsyncTransfer(false, ErrorCode::TIMEOUT);
   }
   return ans;
@@ -1608,9 +1664,7 @@ void HPMI2C::HandleAsyncInterrupt(bool in_isr)
   if ((status & I2C_STATUS_ARBLOSE_MASK) != 0U)
   {
     i2c_clear_status(i2c_, I2C_STATUS_ARBLOSE_MASK);
-    async_ctx_.cmpl_done.store(true, std::memory_order_release);
-    async_ctx_.final_status.store(status_timeout, std::memory_order_release);
-    async_ctx_.should_recover.store(true, std::memory_order_release);
+    AsyncCompletionStateMachine::MarkI2cDone(async_ctx_, status_timeout, true);
     CompleteAsyncTransfer(in_isr, ErrorCode::TIMEOUT);
     return;
   }
@@ -1618,17 +1672,14 @@ void HPMI2C::HandleAsyncInterrupt(bool in_isr)
   if ((status & I2C_STATUS_CMPL_MASK) != 0U)
   {
     i2c_clear_status(i2c_, I2C_STATUS_CMPL_MASK);
-    async_ctx_.cmpl_done.store(true, std::memory_order_release);
-
     if (async_ctx_.kind == AsyncTransferKind::WRITE &&
         (async_ctx_.flags & kI2CFlagWriteCheckAck) != 0U && !I2C_STATUS_ACK_GET(status))
     {
-      async_ctx_.final_status.store(status_i2c_no_ack, std::memory_order_release);
-      async_ctx_.should_recover.store(true, std::memory_order_release);
+      AsyncCompletionStateMachine::MarkI2cDone(async_ctx_, status_i2c_no_ack, true);
     }
     else
     {
-      async_ctx_.final_status.store(status_success, std::memory_order_release);
+      AsyncCompletionStateMachine::MarkI2cDone(async_ctx_, status_success, false);
     }
   }
 
@@ -1637,8 +1688,7 @@ void HPMI2C::HandleAsyncInterrupt(bool in_isr)
 
 void HPMI2C::MaybeCompleteAsyncTransfer(bool in_isr)
 {
-  if (!AsyncTransferActive() || !async_ctx_.dma_done.load(std::memory_order_acquire) ||
-      !async_ctx_.cmpl_done.load(std::memory_order_acquire))
+  if (!AsyncTransferActive() || !AsyncCompletionStateMachine::Ready(async_ctx_))
   {
     return;
   }
@@ -1649,11 +1699,11 @@ void HPMI2C::MaybeCompleteAsyncTransfer(bool in_isr)
     InvalidateDCacheIfNeeded(async_ctx_.read_data.addr_,
                              static_cast<uint32_t>(async_ctx_.read_data.size_));
   }
-  hpm_stat_t final_status = async_ctx_.final_status.load(std::memory_order_acquire);
+  hpm_stat_t final_status = AsyncCompletionStateMachine::FinalStatus(async_ctx_);
   if (final_status == status_success && i2c_get_data_count(i2c_) != 0U)
   {
     final_status = status_i2c_transmit_not_completed;
-    async_ctx_.final_status.store(final_status, std::memory_order_release);
+    AsyncCompletionStateMachine::SetFinalStatus(async_ctx_, final_status);
   }
   CompleteAsyncTransfer(in_isr, ConvertStatus(final_status));
 }
@@ -1675,7 +1725,7 @@ void HPMI2C::OnDmaTcCallback(DMA_Type* base, uint32_t channel, void* cb_data_ptr
     return;
   }
 
-  self->async_ctx_.dma_done.store(true, std::memory_order_release);
+  AsyncCompletionStateMachine::MarkDmaDone(self->async_ctx_);
   self->MaybeCompleteAsyncTransfer(true);
 }
 
@@ -1688,12 +1738,11 @@ void HPMI2C::OnDmaErrorCallback(DMA_Type* base, uint32_t channel, void* cb_data_
   {
     return;
   }
-  if (self->async_ctx_.dma_done.load(std::memory_order_acquire))
+  if (AsyncCompletionStateMachine::DmaDone(self->async_ctx_))
   {
     return;
   }
-  self->async_ctx_.final_status.store(status_fail, std::memory_order_release);
-  self->async_ctx_.should_recover.store(true, std::memory_order_release);
+  AsyncCompletionStateMachine::MarkFailure(self->async_ctx_, status_fail, true);
   self->CompleteAsyncTransfer(true, ErrorCode::FAILED);
 }
 
@@ -1706,15 +1755,71 @@ void HPMI2C::OnDmaAbortCallback(DMA_Type* base, uint32_t channel, void* cb_data_
   {
     return;
   }
-  if (self->async_ctx_.dma_done.load(std::memory_order_acquire))
+  if (AsyncCompletionStateMachine::DmaDone(self->async_ctx_))
   {
     return;
   }
-  self->async_ctx_.final_status.store(status_fail, std::memory_order_release);
-  self->async_ctx_.should_recover.store(true, std::memory_order_release);
+  AsyncCompletionStateMachine::MarkFailure(self->async_ctx_, status_fail, true);
   self->CompleteAsyncTransfer(true, ErrorCode::FAILED);
 }
 #endif
+
+ErrorCode HPMI2C::ValidateTransferArgs(uint16_t slave_addr, RawData data,
+                                       bool allow_zero_size) const
+{
+  if (data.size_ == 0)
+  {
+    return allow_zero_size ? ErrorCode::OK : ErrorCode::ARG_ERR;
+  }
+  if (data.addr_ == nullptr)
+  {
+    return ErrorCode::PTR_NULL;
+  }
+  if (data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
+  {
+    return ErrorCode::SIZE_ERR;
+  }
+  return ValidateSlaveAddress(slave_addr);
+}
+
+ErrorCode HPMI2C::ValidateTransferArgs(uint16_t slave_addr, ConstRawData data,
+                                       bool allow_zero_size) const
+{
+  if (data.size_ == 0)
+  {
+    return allow_zero_size ? ErrorCode::OK : ErrorCode::ARG_ERR;
+  }
+  if (data.addr_ == nullptr)
+  {
+    return ErrorCode::PTR_NULL;
+  }
+  if (data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
+  {
+    return ErrorCode::SIZE_ERR;
+  }
+  return ValidateSlaveAddress(slave_addr);
+}
+
+ErrorCode HPMI2C::ValidateMemWriteArgs(uint16_t slave_addr, ConstRawData write_data,
+                                       MemAddrLength mem_addr_size,
+                                       uint32_t& addr_size) const
+{
+  if (write_data.size_ > 0 && write_data.addr_ == nullptr)
+  {
+    return ErrorCode::PTR_NULL;
+  }
+
+  ErrorCode ans = ResolveMemAddressSize(mem_addr_size, addr_size);
+  if (ans != ErrorCode::OK)
+  {
+    return ans;
+  }
+  if ((addr_size + write_data.size_) > I2C_SOC_TRANSFER_COUNT_MAX)
+  {
+    return ErrorCode::SIZE_ERR;
+  }
+  return ValidateSlaveAddress(slave_addr);
+}
 
 ErrorCode HPMI2C::SetConfig(Configuration config)
 {
@@ -1729,22 +1834,10 @@ ErrorCode HPMI2C::SetConfig(Configuration config)
 ErrorCode HPMI2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
                        bool in_isr)
 {
-  if (read_data.size_ == 0)
+  const ErrorCode arg_ans = ValidateTransferArgs(slave_addr, read_data, true);
+  if (arg_ans != ErrorCode::OK || read_data.size_ == 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OK);
-  }
-  if (read_data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-  if (read_data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
+    return FinishOperation(op, in_isr, arg_ans);
   }
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
@@ -1926,31 +2019,17 @@ hpm_stat_t HPMI2C::DoManualTransferWithFlags(uint16_t slave_addr, RawData data,
   }
 #endif
 
-  return DoManualTransferWithFlagsImpl(i2c_, slave_addr, data, flags);
+  return DoManualTransferWithFlagsImpl(i2c_, slave_addr, data, flags, wait_policy_);
 }
 
 ErrorCode HPMI2C::SequenceWrite(uint16_t slave_addr, ConstRawData write_data,
                                 SequenceFrame frame, bool check_ack, WriteOperation& op,
                                 bool in_isr)
 {
-  if (write_data.size_ == 0)
+  const ErrorCode arg_ans = ValidateTransferArgs(slave_addr, write_data, false);
+  if (arg_ans != ErrorCode::OK)
   {
-    // 顺序接口表示真实总线分段，零长度分段无法推进 START/NEXT/LAST 状态。
-    // Sequence APIs model real bus frames; a zero-length frame is rejected.
-    return FinishOperation(op, in_isr, ErrorCode::ARG_ERR);
-  }
-  if (write_data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-  if (write_data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
+    return FinishOperation(op, in_isr, arg_ans);
   }
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
   if (AsyncTransferActive())
@@ -1965,24 +2044,10 @@ ErrorCode HPMI2C::SequenceWrite(uint16_t slave_addr, ConstRawData write_data,
 ErrorCode HPMI2C::SequenceRead(uint16_t slave_addr, RawData read_data,
                                SequenceFrame frame, ReadOperation& op, bool in_isr)
 {
-  if (read_data.size_ == 0)
+  const ErrorCode arg_ans = ValidateTransferArgs(slave_addr, read_data, false);
+  if (arg_ans != ErrorCode::OK)
   {
-    // 顺序接口表示真实总线分段，零长度分段无法推进 START/NEXT/LAST 状态。
-    // Sequence APIs model real bus frames; a zero-length frame is rejected.
-    return FinishOperation(op, in_isr, ErrorCode::ARG_ERR);
-  }
-  if (read_data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-  if (read_data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
+    return FinishOperation(op, in_isr, arg_ans);
   }
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
   if (AsyncTransferActive())
@@ -1996,22 +2061,10 @@ ErrorCode HPMI2C::SequenceRead(uint16_t slave_addr, RawData read_data,
 ErrorCode HPMI2C::TransferWithFlags(uint16_t slave_addr, RawData data, uint16_t flags,
                                     ReadOperation& op, bool in_isr)
 {
-  if (data.size_ == 0)
+  const ErrorCode arg_ans = ValidateTransferArgs(slave_addr, data, false);
+  if (arg_ans != ErrorCode::OK)
   {
-    return FinishOperation(op, in_isr, ErrorCode::ARG_ERR);
-  }
-  if (data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-  if (data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
+    return FinishOperation(op, in_isr, arg_ans);
   }
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
   if (AsyncTransferActive())
@@ -2025,22 +2078,10 @@ ErrorCode HPMI2C::TransferWithFlags(uint16_t slave_addr, RawData data, uint16_t 
 ErrorCode HPMI2C::TransferWithFlags(uint16_t slave_addr, ConstRawData data,
                                     uint16_t flags, WriteOperation& op, bool in_isr)
 {
-  if (data.size_ == 0)
+  const ErrorCode arg_ans = ValidateTransferArgs(slave_addr, data, false);
+  if (arg_ans != ErrorCode::OK)
   {
-    return FinishOperation(op, in_isr, ErrorCode::ARG_ERR);
-  }
-  if (data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-  if (data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
+    return FinishOperation(op, in_isr, arg_ans);
   }
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
   if (AsyncTransferActive())
@@ -2057,22 +2098,10 @@ ErrorCode HPMI2C::TransferWithFlags(uint16_t slave_addr, ConstRawData data,
 ErrorCode HPMI2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOperation& op,
                         bool in_isr)
 {
-  if (write_data.size_ == 0)
+  const ErrorCode arg_ans = ValidateTransferArgs(slave_addr, write_data, true);
+  if (arg_ans != ErrorCode::OK || write_data.size_ == 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OK);
-  }
-  if (write_data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-  if (write_data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
+    return FinishOperation(op, in_isr, arg_ans);
   }
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
@@ -2113,22 +2142,10 @@ ErrorCode HPMI2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOpera
 ErrorCode HPMI2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
                           ReadOperation& op, MemAddrLength mem_addr_size, bool in_isr)
 {
-  if (read_data.size_ == 0)
+  const ErrorCode arg_ans = ValidateTransferArgs(slave_addr, read_data, true);
+  if (arg_ans != ErrorCode::OK || read_data.size_ == 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OK);
-  }
-  if (read_data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-  if (read_data.size_ > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
+    return FinishOperation(op, in_isr, arg_ans);
   }
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
@@ -2196,25 +2213,11 @@ ErrorCode HPMI2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                            ConstRawData write_data, WriteOperation& op,
                            MemAddrLength mem_addr_size, bool in_isr)
 {
-  if (write_data.size_ > 0 && write_data.addr_ == nullptr)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
-  }
-
   uint32_t addr_size = 0;
-  ErrorCode ans = ResolveMemAddressSize(mem_addr_size, addr_size);
+  ErrorCode ans = ValidateMemWriteArgs(slave_addr, write_data, mem_addr_size, addr_size);
   if (ans != ErrorCode::OK)
   {
     return FinishOperation(op, in_isr, ans);
-  }
-  if ((addr_size + write_data.size_) > I2C_SOC_TRANSFER_COUNT_MAX)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
-  }
-  const ErrorCode addr_ans = ValidateSlaveAddress(slave_addr);
-  if (addr_ans != ErrorCode::OK)
-  {
-    return FinishOperation(op, in_isr, addr_ans);
   }
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR

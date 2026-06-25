@@ -87,6 +87,12 @@ namespace LibXR
  * DMA completion alone is not treated as transfer success. After DMA finishes, the
  * driver still verifies I2C `CMPL` and post-transfer status before reporting the
  * final result through UpdateStatus() or AsyncBlockWait.
+ * 异步完成路径的 `dma_done`、`cmpl_done`、`final_status` 和 `should_recover`
+ * 原子状态由内部 AsyncCompletionStateMachine helper 统一更新，IRQ 和 DMA 回调只声明
+ * 发生的事件。
+ * The asynchronous completion atomics `dma_done`, `cmpl_done`, `final_status`, and
+ * `should_recover` are updated through the internal AsyncCompletionStateMachine
+ * helper, leaving IRQ and DMA callbacks to report events only.
  *
  * 当 DMA 后台事务正在进行时，同步 Read / Write / MemRead / MemWrite、顺序
  * SequenceRead / SequenceWrite 以及扩展 flags 手动 phase 入口会返回 `BUSY`；
@@ -115,6 +121,8 @@ namespace LibXR
  * uses an unsigned elapsed-tick comparison to avoid deadline-addition wrap-around.
  * The HPM SDK `hpm_csr_get_core_cycle()` API returns a 64-bit CYCLE value; the
  * core clock is still assumed not to be dynamically retuned during I2C transfers.
+ * 每个实例可通过 SetWaitPolicy() 调整这些超时值。
+ * Per-instance timeout values can be adjusted with SetWaitPolicy().
  *
  * 默认 ISR wrapper 按 `HPM_I2Cn`、`IRQn_I2Cn` 和 `HPM_DMA_SRC_I2Cn` 等 HPM SDK
  * header 宏构建同一个实例资源表；该表已拆到 `hpm_i2c_platform.hpp` 内部 helper，
@@ -194,6 +202,33 @@ class HPMI2C final : public I2C
   };
 
   /**
+   * @brief HPM I2C 忙等超时策略 / HPM I2C busy-wait timeout policy.
+   *
+   * @details
+   * 单位均为微秒，用于等待地址命中、STOP 完成、总线空闲和单笔传输阶段完成。所有字段
+   * 必须非零；硬件时序仍需按目标板和外设上板确认。
+   * All fields are in microseconds and are used for address-hit, STOP-complete,
+   * bus-idle, and transfer-stage waits. Every field must be nonzero; hardware
+   * timing still needs board/peripheral validation.
+   */
+  struct WaitPolicy
+  {
+    uint64_t addr_hit_timeout_us;
+    uint64_t stop_timeout_us;
+    uint64_t bus_idle_timeout_us;
+    uint64_t transfer_timeout_us;
+  };
+
+  /**
+   * @brief 返回默认 HPM I2C 忙等超时策略 / Return the default HPM I2C wait policy.
+   * @return 默认超时策略 / Default timeout policy.
+   */
+  static constexpr WaitPolicy DefaultWaitPolicy()
+  {
+    return {500ULL, 1000ULL, 1000ULL, 500000ULL};
+  }
+
+  /**
    * @brief 构造 HPM I2C 主机对象 / Construct an HPM I2C master object.
    * @param i2c HPM I2C 外设基地址，不能为空 /
    * HPM I2C peripheral base address. Must not be nullptr.
@@ -234,6 +269,22 @@ class HPMI2C final : public I2C
    * configuration.
    */
   ErrorCode SetAddressMode(AddressMode mode);
+
+  /**
+   * @brief 设置当前实例的忙等超时策略 / Set the busy-wait timeout policy for this
+   * instance.
+   * @param policy 新策略；所有字段必须非零 / New policy. Every field must be nonzero.
+   * @return 成功返回 OK；字段为 0 返回 ARG_ERR；后台 DMA 事务在途时返回 BUSY /
+   * Returns OK on success, ARG_ERR when any field is zero, or BUSY while a DMA-backed
+   * transfer is active.
+   */
+  ErrorCode SetWaitPolicy(WaitPolicy policy);
+
+  /**
+   * @brief 获取当前实例的忙等超时策略 / Get the current busy-wait timeout policy.
+   * @return 当前策略 / Current policy.
+   */
+  WaitPolicy GetWaitPolicy() const { return wait_policy_; }
 
   /**
    * @brief 获取当前 HPM 主机寻址模式 / Get current HPM master addressing mode.
@@ -484,6 +535,28 @@ class HPMI2C final : public I2C
         false};  ///< DMA 回调完成标志 / DMA callback completion flag.
     std::atomic<bool> cmpl_done{false};  ///< I2C IRQ 完成标志 / I2C IRQ completion flag.
   };
+
+  /**
+   * @brief 异步 DMA/I2C 完成状态 helper / Async DMA/I2C completion state helper.
+   *
+   * 该 helper 集中更新 `dma_done`、`cmpl_done`、`final_status` 和 `should_recover`，
+   * 使 DMA 回调、I2C IRQ 和 BLOCK timeout 只表达发生的事件。
+   * This helper centralizes updates to `dma_done`, `cmpl_done`, `final_status`, and
+   * `should_recover`, so DMA callbacks, I2C IRQ handling, and BLOCK timeout paths
+   * only report events.
+   */
+  struct AsyncCompletionStateMachine
+  {
+    static void Reset(AsyncTransferContext& ctx);
+    static void MarkDmaDone(AsyncTransferContext& ctx);
+    static void MarkI2cDone(AsyncTransferContext& ctx, hpm_stat_t status, bool recover);
+    static void MarkFailure(AsyncTransferContext& ctx, hpm_stat_t status, bool recover);
+    static void SetFinalStatus(AsyncTransferContext& ctx, hpm_stat_t status);
+    static bool DmaDone(const AsyncTransferContext& ctx);
+    static bool Ready(const AsyncTransferContext& ctx);
+    static hpm_stat_t FinalStatus(const AsyncTransferContext& ctx);
+    static bool ShouldRecover(const AsyncTransferContext& ctx);
+  };
 #endif
 
   /**
@@ -545,6 +618,25 @@ class HPMI2C final : public I2C
    * Validate slave address for the current addressing mode.
    */
   ErrorCode ValidateSlaveAddress(uint16_t slave_addr) const;
+
+  /**
+   * @brief 校验普通读写事务入口参数 / Validate common read/write entry arguments.
+   */
+  ErrorCode ValidateTransferArgs(uint16_t slave_addr, RawData data,
+                                 bool allow_zero_size) const;
+
+  /**
+   * @brief 校验普通写事务入口参数 / Validate common write entry arguments.
+   */
+  ErrorCode ValidateTransferArgs(uint16_t slave_addr, ConstRawData data,
+                                 bool allow_zero_size) const;
+
+  /**
+   * @brief 校验寄存器写事务入口参数并解析寄存器地址长度 /
+   * Validate memory-write entry arguments and resolve memory-address length.
+   */
+  ErrorCode ValidateMemWriteArgs(uint16_t slave_addr, ConstRawData write_data,
+                                 MemAddrLength mem_addr_size, uint32_t& addr_size) const;
 
   /**
    * @brief 解析寄存器地址宽度枚举到字节数 /
@@ -823,6 +915,8 @@ class HPMI2C final : public I2C
   uint32_t source_clock_hz_ = 0;  ///< 缓存的源时钟频率 / Cached source clock frequency.
   Configuration current_config_{
       100000};  ///< 最近一次成功总线时序配置 / Most recent successful bus-timing config.
+  WaitPolicy wait_policy_ =
+      DefaultWaitPolicy();  ///< 当前忙等超时策略 / Current busy-wait timeout policy.
   AddressMode address_mode_ =
       AddressMode::ADDR_7BIT;  ///< 当前主机寻址模式 / Current master addressing mode.
   bool configured_ = false;    ///< 是否已有成功配置 / Whether a valid config was applied.
