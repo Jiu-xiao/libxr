@@ -81,7 +81,7 @@ class CDCBase : public DeviceClass
                           ///< (required for CDC-ACM)
   };
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief CDC线路编码参数结构体
    *        CDC line coding parameters structure
@@ -115,7 +115,7 @@ class CDCBase : public DeviceClass
     uint16_t wLength;       ///< 数据长度（固定为2）| Data length (fixed to 2)
     uint16_t serialState;   ///< 串行状态位图 / Serial state bitmap
   };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   // 确保 CDCLineCoding 结构体大小为 7 字节。
   // Ensure CDCLineCoding is exactly 7 bytes.
@@ -228,6 +228,7 @@ class CDCBase : public DeviceClass
    */
   void SetOnSetControlLineStateCallback(LibXR::Callback<bool, bool> cb)
   {
+    has_control_line_state_cb_ = !cb.Empty();
     on_set_control_line_state_cb_ = cb;
   }
 
@@ -237,6 +238,7 @@ class CDCBase : public DeviceClass
    */
   void SetOnSetLineCodingCallback(LibXR::Callback<LibXR::UART::Configuration> cb)
   {
+    has_line_coding_cb_ = !cb.Empty();
     on_set_line_coding_cb_ = cb;
   }
 
@@ -532,7 +534,10 @@ class CDCBase : public DeviceClass
         control_line_state_ = wValue;
         result.write_zlp = true;
         SendSerialState();
-        on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
+        if (has_control_line_state_cb_)
+        {
+          on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
+        }
         return ErrorCode::OK;
 
       case ClassRequest::SEND_BREAK:
@@ -587,7 +592,10 @@ class CDCBase : public DeviceClass
             cfg.parity = LibXR::UART::Parity::NO_PARITY;
         }
         cfg.data_bits = line_coding_.bDataBits;
-        on_set_line_coding_cb_.Run(in_isr, cfg);
+        if (has_line_coding_cb_)
+        {
+          on_set_line_coding_cb_.Run(in_isr, cfg);
+        }
       }
         return ErrorCode::OK;
       default:
@@ -595,7 +603,7 @@ class CDCBase : public DeviceClass
     }
   }
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief CDC描述符块结构
    *        CDC descriptor block structure
@@ -651,7 +659,7 @@ class CDCBase : public DeviceClass
     EndpointDescriptor data_ep_out;  ///< 数据OUT端点描述符 / Data OUT endpoint descriptor
     EndpointDescriptor data_ep_in;   ///< 数据IN端点描述符 / Data IN endpoint descriptor
   } desc_block_;
-#pragma pack(pop)
+LIBXR_PACKED_END
 
  protected:
   CDCLineCoding& GetLineCoding() { return line_coding_; }
@@ -699,7 +707,9 @@ class CDCBase : public DeviceClass
 
   // 状态标志。
   // State flags.
-  bool inited_ = false;  ///< 初始化标志 / Initialization flag
+  bool inited_ = false;                 ///< 初始化标志 / Initialization flag
+  bool has_control_line_state_cb_ = false;  ///< Control-line callback registered
+  bool has_line_coding_cb_ = false;         ///< Line-coding callback registered
 
   // 接口信息。
   // Interface metadata.

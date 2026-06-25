@@ -27,4 +27,14 @@ typedef enum : uint8_t
   STM32_USB_DEV_ID_NUM
 } stm32_usb_dev_id_t;
 
+static inline bool STM32USBUsesDma(PCD_HandleTypeDef* hpcd)
+{
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  return hpcd->Init.dma_enable == 1U;
+#else
+  UNUSED(hpcd);
+  return false;
+#endif
+}
+
 #endif

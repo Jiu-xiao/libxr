@@ -1,0 +1,12 @@
+if(NOT TARGET ${PROJECT_NAME})
+  message(FATAL_ERROR "Need LibXR to build.")
+endif()
+
+file(GLOB XR_CORE_SUBDIR_CPP CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_LIST_DIR}/*/*.cpp"
+)
+list(SORT XR_CORE_SUBDIR_CPP)
+
+target_sources(${PROJECT_NAME}
+  PRIVATE ${XR_CORE_SUBDIR_CPP}
+)

@@ -9,58 +9,54 @@ namespace LibXR
  * @brief 时间基类，用于提供高精度时间戳。
  *        Timebase class for providing high-precision timestamps.
  *
- * 该类提供了微秒和毫秒级的时间戳获取接口，并要求派生类实现具体的时间获取方法。
+ * 该类提供了微秒和毫秒级的时间戳获取接口。
  * This class provides interfaces for obtaining timestamps in microseconds and
- * milliseconds, and requires derived classes to implement the actual time retrieval
- * methods.
+ * milliseconds.
  */
 class Timebase
 {
  public:
   /**
-   * @brief 默认构造函数，初始化全局时间基指针。
-   *        Default constructor, initializing the global timebase pointer.
-   *
-   * 该构造函数在实例化对象时，将 `timebase` 指针指向当前对象，
-   * 以便静态方法可以访问具体的时间基实例。
-   * This constructor sets the `timebase` pointer to the current object
-   * when an instance is created, allowing static methods to access the specific timebase
-   * instance.
+   * @brief 默认构造函数。
+   *        Default constructor.
    */
-  Timebase(uint64_t max_valid_us = UINT64_MAX, uint32_t max_valid_ms = UINT32_MAX)
-  {
-    libxr_timebase_max_valid_ms = max_valid_ms;
-    libxr_timebase_max_valid_us = max_valid_us;
-    timebase = this;
-  }
+  Timebase() = default;
+
+  /**
+   * @brief 禁止拷贝构造。
+   *        Copy construction is disabled.
+   */
+  Timebase(const Timebase&) = delete;
+
+  /**
+   * @brief 禁止拷贝赋值。
+   *        Copy assignment is disabled.
+   */
+  Timebase& operator=(const Timebase&) = delete;
 
   /**
    * @brief 获取当前时间的微秒级时间戳。
    *        Gets the current timestamp in microseconds.
    *
-   * 该函数通过静态方法调用 `_get_microseconds()`，
-   * 从 `timebase` 实例中获取当前时间。
-   * This function calls `_get_microseconds()` via a static method
-   * to retrieve the current time from the `timebase` instance.
-   *
    * @return 返回当前的时间戳（单位：微秒）。
    *         Returns the current timestamp (in microseconds).
    */
-  static MicrosecondTimestamp GetMicroseconds() { return timebase->_get_microseconds(); }
+  static MicrosecondTimestamp GetMicroseconds();
 
   /**
    * @brief 获取当前时间的毫秒级时间戳。
    *        Gets the current timestamp in milliseconds.
    *
-   * 该函数通过静态方法调用 `_get_milliseconds()`，
-   * 从 `timebase` 实例中获取当前时间。
-   * This function calls `_get_milliseconds()` via a static method
-   * to retrieve the current time from the `timebase` instance.
-   *
    * @return 返回当前的时间戳（单位：毫秒）。
    *         Returns the current timestamp (in milliseconds).
    */
-  static MillisecondTimestamp GetMilliseconds() { return timebase->_get_milliseconds(); }
+  static MillisecondTimestamp GetMilliseconds();
+
+  /**
+   * @brief 检查时间基是否已经初始化。
+   *        Check whether the active timebase backend is initialized.
+   */
+  [[nodiscard]] static bool IsReady() noexcept { return ready_; }
 
   /**
    * @brief 微秒级延时 / Delay in microseconds
@@ -80,43 +76,51 @@ class Timebase
     }
   }
 
+ protected:
   /**
-   * @brief 纯虚函数，获取当前时间的微秒级时间戳（由派生类实现）。
-   *        Pure virtual function for obtaining the current timestamp in microseconds
-   * (implemented by derived classes).
-   *
-   * 该函数需要在派生类中实现，以提供具体的时间获取机制。
-   * This function must be implemented in derived classes to provide
-   * the actual time retrieval mechanism.
-   *
-   * @return 返回当前的时间戳（单位：微秒）。
-   *         Returns the current timestamp (in microseconds).
+   * @brief 设置时间基就绪状态。
+   *        Set the timebase ready flag.
+   * @param ready 是否就绪。Whether the backend is ready.
    */
-  virtual MicrosecondTimestamp _get_microseconds() = 0;  // NOLINT
+  static void SetReady(bool ready = true) noexcept { ready_ = ready; }
 
   /**
-   * @brief 纯虚函数，获取当前时间的毫秒级时间戳（由派生类实现）。
-   *        Pure virtual function for obtaining the current timestamp in milliseconds
-   * (implemented by derived classes).
-   *
-   * 该函数需要在派生类中实现，以提供具体的时间获取机制。
-   * This function must be implemented in derived classes to provide
-   * the actual time retrieval mechanism.
-   *
-   * @return 返回当前的时间戳（单位：毫秒）。
-   *         Returns the current timestamp (in milliseconds).
+   * @brief 配置时间戳回绕上界。
+   *        Configure the timestamp wraparound limits.
+   * @param max_valid_us 微秒时间戳的有效上界。
+   *                     Maximum valid microsecond timestamp value.
+   * @param max_valid_ms 毫秒时间戳的有效上界。
+   *                     Maximum valid millisecond timestamp value.
    */
-  virtual MillisecondTimestamp _get_milliseconds() = 0;  // NOLINT
+  static void ConfigureWrapRange(uint64_t max_valid_us, uint32_t max_valid_ms) noexcept
+  {
+    Detail::ConfigureTimebaseWrapRange(max_valid_us, max_valid_ms);
+  }
 
   /**
-   * @brief 静态指针，用于存储全局时间基对象。
-   *        Static pointer storing the global timebase instance.
-   *
-   * 该指针指向当前生效的 `Timebase` 实例，所有静态时间函数都通过该指针访问实际实现。
-   * This pointer refers to the currently active `Timebase` instance,
-   * and all static time functions access the actual implementation through this pointer.
+   * @brief 读取当前配置的微秒回绕上界。
+   *        Read the configured microsecond wraparound limit.
    */
-  static inline Timebase* timebase = nullptr;  // NOLINT
+  [[nodiscard]] static uint64_t GetConfiguredWrapRangeUs() noexcept
+  {
+    return Detail::TimebaseMaxValidUs();
+  }
+
+  /**
+   * @brief 读取当前配置的毫秒回绕上界。
+   *        Read the configured millisecond wraparound limit.
+   */
+  [[nodiscard]] static uint32_t GetConfiguredWrapRangeMs() noexcept
+  {
+    return Detail::TimebaseMaxValidMs();
+  }
+
+ private:
+  /**
+   * @brief 时间基是否已完成初始化。
+   *        Whether the timebase backend has been initialized.
+   */
+  static inline bool ready_ = false;
 };
 
 }  // namespace LibXR

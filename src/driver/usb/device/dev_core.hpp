@@ -97,6 +97,14 @@ class DeviceCore
    */
   void OnSetupPacket(bool in_isr, const SetupPacket* setup);
 
+  /**
+   * @brief 查询设备核心是否已经完成初始化 / Query whether the device core is
+   *        initialized
+   * @return true：已初始化；false：未初始化 / true: initialized; false: not
+   *         initialized
+   */
+  [[nodiscard]] bool IsInited() const { return state_.inited; }
+
  protected:
   /**
    * @brief 设置设备地址（由子类实现）

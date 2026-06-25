@@ -140,7 +140,7 @@ enum class TerminationState : uint32_t
 
 // =================== 控制传输结构体（packed 对齐原协议） ===================
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
 
 /**
  * @brief 主机配置（字节序协商） / Host configuration (byte order negotiation)
@@ -266,7 +266,7 @@ struct HostFrame
   uint32_t timestamp_us;  ///< 时间戳（可选） / Timestamp (optional)
 };
 
-#pragma pack(pop)
+LIBXR_PACKED_END
 
 // =================== MODE 标志位（GS_CAN_MODE_*） ===================
 

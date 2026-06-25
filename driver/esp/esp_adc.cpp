@@ -1,7 +1,5 @@
 #include "esp_adc.hpp"
 
-#include <new>
-
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_clk_tree.h"
 #include "esp_private/adc_private.h"
@@ -38,7 +36,7 @@ namespace LibXR
 namespace
 {
 
-constexpr uint32_t kDefaultLineFittingVrefMv = 1100U;
+constexpr uint32_t DEFAULT_LINE_FITTING_VREF_MV = 1100U;
 
 }  // namespace
 
@@ -72,27 +70,15 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
     return;
   }
 
-  channels_ = new (std::nothrow) Channel[num_channels_];
-  channel_ids_ = new (std::nothrow) adc_channel_t[num_channels_];
-  channel_ready_ = new (std::nothrow) bool[num_channels_];
-  latest_values_ = new (std::nothrow) float[num_channels_];
-  latest_raw_ = new (std::nothrow) uint16_t[num_channels_];
-  ASSERT(channels_ != nullptr);
-  ASSERT(channel_ids_ != nullptr);
-  ASSERT(channel_ready_ != nullptr);
-  ASSERT(latest_values_ != nullptr);
-  ASSERT(latest_raw_ != nullptr);
-  if ((channels_ == nullptr) || (channel_ids_ == nullptr) ||
-      (channel_ready_ == nullptr) || (latest_values_ == nullptr) ||
-      (latest_raw_ == nullptr))
-  {
-    ASSERT(false);
-    return;
-  }
+  channels_ = new Channel[num_channels_];
+  channel_ids_ = new adc_channel_t[num_channels_];
+  channel_ready_ = new bool[num_channels_];
+  latest_values_ = new float[num_channels_];
+  latest_raw_ = new uint16_t[num_channels_];
 
   for (uint8_t i = 0; i < SOC_ADC_MAX_CHANNEL_NUM; ++i)
   {
-    channel_idx_map_[i] = kInvalidChannelIdx;
+    channel_idx_map_[i] = INVALID_CHANNEL_IDX;
     cali_handles_[i] = nullptr;
   }
 
@@ -100,8 +86,8 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
   {
     ASSERT(IsValidChannel(channels[i]));
     const uint8_t ch = static_cast<uint8_t>(channels[i]);
-    ASSERT(channel_idx_map_[ch] == kInvalidChannelIdx);
-    if (!IsValidChannel(channels[i]) || (channel_idx_map_[ch] != kInvalidChannelIdx))
+    ASSERT(channel_idx_map_[ch] == INVALID_CHANNEL_IDX);
+    if (!IsValidChannel(channels[i]) || (channel_idx_map_[ch] != INVALID_CHANNEL_IDX))
     {
       return;
     }
@@ -301,7 +287,7 @@ bool ESP32ADC::InitCalibration()
   config.atten = attenuation_;
   config.bitwidth = bitwidth_;
 #if CONFIG_IDF_TARGET_ESP32
-  config.default_vref = kDefaultLineFittingVrefMv;
+  config.default_vref = DEFAULT_LINE_FITTING_VREF_MV;
 #endif
 
   adc_cali_handle_t handle = nullptr;

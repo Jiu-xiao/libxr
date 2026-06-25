@@ -71,7 +71,7 @@ class HIDGamepadT
     BTN8 = 0x80,
   };
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief 输入报告结构（9 字节） / Input report structure (9 bytes)
    * @details 4 个 16 位轴（LOG_MIN..LOG_MAX）+ 8 位按钮 / Four 16-bit axes
@@ -85,7 +85,7 @@ class HIDGamepadT
     int16_t rx;       ///< Rx 轴 / Rx axis (LOG_MIN..LOG_MAX)
     uint8_t buttons;  ///< 按钮位 / Button bits (8)
   };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   static_assert(sizeof(Report) == 9, "Report size must be 9 bytes");
 

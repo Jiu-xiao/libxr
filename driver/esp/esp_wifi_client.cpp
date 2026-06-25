@@ -13,10 +13,10 @@ namespace LibXR
 {
 namespace
 {
-constexpr uint32_t kWifiConnectTimeoutMs = 15000U;
-constexpr uint32_t kWifiDhcpTimeoutMs = 15000U;
-constexpr uint32_t kWifiDisconnectTimeoutMs = 5000U;
-constexpr uint16_t kMaxScanResults = 20U;
+constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000U;
+constexpr uint32_t WIFI_DHCP_TIMEOUT_MS = 15000U;
+constexpr uint32_t WIFI_DISCONNECT_TIMEOUT_MS = 5000U;
+constexpr uint16_t MAX_SCAN_RESULTS = 20U;
 
 template <typename Predicate>
 bool WaitForPredicate(Semaphore& semaphore, uint32_t timeout_ms, Predicate&& predicate)
@@ -201,12 +201,13 @@ WifiClient::WifiError ESP32WifiClient::Connect(const Config& config)
     return WifiError::HARDWARE_FAILURE;
   }
 
-  if (!WaitForPredicate(semaphore_, kWifiConnectTimeoutMs, [&]() { return connected_; }))
+  if (!WaitForPredicate(semaphore_, WIFI_CONNECT_TIMEOUT_MS,
+                        [&]() { return connected_; }))
   {
     return WifiError::CONNECTION_TIMEOUT;
   }
 
-  if (!WaitForPredicate(semaphore_, kWifiDhcpTimeoutMs,
+  if (!WaitForPredicate(semaphore_, WIFI_DHCP_TIMEOUT_MS,
                         [&]() { return got_ip_ || !connected_; }))
   {
     return WifiError::DHCP_FAILED;
@@ -228,7 +229,7 @@ WifiClient::WifiError ESP32WifiClient::Disconnect()
     return WifiError::HARDWARE_FAILURE;
   }
 
-  if (!WaitForPredicate(semaphore_, kWifiDisconnectTimeoutMs,
+  if (!WaitForPredicate(semaphore_, WIFI_DISCONNECT_TIMEOUT_MS,
                         [&]() { return !connected_; }))
   {
     return WifiError::UNKNOWN;
@@ -283,12 +284,12 @@ WifiClient::WifiError ESP32WifiClient::Scan(ScanResult* out_list, size_t max_cou
   {
     copy_count = static_cast<uint16_t>(max_count);
   }
-  if (copy_count > kMaxScanResults)
+  if (copy_count > MAX_SCAN_RESULTS)
   {
-    copy_count = kMaxScanResults;
+    copy_count = MAX_SCAN_RESULTS;
   }
 
-  wifi_ap_record_t ap_records[kMaxScanResults] = {};
+  wifi_ap_record_t ap_records[MAX_SCAN_RESULTS] = {};
   if ((copy_count > 0U) &&
       (esp_wifi_scan_get_ap_records(&copy_count, ap_records) != ESP_OK))
   {

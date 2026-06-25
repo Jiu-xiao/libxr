@@ -8,31 +8,26 @@ on:
 
 jobs:
   build:
+
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/xrobot-org/docker-image-linux:main
 
     steps:
     - uses: actions/checkout@v4
     - name: setup deps
-      run: apt-get update && apt-get install -y libwpa-client-dev libnm-dev libudev-dev
+      run: sudo apt-get update && sudo apt-get install -y libwpa-client-dev libnm-dev libudev-dev
     - name: configure
-      run: cmake -S . -B build -DLIBXR_TEST_BUILD=True
-    - name: build
-      run: cmake --build build
+      run: mkdir build && cd build && cmake -DLIBXR_TEST_BUILD=True ..
+    - name: make
+      run: cd build && cmake --build . -j"$(nproc)"
     - name: check
-      run: ./build/test
+      run: script -q -e -c "./build/test/test" /dev/null
 
   clang-format:
     needs: build
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/xrobot-org/docker-image-linux:main
 
     steps:
     - uses: actions/checkout@v4
-    - name: install format deps
-      run: apt-get update && apt-get install -y python3-venv
     - name: install clang-format 21.1.8
       shell: bash
       run: |
@@ -44,3 +39,21 @@ jobs:
       shell: bash
       run: |
         tools/format_driver_src.sh --check
+
+  cmake-format:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: install cmake-format 0.6.13
+      shell: bash
+      run: |
+        python3 -m venv .venv-cmake-format
+        .venv-cmake-format/bin/python -m pip install --upgrade pip
+        .venv-cmake-format/bin/python -m pip install "cmakelang[YAML]==0.6.13"
+        .venv-cmake-format/bin/cmake-format --version
+    - name: check cmake-format via script
+      shell: bash
+      run: |
+        tools/format_cmake_files.sh --check

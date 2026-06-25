@@ -2,6 +2,9 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+
+#include "libxr_def.hpp"
 
 namespace LibXR
 {
@@ -63,23 +66,7 @@ class CRC8
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC8 值 / Computed CRC8 value
    */
-  static uint8_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint8_t crc = INIT;
-
-    while (len-- > 0)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff];
-    }
-
-    return crc;
-  }
+  static uint8_t Calculate(const void* raw, size_t len);
 
   /**
    * @brief 验证数据的 CRC8 校验码 / Verifies the CRC8 checksum of the given data
@@ -155,21 +142,7 @@ class CRC16
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC16 值 / Computed CRC16 value
    */
-  static uint16_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint16_t crc = INIT;
-    while (len--)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
-    }
-    return crc;
-  }
+  static uint16_t Calculate(const void* raw, size_t len);
 
   /**
    * @brief 验证数据的 CRC16 校验码 / Verifies the CRC16 checksum of the given data
@@ -191,9 +164,11 @@ class CRC16
       return false;
     }
 
+    uint16_t actual = 0;
+    std::memcpy(&actual, buf + len - sizeof(actual), sizeof(actual));
+
     uint16_t expected = Calculate(buf, len - sizeof(uint16_t));
-    return expected == (reinterpret_cast<const uint16_t*>(
-                           buf + (len % 2)))[len / sizeof(uint16_t) - 1];
+    return expected == actual;
   }
 };
 
@@ -248,21 +223,7 @@ class CRC32
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC32 值 / Computed CRC32 value
    */
-  static uint32_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint32_t crc = INIT;
-    while (len--)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
-    }
-    return crc;
-  }
+  static uint32_t Calculate(const void* raw, size_t len);
 
   /**
    * @brief 验证数据的 CRC32 校验码 / Verifies the CRC32 checksum of the given data
@@ -284,9 +245,11 @@ class CRC32
       return false;
     }
 
+    uint32_t actual = 0;
+    std::memcpy(&actual, buf + len - sizeof(actual), sizeof(actual));
+
     uint32_t expected = Calculate(buf, len - sizeof(uint32_t));
-    return expected == (reinterpret_cast<const uint32_t*>(
-                           buf + (len % 4)))[len / sizeof(uint32_t) - 1];
+    return expected == actual;
   }
 };
 
@@ -301,7 +264,8 @@ class CRC32
 class CRC64
 {
  private:
-  static const uint64_t INIT = 0xFFFFFFFFFFFFFFFFULL;  ///< CRC64 初始值 / CRC64 initial value
+  static const uint64_t INIT =
+      0xFFFFFFFFFFFFFFFFULL;  ///< CRC64 初始值 / CRC64 initial value
 
  public:
   static inline uint64_t tab_[256];  ///< CRC64 查找表 / CRC64 lookup table
@@ -341,20 +305,6 @@ class CRC64
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC64 值 / Computed CRC64 value
    */
-  static uint64_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint64_t crc = INIT;
-    while (len--)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8U);
-    }
-    return crc;
-  }
+  static uint64_t Calculate(const void* raw, size_t len);
 };
 }  // namespace LibXR

@@ -17,9 +17,9 @@ namespace LibXR::ESPUSBDetail
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
 extern "C" esp_err_t esp_cache_msync(void* addr, size_t size, int flags);
 
-constexpr int kCacheSyncFlagUnaligned = (1 << 1);
-constexpr int kCacheSyncFlagDirC2M = (1 << 2);
-constexpr int kCacheSyncFlagDirM2C = (1 << 3);
+constexpr int CACHE_SYNC_FLAG_UNALIGNED = (1 << 1);
+constexpr int CACHE_SYNC_FLAG_DIR_C2M = (1 << 2);
+constexpr int CACHE_SYNC_FLAG_DIR_M2C = (1 << 3);
 
 bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem,
                         bool allow_unaligned)
@@ -39,10 +39,10 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem,
     return true;
   }
 
-  int flags = cache_to_mem ? kCacheSyncFlagDirC2M : kCacheSyncFlagDirM2C;
+  int flags = cache_to_mem ? CACHE_SYNC_FLAG_DIR_C2M : CACHE_SYNC_FLAG_DIR_M2C;
   if (allow_unaligned && cache_to_mem)
   {
-    flags |= kCacheSyncFlagUnaligned;
+    flags |= CACHE_SYNC_FLAG_UNALIGNED;
   }
   return esp_cache_msync(const_cast<void*>(addr), size, flags) == ESP_OK;
 }
@@ -63,7 +63,7 @@ esp_dma_mem_info_t UsbDmaMemInfo()
 {
   esp_dma_mem_info_t info = {};
   info.extra_heap_caps = MALLOC_CAP_INTERNAL;
-  info.dma_alignment_bytes = kWordSize;
+  info.dma_alignment_bytes = WORD_SIZE;
   return info;
 }
 
@@ -107,7 +107,7 @@ bool CanUseDirectOutDmaBuffer(const void* ptr, size_t size)
   }
 
   const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-  return ((addr % kUsbDmaAlignment) == 0U) && (AlignUp(size, kUsbDmaAlignment) == size);
+  return ((addr % USB_DMA_ALIGNMENT) == 0U) && (AlignUp(size, USB_DMA_ALIGNMENT) == size);
 }
 
 uint16_t CalcRxFifoWords(uint16_t largest_packet_size, uint8_t ep_count)
@@ -122,14 +122,14 @@ uint16_t CalcConfiguredRxFifoWords(uint16_t largest_packet_size, uint8_t ep_coun
   uint16_t words = CalcRxFifoWords(largest_packet_size, ep_count);
   if (dma_enabled)
   {
-    words = std::max<uint16_t>(words, kEsp32SxFsDmaMinRxFifoWords);
+    words = std::max<uint16_t>(words, ESP32_SX_FS_DMA_MIN_RX_FIFO_WORDS);
   }
   return words;
 }
 
 uint16_t GetHardwareFifoDepthWords()
 {
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(kDwc2FsRegBase);
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(DWC2_FS_REG_BASE);
   return static_cast<uint16_t>(dev->ghwcfg3_reg.dfifodepth);
 }
 
@@ -171,7 +171,7 @@ uint16_t CalcTxFifoWords(uint16_t packet_size, bool dma_enabled)
   uint16_t words = static_cast<uint16_t>((packet_size + 3U) / 4U);
   if (dma_enabled)
   {
-    words = std::max<uint16_t>(words, kEsp32SxFsMinTxFifoWords);
+    words = std::max<uint16_t>(words, ESP32_SX_FS_MIN_TX_FIFO_WORDS);
   }
   return words;
 }
@@ -180,15 +180,15 @@ volatile uint32_t* GetEndpointFifo(usb_dwc_dev_t* dev, uint8_t ep_num)
 {
   uintptr_t base = reinterpret_cast<uintptr_t>(dev);
   return reinterpret_cast<volatile uint32_t*>(
-      base + kFifoBaseOffset + static_cast<uintptr_t>(ep_num) * kFifoStride);
+      base + FIFO_BASE_OFFSET + static_cast<uintptr_t>(ep_num) * FIFO_STRIDE);
 }
 
 void WriteFifoPacket(volatile uint32_t* fifo, const uint8_t* src, size_t size)
 {
-  for (size_t offset = 0; offset < size; offset += kWordSize)
+  for (size_t offset = 0; offset < size; offset += WORD_SIZE)
   {
     uint32_t word = 0U;
-    const size_t chunk = std::min(kWordSize, size - offset);
+    const size_t chunk = std::min(WORD_SIZE, size - offset);
     std::memcpy(&word, src + offset, chunk);
     fifo[0] = word;
   }
@@ -196,10 +196,10 @@ void WriteFifoPacket(volatile uint32_t* fifo, const uint8_t* src, size_t size)
 
 void ReadFifoPacket(const volatile uint32_t* fifo, uint8_t* dst, size_t size)
 {
-  for (size_t offset = 0; offset < size; offset += kWordSize)
+  for (size_t offset = 0; offset < size; offset += WORD_SIZE)
   {
     const uint32_t word = fifo[0];
-    const size_t chunk = std::min(kWordSize, size - offset);
+    const size_t chunk = std::min(WORD_SIZE, size - offset);
     std::memcpy(dst + offset, &word, chunk);
   }
 }

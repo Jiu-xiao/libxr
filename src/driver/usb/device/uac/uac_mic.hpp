@@ -7,6 +7,7 @@
 #include "dev_core.hpp"
 #include "ep.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 
 namespace LibXR::USB
 {
@@ -181,7 +182,7 @@ class UAC1MicrophoneQ : public DeviceClass
     ID_OT_USB = 3
   };
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief AC 头描述符
    *        AC header descriptor
@@ -307,7 +308,7 @@ class UAC1MicrophoneQ : public DeviceClass
     EndpointDescriptorIso9 ep_in;  ///< 标准 IN 端点（9B）/ Std IN EP (9B)
     CSEndpointGeneral ep_cs;       ///< 类特定端点 / CS EP
   };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   // ===== DeviceClass 接口实现 / DeviceClass implementation =====
   /**
@@ -894,7 +895,7 @@ class UAC1MicrophoneQ : public DeviceClass
 
   // PCM 字节队列。
   // PCM byte queue.
-  LibXR::LockFreeQueue<uint8_t> pcm_queue_;
+  LibXR::SPSCQueue<uint8_t> pcm_queue_;
 
   // 端点回调包装。
   // Endpoint callback wrapper.

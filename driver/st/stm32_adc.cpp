@@ -1,6 +1,10 @@
 #include "stm32_adc.hpp"
 
+#include <cstddef>
+#include <limits>
+
 #include "libxr_def.hpp"
+#include "stm32_dcache.hpp"
 
 #ifdef HAL_ADC_MODULE_ENABLED
 
@@ -19,6 +23,21 @@ extern "C" HAL_StatusTypeDef
 }
 #endif
 
+namespace
+{
+
+uint8_t CalculateFilterSize(RawData dma_buff, std::size_t channel_count)
+{
+  ASSERT(channel_count > 0U);
+
+  const std::size_t filter_size = dma_buff.size_ / channel_count / sizeof(uint16_t);
+  ASSERT(filter_size > 0U);
+  ASSERT(filter_size <= std::numeric_limits<uint8_t>::max());
+  return static_cast<uint8_t>(filter_size);
+}
+
+}  // namespace
+
 STM32ADC::Channel::Channel(STM32ADC* adc, uint8_t index, uint32_t ch)
     : adc_(adc), index_(index), ch_(ch)
 {
@@ -30,7 +49,7 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
                    std::initializer_list<uint32_t> channels, float vref)
     : hadc_(hadc),
       NUM_CHANNELS(channels.size()),
-      filter_size_(dma_buff.size_ / NUM_CHANNELS / 2),
+      filter_size_(CalculateFilterSize(dma_buff, channels.size())),
       use_dma_(hadc_->DMA_Handle != nullptr),
       dma_buffer_(dma_buff),
       resolution_(GetADCResolution<ADC_HandleTypeDef>{}.Get(hadc)),
@@ -96,9 +115,7 @@ float STM32ADC::ReadChannel(uint8_t channel)
   uint16_t* buffer = reinterpret_cast<uint16_t*>(dma_buffer_.addr_);
   if (use_dma_)
   {
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    SCB_InvalidateDCache_by_Addr(buffer, filter_size_ * NUM_CHANNELS * 2);
-#endif
+    STM32_InvalidateDCacheByAddr(buffer, filter_size_ * NUM_CHANNELS * 2);
     uint32_t sum = 0;
     for (uint8_t i = 0; i < filter_size_; ++i)
     {

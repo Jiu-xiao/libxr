@@ -1,25 +1,32 @@
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
+#include "libxr_assert.hpp"
 #include "libxr_type.hpp"  // RawData
 
 namespace LibXR
-{ /**
-   * @class DoubleBuffer
-   * @brief 双缓冲区管理类 / Double buffer manager class
-   *
-   * 该类用于在嵌入式场景中管理双缓冲传输结构，支持主动缓冲、备用缓冲切换与填充。
-   * 用于实现无缝 DMA 或 USB 数据流水线发送，提高吞吐效率。
-   * This class provides double-buffer control for efficient pipelined transmission
-   * such as USB or DMA streaming.
-   */
+{
+/**
+ * @class DoubleBuffer
+ * @brief 双缓冲区管理类 / Double buffer manager class
+ *
+ * 该类用于在嵌入式场景中管理双缓冲传输结构，支持主动缓冲、备用缓冲切换与填充。
+ * 用于实现无缝 DMA 或 USB 数据流水线发送，提高吞吐效率。
+ * This class provides double-buffer control for efficient pipelined transmission
+ * such as USB or DMA streaming.
+ */
 class DoubleBuffer
 {
  public:
+  /**
+   * @brief 默认构造一个未初始化的双缓冲对象
+   *        Constructs one uninitialized double buffer object
+   */
+  DoubleBuffer() = default;
+
   /**
    * @brief 构造函数，使用连续内存构造两个缓冲区
    *        Constructs a double buffer using one continuous memory block
@@ -27,6 +34,23 @@ class DoubleBuffer
    * @param raw_data 连续内存区，大小必须为两个缓冲区之和 / The raw memory to be split
    */
   explicit DoubleBuffer(const LibXR::RawData& raw_data);
+
+  /**
+   * @brief 绑定连续 backing storage 并重置双缓冲状态
+   *        Binds continuous backing storage and resets double-buffer state
+   *
+   * @param raw_data 连续内存区，大小必须满足双缓冲对半切分约束；空双缓冲允许
+   *        传入 `nullptr + 0`
+   * @param raw_data Continuous memory block satisfying the half-split contract;
+   *        an empty double buffer may be initialized with `nullptr + 0`
+   */
+  void Init(const LibXR::RawData& raw_data);
+
+  /**
+   * @brief 重置 active/pending 状态，但保留已绑定的 backing storage
+   *        Resets active/pending state while keeping bound backing storage
+   */
+  void Reset();
 
   /**
    * @brief 获取当前正在使用的缓冲区指针
@@ -43,6 +67,15 @@ class DoubleBuffer
    * @return 指向备用缓冲区的指针 / Pointer to the pending buffer
    */
   uint8_t* PendingBuffer() const;
+
+  /**
+   * @brief 获取指定编号缓冲区的指针
+   *        Returns the pointer of the specified block
+   *
+   * @param block 缓冲区编号，只允许 0 或 1 / Buffer block index, only 0 or 1
+   * @return 指向指定缓冲区的指针 / Pointer to the requested buffer block
+   */
+  uint8_t* Buffer(int block) const;
 
   /**
    * @brief 获取每个缓冲区的大小（单位：字节）
@@ -132,6 +165,18 @@ class DoubleBuffer
   void SetActiveLength(size_t length) { active_len_ = length; }
 
   /**
+   * @brief 翻转当前活动缓冲区编号
+   *        Flips the current active block index
+   */
+  void FlipActiveBlock() { active_ ^= 1; }
+
+  /**
+   * @brief 获取当前活动缓冲区编号
+   *        Returns the current active block index
+   */
+  int ActiveBlock() const { return active_; }
+
+  /**
    * @brief 设置当前活动缓冲区
    *        Sets the active buffer
    *
@@ -140,8 +185,8 @@ class DoubleBuffer
   void SetActiveBlock(bool block) { active_ = block ? 1 : 0; }
 
  private:
-  uint8_t* buffer_[2];  ///< 双缓冲区指针 / Double buffer pointers
-  const size_t SIZE;    ///< 单个缓冲区大小 / Size of each buffer
+  uint8_t* buffer_[2] = {nullptr, nullptr};  ///< 双缓冲区指针 / Double buffer pointers
+  size_t size_ = 0;                          ///< 单个缓冲区大小 / Size of each buffer
   int active_ = 0;      ///< 当前活动缓冲区编号 / Index of active buffer
   bool pending_valid_ =
       false;                ///< 标记备用区是否准备好 / Whether pending buffer is ready

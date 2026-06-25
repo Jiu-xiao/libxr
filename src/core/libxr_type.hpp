@@ -2,20 +2,43 @@
 
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <type_traits>
 
 #include "libxr_def.hpp"
 
 namespace LibXR
 {
 
+namespace Detail
+{
 /**
- * @brief 原始数据封装类。
- *        A class for encapsulating raw data.
+ * @brief 仅裁掉数组末尾的一个 `\\0`；其余字节按原始数据保留。
+ * @brief Trim at most one trailing `\\0` from a bounded char array and keep all
+ *        preceding bytes untouched.
+ */
+template <size_t N>
+[[nodiscard]] constexpr size_t TrailingNulTrimmedArraySize(char (&data)[N]) noexcept
+{
+  return (data[N - 1] == '\0') ? (N - 1) : N;
+}
+
+template <size_t N>
+[[nodiscard]] constexpr size_t TrailingNulTrimmedArraySize(
+    const char (&data)[N]) noexcept
+{
+  return (data[N - 1] == '\0') ? (N - 1) : N;
+}
+}  // namespace Detail
+
+/**
+ * @brief 可写原始数据视图 / Mutable raw data view
  *
- * 该类提供了一种通用的数据存储方式，可以存储指针和数据大小，
- * 以支持各种数据类型的传输和存储。
- * This class provides a generic way to store pointers and data sizes
- * to support the transmission and storage of various data types.
+ * @note 该类型不拥有数据，仅保存起始地址和字节数。调用方需要保证被引用对象在视图使用期间
+ *       保持有效且可写。
+ *       / This type does not own the data. It only stores the start address and
+ *       byte count. The caller must keep the referenced object alive and writable
+ *       while the view is in use.
  */
 class RawData
 {
@@ -29,27 +52,23 @@ class RawData
    * @param size 数据的大小（字节）。
    *             The size of the data (in bytes).
    */
-  RawData(void* addr, size_t size);
+  RawData(void* addr, size_t size) : addr_(addr), size_(size) {}
 
   /**
    * @brief 默认构造函数，初始化为空数据。
    *        Default constructor initializing to empty data.
    */
-  RawData();
+  RawData() = default;
 
   /**
-   * @brief 使用任意数据类型构造 `RawData`，数据地址指向该对象，大小为该类型的字节大小。
-   *        Constructs `RawData` using any data type, pointing to the object and
-   *        setting the size to the type's byte size.
-   *
-   * @tparam DataType 数据类型。
-   *                  The data type.
-   * @param data 需要存储的具体数据。
-   *             The actual data to be stored.
+   * @brief 从可写对象构造视图 / Construct a view from a writable object
+   * @tparam DataType 对象类型 / Object type
+   * @param data 被引用对象 / Referenced object
    */
   template <typename DataType>
-  RawData(const DataType& data)
-      : addr_(const_cast<DataType*>(&data)), size_(sizeof(DataType))
+    requires(!std::is_const_v<DataType> &&
+             !std::is_same_v<std::remove_cvref_t<DataType>, RawData>)
+  RawData(DataType& data) : addr_(&data), size_(sizeof(DataType))
   {
   }
 
@@ -70,32 +89,30 @@ class RawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  RawData(char* data);
+  RawData(char* data) : addr_(data), size_(data != nullptr ? std::strlen(data) : 0) {}
 
   /**
-   * @brief 从字符数组构造 `RawData`，数据大小为数组长度减 1（不含 `\0`）。
-   *        Constructs `RawData` from a character array,
-   *        with size set to array length minus 1 (excluding `\0`).
+   * @brief 从可写字符数组构造文本视图 / Construct a text view from a writable char array
+   * @tparam N 数组长度 / Array length
+   * @param data 被引用字符数组 / Referenced char array
    *
-   * @tparam N 数组大小。
-   *           The array size.
-   * @param data 需要存储的字符数组。
-   *             The character array to be stored.
+   * @note 若数组最后一个字符恰为 `\\0`，则仅裁掉这一个尾随终止符；否则保留整个数组长度。
+   *       / If the last array element is `\\0`, only that trailing terminator is
+   *       trimmed; otherwise the full array extent is kept.
    */
   template <size_t N>
-  RawData(const char (&data)[N]) : addr_(reinterpret_cast<void*>(data)), size_(N - 1)
+  RawData(char (&data)[N]) : addr_(data), size_(Detail::TrailingNulTrimmedArraySize(data))
   {
   }
 
   /**
-   * @brief 从 `std::string` 构造 `RawData`，数据地址指向字符串内容，大小为字符串长度。
-   *        Constructs `RawData` from `std::string`,
-   *        with data pointing to the string content and size set to its length.
-   *
-   * @param data `std::string` 类型数据。
-   *             A `std::string` object.
+   * @brief 从可写字符串构造文本视图 / Construct a text view from a writable string
+   * @param data 被引用字符串 / Referenced string
    */
-  explicit RawData(const std::string& data);
+  explicit RawData(std::string& data)
+      : addr_(data.empty() ? nullptr : data.data()), size_(data.size())
+  {
+  }
 
   /**
    * @brief 赋值运算符重载。
@@ -108,18 +125,18 @@ class RawData
    */
   RawData& operator=(const RawData& data) = default;
 
-  void* addr_;   ///< 数据存储地址。 The storage address of the data.
-  size_t size_;  ///< 数据大小（字节）。 The size of the data (in bytes).
+  void* addr_ = nullptr;   ///< 数据起始地址 / Data start address
+  size_t size_ = 0;        ///< 数据字节数 / Data size in bytes
 };
 
 /**
- * @brief 常量原始数据封装类。
- *        A class for encapsulating constant raw data.
+ * @brief 只读原始数据视图 / Immutable raw data view
  *
- * 该类与 `RawData` 类似，但存储的数据地址是 `const` 类型，
- * 以确保数据不可修改。
- * This class is similar to `RawData`, but the stored data address is `const`,
- * ensuring the data remains immutable.
+ * @note 该类型不拥有数据，仅保存起始地址和字节数。调用方需要保证被引用对象在视图使用期间
+ *       保持有效。
+ *       / This type does not own the data. It only stores the start address and
+ *       byte count. The caller must keep the referenced object alive while the
+ *       view is in use.
  */
 class ConstRawData
 {
@@ -133,26 +150,23 @@ class ConstRawData
    * @param size 数据的大小（字节）。
    *             The size of the data (in bytes).
    */
-  ConstRawData(const void* addr, size_t size);
+  ConstRawData(const void* addr, size_t size) : addr_(addr), size_(size) {}
 
   /**
    * @brief 默认构造函数，初始化为空数据。
    *        Default constructor initializing to empty data.
    */
-  ConstRawData();
+  ConstRawData() = default;
 
   /**
-   * @brief 使用任意数据类型构造
-   * `ConstRawData`，数据地址指向该对象，大小为该类型的字节大小。 Constructs
-   * `ConstRawData` using any data type, pointing to the object and setting the size to
-   * the type's byte size.
-   *
-   * @tparam DataType 数据类型。
-   *                  The data type.
-   * @param data 需要存储的具体数据。
-   *             The actual data to be stored.
+   * @brief 从任意对象构造只读视图 / Construct a read-only view from any object
+   * @tparam DataType 对象类型 / Object type
+   * @param data 被引用对象 / Referenced object
    */
   template <typename DataType>
+    requires(!std::is_pointer_v<std::remove_cvref_t<DataType>> &&
+             !std::is_same_v<std::remove_cvref_t<DataType>, ConstRawData> &&
+             !std::is_same_v<std::remove_cvref_t<DataType>, RawData>)
   ConstRawData(const DataType& data)
       : addr_(reinterpret_cast<const DataType*>(&data)), size_(sizeof(DataType))
   {
@@ -175,31 +189,50 @@ class ConstRawData
    * @param data `RawData` 对象。
    *             A `RawData` object.
    */
-  ConstRawData(const RawData& data);
+  ConstRawData(const RawData& data) : addr_(data.addr_), size_(data.size_) {}
 
   /**
-   * @brief 从 `char *` 指针构造 `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
-   *        Constructs `ConstRawData` from a `char *` pointer,
+   * @brief 从 `char*` / `const char*` 文本指针构造 `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
+   *        Constructs `ConstRawData` from a `char*` / `const char*` text pointer,
    *        with size set to the string length (excluding `\0`).
    *
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  ConstRawData(char* data);
+  template <typename CharPtr>
+    requires(std::is_pointer_v<std::remove_reference_t<CharPtr>> &&
+             std::is_same_v<std::remove_cv_t<
+                                std::remove_pointer_t<std::remove_reference_t<CharPtr>>>,
+                            char> &&
+             !std::is_volatile_v<std::remove_pointer_t<std::remove_reference_t<CharPtr>>>)
+  ConstRawData(CharPtr data)
+      : addr_(data),
+        size_(data != nullptr ? std::strlen(static_cast<const char*>(data)) : 0)
+  {
+  }
 
   /**
-   * @brief 从 `char *` 指针构造 `ConstRawData`（常量版本）。
-   *        Constructs `ConstRawData` from a `const char *` pointer.
-   *
-   * @param data C 风格字符串指针。
-   *             A C-style string pointer.
+   * @brief 从只读字符串构造文本视图 / Construct a text view from a read-only string
+   * @param data 被引用字符串 / Referenced string
    */
-  ConstRawData(const char* data);
+  explicit ConstRawData(const std::string& data)
+      : addr_(data.empty() ? nullptr : data.data()), size_(data.size())
+  {
+  }
 
   /**
-   * @brief 从字符数组构造 `ConstRawData`，数据大小为数组长度减 1（不含 `\0`）。
-   *        Constructs `ConstRawData` from a character array,
-   *        with size set to array length minus 1 (excluding `\0`).
+   * @brief 从字符串视图构造文本视图 / Construct a text view from a string view
+   * @param data 被引用字符串视图 / Referenced string view
+   */
+  explicit ConstRawData(std::string_view data)
+      : addr_(data.empty() ? nullptr : data.data()), size_(data.size())
+  {
+  }
+
+  /**
+   * @brief 从字符数组构造 `ConstRawData`；若最后一个字符是 `\\0`，仅忽略这一尾随终止符。
+   * @brief Constructs `ConstRawData` from a character array; if the last element
+   *        is `\\0`, only that trailing terminator is ignored.
    *
    * @tparam N 数组大小。
    *           The array size.
@@ -207,8 +240,16 @@ class ConstRawData
    *             The character array to be stored.
    */
   template <size_t N>
+  ConstRawData(char (&data)[N])
+      : addr_(reinterpret_cast<const void*>(data)),
+        size_(Detail::TrailingNulTrimmedArraySize(data))
+  {
+  }
+
+  template <size_t N>
   ConstRawData(const char (&data)[N])
-      : addr_(reinterpret_cast<const void*>(data)), size_(N - 1)
+      : addr_(reinterpret_cast<const void*>(data)),
+        size_(Detail::TrailingNulTrimmedArraySize(data))
   {
   }
 
@@ -223,22 +264,20 @@ class ConstRawData
    */
   ConstRawData& operator=(const ConstRawData& data) = default;
 
-  const void*
-      addr_;     ///< 数据存储地址（常量）。 The storage address of the data (constant).
-  size_t size_;  ///< 数据大小（字节）。 The size of the data (in bytes).
+  const void* addr_ = nullptr;  ///< 数据起始地址 / Data start address
+  size_t size_ = 0;             ///< 数据字节数 / Data size in bytes
 };
 
 /**
- * @brief 类型标识符生成器，替代 typeid
- * @brief Type identifier generator (RTTI-free)
+ * @brief 类型标识符生成器 / RTTI-free type identifier generator
  */
 class TypeID
 {
  public:
   using ID = const void*;
+
   /**
-   * @brief 获取类型的唯一标识符
-   * @brief Get unique identifier for type T
+   * @brief 获取类型的唯一标识符 / Get a unique identifier for type `T`
    * @tparam T 目标类型 / Target type
    * @return 类型唯一标识符指针 / Unique type identifier pointer
    */

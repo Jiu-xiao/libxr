@@ -9,6 +9,7 @@
 #include "dev_core.hpp"
 #include "gpio.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"
@@ -369,8 +370,6 @@ class DapLinkV2Class : public DeviceClass
 
   void InitWinUsbDescriptors()
   {
-    static constexpr uint8_t kConfigurationValue = 1u;
-
     winusb_msos20_.set.wLength = static_cast<uint16_t>(sizeof(winusb_msos20_.set));
     winusb_msos20_.set.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SET_HEADER_DESCRIPTOR;
@@ -381,7 +380,8 @@ class DapLinkV2Class : public DeviceClass
     winusb_msos20_.cfg.wDescriptorType =
         LibXR::USB::WinUsbMsOs20::MS_OS_20_SUBSET_HEADER_CONFIGURATION;
 
-    winusb_msos20_.cfg.bConfigurationValue = kConfigurationValue;
+    // MS OS 2.0 configuration subset uses a zero-based configuration index.
+    winusb_msos20_.cfg.bConfigurationValue = 0u;
     winusb_msos20_.cfg.bReserved = 0;
     winusb_msos20_.cfg.wTotalLength = static_cast<uint16_t>(
         sizeof(winusb_msos20_) - offsetof(WinUsbMsOs20DescSet, cfg));
@@ -2969,7 +2969,7 @@ class DapLinkV2Class : public DeviceClass
   uint8_t in_tx_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
   LibXR::RawData in_tx_multi_buf_{in_tx_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief MS OS 2.0 描述符集合布局 / MS OS 2.0 descriptor set layout
    */
@@ -2998,7 +2998,7 @@ class DapLinkV2Class : public DeviceClass
           data[GUID_MULTI_SZ_UTF_16_BYTES];  ///< REG_MULTI_SZ 数据 / REG_MULTI_SZ data
     } prop;
   } winusb_msos20_{};
-#pragma pack(pop)
+LIBXR_PACKED_END
 
  private:
   SwdPort& swd_;  ///< SWD 链路 / SWD link
@@ -3028,7 +3028,7 @@ class DapLinkV2Class : public DeviceClass
   bool inited_ = false;        ///< Initialized flag
   uint8_t interface_num_ = 0;  ///< Interface number
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief Descriptor block (Interface + 2x Endpoint)
    *
@@ -3039,7 +3039,7 @@ class DapLinkV2Class : public DeviceClass
     EndpointDescriptor ep_out;  ///< OUT endpoint descriptor / OUT endpoint descriptor
     EndpointDescriptor ep_in;   ///< IN endpoint descriptor / IN endpoint descriptor
   } desc_block_{};
-#pragma pack(pop)
+LIBXR_PACKED_END
 
  private:
   LibXR::USB::WinUsbMsOs20::MsOs20BosCapability winusb_msos20_cap_{

@@ -1,5 +1,4 @@
 #include <array>
-#include <new>
 
 #include "esp_adc.hpp"
 
@@ -89,7 +88,7 @@ void ESP32ADC::DrainContinuousFrames(uint32_t timeout_ms)
       }
 
       const uint8_t sample_idx = channel_idx_map_[sample_channel];
-      if ((sample_idx == kInvalidChannelIdx) || (sample_idx >= num_channels_))
+      if ((sample_idx == INVALID_CHANNEL_IDX) || (sample_idx >= num_channels_))
       {
         continue;
       }
@@ -138,13 +137,8 @@ ESP32ADC::ContinuousInitResult ESP32ADC::InitContinuous(uint32_t freq,
               SOC_ADC_DIGI_DATA_BYTES_PER_CONV);
   const uint32_t parsed_capacity = frame_size / SOC_ADC_DIGI_RESULT_BYTES;
 
-  continuous_read_buf_ = new (std::nothrow) uint8_t[frame_size];
-  continuous_parsed_buf_ = new (std::nothrow) adc_continuous_data_t[parsed_capacity];
-  ASSERT((continuous_read_buf_ != nullptr) && (continuous_parsed_buf_ != nullptr));
-  if ((continuous_read_buf_ == nullptr) || (continuous_parsed_buf_ == nullptr))
-  {
-    return ContinuousInitResult::FAILED;
-  }
+  continuous_read_buf_ = new uint8_t[frame_size];
+  continuous_parsed_buf_ = new adc_continuous_data_t[parsed_capacity];
 
   adc_continuous_handle_cfg_t handle_cfg = {};
   handle_cfg.max_store_buf_size = store_size;

@@ -9,6 +9,7 @@
 #include "gpio.hpp"
 #include "hid.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "timebase.hpp"
 

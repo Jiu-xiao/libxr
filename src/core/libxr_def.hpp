@@ -1,23 +1,10 @@
 #pragma once
 
+#include <concepts>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <libxr_mem.hpp>
 #include <type_traits>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-#ifndef M_2PI
-#define M_2PI (2.0 * M_PI)
-#endif
-
-#ifndef M_1G
-/// \brief 标准重力加速度（m/s²）
-/// \brief Standard gravitational acceleration (m/s²)
-constexpr double M_1G = 9.80665;
-#endif
 
 #ifndef DEF2STR
 #define XR_TO_STR(_arg) #_arg
@@ -30,28 +17,112 @@ constexpr double M_1G = 9.80665;
 #define UNUSED(_x) ((void)(_x))
 #endif
 
-#ifndef OFFSET_OF
-/// \brief 计算结构体成员在结构体中的偏移量
-/// \brief Computes the offset of a member within a struct
-#define OFFSET_OF(type, member) ((size_t)&((type*)0)->member)
+#ifndef LIBXR_SINGLE_CORE
+#define LIBXR_SINGLE_CORE 0
 #endif
 
-#ifndef MEMBER_SIZE_OF
-/// \brief 获取结构体成员的大小
-/// \brief Retrieves the size of a member within a struct
-#define MEMBER_SIZE_OF(type, member) (sizeof(decltype(((type*)0)->member)))
+#if defined(_MSC_VER)
+#define LIBXR_NOINLINE __declspec(noinline)
+#define LIBXR_PACKED_BEGIN __pragma(pack(push, 1))
+#define LIBXR_PACKED_END __pragma(pack(pop))
+#define LIBXR_PACKED
+#elif defined(__clang__) || defined(__GNUC__)
+#define LIBXR_NOINLINE __attribute__((noinline))
+#define LIBXR_PACKED_BEGIN _Pragma("pack(push, 1)")
+#define LIBXR_PACKED_END _Pragma("pack(pop)")
+#define LIBXR_PACKED __attribute__((packed))
+#else
+#warning "LibXR compiler compatibility macros fallback to no-op on unknown compiler"
+#define LIBXR_NOINLINE
+#define LIBXR_PACKED_BEGIN
+#define LIBXR_PACKED_END
+#define LIBXR_PACKED
 #endif
 
-#ifndef CONTAINER_OF
-/// \brief 通过成员指针获取包含该成员的结构体指针
-/// \brief Retrieve the pointer to the containing structure from a member pointer
-#define CONTAINER_OF(ptr, type, member) \
-  ((type*)((char*)(ptr) - OFFSET_OF(type, member)))  // NOLINT
+namespace LibXR
+{
+/// \brief PI 常量 / PI constant
+inline constexpr double PI = 3.14159265358979323846;
+
+/// \brief 2PI 常量 / 2PI constant
+inline constexpr double TWO_PI = 2.0 * PI;
+
+/// \brief 标准重力加速度（m/s²） / Standard gravitational acceleration (m/s²)
+inline constexpr double STANDARD_GRAVITY = 9.80665;
+
+/// \brief 真实硬件缓存行大小（用于 DMA / cache coherency） / Hardware cache-line size used for DMA/cache-coherency boundaries
+inline constexpr size_t HW_CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
+
+/// \brief 并发结构对齐粒度（用于降低多核伪共享） / Alignment policy used by concurrency-oriented structures
+#if LIBXR_SINGLE_CORE
+inline constexpr size_t CONCURRENCY_ALIGNMENT = sizeof(size_t);
+#else
+inline constexpr size_t CONCURRENCY_ALIGNMENT = HW_CACHE_LINE_SIZE;
 #endif
 
-/// \brief 缓存行大小
-static constexpr size_t LIBXR_CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
-static constexpr size_t LIBXR_ALIGN_SIZE = (sizeof(void*));
+/// \brief 兼容旧代码的缓存行别名 / Backward-compatible cache-line alias for existing code
+inline constexpr size_t CACHE_LINE_SIZE = HW_CACHE_LINE_SIZE;
+
+/// \brief 平台自然对齐大小 / Native platform alignment size
+inline constexpr size_t ALIGN_SIZE = sizeof(void*);
+
+/**
+ * @brief 指向非静态数据成员的成员指针
+ * @brief Pointer to a non-static data member
+ */
+template <typename OwnerType, typename MemberType>
+concept MemberObjectPointer = std::is_member_object_pointer_v<MemberType OwnerType::*>;
+
+/**
+ * @brief 具有公共类型且可比较大小的类型对
+ * @brief Type pair with a common type and ordering
+ */
+template <typename LeftType, typename RightType>
+concept CommonOrdered = std::common_with<LeftType, RightType> &&
+                        requires(const LeftType& left, const RightType& right)
+{
+  { left < right } -> std::convertible_to<bool>;
+  { left > right } -> std::convertible_to<bool>;
+};
+
+/**
+ * @brief 计算成员在宿主对象中的偏移量
+ * @brief Computes the offset of a member within the owning object
+ * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as `&Type::member`
+ * @return 成员偏移量 | Member offset
+ */
+template <typename OwnerType, typename MemberType>
+requires MemberObjectPointer<OwnerType, MemberType>
+[[nodiscard]] inline size_t OffsetOf(MemberType OwnerType::*member) noexcept
+{
+  return reinterpret_cast<size_t>(
+      &(reinterpret_cast<const volatile OwnerType*>(0)->*member));
+}
+
+/**
+ * @brief 通过成员指针恢复其所属对象指针
+ * @brief Recover the owning object pointer from a member pointer
+ * @param ptr 指向成员的指针 | Pointer to the member
+ * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as `&Type::member`
+ * @return 所属对象指针 | Pointer to the owning object
+ */
+template <typename OwnerType, typename MemberType>
+requires MemberObjectPointer<OwnerType, MemberType>
+[[nodiscard]] inline OwnerType* ContainerOf(MemberType* ptr,
+                                            MemberType OwnerType::*member) noexcept
+{
+  return reinterpret_cast<OwnerType*>(reinterpret_cast<std::byte*>(ptr) -
+                                      OffsetOf(member));
+}
+
+template <typename OwnerType, typename MemberType>
+requires MemberObjectPointer<OwnerType, MemberType>
+[[nodiscard]] inline const OwnerType* ContainerOf(const MemberType* ptr,
+                                                  MemberType OwnerType::*member) noexcept
+{
+  return reinterpret_cast<const OwnerType*>(reinterpret_cast<const std::byte*>(ptr) -
+                                            OffsetOf(member));
+}
 
 /**
  * @enum ErrorCode
@@ -89,21 +160,69 @@ enum class ErrorCode : int8_t
 enum class SizeLimitMode : uint8_t
 {
   EQUAL = 0,  ///< 尺寸必须相等 | Size must be equal
-  LESS = 1,   ///< 尺寸必须小于 | Size must be less
-  MORE = 2,   ///< 尺寸必须大于 | Size must be more
+  LESS = 1,   ///< 尺寸必须小于等于 | Size must be less than or equal
+  MORE = 2,   ///< 尺寸必须大于等于 | Size must be greater than or equal
   NONE = 3    ///< 无限制 | No restriction
 };
+
+/**
+ * @brief 尺寸约束的纯判断函数
+ * @brief Pure predicate for size-limit comparisons
+ *
+ * This helper only answers whether the requested size relation holds.
+ * It does not decide whether the caller should assert, require, or return an
+ * error code.
+ * 这个辅助函数只判断尺寸关系是否成立；
+ * 它本身不决定调用方应该断言、强约束终止，还是返回错误码。
+ */
+[[nodiscard]] constexpr bool SizeLimitCheck(SizeLimitMode mode, size_t limit,
+                                            size_t size) noexcept
+{
+  switch (mode)
+  {
+    case SizeLimitMode::EQUAL:
+      return limit == size;
+    case SizeLimitMode::LESS:
+      return limit >= size;
+    case SizeLimitMode::MORE:
+      return limit <= size;
+    case SizeLimitMode::NONE:
+      return true;
+  }
+  return false;
+}
+}  // namespace LibXR
+
+#ifdef DEV_ASSERT
+#undef DEV_ASSERT
+#endif
+
+#ifdef DEV_ASSERT_FROM_CALLBACK
+#undef DEV_ASSERT_FROM_CALLBACK
+#endif
+
+#ifdef REQUIRE
+#undef REQUIRE
+#endif
+
+#ifdef REQUIRE_FROM_CALLBACK
+#undef REQUIRE_FROM_CALLBACK
+#endif
 
 #ifdef ASSERT
 #undef ASSERT
 #endif
 
-#ifdef LIBXR_DEBUG_BUILD
+#ifdef ASSERT_FROM_CALLBACK
+#undef ASSERT_FROM_CALLBACK
+#endif
+
 /**
- * @brief 断言宏，在调试模式下检查条件是否满足
- * @brief Assertion macro to check conditions in debug mode
+ * @brief 面向 LibXR 用户的断言宏
+ * @brief Assertion macro for LibXR users
  * @param arg 要检查的条件 | Condition to check
  */
+#ifdef LIBXR_DEBUG_BUILD
 #define ASSERT(arg)                                 \
   do                                                \
   {                                                 \
@@ -114,19 +233,19 @@ enum class SizeLimitMode : uint8_t
   } while (0)
 
 /**
- * @brief 回调环境下使用的断言宏（可来自中断或线程）
- * @brief Assertion macro for callbacks (may run in ISR or thread context).
+ * @brief 回调/ISR 上下文中的 LibXR 用户断言
+ * @brief Assertion macro for LibXR users in callback/ISR contexts
  *
  * @param arg    要检查的条件 | Condition to check
  * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
  */
-#define ASSERT_FROM_CALLBACK(arg, in_isr)              \
-  do                                                   \
-  {                                                    \
-    if (!(arg))                                        \
-    {                                                  \
+#define ASSERT_FROM_CALLBACK(arg, in_isr)             \
+  do                                                  \
+  {                                                   \
+    if (!(arg))                                       \
+    {                                                 \
       libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
-    }                                                  \
+    }                                                 \
   } while (0)
 #else
 #define ASSERT(arg) (void(arg), (void)0)
@@ -139,6 +258,76 @@ enum class SizeLimitMode : uint8_t
 #endif
 
 /**
+ * @brief 仅供 LibXR 本体开发使用的开发期断言
+ * @brief Development-only assertion for LibXR maintainers
+ * @param arg 要检查的条件 | Condition to check
+ */
+#ifdef LIBXR_DEV_ASSERT_BUILD
+#define DEV_ASSERT(arg)                            \
+  do                                               \
+  {                                                \
+    if (!(arg))                                    \
+    {                                              \
+      libxr_fatal_error(__FILE__, __LINE__, false); \
+    }                                              \
+  } while (0)
+
+/**
+ * @brief 仅供 LibXR 本体开发使用的回调/ISR 开发期断言
+ * @brief Development-only callback/ISR assertion for LibXR maintainers
+ *
+ * @param arg    要检查的条件 | Condition to check
+ * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
+ */
+#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr)        \
+  do                                                 \
+  {                                                  \
+    if (!(arg))                                      \
+    {                                                \
+      libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
+    }                                                \
+  } while (0)
+#else
+#define DEV_ASSERT(arg) (void(arg), (void)0)
+#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr) \
+  do                                          \
+  {                                           \
+    (void)(arg);                              \
+    (void)(in_isr);                           \
+  } while (0)
+#endif
+
+/**
+ * @brief 与编译开关无关的强约束检查
+ * @brief Strong requirement check independent of build switches
+ * @param arg 要检查的条件 | Condition to check
+ */
+#define REQUIRE(arg)                                \
+  do                                                \
+  {                                                 \
+    if (!(arg))                                     \
+    {                                               \
+      libxr_fatal_error(__FILE__, __LINE__, false); \
+    }                                               \
+  } while (0)
+
+/**
+ * @brief 回调/ISR 上下文中的强约束检查
+ * @brief Strong requirement check in callback/ISR contexts
+ *
+ * @param arg    要检查的条件 | Condition to check
+ * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
+ */
+#define REQUIRE_FROM_CALLBACK(arg, in_isr)          \
+  do                                                \
+  {                                                 \
+    if (!(arg))                                     \
+    {                                               \
+      libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
+    }                                               \
+  } while (0)
+
+/**
  * @brief 处理致命错误
  * @brief Handles fatal errors
  * @param file 出错的源文件 | Source file where the error occurred
@@ -149,20 +338,18 @@ extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr);
 
 namespace LibXR
 {
-using ErrorCode = ErrorCode;
-using SizeLimitMode = SizeLimitMode;
-
 /**
  * @brief 计算两个数的最大值
  * @brief Computes the maximum of two numbers
- * @tparam T1 第一个数的类型 | Type of the first number
- * @tparam T2 第二个数的类型 | Type of the second number
+ * @tparam LeftType 第一个数的类型 | Type of the first number
+ * @tparam RightType 第二个数的类型 | Type of the second number
  * @param a 第一个数 | First number
  * @param b 第二个数 | Second number
  * @return 两数中的较大值 | The larger of the two numbers
  */
-template <typename T1, typename T2>
-constexpr auto max(T1 a, T2 b) -> typename std::common_type<T1, T2>::type
+template <typename LeftType, typename RightType>
+requires CommonOrdered<LeftType, RightType>
+constexpr auto max(LeftType a, RightType b) -> std::common_type_t<LeftType, RightType>
 {
   return (a > b) ? a : b;
 }
@@ -170,14 +357,15 @@ constexpr auto max(T1 a, T2 b) -> typename std::common_type<T1, T2>::type
 /**
  * @brief 计算两个数的最小值
  * @brief Computes the minimum of two numbers
- * @tparam T1 第一个数的类型 | Type of the first number
- * @tparam T2 第二个数的类型 | Type of the second number
+ * @tparam LeftType 第一个数的类型 | Type of the first number
+ * @tparam RightType 第二个数的类型 | Type of the second number
  * @param a 第一个数 | First number
  * @param b 第二个数 | Second number
  * @return 两数中的较小值 | The smaller of the two numbers
  */
-template <typename T1, typename T2>
-constexpr auto min(T1 a, T2 b) -> typename std::common_type<T1, T2>::type
+template <typename LeftType, typename RightType>
+requires CommonOrdered<LeftType, RightType>
+constexpr auto min(LeftType a, RightType b) -> std::common_type_t<LeftType, RightType>
 {
   return (a < b) ? a : b;
 }

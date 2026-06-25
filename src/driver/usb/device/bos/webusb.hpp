@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/bos.hpp"
 #include "usb/core/core.hpp"
@@ -26,7 +27,7 @@ static constexpr uint8_t WEBUSB_PLATFORM_CAPABILITY_UUID[16] = {
     0x8B, 0xFD, 0xA0, 0x76, 0x88, 0x15, 0xB6, 0x65,
 };
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
 
 /**
  * @brief WebUSB BOS 平台能力描述符 / WebUSB BOS platform capability descriptor
@@ -42,7 +43,7 @@ struct WebUsbPlatformCapability
   uint8_t bVendorCode = WEBUSB_VENDOR_CODE_DEFAULT;
   uint8_t iLandingPage = 0u;
 };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
 static_assert(sizeof(WebUsbPlatformCapability) == 24,
               "WebUSB platform capability size mismatch.");
@@ -210,19 +211,19 @@ class WebUsbBosCapability final : public LibXR::USB::BosCapability
    */
   static bool ParseLandingPageUrl(const char* input, uint8_t& scheme, const char*& body)
   {
-    static constexpr const char kHttpsPrefix[] = "https://";
-    static constexpr const char kHttpPrefix[] = "http://";
+    static constexpr const char HTTPS_PREFIX[] = "https://";
+    static constexpr const char HTTP_PREFIX[] = "http://";
 
-    if (std::strncmp(input, kHttpsPrefix, sizeof(kHttpsPrefix) - 1u) == 0)
+    if (std::strncmp(input, HTTPS_PREFIX, sizeof(HTTPS_PREFIX) - 1u) == 0)
     {
       scheme = WEBUSB_URL_SCHEME_HTTPS;
-      body = input + sizeof(kHttpsPrefix) - 1u;
+      body = input + sizeof(HTTPS_PREFIX) - 1u;
       return true;
     }
-    if (std::strncmp(input, kHttpPrefix, sizeof(kHttpPrefix) - 1u) == 0)
+    if (std::strncmp(input, HTTP_PREFIX, sizeof(HTTP_PREFIX) - 1u) == 0)
     {
       scheme = WEBUSB_URL_SCHEME_HTTP;
-      body = input + sizeof(kHttpPrefix) - 1u;
+      body = input + sizeof(HTTP_PREFIX) - 1u;
       return true;
     }
 

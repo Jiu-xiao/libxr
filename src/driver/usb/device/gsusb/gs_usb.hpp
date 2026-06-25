@@ -13,6 +13,7 @@
 #include "gpio.hpp"
 #include "gs_usb_protocol.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"
 
@@ -38,7 +39,7 @@ class GsUsbClass : public DeviceClass
  private:
   // ===== Linux gs_usb 线缆格式（固定 12 字节头） / Linux gs_usb wire format
   // (fixed 12-byte header) =====
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
 
   /**
    * @brief gs_usb 线缆格式头（12 字节） / gs_usb wire-format header (12 bytes)
@@ -52,7 +53,7 @@ class GsUsbClass : public DeviceClass
     uint8_t flags;     ///< 帧标志（GS_CAN_FLAG_*） / Frame flags (GS_CAN_FLAG_*)
     uint8_t reserved;  ///< 保留 / Reserved
   };
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   static constexpr uint32_t ECHO_ID_RX =
       0xFFFFFFFFu;  ///< RX 帧 echo_id 固定值 / Fixed echo_id for RX frames
@@ -965,7 +966,7 @@ class GsUsbClass : public DeviceClass
   uint8_t ctrl_target_channel_ =
       0;  ///< 控制请求目标通道 / Control request target channel
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
   /**
    * @brief 本类的接口与端点描述符块 / Descriptor block for interface and endpoints
    */
@@ -975,7 +976,7 @@ class GsUsbClass : public DeviceClass
     EndpointDescriptor ep_out;  ///< OUT 端点描述符 / OUT endpoint descriptor
     EndpointDescriptor ep_in;   ///< IN 端点描述符 / IN endpoint descriptor
   } desc_block_{};
-#pragma pack(pop)
+LIBXR_PACKED_END
 
   uint8_t rx_buf_[WIRE_MAX_SIZE]{};  ///< OUT 接收缓冲区 / OUT receive buffer
   std::array<uint8_t, WIRE_MAX_SIZE>
@@ -1053,9 +1054,9 @@ class GsUsbClass : public DeviceClass
     std::array<uint8_t, 64> data;  ///< 数据段 / Data bytes
   };
 
-  LibXR::LockFreeQueue<QueueItem>
+  LibXR::SPSCQueue<QueueItem>
       rx_queue_;  ///< RX 队列（Device->Host） / RX queue (Device->Host)
-  LibXR::LockFreeQueue<QueueItem>
+  LibXR::SPSCQueue<QueueItem>
       echo_queue_;  ///< Echo 队列（回送 echo_id） / Echo queue (echo back echo_id)
 
   /**
@@ -1899,8 +1900,7 @@ class GsUsbClass : public DeviceClass
    */
   uint32_t MakeTimestampUs(uint8_t ch) const
   {
-    if (ch < can_count_ && timestamps_enabled_ch_[ch] &&
-        LibXR::Timebase::timebase != nullptr)
+    if (ch < can_count_ && timestamps_enabled_ch_[ch])
     {
       return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
     }
@@ -1913,11 +1913,7 @@ class GsUsbClass : public DeviceClass
    */
   uint32_t MakeTimestampUsGlobal() const
   {
-    if (LibXR::Timebase::timebase != nullptr)
-    {
-      return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
-    }
-    return 0u;
+    return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
   }
 
   /**

@@ -53,8 +53,8 @@ class ESP32SPI : public SPI
   RawData GetTxBuffer();
 
  private:
-  static constexpr size_t kMaxPollingTransferBytes = SOC_SPI_MAXIMUM_BUFFER_SIZE;
-  static constexpr size_t kMaxDmaTransferBytes = SPI_LL_DMA_MAX_BIT_LEN / 8U;
+  static constexpr size_t MAX_POLLING_TRANSFER_BYTES = SOC_SPI_MAXIMUM_BUFFER_SIZE;
+  static constexpr size_t MAX_DMA_TRANSFER_BYTES = SPI_LL_DMA_MAX_BIT_LEN / 8U;
 
   bool Acquire();
 

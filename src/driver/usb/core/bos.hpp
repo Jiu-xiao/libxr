@@ -5,6 +5,7 @@
 
 #include "desc_dev.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/core.hpp"
 
