@@ -82,6 +82,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteStringRaw(args_.Read<std::string_view>());
+#if LIBXR_PRINT_ENABLE_FLOAT
     case FormatOp::F32FixedPrec:
       if constexpr (!HasProfile(Profile, FormatProfile::F32Fixed) ||
                     !FloatEnabled(FormatType::FloatFixed))
@@ -96,6 +97,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteF64FixedPrec(codes_.Read<uint8_t>(), args_.Read<double>());
+#endif
     case FormatOp::GenericField:
       if constexpr (!HasProfile(Profile, FormatProfile::Generic))
       {

@@ -176,6 +176,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchGenericField(FormatType type)
         return ErrorCode::STATE_ERR;
       }
       return DispatchStringField();
+#if LIBXR_PRINT_ENABLE_FLOAT
     case FormatType::FloatFixed:
       if constexpr (!FloatEnabled(FormatType::FloatFixed))
       {
@@ -230,6 +231,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchGenericField(FormatType type)
         return ErrorCode::STATE_ERR;
       }
       return DispatchFloatField<FormatType::LongDoubleGeneral, long double>();
+#endif
     case FormatType::TextInline:
     case FormatType::TextRef:
     case FormatType::TextSpace:
