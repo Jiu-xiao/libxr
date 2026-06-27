@@ -36,8 +36,10 @@ class Writer::Executor
   template <std::signed_integral Int>
   [[nodiscard]] static char ResolveSignChar(Int value, const Spec& spec);
 
+#if LIBXR_PRINT_ENABLE_FLOAT
   template <typename T>
   [[nodiscard]] static char ResolveFloatSignChar(T value, const Spec& spec);
+#endif
 
   template <std::signed_integral Int>
   [[nodiscard]] ErrorCode WriteSigned(const Spec& spec, Int value);
@@ -64,8 +66,10 @@ class Writer::Executor
   [[nodiscard]] ErrorCode WriteCharacter(const Spec& spec, char ch);
   [[nodiscard]] ErrorCode WriteString(const Spec& spec, std::string_view text);
 
+#if LIBXR_PRINT_ENABLE_FLOAT
   template <typename T>
   [[nodiscard]] ErrorCode WriteFloat(FormatType type, const Spec& spec, T value);
+#endif
 
   /**
    * @brief 单个原始 uint32_t 十进制字段的快路径。 / Fast path for one raw uint32_t decimal field.
@@ -82,6 +86,7 @@ class Writer::Executor
    */
   [[nodiscard]] ErrorCode WriteStringRaw(std::string_view text);
 
+#if LIBXR_PRINT_ENABLE_FLOAT
   /**
    * @brief 单个带显式精度的定点 float 快路径。 / Fast path for one fixed float with explicit precision.
    */
@@ -91,6 +96,7 @@ class Writer::Executor
    * @brief 单个带显式精度的定点 double 快路径。 / Fast path for one fixed double with explicit precision.
    */
   [[nodiscard]] ErrorCode WriteF64FixedPrec(uint8_t precision, double value);
+#endif
 
   // Small bridges that keep GenericField dispatch readable while preserving the
   // existing "read spec -> read next packed argument -> call concrete writer"
@@ -103,8 +109,10 @@ class Writer::Executor
   template <FormatType Type, std::unsigned_integral UInt>
   [[nodiscard]] ErrorCode DispatchUnsignedField();
 
+#if LIBXR_PRINT_ENABLE_FLOAT
   template <FormatType Type, typename Float>
   [[nodiscard]] ErrorCode DispatchFloatField();
+#endif
 
   [[nodiscard]] ErrorCode DispatchPointerField();
 

@@ -476,6 +476,7 @@ class Writer
   [[nodiscard]] static bool AppendBufferU32ZeroPad(char* buffer, size_t capacity,
                                                    size_t& size, uint32_t value, uint8_t width);
 
+#if LIBXR_PRINT_ENABLE_FLOAT
   /**
    * @brief 基于精确 float32 位模式并按最近偶数处理平局返回 `round(value * scale)` / Return `round(value * scale)` using the exact float32 bit pattern and nearest-even ties
    * @param value 待缩放的 float32 绝对值 / Float32 magnitude to scale
@@ -592,6 +593,7 @@ class Writer
   template <typename Float>
   [[nodiscard]] static bool FormatFloatText(FormatType type, const Spec& spec, Float value,
                                             char* out, size_t& out_size);
+#endif
 
   class CodeReader;
   class ArgumentReader;
@@ -650,10 +652,12 @@ class Writer
 
 #include "writer/writer_argument.hpp"
 #include "writer/writer_integer.hpp"
+#if LIBXR_PRINT_ENABLE_FLOAT
 #include "writer/writer_float_runtime.hpp"
 #include "writer/writer_float_math.hpp"
 #include "writer/writer_float_fixed.hpp"
 #include "writer/writer_float_general.hpp"
+#endif
 #include "writer/writer_reader.hpp"
 #include "writer/writer_executor.hpp"
 }  // namespace LibXR::Print

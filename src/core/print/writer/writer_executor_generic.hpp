@@ -29,6 +29,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsignedField()
   return WriteUnsigned<Type>(codes_.ReadSpec(), args_.Read<UInt>());
 }
 
+#if LIBXR_PRINT_ENABLE_FLOAT
 /**
  * @brief 读取一个浮点载荷并转发给选定的浮点语义写出路径 / Read one float payload and forward it to the selected float semantic writer
  * @tparam Type 运行期浮点语义类型 / Runtime float semantic type
@@ -41,6 +42,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchFloatField()
 {
   return WriteFloat(Type, codes_.ReadSpec(), args_.Read<Float>());
 }
+#endif
 
 /**
  * @brief 读取一个指针载荷并走指针字段写出路径 / Read one pointer payload and write it through the pointer field path
@@ -176,6 +178,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchGenericField(FormatType type)
         return ErrorCode::STATE_ERR;
       }
       return DispatchStringField();
+#if LIBXR_PRINT_ENABLE_FLOAT
     case FormatType::FloatFixed:
       if constexpr (!FloatEnabled(FormatType::FloatFixed))
       {
@@ -230,6 +233,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchGenericField(FormatType type)
         return ErrorCode::STATE_ERR;
       }
       return DispatchFloatField<FormatType::LongDoubleGeneral, long double>();
+#endif
     case FormatType::TextInline:
     case FormatType::TextRef:
     case FormatType::TextSpace:

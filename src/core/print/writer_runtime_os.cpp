@@ -78,6 +78,8 @@ bool Writer::AppendBufferU32ZeroPad(char* buffer, size_t capacity, size_t& size,
   return AppendBufferText(buffer, capacity, size, std::string_view(digits, digit_count));
 }
 
+#if LIBXR_PRINT_ENABLE_FLOAT
+
 uint64_t Writer::RoundScaledF32(float value, uint32_t scale)
 {
   uint32_t bits = std::bit_cast<uint32_t>(value);
@@ -326,4 +328,6 @@ bool Writer::FormatF32FixedPrecText(float value, uint8_t precision, char* out,
 
   return true;
 }
+
+#endif
 }  // namespace LibXR::Print

@@ -30,6 +30,7 @@ char Writer::Executor<Sink, Profile>::ResolveSignChar(Int value, const Spec& spe
   return '\0';
 }
 
+#if LIBXR_PRINT_ENABLE_FLOAT
 /**
  * @brief 为一个浮点载荷确定最终可见的符号字符 / Resolve the visible sign character for one float payload
  * @tparam T 浮点类型 / Float type
@@ -55,6 +56,7 @@ char Writer::Executor<Sink, Profile>::ResolveFloatSignChar(T value, const Spec& 
   }
   return '\0';
 }
+#endif
 
 /**
  * @brief 通过共享整数字段路径写出一个有符号整数值 / Write one signed integer value through the shared integer-field path
@@ -222,6 +224,7 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteString(const Spec& spec,
  * @param value 待写出的浮点值 / Float value to write
  * @return 返回浮点字段写出结果 / Returns the float-field write result
  */
+#if LIBXR_PRINT_ENABLE_FLOAT
 template <OutputSink Sink, FormatProfile Profile>
 template <typename T>
 ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
@@ -271,6 +274,7 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
 
   return WriteFloatField(sign_char, std::string_view(output_buffer, output_size), spec);
 }
+#endif
 
 /**
  * @brief 写出一个原始 uint32 十进制快路径字段 / Writes one raw uint32 decimal fast-path field.
@@ -322,6 +326,7 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteStringRaw(std::string_view text)
  * @param value 待写出的浮点值 / Float value to write
  * @return 返回该快路径的写出结果 / Returns the fast-path write result
  */
+#if LIBXR_PRINT_ENABLE_FLOAT
 template <OutputSink Sink, FormatProfile Profile>
 ErrorCode Writer::Executor<Sink, Profile>::WriteF32FixedPrec(uint8_t precision,
                                                              float value)
@@ -362,3 +367,4 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteF64FixedPrec(uint8_t precision,
 {
   return WriteFloat(FormatType::DoubleFixed, Spec{.precision = precision}, value);
 }
+#endif
