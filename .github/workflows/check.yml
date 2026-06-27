@@ -57,3 +57,25 @@ jobs:
       shell: bash
       run: |
         tools/format_cmake_files.sh --check
+
+  no-float-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: configure no-float smoke
+      shell: bash
+      run: |
+        cmake -S . -B build-nofloat \
+          -DLIBXR_TEST_BUILD=True \
+          -DLIBXR_PRINT_ENABLE_FLOAT=0 \
+          -DLIBXR_PRINT_FLOAT_ENABLE_FIXED=0 \
+          -DLIBXR_PRINT_FLOAT_ENABLE_DOUBLE=0 \
+          -DLIBXR_PRINT_FLOAT_ENABLE_SCIENTIFIC=0 \
+          -DLIBXR_PRINT_FLOAT_ENABLE_GENERAL=0 \
+          -DLIBXR_PRINT_FLOAT_ENABLE_LONG_DOUBLE=0
+    - name: build no-float smoke
+      shell: bash
+      run: |
+        cmake --build build-nofloat -j"$(nproc)"
