@@ -48,3 +48,18 @@ target_include_directories(
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/framework"
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen)
+
+file(GLOB_RECURSE XR_TEST_PRINT_CONFIG_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/print_config/*.cpp")
+list(SORT XR_TEST_PRINT_CONFIG_SOURCES)
+
+add_library(test_print_config_matrix OBJECT ${XR_TEST_PRINT_CONFIG_SOURCES})
+add_dependencies(test_print_config_matrix xr)
+
+target_compile_features(test_print_config_matrix PRIVATE cxx_std_20)
+
+target_include_directories(
+  test_print_config_matrix
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/print_config"
+  PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen)
