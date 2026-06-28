@@ -55,7 +55,7 @@ void test_assert()
   LibXR::Assert::RegisterFatalErrorCallback(callback);
   ASSERT(!LibXR::Assert::FatalErrorCallback().Empty());
 
-  LibXR::Assert::FatalErrorCallback().Run(false, "test_assert.cpp", 42);
+  LibXR::Assert::RunFatalErrorCallback(false, "test_assert.cpp", 42);
   ASSERT(probe.hit_count == 1);
   ASSERT(!probe.in_isr);
   ASSERT(probe.file == "test_assert.cpp");
