@@ -67,6 +67,37 @@ void TestFormatFrontendSemantics()
     Fail("format frontend float mismatch");
   }
 
+  // Keep brace-format float behavior aligned with the shared printf writer path.
+  if (!SameFormatAsExpected<"{:.0f}|{:.0f}|{:.0f}|{:.0f}">("0|2|2|4", 0.5, 1.5,
+                                                                2.5, 3.5))
+  {
+    Fail("format frontend float half-even mismatch");
+  }
+
+  if (!SameFormatAsExpected<"{:010f}|{:+010f}|{: 010f}|{:010f}">(
+          "       inf|      +inf|       inf|       nan",
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN()))
+  {
+    Fail("format frontend inf nan zero padding mismatch");
+  }
+
+  if (!SameFormatAsExpected<"{:.2e}|{:.2g}">("1.80e+308|1.8e+308",
+                                             std::numeric_limits<double>::max(),
+                                             std::numeric_limits<double>::max()))
+  {
+    Fail("format frontend max double scientific mismatch");
+  }
+
+  if (!SameFormatAsExpected<"{:.6g}|{:.6g}|{:.5g}|{:.4g}|{:.6g}|{:.6g}">(
+          "999999|1e+06|1e+05|1e+04|9.99999e-05|0.0001", 999999.4,
+          999999.5, 99999.9, 9999.9, 0.0000999999, 0.00009999999))
+  {
+    Fail("format frontend rounded exponent mismatch");
+  }
+
   if (!SameFormatAsExpected<"{:+d}|{: d}|{:08d}|{:#x}">("+7| 7|00000007|0x2a", 7, 7, 7,
                                                         42U))
   {
