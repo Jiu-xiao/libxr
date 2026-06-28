@@ -27,7 +27,7 @@ bool HPM_GPIO_IsFastController(GPIO_Type* gpio)
 #if defined(HPM_FGPIO)
   return gpio == HPM_FGPIO;
 #else
-  (void) gpio;
+  (void)gpio;
   return false;
 #endif
 }
@@ -85,8 +85,8 @@ static inline void HPM_GPIO_ConfigMuxToGPIO(GPIO_Type* gpio, uint32_t port,
     HPM_PIOC->PAD[pad_index].FUNC_CTL = IOC_PAD_FUNC_CTL_ALT_SELECT_SET(3);
   }
 #else
-  (void) gpio;
-  (void) port;
+  (void)gpio;
+  (void)port;
 #endif
 }
 
