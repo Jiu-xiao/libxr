@@ -2,12 +2,13 @@
 
 #include <cstdint>
 
-constexpr uint32_t GPIO_DI_GPIOA = 0u;
-constexpr uint32_t GPIO_DI_GPIOB = 1u;
-constexpr uint32_t GPIO_DI_GPIOX = 13u;
-constexpr uint32_t GPIO_DI_GPIOY = 14u;
+#define GPIO_DI_GPIOA (0u)
+#define GPIO_DI_GPIOB (1u)
+#define GPIO_DI_GPIOX (13u)
+#define GPIO_DI_GPIOY (14u)
+#define GPIO_DI_GPIOZ (15u)
 
-constexpr uint32_t HPM_TEST_GPIO_PORT_COUNT = 15u;
+constexpr uint32_t HPM_TEST_GPIO_PORT_COUNT = 16u;
 
 struct HpmTestGpioReg
 {

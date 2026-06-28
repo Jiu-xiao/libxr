@@ -1,4 +1,26 @@
-﻿#pragma once
+#pragma once
+
+/**
+ * @file hpm_gpio.hpp
+ * @brief HPM GPIO 驱动适配头文件 / Adapter header for the HPM GPIO driver.
+ *
+ * @details
+ * 本文件在 `GPIO_Type` 上实现 `LibXR::GPIO`，通过 HPM SDK `hpm_gpio_drv`
+ * 完成引脚读写、方向配置、中断触发模式配置和中断标志分发。当前实现使用同步
+ * GPIO API；中断由板级 IRQ handler 调用 `libxr_hpm_gpio_check_interrupt()`
+ * 后按 port/pin 映射分发。HPM5301 的 `GPIO0_A/B/X/Y` IRQ 是端口级 PLIC
+ * 路由，因此同一 port 上多个 pin 会共享同一 IRQ enable/disable 计数。端口表大小
+ * 按当前 SDK 头文件暴露的 `GPIO_DI_GPIO*` 宏推导，避免为不同 HPM 系列复制驱动文件。
+ *
+ * This file implements `LibXR::GPIO` on top of `GPIO_Type` using the HPM SDK
+ * `hpm_gpio_drv` APIs for pin read/write, direction setup, interrupt trigger
+ * setup, and interrupt-flag dispatch. The current implementation uses synchronous
+ * GPIO APIs; interrupts are dispatched after the board IRQ handler calls
+ * `libxr_hpm_gpio_check_interrupt()`. HPM5301 routes `GPIO0_A/B/X/Y` IRQs per
+ * port through PLIC, so multiple pins on the same port share one IRQ enable/disable
+ * reference count. The dispatch table size is derived from the `GPIO_DI_GPIO*`
+ * macros exposed by the active SDK headers to avoid per-series driver forks.
+ */
 
 #include "gpio.hpp"
 #include "hpm_gpio_drv.h"
@@ -11,8 +33,25 @@ namespace LibXR
  * @class HPMGPIO
  * @brief HPM 平台 GPIO 驱动实现 / GPIO driver implementation for HPM platform.
  *
- * 该类将 LibXR `GPIO` 抽象接口适配到 HPM SDK GPIO API。
- * This class adapts the LibXR `GPIO` abstraction to HPM SDK GPIO APIs.
+ * @details
+ * 该类将 LibXR `GPIO` 抽象接口适配到 HPM SDK GPIO API。`Read()` 和
+ * `Write()` 分别调用 `gpio_read_pin()` 与 `gpio_write_pin()`；`SetConfig()`
+ * 调用 `gpio_set_pin_input()`、`gpio_set_pin_output()` 和
+ * `gpio_config_pin_interrupt()`，并在可解析 PAD 时更新 IOC `FUNC_CTL`、
+ * `PAD_CTL` 的 GPIO 复用、loopback、上下拉和开漏位。`EnableInterrupt()` 与
+ * `DisableInterrupt()` 只支持普通 `HPM_GPIO0` 中断路径；完整 SDK GPIO 示例说明
+ * FGPIO 不支持中断，因此 `HPM_FGPIO` 中断请求返回 `ErrorCode::NOT_SUPPORT`，并且
+ * 不会注册到中断分发表。
+ *
+ * This class adapts the LibXR `GPIO` abstraction to HPM SDK GPIO APIs. `Read()`
+ * and `Write()` call `gpio_read_pin()` and `gpio_write_pin()` respectively.
+ * `SetConfig()` calls `gpio_set_pin_input()`, `gpio_set_pin_output()`, and
+ * `gpio_config_pin_interrupt()`, and updates IOC `FUNC_CTL` / `PAD_CTL` GPIO mux,
+ * loopback, pull, and open-drain bits when the PAD can be resolved.
+ * `EnableInterrupt()` and `DisableInterrupt()` support only the normal `HPM_GPIO0`
+ * IRQ path; the full SDK GPIO sample states that FGPIO does not support interrupts,
+ * so interrupt requests on `HPM_FGPIO` return `ErrorCode::NOT_SUPPORT` and are not
+ * registered in the interrupt dispatch map.
  *
  * 中断回调由 `CheckInterrupt()` 统一分发。
  * Interrupt callbacks are dispatched through `CheckInterrupt()`.
@@ -25,10 +64,14 @@ class HPMGPIO final : public GPIO
    * @param gpio GPIO 控制器基地址 / GPIO controller base address.
    * @param port GPIO 端口号 / GPIO port index.
    * @param pin GPIO 引脚号 / GPIO pin index.
-   * @param irq 当前 port 对应的中断号（可选） / IRQ number for the current port
-   * (optional).
-   * @param pad_index IOC PAD 编号，默认值表示自动由 `(gpio, port, pin)` 推导 /
-   * IOC PAD index. Use default value to auto-resolve from `(gpio, port, pin)`.
+   * @param irq 当前 port 对应的 PLIC IRQ 号；没有中断需求时可保持默认值 /
+   * PLIC IRQ number for the current port. Keep the default when interrupt support
+   * is not needed.
+   * @param pad_index IOC PAD 编号，默认值表示自动由 `(gpio, port, pin)` 推导；无法
+   * 推导时仍可读写 GPIO，但 PAD 复用和模拟高阻配置会受限 /
+   * IOC PAD index. The default auto-resolves it from `(gpio, port, pin)`. If it
+   * cannot be resolved, GPIO read/write can still work, while PAD mux and analog
+   * high-impedance configuration are limited.
    */
   HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq = INVALID_IRQ,
           uint16_t pad_index = INVALID_PAD_INDEX);
@@ -56,38 +99,69 @@ class HPMGPIO final : public GPIO
   /**
    * @brief 使能当前引脚中断 / Enable GPIO interrupt for current pin.
    * @return 成功返回 `ErrorCode::OK`；IRQ/端口参数无效返回 `ErrorCode::ARG_ERR`；
-   * 同 port 存在冲突 IRQ 路由返回 `ErrorCode::STATE_ERR` /
+   * `HPM_FGPIO` 返回 `ErrorCode::NOT_SUPPORT`；同 port 存在冲突 IRQ 路由返回
+   * `ErrorCode::STATE_ERR` /
    * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` for invalid irq/port/pin,
-   * and `ErrorCode::STATE_ERR` when the same port is already routed to another IRQ.
+   * `ErrorCode::NOT_SUPPORT` for `HPM_FGPIO`, and `ErrorCode::STATE_ERR` when the
+   * same port is already routed to another IRQ.
+   *
+   * @note HPM SDK `gpio_enable_pin_interrupt()` 只设置 GPIO `IE` 位；PLIC 路由由
+   * `intc_m_enable_irq_with_priority()` 打开，且同一 port 只在首个 pin enable 时调用 /
+   * HPM SDK `gpio_enable_pin_interrupt()` only sets the GPIO `IE` bit; PLIC routing
+   * is opened through `intc_m_enable_irq_with_priority()` only when the first pin on
+   * the same port is enabled.
    */
   ErrorCode EnableInterrupt() override;
 
   /**
    * @brief 失能当前引脚中断 / Disable GPIO interrupt for current pin.
    * @return 成功返回 `ErrorCode::OK`；IRQ/端口参数无效返回 `ErrorCode::ARG_ERR`；
-   * 端口路由状态异常返回 `ErrorCode::STATE_ERR` /
+   * `HPM_FGPIO` 返回 `ErrorCode::NOT_SUPPORT`；端口路由状态异常返回
+   * `ErrorCode::STATE_ERR` /
    * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` for invalid irq/port/pin,
-   * and `ErrorCode::STATE_ERR` when shared port-route state is inconsistent.
+   * `ErrorCode::NOT_SUPPORT` for `HPM_FGPIO`, and `ErrorCode::STATE_ERR` when shared
+   * port-route state is inconsistent.
+   *
+   * @note HPM SDK `gpio_disable_pin_interrupt()` 只清当前 pin 的 GPIO `IE` 位；
+   * 共享 PLIC 路由只在同 port 最后一个已启用 pin disable 后关闭 /
+   * HPM SDK `gpio_disable_pin_interrupt()` only clears the current pin's GPIO `IE`
+   * bit; the shared PLIC route is closed only after the last enabled pin on the same
+   * port is disabled.
    */
   ErrorCode DisableInterrupt() override;
 
   /**
    * @brief 配置当前引脚模式 / Configure GPIO mode for current pin.
    * @param config GPIO 配置参数 / GPIO configuration.
-   * @return 成功返回 `ErrorCode::OK`，失败返回对应错误码 /
-   * Returns `ErrorCode::OK` on success, error code otherwise.
+   * @return 成功返回 `ErrorCode::OK`；port/pin 或枚举值无效返回 `ErrorCode::ARG_ERR`；
+   * `HPM_FGPIO` 的中断方向或 SDK 未提供双沿枚举时返回 `ErrorCode::NOT_SUPPORT` /
+   * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` for invalid port/pin
+   * or enum values, or `ErrorCode::NOT_SUPPORT` for interrupt directions on
+   * `HPM_FGPIO` or when the SDK does not provide the both-edge enum.
    * @note 该接口会将 PAD 复用强制切换为 GPIO，不负责外设复用配置 /
    * This API forces pad mux to GPIO function (no peripheral alternate-function setup).
-   * @note 在可解析到 PAD 时会自动开启 IOC loopback，用于输出模式下直接通过 `Read()`
-   * 读取实际引脚电平 / When PAD can be resolved, IOC loopback is enabled so `Read()` can
-   * return the actual pad level even in output mode.
+   * @note 在可解析到 PAD 时会自动开启 IOC loopback，用于输出模式下直接通过 `Read()` 读取实际引脚电平 /
+   * When PAD can be resolved, IOC loopback is enabled so `Read()` can return the actual pad
+   * level even in output mode.
    */
   ErrorCode SetConfig(Configuration config) override;
 
   /**
    * @brief 将当前 PAD 配置为模拟高阻 / Configure current pad to analog high-impedance.
-   * @return 成功返回 `ErrorCode::OK`，PAD 不可解析返回 `ErrorCode::NOT_SUPPORT` /
-   * Returns `ErrorCode::OK` on success, `ErrorCode::NOT_SUPPORT` when PAD is unavailable.
+   * @return 成功返回 `ErrorCode::OK`；port/pin 无效返回 `ErrorCode::ARG_ERR`；
+   * PAD 不可解析返回 `ErrorCode::NOT_SUPPORT` /
+   * Returns `ErrorCode::OK` on success, `ErrorCode::ARG_ERR` for invalid port/pin,
+   * or `ErrorCode::NOT_SUPPORT` when PAD is unavailable.
+   *
+   * @note 该接口直接写 IOC `FUNC_CTL` 的 `ANALOG` 位并清除上下拉和开漏位，未上板前
+   * 仍需用实际电气连接确认高阻效果 /
+   * This API writes the IOC `FUNC_CTL` `ANALOG` bit and clears pull/open-drain bits.
+   * The high-impedance effect still needs board-level electrical verification.
+   * @note 如果当前 pin 已经通过 `EnableInterrupt()` 进入共享 port IRQ 路由，本接口会先
+   * 走 `DisableInterrupt()` 维护引用计数；否则只清当前 pin 的 GPIO `IE` 位 /
+   * If the pin is already routed through `EnableInterrupt()`, this API first calls
+   * `DisableInterrupt()` to keep the shared port IRQ reference count consistent;
+   * otherwise it only clears the current pin's GPIO `IE` bit.
    */
   ErrorCode SetAnalogHighImpedance();
 
@@ -104,12 +178,33 @@ class HPMGPIO final : public GPIO
   static void CheckInterrupt(uint32_t port);
 
  private:
-  static constexpr uint32_t PORT_COUNT = 15;  ///< 支持的端口数量 / Supported port count.
+#if defined(GPIO_DI_GPIOZ)
+  static constexpr uint32_t PORT_COUNT =
+      GPIO_DI_GPIOZ + 1u;  ///< 支持的端口数量 / Supported port count.
+#elif defined(GPIO_DI_GPIOY)
+  static constexpr uint32_t PORT_COUNT =
+      GPIO_DI_GPIOY + 1u;  ///< 支持的端口数量 / Supported port count.
+#elif defined(GPIO_DI_GPIOX)
+  static constexpr uint32_t PORT_COUNT =
+      GPIO_DI_GPIOX + 1u;  ///< 支持的端口数量 / Supported port count.
+#elif defined(GPIO_DI_GPIOF)
+  static constexpr uint32_t PORT_COUNT =
+      GPIO_DI_GPIOF + 1u;  ///< 支持的端口数量 / Supported port count.
+#elif defined(GPIO_DI_GPIOE)
+  static constexpr uint32_t PORT_COUNT =
+      GPIO_DI_GPIOE + 1u;  ///< 支持的端口数量 / Supported port count.
+#elif defined(GPIO_DI_GPIOD)
+  static constexpr uint32_t PORT_COUNT =
+      GPIO_DI_GPIOD + 1u;  ///< 支持的端口数量 / Supported port count.
+#elif defined(GPIO_DI_GPIOC)
+  static constexpr uint32_t PORT_COUNT =
+      GPIO_DI_GPIOC + 1u;  ///< 支持的端口数量 / Supported port count.
+#else
+  static constexpr uint32_t PORT_COUNT = 15u;  ///< 支持的端口数量 / Supported port count.
+#endif
   static constexpr uint32_t PIN_COUNT = 32;   ///< 每个端口引脚数 / Pins per port.
-  static constexpr uint32_t INVALID_IRQ =
-      0xFFFFFFFFu;  ///< 无效 IRQ 标记 / Invalid IRQ marker.
-  static constexpr uint16_t INVALID_PAD_INDEX =
-      0xFFFFu;  ///< 无效 PAD 标记 / Invalid PAD marker.
+  static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;    ///< 无效 IRQ 标记 / Invalid IRQ marker.
+  static constexpr uint16_t INVALID_PAD_INDEX = 0xFFFFu;   ///< 无效 PAD 标记 / Invalid PAD marker.
 
   /**
    * @brief 端口级 IRQ 路由状态 / Shared port-level IRQ routing state.
@@ -148,8 +243,7 @@ class HPMGPIO final : public GPIO
   uint8_t pin_;         ///< GPIO 引脚号 / GPIO pin index.
   uint32_t irq_;        ///< 当前 port 对应 IRQ 号 / IRQ number for the current port.
   uint16_t pad_index_;  ///< IOC PAD 编号 / IOC PAD index.
-  bool interrupt_enabled_ =
-      false;  ///< 当前 pin IRQ 使能状态 / Per-instance IRQ enabled flag.
+  bool interrupt_enabled_ = false;  ///< 当前 pin IRQ 使能状态 / Per-instance IRQ enabled flag.
 };
 
 }  // namespace LibXR

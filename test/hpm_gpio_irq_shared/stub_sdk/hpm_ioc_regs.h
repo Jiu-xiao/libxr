@@ -17,10 +17,10 @@ struct IOC_Type
 
 using PIOC_Type = IOC_Type;
 
-constexpr uint16_t IOC_PAD_PA00 = 0u;
-constexpr uint16_t IOC_PAD_PB00 = 32u;
-constexpr uint16_t IOC_PAD_PX00 = 64u;
-constexpr uint16_t IOC_PAD_PY00 = 72u;
+#define IOC_PAD_PA00 (0u)
+#define IOC_PAD_PB00 (32u)
+#define IOC_PAD_PX00 (64u)
+#define IOC_PAD_PY00 (72u)
 
 #define IOC_PAD_FUNC_CTL_ALT_SELECT_SET(value) (static_cast<uint32_t>(value) & 0xFu)
 #define IOC_PAD_FUNC_CTL_LOOP_BACK_MASK (1u << 8u)
