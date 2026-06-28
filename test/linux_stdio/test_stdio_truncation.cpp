@@ -1,20 +1,24 @@
 /**
  * @file test_stdio_truncation.cpp
- * @brief linux stdio `print` 截断语义子测试。 Split test unit for linux stdio `print` truncation semantics.
+ * @brief Linux STDIO `print` 容量截断语义测试。 Capacity-truncation tests for Linux
+ * STDIO `print`.
+ * @details
+ * 1. 截断时返回实际保留字节数。
+ * 2. pipe 中只出现被保留的前缀内容。
+ * 3. 覆盖 direct writer、stream-backed writer 和很小 stream 容量。
  */
 #include "linux_stdio_print_test_common.hpp"
 
 namespace LibXRLinuxStdioPrintTest
 {
 /**
- * @brief 测试项函数 `TestStdioTruncation`。 Test-item function `TestStdioTruncation`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 覆盖 direct 和 stream-backed STDIO 写入的截断返回值和保留内容。 Cover truncation
+ * return values and retained payload for direct and stream-backed STDIO writes.
  */
 void TestStdioTruncation()
 {
-  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
-  // Test coverage: execute the current helper-scoped test item from this file.
+  // Direct writer 容量不足：只保留 pipe 空余容量对应的前缀。
+  // Direct writer with insufficient capacity: retain only the prefix that fits the pipe.
   {
     constexpr size_t pipe_capacity = 64;
     constexpr size_t payload_size = pipe_capacity + 16;
@@ -54,6 +58,9 @@ void TestStdioTruncation()
     }
   }
 
+  // Stream-backed 容量不足：同样按底层写端可用空间截断。
+  // Stream-backed insufficient capacity: truncation still follows the underlying writer
+  // space.
   {
     constexpr size_t stream_capacity = 64;
     constexpr size_t payload_size = stream_capacity + 16;
@@ -95,6 +102,8 @@ void TestStdioTruncation()
     }
   }
 
+  // 很小 stream 容量：覆盖短缓冲区下的返回值和前缀保留。
+  // Very small stream capacity: cover return value and prefix retention for tiny buffers.
   {
     constexpr size_t stream_capacity = 4;
     constexpr size_t payload_size = stream_capacity + 16;

@@ -1,22 +1,24 @@
 /**
  * @file test_print_failure.cpp
- * @brief `print` 失败路径语义子测试。 Split test unit for `print` failure-path semantics.
+ * @brief `print` stream-backed writer 的失败路径测试。 Failure-path tests for the
+ * `print` stream-backed writer.
+ * @details 格式对象在写出前缀后失败时，已经进入 stream 的前缀仍可提交；这和纯
+ *          bounded-buffer 的失败清理语义不同。
  */
 #include "print_test_common.hpp"
 
 namespace LibXRPrintTest
 {
 /**
- * @brief 测试项函数 `TestStreamBackedPrintFailureKeepsPrefix`。 Test-item function `TestStreamBackedPrintFailureKeepsPrefix`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 确认 stream-backed print 失败后保留已写前缀。 Confirm that stream-backed print
+ * keeps the prefix written before a later failure.
  */
 void TestStreamBackedPrintFailureKeepsPrefix()
 {
-  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
-  // Test coverage: execute the current helper-scoped test item from this file.
   static constexpr char expected[] = "hello ";
 
+  // Pipe 读端先挂起，写端 stream 只需要提交成功写出的前缀。
+  // Arm the pipe read first; the write stream only has to commit the emitted prefix.
   LibXR::Pipe pipe(64);
   LibXR::ReadPort& read = pipe.GetReadPort();
   LibXR::WritePort& write = pipe.GetWritePort();

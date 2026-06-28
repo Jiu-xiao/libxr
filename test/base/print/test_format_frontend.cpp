@@ -1,20 +1,25 @@
 /**
  * @file test_format_frontend.cpp
- * @brief `print` format 前端语义子测试。 Split test unit for `print` format frontend semantics.
+ * @brief 默认 profile 的 brace `Format` 运行时输出测试。 Default-profile brace
+ * `Format` runtime output tests.
+ * @details
+ * 1. 覆盖 `{}` 字面量编译后的 writer 输出。
+ * 2. 覆盖转义、显式索引、整数进制、字符串、浮点和指针。
+ * 3. 覆盖 `WriteTo` 直接写入路径。
  */
 #include "print_test_common.hpp"
 
 namespace LibXRPrintTest
 {
 /**
- * @brief 测试项函数 `TestFormatFrontendSemantics`。 Test-item function `TestFormatFrontendSemantics`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 覆盖默认 brace `Format` profile 下的输出语义。 Cover output semantics under the
+ * default brace `Format` profile.
+ * @details 期望文本写在测试内；brace 格式不是 host `snprintf` 方言。
  */
 void TestFormatFrontendSemantics()
 {
-  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
-  // Test coverage: execute the current helper-scoped test item from this file.
+  // 文本、转义和索引：确认 `{}` 前端最基础的 source 解析和参数重排。
+  // Text, escapes, and indexing: basic source parsing plus argument reordering.
   if (!SameFormatAsExpected<"abc">("abc"))
   {
     Fail("format frontend plain text mismatch");
@@ -31,6 +36,9 @@ void TestFormatFrontendSemantics()
     Fail("format frontend mixed mismatch");
   }
 
+  // 整数进制：二/八/十六进制和 64 位最大值覆盖 base writer 的宽路径。
+  // Integer bases: binary/octal/hex plus max 64-bit values cover the wider base-writer
+  // path.
   if (!SameFormatAsExpected<"{:#b} {:#B} {:#o}">("0b101 0B101 010", 5U, 5U, 8U))
   {
     Fail("format frontend non-decimal mismatch");
@@ -42,8 +50,8 @@ void TestFormatFrontendSemantics()
     std::string octal = UnsignedBaseText(max_value, 8);
     std::string hex_lower = UnsignedBaseText(max_value, 16);
     std::string hex_upper = UnsignedBaseText(max_value, 16, true);
-    std::string expected = binary + "|0b" + binary + "|0" + octal + "|" + hex_lower +
-                           "|" + hex_upper;
+    std::string expected =
+        binary + "|0b" + binary + "|0" + octal + "|" + hex_lower + "|" + hex_upper;
     if (!SameFormatAsExpected<"{:b}|{:#b}|{:#o}|{:x}|{:X}">(
             expected, max_value, max_value, max_value, max_value, max_value))
     {
@@ -51,6 +59,8 @@ void TestFormatFrontendSemantics()
     }
   }
 
+  // 文本族：字符串精度/填充、字符输出和默认左对齐。
+  // Text family: string precision/fill, character output, and default left alignment.
   if (!SameFormatAsExpected<"[{:.3s}] [{:_>6s}] [{:*^7s}]">("[abc] [___abc] [**abc**]",
                                                             "abcdef", "abc", "abc"))
   {
@@ -73,6 +83,9 @@ void TestFormatFrontendSemantics()
     Fail("format frontend integer flag mismatch");
   }
 
+  // 显式索引和浮点边界：参数重排、负零、inf/nan 文本。
+  // Explicit indexes and float boundaries: argument reorder, negative zero, and inf/nan
+  // text.
   if (!SameFormatAsExpected<"{1:+08d} {0:#x} {1}">("-0000012 0x2a -12", 42U, -12))
   {
     Fail("format frontend indexed spec mismatch");
@@ -92,6 +105,8 @@ void TestFormatFrontendSemantics()
     Fail("format frontend inf nan mismatch");
   }
 
+  // LibXR 参数适配：对象字符串、定长 char 数组和空 C 字符串。
+  // LibXR argument adapters: object strings, bounded char arrays, and null C strings.
   if (!SameFormatAsExpected<"[{:3}] [{:6}]">("[A  ] [abc   ]", 'A', "abc"))
   {
     Fail("format frontend default text alignment mismatch");
@@ -120,6 +135,8 @@ void TestFormatFrontendSemantics()
     Fail("format frontend null string mismatch");
   }
 
+  // 直接 writer 路径和指针默认格式：不经过 helper 包装也应生成同一类输出。
+  // Direct writer path and pointer defaults: output should match without helper wrappers.
   {
     constexpr LibXR::Format<"{:c} {:.3s} {:p}"> format{};
     int value = 7;

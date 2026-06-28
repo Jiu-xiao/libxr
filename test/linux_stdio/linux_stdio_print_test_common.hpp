@@ -1,12 +1,13 @@
 /**
  * @file linux_stdio_print_test_common.hpp
- * @brief linux stdio `print` 测试共用 helper。 Shared helpers for linux stdio `print` tests.
+ * @brief Linux STDIO `print` 适配测试共用 helper。 Shared helpers for Linux STDIO
+ * `print` adapter tests.
  *
  * 作用 / Purpose:
- * 1. 集中 STDIO 绑定作用域和失败辅助函数。
- *    Centralize STDIO linux scope and failure helpers.
- * 2. 让 split 后的 linux print 测试文件只保留各自场景。
- *    Keep each split linux-stdio-print test file focused on its own scenario.
+ * 1. 用 `StdioWriteScope` 临时绑定并恢复 `LibXR::STDIO` 的全局写端。
+ *    Temporarily bind and restore the global `LibXR::STDIO` writer.
+ * 2. 提供失败退出 helper，让测试主体只保留适配层场景。
+ *    Provide the failure-exit helper so test bodies stay focused on adapter scenarios.
  */
 #pragma once
 
@@ -25,6 +26,8 @@ namespace LibXRLinuxStdioPrintTest
 
 struct StdioWriteScope
 {
+  // 构造时替换 STDIO 全局写端，析构时恢复为空，避免影响后续测试。
+  // Replace the STDIO global writer during this scope and clear it on destruction.
   explicit StdioWriteScope(LibXR::WritePort& write, LibXR::Mutex& mutex,
                            LibXR::WritePort::Stream* stream = nullptr)
   {
@@ -45,9 +48,8 @@ struct StdioWriteScope
 };
 
 /**
- * @brief 辅助函数 `Fail`。 Helper function `Fail`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @brief 打印失败原因并终止当前测试进程。 Print the failure reason and terminate the
+ * current test process.
  */
 inline int Fail(const char* message)
 {

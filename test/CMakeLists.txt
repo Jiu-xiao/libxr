@@ -5,40 +5,47 @@ endif()
 add_compile_options(-g)
 
 file(GLOB_RECURSE XR_TEST_BASE_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/base/*.cpp")
+     "${CMAKE_CURRENT_SOURCE_DIR}/base/*.cpp"
+)
 list(SORT XR_TEST_BASE_SOURCES)
 
 file(GLOB_RECURSE XR_TEST_RUNTIME_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/runtime/*.cpp")
+     "${CMAKE_CURRENT_SOURCE_DIR}/runtime/*.cpp"
+)
 list(SORT XR_TEST_RUNTIME_SOURCES)
 
 file(GLOB_RECURSE XR_TEST_LINUX_STDIO_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/linux_stdio/*.cpp")
+     "${CMAKE_CURRENT_SOURCE_DIR}/linux_stdio/*.cpp"
+)
 list(SORT XR_TEST_LINUX_STDIO_SOURCES)
 
 file(GLOB_RECURSE XR_TEST_LINUX_DATABASE_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/linux_database/*.cpp")
+     "${CMAKE_CURRENT_SOURCE_DIR}/linux_database/*.cpp"
+)
 list(SORT XR_TEST_LINUX_DATABASE_SOURCES)
 
 file(GLOB_RECURSE XR_TEST_LINUX_SHM_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/linux_shm/*.cpp")
+     "${CMAKE_CURRENT_SOURCE_DIR}/linux_shm/*.cpp"
+)
 list(SORT XR_TEST_LINUX_SHM_SOURCES)
 
 file(GLOB_RECURSE XR_TEST_LINUX_BENCH_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/linux_bench/*.cpp")
+     "${CMAKE_CURRENT_SOURCE_DIR}/linux_bench/*.cpp"
+)
 list(SORT XR_TEST_LINUX_BENCH_SOURCES)
 
-set(XR_TEST_HARNESS_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/framework/main.cpp")
+set(XR_TEST_HARNESS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/framework/main.cpp")
 
-add_executable(test
+add_executable(
+  test
   ${XR_TEST_HARNESS_SOURCES}
   ${XR_TEST_BASE_SOURCES}
   ${XR_TEST_RUNTIME_SOURCES}
   ${XR_TEST_LINUX_STDIO_SOURCES}
   ${XR_TEST_LINUX_DATABASE_SOURCES}
   ${XR_TEST_LINUX_SHM_SOURCES}
-  ${XR_TEST_LINUX_BENCH_SOURCES})
+  ${XR_TEST_LINUX_BENCH_SOURCES}
+)
 add_dependencies(test xr)
 
 target_link_libraries(test PUBLIC xr)
@@ -47,4 +54,25 @@ target_include_directories(
   test
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/framework"
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen)
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
+)
+
+file(GLOB_RECURSE XR_TEST_PRINT_CONFIG_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/print_config/*.cpp"
+)
+list(SORT XR_TEST_PRINT_CONFIG_SOURCES)
+
+add_library(test_print_config_matrix OBJECT ${XR_TEST_PRINT_CONFIG_SOURCES})
+add_dependencies(test_print_config_matrix xr)
+
+target_compile_features(test_print_config_matrix PRIVATE cxx_std_20)
+target_compile_definitions(
+  test_print_config_matrix PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_COMPILE_DEFINITIONS>
+)
+
+target_include_directories(
+  test_print_config_matrix
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/print_config"
+  PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
+)

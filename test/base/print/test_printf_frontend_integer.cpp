@@ -1,19 +1,24 @@
 /**
  * @file test_printf_frontend_integer.cpp
- * @brief `print` printf 整数族前端语义子测试。 Split test unit for `print` printf integer-family frontend semantics.
- * @details 测试项目：
- *          1. 纯文本、十进制、有符号/无符号与进制转换语义。
- *          2. 标志位、精度和 64 位整数族语义。
- *          Test items:
- *          1. Plain text, decimal, signed/unsigned, and base-conversion semantics.
- *          2. Flag, precision, and 64-bit integer-family semantics.
+ * @brief 默认 profile 的 `printf` 整数族运行时输出测试。 Default-profile `printf`
+ * integer-family runtime output tests.
+ * @details
+ * 1. 标准 C printf 整数格式对照 host `snprintf`。
+ * 2. LibXR 扩展 `%b/%B` 对照固定期望文本。
+ * 3. 长度修饰符和 enum 参数覆盖参数打包边界。
  */
 #include "print_test_common.hpp"
 
 namespace LibXRPrintTest
 {
+/**
+ * @brief 覆盖默认 `printf` profile 下的整数输出语义。 Cover integer output semantics
+ * under the default `printf` profile.
+ */
 void TestPrintfFrontendIntegerSemantics()
 {
+  // 无参数文本路径：确认字面量文本不会经过格式参数路径后被改写。
+  // No-argument text path: literal text must survive without argument formatting.
   if (!SameAsSnprintf<"abc">())
   {
     Fail("plain text mismatch");
@@ -24,6 +29,8 @@ void TestPrintfFrontendIntegerSemantics()
     Fail("long plain text mismatch");
   }
 
+  // 有符号十进制：符号、空格、零填充、左对齐和零值精度语义。
+  // Signed decimal: sign, space, zero padding, left alignment, and zero-value precision.
   if (!SameAsSnprintf<"%d|%+d|% d|%05d|%-5d|%.0d">(-7, 7, 7, 7, 7, 0))
   {
     Fail("signed integer semantics mismatch");
@@ -39,6 +46,8 @@ void TestPrintfFrontendIntegerSemantics()
     Fail("integer precision precedence mismatch");
   }
 
+  // 无符号十进制和非十进制：标准 `%u/%x/%o` 对照 host，扩展 `%b/%B` 对照固定文本。
+  // Unsigned and bases: standard `%u/%x/%o` compare with host; `%b/%B` use fixed text.
   if (!SameAsSnprintf<"%u|%.0u|%5.3u|%-5u">(7U, 0U, 7U, 7U))
   {
     Fail("unsigned integer semantics mismatch");
@@ -60,14 +69,16 @@ void TestPrintfFrontendIntegerSemantics()
     Fail("binary integer semantics mismatch");
   }
 
+  // 64 位最大值覆盖多进制 writer 循环，避免只测小数值时漏掉高位路径。
+  // Max 64-bit value covers the multi-base writer loops beyond small-value paths.
   {
     unsigned long long max_value = std::numeric_limits<unsigned long long>::max();
     std::string binary = UnsignedBaseText(max_value, 2);
     std::string octal = UnsignedBaseText(max_value, 8);
     std::string hex_lower = UnsignedBaseText(max_value, 16);
     std::string hex_upper = UnsignedBaseText(max_value, 16, true);
-    std::string expected = binary + "|0b" + binary + "|0" + octal + "|" + hex_lower +
-                           "|" + hex_upper;
+    std::string expected =
+        binary + "|0b" + binary + "|0" + octal + "|" + hex_lower + "|" + hex_upper;
     if (!SamePrintfAsExpected<"%llb|%#llb|%#llo|%llx|%llX">(
             expected, max_value, max_value, max_value, max_value, max_value))
     {
@@ -75,6 +86,8 @@ void TestPrintfFrontendIntegerSemantics()
     }
   }
 
+  // 长度修饰符和 enum：确认参数打包类型、整数提升和最终输出一致。
+  // Length modifiers and enum arguments: verify packing, integer promotion, and output.
   {
     signed char tiny_signed = -3;
     unsigned char tiny_unsigned = 4;

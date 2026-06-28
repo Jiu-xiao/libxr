@@ -1,20 +1,25 @@
 /**
  * @file test_print_api.cpp
- * @brief `print` 公开 API 包装层子测试。 Split test unit for `print` public API wrappers.
+ * @brief `Print::*` 公开 API wrapper 的运行时契约测试。 Runtime contract tests for
+ * public `Print::*` API wrappers.
+ * @details
+ * 1. 不重复扩大格式语法覆盖。
+ * 2. 验证已编译格式写入 sink、bounded buffer 和 `SNPrintf` 风格接口。
+ * 3. 验证截断长度和错误返回。
  */
 #include "print_test_common.hpp"
 
 namespace LibXRPrintTest
 {
 /**
- * @brief 测试项函数 `TestPrintApiWrappers`。 Test-item function `TestPrintApiWrappers`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 覆盖 public print wrapper 的 sink、buffer、截断和错误传播路径。 Cover sink,
+ * buffer, truncation, and error-propagation paths in the public print wrappers.
  */
 void TestPrintApiWrappers()
 {
-  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
-  // Test coverage: execute the current helper-scoped test item from this file.
+  // Sink wrapper：已构造 format 对象和字面量模板两种入口都应写入同一 sink 合约。
+  // Sink wrappers: object-based and literal-template entry points share the same sink
+  // contract.
   {
     constexpr LibXR::Format<"x={:+05d} {:#x} {}"> format{};
     StringSink sink;
@@ -53,6 +58,9 @@ void TestPrintApiWrappers()
     }
   }
 
+  // Bounded buffer：返回完整逻辑长度，实际内容按容量写入并保持 C 字符串结尾语义。
+  // Bounded buffers: return full logical length while writing only what fits as a C
+  // string.
   {
     constexpr LibXR::Format<"x={:+05d} {:#x} {}"> format{};
     char buffer[32] = {};
@@ -99,6 +107,9 @@ void TestPrintApiWrappers()
     }
   }
 
+  // 边界容量：零容量、单字节容量和空指针计数模式不应越界写入。
+  // Capacity edges: zero-capacity, single-byte, and null-counting modes must not
+  // over-write.
   {
     constexpr LibXR::Format<"{} {}"> format{};
     char buffer[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', '\0'};
@@ -127,6 +138,9 @@ void TestPrintApiWrappers()
     }
   }
 
+  // `SNPrintf` wrapper：保留 snprintf 风格的返回值和截断后的可见内容。
+  // `SNPrintf` wrappers preserve snprintf-style return values and truncated visible
+  // content.
   {
     constexpr LibXR::Format<"{} {}"> format{};
     char buffer[6] = {};
@@ -148,6 +162,9 @@ void TestPrintApiWrappers()
     }
   }
 
+  // 错误传播：sink 写入失败或格式运行期失败时，wrapper 返回错误并清理 buffer 开头。
+  // Error propagation: sink and runtime-format failures are surfaced and buffers are
+  // cleared.
   {
     constexpr LibXR::Format<"hello {}"> format{};
     LimitedSink sink{.limit = 6};
@@ -169,7 +186,8 @@ void TestPrintApiWrappers()
 
   {
     char buffer[8] = {'x', 'x', 'x', '\0'};
-    int written = LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), BrokenGenericFormat{});
+    int written =
+        LibXR::Print::FormatIntoBuffer(buffer, sizeof(buffer), BrokenGenericFormat{});
     if (written != -1 || buffer[0] != '\0')
     {
       Fail("format bounded buffer runtime error mismatch");
@@ -185,6 +203,8 @@ void TestPrintApiWrappers()
     }
   }
 
+  // 空输出：成功写入空字符串时返回 0，buffer 仍保持 NUL 开头。
+  // Empty output returns zero and leaves the buffer NUL-terminated at the first byte.
   {
     constexpr LibXR::Format<""> format{};
     char buffer[4] = {'x', 'x', 'x', '\0'};

@@ -1,12 +1,11 @@
 /**
  * @file print_sink_test_common.hpp
- * @brief `print` sink 与坏格式探针。 Shared sinks and malformed-format probes for `print` tests.
- * @details 测试项目：
- *          1. 提供字符串 sink 和限长 sink。
- *          2. 提供用于失败路径的坏格式探针对象。
- *          Test items:
- *          1. Provide string sinks and bounded sinks.
- *          2. Provide malformed-format probe objects for failure-path tests.
+ * @brief `print` 测试用 sink 和坏格式探针。 Test sinks and malformed-format probes
+ * for `print` tests.
+ * @details
+ * 1. `StringSink` 收集完整输出，`LimitedSink` 模拟 sink 写满。
+ * 2. `BrokenGenericFormat` 测 wrapper 错误返回。
+ * 3. `PrefixThenBrokenFormat` 测 stream 前缀保留。
  */
 #pragma once
 
