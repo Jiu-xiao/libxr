@@ -20,7 +20,9 @@ jobs:
     - name: make
       run: cd build && cmake --build . -j"$(nproc)"
     - name: check
-      run: script -q -e -c "./build/test/test" /dev/null
+      run: |
+        script -q -e -c "./build/test/test" /dev/null
+        ./build/test/hpm_gpio_irq_shared/test_hpm_gpio_irq_shared
 
   clang-format:
     needs: build
