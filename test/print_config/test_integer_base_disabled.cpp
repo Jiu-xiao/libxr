@@ -1,15 +1,10 @@
 /**
  * @file test_integer_base_disabled.cpp
- * @brief 验证非十进制整数族关闭时的前端门控。 Verify frontend gates when non-decimal
- * integer formats are disabled.
- * @details 测试项目：
- *          1. 十进制整数继续可用。
- *          2. brace 前端拒绝二进制、八进制和十六进制展示。
- *          3. printf 前端把 `%b`、`%o`、`%x` 识别为被禁用的说明符。
- *          Test items:
- *          1. Decimal integer formatting remains enabled.
- *          2. Brace formatting rejects binary, octal, and hexadecimal presentations.
- *          3. Printf analysis reports `%b`, `%o`, and `%x` as disabled specifiers.
+ * @brief 非十进制整数关闭 profile 的编译期门控测试。 Compile-time gate test for the
+ * non-decimal-integer-disabled profile.
+ * @details
+ * 1. `LIBXR_PRINT_INTEGER_ENABLE_BASE8_16=0` 关闭二/八/十六进制整数格式。
+ * 2. 十进制整数必须继续可用。
  */
 #include "print_config_reset.hpp"
 
@@ -35,6 +30,9 @@ using LibXR::Print::Printf;
 using LibXR::Print::Detail::FormatFrontend::Error;
 using namespace LibXRPrintConfigTest;
 
+// Brace 前端：十进制可用，非十进制 presentation 被参数门拒绝。
+// Brace frontend: decimal works; non-decimal presentations are rejected by the argument
+// gate.
 static_assert(LibXR::Format<"{}">::Matches<int>());
 static_assert(LibXR::Format<"{:d}">::Matches<unsigned int>());
 static_assert(!LibXR::Format<"{:b}">::Matches<unsigned int>());
@@ -44,6 +42,8 @@ static_assert(FormatCompileError<"{:b}", unsigned int>() == Error::ArgumentTypeM
 static_assert(FormatCompileError<"{:o}", unsigned int>() == Error::ArgumentTypeMismatch);
 static_assert(FormatCompileError<"{:x}", unsigned int>() == Error::ArgumentTypeMismatch);
 
+// Printf 前端：对应说明符在 source analysis 阶段不可用。
+// Printf frontend: matching specifiers are unavailable during source analysis.
 static_assert(PrintfSourceError<"%d">() == Printf::Error::None);
 static_assert(PrintfSourceError<"%u">() == Printf::Error::None);
 static_assert(PrintfSourceError<"%b">() == Printf::Error::InvalidSpecifier);

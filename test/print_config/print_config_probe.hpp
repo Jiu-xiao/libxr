@@ -2,17 +2,10 @@
  * @file print_config_probe.hpp
  * @brief `print` 配置矩阵的编译期探针。 Compile-time probes for the `print` config
  * matrix.
- * @details 测试项目：
- *          1. 用内部前端分析接口检查禁用语法产生的错误类别。
- *          2. 用共享编译后端检查源串合法但参数/功能门不匹配的错误类别。
- *          3. 不执行 writer，不把配置矩阵与运行时文本对照测试混在一起。
- *          Test items:
- *          1. Inspect disabled-syntax errors through the internal frontend
- *             analysis interfaces.
- *          2. Inspect source-valid argument/gate failures through the shared
- *             compile backend.
- *          3. Avoid running the writer so this matrix stays separate from
- *             runtime text-comparison tests.
+ * @details
+ * 1. source analysis 检查被关闭的语法。
+ * 2. compile backend 检查源串合法但参数类型被配置门拒绝的情况。
+ * 3. 不执行 writer，不混入默认 profile 的运行时文本对照测试。
  */
 #pragma once
 

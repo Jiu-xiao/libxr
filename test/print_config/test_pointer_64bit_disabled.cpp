@@ -1,16 +1,13 @@
 /**
  * @file test_pointer_64bit_disabled.cpp
- * @brief 验证指针与 64 位整数关闭时的前端门控。 Verify frontend gates when pointer and
- * 64-bit integer support are disabled.
- * @details 测试项目：
- *          1. brace 与 printf 都拒绝指针格式。
- *          2. brace 与 printf 都拒绝需要 64 位存储的整数格式。
- *          3. 32 位整数格式继续可用，确认没有误关整数总开关。
- *          Test items:
- *          1. Brace and printf frontends both reject pointer formatting.
- *          2. Brace and printf frontends both reject integer formats requiring
- *             64-bit packed storage.
- *          3. 32-bit integer formats remain accepted.
+ * @brief 指针与 64 位整数关闭 profile 的编译期门控测试。 Compile-time gate test for the
+ * pointer/64-bit-integer-disabled profile.
+ * @details 指针格式由 `LIBXR_PRINT_ENABLE_POINTER=0` 拒绝，`long long` 整数格式由
+ *          `LIBXR_PRINT_INTEGER_ENABLE_64BIT=0` 拒绝；32 位整数仍可用，证明没有误关整数总
+ *          开关。 Pointer formats are rejected by `LIBXR_PRINT_ENABLE_POINTER=0`; `long
+ * long` integer formats are rejected by `LIBXR_PRINT_INTEGER_ENABLE_64BIT=0`; 32-bit
+ *          integer formats stay accepted so the integer master gate is not being tested
+ * here.
  */
 #include "print_config_reset.hpp"
 
@@ -40,6 +37,8 @@ using namespace LibXRPrintConfigTest;
 
 static_assert(sizeof(unsigned long long) > sizeof(uint32_t));
 
+// Brace 前端：指针和需要 64 位打包的整数参数都不匹配。
+// Brace frontend: pointers and integer arguments requiring 64-bit packing do not match.
 static_assert(!LibXR::Format<"{}">::Matches<const void*>());
 static_assert(!LibXR::Format<"{:p}">::Matches<const void*>());
 static_assert(!LibXR::Format<"{}">::Matches<unsigned long long>());
@@ -51,10 +50,14 @@ static_assert(FormatCompileError<"{}", unsigned long long>() ==
 static_assert(FormatCompileError<"{:x}", unsigned long long>() ==
               Error::ArgumentTypeMismatch);
 
+// Printf 前端：指针是禁用说明符，`ll` 长度修饰符是禁用长度族。
+// Printf frontend: pointer is a disabled specifier; `ll` is a disabled length family.
 static_assert(PrintfSourceError<"%p">() == Printf::Error::InvalidSpecifier);
 static_assert(PrintfSourceError<"%llu">() == Printf::Error::InvalidLength);
 static_assert(PrintfSourceError<"%llx">() == Printf::Error::InvalidLength);
 
+// 32 位整数仍可用，确认不是整数总开关被关闭。
+// 32-bit integers remain accepted, proving the integer master gate is still enabled.
 static_assert(LibXR::Format<"{}">::Matches<int32_t>());
 static_assert(LibXR::Format<"{:x}">::Matches<uint32_t>());
 static_assert(PrintfSourceError<"%d %u %x">() == Printf::Error::None);

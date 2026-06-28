@@ -1,12 +1,11 @@
 /**
  * @file print_compare_test_common.hpp
- * @brief `print` 文本对照与失败断言 helper。 Shared comparison and failure helpers for `print` tests.
- * @details 测试项目：
- *          1. 提供 `snprintf` / `Format` / `Printf` 的文本对照 helper。
- *          2. 提供指针、无符号进制文本和失败退出 helper。
- *          Test items:
- *          1. Provide text-comparison helpers for `snprintf`, `Format`, and `Printf`.
- *          2. Provide pointer/base-string helpers and the shared failure exit helper.
+ * @brief `print` 输出对照和失败报告 helper。 Output comparison and failure-report helpers
+ * for `print` tests.
+ * @details
+ * 1. `SameAsSnprintf` 对照 host `snprintf`。
+ * 2. Expected-text helpers cover brace formats.
+ * 3. Expected-text helpers also cover LibXR extensions.
  */
 #pragma once
 
@@ -108,8 +107,7 @@ std::string UnsignedBaseText(UInt value, uint8_t base, bool upper_case = false)
   std::string reversed;
   while (value != 0)
   {
-    reversed.push_back(
-        digits[static_cast<size_t>(value % static_cast<UInt>(base))]);
+    reversed.push_back(digits[static_cast<size_t>(value % static_cast<UInt>(base))]);
     value /= static_cast<UInt>(base);
   }
 

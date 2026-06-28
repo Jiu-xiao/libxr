@@ -1,19 +1,12 @@
 /**
  * @file test_float_precision_limit.cpp
- * @brief 验证浮点精度上限配置的前端门控。 Verify frontend gates for the float precision
- * limit.
- * @details 测试项目：
- *          1. brace 与 printf 都接受不超过上限的显式浮点精度。
- *          2. brace 与 printf 都拒绝超过 `LIBXR_PRINT_FLOAT_MAX_PRECISION` 的精度。
- *          3. `LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS` 只确认配置值传递，不在这里测试
- *             writer 运行时边界。
- *          Test items:
- *          1. Brace and printf frontends accept explicit float precision at or
- *             below the configured limit.
- *          2. Brace and printf frontends reject precision above
- *             `LIBXR_PRINT_FLOAT_MAX_PRECISION`.
- *          3. `LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS` is checked only as config
- *             propagation; writer runtime boundaries stay outside this matrix.
+ * @brief 浮点精度上限 profile 的编译期门控测试。 Compile-time gate test for the float
+ * precision-limit profile.
+ * @details
+ * 1. 显式精度小于等于 `LIBXR_PRINT_FLOAT_MAX_PRECISION` 时允许编译。
+ * 2. 超过上限时返回精度上限错误。
+ * 3. `LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS` 这里只确认配置值传递。
+ * 4. writer 运行时边界不在本矩阵源里测试。
  */
 #include "print_config_reset.hpp"
 
@@ -46,6 +39,8 @@ using namespace LibXRPrintConfigTest;
 static_assert(max_float_precision == 2);
 static_assert(max_float_integer_digits == 5);
 
+// Brace 前端：0..2 位精度可用，3 位精度被配置上限拒绝。
+// Brace frontend: precision 0..2 is accepted; precision 3 exceeds the configured limit.
 static_assert(LibXR::Format<"{:.0f}">::Matches<float>());
 static_assert(LibXR::Format<"{:.2f}">::Matches<float>());
 static_assert(LibXR::Format<"{:.2e}">::Matches<double>());
@@ -60,6 +55,9 @@ static_assert(FormatCompileError<"{:.3e}", double>() ==
 static_assert(FormatCompileError<"{:.3g}", double>() ==
               Error::FloatPrecisionLimitExceeded);
 
+// Printf 前端：同一上限应在 printf source analysis 中得到相同错误类别。
+// Printf frontend: the same limit should surface as the corresponding source-analysis
+// error.
 static_assert(PrintfSourceError<"%.0f">() == Printf::Error::None);
 static_assert(PrintfSourceError<"%.2f">() == Printf::Error::None);
 static_assert(PrintfSourceError<"%.2e">() == Printf::Error::None);

@@ -1,15 +1,10 @@
 /**
  * @file print_config_reset.hpp
  * @brief 清除 CMake 传入的 print 配置宏。 Clear CMake-provided print config macros.
- * @details 测试项目：
- *          1. 允许每个配置矩阵源文件在 include `print.hpp` 前自行定义
- *             `LIBXR_PRINT_*`。
- *          2. 避免 `xr` target 的 PUBLIC compile definitions 污染本地配置。
- *          Test items:
- *          1. Let each matrix source define its own `LIBXR_PRINT_*` values before
- *             including `print.hpp`.
- *          2. Keep PUBLIC compile definitions from the `xr` target from leaking
- *             into the local profile under test.
+ * @details
+ * 1. 每个矩阵 `.cpp` 先 include 本文件。
+ * 2. 然后该 `.cpp` 定义自己的 `LIBXR_PRINT_*` profile。
+ * 3. 最后 include `print.hpp`，避免继承 `xr` target 的 PUBLIC print 宏。
  */
 #pragma once
 
