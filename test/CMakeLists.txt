@@ -48,5 +48,3 @@ target_include_directories(
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/framework"
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen)
-
-add_subdirectory(hpm_gpio_irq_shared)
