@@ -85,10 +85,11 @@ ErrorCode MSPM0PWM::SetConfig(Configuration config)
   }
 
   uint32_t best_load = (SOURCE_CLOCK / (best_div * best_prescaler * config.frequency));
-  if (best_load > 0)
+  if (best_load == 0)
   {
-    best_load -= 1;
+    return ErrorCode::NOT_SUPPORT;  // Frequency too high to represent
   }
+  best_load -= 1;
 
   DL_Timer_ClockConfig clock_config;
   DL_Timer_getClockConfig(timer_, &clock_config);

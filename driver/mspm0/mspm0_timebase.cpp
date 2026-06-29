@@ -12,9 +12,9 @@ MicrosecondTimestamp Timebase::GetMicroseconds()
 {
   do
   {
-    uint32_t tick_old = sys_tick_ms;
+    uint32_t tick_old = MSPM0Timebase::sys_tick_ms;
     uint32_t val_old = DL_SYSTICK_getValue();
-    uint32_t tick_new = sys_tick_ms;
+    uint32_t tick_new = MSPM0Timebase::sys_tick_ms;
     uint32_t val_new = DL_SYSTICK_getValue();
 
     auto tick_diff = tick_new - tick_old;
@@ -43,8 +43,8 @@ MicrosecondTimestamp Timebase::GetMicroseconds()
 }
 
 MillisecondTimestamp Timebase::GetMilliseconds() { return MSPM0Timebase::sys_tick_ms; }
-void MSPM0Timebase::OnSysTickInterrupt() { sys_tick_ms++; }
-void MSPM0Timebase::Sync(uint32_t ticks) { sys_tick_ms = ticks; }
+void MSPM0Timebase::OnSysTickInterrupt() { MSPM0Timebase::sys_tick_ms++; }
+void MSPM0Timebase::Sync(uint32_t ticks) { MSPM0Timebase::sys_tick_ms = ticks; }
 
 extern "C" void SysTick_Handler(void)  // NOLINT
 {
