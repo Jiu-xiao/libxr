@@ -149,8 +149,10 @@ constexpr uint16_t kI2CFlagWriteCheckAck = I2C_WRITE_CHECK_ACK;
 // DMA manager state and ISR instance slots stay in this TU to avoid build-system
 // churn; platform resource resolution lives in hpm_i2c_platform.hpp.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
+#if !defined(LIBXR_HPM_I2C_HOST_STUB_TEST)
 static_assert(sizeof(uintptr_t) <= sizeof(uint32_t),
               "HPM I2C DMA helper assumes a 32-bit address space.");
+#endif
 
 uint32_t ToHpmI2cDmaAddress(const volatile void* addr)
 {
@@ -929,7 +931,7 @@ ErrorCode HPMI2C::PrepareAsyncTransfer(uint16_t slave_addr, uint16_t flags, uint
         wait_policy_.addr_hit_timeout_us);
     if (!addr_hit)
     {
-      ReleaseAsyncBus();
+      StopAndReleaseAsyncBus();
       return ErrorCode::NO_RESPONSE;
     }
     i2c_clear_status(i2c_, I2C_STATUS_ADDRHIT_MASK);
@@ -1104,6 +1106,12 @@ void HPMI2C::StopAsyncDma()
   }
 }
 
+void HPMI2C::StopAndReleaseAsyncBus()
+{
+  IssueStopAndWait(i2c_, wait_policy_);
+  ReleaseAsyncBus();
+}
+
 void HPMI2C::AsyncCompletionStateMachine::Reset(AsyncTransferContext& ctx)
 {
   ctx.final_status.store(status_success, std::memory_order_release);
@@ -1258,7 +1266,7 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   async_ctx_.slave_addr = slave_addr;
   async_ctx_.write_data = write_data;
   async_ctx_.write_op = op;
-  async_ctx_.flags = 0U;
+  async_ctx_.flags = BuildTransferFlags(kI2CFlagWriteCheckAck);
   async_completion_claim_.store(0U, std::memory_order_release);
 
   StartAsyncBlockWaitIfNeeded(op);
@@ -1427,7 +1435,8 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   if (!mem_addr_complete)
   {
     AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_timeout, true);
-    AbortAsyncStart(false, false, false);
+    StopAndReleaseAsyncBus();
+    ResetAsyncState();
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::TIMEOUT;
   }
@@ -1452,7 +1461,8 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   if (ans != ErrorCode::OK)
   {
     AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
-    AbortAsyncStart(false, false, false);
+    StopAndReleaseAsyncBus();
+    ResetAsyncState();
     CancelAsyncBlockWaitIfNeeded(op);
     return ErrorCode::NOT_SUPPORT;
   }
@@ -1461,7 +1471,9 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   if (ans != ErrorCode::OK)
   {
     AsyncCompletionStateMachine::MarkFailure(async_ctx_, status_fail, true);
-    AbortAsyncStart(false, true, false);
+    DisableAsyncI2cIrq();
+    StopAndReleaseAsyncBus();
+    ResetAsyncState();
     CancelAsyncBlockWaitIfNeeded(op);
     return ans;
   }

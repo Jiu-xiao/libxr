@@ -708,6 +708,12 @@ class HPMI2C final : public I2C
   void StopAsyncDma();
 
   /**
+   * @brief 显式发出 STOP 并释放异步事务占用的总线相位 /
+   * Issue an explicit STOP and release the bus phase held by an async transaction.
+   */
+  void StopAndReleaseAsyncBus();
+
+  /**
    * @brief Reset async bookkeeping after a start path aborts or completes.
    */
   void ResetAsyncState();
