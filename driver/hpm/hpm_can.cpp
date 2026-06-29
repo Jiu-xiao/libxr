@@ -398,6 +398,8 @@ void HPMCAN::ProcessError()
 
   if (protocol.in_bus_off_state)
   {
+    // Bus-off sets CCCR.INIT; clear it so MCAN can run the recovery sequence.
+    mcan_enter_normal_mode(can_);
     pack.id = FromErrorID(ErrorID::CAN_ERROR_ID_BUS_OFF);
   }
   else if (protocol.in_error_passive_state)
