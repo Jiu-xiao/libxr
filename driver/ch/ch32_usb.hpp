@@ -1,7 +1,6 @@
 #pragma once
 
-#include "libxr_def.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
+#include "ch32_def.hpp"
 
 namespace LibXR
 {
@@ -16,6 +15,9 @@ typedef enum : uint8_t
 #endif
 #if defined(USBHSD)
   CH32_USB_OTG_HS,
+#endif
+#if defined(LIBXR_CH32_HAS_USB_OTG_SS)
+  CH32_USB_OTG_SS,
 #endif
   CH32_USB_DEV_ID_NUM
 } ch32_usb_dev_id_t;

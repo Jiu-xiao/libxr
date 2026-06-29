@@ -283,6 +283,13 @@ class Endpoint
   virtual size_t MaxTransferSize() const { return MaxPacketSize(); }
 
   /**
+   * @brief 返回端点每个 service interval 的最大 packet 数 / Return the maximum
+   *        packets per service interval for this endpoint
+   * @return uint8_t 包数（至少为 1）/ Packet count (at least 1)
+   */
+  virtual uint8_t MaxBurst() const { return 1u; }
+
+  /**
    * @brief 配置端点协议参数 / Configure endpoint protocol parameters
    * @param cfg 配置参数 / Configuration parameters
    */

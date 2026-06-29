@@ -108,12 +108,12 @@ LIBXR_PACKED_BEGIN
   struct SerialStateNotification
   {
     uint8_t bmRequestType;  ///< 请求类型（固定为 0xA1） / Request type (fixed to 0xA1)
-    uint8_t bNotification;  ///< 通知类型（固定为 SERIAL_STATE） / Notification type (fixed
-                            ///< to SERIAL_STATE)
-    uint16_t wValue;        ///< 值（固定为 0） / Value (fixed to 0)
-    uint16_t wIndex;        ///< 接口号 / Interface number
-    uint16_t wLength;       ///< 数据长度（固定为2）| Data length (fixed to 2)
-    uint16_t serialState;   ///< 串行状态位图 / Serial state bitmap
+    uint8_t bNotification;  ///< 通知类型（固定为 SERIAL_STATE） / Notification type
+                            ///< (fixed to SERIAL_STATE)
+    uint16_t wValue;       ///< 值（固定为 0） / Value (fixed to 0)
+    uint16_t wIndex;       ///< 接口号 / Interface number
+    uint16_t wLength;      ///< 数据长度（固定为2）| Data length (fixed to 2)
+    uint16_t serialState;  ///< 串行状态位图 / Serial state bitmap
   };
 LIBXR_PACKED_END
 
@@ -124,6 +124,8 @@ LIBXR_PACKED_END
   // 控制线路状态位定义
   static constexpr uint16_t CDC_CONTROL_LINE_DTR = 0x01;  ///< DTR控制位 / DTR control bit
   static constexpr uint16_t CDC_CONTROL_LINE_RTS = 0x02;  ///< RTS控制位 / RTS control bit
+  static constexpr uint16_t CDC_COMM_PACKET_SIZE = 16u;   ///< CDC 通知端点包长
+  static constexpr uint8_t CDC_COMM_INTERVAL = 0x04u;     ///< CDC 通知端点轮询间隔
 
  public:
   /**
@@ -187,6 +189,11 @@ LIBXR_PACKED_END
    */
   ErrorCode SendSerialState()
   {
+    if (!inited_ || ep_comm_in_ == nullptr)
+    {
+      return ErrorCode::INIT_ERR;
+    }
+
     if (ep_comm_in_->GetState() == Endpoint::State::BUSY)
     {
       return ErrorCode::BUSY;
@@ -217,9 +224,7 @@ LIBXR_PACKED_END
     notification->wValue = 0;
     notification->wLength = 2;
 
-    ep_comm_in_->Transfer(sizeof(SerialStateNotification));
-
-    return ErrorCode::OK;
+    return ep_comm_in_->Transfer(sizeof(SerialStateNotification));
   }
 
   /**
@@ -258,6 +263,10 @@ LIBXR_PACKED_END
                              bool) override
   {
     control_line_state_ = 0;
+    const bool USE_SUPERSPEED =
+        GetUsbSpeed() == Speed::SUPER && GetUsbSpec() >= USBSpec::USB_3_0;
+    const uint8_t comm_protocol = static_cast<uint8_t>(
+        USE_SUPERSPEED ? Protocol::AT_COMMAND : Protocol::NONE);
     // 获取并配置数据IN端点
     auto ans = endpoint_pool.Get(ep_data_in_, Endpoint::Direction::IN, data_in_ep_num_);
     ASSERT(ans == ErrorCode::OK);
@@ -291,7 +300,7 @@ LIBXR_PACKED_END
                        2,
                        static_cast<uint8_t>(Class::COMM),
                        static_cast<uint8_t>(Subclass::ABSTRACT_CONTROL_MODEL),
-                       static_cast<uint8_t>(Protocol::NONE),
+                       comm_protocol,
                        0};
 
     // 通信接口描述符。
@@ -303,7 +312,7 @@ LIBXR_PACKED_END
                              1,
                              static_cast<uint8_t>(Class::COMM),
                              static_cast<uint8_t>(Subclass::ABSTRACT_CONTROL_MODEL),
-                             static_cast<uint8_t>(Protocol::NONE),
+                             comm_protocol,
                              GetInterfaceStringIndex(COMM_INTERFACE)};
 
     // CDC 头功能描述符。
@@ -359,20 +368,46 @@ LIBXR_PACKED_END
 
     // 通信端点描述符。
     // Communication endpoint descriptor.
-    desc_block_.comm_ep = {
-        7,
-        static_cast<uint8_t>(DescriptorType::ENDPOINT),
-        static_cast<uint8_t>(ep_comm_in_->GetAddress()),  // IN端点地址
-        static_cast<uint8_t>(Endpoint::Type::INTERRUPT),
-        16,   // 16字节最大包大小
-        0x04  // 轮询间隔FS-4ms HS-1ms
-    };
+    desc_block_.comm_ep = {7,
+                           static_cast<uint8_t>(DescriptorType::ENDPOINT),
+                           static_cast<uint8_t>(ep_comm_in_->GetAddress()),  // IN端点地址
+                           static_cast<uint8_t>(Endpoint::Type::INTERRUPT),
+                           CDC_COMM_PACKET_SIZE,
+                           CDC_COMM_INTERVAL};
 
     itf_comm_in_num_ = start_itf_num;
 
     // 设置描述符原始数据。
     // Publish the raw descriptor block.
-    SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
+    if (USE_SUPERSPEED)
+    {
+      const auto encode_max_burst = [](Endpoint* ep) -> uint8_t {
+        const uint8_t burst = (ep == nullptr || ep->MaxBurst() == 0u) ? 1u : ep->MaxBurst();
+        return static_cast<uint8_t>(burst - 1u);
+      };
+
+      ss_desc_block_.iad = desc_block_.iad;
+      ss_desc_block_.comm_intf = desc_block_.comm_intf;
+      ss_desc_block_.cdc_header = desc_block_.cdc_header;
+      ss_desc_block_.cdc_callmgmt = desc_block_.cdc_callmgmt;
+      ss_desc_block_.cdc_acm = desc_block_.cdc_acm;
+      ss_desc_block_.cdc_union = desc_block_.cdc_union;
+      ss_desc_block_.comm_ep = desc_block_.comm_ep;
+      ss_desc_block_.comm_ep_ss.bMaxBurst = encode_max_burst(ep_comm_in_);
+      ss_desc_block_.comm_ep_ss.wBytesPerInterval =
+          static_cast<uint16_t>(ep_comm_in_->MaxPacketSize() * ep_comm_in_->MaxBurst());
+      ss_desc_block_.data_intf = desc_block_.data_intf;
+      ss_desc_block_.data_ep_out = desc_block_.data_ep_out;
+      ss_desc_block_.data_ep_out_ss.bMaxBurst = encode_max_burst(ep_data_out_);
+      ss_desc_block_.data_ep_in = desc_block_.data_ep_in;
+      ss_desc_block_.data_ep_in_ss.bMaxBurst = encode_max_burst(ep_data_in_);
+      SetData(
+          RawData{reinterpret_cast<uint8_t*>(&ss_desc_block_), sizeof(ss_desc_block_)});
+    }
+    else
+    {
+      SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
+    }
 
     // 设置端点传输完成回调。
     // Install endpoint transfer-complete callbacks.
@@ -381,8 +416,9 @@ LIBXR_PACKED_END
 
     inited_ = true;
 
-    // 启动OUT端点传输
-    ep_data_out_->Transfer(ep_data_out_->MaxPacketSize());
+    const size_t initial_rx_xfer =
+        USE_SUPERSPEED ? ep_data_out_->MaxTransferSize() : ep_data_out_->MaxPacketSize();
+    ep_data_out_->Transfer(initial_rx_xfer);
   }
 
   /**
@@ -488,7 +524,7 @@ LIBXR_PACKED_END
    *
    * @return size_t 描述符块大小
    */
-  size_t GetMaxConfigSize() override { return sizeof(desc_block_); }
+  size_t GetMaxConfigSize() override { return sizeof(ss_desc_block_); }
 
   /**
    * @brief 处理类特定请求
@@ -533,7 +569,7 @@ LIBXR_PACKED_END
         // Update the DTR / RTS control-line state.
         control_line_state_ = wValue;
         result.write_zlp = true;
-        SendSerialState();
+        (void)SendSerialState();
         if (has_control_line_state_cb_)
         {
           on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
@@ -659,6 +695,29 @@ LIBXR_PACKED_BEGIN
     EndpointDescriptor data_ep_out;  ///< 数据OUT端点描述符 / Data OUT endpoint descriptor
     EndpointDescriptor data_ep_in;   ///< 数据IN端点描述符 / Data IN endpoint descriptor
   } desc_block_;
+
+  struct CDCSuperSpeedDescBlock
+  {
+    IADDescriptor iad;  ///< 接口关联描述符 / Interface association descriptor
+    InterfaceDescriptor
+        comm_intf;  ///< 通信接口描述符 / Communication interface descriptor
+    decltype(CDCDescBlock::cdc_header) cdc_header;  ///< CDC header descriptor
+    decltype(CDCDescBlock::cdc_callmgmt)
+        cdc_callmgmt;                             ///< CDC call management descriptor
+    decltype(CDCDescBlock::cdc_acm) cdc_acm;      ///< CDC ACM descriptor
+    decltype(CDCDescBlock::cdc_union) cdc_union;  ///< CDC union descriptor
+    EndpointDescriptor comm_ep;  ///< 通信端点描述符 / Communication endpoint descriptor
+    SuperSpeedEndpointCompanionDescriptor
+        comm_ep_ss;                 ///< 通信端点伴随描述符 / Communication SS companion
+    InterfaceDescriptor data_intf;  ///< 数据接口描述符 / Data interface descriptor
+    EndpointDescriptor
+        data_ep_out;  ///< 数据 OUT 端点描述符 / Data OUT endpoint descriptor
+    SuperSpeedEndpointCompanionDescriptor
+        data_ep_out_ss;             ///< 数据 OUT 伴随描述符 / Data OUT SS companion
+    EndpointDescriptor data_ep_in;  ///< 数据 IN 端点描述符 / Data IN endpoint descriptor
+    SuperSpeedEndpointCompanionDescriptor
+        data_ep_in_ss;  ///< 数据 IN 伴随描述符 / Data IN SS companion
+  } ss_desc_block_;
 LIBXR_PACKED_END
 
  protected:
@@ -707,7 +766,7 @@ LIBXR_PACKED_END
 
   // 状态标志。
   // State flags.
-  bool inited_ = false;                 ///< 初始化标志 / Initialization flag
+  bool inited_ = false;                     ///< 初始化标志 / Initialization flag
   bool has_control_line_state_cb_ = false;  ///< Control-line callback registered
   bool has_line_coding_cb_ = false;         ///< Line-coding callback registered
 

@@ -92,6 +92,19 @@ class CDCUartTxOpDequeueHelper final
    */
   bool HeadCompleted() const { return head_valid_ && (offset_ == head_.data.size_); }
 
+  ErrorCode PeekRemaining(std::size_t& remaining)
+  {
+    auto ec = EnsureHead();
+    if (ec != ErrorCode::OK)
+    {
+      remaining = 0;
+      return ec;
+    }
+
+    remaining = Remaining();
+    return ErrorCode::OK;
+  }
+
   /**
    * @brief 在 head 完成后 pop info 并重置状态
    *        Pop info after head completes and reset state
@@ -373,8 +386,11 @@ class CDCUart : public CDCBase, public LibXR::UART
       return false;
     }
 
-    const std::size_t MPS = ep_data_out->MaxPacketSize();
-    if (MPS == 0 || read_port_cdc_.queue_data_ == nullptr)
+    const bool USE_SUPERSPEED =
+        GetUsbSpeed() == Speed::SUPER && GetUsbSpec() >= USBSpec::USB_3_0;
+    const std::size_t RX_XFER =
+        USE_SUPERSPEED ? ep_data_out->MaxTransferSize() : ep_data_out->MaxPacketSize();
+    if (RX_XFER == 0 || read_port_cdc_.queue_data_ == nullptr)
     {
       return false;
     }
@@ -406,7 +422,7 @@ class CDCUart : public CDCBase, public LibXR::UART
       return false;
     }
 
-    auto ans = ep_data_out->Transfer(MPS);
+    auto ans = ep_data_out->Transfer(RX_XFER);
     if (ans == ErrorCode::OK)
     {
       read_port_cdc_.recv_pause_ = false;
@@ -414,6 +430,45 @@ class CDCUart : public CDCBase, public LibXR::UART
     }
 
     return false;
+  }
+
+  ErrorCode StartSuperSpeedTxSegment(Endpoint* ep)
+  {
+    auto buffer = ep->GetBuffer();
+    const std::size_t EP_CAP =
+        (buffer.size_ < ep->MaxTransferSize()) ? buffer.size_ : ep->MaxTransferSize();
+    std::size_t cap = EP_CAP;
+    std::size_t remaining = 0;
+    auto remain_ec = tx_deq_.PeekRemaining(remaining);
+    if (remain_ec != ErrorCode::OK || remaining == 0u || cap == 0u)
+    {
+      super_tx_last_segment_ = false;
+      return ErrorCode::PENDING;
+    }
+
+    const std::size_t MPS = ep->MaxPacketSize();
+    if (remaining > 1u && remaining <= cap && MPS > 0u && (remaining % MPS) == 0u)
+    {
+      cap = remaining - 1u;
+    }
+
+    std::size_t len = 0;
+    auto ec = tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), cap, len);
+    if (ec == ErrorCode::EMPTY || len == 0)
+    {
+      super_tx_last_segment_ = false;
+      return ErrorCode::PENDING;
+    }
+    if (ec != ErrorCode::OK && ec != ErrorCode::PENDING)
+    {
+      return ec;
+    }
+
+    super_tx_last_segment_ = (ec == ErrorCode::OK && tx_deq_.HeadCompleted());
+    super_tx_last_length_ = len;
+    auto ans = ep->Transfer(len);
+    ASSERT(ans == ErrorCode::OK);
+    return ErrorCode::PENDING;
   }
 
  protected:
@@ -432,6 +487,9 @@ class CDCUart : public CDCBase, public LibXR::UART
     read_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
 
     need_write_zlp_ = false;
+    super_tx_last_segment_ = false;
+    super_tx_last_length_ = 0;
+    super_tx_waiting_zlp_ = false;
 
     read_port_cdc_.recv_pause_ = false;
     read_port_cdc_.pending_data_ = {nullptr, 0};
@@ -513,6 +571,16 @@ class CDCUart : public CDCBase, public LibXR::UART
       cdc->need_write_zlp_ = false;
     }
 
+    if (cdc->GetUsbSpeed() == Speed::SUPER)
+    {
+      if (ep->GetState() != Endpoint::State::IDLE || !cdc->tx_deq_.HasOp())
+      {
+        return ErrorCode::PENDING;
+      }
+
+      return cdc->StartSuperSpeedTxSegment(ep);
+    }
+
     /**
      * @brief 当前 ActiveLength 槽对应数据段的完成态
      *        Completion state associated with the current ActiveLength slot
@@ -588,7 +656,8 @@ class CDCUart : public CDCBase, public LibXR::UART
           cdc->need_write_zlp_ = true;
         }
 
-        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one upstream finish
+        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one
+                               // upstream finish
       }
 
       // 预写下一段。
@@ -671,6 +740,9 @@ class CDCUart : public CDCBase, public LibXR::UART
     {
       tx_deq_.Reset();
       write_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
+      super_tx_last_segment_ = false;
+      super_tx_last_length_ = 0;
+      super_tx_waiting_zlp_ = false;
       return;
     }
 
@@ -686,6 +758,48 @@ class CDCUart : public CDCBase, public LibXR::UART
         return;
       }
       need_write_zlp_ = false;
+    }
+
+    if (GetUsbSpeed() == Speed::SUPER)
+    {
+      if (super_tx_waiting_zlp_)
+      {
+        WriteInfoBlock completed{};
+        auto pop_ok = tx_deq_.PopCompleted(&completed);
+        ASSERT(pop_ok == ErrorCode::OK);
+        write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
+        super_tx_waiting_zlp_ = false;
+        super_tx_last_length_ = 0;
+      }
+
+      if (super_tx_last_segment_)
+      {
+        const std::size_t MPS = ep->MaxPacketSize();
+        const bool NEEDS_ZLP =
+            MPS > 0 && (super_tx_last_length_ % MPS) == 0 && !tx_deq_.HasOp();
+        if (NEEDS_ZLP)
+        {
+          super_tx_waiting_zlp_ = true;
+          auto z = ep->TransferZLP();
+          ASSERT(z == ErrorCode::OK);
+          super_tx_last_segment_ = false;
+          return;
+        }
+
+        WriteInfoBlock completed{};
+        auto pop_ok = tx_deq_.PopCompleted(&completed);
+        ASSERT(pop_ok == ErrorCode::OK);
+        write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
+        super_tx_last_segment_ = false;
+        super_tx_last_length_ = 0;
+      }
+
+      if (tx_deq_.HasOp())
+      {
+        auto ans = StartSuperSpeedTxSegment(ep);
+        ASSERT(ans == ErrorCode::PENDING);
+      }
+      return;
     }
 
     // ActiveLength==0 时不读取队列。
@@ -747,6 +861,9 @@ class CDCUart : public CDCBase, public LibXR::UART
   Flag::Plain in_write_isr_;  ///< 写 ISR 保护标志 / Write ISR guard flag
 
   bool need_write_zlp_{false};  ///< ZLP 需求标志 / ZLP required flag
+  bool super_tx_last_segment_ = false;
+  std::size_t super_tx_last_length_ = 0;
+  bool super_tx_waiting_zlp_ = false;
 };
 
 inline void CDCUartReadPort::OnRxDequeue(bool in_isr)

@@ -18,6 +18,30 @@ using OtgHsEndpointMap = decltype(LibXR::CH32EndpointOtgHs::map_otg_hs_);
 constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
 constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
 
+static void EnableUsbHsControllerClock()
+{
+#if defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+#elif defined(RCC_HBPeriph_USBHS)
+  RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, ENABLE);
+#endif
+}
+
+static void DisableUsbHsControllerClock()
+{
+#if defined(RCC_AHBPeriph_USBHS)
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, DISABLE);
+#elif defined(RCC_HBPeriph_USBHS)
+  RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, DISABLE);
+#endif
+}
+
+static uint16_t GetOtgHsRxLen(uint8_t ep_num)
+{
+  UNUSED(ep_num);
+  return USBHSD->RX_LEN;
+}
+
 static void ResetEp0State(OtgHsEndpointMap& map)
 {
   auto* out0 = map[0][OUT_IDX];
@@ -98,7 +122,7 @@ static void HandleTransferOut(CH32EndpointOtgHs* ep_out, uint8_t ep_num, uint8_t
 
   const bool is_nak = ((int_st & USBHS_UIS_IS_NAK) != 0u);
   const bool busy = (ep_out->GetState() == LibXR::USB::Endpoint::State::BUSY);
-  const uint16_t rx_len = USBHSD->RX_LEN;
+  const uint16_t rx_len = GetOtgHsRxLen(ep_num);
 
   if (ep_num == 0u)
   {
@@ -361,9 +385,7 @@ void CH32USBOtgHS::Start(bool)
   // OTGHS selects the shared 48 MHz source first, then enables its own bus clock.
   // OTGHS 先选择共享 48 MHz 时钟源，再打开 USBHS 自己的总线时钟。
   LibXR::CH32UsbRcc::ConfigureUsb48M();
-#if defined(RCC_AHBPeriph_USBHS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
-#endif
+  EnableUsbHsControllerClock();
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
   USBHSD->CONTROL &= ~USBHS_UC_RESET_SIE;
   USBHSD->HOST_CTRL = USBHS_UH_PHY_SUSPENDM;
@@ -371,8 +393,8 @@ void CH32USBOtgHS::Start(bool)
   USBHSD->INT_EN =
       USBHS_UIE_SETUP_ACT | USBHS_UIE_TRANSFER | USBHS_UIE_DETECT | USBHS_UIE_SUSPEND;
   USBHSD->CONTROL |= USBHS_UC_DEV_PU_EN;
-  NVIC_EnableIRQ(USBHS_IRQn);
   self_ = this;
+  NVIC_EnableIRQ(USBHS_IRQn);
 }
 
 void CH32USBOtgHS::Stop(bool)

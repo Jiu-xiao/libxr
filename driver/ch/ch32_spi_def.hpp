@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ch32_def.hpp"
 #include "libxr.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 /**
  * @brief CH32 SPI 实例编号 / CH32 SPI instance identifier
@@ -20,6 +20,8 @@ typedef enum
   CH32_SPI_NUMBER,
   CH32_SPI_ID_ERROR
 } ch32_spi_id_t;
+
+static constexpr uint16_t CH32_SPI_DEFAULT_PRESCALER = SPI_BaudRatePrescaler_64;
 
 static constexpr uint8_t CH32_SPI_APB_MAP[] = {
 #if defined(SPI1)

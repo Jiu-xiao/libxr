@@ -8,6 +8,60 @@
 namespace LibXR::CH32UsbRcc
 {
 
+#if defined(LIBXR_CH32_IS_H41X)
+inline bool WaitForRccCtlrBits(uint32_t mask, uint32_t timeout)
+{
+  while (((RCC->CTLR & mask) != mask) && timeout != 0u)
+  {
+    --timeout;
+  }
+
+  return (RCC->CTLR & mask) == mask;
+}
+
+inline bool WaitForRccPllCfgr2MaskedValue(uint32_t mask, uint32_t expected,
+                                          uint32_t timeout)
+{
+  while (((RCC->PLLCFGR2 & mask) != expected) && timeout != 0u)
+  {
+    --timeout;
+  }
+
+  return (RCC->PLLCFGR2 & mask) == expected;
+}
+
+inline bool TryGetUsbHsCH32H41xRefConfig(bool use_hse, uint32_t& ref_cfg)
+{
+  if (!use_hse)
+  {
+#if defined(RCC_USBHSPLLRefer_25M)
+    ref_cfg = RCC_USBHSPLLRefer_25M;
+    return true;
+#else
+    return false;
+#endif
+  }
+
+  switch (static_cast<uint32_t>(HSE_VALUE))
+  {
+    case 20000000u:
+      ref_cfg = RCC_USBHSPLLRefer_20M;
+      return true;
+    case 24000000u:
+      ref_cfg = RCC_USBHSPLLRefer_24M;
+      return true;
+    case 25000000u:
+      ref_cfg = RCC_USBHSPLLRefer_25M;
+      return true;
+    case 32000000u:
+      ref_cfg = RCC_USBHSPLLRefer_32M;
+      return true;
+    default:
+      return false;
+  }
+}
+#endif
+
 inline uint32_t GetSysclkHz()
 {
   RCC_ClocksTypeDef clk{};
@@ -70,6 +124,109 @@ inline void ConfigureUsb48MFromSysclk()
 #endif
 
   ASSERT(false);
+}
+
+inline void ConfigureUsb48MForCH32H41x()
+{
+#if defined(RCC_USBFSCLKSource_USBHSPLL) && defined(RCC_USBHSPLLSource_HSE) && \
+    defined(RCC_USBHSPLLRefer_20M) && \
+    defined(RCC_USBHSPLLRefer_24M) && defined(RCC_USBHSPLLRefer_25M) && \
+    defined(RCC_USBHSPLLRefer_32M) && defined(RCC_USBHSPLL_IN_Div1) && \
+    defined(RCC_USBFS_Div10) && defined(RCC_SYSPLL_SEL) && defined(RCC_SYSPLL_USBHS) && \
+    defined(RCC_HSERDY) && defined(RCC_USBHS_PLLRDY)
+  if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
+  {
+    ASSERT((RCC->CTLR & RCC_HSERDY) != 0u);
+
+    uint32_t ref_cfg = 0u;
+    switch (static_cast<uint32_t>(HSE_VALUE))
+    {
+      case 20000000u:
+        ref_cfg = RCC_USBHSPLLRefer_20M;
+        break;
+      case 24000000u:
+        ref_cfg = RCC_USBHSPLLRefer_24M;
+        break;
+      case 25000000u:
+        ref_cfg = RCC_USBHSPLLRefer_25M;
+        break;
+      case 32000000u:
+        ref_cfg = RCC_USBHSPLLRefer_32M;
+        break;
+      default:
+        ASSERT(false);
+        return;
+    }
+
+    RCC_USBHS_PLLCmd(DISABLE);
+    RCC_USBHSPLLCLKConfig(RCC_USBHSPLLSource_HSE);
+    RCC_USBHSPLLReferConfig(ref_cfg);
+    RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
+    RCC_USBHS_PLLCmd(ENABLE);
+    while ((RCC->CTLR & RCC_USBHS_PLLRDY) == 0u)
+    {
+    }
+  }
+
+  RCC_USBFSCLKConfig(RCC_USBFSCLKSource_USBHSPLL);
+  RCC_USBFS48ClockSourceDivConfig(RCC_USBFS_Div10);
+#else
+  ASSERT(false);
+#endif
+}
+
+inline void ConfigureUsbHsForCH32H41x()
+{
+#if defined(RCC_USBHSPLLSource_HSE) && defined(RCC_USBHSPLLRefer_20M) && \
+    defined(RCC_USBHSPLLRefer_24M) && \
+    defined(RCC_USBHSPLLRefer_25M) && defined(RCC_USBHSPLLRefer_32M) && \
+    defined(RCC_USBHSPLL_IN_Div1) && defined(RCC_USBHSPLLSRC) &&        \
+    defined(RCC_USBHSPLL_REFSEL) && defined(RCC_USBHSPLL_IN_DIV) &&     \
+    defined(RCC_SYSPLL_SEL) && defined(RCC_SYSPLL_USBHS) &&             \
+    defined(RCC_HSEON) && defined(RCC_HSERDY) && defined(RCC_USBHS_PLLRDY) && \
+    defined(RCC_USBHSPLLSource_HSI)
+  if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
+  {
+    constexpr uint32_t kHseTimeout = 200000u;
+    constexpr uint32_t kCfgTimeout = 200000u;
+    constexpr uint32_t kUsbHsPllTimeout = 200000u;
+
+    // USBFS on CH32H41x can already be running from USBHS PLL / 10. Reconfiguring the
+    // shared PLL under an active FS runtime is unsafe, so reuse the locked PLL when
+    // it is already on.
+    // CH32H41x 上 USBFS 可能已经在使用 USBHS PLL / 10；此时再次关闭并重配共享 PLL
+    // 会直接干扰正在工作的 FS 运行时，因此 PLL 已锁定时直接复用。
+    if ((RCC->CTLR & RCC_USBHS_PLLRDY) != 0u)
+    {
+      return;
+    }
+
+    bool use_hse = (RCC->CTLR & RCC_HSERDY) != 0u;
+    if (!use_hse)
+    {
+      RCC->CTLR |= RCC_HSEON;
+      use_hse = WaitForRccCtlrBits(RCC_HSERDY, kHseTimeout);
+    }
+
+    uint32_t ref_cfg = 0u;
+    ASSERT(TryGetUsbHsCH32H41xRefConfig(use_hse, ref_cfg));
+
+    RCC_USBHS_PLLCmd(DISABLE);
+    RCC_USBHSPLLCLKConfig(use_hse ? RCC_USBHSPLLSource_HSE : RCC_USBHSPLLSource_HSI);
+    ASSERT(WaitForRccPllCfgr2MaskedValue(
+        RCC_USBHSPLLSRC,
+        use_hse ? RCC_USBHSPLLSource_HSE : RCC_USBHSPLLSource_HSI, kCfgTimeout));
+    RCC_USBHSPLLReferConfig(ref_cfg);
+    ASSERT(WaitForRccPllCfgr2MaskedValue(RCC_USBHSPLL_REFSEL, ref_cfg, kCfgTimeout));
+    RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
+    ASSERT(WaitForRccPllCfgr2MaskedValue(RCC_USBHSPLL_IN_DIV, RCC_USBHSPLL_IN_Div1,
+                                         kCfgTimeout));
+    RCC_USBHS_PLLCmd(ENABLE);
+    ASSERT(WaitForRccCtlrBits(RCC_USBHS_PLLRDY, kUsbHsPllTimeout));
+  }
+#else
+  ASSERT(false);
+#endif
 }
 
 #if defined(RCC_HSBHSPLLCLKSource_HSE) && defined(RCC_USBPLL_Div1) &&                   \
@@ -156,7 +313,11 @@ inline void ConfigureUsbHsPhyFromHse()
 
 inline void ConfigureUsb48M()
 {
-#if defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_HSBHSPLLCLKSource_HSE)
+#if defined(LIBXR_CH32_IS_H41X)
+  // CH32H41x routes USBFS 48 MHz from the dedicated USBHS PLL path.
+  // CH32H41x 的 USBFS 48 MHz 走专用 USBHS PLL 路径。
+  ConfigureUsb48MForCH32H41x();
+#elif defined(RCC_USBCLK48MCLKSource_USBPHY) && defined(RCC_HSBHSPLLCLKSource_HSE)
   // 部分 CH32V30x 可以从 USBHS PHY PLL 提供共享 48 MHz USB 时钟；
   // 这种情况下先选 PHY 路径，再让各控制器自己打开总线时钟。
   // Some CH32V30x parts can source the shared 48 MHz USB clock from the USBHS PHY PLL;
