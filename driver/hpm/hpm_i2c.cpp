@@ -149,10 +149,8 @@ constexpr uint16_t kI2CFlagWriteCheckAck = I2C_WRITE_CHECK_ACK;
 // DMA manager state and ISR instance slots stay in this TU to avoid build-system
 // churn; platform resource resolution lives in hpm_i2c_platform.hpp.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
-#if !defined(LIBXR_HPM_I2C_HOST_STUB_TEST)
 static_assert(sizeof(uintptr_t) <= sizeof(uint32_t),
               "HPM I2C DMA helper assumes a 32-bit address space.");
-#endif
 
 uint32_t ToHpmI2cDmaAddress(const volatile void* addr)
 {
