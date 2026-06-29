@@ -212,14 +212,14 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
           uint32_t current_polarity = DL_GPIO_getLowerPinsPolarity(port_);
           current_polarity &= ~clear_mask;
           current_polarity |= pol_mask;
-          DL_GPIO_setLowerPinsPolarity(port_, current_polarity);
+          port_->POLARITY15_0 = current_polarity;
         }
         else
         {
           uint32_t current_polarity = DL_GPIO_getUpperPinsPolarity(port_);
           current_polarity &= ~clear_mask;
           current_polarity |= pol_mask;
-          DL_GPIO_setUpperPinsPolarity(port_, current_polarity);
+          port_->POLARITY31_16 = current_polarity;
         }
       }
 

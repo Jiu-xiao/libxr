@@ -1,12 +1,10 @@
 /**
  * @file print_literal_test_common.hpp
- * @brief `print` 前端字面量解析测试共用约束。 Shared literal-resolution constraints for `print` frontend tests.
- * @details 测试项目：
- *          1. 固化 `Format` 参数匹配的编译期约束。
- *          2. 固化 logger 字面量前端自动判定的编译期约束。
- *          Test items:
- *          1. Lock in compile-time argument-matching constraints for `Format`.
- *          2. Lock in compile-time auto-frontend resolution constraints for logger literals.
+ * @brief `print` 字面量前端的编译期约束。 Compile-time constraints for `print`
+ * literal frontends.
+ * @details
+ * 1. 固化 brace `Format` 的参数匹配规则。
+ * 2. 固化 logger 自动选择 brace/printf/None/Ambiguous 的边界。
  */
 #pragma once
 

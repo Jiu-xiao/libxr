@@ -1,20 +1,24 @@
 /**
  * @file test_stdio_wrappers.cpp
- * @brief linux stdio `print` STDIO 包装层子测试。 Split test unit for linux stdio `print` STDIO wrappers.
+ * @brief Linux STDIO `Print` / `Printf` wrapper 正常写入测试。 Normal-write tests for
+ * Linux STDIO `Print` / `Printf` wrappers.
+ * @details
+ * 1. 每个场景都把 `STDIO::write_` 绑定到 pipe 写端。
+ * 2. 从 pipe 读端确认实际字节。
+ * 3. stream-backed 场景额外验证 `write_stream_` 绑定。
  */
 #include "linux_stdio_print_test_common.hpp"
 
 namespace LibXRLinuxStdioPrintTest
 {
 /**
- * @brief 测试项函数 `TestStdioPrintWrappers`。 Test-item function `TestStdioPrintWrappers`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 覆盖 STDIO 正常写入的 Format/Printf direct 和 stream-backed 路径。 Cover normal
+ * STDIO writes through Format/Printf direct and stream-backed paths.
  */
 void TestStdioPrintWrappers()
 {
-  // 测试内容：执行当前辅助测试项，对应文件头中的一个具体项目。
-  // Test coverage: execute the current helper-scoped test item from this file.
+  // Format direct：`STDIO::Print` 直接写到全局 `write_`。
+  // Format direct: `STDIO::Print` writes directly to global `write_`.
   {
     static constexpr char expected[] = "x=+0007 0x2a ok";
 
@@ -44,6 +48,9 @@ void TestStdioPrintWrappers()
     }
   }
 
+  // Format stream-backed：绑定 stream 后，输出仍应到同一个 pipe，并返回完整长度。
+  // Format stream-backed: with a bound stream, output still reaches the pipe and returns
+  // full length.
   {
     static constexpr char expected[] = "x=+0007 0x2a ok";
 
@@ -75,6 +82,8 @@ void TestStdioPrintWrappers()
     }
   }
 
+  // Printf direct：printf 字面量 wrapper 走同一个全局写端绑定。
+  // Printf direct: printf-literal wrapper uses the same global writer binding.
   {
     static constexpr char expected[] = "+0007 0x2a ok";
 
@@ -104,6 +113,8 @@ void TestStdioPrintWrappers()
     }
   }
 
+  // Printf stream-backed：printf 路径也必须遵守 `write_stream_` 绑定。
+  // Printf stream-backed: printf path must also honor the `write_stream_` binding.
   {
     static constexpr char expected[] = "+0007 0x2a ok";
 
