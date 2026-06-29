@@ -5,12 +5,6 @@
  */
 
 /**
- * @brief 使用 float32 位级算术对 `value * scale` 做舍入 / Round `value * scale` using float32 bit-level arithmetic
- * @param value 待缩放的 float32 绝对值 / Float32 magnitude to scale
- * @param scale 十进制缩放因子 / Decimal scale factor
- * @return 舍入后的缩放整数 / Returns the rounded scaled integer
- */
-/**
  * @brief 浮点文本输出归一化过程中使用的十进制缩放对 / Decimal-scale pair used while normalizing one float for text output.
  * @tparam Float Float type. / 浮点类型。
  */
@@ -19,6 +13,14 @@ struct Writer::DecimalScale
 {
   int exponent = 0;  ///< decimal exponent / 十进制指数
   Float scale = 1;   ///< 10 ^ exponent / 10 的 exponent 次幂
+};
+
+template <typename Float>
+struct Writer::ScientificDigits
+{
+  Float digits = 0;
+  Float scale = 1;
+  int exponent = 0;
 };
 
 /**
@@ -54,6 +56,47 @@ Float Writer::Power10(int exponent)
     {
       base *= base;
     }
+  }
+
+  return result;
+}
+
+/**
+ * @brief 把一个值舍入到指定小数位 / Round one value to the requested decimal precision.
+ * @tparam Float Float type. / 浮点类型。
+ * @param value Finite non-negative value. / 有限非负值。
+ * @param precision Decimal places to retain. / 保留的小数位数。
+ * @return Rounded value, or the original value if scaling would overflow. /
+ *         返回舍入后的值；若缩放会溢出，则保留原值。
+ */
+template <typename Float>
+Float Writer::RoundDecimal(Float value, uint8_t precision)
+{
+  Float scale = Power10<Float>(static_cast<int>(precision));
+  Float scaled = value * scale;
+  if (!std::isfinite(scaled))
+  {
+    return value;
+  }
+
+  return std::nearbyint(scaled) / scale;
+}
+
+template <typename Float>
+Writer::ScientificDigits<Float> Writer::RoundScientificDigits(Float value,
+                                                              uint8_t precision)
+{
+  ScientificDigits<Float> result{};
+  auto normalized = NormalizeDecimal(value);
+  result.exponent = (value == 0) ? 0 : normalized.exponent;
+  Float decimal_scale = Power10<Float>(result.exponent);
+  Float mantissa = (value == 0) ? 0 : value / decimal_scale;
+  result.scale = Power10<Float>(static_cast<int>(precision));
+  result.digits = std::nearbyint(mantissa * result.scale);
+  if (result.digits >= static_cast<Float>(10) * result.scale)
+  {
+    result.digits /= 10;
+    ++result.exponent;
   }
 
   return result;
@@ -131,10 +174,3 @@ uint8_t Writer::ExtractDigit(Float& value, Float scale)
 
   return static_cast<uint8_t>(digit);
 }
-
-/**
- * @brief 在通用格式中裁掉末尾零和多余的小数点 / Trim trailing zeros and the spare decimal point in general format
- * @param text 可修改的浮点文本缓冲区 / Mutable float text buffer
- * @param size 当前文本长度 / Current text size
- * @return 返回修剪后的文本长度 / Returns the trimmed text size
- */

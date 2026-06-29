@@ -38,9 +38,25 @@ void TestPrintfFrontendFloatSemantics()
     Fail("float alternate form mismatch");
   }
 
+  // Halfway cases must follow the default printf nearest-even rounding behavior.
+  if (!SameAsSnprintf<"%.0f|%.0f|%.0f|%.0f">(0.5, 1.5, 2.5, 3.5))
+  {
+    Fail("float half-even rounding mismatch");
+  }
+
   if (!SameAsSnprintf<"%010f|%+010f|% 010f">(1.25, 1.25, 1.25))
   {
     Fail("float zero padding mismatch");
+  }
+
+  // inf/nan are text payloads; zero padding must not be inserted after the sign.
+  if (!SameAsSnprintf<"%010f|%+010f|% 010f|%010f">(
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN()))
+  {
+    Fail("float inf nan zero padding mismatch");
   }
 
   // 边界语义：`%g` fixed/scientific 阈值、负零和 inf/nan 文本。
@@ -48,6 +64,20 @@ void TestPrintfFrontendFloatSemantics()
   if (!SameAsSnprintf<"%g|%g|%.0g|%#.0g">(1000000.0, 999999.0, 12.0, 12.0))
   {
     Fail("float general threshold mismatch");
+  }
+
+  // %g chooses fixed or scientific form after rounding the requested significant digits.
+  if (!SameAsSnprintf<"%.6g|%.6g|%.5g|%.4g|%.6g|%.6g">(
+          999999.4, 999999.5, 99999.9, 9999.9, 0.0000999999, 0.00009999999))
+  {
+    Fail("float general rounded exponent mismatch");
+  }
+
+  // Rounding at the largest finite double must not overflow the internal helper.
+  if (!SameAsSnprintf<"%.2e|%.2g">(std::numeric_limits<double>::max(),
+                                   std::numeric_limits<double>::max()))
+  {
+    Fail("float max double scientific mismatch");
   }
 
   if (!SameAsSnprintf<"%f|%e|%g">(-0.0, -0.0, -0.0))

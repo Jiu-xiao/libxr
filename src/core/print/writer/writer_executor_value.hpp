@@ -235,9 +235,15 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
     return ErrorCode::ARG_ERR;
   }
 
-  char sign_char = ResolveFloatSignChar(value, spec);
+  Spec actual = spec;
+  if (!std::isfinite(value))
+  {
+    actual.flags &= static_cast<uint8_t>(~static_cast<uint8_t>(FormatFlag::ZeroPad));
+  }
+
+  char sign_char = ResolveFloatSignChar(value, actual);
   T magnitude = std::signbit(value) ? -static_cast<T>(value) : static_cast<T>(value);
-  uint8_t precision = spec.HasPrecision() ? spec.precision : DefaultFloatPrecision();
+  uint8_t precision = actual.HasPrecision() ? actual.precision : DefaultFloatPrecision();
   if (type == FormatType::FloatFixed || type == FormatType::DoubleFixed ||
       type == FormatType::LongDoubleFixed)
   {
@@ -250,7 +256,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
            type == FormatType::LongDoubleGeneral)
   {
     uint8_t significant = precision == 0 ? 1 : precision;
-    int exponent = (magnitude == 0) ? 0 : NormalizeDecimal(magnitude).exponent;
+    int exponent =
+        RoundScientificDigits(magnitude, static_cast<uint8_t>(significant - 1)).exponent;
     if (!(exponent < -4 || exponent >= significant))
     {
       int fractional_precision = static_cast<int>(significant) - (exponent + 1);
@@ -267,12 +274,12 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
   }
   char output_buffer[float_buffer_capacity];
   size_t output_size = 0;
-  if (!FormatFloatText(type, spec, magnitude, output_buffer, output_size))
+  if (!FormatFloatText(type, actual, magnitude, output_buffer, output_size))
   {
     return ErrorCode::NO_BUFF;
   }
 
-  return WriteFloatField(sign_char, std::string_view(output_buffer, output_size), spec);
+  return WriteFloatField(sign_char, std::string_view(output_buffer, output_size), actual);
 }
 #endif
 

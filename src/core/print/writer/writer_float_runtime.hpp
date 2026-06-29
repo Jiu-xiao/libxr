@@ -84,8 +84,7 @@ bool Writer::ExceedsFixedIntegerDigits(Float value, uint8_t precision)
     return false;
   }
 
-  Float rounded =
-      value + static_cast<Float>(0.5L) * Power10<Float>(-static_cast<int>(precision));
+  Float rounded = RoundDecimal(value, precision);
   if (rounded == 0)
   {
     return 1 > Config::max_float_integer_digits;

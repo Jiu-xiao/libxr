@@ -19,21 +19,13 @@ template <typename Float>
 bool Writer::FormatScientificText(Float value, uint8_t precision, bool alternate,
                                   bool upper_case, char* out, size_t& out_size)
 {
-  auto initial = NormalizeDecimal(value);
-  Float rounded = value;
-  if (value != 0)
-  {
-    rounded += static_cast<Float>(0.5L) *
-               Power10<Float>(initial.exponent - static_cast<int>(precision));
-  }
-
-  auto normalized = NormalizeDecimal(rounded);
-  int exponent = (rounded == 0) ? 0 : normalized.exponent;
-  Float scale = Power10<Float>(exponent);
+  auto rounded = RoundScientificDigits(value, precision);
+  Float rounded_digits = rounded.digits;
+  Float digit_scale = rounded.scale;
 
   out_size = 0;
   if (!AppendBufferChar(out, float_buffer_capacity, out_size,
-                        static_cast<char>('0' + ExtractDigit(rounded, scale))))
+                        static_cast<char>('0' + ExtractDigit(rounded_digits, digit_scale))))
   {
     return false;
   }
@@ -46,18 +38,18 @@ bool Writer::FormatScientificText(Float value, uint8_t precision, bool alternate
     }
   }
 
-  scale /= 10;
+  digit_scale /= 10;
   for (uint8_t i = 0; i < precision; ++i)
   {
     if (!AppendBufferChar(out, float_buffer_capacity, out_size,
-                          static_cast<char>('0' + ExtractDigit(rounded, scale))))
+                          static_cast<char>('0' + ExtractDigit(rounded_digits, digit_scale))))
     {
       return false;
     }
-    scale /= 10;
+    digit_scale /= 10;
   }
 
-  return AppendExponentText(out, out_size, exponent, upper_case);
+  return AppendExponentText(out, out_size, rounded.exponent, upper_case);
 }
 
 /**
@@ -108,7 +100,8 @@ bool Writer::FormatFloatText(FormatType type, const Spec& spec, Float value, cha
     case FormatType::LongDoubleGeneral:
     {
       uint8_t significant = precision == 0 ? 1 : precision;
-      int exponent = (value == 0) ? 0 : NormalizeDecimal(value).exponent;
+      int exponent =
+          RoundScientificDigits(value, static_cast<uint8_t>(significant - 1)).exponent;
       if (exponent < -4 || exponent >= significant)
       {
         if (!FormatScientificText(value, static_cast<uint8_t>(significant - 1),

@@ -493,6 +493,13 @@ class Writer
   struct DecimalScale;
 
   /**
+   * @brief 科学计数法舍入后的十进制数字块 / Rounded decimal digit block for scientific notation
+   * @tparam Float 浮点类型 / Float type
+   */
+  template <typename Float>
+  struct ScientificDigits;
+
+  /**
    * @brief 以指定浮点类型返回 `10^exponent` / Return `10^exponent` in the selected float type
    * @tparam Float 浮点类型 / Float type
    * @param exponent 十进制指数 / Base-10 exponent
@@ -500,6 +507,27 @@ class Writer
    */
   template <typename Float>
   [[nodiscard]] static Float Power10(int exponent);
+
+  /**
+   * @brief 把有限非负值舍入到指定小数位 / Round one finite non-negative value to a decimal precision
+   * @tparam Float 浮点类型 / Float type
+   * @param value 有限非负值 / Finite non-negative value
+   * @param precision 保留的小数位数 / Decimal places to retain
+   * @return 舍入后的值；若内部缩放溢出则返回原值 / Rounded value, or the original value if internal scaling overflows
+   */
+  template <typename Float>
+  [[nodiscard]] static Float RoundDecimal(Float value, uint8_t precision);
+
+  /**
+   * @brief 计算科学计数法舍入后的数字块与指数 / Build the rounded digit block and exponent for scientific notation
+   * @tparam Float 浮点类型 / Float type
+   * @param value 有限非负值 / Finite non-negative value
+   * @param precision 小数点后的位数 / Digits after the decimal point
+   * @return 舍入后的数字块、数字块权重和指数 / Rounded digits, digit scale, and exponent
+   */
+  template <typename Float>
+  [[nodiscard]] static ScientificDigits<Float> RoundScientificDigits(
+      Float value, uint8_t precision);
 
   /**
    * @brief 将一个有限正值规范化，使 `value / scale` 落在 `[1, 10)` / Normalize one finite positive value so that `value / scale` stays in `[1, 10)`
