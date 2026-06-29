@@ -68,6 +68,13 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteU32Dec(args_.Read<uint32_t>());
+    case FormatOp::Signed32Dec:
+      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+                    !Config::enable_integer)
+      {
+        return ErrorCode::STATE_ERR;
+      }
+      return WriteI32Dec(args_.Read<int32_t>());
     case FormatOp::U32ZeroPadWidth:
       if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
                     !Config::enable_integer)
@@ -75,6 +82,34 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteU32ZeroPadWidth(codes_.Read<uint8_t>(), args_.Read<uint32_t>());
+    case FormatOp::U32Binary:
+      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+                    !Config::enable_integer || !Config::enable_integer_base8_16)
+      {
+        return ErrorCode::STATE_ERR;
+      }
+      return WriteU32Base<2>(args_.Read<uint32_t>());
+    case FormatOp::U32Octal:
+      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+                    !Config::enable_integer || !Config::enable_integer_base8_16)
+      {
+        return ErrorCode::STATE_ERR;
+      }
+      return WriteU32Base<8>(args_.Read<uint32_t>());
+    case FormatOp::U32HexLower:
+      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+                    !Config::enable_integer || !Config::enable_integer_base8_16)
+      {
+        return ErrorCode::STATE_ERR;
+      }
+      return WriteU32Base<16>(args_.Read<uint32_t>());
+    case FormatOp::U32HexUpper:
+      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+                    !Config::enable_integer || !Config::enable_integer_base8_16)
+      {
+        return ErrorCode::STATE_ERR;
+      }
+      return WriteU32Base<16, true>(args_.Read<uint32_t>());
     case FormatOp::StringRaw:
       if constexpr (!HasProfile(Profile, FormatProfile::TextArg) ||
                     !Config::enable_text)
@@ -82,6 +117,13 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteStringRaw(args_.Read<std::string_view>());
+    case FormatOp::CharacterRaw:
+      if constexpr (!HasProfile(Profile, FormatProfile::TextArg) ||
+                    !Config::enable_text)
+      {
+        return ErrorCode::STATE_ERR;
+      }
+      return WriteCharacterRaw(args_.Read<char>());
 #if LIBXR_PRINT_ENABLE_FLOAT
     case FormatOp::F32FixedPrec:
       if constexpr (!HasProfile(Profile, FormatProfile::F32Fixed) ||

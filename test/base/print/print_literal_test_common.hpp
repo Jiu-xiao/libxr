@@ -8,6 +8,8 @@
  */
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 
 #include "libxr.hpp"
@@ -19,6 +21,103 @@ static_assert(LibXR::Format<"{}">::template Matches<int>());
 static_assert(!LibXR::Format<"{}">::template Matches<int, int>());
 static_assert(!LibXR::Format<"abc">::template Matches<int>());
 static_assert(!LibXR::Format<"{:d} {}">::template Matches<const char*, int>());
+
+namespace LibXRPrintTest::CompileProfile
+{
+template <typename Format>
+[[nodiscard]] consteval bool HasOp(LibXR::Print::FormatOp op)
+{
+  auto codes = Format::Codes();
+  size_t pos = 0;
+  while (pos < codes.size())
+  {
+    auto current = static_cast<LibXR::Print::FormatOp>(codes[pos++]);
+    if (current == op)
+    {
+      return true;
+    }
+
+    switch (current)
+    {
+      case LibXR::Print::FormatOp::TextInline:
+        while (pos < codes.size() && codes[pos++] != 0)
+        {
+        }
+        break;
+      case LibXR::Print::FormatOp::TextRef:
+        pos += 2 * sizeof(uint16_t);
+        break;
+      case LibXR::Print::FormatOp::U32ZeroPadWidth:
+      case LibXR::Print::FormatOp::F32FixedPrec:
+      case LibXR::Print::FormatOp::F64FixedPrec:
+        ++pos;
+        break;
+      case LibXR::Print::FormatOp::GenericField:
+        pos += 5;
+        break;
+      case LibXR::Print::FormatOp::End:
+        return false;
+      case LibXR::Print::FormatOp::TextSpace:
+      case LibXR::Print::FormatOp::U32Dec:
+      case LibXR::Print::FormatOp::Signed32Dec:
+      case LibXR::Print::FormatOp::U32Binary:
+      case LibXR::Print::FormatOp::U32Octal:
+      case LibXR::Print::FormatOp::U32HexLower:
+      case LibXR::Print::FormatOp::U32HexUpper:
+      case LibXR::Print::FormatOp::StringRaw:
+      case LibXR::Print::FormatOp::CharacterRaw:
+        break;
+      default:
+        return false;
+    }
+  }
+  return false;
+}
+
+template <typename Format>
+[[nodiscard]] consteval bool HasProfileBit(LibXR::Print::FormatProfile bit)
+{
+  return LibXR::Print::HasProfile(Format::Profile(), bit);
+}
+
+using PrintfRawIntegerFormat =
+    decltype(LibXR::Print::Printf::Build<"%d %u %b %o %x %X">());
+using PrintfIntTextFormat =
+    decltype(LibXR::Print::Printf::Build<"id=%d hex=%x msg=%s ch=%c">());
+using FormatRawIntegerFormat =
+    LibXR::Format<"{} {:x} {:c}">::Compiled<int, unsigned, int>;
+
+// 裁剪边界：常见裸整数/文本字段不能退回 GenericField。
+// 否则 float 默认开启时会留下浮点分发后端。
+// Trimming boundary: raw integer/text fields must not use GenericField.
+// Otherwise the default float-enabled profile retains float dispatch.
+static_assert(
+    !HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::Generic));
+static_assert(HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::U32));
+static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::Signed32Dec));
+static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Dec));
+static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Binary));
+static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Octal));
+static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32HexLower));
+static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32HexUpper));
+
+static_assert(!HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::Generic));
+static_assert(HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::U32));
+static_assert(HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::TextArg));
+static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::Signed32Dec));
+static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::U32HexLower));
+static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::StringRaw));
+static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::CharacterRaw));
+
+static_assert(
+    !HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::Generic));
+static_assert(HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::U32));
+static_assert(
+    HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::TextArg));
+static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::Signed32Dec));
+static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::U32HexLower));
+static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::CharacterRaw));
+}  // namespace LibXRPrintTest::CompileProfile
 
 using LoggerFrontend = LibXR::Detail::LoggerLiteral::Frontend;
 using LoggerResolution = LibXR::Detail::LoggerLiteral::Resolution;

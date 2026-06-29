@@ -166,8 +166,14 @@ class FormatCompiler
     {
       case FormatOp::U32Dec:
       case FormatOp::U32ZeroPadWidth:
+      case FormatOp::Signed32Dec:
+      case FormatOp::U32Binary:
+      case FormatOp::U32Octal:
+      case FormatOp::U32HexLower:
+      case FormatOp::U32HexUpper:
         return FormatProfile::U32;
       case FormatOp::StringRaw:
+      case FormatOp::CharacterRaw:
         return FormatProfile::TextArg;
       case FormatOp::F32FixedPrec:
         return FormatProfile::F32Fixed;
@@ -190,11 +196,60 @@ class FormatCompiler
    */
   [[nodiscard]] static consteval FormatOp FastFieldOp(const FormatField& field)
   {
+    const bool raw_integer_field = field.flags == 0 && field.fill == ' ' &&
+                                   field.width == 0 &&
+                                   field.precision == unspecified_precision;
+    const bool raw_text_field =
+        (field.flags == 0 || field.flags == static_cast<uint8_t>(FormatFlag::LeftAlign)) &&
+        field.fill == ' ' && field.width == 0 &&
+        field.precision == unspecified_precision;
+
+    if (raw_integer_field && field.type == FormatType::Signed32 &&
+        field.pack == FormatPackKind::I32)
+    {
+      return FormatOp::Signed32Dec;
+    }
+
     if (field.type == FormatType::Unsigned32 && field.pack == FormatPackKind::U32 &&
-        field.flags == 0 && field.fill == ' ' && field.width == 0 &&
-        field.precision == unspecified_precision)
+        raw_integer_field)
     {
       return FormatOp::U32Dec;
+    }
+
+    if (raw_integer_field && field.type == FormatType::Binary32 &&
+        field.pack == FormatPackKind::U32)
+    {
+      return FormatOp::U32Binary;
+    }
+
+    if (raw_integer_field && field.type == FormatType::Octal32 &&
+        field.pack == FormatPackKind::U32)
+    {
+      return FormatOp::U32Octal;
+    }
+
+    if (raw_integer_field && field.type == FormatType::HexLower32 &&
+        field.pack == FormatPackKind::U32)
+    {
+      return FormatOp::U32HexLower;
+    }
+
+    if (raw_integer_field && field.type == FormatType::HexUpper32 &&
+        field.pack == FormatPackKind::U32)
+    {
+      return FormatOp::U32HexUpper;
+    }
+
+    if (raw_text_field && field.type == FormatType::Character &&
+        field.pack == FormatPackKind::Character)
+    {
+      return FormatOp::CharacterRaw;
+    }
+
+    if (raw_text_field && field.type == FormatType::String &&
+        field.pack == FormatPackKind::StringView)
+    {
+      return FormatOp::StringRaw;
     }
 
     if (field.type == FormatType::Unsigned32 && field.pack == FormatPackKind::U32 &&
@@ -203,14 +258,6 @@ class FormatCompiler
         field.precision == unspecified_precision)
     {
       return FormatOp::U32ZeroPadWidth;
-    }
-
-    if (field.type == FormatType::String &&
-        field.pack == FormatPackKind::StringView && field.flags == 0 &&
-        field.fill == ' ' &&
-        field.width == 0 && field.precision == unspecified_precision)
-    {
-      return FormatOp::StringRaw;
     }
 
     if (field.type == FormatType::FloatFixed && field.pack == FormatPackKind::F32 &&
@@ -315,7 +362,13 @@ class FormatCompiler
       switch (op)
       {
         case FormatOp::U32Dec:
+        case FormatOp::Signed32Dec:
+        case FormatOp::U32Binary:
+        case FormatOp::U32Octal:
+        case FormatOp::U32HexLower:
+        case FormatOp::U32HexUpper:
         case FormatOp::StringRaw:
+        case FormatOp::CharacterRaw:
           break;
         case FormatOp::U32ZeroPadWidth:
           EmitByte(code_scratch, code_bytes, field.width);

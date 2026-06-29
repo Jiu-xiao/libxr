@@ -297,6 +297,47 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteU32Dec(uint32_t value)
 }
 
 /**
+ * @brief 写出一个原始 int32 十进制快路径字段 / Writes one raw int32 decimal fast-path field.
+ * @param value Signed value to write. / 待写出的有符号值。
+ * @return Returns the sink write result. / 返回 sink 写出结果。
+ */
+template <OutputSink Sink, FormatProfile Profile>
+ErrorCode Writer::Executor<Sink, Profile>::WriteI32Dec(int32_t value)
+{
+  using UInt = std::make_unsigned_t<int32_t>;
+  char digit_buffer[UnsignedDigitCapacity<UInt, 10>()];
+  UInt bits = static_cast<UInt>(value);
+  UInt magnitude = (value < 0) ? (UInt{0} - bits) : bits;
+  size_t digit_count = AppendUnsigned<10>(digit_buffer, magnitude);
+
+  if (value < 0)
+  {
+    if (auto ec = WriteRaw("-"); ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+  }
+
+  return WriteRaw(std::string_view(digit_buffer, digit_count));
+}
+
+/**
+ * @brief 写出一个原始 uint32 多进制快路径字段 / Writes one raw uint32 base-specific fast-path field.
+ * @tparam Base Integer radix. / 整数进制。
+ * @tparam UpperCase Whether hexadecimal digits are uppercase. / 十六进制数字是否大写。
+ * @param value Unsigned value to write. / 待写出的无符号值。
+ * @return Returns the sink write result. / 返回 sink 写出结果。
+ */
+template <OutputSink Sink, FormatProfile Profile>
+template <uint8_t Base, bool UpperCase>
+ErrorCode Writer::Executor<Sink, Profile>::WriteU32Base(uint32_t value)
+{
+  char digit_buffer[UnsignedDigitCapacity<uint32_t, Base>()];
+  size_t digit_count = AppendUnsigned<Base, UpperCase>(digit_buffer, value);
+  return WriteRaw(std::string_view(digit_buffer, digit_count));
+}
+
+/**
  * @brief 写出一个带零填充宽度的 `uint32_t` 十进制快路径字段 / Write one zero-padded `uint32_t` decimal fast-path field
  * @param width 目标零填充宽度 / Target zero-padded width
  * @param value 待写出的无符号值 / Unsigned value to write
@@ -325,6 +366,17 @@ template <OutputSink Sink, FormatProfile Profile>
 ErrorCode Writer::Executor<Sink, Profile>::WriteStringRaw(std::string_view text)
 {
   return WriteRaw(text);
+}
+
+/**
+ * @brief 写出一个原始字符快路径字段 / Writes one raw character fast-path field.
+ * @param ch Character payload to write. / 待写出的字符载荷。
+ * @return Returns the sink write result. / 返回 sink 写出结果。
+ */
+template <OutputSink Sink, FormatProfile Profile>
+ErrorCode Writer::Executor<Sink, Profile>::WriteCharacterRaw(char ch)
+{
+  return WriteRaw(std::string_view(&ch, 1));
 }
 
 /**
