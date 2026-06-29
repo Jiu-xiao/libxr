@@ -262,12 +262,51 @@ enum class FormatOp : uint8_t
   TextSpace = 0x03,        ///< one literal space / 单个字面空格
   U32Dec = 0x10,           ///< raw uint32_t decimal output / 直接输出 uint32_t 十进制
   U32ZeroPadWidth = 0x11,  ///< uint32_t decimal with zero-pad width byte / 带零填充宽度字节的 uint32_t 十进制
+  Signed32Dec = 0x12,      ///< raw int32_t decimal output / 直接输出 int32_t 十进制
+  U32Binary = 0x13,        ///< raw uint32_t binary output / 直接输出 uint32_t 二进制
+  U32Octal = 0x14,         ///< raw uint32_t octal output / 直接输出 uint32_t 八进制
+  U32HexLower = 0x15,      ///< raw uint32_t lowercase hex output / 直接输出 uint32_t 小写十六进制
+  U32HexUpper = 0x16,      ///< raw uint32_t uppercase hex output / 直接输出 uint32_t 大写十六进制
   StringRaw = 0x20,        ///< raw string_view output / 直接输出 string_view
+  CharacterRaw = 0x21,     ///< raw character output / 直接输出字符
   F32FixedPrec = 0x30,     ///< fixed float with one precision byte / 带一个精度字节的定点 float
   F64FixedPrec = 0x31,     ///< fixed double with one precision byte / 带一个精度字节的定点 double
   GenericField = 0xF0,     ///< wide fallback payload: type, flags, fill, width, precision / 宽回退载荷：type、flags、fill、width、precision
   End = 0xFF,              ///< terminates the compiled record stream / 结束整条编译记录流
 };
+
+/**
+ * @brief 编码后的单个操作码后面跟随的载荷字节数 / Number of payload bytes that follow one encoded opcode.
+ */
+[[nodiscard]] constexpr size_t FormatOpPayloadBytes(FormatOp op)
+{
+  switch (op)
+  {
+    case FormatOp::TextInline:
+      return 0;
+    case FormatOp::TextRef:
+      return 2 * sizeof(uint16_t);
+    case FormatOp::U32ZeroPadWidth:
+    case FormatOp::F32FixedPrec:
+    case FormatOp::F64FixedPrec:
+      return 1;
+    case FormatOp::GenericField:
+      return 5;
+    case FormatOp::TextSpace:
+    case FormatOp::U32Dec:
+    case FormatOp::Signed32Dec:
+    case FormatOp::U32Binary:
+    case FormatOp::U32Octal:
+    case FormatOp::U32HexLower:
+    case FormatOp::U32HexUpper:
+    case FormatOp::StringRaw:
+    case FormatOp::CharacterRaw:
+    case FormatOp::End:
+      return 0;
+  }
+
+  return 0;
+}
 
 /**
  * @brief 编译期分析和运行期分发共用的语义处理类别。 / Semantic handler categories used by compile-time analysis and runtime dispatch.
@@ -335,8 +374,8 @@ enum class FormatPackKind : uint8_t
 enum class FormatProfile : uint8_t
 {
   None = 0,            ///< text-only stream / 只有文本记录的流
-  U32 = 1U << 0,       ///< uint32_t decimal fast path / uint32_t 十进制快路径
-  TextArg = 1U << 1,   ///< raw string argument fast path / 原始字符串参数快路径
+  NarrowInt = 1U << 0, ///< signed/unsigned narrow integer fast path family / 有符号/无符号窄整数快路径族
+  TextArg = 1U << 1,   ///< raw text argument fast path / 原始文本参数快路径
   F32Fixed = 1U << 2,  ///< fixed float fast path / 定点 float 快路径
   F64Fixed = 1U << 3,  ///< fixed double fast path / 定点 double 快路径
   Generic = 1U << 7,   ///< at least one field uses generic fallback / 至少有一个字段使用通用回退
