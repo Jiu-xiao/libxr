@@ -37,38 +37,32 @@ template <typename Format>
       return true;
     }
 
-    switch (current)
+    const size_t payload_bytes = LibXR::Print::FormatOpPayloadBytes(current);
+    if (current == LibXR::Print::FormatOp::TextInline)
     {
-      case LibXR::Print::FormatOp::TextInline:
-        while (pos < codes.size() && codes[pos++] != 0)
-        {
-        }
-        break;
-      case LibXR::Print::FormatOp::TextRef:
-        pos += 2 * sizeof(uint16_t);
-        break;
-      case LibXR::Print::FormatOp::U32ZeroPadWidth:
-      case LibXR::Print::FormatOp::F32FixedPrec:
-      case LibXR::Print::FormatOp::F64FixedPrec:
-        ++pos;
-        break;
-      case LibXR::Print::FormatOp::GenericField:
-        pos += 5;
-        break;
-      case LibXR::Print::FormatOp::End:
-        return false;
-      case LibXR::Print::FormatOp::TextSpace:
-      case LibXR::Print::FormatOp::U32Dec:
-      case LibXR::Print::FormatOp::Signed32Dec:
-      case LibXR::Print::FormatOp::U32Binary:
-      case LibXR::Print::FormatOp::U32Octal:
-      case LibXR::Print::FormatOp::U32HexLower:
-      case LibXR::Print::FormatOp::U32HexUpper:
-      case LibXR::Print::FormatOp::StringRaw:
-      case LibXR::Print::FormatOp::CharacterRaw:
-        break;
-      default:
-        return false;
+      while (pos < codes.size() && codes[pos++] != 0)
+      {
+      }
+    }
+    else if (current == LibXR::Print::FormatOp::End)
+    {
+      return false;
+    }
+    else if (payload_bytes != 0)
+    {
+      pos += payload_bytes;
+    }
+    else if (current != LibXR::Print::FormatOp::TextSpace &&
+             current != LibXR::Print::FormatOp::U32Dec &&
+             current != LibXR::Print::FormatOp::Signed32Dec &&
+             current != LibXR::Print::FormatOp::U32Binary &&
+             current != LibXR::Print::FormatOp::U32Octal &&
+             current != LibXR::Print::FormatOp::U32HexLower &&
+             current != LibXR::Print::FormatOp::U32HexUpper &&
+             current != LibXR::Print::FormatOp::StringRaw &&
+             current != LibXR::Print::FormatOp::CharacterRaw)
+    {
+      return false;
     }
   }
   return false;
@@ -93,7 +87,7 @@ using FormatRawIntegerFormat =
 // Otherwise the default float-enabled profile retains float dispatch.
 static_assert(
     !HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::Generic));
-static_assert(HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::U32));
+static_assert(HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::Signed32Dec));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Dec));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Binary));
@@ -102,7 +96,7 @@ static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32HexLower)
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32HexUpper));
 
 static_assert(!HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::Generic));
-static_assert(HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::U32));
+static_assert(HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::NarrowInt));
 static_assert(HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::TextArg));
 static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::Signed32Dec));
 static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::U32HexLower));
@@ -111,7 +105,7 @@ static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::CharacterRaw));
 
 static_assert(
     !HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::Generic));
-static_assert(HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::U32));
+static_assert(HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
 static_assert(
     HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::TextArg));
 static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::Signed32Dec));

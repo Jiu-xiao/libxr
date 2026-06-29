@@ -276,6 +276,39 @@ enum class FormatOp : uint8_t
 };
 
 /**
+ * @brief 编码后的单个操作码后面跟随的载荷字节数 / Number of payload bytes that follow one encoded opcode.
+ */
+[[nodiscard]] constexpr size_t FormatOpPayloadBytes(FormatOp op)
+{
+  switch (op)
+  {
+    case FormatOp::TextInline:
+      return 0;
+    case FormatOp::TextRef:
+      return 2 * sizeof(uint16_t);
+    case FormatOp::U32ZeroPadWidth:
+    case FormatOp::F32FixedPrec:
+    case FormatOp::F64FixedPrec:
+      return 1;
+    case FormatOp::GenericField:
+      return 5;
+    case FormatOp::TextSpace:
+    case FormatOp::U32Dec:
+    case FormatOp::Signed32Dec:
+    case FormatOp::U32Binary:
+    case FormatOp::U32Octal:
+    case FormatOp::U32HexLower:
+    case FormatOp::U32HexUpper:
+    case FormatOp::StringRaw:
+    case FormatOp::CharacterRaw:
+    case FormatOp::End:
+      return 0;
+  }
+
+  return 0;
+}
+
+/**
  * @brief 编译期分析和运行期分发共用的语义处理类别。 / Semantic handler categories used by compile-time analysis and runtime dispatch.
  */
 enum class FormatType : uint8_t
@@ -341,7 +374,7 @@ enum class FormatPackKind : uint8_t
 enum class FormatProfile : uint8_t
 {
   None = 0,            ///< text-only stream / 只有文本记录的流
-  U32 = 1U << 0,       ///< narrow integer fast path / 窄整数快路径
+  NarrowInt = 1U << 0, ///< signed/unsigned narrow integer fast path family / 有符号/无符号窄整数快路径族
   TextArg = 1U << 1,   ///< raw text argument fast path / 原始文本参数快路径
   F32Fixed = 1U << 2,  ///< fixed float fast path / 定点 float 快路径
   F64Fixed = 1U << 3,  ///< fixed double fast path / 定点 double 快路径

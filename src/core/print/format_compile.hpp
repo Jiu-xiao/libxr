@@ -171,7 +171,7 @@ class FormatCompiler
       case FormatOp::U32Octal:
       case FormatOp::U32HexLower:
       case FormatOp::U32HexUpper:
-        return FormatProfile::U32;
+        return FormatProfile::NarrowInt;
       case FormatOp::StringRaw:
       case FormatOp::CharacterRaw:
         return FormatProfile::TextArg;
@@ -196,13 +196,8 @@ class FormatCompiler
    */
   [[nodiscard]] static consteval FormatOp FastFieldOp(const FormatField& field)
   {
-    const bool raw_integer_field = field.flags == 0 && field.fill == ' ' &&
-                                   field.width == 0 &&
-                                   field.precision == unspecified_precision;
-    const bool raw_text_field =
-        (field.flags == 0 || field.flags == static_cast<uint8_t>(FormatFlag::LeftAlign)) &&
-        field.fill == ' ' && field.width == 0 &&
-        field.precision == unspecified_precision;
+    const bool raw_integer_field = IsRawIntegerField(field);
+    const bool raw_text_field = IsRawTextField(field);
 
     if (raw_integer_field && field.type == FormatType::Signed32 &&
         field.pack == FormatPackKind::I32)
@@ -275,6 +270,25 @@ class FormatCompiler
     }
 
     return FormatOp::GenericField;
+  }
+
+  /**
+   * @brief 判断字段是否满足裸整数快路径条件。 / Tests whether one field matches the raw integer fast-path gate.
+   */
+  [[nodiscard]] static consteval bool IsRawIntegerField(const FormatField& field)
+  {
+    return field.flags == 0 && field.fill == ' ' && field.width == 0 &&
+           field.precision == unspecified_precision;
+  }
+
+  /**
+   * @brief 判断字段是否满足裸文本快路径条件。 / Tests whether one field matches the raw text fast-path gate.
+   */
+  [[nodiscard]] static consteval bool IsRawTextField(const FormatField& field)
+  {
+    return (field.flags == 0 || field.flags == static_cast<uint8_t>(FormatFlag::LeftAlign)) &&
+           field.fill == ' ' && field.width == 0 &&
+           field.precision == unspecified_precision;
   }
 
   /**
@@ -455,6 +469,12 @@ class FormatCompiler
           continue;
         }
 
+        const size_t payload_bytes = FormatOpPayloadBytes(op);
+        if (payload_bytes == 0)
+        {
+          continue;
+        }
+
         if (op == FormatOp::TextRef)
         {
           auto relative_offset = ReadNative<uint16_t>(code_scratch, scratch_in);
@@ -470,8 +490,7 @@ class FormatCompiler
           continue;
         }
 
-        if (op == FormatOp::U32ZeroPadWidth || op == FormatOp::F32FixedPrec ||
-            op == FormatOp::F64FixedPrec)
+        if (payload_bytes == 1)
         {
           EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
           continue;
@@ -479,11 +498,10 @@ class FormatCompiler
 
         if (op == FormatOp::GenericField)
         {
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
+          for (size_t i = 0; i < payload_bytes; ++i)
+          {
+            EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
+          }
         }
       }
 

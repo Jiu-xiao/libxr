@@ -62,49 +62,49 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
     case FormatOp::TextSpace:
       return WriteRaw(" ");
     case FormatOp::U32Dec:
-      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+      if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer)
       {
         return ErrorCode::STATE_ERR;
       }
       return WriteU32Dec(args_.Read<uint32_t>());
     case FormatOp::Signed32Dec:
-      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+      if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer)
       {
         return ErrorCode::STATE_ERR;
       }
       return WriteI32Dec(args_.Read<int32_t>());
     case FormatOp::U32ZeroPadWidth:
-      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+      if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer)
       {
         return ErrorCode::STATE_ERR;
       }
       return WriteU32ZeroPadWidth(codes_.Read<uint8_t>(), args_.Read<uint32_t>());
     case FormatOp::U32Binary:
-      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+      if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer || !Config::enable_integer_base8_16)
       {
         return ErrorCode::STATE_ERR;
       }
       return WriteU32Base<2>(args_.Read<uint32_t>());
     case FormatOp::U32Octal:
-      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+      if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer || !Config::enable_integer_base8_16)
       {
         return ErrorCode::STATE_ERR;
       }
       return WriteU32Base<8>(args_.Read<uint32_t>());
     case FormatOp::U32HexLower:
-      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+      if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer || !Config::enable_integer_base8_16)
       {
         return ErrorCode::STATE_ERR;
       }
       return WriteU32Base<16>(args_.Read<uint32_t>());
     case FormatOp::U32HexUpper:
-      if constexpr (!HasProfile(Profile, FormatProfile::U32) ||
+      if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer || !Config::enable_integer_base8_16)
       {
         return ErrorCode::STATE_ERR;
