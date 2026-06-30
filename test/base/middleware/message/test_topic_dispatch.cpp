@@ -4,11 +4,14 @@
  * @details 测试项目：
  *          1. async、队列和 callback 订阅者 fan-out。
  *          2. callback-context 发布保持时间戳和 ISR 语义。
- *          3. 非平凡 payload 的 typed 传输。
+ *          3. raw payload 视图回调不参与业务 payload TypeID 匹配。
+ *          4. 非平凡 payload 的 typed 传输。
  *          Test items:
  *          1. Fan-out to async, queued, and callback subscribers.
  *          2. Callback-context publish preserves timestamp and ISR semantics.
- *          3. Typed delivery of non-trivial payloads.
+ *          3. Raw payload view callbacks do not participate in business payload
+ *             TypeID matching.
+ *          4. Typed delivery of non-trivial payloads.
  */
 #include "topic_test_common.hpp"
 
@@ -41,6 +44,14 @@ void TestTopicSubscriberDispatch()
   static LibXR::MicrosecondTimestamp cb_timestamp;
   static LibXR::MicrosecondTimestamp view_cb_timestamp;
   static double view_cb_value = 0.0;
+  static LibXR::MicrosecondTimestamp raw_view_timestamp;
+  static LibXR::MicrosecondTimestamp raw_arg_timestamp;
+  static double raw_view_value = 0.0;
+  static double raw_arg_value = 0.0;
+  static double raw_mutable_arg_value = 0.0;
+  static size_t raw_view_size = 0;
+  static size_t raw_arg_size = 0;
+  static size_t raw_mutable_arg_size = 0;
 
   auto msg_cb = LibXR::Topic::Callback::Create(
       [](bool in_isr, void*, LibXR::MicrosecondTimestamp timestamp, double& data)
@@ -61,6 +72,38 @@ void TestTopicSubscriberDispatch()
       },
       reinterpret_cast<void*>(0));
   topic.RegisterCallback(view_cb);
+
+  auto raw_view_cb = LibXR::Topic::Callback::Create(
+      [](bool, void*, const LibXR::Topic::RawMessageView& message)
+      {
+        raw_view_timestamp = message.timestamp;
+        raw_view_size = message.payload.size_;
+        ASSERT(message.payload.addr_ != nullptr);
+        raw_view_value = *static_cast<const double*>(message.payload.addr_);
+      },
+      reinterpret_cast<void*>(0));
+  topic.RegisterCallback(raw_view_cb);
+
+  auto raw_arg_cb = LibXR::Topic::Callback::Create(
+      [](bool, void*, LibXR::MicrosecondTimestamp timestamp, const LibXR::ConstRawData& data)
+      {
+        raw_arg_timestamp = timestamp;
+        raw_arg_size = data.size_;
+        ASSERT(data.addr_ != nullptr);
+        raw_arg_value = *static_cast<const double*>(data.addr_);
+      },
+      reinterpret_cast<void*>(0));
+  topic.RegisterCallback(raw_arg_cb);
+
+  auto raw_mutable_arg_cb = LibXR::Topic::Callback::Create(
+      [](bool, void*, LibXR::ConstRawData& data)
+      {
+        raw_mutable_arg_size = data.size_;
+        ASSERT(data.addr_ != nullptr);
+        raw_mutable_arg_value = *static_cast<const double*>(data.addr_);
+      },
+      reinterpret_cast<void*>(0));
+  topic.RegisterCallback(raw_mutable_arg_cb);
 
   ASSERT(!async_suber.Available());
 
@@ -85,6 +128,14 @@ void TestTopicSubscriberDispatch()
   ASSERT(TimestampUs(cb_timestamp) == TimestampUs(timestamp0));
   ASSERT(view_cb_value == msg[0]);
   ASSERT(TimestampUs(view_cb_timestamp) == TimestampUs(timestamp0));
+  ASSERT(raw_view_value == msg[0]);
+  ASSERT(raw_view_size == sizeof(double));
+  ASSERT(TimestampUs(raw_view_timestamp) == TimestampUs(timestamp0));
+  ASSERT(raw_arg_value == msg[0]);
+  ASSERT(raw_arg_size == sizeof(double));
+  ASSERT(TimestampUs(raw_arg_timestamp) == TimestampUs(timestamp0));
+  ASSERT(raw_mutable_arg_value == msg[0]);
+  ASSERT(raw_mutable_arg_size == sizeof(double));
   ASSERT(!cb_in_isr);
 
   auto byte_stable_topic =
@@ -127,6 +178,14 @@ void TestTopicSubscriberDispatch()
   ASSERT(cb_in_isr);
   ASSERT(view_cb_value == msg[0]);
   ASSERT(TimestampUs(view_cb_timestamp) == TimestampUs(timestamp1));
+  ASSERT(raw_view_value == msg[0]);
+  ASSERT(raw_view_size == sizeof(double));
+  ASSERT(TimestampUs(raw_view_timestamp) == TimestampUs(timestamp1));
+  ASSERT(raw_arg_value == msg[0]);
+  ASSERT(raw_arg_size == sizeof(double));
+  ASSERT(TimestampUs(raw_arg_timestamp) == TimestampUs(timestamp1));
+  ASSERT(raw_mutable_arg_value == msg[0]);
+  ASSERT(raw_mutable_arg_size == sizeof(double));
 }
 
 }  // namespace

@@ -130,6 +130,23 @@ class Topic
   };
 
   /**
+   * @struct RawMessageView
+   * @brief 带时间戳和只读原始 payload 视图的消息 / Message carrying a timestamp and
+   *        a read-only raw payload view
+   *
+   * @note 该视图只在当前回调调用期间有效；它不拥有 payload 字节，也不绕过 topic 的
+   *       发布时类型契约。
+   *       This view is valid only for the current callback invocation; it does not
+   *       own the payload bytes and does not bypass the topic's publish-time type
+   *       contract.
+   */
+  struct RawMessageView
+  {
+    MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
+    ConstRawData payload;            ///< 本次发布 payload 的只读字节视图。Read-only byte view of this publish payload.
+  };
+
+  /**
    * @struct Message
    * @brief 带时间戳和 payload 副本的消息对象 / Message object carrying a timestamp and
    *        a payload copy
@@ -507,6 +524,47 @@ class Topic
                      MicrosecondTimestamp timestamp);
 
   /**
+   * @brief 将一段 raw payload 按当前 topic 元数据打包成 packet / Pack a raw payload
+   *        byte view into one packet using the current topic metadata and current timestamp
+   * @param data 待打包 payload 字节 / Payload bytes to pack
+   * @param packet 输出 packet 缓冲区 / Output packet buffer
+   * @return 操作结果错误码 / Error code
+   */
+  ErrorCode PackRaw(ConstRawData data, RawData packet)
+  {
+    return PackRaw(data, packet, NowTimestamp());
+  }
+
+  /**
+   * @brief 将一段 raw payload 按当前 topic 元数据和指定时间戳打包成 packet / Pack a raw
+   *        payload byte view into one packet using the current topic metadata and timestamp
+   * @param data 待打包 payload 字节 / Payload bytes to pack
+   * @param packet 输出 packet 缓冲区 / Output packet buffer
+   * @param timestamp 指定时间戳 / Explicit timestamp
+   * @return 操作结果错误码 / Error code
+   */
+  ErrorCode PackRaw(ConstRawData data, RawData packet, MicrosecondTimestamp timestamp)
+  {
+    if (block_ == nullptr || data.addr_ == nullptr || packet.addr_ == nullptr)
+    {
+      return ErrorCode::PTR_NULL;
+    }
+
+    if (data.size_ != block_->data_.payload_size)
+    {
+      return ErrorCode::SIZE_ERR;
+    }
+
+    if (packet.size_ < PACK_BASE_SIZE + data.size_)
+    {
+      return ErrorCode::NO_BUFF;
+    }
+
+    PackBytes(block_->data_.crc32, packet, timestamp, data);
+    return ErrorCode::OK;
+  }
+
+  /**
    * @brief 等待指定名称的 topic 出现 / Wait until a topic with the given name exists
    * @param name topic 名称 / Topic name
    * @param timeout 等待超时，默认永久等待 / Timeout in ticks, default wait forever
@@ -684,7 +742,8 @@ class Topic
    * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
   static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
-                                 void* payload_addr, bool from_callback, bool in_isr);
+                                 void* payload_addr, size_t payload_size,
+                                 bool from_callback, bool in_isr);
 
   /**
    * @brief 将一条消息分发给一个 topic 上的全部订阅者 / Dispatch one message to all
