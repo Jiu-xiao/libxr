@@ -742,8 +742,7 @@ class Topic
    * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
   static void DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
-                                 void* payload_addr, size_t payload_size,
-                                 bool from_callback, bool in_isr);
+                                 void* payload_addr, bool from_callback, bool in_isr);
 
   /**
    * @brief 将一条消息分发给一个 topic 上的全部订阅者 / Dispatch one message to all
