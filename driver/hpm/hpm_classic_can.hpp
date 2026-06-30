@@ -1,9 +1,9 @@
 /// @file hpm_classic_can.hpp
 /// @brief HPM classic `CAN_Type` IP 适配头文件 / Adapter header.
 ///
-/// 本文件面向非 MCAN 的 classic CAN 外设。
-/// MCAN classic CAN 使用 `hpm_can.*` 中的 `HPMCAN`。
-/// MCAN FD 使用 `hpm_mcan.*` 中的 `HPMCANFD`。
+/// 本文件面向非 MCAN 的 classic CAN 外设 / Targets non-MCAN classic CAN IP.
+/// MCAN classic CAN 使用 `HPMCAN`，MCAN FD 使用 `HPMCANFD`。
+/// MCAN classic CAN uses `HPMCAN`; MCAN FD uses `HPMCANFD`.
 #pragma once
 
 #include <atomic>
@@ -33,7 +33,8 @@ namespace LibXR
 {
 
 /// @class HPMClassicCAN
-/// @brief HPM classic `CAN_Type` 的 `LibXR::CAN` 适配器。
+/// @brief HPM classic `CAN_Type` 的 `LibXR::CAN` 适配器 /
+/// `LibXR::CAN` adapter for the HPM classic `CAN_Type` IP.
 class HPMClassicCAN : public CAN
 {
  public:
@@ -57,12 +58,12 @@ class HPMClassicCAN : public CAN
 #endif
 
   /// @brief 构造 classic CAN 适配器 / Construct the classic CAN adapter.
-  /// @param can HPM classic `CAN_Type` 实例。
-  /// @param clock HPM SDK 时钟，用于 `clock_get_frequency()` 和 `can_init()`。
-  /// @param index 外设索引，必须小于 `CAN_SOC_MAX_COUNT`。
-  /// @param irq 外设 IRQ 号；`kInvalidIrq` 表示不自动打开 NVIC。
-  /// @param auto_enable_irq 是否由适配器管理 IRQ flag 和 NVIC。
-  /// @param tx_pool_size LibXR TX 队列深度，必须大于 0。
+  /// @param can HPM classic `CAN_Type` 实例 / HPM classic `CAN_Type` instance.
+  /// @param clock HPM SDK 时钟 / HPM SDK clock.
+  /// @param index 外设索引 / Peripheral index.
+  /// @param irq 外设 IRQ 号 / Peripheral IRQ number.
+  /// @param auto_enable_irq 是否由适配器管理 IRQ / Whether adapter manages IRQs.
+  /// @param tx_pool_size LibXR TX 队列深度 / LibXR TX queue depth.
   HPMClassicCAN(LibXRHpmClassicCanType* can, clock_name_t clock, uint8_t index = 0,
                 uint32_t irq = kInvalidIrq, bool auto_enable_irq = true,
                 uint32_t tx_pool_size = kDefaultTxPoolSize);
@@ -71,34 +72,34 @@ class HPMClassicCAN : public CAN
   ~HPMClassicCAN() override;
 
   /// @brief 配置 classic CAN 位时序和模式 / Configure bit timing and mode.
-  /// @param cfg LibXR CAN 配置。
-  /// @return `OK`、`PTR_NULL`、`ARG_ERR`、`NOT_SUPPORT` 或映射后的 SDK 状态。
+  /// @param cfg LibXR CAN 配置 / LibXR CAN configuration.
+  /// @return 操作结果 / Operation result.
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
   /// @brief 返回 CAN 外设输入时钟 / Return CAN peripheral input clock.
-  /// @return 支持时返回 `clock_get_frequency(clock_)`，否则返回 0。
+  /// @return 输入时钟或 0 / Input clock or 0 when unsupported.
   uint32_t GetClockFreq() const override;
 
   /// @brief 将 classic CAN 帧加入发送队列 / Queue a classic CAN frame.
-  /// @param pack 标准帧、扩展帧或远程帧；DLC 必须 <= 8。
-  /// @return `OK`、`INIT_ERR`、`ARG_ERR`、`FULL` 或 `NOT_SUPPORT`。
+  /// @param pack classic CAN 帧 / Classic CAN frame, DLC <= 8.
+  /// @return 操作结果 / Operation result.
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
   /// @brief 读取 classic CAN 错误状态 / Read classic CAN error state.
-  /// @param state 输出 LibXR 错误计数和 bus-off/passive/warning 状态。
-  /// @return `OK`、`PTR_NULL` 或 `NOT_SUPPORT`。
+  /// @param state 输出错误状态 / Output LibXR error counters and state.
+  /// @return 操作结果 / Operation result.
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   /// @brief 轮询 RX buffer 并分发 LibXR 回调 / Poll RX buffer.
-  /// @param in_isr 标记回调是否来自 ISR 语境。
+  /// @param in_isr 是否在 ISR 语境 / Whether callbacks run from ISR context.
   void ProcessRx(bool in_isr = false);
 
   /// @brief 处理 classic CAN 中断标志 / Process interrupt flags.
-  /// @param in_isr 标记当前调用是否来自 ISR。
+  /// @param in_isr 是否在 ISR 语境 / Whether the call runs from ISR context.
   void ProcessInterrupt(bool in_isr = true);
 
-  /// @brief C ISR trampoline 使用的按索引入口。
-  /// @param index HPM CAN 实例索引。
+  /// @brief C ISR trampoline 使用的按索引入口 / Indexed C ISR trampoline entry.
+  /// @param index HPM CAN 实例索引 / HPM CAN instance index.
   static void OnInterrupt(uint8_t index);
 
  private:
