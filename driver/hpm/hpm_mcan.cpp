@@ -429,8 +429,8 @@ void HPMCANFD::EmitErrorFrame(CAN::ErrorID error_id, bool in_isr)
 }
 
 HPMCANFD::HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index,
-                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size,
-                   void* msg_buf, uint32_t msg_buf_size)
+                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size, void* msg_buf,
+                   uint32_t msg_buf_size)
     : can_(can),
       clock_(clock),
       index_(index),
@@ -507,8 +507,7 @@ ErrorCode HPMCANFD::ApplyMessageBuffer()
     return ErrorCode::ARG_ERR;
   }
 
-  const mcan_msg_buf_attr_t attr = {static_cast<uint32_t>(msg_buf_addr),
-                                    msg_buf_size_};
+  const mcan_msg_buf_attr_t attr = {static_cast<uint32_t>(msg_buf_addr), msg_buf_size_};
   return detail::ConvertMcanStatus(mcan_set_msg_buf_attr(can_, &attr));
 }
 
@@ -960,8 +959,8 @@ void HPMCANFD::EmitErrorFrame(CAN::ErrorID error_id, bool in_isr)
 }
 
 HPMCANFD::HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index,
-                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size,
-                   void* msg_buf, uint32_t msg_buf_size)
+                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size, void* msg_buf,
+                   uint32_t msg_buf_size)
     : can_(can),
       clock_(clock),
       index_(index),
