@@ -86,6 +86,29 @@ void TestPacketHeaderAndServerParse()
   ASSERT(exact_size_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
   ASSERT(rx_value == value2);
   ASSERT(TimestampUs(cb_timestamp) == TimestampUs(timestamp2));
+
+  const double raw_value = 72.72;
+  const LibXR::MicrosecondTimestamp raw_timestamp(6006);
+  uint8_t raw_packet[PACKET_SIZE] = {};
+  ASSERT(topic.PackRaw(LibXR::ConstRawData(raw_value),
+                       LibXR::RawData(raw_packet, sizeof(raw_packet)), raw_timestamp) ==
+         LibXR::ErrorCode::OK);
+  rx_value = -1.0;
+  ASSERT(topic_server.ParseData(LibXR::ConstRawData(raw_packet, sizeof(raw_packet))) ==
+         1);
+  ASSERT(rx_value == raw_value);
+  ASSERT(TimestampUs(cb_timestamp) == TimestampUs(raw_timestamp));
+
+  uint8_t small_packet[PACKET_SIZE - 1] = {};
+  uint32_t wrong_size_payload = 0;
+  ASSERT(topic.PackRaw(LibXR::ConstRawData(wrong_size_payload),
+                       LibXR::RawData(raw_packet, sizeof(raw_packet)), raw_timestamp) ==
+         LibXR::ErrorCode::SIZE_ERR);
+  ASSERT(topic.PackRaw(LibXR::ConstRawData(raw_value),
+                       LibXR::RawData(small_packet, sizeof(small_packet)),
+                       raw_timestamp) == LibXR::ErrorCode::NO_BUFF);
+  ASSERT(topic.PackRaw(LibXR::ConstRawData(raw_value), LibXR::RawData(),
+                       raw_timestamp) == LibXR::ErrorCode::PTR_NULL);
 }
 
 }  // namespace
