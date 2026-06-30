@@ -553,13 +553,31 @@ struct Topic::CallbackBlock : public Topic::SuberBlock
   /**
    * @brief 构造一个回调订阅块 / Construct one callback subscriber block
    * @param callback 要挂接的回调句柄 / Callback handle to attach
+   * @param topic_payload_size 当前 topic 的固定 payload 字节数 / Fixed payload
+   *        size of the topic this callback is registered to
    */
-  explicit CallbackBlock(Callback& callback) : cb(callback)
+  CallbackBlock(Callback& callback, size_t topic_payload_size)
+      : cb(callback), payload_size(topic_payload_size)
   {
     type = SuberType::CALLBACK;
   }
 
+  /**
+   * @brief 通过注册时绑定的 topic payload size 执行回调 / Run the callback with the
+   *        topic payload size bound at registration time
+   * @param in_isr 当前是否处于中断上下文 / Whether the current path runs in ISR context
+   * @param timestamp 当前消息时间戳 / Current message timestamp
+   * @param payload_addr 当前消息 payload 对象地址 / Address of the current payload object
+   */
+  void Run(bool in_isr, MicrosecondTimestamp timestamp, void* payload_addr) const
+  {
+    cb.Run(in_isr, timestamp, payload_addr, payload_size);
+  }
+
   Callback cb;  ///< 订阅的回调句柄。Subscribed callback handle.
+
+  /// 注册到的 topic 固定 payload 字节数。Fixed payload size of the subscribed topic.
+  size_t payload_size = 0;
 };
 
 /**
@@ -577,7 +595,7 @@ inline void Topic::RegisterCallback(Callback& cb)
   }
 
   auto node = new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
-      LockFreeList::Node<CallbackBlock>(cb);
+      LockFreeList::Node<CallbackBlock>(cb, block_->data_.payload_size);
   block_->data_.subers.Add(*node);
 }
 }  // namespace LibXR

@@ -10,8 +10,7 @@
 using namespace LibXR;
 
 void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp,
-                               void* payload_addr, size_t payload_size,
-                               bool from_callback, bool in_isr)
+                               void* payload_addr, bool from_callback, bool in_isr)
 {
   switch (block.type)
   {
@@ -61,7 +60,7 @@ void Topic::DispatchSubscriber(SuberBlock& block, MicrosecondTimestamp timestamp
     case SuberType::CALLBACK:
     {
       auto cb_block = static_cast<CallbackBlock*>(&block);
-      cb_block->cb.Run(from_callback && in_isr, timestamp, payload_addr, payload_size);
+      cb_block->Run(from_callback && in_isr, timestamp, payload_addr);
       break;
     }
   }
@@ -73,8 +72,7 @@ void Topic::DispatchSubscribers(TopicHandle topic, MicrosecondTimestamp timestam
   topic->data_.subers.Foreach<SuberBlock>(
       [=](SuberBlock& block)
       {
-        DispatchSubscriber(block, timestamp, payload_addr, topic->data_.payload_size,
-                           from_callback, in_isr);
+        DispatchSubscriber(block, timestamp, payload_addr, from_callback, in_isr);
         return ErrorCode::OK;
       });
 }
