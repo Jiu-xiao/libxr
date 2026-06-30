@@ -5,13 +5,13 @@
  *
  * @details
  * 鏈枃浠舵寜搴曞眰澶栬 IP 褰掓。锛屽彧瀵瑰簲 classic `CAN_Type`
- * IP銆傜被鍚嶄粛鎸?LibXR 鎶借薄鍛藉悕锛? * 鍥犳杩欓噷鐨?`HPMClassicCAN`
- * 琛ㄧず鈥渃lassic CAN IP + LibXR::CAN鈥濄€傝嫢鐩爣 SoC
- * 鏆撮湶鐨勬槸 `MCAN_Type`锛屽悓鍚?`HPMClassicCAN` 瀹炵幇浣嶄簬 `hpm_mcan.*`銆? * This
- * file is grouped by hardware IP and only targets the classic `CAN_Type` IP.
- * `HPMClassicCAN` is named separately so it can coexist with PR #208's `HPMCAN`
- * MCAN classic adapter. When the target exposes only `MCAN_Type`, use `HPMCAN`
- * from `hpm_can.*` or `HPMCANFD` from `hpm_mcan.*` instead.
+ * IP銆傜被鍚嶄粛鎸?LibXR 鎶借薄鍛藉悕锛? *
+ * 鍥犳杩欓噷鐨?`HPMClassicCAN` 琛ㄧず鈥渃lassic CAN IP +
+ * LibXR::CAN鈥濄€傝嫢鐩爣 SoC 鏆撮湶鐨勬槸 `MCAN_Type`锛屽悓鍚?`HPMClassicCAN`
+ * 瀹炵幇浣嶄簬 `hpm_mcan.*`銆? * This file is grouped by hardware IP and only targets the
+ * classic `CAN_Type` IP. `HPMClassicCAN` is named separately so it can coexist with PR
+ * #208's `HPMCAN` MCAN classic adapter. When the target exposes only `MCAN_Type`, use
+ * `HPMCAN` from `hpm_can.*` or `HPMCANFD` from `hpm_mcan.*` instead.
  *
  * 澶氱郴鍒楅€夋嫨浣跨敤 HPM SDK header 涓殑
  * `MCAN_SOC_MAX_COUNT`銆乣CAN_SOC_MAX_COUNT`銆? * `HPMSOC_HAS_HPMSDK_CAN`
@@ -60,10 +60,10 @@ namespace LibXR
  * 璇ョ被鍦?classic `CAN_Type` IP 涓婂疄鐜?`LibXR::CAN`銆傚綋鍓嶆枃浠跺彧鎻愪緵
  * `HPMClassicCAN`锛? * 鑻ュ悗缁琛?classic CAN IP 涓婄殑 `LibXR::FDCAN`
  * 閫傞厤鍣紝浠嶅簲缁х画鏀惧湪 `hpm_can.*`锛? *
- * 鍥犱负鏂囦欢褰掑睘鎸?IP锛岃€屼笉鏄寜鏄惁鍚敤 FD銆? * This class implements
- * `LibXR::CAN` on top of the classic `CAN_Type` IP. This file currently provides only
- * `HPMClassicCAN` for non-MCAN `CAN_Type` peripherals, avoiding class-name overlap with
- * PR #208's MCAN `HPMCAN`.
+ * 鍥犱负鏂囦欢褰掑睘鎸?IP锛岃€屼笉鏄寜鏄惁鍚敤 FD銆? * This class
+ * implements `LibXR::CAN` on top of the classic `CAN_Type` IP. This file currently
+ * provides only `HPMClassicCAN` for non-MCAN `CAN_Type` peripherals, avoiding class-name
+ * overlap with PR #208's MCAN `HPMCAN`.
  */
 class HPMClassicCAN : public CAN
 {
@@ -95,18 +95,18 @@ class HPMClassicCAN : public CAN
    * return `NOT_SUPPORT`.
    * @param clock HPM SDK `clock_name_t`锛岀敤浜?`clock_get_frequency()` 鍜?`can_init()` /
    * HPM SDK `clock_name_t` used by `clock_get_frequency()` and `can_init()`.
-   * @param index 澶栬绱㈠紩锛屽繀椤诲皬浜?`CAN_SOC_MAX_COUNT` / Peripheral index,
-   * which must be lower than `CAN_SOC_MAX_COUNT`.
-   * @param irq 澶栬 IRQ 鍙凤紱涓?`kInvalidIrq` 鏃朵笉鑷姩鎵撳紑 NVIC / Peripheral
-   * IRQ number; `kInvalidIrq` disables automatic NVIC enable.
-   * @param auto_enable_irq 鏄惁鐢遍€傞厤鍣ㄦ竻鏍囧織骞舵墦寮€ IRQ / Whether the
-   * adapter clears flags and enables IRQs.
+   * @param index 澶栬绱㈠紩锛屽繀椤诲皬浜?`CAN_SOC_MAX_COUNT` / Peripheral
+   * index, which must be lower than `CAN_SOC_MAX_COUNT`.
+   * @param irq 澶栬 IRQ 鍙凤紱涓?`kInvalidIrq` 鏃朵笉鑷姩鎵撳紑 NVIC /
+   * Peripheral IRQ number; `kInvalidIrq` disables automatic NVIC enable.
+   * @param auto_enable_irq 鏄惁鐢遍€傞厤鍣ㄦ竻鏍囧織骞舵墦寮€ IRQ / Whether
+   * the adapter clears flags and enables IRQs.
    * @param tx_pool_size LibXR 鍙戦€侀槦鍒楁繁搴︼紝蹇呴』澶т簬 0 / LibXR TX queue depth,
    * which must be greater than 0.
    *
    * @note HPM5301 鐨?`CAN_SOC_MAX_COUNT` 璺熼殢 `MCAN_SOC_MAX_COUNT ==
-   * 0`锛屽洜姝ゆ湰妯℃澘鍙?   * 闈欐€佺紪璇?unsupported 璺緞锛沜lassic CAN
-   * 琛屼负闇€鍦ㄥ甫 `CAN_Type` 鐨?SoC 涓婇獙璇併€?/ On HPM5301, `CAN_SOC_MAX_COUNT`
+   * 0`锛屽洜姝ゆ湰妯℃澘鍙?   * 闈欐€佺紪璇?unsupported 璺緞锛沜lassic
+   * CAN 琛屼负闇€鍦ㄥ甫 `CAN_Type` 鐨?SoC 涓婇獙璇併€?/ On HPM5301, `CAN_SOC_MAX_COUNT`
    * follows `MCAN_SOC_MAX_COUNT == 0`, so this template only statically builds the
    * unsupported path; classic CAN behavior needs hardware validation on a SoC with
    * `CAN_Type`.
@@ -118,11 +118,11 @@ class HPMClassicCAN : public CAN
   /**
    * @brief 鏋愭瀯骞跺叧闂?IRQ/鐘舵€?/ Destruct and shut down IRQ/state.
    *
-   * @note 鏀寔 classic CAN IP 鏃朵細鍏抽棴 TX/RX/error IRQ 骞舵竻鐞?instance
-   * 鏄犲皠锛泆nsupported
-   * 璺緞鏃犵‖浠跺壇浣滅敤銆?/ When classic CAN IP is supported, TX/RX/error IRQs are
-   * disabled and the instance map is cleared; the unsupported path has no hardware side
-   * effect.
+   * @note 鏀寔 classic CAN IP 鏃朵細鍏抽棴 TX/RX/error IRQ
+   * 骞舵竻鐞?instance 鏄犲皠锛泆nsupported
+   * 璺緞鏃犵‖浠跺壇浣滅敤銆?/ When classic CAN IP is supported, TX/RX/error IRQs
+   * are disabled and the instance map is cleared; the unsupported path has no hardware
+   * side effect.
    */
   ~HPMClassicCAN() override;
 
@@ -135,15 +135,15 @@ class HPMClassicCAN : public CAN
    * `bitrate`/`sample_point` or low-level `bit_timing` maps to HPM SDK `can_config_t`,
    * and `mode` maps to normal/listen-only/loopback/one-shot behavior.
    * @return 鎴愬姛杩斿洖 `OK`锛涚┖鎸囬拡杩斿洖 `PTR_NULL`锛岄潪娉?timing/妯″紡杩斿洖
-   * `ARG_ERR` 鎴?   * `NOT_SUPPORT`锛孲DK 鍒濆鍖栧け璐ユ寜 `status_can_*` 杞负
-   * LibXR 閿欒鐮併€?/ Returns `OK` on success; returns `PTR_NULL` for null
-   * hardware, `ARG_ERR` or `NOT_SUPPORT` for invalid timing/mode, and maps SDK
+   * `ARG_ERR` 鎴?   * `NOT_SUPPORT`锛孲DK 鍒濆鍖栧け璐ユ寜 `status_can_*`
+   * 杞负 LibXR 閿欒鐮併€?/ Returns `OK` on success; returns `PTR_NULL` for
+   * null hardware, `ARG_ERR` or `NOT_SUPPORT` for invalid timing/mode, and maps SDK
    * initialization `status_can_*` values to LibXR error codes.
    *
    * @note 璋冪敤閾句负 `can_get_default_config()` -> accept-all filter 閰嶇疆 ->
-   * `can_init()`锛?   * 涓柇璺緞浣跨敤 `CAN_EVENT_*` 涓?`CAN_ERROR_*` 鏍囧織銆?/
-   * The call sequence is `can_get_default_config()` -> accept-all filter setup ->
-   * `can_init()`; the interrupt path uses `CAN_EVENT_*` and `CAN_ERROR_*` flags.
+   * `can_init()`锛?   * 涓柇璺緞浣跨敤 `CAN_EVENT_*` 涓?`CAN_ERROR_*`
+   * 鏍囧織銆?/ The call sequence is `can_get_default_config()` -> accept-all filter setup
+   * -> `can_init()`; the interrupt path uses `CAN_EVENT_*` and `CAN_ERROR_*` flags.
    */
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
@@ -159,25 +159,26 @@ class HPMClassicCAN : public CAN
   /**
    * @brief 灏?classic CAN 甯у姞鍏ュ彂閫侀槦鍒?/ Queue a classic CAN frame for
    * transmission.
-   * @param pack LibXR classic CAN 甯э紱鏀寔鏍囧噯/鎵╁睍/杩滅▼甯э紝DLC
-   * 蹇呴』涓嶅ぇ浜?8銆?/ LibXR classic CAN frame; standard, extended, and remote frames
-   * are supported, and DLC must be no greater than 8.
+   * @param pack LibXR classic CAN
+   * 甯э紱鏀寔鏍囧噯/鎵╁睍/杩滅▼甯э紝DLC 蹇呴』涓嶅ぇ浜?8銆?/ LibXR
+   * classic CAN frame; standard, extended, and remote frames are supported, and DLC must
+   * be no greater than 8.
    * @return 鎴愬姛鍏ラ槦杩斿洖 `OK`锛涙湭閰嶇疆杩斿洖 `INIT_ERR`锛岄潪娉曞抚杩斿洖
    * `ARG_ERR`锛岄槦鍒楁弧杩斿洖 `FULL`锛寀nsupported SoC 杩斿洖 `NOT_SUPPORT`銆?/ Returns
    * `OK` when queued; returns `INIT_ERR` if not configured, `ARG_ERR` for invalid frames,
    * `FULL` when the queue is full, and `NOT_SUPPORT` on unsupported SoCs.
    *
    * @note 鍙戦€佹湇鍔℃渶缁堣皟鐢?`can_send_message_nonblocking()`锛岀‖浠?TX
-   * FIFO/鎬荤嚎浠茶缁撴灉浠嶉渶 涓婃澘瑙傚療銆?/ TX service eventually
-   * calls `can_send_message_nonblocking()`; hardware TX FIFO and bus arbitration behavior
-   * still need hardware observation.
+   * FIFO/鎬荤嚎浠茶缁撴灉浠嶉渶 涓婃澘瑙傚療銆?/ TX service
+   * eventually calls `can_send_message_nonblocking()`; hardware TX FIFO and bus
+   * arbitration behavior still need hardware observation.
    */
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
   /**
    * @brief 璇诲彇 classic CAN 閿欒鐘舵€?/ Read classic CAN error state.
-   * @param state 杈撳嚭 LibXR 閿欒璁℃暟鍜?bus-off/passive/warning 鐘舵€?/ Output LibXR
-   * error counters and bus-off/passive/warning state.
+   * @param state 杈撳嚭 LibXR 閿欒璁℃暟鍜?bus-off/passive/warning 鐘舵€?/ Output
+   * LibXR error counters and bus-off/passive/warning state.
    * @return 鎴愬姛杩斿洖 `OK`锛涚┖鎸囬拡杩斿洖 `PTR_NULL`锛泆nsupported SoC 杩斿洖
    * `NOT_SUPPORT`銆?/ Returns `OK` on success, `PTR_NULL` for null hardware, and
    * `NOT_SUPPORT` on unsupported SoCs.
@@ -191,23 +192,23 @@ class HPMClassicCAN : public CAN
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
   /**
-   * @brief 涓诲姩杞 RX buffer 骞舵淳鍙?LibXR 鍥炶皟 / Poll the RX buffer and
-   * dispatch LibXR callbacks.
-   * @param in_isr 鏍囪鍥炶皟鏄惁鍦?ISR 璇瑙﹀彂 / Marks whether callbacks are
-   * emitted from ISR context.
+   * @brief 涓诲姩杞 RX buffer 骞舵淳鍙?LibXR 鍥炶皟 / Poll the RX buffer
+   * and dispatch LibXR callbacks.
+   * @param in_isr 鏍囪鍥炶皟鏄惁鍦?ISR 璇瑙﹀彂 / Marks whether callbacks
+   * are emitted from ISR context.
    */
   void ProcessRx(bool in_isr = false);
 
   /**
    * @brief 澶勭悊 classic CAN 涓柇鏍囧織 / Process classic CAN interrupt
    * flags.
-   * @param in_isr 鏍囪褰撳墠璋冪敤鏄惁鏉ヨ嚜 ISR / Marks whether the call is from
-   * ISR context.
+   * @param in_isr 鏍囪褰撳墠璋冪敤鏄惁鏉ヨ嚜 ISR / Marks whether the call is
+   * from ISR context.
    *
    * @note 浼氬厛璇诲彇骞舵竻闄?TX/RX flags锛屽啀鏍规嵁 RX銆乀X銆乪rror 鏍囧織璋冪敤 RX
    * drain銆乀X service
-   * 鍜岄敊璇抚娲惧彂銆?/ Reads and clears TX/RX flags first, then calls RX drain, TX
-   * service, and error-frame dispatch according to RX, TX, and error flags.
+   * 鍜岄敊璇抚娲惧彂銆?/ Reads and clears TX/RX flags first, then calls RX drain,
+   * TX service, and error-frame dispatch according to RX, TX, and error flags.
    */
   void ProcessInterrupt(bool in_isr = true);
 

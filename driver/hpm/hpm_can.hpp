@@ -37,7 +37,7 @@ class HPMCAN final : public CAN
   static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;
 
   HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
-          void* msg_buf, uint32_t msg_buf_size);
+         void* msg_buf, uint32_t msg_buf_size);
 
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
   uint32_t GetClockFreq() const override;
