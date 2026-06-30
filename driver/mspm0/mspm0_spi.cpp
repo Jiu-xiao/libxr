@@ -722,3 +722,10 @@ extern "C" void SPI1_IRQHandler(void)  // NOLINT
   LibXR::MSPM0SPI::OnInterrupt(1);
 }
 #endif
+
+#if defined(SPI2_BASE)
+extern "C" void SPI2_IRQHandler(void)  // NOLINT
+{
+  LibXR::MSPM0SPI::OnInterrupt(2);
+}
+#endif

@@ -1,5 +1,7 @@
 #include "mspm0_gpio.hpp"
 
+#include <ti/driverlib/m0p/dl_interrupt.h>
+
 using namespace LibXR;
 
 MSPM0GPIO* MSPM0GPIO::instance_map_[MAX_PORTS][32] = {{nullptr}};
@@ -237,6 +239,11 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
 
 void MSPM0GPIO::OnInterruptDispatch(GPIO_Regs* port, int port_idx)
 {
+  if (port_idx < 0 || port_idx >= LibXR::MAX_PORTS)
+  {
+    return;
+  }
+
   uint32_t pending_pins = DL_GPIO_getEnabledInterruptStatus(port, 0xFFFFFFFF);
 
   if (pending_pins != 0)
@@ -256,5 +263,29 @@ void MSPM0GPIO::OnInterruptDispatch(GPIO_Regs* port, int port_idx)
     {
       instance->callback_.Run(true);
     }
+  }
+}
+
+extern "C" void GROUP1_IRQHandler(void)  // NOLINT
+{
+  switch (DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1))
+  {
+#ifdef GPIOA_BASE
+    case DL_INTERRUPT_GROUP1_IIDX_GPIOA:
+      LibXR::MSPM0GPIO::OnInterrupt(GPIOA);
+      break;
+#endif
+#ifdef GPIOB_BASE
+    case DL_INTERRUPT_GROUP1_IIDX_GPIOB:
+      LibXR::MSPM0GPIO::OnInterrupt(GPIOB);
+      break;
+#endif
+#ifdef GPIOC_BASE
+    case DL_INTERRUPT_GROUP1_IIDX_GPIOC:
+      LibXR::MSPM0GPIO::OnInterrupt(GPIOC);
+      break;
+#endif
+    default:
+      break;
   }
 }
