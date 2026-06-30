@@ -80,6 +80,7 @@ class HPMCAN final : public CAN
   uint32_t irq_;
   void* msg_buf_{nullptr};
   uint32_t msg_buf_size_{0};
+  bool configured_{false};
 
   MPMCQueue<ClassicPack> tx_queue_;
   bool tx_retry_valid_{false};

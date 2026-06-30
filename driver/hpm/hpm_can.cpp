@@ -107,6 +107,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   {
     return ErrorCode::ARG_ERR;
   }
+  configured_ = false;
 
   const ErrorCode MSG_BUF_STATUS = ApplyMessageBuffer();
   if (MSG_BUF_STATUS != ErrorCode::OK)
@@ -157,6 +158,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   if (RESULT == ErrorCode::OK)
   {
     mcan_disable_standby_pin(can_);
+    configured_ = true;
     EnableCanInterrupts();
     (void)EnableInterrupt();
   }
@@ -266,7 +268,7 @@ CAN::ErrorID HPMCAN::ConvertLastError(uint8_t last_error)
 
 void HPMCAN::TxService()
 {
-  if (can_ == nullptr)
+  if (!configured_ || can_ == nullptr)
   {
     return;
   }
@@ -335,6 +337,14 @@ void HPMCAN::TxService()
 
 ErrorCode HPMCAN::AddMessage(const ClassicPack& pack)
 {
+  if (can_ == nullptr)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (!configured_)
+  {
+    return ErrorCode::INIT_ERR;
+  }
   if (pack.type == Type::ERROR)
   {
     return ErrorCode::ARG_ERR;
@@ -420,7 +430,7 @@ void HPMCAN::ProcessError()
 
 void HPMCAN::ProcessInterrupt()
 {
-  if (can_ == nullptr)
+  if (!configured_ || can_ == nullptr)
   {
     return;
   }

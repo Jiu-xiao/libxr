@@ -759,6 +759,8 @@ void HPMCANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
 
   if ((error_status_its & MCAN_INT_BUS_OFF_STATUS) != 0U && protocol.in_bus_off_state)
   {
+    // Bus-off sets CCCR.INIT; clear it so MCAN can run the recovery sequence.
+    mcan_enter_normal_mode(can_);
     EmitErrorFrame(ErrorID::CAN_ERROR_ID_BUS_OFF, true);
     return;
   }
