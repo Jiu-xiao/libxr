@@ -6,8 +6,8 @@
 #if __has_include("hpm_mcan_drv.h") && __has_include("hpm_mcan_regs.h") && \
                                                      __has_include("hpm_mcan_soc.h")
 #include "hpm_mcan_drv.h"
-// Current HPM CAN support assumes MCAN message RAM placement is described by
-// `MCAN_MSG_BUF_BASE_VALID_START`.
+// 当前 HPM CAN 支持假定 MCAN message RAM 位置由
+// `MCAN_MSG_BUF_BASE_VALID_START` 描述。
 #if ((defined(MCAN_SOC_MAX_COUNT) && (MCAN_SOC_MAX_COUNT > 0)) || \
      (defined(CAN_SOC_MAX_COUNT) && (CAN_SOC_MAX_COUNT > 0))) &&  \
     defined(HPM_MCAN0) && defined(MCAN_MSG_BUF_BASE_VALID_START)
@@ -50,10 +50,9 @@ class HPMCAN final : public CAN
 
   ErrorCode DisableInterrupt();
 
-  /// @brief Set message RAM before configuration.
+  /// @brief 在配置前设置 message RAM / Set message RAM before configuration.
   ///
-  /// The buffer should reside in `.ahb_sram`, typically sized as
-  /// `MCAN_MSG_BUF_SIZE_IN_WORDS` words.
+  /// 缓冲区应放在 `.ahb_sram`，通常大小为 `MCAN_MSG_BUF_SIZE_IN_WORDS` words。
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
  private:

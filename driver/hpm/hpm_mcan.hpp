@@ -1,8 +1,8 @@
 /// @file hpm_mcan.hpp
-/// @brief Adapter header for HPM MCAN IP.
+/// @brief HPM MCAN IP 适配头文件 / Adapter header.
 ///
-/// This file adds `HPMCANFD`, the `LibXR::FDCAN` adapter for Bosch MCAN IP.
-/// The MCAN classic CAN adapter remains `HPMCAN` in `hpm_can.*`.
+/// 本文件提供 Bosch MCAN IP 的 `LibXR::FDCAN` 适配器 `HPMCANFD`。
+/// MCAN classic CAN 适配器仍位于 `hpm_can.*`，类名为 `HPMCAN`。
 #pragma once
 
 #include <atomic>
@@ -218,10 +218,10 @@ void ProcessMcanInterrupt(MCAN_Type* can, bool configured, bool in_isr,
 }  // namespace detail
 
 /// @class HPMCANFD
-/// @brief `LibXR::FDCAN` adapter for HPM MCAN IP.
+/// @brief HPM MCAN IP 的 `LibXR::FDCAN` 适配器。
 ///
-/// Supports classic and FD frames, BRS, ESI, and TDC. Do not share one MCAN
-/// instance between this adapter and `HPMCAN`.
+/// 支持 classic/FD 帧、BRS、ESI 和 TDC。
+/// 同一个 MCAN instance 不应同时交给本类和 `HPMCAN` 使用。
 class HPMCANFD : public FDCAN
 {
  public:
@@ -235,93 +235,90 @@ class HPMCANFD : public FDCAN
   static constexpr uint8_t kMaxInstances = 1;
 #endif
 
-  /// @brief Construct the MCAN FDCAN wrapper.
-  /// @param can HPM `MCAN_Type` instance.
-  /// @param clock HPM SDK clock used by `clock_get_frequency()` and `mcan_init()`.
-  /// @param index MCAN instance index; must be lower than `MCAN_SOC_MAX_COUNT`.
-  /// @param irq Peripheral IRQ number, or `kInvalidIrq` to skip NVIC enable.
-  /// @param auto_enable_irq Whether the adapter manages IRQ flags and NVIC enable.
-  /// @param queue_size Classic and FD software TX queue depth; must be greater than 0.
+  /// @brief 构造 MCAN FDCAN wrapper / Construct the MCAN FDCAN wrapper.
+  /// @param can HPM `MCAN_Type` 实例。
+  /// @param clock HPM SDK 时钟，用于 `clock_get_frequency()` 和 `mcan_init()`。
+  /// @param index MCAN 实例索引，必须小于 `MCAN_SOC_MAX_COUNT`。
+  /// @param irq 外设 IRQ 号；`kInvalidIrq` 表示不自动打开 NVIC。
+  /// @param auto_enable_irq 是否由适配器管理 IRQ flag 和 NVIC。
+  /// @param queue_size classic 和 FD 软件 TX 队列深度，必须大于 0。
   HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index = 0,
            uint32_t irq = kInvalidIrq, bool auto_enable_irq = true,
            uint32_t queue_size = kDefaultTxPoolSize, void* msg_buf = nullptr,
            uint32_t msg_buf_size = 0);
 
-  /// @brief Destruct and release MCAN/FDCAN state.
+  /// @brief 析构并释放 MCAN/FDCAN 状态 / Release MCAN/FDCAN state.
   ~HPMCANFD() override;
 
-  /// @brief Perform the lightweight initialization check.
-  /// @return `OK`, `PTR_NULL`, or `NOT_SUPPORT`.
+  /// @brief 执行轻量初始化检查 / Lightweight initialization check.
+  /// @return `OK`、`PTR_NULL` 或 `NOT_SUPPORT`。
   ErrorCode Init(void);
 
-  /**
-   * @brief Set MCAN message RAM before configuration.
-   *
-   * The buffer should be placed in `.ahb_sram` on HPM SoCs whose MCAN message
-   * RAM is backed by AHB RAM.
-   */
+  /// @brief 在配置前设置 MCAN message RAM / Set message RAM before configuration.
+  ///
+  /// 对于 message RAM 由 AHB RAM 承载的 HPM SoC，缓冲区应放在 `.ahb_sram`。
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
-  /// @brief Configure the MCAN/FDCAN wrapper with classic CAN settings.
-  /// @param cfg Classic CAN configuration promoted to FDCAN with FD disabled.
-  /// @return Result of `SetConfig(const FDCAN::Configuration&)`.
+  /// @brief 用 classic CAN 配置 MCAN/FDCAN wrapper。
+  /// @param cfg classic CAN 配置，会提升为关闭 FD 的 FDCAN 配置。
+  /// @return `SetConfig(const FDCAN::Configuration&)` 的结果。
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
-  /// @brief Configure MCAN classic/FD operating parameters.
-  /// @param cfg LibXR FDCAN configuration.
-  /// @return `OK`, `PTR_NULL`, `ARG_ERR`, `NOT_SUPPORT`, or mapped SDK status.
+  /// @brief 配置 MCAN classic/FD 工作参数 / Configure MCAN parameters.
+  /// @param cfg LibXR FDCAN 配置。
+  /// @return `OK`、`PTR_NULL`、`ARG_ERR`、`NOT_SUPPORT` 或映射后的 SDK 状态。
   ErrorCode SetConfig(const FDCAN::Configuration& cfg) override;
 
-  /// @brief Return the MCAN peripheral input clock.
-  /// @return `clock_get_frequency(clock_)` when supported, otherwise 0.
+  /// @brief 返回 MCAN 外设输入时钟 / Return MCAN peripheral input clock.
+  /// @return 支持时返回 `clock_get_frequency(clock_)`，否则返回 0。
   uint32_t GetClockFreq() const override;
 
-  /// @brief Queue a classic CAN frame.
-  /// @param pack Classic CAN data frame; DLC must be <= 8.
-  /// @return `OK`, `INIT_ERR`, `ARG_ERR`, `FULL`, or `NOT_SUPPORT`.
+  /// @brief 将 classic CAN 帧加入发送队列 / Queue a classic CAN frame.
+  /// @param pack classic CAN 数据帧，DLC 必须 <= 8。
+  /// @return `OK`、`INIT_ERR`、`ARG_ERR`、`FULL` 或 `NOT_SUPPORT`。
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
-  /// @brief Queue an FD frame.
-  /// @param pack Standard or extended FD data frame; length must be <= 64.
-  /// @return `OK`, `INIT_ERR`, `NOT_SUPPORT`, `ARG_ERR`, or `FULL`.
+  /// @brief 将 FD 帧加入发送队列 / Queue an FD frame.
+  /// @param pack 标准或扩展 FD 数据帧，长度必须 <= 64。
+  /// @return `OK`、`INIT_ERR`、`NOT_SUPPORT`、`ARG_ERR` 或 `FULL`。
   ErrorCode AddMessage(const FDPack& pack) override;
 
-  /// @brief Read MCAN error state.
-  /// @param state Output LibXR error counters and bus-off/passive/warning state.
-  /// @return `OK`, `PTR_NULL`, or `NOT_SUPPORT`.
+  /// @brief 读取 MCAN 错误状态 / Read MCAN error state.
+  /// @param state 输出 LibXR 错误计数和 bus-off/passive/warning 状态。
+  /// @return `OK`、`PTR_NULL` 或 `NOT_SUPPORT`。
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
-  /// @brief Query free slots in the hardware TX FIFO.
-  /// @return Free hardware TX FIFO slots, or 0 when unsupported.
+  /// @brief 查询硬件 TX FIFO 空闲槽数量 / Query TX FIFO free slots.
+  /// @return 硬件 TX FIFO 空闲槽数量；不支持时返回 0。
   size_t HardwareTxQueueEmptySize() const;
 
-  /// @brief Process receive interrupts for one RX FIFO.
-  /// @param fifo RX FIFO index, usually 0 or 1.
+  /// @brief 处理指定 RX FIFO 的接收中断 / Process RX FIFO interrupt.
+  /// @param fifo RX FIFO 索引，通常为 0 或 1。
   void ProcessRxInterrupt(uint32_t fifo);
 
-  /// @brief Process MCAN error/status interrupts.
-  /// @param error_status_its MCAN error/status flags hit by this interrupt.
+  /// @brief 处理 MCAN error/status 中断。
+  /// @param error_status_its 本次中断命中的 MCAN error/status flags。
   void ProcessErrorStatusInterrupt(uint32_t error_status_its);
 
-  /// @brief Process combined MCAN interrupts.
-  /// @param in_isr Marks whether the call is from ISR context.
+  /// @brief 处理 MCAN 综合中断 / Process combined MCAN interrupt.
+  /// @param in_isr 标记当前调用是否来自 ISR。
   void ProcessInterrupt(bool in_isr = true);
 
-  /// @brief Indexed entry used by the C ISR trampoline.
-  /// @param index MCAN instance index.
+  /// @brief C ISR trampoline 使用的按索引入口。
+  /// @param index MCAN 实例索引。
   static void OnInterrupt(uint8_t index);
 
-  /// @brief Convert a LibXR classic frame to HPM `mcan_tx_frame_t`.
-  /// @param pack Input classic frame.
-  /// @param frame Output HPM MCAN TX frame.
+  /// @brief 将 LibXR classic frame 转为 HPM `mcan_tx_frame_t`。
+  /// @param pack 输入 classic frame。
+  /// @param frame 输出 HPM MCAN TX frame。
   static inline void BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame);
 
-  /// @brief Convert a LibXR FD frame to HPM `mcan_tx_frame_t`.
-  /// @param pack Input FD frame.
-  /// @param frame Output HPM MCAN TX frame.
+  /// @brief 将 LibXR FD frame 转为 HPM `mcan_tx_frame_t`。
+  /// @param pack 输入 FD frame。
+  /// @param frame 输出 HPM MCAN TX frame。
   static inline void BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame);
 
-  /// @brief Service software TX queues into the MCAN TX FIFO.
+  /// @brief 将软件 TX 队列服务到 MCAN TX FIFO / Service TX queues.
   void TxService();
 
  private:
