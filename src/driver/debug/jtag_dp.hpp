@@ -53,10 +53,14 @@ class JtagDp final
   {
     JtagProtocol::Response resp;
     ErrorCode EC = Transfer(JtagProtocol::make_dp_req(true, addr2b, 0u), resp);
+    ack = resp.ack;
     if (EC != ErrorCode::OK)
     {
-      ack = resp.ack;
       return EC;
+    }
+    if (resp.ack != JtagProtocol::Ack::OK)
+    {
+      return ErrorCode::OK;
     }
     // 读为管线化：第二次读取 RDBUFF 拿到结果
     EC = Transfer(JtagProtocol::make_dp_req(true, 3u, 0u), resp);
@@ -78,10 +82,14 @@ class JtagDp final
   {
     JtagProtocol::Response resp;
     ErrorCode EC = Transfer(JtagProtocol::make_ap_req(true, addr2b, 0u), resp);
+    ack = resp.ack;
     if (EC != ErrorCode::OK)
     {
-      ack = resp.ack;
       return EC;
+    }
+    if (resp.ack != JtagProtocol::Ack::OK)
+    {
+      return ErrorCode::OK;
     }
     // AP 读同样是 posted：读 RDBUFF 获取实际数据
     EC = Transfer(JtagProtocol::make_dp_req(true, 3u, 0u), resp);

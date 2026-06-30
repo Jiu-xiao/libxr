@@ -1542,13 +1542,18 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  ErrorCode HandleWriteABORT(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
+  ErrorCode HandleWriteABORT(bool in_isr, const uint8_t* req, uint16_t req_len,
                              uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
     if (resp_cap < 2u)
     {
       out_len = 0;
       return ErrorCode::NOT_FOUND;
+    }
+
+    if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+    {
+      return HandleJtagWriteAbort(in_isr, req, req_len, resp, resp_cap, out_len);
     }
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::WRITE_ABORT);
@@ -2403,13 +2408,18 @@ class DapLinkV2Class : public DeviceClass
   // Note: The following long functions are kept as-is; no function-level docs in this
   // cpp. HPP will carry API docs.
 
-  ErrorCode HandleTransfer(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
+  ErrorCode HandleTransfer(bool in_isr, const uint8_t* req, uint16_t req_len,
                            uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
     out_len = 0u;
     if (!req || !resp || resp_cap < 3u)
     {
       return ErrorCode::ARG_ERR;
+    }
+
+    if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+    {
+      return HandleJtagTransfer(in_isr, req, req_len, resp, resp_cap, out_len);
     }
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER);
@@ -2910,9 +2920,14 @@ class DapLinkV2Class : public DeviceClass
     out_len = resp_off;
     return ErrorCode::OK;
   }
-  ErrorCode HandleTransferBlock(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
+  ErrorCode HandleTransferBlock(bool in_isr, const uint8_t* req, uint16_t req_len,
                                 uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
+    if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+    {
+      return HandleJtagTransferBlock(in_isr, req, req_len, resp, resp_cap, out_len);
+    }
+
     // Req:  [0]=0x06 [1]=index [2..3]=count [4]=request [5..]=data(write)
     // Resp: [0]=0x06 [1..2]=done [3]=resp [4..]=data(read)
     if (!resp || resp_cap < 4u)
@@ -3615,61 +3630,33 @@ class DapLinkV2Class : public DeviceClass
           continue;
         }
 
-        if (!pending.valid)
+        uint32_t rdata = 0u;
+        ec = ap_read_retry(ADDR2B, rdata, ack);
+
+        response_value = MapAckToDapResp(ack);
+        if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
         {
-          uint32_t dummy_posted = 0u;
-          ec = ApReadPostedFast(ADDR2B, dummy_posted, ack);
-
-          response_value = MapAckToDapResp(ack);
-          if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
-          {
-            break;
-          }
-          if (ec != ErrorCode::OK)
-          {
-            response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-            break;
-          }
-
-          pending.valid = true;
-          pending.need_ts = TS;
-          response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
+          break;
         }
-        else
+        if (ec != ErrorCode::OK)
         {
-          if (!ensure_space(bytes_for_read(pending.need_ts)))
-          {
-            response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-            break;
-          }
-
-          uint32_t posted_prev = 0u;
-          ec = ApReadPostedFast(ADDR2B, posted_prev, ack);
-
-          const uint8_t CUR_V = MapAckToDapResp(ack);
-          if (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK || ec != ErrorCode::OK)
-          {
-            const uint8_t FAIL = (CUR_V != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
-                                     ? CUR_V
-                                     : LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-            if (!complete_pending_ap_read_by_rdbuff())
-            {
-              break;
-            }
-            response_value = FAIL;
-            break;
-          }
-
-          if (!emit_read_with_ts(pending.need_ts, posted_prev))
-          {
-            response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-            break;
-          }
-
-          pending.valid = true;
-          pending.need_ts = TS;
-          response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
+          response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+          break;
         }
+
+        if (!ensure_space(bytes_for_read(TS)))
+        {
+          response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+          break;
+        }
+
+        if (!emit_read_with_ts(TS, rdata))
+        {
+          response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+          break;
+        }
+
+        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
       }
 
       if (dap_state_.transfer_abort)
@@ -3696,7 +3683,7 @@ class DapLinkV2Class : public DeviceClass
     {
       uint32_t dummy = 0u;
       LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-      const ErrorCode ec = DpReadRdbuffFast(dummy, ack);
+      const ErrorCode ec = dp_read_retry(3u, dummy, ack);
       const uint8_t v = MapAckToDapResp(ack);
 
       if (v != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)

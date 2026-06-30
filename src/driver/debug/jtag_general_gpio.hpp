@@ -1,11 +1,11 @@
 #pragma once
 
-#include <cmath>
 #include <cstdint>
 
 #include "gpio.hpp"
 #include "jtag.hpp"
 #include "libxr_def.hpp"
+#include "libxr_mem.hpp"
 
 namespace LibXR::Debug
 {
@@ -100,9 +100,7 @@ class JtagGeneralGPIO final : public Jtag
 
     clock_hz_ = hz;
 
-    const double DEN = 2.0 * static_cast<double>(hz);
-    const double HALF_PERIOD_NS_F = std::ceil(static_cast<double>(NS_PER_SEC) / DEN);
-    half_period_ns_ = static_cast<uint32_t>(HALF_PERIOD_NS_F);
+    half_period_ns_ = (NS_PER_SEC + (2u * hz) - 1u) / (2u * hz);
 
     if (loops_per_us_ == 0u)
     {
@@ -110,20 +108,17 @@ class JtagGeneralGPIO final : public Jtag
       return ErrorCode::OK;
     }
 
-    const double HALF_PERIOD_LOOPS_F =
-        (static_cast<double>(loops_per_us_) * static_cast<double>(half_period_ns_)) /
-        static_cast<double>(LOOPS_SCALE);
-
-    if (HALF_PERIOD_LOOPS_F < 1.0)
+    const uint64_t LOOPS_SCALED =
+        static_cast<uint64_t>(loops_per_us_) * static_cast<uint64_t>(half_period_ns_);
+    if (LOOPS_SCALED < LOOPS_SCALE)
     {
       half_period_loops_ = 0u;
     }
     else
     {
-      const double LOOPS_CEIL_F = std::ceil(HALF_PERIOD_LOOPS_F);
-      half_period_loops_ = (LOOPS_CEIL_F >= static_cast<double>(UINT32_MAX))
-                               ? UINT32_MAX
-                               : static_cast<uint32_t>(LOOPS_CEIL_F);
+      const uint64_t LOOPS_CEIL = (LOOPS_SCALED + CEIL_BIAS) / LOOPS_SCALE;
+      half_period_loops_ = (LOOPS_CEIL > UINT32_MAX) ? UINT32_MAX
+                                                     : static_cast<uint32_t>(LOOPS_CEIL);
     }
 
     return ErrorCode::OK;
@@ -295,7 +290,7 @@ class JtagGeneralGPIO final : public Jtag
 
   void ShiftBits(uint32_t bits, const uint8_t* in_lsb_first, uint8_t* out_lsb_first)
   {
-    if (out_lsb_first != nullptr && bits <= 1u)
+    if (out_lsb_first != nullptr && bits != 0u)
     {
       const uint32_t BYTES = (bits + 7u) / 8u;
       Memory::FastSet(out_lsb_first, 0, BYTES);
