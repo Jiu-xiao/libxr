@@ -159,7 +159,7 @@ void ApplyLowLevelTiming(const CAN::BitTiming& src, mcan_bit_timing_param_t& dst
 void ApplyLowLevelTiming(const FDCAN::DataBitTiming& src, mcan_bit_timing_param_t& dst);
 CAN::ErrorID ConvertMcanProtocolError(mcan_last_err_code_t code);
 uint32_t AcquireMcanClock(clock_name_t clock);
-void PrepareMcanCommonConfig(mcan_config_t& config, bool enable_canfd);
+void PrepareMcanCommonConfig(MCAN_Type* can, mcan_config_t& config, bool enable_canfd);
 void PrepareMcanAcceptAllFilters(mcan_config_t& config);
 void ShutdownMcan(MCAN_Type* can, uint32_t irq, bool auto_enable_irq,
                   uint32_t interrupt_mask);
@@ -287,7 +287,8 @@ class HPMCANFD : public FDCAN
    */
   HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index = 0,
            uint32_t irq = kInvalidIrq, bool auto_enable_irq = true,
-           uint32_t queue_size = kDefaultTxPoolSize);
+           uint32_t queue_size = kDefaultTxPoolSize, void* msg_buf = nullptr,
+           uint32_t msg_buf_size = 0);
 
   /**
    * @brief 鏋愭瀯骞堕噴鏀?MCAN/FDCAN 鐘舵€?/ Destruct and release MCAN/FDCAN state.
@@ -306,6 +307,14 @@ class HPMCANFD : public FDCAN
    * `NOT_SUPPORT` on unsupported SoCs.
    */
   ErrorCode Init(void);
+
+  /**
+   * @brief Set MCAN message RAM before configuration.
+   *
+   * The buffer should be placed in `.ahb_sram` on HPM SoCs whose MCAN message
+   * RAM is backed by AHB RAM.
+   */
+  ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
   /**
    * @brief 鎸?classic CAN 閰嶇疆 MCAN/FDCAN wrapper / Configure the MCAN/FDCAN wrapper
@@ -465,6 +474,7 @@ class HPMCANFD : public FDCAN
   static uint16_t SamplePointToPermilleX10(float sample_point);
   static uint8_t DlcToBytes(uint8_t dlc);
   static uint8_t BytesToDlc(uint8_t bytes);
+  ErrorCode ApplyMessageBuffer();
   void Shutdown();
   static bool BuildRxPack(const mcan_rx_message_t& frame, ClassicPack& pack);
   static bool BuildRxPack(const mcan_rx_message_t& frame, FDPack& pack);
@@ -476,6 +486,8 @@ class HPMCANFD : public FDCAN
   uint8_t index_;
   uint32_t irq_;
   bool auto_enable_irq_;
+  void* msg_buf_{nullptr};
+  uint32_t msg_buf_size_{0};
   bool ownership_acquired_ = false;
   bool configured_ = false;
   bool fd_enabled_ = false;

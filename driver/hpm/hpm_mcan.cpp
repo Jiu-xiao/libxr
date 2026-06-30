@@ -132,9 +132,13 @@ uint32_t AcquireMcanClock(clock_name_t clock)
   return clock_get_frequency(clock);
 }
 
-void PrepareMcanCommonConfig(mcan_config_t& config, bool enable_canfd)
+void PrepareMcanCommonConfig(MCAN_Type* can, mcan_config_t& config, bool enable_canfd)
 {
   config.enable_canfd = enable_canfd;
+  if (enable_canfd)
+  {
+    mcan_get_default_ram_config(can, &config.ram_config, true);
+  }
   config.ram_config.enable_rxbuf = false;
   config.ram_config.rxbuf_elem_count = 0U;
   config.interrupt_mask = kMcanInterruptMask;
@@ -425,12 +429,15 @@ void HPMCANFD::EmitErrorFrame(CAN::ErrorID error_id, bool in_isr)
 }
 
 HPMCANFD::HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index,
-                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size)
+                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size,
+                   void* msg_buf, uint32_t msg_buf_size)
     : can_(can),
       clock_(clock),
       index_(index),
       irq_(irq),
       auto_enable_irq_(auto_enable_irq),
+      msg_buf_(msg_buf),
+      msg_buf_size_(msg_buf_size),
       tx_pool_(queue_size),
       tx_pool_fd_(queue_size)
 {
@@ -475,6 +482,36 @@ ErrorCode HPMCANFD::Init(void)
   return ErrorCode::OK;
 }
 
+ErrorCode HPMCANFD::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
+{
+  if (msg_buf == nullptr || msg_buf_size == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  msg_buf_ = msg_buf;
+  msg_buf_size_ = msg_buf_size;
+  return ErrorCode::OK;
+}
+
+ErrorCode HPMCANFD::ApplyMessageBuffer()
+{
+  if (can_ == nullptr || msg_buf_ == nullptr || msg_buf_size_ == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uintptr_t msg_buf_addr = reinterpret_cast<uintptr_t>(msg_buf_);
+  if (msg_buf_addr > UINT32_MAX)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  const mcan_msg_buf_attr_t attr = {static_cast<uint32_t>(msg_buf_addr),
+                                    msg_buf_size_};
+  return detail::ConvertMcanStatus(mcan_set_msg_buf_attr(can_, &attr));
+}
+
 ErrorCode HPMCANFD::SetConfig(const CAN::Configuration& cfg)
 {
   FDCAN::Configuration fd_cfg{};
@@ -510,6 +547,12 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
 
   Shutdown();
 
+  const ErrorCode msg_buf_status = ApplyMessageBuffer();
+  if (msg_buf_status != ErrorCode::OK)
+  {
+    return msg_buf_status;
+  }
+
   const uint32_t clock_hz = detail::AcquireMcanClock(clock_);
   if (clock_hz == 0U)
   {
@@ -518,7 +561,7 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
 
   mcan_config_t config{};
   mcan_get_default_config(can_, &config);
-  detail::PrepareMcanCommonConfig(config, cfg.fd_mode.fd_enabled);
+  detail::PrepareMcanCommonConfig(can_, config, cfg.fd_mode.fd_enabled);
   config.mode = detail::ConvertMcanMode(cfg.mode);
   config.disable_auto_retransmission = cfg.mode.one_shot;
   config.enable_restricted_operation_mode = cfg.mode.listen_only;
@@ -915,12 +958,15 @@ void HPMCANFD::EmitErrorFrame(CAN::ErrorID error_id, bool in_isr)
 }
 
 HPMCANFD::HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index,
-                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size)
+                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size,
+                   void* msg_buf, uint32_t msg_buf_size)
     : can_(can),
       clock_(clock),
       index_(index),
       irq_(irq),
       auto_enable_irq_(auto_enable_irq),
+      msg_buf_(msg_buf),
+      msg_buf_size_(msg_buf_size),
       tx_pool_(queue_size),
       tx_pool_fd_(queue_size)
 {
@@ -940,6 +986,15 @@ void HPMCANFD::Shutdown()
 }
 
 ErrorCode HPMCANFD::Init(void) { return ErrorCode::NOT_SUPPORT; }
+
+ErrorCode HPMCANFD::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
+{
+  UNUSED(msg_buf);
+  UNUSED(msg_buf_size);
+  return ErrorCode::NOT_SUPPORT;
+}
+
+ErrorCode HPMCANFD::ApplyMessageBuffer() { return ErrorCode::NOT_SUPPORT; }
 
 ErrorCode HPMCANFD::SetConfig(const CAN::Configuration& cfg)
 {
