@@ -1,27 +1,8 @@
-﻿/**
- * @file hpm_mcan.hpp
- * @brief HPM MCAN IP 閫傞厤澶存枃浠?/ Adapter header for HPM MCAN IP.
- *
- * @details
- * 鏈枃浠舵寜搴曞眰澶栬 IP
- * 褰掓。锛屽搴?`MCAN_Type`銆傛枃浠朵腑鍚屾椂鎻愪緵 `HPMCAN` 涓? *
- * `HPMCANFD`锛氬墠鑰呭鍑?`LibXR::CAN`锛屽悗鑰呭鍑?`LibXR::FDCAN`銆備袱鑰呭叡鐢ㄥ悓涓€濂?
- * * MCAN 澶栬妯″瀷锛屼絾鍚屼竴涓?MCAN instance 涓嶅厑璁稿叡瀛樸€? * This file
- * is grouped by the low-level peripheral IP and targets `MCAN_Type`. This follow-up
- * intentionally does not redefine `HPMCAN`; PR #208 keeps the MCAN classic `LibXR::CAN`
- * adapter in `hpm_can.*`. This file adds only `HPMCANFD`, the `LibXR::FDCAN` adapter for
- * the same Bosch MCAN IP.
- *
- * 澶氱郴鍒楅€傞厤閫氳繃 `HPMSOC_HAS_HPMSDK_MCAN`銆乣__has_include("hpm_mcan_drv.h")`銆? *
- * `MCAN_SOC_MAX_COUNT`銆乣HPM_MCANn`銆乣IRQn_MCANn` 鍜?HPM SDK `hpm_mcan_drv.h`
- * 鏆撮湶鐨勭姸鎬?feature 瀹忓畬鎴愶紱娌℃湁 MCAN 鐨?SoC 鎴栬鍓?SDK 缂哄皯 MCAN
- * driver 澶存椂璧? * `NOT_SUPPORT` 鎴栫紪璇戞湡 gate銆? * Multi-series adaptation is
- * driven by `HPMSOC_HAS_HPMSDK_MCAN`,
- * `__has_include("hpm_mcan_drv.h")`, `MCAN_SOC_MAX_COUNT`, `HPM_MCANn`,
- * `IRQn_MCANn`, and status/feature macros exposed by the HPM SDK `hpm_mcan_drv.h`.
- * SoCs without MCAN, or trimmed SDKs without the MCAN driver header, use the
- * `NOT_SUPPORT` path or compile-time gate.
- */
+/// @file hpm_mcan.hpp
+/// @brief Adapter header for HPM MCAN IP.
+///
+/// This file adds `HPMCANFD`, the `LibXR::FDCAN` adapter for Bosch MCAN IP.
+/// The MCAN classic CAN adapter remains `HPMCAN` in `hpm_can.*`.
 #pragma once
 
 #include <atomic>
@@ -236,22 +217,11 @@ void ProcessMcanInterrupt(MCAN_Type* can, bool configured, bool in_isr,
 
 }  // namespace detail
 
-/**
- * @class HPMCANFD
- * @brief HPM MCAN FDCAN 椹卞姩閫傞厤鍣紝閫傞厤 LibXR FDCAN 鎺ュ彛 /
- * HPM MCAN FDCAN adapter for the LibXR FDCAN interface.
- *
- * @details
- * 璇ョ被鍦?`MCAN_Type` 涓婂疄鐜?`LibXR::FDCAN`锛屽湪 classic frame
- * 涔嬪杩樻敮鎸?FD frame銆? * BRS銆丒SI銆乀DC 绛?FDCAN
- * 璇箟銆傚畠涓庡悓鏂囦欢涓殑 `HPMCAN` 鍏变韩鍚屼竴濂?MCAN
- * 澶栬妯″瀷锛? * 浣嗗悓涓€涓?MCAN instance
- * 涓婁笉鍏佽鍏卞瓨銆?
- * * This class implements `LibXR::FDCAN` on top of `MCAN_Type` and supports FD frame,
- * BRS, ESI, TDC, and related FDCAN semantics in addition to classic frames. It shares
- * the same MCAN peripheral model as the `HPMCAN` adapter from `hpm_can.*`; callers
- * should not instantiate both wrappers for the same MCAN instance.
- */
+/// @class HPMCANFD
+/// @brief `LibXR::FDCAN` adapter for HPM MCAN IP.
+///
+/// Supports classic and FD frames, BRS, ESI, and TDC. Do not share one MCAN
+/// instance between this adapter and `HPMCAN`.
 class HPMCANFD : public FDCAN
 {
  public:
@@ -265,50 +235,23 @@ class HPMCANFD : public FDCAN
   static constexpr uint8_t kMaxInstances = 1;
 #endif
 
-  /**
-   * @brief 鏋勯€?MCAN FDCAN wrapper / Construct the MCAN FDCAN wrapper.
-   * @param can HPM `MCAN_Type` 瀹炰緥锛泆nsupported SoC
-   * 涓婁负鍗犱綅鎸囬拡骞惰繑鍥?`NOT_SUPPORT` / HPM `MCAN_Type` instance; on unsupported
-   * SoCs this is a placeholder pointer and APIs return `NOT_SUPPORT`.
-   * @param clock HPM SDK `clock_name_t`锛岀敤浜?clock group銆乣clock_get_frequency()` 鍜?
-   * * `mcan_init()` / HPM SDK `clock_name_t` used for the clock group,
-   * `clock_get_frequency()`, and `mcan_init()`.
-   * @param index MCAN instance 绱㈠紩锛屽繀椤诲皬浜?`MCAN_SOC_MAX_COUNT` / MCAN instance
-   * index, which must be lower than `MCAN_SOC_MAX_COUNT`.
-   * @param irq 澶栬 IRQ 鍙凤紱涓?`kInvalidIrq` 鏃朵笉鑷姩鎵撳紑 NVIC /
-   * Peripheral IRQ number; `kInvalidIrq` disables automatic NVIC enable.
-   * @param auto_enable_irq 鏄惁鐢遍€傞厤鍣ㄦ竻鏍囧織骞舵墦寮€ IRQ / Whether
-   * the adapter clears flags and enables IRQs.
-   * @param queue_size classic 鍜?FD 杞欢鍙戦€侀槦鍒楁繁搴︼紝蹇呴』澶т簬 0 /
-   * Classic and FD software TX queue depth, which must be greater than 0.
-   *
-   * @note HPM5301 `MCAN_SOC_MAX_COUNT ==
-   * 0`锛屽洜姝ゆ湰妯℃澘鍙潤鎬佺紪璇?unsupported wrapper锛?   * FD
-   * 琛屼负闇€鍦ㄥ甫 MCAN IP 鐨?SoC 涓婇獙璇併€?/ HPM5301 has `MCAN_SOC_MAX_COUNT == 0`,
-   * so this template only statically builds the unsupported wrapper; FD behavior needs
-   * validation on a SoC with MCAN IP.
-   */
+  /// @brief Construct the MCAN FDCAN wrapper.
+  /// @param can HPM `MCAN_Type` instance.
+  /// @param clock HPM SDK clock used by `clock_get_frequency()` and `mcan_init()`.
+  /// @param index MCAN instance index; must be lower than `MCAN_SOC_MAX_COUNT`.
+  /// @param irq Peripheral IRQ number, or `kInvalidIrq` to skip NVIC enable.
+  /// @param auto_enable_irq Whether the adapter manages IRQ flags and NVIC enable.
+  /// @param queue_size Classic and FD software TX queue depth; must be greater than 0.
   HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index = 0,
            uint32_t irq = kInvalidIrq, bool auto_enable_irq = true,
            uint32_t queue_size = kDefaultTxPoolSize, void* msg_buf = nullptr,
            uint32_t msg_buf_size = 0);
 
-  /**
-   * @brief 鏋愭瀯骞堕噴鏀?MCAN/FDCAN 鐘舵€?/ Destruct and release MCAN/FDCAN state.
-   *
-   * @note 鏀寔 MCAN IP 鏃朵細鍏抽棴涓柇銆佹竻鐞?registry
-   * 骞堕噴鏀惧叡浜?ownership銆?/ When MCAN IP is supported, interrupts are disabled, the
-   * registry is cleared, and shared ownership is released.
-   */
+  /// @brief Destruct and release MCAN/FDCAN state.
   ~HPMCANFD() override;
 
-  /**
-   * @brief 杞婚噺鍒濆鍖栨鏌?/ Perform the lightweight initialization check.
-   * @return 鏀寔 MCAN IP 涓旂‖浠舵寚閽堟湁鏁堟椂杩斿洖
-   * `OK`锛涚┖鎸囬拡杩斿洖 `PTR_NULL`锛泆nsupported SoC 杩斿洖 `NOT_SUPPORT`銆?/ Returns
-   * `OK` when MCAN IP is supported and the hardware pointer is valid, `PTR_NULL` for null
-   * hardware, and `NOT_SUPPORT` on unsupported SoCs.
-   */
+  /// @brief Perform the lightweight initialization check.
+  /// @return `OK`, `PTR_NULL`, or `NOT_SUPPORT`.
   ErrorCode Init(void);
 
   /**
@@ -319,155 +262,66 @@ class HPMCANFD : public FDCAN
    */
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
-  /**
-   * @brief 鎸?classic CAN 閰嶇疆 MCAN/FDCAN wrapper / Configure the MCAN/FDCAN wrapper
-   * with classic CAN settings.
-   * @param cfg LibXR classic CAN 閰嶇疆锛屼細鎻愬崌涓?`FDCAN::Configuration`
-   * 涓斿叧闂?FD銆?/ LibXR classic CAN configuration, promoted to `FDCAN::Configuration`
-   * with FD disabled.
-   * @return 閫忎紶 `SetConfig(const FDCAN::Configuration&)` 鐨勭粨鏋?/ Returns the result
-   * of `SetConfig(const FDCAN::Configuration&)`.
-   */
+  /// @brief Configure the MCAN/FDCAN wrapper with classic CAN settings.
+  /// @param cfg Classic CAN configuration promoted to FDCAN with FD disabled.
+  /// @return Result of `SetConfig(const FDCAN::Configuration&)`.
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
-  /**
-   * @brief 閰嶇疆 MCAN classic/FD 宸ヤ綔鍙傛暟 / Configure MCAN classic/FD operating
-   * parameters.
-   * @param cfg LibXR FDCAN 閰嶇疆锛沶ominal/data bitrate銆乻ample point銆丅RS銆丒SI
-   * 鍜?TDC 鏄犲皠鍒?`mcan_config_t`銆?/ LibXR FDCAN configuration; nominal/data bitrate,
-   * sample point, BRS, ESI, and TDC map to `mcan_config_t`.
-   * @return 鎴愬姛杩斿洖 `OK`锛涚┖鎸囬拡杩斿洖 `PTR_NULL`锛屾棤鏁?mode/timing 杩斿洖
-   * `ARG_ERR` 鎴?   * `NOT_SUPPORT`锛孲DK 鐘舵€佹寜 `status_mcan_*` 杞崲銆?/
-   * Returns `OK` on success; returns `PTR_NULL` for null hardware, `ARG_ERR` or
-   * `NOT_SUPPORT` for invalid mode/timing, and maps SDK `status_mcan_*` values.
-   *
-   * @note 璋冪敤 `mcan_get_default_config()` 鍜?`mcan_init()`锛汻X FIFO銆乀X
-   * FIFO銆丒CR/PSR銆?   * DLC/message RAM 琛屼负浠嶉渶涓婃澘楠岃瘉銆?/ Calls
-   * `mcan_get_default_config()` and `mcan_init()`; RX FIFO, TX FIFO, ECR/PSR, DLC, and
-   * message RAM behavior still need hardware validation.
-   */
+  /// @brief Configure MCAN classic/FD operating parameters.
+  /// @param cfg LibXR FDCAN configuration.
+  /// @return `OK`, `PTR_NULL`, `ARG_ERR`, `NOT_SUPPORT`, or mapped SDK status.
   ErrorCode SetConfig(const FDCAN::Configuration& cfg) override;
 
-  /**
-   * @brief 杩斿洖 MCAN 澶栬杈撳叆鏃堕挓 / Return the MCAN peripheral input
-   * clock.
-   * @return 鏀寔 MCAN IP 鏃惰繑鍥?`clock_get_frequency(clock_)`锛寀nsupported
-   * SoC 杩斿洖 0銆?/ Returns `clock_get_frequency(clock_)` when MCAN IP is supported, and
-   * 0 on unsupported SoCs.
-   */
+  /// @brief Return the MCAN peripheral input clock.
+  /// @return `clock_get_frequency(clock_)` when supported, otherwise 0.
   uint32_t GetClockFreq() const override;
 
-  /**
-   * @brief 灏?classic CAN 甯у姞鍏ュ彂閫侀槦鍒?/ Queue a classic CAN frame.
-   * @param pack LibXR classic CAN 甯э紱DLC
-   * 蹇呴』涓嶅ぇ浜?8锛岄敊璇抚涓嶈兘鍙戦€併€?/ LibXR classic CAN
-   * frame; DLC must be no greater than 8, and error frames cannot be transmitted.
-   * @return 鎴愬姛鍏ラ槦杩斿洖 `OK`锛涙湭閰嶇疆杩斿洖 `INIT_ERR`锛岄潪娉曞抚杩斿洖
-   * `ARG_ERR`锛岄槦鍒楁弧杩斿洖 `FULL`锛寀nsupported SoC 杩斿洖 `NOT_SUPPORT`銆?/ Returns
-   * `OK` when queued; returns `INIT_ERR` if not configured, `ARG_ERR` for invalid frames,
-   * `FULL` when the queue is full, and `NOT_SUPPORT` on unsupported SoCs.
-   */
+  /// @brief Queue a classic CAN frame.
+  /// @param pack Classic CAN data frame; DLC must be <= 8.
+  /// @return `OK`, `INIT_ERR`, `ARG_ERR`, `FULL`, or `NOT_SUPPORT`.
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
-  /**
-   * @brief 灏?FD 甯у姞鍏ュ彂閫侀槦鍒?/ Queue an FD frame.
-   * @param pack LibXR FD 甯э紱浠呮敮鎸佹爣鍑?鎵╁睍鏁版嵁甯э紝闀垮害蹇呴』涓嶅ぇ浜?64銆?/
-   * LibXR FD frame; only standard/extended data frames are supported, and length must be
-   * no greater than 64.
-   * @return 鎴愬姛鍏ラ槦杩斿洖 `OK`锛涙湭閰嶇疆杩斿洖 `INIT_ERR`锛孎D
-   * 鏈惎鐢ㄨ繑鍥?`NOT_SUPPORT`锛岄潪娉曞抚 杩斿洖
-   * `ARG_ERR`锛岄槦鍒楁弧杩斿洖 `FULL`銆?/ Returns `OK` when queued; returns `INIT_ERR`
-   * if not configured, `NOT_SUPPORT` if FD is disabled, `ARG_ERR` for invalid frames,
-   * and `FULL` when the queue is full.
-   */
+  /// @brief Queue an FD frame.
+  /// @param pack Standard or extended FD data frame; length must be <= 64.
+  /// @return `OK`, `INIT_ERR`, `NOT_SUPPORT`, `ARG_ERR`, or `FULL`.
   ErrorCode AddMessage(const FDPack& pack) override;
 
-  /**
-   * @brief 璇诲彇 MCAN 閿欒鐘舵€?/ Read MCAN error state.
-   * @param state 杈撳嚭 LibXR 閿欒璁℃暟鍜?bus-off/passive/warning 鐘舵€?/ Output
-   * LibXR error counters and bus-off/passive/warning state.
-   * @return 鎴愬姛杩斿洖 `OK`锛涚┖鎸囬拡杩斿洖 `PTR_NULL`锛泆nsupported SoC 杩斿洖
-   * `NOT_SUPPORT`銆?/ Returns `OK` on success, `PTR_NULL` for null hardware, and
-   * `NOT_SUPPORT` on unsupported SoCs.
-   */
+  /// @brief Read MCAN error state.
+  /// @param state Output LibXR error counters and bus-off/passive/warning state.
+  /// @return `OK`, `PTR_NULL`, or `NOT_SUPPORT`.
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
-  /**
-   * @brief 鏌ヨ纭欢 TX FIFO 绌洪棽妲芥暟 / Query free slots in the hardware
-   * TX FIFO.
-   * @return 鏀寔 MCAN IP 鏃惰繑鍥?`TXFQS`/SDK helper
-   * 璁＄畻鍑虹殑绌洪棽妲芥暟锛寀nsupported SoC 杩斿洖 0銆?/ Returns the free-slot count
-   * calculated from `TXFQS`/SDK helper when MCAN IP is supported, and 0 on unsupported
-   * SoCs.
-   */
+  /// @brief Query free slots in the hardware TX FIFO.
+  /// @return Free hardware TX FIFO slots, or 0 when unsupported.
   size_t HardwareTxQueueEmptySize() const;
 
-  /**
-   * @brief 澶勭悊鎸囧畾 RX FIFO 鐨勬帴鏀朵腑鏂?/ Process receive interrupts for one RX
-   * FIFO.
-   * @param fifo RX FIFO 绱㈠紩锛岄€氬父涓?0 鎴?1 / RX FIFO index, usually 0 or 1.
-   *
-   * @note 浣跨敤 `mcan_read_rxfifo()` drain FIFO锛屽苟鎸?classic/FD frame 绫诲瀷娲惧彂
-   * LibXR 鍥炶皟銆?   * / Uses `mcan_read_rxfifo()` to drain the FIFO and dispatch LibXR
-   * callbacks by classic/FD frame type.
-   */
+  /// @brief Process receive interrupts for one RX FIFO.
+  /// @param fifo RX FIFO index, usually 0 or 1.
   void ProcessRxInterrupt(uint32_t fifo);
 
-  /**
-   * @brief 澶勭悊 MCAN error/status 涓柇 / Process MCAN error/status interrupts.
-   * @param error_status_its 鏈涓柇鍛戒腑鐨?MCAN error/status flags / MCAN
-   * error/status flags hit by this interrupt.
-   *
-   * @note 璇诲彇 `mcan_get_protocol_status()`锛屽皢 bus-off/passive/warning/protocol
-   * error 杞崲涓?LibXR error frame銆?/ Reads `mcan_get_protocol_status()` and
-   * converts bus-off/passive/warning/protocol errors to LibXR error frames.
-   */
+  /// @brief Process MCAN error/status interrupts.
+  /// @param error_status_its MCAN error/status flags hit by this interrupt.
   void ProcessErrorStatusInterrupt(uint32_t error_status_its);
 
-  /**
-   * @brief 澶勭悊 MCAN 缁煎悎涓柇 / Process combined MCAN interrupts.
-   * @param in_isr 鏍囪褰撳墠璋冪敤鏄惁鏉ヨ嚜 ISR / Marks whether the call is
-   * from ISR context.
-   */
+  /// @brief Process combined MCAN interrupts.
+  /// @param in_isr Marks whether the call is from ISR context.
   void ProcessInterrupt(bool in_isr = true);
 
-  /**
-   * @brief C ISR trampoline 鐨勬寜绱㈠紩鍏ュ彛 / Indexed entry used by the C ISR
-   * trampoline.
-   * @param index MCAN instance 绱㈠紩 / MCAN instance index.
-   */
+  /// @brief Indexed entry used by the C ISR trampoline.
+  /// @param index MCAN instance index.
   static void OnInterrupt(uint8_t index);
 
-  /**
-   * @brief 灏?LibXR classic frame 杞负 HPM `mcan_tx_frame_t` / Convert a LibXR
-   * classic frame to HPM `mcan_tx_frame_t`.
-   * @param pack 杈撳叆 classic frame / Input classic frame.
-   * @param frame 杈撳嚭 HPM MCAN TX frame / Output HPM MCAN TX frame.
-   */
+  /// @brief Convert a LibXR classic frame to HPM `mcan_tx_frame_t`.
+  /// @param pack Input classic frame.
+  /// @param frame Output HPM MCAN TX frame.
   static inline void BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame);
 
-  /**
-   * @brief 灏?LibXR FD frame 杞负 HPM `mcan_tx_frame_t` / Convert a LibXR FD frame
-   * to HPM `mcan_tx_frame_t`.
-   * @param pack 杈撳叆 FD frame / Input FD frame.
-   * @param frame 杈撳嚭 HPM MCAN TX frame / Output HPM MCAN TX frame.
-   *
-   * @note DLC 浣跨敤 HPM SDK 鐨?8/12/16/20/24/32/48/64 瀛楄妭缂栫爜锛涘疄闄?message RAM
-   * 灏哄闇€
-   * 涓婃澘纭銆?/ DLC uses the HPM SDK 8/12/16/20/24/32/48/64-byte encoding;
-   * actual message RAM sizing needs hardware validation.
-   */
+  /// @brief Convert a LibXR FD frame to HPM `mcan_tx_frame_t`.
+  /// @param pack Input FD frame.
+  /// @param frame Output HPM MCAN TX frame.
   static inline void BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame);
 
-  /**
-   * @brief 鏈嶅姟杞欢鍙戦€侀槦鍒楀埌 MCAN TX FIFO / Service software TX queues
-   * into the MCAN TX FIFO.
-   *
-   * @note FD 闃熷垪浼樺厛浜?classic
-   * 闃熷垪锛屾渶缁堣皟鐢?`mcan_transmit_via_txfifo_nonblocking()`銆?   * / The FD queue
-   * is served before the classic queue, and the final call is
-   * `mcan_transmit_via_txfifo_nonblocking()`.
-   */
+  /// @brief Service software TX queues into the MCAN TX FIFO.
   void TxService();
 
  private:
