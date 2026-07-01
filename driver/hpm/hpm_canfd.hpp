@@ -29,8 +29,6 @@ class HPMCANFD : public FDCAN
            uint32_t queue_size = DEFAULT_TX_POOL_SIZE, void* msg_buf = nullptr,
            uint32_t msg_buf_size = 0);
 
-  ~HPMCANFD() override;
-
   /** @brief 在配置前设置 MCAN message RAM / Set message RAM before configuration. */
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
@@ -92,7 +90,6 @@ class HPMCANFD : public FDCAN
   uint8_t index_;
   uint32_t irq_;
   bool auto_enable_irq_;
-  bool registered_{false};
   void* msg_buf_{nullptr};
   uint32_t msg_buf_size_{0};
   bool configured_ = false;

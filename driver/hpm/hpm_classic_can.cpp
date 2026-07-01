@@ -28,15 +28,6 @@ HPMClassicCAN::HPMClassicCAN(CAN_Type* can, clock_name_t clock, uint8_t index,
   instance_map_[index_] = this;
 }
 
-HPMClassicCAN::~HPMClassicCAN()
-{
-  Shutdown();
-  if (index_ < MAX_INSTANCES && instance_map_[index_] == this)
-  {
-    instance_map_[index_] = nullptr;
-  }
-}
-
 ErrorCode HPMClassicCAN::ConvertStatus(hpm_stat_t status)
 {
   switch (status)

@@ -462,20 +462,6 @@ inline bool RegisterMcanOwner(uint8_t index, void* owner, HpmMcanOwnerKind kind,
   return true;
 }
 
-inline void ReleaseMcanOwner(uint8_t index, void* owner)
-{
-  if (index >= MCAN_SOC_MAX_COUNT)
-  {
-    return;
-  }
-
-  auto& slot = hpm_mcan_owner_slots[index];
-  if (slot.owner == owner)
-  {
-    slot = {};
-  }
-}
-
 inline void ProcessMcanRegisteredInterrupt(uint8_t index, bool in_isr = true)
 {
   if (index >= MCAN_SOC_MAX_COUNT)

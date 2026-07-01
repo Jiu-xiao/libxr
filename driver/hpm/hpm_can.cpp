@@ -30,18 +30,6 @@ HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_
       index_, this, detail::HpmMcanOwnerKind::CLASSIC_CAN,
       [](void* owner, bool)
       { static_cast<HPMCAN*>(owner)->ProcessInterrupt(); }));
-  registered_ = true;
-}
-
-HPMCAN::~HPMCAN()
-{
-  DisableInterrupt();
-  DisableCanInterrupts();
-  if (registered_)
-  {
-    detail::ReleaseMcanOwner(index_, this);
-    registered_ = false;
-  }
 }
 
 ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
