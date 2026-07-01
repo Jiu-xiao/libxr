@@ -767,7 +767,10 @@ void MSPM0CAN::ProcessTxInterrupt()
       const ErrorCode send_ans = SendImmediate(next_pack);
       if (send_ans != ErrorCode::OK)
       {
-        (void)tx_pool_.Put(next_pack);
+        if (tx_pool_.Put(next_pack) != ErrorCode::OK)
+        {
+          ASSERT(false);
+        }
         break;
       }
     }
