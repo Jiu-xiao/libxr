@@ -15,7 +15,7 @@
 #include "lockfree_pool.hpp"
 
 #if defined(MCAN_SOC_MAX_COUNT) && (MCAN_SOC_MAX_COUNT > 0)
-#include "hpm_mcan.hpp"
+#include "hpm_canfd.hpp"
 #else
 
 #if defined(HPMSOC_HAS_HPMSDK_CAN) && __has_include("hpm_can_drv.h") &&           \
