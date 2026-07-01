@@ -150,7 +150,7 @@ uint32_t mspm0_can_sysosc_freq_hz()
 
 uint32_t mspm0_can_hfclk_freq_hz()
 {
-#if defined(DL_SYSCTL_HSCLK_SOURCE_HFCLK)
+#if defined(SYSCTL_HSCLKCFG_HSCLKSEL_HFCLKCLK)
   if ((DL_SYSCTL_getHSCLKSource() == DL_SYSCTL_HSCLK_SOURCE_HFCLK) &&
       (DL_SYSCTL_getMCLKSource() == DL_SYSCTL_MCLK_SOURCE_HSCLK) &&
       (DL_SYSCTL_getMCLKDivider() == DL_SYSCTL_MCLK_DIVIDER_DISABLE))
@@ -164,19 +164,21 @@ uint32_t mspm0_can_hfclk_freq_hz()
 
 uint32_t mspm0_can_syspll_ref_freq_hz()
 {
-#if defined(DL_SYSCTL_SYSPLL_REF_SYSOSC)
+#if defined(SYSCTL_SYSPLLCFG0_SYSPLLREF_SYSOSC)
   const uint32_t pll_ref = SYSCTL->SOCLOCK.SYSPLLCFG0 & SYSCTL_SYSPLLCFG0_SYSPLLREF_MASK;
-  if (pll_ref == static_cast<uint32_t>(DL_SYSCTL_SYSPLL_REF_SYSOSC))
+  if (pll_ref == SYSCTL_SYSPLLCFG0_SYSPLLREF_SYSOSC)
   {
     const uint32_t sysosc_hz = mspm0_can_sysosc_freq_hz();
     const uint32_t ref_hz = (sysosc_hz != 0U) ? sysosc_hz : CPUCLK_FREQ;
     return ref_hz;
   }
 
-  if (pll_ref == static_cast<uint32_t>(DL_SYSCTL_SYSPLL_REF_HFCLK))
+#if defined(SYSCTL_SYSPLLCFG0_SYSPLLREF_HFCLK)
+  if (pll_ref == SYSCTL_SYSPLLCFG0_SYSPLLREF_HFCLK)
   {
     return mspm0_can_hfclk_freq_hz();
   }
+#endif
 #endif
 
   return 0U;
