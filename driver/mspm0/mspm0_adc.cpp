@@ -511,13 +511,13 @@ float MSPM0ADC::ReadByPolling(uint8_t channel)
     }
 
     const uint16_t raw = DL_ADC12_getMemResult(res_.instance, mem_idx);
-    DL_ADC12_stopConversion(res_.instance);
     if (buffer != nullptr)
     {
       buffer[channel + static_cast<uint32_t>(i) * num_channels_] = raw;
     }
     sum += raw;
     DL_ADC12_clearInterruptStatus(res_.instance, mem_interrupt);
+    DL_ADC12_enableConversions(res_.instance);
   }
 
   DL_ADC12_stopConversion(res_.instance);
