@@ -917,4 +917,18 @@ void MSPM0CAN::OnInterrupt(uint8_t index)
   can->HandleInterrupt();
 }
 
+#if defined(CANFD0_BASE)
+extern "C" void CANFD0_IRQHandler(void)  // NOLINT
+{
+  LibXR::MSPM0CAN::OnInterrupt(0);
+}
+#endif
+
+#if defined(CANFD1_BASE)
+extern "C" void CANFD1_IRQHandler(void)  // NOLINT
+{
+  LibXR::MSPM0CAN::OnInterrupt(1);
+}
+#endif
+
 #endif
