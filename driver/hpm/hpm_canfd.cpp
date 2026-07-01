@@ -143,8 +143,7 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
   }
 
   if (!detail::RegisterMcanOwner(
-          index_, this, detail::HpmMcanOwnerKind::FD_CAN,
-          [](void* owner, bool in_isr)
+          index_, this, detail::HpmMcanOwnerKind::FD_CAN, [](void* owner, bool in_isr)
           { static_cast<HPMCANFD*>(owner)->ProcessInterrupt(in_isr); }))
   {
     ASSERT(false);
@@ -463,8 +462,7 @@ void HPMCANFD::ProcessInterrupt(bool in_isr)
       can_, configured_, in_isr, [this](uint32_t fifo_index, uint32_t, bool rx_in_isr)
       { ProcessRxInterrupt(fifo_index, rx_in_isr); }, [this](bool err_in_isr)
       { EmitErrorFrame(ErrorID::CAN_ERROR_ID_OTHER, err_in_isr); },
-      [this]() { TxService(); },
-      [this](uint32_t error_flags, bool err_in_isr)
+      [this]() { TxService(); }, [this](uint32_t error_flags, bool err_in_isr)
       { ProcessErrorStatusInterrupt(error_flags, err_in_isr); });
 }
 
