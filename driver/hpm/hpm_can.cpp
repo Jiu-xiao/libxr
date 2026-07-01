@@ -47,6 +47,10 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
+
+  (void)DisableInterrupt();
+  DisableCanInterrupts();
+  mcan_clear_interrupt_flags(can_, 0xFFFFFFFFUL);
   configured_ = false;
 
   const ErrorCode MSG_BUF_STATUS = ApplyMessageBuffer();
@@ -54,8 +58,6 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   {
     return MSG_BUF_STATUS;
   }
-
-  DisableCanInterrupts();
 
   mcan_config_t config{};
   mcan_get_default_config(can_, &config);
@@ -78,7 +80,6 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
         cfg.bit_timing.sjw > cfg.bit_timing.phase_seg2 || SEG1 == 0U)
     {
       ASSERT(false);
-      EnableCanInterrupts();
       return ErrorCode::ARG_ERR;
     }
 
@@ -104,7 +105,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   }
   else
   {
-    EnableCanInterrupts();
+    mcan_clear_interrupt_flags(can_, 0xFFFFFFFFUL);
   }
   return RESULT;
 }
