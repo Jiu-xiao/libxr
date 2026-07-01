@@ -177,9 +177,9 @@ uint8_t CalculateFilterSize(RawData dma_buff, std::size_t channel_count)
   return static_cast<uint8_t>(filter_size);
 }
 
-bool IsAlignedForWordDma(const void* addr)
+bool IsAlignedForDmaWidth(const void* addr, std::size_t width)
 {
-  return (reinterpret_cast<uintptr_t>(addr) % alignof(uint32_t)) == 0U;
+  return (reinterpret_cast<uintptr_t>(addr) % width) == 0U;
 }
 
 bool IsContiguousMemRange(const DL_ADC12_MEM_IDX* mem_indices, uint8_t count)
@@ -207,8 +207,14 @@ bool CanUseFifoDMA(const RawData& dma_buff, uint8_t channel_count, uint8_t filte
       static_cast<uint32_t>(channel_count) * static_cast<uint32_t>(filter_size);
 
   return dma_buff.addr_ != nullptr && total_samples >= 2U && (total_samples % 2U) == 0U &&
-         IsAlignedForWordDma(dma_buff.addr_) &&
+         IsAlignedForDmaWidth(dma_buff.addr_, alignof(uint32_t)) &&
          (channel_count == 1U || (channel_count % 2U) == 0U);
+}
+
+bool CanUseMemDMA(const RawData& dma_buff, uint8_t channel_count)
+{
+  return dma_buff.addr_ != nullptr && channel_count == 1U &&
+         IsAlignedForDmaWidth(dma_buff.addr_, alignof(uint16_t));
 }
 
 uint32_t GetFifoDmaTriggerMask(const DL_ADC12_MEM_IDX* mem_indices, uint8_t channel_count)
@@ -399,12 +405,11 @@ void MSPM0ADC::Initialize(RawData dma_buff,
 
   const bool has_dma_channel =
       (dma_channel_id_ != DMA_CHANNEL_INVALID) && IsFullDmaChannel(dma_channel_id_);
-  const uint32_t total_samples =
-      static_cast<uint32_t>(num_channels_) * static_cast<uint32_t>(filter_size_);
   const bool contiguous_mem_range = IsContiguousMemRange(mem_indices_, num_channels_);
   use_fifo_dma_ = has_dma_channel && contiguous_mem_range &&
                   CanUseFifoDMA(dma_buffer_, num_channels_, filter_size_);
-  use_dma_ = use_fifo_dma_ || (has_dma_channel && total_samples == 1U);
+  use_dma_ =
+      use_fifo_dma_ || (has_dma_channel && CanUseMemDMA(dma_buffer_, num_channels_));
 
   const bool adc_dma_enabled = DL_ADC12_isDMAEnabled(res_.instance);
   if (has_dma_channel || adc_dma_enabled)
@@ -571,21 +576,21 @@ void MSPM0ADC::StartContinuousDMA()
   }
   else
   {
-    ASSERT(total_samples == 1U);
+    ASSERT(num_channels_ == 1U);
     DL_ADC12_disableFIFO(res_.instance);
     DL_ADC12_setDMASamplesCnt(res_.instance, 1U);
 
     DL_DMA_configTransfer(DMA, dma_channel_id_,
                           DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE, DL_DMA_NORMAL_MODE,
                           DL_DMA_WIDTH_HALF_WORD, DL_DMA_WIDTH_HALF_WORD,
-                          DL_DMA_ADDR_UNCHANGED, DL_DMA_ADDR_UNCHANGED);
+                          DL_DMA_ADDR_UNCHANGED, DL_DMA_ADDR_INCREMENT);
     DL_DMA_setSrcAddr(DMA, dma_channel_id_,
                       static_cast<uint32_t>(
                           DL_ADC12_getMemResultAddress(res_.instance, mem_indices_[0])));
     DL_DMA_setDestAddr(
         DMA, dma_channel_id_,
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dma_buffer_.addr_)));
-    DL_DMA_setTransferSize(DMA, dma_channel_id_, 1U);
+    DL_DMA_setTransferSize(DMA, dma_channel_id_, filter_size_);
     DL_ADC12_enableDMATrigger(res_.instance, GetMemResultDmaTriggerMask(mem_indices_[0]));
   }
 
