@@ -52,11 +52,7 @@ class HPMCAN final : public CAN
 
   ErrorCode DisableInterrupt();
 
-  /// @brief 在配置前设置 message RAM / Set message RAM before configuration.
-  ///
-  /// 缓冲区应放在 `.ahb_sram`，通常大小为 `MCAN_MSG_BUF_SIZE_IN_WORDS` words。
-  /// The buffer should reside in `.ahb_sram`, typically sized as
-  /// `MCAN_MSG_BUF_SIZE_IN_WORDS` words.
+  /** @brief 在配置前设置 message RAM / Set message RAM before configuration. */
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
  private:

@@ -1,22 +1,19 @@
-﻿#include "hpm_classic_can.hpp"
+#include "hpm_classic_can.hpp"
 
 #if !defined(MCAN_SOC_MAX_COUNT) || (MCAN_SOC_MAX_COUNT == 0)
 
 #include <cstring>
 
 #if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
+
 #include "hpm_interrupt.h"
-#endif
 
 using namespace LibXR;
 
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
-HPMClassicCAN* HPMClassicCAN::instance_map_[HPMClassicCAN::kMaxInstances] = {};
-#endif
+HPMClassicCAN* HPMClassicCAN::instance_map_[HPMClassicCAN::MAX_INSTANCES] = {};
 
-HPMClassicCAN::HPMClassicCAN(LibXRHpmClassicCanType* can, clock_name_t clock,
-                             uint8_t index, uint32_t irq, bool auto_enable_irq,
-                             uint32_t tx_pool_size)
+HPMClassicCAN::HPMClassicCAN(CAN_Type* can, clock_name_t clock, uint8_t index,
+                             uint32_t irq, bool auto_enable_irq, uint32_t tx_pool_size)
     : can_(can),
       clock_(clock),
       index_(index),
@@ -24,36 +21,24 @@ HPMClassicCAN::HPMClassicCAN(LibXRHpmClassicCanType* can, clock_name_t clock,
       auto_enable_irq_(auto_enable_irq),
       tx_pool_(tx_pool_size)
 {
-  ASSERT(tx_pool_size > 0U);
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
-  ASSERT(can_ != nullptr);
-  ASSERT(index_ < kMaxInstances);
-  ASSERT(instance_map_[index_] == nullptr);
+  REQUIRE(tx_pool_size > 0U);
+  REQUIRE(can_ != nullptr);
+  REQUIRE(index_ < MAX_INSTANCES);
+  REQUIRE(instance_map_[index_] == nullptr);
   instance_map_[index_] = this;
-#else
-  (void)can_;
-  (void)clock_;
-  (void)tx_pool_size;
-  (void)index_;
-  (void)irq_;
-  (void)auto_enable_irq_;
-#endif
 }
 
 HPMClassicCAN::~HPMClassicCAN()
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   Shutdown();
-  if (index_ < kMaxInstances && instance_map_[index_] == this)
+  if (index_ < MAX_INSTANCES && instance_map_[index_] == this)
   {
     instance_map_[index_] = nullptr;
   }
-#endif
 }
 
 ErrorCode HPMClassicCAN::ConvertStatus(hpm_stat_t status)
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   switch (status)
   {
     case status_success:
@@ -79,10 +64,6 @@ ErrorCode HPMClassicCAN::ConvertStatus(hpm_stat_t status)
     default:
       return ErrorCode::FAILED;
   }
-#else
-  UNUSED(status);
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode HPMClassicCAN::ValidateConfig(const CAN::Configuration& cfg)
@@ -105,21 +86,19 @@ void HPMClassicCAN::EmitErrorFrame(CAN::ErrorID error_id, bool in_isr)
 
 void HPMClassicCAN::Shutdown()
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
-  if (auto_enable_irq_ && irq_ != kInvalidIrq)
+  if (auto_enable_irq_ && irq_ != INVALID_IRQ)
   {
     intc_m_disable_irq(irq_);
   }
   if (can_ != nullptr)
   {
-    can_disable_tx_rx_irq(can_, kInterruptMask);
-    can_disable_error_irq(can_, kCanErrorInterruptMask);
+    can_disable_tx_rx_irq(can_, INTERRUPT_MASK);
+    can_disable_error_irq(can_, CAN_ERROR_INTERRUPT_MASK);
     can_abort_message_transmit(can_);
     can_clear_tx_rx_flags(can_, 0xFFU);
     can_clear_error_interrupt_flags(can_, 0xFFU);
     can_deinit(can_);
   }
-#endif
   configured_ = false;
   tx_lock_.store(0U, std::memory_order_release);
   tx_pend_.store(0U, std::memory_order_release);
@@ -144,7 +123,6 @@ uint16_t HPMClassicCAN::SamplePointToPermille(float sample_point)
   return static_cast<uint16_t>(sample_point * 1000.0f);
 }
 
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
 can_node_mode_t HPMClassicCAN::ConvertMode(const CAN::Mode& mode)
 {
   if (mode.loopback && mode.listen_only)
@@ -238,11 +216,9 @@ CAN::ErrorID HPMClassicCAN::ConvertProtocolError(uint8_t error_kind)
       return ErrorID::CAN_ERROR_ID_OTHER;
   }
 }
-#endif
 
 ErrorCode HPMClassicCAN::SetConfig(const CAN::Configuration& cfg)
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   if (can_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
@@ -275,8 +251,8 @@ ErrorCode HPMClassicCAN::SetConfig(const CAN::Configuration& cfg)
   config.disable_stb_retransmission = cfg.mode.one_shot;
   config.enable_self_ack = cfg.mode.loopback;
   config.enable_tx_buffer_priority_mode = false;
-  config.irq_txrx_enable_mask = kInterruptMask;
-  config.irq_error_enable_mask = kCanErrorInterruptMask;
+  config.irq_txrx_enable_mask = INTERRUPT_MASK;
+  config.irq_error_enable_mask = CAN_ERROR_INTERRUPT_MASK;
 
   if (HasLowLevelTiming(cfg.bit_timing))
   {
@@ -317,33 +293,21 @@ ErrorCode HPMClassicCAN::SetConfig(const CAN::Configuration& cfg)
   configured_ = true;
   tx_lock_.store(0U, std::memory_order_release);
   tx_pend_.store(0U, std::memory_order_release);
-  if (auto_enable_irq_ && irq_ != kInvalidIrq)
+  if (auto_enable_irq_ && irq_ != INVALID_IRQ)
   {
     can_clear_tx_rx_flags(can_, 0xFFU);
     can_clear_error_interrupt_flags(can_, 0xFFU);
-    can_enable_tx_rx_irq(can_, kInterruptMask);
-    can_enable_error_irq(can_, kCanErrorInterruptMask);
+    can_enable_tx_rx_irq(can_, INTERRUPT_MASK);
+    can_enable_error_irq(can_, CAN_ERROR_INTERRUPT_MASK);
     intc_m_enable_irq_with_priority(irq_, 1);
   }
   return ErrorCode::OK;
-#else
-  (void)cfg;
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
-uint32_t HPMClassicCAN::GetClockFreq() const
-{
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
-  return clock_get_frequency(clock_);
-#else
-  return 0U;
-#endif
-}
+uint32_t HPMClassicCAN::GetClockFreq() const { return clock_get_frequency(clock_); }
 
 ErrorCode HPMClassicCAN::AddMessage(const ClassicPack& pack)
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   if (can_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
@@ -368,16 +332,11 @@ ErrorCode HPMClassicCAN::AddMessage(const ClassicPack& pack)
 
   TxService();
   return ErrorCode::OK;
-#else
-  (void)pack;
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode HPMClassicCAN::GetErrorState(CAN::ErrorState& state) const
 {
   state = {};
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   if (can_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
@@ -391,27 +350,19 @@ ErrorCode HPMClassicCAN::GetErrorState(CAN::ErrorState& state) const
   state.error_passive = (flags & CAN_ERROR_PASSIVE_MODE_ACTIVE_FLAG) != 0U;
   state.error_warning = (flags & CAN_ERROR_WARNING_LIMIT_FLAG) != 0U;
   return ErrorCode::OK;
-#else
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 void HPMClassicCAN::ProcessRx(bool in_isr)
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   if (!configured_)
   {
     return;
   }
   ProcessRxBuffer(in_isr);
-#else
-  (void)in_isr;
-#endif
 }
 
 void HPMClassicCAN::ProcessInterrupt(bool in_isr)
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   if (!configured_ || can_ == nullptr)
   {
     return;
@@ -428,7 +379,7 @@ void HPMClassicCAN::ProcessInterrupt(bool in_isr)
     can_clear_tx_rx_flags(can_, flags);
   }
 
-  if ((flags & kRxInterruptMask) != 0U)
+  if ((flags & RX_INTERRUPT_MASK) != 0U)
   {
     ProcessRx(in_isr);
   }
@@ -436,24 +387,20 @@ void HPMClassicCAN::ProcessInterrupt(bool in_isr)
   {
     EmitErrorFrame(ErrorID::CAN_ERROR_ID_OTHER, in_isr);
   }
-  if ((flags & kTxInterruptMask) != 0U)
+  if ((flags & TX_INTERRUPT_MASK) != 0U)
   {
     TxService();
   }
-  if (((flags & kErrorInterruptMask) != 0U) || err_flags != 0U)
+  if (((flags & ERROR_INTERRUPT_MASK) != 0U) || err_flags != 0U)
   {
     ProcessError(in_isr);
     TxService();
   }
-#else
-  (void)in_isr;
-#endif
 }
 
 void HPMClassicCAN::OnInterrupt(uint8_t index)
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
-  if (index >= kMaxInstances)
+  if (index >= MAX_INSTANCES)
   {
     return;
   }
@@ -461,14 +408,10 @@ void HPMClassicCAN::OnInterrupt(uint8_t index)
   {
     can->ProcessInterrupt(true);
   }
-#else
-  UNUSED(index);
-#endif
 }
 
 void HPMClassicCAN::TxService()
 {
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   if (!configured_ || can_ == nullptr)
   {
     return;
@@ -522,10 +465,8 @@ void HPMClassicCAN::TxService()
       return;
     }
   }
-#endif
 }
 
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
 void HPMClassicCAN::ProcessRxBuffer(bool in_isr)
 {
   while (can_is_data_available_in_receive_buffer(can_))
@@ -571,11 +512,7 @@ void HPMClassicCAN::ProcessError(bool in_isr)
     EmitErrorFrame(ConvertProtocolError(can_get_last_error_kind(can_)), in_isr);
   }
 }
-#endif
 
-extern "C" void libxr_hpm_classic_can_process_interrupt(uint8_t index)
-{
-  HPMClassicCAN::OnInterrupt(index);
-}
+#endif
 
 #endif
