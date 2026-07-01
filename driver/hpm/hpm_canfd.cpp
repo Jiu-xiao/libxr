@@ -1,19 +1,15 @@
 #include "hpm_canfd.hpp"
 
+#if LIBXR_HPM_MCAN_SUPPORTED
+
 #include <cstring>
 
-#if LIBXR_HPM_MCAN_CORE_SUPPORTED
 #include "hpm_interrupt.h"
-#endif
 
 using namespace LibXR;
 
-#if LIBXR_HPM_MCAN_CORE_SUPPORTED
-
 namespace LibXR::detail
 {
-
-inline HpmMcanSharedOwner g_hpm_mcan_shared_owner[MCAN_SOC_MAX_COUNT] = {};
 
 ErrorCode ConvertMcanStatus(hpm_stat_t status)
 {
@@ -141,7 +137,7 @@ void PrepareMcanCommonConfig(MCAN_Type* can, mcan_config_t& config, bool enable_
   }
   config.ram_config.enable_rxbuf = false;
   config.ram_config.rxbuf_elem_count = 0U;
-  config.interrupt_mask = kMcanInterruptMask;
+  config.interrupt_mask = MCAN_INTERRUPT_MASK;
 }
 
 void PrepareMcanAcceptAllFilters(mcan_config_t& config)
@@ -218,34 +214,9 @@ size_t HardwareTxQueueEmptySize(MCAN_Type* can)
   return static_cast<size_t>(MCAN_TXFQS_TFFL_GET(can->TXFQS));
 }
 
-bool AcquireSharedMcanOwnership(uint8_t index, void* owner, HpmMcanOwnerKind kind)
-{
-  ASSERT(index < MCAN_SOC_MAX_COUNT);
-  if (g_hpm_mcan_shared_owner[index].kind != HpmMcanOwnerKind::NONE &&
-      g_hpm_mcan_shared_owner[index].owner != owner)
-  {
-    return false;
-  }
-
-  g_hpm_mcan_shared_owner[index].kind = kind;
-  g_hpm_mcan_shared_owner[index].owner = owner;
-  return true;
-}
-
-void ReleaseSharedMcanOwnership(uint8_t index, void* owner, HpmMcanOwnerKind kind)
-{
-  if (index >= MCAN_SOC_MAX_COUNT)
-  {
-    return;
-  }
-  if (g_hpm_mcan_shared_owner[index].owner == owner &&
-      g_hpm_mcan_shared_owner[index].kind == kind)
-  {
-    g_hpm_mcan_shared_owner[index] = {};
-  }
-}
-
 }  // namespace LibXR::detail
+
+HPMCANFD* HPMCANFD::instance_map_[HPMCANFD::MAX_INSTANCES] = {};
 
 ErrorCode HPMCANFD::ConvertStatus(hpm_stat_t status)
 {
@@ -428,8 +399,8 @@ void HPMCANFD::EmitErrorFrame(CAN::ErrorID error_id, bool in_isr)
   OnMessage(pack, in_isr);
 }
 
-HPMCANFD::HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index,
-                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size, void* msg_buf,
+HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t irq,
+                   bool auto_enable_irq, uint32_t queue_size, void* msg_buf,
                    uint32_t msg_buf_size)
     : can_(can),
       clock_(clock),
@@ -441,30 +412,26 @@ HPMCANFD::HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index,
       tx_pool_(queue_size),
       tx_pool_fd_(queue_size)
 {
-  ASSERT(queue_size > 0U);
-  ASSERT(can_ != nullptr);
-  ASSERT(index_ < kMaxInstances);
-  ASSERT(
-      detail::AcquireSharedMcanOwnership(index_, this, detail::HpmMcanOwnerKind::CANFD));
-  ownership_acquired_ = true;
-  McanRegistry::Register(index_, this);
+  REQUIRE(queue_size > 0U);
+  REQUIRE(can_ != nullptr);
+  REQUIRE(index_ < MAX_INSTANCES);
+  REQUIRE(instance_map_[index_] == nullptr);
+  instance_map_[index_] = this;
   Init();
 }
 
 HPMCANFD::~HPMCANFD()
 {
   Shutdown();
-  if (ownership_acquired_)
+  if (index_ < MAX_INSTANCES && instance_map_[index_] == this)
   {
-    McanRegistry::Unregister(index_, this);
-    detail::ReleaseSharedMcanOwnership(index_, this, detail::HpmMcanOwnerKind::CANFD);
-    ownership_acquired_ = false;
+    instance_map_[index_] = nullptr;
   }
 }
 
 void HPMCANFD::Shutdown()
 {
-  detail::ShutdownMcan(can_, irq_, auto_enable_irq_, detail::kMcanInterruptMask);
+  detail::ShutdownMcan(can_, irq_, auto_enable_irq_, detail::MCAN_INTERRUPT_MASK);
   configured_ = false;
   fd_enabled_ = false;
   brs_enabled_ = false;
@@ -637,7 +604,7 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   esi_enabled_ = cfg.fd_mode.esi;
   tx_lock_.store(0U, std::memory_order_release);
   tx_pend_.store(0U, std::memory_order_release);
-  detail::EnableMcanInterrupts(can_, irq_, auto_enable_irq_, detail::kMcanInterruptMask);
+  detail::EnableMcanInterrupts(can_, irq_, auto_enable_irq_, detail::MCAN_INTERRUPT_MASK);
   return ErrorCode::OK;
 }
 
@@ -794,11 +761,11 @@ void HPMCANFD::ProcessInterrupt(bool in_isr)
 
 void HPMCANFD::OnInterrupt(uint8_t index)
 {
-  if (index >= kMaxInstances)
+  if (index >= MAX_INSTANCES)
   {
     return;
   }
-  if (auto* can = McanRegistry::Get(index))
+  if (auto* can = instance_map_[index])
   {
     can->ProcessInterrupt(true);
   }
@@ -884,166 +851,5 @@ void HPMCANFD::TxService()
     }
   }
 }
-
-extern "C" void libxr_hpm_mcan_process_interrupt(uint8_t index)
-{
-  HPMCANFD::OnInterrupt(index);
-}
-
-#else
-
-ErrorCode HPMCANFD::ConvertStatus(hpm_stat_t status)
-{
-  UNUSED(status);
-  return ErrorCode::NOT_SUPPORT;
-}
-
-bool HPMCANFD::HasLowLevelTiming(const CAN::BitTiming& timing)
-{
-  UNUSED(timing);
-  return false;
-}
-
-bool HPMCANFD::HasLowLevelTiming(const FDCAN::DataBitTiming& timing)
-{
-  UNUSED(timing);
-  return false;
-}
-
-uint16_t HPMCANFD::SamplePointToPermilleX10(float sample_point)
-{
-  UNUSED(sample_point);
-  return 0U;
-}
-
-uint8_t HPMCANFD::BytesToDlc(uint8_t bytes) { return bytes; }
-
-uint8_t HPMCANFD::DlcToBytes(uint8_t dlc) { return dlc; }
-
-inline void HPMCANFD::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame)
-{
-  UNUSED(pack);
-  UNUSED(frame);
-}
-
-inline void HPMCANFD::BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame)
-{
-  UNUSED(pack);
-  UNUSED(frame);
-}
-
-bool HPMCANFD::BuildRxPack(const mcan_rx_message_t& frame, ClassicPack& pack)
-{
-  UNUSED(frame);
-  UNUSED(pack);
-  return false;
-}
-
-bool HPMCANFD::BuildRxPack(const mcan_rx_message_t& frame, FDPack& pack)
-{
-  UNUSED(frame);
-  UNUSED(pack);
-  return false;
-}
-
-CAN::ErrorID HPMCANFD::ConvertProtocolError(mcan_last_err_code_t code)
-{
-  UNUSED(code);
-  return ErrorID::CAN_ERROR_ID_GENERIC;
-}
-
-void HPMCANFD::EmitErrorFrame(CAN::ErrorID error_id, bool in_isr)
-{
-  UNUSED(error_id);
-  UNUSED(in_isr);
-}
-
-HPMCANFD::HPMCANFD(LibXRHpmCanFdType* can, clock_name_t clock, uint8_t index,
-                   uint32_t irq, bool auto_enable_irq, uint32_t queue_size, void* msg_buf,
-                   uint32_t msg_buf_size)
-    : can_(can),
-      clock_(clock),
-      index_(index),
-      irq_(irq),
-      auto_enable_irq_(auto_enable_irq),
-      msg_buf_(msg_buf),
-      msg_buf_size_(msg_buf_size),
-      tx_pool_(queue_size),
-      tx_pool_fd_(queue_size)
-{
-  ASSERT(queue_size > 0U);
-}
-
-HPMCANFD::~HPMCANFD() = default;
-
-void HPMCANFD::Shutdown()
-{
-  configured_ = false;
-  fd_enabled_ = false;
-  brs_enabled_ = false;
-  esi_enabled_ = false;
-  tx_lock_.store(0U, std::memory_order_release);
-  tx_pend_.store(0U, std::memory_order_release);
-}
-
-ErrorCode HPMCANFD::Init(void) { return ErrorCode::NOT_SUPPORT; }
-
-ErrorCode HPMCANFD::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
-{
-  UNUSED(msg_buf);
-  UNUSED(msg_buf_size);
-  return ErrorCode::NOT_SUPPORT;
-}
-
-ErrorCode HPMCANFD::ApplyMessageBuffer() { return ErrorCode::NOT_SUPPORT; }
-
-ErrorCode HPMCANFD::SetConfig(const CAN::Configuration& cfg)
-{
-  UNUSED(cfg);
-  return ErrorCode::NOT_SUPPORT;
-}
-
-ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
-{
-  UNUSED(cfg);
-  return ErrorCode::NOT_SUPPORT;
-}
-
-uint32_t HPMCANFD::GetClockFreq() const { return 0U; }
-
-ErrorCode HPMCANFD::AddMessage(const ClassicPack& pack)
-{
-  UNUSED(pack);
-  return ErrorCode::NOT_SUPPORT;
-}
-
-ErrorCode HPMCANFD::AddMessage(const FDPack& pack)
-{
-  UNUSED(pack);
-  return ErrorCode::NOT_SUPPORT;
-}
-
-ErrorCode HPMCANFD::GetErrorState(CAN::ErrorState& state) const
-{
-  state = {};
-  return ErrorCode::NOT_SUPPORT;
-}
-
-size_t HPMCANFD::HardwareTxQueueEmptySize() const { return 0U; }
-
-void HPMCANFD::ProcessRxInterrupt(uint32_t fifo) { UNUSED(fifo); }
-
-void HPMCANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
-{
-  UNUSED(error_status_its);
-}
-
-void HPMCANFD::ProcessInterrupt(bool in_isr) { UNUSED(in_isr); }
-
-void HPMCANFD::OnInterrupt(uint8_t index) { UNUSED(index); }
-
-void HPMCANFD::TxService() {}
-
-extern "C" void libxr_hpm_mcan_process_interrupt(uint8_t index) { UNUSED(index); }
 
 #endif

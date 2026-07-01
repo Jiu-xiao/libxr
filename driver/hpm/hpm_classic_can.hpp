@@ -1,9 +1,3 @@
-/// @file hpm_classic_can.hpp
-/// @brief HPM classic `CAN_Type` IP 适配头文件 / Adapter header.
-///
-/// 本文件面向非 MCAN 的 classic CAN 外设 / Targets non-MCAN classic CAN IP.
-/// MCAN classic CAN 使用 `HPMCAN`，MCAN FD 使用 `HPMCANFD`。
-/// MCAN classic CAN uses `HPMCAN`; MCAN FD uses `HPMCANFD`.
 #pragma once
 
 #include <atomic>
@@ -23,83 +17,68 @@
                                                     (CAN_SOC_MAX_COUNT > 0)
 #include "hpm_can_drv.h"
 #define LIBXR_HPM_CLASSIC_CAN_SUPPORTED 1
-using LibXRHpmClassicCanType = CAN_Type;
 #else
 #define LIBXR_HPM_CLASSIC_CAN_SUPPORTED 0
-using LibXRHpmClassicCanType = void;
 #endif
+
+#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
 
 namespace LibXR
 {
 
-/// @class HPMClassicCAN
-/// @brief HPM classic `CAN_Type` 的 `LibXR::CAN` 适配器 /
-/// `LibXR::CAN` adapter for the HPM classic `CAN_Type` IP.
+/**
+ * @brief HPM classic CAN 驱动实现 / HPM classic CAN driver implementation.
+ */
 class HPMClassicCAN : public CAN
 {
  public:
-  static constexpr uint32_t kInvalidIrq = 0xFFFFFFFFu;
-  static constexpr uint32_t kDefaultTxPoolSize = 8;
-
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
-  static constexpr uint8_t kMaxInstances = CAN_SOC_MAX_COUNT;
-  static constexpr uint8_t kRxInterruptMask =
+  static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;
+  static constexpr uint32_t DEFAULT_TX_POOL_SIZE = 8;
+  static constexpr uint8_t MAX_INSTANCES = CAN_SOC_MAX_COUNT;
+  static constexpr uint8_t RX_INTERRUPT_MASK =
       CAN_EVENT_RECEIVE | CAN_EVENT_RX_BUF_OVERRUN | CAN_EVENT_RX_BUF_FULL;
-  static constexpr uint8_t kTxInterruptMask =
+  static constexpr uint8_t TX_INTERRUPT_MASK =
       CAN_EVENT_TX_SECONDARY_BUF | CAN_EVENT_TX_PRIMARY_BUF;
-  static constexpr uint8_t kErrorInterruptMask = CAN_EVENT_ERROR | CAN_EVENT_ABORT;
-  static constexpr uint8_t kInterruptMask =
-      kRxInterruptMask | kTxInterruptMask | kErrorInterruptMask;
-  static constexpr uint8_t kCanErrorInterruptMask =
+  static constexpr uint8_t ERROR_INTERRUPT_MASK = CAN_EVENT_ERROR | CAN_EVENT_ABORT;
+  static constexpr uint8_t INTERRUPT_MASK =
+      RX_INTERRUPT_MASK | TX_INTERRUPT_MASK | ERROR_INTERRUPT_MASK;
+  static constexpr uint8_t CAN_ERROR_INTERRUPT_MASK =
       CAN_ERROR_PASSIVE_INT_ENABLE | CAN_ERROR_ARBITRATION_LOST_INT_ENABLE |
       CAN_ERROR_BUS_ERROR_INT_ENABLE;
-#else
-  static constexpr uint8_t kMaxInstances = 1;
-#endif
 
-  /// @brief 构造 classic CAN 适配器 / Construct the classic CAN adapter.
-  /// @param can HPM classic `CAN_Type` 实例 / HPM classic `CAN_Type` instance.
-  /// @param clock HPM SDK 时钟 / HPM SDK clock.
-  /// @param index 外设索引 / Peripheral index.
-  /// @param irq 外设 IRQ 号 / Peripheral IRQ number.
-  /// @param auto_enable_irq 是否由适配器管理 IRQ / Whether adapter manages IRQs.
-  /// @param tx_pool_size LibXR TX 队列深度 / LibXR TX queue depth.
-  HPMClassicCAN(LibXRHpmClassicCanType* can, clock_name_t clock, uint8_t index = 0,
-                uint32_t irq = kInvalidIrq, bool auto_enable_irq = true,
-                uint32_t tx_pool_size = kDefaultTxPoolSize);
+  /**
+   * @brief 构造 classic CAN 适配器 / Construct the classic CAN adapter.
+   */
+  HPMClassicCAN(CAN_Type* can, clock_name_t clock, uint8_t index = 0,
+                uint32_t irq = INVALID_IRQ, bool auto_enable_irq = true,
+                uint32_t tx_pool_size = DEFAULT_TX_POOL_SIZE);
 
-  /// @brief 析构并关闭 IRQ/状态 / Destruct and shut down IRQ/state.
   ~HPMClassicCAN() override;
 
-  /// @brief 配置 classic CAN 位时序和模式 / Configure bit timing and mode.
-  /// @param cfg LibXR CAN 配置 / LibXR CAN configuration.
-  /// @return 操作结果 / Operation result.
+  /**
+   * @brief 设置 CAN 配置 / Set CAN configuration.
+   */
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
 
-  /// @brief 返回 CAN 外设输入时钟 / Return CAN peripheral input clock.
-  /// @return 输入时钟或 0 / Input clock or 0 when unsupported.
   uint32_t GetClockFreq() const override;
 
-  /// @brief 将 classic CAN 帧加入发送队列 / Queue a classic CAN frame.
-  /// @param pack classic CAN 帧 / Classic CAN frame, DLC <= 8.
-  /// @return 操作结果 / Operation result.
   ErrorCode AddMessage(const ClassicPack& pack) override;
 
-  /// @brief 读取 classic CAN 错误状态 / Read classic CAN error state.
-  /// @param state 输出错误状态 / Output LibXR error counters and state.
-  /// @return 操作结果 / Operation result.
+  /**
+   * @brief 查询当前错误状态 / Query current error state.
+   */
   ErrorCode GetErrorState(CAN::ErrorState& state) const override;
 
-  /// @brief 轮询 RX buffer 并分发 LibXR 回调 / Poll RX buffer.
-  /// @param in_isr 是否在 ISR 语境 / Whether callbacks run from ISR context.
+  /**
+   * @brief 轮询 RX buffer 并分发 LibXR 回调 / Poll RX buffer.
+   */
   void ProcessRx(bool in_isr = false);
 
-  /// @brief 处理 classic CAN 中断标志 / Process interrupt flags.
-  /// @param in_isr 是否在 ISR 语境 / Whether the call runs from ISR context.
+  /**
+   * @brief 处理 classic CAN 中断标志 / Process interrupt flags.
+   */
   void ProcessInterrupt(bool in_isr = true);
 
-  /// @brief C ISR trampoline 使用的按索引入口 / Indexed C ISR trampoline entry.
-  /// @param index HPM CAN 实例索引 / HPM CAN instance index.
   static void OnInterrupt(uint8_t index);
 
  private:
@@ -111,7 +90,6 @@ class HPMClassicCAN : public CAN
   static uint16_t SamplePointToPermille(float sample_point);
   void TxService();
 
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
   static can_node_mode_t ConvertMode(const CAN::Mode& mode);
   static void ApplyLowLevelTiming(const CAN::BitTiming& src, can_bit_timing_param_t& dst);
   static void BuildTxFrame(const ClassicPack& pack, can_transmit_buf_t& frame);
@@ -119,9 +97,8 @@ class HPMClassicCAN : public CAN
   static CAN::ErrorID ConvertProtocolError(uint8_t error_kind);
   void ProcessRxBuffer(bool in_isr);
   void ProcessError(bool in_isr);
-#endif
 
-  LibXRHpmClassicCanType* can_;
+  CAN_Type* can_;
   clock_name_t clock_;
   uint8_t index_;
   uint32_t irq_;
@@ -132,13 +109,11 @@ class HPMClassicCAN : public CAN
   std::atomic<uint32_t> tx_lock_{0};
   std::atomic<uint32_t> tx_pend_{0};
 
-#if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
-  static HPMClassicCAN* instance_map_[kMaxInstances];
-#endif
+  static HPMClassicCAN* instance_map_[MAX_INSTANCES];
 };
 
 }  // namespace LibXR
 
-extern "C" void libxr_hpm_classic_can_process_interrupt(uint8_t index);
+#endif
 
 #endif
