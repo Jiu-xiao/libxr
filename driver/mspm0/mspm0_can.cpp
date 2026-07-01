@@ -262,25 +262,8 @@ uint32_t mspm0_can_mcan_fclk_hz(MCAN_Regs* instance)
   switch (canclksrc_raw)
   {
     case SYSCTL_GENCLKCFG_CANCLKSRC_SYSPLLOUT1:
-    {
-      const uint32_t cfg0 = SYSCTL->SOCLOCK.SYSPLLCFG0;
-      const uint32_t pdiv = mspm0_can_syspll_pdiv_value();
-      const uint32_t qdiv = ((SYSCTL->SOCLOCK.SYSPLLCFG1 & SYSCTL_SYSPLLCFG1_QDIV_MASK) >>
-                             SYSCTL_SYSPLLCFG1_QDIV_OFS) +
-                            1U;
-      const uint32_t rdiv_clk1 =
-          ((cfg0 & SYSCTL_SYSPLLCFG0_RDIVCLK1_MASK) >> SYSCTL_SYSPLLCFG0_RDIVCLK1_OFS) +
-          1U;
-      const uint32_t clk1_div = 2U * rdiv_clk1;
-
-      if ((pdiv != 0U) && (clk1_div != 0U))
-      {
-        src_hz = static_cast<uint32_t>(
-            (static_cast<uint64_t>(CPUCLK_FREQ) * static_cast<uint64_t>(qdiv)) /
-            (static_cast<uint64_t>(pdiv) * static_cast<uint64_t>(clk1_div)));
-      }
+      src_hz = mspm0_can_syspll_clk1_freq_hz();
       break;
-    }
 
     case SYSCTL_GENCLKCFG_CANCLKSRC_HFCLK:
       src_hz = mspm0_can_hfclk_freq_hz();
