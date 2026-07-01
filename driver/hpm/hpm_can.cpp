@@ -47,6 +47,10 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
+  if (cfg.mode.loopback && cfg.mode.listen_only)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
 
   (void)DisableInterrupt();
   DisableCanInterrupts();
@@ -113,17 +117,7 @@ uint32_t HPMCAN::GetClockFreq() const { return clock_get_frequency(clock_); }
 
 ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
 {
-  if (msg_buf == nullptr && msg_buf_size != 0u)
-  {
-    return ErrorCode::ARG_ERR;
-  }
-
-  if (msg_buf != nullptr && msg_buf_size == 0u)
-  {
-    return ErrorCode::ARG_ERR;
-  }
-
-  if (msg_buf == nullptr)
+  if (msg_buf == nullptr || msg_buf_size == 0u)
   {
     return ErrorCode::ARG_ERR;
   }
@@ -216,7 +210,7 @@ ErrorCode HPMCAN::AddMessage(const ClassicPack& pack)
 {
   if (can_ == nullptr)
   {
-    return ErrorCode::ARG_ERR;
+    return ErrorCode::PTR_NULL;
   }
   if (!configured_)
   {
@@ -369,7 +363,7 @@ ErrorCode HPMCAN::GetErrorState(CAN::ErrorState& state) const
 {
   if (can_ == nullptr)
   {
-    return ErrorCode::ARG_ERR;
+    return ErrorCode::PTR_NULL;
   }
 
   return detail::ReadMcanErrorState(can_, state);

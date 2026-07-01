@@ -133,8 +133,7 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
       tx_pool_(queue_size),
       tx_pool_fd_(queue_size)
 {
-  UNUSED(index);
-  if (can_ == nullptr || index_ >= MAX_INSTANCES)
+  if (can_ == nullptr || index_ >= MAX_INSTANCES || index_ != index)
   {
     ASSERT(false);
     can_ = nullptr;
