@@ -36,8 +36,12 @@ MSPM0Watchdog::MSPM0Watchdog(WWDT_Regs* wwdt, uint32_t timeout_ms, uint32_t feed
 {
   ASSERT(wwdt_ != nullptr);
   ASSERT(clock_ > 0U);
-  SetConfig({timeout_ms, feed_ms});
-  Start();
+
+  const ErrorCode SET_CFG_ANS = SetConfig({timeout_ms, feed_ms});
+  ASSERT(SET_CFG_ANS == ErrorCode::OK);
+
+  const ErrorCode START_ANS = Start();
+  ASSERT(START_ANS == ErrorCode::OK);
 }
 
 ErrorCode MSPM0Watchdog::SetConfig(const Configuration& config)
@@ -46,6 +50,11 @@ ErrorCode MSPM0Watchdog::SetConfig(const Configuration& config)
       config.feed_ms > config.timeout_ms)
   {
     return ErrorCode::ARG_ERR;
+  }
+
+  if (initialized_)
+  {
+    return ErrorCode::NOT_SUPPORT;
   }
 
   bool found = false;
