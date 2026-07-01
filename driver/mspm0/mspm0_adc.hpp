@@ -31,11 +31,13 @@ class MSPM0ADC : public ADC
 
   float ReadByDMA();
 
+  void StartContinuousDMA();
+
   Resources res_;
   float scale_;
   bool use_dma_;
   uint8_t dma_channel_id_;
-  uint16_t dma_sample_;
+  volatile uint16_t dma_sample_;
 };
 
 #define MSPM0_ADC_INIT(name)                                                        \

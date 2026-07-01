@@ -13,6 +13,7 @@ namespace
 
 constexpr uint32_t MSPM0_ADC_DMA_TRIGGER_INVALID = 0xFFFFFFFFU;
 constexpr uint8_t MSPM0_ADC_DMA_CHANNEL_INVALID = 0xFF;
+constexpr uint32_t MSPM0_ADC_POLLING_TIMEOUT = 300000U;
 
 uint32_t GetMemResultInterruptMask(DL_ADC12_MEM_IDX mem_idx)
 {
@@ -132,6 +133,28 @@ uint8_t ResolveDmaChannelId(uint32_t trigger)
   return MSPM0_ADC_DMA_CHANNEL_INVALID;
 }
 
+bool IsFullDmaChannel(uint8_t channel)
+{
+#if defined(DMA_SYS_N_DMA_FULL_CHANNEL)
+  return channel < static_cast<uint8_t>(DMA_SYS_N_DMA_FULL_CHANNEL);
+#else
+  (void)channel;
+  return false;
+#endif
+}
+
+uint32_t GetContinuousSampleMode(const ADC12_Regs* instance)
+{
+  const uint32_t sample_mode = DL_ADC12_getSampleMode(instance);
+  if (sample_mode == DL_ADC12_SAMP_MODE_SEQUENCE ||
+      sample_mode == DL_ADC12_SAMP_MODE_SEQUENCE_REPEAT)
+  {
+    return DL_ADC12_SAMP_MODE_SEQUENCE_REPEAT;
+  }
+
+  return DL_ADC12_SAMP_MODE_SINGLE_REPEAT;
+}
+
 }  // namespace
 
 MSPM0ADC::MSPM0ADC(Resources res)
@@ -158,31 +181,24 @@ MSPM0ADC::MSPM0ADC(Resources res)
 
   scale_ = res_.vref / full_scale;
 
-  use_dma_ = DL_ADC12_isDMAEnabled(res_.instance);
+#if !defined(DMA_BASE)
+  use_dma_ = false;
+#else
+  const uint32_t dma_trigger = GetAdcDmaTrigger(res_.instance);
+  dma_channel_id_ = ResolveDmaChannelId(dma_trigger);
+  use_dma_ =
+      (dma_channel_id_ != DMA_CHANNEL_INVALID) && IsFullDmaChannel(dma_channel_id_);
+
+  if (DL_ADC12_isDMAEnabled(res_.instance))
+  {
+    ASSERT(use_dma_);
+  }
+
   if (use_dma_)
   {
-#if !defined(DMA_BASE)
-    ASSERT(false);
-#else
-    const uint32_t dma_mask = GetMemResultDmaTriggerMask(res_.mem_idx);
-    if (DL_ADC12_getEnabledDMATrigger(res_.instance, dma_mask) == 0U)
-    {
-      ASSERT(false);
-    }
-
-    const uint32_t dma_trigger = GetAdcDmaTrigger(res_.instance);
-    if (dma_trigger == MSPM0_ADC_DMA_TRIGGER_INVALID)
-    {
-      ASSERT(false);
-    }
-
-    dma_channel_id_ = ResolveDmaChannelId(dma_trigger);
-    if (dma_channel_id_ == DMA_CHANNEL_INVALID)
-    {
-      ASSERT(false);
-    }
-#endif
+    StartContinuousDMA();
   }
+#endif
 }
 
 float MSPM0ADC::Read()
@@ -202,8 +218,14 @@ float MSPM0ADC::ReadByPolling()
   DL_ADC12_clearInterruptStatus(res_.instance, mem_interrupt);
   DL_ADC12_startConversion(res_.instance);
 
+  uint32_t timeout = MSPM0_ADC_POLLING_TIMEOUT;
   while (DL_ADC12_getRawInterruptStatus(res_.instance, mem_interrupt) == 0U)
   {
+    if (timeout-- == 0U)
+    {
+      ASSERT(false);
+      return 0.0f;
+    }
   }
 
   const uint16_t raw = DL_ADC12_getMemResult(res_.instance, res_.mem_idx);
@@ -211,28 +233,45 @@ float MSPM0ADC::ReadByPolling()
   return static_cast<float>(raw) * scale_;
 }
 
-float MSPM0ADC::ReadByDMA()
+float MSPM0ADC::ReadByDMA() { return static_cast<float>(dma_sample_) * scale_; }
+
+void MSPM0ADC::StartContinuousDMA()
 {
+#if defined(DMA_BASE) && defined(DEVICE_HAS_DMA_FULL_CHANNEL)
+  const uint32_t dma_mask = GetMemResultDmaTriggerMask(res_.mem_idx);
+
   DL_DMA_disableChannel(DMA, dma_channel_id_);
+  DL_DMA_configTransfer(DMA, dma_channel_id_, DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
+                        DL_DMA_NORMAL_MODE, DL_DMA_WIDTH_HALF_WORD,
+                        DL_DMA_WIDTH_HALF_WORD, DL_DMA_ADDR_UNCHANGED,
+                        DL_DMA_ADDR_UNCHANGED);
   DL_DMA_setSrcAddr(
       DMA, dma_channel_id_,
       static_cast<uint32_t>(DL_ADC12_getMemResultAddress(res_.instance, res_.mem_idx)));
   DL_DMA_setDestAddr(DMA, dma_channel_id_,
-                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&dma_sample_)));
+                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                         const_cast<uint16_t*>(&dma_sample_))));
   DL_DMA_setTransferSize(DMA, dma_channel_id_, 1);
   DL_DMA_enableChannel(DMA, dma_channel_id_);
 
+  DL_ADC12_stopConversion(res_.instance);
+  DL_ADC12_disableConversions(res_.instance);
+  DL_Common_updateReg(
+      &res_.instance->ULLMEM.CTL1,
+      GetContinuousSampleMode(res_.instance) | DL_ADC12_SAMPLING_SOURCE_AUTO |
+          DL_ADC12_TRIG_SRC_SOFTWARE,
+      ADC12_CTL1_SAMPMODE_MASK | ADC12_CTL1_CONSEQ_MASK | ADC12_CTL1_TRIGSRC_MASK);
+
+  DL_ADC12_setDMASamplesCnt(res_.instance, 1);
+  DL_ADC12_enableDMATrigger(res_.instance, dma_mask);
   DL_ADC12_enableDMA(res_.instance);
+  DL_ADC12_enableConversions(res_.instance);
+  DL_ADC12_clearDMATriggerStatus(res_.instance, dma_mask);
   DL_ADC12_clearInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE);
   DL_ADC12_startConversion(res_.instance);
-
-  while (DL_ADC12_getRawInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE) == 0U)
-  {
-  }
-
-  DL_ADC12_clearInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE);
-  DL_DMA_disableChannel(DMA, dma_channel_id_);
-  return static_cast<float>(dma_sample_) * scale_;
+#else
+  ASSERT(false);
+#endif
 }
 
 #endif
