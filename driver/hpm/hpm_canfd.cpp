@@ -392,7 +392,7 @@ size_t HPMCANFD::HardwareTxQueueEmptySize() const
   return detail::HardwareTxQueueEmptySize(can_);
 }
 
-void HPMCANFD::ProcessRxInterrupt(uint32_t fifo)
+void HPMCANFD::ProcessRxInterrupt(uint32_t fifo, bool in_isr)
 {
   if (!configured_ || can_ == nullptr)
   {
@@ -401,24 +401,24 @@ void HPMCANFD::ProcessRxInterrupt(uint32_t fifo)
 
   detail::DrainMcanRxFifo(
       can_, fifo,
-      [this](const mcan_rx_message_t& frame)
+      [this, in_isr](const mcan_rx_message_t& frame)
       {
         rx_buff_.frame = frame;
         if (BuildRxPack(rx_buff_.frame, rx_buff_.pack_fd))
         {
-          OnMessage(rx_buff_.pack_fd, true);
+          OnMessage(rx_buff_.pack_fd, in_isr);
           return;
         }
 
         if (BuildRxPack(rx_buff_.frame, rx_buff_.pack))
         {
-          OnMessage(rx_buff_.pack, true);
+          OnMessage(rx_buff_.pack, in_isr);
         }
       },
-      [this]() { EmitErrorFrame(ErrorID::CAN_ERROR_ID_OTHER, true); });
+      [this, in_isr]() { EmitErrorFrame(ErrorID::CAN_ERROR_ID_OTHER, in_isr); });
 }
 
-void HPMCANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
+void HPMCANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its, bool in_isr)
 {
   if (can_ == nullptr)
   {
@@ -435,36 +435,37 @@ void HPMCANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its)
   {
     // Bus-off sets CCCR.INIT; clear it so MCAN can run the recovery sequence.
     mcan_enter_normal_mode(can_);
-    EmitErrorFrame(ErrorID::CAN_ERROR_ID_BUS_OFF, true);
+    EmitErrorFrame(ErrorID::CAN_ERROR_ID_BUS_OFF, in_isr);
     return;
   }
   if ((error_status_its & MCAN_INT_ERROR_PASSIVE) != 0U &&
       protocol.in_error_passive_state)
   {
-    EmitErrorFrame(ErrorID::CAN_ERROR_ID_ERROR_PASSIVE, true);
+    EmitErrorFrame(ErrorID::CAN_ERROR_ID_ERROR_PASSIVE, in_isr);
     return;
   }
   if ((error_status_its & MCAN_INT_WARNING_STATUS) != 0U && protocol.in_warning_state)
   {
-    EmitErrorFrame(ErrorID::CAN_ERROR_ID_ERROR_WARNING, true);
+    EmitErrorFrame(ErrorID::CAN_ERROR_ID_ERROR_WARNING, in_isr);
     return;
   }
   if ((error_status_its &
        (MCAN_INT_PROTOCOL_ERR_IN_ARB_PHASE | MCAN_INT_PROTOCOL_ERR_IN_DATA_PHASE |
         MCAN_INT_BIT_ERROR_UNCORRECTED)) != 0U)
   {
-    EmitErrorFrame(detail::ConvertMcanProtocolError(protocol.last_error_code), true);
+    EmitErrorFrame(detail::ConvertMcanProtocolError(protocol.last_error_code), in_isr);
   }
 }
 
 void HPMCANFD::ProcessInterrupt(bool in_isr)
 {
   detail::ProcessMcanInterrupt(
-      can_, configured_, in_isr, [this](uint32_t fifo_index, uint32_t, bool)
-      { ProcessRxInterrupt(fifo_index); }, [this](bool err_in_isr)
+      can_, configured_, in_isr, [this](uint32_t fifo_index, uint32_t, bool rx_in_isr)
+      { ProcessRxInterrupt(fifo_index, rx_in_isr); }, [this](bool err_in_isr)
       { EmitErrorFrame(ErrorID::CAN_ERROR_ID_OTHER, err_in_isr); },
       [this]() { TxService(); },
-      [this](uint32_t error_flags, bool) { ProcessErrorStatusInterrupt(error_flags); });
+      [this](uint32_t error_flags, bool err_in_isr)
+      { ProcessErrorStatusInterrupt(error_flags, err_in_isr); });
 }
 
 void HPMCANFD::OnInterrupt(uint8_t index)

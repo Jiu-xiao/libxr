@@ -61,10 +61,10 @@ class HPMCANFD : public FDCAN
   /**
    * @brief 处理指定 RX FIFO 的接收中断 / Process RX FIFO interrupt.
    */
-  void ProcessRxInterrupt(uint32_t fifo);
+  void ProcessRxInterrupt(uint32_t fifo, bool in_isr = true);
 
   /** @brief 处理 MCAN error/status 中断 / Process MCAN error/status interrupt. */
-  void ProcessErrorStatusInterrupt(uint32_t error_status_its);
+  void ProcessErrorStatusInterrupt(uint32_t error_status_its, bool in_isr = true);
 
   void ProcessInterrupt(bool in_isr = true);
 
