@@ -550,7 +550,7 @@ void HPMCANFD::TxService()
   }
 }
 
-extern "C" void libxr_hpm_mcan_process_interrupt(uint8_t index)
+extern "C" void libxr_hpm_mcan_irq_handler(uint8_t index)
 {
   LibXR::detail::ProcessMcanRegisteredInterrupt(index, true);
 }
