@@ -303,23 +303,6 @@ float MSPM0ADC::Channel::Read()
   return adc_ != nullptr ? adc_->ReadChannel(index_) : 0.0f;
 }
 
-MSPM0ADC::MSPM0ADC(Resources res)
-    : res_(res),
-      scale_(0.0f),
-      use_dma_(false),
-      use_fifo_dma_(false),
-      dma_channel_id_(DMA_CHANNEL_INVALID),
-      num_channels_(0),
-      filter_size_(0),
-      dma_buffer_(),
-      channels_(nullptr),
-      mem_indices_(nullptr),
-      single_dma_sample_(0),
-      locked_(0U)
-{
-  Initialize(RawData(&single_dma_sample_, sizeof(single_dma_sample_)), {res.mem_idx});
-}
-
 MSPM0ADC::MSPM0ADC(Resources res, RawData dma_buff,
                    std::initializer_list<DL_ADC12_MEM_IDX> mem_indices)
     : res_(res),
@@ -332,7 +315,6 @@ MSPM0ADC::MSPM0ADC(Resources res, RawData dma_buff,
       dma_buffer_(),
       channels_(nullptr),
       mem_indices_(nullptr),
-      single_dma_sample_(0),
       locked_(0U)
 {
   Initialize(dma_buff, mem_indices);
@@ -444,8 +426,6 @@ void MSPM0ADC::Initialize(RawData dma_buff,
 #endif
 }
 
-float MSPM0ADC::Read() { return ReadChannel(0); }
-
 MSPM0ADC::Channel& MSPM0ADC::GetChannel(uint8_t index)
 {
   ASSERT(index < num_channels_);
@@ -457,7 +437,7 @@ float MSPM0ADC::ReadChannel(uint8_t channel)
   ASSERT(channel < num_channels_);
   if (channel >= num_channels_)
   {
-    return 0.0f;
+    return -1.0f;
   }
 
   if (use_dma_)

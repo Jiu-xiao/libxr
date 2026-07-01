@@ -13,7 +13,7 @@
 namespace LibXR
 {
 
-class MSPM0ADC : public ADC
+class MSPM0ADC
 {
  public:
   class Channel : public ADC
@@ -35,17 +35,13 @@ class MSPM0ADC : public ADC
   struct Resources
   {
     ADC12_Regs* instance;
-    DL_ADC12_MEM_IDX mem_idx;
     float vref;
   };
 
-  explicit MSPM0ADC(Resources res);
   MSPM0ADC(Resources res, RawData dma_buff,
            std::initializer_list<DL_ADC12_MEM_IDX> mem_indices);
 
-  ~MSPM0ADC() override;
-
-  float Read() override;
+  ~MSPM0ADC();
 
   Channel& GetChannel(uint8_t index);
 
@@ -77,14 +73,15 @@ class MSPM0ADC : public ADC
   RawData dma_buffer_;
   Channel* channels_;
   DL_ADC12_MEM_IDX* mem_indices_;
-  uint16_t single_dma_sample_;
   alignas(LibXR::CACHE_LINE_SIZE) std::atomic<uint32_t> locked_;
 };
 
-#define MSPM0_ADC_INIT(name)                                                        \
-  ::LibXR::MSPM0ADC::Resources                                                      \
-  {                                                                                 \
-    name##_INST, name##_ADCMEM_0, static_cast<float>(name##_ADCMEM_0_REF_VOLTAGE_V) \
+#define MSPM0_ADC_INIT(name, mem_name) MSPM0_ADC_INIT_IMPL(name, mem_name)
+
+#define MSPM0_ADC_INIT_IMPL(name, mem_name)                                      \
+  ::LibXR::MSPM0ADC::Resources                                                   \
+  {                                                                              \
+    name##_INST, static_cast<float>(name##_ADCMEM_##mem_name##_REF_VOLTAGE_V)    \
   }
 
 }  // namespace LibXR
