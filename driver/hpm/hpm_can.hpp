@@ -27,9 +27,12 @@ class HPMCAN final : public CAN
 {
  public:
   static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;
+  static constexpr uint8_t MAX_INSTANCES = MCAN_SOC_MAX_COUNT;
 
   HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
          void* msg_buf, uint32_t msg_buf_size);
+
+  ~HPMCAN() override;
 
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
   uint32_t GetClockFreq() const override;
@@ -44,6 +47,8 @@ class HPMCAN final : public CAN
 
   /** @brief 在配置前设置 message RAM / Set message RAM before configuration. */
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
+
+  static void OnInterrupt(uint8_t index);
 
  private:
   static void BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame);
@@ -60,6 +65,8 @@ class HPMCAN final : public CAN
   MCAN_Type* can_;
   clock_name_t clock_;
   uint32_t irq_;
+  uint8_t index_{MAX_INSTANCES};
+  bool registered_{false};
   void* msg_buf_{nullptr};
   uint32_t msg_buf_size_{0};
   bool configured_{false};

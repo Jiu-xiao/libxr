@@ -6,8 +6,6 @@
 
 using namespace LibXR;
 
-HPMCANFD* HPMCANFD::instance_map_[HPMCANFD::MAX_INSTANCES] = {};
-
 uint8_t HPMCANFD::BytesToDlc(uint8_t bytes)
 {
   if (bytes <= 8U)
@@ -127,7 +125,7 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
                    uint32_t msg_buf_size)
     : can_(can),
       clock_(clock),
-      index_(index),
+      index_(detail::GetMcanInstanceIndex(can)),
       irq_(irq),
       auto_enable_irq_(auto_enable_irq),
       msg_buf_(msg_buf),
@@ -135,20 +133,24 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
       tx_pool_(queue_size),
       tx_pool_fd_(queue_size)
 {
+  UNUSED(index);
   REQUIRE(queue_size > 0U);
   REQUIRE(can_ != nullptr);
   REQUIRE(index_ < MAX_INSTANCES);
-  REQUIRE(instance_map_[index_] == nullptr);
-  instance_map_[index_] = this;
-  Init();
+  REQUIRE(detail::RegisterMcanOwner(
+      index_, this, detail::HpmMcanOwnerKind::FD_CAN,
+      [](void* owner, bool in_isr)
+      { static_cast<HPMCANFD*>(owner)->ProcessInterrupt(in_isr); }));
+  registered_ = true;
 }
 
 HPMCANFD::~HPMCANFD()
 {
   Shutdown();
-  if (index_ < MAX_INSTANCES && instance_map_[index_] == this)
+  if (registered_)
   {
-    instance_map_[index_] = nullptr;
+    detail::ReleaseMcanOwner(index_, this);
+    registered_ = false;
   }
 }
 
@@ -161,15 +163,6 @@ void HPMCANFD::Shutdown()
   esi_enabled_ = false;
   tx_lock_.store(0U, std::memory_order_release);
   tx_pend_.store(0U, std::memory_order_release);
-}
-
-ErrorCode HPMCANFD::Init(void)
-{
-  if (can_ == nullptr)
-  {
-    return ErrorCode::PTR_NULL;
-  }
-  return ErrorCode::OK;
 }
 
 ErrorCode HPMCANFD::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
@@ -473,14 +466,7 @@ void HPMCANFD::ProcessInterrupt(bool in_isr)
 
 void HPMCANFD::OnInterrupt(uint8_t index)
 {
-  if (index >= MAX_INSTANCES)
-  {
-    return;
-  }
-  if (auto* can = instance_map_[index])
-  {
-    can->ProcessInterrupt(true);
-  }
+  detail::ProcessMcanRegisteredInterrupt(index, true);
 }
 
 void HPMCANFD::TxService()
@@ -562,6 +548,11 @@ void HPMCANFD::TxService()
       return;
     }
   }
+}
+
+extern "C" void libxr_hpm_mcan_process_interrupt(uint8_t index)
+{
+  LibXR::detail::ProcessMcanRegisteredInterrupt(index, true);
 }
 
 #endif

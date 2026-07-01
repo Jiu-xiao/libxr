@@ -21,6 +21,27 @@ HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_
       msg_buf_size_(msg_buf_size),
       tx_queue_(queue_size)
 {
+  REQUIRE(queue_size > 0U);
+  REQUIRE(can_ != nullptr);
+
+  index_ = detail::GetMcanInstanceIndex(can_);
+  REQUIRE(index_ < MAX_INSTANCES);
+  REQUIRE(detail::RegisterMcanOwner(
+      index_, this, detail::HpmMcanOwnerKind::CLASSIC_CAN,
+      [](void* owner, bool)
+      { static_cast<HPMCAN*>(owner)->ProcessInterrupt(); }));
+  registered_ = true;
+}
+
+HPMCAN::~HPMCAN()
+{
+  DisableInterrupt();
+  DisableCanInterrupts();
+  if (registered_)
+  {
+    detail::ReleaseMcanOwner(index_, this);
+    registered_ = false;
+  }
 }
 
 ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
@@ -289,6 +310,11 @@ void HPMCAN::ProcessInterrupt()
         OnMessage(pack, true);
       },
       [this]() { ProcessTx(); }, [this](uint32_t, bool) { ProcessError(); });
+}
+
+void HPMCAN::OnInterrupt(uint8_t index)
+{
+  detail::ProcessMcanRegisteredInterrupt(index, true);
 }
 
 void HPMCAN::EnableCanInterrupts()
