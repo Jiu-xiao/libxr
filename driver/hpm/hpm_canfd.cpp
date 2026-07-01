@@ -134,13 +134,23 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
       tx_pool_fd_(queue_size)
 {
   UNUSED(index);
-  REQUIRE(queue_size > 0U);
-  REQUIRE(can_ != nullptr);
-  REQUIRE(index_ < MAX_INSTANCES);
-  REQUIRE(detail::RegisterMcanOwner(
-      index_, this, detail::HpmMcanOwnerKind::FD_CAN,
-      [](void* owner, bool in_isr)
-      { static_cast<HPMCANFD*>(owner)->ProcessInterrupt(in_isr); }));
+  if (can_ == nullptr || index_ >= MAX_INSTANCES)
+  {
+    ASSERT(false);
+    can_ = nullptr;
+    index_ = MAX_INSTANCES;
+    return;
+  }
+
+  if (!detail::RegisterMcanOwner(
+          index_, this, detail::HpmMcanOwnerKind::FD_CAN,
+          [](void* owner, bool in_isr)
+          { static_cast<HPMCANFD*>(owner)->ProcessInterrupt(in_isr); }))
+  {
+    ASSERT(false);
+    can_ = nullptr;
+    index_ = MAX_INSTANCES;
+  }
 }
 
 void HPMCANFD::Shutdown()
@@ -185,7 +195,8 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
 {
   if (can_ == nullptr)
   {
-    return ErrorCode::PTR_NULL;
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
   }
   if (cfg.mode.triple_sampling)
   {
@@ -234,11 +245,13 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   {
     if (!nominal_low_level)
     {
+      ASSERT(false);
       return ErrorCode::ARG_ERR;
     }
     if (cfg.fd_mode.fd_enabled && !data_low_level &&
         (cfg.data_bitrate != 0U || cfg.data_sample_point > 0.0f))
     {
+      ASSERT(false);
       return ErrorCode::ARG_ERR;
     }
     config.use_lowlevel_timing_setting = true;
@@ -260,6 +273,7 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   {
     if (cfg.bitrate == 0U)
     {
+      ASSERT(false);
       return ErrorCode::ARG_ERR;
     }
     config.use_lowlevel_timing_setting = false;

@@ -21,10 +21,14 @@ HPMClassicCAN::HPMClassicCAN(CAN_Type* can, clock_name_t clock, uint8_t index,
       auto_enable_irq_(auto_enable_irq),
       tx_pool_(tx_pool_size)
 {
-  REQUIRE(tx_pool_size > 0U);
-  REQUIRE(can_ != nullptr);
-  REQUIRE(index_ < MAX_INSTANCES);
-  REQUIRE(instance_map_[index_] == nullptr);
+  if (can_ == nullptr || index_ >= MAX_INSTANCES || instance_map_[index_] != nullptr)
+  {
+    ASSERT(false);
+    can_ = nullptr;
+    index_ = MAX_INSTANCES;
+    return;
+  }
+
   instance_map_[index_] = this;
 }
 
@@ -212,7 +216,8 @@ ErrorCode HPMClassicCAN::SetConfig(const CAN::Configuration& cfg)
 {
   if (can_ == nullptr)
   {
-    return ErrorCode::PTR_NULL;
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
   }
   ErrorCode cfg_ans = ValidateConfig(cfg);
   if (cfg_ans != ErrorCode::OK)
@@ -254,6 +259,7 @@ ErrorCode HPMClassicCAN::SetConfig(const CAN::Configuration& cfg)
   {
     if (cfg.bitrate == 0U)
     {
+      ASSERT(false);
       return ErrorCode::ARG_ERR;
     }
     config.use_lowlevel_timing_setting = false;
