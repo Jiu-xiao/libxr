@@ -21,21 +21,30 @@ HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_
       msg_buf_size_(msg_buf_size),
       tx_queue_(queue_size)
 {
-  REQUIRE(queue_size > 0U);
-  REQUIRE(can_ != nullptr);
-
   index_ = detail::GetMcanInstanceIndex(can_);
-  REQUIRE(index_ < MAX_INSTANCES);
-  REQUIRE(detail::RegisterMcanOwner(
-      index_, this, detail::HpmMcanOwnerKind::CLASSIC_CAN,
-      [](void* owner, bool)
-      { static_cast<HPMCAN*>(owner)->ProcessInterrupt(); }));
+  if (can_ == nullptr || index_ >= MAX_INSTANCES)
+  {
+    ASSERT(false);
+    can_ = nullptr;
+    index_ = MAX_INSTANCES;
+    return;
+  }
+
+  if (!detail::RegisterMcanOwner(index_, this, detail::HpmMcanOwnerKind::CLASSIC_CAN,
+                                 [](void* owner, bool)
+                                 { static_cast<HPMCAN*>(owner)->ProcessInterrupt(); }))
+  {
+    ASSERT(false);
+    can_ = nullptr;
+    index_ = MAX_INSTANCES;
+  }
 }
 
 ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
 {
   if (can_ == nullptr)
   {
+    ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
   configured_ = false;
@@ -68,6 +77,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     if (!detail::HasLowLevelTiming(cfg.bit_timing) ||
         cfg.bit_timing.sjw > cfg.bit_timing.phase_seg2 || SEG1 == 0U)
     {
+      ASSERT(false);
       EnableCanInterrupts();
       return ErrorCode::ARG_ERR;
     }
