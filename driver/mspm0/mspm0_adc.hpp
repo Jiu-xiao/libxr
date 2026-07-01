@@ -13,7 +13,7 @@
 namespace LibXR
 {
 
-class MSPM0ADC
+class MSPM0ADC : public ADC
 {
  public:
   class Channel : public ADC
@@ -41,7 +41,9 @@ class MSPM0ADC
   MSPM0ADC(Resources res, RawData dma_buff,
            std::initializer_list<DL_ADC12_MEM_IDX> mem_indices);
 
-  ~MSPM0ADC();
+  ~MSPM0ADC() override;
+
+  float Read() override;
 
   Channel& GetChannel(uint8_t index);
 
