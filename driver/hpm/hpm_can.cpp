@@ -68,8 +68,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   config.interrupt_mask = HPM_CAN_INTERRUPT_MASK;
   config.txbuf_trans_interrupt_mask = ~0UL;
 
-  const bool USE_LOW_LEVEL = cfg.bit_timing.brp != 0U ||
-                             cfg.bit_timing.prop_seg != 0U ||
+  const bool USE_LOW_LEVEL = cfg.bit_timing.brp != 0U || cfg.bit_timing.prop_seg != 0U ||
                              cfg.bit_timing.phase_seg1 != 0U ||
                              cfg.bit_timing.phase_seg2 != 0U || cfg.bit_timing.sjw != 0U;
 
@@ -289,8 +288,8 @@ void HPMCAN::ProcessError()
   }
   else
   {
-    pack.id = FromErrorID(detail::ConvertMcanProtocolError(
-        protocol.last_error_code, ErrorID::CAN_ERROR_ID_OTHER));
+    pack.id = FromErrorID(detail::ConvertMcanProtocolError(protocol.last_error_code,
+                                                           ErrorID::CAN_ERROR_ID_OTHER));
   }
 
   OnMessage(pack, true);
