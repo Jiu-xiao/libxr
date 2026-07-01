@@ -29,7 +29,7 @@ class MSPM0DAC : public DAC
 };
 
 #define MSPM0_DAC_INIT(name) \
-  ::LibXR::MSPM0DAC::Resources { name }
+  ::LibXR::MSPM0DAC::Resources { name##_INST }
 
 }  // namespace LibXR
 
