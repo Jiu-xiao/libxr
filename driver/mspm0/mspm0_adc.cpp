@@ -431,8 +431,6 @@ void MSPM0ADC::Initialize(RawData dma_buff,
 #endif
 }
 
-float MSPM0ADC::Read() { return ReadChannel(0); }
-
 MSPM0ADC::Channel& MSPM0ADC::GetChannel(uint8_t index)
 {
   ASSERT(index < num_channels_);
