@@ -32,8 +32,6 @@ class HPMCAN final : public CAN
   HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
          void* msg_buf, uint32_t msg_buf_size);
 
-  ~HPMCAN() override;
-
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
   uint32_t GetClockFreq() const override;
   ErrorCode AddMessage(const ClassicPack& pack) override;
@@ -66,7 +64,6 @@ class HPMCAN final : public CAN
   clock_name_t clock_;
   uint32_t irq_;
   uint8_t index_{MAX_INSTANCES};
-  bool registered_{false};
   void* msg_buf_{nullptr};
   uint32_t msg_buf_size_{0};
   bool configured_{false};

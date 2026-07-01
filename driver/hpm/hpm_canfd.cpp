@@ -141,17 +141,6 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
       index_, this, detail::HpmMcanOwnerKind::FD_CAN,
       [](void* owner, bool in_isr)
       { static_cast<HPMCANFD*>(owner)->ProcessInterrupt(in_isr); }));
-  registered_ = true;
-}
-
-HPMCANFD::~HPMCANFD()
-{
-  Shutdown();
-  if (registered_)
-  {
-    detail::ReleaseMcanOwner(index_, this);
-    registered_ = false;
-  }
 }
 
 void HPMCANFD::Shutdown()

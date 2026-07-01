@@ -53,8 +53,6 @@ class HPMClassicCAN : public CAN
                 uint32_t irq = INVALID_IRQ, bool auto_enable_irq = true,
                 uint32_t tx_pool_size = DEFAULT_TX_POOL_SIZE);
 
-  ~HPMClassicCAN() override;
-
   /**
    * @brief 设置 CAN 配置 / Set CAN configuration.
    */
