@@ -5,6 +5,8 @@
 #include "dac.hpp"
 #include "ti_msp_dl_config.h"
 
+#if defined(__MSPM0_HAS_DAC12__)
+
 namespace LibXR
 {
 
@@ -30,3 +32,5 @@ class MSPM0DAC : public DAC
   ::LibXR::MSPM0DAC::Resources { name }
 
 }  // namespace LibXR
+
+#endif

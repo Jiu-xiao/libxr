@@ -1,5 +1,7 @@
 #include "mspm0_adc.hpp"
 
+#if defined(__MSPM0_HAS_ADC12__)
+
 #include <ti/driverlib/dl_dma.h>
 
 #include <cstdint>
@@ -232,3 +234,5 @@ float MSPM0ADC::ReadByDMA()
   DL_DMA_disableChannel(DMA, dma_channel_id_);
   return static_cast<float>(dma_sample_) * scale_;
 }
+
+#endif

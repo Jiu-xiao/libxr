@@ -5,6 +5,7 @@
 #include "adc.hpp"
 #include "ti_msp_dl_config.h"
 
+#if defined(__MSPM0_HAS_ADC12__)
 
 namespace LibXR
 {
@@ -44,3 +45,5 @@ class MSPM0ADC : public ADC
   }
 
 }  // namespace LibXR
+
+#endif

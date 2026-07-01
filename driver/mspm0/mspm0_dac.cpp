@@ -1,5 +1,7 @@
 #include "mspm0_dac.hpp"
 
+#if defined(__MSPM0_HAS_DAC12__)
+
 #include <algorithm>
 
 using namespace LibXR;
@@ -41,3 +43,5 @@ ErrorCode MSPM0DAC::Write(float voltage)
 
   return ErrorCode::OK;
 }
+
+#endif
