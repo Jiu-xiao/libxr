@@ -29,8 +29,7 @@
 #include "hpm_soc.h"
 #include "watchdog.hpp"
 
-#if (defined(HPMSOC_HAS_HPMSDK_EWDG) || defined(HPM_EWDG0) || defined(HPM_PEWDG)) && \
-    __has_include("hpm_ewdg_drv.h")
+#if defined(HPM_EWDG0) && __has_include("hpm_ewdg_drv.h")
 #include "hpm_ewdg_drv.h"
 #define LIBXR_HPM_EWDG_SUPPORTED 1
 #else
