@@ -171,6 +171,7 @@ class HPMWatchdog final : public Watchdog
   clk_src_t clock_source_;         ///< EWDG 时钟源 / EWDG clock source.
   Configuration current_config_;   ///< 当前配置 / Current configuration.
   uint32_t counter_clock_hz_ = 0;  ///< 计数器频率 / Counter clock frequency.
+  bool clock_ready_ = false;       ///< 时钟是否已就绪 / Whether clock is ready.
   bool started_ = false;           ///< 是否已启动 / Whether started.
 };
 

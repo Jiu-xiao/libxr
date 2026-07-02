@@ -67,6 +67,12 @@ constexpr uint32_t EWDG_CLOCK_DIV_POWER_MAX =
 
 uint64_t DivCeil(uint64_t value, uint64_t divisor)
 {
+  if (divisor == 0u)
+  {
+    ASSERT(false);
+    return std::numeric_limits<uint64_t>::max();
+  }
+
   return value / divisor + (value % divisor == 0u ? 0u : 1u);
 }
 
@@ -230,6 +236,11 @@ ErrorCode HPMWatchdog::Stop()
 
 ErrorCode HPMWatchdog::EnsureClockReady()
 {
+  if (clock_ready_)
+  {
+    return ErrorCode::OK;
+  }
+
   const clk_src_t clock_source = ResolveClockSource();
   ErrorCode ans = ValidateClockSource(clock_, clock_source);
   if (ans != ErrorCode::OK)
@@ -241,7 +252,13 @@ ErrorCode HPMWatchdog::EnsureClockReady()
 
   ewdg_switch_clock_source(ewdg_, ResolveEwdgClockSelect());
 
-  return ResolveCounterClockFrequency(clock_source, &counter_clock_hz_);
+  ans = ResolveCounterClockFrequency(clock_source, &counter_clock_hz_);
+  if (ans == ErrorCode::OK)
+  {
+    clock_ready_ = true;
+  }
+
+  return ans;
 }
 
 ErrorCode HPMWatchdog::ResolveTimeoutSetting(uint32_t timeout_ms,
@@ -271,7 +288,8 @@ ErrorCode HPMWatchdog::ResolveTimeoutSetting(uint32_t timeout_ms,
 
   for (uint32_t div_power = 0u; div_power <= EWDG_CLOCK_DIV_POWER_MAX; ++div_power)
   {
-    if (ticks <= EWDG_TIMEOUT_TICK_MAX)
+    if (ticks <= EWDG_TIMEOUT_TICK_MAX &&
+        ticks <= static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()))
     {
       *timeout_ticks = static_cast<uint32_t>(ticks);
       *clock_div_power = div_power;
