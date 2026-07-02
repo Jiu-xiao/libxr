@@ -8,18 +8,17 @@
 #include "hpm_soc.h"
 #include "lockfree_pool.hpp"
 
-#if defined(MCAN_SOC_MAX_COUNT) && (MCAN_SOC_MAX_COUNT > 0)
-#include "hpm_canfd.hpp"
-#else
-
 #if defined(HPMSOC_HAS_HPMSDK_CAN) && __has_include("hpm_can_drv.h") &&           \
-                                                    defined(CAN_SOC_MAX_COUNT) && \
-                                                    (CAN_SOC_MAX_COUNT > 0)
+    defined(CAN_SOC_MAX_COUNT) && (CAN_SOC_MAX_COUNT > 0) &&                      \
+    (!defined(MCAN_SOC_MAX_COUNT) || (MCAN_SOC_MAX_COUNT == 0))
 #include "hpm_can_drv.h"
 #define LIBXR_HPM_CLASSIC_CAN_SUPPORTED 1
 #else
 #define LIBXR_HPM_CLASSIC_CAN_SUPPORTED 0
 #endif
+
+// Classic CAN is only enabled for HPM SDK targets that expose the legacy
+// HPM_CANx peripheral. MCAN-only targets use the separate MCAN driver.
 
 #if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
 
@@ -111,7 +110,5 @@ class HPMClassicCAN : public CAN
 };
 
 }  // namespace LibXR
-
-#endif
 
 #endif
