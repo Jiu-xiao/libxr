@@ -254,6 +254,17 @@ enum class FormatFlag : uint8_t
  * 常见小场景会直接降为只携带必要立即数的窄操作码；其余情况全部回落到
  * GenericField，继续沿用共享的
  * “type + flags + fill + width + precision” 载荷形状。
+ *
+ * @note FormatOp is the wire-level opcode; FormatType (below) is the semantic
+ *       category used for GenericField dispatch. The two are not 1:1 — one
+ *       FormatType may be encoded by several FormatOps (e.g. Unsigned32 is
+ *       carried by U32Dec, U32ZeroPadWidth, U32Binary, U32Octal, U32Hex*),
+ *       and narrow opcodes bypass FormatType entirely by naming their exact
+ *       operation. /
+ *       FormatOp 是线级操作码；下面的 FormatType 是 GenericField 分发用的语义
+ *       类别。二者不是一一对应——一个 FormatType 可能由多个 FormatOp 编码
+ *       （例如 Unsigned32 由 U32Dec、U32ZeroPadWidth、U32Binary、U32Octal、
+ *       U32Hex* 承载），而窄操作码直接以其确切操作命名，完全绕过 FormatType。
  */
 enum class FormatOp : uint8_t
 {
@@ -262,7 +273,7 @@ enum class FormatOp : uint8_t
   TextSpace = 0x03,        ///< one literal space / 单个字面空格
   U32Dec = 0x10,           ///< raw uint32_t decimal output / 直接输出 uint32_t 十进制
   U32ZeroPadWidth = 0x11,  ///< uint32_t decimal with zero-pad width byte / 带零填充宽度字节的 uint32_t 十进制
-  Signed32Dec = 0x12,      ///< raw int32_t decimal output / 直接输出 int32_t 十进制
+  I32Dec = 0x12,           ///< raw int32_t decimal output / 直接输出 int32_t 十进制
   U32Binary = 0x13,        ///< raw uint32_t binary output / 直接输出 uint32_t 二进制
   U32Octal = 0x14,         ///< raw uint32_t octal output / 直接输出 uint32_t 八进制
   U32HexLower = 0x15,      ///< raw uint32_t lowercase hex output / 直接输出 uint32_t 小写十六进制
@@ -290,7 +301,7 @@ enum class FormatOp : uint8_t
       return 5;
     case FormatOp::TextSpace:
     case FormatOp::U32Dec:
-    case FormatOp::Signed32Dec:
+    case FormatOp::I32Dec:
     case FormatOp::U32Binary:
     case FormatOp::U32Octal:
     case FormatOp::U32HexLower:

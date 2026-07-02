@@ -166,7 +166,7 @@ class FormatCompiler
     {
       case FormatOp::U32Dec:
       case FormatOp::U32ZeroPadWidth:
-      case FormatOp::Signed32Dec:
+      case FormatOp::I32Dec:
       case FormatOp::U32Binary:
       case FormatOp::U32Octal:
       case FormatOp::U32HexLower:
@@ -198,7 +198,7 @@ class FormatCompiler
     if (raw_integer_field && field.type == FormatType::Signed32 &&
         field.pack == FormatPackKind::I32)
     {
-      return FormatOp::Signed32Dec;
+      return FormatOp::I32Dec;
     }
 
     if (field.type == FormatType::Unsigned32 && field.pack == FormatPackKind::U32 &&
@@ -358,7 +358,7 @@ class FormatCompiler
       switch (op)
       {
         case FormatOp::U32Dec:
-        case FormatOp::Signed32Dec:
+        case FormatOp::I32Dec:
         case FormatOp::U32Binary:
         case FormatOp::U32Octal:
         case FormatOp::U32HexLower:

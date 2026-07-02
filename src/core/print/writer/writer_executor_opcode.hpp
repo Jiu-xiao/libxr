@@ -68,7 +68,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteU32Dec(args_.Read<uint32_t>());
-    case FormatOp::Signed32Dec:
+    case FormatOp::I32Dec:
       if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer)
       {
