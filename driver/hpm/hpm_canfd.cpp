@@ -41,6 +41,12 @@ uint8_t HPMCANFD::BytesToDlc(uint8_t bytes)
 
 uint8_t HPMCANFD::DlcToBytes(uint8_t dlc) { return mcan_get_message_size_from_dlc(dlc); }
 
+bool HPMCANFD::IsValidFdLength(uint8_t bytes)
+{
+  return bytes <= 8U || bytes == 12U || bytes == 16U || bytes == 20U ||
+         bytes == 24U || bytes == 32U || bytes == 48U || bytes == 64U;
+}
+
 inline void HPMCANFD::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame)
 {
   detail::BuildMcanClassicTxFrame(pack, frame);
@@ -363,6 +369,10 @@ ErrorCode HPMCANFD::AddMessage(const FDPack& pack)
     return ErrorCode::ARG_ERR;
   }
   if (pack.len > 64U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (!IsValidFdLength(pack.len))
   {
     return ErrorCode::ARG_ERR;
   }

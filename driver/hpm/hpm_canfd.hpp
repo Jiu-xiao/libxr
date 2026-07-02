@@ -79,6 +79,7 @@ class HPMCANFD : public FDCAN
  private:
   static uint8_t DlcToBytes(uint8_t dlc);
   static uint8_t BytesToDlc(uint8_t bytes);
+  static bool IsValidFdLength(uint8_t bytes);
   ErrorCode ApplyMessageBuffer();
   void Shutdown();
   static bool BuildRxPack(const mcan_rx_message_t& frame, ClassicPack& pack);
