@@ -377,12 +377,6 @@ ErrorCode HPMWatchdog::ResolveCounterClockFrequency(clk_src_t source,
   const uint32_t source_group = GET_CLK_SRC_GROUP(source);
   const uint32_t source_index = GET_CLK_SRC_INDEX(source);
 
-  const ErrorCode ans = ValidateClockSource(clock_, source);
-  if (ans != ErrorCode::OK)
-  {
-    return ans;
-  }
-
   if (source_group == CLK_SRC_GROUP_EWDG)
   {
     if (source_index == EWDG_EXTERNAL_CLOCK_SOURCE_INDEX)
