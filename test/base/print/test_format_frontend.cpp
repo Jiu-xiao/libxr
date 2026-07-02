@@ -136,6 +136,41 @@ void TestFormatFrontendSemantics()
     Fail("format frontend inf nan mismatch");
   }
 
+  // F32 fixed fast-path (FormatOp::F32FixedPrec) non-finite coverage.
+  // {:.2f} with a float hits the fast path; these verify it delegates to the
+  // generic writer instead of misbehaving on NaN/inf.
+  if (!SameFormatAsExpected<"{:.2f}|{:.2f}|{:.2f}">(
+          "nan|inf|-inf",
+          std::numeric_limits<float>::quiet_NaN(),
+          std::numeric_limits<float>::infinity(),
+          -std::numeric_limits<float>::infinity()))
+  {
+    Fail("f32 fast-path nan/inf mismatch");
+  }
+
+  // NaN sign policy: signbit is ignored; explicit sign flag is honored.
+  if (!SameFormatAsExpected<"{:.2f}|{:-.2f}|{:+.2f}|{: .2f}">(
+          "nan|nan|+nan| nan",
+          std::numeric_limits<float>::quiet_NaN(),
+          std::numeric_limits<float>::quiet_NaN(),
+          std::numeric_limits<float>::quiet_NaN(),
+          std::numeric_limits<float>::quiet_NaN()))
+  {
+    Fail("f32 nan sign flag mismatch");
+  }
+
+  // F32 fixed fast-path overflow: float::max() * 10^2 overflows; must
+  // return OUT_OF_RANGE, not NO_BUFF or undefined behavior.
+  {
+    constexpr LibXR::Format<"{:.2f}"> format{};
+    StringSink sink;
+    auto ec = LibXR::Print::Write(sink, format, std::numeric_limits<float>::max());
+    if (ec != LibXR::ErrorCode::OUT_OF_RANGE)
+    {
+      Fail("f32 fast-path overflow should return OUT_OF_RANGE");
+    }
+  }
+
   // LibXR 参数适配：对象字符串、定长 char 数组和空 C 字符串。
   // LibXR argument adapters: object strings, bounded char arrays, and null C strings.
   if (!SameFormatAsExpected<"[{:3}] [{:6}]">("[A  ] [abc   ]", 'A', "abc"))

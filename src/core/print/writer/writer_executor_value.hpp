@@ -397,6 +397,12 @@ template <OutputSink Sink, FormatProfile Profile>
 ErrorCode Writer::Executor<Sink, Profile>::WriteF32FixedPrec(uint8_t precision,
                                                              float value)
 {
+  if (!std::isfinite(value))
+  {
+    // Fast path only handles finite values. Delegate NaN/inf to the generic
+    // float writer so they format consistently with the generic path.
+    return WriteFloat(FormatType::FloatFixed, Spec{.precision = precision}, value);
+  }
   char sign_char = std::signbit(value) ? '-' : '\0';
   float magnitude = std::signbit(value) ? -value : value;
   if (ExceedsFixedIntegerDigits(magnitude, precision))
