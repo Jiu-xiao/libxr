@@ -31,9 +31,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR repository names must be lowercase; the owner login may not be.
+      - name: Compute image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/libxr-docs" >> "$GITHUB_ENV"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: docker/docs
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/libxr-docs:latest
+          tags: ${{ env.IMAGE }}:latest
