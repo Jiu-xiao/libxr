@@ -16,13 +16,17 @@
 template <size_t N>
 constexpr size_t Writer::BoundedTextLength(const char (&text)[N]) noexcept
 {
+  static_assert(N > 0, "LibXR::Print::Writer::BoundedTextLength: char array must be non-empty");
   size_t size = 0;
   while (size < N && text[size] != '\0')
   {
     ++size;
   }
   ASSERT(size < N);
-  return size;
+  // Safety: if no NUL was found (size == N) and ASSERT is stripped in release
+  // builds, return N-1 instead of N to prevent the caller from constructing a
+  // string_view that reads past the array boundary.
+  return size < N ? size : N - 1;
 }
 
 /**

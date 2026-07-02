@@ -76,7 +76,10 @@ Float Writer::RoundDecimal(Float value, uint8_t precision)
   Float scaled = value * scale;
   if (!std::isfinite(scaled))
   {
-    return value;
+    // Scaling overflowed: propagate as infinity so callers' isfinite() guard
+    // rejects the result cleanly instead of silently returning the original
+    // value and later producing OUT_OF_RANGE.
+    return std::copysign(std::numeric_limits<Float>::infinity(), value);
   }
 
   return std::nearbyint(scaled) / scale;
@@ -155,7 +158,10 @@ template <typename Float>
 uint8_t Writer::ExtractDigit(Float& value, Float scale)
 {
   Float scaled = value / scale;
-  auto digit = static_cast<int>(scaled + static_cast<Float>(1e-12L));
+  // Use a type-appropriate bias (10x machine epsilon) to correct for
+  // floating-point rounding when converting to int. The hardcoded 1e-12
+  // was calibrated for double and has no effect on float or long double.
+  auto digit = static_cast<int>(scaled + static_cast<Float>(10) * std::numeric_limits<Float>::epsilon());
   if (digit < 0)
   {
     digit = 0;
@@ -166,7 +172,9 @@ uint8_t Writer::ExtractDigit(Float& value, Float scale)
   }
 
   value -= static_cast<Float>(digit) * scale;
-  Float epsilon = scale * static_cast<Float>(1e-9L);
+  // Type-appropriate zero-clamping epsilon: scale relative to machine precision
+  // instead of hardcoded 1e-9 (calibrated for double only).
+  Float epsilon = scale * static_cast<Float>(10) * std::numeric_limits<Float>::epsilon();
   if (value < 0 && value > -epsilon)
   {
     value = 0;

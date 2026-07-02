@@ -242,6 +242,10 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
   }
 
   char sign_char = ResolveFloatSignChar(value, actual);
+  if (std::isnan(value))
+  {
+    sign_char = '\0';
+  }
   T magnitude = std::signbit(value) ? -static_cast<T>(value) : static_cast<T>(value);
   uint8_t precision = actual.HasPrecision() ? actual.precision : DefaultFloatPrecision();
   if (type == FormatType::FloatFixed || type == FormatType::DoubleFixed ||

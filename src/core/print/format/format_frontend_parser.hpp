@@ -226,6 +226,10 @@ struct IndexingState
   if (pos < source.size() &&
       (source[pos] == '+' || source[pos] == '-' || source[pos] == ' '))
   {
+    if (source[pos] == '-')
+    {
+      return Error::InvalidSpecifier;
+    }
     field.force_sign = source[pos] == '+';
     field.space_sign = source[pos] == ' ';
     ++pos;
