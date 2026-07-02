@@ -19,6 +19,10 @@ bool Writer::FormatFixedText(Float value, uint8_t precision, bool alternate, cha
                              size_t& out_size)
 {
   Float rounded = RoundDecimal(value, precision);
+  if (!std::isfinite(rounded))
+  {
+    return false;
+  }
   auto normalized = NormalizeDecimal(rounded);
   int integer_exponent = (rounded == 0) ? 0 : normalized.exponent;
   int start_pos = (integer_exponent > 0) ? integer_exponent : 0;

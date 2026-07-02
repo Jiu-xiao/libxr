@@ -244,7 +244,10 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
   char sign_char = ResolveFloatSignChar(value, actual);
   if (std::isnan(value))
   {
-    sign_char = '\0';
+    // NaN signbit is implementation-defined and platform-dependent. Ignore it
+    // and derive the sign character from the explicit format option instead:
+    //   {:f}  -> "nan"   {:+f} -> "+nan"   {: f} -> " nan"
+    sign_char = actual.ForceSign() ? '+' : actual.SpaceSign() ? ' ' : '\0';
   }
   T magnitude = std::signbit(value) ? -static_cast<T>(value) : static_cast<T>(value);
   uint8_t precision = actual.HasPrecision() ? actual.precision : DefaultFloatPrecision();
