@@ -53,13 +53,14 @@ namespace LibXR
  * 因此非法 `timeout_ms`/`feed_ms` 会返回参数错误。默认实例为 `HPM_EWDG0`，
  * 默认时钟为 `clock_watchdog0`，自动选择 32 kHz 看门狗时钟源。
  *
- * When the HPM SDK exposes `HPMSOC_HAS_HPMSDK_EWDG` and `hpm_ewdg_drv.h` is
- * available, this driver initializes, starts, feeds, and stops the watchdog
- * through the SDK EWDG API. Otherwise the whole class definition is excluded by
- * `LIBXR_HPM_EWDG_SUPPORTED`. `SetConfig()` performs LibXR argument validation
- * first, so invalid `timeout_ms`/`feed_ms` values return argument errors. The
- * default instance is `HPM_EWDG0` with `clock_watchdog0`, using the 32 kHz
- * watchdog clock source by default.
+ * Supported when `HPM_EWDG0` and `hpm_ewdg_drv.h` are available.
+ * Unsupported targets
+ * exclude this class at compile time.
+ * Invalid `timeout_ms` or `feed_ms` values return
+ * argument errors.
+ * The default instance is `HPM_EWDG0` with `clock_watchdog0`.
+ * The
+ * default clock source is the 32 kHz watchdog clock.
  */
 class HPMWatchdog final : public Watchdog
 {
@@ -76,9 +77,9 @@ class HPMWatchdog final : public Watchdog
 #endif
 
   /** @brief Construct an HPM EWDG watchdog and optionally start it. */
-  explicit HPMWatchdog(EWDG_Type* ewdg = HPM_EWDG0,
-                       clock_name_t clock = clock_watchdog0, uint32_t timeout_ms = 1000,
-                       uint32_t feed_ms = 250, clk_src_t clock_source = AUTO_CLOCK_SOURCE,
+  explicit HPMWatchdog(EWDG_Type* ewdg = HPM_EWDG0, clock_name_t clock = clock_watchdog0,
+                       uint32_t timeout_ms = 1000, uint32_t feed_ms = 250,
+                       clk_src_t clock_source = AUTO_CLOCK_SOURCE,
                        bool auto_start = true);
 
   /**
