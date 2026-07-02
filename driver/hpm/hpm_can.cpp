@@ -51,6 +51,10 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   {
     return ErrorCode::NOT_SUPPORT;
   }
+  if (cfg.mode.triple_sampling)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
 
   (void)DisableInterrupt();
   DisableCanInterrupts();
@@ -95,6 +99,11 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     config.baudrate = cfg.bitrate;
     config.can20_samplepoint_min = detail::SamplePointToHpmRange(cfg.sample_point, false);
     config.can20_samplepoint_max = detail::SamplePointToHpmRange(cfg.sample_point, true);
+  }
+  else
+  {
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
   }
 
   const ErrorCode RESULT =
