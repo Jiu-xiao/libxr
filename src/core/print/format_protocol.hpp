@@ -385,8 +385,6 @@ enum class FormatProfile : uint8_t
   None = 0,            ///< text-only stream / 只有文本记录的流
   NarrowInt = 1U << 0, ///< signed/unsigned narrow integer fast path family / 有符号/无符号窄整数快路径族
   TextArg = 1U << 1,   ///< raw text argument fast path / 原始文本参数快路径
-  F32Fixed = 1U << 2,  ///< fixed float fast path / 定点 float 快路径
-  F64Fixed = 1U << 3,  ///< fixed double fast path / 定点 double 快路径
   Generic = 1U << 7,   ///< at least one field uses generic fallback / 至少有一个字段使用通用回退
 };
 

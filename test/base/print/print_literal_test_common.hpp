@@ -54,7 +54,7 @@ template <typename Format>
     }
     else if (current != LibXR::Print::FormatOp::TextSpace &&
              current != LibXR::Print::FormatOp::U32Dec &&
-             current != LibXR::Print::FormatOp::Signed32Dec &&
+             current != LibXR::Print::FormatOp::I32Dec &&
              current != LibXR::Print::FormatOp::U32Binary &&
              current != LibXR::Print::FormatOp::U32Octal &&
              current != LibXR::Print::FormatOp::U32HexLower &&
@@ -88,7 +88,7 @@ using FormatRawIntegerFormat =
 static_assert(
     !HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::Generic));
 static_assert(HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
-static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::Signed32Dec));
+static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::I32Dec));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Dec));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Binary));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Octal));
@@ -98,7 +98,7 @@ static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32HexUpper)
 static_assert(!HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::Generic));
 static_assert(HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::NarrowInt));
 static_assert(HasProfileBit<PrintfIntTextFormat>(LibXR::Print::FormatProfile::TextArg));
-static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::Signed32Dec));
+static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::I32Dec));
 static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::U32HexLower));
 static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::StringRaw));
 static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::CharacterRaw));
@@ -108,7 +108,7 @@ static_assert(
 static_assert(HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
 static_assert(
     HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::TextArg));
-static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::Signed32Dec));
+static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::I32Dec));
 static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::U32HexLower));
 static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::CharacterRaw));
 }  // namespace LibXRPrintTest::CompileProfile
