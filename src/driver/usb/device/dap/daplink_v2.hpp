@@ -18,6 +18,14 @@
 
 namespace LibXR::USB
 {
+#ifndef LIBXR_USB_DAPLINK_V2_BUILD_CONFIG_DEFINED
+#define LIBXR_USB_DAPLINK_V2_BUILD_CONFIG_DEFINED
+namespace DapLinkV2BuildConfig
+{
+static constexpr bool kEnableJtag = true;
+}
+#endif
+
 /**
  * @brief CMSIS-DAP v2 (Bulk) USB class (SWD-only, optional nRESET control).
  *
@@ -30,6 +38,7 @@ template <typename SwdPort, uint16_t DefaultDapPacketSize = 512u,
 class DapLinkV2Class : public DeviceClass
 {
  public:
+  static constexpr bool JTAG_ENABLED = DapLinkV2BuildConfig::kEnableJtag;
   static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB CMSIS-DAP v2";
 
   /**
@@ -99,12 +108,19 @@ class DapLinkV2Class : public DeviceClass
 
   void SetJtag(LibXR::Debug::Jtag* jtag)
   {
-    jtag_ = jtag;
-    jtag_chain_.ir_length = jtag_ir_len_;
-    ResetJtagChainState();
-    if (jtag_ != nullptr)
+    if constexpr (JTAG_ENABLED)
     {
-      (void)jtag_->SetClockHz(swj_clock_hz_);
+      jtag_ = jtag;
+      jtag_chain_.ir_length = jtag_ir_len_;
+      ResetJtagChainState();
+      if (jtag_ != nullptr)
+      {
+        (void)jtag_->SetClockHz(swj_clock_hz_);
+      }
+    }
+    else
+    {
+      (void)jtag;
     }
   }
 
@@ -214,9 +230,12 @@ class DapLinkV2Class : public DeviceClass
 
     swj_clock_hz_ = 1'000'000u;
     (void)swd_.SetClockHz(swj_clock_hz_);
-    if (jtag_ != nullptr)
+    if constexpr (JTAG_ENABLED)
     {
-      (void)jtag_->SetClockHz(swj_clock_hz_);
+      if (jtag_ != nullptr)
+      {
+        (void)jtag_->SetClockHz(swj_clock_hz_);
+      }
     }
 
     // SWJ shadow defaults: SWDIO=1, nRESET=1, SWCLK=0
@@ -264,9 +283,12 @@ class DapLinkV2Class : public DeviceClass
     }
 
     swd_.Close();
-    if (jtag_ != nullptr)
+    if constexpr (JTAG_ENABLED)
     {
-      jtag_->Close();
+      if (jtag_ != nullptr)
+      {
+        jtag_->Close();
+      }
     }
 
     // Reset shadow defaults
@@ -1179,11 +1201,26 @@ class DapLinkV2Class : public DeviceClass
         return HandleSWDSequence(in_isr, req, req_len, resp, resp_cap, out_len);
 
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::JTAG_SEQUENCE):
-        return HandleJTAGSequence(in_isr, req, req_len, resp, resp_cap, out_len);
+        if constexpr (JTAG_ENABLED)
+        {
+          return HandleJTAGSequence(in_isr, req, req_len, resp, resp_cap, out_len);
+        }
+        (void)BuildUnknownCmdResponse(resp, resp_cap, out_len);
+        return ErrorCode::NOT_SUPPORT;
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::JTAG_CONFIGURE):
-        return HandleJTAGConfigure(in_isr, req, req_len, resp, resp_cap, out_len);
+        if constexpr (JTAG_ENABLED)
+        {
+          return HandleJTAGConfigure(in_isr, req, req_len, resp, resp_cap, out_len);
+        }
+        (void)BuildUnknownCmdResponse(resp, resp_cap, out_len);
+        return ErrorCode::NOT_SUPPORT;
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::JTAG_IDCODE):
-        return HandleJTAGIdCode(in_isr, req, req_len, resp, resp_cap, out_len);
+        if constexpr (JTAG_ENABLED)
+        {
+          return HandleJTAGIdCode(in_isr, req, req_len, resp, resp_cap, out_len);
+        }
+        (void)BuildUnknownCmdResponse(resp, resp_cap, out_len);
+        return ErrorCode::NOT_SUPPORT;
 
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS):
         return HandleQueueCommands(in_isr, req, req_len, resp, resp_cap, out_len);
@@ -1265,9 +1302,12 @@ class DapLinkV2Class : public DeviceClass
       case ToU8(LibXR::USB::DapLinkV2Def::InfoId::CAPABILITIES):
       {
         uint8_t caps = LibXR::USB::DapLinkV2Def::DAP_CAP_SWD;
-        if (jtag_ != nullptr)
+        if constexpr (JTAG_ENABLED)
         {
-          caps = static_cast<uint8_t>(caps | LibXR::USB::DapLinkV2Def::DAP_CAP_JTAG);
+          if (jtag_ != nullptr)
+          {
+            caps = static_cast<uint8_t>(caps | LibXR::USB::DapLinkV2Def::DAP_CAP_JTAG);
+          }
         }
         return BuildInfoU8Response(resp[0], caps, resp, resp_cap, out_len);
       }
@@ -1421,25 +1461,32 @@ class DapLinkV2Class : public DeviceClass
     }
     else if (port == ToU8(LibXR::USB::DapLinkV2Def::Port::JTAG))
     {
-      if (jtag_ == nullptr)
+      if constexpr (!JTAG_ENABLED)
       {
         resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Port::DISABLED);
       }
       else
       {
-        static constexpr uint8_t SWD_TO_JTAG_SEQUENCE[2] = {0x3Cu, 0xE7u};
-        (void)swd_.SetClockHz(swj_clock_hz_);
-        (void)swd_.LineReset();
-        (void)swd_.SeqWriteBits(16u, SWD_TO_JTAG_SEQUENCE);
-        (void)swd_.LineReset();
-        (void)jtag_->SetClockHz(swj_clock_hz_);
-        (void)jtag_->ResetTap();
+        if (jtag_ == nullptr)
+        {
+          resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Port::DISABLED);
+        }
+        else
+        {
+          static constexpr uint8_t SWD_TO_JTAG_SEQUENCE[2] = {0x3Cu, 0xE7u};
+          (void)swd_.SetClockHz(swj_clock_hz_);
+          (void)swd_.LineReset();
+          (void)swd_.SeqWriteBits(16u, SWD_TO_JTAG_SEQUENCE);
+          (void)swd_.LineReset();
+          (void)jtag_->SetClockHz(swj_clock_hz_);
+          (void)jtag_->ResetTap();
 
-        dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::JTAG;
-        dap_state_.transfer_abort = false;
-        ResetQueuedCommandState();
-        ResetJtagChainState();
-        resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Port::JTAG);
+          dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::JTAG;
+          dap_state_.transfer_abort = false;
+          ResetQueuedCommandState();
+          ResetJtagChainState();
+          resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Port::JTAG);
+        }
       }
     }
     else
@@ -1462,9 +1509,12 @@ class DapLinkV2Class : public DeviceClass
     }
 
     swd_.Close();
-    if (jtag_ != nullptr)
+    if constexpr (JTAG_ENABLED)
     {
-      jtag_->Close();
+      if (jtag_ != nullptr)
+      {
+        jtag_->Close();
+      }
     }
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
     dap_state_.transfer_abort = false;
@@ -1544,9 +1594,12 @@ class DapLinkV2Class : public DeviceClass
       return ErrorCode::NOT_FOUND;
     }
 
-    if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+    if constexpr (JTAG_ENABLED)
     {
-      return HandleJtagWriteAbort(in_isr, req, req_len, resp, resp_cap, out_len);
+      if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+      {
+        return HandleJtagWriteAbort(in_isr, req, req_len, resp, resp_cap, out_len);
+      }
     }
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::WRITE_ABORT);
@@ -1746,9 +1799,12 @@ class DapLinkV2Class : public DeviceClass
 
     swj_clock_hz_ = hz;
     (void)swd_.SetClockHz(hz);
-    if (jtag_ != nullptr)
+    if constexpr (JTAG_ENABLED)
     {
-      (void)jtag_->SetClockHz(hz);
+      if (jtag_ != nullptr)
+      {
+        (void)jtag_->SetClockHz(hz);
+      }
     }
 
     resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
@@ -2415,9 +2471,12 @@ class DapLinkV2Class : public DeviceClass
       return ErrorCode::ARG_ERR;
     }
 
-    if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+    if constexpr (JTAG_ENABLED)
     {
-      return HandleJtagTransfer(in_isr, req, req_len, resp, resp_cap, out_len);
+      if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+      {
+        return HandleJtagTransfer(in_isr, req, req_len, resp, resp_cap, out_len);
+      }
     }
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER);
@@ -2921,9 +2980,12 @@ class DapLinkV2Class : public DeviceClass
   ErrorCode HandleTransferBlock(bool in_isr, const uint8_t* req, uint16_t req_len,
                                 uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
-    if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+    if constexpr (JTAG_ENABLED)
     {
-      return HandleJtagTransferBlock(in_isr, req, req_len, resp, resp_cap, out_len);
+      if (dap_state_.debug_port == LibXR::USB::DapLinkV2Def::DebugPort::JTAG)
+      {
+        return HandleJtagTransferBlock(in_isr, req, req_len, resp, resp_cap, out_len);
+      }
     }
 
     // Req:  [0]=0x06 [1]=index [2..3]=count [4]=request [5..]=data(write)
@@ -4005,14 +4067,17 @@ class DapLinkV2Class : public DeviceClass
 
   void ResetJtagChainState()
   {
-    jtag_chain_.ir_length = jtag_ir_len_;
-    jtag_chain_.count = 0u;
-    jtag_chain_.index = 0u;
-    jtag_chain_.ir_before_bits_len = 0u;
-    jtag_chain_.ir_after_bits_len = 0u;
-    jtag_chain_.dr_before_bits_len = 0u;
-    jtag_chain_.dr_after_bits_len = 0u;
-    Memory::FastSet(jtag_ir_len_, 0, sizeof(jtag_ir_len_));
+    if constexpr (JTAG_ENABLED)
+    {
+      jtag_chain_.ir_length = jtag_ir_len_;
+      jtag_chain_.count = 0u;
+      jtag_chain_.index = 0u;
+      jtag_chain_.ir_before_bits_len = 0u;
+      jtag_chain_.ir_after_bits_len = 0u;
+      jtag_chain_.dr_before_bits_len = 0u;
+      jtag_chain_.dr_after_bits_len = 0u;
+      Memory::FastSet(jtag_ir_len_, 0, sizeof(jtag_ir_len_));
+    }
   }
 
   void DelayUsIfAllowed(bool /*in_isr*/, uint32_t us)

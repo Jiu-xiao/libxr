@@ -76,3 +76,23 @@ target_include_directories(
   PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
 )
+
+file(GLOB_RECURSE XR_TEST_DAP_CONFIG_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/dap_config/*.cpp"
+)
+list(SORT XR_TEST_DAP_CONFIG_SOURCES)
+
+add_library(test_dap_config_matrix OBJECT ${XR_TEST_DAP_CONFIG_SOURCES})
+add_dependencies(test_dap_config_matrix xr)
+
+target_compile_features(test_dap_config_matrix PRIVATE cxx_std_20)
+target_compile_definitions(
+  test_dap_config_matrix PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_COMPILE_DEFINITIONS>
+)
+
+target_include_directories(
+  test_dap_config_matrix
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/dap_config"
+  PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
+)
