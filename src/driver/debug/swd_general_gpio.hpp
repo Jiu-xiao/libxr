@@ -31,7 +31,7 @@ template <typename SwclkGpioType, typename SwdioGpioType,
           SwdIoDriveMode IO_DRIVE_MODE = SwdIoDriveMode::PUSH_PULL>
 class SwdGeneralGPIO final : public Swd
 {
-  static constexpr uint32_t MIN_HZ = 10'000u;
+  static constexpr uint32_t MIN_HZ = 50'000u;
   static constexpr uint32_t MAX_HZ = 100'000'000u;
 
   static constexpr uint32_t NS_PER_SEC = 1'000'000'000u;
@@ -107,11 +107,11 @@ class SwdGeneralGPIO final : public Swd
 
     clock_hz_ = hz;
 
-    // 半周期计算改为浮点（double），最终再转为整型。Half period computed in double, then
-    // converted to integer.
-    const double DEN = 2.0 * static_cast<double>(hz);
-    const double HALF_PERIOD_NS_F = std::ceil(static_cast<double>(NS_PER_SEC) / DEN);
-    half_period_ns_ = static_cast<uint32_t>(HALF_PERIOD_NS_F);
+    // Keep MCU timing setup integer-only so simple SWD clock setup does not
+    // pull in floating-point runtime helpers.
+    const uint64_t DEN = static_cast<uint64_t>(2u) * static_cast<uint64_t>(hz);
+    half_period_ns_ =
+        static_cast<uint32_t>((static_cast<uint64_t>(NS_PER_SEC) + DEN - 1u) / DEN);
 
     if (loops_per_us_ == 0u)
     {
@@ -119,24 +119,21 @@ class SwdGeneralGPIO final : public Swd
       return ErrorCode::OK;
     }
 
-    // half_period_loops 使用浮点计算，最终再转为整型（ceil）。
-    // 允许 < 1 时转换为 0，用于进入 no-delay 路径。
-    // Compute loops in double, then convert to integer (ceil). Allow < 1 to become 0
-    // to enter no-delay path.
-    const double HALF_PERIOD_LOOPS_F =
-        (static_cast<double>(loops_per_us_) * static_cast<double>(half_period_ns_)) /
-        static_cast<double>(LOOPS_SCALE);
+    const uint64_t loops_num =
+        static_cast<uint64_t>(loops_per_us_) * static_cast<uint64_t>(half_period_ns_);
 
-    if (HALF_PERIOD_LOOPS_F < 1.0)
+    if (loops_num < static_cast<uint64_t>(LOOPS_SCALE))
     {
       half_period_loops_ = 0u;
     }
     else
     {
-      const double LOOPS_CEIL_F = std::ceil(HALF_PERIOD_LOOPS_F);
-      half_period_loops_ = (LOOPS_CEIL_F >= static_cast<double>(UINT32_MAX))
+      const uint64_t loops_ceil =
+          (loops_num + static_cast<uint64_t>(LOOPS_SCALE) - 1u) /
+          static_cast<uint64_t>(LOOPS_SCALE);
+      half_period_loops_ = (loops_ceil >= static_cast<uint64_t>(UINT32_MAX))
                                ? UINT32_MAX
-                               : static_cast<uint32_t>(LOOPS_CEIL_F);
+                               : static_cast<uint32_t>(loops_ceil);
     }
 
     return ErrorCode::OK;
@@ -243,12 +240,13 @@ class SwdGeneralGPIO final : public Swd
       const bool BIT = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
       swdio_.Write(BIT);
 
-      // one clock cycle: low->high (with DelayHalf inside GenOneClk)
-      // NOTE: your GenOneClk ends at high; to keep "end low" legacy for SeqWrite,
-      // we explicitly pull low after each cycle (no extra DelayHalf added).
+      // Match the DAP_Transfer request path: one bit owns one complete
+      // low-high clock cycle. Do not add an un-timed low pulse after every bit.
+      // 匹配 DAP_Transfer 请求路径：每个 bit 只产生一个完整低-高时钟周期，
+      // 不在每 bit 末尾额外插入无定时低脉冲。
       GenOneClk();
-      swclk_.Write(false);
     }
+    swclk_.Write(false);
 
     return ErrorCode::OK;
   }
