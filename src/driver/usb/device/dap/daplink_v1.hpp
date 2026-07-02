@@ -2389,7 +2389,40 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransfer(bool /*in_isr*/, const uin
 
   uint8_t response_count = 0u;
   uint8_t response_value = LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK;
-  bool check_write = false;
+  bool pending_ap_write = false;
+
+  auto check_posted_ap_write_if_pending = [&]() -> bool
+  {
+    if (!pending_ap_write)
+    {
+      return true;
+    }
+
+    LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
+    const ErrorCode EC = check_posted_ap_write_jtag(ack);
+    const uint8_t V = MapAckToDapResp(ack);
+
+    if (V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK)
+    {
+      response_value = V;
+      return false;
+    }
+    if (EC != ErrorCode::OK)
+    {
+      response_value = LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
+      return false;
+    }
+
+    pending_ap_write = false;
+    return true;
+  };
+
+  auto should_check_pending_ap_write_at_tail = [&]() -> bool
+  {
+    return response_value == LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK ||
+           response_value == static_cast<uint8_t>(LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK |
+                                                  LibXR::USB::DapLinkV1Def::DAP_TRANSFER_MISMATCH);
+  };
 
   auto emit_read_with_ts = [&](bool need_ts, uint32_t data) -> bool
   {
@@ -2488,13 +2521,18 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransfer(bool /*in_isr*/, const uin
       response_count++;
       if (AP)
       {
-        check_write = true;
+        pending_ap_write = true;
       }
     }
     else
     {
       if (MATCH_VALUE)
       {
+        if (!check_posted_ap_write_if_pending())
+        {
+          break;
+        }
+
         if (req_off + 4u > req_len)
         {
           response_value = LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
@@ -2563,6 +2601,11 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransfer(bool /*in_isr*/, const uin
       }
 
       uint32_t rdata = 0u;
+      if (!check_posted_ap_write_if_pending())
+      {
+        break;
+      }
+
       if (AP)
       {
         EC = ap_read_retry(ADDR2B, rdata, ack);
@@ -2605,19 +2648,12 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransfer(bool /*in_isr*/, const uin
     }
   }
 
-  if (response_value == LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK && check_write)
+  if (pending_ap_write && should_check_pending_ap_write_at_tail())
   {
-    LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-    const ErrorCode EC = check_posted_ap_write_jtag(ack);
-    const uint8_t V = MapAckToDapResp(ack);
-
-    if (V != LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK)
+    const uint8_t PRIOR_RESPONSE = response_value;
+    if (check_posted_ap_write_if_pending())
     {
-      response_value = V;
-    }
-    else if (EC != ErrorCode::OK)
-    {
-      response_value = LibXR::USB::DapLinkV1Def::DAP_TRANSFER_ERROR;
+      response_value = PRIOR_RESPONSE;
     }
   }
 

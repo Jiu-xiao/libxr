@@ -3380,7 +3380,7 @@ class DapLinkV2Class : public DeviceClass
 
     uint8_t response_count = 0u;
     uint8_t response_value = 0u;
-    bool check_write = false;
+    bool pending_ap_write = false;
 
     auto emit_read_with_ts = [&](bool need_ts, uint32_t data) -> bool
     {
@@ -3442,13 +3442,48 @@ class DapLinkV2Class : public DeviceClass
 
       pending.valid = false;
       pending.need_ts = false;
-      check_write = false;
       response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
       return true;
     };
 
     auto complete_pending_ap_read_if_any = [&]() -> bool
     { return pending.valid ? complete_pending_ap_read_by_rdbuff() : true; };
+
+    auto check_posted_ap_write_if_pending = [&]() -> bool
+    {
+      if (!pending_ap_write)
+      {
+        return true;
+      }
+
+      LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
+      const ErrorCode ec = check_posted_ap_write_jtag(ack);
+      const uint8_t v = MapAckToDapResp(ack);
+
+      if (v != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
+      {
+        response_value = v;
+        return false;
+      }
+      if (ec != ErrorCode::OK)
+      {
+        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+        return false;
+      }
+
+      pending_ap_write = false;
+      return true;
+    };
+
+    auto close_posted_state = [&]() -> bool
+    { return complete_pending_ap_read_if_any() && check_posted_ap_write_if_pending(); };
+
+    auto should_check_pending_ap_write_at_tail = [&]() -> bool
+    {
+      return response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK ||
+             response_value == static_cast<uint8_t>(LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK |
+                                                    LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MISMATCH);
+    };
 
     for (uint32_t i = 0; i < COUNT; ++i)
     {
@@ -3532,14 +3567,14 @@ class DapLinkV2Class : public DeviceClass
         response_count++;
         if (AP)
         {
-          check_write = true;
+          pending_ap_write = true;
         }
       }
       else
       {
         if (MATCH_VALUE)
         {
-          if (!complete_pending_ap_read_if_any())
+          if (!close_posted_state())
           {
             break;
           }
@@ -3612,7 +3647,7 @@ class DapLinkV2Class : public DeviceClass
 
         if (!AP)
         {
-          if (!complete_pending_ap_read_if_any())
+          if (!close_posted_state())
           {
             break;
           }
@@ -3648,6 +3683,11 @@ class DapLinkV2Class : public DeviceClass
         }
 
         uint32_t rdata = 0u;
+        if (!close_posted_state())
+        {
+          break;
+        }
+
         ec = ap_read_retry(ADDR2B, rdata, ack);
 
         response_value = MapAckToDapResp(ack);
@@ -3696,19 +3736,12 @@ class DapLinkV2Class : public DeviceClass
       }
     }
 
-    if (response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && check_write)
+    if (pending_ap_write && should_check_pending_ap_write_at_tail())
     {
-      LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-      const ErrorCode ec = check_posted_ap_write_jtag(ack);
-      const uint8_t v = MapAckToDapResp(ack);
-
-      if (v != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
+      const uint8_t PRIOR_RESPONSE = response_value;
+      if (check_posted_ap_write_if_pending())
       {
-        response_value = v;
-      }
-      else if (ec != ErrorCode::OK)
-      {
-        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
+        response_value = PRIOR_RESPONSE;
       }
     }
 
