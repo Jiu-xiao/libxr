@@ -3371,6 +3371,13 @@ class DapLinkV2Class : public DeviceClass
       }
     };
 
+    auto check_posted_ap_write_jtag = [&](LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
+    {
+      uint32_t ctrl_stat = 0u;
+      return dp_read_retry(static_cast<uint8_t>(LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT),
+                           ctrl_stat, ack);
+    };
+
     uint8_t response_count = 0u;
     uint8_t response_value = 0u;
     bool check_write = false;
@@ -3691,9 +3698,8 @@ class DapLinkV2Class : public DeviceClass
 
     if (response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && check_write)
     {
-      uint32_t dummy = 0u;
       LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-      const ErrorCode ec = dp_read_retry(3u, dummy, ack);
+      const ErrorCode ec = check_posted_ap_write_jtag(ack);
       const uint8_t v = MapAckToDapResp(ack);
 
       if (v != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
@@ -3851,6 +3857,13 @@ class DapLinkV2Class : public DeviceClass
       }
     };
 
+    auto check_posted_ap_write_jtag = [&](LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
+    {
+      uint32_t ctrl_stat = 0u;
+      return dp_read_retry(static_cast<uint8_t>(LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT),
+                           ctrl_stat, ack);
+    };
+
     const bool AP = LibXR::USB::DapLinkV2Def::req_is_ap(DAP_RQ);
     const bool RNW = LibXR::USB::DapLinkV2Def::req_is_read(DAP_RQ);
     const uint8_t ADDR2B = LibXR::USB::DapLinkV2Def::req_addr2b(DAP_RQ);
@@ -3901,9 +3914,8 @@ class DapLinkV2Class : public DeviceClass
 
       if (AP && xresp == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && done > 0u)
       {
-        uint32_t dummy = 0u;
         LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-        const ErrorCode ec = dp_read_retry(3u, dummy, ack);
+        const ErrorCode ec = check_posted_ap_write_jtag(ack);
         const uint8_t v = MapAckToDapResp(ack);
         if (v != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
         {
