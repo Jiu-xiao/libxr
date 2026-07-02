@@ -3,6 +3,7 @@
 #if LIBXR_HPM_EWDG_SUPPORTED
 
 #include <limits>
+#include <type_traits>
 
 using namespace LibXR;
 
@@ -65,6 +66,38 @@ constexpr uint32_t EWDG_CLOCK_DIV_POWER_MAX =
         ? EWDG_SOC_CLOCK_DIV_POWER_MAX
         : EWDG_REGISTER_CLOCK_DIV_POWER_MAX;
 
+ErrorCode ConvertSdkStatus(hpm_stat_t status)
+{
+  switch (status)
+  {
+    case status_success:
+      return ErrorCode::OK;
+    case status_invalid_argument:
+      return ErrorCode::ARG_ERR;
+    case status_ewdg_tick_out_of_range:
+    case status_ewdg_div_out_of_range:
+      return ErrorCode::OUT_OF_RANGE;
+    case status_ewdg_feature_unsupported:
+      return ErrorCode::NOT_SUPPORT;
+    default:
+      return ErrorCode::FAILED;
+  }
+}
+
+template <typename Callable>
+ErrorCode InvokeSdk(Callable callable)
+{
+  if constexpr (std::is_void_v<decltype(callable())>)
+  {
+    callable();
+    return ErrorCode::OK;
+  }
+  else
+  {
+    return ConvertSdkStatus(static_cast<hpm_stat_t>(callable()));
+  }
+}
+
 uint64_t DivCeil(uint64_t value, uint64_t divisor)
 {
   if (divisor == 0u)
@@ -122,35 +155,17 @@ ErrorCode ValidateClockSource(clock_name_t clock, clk_src_t source)
 }  // namespace
 
 HPMWatchdog::HPMWatchdog(EWDG_Type* ewdg, clock_name_t clock, uint32_t timeout_ms,
-                         uint32_t feed_ms, clk_src_t clock_source, bool auto_start)
+                         uint32_t feed_ms, clk_src_t clock_source)
     : ewdg_(ewdg),
       clock_(clock),
       clock_source_(clock_source),
       current_config_{timeout_ms, feed_ms}
 {
-  if (auto_start)
-  {
-    const ErrorCode ans = Start();
-    ASSERT(ans == ErrorCode::OK);
-  }
 }
 
 ErrorCode HPMWatchdog::ConvertStatus(hpm_stat_t status)
 {
-  switch (status)
-  {
-    case status_success:
-      return ErrorCode::OK;
-    case status_invalid_argument:
-      return ErrorCode::ARG_ERR;
-    case status_ewdg_tick_out_of_range:
-    case status_ewdg_div_out_of_range:
-      return ErrorCode::OUT_OF_RANGE;
-    case status_ewdg_feature_unsupported:
-      return ErrorCode::NOT_SUPPORT;
-    default:
-      return ErrorCode::FAILED;
-  }
+  return ConvertSdkStatus(status);
 }
 
 ErrorCode HPMWatchdog::SetConfig(const Configuration& config)
@@ -249,9 +264,19 @@ ErrorCode HPMWatchdog::EnsureClockReady()
     return ans;
   }
 
-  clock_add_to_group(clock_, EWDG_SDK_DEFAULT_CLOCK_GROUP);
+  ans = InvokeSdk([&]()
+                  { return clock_add_to_group(clock_, EWDG_SDK_DEFAULT_CLOCK_GROUP); });
+  if (ans != ErrorCode::OK)
+  {
+    return ans;
+  }
 
-  ewdg_switch_clock_source(ewdg_, ResolveEwdgClockSelect());
+  ans = InvokeSdk([&]()
+                  { return ewdg_switch_clock_source(ewdg_, ResolveEwdgClockSelect()); });
+  if (ans != ErrorCode::OK)
+  {
+    return ans;
+  }
 
   ans = ResolveCounterClockFrequency(clock_source, &counter_clock_hz_);
   if (ans == ErrorCode::OK)

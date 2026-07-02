@@ -76,11 +76,10 @@ class HPMWatchdog final : public Watchdog
   static constexpr clk_src_t AUTO_CLOCK_SOURCE = static_cast<clk_src_t>(0xFFu);
 #endif
 
-  /** @brief Construct an HPM EWDG watchdog and optionally start it. */
+  /** @brief Construct an HPM EWDG watchdog; call Start() to enable it. */
   explicit HPMWatchdog(EWDG_Type* ewdg = HPM_EWDG0, clock_name_t clock = clock_watchdog0,
                        uint32_t timeout_ms = 1000, uint32_t feed_ms = 250,
-                       clk_src_t clock_source = AUTO_CLOCK_SOURCE,
-                       bool auto_start = true);
+                       clk_src_t clock_source = AUTO_CLOCK_SOURCE);
 
   /**
    * @brief 设置超时和自动喂狗周期，并初始化 EWDG 配置。
