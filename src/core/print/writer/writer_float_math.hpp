@@ -78,8 +78,9 @@ Float Writer::RoundDecimal(Float value, uint8_t precision)
   {
     // Scaling overflowed: propagate as infinity so callers' isfinite() guard
     // rejects the result cleanly instead of silently returning the original
-    // value and later producing OUT_OF_RANGE.
-    return std::copysign(std::numeric_limits<Float>::infinity(), value);
+    // value and later producing OUT_OF_RANGE. Input is expected to be a
+    // non-negative magnitude, so plain infinity is sufficient.
+    return std::numeric_limits<Float>::infinity();
   }
 
   return std::nearbyint(scaled) / scale;
