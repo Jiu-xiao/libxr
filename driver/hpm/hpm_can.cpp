@@ -30,7 +30,7 @@ HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_
     return;
   }
 
-  if (!detail::RegisterMcanOwner(index_, this, detail::HpmMcanOwnerKind::CLASSIC_CAN,
+  if (!detail::RegisterMcanOwner(index_, this, detail::McanOwnerKind::CLASSIC_CAN,
                                  [](void* owner, bool)
                                  { static_cast<HPMCAN*>(owner)->ProcessInterrupt(); }))
   {

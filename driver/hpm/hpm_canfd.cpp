@@ -148,7 +148,7 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
   }
 
   if (!detail::RegisterMcanOwner(
-          index_, this, detail::HpmMcanOwnerKind::FD_CAN, [](void* owner, bool in_isr)
+          index_, this, detail::McanOwnerKind::FD_CAN, [](void* owner, bool in_isr)
           { static_cast<HPMCANFD*>(owner)->ProcessInterrupt(in_isr); }))
   {
     ASSERT(false);

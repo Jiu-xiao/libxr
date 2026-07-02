@@ -43,23 +43,23 @@ inline constexpr uint32_t MCAN_RX_FIFO0_ACTIVITY_MASK =
 inline constexpr uint32_t MCAN_RX_FIFO1_ACTIVITY_MASK =
     MCAN_INT_RXFIFO1_NEW_MSG | MCAN_INT_RXFIFO1_FULL | MCAN_INT_RXFIFO1_MSG_LOST;
 
-enum class HpmMcanOwnerKind : uint8_t
+enum class McanOwnerKind : uint8_t
 {
   NONE,
   CLASSIC_CAN,
   FD_CAN,
 };
 
-using HpmMcanInterruptHandler = void (*)(void* owner, bool in_isr);
+using McanInterruptHandler = void (*)(void* owner, bool in_isr);
 
-struct HpmMcanOwnerSlot
+struct McanOwnerSlot
 {
   void* owner = nullptr;
-  HpmMcanOwnerKind kind = HpmMcanOwnerKind::NONE;
-  HpmMcanInterruptHandler handler = nullptr;
+  McanOwnerKind kind = McanOwnerKind::NONE;
+  McanInterruptHandler handler = nullptr;
 };
 
-inline HpmMcanOwnerSlot hpm_mcan_owner_slots[MCAN_SOC_MAX_COUNT] = {};
+inline McanOwnerSlot mcan_owner_slots[MCAN_SOC_MAX_COUNT] = {};
 
 template <typename FrameConsumer, typename ErrorConsumer>
 void DrainMcanRxFifo(MCAN_Type* can, uint32_t fifo_index, FrameConsumer&& on_frame,
@@ -445,15 +445,15 @@ inline uint8_t GetMcanInstanceIndex(MCAN_Type* can)
                                       : static_cast<uint8_t>(MCAN_SOC_MAX_COUNT);
 }
 
-inline bool RegisterMcanOwner(uint8_t index, void* owner, HpmMcanOwnerKind kind,
-                              HpmMcanInterruptHandler handler)
+inline bool RegisterMcanOwner(uint8_t index, void* owner, McanOwnerKind kind,
+                              McanInterruptHandler handler)
 {
   if (index >= MCAN_SOC_MAX_COUNT || owner == nullptr || handler == nullptr)
   {
     return false;
   }
 
-  auto& slot = hpm_mcan_owner_slots[index];
+  auto& slot = mcan_owner_slots[index];
   if (slot.owner != nullptr && slot.owner != owner)
   {
     return false;
@@ -472,7 +472,7 @@ inline void ProcessMcanRegisteredInterrupt(uint8_t index, bool in_isr = true)
     return;
   }
 
-  auto& slot = hpm_mcan_owner_slots[index];
+  auto& slot = mcan_owner_slots[index];
   if (slot.owner != nullptr && slot.handler != nullptr)
   {
     slot.handler(slot.owner, in_isr);
