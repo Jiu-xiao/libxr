@@ -15,12 +15,16 @@ struct Writer::DecimalScale
   Float scale = 1;   ///< 10 ^ exponent / 10 的 exponent 次幂
 };
 
+/**
+ * @brief 科学计数法归一化后的尾数数字、缩放因子与十进制指数 / Rounded mantissa digits, scale factor, and decimal exponent after scientific normalization.
+ * @tparam Float Float type. / 浮点类型。
+ */
 template <typename Float>
 struct Writer::ScientificDigits
 {
-  Float digits = 0;
-  Float scale = 1;
-  int exponent = 0;
+  Float digits = 0;   ///< rounded mantissa scaled to integer digits / 舍入后按整数位缩放的尾数
+  Float scale = 1;    ///< 10 ^ precision applied to the mantissa / 施加到尾数上的 10 的 precision 次幂
+  int exponent = 0;   ///< decimal exponent / 十进制指数
 };
 
 /**
@@ -87,6 +91,15 @@ Float Writer::RoundDecimal(Float value, uint8_t precision)
   return std::nearbyint(scaled) / scale;
 }
 
+/**
+ * @brief 把一个值归一化为科学计数法的尾数数字与十进制指数 / Normalize one value into scientific-notation mantissa digits and a decimal exponent.
+ * @tparam Float Float type. / 浮点类型。
+ * @param value Finite non-negative value. / 有限非负值。
+ * @param precision Significant fractional digits to retain in the mantissa. / 尾数中保留的有效小数位数。
+ * @return Rounded mantissa, its scale, and the decimal exponent (carry-out
+ *         adjusts the exponent when rounding overflows one digit). /
+ *         返回舍入后的尾数、缩放因子与十进制指数；若舍入进位溢出一位，会相应调整指数。
+ */
 template <typename Float>
 Writer::ScientificDigits<Float> Writer::RoundScientificDigits(Float value,
                                                               uint8_t precision)

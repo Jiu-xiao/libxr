@@ -166,7 +166,7 @@ class FormatCompiler
     {
       case FormatOp::U32Dec:
       case FormatOp::U32ZeroPadWidth:
-      case FormatOp::Signed32Dec:
+      case FormatOp::I32Dec:
       case FormatOp::U32Binary:
       case FormatOp::U32Octal:
       case FormatOp::U32HexLower:
@@ -175,10 +175,6 @@ class FormatCompiler
       case FormatOp::StringRaw:
       case FormatOp::CharacterRaw:
         return FormatProfile::TextArg;
-      case FormatOp::F32FixedPrec:
-        return FormatProfile::F32Fixed;
-      case FormatOp::F64FixedPrec:
-        return FormatProfile::F64Fixed;
       case FormatOp::GenericField:
         return FormatProfile::Generic;
       case FormatOp::TextInline:
@@ -202,7 +198,7 @@ class FormatCompiler
     if (raw_integer_field && field.type == FormatType::Signed32 &&
         field.pack == FormatPackKind::I32)
     {
-      return FormatOp::Signed32Dec;
+      return FormatOp::I32Dec;
     }
 
     if (field.type == FormatType::Unsigned32 && field.pack == FormatPackKind::U32 &&
@@ -253,20 +249,6 @@ class FormatCompiler
         field.precision == unspecified_precision)
     {
       return FormatOp::U32ZeroPadWidth;
-    }
-
-    if (field.type == FormatType::FloatFixed && field.pack == FormatPackKind::F32 &&
-        field.flags == 0 && field.fill == ' ' && field.width == 0 &&
-        field.precision != unspecified_precision)
-    {
-      return FormatOp::F32FixedPrec;
-    }
-
-    if (field.type == FormatType::DoubleFixed && field.pack == FormatPackKind::F64 &&
-        field.flags == 0 && field.fill == ' ' && field.width == 0 &&
-        field.precision != unspecified_precision)
-    {
-      return FormatOp::F64FixedPrec;
     }
 
     return FormatOp::GenericField;
@@ -376,7 +358,7 @@ class FormatCompiler
       switch (op)
       {
         case FormatOp::U32Dec:
-        case FormatOp::Signed32Dec:
+        case FormatOp::I32Dec:
         case FormatOp::U32Binary:
         case FormatOp::U32Octal:
         case FormatOp::U32HexLower:
@@ -386,10 +368,6 @@ class FormatCompiler
           break;
         case FormatOp::U32ZeroPadWidth:
           EmitByte(code_scratch, code_bytes, field.width);
-          break;
-        case FormatOp::F32FixedPrec:
-        case FormatOp::F64FixedPrec:
-          EmitByte(code_scratch, code_bytes, field.precision);
           break;
         case FormatOp::GenericField:
           EmitByte(code_scratch, code_bytes, static_cast<uint8_t>(field.type));

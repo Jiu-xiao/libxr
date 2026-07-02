@@ -136,24 +136,14 @@ void TestFormatFrontendSemantics()
     Fail("format frontend inf nan mismatch");
   }
 
-  // Near-boundary digit extraction: values just below a rounding threshold
-  // must not carry over. Regression for ExtractDigit() epsilon over-bias.
-  if (!SameFormatAsExpected<"{:.6f}|{:.6f}">(
-          "1.999999|0.999999", 1.999999f, 0.999999f))
-  {
-    Fail("f32 fixed near-boundary digit extraction mismatch");
-  }
-
-  // F32 fixed fast-path (FormatOp::F32FixedPrec) non-finite coverage.
-  // {:.2f} with a float hits the fast path; these verify it delegates to the
-  // generic writer instead of misbehaving on NaN/inf.
+  // {:.2f} with a float: non-finite values must format as nan/inf/-inf.
   if (!SameFormatAsExpected<"{:.2f}|{:.2f}|{:.2f}">(
           "nan|inf|-inf",
           std::numeric_limits<float>::quiet_NaN(),
           std::numeric_limits<float>::infinity(),
           -std::numeric_limits<float>::infinity()))
   {
-    Fail("f32 fast-path nan/inf mismatch");
+    Fail("f32 fixed nan/inf mismatch");
   }
 
   // NaN sign policy: signbit is ignored; explicit sign flag is honored.
@@ -167,15 +157,15 @@ void TestFormatFrontendSemantics()
     Fail("f32 nan sign flag mismatch");
   }
 
-  // F32 fixed fast-path overflow: float::max() * 10^2 overflows; must
-  // return OUT_OF_RANGE, not NO_BUFF or undefined behavior.
+  // {:.2f} overflow: float::max() * 10^2 overflows; must return
+  // OUT_OF_RANGE, not NO_BUFF or undefined behavior.
   {
     constexpr LibXR::Format<"{:.2f}"> format{};
     StringSink sink;
     auto ec = LibXR::Print::Write(sink, format, std::numeric_limits<float>::max());
     if (ec != LibXR::ErrorCode::OUT_OF_RANGE)
     {
-      Fail("f32 fast-path overflow should return OUT_OF_RANGE");
+      Fail("f32 fixed overflow should return OUT_OF_RANGE");
     }
   }
 

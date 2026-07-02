@@ -45,13 +45,13 @@ class Writer::Executor
   [[nodiscard]] ErrorCode WriteSigned(const Spec& spec, Int value);
 
   template <FormatType Type, std::unsigned_integral UInt>
-  [[nodiscard]] ErrorCode WriteUnsigned(const Spec& spec, UInt value);
+  [[nodiscard]] ErrorCode DispatchUnsigned(const Spec& spec, UInt value);
 
   /**
    * @brief 按编译期进制/大小写/八进制备用格式参数复用无符号数字载荷写出逻辑 / Reuse the unsigned-digit payload writer with compile-time radix, case, and octal-alternate parameters
    * @tparam Base 整数进制 / Integer radix
    * @tparam UpperCase 十六进制数字是否使用大写字符 / Whether hexadecimal digits should use uppercase characters
-   * @tparam InlineAlternateOctal 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
+   * @tparam PrependOctalZero 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
    * @tparam UInt 无符号整数类型 / Unsigned integer type
    * @param prefix 脱离数字载荷输出的前缀 / Prefix emitted outside the digit payload
    * @param spec 解码后的字段规格 / Decoded field spec
@@ -59,7 +59,7 @@ class Writer::Executor
    * @return 返回共享无符号数字写出路径的结果 / Returns the shared unsigned-digit write result
    */
   template <uint8_t Base, bool UpperCase = false,
-            bool InlineAlternateOctal = false, std::unsigned_integral UInt>
+            bool PrependOctalZero = false, std::unsigned_integral UInt>
   [[nodiscard]] ErrorCode WriteUnsignedDigits(std::string_view prefix, const Spec& spec,
                                               UInt value);
   [[nodiscard]] ErrorCode WritePointer(const Spec& spec, uintptr_t value);
@@ -101,18 +101,6 @@ class Writer::Executor
    * @brief 单个原始字符参数的快路径。 / Fast path for one raw character argument.
    */
   [[nodiscard]] ErrorCode WriteCharacterRaw(char ch);
-
-#if LIBXR_PRINT_ENABLE_FLOAT
-  /**
-   * @brief 单个带显式精度的定点 float 快路径。 / Fast path for one fixed float with explicit precision.
-   */
-  [[nodiscard]] ErrorCode WriteF32FixedPrec(uint8_t precision, float value);
-
-  /**
-   * @brief 单个带显式精度的定点 double 快路径。 / Fast path for one fixed double with explicit precision.
-   */
-  [[nodiscard]] ErrorCode WriteF64FixedPrec(uint8_t precision, double value);
-#endif
 
   // Small bridges that keep GenericField dispatch readable while preserving the
   // existing "read spec -> read next packed argument -> call concrete writer"

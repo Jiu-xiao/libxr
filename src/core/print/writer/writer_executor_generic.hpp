@@ -26,7 +26,7 @@ template <OutputSink Sink, FormatProfile Profile>
 template <FormatType Type, std::unsigned_integral UInt>
 ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsignedField()
 {
-  return WriteUnsigned<Type>(codes_.ReadSpec(), args_.Read<UInt>());
+  return DispatchUnsigned<Type>(codes_.ReadSpec(), args_.Read<UInt>());
 }
 
 #if LIBXR_PRINT_ENABLE_FLOAT

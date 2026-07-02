@@ -1,7 +1,7 @@
 #pragma once
 
-#include "printf_frontend_lowering_base.hpp"
-#include "printf_frontend_lowering_field.hpp"
+#include "printf_frontend_binding_base.hpp"
+#include "printf_frontend_binding_field.hpp"
 
 namespace SourceSyntax
 {

@@ -80,37 +80,6 @@ bool Writer::AppendBufferU32ZeroPad(char* buffer, size_t capacity, size_t& size,
 
 #if LIBXR_PRINT_ENABLE_FLOAT
 
-uint64_t Writer::RoundScaledF32(float value, uint32_t scale)
-{
-  uint32_t bits = std::bit_cast<uint32_t>(value);
-  uint32_t exponent_bits = (bits >> 23) & 0xFFU;
-  uint32_t fraction_bits = bits & 0x7FFFFFU;
-  uint32_t significand =
-      (exponent_bits == 0) ? fraction_bits : ((1U << 23) | fraction_bits);
-  int exponent2 = (exponent_bits == 0) ? -149 : static_cast<int>(exponent_bits) - 150;
-  uint64_t numerator = static_cast<uint64_t>(significand) * scale;
-
-  if (exponent2 >= 0)
-  {
-    return numerator << exponent2;
-  }
-
-  unsigned int shift = static_cast<unsigned int>(-exponent2);
-  if (shift >= 64)
-  {
-    return 0;
-  }
-
-  uint64_t quotient = numerator >> shift;
-  uint64_t remainder = numerator & ((uint64_t{1} << shift) - 1U);
-  uint64_t halfway = uint64_t{1} << (shift - 1);
-  if (remainder > halfway || (remainder == halfway && (quotient & 1U) != 0U))
-  {
-    ++quotient;
-  }
-  return quotient;
-}
-
 size_t Writer::TrimGeneralText(char* text, size_t size)
 {
   size_t exponent_pos = size;
@@ -164,78 +133,6 @@ bool Writer::AppendExponentText(char* out, size_t& out_size, int exponent,
 
   return AppendBufferText(out, float_buffer_capacity, out_size,
                           std::string_view(digits, digit_count));
-}
-
-bool Writer::FormatF32FixedPrecText(float value, uint8_t precision, char* out,
-                                    size_t& out_size)
-{
-  out_size = 0;
-
-  if (std::isnan(value))
-  {
-    return AppendBufferText(out, float_buffer_capacity, out_size, "nan");
-  }
-  if (std::isinf(value))
-  {
-    return AppendBufferText(out, float_buffer_capacity, out_size, "inf");
-  }
-
-  if (precision < f32_decimal_scales_u32.size() && value < f32_u32_overflow_limit)
-  {
-    uint32_t integer_part = static_cast<uint32_t>(value);
-    uint32_t scale = f32_decimal_scales_u32[precision];
-    uint64_t scaled_total = RoundScaledF32(value, scale);
-    uint64_t scaled_integer = static_cast<uint64_t>(integer_part) * scale;
-    uint32_t fractional_part = (scaled_total >= scaled_integer)
-                                   ? static_cast<uint32_t>(scaled_total - scaled_integer)
-                                   : 0U;
-
-    if (fractional_part >= scale)
-    {
-      fractional_part -= scale;
-      if (integer_part == std::numeric_limits<uint32_t>::max())
-      {
-        if (!AppendBufferText(out, float_buffer_capacity, out_size, "4294967296"))
-        {
-          return false;
-        }
-        if (precision == 0)
-        {
-          return true;
-        }
-        if (!AppendBufferChar(out, float_buffer_capacity, out_size, '.'))
-        {
-          return false;
-        }
-        for (uint8_t i = 0; i < precision; ++i)
-        {
-          if (!AppendBufferChar(out, float_buffer_capacity, out_size, '0'))
-          {
-            return false;
-          }
-        }
-        return true;
-      }
-      ++integer_part;
-    }
-
-    if (!AppendBufferU32ZeroPad(out, float_buffer_capacity, out_size, integer_part, 1))
-    {
-      return false;
-    }
-    if (precision == 0)
-    {
-      return true;
-    }
-    if (!AppendBufferChar(out, float_buffer_capacity, out_size, '.'))
-    {
-      return false;
-    }
-    return AppendBufferU32ZeroPad(out, float_buffer_capacity, out_size, fractional_part,
-                                  precision);
-  }
-
-  return FormatFixedText(value, precision, false, out, out_size);
 }
 
 #endif

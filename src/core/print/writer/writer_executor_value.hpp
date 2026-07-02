@@ -96,7 +96,7 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int val
  * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer semantic value through the shared integer-field path
  * @tparam Base 整数进制 / Integer radix
  * @tparam UpperCase 十六进制数字是否使用大写字符 / Whether hexadecimal digits should use uppercase characters
- * @tparam InlineAlternateOctal 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
+ * @tparam PrependOctalZero 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param prefix 脱离数字载荷输出的前缀 / Prefix emitted outside the digit payload
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -104,17 +104,17 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int val
  * @return 返回共享整数字段路径的写出结果 / Returns the shared integer-field write result
  */
 template <OutputSink Sink, FormatProfile Profile>
-template <uint8_t Base, bool UpperCase, bool InlineAlternateOctal,
+template <uint8_t Base, bool UpperCase, bool PrependOctalZero,
           std::unsigned_integral UInt>
 ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view prefix,
                                                                const Spec& spec,
                                                                UInt value)
 {
   char digit_buffer[UnsignedDigitCapacity<UInt, Base>() +
-                    (InlineAlternateOctal ? 1U : 0U)];
+                    (PrependOctalZero ? 1U : 0U)];
   size_t digit_count = AppendUnsigned<Base, UpperCase>(digit_buffer, value);
 
-  if constexpr (InlineAlternateOctal)
+  if constexpr (PrependOctalZero)
   {
     digit_count = ApplyAlternateOctal(digit_buffer, digit_count, spec, value);
   }
@@ -142,7 +142,7 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view 
  */
 template <OutputSink Sink, FormatProfile Profile>
 template <FormatType Type, std::unsigned_integral UInt>
-ErrorCode Writer::Executor<Sink, Profile>::WriteUnsigned(const Spec& spec, UInt value)
+ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsigned(const Spec& spec, UInt value)
 {
   auto prefix = IntegerPrefix(Type, spec, value);
 
@@ -386,58 +386,3 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteCharacterRaw(char ch)
 {
   return WriteRaw(std::string_view(&ch, 1));
 }
-
-/**
- * @brief 写出一个 float32 定点精度快路径字段 / Write one float32 fixed-precision fast-path field
- * @param precision 显式定点精度 / Explicit fixed precision
- * @param value 待写出的浮点值 / Float value to write
- * @return 返回该快路径的写出结果 / Returns the fast-path write result
- */
-#if LIBXR_PRINT_ENABLE_FLOAT
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteF32FixedPrec(uint8_t precision,
-                                                             float value)
-{
-  if (!std::isfinite(value))
-  {
-    // Fast path only handles finite values. Delegate NaN/inf to the generic
-    // float writer so they format consistently with the generic path.
-    return WriteFloat(FormatType::FloatFixed, Spec{.precision = precision}, value);
-  }
-  char sign_char = std::signbit(value) ? '-' : '\0';
-  float magnitude = std::signbit(value) ? -value : value;
-  if (ExceedsFixedIntegerDigits(magnitude, precision))
-  {
-    return ErrorCode::OUT_OF_RANGE;
-  }
-  char output_buffer[float_buffer_capacity];
-  size_t output_size = 0;
-  if (!FormatF32FixedPrecText(magnitude, precision, output_buffer, output_size))
-  {
-    return ErrorCode::NO_BUFF;
-  }
-
-  if (sign_char != '\0')
-  {
-    if (auto ec = WriteRaw(std::string_view(&sign_char, 1)); ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-  }
-
-  return WriteRaw(std::string_view(output_buffer, output_size));
-}
-
-/**
- * @brief 通过通用浮点写出路径写出一个 double 定点精度字段 / Write one double fixed-precision field through the generic float writer
- * @param precision 显式定点精度 / Explicit fixed precision
- * @param value 待写出的 double 值 / Double value to write
- * @return 返回通用浮点写出路径的结果 / Returns the generic float-writer result
- */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteF64FixedPrec(uint8_t precision,
-                                                             double value)
-{
-  return WriteFloat(FormatType::DoubleFixed, Spec{.precision = precision}, value);
-}
-#endif

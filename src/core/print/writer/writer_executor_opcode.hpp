@@ -68,7 +68,7 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteU32Dec(args_.Read<uint32_t>());
-    case FormatOp::Signed32Dec:
+    case FormatOp::I32Dec:
       if constexpr (!HasProfile(Profile, FormatProfile::NarrowInt) ||
                     !Config::enable_integer)
       {
@@ -124,22 +124,6 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteCharacterRaw(args_.Read<char>());
-#if LIBXR_PRINT_ENABLE_FLOAT
-    case FormatOp::F32FixedPrec:
-      if constexpr (!HasProfile(Profile, FormatProfile::F32Fixed) ||
-                    !FloatEnabled(FormatType::FloatFixed))
-      {
-        return ErrorCode::STATE_ERR;
-      }
-      return WriteF32FixedPrec(codes_.Read<uint8_t>(), args_.Read<float>());
-    case FormatOp::F64FixedPrec:
-      if constexpr (!HasProfile(Profile, FormatProfile::F64Fixed) ||
-                    !FloatEnabled(FormatType::DoubleFixed))
-      {
-        return ErrorCode::STATE_ERR;
-      }
-      return WriteF64FixedPrec(codes_.Read<uint8_t>(), args_.Read<double>());
-#endif
     case FormatOp::GenericField:
       if constexpr (!HasProfile(Profile, FormatProfile::Generic))
       {

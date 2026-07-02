@@ -254,6 +254,17 @@ enum class FormatFlag : uint8_t
  * 常见小场景会直接降为只携带必要立即数的窄操作码；其余情况全部回落到
  * GenericField，继续沿用共享的
  * “type + flags + fill + width + precision” 载荷形状。
+ *
+ * @note FormatOp is the wire-level opcode; FormatType (below) is the semantic
+ *       category used for GenericField dispatch. The two are not 1:1 — one
+ *       FormatType may be encoded by several FormatOps (e.g. Unsigned32 is
+ *       carried by U32Dec, U32ZeroPadWidth, U32Binary, U32Octal, U32Hex*),
+ *       and narrow opcodes bypass FormatType entirely by naming their exact
+ *       operation. /
+ *       FormatOp 是线级操作码；下面的 FormatType 是 GenericField 分发用的语义
+ *       类别。二者不是一一对应——一个 FormatType 可能由多个 FormatOp 编码
+ *       （例如 Unsigned32 由 U32Dec、U32ZeroPadWidth、U32Binary、U32Octal、
+ *       U32Hex* 承载），而窄操作码直接以其确切操作命名，完全绕过 FormatType。
  */
 enum class FormatOp : uint8_t
 {
@@ -262,15 +273,13 @@ enum class FormatOp : uint8_t
   TextSpace = 0x03,        ///< one literal space / 单个字面空格
   U32Dec = 0x10,           ///< raw uint32_t decimal output / 直接输出 uint32_t 十进制
   U32ZeroPadWidth = 0x11,  ///< uint32_t decimal with zero-pad width byte / 带零填充宽度字节的 uint32_t 十进制
-  Signed32Dec = 0x12,      ///< raw int32_t decimal output / 直接输出 int32_t 十进制
+  I32Dec = 0x12,           ///< raw int32_t decimal output / 直接输出 int32_t 十进制
   U32Binary = 0x13,        ///< raw uint32_t binary output / 直接输出 uint32_t 二进制
   U32Octal = 0x14,         ///< raw uint32_t octal output / 直接输出 uint32_t 八进制
   U32HexLower = 0x15,      ///< raw uint32_t lowercase hex output / 直接输出 uint32_t 小写十六进制
   U32HexUpper = 0x16,      ///< raw uint32_t uppercase hex output / 直接输出 uint32_t 大写十六进制
   StringRaw = 0x20,        ///< raw string_view output / 直接输出 string_view
   CharacterRaw = 0x21,     ///< raw character output / 直接输出字符
-  F32FixedPrec = 0x30,     ///< fixed float with one precision byte / 带一个精度字节的定点 float
-  F64FixedPrec = 0x31,     ///< fixed double with one precision byte / 带一个精度字节的定点 double
   GenericField = 0xF0,     ///< wide fallback payload: type, flags, fill, width, precision / 宽回退载荷：type、flags、fill、width、precision
   End = 0xFF,              ///< terminates the compiled record stream / 结束整条编译记录流
 };
@@ -287,14 +296,12 @@ enum class FormatOp : uint8_t
     case FormatOp::TextRef:
       return 2 * sizeof(uint16_t);
     case FormatOp::U32ZeroPadWidth:
-    case FormatOp::F32FixedPrec:
-    case FormatOp::F64FixedPrec:
       return 1;
     case FormatOp::GenericField:
       return 5;
     case FormatOp::TextSpace:
     case FormatOp::U32Dec:
-    case FormatOp::Signed32Dec:
+    case FormatOp::I32Dec:
     case FormatOp::U32Binary:
     case FormatOp::U32Octal:
     case FormatOp::U32HexLower:
@@ -305,6 +312,8 @@ enum class FormatOp : uint8_t
       return 0;
   }
 
+  // Unreachable for valid streams: every FormatOp value is enumerated above.
+  // A corrupt/unknown opcode falls through here and yields 0 payload bytes.
   return 0;
 }
 
@@ -376,8 +385,6 @@ enum class FormatProfile : uint8_t
   None = 0,            ///< text-only stream / 只有文本记录的流
   NarrowInt = 1U << 0, ///< signed/unsigned narrow integer fast path family / 有符号/无符号窄整数快路径族
   TextArg = 1U << 1,   ///< raw text argument fast path / 原始文本参数快路径
-  F32Fixed = 1U << 2,  ///< fixed float fast path / 定点 float 快路径
-  F64Fixed = 1U << 3,  ///< fixed double fast path / 定点 double 快路径
   Generic = 1U << 7,   ///< at least one field uses generic fallback / 至少有一个字段使用通用回退
 };
 
