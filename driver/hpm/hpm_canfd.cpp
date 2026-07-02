@@ -43,8 +43,8 @@ uint8_t HPMCANFD::DlcToBytes(uint8_t dlc) { return mcan_get_message_size_from_dl
 
 bool HPMCANFD::IsValidFdLength(uint8_t bytes)
 {
-  return bytes <= 8U || bytes == 12U || bytes == 16U || bytes == 20U ||
-         bytes == 24U || bytes == 32U || bytes == 48U || bytes == 64U;
+  return bytes <= 8U || bytes == 12U || bytes == 16U || bytes == 20U || bytes == 24U ||
+         bytes == 32U || bytes == 48U || bytes == 64U;
 }
 
 inline void HPMCANFD::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame)
