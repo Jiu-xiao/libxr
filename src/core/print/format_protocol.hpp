@@ -301,6 +301,8 @@ enum class FormatOp : uint8_t
       return 0;
   }
 
+  // Unreachable for valid streams: every FormatOp value is enumerated above.
+  // A corrupt/unknown opcode falls through here and yields 0 payload bytes.
   return 0;
 }
 
