@@ -1,5 +1,7 @@
 #include "mspm0_gpio.hpp"
 
+#include "mspm0_group1_shared.hpp"
+
 using namespace LibXR;
 
 MSPM0GPIO* MSPM0GPIO::instance_map_[MAX_PORTS][32] = {{nullptr}};
@@ -33,6 +35,17 @@ static constexpr uint32_t MSPM0_GPIO_GetPolarityMask(uint8_t pin,  // NOLINT
   uint32_t shift = (pin % 16) * 2;
   return config_bits << shift;
 }
+#ifdef GPIOA_BASE
+static void gpioa_irq_thunk() { LibXR::MSPM0GPIO::OnInterrupt(GPIOA); }
+#endif
+
+#ifdef GPIOB_BASE
+static void gpiob_irq_thunk() { LibXR::MSPM0GPIO::OnInterrupt(GPIOB); }
+#endif
+
+#ifdef GPIOC_BASE
+static void gpioc_irq_thunk() { LibXR::MSPM0GPIO::OnInterrupt(GPIOC); }
+#endif
 
 MSPM0GPIO::MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm)
     : port_(port), pin_mask_(pin_mask), pincm_(pincm)
@@ -49,22 +62,24 @@ MSPM0GPIO::MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm)
   {
     case 0:
 #ifdef GPIOA_BASE
-      NVIC_EnableIRQ(GPIOA_INT_IRQn);
+      LibXR::MSPM0Group1Shared::RegisterGPIOA(&gpioa_irq_thunk);
 #endif
       break;
 
     case 1:
 #ifdef GPIOB_BASE
-      NVIC_EnableIRQ(GPIOB_INT_IRQn);
+      LibXR::MSPM0Group1Shared::RegisterGPIOB(&gpiob_irq_thunk);
 #endif
       break;
 
     case 2:
 #ifdef GPIOC_BASE
-      NVIC_EnableIRQ(GPIOC_INT_IRQn);
+      LibXR::MSPM0Group1Shared::RegisterGPIOC(&gpioc_irq_thunk);
 #endif
       break;
   }
+  default:
+    return;
 }
 
 bool MSPM0GPIO::Read() { return DL_GPIO_readPins(port_, pin_mask_) == pin_mask_; }
@@ -237,6 +252,11 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
 
 void MSPM0GPIO::OnInterruptDispatch(GPIO_Regs* port, int port_idx)
 {
+  if (port_idx < 0 || port_idx >= LibXR::MAX_PORTS)
+  {
+    return;
+  }
+
   uint32_t pending_pins = DL_GPIO_getEnabledInterruptStatus(port, 0xFFFFFFFF);
 
   if (pending_pins != 0)
