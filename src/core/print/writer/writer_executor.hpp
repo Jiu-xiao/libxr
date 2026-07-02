@@ -102,8 +102,6 @@ class Writer::Executor
    */
   [[nodiscard]] ErrorCode WriteCharacterRaw(char ch);
 
-#if LIBXR_PRINT_ENABLE_FLOAT
-
   // Small bridges that keep GenericField dispatch readable while preserving the
   // existing "read spec -> read next packed argument -> call concrete writer"
   // execution order.

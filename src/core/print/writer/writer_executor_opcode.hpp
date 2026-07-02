@@ -124,7 +124,6 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
         return ErrorCode::STATE_ERR;
       }
       return WriteCharacterRaw(args_.Read<char>());
-#if LIBXR_PRINT_ENABLE_FLOAT
     case FormatOp::GenericField:
       if constexpr (!HasProfile(Profile, FormatProfile::Generic))
       {
