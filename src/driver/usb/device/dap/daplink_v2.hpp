@@ -39,7 +39,7 @@ class DapLinkV2Class : public DeviceClass
 {
  public:
   static constexpr bool JTAG_ENABLED = DapLinkV2BuildConfig::kEnableJtag;
-  static constexpr const char* DEFAULT_INTERFACE_STRING = "XRUSB CMSIS-DAP v2";
+  static constexpr const char* DEFAULT_INTERFACE_STRING = "CMSIS-DAP v2";
 
   /**
    * @brief Info string set

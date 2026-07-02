@@ -50,6 +50,7 @@ class DapLinkV1Class
 {
  public:
   static constexpr bool JTAG_ENABLED = DapLinkV1BuildConfig::kEnableJtag;
+  static constexpr const char* DEFAULT_INTERFACE_STRING = "CMSIS-DAP";
   struct InfoStrings
   {
     const char* vendor = nullptr;
@@ -239,7 +240,9 @@ template <typename SwdPort>
 DapLinkV1Class<SwdPort>::DapLinkV1Class(SwdPort& swd_link, LibXR::GPIO* nreset_gpio,
                                Endpoint::EPNumber in_ep_num,
                                Endpoint::EPNumber out_ep_num)
-    : HID(true, 1, 1, in_ep_num, out_ep_num), swd_(swd_link), nreset_gpio_(nreset_gpio)
+    : HID(true, 1, 1, in_ep_num, out_ep_num, DEFAULT_INTERFACE_STRING),
+      swd_(swd_link),
+      nreset_gpio_(nreset_gpio)
 {
   if constexpr (JTAG_ENABLED)
   {
