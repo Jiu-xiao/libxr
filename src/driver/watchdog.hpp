@@ -1,7 +1,6 @@
 #pragma once
 
-#include "libxr_def.hpp"
-#include "thread.hpp"
+#include "libxr.hpp"
 
 namespace LibXR
 {
