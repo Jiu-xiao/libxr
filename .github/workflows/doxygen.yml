@@ -15,11 +15,14 @@ permissions:
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+# Allow only one concurrent deployment, and cancel any in-progress run when a
+# newer push arrives. Without this, overlapping runs both upload a
+# "github-pages" artifact against the same Pages deployment, which makes
+# deploy-pages fail with "Multiple artifacts named github-pages" and can leave
+# a later run blocking on the environment lock until it times out.
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   # Single deploy job since we're just deploying
@@ -68,4 +71,5 @@ jobs:
           path: 'doc/html'
       - name: Deploy to GitHub Pages
         id: deployment
+        timeout-minutes: 5
         uses: actions/deploy-pages@v4
