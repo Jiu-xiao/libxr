@@ -33,11 +33,11 @@
     __has_include("hpm_ewdg_drv.h")
 #include "hpm_ewdg_drv.h"
 #define LIBXR_HPM_EWDG_SUPPORTED 1
-using LibXRHpmEwdgType = EWDG_Type;
 #else
 #define LIBXR_HPM_EWDG_SUPPORTED 0
-using LibXRHpmEwdgType = void;
 #endif
+
+#if LIBXR_HPM_EWDG_SUPPORTED
 
 namespace LibXR
 {
@@ -49,19 +49,18 @@ namespace LibXR
  *
  * @details
  * 当 HPM SDK 暴露 `HPMSOC_HAS_HPMSDK_EWDG` 且可以包含 `hpm_ewdg_drv.h`
- * 时，本驱动通过 SDK EWDG 接口完成初始化、启动、喂狗和停止；否则接口保留，
- * 有效配置和启停/喂狗操作返回 `ErrorCode::NOT_SUPPORT`。`SetConfig()` 仍会先执行
- * LibXR 参数校验，因此非法 `timeout_ms`/`feed_ms` 会返回参数错误。默认实例为
- * `HPM_EWDG0`，默认时钟为 `clock_watchdog0`，自动选择 32 kHz 看门狗时钟源。
+ * 时，本驱动通过 SDK EWDG 接口完成初始化、启动、喂狗和停止；否则整个类定义
+ * 会被 `LIBXR_HPM_EWDG_SUPPORTED` 宏排除。`SetConfig()` 会先执行 LibXR 参数校验，
+ * 因此非法 `timeout_ms`/`feed_ms` 会返回参数错误。默认实例为 `HPM_EWDG0`，
+ * 默认时钟为 `clock_watchdog0`，自动选择 32 kHz 看门狗时钟源。
  *
  * When the HPM SDK exposes `HPMSOC_HAS_HPMSDK_EWDG` and `hpm_ewdg_drv.h` is
  * available, this driver initializes, starts, feeds, and stops the watchdog
- * through the SDK EWDG API. Otherwise the class remains available and valid
- * configuration plus start/feed/stop operations return `ErrorCode::NOT_SUPPORT`.
- * `SetConfig()` still performs LibXR argument validation first, so invalid
- * `timeout_ms`/`feed_ms` values return argument errors. The default instance is
- * `HPM_EWDG0` with `clock_watchdog0`, using the 32 kHz watchdog clock source by
- * default.
+ * through the SDK EWDG API. Otherwise the whole class definition is excluded by
+ * `LIBXR_HPM_EWDG_SUPPORTED`. `SetConfig()` performs LibXR argument validation
+ * first, so invalid `timeout_ms`/`feed_ms` values return argument errors. The
+ * default instance is `HPM_EWDG0` with `clock_watchdog0`, using the 32 kHz
+ * watchdog clock source by default.
  */
 class HPMWatchdog final : public Watchdog
 {
@@ -71,51 +70,17 @@ class HPMWatchdog final : public Watchdog
    *        Sentinel value for automatic EWDG clock source selection.
    */
 #if defined(CLK_SRC_GROUP_INVALID) && defined(MAKE_CLK_SRC)
-  static constexpr clk_src_t kAutoClockSource =
+  static constexpr clk_src_t AUTO_CLOCK_SOURCE =
       static_cast<clk_src_t>(MAKE_CLK_SRC(CLK_SRC_GROUP_INVALID, 0x0Fu));
 #else
-  static constexpr clk_src_t kAutoClockSource = static_cast<clk_src_t>(0xFFu);
+  static constexpr clk_src_t AUTO_CLOCK_SOURCE = static_cast<clk_src_t>(0xFFu);
 #endif
 
-#if LIBXR_HPM_EWDG_SUPPORTED && defined(HPM_EWDG0)
   /** @brief Construct an HPM EWDG watchdog and optionally start it. */
-  explicit HPMWatchdog(LibXRHpmEwdgType* ewdg = HPM_EWDG0,
+  explicit HPMWatchdog(EWDG_Type* ewdg = HPM_EWDG0,
                        clock_name_t clock = clock_watchdog0, uint32_t timeout_ms = 1000,
-                       uint32_t feed_ms = 250, clk_src_t clock_source = kAutoClockSource,
+                       uint32_t feed_ms = 250, clk_src_t clock_source = AUTO_CLOCK_SOURCE,
                        bool auto_start = true);
-#else
-  /**
-   * @brief 构造未启用 EWDG 后端的占位看门狗。
-   *        Construct a placeholder watchdog when the EWDG backend is unavailable.
-   *
-   * @details
-   * 该构造函数保留统一类型接口；有效配置、启动、喂狗和停止操作会返回
-   * `ErrorCode::NOT_SUPPORT`。`SetConfig()` 仍会先做 `timeout_ms`/`feed_ms`
-   * 参数校验。
-   *
-   * This constructor preserves the common type interface; valid configuration,
-   * start, feed, and stop operations return `ErrorCode::NOT_SUPPORT`.
-   * `SetConfig()` still validates `timeout_ms`/`feed_ms` first.
-   *
-   * @param ewdg 占位 EWDG 指针；后端不可用时不会解引用。
-   *             Placeholder EWDG pointer; it is not dereferenced when unsupported.
-   * @param clock 占位时钟名；后端不可用时不会使用。
-   *              Placeholder clock name; it is not used when unsupported.
-   * @param timeout_ms 初始超时配置，仅保存到 LibXR 配置路径。
-   *                   Initial timeout configuration, only saved through the LibXR path.
-   * @param feed_ms 初始自动喂狗周期，仅保存到 LibXR 配置路径。
-   *                Initial auto-feed interval, only saved through the LibXR path.
-   * @param clock_source 占位时钟源；后端不可用时不会使用。
-   *                     Placeholder clock source; it is not used when unsupported.
-   * @param auto_start 占位自动启动标志；后端不可用时不会启动硬件。
-   *                   Placeholder auto-start flag; no hardware is started when
-   * unsupported.
-   */
-  explicit HPMWatchdog(LibXRHpmEwdgType* ewdg = nullptr,
-                       clock_name_t clock = static_cast<clock_name_t>(0),
-                       uint32_t timeout_ms = 1000, uint32_t feed_ms = 250,
-                       clk_src_t clock_source = kAutoClockSource, bool auto_start = true);
-#endif
 
   /**
    * @brief 设置超时和自动喂狗周期，并初始化 EWDG 配置。
@@ -124,9 +89,9 @@ class HPMWatchdog final : public Watchdog
    * @param config 看门狗配置，`timeout_ms` 和 `feed_ms` 必须在硬件范围内。
    *               Watchdog configuration; `timeout_ms` and `feed_ms` must fit
    *               the hardware range.
-   * @return `OK` 表示配置成功；参数非法、超出硬件范围或后端不可用时返回对应错误码。
-   *         `OK` on success; otherwise an error for invalid arguments, hardware
-   *         range overflow, or unavailable backend.
+   * @return `OK` 表示配置成功；参数非法或超出硬件范围时返回对应错误码。
+   *         `OK` on success; otherwise an error for invalid arguments or hardware
+   *         range overflow.
    */
   ErrorCode SetConfig(const Configuration& config) override;
 
@@ -134,9 +99,8 @@ class HPMWatchdog final : public Watchdog
    * @brief 立即喂狗。
    *        Feed the watchdog immediately.
    *
-   * @return 已启动时返回 `OK`；未启动、指针为空或后端不可用时返回对应错误码。
-   *         `OK` when started; otherwise an error for not started, null pointer,
-   *         or unavailable backend.
+   * @return 已启动时返回 `OK`；未启动或指针为空时返回对应错误码。
+   *         `OK` when started; otherwise an error for not started or null pointer.
    */
   ErrorCode Feed() override;
 
@@ -153,8 +117,8 @@ class HPMWatchdog final : public Watchdog
    * @brief 停止 EWDG。
    *        Stop EWDG.
    *
-   * @return 操作结果错误码；后端不可用时返回 `NOT_SUPPORT`。
-   *         Operation result error code; returns `NOT_SUPPORT` when unavailable.
+   * @return 操作结果错误码。
+   *         Operation result error code.
    */
   ErrorCode Stop() override;
 
@@ -165,7 +129,6 @@ class HPMWatchdog final : public Watchdog
    */
   static ErrorCode ConvertStatus(hpm_stat_t status);
 
-#if LIBXR_HPM_EWDG_SUPPORTED
   /**
    * @brief Ensure the EWDG clock gate/source are ready and resolve frequency.
    */
@@ -202,9 +165,8 @@ class HPMWatchdog final : public Watchdog
    *        Resolve the EWDG counter frequency from an SDK clock source.
    */
   ErrorCode ResolveCounterClockFrequency(clk_src_t source, uint32_t* frequency_hz) const;
-#endif
 
-  LibXRHpmEwdgType* ewdg_;         ///< EWDG 寄存器基地址 / EWDG register base.
+  EWDG_Type* ewdg_;                ///< EWDG 寄存器基地址 / EWDG register base.
   clock_name_t clock_;             ///< EWDG 时钟名 / EWDG clock name.
   clk_src_t clock_source_;         ///< EWDG 时钟源 / EWDG clock source.
   Configuration current_config_;   ///< 当前配置 / Current configuration.
@@ -213,3 +175,5 @@ class HPMWatchdog final : public Watchdog
 };
 
 }  // namespace LibXR
+
+#endif  // LIBXR_HPM_EWDG_SUPPORTED

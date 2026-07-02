@@ -1,5 +1,7 @@
 #include "hpm_watchdog.hpp"
 
+#if LIBXR_HPM_EWDG_SUPPORTED
+
 #include <limits>
 
 using namespace LibXR;
@@ -17,49 +19,49 @@ ErrorCode ValidateConfiguration(const Watchdog::Configuration& config)
   return ErrorCode::OK;
 }
 
-#if LIBXR_HPM_EWDG_SUPPORTED
-constexpr uint32_t kMillisecondsPerSecond = 1000u;
-constexpr uint32_t kEwdgOsc32kHz = 32768u;
-constexpr uint32_t kEwdgOsc24mHz = 24000000u;
-constexpr uint32_t kEwdgBusClockSourceIndex = 0u;
-constexpr uint32_t kEwdgExternalClockSourceIndex = 1u;
-constexpr uint32_t kEwdgSdkDefaultClockGroup = 0u;
+constexpr uint32_t MILLISECONDS_PER_SECOND = 1000u;
+constexpr uint32_t EWDG_OSC_32KHZ = 32768u;
+constexpr uint32_t EWDG_OSC_24MHZ = 24000000u;
+constexpr uint32_t EWDG_BUS_CLOCK_SOURCE_INDEX = 0u;
+constexpr uint32_t EWDG_EXTERNAL_CLOCK_SOURCE_INDEX = 1u;
+constexpr uint32_t EWDG_SDK_DEFAULT_CLOCK_GROUP = 0u;
 
 #if defined(EWDG_SOC_OVERTIME_REG_WIDTH) && (EWDG_SOC_OVERTIME_REG_WIDTH == 16)
-constexpr uint64_t kEwdgSocTimeoutTickMax = 0xFFFFULL;
+constexpr uint64_t EWDG_SOC_TIMEOUT_TICK_MAX = 0xFFFFULL;
 #else
-constexpr uint64_t kEwdgSocTimeoutTickMax = 0xFFFFFFFFULL;
+constexpr uint64_t EWDG_SOC_TIMEOUT_TICK_MAX = 0xFFFFFFFFULL;
 #endif
 
 #if defined(EWDG_OT_RST_VAL_OT_RST_VAL_MASK) && defined(EWDG_OT_RST_VAL_OT_RST_VAL_SHIFT)
-constexpr uint64_t kEwdgRegisterTimeoutTickMax =
+constexpr uint64_t EWDG_REGISTER_TIMEOUT_TICK_MAX =
     EWDG_OT_RST_VAL_OT_RST_VAL_MASK >> EWDG_OT_RST_VAL_OT_RST_VAL_SHIFT;
 #else
-constexpr uint64_t kEwdgRegisterTimeoutTickMax = kEwdgSocTimeoutTickMax;
+constexpr uint64_t EWDG_REGISTER_TIMEOUT_TICK_MAX = EWDG_SOC_TIMEOUT_TICK_MAX;
 #endif
 
-constexpr uint64_t kEwdgTimeoutTickMax =
-    kEwdgSocTimeoutTickMax < kEwdgRegisterTimeoutTickMax ? kEwdgSocTimeoutTickMax
-                                                         : kEwdgRegisterTimeoutTickMax;
+constexpr uint64_t EWDG_TIMEOUT_TICK_MAX =
+    EWDG_SOC_TIMEOUT_TICK_MAX < EWDG_REGISTER_TIMEOUT_TICK_MAX
+        ? EWDG_SOC_TIMEOUT_TICK_MAX
+        : EWDG_REGISTER_TIMEOUT_TICK_MAX;
 
 #if defined(EWDG_SOC_CLK_DIV_VAL_MAX)
-constexpr uint32_t kEwdgSocClockDivPowerMax = EWDG_SOC_CLK_DIV_VAL_MAX;
+constexpr uint32_t EWDG_SOC_CLOCK_DIV_POWER_MAX = EWDG_SOC_CLK_DIV_VAL_MAX;
 #else
-constexpr uint32_t kEwdgSocClockDivPowerMax =
+constexpr uint32_t EWDG_SOC_CLOCK_DIV_POWER_MAX =
     EWDG_CTRL0_DIV_VALUE_MASK >> EWDG_CTRL0_DIV_VALUE_SHIFT;
 #endif
 
 #if defined(EWDG_CTRL0_DIV_VALUE_MASK) && defined(EWDG_CTRL0_DIV_VALUE_SHIFT)
-constexpr uint32_t kEwdgRegisterClockDivPowerMax =
+constexpr uint32_t EWDG_REGISTER_CLOCK_DIV_POWER_MAX =
     EWDG_CTRL0_DIV_VALUE_MASK >> EWDG_CTRL0_DIV_VALUE_SHIFT;
 #else
-constexpr uint32_t kEwdgRegisterClockDivPowerMax = kEwdgSocClockDivPowerMax;
+constexpr uint32_t EWDG_REGISTER_CLOCK_DIV_POWER_MAX = EWDG_SOC_CLOCK_DIV_POWER_MAX;
 #endif
 
-constexpr uint32_t kEwdgClockDivPowerMax =
-    kEwdgSocClockDivPowerMax < kEwdgRegisterClockDivPowerMax
-        ? kEwdgSocClockDivPowerMax
-        : kEwdgRegisterClockDivPowerMax;
+constexpr uint32_t EWDG_CLOCK_DIV_POWER_MAX =
+    EWDG_SOC_CLOCK_DIV_POWER_MAX < EWDG_REGISTER_CLOCK_DIV_POWER_MAX
+        ? EWDG_SOC_CLOCK_DIV_POWER_MAX
+        : EWDG_REGISTER_CLOCK_DIV_POWER_MAX;
 
 uint64_t DivCeil(uint64_t value, uint64_t divisor)
 {
@@ -85,7 +87,7 @@ ErrorCode ConvertTimeoutMsToTicks(uint32_t counter_clock_hz, uint32_t timeout_ms
 
   const uint64_t timeout_clock_cycles =
       timeout_ms_64 * static_cast<uint64_t>(counter_clock_hz);
-  *timeout_ticks = DivCeil(timeout_clock_cycles, kMillisecondsPerSecond);
+  *timeout_ticks = DivCeil(timeout_clock_cycles, MILLISECONDS_PER_SECOND);
   return ErrorCode::OK;
 }
 
@@ -101,40 +103,31 @@ ErrorCode ValidateClockSource(clock_name_t clock, clk_src_t source)
     return ErrorCode::ARG_ERR;
   }
 
-  if (source_index == kEwdgExternalClockSourceIndex ||
-      source_index == kEwdgBusClockSourceIndex)
+  if (source_index == EWDG_EXTERNAL_CLOCK_SOURCE_INDEX ||
+      source_index == EWDG_BUS_CLOCK_SOURCE_INDEX)
   {
     return ErrorCode::OK;
   }
 
   return ErrorCode::ARG_ERR;
 }
-#endif
 }  // namespace
 
-HPMWatchdog::HPMWatchdog(LibXRHpmEwdgType* ewdg, clock_name_t clock, uint32_t timeout_ms,
+HPMWatchdog::HPMWatchdog(EWDG_Type* ewdg, clock_name_t clock, uint32_t timeout_ms,
                          uint32_t feed_ms, clk_src_t clock_source, bool auto_start)
     : ewdg_(ewdg),
       clock_(clock),
       clock_source_(clock_source),
       current_config_{timeout_ms, feed_ms}
 {
-#if LIBXR_HPM_EWDG_SUPPORTED
   if (auto_start)
   {
     (void)Start();
   }
-#else
-  (void)ewdg_;
-  (void)clock_;
-  (void)clock_source_;
-  (void)auto_start;
-#endif
 }
 
 ErrorCode HPMWatchdog::ConvertStatus(hpm_stat_t status)
 {
-#if LIBXR_HPM_EWDG_SUPPORTED
   switch (status)
   {
     case status_success:
@@ -149,10 +142,6 @@ ErrorCode HPMWatchdog::ConvertStatus(hpm_stat_t status)
     default:
       return ErrorCode::FAILED;
   }
-#else
-  (void)status;
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode HPMWatchdog::SetConfig(const Configuration& config)
@@ -163,7 +152,6 @@ ErrorCode HPMWatchdog::SetConfig(const Configuration& config)
     return ans;
   }
 
-#if LIBXR_HPM_EWDG_SUPPORTED
   if (ewdg_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
@@ -176,15 +164,10 @@ ErrorCode HPMWatchdog::SetConfig(const Configuration& config)
   }
 
   return ans;
-#else
-  (void)config;
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode HPMWatchdog::Feed()
 {
-#if LIBXR_HPM_EWDG_SUPPORTED
   if (ewdg_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
@@ -195,14 +178,10 @@ ErrorCode HPMWatchdog::Feed()
   }
 
   return ConvertStatus(ewdg_refresh(ewdg_));
-#else
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode HPMWatchdog::Start()
 {
-#if LIBXR_HPM_EWDG_SUPPORTED
   if (ewdg_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
@@ -232,14 +211,10 @@ ErrorCode HPMWatchdog::Start()
   this->auto_feed_ = true;
   started_ = true;
   return ErrorCode::OK;
-#else
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode HPMWatchdog::Stop()
 {
-#if LIBXR_HPM_EWDG_SUPPORTED
   if (ewdg_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
@@ -249,12 +224,8 @@ ErrorCode HPMWatchdog::Stop()
   this->auto_feed_ = false;
   started_ = false;
   return ErrorCode::OK;
-#else
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
-#if LIBXR_HPM_EWDG_SUPPORTED
 ErrorCode HPMWatchdog::EnsureClockReady()
 {
   const clk_src_t clock_source = ResolveClockSource();
@@ -264,12 +235,9 @@ ErrorCode HPMWatchdog::EnsureClockReady()
     return ans;
   }
 
-  clock_add_to_group(clock_, kEwdgSdkDefaultClockGroup);
+  clock_add_to_group(clock_, EWDG_SDK_DEFAULT_CLOCK_GROUP);
 
-  if (ResolveEwdgClockSelect() == ewdg_cnt_clk_src_bus_clk)
-  {
-    ewdg_switch_clock_source(ewdg_, ewdg_cnt_clk_src_bus_clk);
-  }
+  ewdg_switch_clock_source(ewdg_, ResolveEwdgClockSelect());
 
   return ResolveCounterClockFrequency(clock_source, &counter_clock_hz_);
 }
@@ -299,9 +267,9 @@ ErrorCode HPMWatchdog::ResolveTimeoutSetting(uint32_t timeout_ms,
     return ans;
   }
 
-  for (uint32_t div_power = 0u; div_power <= kEwdgClockDivPowerMax; ++div_power)
+  for (uint32_t div_power = 0u; div_power <= EWDG_CLOCK_DIV_POWER_MAX; ++div_power)
   {
-    if (ticks <= kEwdgTimeoutTickMax)
+    if (ticks <= EWDG_TIMEOUT_TICK_MAX)
     {
       *timeout_ticks = static_cast<uint32_t>(ticks);
       *clock_div_power = div_power;
@@ -368,7 +336,7 @@ ErrorCode HPMWatchdog::ApplyConfiguration(const Configuration& config,
 
 clk_src_t HPMWatchdog::ResolveClockSource() const
 {
-  if (clock_source_ != kAutoClockSource)
+  if (clock_source_ != AUTO_CLOCK_SOURCE)
   {
     return clock_source_;
   }
@@ -388,7 +356,7 @@ ewdg_cnt_clk_sel_t HPMWatchdog::ResolveEwdgClockSelect() const
   const uint32_t source_index = GET_CLK_SRC_INDEX(resolved_source);
 
   if ((source_group == CLK_SRC_GROUP_EWDG || source_group == CLK_SRC_GROUP_PEWDG) &&
-      source_index == kEwdgBusClockSourceIndex)
+      source_index == EWDG_BUS_CLOCK_SOURCE_INDEX)
   {
     return ewdg_cnt_clk_src_bus_clk;
   }
@@ -417,13 +385,13 @@ ErrorCode HPMWatchdog::ResolveCounterClockFrequency(clk_src_t source,
 
   if (source_group == CLK_SRC_GROUP_EWDG)
   {
-    if (source_index == kEwdgExternalClockSourceIndex)
+    if (source_index == EWDG_EXTERNAL_CLOCK_SOURCE_INDEX)
     {
-      *frequency_hz = kEwdgOsc32kHz;
+      *frequency_hz = EWDG_OSC_32KHZ;
       return ErrorCode::OK;
     }
 
-    if (source_index == kEwdgBusClockSourceIndex)
+    if (source_index == EWDG_BUS_CLOCK_SOURCE_INDEX)
     {
       *frequency_hz = clock_get_frequency(clock_);
       return *frequency_hz == 0u ? ErrorCode::INIT_ERR : ErrorCode::OK;
@@ -434,15 +402,15 @@ ErrorCode HPMWatchdog::ResolveCounterClockFrequency(clk_src_t source,
 
   if (source_group == CLK_SRC_GROUP_PEWDG)
   {
-    if (source_index == kEwdgExternalClockSourceIndex)
+    if (source_index == EWDG_EXTERNAL_CLOCK_SOURCE_INDEX)
     {
-      *frequency_hz = kEwdgOsc32kHz;
+      *frequency_hz = EWDG_OSC_32KHZ;
       return ErrorCode::OK;
     }
 
-    if (source_index == kEwdgBusClockSourceIndex)
+    if (source_index == EWDG_BUS_CLOCK_SOURCE_INDEX)
     {
-      *frequency_hz = kEwdgOsc24mHz;
+      *frequency_hz = EWDG_OSC_24MHZ;
       return ErrorCode::OK;
     }
 
@@ -451,4 +419,5 @@ ErrorCode HPMWatchdog::ResolveCounterClockFrequency(clk_src_t source,
 
   return ErrorCode::ARG_ERR;
 }
-#endif
+
+#endif  // LIBXR_HPM_EWDG_SUPPORTED
