@@ -101,8 +101,6 @@ class DapLinkV2Class : public DeviceClass
   {
     jtag_ = jtag;
     jtag_chain_.ir_length = jtag_ir_len_;
-    jtag_chain_.ir_before = jtag_ir_before_;
-    jtag_chain_.ir_after = jtag_ir_after_;
     ResetJtagChainState();
     if (jtag_ != nullptr)
     {
@@ -2079,21 +2077,13 @@ class DapLinkV2Class : public DeviceClass
     }
 
     Memory::FastSet(jtag_ir_len_, 0, sizeof(jtag_ir_len_));
-    Memory::FastSet(jtag_ir_before_, 0, sizeof(jtag_ir_before_));
-    Memory::FastSet(jtag_ir_after_, 0, sizeof(jtag_ir_after_));
 
     uint32_t bits = 0u;
     for (uint32_t i = 0; i < count; ++i)
     {
       const uint8_t len = req[static_cast<uint16_t>(2u + i)];
       jtag_ir_len_[i] = len;
-      jtag_ir_before_[i] = static_cast<uint16_t>(bits);
       bits += len;
-    }
-    for (uint32_t i = 0; i < count; ++i)
-    {
-      bits -= jtag_ir_len_[i];
-      jtag_ir_after_[i] = static_cast<uint16_t>(bits);
     }
 
     jtag_chain_.count = count;
@@ -2143,7 +2133,23 @@ class DapLinkV2Class : public DeviceClass
 
     LibXR::Debug::JtagDp dp(*jtag_, &jtag_chain_);
     uint32_t idcode = 0u;
-    const ErrorCode ec = dp.ReadIdCode(idcode);
+    ErrorCode ec = dp.ReadIdCode(idcode);
+    if (ec == ErrorCode::OK && (idcode == 0u || idcode == 0xFFFF'FFFFu ||
+                                ((idcode & 0x1u) == 0u)) &&
+        jtag_ir_len_[index] != 4u)
+    {
+      uint32_t fallback_idcode = 0u;
+      ec = dp.ReadIdCodeWithIr(0x01u, fallback_idcode);
+      if (ec != ErrorCode::OK)
+      {
+        return ec;
+      }
+      if (fallback_idcode != 0u && fallback_idcode != 0xFFFF'FFFFu &&
+          ((fallback_idcode & 0x1u) != 0u))
+      {
+        idcode = fallback_idcode;
+      }
+    }
     if (ec != ErrorCode::OK)
     {
       return ec;
@@ -4030,8 +4036,6 @@ class DapLinkV2Class : public DeviceClass
   void ResetJtagChainState()
   {
     jtag_chain_.ir_length = jtag_ir_len_;
-    jtag_chain_.ir_before = jtag_ir_before_;
-    jtag_chain_.ir_after = jtag_ir_after_;
     jtag_chain_.count = 0u;
     jtag_chain_.index = 0u;
     jtag_chain_.ir_before_bits_len = 0u;
@@ -4039,8 +4043,6 @@ class DapLinkV2Class : public DeviceClass
     jtag_chain_.dr_before_bits_len = 0u;
     jtag_chain_.dr_after_bits_len = 0u;
     Memory::FastSet(jtag_ir_len_, 0, sizeof(jtag_ir_len_));
-    Memory::FastSet(jtag_ir_before_, 0, sizeof(jtag_ir_before_));
-    Memory::FastSet(jtag_ir_after_, 0, sizeof(jtag_ir_after_));
   }
 
   void DelayUsIfAllowed(bool /*in_isr*/, uint32_t us)
@@ -4151,8 +4153,6 @@ LIBXR_PACKED_END
   LibXR::Debug::Jtag* jtag_ = nullptr;  ///< JTAG 链路 / JTAG link
   LibXR::Debug::JtagProtocol::ChainConfig jtag_chain_{};  ///< JTAG 链状态 / JTAG chain state
   uint8_t jtag_ir_len_[JTAG_MAX_DEVICES] = {};  ///< JTAG IR 长度 / JTAG IR lengths
-  uint16_t jtag_ir_before_[JTAG_MAX_DEVICES] = {};  ///< 目标前 IR 位数 / IR bits before target
-  uint16_t jtag_ir_after_[JTAG_MAX_DEVICES] = {};  ///< 目标后 IR 位数 / IR bits after target
 
   LibXR::GPIO* nreset_gpio_ = nullptr;  ///< Optional nRESET GPIO
 

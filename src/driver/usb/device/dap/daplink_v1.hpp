@@ -203,8 +203,6 @@ class DapLinkV1Class
   LibXR::Debug::Jtag* jtag_ = nullptr;
   LibXR::Debug::JtagProtocol::ChainConfig jtag_chain_{};
   uint8_t jtag_ir_len_[JTAG_MAX_DEVICES] = {};
-  uint16_t jtag_ir_before_[JTAG_MAX_DEVICES] = {};
-  uint16_t jtag_ir_after_[JTAG_MAX_DEVICES] = {};
   LibXR::GPIO* nreset_gpio_ = nullptr;
 
   uint8_t swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
@@ -236,8 +234,6 @@ DapLinkV1Class<SwdPort>::DapLinkV1Class(SwdPort& swd_link, LibXR::GPIO* nreset_g
     : HID(true, 1, 1, in_ep_num, out_ep_num), swd_(swd_link), nreset_gpio_(nreset_gpio)
 {
   jtag_chain_.ir_length = jtag_ir_len_;
-  jtag_chain_.ir_before = jtag_ir_before_;
-  jtag_chain_.ir_after = jtag_ir_after_;
   jtag_chain_.count = 0u;
   jtag_chain_.index = 0u;
   (void)swd_.SetClockHz(swj_clock_hz_);
@@ -321,8 +317,6 @@ void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool, uint8_t
   jtag_chain_.dr_before_bits_len = 0u;
   jtag_chain_.dr_after_bits_len = 0u;
   Memory::FastSet(jtag_ir_len_, 0, sizeof(jtag_ir_len_));
-  Memory::FastSet(jtag_ir_before_, 0, sizeof(jtag_ir_before_));
-  Memory::FastSet(jtag_ir_after_, 0, sizeof(jtag_ir_after_));
 
   last_nreset_level_high_ = true;
   swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
@@ -1337,21 +1331,13 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJTAGConfigure(bool /*in_isr*/, const ui
   }
 
   Memory::FastSet(jtag_ir_len_, 0, sizeof(jtag_ir_len_));
-  Memory::FastSet(jtag_ir_before_, 0, sizeof(jtag_ir_before_));
-  Memory::FastSet(jtag_ir_after_, 0, sizeof(jtag_ir_after_));
 
   uint32_t bits = 0u;
   for (uint32_t i = 0; i < COUNT; ++i)
   {
     const uint8_t LEN = req[static_cast<uint16_t>(2u + i)];
     jtag_ir_len_[i] = LEN;
-    jtag_ir_before_[i] = static_cast<uint16_t>(bits);
     bits += LEN;
-  }
-  for (uint32_t i = 0; i < COUNT; ++i)
-  {
-    bits -= jtag_ir_len_[i];
-    jtag_ir_after_[i] = static_cast<uint16_t>(bits);
   }
 
   jtag_chain_.count = COUNT;
@@ -1409,7 +1395,23 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJTAGIdCode(bool /*in_isr*/, const uint8
 
   LibXR::Debug::JtagDp dp(*jtag_, &jtag_chain_);
   uint32_t idcode = 0u;
-  const ErrorCode EC = dp.ReadIdCode(idcode);
+  ErrorCode EC = dp.ReadIdCode(idcode);
+  if (EC == ErrorCode::OK && (idcode == 0u || idcode == 0xFFFF'FFFFu ||
+                              ((idcode & 0x1u) == 0u)) &&
+      jtag_ir_len_[INDEX] != 4u)
+  {
+    uint32_t fallback_idcode = 0u;
+    EC = dp.ReadIdCodeWithIr(0x01u, fallback_idcode);
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
+    if (fallback_idcode != 0u && fallback_idcode != 0xFFFF'FFFFu &&
+        ((fallback_idcode & 0x1u) != 0u))
+    {
+      idcode = fallback_idcode;
+    }
+  }
   if (EC != ErrorCode::OK)
   {
     return EC;

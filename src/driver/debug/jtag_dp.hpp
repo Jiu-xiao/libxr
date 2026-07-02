@@ -70,11 +70,27 @@ class JtagDp final
       return EC;
     }
     val = resp.rdata;
+
+    if ((addr2b & 0x03u) == 0u && val == 0u)
+    {
+      uint32_t idcode = 0u;
+      const ErrorCode id_ec = ReadIdCode(idcode);
+      if (id_ec == ErrorCode::OK && idcode != 0u && idcode != 0xFFFF'FFFFu)
+      {
+        val = idcode;
+        ack = JtagProtocol::Ack::OK;
+      }
+    }
     return ErrorCode::OK;
   }
 
   ErrorCode DpWriteTxn(uint8_t addr2b, uint32_t val, JtagProtocol::Ack& ack)
   {
+    if ((addr2b & 0x03u) == 0u)
+    {
+      return WriteAbort(val, ack);
+    }
+
     return DpWrite(addr2b, val, ack);
   }
 
@@ -113,7 +129,12 @@ class JtagDp final
 
   ErrorCode ReadIdCode(uint32_t& idcode)
   {
-    const ErrorCode EC = SelectIr(JtagProtocol::JTAG_IR_IDCODE);
+    return ReadIdCodeWithIr(JtagProtocol::JTAG_IR_IDCODE, idcode);
+  }
+
+  ErrorCode ReadIdCodeWithIr(uint32_t ir, uint32_t& idcode)
+  {
+    const ErrorCode EC = SelectIr(ir);
     if (EC != ErrorCode::OK)
     {
       return EC;
@@ -138,7 +159,6 @@ class JtagDp final
       return EC;
     }
 
-    JtagProtocol::Response resp;
     uint64_t out_dr = 0u;
     const ErrorCode EC2 = ShiftValueThroughChain(
         JtagProtocol::PackDpDr(JtagProtocol::make_dp_req(false, 0u, data)),
@@ -149,9 +169,11 @@ class JtagDp final
       return EC2;
     }
 
-    JtagProtocol::UnpackDpDr(out_dr, resp);
-    ack = resp.ack;
-    return (resp.ack == JtagProtocol::Ack::OK) ? ErrorCode::OK : ErrorCode::FAILED;
+    (void)out_dr;
+    // JTAG ABORT uses its own scan chain; captured TDO bits are not a
+    // DPACC/APACC ACK field. A completed shift means the ABORT was issued.
+    ack = JtagProtocol::Ack::OK;
+    return ErrorCode::OK;
   }
 
   ErrorCode Transfer(const JtagProtocol::Request& req, JtagProtocol::Response& resp)
