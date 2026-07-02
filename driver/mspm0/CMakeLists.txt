@@ -1,9 +1,20 @@
-set(_xr_mspm0_driver_sources
-    ${CMAKE_CURRENT_LIST_DIR}/mspm0_gpio.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mspm0_pwm.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mspm0_timebase.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mspm0_uart.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mspm0_atomic_shim.c
+file(
+  GLOB ${PROJECT_NAME}_DRIVER_CPP_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_LIST_DIR}/*.cpp"
+)
+list(SORT ${PROJECT_NAME}_DRIVER_CPP_SOURCES)
+
+file(
+  GLOB ${PROJECT_NAME}_DRIVER_C_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_LIST_DIR}/*.c"
+)
+list(SORT ${PROJECT_NAME}_DRIVER_C_SOURCES)
+
+target_sources(${PROJECT_NAME}
+  PRIVATE ${${PROJECT_NAME}_DRIVER_CPP_SOURCES}
+  PRIVATE ${${PROJECT_NAME}_DRIVER_C_SOURCES}
 )
 
-target_sources(${PROJECT_NAME} PRIVATE ${_xr_mspm0_driver_sources})
+target_include_directories(${PROJECT_NAME}
+  PUBLIC ${CMAKE_CURRENT_LIST_DIR}
+)

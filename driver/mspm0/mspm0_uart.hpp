@@ -1,8 +1,10 @@
 #pragma once
 
 #include <ti/driverlib/dl_uart_main.h>
+
 #include "ti_msp_dl_config.h"
 #include "uart.hpp"
+
 
 namespace LibXR
 {

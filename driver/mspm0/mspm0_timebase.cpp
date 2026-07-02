@@ -24,16 +24,14 @@ MicrosecondTimestamp Timebase::GetMicroseconds()
     switch (tick_diff)
     {
       case 0:
-        return MicrosecondTimestamp(
-            static_cast<uint64_t>(tick_new) * 1000 +
-            static_cast<uint64_t>(DL_SYSTICK_getPeriod() - val_old) * 1000 /
-                cycles_per_ms);
+        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 +
+                                    static_cast<uint64_t>(cycles_per_ms - val_old) *
+                                        1000 / cycles_per_ms);
       case 1:
         /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return MicrosecondTimestamp(
-            static_cast<uint64_t>(tick_new) * 1000 +
-            static_cast<uint64_t>(DL_SYSTICK_getPeriod() - val_new) * 1000 /
-                cycles_per_ms);
+        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 +
+                                    static_cast<uint64_t>(cycles_per_ms - val_new) *
+                                        1000 / cycles_per_ms);
       default:
         /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more
          * than 1ms, an error case */
