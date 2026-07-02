@@ -43,6 +43,8 @@ constexpr uint64_t EWDG_TIMEOUT_TICK_MAX =
     EWDG_SOC_TIMEOUT_TICK_MAX < EWDG_REGISTER_TIMEOUT_TICK_MAX
         ? EWDG_SOC_TIMEOUT_TICK_MAX
         : EWDG_REGISTER_TIMEOUT_TICK_MAX;
+static_assert(EWDG_TIMEOUT_TICK_MAX <= std::numeric_limits<uint32_t>::max(),
+              "EWDG_TIMEOUT_TICK_MAX must fit in uint32_t");
 
 #if defined(EWDG_SOC_CLK_DIV_VAL_MAX)
 constexpr uint32_t EWDG_SOC_CLOCK_DIV_POWER_MAX = EWDG_SOC_CLK_DIV_VAL_MAX;
