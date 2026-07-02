@@ -130,7 +130,8 @@ HPMWatchdog::HPMWatchdog(EWDG_Type* ewdg, clock_name_t clock, uint32_t timeout_m
 {
   if (auto_start)
   {
-    (void)Start();
+    const ErrorCode ans = Start();
+    ASSERT(ans == ErrorCode::OK);
   }
 }
 
