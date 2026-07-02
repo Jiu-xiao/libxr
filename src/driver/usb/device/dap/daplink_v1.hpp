@@ -2479,7 +2479,10 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransfer(bool /*in_isr*/, const uin
       }
 
       response_count++;
-      check_write = true;
+      if (AP)
+      {
+        check_write = true;
+      }
     }
     else
     {
@@ -2819,7 +2822,7 @@ ErrorCode DapLinkV1Class<SwdPort>::HandleJtagTransferBlock(bool /*in_isr*/,
       done = static_cast<uint16_t>(i + 1u);
     }
 
-    if (xresp == LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK && done > 0u)
+    if (AP && xresp == LibXR::USB::DapLinkV1Def::DAP_TRANSFER_OK && done > 0u)
     {
       uint32_t dummy = 0u;
       LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;

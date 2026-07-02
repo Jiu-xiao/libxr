@@ -3487,6 +3487,7 @@ class DapLinkV2Class : public DeviceClass
 
         if (MATCH_MASK)
         {
+          match_mask_ = wdata;
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
           response_count++;
           continue;
@@ -3522,7 +3523,10 @@ class DapLinkV2Class : public DeviceClass
         }
 
         response_count++;
-        check_write = true;
+        if (AP)
+        {
+          check_write = true;
+        }
       }
       else
       {
@@ -3895,7 +3899,7 @@ class DapLinkV2Class : public DeviceClass
         done = static_cast<uint16_t>(i + 1u);
       }
 
-      if (xresp == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && done > 0u)
+      if (AP && xresp == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK && done > 0u)
       {
         uint32_t dummy = 0u;
         LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
