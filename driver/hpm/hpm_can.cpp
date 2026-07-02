@@ -106,8 +106,14 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     return ErrorCode::ARG_ERR;
   }
 
+  const uint32_t clock_hz = detail::AcquireMcanClock(clock_);
+  if (clock_hz == 0U)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+
   const ErrorCode RESULT =
-      detail::ConvertMcanStatus(mcan_init(can_, &config, GetClockFreq()));
+      detail::ConvertMcanStatus(mcan_init(can_, &config, clock_hz));
   if (RESULT == ErrorCode::OK)
   {
     mcan_disable_standby_pin(can_);
@@ -225,7 +231,7 @@ ErrorCode HPMCAN::AddMessage(const ClassicPack& pack)
   {
     return ErrorCode::INIT_ERR;
   }
-  if (pack.type == Type::ERROR)
+  if (pack.type == Type::ERROR || pack.type == Type::TYPE_NUM || pack.dlc > 8U)
   {
     return ErrorCode::ARG_ERR;
   }
