@@ -269,8 +269,6 @@ enum class FormatOp : uint8_t
   U32HexUpper = 0x16,      ///< raw uint32_t uppercase hex output / 直接输出 uint32_t 大写十六进制
   StringRaw = 0x20,        ///< raw string_view output / 直接输出 string_view
   CharacterRaw = 0x21,     ///< raw character output / 直接输出字符
-  F32FixedPrec = 0x30,     ///< fixed float with one precision byte / 带一个精度字节的定点 float
-  F64FixedPrec = 0x31,     ///< fixed double with one precision byte / 带一个精度字节的定点 double
   GenericField = 0xF0,     ///< wide fallback payload: type, flags, fill, width, precision / 宽回退载荷：type、flags、fill、width、precision
   End = 0xFF,              ///< terminates the compiled record stream / 结束整条编译记录流
 };
@@ -287,8 +285,6 @@ enum class FormatOp : uint8_t
     case FormatOp::TextRef:
       return 2 * sizeof(uint16_t);
     case FormatOp::U32ZeroPadWidth:
-    case FormatOp::F32FixedPrec:
-    case FormatOp::F64FixedPrec:
       return 1;
     case FormatOp::GenericField:
       return 5;

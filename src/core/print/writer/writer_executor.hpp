@@ -103,16 +103,6 @@ class Writer::Executor
   [[nodiscard]] ErrorCode WriteCharacterRaw(char ch);
 
 #if LIBXR_PRINT_ENABLE_FLOAT
-  /**
-   * @brief 单个带显式精度的定点 float 快路径。 / Fast path for one fixed float with explicit precision.
-   */
-  [[nodiscard]] ErrorCode WriteF32FixedPrec(uint8_t precision, float value);
-
-  /**
-   * @brief 单个带显式精度的定点 double 快路径。 / Fast path for one fixed double with explicit precision.
-   */
-  [[nodiscard]] ErrorCode WriteF64FixedPrec(uint8_t precision, double value);
-#endif
 
   // Small bridges that keep GenericField dispatch readable while preserving the
   // existing "read spec -> read next packed argument -> call concrete writer"

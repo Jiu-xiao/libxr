@@ -557,17 +557,6 @@ class Writer
   [[nodiscard]] static size_t TrimGeneralText(char* text, size_t size);
 
   /**
-   * @brief 仅供 float32 定点输出使用的格式化器，在可行时优先走 `uint32_t` 缩放小数快路径 / Fixed-only float32 formatter that uses a `uint32_t` scaled-fraction fast path when possible
-   * @param value float32 绝对值 / Float32 magnitude
-   * @param precision 请求的小数精度 / Requested fractional precision
-   * @param out 目标文本缓冲区 / Destination text buffer
-   * @param out_size 输出文本长度 / Output text size
-   * @return 成功返回 `true`，否则返回 `false` / Returns `true` on success, otherwise `false`
-   */
-  [[nodiscard]] static bool FormatF32FixedPrecText(float value, uint8_t precision,
-                                                   char* out, size_t& out_size);
-
-  /**
    * @brief 通用定点浮点文本生成器 / Generic fixed-format float text generator
    * @tparam Float 浮点类型 / Float type
    * @param value 浮点绝对值 / Float magnitude
