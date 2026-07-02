@@ -96,7 +96,7 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int val
  * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer semantic value through the shared integer-field path
  * @tparam Base 整数进制 / Integer radix
  * @tparam UpperCase 十六进制数字是否使用大写字符 / Whether hexadecimal digits should use uppercase characters
- * @tparam InlineAlternateOctal 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
+ * @tparam PrependOctalZero 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param prefix 脱离数字载荷输出的前缀 / Prefix emitted outside the digit payload
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -104,17 +104,17 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int val
  * @return 返回共享整数字段路径的写出结果 / Returns the shared integer-field write result
  */
 template <OutputSink Sink, FormatProfile Profile>
-template <uint8_t Base, bool UpperCase, bool InlineAlternateOctal,
+template <uint8_t Base, bool UpperCase, bool PrependOctalZero,
           std::unsigned_integral UInt>
 ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view prefix,
                                                                const Spec& spec,
                                                                UInt value)
 {
   char digit_buffer[UnsignedDigitCapacity<UInt, Base>() +
-                    (InlineAlternateOctal ? 1U : 0U)];
+                    (PrependOctalZero ? 1U : 0U)];
   size_t digit_count = AppendUnsigned<Base, UpperCase>(digit_buffer, value);
 
-  if constexpr (InlineAlternateOctal)
+  if constexpr (PrependOctalZero)
   {
     digit_count = ApplyAlternateOctal(digit_buffer, digit_count, spec, value);
   }
@@ -142,7 +142,7 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view 
  */
 template <OutputSink Sink, FormatProfile Profile>
 template <FormatType Type, std::unsigned_integral UInt>
-ErrorCode Writer::Executor<Sink, Profile>::WriteUnsigned(const Spec& spec, UInt value)
+ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsigned(const Spec& spec, UInt value)
 {
   auto prefix = IntegerPrefix(Type, spec, value);
 
