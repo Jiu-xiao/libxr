@@ -162,7 +162,7 @@ size_t Writer::ApplyAlternateOctal(char* digits, size_t digit_count, const Spec&
     return digit_count;
   }
 
-  Memory::FastMove(digits + 1, digits, digit_count);
+  LibXR::Memory::FastMove(digits + 1, digits, digit_count);
   digits[0] = '0';
   digit_count++;
   return digit_count;
