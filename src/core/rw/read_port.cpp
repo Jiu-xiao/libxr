@@ -308,9 +308,26 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
 void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
-  queue_data_->Reset();
 
   auto state = busy_.load(std::memory_order_acquire);
+
+  // Symmetric to WritePort::FailAndClearAll's guard on
+  // LOCKED/BLOCK_PUBLISHING/RESETTING: CLEARING means ClearQueuedData() still owns
+  // dequeue progress, which violates this API's "backend already unavailable, no
+  // concurrent activity" precondition. Assert in dev builds and back off in release
+  // builds instead of silently stomping the in-flight clear back to IDLE.
+  // 对称于 WritePort::FailAndClearAll 对 LOCKED/BLOCK_PUBLISHING/RESETTING 的守卫：
+  // CLEARING 表示 ClearQueuedData() 仍占有出队进度，违反了本接口“后端已不可用、
+  // 无并发活动”的前置条件。开发期触发断言，发布期直接退回，而不是把正在进行的
+  // 清队列静默踩回 IDLE。
+  if (state == BusyState::CLEARING)
+  {
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+    return;
+  }
+
+  queue_data_->Reset();
+
   if (state == BusyState::PENDING)
   {
     if (info_.op.type == ReadOperation::OperationType::BLOCK)

@@ -68,6 +68,19 @@ class ReadPort
   ReadPort(size_t buffer_size = 128);
 
   /**
+   * @brief 虚析构函数，保证通过基类指针析构派生读端口的安全性。
+   *        Virtual destructor for safe destruction of derived read ports through a base
+   *        pointer.
+   *
+   * @note 仅补齐虚析构以消除“有虚函数却非虚析构”的编译告警；不改变析构行为，
+   *       裸指针成员的所有权语义与此前保持一致。
+   *       Only adds the virtual destructor to silence the non-virtual-dtor warning; the
+   *       destruction behavior is unchanged and raw-pointer member ownership stays as
+   *       before.
+   */
+  virtual ~ReadPort() = default;
+
+  /**
    * @brief 获取队列的剩余可用空间。
    *        Gets the remaining available space in the queue.
    *
