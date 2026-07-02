@@ -100,6 +100,10 @@ bool Writer::FormatFloatText(FormatType type, const Spec& spec, Float value, cha
     case FormatType::LongDoubleGeneral:
     {
       uint8_t significant = precision == 0 ? 1 : precision;
+      // TODO(perf): RoundScientificDigits is called here only to read .exponent,
+      // and then called again inside FormatScientificText. A future refactor can
+      // add an overload that accepts a pre-computed ScientificDigits to avoid
+      // the redundant calculation.
       int exponent =
           RoundScientificDigits(value, static_cast<uint8_t>(significant - 1)).exponent;
       if (exponent < -4 || exponent >= significant)

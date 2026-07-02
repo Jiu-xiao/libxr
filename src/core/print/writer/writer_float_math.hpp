@@ -66,8 +66,9 @@ Float Writer::Power10(int exponent)
  * @tparam Float Float type. / 浮点类型。
  * @param value Finite non-negative value. / 有限非负值。
  * @param precision Decimal places to retain. / 保留的小数位数。
- * @return Rounded value, or the original value if scaling would overflow. /
- *         返回舍入后的值；若缩放会溢出，则保留原值。
+ * @return Rounded value, or +infinity if scaling would overflow (input is
+ *         expected to be a non-negative magnitude). /
+ *         返回舍入后的值；若缩放溢出且输入为非负数，则返回 +infinity。
  */
 template <typename Float>
 Float Writer::RoundDecimal(Float value, uint8_t precision)
@@ -76,7 +77,11 @@ Float Writer::RoundDecimal(Float value, uint8_t precision)
   Float scaled = value * scale;
   if (!std::isfinite(scaled))
   {
-    return value;
+    // Scaling overflowed: propagate as infinity so callers' isfinite() guard
+    // rejects the result cleanly instead of silently returning the original
+    // value and later producing OUT_OF_RANGE. Input is expected to be a
+    // non-negative magnitude, so plain infinity is sufficient.
+    return std::numeric_limits<Float>::infinity();
   }
 
   return std::nearbyint(scaled) / scale;
@@ -155,6 +160,14 @@ template <typename Float>
 uint8_t Writer::ExtractDigit(Float& value, Float scale)
 {
   Float scaled = value / scale;
+  // Bias to correct floating-point rounding when the true digit value is an
+  // integer but division leaves it just below (e.g. 1.9999999... instead of 2).
+  // 1e-12 is effective for double (epsilon ~2.2e-16) but effectively zero for
+  // float (epsilon ~1.2e-7). For float, digit extraction may have up to 1-ULP
+  // error in the last digit; this is a known limitation of the approach.
+  // Do NOT increase this bias to fix float: values like 1.999999f have a
+  // legitimate float representation ~9.5e-7 below 2.0, so any bias large
+  // enough to "fix" float rounding would also cause false carry on such values.
   auto digit = static_cast<int>(scaled + static_cast<Float>(1e-12L));
   if (digit < 0)
   {
@@ -166,6 +179,10 @@ uint8_t Writer::ExtractDigit(Float& value, Float scale)
   }
 
   value -= static_cast<Float>(digit) * scale;
+  // Zero-clamp: clear tiny negative residuals that are FP rounding artifacts.
+  // 1e-9 is effective for double but coarse for long double; for float it is
+  // large enough to clear genuine residuals without clamping real fractional
+  // remainders (float residuals after digit extraction are < epsilon * scale).
   Float epsilon = scale * static_cast<Float>(1e-9L);
   if (value < 0 && value > -epsilon)
   {

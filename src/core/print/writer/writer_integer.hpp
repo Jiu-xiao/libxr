@@ -162,11 +162,11 @@ size_t Writer::ApplyAlternateOctal(char* digits, size_t digit_count, const Spec&
     return digit_count;
   }
 
-  digits[digit_count++] = '0';
-  for (size_t i = digit_count - 1; i > 0; --i)
+  for (size_t i = digit_count; i > 0; --i)
   {
     digits[i] = digits[i - 1];
   }
   digits[0] = '0';
+  digit_count++;
   return digit_count;
 }

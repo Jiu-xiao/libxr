@@ -226,8 +226,17 @@ struct IndexingState
   if (pos < source.size() &&
       (source[pos] == '+' || source[pos] == '-' || source[pos] == ' '))
   {
-    field.force_sign = source[pos] == '+';
-    field.space_sign = source[pos] == ' ';
+    if (source[pos] == '+')
+    {
+      field.force_sign = true;
+    }
+    else if (source[pos] == ' ')
+    {
+      field.space_sign = true;
+    }
+    // '-' is the default sign mode (negative values only); accepted for
+    // fmt/std::format compatibility and produces the same output as omitting
+    // the sign option entirely.
     ++pos;
   }
 
