@@ -80,37 +80,6 @@ bool Writer::AppendBufferU32ZeroPad(char* buffer, size_t capacity, size_t& size,
 
 #if LIBXR_PRINT_ENABLE_FLOAT
 
-uint64_t Writer::RoundScaledF32(float value, uint32_t scale)
-{
-  uint32_t bits = std::bit_cast<uint32_t>(value);
-  uint32_t exponent_bits = (bits >> 23) & 0xFFU;
-  uint32_t fraction_bits = bits & 0x7FFFFFU;
-  uint32_t significand =
-      (exponent_bits == 0) ? fraction_bits : ((1U << 23) | fraction_bits);
-  int exponent2 = (exponent_bits == 0) ? -149 : static_cast<int>(exponent_bits) - 150;
-  uint64_t numerator = static_cast<uint64_t>(significand) * scale;
-
-  if (exponent2 >= 0)
-  {
-    return numerator << exponent2;
-  }
-
-  unsigned int shift = static_cast<unsigned int>(-exponent2);
-  if (shift >= 64)
-  {
-    return 0;
-  }
-
-  uint64_t quotient = numerator >> shift;
-  uint64_t remainder = numerator & ((uint64_t{1} << shift) - 1U);
-  uint64_t halfway = uint64_t{1} << (shift - 1);
-  if (remainder > halfway || (remainder == halfway && (quotient & 1U) != 0U))
-  {
-    ++quotient;
-  }
-  return quotient;
-}
-
 size_t Writer::TrimGeneralText(char* text, size_t size)
 {
   size_t exponent_pos = size;

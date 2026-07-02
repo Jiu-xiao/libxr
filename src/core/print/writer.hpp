@@ -157,25 +157,6 @@ class Writer
   static constexpr bool dependent_false_v = false;
   static constexpr size_t float_buffer_capacity =
       Detail::WriterFloatLimit::ComputeBufferCapacity();
-  /**
-   * @brief 整数部分仍可放入 `uint32_t` 的最大 float32 值上界 / Largest finite float32 value whose integer part still fits in `uint32_t`
-   */
-  static constexpr float f32_u32_overflow_limit = 4294967296.0f;
-  /**
-   * @brief 窄 float32 定点快路径使用的十进制缩放表 / Decimal scales used by the narrow float32 fixed-precision fast path
-   */
-  inline static constexpr std::array<uint32_t, 10> f32_decimal_scales_u32{
-      1U,
-      10U,
-      100U,
-      1000U,
-      10000U,
-      100000U,
-      1000000U,
-      10000000U,
-      100000000U,
-      1000000000U,
-  };
 
   /**
    * @brief 判断某个已解码字段修饰位是否被设置 / Test whether one decoded field-spec bit is set
@@ -477,14 +458,6 @@ class Writer
                                                    size_t& size, uint32_t value, uint8_t width);
 
 #if LIBXR_PRINT_ENABLE_FLOAT
-  /**
-   * @brief 基于精确 float32 位模式并按最近偶数处理平局返回 `round(value * scale)` / Return `round(value * scale)` using the exact float32 bit pattern and nearest-even ties
-   * @param value 待缩放的 float32 绝对值 / Float32 magnitude to scale
-   * @param scale 十进制缩放因子 / Decimal scale factor
-   * @return 四舍六入五成双后的缩放整数 / Returns the rounded scaled integer
-   */
-  [[nodiscard]] static uint64_t RoundScaledF32(float value, uint32_t scale);
-
   /**
    * @brief 科学计数法与通用浮点格式化使用的十进制规范化结果 / Decimal normalization result used by scientific and general float formatting
    * @tparam Float 浮点类型 / Float type
