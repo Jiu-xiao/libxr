@@ -115,13 +115,13 @@ class DapLinkV2Class : public DeviceClass
   const LibXR::USB::DapLinkV2Def::State& GetState() const { return dap_state_; }
 
   /**
-   * @brief 是否已初始化 / Whether initialized
-   * @return true 已初始化 / Initialized
+   * @brief Whether initialized
+   * @return true if initialized
    */
   bool IsInited() const { return inited_; }
 
   /**
-   * @brief IN 端点是否忙碌 / Whether IN endpoint is busy
+   * @brief Whether IN endpoint is busy
    *
    * @return true
    * @return false
@@ -133,7 +133,7 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief OUT 端点是否忙碌 / Whether OUT endpoint is busy
+   * @brief Whether OUT endpoint is busy
    *
    * @return true
    * @return false
@@ -146,10 +146,10 @@ class DapLinkV2Class : public DeviceClass
 
  protected:
   /**
-   * @brief 绑定端点资源 / Bind endpoint resources
+   * @brief Bind endpoint resources
    * @param endpoint_pool Endpoint pool
    * @param start_itf_num Start interface number
-   * @param in_isr 是否在中断中 / Whether in ISR
+   * @param in_isr Whether called from ISR context
    */
   void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
   {
@@ -234,9 +234,9 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 解绑端点资源 / Unbind endpoint resources
+   * @brief Unbind endpoint resources
    * @param endpoint_pool Endpoint pool
-   * @param in_isr 是否在中断中 / Whether in ISR
+   * @param in_isr Whether called from ISR context
    */
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
@@ -276,21 +276,21 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 接口数量 / Number of interfaces contributed
-   * @return 接口数量 / Interface count
+   * @brief Number of interfaces contributed
+   * @return Interface count
    */
   size_t GetInterfaceCount() override { return 1; }
 
   /**
-   * @brief 是否包含 IAD / Whether an IAD is used
-   * @return true 使用 IAD / Uses IAD
+   * @brief Whether an IAD is used
+   * @return true if this class uses an IAD
    */
   bool HasIAD() override { return false; }
 
   /**
-   * @brief 端点归属判定 / Endpoint ownership
-   * @param ep_addr 端点地址 / Endpoint address
-   * @return true 属于本类 / Owned by this class
+   * @brief Endpoint ownership check
+   * @param ep_addr Endpoint address
+   * @return true if owned by this class
    */
   bool OwnsEndpoint(uint8_t ep_addr) const override
   {
@@ -303,8 +303,8 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 最大配置描述符占用 / Maximum bytes required in configuration descriptor
-   * @return 最大字节数 / Maximum bytes
+   * @brief Maximum bytes required in configuration descriptor
+   * @return Maximum bytes
    */
   size_t GetMaxConfigSize() override { return sizeof(desc_block_); }
 
@@ -319,15 +319,15 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief BOS 能力数量 / BOS capability count
-   * @return 能力数量 / Capability count
+   * @brief BOS capability count
+   * @return Capability count
    */
   size_t GetBosCapabilityCount() override { return 1; }
 
   /**
-   * @brief 获取 BOS 能力对象 / Get BOS capability
-   * @param index 索引 / Index
-   * @return BosCapability* 能力对象指针 / Capability pointer
+   * @brief Get BOS capability
+   * @param index Capability index
+   * @return Capability pointer
    */
   BosCapability* GetBosCapability(size_t index) override
   {
@@ -343,7 +343,7 @@ class DapLinkV2Class : public DeviceClass
   // Local helpers (kept with original comments, moved inside the class)
   // ============================================================================
 
-  // 枚举/整型uint8_t。Cast enum/integer to uint8_t.
+  // Cast enum/integer to uint8_t.
   template <typename E>
   static constexpr uint8_t ToU8(E e)
   {
@@ -354,7 +354,7 @@ class DapLinkV2Class : public DeviceClass
   static constexpr uint8_t DAP_OK = 0x00u;     ///< DAP_OK / DAP_OK
   static constexpr uint8_t DAP_ERROR = 0xFFu;  ///< DAP_ERROR / DAP_ERROR
 
-  // 未知命令响应：单字节 0xFF。Unknown command response: single byte 0xFF.
+  // Unknown command response: single byte 0xFF.
   static inline ErrorCode BuildUnknownCmdResponse(uint8_t* resp, uint16_t cap,
                                                   uint16_t& out_len)
   {
@@ -368,7 +368,7 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  // 命令状态响应：<cmd, status>。Command status response: <cmd, status>.
+  // Command status response: <cmd, status>.
   static inline ErrorCode BuildCmdStatusResponse(uint8_t cmd, uint8_t status,
                                                  uint8_t* resp, uint16_t cap,
                                                  uint16_t& out_len)
@@ -429,7 +429,7 @@ class DapLinkV2Class : public DeviceClass
                      LibXR::USB::WinUsbMsOs20::PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES);
 
     // DeviceInterfaceGUIDs: REG_MULTI_SZ UTF-16LE, include double-NUL terminator
-    // 注意：此处为“单 GUID + NUL 结束”的 REG_MULTI_SZ / Single GUID + double-NUL end.
+    // Single GUID plus double-NUL terminator for REG_MULTI_SZ.
     const char GUID_STR[] = "{CDB3B5AD-293B-4663-AA36-1AAE46463776}";
     const size_t GUID_LEN = sizeof(GUID_STR) - 1;
 
@@ -459,7 +459,6 @@ class DapLinkV2Class : public DeviceClass
     // Function subset interface number
     winusb_msos20_.func.bFirstInterface = interface_num_;
 
-    // 内容变化但总长度不变；同步一次保持一致
     // Content changes but total size stays the same; resync for consistency.
     winusb_msos20_cap_.SetDescriptorSet(GetWinUsbMsOs20DescriptorSet());
   }
@@ -470,7 +469,7 @@ class DapLinkV2Class : public DeviceClass
   // ============================================================================
 
   /**
-   * @brief OUT 完成回调静态入口 / OUT complete callback static entry
+   * @brief OUT complete callback static entry
    */
   static void OnDataOutCompleteStatic(bool in_isr, DapLinkV2Class* self,
                                       LibXR::ConstRawData& data)
@@ -482,7 +481,7 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief IN 完成回调静态入口 / IN complete callback static entry
+   * @brief IN complete callback static entry
    */
   static void OnDataInCompleteStatic(bool in_isr, DapLinkV2Class* self,
                                      LibXR::ConstRawData& data)
@@ -494,7 +493,7 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief OUT 完成回调（实例方法）/ OUT complete callback (instance)
+   * @brief OUT complete callback instance method
    */
   void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
   {
@@ -508,9 +507,8 @@ class DapLinkV2Class : public DeviceClass
     const auto* req = static_cast<const uint8_t*>(data.addr_);
     const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
 
-    // 快路径：IN idle 且无积压时，直接在 IN 缓冲构造响应并发包 /
-    // Fast path: build directly
-    // in IN endpoint buffer and submit without extra response copy.
+    // Fast path: when IN is idle and no backlog exists, build directly
+    // in the IN endpoint buffer and submit without extra response copy.
     if (!HasDeferredResponseInEpBuffer() && IsResponseQueueEmpty() &&
         ep_data_in_->GetState() == Endpoint::State::IDLE &&
         CanBuildResponseDirectlyInEpBuffer())
@@ -542,8 +540,8 @@ class DapLinkV2Class : public DeviceClass
       }
     }
 
-    // 延迟快路径：IN busy 且无积压时，直接写入另一IN 双缓/ Deferred fast path:
-    // build next response in the other IN DB buffer to avoid queue copy.
+    // Deferred fast path: when IN is busy and no backlog exists, build the next
+    // response in the alternate IN double buffer to avoid queue copy.
     if (!HasDeferredResponseInEpBuffer() && IsResponseQueueEmpty() &&
         ep_data_in_->GetState() == Endpoint::State::BUSY &&
         CanBuildResponseDirectlyInEpBuffer())
@@ -572,7 +570,6 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    // 正常背压下不应触发；这里做一best-effort 腾挪后重试队列构建
     // Should not happen with proper backpressure; drain once and retry queue build.
     (void)SubmitNextQueuedResponseIfIdle();
     (void)TryBuildAndEnqueueResponse(in_isr, req, REQ_LEN);
@@ -583,7 +580,7 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief IN 完成回调（实例方法）/ IN complete callback (instance)
+   * @brief IN complete callback instance method
    */
   void OnDataInComplete(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
   {
@@ -594,7 +591,7 @@ class DapLinkV2Class : public DeviceClass
 
  private:
   /**
-   * @brief 获取当前 DAP 有效包长 / Get effective DAP packet size
+   * @brief Get effective DAP packet size
    */
   uint16_t GetDapPacketSize() const
   {
@@ -679,8 +676,7 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 裁剪响应长度DAP 包长与缓冲容/ Clip response length by DAP packet and buffer
-   * cap
+   * @brief Clip response length by DAP packet size and buffer capacity
    */
   uint16_t ClipResponseLength(uint16_t len, uint16_t cap) const
   {
@@ -1074,8 +1070,7 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    // 对总未完成响应做背压（in-flight + queued Backpressure on total outstanding
-    // responses (in-flight + queued).
+    // Backpressure on total outstanding responses (in-flight + queued).
     if (OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
     {
       return;
@@ -1121,15 +1116,15 @@ class DapLinkV2Class : public DeviceClass
   // ============================================================================
 
   /**
-   * @brief 处理一条命令 / Process one command
+   * @brief Process one command
    *
-   * @param in_isr   ISR 上下文标志 / ISR context flag
-   * @param req      请求缓冲 / Request buffer
-   * @param req_len  请求长度 / Request length
-   * @param resp     响应缓冲 / Response buffer
-   * @param resp_cap 响应容量 / Response capacity
-   * @param out_len  输出：响应长度 / Output: response length
-   * @return 错误码 / Error code
+   * @param in_isr   ISR context flag
+   * @param req      Request buffer
+   * @param req_len  Request length
+   * @param resp     Response buffer
+   * @param resp_cap Response capacity
+   * @param out_len  Output response length
+   * @return Error code
    */
   ErrorCode ProcessOneCommand(bool in_isr, const uint8_t* req, uint16_t req_len,
                               uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
@@ -1202,11 +1197,11 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief 构建不支持响应 / Build NOT_SUPPORT response
+   * @brief Build NOT_SUPPORT response
    *
-   * @param resp     响应缓冲 / Response buffer
-   * @param resp_cap 响应容量 / Response capacity
-   * @param out_len  输出：响应长度 / Output: response length
+   * @param resp     Response buffer
+   * @param resp_cap Response capacity
+   * @param out_len  Output response length
    */
   void BuildNotSupportResponse(uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
@@ -1627,8 +1622,7 @@ class DapLinkV2Class : public DeviceClass
       execute = 1u;
     }
 
-    // 关键：无论是否实reset，都返回 DAP_OK；未实现Execute=0
-    // Key: Always return DAP_OK; if not implemented, Execute=0.
+    // Always return DAP_OK; if reset is not implemented, Execute=0.
     resp[1] = DAP_OK;
     resp[2] = execute;
     out_len = 3u;
@@ -2410,9 +2404,7 @@ class DapLinkV2Class : public DeviceClass
   // DAP_Transfer / DAP_TransferBlock
   // ============================================================================
 
-  // 说明：以下长函数保持原样；本 cpp 文件不补充函数级注释，hpp 中再统一给出接口说明
-  // Note: The following long functions are kept as-is; no function-level docs in this
-  // cpp. HPP will carry API docs.
+  // The following long functions are kept as-is; API docs live at the header boundary.
 
   ErrorCode HandleTransfer(bool in_isr, const uint8_t* req, uint16_t req_len,
                            uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
@@ -2547,7 +2539,7 @@ class DapLinkV2Class : public DeviceClass
       pending.valid = false;
       pending.need_ts = false;
 
-      // 成功路径保持 OK
+      // Successful path keeps OK.
       response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
       return true;
     };
@@ -2636,7 +2628,7 @@ class DapLinkV2Class : public DeviceClass
         {
           match_mask_ = wdata;
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
-          response_count++;  // MATCH_MASK 视为成功 transfer
+          response_count++;  // MATCH_MASK counts as a successful transfer.
           continue;
         }
         if (AP)
@@ -2706,7 +2698,7 @@ class DapLinkV2Class : public DeviceClass
           {
             if (AP)
             {
-              ec = swd_.ApReadTxn(ADDR2B, rdata, ack);  // 内含 RDBUFF
+              ec = swd_.ApReadTxn(ADDR2B, rdata, ack);  // Includes RDBUFF.
               if (ec == ErrorCode::OK && ack == LibXR::Debug::SwdProtocol::Ack::OK)
               {
                 // ApReadTxn completes the AP read pipeline only.
@@ -2808,7 +2800,7 @@ class DapLinkV2Class : public DeviceClass
           break;
         }
 
-        // AP normal read：posted-read pipeline
+        // AP normal read: posted-read pipeline.
         if (!pending.valid)
         {
           // First AP read in this contiguous AP-read segment:
@@ -4167,7 +4159,7 @@ class DapLinkV2Class : public DeviceClass
 
 LIBXR_PACKED_BEGIN
   /**
-   * @brief MS OS 2.0 描述符集合布局 / MS OS 2.0 descriptor set layout
+   * @brief MS OS 2.0 descriptor set layout
    */
   struct WinUsbMsOs20DescSet
   {
@@ -4189,19 +4181,19 @@ LIBXR_PACKED_BEGIN
       uint8_t name[LibXR::USB::WinUsbMsOs20::
                        PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES];  ///< Property name /
                                                                  ///< Property name
-      uint16_t wPropertyDataLength;  ///< UTF-16 字节长度 / UTF-16 byte length
+      uint16_t wPropertyDataLength;  ///< UTF-16 byte length
       uint8_t
-          data[GUID_MULTI_SZ_UTF_16_BYTES];  ///< REG_MULTI_SZ 数据 / REG_MULTI_SZ data
+          data[GUID_MULTI_SZ_UTF_16_BYTES];  ///< REG_MULTI_SZ data
     } prop;
   } winusb_msos20_{};
 LIBXR_PACKED_END
 
  private:
-  SwdPort& swd_;  ///< SWD 链路 / SWD link
+  SwdPort& swd_;  ///< SWD link
 
-  LibXR::Debug::Jtag* jtag_ = nullptr;  ///< JTAG 链路 / JTAG link
-  LibXR::Debug::JtagProtocol::ChainConfig jtag_chain_{};  ///< JTAG 链状态 / JTAG chain state
-  uint8_t jtag_ir_len_[JTAG_MAX_DEVICES] = {};  ///< JTAG IR 长度 / JTAG IR lengths
+  LibXR::Debug::Jtag* jtag_ = nullptr;  ///< JTAG link
+  LibXR::Debug::JtagProtocol::ChainConfig jtag_chain_{};  ///< JTAG chain state
+  uint8_t jtag_ir_len_[JTAG_MAX_DEVICES] = {};  ///< JTAG IR lengths
 
   LibXR::GPIO* nreset_gpio_ = nullptr;  ///< Optional nRESET GPIO
 
