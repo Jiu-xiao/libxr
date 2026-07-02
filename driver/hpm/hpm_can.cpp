@@ -112,8 +112,7 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
     return ErrorCode::INIT_ERR;
   }
 
-  const ErrorCode RESULT =
-      detail::ConvertMcanStatus(mcan_init(can_, &config, clock_hz));
+  const ErrorCode RESULT = detail::ConvertMcanStatus(mcan_init(can_, &config, clock_hz));
   if (RESULT == ErrorCode::OK)
   {
     mcan_disable_standby_pin(can_);
