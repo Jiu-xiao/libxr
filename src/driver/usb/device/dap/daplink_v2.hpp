@@ -3391,56 +3391,6 @@ class DapLinkV2Class : public DeviceClass
       return true;
     };
 
-    struct PendingApRead
-    {
-      bool valid = false;
-      bool need_ts = false;
-    } pending;
-
-    auto complete_pending_ap_read_by_rdbuff = [&]() -> bool
-    {
-      if (!pending.valid)
-      {
-        return true;
-      }
-
-      if (!ensure_space(bytes_for_read(pending.need_ts)))
-      {
-        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-        return false;
-      }
-
-      uint32_t rdata = 0u;
-      LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-      const ErrorCode ec = dp_read_retry(3u, rdata, ack);
-
-      const uint8_t v = MapAckToDapResp(ack);
-      if (v != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
-      {
-        response_value = v;
-        return false;
-      }
-      if (ec != ErrorCode::OK)
-      {
-        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-        return false;
-      }
-
-      if (!emit_read_with_ts(pending.need_ts, rdata))
-      {
-        response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-        return false;
-      }
-
-      pending.valid = false;
-      pending.need_ts = false;
-      response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
-      return true;
-    };
-
-    auto complete_pending_ap_read_if_any = [&]() -> bool
-    { return pending.valid ? complete_pending_ap_read_by_rdbuff() : true; };
-
     auto check_posted_ap_write_if_pending = [&]() -> bool
     {
       if (!pending_ap_write)
@@ -3466,9 +3416,6 @@ class DapLinkV2Class : public DeviceClass
       pending_ap_write = false;
       return true;
     };
-
-    auto close_posted_state = [&]() -> bool
-    { return complete_pending_ap_read_if_any() && check_posted_ap_write_if_pending(); };
 
     auto should_check_pending_ap_write_at_tail = [&]() -> bool
     {
@@ -3504,11 +3451,6 @@ class DapLinkV2Class : public DeviceClass
 
       if (!RNW)
       {
-        if (!complete_pending_ap_read_if_any())
-        {
-          break;
-        }
-
         if (req_off + 4u > req_len)
         {
           response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
@@ -3566,7 +3508,7 @@ class DapLinkV2Class : public DeviceClass
       {
         if (MATCH_VALUE)
         {
-          if (!close_posted_state())
+          if (!check_posted_ap_write_if_pending())
           {
             break;
           }
@@ -3639,7 +3581,7 @@ class DapLinkV2Class : public DeviceClass
 
         if (!AP)
         {
-          if (!close_posted_state())
+          if (!check_posted_ap_write_if_pending())
           {
             break;
           }
@@ -3675,7 +3617,7 @@ class DapLinkV2Class : public DeviceClass
         }
 
         uint32_t rdata = 0u;
-        if (!close_posted_state())
+        if (!check_posted_ap_write_if_pending())
         {
           break;
         }
@@ -3712,19 +3654,6 @@ class DapLinkV2Class : public DeviceClass
       {
         dap_state_.transfer_abort = false;
         break;
-      }
-    }
-
-    if (pending.valid)
-    {
-      const uint8_t PRIOR_FAIL = response_value;
-      if (!complete_pending_ap_read_by_rdbuff())
-      {
-        // pending failure already recorded in response_value
-      }
-      else if (PRIOR_FAIL != 0u && PRIOR_FAIL != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
-      {
-        response_value = PRIOR_FAIL;
       }
     }
 
