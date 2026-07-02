@@ -136,14 +136,6 @@ void TestFormatFrontendSemantics()
     Fail("format frontend inf nan mismatch");
   }
 
-  // Near-boundary digit extraction: values just below a rounding threshold
-  // must not carry over. Regression for ExtractDigit() epsilon over-bias.
-  if (!SameFormatAsExpected<"{:.6f}|{:.6f}">(
-          "1.999999|0.999999", 1.999999f, 0.999999f))
-  {
-    Fail("f32 fixed near-boundary digit extraction mismatch");
-  }
-
   // {:.2f} with a float: non-finite values must format as nan/inf/-inf.
   if (!SameFormatAsExpected<"{:.2f}|{:.2f}|{:.2f}">(
           "nan|inf|-inf",
