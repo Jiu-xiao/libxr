@@ -87,7 +87,7 @@ bool Writer::ExceedsFixedIntegerDigits(Float value, uint8_t precision)
   Float rounded = RoundDecimal(value, precision);
   if (!std::isfinite(rounded))
   {
-    // RoundDecimal returns signed infinity when value * 10^precision overflows.
+    // RoundDecimal returns +infinity when value * 10^precision overflows.
     // Treat this as exceeding the integer digit limit.
     return true;
   }

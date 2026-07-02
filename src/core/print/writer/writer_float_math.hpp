@@ -160,10 +160,15 @@ template <typename Float>
 uint8_t Writer::ExtractDigit(Float& value, Float scale)
 {
   Float scaled = value / scale;
-  // Use a type-appropriate bias (10x machine epsilon) to correct for
-  // floating-point rounding when converting to int. The hardcoded 1e-12
-  // was calibrated for double and has no effect on float or long double.
-  auto digit = static_cast<int>(scaled + static_cast<Float>(10) * std::numeric_limits<Float>::epsilon());
+  // Bias to correct floating-point rounding when the true digit value is an
+  // integer but division leaves it just below (e.g. 1.9999999... instead of 2).
+  // 1e-12 is effective for double (epsilon ~2.2e-16) but effectively zero for
+  // float (epsilon ~1.2e-7). For float, digit extraction may have up to 1-ULP
+  // error in the last digit; this is a known limitation of the approach.
+  // Do NOT increase this bias to fix float: values like 1.999999f have a
+  // legitimate float representation ~9.5e-7 below 2.0, so any bias large
+  // enough to "fix" float rounding would also cause false carry on such values.
+  auto digit = static_cast<int>(scaled + static_cast<Float>(1e-12L));
   if (digit < 0)
   {
     digit = 0;
@@ -174,9 +179,11 @@ uint8_t Writer::ExtractDigit(Float& value, Float scale)
   }
 
   value -= static_cast<Float>(digit) * scale;
-  // Type-appropriate zero-clamping epsilon: scale relative to machine precision
-  // instead of hardcoded 1e-9 (calibrated for double only).
-  Float epsilon = scale * static_cast<Float>(10) * std::numeric_limits<Float>::epsilon();
+  // Zero-clamp: clear tiny negative residuals that are FP rounding artifacts.
+  // 1e-9 is effective for double but coarse for long double; for float it is
+  // large enough to clear genuine residuals without clamping real fractional
+  // remainders (float residuals after digit extraction are < epsilon * scale).
+  Float epsilon = scale * static_cast<Float>(1e-9L);
   if (value < 0 && value > -epsilon)
   {
     value = 0;
