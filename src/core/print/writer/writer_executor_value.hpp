@@ -42,6 +42,14 @@ template <OutputSink Sink, FormatProfile Profile>
 template <typename T>
 char Writer::Executor<Sink, Profile>::ResolveFloatSignChar(T value, const Spec& spec)
 {
+  if (std::isnan(value))
+  {
+    // NaN signbit is implementation-defined and platform-dependent.
+    // Derive sign from the explicit format flag only so output is stable
+    // across platforms and FPU implementations:
+    //   {:f}  -> "nan"   {:+f} -> "+nan"   {: f} -> " nan"
+    return spec.ForceSign() ? '+' : spec.SpaceSign() ? ' ' : '\0';
+  }
   if (std::signbit(value))
   {
     return '-';
@@ -242,13 +250,6 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
   }
 
   char sign_char = ResolveFloatSignChar(value, actual);
-  if (std::isnan(value))
-  {
-    // NaN signbit is implementation-defined and platform-dependent. Ignore it
-    // and derive the sign character from the explicit format option instead:
-    //   {:f}  -> "nan"   {:+f} -> "+nan"   {: f} -> " nan"
-    sign_char = actual.ForceSign() ? '+' : actual.SpaceSign() ? ' ' : '\0';
-  }
   T magnitude = std::signbit(value) ? -static_cast<T>(value) : static_cast<T>(value);
   uint8_t precision = actual.HasPrecision() ? actual.precision : DefaultFloatPrecision();
   if (type == FormatType::FloatFixed || type == FormatType::DoubleFixed ||

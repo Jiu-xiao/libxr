@@ -66,8 +66,9 @@ Float Writer::Power10(int exponent)
  * @tparam Float Float type. / 浮点类型。
  * @param value Finite non-negative value. / 有限非负值。
  * @param precision Decimal places to retain. / 保留的小数位数。
- * @return Rounded value, or signed infinity if scaling would overflow. /
- *         返回舍入后的值；若缩放会溢出，则返回带符号 infinity。
+ * @return Rounded value, or +infinity if scaling would overflow (input is
+ *         expected to be a non-negative magnitude). /
+ *         返回舍入后的值；若缩放溢出且输入为非负数，则返回 +infinity。
  */
 template <typename Float>
 Float Writer::RoundDecimal(Float value, uint8_t precision)
