@@ -135,10 +135,16 @@ LibXR::ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
 
   const size_t d = DirIndex(direction);
   Endpoint* ep = slots_[num][d];
-  // 仅「已分配（in-use）」的端点可被地址反查到，与原 RECYCLE-only 语义一致。
-  // Only allocated (in-use) endpoints are visible here, matching the original
-  // RECYCLE-only lookup semantics.
-  if (ep != nullptr && use_[num][d] == SlotUse::IN_USE)
+  // 仅「已分配（in-use）」且当前配置地址/方向与请求一致的端点可被反查到。
+  // 必须核对 GetAddress()/GetDirection()（当前配置方向），与原实现语义一致：
+  // 一个 BOTH 端点被配置成单一方向后，不会再被另一方向的同号地址查到。
+  // Only endpoints that are allocated (in-use) AND whose current configured
+  // address/direction match the request are visible here. Checking
+  // GetAddress()/GetDirection() (the configured direction) preserves the original
+  // semantics: once a BOTH endpoint is configured for a single direction, it is no
+  // longer reachable via the opposite-direction address of the same number.
+  if (ep != nullptr && use_[num][d] == SlotUse::IN_USE &&
+      ep->GetAddress() == ep_addr && ep->GetDirection() == direction)
   {
     ans = ep;
     return LibXR::ErrorCode::OK;
