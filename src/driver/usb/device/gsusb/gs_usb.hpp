@@ -93,9 +93,8 @@ LIBXR_PACKED_END
    * by USER_ID)
    * @param interface_string 接口字符串 / Interface string
    */
-  GsUsbClass(std::initializer_list<LibXR::CAN*> cans,
-             Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP1,
-             Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP2,
+  GsUsbClass(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+             std::initializer_list<LibXR::CAN*> cans,
              size_t rx_queue_size = 32, size_t echo_queue_size = 32,
              LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},
@@ -144,10 +143,8 @@ LIBXR_PACKED_END
    * @brief 构造：FDCAN / Construct: FDCAN
    * @param fd_cans FDCAN 指针列表，数量必须等于 CAN_CH_NUM / FDCAN pointers, count must
    * equal CAN_CH_NUM
-   * @param data_in_ep_num Bulk IN 端点号（可自动分配） / Bulk IN endpoint number (auto
-   * allowed)
-   * @param data_out_ep_num Bulk OUT 端点号（可自动分配） / Bulk OUT endpoint number (auto
-   * allowed)
+   * @param data_in_ep_num Bulk IN 端点号（必填） / Bulk IN endpoint number (required)
+   * @param data_out_ep_num Bulk OUT 端点号（必填） / Bulk OUT endpoint number (required)
    * @param rx_queue_size 接收队列大小 / RX queue size
    * @param echo_queue_size 回显队列大小 / Echo queue size
    * @param identify_gpio Identify GPIO（可选） / Identify GPIO (optional)
@@ -157,9 +154,8 @@ LIBXR_PACKED_END
    * by USER_ID)
    * @param interface_string 接口字符串 / Interface string
    */
-  GsUsbClass(std::initializer_list<LibXR::FDCAN*> fd_cans,
-             Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-             Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
+  GsUsbClass(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+             std::initializer_list<LibXR::FDCAN*> fd_cans,
              size_t rx_queue_size = 32, size_t echo_queue_size = 32,
              LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},

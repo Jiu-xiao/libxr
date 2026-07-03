@@ -47,15 +47,14 @@ class HIDMouse : public HID<sizeof(HID_MOUSE_REPORT_DESC), 4, 0>
  public:
   /**
    * @brief 构造函数 / Constructor
+   * @param in_ep_num IN 端点号（必填）/ IN endpoint number (required)
    * @param in_ep_interval IN 端点间隔 / IN endpoint interval
-   * @param in_ep_num IN 端点号 / IN endpoint number
    * @param interface_string 接口字符串 / Interface string
    */
-  HIDMouse(uint8_t in_ep_interval = 1,
-           Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
+  HIDMouse(Endpoint::EPNumber in_ep_num, uint8_t in_ep_interval = 1,
            const char* interface_string =
                HID<sizeof(HID_MOUSE_REPORT_DESC), 4, 0>::DEFAULT_INTERFACE_STRING)
-      : HID(false, in_ep_interval, 1, in_ep_num, Endpoint::EPNumber::EP_AUTO,
+      : HID(in_ep_num, Endpoint::EPNumber::EP_INVALID, false, in_ep_interval, 1,
             interface_string)
   {
   }

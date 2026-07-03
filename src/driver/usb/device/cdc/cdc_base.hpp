@@ -134,9 +134,8 @@ LIBXR_PACKED_END
    * @param data_out_ep_num 数据输出端点号 / Data OUT endpoint number
    * @param comm_ep_num 通信端点号 / Communication endpoint number
    */
-  CDCBase(Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-          Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-          Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO,
+  CDCBase(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+          Endpoint::EPNumber comm_ep_num,
           const char* control_interface_string = DEFAULT_CONTROL_INTERFACE_STRING,
           const char* data_interface_string = DEFAULT_DATA_INTERFACE_STRING)
       : data_in_ep_num_(data_in_ep_num),

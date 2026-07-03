@@ -2,60 +2,118 @@
 
 using namespace LibXR::USB;
 
-EndpointPool::EndpointPool(size_t endpoint_num)
-    : LockFreePool<Endpoint*>(endpoint_num - 2)
+EndpointPool::EndpointPool(size_t endpoint_num) { ASSERT(endpoint_num >= 2); }
+
+LibXR::ErrorCode EndpointPool::Put(Endpoint* ep)
 {
-  ASSERT(endpoint_num >= 2);
+  if (ep == nullptr)
+  {
+    return LibXR::ErrorCode::ARG_ERR;
+  }
+
+  const auto ep_num = static_cast<size_t>(ep->GetNumber());
+  if (ep_num >= SLOT_COUNT)
+  {
+    return LibXR::ErrorCode::ARG_ERR;
+  }
+
+  const Endpoint::Direction dir = ep->AvailableDirection();
+
+  // BOTH 端点同时登记到该号的两个方向槽；其余按具体方向入位。
+  // A BOTH endpoint is registered into both direction slots of its number; others go
+  // into their concrete direction slot.
+  if (dir == Endpoint::Direction::BOTH)
+  {
+    for (size_t d = 0; d < DIR_COUNT; ++d)
+    {
+      if (slots_[ep_num][d] != nullptr)
+      {
+        return LibXR::ErrorCode::FULL;
+      }
+    }
+    for (size_t d = 0; d < DIR_COUNT; ++d)
+    {
+      slots_[ep_num][d] = ep;
+      use_[ep_num][d] = SlotUse::AVAILABLE;
+    }
+    return LibXR::ErrorCode::OK;
+  }
+
+  const size_t d = DirIndex(dir);
+  if (slots_[ep_num][d] != nullptr)
+  {
+    return LibXR::ErrorCode::FULL;
+  }
+  slots_[ep_num][d] = ep;
+  use_[ep_num][d] = SlotUse::AVAILABLE;
+  return LibXR::ErrorCode::OK;
 }
 
 LibXR::ErrorCode EndpointPool::Get(Endpoint*& ep_info, Endpoint::Direction direction,
                                    Endpoint::EPNumber ep_num)
 {
-  for (uint32_t i = 0; i < SlotCount(); ++i)
+  const auto num = static_cast<size_t>(ep_num);
+  if (num >= SLOT_COUNT || direction == Endpoint::Direction::BOTH)
   {
-    auto& slot_container = (*this)[i];
-    auto state = slot_container.slot.state.load(std::memory_order_acquire);
-    if (state == SlotState::READY)
-    {
-      if (ep_num != Endpoint::EPNumber::EP_AUTO &&
-          ep_num != slot_container.slot.data->GetNumber())
-      {
-        continue;  // 如果指定了端点号，则跳过不匹配的
-      }
-
-      if (slot_container.slot.data->AvailableDirection() == direction ||
-          slot_container.slot.data->AvailableDirection() == Endpoint::Direction::BOTH)
-      {
-        LockFreePool<Endpoint*>::Get(ep_info, i);
-        return LibXR::ErrorCode::OK;
-      }
-    }
+    return LibXR::ErrorCode::NOT_FOUND;
   }
-  return LibXR::ErrorCode::NOT_FOUND;
+
+  const size_t d = DirIndex(direction);
+  Endpoint* ep = slots_[num][d];
+  if (ep == nullptr || use_[num][d] != SlotUse::AVAILABLE)
+  {
+    return LibXR::ErrorCode::NOT_FOUND;
+  }
+
+  // 端点登记方向必须与请求方向兼容（具体方向匹配，或登记为 BOTH）。
+  // The registered direction must be compatible with the requested one (exact match, or
+  // registered as BOTH).
+  const Endpoint::Direction avail = ep->AvailableDirection();
+  if (avail != direction && avail != Endpoint::Direction::BOTH)
+  {
+    return LibXR::ErrorCode::NOT_FOUND;
+  }
+
+  ep_info = ep;
+
+  // BOTH 端点占用后，两个方向槽一并标记为使用中。
+  // For a BOTH endpoint, mark both direction slots as in-use together.
+  if (avail == Endpoint::Direction::BOTH)
+  {
+    use_[num][0] = SlotUse::IN_USE;
+    use_[num][1] = SlotUse::IN_USE;
+  }
+  else
+  {
+    use_[num][d] = SlotUse::IN_USE;
+  }
+  return LibXR::ErrorCode::OK;
 }
 
 LibXR::ErrorCode EndpointPool::Release(Endpoint* ep_info)
 {
-  for (uint32_t i = 0; i < SlotCount(); ++i)
+  if (ep_info == nullptr)
   {
-    auto& slot = (*this)[i];
-    auto state = slot.slot.state.load(std::memory_order_acquire);
-    if (state == SlotState::RECYCLE)
-    {
-      if (slot.slot.data == ep_info)
-      {
-        slot.slot.state.store(SlotState::READY, std::memory_order_release);
-        return LibXR::ErrorCode::OK;
-      }
-    }
+    return LibXR::ErrorCode::NOT_FOUND;
+  }
 
-    if (state == SlotState::FREE)
+  const auto num = static_cast<size_t>(ep_info->GetNumber());
+  if (num >= SLOT_COUNT)
+  {
+    return LibXR::ErrorCode::NOT_FOUND;
+  }
+
+  bool released = false;
+  for (size_t d = 0; d < DIR_COUNT; ++d)
+  {
+    if (slots_[num][d] == ep_info && use_[num][d] == SlotUse::IN_USE)
     {
-      break;
+      use_[num][d] = SlotUse::AVAILABLE;
+      released = true;
     }
   }
 
-  return LibXR::ErrorCode::NOT_FOUND;
+  return released ? LibXR::ErrorCode::OK : LibXR::ErrorCode::NOT_FOUND;
 }
 
 LibXR::ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
@@ -69,21 +127,27 @@ LibXR::ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
     return (ans != nullptr) ? LibXR::ErrorCode::OK : LibXR::ErrorCode::NOT_FOUND;
   }
 
-  for (uint32_t i = 0; i < SlotCount(); ++i)
+  const size_t num = ep_addr & 0x7F;
+  if (num >= SLOT_COUNT)
   {
-    auto& slot_container = (*this)[i];
-    auto state = slot_container.slot.state.load(std::memory_order_acquire);
-    if (state == SlotState::RECYCLE &&
-        slot_container.slot.data->GetAddress() == ep_addr &&
-        slot_container.slot.data->GetDirection() == direction)
-    {
-      ans = slot_container.slot.data;
-      return LibXR::ErrorCode::OK;
-    }
-    if (state == SlotState::FREE)
-    {
-      break;  // 没有找到，直接退出
-    }
+    return LibXR::ErrorCode::NOT_FOUND;
+  }
+
+  const size_t d = DirIndex(direction);
+  Endpoint* ep = slots_[num][d];
+  // 仅「已分配（in-use）」且当前配置地址/方向与请求一致的端点可被反查到。
+  // 必须核对 GetAddress()/GetDirection()（当前配置方向），与原实现语义一致：
+  // 一个 BOTH 端点被配置成单一方向后，不会再被另一方向的同号地址查到。
+  // Only endpoints that are allocated (in-use) AND whose current configured
+  // address/direction match the request are visible here. Checking
+  // GetAddress()/GetDirection() (the configured direction) preserves the original
+  // semantics: once a BOTH endpoint is configured for a single direction, it is no
+  // longer reachable via the opposite-direction address of the same number.
+  if (ep != nullptr && use_[num][d] == SlotUse::IN_USE && ep->GetAddress() == ep_addr &&
+      ep->GetDirection() == direction)
+  {
+    ans = ep;
+    return LibXR::ErrorCode::OK;
   }
 
   return LibXR::ErrorCode::NOT_FOUND;

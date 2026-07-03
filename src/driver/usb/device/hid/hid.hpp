@@ -106,17 +106,17 @@ LIBXR_PACKED_END
    * @brief HID 构造函数
    * HID class constructor.
    *
+   * @param in_ep_num IN 端点号（必填）/ IN endpoint number (required)
+   * @param out_ep_num OUT 端点号（必填，未启用 OUT 时传 EP_INVALID）/ OUT endpoint number
+   * (required; pass EP_INVALID when OUT is disabled)
    * @param enable_out_endpoint 是否启用 OUT 端点 / Enable OUT endpoint
    * @param in_ep_interval IN 端点间隔 / IN endpoint interval
    * @param out_ep_interval OUT 端点间隔 / OUT endpoint interval
-   * @param in_ep_num IN 端点号 / IN endpoint number
-   * @param out_ep_num OUT 端点号 / OUT endpoint number
    * @param interface_string 接口字符串 / Interface string
    */
-  HID(bool enable_out_endpoint = false, uint8_t in_ep_interval = 10,
+  HID(Endpoint::EPNumber in_ep_num, Endpoint::EPNumber out_ep_num,
+      bool enable_out_endpoint = false, uint8_t in_ep_interval = 10,
       uint8_t out_ep_interval = 10,
-      Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO,
       const char* interface_string = DEFAULT_INTERFACE_STRING)
       : in_ep_interval_(in_ep_interval),
         out_ep_interval_(out_ep_interval),

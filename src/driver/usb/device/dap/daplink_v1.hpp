@@ -65,9 +65,8 @@ class DapLinkV1Class
     const char* product_fw_ver = nullptr;
   };
 
-  explicit DapLinkV1Class(SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
-                          Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
-                          Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO);
+  explicit DapLinkV1Class(Endpoint::EPNumber in_ep_num, Endpoint::EPNumber out_ep_num,
+                          SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr);
 
   ~DapLinkV1Class() override = default;
 
@@ -237,10 +236,10 @@ class DapLinkV1Class
 };
 
 template <typename SwdPort>
-DapLinkV1Class<SwdPort>::DapLinkV1Class(SwdPort& swd_link, LibXR::GPIO* nreset_gpio,
-                               Endpoint::EPNumber in_ep_num,
-                               Endpoint::EPNumber out_ep_num)
-    : HID(true, 1, 1, in_ep_num, out_ep_num, DEFAULT_INTERFACE_STRING),
+DapLinkV1Class<SwdPort>::DapLinkV1Class(Endpoint::EPNumber in_ep_num,
+                               Endpoint::EPNumber out_ep_num, SwdPort& swd_link,
+                               LibXR::GPIO* nreset_gpio)
+    : HID(in_ep_num, out_ep_num, true, 1, 1, DEFAULT_INTERFACE_STRING),
       swd_(swd_link),
       nreset_gpio_(nreset_gpio)
 {
