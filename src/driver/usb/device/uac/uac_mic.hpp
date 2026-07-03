@@ -69,15 +69,15 @@ class UAC1MicrophoneQ : public DeviceClass
       const char* control_interface_string = DEFAULT_CONTROL_INTERFACE_STRING,
       const char* streaming_interface_string = DEFAULT_STREAMING_INTERFACE_STRING)
       : iso_in_ep_num_(iso_in_ep_num),
+        control_interface_string_(control_interface_string),
+        streaming_interface_string_(streaming_interface_string),
         vol_min_(vol_min),
         vol_max_(vol_max),
         vol_res_(vol_res),
         interval_(interval),
         speed_(speed),
         sr_hz_(sample_rate_hz),
-        pcm_queue_(queue_bytes),
-        control_interface_string_(control_interface_string),
-        streaming_interface_string_(streaming_interface_string)
+        pcm_queue_(queue_bytes)
   {
     RecomputeTiming();
     // 缓存端点采样率（3 字节小端） / Cache current sampling frequency (3‑byte LE)
