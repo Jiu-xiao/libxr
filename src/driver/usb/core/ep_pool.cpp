@@ -143,8 +143,8 @@ LibXR::ErrorCode EndpointPool::FindEndpoint(uint8_t ep_addr, Endpoint*& ans)
   // GetAddress()/GetDirection() (the configured direction) preserves the original
   // semantics: once a BOTH endpoint is configured for a single direction, it is no
   // longer reachable via the opposite-direction address of the same number.
-  if (ep != nullptr && use_[num][d] == SlotUse::IN_USE &&
-      ep->GetAddress() == ep_addr && ep->GetDirection() == direction)
+  if (ep != nullptr && use_[num][d] == SlotUse::IN_USE && ep->GetAddress() == ep_addr &&
+      ep->GetDirection() == direction)
   {
     ans = ep;
     return LibXR::ErrorCode::OK;
