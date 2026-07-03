@@ -21,7 +21,6 @@
 #include "libxr_type.hpp"
 #include "list.hpp"
 #include "lockfree_list.hpp"
-#include "lockfree_pool.hpp"
 #include "object_pool.hpp"
 #include "logger.hpp"
 #include "message.hpp"

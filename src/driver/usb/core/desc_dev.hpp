@@ -8,7 +8,6 @@
 #include "desc_str.hpp"
 #include "ep_pool.hpp"
 #include "lockfree_list.hpp"
-#include "lockfree_pool.hpp"
 
 namespace LibXR::USB
 {

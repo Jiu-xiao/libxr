@@ -62,11 +62,10 @@ class UAC1MicrophoneQ : public DeviceClass
    * @param streaming_interface_string 流接口字符串 / Streaming interface string
    */
   UAC1MicrophoneQ(
-      uint32_t sample_rate_hz, int16_t vol_min = K_DEFAULT_VOL_MIN,
-      int16_t vol_max = K_DEFAULT_VOL_MAX, int16_t vol_res = K_DEFAULT_VOL_RES,
-      Speed speed = K_DEFAULT_SPEED, size_t queue_bytes = K_DEFAULT_QUEUE_BYTES,
-      uint8_t interval = K_DEFAULT_INTERVAL,
-      Endpoint::EPNumber iso_in_ep_num = Endpoint::EPNumber::EP_AUTO,
+      Endpoint::EPNumber iso_in_ep_num, uint32_t sample_rate_hz,
+      int16_t vol_min = K_DEFAULT_VOL_MIN, int16_t vol_max = K_DEFAULT_VOL_MAX,
+      int16_t vol_res = K_DEFAULT_VOL_RES, Speed speed = K_DEFAULT_SPEED,
+      size_t queue_bytes = K_DEFAULT_QUEUE_BYTES, uint8_t interval = K_DEFAULT_INTERVAL,
       const char* control_interface_string = DEFAULT_CONTROL_INTERFACE_STRING,
       const char* streaming_interface_string = DEFAULT_STREAMING_INTERFACE_STRING)
       : iso_in_ep_num_(iso_in_ep_num),

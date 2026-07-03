@@ -62,16 +62,15 @@ class DapLinkV2Class : public DeviceClass
   /**
    * @brief Constructor
    *
+   * @param data_in_ep_num  Bulk IN endpoint number (required)
+   * @param data_out_ep_num Bulk OUT endpoint number (required)
    * @param swd_link        SWD link reference
    * @param nreset_gpio     Optional nRESET GPIO
-   * @param data_in_ep_num  Bulk IN endpoint number (auto allowed)
-   * @param data_out_ep_num Bulk OUT endpoint number (auto allowed)
    *
    */
   explicit DapLinkV2Class(
+      Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
       SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
-      Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
       const char* interface_string = DEFAULT_INTERFACE_STRING)
       : DeviceClass(),
         swd_(swd_link),

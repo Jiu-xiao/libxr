@@ -40,13 +40,11 @@ class CDCToUart : public CDCUart
    * @note 本构造函数包含动态内存分配 / This constructor performs dynamic memory
    * allocation
    */
-  CDCToUart(LibXR::UART& uart, size_t rx_buffer_size = 128, size_t tx_buffer_size = 128,
-            size_t tx_queue_size = 5,
-            Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-            Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-            Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO)
-      : CDCUart(rx_buffer_size, tx_buffer_size, tx_queue_size, data_in_ep_num,
-                data_out_ep_num, comm_ep_num),
+  CDCToUart(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+            Endpoint::EPNumber comm_ep_num, LibXR::UART& uart, size_t rx_buffer_size = 128,
+            size_t tx_buffer_size = 128, size_t tx_queue_size = 5)
+      : CDCUart(data_in_ep_num, data_out_ep_num, comm_ep_num, rx_buffer_size,
+                tx_buffer_size, tx_queue_size),
         rx_buffer_(new uint8_t[rx_buffer_size], rx_buffer_size),
         tx_buffer_(new uint8_t[tx_buffer_size], tx_buffer_size),
         uart_(uart)
