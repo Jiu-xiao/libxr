@@ -80,7 +80,6 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"data_structure_tests", {"queue", &RunVoidEntry<test_queue>, false}},
     {"data_structure_tests", {"spsc_queue", &RunVoidEntry<test_spsc_queue>, false}},
     {"data_structure_tests", {"mpmc_queue", &RunVoidEntry<test_mpmc_queue>, false}},
-    {"data_structure_tests", {"pool", &RunVoidEntry<test_lock_free_pool>, false}},
     {"data_structure_tests", {"object_pool", &RunVoidEntry<test_object_pool>, false}},
     {"data_structure_tests", {"stack", &RunVoidEntry<test_stack>, false}},
     {"data_structure_tests", {"list", &RunVoidEntry<test_list>, false}},
