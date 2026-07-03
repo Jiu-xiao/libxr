@@ -5,7 +5,7 @@ on:
   push:
     branches: ["master"]
     paths:
-      - "docker/docs/Dockerfile"
+      - "doc/ci.Dockerfile"
       - ".github/workflows/docs-image.yml"
   # Allow manual rebuilds (e.g. to pick up a new base image).
   workflow_dispatch:
@@ -38,6 +38,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: docker/docs
+          context: doc
+          file: doc/ci.Dockerfile
           push: true
           tags: ${{ env.IMAGE }}:latest
