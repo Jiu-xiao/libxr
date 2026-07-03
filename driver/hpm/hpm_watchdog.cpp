@@ -103,7 +103,6 @@ uint64_t DivCeil(uint64_t value, uint64_t divisor)
   if (divisor == 0u)
   {
     ASSERT(false);
-    return std::numeric_limits<uint64_t>::max();
   }
 
   return value / divisor + (value % divisor == 0u ? 0u : 1u);
