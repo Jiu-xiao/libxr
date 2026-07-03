@@ -30,10 +30,8 @@
 #if defined(HPMSOC_HAS_HPMSDK_I2C) && __has_include("hpm_i2c_drv.h")
 #include "hpm_i2c_drv.h"
 #define LIBXR_HPM_I2C_SUPPORTED 1
-using LibXRHpmI2cType = I2C_Type;
 #else
 #define LIBXR_HPM_I2C_SUPPORTED 0
-using LibXRHpmI2cType = void;
 #endif
 
 #if LIBXR_HPM_I2C_SUPPORTED && __has_include("hpm_dma_mgr.h")
@@ -43,7 +41,9 @@ using LibXRHpmI2cType = void;
 #define LIBXR_HPM_I2C_HAS_DMA_MGR 0
 #endif
 
-extern "C" void libxr_hpm_i2c_process_interrupt(LibXRHpmI2cType* ptr);
+#if LIBXR_HPM_I2C_SUPPORTED
+
+extern "C" void libxr_hpm_i2c_process_interrupt(I2C_Type* ptr);
 
 namespace LibXR
 {
@@ -67,17 +67,20 @@ namespace LibXR
  * busy, or no response, the driver attempts to rebuild the controller with the most
  * recent successful configuration.
  *
- * BLOCK 模式保持同步阻塞式传输；当工程提供旧分支的 `hpm_dma_mgr.h` helper 时，
- * POLLING / CALLBACK / NONE 可复用 DMA 后台路径覆盖 Write / Read / MemRead。
+ * 当工程提供旧分支的 `hpm_dma_mgr.h` helper 时，超过实例 DMA 阈值的 BLOCK /
+ * POLLING / CALLBACK / NONE 可复用 DMA 后台路径覆盖 Write / Read / MemRead /
+ * MemWrite；小包仍走同步阻塞式传输并按 LibXR Operation 语义即时完成。
  * 当前 upstream HPM5301 模板未携带该 helper 时，这些操作降级为同步完成并即时更新
- * LibXR Operation 状态。MemWrite 始终保持阻塞路径。对 10-bit / 扩展 flags 的
- * blocking 手工 phase 路径，地址阶段会显式等待 `ADDRHIT`，失败时按适配层策略强制
- * cleanup 并按原始 HPM 状态触发恢复链路。
- * BLOCK mode stays on synchronous blocking transfers. When the project provides the
- * legacy-branch `hpm_dma_mgr.h` helper, POLLING / CALLBACK / NONE can reuse the DMA
- * backed path for Write / Read / MemRead. Without that helper, as in the current
- * upstream HPM5301 template, these operations complete synchronously and update the
- * LibXR Operation state before returning. MemWrite always stays on the blocking path.
+ * LibXR Operation 状态。对 10-bit / 扩展 flags 的 blocking 手工 phase 路径，
+ * 地址阶段会显式等待 `ADDRHIT`，失败时按适配层策略强制 cleanup 并按原始 HPM
+ * 状态触发恢复链路。
+ * When the project provides the legacy-branch `hpm_dma_mgr.h` helper, BLOCK /
+ * POLLING / CALLBACK / NONE transfers larger than the instance DMA threshold can
+ * reuse the DMA backed path for Write / Read / MemRead / MemWrite. Smaller packets
+ * stay on synchronous blocking transfers and complete the LibXR Operation
+ * immediately. Without that helper, as in the current upstream HPM5301 template,
+ * these operations complete synchronously and update the LibXR Operation state
+ * before returning.
  * For the blocking manual phase path used by 10-bit / extended-flag transfers, the
  * address phase explicitly waits for `ADDRHIT`; failures force adapter-level cleanup
  * and preserve the original HPM status for recovery handling.
@@ -135,13 +138,12 @@ namespace LibXR
  * the same IRQ later, the ownership scheme should be revised in a separate change.
  *
  * 编译期支持由 `HPMSOC_HAS_HPMSDK_I2C` 和 `__has_include("hpm_i2c_drv.h")`
- * 同时 gate；缺少能力宏或裁剪 SDK 头时仍保留 LibXR API 形状，但所有事务返回
- * `NOT_SUPPORT`，避免 `driver/hpm` glob 构建在无 I2C SoC 上因 SDK 头缺失失败。
+ * 同时 gate；缺少能力宏或裁剪 SDK 头时会直接排除整个 HPMI2C 类定义，避免在无
+ * I2C SoC 上暴露不可用 stub。
  * Compile-time support is gated by both `HPMSOC_HAS_HPMSDK_I2C` and
  * `__has_include("hpm_i2c_drv.h")`. When the capability macro or trimmed SDK header
- * is missing, the LibXR API shape remains available but transfer APIs return
- * `NOT_SUPPORT`, preventing the `driver/hpm` glob build from failing on SoCs without
- * I2C.
+ * is missing, the whole HPMI2C class definition is excluded instead of exposing
+ * unavailable stubs.
  */
 class HPMI2C final : public I2C
 {
@@ -198,7 +200,8 @@ class HPMI2C final : public I2C
     NONE,
     READ,
     WRITE,
-    MEM_READ
+    MEM_READ,
+    MEM_WRITE
   };
 
   /**
@@ -245,13 +248,17 @@ class HPMI2C final : public I2C
    * rates: 100 kHz, 400 kHz, and 1 MHz. Other rates are rejected by SetConfig().
    * The default address mode is 7-bit; call SetAddressMode() after construction to
    * switch to 10-bit when needed.
+   * @param dma_enable_min_size 启用 DMA 后台路径的最小传输阈值；size 大于该值时使用
+   * DMA，否则使用同步路径 / Minimum transfer threshold for the DMA-backed path;
+   * transfers with size greater than this value use DMA, otherwise they use the
+   * synchronous path.
    *
    * @note 构造函数会在外设指针为空、源时钟无法解析或初始配置无效时断言失败 /
    * The constructor asserts when the peripheral pointer is null, the source clock
    * cannot be resolved, or the initial configuration is invalid.
    */
-  HPMI2C(LibXRHpmI2cType* i2c, clock_name_t clock, bool auto_board_init = true,
-         I2C::Configuration config = {100000});
+  HPMI2C(I2C_Type* i2c, clock_name_t clock, bool auto_board_init = true,
+         I2C::Configuration config = {100000}, uint32_t dma_enable_min_size = 3U);
 
   /**
    * @brief 设置 HPM 主机寻址模式并重建控制器 / Set HPM master addressing mode and
@@ -507,7 +514,7 @@ class HPMI2C final : public I2C
 #endif
 
  private:
-  friend void ::libxr_hpm_i2c_process_interrupt(LibXRHpmI2cType* ptr);
+  friend void ::libxr_hpm_i2c_process_interrupt(I2C_Type* ptr);
 
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
   /**
@@ -790,6 +797,14 @@ class HPMI2C final : public I2C
                               ReadOperation& op, MemAddrLength mem_addr_size);
 
   /**
+   * @brief 后台寄存器写事务提交 /
+   * Submit one asynchronous memory/register write transaction.
+   */
+  ErrorCode StartMemWriteAsync(uint16_t slave_addr, uint16_t mem_addr,
+                               ConstRawData write_data, WriteOperation& op,
+                               MemAddrLength mem_addr_size);
+
+  /**
    * @brief DMA manager 资源就绪检查 / Ensure DMA manager resource is ready.
    */
   ErrorCode EnsureAsyncDmaReady();
@@ -916,7 +931,7 @@ class HPMI2C final : public I2C
     return ans;
   }
 
-  LibXRHpmI2cType* i2c_;          ///< I2C 外设实例 / I2C peripheral instance.
+  I2C_Type* i2c_;                 ///< I2C 外设实例 / I2C peripheral instance.
   clock_name_t clock_;            ///< I2C 源时钟名称 / I2C source clock name.
   uint32_t source_clock_hz_ = 0;  ///< 缓存的源时钟频率 / Cached source clock frequency.
   Configuration current_config_{
@@ -926,6 +941,8 @@ class HPMI2C final : public I2C
   AddressMode address_mode_ =
       AddressMode::ADDR_7BIT;  ///< 当前主机寻址模式 / Current master addressing mode.
   bool configured_ = false;    ///< 是否已有成功配置 / Whether a valid config was applied.
+  uint32_t dma_enable_min_size_ =
+      3U;  ///< 启用 DMA 后台路径的最小阈值 / Minimum size threshold for DMA path.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
   std::atomic<uint32_t> async_busy_{
       0U};  ///< 后台事务活动标志 / Asynchronous transfer active flag.
@@ -944,3 +961,5 @@ class HPMI2C final : public I2C
 };
 
 }  // namespace LibXR
+
+#endif  // LIBXR_HPM_I2C_SUPPORTED
