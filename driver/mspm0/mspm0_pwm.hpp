@@ -1,8 +1,7 @@
 #pragma once
 
-#include "mspm0_conf.hpp"
 #include "pwm.hpp"
-#include "ti_msp_dl_config.h"
+#include "ti_msp_dl_config.h"  // IWYU pragma: keep; required for GPTIMER_Regs and DL_TIMER_CC_INDEX
 
 namespace LibXR
 {
