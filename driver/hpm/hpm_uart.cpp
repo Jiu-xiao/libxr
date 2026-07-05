@@ -1039,24 +1039,23 @@ void HPMUART::HandleTxDmaComplete(ErrorCode result)
     return;
   }
 
-  WriteInfoBlock promoted_info;
-  if (write_port_->queue_info_->Pop(promoted_info) != ErrorCode::OK)
+  dma_buff_tx_.Switch();
+  dma_buff_tx_.SetActiveLength(pending_len);
+  tx_busy_.Set();
+
+  const ErrorCode start_ans = StartTxDMA(pending_len);
+
+  WriteInfoBlock& current_info = write_info_active_;
+  if (write_port_->queue_info_->Pop(current_info) != ErrorCode::OK)
   {
     ASSERT(false);
+    tx_busy_.Clear();
     return;
   }
 
-  const size_t next_len = dma_buff_tx_.GetPendingLength();
-  dma_buff_tx_.Switch();
-  dma_buff_tx_.SetActiveLength(next_len);
-  write_info_active_ = promoted_info;
-  tx_busy_.Set();
-
-  const ErrorCode start_ans = StartTxDMA(next_len);
-
   // Match STM32 UART semantics: a queued write completes when its pending
   // buffer is promoted and the DMA transfer is started.
-  write_port_->Finish(true, start_ans, promoted_info);
+  write_port_->Finish(true, start_ans, current_info);
 
   if (start_ans != ErrorCode::OK)
   {
