@@ -464,13 +464,12 @@ uint8_t HPMUART::ResolveTxDmaReq(UART_Type* instance)
 
 ErrorCode HPMUART::PrepareDmaChannels()
 {
-#if LIBXR_HPM_UART_HAS_DMA_MGR
+#if LIBXR_HPM_UART_HAS_DMA_MGR && defined(USE_DMA_MGR) && (USE_DMA_MGR == 1)
   if (dma_mgr_ready_)
   {
     return ErrorCode::OK;
   }
 
-#if defined(USE_DMA_MGR) && (USE_DMA_MGR == 1)
   dma_mgr_init();
 
   rx_dma_resource_.base = res_.dma;
@@ -504,8 +503,8 @@ ErrorCode HPMUART::PrepareDmaChannels()
     return ErrorCode::FULL;
   }
 
-  status = dma_mgr_install_chn_half_tc_callback(
-      &rx_dma_resource_, &HPMUART::OnDmaMgrHalfTcCallback, this);
+  status = dma_mgr_install_chn_half_tc_callback(&rx_dma_resource_,
+                                                &HPMUART::OnDmaMgrHalfTcCallback, this);
   if (status != status_success)
   {
     (void)dma_mgr_release_resource(&tx_dma_resource_);
@@ -562,11 +561,9 @@ ErrorCode HPMUART::PrepareDmaChannels()
     return HPMUARTConvertDmaMgrStatus(status);
   }
 
-  status = dma_mgr_enable_chn_irq(&rx_dma_resource_,
-                                  DMA_MGR_INTERRUPT_MASK_TC |
-                                      DMA_MGR_INTERRUPT_MASK_HALF_TC |
-                                      DMA_MGR_INTERRUPT_MASK_ERROR |
-                                      DMA_MGR_INTERRUPT_MASK_ABORT);
+  status = dma_mgr_enable_chn_irq(
+      &rx_dma_resource_, DMA_MGR_INTERRUPT_MASK_TC | DMA_MGR_INTERRUPT_MASK_HALF_TC |
+                             DMA_MGR_INTERRUPT_MASK_ERROR | DMA_MGR_INTERRUPT_MASK_ABORT);
   if (status != status_success)
   {
     (void)dma_mgr_release_resource(&tx_dma_resource_);
@@ -590,7 +587,6 @@ ErrorCode HPMUART::PrepareDmaChannels()
     (void)dma_mgr_release_resource(&rx_dma_resource_);
     return HPMUARTConvertDmaMgrStatus(status);
   }
-#endif
 
   dma_mgr_ready_ = true;
 #endif
@@ -775,8 +771,7 @@ ErrorCode HPMUART::StartRxDMA()
 #if LIBXR_HPM_UART_HAS_DMA_MGR && defined(USE_DMA_MGR) && (USE_DMA_MGR == 1)
   dma_enable_channel_interrupt(res_.dma, res_.rx_dma_channel,
                                DMA_INTERRUPT_MASK_TERMINAL_COUNT |
-                                   DMA_INTERRUPT_MASK_HALF_TC |
-                                   DMA_INTERRUPT_MASK_ERROR |
+                                   DMA_INTERRUPT_MASK_HALF_TC | DMA_INTERRUPT_MASK_ERROR |
                                    DMA_INTERRUPT_MASK_ABORT);
 #endif
 
@@ -818,8 +813,7 @@ ErrorCode HPMUART::StartTxDMA(size_t length)
 #if LIBXR_HPM_UART_HAS_DMA_MGR && defined(USE_DMA_MGR) && (USE_DMA_MGR == 1)
   dma_enable_channel_interrupt(res_.dma, res_.tx_dma_channel,
                                DMA_INTERRUPT_MASK_TERMINAL_COUNT |
-                                   DMA_INTERRUPT_MASK_ERROR |
-                                   DMA_INTERRUPT_MASK_ABORT);
+                                   DMA_INTERRUPT_MASK_ERROR | DMA_INTERRUPT_MASK_ABORT);
 #endif
 
   return ErrorCode::OK;
@@ -938,6 +932,8 @@ void HPMUART::ProcessRxDMA(bool in_isr)
       dma_get_remaining_transfer_size(res_.dma, res_.rx_dma_channel);
   const uint32_t second_remaining =
       dma_get_remaining_transfer_size(res_.dma, res_.rx_dma_channel);
+  // The DMA counter can decrement between reads; use the more advanced sample
+  // so the RX cursor does not move backwards on an in-flight transfer.
   const uint32_t remaining =
       (second_remaining <= first_remaining) ? second_remaining : first_remaining;
   size_t curr_pos = 0;
@@ -1043,23 +1039,24 @@ void HPMUART::HandleTxDmaComplete(ErrorCode result)
     return;
   }
 
-  WriteInfoBlock next_active_info;
-  if (write_port_->queue_info_->Pop(next_active_info) != ErrorCode::OK)
+  WriteInfoBlock promoted_info;
+  if (write_port_->queue_info_->Pop(promoted_info) != ErrorCode::OK)
   {
     ASSERT(false);
     return;
   }
-  write_info_active_ = next_active_info;
 
   const size_t next_len = dma_buff_tx_.GetPendingLength();
   dma_buff_tx_.Switch();
   dma_buff_tx_.SetActiveLength(next_len);
+  write_info_active_ = promoted_info;
   tx_busy_.Set();
 
   const ErrorCode start_ans = StartTxDMA(next_len);
 
-  WriteInfoBlock current_info = write_info_active_;
-  write_port_->Finish(true, start_ans, current_info);
+  // Match STM32 UART semantics: a queued write completes when its pending
+  // buffer is promoted and the DMA transfer is started.
+  write_port_->Finish(true, start_ans, promoted_info);
 
   if (start_ans != ErrorCode::OK)
   {
@@ -1164,28 +1161,30 @@ void HPMUART::OnDmaInterrupt(DMAV2_Type* dma)
 {
   for (uint8_t channel = 0; channel < DMA_SOC_CHANNEL_NUM; ++channel)
   {
-    if (auto* uart = rx_dma_map_[channel])
+    auto* rx_uart = rx_dma_map_[channel];
+    auto* tx_uart = tx_dma_map_[channel];
+
+    const bool has_rx = (rx_uart != nullptr) && (rx_uart->res_.dma == dma);
+    const bool has_tx = (tx_uart != nullptr) && (tx_uart->res_.dma == dma);
+    if (!has_rx && !has_tx)
     {
-      if (uart->res_.dma == dma)
-      {
-        const uint32_t status = dma_check_transfer_status(dma, channel);
-        if (status != DMA_CHANNEL_STATUS_ONGOING)
-        {
-          uart->HandleDmaInterrupt(status, channel);
-        }
-      }
+      continue;
     }
 
-    if (auto* uart = tx_dma_map_[channel])
+    const uint32_t status = dma_check_transfer_status(dma, channel);
+    if (status == DMA_CHANNEL_STATUS_ONGOING)
     {
-      if (uart->res_.dma == dma)
-      {
-        const uint32_t status = dma_check_transfer_status(dma, channel);
-        if (status != DMA_CHANNEL_STATUS_ONGOING)
-        {
-          uart->HandleDmaInterrupt(status, channel);
-        }
-      }
+      continue;
+    }
+
+    if (has_rx)
+    {
+      rx_uart->HandleDmaInterrupt(status, channel);
+    }
+
+    if (has_tx && tx_uart != rx_uart)
+    {
+      tx_uart->HandleDmaInterrupt(status, channel);
     }
   }
 }
@@ -1201,8 +1200,7 @@ void HPMUART::OnDmaMgrTcCallback(DMA_Type* base, uint32_t channel, void* user_da
   uart->HandleDmaInterrupt(DMA_CHANNEL_STATUS_TC, static_cast<uint8_t>(channel));
 }
 
-void HPMUART::OnDmaMgrHalfTcCallback(DMA_Type* base, uint32_t channel,
-                                     void* user_data)
+void HPMUART::OnDmaMgrHalfTcCallback(DMA_Type* base, uint32_t channel, void* user_data)
 {
   auto* uart = static_cast<HPMUART*>(user_data);
   if (uart == nullptr)
