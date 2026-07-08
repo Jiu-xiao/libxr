@@ -535,6 +535,12 @@ class HPMSPI final : public SPI
   }
 
   /**
+   * @brief 校验 LibXR SPI 分频参数是否可映射到 HPM SPI timing /
+   * Validate whether a LibXR SPI prescaler can map to HPM SPI timing.
+   */
+  static ErrorCode ValidatePrescaler(Prescaler prescaler);
+
+  /**
    * @brief 根据 LibXR 分频参数配置 HPM SPI 时序 /
    * Configure HPM SPI timing from LibXR prescaler.
    */
@@ -657,6 +663,11 @@ class HPMSPI final : public SPI
   {
     return dma_busy_.load(std::memory_order_acquire) != 0U;
   }
+
+  /**
+   * @brief 若已有 DMA 后台事务则返回 BUSY / Return BUSY if a DMA transfer is active.
+   */
+  ErrorCode GuardNoDmaActive() const;
 
   /**
    * @brief 启动一次 data-phase DMA 传输 / Start one data-phase DMA transfer.
