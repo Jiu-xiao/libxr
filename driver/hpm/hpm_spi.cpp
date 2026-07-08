@@ -228,7 +228,25 @@ spi_sclk_sampling_clk_edges_t HPMSPI::ConvertPhase(ClockPhase phase)
 
 ErrorCode HPMSPI::ValidateConfiguration(const Configuration& config) const
 {
-  const uint32_t div = SPI::PrescalerToDiv(config.prescaler);
+  const ErrorCode prescaler_ans = ValidatePrescaler(config.prescaler);
+  if (prescaler_ans != ErrorCode::OK)
+  {
+    return prescaler_ans;
+  }
+
+  if (config.double_buffer &&
+      ((rx_buffer_capacity_ < 2U) || (tx_buffer_capacity_ < 2U) ||
+       ((rx_buffer_capacity_ / 2U) == 0U) || ((tx_buffer_capacity_ / 2U) == 0U)))
+  {
+    return ErrorCode::SIZE_ERR;
+  }
+
+  return ErrorCode::OK;
+}
+
+ErrorCode HPMSPI::ValidatePrescaler(Prescaler prescaler)
+{
+  const uint32_t div = SPI::PrescalerToDiv(prescaler);
   if (div == 0U)
   {
     return ErrorCode::ARG_ERR;
@@ -245,13 +263,6 @@ ErrorCode HPMSPI::ValidateConfiguration(const Configuration& config) const
   if (div != 1U && ((div & 0x1U) != 0U || div > 510U))
   {
     return ErrorCode::NOT_SUPPORT;
-  }
-
-  if (config.double_buffer &&
-      ((rx_buffer_capacity_ < 2U) || (tx_buffer_capacity_ < 2U) ||
-       ((rx_buffer_capacity_ / 2U) == 0U) || ((tx_buffer_capacity_ / 2U) == 0U)))
-  {
-    return ErrorCode::SIZE_ERR;
   }
 
   return ErrorCode::OK;
@@ -341,15 +352,10 @@ void HPMSPI::RecoverController()
 
 ErrorCode HPMSPI::ApplyTiming(Prescaler prescaler)
 {
-  const uint32_t div = SPI::PrescalerToDiv(prescaler);
-  if (div == 0U)
+  const ErrorCode prescaler_ans = ValidatePrescaler(prescaler);
+  if (prescaler_ans != ErrorCode::OK)
   {
-    return ErrorCode::ARG_ERR;
-  }
-
-  if (div != 1U && ((div & 0x1U) != 0U || div > 510U))
-  {
-    return ErrorCode::NOT_SUPPORT;
+    return prescaler_ans;
   }
 
   const ErrorCode clock_ans = EnsureClockReady();
@@ -358,11 +364,7 @@ ErrorCode HPMSPI::ApplyTiming(Prescaler prescaler)
     return clock_ans;
   }
 
-  if (div > SPI::PrescalerToDiv(Prescaler::DIV_256))
-  {
-    return ErrorCode::NOT_SUPPORT;
-  }
-
+  const uint32_t div = SPI::PrescalerToDiv(prescaler);
   spi_timing_config_t timing{};
   spi_master_get_default_timing_config(&timing);
   timing.master_config.clk_src_freq_in_hz = source_clock_hz_;
@@ -383,9 +385,10 @@ ErrorCode HPMSPI::SetConfig(SPI::Configuration config)
     return ErrorCode::PTR_NULL;
   }
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return ErrorCode::BUSY;
+    return guard_ans;
   }
 #endif
 
@@ -417,9 +420,10 @@ ErrorCode HPMSPI::SetConfig(SPI::Configuration config)
 ErrorCode HPMSPI::SetChipSelect(ChipSelect cs)
 {
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return ErrorCode::BUSY;
+    return guard_ans;
   }
 #endif
 #if defined(HPM_IP_FEATURE_SPI_CS_SELECT) && (HPM_IP_FEATURE_SPI_CS_SELECT == 1)
@@ -443,9 +447,10 @@ SPI::Prescaler HPMSPI::GetMaxPrescaler() const { return Prescaler::DIV_256; }
 ErrorCode HPMSPI::SetDmaEnabled(bool enabled)
 {
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return ErrorCode::BUSY;
+    return guard_ans;
   }
 
   if (!enabled)
@@ -469,6 +474,11 @@ ErrorCode HPMSPI::SetDmaEnabled(bool enabled)
 }
 
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
+ErrorCode HPMSPI::GuardNoDmaActive() const
+{
+  return DmaTransferActive() ? ErrorCode::BUSY : ErrorCode::OK;
+}
+
 ErrorCode HPMSPI::ConvertDmaStatus(hpm_stat_t status)
 {
   switch (status)
@@ -937,9 +947,10 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
                                OperationRW& op, bool in_isr)
 {
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+    return FinishOperation(op, in_isr, guard_ans);
   }
 #endif
 
@@ -1042,9 +1053,10 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
                                    RawData read_data, OperationRW& op, bool in_isr)
 {
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+    return FinishOperation(op, in_isr, guard_ans);
   }
 #endif
 
@@ -1118,9 +1130,10 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
 ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 {
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+    return FinishOperation(op, in_isr, guard_ans);
   }
 #endif
 
@@ -1167,9 +1180,10 @@ ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool in_isr)
 {
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+    return FinishOperation(op, in_isr, guard_ans);
   }
 #endif
 
@@ -1225,9 +1239,10 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
                            bool in_isr)
 {
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-  if (DmaTransferActive())
+  ErrorCode guard_ans = GuardNoDmaActive();
+  if (guard_ans != ErrorCode::OK)
   {
-    return FinishOperation(op, in_isr, ErrorCode::BUSY);
+    return FinishOperation(op, in_isr, guard_ans);
   }
 #endif
 
@@ -1311,6 +1326,12 @@ bool HPMSPI::ShouldRecover(LibXRHpmSpiStatusType status)
 ErrorCode HPMSPI::ValidateConfiguration(const Configuration& config) const
 {
   UNUSED(config);
+  return ErrorCode::NOT_SUPPORT;
+}
+
+ErrorCode HPMSPI::ValidatePrescaler(Prescaler prescaler)
+{
+  UNUSED(prescaler);
   return ErrorCode::NOT_SUPPORT;
 }
 
