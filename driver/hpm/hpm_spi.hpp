@@ -262,6 +262,13 @@ class HPMSPI final : public SPI
    * data-phase stream transfers through ReadAndWrite() and Transfer() only.
    * CommandRead() / CommandWriteRead() keep using the blocking HPM SDK command
    * phase so SPI-flash opcode-read timing remains unchanged.
+   * 在 system/none、webasm 等轮询等待系统中，BLOCK DMA 操作依赖 LibXR
+   * Timebase 进行超时等待；未初始化 Timebase 时，ReadAndWrite() / Transfer()
+   * 会在启动 DMA 前返回 INIT_ERR。RTOS/POSIX 系统使用各自的 semaphore 等待机制。
+   * On polling-wait systems such as system/none and webasm, BLOCK DMA operations
+   * require a LibXR Timebase for timeout-aware waits; otherwise ReadAndWrite() /
+   * Transfer() return INIT_ERR before starting DMA. RTOS/POSIX systems use their
+   * native semaphore wait paths.
    *
    * @param enabled true 启用 DMA，false 回到同步阻塞路径 /
    * true to enable DMA, false to use the synchronous blocking path.
@@ -287,6 +294,21 @@ class HPMSPI final : public SPI
    * true when SetDmaEnabled(true) can succeed.
    */
   static constexpr bool IsDmaSupported() { return LIBXR_HPM_SPI_HAS_DMA_MGR != 0; }
+
+  /**
+   * @brief 查询控制器是否已有可用配置 / Query whether the controller has a
+   * valid applied configuration.
+   *
+   * 当底层 HPM 控制器复位/恢复失败时，该状态会被清除，后续传输将返回 INIT_ERR，
+   * 调用方可用它区分普通传输错误和控制器已不可用状态。
+   * The flag is cleared when low-level HPM controller reset/recovery fails. Later
+   * transfers return INIT_ERR, and callers can use this query to distinguish a
+   * normal transfer error from a controller that is no longer configured.
+   *
+   * @return true 表示 SetConfig() 已成功应用且恢复流程未清除该状态 /
+   * true when SetConfig() succeeded and recovery has not cleared the state.
+   */
+  bool IsConfigured() const { return configured_; }
 
   /**
    * @brief 发送 8-bit 命令后读取数据 / Read data after sending an 8-bit command.
