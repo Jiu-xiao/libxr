@@ -9,6 +9,13 @@
 #include "board.h"
 #endif
 
+#if defined(LIBXR_SYSTEM_none) || defined(LIBXR_SYSTEM_webasm)
+#include "timebase.hpp"
+#define LIBXR_HPM_SPI_DMA_BLOCK_WAIT_REQUIRES_TIMEBASE 1
+#else
+#define LIBXR_HPM_SPI_DMA_BLOCK_WAIT_REQUIRES_TIMEBASE 0
+#endif
+
 #if LIBXR_HPM_SPI_HAS_DMA_MGR && __has_include("hpm_l1c_drv.h")
 #include "hpm_l1c_drv.h"
 #define LIBXR_HPM_SPI_HAS_L1C 1
@@ -592,6 +599,12 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
   }
+#if LIBXR_HPM_SPI_DMA_BLOCK_WAIT_REQUIRES_TIMEBASE
+  if (op.type == OperationRW::OperationType::BLOCK && !Timebase::IsReady())
+  {
+    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+  }
+#endif
 
   ErrorCode ans = EnsureDmaReady();
   if (ans != ErrorCode::OK)
