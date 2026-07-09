@@ -77,10 +77,9 @@ MSPM0GPIO::MSPM0GPIO(GPIO_Regs* port, uint32_t pin_mask, uint32_t pincm)
       LibXR::MSPM0Group1Shared::RegisterGPIOC(&gpioc_irq_thunk);
 #endif
       break;
-  default:
-    return;     
+    default:
+      return;
   }
- 
 }
 
 bool MSPM0GPIO::Read() { return DL_GPIO_readPins(port_, pin_mask_) == pin_mask_; }
