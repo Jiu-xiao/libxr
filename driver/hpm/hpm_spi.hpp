@@ -633,7 +633,7 @@ class HPMSPI final : public SPI
   struct DmaTransferContext
   {
     DmaTransferKind kind = DmaTransferKind::NONE;
-    OperationRW op = {};
+    OperationRW* op = nullptr;
     uint8_t* rx = nullptr;
     uint8_t* tx = nullptr;
     RawData user_read = {nullptr, 0};
