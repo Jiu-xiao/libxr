@@ -48,9 +48,6 @@ inline constexpr bool K_HAS_TRNG = true;
 inline constexpr bool K_HAS_TRNG = false;
 #endif
 
-inline constexpr bool K_GROUP1_SHARED =
-    K_HAS_GPIOA || K_HAS_GPIOB || K_HAS_GPIOC || K_HAS_COMP0 || K_HAS_COMP1 ||
-    K_HAS_COMP2 || K_HAS_TRNG;
 
 inline IrqFn gpioa_irq_cb{nullptr};
 inline IrqFn gpiob_irq_cb{nullptr};
