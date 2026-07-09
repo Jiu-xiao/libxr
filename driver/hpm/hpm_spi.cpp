@@ -235,8 +235,7 @@ ErrorCode HPMSPI::ValidateConfiguration(const Configuration& config) const
   }
 
   if (config.double_buffer &&
-      ((rx_buffer_capacity_ < 2U) || (tx_buffer_capacity_ < 2U) ||
-       ((rx_buffer_capacity_ / 2U) == 0U) || ((tx_buffer_capacity_ / 2U) == 0U)))
+      ((rx_buffer_capacity_ < 2U) || (tx_buffer_capacity_ < 2U)))
   {
     return ErrorCode::SIZE_ERR;
   }
