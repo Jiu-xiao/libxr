@@ -535,7 +535,7 @@ ErrorCode HPMSPI::EnsureDmaReady()
 void HPMSPI::ClearDmaContext()
 {
   dma_ctx_.kind = DmaTransferKind::NONE;
-  dma_ctx_.op = OperationRW();
+  dma_ctx_.op = nullptr;
   dma_ctx_.rx = nullptr;
   dma_ctx_.tx = nullptr;
   dma_ctx_.user_read = {nullptr, 0};
@@ -635,7 +635,7 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   dma_busy_.store(1U, std::memory_order_release);
   ClearDmaContext();
   dma_ctx_.kind = kind;
-  dma_ctx_.op = op;
+  dma_ctx_.op = &op;
   dma_ctx_.rx = rx;
   dma_ctx_.tx = tx;
   dma_ctx_.user_read = user_read;
@@ -742,7 +742,7 @@ void HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans)
   }
 
   DmaTransferKind kind = dma_ctx_.kind;
-  OperationRW op = dma_ctx_.op;
+  OperationRW* op = dma_ctx_.op;
   uint8_t* rx = dma_ctx_.rx;
   const uint32_t size = dma_ctx_.size;
   const RawData user_read = dma_ctx_.user_read;
@@ -791,13 +791,13 @@ void HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans)
   ClearDmaContext();
   dma_busy_.store(0U, std::memory_order_release);
 
-  if (op.type == OperationRW::OperationType::BLOCK)
+  if (op != nullptr && op->type == OperationRW::OperationType::BLOCK)
   {
     (void)dma_block_wait_.TryPost(in_isr, ans);
   }
-  else
+  else if (op != nullptr)
   {
-    op.UpdateStatus(in_isr, ans);
+    op->UpdateStatus(in_isr, ans);
   }
 }
 
