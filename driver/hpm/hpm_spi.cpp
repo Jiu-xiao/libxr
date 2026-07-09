@@ -40,6 +40,18 @@ constexpr uint32_t kHpmSpiTransferCountMax = UINT32_MAX;
 #endif
 constexpr uint16_t kSpiRegisterAddressMask = 0x007FU;
 
+bool TransferSizeTooLarge(size_t size)
+{
+  return size > static_cast<size_t>(UINT32_MAX) ||
+         size > static_cast<size_t>(kHpmSpiTransferCountMax);
+}
+
+bool RegisterPayloadSizeTooLarge(size_t size)
+{
+  return size >= static_cast<size_t>(UINT32_MAX) ||
+         size >= static_cast<size_t>(kHpmSpiTransferCountMax);
+}
+
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
 static_assert(sizeof(uintptr_t) <= sizeof(uint32_t),
               "HPM SPI DMA helper assumes a 32-bit address space.");
@@ -782,7 +794,7 @@ void HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans)
     SwitchBuffer();
   }
 
-  if (ans != ErrorCode::OK && !in_isr)
+  if (ans != ErrorCode::OK)
   {
     RecoverController();
   }
@@ -982,7 +994,7 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
   }
-  if (need > kHpmSpiTransferCountMax)
+  if (TransferSizeTooLarge(need))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
@@ -1083,8 +1095,7 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
   }
-  if (write_data.size_ > kHpmSpiTransferCountMax ||
-      read_data.size_ > kHpmSpiTransferCountMax)
+  if (TransferSizeTooLarge(write_data.size_) || TransferSizeTooLarge(read_data.size_))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
@@ -1156,7 +1167,7 @@ ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   {
     return FinishOperation(op, in_isr, ErrorCode::OK);
   }
-  if (size > kHpmSpiTransferCountMax)
+  if (TransferSizeTooLarge(size))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
@@ -1215,7 +1226,7 @@ ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool
     return FinishOperation(op, in_isr, ErrorCode::OUT_OF_RANGE);
   }
 
-  if (read_data.size_ > (static_cast<size_t>(kHpmSpiTransferCountMax) - 1U))
+  if (RegisterPayloadSizeTooLarge(read_data.size_))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
@@ -1269,7 +1280,7 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
   }
-  if (write_data.size_ > (static_cast<size_t>(kHpmSpiTransferCountMax) - 1U))
+  if (RegisterPayloadSizeTooLarge(write_data.size_))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
@@ -1287,10 +1298,6 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
 
   auto* tx_bytes = static_cast<uint8_t*>(tx.addr_);
   tx_bytes[0] = static_cast<uint8_t>(reg & 0x7Fu);
-  if (write_data.size_ == 0 && tx.size_ > 1)
-  {
-    tx_bytes[1] = 0;
-  }
   if (write_data.size_ > 0)
   {
     Memory::FastCopy(tx_bytes + 1, write_data.addr_, write_data.size_);
