@@ -1206,12 +1206,12 @@ ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool
     return FinishOperation(op, in_isr, ErrorCode::OUT_OF_RANGE);
   }
 
-  const size_t total = read_data.size_ + 1;
-  if (total > kHpmSpiTransferCountMax)
+  if (read_data.size_ > (static_cast<size_t>(kHpmSpiTransferCountMax) - 1U))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
+  const size_t total = read_data.size_ + 1U;
   RawData rx = GetRxBuffer();
   RawData tx = GetTxBuffer();
   if (rx.addr_ == nullptr || tx.addr_ == nullptr)
@@ -1252,7 +1252,6 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
   }
 #endif
 
-  const size_t total = write_data.size_ + 1;
   if ((reg & static_cast<uint16_t>(~kSpiRegisterAddressMask)) != 0U)
   {
     return FinishOperation(op, in_isr, ErrorCode::OUT_OF_RANGE);
@@ -1261,11 +1260,12 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
   }
-  if (total > kHpmSpiTransferCountMax)
+  if (write_data.size_ > (static_cast<size_t>(kHpmSpiTransferCountMax) - 1U))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
+  const size_t total = write_data.size_ + 1U;
   RawData tx = GetTxBuffer();
   if (tx.addr_ == nullptr)
   {
