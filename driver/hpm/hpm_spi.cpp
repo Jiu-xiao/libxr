@@ -846,6 +846,7 @@ ErrorCode HPMSPI::DoTransfer(uint8_t* rx, const uint8_t* tx, uint32_t size)
   }
 
   spi_control_config_t control = MakeControlConfig(spi_trans_write_read_together);
+  ApplyChipSelect();
   const hpm_stat_t status = spi_transfer(spi_, &control, nullptr, nullptr,
                                          const_cast<uint8_t*>(tx), size, rx, size);
   if (ShouldRecover(status))
@@ -871,8 +872,10 @@ ErrorCode HPMSPI::DoWriteOnly(const uint8_t* tx, uint32_t size)
   }
 
   spi_control_config_t control = MakeControlConfig(spi_trans_write_only);
+  uint8_t dummy_rx = 0U;
+  ApplyChipSelect();
   const hpm_stat_t status = spi_transfer(spi_, &control, nullptr, nullptr,
-                                         const_cast<uint8_t*>(tx), size, nullptr, 1);
+                                         const_cast<uint8_t*>(tx), size, &dummy_rx, 1U);
   if (ShouldRecover(status))
   {
     RecoverController();
@@ -896,8 +899,10 @@ ErrorCode HPMSPI::DoReadOnly(uint8_t* rx, uint32_t size)
   }
 
   spi_control_config_t control = MakeControlConfig(spi_trans_read_only);
+  uint8_t dummy_tx = 0U;
+  ApplyChipSelect();
   const hpm_stat_t status =
-      spi_transfer(spi_, &control, nullptr, nullptr, nullptr, 1, rx, size);
+      spi_transfer(spi_, &control, nullptr, nullptr, &dummy_tx, 1U, rx, size);
   if (ShouldRecover(status))
   {
     RecoverController();
@@ -940,8 +945,13 @@ ErrorCode HPMSPI::DoCommandWriteRead(uint8_t command, const uint8_t* tx, uint32_
   control.master_config.cmd_enable = true;
   const uint32_t wcount = (tx_size > 0U) ? tx_size : 1U;
   const uint32_t rcount = (rx_size > 0U) ? rx_size : 1U;
+  uint8_t dummy_tx = 0U;
+  uint8_t dummy_rx = 0U;
+  uint8_t* tx_buffer = (tx_size > 0U) ? const_cast<uint8_t*>(tx) : &dummy_tx;
+  uint8_t* rx_buffer = (rx_size > 0U) ? rx : &dummy_rx;
+  ApplyChipSelect();
   const hpm_stat_t status = spi_transfer(spi_, &control, &command, nullptr,
-                                         const_cast<uint8_t*>(tx), wcount, rx, rcount);
+                                         tx_buffer, wcount, rx_buffer, rcount);
   if (ShouldRecover(status))
   {
     RecoverController();
