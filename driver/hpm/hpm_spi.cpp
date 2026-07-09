@@ -655,10 +655,6 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     FlushDCacheIfNeeded(tx, size);
   }
-  if (rx != nullptr)
-  {
-    FlushDCacheIfNeeded(rx, size);
-  }
 
   ApplyChipSelect();
 
