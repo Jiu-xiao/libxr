@@ -124,10 +124,6 @@ ErrorCode MSPM0Watchdog::Start()
   return ErrorCode::OK;
 }
 
-ErrorCode MSPM0Watchdog::Stop()
-{
-  auto_feed_ = false;
-  return ErrorCode::NOT_SUPPORT;
-}
+ErrorCode MSPM0Watchdog::Stop() { return ErrorCode::NOT_SUPPORT; }
 
 #endif

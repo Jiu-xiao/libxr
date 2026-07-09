@@ -17,7 +17,7 @@ constexpr uint32_t MSPM0_CAN_INTR_MASK =
     DL_MCAN_INTR_SRC_TRANS_COMPLETE | DL_MCAN_INTR_SRC_TRANS_CANCEL_FINISH |
     DL_MCAN_INTR_SRC_TX_FIFO_EMPTY | DL_MCAN_INTR_SRC_BUS_OFF_STATUS |
     DL_MCAN_INTR_SRC_PROTOCOL_ERR_ARB | DL_MCAN_INTR_SRC_PROTOCOL_ERR_DATA |
-    DL_MCAN_INTR_SRC_MSG_RAM_ACCESS_FAILURE;
+    DL_MCAN_INTR_SRC_MSG_RAM_ACCESS_FAILURE | DL_MCAN_INTR_SRC_RES_ADDR_ACCESS;
 
 constexpr uint32_t MSPM0_CAN_ERROR_INTR_MASK =
     DL_MCAN_INTR_SRC_BUS_OFF_STATUS | DL_MCAN_INTR_SRC_PROTOCOL_ERR_ARB |
@@ -246,6 +246,7 @@ uint32_t mspm0_can_fclk_divider_hz(DL_MCAN_FCLK_DIV divider)
       return 4U;
 
     case static_cast<DL_MCAN_FCLK_DIV>(MCAN_CLKDIV_RATIO_DIV_BY_1_1):
+      // SysConfig may store the raw 1:1 register value, which differs from the DL enum.
       return 1U;
 
     default:
@@ -351,11 +352,11 @@ MSPM0CAN::MSPM0CAN(Resources res, uint32_t tx_pool_size)
 
   instance_map_[res_.index] = this;
 
-  NVIC_ClearPendingIRQ(res_.irqn);
-  NVIC_EnableIRQ(res_.irqn);
-
   const ErrorCode INIT_ANS = Init();
   ASSERT(INIT_ANS == ErrorCode::OK);
+
+  NVIC_ClearPendingIRQ(res_.irqn);
+  NVIC_EnableIRQ(res_.irqn);
 }
 
 ErrorCode MSPM0CAN::Init()
@@ -378,16 +379,16 @@ ErrorCode MSPM0CAN::Init()
     }
   }
 
-  DL_MCAN_enableIntr(res_.instance, MSPM0_CAN_INTR_MASK, true);
-  DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_0, true);
-  DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_1, true);
-
   DL_MCAN_clearIntrStatus(res_.instance, DL_MCAN_INTR_MASK_ALL,
                           DL_MCAN_INTR_SRC_MCAN_LINE_0);
   DL_MCAN_clearIntrStatus(res_.instance, DL_MCAN_INTR_MASK_ALL,
                           DL_MCAN_INTR_SRC_MCAN_LINE_1);
 
   DL_MCAN_clearInterruptStatus(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
+
+  DL_MCAN_enableIntr(res_.instance, MSPM0_CAN_INTR_MASK, true);
+  DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_0, true);
+  DL_MCAN_enableIntrLine(res_.instance, DL_MCAN_INTR_LINE_NUM_1, true);
   DL_MCAN_enableInterrupt(res_.instance, MSPM0_CAN_MSP_LINE_MASK);
 
   return ErrorCode::OK;
