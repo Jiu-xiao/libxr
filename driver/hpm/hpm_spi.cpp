@@ -234,8 +234,7 @@ ErrorCode HPMSPI::ValidateConfiguration(const Configuration& config) const
     return prescaler_ans;
   }
 
-  if (config.double_buffer &&
-      ((rx_buffer_capacity_ < 2U) || (tx_buffer_capacity_ < 2U)))
+  if (config.double_buffer && ((rx_buffer_capacity_ < 2U) || (tx_buffer_capacity_ < 2U)))
   {
     return ErrorCode::SIZE_ERR;
   }
@@ -950,8 +949,8 @@ ErrorCode HPMSPI::DoCommandWriteRead(uint8_t command, const uint8_t* tx, uint32_
   uint8_t* tx_buffer = (tx_size > 0U) ? const_cast<uint8_t*>(tx) : &dummy_tx;
   uint8_t* rx_buffer = (rx_size > 0U) ? rx : &dummy_rx;
   ApplyChipSelect();
-  const hpm_stat_t status = spi_transfer(spi_, &control, &command, nullptr,
-                                         tx_buffer, wcount, rx_buffer, rcount);
+  const hpm_stat_t status = spi_transfer(spi_, &control, &command, nullptr, tx_buffer,
+                                         wcount, rx_buffer, rcount);
   if (ShouldRecover(status))
   {
     RecoverController();
