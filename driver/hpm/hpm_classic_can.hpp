@@ -7,20 +7,20 @@
  * 鏈枃浠舵寜搴曞眰澶栬 IP 褰掓。锛屽彧瀵瑰簲 classic `CAN_Type`
  * IP銆傜被鍚嶄粛鎸?LibXR 鎶借薄鍛藉悕锛? * 鍥犳杩欓噷鐨?`HPMClassicCAN`
  * 琛ㄧず鈥渃lassic CAN IP + LibXR::CAN鈥濄€傝嫢鐩爣 SoC
- * 鏆撮湶鐨勬槸 `MCAN_Type`锛屽悓鍚?`HPMClassicCAN` 瀹炵幇浣嶄簬 `hpm_mcan.*`銆? * This
+ * 鏆撮湶鐨勬槸 `MCAN_Type`锛岃浣跨敤 MCAN wrapper銆? * This
  * file is grouped by hardware IP and only targets the classic `CAN_Type` IP.
  * `HPMClassicCAN` is named separately so it can coexist with PR #208's `HPMCAN`
  * MCAN classic adapter. When the target exposes only `MCAN_Type`, use `HPMCAN`
- * from `hpm_can.*` or `HPMCANFD` from `hpm_mcan.*` instead.
+ * from `hpm_can.*` or `HPMCANFD` from `hpm_canfd.*` instead.
  *
  * 澶氱郴鍒楅€夋嫨浣跨敤 HPM SDK header 涓殑
  * `MCAN_SOC_MAX_COUNT`銆乣CAN_SOC_MAX_COUNT`銆? * `HPMSOC_HAS_HPMSDK_CAN`
  * 鍜?`__has_include("hpm_can_drv.h")` 鑳藉姏瀹忥紱渚嬪 HPM6360 璧?classic
- * CAN锛孒PM6E80 璧?`hpm_mcan.*`锛屼笉鎸夌郴鍒楀悕澶嶅埗鏂囦欢銆傜己灏?classic CAN SDK
+ * CAN锛孒PM6E80 璧?MCAN wrapper锛屼笉鎸夌郴鍒楀悕澶嶅埗鏂囦欢銆傜己灏?classic CAN SDK
  * driver 澶存垨妯″潡瀹忔椂淇濈暀绫诲舰鐘跺苟杩斿洖 `NOT_SUPPORT`銆? * Multi-series
  * selection uses the `MCAN_SOC_MAX_COUNT`, `CAN_SOC_MAX_COUNT`, `HPMSOC_HAS_HPMSDK_CAN`,
  * and `__has_include("hpm_can_drv.h")` capability macros from HPM SDK headers. For
- * example, HPM6360 uses classic CAN, while HPM6E80 uses `hpm_mcan.*`; no series-specific
+ * example, HPM6360 uses classic CAN, while HPM6E80 uses MCAN wrappers; no series-specific
  * driver copy is used. When the classic CAN SDK driver header or module macro is missing,
  * the class shape remains available and APIs return `NOT_SUPPORT`.
  */
@@ -33,10 +33,6 @@
 #include "hpm_common.h"
 #include "hpm_soc.h"
 #include "lockfree_pool.hpp"
-
-#if defined(MCAN_SOC_MAX_COUNT) && (MCAN_SOC_MAX_COUNT > 0)
-#include "hpm_mcan.hpp"
-#else
 
 #if defined(HPMSOC_HAS_HPMSDK_CAN) && __has_include("hpm_can_drv.h") &&           \
                                                     defined(CAN_SOC_MAX_COUNT) && \

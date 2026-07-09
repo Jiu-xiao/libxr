@@ -1,7 +1,5 @@
 ﻿#include "hpm_classic_can.hpp"
 
-#if !defined(MCAN_SOC_MAX_COUNT) || (MCAN_SOC_MAX_COUNT == 0)
-
 #include <cstring>
 
 #if LIBXR_HPM_CLASSIC_CAN_SUPPORTED
@@ -577,5 +575,3 @@ extern "C" void libxr_hpm_classic_can_process_interrupt(uint8_t index)
 {
   HPMClassicCAN::OnInterrupt(index);
 }
-
-#endif
