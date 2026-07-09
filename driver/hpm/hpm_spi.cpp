@@ -609,6 +609,17 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
   }
+  if (copy_rx_to_user)
+  {
+    if (user_read.size_ > size)
+    {
+      return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    }
+    if (user_read.size_ > 0U && user_read.addr_ == nullptr)
+    {
+      return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    }
+  }
 #if LIBXR_HPM_SPI_DMA_BLOCK_WAIT_REQUIRES_TIMEBASE
   if (op.type == OperationRW::OperationType::BLOCK && !Timebase::IsReady())
   {
