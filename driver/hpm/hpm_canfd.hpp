@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "hpm_mcan_backend.hpp"
-#include "lockfree_pool.hpp"
+#include "queue.hpp"
 
 #if LIBXR_HPM_MCAN_SUPPORTED
 
@@ -102,8 +102,8 @@ class HPMCANFD : public FDCAN
   std::atomic<uint32_t> tx_lock_{0};
   std::atomic<uint32_t> tx_pend_{0};
 
-  LockFreePool<ClassicPack> tx_pool_;
-  LockFreePool<FDPack> tx_pool_fd_;
+  MPMCQueue<ClassicPack> tx_queue_;
+  MPMCQueue<FDPack> tx_fd_queue_;
 
   struct
   {

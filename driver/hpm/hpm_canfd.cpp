@@ -137,8 +137,8 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
       auto_enable_irq_(auto_enable_irq),
       msg_buf_(msg_buf),
       msg_buf_size_(msg_buf_size),
-      tx_pool_(queue_size),
-      tx_pool_fd_(queue_size)
+      tx_queue_(queue_size),
+      tx_fd_queue_(queue_size)
 {
   if (can_ == nullptr || index_ >= MAX_INSTANCES || index_ != index)
   {
@@ -220,6 +220,22 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
     return ErrorCode::ARG_ERR;
   }
 
+  const bool nominal_timing_set = detail::HasAnyLowLevelTiming(cfg.bit_timing);
+  const bool data_timing_set = detail::HasAnyLowLevelTiming(cfg.data_timing);
+  const bool nominal_low_level = detail::HasLowLevelTiming(cfg.bit_timing);
+  const bool data_low_level = detail::HasLowLevelTiming(cfg.data_timing);
+
+  if ((nominal_timing_set && !nominal_low_level) || (data_timing_set && !data_low_level))
+  {
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
+  }
+  if (!cfg.fd_mode.fd_enabled && data_timing_set)
+  {
+    ASSERT(false);
+    return ErrorCode::ARG_ERR;
+  }
+
   Shutdown();
 
   const ErrorCode msg_buf_status = ApplyMessageBuffer();
@@ -242,9 +258,6 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   config.enable_restricted_operation_mode = cfg.mode.listen_only;
   config.enable_non_iso_mode = false;
   config.enable_tdc = cfg.fd_mode.fd_enabled && cfg.fd_mode.brs;
-
-  const bool nominal_low_level = detail::HasLowLevelTiming(cfg.bit_timing);
-  const bool data_low_level = detail::HasLowLevelTiming(cfg.data_timing);
 
   if (nominal_low_level || data_low_level)
   {
@@ -338,10 +351,10 @@ ErrorCode HPMCANFD::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  if (tx_pool_.Put(pack) != ErrorCode::OK)
+  if (tx_queue_.Push(pack) != ErrorCode::OK)
   {
     TxService();
-    if (tx_pool_.Put(pack) != ErrorCode::OK)
+    if (tx_queue_.Push(pack) != ErrorCode::OK)
     {
       return ErrorCode::FULL;
     }
@@ -378,10 +391,10 @@ ErrorCode HPMCANFD::AddMessage(const FDPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  if (tx_pool_fd_.Put(pack) != ErrorCode::OK)
+  if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
   {
     TxService();
-    if (tx_pool_fd_.Put(pack) != ErrorCode::OK)
+    if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
     {
       return ErrorCode::FULL;
     }
@@ -504,7 +517,7 @@ void HPMCANFD::TxService()
     while (HardwareTxQueueEmptySize() != 0U)
     {
       FDPack pfd{};
-      if (fd_enabled_ && tx_pool_fd_.Get(pfd) == ErrorCode::OK)
+      if (fd_enabled_ && tx_fd_queue_.Pop(pfd) == ErrorCode::OK)
       {
         BuildTxFrame(pfd, tx_buff_.frame, brs_enabled_, esi_enabled_);
 
@@ -514,7 +527,7 @@ void HPMCANFD::TxService()
         UNUSED(fifo_index);
         if (status != status_success)
         {
-          if (tx_pool_fd_.Put(pfd) != ErrorCode::OK)
+          if (tx_fd_queue_.Push(pfd) != ErrorCode::OK)
           {
             ASSERT(false);
           }
@@ -524,7 +537,7 @@ void HPMCANFD::TxService()
       }
 
       ClassicPack pc{};
-      if (tx_pool_.Get(pc) == ErrorCode::OK)
+      if (tx_queue_.Pop(pc) == ErrorCode::OK)
       {
         BuildTxFrame(pc, tx_buff_.frame);
         uint32_t fifo_index = 0U;
@@ -533,7 +546,7 @@ void HPMCANFD::TxService()
         UNUSED(fifo_index);
         if (status != status_success)
         {
-          if (tx_pool_.Put(pc) != ErrorCode::OK)
+          if (tx_queue_.Push(pc) != ErrorCode::OK)
           {
             ASSERT(false);
           }

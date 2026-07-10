@@ -156,6 +156,18 @@ inline ErrorCode ConvertMcanStatus(hpm_stat_t status)
   }
 }
 
+inline bool HasAnyLowLevelTiming(const CAN::BitTiming& timing)
+{
+  return timing.brp != 0U || timing.prop_seg != 0U || timing.phase_seg1 != 0U ||
+         timing.phase_seg2 != 0U || timing.sjw != 0U;
+}
+
+inline bool HasAnyLowLevelTiming(const FDCAN::DataBitTiming& timing)
+{
+  return timing.brp != 0U || timing.prop_seg != 0U || timing.phase_seg1 != 0U ||
+         timing.phase_seg2 != 0U || timing.sjw != 0U;
+}
+
 inline bool HasLowLevelTiming(const CAN::BitTiming& timing)
 {
   return timing.brp != 0U && timing.phase_seg1 != 0U && timing.phase_seg2 != 0U &&
