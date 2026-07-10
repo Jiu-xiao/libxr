@@ -1,9 +1,10 @@
 #pragma once
 
 /**
- * @brief 按编译格式 profile 特化的、按输出端类型区分的字节码执行器 / Per-sink bytecode executor specialized by the compiled format profile
+ * @brief 按输出端共享重后端、按调用点 profile 裁剪操作码分发的字节码执行器 / Per-sink bytecode executor with shared heavy backends and per-call profile-pruned opcode dispatch
+ * @tparam Sink 输出端类型，需满足 `OutputSink` / Sink type satisfying `OutputSink`
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 class Writer::Executor
 {
  public:
@@ -17,8 +18,10 @@ class Writer::Executor
 
   /**
    * @brief 持续执行记录流，直到遇到 `FormatOp::End` / Run until the compiled record stream reaches `FormatOp::End`
+   * @tparam Profile 当前编译格式需要的操作码配置 / Opcode profile required by the current compiled format
    * @return 返回首个 sink 或运行期错误；正常执行到记录流结束时返回 `ErrorCode::OK` / Returns the first sink or runtime error, or `ErrorCode::OK` when the record stream finishes normally
    */
+  template <FormatProfile Profile>
   [[nodiscard]] ErrorCode Run();
 
  private:
@@ -126,16 +129,20 @@ class Writer::Executor
 
   /**
    * @brief 将一个 `GenericField` 载荷分发到对应的宽回退路径 / Dispatch one `GenericField` payload to the corresponding wide fallback
+   * @tparam Profile 当前编译格式使用的精确通用字段类型集合 / Exact generic-field type set used by the current compiled format
    * @param type `GenericField` 记录携带的语义字段类型 / Semantic field type carried by the `GenericField` record
    * @return 返回该字段的具体写出结果 / Returns the concrete writer result for that field
    */
+  template <FormatProfile Profile>
   [[nodiscard]] ErrorCode DispatchGenericField(FormatType type);
 
   /**
    * @brief 将一个运行期操作码分发到选中的特化路径 / Dispatch one runtime opcode to the selected specialized path
+   * @tparam Profile 当前编译格式需要的操作码配置 / Opcode profile required by the current compiled format
    * @param op 解码后的运行期操作码 / Decoded runtime opcode
    * @return 返回该操作码对应特化路径的运行结果 / Returns the specialized runtime result for that opcode
    */
+  template <FormatProfile Profile>
   [[nodiscard]] ErrorCode DispatchOp(FormatOp op);
 
   Sink& sink_;

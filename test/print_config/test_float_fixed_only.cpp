@@ -5,7 +5,7 @@
  * @details
  * 1. `%f` / `{:f}` 可用。
  * 2. scientific、general 和 long double 被拒绝。
- * 3. `LIBXR_PRINT_FLOAT_ENABLE_DOUBLE=0` 时 brace `double` 降到 F32 打包。
+ * 3. `LIBXR_PRINT_FLOAT_ENABLE_DOUBLE=0` 时 `double` 降到 F32 打包。
  */
 #include "print_config_reset.hpp"
 
@@ -54,8 +54,12 @@ static_assert(PrintfSourceError<"%F">() == Printf::Error::None);
 static_assert(PrintfSourceError<"%e">() == Printf::Error::InvalidSpecifier);
 static_assert(PrintfSourceError<"%g">() == Printf::Error::InvalidSpecifier);
 static_assert(PrintfSourceError<"%Lf">() == Printf::Error::InvalidSpecifier);
+static_assert(Printf::Matches<"%f", float>());
+static_assert(Printf::Matches<"%f", double>());
 
-// double 存储关闭时，brace `double` 参数仍可用，但按 F32 打包。
-// With double storage disabled, brace `double` remains accepted but packs as F32.
-using DoubleFixed = LibXR::Format<"{:.2f}">::Compiled<double>;
-static_assert(DoubleFixed::ArgumentList()[0].pack == FormatPackKind::F32);
+// double 存储关闭时，brace 和 printf 都接受 double，但按 F32 打包并降精度。
+// With double storage disabled, brace and printf accept double but pack it as F32.
+using BraceDoubleFixed = LibXR::Format<"{:.2f}">::Compiled<double>;
+using PrintfDoubleFixed = decltype(Printf::Build<"%f">());
+static_assert(BraceDoubleFixed::ArgumentList()[0].pack == FormatPackKind::F32);
+static_assert(PrintfDoubleFixed::ArgumentList()[0].pack == FormatPackKind::F32);

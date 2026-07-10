@@ -11,9 +11,9 @@
  * @param spec 解码后的字段规格 / Decoded field spec
  * @return 返回 `'-'`、`'+'`、`' '` 或 `'\0'` / Returns `'-'`, `'+'`, `' '`, or `'\0'`
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <std::signed_integral Int>
-char Writer::Executor<Sink, Profile>::ResolveSignChar(Int value, const Spec& spec)
+char Writer::Executor<Sink>::ResolveSignChar(Int value, const Spec& spec)
 {
   if (value < 0)
   {
@@ -38,9 +38,9 @@ char Writer::Executor<Sink, Profile>::ResolveSignChar(Int value, const Spec& spe
  * @param spec 解码后的字段规格 / Decoded field spec
  * @return 返回 `'-'`、`'+'`、`' '` 或 `'\0'` / Returns `'-'`, `'+'`, `' '`, or `'\0'`
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <typename T>
-char Writer::Executor<Sink, Profile>::ResolveFloatSignChar(T value, const Spec& spec)
+char Writer::Executor<Sink>::ResolveFloatSignChar(T value, const Spec& spec)
 {
   if (std::isnan(value))
   {
@@ -73,9 +73,9 @@ char Writer::Executor<Sink, Profile>::ResolveFloatSignChar(T value, const Spec& 
  * @param value 待写出的整数值 / Integer value to write
  * @return 返回共享整数字段路径的写出结果 / Returns the shared integer-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <std::signed_integral Int>
-ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int value)
+ErrorCode Writer::Executor<Sink>::WriteSigned(const Spec& spec, Int value)
 {
   using UInt = std::make_unsigned_t<Int>;
   char digit_buffer[UnsignedDigitCapacity<UInt, 10>()];
@@ -103,10 +103,10 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteSigned(const Spec& spec, Int val
  * @param value 待写出的整数值 / Integer value to write
  * @return 返回共享整数字段路径的写出结果 / Returns the shared integer-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <uint8_t Base, bool UpperCase, bool PrependOctalZero,
           std::unsigned_integral UInt>
-ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view prefix,
+ErrorCode Writer::Executor<Sink>::WriteUnsignedDigits(std::string_view prefix,
                                                                const Spec& spec,
                                                                UInt value)
 {
@@ -140,9 +140,9 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteUnsignedDigits(std::string_view 
  * 这个桥接函数本身不直接格式化数字；它只负责把运行期整数语义类型映射到上面的
  * 编译期进制/大小写共享辅助路径。
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <FormatType Type, std::unsigned_integral UInt>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsigned(const Spec& spec, UInt value)
+ErrorCode Writer::Executor<Sink>::DispatchUnsigned(const Spec& spec, UInt value)
 {
   auto prefix = IntegerPrefix(Type, spec, value);
 
@@ -176,8 +176,8 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsigned(const Spec& spec, UI
  * @param value 以 `uintptr_t` 编码的指针值 / Pointer value encoded as `uintptr_t`
  * @return 返回指针字段写出结果 / Returns the pointer-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WritePointer(const Spec& spec,
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WritePointer(const Spec& spec,
                                                         uintptr_t value)
 {
   char digit_buffer[UnsignedDigitCapacity<uintptr_t, 16>()];
@@ -199,8 +199,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WritePointer(const Spec& spec,
  * @param ch 待写出的字符值 / Character value to write
  * @return 返回字符字段写出结果 / Returns the character-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteCharacter(const Spec& spec, char ch)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteCharacter(const Spec& spec, char ch)
 {
   return WriteTextField(std::string_view(&ch, 1), spec);
 }
@@ -211,8 +211,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteCharacter(const Spec& spec, char
  * @param text 待写出的字符串载荷 / String payload to write
  * @return 返回字符串字段写出结果 / Returns the string-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteString(const Spec& spec,
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteString(const Spec& spec,
                                                        std::string_view text)
 {
   auto view = text;
@@ -233,9 +233,9 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteString(const Spec& spec,
  * @return 返回浮点字段写出结果 / Returns the float-field write result
  */
 #if LIBXR_PRINT_ENABLE_FLOAT
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <typename T>
-ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
+ErrorCode Writer::Executor<Sink>::WriteFloat(FormatType type,
                                                       const Spec& spec, T value)
 {
   if (!UsesFloatTextBackend(type))
@@ -296,8 +296,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteFloat(FormatType type,
  * @param value Unsigned value to write. / 待写出的无符号值。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteU32Dec(uint32_t value)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteU32Dec(uint32_t value)
 {
   char digit_buffer[UnsignedDigitCapacity<uint32_t, 10>()];
   size_t digit_count = AppendUnsigned<10>(digit_buffer, value);
@@ -309,8 +309,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteU32Dec(uint32_t value)
  * @param value Signed value to write. / 待写出的有符号值。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteI32Dec(int32_t value)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteI32Dec(int32_t value)
 {
   using UInt = std::make_unsigned_t<int32_t>;
   char digit_buffer[UnsignedDigitCapacity<UInt, 10>()];
@@ -336,9 +336,9 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteI32Dec(int32_t value)
  * @param value Unsigned value to write. / 待写出的无符号值。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <uint8_t Base, bool UpperCase>
-ErrorCode Writer::Executor<Sink, Profile>::WriteU32Base(uint32_t value)
+ErrorCode Writer::Executor<Sink>::WriteU32Base(uint32_t value)
 {
   char digit_buffer[UnsignedDigitCapacity<uint32_t, Base>()];
   size_t digit_count = AppendUnsigned<Base, UpperCase>(digit_buffer, value);
@@ -351,8 +351,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteU32Base(uint32_t value)
  * @param value 待写出的无符号值 / Unsigned value to write
  * @return 返回该快路径的写出结果 / Returns the fast-path write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteU32ZeroPadWidth(uint8_t width,
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteU32ZeroPadWidth(uint8_t width,
                                                                 uint32_t value)
 {
   char digit_buffer[UnsignedDigitCapacity<uint32_t, 10>()];
@@ -370,8 +370,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteU32ZeroPadWidth(uint8_t width,
  * @param text String payload to write. / 待写出的字符串载荷。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteStringRaw(std::string_view text)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteStringRaw(std::string_view text)
 {
   return WriteRaw(text);
 }
@@ -381,8 +381,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteStringRaw(std::string_view text)
  * @param ch Character payload to write. / 待写出的字符载荷。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteCharacterRaw(char ch)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteCharacterRaw(char ch)
 {
   return WriteRaw(std::string_view(&ch, 1));
 }

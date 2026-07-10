@@ -588,7 +588,7 @@ class Writer
   class CodeReader;
   class ArgumentReader;
 
-  template <OutputSink Sink, FormatProfile Profile>
+  template <OutputSink Sink>
   class Executor;
 
   /**
@@ -604,7 +604,7 @@ class Writer
   [[nodiscard]] static LIBXR_NOINLINE ErrorCode Execute(Sink& sink, const uint8_t* codes,
                                                         const uint8_t* args)
   {
-    return Executor<Sink, Profile>(sink, codes, args).Run();
+    return Executor<Sink>(sink, codes, args).template Run<Profile>();
   }
 
   /**

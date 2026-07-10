@@ -159,6 +159,8 @@ class FormatCompiler
 
   /**
    * @brief 指出某个操作码族需要打开哪一个 writer-profile 位。 / Says which writer-profile bit one opcode family needs.
+   * @param op 待分类的操作码 / Opcode to classify
+   * @return 对应的窄路径 profile 位；无需窄路径时返回 `None` / Required narrow-path profile bit, or `None` when no narrow path is needed
    */
   [[nodiscard]] static consteval FormatProfile ProfileForOp(FormatOp op)
   {
@@ -176,7 +178,7 @@ class FormatCompiler
       case FormatOp::CharacterRaw:
         return FormatProfile::TextArg;
       case FormatOp::GenericField:
-        return FormatProfile::Generic;
+        return FormatProfile::None;
       case FormatOp::TextInline:
       case FormatOp::TextRef:
       case FormatOp::TextSpace:
@@ -383,7 +385,8 @@ class FormatCompiler
           break;
       }
 
-      profile |= ProfileForOp(op);
+      profile |= op == FormatOp::GenericField ? GenericProfileFor(field.type)
+                                              : ProfileForOp(op);
 
       arg_scratch[arg_count++] = FormatArgumentInfo{
           .pack = field.pack,

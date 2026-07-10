@@ -9,8 +9,8 @@
  * @param text Text chunk to write. / 待写出的文本片段。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteRaw(std::string_view text)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteRaw(std::string_view text)
 {
   return sink_.Write(text);
 }
@@ -21,8 +21,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteRaw(std::string_view text)
  * @param count 重复次数 / Repeat count
  * @return 返回首个 sink 错误；全部填充字节写出后返回 `ErrorCode::OK` / Returns the first sink error, or `ErrorCode::OK` when all fill bytes are written
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WritePadding(char fill, size_t count)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WritePadding(char fill, size_t count)
 {
   char chunk[16];
   std::memset(chunk, fill, sizeof(chunk));
@@ -47,8 +47,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WritePadding(char fill, size_t count)
  * @param spec 解码后的字段规格 / Decoded field spec
  * @return 返回首个 sink 错误；成功时返回 `ErrorCode::OK` / Returns the first sink error, or `ErrorCode::OK` on success
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteTextField(std::string_view text,
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteTextField(std::string_view text,
                                                           const Spec& spec)
 {
   size_t pad = FieldPadding(spec.width, text.size());
@@ -87,8 +87,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteTextField(std::string_view text,
  * @param spec 解码后的字段规格 / Decoded field spec
  * @return 返回首个 sink 错误；成功时返回 `ErrorCode::OK` / Returns the first sink error, or `ErrorCode::OK` on success
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteIntegerField(
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteIntegerField(
     char sign_char, std::string_view prefix, std::string_view digits, const Spec& spec)
 {
   auto write_char = [this](char ch) -> ErrorCode {
@@ -166,8 +166,8 @@ ErrorCode Writer::Executor<Sink, Profile>::WriteIntegerField(
  * @param spec 解码后的字段规格 / Decoded field spec
  * @return 返回首个 sink 错误；成功时返回 `ErrorCode::OK` / Returns the first sink error, or `ErrorCode::OK` on success
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::WriteFloatField(char sign_char,
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::WriteFloatField(char sign_char,
                                                            std::string_view text,
                                                            const Spec& spec)
 {
