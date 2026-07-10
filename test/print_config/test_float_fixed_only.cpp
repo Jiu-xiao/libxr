@@ -5,7 +5,7 @@
  * @details
  * 1. `%f` / `{:f}` 可用。
  * 2. scientific、general 和 long double 被拒绝。
- * 3. `LIBXR_PRINT_FLOAT_ENABLE_DOUBLE=0` 时 brace `double` 降到 F32 打包。
+ * 3. `LIBXR_PRINT_FLOAT_ENABLE_DOUBLE=0` 时拒绝隐式 `double` 降精度。
  */
 #include "print_config_reset.hpp"
 
@@ -27,7 +27,6 @@
 
 #include "print_config_probe.hpp"
 
-using LibXR::Print::FormatPackKind;
 using LibXR::Print::Printf;
 using LibXR::Print::Config::enable_float_double;
 using LibXR::Print::Detail::FormatFrontend::Error;
@@ -39,7 +38,7 @@ static_assert(!enable_float_double);
 // Brace frontend: fixed is accepted; scientific/general/long double are rejected.
 static_assert(LibXR::Format<"{}">::Matches<float>());
 static_assert(LibXR::Format<"{:.2f}">::Matches<float>());
-static_assert(LibXR::Format<"{:.2F}">::Matches<double>());
+static_assert(!LibXR::Format<"{:.2F}">::Matches<double>());
 static_assert(!LibXR::Format<"{:.2e}">::Matches<float>());
 static_assert(!LibXR::Format<"{:g}">::Matches<double>());
 static_assert(!LibXR::Format<"{:.2f}">::Matches<long double>());
@@ -54,8 +53,9 @@ static_assert(PrintfSourceError<"%F">() == Printf::Error::None);
 static_assert(PrintfSourceError<"%e">() == Printf::Error::InvalidSpecifier);
 static_assert(PrintfSourceError<"%g">() == Printf::Error::InvalidSpecifier);
 static_assert(PrintfSourceError<"%Lf">() == Printf::Error::InvalidSpecifier);
+static_assert(Printf::Matches<"%f", float>());
+static_assert(!Printf::Matches<"%f", double>());
 
-// double 存储关闭时，brace `double` 参数仍可用，但按 F32 打包。
-// With double storage disabled, brace `double` remains accepted but packs as F32.
-using DoubleFixed = LibXR::Format<"{:.2f}">::Compiled<double>;
-static_assert(DoubleFixed::ArgumentList()[0].pack == FormatPackKind::F32);
+// double 存储关闭时，brace `double` 参数必须显式转成 float 或打开 double 支持。
+// With double storage disabled, brace `double` must be cast to float or enabled explicitly.
+static_assert(FormatCompileError<"{:.2f}", double>() == Error::ArgumentTypeMismatch);

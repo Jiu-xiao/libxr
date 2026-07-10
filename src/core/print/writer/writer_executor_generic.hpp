@@ -80,159 +80,184 @@ ErrorCode Writer::Executor<Sink>::DispatchStringField()
  * @return 返回具体宽回退路径的写出结果 / Returns the concrete wide-path write result
  */
 template <OutputSink Sink>
+template <FormatProfile Profile>
 ErrorCode Writer::Executor<Sink>::DispatchGenericField(FormatType type)
 {
   switch (type)
   {
     case FormatType::Signed32:
-      if constexpr (!Config::enable_integer)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericSigned32) &&
+                    Config::enable_integer)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchSignedField<int32_t>();
       }
-      return DispatchSignedField<int32_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Signed64:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_64bit)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericSigned64) &&
+                    Config::enable_integer && Config::enable_integer_64bit)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchSignedField<int64_t>();
       }
-      return DispatchSignedField<int64_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Unsigned32:
-      if constexpr (!Config::enable_integer)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericUnsigned32) &&
+                    Config::enable_integer)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::Unsigned32, uint32_t>();
       }
-      return DispatchUnsignedField<FormatType::Unsigned32, uint32_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Unsigned64:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_64bit)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericUnsigned64) &&
+                    Config::enable_integer && Config::enable_integer_64bit)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::Unsigned64, uint64_t>();
       }
-      return DispatchUnsignedField<FormatType::Unsigned64, uint64_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Binary32:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericBinary32) &&
+                    Config::enable_integer && Config::enable_integer_base8_16)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::Binary32, uint32_t>();
       }
-      return DispatchUnsignedField<FormatType::Binary32, uint32_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Binary64:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16 ||
-                    !Config::enable_integer_64bit)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericBinary64) &&
+                    Config::enable_integer && Config::enable_integer_base8_16 &&
+                    Config::enable_integer_64bit)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::Binary64, uint64_t>();
       }
-      return DispatchUnsignedField<FormatType::Binary64, uint64_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Octal32:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericOctal32) &&
+                    Config::enable_integer && Config::enable_integer_base8_16)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::Octal32, uint32_t>();
       }
-      return DispatchUnsignedField<FormatType::Octal32, uint32_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Octal64:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16 ||
-                    !Config::enable_integer_64bit)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericOctal64) &&
+                    Config::enable_integer && Config::enable_integer_base8_16 &&
+                    Config::enable_integer_64bit)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::Octal64, uint64_t>();
       }
-      return DispatchUnsignedField<FormatType::Octal64, uint64_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::HexLower32:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericHexLower32) &&
+                    Config::enable_integer && Config::enable_integer_base8_16)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::HexLower32, uint32_t>();
       }
-      return DispatchUnsignedField<FormatType::HexLower32, uint32_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::HexLower64:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16 ||
-                    !Config::enable_integer_64bit)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericHexLower64) &&
+                    Config::enable_integer && Config::enable_integer_base8_16 &&
+                    Config::enable_integer_64bit)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::HexLower64, uint64_t>();
       }
-      return DispatchUnsignedField<FormatType::HexLower64, uint64_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::HexUpper32:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericHexUpper32) &&
+                    Config::enable_integer && Config::enable_integer_base8_16)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::HexUpper32, uint32_t>();
       }
-      return DispatchUnsignedField<FormatType::HexUpper32, uint32_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::HexUpper64:
-      if constexpr (!Config::enable_integer || !Config::enable_integer_base8_16 ||
-                    !Config::enable_integer_64bit)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericHexUpper64) &&
+                    Config::enable_integer && Config::enable_integer_base8_16 &&
+                    Config::enable_integer_64bit)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchUnsignedField<FormatType::HexUpper64, uint64_t>();
       }
-      return DispatchUnsignedField<FormatType::HexUpper64, uint64_t>();
+      return ErrorCode::STATE_ERR;
     case FormatType::Pointer:
-      if constexpr (!Config::enable_pointer)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericPointer) &&
+                    Config::enable_pointer)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchPointerField();
       }
-      return DispatchPointerField();
+      return ErrorCode::STATE_ERR;
     case FormatType::Character:
-      if constexpr (!Config::enable_text)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericCharacter) &&
+                    Config::enable_text)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchCharacterField();
       }
-      return DispatchCharacterField();
+      return ErrorCode::STATE_ERR;
     case FormatType::String:
-      if constexpr (!Config::enable_text)
+      if constexpr (HasProfile(Profile, FormatProfile::GenericString) &&
+                    Config::enable_text)
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchStringField();
       }
-      return DispatchStringField();
+      return ErrorCode::STATE_ERR;
 #if LIBXR_PRINT_ENABLE_FLOAT
     case FormatType::FloatFixed:
-      if constexpr (!FloatEnabled(FormatType::FloatFixed))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericFloatFixed) &&
+                    FloatEnabled(FormatType::FloatFixed))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::FloatFixed, float>();
       }
-      return DispatchFloatField<FormatType::FloatFixed, float>();
+      return ErrorCode::STATE_ERR;
     case FormatType::DoubleFixed:
-      if constexpr (!FloatEnabled(FormatType::DoubleFixed))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericDoubleFixed) &&
+                    FloatEnabled(FormatType::DoubleFixed))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::DoubleFixed, double>();
       }
-      return DispatchFloatField<FormatType::DoubleFixed, double>();
+      return ErrorCode::STATE_ERR;
     case FormatType::FloatScientific:
-      if constexpr (!FloatEnabled(FormatType::FloatScientific))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericFloatScientific) &&
+                    FloatEnabled(FormatType::FloatScientific))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::FloatScientific, float>();
       }
-      return DispatchFloatField<FormatType::FloatScientific, float>();
+      return ErrorCode::STATE_ERR;
     case FormatType::DoubleScientific:
-      if constexpr (!FloatEnabled(FormatType::DoubleScientific))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericDoubleScientific) &&
+                    FloatEnabled(FormatType::DoubleScientific))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::DoubleScientific, double>();
       }
-      return DispatchFloatField<FormatType::DoubleScientific, double>();
+      return ErrorCode::STATE_ERR;
     case FormatType::FloatGeneral:
-      if constexpr (!FloatEnabled(FormatType::FloatGeneral))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericFloatGeneral) &&
+                    FloatEnabled(FormatType::FloatGeneral))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::FloatGeneral, float>();
       }
-      return DispatchFloatField<FormatType::FloatGeneral, float>();
+      return ErrorCode::STATE_ERR;
     case FormatType::DoubleGeneral:
-      if constexpr (!FloatEnabled(FormatType::DoubleGeneral))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericDoubleGeneral) &&
+                    FloatEnabled(FormatType::DoubleGeneral))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::DoubleGeneral, double>();
       }
-      return DispatchFloatField<FormatType::DoubleGeneral, double>();
+      return ErrorCode::STATE_ERR;
     case FormatType::LongDoubleFixed:
-      if constexpr (!FloatEnabled(FormatType::LongDoubleFixed))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericLongDoubleFixed) &&
+                    FloatEnabled(FormatType::LongDoubleFixed))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::LongDoubleFixed, long double>();
       }
-      return DispatchFloatField<FormatType::LongDoubleFixed, long double>();
+      return ErrorCode::STATE_ERR;
     case FormatType::LongDoubleScientific:
-      if constexpr (!FloatEnabled(FormatType::LongDoubleScientific))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericLongDoubleScientific) &&
+                    FloatEnabled(FormatType::LongDoubleScientific))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::LongDoubleScientific, long double>();
       }
-      return DispatchFloatField<FormatType::LongDoubleScientific, long double>();
+      return ErrorCode::STATE_ERR;
     case FormatType::LongDoubleGeneral:
-      if constexpr (!FloatEnabled(FormatType::LongDoubleGeneral))
+      if constexpr (HasProfile(Profile, FormatProfile::GenericLongDoubleGeneral) &&
+                    FloatEnabled(FormatType::LongDoubleGeneral))
       {
-        return ErrorCode::STATE_ERR;
+        return DispatchFloatField<FormatType::LongDoubleGeneral, long double>();
       }
-      return DispatchFloatField<FormatType::LongDoubleGeneral, long double>();
+      return ErrorCode::STATE_ERR;
 #endif
     case FormatType::TextInline:
     case FormatType::TextRef:

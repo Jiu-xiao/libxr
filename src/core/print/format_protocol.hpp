@@ -223,7 +223,7 @@ enum class FormatArgumentRule : uint8_t
   Pointer,           ///< object pointer or nullptr / 对象指针或 nullptr
   Character,         ///< any integral or enum accepted by %c / 可按 %c 接受的整数或枚举
   String,            ///< C string, string_view, or string / C 字符串、string_view 或 string
-  Float,             ///< float or double / float 或 double
+  Float,             ///< float, plus double when double support is enabled / float；启用 double 支持时也接受 double
   LongDouble,        ///< exact long double / 精确匹配 long double
 };
 
@@ -374,18 +374,44 @@ enum class FormatPackKind : uint8_t
 };
 
 /**
- * @brief 编译期选出的粗粒度运行期执行器配置。 / Coarse runtime executor profiles selected at compile time.
+ * @brief 编译期选出的精确运行期执行器配置。 / Precise runtime executor profiles selected at compile time.
  *
  * The low bits describe which narrow fast-path families appear in the bytecode.
- * Generic marks that at least one field still requires the old wide fallback.
- * 低位描述当前字节码里出现了哪些窄快路径族；Generic 表示至少存在一个字段仍需走旧的宽回退路径。
+ * The remaining bits identify the exact semantic types used by generic fields,
+ * so unrelated integer, text, pointer, and float backends remain prunable.
+ * 低位描述当前字节码里出现了哪些窄快路径族；其余位精确标记通用字段使用的语义类型，
+ * 使无关的整数、文本、指针和浮点后端仍可被裁剪。
  */
-enum class FormatProfile : uint8_t
+enum class FormatProfile : uint32_t
 {
   None = 0,            ///< text-only stream / 只有文本记录的流
-  NarrowInt = 1U << 0, ///< signed/unsigned narrow integer fast path family / 有符号/无符号窄整数快路径族
-  TextArg = 1U << 1,   ///< raw text argument fast path / 原始文本参数快路径
-  Generic = 1U << 7,   ///< at least one field uses generic fallback / 至少有一个字段使用通用回退
+  NarrowInt = 1U << 0, ///< narrow integer fast-path family / 窄整数快路径族
+  TextArg = 1U << 1,   ///< raw text argument fast-path family / 原始文本参数快路径族
+  GenericSigned32 = 1U << 2,   ///< generic signed 32-bit decimal / 通用 32 位有符号十进制
+  GenericSigned64 = 1U << 3,   ///< generic signed 64-bit decimal / 通用 64 位有符号十进制
+  GenericUnsigned32 = 1U << 4, ///< generic unsigned 32-bit decimal / 通用 32 位无符号十进制
+  GenericUnsigned64 = 1U << 5, ///< generic unsigned 64-bit decimal / 通用 64 位无符号十进制
+  GenericBinary32 = 1U << 6,   ///< generic 32-bit binary / 通用 32 位二进制
+  GenericBinary64 = 1U << 7,   ///< generic 64-bit binary / 通用 64 位二进制
+  GenericOctal32 = 1U << 8,    ///< generic 32-bit octal / 通用 32 位八进制
+  GenericOctal64 = 1U << 9,    ///< generic 64-bit octal / 通用 64 位八进制
+  GenericHexLower32 = 1U << 10, ///< generic lowercase 32-bit hex / 通用小写 32 位十六进制
+  GenericHexLower64 = 1U << 11, ///< generic lowercase 64-bit hex / 通用小写 64 位十六进制
+  GenericHexUpper32 = 1U << 12, ///< generic uppercase 32-bit hex / 通用大写 32 位十六进制
+  GenericHexUpper64 = 1U << 13, ///< generic uppercase 64-bit hex / 通用大写 64 位十六进制
+  GenericPointer = 1U << 14,   ///< generic pointer field / 通用指针字段
+  GenericCharacter = 1U << 15, ///< generic character field / 通用字符字段
+  GenericString = 1U << 16,    ///< generic string field / 通用字符串字段
+  GenericFloatFixed = 1U << 17, ///< generic float fixed-point / 通用 float 定点格式
+  GenericFloatScientific = 1U << 18, ///< generic float scientific / 通用 float 科学计数法
+  GenericFloatGeneral = 1U << 19, ///< generic float general / 通用 float 通用格式
+  GenericDoubleFixed = 1U << 20, ///< generic double fixed-point / 通用 double 定点格式
+  GenericDoubleScientific = 1U << 21, ///< generic double scientific / 通用 double 科学计数法
+  GenericDoubleGeneral = 1U << 22, ///< generic double general / 通用 double 通用格式
+  GenericLongDoubleFixed = 1U << 23, ///< generic long double fixed-point / 通用 long double 定点格式
+  GenericLongDoubleScientific = 1U << 24, ///< generic long double scientific / 通用 long double 科学计数法
+  GenericLongDoubleGeneral = 1U << 25, ///< generic long double general / 通用 long double 通用格式
+  Generic = 0x03FFFFFCU, ///< compatibility mask for every generic field / 所有通用字段的兼容掩码
 };
 
 /**
@@ -396,8 +422,8 @@ enum class FormatProfile : uint8_t
  */
 [[nodiscard]] constexpr FormatProfile operator|(FormatProfile left, FormatProfile right)
 {
-  return static_cast<FormatProfile>(static_cast<uint8_t>(left) |
-                                    static_cast<uint8_t>(right));
+  return static_cast<FormatProfile>(static_cast<uint32_t>(left) |
+                                    static_cast<uint32_t>(right));
 }
 
 /**
@@ -420,8 +446,33 @@ constexpr FormatProfile& operator|=(FormatProfile& left, FormatProfile right)
  */
 [[nodiscard]] constexpr bool HasProfile(FormatProfile profile, FormatProfile bit)
 {
-  return (static_cast<uint8_t>(profile) & static_cast<uint8_t>(bit)) != 0;
+  return (static_cast<uint32_t>(profile) & static_cast<uint32_t>(bit)) != 0;
 }
+
+/**
+ * @brief 返回一个通用字段语义类型对应的精确 profile 位 / Return the precise profile bit for one generic-field semantic type
+ * @param type 通用字段携带的语义类型 / Semantic type carried by the generic field
+ * @return 对应的精确 profile 位；非通用值类型返回 `None` / The precise profile bit, or `None` for non-value semantic types
+ */
+[[nodiscard]] constexpr FormatProfile GenericProfileFor(FormatType type)
+{
+  auto value = static_cast<uint8_t>(type);
+  auto first = static_cast<uint8_t>(FormatType::Signed32);
+  auto last = static_cast<uint8_t>(FormatType::LongDoubleGeneral);
+  if (value < first || value > last)
+  {
+    return FormatProfile::None;
+  }
+  return static_cast<FormatProfile>(uint32_t{1} << (2U + value - first));
+}
+
+static_assert(GenericProfileFor(FormatType::Signed32) ==
+              FormatProfile::GenericSigned32);
+static_assert(GenericProfileFor(FormatType::LongDoubleGeneral) ==
+              FormatProfile::GenericLongDoubleGeneral);
+static_assert(GenericProfileFor(FormatType::TextSpace) == FormatProfile::None);
+static_assert(static_cast<uint32_t>(FormatProfile::Generic) ==
+              ((uint32_t{1} << 26U) - (uint32_t{1} << 2U)));
 
 /**
  * @brief Writer 消费的编译格式运行期协议。 / Compiled-format runtime contract consumed by Writer.

@@ -80,6 +80,9 @@ using PrintfIntTextFormat =
     decltype(LibXR::Print::Printf::Build<"id=%d hex=%x msg=%s ch=%c">());
 using FormatRawIntegerFormat =
     LibXR::Format<"{} {:x} {:c}">::Compiled<int, unsigned, int>;
+using FormatGenericIntegerFormat = LibXR::Format<"{:5d}">::Compiled<int>;
+using FormatGenericTextFormat = LibXR::Format<"{:.2s}">::Compiled<const char*>;
+using FormatGenericFloatFormat = LibXR::Format<"{:5.2f}">::Compiled<float>;
 
 // 裁剪边界：常见裸整数/文本字段不能退回 GenericField。
 // 否则 float 默认开启时会留下浮点分发后端。
@@ -111,6 +114,25 @@ static_assert(
 static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::I32Dec));
 static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::U32HexLower));
 static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::CharacterRaw));
+
+static_assert(HasProfileBit<FormatGenericIntegerFormat>(
+    LibXR::Print::FormatProfile::GenericSigned32));
+static_assert(!HasProfileBit<FormatGenericIntegerFormat>(
+    LibXR::Print::FormatProfile::GenericString));
+static_assert(!HasProfileBit<FormatGenericIntegerFormat>(
+    LibXR::Print::FormatProfile::GenericFloatFixed));
+static_assert(HasProfileBit<FormatGenericTextFormat>(
+    LibXR::Print::FormatProfile::GenericString));
+static_assert(!HasProfileBit<FormatGenericTextFormat>(
+    LibXR::Print::FormatProfile::GenericSigned32));
+static_assert(!HasProfileBit<FormatGenericTextFormat>(
+    LibXR::Print::FormatProfile::GenericFloatFixed));
+static_assert(HasProfileBit<FormatGenericFloatFormat>(
+    LibXR::Print::FormatProfile::GenericFloatFixed));
+static_assert(!HasProfileBit<FormatGenericFloatFormat>(
+    LibXR::Print::FormatProfile::GenericSigned32));
+static_assert(!HasProfileBit<FormatGenericFloatFormat>(
+    LibXR::Print::FormatProfile::GenericString));
 }  // namespace LibXRPrintTest::CompileProfile
 
 using LoggerFrontend = LibXR::Detail::LoggerLiteral::Frontend;

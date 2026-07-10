@@ -41,12 +41,12 @@ namespace ArgumentResolution
         pack = FormatPackKind::F32;
         return true;
       case ArgumentKind::Float64:
-        // When enable_float_double is false, a double argument is silently
-        // formatted at float precision (7 significant digits). If full double
-        // precision is needed, set Config::enable_float_double = true, or
-        // cast the argument to float explicitly to make the demotion visible.
-        type = Config::enable_float_double ? f64_type : f32_type;
-        pack = Config::enable_float_double ? FormatPackKind::F64 : FormatPackKind::F32;
+        if (!Config::enable_float_double)
+        {
+          return false;
+        }
+        type = f64_type;
+        pack = FormatPackKind::F64;
         return true;
       case ArgumentKind::LongDouble:
         if (!Config::enable_float_long_double)

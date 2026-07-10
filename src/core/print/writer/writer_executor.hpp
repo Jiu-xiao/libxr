@@ -129,9 +129,11 @@ class Writer::Executor
 
   /**
    * @brief 将一个 `GenericField` 载荷分发到对应的宽回退路径 / Dispatch one `GenericField` payload to the corresponding wide fallback
+   * @tparam Profile 当前编译格式使用的精确通用字段类型集合 / Exact generic-field type set used by the current compiled format
    * @param type `GenericField` 记录携带的语义字段类型 / Semantic field type carried by the `GenericField` record
    * @return 返回该字段的具体写出结果 / Returns the concrete writer result for that field
    */
+  template <FormatProfile Profile>
   [[nodiscard]] ErrorCode DispatchGenericField(FormatType type);
 
   /**

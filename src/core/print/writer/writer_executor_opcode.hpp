@@ -133,7 +133,7 @@ ErrorCode Writer::Executor<Sink>::DispatchOp(FormatOp op)
       {
         return ErrorCode::STATE_ERR;
       }
-      return DispatchGenericField(codes_.ReadFormatType());
+      return DispatchGenericField<Profile>(codes_.ReadFormatType());
     case FormatOp::End:
     default:
       return ErrorCode::STATE_ERR;

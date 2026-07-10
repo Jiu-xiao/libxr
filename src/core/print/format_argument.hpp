@@ -112,7 +112,8 @@ struct TypeTraits
       case FormatArgumentRule::String:
         return is_string_like;
       case FormatArgumentRule::Float:
-        return is_float;
+        return std::is_same_v<Decayed, float> ||
+               (Config::enable_float_double && std::is_same_v<Decayed, double>);
       case FormatArgumentRule::LongDouble:
         return is_long_double;
       default:
