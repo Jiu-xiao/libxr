@@ -167,6 +167,9 @@ class HPMSPI final : public SPI
                                       SPI::Prescaler::DIV_4, false},
          ChipSelect cs = ChipSelect::CS0);
 
+  HPMSPI(const HPMSPI&) = delete;
+  HPMSPI& operator=(const HPMSPI&) = delete;
+
   /**
    * @brief 传输 SPI 字节，并可同时采集接收数据 /
    * Transfer SPI bytes while optionally collecting received bytes.
@@ -268,6 +271,15 @@ class HPMSPI final : public SPI
    * require a LibXR Timebase for timeout-aware waits; otherwise ReadAndWrite() /
    * Transfer() return INIT_ERR before starting DMA. RTOS/POSIX systems use their
    * native semaphore wait paths.
+   *
+   * @note 启用 D-cache 的平台上，BLOCK DMA RX 要求内部 RX staging buffer 起始地址按
+   * `HPM_L1C_CACHELINE_SIZE` 对齐，且容量为 cache line 的整数倍；否则 ReadAndWrite() /
+   * Transfer() 会在启动 DMA 前返回 NOT_SUPPORT，避免无效化共享 cache line 时丢失其他
+   * dirty data。On D-cache-enabled platforms, BLOCK DMA RX requires the internal RX
+   * staging buffer start address to be aligned to `HPM_L1C_CACHELINE_SIZE`, and its
+   * capacity to be a multiple of the cache-line size. Otherwise ReadAndWrite() /
+   * Transfer() returns NOT_SUPPORT before starting DMA, avoiding unrelated dirty
+   * data loss when invalidating shared cache lines.
    *
    * @param enabled true 启用 DMA，false 回到同步阻塞路径 /
    * true to enable DMA, false to use the synchronous blocking path.
