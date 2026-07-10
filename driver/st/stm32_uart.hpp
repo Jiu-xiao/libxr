@@ -11,9 +11,9 @@
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "stm32_dcache.hpp"
-#include "uart.hpp"
-#include "uart_circular_dma_rx_model.hpp"
-#include "uart_dma_tx_model.hpp"
+#include "uart/uart.hpp"
+#include "uart/uart_circular_dma_rx_model.hpp"
+#include "uart/uart_dma_tx_model.hpp"
 
 typedef enum : uint8_t
 {
@@ -149,9 +149,10 @@ class STM32UART : public UART
 
  private:
   /**
-   * @brief Configure and start circular UART RX DMA through STM32 HAL.
-   * @param data DMA-writable receive buffer.
-   * @param size Receive buffer capacity in bytes.
+   * @brief 通过 STM32 HAL 配置并启动 UART 循环 RX DMA / Configure and start circular
+   * UART RX DMA through STM32 HAL
+   * @param data DMA 可写的接收缓冲区 / DMA-writable receive buffer
+   * @param size 接收缓冲区字节数 / Receive buffer capacity in bytes
    */
   void StartCircularDmaRx(uint8_t* data, size_t size)
   {
@@ -161,7 +162,8 @@ class STM32UART : public UART
   }
 
   /**
-   * @brief Return the STM32 RX DMA remaining transfer count.
+   * @brief 获取 STM32 RX DMA 剩余传输计数 / Get the STM32 RX DMA remaining count
+   * @return DMA 尚未写入的字节数 / Number of bytes not yet written by DMA
    */
   [[nodiscard]] size_t GetCircularDmaRxRemaining() const
   {
@@ -169,9 +171,9 @@ class STM32UART : public UART
   }
 
   /**
-   * @brief Make circular DMA RX storage visible to the CPU data cache.
-   * @param data DMA receive buffer start address.
-   * @param size Receive buffer capacity in bytes.
+   * @brief 使循环 DMA RX 数据对 CPU 可见 / Make circular DMA RX data visible to the CPU
+   * @param data DMA 接收缓冲区起始地址 / DMA receive buffer start address
+   * @param size 接收缓冲区字节数 / Receive buffer capacity in bytes
    */
   void PrepareCircularDmaRxForCpu(uint8_t* data, size_t size)
   {
@@ -179,11 +181,13 @@ class STM32UART : public UART
   }
 
   /**
-   * @brief Start one active UART TX DMA payload through STM32 HAL.
-   * @param data DMA-readable payload buffer.
-   * @param size Payload size in bytes.
-   * @param block Active double-buffer block index; unused by STM32 HAL.
-   * @return True when HAL accepted the DMA transfer.
+   * @brief 通过 STM32 HAL 启动一个 active UART TX DMA 载荷 / Start one active UART TX
+   * DMA payload through STM32 HAL
+   * @param data DMA 可读的载荷缓冲区 / DMA-readable payload buffer
+   * @param size 载荷字节数 / Payload size in bytes
+   * @param block active 双缓冲块索引，STM32 HAL 不使用 / Active double-buffer block
+   * index, unused by STM32 HAL
+   * @return HAL 接受 DMA 传输时返回 true / True when HAL accepts the DMA transfer
    */
   bool StartDmaTx(uint8_t* data, size_t size, int block);
 };

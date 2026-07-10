@@ -61,5 +61,3 @@ void test_rw();
 void test_cb();
 void test_memory();
 void test_linux_shm_topic();
-void test_uart_circular_dma_rx_model();
-void test_uart_dma_tx_model();

@@ -1,19 +1,20 @@
 #pragma once
 
+#include "esp_def.hpp"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "driver/gpio.h"
-#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "flag.hpp"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
-#include "uart.hpp"
-#include "uart_dma_tx_model.hpp"
+#include "uart/uart.hpp"
+#include "uart/uart_dma_tx_model.hpp"
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
 #include "esp_private/gdma.h"
@@ -213,12 +214,11 @@ class ESP32UART : public UART
   ErrorCode InitDmaBackend();
 
   /**
-   * @brief Start the active TX request over GDMA.
-   * @brief 通过 GDMA 启动当前 active TX 请求。
-   * @param data DMA-readable payload buffer.
-   * @param size Payload size in bytes.
-   * @param block Active double-buffer block and descriptor-list index.
-   * @return True when GDMA accepted the descriptor list.
+   * @brief 通过 GDMA 启动 active TX 请求 / Start the active TX request over GDMA
+   * @param data DMA 可读的载荷缓冲区 / DMA-readable payload buffer
+   * @param size 载荷字节数 / Payload size in bytes
+   * @param block 双缓冲块和描述符链表索引 / Double-buffer block and descriptor-list index
+   * @return GDMA 接受描述符链表时返回 true / True when GDMA accepts the descriptor list
    */
   bool StartDmaTx(uint8_t* data, size_t size, int block);
 

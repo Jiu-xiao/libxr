@@ -12,21 +12,30 @@ namespace LibXR
 {
 
 /**
- * @brief Queue-backed one-shot DMA transmit model for UART drivers.
+ * @brief UART 单次 DMA 发送执行模型 / UART one-shot DMA TX execution model
  *
- * The model owns the reusable active/pending transaction state. A platform
- * backend only provides `StartDmaTx(buffer, size, block)`, while DMA completion
- * and error events are returned through `OnTransferDone()`.
+ * 模型管理 active/pending 请求和双缓冲状态。平台后端只需实现
+ * `StartDmaTx(data, size, block)`，并通过 `OnTransferDone()` 上报 DMA 完成或错误。
+ * The model owns the active/pending requests and double-buffer state. The platform
+ * backend only implements `StartDmaTx(data, size, block)` and reports DMA completion
+ * or errors through `OnTransferDone()`.
  *
- * @tparam Backend Statically bound platform backend.
- * @tparam StateFlag Flag implementation selected for the platform concurrency model.
+ * @tparam Backend 静态绑定的平台后端类型 / Statically bound platform backend type
+ * @tparam StateFlag 与平台并发模型匹配的标志类型 / Flag type selected for the platform
+ * concurrency model
  */
 template <typename Backend, typename StateFlag = Flag::Plain>
 class UartDmaTxModel
 {
  public:
   /**
-   * @brief Bind the model to a backend, write port, and two-half DMA buffer.
+   * @brief 绑定平台后端、写端口和 DMA 双缓冲区 / Bind the backend, write port, and
+   * DMA double buffer
+   * @param backend 提供 DMA 启动操作的平台后端 / Platform backend providing DMA start
+   * @param port 提供请求队列和完成通知的写端口 / Write port providing request queues and
+   * completion notification
+   * @param storage 划分为两个等长块的 DMA 存储区 / DMA storage split into two equal
+   * blocks
    */
   UartDmaTxModel(Backend& backend, WritePort& port, RawData storage)
       : backend_(backend), port_(port), buffers_(storage)
@@ -34,13 +43,20 @@ class UartDmaTxModel
   }
 
   /**
-   * @brief Consume or stage the write request currently queued by `WritePort`.
+   * @brief 提交或预装 `WritePort` 队首请求 / Submit or stage the request at the head of
+   * `WritePort`
    *
-   * An idle request completes synchronously when DMA starts. A request staged
-   * behind active DMA returns `PENDING` and is completed when it is promoted
-   * and started by `OnTransferDone()`.
+   * 空闲时，请求在 DMA 成功启动后同步返回 `OK`。DMA 忙时，请求预装到 pending 缓冲区并
+   * 返回 `PENDING`，随后由 `OnTransferDone()` 提升、启动并完成通知。
+   * When idle, the request returns `OK` after DMA starts successfully. While DMA is
+   * active, the request is staged in the pending buffer and returns `PENDING`; it is
+   * promoted, started, and completed by `OnTransferDone()`.
+   *
+   * @return `OK` 表示 DMA 已启动，`PENDING` 表示请求仍在排队，其他值表示启动失败 /
+   * `OK` if DMA started, `PENDING` if the request remains queued, or another code on
+   * start failure
    */
-  ErrorCode Submit(bool)
+  ErrorCode Submit()
   {
     if (in_completion_.IsSet() || pending_valid_.IsSet())
     {
@@ -100,7 +116,16 @@ class UartDmaTxModel
   }
 
   /**
-   * @brief Advance the model after one DMA completion or error event.
+   * @brief 处理一次 DMA 完成或错误事件 / Handle one DMA completion or error event
+   * @param in_isr 事件是否来自中断上下文 / Whether the event is handled in interrupt
+   * context
+   * @param result DMA 传输结果 / DMA transfer result
+   *
+   * 重复事件或没有 active 请求时不产生完成通知。错误只终止已预装的 pending 请求；active
+   * 请求已经在 DMA 启动时完成上层提交。
+   * Duplicate events and events without an active request do not emit completion. An
+   * error fails only the staged pending request because the active request completed at
+   * the upper layer when DMA was started.
    */
   void OnTransferDone(bool in_isr, ErrorCode result)
   {
@@ -147,7 +172,9 @@ class UartDmaTxModel
   }
 
   /**
-   * @brief Restart the active DMA payload after platform reconfiguration.
+   * @brief 平台重新配置后重启 active DMA / Restart active DMA after reconfiguration
+   * @return active 请求存在且后端接受重启时返回 true / True when an active request exists
+   * and the backend accepts the restart
    */
   bool RestartActive()
   {
@@ -160,17 +187,21 @@ class UartDmaTxModel
   }
 
   /**
-   * @brief Return whether DMA currently owns an active request.
+   * @brief 查询 DMA 是否持有 active 请求 / Check whether DMA owns an active request
+   * @return DMA 正在处理 active 请求时返回 true / True while DMA owns an active request
    */
   [[nodiscard]] bool IsBusy() const { return busy_.IsSet(); }
 
   /**
-   * @brief Return one fixed DMA buffer block for descriptor initialization.
+   * @brief 获取一个固定 DMA 缓冲块 / Get one fixed DMA buffer block
+   * @param block 缓冲块索引，只能为 0 或 1 / Buffer block index, either 0 or 1
+   * @return 指定缓冲块的起始地址 / Start address of the selected buffer block
    */
   [[nodiscard]] uint8_t* Buffer(int block) const { return buffers_.Buffer(block); }
 
   /**
-   * @brief Return the capacity of one DMA buffer block.
+   * @brief 获取单个 DMA 缓冲块容量 / Get the capacity of one DMA buffer block
+   * @return 单个缓冲块的字节数 / Capacity of one buffer block in bytes
    */
   [[nodiscard]] size_t BufferSize() const { return buffers_.Size(); }
 
