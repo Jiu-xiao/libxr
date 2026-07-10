@@ -748,6 +748,10 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     return FinishOperation(op, in_isr, ErrorCode::OK);
   }
+  if (size > kHpmSpiTransferCountMax)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+  }
   if (DmaTransferActive())
   {
     return FinishOperation(op, in_isr, ErrorCode::BUSY);
