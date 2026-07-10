@@ -1058,6 +1058,10 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   {
     return FinishOperation(op, in_isr, ErrorCode::OK);
   }
+  if (!configured_)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+  }
   if (read_data.size_ > 0 && read_data.addr_ == nullptr)
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
@@ -1144,6 +1148,10 @@ ErrorCode HPMSPI::CommandRead(uint8_t command, RawData read_data, OperationRW& o
     UNUSED(command);
     return FinishOperation(op, in_isr, ErrorCode::OK);
   }
+  if (!configured_)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+  }
 
   return CommandWriteRead(command, ConstRawData(nullptr, 0), read_data, op, in_isr);
 }
@@ -1158,6 +1166,11 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
     return FinishOperation(op, in_isr, guard_ans);
   }
 #endif
+
+  if (!configured_)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+  }
 
   if (write_data.size_ > 0 && write_data.addr_ == nullptr)
   {
@@ -1239,6 +1252,10 @@ ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   {
     return FinishOperation(op, in_isr, ErrorCode::OK);
   }
+  if (!configured_)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+  }
   if (TransferSizeTooLarge(size))
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
@@ -1288,6 +1305,10 @@ ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool
   if (read_data.size_ == 0)
   {
     return FinishOperation(op, in_isr, ErrorCode::OK);
+  }
+  if (!configured_)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
   }
   if (read_data.addr_ == nullptr)
   {
@@ -1343,6 +1364,11 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
     return FinishOperation(op, in_isr, guard_ans);
   }
 #endif
+
+  if (!configured_)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+  }
 
   if ((reg & static_cast<uint16_t>(~kSpiRegisterAddressMask)) != 0U)
   {
