@@ -52,7 +52,8 @@ inline void HPMCANFD::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& fra
   detail::BuildMcanClassicTxFrame(pack, frame);
 }
 
-inline void HPMCANFD::BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame)
+inline void HPMCANFD::BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame,
+                                   bool bitrate_switch, bool error_state_indicator)
 {
   std::memset(&frame, 0, sizeof(frame));
   frame.use_ext_id = (pack.type == Type::EXTENDED) ? 1U : 0U;
@@ -67,8 +68,8 @@ inline void HPMCANFD::BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame)
   }
   frame.dlc = BytesToDlc(pack.len);
   frame.canfd_frame = 1U;
-  frame.bitrate_switch = 0U;
-  frame.error_state_indicator = 0U;
+  frame.bitrate_switch = bitrate_switch ? 1U : 0U;
+  frame.error_state_indicator = error_state_indicator ? 1U : 0U;
   if (pack.len > 0U)
   {
     std::memcpy(frame.data_8, pack.data, pack.len);
@@ -505,9 +506,7 @@ void HPMCANFD::TxService()
       FDPack pfd{};
       if (fd_enabled_ && tx_pool_fd_.Get(pfd) == ErrorCode::OK)
       {
-        BuildTxFrame(pfd, tx_buff_.frame);
-        tx_buff_.frame.bitrate_switch = brs_enabled_ ? 1U : 0U;
-        tx_buff_.frame.error_state_indicator = esi_enabled_ ? 1U : 0U;
+        BuildTxFrame(pfd, tx_buff_.frame, brs_enabled_, esi_enabled_);
 
         uint32_t fifo_index = 0U;
         const hpm_stat_t status =

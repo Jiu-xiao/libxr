@@ -72,7 +72,8 @@ class HPMCANFD : public FDCAN
 
   static inline void BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame);
 
-  static inline void BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame);
+  static inline void BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame,
+                                  bool bitrate_switch, bool error_state_indicator);
 
   void TxService();
 
