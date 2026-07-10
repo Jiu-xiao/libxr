@@ -41,12 +41,16 @@ constexpr uint32_t kHpmSpiTransferCountMax = UINT32_MAX;
 #endif
 constexpr uint16_t kSpiRegisterAddressMask = 0x007FU;
 
+// Generic transfers pass the complete hardware transfer count, so the maximum
+// representable HPM count remains valid.
 bool TransferSizeTooLarge(size_t size)
 {
   return size > static_cast<size_t>(UINT32_MAX) ||
          size > static_cast<size_t>(kHpmSpiTransferCountMax);
 }
 
+// Register helpers add one command byte after this payload. Rejecting equality
+// keeps command + payload within both uint32_t and the HPM transfer-count limit.
 bool RegisterPayloadSizeTooLarge(size_t size)
 {
   return size >= static_cast<size_t>(UINT32_MAX) ||
