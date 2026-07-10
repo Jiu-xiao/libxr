@@ -699,6 +699,11 @@ class HPMSPI final : public SPI
   void StopDmaTransfer();
 
   /**
+   * @brief 清除 RX/TX DMA 通道的残留状态 / Clear stale RX/TX DMA channel status.
+   */
+  void ClearDmaTransferStatus();
+
+  /**
    * @brief 清空 DMA 事务上下文 / Clear DMA transfer context.
    */
   void ClearDmaContext();
@@ -752,6 +757,12 @@ class HPMSPI final : public SPI
    * @brief TX DMA terminal-count callback / TX DMA 终端计数回调。
    */
   static void OnTxDmaTcCallback(DMA_Type* base, uint32_t channel, void* cb_data_ptr);
+
+  /**
+   * @brief DMA error/abort callback / DMA 错误或中止回调。
+   */
+  static void OnDmaFailureCallback(DMA_Type* base, uint32_t channel,
+                                   void* cb_data_ptr);
 #endif
 
   LibXRHpmSpiType* spi_;           ///< SPI 外设实例 / SPI peripheral instance.
