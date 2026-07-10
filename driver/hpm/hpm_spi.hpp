@@ -303,7 +303,10 @@ class HPMSPI final : public SPI
    * @brief 查询当前构建是否支持 HPM SPI DMA manager /
    * Query build-time HPM SPI DMA-manager support.
    * @return true 表示可调用 SetDmaEnabled(true) /
-   * true when SetDmaEnabled(true) can succeed.
+   * true when DMA-manager support is compiled into this build.
+   * @note This is a build-time indicator only. SetDmaEnabled(true) remains the
+   * authoritative runtime check because resource allocation and callback setup
+   * can still fail.
    */
   static constexpr bool IsDmaSupported() { return LIBXR_HPM_SPI_HAS_DMA_MGR != 0; }
 
