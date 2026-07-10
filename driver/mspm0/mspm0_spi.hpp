@@ -57,6 +57,10 @@ class MSPM0SPI : public SPI
       case SPI1_INT_IRQn:
         return 1;
 #endif
+#if defined(SPI2_BASE)
+      case SPI2_INT_IRQn:
+        return 2;
+#endif
       default:
         return INVALID_INSTANCE_INDEX;
     }
@@ -70,7 +74,13 @@ class MSPM0SPI : public SPI
     TX_ONLY
   };
 
+#if defined(SPI2_BASE)
+  static constexpr uint8_t MAX_SPI_INSTANCES = 3;
+#elif defined(SPI1_BASE)
   static constexpr uint8_t MAX_SPI_INSTANCES = 2;
+#else
+  static constexpr uint8_t MAX_SPI_INSTANCES = 1;
+#endif
   static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
   static constexpr uint32_t RX_ONLY_REPEAT_TX_MAX_FRAMES = 256U;
 
