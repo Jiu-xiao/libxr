@@ -53,14 +53,13 @@ bool RegisterPayloadSizeTooLarge(size_t size)
 }
 
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-static_assert(sizeof(uintptr_t) <= sizeof(uint32_t),
-              "HPM SPI DMA helper assumes a 32-bit address space.");
+constexpr bool kHpmSpiDmaAddressSpaceSupported = sizeof(uintptr_t) <= sizeof(uint32_t);
 
 #if LIBXR_HPM_SPI_HAS_L1C
 bool ResolveDCacheRange(const void* addr, uint32_t size, uint32_t& start,
                         uint32_t& aligned_size)
 {
-  if (addr == nullptr || size == 0U)
+  if (!kHpmSpiDmaAddressSpaceSupported || addr == nullptr || size == 0U)
   {
     start = 0U;
     aligned_size = 0U;
@@ -93,6 +92,28 @@ bool ResolveDCacheRange(const void* addr, uint32_t size, uint32_t& start,
   return aligned_size > 0U;
 }
 #endif
+
+bool DCacheRangeIsLineExclusive(const void* addr, size_t capacity)
+{
+#if LIBXR_HPM_SPI_HAS_L1C
+  if (addr == nullptr || capacity == 0U)
+  {
+    return false;
+  }
+  if (!l1c_dc_is_enabled())
+  {
+    return true;
+  }
+
+  const uintptr_t address = reinterpret_cast<uintptr_t>(addr);
+  return (address % HPM_L1C_CACHELINE_SIZE) == 0U &&
+         (capacity % HPM_L1C_CACHELINE_SIZE) == 0U;
+#else
+  UNUSED(addr);
+  UNUSED(capacity);
+  return true;
+#endif
+}
 
 void FlushDCacheIfNeeded(const void* addr, uint32_t size)
 {
@@ -508,6 +529,10 @@ ErrorCode HPMSPI::ConvertDmaStatus(hpm_stat_t status)
 
 ErrorCode HPMSPI::EnsureDmaReady()
 {
+  if (!kHpmSpiDmaAddressSpaceSupported)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
   if (dma_ready_)
   {
     return ErrorCode::OK;
@@ -553,6 +578,7 @@ void HPMSPI::ClearDmaContext()
   dma_ctx_.size = 0U;
   dma_ctx_.copy_rx_to_user = false;
   dma_ctx_.switch_buffer_on_success = false;
+  dma_ctx_.block_dma_ready.store(0U, std::memory_order_release);
   dma_ctx_.rx_done.store(0U, std::memory_order_release);
   dma_ctx_.tx_done.store(0U, std::memory_order_release);
 }
@@ -594,10 +620,16 @@ bool HPMSPI::TryClaimDmaCompletion()
       expected, 1U, std::memory_order_acq_rel, std::memory_order_acquire);
 }
 
+bool HPMSPI::DmaRxBufferCacheSafe(const void* addr, size_t capacity)
+{
+  return DCacheRangeIsLineExclusive(addr, capacity);
+}
+
 ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
-                                   DmaTransferKind kind, RawData user_read,
-                                   bool copy_rx_to_user, bool switch_buffer_on_success,
-                                   OperationRW& op, bool in_isr)
+                                   size_t rx_capacity, DmaTransferKind kind,
+                                   RawData user_read, bool copy_rx_to_user,
+                                   bool switch_buffer_on_success, OperationRW& op,
+                                   bool in_isr)
 {
   if (size == 0U)
   {
@@ -606,6 +638,14 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   if (DmaTransferActive())
   {
     return FinishOperation(op, in_isr, ErrorCode::BUSY);
+  }
+  if (op.type != OperationRW::OperationType::BLOCK)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::NOT_SUPPORT);
+  }
+  if (!kHpmSpiDmaAddressSpaceSupported)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::NOT_SUPPORT);
   }
   if (kind == DmaTransferKind::READ_ONLY && rx == nullptr)
   {
@@ -618,6 +658,16 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   if (kind == DmaTransferKind::WRITE_READ && (rx == nullptr || tx == nullptr))
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+  }
+  if ((kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ) &&
+      rx_capacity < size)
+  {
+    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+  }
+  if ((kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ) &&
+      !DmaRxBufferCacheSafe(rx, rx_capacity))
+  {
+    return FinishOperation(op, in_isr, ErrorCode::NOT_SUPPORT);
   }
   if (copy_rx_to_user)
   {
@@ -665,6 +715,11 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     FlushDCacheIfNeeded(tx, size);
   }
+  if (rx != nullptr &&
+      (kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ))
+  {
+    InvalidateDCacheIfNeeded(rx, size);
+  }
 
   ApplyChipSelect();
 
@@ -707,9 +762,14 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
 ErrorCode HPMSPI::WaitForDmaBlockResult(uint32_t timeout)
 {
   const ErrorCode ans = dma_block_wait_.Wait(timeout);
+  if (ans == ErrorCode::OK && DmaTransferActive() &&
+      dma_ctx_.block_dma_ready.load(std::memory_order_acquire) != 0U)
+  {
+    return CompleteDmaTransfer(false, ErrorCode::OK, false);
+  }
   if (ans == ErrorCode::TIMEOUT && DmaTransferActive())
   {
-    CompleteDmaTransfer(false, ErrorCode::TIMEOUT);
+    (void)CompleteDmaTransfer(false, ErrorCode::TIMEOUT);
   }
   return ans;
 }
@@ -741,15 +801,22 @@ void HPMSPI::MaybeCompleteDmaTransfer(bool in_isr)
 
   if (ready)
   {
-    CompleteDmaTransfer(in_isr, ErrorCode::OK);
+    if (dma_ctx_.op != nullptr && dma_ctx_.op->type == OperationRW::OperationType::BLOCK)
+    {
+      dma_ctx_.block_dma_ready.store(1U, std::memory_order_release);
+      (void)dma_block_wait_.TryPost(in_isr, ErrorCode::OK);
+      return;
+    }
+
+    (void)CompleteDmaTransfer(in_isr, ErrorCode::OK);
   }
 }
 
-void HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans)
+ErrorCode HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans, bool notify_block)
 {
   if (!TryClaimDmaCompletion())
   {
-    return;
+    return ErrorCode::BUSY;
   }
 
   DmaTransferKind kind = dma_ctx_.kind;
@@ -767,7 +834,7 @@ void HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans)
     dma_stopped = true;
   }
 
-  if (ans == ErrorCode::OK && !in_isr)
+  if (ans == ErrorCode::OK)
   {
     const hpm_stat_t idle_status = spi_wait_for_idle_status(spi_);
     ans = ConvertStatus(idle_status);
@@ -804,12 +871,17 @@ void HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans)
 
   if (op != nullptr && op->type == OperationRW::OperationType::BLOCK)
   {
-    (void)dma_block_wait_.TryPost(in_isr, ans);
+    if (notify_block)
+    {
+      (void)dma_block_wait_.TryPost(in_isr, ans);
+    }
   }
   else if (op != nullptr)
   {
     op->UpdateStatus(in_isr, ans);
   }
+
+  return ans;
 }
 
 void HPMSPI::OnRxDmaTcCallback(DMA_Type* base, uint32_t channel, void* cb_data_ptr)
@@ -1033,7 +1105,7 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
     return StartDmaTransfer((read_data.size_ > 0) ? rx_bytes : nullptr,
                             (write_data.size_ > 0) ? tx_bytes : nullptr,
-                            static_cast<uint32_t>(need), kind, read_data,
+                            static_cast<uint32_t>(need), rx.size_, kind, read_data,
                             read_data.size_ > 0, true, op, in_isr);
   }
 #endif
@@ -1188,8 +1260,8 @@ ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   {
     return StartDmaTransfer(static_cast<uint8_t*>(rx.addr_),
                             static_cast<uint8_t*>(tx.addr_), static_cast<uint32_t>(size),
-                            DmaTransferKind::WRITE_READ, RawData(nullptr, 0), false, true,
-                            op, in_isr);
+                            rx.size_, DmaTransferKind::WRITE_READ, RawData(nullptr, 0),
+                            false, true, op, in_isr);
   }
 #endif
 

@@ -75,19 +75,18 @@ namespace LibXR
  *
  * 支持 LibXR 操作模式参数；默认同步完成，DMA 启用后仅流式传输可后台完成 /
  * LibXR operation mode parameters are accepted; transfers complete synchronously
- * by default, and only stream transfers may complete in the background when DMA is
- * enabled:
+ * by default, and only BLOCK stream transfers use DMA when DMA is enabled:
  * - BLOCK：直接返回最终 ErrorCode，不触发回调或状态更新 /
  *   BLOCK: returns the final ErrorCode directly without callback/status update.
  * - POLLING：同步路径返回前更新为 DONE/ERROR；DMA 路径先标记
  * RUNNING，再在完成回调中更新。 POLLING: synchronous paths update DONE/ERROR before
- * return; DMA paths mark RUNNING first and update in the completion callback.
+ * return; DMA-enabled POLLING transfers return NOT_SUPPORT.
  * - CALLBACK：同步路径返回前执行回调；DMA 路径在完成回调中执行，并透传 in_isr 标志。
- *   CALLBACK: synchronous paths invoke the callback before return; DMA paths invoke
- *   it from the completion callback and forward the in_isr flag.
+ *   CALLBACK: synchronous paths invoke the callback before return; DMA-enabled
+ *   CALLBACK transfers return NOT_SUPPORT.
  * - NONE：同步路径只返回最终 ErrorCode；DMA 路径只负责后台清理，不产生额外通知。
- *   NONE: synchronous paths only return the final ErrorCode; DMA paths only clean up
- *   the background transaction without extra notification.
+ *   NONE: synchronous paths only return the final ErrorCode; DMA-enabled NONE
+ *   transfers return NOT_SUPPORT.
  *
  * 多系列适配依赖构造参数传入的 `SPI_Type*`/`clock_name_t`、HPM SDK
  * `SPI_SOC_TRANSFER_COUNT_MAX` 传输上限，以及工程/board header 暴露的实例、IRQ、DMA
@@ -640,6 +639,7 @@ class HPMSPI final : public SPI
     uint32_t size = 0;
     bool copy_rx_to_user = false;
     bool switch_buffer_on_success = false;
+    std::atomic<uint32_t> block_dma_ready{0U};
     std::atomic<uint32_t> rx_done{0U};
     std::atomic<uint32_t> tx_done{0U};
   };
@@ -673,6 +673,7 @@ class HPMSPI final : public SPI
    * @brief 启动一次 data-phase DMA 传输 / Start one data-phase DMA transfer.
    */
   ErrorCode StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
+                             size_t rx_capacity,
                              DmaTransferKind kind, RawData user_read,
                              bool copy_rx_to_user, bool switch_buffer_on_success,
                              OperationRW& op, bool in_isr);
@@ -698,6 +699,11 @@ class HPMSPI final : public SPI
   ErrorCode WaitForDmaBlockResult(uint32_t timeout);
 
   /**
+   * @brief 查询 DMA 接收缓存契约是否安全 / Check whether the DMA RX cache contract is safe.
+   */
+  static bool DmaRxBufferCacheSafe(const void* addr, size_t capacity);
+
+  /**
    * @brief DMA 回调后检查事务是否完成 / Check whether DMA callbacks complete the
    * transfer.
    */
@@ -706,7 +712,7 @@ class HPMSPI final : public SPI
   /**
    * @brief 完成并分发 DMA 事务结果 / Complete and dispatch a DMA transaction result.
    */
-  void CompleteDmaTransfer(bool in_isr, ErrorCode ans);
+  ErrorCode CompleteDmaTransfer(bool in_isr, ErrorCode ans, bool notify_block = true);
 
   /**
    * @brief 抢占 DMA 完成所有权 / Claim single DMA completion ownership.
