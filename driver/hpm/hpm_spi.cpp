@@ -808,7 +808,7 @@ ErrorCode HPMSPI::RunBlockingStreamTransfer(uint8_t* rx, const uint8_t* tx, uint
   if (ans == ErrorCode::OK && copy_rx_to_user && user_read.addr_ != nullptr &&
       user_read.size_ > 0U)
   {
-    Memory::FastCopy(user_read.addr_, rx, user_read.size_);
+    Memory::FastMove(user_read.addr_, rx, user_read.size_);
   }
   if (ans == ErrorCode::OK && switch_buffer_on_success)
   {
@@ -1085,7 +1085,7 @@ ErrorCode HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans, bool notify_bl
   if (ans == ErrorCode::OK && copy_rx_to_user && user_read.addr_ != nullptr &&
       user_read.size_ > 0U)
   {
-    Memory::FastCopy(user_read.addr_, readable_rx, user_read.size_);
+    Memory::FastMove(user_read.addr_, readable_rx, user_read.size_);
   }
   if (ans == ErrorCode::OK && switch_buffer_on_success)
   {
@@ -1399,7 +1399,7 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
   if (ans == ErrorCode::OK && read_data.size_ > 0)
   {
-    Memory::FastCopy(read_data.addr_, rx_bytes, read_data.size_);
+    Memory::FastMove(read_data.addr_, rx_bytes, read_data.size_);
   }
 
   if (ans == ErrorCode::OK)
@@ -1470,7 +1470,7 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
     }
 
     auto* tx_buffer = static_cast<uint8_t*>(tx.addr_);
-    Memory::FastCopy(tx_buffer, write_data.addr_, write_data.size_);
+    Memory::FastMove(tx_buffer, write_data.addr_, write_data.size_);
     tx_bytes = tx_buffer;
   }
 
@@ -1501,7 +1501,7 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
                          rx_bytes, static_cast<uint32_t>(read_data.size_));
   if (ans == ErrorCode::OK)
   {
-    Memory::FastCopy(read_data.addr_, rx_bytes, read_data.size_);
+    Memory::FastMove(read_data.addr_, rx_bytes, read_data.size_);
     SwitchBuffer();
   }
   return FinishOperation(op, in_isr, ans);
@@ -1613,7 +1613,7 @@ ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool
   ErrorCode ans = DoTransfer(rx_bytes, tx_bytes, static_cast<uint32_t>(total));
   if (ans == ErrorCode::OK)
   {
-    Memory::FastCopy(read_data.addr_, rx_bytes + 1, read_data.size_);
+    Memory::FastMove(read_data.addr_, rx_bytes + 1, read_data.size_);
   }
 
   if (ans == ErrorCode::OK)
@@ -1664,11 +1664,11 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
   }
 
   auto* tx_bytes = static_cast<uint8_t*>(tx.addr_);
-  tx_bytes[0] = static_cast<uint8_t>(reg & 0x7Fu);
   if (write_data.size_ > 0)
   {
-    Memory::FastCopy(tx_bytes + 1, write_data.addr_, write_data.size_);
+    Memory::FastMove(tx_bytes + 1, write_data.addr_, write_data.size_);
   }
+  tx_bytes[0] = static_cast<uint8_t>(reg & 0x7Fu);
 
   ErrorCode ans = DoWriteOnly(tx_bytes, static_cast<uint32_t>(total));
   if (ans == ErrorCode::OK)
