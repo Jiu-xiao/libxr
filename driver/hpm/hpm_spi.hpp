@@ -272,14 +272,15 @@ class HPMSPI final : public SPI
    * Transfer() return INIT_ERR before starting DMA. RTOS/POSIX systems use their
    * native semaphore wait paths.
    *
-   * @note 启用 D-cache 的平台上，BLOCK DMA RX 要求内部 RX staging buffer 起始地址按
-   * `HPM_L1C_CACHELINE_SIZE` 对齐，且容量为 cache line 的整数倍；否则 ReadAndWrite() /
-   * Transfer() 会在启动 DMA 前返回 NOT_SUPPORT，避免无效化共享 cache line 时丢失其他
-   * dirty data。On D-cache-enabled platforms, BLOCK DMA RX requires the internal RX
-   * staging buffer start address to be aligned to `HPM_L1C_CACHELINE_SIZE`, and its
-   * capacity to be a multiple of the cache-line size. Otherwise ReadAndWrite() /
-   * Transfer() returns NOT_SUPPORT before starting DMA, avoiding unrelated dirty
-   * data loss when invalidating shared cache lines.
+   * @note 启用 D-cache 的平台上，DMA RX 会优先使用内部 RX staging buffer 中的
+   * cache-line 独占区域；若原始 staging buffer 不满足直接 DMA 条件，驱动会尝试在 buffer
+   * 内选择对齐子区并在完成后搬回原始 staging 起点。若空间不足，BLOCK 传输回退到同步路径，
+   * 避免无效化共享 cache line 时丢失其他 dirty data。On D-cache-enabled platforms,
+   * DMA RX first uses a cache-line-exclusive range inside the internal RX staging
+   * buffer. If the original staging buffer is not directly DMA-safe, the driver
+   * tries an aligned subrange and moves received bytes back after completion. If
+   * no such range fits, BLOCK transfers fall back to the synchronous path, avoiding
+   * unrelated dirty-data loss when invalidating shared cache lines.
    *
    * @param enabled true 启用 DMA，false 回到同步阻塞路径 /
    * true to enable DMA, false to use the synchronous blocking path.
@@ -646,10 +647,12 @@ class HPMSPI final : public SPI
     DmaTransferKind kind = DmaTransferKind::NONE;
     OperationRW* op = nullptr;
     uint8_t* rx = nullptr;
+    uint8_t* staging_rx = nullptr;
     uint8_t* tx = nullptr;
     RawData user_read = {nullptr, 0};
     uint32_t size = 0;
     bool copy_rx_to_user = false;
+    bool copy_rx_to_staging = false;
     bool switch_buffer_on_success = false;
     std::atomic<uint32_t> block_dma_ready{0U};
     std::atomic<uint32_t> rx_done{0U};
@@ -714,6 +717,15 @@ class HPMSPI final : public SPI
    * @brief 查询 DMA 接收缓存契约是否安全 / Check whether the DMA RX cache contract is safe.
    */
   static bool DmaRxBufferCacheSafe(const void* addr, size_t capacity);
+
+  /**
+   * @brief 使用同步路径执行一次流式传输 / Run one stream transfer through the blocking path.
+   */
+  ErrorCode RunBlockingStreamTransfer(uint8_t* rx, const uint8_t* tx, uint32_t size,
+                                      DmaTransferKind kind, RawData user_read,
+                                      bool copy_rx_to_user,
+                                      bool switch_buffer_on_success,
+                                      OperationRW& op, bool in_isr);
 
   /**
    * @brief DMA 回调后检查事务是否完成 / Check whether DMA callbacks complete the
