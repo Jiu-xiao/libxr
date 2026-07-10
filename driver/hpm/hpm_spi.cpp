@@ -159,9 +159,8 @@ bool SelectDmaRxBuffer(uint8_t* rx, size_t capacity, uint32_t size,
   }
 
   const uintptr_t start = reinterpret_cast<uintptr_t>(rx);
-  const uintptr_t aligned =
-      (start + HPM_L1C_CACHELINE_SIZE - 1U) &
-      ~(static_cast<uintptr_t>(HPM_L1C_CACHELINE_SIZE) - 1U);
+  const uintptr_t aligned = (start + HPM_L1C_CACHELINE_SIZE - 1U) &
+                            ~(static_cast<uintptr_t>(HPM_L1C_CACHELINE_SIZE) - 1U);
   if (aligned < start)
   {
     return false;
@@ -706,9 +705,9 @@ bool HPMSPI::DmaRxBufferCacheSafe(const void* addr, size_t capacity)
   return DCacheRangeIsLineExclusive(addr, capacity);
 }
 
-ErrorCode HPMSPI::RunBlockingStreamTransfer(uint8_t* rx, const uint8_t* tx,
-                                            uint32_t size, DmaTransferKind kind,
-                                            RawData user_read, bool copy_rx_to_user,
+ErrorCode HPMSPI::RunBlockingStreamTransfer(uint8_t* rx, const uint8_t* tx, uint32_t size,
+                                            DmaTransferKind kind, RawData user_read,
+                                            bool copy_rx_to_user,
                                             bool switch_buffer_on_success,
                                             OperationRW& op, bool in_isr)
 {
