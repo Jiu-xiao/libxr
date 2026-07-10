@@ -15,10 +15,11 @@ namespace LibXR
  * @brief UART 单次 DMA 发送执行模型 / UART one-shot DMA TX execution model
  *
  * 模型管理 active/pending 请求和双缓冲状态。平台后端只需实现
- * `StartDmaTx(data, size, block)`，并通过 `OnTransferDone()` 上报 DMA 完成或错误。
+ * `StartDmaTx(data, size, block)`，并在 DMA 正常完成或错误恢复后通过
+ * `OnTransferDone()` 上报终止事件。
  * The model owns the active/pending requests and double-buffer state. The platform
- * backend only implements `StartDmaTx(data, size, block)` and reports DMA completion
- * or errors through `OnTransferDone()`.
+ * backend only implements `StartDmaTx(data, size, block)` and reports a terminal event
+ * through `OnTransferDone()` after normal completion or error recovery.
  *
  * @tparam Backend 静态绑定的平台后端类型 / Statically bound platform backend type
  * @tparam StateFlag 与平台并发模型匹配的标志类型 / Flag type selected for the platform
@@ -114,18 +115,20 @@ class UartDmaTxModel
   }
 
   /**
-   * @brief 处理一次 DMA 完成或错误事件 / Handle one DMA completion or error event
+   * @brief 处理一次 DMA 终止事件 / Handle one DMA terminal event
    * @param in_isr 事件是否来自中断上下文 / Whether the event is handled in interrupt
    * context
-   * @param result DMA 传输结果 / DMA transfer result
    *
-   * 重复事件或没有 active 请求时不产生完成通知。错误只终止已预装的 pending 请求；active
-   * 请求已经在 DMA 启动时完成上层提交。
-   * Duplicate events and events without an active request do not emit completion. An
-   * error fails only the staged pending request because the active request completed at
-   * the upper layer when DMA was started.
+   * active 请求已经在 DMA 启动成功时完成上层提交。平台应在报告该事件前完成 DMA
+   * 错误恢复；模型随后与正常完成一样提升 ready pending 请求。重复事件或没有 active
+   * 请求时不产生完成通知。
+   * The active request has already completed at the upper layer when DMA starts
+   * successfully. The platform must recover DMA errors before reporting this event; the
+   * model then promotes a ready pending request exactly as it does after normal
+   * completion. Duplicate events and events without an active request do not emit
+   * completion.
    */
-  void OnTransferDone(bool in_isr, ErrorCode result)
+  void OnTransferDone(bool in_isr)
   {
     if (in_completion_.TestAndSet())
     {
@@ -140,15 +143,8 @@ class UartDmaTxModel
 
     ClearActive();
 
-    if (result != ErrorCode::OK)
-    {
-      FailPending(in_isr, result);
-      in_completion_.Clear();
-      return;
-    }
-
     WriteInfoBlock completed_info{};
-    if (!LoadNextActive(completed_info))
+    if (!PromotePendingToActive(completed_info))
     {
       in_completion_.Clear();
       return;
@@ -164,6 +160,10 @@ class UartDmaTxModel
     if (started)
     {
       (void)StageNextPending();
+    }
+    else
+    {
+      port_.FailAndClearAll(ErrorCode::FAILED, in_isr);
     }
 
     in_completion_.Clear();
@@ -261,27 +261,15 @@ class UartDmaTxModel
     return result == ErrorCode::OK;
   }
 
-  bool LoadNextActive(WriteInfoBlock& info)
+  bool PromotePendingToActive(WriteInfoBlock& info)
   {
-    if (PromotePending())
-    {
-      if (!PopActiveInfo(info))
-      {
-        return false;
-      }
-
-      active_length_ = info.data.size_;
-      return true;
-    }
-
-    if (port_.queue_info_->Peek(info) != ErrorCode::OK)
+    if (!PromotePending())
     {
       return false;
     }
-    if (info.data.size_ > buffers_.Size() ||
-        !PopPayload(buffers_.ActiveBuffer(), info.data.size_) || !PopActiveInfo(info))
+
+    if (!PopActiveInfo(info))
     {
-      ASSERT(false);
       return false;
     }
 
@@ -307,22 +295,6 @@ class UartDmaTxModel
   {
     ClearActive();
     return ErrorCode::FAILED;
-  }
-
-  void FailPending(bool in_isr, ErrorCode result)
-  {
-    if (!pending_valid_.TestAndClear())
-    {
-      return;
-    }
-
-    WriteInfoBlock pending_info{};
-    if (port_.queue_info_->Pop(pending_info) != ErrorCode::OK)
-    {
-      ASSERT(false);
-      return;
-    }
-    port_.Finish(in_isr, result, pending_info);
   }
 
   void ClearActive() { active_length_ = 0U; }

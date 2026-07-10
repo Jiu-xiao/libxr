@@ -292,7 +292,7 @@ static inline void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef* uart_handle)
 void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 {
   auto uart = STM32UART::map[id];
-  uart->tx_dma_model_.OnTransferDone(true, ErrorCode::OK);
+  uart->tx_dma_model_.OnTransferDone(true);
 }
 
 extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t)

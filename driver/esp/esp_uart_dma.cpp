@@ -121,7 +121,7 @@ bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t, gdma_event_dat
   auto* uart = static_cast<ESP32UART*>(user_data);
   if (uart != nullptr)
   {
-    uart->tx_dma_model_.OnTransferDone(true, ErrorCode::OK);
+    uart->tx_dma_model_.OnTransferDone(true);
   }
   return false;
 }
@@ -503,9 +503,9 @@ void IRAM_ATTR ESP32UART::HandleDmaRxError()
   (void)gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_));
 }
 
-// TX DMA recovery aborts the current hardware transfer and lets the common TX
-// completion path clean up the software state.
-// TX DMA 恢复会中止当前硬件传输，再交给公共 TX 完成路径清理软件状态。
+// TX DMA recovery aborts the current hardware transfer before the common terminal
+// path advances a ready pending request.
+// TX DMA 恢复先中止当前硬件传输，再由公共终止路径推进 ready pending 请求。
 void IRAM_ATTR ESP32UART::HandleDmaTxError()
 {
   if (tx_dma_channel_ != nullptr)
@@ -513,7 +513,7 @@ void IRAM_ATTR ESP32UART::HandleDmaTxError()
     gdma_stop(tx_dma_channel_);
     gdma_reset(tx_dma_channel_);
   }
-  tx_dma_model_.OnTransferDone(true, ErrorCode::FAILED);
+  tx_dma_model_.OnTransferDone(true);
 }
 
 }  // namespace LibXR

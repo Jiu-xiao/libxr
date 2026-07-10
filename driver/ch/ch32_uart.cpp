@@ -283,7 +283,7 @@ extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
 {
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
-  uart->tx_dma_model_.OnTransferDone(true, ErrorCode::OK);
+  uart->tx_dma_model_.OnTransferDone(true);
 }
 
 // DMA channel IRQ callbacks.
