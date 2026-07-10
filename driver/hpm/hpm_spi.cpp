@@ -59,6 +59,9 @@ bool RegisterPayloadSizeTooLarge(size_t size)
 
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
 constexpr bool kHpmSpiDmaAddressSpaceSupported = sizeof(uintptr_t) <= sizeof(uint32_t);
+constexpr uint32_t kDmaBlockPending = 0U;
+constexpr uint32_t kDmaBlockSuccess = 1U;
+constexpr uint32_t kDmaBlockFailure = 2U;
 
 struct DmaRxBufferSelection
 {
@@ -338,6 +341,14 @@ spi_sclk_sampling_clk_edges_t HPMSPI::ConvertPhase(ClockPhase phase)
 
 ErrorCode HPMSPI::ValidateConfiguration(const Configuration& config) const
 {
+  if ((config.clock_polarity != ClockPolarity::LOW &&
+       config.clock_polarity != ClockPolarity::HIGH) ||
+      (config.clock_phase != ClockPhase::EDGE_1 &&
+       config.clock_phase != ClockPhase::EDGE_2))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
   const ErrorCode prescaler_ans = ValidatePrescaler(config.prescaler);
   if (prescaler_ans != ErrorCode::OK)
   {
@@ -621,6 +632,36 @@ ErrorCode HPMSPI::EnsureDmaReady()
   }
 
   dma_mgr_init();
+  auto release_resource = [](dma_resource_t* resource)
+  {
+    if (resource != nullptr && resource->base != nullptr)
+    {
+      (void)dma_mgr_release_resource(resource);
+    }
+  };
+  auto install_failure_callbacks = [this](dma_resource_t* resource) -> hpm_stat_t
+  {
+    if (resource == nullptr || resource->base == nullptr)
+    {
+      return status_invalid_argument;
+    }
+
+    hpm_stat_t callback_status =
+        dma_mgr_install_chn_error_callback(resource, &HPMSPI::OnDmaFailureCallback, this);
+    if (callback_status != status_success)
+    {
+      return callback_status;
+    }
+    callback_status =
+        dma_mgr_install_chn_abort_callback(resource, &HPMSPI::OnDmaFailureCallback, this);
+    if (callback_status != status_success)
+    {
+      return callback_status;
+    }
+    return dma_mgr_enable_chn_irq(
+        resource, DMA_MGR_INTERRUPT_MASK_ERROR | DMA_MGR_INTERRUPT_MASK_ABORT);
+  };
+
   hpm_stat_t status =
       hpm_spi_rx_dma_mgr_install_custom_callback(spi_, &HPMSPI::OnRxDmaTcCallback, this);
   if (status != status_success)
@@ -629,17 +670,30 @@ ErrorCode HPMSPI::EnsureDmaReady()
                                                : ConvertDmaStatus(status);
   }
 
+  dma_resource_t* rx_resource = hpm_spi_get_rx_dma_resource(spi_);
+  status = install_failure_callbacks(rx_resource);
+  if (status != status_success)
+  {
+    release_resource(rx_resource);
+    return ConvertDmaStatus(status);
+  }
+
   status =
       hpm_spi_tx_dma_mgr_install_custom_callback(spi_, &HPMSPI::OnTxDmaTcCallback, this);
   if (status != status_success)
   {
-    dma_resource_t* rx_resource = hpm_spi_get_rx_dma_resource(spi_);
-    if (rx_resource != nullptr && rx_resource->base != nullptr)
-    {
-      (void)dma_mgr_release_resource(rx_resource);
-    }
+    release_resource(rx_resource);
     return (status == status_invalid_argument) ? ErrorCode::NOT_SUPPORT
                                                : ConvertDmaStatus(status);
+  }
+
+  dma_resource_t* tx_resource = hpm_spi_get_tx_dma_resource(spi_);
+  status = install_failure_callbacks(tx_resource);
+  if (status != status_success)
+  {
+    release_resource(tx_resource);
+    release_resource(rx_resource);
+    return ConvertDmaStatus(status);
   }
 
   dma_ready_ = true;
@@ -682,6 +736,28 @@ void HPMSPI::StopDmaTransfer()
   if (tx_resource != nullptr && tx_resource->base != nullptr)
   {
     (void)dma_mgr_disable_channel(tx_resource);
+  }
+
+  ClearDmaTransferStatus();
+}
+
+void HPMSPI::ClearDmaTransferStatus()
+{
+  if (spi_ == nullptr)
+  {
+    return;
+  }
+
+  dma_resource_t* rx_resource = hpm_spi_get_rx_dma_resource(spi_);
+  if (rx_resource != nullptr && rx_resource->base != nullptr)
+  {
+    dma_clear_transfer_status(rx_resource->base, rx_resource->channel);
+  }
+
+  dma_resource_t* tx_resource = hpm_spi_get_tx_dma_resource(spi_);
+  if (tx_resource != nullptr && tx_resource->base != nullptr)
+  {
+    dma_clear_transfer_status(tx_resource->base, tx_resource->channel);
   }
 }
 
@@ -763,6 +839,10 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     return FinishOperation(op, in_isr, ErrorCode::NOT_SUPPORT);
   }
+  if (in_isr)
+  {
+    return FinishOperation(op, true, ErrorCode::NOT_SUPPORT);
+  }
   if (!kHpmSpiDmaAddressSpaceSupported)
   {
     return FinishOperation(op, in_isr, ErrorCode::NOT_SUPPORT);
@@ -826,6 +906,7 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
     return FinishOperation(op, in_isr, ans);
   }
 
+  ClearDmaTransferStatus();
   dma_busy_.store(1U, std::memory_order_release);
   ClearDmaContext();
   dma_ctx_.kind = kind;
@@ -898,13 +979,13 @@ ErrorCode HPMSPI::WaitForDmaBlockResult(uint32_t timeout)
 {
   const ErrorCode ans = dma_block_wait_.Wait(timeout);
   if (ans == ErrorCode::OK && DmaTransferActive() &&
-      dma_ctx_.block_dma_ready.load(std::memory_order_acquire) != 0U)
+      dma_ctx_.block_dma_ready.load(std::memory_order_acquire) == kDmaBlockSuccess)
   {
     return CompleteDmaTransfer(false, ErrorCode::OK, false);
   }
-  if (ans == ErrorCode::TIMEOUT && DmaTransferActive())
+  if (ans != ErrorCode::OK && DmaTransferActive())
   {
-    (void)CompleteDmaTransfer(false, ErrorCode::TIMEOUT);
+    (void)CompleteDmaTransfer(false, ans, false);
   }
   return ans;
 }
@@ -938,8 +1019,13 @@ void HPMSPI::MaybeCompleteDmaTransfer(bool in_isr)
   {
     if (dma_ctx_.op != nullptr && dma_ctx_.op->type == OperationRW::OperationType::BLOCK)
     {
-      dma_ctx_.block_dma_ready.store(1U, std::memory_order_release);
-      (void)dma_block_wait_.TryPost(in_isr, ErrorCode::OK);
+      uint32_t expected = kDmaBlockPending;
+      if (dma_ctx_.block_dma_ready.compare_exchange_strong(expected, kDmaBlockSuccess,
+                                                           std::memory_order_acq_rel,
+                                                           std::memory_order_acquire))
+      {
+        (void)dma_block_wait_.TryPost(in_isr, ErrorCode::OK);
+      }
       return;
     }
 
@@ -1055,6 +1141,25 @@ void HPMSPI::OnTxDmaTcCallback(DMA_Type* base, uint32_t channel, void* cb_data_p
 
   self->dma_ctx_.tx_done.store(1U, std::memory_order_release);
   self->MaybeCompleteDmaTransfer(true);
+}
+
+void HPMSPI::OnDmaFailureCallback(DMA_Type* base, uint32_t channel, void* cb_data_ptr)
+{
+  UNUSED(base);
+  UNUSED(channel);
+  auto* self = static_cast<HPMSPI*>(cb_data_ptr);
+  if (self == nullptr || !self->DmaTransferActive())
+  {
+    return;
+  }
+
+  uint32_t expected = kDmaBlockPending;
+  if (self->dma_ctx_.block_dma_ready.compare_exchange_strong(expected, kDmaBlockFailure,
+                                                             std::memory_order_acq_rel,
+                                                             std::memory_order_acquire))
+  {
+    (void)self->dma_block_wait_.TryPost(true, ErrorCode::FAILED);
+  }
 }
 #endif
 
@@ -1220,24 +1325,40 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
-  RawData rx = GetRxBuffer();
-  RawData tx = GetTxBuffer();
-  if ((read_data.size_ > 0 && rx.addr_ == nullptr) || tx.addr_ == nullptr)
+  RawData rx = {nullptr, 0};
+  if (read_data.size_ > 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    rx = GetRxBuffer();
+    if (rx.addr_ == nullptr)
+    {
+      return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    }
+    if (rx.size_ < need)
+    {
+      return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    }
   }
-  if ((read_data.size_ > 0 && rx.size_ < need) || tx.size_ < need)
+
+  RawData tx = {nullptr, 0};
+  uint8_t* tx_bytes = nullptr;
+  if (write_data.size_ > 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    tx = GetTxBuffer();
+    if (tx.addr_ == nullptr)
+    {
+      return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    }
+    if (tx.size_ < need)
+    {
+      return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    }
+
+    tx_bytes = static_cast<uint8_t*>(tx.addr_);
+    Memory::FastSet(tx_bytes, 0, need);
+    Memory::FastCopy(tx_bytes, write_data.addr_, write_data.size_);
   }
 
   auto* rx_bytes = static_cast<uint8_t*>(rx.addr_);
-  auto* tx_bytes = static_cast<uint8_t*>(tx.addr_);
-  Memory::FastSet(tx_bytes, 0, need);
-  if (write_data.size_ > 0)
-  {
-    Memory::FastCopy(tx_bytes, write_data.addr_, write_data.size_);
-  }
 
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
   if (dma_enabled_)
@@ -1614,7 +1735,7 @@ ErrorCode HPMSPI::ApplyTiming(Prescaler prescaler)
 
 ErrorCode HPMSPI::SetConfig(SPI::Configuration config)
 {
-  GetConfig() = config;
+  UNUSED(config);
   configured_ = false;
   return ErrorCode::NOT_SUPPORT;
 }
