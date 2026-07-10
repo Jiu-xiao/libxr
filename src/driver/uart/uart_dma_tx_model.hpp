@@ -93,19 +93,17 @@ class UartDmaTxModel
         return ErrorCode::PENDING;
       }
 
-      WriteInfoBlock claimed_info{};
-      if (!PopActiveInfo(claimed_info))
+      if (!PopActiveInfo(info))
       {
         ClearActive();
         return ErrorCode::FAILED;
       }
 
+      active_length_ = info.data.size_;
       return StartActive() ? ErrorCode::OK : FailSynchronousStart();
     }
 
-    WriteInfoBlock claimed_info{};
-    if (!PopPayload(buffers_.ActiveBuffer(), info.data.size_) ||
-        port_.queue_info_->Pop(claimed_info) != ErrorCode::OK)
+    if (!PopPayload(buffers_.ActiveBuffer(), info.data.size_) || !PopActiveInfo(info))
     {
       ASSERT(false);
       return ErrorCode::FAILED;
@@ -220,7 +218,6 @@ class UartDmaTxModel
       return false;
     }
 
-    pending_length_ = info.data.size_;
     pending_valid_.Set();
     return true;
   }
@@ -254,8 +251,6 @@ class UartDmaTxModel
     }
 
     buffers_.FlipActiveBlock();
-    active_length_ = pending_length_;
-    pending_length_ = 0U;
     return true;
   }
 
@@ -270,23 +265,27 @@ class UartDmaTxModel
   {
     if (PromotePending())
     {
-      return PopActiveInfo(info);
+      if (!PopActiveInfo(info))
+      {
+        return false;
+      }
+
+      active_length_ = info.data.size_;
+      return true;
     }
 
-    WriteInfoBlock next_info{};
-    if (port_.queue_info_->Peek(next_info) != ErrorCode::OK)
+    if (port_.queue_info_->Peek(info) != ErrorCode::OK)
     {
       return false;
     }
-    if (next_info.data.size_ > buffers_.Size() ||
-        !PopPayload(buffers_.ActiveBuffer(), next_info.data.size_) ||
-        !PopActiveInfo(info))
+    if (info.data.size_ > buffers_.Size() ||
+        !PopPayload(buffers_.ActiveBuffer(), info.data.size_) || !PopActiveInfo(info))
     {
       ASSERT(false);
       return false;
     }
 
-    active_length_ = next_info.data.size_;
+    active_length_ = info.data.size_;
     return true;
   }
 
@@ -317,7 +316,6 @@ class UartDmaTxModel
       return;
     }
 
-    pending_length_ = 0U;
     WriteInfoBlock pending_info{};
     if (port_.queue_info_->Pop(pending_info) != ErrorCode::OK)
     {
@@ -333,7 +331,6 @@ class UartDmaTxModel
   WritePort& port_;
   DoubleBuffer buffers_;
   size_t active_length_ = 0U;
-  size_t pending_length_ = 0U;
   StateFlag busy_{};
   StateFlag pending_valid_{};
   StateFlag in_completion_{};
