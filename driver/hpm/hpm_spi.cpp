@@ -907,7 +907,6 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   }
 
   ClearDmaTransferStatus();
-  dma_busy_.store(1U, std::memory_order_release);
   ClearDmaContext();
   dma_ctx_.kind = kind;
   dma_ctx_.op = &op;
@@ -920,6 +919,7 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   dma_ctx_.copy_rx_to_staging = copy_rx_to_staging;
   dma_ctx_.switch_buffer_on_success = switch_buffer_on_success;
   dma_completion_claim_.store(0U, std::memory_order_release);
+  dma_busy_.store(1U, std::memory_order_release);
 
   if (op.type == OperationRW::OperationType::BLOCK)
   {
@@ -1354,8 +1354,11 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     }
 
     tx_bytes = static_cast<uint8_t*>(tx.addr_);
-    Memory::FastSet(tx_bytes, 0, need);
-    Memory::FastCopy(tx_bytes, write_data.addr_, write_data.size_);
+    Memory::FastMove(tx_bytes, write_data.addr_, write_data.size_);
+    if (need > write_data.size_)
+    {
+      Memory::FastSet(tx_bytes + write_data.size_, 0, need - write_data.size_);
+    }
   }
 
   auto* rx_bytes = static_cast<uint8_t*>(rx.addr_);
