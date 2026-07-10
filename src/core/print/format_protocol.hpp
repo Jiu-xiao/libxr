@@ -125,6 +125,7 @@ inline constexpr bool enable_float_fixed =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_FIXED;
 /**
  * @brief 在浮点功能开启时启用基于 double 的默认浮点格式化 / Enables double-backed default float formatting when floating-point support is enabled.
+ * @note 关闭时仍接受 double 输入，但会按 F32 降精度格式化 / When disabled, double input remains accepted but is formatted at reduced F32 precision
  */
 inline constexpr bool enable_float_double =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_DOUBLE;
@@ -223,7 +224,7 @@ enum class FormatArgumentRule : uint8_t
   Pointer,           ///< object pointer or nullptr / 对象指针或 nullptr
   Character,         ///< any integral or enum accepted by %c / 可按 %c 接受的整数或枚举
   String,            ///< C string, string_view, or string / C 字符串、string_view 或 string
-  Float,             ///< float, plus double when double support is enabled / float；启用 double 支持时也接受 double
+  Float,             ///< float or double / float 或 double
   LongDouble,        ///< exact long double / 精确匹配 long double
 };
 

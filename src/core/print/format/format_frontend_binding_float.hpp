@@ -11,6 +11,7 @@ namespace ArgumentResolution
  * @param parsed 已解析的 brace 字段 / Parsed brace field
  * @param kind 当前字段选中的前端参数类别 / Frontend-side argument family selected for this field
  * @return 返回解析后的共享字段；精度或类型不匹配时返回首个错误 / Returns the resolved shared field, or the first precision or type mismatch error
+ * @note double 支持关闭时，double 参数会降为 F32 存储与格式化 / When double support is disabled, double arguments are reduced to F32 storage and formatting
  */
 [[nodiscard]] consteval ResolvedField ResolveFloatField(const ParsedField& parsed,
                                                         ArgumentKind kind)
@@ -41,12 +42,8 @@ namespace ArgumentResolution
         pack = FormatPackKind::F32;
         return true;
       case ArgumentKind::Float64:
-        if (!Config::enable_float_double)
-        {
-          return false;
-        }
-        type = f64_type;
-        pack = FormatPackKind::F64;
+        type = Config::enable_float_double ? f64_type : f32_type;
+        pack = Config::enable_float_double ? FormatPackKind::F64 : FormatPackKind::F32;
         return true;
       case ArgumentKind::LongDouble:
         if (!Config::enable_float_long_double)
