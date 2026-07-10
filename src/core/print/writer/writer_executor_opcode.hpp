@@ -10,9 +10,9 @@
  * @param codes 指向编译字节流的指针 / Pointer to the compiled byte stream
  * @param args 指向已打包参数字节块的指针；无参数时可为空 / Pointer to the packed argument blob, or null when no arguments exist
  */
-template <OutputSink Sink, FormatProfile Profile>
-Writer::Executor<Sink, Profile>::Executor(Sink& sink, const uint8_t* codes,
-                                          const uint8_t* args)
+template <OutputSink Sink>
+Writer::Executor<Sink>::Executor(Sink& sink, const uint8_t* codes,
+                                 const uint8_t* args)
     : sink_(sink),
       codes_(codes),
       args_(args)
@@ -21,12 +21,14 @@ Writer::Executor<Sink, Profile>::Executor(Sink& sink, const uint8_t* codes,
 
 /**
  * @brief 运行操作码循环，直到遇到 End 或首个 sink/运行期错误 / Runs the opcode loop until End or the first sink/runtime error.
+ * @tparam Profile 当前编译格式需要的操作码配置 / Opcode profile required by the current compiled format
  * @return Returns `ErrorCode::OK` on normal completion, or the first sink /
  *         runtime error. / 正常结束返回 `ErrorCode::OK`；否则返回首个
  *         sink/运行期错误。
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::Run()
+template <OutputSink Sink>
+template <FormatProfile Profile>
+ErrorCode Writer::Executor<Sink>::Run()
 {
   while (true)
   {
@@ -36,7 +38,7 @@ ErrorCode Writer::Executor<Sink, Profile>::Run()
       return ErrorCode::OK;
     }
 
-    auto ec = DispatchOp(op);
+    auto ec = DispatchOp<Profile>(op);
     if (ec != ErrorCode::OK)
     {
       return ec;
@@ -46,12 +48,14 @@ ErrorCode Writer::Executor<Sink, Profile>::Run()
 
 /**
  * @brief 将一个顶层操作码分发到其特化运行期路径 / Dispatches one top-level opcode to its specialized runtime path.
+ * @tparam Profile 当前编译格式需要的操作码配置 / Opcode profile required by the current compiled format
  * @param op Decoded runtime opcode. / 解码后的运行期操作码。
  * @return Returns the specialized runtime result for that opcode. /
  *         返回该操作码对应特化路径的运行结果。
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchOp(FormatOp op)
+template <OutputSink Sink>
+template <FormatProfile Profile>
+ErrorCode Writer::Executor<Sink>::DispatchOp(FormatOp op)
 {
   switch (op)
   {

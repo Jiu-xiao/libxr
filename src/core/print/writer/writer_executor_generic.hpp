@@ -9,9 +9,9 @@
  * @tparam Int 有符号打包存储类型 / Signed packed-storage type
  * @return 返回具体有符号字段写出结果 / Returns the concrete signed-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <std::signed_integral Int>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchSignedField()
+ErrorCode Writer::Executor<Sink>::DispatchSignedField()
 {
   return WriteSigned(codes_.ReadSpec(), args_.Read<Int>());
 }
@@ -22,9 +22,9 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchSignedField()
  * @tparam UInt 无符号打包存储类型 / Unsigned packed-storage type
  * @return 返回选定整数语义路径的写出结果 / Returns the selected integer-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <FormatType Type, std::unsigned_integral UInt>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsignedField()
+ErrorCode Writer::Executor<Sink>::DispatchUnsignedField()
 {
   return DispatchUnsigned<Type>(codes_.ReadSpec(), args_.Read<UInt>());
 }
@@ -36,9 +36,9 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchUnsignedField()
  * @tparam Float 打包浮点存储类型 / Packed float storage type
  * @return 返回选定浮点语义路径的写出结果 / Returns the selected float-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
+template <OutputSink Sink>
 template <FormatType Type, typename Float>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchFloatField()
+ErrorCode Writer::Executor<Sink>::DispatchFloatField()
 {
   return WriteFloat(Type, codes_.ReadSpec(), args_.Read<Float>());
 }
@@ -48,8 +48,8 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchFloatField()
  * @brief 读取一个指针载荷并走指针字段写出路径 / Read one pointer payload and write it through the pointer field path
  * @return 返回指针字段写出结果 / Returns the pointer-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchPointerField()
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::DispatchPointerField()
 {
   return WritePointer(codes_.ReadSpec(), args_.Read<uintptr_t>());
 }
@@ -58,8 +58,8 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchPointerField()
  * @brief 读取一个字符载荷并走字符字段写出路径 / Read one character payload and write it through the character field path
  * @return 返回字符字段写出结果 / Returns the character-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchCharacterField()
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::DispatchCharacterField()
 {
   return WriteCharacter(codes_.ReadSpec(), args_.Read<char>());
 }
@@ -68,8 +68,8 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchCharacterField()
  * @brief 读取一个字符串载荷并走字符串字段写出路径 / Read one string payload and write it through the string field path
  * @return 返回字符串字段写出结果 / Returns the string-field write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchStringField()
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::DispatchStringField()
 {
   return WriteString(codes_.ReadSpec(), args_.Read<std::string_view>());
 }
@@ -79,8 +79,8 @@ ErrorCode Writer::Executor<Sink, Profile>::DispatchStringField()
  * @param type 当前 `GenericField` 携带的运行期语义类型 / Runtime semantic type carried by this `GenericField`
  * @return 返回具体宽回退路径的写出结果 / Returns the concrete wide-path write result
  */
-template <OutputSink Sink, FormatProfile Profile>
-ErrorCode Writer::Executor<Sink, Profile>::DispatchGenericField(FormatType type)
+template <OutputSink Sink>
+ErrorCode Writer::Executor<Sink>::DispatchGenericField(FormatType type)
 {
   switch (type)
   {
