@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 #if __has_include("board.h")
 #include "board.h"
@@ -55,6 +56,12 @@ bool RegisterPayloadSizeTooLarge(size_t size)
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
 constexpr bool kHpmSpiDmaAddressSpaceSupported = sizeof(uintptr_t) <= sizeof(uint32_t);
 
+struct DmaRxBufferSelection
+{
+  uint8_t* dma_rx = nullptr;
+  bool copy_to_staging = false;
+};
+
 #if LIBXR_HPM_SPI_HAS_L1C
 bool ResolveDCacheRange(const void* addr, uint32_t size, uint32_t& start,
                         uint32_t& aligned_size)
@@ -91,6 +98,17 @@ bool ResolveDCacheRange(const void* addr, uint32_t size, uint32_t& start,
   aligned_size = static_cast<uint32_t>(range_size);
   return aligned_size > 0U;
 }
+
+size_t RoundUpDCacheLine(size_t size)
+{
+  constexpr size_t line_size = HPM_L1C_CACHELINE_SIZE;
+  if (line_size == 0U || size > std::numeric_limits<size_t>::max() - (line_size - 1U))
+  {
+    return 0U;
+  }
+
+  return ((size + line_size - 1U) / line_size) * line_size;
+}
 #endif
 
 bool DCacheRangeIsLineExclusive(const void* addr, size_t capacity)
@@ -112,6 +130,62 @@ bool DCacheRangeIsLineExclusive(const void* addr, size_t capacity)
   UNUSED(addr);
   UNUSED(capacity);
   return true;
+#endif
+}
+
+bool SelectDmaRxBuffer(uint8_t* rx, size_t capacity, uint32_t size,
+                       DmaRxBufferSelection& selection)
+{
+  selection = {};
+  if (rx == nullptr || size == 0U || capacity < size)
+  {
+    return false;
+  }
+  if (DCacheRangeIsLineExclusive(rx, capacity))
+  {
+    selection.dma_rx = rx;
+    return true;
+  }
+
+#if LIBXR_HPM_SPI_HAS_L1C
+  if (!l1c_dc_is_enabled())
+  {
+    selection.dma_rx = rx;
+    return true;
+  }
+
+  const uintptr_t start = reinterpret_cast<uintptr_t>(rx);
+  const uintptr_t aligned =
+      (start + HPM_L1C_CACHELINE_SIZE - 1U) &
+      ~(static_cast<uintptr_t>(HPM_L1C_CACHELINE_SIZE) - 1U);
+  if (aligned < start)
+  {
+    return false;
+  }
+
+  const size_t offset = static_cast<size_t>(aligned - start);
+  if (offset > capacity)
+  {
+    return false;
+  }
+
+  const size_t aligned_size = RoundUpDCacheLine(size);
+  if (aligned_size == 0U)
+  {
+    return false;
+  }
+
+  const size_t aligned_capacity = capacity - offset;
+  if (aligned_capacity < aligned_size)
+  {
+    return false;
+  }
+
+  selection.dma_rx = reinterpret_cast<uint8_t*>(aligned);
+  selection.copy_to_staging = selection.dma_rx != rx;
+  return true;
+#else
+  return false;
 #endif
 }
 
@@ -573,10 +647,12 @@ void HPMSPI::ClearDmaContext()
   dma_ctx_.kind = DmaTransferKind::NONE;
   dma_ctx_.op = nullptr;
   dma_ctx_.rx = nullptr;
+  dma_ctx_.staging_rx = nullptr;
   dma_ctx_.tx = nullptr;
   dma_ctx_.user_read = {nullptr, 0};
   dma_ctx_.size = 0U;
   dma_ctx_.copy_rx_to_user = false;
+  dma_ctx_.copy_rx_to_staging = false;
   dma_ctx_.switch_buffer_on_success = false;
   dma_ctx_.block_dma_ready.store(0U, std::memory_order_release);
   dma_ctx_.rx_done.store(0U, std::memory_order_release);
@@ -625,6 +701,42 @@ bool HPMSPI::DmaRxBufferCacheSafe(const void* addr, size_t capacity)
   return DCacheRangeIsLineExclusive(addr, capacity);
 }
 
+ErrorCode HPMSPI::RunBlockingStreamTransfer(uint8_t* rx, const uint8_t* tx,
+                                            uint32_t size, DmaTransferKind kind,
+                                            RawData user_read, bool copy_rx_to_user,
+                                            bool switch_buffer_on_success,
+                                            OperationRW& op, bool in_isr)
+{
+  ErrorCode ans = ErrorCode::FAILED;
+  switch (kind)
+  {
+    case DmaTransferKind::READ_ONLY:
+      ans = DoReadOnly(rx, size);
+      break;
+    case DmaTransferKind::WRITE_ONLY:
+      ans = DoWriteOnly(tx, size);
+      break;
+    case DmaTransferKind::WRITE_READ:
+      ans = DoTransfer(rx, tx, size);
+      break;
+    case DmaTransferKind::NONE:
+    default:
+      ans = ErrorCode::ARG_ERR;
+      break;
+  }
+
+  if (ans == ErrorCode::OK && copy_rx_to_user && user_read.addr_ != nullptr &&
+      user_read.size_ > 0U)
+  {
+    Memory::FastCopy(user_read.addr_, rx, user_read.size_);
+  }
+  if (ans == ErrorCode::OK && switch_buffer_on_success)
+  {
+    SwitchBuffer();
+  }
+  return FinishOperation(op, in_isr, ans);
+}
+
 ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
                                    size_t rx_capacity, DmaTransferKind kind,
                                    RawData user_read, bool copy_rx_to_user,
@@ -664,11 +776,7 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
   }
-  if ((kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ) &&
-      !DmaRxBufferCacheSafe(rx, rx_capacity))
-  {
-    return FinishOperation(op, in_isr, ErrorCode::NOT_SUPPORT);
-  }
+
   if (copy_rx_to_user)
   {
     if (user_read.size_ > size)
@@ -678,6 +786,23 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
     if (user_read.size_ > 0U && user_read.addr_ == nullptr)
     {
       return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    }
+  }
+
+  uint8_t* dma_rx = rx;
+  bool copy_rx_to_staging = false;
+  if (kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ)
+  {
+    DmaRxBufferSelection rx_selection;
+    if (SelectDmaRxBuffer(rx, rx_capacity, size, rx_selection))
+    {
+      dma_rx = rx_selection.dma_rx;
+      copy_rx_to_staging = rx_selection.copy_to_staging;
+    }
+    else
+    {
+      return RunBlockingStreamTransfer(rx, tx, size, kind, user_read, copy_rx_to_user,
+                                       switch_buffer_on_success, op, in_isr);
     }
   }
 #if LIBXR_HPM_SPI_DMA_BLOCK_WAIT_REQUIRES_TIMEBASE
@@ -697,11 +822,13 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   ClearDmaContext();
   dma_ctx_.kind = kind;
   dma_ctx_.op = &op;
-  dma_ctx_.rx = rx;
+  dma_ctx_.rx = dma_rx;
+  dma_ctx_.staging_rx = rx;
   dma_ctx_.tx = tx;
   dma_ctx_.user_read = user_read;
   dma_ctx_.size = size;
   dma_ctx_.copy_rx_to_user = copy_rx_to_user;
+  dma_ctx_.copy_rx_to_staging = copy_rx_to_staging;
   dma_ctx_.switch_buffer_on_success = switch_buffer_on_success;
   dma_completion_claim_.store(0U, std::memory_order_release);
 
@@ -715,10 +842,10 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     FlushDCacheIfNeeded(tx, size);
   }
-  if (rx != nullptr &&
+  if (dma_rx != nullptr &&
       (kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ))
   {
-    InvalidateDCacheIfNeeded(rx, size);
+    InvalidateDCacheIfNeeded(dma_rx, size);
   }
 
   ApplyChipSelect();
@@ -727,13 +854,13 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   switch (kind)
   {
     case DmaTransferKind::READ_ONLY:
-      status = hpm_spi_receive_nonblocking(spi_, rx, size);
+      status = hpm_spi_receive_nonblocking(spi_, dma_rx, size);
       break;
     case DmaTransferKind::WRITE_ONLY:
       status = hpm_spi_transmit_nonblocking(spi_, tx, size);
       break;
     case DmaTransferKind::WRITE_READ:
-      status = hpm_spi_transmit_receive_nonblocking(spi_, tx, rx, size);
+      status = hpm_spi_transmit_receive_nonblocking(spi_, tx, dma_rx, size);
       break;
     case DmaTransferKind::NONE:
     default:
@@ -822,9 +949,11 @@ ErrorCode HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans, bool notify_bl
   DmaTransferKind kind = dma_ctx_.kind;
   OperationRW* op = dma_ctx_.op;
   uint8_t* rx = dma_ctx_.rx;
+  uint8_t* staging_rx = dma_ctx_.staging_rx;
   const uint32_t size = dma_ctx_.size;
   const RawData user_read = dma_ctx_.user_read;
   const bool copy_rx_to_user = dma_ctx_.copy_rx_to_user;
+  const bool copy_rx_to_staging = dma_ctx_.copy_rx_to_staging;
   const bool switch_buffer_on_success = dma_ctx_.switch_buffer_on_success;
   bool dma_stopped = false;
 
@@ -851,10 +980,18 @@ ErrorCode HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans, bool notify_bl
     InvalidateDCacheIfNeeded(rx, size);
   }
 
+  uint8_t* readable_rx = rx;
+  if (ans == ErrorCode::OK && copy_rx_to_staging && staging_rx != nullptr &&
+      rx != nullptr)
+  {
+    Memory::FastMove(staging_rx, rx, size);
+    readable_rx = staging_rx;
+  }
+
   if (ans == ErrorCode::OK && copy_rx_to_user && user_read.addr_ != nullptr &&
       user_read.size_ > 0U)
   {
-    Memory::FastCopy(user_read.addr_, rx, user_read.size_);
+    Memory::FastCopy(user_read.addr_, readable_rx, user_read.size_);
   }
   if (ans == ErrorCode::OK && switch_buffer_on_success)
   {
