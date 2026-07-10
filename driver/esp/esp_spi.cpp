@@ -51,6 +51,30 @@ uint64_t CalcPollingTimeoutUs(size_t size, uint32_t bus_hz)
   return std::max<uint64_t>(100ULL, wire_time_us * 8ULL + 50ULL);
 }
 
+inline void SpiEnableClockAtomic(spi_host_device_t host_id, bool enable)
+{
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif
+  PERIPH_RCC_ATOMIC() { spi_ll_enable_clock(host_id, enable); }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+}
+
+inline void SpiSetClockSourceAtomic(spi_dev_t* hw, spi_clock_source_t clk_source)
+{
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif
+  PERIPH_RCC_ATOMIC() { spi_ll_set_clk_source(hw, clk_source); }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+}
+
 #if SOC_GDMA_SUPPORTED
 esp_err_t DmaReset(gdma_channel_handle_t chan) { return gdma_reset(chan); }
 
@@ -193,7 +217,7 @@ ErrorCode ESP32SPI::InitializeHardware()
     spi_ll_enable_bus_clock(host_, true);
     spi_ll_reset_register(host_);
   }
-  spi_ll_enable_clock(host_, true);
+  SpiEnableClockAtomic(host_, true);
   spi_ll_master_init(hw_);
 
   const spi_line_mode_t line_mode = {
@@ -216,7 +240,7 @@ ErrorCode ESP32SPI::InitializeHardware()
   hw_->user.usr_command = 0;
   hw_->user.usr_addr = 0;
 
-  spi_ll_set_clk_source(hw_, SPI_CLK_SRC_DEFAULT);
+  SpiSetClockSourceAtomic(hw_, SPI_CLK_SRC_DEFAULT);
   if (ResolveClockSource(source_clock_hz_) != ErrorCode::OK)
   {
     return ErrorCode::INIT_ERR;
