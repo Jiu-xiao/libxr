@@ -90,7 +90,8 @@ using FormatGenericFloatFormat = LibXR::Format<"{:5.2f}">::Compiled<float>;
 // Otherwise the default float-enabled profile retains float dispatch.
 static_assert(
     !HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::Generic));
-static_assert(HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
+static_assert(
+    HasProfileBit<PrintfRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::I32Dec));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Dec));
 static_assert(HasOp<PrintfRawIntegerFormat>(LibXR::Print::FormatOp::U32Binary));
@@ -108,7 +109,8 @@ static_assert(HasOp<PrintfIntTextFormat>(LibXR::Print::FormatOp::CharacterRaw));
 
 static_assert(
     !HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::Generic));
-static_assert(HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
+static_assert(
+    HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::NarrowInt));
 static_assert(
     HasProfileBit<FormatRawIntegerFormat>(LibXR::Print::FormatProfile::TextArg));
 static_assert(HasOp<FormatRawIntegerFormat>(LibXR::Print::FormatOp::I32Dec));
@@ -121,8 +123,8 @@ static_assert(!HasProfileBit<FormatGenericIntegerFormat>(
     LibXR::Print::FormatProfile::GenericString));
 static_assert(!HasProfileBit<FormatGenericIntegerFormat>(
     LibXR::Print::FormatProfile::GenericFloatFixed));
-static_assert(HasProfileBit<FormatGenericTextFormat>(
-    LibXR::Print::FormatProfile::GenericString));
+static_assert(
+    HasProfileBit<FormatGenericTextFormat>(LibXR::Print::FormatProfile::GenericString));
 static_assert(!HasProfileBit<FormatGenericTextFormat>(
     LibXR::Print::FormatProfile::GenericSigned32));
 static_assert(!HasProfileBit<FormatGenericTextFormat>(
@@ -131,8 +133,8 @@ static_assert(HasProfileBit<FormatGenericFloatFormat>(
     LibXR::Print::FormatProfile::GenericFloatFixed));
 static_assert(!HasProfileBit<FormatGenericFloatFormat>(
     LibXR::Print::FormatProfile::GenericSigned32));
-static_assert(!HasProfileBit<FormatGenericFloatFormat>(
-    LibXR::Print::FormatProfile::GenericString));
+static_assert(
+    !HasProfileBit<FormatGenericFloatFormat>(LibXR::Print::FormatProfile::GenericString));
 }  // namespace LibXRPrintTest::CompileProfile
 
 using LoggerFrontend = LibXR::Detail::LoggerLiteral::Frontend;

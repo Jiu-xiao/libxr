@@ -57,5 +57,6 @@ static_assert(Printf::Matches<"%f", float>());
 static_assert(!Printf::Matches<"%f", double>());
 
 // double 存储关闭时，brace `double` 参数必须显式转成 float 或打开 double 支持。
-// With double storage disabled, brace `double` must be cast to float or enabled explicitly.
+// With double storage disabled, brace `double` must be cast to float or enabled
+// explicitly.
 static_assert(FormatCompileError<"{:.2f}", double>() == Error::ArgumentTypeMismatch);
