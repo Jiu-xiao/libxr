@@ -20,8 +20,8 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
       id_(id),
       _read_port(dma_rx.size_),
       _write_port(tx_queue_size, dma_tx.size_ / 2),
-      dma_buff_rx_(dma_rx),
-      dma_buff_tx_(dma_tx),
+      rx_dma_model_(dma_rx),
+      tx_dma_model_(*this, _write_port, dma_tx),
       instance_(ch32_uart_get_instance_id(id)),
       dma_rx_channel_(CH32_UART_RX_DMA_CHANNEL_MAP[id]),
       dma_tx_channel_(CH32_UART_TX_DMA_CHANNEL_MAP[id])
@@ -136,12 +136,12 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
     DMA_DeInit(dma_rx_channel_);
     dma_init.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
-    dma_init.DMA_MemoryBaseAddr = (uint32_t)dma_buff_rx_.addr_;
+    dma_init.DMA_MemoryBaseAddr = (uint32_t)rx_dma_model_.Buffer();
     dma_init.DMA_DIR = DMA_DIR_PeripheralSRC;
     dma_init.DMA_Mode = DMA_Mode_Circular;
-    dma_init.DMA_BufferSize = dma_buff_rx_.size_;
+    dma_init.DMA_BufferSize = rx_dma_model_.BufferSize();
     DMA_Init(dma_rx_channel_, &dma_init);
-    DMA_Cmd(dma_rx_channel_, ENABLE);
+    rx_dma_model_.Start(*this);
     DMA_ITConfig(dma_rx_channel_, DMA_IT_TC, ENABLE);
     DMA_ITConfig(dma_rx_channel_, DMA_IT_HT, ENABLE);
     USART_DMACmd(instance_, USART_DMAReq_Rx, ENABLE);
@@ -226,84 +226,25 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
 
   USART_Cmd(instance_, ENABLE);
 
-  if (tx_busy_.IsSet())
-  {
-    dma_tx_channel_->CNTR = dma_buff_tx_.GetActiveLength();
-    dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(dma_buff_tx_.ActiveBuffer());
-    DMA_Cmd(dma_tx_channel_, ENABLE);
-  }
+  (void)tx_dma_model_.RestartActive();
 
   return ErrorCode::OK;
 }
 
 // Write callback (DMA-based transfer).
-ErrorCode CH32UART::WriteFun(WritePort& port, bool)
+ErrorCode CH32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &CH32UART::_write_port);
+  return uart->tx_dma_model_.Submit(in_isr);
+}
 
-  if (uart->in_tx_isr.IsSet())
-  {
-    return ErrorCode::PENDING;
-  }
-
-  if (!uart->dma_buff_tx_.HasPending())
-  {
-    WriteInfoBlock info;
-    if (port.queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return ErrorCode::PENDING;
-    }
-
-    uint8_t* buffer = nullptr;
-    bool use_pending = false;
-
-    // DMA空闲判断
-    bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
-    if (dma_ready)
-    {
-      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
-    }
-    else
-    {
-      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer());
-      use_pending = true;
-    }
-
-    if (port.queue_data_->PopBatch(buffer, info.data.size_) != ErrorCode::OK)
-    {
-      ASSERT(false);
-      return ErrorCode::EMPTY;
-    }
-
-    if (use_pending)
-    {
-      uart->dma_buff_tx_.SetPendingLength(info.data.size_);
-      uart->dma_buff_tx_.EnablePending();
-      // 检查当前DMA是否可切换
-      bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
-      if (dma_ready && uart->dma_buff_tx_.HasPending())
-      {
-        uart->dma_buff_tx_.Switch();
-      }
-      else
-      {
-        return ErrorCode::PENDING;
-      }
-    }
-
-    port.queue_info_->Pop(uart->write_info_active_);
-
-    DMA_Cmd(uart->dma_tx_channel_, DISABLE);
-    uart->dma_tx_channel_->MADDR =
-        reinterpret_cast<uint32_t>(uart->dma_buff_tx_.ActiveBuffer());
-    uart->dma_tx_channel_->CNTR = info.data.size_;
-    uart->dma_buff_tx_.SetActiveLength(info.data.size_);
-    uart->tx_busy_.Set();
-    DMA_Cmd(uart->dma_tx_channel_, ENABLE);
-
-    return ErrorCode::OK;
-  }
-  return ErrorCode::PENDING;
+bool CH32UART::StartDmaTx(uint8_t* data, size_t size, int)
+{
+  DMA_Cmd(dma_tx_channel_, DISABLE);
+  dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(data);
+  dma_tx_channel_->CNTR = size;
+  DMA_Cmd(dma_tx_channel_, ENABLE);
+  return true;
 }
 
 // Read callback (interrupt-driven).
@@ -315,27 +256,7 @@ ErrorCode CH32UART::ReadFun(ReadPort&, bool)
 
 void ch32_uart_rx_isr_handler(LibXR::CH32UART* uart)
 {
-  auto rx_buf = static_cast<uint8_t*>(uart->dma_buff_rx_.addr_);
-  size_t dma_size = uart->dma_buff_rx_.size_;
-  size_t curr_pos = dma_size - uart->dma_rx_channel_->CNTR;
-  size_t last_pos = uart->last_rx_pos_;
-
-  if (curr_pos != last_pos)
-  {
-    if (curr_pos > last_pos)
-    {
-      // 普通区间
-      uart->_read_port.queue_data_->PushBatch(&rx_buf[last_pos], curr_pos - last_pos);
-    }
-    else
-    {
-      // 回卷区
-      uart->_read_port.queue_data_->PushBatch(&rx_buf[last_pos], dma_size - last_pos);
-      uart->_read_port.queue_data_->PushBatch(&rx_buf[0], curr_pos);
-    }
-    uart->last_rx_pos_ = curr_pos;
-    uart->_read_port.ProcessPendingReads(true);
-  }
+  uart->rx_dma_model_.OnDataAvailable(*uart, uart->_read_port, true);
 }
 
 // USART IDLE interrupt handler.
@@ -362,56 +283,7 @@ extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
 {
   DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
-
-  uart->tx_busy_.Clear();
-
-  Flag::ScopedRestore tx_flag(uart->in_tx_isr);
-
-  size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
-
-  if (pending_len == 0)
-  {
-    return;
-  }
-
-  uart->dma_buff_tx_.Switch();
-
-  auto* buf = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
-  DMA_Cmd(uart->dma_tx_channel_, DISABLE);
-  uart->dma_tx_channel_->MADDR = (uint32_t)buf;
-  uart->dma_tx_channel_->CNTR = pending_len;
-  uart->dma_buff_tx_.SetActiveLength(pending_len);
-  DMA_Cmd(uart->dma_tx_channel_, ENABLE);
-
-  WriteInfoBlock& current_info = uart->write_info_active_;
-
-  // 有pending包，继续取下一包
-  if (uart->_write_port.queue_info_->Pop(current_info) != ErrorCode::OK)
-  {
-    ASSERT(false);
-    return;
-  }
-
-  uart->write_port_->Finish(true, ErrorCode::OK, current_info);
-
-  // 预装pending区
-  WriteInfoBlock next_info;
-  if (uart->write_port_->queue_info_->Peek(next_info) != ErrorCode::OK)
-  {
-    return;
-  }
-
-  if (uart->write_port_->queue_data_->PopBatch(
-          reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer()),
-          next_info.data.size_) != ErrorCode::OK)
-  {
-    ASSERT(false);
-    return;
-  }
-
-  uart->dma_buff_tx_.SetPendingLength(next_info.data.size_);
-
-  uart->dma_buff_tx_.EnablePending();
+  uart->tx_dma_model_.OnTransferDone(true, ErrorCode::OK);
 }
 
 // DMA channel IRQ callbacks.

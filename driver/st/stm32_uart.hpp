@@ -8,11 +8,12 @@
 #undef UART
 #endif
 
-#include "double_buffer.hpp"
-#include "flag.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
+#include "stm32_dcache.hpp"
 #include "uart.hpp"
+#include "uart_circular_dma_rx_model.hpp"
+#include "uart_dma_tx_model.hpp"
 
 typedef enum : uint8_t
 {
@@ -116,6 +117,9 @@ namespace LibXR
  */
 class STM32UART : public UART
 {
+  friend class UartCircularDmaRxModel;
+  friend class UartDmaTxModel<STM32UART>;
+
  public:
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 
@@ -134,19 +138,54 @@ class STM32UART : public UART
   ReadPort _read_port;
   WritePort _write_port;
 
-  RawData dma_buff_rx_;
-  DoubleBuffer dma_buff_tx_;
-  WriteInfoBlock write_info_active_;
-
-  size_t last_rx_pos_ = 0;
+  UartCircularDmaRxModel rx_dma_model_;
+  UartDmaTxModel<STM32UART> tx_dma_model_;
 
   UART_HandleTypeDef* uart_handle_;
-
-  Flag::Plain in_tx_isr, tx_busy_;
 
   stm32_uart_id_t id_ = STM32_UART_ID_ERROR;
 
   static STM32UART* map[STM32_UART_NUMBER];  // NOLINT
+
+ private:
+  /**
+   * @brief Configure and start circular UART RX DMA through STM32 HAL.
+   * @param data DMA-writable receive buffer.
+   * @param size Receive buffer capacity in bytes.
+   */
+  void StartCircularDmaRx(uint8_t* data, size_t size)
+  {
+    uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
+    HAL_DMA_Init(uart_handle_->hdmarx);
+    HAL_UARTEx_ReceiveToIdle_DMA(uart_handle_, data, size);
+  }
+
+  /**
+   * @brief Return the STM32 RX DMA remaining transfer count.
+   */
+  [[nodiscard]] size_t GetCircularDmaRxRemaining() const
+  {
+    return __HAL_DMA_GET_COUNTER(uart_handle_->hdmarx);
+  }
+
+  /**
+   * @brief Make circular DMA RX storage visible to the CPU data cache.
+   * @param data DMA receive buffer start address.
+   * @param size Receive buffer capacity in bytes.
+   */
+  void PrepareCircularDmaRxForCpu(uint8_t* data, size_t size)
+  {
+    STM32_InvalidateDCacheByAddr(data, size);
+  }
+
+  /**
+   * @brief Start one active UART TX DMA payload through STM32 HAL.
+   * @param data DMA-readable payload buffer.
+   * @param size Payload size in bytes.
+   * @param block Active double-buffer block index; unused by STM32 HAL.
+   * @return True when HAL accepted the DMA transfer.
+   */
+  bool StartDmaTx(uint8_t* data, size_t size, int block);
 };
 
 }  // namespace LibXR

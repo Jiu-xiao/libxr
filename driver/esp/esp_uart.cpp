@@ -116,15 +116,14 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       tx_storage_(AllocateTxStorage(tx_buffer_size * 2)),
       dma_requested_(enable_dma),
       _read_port(rx_buffer_size, *this),
-      _write_port(tx_queue_size, tx_buffer_size)
+      _write_port(tx_queue_size, tx_buffer_size),
+      tx_dma_model_(*this, _write_port, RawData(tx_storage_, tx_buffer_size * 2U))
 {
   ASSERT(!IsConsoleUartInUse(uart_num_));
   ASSERT(uart_num_ < UART_NUM_MAX);
   ASSERT(uart_num_ < SOC_UART_HP_NUM);
   ASSERT(rx_isr_buffer_size_ > 0);
   ASSERT(tx_buffer_size > 0);
-
-  tx_dma_buffer_.Init({tx_storage_, tx_buffer_size * 2U});
 
   _read_port = ReadFun;
   _write_port = WriteFun;
@@ -241,15 +240,15 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
 
   // Align with ST/CH SetConfig semantics: if TX was in-flight during
   // reconfiguration, keep transfer progression instead of surfacing BUSY.
-  if (tx_busy_.IsSet() && tx_active_valid_)
-  {
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-    if (dma_backend_enabled_)
-    {
-      (void)StartDmaTx();
-    }
-    else
+  if (dma_backend_enabled_)
+  {
+    (void)tx_dma_model_.RestartActive();
+  }
+  else
 #endif
+  {
+    if (tx_busy_.IsSet() && tx_active_valid_)
     {
       uart_hal_clr_intsts_mask(&uart_hal_, UART_TX_INTR_MASK);
       uart_hal_ena_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
@@ -280,6 +279,12 @@ ErrorCode ESP32UART::SetLoopback(bool enable)
 ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &ESP32UART::_write_port);
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (uart->dma_backend_enabled_)
+  {
+    return uart->tx_dma_model_.Submit(in_isr);
+  }
+#endif
   return uart->TryStartTx(in_isr);
 }
 
@@ -456,18 +461,6 @@ void IRAM_ATTR ESP32UART::ClearActiveTx()
   tx_active_valid_ = false;
 }
 
-// Only the DMA backend carries a distinct pending TX preload state.
-// 只有 DMA 后端维护独立的 pending TX 预装状态。
-void IRAM_ATTR ESP32UART::ClearPendingTx()
-{
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    tx_dma_buffer_.Reset();
-  }
-#endif
-}
-
 // Once hardware accepts the active request, completion ownership moves to the
 // backend ISR path and the queued write can be reported as accepted.
 // 一旦硬件接管 active 请求，完成所有权就转移到后端 ISR 路径，队列侧即可
@@ -500,13 +493,6 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
     return ErrorCode::PENDING;
   }
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_ && !tx_busy_.IsSet() && StartPendingTxIfIdle(in_isr))
-  {
-    return ErrorCode::PENDING;
-  }
-#endif
-
   if (!tx_active_valid_)
   {
     (void)LoadActiveTxFromQueue(in_isr);
@@ -523,13 +509,6 @@ ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
     return ErrorCode::OK;
   }
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_ && tx_busy_.IsSet() && !tx_dma_buffer_.HasPending())
-  {
-    (void)LoadPendingTxFromQueue(in_isr);
-  }
-#endif
-
   return ErrorCode::PENDING;
 }
 
@@ -543,150 +522,24 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
 
   size_t active_length = 0U;
   WriteInfoBlock active_info = {};
-  uint8_t* active_buffer = nullptr;
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    active_buffer = tx_dma_buffer_.ActiveBuffer();
-  }
-#endif
-  if (!DequeueTxToBuffer(active_buffer, active_length, active_info, in_isr))
+  if (!DequeueFifoTx(active_length, active_info))
   {
     return false;
   }
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    tx_dma_buffer_.SetActiveLength(active_length);
-  }
-  else
-#endif
-  {
-    tx_active_length_ = active_length;
-  }
+  tx_active_length_ = active_length;
   tx_active_offset_ = 0U;
   tx_active_info_ = active_info;
   tx_active_valid_ = true;
   return true;
 }
 
-// Pending preload exists only for the DMA backend because FIFO mode can stream
-// directly from the queue without staging a second payload block.
-// Pending 预装只存在于 DMA 后端，因为 FIFO 模式可以直接从队列流式发送，
-// 不需要再暂存第二块 payload。
-bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
-{
-  (void)in_isr;
-
-#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
-  return false;
-#else
-  if (!dma_backend_enabled_ || tx_dma_buffer_.HasPending())
-  {
-    return false;
-  }
-
-  size_t pending_length = 0U;
-  WriteInfoBlock pending_info = {};
-  if (write_port_->queue_info_->Peek(pending_info) != ErrorCode::OK)
-  {
-    return false;
-  }
-
-  if (pending_info.data.size_ > tx_dma_buffer_.Size())
-  {
-    ASSERT(false);
-    return false;
-  }
-
-  if (write_port_->queue_data_->PopBatch(tx_dma_buffer_.PendingBuffer(),
-                                         pending_info.data.size_) != ErrorCode::OK)
-  {
-    return false;
-  }
-
-  pending_length = pending_info.data.size_;
-  tx_dma_buffer_.SetPendingLength(pending_length);
-  tx_dma_buffer_.EnablePending();
-  return true;
-#endif
-}
-
-// Promotion only moves one preloaded pending request into the active slot.
-// Hardware start is a separate step.
-// 提升步骤只负责把一个已经预装的 pending 请求转成 active；
-// 真正启动硬件传输是单独一步。
-bool IRAM_ATTR ESP32UART::PromotePendingTxToActive()
-{
-#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
-  return false;
-#else
-  if (!dma_backend_enabled_)
-  {
-    return false;
-  }
-
-  if (tx_active_valid_ || !tx_dma_buffer_.HasPending())
-  {
-    return false;
-  }
-
-  const size_t pending_length = tx_dma_buffer_.GetPendingLength();
-  tx_dma_buffer_.Switch();
-  tx_dma_buffer_.SetActiveLength(pending_length);
-
-  if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
-  {
-    ASSERT(false);
-    return false;
-  }
-  tx_active_length_ = pending_length;
-  tx_active_offset_ = 0U;
-  tx_active_valid_ = true;
-
-  return true;
-#endif
-}
-
-// Starting the pending DMA request is allowed only when TX is fully idle.
-// 启动 pending DMA 请求只允许发生在 TX 完全空闲时。
-bool IRAM_ATTR ESP32UART::StartPendingTxIfIdle(bool in_isr)
-{
-#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
-  (void)in_isr;
-  return false;
-#else
-  if (!dma_backend_enabled_)
-  {
-    (void)in_isr;
-    return false;
-  }
-
-  if (tx_busy_.IsSet())
-  {
-    return false;
-  }
-
-  if (!tx_active_valid_ && !PromotePendingTxToActive())
-  {
-    return false;
-  }
-
-  return StartAndReportActive(in_isr);
-#endif
-}
-
 // Queue-data and queue-info stay decoupled, so dequeue first validates the
 // next metadata entry and only then moves bytes or ownership forward.
 // `queue_data_` 和 `queue_info_` 保持解耦，因此这里先验证下一条元数据，
 // 再推进字节或所有权。
-bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
-                                            WriteInfoBlock& info, bool in_isr)
+bool IRAM_ATTR ESP32UART::DequeueFifoTx(size_t& size, WriteInfoBlock& info)
 {
-  (void)in_isr;
-  (void)buffer;
-
   WriteInfoBlock peek_info = {};
   if (write_port_->queue_info_->Peek(peek_info) != ErrorCode::OK)
   {
@@ -694,27 +547,11 @@ bool IRAM_ATTR ESP32UART::DequeueTxToBuffer(uint8_t* buffer, size_t& size,
   }
 
   size_t max_size = write_port_->queue_data_->MaxSize();
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    max_size = tx_dma_buffer_.Size();
-  }
-#endif
   if (peek_info.data.size_ > max_size)
   {
     ASSERT(false);
     return false;
   }
-
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    if (write_port_->queue_data_->PopBatch(buffer, peek_info.data.size_) != ErrorCode::OK)
-    {
-      return false;
-    }
-  }
-#endif
 
   if (write_port_->queue_info_->Pop(info) != ErrorCode::OK)
   {
@@ -744,19 +581,6 @@ bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
   }
 
   tx_active_offset_ = 0U;
-
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    if (StartDmaTx())
-    {
-      return true;
-    }
-
-    tx_busy_.Clear();
-    return false;
-  }
-#endif
 
   uart_hal_clr_intsts_mask(&uart_hal_, UART_TX_INTR_MASK);
   uart_hal_ena_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
@@ -810,46 +634,6 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
   tx_busy_.Clear();
 
   ClearActiveTx();
-
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    if ((result != ErrorCode::OK) && tx_dma_buffer_.HasPending())
-    {
-      WriteInfoBlock dropped_info = {};
-      if (write_port_->queue_info_->Pop(dropped_info) == ErrorCode::OK)
-      {
-        write_port_->Finish(in_isr, ErrorCode::FAILED, dropped_info);
-      }
-      else
-      {
-        ASSERT(false);
-      }
-      tx_dma_buffer_.Reset();
-    }
-
-    if (result != ErrorCode::OK)
-    {
-      return;
-    }
-
-    if (!PromotePendingTxToActive())
-    {
-      return;
-    }
-
-    if (!StartAndReportActive(in_isr))
-    {
-      return;
-    }
-
-    if (!tx_dma_buffer_.HasPending())
-    {
-      (void)LoadPendingTxFromQueue(in_isr);
-    }
-    return;
-  }
-#endif
 
   if (result != ErrorCode::OK)
   {

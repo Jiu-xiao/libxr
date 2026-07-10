@@ -4,10 +4,11 @@
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 #include "ch32_uart_def.hpp"
-#include "double_buffer.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "uart.hpp"
+#include "uart_circular_dma_rx_model.hpp"
+#include "uart_dma_tx_model.hpp"
 
 namespace LibXR
 {
@@ -17,6 +18,9 @@ namespace LibXR
  */
 class CH32UART : public UART
 {
+  friend class UartCircularDmaRxModel;
+  friend class UartDmaTxModel<CH32UART>;
+
  public:
   /**
    * @brief 构造 UART 对象 / Construct UART object
@@ -40,19 +44,49 @@ class CH32UART : public UART
   ReadPort _read_port;
   WritePort _write_port;
 
-  RawData dma_buff_rx_;
-  DoubleBuffer dma_buff_tx_;
-  WriteInfoBlock write_info_active_;
-
-  size_t last_rx_pos_ = 0;
+  UartCircularDmaRxModel rx_dma_model_;
+  UartDmaTxModel<CH32UART> tx_dma_model_;
 
   USART_TypeDef* instance_;
   DMA_Channel_TypeDef* dma_rx_channel_;
   DMA_Channel_TypeDef* dma_tx_channel_;
 
-  Flag::Plain in_tx_isr, tx_busy_;
-
   static CH32UART* map_[CH32_UART_NUMBER];
+
+ private:
+  /**
+   * @brief Program and start the CH32 circular UART RX DMA channel.
+   * @param data DMA-writable receive buffer.
+   * @param size Receive buffer capacity in bytes.
+   */
+  void StartCircularDmaRx(uint8_t* data, size_t size)
+  {
+    dma_rx_channel_->MADDR = reinterpret_cast<uint32_t>(data);
+    dma_rx_channel_->CNTR = size;
+    DMA_Cmd(dma_rx_channel_, ENABLE);
+  }
+
+  /**
+   * @brief Return the CH32 RX DMA remaining transfer count.
+   */
+  [[nodiscard]] size_t GetCircularDmaRxRemaining() const { return dma_rx_channel_->CNTR; }
+
+  /**
+   * @brief Prepare CH32 circular DMA RX storage for CPU access.
+   * @param data DMA receive buffer start address.
+   * @param size Receive buffer capacity in bytes.
+   * @note CH32 requires no cache maintenance for this buffer.
+   */
+  void PrepareCircularDmaRxForCpu(uint8_t*, size_t) {}
+
+  /**
+   * @brief Program and start one active UART TX DMA payload.
+   * @param data DMA-readable payload buffer.
+   * @param size Payload size in bytes.
+   * @param block Active double-buffer block index; unused by CH32 DMA.
+   * @return True after the DMA channel is enabled.
+   */
+  bool StartDmaTx(uint8_t* data, size_t size, int block);
 };
 
 }  // namespace LibXR
