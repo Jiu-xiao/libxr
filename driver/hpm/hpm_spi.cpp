@@ -452,6 +452,7 @@ void HPMSPI::RecoverController()
     }
 
     ApplyFormat(config);
+    ApplyChipSelect();
   }
 }
 
