@@ -32,6 +32,10 @@
 #include "hpm_soc.h"
 #include "spi.hpp"
 
+#if __has_include("hpm_sdk_version.h")
+#include "hpm_sdk_version.h"
+#endif
+
 #if defined(HPMSOC_HAS_HPMSDK_SPI) && __has_include("hpm_spi_drv.h")
 #include "hpm_spi_drv.h"
 #define LIBXR_HPM_SPI_SUPPORTED 1
@@ -44,6 +48,7 @@ using LibXRHpmSpiStatusType = int;
 #endif
 
 #if LIBXR_HPM_SPI_SUPPORTED && defined(USE_DMA_MGR) && (USE_DMA_MGR) && \
+    defined(SDK_VERSION_NUMBER) && (SDK_VERSION_NUMBER >= 0x010B00U) && \
     __has_include("hpm_spi.h") && __has_include("hpm_dma_mgr.h")
 #include "hpm_spi.h"
 #define LIBXR_HPM_SPI_HAS_DMA_MGR 1
@@ -73,18 +78,18 @@ namespace LibXR
  * instance return BUSY until the DMA callback completes. CommandRead(),
  * CommandWriteRead(), MemRead(), and MemWrite() stay on the blocking path.
  *
- * 支持 LibXR 操作模式参数；默认同步完成，DMA 启用后仅流式传输可后台完成 /
+ * 支持 LibXR 操作模式参数；默认同步完成，DMA 启用后仅 BLOCK 流式传输使用 DMA /
  * LibXR operation mode parameters are accepted; transfers complete synchronously
  * by default, and only BLOCK stream transfers use DMA when DMA is enabled:
  * - BLOCK：直接返回最终 ErrorCode，不触发回调或状态更新 /
  *   BLOCK: returns the final ErrorCode directly without callback/status update.
- * - POLLING：同步路径返回前更新为 DONE/ERROR；DMA 路径先标记
- * RUNNING，再在完成回调中更新。 POLLING: synchronous paths update DONE/ERROR before
- * return; DMA-enabled POLLING transfers return NOT_SUPPORT.
- * - CALLBACK：同步路径返回前执行回调；DMA 路径在完成回调中执行，并透传 in_isr 标志。
+ * - POLLING：同步路径返回前更新为 DONE/ERROR；DMA 启用时返回 NOT_SUPPORT。
+ *   POLLING: synchronous paths update DONE/ERROR before return; DMA-enabled
+ *   POLLING transfers return NOT_SUPPORT.
+ * - CALLBACK：同步路径返回前执行回调；DMA 启用时返回 NOT_SUPPORT。
  *   CALLBACK: synchronous paths invoke the callback before return; DMA-enabled
  *   CALLBACK transfers return NOT_SUPPORT.
- * - NONE：同步路径只返回最终 ErrorCode；DMA 路径只负责后台清理，不产生额外通知。
+ * - NONE：同步路径只返回最终 ErrorCode；DMA 启用时返回 NOT_SUPPORT。
  *   NONE: synchronous paths only return the final ErrorCode; DMA-enabled NONE
  *   transfers return NOT_SUPPORT.
  *
@@ -139,12 +144,15 @@ class HPMSPI final : public SPI
    * HPM clock name used to enable and query the peripheral source clock when the
    * optional board helper does not provide one.
    * @param rx_buffer 内部 RX 暂存缓冲区，供 ReadAndWrite()、Transfer()、MemRead()
-   * 使用；驱动生命周期内必须保持非空且有效 /
-   * Internal RX staging buffer used by ReadAndWrite(), Transfer(), and MemRead().
-   * It must remain non-null and valid for the driver lifetime.
+   * 使用；驱动生命周期内必须保持非空且有效，并满足 `alignof(size_t)` 对齐及
+   * `2 * alignof(size_t)` 整倍数容量要求 / Internal RX staging buffer used by
+   * ReadAndWrite(), Transfer(), and MemRead(). It must remain non-null and valid for
+   * the driver lifetime, be aligned to `alignof(size_t)`, and have a size divisible
+   * by `2 * alignof(size_t)`.
    * @param tx_buffer 内部 TX 暂存缓冲区，供所有传输接口使用；驱动生命周期内必须
-   * 保持非空且有效 / Internal TX staging buffer used by all transfer methods.
-   * It must remain non-null and valid for the driver lifetime.
+   * 保持非空且有效，并满足相同的对齐和容量要求 / Internal TX staging buffer used
+   * by all transfer methods. It must satisfy the same lifetime, alignment, and size
+   * requirements.
    * @param auto_board_init 若为 true 且存在 board.h，则自动调用板级 SPI 时钟和引脚
    * 初始化 helper / If true and board.h is available, call board SPI clock and pin
    * helper functions automatically.
@@ -157,9 +165,13 @@ class HPMSPI final : public SPI
    * Hardware chip-select line. It is written to the transfer control register only
    * when the HPM SDK/SoC exposes `cs_index`.
    *
-   * @note 构造函数会断言外设指针为空、暂存缓冲区为空、源时钟无法解析或初始配置无效 /
-   * The constructor asserts on null peripheral pointer, null/empty staging buffers,
-   * unresolved source clock, or invalid initial configuration.
+   * @note RX/TX 暂存区在全双工传输使用的范围内不得重叠；检测到重叠时传输返回
+   * ARG_ERR。RX and TX staging ranges used by a full-duplex transfer must not overlap;
+   * an overlapping transfer returns ARG_ERR.
+   * @note 构造函数会断言外设指针为空、暂存缓冲区为空或不满足基类对齐/容量要求、
+   * 源时钟无法解析或初始配置无效 / The constructor asserts on null peripheral pointer,
+   * null/empty staging buffers, staging buffers that violate the base-class
+   * alignment/size contract, unresolved source clock, or invalid initial configuration.
    */
   HPMSPI(LibXRHpmSpiType* spi, clock_name_t clock, RawData rx_buffer, RawData tx_buffer,
          bool auto_board_init = true,
@@ -254,16 +266,16 @@ class HPMSPI final : public SPI
    * @brief 启用或关闭 HPM SPI DMA manager 路径 /
    * Enable or disable the HPM SPI DMA-manager path.
    *
-   * DMA 路径仅在工程启用 `USE_DMA_MGR=1` 且 HPM SDK 提供 `hpm_spi.h`
-   * 组件 API 时可用。它只覆盖普通 data-phase 流式传输，即 ReadAndWrite() 和
-   * Transfer()；CommandRead() / CommandWriteRead() 仍使用 HPM SDK command phase
-   * 阻塞传输，以保持 SPI flash opcode-read 时序。
+   * DMA 路径仅在工程启用 `USE_DMA_MGR=1` 且 HPM SDK 版本不低于 1.11.0、提供
+   * `hpm_spi.h` 自定义 DMA 回调 API 时可用。它只覆盖普通 data-phase 流式传输，即
+   * ReadAndWrite() 和 Transfer()；CommandRead() / CommandWriteRead() 仍使用 HPM SDK
+   * command phase 阻塞传输，以保持 SPI flash opcode-read 时序。
    *
-   * The DMA path is available only when the project builds with `USE_DMA_MGR=1`
-   * and the HPM SDK `hpm_spi.h` component APIs are present. It covers regular
-   * data-phase stream transfers through ReadAndWrite() and Transfer() only.
-   * CommandRead() / CommandWriteRead() keep using the blocking HPM SDK command
-   * phase so SPI-flash opcode-read timing remains unchanged.
+   * The DMA path is available only when the project builds with `USE_DMA_MGR=1`,
+   * HPM SDK 1.11.0 or newer is used, and the `hpm_spi.h` custom DMA callback APIs
+   * are present. It covers regular data-phase stream transfers through ReadAndWrite()
+   * and Transfer() only. CommandRead() / CommandWriteRead() keep using the blocking
+   * HPM SDK command phase so SPI-flash opcode-read timing remains unchanged.
    * 在 system/none、webasm 等轮询等待系统中，BLOCK DMA 操作依赖 LibXR
    * Timebase 进行超时等待；未初始化 Timebase 时，ReadAndWrite() / Transfer()
    * 会在启动 DMA 前返回 INIT_ERR。RTOS/POSIX 系统使用各自的 semaphore 等待机制。
@@ -281,6 +293,12 @@ class HPMSPI final : public SPI
    * tries an aligned subrange and moves received bytes back after completion. If
    * no such range fits, BLOCK transfers fall back to the synchronous path, avoiding
    * unrelated dirty-data loss when invalidating shared cache lines.
+   * @note 当前 HPM SDK SPI component 固定按 core0 转换 DMA 地址，因此双核 SoC 的
+   * core1 上 SetDmaEnabled(true) 返回 NOT_SUPPORT。若传输长度超过 DMA 控制器计数范围，
+   * BLOCK 操作回退到同步路径 / The current HPM SDK SPI component converts DMA
+   * addresses as core0, so SetDmaEnabled(true) returns NOT_SUPPORT on core1 of a
+   * dual-core SoC. BLOCK transfers larger than the DMA controller count field fall
+   * back to the synchronous path.
    *
    * @param enabled true 启用 DMA，false 回到同步阻塞路径 /
    * true to enable DMA, false to use the synchronous blocking path.
@@ -550,6 +568,34 @@ class HPMSPI final : public SPI
   }
 
   /**
+   * @brief 原子获取实例事务所有权 / Atomically acquire instance transaction ownership.
+   */
+  bool TryAcquireTransaction()
+  {
+    uint32_t expected = 0U;
+    return transaction_busy_.compare_exchange_strong(
+        expected, 1U, std::memory_order_acq_rel, std::memory_order_acquire);
+  }
+
+  /**
+   * @brief 释放事务所有权并返回结果 / Release transaction ownership and return a result.
+   */
+  ErrorCode EndTransaction(ErrorCode ans)
+  {
+    transaction_busy_.store(0U, std::memory_order_release);
+    return ans;
+  }
+
+  /**
+   * @brief 释放事务所有权后分发操作结果 / Release ownership before dispatching a result.
+   */
+  ErrorCode EndTransaction(OperationRW& op, bool in_isr, ErrorCode ans)
+  {
+    transaction_busy_.store(0U, std::memory_order_release);
+    return FinishOperation(op, in_isr, ans);
+  }
+
+  /**
    * @brief 校验 LibXR SPI 分频参数是否可映射到 HPM SPI timing /
    * Validate whether a LibXR SPI prescaler can map to HPM SPI timing.
    */
@@ -683,16 +729,10 @@ class HPMSPI final : public SPI
   }
 
   /**
-   * @brief 若已有 DMA 后台事务则返回 BUSY / Return BUSY if a DMA transfer is active.
-   */
-  ErrorCode GuardNoDmaActive() const;
-
-  /**
    * @brief 启动一次 data-phase DMA 传输 / Start one data-phase DMA transfer.
    */
   ErrorCode StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
-                             size_t rx_capacity,
-                             DmaTransferKind kind, RawData user_read,
+                             size_t rx_capacity, DmaTransferKind kind, RawData user_read,
                              bool copy_rx_to_user, bool switch_buffer_on_success,
                              OperationRW& op, bool in_isr);
 
@@ -773,7 +813,9 @@ class HPMSPI final : public SPI
   uint32_t source_clock_hz_ = 0;   ///< 缓存的源时钟频率 / Cached source clock frequency.
   size_t rx_buffer_capacity_ = 0;  ///< 原始 RX 缓冲区容量 / Raw RX buffer capacity.
   size_t tx_buffer_capacity_ = 0;  ///< 原始 TX 缓冲区容量 / Raw TX buffer capacity.
-  bool configured_ = false;        ///< 是否已有成功配置 / Whether a config was applied.
+  std::atomic<uint32_t> transaction_busy_{
+      0U};  ///< 实例事务占用标志 / Instance transaction ownership flag.
+  bool configured_ = false;  ///< 是否已有成功配置 / Whether a config was applied.
   bool dma_enabled_ =
       false;  ///< 是否启用 DMA 流式传输 / Whether DMA stream path is enabled.
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
