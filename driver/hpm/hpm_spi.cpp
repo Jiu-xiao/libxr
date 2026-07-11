@@ -57,11 +57,39 @@ bool RegisterPayloadSizeTooLarge(size_t size)
          size >= static_cast<size_t>(kHpmSpiTransferCountMax);
 }
 
+bool BufferRangesOverlap(const void* first, size_t first_size, const void* second,
+                         size_t second_size)
+{
+  if (first == nullptr || second == nullptr || first_size == 0U || second_size == 0U)
+  {
+    return false;
+  }
+
+  const uintptr_t first_addr = reinterpret_cast<uintptr_t>(first);
+  const uintptr_t second_addr = reinterpret_cast<uintptr_t>(second);
+  if (first_addr <= second_addr)
+  {
+    return static_cast<size_t>(second_addr - first_addr) < first_size;
+  }
+  return static_cast<size_t>(first_addr - second_addr) < second_size;
+}
+
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
 constexpr bool kHpmSpiDmaAddressSpaceSupported = sizeof(uintptr_t) <= sizeof(uint32_t);
 constexpr uint32_t kDmaBlockPending = 0U;
 constexpr uint32_t kDmaBlockSuccess = 1U;
 constexpr uint32_t kDmaBlockFailure = 2U;
+#if defined(HPMSOC_HAS_HPMSDK_DMAV2) && defined(DMAV2_CHCTRL_TRANSIZE_TRANSIZE_MASK) && \
+    defined(DMAV2_CHCTRL_TRANSIZE_TRANSIZE_SHIFT)
+constexpr uint32_t kHpmSpiDmaTransferCountMax = static_cast<uint32_t>(
+    DMAV2_CHCTRL_TRANSIZE_TRANSIZE_MASK >> DMAV2_CHCTRL_TRANSIZE_TRANSIZE_SHIFT);
+#elif defined(DMA_CHCTRL_TRANSIZE_TRANSIZE_MASK) && \
+    defined(DMA_CHCTRL_TRANSIZE_TRANSIZE_SHIFT)
+constexpr uint32_t kHpmSpiDmaTransferCountMax = static_cast<uint32_t>(
+    DMA_CHCTRL_TRANSIZE_TRANSIZE_MASK >> DMA_CHCTRL_TRANSIZE_TRANSIZE_SHIFT);
+#else
+constexpr uint32_t kHpmSpiDmaTransferCountMax = UINT32_MAX;
+#endif
 
 struct DmaRxBufferSelection
 {
@@ -443,7 +471,18 @@ void HPMSPI::RecoverController()
   }
 
   spi_reset(spi_);
-  if (spi_poll_reset_complete(spi_, spi_reset_spi, 5000U) != status_success)
+#if defined(SDK_VERSION_NUMBER) && (SDK_VERSION_NUMBER >= 0x010B00U)
+  const bool reset_complete =
+      spi_poll_reset_complete(spi_, spi_reset_spi, 5000U) == status_success;
+#else
+  uint32_t retry = 5000U;
+  while ((spi_->CTRL & SPI_CTRL_SPIRST_MASK) != 0U && retry > 0U)
+  {
+    --retry;
+  }
+  const bool reset_complete = (spi_->CTRL & SPI_CTRL_SPIRST_MASK) == 0U;
+#endif
+  if (!reset_complete)
   {
     configured_ = false;
     return;
@@ -500,63 +539,57 @@ ErrorCode HPMSPI::ApplyTiming(Prescaler prescaler)
 
 ErrorCode HPMSPI::SetConfig(SPI::Configuration config)
 {
+  if (!TryAcquireTransaction())
+  {
+    return ErrorCode::BUSY;
+  }
   if (spi_ == nullptr)
   {
-    return ErrorCode::PTR_NULL;
+    return EndTransaction(ErrorCode::PTR_NULL);
   }
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
-  {
-    return guard_ans;
-  }
-#endif
 
   const ErrorCode valid_ans = ValidateConfiguration(config);
   if (valid_ans != ErrorCode::OK)
   {
-    return valid_ans;
+    return EndTransaction(valid_ans);
   }
 
   ErrorCode ans = EnsureClockReady();
   if (ans != ErrorCode::OK)
   {
-    return ans;
+    return EndTransaction(ans);
   }
 
   ans = ApplyTiming(config.prescaler);
   if (ans != ErrorCode::OK)
   {
-    return ans;
+    return EndTransaction(ans);
   }
 
   ApplyFormat(config);
 
   GetConfig() = config;
   configured_ = true;
-  return ErrorCode::OK;
+  return EndTransaction(ErrorCode::OK);
 }
 
 ErrorCode HPMSPI::SetChipSelect(ChipSelect cs)
 {
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
+  if (!TryAcquireTransaction())
   {
-    return guard_ans;
+    return ErrorCode::BUSY;
   }
-#endif
 #if defined(HPM_IP_FEATURE_SPI_CS_SELECT) && (HPM_IP_FEATURE_SPI_CS_SELECT == 1)
   if (ConvertChipSelect(cs) == 0U)
   {
-    return ErrorCode::ARG_ERR;
+    return EndTransaction(ErrorCode::ARG_ERR);
   }
 
   cs_ = cs;
-  return ErrorCode::OK;
+  return EndTransaction(ErrorCode::OK);
 #else
   UNUSED(cs);
-  return ErrorCode::NOT_SUPPORT;
+  return EndTransaction(ErrorCode::NOT_SUPPORT);
 #endif
 }
 
@@ -566,39 +599,32 @@ SPI::Prescaler HPMSPI::GetMaxPrescaler() const { return Prescaler::DIV_256; }
 
 ErrorCode HPMSPI::SetDmaEnabled(bool enabled)
 {
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
+  if (!TryAcquireTransaction())
   {
-    return guard_ans;
+    return ErrorCode::BUSY;
   }
-
+#if LIBXR_HPM_SPI_HAS_DMA_MGR
   if (!enabled)
   {
     dma_enabled_ = false;
-    return ErrorCode::OK;
+    return EndTransaction(ErrorCode::OK);
   }
 
   const ErrorCode ans = EnsureDmaReady();
   if (ans != ErrorCode::OK)
   {
-    return ans;
+    return EndTransaction(ans);
   }
 
   dma_enabled_ = true;
-  return ErrorCode::OK;
+  return EndTransaction(ErrorCode::OK);
 #else
   dma_enabled_ = false;
-  return enabled ? ErrorCode::NOT_SUPPORT : ErrorCode::OK;
+  return EndTransaction(enabled ? ErrorCode::NOT_SUPPORT : ErrorCode::OK);
 #endif
 }
 
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
-ErrorCode HPMSPI::GuardNoDmaActive() const
-{
-  return DmaTransferActive() ? ErrorCode::BUSY : ErrorCode::OK;
-}
-
 ErrorCode HPMSPI::ConvertDmaStatus(hpm_stat_t status)
 {
   switch (status)
@@ -618,6 +644,12 @@ ErrorCode HPMSPI::ConvertDmaStatus(hpm_stat_t status)
 
 ErrorCode HPMSPI::EnsureDmaReady()
 {
+#if defined(HPM_CORE1)
+  if (read_csr(CSR_MHARTID) != HPM_CORE0)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+#endif
   if (!kHpmSpiDmaAddressSpaceSupported)
   {
     return ErrorCode::NOT_SUPPORT;
@@ -859,6 +891,10 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
   {
     return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
   }
+  if (kind == DmaTransferKind::WRITE_READ && BufferRangesOverlap(rx, size, tx, size))
+  {
+    return FinishOperation(op, in_isr, ErrorCode::ARG_ERR);
+  }
   if ((kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ) &&
       rx_capacity < size)
   {
@@ -877,6 +913,12 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
     }
   }
 
+  if (size > kHpmSpiDmaTransferCountMax)
+  {
+    return RunBlockingStreamTransfer(rx, tx, size, kind, user_read, copy_rx_to_user,
+                                     switch_buffer_on_success, op, in_isr);
+  }
+
   uint8_t* dma_rx = rx;
   bool copy_rx_to_staging = false;
   if (kind == DmaTransferKind::READ_ONLY || kind == DmaTransferKind::WRITE_READ)
@@ -892,6 +934,11 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
       return RunBlockingStreamTransfer(rx, tx, size, kind, user_read, copy_rx_to_user,
                                        switch_buffer_on_success, op, in_isr);
     }
+  }
+  if (kind == DmaTransferKind::WRITE_READ && BufferRangesOverlap(dma_rx, size, tx, size))
+  {
+    return RunBlockingStreamTransfer(rx, tx, size, kind, user_read, copy_rx_to_user,
+                                     switch_buffer_on_success, op, in_isr);
   }
 #if LIBXR_HPM_SPI_DMA_BLOCK_WAIT_REQUIRES_TIMEBASE
   if (op.type == OperationRW::OperationType::BLOCK && !Timebase::IsReady())
@@ -965,6 +1012,10 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
       dma_block_wait_.Cancel();
     }
     AbortDmaStart();
+    if (ShouldRecover(status))
+    {
+      RecoverController();
+    }
     return FinishOperation(op, in_isr, ans);
   }
 
@@ -978,10 +1029,12 @@ ErrorCode HPMSPI::StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
 ErrorCode HPMSPI::WaitForDmaBlockResult(uint32_t timeout)
 {
   const ErrorCode ans = dma_block_wait_.Wait(timeout);
-  if (ans == ErrorCode::OK && DmaTransferActive() &&
-      dma_ctx_.block_dma_ready.load(std::memory_order_acquire) == kDmaBlockSuccess)
+  if (ans == ErrorCode::OK && DmaTransferActive())
   {
-    return CompleteDmaTransfer(false, ErrorCode::OK, false);
+    const uint32_t dma_result = dma_ctx_.block_dma_ready.load(std::memory_order_acquire);
+    const ErrorCode final_ans =
+        (dma_result == kDmaBlockSuccess) ? ErrorCode::OK : ErrorCode::FAILED;
+    return CompleteDmaTransfer(false, final_ans, false);
   }
   if (ans != ErrorCode::OK && DmaTransferActive())
   {
@@ -1153,10 +1206,11 @@ void HPMSPI::OnDmaFailureCallback(DMA_Type* base, uint32_t channel, void* cb_dat
     return;
   }
 
-  uint32_t expected = kDmaBlockPending;
-  if (self->dma_ctx_.block_dma_ready.compare_exchange_strong(expected, kDmaBlockFailure,
-                                                             std::memory_order_acq_rel,
-                                                             std::memory_order_acquire))
+  // DMA manager dispatches TC before ERROR/ABORT when flags share one IRQ, so
+  // failure must be allowed to replace an already published success result.
+  const uint32_t previous = self->dma_ctx_.block_dma_ready.exchange(
+      kDmaBlockFailure, std::memory_order_acq_rel);
+  if (previous == kDmaBlockPending)
   {
     (void)self->dma_block_wait_.TryPost(true, ErrorCode::FAILED);
   }
@@ -1176,6 +1230,10 @@ ErrorCode HPMSPI::DoTransfer(uint8_t* rx, const uint8_t* tx, uint32_t size)
   if (size > kHpmSpiTransferCountMax)
   {
     return ErrorCode::SIZE_ERR;
+  }
+  if (BufferRangesOverlap(rx, size, tx, size))
+  {
+    return ErrorCode::ARG_ERR;
   }
 
   spi_control_config_t control = MakeControlConfig(spi_trans_write_read_together);
@@ -1295,34 +1353,37 @@ ErrorCode HPMSPI::DoCommandWriteRead(uint8_t command, const uint8_t* tx, uint32_
 ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
                                OperationRW& op, bool in_isr)
 {
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
+  if (!TryAcquireTransaction())
   {
-    return FinishOperation(op, in_isr, guard_ans);
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
   }
-#endif
 
   const size_t need = std::max(read_data.size_, write_data.size_);
   if (need == 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OK);
+    return EndTransaction(op, in_isr, ErrorCode::OK);
   }
   if (!configured_)
   {
-    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::INIT_ERR);
   }
+#if LIBXR_HPM_SPI_HAS_DMA_MGR
+  if (dma_enabled_ && (op.type != OperationRW::OperationType::BLOCK || in_isr))
+  {
+    return EndTransaction(op, in_isr, ErrorCode::NOT_SUPPORT);
+  }
+#endif
   if (read_data.size_ > 0 && read_data.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (write_data.size_ > 0 && write_data.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (TransferSizeTooLarge(need))
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   RawData rx = {nullptr, 0};
@@ -1331,11 +1392,11 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     rx = GetRxBuffer();
     if (rx.addr_ == nullptr)
     {
-      return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+      return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
     }
     if (rx.size_ < need)
     {
-      return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+      return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
     }
   }
 
@@ -1346,11 +1407,11 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
     tx = GetTxBuffer();
     if (tx.addr_ == nullptr)
     {
-      return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+      return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
     }
     if (tx.size_ < need)
     {
-      return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+      return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
     }
 
     tx_bytes = static_cast<uint8_t*>(tx.addr_);
@@ -1376,10 +1437,11 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
       kind = DmaTransferKind::READ_ONLY;
     }
 
-    return StartDmaTransfer((read_data.size_ > 0) ? rx_bytes : nullptr,
-                            (write_data.size_ > 0) ? tx_bytes : nullptr,
-                            static_cast<uint32_t>(need), rx.size_, kind, read_data,
-                            read_data.size_ > 0, true, op, in_isr);
+    const ErrorCode ans = StartDmaTransfer(
+        (read_data.size_ > 0) ? rx_bytes : nullptr,
+        (write_data.size_ > 0) ? tx_bytes : nullptr, static_cast<uint32_t>(need),
+        rx.size_, kind, read_data, read_data.size_ > 0, true, op, in_isr);
+    return EndTransaction(ans);
   }
 #endif
 
@@ -1406,7 +1468,7 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
   {
     SwitchBuffer();
   }
-  return FinishOperation(op, in_isr, ans);
+  return EndTransaction(op, in_isr, ans);
 }
 
 ErrorCode HPMSPI::CommandRead(uint8_t command, RawData read_data, OperationRW& op,
@@ -1417,10 +1479,6 @@ ErrorCode HPMSPI::CommandRead(uint8_t command, RawData read_data, OperationRW& o
     UNUSED(command);
     return FinishOperation(op, in_isr, ErrorCode::OK);
   }
-  if (!configured_)
-  {
-    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
-  }
 
   return CommandWriteRead(command, ConstRawData(nullptr, 0), read_data, op, in_isr);
 }
@@ -1428,30 +1486,27 @@ ErrorCode HPMSPI::CommandRead(uint8_t command, RawData read_data, OperationRW& o
 ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
                                    RawData read_data, OperationRW& op, bool in_isr)
 {
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
+  if (!TryAcquireTransaction())
   {
-    return FinishOperation(op, in_isr, guard_ans);
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
   }
-#endif
 
   if (!configured_)
   {
-    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::INIT_ERR);
   }
 
   if (write_data.size_ > 0 && write_data.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (read_data.size_ > 0 && read_data.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (TransferSizeTooLarge(write_data.size_) || TransferSizeTooLarge(read_data.size_))
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   uint8_t* rx_bytes = nullptr;
@@ -1462,11 +1517,11 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
     RawData tx = GetTxBuffer();
     if (tx.addr_ == nullptr)
     {
-      return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+      return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
     }
     if (tx.size_ < write_data.size_)
     {
-      return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+      return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
     }
 
     auto* tx_buffer = static_cast<uint8_t*>(tx.addr_);
@@ -1482,17 +1537,17 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
     {
       SwitchBuffer();
     }
-    return FinishOperation(op, in_isr, ans);
+    return EndTransaction(op, in_isr, ans);
   }
 
   RawData rx = GetRxBuffer();
   if (rx.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (rx.size_ < read_data.size_)
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   rx_bytes = static_cast<uint8_t*>(rx.addr_);
@@ -1504,50 +1559,54 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
     Memory::FastMove(read_data.addr_, rx_bytes, read_data.size_);
     SwitchBuffer();
   }
-  return FinishOperation(op, in_isr, ans);
+  return EndTransaction(op, in_isr, ans);
 }
 
 ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
 {
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
+  if (!TryAcquireTransaction())
   {
-    return FinishOperation(op, in_isr, guard_ans);
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
   }
-#endif
 
   if (size == 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OK);
+    return EndTransaction(op, in_isr, ErrorCode::OK);
   }
   if (!configured_)
   {
-    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::INIT_ERR);
   }
+#if LIBXR_HPM_SPI_HAS_DMA_MGR
+  if (dma_enabled_ && (op.type != OperationRW::OperationType::BLOCK || in_isr))
+  {
+    return EndTransaction(op, in_isr, ErrorCode::NOT_SUPPORT);
+  }
+#endif
   if (TransferSizeTooLarge(size))
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   RawData rx = GetRxBuffer();
   RawData tx = GetTxBuffer();
   if (rx.addr_ == nullptr || tx.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (rx.size_ < size || tx.size_ < size)
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
 #if LIBXR_HPM_SPI_HAS_DMA_MGR
   if (dma_enabled_)
   {
-    return StartDmaTransfer(static_cast<uint8_t*>(rx.addr_),
-                            static_cast<uint8_t*>(tx.addr_), static_cast<uint32_t>(size),
-                            rx.size_, DmaTransferKind::WRITE_READ, RawData(nullptr, 0),
-                            false, true, op, in_isr);
+    const ErrorCode ans = StartDmaTransfer(
+        static_cast<uint8_t*>(rx.addr_), static_cast<uint8_t*>(tx.addr_),
+        static_cast<uint32_t>(size), rx.size_, DmaTransferKind::WRITE_READ,
+        RawData(nullptr, 0), false, true, op, in_isr);
+    return EndTransaction(ans);
   }
 #endif
 
@@ -1558,39 +1617,36 @@ ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
   {
     SwitchBuffer();
   }
-  return FinishOperation(op, in_isr, ans);
+  return EndTransaction(op, in_isr, ans);
 }
 
 ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool in_isr)
 {
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
+  if (!TryAcquireTransaction())
   {
-    return FinishOperation(op, in_isr, guard_ans);
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
   }
-#endif
 
   if (read_data.size_ == 0)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OK);
+    return EndTransaction(op, in_isr, ErrorCode::OK);
   }
   if (!configured_)
   {
-    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::INIT_ERR);
   }
   if (read_data.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if ((reg & static_cast<uint16_t>(~kSpiRegisterAddressMask)) != 0U)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OUT_OF_RANGE);
+    return EndTransaction(op, in_isr, ErrorCode::OUT_OF_RANGE);
   }
 
   if (RegisterPayloadSizeTooLarge(read_data.size_))
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   const size_t total = read_data.size_ + 1U;
@@ -1598,11 +1654,11 @@ ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool
   RawData tx = GetTxBuffer();
   if (rx.addr_ == nullptr || tx.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (rx.size_ < total || tx.size_ < total)
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   auto* rx_bytes = static_cast<uint8_t*>(rx.addr_);
@@ -1620,47 +1676,44 @@ ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool
   {
     SwitchBuffer();
   }
-  return FinishOperation(op, in_isr, ans);
+  return EndTransaction(op, in_isr, ans);
 }
 
 ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& op,
                            bool in_isr)
 {
-#if LIBXR_HPM_SPI_HAS_DMA_MGR
-  ErrorCode guard_ans = GuardNoDmaActive();
-  if (guard_ans != ErrorCode::OK)
+  if (!TryAcquireTransaction())
   {
-    return FinishOperation(op, in_isr, guard_ans);
+    return FinishOperation(op, in_isr, ErrorCode::BUSY);
   }
-#endif
 
   if (!configured_)
   {
-    return FinishOperation(op, in_isr, ErrorCode::INIT_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::INIT_ERR);
   }
 
   if ((reg & static_cast<uint16_t>(~kSpiRegisterAddressMask)) != 0U)
   {
-    return FinishOperation(op, in_isr, ErrorCode::OUT_OF_RANGE);
+    return EndTransaction(op, in_isr, ErrorCode::OUT_OF_RANGE);
   }
   if (write_data.size_ > 0 && write_data.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (RegisterPayloadSizeTooLarge(write_data.size_))
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   const size_t total = write_data.size_ + 1U;
   RawData tx = GetTxBuffer();
   if (tx.addr_ == nullptr)
   {
-    return FinishOperation(op, in_isr, ErrorCode::PTR_NULL);
+    return EndTransaction(op, in_isr, ErrorCode::PTR_NULL);
   }
   if (tx.size_ < total)
   {
-    return FinishOperation(op, in_isr, ErrorCode::SIZE_ERR);
+    return EndTransaction(op, in_isr, ErrorCode::SIZE_ERR);
   }
 
   auto* tx_bytes = static_cast<uint8_t*>(tx.addr_);
@@ -1675,7 +1728,7 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
   {
     SwitchBuffer();
   }
-  return FinishOperation(op, in_isr, ans);
+  return EndTransaction(op, in_isr, ans);
 }
 
 #else
