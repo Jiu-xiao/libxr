@@ -2,12 +2,7 @@
 
 #include "hpm_mcan_backend.hpp"
 
-// 当前 HPM CAN 支持假定 MCAN message RAM 位置由
-// `MCAN_MSG_BUF_BASE_VALID_START` 描述。
-// Current HPM CAN support assumes MCAN message RAM placement is described by
-// `MCAN_MSG_BUF_BASE_VALID_START`.
-#if LIBXR_HPM_MCAN_SUPPORTED && defined(HPM_MCAN0) && \
-    defined(MCAN_MSG_BUF_BASE_VALID_START)
+#if LIBXR_HPM_MCAN_SUPPORTED
 #define LIBXR_HPM_CAN_SUPPORTED 1
 #else
 #define LIBXR_HPM_CAN_SUPPORTED 0
@@ -27,10 +22,11 @@ class HPMCAN final : public CAN
 {
  public:
   static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;
-  static constexpr uint8_t MAX_INSTANCES = MCAN_SOC_MAX_COUNT;
+  static constexpr uint8_t MAX_INSTANCES = detail::MCAN_INSTANCE_COUNT;
 
   HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
          void* msg_buf, uint32_t msg_buf_size);
+  ~HPMCAN() override;
 
   ErrorCode SetConfig(const CAN::Configuration& cfg) override;
   uint32_t GetClockFreq() const override;
@@ -43,7 +39,7 @@ class HPMCAN final : public CAN
 
   ErrorCode DisableInterrupt();
 
-  /** @brief 在配置前设置 message RAM / Set message RAM before configuration. */
+  /** @brief 配置外部 MCAN message RAM / Configure external MCAN message RAM. */
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
   static void OnInterrupt(uint8_t index);
@@ -62,11 +58,12 @@ class HPMCAN final : public CAN
 
   MCAN_Type* can_;
   clock_name_t clock_;
+  bool clock_ready_{false};
   uint32_t irq_;
   uint8_t index_{MAX_INSTANCES};
   void* msg_buf_{nullptr};
   uint32_t msg_buf_size_{0};
-  bool configured_{false};
+  std::atomic<bool> configured_{false};
 
   MPMCQueue<ClassicPack> tx_queue_;
   bool tx_retry_valid_{false};

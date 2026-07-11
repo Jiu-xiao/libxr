@@ -19,7 +19,7 @@ class HPMCANFD : public FDCAN
  public:
   static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;
   static constexpr uint32_t DEFAULT_TX_POOL_SIZE = 8;
-  static constexpr uint8_t MAX_INSTANCES = MCAN_SOC_MAX_COUNT;
+  static constexpr uint8_t MAX_INSTANCES = detail::MCAN_INSTANCE_COUNT;
 
   /**
    * @brief 构造 MCAN FDCAN wrapper / Construct the MCAN FDCAN wrapper.
@@ -28,8 +28,9 @@ class HPMCANFD : public FDCAN
            uint32_t irq = INVALID_IRQ, bool auto_enable_irq = true,
            uint32_t queue_size = DEFAULT_TX_POOL_SIZE, void* msg_buf = nullptr,
            uint32_t msg_buf_size = 0);
+  ~HPMCANFD() override;
 
-  /** @brief 在配置前设置 MCAN message RAM / Set message RAM before configuration. */
+  /** @brief 配置外部 MCAN message RAM / Configure external MCAN message RAM. */
   ErrorCode SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size);
 
   /**
@@ -70,17 +71,16 @@ class HPMCANFD : public FDCAN
 
   static void OnInterrupt(uint8_t index);
 
-  static inline void BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame);
+  static void BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame);
 
-  static inline void BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame,
-                                  bool bitrate_switch, bool error_state_indicator);
+  static void BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame,
+                           bool bitrate_switch, bool error_state_indicator);
 
   void TxService();
 
  private:
   static uint8_t DlcToBytes(uint8_t dlc);
   static uint8_t BytesToDlc(uint8_t bytes);
-  static bool IsValidFdLength(uint8_t bytes);
   ErrorCode ApplyMessageBuffer();
   void Shutdown();
   static bool BuildRxPack(const mcan_rx_message_t& frame, ClassicPack& pack);
@@ -89,21 +89,27 @@ class HPMCANFD : public FDCAN
 
   MCAN_Type* can_;
   clock_name_t clock_;
+  bool clock_ready_{false};
   uint8_t index_;
   uint32_t irq_;
   bool auto_enable_irq_;
   void* msg_buf_{nullptr};
   uint32_t msg_buf_size_{0};
-  bool configured_ = false;
-  bool fd_enabled_ = false;
-  bool brs_enabled_ = false;
-  bool esi_enabled_ = false;
+  std::atomic<bool> configured_{false};
+  std::atomic<bool> fd_enabled_{false};
+  std::atomic<bool> brs_enabled_{false};
+  std::atomic<bool> esi_enabled_{false};
 
   std::atomic<uint32_t> tx_lock_{0};
   std::atomic<uint32_t> tx_pend_{0};
 
   MPMCQueue<ClassicPack> tx_queue_;
   MPMCQueue<FDPack> tx_fd_queue_;
+  bool tx_retry_valid_ = false;
+  ClassicPack tx_retry_pack_{};
+  bool tx_fd_retry_valid_ = false;
+  FDPack tx_fd_retry_pack_{};
+  bool prefer_fd_next_ = true;
 
   struct
   {

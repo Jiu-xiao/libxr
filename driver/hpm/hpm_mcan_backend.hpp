@@ -10,9 +10,30 @@
 #include "hpm_common.h"
 #include "hpm_soc.h"
 
-#if defined(HPMSOC_HAS_HPMSDK_MCAN) && __has_include("hpm_mcan_drv.h") &&           \
-                                                     defined(MCAN_SOC_MAX_COUNT) && \
-                                                     (MCAN_SOC_MAX_COUNT > 0)
+#if defined(MCAN_SOC_MAX_COUNT)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT MCAN_SOC_MAX_COUNT
+#elif defined(HPM_MCAN7)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 8U
+#elif defined(HPM_MCAN6)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 7U
+#elif defined(HPM_MCAN5)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 6U
+#elif defined(HPM_MCAN4)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 5U
+#elif defined(HPM_MCAN3)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 4U
+#elif defined(HPM_MCAN2)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 3U
+#elif defined(HPM_MCAN1)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 2U
+#elif defined(HPM_MCAN0)
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 1U
+#else
+#define LIBXR_HPM_MCAN_INSTANCE_COUNT 0U
+#endif
+
+#if defined(HPMSOC_HAS_HPMSDK_MCAN) && __has_include("hpm_mcan_drv.h") && \
+                                                     (LIBXR_HPM_MCAN_INSTANCE_COUNT > 0)
 #include "hpm_interrupt.h"
 #include "hpm_mcan_drv.h"
 #define LIBXR_HPM_MCAN_SUPPORTED 1
@@ -24,6 +45,8 @@
 
 namespace LibXR::detail
 {
+
+inline constexpr uint8_t MCAN_INSTANCE_COUNT = LIBXR_HPM_MCAN_INSTANCE_COUNT;
 
 inline constexpr uint32_t MCAN_RX_INTERRUPT_MASK =
     MCAN_INT_RXFIFO0_NEW_MSG | MCAN_INT_RXFIFO1_NEW_MSG;
@@ -38,6 +61,8 @@ inline constexpr uint32_t MCAN_INTERRUPT_MASK =
 inline constexpr uint32_t MCAN_RX_FAULT_MASK =
     MCAN_INT_RXFIFO0_FULL | MCAN_INT_RXFIFO1_FULL | MCAN_INT_RXFIFO0_MSG_LOST |
     MCAN_INT_RXFIFO1_MSG_LOST | MCAN_INT_MSG_RAM_ACCESS_FAILURE;
+inline constexpr uint32_t MCAN_DRIVER_INTERRUPT_MASK =
+    MCAN_INTERRUPT_MASK | MCAN_RX_FAULT_MASK;
 inline constexpr uint32_t MCAN_RX_FIFO0_ACTIVITY_MASK =
     MCAN_INT_RXFIFO0_NEW_MSG | MCAN_INT_RXFIFO0_FULL | MCAN_INT_RXFIFO0_MSG_LOST;
 inline constexpr uint32_t MCAN_RX_FIFO1_ACTIVITY_MASK =
@@ -59,7 +84,7 @@ struct McanOwnerSlot
   McanInterruptHandler handler = nullptr;
 };
 
-inline McanOwnerSlot mcan_owner_slots[MCAN_SOC_MAX_COUNT] = {};
+inline McanOwnerSlot mcan_owner_slots[MCAN_INSTANCE_COUNT] = {};
 
 template <typename FrameConsumer, typename ErrorConsumer>
 void DrainMcanRxFifo(MCAN_Type* can, uint32_t fifo_index, FrameConsumer&& on_frame,
@@ -180,6 +205,20 @@ inline bool HasLowLevelTiming(const FDCAN::DataBitTiming& timing)
          timing.sjw != 0U;
 }
 
+template <typename Timing>
+inline bool CanApplyMcanLowLevelTiming(const Timing& timing)
+{
+  const uint64_t seg1 = static_cast<uint64_t>(timing.prop_seg) + timing.phase_seg1;
+  return HasLowLevelTiming(timing) && seg1 <= UINT16_MAX && timing.brp <= UINT16_MAX &&
+         timing.phase_seg2 <= UINT16_MAX && timing.sjw <= UINT8_MAX &&
+         timing.sjw <= timing.phase_seg2;
+}
+
+inline bool IsValidMcanSamplePoint(float sample_point)
+{
+  return sample_point >= 0.0f && sample_point < 1.0f;
+}
+
 inline uint16_t SamplePointToPermille(float sample_point)
 {
   if (sample_point <= 0.0f)
@@ -232,8 +271,7 @@ inline mcan_node_mode_t ConvertMcanMode(const CAN::Mode& mode)
   return mcan_mode_normal;
 }
 
-inline void ApplyLowLevelTiming(const CAN::BitTiming& src,
-                                mcan_bit_timing_param_t& dst)
+inline void ApplyLowLevelTiming(const CAN::BitTiming& src, mcan_bit_timing_param_t& dst)
 {
   dst.prescaler = static_cast<uint16_t>(src.brp);
   dst.num_seg1 = static_cast<uint16_t>(src.prop_seg + src.phase_seg1);
@@ -253,8 +291,7 @@ inline void ApplyLowLevelTiming(const FDCAN::DataBitTiming& src,
 }
 
 inline CAN::ErrorID ConvertMcanProtocolError(
-    mcan_last_err_code_t code,
-    CAN::ErrorID fallback = CAN::ErrorID::CAN_ERROR_ID_GENERIC)
+    mcan_last_err_code_t code, CAN::ErrorID fallback = CAN::ErrorID::CAN_ERROR_ID_GENERIC)
 {
   switch (code)
   {
@@ -283,10 +320,27 @@ inline uint32_t AcquireMcanClock(clock_name_t clock)
   return clock_get_frequency(clock);
 }
 
+inline bool HasMcanDefaultMessageBufferCapacity(uint32_t msg_buf_size)
+{
+  if (msg_buf_size == 0U)
+  {
+    return false;
+  }
+#if defined(MCAN_MSG_BUF_SIZE_IN_WORDS)
+  constexpr uint64_t required_size =
+      static_cast<uint64_t>(MCAN_MSG_BUF_SIZE_IN_WORDS) * sizeof(uint32_t);
+  return static_cast<uint64_t>(msg_buf_size) >= required_size;
+#else
+  return true;
+#endif
+}
+
 inline ErrorCode ApplyMcanMessageBuffer(MCAN_Type* can, void* msg_buf,
                                         uint32_t msg_buf_size)
 {
-  if (can == nullptr || msg_buf == nullptr || msg_buf_size == 0U)
+#if defined(MCAN_SOC_MSG_BUF_IN_AHB_RAM) && (MCAN_SOC_MSG_BUF_IN_AHB_RAM == 1)
+  if (can == nullptr || msg_buf == nullptr ||
+      !HasMcanDefaultMessageBufferCapacity(msg_buf_size))
   {
     return ErrorCode::ARG_ERR;
   }
@@ -297,9 +351,13 @@ inline ErrorCode ApplyMcanMessageBuffer(MCAN_Type* can, void* msg_buf,
     return ErrorCode::ARG_ERR;
   }
 
-  const mcan_msg_buf_attr_t attr = {static_cast<uint32_t>(msg_buf_addr),
-                                    msg_buf_size};
+  const mcan_msg_buf_attr_t attr = {static_cast<uint32_t>(msg_buf_addr), msg_buf_size};
   return ConvertMcanStatus(mcan_set_msg_buf_attr(can, &attr));
+#else
+  UNUSED(msg_buf);
+  UNUSED(msg_buf_size);
+  return can == nullptr ? ErrorCode::ARG_ERR : ErrorCode::OK;
+#endif
 }
 
 inline void PrepareMcanCommonConfig(MCAN_Type* can, mcan_config_t& config,
@@ -312,7 +370,7 @@ inline void PrepareMcanCommonConfig(MCAN_Type* can, mcan_config_t& config,
   }
   config.ram_config.enable_rxbuf = false;
   config.ram_config.rxbuf_elem_count = 0U;
-  config.interrupt_mask = MCAN_INTERRUPT_MASK;
+  config.interrupt_mask = MCAN_DRIVER_INTERRUPT_MASK;
 }
 
 inline void PrepareMcanAcceptAllFilters(mcan_config_t& config)
@@ -328,13 +386,13 @@ inline void PrepareMcanAcceptAllFilters(mcan_config_t& config)
 inline void ShutdownMcan(MCAN_Type* can, uint32_t irq, bool auto_enable_irq,
                          uint32_t interrupt_mask)
 {
-  if (auto_enable_irq && irq != 0xFFFFFFFFUL)
-  {
-    intc_m_disable_irq(irq);
-  }
   if (can == nullptr)
   {
     return;
+  }
+  if (auto_enable_irq && irq != 0xFFFFFFFFUL)
+  {
+    intc_m_disable_irq(irq);
   }
 
   mcan_disable_interrupts(can, interrupt_mask);
@@ -342,18 +400,20 @@ inline void ShutdownMcan(MCAN_Type* can, uint32_t irq, bool auto_enable_irq,
   mcan_deinit(can);
 }
 
-inline void EnableMcanInterrupts(MCAN_Type* can, uint32_t irq,
-                                 bool auto_enable_irq,
+inline void EnableMcanInterrupts(MCAN_Type* can, uint32_t irq, bool auto_enable_irq,
                                  uint32_t interrupt_mask)
 {
-  if (!auto_enable_irq || irq == 0xFFFFFFFFUL || can == nullptr)
+  if (can == nullptr)
   {
     return;
   }
 
   mcan_clear_interrupt_flags(can, 0xFFFFFFFFUL);
   mcan_enable_interrupts(can, interrupt_mask);
-  intc_m_enable_irq_with_priority(irq, 1);
+  if (auto_enable_irq && irq != 0xFFFFFFFFUL)
+  {
+    intc_m_enable_irq_with_priority(irq, 1);
+  }
 }
 
 inline ErrorCode ReadMcanErrorState(MCAN_Type* can, CAN::ErrorState& state)
@@ -390,15 +450,49 @@ inline size_t HardwareTxQueueEmptySize(MCAN_Type* can)
   return static_cast<size_t>(MCAN_TXFQS_TFFL_GET(can->TXFQS));
 }
 
-inline void BuildMcanClassicTxFrame(const CAN::ClassicPack& pack,
-                                    mcan_tx_frame_t& frame)
+inline bool IsValidMcanClassicPack(const CAN::ClassicPack& pack)
+{
+  if (pack.dlc > 8U)
+  {
+    return false;
+  }
+
+  switch (pack.type)
+  {
+    case CAN::Type::STANDARD:
+    case CAN::Type::REMOTE_STANDARD:
+      return pack.id <= 0x7FFUL;
+    case CAN::Type::EXTENDED:
+    case CAN::Type::REMOTE_EXTENDED:
+      return pack.id <= 0x1FFFFFFFUL;
+    case CAN::Type::ERROR:
+    case CAN::Type::TYPE_NUM:
+    default:
+      return false;
+  }
+}
+
+inline bool IsValidMcanFdIdentifier(const FDCAN::FDPack& pack)
+{
+  if (pack.type == CAN::Type::STANDARD)
+  {
+    return pack.id <= 0x7FFUL;
+  }
+  if (pack.type == CAN::Type::EXTENDED)
+  {
+    return pack.id <= 0x1FFFFFFFUL;
+  }
+  return false;
+}
+
+inline void BuildMcanClassicTxFrame(const CAN::ClassicPack& pack, mcan_tx_frame_t& frame)
 {
   std::memset(&frame, 0, sizeof(frame));
 
   const bool is_ext =
       pack.type == CAN::Type::EXTENDED || pack.type == CAN::Type::REMOTE_EXTENDED;
-  const bool is_rtr = pack.type == CAN::Type::REMOTE_STANDARD ||
-                      pack.type == CAN::Type::REMOTE_EXTENDED;
+  const bool is_rtr =
+      pack.type == CAN::Type::REMOTE_STANDARD || pack.type == CAN::Type::REMOTE_EXTENDED;
 
   frame.use_ext_id = is_ext ? 1U : 0U;
   frame.rtr = is_rtr ? 1U : 0U;
@@ -422,8 +516,7 @@ inline void BuildMcanClassicTxFrame(const CAN::ClassicPack& pack,
   }
 }
 
-inline void BuildMcanClassicRxPack(const mcan_rx_message_t& frame,
-                                   CAN::ClassicPack& pack)
+inline void BuildMcanClassicRxPack(const mcan_rx_message_t& frame, CAN::ClassicPack& pack)
 {
   std::memset(&pack, 0, sizeof(pack));
 
@@ -449,18 +542,64 @@ inline uint8_t GetMcanInstanceIndex(MCAN_Type* can)
 {
   if (can == nullptr)
   {
-    return MCAN_SOC_MAX_COUNT;
+    return MCAN_INSTANCE_COUNT;
   }
 
-  const uint32_t index = mcan_get_instance_from_base(can);
-  return (index < MCAN_SOC_MAX_COUNT) ? static_cast<uint8_t>(index)
-                                      : static_cast<uint8_t>(MCAN_SOC_MAX_COUNT);
+#if defined(HPM_MCAN0)
+  if (can == HPM_MCAN0)
+  {
+    return 0U;
+  }
+#endif
+#if defined(HPM_MCAN1)
+  if (can == HPM_MCAN1)
+  {
+    return 1U;
+  }
+#endif
+#if defined(HPM_MCAN2)
+  if (can == HPM_MCAN2)
+  {
+    return 2U;
+  }
+#endif
+#if defined(HPM_MCAN3)
+  if (can == HPM_MCAN3)
+  {
+    return 3U;
+  }
+#endif
+#if defined(HPM_MCAN4)
+  if (can == HPM_MCAN4)
+  {
+    return 4U;
+  }
+#endif
+#if defined(HPM_MCAN5)
+  if (can == HPM_MCAN5)
+  {
+    return 5U;
+  }
+#endif
+#if defined(HPM_MCAN6)
+  if (can == HPM_MCAN6)
+  {
+    return 6U;
+  }
+#endif
+#if defined(HPM_MCAN7)
+  if (can == HPM_MCAN7)
+  {
+    return 7U;
+  }
+#endif
+  return MCAN_INSTANCE_COUNT;
 }
 
 inline bool RegisterMcanOwner(uint8_t index, void* owner, McanOwnerKind kind,
                               McanInterruptHandler handler)
 {
-  if (index >= MCAN_SOC_MAX_COUNT || owner == nullptr || handler == nullptr)
+  if (index >= MCAN_INSTANCE_COUNT || owner == nullptr || handler == nullptr)
   {
     return false;
   }
@@ -477,9 +616,23 @@ inline bool RegisterMcanOwner(uint8_t index, void* owner, McanOwnerKind kind,
   return true;
 }
 
+inline void UnregisterMcanOwner(uint8_t index, void* owner)
+{
+  if (index >= MCAN_INSTANCE_COUNT || owner == nullptr)
+  {
+    return;
+  }
+
+  auto& slot = mcan_owner_slots[index];
+  if (slot.owner == owner)
+  {
+    slot = {};
+  }
+}
+
 inline void ProcessMcanRegisteredInterrupt(uint8_t index, bool in_isr = true)
 {
-  if (index >= MCAN_SOC_MAX_COUNT)
+  if (index >= MCAN_INSTANCE_COUNT)
   {
     return;
   }
