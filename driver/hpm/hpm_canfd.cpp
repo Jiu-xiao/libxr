@@ -6,6 +6,17 @@
 
 using namespace LibXR;
 
+namespace
+{
+constexpr uint8_t kCanFdDlc12Bytes = 9U;
+constexpr uint8_t kCanFdDlc16Bytes = 10U;
+constexpr uint8_t kCanFdDlc20Bytes = 11U;
+constexpr uint8_t kCanFdDlc24Bytes = 12U;
+constexpr uint8_t kCanFdDlc32Bytes = 13U;
+constexpr uint8_t kCanFdDlc48Bytes = 14U;
+constexpr uint8_t kCanFdDlc64Bytes = 15U;
+}  // namespace
+
 uint8_t HPMCANFD::BytesToDlc(uint8_t bytes)
 {
   if (bytes <= 8U)
@@ -14,48 +25,43 @@ uint8_t HPMCANFD::BytesToDlc(uint8_t bytes)
   }
   if (bytes <= 12U)
   {
-    return MCAN_MSG_DLC_12_BYTES;
+    return kCanFdDlc12Bytes;
   }
   if (bytes <= 16U)
   {
-    return MCAN_MSG_DLC_16_BYTES;
+    return kCanFdDlc16Bytes;
   }
   if (bytes <= 20U)
   {
-    return MCAN_MSG_DLC_20_BYTES;
+    return kCanFdDlc20Bytes;
   }
   if (bytes <= 24U)
   {
-    return MCAN_MSG_DLC_24_BYTES;
+    return kCanFdDlc24Bytes;
   }
   if (bytes <= 32U)
   {
-    return MCAN_MSG_DLC_32_BYTES;
+    return kCanFdDlc32Bytes;
   }
   if (bytes <= 48U)
   {
-    return MCAN_MSG_DLC_48_BYTES;
+    return kCanFdDlc48Bytes;
   }
-  return MCAN_MSG_DLC_64_BYTES;
+  return kCanFdDlc64Bytes;
 }
 
 uint8_t HPMCANFD::DlcToBytes(uint8_t dlc) { return mcan_get_message_size_from_dlc(dlc); }
 
-bool HPMCANFD::IsValidFdLength(uint8_t bytes)
-{
-  return bytes <= 8U || bytes == 12U || bytes == 16U || bytes == 20U || bytes == 24U ||
-         bytes == 32U || bytes == 48U || bytes == 64U;
-}
-
-inline void HPMCANFD::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame)
+void HPMCANFD::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame)
 {
   detail::BuildMcanClassicTxFrame(pack, frame);
 }
 
-inline void HPMCANFD::BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame,
-                                   bool bitrate_switch, bool error_state_indicator)
+void HPMCANFD::BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame,
+                            bool bitrate_switch, bool error_state_indicator)
 {
   std::memset(&frame, 0, sizeof(frame));
+  const uint8_t payload_size = pack.len <= 64U ? pack.len : 64U;
   frame.use_ext_id = (pack.type == Type::EXTENDED) ? 1U : 0U;
   frame.rtr = 0U;
   if (frame.use_ext_id != 0U)
@@ -66,13 +72,13 @@ inline void HPMCANFD::BuildTxFrame(const FDPack& pack, mcan_tx_frame_t& frame,
   {
     frame.std_id = pack.id & 0x7FFUL;
   }
-  frame.dlc = BytesToDlc(pack.len);
+  frame.dlc = BytesToDlc(payload_size);
   frame.canfd_frame = 1U;
   frame.bitrate_switch = bitrate_switch ? 1U : 0U;
   frame.error_state_indicator = error_state_indicator ? 1U : 0U;
-  if (pack.len > 0U)
+  if (payload_size > 0U)
   {
-    std::memcpy(frame.data_8, pack.data, pack.len);
+    std::memcpy(frame.data_8, pack.data, payload_size);
   }
 }
 
@@ -158,27 +164,55 @@ HPMCANFD::HPMCANFD(MCAN_Type* can, clock_name_t clock, uint8_t index, uint32_t i
   }
 }
 
+HPMCANFD::~HPMCANFD()
+{
+  Shutdown();
+  detail::UnregisterMcanOwner(index_, this);
+}
+
 void HPMCANFD::Shutdown()
 {
-  detail::ShutdownMcan(can_, irq_, auto_enable_irq_, detail::MCAN_INTERRUPT_MASK);
-  configured_ = false;
-  fd_enabled_ = false;
-  brs_enabled_ = false;
-  esi_enabled_ = false;
-  tx_lock_.store(0U, std::memory_order_release);
+  configured_.store(false, std::memory_order_release);
+  if (clock_ready_)
+  {
+    detail::ShutdownMcan(can_, irq_, auto_enable_irq_,
+                         detail::MCAN_DRIVER_INTERRUPT_MASK);
+  }
+  fd_enabled_.store(false, std::memory_order_release);
+  brs_enabled_.store(false, std::memory_order_release);
+  esi_enabled_.store(false, std::memory_order_release);
   tx_pend_.store(0U, std::memory_order_release);
 }
 
 ErrorCode HPMCANFD::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
 {
-  if (msg_buf == nullptr || msg_buf_size == 0U)
+#if !defined(MCAN_SOC_MSG_BUF_IN_AHB_RAM) || (MCAN_SOC_MSG_BUF_IN_AHB_RAM != 1)
+  UNUSED(msg_buf);
+  UNUSED(msg_buf_size);
+  return ErrorCode::NOT_SUPPORT;
+#else
+  if (msg_buf == nullptr || !detail::HasMcanDefaultMessageBufferCapacity(msg_buf_size))
   {
     return ErrorCode::ARG_ERR;
   }
 
+  uint32_t expected = 0U;
+  if (!tx_lock_.compare_exchange_strong(expected, 1U, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
+  {
+    return ErrorCode::BUSY;
+  }
+  if (configured_.load(std::memory_order_acquire))
+  {
+    tx_lock_.store(0U, std::memory_order_release);
+    return ErrorCode::BUSY;
+  }
+
   msg_buf_ = msg_buf;
   msg_buf_size_ = msg_buf_size;
+  tx_lock_.store(0U, std::memory_order_release);
   return ErrorCode::OK;
+#endif
 }
 
 ErrorCode HPMCANFD::ApplyMessageBuffer()
@@ -200,8 +234,7 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
 {
   if (can_ == nullptr)
   {
-    ASSERT(false);
-    return ErrorCode::ARG_ERR;
+    return ErrorCode::PTR_NULL;
   }
   if (cfg.mode.triple_sampling)
   {
@@ -219,6 +252,11 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   {
     return ErrorCode::ARG_ERR;
   }
+  if (!detail::IsValidMcanSamplePoint(cfg.sample_point) ||
+      !detail::IsValidMcanSamplePoint(cfg.data_sample_point))
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
   const bool nominal_timing_set = detail::HasAnyLowLevelTiming(cfg.bit_timing);
   const bool data_timing_set = detail::HasAnyLowLevelTiming(cfg.data_timing);
@@ -227,27 +265,54 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
 
   if ((nominal_timing_set && !nominal_low_level) || (data_timing_set && !data_low_level))
   {
-    ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
-  if (!cfg.fd_mode.fd_enabled && data_timing_set)
+  if (!cfg.fd_mode.fd_enabled &&
+      (data_timing_set || cfg.data_bitrate != 0U || cfg.data_sample_point != 0.0f))
   {
-    ASSERT(false);
     return ErrorCode::ARG_ERR;
   }
+  if ((nominal_low_level && !detail::CanApplyMcanLowLevelTiming(cfg.bit_timing)) ||
+      (data_low_level && !detail::CanApplyMcanLowLevelTiming(cfg.data_timing)))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  if (nominal_low_level || data_low_level)
+  {
+    if (!nominal_low_level || (cfg.fd_mode.fd_enabled && !data_low_level &&
+                               (cfg.data_bitrate != 0U || cfg.data_sample_point > 0.0f)))
+    {
+      return ErrorCode::ARG_ERR;
+    }
+  }
+  else if (cfg.bitrate == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  uint32_t expected = 0U;
+  if (!tx_lock_.compare_exchange_strong(expected, 1U, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
+  {
+    return ErrorCode::BUSY;
+  }
+
+  const uint32_t clock_hz = detail::AcquireMcanClock(clock_);
+  if (clock_hz == 0U)
+  {
+    tx_lock_.store(0U, std::memory_order_release);
+    return ErrorCode::INIT_ERR;
+  }
+  clock_ready_ = true;
 
   Shutdown();
 
   const ErrorCode msg_buf_status = ApplyMessageBuffer();
   if (msg_buf_status != ErrorCode::OK)
   {
+    tx_lock_.store(0U, std::memory_order_release);
     return msg_buf_status;
-  }
-
-  const uint32_t clock_hz = detail::AcquireMcanClock(clock_);
-  if (clock_hz == 0U)
-  {
-    return ErrorCode::INIT_ERR;
   }
 
   mcan_config_t config{};
@@ -255,23 +320,11 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   detail::PrepareMcanCommonConfig(can_, config, cfg.fd_mode.fd_enabled);
   config.mode = detail::ConvertMcanMode(cfg.mode);
   config.disable_auto_retransmission = cfg.mode.one_shot;
-  config.enable_restricted_operation_mode = cfg.mode.listen_only;
   config.enable_non_iso_mode = false;
   config.enable_tdc = cfg.fd_mode.fd_enabled && cfg.fd_mode.brs;
 
   if (nominal_low_level || data_low_level)
   {
-    if (!nominal_low_level)
-    {
-      ASSERT(false);
-      return ErrorCode::ARG_ERR;
-    }
-    if (cfg.fd_mode.fd_enabled && !data_low_level &&
-        (cfg.data_bitrate != 0U || cfg.data_sample_point > 0.0f))
-    {
-      ASSERT(false);
-      return ErrorCode::ARG_ERR;
-    }
     config.use_lowlevel_timing_setting = true;
     detail::ApplyLowLevelTiming(cfg.bit_timing, config.can_timing);
     if (cfg.fd_mode.fd_enabled)
@@ -289,11 +342,6 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   }
   else
   {
-    if (cfg.bitrate == 0U)
-    {
-      ASSERT(false);
-      return ErrorCode::ARG_ERR;
-    }
     config.use_lowlevel_timing_setting = false;
     config.baudrate = cfg.bitrate;
     const uint16_t sample_point = detail::SamplePointToPermille(cfg.sample_point);
@@ -321,16 +369,21 @@ ErrorCode HPMCANFD::SetConfig(const FDCAN::Configuration& cfg)
   ErrorCode ans = detail::ConvertMcanStatus(mcan_init(can_, &config, clock_hz));
   if (ans != ErrorCode::OK)
   {
+    Shutdown();
+    tx_lock_.store(0U, std::memory_order_release);
     return ans;
   }
 
-  configured_ = true;
-  fd_enabled_ = cfg.fd_mode.fd_enabled;
-  brs_enabled_ = cfg.fd_mode.brs;
-  esi_enabled_ = cfg.fd_mode.esi;
-  tx_lock_.store(0U, std::memory_order_release);
+  mcan_disable_standby_pin(can_);
+  fd_enabled_.store(cfg.fd_mode.fd_enabled, std::memory_order_release);
+  brs_enabled_.store(cfg.fd_mode.brs, std::memory_order_release);
+  esi_enabled_.store(cfg.fd_mode.esi, std::memory_order_release);
+  configured_.store(true, std::memory_order_release);
   tx_pend_.store(0U, std::memory_order_release);
-  detail::EnableMcanInterrupts(can_, irq_, auto_enable_irq_, detail::MCAN_INTERRUPT_MASK);
+  detail::EnableMcanInterrupts(can_, irq_, auto_enable_irq_,
+                               detail::MCAN_DRIVER_INTERRUPT_MASK);
+  tx_lock_.store(0U, std::memory_order_release);
+  TxService();
   return ErrorCode::OK;
 }
 
@@ -342,11 +395,11 @@ ErrorCode HPMCANFD::AddMessage(const ClassicPack& pack)
   {
     return ErrorCode::PTR_NULL;
   }
-  if (!configured_)
+  if (!configured_.load(std::memory_order_acquire))
   {
     return ErrorCode::INIT_ERR;
   }
-  if (pack.type == Type::ERROR || pack.type == Type::TYPE_NUM || pack.dlc > 8U)
+  if (!detail::IsValidMcanClassicPack(pack))
   {
     return ErrorCode::ARG_ERR;
   }
@@ -370,15 +423,15 @@ ErrorCode HPMCANFD::AddMessage(const FDPack& pack)
   {
     return ErrorCode::PTR_NULL;
   }
-  if (!configured_)
+  if (!configured_.load(std::memory_order_acquire))
   {
     return ErrorCode::INIT_ERR;
   }
-  if (!fd_enabled_)
+  if (!fd_enabled_.load(std::memory_order_acquire))
   {
     return ErrorCode::NOT_SUPPORT;
   }
-  if (pack.type != Type::STANDARD && pack.type != Type::EXTENDED)
+  if (!detail::IsValidMcanFdIdentifier(pack))
   {
     return ErrorCode::ARG_ERR;
   }
@@ -386,11 +439,6 @@ ErrorCode HPMCANFD::AddMessage(const FDPack& pack)
   {
     return ErrorCode::ARG_ERR;
   }
-  if (!IsValidFdLength(pack.len))
-  {
-    return ErrorCode::ARG_ERR;
-  }
-
   if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
   {
     TxService();
@@ -406,17 +454,29 @@ ErrorCode HPMCANFD::AddMessage(const FDPack& pack)
 
 ErrorCode HPMCANFD::GetErrorState(CAN::ErrorState& state) const
 {
+  if (can_ == nullptr)
+  {
+    return ErrorCode::PTR_NULL;
+  }
+  if (!configured_.load(std::memory_order_acquire))
+  {
+    return ErrorCode::INIT_ERR;
+  }
   return detail::ReadMcanErrorState(can_, state);
 }
 
 size_t HPMCANFD::HardwareTxQueueEmptySize() const
 {
+  if (!configured_.load(std::memory_order_acquire))
+  {
+    return 0U;
+  }
   return detail::HardwareTxQueueEmptySize(can_);
 }
 
 void HPMCANFD::ProcessRxInterrupt(uint32_t fifo, bool in_isr)
 {
-  if (!configured_ || can_ == nullptr)
+  if (!configured_.load(std::memory_order_acquire) || can_ == nullptr)
   {
     return;
   }
@@ -482,7 +542,8 @@ void HPMCANFD::ProcessErrorStatusInterrupt(uint32_t error_status_its, bool in_is
 void HPMCANFD::ProcessInterrupt(bool in_isr)
 {
   detail::ProcessMcanInterrupt(
-      can_, configured_, in_isr, [this](uint32_t fifo_index, uint32_t, bool rx_in_isr)
+      can_, configured_.load(std::memory_order_acquire), in_isr,
+      [this](uint32_t fifo_index, uint32_t, bool rx_in_isr)
       { ProcessRxInterrupt(fifo_index, rx_in_isr); }, [this](bool err_in_isr)
       { EmitErrorFrame(ErrorID::CAN_ERROR_ID_OTHER, err_in_isr); },
       [this]() { TxService(); }, [this](uint32_t error_flags, bool err_in_isr)
@@ -496,7 +557,7 @@ void HPMCANFD::OnInterrupt(uint8_t index)
 
 void HPMCANFD::TxService()
 {
-  if (!configured_ || can_ == nullptr)
+  if (!configured_.load(std::memory_order_acquire) || can_ == nullptr)
   {
     return;
   }
@@ -516,46 +577,90 @@ void HPMCANFD::TxService()
 
     while (HardwareTxQueueEmptySize() != 0U)
     {
-      FDPack pfd{};
-      if (fd_enabled_ && tx_fd_queue_.Pop(pfd) == ErrorCode::OK)
+      bool submitted = false;
+      for (uint32_t attempt = 0U; attempt < 2U; ++attempt)
       {
-        BuildTxFrame(pfd, tx_buff_.frame, brs_enabled_, esi_enabled_);
+        const bool try_fd = (attempt == 0U) ? prefer_fd_next_ : !prefer_fd_next_;
+        if (try_fd)
+        {
+          if (!fd_enabled_.load(std::memory_order_acquire))
+          {
+            continue;
+          }
 
+          FDPack pack{};
+          bool have_pack = false;
+          if (tx_fd_retry_valid_)
+          {
+            pack = tx_fd_retry_pack_;
+            have_pack = true;
+          }
+          else
+          {
+            have_pack = tx_fd_queue_.Pop(pack) == ErrorCode::OK;
+          }
+          if (!have_pack)
+          {
+            continue;
+          }
+
+          BuildTxFrame(pack, tx_buff_.frame, brs_enabled_.load(std::memory_order_relaxed),
+                       esi_enabled_.load(std::memory_order_relaxed));
+          uint32_t fifo_index = 0U;
+          const hpm_stat_t status =
+              mcan_transmit_via_txfifo_nonblocking(can_, &tx_buff_.frame, &fifo_index);
+          UNUSED(fifo_index);
+          if (status != status_success)
+          {
+            tx_fd_retry_pack_ = pack;
+            tx_fd_retry_valid_ = true;
+            break;
+          }
+
+          tx_fd_retry_valid_ = false;
+          prefer_fd_next_ = false;
+          submitted = true;
+          break;
+        }
+
+        ClassicPack pack{};
+        bool have_pack = false;
+        if (tx_retry_valid_)
+        {
+          pack = tx_retry_pack_;
+          have_pack = true;
+        }
+        else
+        {
+          have_pack = tx_queue_.Pop(pack) == ErrorCode::OK;
+        }
+        if (!have_pack)
+        {
+          continue;
+        }
+
+        BuildTxFrame(pack, tx_buff_.frame);
         uint32_t fifo_index = 0U;
         const hpm_stat_t status =
             mcan_transmit_via_txfifo_nonblocking(can_, &tx_buff_.frame, &fifo_index);
         UNUSED(fifo_index);
         if (status != status_success)
         {
-          if (tx_fd_queue_.Push(pfd) != ErrorCode::OK)
-          {
-            ASSERT(false);
-          }
+          tx_retry_pack_ = pack;
+          tx_retry_valid_ = true;
           break;
         }
-        continue;
+
+        tx_retry_valid_ = false;
+        prefer_fd_next_ = true;
+        submitted = true;
+        break;
       }
 
-      ClassicPack pc{};
-      if (tx_queue_.Pop(pc) == ErrorCode::OK)
+      if (!submitted)
       {
-        BuildTxFrame(pc, tx_buff_.frame);
-        uint32_t fifo_index = 0U;
-        const hpm_stat_t status =
-            mcan_transmit_via_txfifo_nonblocking(can_, &tx_buff_.frame, &fifo_index);
-        UNUSED(fifo_index);
-        if (status != status_success)
-        {
-          if (tx_queue_.Push(pc) != ErrorCode::OK)
-          {
-            ASSERT(false);
-          }
-          break;
-        }
-        continue;
+        break;
       }
-
-      break;
     }
 
     tx_lock_.store(0U, std::memory_order_release);

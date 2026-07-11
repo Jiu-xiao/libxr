@@ -8,8 +8,7 @@ using namespace LibXR;
 
 namespace
 {
-constexpr uint32_t HPM_CAN_INTERRUPT_MASK =
-    LibXR::detail::MCAN_INTERRUPT_MASK | LibXR::detail::MCAN_RX_FAULT_MASK;
+constexpr uint32_t HPM_CAN_INTERRUPT_MASK = LibXR::detail::MCAN_DRIVER_INTERRUPT_MASK;
 }  // namespace
 
 HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_size,
@@ -40,12 +39,27 @@ HPMCAN::HPMCAN(MCAN_Type* can, clock_name_t clock, uint32_t irq, uint32_t queue_
   }
 }
 
+HPMCAN::~HPMCAN()
+{
+  configured_.store(false, std::memory_order_release);
+  if (can_ != nullptr)
+  {
+    (void)DisableInterrupt();
+    if (clock_ready_)
+    {
+      DisableCanInterrupts();
+      mcan_clear_interrupt_flags(can_, 0xFFFFFFFFUL);
+      mcan_deinit(can_);
+    }
+  }
+  detail::UnregisterMcanOwner(index_, this);
+}
+
 ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
 {
   if (can_ == nullptr)
   {
-    ASSERT(false);
-    return ErrorCode::ARG_ERR;
+    return ErrorCode::PTR_NULL;
   }
   if (cfg.mode.loopback && cfg.mode.listen_only)
   {
@@ -55,15 +69,49 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   {
     return ErrorCode::NOT_SUPPORT;
   }
+  if (!detail::IsValidMcanSamplePoint(cfg.sample_point))
+  {
+    return ErrorCode::ARG_ERR;
+  }
 
+  const bool use_low_level = detail::HasAnyLowLevelTiming(cfg.bit_timing);
+  if (use_low_level)
+  {
+    if (!detail::CanApplyMcanLowLevelTiming(cfg.bit_timing))
+    {
+      return ErrorCode::ARG_ERR;
+    }
+  }
+  else if (cfg.bitrate == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  uint32_t expected = 0U;
+  if (!tx_lock_.compare_exchange_strong(expected, 1U, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
+  {
+    return ErrorCode::BUSY;
+  }
+
+  const uint32_t clock_hz = detail::AcquireMcanClock(clock_);
+  if (clock_hz == 0U)
+  {
+    tx_lock_.store(0U, std::memory_order_release);
+    return ErrorCode::INIT_ERR;
+  }
+  clock_ready_ = true;
+
+  configured_.store(false, std::memory_order_release);
   (void)DisableInterrupt();
   DisableCanInterrupts();
   mcan_clear_interrupt_flags(can_, 0xFFFFFFFFUL);
-  configured_ = false;
+  mcan_deinit(can_);
 
   const ErrorCode MSG_BUF_STATUS = ApplyMessageBuffer();
   if (MSG_BUF_STATUS != ErrorCode::OK)
   {
+    tx_lock_.store(0U, std::memory_order_release);
     return MSG_BUF_STATUS;
   }
 
@@ -76,53 +124,38 @@ ErrorCode HPMCAN::SetConfig(const CAN::Configuration& cfg)
   config.interrupt_mask = HPM_CAN_INTERRUPT_MASK;
   config.txbuf_trans_interrupt_mask = ~0UL;
 
-  const bool USE_LOW_LEVEL = cfg.bit_timing.brp != 0U || cfg.bit_timing.prop_seg != 0U ||
-                             cfg.bit_timing.phase_seg1 != 0U ||
-                             cfg.bit_timing.phase_seg2 != 0U || cfg.bit_timing.sjw != 0U;
-
-  if (USE_LOW_LEVEL)
+  if (use_low_level)
   {
-    const uint32_t SEG1 = cfg.bit_timing.prop_seg + cfg.bit_timing.phase_seg1;
-    if (!detail::HasLowLevelTiming(cfg.bit_timing) ||
-        cfg.bit_timing.sjw > cfg.bit_timing.phase_seg2 || SEG1 == 0U)
-    {
-      ASSERT(false);
-      return ErrorCode::ARG_ERR;
-    }
-
     config.use_lowlevel_timing_setting = true;
     detail::ApplyLowLevelTiming(cfg.bit_timing, config.can_timing);
   }
-  else if (cfg.bitrate != 0U)
+  else
   {
     config.use_lowlevel_timing_setting = false;
     config.baudrate = cfg.bitrate;
     config.can20_samplepoint_min = detail::SamplePointToHpmRange(cfg.sample_point, false);
     config.can20_samplepoint_max = detail::SamplePointToHpmRange(cfg.sample_point, true);
   }
-  else
-  {
-    ASSERT(false);
-    return ErrorCode::ARG_ERR;
-  }
-
-  const uint32_t clock_hz = detail::AcquireMcanClock(clock_);
-  if (clock_hz == 0U)
-  {
-    return ErrorCode::INIT_ERR;
-  }
 
   const ErrorCode RESULT = detail::ConvertMcanStatus(mcan_init(can_, &config, clock_hz));
   if (RESULT == ErrorCode::OK)
   {
     mcan_disable_standby_pin(can_);
-    configured_ = true;
+    configured_.store(true, std::memory_order_release);
     EnableCanInterrupts();
     (void)EnableInterrupt();
   }
   else
   {
+    DisableCanInterrupts();
     mcan_clear_interrupt_flags(can_, 0xFFFFFFFFUL);
+    mcan_deinit(can_);
+  }
+  tx_pend_.store(0U, std::memory_order_release);
+  tx_lock_.store(0U, std::memory_order_release);
+  if (RESULT == ErrorCode::OK)
+  {
+    TxService();
   }
   return RESULT;
 }
@@ -131,14 +164,33 @@ uint32_t HPMCAN::GetClockFreq() const { return clock_get_frequency(clock_); }
 
 ErrorCode HPMCAN::SetMessageBuffer(void* msg_buf, uint32_t msg_buf_size)
 {
-  if (msg_buf == nullptr || msg_buf_size == 0u)
+#if !defined(MCAN_SOC_MSG_BUF_IN_AHB_RAM) || (MCAN_SOC_MSG_BUF_IN_AHB_RAM != 1)
+  UNUSED(msg_buf);
+  UNUSED(msg_buf_size);
+  return ErrorCode::NOT_SUPPORT;
+#else
+  if (msg_buf == nullptr || !detail::HasMcanDefaultMessageBufferCapacity(msg_buf_size))
   {
     return ErrorCode::ARG_ERR;
   }
 
+  uint32_t expected = 0U;
+  if (!tx_lock_.compare_exchange_strong(expected, 1U, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
+  {
+    return ErrorCode::BUSY;
+  }
+  if (configured_.load(std::memory_order_acquire))
+  {
+    tx_lock_.store(0U, std::memory_order_release);
+    return ErrorCode::BUSY;
+  }
+
   msg_buf_ = msg_buf;
   msg_buf_size_ = msg_buf_size;
+  tx_lock_.store(0U, std::memory_order_release);
   return ErrorCode::OK;
+#endif
 }
 
 void HPMCAN::BuildTxFrame(const ClassicPack& pack, mcan_tx_frame_t& frame)
@@ -153,7 +205,7 @@ void HPMCAN::BuildRxPack(const mcan_rx_message_t& frame, ClassicPack& pack)
 
 void HPMCAN::TxService()
 {
-  if (!configured_ || can_ == nullptr)
+  if (!configured_.load(std::memory_order_acquire) || can_ == nullptr)
   {
     return;
   }
@@ -189,15 +241,10 @@ void HPMCAN::TxService()
       uint32_t fifo_index = 0u;
       const hpm_stat_t STATUS =
           mcan_transmit_via_txfifo_nonblocking(can_, &frame, &fifo_index);
-      if (STATUS == status_mcan_txfifo_full)
+      if (STATUS != status_success)
       {
         tx_retry_pack_ = pack;
         tx_retry_valid_ = true;
-        break;
-      }
-      if (STATUS != status_success)
-      {
-        tx_retry_valid_ = false;
         break;
       }
 
@@ -226,18 +273,22 @@ ErrorCode HPMCAN::AddMessage(const ClassicPack& pack)
   {
     return ErrorCode::PTR_NULL;
   }
-  if (!configured_)
+  if (!configured_.load(std::memory_order_acquire))
   {
     return ErrorCode::INIT_ERR;
   }
-  if (pack.type == Type::ERROR || pack.type == Type::TYPE_NUM || pack.dlc > 8U)
+  if (!detail::IsValidMcanClassicPack(pack))
   {
     return ErrorCode::ARG_ERR;
   }
 
   if (tx_queue_.Push(pack) != ErrorCode::OK)
   {
-    return ErrorCode::FULL;
+    TxService();
+    if (tx_queue_.Push(pack) != ErrorCode::OK)
+    {
+      return ErrorCode::FULL;
+    }
   }
 
   TxService();
@@ -259,7 +310,13 @@ void HPMCAN::ProcessRxFifo(uint32_t fifo_index)
         BuildRxPack(frame, pack);
         OnMessage(pack, true);
       },
-      []() {});
+      [this]()
+      {
+        ClassicPack pack{};
+        pack.type = Type::ERROR;
+        pack.id = FromErrorID(ErrorID::CAN_ERROR_ID_OTHER);
+        OnMessage(pack, true);
+      });
 }
 
 void HPMCAN::ProcessTx() { TxService(); }
@@ -306,7 +363,7 @@ void HPMCAN::ProcessError()
 void HPMCAN::ProcessInterrupt()
 {
   detail::ProcessMcanInterrupt(
-      can_, configured_, true,
+      can_, configured_.load(std::memory_order_acquire), true,
       [this](uint32_t fifo_index, uint32_t, bool) { ProcessRxFifo(fifo_index); },
       [this](bool)
       {
@@ -343,11 +400,6 @@ void HPMCAN::DisableCanInterrupts()
 
 ErrorCode HPMCAN::ApplyMessageBuffer()
 {
-  if (can_ == nullptr || msg_buf_ == nullptr || msg_buf_size_ == 0u)
-  {
-    return ErrorCode::ARG_ERR;
-  }
-
   return detail::ApplyMcanMessageBuffer(can_, msg_buf_, msg_buf_size_);
 }
 
@@ -378,6 +430,10 @@ ErrorCode HPMCAN::GetErrorState(CAN::ErrorState& state) const
   if (can_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
+  }
+  if (!configured_.load(std::memory_order_acquire))
+  {
+    return ErrorCode::INIT_ERR;
   }
 
   return detail::ReadMcanErrorState(can_, state);
