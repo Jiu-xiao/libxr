@@ -92,10 +92,9 @@ namespace LibXR
  * final result through UpdateStatus() or AsyncBlockWait.
  * 异步完成路径的 `dma_done`、`cmpl_done`、`final_status` 和 `should_recover`
  * 原子状态由内部 AsyncCompletionStateMachine helper 统一更新，IRQ 和 DMA 回调只声明
- * 发生的事件。
- * The asynchronous completion atomics `dma_done`, `cmpl_done`, `final_status`, and
- * `should_recover` are updated through the internal AsyncCompletionStateMachine
- * helper, leaving IRQ and DMA callbacks to report events only.
+ * 发生的事件。硬件启动发布前，完成事件只记录而不清理控制器。
+ * The asynchronous completion atomics are updated through the internal state machine.
+ * Completion events are deferred until hardware submission has finished.
  *
  * 当 DMA 后台事务正在进行时，同步 Read / Write / MemRead / MemWrite、顺序
  * SequenceRead / SequenceWrite 以及扩展 flags 手动 phase 入口会返回 `BUSY`；
@@ -332,8 +331,8 @@ class HPMI2C final : public I2C
   /**
    * @brief 执行一段 HPM 扩展标志主机事务 / Execute one HPM master transfer with
    * extended SDK flags.
-   * @param slave_addr 当前寻址模式下的从设备地址，不包含 R/W 位 / Slave address in
-   * the current addressing mode, without the R/W bit.
+   * @param slave_addr 当前寻址模式或 ADDR_10BIT 标志下的从设备地址，不包含 R/W 位 /
+   * Slave address in the active mode, or 10-bit mode when ADDR_10BIT is set.
    * @param data 数据缓冲区；按 flags 指示读或写 / Data buffer used for read or write
    * according to flags.
    * @param flags HPM 扩展事务标志组合 / Combined HPM extended transfer flags.
@@ -347,8 +346,8 @@ class HPMI2C final : public I2C
   /**
    * @brief 执行一段 HPM 扩展标志主机写事务 / Execute one HPM master write transfer
    * with extended SDK flags.
-   * @param slave_addr 当前寻址模式下的从设备地址，不包含 R/W 位 / Slave address in
-   * the current addressing mode, without the R/W bit.
+   * @param slave_addr 当前寻址模式或 ADDR_10BIT 标志下的从设备地址，不包含 R/W 位 /
+   * Slave address in the active mode, or 10-bit mode when ADDR_10BIT is set.
    * @param data 要写出的数据缓冲区 / Data buffer to be transmitted.
    * @param flags HPM 扩展事务标志组合；READ 位若被传入会被忽略 / Combined HPM
    * extended transfer flags. The READ bit is ignored when provided.
@@ -507,10 +506,14 @@ class HPMI2C final : public I2C
   /**
    * @brief 供 DMA / 中断完成路径调用的完成入口 /
    * Completion entry used by DMA / interrupt driven paths.
-   * @param in_isr 当前是否位于中断上下文 / Whether current context is ISR.
-   * @param ans 事务最终错误码 / Final transfer error code.
+   * @param in_isr
+   * 当前是否位于中断上下文 / Whether current context is ISR.
+   * @param ans
+   * 事务最终错误码 / Final transfer error code.
+   * @param force_recover
+   * 无条件执行控制器恢复 / Force controller recovery.
    */
-  void CompleteAsyncTransfer(bool in_isr, ErrorCode ans);
+  void CompleteAsyncTransfer(bool in_isr, ErrorCode ans, bool force_recover = false);
 #endif
 
  private:
@@ -538,6 +541,8 @@ class HPMI2C final : public I2C
         status_success};  ///< DMA/IRQ 共享最终状态 / Final status shared by DMA/IRQ.
     std::atomic<bool> should_recover{
         false};  ///< DMA/IRQ 共享恢复标志 / Recovery flag shared by DMA/IRQ.
+    std::atomic<bool> submission_done{
+        false};  ///< 硬件启动阶段已结束 / Hardware submission phase has finished.
     std::atomic<bool> dma_done{
         false};  ///< DMA 回调完成标志 / DMA callback completion flag.
     std::atomic<bool> cmpl_done{false};  ///< I2C IRQ 完成标志 / I2C IRQ completion flag.
@@ -546,19 +551,21 @@ class HPMI2C final : public I2C
   /**
    * @brief 异步 DMA/I2C 完成状态 helper / Async DMA/I2C completion state helper.
    *
-   * 该 helper 集中更新 `dma_done`、`cmpl_done`、`final_status` 和 `should_recover`，
-   * 使 DMA 回调、I2C IRQ 和 BLOCK timeout 只表达发生的事件。
-   * This helper centralizes updates to `dma_done`, `cmpl_done`, `final_status`, and
-   * `should_recover`, so DMA callbacks, I2C IRQ handling, and BLOCK timeout paths
-   * only report events.
+   * 该 helper 集中更新异步完成原子状态；`submission_done` 在硬件启动完成前阻止清理。
+   * This helper centralizes asynchronous completion state. `submission_done` blocks
+   * cleanup until hardware submission has finished.
    */
   struct AsyncCompletionStateMachine
   {
     static void Reset(AsyncTransferContext& ctx);
+    static void MarkSubmissionDone(AsyncTransferContext& ctx);
     static void MarkDmaDone(AsyncTransferContext& ctx);
     static void MarkI2cDone(AsyncTransferContext& ctx, hpm_stat_t status, bool recover);
     static void MarkFailure(AsyncTransferContext& ctx, hpm_stat_t status, bool recover);
+    static void MarkTerminalFailure(AsyncTransferContext& ctx, hpm_stat_t status,
+                                    bool recover);
     static void SetFinalStatus(AsyncTransferContext& ctx, hpm_stat_t status);
+    static bool SubmissionDone(const AsyncTransferContext& ctx);
     static bool DmaDone(const AsyncTransferContext& ctx);
     static bool Ready(const AsyncTransferContext& ctx);
     static hpm_stat_t FinalStatus(const AsyncTransferContext& ctx);
@@ -601,16 +608,8 @@ class HPMI2C final : public I2C
 #endif
 
   /**
-   * @brief 转换 HPM 顺序分段枚举到 SDK 枚举 / Convert HPM sequence frame enum to SDK
-   * enum.
-   */
-#if LIBXR_HPM_I2C_SUPPORTED
-  static i2c_seq_transfer_opt_t ConvertSequenceFrame(SequenceFrame frame);
-#endif
-
-  /**
-   * @brief 从当前地址模式补齐 HPM SDK 事务标志 / Merge current address-mode bit into SDK
-   * transfer flags.
+   * @brief 从当前地址模式补齐 HPM SDK 事务标志 / Merge current
+   * address-mode bit into SDK transfer flags.
    */
   uint16_t BuildTransferFlags(uint16_t flags) const;
 
@@ -632,11 +631,17 @@ class HPMI2C final : public I2C
   ErrorCode ValidateTransferArgs(uint16_t slave_addr, RawData data,
                                  bool allow_zero_size) const;
 
+  ErrorCode ValidateTransferArgs(uint16_t slave_addr, RawData data, bool allow_zero_size,
+                                 AddressMode mode) const;
+
   /**
    * @brief 校验普通写事务入口参数 / Validate common write entry arguments.
    */
   ErrorCode ValidateTransferArgs(uint16_t slave_addr, ConstRawData data,
                                  bool allow_zero_size) const;
+
+  ErrorCode ValidateTransferArgs(uint16_t slave_addr, ConstRawData data,
+                                 bool allow_zero_size, AddressMode mode) const;
 
   /**
    * @brief 校验寄存器写事务入口参数并解析寄存器地址长度 /
@@ -845,6 +850,12 @@ class HPMI2C final : public I2C
   void HandleAsyncInterrupt(bool in_isr);
 
   /**
+   * @brief 发布硬件启动完成并处理暂存事件 /
+   * Finalize hardware submission and process deferred events.
+   */
+  void FinishAsyncSubmission();
+
+  /**
    * @brief 当 DMA 与 I2C 两阶段都满足时统一完成事务 /
    * Complete the transfer once both DMA and I2C phases are satisfied.
    */
@@ -931,6 +942,28 @@ class HPMI2C final : public I2C
     return ans;
   }
 
+  bool TryAcquireTransaction()
+  {
+    uint32_t expected = 0U;
+    return transaction_busy_.compare_exchange_strong(
+        expected, 1U, std::memory_order_acq_rel, std::memory_order_acquire);
+  }
+
+  void ReleaseTransaction() { transaction_busy_.store(0U, std::memory_order_release); }
+
+  ErrorCode EndTransaction(ErrorCode ans)
+  {
+    ReleaseTransaction();
+    return ans;
+  }
+
+  template <typename Op>
+  ErrorCode EndTransaction(Op& op, bool in_isr, ErrorCode ans)
+  {
+    ReleaseTransaction();
+    return FinishOperation(op, in_isr, ans);
+  }
+
   I2C_Type* i2c_;                 ///< I2C 外设实例 / I2C peripheral instance.
   clock_name_t clock_;            ///< I2C 源时钟名称 / I2C source clock name.
   uint32_t source_clock_hz_ = 0;  ///< 缓存的源时钟频率 / Cached source clock frequency.
@@ -940,7 +973,9 @@ class HPMI2C final : public I2C
       DefaultWaitPolicy();  ///< 当前忙等超时策略 / Current busy-wait timeout policy.
   AddressMode address_mode_ =
       AddressMode::ADDR_7BIT;  ///< 当前主机寻址模式 / Current master addressing mode.
-  bool configured_ = false;    ///< 是否已有成功配置 / Whether a valid config was applied.
+  std::atomic<uint32_t> transaction_busy_{
+      0U};                   ///< 实例事务占用标志 / Instance transaction ownership flag.
+  bool configured_ = false;  ///< 是否已有成功配置 / Whether a valid config was applied.
   uint32_t dma_enable_min_size_ =
       3U;  ///< 启用 DMA 后台路径的最小阈值 / Minimum size threshold for DMA path.
 #if LIBXR_HPM_I2C_HAS_DMA_MGR
