@@ -513,7 +513,7 @@ void IRAM_ATTR ESP32UART::HandleDmaTxError()
     gdma_stop(tx_dma_channel_);
     gdma_reset(tx_dma_channel_);
   }
-  tx_dma_model_.OnTransferDone(true);
+  tx_dma_model_.OnTransferError(true);
 }
 
 }  // namespace LibXR

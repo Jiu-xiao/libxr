@@ -192,10 +192,10 @@ stm32_uart_id_t stm32_uart_get_id(USART_TypeDef* addr)
   }
 }
 
-ErrorCode STM32UART::WriteFun(WritePort& port, bool)
+ErrorCode STM32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &STM32UART::_write_port);
-  return uart->tx_dma_model_.Submit();
+  return uart->tx_dma_model_.Submit(in_isr);
 }
 
 ErrorCode STM32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }

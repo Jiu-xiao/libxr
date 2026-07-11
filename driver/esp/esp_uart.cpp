@@ -282,7 +282,7 @@ ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (uart->dma_backend_enabled_)
   {
-    return uart->tx_dma_model_.Submit();
+    return uart->tx_dma_model_.Submit(in_isr);
   }
 #endif
   return uart->TryStartTx(in_isr);

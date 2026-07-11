@@ -232,10 +232,10 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
 }
 
 // Write callback (DMA-based transfer).
-ErrorCode CH32UART::WriteFun(WritePort& port, bool)
+ErrorCode CH32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &CH32UART::_write_port);
-  return uart->tx_dma_model_.Submit();
+  return uart->tx_dma_model_.Submit(in_isr);
 }
 
 bool CH32UART::StartDmaTx(uint8_t* data, size_t size, int)

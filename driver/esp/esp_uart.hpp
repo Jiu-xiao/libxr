@@ -1,12 +1,11 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "driver/gpio.h"
+#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "flag.hpp"
 #include "hal/uart_hal.h"
@@ -76,7 +75,7 @@ class ESP32UARTReadPort : public ReadPort
 class ESP32UART : public UART
 {
   friend class ESP32UARTReadPort;
-  friend class UartDmaTxModel<ESP32UART, Flag::Atomic>;
+  friend class UartDmaTxModel<ESP32UART>;
 
  public:
   static constexpr int PIN_NO_CHANGE = -1;  ///< Sentinel for an unmapped GPIO.
@@ -352,8 +351,7 @@ class ESP32UART : public UART
 
   ESP32UARTReadPort _read_port;  ///< Read-side queue bridge exposed to `UART`.
   WritePort _write_port;         ///< Write-side queue bridge exposed to `UART`.
-  UartDmaTxModel<ESP32UART, Flag::Atomic>
-      tx_dma_model_;  ///< One-shot DMA TX execution model.
+  UartDmaTxModel<ESP32UART> tx_dma_model_;  ///< One-shot DMA TX execution model.
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   bool dma_backend_enabled_ = false;  ///< UHCI/GDMA backend is active.
