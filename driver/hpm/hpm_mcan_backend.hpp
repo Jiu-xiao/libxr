@@ -10,6 +10,10 @@
 #include "hpm_common.h"
 #include "hpm_soc.h"
 
+#if __has_include("hpm_sdk_version.h")
+#include "hpm_sdk_version.h"
+#endif
+
 #if defined(MCAN_SOC_MAX_COUNT)
 #define LIBXR_HPM_MCAN_INSTANCE_COUNT MCAN_SOC_MAX_COUNT
 #elif defined(HPM_MCAN7)
@@ -164,6 +168,9 @@ inline ErrorCode ConvertMcanStatus(hpm_stat_t status)
     case status_mcan_rxbuf_index_out_of_range:
     case status_mcan_ram_out_of_range:
     case status_mcan_invalid_bit_timing:
+#if defined(SDK_VERSION_NUMBER) && (SDK_VERSION_NUMBER >= 0x010C00U)
+    case status_mcan_txqueue_not_enabled:
+#endif
       return ErrorCode::ARG_ERR;
     case status_mcan_txfifo_full:
     case status_mcan_txbuf_full:
