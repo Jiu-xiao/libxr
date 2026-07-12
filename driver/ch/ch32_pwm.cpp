@@ -1,8 +1,35 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_pwm.hpp"
 
+#include "ch32_gpio.hpp"
+
 namespace LibXR
 {
+
+static inline void ch32_clock_bus1_enable(uint32_t periph)
+{
+  RCC_APB1PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_clock_bus2_enable(uint32_t periph)
+{
+  RCC_APB2PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_enable_afio_clock()
+{
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+}
+
+static inline uint32_t ch32_clock_pclk1(const RCC_ClocksTypeDef& clocks)
+{
+  return clocks.PCLK1_Frequency;
+}
+
+static inline uint32_t ch32_clock_pclk2(const RCC_ClocksTypeDef& clocks)
+{
+  return clocks.PCLK2_Frequency;
+}
 
 CH32PWM::CH32PWM(TIM_TypeDef* tim, uint16_t channel, bool active_high, GPIO_TypeDef* gpio,
                  uint16_t pin, uint32_t pin_remap, bool complementary)
@@ -56,7 +83,7 @@ uint32_t CH32PWM::GetTimerClockHz(TIM_TypeDef* t)
   RCC_GetClocksFreq(&c);
 
   const bool ON_APB2 = OnAPB2(t);
-  const uint32_t PCLK = ON_APB2 ? c.PCLK2_Frequency : c.PCLK1_Frequency;
+  const uint32_t PCLK = ON_APB2 ? ch32_clock_pclk2(c) : ch32_clock_pclk1(c);
   const uint32_t HCLK = c.HCLK_Frequency;
 
   if (PCLK == 0u || HCLK == 0u)
@@ -73,107 +100,130 @@ uint32_t CH32PWM::GetTimerClockHz(TIM_TypeDef* t)
 
 void CH32PWM::EnableGPIOClock(GPIO_TypeDef* gpio)
 {
-  if (gpio == GPIOA)
-  {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
-  }
-  else if (gpio == GPIOB)
-  {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
-  }
-  else if (gpio == GPIOC)
-  {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-  }
-  else if (gpio == GPIOD)
-  {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);
-#if defined(GPIOE)
-  }
-  else if (gpio == GPIOE)
-  {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOE, ENABLE);
-  }
-#endif
+  ch32_clock_bus2_enable(ch32_get_gpio_periph(gpio));
 }
 
 void CH32PWM::EnableTIMClock(TIM_TypeDef* tim)
 {
   // Keep each branch independent so conditional compilation cannot break brace structure.
-#if defined(TIM1) && defined(RCC_APB2Periph_TIM1)
+#if defined(TIM1) && (defined(RCC_APB2Periph_TIM1) || defined(RCC_HB2Periph_TIM1))
   if (tim == TIM1)
   {
+#if defined(RCC_HB2Periph_TIM1)
+    ch32_clock_bus2_enable(RCC_HB2Periph_TIM1);
+#else
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM8) && defined(RCC_APB2Periph_TIM8)
+#if defined(TIM8) && (defined(RCC_APB2Periph_TIM8) || defined(RCC_HB2Periph_TIM8))
   if (tim == TIM8)
   {
+#if defined(RCC_HB2Periph_TIM8)
+    ch32_clock_bus2_enable(RCC_HB2Periph_TIM8);
+#else
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM9) && defined(RCC_APB2Periph_TIM9)
+#if defined(TIM9) && (defined(RCC_APB2Periph_TIM9) || defined(RCC_HB2Periph_TIM9))
   if (tim == TIM9)
   {
+#if defined(RCC_HB2Periph_TIM9)
+    ch32_clock_bus2_enable(RCC_HB2Periph_TIM9);
+#else
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM9, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM10) && defined(RCC_APB2Periph_TIM10)
+#if defined(TIM10) && (defined(RCC_APB2Periph_TIM10) || defined(RCC_HB2Periph_TIM10))
   if (tim == TIM10)
   {
+#if defined(RCC_HB2Periph_TIM10)
+    ch32_clock_bus2_enable(RCC_HB2Periph_TIM10);
+#else
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM10, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM2) && defined(RCC_APB1Periph_TIM2)
+#if defined(TIM2) && (defined(RCC_APB1Periph_TIM2) || defined(RCC_HB1Periph_TIM2))
   if (tim == TIM2)
   {
+#if defined(RCC_HB1Periph_TIM2)
+    ch32_clock_bus1_enable(RCC_HB1Periph_TIM2);
+#else
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM3) && defined(RCC_APB1Periph_TIM3)
+#if defined(TIM3) && (defined(RCC_APB1Periph_TIM3) || defined(RCC_HB1Periph_TIM3))
   if (tim == TIM3)
   {
+#if defined(RCC_HB1Periph_TIM3)
+    ch32_clock_bus1_enable(RCC_HB1Periph_TIM3);
+#else
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM4) && defined(RCC_APB1Periph_TIM4)
+#if defined(TIM4) && (defined(RCC_APB1Periph_TIM4) || defined(RCC_HB1Periph_TIM4))
   if (tim == TIM4)
   {
+#if defined(RCC_HB1Periph_TIM4)
+    ch32_clock_bus1_enable(RCC_HB1Periph_TIM4);
+#else
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM5) && defined(RCC_APB1Periph_TIM5)
+#if defined(TIM5) && (defined(RCC_APB1Periph_TIM5) || defined(RCC_HB1Periph_TIM5))
   if (tim == TIM5)
   {
+#if defined(RCC_HB1Periph_TIM5)
+    ch32_clock_bus1_enable(RCC_HB1Periph_TIM5);
+#else
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM6) && defined(RCC_APB1Periph_TIM6)
+#if defined(TIM6) && (defined(RCC_APB1Periph_TIM6) || defined(RCC_HB1Periph_TIM6))
   if (tim == TIM6)
   {
+#if defined(RCC_HB1Periph_TIM6)
+    ch32_clock_bus1_enable(RCC_HB1Periph_TIM6);
+#else
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM7) && defined(RCC_APB1Periph_TIM7)
+#if defined(TIM7) && (defined(RCC_APB1Periph_TIM7) || defined(RCC_HB1Periph_TIM7))
   if (tim == TIM7)
   {
+#if defined(RCC_HB1Periph_TIM7)
+    ch32_clock_bus1_enable(RCC_HB1Periph_TIM7);
+#else
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM7, ENABLE);
+#endif
     return;
   }
 #endif
-#if defined(TIM12) && defined(RCC_APB1Periph_TIM12)
+#if defined(TIM12) && (defined(RCC_APB1Periph_TIM12) || defined(RCC_HB2Periph_TIM12))
   if (tim == TIM12)
   {
+#if defined(RCC_HB2Periph_TIM12)
+    ch32_clock_bus2_enable(RCC_HB2Periph_TIM12);
+#else
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM12, ENABLE);
+#endif
     return;
   }
 #endif
@@ -195,7 +245,7 @@ void CH32PWM::EnableTIMClock(TIM_TypeDef* tim)
 void CH32PWM::ConfigureGPIO()
 {
   // AFIO 时钟（用于重映射）
-  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+  ch32_enable_afio_clock();
 
   // 需要重映射则打开
   if (pin_remap_ != 0u)
@@ -207,7 +257,7 @@ void CH32PWM::ConfigureGPIO()
   EnableGPIOClock(gpio_);
   GPIO_InitTypeDef io{};
   io.GPIO_Pin = pin_;
-  io.GPIO_Speed = GPIO_Speed_50MHz;
+  io.GPIO_Speed = ch32_gpio_speed_fast();
   io.GPIO_Mode = GPIO_Mode_AF_PP;
   GPIO_Init(gpio_, &io);
 }
@@ -430,7 +480,7 @@ void CH32PWM::EnableChannel(bool en)
       break;
   }
 #else
-    (void)en;
+  (void)en;
 #endif
 }
 

@@ -1,5 +1,5 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
-// ch32_usb_otgfs.cpp  (OTG FS)
+// ch32_usb_otgfs_h41x.cpp  (OTG FS, CH32H41x)
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
 #include "ch32_usb_rcc.hpp"
@@ -8,7 +8,7 @@
 using namespace LibXR;
 using namespace LibXR::USB;
 
-#if defined(USBFSD)
+#if defined(USBFSD) && defined(LIBXR_CH32_IS_H41X)
 
 namespace
 {
@@ -16,16 +16,18 @@ namespace
 constexpr uint8_t OTG_FS_CLEARABLE_MASK = USBFS_UIF_FIFO_OV | USBFS_UIF_HST_SOF |
                                           USBFS_UIF_SUSPEND | USBFS_UIF_TRANSFER |
                                           USBFS_UIF_DETECT | USBFS_UIF_BUS_RST;
+constexpr uint8_t OTG_FS_DEVICE_BASE_CTRL =
+    USBFS_UC_SYS_CTRL1 | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
 
 static void ch32_usbfs_delay_short();
 static void EnableUsbFsControllerClock()
 {
-#if defined(RCC_AHBPeriph_USBFS)
+#if defined(RCC_HBPeriph_OTG_FS)
+  RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
+#elif defined(RCC_AHBPeriph_USBFS)
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
 #elif defined(RCC_AHBPeriph_USBOTGFS)
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBOTGFS, ENABLE);
-#elif defined(RCC_HBPeriph_OTG_FS)
-  RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
 #endif
 }
 
@@ -75,12 +77,12 @@ static void ch32_usbfs_apply_device_registers()
 static void ch32_usbfs_detach_device()
 {
   USBFSD->UDEV_CTRL = 0x00;
-  USBFSD->BASE_CTRL = USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
+  USBFSD->BASE_CTRL = OTG_FS_DEVICE_BASE_CTRL;
 }
 
 static void ch32_usbfs_enable_device_logic()
 {
-  USBFSD->BASE_CTRL = USBFS_UC_DEV_PU_EN | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
+  USBFSD->BASE_CTRL = OTG_FS_DEVICE_BASE_CTRL | USBFS_UC_DEV_PU_EN;
 }
 
 static void ch32_usbfs_enable_device_port()
@@ -197,9 +199,7 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     if (PENDING & USBFS_UIF_BUS_RST)
     {
       USBFSD->DEV_ADDR = 0;
-
-      usb->Deinit(true);
-      usb->Init(true);
+      usb->OnBusReset(true);
       RestoreUsbFsEndpointState();
 
       clear_mask |= USBFS_UIF_BUS_RST;
@@ -207,10 +207,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
 
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      usb->Deinit(true);
-      usb->Init(true);
-      RestoreUsbFsEndpointState();
-
       clear_mask |= USBFS_UIF_SUSPEND;
     }
 
@@ -367,6 +363,6 @@ void CH32USBOtgFS::Stop(bool)
   self_ = nullptr;
 }
 
-#endif  // defined(USBFSD)
+#endif  // defined(USBFSD) && defined(LIBXR_CH32_IS_H41X)
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

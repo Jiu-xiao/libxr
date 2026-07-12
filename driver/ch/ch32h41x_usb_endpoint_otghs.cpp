@@ -1,15 +1,24 @@
+#include "ch32h41x_usb_endpoint_otghs.hpp"
+
 #include <cstdint>
 
-#include "ch32_usb_endpoint.hpp"
 #include "ep.hpp"
 #include "libxr_time.hpp"
 #include "timebase.hpp"
 
 using namespace LibXR;
 
-#if defined(USBHSD)
+#if defined(USBHSD) && defined(LIBXR_CH32_IS_H41X)
 
 // NOLINTBEGIN
+static constexpr bool normalize_h417_device_double_buffer(bool)
+{
+  // CH32H41x RM 25.2.1.21/23/24 exposes one RX DMA and one TX DMA register
+  // per device endpoint. R32_UEP_AF_MODE selects endpoint 1..7 vs 9..15
+  // multiplexing; it is not a device-side double-buffer switch.
+  return false;
+}
+
 static inline volatile uint8_t* get_tx_control_addr(USB::Endpoint::EPNumber ep_num)
 {
   return reinterpret_cast<volatile uint8_t*>(
@@ -73,7 +82,8 @@ static void set_tx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer,
                               uint32_t buffer_size, bool double_buffer)
 {
   uint8_t* buf_base = reinterpret_cast<uint8_t*>(buffer);
-  uint8_t* buf_alt = buf_base + buffer_size / 2;
+  UNUSED(buffer_size);
+  UNUSED(double_buffer);
 
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
@@ -82,20 +92,6 @@ static void set_tx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer,
   else
   {
     *get_tx_dma_addr(ep_num) = (uint32_t)buf_base;
-    if (double_buffer)
-    {
-      *get_rx_dma_addr(ep_num) = (uint32_t)buf_alt;
-    }
-  }
-
-  int IDX = static_cast<int>(ep_num);
-  if (double_buffer && ep_num != USB::Endpoint::EPNumber::EP0)
-  {
-    USBHSD->BUF_MODE |= (1 << IDX);
-  }
-  else
-  {
-    USBHSD->BUF_MODE &= ~(1 << IDX);
   }
 }
 
@@ -103,7 +99,8 @@ static void set_rx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer,
                               uint32_t buffer_size, bool double_buffer)
 {
   uint8_t* buf_base = reinterpret_cast<uint8_t*>(buffer);
-  uint8_t* buf_alt = buf_base + buffer_size / 2;
+  UNUSED(buffer_size);
+  UNUSED(double_buffer);
 
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
@@ -112,265 +109,78 @@ static void set_rx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer,
   else
   {
     *get_rx_dma_addr(ep_num) = (uint32_t)buf_base;
-    if (double_buffer)
-    {
-      *get_tx_dma_addr(ep_num) = (uint32_t)buf_alt;
-    }
   }
+}
 
-  int IDX = static_cast<int>(ep_num);
-  if (double_buffer && ep_num != USB::Endpoint::EPNumber::EP0)
-  {
-    USBHSD->BUF_MODE |= (1 << IDX);
-  }
-  else
-  {
-    USBHSD->BUF_MODE &= ~(1 << IDX);
-  }
+static inline uint16_t ch32h41x_otghs_ep_bit(USB::Endpoint::EPNumber ep_num)
+{
+  return static_cast<uint16_t>(1u << USB::Endpoint::EPNumberToInt8(ep_num));
 }
 
 static void enable_tx(USB::Endpoint::EPNumber ep_num)
 {
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP0_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP1_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP2_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP3_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP4_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP5_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP6_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP7_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP8:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP8_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP9:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP9_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP10:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP10_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP11:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP11_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP12:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP12_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP13:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP13_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP14:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP14_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP15:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP15_T_EN;
-      break;
-    default:
-      break;
-  }
+  USBHSD->UEP_TX_EN |= ch32h41x_otghs_ep_bit(ep_num);
 }
 
 static void disable_tx(USB::Endpoint::EPNumber ep_num)
 {
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP0_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP1_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP2_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP3_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP4_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP5_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP6_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP7_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP8:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP8_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP9:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP9_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP10:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP10_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP11:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP11_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP12:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP12_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP13:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP13_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP14:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP14_T_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP15:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP15_T_EN;
-      break;
-    default:
-      break;
-  }
+  USBHSD->UEP_TX_EN &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(ep_num));
 }
 
 static void enable_rx(USB::Endpoint::EPNumber ep_num)
 {
-  switch (ep_num)
-  {
-    case USB::Endpoint::EPNumber::EP0:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP0_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP1_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP2_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP3_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP4_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP5_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP6_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP7_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP8:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP8_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP9:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP9_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP10:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP10_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP11:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP11_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP12:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP12_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP13:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP13_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP14:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP14_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP15:
-      USBHSD->ENDP_CONFIG |= USBHS_UEP15_R_EN;
-      break;
-    default:
-      break;
-  }
+  USBHSD->UEP_RX_EN |= ch32h41x_otghs_ep_bit(ep_num);
 }
 
 static void disable_rx(USB::Endpoint::EPNumber ep_num)
 {
-  switch (ep_num)
+  USBHSD->UEP_RX_EN &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(ep_num));
+}
+
+static void set_tx_toggle_auto(USB::Endpoint::EPNumber ep_num, bool enable)
+{
+  const uint16_t ep_bit = ch32h41x_otghs_ep_bit(ep_num);
+  if (enable)
   {
-    case USB::Endpoint::EPNumber::EP0:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP0_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP1:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP1_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP2:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP2_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP3:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP3_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP4:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP4_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP5:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP5_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP6:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP6_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP7:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP7_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP8:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP8_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP9:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP9_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP10:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP10_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP11:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP11_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP12:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP12_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP13:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP13_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP14:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP14_R_EN;
-      break;
-    case USB::Endpoint::EPNumber::EP15:
-      USBHSD->ENDP_CONFIG &= ~USBHS_UEP15_R_EN;
-      break;
-    default:
-      break;
+    USBHSD->UEP_TX_TOG_AUTO |= ep_bit;
+  }
+  else
+  {
+    USBHSD->UEP_TX_TOG_AUTO &= static_cast<uint16_t>(~ep_bit);
+  }
+}
+
+static void set_rx_toggle_auto(USB::Endpoint::EPNumber ep_num, bool enable)
+{
+  const uint16_t ep_bit = ch32h41x_otghs_ep_bit(ep_num);
+  if (enable)
+  {
+    USBHSD->UEP_RX_TOG_AUTO |= ep_bit;
+  }
+  else
+  {
+    USBHSD->UEP_RX_TOG_AUTO &= static_cast<uint16_t>(~ep_bit);
   }
 }
 // NOLINTEND
 
-CH32EndpointOtgHs::CH32EndpointOtgHs(EPNumber ep_num, Direction dir,
-                                     LibXR::RawData buffer, bool double_buffer)
-    : Endpoint(ep_num, dir, buffer), hw_double_buffer_(double_buffer), dma_buffer_(buffer)
+CH32H41xEndpointOtgHs::CH32H41xEndpointOtgHs(EPNumber ep_num, Direction dir,
+                                             LibXR::RawData buffer, bool double_buffer)
+    : Endpoint(ep_num, dir, buffer),
+      hw_double_buffer_(normalize_h417_device_double_buffer(double_buffer)),
+      dma_buffer_(buffer)
 {
   map_otg_hs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
   if (dir == Direction::IN)
   {
-    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, double_buffer);
+    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_,
+                      hw_double_buffer_);
   }
   else
   {
-    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, double_buffer);
+    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_,
+                      hw_double_buffer_);
   }
 
   if (dir == Direction::IN)
@@ -384,7 +194,7 @@ CH32EndpointOtgHs::CH32EndpointOtgHs(EPNumber ep_num, Direction dir,
   }
 }
 
-void CH32EndpointOtgHs::Configure(const Config& cfg)
+void CH32H41xEndpointOtgHs::Configure(const Config& cfg)
 {
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
@@ -394,12 +204,18 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   const uint8_t IN_IDX = static_cast<uint8_t>(Direction::IN);
   const uint8_t OUT_IDX = static_cast<uint8_t>(Direction::OUT);
 
-  const bool HAS_IN = (map_otg_hs_[EP_IDX][IN_IDX] != nullptr);
-  const bool HAS_OUT = (map_otg_hs_[EP_IDX][OUT_IDX] != nullptr);
+  const auto* in_ep = map_otg_hs_[EP_IDX][IN_IDX];
+  const auto* out_ep = map_otg_hs_[EP_IDX][OUT_IDX];
+  const bool HAS_IN =
+      (in_ep != nullptr) && (in_ep->GetState() != State::DISABLED || in_ep == this);
+  const bool HAS_OUT =
+      (out_ep != nullptr) && (out_ep->GetState() != State::DISABLED || out_ep == this);
 
   // 双缓冲策略：EP0 不使用 double buffer。
   // Double-buffer policy: EP0 does not use double buffering.
-  bool enable_double = (GetNumber() != EPNumber::EP0) && hw_double_buffer_;
+  // CH32H41x USBHS device mode does not expose a device-side DB selector here:
+  // RM 25.2.1.21 defines UEP_AF_MODE as endpoint 1..7 vs 9..15 multiplexing.
+  bool enable_double = false;
   if (enable_double && HAS_IN && HAS_OUT)
   {
     ASSERT(false);  // 双缓冲端点必须是单向
@@ -423,53 +239,55 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
     ep_cfg.max_packet_size = buffer_size;
   }
 
+  // CH32H41x USBHS examples always publish UEPn_MAX_LEN for every active endpoint,
+  // including IN-only ones. Keep the hardware packet-size image aligned with the
+  // configured endpoint shape before touching direction-specific control bits.
+  // CH32H41x USBHS 官方例程会给每个已用端点都写 UEPn_MAX_LEN，包括仅 IN 端点；
+  // 这里先把硬件里的包长镜像写齐，再处理方向相关控制位。
+  *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
+
   if (GetDirection() == Direction::IN)
   {
-    if (GetType() != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
+    set_tx_toggle_auto(GetNumber(), enable_double && GetType() != Type::ISOCHRONOUS);
+    if (!HAS_OUT)
     {
-      *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_AUTO;
+      set_rx_toggle_auto(GetNumber(), false);
     }
-    else
-    {
-      *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
-    }
+    *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
     set_tx_len(GetNumber(), 0);
   }
   else
   {
-    if (GetType() != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
+    set_rx_toggle_auto(GetNumber(), enable_double && GetType() != Type::ISOCHRONOUS);
+    if (!HAS_IN)
     {
-      *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK | USBHS_UEP_R_TOG_AUTO;
+      set_tx_toggle_auto(GetNumber(), false);
     }
-    else
-    {
-      *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
-    }
-
-    *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
+    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
   }
 
   const int IDX = static_cast<int>(GetNumber());
+  UNUSED(IDX);
   if (GetDirection() == Direction::IN)
   {
     if (GetType() == Type::ISOCHRONOUS)
     {
-      USBHSD->ENDP_TYPE |= (USBHS_UEP0_T_TYPE << IDX);
+      USBHSD->UEP_TX_ISO |= ch32h41x_otghs_ep_bit(GetNumber());
     }
     else
     {
-      USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_T_TYPE << IDX);
+      USBHSD->UEP_TX_ISO &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(GetNumber()));
     }
   }
   else
   {
     if (GetType() == Type::ISOCHRONOUS)
     {
-      USBHSD->ENDP_TYPE |= (USBHS_UEP0_R_TYPE << IDX);
+      USBHSD->UEP_RX_ISO |= ch32h41x_otghs_ep_bit(GetNumber());
     }
     else
     {
-      USBHSD->ENDP_TYPE &= ~(USBHS_UEP0_R_TYPE << IDX);
+      USBHSD->UEP_RX_ISO &= static_cast<uint16_t>(~ch32h41x_otghs_ep_bit(GetNumber()));
     }
   }
 
@@ -506,10 +324,12 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
   SetState(State::IDLE);
 }
 
-void CH32EndpointOtgHs::Close()
+void CH32H41xEndpointOtgHs::Close()
 {
   disable_tx(GetNumber());
   disable_rx(GetNumber());
+  set_tx_toggle_auto(GetNumber(), false);
+  set_rx_toggle_auto(GetNumber(), false);
 
   *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
   *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
@@ -517,7 +337,7 @@ void CH32EndpointOtgHs::Close()
   SetState(State::DISABLED);
 }
 
-ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
+ErrorCode CH32H41xEndpointOtgHs::Transfer(size_t size)
 {
   if (GetState() == State::BUSY)
   {
@@ -574,8 +394,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
     }
     else
     {
-      *addr = (uint8_t)((*addr & ~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MASK)) |
-                        USBHS_UEP_T_TOG_AUTO);
+      *addr = static_cast<uint8_t>((*addr & ~USBHS_UEP_T_TOG_MASK) | USBHS_UEP_T_RES_ACK);
     }
   }
   else
@@ -623,7 +442,7 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgHs::Stall()
+ErrorCode CH32H41xEndpointOtgHs::Stall()
 {
   const bool IS_IN = (GetDirection() == Direction::IN);
   if (GetState() != State::IDLE && !(GetState() == State::BUSY && !IS_IN))
@@ -643,7 +462,7 @@ ErrorCode CH32EndpointOtgHs::Stall()
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgHs::ClearStall()
+ErrorCode CH32H41xEndpointOtgHs::ClearStall()
 {
   if (GetState() != State::STALLED)
   {
@@ -663,7 +482,7 @@ ErrorCode CH32EndpointOtgHs::ClearStall()
   return ErrorCode::OK;
 }
 
-void CH32EndpointOtgHs::TransferComplete(size_t size)
+void CH32H41xEndpointOtgHs::TransferComplete(size_t size)
 {
   const bool IS_IN = (GetDirection() == Direction::IN);
   const bool IS_OUT = !IS_IN;
@@ -676,6 +495,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   if (IS_IN)
   {
     auto* tx_ctrl = get_tx_control_addr(GetNumber());
+    *tx_ctrl &= static_cast<uint8_t>(~USBHS_UEP_T_DONE);
     *tx_ctrl = (*tx_ctrl & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
 
     size = last_transfer_size_;
@@ -691,6 +511,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     // 对 non-EP0 OUT 端点，完成后恢复到 NAK。
     // For non-EP0 OUT endpoints, restore NAK on completion.
     auto* rx_ctrl = get_rx_control_addr(GetNumber());
+    *rx_ctrl &= static_cast<uint8_t>(~USBHS_UEP_R_DONE);
     if (!IS_EP0)
     {
       *rx_ctrl = (*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK;
@@ -701,13 +522,17 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   // TOG mismatch indicates data synchronization failure.
   if (IS_OUT && !IS_EP0)
   {
-    const bool TOG_OK =
-        ((USBHSD->INT_ST & USBHS_UIS_TOG_OK) == USBHS_UIS_TOG_OK);  // NOLINT
-    if (!TOG_OK)
+    auto* rx_ctrl = get_rx_control_addr(GetNumber());
+    const bool tog_match = ((*rx_ctrl & USBHS_UEP_R_TOG_MATCH) == USBHS_UEP_R_TOG_MATCH);
+    if (!tog_match)
     {
+      *rx_ctrl = (*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_ACK;
       SetState(State::IDLE);
-      (void)Transfer(last_transfer_size_);
       return;
+    }
+    if (!UseDoubleBuffer())
+    {
+      *rx_ctrl ^= USBHS_UEP_R_TOG_DATA1;
     }
   }
 
@@ -738,24 +563,36 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
           static_cast<uint8_t>((*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK);
     }
   }
+  else if (IS_IN && !IS_EP0)
+  {
+    if (!UseDoubleBuffer())
+    {
+      auto* tx_ctrl = get_tx_control_addr(GetNumber());
+      *tx_ctrl ^= USBHS_UEP_T_TOG_DATA1;
+    }
+  }
   OnTransferCompleteCallback(true, size);
 }
 
-void CH32EndpointOtgHs::SwitchBuffer()
+void CH32H41xEndpointOtgHs::SwitchBuffer()
 {
+  if (!UseDoubleBuffer())
+  {
+    return;
+  }
   if (GetDirection() == Direction::IN)
   {
     const auto* tx_ctrl = get_tx_control_addr(GetNumber());
-    const bool TOG_IS_DATA1 =
+    const bool tog_is_data1 =
         ((*tx_ctrl & USBHS_UEP_T_TOG_MASK) == USBHS_UEP_T_TOG_DATA1);
-    SetActiveBlock(!TOG_IS_DATA1);
+    SetActiveBlock(!tog_is_data1);
   }
   else
   {
     const auto* rx_ctrl = get_rx_control_addr(GetNumber());
-    const bool TOG_IS_DATA1 =
+    const bool tog_is_data1 =
         ((*rx_ctrl & USBHS_UEP_R_TOG_MASK) == USBHS_UEP_R_TOG_DATA1);
-    SetActiveBlock(TOG_IS_DATA1);
+    SetActiveBlock(tog_is_data1);
   }
 }
 

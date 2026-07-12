@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ch32_def.hpp"
 #include "libxr.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 typedef void (*ch32_dma_callback_t)(void*);
 
@@ -135,6 +135,10 @@ static constexpr IRQn_Type CH32_DMA_IRQ_MAP[] = {
 ch32_dma_channel_t ch32_dma_get_id(DMA_Channel_TypeDef* channel);
 
 DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id);
+
+DMA_TypeDef* ch32_dma_get_controller(DMA_Channel_TypeDef* channel);
+ITStatus ch32_dma_get_it_status(DMA_Channel_TypeDef* channel, uint32_t dma_it);
+void ch32_dma_clear_it_pending(DMA_Channel_TypeDef* channel, uint32_t dma_it);
 
 /**
  * @brief 注册 DMA 回调 / Register DMA callback

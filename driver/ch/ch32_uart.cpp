@@ -8,6 +8,31 @@
 
 using namespace LibXR;
 
+static inline void ch32_clock_bus1_enable(uint32_t periph)
+{
+  RCC_APB1PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_clock_bus2_enable(uint32_t periph)
+{
+  RCC_APB2PeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_clock_ahb_enable(uint32_t periph)
+{
+  RCC_AHBPeriphClockCmd(periph, ENABLE);
+}
+
+static inline void ch32_enable_afio_clock()
+{
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+}
+
+static inline void ch32_dma_set_memory_base(DMA_InitTypeDef& dma, uint32_t addr)
+{
+  dma.DMA_MemoryBaseAddr = addr;
+}
+
 // Static instance map.
 CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
 
@@ -46,11 +71,11 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   /* GPIO配置（TX: 推挽输出，RX: 悬空输入） */
   GPIO_InitTypeDef gpio_init = {};
-  gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
+  gpio_init.GPIO_Speed = ch32_gpio_speed_fast();
 
   if (tx_enable)
   {
-    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(tx_gpio_port), ENABLE);
+    ch32_clock_bus2_enable(ch32_get_gpio_periph(tx_gpio_port));
     gpio_init.GPIO_Pin = tx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_Init(tx_gpio_port, &gpio_init);
@@ -59,7 +84,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
   if (rx_enable)
   {
-    RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(rx_gpio_port), ENABLE);
+    ch32_clock_bus2_enable(ch32_get_gpio_periph(rx_gpio_port));
     gpio_init.GPIO_Pin = rx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(rx_gpio_port, &gpio_init);
@@ -69,24 +94,24 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   /* 可选：引脚重映射 */
   if (pin_remap != 0)
   {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+    ch32_enable_afio_clock();
     GPIO_PinRemapConfig(pin_remap, ENABLE);
   }
 
   /* 串口外设时钟使能 */
   if (CH32_UART_APB_MAP[id] == 1)
   {
-    RCC_APB1PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id], ENABLE);
+    ch32_clock_bus1_enable(CH32_UART_RCC_PERIPH_MAP[id]);
   }
   else if (CH32_UART_APB_MAP[id] == 2)
   {
-    RCC_APB2PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id], ENABLE);
+    ch32_clock_bus2_enable(CH32_UART_RCC_PERIPH_MAP[id]);
   }
   else
   {
     ASSERT(false);
   }
-  RCC_AHBPeriphClockCmd(CH32_UART_RCC_PERIPH_MAP_DMA[id], ENABLE);
+  ch32_clock_ahb_enable(CH32_UART_RCC_PERIPH_MAP_DMA[id]);
 
   // 3. USART 配置
   USART_InitTypeDef usart_cfg = {};
@@ -136,7 +161,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 
     DMA_DeInit(dma_rx_channel_);
     dma_init.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
-    dma_init.DMA_MemoryBaseAddr = (uint32_t)dma_buff_rx_.addr_;
+    ch32_dma_set_memory_base(dma_init, (uint32_t)dma_buff_rx_.addr_);
     dma_init.DMA_DIR = DMA_DIR_PeripheralSRC;
     dma_init.DMA_Mode = DMA_Mode_Circular;
     dma_init.DMA_BufferSize = dma_buff_rx_.size_;
@@ -156,7 +181,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
                                tx_cb_fun, this);
     DMA_DeInit(dma_tx_channel_);
     dma_init.DMA_PeripheralBaseAddr = (u32)(&instance_->DATAR);
-    dma_init.DMA_MemoryBaseAddr = 0;
+    ch32_dma_set_memory_base(dma_init, 0);
     dma_init.DMA_DIR = DMA_DIR_PeripheralDST;
     dma_init.DMA_Mode = DMA_Mode_Normal;
     dma_init.DMA_BufferSize = 0;
@@ -361,7 +386,7 @@ extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 // DMA TX completion interrupt handler.
 extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
 {
-  DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
+  ch32_dma_clear_it_pending(uart->dma_tx_channel_, CH32_UART_TX_DMA_IT_MAP[uart->id_]);
 
   uart->tx_busy_.Clear();
 
@@ -417,7 +442,7 @@ extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
 // DMA channel IRQ callbacks.
 void CH32UART::TxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET)
+  if (ch32_dma_get_it_status(dma_tx_channel_, CH32_UART_TX_DMA_IT_MAP[id_]) == RESET)
   {
     return;
   }
@@ -438,15 +463,15 @@ void CH32UART::TxDmaIRQHandler()
  */
 void CH32UART::RxDmaIRQHandler()
 {
-  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET)
+  if (ch32_dma_get_it_status(dma_rx_channel_, CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET)
   {
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
+    ch32_dma_clear_it_pending(dma_rx_channel_, CH32_UART_RX_DMA_IT_HT_MAP[id_]);
     ch32_uart_rx_isr_handler(this);
   }
 
-  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) == SET)
+  if (ch32_dma_get_it_status(dma_rx_channel_, CH32_UART_RX_DMA_IT_TC_MAP[id_]) == SET)
   {
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
+    ch32_dma_clear_it_pending(dma_rx_channel_, CH32_UART_RX_DMA_IT_TC_MAP[id_]);
     ch32_uart_rx_isr_handler(this);
   }
 }

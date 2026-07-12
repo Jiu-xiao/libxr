@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <cstring>
 
+#include "ch32_def.hpp"
 #include "flash.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 namespace LibXR
 {
@@ -37,6 +37,7 @@ class CH32Flash : public Flash
 
   ErrorCode Erase(size_t offset, size_t size) override;
   ErrorCode Write(size_t offset, ConstRawData data) override;
+  ErrorCode Read(size_t offset, RawData data) override;
 
   static constexpr size_t MinWriteSize()
   {

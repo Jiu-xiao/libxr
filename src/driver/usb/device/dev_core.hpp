@@ -105,6 +105,12 @@ class DeviceCore
    */
   [[nodiscard]] bool IsInited() const { return state_.inited; }
 
+  /**
+   * @brief 处理 USB bus reset / Handle a USB bus reset
+   * @param in_isr 是否在 ISR / Whether in ISR context
+   */
+  void OnBusReset(bool in_isr);
+
  protected:
   /**
    * @brief 设置设备地址（由子类实现）
@@ -131,6 +137,44 @@ class DeviceCore
    * @return true：已启用；false：未启用 / true: enabled; false: disabled
    */
   virtual bool IsRemoteWakeupEnabled() const { return false; }
+
+  /**
+   * @brief 设置 SuperSpeed 设备特性 / Set SuperSpeed device feature
+   */
+  virtual void SetSuperSpeedFeature(uint16_t selector, bool enable)
+  {
+    (void)selector;
+    (void)enable;
+  }
+
+  /**
+   * @brief 获取 SuperSpeed 设备状态位 / Get SuperSpeed device status bits
+   */
+  virtual uint16_t GetSuperSpeedDeviceStatus() const { return 0; }
+
+  /**
+   * @brief 应用 USB 3.0 isochronous delay / Apply USB 3.0 isochronous delay
+   */
+  virtual void SetIsochronousDelay(uint16_t delay) { (void)delay; }
+
+  /**
+   * @brief 处理 USB 3.0 SET_SEL 数据 / Handle USB 3.0 SET_SEL payload
+   */
+  virtual void OnSetSelData(const uint8_t* data, size_t size)
+  {
+    (void)data;
+    (void)size;
+  }
+
+  /**
+   * @brief 配置切换完成后的控制器专有收尾 / Controller-specific hook after
+   *        SET_CONFIGURATION succeeds
+   */
+  virtual void OnConfigurationSwitched(uint16_t value, bool in_isr)
+  {
+    (void)value;
+    (void)in_isr;
+  }
 
   /**
    * @brief 获取设备速度 / Get device speed
@@ -167,6 +211,10 @@ class DeviceCore
   ErrorCode ApplyFeature(const SetupPacket* setup, Recipient recipient);
   ErrorCode SendDescriptor(bool in_isr, const SetupPacket* setup, Recipient recipient);
   ErrorCode PrepareAddressChange(uint16_t address);
+  ErrorCode PrepareSetSel(const SetupPacket* setup, RequestDirection direction,
+                          Recipient recipient);
+  ErrorCode PrepareIsochronousDelay(const SetupPacket* setup, RequestDirection direction,
+                                    Recipient recipient);
   ErrorCode SwitchConfiguration(uint16_t value, bool in_isr);
   ErrorCode SendConfiguration();
 
@@ -183,6 +231,10 @@ class DeviceCore
  private:
   DeviceComposition composition_;  ///< USB 组合管理器 / USB composition manager
   DeviceDescriptor device_desc_;   ///< 设备描述符 / Device descriptor
+  SuperSpeedUsbBosCapability
+      superspeed_bos_capability_{};  ///< SuperSpeed BOS capability / SuperSpeed BOS cap
+  SingleBosCapabilityProvider superspeed_bos_provider_{
+      &superspeed_bos_capability_};  ///< Built-in BOS provider for SuperSpeed devices
 
   struct
   {
@@ -206,7 +258,12 @@ class DeviceCore
     uint8_t* out0_buffer = nullptr;         ///< EP0 OUT 缓冲区 / EP0 OUT buffer
     bool need_write_zlp = false;            ///< 是否需要发送 ZLP / Whether to send ZLP
     bool status_out_armed =
-        false;  ///< STATUS OUT 已经预先挂起 / STATUS OUT already armed
+        false;                     ///< STATUS OUT 已经预先挂起 / STATUS OUT already armed
+    bool set_sel_pending = false;  ///< 是否等待 SET_SEL 数据完成 / Waiting SET_SEL data
+    bool pending_isoch_delay_valid =
+        false;                         ///< 是否等待应用 isoch delay / Pending isoch delay
+    uint16_t pending_isoch_delay = 0;  ///< 待应用的 isoch delay / Pending isoch delay
+    uint8_t set_sel_data[SET_SEL_DATA_SIZE] = {};  ///< SET_SEL data scratch
   } state_;
 
   struct

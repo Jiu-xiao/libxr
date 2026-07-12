@@ -338,6 +338,8 @@ LIBXR_PACKED_END
     if (image_.ready)
     {
       image_.launch_requested = true;
+      image_.launch_request_time_ms =
+          static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
       return true;
     }
     return false;
@@ -352,12 +354,19 @@ LIBXR_PACKED_END
     if (autorun_ && image_.ready)
     {
       image_.launch_requested = true;
+      image_.launch_request_time_ms =
+          static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
     }
   }
 
-  bool TryConsumeAppLaunch(uint32_t)
+  bool TryConsumeAppLaunch(uint32_t now_ms)
   {
     if (!image_.launch_requested || !image_.ready)
+    {
+      return false;
+    }
+    if (static_cast<uint32_t>(now_ms - image_.launch_request_time_ms) <
+        kLaunchDelayAfterRequestMs)
     {
       return false;
     }
@@ -414,6 +423,7 @@ LIBXR_PACKED_END
     image_.ready = false;
     image_.stored_size = 0u;
     image_.launch_requested = false;
+    image_.launch_request_time_ms = 0u;
   }
 
   void ResetTransferState()
@@ -438,6 +448,12 @@ LIBXR_PACKED_END
   // blocks that still need erase are reported slower than pure program-only writes.
   uint32_t ComputeWritePollTimeout(size_t offset, size_t len) const
   {
+    // H41x flash program/erase temporarily blocks the USB control path while
+    // the hot path runs with interrupts disabled. Report a conservative host
+    // poll timeout so GETSTATUS does not race the first large sector erase.
+    static constexpr uint32_t kProgramPollTimeoutMs = 20u;
+    static constexpr uint32_t kErasePollTimeoutMs = 200u;
+
     const size_t first_block = offset / erase_block_size_;
     const size_t last_block = (offset + len - 1u) / erase_block_size_;
     for (size_t block = first_block; block <= last_block && block < erase_block_count_;
@@ -445,10 +461,10 @@ LIBXR_PACKED_END
     {
       if (erased_blocks_[block] == 0u)
       {
-        return 25u;
+        return kErasePollTimeoutMs;
       }
     }
-    return 10u;
+    return kProgramPollTimeoutMs;
   }
 
   // 执行一次延迟写入步骤：
@@ -508,6 +524,7 @@ LIBXR_PACKED_END
     image_.stored_size = download_.received_bytes;
     image_.ready = true;
     image_.launch_requested = false;
+    image_.launch_request_time_ms = 0u;
     manifest_.last_status = DFUStatusCode::OK;
     download_.session_started = false;
     download_.received_bytes = 0u;
@@ -663,7 +680,10 @@ LIBXR_PACKED_END
     bool launch_requested = false;
     bool ready = false;
     size_t stored_size = 0u;
+    uint32_t launch_request_time_ms = 0u;
   };
+
+  static constexpr uint32_t kLaunchDelayAfterRequestMs = 50u;
 
   /**
    * @brief Download 会话状态 / Download session state
@@ -694,7 +714,7 @@ LIBXR_PACKED_END
   struct ManifestState
   {
     bool pending = false;
-    uint32_t poll_timeout_ms = 50u;
+    uint32_t poll_timeout_ms = 250u;
     DFUStatusCode last_status = DFUStatusCode::OK;
   };
 
@@ -842,7 +862,7 @@ LIBXR_PACKED_END
       uint8_t winusb_vendor_code = DEFAULT_WINUSB_VENDOR_CODE)
       : DfuInterfaceClassBase(interface_string, webusb_landing_page_url,
                               webusb_vendor_code, winusb_device_interface_guid,
-                              winusb_vendor_code),
+                              winusb_vendor_code, WinUsbMsOs20Scope::DEVICE),
         backend_(backend)
   {
   }
@@ -902,9 +922,13 @@ LIBXR_PACKED_END
   size_t GetMaxConfigSize() override { return sizeof(desc_block_); }
   ErrorCode WriteDeviceDescriptor(DeviceDescriptor& header) override
   {
-    header.data_.bDeviceClass = DeviceDescriptor::ClassID::APPLICATION_SPECIFIC;
-    header.data_.bDeviceSubClass = INTERFACE_SUB_CLASS;
-    header.data_.bDeviceProtocol = INTERFACE_PROTOCOL;
+    // Keep the device descriptor classless and let the DFU interface descriptor
+    // carry the class/subclass/protocol identity. This matches the working
+    // runtime composite path and avoids relying on Windows to accept a
+    // whole-device DFU class declaration for an EP0-only device.
+    header.data_.bDeviceClass = DeviceDescriptor::ClassID::PER_INTERFACE;
+    header.data_.bDeviceSubClass = 0u;
+    header.data_.bDeviceProtocol = 0u;
     return ErrorCode::OK;
   }
 

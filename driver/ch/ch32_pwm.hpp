@@ -1,8 +1,7 @@
 #pragma once
 
 #include "pwm.hpp"
-
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
+#include "ch32_def.hpp"
 
 namespace LibXR
 {
