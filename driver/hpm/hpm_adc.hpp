@@ -4,14 +4,14 @@
 #include <initializer_list>
 
 #include "adc.hpp"
+#include "hpm_adc_v2.h"
 #include "hpm_clock_drv.h"
 #include "hpm_soc.h"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 
-#if defined(HPMSOC_HAS_HPMSDK_ADC16) && __has_include("hpm_adc16_drv.h")
+#if __has_include("hpm_adc_v2.h")
 #define LIBXR_HPM_ADC_SUPPORTED 1
-#include "hpm_adc16_drv.h"
 #else
 #define LIBXR_HPM_ADC_SUPPORTED 0
 #endif
@@ -43,10 +43,10 @@ class HPMADC
     friend class HPMADC;
   };
 
-  HPMADC(ADC16_Type* adc, clock_name_t clock, std::initializer_list<uint8_t> channels,
+  HPMADC(adc_v2_handle_t adc, clock_name_t clock, std::initializer_list<uint8_t> channels,
          float vref, uint32_t sample_cycle = 20U,
-         adc16_resolution_t resolution = adc16_res_16_bits,
-         adc16_clock_divider_t clock_divider = adc16_clock_divider_4,
+         adc_v2_resolution_bits_t resolution = adc_v2_resolution_16bit,
+         uint8_t clock_divider = 4U,
          bool auto_board_init = true, uint8_t filter_size = 1U);
 
   Channel& GetChannel(uint8_t index);
@@ -58,10 +58,10 @@ class HPMADC
   bool IsValid() const { return valid_; }
 
  private:
-  static float ResolutionMax(adc16_resolution_t resolution);
+  static float ResolutionMax(adc_v2_resolution_bits_t resolution);
 
-  bool Init(uint32_t sample_cycle, adc16_resolution_t resolution,
-            adc16_clock_divider_t clock_divider, bool auto_board_init);
+  bool Init(uint32_t sample_cycle, adc_v2_resolution_bits_t resolution,
+            uint8_t clock_divider, bool auto_board_init);
 
   float ConvertToVoltage(float adc_value) const;
 
@@ -73,7 +73,7 @@ class HPMADC
 #endif
 
   alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<uint32_t> locked_ = 0U;
-  ADC16_Type* adc_;
+  adc_v2_handle_t adc_;
   clock_name_t clock_;
   const uint8_t NUM_CHANNELS;
   Channel channels_[MAX_CHANNELS];
