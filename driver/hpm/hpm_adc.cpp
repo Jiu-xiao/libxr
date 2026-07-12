@@ -15,6 +15,7 @@ constexpr uint32_t READ_RETRY_COUNT = 1024U;
 }  // namespace
 
 extern "C" void __attribute__((weak)) board_init_adc16_pins(void) {}
+extern "C" void __attribute__((weak)) board_init_adc12_pins(void) {}
 extern "C" uint32_t __attribute__((weak)) board_init_adc_clock(void* ptr,
                                                                bool clk_src_bus)
 {
@@ -148,7 +149,14 @@ bool HPMADC::Init(uint32_t sample_cycle, adc_v2_resolution_bits_t resolution,
 
   if (auto_board_init)
   {
-    board_init_adc16_pins();
+    if (hpm_adc_v2_get_ip_type(adc_) == adc_v2_ip_adc12)
+    {
+      board_init_adc12_pins();
+    }
+    else
+    {
+      board_init_adc16_pins();
+    }
   }
 
   const uint32_t clock_hz =

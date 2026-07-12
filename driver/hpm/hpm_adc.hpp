@@ -45,7 +45,7 @@ class HPMADC
 
   HPMADC(adc_v2_handle_t adc, clock_name_t clock, std::initializer_list<uint8_t> channels,
          float vref, uint32_t sample_cycle = 20U,
-         adc_v2_resolution_bits_t resolution = adc_v2_resolution_16bit,
+         adc_v2_resolution_bits_t resolution = adc_v2_resolution_12bit,
          uint8_t clock_divider = 4U, bool auto_board_init = true,
          uint8_t filter_size = 1U);
 
