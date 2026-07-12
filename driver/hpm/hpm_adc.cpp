@@ -140,8 +140,8 @@ float HPMADC::ResolutionMax(adc_v2_resolution_bits_t resolution)
 bool HPMADC::Init(uint32_t sample_cycle, adc_v2_resolution_bits_t resolution,
                   uint8_t clock_divider, bool auto_board_init)
 {
-  if ((hpm_adc_v2_get_ip_type(adc_) == adc_v2_ip_unknown) ||
-      (NUM_CHANNELS == 0U) || (sample_cycle == 0U))
+  if ((hpm_adc_v2_get_ip_type(adc_) == adc_v2_ip_unknown) || (NUM_CHANNELS == 0U) ||
+      (sample_cycle == 0U))
   {
     return false;
   }
@@ -151,7 +151,8 @@ bool HPMADC::Init(uint32_t sample_cycle, adc_v2_resolution_bits_t resolution,
     board_init_adc16_pins();
   }
 
-  const uint32_t clock_hz = board_init_adc_clock(reinterpret_cast<void*>(adc_.base), true);
+  const uint32_t clock_hz =
+      board_init_adc_clock(reinterpret_cast<void*>(adc_.base), true);
   if (clock_hz == 0U)
   {
     clock_add_to_group(clock_, 0);
