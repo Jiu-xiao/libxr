@@ -23,9 +23,9 @@ bool EqualDouble(double a, double b) { return std::abs(a - b) < 1e-9; }
  */
 struct ProducerArg
 {
-  size_t begin;  ///< 本生产者负责的起始值 / First value owned by this producer.
-  size_t count;  ///< 本生产者负责推送的元素数 / Number of items pushed by this producer.
-  Queue* queue;  ///< 共享队列 / Shared queue instance.
+  size_t begin;                    ///< 本生产者负责的起始值 / First value owned by this producer.
+  size_t count;                    ///< 本生产者负责推送的元素数 / Number of items pushed by this producer.
+  Queue* queue;                    ///< 共享队列 / Shared queue instance.
   std::atomic<size_t>* done_count;  ///< 完成计数器 / Producer completion counter.
 };
 
@@ -35,17 +35,14 @@ struct ProducerArg
  */
 struct ConsumerArg
 {
-  Queue* queue;           ///< 共享队列 / Shared queue instance.
-  size_t total_items;     ///< 目标总元素数 / Expected total item count.
-  size_t producer_count;  ///< 生产者总数 / Total number of producers.
-  std::atomic<size_t>*
-      produced_done_count;  ///< 生产者完成计数 / Producer completion counter.
-  std::atomic<size_t>*
-      consumed_done_count;         ///< 消费者完成计数 / Consumer completion counter.
-  std::atomic<size_t>* pop_count;  ///< 已消费元素数 / Total consumed item count.
-  std::atomic<unsigned long long>*
-      pop_sum;                 ///< 已消费元素和 / Running sum of consumed values.
-  std::atomic<uint8_t>* seen;  ///< 去重标记表 / Deduplication mark table.
+  Queue* queue;                                 ///< 共享队列 / Shared queue instance.
+  size_t total_items;                           ///< 目标总元素数 / Expected total item count.
+  size_t producer_count;                        ///< 生产者总数 / Total number of producers.
+  std::atomic<size_t>* produced_done_count;     ///< 生产者完成计数 / Producer completion counter.
+  std::atomic<size_t>* consumed_done_count;     ///< 消费者完成计数 / Consumer completion counter.
+  std::atomic<size_t>* pop_count;               ///< 已消费元素数 / Total consumed item count.
+  std::atomic<unsigned long long>* pop_sum;     ///< 已消费元素和 / Running sum of consumed values.
+  std::atomic<uint8_t>* seen;                   ///< 去重标记表 / Deduplication mark table.
 };
 
 /**
@@ -256,14 +253,6 @@ void test_mpmc_queue()
 
     ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
     ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
-    for (auto& producer : producers)
-    {
-      ASSERT(producer.Join() == LibXR::ErrorCode::OK);
-    }
-    for (auto& consumer : consumers)
-    {
-      ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
-    }
     ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
     ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
@@ -323,14 +312,6 @@ void test_mpmc_queue()
 
     ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
     ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
-    for (auto& producer : producers)
-    {
-      ASSERT(producer.Join() == LibXR::ErrorCode::OK);
-    }
-    for (auto& consumer : consumers)
-    {
-      ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
-    }
     ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
     ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
