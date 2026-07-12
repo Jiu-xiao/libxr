@@ -183,6 +183,12 @@ class Thread
   static void Yield();
 
   /**
+   * @brief Waits for this POSIX thread to terminate and releases its resources.
+   * @return `OK` on success, otherwise `FAILED`.
+   */
+  ErrorCode Join();
+
+  /**
    * @brief  线程对象转换为 POSIX 线程句柄
    *         Converts the thread object to a POSIX thread handle
    * @return POSIX 线程句柄 POSIX thread handle

@@ -33,8 +33,7 @@ inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
-  UNUSED(thread);
-  LibXR::Thread::Sleep(1);
+  ASSERT(thread.Join() == LibXR::ErrorCode::OK);
 }
 
 /**

@@ -253,6 +253,14 @@ void test_mpmc_queue()
 
     ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
     ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
+    for (auto& producer : producers)
+    {
+      ASSERT(producer.Join() == LibXR::ErrorCode::OK);
+    }
+    for (auto& consumer : consumers)
+    {
+      ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
+    }
     ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
     ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
@@ -312,6 +320,14 @@ void test_mpmc_queue()
 
     ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
     ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
+    for (auto& producer : producers)
+    {
+      ASSERT(producer.Join() == LibXR::ErrorCode::OK);
+    }
+    for (auto& consumer : consumers)
+    {
+      ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
+    }
     ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
     ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);

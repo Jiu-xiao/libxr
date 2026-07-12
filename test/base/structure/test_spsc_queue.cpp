@@ -291,6 +291,7 @@ void test_spsc_queue()
     {
       LibXR::Thread::Yield();
     }
+    ASSERT(producer.Join() == LibXR::ErrorCode::OK);
     uint32_t value = 0;
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
     ASSERT(queue.Size() == 0);
