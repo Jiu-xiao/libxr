@@ -18,6 +18,8 @@ constexpr uint32_t EVENT_WRITE = 1U << 0U;
 constexpr uint32_t EVENT_COMPLETE = 1U << 1U;
 constexpr uint32_t EVENT_ERROR = 1U << 2U;
 constexpr uint32_t EVENT_KICK = 1U << 3U;
+constexpr uint32_t EVENT_HIGHEST = 1U << 30U;
+constexpr uint32_t OWNER_RESERVED = 1U << 31U;
 constexpr uint32_t WAIT_TIMEOUT_MS = 1000U;
 
 template <typename Predicate>
@@ -69,7 +71,18 @@ void TestBasicReentryAndZeroMask()
   ASSERT(handler.max_depth == 1U);
   ASSERT(handler.observed == (EVENT_WRITE | EVENT_COMPLETE));
   ASSERT(!service.Invoke(0U, handler));
+  ASSERT(!service.Invoke(OWNER_RESERVED, handler));
+  ASSERT(!service.Invoke(OWNER_RESERVED | EVENT_WRITE, handler));
   ASSERT(handler.calls == 2U);
+}
+
+void TestHighestEventBit()
+{
+  LibXR::SerializedService service;
+  uint32_t observed = 0U;
+  ASSERT(service.Invoke(EVENT_HIGHEST,
+                        [&](uint32_t events) noexcept { observed = events; }));
+  ASSERT(observed == EVENT_HIGHEST);
 }
 
 void TestEveryEventCombinationIsPreserved()
@@ -250,6 +263,7 @@ void TestConcurrentReleaseReacquireStress()
 void test_serialized_service()
 {
   TestBasicReentryAndZeroMask();
+  TestHighestEventBit();
   TestEveryEventCombinationIsPreserved();
   TestCoalescingAndLoserHandlerIsolation();
   TestPublicationVisibilityThroughPendingEvent();
