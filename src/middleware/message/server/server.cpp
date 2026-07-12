@@ -10,8 +10,7 @@
 using namespace LibXR;
 
 Topic::Server::Server(size_t buffer_length)
-    : topic_map_([](const uint32_t& a, const uint32_t& b)
-                 { return static_cast<int>(a) - static_cast<int>(b); }),
+    : topic_map_([](const uint32_t& a, const uint32_t& b) { return (a > b) - (a < b); }),
       queue_(1, buffer_length)
 {
   ASSERT(buffer_length > PACK_BASE_SIZE);
