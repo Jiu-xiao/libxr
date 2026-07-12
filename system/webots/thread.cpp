@@ -12,6 +12,12 @@ extern condition_var_handle* _libxr_webots_time_notify;
 
 Thread Thread::Current(void) { return Thread(pthread_self()); }
 
+ErrorCode Thread::Join()
+{
+  return pthread_join(thread_handle_, nullptr) == 0 ? ErrorCode::OK
+                                                    : ErrorCode::FAILED;
+}
+
 static ErrorCode ConditionVarWait(uint32_t timeout)
 {
   const uint64_t deadline_ms = MonotonicTime::NowMilliseconds() + timeout;

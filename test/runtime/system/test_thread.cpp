@@ -38,7 +38,7 @@ void test_thread()
       "test_task", 512, LibXR::Thread::Priority::REALTIME);
 
   ASSERT(sem.Wait(200) == LibXR::ErrorCode::OK);
-  LibXR::Thread::Sleep(1);
+  ASSERT(thread.Join() == LibXR::ErrorCode::OK);
 
   const uint32_t sleep_start_ms = LibXR::Thread::GetTime();
   LibXR::Thread::Sleep(20);

@@ -112,11 +112,7 @@ void TestSyncSubscriberFreshWait()
            LibXR::Topic::SyncBlock::WAITING);
     ASSERT(suber.Wait(0) == LibXR::ErrorCode::BUSY);
     publish();
-    for (uint32_t i = 0; i < 1000000 && ctx.result != LibXR::ErrorCode::OK; i++)
-    {
-      LibXR::Thread::Yield();
-    }
-    LibXR::Thread::Sleep(1);
+    ASSERT(wait_thread.Join() == LibXR::ErrorCode::OK);
     ASSERT(ctx.result == LibXR::ErrorCode::OK);
   };
 

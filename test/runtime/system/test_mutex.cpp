@@ -67,7 +67,7 @@ void test_mutex()
   mutex.Unlock();
 
   ASSERT(done.Wait(500) == LibXR::ErrorCode::OK);
-  LibXR::Thread::Sleep(1);
+  ASSERT(waiter.Join() == LibXR::ErrorCode::OK);
   ASSERT(acquired.load(std::memory_order_acquire));
 
   ASSERT(mutex.TryLock() == LibXR::ErrorCode::OK);

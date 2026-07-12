@@ -89,7 +89,12 @@ class RawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  RawData(char* data) : addr_(data), size_(data != nullptr ? std::strlen(data) : 0) {}
+  template <typename CharPtr>
+    requires(std::is_same_v<std::remove_cvref_t<CharPtr>, char*>)
+  RawData(CharPtr&& data)
+      : addr_(data), size_(data != nullptr ? std::strlen(data) : 0)
+  {
+  }
 
   /**
    * @brief 从可写字符数组构造文本视图 / Construct a text view from a writable char array
@@ -200,12 +205,12 @@ class ConstRawData
    *             A C-style string pointer.
    */
   template <typename CharPtr>
-    requires(std::is_pointer_v<std::remove_reference_t<CharPtr>> &&
+    requires(std::is_pointer_v<std::remove_cvref_t<CharPtr>> &&
              std::is_same_v<std::remove_cv_t<
-                                std::remove_pointer_t<std::remove_reference_t<CharPtr>>>,
+                                std::remove_pointer_t<std::remove_cvref_t<CharPtr>>>,
                             char> &&
-             !std::is_volatile_v<std::remove_pointer_t<std::remove_reference_t<CharPtr>>>)
-  ConstRawData(CharPtr data)
+             !std::is_volatile_v<std::remove_pointer_t<std::remove_cvref_t<CharPtr>>>)
+  ConstRawData(CharPtr&& data)
       : addr_(data),
         size_(data != nullptr ? std::strlen(static_cast<const char*>(data)) : 0)
   {

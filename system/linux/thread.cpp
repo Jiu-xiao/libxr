@@ -38,3 +38,9 @@ uint32_t Thread::GetTime()
 }
 
 void Thread::Yield() { sched_yield(); }
+
+ErrorCode Thread::Join()
+{
+  return pthread_join(thread_handle_, nullptr) == 0 ? ErrorCode::OK
+                                                    : ErrorCode::FAILED;
+}
