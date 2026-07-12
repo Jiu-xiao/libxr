@@ -1,11 +1,10 @@
 #pragma once
 
 #include <climits>
-
 #include <cstring>
 
-#include "libxr_system.hpp"
 #include "libxr_mem.hpp"
+#include "libxr_system.hpp"
 #include "libxr_time.hpp"
 #include "logger.hpp"
 
@@ -36,14 +35,14 @@ class Thread
    * @brief  默认构造函数，初始化空线程
    *         Default constructor initializing an empty thread
    */
-  Thread(){};
+  Thread() {};
 
   /**
    * @brief  通过 POSIX 线程句柄创建线程对象
    *         Constructor to create a thread object from a POSIX thread handle
    * @param  handle POSIX 线程句柄 POSIX thread handle
    */
-  Thread(libxr_thread_handle handle) : thread_handle_(handle){};
+  Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
 
   /**
    * @brief  创建新线程
@@ -66,7 +65,7 @@ class Thread
    * accordingly.
    */
   template <typename ArgType>
-  void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
+  void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
               size_t stack_depth, Thread::Priority priority)
   {
     pthread_attr_t attr;
@@ -87,9 +86,8 @@ class Thread
        * @param  arg 线程参数 Thread argument
        * @param  name 线程名称 Thread name
        */
-      ThreadBlock(decltype(function) fun, ArgType arg, const char *name)
-          : fun_(fun),
-            arg_(arg)
+      ThreadBlock(decltype(function) fun, ArgType arg, const char* name)
+          : fun_(fun), arg_(arg)
       {
         std::memset(name_, 0, sizeof(name_));
         if (name != nullptr)
@@ -105,9 +103,9 @@ class Thread
        * @return 返回值始终为 `nullptr`
        *         The return value is always `nullptr`
        */
-      static void *Port(void *arg)
+      static void* Port(void* arg)
       {
-        ThreadBlock *block = static_cast<ThreadBlock *>(arg);
+        ThreadBlock* block = static_cast<ThreadBlock*>(arg);
 
         if (block->name_[0] != '\0')
         {
@@ -116,12 +114,12 @@ class Thread
 
         block->fun_(block->arg_);
         delete block;
-        return static_cast<void *>(nullptr);
+        return static_cast<void*>(nullptr);
       }
 
       decltype(function) fun_;  ///< 线程执行的函数 Function executed by the thread
-      ArgType arg_;  ///< 线程函数的参数 Argument passed to the thread function
-      char name_[16];  ///< 线程名称 Thread name
+      ArgType arg_;             ///< 线程函数的参数 Argument passed to the thread function
+      char name_[16];           ///< 线程名称 Thread name
     };
 
     auto block = new ThreadBlock(function, arg, name);
@@ -174,13 +172,19 @@ class Thread
    * @param  last_waskup_time 上次唤醒时间 Last wake-up time
    * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
    */
-  static void SleepUntil(MillisecondTimestamp &last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程
    *         Yields CPU execution to allow other threads to run
    */
   static void Yield();
+
+  /**
+   * @brief Waits for this POSIX thread to terminate and releases its resources.
+   * @return `OK` on success, otherwise `FAILED`.
+   */
+  ErrorCode Join();
 
   /**
    * @brief  线程对象转换为 POSIX 线程句柄
@@ -193,7 +197,8 @@ class Thread
   static void ConfigureAttributes(pthread_attr_t& attr, size_t stack_depth,
                                   Thread::Priority priority)
   {
-    const size_t stack_size = LibXR::max(static_cast<size_t>(PTHREAD_STACK_MIN), stack_depth);
+    const size_t stack_size =
+        LibXR::max(static_cast<size_t>(PTHREAD_STACK_MIN), stack_depth);
     pthread_attr_setstacksize(&attr, stack_size);
     ConfigureScheduling(attr, priority);
   }

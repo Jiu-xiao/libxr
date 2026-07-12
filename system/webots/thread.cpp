@@ -12,6 +12,11 @@ extern condition_var_handle* _libxr_webots_time_notify;
 
 Thread Thread::Current(void) { return Thread(pthread_self()); }
 
+ErrorCode Thread::Join()
+{
+  return pthread_join(thread_handle_, nullptr) == 0 ? ErrorCode::OK : ErrorCode::FAILED;
+}
+
 static ErrorCode ConditionVarWait(uint32_t timeout)
 {
   const uint64_t deadline_ms = MonotonicTime::NowMilliseconds() + timeout;
@@ -57,6 +62,9 @@ void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to
   }
 }
 
-uint32_t Thread::GetTime() { return static_cast<uint32_t>(MonotonicTime::NowMilliseconds()); }
+uint32_t Thread::GetTime()
+{
+  return static_cast<uint32_t>(MonotonicTime::NowMilliseconds());
+}
 
 void Thread::Yield() { sched_yield(); }
