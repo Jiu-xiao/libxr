@@ -3,7 +3,7 @@
 #include "cdc_uart.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_rw.hpp"
-#include "uart/uart.hpp"
+#include "uart.hpp"
 
 namespace LibXR::USB
 {

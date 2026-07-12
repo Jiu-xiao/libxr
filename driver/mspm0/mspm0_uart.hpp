@@ -3,7 +3,7 @@
 #include <ti/driverlib/dl_uart_main.h>
 
 #include "ti_msp_dl_config.h"
-#include "uart/uart.hpp"
+#include "uart.hpp"
 
 namespace LibXR
 {

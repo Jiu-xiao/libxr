@@ -11,9 +11,9 @@
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "stm32_dcache.hpp"
-#include "uart/uart.hpp"
-#include "uart/uart_circular_dma_rx_model.hpp"
-#include "uart/uart_dma_tx_model.hpp"
+#include "uart.hpp"
+#include "model/uart_circular_dma_rx_model.hpp"
+#include "model/uart_dma_tx_model.hpp"
 
 typedef enum : uint8_t
 {

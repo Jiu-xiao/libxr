@@ -6,9 +6,9 @@
 #include "ch32_uart_def.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-#include "uart/uart.hpp"
-#include "uart/uart_circular_dma_rx_model.hpp"
-#include "uart/uart_dma_tx_model.hpp"
+#include "uart.hpp"
+#include "model/uart_circular_dma_rx_model.hpp"
+#include "model/uart_dma_tx_model.hpp"
 
 namespace LibXR
 {

@@ -21,7 +21,7 @@
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "semaphore.hpp"
-#include "uart/uart.hpp"
+#include "uart.hpp"
 
 namespace LibXR
 {

@@ -3,7 +3,7 @@
 
 #include "dev_core.hpp"
 #include "libxr_def.hpp"
-#include "uart/uart.hpp"
+#include "uart.hpp"
 #include "usb/core/desc_cfg.hpp"
 
 namespace LibXR::USB

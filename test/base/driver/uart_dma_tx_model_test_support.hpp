@@ -9,7 +9,7 @@
 
 #include "../../common/rw/rw_mode_test_common.hpp"
 #include "test.hpp"
-#include "uart/uart_dma_tx_model.hpp"
+#include "model/uart_dma_tx_model.hpp"
 
 namespace LibXRTest::UartDmaTx
 {

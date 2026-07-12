@@ -31,7 +31,7 @@
 #include "queue.hpp"
 #include "ramfs.hpp"
 #include "semaphore.hpp"
-#include "serialized_service.hpp"
+#include "model/serialized_service.hpp"
 #include "stack.hpp"
 #include "terminal.hpp"
 #include "thread.hpp"

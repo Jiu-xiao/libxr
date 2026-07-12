@@ -8,7 +8,7 @@
 #include "esp_tx_double_buffer.hpp"
 #include "flag.hpp"
 #include "soc/soc_caps.h"
-#include "uart/uart.hpp"
+#include "uart.hpp"
 
 #if SOC_USB_SERIAL_JTAG_SUPPORTED &&                                      \
     ((defined(CONFIG_IDF_TARGET_ESP32C3) && CONFIG_IDF_TARGET_ESP32C3) || \

@@ -12,8 +12,8 @@
 #include "hal/uart_types.h"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
-#include "uart/uart.hpp"
-#include "uart/uart_dma_tx_model.hpp"
+#include "uart.hpp"
+#include "model/uart_dma_tx_model.hpp"
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
 #include "esp_private/gdma.h"
