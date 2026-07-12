@@ -5,8 +5,10 @@
  *          1. 提供零长度写请求的完成与后续通路验证 helper。
  *          2. 提供零长度读请求的完成与后续通路验证 helper。
  *          Test items:
- *          1. Provide helpers for zero-length write completion and follow-up transport checks.
- *          2. Provide helpers for zero-length read completion and follow-up transport checks.
+ *          1. Provide helpers for zero-length write completion and follow-up transport
+ * checks.
+ *          2. Provide helpers for zero-length read completion and follow-up transport
+ * checks.
  */
 #pragma once
 

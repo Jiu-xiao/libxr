@@ -43,9 +43,8 @@ class DatabaseRaw : public Database
    *       Both the main block and the backup block use this signature to decide
    *       whether the block at least looks like it was written by the same raw
    *       database format version.
-  */
-  static constexpr uint32_t FLASH_HEADER =
-      0x12345678 + LIBXR_DATABASE_VERSION;
+   */
+  static constexpr uint32_t FLASH_HEADER = 0x12345678 + LIBXR_DATABASE_VERSION;
 
   /**
    * @brief 当前 raw 后端使用的块尾校验常量 / Trailing checksum constant used by the
@@ -54,7 +53,7 @@ class DatabaseRaw : public Database
    * @note 这里不是通用 CRC 计算结果，而是“块已完整写完”的固定尾标记。
    *       This is not a generic computed CRC result; it is the fixed trailing
    *       marker meaning "this block has been fully written".
-  */
+   */
   static constexpr uint32_t CHECKSUM_BYTE = 0x9abcedf0;
 
   // 存储布局定义：块角色、位图编码、键头与块头。

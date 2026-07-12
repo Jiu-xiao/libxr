@@ -1,6 +1,7 @@
 /**
  * @file linux_database_image_test_common.hpp
- * @brief linux database 测试共用 flash 映像注入 helper。 Shared flash-image mutation helpers for linux database tests.
+ * @brief linux database 测试共用 flash 映像注入 helper。 Shared flash-image mutation
+ * helpers for linux database tests.
  * @details 共享职责：
  *          1. 读取/写回原始 flash 映像并注入 main/backup 损坏。
  *          2. 生成 seed 数据库与双 key 数据库。
@@ -30,8 +31,11 @@ namespace LinuxDatabaseTestCommon
 
 /**
  * @brief 辅助函数 `WriteLe32`。 Helper function `WriteLe32`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 inline void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value)
 {
@@ -57,8 +61,11 @@ inline void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value
 
 /**
  * @brief 辅助函数 `WriteAllBytes`。 Helper function `WriteAllBytes`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 inline void WriteAllBytes(const char* path, const std::vector<uint8_t>& bytes)
 {

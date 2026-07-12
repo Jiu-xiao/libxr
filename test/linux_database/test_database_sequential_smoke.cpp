@@ -1,6 +1,7 @@
 /**
  * @file test_sequential_smoke.cpp
- * @brief linux file-backed `DatabaseRawSequential` smoke/save 场景子测试。 Split test unit for linux file-backed `DatabaseRawSequential` smoke/save scenarios.
+ * @brief linux file-backed `DatabaseRawSequential` smoke/save 场景子测试。 Split test
+ * unit for linux file-backed `DatabaseRawSequential` smoke/save scenarios.
  * @details 测试项目：
  *          1. 多 key sequential 数据库烟雾流量与重复 load/store。
  *          2. `Save()` 保存当前值语义。
@@ -18,7 +19,8 @@ using namespace LinuxDatabaseTestCommon;
 void TestLinuxDatabaseSequentialSmoke()
 {
   // 测试内容：验证 linux database sequential 在长时间多 key 读写流量下保持持久化一致性。
-  // Test coverage: verify that the linux database sequential keeps persistence consistency under long-running multi-key traffic.
+  // Test coverage: verify that the linux database sequential keeps persistence
+  // consistency under long-running multi-key traffic.
   constexpr size_t FLASH_SIZE = XR_DB_FLASH_SIZE;
 
   LinuxBinaryFileFlash<FLASH_SIZE> test_flash("/tmp/flash_test.bin", 512, 8, true, true);
@@ -98,7 +100,8 @@ void TestLinuxDatabaseSequentialSmoke()
 void TestDatabaseSequentialSaveCurrentValue()
 {
   // 测试内容：验证 `Save()` 会把 key 对象当前缓冲区中的值持久化到 sequential backend。
-  // Test coverage: verify that `Save()` persists the key object's current in-memory value to the sequential backend.
+  // Test coverage: verify that `Save()` persists the key object's current in-memory value
+  // to the sequential backend.
   const char* path = "/tmp/flash_test_seq_save_current.bin";
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, 512, 8, true, true);
   DatabaseRawSequential db(flash);

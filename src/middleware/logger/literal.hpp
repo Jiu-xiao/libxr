@@ -32,7 +32,8 @@ enum class Resolution : uint8_t
   None,       ///< matches neither frontend / 两个前端都不匹配
   Format,     ///< select brace-style frontend / 选择 brace 风格前端
   Printf,     ///< select printf-style frontend / 选择 printf 风格前端
-  Ambiguous,  ///< both frontends remain valid and both syntaxes are used / 两个前端都可用且都真的使用了自己的语法
+  Ambiguous,  ///< both frontends remain valid and both syntaxes are used /
+              ///< 两个前端都可用且都真的使用了自己的语法
 };
 
 /**
@@ -200,8 +201,9 @@ template <Frontend Forced, Print::Text Source, typename... Args>
 
   if constexpr (Forced == Frontend::Format)
   {
-    static_assert(resolution == Resolution::Format,
-                  "LibXR::Logger: XR_FMT(...) literal is not accepted by the brace frontend");
+    static_assert(
+        resolution == Resolution::Format,
+        "LibXR::Logger: XR_FMT(...) literal is not accepted by the brace frontend");
     return Frontend::Format;
   }
   else if constexpr (Forced == Frontend::Printf)
@@ -222,7 +224,8 @@ template <Frontend Forced, Print::Text Source, typename... Args>
   else if constexpr (resolution == Resolution::Ambiguous)
   {
     static_assert(resolution != Resolution::Ambiguous,
-                  "LibXR::Logger: literal is ambiguous between brace and printf frontends; use XR_FMT(...) or XR_PRINTF(...)");
+                  "LibXR::Logger: literal is ambiguous between brace and printf "
+                  "frontends; use XR_FMT(...) or XR_PRINTF(...)");
     return Frontend::Auto;
   }
   else

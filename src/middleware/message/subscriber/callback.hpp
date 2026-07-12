@@ -2,9 +2,8 @@
 
 #include <new>
 
-#include "libxr_def.hpp"
-
 #include "../topic.hpp"
+#include "libxr_def.hpp"
 
 namespace LibXR
 {
@@ -54,7 +53,8 @@ class Topic::Callback
   template <typename T>
   struct MessageViewTraits
   {
-    static constexpr bool VALUE = false;  ///< 默认不是 `MessageView`。Not a `MessageView` by default.
+    static constexpr bool VALUE =
+        false;  ///< 默认不是 `MessageView`。Not a `MessageView` by default.
   };
 
   /**
@@ -67,8 +67,10 @@ class Topic::Callback
   template <typename Data>
   struct MessageViewTraits<MessageView<Data>>
   {
-    static constexpr bool VALUE = true;  ///< 该参数是 `MessageView`。This argument is a `MessageView`.
-    using DataType = Data;  ///< `MessageView` 对应的数据类型。Payload type behind the `MessageView`.
+    static constexpr bool VALUE =
+        true;  ///< 该参数是 `MessageView`。This argument is a `MessageView`.
+    using DataType =
+        Data;  ///< `MessageView` 对应的数据类型。Payload type behind the `MessageView`.
   };
 
   /**
@@ -85,8 +87,10 @@ class Topic::Callback
    * @tparam T 待判断的参数类型 / Argument type to inspect
    */
   template <typename T>
-  static constexpr bool IS_MESSAGE_VIEW =
-      MessageViewTraits<RemoveCVRef<T>>::VALUE;  ///< 是否为带时间戳的类型化消息视图参数。Whether the argument is a timestamped typed message view.
+  static constexpr bool IS_MESSAGE_VIEW = MessageViewTraits<
+      RemoveCVRef<T>>::VALUE;  ///< 是否为带时间戳的类型化消息视图参数。Whether
+                               ///< the argument is a timestamped typed
+                               ///< message view.
 
   /**
    * @brief 是否为只读 raw payload 视图参数 / Whether one callback payload argument is a
@@ -94,9 +98,8 @@ class Topic::Callback
    * @tparam T 待判断的参数类型 / Argument type to inspect
    */
   template <typename T>
-  static constexpr bool IS_RAW_DATA_VIEW =
-      std::same_as<RemoveCVRef<T>, ConstRawData> ||
-      std::same_as<RemoveCVRef<T>, RawMessageView>;
+  static constexpr bool IS_RAW_DATA_VIEW = std::same_as<RemoveCVRef<T>, ConstRawData> ||
+                                           std::same_as<RemoveCVRef<T>, RawMessageView>;
 
   /**
    * @brief 是否把 payload 直接当成一个对象接收 / Whether one callback payload argument
@@ -106,7 +109,9 @@ class Topic::Callback
   template <typename T>
   static constexpr bool IS_TYPED_DATA =
       !IS_MESSAGE_VIEW<T> && !IS_RAW_DATA_VIEW<T> &&
-      TopicPayload<RemoveCVRef<T>>;  ///< 是否把负载直接当成一个对象来接收。Whether the payload is received directly as one typed object.
+      TopicPayload<RemoveCVRef<T>>;  ///< 是否把负载直接当成一个对象来接收。Whether the
+                                     ///< payload is received directly as one typed
+                                     ///< object.
 
   /**
    * @brief 是否是回调接口允许的 payload 参数写法 / Whether one payload argument form is
@@ -116,7 +121,8 @@ class Topic::Callback
   template <typename T>
   static constexpr bool IS_CALLBACK_PAYLOAD =
       IS_MESSAGE_VIEW<T> || IS_RAW_DATA_VIEW<T> ||
-      IS_TYPED_DATA<T>;  ///< 是否是这个回调接口允许的负载参数写法。Whether this callback interface accepts this payload argument form.
+      IS_TYPED_DATA<T>;  ///< 是否是这个回调接口允许的负载参数写法。Whether this callback
+                         ///< interface accepts this payload argument form.
 
   /**
    * @brief 是否错误地使用了可变 `MessageView<T>&` / Whether one payload argument is an
@@ -144,11 +150,14 @@ class Topic::Callback
   struct BlockHeader
   {
     using RunFun = void (*)(const BlockHeader*, bool, MicrosecondTimestamp, void*,
-                            size_t);  ///< 所有具体回调块共用的执行入口。Shared execution entry used by all concrete callback blocks.
+                            size_t);  ///< 所有具体回调块共用的执行入口。Shared execution
+                                      ///< entry used by all concrete callback blocks.
 
     RunFun run = nullptr;  ///< 当前块的执行函数。Execution function of the current block.
-    TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识。Expected topic payload type identifier.
-    bool accepts_raw_payload = false;  ///< 是否按 raw payload 视图接收。Whether this callback receives a raw payload view.
+    TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识。Expected
+                                           ///< topic payload type identifier.
+    bool accepts_raw_payload = false;      ///< 是否按 raw payload 视图接收。Whether this
+                                           ///< callback receives a raw payload view.
   };
 
   /**
@@ -254,8 +263,7 @@ class Topic::Callback
      * @param arg 绑定到回调中的参数 / Argument bound into the callback
      */
     PayloadOnlyBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadTypeID<PayloadArg>(),
-                      AcceptsRawPayload<PayloadArg>()},
+        : BlockHeader{&Run, PayloadTypeID<PayloadArg>(), AcceptsRawPayload<PayloadArg>()},
           fun_(fun),
           arg_(std::move(arg))
     {
@@ -302,8 +310,7 @@ class Topic::Callback
      * @param arg 绑定到回调中的参数 / Argument bound into the callback
      */
     TimestampPayloadBlock(Function fun, BoundArg&& arg)
-        : BlockHeader{&Run, PayloadTypeID<PayloadArg>(),
-                      AcceptsRawPayload<PayloadArg>()},
+        : BlockHeader{&Run, PayloadTypeID<PayloadArg>(), AcceptsRawPayload<PayloadArg>()},
           fun_(fun),
           arg_(std::move(arg))
     {
@@ -337,9 +344,8 @@ class Topic::Callback
       {
         using View = MessageViewTraits<RemoveCVRef<PayloadArg>>;
         using Data = typename View::DataType;
-        block->fun_(
-            in_isr, block->arg_, timestamp,
-            MessageView<Data>{timestamp, reinterpret_cast<Data*>(payload_addr)});
+        block->fun_(in_isr, block->arg_, timestamp,
+                    MessageView<Data>{timestamp, reinterpret_cast<Data*>(payload_addr)});
       }
       else
       {
@@ -380,7 +386,9 @@ class Topic::Callback
   {
     using Traits = FunctionTraits<Function>;  ///< 回调签名信息。Callback signature info.
     using PayloadArg =
-        typename Traits::template Arg<2>;  ///< 第三个参数，即负载参数类型。Third argument, namely the payload argument type.
+        typename Traits::template Arg<2>;  ///< 第三个参数，即负载参数类型。Third
+                                           ///< argument, namely the
+                                           ///< payload argument type.
 
     /**
      * @brief 创建只转发负载的回调块 / Create one callback block that forwards only the
@@ -410,9 +418,13 @@ class Topic::Callback
   {
     using Traits = FunctionTraits<Function>;  ///< 回调签名信息。Callback signature info.
     using TimestampArg =
-        typename Traits::template Arg<2>;  ///< 第三个参数，即时间戳参数类型。Third argument, namely the timestamp argument type.
+        typename Traits::template Arg<2>;  ///< 第三个参数，即时间戳参数类型。Third
+                                           ///< argument, namely the
+                                           ///< timestamp argument type.
     using PayloadArg =
-        typename Traits::template Arg<3>;  ///< 第四个参数，即负载参数类型。Fourth argument, namely the payload argument type.
+        typename Traits::template Arg<3>;  ///< 第四个参数，即负载参数类型。Fourth
+                                           ///< argument, namely the
+                                           ///< payload argument type.
 
     /**
      * @brief 创建同时转发时间戳和负载的回调块 / Create one callback block that forwards
@@ -453,8 +465,8 @@ class Topic::Callback
   }
 
   inline static BlockHeader empty_block_{
-      &EmptyRun, nullptr,
-      false};  ///< 空回调句柄共用的静态空执行块。Shared static empty execution block used by empty callback handles.
+      &EmptyRun, nullptr, false};  ///< 空回调句柄共用的静态空执行块。Shared static empty
+                                   ///< execution block used by empty callback handles.
 
  public:
   /**
@@ -527,7 +539,8 @@ class Topic::Callback
   /**
    * @brief 判断该回调是否按 raw payload 视图接收消息 / Tell whether this callback
    *        receives messages as a raw payload view
-   * @return 是 raw payload 视图回调则返回 true / Returns true for raw payload view callbacks
+   * @return 是 raw payload 视图回调则返回 true / Returns true for raw payload view
+   * callbacks
    */
   bool IsRawPayloadView() const { return block_->accepts_raw_payload; }
 
@@ -540,7 +553,8 @@ class Topic::Callback
    */
   explicit Callback(BlockHeader* block) : block_(block ? block : &empty_block_) {}
 
-  BlockHeader* block_ = &empty_block_;  ///< 当前回调句柄绑定的执行块。Execution block bound to the current callback handle.
+  BlockHeader* block_ = &empty_block_;  ///< 当前回调句柄绑定的执行块。Execution block
+                                        ///< bound to the current callback handle.
 };
 
 /**
@@ -584,8 +598,10 @@ struct Topic::CallbackBlock : public Topic::SuberBlock
  * @brief 注册回调函数 / Register a callback function
  * @param cb 需要注册的回调函数 / Callback function to register
  *
- * @note 包含初始化期动态内存分配，回调订阅应长期存在 / Contains initialization-time dynamic allocation; callback subscriptions are expected to be long-lived
- * @note 回调在发布锁内运行，不应重入发布同一个主题 / The callback runs while the publish lock is held and should not re-enter publishing on the same topic
+ * @note 包含初始化期动态内存分配，回调订阅应长期存在 / Contains initialization-time
+ * dynamic allocation; callback subscriptions are expected to be long-lived
+ * @note 回调在发布锁内运行，不应重入发布同一个主题 / The callback runs while the publish
+ * lock is held and should not re-enter publishing on the same topic
  */
 inline void Topic::RegisterCallback(Callback& cb)
 {

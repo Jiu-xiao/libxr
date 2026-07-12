@@ -7,7 +7,8 @@
 #include <type_traits>
 
 /**
- * @brief 供直接包含头文件的用户使用的打印功能默认值。 / Print feature defaults for direct header consumers.
+ * @brief 供直接包含头文件的用户使用的打印功能默认值。 / Print feature defaults for direct
+ * header consumers.
  *
  * CMake exports the same names as 0 or 1 target compile definitions. When the
  * headers are used without CMake, these fallback values match the ordinary
@@ -91,7 +92,8 @@
 namespace LibXR::Print::Config
 {
 /**
- * @brief 启用有符号与无符号十进制整数转换 / Enables signed and unsigned decimal integer conversions.
+ * @brief 启用有符号与无符号十进制整数转换 / Enables signed and unsigned decimal integer
+ * conversions.
  */
 inline constexpr bool enable_integer = LIBXR_PRINT_ENABLE_INTEGER;
 /**
@@ -108,39 +110,46 @@ inline constexpr bool enable_pointer = LIBXR_PRINT_ENABLE_POINTER;
 inline constexpr bool enable_float = LIBXR_PRINT_ENABLE_FLOAT;
 
 /**
- * @brief 在整数功能开启时启用二进制、八进制和十六进制转换 / Enables binary, octal, and hexadecimal integer conversions when integers are enabled.
+ * @brief 在整数功能开启时启用二进制、八进制和十六进制转换 / Enables binary, octal, and
+ * hexadecimal integer conversions when integers are enabled.
  */
 inline constexpr bool enable_integer_base8_16 =
     enable_integer && LIBXR_PRINT_INTEGER_ENABLE_BASE8_16;
 /**
- * @brief 在整数功能开启时启用 64 位整数格式化族 / Enables 64-bit integer formatting families when integers are enabled.
+ * @brief 在整数功能开启时启用 64 位整数格式化族 / Enables 64-bit integer formatting
+ * families when integers are enabled.
  */
 inline constexpr bool enable_integer_64bit =
     enable_integer && LIBXR_PRINT_INTEGER_ENABLE_64BIT;
 
 /**
- * @brief 在浮点功能开启时启用 %f / %F / Enables %f / %F when floating-point support is enabled.
+ * @brief 在浮点功能开启时启用 %f / %F / Enables %f / %F when floating-point support is
+ * enabled.
  */
-inline constexpr bool enable_float_fixed =
-    enable_float && LIBXR_PRINT_FLOAT_ENABLE_FIXED;
+inline constexpr bool enable_float_fixed = enable_float && LIBXR_PRINT_FLOAT_ENABLE_FIXED;
 /**
- * @brief 在浮点功能开启时启用基于 double 的默认浮点格式化 / Enables double-backed default float formatting when floating-point support is enabled.
- * @note 关闭时仍接受 double 输入，但会按 F32 降精度格式化 / When disabled, double input remains accepted but is formatted at reduced F32 precision
+ * @brief 在浮点功能开启时启用基于 double 的默认浮点格式化 / Enables double-backed default
+ * float formatting when floating-point support is enabled.
+ * @note 关闭时仍接受 double 输入，但会按 F32 降精度格式化 / When disabled, double input
+ * remains accepted but is formatted at reduced F32 precision
  */
 inline constexpr bool enable_float_double =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_DOUBLE;
 /**
- * @brief 在浮点功能开启时启用 %e / %E / Enables %e / %E when floating-point support is enabled.
+ * @brief 在浮点功能开启时启用 %e / %E / Enables %e / %E when floating-point support is
+ * enabled.
  */
 inline constexpr bool enable_float_scientific =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_SCIENTIFIC;
 /**
- * @brief 在浮点功能开启时启用 %g / %G / Enables %g / %G when floating-point support is enabled.
+ * @brief 在浮点功能开启时启用 %g / %G / Enables %g / %G when floating-point support is
+ * enabled.
  */
 inline constexpr bool enable_float_general =
     enable_float && LIBXR_PRINT_FLOAT_ENABLE_GENERAL;
 /**
- * @brief 在浮点功能开启时启用 L 长度修饰 / Enables the L floating-point length modifier when floating-point support is enabled.
+ * @brief 在浮点功能开启时启用 L 长度修饰 / Enables the L floating-point length modifier
+ * when floating-point support is enabled.
  */
 inline constexpr bool enable_float_long_double =
     enable_float_double && LIBXR_PRINT_FLOAT_ENABLE_LONG_DOUBLE;
@@ -151,12 +160,14 @@ static_assert(LIBXR_PRINT_FLOAT_MAX_PRECISION <=
 static_assert(LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS > 0,
               "LibXR::Print: LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS must be positive");
 /**
- * @brief 前端接受的浮点显式精度上限 / Maximum explicit float precision accepted by the frontend.
+ * @brief 前端接受的浮点显式精度上限 / Maximum explicit float precision accepted by the
+ * frontend.
  */
 inline constexpr uint8_t max_float_precision =
     static_cast<uint8_t>(LIBXR_PRINT_FLOAT_MAX_PRECISION);
 /**
- * @brief 定点浮点格式接受的整数位数上限 / Maximum integer-digit count accepted by fixed float formatting.
+ * @brief 定点浮点格式接受的整数位数上限 / Maximum integer-digit count accepted by fixed
+ * float formatting.
  */
 inline constexpr size_t max_float_integer_digits =
     static_cast<size_t>(LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS);
@@ -170,11 +181,13 @@ inline constexpr bool enable_width = LIBXR_PRINT_ENABLE_WIDTH;
  */
 inline constexpr bool enable_precision = LIBXR_PRINT_ENABLE_PRECISION;
 /**
- * @brief 启用备用格式语法，例如用于整数前缀和浮点保留小数点的 # / Enables alternate-form syntax such as # for integer prefixes and float decimal-point retention.
+ * @brief 启用备用格式语法，例如用于整数前缀和浮点保留小数点的 # / Enables alternate-form
+ * syntax such as # for integer prefixes and float decimal-point retention.
  */
 inline constexpr bool enable_alternate = LIBXR_PRINT_ENABLE_ALTERNATE;
 /**
- * @brief 启用源级显式参数索引，例如 printf 的 n$ 和 format 的 {1} / Enables source-level explicit argument indexing such as printf n$ and format {1}.
+ * @brief 启用源级显式参数索引，例如 printf 的 n$ 和 format 的 {1} / Enables source-level
+ * explicit argument indexing such as printf n$ and format {1}.
  */
 inline constexpr bool enable_explicit_argument_indexing =
     LIBXR_PRINT_ENABLE_EXPLICIT_ARGUMENT_INDEXING;
@@ -183,7 +196,8 @@ inline constexpr bool enable_explicit_argument_indexing =
 namespace LibXR::Print
 {
 /**
- * @brief 编译期解析层与运行期写出层之间共用的打印格式协议。 / Shared print-format protocol used between compile-time parsing and runtime writing.
+ * @brief 编译期解析层与运行期写出层之间共用的打印格式协议。 / Shared print-format
+ * protocol used between compile-time parsing and runtime writing.
  *
  * The frontends first decide:
  * - which C++ argument types are allowed
@@ -200,18 +214,19 @@ namespace LibXR::Print
  * 运行期 writer 随后直接读取这套协议，不再重新解析原始格式串。
  */
 /**
- * @brief 每个运行期参数附带的编译期匹配规则。 / Compile-time argument matching rules attached to each runtime argument.
+ * @brief 每个运行期参数附带的编译期匹配规则。 / Compile-time argument matching rules
+ * attached to each runtime argument.
  */
 enum class FormatArgumentRule : uint8_t
 {
-  None,              ///< no runtime argument is consumed / 不消耗运行期参数
-  SignedAny,         ///< default-width signed integer family / 默认宽度有符号整数族
-  SignedChar,        ///< exact signed char / 精确匹配 signed char
-  SignedShort,       ///< exact short / 精确匹配 short
-  SignedLong,        ///< exact long / 精确匹配 long
-  SignedLongLong,    ///< exact long long / 精确匹配 long long
-  SignedIntMax,      ///< exact intmax_t / 精确匹配 intmax_t
-  SignedSize,        ///< exact signed counterpart of size_t / 精确匹配 size_t 的有符号对应类型
+  None,            ///< no runtime argument is consumed / 不消耗运行期参数
+  SignedAny,       ///< default-width signed integer family / 默认宽度有符号整数族
+  SignedChar,      ///< exact signed char / 精确匹配 signed char
+  SignedShort,     ///< exact short / 精确匹配 short
+  SignedLong,      ///< exact long / 精确匹配 long
+  SignedLongLong,  ///< exact long long / 精确匹配 long long
+  SignedIntMax,    ///< exact intmax_t / 精确匹配 intmax_t
+  SignedSize,  ///< exact signed counterpart of size_t / 精确匹配 size_t 的有符号对应类型
   SignedPtrDiff,     ///< exact ptrdiff_t / 精确匹配 ptrdiff_t
   UnsignedAny,       ///< default-width unsigned integer family / 默认宽度无符号整数族
   UnsignedChar,      ///< exact unsigned char / 精确匹配 unsigned char
@@ -220,16 +235,18 @@ enum class FormatArgumentRule : uint8_t
   UnsignedLongLong,  ///< exact unsigned long long / 精确匹配 unsigned long long
   UnsignedIntMax,    ///< exact uintmax_t / 精确匹配 uintmax_t
   UnsignedSize,      ///< exact size_t / 精确匹配 size_t
-  UnsignedPtrDiff,   ///< exact unsigned counterpart of ptrdiff_t / 精确匹配 ptrdiff_t 的无符号对应类型
+  UnsignedPtrDiff,   ///< exact unsigned counterpart of ptrdiff_t / 精确匹配 ptrdiff_t
+                     ///< 的无符号对应类型
   Pointer,           ///< object pointer or nullptr / 对象指针或 nullptr
   Character,         ///< any integral or enum accepted by %c / 可按 %c 接受的整数或枚举
-  String,            ///< C string, string_view, or string / C 字符串、string_view 或 string
-  Float,             ///< float or double / float 或 double
-  LongDouble,        ///< exact long double / 精确匹配 long double
+  String,      ///< C string, string_view, or string / C 字符串、string_view 或 string
+  Float,       ///< float or double / float 或 double
+  LongDouble,  ///< exact long double / 精确匹配 long double
 };
 
 /**
- * @brief 保存在值记录字段描述字节中的位标志。 / Bit flags stored in a value record's field-spec byte.
+ * @brief 保存在值记录字段描述字节中的位标志。 / Bit flags stored in a value record's
+ * field-spec byte.
  *
  * These bits are not stored in the record-op byte, so their numeric values may
  * overlap with FormatOp values.
@@ -237,17 +254,18 @@ enum class FormatArgumentRule : uint8_t
  */
 enum class FormatFlag : uint8_t
 {
-  LeftAlign = 1U << 0,  ///< - flag; left-align field output / 左对齐输出字段
-  ForceSign = 1U << 1,  ///< + flag; always emit sign for signed values / 总是输出符号位
-  SpaceSign = 1U << 2,  ///< leading space for positive signed values / 正数前补空格
-  Alternate = 1U << 3,  ///< # flag; alternate form such as prefixes / 备用格式，如前缀
-  ZeroPad = 1U << 4,    ///< 0 flag; pad field with 0 when allowed / 允许时用 0 填充
-  UpperCase = 1U << 5,  ///< uppercase hex / float output / 使用大写十六进制或浮点格式
+  LeftAlign = 1U << 0,    ///< - flag; left-align field output / 左对齐输出字段
+  ForceSign = 1U << 1,    ///< + flag; always emit sign for signed values / 总是输出符号位
+  SpaceSign = 1U << 2,    ///< leading space for positive signed values / 正数前补空格
+  Alternate = 1U << 3,    ///< # flag; alternate form such as prefixes / 备用格式，如前缀
+  ZeroPad = 1U << 4,      ///< 0 flag; pad field with 0 when allowed / 允许时用 0 填充
+  UpperCase = 1U << 5,    ///< uppercase hex / float output / 使用大写十六进制或浮点格式
   CenterAlign = 1U << 6,  ///< centered field output / 居中对齐输出字段
 };
 
 /**
- * @brief Writer 消费的运行期字节码操作。 / Runtime bytecode operations consumed by Writer.
+ * @brief Writer 消费的运行期字节码操作。 / Runtime bytecode operations consumed by
+ * Writer.
  *
  * Small common cases lower directly to narrow opcodes with only the immediates
  * they actually need. Everything else falls back to GenericField, which keeps
@@ -269,24 +287,29 @@ enum class FormatFlag : uint8_t
  */
 enum class FormatOp : uint8_t
 {
-  TextInline = 0x01,       ///< short inline literal text / 直接内嵌在码流中的短字面文本
-  TextRef = 0x02,          ///< text span stored in the trailing pool / 引用尾部文本池中的文本片段
+  TextInline = 0x01,  ///< short inline literal text / 直接内嵌在码流中的短字面文本
+  TextRef = 0x02,  ///< text span stored in the trailing pool / 引用尾部文本池中的文本片段
   TextSpace = 0x03,        ///< one literal space / 单个字面空格
   U32Dec = 0x10,           ///< raw uint32_t decimal output / 直接输出 uint32_t 十进制
-  U32ZeroPadWidth = 0x11,  ///< uint32_t decimal with zero-pad width byte / 带零填充宽度字节的 uint32_t 十进制
+  U32ZeroPadWidth = 0x11,  ///< uint32_t decimal with zero-pad width byte /
+                           ///< 带零填充宽度字节的 uint32_t 十进制
   I32Dec = 0x12,           ///< raw int32_t decimal output / 直接输出 int32_t 十进制
   U32Binary = 0x13,        ///< raw uint32_t binary output / 直接输出 uint32_t 二进制
   U32Octal = 0x14,         ///< raw uint32_t octal output / 直接输出 uint32_t 八进制
-  U32HexLower = 0x15,      ///< raw uint32_t lowercase hex output / 直接输出 uint32_t 小写十六进制
-  U32HexUpper = 0x16,      ///< raw uint32_t uppercase hex output / 直接输出 uint32_t 大写十六进制
-  StringRaw = 0x20,        ///< raw string_view output / 直接输出 string_view
-  CharacterRaw = 0x21,     ///< raw character output / 直接输出字符
-  GenericField = 0xF0,     ///< wide fallback payload: type, flags, fill, width, precision / 宽回退载荷：type、flags、fill、width、precision
-  End = 0xFF,              ///< terminates the compiled record stream / 结束整条编译记录流
+  U32HexLower =
+      0x15,  ///< raw uint32_t lowercase hex output / 直接输出 uint32_t 小写十六进制
+  U32HexUpper =
+      0x16,  ///< raw uint32_t uppercase hex output / 直接输出 uint32_t 大写十六进制
+  StringRaw = 0x20,     ///< raw string_view output / 直接输出 string_view
+  CharacterRaw = 0x21,  ///< raw character output / 直接输出字符
+  GenericField = 0xF0,  ///< wide fallback payload: type, flags, fill, width, precision /
+                        ///< 宽回退载荷：type、flags、fill、width、precision
+  End = 0xFF,           ///< terminates the compiled record stream / 结束整条编译记录流
 };
 
 /**
- * @brief 编码后的单个操作码后面跟随的载荷字节数 / Number of payload bytes that follow one encoded opcode.
+ * @brief 编码后的单个操作码后面跟随的载荷字节数 / Number of payload bytes that follow one
+ * encoded opcode.
  */
 [[nodiscard]] constexpr size_t FormatOpPayloadBytes(FormatOp op)
 {
@@ -319,37 +342,48 @@ enum class FormatOp : uint8_t
 }
 
 /**
- * @brief 编译期分析和运行期分发共用的语义处理类别。 / Semantic handler categories used by compile-time analysis and runtime dispatch.
+ * @brief 编译期分析和运行期分发共用的语义处理类别。 / Semantic handler categories used by
+ * compile-time analysis and runtime dispatch.
  */
 enum class FormatType : uint8_t
 {
-  End,                   ///< semantic sentinel only; not the byte-stream terminator FormatOp::End / 仅语义哨兵；不等于字节流结束符 FormatOp::End
-  TextInline,            ///< short inline text stored in the code stream / 直接内嵌在码流中的短文本
-  TextRef,               ///< long text stored in the trailing text pool / 引用尾部文本池中的长文本
-  TextSpace,             ///< one literal space / 单个字面空格
-  Signed32,              ///< runtime signed decimal stored as int32_t / 运行期按 int32_t 存储的有符号十进制
-  Signed64,              ///< runtime signed decimal stored as int64_t / 运行期按 int64_t 存储的有符号十进制
-  Unsigned32,            ///< runtime unsigned decimal stored as uint32_t / 运行期按 uint32_t 存储的无符号十进制
-  Unsigned64,            ///< runtime unsigned decimal stored as uint64_t / 运行期按 uint64_t 存储的无符号十进制
-  Binary32,              ///< runtime binary stored as uint32_t / 运行期按 uint32_t 存储的二进制
-  Binary64,              ///< runtime binary stored as uint64_t / 运行期按 uint64_t 存储的二进制
-  Octal32,               ///< runtime octal stored as uint32_t / 运行期按 uint32_t 存储的八进制
-  Octal64,               ///< runtime octal stored as uint64_t / 运行期按 uint64_t 存储的八进制
-  HexLower32,            ///< runtime lowercase hex stored as uint32_t / 运行期按 uint32_t 存储的小写十六进制
-  HexLower64,            ///< runtime lowercase hex stored as uint64_t / 运行期按 uint64_t 存储的小写十六进制
-  HexUpper32,            ///< runtime uppercase hex stored as uint32_t / 运行期按 uint32_t 存储的大写十六进制
-  HexUpper64,            ///< runtime uppercase hex stored as uint64_t / 运行期按 uint64_t 存储的大写十六进制
-  Pointer,               ///< pointer value / 指针值
-  Character,             ///< character / 单个字符
-  String,                ///< string / string view / C string / 字符串、字符串视图或 C 字符串
-  FloatFixed,            ///< %f / %F fixed-point float32 / 定点 float32 输出
+  End,         ///< semantic sentinel only; not the byte-stream terminator FormatOp::End /
+               ///< 仅语义哨兵；不等于字节流结束符 FormatOp::End
+  TextInline,  ///< short inline text stored in the code stream / 直接内嵌在码流中的短文本
+  TextRef,     ///< long text stored in the trailing text pool / 引用尾部文本池中的长文本
+  TextSpace,   ///< one literal space / 单个字面空格
+  Signed32,    ///< runtime signed decimal stored as int32_t / 运行期按 int32_t
+               ///< 存储的有符号十进制
+  Signed64,    ///< runtime signed decimal stored as int64_t / 运行期按 int64_t
+               ///< 存储的有符号十进制
+  Unsigned32,  ///< runtime unsigned decimal stored as uint32_t / 运行期按 uint32_t
+               ///< 存储的无符号十进制
+  Unsigned64,  ///< runtime unsigned decimal stored as uint64_t / 运行期按 uint64_t
+               ///< 存储的无符号十进制
+  Binary32,    ///< runtime binary stored as uint32_t / 运行期按 uint32_t 存储的二进制
+  Binary64,    ///< runtime binary stored as uint64_t / 运行期按 uint64_t 存储的二进制
+  Octal32,     ///< runtime octal stored as uint32_t / 运行期按 uint32_t 存储的八进制
+  Octal64,     ///< runtime octal stored as uint64_t / 运行期按 uint64_t 存储的八进制
+  HexLower32,  ///< runtime lowercase hex stored as uint32_t / 运行期按 uint32_t
+               ///< 存储的小写十六进制
+  HexLower64,  ///< runtime lowercase hex stored as uint64_t / 运行期按 uint64_t
+               ///< 存储的小写十六进制
+  HexUpper32,  ///< runtime uppercase hex stored as uint32_t / 运行期按 uint32_t
+               ///< 存储的大写十六进制
+  HexUpper64,  ///< runtime uppercase hex stored as uint64_t / 运行期按 uint64_t
+               ///< 存储的大写十六进制
+  Pointer,     ///< pointer value / 指针值
+  Character,   ///< character / 单个字符
+  String,      ///< string / string view / C string / 字符串、字符串视图或 C 字符串
+  FloatFixed,  ///< %f / %F fixed-point float32 / 定点 float32 输出
   FloatScientific,       ///< %e / %E scientific float32 / 科学计数法 float32 输出
   FloatGeneral,          ///< %g / %G general float32 / 通用 float32 输出
   DoubleFixed,           ///< %f / %F fixed-point double / 定点 double 输出
   DoubleScientific,      ///< %e / %E scientific double / 科学计数法 double 输出
   DoubleGeneral,         ///< %g / %G general double / 通用 double 输出
   LongDoubleFixed,       ///< %Lf / %LF fixed-point long double / long double 定点输出
-  LongDoubleScientific,  ///< %Le / %LE scientific long double / long double 科学计数法输出
+  LongDoubleScientific,  ///< %Le / %LE scientific long double / long double
+                         ///< 科学计数法输出
   LongDoubleGeneral,     ///< %Lg / %LG general long double / long double 通用输出
 };
 
@@ -375,7 +409,8 @@ enum class FormatPackKind : uint8_t
 };
 
 /**
- * @brief 编译期选出的精确运行期执行器配置。 / Precise runtime executor profiles selected at compile time.
+ * @brief 编译期选出的精确运行期执行器配置。 / Precise runtime executor profiles selected
+ * at compile time.
  *
  * The low bits describe which narrow fast-path families appear in the bytecode.
  * The remaining bits identify the exact semantic types used by generic fields,
@@ -385,34 +420,46 @@ enum class FormatPackKind : uint8_t
  */
 enum class FormatProfile : uint32_t
 {
-  None = 0,            ///< text-only stream / 只有文本记录的流
-  NarrowInt = 1U << 0, ///< narrow integer fast-path family / 窄整数快路径族
-  TextArg = 1U << 1,   ///< raw text argument fast-path family / 原始文本参数快路径族
-  GenericSigned32 = 1U << 2,   ///< generic signed 32-bit decimal / 通用 32 位有符号十进制
-  GenericSigned64 = 1U << 3,   ///< generic signed 64-bit decimal / 通用 64 位有符号十进制
-  GenericUnsigned32 = 1U << 4, ///< generic unsigned 32-bit decimal / 通用 32 位无符号十进制
-  GenericUnsigned64 = 1U << 5, ///< generic unsigned 64-bit decimal / 通用 64 位无符号十进制
-  GenericBinary32 = 1U << 6,   ///< generic 32-bit binary / 通用 32 位二进制
-  GenericBinary64 = 1U << 7,   ///< generic 64-bit binary / 通用 64 位二进制
-  GenericOctal32 = 1U << 8,    ///< generic 32-bit octal / 通用 32 位八进制
-  GenericOctal64 = 1U << 9,    ///< generic 64-bit octal / 通用 64 位八进制
-  GenericHexLower32 = 1U << 10, ///< generic lowercase 32-bit hex / 通用小写 32 位十六进制
-  GenericHexLower64 = 1U << 11, ///< generic lowercase 64-bit hex / 通用小写 64 位十六进制
-  GenericHexUpper32 = 1U << 12, ///< generic uppercase 32-bit hex / 通用大写 32 位十六进制
-  GenericHexUpper64 = 1U << 13, ///< generic uppercase 64-bit hex / 通用大写 64 位十六进制
-  GenericPointer = 1U << 14,   ///< generic pointer field / 通用指针字段
-  GenericCharacter = 1U << 15, ///< generic character field / 通用字符字段
-  GenericString = 1U << 16,    ///< generic string field / 通用字符串字段
-  GenericFloatFixed = 1U << 17, ///< generic float fixed-point / 通用 float 定点格式
-  GenericFloatScientific = 1U << 18, ///< generic float scientific / 通用 float 科学计数法
-  GenericFloatGeneral = 1U << 19, ///< generic float general / 通用 float 通用格式
-  GenericDoubleFixed = 1U << 20, ///< generic double fixed-point / 通用 double 定点格式
-  GenericDoubleScientific = 1U << 21, ///< generic double scientific / 通用 double 科学计数法
-  GenericDoubleGeneral = 1U << 22, ///< generic double general / 通用 double 通用格式
-  GenericLongDoubleFixed = 1U << 23, ///< generic long double fixed-point / 通用 long double 定点格式
-  GenericLongDoubleScientific = 1U << 24, ///< generic long double scientific / 通用 long double 科学计数法
-  GenericLongDoubleGeneral = 1U << 25, ///< generic long double general / 通用 long double 通用格式
-  Generic = 0x03FFFFFCU, ///< compatibility mask for every generic field / 所有通用字段的兼容掩码
+  None = 0,             ///< text-only stream / 只有文本记录的流
+  NarrowInt = 1U << 0,  ///< narrow integer fast-path family / 窄整数快路径族
+  TextArg = 1U << 1,    ///< raw text argument fast-path family / 原始文本参数快路径族
+  GenericSigned32 = 1U << 2,  ///< generic signed 32-bit decimal / 通用 32 位有符号十进制
+  GenericSigned64 = 1U << 3,  ///< generic signed 64-bit decimal / 通用 64 位有符号十进制
+  GenericUnsigned32 =
+      1U << 4,  ///< generic unsigned 32-bit decimal / 通用 32 位无符号十进制
+  GenericUnsigned64 =
+      1U << 5,  ///< generic unsigned 64-bit decimal / 通用 64 位无符号十进制
+  GenericBinary32 = 1U << 6,  ///< generic 32-bit binary / 通用 32 位二进制
+  GenericBinary64 = 1U << 7,  ///< generic 64-bit binary / 通用 64 位二进制
+  GenericOctal32 = 1U << 8,   ///< generic 32-bit octal / 通用 32 位八进制
+  GenericOctal64 = 1U << 9,   ///< generic 64-bit octal / 通用 64 位八进制
+  GenericHexLower32 =
+      1U << 10,  ///< generic lowercase 32-bit hex / 通用小写 32 位十六进制
+  GenericHexLower64 =
+      1U << 11,  ///< generic lowercase 64-bit hex / 通用小写 64 位十六进制
+  GenericHexUpper32 =
+      1U << 12,  ///< generic uppercase 32-bit hex / 通用大写 32 位十六进制
+  GenericHexUpper64 =
+      1U << 13,                 ///< generic uppercase 64-bit hex / 通用大写 64 位十六进制
+  GenericPointer = 1U << 14,    ///< generic pointer field / 通用指针字段
+  GenericCharacter = 1U << 15,  ///< generic character field / 通用字符字段
+  GenericString = 1U << 16,     ///< generic string field / 通用字符串字段
+  GenericFloatFixed = 1U << 17,  ///< generic float fixed-point / 通用 float 定点格式
+  GenericFloatScientific =
+      1U << 18,                    ///< generic float scientific / 通用 float 科学计数法
+  GenericFloatGeneral = 1U << 19,  ///< generic float general / 通用 float 通用格式
+  GenericDoubleFixed = 1U << 20,   ///< generic double fixed-point / 通用 double 定点格式
+  GenericDoubleScientific =
+      1U << 21,  ///< generic double scientific / 通用 double 科学计数法
+  GenericDoubleGeneral = 1U << 22,  ///< generic double general / 通用 double 通用格式
+  GenericLongDoubleFixed =
+      1U << 23,  ///< generic long double fixed-point / 通用 long double 定点格式
+  GenericLongDoubleScientific =
+      1U << 24,  ///< generic long double scientific / 通用 long double 科学计数法
+  GenericLongDoubleGeneral =
+      1U << 25,           ///< generic long double general / 通用 long double 通用格式
+  Generic = 0x03FFFFFCU,  ///< compatibility mask for every generic field /
+                          ///< 所有通用字段的兼容掩码
 };
 
 /**
@@ -443,7 +490,8 @@ constexpr FormatProfile& operator|=(FormatProfile& left, FormatProfile right)
  * @brief 判断某个 profile 位是否存在 / Test whether one profile bit is present
  * @param profile 待检查的 profile 位集合 / Profile bit set to inspect
  * @param bit 待测试的单个 profile 位 / Single profile bit to test
- * @return `profile` 中存在 `bit` 时返回 `true`，否则返回 `false` / Returns `true` when `bit` is present in `profile`, otherwise `false`
+ * @return `profile` 中存在 `bit` 时返回 `true`，否则返回 `false` / Returns `true` when
+ * `bit` is present in `profile`, otherwise `false`
  */
 [[nodiscard]] constexpr bool HasProfile(FormatProfile profile, FormatProfile bit)
 {
@@ -451,9 +499,11 @@ constexpr FormatProfile& operator|=(FormatProfile& left, FormatProfile right)
 }
 
 /**
- * @brief 返回一个通用字段语义类型对应的精确 profile 位 / Return the precise profile bit for one generic-field semantic type
+ * @brief 返回一个通用字段语义类型对应的精确 profile 位 / Return the precise profile bit
+ * for one generic-field semantic type
  * @param type 通用字段携带的语义类型 / Semantic type carried by the generic field
- * @return 对应的精确 profile 位；非通用值类型返回 `None` / The precise profile bit, or `None` for non-value semantic types
+ * @return 对应的精确 profile 位；非通用值类型返回 `None` / The precise profile bit, or
+ * `None` for non-value semantic types
  */
 [[nodiscard]] constexpr FormatProfile GenericProfileFor(FormatType type)
 {
@@ -467,8 +517,7 @@ constexpr FormatProfile& operator|=(FormatProfile& left, FormatProfile right)
   return static_cast<FormatProfile>(uint32_t{1} << (2U + value - first));
 }
 
-static_assert(GenericProfileFor(FormatType::Signed32) ==
-              FormatProfile::GenericSigned32);
+static_assert(GenericProfileFor(FormatType::Signed32) == FormatProfile::GenericSigned32);
 static_assert(GenericProfileFor(FormatType::LongDoubleGeneral) ==
               FormatProfile::GenericLongDoubleGeneral);
 static_assert(GenericProfileFor(FormatType::TextSpace) == FormatProfile::None);
@@ -476,7 +525,8 @@ static_assert(static_cast<uint32_t>(FormatProfile::Generic) ==
               ((uint32_t{1} << 26U) - (uint32_t{1} << 2U)));
 
 /**
- * @brief Writer 消费的编译格式运行期协议。 / Compiled-format runtime contract consumed by Writer.
+ * @brief Writer 消费的编译格式运行期协议。 / Compiled-format runtime contract consumed by
+ * Writer.
  *
  * A compiled format source always provides Codes(), one contiguous uint8_t byte
  * block terminated in-band by FormatOp::End; ArgumentList(), one field-ordered
@@ -492,7 +542,8 @@ static_assert(static_cast<uint32_t>(FormatProfile::Generic) ==
  */
 
 /**
- * @brief 每个参数对应的元信息，同时用于编译期类型检查和运行期打包。 / Per-argument metadata used both for compile-time type checking and runtime packing.
+ * @brief 每个参数对应的元信息，同时用于编译期类型检查和运行期打包。 / Per-argument
+ * metadata used both for compile-time type checking and runtime packing.
  *
  * `pack` says how the runtime argument blob stores this argument.
  * `rule` says which C++ types are accepted at compile time.
@@ -509,7 +560,8 @@ static_assert(sizeof(FormatArgumentInfo) == 2,
               "LibXR::Print::FormatArgumentInfo must stay tightly packed");
 
 /**
- * @brief 一条已经决定完毕、运行期 writer 知道如何打印的值字段。 / One fully-decided value field that the runtime writer knows how to print.
+ * @brief 一条已经决定完毕、运行期 writer 知道如何打印的值字段。 / One fully-decided value
+ * field that the runtime writer knows how to print.
  *
  * It says:
  * - which printing path to use
@@ -525,17 +577,18 @@ static_assert(sizeof(FormatArgumentInfo) == 2,
 struct FormatField
 {
   FormatType type = FormatType::End;  ///< semantic render category / 语义写出类别
-  FormatPackKind pack{};              ///< packed runtime storage kind / 运行期打包存储类别
+  FormatPackKind pack{};  ///< packed runtime storage kind / 运行期打包存储类别
   FormatArgumentRule rule =
       FormatArgumentRule::None;  ///< compile-time argument rule / 编译期实参匹配规则
   uint8_t flags = 0;             ///< FormatFlag bitset / 字段修饰位集合
   char fill = ' ';               ///< field fill character / 字段填充字符
   uint8_t width = 0;             ///< parsed field width / 已解析的字段宽度
-  uint8_t precision = 0xFF;      ///< parsed precision, or unspecified / 已解析精度，或未指定
+  uint8_t precision = 0xFF;  ///< parsed precision, or unspecified / 已解析精度，或未指定
 };
 
 /**
- * @brief 返回一个运行期已打包参数会占多少字节。 / Returns how many bytes one packed runtime argument occupies.
+ * @brief 返回一个运行期已打包参数会占多少字节。 / Returns how many bytes one packed
+ * runtime argument occupies.
  *
  * This answers "how big is one packed argument", not "how long is one opcode".
  * 这里回答的是“一个参数打包后有多大”，不是“某条操作码记录有多长”。

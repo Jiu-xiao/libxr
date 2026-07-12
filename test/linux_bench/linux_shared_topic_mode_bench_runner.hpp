@@ -1,11 +1,13 @@
 /**
  * @file linux_shared_topic_mode_bench_runner.hpp
- * @brief `LinuxSharedTopic` subscriber mode 基准执行 helper。 Shared execution helper for `LinuxSharedTopic` subscriber-mode benchmarks.
+ * @brief `LinuxSharedTopic` subscriber mode 基准执行 helper。 Shared execution helper for
+ * `LinuxSharedTopic` subscriber-mode benchmarks.
  * @details 作用：
  *          1. 封装 mode benchmark 的 parent 侧发布与结果聚合流程。
  *          2. 让 `bench_modes.cpp` 只保留模式组合。
  *          Purpose:
- *          1. Encapsulate the publisher-side flow and result aggregation of mode benchmarks.
+ *          1. Encapsulate the publisher-side flow and result aggregation of mode
+ * benchmarks.
  *          2. Keep `bench_modes.cpp` focused on mode combinations only.
  */
 #pragma once
@@ -55,20 +57,21 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
   };
 
   std::vector<ChildRuntime> runtimes(subscribers.size());
-  auto cleanup = MakeScopeExit([&]()
-  {
-    for (auto& runtime : runtimes)
-    {
-      CloseFd(runtime.ready_pipe[0]);
-      CloseFd(runtime.ready_pipe[1]);
-      CloseFd(runtime.done_pipe[0]);
-      CloseFd(runtime.done_pipe[1]);
-      CloseFd(runtime.stats_pipe[0]);
-      CloseFd(runtime.stats_pipe[1]);
-      KillAndReapChild(runtime.pid);
-    }
-    (void)Topic::Remove(topic_name);
-  });
+  auto cleanup = MakeScopeExit(
+      [&]()
+      {
+        for (auto& runtime : runtimes)
+        {
+          CloseFd(runtime.ready_pipe[0]);
+          CloseFd(runtime.ready_pipe[1]);
+          CloseFd(runtime.done_pipe[0]);
+          CloseFd(runtime.done_pipe[1]);
+          CloseFd(runtime.stats_pipe[0]);
+          CloseFd(runtime.stats_pipe[1]);
+          KillAndReapChild(runtime.pid);
+        }
+        (void)Topic::Remove(topic_name);
+      });
 
   for (size_t i = 0; i < subscribers.size(); ++i)
   {
@@ -94,8 +97,8 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
       CloseFd(runtimes[i].done_pipe[1]);
       CloseFd(runtimes[i].stats_pipe[0]);
       const int child_status = RunModeSubscriberChild<PayloadBytes, Subscriber, Data>(
-          topic_name, subscribers[i], count, runtimes[i].done_pipe[0], runtimes[i].stats_pipe[1],
-          runtimes[i].ready_pipe[1]);
+          topic_name, subscribers[i], count, runtimes[i].done_pipe[0],
+          runtimes[i].stats_pipe[1], runtimes[i].ready_pipe[1]);
       CloseFd(runtimes[i].done_pipe[0]);
       CloseFd(runtimes[i].stats_pipe[1]);
       CloseFd(runtimes[i].ready_pipe[1]);
@@ -119,7 +122,8 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
     CloseFd(runtimes[i].ready_pipe[0]);
   }
 
-  if (!WaitForSubscriberAttach(publisher, static_cast<uint32_t>(subscribers.size()), case_label))
+  if (!WaitForSubscriberAttach(publisher, static_cast<uint32_t>(subscribers.size()),
+                               case_label))
   {
     return 1;
   }
@@ -141,7 +145,8 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
     auto* frame = data.GetData();
     frame->seq = seq;
     frame->pub_ns = NowNs();
-    std::memset(frame->payload.data(), static_cast<int>(seq & 0xFFU), frame->payload.size());
+    std::memset(frame->payload.data(), static_cast<int>(seq & 0xFFU),
+                frame->payload.size());
     frame->checksum = ComputeChecksum(*frame);
 
     if (publisher.Publish(data) != LibXR::ErrorCode::OK)
@@ -161,7 +166,8 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
   std::vector<ModeSubResult> results(subscribers.size());
   for (size_t i = 0; i < subscribers.size(); ++i)
   {
-    const bool read_ok = ReadAll(runtimes[i].stats_pipe[0], &results[i], sizeof(results[i]));
+    const bool read_ok =
+        ReadAll(runtimes[i].stats_pipe[0], &results[i], sizeof(results[i]));
     CloseFd(runtimes[i].stats_pipe[0]);
     int status = 0;
     while (waitpid(runtimes[i].pid, &status, 0) == -1 && errno == EINTR)
@@ -187,9 +193,10 @@ int RunModeCase(const char* case_label, const std::vector<ModeSubConfig>& subscr
     std::printf("[BENCH] shared_mode_subscriber case=%s sub=%s mode=%u recv=%" PRIu64
                 " drop=%" PRIu64 " first=%" PRIu64 " last=%" PRIu64
                 " lat_avg=%.3f us p95=%.3f us\n",
-                case_label, subscribers[i].label, static_cast<unsigned>(subscribers[i].mode),
-                results[i].recv_count, results[i].drop_count, results[i].first_seq,
-                results[i].last_seq, results[i].latency.avg_us, results[i].latency.p95_us);
+                case_label, subscribers[i].label,
+                static_cast<unsigned>(subscribers[i].mode), results[i].recv_count,
+                results[i].drop_count, results[i].first_seq, results[i].last_seq,
+                results[i].latency.avg_us, results[i].latency.p95_us);
   }
   std::fflush(stdout);
 

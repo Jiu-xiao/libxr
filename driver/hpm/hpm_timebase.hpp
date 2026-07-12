@@ -1,10 +1,9 @@
 #pragma once
 
-#include "timebase.hpp"
-
 #include "hpm_clock_drv.h"
 #include "hpm_mchtmr_drv.h"
 #include "hpm_soc.h"
+#include "timebase.hpp"
 
 namespace LibXR
 {

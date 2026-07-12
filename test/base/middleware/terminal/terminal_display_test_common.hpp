@@ -1,6 +1,7 @@
 /**
  * @file terminal_display_test_common.hpp
- * @brief `Terminal` 显示类测试共用 helper。 Shared helpers for `Terminal` display-oriented tests.
+ * @brief `Terminal` 显示类测试共用 helper。 Shared helpers for `Terminal`
+ * display-oriented tests.
  * @details 测试项目：
  *          1. 提供不同换行模式下的显示 fixture。
  *          2. 提供输入行填充和输出刷出 helper。
@@ -38,8 +39,11 @@ struct TerminalDisplayFixture
 
   /**
    * @brief 辅助函数 `FlushOutput`。 Helper function `FlushOutput`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   std::string FlushOutput()
   {
@@ -61,8 +65,11 @@ struct TerminalDisplayFixture
 
 /**
  * @brief 辅助函数 `FillInputLine`。 Helper function `FillInputLine`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 void FillInputLine(LibXR::Terminal<>& terminal, const char* text)
 {

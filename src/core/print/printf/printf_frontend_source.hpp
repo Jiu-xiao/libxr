@@ -6,16 +6,20 @@
 namespace SourceSyntax
 {
 /**
- * @brief 供位置参数分析使用的仅源串临时摘要 / Source-only scratch summary for positional argument analysis
- * @tparam MaxFieldCount 已解析转换项数量的保守上界 / Conservative upper bound for parsed conversion count
+ * @brief 供位置参数分析使用的仅源串临时摘要 / Source-only scratch summary for positional
+ * argument analysis
+ * @tparam MaxFieldCount 已解析转换项数量的保守上界 / Conservative upper bound for parsed
+ * conversion count
  */
 template <size_t MaxFieldCount>
 struct SourceAnalysisScratch
 {
-  std::array<size_t, MaxFieldCount> order{};  ///< field-ordered source argument indexes / 按字段顺序排列的源参数索引
-  size_t field_count = 0;                     ///< parsed conversion count / 已解析的转换项数量
-  size_t argument_count = 0;                  ///< highest referenced argument count / 最高引用到的参数个数
-  Error error = Error::None;                  ///< first parse/analysis error / 首个解析或分析错误
+  std::array<size_t, MaxFieldCount>
+      order{};  ///< field-ordered source argument indexes / 按字段顺序排列的源参数索引
+  size_t field_count = 0;  ///< parsed conversion count / 已解析的转换项数量
+  size_t argument_count =
+      0;  ///< highest referenced argument count / 最高引用到的参数个数
+  Error error = Error::None;  ///< first parse/analysis error / 首个解析或分析错误
 
   [[nodiscard]] consteval Error Text(size_t, size_t) const { return Error::None; }
 
@@ -32,20 +36,24 @@ struct SourceAnalysisScratch
 };
 
 /**
- * @brief 最终的源级位置参数或顺序参数摘要 / Final source-level positional or sequential argument summary
+ * @brief 最终的源级位置参数或顺序参数摘要 / Final source-level positional or sequential
+ * argument summary
  * @tparam FieldCount 最终解析出的转换项数量 / Final parsed conversion count
  * @tparam ArgCount 最终引用到的参数个数 / Final referenced argument count
  */
 template <size_t FieldCount, size_t ArgCount>
 struct SourceAnalysis
 {
-  std::array<size_t, FieldCount> order{};          ///< field-ordered source argument indexes / 按字段顺序排列的源参数索引
-  std::array<FormatArgumentInfo, ArgCount> args{};  ///< source-ordered argument metadata / 按源参数顺序排列的参数元信息
-  Error error = Error::None;                       ///< first parse/analysis error / 首个解析或分析错误
+  std::array<size_t, FieldCount>
+      order{};  ///< field-ordered source argument indexes / 按字段顺序排列的源参数索引
+  std::array<FormatArgumentInfo, ArgCount>
+      args{};  ///< source-ordered argument metadata / 按源参数顺序排列的参数元信息
+  Error error = Error::None;  ///< first parse/analysis error / 首个解析或分析错误
 };
 
 /**
- * @brief 将已解析转换解析成最终源顺序参数元信息摘要的 visitor / Visitor that resolves parsed conversions into the final source-ordered argument metadata summary
+ * @brief 将已解析转换解析成最终源顺序参数元信息摘要的 visitor / Visitor that resolves
+ * parsed conversions into the final source-ordered argument metadata summary
  * @tparam FieldCount 最终解析出的转换项数量 / Final parsed conversion count
  * @tparam ArgCount 最终引用到的参数个数 / Final referenced argument count
  */
@@ -78,10 +86,13 @@ struct ResolvedArgumentVisitor
 #include "printf_frontend_parser.hpp"
 
 /**
- * @brief 遍历一个 printf 源字符串，并发射字面文本片段与已解析转换项 / Walk one printf source string and emit literal-text spans plus parsed conversions
+ * @brief 遍历一个 printf 源字符串，并发射字面文本片段与已解析转换项 / Walk one printf
+ * source string and emit literal-text spans plus parsed conversions
  * @param source 当前待解析的 printf 源字符串 / Printf source string to walk
- * @param visitor 接收文本片段与已解析转换项的 visitor / Visitor receiving text spans and parsed conversions
- * @return 首个源级解析错误；成功时返回 `Error::None` / Returns the first source-level parse error, or `Error::None` on success
+ * @param visitor 接收文本片段与已解析转换项的 visitor / Visitor receiving text spans and
+ * parsed conversions
+ * @return 首个源级解析错误；成功时返回 `Error::None` / Returns the first source-level
+ * parse error, or `Error::None` on success
  */
 [[nodiscard]] consteval Error WalkSource(std::string_view source, auto& visitor)
 {
@@ -143,17 +154,21 @@ struct ResolvedArgumentVisitor
 }
 
 /**
- * @brief 对一个 printf 字面量执行仅源串分析，并返回按顺序整理的参数引用摘要 / Run source-only analysis for one printf literal and return the ordered argument-reference summary
+ * @brief 对一个 printf 字面量执行仅源串分析，并返回按顺序整理的参数引用摘要 / Run
+ * source-only analysis for one printf literal and return the ordered argument-reference
+ * summary
  * @tparam Source printf 风格格式串字面量 / Printf-style format literal
- * @return 源串分析结果，包含字段顺序、参数引用摘要与首个源级错误 / Returns the source analysis result, including field order, argument reference summary, and the first source-level error
+ * @return 源串分析结果，包含字段顺序、参数引用摘要与首个源级错误 / Returns the source
+ * analysis result, including field order, argument reference summary, and the first
+ * source-level error
  */
 template <Text Source>
 [[nodiscard]] consteval auto Analyze()
 {
-  constexpr auto scratch = []() consteval {
+  constexpr auto scratch = []() consteval
+  {
     SourceAnalysisScratch<Source.Size()> visitor{};
-    visitor.error =
-        WalkSource(std::string_view(Source.Data(), Source.Size()), visitor);
+    visitor.error = WalkSource(std::string_view(Source.Data(), Source.Size()), visitor);
     return visitor;
   }();
 
@@ -170,8 +185,7 @@ template <Text Source>
   }
   else
   {
-    ResolvedArgumentVisitor<scratch.field_count, scratch.argument_count> visitor{
-        result};
+    ResolvedArgumentVisitor<scratch.field_count, scratch.argument_count> visitor{result};
     result.error = WalkSource(std::string_view(Source.Data(), Source.Size()), visitor);
     return result;
   }

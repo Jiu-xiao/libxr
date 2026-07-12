@@ -6,8 +6,11 @@
 
 /**
  * @brief 测试项函数 `RunPidCycleTests`。 Test-item function `RunPidCycleTests`.
- * @details 测试内容：执行当前分组里的 PID 子场景。 Execute the grouped PID sub-scenarios for this split file.
- *          测试原理：把响应、防积分和状态语义拆开，避免一个测试文件继续承担过多控制器语义。 Split response, anti-windup, and state semantics so one test file does not keep carrying too many controller behaviors.
+ * @details 测试内容：执行当前分组里的 PID 子场景。 Execute the grouped PID sub-scenarios
+ * for this split file.
+ *          测试原理：把响应、防积分和状态语义拆开，避免一个测试文件继续承担过多控制器语义。
+ * Split response, anti-windup, and state semantics so one test file does not keep
+ * carrying too many controller behaviors.
  */
 void RunPidCycleTests()
 {
@@ -58,5 +61,4 @@ void RunPidCycleTests()
       ASSERT(near(pid.LastError(), EXPECT_CYCLE, 1e-6));
     }
   }
-
 }

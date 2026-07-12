@@ -1,17 +1,21 @@
 #pragma once
 
 /**
- * @brief 为一个已解析 printf 转换选择运行期语义类型 / Choose the runtime semantic type for one parsed printf conversion
+ * @brief 为一个已解析 printf 转换选择运行期语义类型 / Choose the runtime semantic type
+ * for one parsed printf conversion
  */
 namespace SourceSyntax
 {
 namespace FieldSelection
 {
 /**
- * @brief 在已知参数匹配规则后，为一个已解析转换选择运行期语义类型 / Choose the runtime semantic type for one parsed conversion after its argument rule is known
+ * @brief 在已知参数匹配规则后，为一个已解析转换选择运行期语义类型 / Choose the runtime
+ * semantic type for one parsed conversion after its argument rule is known
  * @param conversion 已解析的 printf 转换项 / Parsed printf conversion
- * @param rule 该转换项对应的编译期参数匹配规则 / Compile-time argument rule selected for that conversion
- * @return 返回该转换项最终选中的运行期语义类型 / Returns the runtime semantic type selected for this conversion
+ * @param rule 该转换项对应的编译期参数匹配规则 / Compile-time argument rule selected for
+ * that conversion
+ * @return 返回该转换项最终选中的运行期语义类型 / Returns the runtime semantic type
+ * selected for this conversion
  */
 [[nodiscard]] consteval FormatType SelectFormatType(const Conversion& conversion,
                                                     FormatArgumentRule rule)
@@ -38,8 +42,7 @@ namespace FieldSelection
   }
   if (conversion.type == ValueKind::Unsigned)
   {
-    return RuleUses64BitStorage(rule) ? FormatType::Unsigned64
-                                      : FormatType::Unsigned32;
+    return RuleUses64BitStorage(rule) ? FormatType::Unsigned64 : FormatType::Unsigned32;
   }
   if (conversion.type == ValueKind::Binary)
   {
@@ -51,13 +54,11 @@ namespace FieldSelection
   }
   if (conversion.type == ValueKind::HexLower)
   {
-    return RuleUses64BitStorage(rule) ? FormatType::HexLower64
-                                      : FormatType::HexLower32;
+    return RuleUses64BitStorage(rule) ? FormatType::HexLower64 : FormatType::HexLower32;
   }
   if (conversion.type == ValueKind::HexUpper)
   {
-    return RuleUses64BitStorage(rule) ? FormatType::HexUpper64
-                                      : FormatType::HexUpper32;
+    return RuleUses64BitStorage(rule) ? FormatType::HexUpper64 : FormatType::HexUpper32;
   }
 
   switch (conversion.type)
@@ -69,8 +70,7 @@ namespace FieldSelection
     case ValueKind::String:
       return FormatType::String;
     case ValueKind::FloatFixed:
-      return UsesDoubleFloatStorage() ? FormatType::DoubleFixed
-                                      : FormatType::FloatFixed;
+      return UsesDoubleFloatStorage() ? FormatType::DoubleFixed : FormatType::FloatFixed;
     case ValueKind::FloatScientific:
       return UsesDoubleFloatStorage() ? FormatType::DoubleScientific
                                       : FormatType::FloatScientific;
@@ -91,7 +91,8 @@ namespace FieldSelection
 }
 
 /**
- * @brief 为一个运行期语义类型选择参数打包存储类别。 / Chooses the packed storage kind for one runtime semantic type.
+ * @brief 为一个运行期语义类型选择参数打包存储类别。 / Chooses the packed storage kind for
+ * one runtime semantic type.
  * @param type Runtime semantic type. / 运行期语义类型。
  * @return Returns the packed storage kind used by that runtime type. /
  *         返回该运行期类型使用的参数打包存储类别。
@@ -147,12 +148,14 @@ namespace FieldSelection
 }
 
 /**
- * @brief 为一个已解析转换选择它消耗的编译期参数匹配规则。 / Chooses which compile-time argument rule one parsed conversion consumes.
+ * @brief 为一个已解析转换选择它消耗的编译期参数匹配规则。 / Chooses which compile-time
+ * argument rule one parsed conversion consumes.
  * @param conversion Parsed printf conversion. / 已解析的 printf 转换项。
  * @return Returns the compile-time argument rule consumed by this conversion. /
  *         返回该转换项消耗的编译期参数匹配规则。
  */
-[[nodiscard]] consteval FormatArgumentRule SelectArgumentRule(const Conversion& conversion)
+[[nodiscard]] consteval FormatArgumentRule SelectArgumentRule(
+    const Conversion& conversion)
 {
   if (conversion.type == ValueKind::Signed)
   {
@@ -175,9 +178,8 @@ namespace FieldSelection
     case ValueKind::FloatFixed:
     case ValueKind::FloatScientific:
     case ValueKind::FloatGeneral:
-      return (conversion.length == Length::LongDouble)
-                 ? FormatArgumentRule::LongDouble
-                 : FormatArgumentRule::Float;
+      return (conversion.length == Length::LongDouble) ? FormatArgumentRule::LongDouble
+                                                       : FormatArgumentRule::Float;
     case ValueKind::None:
     case ValueKind::Signed:
     case ValueKind::Unsigned:
@@ -192,7 +194,8 @@ namespace FieldSelection
 }
 
 /**
- * @brief 在解析后校验与目标相关的格式选择约束。 / Validates target-dependent format-selection constraints after parsing.
+ * @brief 在解析后校验与目标相关的格式选择约束。 / Validates target-dependent
+ * format-selection constraints after parsing.
  * @param conversion Parsed printf conversion. / 已解析的 printf 转换项。
  * @return Returns `Error::None` when the conversion is legal on the current
  *         target/profile, otherwise the first target-dependent error. /
@@ -203,8 +206,7 @@ namespace FieldSelection
   if ((conversion.type == ValueKind::FloatFixed ||
        conversion.type == ValueKind::FloatScientific ||
        conversion.type == ValueKind::FloatGeneral) &&
-      conversion.has_precision &&
-      conversion.precision > Config::max_float_precision)
+      conversion.has_precision && conversion.precision > Config::max_float_precision)
   {
     return Error::FloatPrecisionLimitExceeded;
   }
@@ -220,7 +222,8 @@ namespace FieldSelection
 }
 
 /**
- * @brief 为一个已解析 printf 转换构造共享 FormatField 记录。 / Builds the shared FormatField record for one parsed printf conversion.
+ * @brief 为一个已解析 printf 转换构造共享 FormatField 记录。 / Builds the shared
+ * FormatField record for one parsed printf conversion.
  * @param conversion Parsed printf conversion. / 已解析的 printf 转换项。
  * @return Returns the shared `FormatField` record consumed by the compile-time
  *         backend. / 返回共享编译后端要消费的 `FormatField` 记录。

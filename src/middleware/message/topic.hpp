@@ -4,15 +4,14 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <cstddef>
 
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_time.hpp"
 #include "libxr_type.hpp"
 #include "lockfree_list.hpp"
-#include "queue.hpp"
 #include "mutex.hpp"
+#include "queue.hpp"
 #include "rbt.hpp"
 #include "semaphore.hpp"
 #include "thread.hpp"
@@ -61,9 +60,11 @@ class Topic
    */
   enum class LockState : uint32_t
   {
-    UNLOCKED = 0,          ///< 当前未持有发布锁。The publish path is currently unlocked.
-    LOCKED = 1,            ///< 当前通过原子快路径持有发布权。The publish path is locked through the atomic fast path.
-    USE_MUTEX = UINT32_MAX ///< 当前主题改走互斥量串行化。This topic currently serializes publishers through a mutex.
+    UNLOCKED = 0,  ///< 当前未持有发布锁。The publish path is currently unlocked.
+    LOCKED = 1,  ///< 当前通过原子快路径持有发布权。The publish path is locked through the
+                 ///< atomic fast path.
+    USE_MUTEX = UINT32_MAX  ///< 当前主题改走互斥量串行化。This topic currently serializes
+                            ///< publishers through a mutex.
   };
 
  public:
@@ -79,13 +80,17 @@ class Topic
    */
   struct Block
   {
-    std::atomic<LockState> busy;  ///< 发布路径串行化状态。Publish-path serialization state.
-    LockFreeList subers;          ///< 已挂接订阅者链表。List of attached subscribers.
-    TypeID::ID payload_type_id;   ///< 精确 payload 类型标识。Exact payload type identifier.
-    uint32_t payload_size;        ///< 该 topic 固定 payload 字节数。Fixed payload size in bytes of this topic.
-    uint32_t payload_alignment;   ///< 该 topic payload 所需对齐。Required payload alignment of this topic.
-    uint32_t crc32;               ///< 主题名 CRC32 键。CRC32 key of the topic name.
-    Mutex* mutex;                 ///< 多发布者主题使用的互斥量。Mutex used by multi-publisher topics.
+    std::atomic<LockState>
+        busy;             ///< 发布路径串行化状态。Publish-path serialization state.
+    LockFreeList subers;  ///< 已挂接订阅者链表。List of attached subscribers.
+    TypeID::ID
+        payload_type_id;    ///< 精确 payload 类型标识。Exact payload type identifier.
+    uint32_t payload_size;  ///< 该 topic 固定 payload 字节数。Fixed payload size in bytes
+                            ///< of this topic.
+    uint32_t payload_alignment;  ///< 该 topic payload 所需对齐。Required payload
+                                 ///< alignment of this topic.
+    uint32_t crc32;              ///< 主题名 CRC32 键。CRC32 key of the topic name.
+    Mutex* mutex;  ///< 多发布者主题使用的互斥量。Mutex used by multi-publisher topics.
   };
 
 #ifndef __DOXYGEN__
@@ -103,9 +108,13 @@ class Topic
    */
   template <typename Data>
   class PackedData;
-  static constexpr uint8_t PACKET_PREFIX = 0x5A;  ///< 打包消息前缀字节。Packed-message prefix byte.
-  static constexpr uint8_t PACKET_VERSION = 0x01;  ///< 打包消息协议版本。Packed-message protocol version.
-  static constexpr size_t PACK_BASE_SIZE = 17;  ///< 固定非 payload 开销：16 字节头 + 1 字节尾 CRC8。Fixed non-payload overhead: 16-byte header plus 1-byte trailing CRC8.
+  static constexpr uint8_t PACKET_PREFIX =
+      0x5A;  ///< 打包消息前缀字节。Packed-message prefix byte.
+  static constexpr uint8_t PACKET_VERSION =
+      0x01;  ///< 打包消息协议版本。Packed-message protocol version.
+  static constexpr size_t PACK_BASE_SIZE =
+      17;  ///< 固定非 payload 开销：16 字节头 + 1 字节尾 CRC8。Fixed non-payload
+           ///< overhead: 16-byte header plus 1-byte trailing CRC8.
 #endif
 
   /**
@@ -126,7 +135,8 @@ class Topic
   {
     static_assert(TopicPayload<Data>);
     MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
-    Data* data;                      ///< 指向本次发布 payload 对象的指针。Pointer to the payload object of this publish.
+    Data* data;  ///< 指向本次发布 payload 对象的指针。Pointer to the payload object of
+                 ///< this publish.
   };
 
   /**
@@ -143,7 +153,8 @@ class Topic
   struct RawMessageView
   {
     MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
-    ConstRawData payload;            ///< 本次发布 payload 的只读字节视图。Read-only byte view of this publish payload.
+    ConstRawData payload;  ///< 本次发布 payload 的只读字节视图。Read-only byte view of
+                           ///< this publish payload.
   };
 
   /**
@@ -201,7 +212,9 @@ class Topic
      */
     Domain(const char* name);
 
-    RBTree<uint32_t>::Node<RBTree<uint32_t>>* node_;  ///< 该域在全局域表里的节点。This domain's node inside the global domain tree.
+    RBTree<uint32_t>::Node<RBTree<uint32_t>>*
+        node_;  ///< 该域在全局域表里的节点。This domain's node inside the global domain
+                ///< tree.
   };
 
   /**
@@ -210,10 +223,10 @@ class Topic
    */
   enum class SuberType : uint8_t
   {
-    SYNC,     ///< 同步等待型订阅者。Synchronous wait-based subscriber.
-    ASYNC,    ///< 异步本地缓冲型订阅者。Asynchronous local-buffer subscriber.
-    QUEUE,    ///< 队列转发型订阅者。Queue-forwarding subscriber.
-    CALLBACK, ///< 回调执行型订阅者。Callback-executing subscriber.
+    SYNC,      ///< 同步等待型订阅者。Synchronous wait-based subscriber.
+    ASYNC,     ///< 异步本地缓冲型订阅者。Asynchronous local-buffer subscriber.
+    QUEUE,     ///< 队列转发型订阅者。Queue-forwarding subscriber.
+    CALLBACK,  ///< 回调执行型订阅者。Callback-executing subscriber.
   };
 
   /**
@@ -324,11 +337,11 @@ class Topic
    *        Required payload alignment of this topic; must be a non-zero power of
    *        two
    * @param domain 可选主题域 / Optional topic domain
-   * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized multi-publisher use
+   * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized
+   * multi-publisher use
    */
   Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
-        size_t payload_alignment, Domain* domain = nullptr,
-        bool multi_publisher = false);
+        size_t payload_alignment, Domain* domain = nullptr, bool multi_publisher = false);
 
   /**
    * @brief 用精确类型创建或查找一个 topic / Create or look up one topic using one
@@ -471,8 +484,10 @@ class Topic
   /**
    * @brief 供 packet/server 路径按字节发布一条消息 / Publish one message from the
    *        packet/server path using bytes already arranged as the exact payload object
-   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the already-aligned payload object
-   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must equal the fixed topic size
+   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the
+   * already-aligned payload object
+   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must
+   * equal the fixed topic size
    * @param timestamp 这条消息的时间戳 / Timestamp of this message
    */
   void PublishBytesFromServer(void* payload_addr, size_t payload_size,
@@ -483,10 +498,12 @@ class Topic
 
   /**
    * @brief 供回调/ISR 上下文里的 packet/server 路径按字节发布一条消息 / Publish one
-   *        packet/server message from callback/ISR context using bytes already arranged as
-   *        the exact payload object
-   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the already-aligned payload object
-   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must equal the fixed topic size
+   *        packet/server message from callback/ISR context using bytes already arranged
+   * as the exact payload object
+   * @param payload_addr 已满足对齐的 payload 起始地址 / Start address of the
+   * already-aligned payload object
+   * @param payload_size payload 字节数，必须等于 topic 固定大小 / Payload size, must
+   * equal the fixed topic size
    * @param timestamp 这条消息的时间戳 / Timestamp of this message
    * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
@@ -525,7 +542,8 @@ class Topic
 
   /**
    * @brief 将一段 raw payload 按当前 topic 元数据打包成 packet / Pack a raw payload
-   *        byte view into one packet using the current topic metadata and current timestamp
+   *        byte view into one packet using the current topic metadata and current
+   * timestamp
    * @param data 待打包 payload 字节 / Payload bytes to pack
    * @param packet 输出 packet 缓冲区 / Output packet buffer
    * @return 操作结果错误码 / Error code
@@ -537,7 +555,8 @@ class Topic
 
   /**
    * @brief 将一段 raw payload 按当前 topic 元数据和指定时间戳打包成 packet / Pack a raw
-   *        payload byte view into one packet using the current topic metadata and timestamp
+   *        payload byte view into one packet using the current topic metadata and
+   * timestamp
    * @param data 待打包 payload 字节 / Payload bytes to pack
    * @param packet 输出 packet 缓冲区 / Output packet buffer
    * @param timestamp 指定时间戳 / Explicit timestamp
@@ -588,10 +607,12 @@ class Topic
   uint32_t GetKey() const;
 
  private:
-  TopicHandle block_ = nullptr;  ///< 当前 topic 视图绑定的状态块。Runtime state block bound to the current topic view.
+  TopicHandle block_ = nullptr;  ///< 当前 topic 视图绑定的状态块。Runtime state block
+                                 ///< bound to the current topic view.
 
-  static inline RBTree<uint32_t>* domain_ = nullptr;  ///< 全局 topic 域注册表。Global registry of topic domains.
-  static inline Domain* def_domain_ = nullptr;        ///< 缺省 topic 域。Default topic domain.
+  static inline RBTree<uint32_t>* domain_ =
+      nullptr;  ///< 全局 topic 域注册表。Global registry of topic domains.
+  static inline Domain* def_domain_ = nullptr;  ///< 缺省 topic 域。Default topic domain.
 
   /**
    * @brief 确保全局域注册表已创建 / Ensure the global domain registry exists
@@ -764,12 +785,12 @@ class Topic
    * @param payload_addr 已满足对齐的 payload 地址 / Already-aligned payload address
    * @param payload_size payload 字节数 / Payload size in bytes
    * @param timestamp 消息时间戳 / Message timestamp
-   * @param from_callback 是否来自回调发布路径 / Whether this publish comes from callback path
+   * @param from_callback 是否来自回调发布路径 / Whether this publish comes from callback
+   * path
    * @param in_isr 当前是否位于 ISR / Whether the current path is in ISR context
    */
   void PublishServerBytes(void* payload_addr, size_t payload_size,
-                          MicrosecondTimestamp timestamp, bool from_callback,
-                          bool in_isr)
+                          MicrosecondTimestamp timestamp, bool from_callback, bool in_isr)
   {
     CheckServerPublishContract(block_, payload_addr, payload_size);
 

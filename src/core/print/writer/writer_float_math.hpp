@@ -1,11 +1,13 @@
 #pragma once
 
 /**
- * @brief 通用浮点文本格式化器使用的数学辅助函数。 / Math helpers used by the generic float text formatter.
+ * @brief 通用浮点文本格式化器使用的数学辅助函数。 / Math helpers used by the generic
+ * float text formatter.
  */
 
 /**
- * @brief 浮点文本输出归一化过程中使用的十进制缩放对 / Decimal-scale pair used while normalizing one float for text output.
+ * @brief 浮点文本输出归一化过程中使用的十进制缩放对 / Decimal-scale pair used while
+ * normalizing one float for text output.
  * @tparam Float Float type. / 浮点类型。
  */
 template <typename Float>
@@ -16,15 +18,18 @@ struct Writer::DecimalScale
 };
 
 /**
- * @brief 科学计数法归一化后的尾数数字、缩放因子与十进制指数 / Rounded mantissa digits, scale factor, and decimal exponent after scientific normalization.
+ * @brief 科学计数法归一化后的尾数数字、缩放因子与十进制指数 / Rounded mantissa digits,
+ * scale factor, and decimal exponent after scientific normalization.
  * @tparam Float Float type. / 浮点类型。
  */
 template <typename Float>
 struct Writer::ScientificDigits
 {
-  Float digits = 0;   ///< rounded mantissa scaled to integer digits / 舍入后按整数位缩放的尾数
-  Float scale = 1;    ///< 10 ^ precision applied to the mantissa / 施加到尾数上的 10 的 precision 次幂
-  int exponent = 0;   ///< decimal exponent / 十进制指数
+  Float digits =
+      0;  ///< rounded mantissa scaled to integer digits / 舍入后按整数位缩放的尾数
+  Float scale = 1;   ///< 10 ^ precision applied to the mantissa / 施加到尾数上的 10 的
+                     ///< precision 次幂
+  int exponent = 0;  ///< decimal exponent / 十进制指数
 };
 
 /**
@@ -38,8 +43,7 @@ Float Writer::Power10(int exponent)
 {
   Float result = 1;
   Float base = 10;
-  unsigned int remaining =
-      static_cast<unsigned int>(exponent < 0 ? -exponent : exponent);
+  unsigned int remaining = static_cast<unsigned int>(exponent < 0 ? -exponent : exponent);
 
   while (remaining != 0)
   {
@@ -92,10 +96,12 @@ Float Writer::RoundDecimal(Float value, uint8_t precision)
 }
 
 /**
- * @brief 把一个值归一化为科学计数法的尾数数字与十进制指数 / Normalize one value into scientific-notation mantissa digits and a decimal exponent.
+ * @brief 把一个值归一化为科学计数法的尾数数字与十进制指数 / Normalize one value into
+ * scientific-notation mantissa digits and a decimal exponent.
  * @tparam Float Float type. / 浮点类型。
  * @param value Finite non-negative value. / 有限非负值。
- * @param precision Significant fractional digits to retain in the mantissa. / 尾数中保留的有效小数位数。
+ * @param precision Significant fractional digits to retain in the mantissa. /
+ * 尾数中保留的有效小数位数。
  * @return Rounded mantissa, its scale, and the decimal exponent (carry-out
  *         adjusts the exponent when rounding overflows one digit). /
  *         返回舍入后的尾数、缩放因子与十进制指数；若舍入进位溢出一位，会相应调整指数。
@@ -121,7 +127,8 @@ Writer::ScientificDigits<Float> Writer::RoundScientificDigits(Float value,
 }
 
 /**
- * @brief 将一个浮点值归一化为十进制指数与缩放因子 / Normalizes one float into a decimal exponent plus scale pair.
+ * @brief 将一个浮点值归一化为十进制指数与缩放因子 / Normalizes one float into a decimal
+ * exponent plus scale pair.
  * @tparam Float Float type. / 浮点类型。
  * @param value Finite positive magnitude. / 有限正数绝对值。
  * @return Returns the normalized decimal scale description. /
@@ -138,8 +145,7 @@ Writer::DecimalScale<Float> Writer::NormalizeDecimal(Float value)
 
   int binary_exponent = 0;
   std::frexp(value, &binary_exponent);
-  constexpr Float log10_of_2 =
-      static_cast<Float>(0.30102999566398119521373889472449L);
+  constexpr Float log10_of_2 = static_cast<Float>(0.30102999566398119521373889472449L);
   normalized.exponent =
       static_cast<int>(static_cast<Float>(binary_exponent - 1) * log10_of_2);
   normalized.scale = Power10<Float>(normalized.exponent);
@@ -162,7 +168,8 @@ Writer::DecimalScale<Float> Writer::NormalizeDecimal(Float value)
 }
 
 /**
- * @brief 在当前缩放位提取一个十进制数字并推进剩余值 / Extracts one decimal digit at the current scale and advances the remainder.
+ * @brief 在当前缩放位提取一个十进制数字并推进剩余值 / Extracts one decimal digit at the
+ * current scale and advances the remainder.
  * @tparam Float Float type. / 浮点类型。
  * @param value Remaining normalized value; reduced in place. / 剩余规范化值；
  *        会原地减少。

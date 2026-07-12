@@ -22,16 +22,21 @@ struct Topic::SyncBlock : public SuberBlock
    */
   enum WaitState : uint32_t
   {
-    WAIT_IDLE = 0,   ///< 当前没有挂起等待。No wait is currently pending.
-    WAITING = 1,     ///< 当前有一个挂起的等待者。One waiter is currently pending.
-    WAIT_CLAIMED = 2 ///< 某次发布已归一个刚超时的等待者所有。One publish wakeup is reserved for a waiter that just timed out.
+    WAIT_IDLE = 0,    ///< 当前没有挂起等待。No wait is currently pending.
+    WAITING = 1,      ///< 当前有一个挂起的等待者。One waiter is currently pending.
+    WAIT_CLAIMED = 2  ///< 某次发布已归一个刚超时的等待者所有。One publish wakeup is
+                      ///< reserved for a waiter that just timed out.
   };
 
-  void* buff_addr;                 ///< 收到消息后要拷到这里。Received payloads are copied here.
-  void (*copy_payload)(void* dst,
-                       void* payload_addr);    ///< 按订阅精确类型执行负载拷贝的适配函数。Adapter that copies one payload using the subscriber's exact type.
-  MicrosecondTimestamp timestamp;  ///< 这里对应那份数据的时间戳。Timestamp paired with the buffered data.
-  std::atomic<uint32_t> wait_state = WAIT_IDLE;  ///< 当前 `Wait()` 的挂起状态。Current pending state of `Wait()`.
+  void* buff_addr;  ///< 收到消息后要拷到这里。Received payloads are copied here.
+  void (*copy_payload)(
+      void* dst,
+      void* payload_addr);  ///< 按订阅精确类型执行负载拷贝的适配函数。Adapter that copies
+                            ///< one payload using the subscriber's exact type.
+  MicrosecondTimestamp
+      timestamp;  ///< 这里对应那份数据的时间戳。Timestamp paired with the buffered data.
+  std::atomic<uint32_t> wait_state =
+      WAIT_IDLE;  ///< 当前 `Wait()` 的挂起状态。Current pending state of `Wait()`.
   Semaphore sem;  ///< 用来唤醒 `Wait()` 的信号量。Semaphore used to wake `Wait()`.
 };
 
@@ -50,7 +55,8 @@ class Topic::SyncSubscriber
    * @param name 主题名称 / Topic name
    * @param data 用来接收消息的对象 / Destination object receiving subscribed data
    * @param domain 可选的主题域 / Optional topic domain
-   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time
+   * dynamic allocation; subscribers are expected to be long-lived
    * @note 同步订阅者不会自建接收缓冲区，而是直接把收到的数据写进 `data`；`data`
    *       必须至少活到订阅者不再使用为止 /
    *       Synchronous subscribers do not allocate their own receive buffer;
@@ -63,10 +69,12 @@ class Topic::SyncSubscriber
   }
 
   /**
-   * @brief 通过 `Topic` 句柄构造同步订阅者 / Construct a synchronous subscriber using a `Topic` handle
+   * @brief 通过 `Topic` 句柄构造同步订阅者 / Construct a synchronous subscriber using a
+   * `Topic` handle
    * @param topic 订阅的主题 / Topic being subscribed to
    * @param data 用来接收消息的对象 / Destination object receiving subscribed data
-   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time
+   * dynamic allocation; subscribers are expected to be long-lived
    * @note 同步订阅者不会自建接收缓冲区，而是直接把收到的数据写进 `data`；`data`
    *       必须至少活到订阅者不再使用为止 /
    *       Synchronous subscribers do not allocate their own receive buffer;
@@ -191,6 +199,7 @@ class Topic::SyncSubscriber
    */
   MicrosecondTimestamp GetTimestamp() const { return block_->data_.timestamp; }
 
-  LockFreeList::Node<SyncBlock>* block_ = nullptr;  ///< 订阅者数据块。Subscriber data block.
+  LockFreeList::Node<SyncBlock>* block_ =
+      nullptr;  ///< 订阅者数据块。Subscriber data block.
 };
 }  // namespace LibXR

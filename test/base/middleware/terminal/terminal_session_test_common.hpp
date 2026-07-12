@@ -1,12 +1,14 @@
 /**
  * @file terminal_session_test_common.hpp
- * @brief `Terminal` 输入与命令测试共用 session helper。 Shared session helpers for `Terminal` input and command tests.
+ * @brief `Terminal` 输入与命令测试共用 session helper。 Shared session helpers for
+ * `Terminal` input and command tests.
  * @details 测试项目：
  *          1. 提供命令计数上下文和 ANSI 输出计数 helper。
  *          2. 提供可发送原始输入/文本并驱动 `TaskFun()` 的交互 fixture。
  *          Test items:
  *          1. Provide command-count contexts and ANSI-substring counting helpers.
- *          2. Provide an interactive fixture that sends raw input/text and drives `TaskFun()`.
+ *          2. Provide an interactive fixture that sends raw input/text and drives
+ * `TaskFun()`.
  */
 #pragma once
 
@@ -30,8 +32,11 @@ struct CommandState
 
 /**
  * @brief 辅助函数 `CountCommand`。 Helper function `CountCommand`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 int CountCommand(CommandState* state, int argc, char** argv)
 {
@@ -47,8 +52,11 @@ int CountCommand(CommandState* state, int argc, char** argv)
 
 /**
  * @brief 辅助函数 `CountSubstring`。 Helper function `CountSubstring`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 size_t CountSubstring(std::string_view text, std::string_view needle)
 {
@@ -80,8 +88,10 @@ struct TerminalFixture
 
   /**
    * @brief 执行辅助函数 `RunUntilIdle`。 Execution helper function `RunUntilIdle`.
-   * @details 测试内容：执行一个子 case、子流程或基准场景。 Execute one sub-case, sub-flow, or benchmark scenario.
-   *          测试原理：把重复执行逻辑集中封装，保证不同 case 走同一执行路径。 Centralize repeated execution logic so different cases use the same execution path.
+   * @details 测试内容：执行一个子 case、子流程或基准场景。 Execute one sub-case,
+   * sub-flow, or benchmark scenario. 测试原理：把重复执行逻辑集中封装，保证不同 case
+   * 走同一执行路径。 Centralize repeated execution logic so different cases use the same
+   * execution path.
    */
   void RunUntilIdle()
   {
@@ -101,8 +111,11 @@ struct TerminalFixture
 
   /**
    * @brief 辅助函数 `DrainOutput`。 Helper function `DrainOutput`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   std::string DrainOutput()
   {
@@ -121,8 +134,11 @@ struct TerminalFixture
 
   /**
    * @brief 辅助函数 `SendRaw`。 Helper function `SendRaw`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   std::string SendRaw(const void* data, size_t size)
   {
@@ -135,8 +151,11 @@ struct TerminalFixture
 
   /**
    * @brief 辅助函数 `SendText`。 Helper function `SendText`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   std::string SendText(const char* text) { return SendRaw(text, std::strlen(text)); }
 };

@@ -1,14 +1,18 @@
 /**
  * @file test_rw_block_timeout.cpp
- * @brief base `rw` 超时与立即错误场景子测试。 Split test unit for base `rw` timeout and immediate-error scenarios.
+ * @brief base `rw` 超时与立即错误场景子测试。 Split test unit for base `rw` timeout and
+ * immediate-error scenarios.
  * @details 测试项目：
  *          1. 阻塞读超时后会解除挂起关系，后续补进的数据不会污染旧缓冲区。
  *          2. 阻塞写超时后会解除等待者，后续再次提交仍按新的等待周期工作。
  *          3. 立即失败的读写回调会在各模式下直接透传错误并复位状态机。
  *          Test items:
- *          1. A blocking read timeout detaches the pending relation and later bytes do not corrupt the stale buffer.
- *          2. A blocking write timeout detaches the waiter and later submissions start a fresh wait cycle.
- *          3. Immediate read/write failures propagate the error directly and reset the state machine in every mode.
+ *          1. A blocking read timeout detaches the pending relation and later bytes do
+ * not corrupt the stale buffer.
+ *          2. A blocking write timeout detaches the waiter and later submissions start a
+ * fresh wait cycle.
+ *          3. Immediate read/write failures propagate the error directly and reset the
+ * state machine in every mode.
  */
 #include "rw_test_common.hpp"
 
@@ -16,14 +20,17 @@ namespace
 {
 
 /**
- * @brief 测试入口函数 `test_rw_block_read_timeout_detaches_pending`。 Test entry function `test_rw_block_read_timeout_detaches_pending`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_block_read_timeout_detaches_pending`。 Test entry function
+ * `test_rw_block_read_timeout_detaches_pending`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_block_read_timeout_detaches_pending()
 {
   // 测试内容：阻塞读超时后，旧缓冲区和信号量状态都不应被后续补数据污染。
-  // Test coverage: later queued bytes must not corrupt the stale buffer or semaphore state after a blocking read timeout.
+  // Test coverage: later queued bytes must not corrupt the stale buffer or semaphore
+  // state after a blocking read timeout.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -57,14 +64,17 @@ void test_rw_block_read_timeout_detaches_pending()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_block_write_timeout_detaches_waiter`。 Test entry function `test_rw_block_write_timeout_detaches_waiter`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_block_write_timeout_detaches_waiter`。 Test entry function
+ * `test_rw_block_write_timeout_detaches_waiter`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_block_write_timeout_detaches_waiter()
 {
   // 测试内容：阻塞写超时后，旧等待者不应阻止下一个等待周期重新建立。
-  // Test coverage: a timed-out blocking write waiter should not prevent the next wait cycle from being established.
+  // Test coverage: a timed-out blocking write waiter should not prevent the next wait
+  // cycle from being established.
   using namespace LibXR;
 
   WritePort w(2, 64);
@@ -96,14 +106,17 @@ void test_rw_block_write_timeout_detaches_waiter()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_immediate_error_propagates`。 Test entry function `test_rw_immediate_error_propagates`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_immediate_error_propagates`。 Test entry function
+ * `test_rw_immediate_error_propagates`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_immediate_error_propagates()
 {
   // 测试内容：立即失败路径应在每种模式下直接返回错误，且端口状态恢复为空闲。
-  // Test coverage: immediate failure paths should return errors directly in every mode and restore idle port state.
+  // Test coverage: immediate failure paths should return errors directly in every mode
+  // and restore idle port state.
   using namespace LibXR;
 
   for (auto mode : LibXRTest::ALL_MODES)
@@ -144,9 +157,12 @@ void test_rw_immediate_error_propagates()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunBaseRwBlockTimeoutTests`。 Test-item function `RunBaseRwBlockTimeoutTests`.
- * @details 测试内容：执行 base `rw` 超时与立即错误子场景。 Execute base `rw` timeout and immediate-error sub-scenarios.
- *          测试原理：把超时/立即失败路径单独成组，聚焦等待者解绑和错误透传契约。 Group timeout/immediate-failure paths around waiter-detach and error-propagation contracts.
+ * @brief 测试项函数 `RunBaseRwBlockTimeoutTests`。 Test-item function
+ * `RunBaseRwBlockTimeoutTests`.
+ * @details 测试内容：执行 base `rw` 超时与立即错误子场景。 Execute base `rw` timeout and
+ * immediate-error sub-scenarios.
+ *          测试原理：把超时/立即失败路径单独成组，聚焦等待者解绑和错误透传契约。 Group
+ * timeout/immediate-failure paths around waiter-detach and error-propagation contracts.
  */
 void RunBaseRwBlockTimeoutTests()
 {

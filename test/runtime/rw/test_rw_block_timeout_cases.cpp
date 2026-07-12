@@ -1,16 +1,21 @@
 /**
  * @file test_rw_block_timeout_cases.cpp
- * @brief runtime `rw` 超时、零长度与队列补齐场景子测试。 Split test unit for runtime `rw` timeout, zero-length, and queue-completion scenarios.
+ * @brief runtime `rw` 超时、零长度与队列补齐场景子测试。 Split test unit for runtime `rw`
+ * timeout, zero-length, and queue-completion scenarios.
  * @details 测试项目：
  *          1. 阻塞读超时后会解除挂起关系，后续补进的数据不会污染旧缓冲区。
  *          2. 零长度挂起读在完成时只发通知，不会偷读队列字节。
  *          3. 阻塞写超时后会解除等待者，后续再次提交仍按新的等待周期工作。
  *          4. 阻塞读在后台补齐队列数据后会把目标字节拷贝到用户缓冲区。
  *          Test items:
- *          1. A blocking read timeout detaches the pending relation and later bytes do not corrupt the stale buffer.
- *          2. A pending zero-length read only triggers completion and does not consume queued bytes.
- *          3. A blocking write timeout detaches the waiter and later submissions start a fresh wait cycle.
- *          4. A blocking read copies bytes into the user buffer after queued data arrives asynchronously.
+ *          1. A blocking read timeout detaches the pending relation and later bytes do
+ * not corrupt the stale buffer.
+ *          2. A pending zero-length read only triggers completion and does not consume
+ * queued bytes.
+ *          3. A blocking write timeout detaches the waiter and later submissions start a
+ * fresh wait cycle.
+ *          4. A blocking read copies bytes into the user buffer after queued data arrives
+ * asynchronously.
  */
 #include "rw_runtime_test_common.hpp"
 
@@ -18,14 +23,17 @@ namespace
 {
 
 /**
- * @brief 测试入口函数 `test_rw_block_read_timeout_detaches_pending`。 Test entry function `test_rw_block_read_timeout_detaches_pending`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_block_read_timeout_detaches_pending`。 Test entry function
+ * `test_rw_block_read_timeout_detaches_pending`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_block_read_timeout_detaches_pending()
 {
   // 测试内容：阻塞读超时后，旧缓冲区和信号量状态都不应被后续补数据污染。
-  // Test coverage: later queued bytes must not corrupt the stale buffer or semaphore state after a blocking read timeout.
+  // Test coverage: later queued bytes must not corrupt the stale buffer or semaphore
+  // state after a blocking read timeout.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -59,14 +67,17 @@ void test_rw_block_read_timeout_detaches_pending()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_zero_read_pending_notifies_without_dequeue`。 Test entry function `test_rw_zero_read_pending_notifies_without_dequeue`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_zero_read_pending_notifies_without_dequeue`。 Test entry
+ * function `test_rw_zero_read_pending_notifies_without_dequeue`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_zero_read_pending_notifies_without_dequeue()
 {
   // 测试内容：零长度挂起请求完成后，队列字节仍应保留给后续真实读取。
-  // Test coverage: queued bytes should remain available for a later real read after a zero-length pending completion.
+  // Test coverage: queued bytes should remain available for a later real read after a
+  // zero-length pending completion.
   using namespace LibXR;
 
   for (auto mode : ALL_MODES)
@@ -107,14 +118,17 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_block_write_timeout_detaches_waiter`。 Test entry function `test_rw_block_write_timeout_detaches_waiter`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_block_write_timeout_detaches_waiter`。 Test entry function
+ * `test_rw_block_write_timeout_detaches_waiter`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_block_write_timeout_detaches_waiter()
 {
   // 测试内容：阻塞写超时后，旧等待者不应阻止下一个等待周期重新建立。
-  // Test coverage: a timed-out blocking write waiter should not prevent the next wait cycle from being established.
+  // Test coverage: a timed-out blocking write waiter should not prevent the next wait
+  // cycle from being established.
   using namespace LibXR;
 
   WritePort w(2, 64);
@@ -146,14 +160,17 @@ void test_rw_block_write_timeout_detaches_waiter()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_read_port_block_queue_completion_copies_data`。 Test entry function `test_rw_read_port_block_queue_completion_copies_data`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_read_port_block_queue_completion_copies_data`。 Test entry
+ * function `test_rw_read_port_block_queue_completion_copies_data`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_read_port_block_queue_completion_copies_data()
 {
   // 测试内容：阻塞读在异步补齐后应写回数据且不残留旧信号量状态。
-  // Test coverage: a blocking read should copy asynchronously supplied bytes and leave no stale semaphore state.
+  // Test coverage: a blocking read should copy asynchronously supplied bytes and leave no
+  // stale semaphore state.
   using namespace LibXR;
 
   ReadPort r(16);
@@ -178,9 +195,12 @@ void test_rw_read_port_block_queue_completion_copies_data()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunRuntimeRwBlockTimeoutTests`。 Test-item function `RunRuntimeRwBlockTimeoutTests`.
- * @details 测试内容：执行 runtime `rw` 超时、零长度与队列补齐子场景。 Execute runtime `rw` timeout, zero-length, and queue-completion sub-scenarios.
- *          测试原理：把等待者解绑与补齐路径单独成组，降低单文件复杂度。 Group waiter-detach and completion paths together to reduce single-file complexity.
+ * @brief 测试项函数 `RunRuntimeRwBlockTimeoutTests`。 Test-item function
+ * `RunRuntimeRwBlockTimeoutTests`.
+ * @details 测试内容：执行 runtime `rw` 超时、零长度与队列补齐子场景。 Execute runtime
+ * `rw` timeout, zero-length, and queue-completion sub-scenarios.
+ *          测试原理：把等待者解绑与补齐路径单独成组，降低单文件复杂度。 Group
+ * waiter-detach and completion paths together to reduce single-file complexity.
  */
 void RunRuntimeRwBlockTimeoutTests()
 {

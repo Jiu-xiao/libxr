@@ -48,7 +48,8 @@ class QueueBase
    * @brief 访问指定物理槽位的原始元素地址。
    * @brief Access the raw element address of one physical slot.
    * @param index 目标物理槽位下标。 Target physical slot index.
-   * @return 指向该槽位元素起始地址的指针。 Pointer to the element base address of the slot.
+   * @return 指向该槽位元素起始地址的指针。 Pointer to the element base address of the
+   * slot.
    */
   [[nodiscard]] void* operator[](uint32_t index);
 
@@ -57,7 +58,8 @@ class QueueBase
    * @brief Enqueue one element by bytes.
    * @param data 指向待入队元素的指针。 Pointer to the element to enqueue.
    * @return 成功返回 `ErrorCode::OK`，队列满返回 `ErrorCode::FULL`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::FULL` when the queue is full.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::FULL` when the queue is
+   * full.
    */
   ErrorCode PushBytes(const void* data);
 
@@ -66,7 +68,8 @@ class QueueBase
    * @brief Peek the front element by bytes without dequeuing it.
    * @param data 接收队头元素的缓冲区。 Buffer receiving the front element.
    * @return 成功返回 `ErrorCode::OK`，队列空返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the queue is empty.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the queue is
+   * empty.
    */
   ErrorCode PeekBytes(void* data);
 
@@ -76,7 +79,8 @@ class QueueBase
    * @param data 接收出队元素的缓冲区；传 `nullptr` 时仅丢弃。
    *             Buffer receiving the dequeued element; pass `nullptr` to discard only.
    * @return 成功返回 `ErrorCode::OK`，队列空返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the queue is empty.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the queue is
+   * empty.
    */
   ErrorCode PopBytes(void* data = nullptr);
 
@@ -84,7 +88,8 @@ class QueueBase
    * @brief 获取当前最后一个已入队元素的物理槽位下标。
    * @brief Get the physical slot index of the current last queued element.
    * @return 队列非空时返回最后一个元素的物理槽位下标，否则返回 `-1`。
-   *         Returns the physical slot index of the last element, or `-1` when the queue is empty.
+   *         Returns the physical slot index of the last element, or `-1` when the queue
+   * is empty.
    */
   int GetLastElementIndex() const;
 
@@ -92,7 +97,8 @@ class QueueBase
    * @brief 获取当前第一个已入队元素的物理槽位下标。
    * @brief Get the physical slot index of the current first queued element.
    * @return 队列非空时返回第一个元素的物理槽位下标，否则返回 `-1`。
-   *         Returns the physical slot index of the first element, or `-1` when the queue is empty.
+   *         Returns the physical slot index of the first element, or `-1` when the queue
+   * is empty.
    */
   int GetFirstElementIndex() const;
 
@@ -102,7 +108,8 @@ class QueueBase
    * @param data 指向元素数组的缓冲区。 Buffer pointing to the element array.
    * @param size 要入队的元素个数。 Number of elements to enqueue.
    * @return 成功返回 `ErrorCode::OK`，空间不足返回 `ErrorCode::FULL`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::FULL` when free space is insufficient.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::FULL` when free space is
+   * insufficient.
    */
   ErrorCode PushBatchBytes(const void* data, size_t size);
 
@@ -113,7 +120,8 @@ class QueueBase
    *             Buffer receiving dequeued elements; pass `nullptr` to discard only.
    * @param size 要出队的元素个数。 Number of elements to dequeue.
    * @return 成功返回 `ErrorCode::OK`，元素不足返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored elements are insufficient.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored
+   * elements are insufficient.
    */
   ErrorCode PopBatchBytes(void* data, size_t size);
 
@@ -123,7 +131,8 @@ class QueueBase
    * @param data 接收查看结果的缓冲区。 Buffer receiving the peeked elements.
    * @param size 要查看的元素个数。 Number of elements to peek.
    * @return 成功返回 `ErrorCode::OK`，元素不足返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored elements are insufficient.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored
+   * elements are insufficient.
    */
   ErrorCode PeekBatchBytes(void* data, size_t size);
 
@@ -177,10 +186,12 @@ class QueueBase
  public:
   uint8_t* queue_array_;        ///< 队列数据缓冲区。 Queue data buffer.
   const uint16_t ELEMENT_SIZE;  ///< 单个元素的字节数。 Byte size of one element.
-  size_t head_ = 0;             ///< 当前队头物理槽位下标。 Physical slot index of the current head.
-  size_t tail_ = 0;             ///< 下一个待写入物理槽位下标。 Physical slot index of the next enqueue position.
-  bool is_full_ = false;        ///< 当前队列是否已满。 Whether the queue is currently full.
-  size_t length_;               ///< 队列最大容量。 Maximum queue capacity.
-  bool own_buffer_ = false;     ///< 是否由当前队列拥有缓冲区。 Whether this queue owns the buffer.
+  size_t head_ = 0;  ///< 当前队头物理槽位下标。 Physical slot index of the current head.
+  size_t tail_ = 0;  ///< 下一个待写入物理槽位下标。 Physical slot index of the next
+                     ///< enqueue position.
+  bool is_full_ = false;  ///< 当前队列是否已满。 Whether the queue is currently full.
+  size_t length_;         ///< 队列最大容量。 Maximum queue capacity.
+  bool own_buffer_ =
+      false;  ///< 是否由当前队列拥有缓冲区。 Whether this queue owns the buffer.
 };
 }  // namespace LibXR

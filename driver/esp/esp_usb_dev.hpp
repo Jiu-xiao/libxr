@@ -30,28 +30,34 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   struct EPConfig
   {
     /**
-     * @brief 该配置项应如何生成 endpoint 方向 / How this config entry should populate endpoint directions
+     * @brief 该配置项应如何生成 endpoint 方向 / How this config entry should populate
+     * endpoint directions
      */
     enum class DirectionHint : int8_t
     {
-      BothDirections = -1,  ///< 同时生成 IN/OUT endpoint / Create both IN and OUT endpoints
-      OutOnly = 0,          ///< 仅生成 OUT endpoint / Create only the OUT endpoint
-      InOnly = 1,           ///< 仅生成 IN endpoint / Create only the IN endpoint
+      BothDirections =
+          -1,       ///< 同时生成 IN/OUT endpoint / Create both IN and OUT endpoints
+      OutOnly = 0,  ///< 仅生成 OUT endpoint / Create only the OUT endpoint
+      InOnly = 1,   ///< 仅生成 IN endpoint / Create only the IN endpoint
     };
 
-    RawData buffer;  ///< 该 endpoint 共享的 payload buffer / Shared payload buffer for this endpoint entry
+    RawData buffer;  ///< 该 endpoint 共享的 payload buffer / Shared payload buffer for
+                     ///< this endpoint entry
     DirectionHint direction_hint =
-        DirectionHint::BothDirections;  ///< 该配置项的方向生成提示 / Direction-population hint for this entry
+        DirectionHint::BothDirections;  ///< 该配置项的方向生成提示 / Direction-population
+                                        ///< hint for this entry
 
     EPConfig() = delete;
 
     /**
-     * @brief 使用同一块 buffer 同时生成 IN/OUT endpoint / Create both IN and OUT endpoints from one shared buffer
+     * @brief 使用同一块 buffer 同时生成 IN/OUT endpoint / Create both IN and OUT
+     * endpoints from one shared buffer
      */
     explicit EPConfig(RawData buffer) : buffer(buffer) {}
 
     /**
-     * @brief 使用同一块 buffer 生成单方向 endpoint / Create a single-direction endpoint from one shared buffer
+     * @brief 使用同一块 buffer 生成单方向 endpoint / Create a single-direction endpoint
+     * from one shared buffer
      */
     EPConfig(RawData buffer, bool is_in)
         : buffer(buffer),
@@ -92,7 +98,8 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   void Deinit(bool in_isr) override;
 
   /**
-   * @brief 在控制传输阶段写入设备地址 / Write the device address during control-transfer sequencing
+   * @brief 在控制传输阶段写入设备地址 / Write the device address during control-transfer
+   * sequencing
    */
   ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
 
@@ -120,29 +127,42 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
    */
   struct ControlState
   {
-    bool setup_direction_out = false;  ///< 最近一笔 setup 请求是否面向 OUT data stage / Whether the latest setup requests an OUT data stage
+    bool setup_direction_out =
+        false;  ///< 最近一笔 setup 请求是否面向 OUT data stage / Whether the latest setup
+                ///< requests an OUT data stage
   };
 
   /**
-   * @brief 按方向索引的 endpoint 指针表 / Direction-indexed endpoint pointer table owned by the device core
+   * @brief 按方向索引的 endpoint 指针表 / Direction-indexed endpoint pointer table owned
+   * by the device core
    */
   struct EndpointMap
   {
-    USB::Endpoint* in[ENDPOINT_COUNT] = {};   ///< IN endpoint 指针表 / IN endpoint pointer table
-    USB::Endpoint* out[ENDPOINT_COUNT] = {};  ///< OUT endpoint 指针表 / OUT endpoint pointer table
+    USB::Endpoint* in[ENDPOINT_COUNT] =
+        {};  ///< IN endpoint 指针表 / IN endpoint pointer table
+    USB::Endpoint* out[ENDPOINT_COUNT] =
+        {};  ///< OUT endpoint 指针表 / OUT endpoint pointer table
   };
 
   /**
-   * @brief DWC2 FIFO 分配状态 / DWC2 FIFO allocation state tracked across endpoint configuration
+   * @brief DWC2 FIFO 分配状态 / DWC2 FIFO allocation state tracked across endpoint
+   * configuration
    */
   struct FifoState
   {
-    uint16_t depth_words = 0U;                ///< 硬件 FIFO 总深度（word）/ Total hardware FIFO depth in words
-    uint16_t rx_words = 0U;                   ///< 当前 RX FIFO 配置深度（word）/ Current RX FIFO depth in words
-    uint16_t tx_next_words = 0U;              ///< 下一个 TX FIFO 起始偏移（word）/ Next TX FIFO start offset in words
-    uint16_t tx_words[ENDPOINT_COUNT] = {};   ///< 各 endpoint 已分配 TX FIFO 深度（word）/ Allocated TX FIFO depth per endpoint in words
-    bool tx_bound[ENDPOINT_COUNT] = {};       ///< 各 endpoint 是否已绑定 TX FIFO / Whether each endpoint already has a bound TX FIFO
-    uint8_t allocated_in = 0U;                ///< 已占用的硬件 IN endpoint 个数 / Number of allocated hardware IN endpoints
+    uint16_t depth_words =
+        0U;  ///< 硬件 FIFO 总深度（word）/ Total hardware FIFO depth in words
+    uint16_t rx_words =
+        0U;  ///< 当前 RX FIFO 配置深度（word）/ Current RX FIFO depth in words
+    uint16_t tx_next_words =
+        0U;  ///< 下一个 TX FIFO 起始偏移（word）/ Next TX FIFO start offset in words
+    uint16_t tx_words[ENDPOINT_COUNT] =
+        {};  ///< 各 endpoint 已分配 TX FIFO 深度（word）/ Allocated TX FIFO depth per
+             ///< endpoint in words
+    bool tx_bound[ENDPOINT_COUNT] = {};  ///< 各 endpoint 是否已绑定 TX FIFO / Whether
+                                         ///< each endpoint already has a bound TX FIFO
+    uint8_t allocated_in = 0U;  ///< 已占用的硬件 IN endpoint 个数 / Number of allocated
+                                ///< hardware IN endpoints
   };
 
   /**
@@ -150,12 +170,15 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
    */
   struct RuntimeState
   {
-    intr_handle_t intr_handle = nullptr;  ///< 注册的 USB 中断句柄 / Registered USB interrupt handle
-    void* phy_handle = nullptr;           ///< USB PHY 句柄 / USB PHY handle
-    bool phy_ready = false;               ///< PHY 是否已准备完成 / Whether the PHY has been prepared
-    bool irq_ready = false;               ///< 中断是否已准备完成 / Whether the interrupt has been prepared
-    bool started = false;                 ///< 控制器是否处于启动态 / Whether the controller is started
-    bool rom_usb_cleaned = false;         ///< ROM USB 默认状态是否已清理 / Whether the ROM USB default state has been cleaned
+    intr_handle_t intr_handle =
+        nullptr;  ///< 注册的 USB 中断句柄 / Registered USB interrupt handle
+    void* phy_handle = nullptr;  ///< USB PHY 句柄 / USB PHY handle
+    bool phy_ready = false;  ///< PHY 是否已准备完成 / Whether the PHY has been prepared
+    bool irq_ready =
+        false;  ///< 中断是否已准备完成 / Whether the interrupt has been prepared
+    bool started = false;  ///< 控制器是否处于启动态 / Whether the controller is started
+    bool rom_usb_cleaned = false;  ///< ROM USB 默认状态是否已清理 / Whether the ROM USB
+                                   ///< default state has been cleaned
   };
 
   /**
@@ -244,7 +267,8 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   void UpdateSetupState(const uint8_t* setup);
 
   /**
-   * @brief 返回最近 setup 的 data stage 是否面向 OUT / Return whether the latest setup uses an OUT data stage
+   * @brief 返回最近 setup 的 data stage 是否面向 OUT / Return whether the latest setup
+   * uses an OUT data stage
    */
   bool LastSetupDirectionOut() const { return control_.setup_direction_out; }
 
@@ -260,16 +284,20 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
                       uint16_t& fifo_words);
 
   /**
-   * @brief 确保 RX FIFO 容量满足当前 endpoint 需求 / Ensure the RX FIFO is large enough for the current endpoint need
+   * @brief 确保 RX FIFO 容量满足当前 endpoint 需求 / Ensure the RX FIFO is large enough
+   * for the current endpoint need
    */
   bool EnsureRxFifo(uint16_t packet_size);
 
   EndpointMap endpoint_map_ = {};  ///< Endpoint 所有权映射表 / Endpoint ownership map
-  FifoState fifo_state_ = {};      ///< FIFO 尺寸与分配账本 / FIFO sizing and allocation bookkeeping
-  RuntimeState runtime_ = {};      ///< 运行时资源与全局状态 / Runtime resource ownership and global flags
-  alignas(SETUP_DMA_BUFFER_BYTES)
-  uint8_t setup_packet_[SETUP_DMA_BUFFER_BYTES] = {};  ///< DMA 可见的共享 setup 包缓冲区 / Shared DMA-visible setup-packet buffer
-  ControlState control_ = {};  ///< 需跨 status completion 保留的 EP0 setup 状态 / EP0 setup state that must survive until status completion
+  FifoState fifo_state_ =
+      {};  ///< FIFO 尺寸与分配账本 / FIFO sizing and allocation bookkeeping
+  RuntimeState runtime_ =
+      {};  ///< 运行时资源与全局状态 / Runtime resource ownership and global flags
+  alignas(SETUP_DMA_BUFFER_BYTES) uint8_t setup_packet_[SETUP_DMA_BUFFER_BYTES] =
+      {};  ///< DMA 可见的共享 setup 包缓冲区 / Shared DMA-visible setup-packet buffer
+  ControlState control_ = {};  ///< 需跨 status completion 保留的 EP0 setup 状态 / EP0
+                               ///< setup state that must survive until status completion
 };
 
 }  // namespace LibXR

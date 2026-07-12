@@ -81,7 +81,8 @@ class Database
 
     /**
      * @brief 构造函数，初始化键，并在数据库不存在时赋默认值
-     *        (Constructor to initialize key, assigning default value if not found in the database).
+     *        (Constructor to initialize key, assigning default value if not found in the
+     * database).
      *
      * If the key does not exist in the database, it is initialized with zero.
      * 如果键在数据库中不存在，则初始化为零。

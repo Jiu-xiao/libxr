@@ -1,15 +1,23 @@
 /**
  * @file test_queue.cpp
- * @brief 公开队列家族的基础字节语义与 FIFO helper 测试。 Tests for public queue-family byte semantics and FIFO helpers.
+ * @brief 公开队列家族的基础字节语义与 FIFO helper 测试。 Tests for public queue-family
+ * byte semantics and FIFO helpers.
  *
  * 测试项目 / Test items:
- * 1. `QueueBase` / `SPSCQueueBase` / `MPMCQueueBase` 的字节级 push/pop。 Byte-level push/pop on the public queue bases.
- * 2. 普通 `Queue` 的 `Overwrite()`、capacity-1 和无默认构造 payload 行为。 Ordinary `Queue` overwrite, capacity-1, and no-default-payload behavior.
- * 3. 普通 `Queue` 的批量 push/pop/peek wraparound 顺序。 FIFO wraparound ordering for ordinary `Queue` batch helpers.
+ * 1. `QueueBase` / `SPSCQueueBase` / `MPMCQueueBase` 的字节级 push/pop。 Byte-level
+ * push/pop on the public queue bases.
+ * 2. 普通 `Queue` 的 `Overwrite()`、capacity-1 和无默认构造 payload 行为。 Ordinary
+ * `Queue` overwrite, capacity-1, and no-default-payload behavior.
+ * 3. 普通 `Queue` 的批量 push/pop/peek wraparound 顺序。 FIFO wraparound ordering for
+ * ordinary `Queue` batch helpers.
  *
  * 测试原理 / Test principles:
- * 1. 主线现在公开了 queue-base 层，因此要直接验证 byte API，而不只验证 typed wrapper。 The mainline now exposes the queue-base layer, so verify the byte API directly instead of only the typed wrappers.
- * 2. 保留普通 `Queue` 的 typed FIFO 验证，因为它仍然是 object-pool 和通用测试里的基础构件。 Keep typed FIFO checks on ordinary `Queue`, because it remains a foundational building block for object-pool and general tests.
+ * 1. 主线现在公开了 queue-base 层，因此要直接验证 byte API，而不只验证 typed wrapper。
+ * The mainline now exposes the queue-base layer, so verify the byte API directly instead
+ * of only the typed wrappers.
+ * 2. 保留普通 `Queue` 的 typed FIFO 验证，因为它仍然是 object-pool
+ * 和通用测试里的基础构件。 Keep typed FIFO checks on ordinary `Queue`, because it remains
+ * a foundational building block for object-pool and general tests.
  */
 #include <cstddef>
 #include <cstdint>
@@ -35,8 +43,8 @@ static_assert(std::is_final_v<LibXR::MPMCQueue<int>>);
 static_assert(std::is_base_of_v<LibXR::QueueBase, LibXR::Queue<int>>);
 static_assert(std::is_base_of_v<LibXR::SPSCQueueBase, LibXR::SPSCQueue<int>>);
 static_assert(std::is_base_of_v<LibXR::MPMCQueueBase, LibXR::MPMCQueue<int>>);
-static_assert(std::is_base_of_v<LibXR::QueueTypedBase<LibXR::Queue<int>, int>,
-                                LibXR::Queue<int>>);
+static_assert(
+    std::is_base_of_v<LibXR::QueueTypedBase<LibXR::Queue<int>, int>, LibXR::Queue<int>>);
 static_assert(std::is_base_of_v<LibXR::QueueTypedBase<LibXR::SPSCQueue<int>, int>,
                                 LibXR::SPSCQueue<int>>);
 static_assert(std::is_base_of_v<LibXR::QueueTypedBase<LibXR::MPMCQueue<int>, int>,
@@ -87,7 +95,8 @@ void test_queue()
     ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
-  // The ordinary FIFO queue supports capacity 1 and no-default payloads for normal byte Push/Pop.
+  // The ordinary FIFO queue supports capacity 1 and no-default payloads for normal byte
+  // Push/Pop.
   {
     LibXR::Queue<uint32_t> queue(1);
     uint32_t value = 0;

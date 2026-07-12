@@ -1,9 +1,8 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstdint>
 
+#include "esp_def.hpp"
 #include "hal/wdt_hal.h"
 #include "soc/soc_caps.h"
 #include "watchdog.hpp"

@@ -1,6 +1,7 @@
 #pragma once
-#include "libxr_def.hpp"
 #include <cstdint>
+
+#include "libxr_def.hpp"
 
 namespace LibXR::USB
 {

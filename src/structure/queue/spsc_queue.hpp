@@ -25,8 +25,7 @@ namespace LibXR
  * @tparam Data 队列存储的数据类型。 Queue element type.
  */
 template <typename Data>
-class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
-                        public SPSCQueueBase
+class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPSCQueueBase
 {
  public:
   static_assert(alignof(Data) <= alignof(std::max_align_t),
@@ -45,8 +44,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
    *
    * @note 包含动态内存分配。 Contains dynamic memory allocation.
    */
-  explicit SPSCQueue(size_t length)
-      : SPSCQueueBase(sizeof(Data), alignof(Data), length)
+  explicit SPSCQueue(size_t length) : SPSCQueueBase(sizeof(Data), alignof(Data), length)
   {
   }
 
@@ -64,10 +62,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
    *         the queue is empty
    */
-  ErrorCode Peek(Data& item)
-  {
-    return SPSCQueueBase::PeekBytes(&item);
-  }
+  ErrorCode Peek(Data& item) { return SPSCQueueBase::PeekBytes(&item); }
 
   /**
    * @brief 批量推入多个 payload。
@@ -110,9 +105,9 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
    * @param size payload 个数。 Number of payloads.
    * @param writer 写入器回调，签名为 `ErrorCode(Data* buffer, size_t count)`。
    *        Writer callback with signature `ErrorCode(Data* buffer, size_t count)`.
-   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`；否则返回写入器错误码。
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when the
-   *         queue is full; otherwise returns the writer error code.
+   * @return 成功返回 `ErrorCode::OK`；队列满返回
+   * `ErrorCode::FULL`；否则返回写入器错误码。 Returns `ErrorCode::OK` on success; returns
+   * `ErrorCode::FULL` when the queue is full; otherwise returns the writer error code.
    *
    * @note 仅当写入器处理完整批次后才提交入队。
    *       The enqueue is committed only after the writer accepts the full batch.
@@ -120,10 +115,12 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   template <typename Writer>
   ErrorCode PushWithWriter(size_t size, Writer&& writer)
   {
-    static_assert(std::is_trivially_copyable_v<Data>,
-                  "batched SPSCQueue::PushWithWriter requires trivially copyable payloads");
-    static_assert(std::is_trivially_destructible_v<Data>,
-                  "batched SPSCQueue::PushWithWriter requires trivially destructible payloads");
+    static_assert(
+        std::is_trivially_copyable_v<Data>,
+        "batched SPSCQueue::PushWithWriter requires trivially copyable payloads");
+    static_assert(
+        std::is_trivially_destructible_v<Data>,
+        "batched SPSCQueue::PushWithWriter requires trivially destructible payloads");
     static_assert(std::is_invocable_v<Writer&, Data*, size_t>,
                   "PushWithWriter writer must be callable as "
                   "ErrorCode(Data* buffer, size_t count)");
@@ -133,11 +130,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
 
     Writer& writer_ref = writer;
     return SPSCQueueBase::PushBytesWithWriter(
-        size,
-        [&](void* buffer, size_t count) -> ErrorCode
-        {
-          return writer_ref(static_cast<Data*>(buffer), count);
-        });
+        size, [&](void* buffer, size_t count) -> ErrorCode
+        { return writer_ref(static_cast<Data*>(buffer), count); });
   }
 
   /**
@@ -167,9 +161,10 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
    * @param size payload 个数。 Number of payloads.
    * @param reader 读取器回调，签名为 `ErrorCode(const Data* buffer, size_t count)`。
    *        Reader callback with signature `ErrorCode(const Data* buffer, size_t count)`.
-   * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`；否则返回读取器错误码。
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when the
-   *         queue is empty; otherwise returns the reader error code.
+   * @return 成功返回 `ErrorCode::OK`；队列空返回
+   * `ErrorCode::EMPTY`；否则返回读取器错误码。 Returns `ErrorCode::OK` on success;
+   * returns `ErrorCode::EMPTY` when the queue is empty; otherwise returns the reader
+   * error code.
    *
    * @note 仅当读取器处理完整批次后才提交出队。
    *       The pop is committed only after the reader accepts the full batch.
@@ -177,10 +172,12 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
   template <typename Reader>
   ErrorCode PopWithReader(size_t size, Reader&& reader)
   {
-    static_assert(std::is_trivially_copyable_v<Data>,
-                  "batched SPSCQueue::PopWithReader requires trivially copyable payloads");
-    static_assert(std::is_trivially_destructible_v<Data>,
-                  "batched SPSCQueue::PopWithReader requires trivially destructible payloads");
+    static_assert(
+        std::is_trivially_copyable_v<Data>,
+        "batched SPSCQueue::PopWithReader requires trivially copyable payloads");
+    static_assert(
+        std::is_trivially_destructible_v<Data>,
+        "batched SPSCQueue::PopWithReader requires trivially destructible payloads");
     static_assert(std::is_invocable_v<Reader&, const Data*, size_t>,
                   "PopWithReader reader must be callable as "
                   "ErrorCode(const Data* buffer, size_t count)");
@@ -190,11 +187,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>,
 
     Reader& reader_ref = reader;
     return SPSCQueueBase::PopBytesWithReader(
-        size,
-        [&](const void* buffer, size_t count) -> ErrorCode
-        {
-          return reader_ref(static_cast<const Data*>(buffer), count);
-        });
+        size, [&](const void* buffer, size_t count) -> ErrorCode
+        { return reader_ref(static_cast<const Data*>(buffer), count); });
   }
 
   /**

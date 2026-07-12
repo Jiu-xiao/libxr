@@ -40,7 +40,7 @@ class Thread
    *         Constructor to create a thread object from a FreeRTOS thread handle
    * @param  handle FreeRTOS 线程句柄 FreeRTOS thread handle
    */
-  Thread(TX_THREAD *handle) : thread_handle_(handle) {};
+  Thread(TX_THREAD* handle) : thread_handle_(handle) {};
 
   /**
    * @brief  创建新线程
@@ -62,7 +62,7 @@ class Thread
    * configuration constraints defined by `configMAX_PRIORITIES`.
    */
   template <typename ArgType>
-  void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
+  void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
               size_t stack_depth, Thread::Priority priority)
   {
     class ThreadBlock
@@ -71,7 +71,7 @@ class Thread
       ThreadBlock(decltype(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
       static void Port(ULONG ptr)
       {
-        ThreadBlock *block = reinterpret_cast<ThreadBlock *>(ptr);
+        ThreadBlock* block = reinterpret_cast<ThreadBlock*>(ptr);
         block->fun_(block->arg_);
         delete block;
       }
@@ -79,12 +79,12 @@ class Thread
       ArgType arg_;
     };
 
-    auto *block = new ThreadBlock(function, arg);
+    auto* block = new ThreadBlock(function, arg);
     auto stack_buffer = new ULONG[stack_depth / sizeof(ULONG)];
     thread_handle_ = new TX_THREAD;
 
     UINT status = tx_thread_create(
-        thread_handle_, const_cast<char *>(name), ThreadBlock::Port, ULONG(block),
+        thread_handle_, const_cast<char*>(name), ThreadBlock::Port, ULONG(block),
         stack_buffer, stack_depth, static_cast<UINT>(priority),
         static_cast<UINT>(priority), TX_NO_TIME_SLICE, TX_AUTO_START);
     ASSERT(status == TX_SUCCESS);
@@ -117,7 +117,7 @@ class Thread
    * @param  last_waskup_time 上次唤醒时间 Last wake-up time
    * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
    */
-  static void SleepUntil(MillisecondTimestamp &last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程
@@ -130,7 +130,7 @@ class Thread
    *         Converts the thread object to a FreeRTOS thread handle
    * @return FreeRTOS 线程句柄 FreeRTOS thread handle
    */
-  operator TX_THREAD *() { return thread_handle_; }
+  operator TX_THREAD*() { return thread_handle_; }
 
  private:
   libxr_thread_handle thread_handle_;

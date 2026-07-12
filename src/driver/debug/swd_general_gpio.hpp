@@ -128,9 +128,8 @@ class SwdGeneralGPIO final : public Swd
     }
     else
     {
-      const uint64_t loops_ceil =
-          (loops_num + static_cast<uint64_t>(LOOPS_SCALE) - 1u) /
-          static_cast<uint64_t>(LOOPS_SCALE);
+      const uint64_t loops_ceil = (loops_num + static_cast<uint64_t>(LOOPS_SCALE) - 1u) /
+                                  static_cast<uint64_t>(LOOPS_SCALE);
       half_period_loops_ = (loops_ceil >= static_cast<uint64_t>(UINT32_MAX))
                                ? UINT32_MAX
                                : static_cast<uint32_t>(loops_ceil);

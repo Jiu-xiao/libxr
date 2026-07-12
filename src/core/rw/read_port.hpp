@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "queue.hpp"
 #include "operation.hpp"
+#include "queue.hpp"
 
 namespace LibXR
 {
@@ -37,9 +37,9 @@ class ReadPort
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
   enum class BusyState : uint32_t
   {
-    IDLE = 0,     ///< No active waiter and no pending completion. 无等待者、无挂起完成。
-    PENDING = 1,  ///< Driver accepted the request; completion still owns progress.
-                  ///< 请求已交给底层推进。
+    IDLE = 0,      ///< No active waiter and no pending completion. 无等待者、无挂起完成。
+    PENDING = 1,   ///< Driver accepted the request; completion still owns progress.
+                   ///< 请求已交给底层推进。
     CLEARING = 2,  ///< ClearQueuedData() owns software dequeue progress.
                    ///< ClearQueuedData() 占有软件出队进度。
     BLOCK_CLAIMED = 3,   ///< BLOCK wakeup already belongs to the current waiter. 当前
@@ -50,10 +50,12 @@ class ReadPort
                          ///< re-check queue. 数据先到，后续调用者要重查队列。
   };
 
-  ReadFun read_fun_ = nullptr;  ///< Driver/backend read notification entry. 底层驱动或后端读取通知入口。
+  ReadFun read_fun_ =
+      nullptr;  ///< Driver/backend read notification entry. 底层驱动或后端读取通知入口。
   SPSCQueue<uint8_t>* queue_data_ = nullptr;  ///< RX payload queue. 接收数据字节队列。
   ReadInfoBlock info_{};  ///< In-flight read request metadata. 当前在途读取请求的元数据。
-  std::atomic<BusyState> busy_{BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
+  std::atomic<BusyState> busy_{
+      BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
 
   /**

@@ -1,17 +1,13 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstdint>
 
 #include "driver/gpio.h"
+#include "esp_def.hpp"
 #include "gpio.hpp"
 #include "hal/gpio_hal.h"
 
-static inline gpio_dev_t* LibXREspGpioHw()
-{
-  return GPIO_HAL_GET_HW(0);
-}
+static inline gpio_dev_t* LibXREspGpioHw() { return GPIO_HAL_GET_HW(0); }
 
 namespace LibXR
 {
@@ -79,9 +75,9 @@ class ESP32GPIO : public GPIO
 
     if (!isr_handler_added_)
     {
-      if (gpio_isr_handler_add(gpio_num_, ESP32GPIO::InterruptDispatcher,
-                               reinterpret_cast<void*>(
-                                   static_cast<uintptr_t>(gpio_num_))) != ESP_OK)
+      if (gpio_isr_handler_add(
+              gpio_num_, ESP32GPIO::InterruptDispatcher,
+              reinterpret_cast<void*>(static_cast<uintptr_t>(gpio_num_))) != ESP_OK)
       {
         return ErrorCode::INIT_ERR;
       }

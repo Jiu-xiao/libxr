@@ -3,11 +3,15 @@
  * @brief runtime `ASync` worker 生命周期测试。 Runtime `ASync` worker lifecycle tests.
  *
  * 测试项目 / Test items:
- * 1. job 分配的状态机。 Job assignment lifecycle: verify the worker transitions through `READY -> BUSY -> DONE -> READY` on repeated assignments.
- * 2. job 执行后的副作用。 Job execution side effect: verify the bound job actually runs and mutates the target state once per assignment.
+ * 1. job 分配的状态机。 Job assignment lifecycle: verify the worker transitions through
+ * `READY -> BUSY -> DONE -> READY` on repeated assignments.
+ * 2. job 执行后的副作用。 Job execution side effect: verify the bound job actually runs
+ * and mutates the target state once per assignment.
  *
  * 测试原理 / Test principles:
- * 1. 围绕真实 worker thread 观察公开状态机，因为这里的正确性首先是调度和生命周期语义。 Observe the public status machine around a real worker thread, because runtime correctness here is primarily scheduling/lifecycle semantics.
+ * 1. 围绕真实 worker thread 观察公开状态机，因为这里的正确性首先是调度和生命周期语义。
+ * Observe the public status machine around a real worker thread, because runtime
+ * correctness here is primarily scheduling/lifecycle semantics.
  */
 #include <cstddef>
 #include <new>
@@ -18,8 +22,9 @@
 
 /**
  * @brief 测试入口函数 `test_async`。 Test entry function `test_async`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_async()
 {
@@ -36,7 +41,8 @@ void test_async()
       },
       &async_arg);
 
-  // ASync has a permanent worker, so the test instance must not register an exit-time destructor.
+  // ASync has a permanent worker, so the test instance must not register an exit-time
+  // destructor.
   alignas(LibXR::ASync) static std::byte async_storage[sizeof(LibXR::ASync)];
   static LibXR::ASync* async =
       new (async_storage) LibXR::ASync(512, LibXR::Thread::Priority::REALTIME);

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+
 #include "double_buffer.hpp"
 #include "flag.hpp"
 #include "libxr_assert.hpp"
@@ -59,28 +60,19 @@ class ESPTxDoubleBuffer
    * @brief 获取当前 active payload 缓冲区指针。
    * @brief Return the current active payload buffer pointer.
    */
-  uint8_t* ActiveBuffer() const
-  {
-    return bytes_.ActiveBuffer();
-  }
+  uint8_t* ActiveBuffer() const { return bytes_.ActiveBuffer(); }
 
   /**
    * @brief 获取当前 pending payload 缓冲区指针。
    * @brief Return the current pending payload buffer pointer.
    */
-  uint8_t* PendingBuffer() const
-  {
-    return bytes_.PendingBuffer();
-  }
+  uint8_t* PendingBuffer() const { return bytes_.PendingBuffer(); }
 
   /**
    * @brief 获取单个半缓冲区大小。
    * @brief Return the size of one half-buffer.
    */
-  size_t BufferSize() const
-  {
-    return bytes_.Size();
-  }
+  size_t BufferSize() const { return bytes_.Size(); }
 
   /**
    * @brief 判断是否存在有效 active 请求。
@@ -223,14 +215,16 @@ class ESPTxDoubleBuffer
   }
 
  private:
-  DoubleBuffer bytes_{};          ///< payload 双缓冲对象。 Payload double-buffer object.
-  size_t active_length_ = 0U;    ///< active payload 长度。 Active payload length.
-  size_t pending_length_ = 0U;   ///< pending payload 长度。 Pending payload length.
-  size_t active_offset_ = 0U;    ///< active payload 已推进偏移。 Active progressed offset.
+  DoubleBuffer bytes_{};        ///< payload 双缓冲对象。 Payload double-buffer object.
+  size_t active_length_ = 0U;   ///< active payload 长度。 Active payload length.
+  size_t pending_length_ = 0U;  ///< pending payload 长度。 Pending payload length.
+  size_t active_offset_ = 0U;   ///< active payload 已推进偏移。 Active progressed offset.
   WriteInfoBlock active_info_ = {};   ///< active 请求元数据。 Active request metadata.
   WriteInfoBlock pending_info_ = {};  ///< pending 请求元数据。 Pending request metadata.
-  bool active_valid_ = false;         ///< active 请求是否有效。 Whether an active request is valid.
-  Flag::Atomic pending_valid_{};      ///< pending 请求是否有效。 Whether a pending request is valid.
+  bool active_valid_ =
+      false;  ///< active 请求是否有效。 Whether an active request is valid.
+  Flag::Atomic
+      pending_valid_{};  ///< pending 请求是否有效。 Whether a pending request is valid.
 };
 
 }  // namespace LibXR

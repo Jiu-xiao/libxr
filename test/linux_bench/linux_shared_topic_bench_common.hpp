@@ -1,6 +1,7 @@
 /**
  * @file linux_shared_topic_bench_common.hpp
- * @brief `LinuxSharedTopic` 基准聚合 helper 入口。 Aggregation helper entry for `LinuxSharedTopic` benchmarks.
+ * @brief `LinuxSharedTopic` 基准聚合 helper 入口。 Aggregation helper entry for
+ * `LinuxSharedTopic` benchmarks.
  * @details 作用：
  *          1. 聚合统计/frame helper 与 I/O/attach helper。
  *          2. 对外只保留 benchmark 组运行入口声明。

@@ -48,7 +48,6 @@ inline constexpr bool K_HAS_TRNG = true;
 inline constexpr bool K_HAS_TRNG = false;
 #endif
 
-
 inline IrqFn gpioa_irq_cb{nullptr};
 inline IrqFn gpiob_irq_cb{nullptr};
 inline IrqFn gpioc_irq_cb{nullptr};

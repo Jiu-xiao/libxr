@@ -1,15 +1,23 @@
 /**
  * @file test_integration.cpp
- * @brief 混合 RamFS 树上的 `Terminal` 集成命令路径测试。 Integrated `Terminal` command-path test over a mixed RamFS tree.
+ * @brief 混合 RamFS 树上的 `Terminal` 集成命令路径测试。 Integrated `Terminal`
+ * command-path test over a mixed RamFS tree.
  *
  * 测试项目 / Test items:
- * 1. 相对/绝对可执行路径执行。 Executable-path dispatch: verify relative and absolute executable paths both run the target command.
- * 2. 非可执行文件和未知命令报错。 Non-executable and unknown command handling: verify ordinary files and unknown commands emit the expected error text.
- * 3. 自动补全与非打印字符过滤。 Auto-complete and input sanitization: verify tab-complete lists matching entries and non-printable bytes are filtered from command parsing.
+ * 1. 相对/绝对可执行路径执行。 Executable-path dispatch: verify relative and absolute
+ * executable paths both run the target command.
+ * 2. 非可执行文件和未知命令报错。 Non-executable and unknown command handling: verify
+ * ordinary files and unknown commands emit the expected error text.
+ * 3. 自动补全与非打印字符过滤。 Auto-complete and input sanitization: verify tab-complete
+ * lists matching entries and non-printable bytes are filtered from command parsing.
  *
  * 测试原理 / Test principles:
- * 1. 在真实 RamFS 树上驱动 `TaskFun()`，让路径解析、输入解析和输出报告保持集成。 Run a realistic RamFS tree through `Terminal::TaskFun()` so path resolution, input parsing and output reporting stay integrated.
- * 2. 以最终终端 transcript 为准，而不是只看局部 helper 状态。 Inspect the final terminal transcript rather than helper internals, because this test covers the end-to-end shell behavior contract.
+ * 1. 在真实 RamFS 树上驱动 `TaskFun()`，让路径解析、输入解析和输出报告保持集成。 Run a
+ * realistic RamFS tree through `Terminal::TaskFun()` so path resolution, input parsing
+ * and output reporting stay integrated.
+ * 2. 以最终终端 transcript 为准，而不是只看局部 helper 状态。 Inspect the final terminal
+ * transcript rather than helper internals, because this test covers the end-to-end shell
+ * behavior contract.
  */
 #include <cstring>
 #include <vector>
@@ -21,8 +29,9 @@
 
 /**
  * @brief 测试入口函数 `test_terminal`。 Test entry function `test_terminal`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_terminal()
 {
@@ -97,9 +106,7 @@ void test_terminal()
   };
 
   auto write_line = [&](const char* command_line)
-  {
-    write_raw(command_line, std::strlen(command_line));
-  };
+  { write_raw(command_line, std::strlen(command_line)); };
 
   write_line("dir1/dir2/dir3/run\n");
   ASSERT(command_count == 1);
@@ -110,7 +117,7 @@ void test_terminal()
   write_line("unknown\n");
   write_line("alph\t\n");
   const unsigned char non_printable_unknown[] = {0xFF, 'u', 'n', 'k', 'n',
-                                                 'o', 'w', 'n', '\n'};
+                                                 'o',  'w', 'n', '\n'};
   write_raw(non_printable_unknown, sizeof(non_printable_unknown));
 
   const size_t output_size = output.GetReadPort().Size();

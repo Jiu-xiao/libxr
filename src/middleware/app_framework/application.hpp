@@ -42,7 +42,8 @@ class Application
 class ApplicationManager
 {
  public:
-  LibXR::LockFreeList app_list_;  ///< 当前已注册模块链表 / List of currently registered modules.
+  LibXR::LockFreeList
+      app_list_;  ///< 当前已注册模块链表 / List of currently registered modules.
 
   /**
    * @brief 注册一个应用模块

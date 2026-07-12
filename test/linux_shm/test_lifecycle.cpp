@@ -1,6 +1,7 @@
 /**
  * @file test_lifecycle.cpp
- * @brief `LinuxSharedTopic` 生命周期语义聚合入口。 Aggregation entry for split `LinuxSharedTopic` lifecycle semantics.
+ * @brief `LinuxSharedTopic` 生命周期语义聚合入口。 Aggregation entry for split
+ * `LinuxSharedTopic` lifecycle semantics.
  * @details 测试项目：
  *          1. 聚合 stale publisher takeover 子场景。
  *          2. 聚合 slot 引用钉住子场景。

@@ -12,7 +12,8 @@ struct Topic::QueueBlock : public Topic::SuberBlock
 {
   SPSCQueueBase* queue;  ///< 指向订阅队列基类。Pointer to the subscribed queue base.
   void (*fun)(MicrosecondTimestamp, void*,
-              QueueBlock&);  ///< 把一条发布转发进队列。Adapter that forwards one publish into the queue.
+              QueueBlock&);  ///< 把一条发布转发进队列。Adapter that forwards one publish
+                             ///< into the queue.
 };
 
 /**
@@ -28,8 +29,10 @@ class Topic::QueuedSubscriber
    * @tparam Data 队列存储的数据类型 / Data type stored in the queue
    * @param name 订阅的主题名称 / Name of the subscribed topic
    * @param queue 订阅的数据队列 / Subscribed data queue
-   * @param domain 可选的域指针，默认为 `nullptr` / Optional domain pointer, default `nullptr`
-   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @param domain 可选的域指针，默认为 `nullptr` / Optional domain pointer, default
+   * `nullptr`
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time
+   * dynamic allocation; subscribers are expected to be long-lived
    * @note 队列订阅者只保存 `queue` 的指针；队列对象本身必须至少活到订阅者不再使用
    *       为止 /
    *       Queued subscribers keep only a pointer to `queue`; the queue object
@@ -46,11 +49,13 @@ class Topic::QueuedSubscriber
   }
 
   /**
-   * @brief 通过主题名称构造带时间戳消息队列订阅者 / Construct a queue subscriber for timestamped messages by topic name
+   * @brief 通过主题名称构造带时间戳消息队列订阅者 / Construct a queue subscriber for
+   * timestamped messages by topic name
    * @tparam Data 队列消息的数据类型 / Data type stored in the queue message
    * @param name 订阅的主题名称 / Name of the subscribed topic
    * @param queue 订阅的消息队列 / Subscribed message queue
-   * @param domain 可选的域指针，默认为 `nullptr` / Optional domain pointer, default `nullptr`
+   * @param domain 可选的域指针，默认为 `nullptr` / Optional domain pointer, default
+   * `nullptr`
    * @note 队列订阅者只保存 `queue` 的指针；队列对象本身必须至少活到订阅者不再使用
    *       为止 /
    *       Queued subscribers keep only a pointer to `queue`; the queue object
@@ -68,11 +73,13 @@ class Topic::QueuedSubscriber
   }
 
   /**
-   * @brief 使用 `Topic` 和无锁队列构造订阅者 / Construct a subscriber from a `Topic` and a lock-free queue
+   * @brief 使用 `Topic` 和无锁队列构造订阅者 / Construct a subscriber from a `Topic` and
+   * a lock-free queue
    * @tparam Data 队列存储的数据类型 / Data type stored in the queue
    * @param topic 订阅的主题 / Subscribed topic
    * @param queue 订阅的数据队列 / Subscribed data queue
-   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time
+   * dynamic allocation; subscribers are expected to be long-lived
    * @note 队列订阅者只保存 `queue` 的指针；队列对象本身必须至少活到订阅者不再使用
    *       为止 /
    *       Queued subscribers keep only a pointer to `queue`; the queue object
@@ -91,15 +98,14 @@ class Topic::QueuedSubscriber
     block_->data_.type = SuberType::QUEUE;
     block_->data_.queue = &queue;
     block_->data_.fun = [](MicrosecondTimestamp, void* payload_addr, QueueBlock& block)
-    {
-      (void)block.queue->PushBytes(payload_addr);
-    };
+    { (void)block.queue->PushBytes(payload_addr); };
 
     topic.block_->data_.subers.Add(*block_);
   }
 
   /**
-   * @brief 使用 `Topic` 和带时间戳消息队列构造订阅者 / Construct a subscriber from a `Topic` and a timestamped message queue
+   * @brief 使用 `Topic` 和带时间戳消息队列构造订阅者 / Construct a subscriber from a
+   * `Topic` and a timestamped message queue
    * @tparam Data 队列消息的数据类型 / Data type stored in the queue message
    * @param topic 订阅的主题 / Subscribed topic
    * @param queue 订阅的消息队列 / Subscribed message queue
@@ -177,6 +183,7 @@ class Topic::QueuedSubscriber
   }
 
  private:
-  LockFreeList::Node<QueueBlock>* block_ = nullptr;  ///< 订阅者数据块。Subscriber data block.
+  LockFreeList::Node<QueueBlock>* block_ =
+      nullptr;  ///< 订阅者数据块。Subscriber data block.
 };
 }  // namespace LibXR

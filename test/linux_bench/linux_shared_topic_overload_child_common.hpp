@@ -1,18 +1,21 @@
 /**
  * @file linux_shared_topic_overload_child_common.hpp
- * @brief `LinuxSharedTopic` overload subscriber 子进程 helper。 Shared subscriber-child helper for `LinuxSharedTopic` overload benchmarks.
+ * @brief `LinuxSharedTopic` overload subscriber 子进程 helper。 Shared subscriber-child
+ * helper for `LinuxSharedTopic` overload benchmarks.
  * @details 作用：
  *          1. 封装 overload 场景下 subscriber 侧的接收、延迟和 drop 统计。
  *          2. 减小 overload runner 主执行函数的体积。
  *          Purpose:
- *          1. Encapsulate receive/latency/drop collection on the subscriber side of overload cases.
+ *          1. Encapsulate receive/latency/drop collection on the subscriber side of
+ * overload cases.
  *          2. Reduce the size of the main overload runner function.
  */
 #pragma once
 
-#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
+
+#include <cerrno>
 
 #include "linux_shared_topic_bench_common.hpp"
 

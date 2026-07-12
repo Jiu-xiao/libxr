@@ -1,6 +1,7 @@
 /**
  * @file test_raw_smoke.cpp
- * @brief linux file-backed `DatabaseRaw` smoke/save 场景子测试。 Split test unit for linux file-backed `DatabaseRaw` smoke/save scenarios.
+ * @brief linux file-backed `DatabaseRaw` smoke/save 场景子测试。 Split test unit for
+ * linux file-backed `DatabaseRaw` smoke/save scenarios.
  */
 #include "linux_database_test_common.hpp"
 #include "raw_database_test_groups.hpp"
@@ -11,9 +12,13 @@ namespace
 using namespace LinuxDatabaseTestCommon;
 
 /**
- * @brief 测试项函数 `TestLinuxDatabaseRawSmoke`。 Test-item function `TestLinuxDatabaseRawSmoke`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestLinuxDatabaseRawSmoke`。 Test-item function
+ * `TestLinuxDatabaseRawSmoke`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestLinuxDatabaseRawSmoke()
 {
@@ -26,8 +31,7 @@ void TestLinuxDatabaseRawSmoke()
   std::array<uint32_t, 3> data_k3 = {111, 222, 333};
   std::array<uint32_t, 4> data_k4 = {1111, 2222, 3333, 4444};
 
-  LinuxBinaryFileFlash<FLASH_SIZE> flash_2("/tmp/flash_test_2.bin", 512, 16, false,
-                                           true);
+  LinuxBinaryFileFlash<FLASH_SIZE> flash_2("/tmp/flash_test_2.bin", 512, 16, false, true);
   DatabaseRaw<16> test_db_2(flash_2, 5);
 
   DatabaseRaw<16>::Key k1_2(test_db_2, "key1", data_k1);
@@ -87,9 +91,13 @@ void TestLinuxDatabaseRawSmoke()
 }
 
 /**
- * @brief 测试项函数 `TestDatabasePartialBackupRecovery`。 Test-item function `TestDatabasePartialBackupRecovery`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestDatabasePartialBackupRecovery`。 Test-item function
+ * `TestDatabasePartialBackupRecovery`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestDatabasePartialBackupRecovery()
 {
@@ -102,9 +110,13 @@ void TestDatabasePartialBackupRecovery()
 }
 
 /**
- * @brief 测试项函数 `TestDatabaseRawSaveCurrentValue`。 Test-item function `TestDatabaseRawSaveCurrentValue`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestDatabaseRawSaveCurrentValue`。 Test-item function
+ * `TestDatabaseRawSaveCurrentValue`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestDatabaseRawSaveCurrentValue()
 {
@@ -123,9 +135,13 @@ void TestDatabaseRawSaveCurrentValue()
 }
 
 /**
- * @brief 测试项函数 `TestDatabaseRawRequiresExactStoredSize`。 Test-item function `TestDatabaseRawRequiresExactStoredSize`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestDatabaseRawRequiresExactStoredSize`。 Test-item function
+ * `TestDatabaseRawRequiresExactStoredSize`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestDatabaseRawRequiresExactStoredSize()
 {
@@ -156,9 +172,12 @@ void TestDatabaseRawRequiresExactStoredSize()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunLinuxDatabaseRawSmokeTests`。 Test-item function `RunLinuxDatabaseRawSmokeTests`.
- * @details 测试内容：执行当前分组里的 `DatabaseRaw` linux database 子场景。 Execute the grouped `DatabaseRaw` linux database sub-scenarios.
- *          测试原理：把 smoke / failure / recovery 三类路径拆开，避免一个原始大文件持续膨胀。 Split smoke, failure, and recovery paths so one raw monolithic file does not keep growing.
+ * @brief 测试项函数 `RunLinuxDatabaseRawSmokeTests`。 Test-item function
+ * `RunLinuxDatabaseRawSmokeTests`.
+ * @details 测试内容：执行当前分组里的 `DatabaseRaw` linux database 子场景。 Execute the
+ * grouped `DatabaseRaw` linux database sub-scenarios. 测试原理：把 smoke / failure /
+ * recovery 三类路径拆开，避免一个原始大文件持续膨胀。 Split smoke, failure, and recovery
+ * paths so one raw monolithic file does not keep growing.
  */
 void RunLinuxDatabaseRawSmokeTests()
 {

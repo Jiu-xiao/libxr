@@ -1,15 +1,22 @@
 /**
  * @file test_encoder.cpp
- * @brief `FloatEncoder` 量化、夹紧与稳健性测试。 `FloatEncoder` quantization, clamp and robustness tests.
+ * @brief `FloatEncoder` 量化、夹紧与稳健性测试。 `FloatEncoder` quantization, clamp and
+ * robustness tests.
  *
  * 测试项目 / Test items:
- * 1. 标称 encode/decode 精度。 Nominal encode/decode accuracy: verify representative gyroscope, accelerometer and Euler-angle ranges decode within the expected tolerance.
- * 2. 越界输入夹紧与边界值回环。 Clamp and boundary behavior: verify out-of-range inputs clamp to min/max and exact boundary values round-trip correctly.
- * 3. 中心点、最小位宽和非有限值路径。 Special cases: verify center-point encoding, minimum bit width and non-finite inputs do not break the encoder contract.
+ * 1. 标称 encode/decode 精度。 Nominal encode/decode accuracy: verify representative
+ * gyroscope, accelerometer and Euler-angle ranges decode within the expected tolerance.
+ * 2. 越界输入夹紧与边界值回环。 Clamp and boundary behavior: verify out-of-range inputs
+ * clamp to min/max and exact boundary values round-trip correctly.
+ * 3. 中心点、最小位宽和非有限值路径。 Special cases: verify center-point encoding,
+ * minimum bit width and non-finite inputs do not break the encoder contract.
  *
  * 测试原理 / Test principles:
- * 1. 按场景误差容忍度比较 decode 误差，因为它本来就是位宽和误差的交换器。 Check decoded numeric error against scenario-specific tolerances, because this utility exists to trade bits for bounded reconstruction error.
- * 2. 显式压夹紧和特殊值分支，把稳健性和精度一起写清。 Exercise explicit clamp and special-value paths so robustness is documented alongside nominal accuracy.
+ * 1. 按场景误差容忍度比较 decode 误差，因为它本来就是位宽和误差的交换器。 Check decoded
+ * numeric error against scenario-specific tolerances, because this utility exists to
+ * trade bits for bounded reconstruction error.
+ * 2. 显式压夹紧和特殊值分支，把稳健性和精度一起写清。 Exercise explicit clamp and
+ * special-value paths so robustness is documented alongside nominal accuracy.
  */
 #include "float_encoder.hpp"
 #include "libxr_def.hpp"
@@ -17,8 +24,9 @@
 
 /**
  * @brief 测试入口函数 `test_float_encoder`。 Test entry function `test_float_encoder`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_float_encoder()
 {

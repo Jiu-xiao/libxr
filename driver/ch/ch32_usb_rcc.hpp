@@ -160,7 +160,8 @@ inline void ConfigureUsb48M()
   // 部分 CH32V30x 可以从 USBHS PHY PLL 提供共享 48 MHz USB 时钟；
   // 这种情况下先选 PHY 路径，再让各控制器自己打开总线时钟。
   // Some CH32V30x parts can source the shared 48 MHz USB clock from the USBHS PHY PLL;
-  // in that case, select the PHY path first and let each controller enable its own bus clock.
+  // in that case, select the PHY path first and let each controller enable its own bus
+  // clock.
   ConfigureUsbHsPhyFromHse();
   RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_USBPHY);
 #else

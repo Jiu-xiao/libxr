@@ -1,6 +1,7 @@
 /**
  * @file test_balance_rr_rotate.cpp
- * @brief `LinuxSharedTopic` BALANCE_RR 轮转分发子验证。 Split verification unit for BALANCE_RR rotation semantics.
+ * @brief `LinuxSharedTopic` BALANCE_RR 轮转分发子验证。 Split verification unit for
+ * BALANCE_RR rotation semantics.
  * @details 测试项目：
  *          1. 活跃 balanced subscriber 之间按轮转顺序交付。
  *          Test items:
@@ -27,8 +28,10 @@ void RunBalanceRoundRobinRotateScenario()
     SharedTopic publisher(topic_name, config);
     ASSERT(publisher.Valid());
 
-    SharedSubscriber subscriber_a(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
-    SharedSubscriber subscriber_b(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_a(topic_name,
+                                  LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_b(topic_name,
+                                  LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
     ASSERT(subscriber_a.Valid());
     ASSERT(subscriber_b.Valid());
 

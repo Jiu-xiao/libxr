@@ -10,10 +10,10 @@
  *       internal module boundaries
  */
 
-#include "topic.hpp"
 #include "packet/packet.hpp"
 #include "server/server.hpp"
 #include "subscriber/async.hpp"
 #include "subscriber/callback.hpp"
 #include "subscriber/queue.hpp"
 #include "subscriber/sync.hpp"
+#include "topic.hpp"

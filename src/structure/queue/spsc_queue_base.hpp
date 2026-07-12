@@ -75,12 +75,11 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     ASSERT((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
 
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
-    payloads_ = static_cast<std::byte*>(::operator new[](
-        payload_bytes, std::align_val_t(payload_alloc_align_)));
+    payloads_ = static_cast<std::byte*>(
+        ::operator new[](payload_bytes, std::align_val_t(payload_alloc_align_)));
   }
 
  public:
-
   /**
    * @brief 析构 SPSC 字节队列内核 / Destroy the SPSC byte-queue core
    */
@@ -145,7 +144,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   }
 
   /**
-   * @brief 按字节查看一个队头 payload 但不出队 / Peek one front payload by bytes without dequeuing it
+   * @brief 按字节查看一个队头 payload 但不出队 / Peek one front payload by bytes without
+   * dequeuing it
    * @param value 用于接收 payload 的缓冲区 / Buffer that receives the payload
    * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`；空指针返回
    *         `ErrorCode::PTR_NULL`
@@ -191,9 +191,9 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     const auto current_tail = tail_.load(std::memory_order_relaxed);
     const auto current_head = head_.load(std::memory_order_acquire);
     const size_t capacity = RingCapacity();
-    const size_t free_space =
-        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
-                                       : (current_head - current_tail - 1);
+    const size_t free_space = (current_tail >= current_head)
+                                  ? (capacity - (current_tail - current_head) - 1)
+                                  : (current_head - current_tail - 1);
 
     if (free_space < count)
     {
@@ -217,9 +217,10 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    * @param count payload 个数 / Number of payloads
    * @param writer 写入器，签名为 `ErrorCode(void* buffer, size_t chunk_count)`
    *               / Writer with signature `ErrorCode(void* buffer, size_t chunk_count)`
-   * @return 成功返回 `ErrorCode::OK`；空间不足返回 `ErrorCode::FULL`；否则返回写入器错误码
-   *         / Returns `ErrorCode::OK` on success, `ErrorCode::FULL` when free space
-   *         is insufficient, otherwise returns the writer error code
+   * @return 成功返回 `ErrorCode::OK`；空间不足返回
+   * `ErrorCode::FULL`；否则返回写入器错误码 / Returns `ErrorCode::OK` on success,
+   * `ErrorCode::FULL` when free space is insufficient, otherwise returns the writer error
+   * code
    * @note 写入器每次收到一段连续 payload 存储区，字节长度为
    *       `chunk_count * element_size` / The writer receives one contiguous
    *       payload storage chunk each time, with byte length
@@ -236,9 +237,9 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     const auto current_tail = tail_.load(std::memory_order_relaxed);
     const auto current_head = head_.load(std::memory_order_acquire);
     const size_t capacity = RingCapacity();
-    const size_t free_space =
-        (current_tail >= current_head) ? (capacity - (current_tail - current_head) - 1)
-                                       : (current_head - current_tail - 1);
+    const size_t free_space = (current_tail >= current_head)
+                                  ? (capacity - (current_tail - current_head) - 1)
+                                  : (current_head - current_tail - 1);
 
     if (free_space < count)
     {
@@ -314,10 +315,12 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    * @tparam Reader 读取器类型 / Reader callback type
    * @param count payload 个数 / Number of payloads
    * @param reader 读取器，签名为 `ErrorCode(const void* buffer, size_t chunk_count)`
-   *               / Reader with signature `ErrorCode(const void* buffer, size_t chunk_count)`
-   * @return 成功返回 `ErrorCode::OK`；元素不足返回 `ErrorCode::EMPTY`；否则返回读取器错误码
-   *         / Returns `ErrorCode::OK` on success, `ErrorCode::EMPTY` when there are
-   *         not enough payloads, otherwise returns the reader error code
+   *               / Reader with signature `ErrorCode(const void* buffer, size_t
+   * chunk_count)`
+   * @return 成功返回 `ErrorCode::OK`；元素不足返回
+   * `ErrorCode::EMPTY`；否则返回读取器错误码 / Returns `ErrorCode::OK` on success,
+   * `ErrorCode::EMPTY` when there are not enough payloads, otherwise returns the reader
+   * error code
    * @note 读取器每次收到一段连续 payload 存储区，字节长度为
    *       `chunk_count * element_size` / The reader receives one contiguous
    *       payload storage chunk each time, with byte length
@@ -423,8 +426,9 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   {
     const auto current_head = head_.load(std::memory_order_acquire);
     const auto current_tail = tail_.load(std::memory_order_acquire);
-    return (current_tail >= current_head) ? (current_tail - current_head)
-                                          : (RingCapacity() - current_head + current_tail);
+    return (current_tail >= current_head)
+               ? (current_tail - current_head)
+               : (RingCapacity() - current_head + current_tail);
   }
 
   /**
@@ -443,12 +447,10 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   /**
    * @brief 获取指定槽位 payload 起始地址 / Get the payload base address of one slot
    * @param index 目标槽位下标 / Target slot index
-   * @return 指向目标槽位 payload 起始地址的指针 / Pointer to the slot payload base address
+   * @return 指向目标槽位 payload 起始地址的指针 / Pointer to the slot payload base
+   * address
    */
-  std::byte* PayloadPtr(IndexType index)
-  {
-    return payloads_ + index * payload_stride_;
-  }
+  std::byte* PayloadPtr(IndexType index) { return payloads_ + index * payload_stride_; }
 
   /**
    * @brief 获取指定槽位 payload 起始地址（只读）
@@ -474,10 +476,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    * @param index 当前槽位下标 / Current slot index
    * @return 推进后的槽位下标 / Advanced slot index
    */
-  IndexType Increment(IndexType index) const
-  {
-    return (index + 1) % RingCapacity();
-  }
+  IndexType Increment(IndexType index) const { return (index + 1) % RingCapacity(); }
 
   /// @brief 禁止拷贝构造。 Non-copyable.
   SPSCQueueBase(const SPSCQueueBase&);
@@ -527,15 +526,17 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     return lhs * rhs;
   }
 
-  const size_t element_size_;    ///< 单个 payload 的字节数。 Byte size of one payload.
-  const size_t capacity_;        ///< 队列容量。 Queue capacity.
-  const size_t payload_alloc_align_;  ///< 整体分配对齐。 Allocation alignment for the payload buffer.
-  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长。 Byte stride between adjacent payload slots.
+  const size_t element_size_;  ///< 单个 payload 的字节数。 Byte size of one payload.
+  const size_t capacity_;      ///< 队列容量。 Queue capacity.
+  const size_t payload_alloc_align_;  ///< 整体分配对齐。 Allocation alignment for the
+                                      ///< payload buffer.
+  const size_t payload_stride_;  ///< 相邻 payload 槽位之间的步长。 Byte stride between
+                                 ///< adjacent payload slots.
   std::byte* payloads_;          ///< payload 字节缓冲区。 Byte buffer storing payloads.
 
-  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
-      head_;  ///< 下一个待出队的环形下标。 Next ring index to dequeue.
-  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<IndexType>
-      tail_;  ///< 下一个待入队的环形下标。 Next ring index to enqueue.
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<
+      IndexType> head_;  ///< 下一个待出队的环形下标。 Next ring index to dequeue.
+  alignas(LibXR::CONCURRENCY_ALIGNMENT) std::atomic<
+      IndexType> tail_;  ///< 下一个待入队的环形下标。 Next ring index to enqueue.
 };
 }  // namespace LibXR

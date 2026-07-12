@@ -1,13 +1,17 @@
 /**
  * @file test_pid_state.cpp
- * @brief PID 状态访问器与重置子测试。 Split test unit for PID state-accessor and reset behavior.
+ * @brief PID 状态访问器与重置子测试。 Split test unit for PID state-accessor and reset
+ * behavior.
  */
 #include "pid_test_common.hpp"
 
 /**
  * @brief 测试项函数 `RunPidStateTests`。 Test-item function `RunPidStateTests`.
- * @details 测试内容：执行当前分组里的 PID 子场景。 Execute the grouped PID sub-scenarios for this split file.
- *          测试原理：把响应、防积分和状态语义拆开，避免一个测试文件继续承担过多控制器语义。 Split response, anti-windup, and state semantics so one test file does not keep carrying too many controller behaviors.
+ * @details 测试内容：执行当前分组里的 PID 子场景。 Execute the grouped PID sub-scenarios
+ * for this split file.
+ *          测试原理：把响应、防积分和状态语义拆开，避免一个测试文件继续承担过多控制器语义。
+ * Split response, anti-windup, and state semantics so one test file does not keep
+ * carrying too many controller behaviors.
  */
 void RunPidStateTests()
 {

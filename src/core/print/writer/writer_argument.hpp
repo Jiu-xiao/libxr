@@ -1,11 +1,13 @@
 #pragma once
 
 /**
- * @brief Writer 的运行期参数归一化与打包辅助函数 / Runtime argument normalization and packing helpers for Writer
+ * @brief Writer 的运行期参数归一化与打包辅助函数 / Runtime argument normalization and
+ * packing helpers for Writer
  */
 
 /**
- * @brief 返回一个 char 数组参数在边界内的 C 字符串长度 / Return the bounded C-string length inside one char array argument
+ * @brief 返回一个 char 数组参数在边界内的 C 字符串长度 / Return the bounded C-string
+ * length inside one char array argument
  * @tparam N 数组长度 / Array extent
  * @param text char 数组参数 / Char array argument
  * @return 返回边界内首个 NUL 的位置 / Returns the first in-range NUL position
@@ -16,7 +18,8 @@
 template <size_t N>
 constexpr size_t Writer::BoundedTextLength(const char (&text)[N]) noexcept
 {
-  static_assert(N > 0, "LibXR::Print::Writer::BoundedTextLength: char array must be non-empty");
+  static_assert(N > 0,
+                "LibXR::Print::Writer::BoundedTextLength: char array must be non-empty");
   size_t size = 0;
   while (size < N && text[size] != '\0')
   {
@@ -30,7 +33,8 @@ constexpr size_t Writer::BoundedTextLength(const char (&text)[N]) noexcept
 }
 
 /**
- * @brief 将一个字符串类运行期参数归一化为 `std::string_view` / Normalize one string-like runtime argument into `std::string_view`
+ * @brief 将一个字符串类运行期参数归一化为 `std::string_view` / Normalize one string-like
+ * runtime argument into `std::string_view`
  * @tparam T 运行期实参类型 / Runtime argument type
  * @param text 运行期实参值 / Runtime argument value
  * @return 返回归一化后的文本视图 / Returns the normalized text view
@@ -70,11 +74,14 @@ constexpr std::string_view Writer::ToStringView(const T& text)
 }
 
 /**
- * @brief 将一个已匹配的 C++ 实参归一化为某个编译参数槽要求的运行期打包存储类型 / Normalize one matched C++ argument into the packed runtime storage kind required by one compiled argument slot
+ * @brief 将一个已匹配的 C++ 实参归一化为某个编译参数槽要求的运行期打包存储类型 /
+ * Normalize one matched C++ argument into the packed runtime storage kind required by one
+ * compiled argument slot
  * @tparam pack 目标打包存储类型 / Target packed storage kind
  * @tparam T 运行期实参类型 / Runtime argument type
  * @param value 运行期实参值 / Runtime argument value
- * @return 返回该参数槽需要的归一化打包值 / Returns the normalized packed value for this slot
+ * @return 返回该参数槽需要的归一化打包值 / Returns the normalized packed value for this
+ * slot
  */
 template <FormatPackKind pack, typename T>
 constexpr auto Writer::PackValue(T&& value)
@@ -104,8 +111,8 @@ constexpr auto Writer::PackValue(T&& value)
     }
     else if constexpr (std::is_integral_v<Normalized>)
     {
-      return static_cast<uint32_t>(static_cast<std::make_unsigned_t<Normalized>>(
-          static_cast<Normalized>(value)));
+      return static_cast<uint32_t>(
+          static_cast<std::make_unsigned_t<Normalized>>(static_cast<Normalized>(value)));
     }
   }
   else if constexpr (pack == FormatPackKind::U64)
@@ -116,8 +123,8 @@ constexpr auto Writer::PackValue(T&& value)
     }
     else if constexpr (std::is_integral_v<Normalized>)
     {
-      return static_cast<uint64_t>(static_cast<std::make_unsigned_t<Normalized>>(
-          static_cast<Normalized>(value)));
+      return static_cast<uint64_t>(
+          static_cast<std::make_unsigned_t<Normalized>>(static_cast<Normalized>(value)));
     }
   }
   else if constexpr (pack == FormatPackKind::Pointer)
@@ -172,16 +179,17 @@ constexpr auto Writer::PackValue(T&& value)
   }
   else
   {
-    static_assert(
-        dependent_false_v<pack>,
-        "LibXR::Print::Writer::PackValue: unsupported packed argument kind");
+    static_assert(dependent_false_v<pack>,
+                  "LibXR::Print::Writer::PackValue: unsupported packed argument kind");
   }
 }
 
 /**
- * @brief 把一个已打包参数值复制进字节块，并推进写指针 / Copy one packed argument value into the byte blob and advance the cursor
+ * @brief 把一个已打包参数值复制进字节块，并推进写指针 / Copy one packed argument value
+ * into the byte blob and advance the cursor
  * @tparam T 已打包值类型 / Packed value type
- * @param out 当前写指针；会前进 `sizeof(T)` / Current write cursor; advanced by `sizeof(T)`
+ * @param out 当前写指针；会前进 `sizeof(T)` / Current write cursor; advanced by
+ * `sizeof(T)`
  * @param value 待写入的已打包值 / Packed value to store
  */
 template <typename T>
@@ -192,9 +200,11 @@ void Writer::StoreArgument(uint8_t*& out, const T& value)
 }
 
 /**
- * @brief 返回一个编译期参数列表所需的参数打包字节数 / Return the packed-byte size required by one compiled argument list
+ * @brief 返回一个编译期参数列表所需的参数打包字节数 / Return the packed-byte size
+ * required by one compiled argument list
  * @tparam ArgumentInfoList 编译期参数元信息列表 / Compile-time argument metadata list
- * @return 返回该参数列表在运行期打包后需要的总字节数 / Returns the packed runtime byte size for this argument list
+ * @return 返回该参数列表在运行期打包后需要的总字节数 / Returns the packed runtime byte
+ * size for this argument list
  */
 template <auto ArgumentInfoList>
 consteval size_t Writer::PackedArgumentBytes()
@@ -208,19 +218,24 @@ consteval size_t Writer::PackedArgumentBytes()
 }
 
 /**
- * @brief 按字段执行顺序把运行期参数打包成最终字节块 / Pack runtime arguments into the final byte blob in field execution order
+ * @brief 按字段执行顺序把运行期参数打包成最终字节块 / Pack runtime arguments into the
+ * final byte blob in field execution order
  * @tparam ArgumentInfoList 编译期参数元信息列表 / Compile-time argument metadata list
- * @tparam ArgumentOrder 每个输出字段对应的源参数索引表 / Source-argument index per emitted field
- * @tparam Tuple 持有转发后运行期实参的 tuple 类型 / Tuple type holding forwarded runtime arguments
- * @param out 当前写指针；会随着写入推进 / Current write cursor; advanced as values are stored
+ * @tparam ArgumentOrder 每个输出字段对应的源参数索引表 / Source-argument index per
+ * emitted field
+ * @tparam Tuple 持有转发后运行期实参的 tuple 类型 / Tuple type holding forwarded runtime
+ * arguments
+ * @param out 当前写指针；会随着写入推进 / Current write cursor; advanced as values are
+ * stored
  * @param tuple 转发后的运行期实参集合 / Forwarded runtime arguments
  */
 template <auto ArgumentInfoList, auto ArgumentOrder, typename Tuple>
 void Writer::StoreArgumentsOrdered(uint8_t*& out, Tuple& tuple)
 {
-  [&]<size_t... I>(std::index_sequence<I...>) {
-    (StoreArgument(out, PackValue<ArgumentInfoList[I].pack>(
-                            std::get<ArgumentOrder[I]>(tuple))),
+  [&]<size_t... I>(std::index_sequence<I...>)
+  {
+    (StoreArgument(
+         out, PackValue<ArgumentInfoList[I].pack>(std::get<ArgumentOrder[I]>(tuple))),
      ...);
   }(std::make_index_sequence<ArgumentInfoList.size()>{});
 }

@@ -11,7 +11,8 @@ namespace LibXR
 
 /**
  * @brief 适用于不支持逆序写入的 Flash 存储的数据库实现
- *        (Database implementation for Flash storage that does not support reverse writing).
+ *        (Database implementation for Flash storage that does not support reverse
+ * writing).
  *
  * This class manages key-value storage in a Flash memory region where
  * data can only be written sequentially. It maintains a backup system
@@ -109,15 +110,16 @@ class DatabaseRawSequential : public Database
     BACKUP = 1  ///< 备份块 (Backup block).
   };
 
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
   /**
    * @brief 键信息结构，存储键的元数据
    *        (Structure containing key metadata).
    */
   struct KeyInfo
   {
-    uint32_t raw_data;  ///< 1 位后继键标志、7 位键名长度、24 位数据长度
-                        ///< (1-bit next-key flag, 7-bit name length, 24-bit payload size).
+    uint32_t
+        raw_data;  ///< 1 位后继键标志、7 位键名长度、24 位数据长度
+                   ///< (1-bit next-key flag, 7-bit name length, 24-bit payload size).
 
     /**
      * @brief 构造一个擦除态键头 (Construct one erased-state key header).
@@ -172,7 +174,7 @@ LIBXR_PACKED_BEGIN
   };
 
   static_assert(sizeof(KeyInfo) == 4, "KeyInfo size must be 4 bytes");
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
   /**
    * @brief Flash 存储的块信息结构

@@ -5,7 +5,8 @@
  */
 
 /**
- * @brief 为一个有符号整数载荷确定最终可见的符号字符 / Resolve the visible sign character for one signed integer payload
+ * @brief 为一个有符号整数载荷确定最终可见的符号字符 / Resolve the visible sign character
+ * for one signed integer payload
  * @tparam Int 有符号整数类型 / Signed integer type
  * @param value 当前要输出的整数值 / Integer value being emitted
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -32,7 +33,8 @@ char Writer::Executor<Sink>::ResolveSignChar(Int value, const Spec& spec)
 
 #if LIBXR_PRINT_ENABLE_FLOAT
 /**
- * @brief 为一个浮点载荷确定最终可见的符号字符 / Resolve the visible sign character for one float payload
+ * @brief 为一个浮点载荷确定最终可见的符号字符 / Resolve the visible sign character for
+ * one float payload
  * @tparam T 浮点类型 / Float type
  * @param value 当前要输出的浮点值 / Float value being emitted
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -67,7 +69,8 @@ char Writer::Executor<Sink>::ResolveFloatSignChar(T value, const Spec& spec)
 #endif
 
 /**
- * @brief 通过共享整数字段路径写出一个有符号整数值 / Write one signed integer value through the shared integer-field path
+ * @brief 通过共享整数字段路径写出一个有符号整数值 / Write one signed integer value
+ * through the shared integer-field path
  * @tparam Int 有符号整数类型 / Signed integer type
  * @param spec 解码后的字段规格 / Decoded field spec
  * @param value 待写出的整数值 / Integer value to write
@@ -93,10 +96,13 @@ ErrorCode Writer::Executor<Sink>::WriteSigned(const Spec& spec, Int value)
 }
 
 /**
- * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer semantic value through the shared integer-field path
+ * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer
+ * semantic value through the shared integer-field path
  * @tparam Base 整数进制 / Integer radix
- * @tparam UpperCase 十六进制数字是否使用大写字符 / Whether hexadecimal digits should use uppercase characters
- * @tparam PrependOctalZero 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o` should inline its leading `0` into the digit payload
+ * @tparam UpperCase 十六进制数字是否使用大写字符 / Whether hexadecimal digits should use
+ * uppercase characters
+ * @tparam PrependOctalZero 是否把 `%#o` 的前导 `0` 直接并入数字载荷 / Whether `%#o`
+ * should inline its leading `0` into the digit payload
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param prefix 脱离数字载荷输出的前缀 / Prefix emitted outside the digit payload
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -107,11 +113,9 @@ template <OutputSink Sink>
 template <uint8_t Base, bool UpperCase, bool PrependOctalZero,
           std::unsigned_integral UInt>
 ErrorCode Writer::Executor<Sink>::WriteUnsignedDigits(std::string_view prefix,
-                                                               const Spec& spec,
-                                                               UInt value)
+                                                      const Spec& spec, UInt value)
 {
-  char digit_buffer[UnsignedDigitCapacity<UInt, Base>() +
-                    (PrependOctalZero ? 1U : 0U)];
+  char digit_buffer[UnsignedDigitCapacity<UInt, Base>() + (PrependOctalZero ? 1U : 0U)];
   size_t digit_count = AppendUnsigned<Base, UpperCase>(digit_buffer, value);
 
   if constexpr (PrependOctalZero)
@@ -128,7 +132,8 @@ ErrorCode Writer::Executor<Sink>::WriteUnsignedDigits(std::string_view prefix,
 }
 
 /**
- * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer semantic value through the shared integer-field path
+ * @brief 通过共享整数字段路径写出一个无符号整数语义值 / Write one unsigned integer
+ * semantic value through the shared integer-field path
  * @tparam Type 运行期整数语义类型 / Runtime integer semantic type
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -171,14 +176,14 @@ ErrorCode Writer::Executor<Sink>::DispatchUnsigned(const Spec& spec, UInt value)
 }
 
 /**
- * @brief 按规范指针字段策略写出一个指针值 / Write one pointer value using the canonical pointer field policy
+ * @brief 按规范指针字段策略写出一个指针值 / Write one pointer value using the canonical
+ * pointer field policy
  * @param spec 解码后的字段规格 / Decoded field spec
  * @param value 以 `uintptr_t` 编码的指针值 / Pointer value encoded as `uintptr_t`
  * @return 返回指针字段写出结果 / Returns the pointer-field write result
  */
 template <OutputSink Sink>
-ErrorCode Writer::Executor<Sink>::WritePointer(const Spec& spec,
-                                                        uintptr_t value)
+ErrorCode Writer::Executor<Sink>::WritePointer(const Spec& spec, uintptr_t value)
 {
   char digit_buffer[UnsignedDigitCapacity<uintptr_t, 16>()];
   size_t digit_count = AppendUnsigned<16>(digit_buffer, value);
@@ -206,14 +211,14 @@ ErrorCode Writer::Executor<Sink>::WriteCharacter(const Spec& spec, char ch)
 }
 
 /**
- * @brief 写出一个字符串字段值，并在需要时应用精度截断 / Write one string field value, including precision truncation when present
+ * @brief 写出一个字符串字段值，并在需要时应用精度截断 / Write one string field value,
+ * including precision truncation when present
  * @param spec 解码后的字段规格 / Decoded field spec
  * @param text 待写出的字符串载荷 / String payload to write
  * @return 返回字符串字段写出结果 / Returns the string-field write result
  */
 template <OutputSink Sink>
-ErrorCode Writer::Executor<Sink>::WriteString(const Spec& spec,
-                                                       std::string_view text)
+ErrorCode Writer::Executor<Sink>::WriteString(const Spec& spec, std::string_view text)
 {
   auto view = text;
   if (spec.HasPrecision() && spec.precision < view.size())
@@ -225,7 +230,8 @@ ErrorCode Writer::Executor<Sink>::WriteString(const Spec& spec,
 }
 
 /**
- * @brief 通过共享浮点文本后端写出一个浮点语义值 / Write one float semantic value through the shared float-text backend
+ * @brief 通过共享浮点文本后端写出一个浮点语义值 / Write one float semantic value through
+ * the shared float-text backend
  * @tparam T 浮点类型 / Float type
  * @param type 运行期浮点语义类型 / Runtime float semantic type
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -235,8 +241,7 @@ ErrorCode Writer::Executor<Sink>::WriteString(const Spec& spec,
 #if LIBXR_PRINT_ENABLE_FLOAT
 template <OutputSink Sink>
 template <typename T>
-ErrorCode Writer::Executor<Sink>::WriteFloat(FormatType type,
-                                                      const Spec& spec, T value)
+ErrorCode Writer::Executor<Sink>::WriteFloat(FormatType type, const Spec& spec, T value)
 {
   if (!UsesFloatTextBackend(type))
   {
@@ -292,7 +297,8 @@ ErrorCode Writer::Executor<Sink>::WriteFloat(FormatType type,
 #endif
 
 /**
- * @brief 写出一个原始 uint32 十进制快路径字段 / Writes one raw uint32 decimal fast-path field.
+ * @brief 写出一个原始 uint32 十进制快路径字段 / Writes one raw uint32 decimal fast-path
+ * field.
  * @param value Unsigned value to write. / 待写出的无符号值。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
@@ -305,7 +311,8 @@ ErrorCode Writer::Executor<Sink>::WriteU32Dec(uint32_t value)
 }
 
 /**
- * @brief 写出一个原始 int32 十进制快路径字段 / Writes one raw int32 decimal fast-path field.
+ * @brief 写出一个原始 int32 十进制快路径字段 / Writes one raw int32 decimal fast-path
+ * field.
  * @param value Signed value to write. / 待写出的有符号值。
  * @return Returns the sink write result. / 返回 sink 写出结果。
  */
@@ -330,7 +337,8 @@ ErrorCode Writer::Executor<Sink>::WriteI32Dec(int32_t value)
 }
 
 /**
- * @brief 写出一个原始 uint32 多进制快路径字段 / Writes one raw uint32 base-specific fast-path field.
+ * @brief 写出一个原始 uint32 多进制快路径字段 / Writes one raw uint32 base-specific
+ * fast-path field.
  * @tparam Base Integer radix. / 整数进制。
  * @tparam UpperCase Whether hexadecimal digits are uppercase. / 十六进制数字是否大写。
  * @param value Unsigned value to write. / 待写出的无符号值。
@@ -346,14 +354,14 @@ ErrorCode Writer::Executor<Sink>::WriteU32Base(uint32_t value)
 }
 
 /**
- * @brief 写出一个带零填充宽度的 `uint32_t` 十进制快路径字段 / Write one zero-padded `uint32_t` decimal fast-path field
+ * @brief 写出一个带零填充宽度的 `uint32_t` 十进制快路径字段 / Write one zero-padded
+ * `uint32_t` decimal fast-path field
  * @param width 目标零填充宽度 / Target zero-padded width
  * @param value 待写出的无符号值 / Unsigned value to write
  * @return 返回该快路径的写出结果 / Returns the fast-path write result
  */
 template <OutputSink Sink>
-ErrorCode Writer::Executor<Sink>::WriteU32ZeroPadWidth(uint8_t width,
-                                                                uint32_t value)
+ErrorCode Writer::Executor<Sink>::WriteU32ZeroPadWidth(uint8_t width, uint32_t value)
 {
   char digit_buffer[UnsignedDigitCapacity<uint32_t, 10>()];
   size_t digit_count = AppendUnsigned<10>(digit_buffer, value);

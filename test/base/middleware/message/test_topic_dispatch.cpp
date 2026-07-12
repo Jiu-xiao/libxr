@@ -1,6 +1,7 @@
 /**
  * @file test_topic_dispatch.cpp
- * @brief 类型化 `Topic` 分发路径子测试。 Split test unit for typed `Topic` dispatch scenarios.
+ * @brief 类型化 `Topic` 分发路径子测试。 Split test unit for typed `Topic` dispatch
+ * scenarios.
  * @details 测试项目：
  *          1. async、队列和 callback 订阅者 fan-out。
  *          2. callback-context 发布保持时间戳和 ISR 语义。
@@ -19,14 +20,19 @@ namespace
 {
 
 /**
- * @brief 测试项函数 `TestTopicSubscriberDispatch`。 Test-item function `TestTopicSubscriberDispatch`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestTopicSubscriberDispatch`。 Test-item function
+ * `TestTopicSubscriberDispatch`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestTopicSubscriberDispatch()
 {
   // 测试内容：验证同一发布在不同订阅者类型上的 fan-out 与时间戳/ISR 语义。
-  // Test coverage: verify fan-out of one publish across subscriber types plus timestamp/ISR semantics.
+  // Test coverage: verify fan-out of one publish across subscriber types plus
+  // timestamp/ISR semantics.
   ASSERT(LibXR::Topic::Find("missing_default_topic") == nullptr);
 
   auto domain = LibXR::Topic::Domain("message_topic_domain");
@@ -85,7 +91,8 @@ void TestTopicSubscriberDispatch()
   topic.RegisterCallback(raw_view_cb);
 
   auto raw_arg_cb = LibXR::Topic::Callback::Create(
-      [](bool, void*, LibXR::MicrosecondTimestamp timestamp, const LibXR::ConstRawData& data)
+      [](bool, void*, LibXR::MicrosecondTimestamp timestamp,
+         const LibXR::ConstRawData& data)
       {
         raw_arg_timestamp = timestamp;
         raw_arg_size = data.size_;
@@ -155,8 +162,7 @@ void TestTopicSubscriberDispatch()
   const LibXR::MicrosecondTimestamp byte_stable_timestamp(1501);
   byte_stable_topic.Publish(byte_stable_tx, byte_stable_timestamp);
   ASSERT(byte_stable_view_value == byte_stable_tx.data[2]);
-  ASSERT(TimestampUs(byte_stable_view_timestamp) ==
-         TimestampUs(byte_stable_timestamp));
+  ASSERT(TimestampUs(byte_stable_view_timestamp) == TimestampUs(byte_stable_timestamp));
 
   msg[0] = 32.32;
   msg[3] = -1.0f;
@@ -192,10 +198,9 @@ void TestTopicSubscriberDispatch()
 
 /**
  * @brief 测试项函数 `RunTopicDispatchTests`。 Test-item function `RunTopicDispatchTests`.
- * @details 测试内容：执行类型化 `Topic` 分发子场景。 Execute typed `Topic` dispatch sub-scenarios.
- *          测试原理：把 fan-out 与时间戳语义单独成组，避免与可变 payload/丢包场景缠在一起。 Group fan-out and timestamp semantics away from mutable-payload and drop scenarios.
+ * @details 测试内容：执行类型化 `Topic` 分发子场景。 Execute typed `Topic` dispatch
+ * sub-scenarios. 测试原理：把 fan-out 与时间戳语义单独成组，避免与可变
+ * payload/丢包场景缠在一起。 Group fan-out and timestamp semantics away from
+ * mutable-payload and drop scenarios.
  */
-void RunTopicDispatchTests()
-{
-  TestTopicSubscriberDispatch();
-}
+void RunTopicDispatchTests() { TestTopicSubscriberDispatch(); }

@@ -14,7 +14,8 @@
 #define XR_FMT(fmt) LibXR::Detail::LoggerLiteral::Frontend::Format, fmt
 
 /**
- * @brief 显式指定 logger 使用 printf 风格前端 / Explicitly force the logger printf frontend
+ * @brief 显式指定 logger 使用 printf 风格前端 / Explicitly force the logger printf
+ * frontend
  */
 #define XR_PRINTF(fmt) LibXR::Detail::LoggerLiteral::Frontend::Printf, fmt
 
@@ -22,7 +23,7 @@
 /**
  * @brief 输出调试日志 / Output debug log
  */
-#define XR_LOG_DEBUG(fmt, ...)                                                          \
+#define XR_LOG_DEBUG(fmt, ...)                                                         \
   LibXR::Logger::Publish<fmt>(LibXR::LogLevel::XR_LOG_LEVEL_DEBUG, __FILE__, __LINE__, \
                               ##__VA_ARGS__)
 #else
@@ -66,7 +67,7 @@
 /**
  * @brief 输出错误日志 / Output error log
  */
-#define XR_LOG_ERROR(fmt, ...)                                                          \
+#define XR_LOG_ERROR(fmt, ...)                                                         \
   LibXR::Logger::Publish<fmt>(LibXR::LogLevel::XR_LOG_LEVEL_ERROR, __FILE__, __LINE__, \
                               ##__VA_ARGS__)
 #else

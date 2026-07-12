@@ -62,7 +62,8 @@ class Operation
    */
   Operation(Semaphore& sem, uint32_t timeout = UINT32_MAX)
       : data{.sem_info = {&sem, timeout}}, type(OperationType::BLOCK)
-  {}
+  {
+  }
 
   /**
    * @brief Constructs a callback-based operation.
@@ -71,7 +72,8 @@ class Operation
    */
   Operation(Callback& callback)
       : data{.callback = &callback}, type(OperationType::CALLBACK)
-  {}
+  {
+  }
 
   /**
    * @brief Constructs a polling operation.
@@ -80,7 +82,8 @@ class Operation
    */
   Operation(OperationPollingStatus& status)
       : data{.status = &status}, type(OperationType::POLLING)
-  {}
+  {
+  }
 
   Operation(const Operation& op) : data{nullptr}, type(OperationType::NONE)
   {
@@ -303,9 +306,8 @@ class AsyncBlockWait
       if (expected == State::DETACHED)
       {
         expected = State::DETACHED;
-        (void)state_.compare_exchange_strong(expected, State::IDLE,
-                                             std::memory_order_acq_rel,
-                                             std::memory_order_acquire);
+        (void)state_.compare_exchange_strong(
+            expected, State::IDLE, std::memory_order_acq_rel, std::memory_order_acquire);
       }
       return false;
     }
@@ -352,7 +354,8 @@ typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
 /// ProcessPendingReads(). Any non-negative return means accepted/armed; negative values
 /// mean failure.
 /// 成功返回只表示已通知或挂起底层接收，不得直接完成本次读；producer 必须先把字节写入
-/// queue_data_，再调用 ProcessPendingReads() 完成读取。返回值非负表示已接受/已挂起，负值表示失败。
+/// queue_data_，再调用 ProcessPendingReads()
+/// 完成读取。返回值非负表示已接受/已挂起，负值表示失败。
 typedef ErrorCode (*ReadFun)(ReadPort& port, bool in_isr);
 
 /**

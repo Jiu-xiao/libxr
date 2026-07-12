@@ -1,6 +1,7 @@
 /**
  * @file linux_database_reopen_test_common.hpp
- * @brief linux database 测试共用 reopen/断言 helper。 Shared reopen/assertion helpers for linux database tests.
+ * @brief linux database 测试共用 reopen/断言 helper。 Shared reopen/assertion helpers for
+ * linux database tests.
  * @details 共享职责：
  *          1. 通过公开 database API reopen 后读取持久化值。
  *          2. 校验 main 有效/backup 无效的持久化状态。
@@ -17,7 +18,8 @@
 namespace LinuxDatabaseTestCommon
 {
 
-[[nodiscard]] inline uint32_t ReopenDatabaseValue(const char* path, uint32_t default_value)
+[[nodiscard]] inline uint32_t ReopenDatabaseValue(const char* path,
+                                                  uint32_t default_value)
 {
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,
                                                XR_DB_MIN_WRITE_SIZE, false, true);
@@ -26,7 +28,8 @@ namespace LinuxDatabaseTestCommon
   return key.data_;
 }
 
-[[nodiscard]] inline uint32_t ReopenDatabaseValue(const char* path, uint32_t default_value,
+[[nodiscard]] inline uint32_t ReopenDatabaseValue(const char* path,
+                                                  uint32_t default_value,
                                                   const char* key_name)
 {
   LinuxBinaryFileFlash<XR_DB_FLASH_SIZE> flash(path, XR_DB_MIN_ERASE_SIZE,

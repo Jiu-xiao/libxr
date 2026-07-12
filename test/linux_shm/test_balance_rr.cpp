@@ -1,6 +1,7 @@
 /**
  * @file test_balance_rr.cpp
- * @brief `LinuxSharedTopic` BALANCE_RR 策略聚合入口。 Aggregation entry for split `LinuxSharedTopic` BALANCE_RR semantics.
+ * @brief `LinuxSharedTopic` BALANCE_RR 策略聚合入口。 Aggregation entry for split
+ * `LinuxSharedTopic` BALANCE_RR semantics.
  * @details 测试项目：
  *          1. 聚合轮转分发子场景。
  *          2. 聚合死亡成员回收子场景。

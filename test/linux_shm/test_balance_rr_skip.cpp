@@ -1,6 +1,7 @@
 /**
  * @file test_balance_rr_skip.cpp
- * @brief `LinuxSharedTopic` BALANCE_RR 跳过满队列成员子验证。 Split verification unit for BALANCE_RR full-member skipping semantics.
+ * @brief `LinuxSharedTopic` BALANCE_RR 跳过满队列成员子验证。 Split verification unit for
+ * BALANCE_RR full-member skipping semantics.
  * @details 测试项目：
  *          1. 某个 balanced subscriber 满时会跳过它并投递给其他成员。
  *          Test items:
@@ -27,9 +28,12 @@ void RunBalanceRoundRobinSkipFullScenario()
     SharedTopic publisher(topic_name, config);
     ASSERT(publisher.Valid());
 
-    SharedSubscriber subscriber_a(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
-    SharedSubscriber subscriber_b(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
-    SharedSubscriber subscriber_c(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_a(topic_name,
+                                  LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_b(topic_name,
+                                  LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_c(topic_name,
+                                  LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
     ASSERT(subscriber_a.Valid());
     ASSERT(subscriber_b.Valid());
     ASSERT(subscriber_c.Valid());

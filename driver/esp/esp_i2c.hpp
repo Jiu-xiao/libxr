@@ -1,12 +1,11 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 
 #include "driver/gpio.h"
+#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "hal/i2c_hal.h"
 #include "hal/i2c_types.h"
@@ -22,10 +21,8 @@ class ESP32I2C : public I2C
  public:
   static constexpr int PIN_NO_CHANGE = -1;
 
-  ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin,
-           uint32_t clock_speed = 400000U,
-           bool enable_internal_pullup = true,
-           uint32_t timeout_ms = 100U,
+  ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin, uint32_t clock_speed = 400000U,
+           bool enable_internal_pullup = true, uint32_t timeout_ms = 100U,
            uint32_t isr_enable_min_size = 32U);
 
   ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
@@ -41,8 +38,8 @@ class ESP32I2C : public I2C
                     MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
                     bool in_isr = false) override;
 
-  ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr,
-                     ConstRawData write_data, WriteOperation& op,
+  ErrorCode MemWrite(uint16_t slave_addr, uint16_t mem_addr, ConstRawData write_data,
+                     WriteOperation& op,
                      MemAddrLength mem_addr_size = MemAddrLength::BYTE_8,
                      bool in_isr = false) override;
 
@@ -51,8 +48,7 @@ class ESP32I2C : public I2C
  private:
   static constexpr size_t FIFO_LEN = SOC_I2C_FIFO_LEN;
   static constexpr size_t MAX_WRITE_PAYLOAD = (FIFO_LEN > 4U) ? (FIFO_LEN - 4U) : 0U;
-  static constexpr size_t MAX_WRITE_READ_PREFIX =
-      (FIFO_LEN > 5U) ? (FIFO_LEN - 5U) : 0U;
+  static constexpr size_t MAX_WRITE_READ_PREFIX = (FIFO_LEN > 5U) ? (FIFO_LEN - 5U) : 0U;
   static constexpr size_t MAX_READ_PAYLOAD = (FIFO_LEN > 4U) ? (FIFO_LEN - 4U) : FIFO_LEN;
 
   bool Acquire();
@@ -72,10 +68,9 @@ class ESP32I2C : public I2C
                                size_t read_size);
   ErrorCode StartAsyncTransaction(uint16_t slave_addr,
                                   const uint8_t* write_prefix_payload,
-                                  size_t write_prefix_size,
-                                  const uint8_t* write_payload, size_t write_size,
-                                  uint8_t* read_payload, size_t read_size,
-                                  ReadOperation& op);
+                                  size_t write_prefix_size, const uint8_t* write_payload,
+                                  size_t write_size, uint8_t* read_payload,
+                                  size_t read_size, ReadOperation& op);
   ErrorCode KickAsyncTransaction();
   void FinishAsync(bool in_isr, ErrorCode ec);
   static bool IsValid7BitAddr(uint16_t addr);

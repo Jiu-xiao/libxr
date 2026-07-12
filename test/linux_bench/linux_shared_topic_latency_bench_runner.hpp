@@ -1,6 +1,7 @@
 /**
  * @file linux_shared_topic_latency_bench_runner.hpp
- * @brief `LinuxSharedTopic` one-way latency 基准执行 helper。 Shared execution helper for `LinuxSharedTopic` one-way latency benchmarks.
+ * @brief `LinuxSharedTopic` one-way latency 基准执行 helper。 Shared execution helper for
+ * `LinuxSharedTopic` one-way latency benchmarks.
  * @details 作用：
  *          1. 封装单 outstanding message 的延迟测量流程。
  *          2. 让 `bench_latency.cpp` 只保留 payload case 组合。
@@ -27,8 +28,8 @@ int RunLatencyCase(uint64_t count_override = 0)
   using Data = typename Topic::Data;
   using Subscriber = typename Topic::SyncSubscriber;
 
-  const uint64_t count = (count_override == 0) ? LatencyCountForPayload<PayloadBytes>()
-                                                : count_override;
+  const uint64_t count =
+      (count_override == 0) ? LatencyCountForPayload<PayloadBytes>() : count_override;
 
   LibXR::LinuxSharedTopicConfig config = {};
   config.slot_num = 4;
@@ -36,22 +37,23 @@ int RunLatencyCase(uint64_t count_override = 0)
   config.queue_num = 4;
 
   char topic_name[96] = {};
-  std::snprintf(topic_name, sizeof(topic_name), "linux_shared_latency_%zu_%d", PayloadBytes,
-                static_cast<int>(getpid()));
+  std::snprintf(topic_name, sizeof(topic_name), "linux_shared_latency_%zu_%d",
+                PayloadBytes, static_cast<int>(getpid()));
   (void)Topic::Remove(topic_name);
 
   int ready_pipe[2] = {-1, -1};
   int ack_pipe[2] = {-1, -1};
   pid_t child = -1;
-  auto cleanup = MakeScopeExit([&]()
-  {
-    CloseFd(ready_pipe[0]);
-    CloseFd(ready_pipe[1]);
-    CloseFd(ack_pipe[0]);
-    CloseFd(ack_pipe[1]);
-    KillAndReapChild(child);
-    (void)Topic::Remove(topic_name);
-  });
+  auto cleanup = MakeScopeExit(
+      [&]()
+      {
+        CloseFd(ready_pipe[0]);
+        CloseFd(ready_pipe[1]);
+        CloseFd(ack_pipe[0]);
+        CloseFd(ack_pipe[1]);
+        KillAndReapChild(child);
+        (void)Topic::Remove(topic_name);
+      });
 
   if (pipe(ready_pipe) != 0 || pipe(ack_pipe) != 0)
   {
@@ -150,7 +152,8 @@ int RunLatencyCase(uint64_t count_override = 0)
     frame->pub_ns = NowNs();
     if constexpr (TouchPayload)
     {
-      std::memset(frame->payload.data(), static_cast<int>(seq & 0xFFU), frame->payload.size());
+      std::memset(frame->payload.data(), static_cast<int>(seq & 0xFFU),
+                  frame->payload.size());
     }
     else if constexpr (PayloadBytes > 0)
     {
@@ -191,13 +194,12 @@ int RunLatencyCase(uint64_t count_override = 0)
   const BenchStats stats = BuildStats<PayloadBytes>(lat_us, 0, 0);
   const double total_s = static_cast<double>(end_ns - start_ns) / 1e9;
   const double exchange_rate = static_cast<double>(count) / total_s;
-  std::printf(
-      "[BENCH] shared_latency mode=%s payload=%zuB count=%" PRIu64
-      " exchange_rate=%.0f msg/s create_retry=%" PRIu64 " publish_retry=%" PRIu64
-      " one_way_avg=%.3f us p50=%.3f us p95=%.3f us p99=%.3f us max=%.3f us\n",
-      TouchPayload ? "full-touch" : "transport", sizeof(BenchFrame<PayloadBytes>), count,
-      exchange_rate, create_retries, publish_retries, stats.avg_us, stats.p50_us, stats.p95_us,
-      stats.p99_us, stats.max_us);
+  std::printf("[BENCH] shared_latency mode=%s payload=%zuB count=%" PRIu64
+              " exchange_rate=%.0f msg/s create_retry=%" PRIu64 " publish_retry=%" PRIu64
+              " one_way_avg=%.3f us p50=%.3f us p95=%.3f us p99=%.3f us max=%.3f us\n",
+              TouchPayload ? "full-touch" : "transport", sizeof(BenchFrame<PayloadBytes>),
+              count, exchange_rate, create_retries, publish_retries, stats.avg_us,
+              stats.p50_us, stats.p95_us, stats.p99_us, stats.max_us);
   std::fflush(stdout);
 
   return 0;

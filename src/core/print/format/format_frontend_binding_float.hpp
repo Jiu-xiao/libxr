@@ -1,17 +1,22 @@
 #pragma once
 
 /**
- * @brief brace 前端里处理浮点参数字段的辅助函数 / Brace-frontend helpers for fields that point to float arguments
+ * @brief brace 前端里处理浮点参数字段的辅助函数 / Brace-frontend helpers for fields that
+ * point to float arguments
  */
 namespace ArgumentResolution
 {
 
 /**
- * @brief 针对 float、double 或 long double 参数解析一个已解析的 brace 字段 / Resolve one parsed brace field for a float, double, or long double argument
+ * @brief 针对 float、double 或 long double 参数解析一个已解析的 brace 字段 / Resolve one
+ * parsed brace field for a float, double, or long double argument
  * @param parsed 已解析的 brace 字段 / Parsed brace field
- * @param kind 当前字段选中的前端参数类别 / Frontend-side argument family selected for this field
- * @return 返回解析后的共享字段；精度或类型不匹配时返回首个错误 / Returns the resolved shared field, or the first precision or type mismatch error
- * @note double 支持关闭时，double 参数会降为 F32 存储与格式化 / When double support is disabled, double arguments are reduced to F32 storage and formatting
+ * @param kind 当前字段选中的前端参数类别 / Frontend-side argument family selected for
+ * this field
+ * @return 返回解析后的共享字段；精度或类型不匹配时返回首个错误 / Returns the resolved
+ * shared field, or the first precision or type mismatch error
+ * @note double 支持关闭时，double 参数会降为 F32 存储与格式化 / When double support is
+ * disabled, double arguments are reduced to F32 storage and formatting
  */
 [[nodiscard]] consteval ResolvedField ResolveFloatField(const ParsedField& parsed,
                                                         ArgumentKind kind)
@@ -27,14 +32,14 @@ namespace ArgumentResolution
   {
     return ResolvedField{.error = Error::ArgumentTypeMismatch};
   }
-  bool upper_case =
-      presentation == 'F' || presentation == 'E' || presentation == 'G';
+  bool upper_case = presentation == 'F' || presentation == 'E' || presentation == 'G';
 
   FormatType type = FormatType::End;
   FormatPackKind pack = FormatPackKind::F32;
 
   auto pick_type = [&](FormatType f32_type, FormatType f64_type,
-                       FormatType ld_type) consteval -> bool {
+                       FormatType ld_type) consteval -> bool
+  {
     switch (kind)
     {
       case ArgumentKind::Float32:
@@ -95,10 +100,12 @@ namespace ArgumentResolution
 }
 
 /**
- * @brief 先判断一个已解析 brace 字段指向哪类参数，再选择匹配的字段构造逻辑 / Check which argument family a parsed brace field points to, then choose the matching field builder
+ * @brief 先判断一个已解析 brace 字段指向哪类参数，再选择匹配的字段构造逻辑 / Check which
+ * argument family a parsed brace field points to, then choose the matching field builder
  * @tparam Args 已绑定的 C++ 实参类型列表 / Bound C++ argument types
  * @param parsed 已解析的 brace 字段 / Parsed brace field
- * @return 返回解析后的共享字段；缺参或类型不支持时返回首个错误 / Returns the resolved shared field, or the first missing-argument or unsupported-type error
+ * @return 返回解析后的共享字段；缺参或类型不支持时返回首个错误 / Returns the resolved
+ * shared field, or the first missing-argument or unsupported-type error
  */
 template <typename... Args>
 [[nodiscard]] consteval ResolvedField ResolveField(const ParsedField& parsed)

@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <string_view>
 
-#include "queue.hpp"
 #include "operation.hpp"
+#include "queue.hpp"
 
 namespace LibXR
 {
@@ -54,19 +54,22 @@ class WritePort
         3,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
     BLOCK_DETACHED = 4,  ///< Waiter already timed out/detached; completion must not post.
                          ///< 等待者已超时/被分离，完成侧不能再 Post。
-    RESETTING = 5,        ///< Fail-and-clear owns queue mutation.
-                          ///< Fail-and-clear 路径占有写队列/元数据修改权。
+    RESETTING = 5,       ///< Fail-and-clear owns queue mutation.
+                         ///< Fail-and-clear 路径占有写队列/元数据修改权。
     IDLE = UINT32_MAX    ///< No active submitter and no armed BLOCK waiter.
                          ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
   };
 
-  WriteFun write_fun_ = nullptr;  ///< Driver/backend write entry. 底层驱动或后端写入入口。
+  WriteFun write_fun_ =
+      nullptr;  ///< Driver/backend write entry. 底层驱动或后端写入入口。
   SPSCQueue<WriteInfoBlock>* queue_info_ =
       nullptr;  ///< Metadata queue for pending write batches. 挂起写批次的元数据队列。
   SPSCQueue<uint8_t>* queue_data_ =
       nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
-  std::atomic<BusyState> busy_{BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
-  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write. 当前 BLOCK 写入的最终结果。
+  std::atomic<BusyState> busy_{
+      BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
+  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
+                                            ///< 当前 BLOCK 写入的最终结果。
 
   // Stream batch facade.
   // Stream 负责一次批次的累积写入与提交。
@@ -179,11 +182,16 @@ class WritePort
      */
     void Release();
 
-    LibXR::WritePort* port_;  ///< 写端口指针 Pointer to the WritePort
+    LibXR::WritePort* port_;    ///< 写端口指针 Pointer to the WritePort
     LibXR::WriteOperation op_;  ///< 写操作对象 Write operation object
-    size_t batch_capacity_ = 0;  ///< 当前批次可用的总容量 Total capacity reserved for the current batch
-    size_t buffered_size_ = 0;  ///< 当前批次已追加到共享 data queue、但尚未发布对应元数据的字节数 Bytes already appended into the shared data queue for the current batch, but whose metadata has not yet been published
-    bool owns_port_ = false;  ///< 当前 Stream 是否持有该批次的端口所有权 Whether this Stream currently owns the batch
+    size_t batch_capacity_ =
+        0;  ///< 当前批次可用的总容量 Total capacity reserved for the current batch
+    size_t buffered_size_ =
+        0;  ///< 当前批次已追加到共享 data queue、但尚未发布对应元数据的字节数 Bytes
+            ///< already appended into the shared data queue for the current batch, but
+            ///< whose metadata has not yet been published
+    bool owns_port_ = false;  ///< 当前 Stream 是否持有该批次的端口所有权 Whether this
+                              ///< Stream currently owns the batch
   };
 
   /**

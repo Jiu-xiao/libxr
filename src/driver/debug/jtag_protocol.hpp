@@ -103,11 +103,11 @@ constexpr Ack map_jtag_ack(uint8_t raw_ack)
  */
 struct ChainConfig
 {
-  uint8_t count = 0;        ///< 设备数（TDO 端为 index=0）/ Device count (TDO side index=0)
-  uint8_t index = 0;        ///< 当前设备索引 / Current device index
-  const uint8_t* ir_length = nullptr;  ///< 各设备 IR 长度数组 / IR length array
-  const uint16_t* ir_before = nullptr; ///< 当前设备前的 bypass 位数 / Bypass bits before
-  const uint16_t* ir_after = nullptr;  ///< 当前设备后的 bypass 位数 / Bypass bits after
+  uint8_t count = 0;  ///< 设备数（TDO 端为 index=0）/ Device count (TDO side index=0)
+  uint8_t index = 0;  ///< 当前设备索引 / Current device index
+  const uint8_t* ir_length = nullptr;   ///< 各设备 IR 长度数组 / IR length array
+  const uint16_t* ir_before = nullptr;  ///< 当前设备前的 bypass 位数 / Bypass bits before
+  const uint16_t* ir_after = nullptr;   ///< 当前设备后的 bypass 位数 / Bypass bits after
 
   // 运行期缓存（可选）：用于减少每次 Shift 计算
   uint32_t ir_before_bits_len = 0;  ///< 前面设备 IR 总位数 / IR bits before

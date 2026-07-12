@@ -117,8 +117,8 @@ class JtagGeneralGPIO final : public Jtag
     else
     {
       const uint64_t LOOPS_CEIL = (LOOPS_SCALED + CEIL_BIAS) / LOOPS_SCALE;
-      half_period_loops_ = (LOOPS_CEIL > UINT32_MAX) ? UINT32_MAX
-                                                     : static_cast<uint32_t>(LOOPS_CEIL);
+      half_period_loops_ =
+          (LOOPS_CEIL > UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(LOOPS_CEIL);
     }
 
     return ErrorCode::OK;
@@ -347,7 +347,6 @@ class JtagGeneralGPIO final : public Jtag
       }
       tck_.Write(false);
     }
-
   }
 
   inline void DelayHalf() { BusyLoop(half_period_loops_); }

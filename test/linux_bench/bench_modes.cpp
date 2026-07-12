@@ -1,6 +1,7 @@
 /**
  * @file bench_modes.cpp
- * @brief `LinuxSharedTopic` subscriber mode 基准聚合入口。 Aggregation entry for `LinuxSharedTopic` subscriber-mode benchmarks.
+ * @brief `LinuxSharedTopic` subscriber mode 基准聚合入口。 Aggregation entry for
+ * `LinuxSharedTopic` subscriber-mode benchmarks.
  * @details 测试项目：
  *          1. 聚合 64 KiB 与 1 MiB payload 的 subscriber mode 对比 case。
  *          Test items:
@@ -25,21 +26,21 @@ int RunModeBenchmarks()
   const uint64_t count_64k = ScaleBenchCount(4000, 32);
   const uint64_t count_1m = ScaleBenchCount(256, 8);
 
-  status |= RunModeCase<65536>(
-      "broadcast_full_64k",
-      {{LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_a"},
-       {LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_b"}},
-      count_64k, 512, 32);
+  status |=
+      RunModeCase<65536>("broadcast_full_64k",
+                         {{LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_a"},
+                          {LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_b"}},
+                         count_64k, 512, 32);
   status |= RunModeCase<65536>(
       "broadcast_drop_old_64k",
       {{LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD, 50, "sub_slow"},
        {LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD, 0, "sub_fast"}},
       count_64k, 512, 8);
-  status |= RunModeCase<65536>(
-      "balance_rr_64k",
-      {{LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_a"},
-       {LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_b"}},
-      count_64k, 512, 32);
+  status |=
+      RunModeCase<65536>("balance_rr_64k",
+                         {{LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_a"},
+                          {LibXR::LinuxSharedSubscriberMode::BALANCE_RR, 0, "worker_b"}},
+                         count_64k, 512, 32);
   status |= RunModeCase<1048576>(
       "broadcast_full_1m",
       {{LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL, 0, "sub_a"},

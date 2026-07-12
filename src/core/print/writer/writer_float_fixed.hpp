@@ -5,14 +5,16 @@
  */
 
 /**
- * @brief 将一个通用定点浮点结果写入局部文本缓冲区 / Formats one generic fixed-point float payload into the local text buffer.
+ * @brief 将一个通用定点浮点结果写入局部文本缓冲区 / Formats one generic fixed-point float
+ * payload into the local text buffer.
  * @tparam Float 浮点类型 / Float type
  * @param value 浮点绝对值 / Float magnitude
  * @param precision 请求的小数精度 / Requested fractional precision
  * @param alternate 是否启用备用格式 / Whether alternate form is enabled
  * @param out 目标文本缓冲区 / Destination text buffer
  * @param out_size 输出文本长度 / Output text size
- * @return 成功返回 `true`，否则返回 `false` / Returns `true` on success, otherwise `false`
+ * @return 成功返回 `true`，否则返回 `false` / Returns `true` on success, otherwise
+ * `false`
  */
 template <typename Float>
 bool Writer::FormatFixedText(Float value, uint8_t precision, bool alternate, char* out,

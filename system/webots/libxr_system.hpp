@@ -16,7 +16,7 @@ extern uint64_t _libxr_webots_time_count;  // NOLINT
  * @brief  Webots 机器人句柄
  *         Webots robot handle
  */
-extern webots::Robot *_libxr_webots_robot_handle;  // NOLINT
+extern webots::Robot* _libxr_webots_robot_handle;  // NOLINT
 
 namespace LibXR
 {
@@ -33,7 +33,7 @@ typedef pthread_mutex_t libxr_mutex_handle;
  * @brief  信号量句柄类型定义
  *         Semaphore handle type definition
  */
-typedef sem_t *libxr_semaphore_handle;
+typedef sem_t* libxr_semaphore_handle;
 
 /**
  * @brief  线程句柄类型定义
@@ -73,7 +73,7 @@ typedef struct
  * the `_libxr_webots_robot_handle` variable and initializing the simulation
  * time counter `_libxr_webots_time_count`.
  */
-void PlatformInit(webots::Robot *robot = nullptr, uint32_t timer_pri = 2,
+void PlatformInit(webots::Robot* robot = nullptr, uint32_t timer_pri = 2,
                   uint32_t timer_stack_depth = 65536,
                   double sim_flow_rate = 1.0);  // NOLINT
 
@@ -81,19 +81,19 @@ void PlatformInit(webots::Robot *robot = nullptr, uint32_t timer_pri = 2,
  * @brief  为 REALTIME 线程预留一条注册项
  * @return  注册项句柄，在线程创建成功后由线程自身完成绑定
  */
-WebotsRealtimeThreadRegistration *WebotsRegisterRealtimeThread();
+WebotsRealtimeThreadRegistration* WebotsRegisterRealtimeThread();
 
 /**
  * @brief  将当前线程绑定到已注册的 REALTIME 项
  * @param  registration 线程创建阶段预留的注册项
  */
-void WebotsBindCurrentRealtimeThread(WebotsRealtimeThreadRegistration *registration);
+void WebotsBindCurrentRealtimeThread(WebotsRealtimeThreadRegistration* registration);
 
 /**
  * @brief  释放一条 REALTIME 线程注册项
  * @param  registration 需要释放的注册项
  */
-void WebotsReleaseRealtimeThread(WebotsRealtimeThreadRegistration *registration);
+void WebotsReleaseRealtimeThread(WebotsRealtimeThreadRegistration* registration);
 
 /**
  * @brief  标记当前 REALTIME 线程进入运行态

@@ -1,15 +1,24 @@
 /**
  * @file test_ramfs.cpp
- * @brief `RamFS` 节点创建、层级查找与类型化文件访问测试。 `RamFS` node creation, hierarchy and typed-file access tests.
+ * @brief `RamFS` 节点创建、层级查找与类型化文件访问测试。 `RamFS` node creation,
+ * hierarchy and typed-file access tests.
  *
  * 测试项目 / Test items:
- * 1. 可执行文件行为。 Executable file behavior: verify executable files run, mutate bound state and stay distinguishable from ordinary files.
- * 2. 可写/只读文件的数据访问视图。 Read/write and read-only data views: verify typed access, const access and raw view sizing for writable and read-only files.
- * 3. 目录、文件、自定义节点的层级查找与遍历。 Hierarchy lookup: verify recursive file/dir/custom lookup, `.` / `..` directory traversal and direct-child enumeration counts.
+ * 1. 可执行文件行为。 Executable file behavior: verify executable files run, mutate bound
+ * state and stay distinguishable from ordinary files.
+ * 2. 可写/只读文件的数据访问视图。 Read/write and read-only data views: verify typed
+ * access, const access and raw view sizing for writable and read-only files.
+ * 3. 目录、文件、自定义节点的层级查找与遍历。 Hierarchy lookup: verify recursive
+ * file/dir/custom lookup, `.` / `..` directory traversal and direct-child enumeration
+ * counts.
  *
  * 测试原理 / Test principles:
- * 1. 构造一个混合节点树，让查找和遍历都跑在真实运行时结构上。 Construct a real mixed node tree containing file, dir, exec and custom nodes so lookup and traversal execute on the same structure users build at runtime.
- * 2. 同时检查数据访问和结构查询，因为 RamFS 契约覆盖存储和命名空间两部分。 Observe both typed data access and structural queries, because RamFS correctness spans storage semantics and namespace semantics together.
+ * 1. 构造一个混合节点树，让查找和遍历都跑在真实运行时结构上。 Construct a real mixed node
+ * tree containing file, dir, exec and custom nodes so lookup and traversal execute on the
+ * same structure users build at runtime.
+ * 2. 同时检查数据访问和结构查询，因为 RamFS 契约覆盖存储和命名空间两部分。 Observe both
+ * typed data access and structural queries, because RamFS correctness spans storage
+ * semantics and namespace semantics together.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -17,8 +26,9 @@
 
 /**
  * @brief 测试入口函数 `test_ramfs`。 Test entry function `test_ramfs`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_ramfs()
 {

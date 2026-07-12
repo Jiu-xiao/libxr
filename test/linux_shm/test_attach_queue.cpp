@@ -1,15 +1,20 @@
 /**
  * @file test_attach_queue.cpp
- * @brief `LinuxSharedTopic` attach/queue 语义子验证。 Split verification unit for `LinuxSharedTopic` attach and queue semantics.
+ * @brief `LinuxSharedTopic` attach/queue 语义子验证。 Split verification unit for
+ * `LinuxSharedTopic` attach and queue semantics.
  */
 #include "linux_shm_topic_test_common.hpp"
 
 namespace LinuxShmTopicTest
 {
 /**
- * @brief 测试项函数 `RunAttachQueueScenarios`。 Test-item function `RunAttachQueueScenarios`.
- * @details 测试内容：验证本地 attach/backpressure 以及 broadcast 队列模式的基本行为。 Execute the local attach/backpressure and broadcast queue-mode scenarios.
- *          测试原理：把无需跨进程协调的基础共享内存 topic 语义集中到同一场景文件里。 Group the foundational shared-memory topic semantics that do not require complex cross-process coordination into one scenario file.
+ * @brief 测试项函数 `RunAttachQueueScenarios`。 Test-item function
+ * `RunAttachQueueScenarios`.
+ * @details 测试内容：验证本地 attach/backpressure 以及 broadcast 队列模式的基本行为。
+ * Execute the local attach/backpressure and broadcast queue-mode scenarios.
+ *          测试原理：把无需跨进程协调的基础共享内存 topic 语义集中到同一场景文件里。
+ * Group the foundational shared-memory topic semantics that do not require complex
+ * cross-process coordination into one scenario file.
  */
 void RunAttachQueueScenarios()
 {
@@ -139,7 +144,8 @@ void RunAttachQueueScenarios()
     SharedTopic publisher(topic_name, config);
     ASSERT(publisher.Valid());
 
-    SharedSubscriber subscriber(topic_name, LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD);
+    SharedSubscriber subscriber(topic_name,
+                                LibXR::LinuxSharedSubscriberMode::BROADCAST_DROP_OLD);
     ASSERT(subscriber.Valid());
 
     IPCFrame frame = {};

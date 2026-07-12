@@ -1,12 +1,15 @@
 /**
  * @file linux_shared_topic_bench_stats_common.hpp
- * @brief `LinuxSharedTopic` 基准共用统计与 frame helper。 Shared stats and frame helpers for `LinuxSharedTopic` benchmarks.
+ * @brief `LinuxSharedTopic` 基准共用统计与 frame helper。 Shared stats and frame helpers
+ * for `LinuxSharedTopic` benchmarks.
  * @details 作用：
  *          1. 集中复用的时钟、统计结构和 payload frame 模板。
  *          2. 提供 payload 规模相关的计数、配置和延迟统计 helper。
  *          Purpose:
- *          1. Centralize reusable clock, statistics structures, and payload frame templates.
- *          2. Provide payload-dependent count/configuration and latency-statistics helpers.
+ *          1. Centralize reusable clock, statistics structures, and payload frame
+ * templates.
+ *          2. Provide payload-dependent count/configuration and latency-statistics
+ * helpers.
  */
 #pragma once
 
@@ -14,8 +17,8 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 
 #include "libxr.hpp"
@@ -58,9 +61,9 @@ inline uint64_t NowNs()
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
-  return static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch())
-          .count());
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   Clock::now().time_since_epoch())
+                                   .count());
 }
 
 struct BenchStats
@@ -85,7 +88,8 @@ struct OverloadStats
 
 struct ModeSubConfig
 {
-  LibXR::LinuxSharedSubscriberMode mode = LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL;
+  LibXR::LinuxSharedSubscriberMode mode =
+      LibXR::LinuxSharedSubscriberMode::BROADCAST_FULL;
   uint32_t delay_us = 0;
   const char* label = "";
 };
@@ -213,7 +217,8 @@ BenchStats BuildStats(const std::vector<double>& lat_us, uint64_t sequence_error
 
   std::vector<double> sorted = lat_us;
   std::sort(sorted.begin(), sorted.end());
-  auto percentile = [&](double p) {
+  auto percentile = [&](double p)
+  {
     const size_t index = static_cast<size_t>(
         std::floor((static_cast<double>(sorted.size() - 1U)) * p + 0.5));
     return sorted[index];

@@ -11,5 +11,5 @@
  */
 
 #include "interface.hpp"
-#include "raw_sequential.hpp"
 #include "raw/raw.hpp"
+#include "raw_sequential.hpp"

@@ -1,21 +1,23 @@
 /**
  * @file linux_shm_topic_test_common.hpp
- * @brief `LinuxSharedTopic` 环境验证共用 helper。 Shared helpers for `LinuxSharedTopic` environment verification.
+ * @brief `LinuxSharedTopic` 环境验证共用 helper。 Shared helpers for `LinuxSharedTopic`
+ * environment verification.
  *
  * 作用 / Purpose:
  * 1. 集中跨进程验证共用的 payload、别名、命名和断言 helper。
- *    Centralize shared payload, aliases, naming helpers, and assertions used by cross-process verification.
+ *    Centralize shared payload, aliases, naming helpers, and assertions used by
+ * cross-process verification.
  * 2. 让拆分后的各个场景文件只保留自己的验证语义。
  *    Keep each split scenario file focused on its own verification semantics.
  */
 #pragma once
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <array>
 #include <cstdio>
 #include <cstdlib>
-
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include "libxr.hpp"
 #include "test.hpp"
@@ -38,8 +40,11 @@ using SharedSubscriber = SharedTopic::SyncSubscriber;
 
 /**
  * @brief 辅助函数 `ComputeChecksum`。 Helper function `ComputeChecksum`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 inline uint32_t ComputeChecksum(const IPCFrame& frame)
 {
@@ -53,8 +58,11 @@ inline uint32_t ComputeChecksum(const IPCFrame& frame)
 
 /**
  * @brief 辅助函数 `FillFrame`。 Helper function `FillFrame`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 inline void FillFrame(IPCFrame& frame, uint32_t seq)
 {
@@ -70,8 +78,10 @@ inline void FillFrame(IPCFrame& frame, uint32_t seq)
 
 /**
  * @brief 断言辅助函数 `AssertFrame`。 Assertion helper function `AssertFrame`.
- * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
- *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+ * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check
+ * to the current result. 测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。
+ * Concentrate repeated validation logic so test items do not drift to inconsistent
+ * checks.
  */
 inline void AssertFrame(const IPCFrame& frame, uint32_t expected_seq)
 {
@@ -83,8 +93,11 @@ inline void AssertFrame(const IPCFrame& frame, uint32_t expected_seq)
 
 /**
  * @brief 辅助函数 `MakeTopicName`。 Helper function `MakeTopicName`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 inline void MakeTopicName(char* topic_name, size_t topic_name_size, const char* prefix)
 {
@@ -95,8 +108,11 @@ inline void MakeTopicName(char* topic_name, size_t topic_name_size, const char* 
 
 /**
  * @brief 辅助函数 `WaitForSubscriberNum`。 Helper function `WaitForSubscriberNum`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 inline void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
 {
@@ -111,8 +127,10 @@ inline void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
 
 /**
  * @brief 断言辅助函数 `ExpectChildExit`。 Assertion helper function `ExpectChildExit`.
- * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
- *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+ * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check
+ * to the current result. 测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。
+ * Concentrate repeated validation logic so test items do not drift to inconsistent
+ * checks.
  */
 inline void ExpectChildExit(pid_t child, int expected_code = 0)
 {

@@ -587,7 +587,8 @@ class CDCUart : public CDCBase, public LibXR::UART
           cdc->need_write_zlp_ = true;
         }
 
-        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one upstream finish
+        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one
+                               // upstream finish
       }
 
       // 预写下一段。

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "esp_def.hpp"
-
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -20,7 +19,6 @@ class ESP32WifiClient : public WifiClient
 {
  public:
   ESP32WifiClient();
-
 
   bool Enable() override;
 
@@ -61,7 +59,7 @@ class ESP32WifiClient : public WifiClient
   static inline esp_netif_t* netif_ = nullptr;  ///< ESP 默认 netif 对象 / Default netif
 
   bool init_ok_ = false;
-  bool enabled_ = false;    ///< 是否启用 / Whether WiFi is enabled
+  bool enabled_ = false;  ///< 是否启用 / Whether WiFi is enabled
   bool handlers_registered_ = false;
   bool connected_ = false;  ///< 是否连接 / Whether WiFi is connected
   bool got_ip_ = false;     ///< 是否获取 IP / Whether IP is acquired

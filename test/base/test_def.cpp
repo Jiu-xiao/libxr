@@ -1,15 +1,24 @@
 /**
  * @file test_def.cpp
- * @brief `libxr_def.hpp` 基础宏与辅助函数测试。 Foundational helpers in `libxr_def.hpp` tests.
+ * @brief `libxr_def.hpp` 基础宏与辅助函数测试。 Foundational helpers in `libxr_def.hpp`
+ * tests.
  *
  * 测试项目 / Test items:
- * 1. 基础常量与字符串化宏。 Numeric constants and macros: verify `PI`, `TWO_PI`, gravity and `DEF2STR` behave as declared.
- * 2. `OffsetOf()` / `ContainerOf()` 布局辅助。 Layout helpers: verify `OffsetOf()` and `ContainerOf()` recover the owning object correctly for mutable and const member pointers.
- * 3. `SizeLimitCheck()` 四种模式语义。 Size-limit predicate semantics: verify `SizeLimitCheck()` matches the documented `EQUAL / LESS / MORE / NONE` rules.
+ * 1. 基础常量与字符串化宏。 Numeric constants and macros: verify `PI`, `TWO_PI`, gravity
+ * and `DEF2STR` behave as declared.
+ * 2. `OffsetOf()` / `ContainerOf()` 布局辅助。 Layout helpers: verify `OffsetOf()` and
+ * `ContainerOf()` recover the owning object correctly for mutable and const member
+ * pointers.
+ * 3. `SizeLimitCheck()` 四种模式语义。 Size-limit predicate semantics: verify
+ * `SizeLimitCheck()` matches the documented `EQUAL / LESS / MORE / NONE` rules.
  *
  * 测试原理 / Test principles:
- * 1. 使用具体对象布局和宏 token，验证这些小工具作为全库基础契约的稳定性。 Use concrete layout objects and stringized macro tokens, because these helpers are small but widely reused contract surfaces.
- * 2. 同时覆盖正反两类边界，避免只验证单一 happy path。 Check both positive and negative predicate cases so the test documents the exact boundary semantics rather than a single happy path.
+ * 1. 使用具体对象布局和宏 token，验证这些小工具作为全库基础契约的稳定性。 Use concrete
+ * layout objects and stringized macro tokens, because these helpers are small but widely
+ * reused contract surfaces.
+ * 2. 同时覆盖正反两类边界，避免只验证单一 happy path。 Check both positive and negative
+ * predicate cases so the test documents the exact boundary semantics rather than a single
+ * happy path.
  */
 #include <cstddef>
 #include <cstdint>
@@ -37,8 +46,9 @@ static_assert(LibXR::CommonOrdered<int, double>);
 
 /**
  * @brief 测试入口函数 `test_def`。 Test entry function `test_def`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_def()
 {

@@ -1,12 +1,14 @@
 /**
  * @file test_lifecycle_dead_sub.cpp
- * @brief `LinuxSharedTopic` 死亡 subscriber 回收子验证。 Split verification unit for dead-subscriber reclamation semantics.
+ * @brief `LinuxSharedTopic` 死亡 subscriber 回收子验证。 Split verification unit for
+ * dead-subscriber reclamation semantics.
  * @details 测试项目：
  *          1. 死亡 subscriber 与其持有的 slot 状态会被回收。
  *          2. 回收后 publisher 的 subscriber 计数和 slot 可用性恢复。
  *          Test items:
  *          1. A dead subscriber and its held slot state are reclaimed.
- *          2. After reclamation, publisher subscriber count and slot availability recover.
+ *          2. After reclamation, publisher subscriber count and slot availability
+ * recover.
  */
 #include "linux_shm_topic_test_common.hpp"
 

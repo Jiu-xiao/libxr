@@ -62,7 +62,7 @@ class Thread
    * configuration constraints defined by `configMAX_PRIORITIES`.
    */
   template <typename ArgType>
-  void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
+  void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
               size_t stack_depth, Thread::Priority priority)
   {
     ASSERT(configMAX_PRIORITIES >= 6);
@@ -72,9 +72,9 @@ class Thread
      public:
       ThreadBlock(decltype(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
 
-      static void Port(void *arg)
+      static void Port(void* arg)
       {
-        ThreadBlock *block = static_cast<ThreadBlock *>(arg);
+        ThreadBlock* block = static_cast<ThreadBlock*>(arg);
         block->fun_(block->arg_);
         delete block;
       }
@@ -111,10 +111,7 @@ class Thread
    *         Gets the current system time in milliseconds
    * @return 当前时间（毫秒） Current time in milliseconds
    */
-  static uint32_t GetTime()
-  {
-    return static_cast<uint32_t>(Timebase::GetMilliseconds());
-  }
+  static uint32_t GetTime() { return static_cast<uint32_t>(Timebase::GetMilliseconds()); }
 
   /**
    * @brief  让线程进入休眠状态

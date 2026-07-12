@@ -1,6 +1,7 @@
 /**
  * @file linux_shared_topic_bench_io_common.hpp
- * @brief `LinuxSharedTopic` 基准共用 I/O 与 attach helper。 Shared I/O and attach helpers for `LinuxSharedTopic` benchmarks.
+ * @brief `LinuxSharedTopic` 基准共用 I/O 与 attach helper。 Shared I/O and attach helpers
+ * for `LinuxSharedTopic` benchmarks.
  * @details 作用：
  *          1. 提供 pipe 完整读写 helper。
  *          2. 提供等待 subscriber attach 的共用 helper。
@@ -10,12 +11,13 @@
  */
 #pragma once
 
-#include <csignal>
-#include <cerrno>
-#include <cstdio>
-#include <cstdint>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
 #include <type_traits>
 #include <utility>
 
@@ -33,7 +35,8 @@ class ScopeExit
   ScopeExit(const ScopeExit&) = delete;
   ScopeExit& operator=(const ScopeExit&) = delete;
 
-  ScopeExit(ScopeExit&& other) noexcept : fn_(std::move(other.fn_)), active_(other.active_)
+  ScopeExit(ScopeExit&& other) noexcept
+      : fn_(std::move(other.fn_)), active_(other.active_)
   {
     other.active_ = false;
   }
@@ -128,7 +131,8 @@ inline bool ReadAll(int fd, void* buffer, size_t size)
 }
 
 template <typename TopicType>
-bool WaitForSubscriberAttach(TopicType& topic, uint32_t expected_num, const char* case_label)
+bool WaitForSubscriberAttach(TopicType& topic, uint32_t expected_num,
+                             const char* case_label)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
@@ -138,8 +142,8 @@ bool WaitForSubscriberAttach(TopicType& topic, uint32_t expected_num, const char
   }
   if (topic.GetSubscriberNum() < expected_num)
   {
-    std::fprintf(stderr, "%s subscriber attach timeout: expected=%u actual=%u\n", case_label,
-                 expected_num, topic.GetSubscriberNum());
+    std::fprintf(stderr, "%s subscriber attach timeout: expected=%u actual=%u\n",
+                 case_label, expected_num, topic.GetSubscriberNum());
     return false;
   }
   return true;

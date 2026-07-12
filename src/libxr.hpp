@@ -1,7 +1,6 @@
 #pragma once
 
 #include "app_framework.hpp"
-#include "libxr_assert.hpp"
 #include "async.hpp"
 #include "database.hpp"
 #include "double_buffer.hpp"
@@ -9,11 +8,11 @@
 #include "flag.hpp"
 #include "inertia.hpp"
 #include "kinematic.hpp"
+#include "libxr_assert.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_color.hpp"
 #include "libxr_def.hpp"
 #include "libxr_pipe.hpp"
-#include "print.hpp"
 #include "libxr_rw.hpp"
 #include "libxr_string.hpp"
 #include "libxr_system.hpp"
@@ -21,9 +20,10 @@
 #include "libxr_type.hpp"
 #include "list.hpp"
 #include "lockfree_list.hpp"
-#include "object_pool.hpp"
 #include "logger.hpp"
 #include "message.hpp"
+#include "object_pool.hpp"
+#include "print.hpp"
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include "linux_shared_topic.hpp"
 #endif
