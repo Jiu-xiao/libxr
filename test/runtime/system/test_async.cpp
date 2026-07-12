@@ -13,9 +13,6 @@
  * Observe the public status machine around a real worker thread, because runtime
  * correctness here is primarily scheduling/lifecycle semantics.
  */
-#include <cstddef>
-#include <new>
-
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
@@ -41,28 +38,24 @@ void test_async()
       },
       &async_arg);
 
-  // ASync has a permanent worker, so the test instance must not register an exit-time
-  // destructor.
-  alignas(LibXR::ASync) static std::byte async_storage[sizeof(LibXR::ASync)];
-  static LibXR::ASync* async =
-      new (async_storage) LibXR::ASync(512, LibXR::Thread::Priority::REALTIME);
+  static LibXR::ASync async(512, LibXR::Thread::Priority::REALTIME);
   for (int i = 0; i < 10; i++)
   {
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::READY);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::READY);
     ASSERT(async_arg == i);
-    async->AssignJob(async_cb);
+    async.AssignJob(async_cb);
 
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::BUSY);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::BUSY);
     const uint32_t wait_start = LibXR::Thread::GetTime();
-    while (async->status_.load(std::memory_order_acquire) != LibXR::ASync::Status::DONE &&
+    while (async.status_.load(std::memory_order_acquire) != LibXR::ASync::Status::DONE &&
            LibXR::Thread::GetTime() - wait_start < 1000U)
     {
       LibXR::Thread::Yield();
     }
 
-    ASSERT(async->status_.load(std::memory_order_acquire) == LibXR::ASync::Status::DONE);
+    ASSERT(async.status_.load(std::memory_order_acquire) == LibXR::ASync::Status::DONE);
     ASSERT(async_arg == i + 1);
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::DONE);
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::READY);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::DONE);
+    ASSERT(async.GetStatus() == LibXR::ASync::Status::READY);
   }
 }
