@@ -23,7 +23,8 @@ void test_rbt()
 {
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
   // Test coverage: execute the test items listed in this file header in sequence.
-  LibXR::RBTree<int> rbtree([](const int& a, const int& b) { return a - b; });
+  LibXR::RBTree<int> rbtree(
+      [](const int& a, const int& b) { return (a > b) - (a < b); });
 
   LibXR::RBTree<int>::Node<int> nodes[100];
 
@@ -59,4 +60,24 @@ void test_rbt()
   }
 
   ASSERT(rbtree.GetNum() == 0);
+
+  LibXR::RBTree<uint32_t> uint32_tree(
+      [](const uint32_t& a, const uint32_t& b) { return (a > b) - (a < b); });
+  constexpr uint32_t keys[] = {0U, 1U, 0x7FFFFFFFU, 0x80000000U, 0xFFFFFFFFU};
+  LibXR::RBTree<uint32_t>::Node<uint32_t> uint32_nodes[std::size(keys)];
+
+  for (size_t i = 0; i < std::size(keys); i++)
+  {
+    uint32_nodes[i] = keys[i];
+    uint32_tree.Insert(uint32_nodes[i], keys[i]);
+  }
+
+  LibXR::RBTree<uint32_t>::Node<uint32_t>* uint32_node_pos = nullptr;
+  for (size_t i = 0; i < std::size(keys); i++)
+  {
+    uint32_node_pos = uint32_tree.ForeachDisc(uint32_node_pos);
+    ASSERT(uint32_node_pos != nullptr);
+    ASSERT(*uint32_node_pos == keys[i]);
+    ASSERT(uint32_tree.Search<uint32_t>(keys[i]) == &uint32_nodes[i]);
+  }
 }

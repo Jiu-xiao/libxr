@@ -15,7 +15,7 @@ void Topic::EnsureDomainRegistry()
   if (!domain_)
   {
     domain_ = new RBTree<uint32_t>([](const uint32_t& a, const uint32_t& b)
-                                   { return static_cast<int>(a) - static_cast<int>(b); });
+                                   { return (a > b) - (a < b); });
   }
 }
 
@@ -107,7 +107,7 @@ Topic::Domain::Domain(const char* name)
 
   node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
       [](const uint32_t& a, const uint32_t& b)
-      { return static_cast<int>(a) - static_cast<int>(b); });
+      { return (a > b) - (a < b); });
 
   domain_->Insert(*node_, crc32);
 }
