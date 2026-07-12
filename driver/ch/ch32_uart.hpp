@@ -4,11 +4,13 @@
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 #include "ch32_uart_def.hpp"
+#include "latest_snapshot.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-#include "uart.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
 #include "model/uart_dma_tx_model.hpp"
+#include "model/uart_rx_config_gate.hpp"
+#include "uart.hpp"
 
 namespace LibXR
 {
@@ -19,8 +21,9 @@ namespace LibXR
  * 相同的抢占优先级。本驱动依赖该优先级契约保证所有 RX 事件入口不重入，使 RX model
  * 保持唯一 producer。
  * When circular RX DMA is enabled, the USART/UART IDLE IRQ and its RX DMA HT/TC IRQ must
- * use the same preemption priority. This driver relies on that priority contract to keep
- * all RX event entries non-reentrant and preserve the RX model's single producer.
+ * use the same preemption priority and, on multicore devices, the same target core. This
+ * keeps all RX event entries one logical producer; runtime configuration may execute on
+ * another core and is coordinated separately by `UartRxConfigGate`.
  */
 class CH32UART : public UART
 {
@@ -43,6 +46,7 @@ class CH32UART : public UART
 
   void TxDmaIRQHandler();
   void RxDmaIRQHandler();
+  void OnRxDataAvailable(bool in_isr);
 
   ch32_uart_id_t id_;
   uint16_t uart_mode_;
@@ -50,6 +54,8 @@ class CH32UART : public UART
   ReadPort _read_port;
   WritePort _write_port;
 
+  LatestSnapshot<UART::Configuration> requested_config_;
+  UartRxConfigGate rx_config_gate_;
   UartCircularDmaRxModel rx_dma_model_;
   UartDmaTxModel<CH32UART> tx_dma_model_;
 
@@ -60,6 +66,14 @@ class CH32UART : public UART
   static CH32UART* map_[CH32_UART_NUMBER];
 
  private:
+  void OnConfigRequested() { rx_config_gate_.RequestConfig(); }
+  bool ApplyPendingConfig(bool in_isr);
+  bool OnConfigApplied(bool)
+  {
+    rx_config_gate_.LeaveConfig();
+    return true;
+  }
+
   /**
    * @brief 配置并启动 CH32 UART 循环 RX DMA 通道 / Configure and start the CH32 UART
    * circular RX DMA channel

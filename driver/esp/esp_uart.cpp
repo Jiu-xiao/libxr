@@ -111,6 +111,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       rts_pin_(rts_pin),
       cts_pin_(cts_pin),
       config_(config),
+      requested_config_(config),
       rx_isr_buffer_(new uint8_t[rx_buffer_size]),
       rx_isr_buffer_size_(rx_buffer_size),
       tx_storage_(AllocateTxStorage(tx_buffer_size * 2)),
@@ -201,6 +202,51 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
     return ErrorCode::ARG_ERR;
   }
 
+  requested_config_.Store(config);
+  tx_dma_model_.RequestConfig(false);
+  return ErrorCode::OK;
+}
+
+void ESP32UART::OnConfigRequested() { rx_config_gate_.RequestConfig(); }
+
+bool ESP32UART::ApplyPendingConfig(bool in_isr)
+{
+  if (!rx_config_gate_.TryEnterConfig())
+  {
+    return false;
+  }
+
+  UART::Configuration config{};
+  (void)requested_config_.LoadLatest(config);
+
+  uart_word_length_t word_length = UART_DATA_8_BITS;
+  uart_stop_bits_t stop_bits = UART_STOP_BITS_1;
+  if (!ResolveWordLength(config.data_bits, word_length) ||
+      !ResolveStopBits(config.stop_bits, stop_bits))
+  {
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+    return true;
+  }
+
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_ && (tx_dma_channel_ != nullptr))
+  {
+    gdma_stop(tx_dma_channel_);
+    gdma_reset(tx_dma_channel_);
+  }
+#endif
+
+  bool dma_backend_enabled = false;
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  dma_backend_enabled = dma_backend_enabled_;
+#endif
+  if (!dma_backend_enabled)
+  {
+    uart_hal_disable_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
+    tx_busy_.Clear();
+    ClearActiveTx();
+  }
+
   const uart_sclk_t sclk = UART_SCLK_DEFAULT;
   uart_hal_set_sclk(&uart_hal_, static_cast<soc_module_clk_t>(sclk));
 
@@ -210,13 +256,19 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
                                     &sclk_hz) != ESP_OK) ||
       (sclk_hz == 0))
   {
-    return ErrorCode::INIT_ERR;
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+    return true;
   }
 
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
   if (!uart_hal_set_baudrate(&uart_hal_, config.baudrate, sclk_hz))
   {
-    return ErrorCode::INIT_ERR;
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+    return true;
   }
+#else
+  uart_hal_set_baudrate(&uart_hal_, config.baudrate, sclk_hz);
+#endif
 
   uart_hal_set_data_bit_num(&uart_hal_, word_length);
   uart_hal_set_stop_bits(&uart_hal_, stop_bits);
@@ -238,27 +290,26 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   }
 #endif
 
-  // Align with ST/CH SetConfig semantics: if TX was in-flight during
-  // reconfiguration, keep transfer progression instead of surfacing BUSY.
+  config_ = config;
+  return true;
+}
+
+bool ESP32UART::OnConfigApplied(bool in_isr)
+{
+  rx_config_gate_.LeaveConfig();
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (dma_backend_enabled_)
   {
-    (void)tx_dma_model_.RestartActive();
+    return true;
   }
-  else
 #endif
-  {
-    if (tx_busy_.IsSet() && tx_active_valid_)
-    {
-      uart_hal_clr_intsts_mask(&uart_hal_, UART_TX_INTR_MASK);
-      uart_hal_ena_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
-      FillTxFifo(false);
-    }
-  }
-
-  config_ = config;
-  return ErrorCode::OK;
+  (void)TryStartTx(in_isr);
+  return false;
 }
+
+#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
+bool ESP32UART::StartDmaTx(uint8_t*, size_t, int) { return false; }
+#endif
 
 // Internal UART loopback is exposed as a direct peripheral toggle for backend
 // self-test and board-free link checks.
@@ -285,6 +336,10 @@ ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
     return uart->tx_dma_model_.Submit(in_isr);
   }
 #endif
+  if (uart->rx_config_gate_.ConfigRequested())
+  {
+    return ErrorCode::PENDING;
+  }
   return uart->TryStartTx(in_isr);
 }
 

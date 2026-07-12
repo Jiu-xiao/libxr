@@ -200,11 +200,29 @@ ErrorCode STM32UART::WriteFun(WritePort& port, bool in_isr)
 
 ErrorCode STM32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
+static UART::Configuration STM32_UART_GetConfig(UART_HandleTypeDef* handle)
+{
+  UART::Parity parity = UART::Parity::NO_PARITY;
+  if (handle->Init.Parity == UART_PARITY_EVEN)
+  {
+    parity = UART::Parity::EVEN;
+  }
+  else if (handle->Init.Parity == UART_PARITY_ODD)
+  {
+    parity = UART::Parity::ODD;
+  }
+
+  return UART::Configuration{
+      handle->Init.BaudRate, parity, 8U,
+      static_cast<uint8_t>(handle->Init.StopBits == UART_STOPBITS_2 ? 2U : 1U)};
+}
+
 STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
                      RawData dma_buff_tx, uint32_t tx_queue_size)
     : UART(&_read_port, &_write_port),
       _read_port(dma_buff_rx.size_),
       _write_port(tx_queue_size, dma_buff_tx.size_ / 2),
+      requested_config_(STM32_UART_GetConfig(uart_handle)),
       rx_dma_model_(dma_buff_rx),
       tx_dma_model_(*this, _write_port, dma_buff_tx),
       uart_handle_(uart_handle),
@@ -225,6 +243,31 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
 
 ErrorCode STM32UART::SetConfig(UART::Configuration config)
 {
+  if ((config.stop_bits != 1U) && (config.stop_bits != 2U))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if ((config.parity != UART::Parity::NO_PARITY) &&
+      (config.parity != UART::Parity::EVEN) && (config.parity != UART::Parity::ODD))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  requested_config_.Store(config);
+  tx_dma_model_.RequestConfig(false);
+  return ErrorCode::OK;
+}
+
+bool STM32UART::ApplyPendingConfig(bool in_isr)
+{
+  if (!rx_config_gate_.TryEnterConfig())
+  {
+    return false;
+  }
+
+  UART::Configuration config{};
+  (void)requested_config_.LoadLatest(config);
+
   HAL_UART_DeInit(uart_handle_);
   uart_handle_->Init.BaudRate = config.baudrate;
 
@@ -243,7 +286,8 @@ ErrorCode STM32UART::SetConfig(UART::Configuration config)
       uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
       break;
     default:
-      ASSERT(false);
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+      return true;
   }
 
   switch (config.stop_bits)
@@ -255,19 +299,18 @@ ErrorCode STM32UART::SetConfig(UART::Configuration config)
       uart_handle_->Init.StopBits = UART_STOPBITS_2;
       break;
     default:
-      ASSERT(false);
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+      return true;
   }
 
   if (HAL_UART_Init(uart_handle_) != HAL_OK)
   {
-    return ErrorCode::INIT_ERR;
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+    return true;
   }
 
   SetRxDMA();
-
-  (void)tx_dma_model_.RestartActive();
-
-  return ErrorCode::OK;
+  return true;
 }
 
 void STM32UART::SetRxDMA()
@@ -285,7 +328,21 @@ void STM32UART::SetRxDMA()
 static inline void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef* uart_handle)
 {
   auto uart = STM32UART::map[stm32_uart_get_id(uart_handle->Instance)];
-  uart->rx_dma_model_.OnDataAvailable(*uart, uart->_read_port, true);
+  uart->OnRxDataAvailable(true);
+}
+
+void STM32UART::OnRxDataAvailable(bool in_isr)
+{
+  if (!rx_config_gate_.TryEnterRx())
+  {
+    return;
+  }
+
+  rx_dma_model_.OnDataAvailable(*this, _read_port, in_isr);
+  if (rx_config_gate_.LeaveRx())
+  {
+    tx_dma_model_.RequestConfig(in_isr);
+  }
 }
 
 // NOLINTNEXTLINE
@@ -307,16 +364,14 @@ extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart)
 
 extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
 {
-  HAL_UART_Abort_IT(huart);
+  auto uart = STM32UART::map[stm32_uart_get_id(huart->Instance)];
+  uart->tx_dma_model_.RequestConfig(true);
 }
 
 extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef* huart)
 {
   auto uart = STM32UART::map[stm32_uart_get_id(huart->Instance)];
-  uart->rx_dma_model_.ResetPosition();
-  HAL_UARTEx_ReceiveToIdle_DMA(huart, huart->pRxBuffPtr,
-                               uart->rx_dma_model_.BufferSize());
-  (void)uart->tx_dma_model_.RestartActive();
+  uart->tx_dma_model_.RequestConfig(true);
 }
 
 bool STM32UART::StartDmaTx(uint8_t* data, size_t size, int)

@@ -79,20 +79,21 @@ class UartDmaTxModel
   }
 
   /**
-   * @brief 平台重新配置后重启 active DMA / Restart active DMA after reconfiguration
-   * @return active 请求存在且后端接受重启时返回 true / True when an active request
-   * exists and the backend accepts the restart
-   * @warning 这是独立控制面接口；调用方必须保证它不与 TX service 并发。This is a
-   * control-plane API; the caller must serialize it against the TX service.
+   * @brief 发布最高优先级配置事件 / Publish the highest-priority configuration event
+   * @param in_isr 当前调用是否位于 ISR / Whether the current caller is in an ISR
+   *
+   * 平台后端负责保存最新配置 payload。本入口只发布可合并事件；CONFIG owner 会停止并
+   * 重配硬件、终止旧 TX 前缀，然后让 CONFIG 期间追加的请求在后续轮次继续推进。
+   * The platform backend owns the latest configuration payload. This entry only
+   * publishes the coalesced event; the CONFIG owner reconfigures hardware, aborts the
+   * old TX prefix, and leaves requests appended during CONFIG for later service rounds.
    */
-  bool RestartActive()
+  void RequestConfig(bool in_isr)
   {
-    if (!busy_ || (active_length_ == 0U))
-    {
-      return false;
-    }
-    return backend_.StartDmaTx(buffers_.ActiveBuffer(), active_length_,
-                               buffers_.ActiveBlock());
+    backend_.OnConfigRequested();
+    (void)service_.Invoke(EventMask(TxEvent::CONFIG),
+                          [this, in_isr](uint32_t events) noexcept
+                          { ServiceTx(events, in_isr, nullptr); });
   }
 
   /**
@@ -112,7 +113,7 @@ class UartDmaTxModel
     WRITE = 1U << 0U,
     COMPLETE = 1U << 1U,
     ERROR = 1U << 2U,
-    ABORT = 1U << 3U,
+    CONFIG = 1U << 3U,
   };
 
   struct SubmitContext
@@ -132,9 +133,23 @@ class UartDmaTxModel
 
   void ServiceTx(uint32_t events, bool in_isr, SubmitContext* submit) noexcept
   {
-    if (HasEvent(events, TxEvent::ABORT))
+    if (HasEvent(events, TxEvent::CONFIG))
     {
-      AbortTx(in_isr);
+      const bool resume_tx = ApplyConfig(in_isr);
+      if (!config_boundary_valid_ && resume_tx)
+      {
+        (void)service_.Invoke(EventMask(TxEvent::WRITE),
+                              [this, in_isr](uint32_t pending_events) noexcept
+                              { ServiceTx(pending_events, in_isr, nullptr); });
+      }
+      return;
+    }
+
+    // A CONFIG request may be waiting for RX hardware ownership. Keep later WRITE and
+    // terminal notifications coalesced in their level-triggered facts, but do not let
+    // them move the fixed old-prefix boundary before CONFIG is retried.
+    if (config_boundary_valid_)
+    {
       return;
     }
 
@@ -290,7 +305,7 @@ class UartDmaTxModel
 
     if (!started)
     {
-      RequestAbort(in_isr);
+      RequestConfig(in_isr);
       return true;
     }
 
@@ -350,44 +365,63 @@ class UartDmaTxModel
       port_.Finish(in_isr, started ? ErrorCode::OK : ErrorCode::FAILED, info);
       if (!started)
       {
-        RequestAbort(in_isr);
+        RequestConfig(in_isr);
       }
     }
   }
 
-  void RequestAbort(bool in_isr)
+  bool ApplyConfig(bool in_isr)
   {
-    // Reentrant invocation only schedules the highest-priority next round.
-    // 重入调用只安排最高优先级的下一轮，不会递归执行 handler。
-    (void)service_.Invoke(EventMask(TxEvent::ABORT),
-                          [this, in_isr](uint32_t events) noexcept
-                          { ServiceTx(events, in_isr, nullptr); });
-  }
+    // Metadata is the operation publication boundary. Fix the old prefix before any
+    // Finish callback can append another request. Payload without metadata belongs to
+    // an in-progress producer and is intentionally left for its later WRITE event.
+    // metadata 是操作发布边界。在任何 Finish callback 可能追加新请求前固定旧前缀；
+    // 只有 payload、尚无 metadata 的生产者仍在发布中，留给其后续 WRITE 事件处理。
+    if (!config_boundary_valid_)
+    {
+      config_prefix_count_ = port_.queue_info_->Size();
+      config_boundary_valid_ = true;
+    }
 
-  void AbortTx(bool in_isr)
-  {
+    if (!backend_.ApplyPendingConfig(in_isr))
+    {
+      return false;
+    }
+
+    size_t remaining = config_prefix_count_;
+    config_prefix_count_ = 0U;
+    config_boundary_valid_ = false;
+
     (void)ReleaseActive();
 
     if (pending_valid_)
     {
+      ASSERT(remaining > 0U);
       pending_valid_ = false;
       WriteInfoBlock info{};
       if (!PopActiveInfo(info))
       {
         ASSERT(false);
-        return;
+        return false;
       }
+      --remaining;
       port_.Finish(in_isr, ErrorCode::FAILED, info);
     }
 
-    FailPublishedQueued(in_isr);
+    FailPublishedQueued(in_isr, remaining);
+    return backend_.OnConfigApplied(in_isr);
   }
 
-  void FailPublishedQueued(bool in_isr)
+  void FailPublishedQueued(bool in_isr, size_t count)
   {
-    WriteInfoBlock info{};
-    while (port_.queue_info_->Peek(info) == ErrorCode::OK)
+    for (size_t index = 0U; index < count; ++index)
     {
+      WriteInfoBlock info{};
+      if (port_.queue_info_->Peek(info) != ErrorCode::OK)
+      {
+        ASSERT(false);
+        return;
+      }
       if (!DiscardPayload(info.data.size_) || !PopActiveInfo(info))
       {
         ASSERT(false);
@@ -404,8 +438,10 @@ class UartDmaTxModel
   DoubleBuffer buffers_;
   SerializedService service_{};
   size_t active_length_ = 0U;
+  size_t config_prefix_count_ = 0U;
   bool busy_ = false;
   bool pending_valid_ = false;
+  bool config_boundary_valid_ = false;
 };
 
 }  // namespace LibXR

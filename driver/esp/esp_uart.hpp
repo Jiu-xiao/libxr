@@ -6,14 +6,17 @@
 
 #include "driver/gpio.h"
 #include "esp_def.hpp"
+#include "esp_idf_version.h"
 #include "esp_intr_alloc.h"
 #include "flag.hpp"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
+#include "latest_snapshot.hpp"
+#include "model/uart_dma_tx_model.hpp"
+#include "model/uart_rx_config_gate.hpp"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
-#include "model/uart_dma_tx_model.hpp"
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
 #include "esp_private/gdma.h"
@@ -145,6 +148,10 @@ class ESP32UART : public UART
    */
   static uart_parity_t ResolveParity(UART::Parity parity);
 
+  void OnConfigRequested();
+  bool ApplyPendingConfig(bool in_isr);
+  bool OnConfigApplied(bool in_isr);
+
   /**
    * @brief UART ISR trampoline.
    * @brief UART 中断跳板函数。
@@ -205,6 +212,8 @@ class ESP32UART : public UART
    */
   void ConfigureRxInterruptPath();
 
+  bool StartDmaTx(uint8_t* data, size_t size, int block);
+
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   /**
    * @brief Bring up the UHCI/GDMA backend.
@@ -219,8 +228,6 @@ class ESP32UART : public UART
    * @param block 双缓冲块和描述符链表索引 / Double-buffer block and descriptor-list index
    * @return GDMA 接受描述符链表时返回 true / True when GDMA accepts the descriptor list
    */
-  bool StartDmaTx(uint8_t* data, size_t size, int block);
-
   /**
    * @brief Handle one RX DMA completion.
    * @brief 处理一次 RX DMA 完成事件。
@@ -331,6 +338,8 @@ class ESP32UART : public UART
   int cts_pin_;           ///< CTS GPIO pin or `PIN_NO_CHANGE`.
 
   UART::Configuration config_;  ///< Current UART framing configuration.
+  LatestSnapshot<UART::Configuration> requested_config_;
+  UartRxConfigGate rx_config_gate_;
 
   uint8_t* rx_isr_buffer_ = nullptr;  ///< Scratch buffer used by the RX ISR path.
   size_t rx_isr_buffer_size_ = 0;     ///< Size of `rx_isr_buffer_`.
@@ -364,8 +373,6 @@ class ESP32UART : public UART
   size_t rx_dma_chunk_size_ = 0;                    ///< Size of one RX DMA ring node.
   uint32_t rx_dma_node_index_ = 0;  ///< Software consumer index in the RX ring.
 #endif
-
-  Flag::Atomic rx_fifo_draining_{};  ///< RX FIFO drain reentry gate.
 };
 
 }  // namespace LibXR

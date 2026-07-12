@@ -27,8 +27,10 @@ namespace LibXR
  * `OnDataAvailable()` 修改读取位置并作为软件队列 producer。
  * Calls delivering RX events to one model instance must not overlap. When UART IDLE and
  * RX DMA HT/TC use different interrupt sources, the platform driver must configure them
- * with the same preemption priority so only one `OnDataAvailable()` call can modify the
- * read position and act as the software-queue producer at a time.
+ * with the same preemption priority and target-core affinity so only one
+ * `OnDataAvailable()` call can modify the read position and act as the software-queue
+ * producer at a time. Configuration on another core must use a separate hardware-state
+ * handoff such as `UartRxConfigGate`.
  */
 class UartCircularDmaRxModel
 {

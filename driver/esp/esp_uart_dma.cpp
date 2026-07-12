@@ -146,9 +146,13 @@ bool IRAM_ATTR ESP32UART::DmaRxDoneCallback(gdma_channel_handle_t,
                                             void* user_data)
 {
   auto* uart = static_cast<ESP32UART*>(user_data);
-  if (uart != nullptr)
+  if ((uart != nullptr) && uart->rx_config_gate_.TryEnterRx())
   {
     uart->HandleDmaRxDone(event_data);
+    if (uart->rx_config_gate_.LeaveRx())
+    {
+      uart->tx_dma_model_.RequestConfig(true);
+    }
   }
   return false;
 }
@@ -159,9 +163,13 @@ bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t, gdma_even
                                                 void* user_data)
 {
   auto* uart = static_cast<ESP32UART*>(user_data);
-  if (uart != nullptr)
+  if ((uart != nullptr) && uart->rx_config_gate_.TryEnterRx())
   {
     uart->HandleDmaRxError();
+    if (uart->rx_config_gate_.LeaveRx())
+    {
+      uart->tx_dma_model_.RequestConfig(true);
+    }
   }
   return false;
 }

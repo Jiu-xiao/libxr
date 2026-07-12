@@ -20,6 +20,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
       id_(id),
       _read_port(dma_rx.size_),
       _write_port(tx_queue_size, dma_tx.size_ / 2),
+      requested_config_(config),
       rx_dma_model_(dma_rx),
       tx_dma_model_(*this, _write_port, dma_tx),
       instance_(ch32_uart_get_instance_id(id)),
@@ -185,6 +186,46 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 // Runtime USART configuration.
 ErrorCode CH32UART::SetConfig(UART::Configuration config)
 {
+  if ((config.stop_bits != 1U) && (config.stop_bits != 2U))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if ((config.parity != UART::Parity::NO_PARITY) &&
+      (config.parity != UART::Parity::EVEN) && (config.parity != UART::Parity::ODD))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  requested_config_.Store(config);
+  tx_dma_model_.RequestConfig(false);
+  return ErrorCode::OK;
+}
+
+bool CH32UART::ApplyPendingConfig(bool in_isr)
+{
+  UNUSED(in_isr);
+  if (!rx_config_gate_.TryEnterConfig())
+  {
+    return false;
+  }
+
+  UART::Configuration config{};
+  (void)requested_config_.LoadLatest(config);
+
+  if (uart_mode_ & USART_Mode_Tx)
+  {
+    USART_DMACmd(instance_, USART_DMAReq_Tx, DISABLE);
+    DMA_Cmd(dma_tx_channel_, DISABLE);
+    DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id_]);
+  }
+  if (uart_mode_ & USART_Mode_Rx)
+  {
+    USART_DMACmd(instance_, USART_DMAReq_Rx, DISABLE);
+    DMA_Cmd(dma_rx_channel_, DISABLE);
+    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
+    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
+  }
+
   USART_InitTypeDef usart_cfg = {};
   usart_cfg.USART_BaudRate = config.baudrate;
   usart_cfg.USART_StopBits =
@@ -205,7 +246,8 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
       usart_cfg.USART_WordLength = USART_WordLength_9b;
       break;
     default:
-      return ErrorCode::NOT_SUPPORT;
+      ASSERT(false);
+      return true;
   }
 
   usart_cfg.USART_Mode = uart_mode_;
@@ -215,6 +257,7 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
 
   if (uart_mode_ & USART_Mode_Rx)
   {
+    rx_dma_model_.Start(*this);
     USART_DMACmd(instance_, USART_DMAReq_Rx, ENABLE);
     USART_ITConfig(instance_, USART_IT_IDLE, ENABLE);
   }
@@ -225,10 +268,7 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
   }
 
   USART_Cmd(instance_, ENABLE);
-
-  (void)tx_dma_model_.RestartActive();
-
-  return ErrorCode::OK;
+  return true;
 }
 
 // Write callback (DMA-based transfer).
@@ -254,9 +294,20 @@ ErrorCode CH32UART::ReadFun(ReadPort&, bool)
   return ErrorCode::PENDING;
 }
 
-void ch32_uart_rx_isr_handler(LibXR::CH32UART* uart)
+void ch32_uart_rx_isr_handler(LibXR::CH32UART* uart) { uart->OnRxDataAvailable(true); }
+
+void CH32UART::OnRxDataAvailable(bool in_isr)
 {
-  uart->rx_dma_model_.OnDataAvailable(*uart, uart->_read_port, true);
+  if (!rx_config_gate_.TryEnterRx())
+  {
+    return;
+  }
+
+  rx_dma_model_.OnDataAvailable(*this, _read_port, in_isr);
+  if (rx_config_gate_.LeaveRx())
+  {
+    tx_dma_model_.RequestConfig(in_isr);
+  }
 }
 
 // USART IDLE interrupt handler.

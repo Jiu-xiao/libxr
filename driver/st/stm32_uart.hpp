@@ -8,12 +8,14 @@
 #undef UART
 #endif
 
+#include "latest_snapshot.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-#include "stm32_dcache.hpp"
-#include "uart.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
 #include "model/uart_dma_tx_model.hpp"
+#include "model/uart_rx_config_gate.hpp"
+#include "stm32_dcache.hpp"
+#include "uart.hpp"
 
 typedef enum : uint8_t
 {
@@ -118,9 +120,10 @@ namespace LibXR
  * NVIC 抢占优先级。HAL 的 UART IDLE、DMA HT 和 DMA TC 路径都可能进入同一 RX event
  * callback；本驱动依赖相同优先级保证这些入口不重入。
  * When circular RX DMA is enabled, the UART global IRQ and its RX DMA IRQ must use the
- * same NVIC preemption priority. UART IDLE, DMA HT, and DMA TC paths may all enter the
- * same HAL RX event callback, and this driver relies on equal priority to prevent
- * reentry.
+ * same NVIC preemption priority and, on multicore devices, the same target core. UART
+ * IDLE, DMA HT, and DMA TC paths may all enter the same HAL RX event callback; they must
+ * remain one logical SPSC producer. Runtime configuration may execute on another core
+ * and is coordinated separately by `UartRxConfigGate`.
  */
 class STM32UART : public UART
 {
@@ -141,10 +144,13 @@ class STM32UART : public UART
   ErrorCode SetConfig(UART::Configuration config);
 
   void SetRxDMA();
+  void OnRxDataAvailable(bool in_isr);
 
   ReadPort _read_port;
   WritePort _write_port;
 
+  LatestSnapshot<UART::Configuration> requested_config_;
+  UartRxConfigGate rx_config_gate_;
   UartCircularDmaRxModel rx_dma_model_;
   UartDmaTxModel<STM32UART> tx_dma_model_;
 
@@ -155,6 +161,14 @@ class STM32UART : public UART
   static STM32UART* map[STM32_UART_NUMBER];  // NOLINT
 
  private:
+  void OnConfigRequested() { rx_config_gate_.RequestConfig(); }
+  bool ApplyPendingConfig(bool in_isr);
+  bool OnConfigApplied(bool)
+  {
+    rx_config_gate_.LeaveConfig();
+    return true;
+  }
+
   /**
    * @brief 通过 STM32 HAL 配置并启动 UART 循环 RX DMA / Configure and start circular
    * UART RX DMA through STM32 HAL

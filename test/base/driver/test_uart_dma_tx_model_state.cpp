@@ -48,17 +48,14 @@ void TestActivePendingQueuedPipeline()
   ASSERT(statuses[2] == PollStatus::RUNNING);
   AssertStart(backend, 0U, first, sizeof(first), 0);
 
-  ASSERT(backend.RestartActive());
-  AssertStart(backend, 1U, first, sizeof(first), 0);
-
   backend.Complete(false);
   ASSERT(statuses[1] == PollStatus::DONE);
   ASSERT(statuses[2] == PollStatus::RUNNING);
-  AssertStart(backend, 2U, second, sizeof(second), 1);
+  AssertStart(backend, 1U, second, sizeof(second), 1);
 
   backend.Complete(true);
   ASSERT(statuses[2] == PollStatus::DONE);
-  AssertStart(backend, 3U, third, sizeof(third), 0);
+  AssertStart(backend, 2U, third, sizeof(third), 0);
 
   backend.Complete(false);
   ASSERT(!backend.IsBusy());
