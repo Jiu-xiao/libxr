@@ -106,8 +106,7 @@ Topic::Domain::Domain(const char* name)
   }
 
   node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
-      [](const uint32_t& a, const uint32_t& b)
-      { return (a > b) - (a < b); });
+      [](const uint32_t& a, const uint32_t& b) { return (a > b) - (a < b); });
 
   domain_->Insert(*node_, crc32);
 }
