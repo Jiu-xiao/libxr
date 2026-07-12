@@ -3,13 +3,20 @@
  * @brief base 平面 `Database::Key` 契约测试。 Base-plane `Database::Key` contract tests.
  *
  * 测试项目 / Test items:
- * 1. `Save()` 使用当前内存值。 Save path: verify `Save()` writes the key's current in-memory value, not a stale constructor value.
- * 2. `Set()` 先更新本地缓存再落库。 Set path: verify `Set()` updates the local cached value before delegating persistence.
- * 3. `Get()` 失败时的默认值回退。 Get/default path: verify constructor fallback to explicit default or zero when `Get()` fails.
+ * 1. `Save()` 使用当前内存值。 Save path: verify `Save()` writes the key's current
+ * in-memory value, not a stale constructor value.
+ * 2. `Set()` 先更新本地缓存再落库。 Set path: verify `Set()` updates the local cached
+ * value before delegating persistence.
+ * 3. `Get()` 失败时的默认值回退。 Get/default path: verify constructor fallback to
+ * explicit default or zero when `Get()` fails.
  *
  * 测试原理 / Test principles:
- * 1. 用极小的内存数据库 stub 隔离 key 对象语义，不把 flash 布局问题混进来。 Use a tiny in-memory database stub so the test isolates key-object semantics from flash layout or backend persistence behavior.
- * 2. 同时观察后端调用计数和本地缓存值，因为 key 契约涵盖两者。 Observe both backend call counters and local cached values, because the key contract covers caller-visible state as well as backend dispatch.
+ * 1. 用极小的内存数据库 stub 隔离 key 对象语义，不把 flash 布局问题混进来。 Use a tiny
+ * in-memory database stub so the test isolates key-object semantics from flash layout or
+ * backend persistence behavior.
+ * 2. 同时观察后端调用计数和本地缓存值，因为 key 契约涵盖两者。 Observe both backend call
+ * counters and local cached values, because the key contract covers caller-visible state
+ * as well as backend dispatch.
  */
 #include <cstdint>
 
@@ -70,9 +77,13 @@ class MemoryDatabase : public Database
 };
 
 /**
- * @brief 测试项函数 `TestDatabaseKeySaveUsesCurrentData`。 Test-item function `TestDatabaseKeySaveUsesCurrentData`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestDatabaseKeySaveUsesCurrentData`。 Test-item function
+ * `TestDatabaseKeySaveUsesCurrentData`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestDatabaseKeySaveUsesCurrentData()
 {
@@ -96,9 +107,13 @@ void TestDatabaseKeySaveUsesCurrentData()
 }
 
 /**
- * @brief 测试项函数 `TestDatabaseKeySetUpdatesCurrentValueBeforeSave`。 Test-item function `TestDatabaseKeySetUpdatesCurrentValueBeforeSave`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestDatabaseKeySetUpdatesCurrentValueBeforeSave`。 Test-item
+ * function `TestDatabaseKeySetUpdatesCurrentValueBeforeSave`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestDatabaseKeySetUpdatesCurrentValueBeforeSave()
 {
@@ -114,9 +129,13 @@ void TestDatabaseKeySetUpdatesCurrentValueBeforeSave()
 }
 
 /**
- * @brief 测试项函数 `TestDatabaseKeyUsesDefaultOnGetFailure`。 Test-item function `TestDatabaseKeyUsesDefaultOnGetFailure`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestDatabaseKeyUsesDefaultOnGetFailure`。 Test-item function
+ * `TestDatabaseKeyUsesDefaultOnGetFailure`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestDatabaseKeyUsesDefaultOnGetFailure()
 {
@@ -141,8 +160,9 @@ void TestDatabaseKeyUsesDefaultOnGetFailure()
 
 /**
  * @brief 测试入口函数 `test_database`。 Test entry function `test_database`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_database()
 {

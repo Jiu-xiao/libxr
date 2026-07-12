@@ -68,10 +68,10 @@ class DapLinkV2Class : public DeviceClass
    * @param nreset_gpio     Optional nRESET GPIO
    *
    */
-  explicit DapLinkV2Class(
-      Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
-      SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
-      const char* interface_string = DEFAULT_INTERFACE_STRING)
+  explicit DapLinkV2Class(Endpoint::EPNumber data_in_ep_num,
+                          Endpoint::EPNumber data_out_ep_num, SwdPort& swd_link,
+                          LibXR::GPIO* nreset_gpio = nullptr,
+                          const char* interface_string = DEFAULT_INTERFACE_STRING)
       : DeviceClass(),
         swd_(swd_link),
         nreset_gpio_(nreset_gpio),
@@ -2183,8 +2183,8 @@ class DapLinkV2Class : public DeviceClass
     LibXR::Debug::JtagDp dp(*jtag_, &jtag_chain_);
     uint32_t idcode = 0u;
     ErrorCode ec = dp.ReadIdCode(idcode);
-    if (ec == ErrorCode::OK && (idcode == 0u || idcode == 0xFFFF'FFFFu ||
-                                ((idcode & 0x1u) == 0u)) &&
+    if (ec == ErrorCode::OK &&
+        (idcode == 0u || idcode == 0xFFFF'FFFFu || ((idcode & 0x1u) == 0u)) &&
         jtag_ir_len_[index] != 4u)
     {
       uint32_t fallback_idcode = 0u;
@@ -2608,8 +2608,7 @@ class DapLinkV2Class : public DeviceClass
       {
         return true;
       }
-      LibXR::Debug::SwdProtocol::Ack check_ack =
-          LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
+      LibXR::Debug::SwdProtocol::Ack check_ack = LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
       const ErrorCode check_ec = CheckPostedApWriteFast(check_ack);
       response_value = MapAckToDapResp(check_ack);
       if (response_value != LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK)
@@ -3093,7 +3092,8 @@ class DapLinkV2Class : public DeviceClass
               LibXR::Debug::SwdProtocol::Ack::PROTOCOL;
           const ErrorCode check_ec = CheckPostedApWriteFast(check_ack);
           xresp = MapAckToDapResp(check_ack);
-          if (check_ack == LibXR::Debug::SwdProtocol::Ack::OK && check_ec != ErrorCode::OK)
+          if (check_ack == LibXR::Debug::SwdProtocol::Ack::OK &&
+              check_ec != ErrorCode::OK)
           {
             xresp |= LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
           }
@@ -3340,16 +3340,13 @@ class DapLinkV2Class : public DeviceClass
     };
 
     auto ensure_space = [&](uint16_t bytes) -> bool
-    {
-      return (resp_off + bytes) <= resp_cap;
-    };
+    { return (resp_off + bytes) <= resp_cap; };
 
     auto bytes_for_read = [&](bool need_ts) -> uint16_t
-    {
-      return static_cast<uint16_t>(need_ts ? 8u : 4u);
-    };
+    { return static_cast<uint16_t>(need_ts ? 8u : 4u); };
 
-    auto idle_after_attempt = [&]() {
+    auto idle_after_attempt = [&]()
+    {
       if (dap_state_.transfer_cfg.idle_cycles != 0u)
       {
         jtag_->IdleClocks(dap_state_.transfer_cfg.idle_cycles);
@@ -3424,11 +3421,13 @@ class DapLinkV2Class : public DeviceClass
       }
     };
 
-    auto check_posted_ap_write_jtag = [&](LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
+    auto check_posted_ap_write_jtag =
+        [&](LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
     {
       uint32_t ctrl_stat = 0u;
-      return dp_read_retry(static_cast<uint8_t>(LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT),
-                           ctrl_stat, ack);
+      return dp_read_retry(
+          static_cast<uint8_t>(LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT),
+          ctrl_stat, ack);
     };
 
     uint8_t response_count = 0u;
@@ -3481,8 +3480,9 @@ class DapLinkV2Class : public DeviceClass
     auto should_check_pending_ap_write_at_tail = [&]() -> bool
     {
       return response_value == LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK ||
-             response_value == static_cast<uint8_t>(LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK |
-                                                    LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MISMATCH);
+             response_value ==
+                 static_cast<uint8_t>(LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK |
+                                      LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MISMATCH);
     };
 
     for (uint32_t i = 0; i < COUNT; ++i)
@@ -3498,8 +3498,10 @@ class DapLinkV2Class : public DeviceClass
       const bool RNW = LibXR::USB::DapLinkV2Def::req_is_read(RQ);
       const uint8_t ADDR2B = LibXR::USB::DapLinkV2Def::req_addr2b(RQ);
       const bool TS = LibXR::USB::DapLinkV2Def::req_need_timestamp(RQ);
-      const bool MATCH_VALUE = ((RQ & LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_VALUE) != 0u);
-      const bool MATCH_MASK = ((RQ & LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_MASK) != 0u);
+      const bool MATCH_VALUE =
+          ((RQ & LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_VALUE) != 0u);
+      const bool MATCH_MASK =
+          ((RQ & LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MATCH_MASK) != 0u);
 
       if (TS && (MATCH_VALUE || MATCH_MASK))
       {
@@ -3630,9 +3632,9 @@ class DapLinkV2Class : public DeviceClass
 
           if (!matched)
           {
-            response_value = static_cast<uint8_t>(
-                LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK |
-                LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MISMATCH);
+            response_value =
+                static_cast<uint8_t>(LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK |
+                                     LibXR::USB::DapLinkV2Def::DAP_TRANSFER_MISMATCH);
             break;
           }
 
@@ -3797,7 +3799,8 @@ class DapLinkV2Class : public DeviceClass
     }
 
     LibXR::Debug::JtagDp dp(*jtag_, &jtag_chain_);
-    auto idle_after_attempt = [&]() {
+    auto idle_after_attempt = [&]()
+    {
       if (dap_state_.transfer_cfg.idle_cycles != 0u)
       {
         jtag_->IdleClocks(dap_state_.transfer_cfg.idle_cycles);
@@ -3872,11 +3875,13 @@ class DapLinkV2Class : public DeviceClass
       }
     };
 
-    auto check_posted_ap_write_jtag = [&](LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
+    auto check_posted_ap_write_jtag =
+        [&](LibXR::Debug::JtagProtocol::Ack& ack) -> ErrorCode
     {
       uint32_t ctrl_stat = 0u;
-      return dp_read_retry(static_cast<uint8_t>(LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT),
-                           ctrl_stat, ack);
+      return dp_read_retry(
+          static_cast<uint8_t>(LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT),
+          ctrl_stat, ack);
     };
 
     const bool AP = LibXR::USB::DapLinkV2Def::req_is_ap(DAP_RQ);
@@ -3903,8 +3908,8 @@ class DapLinkV2Class : public DeviceClass
         req_off = static_cast<uint16_t>(req_off + 4u);
 
         LibXR::Debug::JtagProtocol::Ack ack = LibXR::Debug::JtagProtocol::Ack::PROTOCOL;
-        ErrorCode ec = AP ? ap_write_retry(ADDR2B, wdata, ack)
-                          : dp_write_retry(ADDR2B, wdata, ack);
+        ErrorCode ec =
+            AP ? ap_write_retry(ADDR2B, wdata, ack) : dp_write_retry(ADDR2B, wdata, ack);
 
         xresp = MapAckToDapResp(ack);
         if (xresp == 0u)
@@ -4150,7 +4155,7 @@ class DapLinkV2Class : public DeviceClass
   uint8_t in_tx_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
   LibXR::RawData in_tx_multi_buf_{in_tx_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
 
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
   /**
    * @brief MS OS 2.0 descriptor set layout
    */
@@ -4174,19 +4179,18 @@ LIBXR_PACKED_BEGIN
       uint8_t name[LibXR::USB::WinUsbMsOs20::
                        PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES];  ///< Property name /
                                                                  ///< Property name
-      uint16_t wPropertyDataLength;  ///< UTF-16 byte length
-      uint8_t
-          data[GUID_MULTI_SZ_UTF_16_BYTES];  ///< REG_MULTI_SZ data
+      uint16_t wPropertyDataLength;                              ///< UTF-16 byte length
+      uint8_t data[GUID_MULTI_SZ_UTF_16_BYTES];                  ///< REG_MULTI_SZ data
     } prop;
   } winusb_msos20_{};
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
  private:
   SwdPort& swd_;  ///< SWD link
 
-  LibXR::Debug::Jtag* jtag_ = nullptr;  ///< JTAG link
+  LibXR::Debug::Jtag* jtag_ = nullptr;                    ///< JTAG link
   LibXR::Debug::JtagProtocol::ChainConfig jtag_chain_{};  ///< JTAG chain state
-  uint8_t jtag_ir_len_[JTAG_MAX_DEVICES] = {};  ///< JTAG IR lengths
+  uint8_t jtag_ir_len_[JTAG_MAX_DEVICES] = {};            ///< JTAG IR lengths
 
   LibXR::GPIO* nreset_gpio_ = nullptr;  ///< Optional nRESET GPIO
 
@@ -4213,7 +4217,7 @@ LIBXR_PACKED_END
   bool inited_ = false;        ///< Initialized flag
   uint8_t interface_num_ = 0;  ///< Interface number
 
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
   /**
    * @brief Descriptor block (Interface + 2x Endpoint)
    *
@@ -4224,7 +4228,7 @@ LIBXR_PACKED_BEGIN
     EndpointDescriptor ep_out;  ///< OUT endpoint descriptor / OUT endpoint descriptor
     EndpointDescriptor ep_in;   ///< IN endpoint descriptor / IN endpoint descriptor
   } desc_block_{};
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
  private:
   LibXR::USB::WinUsbMsOs20::MsOs20BosCapability winusb_msos20_cap_{

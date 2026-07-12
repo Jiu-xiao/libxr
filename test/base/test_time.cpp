@@ -1,14 +1,20 @@
 /**
  * @file test_time.cpp
- * @brief `MicrosecondTimestamp` / `MillisecondTimestamp` 算术测试。 `MicrosecondTimestamp` and `MillisecondTimestamp` arithmetic tests.
+ * @brief `MicrosecondTimestamp` / `MillisecondTimestamp` 算术测试。
+ * `MicrosecondTimestamp` and `MillisecondTimestamp` arithmetic tests.
  *
  * 测试项目 / Test items:
- * 1. 直线时间差与单位换算。 Straight-line subtraction: verify elapsed microsecond and millisecond durations and their unit-conversion helpers.
- * 2. 单次回绕后的时间差计算。 Single-wrap subtraction: verify configured wrap ranges are used when the new timestamp is numerically smaller than the old one.
+ * 1. 直线时间差与单位换算。 Straight-line subtraction: verify elapsed microsecond and
+ * millisecond durations and their unit-conversion helpers.
+ * 2. 单次回绕后的时间差计算。 Single-wrap subtraction: verify configured wrap ranges are
+ * used when the new timestamp is numerically smaller than the old one.
  *
  * 测试原理 / Test principles:
- * 1. 同时检查原始 duration 和换算辅助接口，因为调用方会同时使用两者。 Check both raw duration values and converted unit helpers, because callers use both surfaces.
- * 2. 在测试内主动改 wrap 配置，让回绕分支可确定复现。 Override the wrap configuration in-test so the wraparound branch is exercised deterministically instead of depending on platform timebase limits.
+ * 1. 同时检查原始 duration 和换算辅助接口，因为调用方会同时使用两者。 Check both raw
+ * duration values and converted unit helpers, because callers use both surfaces.
+ * 2. 在测试内主动改 wrap 配置，让回绕分支可确定复现。 Override the wrap configuration
+ * in-test so the wraparound branch is exercised deterministically instead of depending on
+ * platform timebase limits.
  */
 #include <cstdint>
 
@@ -31,8 +37,9 @@ struct TimebaseWrapGuard
 
 /**
  * @brief 测试入口函数 `test_time`。 Test entry function `test_time`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_time()
 {

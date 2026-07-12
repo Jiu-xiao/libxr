@@ -1,6 +1,7 @@
 /**
  * @file test_command_ls.cpp
- * @brief `Terminal` `ls` 内建命令场景子测试。 Split test unit for `Terminal` `ls` builtin scenarios.
+ * @brief `Terminal` `ls` 内建命令场景子测试。 Split test unit for `Terminal` `ls` builtin
+ * scenarios.
  * @details 测试项目：
  *          1. 根目录下不同节点类型的输出标记。
  *          2. 切换目录后 listing scope 跟随当前目录。
@@ -15,13 +16,17 @@ namespace
 
 /**
  * @brief 测试项函数 `TestLsBuiltin`。 Test-item function `TestLsBuiltin`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestLsBuiltin()
 {
   // 测试内容：验证 `ls` 在不同目录和节点类型下的输出标记与作用域。
-  // Test coverage: verify `ls` output markers and scope under different directories and node types.
+  // Test coverage: verify `ls` output markers and scope under different directories and
+  // node types.
   TerminalFixture fixture;
 
   int file_value = 42;
@@ -65,11 +70,11 @@ void TestLsBuiltin()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunTerminalCommandLsTests`。 Test-item function `RunTerminalCommandLsTests`.
- * @details 测试内容：执行 `Terminal` `ls` 内建命令子场景。 Execute `Terminal` `ls` builtin sub-scenarios.
- *          测试原理：把 listing 作用域与节点类型标记单独成组，聚焦可见输出契约。 Group listing scope and node-type markers around the visible-output contract.
+ * @brief 测试项函数 `RunTerminalCommandLsTests`。 Test-item function
+ * `RunTerminalCommandLsTests`.
+ * @details 测试内容：执行 `Terminal` `ls` 内建命令子场景。 Execute `Terminal` `ls`
+ * builtin sub-scenarios. 测试原理：把 listing
+ * 作用域与节点类型标记单独成组，聚焦可见输出契约。 Group listing scope and node-type
+ * markers around the visible-output contract.
  */
-void RunTerminalCommandLsTests()
-{
-  TestLsBuiltin();
-}
+void RunTerminalCommandLsTests() { TestLsBuiltin(); }

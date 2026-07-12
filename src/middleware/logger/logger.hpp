@@ -88,8 +88,9 @@ class Logger
   template <Detail::LoggerLiteral::Frontend Forced, Print::Text Source, typename... Args>
   static void Publish(LogLevel level, const char* file, uint32_t line, Args&&... args)
   {
-    static_assert(Forced != Detail::LoggerLiteral::Frontend::Auto,
-                  "LibXR::Logger: explicit literal tag must be XR_FMT(...) or XR_PRINTF(...)");
+    static_assert(
+        Forced != Detail::LoggerLiteral::Frontend::Auto,
+        "LibXR::Logger: explicit literal tag must be XR_FMT(...) or XR_PRINTF(...)");
 
     constexpr auto frontend =
         Detail::LoggerLiteral::SelectFrontend<Forced, Source, Args...>();
@@ -154,7 +155,9 @@ class Logger
    */
   static void PublishToTopic(LogData& data);
 
-  static inline bool initialized_ = false;  ///< 是否已经完成日志 topic 初始化 / Whether logger-topic initialization has completed.
+  static inline bool initialized_ =
+      false;  ///< 是否已经完成日志 topic 初始化 / Whether logger-topic initialization has
+              ///< completed.
 };
 
 }  // namespace LibXR

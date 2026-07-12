@@ -1,6 +1,7 @@
 /**
  * @file linux_database_flash_test_common.hpp
- * @brief linux database 测试共用 flash/fatal helper。 Shared flash and fatal-path helpers for linux database tests.
+ * @brief linux database 测试共用 flash/fatal helper。 Shared flash and fatal-path helpers
+ * for linux database tests.
  * @details 共享职责：
  *          1. 定义 flash 布局常量和 main/backup 校验元数据常量。
  *          2. 提供可注入读写擦失败的 `FailingFlash`。
@@ -118,9 +119,13 @@ class FailingFlash : public Flash
 
  private:
   /**
-   * @brief 辅助函数 `SeedValidSequentialBlocks`。 Helper function `SeedValidSequentialBlocks`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @brief 辅助函数 `SeedValidSequentialBlocks`。 Helper function
+   * `SeedValidSequentialBlocks`.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   void SeedValidSequentialBlocks()
   {

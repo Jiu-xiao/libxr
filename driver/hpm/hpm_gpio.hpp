@@ -140,9 +140,9 @@ class HPMGPIO final : public GPIO
    * `HPM_FGPIO` or when the SDK does not provide the both-edge enum.
    * @note 该接口会将 PAD 复用强制切换为 GPIO，不负责外设复用配置 /
    * This API forces pad mux to GPIO function (no peripheral alternate-function setup).
-   * @note 在可解析到 PAD 时会自动开启 IOC loopback，用于输出模式下直接通过 `Read()` 读取实际引脚电平 /
-   * When PAD can be resolved, IOC loopback is enabled so `Read()` can return the actual pad
-   * level even in output mode.
+   * @note 在可解析到 PAD 时会自动开启 IOC loopback，用于输出模式下直接通过 `Read()`
+   * 读取实际引脚电平 / When PAD can be resolved, IOC loopback is enabled so `Read()` can
+   * return the actual pad level even in output mode.
    */
   ErrorCode SetConfig(Configuration config) override;
 
@@ -202,9 +202,11 @@ class HPMGPIO final : public GPIO
 #else
   static constexpr uint32_t PORT_COUNT = 15u;  ///< 支持的端口数量 / Supported port count.
 #endif
-  static constexpr uint32_t PIN_COUNT = 32;   ///< 每个端口引脚数 / Pins per port.
-  static constexpr uint32_t INVALID_IRQ = 0xFFFFFFFFu;    ///< 无效 IRQ 标记 / Invalid IRQ marker.
-  static constexpr uint16_t INVALID_PAD_INDEX = 0xFFFFu;   ///< 无效 PAD 标记 / Invalid PAD marker.
+  static constexpr uint32_t PIN_COUNT = 32;  ///< 每个端口引脚数 / Pins per port.
+  static constexpr uint32_t INVALID_IRQ =
+      0xFFFFFFFFu;  ///< 无效 IRQ 标记 / Invalid IRQ marker.
+  static constexpr uint16_t INVALID_PAD_INDEX =
+      0xFFFFu;  ///< 无效 PAD 标记 / Invalid PAD marker.
 
   /**
    * @brief 端口级 IRQ 路由状态 / Shared port-level IRQ routing state.
@@ -243,7 +245,8 @@ class HPMGPIO final : public GPIO
   uint8_t pin_;         ///< GPIO 引脚号 / GPIO pin index.
   uint32_t irq_;        ///< 当前 port 对应 IRQ 号 / IRQ number for the current port.
   uint16_t pad_index_;  ///< IOC PAD 编号 / IOC PAD index.
-  bool interrupt_enabled_ = false;  ///< 当前 pin IRQ 使能状态 / Per-instance IRQ enabled flag.
+  bool interrupt_enabled_ =
+      false;  ///< 当前 pin IRQ 使能状态 / Per-instance IRQ enabled flag.
 };
 
 }  // namespace LibXR

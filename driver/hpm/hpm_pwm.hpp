@@ -1,10 +1,9 @@
 ﻿#pragma once
 
-#include "pwm.hpp"
-
-#include "hpm_soc.h"
 #include "hpm_clock_drv.h"
 #include "hpm_gptmr_drv.h"
+#include "hpm_soc.h"
+#include "pwm.hpp"
 
 #if defined(PWM_SOC_CMP_MAX_COUNT) && defined(PWM_SOC_OUTPUT_TO_PWM_MAX_COUNT)
 #define LIBXR_HPM_PWM_SUPPORTED 1

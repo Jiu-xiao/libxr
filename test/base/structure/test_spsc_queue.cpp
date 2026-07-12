@@ -1,11 +1,11 @@
-#include "libxr.hpp"
-#include "libxr_def.hpp"
-#include "test.hpp"
-
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+
+#include "libxr.hpp"
+#include "libxr_def.hpp"
+#include "test.hpp"
 
 namespace
 {
@@ -212,18 +212,17 @@ void test_spsc_queue()
 
     uint8_t write_next = 20;
     size_t write_chunks = 0;
-    ASSERT(byte_queue.PushWithWriter(
-               4,
-               [&](uint8_t* chunk, size_t count)
-               {
-                 ASSERT(count == 2);
-                 ++write_chunks;
-                 for (size_t index = 0; index < count; ++index)
-                 {
-                   chunk[index] = write_next++;
-                 }
-                 return LibXR::ErrorCode::OK;
-               }) == LibXR::ErrorCode::OK);
+    ASSERT(byte_queue.PushWithWriter(4,
+                                     [&](uint8_t* chunk, size_t count)
+                                     {
+                                       ASSERT(count == 2);
+                                       ++write_chunks;
+                                       for (size_t index = 0; index < count; ++index)
+                                       {
+                                         chunk[index] = write_next++;
+                                       }
+                                       return LibXR::ErrorCode::OK;
+                                     }) == LibXR::ErrorCode::OK);
     ASSERT(write_chunks == 2);
 
     const uint8_t expected_after_write[6] = {13, 14, 20, 21, 22, 23};
@@ -247,19 +246,19 @@ void test_spsc_queue()
     const uint8_t expected_read_chunks[5] = {5, 6, 7, 8, 9};
     size_t read_cursor = 0;
     size_t read_chunks = 0;
-    ASSERT(byte_queue.PopWithReader(
-               5,
-               [&](const uint8_t* chunk, size_t count)
-               {
-                 ASSERT((read_chunks == 0 && count == 1) ||
-                        (read_chunks == 1 && count == 4));
-                 for (size_t index = 0; index < count; ++index)
-                 {
-                   ASSERT(chunk[index] == expected_read_chunks[read_cursor++]);
-                 }
-                 ++read_chunks;
-                 return LibXR::ErrorCode::OK;
-               }) == LibXR::ErrorCode::OK);
+    ASSERT(byte_queue.PopWithReader(5,
+                                    [&](const uint8_t* chunk, size_t count)
+                                    {
+                                      ASSERT((read_chunks == 0 && count == 1) ||
+                                             (read_chunks == 1 && count == 4));
+                                      for (size_t index = 0; index < count; ++index)
+                                      {
+                                        ASSERT(chunk[index] ==
+                                               expected_read_chunks[read_cursor++]);
+                                      }
+                                      ++read_chunks;
+                                      return LibXR::ErrorCode::OK;
+                                    }) == LibXR::ErrorCode::OK);
     ASSERT(read_chunks == 2);
     ASSERT(read_cursor == 5);
     ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::OK);
@@ -274,8 +273,9 @@ void test_spsc_queue()
     std::atomic<bool> producer_done = false;
     LibXR::Thread producer;
 
-    producer.Create<ProducerArg>(ProducerArg{&queue, TOTAL_ITEMS, &producer_done}, ProducerTask,
-                                 "spsc_prod", 1024, LibXR::Thread::Priority::REALTIME);
+    producer.Create<ProducerArg>(ProducerArg{&queue, TOTAL_ITEMS, &producer_done},
+                                 ProducerTask, "spsc_prod", 1024,
+                                 LibXR::Thread::Priority::REALTIME);
 
     for (uint32_t expected = 0; expected < TOTAL_ITEMS; ++expected)
     {

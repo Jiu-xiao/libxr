@@ -187,7 +187,7 @@ class DoubleBuffer
  private:
   uint8_t* buffer_[2] = {nullptr, nullptr};  ///< 双缓冲区指针 / Double buffer pointers
   size_t size_ = 0;                          ///< 单个缓冲区大小 / Size of each buffer
-  int active_ = 0;      ///< 当前活动缓冲区编号 / Index of active buffer
+  int active_ = 0;  ///< 当前活动缓冲区编号 / Index of active buffer
   bool pending_valid_ =
       false;                ///< 标记备用区是否准备好 / Whether pending buffer is ready
   size_t active_len_ = 0;   ///< 当前活动缓冲区有效数据长度 / Length of active data

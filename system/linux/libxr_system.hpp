@@ -3,7 +3,6 @@
 #include <pthread.h>
 
 #include <atomic>
-
 #include <cstdint>
 
 namespace LibXR

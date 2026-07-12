@@ -1,15 +1,20 @@
 /**
  * @file test_packet_validation.cpp
- * @brief message packet 失败校验子测试。 Split test unit for message packet validation-failure scenarios.
+ * @brief message packet 失败校验子测试。 Split test unit for message packet
+ * validation-failure scenarios.
  */
 #include "message_packet_test_common.hpp"
 
 namespace
 {
 /**
- * @brief 测试项函数 `TestPacketValidationFailures`。 Test-item function `TestPacketValidationFailures`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestPacketValidationFailures`。 Test-item function
+ * `TestPacketValidationFailures`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestPacketValidationFailures()
 {
@@ -82,11 +87,12 @@ void TestPacketValidationFailures()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunMessagePacketValidationTests`。 Test-item function `RunMessagePacketValidationTests`.
- * @details 测试内容：执行当前分组里的 message packet 子场景。 Execute the grouped message-packet sub-scenarios for this split file.
- *          测试原理：把解析、失败校验和对齐兼容语义拆开，降低 packet 测试文件复杂度。 Split parsing, validation-failure, and alignment-compatibility semantics into separate files to reduce packet-test complexity.
+ * @brief 测试项函数 `RunMessagePacketValidationTests`。 Test-item function
+ * `RunMessagePacketValidationTests`.
+ * @details 测试内容：执行当前分组里的 message packet 子场景。 Execute the grouped
+ * message-packet sub-scenarios for this split file.
+ *          测试原理：把解析、失败校验和对齐兼容语义拆开，降低 packet 测试文件复杂度。
+ * Split parsing, validation-failure, and alignment-compatibility semantics into separate
+ * files to reduce packet-test complexity.
  */
-void RunMessagePacketValidationTests()
-{
-  TestPacketValidationFailures();
-}
+void RunMessagePacketValidationTests() { TestPacketValidationFailures(); }

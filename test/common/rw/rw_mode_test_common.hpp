@@ -1,12 +1,14 @@
 /**
  * @file rw_mode_test_common.hpp
- * @brief `rw` / `pipe` 模式与等待器测试 helper。 Shared mode and waiter helpers for `rw` / `pipe` tests.
+ * @brief `rw` / `pipe` 模式与等待器测试 helper。 Shared mode and waiter helpers for `rw`
+ * / `pipe` tests.
  * @details 测试项目：
  *          1. 统一封装 `NONE` / `POLLING` / `CALLBACK` / `BLOCK` 四类操作模式。
  *          2. 统一维护异步回调计数、最终错误码和等待信号量。
  *          3. 统一提供等待断言，避免各测试文件重复展开样板代码。
  *          Test items:
- *          1. Provide one shared wrapper for `NONE` / `POLLING` / `CALLBACK` / `BLOCK` modes.
+ *          1. Provide one shared wrapper for `NONE` / `POLLING` / `CALLBACK` / `BLOCK`
+ * modes.
  *          2. Keep callback counts, final status, and semaphores in one reusable probe.
  *          3. Centralize wait assertions so scenario files stay focused.
  */
@@ -49,8 +51,11 @@ struct CompletionProbe
 
   /**
    * @brief 辅助函数 `Reset`。 Helper function `Reset`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   void Reset()
   {
@@ -77,8 +82,11 @@ struct ModeHarness
 
   /**
    * @brief 辅助函数 `Reset`。 Helper function `Reset`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   void Reset()
   {
@@ -87,9 +95,12 @@ struct ModeHarness
   }
 
   /**
-   * @brief 断言辅助函数 `ExpectPendingSubmitted`。 Assertion helper function `ExpectPendingSubmitted`.
-   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
-   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+   * @brief 断言辅助函数 `ExpectPendingSubmitted`。 Assertion helper function
+   * `ExpectPendingSubmitted`.
+   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check
+   * to the current result.
+   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate
+   * repeated validation logic so test items do not drift to inconsistent checks.
    */
   void ExpectPendingSubmitted() const
   {
@@ -107,8 +118,10 @@ struct ModeHarness
 
   /**
    * @brief 断言辅助函数 `ExpectFinal`。 Assertion helper function `ExpectFinal`.
-   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check to the current result.
-   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate repeated validation logic so test items do not drift to inconsistent checks.
+   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check
+   * to the current result.
+   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate
+   * repeated validation logic so test items do not drift to inconsistent checks.
    */
   void ExpectFinal(LibXR::ErrorCode expected)
   {
@@ -136,8 +149,11 @@ struct ModeHarness
 
   /**
    * @brief 辅助函数 `OnCallback`。 Helper function `OnCallback`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   static void OnCallback(bool in_isr, ModeHarness* self, LibXR::ErrorCode status)
   {
@@ -148,8 +164,11 @@ struct ModeHarness
 
   /**
    * @brief 辅助函数 `Bind`。 Helper function `Bind`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   void Bind(uint32_t timeout)
   {

@@ -1,15 +1,20 @@
 /**
  * @file test_cross_process.cpp
- * @brief `LinuxSharedTopic` 纯跨进程顺序子验证。 Split verification unit for pure cross-process ordering semantics.
+ * @brief `LinuxSharedTopic` 纯跨进程顺序子验证。 Split verification unit for pure
+ * cross-process ordering semantics.
  */
 #include "linux_shm_topic_test_common.hpp"
 
 namespace LinuxShmTopicTest
 {
 /**
- * @brief 测试项函数 `RunCrossProcessScenarios`。 Test-item function `RunCrossProcessScenarios`.
- * @details 测试内容：验证独立 publisher/subscriber 进程之间的顺序和 payload 完整性。 Execute the cross-process publish/subscribe ordering and payload-integrity scenario.
- *          测试原理：单独把纯跨进程序列完整性拉出来，避免它被其他资源管理场景噪声掩盖。 Isolate the pure cross-process ordering/integrity check so it is not obscured by unrelated resource-management scenarios.
+ * @brief 测试项函数 `RunCrossProcessScenarios`。 Test-item function
+ * `RunCrossProcessScenarios`.
+ * @details 测试内容：验证独立 publisher/subscriber 进程之间的顺序和 payload 完整性。
+ * Execute the cross-process publish/subscribe ordering and payload-integrity scenario.
+ *          测试原理：单独把纯跨进程序列完整性拉出来，避免它被其他资源管理场景噪声掩盖。
+ * Isolate the pure cross-process ordering/integrity check so it is not obscured by
+ * unrelated resource-management scenarios.
  */
 void RunCrossProcessScenarios()
 {

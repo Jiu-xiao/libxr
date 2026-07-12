@@ -1,6 +1,7 @@
 /**
  * @file test_mixed_modes.cpp
- * @brief `LinuxSharedTopic` domain/mixed-mode 子验证。 Split verification unit for `LinuxSharedTopic` domain and mixed-mode semantics.
+ * @brief `LinuxSharedTopic` domain/mixed-mode 子验证。 Split verification unit for
+ * `LinuxSharedTopic` domain and mixed-mode semantics.
  */
 #include "linux_shm_topic_test_common.hpp"
 
@@ -8,8 +9,12 @@ namespace LinuxShmTopicTest
 {
 /**
  * @brief 测试项函数 `RunMixedModeScenarios`。 Test-item function `RunMixedModeScenarios`.
- * @details 测试内容：验证 domain 隔离、broadcast 与 balanced 混合共存，以及 balanced group 不可服务时的整体失败语义。 Execute domain-isolation, mixed broadcast/balanced coexistence, and balanced-group-required failure scenarios.
- *          测试原理：这些场景关注的是 topic 分组与模式混搭后的策略边界，而不是单一模式内部行为。 These scenarios focus on policy boundaries created by topic grouping and mixed subscriber modes rather than one mode in isolation.
+ * @details 测试内容：验证 domain 隔离、broadcast 与 balanced 混合共存，以及 balanced
+ * group 不可服务时的整体失败语义。 Execute domain-isolation, mixed broadcast/balanced
+ * coexistence, and balanced-group-required failure scenarios. 测试原理：这些场景关注的是
+ * topic 分组与模式混搭后的策略边界，而不是单一模式内部行为。 These scenarios focus on
+ * policy boundaries created by topic grouping and mixed subscriber modes rather than one
+ * mode in isolation.
  */
 void RunMixedModeScenarios()
 {
@@ -71,8 +76,10 @@ void RunMixedModeScenarios()
     ASSERT(publisher.Valid());
 
     SharedSubscriber subscriber_broadcast(topic_name);
-    SharedSubscriber subscriber_rr_a(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
-    SharedSubscriber subscriber_rr_b(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_rr_a(topic_name,
+                                     LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_rr_b(topic_name,
+                                     LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
     ASSERT(subscriber_broadcast.Valid());
     ASSERT(subscriber_rr_a.Valid());
     ASSERT(subscriber_rr_b.Valid());
@@ -122,7 +129,8 @@ void RunMixedModeScenarios()
     ASSERT(publisher.Valid());
 
     SharedSubscriber subscriber_broadcast(topic_name);
-    SharedSubscriber subscriber_rr(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_rr(topic_name,
+                                   LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
     ASSERT(subscriber_broadcast.Valid());
     ASSERT(subscriber_rr.Valid());
 

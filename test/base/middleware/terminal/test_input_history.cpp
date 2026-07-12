@@ -1,6 +1,7 @@
 /**
  * @file test_input_history.cpp
- * @brief `Terminal` 输入 CRLF 与历史导航场景子测试。 Split test unit for `Terminal` CRLF-suppression and history-navigation scenarios.
+ * @brief `Terminal` 输入 CRLF 与历史导航场景子测试。 Split test unit for `Terminal`
+ * CRLF-suppression and history-navigation scenarios.
  * @details 测试项目：
  *          1. `\r\n` 双字节提交只执行一次命令。
  *          2. `Up` / `Down` 历史导航回放新旧命令。
@@ -14,14 +15,19 @@ namespace
 {
 
 /**
- * @brief 测试项函数 `TestInputCrLfAndHistory`。 Test-item function `TestInputCrLfAndHistory`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestInputCrLfAndHistory`。 Test-item function
+ * `TestInputCrLfAndHistory`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestInputCrLfAndHistory()
 {
   // 测试内容：验证 CRLF 去重和上下箭头历史导航的执行副作用与回显。
-  // Test coverage: verify CRLF suppression plus the side effects and echoes of up/down history navigation.
+  // Test coverage: verify CRLF suppression plus the side effects and echoes of up/down
+  // history navigation.
   TerminalFixture fixture;
 
   int one_count = 0;
@@ -29,8 +35,10 @@ void TestInputCrLfAndHistory()
   CommandState one_state{"one", &one_count};
   CommandState two_state{"two", &two_count};
 
-  auto one_cmd = LibXR::RamFS::CreateCommand<CommandState*>("one", CountCommand, &one_state);
-  auto two_cmd = LibXR::RamFS::CreateCommand<CommandState*>("two", CountCommand, &two_state);
+  auto one_cmd =
+      LibXR::RamFS::CreateCommand<CommandState*>("one", CountCommand, &one_state);
+  auto two_cmd =
+      LibXR::RamFS::CreateCommand<CommandState*>("two", CountCommand, &two_state);
 
   fixture.ramfs.Add(one_cmd);
   fixture.ramfs.Add(two_cmd);
@@ -63,11 +71,12 @@ void TestInputCrLfAndHistory()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunTerminalInputHistoryTests`。 Test-item function `RunTerminalInputHistoryTests`.
- * @details 测试内容：执行 `Terminal` CRLF 与历史导航子场景。 Execute `Terminal` CRLF-suppression and history-navigation sub-scenarios.
- *          测试原理：把提交去重和历史导航单独成组，聚焦 parser 与 history 的联动契约。 Group submission suppression and history navigation around the parser/history interaction contract.
+ * @brief 测试项函数 `RunTerminalInputHistoryTests`。 Test-item function
+ * `RunTerminalInputHistoryTests`.
+ * @details 测试内容：执行 `Terminal` CRLF 与历史导航子场景。 Execute `Terminal`
+ * CRLF-suppression and history-navigation sub-scenarios.
+ *          测试原理：把提交去重和历史导航单独成组，聚焦 parser 与 history 的联动契约。
+ * Group submission suppression and history navigation around the parser/history
+ * interaction contract.
  */
-void RunTerminalInputHistoryTests()
-{
-  TestInputCrLfAndHistory();
-}
+void RunTerminalInputHistoryTests() { TestInputCrLfAndHistory(); }

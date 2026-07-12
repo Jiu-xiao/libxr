@@ -170,7 +170,8 @@ class DeviceComposition
    */
   ErrorCode GenerateInterfaceString(uint8_t string_index, ConstRawData& data);
 
-  bool configured_ = false;   ///< 是否已进入非 0 配置态 / Whether a non-zero config is active
+  bool configured_ =
+      false;  ///< 是否已进入非 0 配置态 / Whether a non-zero config is active
   bool ep_assigned_ = false;  ///< 端点是否已绑定 / Whether endpoints are assigned
 
   EndpointPool& endpoint_pool_;  ///< 端点池引用 / Endpoint pool reference

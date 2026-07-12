@@ -1,6 +1,7 @@
 /**
  * @file test_string_format.cpp
- * @brief 运行时字符串重格式化场景子测试。 Split test unit for runtime-string reformat/reprintf scenarios.
+ * @brief 运行时字符串重格式化场景子测试。 Split test unit for runtime-string
+ * reformat/reprintf scenarios.
  * @details 测试项目：
  *          1. `Reformat` / `Reprintf` 生成预期文本。
  *          2. 多次重格式化复用同一块稳定存储。
@@ -8,7 +9,8 @@
  *          Test items:
  *          1. `Reformat` / `Reprintf` produce the expected text.
  *          2. Repeated formatting reuses the same stable storage buffer.
- *          3. Floating-point and integer representative values keep producing valid output.
+ *          3. Floating-point and integer representative values keep producing valid
+ * output.
  */
 #include "string_test_common.hpp"
 
@@ -16,14 +18,19 @@ namespace
 {
 
 /**
- * @brief 测试项函数 `TestRuntimeStringFormat`。 Test-item function `TestRuntimeStringFormat`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestRuntimeStringFormat`。 Test-item function
+ * `TestRuntimeStringFormat`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestRuntimeStringFormat()
 {
   // 测试内容：验证运行时格式化输出、稳定存储和边界值路径。
-  // Test coverage: verify runtime formatting output, stable storage reuse, and boundary-value paths.
+  // Test coverage: verify runtime formatting output, stable storage reuse, and
+  // boundary-value paths.
   LibXR::RuntimeStringView<"camera_{}", unsigned int> formatted;
   ASSERT(formatted.Reformat(7U) == LibXR::ErrorCode::OK);
   ASSERT(formatted.Status() == LibXR::ErrorCode::OK);
@@ -64,11 +71,11 @@ void TestRuntimeStringFormat()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunRuntimeStringFormatTests`。 Test-item function `RunRuntimeStringFormatTests`.
- * @details 测试内容：执行运行时字符串重格式化子场景。 Execute runtime-string reformat/reprintf sub-scenarios.
- *          测试原理：把格式化路径单独成组，聚焦文本生成与稳定存储契约。 Group formatting paths around text-generation and stable-storage contracts.
+ * @brief 测试项函数 `RunRuntimeStringFormatTests`。 Test-item function
+ * `RunRuntimeStringFormatTests`.
+ * @details 测试内容：执行运行时字符串重格式化子场景。 Execute runtime-string
+ * reformat/reprintf sub-scenarios.
+ *          测试原理：把格式化路径单独成组，聚焦文本生成与稳定存储契约。 Group formatting
+ * paths around text-generation and stable-storage contracts.
  */
-void RunRuntimeStringFormatTests()
-{
-  TestRuntimeStringFormat();
-}
+void RunRuntimeStringFormatTests() { TestRuntimeStringFormat(); }

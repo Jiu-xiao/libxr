@@ -1,15 +1,18 @@
 #pragma once
 
 /**
- * @brief brace 前端共享的参数分类与字段形状构造辅助函数 / Shared brace-frontend argument classification and field-shape helpers
+ * @brief brace 前端共享的参数分类与字段形状构造辅助函数 / Shared brace-frontend argument
+ * classification and field-shape helpers
  */
 namespace ArgumentResolution
 {
 
 /**
- * @brief 将一个 C++ 参数类型归类到 brace 前端使用的本地参数类别 / Classify one C++ argument type into the brace frontend's local category
+ * @brief 将一个 C++ 参数类型归类到 brace 前端使用的本地参数类别 / Classify one C++
+ * argument type into the brace frontend's local category
  * @tparam Arg 待归类的 C++ 参数类型 / C++ argument type to classify
- * @return 返回后续字段解析要使用的本地前端参数摘要 / Returns the local frontend summary used by later field resolution
+ * @return 返回后续字段解析要使用的本地前端参数摘要 / Returns the local frontend summary
+ * used by later field resolution
  */
 template <typename Arg>
 [[nodiscard]] consteval ArgumentSummary ClassifyArgument()
@@ -67,9 +70,11 @@ template <typename Arg>
 }
 
 /**
- * @brief 为 brace 前端归类整组 C++ 参数类型 / Classify one full C++ argument list for the brace frontend
+ * @brief 为 brace 前端归类整组 C++ 参数类型 / Classify one full C++ argument list for the
+ * brace frontend
  * @tparam Args 待归类的 C++ 实参类型列表 / C++ argument types to classify
- * @return 按源参数顺序返回每个参数对应的一份 `ArgumentSummary` / Returns one `ArgumentSummary` per argument in source order
+ * @return 按源参数顺序返回每个参数对应的一份 `ArgumentSummary` / Returns one
+ * `ArgumentSummary` per argument in source order
  */
 template <typename... Args>
 [[nodiscard]] consteval auto ClassifyArguments()
@@ -78,9 +83,11 @@ template <typename... Args>
 }
 
 /**
- * @brief 判断某个已解析字段是否请求了显式符号策略 / Return whether one parsed field requested an explicit sign policy
+ * @brief 判断某个已解析字段是否请求了显式符号策略 / Return whether one parsed field
+ * requested an explicit sign policy
  * @param field 待检查的已解析字段 / Parsed field to inspect
- * @return 若请求了 `+` 或空格符号策略则返回 `true`，否则返回 `false` / Returns `true` when `+` or space-sign was requested, otherwise `false`
+ * @return 若请求了 `+` 或空格符号策略则返回 `true`，否则返回 `false` / Returns `true`
+ * when `+` or space-sign was requested, otherwise `false`
  */
 [[nodiscard]] constexpr bool HasSignOption(const ParsedField& field)
 {
@@ -88,8 +95,10 @@ template <typename... Args>
 }
 
 /**
- * @brief 返回“未指定精度”的本地哨兵值 / Return the local sentinel meaning "precision not specified"
- * @return 返回 brace 前端内部使用的精度哨兵值 / Returns the precision sentinel byte used inside the brace frontend
+ * @brief 返回“未指定精度”的本地哨兵值 / Return the local sentinel meaning "precision not
+ * specified"
+ * @return 返回 brace 前端内部使用的精度哨兵值 / Returns the precision sentinel byte used
+ * inside the brace frontend
  */
 [[nodiscard]] constexpr uint8_t UnspecifiedPrecision()
 {
@@ -97,10 +106,13 @@ template <typename... Args>
 }
 
 /**
- * @brief 根据一个已解析 brace 字段构造共享 FormatFlag 位集合 / Build the shared `FormatFlag` bitset from one parsed brace field
+ * @brief 根据一个已解析 brace 字段构造共享 FormatFlag 位集合 / Build the shared
+ * `FormatFlag` bitset from one parsed brace field
  * @param parsed 已解析的 brace 字段 / Parsed brace field
- * @param upper_case 最终展示是否使用大写字母 / Whether the final presentation should use uppercase letters
- * @return 返回该字段对应的共享 `FormatFlag` 位集合 / Returns the shared `FormatFlag` bitset for this field
+ * @param upper_case 最终展示是否使用大写字母 / Whether the final presentation should use
+ * uppercase letters
+ * @return 返回该字段对应的共享 `FormatFlag` 位集合 / Returns the shared `FormatFlag`
+ * bitset for this field
  */
 [[nodiscard]] constexpr uint8_t BuildFlags(const ParsedField& parsed, bool upper_case)
 {
@@ -137,15 +149,19 @@ template <typename... Args>
 }
 
 /**
- * @brief 根据 brace 字段属性构造一条共享 `FormatField` 记录 / Build one shared `FormatField` record from parsed brace-field properties
+ * @brief 根据 brace 字段属性构造一条共享 `FormatField` 记录 / Build one shared
+ * `FormatField` record from parsed brace-field properties
  * @param parsed 已解析的 brace 字段 / Parsed brace field
  * @param type 共享运行期字段类型 / Shared runtime field type
  * @param pack 运行期参数打包类型 / Runtime packed-argument kind
- * @param upper_case 最终展示是否使用大写字母 / Whether the final presentation should use uppercase letters
- * @return 返回共享编译后端要消费的 `FormatField` 记录 / Returns the shared `FormatField` record consumed by the compile-time backend
+ * @param upper_case 最终展示是否使用大写字母 / Whether the final presentation should use
+ * uppercase letters
+ * @return 返回共享编译后端要消费的 `FormatField` 记录 / Returns the shared `FormatField`
+ * record consumed by the compile-time backend
  */
 [[nodiscard]] constexpr FormatField MakeField(const ParsedField& parsed, FormatType type,
-                                              FormatPackKind pack, bool upper_case = false)
+                                              FormatPackKind pack,
+                                              bool upper_case = false)
 {
   return FormatField{
       .type = type,
@@ -159,10 +175,13 @@ template <typename... Args>
 }
 
 /**
- * @brief 判断展示字符是否缺省或等于目标字符 / Return whether the presentation is absent or matches the expected token
- * @param presentation 已解析展示字符；缺省时为 0 / Parsed presentation token, or zero when absent
+ * @brief 判断展示字符是否缺省或等于目标字符 / Return whether the presentation is absent
+ * or matches the expected token
+ * @param presentation 已解析展示字符；缺省时为 0 / Parsed presentation token, or zero
+ * when absent
  * @param expected 期望的展示字符 / Expected presentation token
- * @return 若展示字符缺省或等于 `expected` 则返回 `true` / Returns `true` when the presentation is absent or matches `expected`
+ * @return 若展示字符缺省或等于 `expected` 则返回 `true` / Returns `true` when the
+ * presentation is absent or matches `expected`
  */
 [[nodiscard]] constexpr bool IsDefaultOr(char presentation, char expected)
 {
@@ -170,9 +189,11 @@ template <typename... Args>
 }
 
 /**
- * @brief 判断展示字符是否选择了非十进制整数族 / Return whether the presentation selects one non-decimal integer family
+ * @brief 判断展示字符是否选择了非十进制整数族 / Return whether the presentation selects
+ * one non-decimal integer family
  * @param presentation 已解析展示字符 / Parsed presentation token
- * @return 若选择了二进制、八进制或十六进制展示则返回 `true`，否则返回 `false` / Returns `true` for binary, octal, or hex presentations, otherwise `false`
+ * @return 若选择了二进制、八进制或十六进制展示则返回 `true`，否则返回 `false` / Returns
+ * `true` for binary, octal, or hex presentations, otherwise `false`
  */
 [[nodiscard]] constexpr bool IsNonDecimalPresentation(char presentation)
 {
@@ -181,8 +202,10 @@ template <typename... Args>
 }
 
 /**
- * @brief 在当前功能开关下选择前端默认浮点展示字符 / Choose the frontend default float presentation under current feature gates
- * @return 返回默认浮点展示字符；若全部浮点展示都被关闭则返回 0 / Returns the default float presentation token, or zero when all float presentations are disabled
+ * @brief 在当前功能开关下选择前端默认浮点展示字符 / Choose the frontend default float
+ * presentation under current feature gates
+ * @return 返回默认浮点展示字符；若全部浮点展示都被关闭则返回 0 / Returns the default
+ * float presentation token, or zero when all float presentations are disabled
  */
 [[nodiscard]] constexpr char DefaultFloatPresentation()
 {

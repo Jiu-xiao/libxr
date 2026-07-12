@@ -1,16 +1,24 @@
 /**
  * @file test_double_buffer.cpp
- * @brief `DoubleBuffer` pending/active 双半区切换测试。 `DoubleBuffer` pending/active half-switch tests.
+ * @brief `DoubleBuffer` pending/active 双半区切换测试。 `DoubleBuffer` pending/active
+ * half-switch tests.
  *
  * 测试项目 / Test items:
- * 1. 初始分块与 pending 初始状态。 Initial split and pending state: verify the raw buffer is divided evenly and starts without pending data.
- * 2. `nullptr + 0` 空 backing storage。 Empty backing storage: verify an empty raw view can initialize the object without forcing a dummy pointer.
- * 3. `FillPending()` 的写入与重复写保护。 Pending fill semantics: verify `FillPending()` stores bytes and rejects a second pending fill before switch.
- * 4. `Switch()` 切换和越界长度拒绝。 Switch semantics and bounds: verify active-half toggling and oversized pending writes are rejected.
+ * 1. 初始分块与 pending 初始状态。 Initial split and pending state: verify the raw buffer
+ * is divided evenly and starts without pending data.
+ * 2. `nullptr + 0` 空 backing storage。 Empty backing storage: verify an empty raw view
+ * can initialize the object without forcing a dummy pointer.
+ * 3. `FillPending()` 的写入与重复写保护。 Pending fill semantics: verify `FillPending()`
+ * stores bytes and rejects a second pending fill before switch.
+ * 4. `Switch()` 切换和越界长度拒绝。 Switch semantics and bounds: verify active-half
+ * toggling and oversized pending writes are rejected.
  *
  * 测试原理 / Test principles:
- * 1. 使用一个具体后备缓冲区，同时检查地址和长度，因为它是纯存储布局原语。 Use one concrete backing buffer and inspect both addresses and lengths, because this utility is a pure storage-layout primitive.
- * 2. 同时覆盖成功和拒绝分支，明确状态机而不只看 happy path。 Check both accepted and rejected writes so the test documents the state machine, not just the happy path.
+ * 1. 使用一个具体后备缓冲区，同时检查地址和长度，因为它是纯存储布局原语。 Use one
+ * concrete backing buffer and inspect both addresses and lengths, because this utility is
+ * a pure storage-layout primitive.
+ * 2. 同时覆盖成功和拒绝分支，明确状态机而不只看 happy path。 Check both accepted and
+ * rejected writes so the test documents the state machine, not just the happy path.
  */
 #include "double_buffer.hpp"
 #include "libxr_def.hpp"
@@ -19,8 +27,9 @@
 
 /**
  * @brief 测试入口函数 `test_double_buffer`。 Test entry function `test_double_buffer`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_double_buffer()
 {
@@ -32,8 +41,10 @@ void test_double_buffer()
   LibXR::DoubleBuffer init_later;
   init_later.Init(raw);
   ASSERT(init_later.Size() == 64);
-  ASSERT((reinterpret_cast<uintptr_t>(init_later.ActiveBuffer()) % alignof(size_t)) == 0U);
-  ASSERT((reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) == 0U);
+  ASSERT((reinterpret_cast<uintptr_t>(init_later.ActiveBuffer()) % alignof(size_t)) ==
+         0U);
+  ASSERT((reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) ==
+         0U);
 
   LibXR::DoubleBuffer empty_buffer;
   LibXR::RawData empty_raw(nullptr, 0);

@@ -1,6 +1,7 @@
 /**
  * @file rw_port_test_common.hpp
- * @brief `ReadPort` / `WritePort` 状态机测试 helper。 Shared state-machine helpers for `ReadPort` / `WritePort` tests.
+ * @brief `ReadPort` / `WritePort` 状态机测试 helper。 Shared state-machine helpers for
+ * `ReadPort` / `WritePort` tests.
  * @details 测试项目：
  *          1. 提供 `PENDING` / 失败回调桩和阻塞调用线程封装。
  *          2. 提供 `ReadPort` / `WritePort` 队列完成、失败清理与阻塞唤醒验证 helper。
@@ -14,6 +15,7 @@
 
 #include <cstring>
 #include <vector>
+
 #include "rw_thread_test_common.hpp"
 
 namespace
@@ -59,8 +61,11 @@ struct TrackingReadPort : LibXR::ReadPort
 
 /**
  * @brief 辅助函数 `VerifyPendingReadMode`。 Helper function `VerifyPendingReadMode`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 void VerifyPendingReadMode(TestMode mode)
 {
@@ -105,8 +110,11 @@ void VerifyPendingReadMode(TestMode mode)
 
 /**
  * @brief 辅助函数 `VerifyPendingWriteMode`。 Helper function `VerifyPendingWriteMode`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
 {
@@ -148,9 +156,13 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
 }
 
 /**
- * @brief 辅助函数 `VerifyPendingReadFailAndClearMode`。 Helper function `VerifyPendingReadFailAndClearMode`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @brief 辅助函数 `VerifyPendingReadFailAndClearMode`。 Helper function
+ * `VerifyPendingReadFailAndClearMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
 {
@@ -179,9 +191,13 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
 }
 
 /**
- * @brief 辅助函数 `VerifyPendingWriteFailAndClearMode`。 Helper function `VerifyPendingWriteFailAndClearMode`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @brief 辅助函数 `VerifyPendingWriteFailAndClearMode`。 Helper function
+ * `VerifyPendingWriteFailAndClearMode`.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
 {

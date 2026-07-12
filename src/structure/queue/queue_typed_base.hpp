@@ -42,19 +42,13 @@ class QueueTypedBase
    * @param item 用于接收出队元素的引用。 Reference receiving the dequeued element.
    * @return 底层字节队列返回的操作结果。 Operation result returned by the byte queue.
    */
-  ErrorCode Pop(Data& item)
-  {
-    return static_cast<Derived*>(this)->PopBytes(&item);
-  }
+  ErrorCode Pop(Data& item) { return static_cast<Derived*>(this)->PopBytes(&item); }
 
   /**
    * @brief 丢弃一个队头元素。
    * @brief Discard one front element.
    * @return 底层字节队列返回的操作结果。 Operation result returned by the byte queue.
    */
-  ErrorCode Pop()
-  {
-    return static_cast<Derived*>(this)->PopBytes(nullptr);
-  }
+  ErrorCode Pop() { return static_cast<Derived*>(this)->PopBytes(nullptr); }
 };
 }  // namespace LibXR

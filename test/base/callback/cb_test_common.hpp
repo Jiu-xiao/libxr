@@ -5,7 +5,8 @@
  *          1. 提供直接回调、guarded 回调和 lambda 绑定的探针结构。
  *          2. 统一记录值顺序、ISR 标记和重入深度。
  *          Test items:
- *          1. Provide probes for direct callbacks, guarded callbacks, and lambda bindings.
+ *          1. Provide probes for direct callbacks, guarded callbacks, and lambda
+ * bindings.
  *          2. Record value order, ISR flags, and reentry depth consistently.
  */
 #pragma once
@@ -32,8 +33,11 @@ struct DirectCallbackProbe
 
   /**
    * @brief 辅助函数 `OnCallback`。 Helper function `OnCallback`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   static void OnCallback(bool in_isr, DirectCallbackProbe* self, int value)
   {
@@ -73,8 +77,11 @@ struct GuardedCreationProbe
 
   /**
    * @brief 辅助函数 `OnCallback`。 Helper function `OnCallback`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   static void OnCallback(bool in_isr, GuardedCreationProbe* self, int value)
   {

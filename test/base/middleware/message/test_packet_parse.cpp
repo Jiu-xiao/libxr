@@ -1,15 +1,20 @@
 /**
  * @file test_packet_parse.cpp
- * @brief message packet 头部编码与解析子测试。 Split test unit for message packet header encoding and parsing.
+ * @brief message packet 头部编码与解析子测试。 Split test unit for message packet header
+ * encoding and parsing.
  */
 #include "message_packet_test_common.hpp"
 
 namespace
 {
 /**
- * @brief 测试项函数 `TestPacketHeaderAndServerParse`。 Test-item function `TestPacketHeaderAndServerParse`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestPacketHeaderAndServerParse`。 Test-item function
+ * `TestPacketHeaderAndServerParse`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestPacketHeaderAndServerParse()
 {
@@ -91,8 +96,8 @@ void TestPacketHeaderAndServerParse()
   const LibXR::MicrosecondTimestamp raw_timestamp(6006);
   uint8_t raw_packet[PACKET_SIZE] = {};
   ASSERT(topic.PackRaw(LibXR::ConstRawData(raw_value),
-                       LibXR::RawData(raw_packet, sizeof(raw_packet)), raw_timestamp) ==
-         LibXR::ErrorCode::OK);
+                       LibXR::RawData(raw_packet, sizeof(raw_packet)),
+                       raw_timestamp) == LibXR::ErrorCode::OK);
   rx_value = -1.0;
   ASSERT(topic_server.ParseData(LibXR::ConstRawData(raw_packet, sizeof(raw_packet))) ==
          1);
@@ -102,23 +107,24 @@ void TestPacketHeaderAndServerParse()
   uint8_t small_packet[PACKET_SIZE - 1] = {};
   uint32_t wrong_size_payload = 0;
   ASSERT(topic.PackRaw(LibXR::ConstRawData(wrong_size_payload),
-                       LibXR::RawData(raw_packet, sizeof(raw_packet)), raw_timestamp) ==
-         LibXR::ErrorCode::SIZE_ERR);
+                       LibXR::RawData(raw_packet, sizeof(raw_packet)),
+                       raw_timestamp) == LibXR::ErrorCode::SIZE_ERR);
   ASSERT(topic.PackRaw(LibXR::ConstRawData(raw_value),
                        LibXR::RawData(small_packet, sizeof(small_packet)),
                        raw_timestamp) == LibXR::ErrorCode::NO_BUFF);
-  ASSERT(topic.PackRaw(LibXR::ConstRawData(raw_value), LibXR::RawData(),
-                       raw_timestamp) == LibXR::ErrorCode::PTR_NULL);
+  ASSERT(topic.PackRaw(LibXR::ConstRawData(raw_value), LibXR::RawData(), raw_timestamp) ==
+         LibXR::ErrorCode::PTR_NULL);
 }
 
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunMessagePacketParseTests`。 Test-item function `RunMessagePacketParseTests`.
- * @details 测试内容：执行当前分组里的 message packet 子场景。 Execute the grouped message-packet sub-scenarios for this split file.
- *          测试原理：把解析、失败校验和对齐兼容语义拆开，降低 packet 测试文件复杂度。 Split parsing, validation-failure, and alignment-compatibility semantics into separate files to reduce packet-test complexity.
+ * @brief 测试项函数 `RunMessagePacketParseTests`。 Test-item function
+ * `RunMessagePacketParseTests`.
+ * @details 测试内容：执行当前分组里的 message packet 子场景。 Execute the grouped
+ * message-packet sub-scenarios for this split file.
+ *          测试原理：把解析、失败校验和对齐兼容语义拆开，降低 packet 测试文件复杂度。
+ * Split parsing, validation-failure, and alignment-compatibility semantics into separate
+ * files to reduce packet-test complexity.
  */
-void RunMessagePacketParseTests()
-{
-  TestPacketHeaderAndServerParse();
-}
+void RunMessagePacketParseTests() { TestPacketHeaderAndServerParse(); }

@@ -1,6 +1,7 @@
 /**
  * @file test_display_history.cpp
- * @brief `Terminal` 历史显示与行内重绘场景子测试。 Split test unit for `Terminal` history display and inline-redraw scenarios.
+ * @brief `Terminal` 历史显示与行内重绘场景子测试。 Split test unit for `Terminal` history
+ * display and inline-redraw scenarios.
  * @details 测试项目：
  *          1. 历史显示与 `CopyHistoryToInputLine()` 恢复。
  *          2. 光标偏移下的插入/删除重绘后缀。
@@ -14,14 +15,19 @@ namespace
 {
 
 /**
- * @brief 测试项函数 `TestHistoryDisplayAndRestore`。 Test-item function `TestHistoryDisplayAndRestore`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestHistoryDisplayAndRestore`。 Test-item function
+ * `TestHistoryDisplayAndRestore`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestHistoryDisplayAndRestore()
 {
   // 测试内容：验证历史回显、索引推进和复制回输入行后的保留状态。
-  // Test coverage: verify history rendering, index movement, and retained state after copying back to the input line.
+  // Test coverage: verify history rendering, index movement, and retained state after
+  // copying back to the input line.
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> fixture;
 
   FillInputLine(fixture.terminal, "alpha");
@@ -47,14 +53,19 @@ void TestHistoryDisplayAndRestore()
 }
 
 /**
- * @brief 测试项函数 `TestMidLineDisplayEditing`。 Test-item function `TestMidLineDisplayEditing`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestMidLineDisplayEditing`。 Test-item function
+ * `TestMidLineDisplayEditing`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestMidLineDisplayEditing()
 {
   // 测试内容：验证有光标偏移时的插入/删除如何重绘尾部内容。
-  // Test coverage: verify how insertion and deletion redraw the trailing text when the cursor is offset from the end.
+  // Test coverage: verify how insertion and deletion redraw the trailing text when the
+  // cursor is offset from the end.
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> fixture;
 
   FillInputLine(fixture.terminal, "ab");
@@ -71,9 +82,13 @@ void TestMidLineDisplayEditing()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunTerminalDisplayHistoryTests`。 Test-item function `RunTerminalDisplayHistoryTests`.
- * @details 测试内容：执行 `Terminal` 历史显示与行内重绘子场景。 Execute `Terminal` history-display and inline-redraw sub-scenarios.
- *          测试原理：把历史与行内重绘语义单独成组，集中覆盖保留状态和可见输出的一致性。 Group history and inline-redraw semantics around the consistency between retained state and visible output.
+ * @brief 测试项函数 `RunTerminalDisplayHistoryTests`。 Test-item function
+ * `RunTerminalDisplayHistoryTests`.
+ * @details 测试内容：执行 `Terminal` 历史显示与行内重绘子场景。 Execute `Terminal`
+ * history-display and inline-redraw sub-scenarios.
+ *          测试原理：把历史与行内重绘语义单独成组，集中覆盖保留状态和可见输出的一致性。
+ * Group history and inline-redraw semantics around the consistency between retained state
+ * and visible output.
  */
 void RunTerminalDisplayHistoryTests()
 {

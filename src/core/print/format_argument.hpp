@@ -30,12 +30,12 @@ struct TypeTraits
       typename std::conditional_t<std::is_enum_v<Decayed>, std::underlying_type<Decayed>,
                                   std::type_identity<Decayed>>::type;
 
-  static constexpr bool is_signed_integer =
-      std::is_integral_v<Normalized> && !std::is_same_v<Normalized, bool> &&
-      std::is_signed_v<Normalized>;
-  static constexpr bool is_unsigned_integer =
-      std::is_integral_v<Normalized> && !std::is_same_v<Normalized, bool> &&
-      std::is_unsigned_v<Normalized>;
+  static constexpr bool is_signed_integer = std::is_integral_v<Normalized> &&
+                                            !std::is_same_v<Normalized, bool> &&
+                                            std::is_signed_v<Normalized>;
+  static constexpr bool is_unsigned_integer = std::is_integral_v<Normalized> &&
+                                              !std::is_same_v<Normalized, bool> &&
+                                              std::is_unsigned_v<Normalized>;
   static constexpr bool is_default_signed_integer =
       is_signed_integer && sizeof(Normalized) <= sizeof(int);
   static constexpr bool is_default_unsigned_integer =
@@ -43,23 +43,23 @@ struct TypeTraits
   static constexpr bool is_char_array =
       std::is_array_v<Decayed> &&
       std::is_same_v<std::remove_cv_t<std::remove_extent_t<Decayed>>, char>;
-  static constexpr bool is_c_string =
-      std::is_same_v<Decayed, const char*> || std::is_same_v<Decayed, char*> ||
-      is_char_array;
-  static constexpr bool is_string_like =
-      is_c_string || std::is_same_v<Decayed, std::string_view> ||
-      std::is_same_v<Decayed, std::string>;
+  static constexpr bool is_c_string = std::is_same_v<Decayed, const char*> ||
+                                      std::is_same_v<Decayed, char*> || is_char_array;
+  static constexpr bool is_string_like = is_c_string ||
+                                         std::is_same_v<Decayed, std::string_view> ||
+                                         std::is_same_v<Decayed, std::string>;
   static constexpr bool is_pointer_like =
       (std::is_pointer_v<Decayed> &&
        !std::is_function_v<std::remove_pointer_t<Decayed>>) ||
       std::is_same_v<Decayed, std::nullptr_t>;
   static constexpr bool is_character_like = std::is_integral_v<Normalized>;
-  static constexpr bool is_float = std::is_same_v<Decayed, float> ||
-                                   std::is_same_v<Decayed, double>;
+  static constexpr bool is_float =
+      std::is_same_v<Decayed, float> || std::is_same_v<Decayed, double>;
   static constexpr bool is_long_double = std::is_same_v<Decayed, long double>;
 
   /**
-   * @brief 判断当前 C++ 实参类型是否满足某条编译期匹配规则。 / Returns whether this C++ argument type satisfies one compile-time rule.
+   * @brief 判断当前 C++ 实参类型是否满足某条编译期匹配规则。 / Returns whether this C++
+   * argument type satisfies one compile-time rule.
    * @param rule Compile-time matching rule to test. / 待测试的编译期匹配规则。
    * @return Returns `true` when the current type satisfies `rule`, otherwise
    *         `false`. / 当前类型满足 `rule` 时返回 `true`，否则返回 `false`。
@@ -122,12 +122,14 @@ struct TypeTraits
 };
 
 /**
- * @brief 将一组模板实参与一组规则数组逐项展开比对 / Expand one argument list against one rule array
+ * @brief 将一组模板实参与一组规则数组逐项展开比对 / Expand one argument list against one
+ * rule array
  * @tparam Args 参与匹配的 C++ 实参类型列表 / C++ argument types being matched
  * @tparam N 规则数组元素个数 / Rule-array element count
  * @tparam I 展开的索引序列 / Expanded index sequence
  * @param arguments 编译后的参数元信息数组 / Compiled argument metadata array
- * @return 仅当每个参数都满足对应规则时返回 `true` / Returns `true` only when every argument satisfies its matching rule
+ * @return 仅当每个参数都满足对应规则时返回 `true` / Returns `true` only when every
+ * argument satisfies its matching rule
  */
 template <typename... Args, size_t N, size_t... I>
 [[nodiscard]] consteval bool MatchesImpl(
@@ -137,11 +139,13 @@ template <typename... Args, size_t N, size_t... I>
 }
 
 /**
- * @brief 判断给定实参列表是否与编译得到的参数元信息数组完全匹配 / Return whether the provided argument list exactly matches the compiled argument metadata array
+ * @brief 判断给定实参列表是否与编译得到的参数元信息数组完全匹配 / Return whether the
+ * provided argument list exactly matches the compiled argument metadata array
  * @tparam Args 参与匹配的 C++ 实参类型列表 / C++ argument types being matched
  * @tparam N 元信息数组元素个数 / Metadata-array element count
  * @param arguments 编译后的参数元信息数组 / Compiled argument metadata array
- * @return 当参数个数和每一项规则都完全匹配时返回 `true`，否则返回 `false` / Returns `true` when the argument count and every argument rule match exactly, otherwise `false`
+ * @return 当参数个数和每一项规则都完全匹配时返回 `true`，否则返回 `false` / Returns
+ * `true` when the argument count and every argument rule match exactly, otherwise `false`
  */
 template <typename... Args, size_t N>
 [[nodiscard]] consteval bool Matches(const std::array<FormatArgumentInfo, N>& arguments)

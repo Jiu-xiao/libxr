@@ -23,15 +23,9 @@ inline timespec NowSpec()
   return ts;
 }
 
-inline uint64_t NowMicroseconds()
-{
-  return SpecMicroseconds(NowSpec());
-}
+inline uint64_t NowMicroseconds() { return SpecMicroseconds(NowSpec()); }
 
-inline uint64_t NowMilliseconds()
-{
-  return NowMicroseconds() / 1000ULL;
-}
+inline uint64_t NowMilliseconds() { return NowMicroseconds() / 1000ULL; }
 
 inline uint64_t XrToSharedMicroseconds(uint64_t timestamp_us)
 {
@@ -82,10 +76,7 @@ inline int64_t ElapsedMicroseconds(const timespec& start)
          static_cast<int64_t>(now.tv_nsec - start.tv_nsec) / 1000LL;
 }
 
-inline uint32_t WaitSliceMilliseconds(uint32_t remaining_ms)
-{
-  return remaining_ms;
-}
+inline uint32_t WaitSliceMilliseconds(uint32_t remaining_ms) { return remaining_ms; }
 
 }  // namespace MonotonicTime
 }  // namespace LibXR

@@ -1,13 +1,12 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 
-#include "driver/gpio.h"
 #include "double_buffer.hpp"
+#include "driver/gpio.h"
+#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "flag.hpp"
 #include "hal/uart_hal.h"
@@ -84,10 +83,9 @@ class ESP32UART : public UART
    * @brief Create and initialize one ESP32 UART instance.
    * @brief 创建并初始化一个 ESP32 UART 实例。
    */
-  ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin,
-            int rts_pin = PIN_NO_CHANGE, int cts_pin = PIN_NO_CHANGE,
-            size_t rx_buffer_size = 1024, size_t tx_buffer_size = 512,
-            uint32_t tx_queue_size = 5,
+  ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin = PIN_NO_CHANGE,
+            int cts_pin = PIN_NO_CHANGE, size_t rx_buffer_size = 1024,
+            size_t tx_buffer_size = 512, uint32_t tx_queue_size = 5,
             UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1},
             bool enable_dma = true);
 
@@ -158,32 +156,28 @@ class ESP32UART : public UART
    * @brief GDMA TX 完成回调。
    */
   static bool DmaTxEofCallback(gdma_channel_handle_t dma_chan,
-                               gdma_event_data_t* event_data,
-                               void* user_data);
+                               gdma_event_data_t* event_data, void* user_data);
 
   /**
    * @brief GDMA TX descriptor error callback.
    * @brief GDMA TX 描述符错误回调。
    */
   static bool DmaTxDescrErrCallback(gdma_channel_handle_t dma_chan,
-                                    gdma_event_data_t* event_data,
-                                    void* user_data);
+                                    gdma_event_data_t* event_data, void* user_data);
 
   /**
    * @brief GDMA RX completion callback.
    * @brief GDMA RX 完成回调。
    */
   static bool DmaRxDoneCallback(gdma_channel_handle_t dma_chan,
-                                gdma_event_data_t* event_data,
-                                void* user_data);
+                                gdma_event_data_t* event_data, void* user_data);
 
   /**
    * @brief GDMA RX descriptor error callback.
    * @brief GDMA RX 描述符错误回调。
    */
   static bool DmaRxDescrErrCallback(gdma_channel_handle_t dma_chan,
-                                    gdma_event_data_t* event_data,
-                                    void* user_data);
+                                    gdma_event_data_t* event_data, void* user_data);
 #endif
 
   /**
@@ -362,34 +356,34 @@ class ESP32UART : public UART
   uint8_t* rx_isr_buffer_ = nullptr;  ///< Scratch buffer used by the RX ISR path.
   size_t rx_isr_buffer_size_ = 0;     ///< Size of `rx_isr_buffer_`.
 
-  uint8_t* tx_storage_ = nullptr;      ///< Backing storage for the TX half-buffers.
-  DoubleBuffer tx_dma_buffer_{};       ///< TX double-buffer view for the DMA path.
-  WriteInfoBlock tx_active_info_ = {}; ///< Metadata for the active TX request.
-  size_t tx_active_length_ = 0U;       ///< Active TX payload length in bytes.
-  size_t tx_active_offset_ = 0U;       ///< Bytes already emitted for the active request.
-  bool tx_active_valid_ = false;       ///< Whether the active TX metadata is valid.
-  Flag::Plain tx_busy_;                ///< Hardware TX engine currently owns the request.
-  Flag::Plain in_tx_isr_;              ///< Reentry guard while processing TX ISR work.
+  uint8_t* tx_storage_ = nullptr;       ///< Backing storage for the TX half-buffers.
+  DoubleBuffer tx_dma_buffer_{};        ///< TX double-buffer view for the DMA path.
+  WriteInfoBlock tx_active_info_ = {};  ///< Metadata for the active TX request.
+  size_t tx_active_length_ = 0U;        ///< Active TX payload length in bytes.
+  size_t tx_active_offset_ = 0U;        ///< Bytes already emitted for the active request.
+  bool tx_active_valid_ = false;        ///< Whether the active TX metadata is valid.
+  Flag::Plain tx_busy_;    ///< Hardware TX engine currently owns the request.
+  Flag::Plain in_tx_isr_;  ///< Reentry guard while processing TX ISR work.
 
-  bool uart_hw_enabled_ = false;            ///< UART hardware block was initialized.
-  uart_hal_context_t uart_hal_ = {};        ///< ESP-IDF UART HAL context.
+  bool uart_hw_enabled_ = false;              ///< UART hardware block was initialized.
+  uart_hal_context_t uart_hal_ = {};          ///< ESP-IDF UART HAL context.
   intr_handle_t uart_intr_handle_ = nullptr;  ///< Registered UART interrupt handle.
-  bool uart_isr_installed_ = false;         ///< UART ISR installation state.
-  bool dma_requested_ = true;               ///< Constructor preference for DMA mode.
+  bool uart_isr_installed_ = false;           ///< UART ISR installation state.
+  bool dma_requested_ = true;                 ///< Constructor preference for DMA mode.
 
-  ESP32UARTReadPort _read_port;   ///< Read-side queue bridge exposed to `UART`.
-  WritePort _write_port; ///< Write-side queue bridge exposed to `UART`.
+  ESP32UARTReadPort _read_port;  ///< Read-side queue bridge exposed to `UART`.
+  WritePort _write_port;         ///< Write-side queue bridge exposed to `UART`.
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  bool dma_backend_enabled_ = false;   ///< UHCI/GDMA backend is active.
-  uhci_hal_context_t uhci_hal_ = {};   ///< UHCI HAL context bound to this UART.
+  bool dma_backend_enabled_ = false;  ///< UHCI/GDMA backend is active.
+  uhci_hal_context_t uhci_hal_ = {};  ///< UHCI HAL context bound to this UART.
   gdma_channel_handle_t tx_dma_channel_ = nullptr;  ///< TX GDMA channel handle.
   gdma_channel_handle_t rx_dma_channel_ = nullptr;  ///< RX GDMA channel handle.
-  uintptr_t tx_dma_head_addr_[2] = {0U, 0U};   ///< TX list head addresses.
-  gdma_link_list_handle_t rx_dma_link_ = nullptr;  ///< RX GDMA ring list.
-  uint8_t* rx_dma_storage_ = nullptr;            ///< RX DMA ring backing storage.
-  size_t rx_dma_chunk_size_ = 0;                 ///< Size of one RX DMA ring node.
-  uint32_t rx_dma_node_index_ = 0;               ///< Software consumer index in the RX ring.
+  uintptr_t tx_dma_head_addr_[2] = {0U, 0U};        ///< TX list head addresses.
+  gdma_link_list_handle_t rx_dma_link_ = nullptr;   ///< RX GDMA ring list.
+  uint8_t* rx_dma_storage_ = nullptr;               ///< RX DMA ring backing storage.
+  size_t rx_dma_chunk_size_ = 0;                    ///< Size of one RX DMA ring node.
+  uint32_t rx_dma_node_index_ = 0;  ///< Software consumer index in the RX ring.
 #endif
 
   Flag::Atomic rx_fifo_draining_{};  ///< RX FIFO drain reentry gate.

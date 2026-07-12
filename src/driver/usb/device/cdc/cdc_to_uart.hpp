@@ -41,8 +41,9 @@ class CDCToUart : public CDCUart
    * allocation
    */
   CDCToUart(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
-            Endpoint::EPNumber comm_ep_num, LibXR::UART& uart, size_t rx_buffer_size = 128,
-            size_t tx_buffer_size = 128, size_t tx_queue_size = 5)
+            Endpoint::EPNumber comm_ep_num, LibXR::UART& uart,
+            size_t rx_buffer_size = 128, size_t tx_buffer_size = 128,
+            size_t tx_queue_size = 5)
       : CDCUart(data_in_ep_num, data_out_ep_num, comm_ep_num, rx_buffer_size,
                 tx_buffer_size, tx_queue_size),
         rx_buffer_(new uint8_t[rx_buffer_size], rx_buffer_size),

@@ -1,12 +1,14 @@
 /**
  * @file test_main_sets.hpp
- * @brief Linux 主测试二进制固定执行顺序定义。 Fixed execution order for the Linux main `test` binary.
+ * @brief Linux 主测试二进制固定执行顺序定义。 Fixed execution order for the Linux main
+ * `test` binary.
  * @details 作用：
  *          1. 显式列出 Linux 主测试二进制要执行的 case。
- *          2. 保持主 runner 的执行顺序清晰，不再按 `bare_metal` / `rtos` / `full_os` 切分运行集合。
- *          Purpose:
+ *          2. 保持主 runner 的执行顺序清晰，不再按 `bare_metal` / `rtos` / `full_os`
+ * 切分运行集合。 Purpose:
  *          1. Explicitly list the cases executed by the Linux main `test` binary.
- *          2. Keep the execution order clear without splitting runtime sets into `bare_metal`, `rtos`, and `full_os`.
+ *          2. Keep the execution order clear without splitting runtime sets into
+ * `bare_metal`, `rtos`, and `full_os`.
  */
 #pragma once
 
@@ -102,8 +104,10 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"control_tests", {"pid", &RunVoidEntry<test_pid>, false}},
 
     {"system_tests", {"ramfs", &RunVoidEntry<test_ramfs>, false}},
-    {"system_tests", {"app_framework_application", &RunVoidEntry<test_app_framework_application>, false}},
-    {"system_tests", {"app_framework_hardware", &RunVoidEntry<test_app_framework_hardware>, false}},
+    {"system_tests",
+     {"app_framework_application", &RunVoidEntry<test_app_framework_application>, false}},
+    {"system_tests",
+     {"app_framework_hardware", &RunVoidEntry<test_app_framework_hardware>, false}},
     {"system_tests", {"event", &RunVoidEntry<test_event>, false}},
     {"system_tests", {"message_topic", &RunVoidEntry<test_message_topic>, false}},
     {"system_tests", {"message_packet", &RunVoidEntry<test_message_packet>, false}},

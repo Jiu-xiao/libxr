@@ -3,12 +3,18 @@
  * @brief 前向/反向运动链求解测试。 Forward/backward kinematic chain solve test.
  *
  * 测试项目 / Test items:
- * 1. 两关节链的前向传播。 Forward propagation: build a start-point, intermediate object and end-point chain with two joints.
- * 2. 端点目标位姿的反向求解残差。 Backward solve: verify the endpoint target position/quaternion can be reached with small residual error after backward computation.
+ * 1. 两关节链的前向传播。 Forward propagation: build a start-point, intermediate object
+ * and end-point chain with two joints.
+ * 2. 端点目标位姿的反向求解残差。 Backward solve: verify the endpoint target
+ * position/quaternion can be reached with small residual error after backward
+ * computation.
  *
  * 测试原理 / Test principles:
- * 1. 用具体两关节链而不是孤立公式，覆盖对象/关节在真实 API 上的组合行为。 Use a concrete two-joint chain instead of isolated algebra checks so the test covers object/joint composition on the real API surface.
- * 2. 以端点残差为准，而不是强行断言内部中间状态。 Assert residual error rather than exact internal state, because the public contract is geometric convergence at the endpoint.
+ * 1. 用具体两关节链而不是孤立公式，覆盖对象/关节在真实 API 上的组合行为。 Use a concrete
+ * two-joint chain instead of isolated algebra checks so the test covers object/joint
+ * composition on the real API surface.
+ * 2. 以端点残差为准，而不是强行断言内部中间状态。 Assert residual error rather than exact
+ * internal state, because the public contract is geometric convergence at the endpoint.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -16,8 +22,9 @@
 
 /**
  * @brief 测试入口函数 `test_kinematic`。 Test entry function `test_kinematic`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_kinematic()
 {

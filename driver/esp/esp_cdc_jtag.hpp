@@ -1,18 +1,17 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstddef>
 #include <cstdint>
 
+#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "esp_tx_double_buffer.hpp"
 #include "flag.hpp"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
 
-#if SOC_USB_SERIAL_JTAG_SUPPORTED &&                                              \
-    ((defined(CONFIG_IDF_TARGET_ESP32C3) && CONFIG_IDF_TARGET_ESP32C3) ||         \
+#if SOC_USB_SERIAL_JTAG_SUPPORTED &&                                      \
+    ((defined(CONFIG_IDF_TARGET_ESP32C3) && CONFIG_IDF_TARGET_ESP32C3) || \
      (defined(CONFIG_IDF_TARGET_ESP32C6) && CONFIG_IDF_TARGET_ESP32C6))
 
 namespace LibXR
@@ -76,17 +75,19 @@ class ESP32CDCJtag : public UART
 
  public:
   /**
-   * @brief 构造并初始化 USB Serial/JTAG 后端状态 / Construct and initialize the USB Serial/JTAG backend state
+   * @brief 构造并初始化 USB Serial/JTAG 后端状态 / Construct and initialize the USB
+   * Serial/JTAG backend state
    *
    * @param rx_buffer_size RX 队列容量（字节） / RX queue capacity in bytes
-   * @param tx_buffer_size TX payload 半缓冲大小（字节） / TX payload half-buffer size in bytes
+   * @param tx_buffer_size TX payload 半缓冲大小（字节） / TX payload half-buffer size in
+   * bytes
    * @param tx_queue_size TX 请求队列深度 / Number of queued TX requests
    * @param config 初始 UART 帧格式配置 / Initial UART framing configuration
    */
-  explicit ESP32CDCJtag(
-      size_t rx_buffer_size = 1024, size_t tx_buffer_size = 512,
-      uint32_t tx_queue_size = 5,
-      UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
+  explicit ESP32CDCJtag(size_t rx_buffer_size = 1024, size_t tx_buffer_size = 512,
+                        uint32_t tx_queue_size = 5,
+                        UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8,
+                                                      1});
 
   /**
    * @brief 应用 UART 帧格式配置 / Apply a UART framing configuration to the backend
@@ -99,7 +100,8 @@ class ESP32CDCJtag : public UART
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 
   /**
-   * @brief USB Serial/JTAG RX 路径的 ReadPort 入口 / ReadPort entry point for the USB Serial/JTAG RX path
+   * @brief USB Serial/JTAG RX 路径的 ReadPort 入口 / ReadPort entry point for the USB
+   * Serial/JTAG RX path
    */
   static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
@@ -110,7 +112,8 @@ class ESP32CDCJtag : public UART
   static void IsrEntry(void* arg);
 
   /**
-   * @brief 初始化 USB Serial/JTAG 中断和硬件状态 / Initialize the USB Serial/JTAG interrupt and hardware state
+   * @brief 初始化 USB Serial/JTAG 中断和硬件状态 / Initialize the USB Serial/JTAG
+   * interrupt and hardware state
    */
   ErrorCode InitHardware();
 
@@ -120,7 +123,8 @@ class ESP32CDCJtag : public UART
   void HandleInterrupt();
 
   /**
-   * @brief 尝试将硬件 RX FIFO 数据推进软件队列 / Try draining hardware RX FIFO into the software queue
+   * @brief 尝试将硬件 RX FIFO 数据推进软件队列 / Try draining hardware RX FIFO into the
+   * software queue
    */
   void DrainRxToQueue(bool in_isr);
 
@@ -140,12 +144,14 @@ class ESP32CDCJtag : public UART
   bool LoadPendingTxFromQueue(bool in_isr);
 
   /**
-   * @brief 硬件空闲时把 pending TX 提升为 active 状态 / Promote pending TX into active state if hardware is idle
+   * @brief 硬件空闲时把 pending TX 提升为 active 状态 / Promote pending TX into active
+   * state if hardware is idle
    */
   bool StartPendingTxIfIdle(bool in_isr);
 
   /**
-   * @brief 将一条排队的 TX payload 拷入选定 slot / Copy one queued TX payload into the selected slot
+   * @brief 将一条排队的 TX payload 拷入选定 slot / Copy one queued TX payload into the
+   * selected slot
    */
   bool DequeueTxToSlot(uint8_t* slot, size_t& size, WriteInfoBlock& info, bool in_isr);
 
@@ -155,7 +161,8 @@ class ESP32CDCJtag : public UART
   bool StartActiveTransfer(bool in_isr);
 
   /**
-   * @brief 启动 active TX 并上报队列所有权交接 / Start active TX and report queue ownership transfer
+   * @brief 启动 active TX 并上报队列所有权交接 / Start active TX and report queue
+   * ownership transfer
    */
   bool StartAndReportActive(bool in_isr);
 
@@ -194,8 +201,8 @@ class ESP32CDCJtag : public UART
    */
   void ResetTxState(bool in_isr);
 
-  UART::Configuration config_;  ///< Current UART framing configuration.
-  uint8_t* tx_slot_storage_ = nullptr;  ///< Backing storage for the TX helper.
+  UART::Configuration config_;           ///< Current UART framing configuration.
+  uint8_t* tx_slot_storage_ = nullptr;   ///< Backing storage for the TX helper.
   ESPTxDoubleBuffer tx_double_buffer_;   ///< TX helper for active/pending payloads.
   intr_handle_t intr_handle_ = nullptr;  ///< Registered interrupt handle.
   bool intr_installed_ = false;          ///< Whether the interrupt was installed.
@@ -204,8 +211,8 @@ class ESP32CDCJtag : public UART
   Flag::Atomic rx_draining_{};           ///< RX FIFO draining gate.
   Flag::Plain in_tx_isr_;                ///< Reentry guard while servicing TX IRQs.
 
-  ESP32CDCJtagReadPort _read_port;   ///< Read-side queue bridge exposed to `UART`.
-  WritePort _write_port; ///< Write-side queue bridge exposed to `UART`.
+  ESP32CDCJtagReadPort _read_port;  ///< Read-side queue bridge exposed to `UART`.
+  WritePort _write_port;            ///< Write-side queue bridge exposed to `UART`.
 };
 
 }  // namespace LibXR

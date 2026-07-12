@@ -8,10 +8,11 @@ cd "${REPO_ROOT}"
 usage() {
   cat <<'EOF'
 Usage:
-  tools/format_driver_src.sh [--check]
+  tools/format_cpp_files.sh [--check]
 
 Description:
-  Format all C/C++ source files under driver/ and src/ using clang-format.
+  Format all C/C++ files under driver/, src/, system/, and test/ using
+  clang-format.
   Requires clang-format version 21.1.8 by default.
 
 Options:
@@ -76,15 +77,16 @@ EOF
 fi
 
 list_source_files() {
-  find driver src -type f \( \
+  find driver src system test -type f \( \
+    -name '*.h' -o -name '*.hpp' -o \
     -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
   \) -print0
 }
 
 if [[ "${MODE}" == "check" ]]; then
   list_source_files | xargs -0 -r "${CLANG_FORMAT_BIN}" --dry-run --Werror --style=file
-  echo "clang-format check passed for driver/ and src/."
+  echo "clang-format check passed for C/C++ files under driver/, src/, system/, and test/."
 else
   list_source_files | xargs -0 -r "${CLANG_FORMAT_BIN}" -i --style=file
-  echo "Formatted C/C++ sources under driver/ and src/."
+  echo "Formatted C/C++ files under driver/, src/, system/, and test/."
 fi

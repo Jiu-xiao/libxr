@@ -33,8 +33,7 @@ class JtagDp final
   ErrorCode DpRead(uint8_t addr2b, uint32_t& val, JtagProtocol::Ack& ack)
   {
     JtagProtocol::Response resp;
-    const ErrorCode EC =
-        Transfer(JtagProtocol::make_dp_req(true, addr2b, 0u), resp);
+    const ErrorCode EC = Transfer(JtagProtocol::make_dp_req(true, addr2b, 0u), resp);
     ack = resp.ack;
     val = resp.rdata;
     return EC;
@@ -43,8 +42,7 @@ class JtagDp final
   ErrorCode DpWrite(uint8_t addr2b, uint32_t val, JtagProtocol::Ack& ack)
   {
     JtagProtocol::Response resp;
-    const ErrorCode EC =
-        Transfer(JtagProtocol::make_dp_req(false, addr2b, val), resp);
+    const ErrorCode EC = Transfer(JtagProtocol::make_dp_req(false, addr2b, val), resp);
     ack = resp.ack;
     return EC;
   }
@@ -121,8 +119,7 @@ class JtagDp final
   ErrorCode ApWriteTxn(uint8_t addr2b, uint32_t val, JtagProtocol::Ack& ack)
   {
     JtagProtocol::Response resp;
-    const ErrorCode EC =
-        Transfer(JtagProtocol::make_ap_req(false, addr2b, val), resp);
+    const ErrorCode EC = Transfer(JtagProtocol::make_ap_req(false, addr2b, val), resp);
     ack = resp.ack;
     return EC;
   }
@@ -178,9 +175,9 @@ class JtagDp final
 
   ErrorCode Transfer(const JtagProtocol::Request& req, JtagProtocol::Response& resp)
   {
-    const ErrorCode EC = SelectIr(req.port == JtagProtocol::Port::AP
-                                      ? JtagProtocol::JTAG_IR_APACC
-                                      : JtagProtocol::JTAG_IR_DPACC);
+    const ErrorCode EC =
+        SelectIr(req.port == JtagProtocol::Port::AP ? JtagProtocol::JTAG_IR_APACC
+                                                    : JtagProtocol::JTAG_IR_DPACC);
     if (EC != ErrorCode::OK)
     {
       resp.ack = JtagProtocol::Ack::PROTOCOL;
@@ -188,9 +185,8 @@ class JtagDp final
     }
 
     uint64_t out_dr = 0u;
-    const ErrorCode EC2 =
-        ShiftValueThroughChain(JtagProtocol::PackDpDr(req),
-                               JtagProtocol::JTAG_DP_DR_LEN, out_dr);
+    const ErrorCode EC2 = ShiftValueThroughChain(JtagProtocol::PackDpDr(req),
+                                                 JtagProtocol::JTAG_DP_DR_LEN, out_dr);
     if (EC2 != ErrorCode::OK)
     {
       resp.ack = JtagProtocol::Ack::PROTOCOL;

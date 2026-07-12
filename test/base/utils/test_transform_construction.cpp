@@ -1,13 +1,18 @@
 /**
  * @file test_transform_construction.cpp
- * @brief transform 构造与基础代数子测试。 Split test unit for transform construction and basic algebra.
+ * @brief transform 构造与基础代数子测试。 Split test unit for transform construction and
+ * basic algebra.
  */
 #include "transform_test_common.hpp"
 
 /**
- * @brief 测试项函数 `RunTransformConstructionTests`。 Test-item function `RunTransformConstructionTests`.
- * @details 测试内容：执行当前分组里的 transform 子场景。 Execute the grouped transform sub-scenarios for this split file.
- *          测试原理：把构造/互操作/欧拉顺序三个语义维度拆开，降低单文件阅读压力。 Split construction/interoperability/Euler-order semantics into separate files to reduce single-file reading load.
+ * @brief 测试项函数 `RunTransformConstructionTests`。 Test-item function
+ * `RunTransformConstructionTests`.
+ * @details 测试内容：执行当前分组里的 transform 子场景。 Execute the grouped transform
+ * sub-scenarios for this split file.
+ *          测试原理：把构造/互操作/欧拉顺序三个语义维度拆开，降低单文件阅读压力。 Split
+ * construction/interoperability/Euler-order semantics into separate files to reduce
+ * single-file reading load.
  */
 void RunTransformConstructionTests()
 {
@@ -80,6 +85,4 @@ void RunTransformConstructionTests()
   pos_new += pos;
   ASSERT(equal(pos_new(0), pos(0)) && equal(pos_new(1), pos(1)) &&
          equal(pos_new(2), pos(2)));
-
-
 }

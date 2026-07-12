@@ -1,13 +1,18 @@
 /**
  * @file test_transform_euler_orders.cpp
- * @brief transform 欧拉顺序 round-trip 子测试。 Split test unit for transform Euler-order round trips.
+ * @brief transform 欧拉顺序 round-trip 子测试。 Split test unit for transform Euler-order
+ * round trips.
  */
 #include "transform_test_common.hpp"
 
 /**
- * @brief 测试项函数 `RunTransformEulerOrderTests`。 Test-item function `RunTransformEulerOrderTests`.
- * @details 测试内容：执行当前分组里的 transform 子场景。 Execute the grouped transform sub-scenarios for this split file.
- *          测试原理：把构造/互操作/欧拉顺序三个语义维度拆开，降低单文件阅读压力。 Split construction/interoperability/Euler-order semantics into separate files to reduce single-file reading load.
+ * @brief 测试项函数 `RunTransformEulerOrderTests`。 Test-item function
+ * `RunTransformEulerOrderTests`.
+ * @details 测试内容：执行当前分组里的 transform 子场景。 Execute the grouped transform
+ * sub-scenarios for this split file.
+ *          测试原理：把构造/互操作/欧拉顺序三个语义维度拆开，降低单文件阅读压力。 Split
+ * construction/interoperability/Euler-order semantics into separate files to reduce
+ * single-file reading load.
  */
 void RunTransformEulerOrderTests()
 {
@@ -186,5 +191,4 @@ void RunTransformEulerOrderTests()
   eulr_new = quat.ToEulerAngleYZX();
   ASSERT(equal(eulr_new(0), eulr(0)) && equal(eulr_new(1), eulr(1)) &&
          equal(eulr_new(2), eulr(2)));
-
 }

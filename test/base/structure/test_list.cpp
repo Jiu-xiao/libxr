@@ -1,14 +1,21 @@
 /**
  * @file test_list.cpp
- * @brief 普通链表与 lock-free 链表遍历测试。 Ordered list and lock-free list traversal tests.
+ * @brief 普通链表与 lock-free 链表遍历测试。 Ordered list and lock-free list traversal
+ * tests.
  *
  * 测试项目 / Test items:
- * 1. 普通 `List` 的增删遍历行为。 Ordinary `List`: verify add, foreach, delete and not-found delete behavior.
- * 2. `LockFreeList` 的基本遍历覆盖。 `LockFreeList` basic traversal: verify append count and foreach coverage on the lock-free variant.
+ * 1. 普通 `List` 的增删遍历行为。 Ordinary `List`: verify add, foreach, delete and
+ * not-found delete behavior.
+ * 2. `LockFreeList` 的基本遍历覆盖。 `LockFreeList` basic traversal: verify append count
+ * and foreach coverage on the lock-free variant.
  *
  * 测试原理 / Test principles:
- * 1. 复用同一个回调计数器，直接比较两类链表对外可见的遍历契约。 Reuse the same callback counter across both list types so the test compares the observable traversal contract directly.
- * 2. 每次删除后都检查返回值和 size，因为这是普通链表最核心的调用方语义。 Check deletion results after each mutation, because size/accounting is the key caller-visible contract of the ordinary list.
+ * 1. 复用同一个回调计数器，直接比较两类链表对外可见的遍历契约。 Reuse the same callback
+ * counter across both list types so the test compares the observable traversal contract
+ * directly.
+ * 2. 每次删除后都检查返回值和 size，因为这是普通链表最核心的调用方语义。 Check deletion
+ * results after each mutation, because size/accounting is the key caller-visible contract
+ * of the ordinary list.
  */
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -18,8 +25,9 @@ static uint32_t counter = 0;
 
 /**
  * @brief 测试入口函数 `test_list`。 Test entry function `test_list`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_list()
 {

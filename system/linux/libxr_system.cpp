@@ -89,7 +89,9 @@ void StdoThread(LibXR::WritePort* write_port)
       UNUSED(fflush_ans);
 
       write_port->Finish(
-          false, write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED, info);
+          false,
+          write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED,
+          info);
     }
   }
 }

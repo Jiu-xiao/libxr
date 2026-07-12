@@ -29,15 +29,14 @@ namespace LibXR
  * - `Size()`
  */
 template <typename QueueType>
-concept PoolIndexQueue = requires(QueueType queue,
-                                  const typename QueueType::ValueType& index_const,
-                                  typename QueueType::ValueType& index_mut)
-{
-  typename QueueType::ValueType;
-  { queue.Push(index_const) } -> std::same_as<ErrorCode>;
-  { queue.Pop(index_mut) } -> std::same_as<ErrorCode>;
-  { queue.Size() } -> std::convertible_to<size_t>;
-};
+concept PoolIndexQueue =
+    requires(QueueType queue, const typename QueueType::ValueType& index_const,
+             typename QueueType::ValueType& index_mut) {
+      typename QueueType::ValueType;
+      { queue.Push(index_const) } -> std::same_as<ErrorCode>;
+      { queue.Pop(index_mut) } -> std::same_as<ErrorCode>;
+      { queue.Size() } -> std::convertible_to<size_t>;
+    };
 
 /**
  * @class BasicObjectPool
@@ -59,9 +58,9 @@ template <typename Data, PoolIndexQueue FreeQueue>
 class BasicObjectPool
 {
  public:
-  using ValueType = Data;                           ///< 槽内对象类型。 Slot object type.
-  using QueueType = FreeQueue;                     ///< 空闲索引队列类型。 Free-index queue type.
-  using IndexType = typename FreeQueue::ValueType; ///< 槽索引类型。 Slot index type.
+  using ValueType = Data;       ///< 槽内对象类型。 Slot object type.
+  using QueueType = FreeQueue;  ///< 空闲索引队列类型。 Free-index queue type.
+  using IndexType = typename FreeQueue::ValueType;  ///< 槽索引类型。 Slot index type.
 
   /// @brief 槽索引必须是整数类型。 Slot indices must use an integral type.
   static_assert(std::is_integral_v<IndexType>,
@@ -234,7 +233,7 @@ class BasicObjectPool
    * @param slot_count 槽位数量。 Number of slots.
    */
   template <typename T = Data>
-  requires std::is_default_constructible_v<T>
+    requires std::is_default_constructible_v<T>
   explicit BasicObjectPool(size_t slot_count) : slot_count_(slot_count)
   {
     ASSERT(slot_count_ > 0);
@@ -253,8 +252,7 @@ class BasicObjectPool
    *       The caller must ensure that `slots` points to at least `slot_count`
    *       `Data` slots.
    */
-  BasicObjectPool(size_t slot_count, Data* slots)
-      : slot_count_(slot_count), slots_(slots)
+  BasicObjectPool(size_t slot_count, Data* slots) : slot_count_(slot_count), slots_(slots)
   {
     ASSERT(slot_count_ > 0);
     ASSERT(slots_ != nullptr);
@@ -274,7 +272,7 @@ class BasicObjectPool
    *       The caller must ensure that `free_queue` capacity is at least `slot_count`.
    */
   template <typename T = Data>
-  requires std::is_default_constructible_v<T>
+    requires std::is_default_constructible_v<T>
   BasicObjectPool(FreeQueue& free_queue, size_t slot_count)
       : free_queue_(&free_queue), slot_count_(slot_count)
   {
@@ -341,7 +339,8 @@ class BasicObjectPool
    * @brief Acquire one slot handle.
    * @param handle 用于接收成功获取的 handle。 Handle receiving the acquired slot.
    * @return 成功返回 `ErrorCode::OK`，池空返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the pool is empty.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the pool is
+   * empty.
    */
   [[nodiscard]] ErrorCode Acquire(Handle& handle)
   {
@@ -451,8 +450,7 @@ class BasicObjectPool
   void InitializeFreeQueue()
   {
     ASSERT(slot_count_ > 0);
-    ASSERT(slot_count_ - 1 <=
-           static_cast<size_t>(std::numeric_limits<IndexType>::max()));
+    ASSERT(slot_count_ - 1 <= static_cast<size_t>(std::numeric_limits<IndexType>::max()));
     for (size_t index = 0; index < slot_count_; ++index)
     {
       const ErrorCode ec = free_queue_->Push(static_cast<IndexType>(index));
@@ -460,13 +458,17 @@ class BasicObjectPool
     }
   }
 
-  /// @brief 内部自拥有 queue 的原地构造存储区。 In-place storage for an internally owned queue.
+  /// @brief 内部自拥有 queue 的原地构造存储区。 In-place storage for an internally owned
+  /// queue.
   alignas(FreeQueue) std::byte free_queue_storage_[sizeof(FreeQueue)] = {};
-  FreeQueue* free_queue_ = nullptr; ///< 空闲索引队列指针。 Pointer to the free-index queue.
-  const size_t slot_count_;         ///< 槽位总数。 Total slot count.
-  Data* slots_ = nullptr;           ///< 槽数组指针。 Pointer to slot storage.
-  bool owns_free_queue_ = false;    ///< 是否拥有内部 queue。 Whether this pool owns the free queue.
-  bool owns_slots_ = false;         ///< 是否拥有内部 slots。 Whether this pool owns the slot storage.
+  FreeQueue* free_queue_ =
+      nullptr;               ///< 空闲索引队列指针。 Pointer to the free-index queue.
+  const size_t slot_count_;  ///< 槽位总数。 Total slot count.
+  Data* slots_ = nullptr;    ///< 槽数组指针。 Pointer to slot storage.
+  bool owns_free_queue_ =
+      false;  ///< 是否拥有内部 queue。 Whether this pool owns the free queue.
+  bool owns_slots_ =
+      false;  ///< 是否拥有内部 slots。 Whether this pool owns the slot storage.
 };
 
 /**

@@ -10,9 +10,12 @@ namespace LibXR
  */
 enum class Topic::ASyncSubscriberState : uint32_t
 {
-  IDLE = 0,               ///< 当前没有等待，也没有待消费的新数据。No wait is pending and no unread data is buffered.
-  WAITING = 1,            ///< 等待下一次发布填充本地缓冲区。Waiting for the next publish to fill the local buffer.
-  DATA_READY = UINT32_MAX ///< 本地缓冲区已有一份待消费的新数据。One unread fresh sample is buffered locally.
+  IDLE = 0,     ///< 当前没有等待，也没有待消费的新数据。No wait is pending and no unread
+                ///< data is buffered.
+  WAITING = 1,  ///< 等待下一次发布填充本地缓冲区。Waiting for the next publish to fill
+                ///< the local buffer.
+  DATA_READY = UINT32_MAX  ///< 本地缓冲区已有一份待消费的新数据。One unread fresh sample
+                           ///< is buffered locally.
 };
 
 /**
@@ -21,10 +24,14 @@ enum class Topic::ASyncSubscriberState : uint32_t
  */
 struct Topic::ASyncBlock : public Topic::SuberBlock
 {
-  void* buff_addr;                 ///< 长期存在的本地接收对象地址。Long-lived local receive object address.
-  void (*copy_payload)(void* dst,
-                       void* payload_addr);    ///< 按订阅精确类型执行负载拷贝的适配函数。Adapter that copies one payload using the subscriber's exact type.
-  MicrosecondTimestamp timestamp;  ///< 最近接收的消息时间戳。Latest received message timestamp.
+  void* buff_addr;  ///< 长期存在的本地接收对象地址。Long-lived local receive object
+                    ///< address.
+  void (*copy_payload)(
+      void* dst,
+      void* payload_addr);  ///< 按订阅精确类型执行负载拷贝的适配函数。Adapter that copies
+                            ///< one payload using the subscriber's exact type.
+  MicrosecondTimestamp
+      timestamp;  ///< 最近接收的消息时间戳。Latest received message timestamp.
   std::atomic<ASyncSubscriberState> state =
       ASyncSubscriberState::IDLE;  ///< 当前异步订阅状态。Current async subscriber state.
 };
@@ -40,10 +47,12 @@ class Topic::ASyncSubscriber
 {
  public:
   /**
-   * @brief 通过主题名称构造异步订阅者 / Construct an asynchronous subscriber by topic name
+   * @brief 通过主题名称构造异步订阅者 / Construct an asynchronous subscriber by topic
+   * name
    * @param name 订阅的主题名称 / Name of the subscribed topic
    * @param domain 可选的域指针 / Optional domain pointer
-   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time
+   * dynamic allocation; subscribers are expected to be long-lived
    */
   ASyncSubscriber(const char* name, Domain* domain = nullptr)
       : ASyncSubscriber(Topic(WaitTopic(name, UINT32_MAX, domain)))
@@ -54,7 +63,8 @@ class Topic::ASyncSubscriber
    * @brief 通过 `Topic` 句柄构造异步订阅者 / Construct an asynchronous subscriber from a
    *        `Topic` handle
    * @param topic 订阅的主题 / Subscribed topic
-   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time dynamic allocation; subscribers are expected to be long-lived
+   * @note 包含初始化期动态内存分配，订阅者应长期存在 / Contains initialization-time
+   * dynamic allocation; subscribers are expected to be long-lived
    */
   ASyncSubscriber(Topic topic)
   {
@@ -118,7 +128,8 @@ class Topic::ASyncSubscriber
 
   /**
    * @brief 检查数据是否可用 / Check whether data is available
-   * @return 数据已准备好返回 `true`，否则返回 `false` / Returns `true` if data is ready, otherwise `false`
+   * @return 数据已准备好返回 `true`，否则返回 `false` / Returns `true` if data is ready,
+   * otherwise `false`
    */
   bool Available()
   {
@@ -154,20 +165,19 @@ class Topic::ASyncSubscriber
 
   /**
    * @brief 开始等待数据更新 / Start waiting for a data update
-   * @note 异步订阅者只接收 `WAITING` 状态下的下一次发布；`IDLE` 或 `DATA_READY` 状态下的新发布会被忽略 /
-   *       Async subscribers only capture the next publish while in `WAITING`
-   *       state; new publishes in `IDLE` or `DATA_READY` state are ignored
+   * @note 异步订阅者只接收 `WAITING` 状态下的下一次发布；`IDLE` 或 `DATA_READY`
+   * 状态下的新发布会被忽略 / Async subscribers only capture the next publish while in
+   * `WAITING` state; new publishes in `IDLE` or `DATA_READY` state are ignored
    */
   void StartWaiting()
   {
-    if (block_->data_.state.load(std::memory_order_acquire) ==
-        ASyncSubscriberState::IDLE)
+    if (block_->data_.state.load(std::memory_order_acquire) == ASyncSubscriberState::IDLE)
     {
-      block_->data_.state.store(ASyncSubscriberState::WAITING,
-                                std::memory_order_release);
+      block_->data_.state.store(ASyncSubscriberState::WAITING, std::memory_order_release);
     }
   }
 
-  LockFreeList::Node<ASyncBlock>* block_ = nullptr;  ///< 订阅者数据块。Subscriber data block.
+  LockFreeList::Node<ASyncBlock>* block_ =
+      nullptr;  ///< 订阅者数据块。Subscriber data block.
 };
 }  // namespace LibXR

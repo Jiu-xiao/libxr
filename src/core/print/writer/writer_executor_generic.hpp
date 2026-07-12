@@ -1,11 +1,13 @@
 #pragma once
 
 /**
- * @brief 运行期执行器中 `GenericField` 的分发桥接函数 / `GenericField` dispatch bridges for the runtime executor
+ * @brief 运行期执行器中 `GenericField` 的分发桥接函数 / `GenericField` dispatch bridges
+ * for the runtime executor
  */
 
 /**
- * @brief 读取一个有符号载荷并转发给具体有符号写出路径 / Read one signed payload and forward it to the concrete signed writer
+ * @brief 读取一个有符号载荷并转发给具体有符号写出路径 / Read one signed payload and
+ * forward it to the concrete signed writer
  * @tparam Int 有符号打包存储类型 / Signed packed-storage type
  * @return 返回具体有符号字段写出结果 / Returns the concrete signed-field write result
  */
@@ -17,10 +19,12 @@ ErrorCode Writer::Executor<Sink>::DispatchSignedField()
 }
 
 /**
- * @brief 读取一个无符号载荷并转发给选定的整数语义写出路径 / Read one unsigned payload and forward it to the selected integer semantic writer
+ * @brief 读取一个无符号载荷并转发给选定的整数语义写出路径 / Read one unsigned payload and
+ * forward it to the selected integer semantic writer
  * @tparam Type 运行期整数语义类型 / Runtime integer semantic type
  * @tparam UInt 无符号打包存储类型 / Unsigned packed-storage type
- * @return 返回选定整数语义路径的写出结果 / Returns the selected integer-field write result
+ * @return 返回选定整数语义路径的写出结果 / Returns the selected integer-field write
+ * result
  */
 template <OutputSink Sink>
 template <FormatType Type, std::unsigned_integral UInt>
@@ -31,7 +35,8 @@ ErrorCode Writer::Executor<Sink>::DispatchUnsignedField()
 
 #if LIBXR_PRINT_ENABLE_FLOAT
 /**
- * @brief 读取一个浮点载荷并转发给选定的浮点语义写出路径 / Read one float payload and forward it to the selected float semantic writer
+ * @brief 读取一个浮点载荷并转发给选定的浮点语义写出路径 / Read one float payload and
+ * forward it to the selected float semantic writer
  * @tparam Type 运行期浮点语义类型 / Runtime float semantic type
  * @tparam Float 打包浮点存储类型 / Packed float storage type
  * @return 返回选定浮点语义路径的写出结果 / Returns the selected float-field write result
@@ -45,7 +50,8 @@ ErrorCode Writer::Executor<Sink>::DispatchFloatField()
 #endif
 
 /**
- * @brief 读取一个指针载荷并走指针字段写出路径 / Read one pointer payload and write it through the pointer field path
+ * @brief 读取一个指针载荷并走指针字段写出路径 / Read one pointer payload and write it
+ * through the pointer field path
  * @return 返回指针字段写出结果 / Returns the pointer-field write result
  */
 template <OutputSink Sink>
@@ -55,7 +61,8 @@ ErrorCode Writer::Executor<Sink>::DispatchPointerField()
 }
 
 /**
- * @brief 读取一个字符载荷并走字符字段写出路径 / Read one character payload and write it through the character field path
+ * @brief 读取一个字符载荷并走字符字段写出路径 / Read one character payload and write it
+ * through the character field path
  * @return 返回字符字段写出结果 / Returns the character-field write result
  */
 template <OutputSink Sink>
@@ -65,7 +72,8 @@ ErrorCode Writer::Executor<Sink>::DispatchCharacterField()
 }
 
 /**
- * @brief 读取一个字符串载荷并走字符串字段写出路径 / Read one string payload and write it through the string field path
+ * @brief 读取一个字符串载荷并走字符串字段写出路径 / Read one string payload and write it
+ * through the string field path
  * @return 返回字符串字段写出结果 / Returns the string-field write result
  */
 template <OutputSink Sink>
@@ -75,8 +83,10 @@ ErrorCode Writer::Executor<Sink>::DispatchStringField()
 }
 
 /**
- * @brief 将一个 `GenericField` 语义类型分发到具体宽回退写出路径 / Dispatch one `GenericField` semantic type to the concrete wide fallback writer
- * @param type 当前 `GenericField` 携带的运行期语义类型 / Runtime semantic type carried by this `GenericField`
+ * @brief 将一个 `GenericField` 语义类型分发到具体宽回退写出路径 / Dispatch one
+ * `GenericField` semantic type to the concrete wide fallback writer
+ * @param type 当前 `GenericField` 携带的运行期语义类型 / Runtime semantic type carried by
+ * this `GenericField`
  * @return 返回具体宽回退路径的写出结果 / Returns the concrete wide-path write result
  */
 template <OutputSink Sink>

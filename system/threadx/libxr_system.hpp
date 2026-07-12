@@ -1,13 +1,14 @@
 #pragma once
 
 #include <stdint.h>
+
 #include "tx_api.h"
 
 namespace LibXR
 {
-typedef TX_MUTEX  libxr_mutex_handle;
+typedef TX_MUTEX libxr_mutex_handle;
 typedef TX_SEMAPHORE libxr_semaphore_handle;
-typedef TX_THREAD * libxr_thread_handle;
+typedef TX_THREAD* libxr_thread_handle;
 
 /**
  * @brief  平台初始化函数

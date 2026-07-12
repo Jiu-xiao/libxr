@@ -1,6 +1,7 @@
 /**
  * @file test_topic_mutation.cpp
- * @brief 类型化 `Topic` 可变 payload 与队列背压子测试。 Split test unit for typed `Topic` mutable-payload and queue-backpressure scenarios.
+ * @brief 类型化 `Topic` 可变 payload 与队列背压子测试。 Split test unit for typed `Topic`
+ * mutable-payload and queue-backpressure scenarios.
  * @details 测试项目：
  *          1. 可变 callback 订阅者能修改调用者可见 payload。
  *          2. 队列订阅者满载时会丢弃后续发布。
@@ -14,14 +15,19 @@ namespace
 {
 
 /**
- * @brief 测试项函数 `TestTopicMutationAndQueueDrop`。 Test-item function `TestTopicMutationAndQueueDrop`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @brief 测试项函数 `TestTopicMutationAndQueueDrop`。 Test-item function
+ * `TestTopicMutationAndQueueDrop`.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestTopicMutationAndQueueDrop()
 {
   // 测试内容：验证可变 payload 回写语义，以及队列背压下的溢出丢弃契约。
-  // Test coverage: verify mutable-payload writeback semantics and overflow-drop behavior under queue backpressure.
+  // Test coverage: verify mutable-payload writeback semantics and overflow-drop behavior
+  // under queue backpressure.
   auto domain = LibXR::Topic::Domain("message_topic_mutation_domain");
 
   auto mutable_topic = LibXR::Topic::CreateTopic<int>("mutable_payload_tp", &domain);
@@ -59,10 +65,9 @@ void TestTopicMutationAndQueueDrop()
 
 /**
  * @brief 测试项函数 `RunTopicMutationTests`。 Test-item function `RunTopicMutationTests`.
- * @details 测试内容：执行类型化 `Topic` 可变 payload 与丢包子场景。 Execute typed `Topic` mutable-payload and drop-behavior sub-scenarios.
- *          测试原理：把 payload 回写和背压丢弃单独成组，聚焦订阅者副作用契约。 Group payload writeback and backpressure-drop behavior around subscriber side-effect contracts.
+ * @details 测试内容：执行类型化 `Topic` 可变 payload 与丢包子场景。 Execute typed `Topic`
+ * mutable-payload and drop-behavior sub-scenarios. 测试原理：把 payload
+ * 回写和背压丢弃单独成组，聚焦订阅者副作用契约。 Group payload writeback and
+ * backpressure-drop behavior around subscriber side-effect contracts.
  */
-void RunTopicMutationTests()
-{
-  TestTopicMutationAndQueueDrop();
-}
+void RunTopicMutationTests() { TestTopicMutationAndQueueDrop(); }

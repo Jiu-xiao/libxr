@@ -1,14 +1,21 @@
 /**
  * @file test_application.cpp
- * @brief `ApplicationManager` 注册与调度测试。 `ApplicationManager` registration and dispatch tests.
+ * @brief `ApplicationManager` 注册与调度测试。 `ApplicationManager` registration and
+ * dispatch tests.
  *
  * 测试项目 / Test items:
- * 1. 注册计数行为。 Registration accounting: verify manager size grows with each registered application.
- * 2. `MonitorAll()` 的覆盖与重复调用行为。 Monitor dispatch coverage: verify `MonitorAll()` reaches every registered application and can be called repeatedly.
+ * 1. 注册计数行为。 Registration accounting: verify manager size grows with each
+ * registered application.
+ * 2. `MonitorAll()` 的覆盖与重复调用行为。 Monitor dispatch coverage: verify
+ * `MonitorAll()` reaches every registered application and can be called repeatedly.
  *
  * 测试原理 / Test principles:
- * 1. 使用 seen bitmask 和 hit count，而不是假定遍历顺序，因为源码本身不保证顺序。 Record a seen-bitmask and hit count instead of asserting callback order, because the source contract explicitly does not guarantee traversal order.
- * 2. 重复调用 `MonitorAll()`，验证 steady-state 行为而不只是一轮调用。 Call `MonitorAll()` more than once so the test documents steady-state repeatability rather than only first-use behavior.
+ * 1. 使用 seen bitmask 和 hit count，而不是假定遍历顺序，因为源码本身不保证顺序。 Record
+ * a seen-bitmask and hit count instead of asserting callback order, because the source
+ * contract explicitly does not guarantee traversal order.
+ * 2. 重复调用 `MonitorAll()`，验证 steady-state 行为而不只是一轮调用。 Call
+ * `MonitorAll()` more than once so the test documents steady-state repeatability rather
+ * than only first-use behavior.
  */
 #include "libxr.hpp"
 #include "test.hpp"
@@ -26,8 +33,11 @@ class CountingApp : public LibXR::Application
 
   /**
    * @brief 辅助函数 `OnMonitor`。 Helper function `OnMonitor`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+   * measure, or validate shared state for later test steps.
+   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+   * repeated helper logic locally so the main test body stays focused on the test item
+   * itself.
    */
   void OnMonitor() override
   {
@@ -44,9 +54,11 @@ class CountingApp : public LibXR::Application
 }  // namespace
 
 /**
- * @brief 测试入口函数 `test_app_framework_application`。 Test entry function `test_app_framework_application`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_app_framework_application`。 Test entry function
+ * `test_app_framework_application`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_app_framework_application()
 {

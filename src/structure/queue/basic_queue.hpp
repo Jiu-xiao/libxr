@@ -84,7 +84,8 @@ class Queue final : public QueueTypedBase<Queue<Data>, Data>, public QueueBase
    * @brief Peek the front element without removing it.
    * @param data 用于接收查看结果的引用。 Reference receiving the peeked element.
    * @return 成功返回 `ErrorCode::OK`，队列空返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the queue is empty.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the queue is
+   * empty.
    */
   ErrorCode Peek(Data& data) { return QueueBase::PeekBytes(&data); }
 
@@ -94,7 +95,8 @@ class Queue final : public QueueTypedBase<Queue<Data>, Data>, public QueueBase
    * @param data 指向元素数组的指针。 Pointer to the array of elements to push.
    * @param size 要推入的元素个数。 Number of elements to push.
    * @return 成功返回 `ErrorCode::OK`，空间不足返回 `ErrorCode::FULL`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::FULL` when free space is insufficient.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::FULL` when free space is
+   * insufficient.
    */
   ErrorCode PushBatch(const Data* data, size_t size)
   {
@@ -107,7 +109,8 @@ class Queue final : public QueueTypedBase<Queue<Data>, Data>, public QueueBase
    * @param data 指向输出数组的指针。 Pointer to the array receiving popped elements.
    * @param size 要移除的元素个数。 Number of elements to remove.
    * @return 成功返回 `ErrorCode::OK`，元素不足返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored elements are insufficient.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored
+   * elements are insufficient.
    */
   ErrorCode PopBatch(Data* data, size_t size)
   {
@@ -120,7 +123,8 @@ class Queue final : public QueueTypedBase<Queue<Data>, Data>, public QueueBase
    * @param data 指向输出数组的指针。 Pointer to the array receiving peeked elements.
    * @param size 要查看的元素个数。 Number of elements to retrieve.
    * @return 成功返回 `ErrorCode::OK`，元素不足返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored elements are insufficient.
+   *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when stored
+   * elements are insufficient.
    */
   ErrorCode PeekBatch(Data* data, size_t size)
   {

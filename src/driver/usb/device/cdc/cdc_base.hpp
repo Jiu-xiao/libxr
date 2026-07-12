@@ -81,7 +81,7 @@ class CDCBase : public DeviceClass
                           ///< (required for CDC-ACM)
   };
 
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
   /**
    * @brief CDC线路编码参数结构体
    *        CDC line coding parameters structure
@@ -108,14 +108,14 @@ LIBXR_PACKED_BEGIN
   struct SerialStateNotification
   {
     uint8_t bmRequestType;  ///< 请求类型（固定为 0xA1） / Request type (fixed to 0xA1)
-    uint8_t bNotification;  ///< 通知类型（固定为 SERIAL_STATE） / Notification type (fixed
-                            ///< to SERIAL_STATE)
+    uint8_t bNotification;  ///< 通知类型（固定为 SERIAL_STATE） / Notification type
+                            ///< (fixed to SERIAL_STATE)
     uint16_t wValue;        ///< 值（固定为 0） / Value (fixed to 0)
     uint16_t wIndex;        ///< 接口号 / Interface number
     uint16_t wLength;       ///< 数据长度（固定为2）| Data length (fixed to 2)
     uint16_t serialState;   ///< 串行状态位图 / Serial state bitmap
   };
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
   // 确保 CDCLineCoding 结构体大小为 7 字节。
   // Ensure CDCLineCoding is exactly 7 bytes.
@@ -602,7 +602,7 @@ LIBXR_PACKED_END
     }
   }
 
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
   /**
    * @brief CDC描述符块结构
    *        CDC descriptor block structure
@@ -658,7 +658,7 @@ LIBXR_PACKED_BEGIN
     EndpointDescriptor data_ep_out;  ///< 数据OUT端点描述符 / Data OUT endpoint descriptor
     EndpointDescriptor data_ep_in;   ///< 数据IN端点描述符 / Data IN endpoint descriptor
   } desc_block_;
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
  protected:
   CDCLineCoding& GetLineCoding() { return line_coding_; }
@@ -706,7 +706,7 @@ LIBXR_PACKED_END
 
   // 状态标志。
   // State flags.
-  bool inited_ = false;                 ///< 初始化标志 / Initialization flag
+  bool inited_ = false;                     ///< 初始化标志 / Initialization flag
   bool has_control_line_state_cb_ = false;  ///< Control-line callback registered
   bool has_line_coding_cb_ = false;         ///< Line-coding callback registered
 

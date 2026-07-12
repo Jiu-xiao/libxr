@@ -39,7 +39,7 @@ class GsUsbClass : public DeviceClass
  private:
   // ===== Linux gs_usb 线缆格式（固定 12 字节头） / Linux gs_usb wire format
   // (fixed 12-byte header) =====
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
 
   /**
    * @brief gs_usb 线缆格式头（12 字节） / gs_usb wire-format header (12 bytes)
@@ -53,7 +53,7 @@ LIBXR_PACKED_BEGIN
     uint8_t flags;     ///< 帧标志（GS_CAN_FLAG_*） / Frame flags (GS_CAN_FLAG_*)
     uint8_t reserved;  ///< 保留 / Reserved
   };
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
   static constexpr uint32_t ECHO_ID_RX =
       0xFFFFFFFFu;  ///< RX 帧 echo_id 固定值 / Fixed echo_id for RX frames
@@ -94,9 +94,8 @@ LIBXR_PACKED_END
    * @param interface_string 接口字符串 / Interface string
    */
   GsUsbClass(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
-             std::initializer_list<LibXR::CAN*> cans,
-             size_t rx_queue_size = 32, size_t echo_queue_size = 32,
-             LibXR::GPIO* identify_gpio = nullptr,
+             std::initializer_list<LibXR::CAN*> cans, size_t rx_queue_size = 32,
+             size_t echo_queue_size = 32, LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},
              LibXR::Database* database = nullptr,
              const char* interface_string = DEFAULT_INTERFACE_STRING)
@@ -155,9 +154,8 @@ LIBXR_PACKED_END
    * @param interface_string 接口字符串 / Interface string
    */
   GsUsbClass(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
-             std::initializer_list<LibXR::FDCAN*> fd_cans,
-             size_t rx_queue_size = 32, size_t echo_queue_size = 32,
-             LibXR::GPIO* identify_gpio = nullptr,
+             std::initializer_list<LibXR::FDCAN*> fd_cans, size_t rx_queue_size = 32,
+             size_t echo_queue_size = 32, LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},
              LibXR::Database* database = nullptr,
              const char* interface_string = DEFAULT_INTERFACE_STRING)
@@ -222,7 +220,8 @@ LIBXR_PACKED_END
     ASSERT(ans == ErrorCode::OK);
 
     // UINT16_MAX 只是上限，底层会选不超过该值的可用最大长度。
-    // UINT16_MAX is only an upper bound; the backend still chooses the largest valid length.
+    // UINT16_MAX is only an upper bound; the backend still chooses the largest valid
+    // length.
     ep_data_in_->Configure(
         {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
     ep_data_out_->Configure(
@@ -859,7 +858,8 @@ LIBXR_PACKED_END
     }
 
     // TX echo：host 通过 echo_id 跟踪 TX buffer；设备需回送 echo_id。
-    // TX echo: the host tracks TX buffers via echo_id, and the device should echo it back.
+    // TX echo: the host tracks TX buffers via echo_id, and the device should echo it
+    // back.
     if (wh.echo_id != ECHO_ID_RX)
     {
       QueueItem qi;
@@ -962,7 +962,7 @@ LIBXR_PACKED_END
   uint8_t ctrl_target_channel_ =
       0;  ///< 控制请求目标通道 / Control request target channel
 
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
   /**
    * @brief 本类的接口与端点描述符块 / Descriptor block for interface and endpoints
    */
@@ -972,7 +972,7 @@ LIBXR_PACKED_BEGIN
     EndpointDescriptor ep_out;  ///< OUT 端点描述符 / OUT endpoint descriptor
     EndpointDescriptor ep_in;   ///< IN 端点描述符 / IN endpoint descriptor
   } desc_block_{};
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
   uint8_t rx_buf_[WIRE_MAX_SIZE]{};  ///< OUT 接收缓冲区 / OUT receive buffer
   std::array<uint8_t, WIRE_MAX_SIZE>
@@ -1740,7 +1740,8 @@ LIBXR_PACKED_END
     }
 
     // 与 Linux can/error.h 对齐（沿用之前版本的映射）。
-    // Keep these definitions aligned with Linux can/error.h, matching the previous mapping.
+    // Keep these definitions aligned with Linux can/error.h, matching the previous
+    // mapping.
     constexpr uint8_t LNX_CAN_ERR_CRTL_UNSPEC = 0x00;
     constexpr uint8_t LNX_CAN_ERR_CRTL_RX_WARNING = 0x04;
     constexpr uint8_t LNX_CAN_ERR_CRTL_TX_WARNING = 0x08;

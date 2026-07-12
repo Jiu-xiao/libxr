@@ -1,13 +1,18 @@
 /**
  * @file test_transform_rotation.cpp
- * @brief transform 旋转互操作子测试。 Split test unit for transform rotation interoperability.
+ * @brief transform 旋转互操作子测试。 Split test unit for transform rotation
+ * interoperability.
  */
 #include "transform_test_common.hpp"
 
 /**
- * @brief 测试项函数 `RunTransformRotationInteropTests`。 Test-item function `RunTransformRotationInteropTests`.
- * @details 测试内容：执行当前分组里的 transform 子场景。 Execute the grouped transform sub-scenarios for this split file.
- *          测试原理：把构造/互操作/欧拉顺序三个语义维度拆开，降低单文件阅读压力。 Split construction/interoperability/Euler-order semantics into separate files to reduce single-file reading load.
+ * @brief 测试项函数 `RunTransformRotationInteropTests`。 Test-item function
+ * `RunTransformRotationInteropTests`.
+ * @details 测试内容：执行当前分组里的 transform 子场景。 Execute the grouped transform
+ * sub-scenarios for this split file.
+ *          测试原理：把构造/互操作/欧拉顺序三个语义维度拆开，降低单文件阅读压力。 Split
+ * construction/interoperability/Euler-order semantics into separate files to reduce
+ * single-file reading load.
  */
 void RunTransformRotationInteropTests()
 {
@@ -49,6 +54,4 @@ void RunTransformRotationInteropTests()
       Eigen::Quaternion<double>(quat) * eigen_quat.conjugate();
   ASSERT(equal(quat_new.w(), eigen_div.w()) && equal(quat_new.x(), eigen_div.x()) &&
          equal(quat_new.y(), eigen_div.y()) && equal(quat_new.z(), eigen_div.z()));
-
-
 }

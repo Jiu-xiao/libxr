@@ -1,14 +1,18 @@
 /**
  * @file pipe_transfer_test_common.hpp
- * @brief `Pipe` 传输与模式矩阵测试 helper。 Shared transport and mode-matrix helpers for `Pipe` tests.
+ * @brief `Pipe` 传输与模式矩阵测试 helper。 Shared transport and mode-matrix helpers for
+ * `Pipe` tests.
  * @details 测试项目：
  *          1. 提供 `Pipe` 延迟写入、样本填充和调用结果断言 helper。
  *          2. 提供读先写后、写先读后与零长度读写场景验证 helper。
  *          3. 提供混合模式与阻塞模式压力场景复用的基础常量和上下文。
  *          Test items:
- *          1. Provide delayed write, sample fill, and call-result assertion helpers for `Pipe`.
- *          2. Provide helpers for read-first, write-first, and zero-length read/write scenarios.
- *          3. Provide reusable constants and contexts for mixed-mode and blocking-mode stress scenarios.
+ *          1. Provide delayed write, sample fill, and call-result assertion helpers for
+ * `Pipe`.
+ *          2. Provide helpers for read-first, write-first, and zero-length read/write
+ * scenarios.
+ *          3. Provide reusable constants and contexts for mixed-mode and blocking-mode
+ * stress scenarios.
  */
 #pragma once
 
@@ -36,8 +40,11 @@ struct DelayedPipeWriteContext
 
 /**
  * @brief 辅助函数 `DelayedPipeWrite`。 Helper function `DelayedPipeWrite`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 void DelayedPipeWrite(DelayedPipeWriteContext* ctx)
 {
@@ -55,8 +62,11 @@ void StartDelayedPipeWriter(LibXR::Thread& thread, DelayedPipeWriteContext& ctx,
 
 /**
  * @brief 辅助函数 `FillPattern`。 Helper function `FillPattern`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform, measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate repeated helper logic locally so the main test body stays focused on the test item itself.
+ * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
+ * measure, or validate shared state for later test steps.
+ *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
+ * repeated helper logic locally so the main test body stays focused on the test item
+ * itself.
  */
 void FillPattern(std::vector<uint8_t>& buffer, uint8_t seed)
 {

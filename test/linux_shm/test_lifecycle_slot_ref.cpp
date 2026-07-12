@@ -1,6 +1,7 @@
 /**
  * @file test_lifecycle_slot_ref.cpp
- * @brief `LinuxSharedTopic` slot 引用钉住子验证。 Split verification unit for slot-reference pinning semantics.
+ * @brief `LinuxSharedTopic` slot 引用钉住子验证。 Split verification unit for
+ * slot-reference pinning semantics.
  * @details 测试项目：
  *          1. slot 在所有 subscriber 释放前保持占用。
  *          2. 最后一个 subscriber 释放后 publisher 能再次创建新数据。

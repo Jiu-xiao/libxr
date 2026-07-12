@@ -1,6 +1,7 @@
 /**
  * @file test_command_cd.cpp
- * @brief `Terminal` `cd` 内建命令场景子测试。 Split test unit for `Terminal` `cd` builtin scenarios.
+ * @brief `Terminal` `cd` 内建命令场景子测试。 Split test unit for `Terminal` `cd` builtin
+ * scenarios.
  * @details 测试项目：
  *          1. 相对路径、`.`、`..`、根路径切换。
  *          2. 无效路径不会破坏当前目录与 prompt。
@@ -15,8 +16,11 @@ namespace
 
 /**
  * @brief 测试项函数 `TestCdBuiltins`。 Test-item function `TestCdBuiltins`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestCdBuiltins()
 {
@@ -58,11 +62,10 @@ void TestCdBuiltins()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunTerminalCommandCdTests`。 Test-item function `RunTerminalCommandCdTests`.
- * @details 测试内容：执行 `Terminal` `cd` 内建命令子场景。 Execute `Terminal` `cd` builtin sub-scenarios.
- *          测试原理：把目录切换语义单独成组，避免与 `ls` 输出标记场景缠绕。 Group directory-transition semantics away from `ls` marker output scenarios.
+ * @brief 测试项函数 `RunTerminalCommandCdTests`。 Test-item function
+ * `RunTerminalCommandCdTests`.
+ * @details 测试内容：执行 `Terminal` `cd` 内建命令子场景。 Execute `Terminal` `cd`
+ * builtin sub-scenarios. 测试原理：把目录切换语义单独成组，避免与 `ls` 输出标记场景缠绕。
+ * Group directory-transition semantics away from `ls` marker output scenarios.
  */
-void RunTerminalCommandCdTests()
-{
-  TestCdBuiltins();
-}
+void RunTerminalCommandCdTests() { TestCdBuiltins(); }

@@ -1,6 +1,7 @@
 /**
  * @file test_balance_rr_dead.cpp
- * @brief `LinuxSharedTopic` BALANCE_RR 死亡成员回收子验证。 Split verification unit for BALANCE_RR dead-member reclamation semantics.
+ * @brief `LinuxSharedTopic` BALANCE_RR 死亡成员回收子验证。 Split verification unit for
+ * BALANCE_RR dead-member reclamation semantics.
  * @details 测试项目：
  *          1. 死亡 balanced subscriber 被回收后组仍能继续工作。
  *          Test items:
@@ -40,7 +41,8 @@ void RunBalanceRoundRobinDeadMemberScenario()
       close(ack_pipe[0]);
       close(cmd_pipe[1]);
 
-      SharedSubscriber subscriber(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+      SharedSubscriber subscriber(topic_name,
+                                  LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
       if (!subscriber.Valid())
       {
         _exit(40);
@@ -81,7 +83,8 @@ void RunBalanceRoundRobinDeadMemberScenario()
            static_cast<ssize_t>(sizeof(first_seq)));
     ASSERT(first_seq == 361);
 
-    SharedSubscriber subscriber_alive(topic_name, LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
+    SharedSubscriber subscriber_alive(topic_name,
+                                      LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
     ASSERT(subscriber_alive.Valid());
     WaitForSubscriberNum(publisher, 2);
 

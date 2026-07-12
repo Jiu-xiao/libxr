@@ -1,11 +1,10 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstddef>
 #include <cstdint>
 
 #include "driver/gpio.h"
+#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "flag.hpp"
 #include "hal/spi_ll.h"
@@ -19,17 +18,16 @@ namespace LibXR
 class ESP32SPI : public SPI
 {
  public:
-  ESP32SPI(
-      spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_pin, RawData dma_rx,
-      RawData dma_tx,
-      SPI::Configuration config = {
-          SPI::ClockPolarity::LOW,
-          SPI::ClockPhase::EDGE_1,
-          SPI::Prescaler::DIV_8,
-          false,
-      },
-      uint32_t dma_enable_min_size = 3U, bool enable_dma = true);
-
+  ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_pin,
+           RawData dma_rx, RawData dma_tx,
+           SPI::Configuration config =
+               {
+                   SPI::ClockPolarity::LOW,
+                   SPI::ClockPhase::EDGE_1,
+                   SPI::Prescaler::DIV_8,
+                   false,
+               },
+           uint32_t dma_enable_min_size = 3U, bool enable_dma = true);
 
   ErrorCode ReadAndWrite(RawData read_data, ConstRawData write_data, OperationRW& op,
                          bool in_isr = false) override;
@@ -62,16 +60,13 @@ class ESP32SPI : public SPI
 
   ErrorCode InitializeHardware();
 
-
   ErrorCode ConfigurePins();
 
   ErrorCode ResolveClockSource(uint32_t& source_hz);
 
   ErrorCode InstallInterrupt();
 
-
   ErrorCode InitDmaBackend();
-
 
   static void SpiIsrEntry(void* arg);
 
@@ -89,9 +84,9 @@ class ESP32SPI : public SPI
 
   ErrorCode ReturnAsyncStartResult(ErrorCode ec, bool started);
 
-  ErrorCode StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t size, bool enable_rx,
-                               RawData read_back, bool mem_read, OperationRW& op,
-                               bool& started);
+  ErrorCode StartAsyncTransfer(const uint8_t* tx, uint8_t* rx, size_t size,
+                               bool enable_rx, RawData read_back, bool mem_read,
+                               OperationRW& op, bool& started);
 
   void ConfigureTransferRegisters(size_t size);
 

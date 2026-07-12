@@ -1,18 +1,21 @@
 /**
  * @file linux_shared_topic_mode_child_common.hpp
- * @brief `LinuxSharedTopic` subscriber mode 子进程 helper。 Shared subscriber-child helper for `LinuxSharedTopic` mode benchmarks.
+ * @brief `LinuxSharedTopic` subscriber mode 子进程 helper。 Shared subscriber-child
+ * helper for `LinuxSharedTopic` mode benchmarks.
  * @details 作用：
  *          1. 封装 mode benchmark 中 subscriber 子进程的接收与统计逻辑。
  *          2. 减小 mode runner 主执行函数的体积。
  *          Purpose:
- *          1. Encapsulate receive/statistics logic for subscriber children in mode benchmarks.
+ *          1. Encapsulate receive/statistics logic for subscriber children in mode
+ * benchmarks.
  *          2. Reduce the size of the main mode runner function.
  */
 #pragma once
 
-#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
+
+#include <cerrno>
 
 #include "linux_shared_topic_bench_common.hpp"
 

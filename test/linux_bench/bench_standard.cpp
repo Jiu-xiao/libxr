@@ -1,6 +1,7 @@
 /**
  * @file bench_standard.cpp
- * @brief `LinuxSharedTopic` standard 基准聚合入口。 Aggregation entry for `LinuxSharedTopic` standard benchmarks.
+ * @brief `LinuxSharedTopic` standard 基准聚合入口。 Aggregation entry for
+ * `LinuxSharedTopic` standard benchmarks.
  * @details 测试项目：
  *          1. 聚合不同 payload 大小与 payload touch 模式的 standard case。
  *          Test items:
@@ -10,10 +11,7 @@
 
 namespace LinuxSharedTopicBench
 {
-int RunStandardBenchmarksSmoke()
-{
-  return RunBenchCase<64, false>(256);
-}
+int RunStandardBenchmarksSmoke() { return RunBenchCase<64, false>(256); }
 
 int RunStandardBenchmarks()
 {

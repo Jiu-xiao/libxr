@@ -1,6 +1,7 @@
 /**
  * @file test_string_text.cpp
- * @brief 运行时字符串文本构造场景子测试。 Split test unit for runtime-string text construction scenarios.
+ * @brief 运行时字符串文本构造场景子测试。 Split test unit for runtime-string text
+ * construction scenarios.
  * @details 测试项目：
  *          1. 普通文本、定长数组和空字符串构造。
  *          2. 嵌入 NUL 输入与带后缀拼接构造。
@@ -15,13 +16,17 @@ namespace
 
 /**
  * @brief 测试项函数 `TestRuntimeStringText`。 Test-item function `TestRuntimeStringText`.
- * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete scenario and assertions for the current helper-scoped test item.
- *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。 Split one explainable test item into an independent function so failures and reused scenarios stay easy to locate.
+ * @details 测试内容：执行当前辅助测试项对应的具体场景与断言。 Execute the concrete
+ * scenario and assertions for the current helper-scoped test item.
+ *          测试原理：把一个可单独说明的测试项目拆成独立函数，便于定位失败点并复用场景。
+ * Split one explainable test item into an independent function so failures and reused
+ * scenarios stay easy to locate.
  */
 void TestRuntimeStringText()
 {
   // 测试内容：验证不同文本来源都能保持预期视图和稳定存储。
-  // Test coverage: verify that different text sources preserve the expected view and stable storage.
+  // Test coverage: verify that different text sources preserve the expected view and
+  // stable storage.
   LibXR::RuntimeStringView<> copied("camera");
   ASSERT(copied.Status() == LibXR::ErrorCode::OK);
   ASSERT(!copied.Empty());
@@ -104,11 +109,11 @@ void TestRuntimeStringText()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunRuntimeStringTextTests`。 Test-item function `RunRuntimeStringTextTests`.
- * @details 测试内容：执行运行时字符串文本构造子场景。 Execute runtime-string text-construction sub-scenarios.
- *          测试原理：把文本构造语义单独成组，避免与错误路径和重格式化路径缠在一起。 Group text-construction semantics away from error and reformatting paths.
+ * @brief 测试项函数 `RunRuntimeStringTextTests`。 Test-item function
+ * `RunRuntimeStringTextTests`.
+ * @details 测试内容：执行运行时字符串文本构造子场景。 Execute runtime-string
+ * text-construction sub-scenarios.
+ *          测试原理：把文本构造语义单独成组，避免与错误路径和重格式化路径缠在一起。 Group
+ * text-construction semantics away from error and reformatting paths.
  */
-void RunRuntimeStringTextTests()
-{
-  TestRuntimeStringText();
-}
+void RunRuntimeStringTextTests() { TestRuntimeStringText(); }

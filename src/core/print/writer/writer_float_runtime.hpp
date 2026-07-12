@@ -1,13 +1,16 @@
 #pragma once
 
 /**
- * @brief 浮点运行期后端的功能开关判断与有界文本缓冲辅助函数 / Runtime float-backend feature gates and bounded text-buffer helpers
+ * @brief 浮点运行期后端的功能开关判断与有界文本缓冲辅助函数 / Runtime float-backend
+ * feature gates and bounded text-buffer helpers
  */
 
 /**
- * @brief 判断某个运行期浮点语义是否走共享文本后端 / Return whether one runtime float semantic uses the shared text backend
+ * @brief 判断某个运行期浮点语义是否走共享文本后端 / Return whether one runtime float
+ * semantic uses the shared text backend
  * @param type 运行期浮点字段类型 / Runtime float field type
- * @return 该字段类型走共享浮点文本后端时返回 `true`，否则返回 `false` / Returns `true` when this field type uses the shared float-text backend, otherwise `false`
+ * @return 该字段类型走共享浮点文本后端时返回 `true`，否则返回 `false` / Returns `true`
+ * when this field type uses the shared float-text backend, otherwise `false`
  */
 constexpr bool Writer::UsesFloatTextBackend(FormatType type)
 {
@@ -29,9 +32,11 @@ constexpr bool Writer::UsesFloatTextBackend(FormatType type)
 }
 
 /**
- * @brief 判断某个运行期浮点语义是否在当前配置下启用 / Return whether one runtime float semantic is enabled under current config
+ * @brief 判断某个运行期浮点语义是否在当前配置下启用 / Return whether one runtime float
+ * semantic is enabled under current config
  * @param type 运行期浮点字段类型 / Runtime float field type
- * @return 当前配置启用了该字段类型时返回 `true`，否则返回 `false` / Returns `true` when this field type is enabled, otherwise `false`
+ * @return 当前配置启用了该字段类型时返回 `true`，否则返回 `false` / Returns `true` when
+ * this field type is enabled, otherwise `false`
  */
 constexpr bool Writer::FloatEnabled(FormatType type)
 {
@@ -61,7 +66,8 @@ constexpr bool Writer::FloatEnabled(FormatType type)
 }
 
 /**
- * @brief 返回格式串没有显式指定精度时使用的默认浮点精度 / Return the default float precision used when the format string did not specify one
+ * @brief 返回格式串没有显式指定精度时使用的默认浮点精度 / Return the default float
+ * precision used when the format string did not specify one
  * @return 返回默认浮点精度 / Returns the default float precision
  */
 constexpr uint8_t Writer::DefaultFloatPrecision()
@@ -70,11 +76,14 @@ constexpr uint8_t Writer::DefaultFloatPrecision()
 }
 
 /**
- * @brief 判断定点形态的浮点输出是否会超出当前配置的整数位数上限 / Return whether fixed-form float output would exceed the configured integer-digit limit
+ * @brief 判断定点形态的浮点输出是否会超出当前配置的整数位数上限 / Return whether
+ * fixed-form float output would exceed the configured integer-digit limit
  * @tparam Float 浮点类型 / Float type
  * @param value 待检查的浮点绝对值 / Float magnitude to test
  * @param precision 请求的小数精度 / Requested fractional precision
- * @return 若定点输出的整数部分会超出配置上限则返回 `true`，否则返回 `false` / Returns `true` when the fixed-form integer part would exceed the configured limit, otherwise `false`
+ * @return 若定点输出的整数部分会超出配置上限则返回 `true`，否则返回 `false` / Returns
+ * `true` when the fixed-form integer part would exceed the configured limit, otherwise
+ * `false`
  */
 template <typename Float>
 bool Writer::ExceedsFixedIntegerDigits(Float value, uint8_t precision)
@@ -103,10 +112,12 @@ bool Writer::ExceedsFixedIntegerDigits(Float value, uint8_t precision)
 }
 
 /**
- * @brief 向局部有界浮点格式缓冲区追加一个字符 / Append one character into a bounded local float-format buffer
+ * @brief 向局部有界浮点格式缓冲区追加一个字符 / Append one character into a bounded local
+ * float-format buffer
  * @param buffer 目标缓冲区 / Destination buffer
  * @param capacity 缓冲区总容量 / Total buffer capacity
  * @param size 当前已保留长度；成功时会推进 / Current retained size; advanced on success
  * @param ch 待追加字符 / Character to append
- * @return 成功返回 `true`，否则返回 `false` / Returns `true` on success, otherwise `false`
+ * @return 成功返回 `true`，否则返回 `false` / Returns `true` on success, otherwise
+ * `false`
  */

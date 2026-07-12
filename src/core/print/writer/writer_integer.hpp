@@ -1,7 +1,8 @@
 #pragma once
 
 /**
- * @brief 运行期 writer 后端共享的整数文本辅助函数 / Shared integer-text helpers for the runtime writer backend
+ * @brief 运行期 writer 后端共享的整数文本辅助函数 / Shared integer-text helpers for the
+ * runtime writer backend
  */
 
 template <std::unsigned_integral UInt, uint8_t Base>
@@ -21,9 +22,11 @@ consteval size_t Writer::UnsignedDigitCapacity()
 }
 
 /**
- * @brief 将一个无符号整数写入调用方提供的定长数字缓冲区 / Append one unsigned integer into a caller-provided fixed-size digit buffer
+ * @brief 将一个无符号整数写入调用方提供的定长数字缓冲区 / Append one unsigned integer
+ * into a caller-provided fixed-size digit buffer
  * @tparam Base 整数进制 / Integer radix
- * @tparam UpperCase 十六进制数字是否使用大写字母 / Whether hexadecimal digits should use uppercase letters
+ * @tparam UpperCase 十六进制数字是否使用大写字母 / Whether hexadecimal digits should use
+ * uppercase letters
  * @tparam N 目标缓冲区长度 / Destination buffer size
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param out 目标数字缓冲区 / Destination digit buffer
@@ -35,8 +38,9 @@ size_t Writer::AppendUnsigned(char (&out)[N], UInt value)
 {
   constexpr char lower_digits[] = "0123456789abcdef";
   constexpr char upper_digits[] = "0123456789ABCDEF";
-  static_assert(N >= UnsignedDigitCapacity<UInt, Base>(),
-                "LibXR::Print::Writer digit buffer is too small for the selected integer type");
+  static_assert(
+      N >= UnsignedDigitCapacity<UInt, Base>(),
+      "LibXR::Print::Writer digit buffer is too small for the selected integer type");
 
   const char* digits = UpperCase ? upper_digits : lower_digits;
   char reverse[UnsignedDigitCapacity<UInt, Base>()];
@@ -75,7 +79,8 @@ inline size_t Writer::AppendSmallUnsigned(char (&out)[N], uint8_t value)
 }
 
 /**
- * @brief 返回某个载荷尺寸对应的字段宽度填充量 / Return the field-width padding needed for one payload size
+ * @brief 返回某个载荷尺寸对应的字段宽度填充量 / Return the field-width padding needed for
+ * one payload size
  * @param width 请求的字段宽度 / Requested field width
  * @param payload_size 填充前的可见载荷长度 / Visible payload size before padding
  * @return 返回需要补上的填充个数 / Returns the required padding count
@@ -86,7 +91,8 @@ constexpr size_t Writer::FieldPadding(uint8_t width, size_t payload_size)
 }
 
 /**
- * @brief 返回整数精度要求引入的额外前导零个数 / Return the extra leading zeros introduced by integer precision
+ * @brief 返回整数精度要求引入的额外前导零个数 / Return the extra leading zeros introduced
+ * by integer precision
  * @param spec 解码后的字段规格 / Decoded field spec
  * @param digit_count 当前已有的数字个数 / Existing digit count
  * @return 返回额外前导零个数 / Returns the extra leading-zero count
@@ -99,7 +105,8 @@ constexpr size_t Writer::IntegerPrecisionZeros(const Spec& spec, size_t digit_co
 }
 
 /**
- * @brief 返回备用格式下脱离数字主体输出的整数前缀 / Return the detached integer prefix emitted by alternate formatting
+ * @brief 返回备用格式下脱离数字主体输出的整数前缀 / Return the detached integer prefix
+ * emitted by alternate formatting
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param type 运行期字段类型 / Runtime field type
  * @param spec 解码后的字段规格 / Decoded field spec
@@ -130,7 +137,8 @@ constexpr std::string_view Writer::IntegerPrefix(FormatType type, const Spec& sp
 }
 
 /**
- * @brief 直接在已生成数字上应用 `%#o` 的特殊规则 / Apply the special `%#o` payload rules directly onto the generated digits
+ * @brief 直接在已生成数字上应用 `%#o` 的特殊规则 / Apply the special `%#o` payload rules
+ * directly onto the generated digits
  * @tparam UInt 无符号整数类型 / Unsigned integer type
  * @param digits 可修改的数字缓冲区 / Mutable digit buffer
  * @param digit_count 当前数字个数 / Current digit count

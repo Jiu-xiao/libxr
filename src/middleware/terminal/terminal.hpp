@@ -142,7 +142,8 @@ class Terminal
 
   ReadOperation::OperationPollingStatus read_status_;
   WriteOperation::OperationPollingStatus
-      write_status_;  ///< 当前读/写轮询状态 / Current polling status of the read / write side.
+      write_status_;  ///< 当前读/写轮询状态 / Current polling status of the read / write
+                      ///< side.
 
   const Mode MODE;                  ///< 终端换行模式 Terminal line feed mode
   WriteOperation write_op_;         ///< 终端写操作 Terminal write operation
@@ -155,7 +156,8 @@ class Terminal
   RamFS& ramfs_;                    ///< 关联的文件系统 Associated file system
   char read_buff_[READ_BUFF_SIZE];  ///< 读取缓冲区 Read buffer
 
-  size_t request_read_size_ = 0;   ///< 本轮计划读取的字节数 / Byte count requested for the current read attempt.
+  size_t request_read_size_ =
+      0;  ///< 本轮计划读取的字节数 / Byte count requested for the current read attempt.
   RamFS::Dir* current_dir_;        ///< 当前目录 Current directory
   uint8_t flag_ansi_ = 0;          ///< ANSI 控制字符状态 ANSI control character state
   int offset_ = 0;                 ///< 光标偏移 Cursor offset

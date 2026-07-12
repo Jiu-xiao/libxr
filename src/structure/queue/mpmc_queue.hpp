@@ -47,9 +47,6 @@ class MPMCQueue final : public QueueTypedBase<MPMCQueue<Payload>, Payload>,
    *
    * @note 包含动态内存分配。 Contains dynamic memory allocation.
    */
-  explicit MPMCQueue(size_t capacity)
-      : MPMCQueueBase(sizeof(Payload), capacity)
-  {
-  }
+  explicit MPMCQueue(size_t capacity) : MPMCQueueBase(sizeof(Payload), capacity) {}
 };
 }  // namespace LibXR

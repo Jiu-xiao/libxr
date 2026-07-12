@@ -32,15 +32,11 @@ void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to
   }
 }
 
-uint32_t Thread::GetTime()
-{
-  return Timebase::GetMilliseconds();
-}
+uint32_t Thread::GetTime() { return Timebase::GetMilliseconds(); }
 
 void Thread::Yield() { sched_yield(); }
 
 ErrorCode Thread::Join()
 {
-  return pthread_join(thread_handle_, nullptr) == 0 ? ErrorCode::OK
-                                                    : ErrorCode::FAILED;
+  return pthread_join(thread_handle_, nullptr) == 0 ? ErrorCode::OK : ErrorCode::FAILED;
 }

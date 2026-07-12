@@ -25,9 +25,8 @@ inline void RewritePacketPayloadLengthForTest(Packet& packet, size_t payload_len
   const auto crc_offset = sizeof(LibXR::Topic::PackedDataHeader) + payload_len;
 
   packet.raw.header_.SetDataLen(static_cast<uint32_t>(payload_len));
-  packet.raw.header_.pack_header_crc8 =
-      LibXR::CRC8::Calculate(&packet.raw,
-                             sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
+  packet.raw.header_.pack_header_crc8 = LibXR::CRC8::Calculate(
+      &packet.raw, sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
   packet_bytes[crc_offset] = LibXR::CRC8::Calculate(packet_bytes, crc_offset);
 }
 

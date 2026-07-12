@@ -38,7 +38,7 @@ jobs:
     - name: check clang-format via script
       shell: bash
       run: |
-        tools/format_driver_src.sh --check
+        tools/format_cpp_files.sh --check
 
   cmake-format:
 

@@ -1,9 +1,8 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstring>
 
+#include "esp_def.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"

@@ -144,7 +144,8 @@ class HardwareContainer
     TypeID::ID id;     ///< 设备对象类型 ID / Device object type ID.
   };
 
-  mutable LibXR::LockFreeList alias_list_;  ///< 当前已注册的全部别名链表 / List of all currently registered aliases.
+  mutable LibXR::LockFreeList alias_list_;  ///< 当前已注册的全部别名链表 / List of all
+                                            ///< currently registered aliases.
 };
 
 }  // namespace LibXR

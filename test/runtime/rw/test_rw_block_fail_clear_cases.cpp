@@ -1,12 +1,15 @@
 /**
  * @file test_rw_block_fail_clear_cases.cpp
- * @brief runtime `FailAndClearAll` 阻塞等待者场景子测试。 Split test unit for runtime `FailAndClearAll` blocking-waiter scenarios.
+ * @brief runtime `FailAndClearAll` 阻塞等待者场景子测试。 Split test unit for runtime
+ * `FailAndClearAll` blocking-waiter scenarios.
  * @details 测试项目：
  *          1. 阻塞读等待者被 `FailAndClearAll` 唤醒后会收到失败结果，且旧缓冲区不被污染。
- *          2. 阻塞写等待者被 `FailAndClearAll` 唤醒后会收到失败结果，后续写入仍能恢复工作。
- *          Test items:
- *          1. A blocking read waiter is failed by `FailAndClearAll` without corrupting the stale buffer.
- *          2. A blocking write waiter is failed by `FailAndClearAll`, and later writes still recover normally.
+ *          2. 阻塞写等待者被 `FailAndClearAll`
+ * 唤醒后会收到失败结果，后续写入仍能恢复工作。 Test items:
+ *          1. A blocking read waiter is failed by `FailAndClearAll` without corrupting
+ * the stale buffer.
+ *          2. A blocking write waiter is failed by `FailAndClearAll`, and later writes
+ * still recover normally.
  */
 #include "rw_runtime_test_common.hpp"
 
@@ -14,14 +17,17 @@ namespace
 {
 
 /**
- * @brief 测试入口函数 `test_rw_read_port_fail_and_clear_all_fails_block_waiter`。 Test entry function `test_rw_read_port_fail_and_clear_all_fails_block_waiter`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_read_port_fail_and_clear_all_fails_block_waiter`。 Test
+ * entry function `test_rw_read_port_fail_and_clear_all_fails_block_waiter`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
 {
   // 测试内容：阻塞读被失败清理打断后，应保持旧缓冲区不变并允许后续继续读取。
-  // Test coverage: a blocking read interrupted by fail-clear should keep the stale buffer intact and allow later reads.
+  // Test coverage: a blocking read interrupted by fail-clear should keep the stale buffer
+  // intact and allow later reads.
   using namespace LibXR;
 
   ReadPort r(16);
@@ -58,14 +64,17 @@ void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_write_port_fail_and_clear_all_fails_block_waiter`。 Test entry function `test_rw_write_port_fail_and_clear_all_fails_block_waiter`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_rw_write_port_fail_and_clear_all_fails_block_waiter`。 Test
+ * entry function `test_rw_write_port_fail_and_clear_all_fails_block_waiter`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
 {
   // 测试内容：阻塞写被失败清理打断后，应释放端口并允许新的写请求重新进入。
-  // Test coverage: a blocking write interrupted by fail-clear should release the port and allow a new write to enter.
+  // Test coverage: a blocking write interrupted by fail-clear should release the port and
+  // allow a new write to enter.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -108,9 +117,12 @@ void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunRuntimeRwBlockFailClearTests`。 Test-item function `RunRuntimeRwBlockFailClearTests`.
- * @details 测试内容：执行 runtime `FailAndClearAll` 阻塞等待者子场景。 Execute runtime `FailAndClearAll` blocking-waiter sub-scenarios.
- *          测试原理：把阻塞等待者语义单独成组，避免和超时/stream 语义互相缠绕。 Group blocking-waiter semantics away from timeout and stream semantics.
+ * @brief 测试项函数 `RunRuntimeRwBlockFailClearTests`。 Test-item function
+ * `RunRuntimeRwBlockFailClearTests`.
+ * @details 测试内容：执行 runtime `FailAndClearAll` 阻塞等待者子场景。 Execute runtime
+ * `FailAndClearAll` blocking-waiter sub-scenarios.
+ *          测试原理：把阻塞等待者语义单独成组，避免和超时/stream 语义互相缠绕。 Group
+ * blocking-waiter semantics away from timeout and stream semantics.
  */
 void RunRuntimeRwBlockFailClearTests()
 {

@@ -8,9 +8,11 @@ namespace
 {
 
 /**
- * @brief 测试入口函数 `test_pipe_stream_block_immediate_path`。 Test entry function `test_pipe_stream_block_immediate_path`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_pipe_stream_block_immediate_path`。 Test entry function
+ * `test_pipe_stream_block_immediate_path`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_pipe_stream_block_immediate_path()
 {
@@ -43,9 +45,11 @@ void test_pipe_stream_block_immediate_path()
 }
 
 /**
- * @brief 测试入口函数 `test_pipe_block_reuse_stress`。 Test entry function `test_pipe_block_reuse_stress`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared in this file in order.
- *          测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。 Validate the module contract through the scenarios assembled in this file.
+ * @brief 测试入口函数 `test_pipe_block_reuse_stress`。 Test entry function
+ * `test_pipe_block_reuse_stress`.
+ * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
+ * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
+ * Validate the module contract through the scenarios assembled in this file.
  */
 void test_pipe_block_reuse_stress()
 {
@@ -103,8 +107,10 @@ void test_pipe_block_reuse_stress()
 
 /**
  * @brief 测试项函数 `RunRuntimePipeTests`。 Test-item function `RunRuntimePipeTests`.
- * @details 测试内容：执行当前分组里的 runtime `rw`/`Pipe` 子场景。 Execute the grouped runtime `rw`/`Pipe` sub-scenarios.
- *          测试原理：把 runtime 平面的阻塞和 pipe 场景拆分开，减小单文件复杂度。 Separate runtime blocking and pipe scenarios to reduce single-file complexity.
+ * @details 测试内容：执行当前分组里的 runtime `rw`/`Pipe` 子场景。 Execute the grouped
+ * runtime `rw`/`Pipe` sub-scenarios. 测试原理：把 runtime 平面的阻塞和 pipe
+ * 场景拆分开，减小单文件复杂度。 Separate runtime blocking and pipe scenarios to reduce
+ * single-file complexity.
  */
 void RunRuntimePipeTests()
 {

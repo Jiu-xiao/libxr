@@ -1,15 +1,15 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstddef>
 #include <cstdint>
 
+#include "esp_def.hpp"
 #include "esp_dma_utils.h"
 #include "esp_heap_caps.h"
 #include "usb/core/ep.hpp"
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    CONFIG_IDF_TARGET_ESP32S3
 
 #include "soc/usb_dwc_struct.h"
 

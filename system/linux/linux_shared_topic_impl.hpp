@@ -2,6 +2,15 @@
 
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
 
+#include <fcntl.h>
+#include <linux/futex.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <time.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -16,15 +25,6 @@
 #include <string>
 #include <type_traits>
 
-#include <fcntl.h>
-#include <linux/futex.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/syscall.h>
-#include <time.h>
-#include <unistd.h>
-#include <signal.h>
-
 #include "crc.hpp"
 #include "libxr_def.hpp"
 #include "message.hpp"
@@ -37,9 +37,10 @@ namespace LibXR
  */
 enum class LinuxSharedSubscriberMode : uint8_t
 {
-  BROADCAST_FULL = 0,      ///< 广播到该订阅者，满队列时报错。Broadcast and fail on full.
-  BROADCAST_DROP_OLD = 1,  ///< 广播到该订阅者，满队列时丢最旧。Broadcast and drop oldest on full.
-  BALANCE_RR = 2,          ///< 参与 RR 负载均衡组。Participate in the RR balanced group.
+  BROADCAST_FULL = 0,  ///< 广播到该订阅者，满队列时报错。Broadcast and fail on full.
+  BROADCAST_DROP_OLD =
+      1,           ///< 广播到该订阅者，满队列时丢最旧。Broadcast and drop oldest on full.
+  BALANCE_RR = 2,  ///< 参与 RR 负载均衡组。Participate in the RR balanced group.
 };
 
 /**
@@ -48,9 +49,10 @@ enum class LinuxSharedSubscriberMode : uint8_t
  */
 struct LinuxSharedTopicConfig
 {
-  uint32_t slot_num = 64;  ///< 共享 payload 槽位数。Number of shared payload slots.
+  uint32_t slot_num = 64;       ///< 共享 payload 槽位数。Number of shared payload slots.
   uint32_t subscriber_num = 8;  ///< 最大订阅者数量。Maximum number of subscribers.
-  uint32_t queue_num = 64;      ///< 每订阅者描述符队列长度。Descriptor queue length per subscriber.
+  uint32_t queue_num =
+      64;  ///< 每订阅者描述符队列长度。Descriptor queue length per subscriber.
 };
 
 /**
@@ -93,7 +95,8 @@ class LinuxSharedTopic : public Topic
   /**
    * @class Subscriber
    * @brief 同步订阅者，用于从共享 Topic 中等待并读取消息。
-   *        Synchronous subscriber for waiting on and reading messages from a shared topic.
+   *        Synchronous subscriber for waiting on and reading messages from a shared
+   * topic.
    */
   class Subscriber
   {
@@ -101,7 +104,8 @@ class LinuxSharedTopic : public Topic
     using Data = SharedData;
 
     /**
-     * @brief 默认构造函数，创建空订阅者。Default constructor creating an empty subscriber.
+     * @brief 默认构造函数，创建空订阅者。Default constructor creating an empty
+     * subscriber.
      */
     Subscriber() = default;
 
@@ -113,9 +117,8 @@ class LinuxSharedTopic : public Topic
      * @note 包含动态内存分配。
      *       Contains dynamic memory allocation.
      */
-    explicit Subscriber(const char* name,
-                        LinuxSharedSubscriberMode mode =
-                            LinuxSharedSubscriberMode::BROADCAST_FULL)
+    explicit Subscriber(const char* name, LinuxSharedSubscriberMode mode =
+                                              LinuxSharedSubscriberMode::BROADCAST_FULL)
         : owned_topic_(new LinuxSharedTopic(name))
     {
       if (Attach(*owned_topic_, mode) != ErrorCode::OK)
@@ -153,9 +156,9 @@ class LinuxSharedTopic : public Topic
      * @param topic 已打开的共享 Topic。Opened shared topic.
      * @param mode 订阅模式。Subscriber mode.
      */
-    explicit Subscriber(LinuxSharedTopic& topic,
-                        LinuxSharedSubscriberMode mode =
-                            LinuxSharedSubscriberMode::BROADCAST_FULL)
+    explicit Subscriber(
+        LinuxSharedTopic& topic,
+        LinuxSharedSubscriberMode mode = LinuxSharedSubscriberMode::BROADCAST_FULL)
     {
       (void)Attach(topic, mode);
     }
@@ -200,10 +203,7 @@ class LinuxSharedTopic : public Topic
      * @return true 订阅者有效。Subscriber is valid.
      * @return false 订阅者无效。Subscriber is invalid.
      */
-    bool Valid() const
-    {
-      return topic_ != nullptr && subscriber_index_ != INVALID_INDEX;
-    }
+    bool Valid() const { return topic_ != nullptr && subscriber_index_ != INVALID_INDEX; }
 
     /**
      * @brief 等待一条消息，并把当前订阅者切到该 payload。
@@ -247,8 +247,8 @@ class LinuxSharedTopic : public Topic
           wait_ms = static_cast<uint32_t>(deadline_ms - now_ms);
         }
 
-        const ErrorCode wait_ans = topic_->WaitReady(topic_->subscribers_[subscriber_index_],
-                                                     wait_ms);
+        const ErrorCode wait_ans =
+            topic_->WaitReady(topic_->subscribers_[subscriber_index_], wait_ms);
         if (wait_ans == ErrorCode::OK)
         {
           continue;
@@ -303,8 +303,8 @@ class LinuxSharedTopic : public Topic
           wait_ms = static_cast<uint32_t>(deadline_ms - now_ms);
         }
 
-        const ErrorCode wait_ans = topic_->WaitReady(topic_->subscribers_[subscriber_index_],
-                                                     wait_ms);
+        const ErrorCode wait_ans =
+            topic_->WaitReady(topic_->subscribers_[subscriber_index_], wait_ms);
         if (wait_ans == ErrorCode::OK)
         {
           continue;
@@ -359,7 +359,8 @@ class LinuxSharedTopic : public Topic
     }
 
     /**
-     * @brief 获取该订阅者累计丢弃消息数。Get the accumulated drop count of this subscriber.
+     * @brief 获取该订阅者累计丢弃消息数。Get the accumulated drop count of this
+     * subscriber.
      */
     uint64_t GetDropNum() const
     {
@@ -402,9 +403,10 @@ class LinuxSharedTopic : public Topic
 
       topic_->UnregisterBalancedSubscriber(subscriber_index_);
       topic_->subscribers_[subscriber_index_].active.store(0, std::memory_order_release);
-      topic_->subscribers_[subscriber_index_].owner_pid.store(0, std::memory_order_release);
-      topic_->subscribers_[subscriber_index_].owner_starttime.store(0,
-                                                                    std::memory_order_release);
+      topic_->subscribers_[subscriber_index_].owner_pid.store(0,
+                                                              std::memory_order_release);
+      topic_->subscribers_[subscriber_index_].owner_starttime.store(
+          0, std::memory_order_release);
 
       Descriptor desc = {};
       while (topic_->TryPopDescriptor(subscriber_index_, desc) == ErrorCode::OK)
@@ -463,8 +465,7 @@ class LinuxSharedTopic : public Topic
             {
               topic.subscribers_[i].active.store(0, std::memory_order_release);
               topic.subscribers_[i].owner_pid.store(0, std::memory_order_release);
-              topic.subscribers_[i].owner_starttime.store(0,
-                                                          std::memory_order_release);
+              topic.subscribers_[i].owner_starttime.store(0, std::memory_order_release);
               topic.subscribers_[i].mode.store(
                   static_cast<uint32_t>(LinuxSharedSubscriberMode::BROADCAST_FULL),
                   std::memory_order_release);
@@ -509,8 +510,8 @@ class LinuxSharedTopic : public Topic
     SharedData() = default;
 
     /**
-     * @brief 析构函数，自动回收句柄持有的槽位。Destructor automatically releasing the held
-     * slot.
+     * @brief 析构函数，自动回收句柄持有的槽位。Destructor automatically releasing the
+     * held slot.
      */
     ~SharedData() { Reset(); }
 
@@ -973,9 +974,9 @@ class LinuxSharedTopic : public Topic
 
   static uint32_t ResolveDomainKey(const char* domain_name)
   {
-    const std::string resolved =
-        (domain_name == nullptr || domain_name[0] == '\0') ? std::string(DEFAULT_DOMAIN_NAME)
-                                                            : std::string(domain_name);
+    const std::string resolved = (domain_name == nullptr || domain_name[0] == '\0')
+                                     ? std::string(DEFAULT_DOMAIN_NAME)
+                                     : std::string(domain_name);
     return CRC32::Calculate(resolved.data(), resolved.size());
   }
 
@@ -989,7 +990,8 @@ class LinuxSharedTopic : public Topic
     const uint32_t topic_len = static_cast<uint32_t>(topic_name.size());
     std::string key_material;
     key_material.reserve(sizeof(domain_crc32) + sizeof(topic_len) + topic_len);
-    key_material.append(reinterpret_cast<const char*>(&domain_crc32), sizeof(domain_crc32));
+    key_material.append(reinterpret_cast<const char*>(&domain_crc32),
+                        sizeof(domain_crc32));
     key_material.append(reinterpret_cast<const char*>(&topic_len), sizeof(topic_len));
     key_material.append(topic_name.data(), topic_name.size());
     return CRC64::Calculate(key_material.data(), key_material.size());
@@ -1071,7 +1073,8 @@ class LinuxSharedTopic : public Topic
     return false;
   }
 
-  static int FutexWait(std::atomic<uint32_t>* word, uint32_t expected, uint32_t timeout_ms)
+  static int FutexWait(std::atomic<uint32_t>* word, uint32_t expected,
+                       uint32_t timeout_ms)
   {
     struct timespec timeout = {};
     struct timespec* timeout_ptr = nullptr;
@@ -1082,26 +1085,18 @@ class LinuxSharedTopic : public Topic
       timeout_ptr = &timeout;
     }
 
-    return static_cast<int>(syscall(SYS_futex,
-                                    reinterpret_cast<uint32_t*>(word),
-                                    FUTEX_WAIT,
-                                    expected,
-                                    timeout_ptr,
-                                    nullptr,
-                                    0));
+    return static_cast<int>(syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),
+                                    FUTEX_WAIT, expected, timeout_ptr, nullptr, 0));
   }
 
   static int FutexWake(std::atomic<uint32_t>* word)
   {
-    return static_cast<int>(
-        syscall(SYS_futex, reinterpret_cast<uint32_t*>(word), FUTEX_WAKE, INT32_MAX, nullptr,
-                nullptr, 0));
+    return static_cast<int>(syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),
+                                    FUTEX_WAKE, INT32_MAX, nullptr, nullptr, 0));
   }
 
-  static size_t ComputeSharedBytes(uint32_t slot_count,
-                                   uint32_t subscriber_capacity,
-                                   uint32_t queue_capacity,
-                                   uint32_t topic_name_len)
+  static size_t ComputeSharedBytes(uint32_t slot_count, uint32_t subscriber_capacity,
+                                   uint32_t queue_capacity, uint32_t topic_name_len)
   {
     size_t offset = 0;
     offset = AlignUp(offset, alignof(SharedHeader));
@@ -1240,7 +1235,8 @@ class LinuxSharedTopic : public Topic
     header_->queue_capacity = queue_capacity_;
     std::memcpy(topic_name_ptr_, topic_name_.c_str(), topic_name_.size() + 1U);
     header_->publisher_pid.store(self_identity_.pid, std::memory_order_release);
-    header_->publisher_starttime.store(self_identity_.starttime, std::memory_order_release);
+    header_->publisher_starttime.store(self_identity_.starttime,
+                                       std::memory_order_release);
     header_->free_queue_head.store(0, std::memory_order_release);
     header_->free_queue_tail.store(slot_count_, std::memory_order_release);
     header_->next_sequence.store(0, std::memory_order_release);
@@ -1260,8 +1256,9 @@ class LinuxSharedTopic : public Topic
     for (uint32_t i = 0; i < subscriber_capacity_; ++i)
     {
       subscribers_[i].active.store(0, std::memory_order_release);
-      subscribers_[i].mode.store(static_cast<uint32_t>(LinuxSharedSubscriberMode::BROADCAST_FULL),
-                                 std::memory_order_release);
+      subscribers_[i].mode.store(
+          static_cast<uint32_t>(LinuxSharedSubscriberMode::BROADCAST_FULL),
+          std::memory_order_release);
       subscribers_[i].queue_head.store(0, std::memory_order_release);
       subscribers_[i].queue_tail.store(0, std::memory_order_release);
       subscribers_[i].ready_sem_count.store(0, std::memory_order_release);
@@ -1274,7 +1271,8 @@ class LinuxSharedTopic : public Topic
 
     balanced_group_->rr_cursor.store(0, std::memory_order_release);
 
-    for (size_t i = 0; i < static_cast<size_t>(subscriber_capacity_) * queue_capacity_; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(subscriber_capacity_) * queue_capacity_;
+         ++i)
     {
       descriptors_[i] = Descriptor{};
     }
@@ -1346,8 +1344,8 @@ class LinuxSharedTopic : public Topic
     }
     else
     {
-      void* mapping = mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ | PROT_WRITE,
-                           MAP_SHARED, stale_fd, 0);
+      void* mapping = mmap(nullptr, static_cast<size_t>(st.st_size),
+                           PROT_READ | PROT_WRITE, MAP_SHARED, stale_fd, 0);
       if (mapping != MAP_FAILED)
       {
         uint8_t* base = static_cast<uint8_t*>(mapping);
@@ -1557,11 +1555,13 @@ class LinuxSharedTopic : public Topic
 
   bool SelectBalancedSubscriber(uint32_t& subscriber_index)
   {
-    const uint64_t base = balanced_group_->rr_cursor.fetch_add(1, std::memory_order_acq_rel);
+    const uint64_t base =
+        balanced_group_->rr_cursor.fetch_add(1, std::memory_order_acq_rel);
     for (uint32_t offset = 0; offset < subscriber_capacity_; ++offset)
     {
       const uint32_t member_index =
-          balanced_members_[(base + offset) % subscriber_capacity_].load(std::memory_order_acquire);
+          balanced_members_[(base + offset) % subscriber_capacity_].load(
+              std::memory_order_acquire);
       if (member_index == INVALID_INDEX)
       {
         continue;
@@ -1619,9 +1619,8 @@ class LinuxSharedTopic : public Topic
         static_cast<uint32_t>(LinuxSharedSubscriberMode::BROADCAST_FULL),
         std::memory_order_release);
 
-    const uint32_t held_slot =
-        subscribers_[subscriber_index].held_slot.exchange(INVALID_INDEX,
-                                                          std::memory_order_acq_rel);
+    const uint32_t held_slot = subscribers_[subscriber_index].held_slot.exchange(
+        INVALID_INDEX, std::memory_order_acq_rel);
     if (held_slot != INVALID_INDEX)
     {
       ReleaseSlot(held_slot);
@@ -1760,8 +1759,8 @@ class LinuxSharedTopic : public Topic
 
       descriptor = ring[head];
       const uint32_t next_head = (head + 1U) % queue_capacity_;
-      if (control.queue_head.compare_exchange_weak(head, next_head, std::memory_order_acq_rel,
-                                                   std::memory_order_relaxed))
+      if (control.queue_head.compare_exchange_weak(
+              head, next_head, std::memory_order_acq_rel, std::memory_order_relaxed))
       {
         ConsumeReady(control);
         return ErrorCode::OK;
@@ -1785,8 +1784,8 @@ class LinuxSharedTopic : public Topic
 
       const Descriptor descriptor = ring[head];
       const uint32_t next_head = (head + 1U) % queue_capacity_;
-      if (control.queue_head.compare_exchange_weak(head, next_head, std::memory_order_acq_rel,
-                                                   std::memory_order_relaxed))
+      if (control.queue_head.compare_exchange_weak(
+              head, next_head, std::memory_order_acq_rel, std::memory_order_relaxed))
       {
         control.dropped_messages.fetch_add(1, std::memory_order_relaxed);
         ConsumeReady(control);
@@ -1807,9 +1806,8 @@ class LinuxSharedTopic : public Topic
 
       if (diff == 0)
       {
-        if (header_->free_queue_head.compare_exchange_weak(head, head + 1U,
-                                                           std::memory_order_acq_rel,
-                                                           std::memory_order_relaxed))
+        if (header_->free_queue_head.compare_exchange_weak(
+                head, head + 1U, std::memory_order_acq_rel, std::memory_order_relaxed))
         {
           slot_index = cell.slot_index;
           cell.sequence.store(head + slot_count_, std::memory_order_release);
@@ -1837,9 +1835,8 @@ class LinuxSharedTopic : public Topic
 
       if (diff == 0)
       {
-        if (header_->free_queue_tail.compare_exchange_weak(tail, tail + 1U,
-                                                           std::memory_order_acq_rel,
-                                                           std::memory_order_relaxed))
+        if (header_->free_queue_tail.compare_exchange_weak(
+                tail, tail + 1U, std::memory_order_acq_rel, std::memory_order_relaxed))
         {
           cell.slot_index = slot_index;
           cell.sequence.store(tail + 1U, std::memory_order_release);
@@ -1851,7 +1848,8 @@ class LinuxSharedTopic : public Topic
 
   void ReleaseSlot(uint32_t slot_index)
   {
-    const uint32_t prev = slots_[slot_index].refcount.fetch_sub(1, std::memory_order_acq_rel);
+    const uint32_t prev =
+        slots_[slot_index].refcount.fetch_sub(1, std::memory_order_acq_rel);
     ASSERT(prev > 0);
     if (prev == 1)
     {
@@ -2009,7 +2007,6 @@ class LinuxSharedTopic : public Topic
 
   bool open_ok_ = false;
   ErrorCode open_status_ = ErrorCode::STATE_ERR;
-
 };
 
 }  // namespace LibXR
