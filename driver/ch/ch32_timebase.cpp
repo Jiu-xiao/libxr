@@ -39,7 +39,7 @@ MicrosecondTimestamp Timebase::GetMicroseconds()
 
 MillisecondTimestamp Timebase::GetMilliseconds() { return CH32Timebase::sys_tick_ms_; }
 
-void CH32Timebase::OnSysTickInterrupt() { sys_tick_ms_++; }
+void CH32Timebase::OnSysTickInterrupt() { sys_tick_ms_ = sys_tick_ms_ + 1U; }
 
 void CH32Timebase::Sync(uint32_t ticks) { sys_tick_ms_ = ticks; }
 
