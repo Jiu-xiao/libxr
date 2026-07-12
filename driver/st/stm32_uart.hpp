@@ -114,6 +114,13 @@ namespace LibXR
 {
 /**
  * @brief STM32 UART 驱动实现 / STM32 UART driver implementation
+ * @warning 使用循环 RX DMA 时，UART 全局中断与对应 RX DMA 中断必须配置为相同的
+ * NVIC 抢占优先级。HAL 的 UART IDLE、DMA HT 和 DMA TC 路径都可能进入同一 RX event
+ * callback；本驱动依赖相同优先级保证这些入口不重入。
+ * When circular RX DMA is enabled, the UART global IRQ and its RX DMA IRQ must use the
+ * same NVIC preemption priority. UART IDLE, DMA HT, and DMA TC paths may all enter the
+ * same HAL RX event callback, and this driver relies on equal priority to prevent
+ * reentry.
  */
 class STM32UART : public UART
 {

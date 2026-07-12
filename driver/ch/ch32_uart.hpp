@@ -15,6 +15,12 @@ namespace LibXR
 
 /**
  * @brief CH32 UART 驱动实现 / CH32 UART driver implementation
+ * @warning 使用循环 RX DMA 时，USART/UART IDLE 中断与对应 RX DMA HT/TC 中断必须配置为
+ * 相同的抢占优先级。本驱动依赖该优先级契约保证所有 RX 事件入口不重入，使 RX model
+ * 保持唯一 producer。
+ * When circular RX DMA is enabled, the USART/UART IDLE IRQ and its RX DMA HT/TC IRQ must
+ * use the same preemption priority. This driver relies on that priority contract to keep
+ * all RX event entries non-reentrant and preserve the RX model's single producer.
  */
 class CH32UART : public UART
 {

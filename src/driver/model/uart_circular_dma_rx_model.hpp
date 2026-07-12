@@ -21,6 +21,14 @@ namespace LibXR
  * 为保持现有 UART 行为，软件队列写满时仍推进读取位置，无法写入的数据会被丢弃。
  * To preserve existing UART behavior, the read position advances when the software queue
  * is full, and bytes that cannot be queued are dropped.
+ *
+ * @warning 同一模型实例的 RX 事件入口不得重入。若 UART IDLE 与 RX DMA HT/TC 使用
+ * 不同中断源，平台驱动必须把这些中断配置为相同的抢占优先级，保证任意时刻只有一个
+ * `OnDataAvailable()` 修改读取位置并作为软件队列 producer。
+ * Calls delivering RX events to one model instance must not overlap. When UART IDLE and
+ * RX DMA HT/TC use different interrupt sources, the platform driver must configure them
+ * with the same preemption priority so only one `OnDataAvailable()` call can modify the
+ * read position and act as the software-queue producer at a time.
  */
 class UartCircularDmaRxModel
 {
@@ -54,6 +62,9 @@ class UartCircularDmaRxModel
    * @param port 接收新增数据的读端口 / Read port receiving newly produced bytes
    * @param in_isr 是否在中断上下文完成 pending 读取 / Whether pending reads are completed
    * in interrupt context
+   * @warning 调用方必须保证同一模型实例上的调用不重入；相关 UART 与 RX DMA IRQ 必须
+   * 使用相同抢占优先级。Calls for the same model instance must not overlap; related
+   * UART and RX DMA IRQs must use the same preemption priority.
    */
   template <typename Backend>
   void OnDataAvailable(Backend& backend, ReadPort& port, bool in_isr)
