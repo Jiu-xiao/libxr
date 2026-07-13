@@ -40,61 +40,16 @@ void TestZeroAndDmaBlockSizeBoundaries()
   }
 }
 
-void TestOversizedIdleRequestIsConsumed()
+void TestOversizedRequestIsRejectedByPortCapacity()
 {
   FakeUartDmaBackend backend;
   std::array<uint8_t, DMA_BLOCK_SIZE + 1U> oversized{};
-  const uint8_t valid[] = {0x41U, 0x42U};
   PollStatus oversized_status = PollStatus::READY;
-  PollStatus valid_status = PollStatus::READY;
   LibXR::WriteOperation oversized_op(oversized_status);
-  LibXR::WriteOperation valid_op(valid_status);
 
   ASSERT(backend.Write(oversized.data(), oversized.size(), oversized_op) ==
-         LibXR::ErrorCode::FAILED);
-  ASSERT(oversized_status == PollStatus::ERROR);
-  ASSERT(!backend.IsBusy());
-  ASSERT(backend.QueuedInfoCount() == 0U);
-  ASSERT(backend.QueuedDataSize() == 0U);
-
-  ASSERT(backend.Write(valid, sizeof(valid), valid_op) == LibXR::ErrorCode::OK);
-  ASSERT(valid_status == PollStatus::DONE);
-  AssertStart(backend, 0U, valid, sizeof(valid), 0);
-}
-
-void TestOversizedPendingAndQueuedRequestsDoNotBlockValidData()
-{
-  FakeUartDmaBackend backend;
-  const uint8_t first[] = {0x51U};
-  const uint8_t second[] = {0x52U};
-  std::array<uint8_t, DMA_BLOCK_SIZE + 1U> oversized{};
-  const uint8_t fourth[] = {0x54U, 0x55U};
-  PollStatus first_status = PollStatus::READY;
-  PollStatus second_status = PollStatus::READY;
-  PollStatus oversized_status = PollStatus::READY;
-  PollStatus fourth_status = PollStatus::READY;
-  LibXR::WriteOperation first_op(first_status);
-  LibXR::WriteOperation second_op(second_status);
-  LibXR::WriteOperation oversized_op(oversized_status);
-  LibXR::WriteOperation fourth_op(fourth_status);
-
-  ASSERT(backend.Write(first, sizeof(first), first_op) == LibXR::ErrorCode::OK);
-  ASSERT(backend.Write(second, sizeof(second), second_op) == LibXR::ErrorCode::OK);
-  ASSERT(backend.Write(oversized.data(), oversized.size(), oversized_op) ==
-         LibXR::ErrorCode::OK);
-  ASSERT(backend.Write(fourth, sizeof(fourth), fourth_op) == LibXR::ErrorCode::OK);
-  ASSERT(oversized_status == PollStatus::RUNNING);
-
-  backend.Complete(false);
-  ASSERT(second_status == PollStatus::DONE);
-  ASSERT(oversized_status == PollStatus::ERROR);
-  ASSERT(fourth_status == PollStatus::RUNNING);
-  AssertStart(backend, 1U, second, sizeof(second), 1);
-
-  backend.Complete(false);
-  ASSERT(fourth_status == PollStatus::DONE);
-  AssertStart(backend, 2U, fourth, sizeof(fourth), 0);
-  backend.Complete(false);
+         LibXR::ErrorCode::FULL);
+  ASSERT(oversized_status == PollStatus::READY);
   ASSERT(!backend.IsBusy());
   ASSERT(backend.QueuedInfoCount() == 0U);
   ASSERT(backend.QueuedDataSize() == 0U);
@@ -132,14 +87,48 @@ void TestWritePortCapacityFailureDoesNotPublishEvent()
   ASSERT(backend.QueuedDataSize() == 0U);
 }
 
+void TestOperationIsArmedBeforeBackendSeesMetadata()
+{
+  struct Probe
+  {
+    static LibXR::ErrorCode WriteFun(LibXR::WritePort& port, bool in_isr)
+    {
+      LibXR::WriteInfoBlock info{};
+      ASSERT(port.queue_info_->Pop(info) == LibXR::ErrorCode::OK);
+      ASSERT(info.op.type == LibXR::WriteOperation::OperationType::POLLING);
+      ASSERT(*info.op.data.status == PollStatus::RUNNING);
+      ASSERT(port.queue_data_->PopBatch(nullptr, info.data.size_) ==
+             LibXR::ErrorCode::OK);
+      port.Finish(in_isr, LibXR::ErrorCode::OK, info);
+      return LibXR::ErrorCode::OK;
+    }
+  };
+
+  LibXR::WritePort port(1U, DMA_BLOCK_SIZE);
+  port = Probe::WriteFun;
+  const uint8_t data[] = {0x61U};
+  PollStatus status = PollStatus::READY;
+  LibXR::WriteOperation op(status);
+  ASSERT(port(LibXR::ConstRawData(data, sizeof(data)), op, false) ==
+         LibXR::ErrorCode::OK);
+  ASSERT(status == PollStatus::DONE);
+
+  PollStatus stream_status = PollStatus::READY;
+  LibXR::WriteOperation stream_op(stream_status);
+  LibXR::WritePort::Stream stream(&port, stream_op);
+  ASSERT(stream.Write(LibXR::ConstRawData(data, sizeof(data))) == LibXR::ErrorCode::OK);
+  ASSERT(stream.Commit() == LibXR::ErrorCode::OK);
+  ASSERT(stream_status == PollStatus::DONE);
+}
+
 }  // namespace
 
 void RunBoundaryTests()
 {
   TestZeroAndDmaBlockSizeBoundaries();
-  TestOversizedIdleRequestIsConsumed();
-  TestOversizedPendingAndQueuedRequestsDoNotBlockValidData();
+  TestOversizedRequestIsRejectedByPortCapacity();
   TestWritePortCapacityFailureDoesNotPublishEvent();
+  TestOperationIsArmedBeforeBackendSeesMetadata();
 }
 
 }  // namespace LibXRTest::UartDmaTx

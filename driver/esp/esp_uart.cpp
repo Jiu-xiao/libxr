@@ -212,7 +212,11 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   return ErrorCode::OK;
 }
 
-void ESP32UART::OnConfigRequested() { rx_config_gate_.RequestConfig(); }
+void ESP32UART::OnConfigRequested()
+{
+  irq_config_gate_.RequestConfig();
+  rx_config_gate_.RequestConfig();
+}
 
 bool ESP32UART::ApplyPendingConfig(bool in_isr)
 {
@@ -220,7 +224,15 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
   {
     return false;
   }
+  if (!irq_config_gate_.TryEnterConfig())
+  {
+    rx_config_gate_.RequestConfig();
+    rx_config_gate_.LeaveConfig();
+    return false;
+  }
 
+  irq_config_gate_.ConsumePendingConfig();
+  rx_config_gate_.ConsumePendingConfig();
   UART::Configuration config{};
   (void)requested_config_.LoadLatest(config);
 
@@ -234,10 +246,22 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
   }
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_ && (tx_dma_channel_ != nullptr))
+  if (dma_backend_enabled_)
   {
-    gdma_stop(tx_dma_channel_);
-    gdma_reset(tx_dma_channel_);
+    if (tx_dma_channel_ != nullptr)
+    {
+      DEV_ASSERT_FROM_CALLBACK(gdma_stop(tx_dma_channel_) == ESP_OK, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(gdma_reset(tx_dma_channel_) == ESP_OK, in_isr);
+      gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
+                          UINT32_MAX);
+    }
+    if (rx_dma_channel_ != nullptr)
+    {
+      DEV_ASSERT_FROM_CALLBACK(gdma_stop(rx_dma_channel_) == ESP_OK, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(gdma_reset(rx_dma_channel_) == ESP_OK, in_isr);
+      gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
+                          UINT32_MAX);
+    }
   }
 #endif
 
@@ -289,9 +313,12 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (dma_backend_enabled_)
   {
-    // Re-align the circular RX DMA window after reconfig to avoid
-    // carrying stale pre-switch bytes into the next frame.
-    HandleDmaRxError();
+    // Restart the RX ring from node zero after both DMA directions and their stale
+    // pending sources were quiesced under CONFIG ownership.
+    rx_dma_node_index_ = 0U;
+    DEV_ASSERT_FROM_CALLBACK(
+        gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_)) == ESP_OK,
+        in_isr);
   }
 #endif
 
@@ -302,6 +329,7 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
 bool ESP32UART::OnConfigApplied(bool in_isr)
 {
   rx_config_gate_.LeaveConfig();
+  irq_config_gate_.LeaveConfig();
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (dma_backend_enabled_)
   {

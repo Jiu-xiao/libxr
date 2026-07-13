@@ -1,4 +1,5 @@
 #include <array>
+#include <vector>
 
 #include "uart_dma_tx_model_test_support.hpp"
 
@@ -8,6 +9,83 @@ namespace
 {
 
 using PollStatus = LibXR::WriteOperation::OperationPollingStatus;
+
+void TestConcurrentOperationPublication(bool use_stream)
+{
+  constexpr uint32_t publication_count = 10000U;
+  LibXR::WritePort port(32U, 32U);
+  port = [](LibXR::WritePort&, bool) { return LibXR::ErrorCode::PENDING; };
+  std::vector<PollStatus> statuses(publication_count, PollStatus::READY);
+  std::atomic<uint32_t> consumer_ready{0U};
+  std::atomic<uint32_t> consumed{0U};
+
+  std::thread consumer(
+      [&]
+      {
+        consumer_ready.store(1U, std::memory_order_release);
+        for (uint32_t index = 0U; index < publication_count; ++index)
+        {
+          LibXR::WriteInfoBlock info{};
+          ASSERT(WaitUntil(
+              [&] { return port.queue_info_->Pop(info) == LibXR::ErrorCode::OK; }));
+          ASSERT(info.op.type == LibXR::WriteOperation::OperationType::POLLING);
+          ASSERT(*info.op.data.status == PollStatus::RUNNING);
+          ASSERT(port.queue_data_->PopBatch(nullptr, info.data.size_) ==
+                 LibXR::ErrorCode::OK);
+          port.Finish(false, LibXR::ErrorCode::OK, info);
+          consumed.store(index + 1U, std::memory_order_release);
+        }
+      });
+
+  ASSERT(WaitUntil([&] { return consumer_ready.load(std::memory_order_acquire) != 0U; }));
+  const uint8_t data = 0x60U;
+  for (uint32_t index = 0U; index < publication_count; ++index)
+  {
+    LibXR::WriteOperation op(statuses[index]);
+    if (use_stream)
+    {
+      while (true)
+      {
+        LibXR::WritePort::Stream stream(&port, op);
+        const LibXR::ErrorCode write_result =
+            stream.Write(LibXR::ConstRawData(&data, sizeof(data)));
+        if (write_result == LibXR::ErrorCode::OK)
+        {
+          ASSERT(stream.Commit() == LibXR::ErrorCode::OK);
+          break;
+        }
+        ASSERT(write_result == LibXR::ErrorCode::FULL ||
+               write_result == LibXR::ErrorCode::BUSY);
+        std::this_thread::yield();
+      }
+    }
+    else
+    {
+      while (true)
+      {
+        const LibXR::ErrorCode write_result =
+            port(LibXR::ConstRawData(&data, sizeof(data)), op, false);
+        if (write_result == LibXR::ErrorCode::OK)
+        {
+          break;
+        }
+        ASSERT(write_result == LibXR::ErrorCode::FULL ||
+               write_result == LibXR::ErrorCode::BUSY);
+        std::this_thread::yield();
+      }
+    }
+  }
+
+  ASSERT(WaitUntil(
+      [&] { return consumed.load(std::memory_order_acquire) == publication_count; }));
+  consumer.join();
+  for (PollStatus status : statuses)
+  {
+    ASSERT(status == PollStatus::DONE);
+  }
+  ASSERT(port.queue_info_->Size() == 0U);
+  ASSERT(port.queue_data_->Size() == 0U);
+}
 
 void TestConcurrentWriteAndTerminalEventsMakeProgress()
 {
@@ -157,40 +235,6 @@ void TestOwnerContextOverridesTerminalEventSource()
   ASSERT(WaitUntil([&] { return owner_done.load(std::memory_order_acquire) != 0U; }));
   thread_owner.join();
   ASSERT(third_probe.in_isr.load(std::memory_order_acquire) == 0U);
-}
-
-void TestOwnerContextOverridesWriteEventSource()
-{
-  FakeUartDmaBackend backend;
-  const uint8_t first[] = {0x7EU};
-  const uint8_t second[] = {0x7FU};
-  std::array<uint8_t, DMA_BLOCK_SIZE + 1U> oversized{};
-  LibXR::WriteOperation first_op;
-  LibXR::WriteOperation second_op;
-  CallbackProbe oversized_probe;
-  LibXR::WriteOperation oversized_op(oversized_probe.callback);
-  std::atomic<uint32_t> owner_done{0U};
-
-  ASSERT(backend.Write(first, sizeof(first), first_op) == LibXR::ErrorCode::OK);
-  ASSERT(backend.Write(second, sizeof(second), second_op) == LibXR::ErrorCode::OK);
-  backend.BlockNextStart();
-  std::thread isr_owner(
-      [&]
-      {
-        backend.Complete(true);
-        owner_done.store(1U, std::memory_order_release);
-      });
-  ASSERT(backend.WaitUntilStartBlocked());
-
-  ASSERT(backend.Write(oversized.data(), oversized.size(), oversized_op, false) ==
-         LibXR::ErrorCode::OK);
-  backend.ReleaseBlockedStart();
-  ASSERT(oversized_probe.WaitForCount(1U));
-  ASSERT(WaitUntil([&] { return owner_done.load(std::memory_order_acquire) != 0U; }));
-  isr_owner.join();
-  ASSERT(oversized_probe.in_isr.load(std::memory_order_acquire) == 1U);
-  ASSERT(static_cast<LibXR::ErrorCode>(oversized_probe.result.load(
-             std::memory_order_acquire)) == LibXR::ErrorCode::FAILED);
 }
 
 void TestWritesPublishedDuringConfigSurviveFixedPrefix()
@@ -440,15 +484,48 @@ void TestDeferredConfigResumeUsesLatestSnapshot()
   ASSERT(backend.ConfigInIsr() == 1U);
 }
 
+void TestSpuriousConfigResumeDoesNotFreezeWrites()
+{
+  FakeUartDmaBackend backend;
+  const uint8_t data[] = {0x91U};
+  PollStatus status = PollStatus::READY;
+  LibXR::WriteOperation op(status);
+
+  backend.ResumeConfig(true);
+  ASSERT(backend.ConfigApplyCount() == 0U);
+  ASSERT(backend.Write(data, sizeof(data), op, false) == LibXR::ErrorCode::OK);
+  ASSERT(status == PollStatus::DONE);
+  AssertStart(backend, 0U, data, sizeof(data), 0);
+  backend.Complete(false);
+  ASSERT(!backend.IsBusy());
+}
+
+void TestSpuriousConfigDoesNotAbsorbCompletion()
+{
+  FakeUartDmaBackend backend;
+  const uint8_t data[] = {0x92U};
+  PollStatus status = PollStatus::READY;
+  LibXR::WriteOperation op(status);
+
+  backend.CompleteNextStartWithSpuriousConfig();
+  ASSERT(backend.Write(data, sizeof(data), op, false) == LibXR::ErrorCode::OK);
+
+  ASSERT(status == PollStatus::DONE);
+  ASSERT(backend.ConfigApplyCount() == 0U);
+  AssertStart(backend, 0U, data, sizeof(data), 0);
+  ASSERT(!backend.IsBusy());
+}
+
 }  // namespace
 
 void RunConcurrencyTests()
 {
+  TestConcurrentOperationPublication(false);
+  TestConcurrentOperationPublication(true);
   TestConcurrentWriteAndTerminalEventsMakeProgress();
   TestConfigAbsorbsCoalescedTerminalEvents();
   TestStreamPublicationSurvivesConfigBoundary();
   TestOwnerContextOverridesTerminalEventSource();
-  TestOwnerContextOverridesWriteEventSource();
   TestWritesPublishedDuringConfigSurviveFixedPrefix();
   TestCoalescedConfigUsesLatestSnapshot();
   TestConfigCallbackResubmitSurvivesFixedPrefix();
@@ -456,6 +533,8 @@ void RunConcurrencyTests()
   TestBackToBackConfigAbsorbsInterveningWrite();
   TestSynchronousConfigResumeIsFlattened();
   TestDeferredConfigResumeUsesLatestSnapshot();
+  TestSpuriousConfigResumeDoesNotFreezeWrites();
+  TestSpuriousConfigDoesNotAbsorbCompletion();
 }
 
 }  // namespace LibXRTest::UartDmaTx

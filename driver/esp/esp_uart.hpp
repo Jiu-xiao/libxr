@@ -13,6 +13,7 @@
 #include "hal/uart_types.h"
 #include "latest_snapshot.hpp"
 #include "model/uart_dma_tx_model.hpp"
+#include "model/uart_irq_config_gate.hpp"
 #include "model/uart_rx_config_gate.hpp"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
@@ -21,6 +22,7 @@
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
 #include "esp_private/gdma.h"
 #include "esp_private/gdma_link.h"
+#include "hal/gdma_hal.h"
 #include "hal/uhci_hal.h"
 #endif
 
@@ -151,6 +153,10 @@ class ESP32UART : public UART
   static uart_parity_t ResolveParity(UART::Parity parity);
 
   void OnConfigRequested();
+  [[nodiscard]] bool ConfigRequested() const
+  {
+    return irq_config_gate_.ConfigRequested() || rx_config_gate_.ConfigRequested();
+  }
   bool ApplyPendingConfig(bool in_isr);
   bool OnConfigApplied(bool in_isr);
 
@@ -165,29 +171,14 @@ class ESP32UART : public UART
    * @brief GDMA TX completion callback.
    * @brief GDMA TX 完成回调。
    */
-  static bool DmaTxEofCallback(gdma_channel_handle_t dma_chan,
-                               gdma_event_data_t* event_data, void* user_data);
+  static void DmaTxIsrEntry(void* arg);
 
   /**
-   * @brief GDMA TX descriptor error callback.
-   * @brief GDMA TX 描述符错误回调。
+   * @brief GDMA RX interrupt entry.
+   * @brief GDMA RX 中断入口。
    */
-  static bool DmaTxDescrErrCallback(gdma_channel_handle_t dma_chan,
-                                    gdma_event_data_t* event_data, void* user_data);
+  static void DmaRxIsrEntry(void* arg);
 
-  /**
-   * @brief GDMA RX completion callback.
-   * @brief GDMA RX 完成回调。
-   */
-  static bool DmaRxDoneCallback(gdma_channel_handle_t dma_chan,
-                                gdma_event_data_t* event_data, void* user_data);
-
-  /**
-   * @brief GDMA RX descriptor error callback.
-   * @brief GDMA RX 描述符错误回调。
-   */
-  static bool DmaRxDescrErrCallback(gdma_channel_handle_t dma_chan,
-                                    gdma_event_data_t* event_data, void* user_data);
 #endif
 
   /**
@@ -342,6 +333,7 @@ class ESP32UART : public UART
   UART::Configuration config_;  ///< Current UART framing configuration.
   LatestSnapshot<UART::Configuration> requested_config_;
   UartRxConfigGate rx_config_gate_;
+  UartIrqConfigGate irq_config_gate_;
 
   uint8_t* rx_isr_buffer_ = nullptr;  ///< Scratch buffer used by the RX ISR path.
   size_t rx_isr_buffer_size_ = 0;     ///< Size of `rx_isr_buffer_`.
@@ -374,6 +366,14 @@ class ESP32UART : public UART
   uint8_t* rx_dma_storage_ = nullptr;               ///< RX DMA ring backing storage.
   size_t rx_dma_chunk_size_ = 0;                    ///< Size of one RX DMA ring node.
   uint32_t rx_dma_node_index_ = 0;  ///< Software consumer index in the RX ring.
+  gdma_hal_context_t tx_gdma_hal_ = {};
+  int tx_gdma_group_id_ = -1;
+  int tx_gdma_channel_id_ = -1;
+  intr_handle_t tx_gdma_intr_handle_ = nullptr;
+  gdma_hal_context_t rx_gdma_hal_ = {};
+  int rx_gdma_group_id_ = -1;
+  int rx_gdma_channel_id_ = -1;
+  intr_handle_t rx_gdma_intr_handle_ = nullptr;
 #endif
 };
 

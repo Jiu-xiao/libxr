@@ -67,6 +67,8 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"core_tests", {"uart_dma_tx_model", &RunVoidEntry<test_uart_dma_tx_model>, false}},
     {"core_tests",
      {"uart_rx_config_gate", &RunVoidEntry<test_uart_rx_config_gate>, false}},
+    {"core_tests",
+     {"uart_irq_config_gate", &RunVoidEntry<test_uart_irq_config_gate>, false}},
     {"core_tests", {"memory", &RunVoidEntry<test_memory>, false}},
     {"core_tests", {"color", &RunVoidEntry<test_color>, false}},
     {"core_tests", {"time", &RunVoidEntry<test_time>, false}},

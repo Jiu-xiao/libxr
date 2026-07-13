@@ -50,7 +50,8 @@ class FakeUartDmaBackend
   };
 
   FakeUartDmaBackend()
-      : port_(8U, 64U), model_(*this, port_, LibXR::RawData(storage_, sizeof(storage_)))
+      : port_(8U, DMA_BLOCK_SIZE),
+        model_(*this, port_, LibXR::RawData(storage_, sizeof(storage_)))
   {
     port_ = WriteFun;
   }
@@ -112,6 +113,12 @@ class FakeUartDmaBackend
   void ResumeNextConfigSynchronously()
   {
     resume_config_during_apply_.store(1U, std::memory_order_release);
+  }
+
+  void CompleteNextStartWithSpuriousConfig()
+  {
+    complete_with_spurious_config_at_.store(static_cast<uint32_t>(StartCount()),
+                                            std::memory_order_release);
   }
 
   void BlockNextStart()
@@ -186,10 +193,21 @@ class FakeUartDmaBackend
     record.size = size;
     record.block = block;
     start_count_.store(start_index + 1U, std::memory_order_release);
+    if (complete_with_spurious_config_at_.exchange(
+            UINT32_MAX, std::memory_order_acq_rel) == start_index)
+    {
+      model_.ResumeConfig(true);
+      model_.OnTransferDone(true);
+    }
     return true;
   }
 
   void OnConfigRequested() { config_pending_.store(1U, std::memory_order_release); }
+
+  [[nodiscard]] bool ConfigRequested() const
+  {
+    return config_pending_.load(std::memory_order_acquire) != 0U;
+  }
 
   bool ApplyPendingConfig(bool in_isr)
   {
@@ -203,6 +221,8 @@ class FakeUartDmaBackend
     {
       return false;
     }
+
+    ASSERT(config_pending_.exchange(0U, std::memory_order_acq_rel) != 0U);
 
     const uint32_t apply_index = ConfigApplyCount();
     if (block_config_at_.load(std::memory_order_acquire) == apply_index)
@@ -222,11 +242,7 @@ class FakeUartDmaBackend
     return true;
   }
 
-  bool OnConfigApplied(bool)
-  {
-    config_pending_.store(0U, std::memory_order_release);
-    return true;
-  }
+  bool OnConfigApplied(bool) { return true; }
 
   alignas(size_t) uint8_t storage_[DMA_BLOCK_SIZE * 2U]{};
   LibXR::WritePort port_;
@@ -241,6 +257,7 @@ class FakeUartDmaBackend
   std::atomic<uint32_t> config_pending_{0U};
   std::atomic<uint32_t> allow_config_apply_{1U};
   std::atomic<uint32_t> resume_config_during_apply_{0U};
+  std::atomic<uint32_t> complete_with_spurious_config_at_{UINT32_MAX};
   std::atomic<uint32_t> config_apply_count_{0U};
   std::atomic<uint32_t> applied_config_{0U};
   std::atomic<uint32_t> config_in_isr_{UINT32_MAX};
