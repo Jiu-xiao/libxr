@@ -147,6 +147,29 @@ __attribute__((weak, used)) unsigned int __atomic_fetch_sub_4(volatile void* ptr
 }
 
 /**
+ * @brief  模拟实现 __atomic_fetch_or_4 函数 / Simulate the __atomic_fetch_or_4
+ * function
+ * @param  ptr 指向原子变量的指针 / Pointer to the atomic variable
+ * @param  val 需要按位或的值 / The value to combine with bitwise OR
+ * @param  memorder 内存顺序标志 / Memory order (ignored)
+ * @retval 按位或之前的旧值 / Returns the old value before bitwise OR
+ */
+__attribute__((weak, used)) unsigned int __atomic_fetch_or_4(volatile void* ptr,
+                                                             unsigned int val,
+                                                             int memorder)
+{
+  UNUSED(memorder);
+
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
+  unsigned int old_val;
+  __disable_irq();
+  old_val = *addr;
+  *addr = old_val | val;
+  __enable_irq();
+  return old_val;
+}
+
+/**
  * @brief  模拟实现 __atomic_exchange_1 函数 / Simulate the __atomic_exchange_1 function
  * @param  ptr 指向原子变量（1字节大小）的指针 / Pointer to the 1-byte atomic variable
  * @param  val 需要存储的新值 / The new value to be stored
