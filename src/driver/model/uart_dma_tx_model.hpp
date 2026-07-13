@@ -91,6 +91,19 @@ class UartDmaTxModel
   void RequestConfig(bool in_isr)
   {
     backend_.OnConfigRequested();
+    ResumeConfig(in_isr);
+  }
+
+  /**
+   * @brief Continue an already claimed asynchronous configuration transaction.
+   * @param in_isr Whether the current caller is in an ISR.
+   *
+   * Unlike `RequestConfig()`, this entry does not publish a new backend configuration
+   * request. It is intended for a platform completion callback that resumes the same
+   * CONFIG transaction after an asynchronous hardware quiesce step.
+   */
+  void ResumeConfig(bool in_isr)
+  {
     (void)service_.Invoke(EventMask(TxEvent::CONFIG),
                           [this, in_isr](uint32_t events) noexcept
                           { ServiceTx(events, in_isr, nullptr); });

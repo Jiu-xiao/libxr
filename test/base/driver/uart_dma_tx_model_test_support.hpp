@@ -80,6 +80,8 @@ class FakeUartDmaBackend
 
   void RetryConfig(bool in_isr = false) { model_.RequestConfig(in_isr); }
 
+  void ResumeConfig(bool in_isr = false) { model_.ResumeConfig(in_isr); }
+
   [[nodiscard]] bool IsBusy() const { return model_.IsBusy(); }
   [[nodiscard]] size_t BufferSize() const { return model_.BufferSize(); }
 
@@ -105,6 +107,11 @@ class FakeUartDmaBackend
   void SetConfigApplyAllowed(bool allowed)
   {
     allow_config_apply_.store(allowed ? 1U : 0U, std::memory_order_release);
+  }
+
+  void ResumeNextConfigSynchronously()
+  {
+    resume_config_during_apply_.store(1U, std::memory_order_release);
   }
 
   void BlockNextStart()
@@ -186,6 +193,12 @@ class FakeUartDmaBackend
 
   bool ApplyPendingConfig(bool in_isr)
   {
+    if (resume_config_during_apply_.exchange(0U, std::memory_order_acq_rel) != 0U)
+    {
+      model_.ResumeConfig(in_isr);
+      return false;
+    }
+
     if (allow_config_apply_.load(std::memory_order_acquire) == 0U)
     {
       return false;
@@ -227,6 +240,7 @@ class FakeUartDmaBackend
   std::atomic<uint32_t> release_start_{0U};
   std::atomic<uint32_t> config_pending_{0U};
   std::atomic<uint32_t> allow_config_apply_{1U};
+  std::atomic<uint32_t> resume_config_during_apply_{0U};
   std::atomic<uint32_t> config_apply_count_{0U};
   std::atomic<uint32_t> applied_config_{0U};
   std::atomic<uint32_t> config_in_isr_{UINT32_MAX};

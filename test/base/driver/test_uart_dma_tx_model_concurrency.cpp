@@ -411,6 +411,35 @@ void TestBackToBackConfigAbsorbsInterveningWrite()
   ASSERT(backend.StartCount() == 1U);
 }
 
+void TestSynchronousConfigResumeIsFlattened()
+{
+  FakeUartDmaBackend backend;
+  backend.ResumeNextConfigSynchronously();
+
+  backend.Configure(17U, false);
+
+  ASSERT(backend.ConfigApplyCount() == 1U);
+  ASSERT(backend.AppliedConfig() == 17U);
+  ASSERT(backend.ConfigInIsr() == 0U);
+}
+
+void TestDeferredConfigResumeUsesLatestSnapshot()
+{
+  FakeUartDmaBackend backend;
+  backend.SetConfigApplyAllowed(false);
+
+  backend.Configure(18U, false);
+  backend.Configure(19U, true);
+  ASSERT(backend.ConfigApplyCount() == 0U);
+
+  backend.SetConfigApplyAllowed(true);
+  backend.ResumeConfig(true);
+
+  ASSERT(backend.ConfigApplyCount() == 1U);
+  ASSERT(backend.AppliedConfig() == 19U);
+  ASSERT(backend.ConfigInIsr() == 1U);
+}
+
 }  // namespace
 
 void RunConcurrencyTests()
@@ -425,6 +454,8 @@ void RunConcurrencyTests()
   TestConfigCallbackResubmitSurvivesFixedPrefix();
   TestDeferredConfigKeepsOriginalPrefixBoundary();
   TestBackToBackConfigAbsorbsInterveningWrite();
+  TestSynchronousConfigResumeIsFlattened();
+  TestDeferredConfigResumeUsesLatestSnapshot();
 }
 
 }  // namespace LibXRTest::UartDmaTx

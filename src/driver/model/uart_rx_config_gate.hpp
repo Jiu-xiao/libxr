@@ -56,6 +56,21 @@ class UartRxConfigGate
         expected, CONFIG_ACTIVE, std::memory_order_acquire, std::memory_order_relaxed);
   }
 
+  void ConsumePendingConfig()
+  {
+    uint32_t observed = state_.load(std::memory_order_relaxed);
+    while (true)
+    {
+      ASSERT((observed & CONFIG_ACTIVE) != 0U);
+      const uint32_t desired = observed & ~CONFIG_PENDING;
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_relaxed))
+      {
+        return;
+      }
+    }
+  }
+
   void LeaveConfig()
   {
     uint32_t observed = state_.load(std::memory_order_relaxed);

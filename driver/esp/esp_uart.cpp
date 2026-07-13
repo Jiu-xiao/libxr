@@ -202,6 +202,11 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
     return ErrorCode::ARG_ERR;
   }
 
+  if (uart_isr_installed_)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
   requested_config_.Store(config);
   tx_dma_model_.RequestConfig(false);
   return ErrorCode::OK;

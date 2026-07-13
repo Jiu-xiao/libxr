@@ -32,9 +32,8 @@ void test_uart_rx_config_gate()
     gate.RequestConfig();
     ASSERT(gate.TryEnterConfig());
     gate.RequestConfig();
-    gate.LeaveConfig();
+    gate.ConsumePendingConfig();
     ASSERT(gate.ConfigRequested());
-    ASSERT(gate.TryEnterConfig());
     gate.LeaveConfig();
     ASSERT(!gate.ConfigRequested());
   }

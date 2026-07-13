@@ -131,6 +131,13 @@ class STM32UART : public UART
   friend class UartDmaTxModel<STM32UART>;
 
  public:
+  enum class ConfigPhase : uint32_t
+  {
+    IDLE = 0U,
+    ABORTING = 1U,
+    ABORTED = 2U,
+  };
+
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 
   static ErrorCode ReadFun(ReadPort& port, bool in_isr);
@@ -145,6 +152,7 @@ class STM32UART : public UART
 
   void SetRxDMA();
   void OnRxDataAvailable(bool in_isr);
+  void OnAbortComplete(bool in_isr);
 
   ReadPort _read_port;
   WritePort _write_port;
@@ -153,6 +161,7 @@ class STM32UART : public UART
   UartRxConfigGate rx_config_gate_;
   UartCircularDmaRxModel rx_dma_model_;
   UartDmaTxModel<STM32UART> tx_dma_model_;
+  std::atomic<ConfigPhase> config_phase_{ConfigPhase::IDLE};
 
   UART_HandleTypeDef* uart_handle_;
 
