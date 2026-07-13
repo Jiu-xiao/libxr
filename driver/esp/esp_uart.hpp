@@ -96,6 +96,8 @@ class ESP32UART : public UART
   /**
    * @brief Apply a new UART framing and baud configuration.
    * @brief 应用新的 UART 帧格式和波特率配置。
+   * @return `NOT_SUPPORT` when the FIFO backend is active; runtime FIFO
+   * configuration will be provided by its dedicated driver model.
    */
   ErrorCode SetConfig(UART::Configuration config) override;
 

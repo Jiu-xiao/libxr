@@ -77,6 +77,11 @@ class UART
    * 该方法为纯虚函数，子类必须实现具体的 UART 配置逻辑。
    * This is a pure virtual function. Subclasses must implement the specific UART
    * configuration logic.
+   *
+   * @warning `SetConfig()` calls for one UART instance must be serialized by the caller.
+   * Exactly one logical producer may publish configurations for an instance at a time.
+   * 同一 UART 实例的 `SetConfig()` 调用必须由调用方串行化；任意时刻只允许一个逻辑
+   * producer 发布配置。
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
 

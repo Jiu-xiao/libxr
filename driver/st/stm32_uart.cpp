@@ -260,13 +260,36 @@ ErrorCode STM32UART::SetConfig(UART::Configuration config)
 
 bool STM32UART::ApplyPendingConfig(bool in_isr)
 {
-  if (!rx_config_gate_.TryEnterConfig())
+  ConfigPhase phase = config_phase_.load(std::memory_order_acquire);
+  if (phase == ConfigPhase::IDLE)
+  {
+    if (!rx_config_gate_.TryEnterConfig())
+    {
+      return false;
+    }
+
+    config_phase_.store(ConfigPhase::ABORTING, std::memory_order_release);
+    if (HAL_UART_Abort_IT(uart_handle_) == HAL_OK)
+    {
+      return false;
+    }
+
+    config_phase_.store(ConfigPhase::IDLE, std::memory_order_release);
+    rx_config_gate_.LeaveConfig();
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+    return false;
+  }
+
+  if (phase == ConfigPhase::ABORTING)
   {
     return false;
   }
 
+  ASSERT(phase == ConfigPhase::ABORTED);
+  rx_config_gate_.ConsumePendingConfig();
   UART::Configuration config{};
   (void)requested_config_.LoadLatest(config);
+  config_phase_.store(ConfigPhase::IDLE, std::memory_order_release);
 
   HAL_UART_DeInit(uart_handle_);
   uart_handle_->Init.BaudRate = config.baudrate;
@@ -311,6 +334,20 @@ bool STM32UART::ApplyPendingConfig(bool in_isr)
 
   SetRxDMA();
   return true;
+}
+
+void STM32UART::OnAbortComplete(bool in_isr)
+{
+  ConfigPhase expected = ConfigPhase::ABORTING;
+  if (config_phase_.compare_exchange_strong(expected, ConfigPhase::ABORTED,
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire))
+  {
+    tx_dma_model_.ResumeConfig(in_isr);
+    return;
+  }
+
+  tx_dma_model_.RequestConfig(in_isr);
 }
 
 void STM32UART::SetRxDMA()
@@ -371,7 +408,7 @@ extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef*
 extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef* huart)
 {
   auto uart = STM32UART::map[stm32_uart_get_id(huart->Instance)];
-  uart->tx_dma_model_.RequestConfig(true);
+  uart->OnAbortComplete(true);
 }
 
 bool STM32UART::StartDmaTx(uint8_t* data, size_t size, int)
