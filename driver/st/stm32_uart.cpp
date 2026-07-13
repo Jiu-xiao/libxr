@@ -267,30 +267,38 @@ bool STM32UART::ApplyPendingConfig(bool in_isr)
     {
       return false;
     }
-
-    config_phase_.store(ConfigPhase::ABORTING, std::memory_order_release);
-    if (HAL_UART_Abort_IT(uart_handle_) == HAL_OK)
+    if (!irq_config_gate_.TryEnterConfig())
     {
+      rx_config_gate_.RequestConfig();
+      rx_config_gate_.LeaveConfig();
       return false;
     }
 
-    config_phase_.store(ConfigPhase::IDLE, std::memory_order_release);
-    rx_config_gate_.LeaveConfig();
-    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-    return false;
+    config_phase_.store(ConfigPhase::STARTING, std::memory_order_release);
+    const HAL_StatusTypeDef abort_result = HAL_UART_Abort_IT(uart_handle_);
+    DEV_ASSERT_FROM_CALLBACK(abort_result == HAL_OK, in_isr);
+
+    ConfigPhase expected = ConfigPhase::STARTING;
+    if (config_phase_.compare_exchange_strong(expected, ConfigPhase::ABORTING,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire))
+    {
+      return false;
+    }
+    ASSERT(expected == ConfigPhase::ABORTED);
+    phase = ConfigPhase::ABORTED;
   }
 
-  if (phase == ConfigPhase::ABORTING)
+  if ((phase == ConfigPhase::STARTING) || (phase == ConfigPhase::ABORTING))
   {
     return false;
   }
 
   ASSERT(phase == ConfigPhase::ABORTED);
+  irq_config_gate_.ConsumePendingConfig();
   rx_config_gate_.ConsumePendingConfig();
   UART::Configuration config{};
   (void)requested_config_.LoadLatest(config);
-  config_phase_.store(ConfigPhase::IDLE, std::memory_order_release);
-
   HAL_UART_DeInit(uart_handle_);
   uart_handle_->Init.BaudRate = config.baudrate;
 
@@ -338,16 +346,80 @@ bool STM32UART::ApplyPendingConfig(bool in_isr)
 
 void STM32UART::OnAbortComplete(bool in_isr)
 {
-  ConfigPhase expected = ConfigPhase::ABORTING;
-  if (config_phase_.compare_exchange_strong(expected, ConfigPhase::ABORTED,
+  UNUSED(in_isr);
+  ConfigPhase phase = config_phase_.load(std::memory_order_acquire);
+  while ((phase == ConfigPhase::STARTING) || (phase == ConfigPhase::ABORTING))
+  {
+    if (config_phase_.compare_exchange_weak(phase, ConfigPhase::ABORTED,
                                             std::memory_order_acq_rel,
                                             std::memory_order_acquire))
+    {
+      return;
+    }
+  }
+
+  ASSERT(phase == ConfigPhase::ABORTED);
+}
+
+void STM32UART::DmaIRQHandler(DMA_HandleTypeDef* dma_handle)
+{
+  ASSERT(dma_handle != nullptr);
+  ASSERT(dma_handle->Parent == uart_handle_);
+
+  const ConfigPhase phase = config_phase_.load(std::memory_order_acquire);
+  if (phase == ConfigPhase::STARTING || phase == ConfigPhase::ABORTED)
   {
-    tx_dma_model_.ResumeConfig(in_isr);
+    return;
+  }
+  if (phase == ConfigPhase::ABORTING)
+  {
+    if (!irq_config_gate_.TryEnterConfigIrq())
+    {
+      return;
+    }
+    HAL_DMA_IRQHandler(dma_handle);
+    (void)irq_config_gate_.LeaveIrq();
+    if (config_phase_.load(std::memory_order_acquire) == ConfigPhase::ABORTED)
+    {
+      tx_dma_model_.ResumeConfig(true);
+    }
     return;
   }
 
-  tx_dma_model_.RequestConfig(in_isr);
+  if (!irq_config_gate_.TryEnterIrq())
+  {
+    if (irq_config_gate_.ConfigRequested())
+    {
+      tx_dma_model_.ResumeConfig(true);
+    }
+    return;
+  }
+  HAL_DMA_IRQHandler(dma_handle);
+  if (irq_config_gate_.LeaveIrq())
+  {
+    tx_dma_model_.ResumeConfig(true);
+  }
+}
+
+void STM32UART::UartIRQHandler()
+{
+  if (config_phase_.load(std::memory_order_acquire) != ConfigPhase::IDLE)
+  {
+    return;
+  }
+  if (!irq_config_gate_.TryEnterIrq())
+  {
+    if (irq_config_gate_.ConfigRequested())
+    {
+      tx_dma_model_.ResumeConfig(true);
+    }
+    return;
+  }
+  HAL_UART_IRQHandler(uart_handle_);
+  if (irq_config_gate_.LeaveIrq())
+  {
+    tx_dma_model_.ResumeConfig(true);
+  }
 }
 
 void STM32UART::SetRxDMA()
@@ -386,6 +458,11 @@ void STM32UART::OnRxDataAvailable(bool in_isr)
 void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
 {
   auto uart = STM32UART::map[id];
+  if (!uart->irq_config_gate_.IrqActive())
+  {
+    DEV_ASSERT_FROM_CALLBACK(false, true);
+    return;
+  }
   uart->tx_dma_model_.OnTransferDone(true);
 }
 
@@ -402,6 +479,11 @@ extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart)
 extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
 {
   auto uart = STM32UART::map[stm32_uart_get_id(huart->Instance)];
+  if (!uart->irq_config_gate_.IrqActive())
+  {
+    DEV_ASSERT_FROM_CALLBACK(false, true);
+    return;
+  }
   uart->tx_dma_model_.RequestConfig(true);
 }
 
@@ -415,6 +497,24 @@ bool STM32UART::StartDmaTx(uint8_t* data, size_t size, int)
 {
   STM32_CleanDCacheByAddr(data, size);
   return HAL_UART_Transmit_DMA(uart_handle_, data, size) == HAL_OK;
+}
+
+void LibXR::STM32_UART_DMA_IRQHandler(DMA_HandleTypeDef* dma_handle)
+{
+  ASSERT(dma_handle != nullptr);
+  auto* uart_handle = static_cast<UART_HandleTypeDef*>(dma_handle->Parent);
+  ASSERT(uart_handle != nullptr);
+  auto* uart = STM32UART::map[stm32_uart_get_id(uart_handle->Instance)];
+  ASSERT(uart != nullptr);
+  uart->DmaIRQHandler(dma_handle);
+}
+
+void LibXR::STM32_UART_IRQHandler(UART_HandleTypeDef* uart_handle)
+{
+  ASSERT(uart_handle != nullptr);
+  auto* uart = STM32UART::map[stm32_uart_get_id(uart_handle->Instance)];
+  ASSERT(uart != nullptr);
+  uart->UartIRQHandler();
 }
 
 #endif

@@ -35,6 +35,8 @@ class UartDmaTxModel
   UartDmaTxModel(Backend& backend, WritePort& port, RawData storage)
       : backend_(backend), port_(port), buffers_(storage)
   {
+    REQUIRE(port_.queue_data_ != nullptr);
+    REQUIRE(port_.queue_data_->MaxSize() <= buffers_.Size());
   }
 
   /**
@@ -148,14 +150,23 @@ class UartDmaTxModel
   {
     if (HasEvent(events, TxEvent::CONFIG))
     {
-      const bool resume_tx = ApplyConfig(in_isr);
-      if (!config_boundary_valid_ && resume_tx)
+      if (backend_.ConfigRequested())
       {
-        (void)service_.Invoke(EventMask(TxEvent::WRITE),
-                              [this, in_isr](uint32_t pending_events) noexcept
-                              { ServiceTx(pending_events, in_isr, nullptr); });
+        const bool resume_tx = ApplyConfig(in_isr);
+        if (!config_boundary_valid_ && resume_tx)
+        {
+          (void)service_.Invoke(EventMask(TxEvent::WRITE),
+                                [this, in_isr](uint32_t pending_events) noexcept
+                                { ServiceTx(pending_events, in_isr, nullptr); });
+        }
+        return;
       }
-      return;
+
+      events &= ~EventMask(TxEvent::CONFIG);
+      if (events == 0U)
+      {
+        return;
+      }
     }
 
     // A CONFIG request may be waiting for RX hardware ownership. Keep later WRITE and
@@ -199,20 +210,6 @@ class UartDmaTxModel
     return result == ErrorCode::OK;
   }
 
-  bool DiscardPayload(size_t size)
-  {
-    while (size > 0U)
-    {
-      const size_t chunk = size > buffers_.Size() ? buffers_.Size() : size;
-      if (!PopPayload(buffers_.ActiveBuffer(), chunk))
-      {
-        return false;
-      }
-      size -= chunk;
-    }
-    return true;
-  }
-
   bool PopActiveInfo(WriteInfoBlock& info)
   {
     const ErrorCode result = port_.queue_info_->Pop(info);
@@ -241,16 +238,7 @@ class UartDmaTxModel
         return false;
       }
 
-      if (info.data.size_ > buffers_.Size())
-      {
-        if (!DiscardPayload(info.data.size_) || !PopActiveInfo(info))
-        {
-          ASSERT(false);
-          return false;
-        }
-        port_.Finish(in_isr, ErrorCode::FAILED, info);
-        continue;
-      }
+      REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
 
       return StagePending(info);
     }
@@ -334,23 +322,7 @@ class UartDmaTxModel
       return;
     }
 
-    if (info.data.size_ > buffers_.Size())
-    {
-      if (!DiscardPayload(info.data.size_) || !PopActiveInfo(info))
-      {
-        ASSERT(false);
-        return;
-      }
-      if (submit != nullptr)
-      {
-        submit->result = ErrorCode::FAILED;
-      }
-      else
-      {
-        port_.Finish(in_isr, ErrorCode::FAILED, info);
-      }
-      return;
-    }
+    REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
 
     if (!PopPayload(buffers_.ActiveBuffer(), info.data.size_) || !PopActiveInfo(info))
     {
@@ -435,7 +407,8 @@ class UartDmaTxModel
         ASSERT(false);
         return;
       }
-      if (!DiscardPayload(info.data.size_) || !PopActiveInfo(info))
+      if ((port_.queue_data_->PopBatch(nullptr, info.data.size_) != ErrorCode::OK) ||
+          !PopActiveInfo(info))
       {
         ASSERT(false);
         return;

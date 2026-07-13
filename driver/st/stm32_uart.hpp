@@ -13,6 +13,7 @@
 #include "libxr_rw.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
 #include "model/uart_dma_tx_model.hpp"
+#include "model/uart_irq_config_gate.hpp"
 #include "model/uart_rx_config_gate.hpp"
 #include "stm32_dcache.hpp"
 #include "uart.hpp"
@@ -116,26 +117,32 @@ namespace LibXR
 {
 /**
  * @brief STM32 UART 驱动实现 / STM32 UART driver implementation
- * @warning 使用循环 RX DMA 时，UART 全局中断与对应 RX DMA 中断必须配置为相同的
- * NVIC 抢占优先级。HAL 的 UART IDLE、DMA HT 和 DMA TC 路径都可能进入同一 RX event
- * callback；本驱动依赖相同优先级保证这些入口不重入。
- * When circular RX DMA is enabled, the UART global IRQ and its RX DMA IRQ must use the
- * same NVIC preemption priority and, on multicore devices, the same target core. UART
- * IDLE, DMA HT, and DMA TC paths may all enter the same HAL RX event callback; they must
- * remain one logical SPSC producer. Runtime configuration may execute on another core
- * and is coordinated separately by `UartRxConfigGate`.
+ * @warning UART 全局中断与关联的 RX/TX DMA 中断必须分别通过
+ * `STM32_UART_IRQHandler()` 和 `STM32_UART_DMA_IRQHandler()` 分发，不得直接调用 HAL
+ * handler。指向同一核心的相关 IRQ 必须使用相同抢占优先级，避免未取得 gate 的
+ * level-triggered IRQ 反复抢占当前 owner；指向不同核心的 IRQ 会在 HAL 读取或清除硬件
+ * 状态前由 `UartIrqConfigGate` 串行化。
+ * The UART global IRQ and associated RX/TX DMA IRQs must be dispatched through
+ * `STM32_UART_IRQHandler()` and `STM32_UART_DMA_IRQHandler()` rather than calling HAL
+ * handlers directly. IRQ sources targeting the same core must use the same preemption
+ * priority so a losing level-triggered source cannot repeatedly preempt the current
+ * owner. Sources on different cores are serialized by `UartIrqConfigGate` before HAL
+ * reads or clears hardware status.
  */
 class STM32UART : public UART
 {
   friend class UartCircularDmaRxModel;
   friend class UartDmaTxModel<STM32UART>;
+  friend void STM32_UART_DMA_IRQHandler(DMA_HandleTypeDef* dma_handle);
+  friend void STM32_UART_IRQHandler(UART_HandleTypeDef* uart_handle);
 
  public:
   enum class ConfigPhase : uint32_t
   {
     IDLE = 0U,
-    ABORTING = 1U,
-    ABORTED = 2U,
+    STARTING = 1U,
+    ABORTING = 2U,
+    ABORTED = 3U,
   };
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
@@ -153,12 +160,15 @@ class STM32UART : public UART
   void SetRxDMA();
   void OnRxDataAvailable(bool in_isr);
   void OnAbortComplete(bool in_isr);
+  void DmaIRQHandler(DMA_HandleTypeDef* dma_handle);
+  void UartIRQHandler();
 
   ReadPort _read_port;
   WritePort _write_port;
 
   LatestSnapshot<UART::Configuration> requested_config_;
   UartRxConfigGate rx_config_gate_;
+  UartIrqConfigGate irq_config_gate_;
   UartCircularDmaRxModel rx_dma_model_;
   UartDmaTxModel<STM32UART> tx_dma_model_;
   std::atomic<ConfigPhase> config_phase_{ConfigPhase::IDLE};
@@ -170,11 +180,21 @@ class STM32UART : public UART
   static STM32UART* map[STM32_UART_NUMBER];  // NOLINT
 
  private:
-  void OnConfigRequested() { rx_config_gate_.RequestConfig(); }
+  void OnConfigRequested()
+  {
+    irq_config_gate_.RequestConfig();
+    rx_config_gate_.RequestConfig();
+  }
+  [[nodiscard]] bool ConfigRequested() const
+  {
+    return irq_config_gate_.ConfigRequested() || rx_config_gate_.ConfigRequested();
+  }
   bool ApplyPendingConfig(bool in_isr);
   bool OnConfigApplied(bool)
   {
     rx_config_gate_.LeaveConfig();
+    config_phase_.store(ConfigPhase::IDLE, std::memory_order_release);
+    irq_config_gate_.LeaveConfig();
     return true;
   }
 
@@ -221,6 +241,23 @@ class STM32UART : public UART
    */
   bool StartDmaTx(uint8_t* data, size_t size, int block);
 };
+
+/**
+ * @brief Dispatch one STM32 UART DMA IRQ through the libxr TX/config gate.
+ *
+ * BSP DMA IRQ handlers associated with a libxr UART must call this function instead of
+ * calling `HAL_DMA_IRQHandler()` directly. The gate is entered before HAL reads or
+ * clears DMA status.
+ */
+void STM32_UART_DMA_IRQHandler(DMA_HandleTypeDef* dma_handle);
+
+/**
+ * @brief Dispatch one STM32 UART global IRQ through the libxr TX/config gate.
+ *
+ * BSP UART IRQ handlers associated with a libxr UART must call this function instead of
+ * calling `HAL_UART_IRQHandler()` directly.
+ */
+void STM32_UART_IRQHandler(UART_HandleTypeDef* uart_handle);
 
 }  // namespace LibXR
 

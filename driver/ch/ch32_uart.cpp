@@ -208,7 +208,15 @@ bool CH32UART::ApplyPendingConfig(bool in_isr)
   {
     return false;
   }
+  if (!irq_config_gate_.TryEnterConfig())
+  {
+    rx_config_gate_.RequestConfig();
+    rx_config_gate_.LeaveConfig();
+    return false;
+  }
 
+  irq_config_gate_.ConsumePendingConfig();
+  rx_config_gate_.ConsumePendingConfig();
   UART::Configuration config{};
   (void)requested_config_.LoadLatest(config);
 
@@ -318,16 +326,7 @@ extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
   {
     return;
   }
-
-  // 检查和清除IDLE标志
-  if (!USART_GetITStatus(uart->instance_, USART_IT_IDLE))
-  {
-    return;
-  }
-
-  USART_ReceiveData(uart->instance_);
-
-  ch32_uart_rx_isr_handler(uart);
+  uart->UartIRQHandler();
 }
 
 // DMA TX completion interrupt handler.
@@ -340,14 +339,32 @@ extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
 // DMA channel IRQ callbacks.
 void CH32UART::TxDmaIRQHandler()
 {
+  if (!irq_config_gate_.TryEnterIrq())
+  {
+    if (irq_config_gate_.ConfigRequested())
+    {
+      tx_dma_model_.ResumeConfig(true);
+    }
+    return;
+  }
+
   if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET)
   {
+    if (irq_config_gate_.LeaveIrq())
+    {
+      tx_dma_model_.ResumeConfig(true);
+    }
     return;
   }
 
   if (dma_tx_channel_->CNTR == 0)
   {
     ch32_uart_isr_handler_tx_cplt(this);
+  }
+
+  if (irq_config_gate_.LeaveIrq())
+  {
+    tx_dma_model_.ResumeConfig(true);
   }
 }
 
@@ -361,6 +378,15 @@ void CH32UART::TxDmaIRQHandler()
  */
 void CH32UART::RxDmaIRQHandler()
 {
+  if (!irq_config_gate_.TryEnterIrq())
+  {
+    if (irq_config_gate_.ConfigRequested())
+    {
+      tx_dma_model_.ResumeConfig(true);
+    }
+    return;
+  }
+
   if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET)
   {
     DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
@@ -371,6 +397,34 @@ void CH32UART::RxDmaIRQHandler()
   {
     DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
     ch32_uart_rx_isr_handler(this);
+  }
+
+  if (irq_config_gate_.LeaveIrq())
+  {
+    tx_dma_model_.ResumeConfig(true);
+  }
+}
+
+void CH32UART::UartIRQHandler()
+{
+  if (!irq_config_gate_.TryEnterIrq())
+  {
+    if (irq_config_gate_.ConfigRequested())
+    {
+      tx_dma_model_.ResumeConfig(true);
+    }
+    return;
+  }
+
+  if (USART_GetITStatus(instance_, USART_IT_IDLE) != RESET)
+  {
+    USART_ReceiveData(instance_);
+    ch32_uart_rx_isr_handler(this);
+  }
+
+  if (irq_config_gate_.LeaveIrq())
+  {
+    tx_dma_model_.ResumeConfig(true);
   }
 }
 

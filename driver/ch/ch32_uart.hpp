@@ -9,6 +9,7 @@
 #include "libxr_rw.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
 #include "model/uart_dma_tx_model.hpp"
+#include "model/uart_irq_config_gate.hpp"
 #include "model/uart_rx_config_gate.hpp"
 #include "uart.hpp"
 
@@ -17,13 +18,11 @@ namespace LibXR
 
 /**
  * @brief CH32 UART 驱动实现 / CH32 UART driver implementation
- * @warning 使用循环 RX DMA 时，USART/UART IDLE 中断与对应 RX DMA HT/TC 中断必须配置为
- * 相同的抢占优先级。本驱动依赖该优先级契约保证所有 RX 事件入口不重入，使 RX model
- * 保持唯一 producer。
- * When circular RX DMA is enabled, the USART/UART IDLE IRQ and its RX DMA HT/TC IRQ must
- * use the same preemption priority and, on multicore devices, the same target core. This
- * keeps all RX event entries one logical producer; runtime configuration may execute on
- * another core and is coordinated separately by `UartRxConfigGate`.
+ * UART IDLE and RX/TX DMA IRQ sources targeting the same core must use the same
+ * preemption priority. Sources on different cores are serialized by `UartIrqConfigGate`
+ * before they inspect hardware status.
+ * 指向同一核心的 UART IDLE 与 RX/TX DMA IRQ 必须使用相同抢占优先级；指向不同核心的
+ * 中断在读取硬件状态前由 `UartIrqConfigGate` 串行化。
  */
 class CH32UART : public UART
 {
@@ -46,6 +45,7 @@ class CH32UART : public UART
 
   void TxDmaIRQHandler();
   void RxDmaIRQHandler();
+  void UartIRQHandler();
   void OnRxDataAvailable(bool in_isr);
 
   ch32_uart_id_t id_;
@@ -56,6 +56,7 @@ class CH32UART : public UART
 
   LatestSnapshot<UART::Configuration> requested_config_;
   UartRxConfigGate rx_config_gate_;
+  UartIrqConfigGate irq_config_gate_;
   UartCircularDmaRxModel rx_dma_model_;
   UartDmaTxModel<CH32UART> tx_dma_model_;
 
@@ -66,11 +67,20 @@ class CH32UART : public UART
   static CH32UART* map_[CH32_UART_NUMBER];
 
  private:
-  void OnConfigRequested() { rx_config_gate_.RequestConfig(); }
+  void OnConfigRequested()
+  {
+    irq_config_gate_.RequestConfig();
+    rx_config_gate_.RequestConfig();
+  }
+  [[nodiscard]] bool ConfigRequested() const
+  {
+    return irq_config_gate_.ConfigRequested() || rx_config_gate_.ConfigRequested();
+  }
   bool ApplyPendingConfig(bool in_isr);
   bool OnConfigApplied(bool)
   {
     rx_config_gate_.LeaveConfig();
+    irq_config_gate_.LeaveConfig();
     return true;
   }
 
