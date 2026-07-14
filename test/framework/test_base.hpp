@@ -55,6 +55,8 @@ void test_transform();
 void test_double_buffer();
 void test_type();
 void test_uart_dma_tx_model();
+void test_uart_circular_dma_rx_model();
+void test_uart_hardware_gate();
 void test_uart_rx_config_gate();
 void test_uart_irq_config_gate();
 void test_string();

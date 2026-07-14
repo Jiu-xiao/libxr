@@ -26,11 +26,100 @@ void TestSynchronousStartFailureAcrossOperationModes()
     FakeUartDmaBackend backend;
     backend.SetStartAllowed(false);
     WriteHarness write(mode);
-    ASSERT(backend.Write(data, sizeof(data), write.op) == LibXR::ErrorCode::FAILED);
+    const LibXR::ErrorCode result = backend.Write(data, sizeof(data), write.op);
+    ASSERT(result == LibXR::ErrorCode::FAILED);
     write.ExpectFinal(LibXR::ErrorCode::FAILED);
     ASSERT(!backend.IsBusy());
     ASSERT(backend.QueuedInfoCount() == 0U);
     ASSERT(backend.QueuedDataSize() == 0U);
+  }
+}
+
+void TestImmediateFailureCallbackCanResubmitAfterUnlock()
+{
+  struct Probe
+  {
+    FakeUartDmaBackend* backend = nullptr;
+    uint8_t retry_data = 0x64U;
+    LibXR::WriteOperation retry_op{};
+    std::atomic<uint32_t> callback_count{0U};
+    std::atomic<uint32_t> retry_result{static_cast<uint32_t>(LibXR::ErrorCode::OK)};
+    LibXR::WriteOperation::Callback callback =
+        LibXR::WriteOperation::Callback::Create(OnComplete, this);
+
+    static void OnComplete(bool in_isr, Probe* self, LibXR::ErrorCode result)
+    {
+      ASSERT(result == LibXR::ErrorCode::FAILED);
+      self->callback_count.fetch_add(1U, std::memory_order_acq_rel);
+      self->retry_result.store(
+          static_cast<uint32_t>(self->backend->Write(
+              &self->retry_data, sizeof(self->retry_data), self->retry_op, in_isr)),
+          std::memory_order_release);
+    }
+  };
+
+  FakeUartDmaBackend backend;
+  backend.SetStartAllowed(false);
+  Probe probe;
+  probe.backend = &backend;
+  const uint8_t data = 0x63U;
+  LibXR::WriteOperation op(probe.callback);
+
+  ASSERT(backend.Write(&data, sizeof(data), op) == LibXR::ErrorCode::FAILED);
+  ASSERT(probe.callback_count.load(std::memory_order_acquire) == 1U);
+  ASSERT(static_cast<LibXR::ErrorCode>(probe.retry_result.load(
+             std::memory_order_acquire)) == LibXR::ErrorCode::FAILED);
+  ASSERT(backend.ConfigApplyCount() == 2U);
+  ASSERT(backend.QueuedInfoCount() == 0U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+}
+
+void TestStreamCallbackResubmitReportsProducerBusy(bool start_allowed)
+{
+  struct Probe
+  {
+    FakeUartDmaBackend* backend = nullptr;
+    LibXR::ErrorCode expected = LibXR::ErrorCode::OK;
+    uint8_t retry_data = 0x66U;
+    LibXR::WriteOperation retry_op{};
+    std::atomic<uint32_t> callback_count{0U};
+    std::atomic<uint32_t> retry_result{static_cast<uint32_t>(LibXR::ErrorCode::OK)};
+    LibXR::WriteOperation::Callback callback =
+        LibXR::WriteOperation::Callback::Create(OnComplete, this);
+
+    static void OnComplete(bool in_isr, Probe* self, LibXR::ErrorCode result)
+    {
+      ASSERT(result == self->expected);
+      self->retry_result.store(
+          static_cast<uint32_t>(self->backend->Write(
+              &self->retry_data, sizeof(self->retry_data), self->retry_op, in_isr)),
+          std::memory_order_release);
+      self->callback_count.fetch_add(1U, std::memory_order_acq_rel);
+    }
+  };
+
+  FakeUartDmaBackend backend;
+  backend.SetStartAllowed(start_allowed);
+  Probe probe;
+  probe.backend = &backend;
+  probe.expected = start_allowed ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED;
+  LibXR::WriteOperation op(probe.callback);
+  const uint8_t data = 0x65U;
+
+  LibXR::WritePort::Stream stream(&backend.Port(), op);
+  ASSERT(stream.Write(LibXR::ConstRawData(&data, sizeof(data))) == LibXR::ErrorCode::OK);
+  ASSERT(stream.Commit() == probe.expected);
+
+  ASSERT(probe.callback_count.load(std::memory_order_acquire) == 1U);
+  ASSERT(static_cast<LibXR::ErrorCode>(probe.retry_result.load(
+             std::memory_order_acquire)) == LibXR::ErrorCode::BUSY);
+  ASSERT(backend.QueuedInfoCount() == 0U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+
+  if (start_allowed)
+  {
+    backend.Complete(false);
+    ASSERT(!backend.IsBusy());
   }
 }
 
@@ -113,6 +202,9 @@ void RunOperationTests()
 {
   TestSynchronousStartAcrossOperationModes();
   TestSynchronousStartFailureAcrossOperationModes();
+  TestImmediateFailureCallbackCanResubmitAfterUnlock();
+  TestStreamCallbackResubmitReportsProducerBusy(true);
+  TestStreamCallbackResubmitReportsProducerBusy(false);
   TestPendingCompletionAcrossAsyncOperationModes();
   TestPendingBlockCompletion(true, LibXR::ErrorCode::OK);
   TestPendingBlockCompletion(false, LibXR::ErrorCode::FAILED);

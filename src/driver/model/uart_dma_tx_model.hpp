@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "double_buffer.hpp"
 #include "libxr_assert.hpp"
@@ -10,6 +11,26 @@
 
 namespace LibXR
 {
+
+/**
+ * @brief Result of one synchronous backend DMA-start attempt.
+ *
+ * `RETRY` is valid only before the backend has started or otherwise committed the DMA
+ * transfer. The model keeps the queue record and buffer ownership unchanged and expects
+ * a later `ResumeStart()`. `FAILED` is terminal for this attempt and also guarantees
+ * that no DMA remains active. A failure of the current submission is returned through
+ * its `SubmitContext`; an older retained record is completed through `WritePort::Finish`.
+ * `STARTED` transfers the candidate buffer to hardware. For each accepted start, the
+ * platform must dispatch at most one authoritative terminal snapshot; it must clear
+ * that hardware status before a later start can make the same status observable as the
+ * later transfer's completion.
+ */
+enum class UartDmaTxStartResult : uint32_t
+{
+  STARTED = 0U,
+  RETRY = 1U,
+  FAILED = 2U,
+};
 
 /**
  * @brief UART 单次 DMA 发送执行模型 / UART one-shot DMA TX execution model
@@ -21,6 +42,12 @@ namespace LibXR
  * events. The sole owner selected by `SerializedService` controls active/pending
  * buffers, WritePort dequeue, DMA start, and Operation completion, preventing submitters
  * and completion ISRs from advancing the double-buffer state concurrently.
+ *
+ * @warning Service re-entry is flattened, but `WritePort` producer ownership is a
+ * separate boundary. `Finish()` for an older record, or for a current record drained by
+ * same-round CONFIG recovery, may run while a direct or Stream producer owns the port.
+ * A callback that writes the same port can therefore receive `BUSY`. Such callbacks must
+ * handle/retry `BUSY`; serialization alone does not enqueue a rejected re-entrant write.
  *
  * @tparam Backend 静态绑定的平台后端类型 / Statically bound platform backend type
  */
@@ -44,11 +71,15 @@ class UartDmaTxModel
    * @param in_isr 当前调用是否位于 ISR / Whether the current caller is in an ISR
    * @return 当前请求同步启动时返回 `OK`，留在流水中时返回 `PENDING`，同步启动失败
    * 时返回错误 / `OK` for a synchronous start, `PENDING` while retained by the
-   * pipeline, or an error for a synchronous start failure
+   * pipeline. A defensive backend start failure for this submission is returned
+   * synchronously. An ordinary direct WritePort callback runs after the producer lock is
+   * released unless same-round CONFIG recovery drains that submission. Stream retains
+   * producer ownership until its Commit path returns. In either exceptional case, a
+   * callback that re-enters the same port may receive `BUSY`.
    */
   ErrorCode Submit(bool in_isr)
   {
-    SubmitContext context{};
+    SubmitContext context{port_.CurrentSubmissionId(), ErrorCode::PENDING};
     (void)service_.Invoke(EventMask(TxEvent::WRITE),
                           [this, in_isr, &context](uint32_t events) noexcept
                           { ServiceTx(events, in_isr, &context); });
@@ -112,6 +143,19 @@ class UartDmaTxModel
   }
 
   /**
+   * @brief Retry a TX start deferred by the shared UART hardware gate.
+   *
+   * The platform must call this after the owner that observed a pending TX-start action
+   * has released the hardware gate. RETRY preserves all queue and buffer ownership.
+   */
+  void ResumeStart(bool in_isr)
+  {
+    (void)service_.Invoke(EventMask(TxEvent::WRITE),
+                          [this, in_isr](uint32_t events) noexcept
+                          { ServiceTx(events, in_isr, nullptr); });
+  }
+
+  /**
    * @brief 查询 DMA 是否持有 active 请求 / Check whether DMA owns an active request
    * @warning 调用方必须与 TX service 串行化。The caller must serialize this query
    * against the TX service.
@@ -133,6 +177,7 @@ class UartDmaTxModel
 
   struct SubmitContext
   {
+    uint32_t submission_id = 0U;
     ErrorCode result = ErrorCode::PENDING;
   };
 
@@ -192,6 +237,15 @@ class UartDmaTxModel
       return;
     }
 
+    // A pending block may still need its first hardware-start attempt after an IRQ
+    // owner released the shared hardware gate. Its payload has already left the data
+    // queue, so it must be retried before looking at the ordinary queued head.
+    if (!busy_ && (active_length_ == 0U) && pending_valid_ &&
+        PromoteAndStartPending(in_isr))
+    {
+      return;
+    }
+
     if (!busy_ && (active_length_ == 0U))
     {
       StartQueuedActive(in_isr, submit);
@@ -245,36 +299,33 @@ class UartDmaTxModel
     return false;
   }
 
-  bool PromotePending(WriteInfoBlock& info)
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block)
   {
-    if (!pending_valid_)
+    const auto result = backend_.StartDmaTx(data, size, block);
+    using Result = std::remove_cv_t<decltype(result)>;
+    if constexpr (std::is_same_v<Result, bool>)
     {
-      return false;
+      return result ? UartDmaTxStartResult::STARTED : UartDmaTxStartResult::FAILED;
     }
-
-    pending_valid_ = false;
-    buffers_.FlipActiveBlock();
-    if (!PopActiveInfo(info))
+    else
     {
-      return false;
+      static_assert(std::is_same_v<Result, UartDmaTxStartResult>);
+      return result;
     }
-
-    active_length_ = info.data.size_;
-    return true;
   }
 
-  bool StartActive()
+  UartDmaTxStartResult StartCandidate(uint8_t* data, size_t size, int block)
   {
-    ASSERT(active_length_ > 0U);
+    ASSERT(size > 0U);
     busy_ = true;
-    if (backend_.StartDmaTx(buffers_.ActiveBuffer(), active_length_,
-                            buffers_.ActiveBlock()))
+    const UartDmaTxStartResult result = StartDmaTx(data, size, block);
+    if (result == UartDmaTxStartResult::STARTED)
     {
-      return true;
+      return result;
     }
 
     busy_ = false;
-    return false;
+    return result;
   }
 
   bool ReleaseActive()
@@ -291,25 +342,46 @@ class UartDmaTxModel
 
   bool PromoteAndStartPending(bool in_isr)
   {
-    WriteInfoBlock info{};
-    if (!PromotePending(info))
+    if (!pending_valid_)
     {
       return false;
     }
 
-    const bool started = StartActive();
-    if (!started)
+    WriteInfoBlock info{};
+    if (port_.queue_info_->Peek(info) != ErrorCode::OK)
     {
-      ClearActive();
+      ASSERT(false);
+      return false;
     }
-    port_.Finish(in_isr, started ? ErrorCode::OK : ErrorCode::FAILED, info);
 
-    if (!started)
+    const int pending_block = buffers_.ActiveBlock() ^ 1;
+    const UartDmaTxStartResult result =
+        StartCandidate(buffers_.PendingBuffer(), info.data.size_, pending_block);
+    if (result == UartDmaTxStartResult::RETRY)
     {
+      return true;
+    }
+
+    pending_valid_ = false;
+    buffers_.FlipActiveBlock();
+    if (!PopActiveInfo(info))
+    {
+      ASSERT(false);
+      busy_ = false;
+      return false;
+    }
+    active_length_ = info.data.size_;
+
+    if (result == UartDmaTxStartResult::FAILED)
+    {
+      busy_ = false;
+      ClearActive();
+      port_.Finish(in_isr, ErrorCode::FAILED, info);
       RequestConfig(in_isr);
       return true;
     }
 
+    port_.Finish(in_isr, ErrorCode::OK, info);
     (void)StageNextPending(in_isr);
     return true;
   }
@@ -322,36 +394,58 @@ class UartDmaTxModel
       return;
     }
 
+    // A synchronous WriteFun return may complete only the record published by that
+    // caller. A later submitter may still advance an older RETRY head, but that head is
+    // then processed contextlessly and completed through its own queued operation.
+    SubmitContext* current_submit =
+        ((submit != nullptr) && (submit->submission_id == info.submission_id)) ? submit
+                                                                               : nullptr;
+
     REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
 
-    if (!PopPayload(buffers_.ActiveBuffer(), info.data.size_) || !PopActiveInfo(info))
+    if (port_.queue_data_->PeekBatch(buffers_.ActiveBuffer(), info.data.size_) !=
+        ErrorCode::OK)
     {
       ASSERT(false);
-      if (submit != nullptr)
-      {
-        submit->result = ErrorCode::FAILED;
-      }
+      return;
+    }
+
+    const UartDmaTxStartResult result =
+        StartCandidate(buffers_.ActiveBuffer(), info.data.size_, buffers_.ActiveBlock());
+    if (result == UartDmaTxStartResult::RETRY)
+    {
+      return;
+    }
+
+    if (!PopPayload(nullptr, info.data.size_) || !PopActiveInfo(info))
+    {
+      ASSERT(false);
+      busy_ = false;
       return;
     }
 
     active_length_ = info.data.size_;
-    const bool started = StartActive();
-    if (!started)
+    if (result == UartDmaTxStartResult::FAILED)
     {
+      busy_ = false;
       ClearActive();
     }
 
-    if (submit != nullptr)
+    if (current_submit != nullptr)
     {
-      submit->result = started ? ErrorCode::OK : ErrorCode::FAILED;
+      current_submit->result =
+          (result == UartDmaTxStartResult::STARTED) ? ErrorCode::OK : ErrorCode::FAILED;
     }
     else
     {
-      port_.Finish(in_isr, started ? ErrorCode::OK : ErrorCode::FAILED, info);
-      if (!started)
-      {
-        RequestConfig(in_isr);
-      }
+      port_.Finish(
+          in_isr,
+          (result == UartDmaTxStartResult::STARTED) ? ErrorCode::OK : ErrorCode::FAILED,
+          info);
+    }
+    if (result == UartDmaTxStartResult::FAILED)
+    {
+      RequestConfig(in_isr);
     }
   }
 

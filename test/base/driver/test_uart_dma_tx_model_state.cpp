@@ -114,6 +114,78 @@ void TestPromotedStartFailureAbortsRetainedPipeline()
   ASSERT(backend.QueuedDataSize() == 0U);
 }
 
+void TestQueuedStartRetryPreservesPublishedRecord()
+{
+  FakeUartDmaBackend backend;
+  const uint8_t data[] = {0x41U, 0x42U, 0x43U};
+  PollStatus status = PollStatus::READY;
+  LibXR::WriteOperation op(status);
+
+  backend.RetryNextStart();
+  ASSERT(backend.Write(data, sizeof(data), op) == LibXR::ErrorCode::OK);
+
+  ASSERT(status == PollStatus::RUNNING);
+  ASSERT(!backend.IsBusy());
+  ASSERT(backend.StartCount() == 0U);
+  ASSERT(backend.QueuedInfoCount() == 1U);
+  ASSERT(backend.QueuedDataSize() == sizeof(data));
+
+  backend.ResumeStart(true);
+
+  ASSERT(status == PollStatus::DONE);
+  ASSERT(backend.IsBusy());
+  ASSERT(backend.StartCount() == 1U);
+  ASSERT(backend.QueuedInfoCount() == 0U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+  AssertStart(backend, 0U, data, sizeof(data), 0);
+
+  backend.ResumeStart(false);
+  ASSERT(backend.StartCount() == 1U);
+  backend.Complete(false);
+  ASSERT(!backend.IsBusy());
+}
+
+void TestPendingStartRetryPreservesPreloadedBuffer()
+{
+  FakeUartDmaBackend backend;
+  const uint8_t active[] = {0x51U};
+  const uint8_t pending[] = {0x52U, 0x53U};
+  PollStatus active_status = PollStatus::READY;
+  PollStatus pending_status = PollStatus::READY;
+  LibXR::WriteOperation active_op(active_status);
+  LibXR::WriteOperation pending_op(pending_status);
+
+  ASSERT(backend.Write(active, sizeof(active), active_op) == LibXR::ErrorCode::OK);
+  ASSERT(backend.Write(pending, sizeof(pending), pending_op) == LibXR::ErrorCode::OK);
+  ASSERT(active_status == PollStatus::DONE);
+  ASSERT(pending_status == PollStatus::RUNNING);
+  ASSERT(backend.QueuedInfoCount() == 1U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+
+  backend.RetryNextStart();
+  backend.Complete(true);
+
+  ASSERT(pending_status == PollStatus::RUNNING);
+  ASSERT(!backend.IsBusy());
+  ASSERT(backend.StartCount() == 1U);
+  ASSERT(backend.QueuedInfoCount() == 1U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+
+  backend.ResumeStart(false);
+
+  ASSERT(pending_status == PollStatus::DONE);
+  ASSERT(backend.IsBusy());
+  ASSERT(backend.StartCount() == 2U);
+  ASSERT(backend.QueuedInfoCount() == 0U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+  AssertStart(backend, 1U, pending, sizeof(pending), 1);
+
+  backend.ResumeStart(true);
+  ASSERT(backend.StartCount() == 2U);
+  backend.Complete(false);
+  ASSERT(!backend.IsBusy());
+}
+
 }  // namespace
 
 void RunStateTests()
@@ -122,6 +194,8 @@ void RunStateTests()
   TestActivePendingQueuedPipeline();
   TestRecoveredErrorMatchesCompletionProgression();
   TestPromotedStartFailureAbortsRetainedPipeline();
+  TestQueuedStartRetryPreservesPublishedRecord();
+  TestPendingStartRetryPreservesPreloadedBuffer();
 }
 
 }  // namespace LibXRTest::UartDmaTx

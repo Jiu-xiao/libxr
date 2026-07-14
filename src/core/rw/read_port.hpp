@@ -195,11 +195,19 @@ class ReadPort
    * participate in backend teardown and does not fail-complete an in-flight read.
    * Returns BUSY when a read request is currently in progress.
    *
-   * @note After this call claims CLEARING, ordinary reads can no longer consume the
-   *       current software-queue snapshot. Bytes that arrive after the snapshot may
-   *       remain queued for a later reader/clear call.
-   * @note 本次调用 claim `CLEARING` 之后，普通读不会再消费当前软件队列快照；在快照
-   *       之后新到达的字节，可以留给后续读取或下次清队列。
+   * @note After this call claims CLEARING, it owns the current software-queue snapshot
+   *       until return. Bytes that arrive after the snapshot may remain queued for a
+   *       later reader/clear call.
+   * @note 本次调用 claim `CLEARING` 后，在返回前独占当前软件队列快照；快照之后新到达
+   *       的字节可以留给后续读取或下次清队列。
+   * @warning Ordinary reads and `ClearQueuedData()` are operations of the same logical
+   *          SPSC consumer and must not overlap. `CLEARING` coordinates this consumer
+   *          with the ISR producer's `ProcessPendingReads()` path; it does not turn
+   *          ordinary read/clear calls into multiple concurrent consumers.
+   * @warning 普通读取与 `ClearQueuedData()` 同属一个 SPSC consumer，调用不得重叠。
+   *          `CLEARING` 只协调该 consumer 与 ISR producer 的
+   *          `ProcessPendingReads()` 路径，并不会让普通读取和清队列变成可并发的多个
+   *          consumer。
    *
    * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
    * @return `OK` 表示本次清队列成功完成；`BUSY` 表示当前有读请求占有该端口。

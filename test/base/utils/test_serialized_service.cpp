@@ -176,8 +176,10 @@ void TestPublicationVisibilityThroughPendingEvent()
               if ((events & EVENT_KICK) != 0U)
               {
                 entered.store(1U, std::memory_order_release);
+                // Interleaving control only. EVENT_WRITE must establish visibility of
+                // published_value without help from this flag.
                 ASSERT(WaitUntil(
-                    [&] { return release.load(std::memory_order_acquire) != 0U; }));
+                    [&] { return release.load(std::memory_order_relaxed) != 0U; }));
               }
               if ((events & EVENT_WRITE) != 0U)
               {
@@ -190,7 +192,7 @@ void TestPublicationVisibilityThroughPendingEvent()
   ASSERT(WaitUntil([&] { return entered.load(std::memory_order_acquire) != 0U; }));
   published_value = 0xA5A55A5AU;
   ASSERT(!service.Invoke(EVENT_WRITE, [](uint32_t) noexcept { ASSERT(false); }));
-  release.store(1U, std::memory_order_release);
+  release.store(1U, std::memory_order_relaxed);
   ASSERT(WaitUntil([&] { return done.load(std::memory_order_acquire) != 0U; }));
   owner.join();
   ASSERT(observed.load(std::memory_order_acquire) == 0xA5A55A5AU);
@@ -250,12 +252,11 @@ void TestConcurrentReleaseReacquireStress()
   {
     thread.join();
   }
-  (void)service.Invoke(EVENT_KICK, handler);
-
   ASSERT(failures.load(std::memory_order_acquire) == 0U);
   ASSERT(active_handlers.load(std::memory_order_acquire) == 0U);
-  ASSERT(processed.load(std::memory_order_acquire) ==
-         requested.load(std::memory_order_acquire));
+  const uint32_t final_requested = requested.load(std::memory_order_acquire);
+  ASSERT(WaitUntil(
+      [&] { return processed.load(std::memory_order_acquire) == final_requested; }));
 }
 
 }  // namespace

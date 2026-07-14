@@ -10,6 +10,7 @@
 #include "../../common/rw/rw_mode_test_common.hpp"
 #include "latest_snapshot.hpp"
 #include "model/uart_dma_tx_model.hpp"
+#include "model/uart_hardware_gate.hpp"
 #include "test.hpp"
 
 namespace LibXRTest::UartDmaTx
@@ -59,6 +60,7 @@ class FakeUartDmaBackend
   static LibXR::ErrorCode WriteFun(LibXR::WritePort& port, bool in_isr)
   {
     auto* backend = LibXR::ContainerOf(&port, &FakeUartDmaBackend::port_);
+    ContextScope scope(in_isr);
     return backend->model_.Submit(in_isr);
   }
 
@@ -70,18 +72,193 @@ class FakeUartDmaBackend
 
   LibXR::WritePort& Port() { return port_; }
 
-  void Complete(bool in_isr = false) { model_.OnTransferDone(in_isr); }
-  void Error(bool in_isr = false) { model_.OnTransferError(in_isr); }
+  void EnableHardwareGateForTest()
+  {
+    ASSERT(hardware_gate_enabled_.load(std::memory_order_acquire) == 0U);
+    hardware_gate_enabled_.store(1U, std::memory_order_release);
+  }
+
+  [[nodiscard]] bool EnterIrqForTest()
+  {
+    ASSERT(HardwareGateEnabled());
+    const bool entered = hardware_gate_.TryEnterIrq();
+    if (entered)
+    {
+      irq_test_owner_.store(1U, std::memory_order_release);
+    }
+    return entered;
+  }
+
+  void CompleteInHeldIrq(bool in_isr = true)
+  {
+    ASSERT(HardwareGateEnabled());
+    ASSERT(irq_test_owner_.load(std::memory_order_acquire) != 0U);
+    ContextScope scope(in_isr);
+    DispatchCompleteToModel(in_isr);
+  }
+
+  void LeaveIrqForTest(bool in_isr = true)
+  {
+    DispatchActionsForTest(TakeIrqActionsForTest(), in_isr);
+  }
+
+  [[nodiscard]] LibXR::UartHardwareGate::PendingAction TakeIrqActionsForTest()
+  {
+    ASSERT(HardwareGateEnabled());
+    ASSERT(irq_test_owner_.exchange(0U, std::memory_order_acq_rel) != 0U);
+    return hardware_gate_.LeaveIrq();
+  }
+
+  void DispatchActionsForTest(LibXR::UartHardwareGate::PendingAction actions,
+                              bool in_isr = true)
+  {
+    ContextScope scope(in_isr);
+    DispatchHardwareActions(actions, in_isr);
+  }
+
+  [[nodiscard]] bool HardwareIrqDeferred() const
+  {
+    return IrqStatusLatched() || IrqDeferredBit();
+  }
+
+  [[nodiscard]] bool IrqStatusLatched() const
+  {
+    return deferred_irq_events_.load(std::memory_order_acquire) != 0U;
+  }
+
+  [[nodiscard]] bool IrqDeferredBit() const
+  {
+    return HardwareGateEnabled() && hardware_gate_.IrqDeferred();
+  }
+
+  [[nodiscard]] uint32_t ModelCompleteDispatchCount() const
+  {
+    return model_complete_dispatch_count_.load(std::memory_order_acquire);
+  }
+
+  [[nodiscard]] uint32_t ModelErrorDispatchCount() const
+  {
+    return model_error_dispatch_count_.load(std::memory_order_acquire);
+  }
+
+  [[nodiscard]] uint32_t DeferredRemaskCount() const
+  {
+    return deferred_remask_count_.load(std::memory_order_acquire);
+  }
+
+  void MarkDeferredCompleteForTest()
+  {
+    ASSERT(HardwareGateEnabled());
+    LatchIrqStatus(IRQ_COMPLETE);
+    hardware_gate_.MarkIrqDeferred();
+  }
+
+  void MarkIrqDeferredOnlyForTest()
+  {
+    ASSERT(HardwareGateEnabled());
+    hardware_gate_.MarkIrqDeferred();
+  }
+
+  void BlockNextDeferredPublishForTest()
+  {
+    deferred_publish_blocked_.store(0U, std::memory_order_release);
+    release_deferred_publish_.store(0U, std::memory_order_release);
+    block_deferred_publish_.store(1U, std::memory_order_release);
+  }
+
+  [[nodiscard]] bool WaitUntilDeferredPublishBlocked()
+  {
+    return WaitUntil(
+        [&] { return deferred_publish_blocked_.load(std::memory_order_acquire) != 0U; });
+  }
+
+  void ReleaseDeferredPublishForTest()
+  {
+    release_deferred_publish_.store(1U, std::memory_order_release);
+  }
+
+  void Complete(bool in_isr = false)
+  {
+    ContextScope scope(in_isr);
+    if (!HardwareGateEnabled())
+    {
+      DispatchCompleteToModel(in_isr);
+      return;
+    }
+
+    // The peripheral status is already latched when the vector reaches this
+    // adapter. Publish that fact before trying to acquire the shared owner; a
+    // CONFIG owner may clear it while this IRQ is waiting to mark its deferred
+    // handoff.
+    LatchIrqStatus(IRQ_COMPLETE);
+    if (!hardware_gate_.TryEnterIrq())
+    {
+      MaskNormalIrqDomain();
+      MaybeBlockDeferredPublish();
+      hardware_gate_.MarkIrqDeferred();
+      DispatchHardwareActions(LibXR::UartHardwareGate::PendingAction::NONE, in_isr);
+      return;
+    }
+
+    if (hardware_gate_.IrqDeferred())
+    {
+      DispatchHardwareActions(hardware_gate_.LeaveIrq(), in_isr);
+      return;
+    }
+
+    DispatchLatchedIrq(in_isr);
+    DispatchHardwareActions(hardware_gate_.LeaveIrq(), in_isr);
+  }
+
+  void Error(bool in_isr = false)
+  {
+    ContextScope scope(in_isr);
+    if (!HardwareGateEnabled())
+    {
+      DispatchErrorToModel(in_isr);
+      return;
+    }
+
+    // See Complete(): ERROR is a hardware status fact, not a notification that
+    // may be published only after owner acquisition.
+    LatchIrqStatus(IRQ_ERROR);
+    if (!hardware_gate_.TryEnterIrq())
+    {
+      MaskNormalIrqDomain();
+      MaybeBlockDeferredPublish();
+      hardware_gate_.MarkIrqDeferred();
+      DispatchHardwareActions(LibXR::UartHardwareGate::PendingAction::NONE, in_isr);
+      return;
+    }
+
+    if (hardware_gate_.IrqDeferred())
+    {
+      DispatchHardwareActions(hardware_gate_.LeaveIrq(), in_isr);
+      return;
+    }
+
+    DispatchLatchedIrq(in_isr);
+    DispatchHardwareActions(hardware_gate_.LeaveIrq(), in_isr);
+  }
 
   void Configure(uint32_t value, bool in_isr = false)
   {
     requested_config_.Store(Configuration{value});
+    ContextScope scope(in_isr);
     model_.RequestConfig(in_isr);
   }
 
-  void RetryConfig(bool in_isr = false) { model_.RequestConfig(in_isr); }
+  void RetryConfig(bool in_isr = false)
+  {
+    ContextScope scope(in_isr);
+    model_.RequestConfig(in_isr);
+  }
 
-  void ResumeConfig(bool in_isr = false) { model_.ResumeConfig(in_isr); }
+  void ResumeConfig(bool in_isr = false)
+  {
+    ContextScope scope(in_isr);
+    model_.ResumeConfig(in_isr);
+  }
 
   [[nodiscard]] bool IsBusy() const { return model_.IsBusy(); }
   [[nodiscard]] size_t BufferSize() const { return model_.BufferSize(); }
@@ -103,6 +280,14 @@ class FakeUartDmaBackend
   void SetStartAllowed(bool allowed)
   {
     allow_start_.store(allowed ? 1U : 0U, std::memory_order_release);
+  }
+
+  void RetryNextStart() { retry_next_start_.store(1U, std::memory_order_release); }
+
+  void ResumeStart(bool in_isr = false)
+  {
+    ContextScope scope(in_isr);
+    model_.ResumeStart(in_isr);
   }
 
   void SetConfigApplyAllowed(bool allowed)
@@ -169,8 +354,178 @@ class FakeUartDmaBackend
  private:
   friend class LibXR::UartDmaTxModel<FakeUartDmaBackend>;
 
-  bool StartDmaTx(uint8_t* data, size_t size, int block)
+  static constexpr uint32_t IRQ_COMPLETE = 1U << 0U;
+  static constexpr uint32_t IRQ_ERROR = 1U << 1U;
+
+  class ContextScope
   {
+   public:
+    explicit ContextScope(bool in_isr) : previous_(CurrentContextInIsr())
+    {
+      CurrentContextInIsr() = in_isr;
+    }
+
+    ~ContextScope() { CurrentContextInIsr() = previous_; }
+
+    ContextScope(const ContextScope&) = delete;
+    ContextScope& operator=(const ContextScope&) = delete;
+
+   private:
+    bool previous_;
+  };
+
+  static bool& CurrentContextInIsr()
+  {
+    static thread_local bool in_isr = false;
+    return in_isr;
+  }
+
+  [[nodiscard]] bool HardwareGateEnabled() const
+  {
+    return hardware_gate_enabled_.load(std::memory_order_acquire) != 0U;
+  }
+
+  [[nodiscard]] static constexpr bool HasAction(
+      LibXR::UartHardwareGate::PendingAction actions,
+      LibXR::UartHardwareGate::PendingAction action)
+  {
+    return LibXR::UartHardwareGate::HasAction(actions, action);
+  }
+
+  void MaybeBlockDeferredPublish()
+  {
+    if (block_deferred_publish_.exchange(0U, std::memory_order_acq_rel) == 0U)
+    {
+      return;
+    }
+
+    deferred_publish_blocked_.store(1U, std::memory_order_release);
+    const bool released = WaitUntil(
+        [&] { return release_deferred_publish_.load(std::memory_order_acquire) != 0U; });
+    ASSERT(released);
+  }
+
+  void DispatchCompleteToModel(bool in_isr)
+  {
+    model_complete_dispatch_count_.fetch_add(1U, std::memory_order_acq_rel);
+    model_.OnTransferDone(in_isr);
+  }
+
+  void DispatchErrorToModel(bool in_isr)
+  {
+    model_error_dispatch_count_.fetch_add(1U, std::memory_order_acq_rel);
+    model_.OnTransferError(in_isr);
+  }
+
+  void LatchIrqStatus(uint32_t event)
+  {
+    deferred_irq_events_.fetch_or(event, std::memory_order_release);
+  }
+
+  void DispatchLatchedIrq(bool in_isr)
+  {
+    const uint32_t events = deferred_irq_events_.exchange(0U, std::memory_order_acq_rel);
+    if ((events & IRQ_ERROR) != 0U)
+    {
+      // ERROR has priority over a co-latched COMPLETE. The completion belongs
+      // to the same hardware generation and must not release a newly promoted
+      // active request after recovery.
+      DispatchErrorToModel(in_isr);
+    }
+    else if ((events & IRQ_COMPLETE) != 0U)
+    {
+      DispatchCompleteToModel(in_isr);
+    }
+  }
+
+  void MaskNormalIrqDomain()
+  {
+    (void)irq_domain_enabled_.exchange(0U, std::memory_order_seq_cst);
+  }
+
+  void RestoreNormalIrqDomain()
+  {
+    (void)irq_domain_enabled_.exchange(1U, std::memory_order_seq_cst);
+  }
+
+  bool ProcessDeferredIrq(bool in_isr)
+  {
+    if (!hardware_gate_.TryEnterDeferredIrq())
+    {
+      return false;
+    }
+
+    // A prior owner may have restored the authoritative enable mask while a losing
+    // vector was between mask and MarkIrqDeferred(). Re-mask after the durable claim so
+    // the full-domain scan never relies on the publisher's earlier mask still winning.
+    MaskNormalIrqDomain();
+    deferred_remask_count_.fetch_add(1U, std::memory_order_acq_rel);
+    const uint32_t events = deferred_irq_events_.exchange(0U, std::memory_order_acq_rel);
+    ContextScope scope(in_isr);
+    if ((events & IRQ_ERROR) != 0U)
+    {
+      DispatchErrorToModel(in_isr);
+    }
+    else if ((events & IRQ_COMPLETE) != 0U)
+    {
+      DispatchCompleteToModel(in_isr);
+    }
+    RestoreNormalIrqDomain();
+    DispatchHardwareActions(hardware_gate_.LeaveIrq(), in_isr);
+    return true;
+  }
+
+  void DispatchHardwareActions(LibXR::UartHardwareGate::PendingAction actions,
+                               bool in_isr)
+  {
+    if (!HardwareGateEnabled())
+    {
+      return;
+    }
+
+    // CONFIG closes the old hardware generation first. A deferred terminal is then
+    // retried at the same boundary, and only finally may a TX start be resumed.
+    if (HasAction(actions, LibXR::UartHardwareGate::PendingAction::CONFIG))
+    {
+      ResumeConfig(in_isr);
+    }
+
+    const bool deferred =
+        HasAction(actions, LibXR::UartHardwareGate::PendingAction::IRQ_DEFERRED) ||
+        hardware_gate_.IrqDeferred();
+    if (deferred && !ProcessDeferredIrq(in_isr))
+    {
+      return;
+    }
+
+    if (HasAction(actions, LibXR::UartHardwareGate::PendingAction::TX_START))
+    {
+      ResumeStart(in_isr);
+    }
+  }
+
+  LibXR::UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block)
+  {
+    if (retry_next_start_.exchange(0U, std::memory_order_acq_rel) != 0U)
+    {
+      return LibXR::UartDmaTxStartResult::RETRY;
+    }
+
+    const bool gate_enabled = HardwareGateEnabled();
+    if (gate_enabled && !hardware_gate_.TryEnterTxStart())
+    {
+      return LibXR::UartDmaTxStartResult::RETRY;
+    }
+
+    const auto finish_start = [&](LibXR::UartDmaTxStartResult result)
+    {
+      if (gate_enabled)
+      {
+        DispatchHardwareActions(hardware_gate_.LeaveTxStart(), CurrentContextInIsr());
+      }
+      return result;
+    };
+
     const uint32_t start_index = static_cast<uint32_t>(StartCount());
     if (block_start_at_.load(std::memory_order_acquire) == start_index)
     {
@@ -183,7 +538,7 @@ class FakeUartDmaBackend
 
     if (allow_start_.load(std::memory_order_acquire) == 0U)
     {
-      return false;
+      return finish_start(LibXR::UartDmaTxStartResult::FAILED);
     }
 
     ASSERT(start_index < (sizeof(starts_) / sizeof(starts_[0])));
@@ -197,16 +552,27 @@ class FakeUartDmaBackend
             UINT32_MAX, std::memory_order_acq_rel) == start_index)
     {
       model_.ResumeConfig(true);
-      model_.OnTransferDone(true);
+      DispatchCompleteToModel(true);
     }
-    return true;
+    return finish_start(LibXR::UartDmaTxStartResult::STARTED);
   }
 
-  void OnConfigRequested() { config_pending_.store(1U, std::memory_order_release); }
+  void OnConfigRequested()
+  {
+    if (HardwareGateEnabled())
+    {
+      hardware_gate_.RequestConfig();
+    }
+    else
+    {
+      config_pending_.store(1U, std::memory_order_release);
+    }
+  }
 
   [[nodiscard]] bool ConfigRequested() const
   {
-    return config_pending_.load(std::memory_order_acquire) != 0U;
+    return HardwareGateEnabled() ? hardware_gate_.ConfigRequested()
+                                 : config_pending_.load(std::memory_order_acquire) != 0U;
   }
 
   bool ApplyPendingConfig(bool in_isr)
@@ -222,7 +588,24 @@ class FakeUartDmaBackend
       return false;
     }
 
-    ASSERT(config_pending_.exchange(0U, std::memory_order_acq_rel) != 0U);
+    if (HardwareGateEnabled() && !hardware_gate_.ConfigActive() &&
+        !hardware_gate_.TryEnterConfig())
+    {
+      return false;
+    }
+
+    if (HardwareGateEnabled())
+    {
+      MaskNormalIrqDomain();
+      hardware_gate_.ConsumePendingConfig();
+      // CONFIG clears the old hardware terminal source. A deferred event published
+      // after this snapshot remains latched for the next IRQ-domain pass.
+      deferred_irq_events_.exchange(0U, std::memory_order_acq_rel);
+    }
+    else
+    {
+      ASSERT(config_pending_.exchange(0U, std::memory_order_acq_rel) != 0U);
+    }
 
     const uint32_t apply_index = ConfigApplyCount();
     if (block_config_at_.load(std::memory_order_acquire) == apply_index)
@@ -242,7 +625,15 @@ class FakeUartDmaBackend
     return true;
   }
 
-  bool OnConfigApplied(bool) { return true; }
+  bool OnConfigApplied(bool in_isr)
+  {
+    if (HardwareGateEnabled())
+    {
+      RestoreNormalIrqDomain();
+      DispatchHardwareActions(hardware_gate_.LeaveConfig(), in_isr);
+    }
+    return true;
+  }
 
   alignas(size_t) uint8_t storage_[DMA_BLOCK_SIZE * 2U]{};
   LibXR::WritePort port_;
@@ -251,6 +642,7 @@ class FakeUartDmaBackend
   StartRecord starts_[32]{};
   std::atomic<uint32_t> start_count_{0U};
   std::atomic<uint32_t> allow_start_{1U};
+  std::atomic<uint32_t> retry_next_start_{0U};
   std::atomic<uint32_t> block_start_at_{UINT32_MAX};
   std::atomic<uint32_t> start_blocked_{0U};
   std::atomic<uint32_t> release_start_{0U};
@@ -264,6 +656,17 @@ class FakeUartDmaBackend
   std::atomic<uint32_t> block_config_at_{UINT32_MAX};
   std::atomic<uint32_t> config_blocked_{0U};
   std::atomic<uint32_t> release_config_{0U};
+  LibXR::UartHardwareGate hardware_gate_{};
+  std::atomic<uint32_t> hardware_gate_enabled_{0U};
+  std::atomic<uint32_t> irq_test_owner_{0U};
+  std::atomic<uint32_t> deferred_irq_events_{0U};
+  std::atomic<uint32_t> block_deferred_publish_{0U};
+  std::atomic<uint32_t> deferred_publish_blocked_{0U};
+  std::atomic<uint32_t> release_deferred_publish_{0U};
+  std::atomic<uint32_t> model_complete_dispatch_count_{0U};
+  std::atomic<uint32_t> model_error_dispatch_count_{0U};
+  std::atomic<uint32_t> irq_domain_enabled_{1U};
+  std::atomic<uint32_t> deferred_remask_count_{0U};
 };
 
 inline void AssertStart(const FakeUartDmaBackend& backend, size_t index,

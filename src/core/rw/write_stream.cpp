@@ -102,8 +102,8 @@ ErrorCode WritePort::Stream::SubmitBuffered()
     port_->busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
   }
 
-  auto ans = port_->queue_info_->Push(
-      WriteInfoBlock{ConstRawData{nullptr, buffered_size_}, op_});
+  auto ans = port_->queue_info_->Push(WriteInfoBlock{
+      ConstRawData{nullptr, buffered_size_}, op_, port_->BeginSubmission()});
   ASSERT(ans == ErrorCode::OK);
 
   ans = port_->CommitWrite({nullptr, buffered_size_}, op_, true);

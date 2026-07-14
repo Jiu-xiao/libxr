@@ -70,6 +70,27 @@ class WritePort
       BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
                                             ///< 当前 BLOCK 写入的最终结果。
+  uint32_t next_submission_id_ = 1U;
+  uint32_t current_submission_id_ = 0U;
+
+  /**
+   * @brief Allocate the identity stored in the next published metadata record.
+   *
+   * WritePort's producer ownership serializes this non-atomic counter. A live queue
+   * record cannot survive enough later publications for the 32-bit counter to wrap
+   * back onto it because that record itself bounds queue progress.
+   */
+  uint32_t BeginSubmission()
+  {
+    current_submission_id_ = next_submission_id_++;
+    return current_submission_id_;
+  }
+
+  /**
+   * @brief Return the record identity for the currently executing WriteFun call.
+   * @warning Valid only while the current WriteFun invocation owns this port.
+   */
+  [[nodiscard]] uint32_t CurrentSubmissionId() const { return current_submission_id_; }
 
   // Stream batch facade.
   // Stream 负责一次批次的累积写入与提交。
@@ -268,6 +289,9 @@ class WritePort
    *            Error code indicating the result of the operation.
    * @param op 需要更新状态的 WriteOperation 引用。
    *           Reference to the WriteOperation whose status needs to be updated.
+   * @warning A completion callback may run while an unrelated producer owns this port.
+   *          A callback that writes the same port must handle `BUSY`; completion
+   *          serialization does not reserve producer ownership for callback re-entry.
    */
   void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info);
 
