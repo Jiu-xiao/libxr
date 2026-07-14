@@ -14,6 +14,7 @@ WritePort::WritePort(size_t queue_size, size_t buffer_size)
                                         SPSCQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {
+  REQUIRE(queue_size < UINT32_MAX);
 }
 
 size_t WritePort::EmptySize()
@@ -147,7 +148,7 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
       busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
     }
 
-    WriteInfoBlock info{data, op};
+    WriteInfoBlock info{data, op, BeginSubmission()};
     ans = queue_info_->Push(info);
 
     ASSERT(ans == ErrorCode::OK);

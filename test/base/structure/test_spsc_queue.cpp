@@ -40,6 +40,7 @@ void ProducerTask(ProducerArg arg)
 
 static_assert(!std::is_default_constructible_v<NoDefaultPayload>);
 static_assert(std::is_trivially_copyable_v<NoDefaultPayload>);
+static_assert(std::is_same_v<LibXR::SPSCQueueBase::IndexType, uint32_t>);
 
 void test_spsc_queue()
 {

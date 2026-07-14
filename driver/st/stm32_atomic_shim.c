@@ -1,6 +1,7 @@
 #include "main.h"
 
-#if defined(STM32F0) || defined(STM32G0) || defined(STM32L0)
+#if defined(STM32C0) || defined(STM32F0) || defined(STM32G0) || defined(STM32L0) || \
+    defined(STM32U0)
 
 static inline uint32_t atomic_enter(void)
 {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <new>
 
@@ -27,7 +28,7 @@ namespace LibXR
 class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
 {
  public:
-  using IndexType = size_t;  ///< 环形缓冲区索引类型 / Ring-buffer index type.
+  using IndexType = uint32_t;  ///< 环形缓冲区索引类型 / Ring-buffer index type.
 
   /**
    * @brief 构造 SPSC 字节队列内核 / Construct the SPSC byte-queue core
@@ -71,7 +72,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     ASSERT(element_size_ > 0);
     ASSERT(payload_alloc_align_ > 0);
     ASSERT(capacity_ > 0);
-    ASSERT(capacity_ <= std::numeric_limits<size_t>::max() - 1);
+    ASSERT(capacity_ < static_cast<size_t>(UINT32_MAX));
     ASSERT((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
 
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());
@@ -246,7 +247,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
       return ErrorCode::FULL;
     }
 
-    const size_t first_chunk = std::min(count, capacity - current_tail);
+    const size_t first_chunk =
+        std::min(count, capacity - static_cast<size_t>(current_tail));
     Writer& writer_ref = writer;
     const ErrorCode first_ec = writer_ref(PayloadPtr(current_tail), first_chunk);
     if (first_ec != ErrorCode::OK)
@@ -346,7 +348,8 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
       return ErrorCode::EMPTY;
     }
 
-    const size_t first_chunk = std::min(count, capacity - current_head);
+    const size_t first_chunk =
+        std::min(count, capacity - static_cast<size_t>(current_head));
     Reader& reader_ref = reader;
     const ErrorCode first_ec = reader_ref(PayloadPtr(current_head), first_chunk);
     if (first_ec != ErrorCode::OK)

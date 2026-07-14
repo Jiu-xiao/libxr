@@ -29,8 +29,10 @@ namespace LibXR
  * RX DMA HT/TC use different interrupt sources, the platform driver must configure them
  * with the same preemption priority and target-core affinity so only one
  * `OnDataAvailable()` call can modify the read position and act as the software-queue
- * producer at a time. Configuration on another core must use a separate hardware-state
- * handoff such as `UartRxConfigGate`.
+ * producer at a time. Configuration outside that IRQ domain must serialize RX DMA
+ * position/buffer changes through the platform's shared UART hardware owner, such as
+ * `UartHardwareGate`; clearing the `ReadPort` software queue is not that hardware
+ * handoff.
  */
 class UartCircularDmaRxModel
 {
