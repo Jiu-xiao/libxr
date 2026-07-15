@@ -18,13 +18,10 @@ extern "C" void libxr_fatal_error(const char* file, uint32_t line, bool in_isr)
         LibXR::STDIO::Print<"Fatal error at {}:{}\r\n">(file, static_cast<int>(line));
       }
 
-      if (!LibXR::Assert::FatalErrorCallback().Empty())
-      {
-        // The fatal callback is executed only on the non-ISR fatal path here.
-        // Normalize the user callback to thread context instead of forwarding the
-        // original fault source flag.
-        LibXR::Assert::FatalErrorCallback().Run(false, file, line);
-      }
+      // The fatal callback is executed only on the non-ISR fatal path here.
+      // Normalize the user callback to thread context instead of forwarding the
+      // original fault source flag.
+      LibXR::Assert::RunFatalErrorCallback(false, file, line);
 
       LibXR::Thread::Sleep(500);
     }

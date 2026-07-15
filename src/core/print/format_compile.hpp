@@ -13,7 +13,8 @@
 namespace LibXR::Print
 {
 /**
- * @brief 共享编译期后端，把前端事件整理成最终字节流和参数表。 / Shared compile-time backend that turns frontend events into the final byte stream plus argument table.
+ * @brief 共享编译期后端，把前端事件整理成最终字节流和参数表。 / Shared compile-time
+ * backend that turns frontend events into the final byte stream plus argument table.
  *
  * Frontend contract:
  * The frontend must provide the members using ErrorType, static constexpr
@@ -57,7 +58,8 @@ class FormatCompiler
   using Error = typename Frontend::ErrorType;
 
   /**
-   * @brief 当前后端实例产出的最终精确尺寸编译格式 / Final exact-size compiled format produced by this backend instance
+   * @brief 当前后端实例产出的最终精确尺寸编译格式 / Final exact-size compiled format
+   * produced by this backend instance
    * @tparam BlobBytes 最终保留字节块大小 / Final retained byte-block size
    * @tparam ArgCount 最终参数元信息个数 / Final argument metadata count
    */
@@ -68,19 +70,24 @@ class FormatCompiler
         std::array<uint8_t, BlobBytes>;  ///< final runtime byte block / 最终运行期字节块
     using ArgumentListData =
         std::array<FormatArgumentInfo,
-                   ArgCount>;  ///< ordered compile-time argument metadata / 按顺序排列的编译期参数元信息
+                   ArgCount>;  ///< ordered compile-time argument metadata /
+                               ///< 按顺序排列的编译期参数元信息
 
-    CodeList codes{};                    ///< code stream first, text pool second / 前半记录流，后半文本池
-    ArgumentListData arg_info{};         ///< ordered argument metadata / 按参数顺序排列的参数元信息
-    FormatProfile profile = FormatProfile::None;  ///< compile-time executor profile / 编译期执行器配置
-    Error compile_error = Error::None;   ///< first compile-time failure, if any / 首个编译期失败原因
+    CodeList codes{};  ///< code stream first, text pool second / 前半记录流，后半文本池
+    ArgumentListData
+        arg_info{};  ///< ordered argument metadata / 按参数顺序排列的参数元信息
+    FormatProfile profile =
+        FormatProfile::None;  ///< compile-time executor profile / 编译期执行器配置
+    Error compile_error =
+        Error::None;  ///< first compile-time failure, if any / 首个编译期失败原因
   };
 
   template <size_t BlobBytes, size_t ArgCount>
   using Result = ResultData<BlobBytes, ArgCount>;
 
   /**
-   * @brief 超过该长度后，字面文本会从内嵌模式切换为 TextRef / Maximum inline literal size before the backend spills to TextRef.
+   * @brief 超过该长度后，字面文本会从内嵌模式切换为 TextRef / Maximum inline literal size
+   * before the backend spills to TextRef.
    */
   static constexpr size_t inline_text_limit = 2 * sizeof(size_t) - 1;
 
@@ -96,11 +103,11 @@ class FormatCompiler
   static constexpr size_t max_code_bytes = 3 * Frontend::SourceSize() + 1;
   static constexpr size_t max_text_pool_bytes = Frontend::SourceSize();
   static constexpr size_t max_arg_count = Frontend::SourceSize();
-  static constexpr uint8_t unspecified_precision =
-      std::numeric_limits<uint8_t>::max();
+  static constexpr uint8_t unspecified_precision = std::numeric_limits<uint8_t>::max();
 
   /**
-   * @brief 向临时或最终字节缓冲区追加一个原始字节 / Append one raw byte into a scratch or final byte buffer
+   * @brief 向临时或最终字节缓冲区追加一个原始字节 / Append one raw byte into a scratch or
+   * final byte buffer
    * @param data 目标字节缓冲区 / Target byte buffer
    * @param out 当前写位置；会前进一个字节 / Current write position; advanced by one byte
    * @param value 待追加的字节值 / Byte value to append
@@ -111,10 +118,12 @@ class FormatCompiler
   }
 
   /**
-   * @brief 向临时或最终字节缓冲区追加一个按本机字节序编码的 POD 值 / Append one native-endian POD value into a scratch or final byte buffer
+   * @brief 向临时或最终字节缓冲区追加一个按本机字节序编码的 POD 值 / Append one
+   * native-endian POD value into a scratch or final byte buffer
    * @tparam T 待编码的 POD 类型 / POD type to encode
    * @param data 目标字节缓冲区 / Target byte buffer
-   * @param out 当前写位置；会前进 `sizeof(T)` / Current write position; advanced by `sizeof(T)`
+   * @param out 当前写位置；会前进 `sizeof(T)` / Current write position; advanced by
+   * `sizeof(T)`
    * @param value 待追加的 POD 值 / POD value to append
    */
   template <typename T>
@@ -128,10 +137,12 @@ class FormatCompiler
   }
 
   /**
-   * @brief 从临时字节缓冲区读取一个按本机字节序编码的 POD 值 / Read one native-endian POD value from a scratch byte buffer
+   * @brief 从临时字节缓冲区读取一个按本机字节序编码的 POD 值 / Read one native-endian POD
+   * value from a scratch byte buffer
    * @tparam T 待读取的 POD 类型 / POD type to decode
    * @param data 源字节缓冲区 / Source byte buffer
-   * @param pos 当前读取位置；会前进 `sizeof(T)` / Current read position; advanced by `sizeof(T)`
+   * @param pos 当前读取位置；会前进 `sizeof(T)` / Current read position; advanced by
+   * `sizeof(T)`
    * @return 返回解码后的 POD 值 / Returns the decoded POD value
    */
   template <typename T>
@@ -146,7 +157,8 @@ class FormatCompiler
   }
 
   /**
-   * @brief 构造只携带编译错误的最小失败结果。 / Builds the minimal failed result carrying only the compile error.
+   * @brief 构造只携带编译错误的最小失败结果。 / Builds the minimal failed result carrying
+   * only the compile error.
    * @param error Compile-time failure category. / 编译期失败类别。
    * @return Returns a minimal failed result object. / 返回最小失败结果对象。
    */
@@ -158,7 +170,11 @@ class FormatCompiler
   }
 
   /**
-   * @brief 指出某个操作码族需要打开哪一个 writer-profile 位。 / Says which writer-profile bit one opcode family needs.
+   * @brief 指出某个操作码族需要打开哪一个 writer-profile 位。 / Says which writer-profile
+   * bit one opcode family needs.
+   * @param op 待分类的操作码 / Opcode to classify
+   * @return 对应的窄路径 profile 位；无需窄路径时返回 `None` / Required narrow-path
+   * profile bit, or `None` when no narrow path is needed
    */
   [[nodiscard]] static consteval FormatProfile ProfileForOp(FormatOp op)
   {
@@ -166,15 +182,17 @@ class FormatCompiler
     {
       case FormatOp::U32Dec:
       case FormatOp::U32ZeroPadWidth:
-        return FormatProfile::U32;
+      case FormatOp::I32Dec:
+      case FormatOp::U32Binary:
+      case FormatOp::U32Octal:
+      case FormatOp::U32HexLower:
+      case FormatOp::U32HexUpper:
+        return FormatProfile::NarrowInt;
       case FormatOp::StringRaw:
+      case FormatOp::CharacterRaw:
         return FormatProfile::TextArg;
-      case FormatOp::F32FixedPrec:
-        return FormatProfile::F32Fixed;
-      case FormatOp::F64FixedPrec:
-        return FormatProfile::F64Fixed;
       case FormatOp::GenericField:
-        return FormatProfile::Generic;
+        return FormatProfile::None;
       case FormatOp::TextInline:
       case FormatOp::TextRef:
       case FormatOp::TextSpace:
@@ -186,67 +204,119 @@ class FormatCompiler
   }
 
   /**
-   * @brief 为一个字段选择仍能正确打印它的最小操作码。 / Chooses the smallest opcode that can still print this field correctly.
+   * @brief 为一个字段选择仍能正确打印它的最小操作码。 / Chooses the smallest opcode that
+   * can still print this field correctly.
    */
   [[nodiscard]] static consteval FormatOp FastFieldOp(const FormatField& field)
   {
+    const bool raw_integer_field = IsRawIntegerField(field);
+    const bool raw_text_field = IsRawTextField(field);
+
+    if (raw_integer_field && field.type == FormatType::Signed32 &&
+        field.pack == FormatPackKind::I32)
+    {
+      return FormatOp::I32Dec;
+    }
+
     if (field.type == FormatType::Unsigned32 && field.pack == FormatPackKind::U32 &&
-        field.flags == 0 && field.fill == ' ' && field.width == 0 &&
-        field.precision == unspecified_precision)
+        raw_integer_field)
     {
       return FormatOp::U32Dec;
     }
 
-    if (field.type == FormatType::Unsigned32 && field.pack == FormatPackKind::U32 &&
-        field.flags == static_cast<uint8_t>(FormatFlag::ZeroPad) &&
-        field.fill == ' ' && field.width != 0 &&
-        field.precision == unspecified_precision)
+    if (raw_integer_field && field.type == FormatType::Binary32 &&
+        field.pack == FormatPackKind::U32)
     {
-      return FormatOp::U32ZeroPadWidth;
+      return FormatOp::U32Binary;
     }
 
-    if (field.type == FormatType::String &&
-        field.pack == FormatPackKind::StringView && field.flags == 0 &&
-        field.fill == ' ' &&
-        field.width == 0 && field.precision == unspecified_precision)
+    if (raw_integer_field && field.type == FormatType::Octal32 &&
+        field.pack == FormatPackKind::U32)
+    {
+      return FormatOp::U32Octal;
+    }
+
+    if (raw_integer_field && field.type == FormatType::HexLower32 &&
+        field.pack == FormatPackKind::U32)
+    {
+      return FormatOp::U32HexLower;
+    }
+
+    if (raw_integer_field && field.type == FormatType::HexUpper32 &&
+        field.pack == FormatPackKind::U32)
+    {
+      return FormatOp::U32HexUpper;
+    }
+
+    if (raw_text_field && field.type == FormatType::Character &&
+        field.pack == FormatPackKind::Character)
+    {
+      return FormatOp::CharacterRaw;
+    }
+
+    if (raw_text_field && field.type == FormatType::String &&
+        field.pack == FormatPackKind::StringView)
     {
       return FormatOp::StringRaw;
     }
 
-    if (field.type == FormatType::FloatFixed && field.pack == FormatPackKind::F32 &&
-        field.flags == 0 && field.fill == ' ' && field.width == 0 &&
-        field.precision != unspecified_precision)
+    if (field.type == FormatType::Unsigned32 && field.pack == FormatPackKind::U32 &&
+        field.flags == static_cast<uint8_t>(FormatFlag::ZeroPad) && field.fill == ' ' &&
+        field.width != 0 && field.precision == unspecified_precision)
     {
-      return FormatOp::F32FixedPrec;
-    }
-
-    if (field.type == FormatType::DoubleFixed && field.pack == FormatPackKind::F64 &&
-        field.flags == 0 && field.fill == ' ' && field.width == 0 &&
-        field.precision != unspecified_precision)
-    {
-      return FormatOp::F64FixedPrec;
+      return FormatOp::U32ZeroPadWidth;
     }
 
     return FormatOp::GenericField;
   }
 
   /**
-   * @brief 由前端文本/字段事件直接喂给的单遍临时构建器。 / One-pass scratch builder fed directly by frontend text/field events.
+   * @brief 判断字段是否满足裸整数快路径条件。 / Tests whether one field matches the raw
+   * integer fast-path gate.
+   */
+  [[nodiscard]] static consteval bool IsRawIntegerField(const FormatField& field)
+  {
+    return field.flags == 0 && field.fill == ' ' && field.width == 0 &&
+           field.precision == unspecified_precision;
+  }
+
+  /**
+   * @brief 判断字段是否满足裸文本快路径条件。 / Tests whether one field matches the raw
+   * text fast-path gate.
+   */
+  [[nodiscard]] static consteval bool IsRawTextField(const FormatField& field)
+  {
+    return (field.flags == 0 ||
+            field.flags == static_cast<uint8_t>(FormatFlag::LeftAlign)) &&
+           field.fill == ' ' && field.width == 0 &&
+           field.precision == unspecified_precision;
+  }
+
+  /**
+   * @brief 由前端文本/字段事件直接喂给的单遍临时构建器。 / One-pass scratch builder fed
+   * directly by frontend text/field events.
    */
   struct ScratchBuilder
   {
-    std::array<uint8_t, max_code_bytes> code_scratch{};            ///< temporary record stream without final End / 临时记录流，不含最终 End
-    std::array<uint8_t, max_text_pool_bytes> text_scratch{};       ///< temporary trailing text pool / 临时尾部文本池
-    std::array<FormatArgumentInfo, max_arg_count> arg_scratch{};   ///< temporary ordered argument metadata / 临时参数元信息表
+    std::array<uint8_t, max_code_bytes>
+        code_scratch{};  ///< temporary record stream without final End /
+                         ///< 临时记录流，不含最终 End
+    std::array<uint8_t, max_text_pool_bytes>
+        text_scratch{};  ///< temporary trailing text pool / 临时尾部文本池
+    std::array<FormatArgumentInfo, max_arg_count>
+        arg_scratch{};  ///< temporary ordered argument metadata / 临时参数元信息表
 
-    size_t code_bytes = 0;       ///< scratch record-stream bytes, excluding End / 临时记录流字节数，不含 End
+    size_t code_bytes =
+        0;  ///< scratch record-stream bytes, excluding End / 临时记录流字节数，不含 End
     size_t text_pool_bytes = 0;  ///< scratch text-pool bytes / 临时文本池字节数
     size_t arg_count = 0;        ///< consumed runtime arguments / 运行期参数个数
-    FormatProfile profile = FormatProfile::None;  ///< required runtime executor profile / 需要的运行期执行器配置
-    Error frontend_error = Error::None;   ///< first frontend failure / 首个前端失败原因
+    FormatProfile profile = FormatProfile::None;  ///< required runtime executor profile /
+                                                  ///< 需要的运行期执行器配置
+    Error frontend_error = Error::None;  ///< first frontend failure / 首个前端失败原因
 
     /**
-     * @brief 将单个字面文本片段追加到临时缓冲区。 / Appends one literal-text span into the scratch buffers.
+     * @brief 将单个字面文本片段追加到临时缓冲区。 / Appends one literal-text span into
+     * the scratch buffers.
      * @param offset Text offset inside `Frontend::SourceData()`. /
      *        文本在 `Frontend::SourceData()` 中的偏移。
      * @param text_size Text byte count. / 文本字节数。
@@ -302,7 +372,8 @@ class FormatCompiler
     }
 
     /**
-     * @brief 将一个值字段追加到临时字节流和临时参数表中。 / Appends one value field into the scratch byte stream and scratch argument table.
+     * @brief 将一个值字段追加到临时字节流和临时参数表中。 / Appends one value field into
+     * the scratch byte stream and scratch argument table.
      * @param field Shared field record produced by the frontend. /
      *        前端产出的共享字段记录。
      * @return Returns the field append result. / 返回字段追加结果。
@@ -315,14 +386,16 @@ class FormatCompiler
       switch (op)
       {
         case FormatOp::U32Dec:
+        case FormatOp::I32Dec:
+        case FormatOp::U32Binary:
+        case FormatOp::U32Octal:
+        case FormatOp::U32HexLower:
+        case FormatOp::U32HexUpper:
         case FormatOp::StringRaw:
+        case FormatOp::CharacterRaw:
           break;
         case FormatOp::U32ZeroPadWidth:
           EmitByte(code_scratch, code_bytes, field.width);
-          break;
-        case FormatOp::F32FixedPrec:
-        case FormatOp::F64FixedPrec:
-          EmitByte(code_scratch, code_bytes, field.precision);
           break;
         case FormatOp::GenericField:
           EmitByte(code_scratch, code_bytes, static_cast<uint8_t>(field.type));
@@ -338,7 +411,8 @@ class FormatCompiler
           break;
       }
 
-      profile |= ProfileForOp(op);
+      profile |=
+          op == FormatOp::GenericField ? GenericProfileFor(field.type) : ProfileForOp(op);
 
       arg_scratch[arg_count++] = FormatArgumentInfo{
           .pack = field.pack,
@@ -348,12 +422,14 @@ class FormatCompiler
     }
 
     /**
-     * @brief 含 End 结束标记在内的最终记录流字节数 / Final record-stream size including the End marker.
+     * @brief 含 End 结束标记在内的最终记录流字节数 / Final record-stream size including
+     * the End marker.
      * @return Returns the final record-stream byte count. / 返回最终记录流字节数。
      */
     [[nodiscard]] constexpr size_t FinalCodeBytes() const { return code_bytes + 1; }
     /**
-     * @brief 含尾部文本池在内的最终保留字节块大小 / Final retained byte-block size including the trailing text pool.
+     * @brief 含尾部文本池在内的最终保留字节块大小 / Final retained byte-block size
+     * including the trailing text pool.
      * @return Returns the total retained byte-block size. / 返回最终保留字节块总大小。
      */
     [[nodiscard]] constexpr size_t FinalBlobBytes() const
@@ -362,7 +438,8 @@ class FormatCompiler
     }
 
     /**
-     * @brief 把临时缓冲打包成最终精确尺寸的编译格式。 / Packs the scratch buffers into the final exact-size compiled format.
+     * @brief 把临时缓冲打包成最终精确尺寸的编译格式。 / Packs the scratch buffers into
+     * the final exact-size compiled format.
      *
      * TextRef records store temporary offsets relative to the text scratch pool.
      * Finalization rebases those offsets so they point at the trailing text pool
@@ -402,6 +479,12 @@ class FormatCompiler
           continue;
         }
 
+        const size_t payload_bytes = FormatOpPayloadBytes(op);
+        if (payload_bytes == 0)
+        {
+          continue;
+        }
+
         if (op == FormatOp::TextRef)
         {
           auto relative_offset = ReadNative<uint16_t>(code_scratch, scratch_in);
@@ -417,8 +500,7 @@ class FormatCompiler
           continue;
         }
 
-        if (op == FormatOp::U32ZeroPadWidth || op == FormatOp::F32FixedPrec ||
-            op == FormatOp::F64FixedPrec)
+        if (payload_bytes == 1)
         {
           EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
           continue;
@@ -426,11 +508,10 @@ class FormatCompiler
 
         if (op == FormatOp::GenericField)
         {
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
-          EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
+          for (size_t i = 0; i < payload_bytes; ++i)
+          {
+            EmitByte(result.codes, code_out, code_scratch[scratch_in++]);
+          }
         }
       }
 
@@ -455,14 +536,16 @@ class FormatCompiler
 
  public:
   /**
-   * @brief 把一个前端编译成最终字节流、参数表和 writer 摘要。 / Compiles one frontend into the final byte stream, argument table, and writer profile.
+   * @brief 把一个前端编译成最终字节流、参数表和 writer 摘要。 / Compiles one frontend
+   * into the final byte stream, argument table, and writer profile.
    * @return Returns the final compiled result object, or a failed result that
    *         carries the first compile-time error. / 返回最终编译结果对象；
    *         若失败则返回携带首个编译期错误的失败结果。
    */
   [[nodiscard]] static consteval auto Compile()
   {
-    constexpr auto scratch = []() consteval {
+    constexpr auto scratch = []() consteval
+    {
       ScratchBuilder builder{};
       builder.frontend_error = Frontend::Walk(builder);
       return builder;
@@ -474,8 +557,8 @@ class FormatCompiler
     }
     else
     {
-      return scratch.template Finish<scratch.FinalCodeBytes(),
-                                     scratch.FinalBlobBytes(), scratch.arg_count>();
+      return scratch.template Finish<scratch.FinalCodeBytes(), scratch.FinalBlobBytes(),
+                                     scratch.arg_count>();
     }
   }
 };

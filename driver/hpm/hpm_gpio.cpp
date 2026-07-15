@@ -1,4 +1,6 @@
-﻿#include "hpm_gpio.hpp"
+#include "hpm_gpio.hpp"
+
+#include <atomic>
 
 #include "hpm_interrupt.h"
 #include "hpm_ioc_regs.h"
@@ -13,6 +15,47 @@ using namespace LibXR;
  */
 HPMGPIO* HPMGPIO::map[HPMGPIO::PORT_COUNT][HPMGPIO::PIN_COUNT] = {};
 GPIO_Type* HPMGPIO::port_controller_map[HPMGPIO::PORT_COUNT] = {};
+HPMGPIO::PortIrqRouteState HPMGPIO::port_irq_route_map[HPMGPIO::PORT_COUNT] = {};
+
+namespace
+{
+// Serialize shared per-port IRQ routing updates against task/ISR races on the local core.
+std::atomic_flag g_hpm_gpio_irq_route_lock = ATOMIC_FLAG_INIT;
+
+bool HPM_GPIO_IsFastController(GPIO_Type* gpio)
+{
+#if defined(HPM_FGPIO)
+  return gpio == HPM_FGPIO;
+#else
+  (void)gpio;
+  return false;
+#endif
+}
+
+class HPMGPIOIrqRouteGuard
+{
+ public:
+  HPMGPIOIrqRouteGuard()
+      : irq_state_(disable_global_irq(CSR_MSTATUS_MIE_MASK) & CSR_MSTATUS_MIE_MASK)
+  {
+    while (g_hpm_gpio_irq_route_lock.test_and_set(std::memory_order_acquire))
+    {
+    }
+  }
+
+  ~HPMGPIOIrqRouteGuard()
+  {
+    g_hpm_gpio_irq_route_lock.clear(std::memory_order_release);
+    restore_global_irq(irq_state_);
+  }
+
+  HPMGPIOIrqRouteGuard(const HPMGPIOIrqRouteGuard&) = delete;
+  HPMGPIOIrqRouteGuard& operator=(const HPMGPIOIrqRouteGuard&) = delete;
+
+ private:
+  uint32_t irq_state_;
+};
+}  // namespace
 
 /**
  * @brief 将 PAD 复用切换为 GPIO 功能 / Route PAD mux to GPIO function.
@@ -36,10 +79,15 @@ static inline void HPM_GPIO_ConfigMuxToGPIO(GPIO_Type* gpio, uint32_t port,
   HPM_IOC->PAD[pad_index].FUNC_CTL = func_ctl;
 
   // GPIOY 端口需要额外通过 PIOC 选择 SOC GPIO 信号 / GPIOY needs extra PIOC routing.
-  if (port == GPIO_DI_GPIOY && (gpio == HPM_GPIO0 || gpio == HPM_FGPIO))
+#if defined(GPIO_DI_GPIOY) && defined(HPM_PIOC)
+  if (port == GPIO_DI_GPIOY && (gpio == HPM_GPIO0 || HPM_GPIO_IsFastController(gpio)))
   {
     HPM_PIOC->PAD[pad_index].FUNC_CTL = IOC_PAD_FUNC_CTL_ALT_SELECT_SET(3);
   }
+#else
+  (void)gpio;
+  (void)port;
+#endif
 }
 
 /**
@@ -55,7 +103,7 @@ HPMGPIO::HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq,
       pad_index_(pad_index == INVALID_PAD_INDEX ? ResolvePadIndex(gpio, port, pin)
                                                 : pad_index)
 {
-  if (port_ < PORT_COUNT && pin_ < PIN_COUNT)
+  if (port_ < PORT_COUNT && pin_ < PIN_COUNT && !HPM_GPIO_IsFastController(gpio_))
   {
     map[port_][pin_] = this;
     if (port_controller_map[port_] == nullptr)
@@ -68,39 +116,107 @@ HPMGPIO::HPMGPIO(GPIO_Type* gpio, uint32_t port, uint8_t pin, uint32_t irq,
 /**
  * @brief 使能当前引脚中断 / Enable interrupt for current pin.
  *
- * 对于从 STM32 迁移的开发者：
- * - `gpio_enable_pin_interrupt()` 只打开 GPIO 侧事件；
- * - `intc_m_enable_irq_with_priority()` 打开 PLIC 路由并设置优先级。
- * For STM32-oriented users:
- * - `gpio_enable_pin_interrupt()` enables GPIO-side event generation only.
- * - `intc_m_enable_irq_with_priority()` enables PLIC routing and IRQ priority.
+ * 对于共享同一 port IRQ 的多个 pin：
+ * - `gpio_enable_pin_interrupt()` 始终按 pin 开事件；
+ * - PLIC 路由只在该 port 首次进入“已使能”状态时打开一次。
+ * - FGPIO 没有 GPIO 中断能力，按完整 SDK GPIO 示例的约束返回 NOT_SUPPORT。
+ * For multiple pins sharing one port IRQ:
+ * - `gpio_enable_pin_interrupt()` always operates per pin;
+ * - PLIC routing is enabled only once when the first pin on that port becomes active.
+ * - FGPIO has no GPIO interrupt capability and returns NOT_SUPPORT according to the
+ *   full SDK GPIO sample constraint.
  */
 ErrorCode HPMGPIO::EnableInterrupt()
 {
-  if (irq_ == INVALID_IRQ)
+  if (irq_ == INVALID_IRQ || port_ >= PORT_COUNT || pin_ >= PIN_COUNT)
   {
     return ErrorCode::ARG_ERR;
   }
+  if (HPM_GPIO_IsFastController(gpio_))
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  HPMGPIOIrqRouteGuard guard;
+  if (interrupt_enabled_)
+  {
+    return ErrorCode::OK;
+  }
+
+  PortIrqRouteState& route = port_irq_route_map[port_];
+  const bool needs_port_irq_enable = (route.enabled_pin_count == 0u);
+  if (!needs_port_irq_enable && (route.controller != gpio_ || route.irq != irq_))
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
   gpio_enable_pin_interrupt(gpio_, port_, pin_);
-  intc_m_enable_irq_with_priority(irq_, 1);
+
+  if (needs_port_irq_enable)
+  {
+    route.controller = gpio_;
+    route.irq = irq_;
+    intc_m_enable_irq_with_priority(irq_, 1);
+  }
+
+  ++route.enabled_pin_count;
+  interrupt_enabled_ = true;
   return ErrorCode::OK;
 }
 
 /**
  * @brief 失能当前引脚中断 / Disable interrupt for current pin.
  *
- * 先关闭 GPIO 事件，再关闭 PLIC 路由，避免在关中断过程中出现残留触发。
- * Disable GPIO event first, then PLIC routing, to avoid residual triggers while
- * disabling.
+ * 先关闭当前 pin 的 GPIO 事件；
+ * 仅当该 port 最后一个已使能 pin 被释放时，才关闭共享的 PLIC 路由。
+ * FGPIO 没有 GPIO 中断能力，按完整 SDK GPIO 示例的约束返回 NOT_SUPPORT。
+ * Disable the current pin's GPIO event first; the shared PLIC route is disabled only
+ * after the last enabled pin on the same port is released.
+ * FGPIO has no GPIO interrupt capability and returns NOT_SUPPORT according to the
+ * full SDK GPIO sample constraint.
  */
 ErrorCode HPMGPIO::DisableInterrupt()
 {
-  if (irq_ == INVALID_IRQ)
+  if (irq_ == INVALID_IRQ || port_ >= PORT_COUNT || pin_ >= PIN_COUNT)
   {
     return ErrorCode::ARG_ERR;
   }
+  if (HPM_GPIO_IsFastController(gpio_))
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  HPMGPIOIrqRouteGuard guard;
+  if (!interrupt_enabled_)
+  {
+    return ErrorCode::OK;
+  }
+
   gpio_disable_pin_interrupt(gpio_, port_, pin_);
-  intc_m_disable_irq(irq_);
+
+  PortIrqRouteState& route = port_irq_route_map[port_];
+  if (route.enabled_pin_count == 0u)
+  {
+    route = {};
+    interrupt_enabled_ = false;
+    return ErrorCode::STATE_ERR;
+  }
+
+  if (route.controller != gpio_ || route.irq != irq_)
+  {
+    interrupt_enabled_ = false;
+    return ErrorCode::STATE_ERR;
+  }
+
+  --route.enabled_pin_count;
+  if (route.enabled_pin_count == 0u)
+  {
+    const uint32_t route_irq = route.irq;
+    route = {};
+    intc_m_disable_irq(route_irq);
+  }
+
+  interrupt_enabled_ = false;
   return ErrorCode::OK;
 }
 
@@ -120,6 +236,31 @@ ErrorCode HPMGPIO::SetConfig(Configuration config)
   if (port_ >= PORT_COUNT || pin_ >= PIN_COUNT)
   {
     return ErrorCode::ARG_ERR;
+  }
+
+  switch (config.pull)
+  {
+    case Pull::NONE:
+    case Pull::UP:
+    case Pull::DOWN:
+      break;
+    default:
+      return ErrorCode::ARG_ERR;
+  }
+
+  const bool is_interrupt_direction =
+      config.direction == Direction::FALL_INTERRUPT ||
+      config.direction == Direction::RISING_INTERRUPT ||
+      config.direction == Direction::FALL_RISING_INTERRUPT;
+  if (is_interrupt_direction && HPM_GPIO_IsFastController(gpio_))
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+  if (config.direction == Direction::FALL_RISING_INTERRUPT)
+  {
+#if !defined(GPIO_SOC_HAS_EDGE_BOTH_INTERRUPT) || (GPIO_SOC_HAS_EDGE_BOTH_INTERRUPT != 1)
+    return ErrorCode::NOT_SUPPORT;
+#endif
   }
 
   if (pad_index_ != INVALID_PAD_INDEX)
@@ -147,9 +288,13 @@ ErrorCode HPMGPIO::SetConfig(Configuration config)
       gpio_config_pin_interrupt(gpio_, port_, pin_, gpio_interrupt_trigger_edge_rising);
       break;
     case Direction::FALL_RISING_INTERRUPT:
+#if defined(GPIO_SOC_HAS_EDGE_BOTH_INTERRUPT) && (GPIO_SOC_HAS_EDGE_BOTH_INTERRUPT == 1)
       gpio_set_pin_input(gpio_, port_, pin_);
       gpio_config_pin_interrupt(gpio_, port_, pin_, gpio_interrupt_trigger_edge_both);
       break;
+#else
+      return ErrorCode::NOT_SUPPORT;
+#endif
     default:
       return ErrorCode::ARG_ERR;
   }
@@ -172,8 +317,6 @@ ErrorCode HPMGPIO::SetConfig(Configuration config)
       case Pull::DOWN:
         pad_ctl |= IOC_PAD_PAD_CTL_PE_SET(1) | IOC_PAD_PAD_CTL_PS_SET(0);
         break;
-      default:
-        return ErrorCode::ARG_ERR;
     }
 
     if (config.direction == Direction::OUTPUT_OPEN_DRAIN)
@@ -209,7 +352,19 @@ ErrorCode HPMGPIO::SetAnalogHighImpedance()
     return ErrorCode::NOT_SUPPORT;
   }
 
-  gpio_disable_pin_interrupt(gpio_, port_, pin_);
+  if (interrupt_enabled_)
+  {
+    ErrorCode ans = DisableInterrupt();
+    if (ans != ErrorCode::OK)
+    {
+      return ans;
+    }
+  }
+  else
+  {
+    gpio_disable_pin_interrupt(gpio_, port_, pin_);
+  }
+
   gpio_set_pin_input(gpio_, port_, pin_);
 
   HPM_IOC->PAD[pad_index_].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
@@ -262,7 +417,7 @@ void HPMGPIO::CheckInterrupt(uint32_t port)
     }
 
     gpio_clear_pin_interrupt_flag(controller, port, pin);
-    if (auto* gpio = map[port][pin])
+    if (auto* gpio = map[port][pin]; gpio != nullptr && gpio->interrupt_enabled_)
     {
       gpio->callback_.Run(true);
     }
@@ -274,21 +429,29 @@ void HPMGPIO::CheckInterrupt(uint32_t port)
  */
 uint16_t HPMGPIO::ResolvePadIndex(GPIO_Type* gpio, uint32_t port, uint8_t pin)
 {
-  if (gpio != HPM_GPIO0 && gpio != HPM_FGPIO)
+  if (gpio != HPM_GPIO0 && !HPM_GPIO_IsFastController(gpio))
   {
     return INVALID_PAD_INDEX;
   }
 
   switch (port)
   {
+#if defined(GPIO_DI_GPIOA) && defined(IOC_PAD_PA00)
     case GPIO_DI_GPIOA:
       return static_cast<uint16_t>(IOC_PAD_PA00 + pin);
+#endif
+#if defined(GPIO_DI_GPIOB) && defined(IOC_PAD_PB00)
     case GPIO_DI_GPIOB:
       return static_cast<uint16_t>(IOC_PAD_PB00 + pin);
+#endif
+#if defined(GPIO_DI_GPIOX) && defined(IOC_PAD_PX00)
     case GPIO_DI_GPIOX:
       return pin < 8u ? static_cast<uint16_t>(IOC_PAD_PX00 + pin) : INVALID_PAD_INDEX;
+#endif
+#if defined(GPIO_DI_GPIOY) && defined(IOC_PAD_PY00)
     case GPIO_DI_GPIOY:
       return pin < 8u ? static_cast<uint16_t>(IOC_PAD_PY00 + pin) : INVALID_PAD_INDEX;
+#endif
     default:
       return INVALID_PAD_INDEX;
   }

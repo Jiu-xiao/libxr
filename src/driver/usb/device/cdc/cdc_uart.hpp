@@ -283,10 +283,9 @@ class CDCUart : public CDCBase, public LibXR::UART
    * @param comm_ep_num     通信端点号 / Comm EP number
    */
   CDCUart(
-      size_t rx_buffer_size = 128, size_t tx_buffer_size = 128, size_t tx_queue_size = 5,
-      Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO,
+      Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+      Endpoint::EPNumber comm_ep_num, size_t rx_buffer_size = 128,
+      size_t tx_buffer_size = 128, size_t tx_queue_size = 5,
       const char* control_interface_string = CDCBase::DEFAULT_CONTROL_INTERFACE_STRING,
       const char* data_interface_string = CDCBase::DEFAULT_DATA_INTERFACE_STRING)
       : CDCBase(data_in_ep_num, data_out_ep_num, comm_ep_num, control_interface_string,
@@ -588,7 +587,8 @@ class CDCUart : public CDCBase, public LibXR::UART
           cdc->need_write_zlp_ = true;
         }
 
-        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one upstream finish
+        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one
+                               // upstream finish
       }
 
       // 预写下一段。

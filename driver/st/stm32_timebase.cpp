@@ -2,12 +2,17 @@
 
 using namespace LibXR;
 
-STM32Timebase::STM32Timebase()
-    : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
+namespace
 {
-}
+enum class STM32TimebaseBackend : uint8_t
+{
+  SYSTICK = 0,
+  TIMER = 1,
+};
 
-MicrosecondTimestamp STM32Timebase::_get_microseconds()
+STM32TimebaseBackend g_backend = STM32TimebaseBackend::SYSTICK;
+
+MicrosecondTimestamp GetSysTickMicroseconds()
 {
   do
   {
@@ -16,39 +21,27 @@ MicrosecondTimestamp STM32Timebase::_get_microseconds()
     uint32_t tick_new = HAL_GetTick();
     uint32_t cnt_new = SysTick->VAL;
 
-    auto time_diff = tick_new - tick_old;
-    uint32_t tick_load = SysTick->LOAD + 1;
+    const auto time_diff = tick_new - tick_old;
+    const uint32_t tick_load = SysTick->LOAD + 1U;
     switch (time_diff)
     {
       case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 + 1000 -
-                                    static_cast<uint64_t>(cnt_old) * 1000 / tick_load);
+        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL + 1000ULL -
+                                    static_cast<uint64_t>(cnt_old) * 1000ULL / tick_load);
       case 1:
-        /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 + 1000 -
-                                    static_cast<uint64_t>(cnt_new) * 1000 / tick_load);
+        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL + 1000ULL -
+                                    static_cast<uint64_t>(cnt_new) * 1000ULL / tick_load);
       default:
-        /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
-         * 1ms, an error case */
         continue;
     }
   } while (true);
 }
 
-MillisecondTimestamp STM32Timebase::_get_milliseconds() { return HAL_GetTick(); }
-
 #ifdef HAL_TIM_MODULE_ENABLED
-
-TIM_HandleTypeDef* STM32TimerTimebase::htim = nullptr;
-
-STM32TimerTimebase::STM32TimerTimebase(TIM_HandleTypeDef* timer)
-    : Timebase(static_cast<uint64_t>(UINT32_MAX) * 1000 + 999, UINT32_MAX)
+MicrosecondTimestamp GetTimerMicroseconds(TIM_HandleTypeDef* htim)
 {
-  htim = timer;
-}
+  ASSERT(htim != nullptr);
 
-MicrosecondTimestamp STM32TimerTimebase::_get_microseconds()
-{
   do
   {
     uint32_t tick_old = HAL_GetTick();
@@ -56,26 +49,62 @@ MicrosecondTimestamp STM32TimerTimebase::_get_microseconds()
     uint32_t tick_new = HAL_GetTick();
     uint32_t cnt_new = __HAL_TIM_GET_COUNTER(htim);
 
-    uint32_t autoreload = __HAL_TIM_GET_AUTORELOAD(htim) + 1;
-
-    uint32_t delta_ms = tick_new - tick_old;
+    const uint32_t autoreload = __HAL_TIM_GET_AUTORELOAD(htim) + 1U;
+    const uint32_t delta_ms = tick_new - tick_old;
     switch (delta_ms)
     {
       case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 +
-                                    static_cast<uint64_t>(cnt_old) * 1000 / autoreload);
+        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL +
+                                    static_cast<uint64_t>(cnt_old) * 1000ULL /
+                                        autoreload);
       case 1:
-        /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 +
-                                    static_cast<uint64_t>(cnt_new) * 1000 / autoreload);
+        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL +
+                                    static_cast<uint64_t>(cnt_new) * 1000ULL /
+                                        autoreload);
       default:
-        /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more than
-         * 1ms, an error case */
         continue;
     }
   } while (true);
 }
 
-MillisecondTimestamp STM32TimerTimebase::_get_milliseconds() { return HAL_GetTick(); }
+#endif
+}  // namespace
+
+STM32Timebase::STM32Timebase()
+{
+  ConfigureWrapRange(static_cast<uint64_t>(UINT32_MAX) * 1000ULL + 999ULL, UINT32_MAX);
+  g_backend = STM32TimebaseBackend::SYSTICK;
+  SetReady();
+}
+
+MicrosecondTimestamp Timebase::GetMicroseconds()
+{
+  switch (g_backend)
+  {
+    case STM32TimebaseBackend::SYSTICK:
+      return GetSysTickMicroseconds();
+#ifdef HAL_TIM_MODULE_ENABLED
+    case STM32TimebaseBackend::TIMER:
+      return GetTimerMicroseconds(STM32TimerTimebase::htim);
+#endif
+  }
+
+  ASSERT(false);
+  return MicrosecondTimestamp(0ULL);
+}
+
+MillisecondTimestamp Timebase::GetMilliseconds() { return HAL_GetTick(); }
+
+#ifdef HAL_TIM_MODULE_ENABLED
+
+TIM_HandleTypeDef* STM32TimerTimebase::htim = nullptr;
+
+STM32TimerTimebase::STM32TimerTimebase(TIM_HandleTypeDef* timer)
+{
+  htim = timer;
+  ConfigureWrapRange(static_cast<uint64_t>(UINT32_MAX) * 1000ULL + 999ULL, UINT32_MAX);
+  g_backend = STM32TimebaseBackend::TIMER;
+  SetReady();
+}
 
 #endif

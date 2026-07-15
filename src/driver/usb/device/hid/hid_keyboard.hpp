@@ -55,20 +55,20 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
  public:
   /**
    * @brief 构造函数 / Constructor
+   * @param in_ep_num IN 端点号（必填）/ IN endpoint number (required)
+   * @param out_ep_num OUT 端点号（必填，未启用 OUT 时传 EP_INVALID）/ OUT endpoint number
+   * (required; pass EP_INVALID when OUT is disabled)
    * @param enable_out_endpoint 是否启用 OUT 端点 / Enable OUT endpoint
    * @param in_ep_interval IN 端点间隔 / IN endpoint interval
    * @param out_ep_interval OUT 端点间隔 / OUT endpoint interval
-   * @param in_ep_num IN 端点号 / IN endpoint number
-   * @param out_ep_num OUT 端点号 / OUT endpoint number
    * @param interface_string 接口字符串 / Interface string
    */
-  HIDKeyboard(bool enable_out_endpoint = false, uint8_t in_ep_interval = 1,
+  HIDKeyboard(Endpoint::EPNumber in_ep_num, Endpoint::EPNumber out_ep_num,
+              bool enable_out_endpoint = false, uint8_t in_ep_interval = 1,
               uint8_t out_ep_interval = 1,
-              Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
-              Endpoint::EPNumber out_ep_num = Endpoint::EPNumber::EP_AUTO,
               const char* interface_string =
                   HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>::DEFAULT_INTERFACE_STRING)
-      : HID(enable_out_endpoint, in_ep_interval, out_ep_interval, in_ep_num, out_ep_num,
+      : HID(in_ep_num, out_ep_num, enable_out_endpoint, in_ep_interval, out_ep_interval,
             interface_string)
   {
   }

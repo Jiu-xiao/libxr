@@ -17,29 +17,28 @@ using namespace LibXR;
 namespace
 {
 
-int FutexWait(std::atomic<uint32_t>* word, uint32_t expected, const struct timespec* timeout)
+int FutexWait(std::atomic<uint32_t>* word, uint32_t expected,
+              const struct timespec* timeout)
 {
-  return static_cast<int>(syscall(SYS_futex, reinterpret_cast<uint32_t*>(word), FUTEX_WAIT,
-                                  expected, timeout, nullptr, 0));
+  return static_cast<int>(syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),
+                                  FUTEX_WAIT, expected, timeout, nullptr, 0));
 }
 
 int FutexWake(std::atomic<uint32_t>* word, int count)
 {
-  return static_cast<int>(syscall(SYS_futex, reinterpret_cast<uint32_t*>(word), FUTEX_WAKE,
-                                  count, nullptr, nullptr, 0));
+  return static_cast<int>(syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),
+                                  FUTEX_WAKE, count, nullptr, nullptr, 0));
 }
 
 }  // namespace
 
-Semaphore::Semaphore(uint32_t init_count) : semaphore_handle_(new libxr_linux_futex_semaphore)
+Semaphore::Semaphore(uint32_t init_count)
+    : semaphore_handle_(new libxr_linux_futex_semaphore)
 {
   semaphore_handle_->count.store(init_count, std::memory_order_release);
 }
 
-Semaphore::~Semaphore()
-{
-  delete semaphore_handle_;
-}
+Semaphore::~Semaphore() { delete semaphore_handle_; }
 
 void Semaphore::Post()
 {

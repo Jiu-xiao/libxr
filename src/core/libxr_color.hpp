@@ -87,9 +87,8 @@ enum class Preset : uint8_t
 /**
  * @brief ANSI escape sequences for text styles / ANSI转义序列 - 文本样式
  */
-inline constexpr const char* LIBXR_TEXT_STYLE_STR[] = {"",        "\033[1m", "\033[2m",
-                                                       "\033[4m", "\033[5m", "\033[7m",
-                                                       "\033[8m"};
+inline constexpr const char* LIBXR_TEXT_STYLE_STR[] = {
+    "", "\033[1m", "\033[2m", "\033[4m", "\033[5m", "\033[7m", "\033[8m"};
 
 /**
  * @brief ANSI escape sequences for terminal controls / ANSI转义序列 - 终端控制
@@ -113,8 +112,8 @@ inline constexpr const char* LIBXR_BACKGROUND_STR[] = {
 /**
  * @brief ANSI escape sequences for text presets / ANSI转义序列 - 文本预设
  */
-inline constexpr const char* LIBXR_PRESET_STR[] = {
-    "", "\033[33m\033[1m", "\033[31m\033[1m", "\033[1m\033[41m"};
+inline constexpr const char* LIBXR_PRESET_STR[] = {"", "\033[33m\033[1m",
+                                                   "\033[31m\033[1m", "\033[1m\033[41m"};
 
 }  // namespace LibXR
 

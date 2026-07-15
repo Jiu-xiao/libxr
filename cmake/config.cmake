@@ -39,6 +39,17 @@ if(NOT _xr_system)
   message(FATAL_ERROR "No system selected.")
 endif()
 
+if(NOT DEFINED LIBXR_SINGLE_CORE)
+  if(_xr_system STREQUAL "linux" OR _xr_system STREQUAL "webots" OR
+     _xr_system STREQUAL "windows")
+    set(LIBXR_SINGLE_CORE OFF CACHE BOOL
+        "Use single-core concurrency alignment policy")
+  else()
+    set(LIBXR_SINGLE_CORE ON CACHE BOOL
+        "Use single-core concurrency alignment policy")
+  endif()
+endif()
+
 target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_SYSTEM_${_xr_system}=True)
 
 if(_xr_system STREQUAL "linux" OR _xr_system STREQUAL "webots")

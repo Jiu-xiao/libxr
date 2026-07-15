@@ -63,7 +63,7 @@ class ASync
       if (async->sem_.Wait() == ErrorCode::OK)
       {
         async->job_.Run(false, async);
-        async->status_.store(Status::DONE, std::memory_order_relaxed);
+        async->status_.store(Status::DONE, std::memory_order_release);
       }
     }
   }
@@ -84,7 +84,7 @@ class ASync
    */
   [[nodiscard]] Status GetStatus()
   {
-    Status cur = status_.load(std::memory_order_relaxed);
+    Status cur = status_.load(std::memory_order_acquire);
     if (cur != Status::DONE)
     {
       return cur;

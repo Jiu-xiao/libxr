@@ -16,8 +16,7 @@ namespace LibXR
  * @brief Callable convertible to the exact callback function pointer
  */
 template <typename CallableType, typename BoundArgType, typename... CallbackArgs>
-concept CallbackFunctionCompatible = requires(CallableType callable)
-{
+concept CallbackFunctionCompatible = requires(CallableType callable) {
   static_cast<void (*)(bool, BoundArgType, CallbackArgs...)>(callable);
 };
 
@@ -163,13 +162,12 @@ class Callback
    *       the intended model.
    */
   template <typename BoundArgType, typename CallableType>
-  requires CallbackFunctionCompatible<CallableType, BoundArgType, Args...>
+    requires CallbackFunctionCompatible<CallableType, BoundArgType, Args...>
   [[nodiscard]] static Callback Create(CallableType fun, BoundArgType arg)
   {
     using FunctionType = typename CallbackBlock<BoundArgType, Args...>::FunctionType;
-    auto cb_block =
-        new CallbackBlock<BoundArgType, Args...>(static_cast<FunctionType>(fun),
-                                                 std::move(arg));
+    auto cb_block = new CallbackBlock<BoundArgType, Args...>(
+        static_cast<FunctionType>(fun), std::move(arg));
     return Callback(cb_block);
   }
 
@@ -188,13 +186,12 @@ class Callback
    *       logical callback chain, not arbitrary multi-context serialization.
    */
   template <typename BoundArgType, typename CallableType>
-  requires CallbackFunctionCompatible<CallableType, BoundArgType, Args...>
+    requires CallbackFunctionCompatible<CallableType, BoundArgType, Args...>
   [[nodiscard]] static Callback CreateGuarded(CallableType fun, BoundArgType arg)
   {
     using FunctionType = typename CallbackBlock<BoundArgType, Args...>::FunctionType;
-    auto cb_block =
-        new GuardedCallbackBlock<BoundArgType, Args...>(static_cast<FunctionType>(fun),
-                                                        std::move(arg));
+    auto cb_block = new GuardedCallbackBlock<BoundArgType, Args...>(
+        static_cast<FunctionType>(fun), std::move(arg));
     return Callback(cb_block);
   }
 

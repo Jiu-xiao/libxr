@@ -1,0 +1,44 @@
+name: Build Docs Image
+
+on:
+  # Rebuild when the image definition changes.
+  push:
+    branches: ["master"]
+    paths:
+      - "doc/ci.Dockerfile"
+      - ".github/workflows/docs-image.yml"
+  # Allow manual rebuilds (e.g. to pick up a new base image).
+  workflow_dispatch:
+
+concurrency:
+  group: "docs-image"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR repository names must be lowercase; the owner login may not be.
+      - name: Compute image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/libxr-docs" >> "$GITHUB_ENV"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: doc
+          file: doc/ci.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:latest

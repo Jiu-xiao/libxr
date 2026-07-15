@@ -14,32 +14,11 @@ class LinuxTimebase : public Timebase
 {
  public:
   /**
-   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
+   * @brief 构造函数 / Constructor
    *
-   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
+   * 记录 Linux monotonic 参考起点并标记时间基已就绪。
+   * Captures the Linux monotonic reference point and marks the timebase ready.
    */
-  MicrosecondTimestamp _get_microseconds()
-  {
-    return MicrosecondTimestamp(static_cast<uint64_t>(GetElapsedMicroseconds()));
-  }
-
-  /**
-   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
-   *
-   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
-   */
-  MillisecondTimestamp _get_milliseconds()
-  {
-    return MillisecondTimestamp(static_cast<uint32_t>(GetElapsedMicroseconds() / 1000LL));
-  }
-
- private:
-  static int64_t GetElapsedMicroseconds()
-  {
-    struct timespec ts = {};
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<int64_t>(ts.tv_sec - libxr_linux_start_time_spec.tv_sec) * 1000000LL +
-           static_cast<int64_t>(ts.tv_nsec - libxr_linux_start_time_spec.tv_nsec) / 1000LL;
-  }
+  LinuxTimebase();
 };
 }  // namespace LibXR

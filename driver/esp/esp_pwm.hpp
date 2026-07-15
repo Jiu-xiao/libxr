@@ -1,8 +1,7 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include "driver/ledc.h"
+#include "esp_def.hpp"
 #include "esp_err.h"
 #include "hal/ledc_hal.h"
 #include "pwm.hpp"
@@ -119,4 +118,3 @@ class ESP32PWM : public PWM
 };
 
 }  // namespace LibXR
-

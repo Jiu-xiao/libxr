@@ -1,7 +1,5 @@
 #include "esp_adc.hpp"
 
-#include <new>
-
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_clk_tree.h"
 #include "esp_private/adc_private.h"
@@ -72,23 +70,11 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
     return;
   }
 
-  channels_ = new (std::nothrow) Channel[num_channels_];
-  channel_ids_ = new (std::nothrow) adc_channel_t[num_channels_];
-  channel_ready_ = new (std::nothrow) bool[num_channels_];
-  latest_values_ = new (std::nothrow) float[num_channels_];
-  latest_raw_ = new (std::nothrow) uint16_t[num_channels_];
-  ASSERT(channels_ != nullptr);
-  ASSERT(channel_ids_ != nullptr);
-  ASSERT(channel_ready_ != nullptr);
-  ASSERT(latest_values_ != nullptr);
-  ASSERT(latest_raw_ != nullptr);
-  if ((channels_ == nullptr) || (channel_ids_ == nullptr) ||
-      (channel_ready_ == nullptr) || (latest_values_ == nullptr) ||
-      (latest_raw_ == nullptr))
-  {
-    ASSERT(false);
-    return;
-  }
+  channels_ = new Channel[num_channels_];
+  channel_ids_ = new adc_channel_t[num_channels_];
+  channel_ready_ = new bool[num_channels_];
+  latest_values_ = new float[num_channels_];
+  latest_raw_ = new uint16_t[num_channels_];
 
   for (uint8_t i = 0; i < SOC_ADC_MAX_CHANNEL_NUM; ++i)
   {

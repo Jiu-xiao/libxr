@@ -13,8 +13,7 @@ namespace LibXR
  * @brief D-Cache API 可直接接受 `void*`
  */
 template <typename FunctionType>
-concept DCacheFunctionAcceptsVoidPtr =
-    std::is_invocable_v<FunctionType, void*, int32_t>;
+concept DCacheFunctionAcceptsVoidPtr = std::is_invocable_v<FunctionType, void*, int32_t>;
 
 /**
  * @brief D-Cache API accepts `volatile void*`
@@ -30,23 +29,23 @@ concept DCacheFunctionAcceptsVolatileVoidPtr =
  * @brief 按当前工具链接受的指针类型调用 CMSIS D-Cache 接口
  */
 template <typename FunctionType>
-requires DCacheFunctionAcceptsVoidPtr<FunctionType>
+  requires DCacheFunctionAcceptsVoidPtr<FunctionType>
 inline void STM32_CallDCacheByAddr(FunctionType function, void* addr, int32_t dsize)
 {
   function(addr, dsize);
 }
 
 template <typename FunctionType>
-requires(!DCacheFunctionAcceptsVoidPtr<FunctionType> &&
-         DCacheFunctionAcceptsVolatileVoidPtr<FunctionType>)
+  requires(!DCacheFunctionAcceptsVoidPtr<FunctionType> &&
+           DCacheFunctionAcceptsVolatileVoidPtr<FunctionType>)
 inline void STM32_CallDCacheByAddr(FunctionType function, void* addr, int32_t dsize)
 {
   function(reinterpret_cast<volatile void*>(addr), dsize);
 }
 
 template <typename FunctionType>
-requires(!DCacheFunctionAcceptsVoidPtr<FunctionType> &&
-         !DCacheFunctionAcceptsVolatileVoidPtr<FunctionType>)
+  requires(!DCacheFunctionAcceptsVoidPtr<FunctionType> &&
+           !DCacheFunctionAcceptsVolatileVoidPtr<FunctionType>)
 inline void STM32_CallDCacheByAddr(FunctionType function, void* addr, int32_t dsize)
 {
   function(reinterpret_cast<uint32_t*>(addr), dsize);

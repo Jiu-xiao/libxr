@@ -1,8 +1,5 @@
 #include "libxr_system.hpp"
 
-#include <cerrno>
-#include <cmath>
-#include <list>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
@@ -11,9 +8,12 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <list>
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -50,7 +50,8 @@ pthread_cond_t g_webots_realtime_threads_cond = PTHREAD_COND_INITIALIZER;
 uint64_t g_webots_step_epoch = 0;
 thread_local LibXR::WebotsRealtimeThreadRegistration* g_current_realtime_thread = nullptr;
 
-void RemoveWebotsRealtimeThreadUnlocked(LibXR::WebotsRealtimeThreadRegistration* registration)
+void RemoveWebotsRealtimeThreadUnlocked(
+    LibXR::WebotsRealtimeThreadRegistration* registration)
 {
   for (auto it = g_webots_realtime_threads.begin(); it != g_webots_realtime_threads.end();
        ++it)
@@ -152,7 +153,9 @@ void StdoThread(LibXR::WritePort* write_port)
       UNUSED(fflush_ans);
 
       write_port->Finish(
-          false, write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED, info);
+          false,
+          write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED,
+          info);
     }
   }
 }
@@ -298,9 +301,9 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
   };
 
   LibXR::Thread webots_timebase_thread;
-  webots_timebase_thread.Create<void*>(
-      reinterpret_cast<void*>(0), webots_timebase_thread_fun, "webots_timebase",
-      1024, Thread::Priority::REALTIME);
+  webots_timebase_thread.Create<void*>(reinterpret_cast<void*>(0),
+                                       webots_timebase_thread_fun, "webots_timebase",
+                                       1024, Thread::Priority::REALTIME);
 }
 
 LibXR::WebotsRealtimeThreadRegistration* LibXR::WebotsRegisterRealtimeThread()
@@ -313,7 +316,8 @@ LibXR::WebotsRealtimeThreadRegistration* LibXR::WebotsRegisterRealtimeThread()
   return registration;
 }
 
-void LibXR::WebotsBindCurrentRealtimeThread(WebotsRealtimeThreadRegistration* registration)
+void LibXR::WebotsBindCurrentRealtimeThread(
+    WebotsRealtimeThreadRegistration* registration)
 {
   if (registration == nullptr)
   {

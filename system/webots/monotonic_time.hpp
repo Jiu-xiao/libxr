@@ -17,25 +17,13 @@ namespace LibXR
 namespace MonotonicTime
 {
 
-inline uint64_t NowMilliseconds()
-{
-  return _libxr_webots_time_count;
-}
+inline uint64_t NowMilliseconds() { return _libxr_webots_time_count; }
 
-inline uint64_t NowMicroseconds()
-{
-  return _libxr_webots_time_count * 1000ULL;
-}
+inline uint64_t NowMicroseconds() { return _libxr_webots_time_count * 1000ULL; }
 
-inline uint64_t XrToSharedMicroseconds(uint64_t timestamp_us)
-{
-  return timestamp_us;
-}
+inline uint64_t XrToSharedMicroseconds(uint64_t timestamp_us) { return timestamp_us; }
 
-inline uint64_t SharedToXrMicroseconds(uint64_t timestamp_us)
-{
-  return timestamp_us;
-}
+inline uint64_t SharedToXrMicroseconds(uint64_t timestamp_us) { return timestamp_us; }
 
 inline uint32_t RemainingMilliseconds(uint64_t deadline_ms)
 {
@@ -54,7 +42,8 @@ inline uint32_t WaitSliceMilliseconds(uint32_t remaining_ms)
     return 0;
   }
 
-  const uint32_t poll_ms = _libxr_webots_poll_period_ms != 0 ? _libxr_webots_poll_period_ms : 1U;
+  const uint32_t poll_ms =
+      _libxr_webots_poll_period_ms != 0 ? _libxr_webots_poll_period_ms : 1U;
   return remaining_ms < poll_ms ? remaining_ms : poll_ms;
 }
 

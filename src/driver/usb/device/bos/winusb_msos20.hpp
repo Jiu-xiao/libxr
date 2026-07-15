@@ -47,7 +47,7 @@ static constexpr uint8_t PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16[] = {
 static constexpr uint16_t PROP_NAME_DEVICE_INTERFACE_GUIDS_BYTES =
     static_cast<uint16_t>(sizeof(PROP_NAME_DEVICE_INTERFACE_GUIDS_UTF16));
 
-#pragma pack(push, 1)
+LIBXR_PACKED_BEGIN
 
 // ---- MS OS 2.0 basic blocks ----
 
@@ -243,7 +243,7 @@ struct FunctionScopedWinUsbMsOs20DescSet
   }
 };
 
-#pragma pack(pop)
+LIBXR_PACKED_END
 
 // ---- sanity checks ----
 static_assert(sizeof(MsOs20SetHeader) == 10, "SetHeader size mismatch");

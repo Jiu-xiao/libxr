@@ -344,7 +344,7 @@ void mspm0_can_pack_to_tx_elem(const CAN::ClassicPack& pack, DL_MCAN_TxBufElemen
 MSPM0CAN* MSPM0CAN::instance_map_[MAX_CAN_INSTANCES] = {nullptr};
 
 MSPM0CAN::MSPM0CAN(Resources res, uint32_t tx_pool_size)
-    : CAN(), res_(res), tx_pool_(tx_pool_size)
+    : CAN(), res_(res), tx_queue_(tx_pool_size)
 {
   ASSERT(res_.instance != nullptr);
   ASSERT(res_.index < MAX_CAN_INSTANCES);
@@ -696,7 +696,7 @@ ErrorCode MSPM0CAN::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  if (tx_pool_.Put(pack) != ErrorCode::OK)
+  if (tx_queue_.Push(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }
@@ -745,7 +745,11 @@ void MSPM0CAN::ProcessTxInterrupt()
     while (true)
     {
       ClassicPack next_pack = {};
-      if (tx_pool_.Get(next_pack) != ErrorCode::OK)
+      if (tx_retry_valid_)
+      {
+        next_pack = tx_retry_pack_;
+      }
+      else if (tx_queue_.Pop(next_pack) != ErrorCode::OK)
       {
         break;
       }
@@ -753,12 +757,12 @@ void MSPM0CAN::ProcessTxInterrupt()
       const ErrorCode send_ans = SendImmediate(next_pack);
       if (send_ans != ErrorCode::OK)
       {
-        if (tx_pool_.Put(next_pack) != ErrorCode::OK)
-        {
-          ASSERT(false);
-        }
+        tx_retry_pack_ = next_pack;
+        tx_retry_valid_ = true;
         break;
       }
+
+      tx_retry_valid_ = false;
     }
 
     tx_lock_.store(0U, std::memory_order_release);

@@ -39,7 +39,7 @@ class GsUsbClass : public DeviceClass
  private:
   // ===== Linux gs_usb 线缆格式（固定 12 字节头） / Linux gs_usb wire format
   // (fixed 12-byte header) =====
-#pragma pack(push, 1)
+  LIBXR_PACKED_BEGIN
 
   /**
    * @brief gs_usb 线缆格式头（12 字节） / gs_usb wire-format header (12 bytes)
@@ -53,7 +53,7 @@ class GsUsbClass : public DeviceClass
     uint8_t flags;     ///< 帧标志（GS_CAN_FLAG_*） / Frame flags (GS_CAN_FLAG_*)
     uint8_t reserved;  ///< 保留 / Reserved
   };
-#pragma pack(pop)
+  LIBXR_PACKED_END
 
   static constexpr uint32_t ECHO_ID_RX =
       0xFFFFFFFFu;  ///< RX 帧 echo_id 固定值 / Fixed echo_id for RX frames
@@ -93,11 +93,9 @@ class GsUsbClass : public DeviceClass
    * by USER_ID)
    * @param interface_string 接口字符串 / Interface string
    */
-  GsUsbClass(std::initializer_list<LibXR::CAN*> cans,
-             Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP1,
-             Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP2,
-             size_t rx_queue_size = 32, size_t echo_queue_size = 32,
-             LibXR::GPIO* identify_gpio = nullptr,
+  GsUsbClass(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+             std::initializer_list<LibXR::CAN*> cans, size_t rx_queue_size = 32,
+             size_t echo_queue_size = 32, LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},
              LibXR::Database* database = nullptr,
              const char* interface_string = DEFAULT_INTERFACE_STRING)
@@ -144,10 +142,8 @@ class GsUsbClass : public DeviceClass
    * @brief 构造：FDCAN / Construct: FDCAN
    * @param fd_cans FDCAN 指针列表，数量必须等于 CAN_CH_NUM / FDCAN pointers, count must
    * equal CAN_CH_NUM
-   * @param data_in_ep_num Bulk IN 端点号（可自动分配） / Bulk IN endpoint number (auto
-   * allowed)
-   * @param data_out_ep_num Bulk OUT 端点号（可自动分配） / Bulk OUT endpoint number (auto
-   * allowed)
+   * @param data_in_ep_num Bulk IN 端点号（必填） / Bulk IN endpoint number (required)
+   * @param data_out_ep_num Bulk OUT 端点号（必填） / Bulk OUT endpoint number (required)
    * @param rx_queue_size 接收队列大小 / RX queue size
    * @param echo_queue_size 回显队列大小 / Echo queue size
    * @param identify_gpio Identify GPIO（可选） / Identify GPIO (optional)
@@ -157,11 +153,9 @@ class GsUsbClass : public DeviceClass
    * by USER_ID)
    * @param interface_string 接口字符串 / Interface string
    */
-  GsUsbClass(std::initializer_list<LibXR::FDCAN*> fd_cans,
-             Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-             Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-             size_t rx_queue_size = 32, size_t echo_queue_size = 32,
-             LibXR::GPIO* identify_gpio = nullptr,
+  GsUsbClass(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+             std::initializer_list<LibXR::FDCAN*> fd_cans, size_t rx_queue_size = 32,
+             size_t echo_queue_size = 32, LibXR::GPIO* identify_gpio = nullptr,
              std::initializer_list<LibXR::GPIO*> termination_gpios = {},
              LibXR::Database* database = nullptr,
              const char* interface_string = DEFAULT_INTERFACE_STRING)
@@ -226,7 +220,8 @@ class GsUsbClass : public DeviceClass
     ASSERT(ans == ErrorCode::OK);
 
     // UINT16_MAX 只是上限，底层会选不超过该值的可用最大长度。
-    // UINT16_MAX is only an upper bound; the backend still chooses the largest valid length.
+    // UINT16_MAX is only an upper bound; the backend still chooses the largest valid
+    // length.
     ep_data_in_->Configure(
         {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
     ep_data_out_->Configure(
@@ -863,7 +858,8 @@ class GsUsbClass : public DeviceClass
     }
 
     // TX echo：host 通过 echo_id 跟踪 TX buffer；设备需回送 echo_id。
-    // TX echo: the host tracks TX buffers via echo_id, and the device should echo it back.
+    // TX echo: the host tracks TX buffers via echo_id, and the device should echo it
+    // back.
     if (wh.echo_id != ECHO_ID_RX)
     {
       QueueItem qi;
@@ -966,7 +962,7 @@ class GsUsbClass : public DeviceClass
   uint8_t ctrl_target_channel_ =
       0;  ///< 控制请求目标通道 / Control request target channel
 
-#pragma pack(push, 1)
+  LIBXR_PACKED_BEGIN
   /**
    * @brief 本类的接口与端点描述符块 / Descriptor block for interface and endpoints
    */
@@ -976,7 +972,7 @@ class GsUsbClass : public DeviceClass
     EndpointDescriptor ep_out;  ///< OUT 端点描述符 / OUT endpoint descriptor
     EndpointDescriptor ep_in;   ///< IN 端点描述符 / IN endpoint descriptor
   } desc_block_{};
-#pragma pack(pop)
+  LIBXR_PACKED_END
 
   uint8_t rx_buf_[WIRE_MAX_SIZE]{};  ///< OUT 接收缓冲区 / OUT receive buffer
   std::array<uint8_t, WIRE_MAX_SIZE>
@@ -1054,9 +1050,9 @@ class GsUsbClass : public DeviceClass
     std::array<uint8_t, 64> data;  ///< 数据段 / Data bytes
   };
 
-  LibXR::LockFreeQueue<QueueItem>
+  LibXR::SPSCQueue<QueueItem>
       rx_queue_;  ///< RX 队列（Device->Host） / RX queue (Device->Host)
-  LibXR::LockFreeQueue<QueueItem>
+  LibXR::SPSCQueue<QueueItem>
       echo_queue_;  ///< Echo 队列（回送 echo_id） / Echo queue (echo back echo_id)
 
   /**
@@ -1744,7 +1740,8 @@ class GsUsbClass : public DeviceClass
     }
 
     // 与 Linux can/error.h 对齐（沿用之前版本的映射）。
-    // Keep these definitions aligned with Linux can/error.h, matching the previous mapping.
+    // Keep these definitions aligned with Linux can/error.h, matching the previous
+    // mapping.
     constexpr uint8_t LNX_CAN_ERR_CRTL_UNSPEC = 0x00;
     constexpr uint8_t LNX_CAN_ERR_CRTL_RX_WARNING = 0x04;
     constexpr uint8_t LNX_CAN_ERR_CRTL_TX_WARNING = 0x08;
@@ -1900,8 +1897,7 @@ class GsUsbClass : public DeviceClass
    */
   uint32_t MakeTimestampUs(uint8_t ch) const
   {
-    if (ch < can_count_ && timestamps_enabled_ch_[ch] &&
-        LibXR::Timebase::timebase != nullptr)
+    if (ch < can_count_ && timestamps_enabled_ch_[ch])
     {
       return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
     }
@@ -1914,11 +1910,7 @@ class GsUsbClass : public DeviceClass
    */
   uint32_t MakeTimestampUsGlobal() const
   {
-    if (LibXR::Timebase::timebase != nullptr)
-    {
-      return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
-    }
-    return 0u;
+    return static_cast<uint32_t>(LibXR::Timebase::GetMicroseconds() & 0xFFFFFFFFu);
   }
 
   /**

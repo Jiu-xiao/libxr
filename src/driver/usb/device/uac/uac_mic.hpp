@@ -62,23 +62,22 @@ class UAC1MicrophoneQ : public DeviceClass
    * @param streaming_interface_string 流接口字符串 / Streaming interface string
    */
   UAC1MicrophoneQ(
-      uint32_t sample_rate_hz, int16_t vol_min = K_DEFAULT_VOL_MIN,
-      int16_t vol_max = K_DEFAULT_VOL_MAX, int16_t vol_res = K_DEFAULT_VOL_RES,
-      Speed speed = K_DEFAULT_SPEED, size_t queue_bytes = K_DEFAULT_QUEUE_BYTES,
-      uint8_t interval = K_DEFAULT_INTERVAL,
-      Endpoint::EPNumber iso_in_ep_num = Endpoint::EPNumber::EP_AUTO,
+      Endpoint::EPNumber iso_in_ep_num, uint32_t sample_rate_hz,
+      int16_t vol_min = K_DEFAULT_VOL_MIN, int16_t vol_max = K_DEFAULT_VOL_MAX,
+      int16_t vol_res = K_DEFAULT_VOL_RES, Speed speed = K_DEFAULT_SPEED,
+      size_t queue_bytes = K_DEFAULT_QUEUE_BYTES, uint8_t interval = K_DEFAULT_INTERVAL,
       const char* control_interface_string = DEFAULT_CONTROL_INTERFACE_STRING,
       const char* streaming_interface_string = DEFAULT_STREAMING_INTERFACE_STRING)
       : iso_in_ep_num_(iso_in_ep_num),
+        control_interface_string_(control_interface_string),
+        streaming_interface_string_(streaming_interface_string),
         vol_min_(vol_min),
         vol_max_(vol_max),
         vol_res_(vol_res),
         interval_(interval),
         speed_(speed),
         sr_hz_(sample_rate_hz),
-        pcm_queue_(queue_bytes),
-        control_interface_string_(control_interface_string),
-        streaming_interface_string_(streaming_interface_string)
+        pcm_queue_(queue_bytes)
   {
     RecomputeTiming();
     // 缓存端点采样率（3 字节小端） / Cache current sampling frequency (3‑byte LE)
@@ -182,7 +181,7 @@ class UAC1MicrophoneQ : public DeviceClass
     ID_OT_USB = 3
   };
 
-#pragma pack(push, 1)
+  LIBXR_PACKED_BEGIN
   /**
    * @brief AC 头描述符
    *        AC header descriptor
@@ -308,7 +307,7 @@ class UAC1MicrophoneQ : public DeviceClass
     EndpointDescriptorIso9 ep_in;  ///< 标准 IN 端点（9B）/ Std IN EP (9B)
     CSEndpointGeneral ep_cs;       ///< 类特定端点 / CS EP
   };
-#pragma pack(pop)
+  LIBXR_PACKED_END
 
   // ===== DeviceClass 接口实现 / DeviceClass implementation =====
   /**
@@ -540,7 +539,8 @@ class UAC1MicrophoneQ : public DeviceClass
 
     // ===== Feature Unit（收件人：Interface / AC 接口） / Feature Unit =====
     const uint8_t CS = static_cast<uint8_t>((wValue >> 8) & 0xFF);  // FU_MUTE / FU_VOLUME
-    const uint8_t CH = static_cast<uint8_t>(wValue & 0xFF);         // 0=主控, 1..N / 0=master, 1..N
+    const uint8_t CH =
+        static_cast<uint8_t>(wValue & 0xFF);  // 0=主控, 1..N / 0=master, 1..N
     const uint8_t ENT =
         static_cast<uint8_t>((wIndex >> 8) & 0xFF);           // 实体 ID / entity ID
     const uint8_t ITF = static_cast<uint8_t>(wIndex & 0xFF);  // 接口号 / interface num
@@ -817,12 +817,14 @@ class UAC1MicrophoneQ : public DeviceClass
       {
         eff = 16;
       }
-      const uint32_t MICROFRAMES = 1u << (eff - 1u);  // 2^(bInterval-1) 个微帧 / microframes
-      service_hz_ = 8000u / MICROFRAMES;              // 8000 微帧/秒 / microframes per second
+      const uint32_t MICROFRAMES = 1u
+                                   << (eff - 1u);  // 2^(bInterval-1) 个微帧 / microframes
+      service_hz_ = 8000u / MICROFRAMES;  // 8000 微帧/秒 / microframes per second
     }
     else
     {
-      service_hz_ = 1000u;  // FS 等时：规范上 bInterval 必须为 1 帧 / FS isochronous requires bInterval=1
+      service_hz_ = 1000u;  // FS 等时：规范上 bInterval 必须为 1 帧 / FS isochronous
+                            // requires bInterval=1
     }
 
     // 2) 计算每服务周期应送字节。
@@ -843,7 +845,8 @@ class UAC1MicrophoneQ : public DeviceClass
     w_max_packet_size_ = static_cast<uint16_t>(ceil_bpt);
 
     // 4) 若已构建过描述符，则运行时能力不得超过宣告值。
-    // 4) Once descriptors are built, runtime capability must not exceed the advertised value.
+    // 4) Once descriptors are built, runtime capability must not exceed the advertised
+    // value.
     if (desc_block_.ep_in.wMaxPacketSize != 0 &&
         w_max_packet_size_ > desc_block_.ep_in.wMaxPacketSize)
     {
@@ -895,7 +898,7 @@ class UAC1MicrophoneQ : public DeviceClass
 
   // PCM 字节队列。
   // PCM byte queue.
-  LibXR::LockFreeQueue<uint8_t> pcm_queue_;
+  LibXR::SPSCQueue<uint8_t> pcm_queue_;
 
   // 端点回调包装。
   // Endpoint callback wrapper.

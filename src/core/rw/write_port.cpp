@@ -4,14 +4,14 @@
 
 using namespace LibXR;
 
-template class LibXR::LockFreeQueue<WriteInfoBlock>;
-template class LibXR::LockFreeQueue<uint8_t>;
+template class LibXR::SPSCQueue<WriteInfoBlock>;
+template class LibXR::SPSCQueue<uint8_t>;
 
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
-    : queue_info_(new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-                      LockFreeQueue<WriteInfoBlock>(queue_size)),
-      queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-                                        LockFreeQueue<uint8_t>(buffer_size)
+    : queue_info_(new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
+                      SPSCQueue<WriteInfoBlock>(queue_size)),
+      queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
+                                        SPSCQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {
 }
@@ -152,6 +152,15 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     ASSERT(ans == ErrorCode::OK);
   }
 
+  // Non-BLOCK ops are armed here. BLOCK ops submitted through Stream::SubmitBuffered()
+  // were already armed (MarkAsRunning + BLOCK_PUBLISHING) before the metadata was
+  // published, so the meta_pushed re-arm below is an idempotent no-op kept only to cover
+  // the direct-submit (meta_pushed == false) BLOCK path, which arms via BLOCK_PUBLISHING
+  // above. MarkAsRunning only affects POLLING ops, so re-marking a BLOCK op is harmless.
+  // 非 BLOCK op 在此挂起。经 Stream::SubmitBuffered() 提交的 BLOCK op 在发布元数据前
+  // 已经挂起（MarkAsRunning + BLOCK_PUBLISHING），因此下面 meta_pushed 分支的重复挂起
+  // 是幂等空操作，仅为覆盖直接提交（meta_pushed == false）的 BLOCK 路径而保留。
+  // MarkAsRunning 只对 POLLING op 生效，重复标记 BLOCK op 无副作用。
   if (op.type != WriteOperation::OperationType::BLOCK)
   {
     op.MarkAsRunning();

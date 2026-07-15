@@ -13,22 +13,11 @@ class STM32Timebase : public Timebase
  public:
   /**
    * @brief 默认构造函数 / Default constructor
+   *
+   * 选择 SysTick 作为当前时间基后端，并配置对应的回绕范围。
+   * Selects SysTick as the active backend and configures the matching wrap range.
    */
   STM32Timebase();
-
-  /**
-   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
-   *
-   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
-   */
-  MicrosecondTimestamp _get_microseconds();
-
-  /**
-   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
-   *
-   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
-   */
-  MillisecondTimestamp _get_milliseconds();
 };
 
 #ifdef HAL_TIM_MODULE_ENABLED
@@ -42,22 +31,12 @@ class STM32TimerTimebase : public Timebase
   /**
    * @brief 构造函数 / Constructor
    * @param timer 定时器句柄指针 / Pointer to timer handle
+   *
+   * 选择硬件定时器作为当前时间基后端，并缓存句柄供静态入口使用。
+   * Selects the hardware timer as the active backend and caches the handle for
+   * the static entry points.
    */
   STM32TimerTimebase(TIM_HandleTypeDef* timer);
-
-  /**
-   * @brief 获取当前微秒计数 / Get current timestamp in microseconds
-   *
-   * @return MicrosecondTimestamp 微秒时间戳 / Microsecond timestamp
-   */
-  MicrosecondTimestamp _get_microseconds();
-
-  /**
-   * @brief 获取当前毫秒计数 / Get current timestamp in milliseconds
-   *
-   * @return MillisecondTimestamp 毫秒时间戳 / Millisecond timestamp
-   */
-  MillisecondTimestamp _get_milliseconds();
 
   /**
    * @brief 硬件定时器句柄静态指针 / Static pointer to timer handle

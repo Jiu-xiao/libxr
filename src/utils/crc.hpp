@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "libxr_def.hpp"
+
 namespace LibXR
 {
 /**
@@ -64,23 +66,7 @@ class CRC8
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC8 值 / Computed CRC8 value
    */
-  static uint8_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint8_t crc = INIT;
-
-    while (len-- > 0)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff];
-    }
-
-    return crc;
-  }
+  static uint8_t Calculate(const void* raw, size_t len);
 
   /**
    * @brief 验证数据的 CRC8 校验码 / Verifies the CRC8 checksum of the given data
@@ -156,21 +142,7 @@ class CRC16
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC16 值 / Computed CRC16 value
    */
-  static uint16_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint16_t crc = INIT;
-    while (len--)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
-    }
-    return crc;
-  }
+  static uint16_t Calculate(const void* raw, size_t len);
 
   /**
    * @brief 验证数据的 CRC16 校验码 / Verifies the CRC16 checksum of the given data
@@ -251,21 +223,7 @@ class CRC32
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC32 值 / Computed CRC32 value
    */
-  static uint32_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint32_t crc = INIT;
-    while (len--)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8);
-    }
-    return crc;
-  }
+  static uint32_t Calculate(const void* raw, size_t len);
 
   /**
    * @brief 验证数据的 CRC32 校验码 / Verifies the CRC32 checksum of the given data
@@ -347,20 +305,6 @@ class CRC64
    * @param len 数据长度 / Length of the data
    * @return 计算得到的 CRC64 值 / Computed CRC64 value
    */
-  static uint64_t Calculate(const void* raw, size_t len)
-  {
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
-
-    uint64_t crc = INIT;
-    while (len--)
-    {
-      crc = tab_[(crc ^ *buf++) & 0xff] ^ (crc >> 8U);
-    }
-    return crc;
-  }
+  static uint64_t Calculate(const void* raw, size_t len);
 };
 }  // namespace LibXR

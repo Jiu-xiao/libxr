@@ -57,7 +57,6 @@ class Endpoint
     EP14 = 14,         ///< 端点 14 / Endpoint 14
     EP15 = 15,         ///< 端点 15 / Endpoint 15
     EP_MAX_NUM = 16,   ///< 端点数量上限 / Maximum number of endpoints
-    EP_AUTO = 0xFE,    ///< 自动分配端点号 / Auto allocate
     EP_INVALID = 0xFF  ///< 非法端点号 / Invalid endpoint
   };
 

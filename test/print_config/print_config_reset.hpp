@@ -1,0 +1,27 @@
+/**
+ * @file print_config_reset.hpp
+ * @brief 清除 CMake 传入的 print 配置宏。 Clear CMake-provided print config macros.
+ * @details
+ * 1. 每个矩阵 `.cpp` 先 include 本文件。
+ * 2. 然后该 `.cpp` 定义自己的 `LIBXR_PRINT_*` profile。
+ * 3. 最后 include `print.hpp`，避免继承 `xr` target 的 PUBLIC print 宏。
+ */
+#pragma once
+
+#undef LIBXR_PRINT_ENABLE_INTEGER
+#undef LIBXR_PRINT_ENABLE_TEXT
+#undef LIBXR_PRINT_ENABLE_POINTER
+#undef LIBXR_PRINT_ENABLE_FLOAT
+#undef LIBXR_PRINT_INTEGER_ENABLE_BASE8_16
+#undef LIBXR_PRINT_INTEGER_ENABLE_64BIT
+#undef LIBXR_PRINT_FLOAT_ENABLE_FIXED
+#undef LIBXR_PRINT_FLOAT_ENABLE_DOUBLE
+#undef LIBXR_PRINT_FLOAT_ENABLE_SCIENTIFIC
+#undef LIBXR_PRINT_FLOAT_ENABLE_GENERAL
+#undef LIBXR_PRINT_FLOAT_ENABLE_LONG_DOUBLE
+#undef LIBXR_PRINT_FLOAT_MAX_PRECISION
+#undef LIBXR_PRINT_FLOAT_MAX_INTEGER_DIGITS
+#undef LIBXR_PRINT_ENABLE_WIDTH
+#undef LIBXR_PRINT_ENABLE_PRECISION
+#undef LIBXR_PRINT_ENABLE_ALTERNATE
+#undef LIBXR_PRINT_ENABLE_EXPLICIT_ARGUMENT_INDEXING

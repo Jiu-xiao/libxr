@@ -24,8 +24,7 @@ template <size_t N>
 }
 
 template <size_t N>
-[[nodiscard]] constexpr size_t TrailingNulTrimmedArraySize(
-    const char (&data)[N]) noexcept
+[[nodiscard]] constexpr size_t TrailingNulTrimmedArraySize(const char (&data)[N]) noexcept
 {
   return (data[N - 1] == '\0') ? (N - 1) : N;
 }
@@ -89,7 +88,11 @@ class RawData
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
-  RawData(char* data) : addr_(data), size_(data != nullptr ? std::strlen(data) : 0) {}
+  template <typename CharPtr>
+    requires(std::is_same_v<std::remove_cvref_t<CharPtr>, char*>)
+  RawData(CharPtr&& data) : addr_(data), size_(data != nullptr ? std::strlen(data) : 0)
+  {
+  }
 
   /**
    * @brief 从可写字符数组构造文本视图 / Construct a text view from a writable char array
@@ -125,8 +128,8 @@ class RawData
    */
   RawData& operator=(const RawData& data) = default;
 
-  void* addr_ = nullptr;   ///< 数据起始地址 / Data start address
-  size_t size_ = 0;        ///< 数据字节数 / Data size in bytes
+  void* addr_ = nullptr;  ///< 数据起始地址 / Data start address
+  size_t size_ = 0;       ///< 数据字节数 / Data size in bytes
 };
 
 /**
@@ -192,20 +195,21 @@ class ConstRawData
   ConstRawData(const RawData& data) : addr_(data.addr_), size_(data.size_) {}
 
   /**
-   * @brief 从 `char*` / `const char*` 文本指针构造 `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
-   *        Constructs `ConstRawData` from a `char*` / `const char*` text pointer,
-   *        with size set to the string length (excluding `\0`).
+   * @brief 从 `char*` / `const char*` 文本指针构造
+   * `ConstRawData`，数据大小为字符串长度（不含 `\0`）。 Constructs `ConstRawData` from a
+   * `char*` / `const char*` text pointer, with size set to the string length (excluding
+   * `\0`).
    *
    * @param data C 风格字符串指针。
    *             A C-style string pointer.
    */
   template <typename CharPtr>
-    requires(std::is_pointer_v<std::remove_reference_t<CharPtr>> &&
-             std::is_same_v<std::remove_cv_t<
-                                std::remove_pointer_t<std::remove_reference_t<CharPtr>>>,
-                            char> &&
-             !std::is_volatile_v<std::remove_pointer_t<std::remove_reference_t<CharPtr>>>)
-  ConstRawData(CharPtr data)
+    requires(std::is_pointer_v<std::remove_cvref_t<CharPtr>> &&
+             std::is_same_v<
+                 std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<CharPtr>>>,
+                 char> &&
+             !std::is_volatile_v<std::remove_pointer_t<std::remove_cvref_t<CharPtr>>>)
+  ConstRawData(CharPtr&& data)
       : addr_(data),
         size_(data != nullptr ? std::strlen(static_cast<const char*>(data)) : 0)
   {

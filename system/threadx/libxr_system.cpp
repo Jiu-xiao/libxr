@@ -13,7 +13,7 @@
 
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
-  if (Timebase::timebase == nullptr)
+  if (!Timebase::IsReady())
   {
     /* You should initialize Timebase first */
     ASSERT(false);

@@ -1,7 +1,9 @@
+#include "topic.hpp"
+
 #include <atomic>
 
+#include "crc.hpp"
 #include "libxr_def.hpp"
-#include "message.hpp"
 #include "mutex.hpp"
 
 using namespace LibXR;
@@ -13,7 +15,7 @@ void Topic::EnsureDomainRegistry()
   if (!domain_)
   {
     domain_ = new RBTree<uint32_t>([](const uint32_t& a, const uint32_t& b)
-                                   { return static_cast<int>(a) - static_cast<int>(b); });
+                                   { return (a > b) - (a < b); });
   }
 }
 
@@ -38,7 +40,7 @@ void Topic::Lock(Topic::TopicHandle topic)
     LockState expected = LockState::UNLOCKED;
     if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
     {
-      /* Multiple threads are trying to lock the same topic */
+      // 非 mutex topic 禁止并发发布
       ASSERT(false);
       return;
     }
@@ -68,7 +70,7 @@ void Topic::LockFromCallback(Topic::TopicHandle topic)
     LockState expected = LockState::UNLOCKED;
     if (!topic->data_.busy.compare_exchange_strong(expected, LockState::LOCKED))
     {
-      /* Multiple threads are trying to lock the same topic */
+      // 回调发布路径要求外围先串行化
       ASSERT(false);
       return;
     }
@@ -104,37 +106,21 @@ Topic::Domain::Domain(const char* name)
   }
 
   node_ = new LibXR::RBTree<uint32_t>::Node<LibXR::RBTree<uint32_t>>(
-      [](const uint32_t& a, const uint32_t& b)
-      { return static_cast<int>(a) - static_cast<int>(b); });
+      [](const uint32_t& a, const uint32_t& b) { return (a > b) - (a < b); });
 
   domain_->Insert(*node_, crc32);
 }
 
-void LibXR::Topic::RegisterCallback(Callback& cb)
-{
-  if (cb.PayloadSize() != 0)
-  {
-    if (block_->data_.check_length)
-    {
-      ASSERT(block_->data_.max_length == cb.PayloadSize());
-    }
-    else
-    {
-      ASSERT(block_->data_.max_length <= cb.PayloadSize());
-    }
-  }
-
-  auto node = new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-      LockFreeList::Node<CallbackBlock>(cb);
-  block_->data_.subers.Add(*node);
-}
-
 Topic::Topic() {}
 
-Topic::Topic(const char* name, uint32_t max_length, Domain* domain, bool multi_publisher,
-             bool cache, bool check_length)
+Topic::Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
+             size_t payload_alignment, Domain* domain, bool multi_publisher)
 {
   ASSERT(name != nullptr);
+  ASSERT(payload_type_id != nullptr);
+  ASSERT(payload_size != 0);
+  ASSERT(payload_alignment != 0);
+  ASSERT((payload_alignment & (payload_alignment - 1)) == 0);
 
   if (domain == nullptr)
   {
@@ -147,8 +133,9 @@ Topic::Topic(const char* name, uint32_t max_length, Domain* domain, bool multi_p
 
   if (topic)
   {
-    ASSERT(topic->data_.max_length == max_length);
-    ASSERT(topic->data_.check_length == check_length);
+    ASSERT(topic->data_.payload_type_id == payload_type_id);
+    ASSERT(topic->data_.payload_size == payload_size);
+    ASSERT(topic->data_.payload_alignment == payload_alignment);
 
     if (multi_publisher && !topic->data_.mutex)
     {
@@ -160,12 +147,10 @@ Topic::Topic(const char* name, uint32_t max_length, Domain* domain, bool multi_p
   else
   {
     block_ = new RBTree<uint32_t>::Node<Block>;
-    block_->data_.max_length = max_length;
+    block_->data_.payload_type_id = payload_type_id;
+    block_->data_.payload_size = payload_size;
+    block_->data_.payload_alignment = payload_alignment;
     block_->data_.crc32 = crc32;
-    block_->data_.data.addr_ = nullptr;
-    block_->data_.timestamp = MicrosecondTimestamp();
-    block_->data_.cache = false;
-    block_->data_.check_length = check_length;
 
     if (multi_publisher)
     {
@@ -179,11 +164,6 @@ Topic::Topic(const char* name, uint32_t max_length, Domain* domain, bool multi_p
     }
 
     domain->node_->data_.Insert(*block_, crc32);
-  }
-
-  if (cache && !block_->data_.cache)
-  {
-    EnableCache();
   }
 }
 
@@ -205,19 +185,6 @@ Topic::TopicHandle Topic::Find(const char* name, Domain* domain)
   auto crc32 = CRC32::Calculate(name, strlen(name));
 
   return domain->node_->data_.Search<Block>(crc32);
-}
-
-void Topic::EnableCache()
-{
-  Lock(block_);
-
-  if (!block_->data_.cache)
-  {
-    block_->data_.cache = true;
-    block_->data_.data.addr_ = new uint8_t[block_->data_.max_length];
-  }
-
-  Unlock(block_);
 }
 
 Topic::TopicHandle Topic::WaitTopic(const char* name, uint32_t timeout, Domain* domain)
@@ -251,13 +218,4 @@ uint32_t Topic::GetKey() const
   {
     return 0;
   }
-}
-
-MicrosecondTimestamp Topic::GetTimestamp() const
-{
-  if (block_ == nullptr)
-  {
-    return MicrosecondTimestamp();
-  }
-  return block_->data_.timestamp;
 }

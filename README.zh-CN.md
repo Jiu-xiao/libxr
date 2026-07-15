@@ -51,7 +51,7 @@
 
 ## 数据结构支持
 
-| `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
+| `Structure` | List | Stack | RBTree | Queue | LockFreeList |
 | ----------- | ---- | ----- | ------ | ------------- | ------------ |
 |             | ✅    | ✅     | ✅      | ✅             | ✅            |
 
@@ -121,14 +121,17 @@ set(LIBXR_DRIVER Linux)
 
 ### 编译为共享/静态库
 
-默认编译为object目标，可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定
+默认编译为静态库，可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定：
 
 ```cmake
 # 编译为共享库
 set(LIBXR_SHARED_BUILD True)
 
-# 编译为静态库
+# 编译为静态库（默认）
 set(LIBXR_STATIC_BUILD True)
+
+# 编译为 object 库
+set(LIBXR_OBJECT_BUILD True)
 ```
 
 ### 禁用Eigen

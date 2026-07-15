@@ -1,17 +1,18 @@
 #pragma once
 
 #include <ti/driverlib/dl_gpio.h>
+
 #include "gpio.hpp"
 
 namespace LibXR
 {
 
 #ifdef GPIOC_BASE
-    constexpr uint8_t MAX_PORTS = 3;
+constexpr uint8_t MAX_PORTS = 3;
 #elif defined(GPIOB_BASE)
-    constexpr uint8_t MAX_PORTS = 2;
+constexpr uint8_t MAX_PORTS = 2;
 #else
-    constexpr uint8_t MAX_PORTS = 1;
+constexpr uint8_t MAX_PORTS = 1;
 #endif
 
 class MSPM0GPIO : public GPIO
@@ -40,10 +41,12 @@ class MSPM0GPIO : public GPIO
 
   static constexpr int GetPortIndex(uint32_t base_addr)
   {
+#ifdef GPIOA_BASE
     if (base_addr == GPIOA_BASE)
     {
       return 0;
     }
+#endif
 #ifdef GPIOB_BASE
     if (base_addr == GPIOB_BASE)
     {

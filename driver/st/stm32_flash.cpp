@@ -139,9 +139,9 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
   size_t written = 0;
 
 #if defined(STM32H7) || defined(STM32H5)
-  alignas(32) uint32_t flash_word_buffer[8] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-                                               0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-                                               0xFFFFFFFFu, 0xFFFFFFFFu};
+  alignas(LibXR::HW_CACHE_LINE_SIZE) uint32_t flash_word_buffer[8] = {
+      0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+      0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
   while (written < data.size_)
   {
     size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);

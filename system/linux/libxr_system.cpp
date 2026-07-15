@@ -89,7 +89,9 @@ void StdoThread(LibXR::WritePort* write_port)
       UNUSED(fflush_ans);
 
       write_port->Finish(
-          false, write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED, info);
+          false,
+          write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED,
+          info);
     }
   }
 }
@@ -118,8 +120,6 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
   LibXR::STDIO::read_ = new LibXR::ReadPort(host_stdio_queue_bytes);
 
   *LibXR::STDIO::read_ = read_fun;
-
-  UNUSED(clock_gettime(CLOCK_MONOTONIC, &libxr_linux_start_time_spec));
 
   struct termios tty;
   tcgetattr(STDIN_FILENO, &tty);           // 获取当前终端属性

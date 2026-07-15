@@ -4,9 +4,26 @@ using namespace LibXR;
 
 template class LibXR::Callback<uint32_t>;
 
+namespace
+{
+
+int CompareEventId(uint32_t a, uint32_t b)
+{
+  if (a < b)
+  {
+    return -1;
+  }
+  if (a > b)
+  {
+    return 1;
+  }
+  return 0;
+}
+
+}  // namespace
+
 Event::Event()
-    : rbt_([](const uint32_t& a, const uint32_t& b)
-           { return static_cast<int>(a) - static_cast<int>(b); })
+    : rbt_([](const uint32_t& a, const uint32_t& b) { return CompareEventId(a, b); })
 {
 }
 
@@ -77,16 +94,16 @@ void Event::Bind(Event& sources, uint32_t source_event, uint32_t target_event)
   struct BindBlock
   {
     Event* target;
+    Event::CallbackList list;
     uint32_t event;
   };
 
-  auto block = new BindBlock{this, target_event};
+  auto block = new BindBlock{this, GetList(target_event), target_event};
 
   auto bind_fun = [](bool in_isr, BindBlock* block, uint32_t event)
   {
     UNUSED(event);
-    block->target->ActiveFromCallback(block->target->GetList(block->event), block->event,
-                                      in_isr);
+    block->target->ActiveFromCallback(block->list, block->event, in_isr);
   };
 
   auto cb = Callback::Create(bind_fun, block);

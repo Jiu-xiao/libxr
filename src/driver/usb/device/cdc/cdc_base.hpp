@@ -81,7 +81,7 @@ class CDCBase : public DeviceClass
                           ///< (required for CDC-ACM)
   };
 
-#pragma pack(push, 1)
+  LIBXR_PACKED_BEGIN
   /**
    * @brief CDC线路编码参数结构体
    *        CDC line coding parameters structure
@@ -108,14 +108,14 @@ class CDCBase : public DeviceClass
   struct SerialStateNotification
   {
     uint8_t bmRequestType;  ///< 请求类型（固定为 0xA1） / Request type (fixed to 0xA1)
-    uint8_t bNotification;  ///< 通知类型（固定为 SERIAL_STATE） / Notification type (fixed
-                            ///< to SERIAL_STATE)
+    uint8_t bNotification;  ///< 通知类型（固定为 SERIAL_STATE） / Notification type
+                            ///< (fixed to SERIAL_STATE)
     uint16_t wValue;        ///< 值（固定为 0） / Value (fixed to 0)
     uint16_t wIndex;        ///< 接口号 / Interface number
     uint16_t wLength;       ///< 数据长度（固定为2）| Data length (fixed to 2)
     uint16_t serialState;   ///< 串行状态位图 / Serial state bitmap
   };
-#pragma pack(pop)
+  LIBXR_PACKED_END
 
   // 确保 CDCLineCoding 结构体大小为 7 字节。
   // Ensure CDCLineCoding is exactly 7 bytes.
@@ -134,9 +134,8 @@ class CDCBase : public DeviceClass
    * @param data_out_ep_num 数据输出端点号 / Data OUT endpoint number
    * @param comm_ep_num 通信端点号 / Communication endpoint number
    */
-  CDCBase(Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-          Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-          Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO,
+  CDCBase(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+          Endpoint::EPNumber comm_ep_num,
           const char* control_interface_string = DEFAULT_CONTROL_INTERFACE_STRING,
           const char* data_interface_string = DEFAULT_DATA_INTERFACE_STRING)
       : data_in_ep_num_(data_in_ep_num),
@@ -603,7 +602,7 @@ class CDCBase : public DeviceClass
     }
   }
 
-#pragma pack(push, 1)
+  LIBXR_PACKED_BEGIN
   /**
    * @brief CDC描述符块结构
    *        CDC descriptor block structure
@@ -659,7 +658,7 @@ class CDCBase : public DeviceClass
     EndpointDescriptor data_ep_out;  ///< 数据OUT端点描述符 / Data OUT endpoint descriptor
     EndpointDescriptor data_ep_in;   ///< 数据IN端点描述符 / Data IN endpoint descriptor
   } desc_block_;
-#pragma pack(pop)
+  LIBXR_PACKED_END
 
  protected:
   CDCLineCoding& GetLineCoding() { return line_coding_; }
@@ -707,7 +706,7 @@ class CDCBase : public DeviceClass
 
   // 状态标志。
   // State flags.
-  bool inited_ = false;                 ///< 初始化标志 / Initialization flag
+  bool inited_ = false;                     ///< 初始化标志 / Initialization flag
   bool has_control_line_state_cb_ = false;  ///< Control-line callback registered
   bool has_line_coding_cb_ = false;         ///< Line-coding callback registered
 

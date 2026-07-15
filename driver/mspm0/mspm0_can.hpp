@@ -73,7 +73,9 @@ class MSPM0CAN : public CAN
   void HandleInterrupt();
 
   Resources res_;
-  LockFreePool<ClassicPack> tx_pool_;
+  MPMCQueue<ClassicPack> tx_queue_;
+  bool tx_retry_valid_{false};
+  ClassicPack tx_retry_pack_{};
   std::atomic<uint32_t> tx_lock_{0};
   std::atomic<uint32_t> tx_pend_{0};
 

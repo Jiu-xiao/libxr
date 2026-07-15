@@ -6,8 +6,8 @@
 #include <string_view>
 #include <type_traits>
 
-#include "format_protocol.hpp"
 #include "../libxr_def.hpp"
+#include "format_protocol.hpp"
 
 namespace LibXR::Print
 {
@@ -21,28 +21,28 @@ namespace LibXR::Print
  *       `ErrorCode`
  */
 template <typename Sink>
-concept OutputSink = requires(Sink& output, std::string_view text)
-{
+concept OutputSink = requires(Sink& output, std::string_view text) {
   { output.Write(text) } -> std::convertible_to<ErrorCode>;
 };
 
 /**
- * @brief 可由共享后端读取源码信息的格式前端 / Format frontend exposing source metadata to the shared backend
+ * @brief 可由共享后端读取源码信息的格式前端 / Format frontend exposing source metadata to
+ * the shared backend
  * @tparam Frontend 候选前端类型 / Candidate frontend type
  *
  * @note 至少需要暴露 `ErrorType`、`SourceData()` 与 `SourceSize()` /
  *       Must expose at least `ErrorType`, `SourceData()`, and `SourceSize()`
  */
 template <typename Frontend>
-concept SourceFrontend = requires
-{
+concept SourceFrontend = requires {
   typename Frontend::ErrorType;
   { Frontend::SourceData() } -> std::convertible_to<const char*>;
   { Frontend::SourceSize() } -> std::convertible_to<size_t>;
 };
 
 /**
- * @brief 可向指定 visitor 发射格式事件的前端 / Frontend that can emit format events into the supplied visitor
+ * @brief 可向指定 visitor 发射格式事件的前端 / Frontend that can emit format events into
+ * the supplied visitor
  * @tparam Frontend 候选前端类型 / Candidate frontend type
  * @tparam Visitor 候选 visitor 类型 / Candidate visitor type
  *
@@ -50,9 +50,7 @@ concept SourceFrontend = requires
  *       Must support `Walk(visitor)` and return `ErrorType`
  */
 template <typename Frontend, typename Visitor>
-concept WalkableFrontend =
-    SourceFrontend<Frontend> && requires(Visitor& visitor)
-{
+concept WalkableFrontend = SourceFrontend<Frontend> && requires(Visitor& visitor) {
   { Frontend::Walk(visitor) } -> std::same_as<typename Frontend::ErrorType>;
 };
 
@@ -65,17 +63,18 @@ concept WalkableFrontend =
  *       `ArgumentOrder()`, and `Profile()` as its runtime protocol surface
  */
 template <typename Format>
-concept CompiledFormat = requires
-{
-  typename std::remove_cvref_t<decltype(Format::Codes())>::value_type;
-  typename std::remove_cvref_t<decltype(Format::ArgumentList())>::value_type;
-  { Format::Codes().data() } -> std::convertible_to<const uint8_t*>;
-  { Format::Codes().size() } -> std::convertible_to<size_t>;
-  { Format::ArgumentList().size() } -> std::convertible_to<size_t>;
-  { Format::ArgumentOrder().size() } -> std::convertible_to<size_t>;
-  { Format::Profile() } -> std::convertible_to<FormatProfile>;
-} && std::same_as<typename std::remove_cvref_t<decltype(Format::Codes())>::value_type,
-                  uint8_t> &&
+concept CompiledFormat =
+    requires {
+      typename std::remove_cvref_t<decltype(Format::Codes())>::value_type;
+      typename std::remove_cvref_t<decltype(Format::ArgumentList())>::value_type;
+      { Format::Codes().data() } -> std::convertible_to<const uint8_t*>;
+      { Format::Codes().size() } -> std::convertible_to<size_t>;
+      { Format::ArgumentList().size() } -> std::convertible_to<size_t>;
+      { Format::ArgumentOrder().size() } -> std::convertible_to<size_t>;
+      { Format::Profile() } -> std::convertible_to<FormatProfile>;
+    } &&
+    std::same_as<typename std::remove_cvref_t<decltype(Format::Codes())>::value_type,
+                 uint8_t> &&
     std::same_as<
         typename std::remove_cvref_t<decltype(Format::ArgumentList())>::value_type,
         FormatArgumentInfo>;

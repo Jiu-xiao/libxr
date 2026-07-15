@@ -51,7 +51,7 @@ See [XRUSB](https://github.com/Jiu-xiao/XRUSB)
 
 ## Data structure
 
-| `Structure` | List | Stack | RBTree | LockFreeQueue | LockFreeList |
+| `Structure` | List | Stack | RBTree | Queue | LockFreeList |
 | ----------- | ---- | ----- | ------ | ------------- | ------------ |
 |             | ✅    | ✅     | ✅      | ✅             | ✅            |
 
@@ -121,14 +121,17 @@ set(LIBXR_DRIVER Linux)
 
 ### Build as Shared/Static Library
 
-By default, the library is built as an object target. You can explicitly set the build type in the CMake command line or your own CMakeLists.txt:
+By default, the library is built as a static target. You can explicitly set the build type in the CMake command line or your own CMakeLists.txt:
 
 ```cmake
 # Build as a shared library
 set(LIBXR_SHARED_BUILD True)
 
-# Build as a static library
+# Build as a static library (default)
 set(LIBXR_STATIC_BUILD True)
+
+# Build as an object library
+set(LIBXR_OBJECT_BUILD True)
 ```
 
 ### Disable Eigen

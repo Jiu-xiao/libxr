@@ -11,9 +11,9 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <algorithm>
 #include <filesystem>
 #include <system_error>
 #include <vector>
@@ -98,8 +98,8 @@ class LinuxUART : public UART
             unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
             uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
             size_t buffer_size = 512, size_t thread_stack_size = 65536)
-      : LinuxUART(vid, pid, "", "", baudrate, parity, data_bits, stop_bits,
-                  tx_queue_size, buffer_size, thread_stack_size)
+      : LinuxUART(vid, pid, "", "", baudrate, parity, data_bits, stop_bits, tx_queue_size,
+                  buffer_size, thread_stack_size)
   {
   }
 
@@ -114,10 +114,10 @@ class LinuxUART : public UART
    *       interface name.
    */
   LinuxUART(const std::string& vid, const std::string& pid,
-            const std::string& control_interface_name,
-            unsigned int baudrate = 115200, Parity parity = Parity::NO_PARITY,
-            uint8_t data_bits = 8, uint8_t stop_bits = 1, uint32_t tx_queue_size = 5,
-            size_t buffer_size = 512, size_t thread_stack_size = 65536)
+            const std::string& control_interface_name, unsigned int baudrate = 115200,
+            Parity parity = Parity::NO_PARITY, uint8_t data_bits = 8,
+            uint8_t stop_bits = 1, uint32_t tx_queue_size = 5, size_t buffer_size = 512,
+            size_t thread_stack_size = 65536)
       : LinuxUART(vid, pid, control_interface_name, "", baudrate, parity, data_bits,
                   stop_bits, tx_queue_size, buffer_size, thread_stack_size)
   {
@@ -148,7 +148,8 @@ class LinuxUART : public UART
     while (!FindUSBTTYByVidPid(vid, pid, control_interface_name, serial, device_path_))
     {
       XR_LOG_WARN(
-          "Cannot find USB TTY device with VID=%s PID=%s SERIAL=%s CONTROL_INTERFACE=%s, retrying...",
+          "Cannot find USB TTY device with VID=%s PID=%s SERIAL=%s CONTROL_INTERFACE=%s, "
+          "retrying...",
           vid.c_str(), pid.c_str(), serial.empty() ? "*" : serial.c_str(),
           control_interface_name.empty() ? "*" : control_interface_name.c_str());
       Thread::Sleep(100);
@@ -221,8 +222,7 @@ class LinuxUART : public UART
   }
 
   static bool FindUSBTTYByVidPid(const std::string& target_vid,
-                                 const std::string& target_pid,
-                                 std::string& tty_path)
+                                 const std::string& target_pid, std::string& tty_path)
   {
     return FindUSBTTYByVidPid(target_vid, target_pid, "", "", tty_path);
   }
@@ -267,8 +267,8 @@ class LinuxUART : public UART
 
       struct udev_device* usb_dev =
           udev_device_get_parent_with_subsystem_devtype(tty_dev, "usb", "usb_device");
-      struct udev_device* usb_interface = udev_device_get_parent_with_subsystem_devtype(
-          tty_dev, "usb", "usb_interface");
+      struct udev_device* usb_interface =
+          udev_device_get_parent_with_subsystem_devtype(tty_dev, "usb", "usb_interface");
 
       if (usb_dev)
       {
@@ -314,7 +314,9 @@ class LinuxUART : public UART
     if (matches.size() > 1)
     {
       XR_LOG_WARN(
-          "Multiple USB TTY devices found with VID=%s PID=%s SERIAL=%s CONTROL_INTERFACE=%s, using %s. Specify serial or control interface name to disambiguate.",
+          "Multiple USB TTY devices found with VID=%s PID=%s SERIAL=%s "
+          "CONTROL_INTERFACE=%s, using %s. Specify serial or control interface name to "
+          "disambiguate.",
           target_vid.c_str(), target_pid.c_str(),
           target_serial.empty() ? "*" : target_serial.c_str(),
           target_control_interface_name.empty() ? "*"

@@ -37,15 +37,15 @@ class HIDGamepadT
  public:
   /**
    * @brief 构造函数 / Constructor
-   * @param in_ep_num IN 端点号（默认自动） / IN endpoint number (auto by default)
+   * @param in_ep_num IN 端点号（必填） / IN endpoint number (required)
    * @param interface_string 接口字符串 / Interface string
    * @note 仅启用 IN 端点，默认 1ms 轮询 / IN-only, 1 ms polling by default
    */
   explicit HIDGamepadT(
-      Endpoint::EPNumber in_ep_num = Endpoint::EPNumber::EP_AUTO,
+      Endpoint::EPNumber in_ep_num,
       const char* interface_string = HID<50, 9, 0>::DEFAULT_INTERFACE_STRING)
-      : HID<50, 9, 0>(false, IN_EP_INTERVAL_MS, /*out_ep_interval*/ 1, in_ep_num,
-                      Endpoint::EPNumber::EP_AUTO, interface_string)
+      : HID<50, 9, 0>(in_ep_num, Endpoint::EPNumber::EP_INVALID, false, IN_EP_INTERVAL_MS,
+                      /*out_ep_interval*/ 1, interface_string)
   {
     // 初始化上一帧：轴置中，按钮清零 / Initialize last report: axes to mid, buttons
     // cleared
@@ -71,7 +71,7 @@ class HIDGamepadT
     BTN8 = 0x80,
   };
 
-#pragma pack(push, 1)
+  LIBXR_PACKED_BEGIN
   /**
    * @brief 输入报告结构（9 字节） / Input report structure (9 bytes)
    * @details 4 个 16 位轴（LOG_MIN..LOG_MAX）+ 8 位按钮 / Four 16-bit axes
@@ -85,7 +85,7 @@ class HIDGamepadT
     int16_t rx;       ///< Rx 轴 / Rx axis (LOG_MIN..LOG_MAX)
     uint8_t buttons;  ///< 按钮位 / Button bits (8)
   };
-#pragma pack(pop)
+  LIBXR_PACKED_END
 
   static_assert(sizeof(Report) == 9, "Report size must be 9 bytes");
 

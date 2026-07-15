@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <new>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -88,21 +87,20 @@ inline constexpr size_t runtime_string_max_field_width =
     case Print::FormatPackKind::U64:
       return 2U + precision;
     case Print::FormatPackKind::Pointer:
-      return 2U + (precision > 2U * sizeof(uintptr_t) ? precision
-                                                       : 2U * sizeof(uintptr_t));
+      return 2U +
+             (precision > 2U * sizeof(uintptr_t) ? precision : 2U * sizeof(uintptr_t));
     case Print::FormatPackKind::Character:
       return width;
     case Print::FormatPackKind::StringView:
       return runtime_string_unbounded_capacity;
     case Print::FormatPackKind::F32:
-      return 1U + static_cast<size_t>(std::numeric_limits<float>::max_exponent10) +
-             2U + 1U + precision;
+      return 1U + static_cast<size_t>(std::numeric_limits<float>::max_exponent10) + 2U +
+             1U + precision;
     case Print::FormatPackKind::F64:
-      return 1U + static_cast<size_t>(std::numeric_limits<double>::max_exponent10) +
-             2U + 1U + precision;
+      return 1U + static_cast<size_t>(std::numeric_limits<double>::max_exponent10) + 2U +
+             1U + precision;
     case Print::FormatPackKind::LongDouble:
-      return 1U +
-             static_cast<size_t>(std::numeric_limits<long double>::max_exponent10) +
+      return 1U + static_cast<size_t>(std::numeric_limits<long double>::max_exponent10) +
              2U + 1U + precision;
   }
 
@@ -158,13 +156,12 @@ struct RuntimeStringArgumentTraits
       std::is_same_v<Decayed, std::string_view>;
 
   static constexpr bool is_pointer =
-      std::is_pointer_v<Decayed> &&
-      !std::is_function_v<std::remove_pointer_t<Decayed>>;
+      std::is_pointer_v<Decayed> && !std::is_function_v<std::remove_pointer_t<Decayed>>;
 
   static constexpr bool has_static_capacity =
-      !is_text && (std::is_same_v<Decayed, std::nullptr_t> || is_pointer ||
-                   std::is_integral_v<Normalized> ||
-                   std::is_floating_point_v<Normalized>);
+      !is_text &&
+      (std::is_same_v<Decayed, std::nullptr_t> || is_pointer ||
+       std::is_integral_v<Normalized> || std::is_floating_point_v<Normalized>);
 };
 
 /**
@@ -177,10 +174,9 @@ template <typename... Args>
 struct RuntimeStringArgumentTypes
 {
   template <typename... CallArgs>
-  static constexpr bool matches =
-      std::is_same_v<RuntimeStringTypeList<
-                         typename RuntimeStringArgumentTraits<CallArgs>::Decayed...>,
-                     RuntimeStringTypeList<Args...>>;
+  static constexpr bool matches = std::is_same_v<
+      RuntimeStringTypeList<typename RuntimeStringArgumentTraits<CallArgs>::Decayed...>,
+      RuntimeStringTypeList<Args...>>;
 };
 
 /**
@@ -255,7 +251,7 @@ class RuntimeStringView
 {
  public:
   static_assert((std::is_same_v<
-                    Args, typename Detail::RuntimeStringArgumentTraits<Args>::Decayed> &&
+                     Args, typename Detail::RuntimeStringArgumentTraits<Args>::Decayed> &&
                  ...),
                 "LibXR::RuntimeStringView argument types must be unqualified "
                 "value types");
@@ -269,7 +265,8 @@ class RuntimeStringView
   RuntimeStringView(const RuntimeStringView&) = delete;
   RuntimeStringView& operator=(const RuntimeStringView&) = delete;
 
-  /// Move-constructs by taking the retained storage handle. / 移动构造并接管保留存储句柄。
+  /// Move-constructs by taking the retained storage handle. /
+  /// 移动构造并接管保留存储句柄。
   RuntimeStringView(RuntimeStringView&& other) noexcept
       : data_(other.data_),
         size_(other.size_),
@@ -291,7 +288,8 @@ class RuntimeStringView
     static_cast<void>(AssignCopy(text));
   }
 
-  /// Copies one bounded mutable char array as text. / 按文本语义拷贝一个有界可变字符数组。
+  /// Copies one bounded mutable char array as text. /
+  /// 按文本语义拷贝一个有界可变字符数组。
   template <size_t N>
   explicit RuntimeStringView(char (&text)[N])
     requires(Source.Size() == 0 && sizeof...(Args) == 0)
@@ -307,16 +305,18 @@ class RuntimeStringView
     static_cast<void>(AssignCopy(std::string_view(text, BoundedTextLength(text, N))));
   }
 
-  /// Copies a NUL-terminated C-string pointer into retained storage. / 拷贝 NUL 结尾 C 字符串指针到保留存储。
+  /// Copies a NUL-terminated C-string pointer into retained storage. / 拷贝 NUL 结尾 C
+  /// 字符串指针到保留存储。
   template <typename CharPtr>
-  requires(Source.Size() == 0 && sizeof...(Args) == 0 &&
-           (std::is_same_v<CharPtr, char*> || std::is_same_v<CharPtr, const char*>))
+    requires(Source.Size() == 0 && sizeof...(Args) == 0 &&
+             (std::is_same_v<CharPtr, char*> || std::is_same_v<CharPtr, const char*>))
   explicit RuntimeStringView(CharPtr text)
   {
     static_cast<void>(AssignCopy(text));
   }
 
-  /// Preserves the old bare-nullptr entry for runtime null checks. / 保留裸 nullptr 入口以维持运行期空指针检查语义。
+  /// Preserves the old bare-nullptr entry for runtime null checks. / 保留裸 nullptr
+  /// 入口以维持运行期空指针检查语义。
   explicit RuntimeStringView(std::nullptr_t text)
     requires(Source.Size() == 0 && sizeof...(Args) == 0)
   {
@@ -352,9 +352,9 @@ class RuntimeStringView
                   "LibXR::RuntimeStringView cannot retain unbounded formatted "
                   "runtime strings");
 
-    return AssignFormatted(max_size, [&](auto& sink) {
-      return Print::FormatTo<Source>(sink, std::forward<CallArgs>(args)...);
-    });
+    return AssignFormatted(
+        max_size, [&](auto& sink)
+        { return Print::FormatTo<Source>(sink, std::forward<CallArgs>(args)...); });
   }
 
   /**
@@ -376,9 +376,9 @@ class RuntimeStringView
                   "LibXR::RuntimeStringView cannot retain unbounded formatted "
                   "runtime strings");
 
-    return AssignFormatted(max_size, [&](auto& sink) {
-      return Print::PrintfTo<Source>(sink, std::forward<CallArgs>(args)...);
-    });
+    return AssignFormatted(
+        max_size, [&](auto& sink)
+        { return Print::PrintfTo<Source>(sink, std::forward<CallArgs>(args)...); });
   }
 
   /// Returns the current read-only view. / 返回当前只读视图。
@@ -424,15 +424,13 @@ class RuntimeStringView
    *
    * RuntimeStringView 的容量策略是一次分配后复用。格式化路径会先从编译格式
    * 元数据计算最大容量，因此已有存储不足表示设计边界被突破，不能在这里静默
-   * new 第二块内存。
-   * 第一次保留分配若失败，开发期应直接暴露问题；发布构建仍保留 `NO_MEM`
-   * 回退状态。
+   * new 第二块内存。首次保留分配失败属于硬资源错误，交给 LibXR 分配边界处理。
    *
    * RuntimeStringView reuses one allocation. The formatted path computes maximum
    * capacity from compiled format metadata first, so an oversized later write is
-   * a boundary error rather than a reason to allocate again.
-   * If the first retained allocation fails, debug builds should surface it
-   * immediately; release builds still keep the `NO_MEM` fallback status.
+   * a boundary error rather than a reason to allocate again. First retained
+   * allocation failure is a hard resource error and is handled at the LibXR
+   * allocation boundary.
    */
   [[nodiscard]] ErrorCode EnsureCapacity(size_t payload_size)
   {
@@ -453,12 +451,7 @@ class RuntimeStringView
       return ErrorCode::OK;
     }
 
-    data_ = new (std::nothrow) char[payload_size + 1U];
-    if (data_ == nullptr)
-    {
-      ASSERT(data_ != nullptr);
-      return ErrorCode::NO_MEM;
-    }
+    data_ = new char[payload_size + 1U];
     capacity_ = payload_size;
     return ErrorCode::OK;
   }
@@ -630,7 +623,8 @@ class RuntimeStringView
    *        formatting must go through `Reformat()` or `Reprintf()`.
    */
   template <typename T>
-  [[nodiscard]] static constexpr Detail::RuntimeStringTextPart NormalizeConcatPart(T&& text)
+  [[nodiscard]] static constexpr Detail::RuntimeStringTextPart NormalizeConcatPart(
+      T&& text)
   {
     using Bare = std::remove_cvref_t<T>;
     if constexpr (Detail::runtime_string_is_view_v<T>)
@@ -643,7 +637,8 @@ class RuntimeStringView
     else if constexpr (std::is_array_v<Bare> &&
                        std::is_same_v<std::remove_cv_t<std::remove_extent_t<Bare>>, char>)
     {
-      return {.view = std::string_view(text, BoundedTextLength(text, std::extent_v<Bare>))};
+      return {.view =
+                  std::string_view(text, BoundedTextLength(text, std::extent_v<Bare>))};
     }
     else if constexpr (std::is_same_v<Bare, std::string_view>)
     {
@@ -660,7 +655,8 @@ class RuntimeStringView
     else if constexpr (std::is_same_v<Bare, char*> || std::is_same_v<Bare, const char*>)
     {
       return text == nullptr
-                 ? Detail::RuntimeStringTextPart{.status = ErrorCode::PTR_NULL}
+                 ? Detail::RuntimeStringTextPart{.view = {},
+                                                 .status = ErrorCode::PTR_NULL}
                  : Detail::RuntimeStringTextPart{
                        .view = std::string_view(text, std::strlen(text))};
     }
@@ -673,22 +669,28 @@ class RuntimeStringView
     }
   }
 
-  /// 长期保留的 NUL 结尾存储；对象析构时不释放。 / Retained NUL-terminated storage; not released by the destructor.
+  /// 长期保留的 NUL 结尾存储；对象析构时不释放。 / Retained NUL-terminated storage; not
+  /// released by the destructor.
   char* data_ = nullptr;
-  /// 不含结尾 NUL 的当前可见文本长度。 / Current visible payload size excluding the trailing NUL.
+  /// 不含结尾 NUL 的当前可见文本长度。 / Current visible payload size excluding the
+  /// trailing NUL.
   size_t size_ = 0;
-  /// 不含结尾 NUL 的已探测/分配容量。 / Probed/allocated payload capacity excluding the trailing NUL.
+  /// 不含结尾 NUL 的已探测/分配容量。 / Probed/allocated payload capacity excluding the
+  /// trailing NUL.
   size_t capacity_ = 0;
   /// 最近一次构造或重写状态。 / Status of the latest construction or rewrite.
   ErrorCode status_ = ErrorCode::OK;
 };
 
-/// 单参数文本构造推导为普通保留字符串。 / Single text argument deduces a plain retained string.
+/// 单参数文本构造推导为普通保留字符串。 / Single text argument deduces a plain retained
+/// string.
 RuntimeStringView(std::string_view) -> RuntimeStringView<>;
-/// C 字符串构造推导为普通保留字符串。 / C-string construction deduces a plain retained string.
+/// C 字符串构造推导为普通保留字符串。 / C-string construction deduces a plain retained
+/// string.
 RuntimeStringView(const char*) -> RuntimeStringView<>;
 
-/// 多片段构造推导为普通拼接字符串。 / Multi-part construction deduces a plain concatenated string.
+/// 多片段构造推导为普通拼接字符串。 / Multi-part construction deduces a plain
+/// concatenated string.
 template <typename First, typename Second, typename... Rest>
 RuntimeStringView(First&&, Second&&, Rest&&...) -> RuntimeStringView<>;
 

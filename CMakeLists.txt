@@ -6,13 +6,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(LIBXR_DEV_ASSERT_BUILD "Enable LibXR maintainer-only development assertions" OFF)
-
 if(LIBXR_SHARED_BUILD)
   add_library(${PROJECT_NAME} SHARED)
 elseif(LIBXR_STATIC_BUILD)
   add_library(${PROJECT_NAME} STATIC)
-else()
+elseif(LIBXR_OBJECT_BUILD)
   add_library(${PROJECT_NAME} OBJECT)
+else()
+  add_library(${PROJECT_NAME} STATIC)
 endif()
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
@@ -32,6 +33,8 @@ endif()
 if(LIBXR_DEV_ASSERT_BUILD)
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEV_ASSERT_BUILD)
 endif()
+
+target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_SINGLE_CORE=$<BOOL:${LIBXR_SINGLE_CORE}>)
 
 file(GLOB ${PROJECT_NAME}_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
@@ -63,6 +66,11 @@ file(GLOB ${PROJECT_NAME}_STRUCTURE_SOURCES CONFIGURE_DEPENDS
 )
 list(SORT ${PROJECT_NAME}_STRUCTURE_SOURCES)
 
+file(GLOB ${PROJECT_NAME}_STRUCTURE_SUBDIR_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/structure/*/*.cpp"
+)
+list(SORT ${PROJECT_NAME}_STRUCTURE_SUBDIR_SOURCES)
+
 file(GLOB ${PROJECT_NAME}_MIDDLEWARE_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*.cpp"
 )
@@ -73,6 +81,11 @@ file(GLOB ${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES CONFIGURE_DEPENDS
 )
 list(SORT ${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES)
 
+file(GLOB ${PROJECT_NAME}_MIDDLEWARE_NESTED_SUBDIR_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*/*/*.cpp"
+)
+list(SORT ${PROJECT_NAME}_MIDDLEWARE_NESTED_SUBDIR_SOURCES)
+
 target_sources(
   ${PROJECT_NAME}
   PRIVATE ${${PROJECT_NAME}_SOURCES}
@@ -82,9 +95,49 @@ target_sources(
   PRIVATE ${${PROJECT_NAME}_SYSTEM_EXT_SOURCES}
   PRIVATE ${${PROJECT_NAME}_UTILS_SOURCES}
   PRIVATE ${${PROJECT_NAME}_STRUCTURE_SOURCES}
+  PRIVATE ${${PROJECT_NAME}_STRUCTURE_SUBDIR_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SOURCES}
   PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_SUBDIR_SOURCES}
+  PRIVATE ${${PROJECT_NAME}_MIDDLEWARE_NESTED_SUBDIR_SOURCES}
 )
+
+file(GLOB_RECURSE _xr_force_o3_sources CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/*_o3.cpp"
+)
+list(SORT _xr_force_o3_sources)
+
+file(GLOB_RECURSE _xr_force_os_sources CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/*_os.cpp"
+)
+list(SORT _xr_force_os_sources)
+
+if(_xr_force_o3_sources)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    set_property(SOURCE ${_xr_force_o3_sources} APPEND PROPERTY COMPILE_OPTIONS "/O2")
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    set_property(SOURCE ${_xr_force_o3_sources} APPEND PROPERTY COMPILE_OPTIONS "-O3")
+  else()
+    message(WARNING
+            "LibXR file-level optimized sources are not configured for compiler: "
+            "${CMAKE_CXX_COMPILER_ID}")
+  endif()
+endif()
+
+if(_xr_force_os_sources)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    set_property(SOURCE ${_xr_force_os_sources} APPEND PROPERTY COMPILE_OPTIONS "/O1")
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
+         CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    set_property(SOURCE ${_xr_force_os_sources} APPEND PROPERTY COMPILE_OPTIONS "-Os")
+  else()
+    message(WARNING
+            "LibXR file-level size-optimized sources are not configured for compiler: "
+            "${CMAKE_CXX_COMPILER_ID}")
+  endif()
+endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/core/CMakeLists.txt)
 
@@ -117,6 +170,18 @@ endforeach()
 file(GLOB _xr_middleware_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
      "${CMAKE_CURRENT_SOURCE_DIR}/src/middleware/*"
 )
+file(GLOB _xr_structure_SUBDIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/structure/*"
+)
+foreach(_xr_structure_SUBDIR IN LISTS _xr_structure_SUBDIRS)
+  if(IS_DIRECTORY "${_xr_structure_SUBDIR}")
+    get_filename_component(_xr_structure_NAME "${_xr_structure_SUBDIR}" NAME)
+    if(EXISTS "${_xr_structure_SUBDIR}/${_xr_structure_NAME}.hpp")
+      list(APPEND _xr_public_include_dirs "${_xr_structure_SUBDIR}")
+    endif()
+  endif()
+endforeach()
+
 foreach(_xr_middleware_SUBDIR IN LISTS _xr_middleware_SUBDIRS)
   if(IS_DIRECTORY "${_xr_middleware_SUBDIR}")
     get_filename_component(_xr_middleware_NAME "${_xr_middleware_SUBDIR}" NAME)
@@ -196,5 +261,5 @@ if(XROBOT_MODULES_DIR)
 endif()
 
 if(LIBXR_TEST_BUILD)
-  include(cmake/test.cmake)
+  add_subdirectory(test)
 endif()

@@ -22,7 +22,7 @@ uint32_t LibXR::libxr_freertos_timebase_tick_offset = 0;
 
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
-  if (Timebase::timebase == nullptr)
+  if (!Timebase::IsReady())
   {
     /* You should initialize Timebase first */
     ASSERT(false);
@@ -52,7 +52,7 @@ void* operator new(std::size_t size)
 #endif
 
   auto ans = pvPortMalloc(size);
-  ASSERT(ans != nullptr);
+  REQUIRE(ans != nullptr);
   return ans;
 }
 
@@ -78,11 +78,7 @@ void* operator new(std::size_t size, std::align_val_t align)
   std::size_t a = static_cast<std::size_t>(align);
   std::size_t space = size + a + sizeof(void*);
   void* raw = pvPortMalloc(space);
-  if (raw == nullptr)
-  {
-    ASSERT(false);
-    return raw;  // NOLINT
-  }
+  REQUIRE(raw != nullptr);
 
   uintptr_t raw_addr = reinterpret_cast<uintptr_t>(raw) + sizeof(void*);
   uintptr_t aligned_addr = (raw_addr + a - 1) & ~(a - 1);

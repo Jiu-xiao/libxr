@@ -201,19 +201,13 @@ class MillisecondTimestamp
      * @brief 转换为秒 / Convert the duration to seconds
      * @return 秒 / Seconds
      */
-    [[nodiscard]] double ToSecond() const
-    {
-      return static_cast<double>(diff_) / 1000.0;
-    }
+    [[nodiscard]] double ToSecond() const { return static_cast<double>(diff_) / 1000.0; }
 
     /**
      * @brief 转换为单精度秒 / Convert the duration to seconds in single precision
      * @return 单精度秒 / Seconds in single precision
      */
-    [[nodiscard]] float ToSecondf() const
-    {
-      return static_cast<float>(diff_) / 1000.0f;
-    }
+    [[nodiscard]] float ToSecondf() const { return static_cast<float>(diff_) / 1000.0f; }
 
     /**
      * @brief 转换为毫秒 / Convert the duration to milliseconds

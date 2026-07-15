@@ -18,9 +18,9 @@ jobs:
     - name: configure
       run: mkdir build && cd build && cmake -DLIBXR_TEST_BUILD=True ..
     - name: make
-      run: cd build && make
+      run: cd build && cmake --build . -j"$(nproc)"
     - name: check
-      run: script -q -c "./build/test"
+      run: script -q -e -c "./build/test/test" /dev/null
 
   clang-format:
     needs: build
@@ -38,7 +38,7 @@ jobs:
     - name: check clang-format via script
       shell: bash
       run: |
-        tools/format_driver_src.sh --check
+        tools/format_cpp_files.sh --check
 
   cmake-format:
 

@@ -44,8 +44,8 @@ stm32_can_id_t STM32_CAN_GetID(CAN_TypeDef* addr)
   // NOLINTEND
 }
 
-STM32CAN::STM32CAN(CAN_HandleTypeDef* hcan, uint32_t pool_size)
-    : CAN(), hcan_(hcan), id_(STM32_CAN_GetID(hcan->Instance)), tx_pool_(pool_size)
+STM32CAN::STM32CAN(CAN_HandleTypeDef* hcan, uint32_t queue_size)
+    : CAN(), hcan_(hcan), id_(STM32_CAN_GetID(hcan->Instance)), tx_queue_(queue_size)
 {
   map[id_] = this;
   Init();
@@ -445,7 +445,11 @@ void STM32CAN::TxService()
     while ((hcan_->Instance->TSR & TME_MASK) != 0u)
     {
       ClassicPack p{};
-      if (tx_pool_.Get(p) != ErrorCode::OK)
+      if (tx_retry_valid_)
+      {
+        p = tx_retry_pack_;
+      }
+      else if (tx_queue_.Pop(p) != ErrorCode::OK)
       {
         break;  // 队列空
       }
@@ -456,11 +460,12 @@ void STM32CAN::TxService()
       uint32_t mailbox = 0u;
       if (HAL_CAN_AddTxMessage(hcan_, &hdr, p.data, &mailbox) != HAL_OK)
       {
-        // 发送失败：回队列，不做任何兜底/处理
-        (void)tx_pool_.Put(p);
+        tx_retry_pack_ = p;
+        tx_retry_valid_ = true;
         break;
       }
 
+      tx_retry_valid_ = false;
       txMailbox = mailbox;
     }
 
@@ -491,8 +496,7 @@ ErrorCode STM32CAN::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  // 池满直接返回 FULL，不做补救
-  if (tx_pool_.Put(pack) != ErrorCode::OK)
+  if (tx_queue_.Push(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }

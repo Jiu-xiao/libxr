@@ -1,7 +1,7 @@
 #pragma once
 
-#include <concepts>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -17,6 +17,28 @@
 #define UNUSED(_x) ((void)(_x))
 #endif
 
+#ifndef LIBXR_SINGLE_CORE
+#define LIBXR_SINGLE_CORE 0
+#endif
+
+#if defined(_MSC_VER)
+#define LIBXR_NOINLINE __declspec(noinline)
+#define LIBXR_PACKED_BEGIN __pragma(pack(push, 1))
+#define LIBXR_PACKED_END __pragma(pack(pop))
+#define LIBXR_PACKED
+#elif defined(__clang__) || defined(__GNUC__)
+#define LIBXR_NOINLINE __attribute__((noinline))
+#define LIBXR_PACKED_BEGIN _Pragma("pack(push, 1)")
+#define LIBXR_PACKED_END _Pragma("pack(pop)")
+#define LIBXR_PACKED __attribute__((packed))
+#else
+#warning "LibXR compiler compatibility macros fallback to no-op on unknown compiler"
+#define LIBXR_NOINLINE
+#define LIBXR_PACKED_BEGIN
+#define LIBXR_PACKED_END
+#define LIBXR_PACKED
+#endif
+
 namespace LibXR
 {
 /// \brief PI 常量 / PI constant
@@ -28,8 +50,20 @@ inline constexpr double TWO_PI = 2.0 * PI;
 /// \brief 标准重力加速度（m/s²） / Standard gravitational acceleration (m/s²)
 inline constexpr double STANDARD_GRAVITY = 9.80665;
 
-/// \brief 缓存行大小 / Cache line size
-inline constexpr size_t CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
+/// \brief 真实硬件缓存行大小（用于 DMA / cache coherency） / Hardware cache-line size
+/// used for DMA/cache-coherency boundaries
+inline constexpr size_t HW_CACHE_LINE_SIZE = (sizeof(void*) == 8) ? 64 : 32;
+
+/// \brief 并发结构对齐粒度（用于降低多核伪共享） / Alignment policy used by
+/// concurrency-oriented structures
+#if LIBXR_SINGLE_CORE
+inline constexpr size_t CONCURRENCY_ALIGNMENT = sizeof(size_t);
+#else
+inline constexpr size_t CONCURRENCY_ALIGNMENT = HW_CACHE_LINE_SIZE;
+#endif
+
+/// \brief 兼容旧代码的缓存行别名 / Backward-compatible cache-line alias for existing code
+inline constexpr size_t CACHE_LINE_SIZE = HW_CACHE_LINE_SIZE;
 
 /// \brief 平台自然对齐大小 / Native platform alignment size
 inline constexpr size_t ALIGN_SIZE = sizeof(void*);
@@ -47,21 +81,21 @@ concept MemberObjectPointer = std::is_member_object_pointer_v<MemberType OwnerTy
  */
 template <typename LeftType, typename RightType>
 concept CommonOrdered = std::common_with<LeftType, RightType> &&
-                        requires(const LeftType& left, const RightType& right)
-{
-  { left < right } -> std::convertible_to<bool>;
-  { left > right } -> std::convertible_to<bool>;
-};
+                        requires(const LeftType& left, const RightType& right) {
+                          { left < right } -> std::convertible_to<bool>;
+                          { left > right } -> std::convertible_to<bool>;
+                        };
 
 /**
  * @brief 计算成员在宿主对象中的偏移量
  * @brief Computes the offset of a member within the owning object
- * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as `&Type::member`
+ * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as
+ * `&Type::member`
  * @return 成员偏移量 | Member offset
  */
 template <typename OwnerType, typename MemberType>
-requires MemberObjectPointer<OwnerType, MemberType>
-[[nodiscard]] inline size_t OffsetOf(MemberType OwnerType::*member) noexcept
+  requires MemberObjectPointer<OwnerType, MemberType>
+[[nodiscard]] inline size_t OffsetOf(MemberType OwnerType::* member) noexcept
 {
   return reinterpret_cast<size_t>(
       &(reinterpret_cast<const volatile OwnerType*>(0)->*member));
@@ -71,22 +105,23 @@ requires MemberObjectPointer<OwnerType, MemberType>
  * @brief 通过成员指针恢复其所属对象指针
  * @brief Recover the owning object pointer from a member pointer
  * @param ptr 指向成员的指针 | Pointer to the member
- * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as `&Type::member`
+ * @param member 指向成员的成员指针，如 `&Type::member` | Member pointer such as
+ * `&Type::member`
  * @return 所属对象指针 | Pointer to the owning object
  */
 template <typename OwnerType, typename MemberType>
-requires MemberObjectPointer<OwnerType, MemberType>
+  requires MemberObjectPointer<OwnerType, MemberType>
 [[nodiscard]] inline OwnerType* ContainerOf(MemberType* ptr,
-                                            MemberType OwnerType::*member) noexcept
+                                            MemberType OwnerType::* member) noexcept
 {
   return reinterpret_cast<OwnerType*>(reinterpret_cast<std::byte*>(ptr) -
                                       OffsetOf(member));
 }
 
 template <typename OwnerType, typename MemberType>
-requires MemberObjectPointer<OwnerType, MemberType>
+  requires MemberObjectPointer<OwnerType, MemberType>
 [[nodiscard]] inline const OwnerType* ContainerOf(const MemberType* ptr,
-                                                  MemberType OwnerType::*member) noexcept
+                                                  MemberType OwnerType::* member) noexcept
 {
   return reinterpret_cast<const OwnerType*>(reinterpret_cast<const std::byte*>(ptr) -
                                             OffsetOf(member));
@@ -207,13 +242,13 @@ enum class SizeLimitMode : uint8_t
  * @param arg    要检查的条件 | Condition to check
  * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
  */
-#define ASSERT_FROM_CALLBACK(arg, in_isr)             \
-  do                                                  \
-  {                                                   \
-    if (!(arg))                                       \
-    {                                                 \
+#define ASSERT_FROM_CALLBACK(arg, in_isr)              \
+  do                                                   \
+  {                                                    \
+    if (!(arg))                                        \
+    {                                                  \
       libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
-    }                                                 \
+    }                                                  \
   } while (0)
 #else
 #define ASSERT(arg) (void(arg), (void)0)
@@ -231,13 +266,13 @@ enum class SizeLimitMode : uint8_t
  * @param arg 要检查的条件 | Condition to check
  */
 #ifdef LIBXR_DEV_ASSERT_BUILD
-#define DEV_ASSERT(arg)                            \
-  do                                               \
-  {                                                \
-    if (!(arg))                                    \
-    {                                              \
+#define DEV_ASSERT(arg)                             \
+  do                                                \
+  {                                                 \
+    if (!(arg))                                     \
+    {                                               \
       libxr_fatal_error(__FILE__, __LINE__, false); \
-    }                                              \
+    }                                               \
   } while (0)
 
 /**
@@ -247,13 +282,13 @@ enum class SizeLimitMode : uint8_t
  * @param arg    要检查的条件 | Condition to check
  * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
  */
-#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr)        \
-  do                                                 \
-  {                                                  \
-    if (!(arg))                                      \
-    {                                                \
+#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr)          \
+  do                                                   \
+  {                                                    \
+    if (!(arg))                                        \
+    {                                                  \
       libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
-    }                                                \
+    }                                                  \
   } while (0)
 #else
 #define DEV_ASSERT(arg) (void(arg), (void)0)
@@ -286,13 +321,13 @@ enum class SizeLimitMode : uint8_t
  * @param arg    要检查的条件 | Condition to check
  * @param in_isr 当前是否在中断上下文 | Whether currently in ISR context
  */
-#define REQUIRE_FROM_CALLBACK(arg, in_isr)          \
-  do                                                \
-  {                                                 \
-    if (!(arg))                                     \
-    {                                               \
+#define REQUIRE_FROM_CALLBACK(arg, in_isr)             \
+  do                                                   \
+  {                                                    \
+    if (!(arg))                                        \
+    {                                                  \
       libxr_fatal_error(__FILE__, __LINE__, (in_isr)); \
-    }                                               \
+    }                                                  \
   } while (0)
 
 /**
@@ -316,7 +351,7 @@ namespace LibXR
  * @return 两数中的较大值 | The larger of the two numbers
  */
 template <typename LeftType, typename RightType>
-requires CommonOrdered<LeftType, RightType>
+  requires CommonOrdered<LeftType, RightType>
 constexpr auto max(LeftType a, RightType b) -> std::common_type_t<LeftType, RightType>
 {
   return (a > b) ? a : b;
@@ -332,7 +367,7 @@ constexpr auto max(LeftType a, RightType b) -> std::common_type_t<LeftType, Righ
  * @return 两数中的较小值 | The smaller of the two numbers
  */
 template <typename LeftType, typename RightType>
-requires CommonOrdered<LeftType, RightType>
+  requires CommonOrdered<LeftType, RightType>
 constexpr auto min(LeftType a, RightType b) -> std::common_type_t<LeftType, RightType>
 {
   return (a < b) ? a : b;

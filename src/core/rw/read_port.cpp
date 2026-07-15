@@ -5,8 +5,8 @@
 using namespace LibXR;
 
 ReadPort::ReadPort(size_t buffer_size)
-    : queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CACHE_LINE_SIZE))
-                                        LockFreeQueue<uint8_t>(buffer_size)
+    : queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
+                                        SPSCQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {
 }
@@ -254,12 +254,80 @@ void ReadPort::ProcessPendingReads(bool in_isr)
   }
 }
 
+ErrorCode ReadPort::ClearQueuedData(bool in_isr)
+{
+  ASSERT(queue_data_ != nullptr);
+
+  while (true)
+  {
+    auto state = busy_.load(std::memory_order_acquire);
+    if (state != BusyState::IDLE && state != BusyState::EVENT)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    BusyState expected = state;
+    if (!busy_.compare_exchange_strong(expected, BusyState::CLEARING,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+    {
+      if (expected != BusyState::IDLE && expected != BusyState::EVENT)
+      {
+        return ErrorCode::BUSY;
+      }
+      continue;
+    }
+
+    const size_t queued_size = queue_data_->Size();
+    if (queued_size == 0)
+    {
+      busy_.store(BusyState::IDLE, std::memory_order_release);
+      return ErrorCode::OK;
+    }
+
+    const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
+    if (pop_ans == ErrorCode::OK)
+    {
+      OnRxDequeue(in_isr);
+    }
+    else
+    {
+      // With CLEARING, ordinary reads cannot race this pop. EMPTY here means a
+      // stronger path such as FailAndClearAll() reset the queue concurrently.
+      // 有了 CLEARING 之后，普通读不会再与本次 Pop 竞争。这里如果是 EMPTY，
+      // 说明是 FailAndClearAll() 之类更强的路径并发 reset 了队列。
+      ASSERT(pop_ans == ErrorCode::EMPTY);
+    }
+
+    busy_.store(queue_data_->Size() > 0 ? BusyState::EVENT : BusyState::IDLE,
+                std::memory_order_release);
+    return ErrorCode::OK;
+  }
+}
+
 void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
-  queue_data_->Reset();
 
   auto state = busy_.load(std::memory_order_acquire);
+
+  // Symmetric to WritePort::FailAndClearAll's guard on
+  // LOCKED/BLOCK_PUBLISHING/RESETTING: CLEARING means ClearQueuedData() still owns
+  // dequeue progress, which violates this API's "backend already unavailable, no
+  // concurrent activity" precondition. Assert in dev builds and back off in release
+  // builds instead of silently stomping the in-flight clear back to IDLE.
+  // 对称于 WritePort::FailAndClearAll 对 LOCKED/BLOCK_PUBLISHING/RESETTING 的守卫：
+  // CLEARING 表示 ClearQueuedData() 仍占有出队进度，违反了本接口“后端已不可用、
+  // 无并发活动”的前置条件。开发期触发断言，发布期直接退回，而不是把正在进行的
+  // 清队列静默踩回 IDLE。
+  if (state == BusyState::CLEARING)
+  {
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+    return;
+  }
+
+  queue_data_->Reset();
+
   if (state == BusyState::PENDING)
   {
     if (info_.op.type == ReadOperation::OperationType::BLOCK)

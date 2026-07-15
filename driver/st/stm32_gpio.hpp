@@ -12,34 +12,35 @@
 #define XR_STM32_GPIO_HAS_F1_LAYOUT 0
 #endif
 
-#if defined(GPIO_MODER_MODE0) || defined(GPIO_MODER_MODE0_Msk) || defined(GPIO_MODER_MODER0) || \
-    defined(GPIO_MODER_MODER0_Msk)
+#if defined(GPIO_MODER_MODE0) || defined(GPIO_MODER_MODE0_Msk) || \
+    defined(GPIO_MODER_MODER0) || defined(GPIO_MODER_MODER0_Msk)
 #define XR_STM32_GPIO_HAS_MODER_FIELD 1
 #else
 #define XR_STM32_GPIO_HAS_MODER_FIELD 0
 #endif
 
-#if defined(GPIO_OTYPER_OT0) || defined(GPIO_OTYPER_OT0_Msk) || defined(GPIO_OTYPER_OT_0) || \
-    defined(GPIO_OTYPER_OT_0_Msk)
+#if defined(GPIO_OTYPER_OT0) || defined(GPIO_OTYPER_OT0_Msk) || \
+    defined(GPIO_OTYPER_OT_0) || defined(GPIO_OTYPER_OT_0_Msk)
 #define XR_STM32_GPIO_HAS_OTYPER_FIELD 1
 #else
 #define XR_STM32_GPIO_HAS_OTYPER_FIELD 0
 #endif
 
-#if defined(GPIO_PUPDR_PUPD0) || defined(GPIO_PUPDR_PUPD0_Msk) || defined(GPIO_PUPDR_PUPDR0) || \
-    defined(GPIO_PUPDR_PUPDR0_Msk)
+#if defined(GPIO_PUPDR_PUPD0) || defined(GPIO_PUPDR_PUPD0_Msk) || \
+    defined(GPIO_PUPDR_PUPDR0) || defined(GPIO_PUPDR_PUPDR0_Msk)
 #define XR_STM32_GPIO_HAS_PUPDR_FIELD 1
 #else
 #define XR_STM32_GPIO_HAS_PUPDR_FIELD 0
 #endif
 
-#if XR_STM32_GPIO_HAS_MODER_FIELD && XR_STM32_GPIO_HAS_OTYPER_FIELD && XR_STM32_GPIO_HAS_PUPDR_FIELD
+#if XR_STM32_GPIO_HAS_MODER_FIELD && XR_STM32_GPIO_HAS_OTYPER_FIELD && \
+    XR_STM32_GPIO_HAS_PUPDR_FIELD
 #define XR_STM32_GPIO_HAS_MODER_LAYOUT 1
 #else
 #define XR_STM32_GPIO_HAS_MODER_LAYOUT 0
 #endif
 
-#if defined(GPIO_OSPEEDR_OSPEED0) || defined(GPIO_OSPEEDR_OSPEED0_Msk) || \
+#if defined(GPIO_OSPEEDR_OSPEED0) || defined(GPIO_OSPEEDR_OSPEED0_Msk) ||   \
     defined(GPIO_OSPEEDR_OSPEEDR0) || defined(GPIO_OSPEEDR_OSPEEDR0_Msk) || \
     defined(GPIO_OSPEEDER_OSPEEDR0) || defined(GPIO_OSPEEDER_OSPEEDR0_Msk)
 #define XR_STM32_GPIO_HAS_OSPEEDR 1
@@ -48,7 +49,8 @@
 #endif
 
 #if XR_STM32_GPIO_HAS_F1_LAYOUT && XR_STM32_GPIO_HAS_MODER_LAYOUT
-#error "Ambiguous STM32 GPIO layout detection: both F1 and MODER layout signatures are present."
+#error \
+    "Ambiguous STM32 GPIO layout detection: both F1 and MODER layout signatures are present."
 #endif
 
 namespace LibXR

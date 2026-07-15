@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ti_msp_dl_config.h"
 #include "watchdog.hpp"
 
 #if defined(__MSPM0_HAS_WWDT__)

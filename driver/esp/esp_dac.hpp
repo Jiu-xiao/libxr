@@ -1,10 +1,9 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstdint>
 
 #include "dac.hpp"
+#include "esp_def.hpp"
 #include "soc/soc_caps.h"
 
 #if SOC_DAC_SUPPORTED
@@ -40,7 +39,6 @@ class ESP32DAC : public DAC
     (void)init_voltage;
 #endif
   }
-
 
   ErrorCode Write(float voltage) override
   {

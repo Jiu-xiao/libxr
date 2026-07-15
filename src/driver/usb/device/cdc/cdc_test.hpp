@@ -22,9 +22,8 @@ class CDCWriteTest : public CDCBase
 {
  public:
   CDCWriteTest(
-      Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO,
+      Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+      Endpoint::EPNumber comm_ep_num,
       const char* control_interface_string = CDCBase::DEFAULT_CONTROL_INTERFACE_STRING,
       const char* data_interface_string = CDCBase::DEFAULT_DATA_INTERFACE_STRING)
       : CDCBase(data_in_ep_num, data_out_ep_num, comm_ep_num, control_interface_string,
@@ -93,9 +92,8 @@ class CDCReadTest : public CDCBase
 {
  public:
   CDCReadTest(
-      Endpoint::EPNumber data_in_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber data_out_ep_num = Endpoint::EPNumber::EP_AUTO,
-      Endpoint::EPNumber comm_ep_num = Endpoint::EPNumber::EP_AUTO,
+      Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
+      Endpoint::EPNumber comm_ep_num,
       const char* control_interface_string = CDCBase::DEFAULT_CONTROL_INTERFACE_STRING,
       const char* data_interface_string = CDCBase::DEFAULT_DATA_INTERFACE_STRING)
       : CDCBase(data_in_ep_num, data_out_ep_num, comm_ep_num, control_interface_string,

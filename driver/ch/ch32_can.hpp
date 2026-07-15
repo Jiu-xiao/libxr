@@ -6,7 +6,7 @@
 
 #include "can.hpp"
 #include "ch32_can_def.hpp"
-#include "libxr.hpp"
+#include "queue.hpp"
 
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
@@ -27,9 +27,10 @@ class CH32CAN : public CAN
    * @brief 构造 CAN 驱动对象 / Construct CAN driver object
    *
    * @param id CAN 实例编号 / CAN instance ID
-   * @param pool_size 发送池大小 / TX pool size (ClassicPack entries)
+   * @param queue_size 发送队列大小 / TX queue size (ClassicPack entries)
+   * @pre queue_size 必须大于 1。 queue_size must be greater than 1.
    */
-  explicit CH32CAN(ch32_can_id_t id, uint32_t pool_size);
+  explicit CH32CAN(ch32_can_id_t id, uint32_t queue_size);
   ~CH32CAN() override = default;
 
   /**
@@ -90,7 +91,12 @@ class CH32CAN : public CAN
   uint8_t fifo_{0};
   uint8_t filter_bank_{0};
 
-  LockFreePool<ClassicPack> tx_pool_;
+  /// 发送软件队列。 TX software queue.
+  MPMCQueue<ClassicPack> tx_queue_;
+  /// 待重试帧有效标记。 Pending retry frame flag.
+  bool tx_retry_valid_{false};
+  /// 待重试帧。 Pending retry frame.
+  ClassicPack tx_retry_pack_{};
 
   std::atomic<uint32_t> tx_lock_{0};
   std::atomic<uint32_t> tx_pend_{0};
