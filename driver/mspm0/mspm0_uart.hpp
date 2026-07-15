@@ -5,7 +5,6 @@
 #include "ti_msp_dl_config.h"
 #include "uart.hpp"
 
-
 namespace LibXR
 {
 

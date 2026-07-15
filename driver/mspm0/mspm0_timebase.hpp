@@ -4,7 +4,6 @@
 
 #include "timebase.hpp"
 
-
 namespace LibXR
 {
 

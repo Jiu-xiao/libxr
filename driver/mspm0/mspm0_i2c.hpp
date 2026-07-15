@@ -5,7 +5,6 @@
 #include "i2c.hpp"
 #include "ti_msp_dl_config.h"
 
-
 namespace LibXR
 {
 
