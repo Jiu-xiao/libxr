@@ -1,5 +1,9 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
 #include "libxr.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
@@ -59,6 +63,73 @@ typedef enum
   CH32_UART_NUMBER,
   CH32_UART_ID_ERROR
 } ch32_uart_id_t;
+
+static constexpr uint32_t CH32_DMA_CONTROLLER_SELECTOR_MASK = 0x30000000U;
+
+static constexpr uint32_t Ch32DmaControllerSelector(uint32_t complete_status)
+{
+  // V30x DMA2 adds a top-bit controller selector to a nonzero local flag. V20x DMA1
+  // channel 8 uses the top nibble as the local flag itself, so a top-only value is not
+  // a selector.
+  const uint32_t selector = complete_status & CH32_DMA_CONTROLLER_SELECTOR_MASK;
+  return ((complete_status & ~selector) != 0U) ? selector : 0U;
+}
+
+static constexpr uint32_t Ch32DmaTransferErrorStatus(uint32_t complete_status)
+{
+  const uint32_t selector = Ch32DmaControllerSelector(complete_status);
+  return selector | ((complete_status & ~selector) << 2U);
+}
+
+static constexpr uint32_t Ch32DmaGlobalStatus(uint32_t complete_status)
+{
+  const uint32_t selector = Ch32DmaControllerSelector(complete_status);
+  return selector | ((complete_status & ~selector) >> 1U);
+}
+
+template <std::size_t SIZE>
+static constexpr std::array<uint32_t, SIZE> Ch32DmaTransferErrorMap(
+    const uint32_t (&complete_map)[SIZE])
+{
+  std::array<uint32_t, SIZE> result{};
+  for (std::size_t index = 0U; index < SIZE; ++index)
+  {
+    result[index] = Ch32DmaTransferErrorStatus(complete_map[index]);
+  }
+  return result;
+}
+
+template <std::size_t SIZE>
+static constexpr std::array<uint32_t, SIZE> Ch32DmaGlobalMap(
+    const uint32_t (&complete_map)[SIZE])
+{
+  std::array<uint32_t, SIZE> result{};
+  for (std::size_t index = 0U; index < SIZE; ++index)
+  {
+    result[index] = Ch32DmaGlobalStatus(complete_map[index]);
+  }
+  return result;
+}
+
+static_assert(Ch32DmaTransferErrorStatus(DMA1_IT_TC1) == DMA1_IT_TE1);
+static_assert(Ch32DmaGlobalStatus(DMA1_IT_TC1) == DMA1_IT_GL1);
+static_assert(Ch32DmaTransferErrorStatus(DMA1_IT_TC7) == DMA1_IT_TE7);
+static_assert(Ch32DmaGlobalStatus(DMA1_IT_TC7) == DMA1_IT_GL7);
+// V203 DMA1 channel 8 occupies the top nibble instead of using a controller selector.
+static_assert(Ch32DmaTransferErrorStatus(0x20000000U) == 0x80000000U);
+static_assert(Ch32DmaGlobalStatus(0x20000000U) == 0x10000000U);
+#if defined(DMA1_IT_TC8)
+static_assert(Ch32DmaTransferErrorStatus(DMA1_IT_TC8) == DMA1_IT_TE8);
+static_assert(Ch32DmaGlobalStatus(DMA1_IT_TC8) == DMA1_IT_GL8);
+#endif
+#if defined(DMA2_IT_TC1)
+static_assert(Ch32DmaTransferErrorStatus(DMA2_IT_TC1) == DMA2_IT_TE1);
+static_assert(Ch32DmaGlobalStatus(DMA2_IT_TC1) == DMA2_IT_GL1);
+#endif
+#if defined(DMA2_IT_TC8)
+static_assert(Ch32DmaTransferErrorStatus(DMA2_IT_TC8) == DMA2_IT_TE8);
+static_assert(Ch32DmaGlobalStatus(DMA2_IT_TC8) == DMA2_IT_GL8);
+#endif
 
 static constexpr uint8_t CH32_UART_APB_MAP[] = {
 #if defined(USART1)
@@ -268,6 +339,11 @@ static constexpr uint32_t CH32_UART_TX_DMA_IT_MAP[] = {
 #endif
 };
 
+static constexpr auto CH32_UART_TX_DMA_IT_TE_MAP =
+    Ch32DmaTransferErrorMap(CH32_UART_TX_DMA_IT_MAP);
+static constexpr auto CH32_UART_TX_DMA_IT_GL_MAP =
+    Ch32DmaGlobalMap(CH32_UART_TX_DMA_IT_MAP);
+
 static constexpr uint32_t CH32_UART_RX_DMA_IT_TC_MAP[] = {
 #if defined(USART1)
     DMA1_IT_TC5,
@@ -377,6 +453,11 @@ static constexpr uint32_t CH32_UART_RX_DMA_IT_HT_MAP[] = {
     DMA2_IT_HT11,
 #endif
 };
+
+static constexpr auto CH32_UART_RX_DMA_IT_TE_MAP =
+    Ch32DmaTransferErrorMap(CH32_UART_RX_DMA_IT_TC_MAP);
+static constexpr auto CH32_UART_RX_DMA_IT_GL_MAP =
+    Ch32DmaGlobalMap(CH32_UART_RX_DMA_IT_TC_MAP);
 
 static DMA_Channel_TypeDef* const CH32_UART_TX_DMA_CHANNEL_MAP[] = {
 #if defined(USART1)

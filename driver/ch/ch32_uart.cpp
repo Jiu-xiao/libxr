@@ -8,8 +8,45 @@
 
 using namespace LibXR;
 
+namespace
+{
+
+void Ch32UartIoFence() { __asm__ volatile("fence iorw, iorw" ::: "memory"); }
+
+void Ch32ClearDmaStatus(uint32_t status)
+{
+  DMA_ClearITPendingBit(status);
+  Ch32UartIoFence();
+  (void)DMA_GetITStatus(status);
+}
+
+void Ch32StopAndClearDmaChannel(DMA_Channel_TypeDef* channel, uint32_t channel_status,
+                                bool in_isr)
+{
+  DMA_Cmd(channel, DISABLE);
+  Ch32UartIoFence();
+  DEV_ASSERT_FROM_CALLBACK((channel->CFGR & DMA_CFGR1_EN) == 0U, in_isr);
+  Ch32ClearDmaStatus(channel_status);
+  DEV_ASSERT_FROM_CALLBACK(DMA_GetITStatus(channel_status) == RESET, in_isr);
+}
+
+}  // namespace
+
 // Static instance map.
 CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
+
+bool CH32UART::InIsr()
+{
+  constexpr size_t ACTIVE_WORD_COUNT = sizeof(PFIC->IACTR) / sizeof(PFIC->IACTR[0]);
+  for (size_t index = 0U; index < ACTIVE_WORD_COUNT; ++index)
+  {
+    if (PFIC->IACTR[index] != 0U)
+    {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Constructor: USART, DMA, and GPIO initialization.
 CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
@@ -37,12 +74,16 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   {
     ASSERT(dma_tx_channel_ != nullptr);
     ASSERT(CH32_UART_TX_DMA_IT_MAP[id] != 0);
+    ASSERT(CH32_UART_TX_DMA_IT_TE_MAP[id] != 0);
+    ASSERT(CH32_UART_TX_DMA_IT_GL_MAP[id] != 0);
   }
   if (rx_enable)
   {
     ASSERT(dma_rx_channel_ != nullptr);
     ASSERT(CH32_UART_RX_DMA_IT_TC_MAP[id] != 0);
     ASSERT(CH32_UART_RX_DMA_IT_HT_MAP[id] != 0);
+    ASSERT(CH32_UART_RX_DMA_IT_TE_MAP[id] != 0);
+    ASSERT(CH32_UART_RX_DMA_IT_GL_MAP[id] != 0);
   }
 
   /* GPIO配置（TX: 推挽输出，RX: 悬空输入） */
@@ -142,9 +183,8 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     dma_init.DMA_Mode = DMA_Mode_Circular;
     dma_init.DMA_BufferSize = rx_dma_model_.BufferSize();
     DMA_Init(dma_rx_channel_, &dma_init);
+    DMA_ITConfig(dma_rx_channel_, DMA_IT_TC | DMA_IT_HT | DMA_IT_TE, ENABLE);
     rx_dma_model_.Start(*this);
-    DMA_ITConfig(dma_rx_channel_, DMA_IT_TC, ENABLE);
-    DMA_ITConfig(dma_rx_channel_, DMA_IT_HT, ENABLE);
     USART_DMACmd(instance_, USART_DMAReq_Rx, ENABLE);
   }
 
@@ -162,7 +202,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     dma_init.DMA_Mode = DMA_Mode_Normal;
     dma_init.DMA_BufferSize = 0;
     DMA_Init(dma_tx_channel_, &dma_init);
-    DMA_ITConfig(dma_tx_channel_, DMA_IT_TC, ENABLE);
+    DMA_ITConfig(dma_tx_channel_, DMA_IT_TC | DMA_IT_TE, ENABLE);
     USART_DMACmd(instance_, USART_DMAReq_Tx, ENABLE);
   }
 
@@ -186,7 +226,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
 // Runtime USART configuration.
 ErrorCode CH32UART::SetConfig(UART::Configuration config)
 {
-  if ((config.stop_bits != 1U) && (config.stop_bits != 2U))
+  if ((config.baudrate == 0U) || ((config.stop_bits != 1U) && (config.stop_bits != 2U)))
   {
     return ErrorCode::ARG_ERR;
   }
@@ -197,42 +237,64 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
   }
 
   requested_config_.Store(config);
-  tx_dma_model_.RequestConfig(false);
+  tx_dma_model_.RequestConfig(InIsr());
   return ErrorCode::OK;
 }
 
 bool CH32UART::ApplyPendingConfig(bool in_isr)
 {
-  UNUSED(in_isr);
-  if (!rx_config_gate_.TryEnterConfig())
+  if (!hardware_gate_.TryEnterConfig())
   {
-    return false;
-  }
-  if (!irq_config_gate_.TryEnterConfig())
-  {
-    rx_config_gate_.RequestConfig();
-    rx_config_gate_.LeaveConfig();
     return false;
   }
 
-  irq_config_gate_.ConsumePendingConfig();
-  rx_config_gate_.ConsumePendingConfig();
-  UART::Configuration config{};
-  (void)requested_config_.LoadLatest(config);
+  MaskNormalIrqs();
 
   if (uart_mode_ & USART_Mode_Tx)
   {
     USART_DMACmd(instance_, USART_DMAReq_Tx, DISABLE);
-    DMA_Cmd(dma_tx_channel_, DISABLE);
-    DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id_]);
+    Ch32StopAndClearDmaChannel(dma_tx_channel_, CH32_UART_TX_DMA_IT_GL_MAP[id_], in_isr);
   }
   if (uart_mode_ & USART_Mode_Rx)
   {
     USART_DMACmd(instance_, USART_DMAReq_Rx, DISABLE);
-    DMA_Cmd(dma_rx_channel_, DISABLE);
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
+    Ch32StopAndClearDmaChannel(dma_rx_channel_, CH32_UART_RX_DMA_IT_GL_MAP[id_], in_isr);
+    if (USART_GetFlagStatus(instance_, USART_FLAG_IDLE) != RESET)
+    {
+      (void)USART_ReceiveData(instance_);
+    }
   }
+
+  hardware_gate_.ConsumePendingConfig();
+  ApplyConfigPayload(in_isr);
+
+  if (uart_mode_ & USART_Mode_Rx)
+  {
+    rx_dma_model_.Start(*this);
+    USART_DMACmd(instance_, USART_DMAReq_Rx, ENABLE);
+    USART_ITConfig(instance_, USART_IT_IDLE, ENABLE);
+  }
+  if (uart_mode_ & USART_Mode_Tx)
+  {
+    USART_DMACmd(instance_, USART_DMAReq_Tx, ENABLE);
+  }
+
+  USART_Cmd(instance_, ENABLE);
+  return true;
+}
+
+bool CH32UART::OnConfigApplied(bool in_isr)
+{
+  RestoreNormalIrqs();
+  Ch32UartIoFence();
+  DispatchHardwareActions(hardware_gate_.LeaveConfig(), in_isr);
+  return true;
+}
+
+void CH32UART::ApplyConfigPayload(bool in_isr)
+{
+  UART::Configuration config{};
+  (void)requested_config_.LoadLatest(config);
 
   USART_InitTypeDef usart_cfg = {};
   usart_cfg.USART_BaudRate = config.baudrate;
@@ -254,29 +316,14 @@ bool CH32UART::ApplyPendingConfig(bool in_isr)
       usart_cfg.USART_WordLength = USART_WordLength_9b;
       break;
     default:
-      ASSERT(false);
-      return true;
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+      return;
   }
 
   usart_cfg.USART_Mode = uart_mode_;
   usart_cfg.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
   USART_DeInit(instance_);
   USART_Init(instance_, &usart_cfg);
-
-  if (uart_mode_ & USART_Mode_Rx)
-  {
-    rx_dma_model_.Start(*this);
-    USART_DMACmd(instance_, USART_DMAReq_Rx, ENABLE);
-    USART_ITConfig(instance_, USART_IT_IDLE, ENABLE);
-  }
-
-  if (uart_mode_ & USART_Mode_Tx)
-  {
-    USART_DMACmd(instance_, USART_DMAReq_Tx, ENABLE);
-  }
-
-  USART_Cmd(instance_, ENABLE);
-  return true;
 }
 
 // Write callback (DMA-based transfer).
@@ -286,13 +333,52 @@ ErrorCode CH32UART::WriteFun(WritePort& port, bool in_isr)
   return uart->tx_dma_model_.Submit(in_isr);
 }
 
-bool CH32UART::StartDmaTx(uint8_t* data, size_t size, int)
+void CH32UART::StartCircularDmaRx(uint8_t* data, size_t size)
 {
-  DMA_Cmd(dma_tx_channel_, DISABLE);
+  dma_rx_channel_->MADDR = reinterpret_cast<uint32_t>(data);
+  dma_rx_channel_->CNTR = size;
+  Ch32UartIoFence();
+  DMA_Cmd(dma_rx_channel_, ENABLE);
+  Ch32UartIoFence();
+  (void)dma_rx_channel_->CFGR;
+}
+
+UartDmaTxStartResult CH32UART::StartDmaTx(
+    uint8_t* data, size_t size, int, UartHardwareGate::OwnerContext* hardware_context)
+{
+  const bool in_isr = InIsr();
+  const bool nested_start = hardware_context != nullptr;
+  if (nested_start && !hardware_gate_.TryEnterNestedTxStart(*hardware_context))
+  {
+    return UartDmaTxStartResult::RETRY;
+  }
+  if (!nested_start && !hardware_gate_.TryEnterTxStart())
+  {
+    return UartDmaTxStartResult::RETRY;
+  }
+
+  const auto finish_start = [&](UartDmaTxStartResult result)
+  {
+    Ch32UartIoFence();
+    if (nested_start)
+    {
+      hardware_gate_.LeaveNestedTxStart(*hardware_context);
+    }
+    else
+    {
+      DispatchHardwareActions(hardware_gate_.LeaveTxStart(), in_isr);
+    }
+    return result;
+  };
+
+  Ch32StopAndClearDmaChannel(dma_tx_channel_, CH32_UART_TX_DMA_IT_GL_MAP[id_], in_isr);
   dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(data);
   dma_tx_channel_->CNTR = size;
+  Ch32UartIoFence();
   DMA_Cmd(dma_tx_channel_, ENABLE);
-  return true;
+  Ch32UartIoFence();
+  DEV_ASSERT_FROM_CALLBACK((dma_tx_channel_->CFGR & DMA_CFGR1_EN) != 0U, in_isr);
+  return finish_start(UartDmaTxStartResult::STARTED);
 }
 
 // Read callback (interrupt-driven).
@@ -302,20 +388,9 @@ ErrorCode CH32UART::ReadFun(ReadPort&, bool)
   return ErrorCode::PENDING;
 }
 
-void ch32_uart_rx_isr_handler(LibXR::CH32UART* uart) { uart->OnRxDataAvailable(true); }
-
 void CH32UART::OnRxDataAvailable(bool in_isr)
 {
-  if (!rx_config_gate_.TryEnterRx())
-  {
-    return;
-  }
-
   rx_dma_model_.OnDataAvailable(*this, _read_port, in_isr);
-  if (rx_config_gate_.LeaveRx())
-  {
-    tx_dma_model_.RequestConfig(in_isr);
-  }
 }
 
 // USART IDLE interrupt handler.
@@ -329,102 +404,161 @@ extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
   uart->UartIRQHandler();
 }
 
-// DMA TX completion interrupt handler.
-extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
-{
-  DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
-  uart->tx_dma_model_.OnTransferDone(true);
-}
-
 // DMA channel IRQ callbacks.
-void CH32UART::TxDmaIRQHandler()
+void CH32UART::TxDmaIRQHandler() { HandleNormalIrq(); }
+
+// RX DMA IRQ entry. The shared scanner checks the complete UART IRQ domain.
+void CH32UART::RxDmaIRQHandler() { HandleNormalIrq(); }
+
+void CH32UART::UartIRQHandler() { HandleNormalIrq(); }
+
+void CH32UART::HandleNormalIrq()
 {
-  if (!irq_config_gate_.TryEnterIrq())
+  UartHardwareGate::OwnerContext hardware_context;
+  if (!hardware_gate_.TryEnterIrq(hardware_context))
   {
-    if (irq_config_gate_.ConfigRequested())
-    {
-      tx_dma_model_.ResumeConfig(true);
-    }
+    DeferNormalIrq(true);
     return;
   }
 
-  if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET)
+  ScanNormalIrqStatus(true, hardware_context);
+  Ch32UartIoFence();
+  DispatchHardwareActions(hardware_gate_.LeaveIrq(hardware_context), true);
+}
+
+void CH32UART::DeferNormalIrq(bool in_isr)
+{
+  MaskNormalIrqs();
+  hardware_gate_.MarkIrqDeferred();
+  DispatchHardwareActions(UartHardwareGate::PendingAction::IRQ_DEFERRED, in_isr);
+}
+
+void CH32UART::ScanNormalIrqStatus(bool in_isr,
+                                   UartHardwareGate::OwnerContext& hardware_context)
+{
+  const bool rx_enabled = (uart_mode_ & USART_Mode_Rx) != 0U;
+  const bool tx_enabled = (uart_mode_ & USART_Mode_Tx) != 0U;
+  const bool rx_error =
+      rx_enabled && (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TE_MAP[id_]) == SET);
+  const bool rx_half =
+      rx_enabled && (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET);
+  const bool rx_complete =
+      rx_enabled && (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) == SET);
+  const bool tx_error =
+      tx_enabled && (DMA_GetITStatus(CH32_UART_TX_DMA_IT_TE_MAP[id_]) == SET);
+  const bool tx_complete =
+      tx_enabled && (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == SET);
+
+  if (rx_error)
   {
-    if (irq_config_gate_.LeaveIrq())
-    {
-      tx_dma_model_.ResumeConfig(true);
-    }
+    Ch32StopAndClearDmaChannel(dma_rx_channel_, CH32_UART_RX_DMA_IT_GL_MAP[id_], in_isr);
+    tx_dma_model_.RequestConfig(in_isr);
     return;
   }
 
-  if (dma_tx_channel_->CNTR == 0)
+  bool rx_data_available = false;
+  if (uart_mode_ & USART_Mode_Rx)
   {
-    ch32_uart_isr_handler_tx_cplt(this);
+    uint32_t rx_status_to_clear = 0U;
+    if (rx_half)
+    {
+      rx_status_to_clear |= CH32_UART_RX_DMA_IT_HT_MAP[id_];
+      rx_data_available = true;
+    }
+    if (rx_complete)
+    {
+      rx_status_to_clear |= CH32_UART_RX_DMA_IT_TC_MAP[id_];
+      rx_data_available = true;
+    }
+    if (rx_status_to_clear != 0U)
+    {
+      Ch32ClearDmaStatus(rx_status_to_clear);
+    }
+    if (USART_GetFlagStatus(instance_, USART_FLAG_IDLE) != RESET)
+    {
+      (void)USART_ReceiveData(instance_);
+      rx_data_available = true;
+    }
   }
 
-  if (irq_config_gate_.LeaveIrq())
+  if (rx_data_available)
   {
-    tx_dma_model_.ResumeConfig(true);
+    OnRxDataAvailable(in_isr);
+  }
+
+  if (tx_error)
+  {
+    Ch32StopAndClearDmaChannel(dma_tx_channel_, CH32_UART_TX_DMA_IT_GL_MAP[id_], in_isr);
+    tx_dma_model_.OnTransferError(in_isr, hardware_context);
+  }
+  else if (tx_complete)
+  {
+    Ch32StopAndClearDmaChannel(dma_tx_channel_, CH32_UART_TX_DMA_IT_GL_MAP[id_], in_isr);
+    tx_dma_model_.OnTransferDone(in_isr, hardware_context);
   }
 }
 
-/**
- * @brief  DMA中断处理函数
- *
- * 如果DMA中断触发，且中断状态为半满或传输完成，清除中断标志，
- * 并调用对应的中断处理函数
- *
- * @param[in] id  UART的ID
- */
-void CH32UART::RxDmaIRQHandler()
+void CH32UART::MaskNormalIrqs()
 {
-  if (!irq_config_gate_.TryEnterIrq())
+  NVIC_DisableIRQ(CH32_UART_IRQ_MAP[id_]);
+  if (uart_mode_ & USART_Mode_Tx)
   {
-    if (irq_config_gate_.ConfigRequested())
-    {
-      tx_dma_model_.ResumeConfig(true);
-    }
-    return;
+    NVIC_DisableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_tx_channel_)]);
   }
-
-  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET)
+  if (uart_mode_ & USART_Mode_Rx)
   {
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
-    ch32_uart_rx_isr_handler(this);
+    NVIC_DisableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_rx_channel_)]);
   }
-
-  if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) == SET)
-  {
-    DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
-    ch32_uart_rx_isr_handler(this);
-  }
-
-  if (irq_config_gate_.LeaveIrq())
-  {
-    tx_dma_model_.ResumeConfig(true);
-  }
+  Ch32UartIoFence();
 }
 
-void CH32UART::UartIRQHandler()
+void CH32UART::RestoreNormalIrqs()
 {
-  if (!irq_config_gate_.TryEnterIrq())
+  NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id_]);
+  if (uart_mode_ & USART_Mode_Tx)
   {
-    if (irq_config_gate_.ConfigRequested())
+    NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_tx_channel_)]);
+  }
+  if (uart_mode_ & USART_Mode_Rx)
+  {
+    NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_rx_channel_)]);
+  }
+  Ch32UartIoFence();
+}
+
+void CH32UART::DispatchHardwareActions(UartHardwareGate::PendingAction actions,
+                                       bool in_isr)
+{
+  while (true)
+  {
+    if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::CONFIG))
     {
-      tx_dma_model_.ResumeConfig(true);
+      tx_dma_model_.ResumeConfig(in_isr);
+      return;
+    }
+
+    if (UartHardwareGate::HasAction(actions,
+                                    UartHardwareGate::PendingAction::IRQ_DEFERRED))
+    {
+      UartHardwareGate::OwnerContext hardware_context;
+      if (!hardware_gate_.TryEnterDeferredIrq(hardware_context))
+      {
+        return;
+      }
+
+      MaskNormalIrqs();
+      ScanNormalIrqStatus(in_isr, hardware_context);
+      RestoreNormalIrqs();
+      Ch32UartIoFence();
+      actions = hardware_gate_.LeaveIrq(hardware_context);
+      continue;
+    }
+
+    if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::TX_START))
+    {
+      tx_dma_model_.ResumeStart(in_isr);
     }
     return;
-  }
-
-  if (USART_GetITStatus(instance_, USART_IT_IDLE) != RESET)
-  {
-    USART_ReceiveData(instance_);
-    ch32_uart_rx_isr_handler(this);
-  }
-
-  if (irq_config_gate_.LeaveIrq())
-  {
-    tx_dma_model_.ResumeConfig(true);
   }
 }
 

@@ -14,9 +14,11 @@ namespace LibXR
  * All normal hardware access has one owner. A configuration request has priority over
  * deferred IRQ work, which has priority over new TX-start entries. A TX-start caller
  * that cannot enter leaves a persistent retry bit. Releasing owners report that fact
- * as a dispatch hint, but only a successful TX-start claim consumes it. This keeps the
- * retry responsibility durable across the release-to-dispatch window and across an
- * intervening ordinary IRQ owner.
+ * as a dispatch hint. A successful TX-start claim consumes it; a successful CONFIG
+ * claim retires a retry from the old hardware generation because the TX model will
+ * destructively drain that fixed prefix and unconditionally rescan post-boundary writes.
+ * This keeps the retry responsibility durable across ordinary release-to-dispatch
+ * windows without leaving stale work after CONFIG.
  *
  * A normal IRQ that loses ownership must mask the complete normal IRQ domain before
  * calling `MarkIrqDeferred()`. The deferred bit is persistent: a releasing owner does
@@ -33,10 +35,13 @@ namespace LibXR
  * generation. If one scan observes both ERROR and COMPLETE, it advances the TX model
  * once: ERROR absorbs COMPLETE for that snapshot.
  *
- * Configuration may temporarily admit one IRQ sub-owner for asynchronous abort
- * completion. The CONFIG owner publishes that admission only after callback-visible
- * state is initialized, closes admission atomically against callback entry, and
- * remains active until the callback has exited.
+ * CONFIG is a highest-priority level-triggered request. `RequestConfig()` may be
+ * called from any UART entry. Whichever later entry successfully claims CONFIG retains
+ * `CONFIG_ACTIVE` until the backend has quiesced the old hardware generation, applied
+ * the accepted payload, and completed its software drain. The CPU call stack may return
+ * while that ownership remains active. This gate does not identify or admit asynchronous
+ * abort IRQs; a backend that needs them must provide direction-specific admission while
+ * continuing to exclude every ordinary IRQ and TX start.
  *
  * Platform contract:
  * - all ordinary UART, RX-DMA, and TX-DMA IRQs for one instance execute on one target
@@ -44,18 +49,41 @@ namespace LibXR
  * - an IRQ claims this gate before reading or interpreting hardware status; a losing
  *   IRQ caches no COMPLETE, ERROR, or abort payload outside the gate;
  * - CONFIG reports hardware quiescence only after the old DMA is stopped, related
- *   status is cleared with the required barrier/readback, and no selected old callback
- *   can enter a later CONFIG admission;
- * - at most one asynchronous abort is outstanding, and its callback leaves the CONFIG
- *   IRQ sub-owner before it dispatches CONFIG resumption.
- *
- * A platform that queues already-interpreted callbacks outside this ownership domain
- * cannot satisfy the last two rules with the admission bit alone and must carry an
- * immutable transaction token in that callback.
+ *   status is cleared with the required barrier/readback, and every selected old abort
+ *   callback has exited before a later TX start or CONFIG admission;
+ * - CONFIG apply is destructive for the old hardware generation: it stops old RX/TX
+ *   activity, clears old terminal sources, applies the latest payload, and restarts the
+ *   accepted hardware state before releasing CONFIG ownership.
+ * - the TX retry bit represents the single candidate owned by one serialized TX model;
+ *   it is not a counter for independent TX-start callers.
  */
 class UartHardwareGate
 {
  public:
+  /**
+   * @brief Synchronous ownership token for one ordinary/deferred IRQ call stack.
+   *
+   * The token is stack-local ownership evidence, not an event payload. It may be passed
+   * through a synchronously executing TX service owner, but must never be copied, stored,
+   * or used after the outer IRQ owner leaves the gate. The non-atomic depth is touched
+   * only by that owning call stack.
+   */
+  class OwnerContext
+  {
+   public:
+    OwnerContext() = default;
+    OwnerContext(const OwnerContext&) = delete;
+    OwnerContext& operator=(const OwnerContext&) = delete;
+    OwnerContext(OwnerContext&&) = delete;
+    OwnerContext& operator=(OwnerContext&&) = delete;
+
+   private:
+    friend class UartHardwareGate;
+
+    UartHardwareGate* gate_ = nullptr;
+    uint32_t depth_ = 0U;
+  };
+
   enum class PendingAction : uint32_t
   {
     NONE = 0U,
@@ -96,7 +124,34 @@ class UartHardwareGate
     return false;
   }
 
+  [[nodiscard]] bool TryEnterIrq(OwnerContext& context)
+  {
+    if (!ContextIsUnused(context))
+    {
+      ASSERT(false);
+      return false;
+    }
+    if (!TryEnterIrq())
+    {
+      return false;
+    }
+    BindIrqContext(context);
+    return true;
+  }
+
   [[nodiscard]] PendingAction LeaveIrq() { return LeaveOwner(IRQ_ACTIVE); }
+
+  [[nodiscard]] PendingAction LeaveIrq(OwnerContext& context)
+  {
+    if (!ContextIsOuterIrq(context))
+    {
+      ASSERT(false);
+      return PendingAction::NONE;
+    }
+    const PendingAction actions = LeaveIrq();
+    ResetContext(context);
+    return actions;
+  }
 
   /**
    * @brief Claim previously masked/deferred normal IRQ work.
@@ -123,6 +178,79 @@ class UartHardwareGate
     return false;
   }
 
+  [[nodiscard]] bool TryEnterDeferredIrq(OwnerContext& context)
+  {
+    if (!ContextIsUnused(context))
+    {
+      ASSERT(false);
+      return false;
+    }
+    if (!TryEnterDeferredIrq())
+    {
+      return false;
+    }
+    BindIrqContext(context);
+    return true;
+  }
+
+  /**
+   * @brief Atomically admit one TX start nested under the current IRQ owner.
+   *
+   * The successful CAS is the priority linearization point. CONFIG or deferred IRQ work
+   * published first forces a durable TX retry; publication after the CAS waits for the
+   * outer IRQ owner to leave. Successful nesting keeps IRQ_ACTIVE as the sole global
+   * owner and changes only the stack-local depth.
+   */
+  [[nodiscard]] bool TryEnterNestedTxStart(OwnerContext& context)
+  {
+    if (!ContextIsOuterIrq(context))
+    {
+      ASSERT(false);
+      return false;
+    }
+
+    // A valid outer context implies that the common state is exactly IRQ_ACTIVE. Start
+    // the CAS from that value so uncontended nested admission needs no separate load;
+    // failure returns any concurrently published pending bits in observed.
+    uint32_t observed = IRQ_ACTIVE;
+    while ((observed & OWNER_MASK) == IRQ_ACTIVE)
+    {
+      if ((observed & (CONFIG_PENDING | IRQ_DEFERRED_PENDING)) != 0U)
+      {
+        state_.fetch_or(TX_START_PENDING, std::memory_order_release);
+        return false;
+      }
+
+      const uint32_t desired = observed & ~TX_START_PENDING;
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        context.depth_ = 2U;
+        return true;
+      }
+    }
+
+    ASSERT(false);
+    return false;
+  }
+
+  /**
+   * @brief Leave a TX start nested under an IRQ owner without releasing the gate.
+   *
+   * Pending work is dispatched only when the outer IRQ owner leaves. This mirrors a
+   * nested critical section: inner leave restores the outer depth and performs no atomic
+   * owner transition.
+   */
+  void LeaveNestedTxStart(OwnerContext& context)
+  {
+    if ((context.gate_ != this) || (context.depth_ != 2U))
+    {
+      ASSERT(false);
+      return;
+    }
+    context.depth_ = 1U;
+  }
+
   [[nodiscard]] bool TryEnterTxStart()
   {
     uint32_t observed =
@@ -141,12 +269,21 @@ class UartHardwareGate
 
   [[nodiscard]] PendingAction LeaveTxStart() { return LeaveOwner(TX_START_ACTIVE); }
 
+  /**
+   * @brief Claim CONFIG and retire a TX retry from its fixed old prefix.
+   *
+   * The caller must fix the model's CONFIG boundary before this claim. The successful
+   * CAS is also the retry-retirement linearization point: an earlier TX retry belongs to
+   * the destructive old prefix, while a retry published after the CAS remains pending.
+   * The TX model must rescan its authoritative pending/queue state after CONFIG.
+   */
   [[nodiscard]] bool TryEnterConfig()
   {
     uint32_t observed = state_.load(std::memory_order_relaxed);
     while (((observed & CONFIG_PENDING) != 0U) && ((observed & OWNER_MASK) == 0U))
     {
-      const uint32_t desired = (observed & ~CONFIG_PENDING) | CONFIG_ACTIVE;
+      const uint32_t desired =
+          (observed & ~(CONFIG_PENDING | TX_START_PENDING)) | CONFIG_ACTIVE;
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acquire,
                                        std::memory_order_relaxed))
       {
@@ -154,52 +291,6 @@ class UartHardwareGate
       }
     }
     return false;
-  }
-
-  [[nodiscard]] bool TryEnterConfigIrq()
-  {
-    uint32_t observed = state_.load(std::memory_order_relaxed);
-    while (((observed & (CONFIG_ACTIVE | CONFIG_IRQ_ADMITTED)) ==
-            (CONFIG_ACTIVE | CONFIG_IRQ_ADMITTED)) &&
-           ((observed & IRQ_ACTIVE) == 0U))
-    {
-      if (state_.compare_exchange_weak(observed, observed | IRQ_ACTIVE,
-                                       std::memory_order_acquire,
-                                       std::memory_order_relaxed))
-      {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * @brief Publish asynchronous CONFIG IRQ admission after callback state is ready.
-   *
-   * The release operation pairs with `TryEnterConfigIrq()`'s acquire claim. The
-   * admission remains open until `TryLeaveConfig()` starts closing the transaction.
-   */
-  void OpenConfigIrqAdmission()
-  {
-    uint32_t observed = state_.load(std::memory_order_relaxed);
-    while (true)
-    {
-      ASSERT((observed & CONFIG_ACTIVE) != 0U);
-      ASSERT((observed & CONFIG_IRQ_ADMITTED) == 0U);
-      if (state_.compare_exchange_weak(observed, observed | CONFIG_IRQ_ADMITTED,
-                                       std::memory_order_release,
-                                       std::memory_order_relaxed))
-      {
-        return;
-      }
-    }
-  }
-
-  void LeaveConfigIrq()
-  {
-    const uint32_t observed = state_.fetch_sub(IRQ_ACTIVE, std::memory_order_release);
-    ASSERT((observed & CONFIG_ACTIVE) != 0U);
-    ASSERT((observed & IRQ_ACTIVE) != 0U);
   }
 
   void ConsumePendingConfig()
@@ -217,56 +308,7 @@ class UartHardwareGate
     }
   }
 
-  /**
-   * @brief Try to close the outer configuration transaction.
-   * @param actions Receives pending work only when CONFIG ownership was released.
-   * This operation first closes CONFIG IRQ admission. Its CAS competes directly with
-   * callback entry: either the close wins and no new callback may enter, or the
-   * callback wins and CONFIG ownership is retained until that sub-owner exits.
-   *
-   * @return false if an asynchronous CONFIG IRQ sub-owner is still active or won the
-   * entry race; true after CONFIG ownership was released.
-   */
-  [[nodiscard]] bool TryLeaveConfig(PendingAction& actions)
-  {
-    uint32_t observed = state_.load(std::memory_order_relaxed);
-    while (true)
-    {
-      ASSERT((observed & CONFIG_ACTIVE) != 0U);
-      if ((observed & IRQ_ACTIVE) != 0U)
-      {
-        const uint32_t desired = observed & ~CONFIG_IRQ_ADMITTED;
-        if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
-                                         std::memory_order_relaxed))
-        {
-          actions = PendingAction::NONE;
-          return false;
-        }
-        continue;
-      }
-      const uint32_t desired = observed & ~(CONFIG_ACTIVE | CONFIG_IRQ_ADMITTED);
-      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
-                                       std::memory_order_relaxed))
-      {
-        actions = PendingActions(observed);
-        return true;
-      }
-    }
-  }
-
-  /**
-   * @brief Close CONFIG, atomically closing abort admission against callback entry.
-   *
-   * This asserting helper is valid only when no CONFIG IRQ sub-owner is active. Use
-   * `TryLeaveConfig()` when asynchronous callback completion may still be in flight.
-   */
-  [[nodiscard]] PendingAction LeaveConfig()
-  {
-    PendingAction actions = PendingAction::NONE;
-    const bool released = TryLeaveConfig(actions);
-    ASSERT(released);
-    return actions;
-  }
+  [[nodiscard]] PendingAction LeaveConfig() { return LeaveOwner(CONFIG_ACTIVE); }
 
   [[nodiscard]] bool ConfigRequested() const
   {
@@ -281,6 +323,7 @@ class UartHardwareGate
 
   [[nodiscard]] bool TxStartActive() const
   {
+    // Nested TX start remains covered by IRQ_ACTIVE and is intentionally not reported.
     return (state_.load(std::memory_order_acquire) & TX_START_ACTIVE) != 0U;
   }
 
@@ -311,8 +354,29 @@ class UartHardwareGate
   static constexpr uint32_t CONFIG_PENDING = 1U << 3U;
   static constexpr uint32_t TX_START_PENDING = 1U << 4U;
   static constexpr uint32_t IRQ_DEFERRED_PENDING = 1U << 5U;
-  static constexpr uint32_t CONFIG_IRQ_ADMITTED = 1U << 6U;
   static constexpr uint32_t OWNER_MASK = IRQ_ACTIVE | TX_START_ACTIVE | CONFIG_ACTIVE;
+
+  [[nodiscard]] static bool ContextIsUnused(const OwnerContext& context)
+  {
+    return (context.gate_ == nullptr) && (context.depth_ == 0U);
+  }
+
+  [[nodiscard]] bool ContextIsOuterIrq(const OwnerContext& context) const
+  {
+    return (context.gate_ == this) && (context.depth_ == 1U);
+  }
+
+  void BindIrqContext(OwnerContext& context)
+  {
+    context.gate_ = this;
+    context.depth_ = 1U;
+  }
+
+  static void ResetContext(OwnerContext& context)
+  {
+    context.gate_ = nullptr;
+    context.depth_ = 0U;
+  }
 
   [[nodiscard]] static constexpr PendingAction PendingActions(uint32_t state)
   {

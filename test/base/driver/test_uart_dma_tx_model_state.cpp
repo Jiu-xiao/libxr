@@ -7,6 +7,24 @@ namespace
 
 using PollStatus = LibXR::WriteOperation::OperationPollingStatus;
 
+struct LegacyStartBackend
+{
+  bool StartDmaTx(uint8_t*, size_t, int);
+};
+
+template <typename Model>
+concept HasHardwareContextCompletion =
+    requires(Model& model, LibXR::UartHardwareGate::OwnerContext& context) {
+      model.OnTransferDone(false, context);
+    };
+
+using ContextBackendModel = LibXR::UartDmaTxModel<FakeUartDmaBackend>;
+using LegacyBackendModel = LibXR::UartDmaTxModel<LegacyStartBackend>;
+
+static_assert(HasHardwareContextCompletion<ContextBackendModel>);
+static_assert(!HasHardwareContextCompletion<LegacyBackendModel>);
+static_assert(requires(LegacyBackendModel& model) { model.OnTransferDone(false); });
+
 void TestIdleAndDuplicateTerminalEvents()
 {
   FakeUartDmaBackend backend;
@@ -114,7 +132,7 @@ void TestPromotedStartFailureAbortsRetainedPipeline()
   ASSERT(backend.QueuedDataSize() == 0U);
 }
 
-void TestQueuedStartRetryPreservesPublishedRecord()
+void TestQueuedStartRetryStagesPayloadBeforeRetry()
 {
   FakeUartDmaBackend backend;
   const uint8_t data[] = {0x41U, 0x42U, 0x43U};
@@ -128,7 +146,7 @@ void TestQueuedStartRetryPreservesPublishedRecord()
   ASSERT(!backend.IsBusy());
   ASSERT(backend.StartCount() == 0U);
   ASSERT(backend.QueuedInfoCount() == 1U);
-  ASSERT(backend.QueuedDataSize() == sizeof(data));
+  ASSERT(backend.QueuedDataSize() == 0U);
 
   backend.ResumeStart(true);
 
@@ -186,6 +204,99 @@ void TestPendingStartRetryPreservesPreloadedBuffer()
   ASSERT(!backend.IsBusy());
 }
 
+void TestRetriedPendingIsFailedByConfig()
+{
+  FakeUartDmaBackend backend;
+  const uint8_t data[] = {0x5AU};
+  PollStatus status = PollStatus::READY;
+  LibXR::WriteOperation op(status);
+
+  backend.RetryNextStart();
+  ASSERT(backend.Write(data, sizeof(data), op) == LibXR::ErrorCode::OK);
+  ASSERT(status == PollStatus::RUNNING);
+  ASSERT(!backend.IsBusy());
+  ASSERT(backend.StartCount() == 0U);
+  ASSERT(backend.QueuedInfoCount() == 1U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+
+  backend.Configure(0x5AU);
+
+  ASSERT(status == PollStatus::ERROR);
+  ASSERT(!backend.IsBusy());
+  ASSERT(backend.StartCount() == 0U);
+  ASSERT(backend.ConfigApplyCount() == 1U);
+  ASSERT(backend.QueuedInfoCount() == 0U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+}
+
+void TestFailedStartDoesNotAdvanceActiveBlock()
+{
+  FakeUartDmaBackend backend;
+  const uint8_t failed_data[] = {0x5BU};
+  const uint8_t next_data[] = {0x5CU};
+  PollStatus failed_status = PollStatus::READY;
+  PollStatus next_status = PollStatus::READY;
+  LibXR::WriteOperation failed_op(failed_status);
+  LibXR::WriteOperation next_op(next_status);
+
+  backend.SetStartAllowed(false);
+  ASSERT(backend.Write(failed_data, sizeof(failed_data), failed_op) ==
+         LibXR::ErrorCode::FAILED);
+  ASSERT(failed_status == PollStatus::ERROR);
+  ASSERT(backend.ConfigApplyCount() == 1U);
+  ASSERT(backend.StartCount() == 0U);
+  ASSERT(!backend.IsBusy());
+  ASSERT(backend.QueuedInfoCount() == 0U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+
+  backend.SetStartAllowed(true);
+  ASSERT(backend.Write(next_data, sizeof(next_data), next_op) == LibXR::ErrorCode::OK);
+  ASSERT(next_status == PollStatus::DONE);
+  ASSERT(backend.StartCount() == 1U);
+  AssertStart(backend, 0U, next_data, sizeof(next_data), 0);
+
+  backend.Complete(false);
+  ASSERT(!backend.IsBusy());
+}
+
+void TestRetriedHeadStartsBeforeLaterWrite()
+{
+  FakeUartDmaBackend backend;
+  const uint8_t first[] = {0x5DU};
+  const uint8_t second[] = {0x5EU};
+  PollStatus first_status = PollStatus::READY;
+  PollStatus second_status = PollStatus::READY;
+  LibXR::WriteOperation first_op(first_status);
+  LibXR::WriteOperation second_op(second_status);
+
+  backend.RetryNextStart();
+  ASSERT(backend.Write(first, sizeof(first), first_op) == LibXR::ErrorCode::OK);
+  ASSERT(first_status == PollStatus::RUNNING);
+  ASSERT(!backend.IsBusy());
+  ASSERT(backend.StartCount() == 0U);
+  ASSERT(backend.QueuedInfoCount() == 1U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+
+  ASSERT(backend.Write(second, sizeof(second), second_op) == LibXR::ErrorCode::OK);
+
+  ASSERT(first_status == PollStatus::DONE);
+  ASSERT(second_status == PollStatus::RUNNING);
+  ASSERT(backend.StartCount() == 1U);
+  ASSERT(backend.QueuedInfoCount() == 1U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+  AssertStart(backend, 0U, first, sizeof(first), 0);
+
+  backend.Complete(false);
+  ASSERT(second_status == PollStatus::DONE);
+  ASSERT(backend.StartCount() == 2U);
+  AssertStart(backend, 1U, second, sizeof(second), 1);
+
+  backend.Complete(false);
+  ASSERT(!backend.IsBusy());
+  ASSERT(backend.QueuedInfoCount() == 0U);
+  ASSERT(backend.QueuedDataSize() == 0U);
+}
+
 }  // namespace
 
 void RunStateTests()
@@ -194,8 +305,11 @@ void RunStateTests()
   TestActivePendingQueuedPipeline();
   TestRecoveredErrorMatchesCompletionProgression();
   TestPromotedStartFailureAbortsRetainedPipeline();
-  TestQueuedStartRetryPreservesPublishedRecord();
+  TestQueuedStartRetryStagesPayloadBeforeRetry();
   TestPendingStartRetryPreservesPreloadedBuffer();
+  TestRetriedPendingIsFailedByConfig();
+  TestFailedStartDoesNotAdvanceActiveBlock();
+  TestRetriedHeadStartsBeforeLaterWrite();
 }
 
 }  // namespace LibXRTest::UartDmaTx

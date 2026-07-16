@@ -102,15 +102,19 @@ Publish(p) ==
   /\ UNCHANGED <<owner, ownerContext, snapshot, snapshotEpoch,
                  handledEpoch, snapshotSources, handlerLog>>
 
-Claim(p) ==
+ClaimAndTake(p) ==
   /\ pc[p] = "Claim"
   /\ owner = NoOwner
   /\ events # {}
   /\ owner' = p
   /\ ownerContext' = PublisherContext[p]
-  /\ pc' = [pc EXCEPT ![p] = "Take"]
-  /\ UNCHANGED <<events, snapshot, publishedEpoch, snapshotEpoch,
-                 handledEpoch, eventSources, snapshotSources, handlerLog>>
+  /\ snapshot' = events
+  /\ snapshotEpoch' = publishedEpoch
+  /\ snapshotSources' = eventSources
+  /\ events' = {}
+  /\ eventSources' = EmptySources
+  /\ pc' = [pc EXCEPT ![p] = "Handle"]
+  /\ UNCHANGED <<publishedEpoch, handledEpoch, handlerLog>>
 
 ClaimExit(p) ==
   /\ pc[p] = "Claim"
@@ -122,6 +126,7 @@ ClaimExit(p) ==
                  eventSources, snapshotSources, handlerLog>>
 
 Take(p) ==
+  (* Only a retained owner uses Take after a failed release observed new events. *)
   /\ owner = p
   /\ pc[p] = "Take"
   /\ events # {}
@@ -192,7 +197,7 @@ ReleaseBroken(p) ==
 
 ActorStep(p) ==
   \/ Publish(p)
-  \/ Claim(p)
+  \/ ClaimAndTake(p)
   \/ ClaimExit(p)
   \/ Take(p)
   \/ Handle(p)
@@ -247,6 +252,10 @@ NoLostEvents ==
     handledEpoch[e] \leq publishedEpoch[e]
     /\ (publishedEpoch[e] > handledEpoch[e]
           => e \in events \/ e \in snapshot)
+
+NoPhantomEvents ==
+  /\ \A e \in events : publishedEpoch[e] > handledEpoch[e]
+  /\ \A e \in snapshot : snapshotEpoch[e] > handledEpoch[e]
 
 HandlerUsesOwnerContext ==
   \A i \in 1..Len(handlerLog) :

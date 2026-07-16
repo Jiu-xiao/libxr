@@ -134,4 +134,16 @@ Invoke-GenMcCase -Name "UartHardwareGateLiveness" `
   -Source "/work/test/formal/uart/genmc/uart_hardware_gate.cpp" `
   -ExpectSuccess $true
 
+Invoke-GenMcCase -Name "UartHardwareGateNestedSafety" `
+  -GenMcOptions @("--rc11") `
+  -CompilerOptions $GateFlags `
+  -Source "/work/test/formal/uart/genmc/uart_hardware_gate_nested.cpp" `
+  -ExpectSuccess $true
+
+Invoke-GenMcCase -Name "UartHardwareGateNestedLiveness" `
+  -GenMcOptions @("--rc11", "--check-liveness") `
+  -CompilerOptions $GateFlags `
+  -Source "/work/test/formal/uart/genmc/uart_hardware_gate_nested.cpp" `
+  -ExpectSuccess $true
+
 Write-Host "`nAll GenMC expectations passed."

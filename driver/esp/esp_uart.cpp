@@ -208,31 +208,45 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
   }
 
   requested_config_.Store(config);
-  tx_dma_model_.RequestConfig(false);
+  tx_dma_model_.RequestConfig(xPortInIsrContext() != pdFALSE);
   return ErrorCode::OK;
 }
 
-void ESP32UART::OnConfigRequested()
-{
-  irq_config_gate_.RequestConfig();
-  rx_config_gate_.RequestConfig();
-}
+void ESP32UART::OnConfigRequested() { hardware_gate_.RequestConfig(); }
 
 bool ESP32UART::ApplyPendingConfig(bool in_isr)
 {
-  if (!rx_config_gate_.TryEnterConfig())
+  if (!hardware_gate_.TryEnterConfig())
   {
-    return false;
-  }
-  if (!irq_config_gate_.TryEnterConfig())
-  {
-    rx_config_gate_.RequestConfig();
-    rx_config_gate_.LeaveConfig();
     return false;
   }
 
-  irq_config_gate_.ConsumePendingConfig();
-  rx_config_gate_.ConsumePendingConfig();
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (dma_backend_enabled_)
+  {
+    MaskDmaInterrupts(in_isr);
+
+    // Stop both request streams before resetting either channel. `gdma_stop()` and
+    // `gdma_reset()` are synchronous, ISR-safe register operations in ESP-IDF.
+    DEV_ASSERT_FROM_CALLBACK(gdma_stop(tx_dma_channel_) == ESP_OK, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(gdma_stop(rx_dma_channel_) == ESP_OK, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(gdma_reset(tx_dma_channel_) == ESP_OK, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(gdma_reset(rx_dma_channel_) == ESP_OK, in_isr);
+
+    gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
+                        UINT32_MAX);
+    gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
+                        UINT32_MAX);
+    // Read back the raw status registers so the W1C writes are complete before the
+    // UART generation changes.
+    (void)gdma_hal_read_intr_status(&tx_gdma_hal_, tx_gdma_channel_id_,
+                                    GDMA_CHANNEL_DIRECTION_TX, true);
+    (void)gdma_hal_read_intr_status(&rx_gdma_hal_, rx_gdma_channel_id_,
+                                    GDMA_CHANNEL_DIRECTION_RX, true);
+  }
+#endif
+
+  hardware_gate_.ConsumePendingConfig();
   UART::Configuration config{};
   (void)requested_config_.LoadLatest(config);
 
@@ -244,26 +258,6 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
     DEV_ASSERT_FROM_CALLBACK(false, in_isr);
     return true;
   }
-
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    if (tx_dma_channel_ != nullptr)
-    {
-      DEV_ASSERT_FROM_CALLBACK(gdma_stop(tx_dma_channel_) == ESP_OK, in_isr);
-      DEV_ASSERT_FROM_CALLBACK(gdma_reset(tx_dma_channel_) == ESP_OK, in_isr);
-      gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
-                          UINT32_MAX);
-    }
-    if (rx_dma_channel_ != nullptr)
-    {
-      DEV_ASSERT_FROM_CALLBACK(gdma_stop(rx_dma_channel_) == ESP_OK, in_isr);
-      DEV_ASSERT_FROM_CALLBACK(gdma_reset(rx_dma_channel_) == ESP_OK, in_isr);
-      gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
-                          UINT32_MAX);
-    }
-  }
-#endif
 
   bool dma_backend_enabled = false;
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
@@ -305,20 +299,18 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
   uart_hal_set_hw_flow_ctrl(&uart_hal_, UART_HW_FLOWCTRL_DISABLE, 0);
   uart_hal_set_mode(&uart_hal_, UART_MODE_UART);
   uart_hal_set_txfifo_empty_thr(&uart_hal_, TX_EMPTY_THRESHOLD);
-  // Drop stale hardware RX FIFO bytes from the previous baud.
+  // Drop stale hardware bytes from the previous baud in both directions.
   // Keep software read queue semantics aligned with ST/CH (no read_port reset).
+  uart_hal_txfifo_rst(&uart_hal_);
   uart_hal_rxfifo_rst(&uart_hal_);
-  uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
+  uart_hal_clr_intsts_mask(&uart_hal_, UINT32_MAX);
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (dma_backend_enabled_)
   {
-    // Restart the RX ring from node zero after both DMA directions and their stale
-    // pending sources were quiesced under CONFIG ownership.
-    rx_dma_node_index_ = 0U;
-    DEV_ASSERT_FROM_CALLBACK(
-        gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_)) == ESP_OK,
-        in_isr);
+    // Remount every RX descriptor after reset so links, lengths, and DMA ownership are
+    // restored before the ring is started under CONFIG ownership.
+    DEV_ASSERT_FROM_CALLBACK(RemountAndRestartRxDma(), in_isr);
   }
 #endif
 
@@ -328,20 +320,50 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
 
 bool ESP32UART::OnConfigApplied(bool in_isr)
 {
-  rx_config_gate_.LeaveConfig();
-  irq_config_gate_.LeaveConfig();
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   if (dma_backend_enabled_)
   {
+    // Restore the complete IRQ domain while CONFIG still excludes TX start and IRQ
+    // status interpretation. A concurrently pending vector will defer itself.
+    UnmaskDmaInterrupts(in_isr);
+    DispatchHardwareActions(hardware_gate_.LeaveConfig(), in_isr);
     return true;
   }
 #endif
+  DispatchHardwareActions(hardware_gate_.LeaveConfig(), in_isr);
   (void)TryStartTx(in_isr);
-  return false;
+  return true;
+}
+
+void ESP32UART::DispatchHardwareActions(UartHardwareGate::PendingAction actions,
+                                        bool in_isr)
+{
+  if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::CONFIG))
+  {
+    tx_dma_model_.ResumeConfig(in_isr);
+    return;
+  }
+
+#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+  if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::IRQ_DEFERRED))
+  {
+    ServiceDeferredDmaInterrupts(in_isr);
+    return;
+  }
+#endif
+
+  if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::TX_START))
+  {
+    tx_dma_model_.ResumeStart(in_isr);
+  }
 }
 
 #if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
-bool ESP32UART::StartDmaTx(uint8_t*, size_t, int) { return false; }
+UartDmaTxStartResult ESP32UART::StartDmaTx(uint8_t*, size_t, int,
+                                           UartHardwareGate::OwnerContext*)
+{
+  return UartDmaTxStartResult::FAILED;
+}
 #endif
 
 // Internal UART loopback is exposed as a direct peripheral toggle for backend

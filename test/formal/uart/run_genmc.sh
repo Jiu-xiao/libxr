@@ -108,5 +108,13 @@ run_case "UartHardwareGateLiveness" success "" \
   --rc11 --check-liveness -- "${GATE_FLAGS[@]}" \
   /work/test/formal/uart/genmc/uart_hardware_gate.cpp
 
+run_case "UartHardwareGateNestedSafety" success "" \
+  --rc11 -- "${GATE_FLAGS[@]}" \
+  /work/test/formal/uart/genmc/uart_hardware_gate_nested.cpp
+
+run_case "UartHardwareGateNestedLiveness" success "" \
+  --rc11 --check-liveness -- "${GATE_FLAGS[@]}" \
+  /work/test/formal/uart/genmc/uart_hardware_gate_nested.cpp
+
 echo
 echo "All GenMC expectations passed."

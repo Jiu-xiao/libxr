@@ -13,7 +13,7 @@
 #include "hal/uart_types.h"
 #include "latest_snapshot.hpp"
 #include "model/uart_dma_tx_model.hpp"
-#include "model/uart_irq_config_gate.hpp"
+#include "model/uart_hardware_gate.hpp"
 #include "model/uart_rx_config_gate.hpp"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
@@ -76,6 +76,12 @@ class ESP32UARTReadPort : public ReadPort
  * optional DMA resources used by the ESP-specific transmit and receive paths.
  * 该对象持有 UART 硬件状态、软件队列连接，以及 ESP 专用收发路径使用的可选
  * DMA 资源。
+ *
+ * GDMA interrupts are deliberately registered as non-IRAM interrupts. The complete
+ * LibXR service and user-callback chain is safe in an ordinary ISR, but is not required
+ * to reside in IRAM for cache-disabled execution. ESP-IDF therefore defers these
+ * interrupts while flash cache is disabled and services their latched level status
+ * after cache access resumes.
  */
 class ESP32UART : public UART
 {
@@ -153,10 +159,7 @@ class ESP32UART : public UART
   static uart_parity_t ResolveParity(UART::Parity parity);
 
   void OnConfigRequested();
-  [[nodiscard]] bool ConfigRequested() const
-  {
-    return irq_config_gate_.ConfigRequested() || rx_config_gate_.ConfigRequested();
-  }
+  [[nodiscard]] bool ConfigRequested() const { return hardware_gate_.ConfigRequested(); }
   bool ApplyPendingConfig(bool in_isr);
   bool OnConfigApplied(bool in_isr);
 
@@ -205,7 +208,17 @@ class ESP32UART : public UART
    */
   void ConfigureRxInterruptPath();
 
-  bool StartDmaTx(uint8_t* data, size_t size, int block);
+  /**
+   * @brief Start one TX request through GDMA.
+   * @param data DMA-readable payload buffer.
+   * @param size Payload size in bytes.
+   * @param block Double-buffer block and descriptor-list index.
+   * @param hardware_context Current synchronous IRQ ownership, or `nullptr` outside
+   * an IRQ hardware owner.
+   * @return Whether the transfer started, must be retried, or failed terminally.
+   */
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block,
+                                  UartHardwareGate::OwnerContext* hardware_context);
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   /**
@@ -215,36 +228,33 @@ class ESP32UART : public UART
   ErrorCode InitDmaBackend();
 
   /**
-   * @brief 通过 GDMA 启动 active TX 请求 / Start the active TX request over GDMA
-   * @param data DMA 可读的载荷缓冲区 / DMA-readable payload buffer
-   * @param size 载荷字节数 / Payload size in bytes
-   * @param block 双缓冲块和描述符链表索引 / Double-buffer block and descriptor-list index
-   * @return GDMA 接受描述符链表时返回 true / True when GDMA accepts the descriptor list
+   * @brief Drain all completed RX descriptors visible from the software cursor.
+   * @brief 从软件游标开始排空所有已完成的 RX 描述符。
    */
-  /**
-   * @brief Handle one RX DMA completion.
-   * @brief 处理一次 RX DMA 完成事件。
-   */
-  void HandleDmaRxDone(gdma_event_data_t* event_data);
+  void DrainCompletedDmaRxDescriptors(bool in_isr);
 
   /**
    * @brief Recover the RX DMA ring after an error.
    * @brief RX DMA 出错后恢复环形队列。
    */
-  void HandleDmaRxError();
+  void HandleDmaRxError(bool in_isr);
 
   /**
    * @brief Abort the TX DMA path and report failure.
    * @brief 中止 TX DMA 路径并上报失败。
    */
-  void HandleDmaTxError();
+  void HandleDmaTxError(bool in_isr, UartHardwareGate::OwnerContext& hardware_context);
 
-  /**
-   * @brief Push one RX DMA chunk into the software queue.
-   * @brief 将一个 RX DMA chunk 推入软件队列。
-   */
-  void PushDmaRxData(size_t recv_size, bool in_isr);
+  void MaskDmaInterrupts(bool in_isr);
+  void UnmaskDmaInterrupts(bool in_isr);
+  void DeferDmaInterrupt(bool in_isr);
+  void ServiceDeferredDmaInterrupts(bool in_isr);
+  void ServiceDmaTxStatus(bool in_isr, UartHardwareGate::OwnerContext& hardware_context);
+  void ServiceDmaRxStatus(bool in_isr);
+  bool RemountAndRestartRxDma();
 #endif
+
+  void DispatchHardwareActions(UartHardwareGate::PendingAction actions, bool in_isr);
 
   /**
    * @brief Try to start queued transmit work.
@@ -332,8 +342,9 @@ class ESP32UART : public UART
 
   UART::Configuration config_;  ///< Current UART framing configuration.
   LatestSnapshot<UART::Configuration> requested_config_;
+  UartHardwareGate hardware_gate_;
+  // Retained only by the FIFO backend. Runtime FIFO reconfiguration is unsupported.
   UartRxConfigGate rx_config_gate_;
-  UartIrqConfigGate irq_config_gate_;
 
   uint8_t* rx_isr_buffer_ = nullptr;  ///< Scratch buffer used by the RX ISR path.
   size_t rx_isr_buffer_size_ = 0;     ///< Size of `rx_isr_buffer_`.
@@ -365,6 +376,7 @@ class ESP32UART : public UART
   gdma_link_list_handle_t rx_dma_link_ = nullptr;   ///< RX GDMA ring list.
   uint8_t* rx_dma_storage_ = nullptr;               ///< RX DMA ring backing storage.
   size_t rx_dma_chunk_size_ = 0;                    ///< Size of one RX DMA ring node.
+  size_t rx_dma_buffer_alignment_ = 1;              ///< Alignment used for RX buffers.
   uint32_t rx_dma_node_index_ = 0;  ///< Software consumer index in the RX ring.
   gdma_hal_context_t tx_gdma_hal_ = {};
   int tx_gdma_group_id_ = -1;

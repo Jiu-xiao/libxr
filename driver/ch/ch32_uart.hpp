@@ -9,20 +9,20 @@
 #include "libxr_rw.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
 #include "model/uart_dma_tx_model.hpp"
-#include "model/uart_irq_config_gate.hpp"
-#include "model/uart_rx_config_gate.hpp"
+#include "model/uart_hardware_gate.hpp"
 #include "uart.hpp"
 
 namespace LibXR
 {
 
 /**
- * @brief CH32 UART 驱动实现 / CH32 UART driver implementation
- * UART IDLE and RX/TX DMA IRQ sources targeting the same core must use the same
- * preemption priority. Sources on different cores are serialized by `UartIrqConfigGate`
- * before they inspect hardware status.
- * 指向同一核心的 UART IDLE 与 RX/TX DMA IRQ 必须使用相同抢占优先级；指向不同核心的
- * 中断在读取硬件状态前由 `UartIrqConfigGate` 串行化。
+ * @brief CH32 UART driver implementation.
+ *
+ * This backend supports the current single-core CH32V20x/V30x BSPs (V203/V307). UART
+ * IDLE and RX/TX DMA IRQ entries for one instance must use the same preemption priority.
+ * Every entry claims `UartHardwareGate` before inspecting hardware status. A losing
+ * entry masks the complete normal IRQ domain and publishes a deferred rescan; it must
+ * not cache a terminal result outside the gate.
  */
 class CH32UART : public UART
 {
@@ -46,7 +46,6 @@ class CH32UART : public UART
   void TxDmaIRQHandler();
   void RxDmaIRQHandler();
   void UartIRQHandler();
-  void OnRxDataAvailable(bool in_isr);
 
   ch32_uart_id_t id_;
   uint16_t uart_mode_;
@@ -55,8 +54,7 @@ class CH32UART : public UART
   WritePort _write_port;
 
   LatestSnapshot<UART::Configuration> requested_config_;
-  UartRxConfigGate rx_config_gate_;
-  UartIrqConfigGate irq_config_gate_;
+  UartHardwareGate hardware_gate_;
   UartCircularDmaRxModel rx_dma_model_;
   UartDmaTxModel<CH32UART> tx_dma_model_;
 
@@ -67,22 +65,31 @@ class CH32UART : public UART
   static CH32UART* map_[CH32_UART_NUMBER];
 
  private:
-  void OnConfigRequested()
-  {
-    irq_config_gate_.RequestConfig();
-    rx_config_gate_.RequestConfig();
-  }
-  [[nodiscard]] bool ConfigRequested() const
-  {
-    return irq_config_gate_.ConfigRequested() || rx_config_gate_.ConfigRequested();
-  }
+  void OnConfigRequested() { hardware_gate_.RequestConfig(); }
+
+  [[nodiscard]] bool ConfigRequested() const { return hardware_gate_.ConfigRequested(); }
+
   bool ApplyPendingConfig(bool in_isr);
-  bool OnConfigApplied(bool)
-  {
-    rx_config_gate_.LeaveConfig();
-    irq_config_gate_.LeaveConfig();
-    return true;
-  }
+
+  bool OnConfigApplied(bool in_isr);
+
+  static bool InIsr();
+
+  void HandleNormalIrq();
+
+  void DeferNormalIrq(bool in_isr);
+
+  void ScanNormalIrqStatus(bool in_isr, UartHardwareGate::OwnerContext& hardware_context);
+
+  void MaskNormalIrqs();
+
+  void RestoreNormalIrqs();
+
+  void DispatchHardwareActions(UartHardwareGate::PendingAction actions, bool in_isr);
+
+  void ApplyConfigPayload(bool in_isr);
+
+  void OnRxDataAvailable(bool in_isr);
 
   /**
    * @brief 配置并启动 CH32 UART 循环 RX DMA 通道 / Configure and start the CH32 UART
@@ -90,12 +97,7 @@ class CH32UART : public UART
    * @param data DMA 可写的接收缓冲区 / DMA-writable receive buffer
    * @param size 接收缓冲区字节数 / Receive buffer capacity in bytes
    */
-  void StartCircularDmaRx(uint8_t* data, size_t size)
-  {
-    dma_rx_channel_->MADDR = reinterpret_cast<uint32_t>(data);
-    dma_rx_channel_->CNTR = size;
-    DMA_Cmd(dma_rx_channel_, ENABLE);
-  }
+  void StartCircularDmaRx(uint8_t* data, size_t size);
 
   /**
    * @brief 获取 CH32 RX DMA 剩余传输计数 / Get the CH32 RX DMA remaining count
@@ -119,9 +121,11 @@ class CH32UART : public UART
    * @param size 载荷字节数 / Payload size in bytes
    * @param block active 双缓冲块索引，CH32 DMA 不使用 / Active double-buffer block index,
    * unused by CH32 DMA
-   * @return DMA 通道启用后返回 true / True after the DMA channel is enabled
+   * @param hardware_context Optional stack-local IRQ owner context for nested TX start
+   * @return `STARTED` after enabling DMA, or `RETRY` when another hardware action wins
    */
-  bool StartDmaTx(uint8_t* data, size_t size, int block);
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block,
+                                  UartHardwareGate::OwnerContext* hardware_context);
 };
 
 }  // namespace LibXR

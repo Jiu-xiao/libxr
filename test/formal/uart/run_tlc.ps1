@@ -22,6 +22,11 @@ $BoundSubmitContextSignature = "Invariant TxWorkHasCarrier is violated"
 $MovingBoundarySignature = "Action property ConfigBoundaryDoesNotMove is violated"
 $SubmitAfterTakeSignature = "Invariant NoSubmitAfterTakeWitness is violated"
 $OwnerRetakeSignature = "Invariant NoOwnerRetakeWitness is violated"
+$NestedConfigPrioritySignature =
+  "Action property NestedAdmissionRespectsConfigPriority is violated"
+$NestedDeferredPrioritySignature =
+  "Action property NestedAdmissionRespectsDeferredPriority is violated"
+$NestedRetryCarrierSignature = "Invariant BlockedTxHasCarrier is violated"
 $NoRemaskSignature = "Invariant ScanRequiresMask is violated"
 $LateStatusSignature = "Invariant StatusMatchesActiveGeneration is violated"
 $EarlyQuiesceSignature =
@@ -51,6 +56,23 @@ $RxStaleReleaseEventSignature =
   "Invariant PostSnapshotDataReturnsEvent is violated"
 $ConfigDrainMovingBoundarySignature = "Invariant PostBoundarySurvives is violated"
 $ConfigDrainPendingPayloadSignature = "Invariant MetaDataAligned is violated"
+$ConfigAbortEarlyApplySignature = "Invariant NoEarlyApply is violated"
+$ConfigAbortInsideStopIrqWitnessSignature =
+  "Invariant NoInsideStopIrqApplyWitness is violated"
+$ConfigAbortNoWriteRescanSignature =
+  "Invariant PostConfigWriteRescanned is violated"
+$ConfigAbortRetainedTxRetrySignature =
+  "Invariant NoRetiredTxRetryAfterConfig is violated"
+$ConfigAbortUnsafeErrorSignature =
+  "Invariant StopCompletionRequiresDisabled is violated"
+$Stm32SchedulerSplitSignature = "Invariant NoLostWake is violated"
+$Stm32SchedulerReleaseSignature =
+  "Invariant NoPublishedRequestLoss is violated"
+$Stm32DmaStaleTcSignature = "Invariant DmaEnIsAuthoritative is violated"
+$Stm32DmaNoRepublishSignature =
+  "Invariant MaskedDomainHasRestoreCarrier is violated"
+$Stm32DmaOldTerminalWitnessSignature =
+  "Invariant NoOldTerminalCompletionWitness is violated"
 
 $TlcCases = @(
   @{ Name = "SerializedServiceCorrect"; Module = "SerializedService";
@@ -63,6 +85,10 @@ $TlcCases = @(
     Config = "UartHardwareControl.cfg"; ExpectedExitCode = 0 },
   @{ Name = "UartHardwareControlLiveness"; Module = "UartHardwareControl";
     Config = "UartHardwareControlLiveness.cfg"; ExpectedExitCode = 0 },
+  @{ Name = "UartNestedTxAdmission"; Module = "UartNestedTxAdmission";
+    Config = "UartNestedTxAdmission.cfg"; ExpectedExitCode = 0 },
+  @{ Name = "UartNestedTxAdmissionLiveness"; Module = "UartNestedTxAdmission";
+    Config = "UartNestedTxAdmissionLiveness.cfg"; ExpectedExitCode = 0 },
   @{ Name = "UartTxStartWindow"; Module = "UartTxStartWindow";
     Config = "UartTxStartWindow.cfg"; ExpectedExitCode = 0 },
   @{ Name = "UartTxPipeline"; Module = "UartTxPipeline";
@@ -77,6 +103,12 @@ $TlcCases = @(
     Config = "UartTxConfigDrain.cfg"; ExpectedExitCode = 0 },
   @{ Name = "UartTxConfigDrainLiveness"; Module = "UartTxConfigDrain";
     Config = "UartTxConfigDrainLiveness.cfg"; ExpectedExitCode = 0 },
+  @{ Name = "UartConfigAbortJoin"; Module = "UartConfigAbortJoin";
+    Config = "UartConfigAbortJoin.cfg"; ExpectedExitCode = 0 },
+  @{ Name = "Stm32IrqSchedulerCorrect"; Module = "Stm32IrqScheduler";
+    Config = "Stm32IrqSchedulerCorrect.cfg"; ExpectedExitCode = 0 },
+  @{ Name = "Stm32DmaAbortRestoreCorrect"; Module = "Stm32DmaAbortRestore";
+    Config = "Stm32DmaAbortRestoreCorrect.cfg"; ExpectedExitCode = 0 },
   @{ Name = "SerializedServiceBroken"; Module = "SerializedService";
     Config = "SerializedServiceBroken.cfg"; ExpectedExitCode = 12;
     ExpectedText = $ServiceBrokenSignature },
@@ -98,6 +130,19 @@ $TlcCases = @(
   @{ Name = "UartTxControlOwnerRetake"; Module = "UartTxControl";
     Config = "UartTxControlOwnerRetake.cfg"; ExpectedExitCode = 12;
     ExpectedText = $OwnerRetakeSignature },
+  @{ Name = "UartNestedTxAdmissionNonAtomicConfig";
+    Module = "UartNestedTxAdmission";
+    Config = "UartNestedTxAdmissionNonAtomicConfig.cfg"; ExpectedExitCode = 13;
+    ExpectedText = $NestedConfigPrioritySignature },
+  @{ Name = "UartNestedTxAdmissionNonAtomicDeferred";
+    Module = "UartNestedTxAdmission";
+    Config = "UartNestedTxAdmissionNonAtomicDeferred.cfg";
+    ExpectedExitCode = 13;
+    ExpectedText = $NestedDeferredPrioritySignature },
+  @{ Name = "UartNestedTxAdmissionEphemeralRetry";
+    Module = "UartNestedTxAdmission";
+    Config = "UartNestedTxAdmissionEphemeralRetry.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $NestedRetryCarrierSignature },
   @{ Name = "UartHardwareControlNoRemask"; Module = "UartHardwareControl";
     Config = "UartHardwareControlNoRemask.cfg"; ExpectedExitCode = 12;
     ExpectedText = $NoRemaskSignature },
@@ -160,7 +205,43 @@ $TlcCases = @(
     ExpectedText = $ConfigDrainMovingBoundarySignature },
   @{ Name = "UartTxConfigDrainPendingPayload"; Module = "UartTxConfigDrain";
     Config = "UartTxConfigDrainPendingPayload.cfg"; ExpectedExitCode = 12;
-    ExpectedText = $ConfigDrainPendingPayloadSignature }
+    ExpectedText = $ConfigDrainPendingPayloadSignature },
+  @{ Name = "UartConfigAbortJoinEarlyApply"; Module = "UartConfigAbortJoin";
+    Config = "UartConfigAbortJoinEarlyApply.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $ConfigAbortEarlyApplySignature },
+  @{ Name = "UartConfigAbortJoinInsideStopIrqWitness";
+    Module = "UartConfigAbortJoin";
+    Config = "UartConfigAbortJoinInsideStopIrqWitness.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $ConfigAbortInsideStopIrqWitnessSignature },
+  @{ Name = "UartConfigAbortJoinNoWriteRescan"; Module = "UartConfigAbortJoin";
+    Config = "UartConfigAbortJoinNoWriteRescan.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $ConfigAbortNoWriteRescanSignature },
+  @{ Name = "UartConfigAbortJoinRetainedTxRetry"; Module = "UartConfigAbortJoin";
+    Config = "UartConfigAbortJoinRetainedTxRetry.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $ConfigAbortRetainedTxRetrySignature },
+  @{ Name = "UartConfigAbortJoinUnsafeError"; Module = "UartConfigAbortJoin";
+    Config = "UartConfigAbortJoinUnsafeError.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $ConfigAbortUnsafeErrorSignature },
+  @{ Name = "Stm32IrqSchedulerBrokenSplit"; Module = "Stm32IrqScheduler";
+    Config = "Stm32IrqSchedulerBrokenSplit.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $Stm32SchedulerSplitSignature },
+  @{ Name = "Stm32IrqSchedulerBrokenRelease"; Module = "Stm32IrqScheduler";
+    Config = "Stm32IrqSchedulerBrokenRelease.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $Stm32SchedulerReleaseSignature },
+  @{ Name = "Stm32DmaAbortRestoreStaleTc"; Module = "Stm32DmaAbortRestore";
+    Config = "Stm32DmaAbortRestoreStaleTc.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $Stm32DmaStaleTcSignature },
+  @{ Name = "Stm32DmaAbortRestoreNoRepublish"; Module = "Stm32DmaAbortRestore";
+    Config = "Stm32DmaAbortRestoreNoRepublish.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $Stm32DmaNoRepublishSignature },
+  @{ Name = "Stm32DmaAbortRestoreBrokenSplit"; Module = "Stm32DmaAbortRestore";
+    Config = "Stm32DmaAbortRestoreBrokenSplit.cfg"; ExpectedExitCode = 12;
+    ExpectedText = $Stm32SchedulerSplitSignature },
+  @{ Name = "Stm32DmaAbortRestoreOldTerminalWitness";
+    Module = "Stm32DmaAbortRestore";
+    Config = "Stm32DmaAbortRestoreOldTerminalWitness.cfg";
+    ExpectedExitCode = 12;
+    ExpectedText = $Stm32DmaOldTerminalWitnessSignature }
 )
 
 $RejectedTlcFailurePattern =

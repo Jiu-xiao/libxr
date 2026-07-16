@@ -18,8 +18,8 @@ Status values:
 | TLA+ action | C++ linearization point | Status |
 | --- | --- | --- |
 | `Publish(p)` | `SerializedService::Invoke`: `state_.fetch_or(events, release)` | mapped |
-| `Claim(p)` | successful owner-bit `compare_exchange_weak(..., acquire)` | mapped |
-| `Take(p)` | `state_.exchange(OWNER_BIT, acq_rel)` | mapped |
+| `ClaimAndTake(p)` | successful `compare_exchange_weak(observed, OWNER_BIT, acquire)`, with the pre-CAS `observed` event bits becoming the first snapshot | mapped |
+| `Take(p)` | `state_.exchange(OWNER_BIT, acq_rel)` after a failed release CAS | mapped |
 | `Handle(p)` | `handler(snapshot)` in the winning invocation's context | mapped |
 | `ReleaseRetry(p)` | failed final `compare_exchange_strong`, with event bits returned in `expected` | mapped |
 | `ReleaseEmpty(p)` | successful `compare_exchange_strong(OWNER_BIT, 0, release, acquire)` | mapped |
@@ -27,6 +27,10 @@ Status values:
 The TLA+ module checks a finite three-publisher protocol. The GenMC harness executes
 the real header under RC11 with three pthread publishers and one handler-reentrant
 publication. Neither result is a cutoff proof for an arbitrary number of publishers.
+The fused CAS is the first snapshot's linearization point. Events published after it
+remain in the shared word for a later `Take(p)`, even if the first handler has not started.
+The coarser TX models retain split claim/take actions as a conservative scheduling
+over-approximation rather than an exact mapping of this first snapshot boundary.
 
 ## Write Publication
 
@@ -56,12 +60,11 @@ contract rather than a property of `SerializedService`.
 | TLA+ action | C++ location | Status |
 | --- | --- | --- |
 | service owner context | lambda captured by the `Invoke()` call that wins ownership | partial |
-| choose queue head | `UartDmaTxModel::StartQueuedActive()` | partial |
-| retain RETRY record | `StartQueuedActive()` / `PromoteAndStartPending()` on `RETRY` | mapped |
+| choose and stage queue head | `UartDmaTxModel::StageNextPending()` / `StagePending()` | partial |
+| retain RETRY record | `UartDmaTxModel::TryStartPending()` on `RETRY` | mapped |
 | advance an older RETRY head from a later submitter | submission-id match selects the synchronous `SubmitContext`; a mismatch progresses contextlessly and completes through the queued operation | mapped |
-| publish durable TX retry | `UartHardwareGate::TryEnterTxStart()` sets `TX_START_PENDING` before claiming | mapped in model class only |
-| start active DMA | backend `StartDmaTx(...)` | partial |
-| stage pending buffer | `UartDmaTxModel::StageNextPending()` | partial |
+| publish durable TX retry | `UartHardwareGate::TryEnterTxStart()` sets `TX_START_PENDING` before claiming | mapped in STM32, CH32, and ESP DMA backends |
+| start pending DMA candidate | `StartCandidate(buffers_.PendingBuffer(), ...)` | partial |
 | release active terminal | `UartDmaTxModel::ReleaseActive()` | mapped |
 | complete queued operation | `WritePort::Finish(...)` | mapped |
 
@@ -70,10 +73,11 @@ direct return value. It no longer restricts state-machine progression: a later c
 may start an older retained head, whose result is delivered through that record's own
 queued operation. That `Finish()` may execute while the later caller still owns the
 WritePort producer lock, so its callback must handle `BUSY` as described above.
-`UartTxPipeline.tla` separately represents active/pending ownership,
-private copy before pending publication, RETRY preservation, the backend-start/software-
-commit window, and an abstract per-record finish count. Its three-record cutoff is not
-a proof for arbitrary queue length, and the pipeline, combined control, CONFIG-drain,
+`UartTxPipeline.tla` separately represents pending-only candidate staging, active
+ownership after a successful commit, private copy before pending publication, RETRY
+preservation, the backend-start/software-commit window, and an abstract per-record
+finish count. Its three-record cutoff is not a proof for arbitrary queue length, and
+the pipeline, combined control, CONFIG-drain,
 and hardware models have not been proved as one refinement composition. The TX
 refinement therefore remains `partial`.
 
@@ -84,17 +88,20 @@ refinement therefore remains `partial`.
 | `WriteCopyPayload` | `queue_data_->PushBatch(...)` and pre-metadata `MarkAsRunning()` | partial |
 | `WritePublishMetadata` | `queue_info_->Push(WriteInfoBlock)` | partial |
 | `WriteRaise` | `UartDmaTxModel::Submit()` | mapped |
-| active copy | `PeekBatch(buffers_.ActiveBuffer(), ...)` | partial |
-| pending copy and private completion | `StagePending()` payload copy/pop | partial |
+| queue-head copy and private completion | `StageNextPending()` -> `StagePending()` -> `PopPayload(buffers_.PendingBuffer(), ...)` | partial |
 | `PublishPending` | `pending_valid_ = true` | mapped |
-| `BackendRetry` | `StartDmaTx(...) == RETRY` with ownership retained | mapped |
+| `SelectPending` | `TryStartPending()` peeks the metadata for the staged pending buffer | partial |
+| `BackendRetry` | `StartCandidate(...) == RETRY` with `pending_valid_` retained | mapped |
 | `BackendStarted` | platform DMA enable before software commits queue ownership | contract |
-| `CommitStarted` | queue pop, pending flip if needed, and direct result/`Finish()` | partial; the action property binds the new active record to the sole finish-count delta |
+| `CommitStarted` | `TryStartPending()` clears pending, pops metadata, flips the pending block, and delivers the result/`Finish()` | partial; the action property binds the new active record to the sole finish-count delta |
+| `BackendFailed` | `TryStartPending()` clears pending, pops metadata, delivers `FAILED`, and requests CONFIG without flipping the active block | mapped |
 | terminal releases active without resolving its operation again | `ReleaseActive()` | mapped |
 
 The finish counter proves the abstract queue record is resolved at most once. The
 `CompletionIdentityMatchesActiveRecord` action property additionally checks that an
 active-ownership commit resolves that same record rather than another queued operation.
+`FailedDoesNotFlipActiveBlock` checks that resolving a start as `FAILED` does not commit
+the staged pending block as active.
 It does not prove the complete `WritePort` BLOCK timeout/semaphore protocol or arbitrary
 user callback behavior.
 
@@ -103,7 +110,7 @@ user callback behavior.
 | TLA+ action | C++ or platform location | Status |
 | --- | --- | --- |
 | `ServiceClaim` | current `SerializedService` owner entering TX progression | mapped |
-| `TxGateClaim` / `TxGateRelease` | backend `TryEnterTxStart()` / `LeaveTxStart()` | mapped in model class only |
+| `TxGateClaim` / `TxGateRelease` | backend `TryEnterTxStart()` / `LeaveTxStart()` | mapped in STM32, CH32, and ESP DMA backends |
 | `BackendStarted` / `BackendFailed` | backend result returned by `StartDmaTx(...)` | contract |
 | `PublishConfig` | hardware-gate dispatcher or caller publishes CONFIG into the current service owner | partial |
 | `PublishComplete` / `PublishError` | IRQ path publishes a terminal event into the current service owner | partial |
@@ -136,7 +143,7 @@ and platform protocols.
 | stop active hardware | platform UART/DMA backend | contract |
 | fail old pending/queued prefix | `ApplyConfig()` and `FailPublishedQueued()` | mapped |
 | preserve post-boundary writes | fixed `config_prefix_count_` drain | mapped |
-| republish WRITE after apply | `ServiceTx()` after successful `ApplyConfig()` | mapped |
+| republish WRITE after apply | unconditional `ServiceTx()` self-publication after successful `ApplyConfig()` | mapped |
 
 `ApplyPendingConfig()` returning success must identify a real hardware quiescence
 point. The abstract generation property is conditional on that platform contract.
@@ -148,47 +155,121 @@ producer ownership. If another producer is active, the callback may instead rece
 `BUSY`; this model does not supply an automatic retry. The drain is a focused scenario,
 not an arbitrary-length cutoff.
 
+## CONFIG Abort Join
+
+| TLA+ action | C++ or platform location | Status |
+| --- | --- | --- |
+| `RequestConfig` | `UartDmaTxModel::RequestConfig()` publishes the backend request before CONFIG | mapped |
+| CONFIG claim retires old TX retry | `UartHardwareGate::TryEnterConfig()` clears `CONFIG_PENDING` and `TX_START_PENDING` in the successful same-word CAS after the model fixes its prefix | mapped |
+| initialize both pending directions | `UartDmaAbortJoin::Begin()` publishes `LAUNCHING` and the complete pending mask before the first stop launch | mapped |
+| `LaunchStop(d)` with stopped hardware | backend proves `EN == 0` and calls `CompleteStopped(d)` | mapped/contract |
+| `ResolveAsyncStop(d)` with running hardware | backend finishes carrier MMIO, then `ArmAsyncStop(d)` publishes the armed bit | mapped/contract |
+| `EndLaunch` | `EndLaunch()` changes `LAUNCHING` to `STOPPING`; only an empty pending/armed set may publish `QUIESCENT` | mapped |
+| `StopIrqCheck(d)` with `EN=1` | `FinishAsyncStopIrq(d, false)` retains both pending and armed obligations | mapped/contract |
+| `StopIrqCheck(d)` with `EN=0` | `FinishAsyncStopIrq(d, true)` clears both obligations and may publish `QUIESCENT` | mapped/contract |
+| `ApplyConfig` inside the final stop IRQ | `DmaIRQHandler()` calls `ResumeConfig()` after its final readback and performs no later old-state access | mapped/contract |
+| `ApplyConfig` | `UartDmaAbortJoin` reaches `QUIESCENT` only after `LAUNCHING` ends and both pending/armed sets are empty; backend register correspondence remains platform evidence | mapped/partial |
+| `DrainAndRelease` | fixed-prefix drain, `OnConfigApplied()`, and unconditional WRITE rescan | mapped/partial |
+
+`UartConfigAbortJoin.tla` independently enumerates stopped-before-launch, stop-between-
+launch-and-arm, armed asynchronous completion, an EN-still-set IRQ retry, and both TX/RX
+orders. Its negative configurations prove that early finalization, consuming a terminal
+without an `EN=0` proof, retaining a retry for the drained old TX prefix, and omitting
+the final WRITE rescan violate named invariants.
+The stop-IRQ witness proves that applying CONFIG inside the final wrapper is reachable
+and intentional after the wrapper's last old-state access. The model does not include
+actual register definitions, NVIC routing, carrier generation, or DMA data movement.
+
+`test_uart_dma_abort_join.cpp` executes the production atomic leaf for zero-direction,
+sync/sync, both asynchronous orders, EN-still-enabled retry, mixed sync/async, completion
+during launch, and concurrent two-direction completion. Backend tests must separately
+pin stale status, readback/EN checks, and restore/remask scheduling.
+
+## STM32 IRQ Scheduler And DMA Stop
+
+| TLA+ action | C++ or platform location | Status |
+| --- | --- | --- |
+| `PubAtomicFetch(p)` | `irq_domain_state_.fetch_or(request | SCHEDULED, release)` | mapped |
+| publisher kick | `kick_target(context)` only when the old word lacked `SCHEDULED` | mapped/contract |
+| handler snapshot | `exchange(SCHEDULED, acq_rel)` | mapped |
+| release/reacquire | release CAS from exactly `SCHEDULED` to zero; failure takes another exchange snapshot | mapped |
+| old terminal with `EN=1` | armed DMA wrapper clears status, retains the join, and rearms carriers | mapped/contract |
+| terminal with `EN=0` | wrapper may finish the join regardless of terminal generation | mapped/contract |
+| wrapper remask | `DeferNormalIrq()` masks, marks deferred, then rechecks `AnyAsyncStopArmed()` and republishes RESTORE | mapped/contract |
+
+`Stm32IrqScheduler.tla` checks the coalesced request scheduler independently of HAL.
+`Stm32DmaAbortRestore.tla` composes one stale terminal wrapper, EN-authoritative stop,
+early RESTORE consumption, a later wrapper remask, and the scheduler. The positive
+models assume target-handler non-overlap and eventual BSP delivery of a scheduled kick.
+They do not prove MMIO write completion, cache/shareability, shared-vector arbitration,
+or that a specific Stream IP generates a fresh enabled terminal carrier after EN clear.
+
 ## Hardware Control
 
 | TLA+ action | C++ or platform location | Status |
 | --- | --- | --- |
 | request CONFIG priority | `UartHardwareGate::RequestConfig()` | mapped |
 | ordinary IRQ claim | `UartHardwareGate::TryEnterIrq()` | mapped |
-| mask complete normal IRQ domain | platform backend before `MarkIrqDeferred()` | open |
+| mask complete normal IRQ domain | platform backend before `MarkIrqDeferred()` | mapped in STM32, CH32, and ESP DMA backends; IRQ-controller ownership remains a BSP contract |
 | publish deferred scan | `UartHardwareGate::MarkIrqDeferred()` | mapped |
-| publisher self-dispatch | platform dispatch glue after `MarkIrqDeferred()` | open |
+| publisher self-dispatch | platform dispatch glue after `MarkIrqDeferred()` | mapped in STM32, CH32, and ESP DMA backends; target-context delivery remains a BSP contract |
 | deferred claim and consume | `UartHardwareGate::TryEnterDeferredIrq()` | mapped |
-| re-mask, barrier, authoritative status scan | platform backend | open |
-| restore authoritative IRQ mask | platform backend | open |
-| TX-start claim | `UartHardwareGate::TryEnterTxStart()` | mapped in model class only |
-| CONFIG claim and close | `TryEnterConfig()` / `TryLeaveConfig()` | mapped in model class only |
-| abort callback admission within one CONFIG transaction | `OpenConfigIrqAdmission()` / `TryEnterConfigIrq()` | mapped in model class only |
+| re-mask, barrier, authoritative status scan | platform backend | mapped in STM32, CH32, and ESP DMA backends; physical MMIO completion remains a platform contract |
+| restore authoritative IRQ mask | platform backend | mapped in STM32, CH32, and ESP DMA backends; shared-vector claim arbitration remains a BSP contract |
+| TX-start claim | `UartHardwareGate::TryEnterTxStart()` | mapped in STM32, CH32, and ESP DMA backends |
+| bind stack-local IRQ ownership context | successful `TryEnterIrq(context)` / `TryEnterDeferredIrq(context)` followed by local context initialization | mapped in STM32, CH32, and ESP DMA backends |
+| atomically admit nested TX start | successful CAS in `TryEnterNestedTxStart(context)`; the pre-CAS word has exact IRQ ownership and no CONFIG/deferred pending bit, and the desired word consumes `TX_START_PENDING` | mapped in STM32, CH32, and ESP DMA backends |
+| publish blocked nested TX retry | failed priority admission followed by `fetch_or(TX_START_PENDING, release)` while the outer IRQ context remains active | mapped in STM32, CH32, and ESP DMA backends |
+| leave nested TX start | `LeaveNestedTxStart(context)` restores local depth 2 to 1 without releasing the atomic owner | mapped in STM32, CH32, and ESP DMA backends |
+| release context-carrying outer IRQ | `LeaveIrq(context)` requires depth 1, releases `IRQ_ACTIVE`, returns pending actions, and invalidates the context | mapped in STM32, CH32, and ESP DMA backends |
+| `NestedStart` / `FallbackStart` | platform `StartDmaTx(...)` after the matching gate admission | contract; the nested-admission model assumes `STARTED`, excludes `FAILED`, and the backend contract forbids `RETRY` after admission |
+| CONFIG claim and close | `TryEnterConfig()` / `LeaveConfig()` | mapped in STM32, CH32, and ESP DMA backends |
 | prevent an old callback from surviving into a later CONFIG admission | backend quiescence and claim-before-inspect rules below | contract |
 
-STM32, CH32, and ESP backends have not been migrated to `UartHardwareGate`. Formal
-results for this section are protocol results only and cannot be reported as backend
-correctness.
+Formal results for this section are protocol results only and cannot by themselves be
+reported as backend correctness. `UartHardwareGate` keeps `CONFIG_ACTIVE` across an
+asynchronous transaction but does not encode abort-direction admission. The backend
+must admit only the selected abort DMA IRQs, keep ordinary IRQ and TX-start entries
+excluded, and call `LeaveConfig()` only after hardware apply and the fixed TX-prefix
+drain.
 
-The gate's admission bit and close CAS serialize callback entry against the current
-CONFIG owner, but they do not identify the CONFIG generation. The TLA+ model now treats
-`configQuiesced` as the join point and checks that a selected abort callback has already
-settled before that state is published. Establishing the join is still a backend
-contract; `OldAbortCannotEnterNewAdmission` therefore depends on these rules:
+### Nested TX Admission
 
-- an IRQ must claim the hardware gate before reading status, selecting a callback, or
-  retaining COMPLETE, ERROR, or abort meaning;
-- `ApplyPendingConfig()` may return true only after mask/barrier, stop, and status clear
-  have made the old DMA generation quiescent;
-- at most one abort transaction is outstanding, and an entered abort callback must
-  leave the CONFIG IRQ sub-owner before resuming CONFIG;
-- CONFIG admission cannot close and reopen while an already selected old abort callback
-  can still enter; a late empty vector must re-read current status and do nothing.
+`UartNestedTxAdmission.tla` starts after an IRQ invocation has both acquired the
+hardware gate and synchronously won the `SerializedService` owner. The successful
+nested-admission action is the abstract linearization point of the same-word CAS. If
+CONFIG or deferred IRQ publication is ordered first, admission fails and the still-live
+outer IRQ call stack publishes `TX_START_PENDING` before it may release. If the CAS is
+ordered first, the start is already admitted and a later high-priority publication waits
+for the outer IRQ owner.
 
-Under this contract, the generation fields in `UartHardwareControl.tla` are ghost
-history used to state the property, not runtime state that must be added to
-`UartHardwareGate`. A backend that queues already-selected callbacks outside the gate
-and cannot drain or cancel them needs an immutable generation token carried by the
-callback instead.
+After the model fixes the CONFIG prefix, `ConfigClaim` maps to the successful
+`TryEnterConfig()` same-word CAS. It clears the pre-claim TX retry because that candidate
+is now irreversibly owned by the destructive CONFIG drain. The model's `Cancelled` state
+means committed-to-drain, not callback-complete. A retry published after the CAS remains
+ordered after the claim and is reported on CONFIG leave.
+
+The context depth is ordinary `uint32_t` state owned by that synchronous call stack.
+Inner leave only restores depth; it neither clears `IRQ_ACTIVE` nor dispatches actions.
+Only outer leave returns the CONFIG/deferred/TX snapshot. An existing retry is consumed
+by the successful nested CAS, so a later release cannot spuriously start the same
+candidate again.
+
+The retry bit represents one candidate managed by the UART's `SerializedService`. It is
+not a count and does not support two independent TX-start publishers: a second publisher
+that sets an already-set bit before CONFIG claim has no distinct carrier. That scenario
+is outside the production integration contract.
+
+The model assumes the IRQ invocation won the TX service and therefore legitimately
+passes its context into the executing handler. The context is not an event payload. If
+another thread already owns the service, an IRQ publication must return and invalidate
+its context at outer leave; the eventual thread handler uses the ordinary TX claim.
+That service/context wiring is used by the STM32, CH32, and ESP DMA backends and covered
+by deterministic composition tests. Its refinement remains `partial` because the model
+does not include arbitrary callback bodies, physical MMIO, BSP IRQ delivery, or the
+complete service-owner selection protocol. The older `UartTxControl.tla` deliberately
+retains the more conservative behavior in which an IRQ-held gate causes RETRY; it does
+not model the optimized nested path.
 
 ## RX SPSC And Clear
 
@@ -221,6 +302,9 @@ data; the next ordinary read checks the queue again under the single-consumer co
   published CONFIG obligation settles without wrapping generation identity.
 - `UartHardwareControlLiveness.cfg` checks already-started IRQ, scanner, CONFIG, and
   abort continuations; it does not force external IRQ or CONFIG publication.
+- `UartNestedTxAdmissionLiveness.cfg` forces its finite CONFIG and deferred publishers,
+  weakly fairly schedules every internal continuation, and requires the candidate to
+  settle either by a successful nested/fallback start or by CONFIG cancellation.
 - `UartTxPipelineLiveness.cfg` assumes finite publications, no backend start failure,
   fair retry dispatch, and eventual DMA terminal status.
 - `UartTxStartWindow.cfg` is safety-only. It checks that a software-committed backend
@@ -228,6 +312,11 @@ data; the next ordinary read checks the queue again under the single-consumer co
   must terminate.
 - `UartTxConfigDrainLiveness.cfg` and `UartRxSpscLiveness.cfg` check progress only for
   already-started bounded transactions.
+- `UartConfigAbortJoin.cfg` is safety-only. It enumerates launch, arm, EN-still-set
+  retry, and stopped outcomes but does not assert that hardware must eventually clear
+  EN or deliver another carrier IRQ.
+- The STM32 scheduler/restore configurations are safety-only. Their correct cases do
+  not establish unbounded fairness or physical IRQ delivery.
 
 ## Verification Boundaries
 
