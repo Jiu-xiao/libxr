@@ -64,6 +64,8 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"core_tests", {"callback", &RunVoidEntry<test_cb>, false}},
     {"core_tests", {"pipe", &RunVoidEntry<test_pipe>, false}},
     {"core_tests", {"rw", &RunVoidEntry<test_rw>, false}},
+    {"core_tests",
+     {"uart_dma_abort_join", &RunVoidEntry<test_uart_dma_abort_join>, false}},
     {"core_tests", {"uart_dma_tx_model", &RunVoidEntry<test_uart_dma_tx_model>, false}},
     {"core_tests",
      {"uart_circular_dma_rx_model", &RunVoidEntry<test_uart_circular_dma_rx_model>,

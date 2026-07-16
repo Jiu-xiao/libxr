@@ -35,19 +35,26 @@ all harnesses under the RC11 memory model.
 
 | Model | Finite cutoff | Assumptions and verified scope |
 | --- | --- | --- |
-| `SerializedService` | 3 one-shot publishers, 2 event bits, thread/ISR contexts | Checks unique ownership, durable coalesced events, owner-context callbacks, accounting, and termination under per-publisher weak fairness. It is not a cutoff proof for arbitrary publishers and carries no event payload/count. |
+| `SerializedService` | 3 one-shot publishers, 2 event bits, thread/ISR contexts | Checks fused initial owner-claim/snapshot-take, unique ownership, durable coalesced events, owner-context callbacks, accounting, and termination under per-publisher weak fairness. It is not a cutoff proof for arbitrary publishers and carries no event payload/count. |
 | `UartTxControl` | 3 one-shot writers, at most 2 CONFIG publications and DMA generations | Checks the coarse queue/service/hardware-gate control protocol, durable retry/deferred carriers, fixed CONFIG boundary, and writer publication during an owner round. The main configuration is safety-only. The focused CONFIG liveness configuration makes the finite request actor and internal CONFIG continuations weakly fair, so the request budget is exhausted and every published CONFIG obligation settles without wrapping generation identity. The model does not contain the active/pending buffer-copy pipeline. |
 | `UartHardwareControl` | 2 ordered IRQ publishers on one logical IRQ core, at most 2 CONFIG generations | Checks scanner/CONFIG exclusion, mask-before-scan, abort admission, and ghost-generation status identity. The correct environment remasks before scanning, forbids late retired-generation status, and establishes `configQuiesced` only after a selected abort callback has settled. The liveness config weakly fairly schedules internal IRQ/scanner/CONFIG/abort continuations; requests and hardware-status arrivals remain environment choices. |
+| `UartNestedTxAdmission` | 1 IRQ owner/context, depth at most 2, 1 serialized TX candidate, and one-shot CONFIG/deferred publishers | Starts after the IRQ invocation has synchronously won the TX service. It checks the atomic nested-admission order against both priority publishers, consumption of an existing TX retry, CONFIG-claim retirement of the old retry, stack-local context depth, and durable fallback before the outer IRQ releases. The liveness config forces the two finite publishers and internal continuations; the candidate must eventually start or become committed to CONFIG drain. It does not model callback completion, backend `FAILED`, service-owner selection, DMA completion, or MMIO. The C++ backend contract forbids `RETRY` after gate admission; an admitted attempt must return `STARTED` or `FAILED`. |
 | `UartTxStartWindow` | 1 TX service round, 1 TX gate owner, 1 backend result, at most 1 external publication of each event kind plus 1 mandatory failure-CONFIG publication | Checks the focused interval from DMA start through hardware-gate release to software commit. CONFIG, COMPLETE, and ERROR paths may publish after gate release but before commit; CONFIG may also be published while a failed result is delivered. Only the service owner may mutate TX state. ERROR absorbs a coalesced COMPLETE. A backend failure explicitly passes through software commit, direct result delivery or a `Finish()` callback/return, and failure-CONFIG publication. The service owner and failure phase PC carry the continuation until CONFIG becomes persistent. This is a safety-only composition model; it does not include the full queue, retry, buffer-copy, generation, or platform protocol. |
-| `UartTxPipeline` | 3 records, 2 DMA buffer blocks, one logical WritePort producer | Splits payload, metadata, WRITE, private copy, pending publication, DMA start, retry/failure, commit, and terminal actions. Safety uses record symmetry. Liveness uses no symmetry, assumes no backend `FAILED` result, weak fairness for protocol continuations/terminal publication, and strong fairness for a successful backend start. CONFIG, the hardware gate, DMA generations, callback bodies, and BLOCK waiter state are separate obligations. |
+| `UartTxPipeline` | 3 records, 2 DMA buffer blocks, one logical WritePort producer | Models one pending-only candidate path: payload and metadata publication, WRITE, private copy into pending, pending publication, DMA start, retry/failure, STARTED-only active commit, and terminal release. It checks that `FAILED` leaves the active block unchanged. Safety uses record symmetry. Liveness uses no symmetry, assumes no backend `FAILED` result, weak fairness for protocol continuations/terminal publication, and strong fairness for a successful backend start. CONFIG, the hardware gate, DMA generations, callback bodies, and BLOCK waiter state are separate obligations. |
 | `UartRxSpsc` | `MaxItems = 3`, one ISR producer, one one-byte reader, one clear operation | Assumes successful pushes and the ReadPort single-logical-consumer contract. Checks SPSC order, single consumer ownership, fixed clear snapshot, and post-snapshot preservation. An empty initial snapshot releases directly to `IDLE`; only a nonempty snapshot performs a post-drop Size observation before release. It does not cover queue-full policy, the complete ReadOperation lifecycle, or concurrent front-end consumers. Liveness uses no symmetry and weakly fairly schedules only already-started producer/read/clear continuations; the environment is not forced to initiate them. |
 | `UartTxConfigDrain` | 4 records: active, pending, old queued, and one callback-published record | Assumes hardware is already quiesced. Checks that active is released without another Finish, pending consumes metadata only, ordinary queued work consumes metadata+payload, each operation finishes at most once, and only the first-attempt metadata prefix is failed. Safety uses record symmetry; liveness uses no symmetry and weak fairness for the finite drain continuation. |
+| `UartConfigAbortJoin` | 2 DMA directions, one CONFIG transaction, one old TX retry, and at most one WRITE during CONFIG | Models stopped-before-launch completion, asynchronous stop arming after both stop calls return, an IRQ that may first observe `EN=1`, and completion only after a later `EN=0` proof. CONFIG claim retires the retry for its fixed old prefix and may apply from the final stop IRQ after its last old-state readback. It checks one apply/release, no stale old retry after release, and the independent mandatory post-CONFIG WRITE rescan. It excludes HAL register encodings, IRQ routing, queue bytes, and user callbacks. |
+| `Stm32IrqScheduler` | 2 coalescing publishers, one non-reentrant target handler | Checks atomic `request | SCHEDULED` publication, one kick owner, exchange snapshots, and the release-CAS/reacquire boundary. Split publication and a release that clears concurrent work are expected failures. The BSP target-core and non-overlap contract is assumed. |
+| `Stm32DmaAbortRestore` | 1 Stream stop, one stale terminal wrapper, 2 restore publishers | Checks that `EN`, rather than terminal-event age, is the stop proof and that a wrapper which remasks after an early RESTORE republishes RESTORE. It also composes the request scheduler. MMIO ordering and hardware carrier generation remain platform contracts. |
 
 The TX pipeline models retry and backend-failure accounting. `UartTxStartWindow`
 checks the focused start/gate-release/commit composition, while CONFIG prefix drain and
 stale DMA/abort generations are modeled separately by `UartTxConfigDrain` and
-`UartHardwareControl`. Passing all four does not by itself prove their C++ or platform
-composition.
+`UartHardwareControl`; `UartConfigAbortJoin` isolates the two-direction synchronous and
+asynchronous stop join. The two STM32-focused models isolate target-core scheduling and
+EN-authoritative Stream stop/restore. `UartNestedTxAdmission` separately checks the optimized IRQ-owner
+admission and fallback boundary. Passing these models does not by itself prove their C++ or
+platform composition.
 
 ### Successful configurations
 
@@ -58,6 +65,8 @@ The following configurations must complete with exit code zero:
 - `UartTxControlLiveness.cfg` against `UartTxControl.tla`
 - `UartHardwareControl.cfg` against `UartHardwareControl.tla`
 - `UartHardwareControlLiveness.cfg` against `UartHardwareControl.tla`
+- `UartNestedTxAdmission.cfg` against `UartNestedTxAdmission.tla`
+- `UartNestedTxAdmissionLiveness.cfg` against `UartNestedTxAdmission.tla`
 - `UartTxStartWindow.cfg` against `UartTxStartWindow.tla`
 - `UartTxPipeline.cfg` against `UartTxPipeline.tla`
 - `UartTxPipelineLiveness.cfg` against `UartTxPipeline.tla`
@@ -65,22 +74,28 @@ The following configurations must complete with exit code zero:
 - `UartRxSpscLiveness.cfg` against `UartRxSpsc.tla`
 - `UartTxConfigDrain.cfg` against `UartTxConfigDrain.tla`
 - `UartTxConfigDrainLiveness.cfg` against `UartTxConfigDrain.tla`
+- `UartConfigAbortJoin.cfg` against `UartConfigAbortJoin.tla`
+- `Stm32IrqSchedulerCorrect.cfg` against `Stm32IrqScheduler.tla`
+- `Stm32DmaAbortRestoreCorrect.cfg` against `Stm32DmaAbortRestore.tla`
 
 The dedicated liveness configurations intentionally omit `SYMMETRY`. Their temporal
 claims are conditional on the explicit fairness and environment assumptions summarized
 above. `UartTxControlLiveness.cfg` intentionally forces its finite CONFIG publisher to
-exhaust the two-publication budget; the other models do not assert that an unconstrained
-external producer, request, IRQ, or DMA event must occur.
+exhaust the two-publication budget. `UartNestedTxAdmissionLiveness.cfg` likewise forces
+its two one-shot priority publishers; the other models do not assert that an
+unconstrained external producer, request, IRQ, or DMA event must occur.
 
 ### Expected counterexamples
 
 Every invariant counterexample below must exit with TLC 2.19 status `12`. The action
 property counterexamples `UartTxControlMovingBoundary.cfg`,
-`UartTxPipelineWrongCompletion.cfg`, and `UartTxPipelineOwnerPublication.cfg` must exit
-with status `13`. Each focused configuration asks TLC to check one targeted property and
-must emit only that configured signature plus the concrete-behavior marker. This pins a
-specific counterexample; it does not claim that other, unconfigured properties would
-remain true under the same injected fault.
+`UartNestedTxAdmissionNonAtomicConfig.cfg`,
+`UartNestedTxAdmissionNonAtomicDeferred.cfg`, `UartTxPipelineWrongCompletion.cfg`, and
+`UartTxPipelineOwnerPublication.cfg` must exit with status `13`. Each focused
+configuration asks TLC to check one targeted property and must emit only that configured
+signature plus the concrete-behavior marker. This pins a specific counterexample; it
+does not claim that other, unconfigured properties would remain true under the same
+injected fault.
 
 - `SerializedServiceBroken.cfg`:
   `Invariant NoLostEvents is violated`
@@ -96,6 +111,12 @@ remain true under the same injected fault.
   `Invariant NoSubmitAfterTakeWitness is violated`
 - `UartTxControlOwnerRetake.cfg`:
   `Invariant NoOwnerRetakeWitness is violated`
+- `UartNestedTxAdmissionNonAtomicConfig.cfg`:
+  `Action property NestedAdmissionRespectsConfigPriority is violated`
+- `UartNestedTxAdmissionNonAtomicDeferred.cfg`:
+  `Action property NestedAdmissionRespectsDeferredPriority is violated`
+- `UartNestedTxAdmissionEphemeralRetry.cfg`:
+  `Invariant BlockedTxHasCarrier is violated`
 - `UartHardwareControlNoRemask.cfg`:
   `Invariant ScanRequiresMask is violated`
 - `UartHardwareControlLateStatus.cfg`:
@@ -134,6 +155,28 @@ remain true under the same injected fault.
   `Invariant PostBoundarySurvives is violated`
 - `UartTxConfigDrainPendingPayload.cfg`:
   `Invariant MetaDataAligned is violated`
+- `UartConfigAbortJoinEarlyApply.cfg`:
+  `Invariant NoEarlyApply is violated`
+- `UartConfigAbortJoinInsideStopIrqWitness.cfg`:
+  `Invariant NoInsideStopIrqApplyWitness is violated`
+- `UartConfigAbortJoinNoWriteRescan.cfg`:
+  `Invariant PostConfigWriteRescanned is violated`
+- `UartConfigAbortJoinRetainedTxRetry.cfg`:
+  `Invariant NoRetiredTxRetryAfterConfig is violated`
+- `UartConfigAbortJoinUnsafeError.cfg`:
+  `Invariant StopCompletionRequiresDisabled is violated`
+- `Stm32IrqSchedulerBrokenSplit.cfg`:
+  `Invariant NoLostWake is violated`
+- `Stm32IrqSchedulerBrokenRelease.cfg`:
+  `Invariant NoPublishedRequestLoss is violated`
+- `Stm32DmaAbortRestoreStaleTc.cfg`:
+  `Invariant DmaEnIsAuthoritative is violated`
+- `Stm32DmaAbortRestoreNoRepublish.cfg`:
+  `Invariant MaskedDomainHasRestoreCarrier is violated`
+- `Stm32DmaAbortRestoreBrokenSplit.cfg`:
+  `Invariant NoLostWake is violated`
+- `Stm32DmaAbortRestoreOldTerminalWitness.cfg`:
+  `Invariant NoOldTerminalCompletionWitness is violated`
 
 The case table is also the exact `.cfg` allowlist. Before starting TLC, each runner
 compares that table with every `.cfg` in this directory. An unregistered new file, a
@@ -141,7 +184,8 @@ missing file, a duplicate entry, an unexpected exit status, a different countere
 a parser/semantic/internal error, or a tool-version mismatch fails the runner.
 
 The two `UartTxControl` `Witness` configurations and
-`UartTxPipelineOwnerPublication.cfg` are expected-failing reachability checks, not
+`UartTxPipelineOwnerPublication.cfg`, `UartConfigAbortJoinInsideStopIrqWitness.cfg`,
+and `Stm32DmaAbortRestoreOldTerminalWitness.cfg` are expected-failing reachability checks, not
 broken protocol variants. The control witnesses require concrete traces in which a
 writer publishes after an existing owner has taken a snapshot and that owner later
 takes the coalesced WRITE event. The pipeline witness independently requires payload or
@@ -156,6 +200,12 @@ yet published` trace. Separate configurations are necessary because the latter t
 alternative schedules. They keep future guard changes from silently removing any
 central window.
 
+The CONFIG stop-IRQ witness requires a trace where `FinishAsyncStopIrq(..., true)`
+publishes `QUIESCENT` and CONFIG applies before that wrapper returns. This is allowed
+because the wrapper bypasses HAL callbacks and performs no old-state access after the
+EN proof. The STM32 old-terminal witness separately demonstrates that an old terminal
+may complete the join after observing `EN=0`; event generation is not the proof.
+
 `UartHardwareControlEarlyQuiesce.cfg` independently demonstrates that CONFIG cannot
 publish its quiescence join while a selected abort callback can still enter. The
 historical `UartHardwareControlAbortABA.cfg` is a compound invalid backend: it permits
@@ -163,6 +213,21 @@ both that early quiescence and a later early close so TLC can retain the old-adm
 ABA counterexample. The correct configuration blocks at the earlier quiescence join;
 generation values remain specification-only history rather than a required runtime
 epoch.
+
+The two non-atomic nested-admission configurations split the priority check from the
+commit. Their counterexamples insert CONFIG and deferred IRQ publication, respectively,
+between those actions. The correct model uses one admission action, corresponding to the
+same-word CAS. `UartNestedTxAdmissionEphemeralRetry.cfg` instead returns from a blocked
+attempt without publishing `TX_START_PENDING`; once the outer IRQ releases, the
+already-consumed service event has no remaining carrier.
+
+`UartConfigAbortJoinRetainedTxRetry.cfg` preserves the old retry across CONFIG claim.
+After CONFIG drains that sole candidate, no TX start remains to consume the bit, so the
+released gate keeps reporting an empty TX action. The correct claim CAS clears the old
+retry, while the mandatory WRITE rescan independently carries post-boundary records.
+This relies on one `SerializedService`-managed TX candidate. Two independent TX-start
+publishers can collapse into the same bit before CONFIG claim and are outside the gate
+contract; the bit is a level fact, not a request counter.
 
 `UartRxSpscStaleReleaseEvent.cfg` is different from the injected protocol faults. It
 captures a real boundary in the current ReadPort implementation: an empty initial Size
@@ -185,12 +250,19 @@ The GenMC runner checks these explicit cases:
    allowed in this mode.
 5. The same gate harness with `--check-liveness` must pass. This checks the bounded
    harness after owner release was made a single non-retrying atomic operation.
+6. `genmc/uart_hardware_gate_nested.cpp` safety checking must pass. It forces both the
+   successful-consume, CONFIG retirement, post-claim retry preservation, and durable-
+   fallback outcomes, then races the real nested-admission CAS against CONFIG and
+   deferred publication with a pre-existing TX retry. That stale retry forces the
+   optimized first CAS to fail and exposes the priority-publication window before the
+   retry CAS.
+7. The same nested gate harness with `--check-liveness` must pass.
 
-The gate harness is compiled with `-fno-threadsafe-statics`,
+The gate harnesses are compiled with `-fno-threadsafe-statics`,
 `-D_BITS_PTHREADTYPES_COMMON_H=1`, and the required libxr include paths.
 
 GenMC is intentionally limited to the atomic frontend probe, `SerializedService`, and
-the hardware-gate leaf harness. It does not verify the full TX model or the real
+the hardware-gate leaf harnesses. It does not verify the full TX model or the real
 `WritePort` closure. A full TX harness was rejected because GenMC v0.17.0 reaches an
 internal failure on dynamic non-atomic access. CBMC 6.10 was also rejected because its
 derived g++ frontend cannot parse the libstdc++ atomic probe used by this codebase.

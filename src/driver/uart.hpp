@@ -80,8 +80,11 @@ class UART
    *
    * @warning `SetConfig()` calls for one UART instance must be serialized by the caller.
    * Exactly one logical producer may publish configurations for an instance at a time.
-   * 同一 UART 实例的 `SetConfig()` 调用必须由调用方串行化；任意时刻只允许一个逻辑
-   * producer 发布配置。
+   * The call may originate in thread or ISR context. An implementation returning
+   * `ErrorCode::OK` must accept the latest request without blocking that context;
+   * hardware quiescence, apply, and restart may finish later. `OK` acknowledges
+   * publication, not synchronous completion of the hardware transaction. 同一 UART 实例的
+   * `SetConfig()` 调用必须由调用方串行化；任意时刻只允许一个逻辑 producer 发布配置。
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
 

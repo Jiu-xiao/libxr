@@ -54,6 +54,7 @@ void test_time();
 void test_transform();
 void test_double_buffer();
 void test_type();
+void test_uart_dma_abort_join();
 void test_uart_dma_tx_model();
 void test_uart_circular_dma_rx_model();
 void test_uart_hardware_gate();

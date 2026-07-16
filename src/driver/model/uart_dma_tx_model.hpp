@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -8,6 +9,7 @@
 #include "libxr_assert.hpp"
 #include "libxr_rw.hpp"
 #include "serialized_service.hpp"
+#include "uart_hardware_gate.hpp"
 
 namespace LibXR
 {
@@ -17,9 +19,13 @@ namespace LibXR
  *
  * `RETRY` is valid only before the backend has started or otherwise committed the DMA
  * transfer. The model keeps the queue record and buffer ownership unchanged and expects
- * a later `ResumeStart()`. `FAILED` is terminal for this attempt and also guarantees
- * that no DMA remains active. A failure of the current submission is returned through
- * its `SubmitContext`; an older retained record is completed through `WritePort::Finish`.
+ * a later `ResumeStart()`. Before returning `RETRY`, the platform must establish that
+ * durable continuation. With `UartHardwareGate`, `RETRY` is therefore allowed only when
+ * `TryEnterTxStart()` or `TryEnterNestedTxStart()` failed and left `TX_START_PENDING`;
+ * after either admission succeeds, the backend must balance its leave and return only
+ * `STARTED` or `FAILED`. `FAILED` is terminal for this attempt and also guarantees that
+ * no DMA remains active. A failure of the current submission is returned through its
+ * `SubmitContext`; an older retained record is completed through `WritePort::Finish`.
  * `STARTED` transfers the candidate buffer to hardware. For each accepted start, the
  * platform must dispatch at most one authoritative terminal snapshot; it must clear
  * that hardware status before a later start can make the same status observable as the
@@ -30,6 +36,13 @@ enum class UartDmaTxStartResult : uint32_t
   STARTED = 0U,
   RETRY = 1U,
   FAILED = 2U,
+};
+
+enum class UartDmaTxTerminalEvent : uint32_t
+{
+  NONE = 0U,
+  COMPLETE = 1U,
+  ERROR = 2U,
 };
 
 /**
@@ -44,16 +57,28 @@ enum class UartDmaTxStartResult : uint32_t
  * and completion ISRs from advancing the double-buffer state concurrently.
  *
  * @warning Service re-entry is flattened, but `WritePort` producer ownership is a
- * separate boundary. `Finish()` for an older record, or for a current record drained by
- * same-round CONFIG recovery, may run while a direct or Stream producer owns the port.
- * A callback that writes the same port can therefore receive `BUSY`. Such callbacks must
- * handle/retry `BUSY`; serialization alone does not enqueue a rejected re-entrant write.
+ * separate boundary. `Finish()` may run while a direct or Stream producer owns the
+ * port, including when CONFIG drains the current direct submission. A callback that
+ * writes the same port can therefore receive `BUSY`. Such callbacks must handle/retry
+ * `BUSY`; serialization alone does not enqueue a rejected re-entrant write.
  *
  * @tparam Backend 静态绑定的平台后端类型 / Statically bound platform backend type
  */
 template <typename Backend>
 class UartDmaTxModel
 {
+ public:
+  using HardwareOwnerContext = UartHardwareGate::OwnerContext;
+
+ private:
+  [[nodiscard]] static constexpr bool BackendSupportsHardwareContext()
+  {
+    return requires(Backend& backend, uint8_t* data, size_t size, int block,
+                    HardwareOwnerContext* hardware_context) {
+      backend.StartDmaTx(data, size, block, hardware_context);
+    };
+  }
+
  public:
   /**
    * @brief 绑定平台后端、写端口和 DMA 双缓冲区 / Bind the backend, write port, and
@@ -64,6 +89,10 @@ class UartDmaTxModel
   {
     REQUIRE(port_.queue_data_ != nullptr);
     REQUIRE(port_.queue_data_->MaxSize() <= buffers_.Size());
+
+    // No DMA is active yet. Treat block 1 as the notional previous active block so the
+    // first staged candidate uses block 0, preserving the established start sequence.
+    buffers_.SetActiveBlock(true);
   }
 
   /**
@@ -72,17 +101,17 @@ class UartDmaTxModel
    * @return 当前请求同步启动时返回 `OK`，留在流水中时返回 `PENDING`，同步启动失败
    * 时返回错误 / `OK` for a synchronous start, `PENDING` while retained by the
    * pipeline. A defensive backend start failure for this submission is returned
-   * synchronously. An ordinary direct WritePort callback runs after the producer lock is
-   * released unless same-round CONFIG recovery drains that submission. Stream retains
-   * producer ownership until its Commit path returns. In either exceptional case, a
-   * callback that re-enters the same port may receive `BUSY`.
+   * synchronously. A callback normally runs after a direct producer unlocks, but CONFIG
+   * may drain an older or current direct record while that producer still owns the port.
+   * Stream also retains producer ownership until its Commit path returns. In either
+   * case, a callback that re-enters the same port may receive `BUSY`.
    */
   ErrorCode Submit(bool in_isr)
   {
     SubmitContext context{port_.CurrentSubmissionId(), ErrorCode::PENDING};
     (void)service_.Invoke(EventMask(TxEvent::WRITE),
                           [this, in_isr, &context](uint32_t events) noexcept
-                          { ServiceTx(events, in_isr, &context); });
+                          { ServiceTx(events, in_isr, &context, nullptr); });
     return context.result;
   }
 
@@ -94,7 +123,22 @@ class UartDmaTxModel
   {
     (void)service_.Invoke(EventMask(TxEvent::COMPLETE),
                           [this, in_isr](uint32_t events) noexcept
-                          { ServiceTx(events, in_isr, nullptr); });
+                          { ServiceTx(events, in_isr, nullptr, nullptr); });
+  }
+
+  /**
+   * @brief Publish a normal completion event from the current IRQ hardware owner.
+   * @param in_isr Whether the current caller is in an ISR.
+   * @param hardware_context Stack-local ownership evidence for this synchronous IRQ call
+   * stack. Ownership follows the service invocation that executes the handler, not the
+   * event source. The model and backend must not retain the context.
+   */
+  void OnTransferDone(bool in_isr, HardwareOwnerContext& hardware_context)
+    requires(BackendSupportsHardwareContext())
+  {
+    (void)service_.Invoke(EventMask(TxEvent::COMPLETE),
+                          [this, in_isr, &hardware_context](uint32_t events) noexcept
+                          { ServiceTx(events, in_isr, nullptr, &hardware_context); });
   }
 
   /**
@@ -108,7 +152,24 @@ class UartDmaTxModel
   {
     (void)service_.Invoke(EventMask(TxEvent::ERROR),
                           [this, in_isr](uint32_t events) noexcept
-                          { ServiceTx(events, in_isr, nullptr); });
+                          { ServiceTx(events, in_isr, nullptr, nullptr); });
+  }
+
+  /**
+   * @brief Publish an error terminal event from the current IRQ hardware owner.
+   * @param in_isr Whether the current caller is in an ISR.
+   * @param hardware_context Stack-local ownership evidence for this synchronous IRQ call
+   * stack. Ownership follows the service invocation that executes the handler, not the
+   * event source. The model and backend must not retain the context.
+   * @note The platform must stop/reset the old DMA and clear its stale completion source
+   * before this call.
+   */
+  void OnTransferError(bool in_isr, HardwareOwnerContext& hardware_context)
+    requires(BackendSupportsHardwareContext())
+  {
+    (void)service_.Invoke(EventMask(TxEvent::ERROR),
+                          [this, in_isr, &hardware_context](uint32_t events) noexcept
+                          { ServiceTx(events, in_isr, nullptr, &hardware_context); });
   }
 
   /**
@@ -117,9 +178,10 @@ class UartDmaTxModel
    *
    * 平台后端负责保存最新配置 payload。本入口只发布可合并事件；CONFIG owner 会停止并
    * 重配硬件、终止旧 TX 前缀，然后让 CONFIG 期间追加的请求在后续轮次继续推进。
-   * The platform backend owns the latest configuration payload. This entry only
-   * publishes the coalesced event; the CONFIG owner reconfigures hardware, aborts the
-   * old TX prefix, and leaves requests appended during CONFIG for later service rounds.
+   * The platform backend owns the latest configuration payload. This entry publishes
+   * the backend request before the coalesced event; the CONFIG owner fixes the old TX
+   * prefix, advances an immediate or asynchronous hardware transaction, and leaves
+   * requests appended after that boundary for a mandatory post-CONFIG rescan.
    */
   void RequestConfig(bool in_isr)
   {
@@ -128,18 +190,18 @@ class UartDmaTxModel
   }
 
   /**
-   * @brief Continue an already claimed asynchronous configuration transaction.
+   * @brief Continue an already published configuration transaction.
    * @param in_isr Whether the current caller is in an ISR.
    *
-   * Unlike `RequestConfig()`, this entry does not publish a new backend configuration
-   * request. It is intended for a platform completion callback that resumes the same
-   * CONFIG transaction after an asynchronous hardware quiesce step.
+   * Unlike `RequestConfig()`, this entry does not create a new backend request. An
+   * ownership handoff or asynchronous hardware callback uses it to republish the
+   * level-triggered CONFIG obligation. Re-entry is flattened by `SerializedService`.
    */
   void ResumeConfig(bool in_isr)
   {
     (void)service_.Invoke(EventMask(TxEvent::CONFIG),
                           [this, in_isr](uint32_t events) noexcept
-                          { ServiceTx(events, in_isr, nullptr); });
+                          { ServiceTx(events, in_isr, nullptr, nullptr); });
   }
 
   /**
@@ -152,7 +214,7 @@ class UartDmaTxModel
   {
     (void)service_.Invoke(EventMask(TxEvent::WRITE),
                           [this, in_isr](uint32_t events) noexcept
-                          { ServiceTx(events, in_isr, nullptr); });
+                          { ServiceTx(events, in_isr, nullptr, nullptr); });
   }
 
   /**
@@ -191,22 +253,26 @@ class UartDmaTxModel
     return (events & EventMask(event)) != 0U;
   }
 
-  void ServiceTx(uint32_t events, bool in_isr, SubmitContext* submit) noexcept
+  void ServiceTx(uint32_t events, bool in_isr, SubmitContext* submit,
+                 HardwareOwnerContext* hardware_context) noexcept
   {
     if (HasEvent(events, TxEvent::CONFIG))
     {
       if (backend_.ConfigRequested())
       {
-        const bool resume_tx = ApplyConfig(in_isr);
-        if (!config_boundary_valid_ && resume_tx)
+        if (ApplyConfig(in_isr))
         {
+          // CONFIG may have consumed a coalesced WRITE or a write may have arrived while
+          // the fixed prefix was being drained. Always recheck the authoritative queue.
           (void)service_.Invoke(EventMask(TxEvent::WRITE),
                                 [this, in_isr](uint32_t pending_events) noexcept
-                                { ServiceTx(pending_events, in_isr, nullptr); });
+                                { ServiceTx(pending_events, in_isr, nullptr, nullptr); });
         }
         return;
       }
 
+      // A completion callback may republish CONFIG after another context already
+      // finished it. Such a spurious reminder must not absorb unrelated terminal work.
       events &= ~EventMask(TxEvent::CONFIG);
       if (events == 0U)
       {
@@ -214,41 +280,38 @@ class UartDmaTxModel
       }
     }
 
-    // A CONFIG request may be waiting for RX hardware ownership. Keep later WRITE and
-    // terminal notifications coalesced in their level-triggered facts, but do not let
-    // them move the fixed old-prefix boundary before CONFIG is retried.
+    // Once CONFIG fixes its metadata prefix, only CONFIG may advance the model until
+    // the backend reports the hardware transaction complete. WRITE and old terminal
+    // notifications remain level-triggered reminders; the final mandatory WRITE rescan
+    // handles post-boundary submissions, while old terminal events are intentionally
+    // discarded because CONFIG retires that hardware generation.
     if (config_boundary_valid_)
     {
       return;
     }
 
-    bool terminal = false;
     if (HasEvent(events, TxEvent::ERROR))
     {
-      terminal = ReleaseActive();
+      (void)ReleaseActive();
     }
     else if (HasEvent(events, TxEvent::COMPLETE))
     {
-      terminal = ReleaseActive();
-    }
-
-    if (terminal && PromoteAndStartPending(in_isr))
-    {
-      return;
-    }
-
-    // A pending block may still need its first hardware-start attempt after an IRQ
-    // owner released the shared hardware gate. Its payload has already left the data
-    // queue, so it must be retried before looking at the ordinary queued head.
-    if (!busy_ && (active_length_ == 0U) && pending_valid_ &&
-        PromoteAndStartPending(in_isr))
-    {
-      return;
+      (void)ReleaseActive();
     }
 
     if (!busy_ && (active_length_ == 0U))
     {
-      StartQueuedActive(in_isr, submit);
+      // Every candidate follows the same path: copy it to pending, then commit it to
+      // active only after the backend accepts the DMA start. This also preserves a
+      // preloaded candidate when the backend returns RETRY.
+      if (!pending_valid_)
+      {
+        (void)StageNextPending(in_isr);
+      }
+      if (pending_valid_ && TryStartPending(in_isr, submit, hardware_context))
+      {
+        return;
+      }
     }
 
     if (busy_)
@@ -299,9 +362,21 @@ class UartDmaTxModel
     return false;
   }
 
-  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block)
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block,
+                                  HardwareOwnerContext* hardware_context)
   {
-    const auto result = backend_.StartDmaTx(data, size, block);
+    const auto result = [&]
+    {
+      if constexpr (BackendSupportsHardwareContext())
+      {
+        return backend_.StartDmaTx(data, size, block, hardware_context);
+      }
+      else
+      {
+        ASSERT(hardware_context == nullptr);
+        return backend_.StartDmaTx(data, size, block);
+      }
+    }();
     using Result = std::remove_cv_t<decltype(result)>;
     if constexpr (std::is_same_v<Result, bool>)
     {
@@ -314,11 +389,12 @@ class UartDmaTxModel
     }
   }
 
-  UartDmaTxStartResult StartCandidate(uint8_t* data, size_t size, int block)
+  UartDmaTxStartResult StartCandidate(uint8_t* data, size_t size, int block,
+                                      HardwareOwnerContext* hardware_context)
   {
     ASSERT(size > 0U);
     busy_ = true;
-    const UartDmaTxStartResult result = StartDmaTx(data, size, block);
+    const UartDmaTxStartResult result = StartDmaTx(data, size, block, hardware_context);
     if (result == UartDmaTxStartResult::STARTED)
     {
       return result;
@@ -340,7 +416,8 @@ class UartDmaTxModel
     return true;
   }
 
-  bool PromoteAndStartPending(bool in_isr)
+  bool TryStartPending(bool in_isr, SubmitContext* submit,
+                       HardwareOwnerContext* hardware_context)
   {
     if (!pending_valid_)
     {
@@ -355,98 +432,48 @@ class UartDmaTxModel
     }
 
     const int pending_block = buffers_.ActiveBlock() ^ 1;
-    const UartDmaTxStartResult result =
-        StartCandidate(buffers_.PendingBuffer(), info.data.size_, pending_block);
+    const UartDmaTxStartResult result = StartCandidate(
+        buffers_.PendingBuffer(), info.data.size_, pending_block, hardware_context);
     if (result == UartDmaTxStartResult::RETRY)
     {
       return true;
     }
 
     pending_valid_ = false;
-    buffers_.FlipActiveBlock();
     if (!PopActiveInfo(info))
     {
       ASSERT(false);
       busy_ = false;
       return false;
     }
-    active_length_ = info.data.size_;
-
     if (result == UartDmaTxStartResult::FAILED)
     {
       busy_ = false;
       ClearActive();
-      port_.Finish(in_isr, ErrorCode::FAILED, info);
+      if ((submit != nullptr) && (submit->submission_id == info.submission_id))
+      {
+        submit->result = ErrorCode::FAILED;
+      }
+      else
+      {
+        port_.Finish(in_isr, ErrorCode::FAILED, info);
+      }
       RequestConfig(in_isr);
       return true;
     }
 
-    port_.Finish(in_isr, ErrorCode::OK, info);
-    (void)StageNextPending(in_isr);
-    return true;
-  }
-
-  void StartQueuedActive(bool in_isr, SubmitContext* submit)
-  {
-    WriteInfoBlock info{};
-    if (port_.queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return;
-    }
-
-    // A synchronous WriteFun return may complete only the record published by that
-    // caller. A later submitter may still advance an older RETRY head, but that head is
-    // then processed contextlessly and completed through its own queued operation.
-    SubmitContext* current_submit =
-        ((submit != nullptr) && (submit->submission_id == info.submission_id)) ? submit
-                                                                               : nullptr;
-
-    REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
-
-    if (port_.queue_data_->PeekBatch(buffers_.ActiveBuffer(), info.data.size_) !=
-        ErrorCode::OK)
-    {
-      ASSERT(false);
-      return;
-    }
-
-    const UartDmaTxStartResult result =
-        StartCandidate(buffers_.ActiveBuffer(), info.data.size_, buffers_.ActiveBlock());
-    if (result == UartDmaTxStartResult::RETRY)
-    {
-      return;
-    }
-
-    if (!PopPayload(nullptr, info.data.size_) || !PopActiveInfo(info))
-    {
-      ASSERT(false);
-      busy_ = false;
-      return;
-    }
-
+    buffers_.FlipActiveBlock();
     active_length_ = info.data.size_;
-    if (result == UartDmaTxStartResult::FAILED)
+    if ((submit != nullptr) && (submit->submission_id == info.submission_id))
     {
-      busy_ = false;
-      ClearActive();
-    }
-
-    if (current_submit != nullptr)
-    {
-      current_submit->result =
-          (result == UartDmaTxStartResult::STARTED) ? ErrorCode::OK : ErrorCode::FAILED;
+      submit->result = ErrorCode::OK;
     }
     else
     {
-      port_.Finish(
-          in_isr,
-          (result == UartDmaTxStartResult::STARTED) ? ErrorCode::OK : ErrorCode::FAILED,
-          info);
+      port_.Finish(in_isr, ErrorCode::OK, info);
     }
-    if (result == UartDmaTxStartResult::FAILED)
-    {
-      RequestConfig(in_isr);
-    }
+    (void)StageNextPending(in_isr);
+    return true;
   }
 
   bool ApplyConfig(bool in_isr)
@@ -462,6 +489,10 @@ class UartDmaTxModel
       config_boundary_valid_ = true;
     }
 
+    // false keeps the fixed boundary and the backend CONFIG obligation alive for a
+    // later ResumeConfig(). true means old hardware activity is quiescent, the latest
+    // payload is applied, and RX is restarted; the backend must retain CONFIG hardware
+    // ownership until OnConfigApplied() is called after the old TX prefix is drained.
     if (!backend_.ApplyPendingConfig(in_isr))
     {
       return false;
@@ -488,7 +519,8 @@ class UartDmaTxModel
     }
 
     FailPublishedQueued(in_isr, remaining);
-    return backend_.OnConfigApplied(in_isr);
+    (void)backend_.OnConfigApplied(in_isr);
+    return true;
   }
 
   void FailPublishedQueued(bool in_isr, size_t count)

@@ -17,7 +17,9 @@ namespace LibXR
  * the sole owner bit in that same word. A caller that does not acquire ownership returns
  * immediately. The owner atomically consumes event snapshots and runs the handler until
  * no work remains. Reentrant `Invoke()` calls only schedule another round; they never
- * invoke the handler recursively.
+ * invoke the handler recursively. The successful owner CAS is also the first snapshot's
+ * linearization point; events published after it remain for a later round even if the
+ * first handler has not started.
  *
  * @note 低 31 位是可合并的 level-triggered 事件；最高位保留给 owner。事件不记录
  * 发生次数或 payload。所有入口必须提供同一个逻辑 handler；实际 handler 在取得 owner
@@ -63,7 +65,9 @@ class SerializedService
         return false;
       }
 
-      const uint32_t desired = observed | OWNER_BIT;
+      // Claim ownership and consume the first snapshot in one RMW. A publisher ordered
+      // after this CAS observes OWNER_BIT and leaves its event for the next exchange.
+      const uint32_t desired = OWNER_BIT;
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acquire,
                                        std::memory_order_relaxed))
       {
@@ -76,10 +80,9 @@ class SerializedService
       return false;
     }
 
+    uint32_t snapshot = observed & EVENT_MASK;
     while (true)
     {
-      const uint32_t snapshot =
-          state_.exchange(OWNER_BIT, std::memory_order_acq_rel) & EVENT_MASK;
       if (snapshot != 0U)
       {
         handler(snapshot);
@@ -93,6 +96,7 @@ class SerializedService
       }
       // A publisher ORed new events while OWNER_BIT was set. Keep ownership and consume
       // the next snapshot; release cannot race past an already-published event.
+      snapshot = state_.exchange(OWNER_BIT, std::memory_order_acq_rel) & EVENT_MASK;
     }
   }
 

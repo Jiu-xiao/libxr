@@ -65,8 +65,7 @@ void* RunConfig(void*)
   {
     EnterObservedOwner(owner);
     LeaveObservedOwner(owner);
-    LibXR::UartHardwareGate::PendingAction actions{};
-    assert(gate.TryLeaveConfig(actions));
+    (void)gate.LeaveConfig();
   }
   return nullptr;
 }

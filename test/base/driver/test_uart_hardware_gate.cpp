@@ -72,7 +72,7 @@ void TestConfigPendingPreventsNewHardwareEntry()
   ASSERT(!gate.TryEnterIrq());
   ASSERT(!gate.TryEnterTxStart());
   ASSERT(gate.TryEnterConfig());
-  ASSERT(gate.LeaveConfig() == Action::TX_START);
+  ASSERT(gate.LeaveConfig() == Action::NONE);
 }
 
 void TestTxRetryRemainsPersistentUntilClaim()
@@ -90,112 +90,88 @@ void TestTxRetryRemainsPersistentUntilClaim()
   ASSERT(gate.LeaveTxStart() == Action::NONE);
 }
 
-void TestConfigIrqSubOwnerRemainsAvailable()
+void TestNestedTxStartKeepsOuterIrqOwner()
 {
   Gate gate;
+  Gate::OwnerContext context;
+
+  ASSERT(gate.TryEnterIrq(context));
+  ASSERT(gate.IrqActive());
+  ASSERT(gate.TryEnterNestedTxStart(context));
+  ASSERT(gate.IrqActive());
+  ASSERT(!gate.TxStartActive());
+  ASSERT(!gate.TryEnterIrq());
+
+  gate.LeaveNestedTxStart(context);
+  ASSERT(gate.IrqActive());
+  ASSERT(gate.LeaveIrq(context) == Action::NONE);
+  ASSERT(!gate.IrqActive());
+
+  // The outer leave resets the stack-local token for a later IRQ call stack.
+  ASSERT(gate.TryEnterIrq(context));
+  ASSERT(gate.LeaveIrq(context) == Action::NONE);
+}
+
+void TestConfigAdmissionRetiresBlockedTxRetry()
+{
+  Gate gate;
+  Gate::OwnerContext context;
+
+  ASSERT(gate.TryEnterIrq(context));
   gate.RequestConfig();
+  ASSERT(!gate.TryEnterNestedTxStart(context));
+
+  const Action irq_actions = gate.LeaveIrq(context);
+  ASSERT(Gate::HasAction(irq_actions, Action::CONFIG));
+  ASSERT(Gate::HasAction(irq_actions, Action::TX_START));
+
   ASSERT(gate.TryEnterConfig());
-  ASSERT(!gate.TryEnterConfigIrq());
-  gate.OpenConfigIrqAdmission();
-  ASSERT(gate.TryEnterConfigIrq());
-  ASSERT(!gate.TryEnterConfigIrq());
-  ASSERT(gate.ConfigActive());
-  gate.LeaveConfigIrq();
-  ASSERT(gate.ConfigActive());
+  ASSERT(gate.LeaveConfig() == Action::NONE);
+
+  // A later TX attempt is a new level fact and can claim normally.
+  ASSERT(gate.TryEnterTxStart());
+  ASSERT(gate.LeaveTxStart() == Action::NONE);
+}
+
+void TestConfigAfterNestedTxStartWaitsForOuterIrqLeave()
+{
+  Gate gate;
+  Gate::OwnerContext context;
+
+  ASSERT(gate.TryEnterIrq(context));
+  ASSERT(gate.TryEnterNestedTxStart(context));
+  gate.RequestConfig();
+  ASSERT(!gate.TryEnterConfig());
+
+  gate.LeaveNestedTxStart(context);
+  ASSERT(gate.IrqActive());
+  ASSERT(!gate.TryEnterConfig());
+
+  const Action actions = gate.LeaveIrq(context);
+  ASSERT(actions == Action::CONFIG);
+  ASSERT(gate.TryEnterConfig());
   ASSERT(gate.LeaveConfig() == Action::NONE);
 }
 
-void TestConfigCloseWaitsForIrqSubOwner()
+void TestDeferredIrqBeforeNestedTxStartKeepsRetryDurable()
 {
   Gate gate;
-  gate.RequestConfig();
-  ASSERT(gate.TryEnterConfig());
-  gate.OpenConfigIrqAdmission();
-  ASSERT(gate.TryEnterConfigIrq());
+  Gate::OwnerContext irq_context;
 
-  Action actions = Action::TX_START;
-  ASSERT(!gate.TryLeaveConfig(actions));
-  ASSERT(actions == Action::NONE);
-  ASSERT(gate.ConfigActive());
+  ASSERT(gate.TryEnterIrq(irq_context));
+  gate.MarkIrqDeferred();
+  ASSERT(!gate.TryEnterNestedTxStart(irq_context));
 
-  gate.LeaveConfigIrq();
-  ASSERT(!gate.TryEnterConfigIrq());
-  ASSERT(gate.TryLeaveConfig(actions));
-  ASSERT(actions == Action::NONE);
-  ASSERT(!gate.ConfigActive());
-}
+  const Action irq_actions = gate.LeaveIrq(irq_context);
+  ASSERT(Gate::HasAction(irq_actions, Action::IRQ_DEFERRED));
+  ASSERT(Gate::HasAction(irq_actions, Action::TX_START));
 
-void TestConfigIrqDoesNotConsumeTxRetry()
-{
-  Gate gate;
-  gate.RequestConfig();
-  ASSERT(gate.TryEnterConfig());
-  gate.OpenConfigIrqAdmission();
-  ASSERT(gate.TryEnterConfigIrq());
-  ASSERT(!gate.TryEnterTxStart());
-  gate.LeaveConfigIrq();
-  ASSERT(gate.LeaveConfig() == Action::TX_START);
-}
-
-void TestConfigIrqAdmissionPublishesAndJoinsCallbackState()
-{
-  Gate gate;
-  gate.RequestConfig();
-  ASSERT(gate.TryEnterConfig());
-
-  uint32_t config_payload = 0U;
-  uint32_t callback_payload = 0U;
-  std::atomic<uint32_t> start{0U};
-  std::atomic<uint32_t> entered{0U};
-  std::atomic<uint32_t> release_callback{0U};
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-
-  std::thread callback(
-      [&]
-      {
-        while (start.load(std::memory_order_acquire) == 0U)
-        {
-          ASSERT(std::chrono::steady_clock::now() < deadline);
-          std::this_thread::yield();
-        }
-        while (!gate.TryEnterConfigIrq())
-        {
-          ASSERT(std::chrono::steady_clock::now() < deadline);
-          std::this_thread::yield();
-        }
-        ASSERT(config_payload == 0x12345678U);
-        entered.store(1U, std::memory_order_release);
-        while (release_callback.load(std::memory_order_acquire) == 0U)
-        {
-          ASSERT(std::chrono::steady_clock::now() < deadline);
-          std::this_thread::yield();
-        }
-        callback_payload = 0x87654321U;
-        gate.LeaveConfigIrq();
-      });
-
-  start.store(1U, std::memory_order_release);
-  config_payload = 0x12345678U;
-  gate.OpenConfigIrqAdmission();
-  while (entered.load(std::memory_order_acquire) == 0U)
-  {
-    ASSERT(std::chrono::steady_clock::now() < deadline);
-    std::this_thread::yield();
-  }
-
-  Action actions = Action::NONE;
-  ASSERT(!gate.TryLeaveConfig(actions));
-  ASSERT(!gate.TryEnterConfigIrq());
-  release_callback.store(1U, std::memory_order_release);
-  while (!gate.TryLeaveConfig(actions))
-  {
-    ASSERT(std::chrono::steady_clock::now() < deadline);
-    std::this_thread::yield();
-  }
-
-  // TryLeaveConfig's acquire RMW joins the callback's release RMW before this read.
-  ASSERT(callback_payload == 0x87654321U);
-  callback.join();
+  Gate::OwnerContext deferred_context;
+  ASSERT(gate.TryEnterDeferredIrq(deferred_context));
+  ASSERT(!gate.IrqDeferred());
+  ASSERT(gate.TryEnterNestedTxStart(deferred_context));
+  gate.LeaveNestedTxStart(deferred_context);
+  ASSERT(gate.LeaveIrq(deferred_context) == Action::NONE);
 }
 
 void TestDeferredIrqSurvivesOwnerRelease()
@@ -258,7 +234,7 @@ void TestConfigThenDeferredIrqThenTxPriority()
   ASSERT(gate.TryEnterConfig());
   const Action config_actions = gate.LeaveConfig();
   ASSERT(Gate::HasAction(config_actions, Action::IRQ_DEFERRED));
-  ASSERT(Gate::HasAction(config_actions, Action::TX_START));
+  ASSERT(!Gate::HasAction(config_actions, Action::TX_START));
 
   // Deferred hardware status keeps TX start blocked until an IRQ-domain owner has
   // scanned and cleared it.
@@ -267,6 +243,7 @@ void TestConfigThenDeferredIrqThenTxPriority()
   const Action irq_actions = gate.LeaveIrq();
   ASSERT(Gate::HasAction(irq_actions, Action::TX_START));
 
+  // The post-CONFIG attempt remains durable across the deferred owner.
   ASSERT(gate.TryEnterTxStart());
   ASSERT(gate.LeaveTxStart() == Action::NONE);
 }
@@ -289,27 +266,11 @@ void TestBackToBackConfigKeepsDeferredIrqAheadOfTx()
   ASSERT(gate.TryEnterConfig());
   const Action final_config_actions = gate.LeaveConfig();
   ASSERT(Gate::HasAction(final_config_actions, Action::IRQ_DEFERRED));
-  ASSERT(Gate::HasAction(final_config_actions, Action::TX_START));
-  ASSERT(gate.TryEnterDeferredIrq());
-  ASSERT(gate.LeaveIrq() == Action::TX_START);
-  ASSERT(gate.TryEnterTxStart());
-  ASSERT(gate.LeaveTxStart() == Action::NONE);
-}
-
-void TestConfigIrqDoesNotConsumeDeferredIrq()
-{
-  Gate gate;
-  gate.RequestConfig();
-  ASSERT(gate.TryEnterConfig());
-  gate.OpenConfigIrqAdmission();
-  ASSERT(gate.TryEnterConfigIrq());
-  gate.MarkIrqDeferred();
-  gate.LeaveConfigIrq();
-
-  const Action actions = gate.LeaveConfig();
-  ASSERT(Gate::HasAction(actions, Action::IRQ_DEFERRED));
+  ASSERT(!Gate::HasAction(final_config_actions, Action::TX_START));
   ASSERT(gate.TryEnterDeferredIrq());
   ASSERT(gate.LeaveIrq() == Action::NONE);
+  ASSERT(gate.TryEnterTxStart());
+  ASSERT(gate.LeaveTxStart() == Action::NONE);
 }
 
 void TestConcurrentOwnersNeverOverlap()
@@ -415,15 +376,14 @@ void test_uart_hardware_gate()
   TestOwnersAreMutuallyExclusive();
   TestConfigPendingPreventsNewHardwareEntry();
   TestTxRetryRemainsPersistentUntilClaim();
-  TestConfigIrqSubOwnerRemainsAvailable();
-  TestConfigCloseWaitsForIrqSubOwner();
-  TestConfigIrqDoesNotConsumeTxRetry();
-  TestConfigIrqAdmissionPublishesAndJoinsCallbackState();
+  TestNestedTxStartKeepsOuterIrqOwner();
+  TestConfigAdmissionRetiresBlockedTxRetry();
+  TestConfigAfterNestedTxStartWaitsForOuterIrqLeave();
+  TestDeferredIrqBeforeNestedTxStartKeepsRetryDurable();
   TestDeferredIrqSurvivesOwnerRelease();
   TestDeferredIrqClaimWinsAfterOwnerReleased();
   TestOrdinaryIrqDoesNotConsumeDeferredDomainWork();
   TestConfigThenDeferredIrqThenTxPriority();
   TestBackToBackConfigKeepsDeferredIrqAheadOfTx();
-  TestConfigIrqDoesNotConsumeDeferredIrq();
   TestConcurrentOwnersNeverOverlap();
 }

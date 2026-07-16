@@ -37,10 +37,10 @@ BlockValues == Blocks \cup {NoBlock}
 Events == {"WRITE", "TERMINAL"}
 RecordStates == {"UNUSED", "RUNNING", "DONE", "FAILED"}
 ServicePhases == {"Idle", "Take", "Handle", "Advance", "End"}
-CopyTargets == {"None", "Active", "Pending"}
+CopyTargets == {"None", "Pending"}
 CopyPhases == {"Idle", "Copying", "Copied"}
-CandidateKinds == {"None", "Queue", "Pending"}
-ActiveOrigins == {"None", "Queue", "Pending"}
+CandidateKinds == {"None", "Pending"}
+ActiveOrigins == {"None", "Pending"}
 
 OtherBlock(block) == 1 - block
 
@@ -114,16 +114,7 @@ CanSelectPending ==
   /\ CandidateIdle
   /\ ~startIssued
 
-CanCopyActive ==
-  /\ activeRec = NoRecord
-  /\ pendingRec = NoRecord
-  /\ metaQ # <<>>
-  /\ CopyIdle
-  /\ CandidateIdle
-  /\ ~startIssued
-
 CanCopyPending ==
-  /\ activeRec # NoRecord
   /\ pendingRec = NoRecord
   /\ metaQ # <<>>
   /\ CopyIdle
@@ -131,7 +122,7 @@ CanCopyPending ==
   /\ ~startIssued
 
 AdvanceNeeded ==
-  CanSelectPending \/ CanCopyActive \/ CanCopyPending
+  CanSelectPending \/ CanCopyPending
 
 PendingPayloadRemoved ==
   \/ pendingRec # NoRecord
@@ -159,7 +150,9 @@ Init ==
   /\ servicePhase = "Idle"
   /\ snapshot = {}
   /\ activeRec = NoRecord
-  /\ activeBlock = 0
+  \* The first pending copy uses physical block 0.  Block 1 is a notional
+  \* already-active sentinel until the first STARTED commit.
+  /\ activeBlock = 1
   /\ activeOrigin = "None"
   /\ pendingRec = NoRecord
   /\ pendingBlock = NoBlock
@@ -319,23 +312,6 @@ OwnerRelease ==
  * pending-valid publication, but service ownership is retained across both.
  ***************************************************************************)
 
-BeginActiveCopy ==
-  /\ owner
-  /\ servicePhase = "Advance"
-  /\ CanCopyActive
-  /\ dataQ # <<>>
-  /\ Head(dataQ) = Head(metaQ)
-  /\ copyRec' = Head(metaQ)
-  /\ copyBlock' = activeBlock
-  /\ copyTarget' = "Active"
-  /\ copyPhase' = "Copying"
-  /\ UNCHANGED <<recordState, finishCount, producer,
-                  producerMetaPublished, metaQ, dataQ, events, owner,
-                  servicePhase, snapshot, activeRec, activeBlock,
-                  activeOrigin, pendingRec, pendingBlock, candidateRec,
-                  candidateKind, startIssued, hwRecord, retryRec,
-                  pendingPublished>>
-
 BeginPendingCopy ==
   /\ owner
   /\ servicePhase = "Advance"
@@ -361,31 +337,13 @@ FinishCopy ==
   /\ dataQ # <<>>
   /\ Head(dataQ) = copyRec
   /\ copyPhase' = "Copied"
-  /\ dataQ' = IF copyTarget = "Pending" THEN Tail(dataQ) ELSE dataQ
+  /\ dataQ' = Tail(dataQ)
   /\ UNCHANGED <<recordState, finishCount, producer,
                   producerMetaPublished, metaQ, events, owner, servicePhase,
                   snapshot, activeRec, activeBlock, activeOrigin, pendingRec,
                   pendingBlock, copyRec, copyBlock, copyTarget, candidateRec,
                   candidateKind, startIssued, hwRecord, retryRec,
                   pendingPublished>>
-
-PublishActiveCandidate ==
-  /\ owner
-  /\ servicePhase = "Advance"
-  /\ copyRec # NoRecord
-  /\ copyTarget = "Active"
-  /\ copyPhase = "Copied"
-  /\ candidateRec' = copyRec
-  /\ candidateKind' = "Queue"
-  /\ copyRec' = NoRecord
-  /\ copyBlock' = NoBlock
-  /\ copyTarget' = "None"
-  /\ copyPhase' = "Idle"
-  /\ UNCHANGED <<recordState, finishCount, producer,
-                  producerMetaPublished, metaQ, dataQ, events, owner,
-                  servicePhase, snapshot, activeRec, activeBlock,
-                  activeOrigin, pendingRec, pendingBlock, startIssued,
-                  hwRecord, retryRec, pendingPublished>>
 
 PublishPending ==
   /\ owner
@@ -431,17 +389,17 @@ BackendRetry ==
   /\ owner
   /\ servicePhase = "Advance"
   /\ rec # NoRecord
+  /\ candidateKind = "Pending"
+  /\ pendingRec = rec
   /\ ~startIssued
   /\ metaQ # <<>>
   /\ Head(metaQ) = rec
-  /\ candidateKind = "Queue" => (dataQ # <<>> /\ Head(dataQ) = rec)
   /\ metaQ' = IF consume THEN Tail(metaQ) ELSE metaQ
-  /\ dataQ' =
-       IF consume /\ candidateKind = "Queue" THEN Tail(dataQ) ELSE dataQ
+  /\ dataQ' = dataQ
   /\ pendingRec' =
-       IF consume /\ candidateKind = "Pending" THEN NoRecord ELSE pendingRec
+       IF consume THEN NoRecord ELSE pendingRec
   /\ pendingBlock' =
-       IF consume /\ candidateKind = "Pending" THEN NoBlock ELSE pendingBlock
+       IF consume THEN NoBlock ELSE pendingBlock
   /\ retryRec' = rec
   /\ candidateRec' = NoRecord
   /\ candidateKind' = "None"
@@ -464,29 +422,28 @@ DispatchRetry ==
 
 BackendFailed ==
   LET rec == candidateRec
-      fromPending == candidateKind = "Pending"
   IN
   /\ owner
   /\ servicePhase = "Advance"
   /\ rec # NoRecord
+  /\ candidateKind = "Pending"
+  /\ pendingRec = rec
   /\ ~startIssued
   /\ recordState[rec] = "RUNNING"
   /\ finishCount[rec] = 0
   /\ metaQ # <<>>
   /\ Head(metaQ) = rec
-  /\ candidateKind = "Queue" => (dataQ # <<>> /\ Head(dataQ) = rec)
   /\ recordState' = [recordState EXCEPT ![rec] = "FAILED"]
   /\ finishCount' = [finishCount EXCEPT ![rec] = @ + 1]
   /\ metaQ' = Tail(metaQ)
-  /\ dataQ' = IF fromPending THEN dataQ ELSE Tail(dataQ)
-  /\ activeBlock' = IF fromPending THEN pendingBlock ELSE activeBlock
-  /\ pendingRec' = IF fromPending THEN NoRecord ELSE pendingRec
-  /\ pendingBlock' = IF fromPending THEN NoBlock ELSE pendingBlock
+  /\ dataQ' = dataQ
+  /\ pendingRec' = NoRecord
+  /\ pendingBlock' = NoBlock
   /\ candidateRec' = NoRecord
   /\ candidateKind' = "None"
   /\ servicePhase' = "End"
   /\ UNCHANGED <<producer, producerMetaPublished, events, owner, snapshot,
-                  activeRec, activeOrigin, copyRec, copyBlock, copyTarget,
+                  activeRec, activeBlock, activeOrigin, copyRec, copyBlock, copyTarget,
                   copyPhase, startIssued, hwRecord, retryRec,
                   pendingPublished>>
 
@@ -494,6 +451,8 @@ BackendStarted ==
   /\ owner
   /\ servicePhase = "Advance"
   /\ candidateRec # NoRecord
+  /\ candidateKind = "Pending"
+  /\ pendingRec = candidateRec
   /\ ~startIssued
   /\ hwRecord = NoRecord
   /\ startIssued' = TRUE
@@ -507,26 +466,26 @@ BackendStarted ==
 
 CommitStarted ==
   LET rec == candidateRec
-      fromPending == candidateKind = "Pending"
   IN
   /\ owner
   /\ servicePhase = "Advance"
   /\ startIssued
   /\ rec # NoRecord
+  /\ candidateKind = "Pending"
+  /\ pendingRec = rec
   /\ recordState[rec] = "RUNNING"
   /\ finishCount[rec] = 0
   /\ metaQ # <<>>
   /\ Head(metaQ) = rec
-  /\ candidateKind = "Queue" => (dataQ # <<>> /\ Head(dataQ) = rec)
   /\ recordState' = [recordState EXCEPT ![rec] = "DONE"]
   /\ finishCount' = [finishCount EXCEPT ![rec] = @ + 1]
   /\ metaQ' = Tail(metaQ)
-  /\ dataQ' = IF fromPending THEN dataQ ELSE Tail(dataQ)
+  /\ dataQ' = dataQ
   /\ activeRec' = rec
-  /\ activeBlock' = IF fromPending THEN pendingBlock ELSE activeBlock
-  /\ activeOrigin' = candidateKind
-  /\ pendingRec' = IF fromPending THEN NoRecord ELSE pendingRec
-  /\ pendingBlock' = IF fromPending THEN NoBlock ELSE pendingBlock
+  /\ activeBlock' = pendingBlock
+  /\ activeOrigin' = "Pending"
+  /\ pendingRec' = NoRecord
+  /\ pendingBlock' = NoBlock
   /\ candidateRec' = NoRecord
   /\ candidateKind' = "None"
   /\ startIssued' = FALSE
@@ -536,7 +495,6 @@ CommitStarted ==
 
 CommitStartedWrongRecord(target) ==
   LET rec == candidateRec
-      fromPending == candidateKind = "Pending"
   IN
   /\ BreakFinishWrongRecord
   /\ target \in Records
@@ -545,6 +503,8 @@ CommitStartedWrongRecord(target) ==
   /\ servicePhase = "Advance"
   /\ startIssued
   /\ rec # NoRecord
+  /\ candidateKind = "Pending"
+  /\ pendingRec = rec
   /\ recordState[rec] = "RUNNING"
   /\ finishCount[rec] = 0
   /\ recordState[target] = "RUNNING"
@@ -552,16 +512,15 @@ CommitStartedWrongRecord(target) ==
   /\ metaQ # <<>>
   /\ Head(metaQ) = rec
   /\ target \in QueueRecords(Tail(metaQ))
-  /\ candidateKind = "Queue" => (dataQ # <<>> /\ Head(dataQ) = rec)
   /\ recordState' = [recordState EXCEPT ![target] = "DONE"]
   /\ finishCount' = [finishCount EXCEPT ![target] = @ + 1]
   /\ metaQ' = Tail(metaQ)
-  /\ dataQ' = IF fromPending THEN dataQ ELSE Tail(dataQ)
+  /\ dataQ' = dataQ
   /\ activeRec' = rec
-  /\ activeBlock' = IF fromPending THEN pendingBlock ELSE activeBlock
-  /\ activeOrigin' = candidateKind
-  /\ pendingRec' = IF fromPending THEN NoRecord ELSE pendingRec
-  /\ pendingBlock' = IF fromPending THEN NoBlock ELSE pendingBlock
+  /\ activeBlock' = pendingBlock
+  /\ activeOrigin' = "Pending"
+  /\ pendingRec' = NoRecord
+  /\ pendingBlock' = NoBlock
   /\ candidateRec' = NoRecord
   /\ candidateKind' = "None"
   /\ startIssued' = FALSE
@@ -624,10 +583,8 @@ Next ==
   \/ ServiceClaim
   \/ ServiceTake
   \/ ServiceHandle
-  \/ BeginActiveCopy
   \/ BeginPendingCopy
   \/ FinishCopy
-  \/ PublishActiveCandidate
   \/ PublishPending
   \/ SelectPending
   \/ BackendRetry
@@ -654,10 +611,8 @@ FairSpec ==
   /\ WF_vars(ServiceClaim)
   /\ WF_vars(ServiceTake)
   /\ WF_vars(ServiceHandle)
-  /\ WF_vars(BeginActiveCopy)
   /\ WF_vars(BeginPendingCopy)
   /\ WF_vars(FinishCopy)
-  /\ WF_vars(PublishActiveCandidate)
   /\ WF_vars(PublishPending)
   /\ WF_vars(SelectPending)
   /\ SF_vars(BackendStarted)
@@ -741,7 +696,7 @@ CopyStateConsistent ==
         /\ metaQ # <<>>
         /\ Head(metaQ) = copyRec
         /\ recordState[copyRec] = "RUNNING"
-        /\ copyTarget # "None"
+        /\ copyTarget = "Pending"
         /\ copyPhase # "Idle")
   /\ (copyRec # NoRecord /\
       ~(copyTarget = "Pending" /\ copyPhase = "Copied") =>
@@ -755,12 +710,9 @@ CandidateStateConsistent ==
         /\ copyRec = NoRecord
         /\ metaQ # <<>>
         /\ Head(metaQ) = candidateRec
-        /\ recordState[candidateRec] = "RUNNING")
-  /\ (candidateKind = "Queue" =>
-        /\ pendingRec = NoRecord
-        /\ dataQ # <<>>
-        /\ Head(dataQ) = candidateRec)
-  /\ (candidateKind = "Pending" => pendingRec = candidateRec)
+        /\ recordState[candidateRec] = "RUNNING"
+        /\ candidateKind = "Pending"
+        /\ pendingRec = candidateRec)
 
 ActiveStateConsistent ==
   /\ (activeRec = NoRecord <=> activeOrigin = "None")
@@ -849,6 +801,14 @@ TerminalDoesNotFinishStep ==
 
 TerminalDoesNotFinishOperation ==
   [][TerminalDoesNotFinishStep]_vars
+
+FailedDoesNotFlipActiveBlockStep ==
+  (\E r \in Records :
+      recordState[r] = "RUNNING" /\ recordState'[r] = "FAILED")
+      => activeBlock' = activeBlock
+
+FailedDoesNotFlipActiveBlock ==
+  [][FailedDoesNotFlipActiveBlockStep]_vars
 
 RunningWriteEventuallyResolves ==
   \A r \in Records : recordState[r] = "RUNNING" ~> finishCount[r] = 1
