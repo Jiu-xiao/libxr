@@ -148,7 +148,7 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
       busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
     }
 
-    WriteInfoBlock info{data, op, BeginSubmission()};
+    WriteInfoBlock info{data, op};
     ans = queue_info_->Push(info);
 
     ASSERT(ans == ErrorCode::OK);

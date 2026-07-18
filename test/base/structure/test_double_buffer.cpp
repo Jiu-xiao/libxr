@@ -21,6 +21,7 @@
  * rejected writes so the test documents the state machine, not just the happy path.
  */
 #include "double_buffer.hpp"
+#include "double_buffer_storage.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "test.hpp"  // 提供 ASSERT 宏
@@ -46,8 +47,31 @@ void test_double_buffer()
   ASSERT((reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) ==
          0U);
 
+  LibXR::DoubleBufferStorage storage(raw);
+  ASSERT(storage.Size() == 64U);
+  ASSERT(storage.ActiveBlock() == 0);
+  ASSERT(storage.ActiveBuffer() == buff);
+  ASSERT(storage.PendingBuffer() == buff + 64);
+  storage.FlipActiveBlock();
+  ASSERT(storage.ActiveBlock() == 1);
+  ASSERT(storage.ActiveBuffer() == buff + 64);
+  ASSERT(storage.PendingBuffer() == buff);
+  storage.Reset();
+  ASSERT(storage.ActiveBlock() == 0);
+  ASSERT(storage.ActiveBuffer() == buff);
+  ASSERT(storage.PendingBuffer() == buff + 64);
+  storage.SetActiveBlock(true);
+  ASSERT(storage.Buffer(0) == buff);
+  ASSERT(storage.Buffer(1) == buff + 64);
+
   LibXR::DoubleBuffer empty_buffer;
   LibXR::RawData empty_raw(nullptr, 0);
+  LibXR::DoubleBufferStorage empty_storage(empty_raw);
+  ASSERT(empty_storage.Size() == 0U);
+  ASSERT(empty_storage.ActiveBuffer() == nullptr);
+  ASSERT(empty_storage.PendingBuffer() == nullptr);
+  ASSERT(empty_storage.Buffer(0) == nullptr);
+  ASSERT(empty_storage.Buffer(1) == nullptr);
   empty_buffer.Init(empty_raw);
   ASSERT(empty_buffer.Size() == 0);
   ASSERT(empty_buffer.ActiveBuffer() == nullptr);
