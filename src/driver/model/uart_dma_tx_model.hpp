@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "double_buffer.hpp"
+#include "double_buffer_storage.hpp"
 #include "libxr_assert.hpp"
 #include "libxr_rw.hpp"
 #include "serialized_service.hpp"
@@ -23,8 +23,9 @@ namespace LibXR
  * durable continuation. With `UartHardwareGate`, `RETRY` is therefore allowed only when
  * `TryEnterTxStart()` or `TryEnterNestedTxStart()` failed and left `TX_START_PENDING`;
  * after either admission succeeds, the backend must balance its leave and return only
- * `STARTED` or `FAILED`. `FAILED` is terminal for this attempt and also guarantees that
- * no DMA remains active. A failure of the current submission is returned through its
+ * `STARTED` or `FAILED`. `FAILED` terminates only the current record: the backend must
+ * leave the hardware reusable for a later start, and the model does not implicitly
+ * request CONFIG. A failure of the current submission is returned through its
  * `SubmitContext`; an older retained record is completed through `WritePort::Finish`.
  * `STARTED` transfers the candidate buffer to hardware. For each accepted start, the
  * platform must dispatch at most one authoritative terminal snapshot; it must clear
@@ -108,7 +109,7 @@ class UartDmaTxModel
    */
   ErrorCode Submit(bool in_isr)
   {
-    SubmitContext context{port_.CurrentSubmissionId(), ErrorCode::PENDING};
+    SubmitContext context{ErrorCode::PENDING};
     (void)service_.Invoke(EventMask(TxEvent::WRITE),
                           [this, in_isr, &context](uint32_t events) noexcept
                           { ServiceTx(events, in_isr, &context, nullptr); });
@@ -239,8 +240,8 @@ class UartDmaTxModel
 
   struct SubmitContext
   {
-    uint32_t submission_id = 0U;
     ErrorCode result = ErrorCode::PENDING;
+    bool synchronous_candidate = false;
   };
 
   static constexpr uint32_t EventMask(TxEvent event)
@@ -256,6 +257,15 @@ class UartDmaTxModel
   void ServiceTx(uint32_t events, bool in_isr, SubmitContext* submit,
                  HardwareOwnerContext* hardware_context) noexcept
   {
+    // The current Write() record is the sole synchronous candidate only when no older
+    // published metadata precedes it. Pending preload keeps metadata in queue_info_, so
+    // this queue-length snapshot remains valid until the current service round commits
+    // the head record.
+    if (submit != nullptr)
+    {
+      submit->synchronous_candidate = (port_.queue_info_->Size() == 1U);
+    }
+
     if (HasEvent(events, TxEvent::CONFIG))
     {
       if (backend_.ConfigRequested())
@@ -320,29 +330,33 @@ class UartDmaTxModel
     }
   }
 
-  bool PopPayload(uint8_t* destination, size_t size)
-  {
-    const ErrorCode result = port_.queue_data_->PopBatch(destination, size);
-    ASSERT(result == ErrorCode::OK);
-    return result == ErrorCode::OK;
-  }
-
-  bool PopActiveInfo(WriteInfoBlock& info)
-  {
-    const ErrorCode result = port_.queue_info_->Pop(info);
-    ASSERT(result == ErrorCode::OK);
-    return result == ErrorCode::OK;
-  }
-
   bool StagePending(const WriteInfoBlock& info)
   {
-    if (pending_valid_ || !PopPayload(buffers_.PendingBuffer(), info.data.size_))
+    if (pending_valid_)
+    {
+      return false;
+    }
+
+    // Move the payload into the UART-owned pending slot. Metadata remains at the queue
+    // head until STARTED or FAILED commits this candidate, so queue length still marks
+    // whether the current Write() is the only synchronous result candidate.
+    const ErrorCode result =
+        port_.queue_data_->PopBatch(buffers_.PendingBuffer(), info.data.size_);
+    ASSERT(result == ErrorCode::OK);
+    if (result != ErrorCode::OK)
     {
       return false;
     }
 
     pending_valid_ = true;
     return true;
+  }
+
+  bool PopInfo(WriteInfoBlock& info)
+  {
+    const ErrorCode result = port_.queue_info_->Pop(info);
+    ASSERT(result == ErrorCode::OK);
+    return result == ErrorCode::OK;
   }
 
   bool StageNextPending(bool in_isr)
@@ -431,6 +445,8 @@ class UartDmaTxModel
       return false;
     }
 
+    const bool synchronous_submission =
+        (submit != nullptr) && submit->synchronous_candidate;
     const int pending_block = buffers_.ActiveBlock() ^ 1;
     const UartDmaTxStartResult result = StartCandidate(
         buffers_.PendingBuffer(), info.data.size_, pending_block, hardware_context);
@@ -440,7 +456,7 @@ class UartDmaTxModel
     }
 
     pending_valid_ = false;
-    if (!PopActiveInfo(info))
+    if (!PopInfo(info))
     {
       ASSERT(false);
       busy_ = false;
@@ -450,7 +466,7 @@ class UartDmaTxModel
     {
       busy_ = false;
       ClearActive();
-      if ((submit != nullptr) && (submit->submission_id == info.submission_id))
+      if (synchronous_submission)
       {
         submit->result = ErrorCode::FAILED;
       }
@@ -458,13 +474,19 @@ class UartDmaTxModel
       {
         port_.Finish(in_isr, ErrorCode::FAILED, info);
       }
-      RequestConfig(in_isr);
+      // FAILED is a record-level terminal result. The backend has already returned with
+      // a reusable, inactive TX path; a hardware recovery request is a separate backend
+      // decision and must be published explicitly when needed. Re-scan the authoritative
+      // queue because the WRITE snapshot that started this candidate has been consumed.
+      (void)service_.Invoke(EventMask(TxEvent::WRITE),
+                            [this, in_isr](uint32_t pending_events) noexcept
+                            { ServiceTx(pending_events, in_isr, nullptr, nullptr); });
       return true;
     }
 
     buffers_.FlipActiveBlock();
     active_length_ = info.data.size_;
-    if ((submit != nullptr) && (submit->submission_id == info.submission_id))
+    if (synchronous_submission)
     {
       submit->result = ErrorCode::OK;
     }
@@ -504,12 +526,14 @@ class UartDmaTxModel
 
     (void)ReleaseActive();
 
+    // A preloaded candidate already owns its payload outside queue_data_. Only its
+    // metadata remains to be removed from the fixed CONFIG prefix.
     if (pending_valid_)
     {
       ASSERT(remaining > 0U);
       pending_valid_ = false;
       WriteInfoBlock info{};
-      if (!PopActiveInfo(info))
+      if (!PopInfo(info))
       {
         ASSERT(false);
         return false;
@@ -533,8 +557,14 @@ class UartDmaTxModel
         ASSERT(false);
         return;
       }
-      if ((port_.queue_data_->PopBatch(nullptr, info.data.size_) != ErrorCode::OK) ||
-          !PopActiveInfo(info))
+      const ErrorCode data_result = port_.queue_data_->PopBatch(nullptr, info.data.size_);
+      ASSERT(data_result == ErrorCode::OK);
+      if (data_result != ErrorCode::OK)
+      {
+        ASSERT(false);
+        return;
+      }
+      if (!PopInfo(info))
       {
         ASSERT(false);
         return;
@@ -547,7 +577,7 @@ class UartDmaTxModel
 
   Backend& backend_;
   WritePort& port_;
-  DoubleBuffer buffers_;
+  DoubleBufferStorage buffers_;
   SerializedService service_{};
   size_t active_length_ = 0U;
   size_t config_prefix_count_ = 0U;

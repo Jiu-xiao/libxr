@@ -370,9 +370,8 @@ typedef struct
 
 struct WriteInfoBlock
 {
-  ConstRawData data;            ///< Data buffer. 数据缓冲区。
-  WriteOperation op;            ///< Write operation instance. 写入操作实例。
-  uint32_t submission_id = 0U;  ///< Identity of this published queue record.
+  ConstRawData data;  ///< Data buffer. 数据缓冲区。
+  WriteOperation op;  ///< Write operation instance. 写入操作实例。
 };
 
 }  // namespace LibXR
