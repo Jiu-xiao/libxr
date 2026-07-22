@@ -3,9 +3,10 @@
 
 static_assert(configTICK_RATE_HZ == 1000, "configTICK_RATE_HZ must be 1000");
 
-// LibXR does not use FreeRTOS software timers here. Projects may keep
-// configUSE_TIMERS enabled when other components require it, but disabling it reduces
-// unused kernel resources.
+#if defined(configUSE_TIMERS) && (configUSE_TIMERS + 0)
+#warning \
+    "It is recommended to set configUSE_TIMERS to 0 to reduce resource usage unless software timers are strictly required."
+#endif
 
 // NOLINTNEXTLINE
 extern "C" __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t xTask,

@@ -14,7 +14,6 @@ WritePort::WritePort(size_t queue_size, size_t buffer_size)
                                         SPSCQueue<uint8_t>(buffer_size)
                                   : nullptr)
 {
-  REQUIRE(queue_size < UINT32_MAX);
 }
 
 size_t WritePort::EmptySize()

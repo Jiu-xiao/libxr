@@ -8,7 +8,7 @@
 #include "flag.hpp"
 #include "inertia.hpp"
 #include "kinematic.hpp"
-#include "latest_snapshot.hpp"
+#include "libxr_assert.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_color.hpp"
 #include "libxr_def.hpp"
@@ -27,7 +27,6 @@
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include "linux_shared_topic.hpp"
 #endif
-#include "model/serialized_service.hpp"
 #include "mutex.hpp"
 #include "queue.hpp"
 #include "ramfs.hpp"

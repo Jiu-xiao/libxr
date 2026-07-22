@@ -10,7 +10,7 @@ namespace LibXR
 {
 
 /**
- * @brief Stateless two-block storage view used by active/pending state machines.
+ * @brief Storage-only two-block view used by active/pending state machines.
  *
  * This class owns only the two backing-block pointers, the half-buffer size, and the
  * active-block index. It does not track pending validity or either block's data length.

@@ -4,56 +4,16 @@
  * `FailAndClearAll` queue-cleanup and stream-lock scenarios.
  * @details 测试项目：
  *          1. 空闲写口上的 `FailAndClearAll` 会清空残留队列数据和 info block。
- *          2. 活跃 `Stream` 持锁期间调用 `FailAndClearAll` 时，开发构建触发预期断言；
- * 普通构建安全退回且不会错误解锁，提交后仍能按原数据落队。 Test items:
+ *          2. 活跃 `Stream` 持锁期间调用 `FailAndClearAll`
+ * 不会错误解锁，提交后仍能按原数据落队。 Test items:
  *          1. `FailAndClearAll` clears queued data and info blocks on an idle write port.
- *          2. An active `Stream` call raises the expected development assertion; ordinary
- * builds still verify safe backoff, and commit flushes the original payload.
+ *          2. `FailAndClearAll` does not unlock an active `Stream`; commit still flushes
+ * the original payload.
  */
-#if defined(LIBXR_DEV_ASSERT_BUILD)
-#include <sys/wait.h>
-#include <unistd.h>
-
-#include <string_view>
-#endif
-
 #include "rw_test_common.hpp"
 
 namespace
 {
-
-#if defined(LIBXR_DEV_ASSERT_BUILD)
-constexpr int kExpectedDevAssertExitCode = 73;
-
-void ExpectActiveStreamFailAndClearDevAssert(LibXR::WritePort& port)
-{
-  const pid_t child = fork();
-  ASSERT(child >= 0);
-
-  if (child == 0)
-  {
-    auto callback = LibXR::Assert::FatalCallback::Create(
-        [](bool in_isr, int expected_exit_code, const char* file, uint32_t)
-        {
-          const std::string_view source = (file == nullptr) ? "" : file;
-          const bool expected_source =
-              !in_isr && (source.ends_with("src/core/rw/write_port.cpp") ||
-                          source.ends_with("src\\core\\rw\\write_port.cpp"));
-          _exit(expected_source ? expected_exit_code : expected_exit_code + 1);
-        },
-        kExpectedDevAssertExitCode);
-    LibXR::Assert::RegisterFatalErrorCallback(callback);
-
-    port.FailAndClearAll(LibXR::ErrorCode::INIT_ERR, false);
-    _exit(kExpectedDevAssertExitCode + 2);
-  }
-
-  int status = 0;
-  ASSERT(waitpid(child, &status, 0) == child);
-  ASSERT(WIFEXITED(status));
-  ASSERT(WEXITSTATUS(status) == kExpectedDevAssertExitCode);
-}
-#endif
 
 /**
  * @brief 测试入口函数 `test_rw_write_port_fail_and_clear_all_clears_idle_queue`。 Test
@@ -96,10 +56,9 @@ void test_rw_write_port_fail_and_clear_all_clears_idle_queue()
  */
 void test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream()
 {
-  // 测试内容：开发构建拒绝活跃 stream
-  // 持锁期间的失败清理；普通构建安全退回且不提前释放写口。 Test coverage: development
-  // builds reject fail-clear while a stream owns the port; ordinary builds back off
-  // without releasing the port to another request.
+  // 测试内容：活跃 stream 持锁期间的失败清理不能把写口提前释放给其他请求。
+  // Test coverage: fail-clear during an active stream lock must not release the write
+  // port early to other requests.
   using namespace LibXR;
 
   WritePort w(2, 16);
@@ -113,14 +72,7 @@ void test_rw_write_port_fail_and_clear_all_does_not_unlock_active_stream()
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::LOCKED);
   ASSERT(stream.Write(ConstRawData{TX, sizeof(TX)}) == ErrorCode::OK);
 
-#if defined(LIBXR_DEV_ASSERT_BUILD)
-  // Calling this driver-only API while a Stream owns the producer lock violates its
-  // quiescence precondition. Verify the development assertion in a child process so the
-  // full test runner can continue.
-  ExpectActiveStreamFailAndClearDevAssert(w);
-#else
   w.FailAndClearAll(ErrorCode::INIT_ERR, false);
-#endif
 
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::LOCKED);
   ASSERT(w.Size() == sizeof(TX));

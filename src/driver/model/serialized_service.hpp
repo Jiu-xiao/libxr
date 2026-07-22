@@ -3,34 +3,22 @@
 #include <atomic>
 #include <cstdint>
 
+#include "libxr_assert.hpp"
+
 namespace LibXR
 {
 
 /**
- * @brief 合并通知并串行执行服务函数 / Coalesce notifications and serialize service
- * execution
+ * @brief Coalesce level-triggered events and run one non-reentrant service owner.
  *
- * 每次调用先把事件合并进一个 32 位状态字，再竞争同一状态字中的唯一 owner 位。未取得
- * owner 的调用立即返回；owner 原子取走事件快照并执行 handler，直到没有待处理事件。
- * handler 执行期间再次调用 `Invoke()` 只会留下下一轮事件，不会递归执行 handler。
- * Each invocation first merges events into one 32-bit state word and then competes for
- * the sole owner bit in that same word. A caller that does not acquire ownership returns
- * immediately. The owner atomically consumes event snapshots and runs the handler until
- * no work remains. Reentrant `Invoke()` calls only schedule another round; they never
- * invoke the handler recursively. The successful owner CAS is also the first snapshot's
- * linearization point; events published after it remain for a later round even if the
- * first handler has not started.
+ * The high bit of one atomic word is the owner bit. The low 31 bits are coalescible
+ * events. A caller that acquires the owner drains events in its current execution
+ * context until a no-new-event release CAS succeeds. A caller that observes an owner
+ * only publishes its events and returns.
  *
- * @note 低 31 位是可合并的 level-triggered 事件；最高位保留给 owner。事件不记录
- * 发生次数或 payload。所有入口必须提供同一个逻辑 handler；实际 handler 在取得 owner
- * 的调用上下文中执行。
- * Events are coalesced level-triggered notifications and do not preserve occurrence
- * counts or payloads. The low 31 bits are available for events and the high bit is
- * reserved for ownership. Every entry must provide the same logical handler; execution
- * uses the context of the caller that acquires ownership.
- * @warning handler 不得抛出异常；可能由 ISR 取得 owner 时，handler 还必须有界且
- * 非阻塞。The handler must not throw. If an ISR may acquire ownership, the handler must
- * also be bounded and non-blocking.
+ * Events do not preserve counts or payloads. Every invocation for one service instance
+ * must use the same logical handler. The handler must not throw or block; when an ISR can
+ * acquire the owner, all work reachable from the handler must be ISR-safe.
  */
 class SerializedService
 {
@@ -38,49 +26,185 @@ class SerializedService
   SerializedService() = default;
 
   /**
-   * @brief 发布事件并尝试执行服务 / Publish events and try to run the service
-   * @tparam Handler 可调用对象类型，签名为 `void(uint32_t)` / Callable type with the
-   * signature `void(uint32_t)`
-   * @param events 要合并的低 31 位非零事件位图 / Nonzero low-31-bit event mask to merge
-   * @param handler 处理每轮事件快照的服务函数 / Service function handling each snapshot
-   * @return 当前调用取得过 owner 时返回 true；事件交给已有 owner 时返回 false / True
-   * if this invocation acquired ownership; false if an existing owner will service it
+   * @brief Publish events and try to acquire the service owner.
+   * @tparam Handler Callable with signature `void(uint32_t)`.
+   * @param events Nonzero low-31-bit event mask.
+   * @param handler Handler for each consumed event snapshot.
+   * @return true when this invocation acquired and released the owner; false when the
+   * event was handed to another owner or had already been consumed.
    */
   template <typename Handler>
   bool Invoke(uint32_t events, Handler&& handler) noexcept
   {
-    if ((events == 0U) || ((events & OWNER_BIT) != 0U))
+    ASSERT(IsEventMask(events));
+    if (!IsEventMask(events))
     {
       return false;
     }
 
     uint32_t observed = state_.fetch_or(events, std::memory_order_release) | events;
-
     while ((observed & OWNER_BIT) == 0U)
     {
-      // Another owner may have consumed this invocation's event and released the state
-      // before our CAS. An empty state means there is no remaining work to claim.
       if ((observed & EVENT_MASK) == 0U)
       {
         return false;
       }
 
-      // Claim ownership and consume the first snapshot in one RMW. A publisher ordered
-      // after this CAS observes OWNER_BIT and leaves its event for the next exchange.
-      const uint32_t desired = OWNER_BIT;
-      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acquire,
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
                                        std::memory_order_relaxed))
       {
-        break;
+        Handler& handler_ref = handler;
+        Drain(observed & EVENT_MASK, handler_ref);
+        return true;
       }
     }
+    return false;
+  }
 
-    if ((observed & OWNER_BIT) != 0U)
+  /**
+   * @brief Publish events and claim/release the owner inside a backend admission guard.
+   *
+   * The guard serializes a multi-step IRQ-domain mask with the owner claim, and the
+   * no-new-event release CAS with the corresponding restore. It is held only around
+   * those fixed-cost boundaries, never while the service handler runs.
+   *
+   * @tparam Guard Backend guard providing `LockAndMaskIrqDomain()`,
+   * `UnlockIrqDomain()`, `LockIrqDomain()`, and `RestoreAndUnlockIrqDomain()`.
+   * @tparam Handler Callable with signature `void(uint32_t)`.
+   */
+  template <typename Guard, typename Handler>
+  bool InvokeGuarded(uint32_t events, Guard& guard, Handler&& handler) noexcept
+  {
+    ASSERT(IsEventMask(events));
+    if (!IsEventMask(events))
     {
       return false;
     }
 
-    uint32_t snapshot = observed & EVENT_MASK;
+    guard.LockAndMaskIrqDomain();
+    uint32_t observed = state_.fetch_or(events, std::memory_order_release) | events;
+    while ((observed & OWNER_BIT) == 0U)
+    {
+      if ((observed & EVENT_MASK) == 0U)
+      {
+        guard.UnlockIrqDomain();
+        return false;
+      }
+
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        guard.UnlockIrqDomain();
+        Handler& handler_ref = handler;
+        DrainGuarded(observed & EVENT_MASK, handler_ref, guard);
+        return true;
+      }
+    }
+    guard.UnlockIrqDomain();
+    return false;
+  }
+
+  /**
+   * @brief Claim an owner before obtaining events from an owned source.
+   *
+   * This entry is for an IRQ adapter that must acquire the same owner before reading or
+   * acknowledging protected hardware status. `source` is called only after a successful
+   * owner claim and returns a low-31-bit event mask. Events queued before the claim are
+   * consumed in the same first snapshot.
+   *
+   * @tparam Source Callable with signature `uint32_t()`.
+   * @tparam Handler Callable with signature `void(uint32_t)`.
+   * @return true when this invocation acquired and released the owner; false when an
+   * existing owner must eventually restore/retrigger the source.
+   */
+  template <typename Source, typename Handler>
+  bool ClaimAndInvoke(Source&& source, Handler&& handler) noexcept
+  {
+    uint32_t observed = state_.load(std::memory_order_relaxed);
+    while ((observed & OWNER_BIT) == 0U)
+    {
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        Source& source_ref = source;
+        const uint32_t source_events = source_ref();
+        ASSERT((source_events & OWNER_BIT) == 0U);
+
+        Handler& handler_ref = handler;
+        Drain((observed | source_events) & EVENT_MASK, handler_ref);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * @brief Claim before reading an IRQ source, using the backend admission guard.
+   *
+   * The protected source is read only after the owner CAS succeeds and after the short
+   * admission guard has been released. The IRQ domain remains masked until the guarded
+   * release CAS restores it.
+   */
+  template <typename Guard, typename Source, typename Handler>
+  bool ClaimAndInvokeGuarded(Guard& guard, Source&& source, Handler&& handler) noexcept
+  {
+    guard.LockAndMaskIrqDomain();
+    uint32_t observed = state_.load(std::memory_order_relaxed);
+    while ((observed & OWNER_BIT) == 0U)
+    {
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        guard.UnlockIrqDomain();
+
+        Source& source_ref = source;
+        const uint32_t source_events = source_ref();
+        ASSERT((source_events & OWNER_BIT) == 0U);
+
+        Handler& handler_ref = handler;
+        DrainGuarded((observed | source_events) & EVENT_MASK, handler_ref, guard);
+        return true;
+      }
+    }
+    guard.UnlockIrqDomain();
+    return false;
+  }
+
+  /**
+   * @brief Publish events without trying to acquire the service owner.
+   *
+   * An active owner consumes the events before release. If no owner exists, the caller
+   * must guarantee a later `Invoke()` or `ClaimAndInvoke()` carrier. Ordinary publishers
+   * should use `Invoke()` so owner-free work starts immediately.
+   */
+  void Publish(uint32_t events) noexcept
+  {
+    if (events == 0U)
+    {
+      return;
+    }
+    ASSERT(IsEventMask(events));
+    if (IsEventMask(events))
+    {
+      state_.fetch_or(events, std::memory_order_release);
+    }
+  }
+
+  SerializedService(const SerializedService&) = delete;
+  SerializedService& operator=(const SerializedService&) = delete;
+
+ private:
+  static constexpr uint32_t OWNER_BIT = 1U << 31U;
+  static constexpr uint32_t EVENT_MASK = ~OWNER_BIT;
+
+  static constexpr bool IsEventMask(uint32_t events)
+  {
+    return (events != 0U) && ((events & OWNER_BIT) == 0U);
+  }
+
+  template <typename Handler>
+  void Drain(uint32_t snapshot, Handler& handler) noexcept
+  {
     while (true)
     {
       if (snapshot != 0U)
@@ -92,20 +216,36 @@ class SerializedService
       if (state_.compare_exchange_strong(expected, 0U, std::memory_order_release,
                                          std::memory_order_acquire))
       {
-        return true;
+        return;
       }
-      // A publisher ORed new events while OWNER_BIT was set. Keep ownership and consume
-      // the next snapshot; release cannot race past an already-published event.
+
       snapshot = state_.exchange(OWNER_BIT, std::memory_order_acq_rel) & EVENT_MASK;
     }
   }
 
-  SerializedService(const SerializedService&) = delete;
-  SerializedService& operator=(const SerializedService&) = delete;
+  template <typename Handler, typename Guard>
+  void DrainGuarded(uint32_t snapshot, Handler& handler, Guard& guard) noexcept
+  {
+    while (true)
+    {
+      if (snapshot != 0U)
+      {
+        handler(snapshot);
+      }
 
- private:
-  static constexpr uint32_t OWNER_BIT = 1U << 31U;
-  static constexpr uint32_t EVENT_MASK = ~OWNER_BIT;
+      guard.LockIrqDomain();
+      uint32_t expected = OWNER_BIT;
+      if (state_.compare_exchange_strong(expected, 0U, std::memory_order_release,
+                                         std::memory_order_acquire))
+      {
+        guard.RestoreAndUnlockIrqDomain();
+        return;
+      }
+      guard.UnlockIrqDomain();
+
+      snapshot = state_.exchange(OWNER_BIT, std::memory_order_acq_rel) & EVENT_MASK;
+    }
+  }
 
   std::atomic<uint32_t> state_{0U};
 };

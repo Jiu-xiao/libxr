@@ -78,13 +78,12 @@ class UART
    * This is a pure virtual function. Subclasses must implement the specific UART
    * configuration logic.
    *
-   * @warning `SetConfig()` calls for one UART instance must be serialized by the caller.
-   * Exactly one logical producer may publish configurations for an instance at a time.
-   * The call may originate in thread or ISR context. An implementation returning
-   * `ErrorCode::OK` must accept the latest request without blocking that context;
-   * hardware quiescence, apply, and restart may finish later. `OK` acknowledges
-   * publication, not synchronous completion of the hardware transaction. 同一 UART 实例的
-   * `SetConfig()` 调用必须由调用方串行化；任意时刻只允许一个逻辑 producer 发布配置。
+   * @warning One UART instance accepts at most one outstanding configuration. Calls may
+   * originate in thread or ISR context; a concurrent or reentrant request returns
+   * `ErrorCode::BUSY` without replacing the accepted payload. `ErrorCode::OK`
+   * acknowledges admission, while hardware quiescence, apply, and restart may finish
+   * later. 每个 UART 实例最多接受一个尚未完成的配置；并发或重入请求返回
+   * `ErrorCode::BUSY`，且不会覆盖已接受的配置。
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
 

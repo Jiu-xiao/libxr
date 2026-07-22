@@ -4,12 +4,12 @@
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 #include "ch32_uart_def.hpp"
-#include "latest_snapshot.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
 #include "model/uart_dma_tx_model.hpp"
-#include "model/uart_hardware_gate.hpp"
+#include "model/uart_execution_policy.hpp"
+#include "model/uart_rx_config_gate.hpp"
 #include "uart.hpp"
 
 namespace LibXR
@@ -18,11 +18,9 @@ namespace LibXR
 /**
  * @brief CH32 UART driver implementation.
  *
- * This backend supports the current single-core CH32V20x/V30x BSPs (V203/V307). UART
- * IDLE and RX/TX DMA IRQ entries for one instance must use the same preemption priority.
- * Every entry claims `UartHardwareGate` before inspecting hardware status. A losing
- * entry masks the complete normal IRQ domain and publishes a deferred rescan; it must
- * not cache a terminal result outside the gate.
+ * This backend supports the current CH32V20x/V30x BSPs (V203/V307). The IRQ handlers
+ * inspect and acknowledge their peripheral/DMA status before publishing coalesced TX
+ * facts into the same serialized service used by Write() and SetConfig().
  */
 class CH32UART : public UART
 {
@@ -38,6 +36,7 @@ class CH32UART : public UART
            uint32_t pin_remap = 0, uint32_t tx_queue_size = 5,
            UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
+  /** @return `BUSY` while an earlier configuration request is outstanding. */
   ErrorCode SetConfig(UART::Configuration config);
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
@@ -53,10 +52,11 @@ class CH32UART : public UART
   ReadPort _read_port;
   WritePort _write_port;
 
-  LatestSnapshot<UART::Configuration> requested_config_;
-  UartHardwareGate hardware_gate_;
+  UART::Configuration requested_config_;
+  UartDirectPolicy execution_policy_;
   UartCircularDmaRxModel rx_dma_model_;
   UartDmaTxModel<CH32UART> tx_dma_model_;
+  UartRxConfigGate rx_config_gate_;
 
   USART_TypeDef* instance_;
   DMA_Channel_TypeDef* dma_rx_channel_;
@@ -65,27 +65,22 @@ class CH32UART : public UART
   static CH32UART* map_[CH32_UART_NUMBER];
 
  private:
-  void OnConfigRequested() { hardware_gate_.RequestConfig(); }
-
-  [[nodiscard]] bool ConfigRequested() const { return hardware_gate_.ConfigRequested(); }
-
-  bool ApplyPendingConfig(bool in_isr);
-
-  bool OnConfigApplied(bool in_isr);
+  UartDmaControlResult ApplyPendingConfig(bool in_isr);
+  void ReleaseConfigAdmission(bool) { rx_config_gate_.LeaveConfig(); }
 
   static bool InIsr();
 
   void HandleNormalIrq();
 
-  void DeferNormalIrq(bool in_isr);
+  void ScanNormalIrqStatus(bool in_isr);
 
-  void ScanNormalIrqStatus(bool in_isr, UartHardwareGate::OwnerContext& hardware_context);
+  UartDmaControlResult RecoverDataPath(bool in_isr);
 
-  void MaskNormalIrqs();
+  void SetDataPathInterrupts(bool enabled);
 
-  void RestoreNormalIrqs();
+  void StopDataPath(bool in_isr);
 
-  void DispatchHardwareActions(UartHardwareGate::PendingAction actions, bool in_isr);
+  void StartDataPath();
 
   void ApplyConfigPayload(bool in_isr);
 
@@ -121,11 +116,9 @@ class CH32UART : public UART
    * @param size 载荷字节数 / Payload size in bytes
    * @param block active 双缓冲块索引，CH32 DMA 不使用 / Active double-buffer block index,
    * unused by CH32 DMA
-   * @param hardware_context Optional stack-local IRQ owner context for nested TX start
-   * @return `STARTED` after enabling DMA, or `RETRY` when another hardware action wins
+   * @return `STARTED` after enabling DMA
    */
-  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block,
-                                  UartHardwareGate::OwnerContext* hardware_context);
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block);
 };
 
 }  // namespace LibXR
