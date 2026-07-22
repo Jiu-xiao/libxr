@@ -15,14 +15,18 @@
 
 namespace
 {
+#if LIBXR_ESP_UART_HAS_AHB_GDMA && defined(SOC_UART_SUPPORT_XTAL_CLK) && \
+    SOC_UART_SUPPORT_XTAL_CLK
+// Runtime CONFIG can run from an ISR, so cache one fixed source frequency at startup.
+constexpr uart_sclk_t UART_CLOCK_SOURCE = UART_SCLK_XTAL;
+#else
+constexpr uart_sclk_t UART_CLOCK_SOURCE = UART_SCLK_DEFAULT;
+#endif
+
 // RX interrupt reasons handled by the FIFO receive path.
 // FIFO 接收路径处理的 RX 中断原因。
 constexpr uint32_t UART_RX_INTR_MASK =
     UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF;
-
-// TX interrupt reason used by the FIFO transmit path.
-// FIFO 发送路径使用的 TX 中断原因。
-constexpr uint32_t UART_TX_INTR_MASK = UART_INTR_TXFIFO_EMPTY;
 
 // Use the minimum non-zero timeout so short RX tails are flushed as close as
 // possible to an idle-style boundary.
@@ -49,15 +53,87 @@ bool IsConsoleUartInUse(uart_port_t uart_num)
 namespace LibXR
 {
 
+void ESP32UARTIrqAdapter::LockAndMaskIrqDomain() noexcept
+{
+  portENTER_CRITICAL_SAFE(&owner_.irq_domain_lock_);
+  owner_.SetIrqDomainEnabledLocked(false);
+}
+
+void ESP32UARTIrqAdapter::UnlockIrqDomain() noexcept
+{
+  portEXIT_CRITICAL_SAFE(&owner_.irq_domain_lock_);
+}
+
+void ESP32UARTIrqAdapter::LockIrqDomain() noexcept
+{
+  portENTER_CRITICAL_SAFE(&owner_.irq_domain_lock_);
+}
+
+void ESP32UARTIrqAdapter::RestoreAndUnlockIrqDomain() noexcept
+{
+  owner_.SetIrqDomainEnabledLocked(true);
+  portEXIT_CRITICAL_SAFE(&owner_.irq_domain_lock_);
+}
+
+bool ESP32UART::IsCurrentTaskPinned()
+{
+#if defined(CONFIG_FREERTOS_SMP) && CONFIG_FREERTOS_SMP
+  const UBaseType_t affinity = vTaskCoreAffinityGet(nullptr);
+  return (affinity != 0U) && ((affinity & (affinity - 1U)) == 0U);
+#else
+  return xTaskGetCoreID(nullptr) != tskNO_AFFINITY;
+#endif
+}
+
+void IRAM_ATTR ESP32UART::SetIrqDomainEnabled(bool enabled) noexcept
+{
+  portENTER_CRITICAL_SAFE(&irq_domain_lock_);
+  SetIrqDomainEnabledLocked(enabled);
+  portEXIT_CRITICAL_SAFE(&irq_domain_lock_);
+}
+
+void IRAM_ATTR ESP32UART::SetIrqDomainEnabledLocked(bool enabled) noexcept
+{
+  const bool in_isr = xPortInIsrContext() != pdFALSE;
+  bool success = true;
+  const auto set_handle = [enabled, &success](intr_handle_t handle)
+  {
+    if (handle == nullptr)
+    {
+      return;
+    }
+    const esp_err_t result = enabled ? esp_intr_enable(handle) : esp_intr_disable(handle);
+    success = (result == ESP_OK) && success;
+  };
+
+  set_handle(uart_intr_handle_);
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
+  set_handle(tx_gdma_intr_handle_);
+  if (rx_gdma_intr_handle_ != tx_gdma_intr_handle_)
+  {
+    set_handle(rx_gdma_intr_handle_);
+  }
+#endif
+  REQUIRE_FROM_CALLBACK(success, in_isr);
+}
+
 void ESP32UARTReadPort::OnRxDequeue(bool in_isr)
 {
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
   if (owner_.dma_backend_enabled_)
   {
     return;
   }
 #endif
-  owner_.DrainRxFifo(in_isr);
+  bool pushed_any = false;
+  (void)owner_.execution_policy_.Invoke(
+      ESP32UART::FIFO_EVENT_RX_DRAIN,
+      [this, in_isr, &pushed_any](uint32_t events) noexcept
+      { return owner_.ServiceFifo(events, in_isr, nullptr, pushed_any); });
+  if (pushed_any)
+  {
+    owner_.read_port_->ProcessPendingReads(in_isr);
+  }
 }
 
 // Prefer aligned DMA-capable allocation first, then fall back to the broader
@@ -112,8 +188,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       cts_pin_(cts_pin),
       config_(config),
       requested_config_(config),
-      rx_isr_buffer_(new uint8_t[rx_buffer_size]),
-      rx_isr_buffer_size_(rx_buffer_size),
+      execution_policy_(*this),
       tx_storage_(AllocateTxStorage(tx_buffer_size * 2)),
       dma_requested_(enable_dma),
       _read_port(rx_buffer_size, *this),
@@ -123,8 +198,12 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   ASSERT(!IsConsoleUartInUse(uart_num_));
   ASSERT(uart_num_ < UART_NUM_MAX);
   ASSERT(uart_num_ < SOC_UART_HP_NUM);
-  ASSERT(rx_isr_buffer_size_ > 0);
+  ASSERT(rx_buffer_size > 0);
   ASSERT(tx_buffer_size > 0);
+  if constexpr (ESP_UART_USES_IRQ_SERIALIZATION)
+  {
+    REQUIRE(IsCurrentTaskPinned());
+  }
 
   _read_port = ReadFun;
   _write_port = WriteFun;
@@ -135,7 +214,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
     return;
   }
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
   if (dma_requested_)
   {
     if (InitDmaBackend() != ErrorCode::OK)
@@ -145,7 +224,21 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
     }
   }
 
-  if (!dma_backend_enabled_)
+  if (dma_backend_enabled_)
+  {
+    if (InstallUartIsr() != ErrorCode::OK)
+    {
+      ASSERT(false);
+      return;
+    }
+    ConfigureDmaErrorInterruptPath();
+    DEV_ASSERT(esp_intr_get_cpu(uart_intr_handle_) ==
+               esp_intr_get_cpu(tx_gdma_intr_handle_));
+    DEV_ASSERT(esp_intr_get_cpu(uart_intr_handle_) ==
+               esp_intr_get_cpu(rx_gdma_intr_handle_));
+    SetIrqDomainEnabled(true);
+  }
+  else
   {
     if (InstallUartIsr() != ErrorCode::OK)
     {
@@ -153,6 +246,11 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
       return;
     }
     ConfigureRxInterruptPath();
+    if (esp_intr_enable(uart_intr_handle_) != ESP_OK)
+    {
+      ASSERT(false);
+      return;
+    }
   }
 #else
   if (InstallUartIsr() != ErrorCode::OK)
@@ -161,6 +259,11 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
     return;
   }
   ConfigureRxInterruptPath();
+  if (esp_intr_enable(uart_intr_handle_) != ESP_OK)
+  {
+    ASSERT(false);
+    return;
+  }
 #endif
 }
 
@@ -177,16 +280,25 @@ void ESP32UART::ConfigureRxInterruptPath()
   uart_hal_ena_intr_mask(&uart_hal_, UART_RX_INTR_MASK);
 }
 
-// Reconfigure framing in place while preserving the current software queue
-// model. If TX is already in progress, resume the backend instead of surfacing
-// a synthetic BUSY state.
-// 原地重配帧格式，同时保持软件队列模型不变。若 TX 已在进行，则恢复后端，
-// 而不是人为抛出 BUSY 状态。
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
+void ESP32UART::ConfigureDmaErrorInterruptPath()
+{
+  uart_hal_clr_intsts_mask(&uart_hal_, DMA_UART_ERROR_INTR_MASK);
+  uart_hal_ena_intr_mask(&uart_hal_, DMA_UART_ERROR_INTR_MASK);
+}
+#endif
+
 ErrorCode ESP32UART::SetConfig(UART::Configuration config)
 {
   if (!uart_hw_enabled_)
   {
     return ErrorCode::STATE_ERR;
+  }
+  if ((config.baudrate == 0U) ||
+      ((config.parity != UART::Parity::NO_PARITY) &&
+       (config.parity != UART::Parity::EVEN) && (config.parity != UART::Parity::ODD)))
+  {
+    return ErrorCode::ARG_ERR;
   }
 
   uart_word_length_t word_length = UART_DATA_8_BITS;
@@ -202,95 +314,99 @@ ErrorCode ESP32UART::SetConfig(UART::Configuration config)
     return ErrorCode::ARG_ERR;
   }
 
-  if (uart_isr_installed_)
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
+  if (!dma_backend_enabled_)
   {
     return ErrorCode::NOT_SUPPORT;
   }
-
-  requested_config_.Store(config);
-  tx_dma_model_.RequestConfig(xPortInIsrContext() != pdFALSE);
+  if (!rx_config_gate_.TryReserveConfig())
+  {
+    return ErrorCode::BUSY;
+  }
+  requested_config_ = config;
+  rx_config_gate_.PublishConfig();
+  tx_dma_model_.RequestConfig(execution_policy_, xPortInIsrContext() != pdFALSE);
   return ErrorCode::OK;
+#else
+  (void)config;
+  return ErrorCode::NOT_SUPPORT;
+#endif
 }
 
-void ESP32UART::OnConfigRequested() { hardware_gate_.RequestConfig(); }
-
-bool ESP32UART::ApplyPendingConfig(bool in_isr)
+UartDmaControlResult ESP32UART::ApplyPendingConfig(bool in_isr)
 {
-  if (!hardware_gate_.TryEnterConfig())
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
+  REQUIRE_FROM_CALLBACK(dma_backend_enabled_, in_isr);
+  if (!rx_config_gate_.TryEnterConfig())
+  {
+    return UartDmaControlResult::PENDING;
+  }
+
+  REQUIRE_FROM_CALLBACK(gdma_stop(tx_dma_channel_) == ESP_OK, in_isr);
+  REQUIRE_FROM_CALLBACK(gdma_stop(rx_dma_channel_) == ESP_OK, in_isr);
+  REQUIRE_FROM_CALLBACK(gdma_reset(tx_dma_channel_) == ESP_OK, in_isr);
+  REQUIRE_FROM_CALLBACK(gdma_reset(rx_dma_channel_) == ESP_OK, in_isr);
+
+  gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
+                      UINT32_MAX);
+  gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
+                      UINT32_MAX);
+  (void)gdma_hal_read_intr_status(&tx_gdma_hal_, tx_gdma_channel_id_,
+                                  GDMA_CHANNEL_DIRECTION_TX, true);
+  (void)gdma_hal_read_intr_status(&rx_gdma_hal_, rx_gdma_channel_id_,
+                                  GDMA_CHANNEL_DIRECTION_RX, true);
+
+  const UART::Configuration config = requested_config_;
+  REQUIRE_FROM_CALLBACK(ApplyConfigPayload(config), in_isr);
+  return UartDmaControlResult::COMPLETED;
+#else
+  (void)in_isr;
+  return UartDmaControlResult::COMPLETED;
+#endif
+}
+
+void ESP32UART::ReleaseConfigAdmission(bool in_isr)
+{
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
+  if (dma_backend_enabled_)
+  {
+    REQUIRE_FROM_CALLBACK(ResetAndRestartRxDma(), in_isr);
+  }
+#else
+  (void)in_isr;
+#endif
+  rx_config_gate_.LeaveConfig();
+}
+
+bool ESP32UART::ApplyConfigPayload(UART::Configuration config)
+{
+  if ((config.baudrate == 0U) ||
+      ((config.parity != UART::Parity::NO_PARITY) &&
+       (config.parity != UART::Parity::EVEN) && (config.parity != UART::Parity::ODD)))
   {
     return false;
   }
-
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    MaskDmaInterrupts(in_isr);
-
-    // Stop both request streams before resetting either channel. `gdma_stop()` and
-    // `gdma_reset()` are synchronous, ISR-safe register operations in ESP-IDF.
-    DEV_ASSERT_FROM_CALLBACK(gdma_stop(tx_dma_channel_) == ESP_OK, in_isr);
-    DEV_ASSERT_FROM_CALLBACK(gdma_stop(rx_dma_channel_) == ESP_OK, in_isr);
-    DEV_ASSERT_FROM_CALLBACK(gdma_reset(tx_dma_channel_) == ESP_OK, in_isr);
-    DEV_ASSERT_FROM_CALLBACK(gdma_reset(rx_dma_channel_) == ESP_OK, in_isr);
-
-    gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
-                        UINT32_MAX);
-    gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
-                        UINT32_MAX);
-    // Read back the raw status registers so the W1C writes are complete before the
-    // UART generation changes.
-    (void)gdma_hal_read_intr_status(&tx_gdma_hal_, tx_gdma_channel_id_,
-                                    GDMA_CHANNEL_DIRECTION_TX, true);
-    (void)gdma_hal_read_intr_status(&rx_gdma_hal_, rx_gdma_channel_id_,
-                                    GDMA_CHANNEL_DIRECTION_RX, true);
-  }
-#endif
-
-  hardware_gate_.ConsumePendingConfig();
-  UART::Configuration config{};
-  (void)requested_config_.LoadLatest(config);
 
   uart_word_length_t word_length = UART_DATA_8_BITS;
   uart_stop_bits_t stop_bits = UART_STOP_BITS_1;
   if (!ResolveWordLength(config.data_bits, word_length) ||
       !ResolveStopBits(config.stop_bits, stop_bits))
   {
-    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-    return true;
+    return false;
   }
 
-  bool dma_backend_enabled = false;
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  dma_backend_enabled = dma_backend_enabled_;
-#endif
-  if (!dma_backend_enabled)
+  if (uart_sclk_hz_ == 0U)
   {
-    uart_hal_disable_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
-    tx_busy_.Clear();
-    ClearActiveTx();
-  }
-
-  const uart_sclk_t sclk = UART_SCLK_DEFAULT;
-  uart_hal_set_sclk(&uart_hal_, static_cast<soc_module_clk_t>(sclk));
-
-  uint32_t sclk_hz = 0;
-  if ((esp_clk_tree_src_get_freq_hz(static_cast<soc_module_clk_t>(sclk),
-                                    ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
-                                    &sclk_hz) != ESP_OK) ||
-      (sclk_hz == 0))
-  {
-    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-    return true;
+    return false;
   }
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
-  if (!uart_hal_set_baudrate(&uart_hal_, config.baudrate, sclk_hz))
+  if (!uart_hal_set_baudrate(&uart_hal_, config.baudrate, uart_sclk_hz_))
   {
-    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-    return true;
+    return false;
   }
 #else
-  uart_hal_set_baudrate(&uart_hal_, config.baudrate, sclk_hz);
+  uart_hal_set_baudrate(&uart_hal_, config.baudrate, uart_sclk_hz_);
 #endif
 
   uart_hal_set_data_bit_num(&uart_hal_, word_length);
@@ -299,68 +415,16 @@ bool ESP32UART::ApplyPendingConfig(bool in_isr)
   uart_hal_set_hw_flow_ctrl(&uart_hal_, UART_HW_FLOWCTRL_DISABLE, 0);
   uart_hal_set_mode(&uart_hal_, UART_MODE_UART);
   uart_hal_set_txfifo_empty_thr(&uart_hal_, TX_EMPTY_THRESHOLD);
-  // Drop stale hardware bytes from the previous baud in both directions.
-  // Keep software read queue semantics aligned with ST/CH (no read_port reset).
   uart_hal_txfifo_rst(&uart_hal_);
   uart_hal_rxfifo_rst(&uart_hal_);
   uart_hal_clr_intsts_mask(&uart_hal_, UINT32_MAX);
-
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    // Remount every RX descriptor after reset so links, lengths, and DMA ownership are
-    // restored before the ring is started under CONFIG ownership.
-    DEV_ASSERT_FROM_CALLBACK(RemountAndRestartRxDma(), in_isr);
-  }
-#endif
 
   config_ = config;
   return true;
 }
 
-bool ESP32UART::OnConfigApplied(bool in_isr)
-{
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (dma_backend_enabled_)
-  {
-    // Restore the complete IRQ domain while CONFIG still excludes TX start and IRQ
-    // status interpretation. A concurrently pending vector will defer itself.
-    UnmaskDmaInterrupts(in_isr);
-    DispatchHardwareActions(hardware_gate_.LeaveConfig(), in_isr);
-    return true;
-  }
-#endif
-  DispatchHardwareActions(hardware_gate_.LeaveConfig(), in_isr);
-  (void)TryStartTx(in_isr);
-  return true;
-}
-
-void ESP32UART::DispatchHardwareActions(UartHardwareGate::PendingAction actions,
-                                        bool in_isr)
-{
-  if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::CONFIG))
-  {
-    tx_dma_model_.ResumeConfig(in_isr);
-    return;
-  }
-
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
-  if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::IRQ_DEFERRED))
-  {
-    ServiceDeferredDmaInterrupts(in_isr);
-    return;
-  }
-#endif
-
-  if (UartHardwareGate::HasAction(actions, UartHardwareGate::PendingAction::TX_START))
-  {
-    tx_dma_model_.ResumeStart(in_isr);
-  }
-}
-
-#if !(SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED)
-UartDmaTxStartResult ESP32UART::StartDmaTx(uint8_t*, size_t, int,
-                                           UartHardwareGate::OwnerContext*)
+#if !LIBXR_ESP_UART_HAS_AHB_GDMA
+UartDmaTxStartResult ESP32UART::StartDmaTx(uint8_t*, size_t, int)
 {
   return UartDmaTxStartResult::FAILED;
 }
@@ -385,17 +449,13 @@ ErrorCode ESP32UART::SetLoopback(bool enable)
 ErrorCode IRAM_ATTR ESP32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &ESP32UART::_write_port);
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
   if (uart->dma_backend_enabled_)
   {
-    return uart->tx_dma_model_.Submit(in_isr);
+    return uart->tx_dma_model_.Submit(uart->execution_policy_, in_isr);
   }
 #endif
-  if (uart->rx_config_gate_.ConfigRequested())
-  {
-    return ErrorCode::PENDING;
-  }
-  return uart->TryStartTx(in_isr);
+  return uart->SubmitFifoTx(in_isr);
 }
 
 // RX is interrupt-driven. Publishing a read waiter does not need any extra
@@ -488,12 +548,20 @@ ErrorCode ESP32UART::InitUartHardware()
   uart_ll_sclk_enable(uart_hal_.dev);
   uart_hal_init(&uart_hal_, uart_num_);
 
-  uart_hw_enabled_ = true;
-  if (SetConfig(config_) != ErrorCode::OK)
+  uart_hal_set_sclk(&uart_hal_, static_cast<soc_module_clk_t>(UART_CLOCK_SOURCE));
+  if ((esp_clk_tree_src_get_freq_hz(static_cast<soc_module_clk_t>(UART_CLOCK_SOURCE),
+                                    ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
+                                    &uart_sclk_hz_) != ESP_OK) ||
+      (uart_sclk_hz_ == 0U))
   {
-    uart_hw_enabled_ = false;
     return ErrorCode::INIT_ERR;
   }
+
+  if (!ApplyConfigPayload(config_))
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  uart_hw_enabled_ = true;
 
   if (ConfigurePins() != ErrorCode::OK)
   {
@@ -561,151 +629,20 @@ ErrorCode ESP32UART::ConfigurePins()
   return ErrorCode::OK;
 }
 
-// Active state is shared by FIFO and DMA TX backends.
-// Active 状态由 FIFO 和 DMA 两条 TX 后端共用。
+// Active state below belongs to the FIFO TX backend.
 void IRAM_ATTR ESP32UART::ClearActiveTx()
 {
   tx_active_length_ = 0U;
   tx_active_offset_ = 0U;
-  tx_active_info_ = {};
   tx_active_valid_ = false;
 }
 
-// Once hardware accepts the active request, completion ownership moves to the
-// backend ISR path and the queued write can be reported as accepted.
-// 一旦硬件接管 active 请求，完成所有权就转移到后端 ISR 路径，队列侧即可
-// 报告该写请求已经被接受。
-bool IRAM_ATTR ESP32UART::StartAndReportActive(bool in_isr)
-{
-  if (!StartActiveTransfer(in_isr))
-  {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
-    ClearActiveTx();
-    return false;
-  }
-
-  // Align with STM/CH semantics: once the active write is kicked to HW,
-  // WritePort owns the completion notification and the ISR only advances queues.
-  write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-  return true;
-}
-
-// TX start only does two things:
-// 1. when TX is fully idle, start one active request;
-// 2. when DMA TX is busy and no pending request is preloaded yet, preload one.
-// TX 发起路径只做两件事：
-// 1. TX 完全空闲时，启动一个 active 请求；
-// 2. DMA TX 已忙且还没有预装 pending 时，补装一个。
-ErrorCode IRAM_ATTR ESP32UART::TryStartTx(bool in_isr)
-{
-  if (in_tx_isr_.IsSet())
-  {
-    return ErrorCode::PENDING;
-  }
-
-  if (!tx_active_valid_)
-  {
-    (void)LoadActiveTxFromQueue(in_isr);
-  }
-
-  if (!tx_busy_.IsSet() && tx_active_valid_)
-  {
-    if (!StartActiveTransfer(in_isr))
-    {
-      ClearActiveTx();
-      return ErrorCode::FAILED;
-    }
-
-    return ErrorCode::OK;
-  }
-
-  return ErrorCode::PENDING;
-}
-
-// Active TX load is shared by both backends. DMA writes payload bytes into the
-// double buffer, while FIFO mode only claims metadata and length.
-// Active TX 装载由两条后端共用。DMA 会把 payload 写进双缓冲；FIFO 模式只
-// 认领元数据和长度。
-bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
-{
-  (void)in_isr;
-
-  size_t active_length = 0U;
-  WriteInfoBlock active_info = {};
-  if (!DequeueFifoTx(active_length, active_info))
-  {
-    return false;
-  }
-
-  tx_active_length_ = active_length;
-  tx_active_offset_ = 0U;
-  tx_active_info_ = active_info;
-  tx_active_valid_ = true;
-  return true;
-}
-
-// Queue-data and queue-info stay decoupled, so dequeue first validates the
-// next metadata entry and only then moves bytes or ownership forward.
-// `queue_data_` 和 `queue_info_` 保持解耦，因此这里先验证下一条元数据，
-// 再推进字节或所有权。
-bool IRAM_ATTR ESP32UART::DequeueFifoTx(size_t& size, WriteInfoBlock& info)
-{
-  WriteInfoBlock peek_info = {};
-  if (write_port_->queue_info_->Peek(peek_info) != ErrorCode::OK)
-  {
-    return false;
-  }
-
-  size_t max_size = write_port_->queue_data_->MaxSize();
-  if (peek_info.data.size_ > max_size)
-  {
-    ASSERT(false);
-    return false;
-  }
-
-  if (write_port_->queue_info_->Pop(info) != ErrorCode::OK)
-  {
-    return false;
-  }
-
-  size = peek_info.data.size_;
-  return true;
-}
-
-// Backend start forks here:
-// - DMA path launches the staged active payload as one DMA transfer.
-// - FIFO path enables TX-empty interrupts and lets ISR-side refill drain data.
-// 后端启动在这里分叉：
-// - DMA 路径把已暂存的 active payload 作为一次 DMA 传输发出去。
-// - FIFO 路径开启 TX-empty 中断，让 ISR 侧补料并持续排空。
-bool IRAM_ATTR ESP32UART::StartActiveTransfer(bool)
-{
-  if (!tx_active_valid_)
-  {
-    return false;
-  }
-
-  if (tx_busy_.TestAndSet())
-  {
-    return true;
-  }
-
-  tx_active_offset_ = 0U;
-
-  uart_hal_clr_intsts_mask(&uart_hal_, UART_TX_INTR_MASK);
-  uart_hal_ena_intr_mask(&uart_hal_, UART_TX_INTR_MASK);
-  FillTxFifo(false);
-
-  return true;
-}
-
-// RX bytes are pushed opportunistically until the software queue is full, then
-// pending read callbacks are serviced once per batch.
-// RX 字节会尽量推进软件队列，直到队列满；完成后按批次触发待读回调。
-void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_isr)
+// RX bytes are pushed opportunistically until the software queue is full. The caller
+// services pending reads only after descriptor/FIFO ownership is in a callback-safe
+// state. RX 字节会尽量推进软件队列，直到队列满；完成后按批次触发待读回调。
+bool IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size)
 {
   size_t offset = 0;
-  bool pushed_any = false;
   while (offset < size)
   {
     const size_t free_space = read_port_->queue_data_->EmptySize();
@@ -721,39 +658,8 @@ void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_
     }
 
     offset += chunk;
-    pushed_any = true;
   }
-
-  if (pushed_any)
-  {
-    read_port_->ProcessPendingReads(in_isr);
-  }
-}
-
-// Completion does the complementary TX handoff work:
-// - if DMA has no pending request, TX is done here;
-// - if DMA has one pending request, start it and then try to preload the next one;
-// - FIFO mode directly loads and starts the next active request.
-// 完成路径负责与发起路径互补的交接工作：
-// - DMA 若没有 pending，请求链在这里结束；
-// - DMA 若有一个 pending，就先启动它，再尝试补装下一个；
-// - FIFO 模式则直接装载并启动下一个 active 请求。
-void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
-{
-  Flag::ScopedRestore tx_flag(in_tx_isr_);
-  tx_busy_.Clear();
-
-  ClearActiveTx();
-
-  if (result != ErrorCode::OK)
-  {
-    return;
-  }
-
-  if (LoadActiveTxFromQueue(in_isr))
-  {
-    (void)StartAndReportActive(in_isr);
-  }
+  return offset != 0U;
 }
 
 }  // namespace LibXR

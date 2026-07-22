@@ -22,7 +22,6 @@ void test_flag();
 void test_inertia();
 void test_list();
 void test_kinematic();
-void test_latest_snapshot();
 void test_mpmc_queue();
 void test_object_pool();
 void test_linux_stdio_print();

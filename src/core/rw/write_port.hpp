@@ -70,6 +70,7 @@ class WritePort
       BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
                                             ///< 当前 BLOCK 写入的最终结果。
+
   // Stream batch facade.
   // Stream 负责一次批次的累积写入与提交。
   class Stream

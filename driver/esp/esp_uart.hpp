@@ -1,35 +1,163 @@
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
+#include <utility>
 
 #include "driver/gpio.h"
 #include "esp_def.hpp"
 #include "esp_idf_version.h"
 #include "esp_intr_alloc.h"
-#include "flag.hpp"
+#include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
+#include "freertos/task.h"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
-#include "latest_snapshot.hpp"
 #include "model/uart_dma_tx_model.hpp"
-#include "model/uart_hardware_gate.hpp"
+#include "model/uart_execution_policy.hpp"
 #include "model/uart_rx_config_gate.hpp"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if defined(SOC_AHB_GDMA_SUPPORTED) && SOC_AHB_GDMA_SUPPORTED && \
+    defined(SOC_UHCI_SUPPORTED) && SOC_UHCI_SUPPORTED
+#define LIBXR_ESP_UART_HAS_AHB_GDMA 1
 #include "esp_private/gdma.h"
 #include "esp_private/gdma_link.h"
+#include "hal/dma_types.h"
 #include "hal/gdma_hal.h"
 #include "hal/uhci_hal.h"
+#else
+#define LIBXR_ESP_UART_HAS_AHB_GDMA 0
 #endif
 
 namespace LibXR
 {
 
 class ESP32UART;
+
+#if (SOC_CPU_CORES_NUM > 1) && \
+    (!defined(CONFIG_FREERTOS_UNICORE) || !CONFIG_FREERTOS_UNICORE)
+inline constexpr bool ESP_UART_USES_IRQ_SERIALIZATION = true;
+#else
+inline constexpr bool ESP_UART_USES_IRQ_SERIALIZATION = false;
+#endif
+
+/** CONFIG-only gate used when the SMP raw-IRQ owner already serializes RX. */
+class ESP32UARTConfigOnlyGate
+{
+ public:
+  [[nodiscard]] bool TryReserveConfig() { return config_gate_.TryReserveConfig(); }
+  void PublishConfig() { config_gate_.PublishConfig(); }
+  [[nodiscard]] bool TryEnterRx() { return true; }
+  [[nodiscard]] bool LeaveRx() { return false; }
+  [[nodiscard]] bool TryEnterConfig() { return config_gate_.TryEnterConfig(); }
+  void LeaveConfig() { config_gate_.LeaveConfig(); }
+  [[nodiscard]] bool TryEnterRecovery() { return true; }
+  void LeaveRecovery() {}
+
+ private:
+  UartRxConfigGate config_gate_;
+};
+
+using ESP32UARTRxConfigGate =
+    std::conditional_t<ESP_UART_USES_IRQ_SERIALIZATION, ESP32UARTConfigOnlyGate,
+                       UartRxConfigGate>;
+
+#if defined(CONFIG_APPTRACE_SV_ENABLE) && CONFIG_APPTRACE_SV_ENABLE
+static_assert(!ESP_UART_USES_IRQ_SERIALIZATION,
+              "ESP UART SMP IRQ serialization is incompatible with the ESP-IDF "
+              "SystemView interrupt wrapper");
+#endif
+
+#if defined(CONFIG_ESP_TRACE_ENABLE) && CONFIG_ESP_TRACE_ENABLE
+static_assert(!ESP_UART_USES_IRQ_SERIALIZATION,
+              "ESP UART SMP IRQ serialization requires direct non-shared ISR handlers");
+#endif
+
+class ESP32UARTIrqAdapter
+{
+ public:
+  explicit ESP32UARTIrqAdapter(ESP32UART& owner) : owner_(owner) {}
+
+  void LockAndMaskIrqDomain() noexcept;
+  void UnlockIrqDomain() noexcept;
+  void LockIrqDomain() noexcept;
+  void RestoreAndUnlockIrqDomain() noexcept;
+
+ private:
+  ESP32UART& owner_;
+};
+
+template <bool UseIrqSerialization>
+class ESP32UARTExecutionPolicyStorage;
+
+template <>
+class ESP32UARTExecutionPolicyStorage<false>
+{
+ public:
+  explicit ESP32UARTExecutionPolicyStorage(ESP32UART&) {}
+
+  template <typename Handler>
+  bool Invoke(uint32_t events, Handler&& handler) noexcept
+  {
+    return policy_.Invoke(events, std::forward<Handler>(handler));
+  }
+
+  template <typename Handler>
+  bool InvokeConfig(uint32_t events, bool in_isr, Handler&& handler) noexcept
+  {
+    return policy_.InvokeConfig(events, in_isr, std::forward<Handler>(handler));
+  }
+
+  template <typename Source, typename Handler>
+  bool InvokeIrq(Source&& source, Handler&& handler) noexcept
+  {
+    return policy_.InvokeIrq(std::forward<Source>(source),
+                             std::forward<Handler>(handler));
+  }
+
+ private:
+  UartDirectPolicy policy_{};
+};
+
+template <>
+class ESP32UARTExecutionPolicyStorage<true>
+{
+ public:
+  explicit ESP32UARTExecutionPolicyStorage(ESP32UART& owner)
+      : adapter_(owner), policy_(adapter_)
+  {
+  }
+
+  template <typename Handler>
+  bool Invoke(uint32_t events, Handler&& handler) noexcept
+  {
+    return policy_.Invoke(events, std::forward<Handler>(handler));
+  }
+
+  template <typename Handler>
+  bool InvokeConfig(uint32_t events, bool in_isr, Handler&& handler) noexcept
+  {
+    return policy_.InvokeConfig(events, in_isr, std::forward<Handler>(handler));
+  }
+
+  template <typename Source, typename Handler>
+  bool InvokeIrq(Source&& source, Handler&& handler) noexcept
+  {
+    return policy_.InvokeIrq(std::forward<Source>(source),
+                             std::forward<Handler>(handler));
+  }
+
+ private:
+  ESP32UARTIrqAdapter adapter_;
+  UartIrqSerializedPolicy<ESP32UARTIrqAdapter> policy_;
+};
+
+using ESP32UARTExecutionPolicy =
+    ESP32UARTExecutionPolicyStorage<ESP_UART_USES_IRQ_SERIALIZATION>;
 
 /**
  * @brief ESP32 UART 读端口 / ESP32 UART read port
@@ -86,6 +214,7 @@ class ESP32UARTReadPort : public ReadPort
 class ESP32UART : public UART
 {
   friend class ESP32UARTReadPort;
+  friend class ESP32UARTIrqAdapter;
   friend class UartDmaTxModel<ESP32UART>;
 
  public:
@@ -104,14 +233,16 @@ class ESP32UART : public UART
   /**
    * @brief Apply a new UART framing and baud configuration.
    * @brief 应用新的 UART 帧格式和波特率配置。
-   * @return `NOT_SUPPORT` when the FIFO backend is active; runtime FIFO
-   * configuration will be provided by its dedicated driver model.
+   * @return `BUSY` while an earlier request is outstanding, or `NOT_SUPPORT` when the
+   * FIFO backend is active.
    */
   ErrorCode SetConfig(UART::Configuration config) override;
 
   /**
    * @brief Toggle UART peripheral internal loopback mode.
    * @brief 切换 UART 外设内部环回模式。
+   * @warning Setup/self-test API. The caller must quiesce concurrent UART traffic and
+   *          configuration before changing this direct peripheral bit.
    */
   ErrorCode SetLoopback(bool enable);
 
@@ -158,10 +289,15 @@ class ESP32UART : public UART
    */
   static uart_parity_t ResolveParity(UART::Parity parity);
 
-  void OnConfigRequested();
-  [[nodiscard]] bool ConfigRequested() const { return hardware_gate_.ConfigRequested(); }
-  bool ApplyPendingConfig(bool in_isr);
-  bool OnConfigApplied(bool in_isr);
+  UartDmaControlResult ApplyPendingConfig(bool in_isr);
+  void ReleaseConfigAdmission(bool in_isr);
+
+  bool ApplyConfigPayload(UART::Configuration config);
+
+  static bool IsCurrentTaskPinned();
+
+  void SetIrqDomainEnabled(bool enabled) noexcept;
+  void SetIrqDomainEnabledLocked(bool enabled) noexcept;
 
   /**
    * @brief UART ISR trampoline.
@@ -169,7 +305,10 @@ class ESP32UART : public UART
    */
   static void UartIsrEntry(void* arg);
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
+  static constexpr uint32_t DMA_UART_ERROR_INTR_MASK =
+      UART_INTR_PARITY_ERR | UART_INTR_FRAM_ERR | UART_INTR_RXFIFO_OVF;
+
   /**
    * @brief GDMA TX completion callback.
    * @brief GDMA TX 完成回调。
@@ -213,78 +352,58 @@ class ESP32UART : public UART
    * @param data DMA-readable payload buffer.
    * @param size Payload size in bytes.
    * @param block Double-buffer block and descriptor-list index.
-   * @param hardware_context Current synchronous IRQ ownership, or `nullptr` outside
-   * an IRQ hardware owner.
-   * @return Whether the transfer started, must be retried, or failed terminally.
+   * @return Whether the transfer started or failed terminally.
    */
-  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block,
-                                  UartHardwareGate::OwnerContext* hardware_context);
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block);
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
   /**
    * @brief Bring up the UHCI/GDMA backend.
    * @brief 拉起 UHCI/GDMA 后端。
    */
   ErrorCode InitDmaBackend();
 
+  void ConfigureDmaErrorInterruptPath();
+
   /**
    * @brief Drain all completed RX descriptors visible from the software cursor.
    * @brief 从软件游标开始排空所有已完成的 RX 描述符。
    */
-  void DrainCompletedDmaRxDescriptors(bool in_isr);
+  bool DrainCompletedDmaRxDescriptors(bool& pushed_any);
 
   /**
-   * @brief Recover the RX DMA ring after an error.
-   * @brief RX DMA 出错后恢复环形队列。
+   * @brief Recover both DMA data paths after a unified error.
+   * @brief 统一错误后恢复 TX/RX DMA 数据路径。
    */
-  void HandleDmaRxError(bool in_isr);
+  UartDmaControlResult RecoverDataPath(bool in_isr);
 
-  /**
-   * @brief Abort the TX DMA path and report failure.
-   * @brief 中止 TX DMA 路径并上报失败。
-   */
-  void HandleDmaTxError(bool in_isr, UartHardwareGate::OwnerContext& hardware_context);
-
-  void MaskDmaInterrupts(bool in_isr);
-  void UnmaskDmaInterrupts(bool in_isr);
-  void DeferDmaInterrupt(bool in_isr);
-  void ServiceDeferredDmaInterrupts(bool in_isr);
-  void ServiceDmaTxStatus(bool in_isr, UartHardwareGate::OwnerContext& hardware_context);
-  void ServiceDmaRxStatus(bool in_isr);
-  bool RemountAndRestartRxDma();
+  uint32_t ServiceDmaTxStatus(bool in_isr);
+  uint32_t ServiceDmaRxStatus(bool& pushed_any);
+  uint32_t ServiceDmaUartStatus(bool in_isr);
+  bool ResetAndRestartRxDma();
 #endif
 
-  void DispatchHardwareActions(UartHardwareGate::PendingAction actions, bool in_isr);
-
   /**
-   * @brief Try to start queued transmit work.
-   * @brief 尝试启动排队的发送工作。
+   * @brief Submit queued work to the FIFO backend's serialized service.
    */
-  ErrorCode TryStartTx(bool in_isr);
+  ErrorCode SubmitFifoTx(bool in_isr);
 
-  /**
-   * @brief Load one active TX request from the queue.
-   * @brief 从队列装载一个 active TX 请求。
-   */
-  bool LoadActiveTxFromQueue(bool in_isr);
+  struct FifoSubmitContext
+  {
+    ErrorCode result = ErrorCode::PENDING;
+    bool resolved = false;
+  };
 
-  /**
-   * @brief Claim one queued request for the FIFO TX backend.
-   * @brief 为 FIFO TX 后端认领一个排队请求。
-   */
-  bool DequeueFifoTx(size_t& size, WriteInfoBlock& info);
+  static constexpr uint32_t FIFO_EVENT_WRITE = 1U << 0U;
+  static constexpr uint32_t FIFO_EVENT_IRQ = 1U << 1U;
+  static constexpr uint32_t FIFO_EVENT_RX_DRAIN = 1U << 2U;
 
-  /**
-   * @brief Start the active request on the selected TX backend.
-   * @brief 在选定 TX 后端上启动 active 请求。
-   */
-  bool StartActiveTransfer(bool in_isr);
+  uint32_t ServiceFifo(uint32_t events, bool in_isr, FifoSubmitContext* submit,
+                       bool& pushed_any) noexcept;
 
-  /**
-   * @brief Start the active request and report queue completion ownership.
-   * @brief 启动 active 请求并上报队列完成所有权交接。
-   */
-  bool StartAndReportActive(bool in_isr);
+  uint32_t ServiceFifoIrqSource(bool in_isr) noexcept;
+
+  bool StartNextFifoTx(bool in_isr, FifoSubmitContext* submit);
 
   /**
    * @brief Clear active TX state.
@@ -302,37 +421,13 @@ class ESP32UART : public UART
    * @brief Push RX bytes into the software queue.
    * @brief 将 RX 字节推入软件队列。
    */
-  void PushRxBytes(const uint8_t* data, size_t size, bool in_isr);
+  bool PushRxBytes(const uint8_t* data, size_t size);
 
   /**
    * @brief Drain pending bytes from the hardware RX FIFO.
    * @brief 从硬件 RX FIFO 中取出待处理字节。
    */
-  void DrainRxFifo(bool in_isr);
-
-  /**
-   * @brief Handle RX-side UART interrupt reasons.
-   * @brief 处理 RX 侧 UART 中断原因。
-   */
-  void HandleRxInterrupt(uint32_t uart_intr_status);
-
-  /**
-   * @brief Handle TX-side UART interrupt reasons.
-   * @brief 处理 TX 侧 UART 中断原因。
-   */
-  void HandleTxInterrupt(uint32_t uart_intr_status);
-
-  /**
-   * @brief Dispatch pending UART interrupt reasons.
-   * @brief 分发待处理的 UART 中断原因。
-   */
-  void HandleUartInterrupt();
-
-  /**
-   * @brief Finalize one TX transfer result.
-   * @brief 收尾一次 TX 传输结果。
-   */
-  void OnTxTransferDone(bool in_isr, ErrorCode result);
+  [[nodiscard]] bool DrainRxFifo(bool in_isr);
 
   uart_port_t uart_num_;  ///< Selected UART peripheral index.
   int tx_pin_;            ///< TX GPIO pin or `PIN_NO_CHANGE`.
@@ -341,21 +436,16 @@ class ESP32UART : public UART
   int cts_pin_;           ///< CTS GPIO pin or `PIN_NO_CHANGE`.
 
   UART::Configuration config_;  ///< Current UART framing configuration.
-  LatestSnapshot<UART::Configuration> requested_config_;
-  UartHardwareGate hardware_gate_;
-  // Retained only by the FIFO backend. Runtime FIFO reconfiguration is unsupported.
-  UartRxConfigGate rx_config_gate_;
+  UART::Configuration requested_config_;
+  uint32_t uart_sclk_hz_ = 0U;
+  portMUX_TYPE irq_domain_lock_ = portMUX_INITIALIZER_UNLOCKED;
+  ESP32UARTExecutionPolicy execution_policy_;
+  [[no_unique_address]] ESP32UARTRxConfigGate rx_config_gate_;
 
-  uint8_t* rx_isr_buffer_ = nullptr;  ///< Scratch buffer used by the RX ISR path.
-  size_t rx_isr_buffer_size_ = 0;     ///< Size of `rx_isr_buffer_`.
-
-  uint8_t* tx_storage_ = nullptr;       ///< Backing storage for the TX half-buffers.
-  WriteInfoBlock tx_active_info_ = {};  ///< Metadata for the active TX request.
-  size_t tx_active_length_ = 0U;        ///< Active TX payload length in bytes.
-  size_t tx_active_offset_ = 0U;        ///< Bytes already emitted for the active request.
-  bool tx_active_valid_ = false;        ///< Whether the active TX metadata is valid.
-  Flag::Plain tx_busy_;    ///< Hardware TX engine currently owns the request.
-  Flag::Plain in_tx_isr_;  ///< Reentry guard while processing TX ISR work.
+  uint8_t* tx_storage_ = nullptr;  ///< Backing storage for the TX half-buffers.
+  size_t tx_active_length_ = 0U;   ///< Active TX payload length in bytes.
+  size_t tx_active_offset_ = 0U;   ///< Bytes already emitted for the active request.
+  bool tx_active_valid_ = false;   ///< Whether the active TX metadata is valid.
 
   bool uart_hw_enabled_ = false;              ///< UART hardware block was initialized.
   uart_hal_context_t uart_hal_ = {};          ///< ESP-IDF UART HAL context.
@@ -367,13 +457,15 @@ class ESP32UART : public UART
   WritePort _write_port;         ///< Write-side queue bridge exposed to `UART`.
   UartDmaTxModel<ESP32UART> tx_dma_model_;  ///< One-shot DMA TX execution model.
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
   bool dma_backend_enabled_ = false;  ///< UHCI/GDMA backend is active.
   uhci_hal_context_t uhci_hal_ = {};  ///< UHCI HAL context bound to this UART.
   gdma_channel_handle_t tx_dma_channel_ = nullptr;  ///< TX GDMA channel handle.
   gdma_channel_handle_t rx_dma_channel_ = nullptr;  ///< RX GDMA channel handle.
   uintptr_t tx_dma_head_addr_[2] = {0U, 0U};        ///< TX list head addresses.
   gdma_link_list_handle_t rx_dma_link_ = nullptr;   ///< RX GDMA ring list.
+  uintptr_t rx_dma_head_addr_ = 0U;                 ///< RX list head address.
+  dma_descriptor_t* rx_dma_descriptors_ = nullptr;  ///< Non-cache RX descriptor view.
   uint8_t* rx_dma_storage_ = nullptr;               ///< RX DMA ring backing storage.
   size_t rx_dma_chunk_size_ = 0;                    ///< Size of one RX DMA ring node.
   size_t rx_dma_buffer_alignment_ = 1;              ///< Alignment used for RX buffers.
