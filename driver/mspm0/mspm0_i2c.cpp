@@ -20,14 +20,15 @@ constexpr uint32_t MSPM0_I2C_MEMREAD_FALLBACK_ATTEMPTS = 3;
 constexpr uint16_t MSPM0_I2C_MAX_TRANSFER_SIZE = 0x0FFF;
 
 #if defined(DMA_CH_TX_CHAN_ID) && defined(DMA_CH_RX_CHAN_ID)
-#define MSPM0_I2C_HAS_SYSCONFIG_DMA 1
+constexpr bool MSPM0_I2C_HAS_DMA_CHANNELS = true;
 constexpr uint8_t MSPM0_I2C_DMA_TX_CHANNEL = DMA_CH_TX_CHAN_ID;
 constexpr uint8_t MSPM0_I2C_DMA_RX_CHANNEL = DMA_CH_RX_CHAN_ID;
 #else
-#define MSPM0_I2C_HAS_SYSCONFIG_DMA 0
+constexpr bool MSPM0_I2C_HAS_DMA_CHANNELS = false;
+constexpr uint8_t MSPM0_I2C_DMA_TX_CHANNEL = 0U;
+constexpr uint8_t MSPM0_I2C_DMA_RX_CHANNEL = 0U;
 #endif
 
-#if MSPM0_I2C_HAS_SYSCONFIG_DMA
 constexpr DL_DMA_Config MSPM0_I2C_DMA_TX_CONFIG_BASE = {
     .trigger = 0U,
     .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
@@ -54,7 +55,6 @@ constexpr uint32_t mspm0_i2c_dma_channel_mask(uint8_t channel_id)
 {
   return (1UL << channel_id);
 }
-#endif
 
 bool mspm0_i2c_resolve_dma_triggers(I2C_Regs* instance, uint8_t& tx_trigger,
                                     uint8_t& rx_trigger)
@@ -96,8 +96,7 @@ bool mspm0_i2c_resolve_dma_triggers(I2C_Regs* instance, uint8_t& tx_trigger,
 
 constexpr uint16_t mspm0_i2c_to_addr7(uint16_t slave_addr)
 {
-  return (slave_addr <= 0x7FU) ? slave_addr
-                               : static_cast<uint16_t>((slave_addr >> 1) & 0x7FU);
+  return static_cast<uint16_t>((slave_addr >> 1) & 0x7F);
 }
 
 void mspm0_i2c_recover_controller(I2C_Regs* instance)
@@ -224,14 +223,11 @@ ErrorCode MSPM0I2C::SetConfig(Configuration config)
       .divideRatio = DL_I2C_CLOCK_DIVIDE_1,
   };
 
-#if MSPM0_I2C_HAS_SYSCONFIG_DMA
   uint8_t dma_tx_trigger = 0U;
   uint8_t dma_rx_trigger = 0U;
   const bool USE_DMA =
+      MSPM0_I2C_HAS_DMA_CHANNELS &&
       mspm0_i2c_resolve_dma_triggers(res_.instance, dma_tx_trigger, dma_rx_trigger);
-#else
-  const bool USE_DMA = false;
-#endif
   dma_enabled_ = USE_DMA;
 
   DL_I2C_disableController(res_.instance);
@@ -249,13 +245,14 @@ ErrorCode MSPM0I2C::SetConfig(Configuration config)
                          DL_I2C_DMA_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER);
   DL_I2C_disableDMAEvent(res_.instance, DL_I2C_EVENT_ROUTE_2,
                          DL_I2C_DMA_INTERRUPT_CONTROLLER_RXFIFO_TRIGGER);
-
-#if MSPM0_I2C_HAS_SYSCONFIG_DMA
-  DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_TX_CHANNEL);
-  DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_RX_CHANNEL);
-  DL_DMA_clearInterruptStatus(DMA,
-                              mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL) |
-                                  mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL));
+  if constexpr (MSPM0_I2C_HAS_DMA_CHANNELS)
+  {
+    DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_TX_CHANNEL);
+    DL_DMA_disableChannel(DMA, MSPM0_I2C_DMA_RX_CHANNEL);
+    DL_DMA_clearInterruptStatus(DMA,
+                                mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_TX_CHANNEL) |
+                                    mspm0_i2c_dma_channel_mask(MSPM0_I2C_DMA_RX_CHANNEL));
+  }
 
   if (USE_DMA)
   {
@@ -271,7 +268,6 @@ ErrorCode MSPM0I2C::SetConfig(Configuration config)
     DL_DMA_initChannel(DMA, MSPM0_I2C_DMA_TX_CHANNEL, &dma_tx_config);
     DL_DMA_initChannel(DMA, MSPM0_I2C_DMA_RX_CHANNEL, &dma_rx_config);
   }
-#endif
 
   DL_I2C_enableController(res_.instance);
 
@@ -417,7 +413,6 @@ ErrorCode MSPM0I2C::PollingRead7(uint16_t addr7, uint8_t* data, size_t size)
 
 ErrorCode MSPM0I2C::WaitDmaTransferDone(uint8_t channel_id) const
 {
-#if MSPM0_I2C_HAS_SYSCONFIG_DMA
   uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
   while (DL_DMA_getTransferSize(DMA, channel_id) != 0U)
   {
@@ -431,15 +426,10 @@ ErrorCode MSPM0I2C::WaitDmaTransferDone(uint8_t channel_id) const
     }
   }
   return ErrorCode::OK;
-#else
-  UNUSED(channel_id);
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode MSPM0I2C::DmaWrite7(uint16_t addr7, ConstRawData write_data)
 {
-#if MSPM0_I2C_HAS_SYSCONFIG_DMA
   if (write_data.size_ == 0)
   {
     return ErrorCode::OK;
@@ -520,16 +510,10 @@ ErrorCode MSPM0I2C::DmaWrite7(uint16_t addr7, ConstRawData write_data)
   }
 
   return last_error;
-#else
-  UNUSED(addr7);
-  UNUSED(write_data);
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode MSPM0I2C::DmaRead7(uint16_t addr7, RawData read_data)
 {
-#if MSPM0_I2C_HAS_SYSCONFIG_DMA
   if (read_data.size_ == 0)
   {
     return ErrorCode::OK;
@@ -610,11 +594,6 @@ ErrorCode MSPM0I2C::DmaRead7(uint16_t addr7, RawData read_data)
   }
 
   return last_error;
-#else
-  UNUSED(addr7);
-  UNUSED(read_data);
-  return ErrorCode::NOT_SUPPORT;
-#endif
 }
 
 ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op,
