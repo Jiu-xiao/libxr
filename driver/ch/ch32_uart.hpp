@@ -7,9 +7,8 @@
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
-#include "model/uart_dma_tx_model.hpp"
+#include "model/uart_dma_model.hpp"
 #include "model/uart_execution_policy.hpp"
-#include "model/uart_rx_config_gate.hpp"
 #include "uart.hpp"
 
 namespace LibXR
@@ -20,12 +19,19 @@ namespace LibXR
  *
  * This backend supports the current CH32V20x/V30x BSPs (V203/V307). The IRQ handlers
  * inspect and acknowledge their peripheral/DMA status before publishing coalesced TX
- * facts into the same serialized service used by Write() and SetConfig().
+ * facts into the same serialized service used by Write() and SetConfig(). Owner
+ * admission neither masks this instance's IRQ sources nor disables global interrupts.
+ * CONFIG/ERROR may disable TC/HT/TE/IDLE only while actually stopping the data path.
+ * Normal TX DMA completion advances the buffered TX model immediately. Destructive
+ * CONFIG waits asynchronously for the USART transmission-complete flag before resetting
+ * the peripheral, using the USART TC IRQ as its service carrier.
+ * The BSP must keep the related UART, TX-DMA, and RX-DMA IRQs on one owner core at the
+ * same preemption priority.
  */
 class CH32UART : public UART
 {
   friend class UartCircularDmaRxModel;
-  friend class UartDmaTxModel<CH32UART>;
+  friend class UartDmaModel<CH32UART, UartDirectPolicy>;
 
  public:
   /**
@@ -36,7 +42,11 @@ class CH32UART : public UART
            uint32_t pin_remap = 0, uint32_t tx_queue_size = 5,
            UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
-  /** @return `BUSY` while an earlier configuration request is outstanding. */
+  /**
+   * @return `BUSY` while an earlier configuration request is outstanding.
+   * @warning Do not call from this UART's callbacks or from an ISR that can preempt its
+   * UART/TX-DMA/RX-DMA IRQ domain.
+   */
   ErrorCode SetConfig(UART::Configuration config);
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
@@ -52,11 +62,9 @@ class CH32UART : public UART
   ReadPort _read_port;
   WritePort _write_port;
 
-  UART::Configuration requested_config_;
   UartDirectPolicy execution_policy_;
   UartCircularDmaRxModel rx_dma_model_;
-  UartDmaTxModel<CH32UART> tx_dma_model_;
-  UartRxConfigGate rx_config_gate_;
+  UartDmaModel<CH32UART, UartDirectPolicy> dma_model_;
 
   USART_TypeDef* instance_;
   DMA_Channel_TypeDef* dma_rx_channel_;
@@ -65,26 +73,30 @@ class CH32UART : public UART
   static CH32UART* map_[CH32_UART_NUMBER];
 
  private:
-  UartDmaControlResult ApplyPendingConfig(bool in_isr);
-  void ReleaseConfigAdmission(bool) { rx_config_gate_.LeaveConfig(); }
+  [[nodiscard]] ErrorCode ValidateConfig(UART::Configuration config) const;
+  UartDmaControlResult AdvanceConfig(UART::Configuration config, bool active_tx,
+                                     bool in_isr);
+  UartDmaControlProgress CompleteConfig(bool in_isr);
 
   static bool InIsr();
 
   void HandleNormalIrq();
 
-  void ScanNormalIrqStatus(bool in_isr);
+  uint32_t ScanNormalIrqStatus(bool in_isr, bool& pushed_any);
 
-  UartDmaControlResult RecoverDataPath(bool in_isr);
+  UartDmaControlResult AdvanceRecovery(bool active_tx, bool in_isr);
+  UartDmaControlProgress CompleteRecovery(bool in_isr);
 
   void SetDataPathInterrupts(bool enabled);
 
-  void StopDataPath(bool in_isr);
+  UartOldTxTerminal StopDataPath(bool active_tx, bool in_isr);
 
   void StartDataPath();
 
-  void ApplyConfigPayload(bool in_isr);
+  void ApplyConfigPayload(UART::Configuration config, bool in_isr);
 
-  void OnRxDataAvailable(bool in_isr);
+  bool config_waiting_for_tx_idle_ = false;
+  UartOldTxTerminal config_tx_terminal_ = UartOldTxTerminal::NONE;
 
   /**
    * @brief 配置并启动 CH32 UART 循环 RX DMA 通道 / Configure and start the CH32 UART
@@ -118,7 +130,7 @@ class CH32UART : public UART
    * unused by CH32 DMA
    * @return `STARTED` after enabling DMA
    */
-  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block);
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block, bool in_isr);
 };
 
 }  // namespace LibXR

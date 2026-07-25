@@ -3,6 +3,8 @@
 #if defined(STM32C0) || defined(STM32F0) || defined(STM32G0) || defined(STM32L0) || \
     defined(STM32U0)
 
+/* Single-core Cortex-M0/M0+ fallback: PRIMASK covers only one atomic load/store/RMW.
+ * This is not UART owner admission and is not valid for a shared-object SMP port. */
 static inline uint32_t atomic_enter(void)
 {
   uint32_t primask_state = __get_PRIMASK();

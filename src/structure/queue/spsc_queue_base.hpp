@@ -72,7 +72,9 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     ASSERT(element_size_ > 0);
     ASSERT(payload_alloc_align_ > 0);
     ASSERT(capacity_ > 0);
-    ASSERT(capacity_ < static_cast<size_t>(UINT32_MAX));
+    // Ring arithmetic uses uint32_t indices and one reserved slot. This is a
+    // construction-time invariant in every build, not a debug-only assertion.
+    REQUIRE(capacity_ < static_cast<size_t>(UINT32_MAX));
     ASSERT((payload_alloc_align_ & (payload_alloc_align_ - 1)) == 0);
 
     const size_t payload_bytes = MultiplyChecked(payload_stride_, RingCapacity());

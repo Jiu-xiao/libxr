@@ -46,8 +46,13 @@ class ReadPort
                          ///< BLOCK 唤醒已被本次等待者认领。
     BLOCK_DETACHED = 4,  ///< Timeout detached the waiter; completion must stay silent.
                          ///< 超时已分离等待者，完成侧不得再唤醒。
-    EVENT = UINT32_MAX   ///< Data arrived before a waiter was armed; next caller must
+    PROCESSING = 5,      ///< One completion path owns the queue pop.
+    EVENT = 1U << 31U,   ///< Data arrived before a waiter was armed; next caller must
                          ///< re-check queue. 数据先到，后续调用者要重查队列。
+    CLEARING_EVENT = (1U << 31U) | 2U,        ///< CLEARING with a follow-up event.
+    PROCESSING_EVENT = (1U << 31U) | 5U,      ///< PROCESSING with a follow-up event.
+    BLOCK_CLAIMED_EVENT = (1U << 31U) | 3U,   ///< Claimed BLOCK plus event.
+    BLOCK_DETACHED_EVENT = (1U << 31U) | 4U,  ///< Detached BLOCK plus event.
   };
 
   ReadFun read_fun_ =
@@ -231,11 +236,11 @@ class ReadPort
    *
    * @note Driver-only: call this only after the backend is known to be unavailable.
    * @note 仅供驱动层在后端已明确不可用后调用。
-   * @note The surrounding driver must already guarantee that no new front-end
-   *       submissions or back-end completion/data events can still arrive for
-   *       this port.
-   * @note 外围驱动还必须先保证：这条端口后续不会再收到新的前端提交，也不会再收到
-   *       新的后端完成或数据事件。
+   * @note The surrounding driver must already guarantee that no front-end
+   *       submission or back-end completion/data event is executing, and that none
+   *       can begin for this port until this call returns.
+   * @note 外围驱动还必须先保证：当前没有前端提交或后端完成/数据事件正在执行，且本调用
+   *       返回前不能开始新的相关操作。
    *
    * @param reason 最终失败原因 / Final failure reason
    * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
