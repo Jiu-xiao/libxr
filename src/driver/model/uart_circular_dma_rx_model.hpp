@@ -24,8 +24,17 @@ namespace LibXR
 class UartCircularDmaRxModel
 {
  public:
-  /** Construct the model with platform-provided DMA storage. */
-  explicit UartCircularDmaRxModel(RawData storage) : storage_(storage) {}
+  /**
+   * @brief Construct the model with platform-provided DMA storage.
+   *
+   * Empty storage disables circular RX. Enabled storage needs at least two bytes so
+   * the modulo DMA position has more than one observable value.
+   */
+  explicit UartCircularDmaRxModel(RawData storage) : storage_(storage)
+  {
+    REQUIRE((storage_.size_ == 0U) ||
+            ((storage_.addr_ != nullptr) && (storage_.size_ >= 2U)));
+  }
 
   /** Reset the software cursor and start the backend circular DMA channel. */
   template <typename Backend>
@@ -55,7 +64,6 @@ class UartCircularDmaRxModel
     }
 
     const size_t current_position = capacity - remaining;
-    backend.PrepareCircularDmaRxForCpu(buffer, capacity);
 
     if (current_position == last_position_)
     {
@@ -64,14 +72,22 @@ class UartCircularDmaRxModel
 
     if (current_position > last_position_)
     {
+      backend.PrepareCircularDmaRxForCpu(&buffer[last_position_],
+                                         current_position - last_position_);
       (void)port.queue_data_->PushBatch(&buffer[last_position_],
                                         current_position - last_position_);
     }
     else
     {
+      backend.PrepareCircularDmaRxForCpu(&buffer[last_position_],
+                                         capacity - last_position_);
       (void)port.queue_data_->PushBatch(&buffer[last_position_],
                                         capacity - last_position_);
-      (void)port.queue_data_->PushBatch(buffer, current_position);
+      if (current_position != 0U)
+      {
+        backend.PrepareCircularDmaRxForCpu(buffer, current_position);
+        (void)port.queue_data_->PushBatch(buffer, current_position);
+      }
     }
 
     last_position_ = current_position;

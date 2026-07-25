@@ -4,6 +4,160 @@
 
 using namespace LibXR;
 
+namespace
+{
+using BusyState = ReadPort::BusyState;
+constexpr uint32_t EVENT_MASK = static_cast<uint32_t>(BusyState::EVENT);
+
+BusyState EventState(BusyState state)
+{
+  if ((static_cast<uint32_t>(state) & ~EVENT_MASK) ==
+      static_cast<uint32_t>(BusyState::PENDING))
+  {
+    return state;
+  }
+
+  return static_cast<BusyState>(static_cast<uint32_t>(state) | EVENT_MASK);
+}
+
+void RecordEvent(std::atomic<BusyState>& state)
+{
+  while (true)
+  {
+    BusyState observed = state.load(std::memory_order_acquire);
+    const BusyState marked = EventState(observed);
+
+    if (marked == observed)
+    {
+      return;
+    }
+
+    if (state.compare_exchange_weak(observed, marked, std::memory_order_acq_rel,
+                                    std::memory_order_acquire))
+    {
+      return;
+    }
+  }
+}
+
+void PublishAfterConsumer(std::atomic<BusyState>& state, BusyState owner,
+                          bool preserve_event = false)
+{
+  while (true)
+  {
+    BusyState observed = state.load(std::memory_order_acquire);
+    BusyState target = preserve_event ? BusyState::EVENT : BusyState::IDLE;
+
+    if (observed == EventState(owner))
+    {
+      target = BusyState::EVENT;
+    }
+    else if (observed != owner)
+    {
+      ASSERT(false);
+      return;
+    }
+
+    if (state.compare_exchange_weak(observed, target, std::memory_order_acq_rel,
+                                    std::memory_order_acquire))
+    {
+      return;
+    }
+  }
+}
+
+bool PublishPending(std::atomic<BusyState>& state, BusyState owner)
+{
+  while (true)
+  {
+    BusyState observed = state.load(std::memory_order_acquire);
+    const bool had_event = observed == EventState(owner);
+    if (observed == owner || had_event)
+    {
+      if (state.compare_exchange_weak(observed, BusyState::PENDING,
+                                      std::memory_order_release,
+                                      std::memory_order_acquire))
+      {
+        return had_event;
+      }
+      continue;
+    }
+
+    ASSERT(false);
+    return false;
+  }
+}
+
+void PublishBlockClaim(std::atomic<BusyState>& state)
+{
+  BusyState expected = BusyState::PROCESSING;
+  if (state.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
+                                    std::memory_order_acq_rel, std::memory_order_acquire))
+  {
+    return;
+  }
+
+  ASSERT(expected == BusyState::PROCESSING_EVENT);
+  expected = BusyState::PROCESSING_EVENT;
+  const bool claimed =
+      state.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED_EVENT,
+                                    std::memory_order_acq_rel, std::memory_order_acquire);
+  ASSERT(claimed);
+}
+
+void ReleaseBlockClaim(std::atomic<BusyState>& state)
+{
+  while (true)
+  {
+    BusyState observed = state.load(std::memory_order_acquire);
+    BusyState target = BusyState::IDLE;
+    if (observed == BusyState::BLOCK_CLAIMED_EVENT)
+    {
+      target = BusyState::EVENT;
+    }
+    else if (observed != BusyState::BLOCK_CLAIMED)
+    {
+      ASSERT(false);
+      return;
+    }
+
+    if (state.compare_exchange_weak(observed, target, std::memory_order_acq_rel,
+                                    std::memory_order_acquire))
+    {
+      return;
+    }
+  }
+}
+
+void ReleaseDetached(std::atomic<BusyState>& state)
+{
+  while (true)
+  {
+    BusyState observed = state.load(std::memory_order_acquire);
+    BusyState target = BusyState::IDLE;
+    if (observed == BusyState::BLOCK_DETACHED_EVENT)
+    {
+      target = BusyState::EVENT;
+    }
+    else if (observed != BusyState::BLOCK_DETACHED)
+    {
+      if (observed == BusyState::EVENT)
+      {
+        return;
+      }
+      ASSERT(false);
+      return;
+    }
+
+    if (state.compare_exchange_weak(observed, target, std::memory_order_acq_rel,
+                                    std::memory_order_acquire))
+    {
+      return;
+    }
+  }
+}
+}  // namespace
+
 ReadPort::ReadPort(size_t buffer_size)
     : queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
                                         SPSCQueue<uint8_t>(buffer_size)
@@ -35,159 +189,159 @@ void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
 {
   if (info.op.type == ReadOperation::OperationType::BLOCK)
   {
-    // Read completion is queue-driven. ProcessPendingReads() must claim the
-    // BLOCK waiter before data is copied and Finish() is called.
-    // 读完成只走队列路径。ProcessPendingReads() 必须先 claim BLOCK waiter，
-    // 再拷贝数据并调用 Finish()。
-    ASSERT(busy_.load(std::memory_order_acquire) == BusyState::BLOCK_CLAIMED);
+    const auto state = busy_.load(std::memory_order_acquire);
+    ASSERT(state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_CLAIMED_EVENT);
     block_result_ = ans;
     info.op.data.sem_info.sem->PostFromCallback(in_isr);
     return;
   }
 
-  busy_.store(BusyState::IDLE, std::memory_order_release);
-  info.op.UpdateStatus(in_isr, ans);
+  auto operation = info.op;
+  PublishAfterConsumer(busy_, BusyState::PROCESSING);
+  operation.UpdateStatus(in_isr, ans);
 }
 
 void ReadPort::MarkAsRunning(ReadInfoBlock& info) { info.op.MarkAsRunning(); }
 
 ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 {
-  if (Readable())
+  if (!Readable())
   {
-    BusyState is_busy = busy_.load(std::memory_order_acquire);
+    return ErrorCode::NOT_SUPPORT;
+  }
 
-    if (is_busy != BusyState::IDLE && is_busy != BusyState::EVENT)
+  while (true)
+  {
+    const BusyState state = busy_.load(std::memory_order_acquire);
+    if (state != BusyState::IDLE && state != BusyState::EVENT)
     {
       return ErrorCode::BUSY;
     }
 
-    while (true)
+    BusyState expected = state;
+    if (!busy_.compare_exchange_weak(expected, BusyState::CLEARING,
+                                     std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
     {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
+      continue;
+    }
 
-      auto readable_size = queue_data_->Size();
-
-      if (readable_size >= data.size_ && readable_size != 0)
+    const size_t readable_size = queue_data_->Size();
+    if (readable_size >= data.size_ && readable_size != 0)
+    {
+      if (data.size_ > 0)
       {
-        if (data.size_ > 0)
-        {
-          auto ans =
-              queue_data_->PopBatch(reinterpret_cast<uint8_t*>(data.addr_), data.size_);
-          ASSERT(ans == ErrorCode::OK);
-          OnRxDequeue(in_isr);
-        }
-
-        if (op.type != ReadOperation::OperationType::BLOCK)
-        {
-          op.UpdateStatus(in_isr, ErrorCode::OK);
-        }
-        return ErrorCode::OK;
+        const auto ans =
+            queue_data_->PopBatch(reinterpret_cast<uint8_t*>(data.addr_), data.size_);
+        ASSERT(ans == ErrorCode::OK);
+        PublishAfterConsumer(busy_, BusyState::CLEARING);
+        OnRxDequeue(in_isr);
+      }
+      else
+      {
+        PublishAfterConsumer(busy_, BusyState::CLEARING);
       }
 
-      info_ = ReadInfoBlock{data, op};
-
-      op.MarkAsRunning();
-
-      BusyState expected = BusyState::IDLE;
-      if (!busy_.compare_exchange_strong(expected, BusyState::PENDING,
-                                         std::memory_order_acq_rel,
-                                         std::memory_order_acquire))
+      if (op.type != ReadOperation::OperationType::BLOCK)
       {
-        ASSERT(expected == BusyState::EVENT);
-        continue;
+        op.UpdateStatus(in_isr, ErrorCode::OK);
       }
+      return ErrorCode::OK;
+    }
 
-      auto ans = read_fun_(*this, in_isr);
-      if (static_cast<int8_t>(ans) >= 0)
-      {
-        break;
-      }
+    info_ = ReadInfoBlock{data, op};
+    op.MarkAsRunning();
+    (void)PublishPending(busy_, BusyState::CLEARING);
 
-      // read_fun_ failed while arming/notifying the backend. Roll back only if no
-      // producer has completed this pending read concurrently.
-      // read_fun_ 挂起/通知底层失败；只有未被 producer 并发完成时，才回滚 pending。
-      expected = BusyState::PENDING;
-      if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
-      {
-        if (op.type != ReadOperation::OperationType::BLOCK)
-        {
-          op.UpdateStatus(in_isr, ans);
-        }
-        return ans;
-      }
-
-      if (expected == BusyState::BLOCK_DETACHED)
-      {
-        return ErrorCode::TIMEOUT;
-      }
-      if (expected == BusyState::IDLE)
-      {
-        // A non-BLOCK read may have completed through ProcessPendingReads() before the
-        // arm failure returned.
-        // 非 BLOCK 读可能在挂起失败返回前，已经通过 ProcessPendingReads() 完成。
-        ASSERT(op.type != ReadOperation::OperationType::BLOCK);
-        return ErrorCode::OK;
-      }
-      ASSERT(expected == BusyState::BLOCK_CLAIMED);
+    const auto ans = read_fun_(*this, in_isr);
+    if (static_cast<int8_t>(ans) >= 0)
+    {
+      // A producer may have pushed while CLEARING suppressed its notification.
+      // Re-check now that the request is visible as PENDING.
+      ProcessPendingReads(in_isr);
       break;
     }
 
-    if (op.type == ReadOperation::OperationType::BLOCK)
+    expected = BusyState::PENDING;
+    if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
     {
-      ASSERT(!in_isr);
-      auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-      if (wait_ans == ErrorCode::OK)
+      if (op.type != ReadOperation::OperationType::BLOCK)
       {
-        // BLOCK_CLAIMED is always released by the waiter itself.
-        // BLOCK_CLAIMED 始终由 waiter 自己释放。
+        op.UpdateStatus(in_isr, ans);
+      }
+      return ans;
+    }
+
+    if (expected == BusyState::BLOCK_DETACHED ||
+        expected == BusyState::BLOCK_DETACHED_EVENT)
+    {
+      return ErrorCode::TIMEOUT;
+    }
+    if (expected == BusyState::IDLE || expected == BusyState::EVENT ||
+        expected == BusyState::PROCESSING || expected == BusyState::PROCESSING_EVENT)
+    {
+      if (op.type != ReadOperation::OperationType::BLOCK)
+      {
+        return ErrorCode::OK;
+      }
+      break;
+    }
+
+    ASSERT(expected == BusyState::BLOCK_CLAIMED ||
+           expected == BusyState::BLOCK_CLAIMED_EVENT);
+    break;
+  }
+
+  if (op.type != ReadOperation::OperationType::BLOCK)
+  {
+    return ErrorCode::OK;
+  }
+
+  ASSERT(!in_isr);
+  const auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+  if (wait_ans == ErrorCode::OK)
+  {
 #ifdef LIBXR_DEBUG_BUILD
-        auto state = busy_.load(std::memory_order_acquire);
-        ASSERT(state == BusyState::BLOCK_CLAIMED);
+    const auto state = busy_.load(std::memory_order_acquire);
+    ASSERT(state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_CLAIMED_EVENT);
 #endif
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-        return block_result_;
-      }
+    ReleaseBlockClaim(busy_);
+    return block_result_;
+  }
 
-      // BLOCK wait timed out after the backend had accepted the read. Cancel only if
-      // completion has not claimed this waiter.
-      // 底层已接受读请求后，BLOCK 等待超时；只有完成侧尚未 claim 当前 waiter 时才取消。
-      BusyState expected = BusyState::PENDING;
-      if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
-      {
-        return ErrorCode::TIMEOUT;
-      }
+  while (true)
+  {
+    BusyState expected = BusyState::PENDING;
+    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      ReleaseDetached(busy_);
+      return ErrorCode::TIMEOUT;
+    }
 
-      if (expected == BusyState::BLOCK_DETACHED)
-      {
-        // The waiter had already detached before the timeout-side cancel won.
-        // 当前 waiter 已经先分离；超时侧负责把端口收回 IDLE。
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-        return ErrorCode::TIMEOUT;
-      }
+    if (expected == BusyState::BLOCK_DETACHED ||
+        expected == BusyState::BLOCK_DETACHED_EVENT)
+    {
+      ReleaseDetached(busy_);
+      return ErrorCode::TIMEOUT;
+    }
 
-      ASSERT(expected == BusyState::BLOCK_CLAIMED);
-
-      // Timeout lost after completion had already claimed the waiter.
-      // 超时发生得太晚，完成侧已经 claim 了当前 waiter。
-      auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
+    if (expected == BusyState::BLOCK_CLAIMED ||
+        expected == BusyState::BLOCK_CLAIMED_EVENT)
+    {
+      const auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
       UNUSED(finish_wait_ans);
       ASSERT(finish_wait_ans == ErrorCode::OK);
-      busy_.store(BusyState::IDLE, std::memory_order_release);
+      ReleaseBlockClaim(busy_);
       return block_result_;
     }
-    else
-    {
-      return ErrorCode::OK;
-    }
-  }
-  else
-  {
-    return ErrorCode::NOT_SUPPORT;
+
+    // PROCESSING is a short queue-claim window. Retry the cancellation CAS;
+    // the completion path either returns to PENDING or posts the semaphore.
+    ASSERT(expected == BusyState::PROCESSING || expected == BusyState::PROCESSING_EVENT);
   }
 }
 
@@ -197,59 +351,67 @@ void ReadPort::ProcessPendingReads(bool in_isr)
 
   while (true)
   {
-    auto is_busy = busy_.load(std::memory_order_acquire);
+    const BusyState state = busy_.load(std::memory_order_acquire);
 
-    if (is_busy == BusyState::PENDING)
+    if (state == BusyState::PENDING)
     {
-      auto size = queue_data_->Size();
-      if (size > 0 && size >= info_.data.size_)
+      BusyState expected = BusyState::PENDING;
+      if (!busy_.compare_exchange_strong(expected, BusyState::PROCESSING,
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire))
       {
-        if (info_.op.type == ReadOperation::OperationType::BLOCK)
-        {
-          // Read BLOCK completion is claimed here before copying data.
-          // BLOCK 读完成在这里先 claim，再拷数据。
-          BusyState expected = BusyState::PENDING;
-          if (!busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
-                                             std::memory_order_acq_rel,
-                                             std::memory_order_acquire))
-          {
-            continue;
-          }
-        }
+        continue;
+      }
 
-        if (info_.data.size_ > 0)
+      const size_t size = queue_data_->Size();
+      if (size == 0 || size < info_.data.size_)
+      {
+        const bool had_event =
+            busy_.load(std::memory_order_acquire) == BusyState::PROCESSING_EVENT;
+        const bool published_event = PublishPending(busy_, BusyState::PROCESSING);
+        if (had_event || published_event)
         {
-          auto ans = queue_data_->PopBatch(reinterpret_cast<uint8_t*>(info_.data.addr_),
-                                           info_.data.size_);
-          UNUSED(ans);
-          ASSERT(ans == ErrorCode::OK);
-          Finish(in_isr, ErrorCode::OK, info_);
-          OnRxDequeue(in_isr);
+          continue;
         }
-        else
-        {
-          Finish(in_isr, ErrorCode::OK, info_);
-        }
+        return;
+      }
+
+      if (info_.op.type == ReadOperation::OperationType::BLOCK)
+      {
+        PublishBlockClaim(busy_);
+      }
+
+      if (info_.data.size_ > 0)
+      {
+        const auto ans = queue_data_->PopBatch(
+            reinterpret_cast<uint8_t*>(info_.data.addr_), info_.data.size_);
+        ASSERT(ans == ErrorCode::OK);
+        Finish(in_isr, ErrorCode::OK, info_);
+        OnRxDequeue(in_isr);
+      }
+      else
+      {
+        Finish(in_isr, ErrorCode::OK, info_);
       }
       return;
     }
 
-    if (is_busy == BusyState::IDLE)
+    if (state == BusyState::IDLE)
     {
-      // Data arrived before a waiter was armed. This must be a CAS: a reader may
-      // publish PENDING after the load above, and EVENT must not overwrite it.
-      // 数据先于 waiter 到达。这里必须用 CAS：读线程可能在上面的 load 之后发布
-      // PENDING，EVENT 不能覆盖它。
-      BusyState expected = BusyState::IDLE;
-      if (busy_.compare_exchange_strong(expected, BusyState::EVENT,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
+      if (queue_data_->Size() == 0)
       {
         return;
       }
-      continue;
+
+      RecordEvent(busy_);
+      return;
     }
 
+    if (state == BusyState::CLEARING || state == BusyState::PROCESSING ||
+        state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_DETACHED)
+    {
+      RecordEvent(busy_);
+    }
     return;
   }
 }
@@ -260,16 +422,16 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
 
   while (true)
   {
-    auto state = busy_.load(std::memory_order_acquire);
+    const BusyState state = busy_.load(std::memory_order_acquire);
     if (state != BusyState::IDLE && state != BusyState::EVENT)
     {
       return ErrorCode::BUSY;
     }
 
     BusyState expected = state;
-    if (!busy_.compare_exchange_strong(expected, BusyState::CLEARING,
-                                       std::memory_order_acq_rel,
-                                       std::memory_order_acquire))
+    if (!busy_.compare_exchange_weak(expected, BusyState::CLEARING,
+                                     std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
     {
       if (expected != BusyState::IDLE && expected != BusyState::EVENT)
       {
@@ -279,28 +441,17 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
     }
 
     const size_t queued_size = queue_data_->Size();
-    if (queued_size == 0)
+    if (queued_size > 0)
     {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return ErrorCode::OK;
-    }
-
-    const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
-    if (pop_ans == ErrorCode::OK)
-    {
+      const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
+      ASSERT(pop_ans == ErrorCode::OK);
+      PublishAfterConsumer(busy_, BusyState::CLEARING, queue_data_->Size() > 0);
       OnRxDequeue(in_isr);
     }
     else
     {
-      // With CLEARING, ordinary reads cannot race this pop. EMPTY here means a
-      // stronger path such as FailAndClearAll() reset the queue concurrently.
-      // 有了 CLEARING 之后，普通读不会再与本次 Pop 竞争。这里如果是 EMPTY，
-      // 说明是 FailAndClearAll() 之类更强的路径并发 reset 了队列。
-      ASSERT(pop_ans == ErrorCode::EMPTY);
+      PublishAfterConsumer(busy_, BusyState::CLEARING);
     }
-
-    busy_.store(queue_data_->Size() > 0 ? BusyState::EVENT : BusyState::IDLE,
-                std::memory_order_release);
     return ErrorCode::OK;
   }
 }
@@ -310,17 +461,8 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
   ASSERT(queue_data_ != nullptr);
 
   auto state = busy_.load(std::memory_order_acquire);
-
-  // Symmetric to WritePort::FailAndClearAll's guard on
-  // LOCKED/BLOCK_PUBLISHING/RESETTING: CLEARING means ClearQueuedData() still owns
-  // dequeue progress, which violates this API's "backend already unavailable, no
-  // concurrent activity" precondition. Assert in dev builds and back off in release
-  // builds instead of silently stomping the in-flight clear back to IDLE.
-  // 对称于 WritePort::FailAndClearAll 对 LOCKED/BLOCK_PUBLISHING/RESETTING 的守卫：
-  // CLEARING 表示 ClearQueuedData() 仍占有出队进度，违反了本接口“后端已不可用、
-  // 无并发活动”的前置条件。开发期触发断言，发布期直接退回，而不是把正在进行的
-  // 清队列静默踩回 IDLE。
-  if (state == BusyState::CLEARING)
+  if (state == BusyState::CLEARING || state == BusyState::CLEARING_EVENT ||
+      state == BusyState::PROCESSING || state == BusyState::PROCESSING_EVENT)
   {
     DEV_ASSERT_FROM_CALLBACK(false, in_isr);
     return;
@@ -332,10 +474,6 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
   {
     if (info_.op.type == ReadOperation::OperationType::BLOCK)
     {
-      // Backend is already unavailable. Claim the waiter and complete it with
-      // the requested failure reason instead of leaving it to timeout.
-      // 后端已经不可用。这里直接 claim waiter，并用指定错误收口，
-      // 而不是让它继续超时等待。
       BusyState expected = BusyState::PENDING;
       if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
                                         std::memory_order_acq_rel,
@@ -348,13 +486,21 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
     }
     else
     {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      info_.op.UpdateStatus(in_isr, reason);
+      auto operation = info_.op;
+      BusyState expected = BusyState::PENDING;
+      if (!busy_.compare_exchange_strong(expected, BusyState::IDLE,
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire))
+      {
+        return;
+      }
+      operation.UpdateStatus(in_isr, reason);
       return;
     }
   }
 
-  if (state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_DETACHED)
+  if (state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_CLAIMED_EVENT ||
+      state == BusyState::BLOCK_DETACHED || state == BusyState::BLOCK_DETACHED_EVENT)
   {
     return;
   }

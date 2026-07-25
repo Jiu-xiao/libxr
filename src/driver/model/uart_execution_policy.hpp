@@ -29,24 +29,6 @@ class UartDirectPolicy
   }
 
   /**
-   * @brief Publish CONFIG without running hardware control from an arbitrary ISR.
-   *
-   * A Direct backend cannot know whether that ISR interrupted vendor UART/DMA handling
-   * before its LibXR callback. ISR publication is therefore durable but deferred until
-   * the next WRITE, UART/DMA callback, or rejected RX carrier enters `Invoke()`.
-   */
-  template <typename Handler>
-  bool InvokeConfig(uint32_t events, bool in_isr, Handler&& handler) noexcept
-  {
-    if (in_isr)
-    {
-      service_.Publish(events);
-      return false;
-    }
-    return Invoke(events, std::forward<Handler>(handler));
-  }
-
-  /**
    * @brief Read/ack one single-core IRQ source, then publish its service events.
    *
    * Direct backends do not need raw-IRQ admission because the IRQ and normal caller
@@ -83,6 +65,11 @@ class UartDirectPolicy
  * and complete-domain restore share the matching short backend guard, so a stale restore
  * cannot reopen one source between a newer mask and owner claim.
  *
+ * This policy requires control before the SDK/HAL first reads or acknowledges the IRQ
+ * source. It cannot provide hardware serialization when it is entered only from a
+ * callback that the SDK invokes after handling the source, unless that SDK already
+ * provides equivalent cross-core serialization for its IRQ handler and UART/DMA APIs.
+ *
  * @tparam Adapter Backend providing `LockAndMaskIrqDomain()`, `UnlockIrqDomain()`,
  * `LockIrqDomain()`, and `RestoreAndUnlockIrqDomain()` methods.
  */
@@ -103,15 +90,13 @@ class UartIrqSerializedPolicy
                                   });
   }
 
-  /** CONFIG already has raw-IRQ exclusion, so every caller may acquire immediately. */
-  template <typename Handler>
-  bool InvokeConfig(uint32_t events, bool, Handler&& handler) noexcept
-  {
-    return Invoke(events, std::forward<Handler>(handler));
-  }
-
   /**
    * @brief Admit a raw IRQ source before its first protected status access.
+   *
+   * `source` must contain the first protected status read/acknowledgement. Calling this
+   * method only after an SDK/HAL IRQ handler has touched that status is too late to
+   * protect the handler from concurrent hardware operations on another core.
+   *
    * @tparam Source Callable with signature `uint32_t()` that reads/acknowledges the
    * protected source and returns service events.
    * @tparam Handler Callable with signature `uint32_t(uint32_t)`.

@@ -1,474 +1,469 @@
-# UART SMP IRQ Serialization Policy
+# UART DMA Concurrency and SMP IRQ Serialization
 
-## Status
+## Status and scope
 
-This document is the current design and implementation baseline for the UART
-concurrency review. The abstract IRQ handoff protocol and its composition with the UART
-business model have passed their positive TLC configurations and targeted negative
-controls. ST, CH, and ESP backend source correspondence and build matrices have been
-checked separately. Hardware behavior, vendor MMIO timing, cache coherency, and future
-non-ESP SMP adapters remain platform proof limits.
+This document defines the current concurrency contract implemented by
+[`UartDmaModel`](../src/driver/model/uart_dma_model.hpp),
+[`UartDirectPolicy`](../src/driver/model/uart_execution_policy.hpp), and
+[`UartIrqSerializedPolicy`](../src/driver/model/uart_execution_policy.hpp). It covers
+the STM32, CH32, and ESP AHB-GDMA UART backends in this tree.
 
-The design deliberately separates the reusable UART service from the additional IRQ
-admission required by a same-object SMP backend:
+The design has one per-UART `SerializedService`. Direct and SMP policies differ only in
+how they admit hardware IRQ work; they do not select different TX/CONFIG state machines:
 
 ```text
-single core or AMP owner core
-  -> DirectPolicy
-  -> SerializedService
-  -> active/pending UART model
-
-same-object SMP
-  -> IrqSerializedPolicy in the backend
-  -> the same SerializedService
-  -> the same active/pending UART model
+WRITE / COMPLETE / ERROR / CONFIG / stop completion
+                         |
+                         v
+          DirectPolicy or IrqSerializedPolicy
+                         |
+                         v
+               one SerializedService
+                         |
+                         v
+                    UartDmaModel
 ```
 
-DirectPolicy does not bypass serialization. It only omits IRQ-domain masking and raw-IRQ
-admission. The common UART model does not contain `PENDING_FILLING`, `PROMOTING`,
-`TX_STARTING`, a Direct-only handoff protocol, or another fine-grained owner.
+This is not a hardware-acceptance report. Source review, deterministic tests, formal
+models, sanitizer runs, and cross-toolchain builds each cover a different layer. None of
+them proves interrupt latency, cache/DMA coherency, vendor MMIO behavior under load, or
+end-to-end operation on a board.
 
-## Fixed decisions
+The current scope deliberately excludes:
 
-1. The UART TX business model keeps the old publication order:
+- an ESP FIFO UART class, an `ESP32UART` compatibility alias, and a runtime DMA/FIFO
+  switch;
+- STM32 H5/U5/U3/N6/H7RS linked-list GPDMA RX;
+- a same-object SMP adapter for STM32 or CH32;
+- an external scheduler, work queue, owner thread, or bounded `max_rounds` policy.
 
-   ```text
-   copy payload -> write pending length -> publish pending valid
-   ```
+## Vocabulary
 
-2. One active DMA and one preloaded pending slot are retained.
-3. RX byte delivery remains one ISR/DMA producer feeding the existing SPSC queue.
-4. Every target publishes WRITE, COMPLETE, ERROR, and CONFIG to the same per-UART
-   `SerializedService`.
-5. Single-core targets and AMP targets use DirectPolicy: no extra IRQ mask or raw-IRQ
-   admission is added around that service.
-6. Only a backend that exposes one UART object to multiple cores adds the SMP IRQ policy.
-7. The UART, TX-DMA, and any IRQ that can touch the protected hardware state are routed
-   to one IRQ core and form one non-reentrant IRQ domain.
-8. A normal caller may run on any core and may itself be an ISR.
-9. The policy never disables global interrupts and never waits for another context.
-10. All C++ atomic state is `uint32_t`.
-11. CONFIG and runtime recovery keep their business phases, but their model and hardware
-    transitions execute through the same SMP policy. They do not introduce a second
-    arbitration owner.
-12. DirectPolicy backends keep their existing vendor SDK IRQ/HAL entry path. They do not
-    add an admission wrapper or replace `HAL_UART_IRQHandler()`, `HAL_DMA_IRQHandler()`,
-    or an equivalent vendor handler.
-13. IRQ admission before hardware-status access applies only to an IrqSerializedPolicy
-    backend whose ISR entry is registered by LibXR or by the application.
+- **service owner**: the caller that wins the single `SerializedService` owner bit and
+  drains coalesced UART events in its current call stack;
+- **active**: the retained TX buffer whose record has successfully started in hardware;
+- **pending**: one payload copied into the other local TX buffer but not yet promoted;
+- **public record**: metadata and payload still owned by `WritePort` queues;
+- **control transaction**: CONFIG or runtime ERROR recovery;
+- **hardware quiescence**: the backend has stopped the old TX/RX generation, classified
+  its final TX terminal state, completed destructive cleanup, and guarantees that no old
+  terminal callback can appear later;
+- **IRQ admission**: acquiring the same service owner before an SMP raw ISR reads or
+  acknowledges protected hardware status.
 
-## State
+The owner is an execution right, not a CPU affinity. Whoever acquires it runs the
+service locally. There is no migration to an IRQ core.
 
-Every UART service uses one atomic arbitration word:
+## One serialized owner
+
+`SerializedService` stores one owner bit and coalescible event bits in one atomic
+`uint32_t`:
 
 ```text
 bit 31       OWNER
-bits 0..30   coalescible level-triggered events
+bits 0..30   level-triggered event facts
 ```
 
-Typical event bits are `WRITE`, `COMPLETE`, `ERROR`, `CONFIG`, and an asynchronous
-CONFIG-stop completion. Payload and event counts are not stored in this word. WRITE is
-rechecked from `WritePort`; CONFIG reads the latest stored configuration; one active DMA
-makes COMPLETE coalescible.
+For `UartDmaModel`, the event facts are `WRITE`, `COMPLETE`, `ERROR`, `CONFIG`,
+`STOP_DONE`, and the internal `CONTROL_READY`. They do not carry counts or payloads.
+Durable state lives in the WritePort queues, the retained active/pending buffers, the
+configuration payload, and the control phase.
 
-DirectPolicy uses this word without touching IRQ enable state. IrqSerializedPolicy wraps
-the same word with the platform IRQ-domain mask. The IRQ controller's enabled state is
-hardware state, not another C++ atomic flag. There is no `RESTORING`, `IRQ_PENDING`,
-Direct-only deferred-terminal state, or mask reference count.
+There is no second owner, generation counter, or external completion owner. Old-terminal
+identity comes from hardware quiescence plus the typed terminal result before a retained
+buffer is reused.
 
-## Required SMP backend operations
+A caller that observes an owner only merges its event and returns. The current owner
+drains a snapshot, then uses a no-new-event CAS to release. Publication before that CAS
+makes the release fail and remains with the current owner; publication after it sees an
+owner-free word and may become the next owner. Reentrant HAL callbacks therefore do not
+recurse into the UART state machine.
 
-Only an IrqSerializedPolicy backend supplies the following operations:
+The service is non-waiting but not time-bounded. It does not spin waiting for another
+context, sleep, or require a scheduler, but an owner can keep draining while publishers
+continue to add work. Any backend that allows an ISR to acquire the owner must make all
+reachable work ISR-safe and non-blocking.
+
+## TX record lifecycle
+
+The common TX path is:
 
 ```text
-MaskIrqDomain()
-SynchronizeIrqMask()
-RestoreIrqDomain()
-ServiceOwnedIrqSource()
+WritePort public queues
+  -> copy payload into pending buffer
+  -> publish pending_valid
+  -> promote pending to active
+  -> publish complete active state
+  -> StartDmaTx(active)
+  -> finish the Write Operation with STARTED or FAILED
+  -> later COMPLETE releases the retained active buffer
 ```
 
-`MaskIrqDomain()` is idempotent. After `SynchronizeIrqMask()` returns, a newly admitted
-handler cannot read or acknowledge the protected hardware status before passing the
-owner admission point. An IRQ that was already accepted may still execute, but the
-LibXR/application-owned entry also masks first and then competes for the same owner.
+The Write Operation reports the result of starting the record. It is not the physical
+wire-completion notification. A later whole-transfer `COMPLETE` only retires the active
+buffer and allows the next pending record to start.
 
-`RestoreIrqDomain()` is also idempotent. It may race with a newer owner. This is allowed:
-the newer owner already masked before claiming, and an IRQ admitted by a delayed restore
-must mask and check the owner before touching the protected hardware state.
+Only the service owner may stage payload, promote pending, start hardware, pop metadata,
+or finish a Write Operation. The payload is removed from the public byte queue while its
+metadata remains at the metadata-queue head. A successful start or record-local start
+failure consumes that exact metadata record. `queue_info_->Size() == 1` identifies the
+only synchronous candidate; no `submission_id` is needed.
 
-The protected interrupt sources must be level-sensitive, or otherwise remain pending
-and be retriggered when restored, until the owned ISR acknowledges their hardware status.
-An entry that loses owner admission does not read or clear the status.
+`StartDmaTx() == FAILED` guarantees that no transfer and no later terminal callback exist
+for that attempt. The model finishes that record as failed and may proceed to the next
+one. It does not start CONFIG or runtime recovery.
 
-DirectPolicy does not implement these operations. Its backend retains the existing SDK
-handler; HAL callbacks publish facts into the same `SerializedService` used by Write and
-CONFIG.
+The model publishes complete active state before calling `StartDmaTx()`. If the backend
+raises a synchronous callback from inside that call, the callback only merges an event.
+The current owner completes the STARTED/FAILED transition before the next snapshot can
+consume it.
 
-## Normal caller protocol
+## Event order and terminal retirement
 
-DirectPolicy performs only the `SerializedService::Invoke()` portion below. An
-IrqSerializedPolicy caller first performs the IRQ-domain mask and synchronization:
-
-Pseudocode:
+Every service snapshot first performs an authoritative `COMPLETE` retirement prepass.
+Only after that prepass does the normal business priority apply:
 
 ```text
-Invoke(event):
-  MaskIrqDomain()
-  SynchronizeIrqMask()
-
-  old = state.fetch_or(event, release)
-
-  if old contains OWNER:
-    return HANDLED_BY_CURRENT_OWNER
-
-  repeatedly CAS the observed event word to OWNER:
-    success -> this caller owns the consumed event snapshot
-    observes OWNER -> return HANDLED_BY_CURRENT_OWNER
-    observes no remaining event -> return ALREADY_HANDLED
-
-  Drain(snapshot)
+COMPLETE retirement prepass
+then CONFIG > ERROR > WRITE/progress
 ```
 
-For IrqSerializedPolicy, the mask happens before the event publication and before the owner decision. If the
-caller observes an owner, that owner is responsible for the later restore. If the old
-owner released first, the caller observes an owner-free word and can compete itself.
+This order is intentional. If an old transfer actually completed before CONFIG or ERROR
+recovery won the control boundary, it must be retired and must not be retransmitted.
+During an active control phase, only control carriers advance that phase; ordinary WRITE
+cannot stage or start another public record.
 
-This ordering has one explicit progress assumption: a caller that has completed the
-hardware mask must eventually execute its atomic publication/claim step. The protocol
-does not lose work if that caller is preempted, but the UART IRQ domain remains masked
-until it resumes. A backend that requires a hard mask-latency bound must protect this
-short mask-to-RMW window with an appropriate local preemption rule and measure it; the
-abstract protocol proves eventual progress under fairness, not a cycle bound.
+A backend must publish `COMPLETE` only for an authoritative whole-transfer completion.
+A partial DMA prefix is not completion. When terminal sources are split across IRQs, the
+backend must collect the old TX terminal fact after quiescence and before clearing or
+reusing hardware state. Serializing source handlers alone does not join facts that were
+latched in different sources.
 
-CAS failure never means "the ISR exited". It only means the atomic word changed. The
-caller reloads the returned value and either retries, hands off to the observed owner, or
-detects that another owner already consumed the event.
+## CONFIG and ERROR transactions
 
-## Direct callback and IrqSerializedPolicy-owned IRQ protocols
-
-A DirectPolicy backend retains its vendor IRQ/HAL entry. After the vendor handler has
-read and cleared its status, its callback invokes COMPLETE or ERROR on the same service.
-If StartDmaTx is still executing under that owner, the callback only merges the event;
-the existing owner finishes the STARTED/FAILED transition before processing it.
-
-This protocol applies only where LibXR or the application already registers the ISR. It
-does not require wrapping or replacing a vendor HAL handler used by a DirectPolicy
-backend. The admission point precedes the first protected status read in that owned ISR:
+CONFIG admission is fixed by the common model:
 
 ```text
-IrqEntry():
-  MaskIrqDomain()
-  SynchronizeIrqMask()
-
-  try to CAS an owner-free state to OWNER, consuming any queued event snapshot
-
-  if an OWNER is observed:
-    return without reading or clearing hardware status
-
-  ServiceOwnedIrqSource()
-    -> read and clear the source status
-    -> publish COMPLETE/ERROR/STOP_DONE into the already-owned state
-
-  Drain(the consumed snapshot and callback events)
+ValidateConfig(config)       // pure, no protected MMIO
+  -> reserve the only CONFIG slot
+  -> store the complete payload
+  -> publish CONFIG
+  -> run through the same service owner
 ```
 
-Mask-before-observe is mandatory. Masking only after observing another owner is unsafe:
-the owner can release and restore between the observation and the late mask, leaving a
-pending level IRQ permanently disabled with no remaining restorer.
+A later concurrent CONFIG returns `BUSY` until the accepted transaction has completely
+restarted the data path and released the gate. A Write that encounters a reserved or
+pending CONFIG leaves the public record untouched and yields to CONFIG; it does not
+self-republish WRITE while blocked.
 
-An owned IRQ entry that loses does not need an `IRQ_PENDING` software bit. Its unchanged
-hardware status is the durable pending fact. The owner it observed restores the domain
-after release, and the hardware/controller admits the IRQ again.
-
-## Owner drain and release
-
-The owner handles snapshots with the UART business priority:
+CONFIG and ERROR deliberately retain both local TX records:
 
 ```text
-CONFIG > ERROR > COMPLETE > WRITE/progress
+active   -> stop old hardware, then restart the entire payload from byte zero
+pending  -> keep the copied payload and its metadata position unchanged
+public   -> leave all not-yet-staged records in WritePort
 ```
 
-Reentrant callbacks only OR another event into the state word. They do not recurse into
-a second handler. This is also the complete DirectPolicy handoff for a terminal callback
-that fires before `StartDmaTx()` returns; no `start_active`, `submit_active`, or
-`deferred_terminal` state is added.
+Restarting active from byte zero gives at-least-once wire semantics across CONFIG or
+runtime ERROR. A prefix transmitted before the stop may appear again. This is a chosen
+contract. An active record proven fully complete is retired by the COMPLETE prepass and
+is not restarted.
 
-Release is:
+The backend reports one typed stop result:
 
 ```text
-expected = OWNER
-
-if CAS(OWNER -> 0, release/acquire) succeeds:
-  RestoreIrqDomain()
-  return
-
-new events were published while OWNER remained set:
-  exchange state to OWNER
-  handle the new snapshot
-  retry release
+UartDmaControlResult
+  progress = PENDING | COMPLETED
+  old_tx_terminal: UartOldTxTerminal = NONE | COMPLETE | ERROR
 ```
 
-The CAS is the no-lost-wakeup boundary. A publication ordered before it makes the CAS
-fail and remains with the owner. A publication ordered after it sees an owner-free word
-and can claim ownership itself.
+- `PENDING` means quiescence is not yet complete and carries no terminal
+  classification. The backend must arrange a real future control carrier, such as an
+  abort completion or hardware terminal IRQ.
+- `COMPLETED` is the quiescence linearization point. Destructive cleanup is complete and
+  no old callback can arrive later.
+- `COMPLETE` asks the next service snapshot to retire active before restart.
+- `NONE` means successful completion was not proven. `NONE` and `ERROR` retain active
+  for restart. `ERROR` records why the old generation was not a successful completion;
+  it does not fail or discard the retained record.
 
-Restore intentionally occurs after the successful owner release. A newer caller may
-mask and claim before an older owner performs its delayed restore. That does not permit
-concurrent protected access: an IRQ admitted by the delayed restore masks first, sees the
-new owner, and exits without acknowledging hardware. The new owner performs the final
-restore when it releases. The cost is at most an extra rejected IRQ entry for that race,
-not another software state.
+The model passes `active_tx` into the backend stop hook. A backend must not infer LibXR
+active ownership from idle UART/DMA registers.
 
-## One concrete race
+After an Advance hook returns `COMPLETED`, the common model publishes an internal
+`CONTROL_READY`, plus `COMPLETE` when classified, into the same owner. This creates a
+separate hardware-quiescent retirement snapshot without waiting for a Write, another
+IRQ, or an external scheduler. Therefore two CONFIG calls do not require a transmission
+between them: after the first accepted transaction reaches `COMPLETED`, its internal
+continuation completes restart and reopens the single CONFIG slot.
+
+The final order is:
 
 ```text
-owner A drains its last event
-  -> CAS releases OWNER
-
-caller B masks the IRQ domain
-  -> publishes WRITE
-  -> claims OWNER
-
-old owner A is delayed, then restores the IRQ domain
-  -> a pending IRQ enters
-  -> owned IRQ entry masks first
-  -> observes owner B
-  -> returns without clearing status
-
-owner B drains WRITE
-  -> releases OWNER
-  -> restores the IRQ domain
-  -> pending IRQ re-enters and can become owner
+stop/apply old generation
+  -> hardware quiescence and final terminal classification
+  -> internal CONTROL_READY retirement snapshot
+  -> backend CompleteConfig/CompleteRecovery restarts RX
+  -> restart retained active TX when present
+  -> release RX/TX/CONFIG admission
+  -> rescan WRITE
 ```
 
-No `RESTORING` bit is needed because the owned IRQ entry never performs protected work before
-owner admission and never acknowledges a losing interrupt.
-
-## CONFIG and ERROR placement
-
-CONFIG remains a control transaction:
-
-1. store the latest complete configuration;
-2. publish `CONFIG` through the SMP policy;
-3. fix the old queue prefix when CONFIG is admitted;
-4. stop the old TX/RX generation synchronously or enter an asynchronous STOPPING phase;
-5. release owner while waiting for a real stop-completion event;
-6. apply the latest configuration after quiescence;
-7. restart RX and rescan post-boundary writes.
-
-The owner is not held while hardware completes an asynchronous stop. The persistent
-CONFIG phase blocks new starts; any later caller or stop IRQ can acquire owner and resume
-the transaction.
-
-`StartDmaTx() == FAILED` remains record-local and does not request CONFIG. Runtime
-DMA/UART ERROR follows the backend recovery contract and does not modify framing.
-
-### Composition rules checked by the business model
-
-The service consumes each event snapshot with the following rules:
-
-```text
-CONFIG > ERROR > COMPLETE > WRITE/progress
-```
-
-- CONFIG consumes the rest of the same old-generation snapshot. Synchronous stop enters
-  the fixed-prefix drain immediately. Asynchronous stop enters `STOPPING`, releases
-  OWNER, and resumes only after a real `STOP_DONE` carrier acquires OWNER.
-- ERROR absorbs a simultaneous COMPLETE. The software active record is released once;
-  the preloaded pending record is preserved for normal progress.
-- Events seen while CONFIG is stopping may be consumed as reminders because the
-  persistent phase and hardware stop join are authoritative. CONFIG completion always
-  republishes WRITE so a consumed post-boundary notification cannot strand its record.
-- The CONFIG boundary is the metadata queue length captured at CONFIG admission. The
-  preloaded head owns payload outside the data queue and is drained by metadata only;
-  each remaining old record consumes one metadata item and its matching payload. Records
-  whose metadata appears after the boundary are not included.
-
-The bounded composition model covers both synchronous and asynchronous stop, COMPLETE,
-ERROR, coalesced ERROR|COMPLETE, CONFIG combined with a terminal snapshot, and a writer
-interleaved at every publication step. Its positive safety and liveness configurations
-explore `84,810` generated / `38,019` distinct states. Five fault configurations expose
-the expected failures for wrong CONFIG priority, failure to absorb COMPLETE into ERROR,
-a moving CONFIG boundary, omission of the mandatory WRITE rescan, and retaining OWNER
-while waiting for asynchronous stop.
-
-### Metadata-visible before `Submit()`
-
-WritePort publishes in this order:
-
-```text
-payload -> arm Operation -> metadata -> call backend WriteFun/Submit
-```
-
-Consequently, a CONFIG completion rescan may consume and start a post-boundary record
-after its metadata is visible but before that producer reaches `Submit()`. This is an
-allowed asynchronous completion path, not a request-identity shortcut:
-
-- the record's own Operation was armed before metadata publication;
-- the owner removes that exact metadata record and completes it through `Finish()`;
-- the later `Submit()` finds no synchronous candidate and returns `PENDING`;
-- no `submission_id` is needed and the record is completed at most once.
-
-The TLC early-consume witness confirms that this ordering is reachable. It does not
-change WritePort producer admission: a rejected `Write()` still returns `BUSY` before
-publishing any record or event.
+The RX/CONFIG gate remains closed until both backend completion and any retained active
+restart have returned. Pending and public records remain preserved throughout.
 
 ## RX boundary
 
-Ordinary `Read()` and `ClearQueuedData()` do not enter this SMP owner. RX data delivery
-continues through SPSC. The IRQ policy is used only around IRQ/HAL/hardware lifecycle
-work that shares state with TX start, CONFIG, or destructive recovery.
+RX data does not enter the serialized TX service. It remains one direct producer feeding
+the ReadPort SPSC queue. The complete RX/CONFIG gate orders position/descriptor access
+and byte delivery against CONFIG and recovery:
 
-A backend may keep an independent RX data IRQ outside the TX domain when it cannot touch
-the protected TX/configuration hardware state. CONFIG must still quiesce the RX DMA
-lifecycle before changing descriptors or position state.
+```text
+read/ack IRQ status when the backend requires it
+  -> TryEnterRx()
+  -> read DMA position or descriptor state
+  -> move bytes into the SPSC queue
+  -> LeaveRx()
+```
 
-ESP GDMA treats transition-window RX bytes as discardable. `ApplyPendingConfig()` stops
-and resets TX/RX GDMA, applies the UART payload, and leaves RX unarmed while the generic
-model drains the fixed CONFIG TX prefix. `ReleaseConfigAdmission()` then remounts and
-starts the RX descriptor ring immediately before opening the RX/CONFIG gate, so a
-descriptor completed during CONFIG callback drain is not left waiting for an unrelated
-future RX event.
+If control wins first, `TryEnterRx()` fails and transition-window hardware bytes may be
+dropped. If RX enters first, that fragment finishes and its release publishes a
+`CONTROL_READY` carrier for the waiting control transaction. Existing bytes already in
+the software queue are not cleared by CONFIG or recovery.
 
-## Platform contract
+`ProcessRxInIrqSource()` joins RX gate release with every COMPLETE/ERROR fact read by the
+same raw source. Independent IRQ sources still require backend aggregation before a
+destructive stop/reset clears terminal status.
 
-The SMP policy is valid only when the backend proves all of the following:
+Circular, linked-list, and future RX adapters are data-path models, not different owner
+algorithms. The ESP backend in this tree uses a linked AHB-GDMA descriptor ring. STM32
+traditional DMA uses the circular NDTR/CNDTR model. STM32 linked-list GPDMA requires a
+different RX adapter and is not accepted by the current backend.
 
-- all protected IRQs are routed to one core and cannot overlap each other;
-- mask and restore can be invoked from every supported caller context and core;
-- mask synchronization prevents a post-mask owned ISR from reading or acknowledging
-  protected status before owner admission;
-- losing IRQs do not acknowledge status and are retriggered after restore;
-- a shared vector has a BSP-owned mask claim so one UART cannot restore a vector still
-  masked by another device;
-- the atomic word and protected non-atomic state reside in coherent shared memory;
-- cache and DMA descriptor ownership follow the platform's explicit maintenance rules.
+## DirectPolicy
 
-Architectural feasibility is not backend validation. ESP SMP and RP2xxx require concrete
-mask/restore adapters. STM32 dual-core MCU families, CH32H417, and multicore HPM families
-remain AMP owner/proxy targets unless a particular BSP intentionally exposes one object
-to both cores.
+DirectPolicy still uses the one `SerializedService`. "Direct" means it does not add an
+SMP IRQ-domain mask or require owner admission before a raw status read.
 
-## Concrete platform mapping
+Two Direct integrations are valid:
 
-The policy and SDK-integration boundary is:
+1. A vendor handler reads/acknowledges hardware and invokes a LibXR callback, as in the
+   STM32 HAL path.
+2. LibXR or the application owns a raw ISR on a single owner core, reads/acknowledges the
+   source through `InvokeIrq()`, then publishes the resulting facts, as in CH32 and
+   single-core ESP AHB-GDMA targets.
 
-| Platform | Policy | Vendor SDK IRQ/HAL takeover |
-|---|---|---|
-| Single-core STM32, H5/U5, traditional H7 | DirectPolicy | None; keep CubeMX/HAL IRQ |
-| STM32H745/H747/H755/H757 dual-core | AMP owner-core plus IPC | None |
-| Single-core CH32 | DirectPolicy | None |
-| CH32H417 | AMP owner-core plus IPC | None |
-| Dual-core HPM families | AMP owner-core plus IPC | None |
-| ESP32 | IrqSerializedPolicy | No SDK patch; use LibXR FIFO ISR |
-| ESP32-S3 | IrqSerializedPolicy | No SDK patch; use LibXR GDMA ISR |
-| ESP32-P4 | IrqSerializedPolicy | No SDK patch; GDMA route is statically selected |
-| ESP32-H4/S31 preview targets | IrqSerializedPolicy | No SDK patch; backend build remains unverified |
-| RP2040/RP2350 | IrqSerializedPolicy | No SDK patch; use application-registered ISR |
-| Single-core ESP C3/C6 and similar targets | DirectPolicy | None |
+On one core, an IRQ may preempt a normal caller but cannot execute hardware operations
+simultaneously on another core. If the service already has an owner, the IRQ's facts are
+merged and the interrupted owner consumes them after it resumes.
 
-This table classifies concurrency policy and IRQ integration. It does not claim that the
-current circular RX data model supports H5/U5 GPDMA; linked-list RX remains a separate
-data-model adapter.
+A post-vendor-handler callback is not sufficient for a same-object SMP backend: the
+vendor handler has already touched hardware before LibXR sees the callback. DirectPolicy
+therefore requires either a single-core execution domain or an AMP owner-core contract.
+Each backend must document which ISR contexts may call `SetConfig()`; a caller that can
+preempt a related vendor/raw IRQ after its hardware-status read is not admitted merely
+because CONFIG itself uses the service owner.
 
-### ESP-IDF SMP targets
+## AMP reuse
 
-The evidence must be split by IDF version and validation level:
+An AMP system reuses DirectPolicy by assigning the UART object, UART IRQ, TX-DMA IRQ,
+RX-DMA IRQ, HAL handles, and all direct hardware access to one owner core. Other cores do
+not call the object directly; they use an IPC/proxy request that is executed on the
+owner core.
 
-| Target | IDF evidence | Current LibXR UART evidence |
-|---|---|---|
-| ESP32 | Dual-core supported target in IDF 5.5.2 | FIFO ISR entry inspected |
-| ESP32-S3 | Dual-core, GDMA+UHCI supported target in IDF 5.5.2 | GDMA ISR entry inspected; prior object build passed |
-| ESP32-P4 | Dual-core, GDMA+UHCI supported target in IDF 5.5.2 | GDMA route inspected; current full build is blocked by unrelated compatibility failures |
-| ESP32-H4 | Dual-core preview target in IDF 5.5.2 | 5.5.2 selects FIFO because UHCI is absent; no LibXR build |
-| ESP32-S31 | Dual-core GDMA+UHCI preview target in IDF master `055ba9d3` | Absent from local IDF 5.5.2; no LibXR build |
+This does not add another UART concurrency model. The owner core sees the same
+single-core DirectPolicy behavior. IPC ordering, shared-memory placement, and remote
+completion delivery are BSP contracts outside `UartDmaModel`.
 
-IDF master `055ba9d3` also gives ESP32-H4 GDMA+UHCI, so a future master-based LibXR
-build would select the GDMA route instead of the 5.5.2 FIFO route. This version drift
-does not change the admission algorithm: both routes register a LibXR-owned entry.
+The current STM32 dual-core and CH32H417 mapping is AMP owner-core plus IPC. This tree
+does not validate a same-object cross-core use of either backend.
 
-For external interrupt sources, IDF documents that `esp_intr_disable()` and
-`esp_intr_enable()` may be called from a core other than the allocation core. The 5.5.2
-implementation disconnects and reconnects the source in the interrupt matrix while
-holding its cross-core allocator spinlock. Therefore the admission mechanism is
-architecturally available on all five dual-core targets above. Only ESP32 and ESP32-S3
-currently have direct LibXR source/build evidence; the other rows are not backend
-validation claims.
+## IrqSerializedPolicy for same-object SMP
 
-LibXR already owns the relevant ESP entries: the GDMA path registers `DmaTxIsrEntry` and
-`DmaRxIsrEntry` with `esp_intr_alloc_intrstatus*()`, while the FIFO path registers
-`UartIsrEntry` with `esp_intr_alloc()`. Admission can therefore be inserted before their
-first status read without replacing an IDF handler.
+IrqSerializedPolicy is required when normal callers on multiple cores directly share
+one UART object while its protected IRQs execute on a fixed IRQ core. Normal callers may
+originate on any core. The backend must control the raw ISR entry before its first
+protected status read.
 
-The current GDMA and FIFO allocations are non-shared:
-`ESP_INTR_FLAG_LEVEL1 | ESP_INTR_FLAG_INTRDISABLED`. They must be created from a pinned
-initialization task on SMP targets so UART, TX-DMA, and RX-DMA interrupt entries land on
-one core. Separate TX/RX sources may use separate same-level interrupt lines on that
-core; a hardware-shared source uses one LibXR entry to service both.
+Normal caller admission is:
 
-IDF 5.5.2 normally invokes a non-shared ISR without the allocator spinlock. When
-`CONFIG_APPTRACE_SV_ENABLE` is enabled, its tracing wrapper also holds that lock, so this
-configuration is rejected by the ESP UART header while the backend uses
-`esp_intr_disable()` from ISR admission. Audited IDF master uses `CONFIG_ESP_TRACE_ENABLE`
-for the same wrapper and installs the handler directly when `CONFIG_ESP_TRACE_LIB_NONE`
-is selected. No IDF source patch is required.
+```text
+lock the IRQ-domain guard
+  -> mask every protected UART/TX-DMA/RX-DMA source
+  -> publish event and try to claim the service owner
+  -> unlock the short guard
+  -> owner drains; loser returns without waiting
+```
 
-Single-HP-core ESP targets use DirectPolicy. SMP ESP FIFO uses the same admission policy
-at its LibXR-owned `UartIsrEntry`, but keeps its separate FIFO TX business model.
+Raw IRQ admission is:
 
-### RP2040 and RP2350
+```text
+lock and mask the IRQ domain
+  -> try to claim the same service owner
+  -> loser returns without reading or clearing status
+  -> winner unlocks the short guard
+  -> read/ack protected status and produce event facts
+  -> drain the same UART service
+```
 
-The Pico SDK states that NVIC enable APIs affect only the executing core, so an arbitrary
-caller cannot disable the fixed IRQ core's NVIC through `irq_set_enabled()`. The adapter
-instead places admission in the application-registered handler and masks the UART/DMA
-peripheral sources:
+The protected source must remain pending or retrigger after restore when an IRQ entry
+loses admission. Owner release and IRQ-domain restore share the matching short guard. A
+new owner can mask and claim before an older owner performs a delayed restore; an IRQ
+admitted by that stale restore masks first, sees the new owner, and exits without
+touching status. No `RESTORING` or `IRQ_PENDING` state is required.
 
-- DMA channel IRQ enables use `hw_set_bits()`/`hw_clear_bits()` on the channel bit in
-  `INTE`;
-- UART interrupt masks can use the RP atomic MMIO alias for `UARTIMSC`;
-- the shared DMA vector remains enabled, so unrelated DMA channels still dispatch.
+The policy never intentionally disables all CPU interrupts. It masks only the IRQ domain
+owned by that UART instance. Its progress proof assumes a caller that has masked the
+domain eventually reaches its publication/claim step; a hard latency bound requires a
+platform measurement and, if needed, a local preemption rule for that short window.
 
-RP-series atomic MMIO aliases are documented as cross-core atomic set/clear operations.
-This makes the IRQ-domain mask/restore portion feasible on both RP2040 and RP2350.
-RP2040 still needs its existing cross-core hardware-spinlock implementation for C++
-`atomic<uint32_t>`; RP2350 can use processor atomics.
+If an SDK clears status before calling LibXR, admission at the callback is too late. Such
+an SDK path is valid only when the SDK independently serializes its handler and every
+relevant hardware API across cores, or when the backend uses DirectPolicy under a
+single-core/AMP contract.
 
-### AMP and single-core targets
+## Platform mapping
 
-STM32 dual-core MCU families, CH32H417, and the audited multicore HPM families use
-separate core images and an owner/proxy contract. They do not share one C++ UART object
-and therefore use DirectPolicy on the owner core. Ordinary single-core STM32, CH32,
-MSPM0, HPM, and single-core ESP targets also use DirectPolicy.
+### STM32
 
-These DirectPolicy backends keep their existing CubeMX/vendor IRQ functions. They do not
-wrap or replace vendor HAL handlers for this policy.
+[`STM32UART`](../driver/st/stm32_uart.hpp) uses DirectPolicy and retains the CubeMX/HAL
+IRQ path. It does not wrap or replace `HAL_UART_IRQHandler()` or
+`HAL_DMA_IRQHandler()`. HAL callbacks publish facts into the same common service.
 
-## Verification plan
+The current backend supports traditional Stream, Channel, and BDMA circular RX. It
+rejects suspend/linked-list GPDMA families such as H5/U5/U3/N6/H7RS because CLLR/CBR1,
+descriptor ownership, and suspend/reset semantics require another RX adapter.
 
-The independent model must cover:
+The backend contract additionally requires:
 
-1. an IRQ accepted before another core finishes masking;
-2. two concurrent normal publishers;
-3. publication against owner release;
-4. a delayed old-owner restore after a new owner has claimed;
-5. a losing IRQ leaving status pending and retriggering;
-6. CONFIG/ERROR priority and asynchronous continuation;
-7. shared-vector mask ownership as a separate BSP model.
+- LibXR exclusively owns the UART/DMA data path and HAL handles after construction;
+- application code does not directly start, stop, or abort those UART/DMA handles;
+- the BSP assigns the related UART, TX-DMA, and RX-DMA IRQs the same NVIC preemption
+  priority so their HAL handlers cannot nest each other; subpriorities may differ;
+- `SetConfig()` is not called from this UART's HAL callbacks or from an ISR that can
+  preempt its UART/TX-DMA/RX-DMA IRQ domain;
+- Stream-DMA and UART completion vectors remain enabled and dispatch the matching HAL
+  handlers whenever an asynchronous control stop needs them as carriers;
+- the BSP keeps the UART kernel clock running while the UART is enabled.
 
-Required negative controls are:
+For ACK-capable F0/L0/G0/G4/H7/C0/U0 UART IP, official reference-manual receive
+sequences permit `UE -> DMAR -> RE` without polling `TEACK`/`REACK`. F1/F4 do not expose
+those ACK flags and use `HAL_UART_Init()`. This establishes register-sequence legality,
+not hardware-under-load behavior; loss of the UART kernel clock remains a BSP liveness
+failure.
 
-- publish before mask;
-- clear/ack IRQ status before owner admission;
-- unconditional owner release after a stale empty check;
-- losing IRQ clears status or fails to remain retriggerable.
+The STM32 M0/M0+ atomic fallback is one narrow exception to the no-global-mask rule. It
+saves PRIMASK, masks local interrupts for one compiler atomic or HAL atomic register
+RMW, then restores the saved PRIMASK. It never spans owner admission, a service handler,
+or a DMA stop/restart transaction. CH32 and ESP do not use this fallback.
 
-TLA+/TLC establishes only the abstract protocol. GenMC must then check the concrete
-`uint32_t` C++ atomic operations and memory orders. Deterministic C++ tests, TSAN/ASAN,
-real platform `-Werror` builds, and hardware timing/IRQ tests remain separate evidence
-levels.
+Dual-core STM32 variants are mapped as AMP owner-core plus IPC. This document does not
+claim same-object SMP support for them.
 
-Current retained evidence is under
-`runs/uart_irq_mask_handoff_audit_20260721/`: the IRQ handoff and UART composition TLC
-suite has `14/14` expected outcomes, and the GenMC v0.17.0 RC11 admission harness has
-`4/4`. These results validate the design interface, not the current unmodified backend
-implementation.
+### CH32
+
+[`CH32UART`](../driver/ch/ch32_uart.hpp) uses DirectPolicy for the current V20x/V30x
+backend and its V203/V307 BSPs. LibXR owns the UART/DMA ISR bodies, but single-core raw
+status reads do not need SMP admission. Owner acquisition does not disable global
+interrupts or mask the UART/DMA domain.
+
+CONFIG and ERROR may disable this instance's TC/HT/TE/IDLE enables while stopping the
+data path. That is hardware lifecycle control, not an owner lock. The BSP keeps the
+related UART, TX-DMA, and RX-DMA IRQs on one owner core at the same preemption priority.
+`SetConfig()` is not called from a related callback or an ISR that can preempt that IRQ
+domain.
+
+CH32H417 is mapped as AMP owner-core plus IPC. The V20x/V30x source and toolchain builds
+do not validate H417 register, DMA, IRQ, or IPC integration.
+
+### ESP AHB-GDMA
+
+[`ESP32UartDma`](../driver/esp/esp_uart.hpp) is the only ESP UART class in this design.
+The class is compiled only when both `SOC_AHB_GDMA_SUPPORTED` and `SOC_UHCI_SUPPORTED`
+are true. In ESP-IDF 5.5.2, the exact target set is:
+
+```text
+ESP32-C3, ESP32-C5, ESP32-C6, ESP32-H2, ESP32-S3, ESP32-P4
+```
+
+The API is explicitly `ESP32UartDma`. There is no `ESP32UART` alias, FIFO class, or
+runtime `enable_dma` selection. Targets outside the capability gate do not receive a
+fallback UART class from this backend.
+
+The RX adapter is a linked AHB-GDMA descriptor ring. The UART, TX-GDMA, and RX-GDMA
+entries are registered directly by LibXR with the actual `esp_intr_alloc()` API and
+non-shared `LEVEL1 | INTRDISABLED` flags. IDF does not clear their status before entering
+LibXR.
+
+Policy selection is compile-time:
+
+```text
+(SOC_CPU_CORES_NUM > 1) && !CONFIG_FREERTOS_UNICORE
+  -> IrqSerializedPolicy
+otherwise
+  -> DirectPolicy
+```
+
+On SMP, construction must run in a task pinned to one core so every allocated IRQ lands
+on the same core. Normal APIs may still be called from other cores. The adapter uses a
+per-instance `portMUX_TYPE` guard and official `esp_intr_disable()`/
+`esp_intr_enable()` operations to mask and restore the complete UART/GDMA IRQ domain.
+RX/UART error scanners also collect the TX source before recovery clears it; the stop
+path scans TX before and after `gdma_stop()` before reset.
+
+Normal GDMA EOF continues to advance the TX double buffer without waiting for physical
+UART line idle. Only destructive CONFIG waits for UART `TX_DONE` plus an idle FSM. Each
+`StartDmaTx()` clears the stale `TX_DONE` raw bit immediately before launching the new
+GDMA generation. CONFIG then publishes its armed state and enables `TX_DONE` without
+clearing the current raw bit, because that bit may be the only carrier that observes the
+current generation becoming idle. Disarming disables and clears the source.
+
+`gdma_stop()` issues a stop command but does not prove that the descriptor FSM has parked
+before the backend's final EOF sample. The ESP backend does not poll that FSM from the
+service or ISR path. If no EOF was observed, it returns `UartOldTxTerminal::NONE`: this
+means completion is unproven, so the retained active payload may be replayed from byte
+zero. The possible duplicate prefix is part of the selected at-least-once wire contract;
+`NONE` must not be interpreted as proof that no byte was transmitted.
+
+ESP-IDF tracing modes that invoke the non-shared handler while holding the interrupt
+allocator lock are rejected at compile time because ISR admission calls
+`esp_intr_disable()`. This is an ESP adapter integration restriction, not a second UART
+owner.
+
+On single-core targets selected by the same capability gate, the LibXR-owned raw ISR
+uses DirectPolicy. `SetConfig()` must not be called from a higher-priority ISR that can
+preempt a related UART/GDMA ISR after its status read, or from inside that unfinished
+raw ISR path.
+
+For the current ESP-IDF 5.5.2 source revision, inherited target compile commands with
+`-Werror` compile both `esp_uart.cpp` and `esp_uart_dma.cpp` for all six targets above.
+Full `xr` builds pass for C3, C6, and S3. The C5, H2, and P4 full builds stop in unrelated
+I2C/SPI or Wi-Fi compatibility code, while their two UART objects pass. Separate API
+probes compile the explicit DMA type and reject both the removed alias and a target
+without the required capabilities. These results establish source/toolchain integration
+only; no ESP hardware timing or runtime recovery result is claimed.
+
+## Verification boundary
+
+The retained evidence is intentionally layered:
+
+1. source correspondence checks map owner, gate, terminal classification, and backend
+   adapters to the concrete implementation;
+2. deterministic C++ tests exercise control continuation, back-to-back CONFIG without a
+   Write/IRQ carrier, gate lifetime, and typed terminal behavior;
+3. TLA+/TLC models the accepted business invariants and uses broken variants as negative
+   controls;
+4. GenMC checks selected concrete atomic owner/gate operations and memory orders;
+5. sanitizer and target `-Werror` builds check executable/compiler integration;
+6. vendor manuals establish only named register-level contracts such as STM32 ACK
+   sequencing.
+
+Formal models do not include vendor HAL internals, MMIO timing, DMA/cache coherency,
+interrupt-controller latency, user callback behavior, or board wiring. Build success is
+not runtime acceptance. Exact run counts and hashes belong in the verification artifacts
+for the corresponding source revision; this design document does not copy historical
+counts forward.
+
+Hardware acceptance remains required for each product BSP, including sustained traffic,
+CONFIG and ERROR injection, independent IRQ-source races, asynchronous stop carriers,
+cacheable DMA storage where applicable, and measured ISR/service latency.
