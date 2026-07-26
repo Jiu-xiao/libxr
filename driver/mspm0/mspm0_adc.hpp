@@ -36,6 +36,7 @@ class MSPM0ADC
   {
     ADC12_Regs* instance;
     float vref;
+    uint8_t dma_channel;
   };
 
   MSPM0ADC(Resources res, RawData dma_buff,
@@ -47,9 +48,9 @@ class MSPM0ADC
 
   float ReadChannel(uint8_t channel);
 
- private:
   static constexpr uint8_t DMA_CHANNEL_INVALID = 0xFF;
 
+ private:
   void Initialize(RawData dma_buff, std::initializer_list<DL_ADC12_MEM_IDX> mem_indices);
 
   void ConfigureSamplingMode(bool continuous, DL_ADC12_MEM_IDX start_mem_idx,
@@ -76,12 +77,21 @@ class MSPM0ADC
   alignas(LibXR::CACHE_LINE_SIZE) std::atomic<uint32_t> locked_;
 };
 
-#define MSPM0_ADC_INIT(name, mem_name) MSPM0_ADC_INIT_IMPL(name, mem_name)
+#define MSPM0_ADC_INIT(name, mem_name, dma_name) \
+  MSPM0_ADC_INIT_IMPL(name, mem_name, dma_name)
 
-#define MSPM0_ADC_INIT_IMPL(name, mem_name)                                   \
+#define MSPM0_ADC_INIT_IMPL(name, mem_name, dma_name)                         \
   ::LibXR::MSPM0ADC::Resources                                                \
   {                                                                           \
-    name##_INST, static_cast<float>(name##_ADCMEM_##mem_name##_REF_VOLTAGE_V) \
+    name##_INST, static_cast<float>(name##_ADCMEM_##mem_name##_REF_VOLTAGE_V), \
+        static_cast<uint8_t>(dma_name##_CHAN_ID)                               \
+  }
+
+#define MSPM0_ADC_POLLING_INIT(name, mem_name)                                \
+  ::LibXR::MSPM0ADC::Resources                                                \
+  {                                                                           \
+    name##_INST, static_cast<float>(name##_ADCMEM_##mem_name##_REF_VOLTAGE_V), \
+        ::LibXR::MSPM0ADC::DMA_CHANNEL_INVALID                                 \
   }
 
 }  // namespace LibXR

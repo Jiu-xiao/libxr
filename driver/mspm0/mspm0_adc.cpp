@@ -14,7 +14,6 @@ namespace
 {
 
 constexpr uint32_t MSPM0_ADC_DMA_TRIGGER_INVALID = 0xFFFFFFFFU;
-constexpr uint8_t MSPM0_ADC_DMA_CHANNEL_INVALID = 0xFF;
 constexpr uint32_t MSPM0_ADC_POLLING_TIMEOUT = 300000U;
 constexpr uint8_t MSPM0_ADC_MEM_COUNT = 12U;
 
@@ -254,43 +253,26 @@ uint32_t GetAdcDmaTrigger(const ADC12_Regs* instance)  // NOLINT
   return MSPM0_ADC_DMA_TRIGGER_INVALID;
 }
 
-uint8_t ResolveDmaChannelId(uint32_t trigger)
-{
-  if (trigger == MSPM0_ADC_DMA_TRIGGER_INVALID)
-  {
-    return MSPM0_ADC_DMA_CHANNEL_INVALID;
-  }
-
-#if defined(DMA_BASE)
-#if defined(DMA_SYS_N_DMA_CHANNEL)
-  constexpr uint8_t DMA_CHANNEL_COUNT = static_cast<uint8_t>(DMA_SYS_N_DMA_CHANNEL);
-#else
-  constexpr uint8_t DMA_CHANNEL_COUNT = 8;
-#endif
-
-  for (uint8_t channel = 0; channel < DMA_CHANNEL_COUNT; ++channel)
-  {
-    if (DL_DMA_getTriggerType(DMA, channel) != DL_DMA_TRIGGER_TYPE_EXTERNAL)
-    {
-      continue;
-    }
-
-    if (DL_DMA_getTrigger(DMA, channel) == trigger)
-    {
-      return channel;
-    }
-  }
-#endif
-
-  return MSPM0_ADC_DMA_CHANNEL_INVALID;
-}
-
 bool IsFullDmaChannel(uint8_t channel)
 {
 #if defined(DMA_SYS_N_DMA_FULL_CHANNEL)
   return channel < static_cast<uint8_t>(DMA_SYS_N_DMA_FULL_CHANNEL);
 #else
   (void)channel;
+  return false;
+#endif
+}
+
+bool IsDmaChannelAssignedToAdc(uint8_t channel, const ADC12_Regs* instance)
+{
+#if defined(DMA_BASE)
+  const uint32_t trigger = GetAdcDmaTrigger(instance);
+  return trigger != MSPM0_ADC_DMA_TRIGGER_INVALID &&
+         DL_DMA_getTriggerType(DMA, channel) == DL_DMA_TRIGGER_TYPE_EXTERNAL &&
+         DL_DMA_getTrigger(DMA, channel) == trigger;
+#else
+  (void)channel;
+  (void)instance;
   return false;
 #endif
 }
@@ -315,7 +297,7 @@ MSPM0ADC::MSPM0ADC(Resources res, RawData dma_buff,
       scale_(0.0f),
       use_dma_(false),
       use_fifo_dma_(false),
-      dma_channel_id_(DMA_CHANNEL_INVALID),
+      dma_channel_id_(res.dma_channel),
       num_channels_(0),
       filter_size_(0),
       dma_buffer_(),
@@ -400,11 +382,14 @@ void MSPM0ADC::Initialize(RawData dma_buff,
   DL_ADC12_disableFIFO(res_.instance);
   ConfigureSamplingMode(false, mem_indices_[0], mem_indices_[0]);
 #else
-  const uint32_t dma_trigger = GetAdcDmaTrigger(res_.instance);
-  dma_channel_id_ = ResolveDmaChannelId(dma_trigger);
+  const bool dma_channel_supplied = dma_channel_id_ != DMA_CHANNEL_INVALID;
+  if (dma_channel_supplied)
+  {
+    REQUIRE(IsFullDmaChannel(dma_channel_id_));
+    REQUIRE(IsDmaChannelAssignedToAdc(dma_channel_id_, res_.instance));
+  }
 
-  const bool has_dma_channel =
-      (dma_channel_id_ != DMA_CHANNEL_INVALID) && IsFullDmaChannel(dma_channel_id_);
+  const bool has_dma_channel = dma_channel_supplied;
   const bool contiguous_mem_range = IsContiguousMemRange(mem_indices_, num_channels_);
   use_fifo_dma_ = has_dma_channel && contiguous_mem_range &&
                   CanUseFifoDMA(dma_buffer_, num_channels_, filter_size_);
