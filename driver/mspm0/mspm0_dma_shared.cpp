@@ -102,8 +102,7 @@ bool DispatchPending(DMA_Regs* dma)
     }
 
     const auto channel_index = static_cast<std::size_t>(channel);
-    const std::uint32_t mask =
-        ChannelInterruptMask(static_cast<std::uint8_t>(channel));
+    const std::uint32_t mask = ChannelInterruptMask(static_cast<std::uint8_t>(channel));
     const auto registration = channel_callbacks[channel_index];
     if (registration.callback != nullptr)
     {
