@@ -61,7 +61,7 @@ class UartDirectPolicy
  *
  * Normal callers serialize the complete IRQ-domain mask with owner admission. A
  * LibXR/application-owned raw ISR uses `InvokeIrq()` so it acquires the same service
- * owner before reading or acknowledging protected status. The no-new-event release CAS
+ * owner before reading or acknowledging protected status. The no-new-event owner release
  * and complete-domain restore share the matching short backend guard, so a stale restore
  * cannot reopen one source between a newer mask and owner claim.
  *
