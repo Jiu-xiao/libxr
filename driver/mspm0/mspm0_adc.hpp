@@ -80,16 +80,16 @@ class MSPM0ADC
 #define MSPM0_ADC_INIT(name, mem_name, dma_name) \
   MSPM0_ADC_INIT_IMPL(name, mem_name, dma_name)
 
-#define MSPM0_ADC_INIT_IMPL(name, mem_name, dma_name)                         \
-  ::LibXR::MSPM0ADC::Resources                                                \
-  {                                                                           \
+#define MSPM0_ADC_INIT_IMPL(name, mem_name, dma_name)                          \
+  ::LibXR::MSPM0ADC::Resources                                                 \
+  {                                                                            \
     name##_INST, static_cast<float>(name##_ADCMEM_##mem_name##_REF_VOLTAGE_V), \
         static_cast<uint8_t>(dma_name##_CHAN_ID)                               \
   }
 
-#define MSPM0_ADC_POLLING_INIT(name, mem_name)                                \
-  ::LibXR::MSPM0ADC::Resources                                                \
-  {                                                                           \
+#define MSPM0_ADC_POLLING_INIT(name, mem_name)                                 \
+  ::LibXR::MSPM0ADC::Resources                                                 \
+  {                                                                            \
     name##_INST, static_cast<float>(name##_ADCMEM_##mem_name##_REF_VOLTAGE_V), \
         ::LibXR::MSPM0ADC::DMA_CHANNEL_INVALID                                 \
   }
