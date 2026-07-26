@@ -121,6 +121,26 @@ __attribute__((weak, used)) unsigned int __atomic_exchange_4(volatile void* ptr,
 }
 
 /**
+ * @brief Provide a 32-bit atomic bitwise AND on single-core Cortex-M0/M0+.
+ *
+ * The interrupt mask covers only one read-modify-write operation. This helper is used
+ * when the compiler cannot emit a native 32-bit atomic instruction.
+ */
+__attribute__((weak, used)) unsigned int __atomic_fetch_and_4(volatile void* ptr,
+                                                              unsigned int val,
+                                                              int memorder)
+{
+  UNUSED(memorder);
+
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
+  uint32_t primask_state = atomic_enter();
+  const unsigned int old_val = *addr;
+  *addr = old_val & val;
+  atomic_exit(primask_state);
+  return old_val;
+}
+
+/**
  * @brief  模拟实现 __atomic_fetch_add_4 函数 / Simulate the __atomic_fetch_add_4 function
  * @param  ptr 指向原子变量的指针 / Pointer to the atomic variable
  * @param  val 需要相加的值 / The value to add
