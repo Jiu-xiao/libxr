@@ -1,6 +1,8 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_timebase.hpp"
 
+#include "ch32_interrupt_guard.h"
+
 using namespace LibXR;
 
 CH32Timebase::CH32Timebase()
@@ -11,35 +13,31 @@ CH32Timebase::CH32Timebase()
 
 MicrosecondTimestamp Timebase::GetMicroseconds()
 {
-  do
+  const uint32_t interrupt_state = libxr_ch32_interrupt_save_and_disable();
+  uint32_t tick = CH32Timebase::sys_tick_ms_;
+  uint32_t count = SysTick->CNT;
+  if ((SysTick->SR & 1U) != 0U)
   {
-    uint32_t tick_old = CH32Timebase::sys_tick_ms_;
-    uint32_t cnt_old = SysTick->CNT;
-    uint32_t tick_new = CH32Timebase::sys_tick_ms_;
-    uint32_t cnt_new = SysTick->CNT;
+    // CNT can reload before the SysTick ISR advances the software epoch.
+    ++tick;
+    count = SysTick->CNT;
+  }
+  const uint32_t tick_period = SysTick->CMP + 1U;
+  libxr_ch32_interrupt_restore(interrupt_state);
 
-    auto tick_diff = tick_new - tick_old;
-    uint32_t tick_cmp = SysTick->CMP + 1;
-    switch (tick_diff)
-    {
-      case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 +
-                                    static_cast<uint64_t>(cnt_old) * 1000 / tick_cmp);
-      case 1:
-        /* 中断发生在两次读取之间 / Interrupt happened between two reads */
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000 +
-                                    static_cast<uint64_t>(cnt_new) * 1000 / tick_cmp);
-      default:
-        /* 中断耗时过长（超过1ms），程序异常 / Indicates that interrupt took more
-         * than 1ms, an error case */
-        continue;
-    }
-  } while (true);
+  return MicrosecondTimestamp(static_cast<uint64_t>(tick) * 1000ULL +
+                              static_cast<uint64_t>(count) * 1000ULL / tick_period);
 }
 
 MillisecondTimestamp Timebase::GetMilliseconds() { return CH32Timebase::sys_tick_ms_; }
 
-void CH32Timebase::OnSysTickInterrupt() { sys_tick_ms_++; }
+void CH32Timebase::OnSysTickInterrupt()
+{
+  const uint32_t interrupt_state = libxr_ch32_interrupt_save_and_disable();
+  ++sys_tick_ms_;
+  SysTick->SR = 0U;
+  libxr_ch32_interrupt_restore(interrupt_state);
+}
 
 void CH32Timebase::Sync(uint32_t ticks) { sys_tick_ms_ = ticks; }
 
