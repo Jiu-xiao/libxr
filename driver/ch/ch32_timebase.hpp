@@ -26,6 +26,8 @@ class CH32Timebase : public Timebase
   /**
    * @brief SysTick 中断入口辅助函数。
    *        Helper called from the SysTick interrupt path.
+   * @note 必须在其他代码清除 SysTick 比较标志前调用。
+   *       Call this before clearing the SysTick compare flag elsewhere.
    */
   static inline void OnSysTickInterrupt();
 

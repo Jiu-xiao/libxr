@@ -1,6 +1,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "ch32_interrupt_guard.h"
+
 #if !defined(__riscv_zaamo)
 #error "CH32 QingKe V4 requires the RISC-V Zaamo extension"
 #endif
@@ -9,34 +11,17 @@
 #error "CH32 QingKe V4 must be compiled with Zaamo, not the full RISC-V A extension"
 #endif
 
-#if !defined(__riscv_zicsr) || !defined(__riscv_zifencei)
-#error "CH32 QingKe V4 atomic shims require the RISC-V Zicsr and Zifencei extensions"
-#endif
-
-enum
-{
-  QINGKE_INTERRUPT_ENABLE_MASK = 0x88U,
-};
-
 static inline uint32_t atomic_enter(void)
 {
-  uint32_t interrupt_state;
-  const uint32_t mask = QINGKE_INTERRUPT_ENABLE_MASK;
-  __asm volatile("csrrc %0, 0x800, %1\n\tfence.i\n\tfence rw, rw"
-                 : "=r"(interrupt_state)
-                 : "r"(mask)
-                 : "memory");
+  const uint32_t interrupt_state = libxr_ch32_interrupt_save_and_disable();
+  __asm volatile("fence rw, rw" ::: "memory");
   return interrupt_state;
 }
 
 static inline void atomic_exit(uint32_t interrupt_state)
 {
   __asm volatile("fence rw, rw" ::: "memory");
-  const uint32_t restore = interrupt_state & QINGKE_INTERRUPT_ENABLE_MASK;
-  if (restore != 0U)
-  {
-    __asm volatile("csrs 0x800, %0" : : "r"(restore) : "memory");
-  }
+  libxr_ch32_interrupt_restore(interrupt_state);
 }
 
 /**
