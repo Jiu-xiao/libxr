@@ -26,6 +26,12 @@ set(_libxr_idf_components
   driver
   hal
   usb
+  esp_hal_uart
+  esp_hal_gpspi
+  esp_hal_timg
+  esp_hal_wdt
+  esp_driver_uart
+  esp_driver_spi
   esp_hw_support
   esp_timer
   esp_event
