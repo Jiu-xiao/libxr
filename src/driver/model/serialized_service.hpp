@@ -12,16 +12,13 @@ namespace LibXR
  * @brief Coalesce level-triggered events and run one non-reentrant service owner.
  *
  * The high bit of one atomic word is the owner bit. The low 31 bits are coalescible
- * events. One atomic OR publishes events and claims the owner without disturbing
- * concurrent publications; atomic AND takes event snapshots and releases the owner
- * while preserving later publications. A caller that observes an owner only publishes
- * its events and returns.
+ * events. A caller that acquires the owner drains events in its current execution
+ * context until a no-new-event release CAS succeeds. A caller that observes an owner
+ * only publishes its events and returns.
  *
  * Events do not preserve counts or payloads. Every invocation for one service instance
  * must use the same logical handler. The handler must not throw or block; when an ISR can
- * acquire the owner, all work reachable from the handler must be ISR-safe. One instance
- * must consistently use either guarded or unguarded owner-entry methods; mixing them
- * bypasses the guarded IRQ-domain admission contract.
+ * acquire the owner, all work reachable from the handler must be ISR-safe.
  */
 class SerializedService
 {
@@ -45,23 +42,30 @@ class SerializedService
       return false;
     }
 
-    const uint32_t claimed =
-        state_.fetch_or(events | OWNER_BIT, std::memory_order_acq_rel);
-    if ((claimed & OWNER_BIT) != 0U)
+    uint32_t observed = state_.fetch_or(events, std::memory_order_release) | events;
+    while ((observed & OWNER_BIT) == 0U)
     {
-      return false;
-    }
+      if ((observed & EVENT_MASK) == 0U)
+      {
+        return false;
+      }
 
-    Handler& handler_ref = handler;
-    Drain(TakePendingEvents(), handler_ref);
-    return true;
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        Handler& handler_ref = handler;
+        Drain(observed & EVENT_MASK, handler_ref);
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
    * @brief Publish events and claim/release the owner inside a backend admission guard.
    *
    * The guard serializes a multi-step IRQ-domain mask with the owner claim, and the
-   * no-new-event owner release with the corresponding restore. It is held only around
+   * no-new-event release CAS with the corresponding restore. It is held only around
    * those fixed-cost boundaries, never while the service handler runs.
    *
    * @tparam Guard Backend guard providing `LockAndMaskIrqDomain()`,
@@ -78,18 +82,26 @@ class SerializedService
     }
 
     guard.LockAndMaskIrqDomain();
-    const uint32_t claimed =
-        state_.fetch_or(events | OWNER_BIT, std::memory_order_acq_rel);
-    if ((claimed & OWNER_BIT) != 0U)
+    uint32_t observed = state_.fetch_or(events, std::memory_order_release) | events;
+    while ((observed & OWNER_BIT) == 0U)
     {
-      guard.UnlockIrqDomain();
-      return false;
-    }
+      if ((observed & EVENT_MASK) == 0U)
+      {
+        guard.UnlockIrqDomain();
+        return false;
+      }
 
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        guard.UnlockIrqDomain();
+        Handler& handler_ref = handler;
+        DrainGuarded(observed & EVENT_MASK, handler_ref, guard);
+        return true;
+      }
+    }
     guard.UnlockIrqDomain();
-    Handler& handler_ref = handler;
-    DrainGuarded(TakePendingEvents(), handler_ref, guard);
-    return true;
+    return false;
   }
 
   /**
@@ -108,50 +120,54 @@ class SerializedService
   template <typename Source, typename Handler>
   bool ClaimAndInvoke(Source&& source, Handler&& handler) noexcept
   {
-    const uint32_t claimed = state_.fetch_or(OWNER_BIT, std::memory_order_acquire);
-    if ((claimed & OWNER_BIT) != 0U)
+    uint32_t observed = state_.load(std::memory_order_relaxed);
+    while ((observed & OWNER_BIT) == 0U)
     {
-      return false;
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        Source& source_ref = source;
+        const uint32_t source_events = source_ref();
+        ASSERT((source_events & OWNER_BIT) == 0U);
+
+        Handler& handler_ref = handler;
+        Drain((observed | source_events) & EVENT_MASK, handler_ref);
+        return true;
+      }
     }
-
-    const uint32_t pending_events = TakePendingEvents();
-    Source& source_ref = source;
-    const uint32_t source_events = source_ref();
-    ASSERT((source_events & OWNER_BIT) == 0U);
-
-    Handler& handler_ref = handler;
-    Drain(pending_events | source_events, handler_ref);
-    return true;
+    return false;
   }
 
   /**
    * @brief Claim before reading an IRQ source, using the backend admission guard.
    *
-   * The protected source is read only after the owner claim succeeds and after the short
+   * The protected source is read only after the owner CAS succeeds and after the short
    * admission guard has been released. The IRQ domain remains masked until the guarded
-   * owner release restores it.
+   * release CAS restores it.
    */
   template <typename Guard, typename Source, typename Handler>
   bool ClaimAndInvokeGuarded(Guard& guard, Source&& source, Handler&& handler) noexcept
   {
     guard.LockAndMaskIrqDomain();
-    const uint32_t claimed = state_.fetch_or(OWNER_BIT, std::memory_order_acquire);
-    if ((claimed & OWNER_BIT) != 0U)
+    uint32_t observed = state_.load(std::memory_order_relaxed);
+    while ((observed & OWNER_BIT) == 0U)
     {
-      guard.UnlockIrqDomain();
-      return false;
+      if (state_.compare_exchange_weak(observed, OWNER_BIT, std::memory_order_acquire,
+                                       std::memory_order_relaxed))
+      {
+        guard.UnlockIrqDomain();
+
+        Source& source_ref = source;
+        const uint32_t source_events = source_ref();
+        ASSERT((source_events & OWNER_BIT) == 0U);
+
+        Handler& handler_ref = handler;
+        DrainGuarded((observed | source_events) & EVENT_MASK, handler_ref, guard);
+        return true;
+      }
     }
-
     guard.UnlockIrqDomain();
-
-    const uint32_t pending_events = TakePendingEvents();
-    Source& source_ref = source;
-    const uint32_t source_events = source_ref();
-    ASSERT((source_events & OWNER_BIT) == 0U);
-
-    Handler& handler_ref = handler;
-    DrainGuarded(pending_events | source_events, handler_ref, guard);
-    return true;
+    return false;
   }
 
   /**
@@ -186,13 +202,6 @@ class SerializedService
     return (events != 0U) && ((events & OWNER_BIT) == 0U);
   }
 
-  uint32_t TakePendingEvents() noexcept
-  {
-    const uint32_t observed = state_.fetch_and(OWNER_BIT, std::memory_order_acq_rel);
-    ASSERT((observed & OWNER_BIT) != 0U);
-    return observed & EVENT_MASK;
-  }
-
   template <typename Handler>
   void Drain(uint32_t snapshot, Handler& handler) noexcept
   {
@@ -203,25 +212,14 @@ class SerializedService
         handler(snapshot);
       }
 
-      snapshot = TakePendingEvents();
-      if (snapshot != 0U)
-      {
-        continue;
-      }
-
-      const uint32_t released = state_.fetch_and(EVENT_MASK, std::memory_order_release);
-      ASSERT((released & OWNER_BIT) != 0U);
-      if ((released & EVENT_MASK) == 0U)
+      uint32_t expected = OWNER_BIT;
+      if (state_.compare_exchange_strong(expected, 0U, std::memory_order_release,
+                                         std::memory_order_acquire))
       {
         return;
       }
 
-      const uint32_t claimed = state_.fetch_or(OWNER_BIT, std::memory_order_acquire);
-      if ((claimed & OWNER_BIT) != 0U)
-      {
-        return;
-      }
-      snapshot = TakePendingEvents();
+      snapshot = state_.exchange(OWNER_BIT, std::memory_order_acq_rel) & EVENT_MASK;
     }
   }
 
@@ -235,25 +233,17 @@ class SerializedService
         handler(snapshot);
       }
 
-      snapshot = TakePendingEvents();
-      if (snapshot != 0U)
-      {
-        continue;
-      }
-
       guard.LockIrqDomain();
-      const uint32_t released = state_.fetch_and(EVENT_MASK, std::memory_order_release);
-      ASSERT((released & OWNER_BIT) != 0U);
-      if ((released & EVENT_MASK) == 0U)
+      uint32_t expected = OWNER_BIT;
+      if (state_.compare_exchange_strong(expected, 0U, std::memory_order_release,
+                                         std::memory_order_acquire))
       {
         guard.RestoreAndUnlockIrqDomain();
         return;
       }
-
-      const uint32_t claimed = state_.fetch_or(OWNER_BIT, std::memory_order_acquire);
-      ASSERT((claimed & OWNER_BIT) == 0U);
       guard.UnlockIrqDomain();
-      snapshot = TakePendingEvents();
+
+      snapshot = state_.exchange(OWNER_BIT, std::memory_order_acq_rel) & EVENT_MASK;
     }
   }
 
