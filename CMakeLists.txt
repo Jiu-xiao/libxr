@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(LIBXR_DEV_ASSERT_BUILD "Enable LibXR maintainer-only development assertions" OFF)
+option(LIBXR_HARDWARE_TEST_BUILD "Build reusable LibXR hardware-test support" OFF)
 if(LIBXR_SHARED_BUILD)
   add_library(${PROJECT_NAME} SHARED)
 elseif(LIBXR_STATIC_BUILD)
@@ -262,4 +263,8 @@ endif()
 
 if(LIBXR_TEST_BUILD)
   add_subdirectory(test)
+endif()
+
+if(LIBXR_HARDWARE_TEST_BUILD)
+  add_subdirectory(test/hardware)
 endif()
