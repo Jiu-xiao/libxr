@@ -1,8 +1,11 @@
 #pragma once
 
+extern "C"
+{
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
+}
 
 namespace LibXR
 {

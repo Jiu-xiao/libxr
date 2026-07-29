@@ -7,7 +7,7 @@
 
 #ifdef HAL_UART_MODULE_ENABLED
 
-#if defined(DMA_IT_SUSP) && defined(DMA_FLAG_SUSP)
+#if defined(DMA_IT_SUSP) && defined(DMA_FLAG_SUSP) && !defined(STM32H503xx)
 #error \
     "LibXR STM32UART does not support suspend/linked-list STM32 DMA; no STM32 linked-list RX backend is currently provided"
 #endif
@@ -18,9 +18,14 @@
 
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-#include "model/uart_circular_dma_rx_model.hpp"
 #include "model/uart_dma_model.hpp"
 #include "model/uart_execution_policy.hpp"
+#if defined(STM32H503xx)
+#include "model/uart_linked_list_dma_rx_model.hpp"
+#include "stm32_uart_h5_gpdma.hpp"
+#else
+#include "model/uart_circular_dma_rx_model.hpp"
+#endif
 #include "stm32_dcache.hpp"
 #include "uart.hpp"
 
@@ -122,14 +127,21 @@ stm32_uart_id_t stm32_uart_get_id(USART_TypeDef* addr);
 namespace LibXR
 {
 
+#if defined(STM32H503xx)
+using STM32RxDmaModel = UartLinkedListDmaRxModel<STM32H5GpdmaUartAdapter::RX_NODE_COUNT>;
+#else
+using STM32RxDmaModel = UartCircularDmaRxModel;
+#endif
+
 /**
  * @brief STM32 UART backend using the HAL callback boundary.
  *
  * HAL IRQ handlers own HAL flags and handle state. They call the callbacks below,
  * which publish TX completion/error facts to `UartDmaModel` and push RX data through
- * `UartCircularDmaRxModel`. CONFIG and runtime recovery stop both DMA directions through
- * DMA abort completion callbacks, which publish `STOP_DONE` into the same serialized
- * service. Stream-DMA abort admission briefly masks that stream's NVIC vector to
+ * the selected circular or linked-list RX model. CONFIG and runtime recovery stop both
+ * DMA directions through DMA abort completion callbacks, which publish `STOP_DONE` into
+ * the same serialized service. Stream-DMA abort admission briefly masks that stream's
+ * NVIC vector to
  * serialize the HAL `BUSY` to `ABORT` transition without modifying an active Stream
  * control register; it never polls for completion or clears a pending terminal flag.
  * Stream DMA also requires the selected NVIC vector and DMA terminal interrupt to be
@@ -142,9 +154,11 @@ namespace LibXR
  * both normal TX completion and any stopped active TX awaiting UART TC use it as their
  * final non-blocking carrier.
  *
- * This backend supports traditional STM32 Stream, Channel, and BDMA circular RX.
- * Suspend/linked-list families such as H5/U5/U3/N6/H7RS GPDMA are rejected because
- * their receive state needs another model.
+ * This backend supports traditional STM32 Stream, Channel, and BDMA circular RX, plus
+ * the separately adapted STM32H503 circular linked-list GPDMA RX path. Other
+ * suspend/linked-list families remain rejected until their HAL and hardware contracts
+ * are reviewed independently. The H503 adapter preserves `DMAT`/`DMAR` and masks only
+ * the affected GPDMA channel vector around HAL's BUSY-to-ABORT publication.
  * On D-cache targets, enabled RX storage must start and end on cache-line boundaries
  * so invalidating DMA-written bytes cannot discard unrelated dirty data.
  * A documented HAL_ERROR caused by a pending RX line error is reported as a pending
@@ -170,7 +184,11 @@ namespace LibXR
  */
 class STM32UART : public UART
 {
+#if defined(STM32H503xx)
+  friend class UartLinkedListDmaRxModel<STM32H5GpdmaUartAdapter::RX_NODE_COUNT>;
+#else
   friend class UartCircularDmaRxModel;
+#endif
   friend class UartDmaModel<STM32UART, UartDirectPolicy>;
   friend void ::HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t size);
   friend void ::HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart);
@@ -191,7 +209,7 @@ class STM32UART : public UART
   ErrorCode SetConfig(UART::Configuration config);
 
   /**
-   * @brief Re-arm circular RX DMA outside the runtime CONFIG state machine.
+   * @brief Re-arm the configured RX DMA outside the runtime CONFIG state machine.
    * @warning Compatibility hook. The caller must keep UART/RX-DMA callbacks,
    * CONFIG/recovery, and the RX producer quiescent for the entire call. Use SetConfig()
    * for ordinary runtime reconfiguration.
@@ -203,7 +221,10 @@ class STM32UART : public UART
   WritePort _write_port;
 
   UartDirectPolicy execution_policy_;
-  UartCircularDmaRxModel rx_dma_model_;
+  STM32RxDmaModel rx_dma_model_;
+#if defined(STM32H503xx)
+  STM32H5GpdmaUartAdapter h5_gpdma_adapter_;
+#endif
   UartDmaModel<STM32UART, UartDirectPolicy> dma_model_;
 
   UART_HandleTypeDef* uart_handle_;
@@ -240,7 +261,14 @@ class STM32UART : public UART
   void CloseTxTerminalSource();
   void LaunchDmaStop(DMA_HandleTypeDef* dma_handle, bool in_isr, bool classify_tx);
   static void DmaAbortCallback(DMA_HandleTypeDef* dma_handle);
+  void CaptureStoppedTx();
+  void FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr);
 
+#if defined(STM32H503xx)
+  RxArmResult StartLinkedListDmaRx(uint8_t* data, size_t size, size_t descriptor_count);
+  [[nodiscard]] uint8_t* GetLinkedListDmaRxProducer() const;
+  void PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size);
+#else
   RxArmResult StartCircularDmaRx(uint8_t* data, size_t size)
   {
     const bool in_isr = InIsr();
@@ -279,6 +307,7 @@ class STM32UART : public UART
   {
     STM32_InvalidateDCacheByAddr(data, size);
   }
+#endif
 
   UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block, bool in_isr);
 
