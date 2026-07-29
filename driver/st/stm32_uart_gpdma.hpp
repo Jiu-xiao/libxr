@@ -5,40 +5,56 @@
 
 #include "main.h"
 
-#if defined(STM32H5) && defined(HAL_UART_MODULE_ENABLED) && !defined(STM32H503xx)
-#error "LibXR STM32 H5 GPDMA UART support is currently validated only for STM32H503"
+#if defined(STM32H5) || defined(STM32U5) || defined(STM32U3) || defined(STM32N6) || \
+    defined(STM32H7RS)
+#define LIBXR_STM32_UART_GPDMA 1
 #endif
 
-#if defined(STM32H5) && defined(HAL_UART_MODULE_ENABLED)
+#if defined(LIBXR_STM32_UART_GPDMA) && defined(HAL_UART_MODULE_ENABLED)
 
 #if !defined(HAL_DMA_MODULE_ENABLED)
-#error "LibXR STM32H503 GPDMA UART support requires the HAL DMA module"
+#error "LibXR STM32 GPDMA UART support requires the HAL DMA module"
 #endif
 
+#if !defined(DMA_LINKEDLIST_CIRCULAR) || !defined(DMA_GPDMA_LINEAR_NODE) || \
+    !defined(DMA_IT_SUSP) || !defined(DMA_FLAG_SUSP) || !defined(IS_GPDMA_INSTANCE)
+#error "LibXR STM32 GPDMA UART support requires the HAL linked-list GPDMA API"
+#endif
+
+#if defined(STM32H503xx) || defined(STM32H523xx) || defined(STM32H533xx) || \
+    defined(STM32H562xx) || defined(STM32H563xx) || defined(STM32H573xx)
+#define LIBXR_STM32_UART_REQUIRES_DMA_REQUEST_WA 1
+#elif defined(STM32U575xx) || defined(STM32U585xx)
+#define LIBXR_STM32_UART_REQUIRES_DMA_REQUEST_WA 1
+#endif
+
+#if defined(LIBXR_STM32_UART_REQUIRES_DMA_REQUEST_WA)
 #if !defined(USART_DMAREQUESTS_SW_WA)
-#error "STM32H503 HAL must preserve UART DMA request bits for ES0561 section 2.11.2"
+#error "This STM32 HAL must preserve UART DMA request bits for its USART erratum"
+#endif
 #endif
 
 namespace LibXR
 {
 
 /**
- * @brief STM32H503 GPDMA details used by the common UART DMA model.
+ * @brief STM32 GPDMA details used by the common UART DMA model.
  *
  * The adapter owns a private four-node linear-addressing RX queue but not its payload
  * storage. It replaces the CubeMX seed queue at the first stopped RX start, samples the
  * live producer only through `GetLinkedListDmaRxProducer()`, and joins asynchronous
- * per-channel aborts without changing HAL handle state. UART `DMAT` and `DMAR` remain
- * untouched as required by STM32H503 erratum ES0561 section 2.11.2.
+ * per-channel aborts without changing HAL handle state. Only GPDMA handles are accepted;
+ * LPDMA and HPDMA require separate controller-specific validation. UART `DMAT` and
+ * `DMAR` remain under the family HAL's erratum-aware abort behavior.
  */
-class STM32H5GpdmaUartAdapter
+class STM32GpdmaUartAdapter
 {
  public:
   static constexpr size_t RX_NODE_COUNT = 4U;
 
   using AbortCallback = void (*)(DMA_HandleTypeDef* dma_handle);
 
-  explicit STM32H5GpdmaUartAdapter(UART_HandleTypeDef* uart_handle);
+  explicit STM32GpdmaUartAdapter(UART_HandleTypeDef* uart_handle);
 
   /**
    * @brief Build, attach, and start the private circular linked-list RX queue.
@@ -56,7 +72,7 @@ class STM32H5GpdmaUartAdapter
   /** Make one DMA-written RX span visible to the CPU. */
   static void PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size);
 
-  /** Disable only UART TC notification; preserve H503 DMAT and DMAR request bits. */
+  /** Disable only UART TC notification; leave DMA request handling to the family HAL. */
   void CloseTxTerminalSource() const;
 
   /**
@@ -78,9 +94,9 @@ class STM32H5GpdmaUartAdapter
   /**
    * @brief Capture stopped normal-TX evidence without inferring completion from CBR1.
    *
-   * H503 silicon readback after asynchronous channel RESET is not yet hardware-proven.
-   * Therefore this adapter records errors but conservatively leaves `payload_complete`
-   * false so an unretired active record is replayed from byte zero.
+   * Post-RESET GPDMA block-count readback is not used as completion evidence. The
+   * adapter records errors but conservatively leaves `payload_complete` false so an
+   * unretired active record is replayed from byte zero.
    */
   void CaptureStoppedTx(DMA_HandleTypeDef* dma_handle, bool& evidence_captured,
                         bool& payload_complete, bool& error) const;
@@ -117,7 +133,7 @@ class STM32H5GpdmaUartAdapter
   StateBlock state_{};
 };
 
-static_assert(sizeof(STM32H5GpdmaUartAdapter) == 256U);
+static_assert(sizeof(STM32GpdmaUartAdapter) == 256U);
 
 }  // namespace LibXR
 
