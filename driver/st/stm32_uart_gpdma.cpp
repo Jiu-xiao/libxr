@@ -1,6 +1,6 @@
-#include "stm32_uart_h5_gpdma.hpp"
+#include "stm32_uart_gpdma.hpp"
 
-#if defined(STM32H5) && defined(HAL_UART_MODULE_ENABLED)
+#if defined(LIBXR_STM32_UART_GPDMA) && defined(HAL_UART_MODULE_ENABLED)
 
 #include "libxr_assert.hpp"
 #include "stm32_dcache.hpp"
@@ -18,6 +18,7 @@ IRQn_Type GetGpdmaIrq(DMA_Channel_TypeDef* instance)
     return DMA##_Channel##CHANNEL##_IRQn;  \
   }
 
+#if defined(GPDMA1_Channel0)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 0)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 1)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 2)
@@ -26,6 +27,20 @@ IRQn_Type GetGpdmaIrq(DMA_Channel_TypeDef* instance)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 5)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 6)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 7)
+#endif
+#if defined(GPDMA1_Channel8)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 8)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 9)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 10)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 11)
+#endif
+#if defined(GPDMA1_Channel12)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 12)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 13)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 14)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA1, 15)
+#endif
+#if defined(GPDMA2_Channel0)
   LIBXR_GPDMA_IRQ_CASE(GPDMA2, 0)
   LIBXR_GPDMA_IRQ_CASE(GPDMA2, 1)
   LIBXR_GPDMA_IRQ_CASE(GPDMA2, 2)
@@ -34,6 +49,19 @@ IRQn_Type GetGpdmaIrq(DMA_Channel_TypeDef* instance)
   LIBXR_GPDMA_IRQ_CASE(GPDMA2, 5)
   LIBXR_GPDMA_IRQ_CASE(GPDMA2, 6)
   LIBXR_GPDMA_IRQ_CASE(GPDMA2, 7)
+#endif
+#if defined(GPDMA2_Channel8)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 8)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 9)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 10)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 11)
+#endif
+#if defined(GPDMA2_Channel12)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 12)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 13)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 14)
+  LIBXR_GPDMA_IRQ_CASE(GPDMA2, 15)
+#endif
 
 #undef LIBXR_GPDMA_IRQ_CASE
 
@@ -86,16 +114,22 @@ class GpdmaNvicMaskGuard
 
 }  // namespace
 
-STM32H5GpdmaUartAdapter::STM32H5GpdmaUartAdapter(UART_HandleTypeDef* uart_handle)
+STM32GpdmaUartAdapter::STM32GpdmaUartAdapter(UART_HandleTypeDef* uart_handle)
 {
   REQUIRE(uart_handle != nullptr);
+#if defined(STM32U5) || defined(STM32N6) || defined(STM32H7RS)
+  REQUIRE((uart_handle->hdmatx == nullptr) ||
+          (IS_GPDMA_INSTANCE(uart_handle->hdmatx->Instance) != 0U));
+  REQUIRE((uart_handle->hdmarx == nullptr) ||
+          (IS_GPDMA_INSTANCE(uart_handle->hdmarx->Instance) != 0U));
+#endif
   state_.uart_handle = uart_handle;
 }
 
-HAL_StatusTypeDef STM32H5GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
-                                                                size_t total_size,
-                                                                size_t descriptor_count,
-                                                                bool in_isr)
+HAL_StatusTypeDef STM32GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
+                                                              size_t total_size,
+                                                              size_t descriptor_count,
+                                                              bool in_isr)
 {
   REQUIRE_FROM_CALLBACK(state_.uart_handle->hdmarx != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(buffer != nullptr, in_isr);
@@ -121,6 +155,9 @@ HAL_StatusTypeDef STM32H5GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
 
   REQUIRE_FROM_CALLBACK(StopComplete(state_.uart_handle->hdmarx), in_isr);
   FinalizeStopped(state_.uart_handle->hdmarx, in_isr);
+  // GPDMA fetches the private nodes directly; cacheable targets must publish all
+  // CPU-built descriptor and queue fields before the HAL starts the channel.
+  STM32_CleanDCacheByAddr(&state_, sizeof(state_));
   STM32_CleanDCacheByAddr(buffer, total_size);
   STM32_InvalidateDCacheByAddr(buffer, total_size);
 
@@ -128,19 +165,19 @@ HAL_StatusTypeDef STM32H5GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
                                       static_cast<uint16_t>(state_.rx_node_size));
 }
 
-uint8_t* STM32H5GpdmaUartAdapter::GetLinkedListDmaRxProducer() const
+uint8_t* STM32GpdmaUartAdapter::GetLinkedListDmaRxProducer() const
 {
   ASSERT(state_.uart_handle->hdmarx != nullptr);
   const uintptr_t destination = state_.uart_handle->hdmarx->Instance->CDAR;
   return reinterpret_cast<uint8_t*>(destination);
 }
 
-void STM32H5GpdmaUartAdapter::PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size)
+void STM32GpdmaUartAdapter::PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size)
 {
   STM32_InvalidateDCacheByAddr(data, size);
 }
 
-void STM32H5GpdmaUartAdapter::CloseTxTerminalSource() const
+void STM32GpdmaUartAdapter::CloseTxTerminalSource() const
 {
   ATOMIC_CLEAR_BIT(state_.uart_handle->Instance->CR1, USART_CR1_TCIE);
   const volatile uint32_t cr1 = state_.uart_handle->Instance->CR1;
@@ -148,8 +185,8 @@ void STM32H5GpdmaUartAdapter::CloseTxTerminalSource() const
   __DSB();
 }
 
-bool STM32H5GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
-                                         AbortCallback callback, bool in_isr)
+bool STM32GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
+                                       AbortCallback callback, bool in_isr)
 {
   ASSERT(dma_handle != nullptr);
   ASSERT(dma_handle->Parent == state_.uart_handle);
@@ -221,7 +258,7 @@ bool STM32H5GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
          StopComplete(dma_handle);
 }
 
-bool STM32H5GpdmaUartAdapter::StopComplete(DMA_HandleTypeDef* dma_handle)
+bool STM32GpdmaUartAdapter::StopComplete(DMA_HandleTypeDef* dma_handle)
 {
   if ((dma_handle == nullptr) || !IsStopped(dma_handle) ||
       (dma_handle->State != HAL_DMA_STATE_READY))
@@ -236,7 +273,7 @@ bool STM32H5GpdmaUartAdapter::StopComplete(DMA_HandleTypeDef* dma_handle)
   return true;
 }
 
-bool STM32H5GpdmaUartAdapter::AllStopsComplete() const
+bool STM32GpdmaUartAdapter::AllStopsComplete() const
 {
   return ((state_.uart_handle->hdmatx == nullptr) ||
           StopComplete(state_.uart_handle->hdmatx)) &&
@@ -244,16 +281,15 @@ bool STM32H5GpdmaUartAdapter::AllStopsComplete() const
           StopComplete(state_.uart_handle->hdmarx));
 }
 
-void STM32H5GpdmaUartAdapter::CaptureStoppedTx(DMA_HandleTypeDef* dma_handle,
-                                               bool& evidence_captured,
-                                               bool& payload_complete, bool& error) const
+void STM32GpdmaUartAdapter::CaptureStoppedTx(DMA_HandleTypeDef* dma_handle,
+                                             bool& evidence_captured,
+                                             bool& payload_complete, bool& error) const
 {
   ASSERT(dma_handle == state_.uart_handle->hdmatx);
   ASSERT(StopComplete(dma_handle));
 
   // CBR1 is intentionally sampled before HAL_UART_Abort() overwrites ErrorCode with
-  // NO_XFER. Until H503 reset readback is proven on hardware, even zero is not used as
-  // authoritative payload completion.
+  // NO_XFER. Post-RESET readback is not used as authoritative payload completion.
   const uint32_t remaining = __HAL_DMA_GET_COUNTER(dma_handle);
   UNUSED(remaining);
 
@@ -269,7 +305,7 @@ void STM32H5GpdmaUartAdapter::CaptureStoppedTx(DMA_HandleTypeDef* dma_handle,
   error = error || HasTransferError(dma_handle);
 }
 
-void STM32H5GpdmaUartAdapter::FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr)
+void STM32GpdmaUartAdapter::FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr)
 {
   REQUIRE_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
   REQUIRE_FROM_CALLBACK(dma_handle->Lock == HAL_UNLOCKED, in_isr);
@@ -281,7 +317,7 @@ void STM32H5GpdmaUartAdapter::FinalizeStopped(DMA_HandleTypeDef* dma_handle, boo
   DisableInterrupts(dma_handle);
   if ((dma_handle->Mode & DMA_LINKEDLIST) == DMA_LINKEDLIST)
   {
-    // The H5 GPDMA error IRQ path resets the channel without clearing CBR1.
+    // STM32 GPDMA error IRQ paths reset the channel without clearing CBR1.
     // A zero block count forces the next list start to load the head node.
     dma_handle->Instance->CBR1 = 0U;
   }
@@ -292,13 +328,13 @@ void STM32H5GpdmaUartAdapter::FinalizeStopped(DMA_HandleTypeDef* dma_handle, boo
   __DSB();
 }
 
-bool STM32H5GpdmaUartAdapter::IsStopped(DMA_HandleTypeDef* dma_handle)
+bool STM32GpdmaUartAdapter::IsStopped(DMA_HandleTypeDef* dma_handle)
 {
   const uint32_t ccr = dma_handle->Instance->CCR;
   return (ccr & DMA_CCR_EN) == 0U;
 }
 
-bool STM32H5GpdmaUartAdapter::HasTransferError(DMA_HandleTypeDef* dma_handle)
+bool STM32GpdmaUartAdapter::HasTransferError(DMA_HandleTypeDef* dma_handle)
 {
   uint32_t error_code = dma_handle->ErrorCode;
   error_code &= ~HAL_DMA_ERROR_NO_XFER;
@@ -308,21 +344,21 @@ bool STM32H5GpdmaUartAdapter::HasTransferError(DMA_HandleTypeDef* dma_handle)
          ((__HAL_DMA_GET_FLAG(dma_handle, error_flags)) != 0U);
 }
 
-void STM32H5GpdmaUartAdapter::DisableInterrupts(DMA_HandleTypeDef* dma_handle)
+void STM32GpdmaUartAdapter::DisableInterrupts(DMA_HandleTypeDef* dma_handle)
 {
   __HAL_DMA_DISABLE_IT(dma_handle, DMA_IT_TC | DMA_IT_HT | DMA_IT_DTE | DMA_IT_ULE |
                                        DMA_IT_USE | DMA_IT_SUSP | DMA_IT_TO);
 }
 
-void STM32H5GpdmaUartAdapter::ClearFlags(DMA_HandleTypeDef* dma_handle)
+void STM32GpdmaUartAdapter::ClearFlags(DMA_HandleTypeDef* dma_handle)
 {
   __HAL_DMA_CLEAR_FLAG(dma_handle, DMA_FLAG_TC | DMA_FLAG_HT | DMA_FLAG_DTE |
                                        DMA_FLAG_ULE | DMA_FLAG_USE | DMA_FLAG_SUSP |
                                        DMA_FLAG_TO);
 }
 
-void STM32H5GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size,
-                                           size_t descriptor_count, bool in_isr)
+void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size,
+                                         size_t descriptor_count, bool in_isr)
 {
   DMA_HandleTypeDef* const dma_handle = state_.uart_handle->hdmarx;
   REQUIRE_FROM_CALLBACK(StopComplete(dma_handle), in_isr);

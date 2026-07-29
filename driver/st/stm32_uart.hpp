@@ -7,7 +7,9 @@
 
 #ifdef HAL_UART_MODULE_ENABLED
 
-#if defined(DMA_IT_SUSP) && defined(DMA_FLAG_SUSP) && !defined(STM32H503xx)
+#include "stm32_uart_gpdma.hpp"
+
+#if defined(DMA_IT_SUSP) && defined(DMA_FLAG_SUSP) && !defined(LIBXR_STM32_UART_GPDMA)
 #error \
     "LibXR STM32UART does not support suspend/linked-list STM32 DMA; no STM32 linked-list RX backend is currently provided"
 #endif
@@ -20,9 +22,8 @@
 #include "libxr_rw.hpp"
 #include "model/uart_dma_model.hpp"
 #include "model/uart_execution_policy.hpp"
-#if defined(STM32H503xx)
+#if defined(LIBXR_STM32_UART_GPDMA)
 #include "model/uart_linked_list_dma_rx_model.hpp"
-#include "stm32_uart_h5_gpdma.hpp"
 #else
 #include "model/uart_circular_dma_rx_model.hpp"
 #endif
@@ -127,8 +128,8 @@ stm32_uart_id_t stm32_uart_get_id(USART_TypeDef* addr);
 namespace LibXR
 {
 
-#if defined(STM32H503xx)
-using STM32RxDmaModel = UartLinkedListDmaRxModel<STM32H5GpdmaUartAdapter::RX_NODE_COUNT>;
+#if defined(LIBXR_STM32_UART_GPDMA)
+using STM32RxDmaModel = UartLinkedListDmaRxModel<STM32GpdmaUartAdapter::RX_NODE_COUNT>;
 #else
 using STM32RxDmaModel = UartCircularDmaRxModel;
 #endif
@@ -155,10 +156,11 @@ using STM32RxDmaModel = UartCircularDmaRxModel;
  * final non-blocking carrier.
  *
  * This backend supports traditional STM32 Stream, Channel, and BDMA circular RX, plus
- * the separately adapted STM32H503 circular linked-list GPDMA RX path. Other
- * suspend/linked-list families remain rejected until their HAL and hardware contracts
- * are reviewed independently. The H503 adapter preserves `DMAT`/`DMAR` and masks only
- * the affected GPDMA channel vector around HAL's BUSY-to-ABORT publication.
+ * the STM32H5/U5/U3/N6/H7RS circular linked-list GPDMA RX path. Other
+ * suspend/linked-list families and non-GPDMA controllers remain rejected until their
+ * HAL and hardware contracts are reviewed independently. The GPDMA adapter leaves
+ * `DMAT`/`DMAR` handling to the family HAL and masks only the affected channel vector
+ * around HAL's BUSY-to-ABORT publication.
  * On D-cache targets, enabled RX storage must start and end on cache-line boundaries
  * so invalidating DMA-written bytes cannot discard unrelated dirty data.
  * A documented HAL_ERROR caused by a pending RX line error is reported as a pending
@@ -184,8 +186,8 @@ using STM32RxDmaModel = UartCircularDmaRxModel;
  */
 class STM32UART : public UART
 {
-#if defined(STM32H503xx)
-  friend class UartLinkedListDmaRxModel<STM32H5GpdmaUartAdapter::RX_NODE_COUNT>;
+#if defined(LIBXR_STM32_UART_GPDMA)
+  friend class UartLinkedListDmaRxModel<STM32GpdmaUartAdapter::RX_NODE_COUNT>;
 #else
   friend class UartCircularDmaRxModel;
 #endif
@@ -222,8 +224,8 @@ class STM32UART : public UART
 
   UartDirectPolicy execution_policy_;
   STM32RxDmaModel rx_dma_model_;
-#if defined(STM32H503xx)
-  STM32H5GpdmaUartAdapter h5_gpdma_adapter_;
+#if defined(LIBXR_STM32_UART_GPDMA)
+  STM32GpdmaUartAdapter gpdma_adapter_;
 #endif
   UartDmaModel<STM32UART, UartDirectPolicy> dma_model_;
 
@@ -264,7 +266,7 @@ class STM32UART : public UART
   void CaptureStoppedTx();
   void FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr);
 
-#if defined(STM32H503xx)
+#if defined(LIBXR_STM32_UART_GPDMA)
   RxArmResult StartLinkedListDmaRx(uint8_t* data, size_t size, size_t descriptor_count);
   [[nodiscard]] uint8_t* GetLinkedListDmaRxProducer() const;
   void PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size);

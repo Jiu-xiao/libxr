@@ -468,16 +468,47 @@ class TraditionalDmaAdapter
 [[nodiscard]] uint32_t GetUartKernelClock(UART_HandleTypeDef* uart_handle)
 {
 #if defined(UART_GETCLOCKSOURCE)
-#if defined(STM32U0xx_HAL_H) || defined(STM32H503xx)
-  // U0 and H503 return an RCC_PERIPHCLK_* selector, not a UART clock-source enum.
+#if defined(STM32U0xx_HAL_H) || defined(STM32H5) || defined(STM32U5) || \
+    defined(STM32U3) || defined(STM32N6)
+  // These HALs return an RCC_PERIPHCLK_* selector, not a UART clock-source enum.
+#if defined(STM32N6)
+  uint64_t clock_source = 0U;
+#else
   uint32_t clock_source = 0U;
+#endif
   UART_GETCLOCKSOURCE(uart_handle, clock_source);
   return HAL_RCCEx_GetPeriphCLKFreq(clock_source);
 #else
   UART_ClockSourceTypeDef clock_source{};
   UART_GETCLOCKSOURCE(uart_handle, clock_source);
 
-#if defined(RCC_D2CFGR_D2PPRE1)
+#if defined(STM32H7RS)
+  switch (clock_source)
+  {
+    case UART_CLOCKSOURCE_PCLK1:
+      return HAL_RCC_GetPCLK1Freq();
+    case UART_CLOCKSOURCE_PCLK2:
+      return HAL_RCC_GetPCLK2Freq();
+    case UART_CLOCKSOURCE_PCLK4:
+      return HAL_RCC_GetPCLK4Freq();
+    case UART_CLOCKSOURCE_PLL2Q:
+      return HAL_RCC_GetPLL2QFreq();
+    case UART_CLOCKSOURCE_PLL3Q:
+      return HAL_RCC_GetPLL3QFreq();
+    case UART_CLOCKSOURCE_HSI:
+      if (__HAL_RCC_GET_FLAG(RCC_FLAG_HSIDIV) != 0U)
+      {
+        return static_cast<uint32_t>(HSI_VALUE >> (__HAL_RCC_GET_HSI_DIVIDER() >> 3U));
+      }
+      return static_cast<uint32_t>(HSI_VALUE);
+    case UART_CLOCKSOURCE_CSI:
+      return static_cast<uint32_t>(CSI_VALUE);
+    case UART_CLOCKSOURCE_LSE:
+      return static_cast<uint32_t>(LSE_VALUE);
+    default:
+      return 0U;
+  }
+#elif defined(RCC_D2CFGR_D2PPRE1)
   switch (clock_source)
   {
     case UART_CLOCKSOURCE_D2PCLK1:
@@ -823,8 +854,8 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
       _read_port(dma_buff_rx.size_),
       _write_port(tx_queue_size, dma_buff_tx.size_ / 2U),
       rx_dma_model_(dma_buff_rx),
-#if defined(STM32H503xx)
-      h5_gpdma_adapter_(uart_handle),
+#if defined(LIBXR_STM32_UART_GPDMA)
+      gpdma_adapter_(uart_handle),
 #endif
       dma_model_(*this, execution_policy_, _write_port, dma_buff_tx),
       uart_handle_(uart_handle),
@@ -1102,8 +1133,8 @@ bool STM32UART::ApplyConfigPayload(UART::Configuration config, bool in_isr)
 
 bool STM32UART::AllDmaStopsComplete() const
 {
-#if defined(STM32H503xx)
-  return h5_gpdma_adapter_.AllStopsComplete();
+#if defined(LIBXR_STM32_UART_GPDMA)
+  return gpdma_adapter_.AllStopsComplete();
 #else
   return ((uart_handle_->hdmatx == nullptr) ||
           TraditionalDmaAdapter::StopComplete(uart_handle_->hdmatx)) &&
@@ -1114,8 +1145,8 @@ bool STM32UART::AllDmaStopsComplete() const
 
 void STM32UART::CloseTxTerminalSource()
 {
-#if defined(STM32H503xx)
-  h5_gpdma_adapter_.CloseTxTerminalSource();
+#if defined(LIBXR_STM32_UART_GPDMA)
+  gpdma_adapter_.CloseTxTerminalSource();
 #else
   ATOMIC_CLEAR_BIT(uart_handle_->Instance->CR1, USART_CR1_TCIE);
   ATOMIC_CLEAR_BIT(uart_handle_->Instance->CR3, USART_CR3_DMAT);
@@ -1132,10 +1163,9 @@ void STM32UART::LaunchDmaStop(DMA_HandleTypeDef* dma_handle, bool in_isr,
 {
   ASSERT(dma_handle != nullptr);
   ASSERT(dma_handle->Parent == uart_handle_);
-#if defined(STM32H503xx)
+#if defined(LIBXR_STM32_UART_GPDMA)
   UNUSED(classify_tx);
-  const bool accepted =
-      h5_gpdma_adapter_.LaunchStop(dma_handle, DmaAbortCallback, in_isr);
+  const bool accepted = gpdma_adapter_.LaunchStop(dma_handle, DmaAbortCallback, in_isr);
 #else
   const bool accepted = TraditionalDmaAdapter::LaunchStop(
       dma_handle, DmaAbortCallback, classify_tx ? &tx_evidence_captured_ : nullptr,
@@ -1161,9 +1191,9 @@ void STM32UART::DmaAbortCallback(DMA_HandleTypeDef* dma_handle)
 void STM32UART::CaptureStoppedTx()
 {
   ASSERT(uart_handle_->hdmatx != nullptr);
-#if defined(STM32H503xx)
-  h5_gpdma_adapter_.CaptureStoppedTx(uart_handle_->hdmatx, tx_evidence_captured_,
-                                     tx_payload_complete_, tx_dma_error_);
+#if defined(LIBXR_STM32_UART_GPDMA)
+  gpdma_adapter_.CaptureStoppedTx(uart_handle_->hdmatx, tx_evidence_captured_,
+                                  tx_payload_complete_, tx_dma_error_);
 #else
   TraditionalDmaAdapter::CaptureStoppedTx(uart_handle_->hdmatx, tx_evidence_captured_,
                                           tx_payload_complete_, tx_dma_error_);
@@ -1172,20 +1202,20 @@ void STM32UART::CaptureStoppedTx()
 
 void STM32UART::FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr)
 {
-#if defined(STM32H503xx)
-  STM32H5GpdmaUartAdapter::FinalizeStopped(dma_handle, in_isr);
+#if defined(LIBXR_STM32_UART_GPDMA)
+  STM32GpdmaUartAdapter::FinalizeStopped(dma_handle, in_isr);
 #else
   TraditionalDmaAdapter::FinalizeStopped(dma_handle, in_isr);
 #endif
 }
 
-#if defined(STM32H503xx)
+#if defined(LIBXR_STM32_UART_GPDMA)
 STM32UART::RxArmResult STM32UART::StartLinkedListDmaRx(uint8_t* data, size_t size,
                                                        size_t descriptor_count)
 {
   const bool in_isr = InIsr();
   const HAL_StatusTypeDef status =
-      h5_gpdma_adapter_.StartLinkedListDmaRx(data, size, descriptor_count, in_isr);
+      gpdma_adapter_.StartLinkedListDmaRx(data, size, descriptor_count, in_isr);
   if (status == HAL_OK)
   {
     rx_arm_result_ = RxArmResult::STARTED;
@@ -1205,12 +1235,12 @@ STM32UART::RxArmResult STM32UART::StartLinkedListDmaRx(uint8_t* data, size_t siz
 
 uint8_t* STM32UART::GetLinkedListDmaRxProducer() const
 {
-  return h5_gpdma_adapter_.GetLinkedListDmaRxProducer();
+  return gpdma_adapter_.GetLinkedListDmaRxProducer();
 }
 
 void STM32UART::PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size)
 {
-  STM32H5GpdmaUartAdapter::PrepareLinkedListDmaRxForCpu(data, size);
+  STM32GpdmaUartAdapter::PrepareLinkedListDmaRxForCpu(data, size);
 }
 #endif
 

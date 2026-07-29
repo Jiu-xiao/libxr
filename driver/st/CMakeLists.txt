@@ -9,7 +9,7 @@ set(_xr_st_component_power stm32_power.cpp)
 set(_xr_st_component_pwm stm32_pwm.cpp)
 set(_xr_st_component_spi stm32_spi.cpp)
 set(_xr_st_component_timebase stm32_timebase.cpp)
-set(_xr_st_component_uart stm32_uart.cpp stm32_uart_h5_gpdma.cpp)
+set(_xr_st_component_uart stm32_uart.cpp stm32_uart_gpdma.cpp)
 set(_xr_st_component_usb stm32_usb_dev.cpp stm32_usb_ep.cpp)
 set(_xr_st_component_watchdog stm32_watchdog.cpp)
 
