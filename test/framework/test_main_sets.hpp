@@ -89,6 +89,10 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"data_structure_tests", {"type", &RunVoidEntry<test_type>, false}},
     {"data_structure_tests", {"string", &RunVoidEntry<test_string>, false}},
 
+    {"driver_model_tests",
+     {"uart_linked_list_dma_rx", &RunVoidEntry<test_uart_linked_list_dma_rx_model>,
+      false}},
+
     {"threading_tests", {"thread", &RunVoidEntry<test_thread>, false}},
     {"threading_tests", {"timebase", &RunVoidEntry<test_timebase>, false}},
     {"threading_tests", {"timer", &RunVoidEntry<test_timer>, false}},
