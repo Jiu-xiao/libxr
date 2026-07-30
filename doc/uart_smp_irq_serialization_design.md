@@ -1,27 +1,30 @@
-# UART DMA Concurrency and SMP IRQ Serialization
+# UART Concurrency and SMP IRQ Serialization
 
 ## Status and scope
 
 This document defines the current concurrency contract implemented by
 [`UartDmaModel`](../src/driver/model/uart_dma_model.hpp),
+[`ESP32UartFifo`](../driver/esp/esp_uart_fifo.hpp),
 [`UartDirectPolicy`](../src/driver/model/uart_execution_policy.hpp), and
 [`UartIrqSerializedPolicy`](../src/driver/model/uart_execution_policy.hpp). It covers
-the STM32, CH32, and ESP AHB-GDMA UART backends in this tree.
+the STM32 and CH32 DMA backends and both explicit ESP DMA and FIFO backends in this tree.
 
 The design has one per-UART `SerializedService`. Direct and SMP policies differ only in
-how they admit hardware IRQ work; they do not select different TX/CONFIG state machines:
+how they admit hardware IRQ work; the selected backend supplies the data-path state
+machine that the service runs:
 
 ```text
-WRITE / COMPLETE / ERROR / CONFIG / stop completion
-                         |
-                         v
-          DirectPolicy or IrqSerializedPolicy
-                         |
-                         v
-               one SerializedService
-                         |
-                         v
-                    UartDmaModel
+normal calls and protected IRQ facts
+                 |
+                 v
+  DirectPolicy or IrqSerializedPolicy
+                 |
+                 v
+       one SerializedService
+                 |
+                 +-> UartDmaModel (STM32 / CH32 / ESP DMA)
+                 |
+                 +-> ESP32UartFifo::ServiceEvents
 ```
 
 This is not a hardware-acceptance report. Source review, deterministic tests, formal
@@ -31,9 +34,7 @@ end-to-end operation on a board.
 
 The current scope deliberately excludes:
 
-- an ESP FIFO UART class, an `ESP32UART` compatibility alias, and a runtime DMA/FIFO
-  switch;
-- STM32 H5/U5/U3/N6/H7RS linked-list GPDMA RX;
+- an `ESP32UART` compatibility alias and a runtime DMA/FIFO switch;
 - a same-object SMP adapter for STM32 or CH32;
 - an external scheduler, work queue, owner thread, or bounded `max_rounds` policy.
 
@@ -41,13 +42,17 @@ The current scope deliberately excludes:
 
 - **service owner**: the caller that wins the single `SerializedService` owner bit and
   drains coalesced UART events in its current call stack;
-- **active**: the retained TX buffer whose record has successfully started in hardware;
-- **pending**: one payload copied into the other local TX buffer but not yet promoted;
+- **DMA active**: the retained DMA TX buffer whose record has successfully started in
+  hardware;
+- **DMA pending**: one payload copied into the other local DMA TX buffer but not yet
+  promoted;
+- **FIFO current record**: the one public record currently being streamed directly into
+  the hardware FIFO; it is not a DMA active/pending buffer;
 - **public record**: metadata and payload still owned by `WritePort` queues;
-- **control transaction**: CONFIG or runtime ERROR recovery;
-- **hardware quiescence**: the backend has stopped the old TX/RX generation, classified
-  its final TX terminal state, completed destructive cleanup, and guarantees that no old
-  terminal callback can appear later;
+- **DMA control transaction**: CONFIG or runtime ERROR recovery;
+- **DMA hardware quiescence**: the backend has stopped the old TX/RX generation,
+  classified its final TX terminal state, completed destructive cleanup, and guarantees
+  that no old terminal callback can appear later;
 - **IRQ admission**: acquiring the same service owner before an SMP raw ISR reads or
   acknowledges protected hardware status.
 
@@ -69,9 +74,14 @@ For `UartDmaModel`, the event facts are `WRITE`, `COMPLETE`, `ERROR`, `CONFIG`,
 Durable state lives in the WritePort queues, the retained active/pending buffers, the
 configuration payload, and the control phase.
 
-There is no second owner, generation counter, or external completion owner. Old-terminal
-identity comes from hardware quiescence plus the typed terminal result before a retained
-buffer is reused.
+`ESP32UartFifo` instead uses `WRITE`, `TX_SPACE`, `TX_IDLE`, `CONFIG`, RX data/error/
+space facts, and `CONTROL_READY`. Its durable TX state is one current record plus its
+FIFO write offset. It has no DMA pending buffer or DMA `COMPLETE` fact.
+
+There is no second owner, generation counter, or external completion owner. In the DMA
+model, old-terminal identity comes from hardware quiescence plus the typed terminal
+result before a retained buffer is reused. The FIFO model does not use that DMA terminal
+protocol.
 
 A caller that observes an owner only merges its event and returns. The current owner
 drains a snapshot, then uses a no-new-event CAS to release. Publication before that CAS
@@ -84,9 +94,9 @@ context, sleep, or require a scheduler, but an owner can keep draining while pub
 continue to add work. Any backend that allows an ISR to acquire the owner must make all
 reachable work ISR-safe and non-blocking.
 
-## TX record lifecycle
+## DMA TX record lifecycle
 
-The common TX path is:
+The common DMA TX path is:
 
 ```text
 WritePort public queues
@@ -118,7 +128,7 @@ raises a synchronous callback from inside that call, the callback only merges an
 The current owner completes the STARTED/FAILED transition before the next snapshot can
 consume it.
 
-## Event order and terminal retirement
+## DMA event order and terminal retirement
 
 Every service snapshot first performs an authoritative `COMPLETE` retirement prepass.
 Only after that prepass does the normal business priority apply:
@@ -139,9 +149,9 @@ backend must collect the old TX terminal fact after quiescence and before cleari
 reusing hardware state. Serializing source handlers alone does not join facts that were
 latched in different sources.
 
-## CONFIG and ERROR transactions
+## DMA CONFIG and ERROR transactions
 
-CONFIG admission is fixed by the common model:
+CONFIG admission is fixed by the common DMA model:
 
 ```text
 ValidateConfig(config)       // pure, no protected MMIO
@@ -214,9 +224,9 @@ restart have returned. Pending and public records remain preserved throughout.
 
 ## RX boundary
 
-RX data does not enter the serialized TX service. It remains one direct producer feeding
-the ReadPort SPSC queue. The complete RX/CONFIG gate orders position/descriptor access
-and byte delivery against CONFIG and recovery:
+DMA RX data does not enter the serialized TX service. It remains one direct producer
+feeding the ReadPort SPSC queue. The complete RX/CONFIG gate orders position/descriptor
+access and byte delivery against CONFIG and recovery:
 
 ```text
 read/ack IRQ status when the backend requires it
@@ -237,8 +247,18 @@ destructive stop/reset clears terminal status.
 
 Circular, linked-list, and future RX adapters are data-path models, not different owner
 algorithms. The ESP backend in this tree uses a linked AHB-GDMA descriptor ring. STM32
-traditional DMA uses the circular NDTR/CNDTR model. STM32 linked-list GPDMA requires a
-different RX adapter and is not accepted by the current backend.
+traditional DMA uses the circular NDTR/CNDTR model. Enabled STM32 H5/U5/U3/N6/H7RS
+families use `UartLinkedListDmaRxModel` with the GPDMA adapter instead; both feed the same
+RX/CONFIG gate and ReadPort SPSC boundary.
+
+ESP FIFO RX has a different execution path but the same storage boundary. Its raw UART
+status becomes `RX_DATA`, `RX_SPACE`, and RX error facts that pass through
+`ESP32UartFifo::ServiceEvents` under the UART service owner. After `TryEnterRx()` succeeds,
+the service drains bytes directly from the hardware FIFO into the ReadPort SPSC queue and
+then calls `LeaveRx()`; there is no intermediate RX queue or DMA model. Parity and framing
+facts are RX-only; parity, framing, and overflow each reset the hardware RX FIFO because
+the error status does not identify a trustworthy byte boundary. None of these RX errors
+stops, discards, or replays the independent FIFO TX record.
 
 ## DirectPolicy
 
@@ -251,11 +271,18 @@ Two Direct integrations are valid:
    STM32 HAL path.
 2. LibXR or the application owns a raw ISR on a single owner core, reads/acknowledges the
    source through `InvokeIrq()`, then publishes the resulting facts, as in CH32 and
-   single-core ESP AHB-GDMA targets.
+   single-core ESP DMA or FIFO targets.
 
 On one core, an IRQ may preempt a normal caller but cannot execute hardware operations
 simultaneously on another core. If the service already has an owner, the IRQ's facts are
 merged and the interrupted owner consumes them after it resumes.
+
+That resume requires the raw source to be quiescent. A latched terminal source may be
+acknowledged normally. A condition-triggered source such as FIFO full/empty that can
+immediately reassert must instead be made one-shot before publication and re-armed by the
+event consumer only when more work remains. Otherwise an IRQ that preempts the owner can
+re-enter indefinitely while the deferred handler is the only code able to remove the
+hardware condition.
 
 A post-vendor-handler callback is not sufficient for a same-object SMP backend: the
 vendor handler has already touched hardware before LibXR sees the callback. DirectPolicy
@@ -330,9 +357,10 @@ single-core/AMP contract.
 IRQ path. It does not wrap or replace `HAL_UART_IRQHandler()` or
 `HAL_DMA_IRQHandler()`. HAL callbacks publish facts into the same common service.
 
-The current backend supports traditional Stream, Channel, and BDMA circular RX. It
-rejects suspend/linked-list GPDMA families such as H5/U5/U3/N6/H7RS because CLLR/CBR1,
-descriptor ownership, and suspend/reset semantics require another RX adapter.
+The backend supports traditional Stream, Channel, and BDMA circular RX. H5, U5, U3, N6,
+and H7RS select the linked-list GPDMA adapter when its compile-time HAL capabilities are
+present. Unsupported suspend/linked-list controllers still fail closed rather than being
+treated as traditional circular DMA.
 
 The backend contract additionally requires:
 
@@ -376,26 +404,21 @@ domain.
 CH32H417 is mapped as AMP owner-core plus IPC. The V20x/V30x source and toolchain builds
 do not validate H417 register, DMA, IRQ, or IPC integration.
 
-### ESP AHB-GDMA
+### ESP
 
-[`ESP32UartDma`](../driver/esp/esp_uart.hpp) is the only ESP UART class in this design.
-The class is compiled only when both `SOC_AHB_GDMA_SUPPORTED` and `SOC_UHCI_SUPPORTED`
-are true. In ESP-IDF 5.5.2, the exact target set is:
+ESP provides two explicitly selected UART classes:
 
-```text
-ESP32-C3, ESP32-C5, ESP32-C6, ESP32-H2, ESP32-S3, ESP32-P4
-```
+- [`ESP32UartDma`](../driver/esp/esp_uart.hpp) uses AHB-GDMA TX and a linked-descriptor
+  RX ring;
+- [`ESP32UartFifo`](../driver/esp/esp_uart_fifo.hpp) streams records through the UART
+  hardware FIFOs without DMA storage or descriptor ownership.
 
-The API is explicitly `ESP32UartDma`. There is no `ESP32UART` alias, FIFO class, or
-runtime `enable_dma` selection. Targets outside the capability gate do not receive a
-fallback UART class from this backend.
+There is no `ESP32UART` alias, automatic capability fallback, or runtime DMA/FIFO switch.
+Applications must name the backend they use.
 
-The RX adapter is a linked AHB-GDMA descriptor ring. The UART, TX-GDMA, and RX-GDMA
-entries are registered directly by LibXR with the actual `esp_intr_alloc()` API and
-non-shared `LEVEL1 | INTRDISABLED` flags. IDF does not clear their status before entering
-LibXR.
+#### Common ESP execution policy
 
-Policy selection is compile-time:
+Both classes use the same compile-time policy selection:
 
 ```text
 (SOC_CPU_CORES_NUM > 1) && !CONFIG_FREERTOS_UNICORE
@@ -404,10 +427,49 @@ otherwise
   -> DirectPolicy
 ```
 
-On SMP, construction must run in a task pinned to one core so every allocated IRQ lands
-on the same core. Normal APIs may still be called from other cores. The adapter uses a
-per-instance `portMUX_TYPE` guard and official `esp_intr_disable()`/
-`esp_intr_enable()` operations to mask and restore the complete UART/GDMA IRQ domain.
+On SMP, construction must run in a task pinned to one core so every IRQ belonging to that
+object is allocated on the same core. Normal APIs may still be called from other cores.
+The shared ESP adapter uses a per-instance `portMUX_TYPE` guard and official
+`esp_intr_disable()`/`esp_intr_enable()` operations to mask and restore the complete IRQ
+domain owned by the selected class: UART plus TX/RX GDMA for `ESP32UartDma`, or the UART
+source alone for `ESP32UartFifo`.
+
+Both classes register non-shared `LEVEL1 | INTRDISABLED` raw handlers. IDF does not clear
+their protected status before entering LibXR. ESP-IDF tracing modes that invoke a
+non-shared handler while holding the interrupt allocator lock are rejected at compile
+time because SMP ISR admission calls `esp_intr_disable()`. This is an ESP adapter
+integration restriction, not a second UART owner.
+
+On single-core targets, the LibXR-owned raw ISR uses DirectPolicy. `SetConfig()` must not
+be called from a higher-priority ISR that can preempt a related raw ISR after its status
+read, or from inside that unfinished raw ISR path.
+
+The FIFO backend treats RX FIFO conditions, TX FIFO space, and the CONFIG line-idle check
+as one-shot IRQ carriers. Its ISR masks a triggered peripheral source before publishing
+the retained event. The service drains or rechecks the corresponding state and re-enables
+that source only when another hardware carrier is required. This is peripheral lifecycle
+control, not global interrupt masking or a second owner.
+
+Each `FillCurrentRecord()` turn consumes one snapshot of available FIFO capacity. If the
+record remains incomplete, it re-arms TX-space and returns to the service boundary; that
+fill turn must not chase slots that the wire frees while the record is still active. A
+single `ProgressTx()` call may still complete several short records, and the common
+`SerializedService` remains intentionally unbounded. The per-fill bound prevents one long
+record from starving retained RX facts on a fast single-core target.
+
+#### ESP32UartDma
+
+`ESP32UartDma` is compiled only when both `SOC_AHB_GDMA_SUPPORTED` and
+`SOC_UHCI_SUPPORTED` are true. In ESP-IDF 5.5.2, the exact target set is:
+
+```text
+ESP32-C3, ESP32-C5, ESP32-C6, ESP32-H2, ESP32-S3, ESP32-P4
+```
+
+The RX adapter is a linked AHB-GDMA descriptor ring. The UART, TX-GDMA, and RX-GDMA
+entries are registered directly by LibXR with the actual `esp_intr_alloc()` API and
+non-shared `LEVEL1 | INTRDISABLED` flags. IDF does not clear their status before entering
+LibXR.
 RX/UART error scanners also collect the TX source before recovery clears it; the stop
 path scans TX before and after `gdma_stop()` before reset.
 
@@ -425,23 +487,32 @@ means completion is unproven, so the retained active payload may be replayed fro
 zero. The possible duplicate prefix is part of the selected at-least-once wire contract;
 `NONE` must not be interpreted as proof that no byte was transmitted.
 
-ESP-IDF tracing modes that invoke the non-shared handler while holding the interrupt
-allocator lock are rejected at compile time because ISR admission calls
-`esp_intr_disable()`. This is an ESP adapter integration restriction, not a second UART
-owner.
+#### ESP32UartFifo
 
-On single-core targets selected by the same capability gate, the LibXR-owned raw ISR
-uses DirectPolicy. `SetConfig()` must not be called from a higher-priority ISR that can
-preempt a related UART/GDMA ISR after its status read, or from inside that unfinished
-raw ISR path.
+`ESP32UartFifo` is independent of the AHB-GDMA/UHCI capability gate. It owns one raw UART
+IRQ and streams the current public `WritePort` record directly into available hardware
+FIFO space. It stores only that record's metadata, length, and current offset. It does not
+allocate DMA buffers, copy a second pending record, call `StartDmaTx()`, or publish a DMA
+`COMPLETE` event. The Write Operation completes once every byte in the record has entered
+the hardware FIFO; ordinary writes do not wait for physical line idle.
 
-For the current ESP-IDF 5.5.2 source revision, inherited target compile commands with
-`-Werror` compile both `esp_uart.cpp` and `esp_uart_dma.cpp` for all six targets above.
-Full `xr` builds pass for C3, C6, and S3. The C5, H2, and P4 full builds stop in unrelated
-I2C/SPI or Wi-Fi compatibility code, while their two UART objects pass. Separate API
-probes compile the explicit DMA type and reject both the removed alias and a target
-without the required capabilities. These results establish source/toolchain integration
-only; no ESP hardware timing or runtime recovery result is claimed.
+An accepted CONFIG prevents later public records from starting. If a current FIFO record
+has already started, CONFIG continues filling that entire record under the old framing,
+then waits for UART `TX_DONE` and an idle FSM before applying the new payload. Later
+records remain in `WritePort` until CONFIG releases the gate. This is a drain-and-boundary
+contract, not the DMA stop-and-replay protocol: FIFO has no pending DMA record to retain
+and no active DMA payload to restart from byte zero.
+
+FIFO RX data, space, parity, framing, and overflow facts share the same service owner so
+IRQ backpressure and CONFIG cannot advance concurrently. The bytes themselves still go
+directly into the gate-protected ReadPort SPSC queue. RX errors affect only the RX path;
+they do not stop or replay the current TX record.
+
+ESP target builds and API probes must instantiate the selected class explicitly. The
+hardware runner can select either DMA or FIFO; its FIFO path supports ESP32, ESP32-S3,
+ESP32-C3, and ESP32-H2 with target-specific UART/pin mappings. It is not a substitute for
+the broader cross-target compile/link matrix. Build success establishes source/toolchain
+integration only; it does not establish ESP hardware timing or runtime recovery behavior.
 
 ## Verification boundary
 

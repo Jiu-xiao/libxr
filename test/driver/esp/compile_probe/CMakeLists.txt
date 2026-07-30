@@ -10,17 +10,6 @@ if(NOT "${LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION}" MATCHES "^[01]$")
   message(FATAL_ERROR "LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION must be exactly 0 or 1")
 endif()
 
-if(NOT DEFINED LIBXR_ESP_UART_TEST_BACKEND)
-  message(FATAL_ERROR "Set LIBXR_ESP_UART_TEST_BACKEND explicitly to FIFO or DMA")
-endif()
-string(TOUPPER "${LIBXR_ESP_UART_TEST_BACKEND}" LIBXR_ESP_UART_TEST_BACKEND)
-if(NOT LIBXR_ESP_UART_TEST_BACKEND MATCHES "^(FIFO|DMA)$")
-  message(
-    FATAL_ERROR
-      "LIBXR_ESP_UART_TEST_BACKEND must be FIFO or DMA, got: ${LIBXR_ESP_UART_TEST_BACKEND}"
-  )
-endif()
-
 if(LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION)
   set(LIBXR_SINGLE_CORE
       OFF
@@ -33,10 +22,15 @@ else()
   )
 endif()
 
+set(LIBXR_NO_EIGEN
+    ON
+    CACHE BOOL "" FORCE
+)
+set(SDKCONFIG
+    "${CMAKE_BINARY_DIR}/sdkconfig"
+    CACHE FILEPATH "" FORCE
+)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD OFF)
-idf_build_set_property(
-  LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION "${LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION}"
-)
-idf_build_set_property(LIBXR_ESP_UART_TEST_BACKEND "${LIBXR_ESP_UART_TEST_BACKEND}")
-project(libxr_uart_loopback)
+project(libxr_esp_uart_compile_probe)

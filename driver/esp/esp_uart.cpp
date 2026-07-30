@@ -46,28 +46,6 @@ bool IsConsoleUartInUse(uart_port_t uart_num)
 namespace LibXR
 {
 
-void ESP32UartDmaIrqAdapter::LockAndMaskIrqDomain() noexcept
-{
-  portENTER_CRITICAL_SAFE(&owner_.irq_domain_lock_);
-  owner_.SetIrqDomainEnabledLocked(false);
-}
-
-void ESP32UartDmaIrqAdapter::UnlockIrqDomain() noexcept
-{
-  portEXIT_CRITICAL_SAFE(&owner_.irq_domain_lock_);
-}
-
-void ESP32UartDmaIrqAdapter::LockIrqDomain() noexcept
-{
-  portENTER_CRITICAL_SAFE(&owner_.irq_domain_lock_);
-}
-
-void ESP32UartDmaIrqAdapter::RestoreAndUnlockIrqDomain() noexcept
-{
-  owner_.SetIrqDomainEnabledLocked(true);
-  portEXIT_CRITICAL_SAFE(&owner_.irq_domain_lock_);
-}
-
 bool ESP32UartDma::IsCurrentTaskPinned()
 {
 #if defined(CONFIG_FREERTOS_SMP) && CONFIG_FREERTOS_SMP
@@ -205,7 +183,7 @@ ESP32UartDma::ESP32UartDma(uart_port_t uart_num, int tx_pin, int rx_pin, int rts
   REQUIRE(uart_num_ < SOC_UART_HP_NUM);
   REQUIRE(rx_buffer_size > 0U);
   REQUIRE(tx_buffer_size > 0U);
-  if constexpr (ESP_UART_DMA_USES_IRQ_SERIALIZATION)
+  if constexpr (Detail::ESP_UART_USES_IRQ_SERIALIZATION)
   {
     REQUIRE(IsCurrentTaskPinned());
   }

@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
 #include "driver/gpio.h"
 #include "esp_def.hpp"
@@ -17,7 +16,6 @@
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
 #include "model/uart_dma_model.hpp"
-#include "model/uart_execution_policy.hpp"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
 
@@ -33,95 +31,16 @@
 #define LIBXR_ESP_UART_HAS_AHB_GDMA 0
 #endif
 
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
+#include "esp_uart_execution_policy.hpp"
+#endif
+
 namespace LibXR
 {
 
 #if LIBXR_ESP_UART_HAS_AHB_GDMA
 
 class ESP32UartDma;
-
-#if (SOC_CPU_CORES_NUM > 1) && \
-    (!defined(CONFIG_FREERTOS_UNICORE) || !CONFIG_FREERTOS_UNICORE)
-inline constexpr bool ESP_UART_DMA_USES_IRQ_SERIALIZATION = true;
-#else
-inline constexpr bool ESP_UART_DMA_USES_IRQ_SERIALIZATION = false;
-#endif
-
-#if defined(CONFIG_APPTRACE_SV_ENABLE) && CONFIG_APPTRACE_SV_ENABLE
-static_assert(!ESP_UART_DMA_USES_IRQ_SERIALIZATION,
-              "ESP UART DMA SMP IRQ serialization is incompatible with the ESP-IDF "
-              "SystemView interrupt wrapper");
-#endif
-
-class ESP32UartDmaIrqAdapter
-{
- public:
-  explicit ESP32UartDmaIrqAdapter(ESP32UartDma& owner) : owner_(owner) {}
-
-  void LockAndMaskIrqDomain() noexcept;
-  void UnlockIrqDomain() noexcept;
-  void LockIrqDomain() noexcept;
-  void RestoreAndUnlockIrqDomain() noexcept;
-
- private:
-  ESP32UartDma& owner_;
-};
-
-template <bool UseIrqSerialization>
-class ESP32UartDmaExecutionPolicyStorage;
-
-template <>
-class ESP32UartDmaExecutionPolicyStorage<false>
-{
- public:
-  explicit ESP32UartDmaExecutionPolicyStorage(ESP32UartDma&) {}
-
-  template <typename Handler>
-  bool Invoke(uint32_t events, Handler&& handler) noexcept
-  {
-    return policy_.Invoke(events, std::forward<Handler>(handler));
-  }
-
-  template <typename Source, typename Handler>
-  bool InvokeIrq(Source&& source, Handler&& handler) noexcept
-  {
-    return policy_.InvokeIrq(std::forward<Source>(source),
-                             std::forward<Handler>(handler));
-  }
-
- private:
-  UartDirectPolicy policy_{};
-};
-
-template <>
-class ESP32UartDmaExecutionPolicyStorage<true>
-{
- public:
-  explicit ESP32UartDmaExecutionPolicyStorage(ESP32UartDma& owner)
-      : adapter_(owner), policy_(adapter_)
-  {
-  }
-
-  template <typename Handler>
-  bool Invoke(uint32_t events, Handler&& handler) noexcept
-  {
-    return policy_.Invoke(events, std::forward<Handler>(handler));
-  }
-
-  template <typename Source, typename Handler>
-  bool InvokeIrq(Source&& source, Handler&& handler) noexcept
-  {
-    return policy_.InvokeIrq(std::forward<Source>(source),
-                             std::forward<Handler>(handler));
-  }
-
- private:
-  ESP32UartDmaIrqAdapter adapter_;
-  UartIrqSerializedPolicy<ESP32UartDmaIrqAdapter> policy_;
-};
-
-using ESP32UartDmaExecutionPolicy =
-    ESP32UartDmaExecutionPolicyStorage<ESP_UART_DMA_USES_IRQ_SERIALIZATION>;
 
 /**
  * @brief ESP UART backend backed exclusively by UHCI/AHB-GDMA.
@@ -133,8 +52,10 @@ using ESP32UartDmaExecutionPolicy =
  */
 class ESP32UartDma : public UART
 {
-  friend class ESP32UartDmaIrqAdapter;
-  friend class UartDmaModel<ESP32UartDma, ESP32UartDmaExecutionPolicy>;
+  using ExecutionPolicy = Detail::ESP32UartExecutionPolicy<ESP32UartDma>;
+
+  friend class Detail::ESP32UartIrqAdapter<ESP32UartDma>;
+  friend class UartDmaModel<ESP32UartDma, ExecutionPolicy>;
 
  public:
   static constexpr int PIN_NO_CHANGE = -1;
@@ -224,7 +145,7 @@ class ESP32UartDma : public UART
   uint32_t uart_sclk_hz_ = 0U;
   portMUX_TYPE irq_domain_lock_ = portMUX_INITIALIZER_UNLOCKED;
   bool irq_domain_masked_ = true;
-  ESP32UartDmaExecutionPolicy execution_policy_;
+  ExecutionPolicy execution_policy_;
   TxStorage tx_storage_{};
 
   bool config_waiting_tx_idle_ = false;
@@ -241,7 +162,7 @@ class ESP32UartDma : public UART
 
   ReadPort _read_port;
   WritePort _write_port;
-  UartDmaModel<ESP32UartDma, ESP32UartDmaExecutionPolicy> dma_model_;
+  UartDmaModel<ESP32UartDma, ExecutionPolicy> dma_model_;
 
   uhci_hal_context_t uhci_hal_ = {};
   gdma_channel_handle_t tx_dma_channel_ = nullptr;

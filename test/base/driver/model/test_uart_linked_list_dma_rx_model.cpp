@@ -204,6 +204,18 @@ void test_uart_linked_list_dma_rx_model()
   }
 
   {
+    LibXR::UartRxConfigGate gate;
+
+    ASSERT(gate.TryEnterRx());
+    ASSERT(gate.TryReserveConfig());
+    gate.PublishConfig();
+    ASSERT(!gate.TryEnterConfig());
+    ASSERT(gate.LeaveRx());
+    ASSERT(gate.TryEnterConfig());
+    gate.LeaveConfig();
+  }
+
+  {
     UartLinkedListDmaRxModel<> disabled(RawData{nullptr, 0U});
     LinkedListRxBackend backend;
     ReadPort port(1U);

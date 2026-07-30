@@ -177,7 +177,7 @@ uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaTxStatus(bool in_isr)
                       status);
 
   uint32_t events = 0U;
-  using Model = UartDmaModel<ESP32UartDma, ESP32UartDmaExecutionPolicy>;
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
   if ((status & GDMA_LL_EVENT_TX_DESC_ERROR) != 0U)
   {
     events |= Model::EventMask(UartDmaEvent::ERROR);
@@ -197,7 +197,7 @@ uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaRxStatus(bool& pushed_any)
   gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
                       status);
 
-  using Model = UartDmaModel<ESP32UartDma, ESP32UartDmaExecutionPolicy>;
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
   bool error = (status & (GDMA_LL_EVENT_RX_DESC_ERROR | GDMA_LL_EVENT_RX_ERR_EOF)) != 0U;
   uint32_t events = error ? Model::EventMask(UartDmaEvent::ERROR) : 0U;
   if (!error && ((status & GDMA_LL_EVENT_RX_DONE) != 0U))
@@ -218,7 +218,7 @@ uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaRxStatus(bool& pushed_any)
 
 uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaUartStatus(bool in_isr)
 {
-  using Model = UartDmaModel<ESP32UartDma, ESP32UartDmaExecutionPolicy>;
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
   const uint32_t status = uart_hal_get_intsts_mask(&uart_hal_) &
                           (DMA_UART_ERROR_INTR_MASK | UART_INTR_TX_DONE);
   const uint32_t error_status = status & DMA_UART_ERROR_INTR_MASK;
@@ -674,7 +674,7 @@ UartDmaControlProgress IRAM_ATTR ESP32UartDma::CompleteRecovery(bool in_isr)
 
 UartOldTxTerminal IRAM_ATTR ESP32UartDma::StopAndResetDma(bool active_tx, bool in_isr)
 {
-  using Model = UartDmaModel<ESP32UartDma, ESP32UartDmaExecutionPolicy>;
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
   REQUIRE_FROM_CALLBACK(tx_dma_channel_ != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(rx_dma_channel_ != nullptr, in_isr);
 
