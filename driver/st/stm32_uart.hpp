@@ -1,19 +1,32 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 #include "main.h"
 
 #ifdef HAL_UART_MODULE_ENABLED
+
+#include "stm32_uart_gpdma.hpp"
+
+#if defined(DMA_IT_SUSP) && defined(DMA_FLAG_SUSP) && !defined(LIBXR_STM32_UART_GPDMA)
+#error \
+    "LibXR STM32UART does not support suspend/linked-list STM32 DMA; no STM32 linked-list RX backend is currently provided"
+#endif
 
 #ifdef UART
 #undef UART
 #endif
 
-#include "latest_snapshot.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
+#include "model/uart_dma_model.hpp"
+#include "model/uart_execution_policy.hpp"
+#if defined(LIBXR_STM32_UART_GPDMA)
+#include "model/uart_linked_list_dma_rx_model.hpp"
+#else
 #include "model/uart_circular_dma_rx_model.hpp"
-#include "model/uart_dma_tx_model.hpp"
-#include "model/uart_rx_config_gate.hpp"
+#endif
 #include "stm32_dcache.hpp"
 #include "uart.hpp"
 
@@ -114,103 +127,199 @@ stm32_uart_id_t stm32_uart_get_id(USART_TypeDef* addr);
 
 namespace LibXR
 {
+
+#if defined(LIBXR_STM32_UART_GPDMA)
+using STM32RxDmaModel = UartLinkedListDmaRxModel<STM32GpdmaUartAdapter::RX_NODE_COUNT>;
+#else
+using STM32RxDmaModel = UartCircularDmaRxModel;
+#endif
+
 /**
- * @brief STM32 UART 驱动实现 / STM32 UART driver implementation
- * @warning 使用循环 RX DMA 时，UART 全局中断与对应 RX DMA 中断必须配置为相同的
- * NVIC 抢占优先级。HAL 的 UART IDLE、DMA HT 和 DMA TC 路径都可能进入同一 RX event
- * callback；本驱动依赖相同优先级保证这些入口不重入。
- * When circular RX DMA is enabled, the UART global IRQ and its RX DMA IRQ must use the
- * same NVIC preemption priority and, on multicore devices, the same target core. UART
- * IDLE, DMA HT, and DMA TC paths may all enter the same HAL RX event callback; they must
- * remain one logical SPSC producer. Runtime configuration may execute on another core
- * and is coordinated separately by `UartRxConfigGate`.
+ * @brief STM32 UART backend using the HAL callback boundary.
+ *
+ * HAL IRQ handlers own HAL flags and handle state. They call the callbacks below,
+ * which publish TX completion/error facts to `UartDmaModel` and push RX data through
+ * the selected circular or linked-list RX model. CONFIG and runtime recovery stop both
+ * DMA directions through DMA abort completion callbacks, which publish `STOP_DONE` into
+ * the same serialized service. Stream-DMA abort admission briefly masks that stream's
+ * NVIC vector to
+ * serialize the HAL `BUSY` to `ABORT` transition without modifying an active Stream
+ * control register; it never polls for completion or clears a pending terminal flag.
+ * Stream DMA also requires the selected NVIC vector and DMA terminal interrupt to be
+ * enabled before an asynchronous abort starts. LibXR-initiated control stops check both
+ * conditions at their abort boundary. A vendor error abort that races the initial RX
+ * arm occurs inside the HAL before LibXR regains control, so the BSP must establish the
+ * same conditions before construction. The BSP must additionally wire that vector to
+ * `HAL_DMA_IRQHandler()`; handler wiring cannot be checked by this backend. The UART
+ * vector must likewise remain enabled and dispatch `HAL_UART_IRQHandler()`, because
+ * both normal TX completion and any stopped active TX awaiting UART TC use it as their
+ * final non-blocking carrier.
+ *
+ * This backend supports traditional STM32 Stream, Channel, and BDMA circular RX, plus
+ * the STM32H5/U5/U3/N6/H7RS circular linked-list GPDMA RX path. Other
+ * suspend/linked-list families and non-GPDMA controllers remain rejected until their
+ * HAL and hardware contracts are reviewed independently. The GPDMA adapter leaves
+ * `DMAT`/`DMAR` handling to the family HAL and masks only the affected channel vector
+ * around HAL's BUSY-to-ABORT publication.
+ * On D-cache targets, enabled RX storage must start and end on cache-line boundaries
+ * so invalidating DMA-written bytes cannot discard unrelated dirty data.
+ * A documented HAL_ERROR caused by a pending RX line error is reported as a pending
+ * control step; the UART handler has already published the error callback or arranged
+ * its DMA-abort callback as the dedicated retry carrier. This transient is accepted
+ * during the initial constructor arm as well as CONFIG/recovery. Other RX-arm failures
+ * remain fail-fast so a stopped receive path cannot be mistaken for success.
+ *
+ * After construction, this backend exclusively owns the UART/DMA data path and their
+ * HAL handles. Application code must not directly call HAL UART transmit, DMA start,
+ * DMA stop, or UART/DMA abort APIs on those handles. In particular, such calls could
+ * disable TCIE without publishing `HAL_UART_TxCpltCallback()` and would invalidate the
+ * old-generation retirement proof used by CONFIG and recovery.
+ *
+ * The BSP must assign this UART's UART, TX-DMA, and RX-DMA IRQs the same NVIC
+ * preemption priority so their vendor HAL handlers cannot nest each other. Their
+ * subpriorities may differ. LibXR starts serialization only at the HAL callback
+ * boundary and therefore cannot repair HAL-handle races caused by nested related IRQs.
+ *
+ * `SetConfig()` must not be called from this UART's HAL callbacks or from an ISR that can
+ * preempt its UART, TX-DMA, or RX-DMA IRQ. The callback-only HAL boundary cannot make
+ * such a caller safe after the vendor handler has already touched hardware state.
  */
 class STM32UART : public UART
 {
+#if defined(LIBXR_STM32_UART_GPDMA)
+  friend class UartLinkedListDmaRxModel<STM32GpdmaUartAdapter::RX_NODE_COUNT>;
+#else
   friend class UartCircularDmaRxModel;
-  friend class UartDmaTxModel<STM32UART>;
+#endif
+  friend class UartDmaModel<STM32UART, UartDirectPolicy>;
+  friend void ::HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t size);
+  friend void ::HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart);
+  friend void ::HAL_UART_ErrorCallback(UART_HandleTypeDef* huart);
 
  public:
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
-
   static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
-  /**
-   * @brief 构造 UART 对象 / Construct UART object
-   */
   STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx, RawData dma_buff_tx,
             uint32_t tx_queue_size = 5);
 
+  /**
+   * @return `BUSY` while an earlier configuration request is outstanding.
+   * @warning Do not call from this UART's HAL callbacks or from an ISR that can preempt
+   * its UART/TX-DMA/RX-DMA IRQ domain.
+   */
   ErrorCode SetConfig(UART::Configuration config);
 
+  /**
+   * @brief Re-arm the configured RX DMA outside the runtime CONFIG state machine.
+   * @warning Compatibility hook. The caller must keep UART/RX-DMA callbacks,
+   * CONFIG/recovery, and the RX producer quiescent for the entire call. Use SetConfig()
+   * for ordinary runtime reconfiguration.
+   */
   void SetRxDMA();
   void OnRxDataAvailable(bool in_isr);
 
   ReadPort _read_port;
   WritePort _write_port;
 
-  LatestSnapshot<UART::Configuration> requested_config_;
-  UartRxConfigGate rx_config_gate_;
-  UartCircularDmaRxModel rx_dma_model_;
-  UartDmaTxModel<STM32UART> tx_dma_model_;
+  UartDirectPolicy execution_policy_;
+  STM32RxDmaModel rx_dma_model_;
+#if defined(LIBXR_STM32_UART_GPDMA)
+  STM32GpdmaUartAdapter gpdma_adapter_;
+#endif
+  UartDmaModel<STM32UART, UartDirectPolicy> dma_model_;
 
   UART_HandleTypeDef* uart_handle_;
-
   stm32_uart_id_t id_ = STM32_UART_ID_ERROR;
 
   static STM32UART* map[STM32_UART_NUMBER];  // NOLINT
 
  private:
-  void OnConfigRequested() { rx_config_gate_.RequestConfig(); }
-  bool ApplyPendingConfig(bool in_isr);
-  bool OnConfigApplied(bool)
+  enum class RxArmResult : uint8_t
   {
-    rx_config_gate_.LeaveConfig();
-    return true;
-  }
+    STARTED,
+    PENDING_LINE_ERROR,
+    FAILED,
+  };
 
-  /**
-   * @brief 通过 STM32 HAL 配置并启动 UART 循环 RX DMA / Configure and start circular
-   * UART RX DMA through STM32 HAL
-   * @param data DMA 可写的接收缓冲区 / DMA-writable receive buffer
-   * @param size 接收缓冲区字节数 / Receive buffer capacity in bytes
-   */
-  void StartCircularDmaRx(uint8_t* data, size_t size)
+  static bool InIsr();
+  static bool DmaTransferSizeSupported(size_t size);
+  static bool IsPendingRxLineError(uint32_t error_code);
+
+  [[nodiscard]] ErrorCode ValidateConfig(UART::Configuration config) const;
+  UartDmaControlResult AdvanceConfig(UART::Configuration config, bool active_tx,
+                                     bool in_isr);
+  UartDmaControlProgress CompleteConfig(bool in_isr);
+  UartDmaControlResult AdvanceRecovery(bool active_tx, bool in_isr);
+  UartDmaControlProgress CompleteRecovery(bool in_isr);
+  UartDmaControlResult StopDataPath(bool active_tx, bool wait_for_uart_tc, bool in_isr);
+  bool ApplyConfigPayload(UART::Configuration config, bool in_isr);
+  void FinishControl();
+  UartDmaControlProgress SetRxDMA(bool in_isr);
+  void OnTxComplete(bool in_isr);
+
+  [[nodiscard]] bool AllDmaStopsComplete() const;
+
+  void CloseTxTerminalSource();
+  void LaunchDmaStop(DMA_HandleTypeDef* dma_handle, bool in_isr, bool classify_tx);
+  static void DmaAbortCallback(DMA_HandleTypeDef* dma_handle);
+  void CaptureStoppedTx();
+  void FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr);
+
+#if defined(LIBXR_STM32_UART_GPDMA)
+  RxArmResult StartLinkedListDmaRx(uint8_t* data, size_t size, size_t descriptor_count);
+  [[nodiscard]] uint8_t* GetLinkedListDmaRxProducer() const;
+  void PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size);
+#else
+  RxArmResult StartCircularDmaRx(uint8_t* data, size_t size)
   {
+    const bool in_isr = InIsr();
+    REQUIRE_FROM_CALLBACK(DmaTransferSizeSupported(size), in_isr);
+    STM32_CleanDCacheByAddr(data, size);
+    STM32_InvalidateDCacheByAddr(data, size);
     uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
-    HAL_DMA_Init(uart_handle_->hdmarx);
-    HAL_UARTEx_ReceiveToIdle_DMA(uart_handle_, data, size);
+    REQUIRE_FROM_CALLBACK(HAL_DMA_Init(uart_handle_->hdmarx) == HAL_OK, in_isr);
+    const HAL_StatusTypeDef status =
+        HAL_UARTEx_ReceiveToIdle_DMA(uart_handle_, data, static_cast<uint16_t>(size));
+    if (status == HAL_OK)
+    {
+      rx_arm_result_ = RxArmResult::STARTED;
+      return rx_arm_result_;
+    }
+
+    if ((status == HAL_ERROR) && IsPendingRxLineError(uart_handle_->ErrorCode))
+    {
+      // HAL may return HAL_ERROR after a pending UART line error has already
+      // aborted this RX arm. The HAL error/abort callback is the next retry carrier.
+      rx_arm_result_ = RxArmResult::PENDING_LINE_ERROR;
+      return rx_arm_result_;
+    }
+
+    rx_arm_result_ = RxArmResult::FAILED;
+    REQUIRE_FROM_CALLBACK(false, in_isr);
+    return rx_arm_result_;
   }
 
-  /**
-   * @brief 获取 STM32 RX DMA 剩余传输计数 / Get the STM32 RX DMA remaining count
-   * @return DMA 尚未写入的字节数 / Number of bytes not yet written by DMA
-   */
   [[nodiscard]] size_t GetCircularDmaRxRemaining() const
   {
     return __HAL_DMA_GET_COUNTER(uart_handle_->hdmarx);
   }
 
-  /**
-   * @brief 使循环 DMA RX 数据对 CPU 可见 / Make circular DMA RX data visible to the CPU
-   * @param data DMA 接收缓冲区起始地址 / DMA receive buffer start address
-   * @param size 接收缓冲区字节数 / Receive buffer capacity in bytes
-   */
   void PrepareCircularDmaRxForCpu(uint8_t* data, size_t size)
   {
     STM32_InvalidateDCacheByAddr(data, size);
   }
+#endif
 
-  /**
-   * @brief 通过 STM32 HAL 启动一个 active UART TX DMA 载荷 / Start one active UART TX
-   * DMA payload through STM32 HAL
-   * @param data DMA 可读的载荷缓冲区 / DMA-readable payload buffer
-   * @param size 载荷字节数 / Payload size in bytes
-   * @param block active 双缓冲块索引，STM32 HAL 不使用 / Active double-buffer block
-   * index, unused by STM32 HAL
-   * @return HAL 接受 DMA 传输时返回 true / True when HAL accepts the DMA transfer
-   */
-  bool StartDmaTx(uint8_t* data, size_t size, int block);
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block, bool in_isr);
+
+  bool stop_active_ = false;
+  bool tx_evidence_captured_ = false;
+  bool tx_payload_complete_ = false;
+  bool tx_dma_error_ = false;
+  bool waiting_for_uart_tc_ = false;
+  bool tx_replay_required_ = false;
+  RxArmResult rx_arm_result_ = RxArmResult::STARTED;
 };
 
 }  // namespace LibXR

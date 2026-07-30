@@ -77,6 +77,13 @@ class UART
    * 该方法为纯虚函数，子类必须实现具体的 UART 配置逻辑。
    * This is a pure virtual function. Subclasses must implement the specific UART
    * configuration logic.
+   *
+   * @warning One UART instance accepts at most one outstanding configuration. Calls may
+   * originate in thread or ISR context; a concurrent or reentrant request returns
+   * `ErrorCode::BUSY` without replacing the accepted payload. `ErrorCode::OK`
+   * acknowledges admission, while hardware quiescence, apply, and restart may finish
+   * later. 每个 UART 实例最多接受一个尚未完成的配置；并发或重入请求返回
+   * `ErrorCode::BUSY`，且不会覆盖已接受的配置。
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
 

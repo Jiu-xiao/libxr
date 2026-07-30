@@ -13,6 +13,64 @@ namespace LibXR
 {
 
 /**
+ * @brief Atomic status value for polling operations.
+ * @brief 用于轮询操作的原子状态值。
+ *
+ * The completion context may update this value while another thread or core polls it.
+ * The 32-bit storage matches the portable embedded atomic runtime boundary.
+ * 完成上下文可以在其他线程或核心轮询时更新该值；32 位存储与嵌入式平台的原子运行时
+ * 边界一致。
+ */
+class OperationPollingStatus
+{
+ public:
+  enum Value : uint32_t
+  {
+    READY,
+    RUNNING,
+    DONE,
+    ERROR
+  };
+
+  OperationPollingStatus(Value initial = READY) noexcept
+      : value_(static_cast<uint32_t>(initial))
+  {
+  }
+
+  OperationPollingStatus(const OperationPollingStatus& other) noexcept
+      : value_(static_cast<uint32_t>(other.Load(std::memory_order_relaxed)))
+  {
+  }
+
+  OperationPollingStatus& operator=(const OperationPollingStatus& other) noexcept
+  {
+    Store(other.Load(std::memory_order_relaxed), std::memory_order_relaxed);
+    return *this;
+  }
+
+  OperationPollingStatus& operator=(Value status) noexcept
+  {
+    Store(status);
+    return *this;
+  }
+
+  void Store(Value status, std::memory_order order = std::memory_order_release) noexcept
+  {
+    value_.store(static_cast<uint32_t>(status), order);
+  }
+
+  Value Load(std::memory_order order = std::memory_order_acquire) const noexcept
+  {
+    return static_cast<Value>(value_.load(order));
+  }
+
+  operator Value() const noexcept { return Load(); }
+
+ private:
+  std::atomic<uint32_t> value_{};
+};
+
+/**
  * @brief Defines an operation with different execution modes.
  * @brief 定义了一种具有不同执行模式的操作。
  *
@@ -24,6 +82,7 @@ class Operation
 {
  public:
   using Callback = LibXR::Callback<Args>;
+  using OperationPollingStatus = LibXR::OperationPollingStatus;
 
   /// Operation types.
   /// 操作类型。
@@ -37,14 +96,6 @@ class Operation
 
   /// Polling operation status.
   /// 轮询操作的状态。
-  enum class OperationPollingStatus : uint8_t
-  {
-    READY,
-    RUNNING,
-    DONE,
-    ERROR
-  };
-
   /// @brief Default constructor, initializes with NONE type.
   /// @brief 默认构造函数，初始化为NONE类型。
   Operation() : data{nullptr}, type(OperationType::NONE) {}
@@ -78,7 +129,7 @@ class Operation
   /**
    * @brief Constructs a polling operation.
    * @brief 构造轮询操作。
-   * @param status Reference to polling status.
+   * @param status Atomic polling status shared with the completion context.
    */
   Operation(OperationPollingStatus& status)
       : data{.status = &status}, type(OperationType::POLLING)
@@ -178,8 +229,8 @@ class Operation
         data.sem_info.sem->PostFromCallback(in_isr);
         break;
       case OperationType::POLLING:
-        *data.status = (status == ErrorCode::OK) ? OperationPollingStatus::DONE
-                                                 : OperationPollingStatus::ERROR;
+        data.status->Store((status == ErrorCode::OK) ? OperationPollingStatus::DONE
+                                                     : OperationPollingStatus::ERROR);
         break;
       case OperationType::NONE:
         break;
@@ -203,7 +254,7 @@ class Operation
   {
     if (type == OperationType::POLLING)
     {
-      *data.status = OperationPollingStatus::RUNNING;
+      data.status->Store(OperationPollingStatus::RUNNING);
     }
   }
 

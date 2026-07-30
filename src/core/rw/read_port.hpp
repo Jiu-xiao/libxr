@@ -46,8 +46,13 @@ class ReadPort
                          ///< BLOCK 唤醒已被本次等待者认领。
     BLOCK_DETACHED = 4,  ///< Timeout detached the waiter; completion must stay silent.
                          ///< 超时已分离等待者，完成侧不得再唤醒。
-    EVENT = UINT32_MAX   ///< Data arrived before a waiter was armed; next caller must
+    PROCESSING = 5,      ///< One completion path owns the queue pop.
+    EVENT = 1U << 31U,   ///< Data arrived before a waiter was armed; next caller must
                          ///< re-check queue. 数据先到，后续调用者要重查队列。
+    CLEARING_EVENT = (1U << 31U) | 2U,        ///< CLEARING with a follow-up event.
+    PROCESSING_EVENT = (1U << 31U) | 5U,      ///< PROCESSING with a follow-up event.
+    BLOCK_CLAIMED_EVENT = (1U << 31U) | 3U,   ///< Claimed BLOCK plus event.
+    BLOCK_DETACHED_EVENT = (1U << 31U) | 4U,  ///< Detached BLOCK plus event.
   };
 
   ReadFun read_fun_ =
@@ -195,11 +200,19 @@ class ReadPort
    * participate in backend teardown and does not fail-complete an in-flight read.
    * Returns BUSY when a read request is currently in progress.
    *
-   * @note After this call claims CLEARING, ordinary reads can no longer consume the
-   *       current software-queue snapshot. Bytes that arrive after the snapshot may
-   *       remain queued for a later reader/clear call.
-   * @note 本次调用 claim `CLEARING` 之后，普通读不会再消费当前软件队列快照；在快照
-   *       之后新到达的字节，可以留给后续读取或下次清队列。
+   * @note After this call claims CLEARING, it owns the current software-queue snapshot
+   *       until return. Bytes that arrive after the snapshot may remain queued for a
+   *       later reader/clear call.
+   * @note 本次调用 claim `CLEARING` 后，在返回前独占当前软件队列快照；快照之后新到达
+   *       的字节可以留给后续读取或下次清队列。
+   * @warning Ordinary reads and `ClearQueuedData()` are operations of the same logical
+   *          SPSC consumer and must not overlap. `CLEARING` coordinates this consumer
+   *          with the ISR producer's `ProcessPendingReads()` path; it does not turn
+   *          ordinary read/clear calls into multiple concurrent consumers.
+   * @warning 普通读取与 `ClearQueuedData()` 同属一个 SPSC consumer，调用不得重叠。
+   *          `CLEARING` 只协调该 consumer 与 ISR producer 的
+   *          `ProcessPendingReads()` 路径，并不会让普通读取和清队列变成可并发的多个
+   *          consumer。
    *
    * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
    * @return `OK` 表示本次清队列成功完成；`BUSY` 表示当前有读请求占有该端口。
@@ -223,11 +236,11 @@ class ReadPort
    *
    * @note Driver-only: call this only after the backend is known to be unavailable.
    * @note 仅供驱动层在后端已明确不可用后调用。
-   * @note The surrounding driver must already guarantee that no new front-end
-   *       submissions or back-end completion/data events can still arrive for
-   *       this port.
-   * @note 外围驱动还必须先保证：这条端口后续不会再收到新的前端提交，也不会再收到
-   *       新的后端完成或数据事件。
+   * @note The surrounding driver must already guarantee that no front-end
+   *       submission or back-end completion/data event is executing, and that none
+   *       can begin for this port until this call returns.
+   * @note 外围驱动还必须先保证：当前没有前端提交或后端完成/数据事件正在执行，且本调用
+   *       返回前不能开始新的相关操作。
    *
    * @param reason 最终失败原因 / Final failure reason
    * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context

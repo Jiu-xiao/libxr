@@ -268,6 +268,9 @@ class WritePort
    *            Error code indicating the result of the operation.
    * @param op 需要更新状态的 WriteOperation 引用。
    *           Reference to the WriteOperation whose status needs to be updated.
+   * @warning A completion callback may run while an unrelated producer owns this port.
+   *          A callback that writes the same port must handle `BUSY`; completion
+   *          serialization does not reserve producer ownership for callback re-entry.
    */
   void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info);
 

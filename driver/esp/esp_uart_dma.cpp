@@ -1,17 +1,36 @@
 #include "esp_uart.hpp"
 
-#if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
+#if LIBXR_ESP_UART_HAS_AHB_GDMA
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 
 #include "esp_attr.h"
+#include "esp_cache.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
-#include "esp_memory_utils.h"
+#include "esp_private/esp_cache_private.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wliteral-suffix"
+#endif
 #include "esp_private/periph_ctrl.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#include "hal/dma_types.h"
+#include "hal/gdma_hal_ahb.h"
+#include "hal/gdma_ll.h"
 #include "hal/uhci_ll.h"
 #include "soc/ext_mem_defs.h"
+#include "soc/gdma_periph.h"
+
+#if defined(SOC_RCC_IS_INDEPENDENT) && SOC_RCC_IS_INDEPENDENT
+#define LIBXR_ESP_UHCI_RCC_ATOMIC()
+#else
+#define LIBXR_ESP_UHCI_RCC_ATOMIC() PERIPH_RCC_ATOMIC()
+#endif
 
 namespace
 {
@@ -23,28 +42,29 @@ constexpr uint32_t DMA_RX_NODE_COUNT = 8;
 
 // Current ESP GDMA link items cannot describe more than 4095 bytes in one node.
 // 当前 ESP GDMA link item 单节点最多只能描述 4095 字节。
-constexpr size_t DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM = 4095U;
+constexpr size_t DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM = DMA_DESCRIPTOR_BUFFER_MAX_SIZE;
+
+// UHCI0 is chip-wide and retained for the process lifetime. A later DMA-UART
+// instance must fail before accessing any UHCI register.
+std::atomic<uint32_t> uhci0_lifetime_claimed{0U};
+
+bool TryClaimUhci0ForLifetime()
+{
+  uint32_t expected = 0U;
+  return uhci0_lifetime_claimed.compare_exchange_strong(
+      expected, 1U, std::memory_order_acq_rel, std::memory_order_relaxed);
+}
 
 // Minimal local view of the GDMA link descriptor layout used for in-place patching.
 // 为就地修改描述符长度而保留的 GDMA link descriptor 最小本地视图。
-struct GdmaLinkItem
-{
-  struct
-  {
-    uint32_t size : 12;
-    uint32_t length : 12;
-    uint32_t reserved24 : 4;
-    uint32_t err_eof : 1;
-    uint32_t reserved29 : 1;
-    uint32_t suc_eof : 1;
-    uint32_t owner : 1;
-  } dw0;
-  void* buffer;
-  GdmaLinkItem* next;
-};
-
-constexpr uint32_t GDMA_OWNER_CPU = 0U;
-constexpr uint32_t GDMA_OWNER_DMA = 1U;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 4)
+constexpr gdma_final_node_link_type_t DMA_FINAL_LINK_TO_DEFAULT =
+    GDMA_FINAL_LINK_TO_DEFAULT;
+constexpr gdma_final_node_link_type_t DMA_FINAL_LINK_TO_NULL = GDMA_FINAL_LINK_TO_NULL;
+#else
+constexpr uint32_t DMA_FINAL_LINK_TO_DEFAULT = 0U;
+constexpr uint32_t DMA_FINAL_LINK_TO_NULL = 1U;
+#endif
 
 // Helper used for DMA storage and node-size alignment calculations.
 // 用于 DMA storage 和 node 大小对齐计算的辅助函数。
@@ -72,40 +92,36 @@ uintptr_t CacheAddrToNonCache(uintptr_t addr)
 
 // Recover the first link item from a GDMA list head address.
 // 从 GDMA list head 地址恢复首个 link item。
-GdmaLinkItem* LinkItemFromHeadAddr(uintptr_t head_addr)
+dma_descriptor_t* DescriptorFromHeadAddr(uintptr_t head_addr)
 {
-  return reinterpret_cast<GdmaLinkItem*>(CacheAddrToNonCache(head_addr));
+  return reinterpret_cast<dma_descriptor_t*>(CacheAddrToNonCache(head_addr));
 }
-
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
-extern "C" esp_err_t esp_cache_msync(void* addr, size_t size, int flags);
-
-constexpr int CACHE_SYNC_FLAG_UNALIGNED = (1 << 1);
-constexpr int CACHE_SYNC_FLAG_DIR_C2M = (1 << 2);
-constexpr int CACHE_SYNC_FLAG_DIR_M2C = (1 << 3);
 
 // Synchronize one DMA window when the active memory region is cacheable.
 // 当当前内存区域可缓存时，同步一个 DMA 窗口。
-bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem,
+                        size_t cache_line_size)
 {
   if ((addr == nullptr) || (size == 0U))
   {
     return true;
   }
 
-#if SOC_PSRAM_DMA_CAPABLE && !SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-  if (!esp_ptr_external_ram(addr))
+  size_t sync_size = size;
+  int flags = ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED;
+  if (!cache_to_mem)
   {
-    return true;
+    if ((cache_line_size == 0U) ||
+        ((reinterpret_cast<uintptr_t>(addr) % cache_line_size) != 0U) ||
+        (size > (SIZE_MAX - (cache_line_size - 1U))))
+    {
+      return false;
+    }
+    sync_size = AlignUp(size, cache_line_size);
+    flags = ESP_CACHE_MSYNC_FLAG_DIR_M2C;
   }
-#endif
-
-  int flags = cache_to_mem ? CACHE_SYNC_FLAG_DIR_C2M : CACHE_SYNC_FLAG_DIR_M2C;
-  flags |= CACHE_SYNC_FLAG_UNALIGNED;
-
-  const esp_err_t ret = esp_cache_msync(const_cast<void*>(addr), size, flags);
-  // Non-cacheable regions can return ESP_ERR_INVALID_ARG; treat as no-op success.
-  return (ret == ESP_OK) || (ret == ESP_ERR_INVALID_ARG);
+  return esp_cache_msync(const_cast<void*>(addr), sync_size, flags) == ESP_OK;
 }
 #endif
 }  // namespace
@@ -113,65 +129,115 @@ bool CacheSyncDmaBuffer(const void* addr, size_t size, bool cache_to_mem)
 namespace LibXR
 {
 
-// TX EOF means the current staged active payload has fully left the DMA engine.
-// TX EOF 表示当前暂存的 active payload 已经完整离开 DMA 引擎。
-bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t, gdma_event_data_t*,
-                                           void* user_data)
+void IRAM_ATTR ESP32UartDma::DmaTxIsrEntry(void* arg)
 {
-  auto* uart = static_cast<ESP32UART*>(user_data);
-  if (uart != nullptr)
+  auto* uart = static_cast<ESP32UartDma*>(arg);
+  if (uart == nullptr)
   {
-    uart->tx_dma_model_.OnTransferDone(true);
+    return;
   }
-  return false;
+#if defined(GDMA_LL_AHB_TX_RX_SHARE_INTERRUPT) && GDMA_LL_AHB_TX_RX_SHARE_INTERRUPT
+  bool pushed_any = false;
+  (void)uart->dma_model_.InvokeIrq(
+      [uart, &pushed_any]() noexcept
+      { return uart->ServiceDmaTxStatus(true) | uart->ServiceDmaRxStatus(pushed_any); },
+      true);
+  if (pushed_any)
+  {
+    uart->read_port_->ProcessPendingReads(true);
+  }
+#else
+  (void)uart->dma_model_.InvokeIrq(
+      [uart]() noexcept { return uart->ServiceDmaTxStatus(true); }, true);
+#endif
 }
 
-// TX descriptor error is surfaced as a backend TX failure.
-// TX 描述符错误会被上报为后端 TX 失败。
-bool IRAM_ATTR ESP32UART::DmaTxDescrErrCallback(gdma_channel_handle_t, gdma_event_data_t*,
-                                                void* user_data)
+void IRAM_ATTR ESP32UartDma::DmaRxIsrEntry(void* arg)
 {
-  auto* uart = static_cast<ESP32UART*>(user_data);
-  if (uart != nullptr)
+  auto* uart = static_cast<ESP32UartDma*>(arg);
+  if (uart == nullptr)
   {
-    uart->HandleDmaTxError();
+    return;
   }
-  return false;
+  bool pushed_any = false;
+  (void)uart->dma_model_.InvokeIrq([uart, &pushed_any]() noexcept
+                                   { return uart->ServiceDmaRxStatus(pushed_any); },
+                                   true);
+  if (pushed_any)
+  {
+    uart->read_port_->ProcessPendingReads(true);
+  }
 }
 
-// RX done callback only forwards the event into the UART object state machine.
-// RX 完成回调只负责把事件转发到 UART 对象状态机。
-bool IRAM_ATTR ESP32UART::DmaRxDoneCallback(gdma_channel_handle_t,
-                                            gdma_event_data_t* event_data,
-                                            void* user_data)
+uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaTxStatus(bool in_isr)
 {
-  auto* uart = static_cast<ESP32UART*>(user_data);
-  if ((uart != nullptr) && uart->rx_config_gate_.TryEnterRx())
+  const uint32_t status = gdma_hal_read_intr_status(&tx_gdma_hal_, tx_gdma_channel_id_,
+                                                    GDMA_CHANNEL_DIRECTION_TX, false);
+  gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
+                      status);
+
+  uint32_t events = 0U;
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
+  if ((status & GDMA_LL_EVENT_TX_DESC_ERROR) != 0U)
   {
-    uart->HandleDmaRxDone(event_data);
-    if (uart->rx_config_gate_.LeaveRx())
-    {
-      uart->tx_dma_model_.RequestConfig(true);
-    }
+    events |= Model::EventMask(UartDmaEvent::ERROR);
   }
-  return false;
+  else if ((status & GDMA_LL_EVENT_TX_EOF) != 0U)
+  {
+    events |= Model::EventMask(UartDmaEvent::COMPLETE);
+  }
+  (void)in_isr;
+  return events;
 }
 
-// RX descriptor error requests a full RX ring recovery.
-// RX 描述符错误要求完整恢复 RX 环。
-bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t, gdma_event_data_t*,
-                                                void* user_data)
+uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaRxStatus(bool& pushed_any)
 {
-  auto* uart = static_cast<ESP32UART*>(user_data);
-  if ((uart != nullptr) && uart->rx_config_gate_.TryEnterRx())
+  const uint32_t status = gdma_hal_read_intr_status(&rx_gdma_hal_, rx_gdma_channel_id_,
+                                                    GDMA_CHANNEL_DIRECTION_RX, true);
+  gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
+                      status);
+
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
+  bool error = (status & (GDMA_LL_EVENT_RX_DESC_ERROR | GDMA_LL_EVENT_RX_ERR_EOF)) != 0U;
+  uint32_t events = error ? Model::EventMask(UartDmaEvent::ERROR) : 0U;
+  if (!error && ((status & GDMA_LL_EVENT_RX_DONE) != 0U))
   {
-    uart->HandleDmaRxError();
-    if (uart->rx_config_gate_.LeaveRx())
-    {
-      uart->tx_dma_model_.RequestConfig(true);
-    }
+    (void)dma_model_.ProcessRxInIrqSource(
+        events, [this, &pushed_any, &error]()
+        { error = !DrainCompletedDmaRxDescriptors(pushed_any); });
   }
-  return false;
+  if (error)
+  {
+    // A separate RX source may observe the error before the TX EOF IRQ runs. Collect
+    // the TX terminal fact in this same owner snapshot before recovery clears it.
+    events |= ServiceDmaTxStatus(true);
+    events |= Model::EventMask(UartDmaEvent::ERROR);
+  }
+  return events;
+}
+
+uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaUartStatus(bool in_isr)
+{
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
+  const uint32_t status = uart_hal_get_intsts_mask(&uart_hal_) &
+                          (DMA_UART_ERROR_INTR_MASK | UART_INTR_TX_DONE);
+  const uint32_t error_status = status & DMA_UART_ERROR_INTR_MASK;
+  if (error_status != 0U)
+  {
+    uart_hal_clr_intsts_mask(&uart_hal_, error_status);
+  }
+  uint32_t events = ServiceDmaTxStatus(in_isr);
+  if (error_status != 0U)
+  {
+    events |= Model::EventMask(UartDmaEvent::ERROR);
+  }
+  if (((status & UART_INTR_TX_DONE) != 0U) && config_waiting_tx_idle_ &&
+      uart_hal_is_tx_idle(&uart_hal_))
+  {
+    DisarmConfigTxIdleInterrupt();
+    events |= Model::EventMask(UartDmaEvent::STOP_DONE);
+  }
+  return events;
 }
 
 // DMA backend bring-up does three things:
@@ -182,15 +248,18 @@ bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t, gdma_even
 // 1. 把 UHCI 绑定到选定 UART。
 // 2. 为双缓冲两半各准备一条 TX 描述符链。
 // 3. 准备一条循环 RX 描述符环。
-ErrorCode ESP32UART::InitDmaBackend()
+ErrorCode ESP32UartDma::InitDmaBackend()
 {
-  if (dma_backend_enabled_)
+  if (!TryClaimUhci0ForLifetime())
   {
-    return ErrorCode::OK;
+    return ErrorCode::INIT_ERR;
   }
 
-  periph_module_enable(PERIPH_UHCI0_MODULE);
-  periph_module_reset(PERIPH_UHCI0_MODULE);
+  LIBXR_ESP_UHCI_RCC_ATOMIC()
+  {
+    uhci_ll_enable_bus_clock(0, true);
+    uhci_ll_reset_register(0);
+  }
 
   uhci_hal_init(&uhci_hal_, 0);
   uhci_ll_attach_uart_port(uhci_hal_.dev, uart_num_);
@@ -203,7 +272,7 @@ ErrorCode ESP32UART::InitDmaBackend()
   gdma_channel_alloc_config_t tx_cfg = {
       .sibling_chan = nullptr,
       .direction = GDMA_CHANNEL_DIRECTION_TX,
-      .flags = {},
+      .flags = {.reserve_sibling = 1, .isr_cache_safe = 0},
   };
   if (gdma_new_ahb_channel(&tx_cfg, &tx_dma_channel_) != ESP_OK)
   {
@@ -232,8 +301,14 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     return ErrorCode::INIT_ERR;
   }
-  const size_t tx_dma_alignment =
-      std::max<size_t>(1, std::max(tx_int_alignment, tx_ext_alignment));
+  const size_t tx_dma_alignment = std::max<size_t>(1, tx_int_alignment);
+  if ((tx_storage_.block_stride == 0U) ||
+      ((tx_storage_.block_stride % tx_dma_alignment) != 0U) ||
+      ((reinterpret_cast<uintptr_t>(dma_model_.Buffer(0)) % tx_dma_alignment) != 0U) ||
+      ((reinterpret_cast<uintptr_t>(dma_model_.Buffer(1)) % tx_dma_alignment) != 0U))
+  {
+    return ErrorCode::INIT_ERR;
+  }
 
   gdma_strategy_config_t tx_strategy = {
       .owner_check = true,
@@ -260,13 +335,13 @@ ErrorCode ESP32UART::InitDmaBackend()
     }
 
     gdma_buffer_mount_config_t tx_mount = {
-        .buffer = tx_dma_model_.Buffer(i),
+        .buffer = dma_model_.Buffer(i),
         .buffer_alignment = tx_dma_alignment,
         .length = 1,
         .flags =
             {
                 .mark_eof = 1,
-                .mark_final = 1,
+                .mark_final = DMA_FINAL_LINK_TO_NULL,
                 .bypass_buffer_align_check = 0,
             },
     };
@@ -283,17 +358,28 @@ ErrorCode ESP32UART::InitDmaBackend()
     }
   }
 
-  gdma_tx_event_callbacks_t tx_callbacks = {
-      .on_trans_eof = DmaTxEofCallback,
-      .on_descr_err = DmaTxDescrErrCallback,
-  };
-  if (gdma_register_tx_event_callbacks(tx_dma_channel_, &tx_callbacks, this) != ESP_OK)
+  if (gdma_get_group_channel_id(tx_dma_channel_, &tx_gdma_group_id_,
+                                &tx_gdma_channel_id_) != ESP_OK)
   {
     return ErrorCode::INIT_ERR;
   }
+  const gdma_hal_config_t tx_hal_config = {.group_id = tx_gdma_group_id_};
+  gdma_ahb_hal_init(&tx_gdma_hal_, &tx_hal_config);
 
+  const int tx_irq_source =
+      gdma_periph_signals.groups[tx_gdma_group_id_].pairs[tx_gdma_channel_id_].tx_irq_id;
+  constexpr int DMA_IRQ_FLAGS = ESP_INTR_FLAG_LEVEL1 | ESP_INTR_FLAG_INTRDISABLED;
+  if (esp_intr_alloc(tx_irq_source, DMA_IRQ_FLAGS, DmaTxIsrEntry, this,
+                     &tx_gdma_intr_handle_) != ESP_OK)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
+                      UINT32_MAX);
+  gdma_hal_enable_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
+                       GDMA_LL_EVENT_TX_EOF | GDMA_LL_EVENT_TX_DESC_ERROR, true);
   gdma_channel_alloc_config_t rx_cfg = {
-      .sibling_chan = nullptr,
+      .sibling_chan = tx_dma_channel_,
       .direction = GDMA_CHANNEL_DIRECTION_RX,
       .flags = {},
   };
@@ -313,6 +399,16 @@ ErrorCode ESP32UART::InitDmaBackend()
     return ErrorCode::INIT_ERR;
   }
 
+  gdma_strategy_config_t rx_strategy = {
+      .owner_check = true,
+      .auto_update_desc = false,
+      .eof_till_data_popped = false,
+  };
+  if (gdma_apply_strategy(rx_dma_channel_, &rx_strategy) != ESP_OK)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+
   size_t rx_int_alignment = 1;
   size_t rx_ext_alignment = 1;
   if (gdma_get_alignment_constraints(rx_dma_channel_, &rx_int_alignment,
@@ -320,8 +416,13 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     return ErrorCode::INIT_ERR;
   }
-  const size_t rx_dma_alignment =
-      std::max<size_t>(1, std::max(rx_int_alignment, rx_ext_alignment));
+  const size_t rx_dma_alignment = std::max<size_t>(1, rx_int_alignment);
+  rx_dma_buffer_alignment_ = rx_dma_alignment;
+  if ((esp_cache_get_alignment(MALLOC_CAP_INTERNAL, &rx_cache_line_size_) != ESP_OK) ||
+      (rx_cache_line_size_ == 0U))
+  {
+    return ErrorCode::INIT_ERR;
+  }
 
   gdma_link_list_config_t rx_link_cfg = {
       .num_items = DMA_RX_NODE_COUNT,
@@ -336,9 +437,11 @@ ErrorCode ESP32UART::InitDmaBackend()
   // Keep one ring window reasonably large to lower ISR pressure at high baud.
   // 保持单个环窗口适度偏大，以降低高波特率下的 ISR 压力。
   const size_t rx_chunk_target = std::min<size_t>(
-      std::max<size_t>(32, rx_isr_buffer_size_ / DMA_RX_NODE_COUNT), 512);
-  rx_dma_chunk_size_ = std::max<size_t>(AlignUp(rx_chunk_target, 4), 32);
-  const size_t rx_storage_alignment = std::max<size_t>(4, rx_dma_alignment);
+      std::max<size_t>(32, read_port_->queue_data_->MaxSize() / DMA_RX_NODE_COUNT), 512);
+  const size_t rx_storage_alignment =
+      std::max<size_t>(4, std::max(rx_dma_buffer_alignment_, rx_cache_line_size_));
+  rx_dma_chunk_size_ =
+      std::max<size_t>(AlignUp(rx_chunk_target, rx_storage_alignment), 32);
   const size_t rx_storage_bytes =
       AlignUp(rx_dma_chunk_size_ * DMA_RX_NODE_COUNT, rx_storage_alignment);
 
@@ -355,12 +458,12 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     rx_mount[i] = gdma_buffer_mount_config_t{
         .buffer = rx_dma_storage_ + (static_cast<size_t>(i) * rx_dma_chunk_size_),
-        .buffer_alignment = rx_dma_alignment,
+        .buffer_alignment = rx_dma_buffer_alignment_,
         .length = rx_dma_chunk_size_,
         .flags =
             {
                 .mark_eof = 0,
-                .mark_final = 0,
+                .mark_final = DMA_FINAL_LINK_TO_DEFAULT,
                 .bypass_buffer_align_check = 0,
             },
     };
@@ -371,159 +474,255 @@ ErrorCode ESP32UART::InitDmaBackend()
   {
     return ErrorCode::INIT_ERR;
   }
-
-  gdma_rx_event_callbacks_t rx_callbacks = {
-      .on_recv_eof = nullptr,
-      .on_descr_err = DmaRxDescrErrCallback,
-      .on_recv_done = DmaRxDoneCallback,
-  };
-  if (gdma_register_rx_event_callbacks(rx_dma_channel_, &rx_callbacks, this) != ESP_OK)
+  rx_dma_head_addr_ = gdma_link_get_head_addr(rx_dma_link_);
+  rx_dma_descriptors_ = DescriptorFromHeadAddr(rx_dma_head_addr_);
+  if ((rx_dma_head_addr_ == 0U) || (rx_dma_descriptors_ == nullptr))
   {
     return ErrorCode::INIT_ERR;
   }
 
+  if (gdma_get_group_channel_id(rx_dma_channel_, &rx_gdma_group_id_,
+                                &rx_gdma_channel_id_) != ESP_OK)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  const gdma_hal_config_t rx_hal_config = {.group_id = rx_gdma_group_id_};
+  gdma_ahb_hal_init(&rx_gdma_hal_, &rx_hal_config);
+
+  const int rx_irq_source =
+      gdma_periph_signals.groups[rx_gdma_group_id_].pairs[rx_gdma_channel_id_].rx_irq_id;
+#if defined(GDMA_LL_AHB_TX_RX_SHARE_INTERRUPT) && GDMA_LL_AHB_TX_RX_SHARE_INTERRUPT
+  if (rx_irq_source != tx_irq_source)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  rx_gdma_intr_handle_ = tx_gdma_intr_handle_;
+#else
+  if (esp_intr_alloc(rx_irq_source, DMA_IRQ_FLAGS, DmaRxIsrEntry, this,
+                     &rx_gdma_intr_handle_) != ESP_OK)
+  {
+    return ErrorCode::INIT_ERR;
+  }
+  DEV_ASSERT(esp_intr_get_cpu(tx_gdma_intr_handle_) ==
+             esp_intr_get_cpu(rx_gdma_intr_handle_));
+#endif
+  gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
+                      UINT32_MAX);
+  gdma_hal_enable_intr(
+      &rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
+      GDMA_LL_EVENT_RX_DONE | GDMA_LL_EVENT_RX_DESC_ERROR | GDMA_LL_EVENT_RX_ERR_EOF,
+      true);
   if (gdma_reset(rx_dma_channel_) != ESP_OK)
   {
     return ErrorCode::INIT_ERR;
   }
 
-  if (gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_)) != ESP_OK)
+  if (!ResetAndRestartRxDma())
   {
     return ErrorCode::INIT_ERR;
   }
 
-  rx_dma_node_index_ = 0;
-  dma_backend_enabled_ = true;
   return ErrorCode::OK;
+}
+
+bool IRAM_ATTR ESP32UartDma::ResetAndRestartRxDma()
+{
+  if ((rx_dma_channel_ == nullptr) || (rx_dma_descriptors_ == nullptr) ||
+      (rx_dma_head_addr_ == 0U) || (rx_dma_storage_ == nullptr) ||
+      (rx_dma_chunk_size_ == 0U) ||
+      (rx_dma_chunk_size_ > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM))
+  {
+    return false;
+  }
+
+  auto* cached_descriptors = reinterpret_cast<dma_descriptor_t*>(rx_dma_head_addr_);
+  for (uint32_t i = 0; i < DMA_RX_NODE_COUNT; ++i)
+  {
+    auto& descriptor = rx_dma_descriptors_[i];
+    descriptor.dw0.owner = DMA_DESCRIPTOR_BUFFER_OWNER_CPU;
+    descriptor.buffer = rx_dma_storage_ + (static_cast<size_t>(i) * rx_dma_chunk_size_);
+    descriptor.dw0.size = static_cast<uint32_t>(rx_dma_chunk_size_);
+    descriptor.dw0.length = static_cast<uint32_t>(rx_dma_chunk_size_);
+    descriptor.dw0.err_eof = 0U;
+    descriptor.dw0.suc_eof = 0U;
+    descriptor.next = &cached_descriptors[(i + 1U) % DMA_RX_NODE_COUNT];
+  }
+
+  std::atomic_thread_fence(std::memory_order_release);
+  for (uint32_t i = 0; i < DMA_RX_NODE_COUNT; ++i)
+  {
+    rx_dma_descriptors_[i].dw0.owner = DMA_DESCRIPTOR_BUFFER_OWNER_DMA;
+  }
+  std::atomic_thread_fence(std::memory_order_release);
+
+  rx_dma_node_index_ = 0U;
+  return gdma_start(rx_dma_channel_, rx_dma_head_addr_) == ESP_OK;
 }
 
 // TX DMA start only patches the dynamic fields of the pre-mounted descriptor
 // list, so the hot path avoids rebuilding descriptors for every request.
 // TX DMA 启动时只修改预挂载描述符链的动态字段，避免每次请求都重建描述符。
-bool IRAM_ATTR ESP32UART::StartDmaTx(uint8_t* data, size_t size, int block)
+UartDmaTxStartResult IRAM_ATTR ESP32UartDma::StartDmaTx(uint8_t* data, size_t size,
+                                                        int block, bool)
 {
   if ((tx_dma_channel_ == nullptr) || (data == nullptr) || (size == 0U) ||
       (size > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM) || ((block != 0) && (block != 1)) ||
       (tx_dma_head_addr_[block] == 0U))
   {
-    return false;
+    return UartDmaTxStartResult::FAILED;
   }
 
-  auto* desc = LinkItemFromHeadAddr(tx_dma_head_addr_[block]);
+  auto* desc = DescriptorFromHeadAddr(tx_dma_head_addr_[block]);
   if (desc == nullptr)
   {
-    return false;
+    return UartDmaTxStartResult::FAILED;
   }
 
+  desc->dw0.owner = DMA_DESCRIPTOR_BUFFER_OWNER_CPU;
   desc->buffer = data;
   desc->dw0.size = static_cast<uint32_t>(size);
   desc->dw0.length = static_cast<uint32_t>(size);
   desc->dw0.err_eof = 0U;
   desc->dw0.suc_eof = 1U;
-  desc->dw0.owner = GDMA_OWNER_DMA;
   desc->next = nullptr;
-  std::atomic_thread_fence(std::memory_order_release);
 
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
-  if (!CacheSyncDmaBuffer(data, size, true))
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+  if (!CacheSyncDmaBuffer(data, size, true, tx_storage_.cache_line_size))
+  {
+    return UartDmaTxStartResult::FAILED;
+  }
+#endif
+
+  std::atomic_thread_fence(std::memory_order_release);
+  desc->dw0.owner = DMA_DESCRIPTOR_BUFFER_OWNER_DMA;
+
+  // Establish the UART TX_DONE generation boundary immediately before launch. CONFIG
+  // must preserve any TX_DONE raw bit raised after this point because that bit can be
+  // the only carrier that observes the UART FSM becoming idle.
+  uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_TX_DONE);
+  return (gdma_start(tx_dma_channel_, tx_dma_head_addr_[block]) == ESP_OK)
+             ? UartDmaTxStartResult::STARTED
+             : UartDmaTxStartResult::FAILED;
+}
+
+// RX_DONE is a level reminder, not an event count. Multiple descriptor completions can
+// coalesce into one status bit while the IRQ is masked, so drain consecutive CPU-owned
+// descriptors and return each one to DMA after copying its payload. One pass is bounded
+// to a full ring; a descriptor completed again during this pass raises another IRQ.
+bool IRAM_ATTR ESP32UartDma::DrainCompletedDmaRxDescriptors(bool& pushed_any)
+{
+  if ((rx_dma_descriptors_ == nullptr) || (rx_dma_chunk_size_ == 0U))
   {
     return false;
   }
-#endif
 
-  return gdma_start(tx_dma_channel_, tx_dma_head_addr_[block]) == ESP_OK;
-}
-
-// RX DMA completion can span multiple ring nodes, so consume at most one full
-// ring window per callback and advance the software node cursor in lockstep.
-// 一次 RX DMA 完成可能跨越多个环节点，因此每次回调最多消费一个完整环窗口，
-// 并同步推进软件节点游标。
-void IRAM_ATTR ESP32UART::PushDmaRxData(size_t recv_size, bool in_isr)
-{
-  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0))
+  bool success = true;
+  for (uint32_t consumed = 0U; consumed < DMA_RX_NODE_COUNT; ++consumed)
   {
-    return;
-  }
-
-  const size_t max_window = rx_dma_chunk_size_ * DMA_RX_NODE_COUNT;
-  size_t remaining = std::min(recv_size, max_window);
-
-  while (remaining > 0)
-  {
-    const size_t offset = static_cast<size_t>(rx_dma_node_index_) * rx_dma_chunk_size_;
-    const size_t chunk = std::min(remaining, rx_dma_chunk_size_);
-    auto* chunk_ptr = rx_dma_storage_ + offset;
-
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
-    if (!CacheSyncDmaBuffer(chunk_ptr, chunk, false))
+    auto& descriptor = rx_dma_descriptors_[rx_dma_node_index_];
+    if (descriptor.dw0.owner != DMA_DESCRIPTOR_BUFFER_OWNER_CPU)
     {
-      HandleDmaRxError();
-      return;
+      break;
+    }
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    auto* buffer = static_cast<uint8_t*>(descriptor.buffer);
+    const size_t length = descriptor.dw0.length;
+    if ((buffer == nullptr) || (length > rx_dma_chunk_size_))
+    {
+      success = false;
+      break;
+    }
+
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+    if (!CacheSyncDmaBuffer(buffer, length, false, rx_cache_line_size_))
+    {
+      success = false;
+      break;
     }
 #endif
-    PushRxBytes(chunk_ptr, chunk, in_isr);
-    remaining -= chunk;
+
+    if (length > 0U)
+    {
+      pushed_any = PushRxBytes(buffer, length) || pushed_any;
+    }
+
+    descriptor.dw0.length = static_cast<uint32_t>(rx_dma_chunk_size_);
+    descriptor.dw0.err_eof = 0U;
+    descriptor.dw0.suc_eof = 0U;
+    std::atomic_thread_fence(std::memory_order_release);
+    descriptor.dw0.owner = DMA_DESCRIPTOR_BUFFER_OWNER_DMA;
     rx_dma_node_index_ = (rx_dma_node_index_ + 1U) % DMA_RX_NODE_COUNT;
   }
+  return success;
 }
 
-// RX DMA completion either reports a full node or the final EOF-sized tail.
-// RX DMA 完成要么报告整节点，要么报告带 EOF 的尾段长度。
-void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data)
+UartDmaControlResult IRAM_ATTR ESP32UartDma::AdvanceRecovery(bool active_tx, bool in_isr)
 {
-  if ((rx_dma_storage_ == nullptr) || (rx_dma_chunk_size_ == 0))
-  {
-    return;
-  }
+  const UartOldTxTerminal terminal = StopAndResetDma(active_tx, in_isr);
 
-  if ((event_data != nullptr) && event_data->flags.abnormal_eof)
-  {
-    HandleDmaRxError();
-    return;
-  }
+  uart_hal_rxfifo_rst(&uart_hal_);
+  uart_hal_clr_intsts_mask(&uart_hal_, DMA_UART_ERROR_INTR_MASK);
+  return UartDmaControlResult::Completed(terminal);
+}
 
-  size_t recv_size = rx_dma_chunk_size_;
-  if ((event_data != nullptr) && event_data->flags.normal_eof)
+UartDmaControlProgress IRAM_ATTR ESP32UartDma::CompleteRecovery(bool in_isr)
+{
+  REQUIRE_FROM_CALLBACK(ResetAndRestartRxDma(), in_isr);
+  return UartDmaControlProgress::COMPLETED;
+}
+
+UartOldTxTerminal IRAM_ATTR ESP32UartDma::StopAndResetDma(bool active_tx, bool in_isr)
+{
+  using Model = UartDmaModel<ESP32UartDma, ExecutionPolicy>;
+  REQUIRE_FROM_CALLBACK(tx_dma_channel_ != nullptr, in_isr);
+  REQUIRE_FROM_CALLBACK(rx_dma_channel_ != nullptr, in_isr);
+
+  UartOldTxTerminal terminal = UartOldTxTerminal::NONE;
+  const auto classify_tx = [&terminal](uint32_t events)
   {
-    const size_t eof_size = gdma_link_count_buffer_size_till_eof(
-        rx_dma_link_, static_cast<int>(rx_dma_node_index_));
-    if (eof_size > 0)
+    if ((events & Model::EventMask(UartDmaEvent::ERROR)) != 0U)
     {
-      recv_size = eof_size;
+      terminal = UartOldTxTerminal::ERROR;
     }
-  }
+    else if ((events & Model::EventMask(UartDmaEvent::COMPLETE)) != 0U &&
+             terminal == UartOldTxTerminal::NONE)
+    {
+      terminal = UartOldTxTerminal::COMPLETE;
+    }
+  };
 
-  PushDmaRxData(recv_size, true);
-}
-
-// RX DMA recovery restarts the circular ring from node zero.
-// RX DMA 恢复会从节点零重新启动整个环。
-void IRAM_ATTR ESP32UART::HandleDmaRxError()
-{
-  if ((rx_dma_channel_ == nullptr) || (rx_dma_link_ == nullptr))
+  const uint32_t before_stop = ServiceDmaTxStatus(in_isr);
+  if (active_tx)
   {
-    return;
+    classify_tx(before_stop);
   }
-
-  gdma_stop(rx_dma_channel_);
-  gdma_reset(rx_dma_channel_);
-  rx_dma_node_index_ = 0;
-  (void)gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_));
-}
-
-// TX DMA recovery aborts the current hardware transfer before the common terminal
-// path advances a ready pending request.
-// TX DMA 恢复先中止当前硬件传输，再由公共终止路径推进 ready pending 请求。
-void IRAM_ATTR ESP32UART::HandleDmaTxError()
-{
-  if (tx_dma_channel_ != nullptr)
+  REQUIRE_FROM_CALLBACK(gdma_stop(tx_dma_channel_) == ESP_OK, in_isr);
+  REQUIRE_FROM_CALLBACK(gdma_stop(rx_dma_channel_) == ESP_OK, in_isr);
+  const uint32_t after_stop = ServiceDmaTxStatus(in_isr);
+  if (active_tx)
   {
-    gdma_stop(tx_dma_channel_);
-    gdma_reset(tx_dma_channel_);
+    classify_tx(after_stop);
   }
-  tx_dma_model_.OnTransferError(true);
+  REQUIRE_FROM_CALLBACK(gdma_reset(tx_dma_channel_) == ESP_OK, in_isr);
+  REQUIRE_FROM_CALLBACK(gdma_reset(rx_dma_channel_) == ESP_OK, in_isr);
+
+  // gdma_stop() issues the stop command but does not prove that the descriptor FSM has
+  // parked before the final status sample. NONE therefore means completion was not
+  // proven. The common model retains active and may replay it from byte zero.
+  gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
+                      UINT32_MAX);
+  (void)gdma_hal_read_intr_status(&tx_gdma_hal_, tx_gdma_channel_id_,
+                                  GDMA_CHANNEL_DIRECTION_TX, true);
+  gdma_hal_clear_intr(&rx_gdma_hal_, rx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_RX,
+                      UINT32_MAX);
+  (void)gdma_hal_read_intr_status(&rx_gdma_hal_, rx_gdma_channel_id_,
+                                  GDMA_CHANNEL_DIRECTION_RX, true);
+  return terminal;
 }
 
 }  // namespace LibXR
+
+#undef LIBXR_ESP_UHCI_RCC_ATOMIC
 
 #endif

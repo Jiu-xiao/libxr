@@ -94,11 +94,11 @@ ErrorCode WritePort::Stream::SubmitBuffered()
   ASSERT(owns_port_);
   ASSERT(buffered_size_ > 0);
 
+  // Publish the operation state before queued metadata can be consumed.
+  // metadata 被消费前先发布 operation 状态。
+  op_.MarkAsRunning();
   if (op_.type == WriteOperation::OperationType::BLOCK)
   {
-    // Publish the wait state before the queued metadata can be consumed.
-    // 元数据可能被消费前，先发布等待状态。
-    op_.MarkAsRunning();
     port_->busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
   }
 

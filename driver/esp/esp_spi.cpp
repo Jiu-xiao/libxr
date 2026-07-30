@@ -192,8 +192,8 @@ ErrorCode ESP32SPI::InitializeHardware()
     (void)__DECLARE_RCC_ATOMIC_ENV;
     spi_ll_enable_bus_clock(host_, true);
     spi_ll_reset_register(host_);
+    spi_ll_enable_clock(host_, true);
   }
-  spi_ll_enable_clock(host_, true);
   spi_ll_master_init(hw_);
 
   const spi_line_mode_t line_mode = {
@@ -216,7 +216,11 @@ ErrorCode ESP32SPI::InitializeHardware()
   hw_->user.usr_command = 0;
   hw_->user.usr_addr = 0;
 
-  spi_ll_set_clk_source(hw_, SPI_CLK_SRC_DEFAULT);
+  PERIPH_RCC_ATOMIC()
+  {
+    (void)__DECLARE_RCC_ATOMIC_ENV;
+    spi_ll_set_clk_source(hw_, SPI_CLK_SRC_DEFAULT);
+  }
   if (ResolveClockSource(source_clock_hz_) != ErrorCode::OK)
   {
     return ErrorCode::INIT_ERR;

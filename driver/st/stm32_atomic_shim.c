@@ -1,6 +1,24 @@
 #include "main.h"
 
-#if defined(STM32F0) || defined(STM32G0) || defined(STM32L0)
+#if defined(STM32C0) || defined(STM32F0) || defined(STM32G0) || defined(STM32L0) || \
+    defined(STM32U0)
+
+/* Single-core Cortex-M0/M0+ fallback: PRIMASK covers only one atomic load/store/RMW.
+ * This is not UART owner admission and is not valid for a shared-object SMP port. */
+static inline uint32_t atomic_enter(void)
+{
+  uint32_t primask_state = __get_PRIMASK();
+  __disable_irq();
+  return primask_state;
+}
+
+static inline void atomic_exit(uint32_t primask_state)
+{
+  if (primask_state == 0U)
+  {
+    __enable_irq();
+  }
+}
 
 /**
  * @brief  模拟实现 __atomic_compare_exchange_4 函数 / Simulate the
@@ -28,7 +46,7 @@ __atomic_compare_exchange_4(volatile void* ptr, void* expected, unsigned int des
   unsigned int expected_val = *(unsigned int*)expected;
   int result;
 
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   if (*addr == expected_val)
   {
     *addr = desired;
@@ -39,7 +57,7 @@ __atomic_compare_exchange_4(volatile void* ptr, void* expected, unsigned int des
     *(unsigned int*)expected = *addr;
     result = 0;
   }
-  __enable_irq();
+  atomic_exit(primask_state);
   return result;
 }
 
@@ -56,9 +74,9 @@ __attribute__((weak, used)) void __atomic_store_4(volatile void* ptr, unsigned i
   UNUSED(memorder);
 
   volatile unsigned int* addr = (volatile unsigned int*)ptr;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   *addr = val;
-  __enable_irq();
+  atomic_exit(primask_state);
 }
 
 /**
@@ -74,9 +92,9 @@ __attribute__((weak, used)) unsigned int __atomic_load_4(const volatile void* pt
 
   volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int val;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   val = *addr;
-  __enable_irq();
+  atomic_exit(primask_state);
   return val;
 }
 
@@ -95,10 +113,10 @@ __attribute__((weak, used)) unsigned int __atomic_exchange_4(volatile void* ptr,
 
   volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int old_val;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   old_val = *addr;
   *addr = val;
-  __enable_irq();
+  atomic_exit(primask_state);
   return old_val;
 }
 
@@ -117,10 +135,10 @@ __attribute__((weak, used)) unsigned int __atomic_fetch_add_4(volatile void* ptr
 
   volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int old_val;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   old_val = *addr;
   *addr = old_val + val;
-  __enable_irq();
+  atomic_exit(primask_state);
   return old_val;
 }
 
@@ -139,10 +157,10 @@ __attribute__((weak, used)) unsigned int __atomic_fetch_sub_4(volatile void* ptr
 
   volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int old_val;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   old_val = *addr;
   *addr = old_val - val;
-  __enable_irq();
+  atomic_exit(primask_state);
   return old_val;
 }
 
@@ -162,10 +180,10 @@ __attribute__((weak, used)) unsigned int __atomic_fetch_or_4(volatile void* ptr,
 
   volatile unsigned int* addr = (volatile unsigned int*)ptr;
   unsigned int old_val;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   old_val = *addr;
   *addr = old_val | val;
-  __enable_irq();
+  atomic_exit(primask_state);
   return old_val;
 }
 
@@ -184,10 +202,10 @@ __attribute__((weak, used)) unsigned char __atomic_exchange_1(volatile void* ptr
 
   volatile unsigned char* addr = (volatile unsigned char*)ptr;
   unsigned char old_val;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   old_val = *addr;
   *addr = val;
-  __enable_irq();
+  atomic_exit(primask_state);
   return old_val;
 }
 
@@ -204,9 +222,9 @@ __attribute__((weak, used)) void __atomic_store_1(volatile void* ptr, unsigned c
   UNUSED(memorder);
 
   volatile unsigned char* addr = (volatile unsigned char*)ptr;
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   *addr = val;
-  __enable_irq();
+  atomic_exit(primask_state);
 }
 
 /**
@@ -224,10 +242,10 @@ __attribute__((weak, used)) _Bool __atomic_test_and_set(volatile void* ptr, int 
   volatile unsigned char* addr = (volatile unsigned char*)ptr;
   _Bool old_val;
 
-  __disable_irq();
+  uint32_t primask_state = atomic_enter();
   old_val = *addr;
   *addr = 1;  // 设置为1
-  __enable_irq();
+  atomic_exit(primask_state);
 
   return old_val;
 }

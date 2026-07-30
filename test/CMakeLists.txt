@@ -57,6 +57,13 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
 )
 
+add_library(test_stm32_timebase_sampling OBJECT driver/st/test_stm32_timebase_sampling.cpp)
+target_compile_features(test_stm32_timebase_sampling PRIVATE cxx_std_20)
+target_include_directories(
+  test_stm32_timebase_sampling PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../driver/st
+)
+add_dependencies(test test_stm32_timebase_sampling)
+
 file(GLOB_RECURSE XR_TEST_PRINT_CONFIG_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/print_config/*.cpp"
 )

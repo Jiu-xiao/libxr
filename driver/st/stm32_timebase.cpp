@@ -1,5 +1,7 @@
 #include "stm32_timebase.hpp"
 
+#include "stm32_timebase_internal.hpp"
+
 using namespace LibXR;
 
 namespace
@@ -16,23 +18,19 @@ MicrosecondTimestamp GetSysTickMicroseconds()
 {
   do
   {
-    uint32_t tick_old = HAL_GetTick();
-    uint32_t cnt_old = SysTick->VAL;
-    uint32_t tick_new = HAL_GetTick();
-    uint32_t cnt_new = SysTick->VAL;
+    const uint32_t tick_before = HAL_GetTick();
+    const uint32_t counter_before = SysTick->VAL;
+    const bool exception_pending = (SCB->ICSR & SCB_ICSR_PENDSTSET_Msk) != 0U;
+    const uint32_t counter_after = SysTick->VAL;
+    const uint32_t tick_after = HAL_GetTick();
+    const uint64_t period_counts = static_cast<uint64_t>(SysTick->LOAD) + 1U;
 
-    const auto time_diff = tick_new - tick_old;
-    const uint32_t tick_load = SysTick->LOAD + 1U;
-    switch (time_diff)
+    const auto sample = STM32TimebaseInternal::ResolveSysTickSample(
+        tick_before, counter_before, exception_pending, counter_after, tick_after,
+        period_counts);
+    if (sample.stable)
     {
-      case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL + 1000ULL -
-                                    static_cast<uint64_t>(cnt_old) * 1000ULL / tick_load);
-      case 1:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL + 1000ULL -
-                                    static_cast<uint64_t>(cnt_new) * 1000ULL / tick_load);
-      default:
-        continue;
+      return MicrosecondTimestamp(sample.microseconds);
     }
   } while (true);
 }
@@ -44,25 +42,20 @@ MicrosecondTimestamp GetTimerMicroseconds(TIM_HandleTypeDef* htim)
 
   do
   {
-    uint32_t tick_old = HAL_GetTick();
-    uint32_t cnt_old = __HAL_TIM_GET_COUNTER(htim);
-    uint32_t tick_new = HAL_GetTick();
-    uint32_t cnt_new = __HAL_TIM_GET_COUNTER(htim);
+    const uint32_t tick_before = HAL_GetTick();
+    const uint32_t counter_before = __HAL_TIM_GET_COUNTER(htim);
+    const bool update_pending = __HAL_TIM_GET_FLAG(htim, TIM_FLAG_UPDATE) != 0U;
+    const uint32_t counter_after = __HAL_TIM_GET_COUNTER(htim);
+    const uint32_t tick_after = HAL_GetTick();
+    const uint64_t period_counts =
+        static_cast<uint64_t>(__HAL_TIM_GET_AUTORELOAD(htim)) + 1U;
 
-    const uint32_t autoreload = __HAL_TIM_GET_AUTORELOAD(htim) + 1U;
-    const uint32_t delta_ms = tick_new - tick_old;
-    switch (delta_ms)
+    const auto sample = STM32TimebaseInternal::ResolveUpCounterSample(
+        tick_before, counter_before, update_pending, counter_after, tick_after,
+        period_counts);
+    if (sample.stable)
     {
-      case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL +
-                                    static_cast<uint64_t>(cnt_old) * 1000ULL /
-                                        autoreload);
-      case 1:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL +
-                                    static_cast<uint64_t>(cnt_new) * 1000ULL /
-                                        autoreload);
-      default:
-        continue;
+      return MicrosecondTimestamp(sample.microseconds);
     }
   } while (true);
 }

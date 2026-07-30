@@ -4,31 +4,34 @@
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
 #include "ch32_uart_def.hpp"
-#include "latest_snapshot.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 #include "model/uart_circular_dma_rx_model.hpp"
-#include "model/uart_dma_tx_model.hpp"
-#include "model/uart_rx_config_gate.hpp"
+#include "model/uart_dma_model.hpp"
+#include "model/uart_execution_policy.hpp"
 #include "uart.hpp"
 
 namespace LibXR
 {
 
 /**
- * @brief CH32 UART 驱动实现 / CH32 UART driver implementation
- * @warning 使用循环 RX DMA 时，USART/UART IDLE 中断与对应 RX DMA HT/TC 中断必须配置为
- * 相同的抢占优先级。本驱动依赖该优先级契约保证所有 RX 事件入口不重入，使 RX model
- * 保持唯一 producer。
- * When circular RX DMA is enabled, the USART/UART IDLE IRQ and its RX DMA HT/TC IRQ must
- * use the same preemption priority and, on multicore devices, the same target core. This
- * keeps all RX event entries one logical producer; runtime configuration may execute on
- * another core and is coordinated separately by `UartRxConfigGate`.
+ * @brief CH32 UART driver implementation.
+ *
+ * This backend supports the current CH32V20x/V30x BSPs (V203/V307). The IRQ handlers
+ * inspect and acknowledge their peripheral/DMA status before publishing coalesced TX
+ * facts into the same serialized service used by Write() and SetConfig(). Owner
+ * admission neither masks this instance's IRQ sources nor disables global interrupts.
+ * CONFIG/ERROR may disable TC/HT/TE/IDLE only while actually stopping the data path.
+ * Normal TX DMA completion advances the buffered TX model immediately. Destructive
+ * CONFIG waits asynchronously for the USART transmission-complete flag before resetting
+ * the peripheral, using the USART TC IRQ as its service carrier.
+ * The BSP must keep the related UART, TX-DMA, and RX-DMA IRQs on one owner core at the
+ * same preemption priority.
  */
 class CH32UART : public UART
 {
   friend class UartCircularDmaRxModel;
-  friend class UartDmaTxModel<CH32UART>;
+  friend class UartDmaModel<CH32UART, UartDirectPolicy>;
 
  public:
   /**
@@ -39,6 +42,11 @@ class CH32UART : public UART
            uint32_t pin_remap = 0, uint32_t tx_queue_size = 5,
            UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
+  /**
+   * @return `BUSY` while an earlier configuration request is outstanding.
+   * @warning Do not call from this UART's callbacks or from an ISR that can preempt its
+   * UART/TX-DMA/RX-DMA IRQ domain.
+   */
   ErrorCode SetConfig(UART::Configuration config);
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
@@ -46,7 +54,7 @@ class CH32UART : public UART
 
   void TxDmaIRQHandler();
   void RxDmaIRQHandler();
-  void OnRxDataAvailable(bool in_isr);
+  void UartIRQHandler();
 
   ch32_uart_id_t id_;
   uint16_t uart_mode_;
@@ -54,10 +62,9 @@ class CH32UART : public UART
   ReadPort _read_port;
   WritePort _write_port;
 
-  LatestSnapshot<UART::Configuration> requested_config_;
-  UartRxConfigGate rx_config_gate_;
+  UartDirectPolicy execution_policy_;
   UartCircularDmaRxModel rx_dma_model_;
-  UartDmaTxModel<CH32UART> tx_dma_model_;
+  UartDmaModel<CH32UART, UartDirectPolicy> dma_model_;
 
   USART_TypeDef* instance_;
   DMA_Channel_TypeDef* dma_rx_channel_;
@@ -66,13 +73,30 @@ class CH32UART : public UART
   static CH32UART* map_[CH32_UART_NUMBER];
 
  private:
-  void OnConfigRequested() { rx_config_gate_.RequestConfig(); }
-  bool ApplyPendingConfig(bool in_isr);
-  bool OnConfigApplied(bool)
-  {
-    rx_config_gate_.LeaveConfig();
-    return true;
-  }
+  [[nodiscard]] ErrorCode ValidateConfig(UART::Configuration config) const;
+  UartDmaControlResult AdvanceConfig(UART::Configuration config, bool active_tx,
+                                     bool in_isr);
+  UartDmaControlProgress CompleteConfig(bool in_isr);
+
+  static bool InIsr();
+
+  void HandleNormalIrq();
+
+  uint32_t ScanNormalIrqStatus(bool in_isr, bool& pushed_any);
+
+  UartDmaControlResult AdvanceRecovery(bool active_tx, bool in_isr);
+  UartDmaControlProgress CompleteRecovery(bool in_isr);
+
+  void SetDataPathInterrupts(bool enabled);
+
+  UartOldTxTerminal StopDataPath(bool active_tx, bool in_isr);
+
+  void StartDataPath();
+
+  void ApplyConfigPayload(UART::Configuration config, bool in_isr);
+
+  bool config_waiting_for_tx_idle_ = false;
+  UartOldTxTerminal config_tx_terminal_ = UartOldTxTerminal::NONE;
 
   /**
    * @brief 配置并启动 CH32 UART 循环 RX DMA 通道 / Configure and start the CH32 UART
@@ -80,12 +104,7 @@ class CH32UART : public UART
    * @param data DMA 可写的接收缓冲区 / DMA-writable receive buffer
    * @param size 接收缓冲区字节数 / Receive buffer capacity in bytes
    */
-  void StartCircularDmaRx(uint8_t* data, size_t size)
-  {
-    dma_rx_channel_->MADDR = reinterpret_cast<uint32_t>(data);
-    dma_rx_channel_->CNTR = size;
-    DMA_Cmd(dma_rx_channel_, ENABLE);
-  }
+  void StartCircularDmaRx(uint8_t* data, size_t size);
 
   /**
    * @brief 获取 CH32 RX DMA 剩余传输计数 / Get the CH32 RX DMA remaining count
@@ -109,9 +128,9 @@ class CH32UART : public UART
    * @param size 载荷字节数 / Payload size in bytes
    * @param block active 双缓冲块索引，CH32 DMA 不使用 / Active double-buffer block index,
    * unused by CH32 DMA
-   * @return DMA 通道启用后返回 true / True after the DMA channel is enabled
+   * @return `STARTED` after enabling DMA
    */
-  bool StartDmaTx(uint8_t* data, size_t size, int block);
+  UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block, bool in_isr);
 };
 
 }  // namespace LibXR
