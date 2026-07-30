@@ -213,7 +213,14 @@ ErrorCode ESP32I2C::ApplyConfig()
     return ErrorCode::ARG_ERR;
   }
 
-  i2c_ll_set_source_clk(hal_.dev, I2C_CLK_SRC_DEFAULT);
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif
+  PERIPH_RCC_ATOMIC() { i2c_ll_set_source_clk(hal_.dev, I2C_CLK_SRC_DEFAULT); }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
   if (ResolveClockSource(source_clock_hz_) != ErrorCode::OK)
   {
     return ErrorCode::INIT_ERR;

@@ -29,12 +29,14 @@ class UartDirectPolicy
   }
 
   /**
-   * @brief Read/ack one single-core IRQ source, then publish its service events.
+   * @brief Quiesce/read/ack one single-core IRQ source, then publish its events.
    *
-   * Direct backends do not need raw-IRQ admission because the IRQ and normal caller
-   * cannot execute simultaneously on different cores. Reading the level source first
-   * also prevents an owner-preempting IRQ from repeatedly retriggering while the owner
-   * is unable to resume.
+   * Direct backends do not need raw-IRQ owner admission because the IRQ and normal
+   * caller cannot execute simultaneously on different cores. A condition-triggered
+   * source that can immediately reassert must nevertheless be masked or otherwise made
+   * one-shot by `source` before publication, then re-armed by `handler` if work remains.
+   * Acknowledgement alone is insufficient when the IRQ preempts an existing owner: the
+   * handler is deferred, so repeated IRQ entry could prevent that owner from resuming.
    */
   template <typename Source, typename Handler>
   bool InvokeIrq(Source&& source, Handler&& handler) noexcept

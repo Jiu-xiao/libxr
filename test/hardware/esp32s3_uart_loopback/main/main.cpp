@@ -8,29 +8,75 @@
 #include "driver/uart_concurrency_stress_test.hpp"
 #include "driver/uart_loopback_test.hpp"
 #include "esp_timebase.hpp"
+#if (defined(LIBXR_ESP_UART_TEST_BACKEND_DMA) + \
+     defined(LIBXR_ESP_UART_TEST_BACKEND_FIFO)) != 1
+#error "Select exactly one ESP UART hardware-test backend."
+#elif defined(LIBXR_ESP_UART_TEST_BACKEND_DMA)
 #include "esp_uart.hpp"
+#else
+#include "esp_uart_fifo.hpp"
+#include "esp_uart_fifo_test.hpp"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 
-#if !defined(CONFIG_IDF_TARGET_ESP32S3)
-#error "This hardware runner currently supports ESP32-S3 only."
+#ifndef LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION
+#error "The hardware runner requires an explicit execution-policy expectation."
 #endif
 
+#if !defined(CONFIG_IDF_TARGET_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32H2)
+#error "This hardware runner supports ESP32, ESP32-S3, ESP32-C3, and ESP32-H2."
+#endif
+
+#if defined(LIBXR_ESP_UART_TEST_BACKEND_DMA)
 #if !LIBXR_ESP_UART_HAS_AHB_GDMA
 #error "ESP32-S3 UART loopback requires the UHCI/AHB-GDMA backend."
+#endif
 #endif
 
 namespace
 {
 
-constexpr uart_port_t kUart = UART_NUM_2;
-constexpr int kTxPin = 1;
-constexpr int kRxPin = 2;
+struct TargetTraits
+{
+  const char* board_name;
+  uart_port_t uart;
+  int tx_pin;
+  int rx_pin;
+  bool irq_serialization;
+  bool has_second_core;
+};
+
+#if defined(CONFIG_IDF_TARGET_ESP32)
+constexpr TargetTraits kTarget = {"ESP32", UART_NUM_2, 17, 16, true, true};
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+constexpr TargetTraits kTarget = {"ESP32S3", UART_NUM_2, 1, 2, true, true};
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+constexpr TargetTraits kTarget = {"ESP32C3", UART_NUM_0, 21, 20, false, false};
+#else
+constexpr TargetTraits kTarget = {"ESP32H2", UART_NUM_0, 24, 23, false, false};
+#endif
+static_assert(SOC_UART_NUM >= 2, "The FIFO CONFIG observer requires UART1.");
+
+constexpr bool kConfiguredIrqSerialization =
+    static_cast<bool>(LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION);
+constexpr bool kActualIrqSerialization = LibXR::Detail::ESP_UART_USES_IRQ_SERIALIZATION;
+static_assert(kConfiguredIrqSerialization == kTarget.irq_serialization);
+static_assert(kActualIrqSerialization == kTarget.irq_serialization);
+static_assert(static_cast<bool>(LIBXR_SINGLE_CORE) != kTarget.irq_serialization);
+
+constexpr const char* PolicyName(bool irq_serialization)
+{
+  return irq_serialization ? "IrqSerializedPolicy" : "DirectPolicy";
+}
+
 constexpr size_t kRxQueueSize = 16384U;
 constexpr size_t kMaxFrameSize = 4095U;
-// ESP32UartDma uses this value for both the public byte queue and each DMA-buffer half.
-// Two max-size frames make the batch-depth-two case independent of owner scheduling.
+// Both backends use this as public TX queue capacity. The DMA backend also uses it
+// for each DMA-buffer half. Two max-size frames keep batch depth two independent of
+// owner scheduling.
 constexpr size_t kTxBufferSize = kMaxFrameSize * 2U;
 constexpr uint32_t kTxQueueDepth = 48U;
 constexpr uint32_t kOperationTimeoutMs = 2000U;
@@ -53,6 +99,14 @@ constexpr uint32_t kStressTaskStackSize = 8192U;
 constexpr EventBits_t kWriterWrapperDone = EventBits_t{1U << 0U};
 constexpr EventBits_t kConfiguratorWrapperDone = EventBits_t{1U << 1U};
 
+#if defined(LIBXR_ESP_UART_TEST_BACKEND_DMA)
+using TestUart = LibXR::ESP32UartDma;
+constexpr char kBackendName[] = "DMA";
+#else
+using TestUart = LibXR::ESP32UartFifo;
+constexpr char kBackendName[] = "FIFO";
+#endif
+
 constexpr LibXR::UART::Configuration kInitialConfig = {
     921600U, LibXR::UART::Parity::NO_PARITY, 8U, 1U};
 
@@ -68,6 +122,9 @@ constexpr std::array<size_t, 9> kFrameSizes = {1U,   31U,   32U,   511U, 512U,
 
 alignas(16) std::array<uint8_t, kMaxFrameSize * 2U> g_tx_scratch{};
 alignas(16) std::array<uint8_t, kMaxFrameSize * 2U> g_rx_scratch{};
+#if defined(LIBXR_ESP_UART_TEST_BACKEND_FIFO)
+alignas(16) std::array<uint8_t, kRxQueueSize> g_fifo_rx_scratch{};
+#endif
 
 struct SuiteResult
 {
@@ -472,12 +529,13 @@ StressDirectionResult RunStressDirection(LibXR::UART& uart, uint32_t direction,
   }
   PrintStressRecoveryResult(direction, result);
 
-  std::printf(
-      "[UART_CONFIG_STRESS_DIRECTION_FINAL] direction=%" PRIu32
-      " writer_core=%d config_core=%d stress=%s barrier=%s recovery=%s all=%s\n",
-      direction, writer_core, configurator_core, result.StressPassed() ? "PASS" : "FAIL",
-      result.barrier_ran && result.barrier.Passed() ? "PASS" : "FAIL",
-      result.RecoveryPassed() ? "PASS" : "FAIL", result.Passed() ? "PASS" : "FAIL");
+  std::printf("[UART_CONFIG_STRESS_DIRECTION_FINAL] backend=%s direction=%" PRIu32
+              " writer_core=%d config_core=%d stress=%s barrier=%s recovery=%s all=%s\n",
+              kBackendName, direction, writer_core, configurator_core,
+              result.StressPassed() ? "PASS" : "FAIL",
+              result.barrier_ran && result.barrier.Passed() ? "PASS" : "FAIL",
+              result.RecoveryPassed() ? "PASS" : "FAIL",
+              result.Passed() ? "PASS" : "FAIL");
   std::fflush(stdout);
   return result;
 }
@@ -491,6 +549,49 @@ const char* TestStatus(bool ran, bool passed)
   return passed ? "PASS" : "FAIL";
 }
 
+#if defined(LIBXR_ESP_UART_TEST_BACKEND_FIFO)
+void PrintFifoPartialConfigResult(const LibXRTest::EspUartFifoPartialConfigResult& result)
+{
+  std::printf(
+      "[UART_FIFO_PARTIAL_CONFIG] status=%s failure=%s error=%d queued=%u "
+      "callback_count=%" PRIu32
+      " callback_error=%d config=%d overlap=%d "
+      "observer_bytes=%u mismatch=%u trailing=%u "
+      "retirement=%s recovery=%s elapsed_us=%" PRIu64 "\n",
+      result.Passed() ? "PASS" : "FAIL",
+      LibXRTest::EspUartFifoPartialConfigFailureName(result.failure),
+      static_cast<int>(result.error), static_cast<unsigned>(result.queued_after_submit),
+      result.callback_count, static_cast<int>(result.callback_error),
+      static_cast<int>(result.first_config_result),
+      static_cast<int>(result.overlapping_config_result),
+      static_cast<unsigned>(result.observer_bytes),
+      static_cast<unsigned>(result.observer_mismatch_offset),
+      static_cast<unsigned>(result.observer_unexpected_bytes),
+      result.retirement.Passed() ? "PASS" : "FAIL",
+      result.recovery.Passed() ? "PASS" : "FAIL", result.elapsed_us);
+  std::fflush(stdout);
+}
+
+void PrintFifoBackpressureResult(const LibXRTest::EspUartFifoRxBackpressureResult& result)
+{
+  std::printf(
+      "[UART_FIFO_RX_BACKPRESSURE] status=%s failure=%s error=%d queued=%u "
+      "fifo_tail=%u rx_ena_full=0x%08" PRIX32 " rx_ena_resumed=0x%08" PRIX32
+      " raw=0x%08" PRIX32
+      " verified=%u precondition=%s recovery=%s "
+      "elapsed_us=%" PRIu64 "\n",
+      result.Passed() ? "PASS" : "FAIL",
+      LibXRTest::EspUartFifoRxBackpressureFailureName(result.failure),
+      static_cast<int>(result.error), static_cast<unsigned>(result.queued_at_saturation),
+      static_cast<unsigned>(result.fifo_tail_bytes), result.rx_interrupts_when_full,
+      result.rx_interrupts_after_resume, result.raw_status_at_saturation,
+      static_cast<unsigned>(result.verified_bytes),
+      result.precondition.Passed() ? "PASS" : "FAIL",
+      result.recovery.Passed() ? "PASS" : "FAIL", result.elapsed_us);
+  std::fflush(stdout);
+}
+#endif
+
 }  // namespace
 
 extern "C" void app_main(void)
@@ -499,15 +600,17 @@ extern "C" void app_main(void)
   LibXR::PlatformInit();
 
   std::printf(
-      "\n[UART_LOOPBACK_START] board=ESP32S3 uart=%d tx=%d rx=%d "
-      "constructor_core=%d\n",
-      static_cast<int>(kUart), kTxPin, kRxPin, xPortGetCoreID());
+      "\n[UART_LOOPBACK_START] board=%s backend=%s uart=%d tx=%d rx=%d "
+      "policy_expected=%s policy_actual=%s topology=%s constructor_core=%d\n",
+      kTarget.board_name, kBackendName, static_cast<int>(kTarget.uart), kTarget.tx_pin,
+      kTarget.rx_pin, PolicyName(kTarget.irq_serialization),
+      PolicyName(kActualIrqSerialization),
+      kTarget.has_second_core ? "dual-core" : "single-core", xPortGetCoreID());
   std::fflush(stdout);
 
-  static LibXR::ESP32UartDma uart(kUart, kTxPin, kRxPin,
-                                  LibXR::ESP32UartDma::PIN_NO_CHANGE,
-                                  LibXR::ESP32UartDma::PIN_NO_CHANGE, kRxQueueSize,
-                                  kTxBufferSize, kTxQueueDepth, kInitialConfig);
+  static TestUart uart(kTarget.uart, kTarget.tx_pin, kTarget.rx_pin,
+                       TestUart::PIN_NO_CHANGE, TestUart::PIN_NO_CHANGE, kRxQueueSize,
+                       kTxBufferSize, kTxQueueDepth, kInitialConfig);
 
   const SuiteResult same_core_result = RunSuite(uart);
 
@@ -517,54 +620,132 @@ extern "C" void app_main(void)
       {},
   };
   BaseType_t create_result = pdFAIL;
-  if (same_core_result.Passed())
+  if constexpr (kTarget.has_second_core)
   {
-    create_result =
-        xTaskCreatePinnedToCore(CrossCoreTask, "uart_loop_core1", 8192U,
-                                &cross_core_context, tskIDLE_PRIORITY + 2U, nullptr, 1);
+    if (same_core_result.Passed())
+    {
+      create_result =
+          xTaskCreatePinnedToCore(CrossCoreTask, "uart_loop_core1", 8192U,
+                                  &cross_core_context, tskIDLE_PRIORITY + 2U, nullptr, 1);
+    }
   }
 
   bool cross_core_completed = false;
   SuiteResult cross_core_result{};
-  if (create_result == pdPASS)
+  if constexpr (kTarget.has_second_core)
   {
-    cross_core_completed =
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kCrossCoreTimeoutMs)) == 1U;
-    if (cross_core_completed)
+    if (create_result == pdPASS)
     {
-      cross_core_result = cross_core_context.result;
+      cross_core_completed =
+          ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kCrossCoreTimeoutMs)) == 1U;
+      if (cross_core_completed)
+      {
+        cross_core_result = cross_core_context.result;
+      }
     }
   }
 
-  const bool controls_passed =
-      same_core_result.Passed() && cross_core_completed && cross_core_result.Passed();
+  const bool cross_core_passed =
+      !kTarget.has_second_core ||
+      (create_result == pdPASS && cross_core_completed && cross_core_result.Passed());
+  const bool controls_passed = same_core_result.Passed() && cross_core_passed;
+  bool fifo_partial_ran = false;
+  bool fifo_partial_passed = true;
+  bool fifo_backpressure_ran = false;
+  bool fifo_backpressure_passed = true;
+#if defined(LIBXR_ESP_UART_TEST_BACKEND_FIFO)
+  LibXRTest::EspUartFifoPartialConfigResult fifo_partial_result{};
+  LibXRTest::EspUartFifoRxBackpressureResult fifo_backpressure_result{};
+  if (controls_passed)
+  {
+    const LibXRTest::EspUartFifoPartialConfigCase partial_case = {
+        .observer_uart_num = UART_NUM_1,
+        .observer_rx_pin = kTarget.tx_pin,
+        .initial_config = kConfigurations[0U],
+        .requested_config = kConfigurations[1U],
+        .overlapping_config = kConfigurations[2U],
+        .final_config = kInitialConfig,
+        .frame_size = kMaxFrameSize,
+        .operation_timeout_ms = 5000U,
+        .callback_quiet_time_ms = 20U,
+        .rx_quiet_time_ms = kRxQuietTimeMs,
+        .pattern_seed = 0xF1F0C001U,
+    };
+    fifo_partial_ran = true;
+    fifo_partial_result = LibXRTest::RunEspUartFifoPartialConfigTest(
+        uart, partial_case, {g_tx_scratch.data(), g_tx_scratch.size()},
+        {g_rx_scratch.data(), g_rx_scratch.size()});
+    fifo_partial_passed = fifo_partial_result.Passed();
+    PrintFifoPartialConfigResult(fifo_partial_result);
+  }
+
+  if (fifo_partial_passed && fifo_partial_ran)
+  {
+    const LibXRTest::EspUartFifoRxBackpressureCase backpressure_case = {
+        .uart_num = kTarget.uart,
+        .config = kConfigurations[2U],
+        .recovery_config = kInitialConfig,
+        .rx_queue_size = kRxQueueSize,
+        .retained_fifo_bytes = 64U,
+        .write_chunk_size = kMaxFrameSize,
+        .operation_timeout_ms = 5000U,
+        .rx_quiet_time_ms = kRxQuietTimeMs,
+        .pattern_seed = 0xF1F0B001U,
+    };
+    fifo_backpressure_ran = true;
+    fifo_backpressure_result = LibXRTest::RunEspUartFifoRxBackpressureTest(
+        uart, backpressure_case, {g_tx_scratch.data(), g_tx_scratch.size()},
+        {g_fifo_rx_scratch.data(), g_fifo_rx_scratch.size()});
+    fifo_backpressure_passed = fifo_backpressure_result.Passed();
+    PrintFifoBackpressureResult(fifo_backpressure_result);
+  }
+#endif
+  const bool fifo_specific_passed = fifo_partial_passed && fifo_backpressure_passed &&
+#if defined(LIBXR_ESP_UART_TEST_BACKEND_FIFO)
+                                    fifo_partial_ran && fifo_backpressure_ran;
+#else
+                                    true;
+#endif
   bool stress_direction_0_ran = false;
   bool stress_direction_1_ran = false;
   StressDirectionResult stress_direction_0{};
   StressDirectionResult stress_direction_1{};
-  if (controls_passed)
+  if (controls_passed && fifo_specific_passed)
   {
     stress_direction_0_ran = true;
-    stress_direction_0 = RunStressDirection(uart, 0U, 0, 1);
-    if (stress_direction_0.RecoveryPassed())
+    stress_direction_0 = RunStressDirection(uart, 0U, 0, kTarget.has_second_core ? 1 : 0);
+    if constexpr (kTarget.has_second_core)
     {
-      stress_direction_1_ran = true;
-      stress_direction_1 = RunStressDirection(uart, 1U, 1, 0);
+      if (stress_direction_0.RecoveryPassed())
+      {
+        stress_direction_1_ran = true;
+        stress_direction_1 = RunStressDirection(uart, 1U, 1, 0);
+      }
     }
   }
 
-  const bool all_passed = controls_passed && stress_direction_0_ran &&
-                          stress_direction_0.Passed() && stress_direction_1_ran &&
-                          stress_direction_1.Passed();
+  const bool stress_direction_1_passed =
+      !kTarget.has_second_core || (stress_direction_1_ran && stress_direction_1.Passed());
+  const bool all_passed = controls_passed && fifo_specific_passed &&
+                          stress_direction_0_ran && stress_direction_0.Passed() &&
+                          stress_direction_1_passed;
   std::printf(
-      "[UART_LOOPBACK_FINAL] board=ESP32S3 uart=%d tx=%d rx=%d "
-      "same_core=%s same_cases=%" PRIu32 " cross_core=%s cross_cases=%" PRIu32
-      " task_create=%s stress_0=%s stress_0_recovery=%s stress_1=%s"
-      " stress_1_recovery=%s all=%s\n",
-      static_cast<int>(kUart), kTxPin, kRxPin,
+      "[UART_LOOPBACK_FINAL] board=%s backend=%s uart=%d tx=%d rx=%d "
+      "policy_expected=%s policy_actual=%s topology=%s same_core=%s "
+      "same_cases=%" PRIu32 " cross_core=%s cross_cases=%" PRIu32
+      " task_create=%s fifo_partial=%s fifo_backpressure=%s stress_0=%s "
+      "stress_0_recovery=%s stress_1=%s "
+      "stress_1_recovery=%s all=%s\n",
+      kTarget.board_name, kBackendName, static_cast<int>(kTarget.uart), kTarget.tx_pin,
+      kTarget.rx_pin, PolicyName(kTarget.irq_serialization),
+      PolicyName(kActualIrqSerialization),
+      kTarget.has_second_core ? "dual-core" : "single-core",
       same_core_result.Passed() ? "PASS" : "FAIL", same_core_result.completed_cases,
-      cross_core_completed && cross_core_result.Passed() ? "PASS" : "FAIL",
-      cross_core_result.completed_cases, create_result == pdPASS ? "PASS" : "FAIL",
+      TestStatus(kTarget.has_second_core, cross_core_passed),
+      cross_core_result.completed_cases,
+      TestStatus(kTarget.has_second_core, create_result == pdPASS),
+      TestStatus(fifo_partial_ran, fifo_partial_passed),
+      TestStatus(fifo_backpressure_ran, fifo_backpressure_passed),
       TestStatus(stress_direction_0_ran, stress_direction_0.StressPassed()),
       TestStatus(stress_direction_0_ran, stress_direction_0.RecoveryPassed()),
       TestStatus(stress_direction_1_ran, stress_direction_1.StressPassed()),
