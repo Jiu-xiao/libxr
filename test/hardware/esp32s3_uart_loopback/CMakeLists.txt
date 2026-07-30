@@ -21,18 +21,6 @@ if(NOT LIBXR_ESP_UART_TEST_BACKEND MATCHES "^(FIFO|DMA)$")
   )
 endif()
 
-if(LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION)
-  set(LIBXR_SINGLE_CORE
-      OFF
-      CACHE BOOL "" FORCE
-  )
-else()
-  set(LIBXR_SINGLE_CORE
-      ON
-      CACHE BOOL "" FORCE
-  )
-endif()
-
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD OFF)
 idf_build_set_property(

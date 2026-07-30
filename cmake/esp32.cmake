@@ -3,6 +3,18 @@ set(LIBXR_SYSTEM freertos)
 set(LIBXR_DRIVER esp)
 set(LIBXR_STATIC_BUILD ON)
 
+if(NOT DEFINED CONFIG_SOC_CPU_CORES_NUM)
+  message(FATAL_ERROR "ESP-IDF did not publish CONFIG_SOC_CPU_CORES_NUM")
+endif()
+
+if(NOT DEFINED LIBXR_SINGLE_CORE)
+  if(CONFIG_SOC_CPU_CORES_NUM GREATER 1 AND NOT CONFIG_FREERTOS_UNICORE)
+    set(LIBXR_SINGLE_CORE OFF)
+  else()
+    set(LIBXR_SINGLE_CORE ON)
+  endif()
+endif()
+
 if(NOT TARGET xr)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_BINARY_DIR}/libxr_build)
 endif()
