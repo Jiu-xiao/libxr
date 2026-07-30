@@ -15,9 +15,9 @@
 #include "freertos/task.h"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
-#include "model/uart_dma_model.hpp"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
+#include "uart/uart_dma_model.hpp"
 
 #if defined(SOC_AHB_GDMA_SUPPORTED) && SOC_AHB_GDMA_SUPPORTED && \
     defined(SOC_UHCI_SUPPORTED) && SOC_UHCI_SUPPORTED

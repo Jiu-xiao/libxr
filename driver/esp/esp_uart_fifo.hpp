@@ -14,8 +14,8 @@
 #include "freertos/task.h"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
-#include "model/uart_rx_config_gate.hpp"
 #include "uart.hpp"
+#include "uart/uart_rx_config_gate.hpp"
 
 namespace LibXR
 {

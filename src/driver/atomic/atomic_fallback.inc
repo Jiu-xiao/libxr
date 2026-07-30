@@ -1,10 +1,24 @@
-#pragma once
+/**
+ * @file atomic_fallback.inc
+ * @brief Compiler atomic fallback implementation for one interrupt domain.
+ *
+ * Include this fragment exactly once from a platform C file after defining:
+ * - `libxr_atomic_fallback_guard_state_t`;
+ * - `libxr_atomic_fallback_enter()`, `libxr_atomic_fallback_exit()`, and
+ *   `libxr_atomic_fallback_fence()`;
+ * - `LIBXR_ATOMIC_FALLBACK_ATTRIBUTES`;
+ * - one or more `LIBXR_ATOMIC_FALLBACK_*` operation selectors.
+ *
+ * Atomicity covers maskable thread and interrupt contexts on one CPU. It does not cover
+ * another CPU, NMI/HardFault, or DMA bus masters. Every requested memory order is
+ * conservatively implemented with sequential consistency.
+ */
 
 #if !defined(LIBXR_ATOMIC_FALLBACK_ATTRIBUTES)
 #error "Define LIBXR_ATOMIC_FALLBACK_ATTRIBUTES before including this file"
 #endif
 
-#if !defined(LIBXR_ATOMIC_FALLBACK_FULL) &&               \
+#if !defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) &&     \
     !defined(LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4) && \
     !defined(LIBXR_ATOMIC_FALLBACK_EXCHANGE_1)
 #error "Select at least one atomic fallback operation"
@@ -15,9 +29,8 @@ _Static_assert(sizeof(unsigned int) == 4U,
 
 typedef unsigned int libxr_atomic_fallback_u32_t __attribute__((may_alias));
 
-/* GCC permits a runtime helper to ignore a weaker requested order when it provides
- * seq_cst semantics. Two unconditional platform fences keep this fallback small and
- * make its ordering independent of compiler-specific memory-order encodings. */
+/* GCC permits a runtime helper to implement a weaker request as seq_cst. The two
+ * platform fences also avoid depending on compiler-specific memory-order encodings. */
 static inline void libxr_atomic_fallback_before(int memorder)
 {
   (void)memorder;
@@ -30,11 +43,11 @@ static inline void libxr_atomic_fallback_after(int memorder)
   libxr_atomic_fallback_fence();
 }
 
-#if defined(LIBXR_ATOMIC_FALLBACK_FULL) || \
+#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) || \
     defined(LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4)
-/* The sized libatomic helper is always strong and therefore omits the builtin's weak
- * argument. Use an assembler label so the compiler does not compare this five-argument
- * runtime ABI against its six-argument source builtin declaration. */
+/* The sized libatomic helper is always a strong CAS and omits the source builtin's weak
+ * argument. The assembler label keeps its five-argument runtime ABI separate from the
+ * six-argument builtin declaration. */
 LIBXR_ATOMIC_FALLBACK_ATTRIBUTES _Bool libxr_atomic_fallback_compare_exchange_4(
     volatile void* ptr, void* expected, unsigned int desired, int success_memorder,
     int failure_memorder) __asm__("__atomic_compare_exchange_4");
@@ -68,7 +81,7 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES _Bool libxr_atomic_fallback_compare_exchange_4(
 }
 #endif
 
-#if defined(LIBXR_ATOMIC_FALLBACK_FULL)
+#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS)
 LIBXR_ATOMIC_FALLBACK_ATTRIBUTES void __atomic_store_4(volatile void* ptr,
                                                        unsigned int desired, int memorder)
 {
@@ -161,7 +174,8 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES unsigned int __atomic_fetch_or_4(volatile void*
 }
 #endif
 
-#if defined(LIBXR_ATOMIC_FALLBACK_FULL) || defined(LIBXR_ATOMIC_FALLBACK_EXCHANGE_1)
+#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) || \
+    defined(LIBXR_ATOMIC_FALLBACK_EXCHANGE_1)
 LIBXR_ATOMIC_FALLBACK_ATTRIBUTES unsigned char __atomic_exchange_1(volatile void* ptr,
                                                                    unsigned char desired,
                                                                    int memorder)
@@ -178,7 +192,7 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES unsigned char __atomic_exchange_1(volatile void
 }
 #endif
 
-#if defined(LIBXR_ATOMIC_FALLBACK_FULL)
+#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS)
 LIBXR_ATOMIC_FALLBACK_ATTRIBUTES void __atomic_store_1(volatile void* ptr,
                                                        unsigned char desired,
                                                        int memorder)
@@ -208,3 +222,8 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES _Bool __atomic_test_and_set(volatile void* ptr,
 }
 #endif
 #endif
+
+#undef LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS
+#undef LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4
+#undef LIBXR_ATOMIC_FALLBACK_EXCHANGE_1
+#undef LIBXR_ATOMIC_FALLBACK_ATTRIBUTES

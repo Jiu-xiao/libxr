@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <utility>
 
-#include "serialized_service.hpp"
+#include "driver/common/serialized_service.hpp"
 
 namespace LibXR
 {

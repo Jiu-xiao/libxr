@@ -33,4 +33,4 @@ static inline void libxr_atomic_fallback_fence(void)
 #define LIBXR_ATOMIC_FALLBACK_ATTRIBUTES __attribute__((used, noinline))
 #define LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4
 #define LIBXR_ATOMIC_FALLBACK_EXCHANGE_1
-#include "../common/atomic_fallback_impl.h"
+#include "driver/atomic/atomic_fallback.inc"

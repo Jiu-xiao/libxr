@@ -52,10 +52,22 @@ file(GLOB ${PROJECT_NAME}_SYSTEM_SOURCES CONFIGURE_DEPENDS
 )
 list(SORT ${PROJECT_NAME}_SYSTEM_SOURCES)
 
-file(GLOB ${PROJECT_NAME}_DRIVER_SOURCES CONFIGURE_DEPENDS
-     "${CMAKE_CURRENT_SOURCE_DIR}/src/driver/*.cpp"
+file(
+  GLOB _xr_driver_SUBDIRS CONFIGURE_DEPENDS
+  LIST_DIRECTORIES true
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/driver/*"
 )
-list(SORT ${PROJECT_NAME}_DRIVER_SOURCES)
+set(${PROJECT_NAME}_DRIVER_SUBDIR_SOURCES)
+foreach(_xr_driver_SUBDIR IN LISTS _xr_driver_SUBDIRS)
+  if(IS_DIRECTORY "${_xr_driver_SUBDIR}")
+    get_filename_component(_xr_driver_NAME "${_xr_driver_SUBDIR}" NAME)
+    if(EXISTS "${_xr_driver_SUBDIR}/${_xr_driver_NAME}.hpp")
+      file(GLOB _xr_driver_SUBDIR_SOURCES CONFIGURE_DEPENDS "${_xr_driver_SUBDIR}/*.cpp")
+      list(APPEND ${PROJECT_NAME}_DRIVER_SUBDIR_SOURCES ${_xr_driver_SUBDIR_SOURCES})
+    endif()
+  endif()
+endforeach()
+list(SORT ${PROJECT_NAME}_DRIVER_SUBDIR_SOURCES)
 
 file(GLOB ${PROJECT_NAME}_UTILS_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/utils/*.cpp"
@@ -92,7 +104,7 @@ target_sources(
   PRIVATE ${${PROJECT_NAME}_SOURCES}
   PRIVATE ${${PROJECT_NAME}_CORE_SOURCES}
   PRIVATE ${${PROJECT_NAME}_SYSTEM_SOURCES}
-  PRIVATE ${${PROJECT_NAME}_DRIVER_SOURCES}
+  PRIVATE ${${PROJECT_NAME}_DRIVER_SUBDIR_SOURCES}
   PRIVATE ${${PROJECT_NAME}_SYSTEM_EXT_SOURCES}
   PRIVATE ${${PROJECT_NAME}_UTILS_SOURCES}
   PRIVATE ${${PROJECT_NAME}_STRUCTURE_SOURCES}
@@ -179,6 +191,15 @@ foreach(_xr_structure_SUBDIR IN LISTS _xr_structure_SUBDIRS)
     get_filename_component(_xr_structure_NAME "${_xr_structure_SUBDIR}" NAME)
     if(EXISTS "${_xr_structure_SUBDIR}/${_xr_structure_NAME}.hpp")
       list(APPEND _xr_public_include_dirs "${_xr_structure_SUBDIR}")
+    endif()
+  endif()
+endforeach()
+
+foreach(_xr_driver_SUBDIR IN LISTS _xr_driver_SUBDIRS)
+  if(IS_DIRECTORY "${_xr_driver_SUBDIR}")
+    get_filename_component(_xr_driver_NAME "${_xr_driver_SUBDIR}" NAME)
+    if(EXISTS "${_xr_driver_SUBDIR}/${_xr_driver_NAME}.hpp")
+      list(APPEND _xr_public_include_dirs "${_xr_driver_SUBDIR}")
     endif()
   endif()
 endforeach()

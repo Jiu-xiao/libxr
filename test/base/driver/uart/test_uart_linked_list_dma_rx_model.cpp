@@ -2,8 +2,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "driver/model/uart_linked_list_dma_rx_model.hpp"
-#include "driver/model/uart_rx_config_gate.hpp"
+#include "driver/uart/uart_linked_list_dma_rx_model.hpp"
+#include "driver/uart/uart_rx_config_gate.hpp"
 #include "test.hpp"
 
 namespace

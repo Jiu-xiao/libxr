@@ -4,9 +4,9 @@
 #include <utility>
 
 #include "freertos/FreeRTOS.h"
-#include "model/uart_execution_policy.hpp"
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
+#include "uart/uart_execution_policy.hpp"
 
 namespace LibXR::Detail
 {
