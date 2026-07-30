@@ -37,13 +37,31 @@ ErrorCode STM32GPIO::DisableInterrupt()
   return ErrorCode::OK;
 }
 
-extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+static void STM32_GPIO_EXTI_Dispatch(uint16_t pin)
 {
-  const uint8_t LINE = STM32_GPIO_PinToLine(GPIO_Pin);
+  const uint8_t LINE = STM32_GPIO_PinToLine(pin);
   if (auto* gpio = STM32GPIO::map[LINE])
   {
     gpio->callback_.Run(true);
   }
 }
+
+#if defined(STM32H5)
+// H5 HAL replaces the legacy combined callback with edge-specific callbacks.
+extern "C" void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
+{
+  STM32_GPIO_EXTI_Dispatch(GPIO_Pin);
+}
+
+extern "C" void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
+{
+  STM32_GPIO_EXTI_Dispatch(GPIO_Pin);
+}
+#else
+extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  STM32_GPIO_EXTI_Dispatch(GPIO_Pin);
+}
+#endif
 
 #endif
