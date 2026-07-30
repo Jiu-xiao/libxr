@@ -75,7 +75,7 @@ bool PublishPending(std::atomic<BusyState>& state, BusyState owner)
     if (observed == owner || had_event)
     {
       if (state.compare_exchange_weak(observed, BusyState::PENDING,
-                                      std::memory_order_release,
+                                      std::memory_order_acq_rel,
                                       std::memory_order_acquire))
       {
         return had_event;

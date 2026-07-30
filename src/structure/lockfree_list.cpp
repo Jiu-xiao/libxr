@@ -31,7 +31,7 @@ void LockFreeList::Add(BaseNode& data)
     current_head = head_.next_.load(std::memory_order_acquire);
     data.next_.store(current_head, std::memory_order_relaxed);
   } while (!head_.next_.compare_exchange_weak(
-      current_head, &data, std::memory_order_release, std::memory_order_acquire));
+      current_head, &data, std::memory_order_release, std::memory_order_relaxed));
 }
 
 uint32_t LockFreeList::Size() noexcept

@@ -214,7 +214,7 @@ class SerializedService
 
       uint32_t expected = OWNER_BIT;
       if (state_.compare_exchange_strong(expected, 0U, std::memory_order_release,
-                                         std::memory_order_acquire))
+                                         std::memory_order_relaxed))
       {
         return;
       }
@@ -236,7 +236,7 @@ class SerializedService
       guard.LockIrqDomain();
       uint32_t expected = OWNER_BIT;
       if (state_.compare_exchange_strong(expected, 0U, std::memory_order_release,
-                                         std::memory_order_acquire))
+                                         std::memory_order_relaxed))
       {
         guard.RestoreAndUnlockIrqDomain();
         return;
