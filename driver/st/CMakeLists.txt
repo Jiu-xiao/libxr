@@ -1,4 +1,4 @@
-set(_xr_st_component_adc stm32_adc.cpp)
+set(_xr_st_component_adc stm32_adc.cpp stm32_adc_gpdma.cpp)
 set(_xr_st_component_can stm32_can.cpp)
 set(_xr_st_component_canfd stm32_canfd.cpp)
 set(_xr_st_component_dac stm32_dac.cpp)
