@@ -4,13 +4,16 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "double_buffer.hpp"
 #include "driver/gpio.h"
 #include "esp_def.hpp"
+#include "esp_idf_version.h"
 #include "esp_intr_alloc.h"
 #include "flag.hpp"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
+#include "latest_snapshot.hpp"
+#include "model/uart_dma_tx_model.hpp"
+#include "model/uart_rx_config_gate.hpp"
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
@@ -75,6 +78,7 @@ class ESP32UARTReadPort : public ReadPort
 class ESP32UART : public UART
 {
   friend class ESP32UARTReadPort;
+  friend class UartDmaTxModel<ESP32UART>;
 
  public:
   static constexpr int PIN_NO_CHANGE = -1;  ///< Sentinel for an unmapped GPIO.
@@ -144,6 +148,10 @@ class ESP32UART : public UART
    */
   static uart_parity_t ResolveParity(UART::Parity parity);
 
+  void OnConfigRequested();
+  bool ApplyPendingConfig(bool in_isr);
+  bool OnConfigApplied(bool in_isr);
+
   /**
    * @brief UART ISR trampoline.
    * @brief UART 中断跳板函数。
@@ -204,6 +212,8 @@ class ESP32UART : public UART
    */
   void ConfigureRxInterruptPath();
 
+  bool StartDmaTx(uint8_t* data, size_t size, int block);
+
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   /**
    * @brief Bring up the UHCI/GDMA backend.
@@ -212,11 +222,12 @@ class ESP32UART : public UART
   ErrorCode InitDmaBackend();
 
   /**
-   * @brief Start the active TX request over GDMA.
-   * @brief 通过 GDMA 启动当前 active TX 请求。
+   * @brief 通过 GDMA 启动 active TX 请求 / Start the active TX request over GDMA
+   * @param data DMA 可读的载荷缓冲区 / DMA-readable payload buffer
+   * @param size 载荷字节数 / Payload size in bytes
+   * @param block 双缓冲块和描述符链表索引 / Double-buffer block and descriptor-list index
+   * @return GDMA 接受描述符链表时返回 true / True when GDMA accepts the descriptor list
    */
-  bool StartDmaTx();
-
   /**
    * @brief Handle one RX DMA completion.
    * @brief 处理一次 RX DMA 完成事件。
@@ -255,29 +266,10 @@ class ESP32UART : public UART
   bool LoadActiveTxFromQueue(bool in_isr);
 
   /**
-   * @brief Preload one pending TX request for DMA mode.
-   * @brief 为 DMA 模式预装一个 pending TX 请求。
+   * @brief Claim one queued request for the FIFO TX backend.
+   * @brief 为 FIFO TX 后端认领一个排队请求。
    */
-  bool LoadPendingTxFromQueue(bool in_isr);
-
-  /**
-   * @brief Promote one preloaded DMA pending request into the active slot.
-   * @brief 将一个已经预装的 DMA pending 请求提升到 active 槽位。
-   */
-  bool PromotePendingTxToActive();
-
-  /**
-   * @brief Start the current pending DMA request when TX is fully idle.
-   * @brief 在 TX 完全空闲时启动当前 pending DMA 请求。
-   */
-  bool StartPendingTxIfIdle(bool in_isr);
-
-  /**
-   * @brief Dequeue one TX payload into the selected buffer.
-   * @brief 将一个 TX payload 出队到选定缓冲区。
-   */
-  bool DequeueTxToBuffer(uint8_t* buffer, size_t& size, WriteInfoBlock& info,
-                         bool in_isr);
+  bool DequeueFifoTx(size_t& size, WriteInfoBlock& info);
 
   /**
    * @brief Start the active request on the selected TX backend.
@@ -296,12 +288,6 @@ class ESP32UART : public UART
    * @brief 清除 active TX 状态。
    */
   void ClearActiveTx();
-
-  /**
-   * @brief Clear pending TX state.
-   * @brief 清除 pending TX 状态。
-   */
-  void ClearPendingTx();
 
   /**
    * @brief Drain active TX bytes into the UART FIFO backend.
@@ -352,12 +338,13 @@ class ESP32UART : public UART
   int cts_pin_;           ///< CTS GPIO pin or `PIN_NO_CHANGE`.
 
   UART::Configuration config_;  ///< Current UART framing configuration.
+  LatestSnapshot<UART::Configuration> requested_config_;
+  UartRxConfigGate rx_config_gate_;
 
   uint8_t* rx_isr_buffer_ = nullptr;  ///< Scratch buffer used by the RX ISR path.
   size_t rx_isr_buffer_size_ = 0;     ///< Size of `rx_isr_buffer_`.
 
   uint8_t* tx_storage_ = nullptr;       ///< Backing storage for the TX half-buffers.
-  DoubleBuffer tx_dma_buffer_{};        ///< TX double-buffer view for the DMA path.
   WriteInfoBlock tx_active_info_ = {};  ///< Metadata for the active TX request.
   size_t tx_active_length_ = 0U;        ///< Active TX payload length in bytes.
   size_t tx_active_offset_ = 0U;        ///< Bytes already emitted for the active request.
@@ -373,6 +360,7 @@ class ESP32UART : public UART
 
   ESP32UARTReadPort _read_port;  ///< Read-side queue bridge exposed to `UART`.
   WritePort _write_port;         ///< Write-side queue bridge exposed to `UART`.
+  UartDmaTxModel<ESP32UART> tx_dma_model_;  ///< One-shot DMA TX execution model.
 
 #if SOC_GDMA_SUPPORTED && SOC_UHCI_SUPPORTED
   bool dma_backend_enabled_ = false;  ///< UHCI/GDMA backend is active.
@@ -385,8 +373,6 @@ class ESP32UART : public UART
   size_t rx_dma_chunk_size_ = 0;                    ///< Size of one RX DMA ring node.
   uint32_t rx_dma_node_index_ = 0;  ///< Software consumer index in the RX ring.
 #endif
-
-  Flag::Atomic rx_fifo_draining_{};  ///< RX FIFO drain reentry gate.
 };
 
 }  // namespace LibXR

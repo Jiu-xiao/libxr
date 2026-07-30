@@ -655,7 +655,8 @@ class RuntimeStringView
     else if constexpr (std::is_same_v<Bare, char*> || std::is_same_v<Bare, const char*>)
     {
       return text == nullptr
-                 ? Detail::RuntimeStringTextPart{.status = ErrorCode::PTR_NULL}
+                 ? Detail::RuntimeStringTextPart{.view = {},
+                                                 .status = ErrorCode::PTR_NULL}
                  : Detail::RuntimeStringTextPart{
                        .view = std::string_view(text, std::strlen(text))};
     }

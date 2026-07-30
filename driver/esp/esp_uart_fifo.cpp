@@ -117,7 +117,7 @@ void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 // 不会粗暴重置整个硬件 FIFO。
 void IRAM_ATTR ESP32UART::DrainRxFifo(bool in_isr)
 {
-  if (rx_fifo_draining_.TestAndSet())
+  if (!rx_config_gate_.TryEnterRx())
   {
     return;
   }
@@ -160,7 +160,10 @@ void IRAM_ATTR ESP32UART::DrainRxFifo(bool in_isr)
     read_port_->ProcessPendingReads(in_isr);
   }
 
-  rx_fifo_draining_.Clear();
+  if (rx_config_gate_.LeaveRx())
+  {
+    tx_dma_model_.RequestConfig(in_isr);
+  }
 }
 
 // RX interrupt handling distinguishes overflow from ordinary data-ready events

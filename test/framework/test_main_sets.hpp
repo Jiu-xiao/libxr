@@ -64,6 +64,9 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"core_tests", {"callback", &RunVoidEntry<test_cb>, false}},
     {"core_tests", {"pipe", &RunVoidEntry<test_pipe>, false}},
     {"core_tests", {"rw", &RunVoidEntry<test_rw>, false}},
+    {"core_tests", {"uart_dma_tx_model", &RunVoidEntry<test_uart_dma_tx_model>, false}},
+    {"core_tests",
+     {"uart_rx_config_gate", &RunVoidEntry<test_uart_rx_config_gate>, false}},
     {"core_tests", {"memory", &RunVoidEntry<test_memory>, false}},
     {"core_tests", {"color", &RunVoidEntry<test_color>, false}},
     {"core_tests", {"time", &RunVoidEntry<test_time>, false}},
@@ -71,6 +74,8 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"synchronization_tests", {"semaphore", &RunVoidEntry<test_semaphore>, false}},
     {"synchronization_tests", {"mutex", &RunVoidEntry<test_mutex>, false}},
     {"synchronization_tests", {"async", &RunVoidEntry<test_async>, false}},
+    {"synchronization_tests",
+     {"serialized_service", &RunVoidEntry<test_serialized_service>, false}},
 
     {"utility_tests", {"crc", &RunVoidEntry<test_crc>, false}},
     {"utility_tests", {"encoder", &RunVoidEntry<test_float_encoder>, false}},
@@ -86,6 +91,8 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"data_structure_tests", {"stack", &RunVoidEntry<test_stack>, false}},
     {"data_structure_tests", {"list", &RunVoidEntry<test_list>, false}},
     {"data_structure_tests", {"double_buffer", &RunVoidEntry<test_double_buffer>, false}},
+    {"data_structure_tests",
+     {"latest_snapshot", &RunVoidEntry<test_latest_snapshot>, false}},
     {"data_structure_tests", {"type", &RunVoidEntry<test_type>, false}},
     {"data_structure_tests", {"string", &RunVoidEntry<test_string>, false}},
 
