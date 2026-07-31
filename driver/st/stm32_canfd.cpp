@@ -351,9 +351,10 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
 #endif
 
 #ifdef FDCAN_CCCR_MON
-  if (cfg.mode.listen_only)
+  if (cfg.mode.loopback || cfg.mode.listen_only)
   {
-    // 总线监控（只听）
+    // 内部回环和只听模式都需要总线监控。
+    // Internal loopback and listen-only mode both require bus monitoring.
     SET_BIT(can->CCCR, FDCAN_CCCR_MON);
   }
   else

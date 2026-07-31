@@ -81,8 +81,14 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
     AssertDMAContReqEnabled<H>(hadc_);
     AssertDMACircular<H>(hadc_);
     AssertNbrOfConvEq<H>(hadc_, NUM_CHANNELS);
-    HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
-                      NUM_CHANNELS * filter_size_);
+#if defined(LIBXR_STM32_ADC_GPDMA)
+    REQUIRE(gpdma_adapter_.Start(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
+                                 NUM_CHANNELS * filter_size_,
+                                 dma_buffer_.size_) == HAL_OK);
+#else
+    REQUIRE(HAL_ADC_Start_DMA(hadc_, reinterpret_cast<uint32_t*>(dma_buffer_.addr_),
+                              NUM_CHANNELS * filter_size_) == HAL_OK);
+#endif
   }
   else
   {
@@ -94,7 +100,18 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
 
 STM32ADC::~STM32ADC()
 {
-  use_dma_ ? HAL_ADC_Stop_DMA(hadc_) : HAL_ADC_Stop(hadc_);
+  if (use_dma_)
+  {
+#if defined(LIBXR_STM32_ADC_GPDMA)
+    REQUIRE(gpdma_adapter_.Stop(hadc_) == HAL_OK);
+#else
+    REQUIRE(HAL_ADC_Stop_DMA(hadc_) == HAL_OK);
+#endif
+  }
+  else
+  {
+    REQUIRE(HAL_ADC_Stop(hadc_) == HAL_OK);
+  }
   for (uint8_t i = 0; i < NUM_CHANNELS; ++i)
   {
     delete channels_[i];

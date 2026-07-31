@@ -13,6 +13,7 @@
 #include "adc.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
+#include "stm32_adc_gpdma.hpp"
 
 namespace LibXR
 {
@@ -101,13 +102,26 @@ class STM32ADC
   };
 
   template <typename T, typename = void>
-  struct HasDMACircularMode : std::false_type
+  struct HasClassicDMAMode : std::false_type
   {
   };
 
   template <typename T>
-  struct HasDMACircularMode<
+  struct HasClassicDMAMode<
       T, std::void_t<decltype(std::declval<T>()->DMA_Handle->Init.Mode)>> : std::true_type
+  {
+  };
+
+  template <typename T, typename = void>
+  struct HasLinkedListDMAMode : std::false_type
+  {
+  };
+
+  template <typename T>
+  struct HasLinkedListDMAMode<
+      T,
+      std::void_t<decltype(std::declval<T>()->DMA_Handle->InitLinkedList.LinkedListMode),
+                  decltype(std::declval<T>()->DMA_Handle->Mode)>> : std::true_type
   {
   };
 
@@ -195,8 +209,15 @@ class STM32ADC
   static void AssertDMACircular(T hadc)
   {
     REQUIRE(hadc->DMA_Handle != nullptr);
-#if defined(DMA_CIRCULAR)
-    if constexpr (HasDMACircularMode<T>::value)
+#if defined(LIBXR_STM32_ADC_GPDMA)
+    if constexpr (HasLinkedListDMAMode<T>::value)
+    {
+      REQUIRE(hadc->DMA_Handle->InitLinkedList.LinkedListMode == DMA_LINKEDLIST_CIRCULAR);
+      REQUIRE(hadc->DMA_Handle->Mode == DMA_LINKEDLIST_CIRCULAR);
+      return;
+    }
+#elif defined(DMA_CIRCULAR)
+    if constexpr (HasClassicDMAMode<T>::value)
     {
       REQUIRE(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
       return;
@@ -279,6 +300,9 @@ class STM32ADC
   float resolution_;
   Channel** channels_;
   float vref_;
+#if defined(LIBXR_STM32_ADC_GPDMA)
+  STM32GpdmaAdcAdapter gpdma_adapter_{};
+#endif
 
   float ConvertToVoltage(float adc_value);
 };

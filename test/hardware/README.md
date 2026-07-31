@@ -30,6 +30,47 @@ both UART byte queues and both scratch buffers must hold `frame_size * batch_dep
 bytes. Hardware tests are opt-in; the host self-test validates the harness itself,
 including mismatch, duplicate-byte, completion-failure, and capacity-failure cases.
 
+`driver/spi_loopback_test.hpp` provides the corresponding backend-independent physical
+SPI loopback test. A board runner connects MOSI to MISO, constructs one SPI object, and
+passes a deterministic list of transfer sizes. Every transfer uses a BLOCK operation, so
+the function compares RX only after polling completion or the DMA terminal callback. The
+SPI must be dedicated to the test. Both scratch buffers and both driver-owned transfer
+buffers must hold the largest requested transfer, and their active ranges must be pairwise
+disjoint. The helper rejects software double buffering because it deliberately verifies
+one active transfer at a time. After a timeout, caller-owned scratch storage must remain
+alive and untouched until the backend retires the transfer. Its host self-test covers
+successful multi-size traffic, absent RX writes, mismatch, transfer/configuration failure,
+overlap rejection, overflow rejection, and scratch/driver capacity rejection.
+
+`driver/adc_sampling_test.hpp` repeatedly reads caller-selected ADC channel objects and
+checks finite values, inclusive voltage ranges, and maximum observed span. The caller
+owns the channel objects and supplies one statistics slot per channel. Board runners can
+therefore use internal references for a wiring-free smoke test or external calibrated
+sources for tighter accuracy checks without embedding board-specific limits in LibXR.
+
+`driver/dac_adc_tracking_test.hpp` drives one or more DAC/ADC feedback pairs through a
+point-major voltage table. It checks every DAC write, rejects non-finite feedback, and
+reports the first tolerance violation plus the maximum observed error. Using distinct
+setpoints per pair also detects crossed loopback wiring.
+
+`driver/pwm_gpio_loopback_test.hpp` drives one or more PWM/GPIO feedback pairs through a
+point-major duty table. Deterministically jittered sampling avoids phase locking, while
+the observed high ratio and rising-edge rate check duty cycle and frequency. The caller
+must choose a maximum sample interval shorter than the smallest expected high or low
+pulse; static 0% and 100% points check level only.
+
+`driver/can_loopback_test.hpp` validates Classic CAN and CAN FD loopback through the
+LibXR CAN interface. The caller supplies phase-specific frame cases and storage for
+callback state. The helper verifies identifier, frame format, flags, payload, callback
+context, and exactly-once completion while draining in-flight callbacks before a phase
+change or teardown.
+
+`driver/i2c_register_device_test.hpp` validates one explicitly addressed register
+device without scanning the bus. It checks a fixed identity register, saves a writable
+register range, performs multi-byte write/readback operations, restores the original
+bytes, and verifies restoration. Repeated multi-byte reads exercise the configured
+polling or DMA threshold while all operation and scratch storage remains caller-owned.
+
 When a physical TX/RX short is unavailable, `host/uart_echo.py` can use a USB-to-UART
 adapter as a transparent peer. Connect DUT TX to adapter RX, DUT RX to adapter TX, and
 connect ground, then start the helper before resetting or flashing the DUT:
