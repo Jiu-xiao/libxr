@@ -10,19 +10,23 @@ namespace LibXR
 {
 
 /**
- * @brief Position-based linked-list DMA RX model for UART.
+ * @brief 基于位置的 UART linked-list DMA RX 模型 / Position-based linked-list DMA RX
+ * model for UART
  *
- * The backend maps a descriptor ring onto contiguous, equally sized fragments of the
- * supplied storage and reports one live producer pointer. The model owns only that
- * storage view and the last consumed logical ring position; descriptor objects and
- * hardware state remain backend-owned.
+ * 后端将 descriptor ring 映射到所给连续存储的等长片段，并报告实时 producer 指针。
+ * 模型只持有存储视图和上次消费的逻辑环位置；descriptor 对象和硬件状态仍归后端所有。
+ * / The backend maps a descriptor ring onto equal fragments of contiguous storage and
+ * reports one live producer pointer. The model owns only the storage view and last
+ * consumed logical position; descriptors and hardware state remain backend-owned.
  *
- * Calls for one instance must not overlap. The caller must acquire its complete
- * RX/config gate before sampling the producer through `OnDataAvailable()`. Bytes that
- * do not fit in the software queue are dropped while the position still advances,
- * preserving the existing UART overrun behavior.
+ * 同一实例的调用不得重叠。调用者必须在通过 `OnDataAvailable()` 采样 producer 前取得
+ * 完整 RX/config gate。软件队列无法容纳的字节会被丢弃，但位置仍向前推进。 / Calls
+ * for one instance must not overlap. The caller must acquire the complete RX/config gate
+ * before sampling the producer. Bytes that do not fit the software queue are dropped
+ * while the position advances.
  *
- * @tparam DescriptorCount Number of equally sized fragments in the descriptor ring.
+ * @tparam DescriptorCount descriptor ring 中的等长片段数 / Number of equal fragments
+ * in the descriptor ring
  */
 template <size_t DescriptorCount = 4U>
 class UartLinkedListDmaRxModel
@@ -31,10 +35,15 @@ class UartLinkedListDmaRxModel
   static_assert(DescriptorCount > 0U, "a linked-list RX ring needs a descriptor");
 
   /**
-   * @brief Construct the model with platform-provided DMA storage.
+   * @brief 使用平台提供的 DMA 存储构造模型 / Construct with platform-provided DMA
+   * storage
    *
-   * Empty storage disables linked-list RX. Enabled storage must contain at least one
-   * byte per descriptor and divide exactly into equal descriptor fragments.
+   * 空存储禁用 linked-list RX；启用时必须为每个 descriptor 至少提供一个字节，并能
+   * 整除为等长片段。 / Empty storage disables linked-list RX. Enabled storage must
+   * contain at least one byte per descriptor and divide into equal fragments.
+   *
+   * @param storage DMA 可写存储；生命周期必须覆盖模型及 DMA 运行期 / DMA-writable
+   * storage that must outlive the model and active DMA
    */
   explicit UartLinkedListDmaRxModel(RawData storage) : storage_(storage)
   {
@@ -43,7 +52,13 @@ class UartLinkedListDmaRxModel
              ((storage_.size_ % DescriptorCount) == 0U)));
   }
 
-  /** Reset the software cursor and start the backend linked-list DMA ring. */
+  /**
+   * @brief 重置软件游标并启动后端 linked-list DMA ring / Reset the software cursor and
+   * start the backend linked-list DMA ring
+   * @tparam Backend 提供 linked-list RX hook 的平台后端 / Platform backend providing
+   * linked-list RX hooks
+   * @param backend 后端实例 / Backend instance
+   */
   template <typename Backend>
   void Start(Backend& backend)
   {
@@ -52,16 +67,25 @@ class UartLinkedListDmaRxModel
   }
 
   /**
-   * @brief Offer bytes produced since the previous DMA event to the RX queue.
-   * @return true when the logical producer position advanced.
+   * @brief 将上次 DMA 事件后产生的字节提交给 RX 队列 / Offer bytes produced since the
+   * previous DMA event to the RX queue
+   * @tparam Backend 提供 producer 采样和缓存维护 hook 的平台后端 / Platform backend
+   * providing producer sampling and cache-maintenance hooks
+   * @param backend 后端实例 / Backend instance
+   * @param port 接收字节的读取端口 / Read port receiving produced bytes
+   * @return 逻辑 producer 位置前进时为 true / True when the logical producer position
+   * advanced
    *
-   * The backend must sample its live producer pointer exactly once in
-   * `GetLinkedListDmaRxProducer()`. Both the first byte and the one-past-end address are
-   * valid ring positions; the latter is normalized to offset zero. Movement by one or
-   * more complete rings between observations remains indistinguishable from no movement.
+   * 后端必须在 `GetLinkedListDmaRxProducer()` 中恰好采样一次实时 producer 指针。首字节
+   * 和尾后地址都是合法环位置，尾后地址归一化为零；两次观察间跨过一个或多个完整环仍
+   * 无法与未移动区分。 / The backend samples its live producer exactly once. Both the
+   * first byte and one-past-end address are valid positions, with one-past-end normalized
+   * to zero. One or more complete wraps remain indistinguishable from no movement.
    *
-   * The caller completes pending reads after releasing its RX/config hardware gate.
-   * This method only samples DMA state, copies bytes, and advances the SPSC producer.
+   * 调用者在释放 RX/config 硬件 gate 后完成挂起读取。本方法只采样 DMA 状态、复制字节
+   * 并推进 SPSC producer。 / The caller completes pending reads after releasing its
+   * RX/config hardware gate. This method only samples DMA state, copies bytes, and
+   * advances the SPSC producer.
    */
   template <typename Backend>
   [[nodiscard]] bool OnDataAvailable(Backend& backend, ReadPort& port)
@@ -122,16 +146,16 @@ class UartLinkedListDmaRxModel
     return true;
   }
 
-  /** Reset the software cursor to the beginning of the logical ring. */
+  /** @brief 将软件游标重置到逻辑环起点 / Reset the software cursor. */
   void ResetPosition() { last_position_ = 0U; }
 
-  /** Return the DMA-writable buffer address. */
+  /** @return DMA 可写缓冲区地址 / DMA-writable buffer address. */
   [[nodiscard]] uint8_t* Buffer() const { return static_cast<uint8_t*>(storage_.addr_); }
 
-  /** Return the total logical ring capacity in bytes. */
+  /** @return 逻辑环总字节容量 / Logical ring capacity in bytes. */
   [[nodiscard]] size_t BufferSize() const { return storage_.size_; }
 
-  /** Return the last consumed logical producer offset. */
+  /** @return 上次消费的逻辑 producer 偏移 / Last consumed logical producer offset. */
   [[nodiscard]] size_t LastPosition() const { return last_position_; }
 
  private:

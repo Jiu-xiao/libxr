@@ -55,12 +55,15 @@ class UART
 
   /**
    * @brief UART 构造函数 / UART constructor
-   * @param rx_buffer_size 接收缓冲区大小 / Receive buffer size
-   * @param tx_queue_size 发送队列大小 / Transmit queue size
-   * @param tx_buffer_size 发送缓冲区大小 / Transmit buffer size
+   * @tparam ReadPortType 读取端口类型 / Read-port type
+   * @tparam WritePortType 写入端口类型 / Write-port type
+   * @param read_port 非 owning 读取端口；UART 可调用期间必须保持有效 / Non-owning read
+   * port that must remain valid while the UART is callable
+   * @param write_port 非 owning 写入端口；UART 可调用期间必须保持有效 / Non-owning write
+   * port that must remain valid while the UART is callable
    *
-   * 该构造函数初始化 UART 的读取和写入端口。
-   * This constructor initializes the read and write ports of the UART.
+   * 该构造函数只绑定读取和写入端口，不接管其所有权。 / This constructor only binds
+   * the read and write ports and does not take ownership.
    */
   template <typename ReadPortType = ReadPort, typename WritePortType = WritePort>
   UART(ReadPortType* read_port, WritePortType* write_port)
@@ -78,15 +81,25 @@ class UART
    * This is a pure virtual function. Subclasses must implement the specific UART
    * configuration logic.
    *
-   * @warning One UART instance accepts at most one outstanding configuration. Calls may
-   * originate in thread or ISR context; a concurrent or reentrant request returns
-   * `ErrorCode::BUSY` without replacing the accepted payload. `ErrorCode::OK`
-   * acknowledges admission, while hardware quiescence, apply, and restart may finish
-   * later. 每个 UART 实例最多接受一个尚未完成的配置；并发或重入请求返回
-   * `ErrorCode::BUSY`，且不会覆盖已接受的配置。
+   * @warning 每个 UART 实例最多接受一个尚未完成的配置。调用可以来自线程或 ISR；并发
+   * 或重入请求返回 `ErrorCode::BUSY`，且不会覆盖已接受的 payload。`ErrorCode::OK`
+   * 只确认请求已接纳，硬件静止、应用配置和重启可以稍后完成。 / One UART instance
+   * accepts at most one outstanding configuration. Calls may originate in thread or ISR
+   * context; a concurrent or reentrant request returns `ErrorCode::BUSY` without
+   * replacing the accepted payload. `ErrorCode::OK` acknowledges admission, while
+   * quiescence, apply, and restart may finish later.
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
 
+  /**
+   * @brief 提交一条 UART 写操作 / Submit one UART write operation
+   * @tparam OperationType `WriteOperation` 的派生类型 / Type derived from
+   * `WriteOperation`
+   * @param data 待发送数据 / Data to transmit
+   * @param op 完成方式和回调信息 / Completion mode and callback information
+   * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @return 写端口的提交结果 / Write-port submission result
+   */
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
                                         WriteOperation, std::decay_t<OperationType>>>>
   ErrorCode Write(ConstRawData data, OperationType&& op, bool in_isr = false)
@@ -94,6 +107,15 @@ class UART
     return (*write_port_)(data, std::forward<OperationType>(op), in_isr);
   }
 
+  /**
+   * @brief 提交一条 UART 读操作 / Submit one UART read operation
+   * @tparam OperationType `ReadOperation` 的派生类型 / Type derived from `ReadOperation`
+   * @param data 接收目标缓冲区，必须保持有效直到操作完成 / Destination buffer that
+   * must remain valid until completion
+   * @param op 完成方式和回调信息 / Completion mode and callback information
+   * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @return 读端口的提交结果 / Read-port submission result
+   */
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
                                         ReadOperation, std::decay_t<OperationType>>>>
   ErrorCode Read(RawData data, OperationType&& op, bool in_isr = false)

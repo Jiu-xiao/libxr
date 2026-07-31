@@ -26,12 +26,6 @@
 #include "soc/ext_mem_defs.h"
 #include "soc/gdma_periph.h"
 
-#if defined(SOC_RCC_IS_INDEPENDENT) && SOC_RCC_IS_INDEPENDENT
-#define LIBXR_ESP_UHCI_RCC_ATOMIC()
-#else
-#define LIBXR_ESP_UHCI_RCC_ATOMIC() PERIPH_RCC_ATOMIC()
-#endif
-
 namespace
 {
 // RX uses a circular DMA descriptor ring, similar to STM/CH circular RX DMA
@@ -255,11 +249,16 @@ ErrorCode ESP32UartDma::InitDmaBackend()
     return ErrorCode::INIT_ERR;
   }
 
-  LIBXR_ESP_UHCI_RCC_ATOMIC()
+#if defined(SOC_RCC_IS_INDEPENDENT) && SOC_RCC_IS_INDEPENDENT
+  uhci_ll_enable_bus_clock(0, true);
+  uhci_ll_reset_register(0);
+#else
+  PERIPH_RCC_ATOMIC()
   {
     uhci_ll_enable_bus_clock(0, true);
     uhci_ll_reset_register(0);
   }
+#endif
 
   uhci_hal_init(&uhci_hal_, 0);
   uhci_ll_attach_uart_port(uhci_hal_.dev, uart_num_);
@@ -302,8 +301,8 @@ ErrorCode ESP32UartDma::InitDmaBackend()
     return ErrorCode::INIT_ERR;
   }
   const size_t tx_dma_alignment = std::max<size_t>(1, tx_int_alignment);
-  if ((tx_storage_.block_stride == 0U) ||
-      ((tx_storage_.block_stride % tx_dma_alignment) != 0U) ||
+  if ((tx_storage_.block_stride_ == 0U) ||
+      ((tx_storage_.block_stride_ % tx_dma_alignment) != 0U) ||
       ((reinterpret_cast<uintptr_t>(dma_model_.Buffer(0)) % tx_dma_alignment) != 0U) ||
       ((reinterpret_cast<uintptr_t>(dma_model_.Buffer(1)) % tx_dma_alignment) != 0U))
   {
@@ -587,7 +586,7 @@ UartDmaTxStartResult IRAM_ATTR ESP32UartDma::StartDmaTx(uint8_t* data, size_t si
   desc->next = nullptr;
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-  if (!CacheSyncDmaBuffer(data, size, true, tx_storage_.cache_line_size))
+  if (!CacheSyncDmaBuffer(data, size, true, tx_storage_.cache_line_size_))
   {
     return UartDmaTxStartResult::FAILED;
   }
@@ -722,7 +721,5 @@ UartOldTxTerminal IRAM_ATTR ESP32UartDma::StopAndResetDma(bool active_tx, bool i
 }
 
 }  // namespace LibXR
-
-#undef LIBXR_ESP_UHCI_RCC_ATOMIC
 
 #endif

@@ -1,4 +1,3 @@
-// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_timebase.hpp"
 
 using namespace LibXR;
@@ -70,5 +69,3 @@ MillisecondTimestamp Timebase::GetMilliseconds()
   return MillisecondTimestamp(static_cast<uint32_t>(
       CyclesToUnits(ReadSysTickCounter(), MILLISECONDS_PER_SECOND)));
 }
-
-// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

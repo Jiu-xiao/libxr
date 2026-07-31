@@ -266,10 +266,12 @@ class WritePort
    *               Indicates whether the operation is executed in an interrupt context.
    * @param ans 错误码，用于指示操作的结果。
    *            Error code indicating the result of the operation.
-   * @param op 需要更新状态的 WriteOperation 引用。
-   *           Reference to the WriteOperation whose status needs to be updated.
-   * @warning A completion callback may run while an unrelated producer owns this port.
-   *          A callback that writes the same port must handle `BUSY`; completion
+   * @param info 需要完成的写入记录元数据。
+   *             Metadata for the write record being completed.
+   * @warning 完成回调可能在无关 producer 持有本端口时运行。回调若重入写同一端口，必须
+   *          处理 `BUSY`；完成串行化不会为回调重入保留 producer ownership。 / A
+   *          completion callback may run while an unrelated producer owns this port. A
+   *          callback that writes the same port must handle `BUSY`; completion
    *          serialization does not reserve producer ownership for callback re-entry.
    */
   void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info);

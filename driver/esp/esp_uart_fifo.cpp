@@ -246,7 +246,7 @@ ErrorCode IRAM_ATTR ESP32UartFifo::SubmitWrite(bool in_isr)
   {
     _read_port.ProcessPendingReads(in_isr);
   }
-  return submit.result;
+  return submit.result_;
 }
 
 void IRAM_ATTR ESP32UartFifo::ResumeRx(bool in_isr)
@@ -339,7 +339,7 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceEvents(uint32_t events, bool in_isr,
   {
     // This Write is only carrying an already accepted CONFIG forward. Its stack-local
     // shortcut must not complete a queued record whose durable operation outlives it.
-    submit->synchronous_completion_allowed = false;
+    submit->synchronous_completion_allowed_ = false;
   }
 
   // ServiceIrqSource() physically masks condition-triggered carriers but deliberately
@@ -596,8 +596,8 @@ bool IRAM_ATTR ESP32UartFifo::ClaimNextRecord(bool in_isr, SubmitContext* submit
   REQUIRE_FROM_CALLBACK(_write_port.queue_data_ != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(info.data.size_ > 0U, in_isr);
   REQUIRE_FROM_CALLBACK(info.data.size_ <= _write_port.queue_data_->Size(), in_isr);
-  synchronous_submission = submit != nullptr && submit->synchronous_completion_allowed &&
-                           !submit->resolved && _write_port.queue_info_->Size() == 1U;
+  synchronous_submission = submit != nullptr && submit->synchronous_completion_allowed_ &&
+                           !submit->resolved_ && _write_port.queue_info_->Size() == 1U;
 
   const ErrorCode pop_result = _write_port.queue_info_->Pop(info);
   REQUIRE_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
@@ -663,8 +663,8 @@ void IRAM_ATTR ESP32UartFifo::CompleteCurrentRecord(bool in_isr,
   if (synchronous_submission)
   {
     ASSERT(submit != nullptr);
-    submit->result = ErrorCode::OK;
-    submit->resolved = true;
+    submit->result_ = ErrorCode::OK;
+    submit->resolved_ = true;
     return;
   }
   _write_port.Finish(in_isr, ErrorCode::OK, completed);

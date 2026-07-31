@@ -1,6 +1,3 @@
-// NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
-// ch32_uart.cpp
-
 #include "ch32_uart.hpp"
 
 #include "ch32_dma.hpp"
@@ -145,7 +142,6 @@ UartOldTxTerminal Ch32StopAndClassifyTxDmaChannel(DMA_Channel_TypeDef* channel,
 
 }  // namespace
 
-// Static instance map.
 CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
 
 bool CH32UART::InIsr()
@@ -161,7 +157,6 @@ bool CH32UART::InIsr()
   return false;
 }
 
-// Constructor: USART, DMA, and GPIO initialization.
 CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
                    GPIO_TypeDef* tx_gpio_port, uint16_t tx_gpio_pin,
                    GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
@@ -205,7 +200,6 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     ASSERT(Ch32DmaGlobalStatus(CH32_UART_RX_DMA_IT_TC_MAP[id]) != 0U);
   }
 
-  /* GPIO配置（TX: 推挽输出，RX: 悬空输入） */
   GPIO_InitTypeDef gpio_init = {};
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
 
@@ -227,14 +221,12 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     (*read_port_) = ReadFun;
   }
 
-  /* 可选：引脚重映射 */
   if (pin_remap != 0)
   {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
     GPIO_PinRemapConfig(pin_remap, ENABLE);
   }
 
-  /* 串口外设时钟使能 */
   if (CH32_UART_APB_MAP[id] == 1)
   {
     RCC_APB1PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id], ENABLE);
@@ -249,13 +241,11 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   }
   RCC_AHBPeriphClockCmd(CH32_UART_RCC_PERIPH_MAP_DMA[id], ENABLE);
 
-  // 3. USART 配置
   uart_mode_ = (tx_enable ? USART_Mode_Tx : 0) | (rx_enable ? USART_Mode_Rx : 0);
   USART_InitTypeDef usart_cfg = {};
   REQUIRE(FillCh32UsartConfig(config, uart_mode_, usart_cfg, false));
   USART_Init(instance_, &usart_cfg);
 
-  /* DMA 配置 */
   DMA_InitTypeDef dma_init = {};
   dma_init.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   dma_init.DMA_MemoryInc = DMA_MemoryInc_Enable;
@@ -273,8 +263,8 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
                                rx_cb_fun, this);
 
     DMA_DeInit(dma_rx_channel_);
-    dma_init.DMA_PeripheralBaseAddr = (uint32_t)&instance_->DATAR;
-    dma_init.DMA_MemoryBaseAddr = (uint32_t)rx_dma_model_.Buffer();
+    dma_init.DMA_PeripheralBaseAddr = reinterpret_cast<uint32_t>(&instance_->DATAR);
+    dma_init.DMA_MemoryBaseAddr = reinterpret_cast<uint32_t>(rx_dma_model_.Buffer());
     dma_init.DMA_DIR = DMA_DIR_PeripheralSRC;
     dma_init.DMA_Mode = DMA_Mode_Circular;
     dma_init.DMA_BufferSize = rx_dma_model_.BufferSize();
@@ -292,7 +282,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     ch32_dma_register_callback(ch32_dma_get_id(CH32_UART_TX_DMA_CHANNEL_MAP[id]),
                                tx_cb_fun, this);
     DMA_DeInit(dma_tx_channel_);
-    dma_init.DMA_PeripheralBaseAddr = (u32)(&instance_->DATAR);
+    dma_init.DMA_PeripheralBaseAddr = reinterpret_cast<uint32_t>(&instance_->DATAR);
     dma_init.DMA_MemoryBaseAddr = 0;
     dma_init.DMA_DIR = DMA_DIR_PeripheralDST;
     dma_init.DMA_Mode = DMA_Mode_Normal;
@@ -302,7 +292,6 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     USART_DMACmd(instance_, USART_DMAReq_Tx, ENABLE);
   }
 
-  // 6. USART和相关中断
   USART_Cmd(instance_, ENABLE);
 
   if (rx_enable)
@@ -321,7 +310,6 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id]);
 }
 
-// Runtime USART configuration.
 ErrorCode CH32UART::SetConfig(UART::Configuration config)
 {
   return dma_model_.SetConfig(config, InIsr());
@@ -471,7 +459,6 @@ void CH32UART::StartDataPath()
   Ch32UartIoFence();
 }
 
-// Write callback (DMA-based transfer).
 ErrorCode CH32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &CH32UART::_write_port);
@@ -507,14 +494,8 @@ UartDmaTxStartResult CH32UART::StartDmaTx(uint8_t* data, size_t size, int, bool 
   return UartDmaTxStartResult::STARTED;
 }
 
-// Read callback (interrupt-driven).
-ErrorCode CH32UART::ReadFun(ReadPort&, bool)
-{
-  // 接收由 IDLE 中断驱动，读取在 ISR 中完成
-  return ErrorCode::PENDING;
-}
+ErrorCode CH32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
-// USART IDLE interrupt handler.
 extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 {
   auto uart = CH32UART::map_[id];
@@ -525,10 +506,8 @@ extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
   uart->UartIRQHandler();
 }
 
-// DMA channel IRQ callbacks.
 void CH32UART::TxDmaIRQHandler() { HandleNormalIrq(); }
 
-// RX DMA IRQ entry. The scanner handles RX data and unified data-path errors.
 void CH32UART::RxDmaIRQHandler() { HandleNormalIrq(); }
 
 void CH32UART::UartIRQHandler() { HandleNormalIrq(); }
@@ -760,5 +739,3 @@ extern "C" void UART8_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-f
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void UART8_IRQHandler(void) { ch32_uart_isr_handler_idle(CH32_UART8); }
 #endif
-
-// NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

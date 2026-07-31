@@ -154,10 +154,10 @@ ESP32UartDma::TxStorage ESP32UartDma::AllocateTxStorage(size_t block_size)
     return storage;
   }
 
-  storage.data = data;
-  storage.size = size;
-  storage.block_stride = block_stride;
-  storage.cache_line_size = cache_line_size;
+  storage.data_ = data;
+  storage.size_ = size;
+  storage.block_stride_ = block_stride;
+  storage.cache_line_size_ = cache_line_size;
   return storage;
 }
 
@@ -176,7 +176,7 @@ ESP32UartDma::ESP32UartDma(uart_port_t uart_num, int tx_pin, int rx_pin, int rts
       _read_port(rx_buffer_size),
       _write_port(tx_queue_size, tx_buffer_size),
       dma_model_(*this, execution_policy_, _write_port,
-                 RawData(tx_storage_.data, tx_storage_.size))
+                 RawData(tx_storage_.data_, tx_storage_.size_))
 {
   REQUIRE(!IsConsoleUartInUse(uart_num_));
   REQUIRE(uart_num_ < UART_NUM_MAX);

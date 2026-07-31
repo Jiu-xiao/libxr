@@ -14,11 +14,12 @@ namespace LibXR
 {
 
 /**
- * @brief Result of one backend DMA-start attempt.
+ * @brief 后端单次 DMA start 的结果 / Result of one backend DMA-start attempt
  *
- * `STARTED` transfers ownership of the active buffer to hardware. `FAILED` guarantees
- * that no hardware transfer is live and no terminal callback from this attempt can be
- * published later; the model may immediately reuse the block and try the next record.
+ * `STARTED` 将 active buffer 所有权交给硬件。`FAILED` 保证没有活跃硬件传输，且本次
+ * 尝试以后不会发布 terminal callback，模型可立即复用该 block。 / `STARTED`
+ * transfers the active buffer to hardware. `FAILED` guarantees no live transfer and no
+ * later terminal callback from this attempt, so the block may be reused immediately.
  */
 enum class UartDmaTxStartResult : uint32_t
 {
@@ -26,14 +27,17 @@ enum class UartDmaTxStartResult : uint32_t
   FAILED = 1U,
 };
 
-/** Progress of one non-blocking control hook. */
+/** @brief 非阻塞 control hook 的进度 / Progress of a non-blocking control hook. */
 enum class UartDmaControlProgress : uint8_t
 {
   COMPLETED = 0U,
   PENDING = 1U,
 };
 
-/** Authoritative terminal classification for the stopped TX generation. */
+/**
+ * @brief 已停止 TX generation 的权威 terminal 分类 / Authoritative terminal
+ * classification for the stopped TX generation
+ */
 enum class UartOldTxTerminal : uint8_t
 {
   NONE = 0U,
@@ -42,38 +46,51 @@ enum class UartOldTxTerminal : uint8_t
 };
 
 /**
- * @brief Result of one backend CONFIG or runtime-recovery advancement.
+ * @brief 后端推进 CONFIG 或 runtime recovery 的结果 / Result of advancing CONFIG or
+ * runtime recovery
  *
- * `PENDING` carries no terminal classification and must arrange a future STOP_DONE,
- * COMPLETE, CONTROL_READY, or equivalent service carrier. `COMPLETED` is the hardware
- * quiescence linearization point: the classification is final, destructive cleanup has
- * completed, and no old terminal callback may be published later. COMPLETE is consumed
- * by the model in the following hardware-quiescent service snapshot; NONE and ERROR keep
- * the retained active payload for restart.
+ * `PENDING` 不携带 terminal 分类，并必须安排未来的 STOP_DONE、COMPLETE、CONTROL_READY
+ * 或等价 service carrier。`COMPLETED` 是硬件静止的线性化点：分类已确定、破坏性清理已
+ * 完成，且以后不会发布旧 terminal callback。模型在下一次硬件静止快照消费 COMPLETE；
+ * NONE 和 ERROR 保留 active payload 以便重启。 / `PENDING` carries no terminal
+ * classification and must arrange a future service carrier. `COMPLETED` is the hardware
+ * quiescence linearization point: classification and cleanup are final, and no old
+ * terminal callback may appear. COMPLETE is consumed next; NONE and ERROR retain active
+ * payload for restart.
  */
 struct UartDmaControlResult
 {
-  UartDmaControlProgress progress;
-  UartOldTxTerminal old_tx_terminal;
+  UartDmaControlProgress progress;    ///< control hook 进度 / Control-hook progress
+  UartOldTxTerminal old_tx_terminal;  ///< 旧 TX 的 terminal 分类 / Old-TX terminal
 
+  /** @brief 构造等待未来 carrier 的结果 / Construct a result awaiting a carrier. */
   [[nodiscard]] static constexpr UartDmaControlResult Pending()
   {
     return {UartDmaControlProgress::PENDING, UartOldTxTerminal::NONE};
   }
 
+  /**
+   * @brief 构造硬件已静止的结果 / Construct a hardware-quiescent result
+   * @param terminal 已停止旧 TX 的最终分类 / Final classification of the stopped old TX
+   * @return 已完成的 control result / Completed control result
+   */
   [[nodiscard]] static constexpr UartDmaControlResult Completed(
       UartOldTxTerminal terminal = UartOldTxTerminal::NONE)
   {
     return {UartDmaControlProgress::COMPLETED, terminal};
   }
 
+  /** @return control hook 已完成时为 true / True when the control hook completed. */
   [[nodiscard]] constexpr bool IsCompleted() const
   {
     return progress == UartDmaControlProgress::COMPLETED;
   }
 };
 
-/** Coalescible facts consumed by one UART serialized service. */
+/**
+ * @brief 由同一 UART serialized service 消费的可合并事实 / Coalescible facts consumed
+ * by one UART serialized service
+ */
 enum class UartDmaEvent : uint32_t
 {
   WRITE = 1U << 0U,
@@ -85,68 +102,82 @@ enum class UartDmaEvent : uint32_t
 };
 
 /**
- * @brief Serialized UART DMA data-path and configuration model.
+ * @brief 串行化 UART DMA data path 与配置的通用模型 / Serialized UART DMA data-path
+ * and configuration model
  *
- * The model owns one execution policy, CONFIG payload publication, RX/control admission,
- * one-active/one-pending TX state, and all lifecycle event routing. WRITE, COMPLETE,
- * ERROR, CONFIG, and asynchronous stop completion enter the same `SerializedService`.
- * Only its owner mutates TX state, dequeues WritePort, starts DMA, performs
- * recovery/configuration, or completes records.
+ * WRITE、COMPLETE、ERROR、CONFIG 和异步 stop completion 进入同一个
+ * `SerializedService`；只有其 owner 可以修改 TX 状态、从 WritePort 出队、启动 DMA、
+ * 执行 recovery/configuration 或完成记录。 / All lifecycle facts enter one
+ * `SerializedService`. Only its owner mutates TX state, dequeues WritePort, starts DMA,
+ * advances control, or completes records.
  *
- * RX byte delivery stays outside the service as one direct SPSC producer. A standalone
- * RX callback enters through `ProcessRx()` after acknowledging IRQ status but before
- * reading DMA position/descriptors or moving bytes. A combined IRQ scanner uses
- * `ProcessRxInIrqSource()` so its control wakeup is published together with every old
- * COMPLETE/ERROR fact returned by that scan. CONFIG may discard an unadmitted fragment,
- * while a fragment that acquired the gate finishes before control advances.
+ * RX 字节仍在 service 外作为单一 SPSC producer。独立 RX callback 在确认 IRQ 后、首次
+ * 读取 DMA 位置/descriptor 前调用 `ProcessRx()`；组合 IRQ scanner 使用
+ * `ProcessRxInIrqSource()`，使 control wakeup 与同一快照中的旧 COMPLETE/ERROR 一起
+ * 发布。未取得 gate 的 RX 片段可以丢弃，已取得 gate 的片段在 control 前完成。 / RX
+ * remains a direct SPSC producer. Gate RX before its first DMA position/descriptor
+ * access; a combined scanner publishes control wakeup with terminal facts from the same
+ * snapshot. Rejected fragments may be dropped, while admitted fragments finish first.
  *
- * The pending payload is copied out of the public byte queue while its metadata remains
- * at the metadata-queue head. Promotion publishes active state before `StartDmaTx()`.
- * The model passes the current `in_isr` fact into the hook so backend hot paths do not
- * need to rediscover it. A terminal callback raised before that function returns only
- * merges another service event and is therefore processed after the owner commits
- * STARTED or FAILED.
- * If that owner observes CONFIG, its stack-local synchronous submission shortcut is
- * abandoned; any preserved public record completes through its durable Operation.
+ * pending payload 从公共字节队列复制，metadata 仍留在队首；提升时先发布 active 状态，
+ * 再调用 `StartDmaTx()`。该调用返回前发生的 terminal callback 只合并事件，并在 owner
+ * 提交 STARTED/FAILED 后处理。owner 观察到 CONFIG 时放弃栈上同步完成捷径，保留记录
+ * 通过其持久 Operation 完成。 / Pending data is copied while metadata remains queued.
+ * Promotion publishes active state before `StartDmaTx()`, so an early terminal callback
+ * is deferred until STARTED/FAILED is committed. CONFIG abandons stack-local synchronous
+ * completion; preserved records complete through their durable Operation.
  *
- * `StartDmaTx() == FAILED` is record-local and never requests CONFIG. Runtime ERROR asks
- * the backend to recover the data path, preserves active and pending software records,
- * restarts the active DMA after quiescence when one exists, and resumes queued work.
- * CONFIG validates, reserves, stores, and publishes one complete payload through this
- * model. After quiescence it preserves active and pending records, preserves every
- * record still in the public WritePort queue, restarts active under the new
- * configuration when one exists, and republishes WRITE.
+ * `StartDmaTx() == FAILED` 只影响当前记录，不请求 CONFIG。runtime ERROR 和 CONFIG
+ * 都在硬件静止后保留 active、pending 与公共队列记录；存在 active 时从 byte 0 重启，
+ * 然后恢复队列推进。 / A start failure is record-local. Runtime ERROR and CONFIG retain
+ * active, pending, and queued records across quiescence, restart active from byte zero
+ * when present, and resume queued work.
  *
- * `Backend::ValidateConfig()` runs before CONFIG reservation and owner acquisition. It
- * must be side-effect-free, safe for concurrent task/ISR callers, and must not access
- * UART/DMA state that requires the service owner. `AdvanceConfig()`,
- * `CompleteConfig()`, `AdvanceRecovery()`, and `CompleteRecovery()` obey
- * `UartDmaControlResult`; the model also passes whether a LibXR active TX exists so the
- * backend never infers software ownership from idle DMA/UART registers. Every PENDING
- * path is idempotent and owns a guaranteed future
- * carrier. Complete hooks return `UartDmaControlProgress`. After an Advance hook returns
- * COMPLETED, the model publishes its own CONTROL_READY continuation together with the
- * returned old-TX COMPLETE fact, if any. That forces one hardware-quiescent service
- * snapshot to retire the old active generation. The corresponding Complete hook then
- * restarts RX, retained active TX is restarted when present, and only then is the
- * RX/config gate released. This internal continuation does not depend on a later Write,
- * IRQ, or external scheduler. Every hook reached with `in_isr == true` must be ISR-safe
- * and non-blocking.
+ * `ValidateConfig()` 在 CONFIG reservation 和 owner acquisition 前运行，必须无副作用、
+ * 支持 task/ISR 并发调用，且不得访问需要 owner 的 UART/DMA 状态。每条 PENDING 路径必须
+ * 幂等并保证未来 carrier；`in_isr == true` 可达的 hook 必须 ISR-safe 且非阻塞。 / Config
+ * validation runs before admission, is side-effect-free and concurrency-safe, and must
+ * not touch owner-protected hardware. Every PENDING path is idempotent and guarantees a
+ * future carrier; hooks reached from ISR are ISR-safe and non-blocking.
  *
- * CONFIG may upgrade a recovery transaction while its Advance hook is pending. The
- * already-selected recovery Advance hook remains responsible for reaching quiescence;
- * after it completes, CONFIG applies its payload without running `CompleteRecovery()` or
- * restarting the old data path in between. CONFIG reserved after `CompleteRecovery()`
- * has already begun is retained as the next transaction instead, because that backend
- * restart has crossed its linearization point.
+ * `active_tx` 是 LibXR 软件所有权的权威事实；后端不得根据 DMA/UART 寄存器空闲状态
+ * 反推记录所有权。模型会把已确定的 `in_isr` 传给每个 owner 侧硬件
+ * hook，后端不得再次探测执行 上下文。 / `active_tx` is the authoritative LibXR
+ * software-ownership fact; a backend must not infer record ownership from idle DMA/UART
+ * registers. The model supplies the resolved `in_isr` value to each owner-side hardware
+ * hook, so the backend must not rediscover execution context.
  *
- * @tparam Backend Statically bound platform backend.
- * @tparam Policy Per-instance serialized execution policy.
+ * Advance hook 返回 COMPLETED 后，模型发布 CONTROL_READY，并在下一硬件静止快照退休旧
+ * generation。Complete hook 重启 RX 和保留的 active TX，之后才释放 RX/config gate；
+ * 该 continuation 不依赖后续 Write、IRQ 或外部 scheduler。 / COMPLETED schedules a
+ * hardware-quiescent snapshot to retire the old generation. The Complete hook restarts
+ * RX and retained active TX before reopening the gate, without relying on an external
+ * carrier.
+ *
+ * recovery 的 Advance 尚 pending 时，CONFIG 可将其升级并复用同一次 stop；若
+ * `CompleteRecovery()` 已开始，restart 已跨过线性化点，CONFIG 保留为下一事务。 /
+ * CONFIG may upgrade a recovery whose Advance hook is pending. Once `CompleteRecovery()`
+ * starts, restart has crossed its linearization point and CONFIG becomes the next
+ * transaction.
+ *
+ * @tparam Backend 静态绑定的平台后端 / Statically bound platform backend
+ * @tparam Policy 每实例的串行执行策略 / Per-instance serialized execution policy
  */
 template <typename Backend, typename Policy>
 class UartDmaModel
 {
  public:
+  /**
+   * @brief 绑定后端、执行策略、写端口和双缓冲存储 / Bind backend, execution policy,
+   * write port, and double-buffer storage
+   * @param backend 生命周期必须覆盖本模型的平台后端 / Platform backend that must
+   * outlive the model
+   * @param policy 生命周期必须覆盖本模型的执行策略 / Execution policy that must
+   * outlive the model
+   * @param port 生命周期必须覆盖本模型的写端口 / Write port that must outlive the model
+   * @param storage 两个等长 TX block 的连续存储；空写端口可使用空存储 / Contiguous
+   * storage for two equal TX blocks; empty storage is allowed for a disabled write port
+   */
   UartDmaModel(Backend& backend, Policy& policy, WritePort& port, RawData storage)
       : backend_(backend), policy_(policy), port_(port), buffers_(storage)
   {
@@ -164,21 +195,34 @@ class UartDmaModel
     buffers_.SetActiveBlock(true);
   }
 
-  /** Publish WRITE and return the current call's synchronous result when identifiable. */
+  /**
+   * @brief 发布 WRITE，并在可判定时返回本调用的同步结果 / Publish WRITE and return
+   * this call's synchronous result when identifiable
+   * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @return 当前记录的同步提交结果；异步接管时为 `PENDING` / Synchronous submission
+   * result for this record, or `PENDING` after asynchronous handoff
+   */
   ErrorCode Submit(bool in_isr)
   {
     SubmitContext context{};
     (void)policy_.Invoke(EventMask(UartDmaEvent::WRITE),
                          [this, in_isr, &context](uint32_t events) noexcept
                          { return ServiceEvents(events, in_isr, &context); });
-    return context.result;
+    return context.result_;
   }
 
   /**
-   * @brief Validate, reserve, store, and publish one complete CONFIG transaction.
+   * @brief 校验、保留、存储并发布一个完整 CONFIG transaction / Validate, reserve,
+   * store, and publish one CONFIG transaction
    *
-   * Validation precedes all model admission; see the pure `ValidateConfig()` backend
-   * contract in the class documentation.
+   * 校验先于所有 model admission；后端 `ValidateConfig()` 必须遵守类注释中的纯函数
+   * 契约。 / Validation precedes all model admission; the backend validator follows the
+   * side-effect-free contract in the class documentation.
+   *
+   * @param config 待应用的完整 UART 配置 / Complete UART configuration to apply
+   * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @return 接纳时为 `OK`，已有 CONFIG 时为 `BUSY`，否则为校验错误 / `OK` when
+   * admitted, `BUSY` while CONFIG is outstanding, otherwise a validation error
    */
   ErrorCode SetConfig(UART::Configuration config, bool in_isr)
   {
@@ -199,26 +243,42 @@ class UartDmaModel
   }
 
   /**
-   * @brief Publish one authoritative whole-transfer completion.
+   * @brief 发布一次权威的整笔传输完成 / Publish one authoritative whole-transfer
+   * completion
    *
-   * A backend must not publish this merely because a partial prefix has drained. During
-   * control stop it is valid only after the backend has already proved that the old DMA
-   * payload completed without a TX error. COMPLETE is also a control carrier, so that
-   * authoritative terminal can finish a pending quiescence transaction.
+   * 后端不得仅因部分 prefix 已排空而发布。control stop 期间，只有证明旧 DMA payload
+   * 已完整完成且无 TX error 后才有效。COMPLETE 同时也是 control carrier。 / A backend
+   * must not publish this for a partial prefix. During control stop it is valid only
+   * after proving complete old-DMA delivery without TX error. COMPLETE is also a control
+   * carrier.
+   *
+   * @param in_isr 是否从 ISR 上下文发布 / Whether published from ISR context
    */
   void OnTransferDone(bool in_isr) { Invoke(UartDmaEvent::COMPLETE, in_isr); }
 
-  /** Publish one authoritative runtime UART/DMA error. */
+  /**
+   * @brief 发布一次权威 runtime UART/DMA error / Publish one authoritative runtime
+   * UART/DMA error
+   * @param in_isr 是否从 ISR 上下文发布 / Whether published from ISR context
+   */
   void OnTransferError(bool in_isr) { Invoke(UartDmaEvent::ERROR, in_isr); }
 
   /**
-   * @brief Run one RX fragment after acquiring the complete RX/CONFIG gate.
+   * @brief 取得完整 RX/CONFIG gate 后运行一个 RX 片段 / Run one RX fragment after
+   * acquiring the complete RX/CONFIG gate
    *
-   * The backend may read and clear interrupt status before this call. `handler` contains
-   * the first DMA position/descriptor access and all byte delivery. A rejected fragment
-   * is intentionally dropped and also acts as a carrier for waiting control work.
+   * 后端可在本调用前读清中断状态。`handler` 必须包含首次 DMA 位置/descriptor 访问和全部
+   * 字节交付。被拒绝的片段按约定丢弃，同时为等待中的 control 提供 carrier。 / The
+   * backend may acknowledge interrupt status first. `handler` contains the first DMA
+   * position or descriptor access and all byte delivery. A rejected fragment is dropped
+   * and carries waiting control work.
    *
-   * @return true when `handler` ran; false when CONFIG or recovery closed RX admission.
+   * @tparam Handler RX 片段处理器类型 / RX-fragment handler type
+   * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @param handler gate 内执行的 RX 硬件读取和字节搬运 / RX hardware access and byte
+   * movement performed inside the gate
+   * @return `handler` 已运行时为 true；CONFIG/recovery 关闭 RX admission 时为 false /
+   * True when `handler` ran; false when CONFIG or recovery closed RX admission
    */
   template <typename Handler>
   bool ProcessRx(bool in_isr, Handler&& handler)
@@ -230,12 +290,21 @@ class UartDmaModel
   }
 
   /**
-   * @brief Gate RX work inside an `InvokeIrq()` source without nested control dispatch.
+   * @brief 在 `InvokeIrq()` source 内 gate RX，且不嵌套 dispatch control / Gate RX
+   * inside an `InvokeIrq()` source without nested control dispatch
    *
-   * Any required CONTROL_READY fact is ORed into `source_events`. The IRQ source must
-   * return that mask together with all COMPLETE/ERROR facts read from the same hardware
-   * snapshot. This prevents CONFIG from retiring the old generation between RX handling
-   * and a later terminal fact from that snapshot.
+   * 所需 CONTROL_READY 会 OR 到 `source_events`。IRQ source 必须将该掩码与同一硬件
+   * 快照中的全部 COMPLETE/ERROR 一起返回，避免 CONFIG 在 RX 处理与该快照后续 terminal
+   * 之间退休旧 generation。 / CONTROL_READY is ORed into `source_events`, which the
+   * IRQ source returns with all terminal facts from the same hardware snapshot. This
+   * prevents CONFIG from retiring the old generation between those facts.
+   *
+   * @tparam Handler RX 片段处理器类型 / RX-fragment handler type
+   * @param source_events 同一 IRQ 快照的输入/输出事件掩码 / Input/output event mask for
+   * the same IRQ snapshot
+   * @param handler gate 内执行的 RX 硬件读取和字节搬运 / RX hardware access and byte
+   * movement performed inside the gate
+   * @return `handler` 已运行时为 true，否则为 false / True when `handler` ran
    */
   template <typename Handler>
   bool ProcessRxInIrqSource(uint32_t& source_events, Handler&& handler)
@@ -257,15 +326,28 @@ class UartDmaModel
     return true;
   }
 
-  /** Publish a real backend stop-completion carrier. */
+  /**
+   * @brief 发布真实的后端 stop-completion carrier / Publish a real backend
+   * stop-completion carrier
+   * @param in_isr 是否从 ISR 上下文发布 / Whether published from ISR context
+   */
   void OnStopDone(bool in_isr) { Invoke(UartDmaEvent::STOP_DONE, in_isr); }
 
   /**
-   * @brief Admit an owned raw IRQ before its first protected status access.
+   * @brief 在首次访问受保护状态前 admit 自有 raw IRQ / Admit an owned raw IRQ before
+   * its first protected status access
    *
-   * `source` may read/acknowledge hardware and return `UartDmaEvent` facts. Any RX
-   * position/descriptor consumption inside it must use `ProcessRxInIrqSource()` so a
-   * waiting control transaction joins the same returned snapshot.
+   * `source` 可读清硬件并返回 `UartDmaEvent`。其中任何 RX 位置/descriptor 消费都必须
+   * 使用 `ProcessRxInIrqSource()`，使等待中的 control 加入同一返回快照。 / `source`
+   * may acknowledge hardware and return events. RX position or descriptor consumption
+   * inside it must use `ProcessRxInIrqSource()` so waiting control joins that snapshot.
+   *
+   * @tparam Source 首次读清受保护 IRQ 状态的可调用对象 / Callable performing the first
+   * protected IRQ-status access
+   * @param source raw IRQ source 操作 / Raw IRQ source operation
+   * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @return 本调用取得并释放 service owner 时为 true，否则为 false / True when this
+   * call acquired and released the service owner; false otherwise
    */
   template <typename Source>
   bool InvokeIrq(Source&& source, bool in_isr)
@@ -275,8 +357,18 @@ class UartDmaModel
                              { return ServiceEvents(events, in_isr, nullptr); });
   }
 
+  /**
+   * @brief 返回指定 TX storage block / Return a selected TX storage block
+   * @param block block 索引，只允许 0 或 1 / Block index, either 0 or 1
+   * @return DMA 可读 block 地址 / DMA-readable block address
+   */
   [[nodiscard]] uint8_t* Buffer(int block) const { return buffers_.Buffer(block); }
 
+  /**
+   * @brief 将 UART DMA 事件转换为位掩码 / Convert a UART DMA event to its bit mask
+   * @param event 单个事件值 / Single event value
+   * @return 对应事件位 / Corresponding event bit
+   */
   static constexpr uint32_t EventMask(UartDmaEvent event)
   {
     return static_cast<uint32_t>(event);
@@ -320,9 +412,9 @@ class UartDmaModel
 
   struct SubmitContext
   {
-    ErrorCode result = ErrorCode::PENDING;
-    bool resolved = false;
-    bool synchronous_completion_allowed = true;
+    ErrorCode result_ = ErrorCode::PENDING;
+    bool resolved_ = false;
+    bool synchronous_completion_allowed_ = true;
   };
 
   static constexpr uint32_t ALL_EVENTS =
@@ -618,8 +710,8 @@ class UartDmaModel
     }
 
     const bool synchronous_submission =
-        (submit != nullptr) && submit->synchronous_completion_allowed &&
-        !submit->resolved && (port_.queue_info_->Size() == 1U);
+        (submit != nullptr) && submit->synchronous_completion_allowed_ &&
+        !submit->resolved_ && (port_.queue_info_->Size() == 1U);
 
     // Publish the complete active state before the backend can synchronously callback.
     buffers_.FlipActiveBlock();
@@ -656,8 +748,8 @@ class UartDmaModel
   {
     if (synchronous_submission)
     {
-      submit->result = result;
-      submit->resolved = true;
+      submit->result_ = result;
+      submit->resolved_ = true;
       return;
     }
     port_.Finish(in_isr, result, info);
@@ -667,7 +759,7 @@ class UartDmaModel
   {
     if (submit != nullptr)
     {
-      submit->synchronous_completion_allowed = false;
+      submit->synchronous_completion_allowed_ = false;
     }
   }
 

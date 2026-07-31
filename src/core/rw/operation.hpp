@@ -24,6 +24,7 @@ namespace LibXR
 class OperationPollingStatus
 {
  public:
+  /** @brief 轮询操作的生命周期状态 / Polling-operation lifecycle state. */
   enum Value : uint32_t
   {
     READY,
@@ -32,38 +33,69 @@ class OperationPollingStatus
     ERROR
   };
 
+  /**
+   * @brief 构造原子轮询状态 / Construct an atomic polling status
+   * @param initial 初始状态 / Initial state
+   */
   OperationPollingStatus(Value initial = READY) noexcept
       : value_(static_cast<uint32_t>(initial))
   {
   }
 
+  /**
+   * @brief 以 relaxed load 复制当前状态 / Copy the current status with a relaxed load
+   * @param other 源状态对象 / Source status object
+   */
   OperationPollingStatus(const OperationPollingStatus& other) noexcept
       : value_(static_cast<uint32_t>(other.Load(std::memory_order_relaxed)))
   {
   }
 
+  /**
+   * @brief 以 relaxed 顺序复制另一个状态值 / Copy another status with relaxed ordering
+   * @param other 源状态对象 / Source status object
+   * @return 当前对象 / This object
+   */
   OperationPollingStatus& operator=(const OperationPollingStatus& other) noexcept
   {
     Store(other.Load(std::memory_order_relaxed), std::memory_order_relaxed);
     return *this;
   }
 
+  /**
+   * @brief 发布一个新状态 / Publish a new status
+   * @param status 新状态值 / New status value
+   * @return 当前对象 / This object
+   */
   OperationPollingStatus& operator=(Value status) noexcept
   {
     Store(status);
     return *this;
   }
 
+  /**
+   * @brief 使用指定 memory order 存储状态 / Store the status with the selected memory
+   * order
+   * @param status 新状态值 / New status value
+   * @param order 原子存储顺序 / Atomic store order
+   */
   void Store(Value status, std::memory_order order = std::memory_order_release) noexcept
   {
     value_.store(static_cast<uint32_t>(status), order);
   }
 
+  /**
+   * @brief 使用指定 memory order 读取状态 / Load the status with the selected memory
+   * order
+   * @param order 原子读取顺序 / Atomic load order
+   * @return 当前状态值 / Current status value
+   */
   Value Load(std::memory_order order = std::memory_order_acquire) const noexcept
   {
     return static_cast<Value>(value_.load(order));
   }
 
+  /** @return 以 acquire 顺序读取的当前状态 / Current status loaded with acquire. */
   operator Value() const noexcept { return Load(); }
 
  private:
@@ -129,7 +161,8 @@ class Operation
   /**
    * @brief Constructs a polling operation.
    * @brief 构造轮询操作。
-   * @param status Atomic polling status shared with the completion context.
+   * @param status 与完成上下文共享的原子轮询状态 / Atomic polling status shared with
+   * the completion context
    */
   Operation(OperationPollingStatus& status)
       : data{.status = &status}, type(OperationType::POLLING)
@@ -212,7 +245,8 @@ class Operation
    * @brief Updates operation status based on type.
    * @brief 根据类型更新操作状态。
    * @param in_isr Indicates if executed within an interrupt.
-   * @param args Parameters passed to the callback.
+   * @param status 转发给 callback 或 polling 状态的结果 / Result forwarded to the
+   * callback or polling status
    */
   template <typename Status>
   void UpdateStatus(bool in_isr, Status&& status)
@@ -277,16 +311,19 @@ class Operation
 };
 
 /**
- * @brief Shared BLOCK waiter handoff for synchronous driver operations.
+ * @brief 同步驱动操作共享的 BLOCK waiter 交接状态 / Shared BLOCK-waiter handoff for
+ * synchronous driver operations
  *
- * Timeout detaches the waiting caller. A late completion may still clear the
- * in-flight state, but it no longer belongs to that timed-out caller.
+ * timeout 会分离等待调用者。迟到的 completion 仍可清理 in-flight 状态，但不再属于已
+ * timeout 的调用者。 / Timeout detaches the waiting caller. A late completion may
+ * still clear in-flight state, but no longer belongs to that caller.
  */
 class AsyncBlockWait
 {
  public:
   // Keep the waiter state 32-bit wide so STM32 builds stay within the
   // project-wide atomic shim boundary.
+  /** @brief waiter 与 completion 的交接状态 / Waiter-completion handoff state. */
   enum class State : uint32_t
   {
     IDLE = 0,
@@ -295,6 +332,11 @@ class AsyncBlockWait
     DETACHED = 3,
   };
 
+  /**
+   * @brief 使用指定 semaphore 启动一次等待 / Start one wait with a semaphore
+   * @param sem 本次等待独占的 semaphore / Semaphore dedicated to this wait
+   * @pre 前一次等待已经完成或取消 / Any previous wait has completed or been cancelled
+   */
   void Start(Semaphore& sem)
   {
     sem_ = &sem;
@@ -302,8 +344,15 @@ class AsyncBlockWait
     state_.store(State::PENDING, std::memory_order_release);
   }
 
+  /** @brief 在等待开始前取消当前 handoff / Cancel the current handoff before waiting. */
   void Cancel() { state_.store(State::IDLE, std::memory_order_release); }
 
+  /**
+   * @brief 等待 completion 或 timeout / Wait for completion or timeout
+   * @param timeout 最大等待毫秒数 / Maximum wait in milliseconds
+   * @return completion 结果，或调用者成功分离后的 `TIMEOUT` / Completion result, or
+   * `TIMEOUT` after the caller detaches
+   */
   ErrorCode Wait(uint32_t timeout)
   {
     ASSERT(sem_ != nullptr);
@@ -344,6 +393,15 @@ class AsyncBlockWait
     return result_;
   }
 
+  /**
+   * @brief 尝试认领 waiter 并发布 completion / Try to claim the waiter and post
+   * completion
+   * @param in_isr 是否从 ISR 上下文完成 / Whether completion runs in ISR context
+   * @param ec 最终操作结果 / Final operation result
+   * @return completion 认领并唤醒 waiter 时为 true；waiter 已分离或操作已空闲时为 false /
+   * True when completion claimed and woke the waiter; false after detachment or when the
+   * operation is already idle
+   */
   bool TryPost(bool in_isr, ErrorCode ec)
   {
     ASSERT(sem_ != nullptr);

@@ -43,12 +43,20 @@ namespace LibXR
 class ESP32UartDma;
 
 /**
- * @brief ESP UART backend backed exclusively by UHCI/AHB-GDMA.
+ * @brief 仅使用 UHCI/AHB-GDMA 的 ESP UART 后端 / ESP UART backend backed exclusively
+ * by UHCI/AHB-GDMA
  *
- * This type exists only on targets that expose both AHB-GDMA and UHCI. TX uses the
- * common retained double-buffer model; RX uses a linked descriptor ring. Interrupts
- * are registered as non-IRAM handlers because the complete LibXR service and callback
- * chain is not required to remain executable while flash cache is disabled.
+ * 本类型仅存在于同时提供 AHB-GDMA 与 UHCI 的目标。TX 使用通用 retained
+ * double-buffer 模型，RX 使用 linked descriptor ring。IRQ 注册为 non-IRAM handler，
+ * 因为 flash cache 关闭期间无需保证整个 LibXR service 与 callback 链可执行。 / This
+ * type exists only on targets that expose both AHB-GDMA and UHCI. TX uses the common
+ * retained double-buffer model; RX uses a linked descriptor ring. Interrupts are
+ * registered as non-IRAM handlers because the complete LibXR service and callback chain
+ * is not required to remain executable while flash cache is disabled.
+ *
+ * @note SMP 目标上必须从固定到单一核心的 task 构造，使 non-shared UART/GDMA IRQ
+ * 固定在同一核心 / On SMP targets, construct from a task pinned to exactly one core so
+ * the non-shared UART/GDMA IRQs are fixed to that core
  */
 class ESP32UartDma : public UART
 {
@@ -58,38 +66,81 @@ class ESP32UartDma : public UART
   friend class UartDmaModel<ESP32UartDma, ExecutionPolicy>;
 
  public:
+  /**
+   * @brief 保持既有 GPIO 路由不变的引脚值 / Pin value that preserves the existing GPIO
+   * route
+   */
   static constexpr int PIN_NO_CHANGE = -1;
 
+  /**
+   * @brief 构造并接管一个 ESP UHCI/AHB-GDMA UART / Construct and take ownership of one
+   * ESP UHCI/AHB-GDMA UART
+   * @param uart_num UART 外设编号 / UART peripheral number
+   * @param tx_pin TX GPIO，或 `PIN_NO_CHANGE` / TX GPIO or `PIN_NO_CHANGE`
+   * @param rx_pin RX GPIO，或 `PIN_NO_CHANGE` / RX GPIO or `PIN_NO_CHANGE`
+   * @param rts_pin RTS GPIO，或 `PIN_NO_CHANGE` / RTS GPIO or `PIN_NO_CHANGE`
+   * @param cts_pin CTS GPIO，或 `PIN_NO_CHANGE` / CTS GPIO or `PIN_NO_CHANGE`
+   * @param rx_buffer_size RX descriptor ring 的 payload 容量 / RX descriptor-ring
+   * payload capacity
+   * @param tx_buffer_size 每个 TX 双缓冲 block 的容量 / Capacity of each TX
+   * double-buffer block
+   * @param tx_queue_size 待发送记录队列深度 / Pending TX record queue depth
+   * @param config 初始 UART 帧格式和波特率 / Initial UART framing and baud rate
+   */
   ESP32UartDma(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin = PIN_NO_CHANGE,
                int cts_pin = PIN_NO_CHANGE, size_t rx_buffer_size = 1024,
                size_t tx_buffer_size = 512, uint32_t tx_queue_size = 5,
                UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
   /**
-   * @brief Apply one serialized framing and baud configuration.
-   * @return `BUSY` while an earlier configuration request is outstanding.
-   * @warning On single-core DirectPolicy targets, do not call this method from a
-   *          higher-priority ISR that can preempt a related UART/GDMA ISR after its
-   *          hardware-status read, or from inside that unfinished raw ISR path.
+   * @brief 提交一次串行化帧格式和波特率配置 / Apply one serialized framing and baud
+   * configuration
+   * @param config 新的帧格式和波特率 / New framing and baud rate
+   * @return 前一个配置仍未完成时返回 `BUSY` / `BUSY` while an earlier configuration
+   * request is outstanding
+   * @warning 在单核 DirectPolicy 目标上，不得从能在相关 UART/GDMA ISR 读取硬件状态后
+   * 抢占它的高优先级 ISR，也不得从该尚未退出的 raw ISR 路径内部调用 / On single-core
+   * DirectPolicy targets, do not call this method from a higher-priority ISR that can
+   * preempt a related UART/GDMA ISR after its hardware-status read, or from inside that
+   * unfinished raw ISR path
    */
   ErrorCode SetConfig(UART::Configuration config) override;
 
   /**
-   * @brief Toggle the UART peripheral's internal loopback bit.
-   * @warning The caller must quiesce traffic and configuration first.
+   * @brief 切换 UART 外设内部 loopback 位 / Toggle the UART peripheral's internal
+   * loopback bit
+   * @param enable 是否启用内部 loopback / Whether to enable internal loopback
+   * @return UART 硬件尚未启用时返回 `STATE_ERR`，否则返回 `OK` / `STATE_ERR` before
+   * UART hardware is enabled; otherwise `OK`
+   * @warning 调用者必须先保证数据传输和配置均静止 / The caller must quiesce traffic and
+   * configuration first
    */
   ErrorCode SetLoopback(bool enable);
 
+  /**
+   * @brief WritePort 提交入口 / WritePort submission entry
+   * @param port 发起提交的写端口 / Write port issuing the submission
+   * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
+   * @return 提交结果 / Submission result
+   */
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
+
+  /**
+   * @brief ReadPort 读取入口 / ReadPort read entry
+   * @param port 发起读取的读端口 / Read port issuing the read
+   * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
+   * @return 始终为 `PENDING`；RX producer 后续完成读取 / Always `PENDING`; the RX
+   * producer completes the read later
+   */
   static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
  private:
   struct TxStorage
   {
-    uint8_t* data = nullptr;
-    size_t size = 0U;
-    size_t block_stride = 0U;
-    size_t cache_line_size = 1U;
+    uint8_t* data_ = nullptr;
+    size_t size_ = 0U;
+    size_t block_stride_ = 0U;
+    size_t cache_line_size_ = 1U;
   };
 
   static TxStorage AllocateTxStorage(size_t block_size);

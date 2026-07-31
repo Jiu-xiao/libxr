@@ -123,7 +123,7 @@ STM32GpdmaUartAdapter::STM32GpdmaUartAdapter(UART_HandleTypeDef* uart_handle)
   REQUIRE((uart_handle->hdmarx == nullptr) ||
           (IS_GPDMA_INSTANCE(uart_handle->hdmarx->Instance) != 0U));
 #endif
-  state_.uart_handle = uart_handle;
+  state_.uart_handle_ = uart_handle;
 }
 
 HAL_StatusTypeDef STM32GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
@@ -131,44 +131,44 @@ HAL_StatusTypeDef STM32GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
                                                               size_t descriptor_count,
                                                               bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(state_.uart_handle->hdmarx != nullptr, in_isr);
+  REQUIRE_FROM_CALLBACK(state_.uart_handle_->hdmarx != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(buffer != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(descriptor_count == RX_NODE_COUNT, in_isr);
   REQUIRE_FROM_CALLBACK(total_size >= RX_NODE_COUNT, in_isr);
   REQUIRE_FROM_CALLBACK((total_size % RX_NODE_COUNT) == 0U, in_isr);
   REQUIRE_FROM_CALLBACK((total_size / RX_NODE_COUNT) <= UINT16_MAX, in_isr);
   REQUIRE_FROM_CALLBACK(IS_DMA_BLOCK_SIZE(total_size / RX_NODE_COUNT) != 0U, in_isr);
-  REQUIRE_FROM_CALLBACK(state_.uart_handle->hdmarx->Mode == DMA_LINKEDLIST_CIRCULAR,
+  REQUIRE_FROM_CALLBACK(state_.uart_handle_->hdmarx->Mode == DMA_LINKEDLIST_CIRCULAR,
                         in_isr);
 
-  if (!state_.rx_queue_built)
+  if (!state_.rx_queue_built_)
   {
     BuildRxQueue(buffer, total_size, descriptor_count, in_isr);
   }
   else
   {
-    REQUIRE_FROM_CALLBACK(buffer == state_.rx_buffer, in_isr);
-    REQUIRE_FROM_CALLBACK(total_size == state_.rx_total_size, in_isr);
-    REQUIRE_FROM_CALLBACK(state_.uart_handle->hdmarx->LinkedListQueue == &state_.rx_queue,
-                          in_isr);
+    REQUIRE_FROM_CALLBACK(buffer == state_.rx_buffer_, in_isr);
+    REQUIRE_FROM_CALLBACK(total_size == state_.rx_total_size_, in_isr);
+    REQUIRE_FROM_CALLBACK(
+        state_.uart_handle_->hdmarx->LinkedListQueue == &state_.rx_queue_, in_isr);
   }
 
-  REQUIRE_FROM_CALLBACK(StopComplete(state_.uart_handle->hdmarx), in_isr);
-  FinalizeStopped(state_.uart_handle->hdmarx, in_isr);
+  REQUIRE_FROM_CALLBACK(StopComplete(state_.uart_handle_->hdmarx), in_isr);
+  FinalizeStopped(state_.uart_handle_->hdmarx, in_isr);
   // GPDMA fetches the private nodes directly; cacheable targets must publish all
   // CPU-built descriptor and queue fields before the HAL starts the channel.
   STM32_CleanDCacheByAddr(&state_, sizeof(state_));
   STM32_CleanDCacheByAddr(buffer, total_size);
   STM32_InvalidateDCacheByAddr(buffer, total_size);
 
-  return HAL_UARTEx_ReceiveToIdle_DMA(state_.uart_handle, buffer,
-                                      static_cast<uint16_t>(state_.rx_node_size));
+  return HAL_UARTEx_ReceiveToIdle_DMA(state_.uart_handle_, buffer,
+                                      static_cast<uint16_t>(state_.rx_node_size_));
 }
 
 uint8_t* STM32GpdmaUartAdapter::GetLinkedListDmaRxProducer() const
 {
-  ASSERT(state_.uart_handle->hdmarx != nullptr);
-  const uintptr_t destination = state_.uart_handle->hdmarx->Instance->CDAR;
+  ASSERT(state_.uart_handle_->hdmarx != nullptr);
+  const uintptr_t destination = state_.uart_handle_->hdmarx->Instance->CDAR;
   return reinterpret_cast<uint8_t*>(destination);
 }
 
@@ -179,8 +179,8 @@ void STM32GpdmaUartAdapter::PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t s
 
 void STM32GpdmaUartAdapter::CloseTxTerminalSource() const
 {
-  ATOMIC_CLEAR_BIT(state_.uart_handle->Instance->CR1, USART_CR1_TCIE);
-  const volatile uint32_t cr1 = state_.uart_handle->Instance->CR1;
+  ATOMIC_CLEAR_BIT(state_.uart_handle_->Instance->CR1, USART_CR1_TCIE);
+  const volatile uint32_t cr1 = state_.uart_handle_->Instance->CR1;
   UNUSED(cr1);
   __DSB();
 }
@@ -189,7 +189,7 @@ bool STM32GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
                                        AbortCallback callback, bool in_isr)
 {
   ASSERT(dma_handle != nullptr);
-  ASSERT(dma_handle->Parent == state_.uart_handle);
+  ASSERT(dma_handle->Parent == state_.uart_handle_);
   ASSERT(callback != nullptr);
 
   const auto abort_is_joinable = [&]()
@@ -202,8 +202,8 @@ bool STM32GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
     // A UART line error may have started the RX abort before LibXR reaches this
     // boundary. Preserve HAL's callback: it publishes ERROR through
     // HAL_UART_ErrorCallback(), which is a carrier for the same service.
-    return (dma_handle == state_.uart_handle->hdmarx) &&
-           (state_.uart_handle->ErrorCode != HAL_UART_ERROR_NONE) &&
+    return (dma_handle == state_.uart_handle_->hdmarx) &&
+           (state_.uart_handle_->ErrorCode != HAL_UART_ERROR_NONE) &&
            (dma_handle->XferAbortCallback != nullptr);
   };
 
@@ -275,17 +275,17 @@ bool STM32GpdmaUartAdapter::StopComplete(DMA_HandleTypeDef* dma_handle)
 
 bool STM32GpdmaUartAdapter::AllStopsComplete() const
 {
-  return ((state_.uart_handle->hdmatx == nullptr) ||
-          StopComplete(state_.uart_handle->hdmatx)) &&
-         ((state_.uart_handle->hdmarx == nullptr) ||
-          StopComplete(state_.uart_handle->hdmarx));
+  return ((state_.uart_handle_->hdmatx == nullptr) ||
+          StopComplete(state_.uart_handle_->hdmatx)) &&
+         ((state_.uart_handle_->hdmarx == nullptr) ||
+          StopComplete(state_.uart_handle_->hdmarx));
 }
 
 void STM32GpdmaUartAdapter::CaptureStoppedTx(DMA_HandleTypeDef* dma_handle,
                                              bool& evidence_captured,
                                              bool& payload_complete, bool& error) const
 {
-  ASSERT(dma_handle == state_.uart_handle->hdmatx);
+  ASSERT(dma_handle == state_.uart_handle_->hdmatx);
   ASSERT(StopComplete(dma_handle));
 
   // CBR1 is intentionally sampled before HAL_UART_Abort() overwrites ErrorCode with
@@ -360,7 +360,7 @@ void STM32GpdmaUartAdapter::ClearFlags(DMA_HandleTypeDef* dma_handle)
 void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size,
                                          size_t descriptor_count, bool in_isr)
 {
-  DMA_HandleTypeDef* const dma_handle = state_.uart_handle->hdmarx;
+  DMA_HandleTypeDef* const dma_handle = state_.uart_handle_->hdmarx;
   REQUIRE_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
   REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue->Head != nullptr, in_isr);
@@ -377,7 +377,7 @@ void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size,
 
   const size_t node_size = total_size / descriptor_count;
   node_config.SrcAddress = static_cast<uint32_t>(
-      reinterpret_cast<uintptr_t>(&state_.uart_handle->Instance->RDR));
+      reinterpret_cast<uintptr_t>(&state_.uart_handle_->Instance->RDR));
   node_config.DataSize = static_cast<uint32_t>(node_size);
 
   for (size_t i = 0U; i < RX_NODE_COUNT; ++i)
@@ -385,23 +385,23 @@ void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size,
     node_config.DstAddress =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&buffer[i * node_size]));
     REQUIRE_FROM_CALLBACK(
-        HAL_DMAEx_List_BuildNode(&node_config, &state_.nodes[i]) == HAL_OK, in_isr);
+        HAL_DMAEx_List_BuildNode(&node_config, &state_.nodes_[i]) == HAL_OK, in_isr);
     REQUIRE_FROM_CALLBACK(
-        HAL_DMAEx_List_InsertNode_Tail(&state_.rx_queue, &state_.nodes[i]) == HAL_OK,
+        HAL_DMAEx_List_InsertNode_Tail(&state_.rx_queue_, &state_.nodes_[i]) == HAL_OK,
         in_isr);
   }
 
-  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_SetCircularMode(&state_.rx_queue) == HAL_OK,
+  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_SetCircularMode(&state_.rx_queue_) == HAL_OK,
                         in_isr);
   REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_UnLinkQ(dma_handle) == HAL_OK, in_isr);
-  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_LinkQ(dma_handle, &state_.rx_queue) == HAL_OK,
+  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_LinkQ(dma_handle, &state_.rx_queue_) == HAL_OK,
                         in_isr);
-  REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue == &state_.rx_queue, in_isr);
+  REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue == &state_.rx_queue_, in_isr);
 
-  state_.rx_buffer = buffer;
-  state_.rx_total_size = total_size;
-  state_.rx_node_size = node_size;
-  state_.rx_queue_built = true;
+  state_.rx_buffer_ = buffer;
+  state_.rx_total_size_ = total_size;
+  state_.rx_node_size_ = node_size;
+  state_.rx_queue_built_ = true;
 }
 
 }  // namespace LibXR
