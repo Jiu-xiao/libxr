@@ -11,7 +11,7 @@
 #endif
 
 /* QingKe V4 LR/SC is not a reservation protocol. Keep native word AMOs, but provide
- * conditional word updates and byte exchange through a bounded single-core guard. */
+ * conditional word updates through a bounded single-core guard. */
 typedef uint32_t libxr_atomic_fallback_guard_state_t;
 
 static inline libxr_atomic_fallback_guard_state_t libxr_atomic_fallback_enter(void)
@@ -32,5 +32,4 @@ static inline void libxr_atomic_fallback_fence(void)
 
 #define LIBXR_ATOMIC_FALLBACK_ATTRIBUTES __attribute__((used, noinline))
 #define LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4
-#define LIBXR_ATOMIC_FALLBACK_EXCHANGE_1
 #include "driver/atomic/atomic_fallback.inc"
