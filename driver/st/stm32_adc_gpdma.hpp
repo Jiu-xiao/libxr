@@ -37,7 +37,8 @@ namespace LibXR
  * controller adapter。 / The CubeMX seed node supplies request and port selection. The
  * adapter validates the sampling geometry and rebuilds a private circular queue without
  * inheriting 2D repeat-address state. Only GPDMA is accepted; LPDMA and HPDMA require
- * controller-specific adapters.
+ * controller-specific adapters. The adapter is started once and remains attached for the
+ * ADC object's lifetime; runtime detach is not supported.
  */
 class STM32GpdmaAdcAdapter
 {
@@ -57,22 +58,11 @@ class STM32GpdmaAdcAdapter
   HAL_StatusTypeDef Start(ADC_HandleTypeDef* adc_handle, uint32_t* buffer,
                           uint32_t sample_count, size_t buffer_size);
 
-  /**
-   * @brief 停止 ADC DMA 并恢复 CubeMX seed queue / Stop ADC DMA and restore the
-   * CubeMX-owned seed queue
-   * @param adc_handle 传给 `Start()` 的同一个 ADC handle / The ADC handle passed to
-   * `Start()`
-   * @return HAL ADC DMA 停止或 queue 恢复结果 / HAL ADC DMA stop or queue-restore
-   * result
-   */
-  HAL_StatusTypeDef Stop(ADC_HandleTypeDef* adc_handle);
-
  private:
   struct alignas(32) StateBlock
   {
     DMA_NodeTypeDef node{};
     DMA_QListTypeDef queue{};
-    DMA_QListTypeDef* original_queue = nullptr;
   };
 
   static_assert((sizeof(StateBlock) % 32U) == 0U);

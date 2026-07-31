@@ -20,6 +20,9 @@ namespace LibXR
 
 /**
  * @brief STM32 ADC 驱动实现 / STM32 ADC driver implementation
+ *
+ * @note 对象在启动期构造并随外设常驻，不提供运行时析构语义。 / Construct at
+ * startup and retain for the peripheral lifetime; runtime teardown is not supported.
  */
 class STM32ADC
 {
@@ -268,11 +271,6 @@ class STM32ADC
    */
   STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
            std::initializer_list<uint32_t> channels, float vref);
-
-  /**
-   * @brief 析构函数 / Destructor
-   */
-  ~STM32ADC();
 
   /**
    * @brief 获取 ADC 通道对象 / Get ADC channel object

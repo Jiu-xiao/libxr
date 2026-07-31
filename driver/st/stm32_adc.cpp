@@ -98,27 +98,6 @@ STM32ADC::STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
   }
 }
 
-STM32ADC::~STM32ADC()
-{
-  if (use_dma_)
-  {
-#if defined(LIBXR_STM32_ADC_GPDMA)
-    REQUIRE(gpdma_adapter_.Stop(hadc_) == HAL_OK);
-#else
-    REQUIRE(HAL_ADC_Stop_DMA(hadc_) == HAL_OK);
-#endif
-  }
-  else
-  {
-    REQUIRE(HAL_ADC_Stop(hadc_) == HAL_OK);
-  }
-  for (uint8_t i = 0; i < NUM_CHANNELS; ++i)
-  {
-    delete channels_[i];
-  }
-  delete[] channels_;
-}
-
 STM32ADC::Channel& STM32ADC::GetChannel(uint8_t index) { return *channels_[index]; }
 
 float STM32ADC::ReadChannel(uint8_t channel)

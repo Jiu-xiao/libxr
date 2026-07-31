@@ -28,52 +28,14 @@ HAL_StatusTypeDef STM32GpdmaAdcAdapter::Start(ADC_HandleTypeDef* adc_handle,
   REQUIRE(dma_handle->InitLinkedList.LinkStepMode == DMA_LSM_FULL_EXECUTION);
   REQUIRE((dma_handle->Instance->CCR & DMA_CCR_LSM) == DMA_LSM_FULL_EXECUTION);
 
-  if (state_.original_queue == nullptr)
-  {
-    BuildAndAttach(adc_handle, buffer, sample_count, buffer_size);
-  }
-  else
-  {
-    REQUIRE(dma_handle->LinkedListQueue == &state_.queue);
-    REQUIRE(state_.queue.Head == &state_.node);
-    REQUIRE(state_.queue.FirstCircularNode == &state_.node);
-    REQUIRE(state_.queue.NodeNumber == 1U);
-  }
+  REQUIRE(dma_handle->LinkedListQueue != &state_.queue);
+  BuildAndAttach(adc_handle, buffer, sample_count, buffer_size);
 
   STM32_CleanDCacheByAddr(&state_, sizeof(state_));
   STM32_CleanDCacheByAddr(buffer, buffer_size);
   STM32_InvalidateDCacheByAddr(buffer, buffer_size);
 
   return HAL_ADC_Start_DMA(adc_handle, buffer, sample_count);
-}
-
-HAL_StatusTypeDef STM32GpdmaAdcAdapter::Stop(ADC_HandleTypeDef* adc_handle)
-{
-  REQUIRE(adc_handle != nullptr);
-  REQUIRE(adc_handle->DMA_Handle != nullptr);
-  DMA_HandleTypeDef* const dma_handle = adc_handle->DMA_Handle;
-  REQUIRE(dma_handle->Parent == adc_handle);
-
-  const HAL_StatusTypeDef stop_status = HAL_ADC_Stop_DMA(adc_handle);
-  if (stop_status != HAL_OK)
-  {
-    return stop_status;
-  }
-
-  if (state_.original_queue == nullptr)
-  {
-    return HAL_OK;
-  }
-
-  REQUIRE(dma_handle->State == HAL_DMA_STATE_READY);
-  REQUIRE(dma_handle->LinkedListQueue == &state_.queue);
-  REQUIRE(state_.queue.State == HAL_DMA_QUEUE_STATE_READY);
-  DMA_QListTypeDef* const original_queue = state_.original_queue;
-  REQUIRE(HAL_DMAEx_List_UnLinkQ(dma_handle) == HAL_OK);
-  REQUIRE(HAL_DMAEx_List_LinkQ(dma_handle, original_queue) == HAL_OK);
-  REQUIRE(dma_handle->LinkedListQueue == original_queue);
-  state_.original_queue = nullptr;
-  return HAL_OK;
 }
 
 void STM32GpdmaAdcAdapter::BuildAndAttach(ADC_HandleTypeDef* adc_handle, uint32_t* buffer,
@@ -123,7 +85,6 @@ void STM32GpdmaAdcAdapter::BuildAndAttach(ADC_HandleTypeDef* adc_handle, uint32_
   REQUIRE(state_.queue.NodeNumber == 1U);
   REQUIRE(state_.queue.State == HAL_DMA_QUEUE_STATE_READY);
 
-  state_.original_queue = dma_handle->LinkedListQueue;
   REQUIRE(HAL_DMAEx_List_UnLinkQ(dma_handle) == HAL_OK);
   REQUIRE(HAL_DMAEx_List_LinkQ(dma_handle, &state_.queue) == HAL_OK);
   REQUIRE(dma_handle->LinkedListQueue == &state_.queue);
