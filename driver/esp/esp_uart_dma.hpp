@@ -3,16 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "driver/gpio.h"
 #include "esp_def.hpp"
-#include "esp_idf_version.h"
 #include "esp_intr_alloc.h"
 #if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
 #include "esp_pm.h"
 #endif
-#include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h"
-#include "freertos/task.h"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
 #include "soc/soc_caps.h"
@@ -144,11 +139,6 @@ class ESP32UartDma : public UART
   };
 
   static TxStorage AllocateTxStorage(size_t block_size);
-  static bool ResolveWordLength(uint8_t data_bits, uart_word_length_t& out);
-  static bool ResolveStopBits(uint8_t stop_bits, uart_stop_bits_t& out);
-  static uart_parity_t ResolveParity(UART::Parity parity);
-  static bool IsBaudrateRepresentable(uint32_t baudrate, uint32_t source_clock_hz);
-  static bool IsCurrentTaskPinned();
 
   [[nodiscard]] ErrorCode ValidateConfig(UART::Configuration config) const;
   UartDmaControlResult AdvanceConfig(UART::Configuration config, bool active_tx,
@@ -161,7 +151,6 @@ class ESP32UartDma : public UART
   bool ApplyConfigPayload(UART::Configuration config);
   ErrorCode InitPowerManagement();
   ErrorCode InitUartHardware();
-  ErrorCode ConfigurePins();
   ErrorCode InstallUartIsr();
   ErrorCode InitDmaBackend();
 
@@ -226,7 +215,7 @@ class ESP32UartDma : public UART
   size_t rx_dma_chunk_size_ = 0U;
   size_t rx_dma_buffer_alignment_ = 1U;
   size_t rx_cache_line_size_ = 1U;
-  uint32_t rx_dma_node_index_ = 0U;
+  uint32_t rx_dma_descriptor_index_ = 0U;
 
   gdma_hal_context_t tx_gdma_hal_ = {};
   int tx_gdma_group_id_ = -1;

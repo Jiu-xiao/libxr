@@ -12,7 +12,7 @@
      defined(LIBXR_ESP_UART_TEST_BACKEND_FIFO)) != 1
 #error "Select exactly one ESP UART hardware-test backend."
 #elif defined(LIBXR_ESP_UART_TEST_BACKEND_DMA)
-#include "esp_uart.hpp"
+#include "esp_uart_dma.hpp"
 #else
 #include "esp_uart_fifo.hpp"
 #include "esp_uart_fifo_test.hpp"

@@ -3,34 +3,12 @@
 #include <algorithm>
 
 #include "esp_attr.h"
-#include "esp_clk_tree.h"
-#include "esp_def.hpp"
 #include "esp_err.h"
-#include "esp_idf_version.h"
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wliteral-suffix"
-#endif
-#include "esp_private/uart_share_hw_ctrl.h"
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-#include "esp_rom_gpio.h"
-#include "hal/uart_ll.h"
-#include "soc/gpio_sig_map.h"
+#include "esp_uart_hal.hpp"
 #include "soc/soc_caps.h"
-#include "soc/uart_periph.h"
 
 namespace
 {
-#if defined(SOC_UART_SUPPORT_XTAL_CLK) && SOC_UART_SUPPORT_XTAL_CLK
-constexpr uart_sclk_t UART_CLOCK_SOURCE = UART_SCLK_XTAL;
-constexpr bool UART_CLOCK_REQUIRES_APB_LOCK = false;
-#else
-constexpr uart_sclk_t UART_CLOCK_SOURCE = UART_SCLK_DEFAULT;
-constexpr bool UART_CLOCK_REQUIRES_APB_LOCK = true;
-#endif
-
 constexpr uint8_t RX_TIMEOUT_THRESHOLD = 1U;
 constexpr uint32_t RX_DATA_INTR_MASK = UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT;
 constexpr uint32_t RX_ERROR_INTR_MASK =
@@ -43,31 +21,12 @@ constexpr uint32_t OWNED_INTR_MASK =
 constexpr uint32_t TX_EMPTY_THRESHOLD = SOC_UART_FIFO_LEN / 2U;
 constexpr uint32_t RX_FULL_THRESHOLD = SOC_UART_FIFO_LEN / 2U;
 
-bool IsConsoleUartInUse(uart_port_t uart_num)
-{
-#if defined(CONFIG_ESP_CONSOLE_UART) && CONFIG_ESP_CONSOLE_UART
-  return static_cast<int>(uart_num) == CONFIG_ESP_CONSOLE_UART_NUM;
-#else
-  (void)uart_num;
-  return false;
-#endif
-}
 }  // namespace
 
 namespace LibXR
 {
 
 void Detail::ESP32UartFifoReadPort::OnRxDequeue(bool in_isr) { owner_.ResumeRx(in_isr); }
-
-bool ESP32UartFifo::IsCurrentTaskPinned()
-{
-#if defined(CONFIG_FREERTOS_SMP) && CONFIG_FREERTOS_SMP
-  const UBaseType_t affinity = vTaskCoreAffinityGet(nullptr);
-  return (affinity != 0U) && ((affinity & (affinity - 1U)) == 0U);
-#else
-  return xTaskGetCoreID(nullptr) != tskNO_AFFINITY;
-#endif
-}
 
 ErrorCode ESP32UartFifo::InitPowerManagement()
 {
@@ -77,8 +36,9 @@ ErrorCode ESP32UartFifo::InitPowerManagement()
     return ErrorCode::STATE_ERR;
   }
 
-  const esp_pm_lock_type_t lock_type =
-      UART_CLOCK_REQUIRES_APB_LOCK ? ESP_PM_APB_FREQ_MAX : ESP_PM_NO_LIGHT_SLEEP;
+  const esp_pm_lock_type_t lock_type = Detail::ESP_UART_CLOCK_REQUIRES_APB_LOCK
+                                           ? ESP_PM_APB_FREQ_MAX
+                                           : ESP_PM_NO_LIGHT_SLEEP;
   if (esp_pm_lock_create(lock_type, 0, "libxr_uart", &pm_lock_) != ESP_OK)
   {
     return ErrorCode::INIT_ERR;
@@ -90,7 +50,7 @@ ErrorCode ESP32UartFifo::InitPowerManagement()
     return ErrorCode::INIT_ERR;
   }
 #else
-  (void)UART_CLOCK_REQUIRES_APB_LOCK;
+  (void)Detail::ESP_UART_CLOCK_REQUIRES_APB_LOCK;
 #endif
   return ErrorCode::OK;
 }
@@ -128,7 +88,7 @@ ESP32UartFifo::ESP32UartFifo(uart_port_t uart_num, int tx_pin, int rx_pin, int r
       _read_port(rx_buffer_size, *this),
       _write_port(tx_queue_size, tx_buffer_size)
 {
-  REQUIRE(!IsConsoleUartInUse(uart_num_));
+  REQUIRE(!Detail::IsEspConsoleUartInUse(uart_num_));
   REQUIRE(uart_num_ < UART_NUM_MAX);
   REQUIRE(uart_num_ < SOC_UART_HP_NUM);
   REQUIRE(rx_buffer_size > 0U);
@@ -136,7 +96,7 @@ ESP32UartFifo::ESP32UartFifo(uart_port_t uart_num, int tx_pin, int rx_pin, int r
   REQUIRE(tx_queue_size > 0U);
   if constexpr (Detail::ESP_UART_USES_IRQ_SERIALIZATION)
   {
-    REQUIRE(IsCurrentTaskPinned());
+    REQUIRE(Detail::IsCurrentTaskPinnedToOneCore());
   }
 
   _read_port = ReadFun;
@@ -177,8 +137,8 @@ ErrorCode ESP32UartFifo::InstallUartIsr()
 
   constexpr int UART_INTR_FLAGS = ESP_INTR_FLAG_LEVEL1 | ESP_INTR_FLAG_INTRDISABLED;
   const esp_err_t result =
-      esp_intr_alloc(uart_periph_signal[uart_num_].irq, UART_INTR_FLAGS, UartIsrEntry,
-                     this, &uart_intr_handle_);
+      esp_intr_alloc(Detail::GetEspUartInterruptSource(uart_num_), UART_INTR_FLAGS,
+                     UartIsrEntry, this, &uart_intr_handle_);
   if (result != ESP_OK)
   {
     return ErrorCode::INIT_ERR;
@@ -222,7 +182,7 @@ ErrorCode ESP32UartFifo::SetLoopback(bool enable)
   {
     return ErrorCode::STATE_ERR;
   }
-  uart_ll_set_loop_back(uart_hal_.dev, enable);
+  Detail::SetEspUartLoopback(uart_hal_, enable);
   return ErrorCode::OK;
 }
 
@@ -754,148 +714,18 @@ void ESP32UartFifo::DisarmConfigTxIdleInterrupt()
   config_tx_idle_interrupt_armed_ = false;
 }
 
-bool ESP32UartFifo::ResolveWordLength(uint8_t data_bits, uart_word_length_t& out)
-{
-  switch (data_bits)
-  {
-    case 5:
-      out = UART_DATA_5_BITS;
-      return true;
-    case 6:
-      out = UART_DATA_6_BITS;
-      return true;
-    case 7:
-      out = UART_DATA_7_BITS;
-      return true;
-    case 8:
-      out = UART_DATA_8_BITS;
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool ESP32UartFifo::ResolveStopBits(uint8_t stop_bits, uart_stop_bits_t& out)
-{
-  switch (stop_bits)
-  {
-    case 1:
-      out = UART_STOP_BITS_1;
-      return true;
-    case 2:
-      out = UART_STOP_BITS_2;
-      return true;
-    default:
-      return false;
-  }
-}
-
-uart_parity_t ESP32UartFifo::ResolveParity(UART::Parity parity)
-{
-  switch (parity)
-  {
-    case UART::Parity::NO_PARITY:
-      return UART_PARITY_DISABLE;
-    case UART::Parity::EVEN:
-      return UART_PARITY_EVEN;
-    case UART::Parity::ODD:
-      return UART_PARITY_ODD;
-    default:
-      return UART_PARITY_DISABLE;
-  }
-}
-
-bool ESP32UartFifo::IsBaudrateRepresentable(uint32_t baudrate, uint32_t source_clock_hz)
-{
-  if ((baudrate == 0U) || (source_clock_hz == 0U))
-  {
-    return false;
-  }
-
-#if defined(UART_SCLK_DIV_NUM_V)
-  constexpr uint32_t MAX_SOURCE_DIV = UART_SCLK_DIV_NUM_V + 1U;
-#elif defined(PCR_UART0_SCLK_DIV_NUM_V)
-  constexpr uint32_t MAX_SOURCE_DIV = PCR_UART0_SCLK_DIV_NUM_V + 1U;
-#elif defined(HP_SYS_CLKRST_REG_UART0_SCLK_DIV_NUM_V)
-  constexpr uint32_t MAX_SOURCE_DIV = HP_SYS_CLKRST_REG_UART0_SCLK_DIV_NUM_V + 1U;
-#else
-  const uint64_t clock_dividend = static_cast<uint64_t>(source_clock_hz) << 4U;
-  const uint64_t clock_divider = clock_dividend / baudrate;
-  return (clock_divider != 0U) && ((clock_divider >> 4U) <= UART_CLKDIV_V);
-#endif
-
-#if defined(UART_SCLK_DIV_NUM_V) || defined(PCR_UART0_SCLK_DIV_NUM_V) || \
-    defined(HP_SYS_CLKRST_REG_UART0_SCLK_DIV_NUM_V)
-  const uint64_t max_uart_divider = UART_CLKDIV_V;
-  const uint64_t denominator = max_uart_divider * baudrate;
-  const uint64_t source_divider =
-      (static_cast<uint64_t>(source_clock_hz) + denominator - 1U) / denominator;
-  if ((source_divider == 0U) || (source_divider > MAX_SOURCE_DIV))
-  {
-    return false;
-  }
-
-  const uint64_t clock_divider = (static_cast<uint64_t>(source_clock_hz) << 4U) /
-                                 (static_cast<uint64_t>(baudrate) * source_divider);
-  return (clock_divider != 0U) && ((clock_divider >> 4U) <= max_uart_divider);
-#endif
-}
-
 ErrorCode ESP32UartFifo::ValidateConfig(UART::Configuration config) const
 {
-  if (!uart_hw_enabled_)
-  {
-    return ErrorCode::STATE_ERR;
-  }
-  if (((config.parity != UART::Parity::NO_PARITY) &&
-       (config.parity != UART::Parity::EVEN) && (config.parity != UART::Parity::ODD)) ||
-      !IsBaudrateRepresentable(config.baudrate, uart_sclk_hz_))
-  {
-    return ErrorCode::ARG_ERR;
-  }
-
-  uart_word_length_t word_length = UART_DATA_8_BITS;
-  uart_stop_bits_t stop_bits = UART_STOP_BITS_1;
-  if (!ResolveWordLength(config.data_bits, word_length) ||
-      !ResolveStopBits(config.stop_bits, stop_bits))
-  {
-    return ErrorCode::ARG_ERR;
-  }
-  return ErrorCode::OK;
+  return Detail::ValidateEspUartConfig(config, uart_sclk_hz_, uart_hw_enabled_);
 }
 
 bool ESP32UartFifo::ApplyConfigPayload(UART::Configuration config)
 {
-  uart_word_length_t word_length = UART_DATA_8_BITS;
-  uart_stop_bits_t stop_bits = UART_STOP_BITS_1;
-  if (((config.parity != UART::Parity::NO_PARITY) &&
-       (config.parity != UART::Parity::EVEN) && (config.parity != UART::Parity::ODD)) ||
-      !ResolveWordLength(config.data_bits, word_length) ||
-      !ResolveStopBits(config.stop_bits, stop_bits) ||
-      !IsBaudrateRepresentable(config.baudrate, uart_sclk_hz_))
+  if (!Detail::ApplyEspUartConfig(uart_hal_, config, uart_sclk_hz_))
   {
     return false;
   }
 
-  bool baudrate_applied = true;
-  HP_UART_SRC_CLK_ATOMIC()
-  {
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
-    baudrate_applied = uart_hal_set_baudrate(&uart_hal_, config.baudrate, uart_sclk_hz_);
-#else
-    uart_hal_set_baudrate(&uart_hal_, config.baudrate, uart_sclk_hz_);
-#endif
-  }
-  if (!baudrate_applied)
-  {
-    return false;
-  }
-
-  uart_hal_set_data_bit_num(&uart_hal_, word_length);
-  uart_hal_set_stop_bits(&uart_hal_, stop_bits);
-  uart_hal_set_parity(&uart_hal_, ResolveParity(config.parity));
-  uart_hal_set_hw_flow_ctrl(&uart_hal_, UART_HW_FLOWCTRL_DISABLE, 0);
-  uart_hal_set_mode(&uart_hal_, UART_MODE_UART);
   uart_hal_set_txfifo_empty_thr(&uart_hal_, TX_EMPTY_THRESHOLD);
   uart_hal_txfifo_rst(&uart_hal_);
   uart_hal_rxfifo_rst(&uart_hal_);
@@ -907,35 +737,11 @@ bool ESP32UartFifo::ApplyConfigPayload(UART::Configuration config)
 ErrorCode ESP32UartFifo::InitUartHardware(int tx_pin, int rx_pin, int rts_pin,
                                           int cts_pin)
 {
-  if ((uart_num_ >= UART_NUM_MAX) || (uart_num_ >= SOC_UART_HP_NUM))
+  const ErrorCode init_result =
+      Detail::InitEspUartHal(uart_num_, uart_hal_, uart_sclk_hz_);
+  if (init_result != ErrorCode::OK)
   {
-    return ErrorCode::NOT_SUPPORT;
-  }
-
-  uart_hal_.dev = UART_LL_GET_HW(uart_num_);
-  if (uart_hal_.dev == nullptr)
-  {
-    return ErrorCode::NOT_SUPPORT;
-  }
-
-  HP_UART_BUS_CLK_ATOMIC()
-  {
-    uart_ll_enable_bus_clock(uart_num_, true);
-    uart_ll_reset_register(uart_num_);
-  }
-  uart_hal_init(&uart_hal_, uart_num_);
-
-  HP_UART_SRC_CLK_ATOMIC()
-  {
-    uart_ll_sclk_enable(uart_hal_.dev);
-    uart_hal_set_sclk(&uart_hal_, static_cast<soc_module_clk_t>(UART_CLOCK_SOURCE));
-  }
-  if ((esp_clk_tree_src_get_freq_hz(static_cast<soc_module_clk_t>(UART_CLOCK_SOURCE),
-                                    ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
-                                    &uart_sclk_hz_) != ESP_OK) ||
-      (uart_sclk_hz_ == 0U))
-  {
-    return ErrorCode::INIT_ERR;
+    return init_result;
   }
 
   if (!ApplyConfigPayload(requested_config_))
@@ -944,7 +750,8 @@ ErrorCode ESP32UartFifo::InitUartHardware(int tx_pin, int rx_pin, int rts_pin,
   }
   uart_hw_enabled_ = true;
 
-  if (ConfigurePins(tx_pin, rx_pin, rts_pin, cts_pin) != ErrorCode::OK)
+  if (Detail::ConfigureEspUartPins(uart_num_, tx_pin, rx_pin, rts_pin, cts_pin) !=
+      ErrorCode::OK)
   {
     uart_hw_enabled_ = false;
     return ErrorCode::INIT_ERR;
@@ -957,55 +764,6 @@ ErrorCode ESP32UartFifo::InitUartHardware(int tx_pin, int rx_pin, int rts_pin,
   rx_interrupt_path_enabled_ = false;
   tx_space_interrupt_armed_ = false;
   config_tx_idle_interrupt_armed_ = false;
-  return ErrorCode::OK;
-}
-
-ErrorCode ESP32UartFifo::ConfigurePins(int tx_pin, int rx_pin, int rts_pin, int cts_pin)
-{
-  if (tx_pin >= 0)
-  {
-    if (!GPIO_IS_VALID_OUTPUT_GPIO(tx_pin))
-    {
-      return ErrorCode::ARG_ERR;
-    }
-    esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(tx_pin));
-    esp_rom_gpio_connect_out_signal(
-        tx_pin, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_TX_PIN_IDX), false, false);
-  }
-
-  if (rx_pin >= 0)
-  {
-    if (!GPIO_IS_VALID_GPIO(rx_pin))
-    {
-      return ErrorCode::ARG_ERR;
-    }
-    gpio_input_enable(static_cast<gpio_num_t>(rx_pin));
-    esp_rom_gpio_connect_in_signal(
-        rx_pin, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RX_PIN_IDX), false);
-  }
-
-  if (rts_pin >= 0)
-  {
-    if (!GPIO_IS_VALID_OUTPUT_GPIO(rts_pin))
-    {
-      return ErrorCode::ARG_ERR;
-    }
-    esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(rts_pin));
-    esp_rom_gpio_connect_out_signal(
-        rts_pin, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_RTS_PIN_IDX), false, false);
-  }
-
-  if (cts_pin >= 0)
-  {
-    if (!GPIO_IS_VALID_GPIO(cts_pin))
-    {
-      return ErrorCode::ARG_ERR;
-    }
-    gpio_pullup_en(static_cast<gpio_num_t>(cts_pin));
-    gpio_input_enable(static_cast<gpio_num_t>(cts_pin));
-    esp_rom_gpio_connect_in_signal(
-        cts_pin, UART_PERIPH_SIGNAL(uart_num_, SOC_UART_CTS_PIN_IDX), false);
-  }
   return ErrorCode::OK;
 }
 

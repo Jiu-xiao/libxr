@@ -1,6 +1,6 @@
 #include <type_traits>
 
-#include "esp_uart.hpp"
+#include "esp_uart_dma.hpp"
 #include "esp_uart_fifo.hpp"
 
 #ifndef LIBXR_ESP_UART_EXPECT_IRQ_SERIALIZATION

@@ -3,15 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "driver/gpio.h"
+#include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
 #include "esp_pm.h"
 #endif
 #include "esp_uart_execution_policy.hpp"
-#include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h"
-#include "freertos/task.h"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
 #include "uart.hpp"
@@ -192,17 +189,10 @@ class ESP32UartFifo : public UART
     return static_cast<uint32_t>(event);
   }
 
-  static bool ResolveWordLength(uint8_t data_bits, uart_word_length_t& out);
-  static bool ResolveStopBits(uint8_t stop_bits, uart_stop_bits_t& out);
-  static uart_parity_t ResolveParity(UART::Parity parity);
-  static bool IsBaudrateRepresentable(uint32_t baudrate, uint32_t source_clock_hz);
-  static bool IsCurrentTaskPinned();
-
   [[nodiscard]] ErrorCode ValidateConfig(UART::Configuration config) const;
   bool ApplyConfigPayload(UART::Configuration config);
   ErrorCode InitPowerManagement();
   ErrorCode InitUartHardware(int tx_pin, int rx_pin, int rts_pin, int cts_pin);
-  ErrorCode ConfigurePins(int tx_pin, int rx_pin, int rts_pin, int cts_pin);
   ErrorCode InstallUartIsr();
 
   void ConfigureRxInterruptPath();

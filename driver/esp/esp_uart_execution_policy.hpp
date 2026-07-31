@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <utility>
 
-#include "freertos/FreeRTOS.h"
+#include "esp_def.hpp"
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 #include "uart/uart_execution_policy.hpp"
