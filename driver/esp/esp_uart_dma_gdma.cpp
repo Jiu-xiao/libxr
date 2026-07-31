@@ -10,6 +10,7 @@
 #include "esp_cache.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
+#include "esp_idf_version.h"
 #include "esp_private/esp_cache_private.h"
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -51,7 +52,7 @@ bool TryClaimUhci0ForLifetime()
 
 // Minimal local view of the GDMA link descriptor layout used for in-place patching.
 // 为就地修改描述符长度而保留的 GDMA link descriptor 最小本地视图。
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 4)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 3)
 constexpr gdma_final_node_link_type_t DMA_FINAL_LINK_TO_DEFAULT =
     GDMA_FINAL_LINK_TO_DEFAULT;
 constexpr gdma_final_node_link_type_t DMA_FINAL_LINK_TO_NULL = GDMA_FINAL_LINK_TO_NULL;
