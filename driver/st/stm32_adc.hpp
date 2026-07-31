@@ -211,22 +211,22 @@ class STM32ADC
   template <typename T>
   static void AssertDMACircular(T hadc)
   {
-    REQUIRE(hadc->DMA_Handle != nullptr);
+    ASSERT(hadc->DMA_Handle != nullptr);
 #if defined(LIBXR_STM32_ADC_GPDMA)
     if constexpr (HasLinkedListDMAMode<T>::value)
     {
-      REQUIRE(hadc->DMA_Handle->InitLinkedList.LinkedListMode == DMA_LINKEDLIST_CIRCULAR);
-      REQUIRE(hadc->DMA_Handle->Mode == DMA_LINKEDLIST_CIRCULAR);
+      ASSERT(hadc->DMA_Handle->InitLinkedList.LinkedListMode == DMA_LINKEDLIST_CIRCULAR &&
+             hadc->DMA_Handle->Mode == DMA_LINKEDLIST_CIRCULAR);
       return;
     }
 #elif defined(DMA_CIRCULAR)
     if constexpr (HasClassicDMAMode<T>::value)
     {
-      REQUIRE(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
+      ASSERT(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
       return;
     }
 #endif
-    REQUIRE(false);
+    ASSERT(false);
   }
 
  public:
