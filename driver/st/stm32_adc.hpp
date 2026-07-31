@@ -192,16 +192,17 @@ class STM32ADC
   }
 
   template <typename T>
-  static typename std::enable_if<HasDMACircularMode<T>::value>::type AssertDMACircular(
-      T hadc)
+  static void AssertDMACircular(T hadc)
   {
-    ASSERT(hadc->DMA_Handle != nullptr);
-    ASSERT(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
-  }
-
-  template <typename T>
-  static typename std::enable_if<!HasDMACircularMode<T>::value>::type AssertDMACircular(T)
-  {
+    REQUIRE(hadc->DMA_Handle != nullptr);
+#if defined(DMA_CIRCULAR)
+    if constexpr (HasDMACircularMode<T>::value)
+    {
+      REQUIRE(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
+      return;
+    }
+#endif
+    REQUIRE(false);
   }
 
  public:
