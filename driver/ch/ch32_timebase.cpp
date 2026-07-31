@@ -48,10 +48,8 @@ CH32Timebase::CH32Timebase()
       (control & (CH32_SYSTICK_ENABLE | CH32_SYSTICK_CLOCK_HCLK)) ==
           (CH32_SYSTICK_ENABLE | CH32_SYSTICK_CLOCK_HCLK) &&
       (control & (CH32_SYSTICK_AUTO_RELOAD | CH32_SYSTICK_COUNT_DOWN)) == 0U;
-  if (!valid_control || SystemCoreClock < MICROSECONDS_PER_SECOND)
-  {
-    libxr_fatal_error(__FILE__, __LINE__, false);
-  }
+  ASSERT(valid_control);
+  ASSERT(SystemCoreClock >= MICROSECONDS_PER_SECOND);
 
   timebase_clock_hz = SystemCoreClock;
   ConfigureWrapRange(UINT64_MAX, UINT32_MAX);
