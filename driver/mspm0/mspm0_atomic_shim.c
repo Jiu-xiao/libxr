@@ -4,24 +4,25 @@
  * interrupt and thread contexts on one core; it does not cover NMI or SMP callers. */
 typedef uint32_t libxr_atomic_fallback_guard_state_t;
 
-static inline libxr_atomic_fallback_guard_state_t libxr_atomic_fallback_enter(void)
+static inline __attribute__((always_inline)) libxr_atomic_fallback_guard_state_t
+libxr_atomic_fallback_enter(void)
 {
   const uint32_t primask_state = __get_PRIMASK();
   __disable_irq();
   return primask_state;
 }
 
-static inline void libxr_atomic_fallback_exit(
+static inline __attribute__((always_inline)) void libxr_atomic_fallback_exit(
     libxr_atomic_fallback_guard_state_t primask_state)
 {
-  if (primask_state == 0U)
-  {
-    __enable_irq();
-  }
+  __set_PRIMASK(primask_state);
 }
 
-static inline void libxr_atomic_fallback_fence(void) { __DMB(); }
+static inline __attribute__((always_inline)) void libxr_atomic_fallback_fence(void)
+{
+  __DMB();
+}
 
 #define LIBXR_ATOMIC_FALLBACK_ATTRIBUTES __attribute__((used, noinline))
-#define LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS
+#define LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS
 #include "driver/atomic/atomic_fallback.inc"

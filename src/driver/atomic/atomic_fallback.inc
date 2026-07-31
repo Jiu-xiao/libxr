@@ -19,6 +19,7 @@
 #endif
 
 #if !defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) &&     \
+    !defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS) &&   \
     !defined(LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4) && \
     !defined(LIBXR_ATOMIC_FALLBACK_EXCHANGE_1)
 #error "Select at least one atomic fallback operation"
@@ -31,19 +32,22 @@ typedef unsigned int libxr_atomic_fallback_u32_t __attribute__((may_alias));
 
 /* GCC permits a runtime helper to implement a weaker request as seq_cst. The two
  * platform fences also avoid depending on compiler-specific memory-order encodings. */
-static inline void libxr_atomic_fallback_before(int memorder)
+static inline __attribute__((always_inline)) void libxr_atomic_fallback_before(
+    int memorder)
 {
   (void)memorder;
   libxr_atomic_fallback_fence();
 }
 
-static inline void libxr_atomic_fallback_after(int memorder)
+static inline __attribute__((always_inline)) void libxr_atomic_fallback_after(
+    int memorder)
 {
   (void)memorder;
   libxr_atomic_fallback_fence();
 }
 
-#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) || \
+#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) ||   \
+    defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS) || \
     defined(LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4)
 /* The sized libatomic helper is always a strong CAS and omits the source builtin's weak
  * argument. The assembler label keeps its five-argument runtime ABI separate from the
@@ -81,7 +85,8 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES _Bool libxr_atomic_fallback_compare_exchange_4(
 }
 #endif
 
-#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS)
+#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) || \
+    defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS)
 LIBXR_ATOMIC_FALLBACK_ATTRIBUTES void __atomic_store_4(volatile void* ptr,
                                                        unsigned int desired, int memorder)
 {
@@ -224,6 +229,7 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES _Bool __atomic_test_and_set(volatile void* ptr,
 #endif
 
 #undef LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS
+#undef LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS
 #undef LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4
 #undef LIBXR_ATOMIC_FALLBACK_EXCHANGE_1
 #undef LIBXR_ATOMIC_FALLBACK_ATTRIBUTES
