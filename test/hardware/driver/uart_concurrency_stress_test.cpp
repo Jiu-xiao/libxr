@@ -537,7 +537,7 @@ void UartConcurrentConfigStressTest::RunConfigWorker()
 UartConcurrentConfigStressResult UartConcurrentConfigStressTest::RunCoordinator()
 {
   const uint64_t start_us = static_cast<uint64_t>(LibXR::Timebase::GetMicroseconds());
-  if (coordinator_started_.exchange(true, std::memory_order_acq_rel))
+  if (coordinator_started_.exchange(1U, std::memory_order_acq_rel) != 0U)
   {
     PublishFailure(UartConcurrentConfigStressFailure::EXTERNAL_ABORT,
                    LibXR::ErrorCode::STATE_ERR);

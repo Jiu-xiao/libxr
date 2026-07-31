@@ -18,10 +18,8 @@
 #error "Define LIBXR_ATOMIC_FALLBACK_ATTRIBUTES before including this file"
 #endif
 
-#if !defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) &&     \
-    !defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS) &&   \
-    !defined(LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4) && \
-    !defined(LIBXR_ATOMIC_FALLBACK_EXCHANGE_1)
+#if !defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS) && \
+    !defined(LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4)
 #error "Select at least one atomic fallback operation"
 #endif
 
@@ -46,8 +44,7 @@ static inline __attribute__((always_inline)) void libxr_atomic_fallback_after(
   libxr_atomic_fallback_fence();
 }
 
-#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) ||   \
-    defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS) || \
+#if defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS) || \
     defined(LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4)
 /* The sized libatomic helper is always a strong CAS and omits the source builtin's weak
  * argument. The assembler label keeps its five-argument runtime ABI separate from the
@@ -85,8 +82,7 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES _Bool libxr_atomic_fallback_compare_exchange_4(
 }
 #endif
 
-#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) || \
-    defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS)
+#if defined(LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS)
 LIBXR_ATOMIC_FALLBACK_ATTRIBUTES void __atomic_store_4(volatile void* ptr,
                                                        unsigned int desired, int memorder)
 {
@@ -179,57 +175,6 @@ LIBXR_ATOMIC_FALLBACK_ATTRIBUTES unsigned int __atomic_fetch_or_4(volatile void*
 }
 #endif
 
-#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS) || \
-    defined(LIBXR_ATOMIC_FALLBACK_EXCHANGE_1)
-LIBXR_ATOMIC_FALLBACK_ATTRIBUTES unsigned char __atomic_exchange_1(volatile void* ptr,
-                                                                   unsigned char desired,
-                                                                   int memorder)
-{
-  volatile unsigned char* const value = (volatile unsigned char*)ptr;
-  const libxr_atomic_fallback_guard_state_t interrupt_state =
-      libxr_atomic_fallback_enter();
-  libxr_atomic_fallback_before(memorder);
-  const unsigned char observed = *value;
-  *value = desired;
-  libxr_atomic_fallback_after(memorder);
-  libxr_atomic_fallback_exit(interrupt_state);
-  return observed;
-}
-#endif
-
-#if defined(LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS)
-LIBXR_ATOMIC_FALLBACK_ATTRIBUTES void __atomic_store_1(volatile void* ptr,
-                                                       unsigned char desired,
-                                                       int memorder)
-{
-  volatile unsigned char* const value = (volatile unsigned char*)ptr;
-  const libxr_atomic_fallback_guard_state_t interrupt_state =
-      libxr_atomic_fallback_enter();
-  libxr_atomic_fallback_before(memorder);
-  *value = desired;
-  libxr_atomic_fallback_after(memorder);
-  libxr_atomic_fallback_exit(interrupt_state);
-}
-
-#if !defined(__clang__)
-LIBXR_ATOMIC_FALLBACK_ATTRIBUTES _Bool __atomic_test_and_set(volatile void* ptr,
-                                                             int memorder)
-{
-  volatile unsigned char* const value = (volatile unsigned char*)ptr;
-  const libxr_atomic_fallback_guard_state_t interrupt_state =
-      libxr_atomic_fallback_enter();
-  libxr_atomic_fallback_before(memorder);
-  const unsigned char observed = *value;
-  *value = 1U;
-  libxr_atomic_fallback_after(memorder);
-  libxr_atomic_fallback_exit(interrupt_state);
-  return observed != 0U;
-}
-#endif
-#endif
-
-#undef LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS
 #undef LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS
 #undef LIBXR_ATOMIC_FALLBACK_COMPARE_EXCHANGE_4
-#undef LIBXR_ATOMIC_FALLBACK_EXCHANGE_1
 #undef LIBXR_ATOMIC_FALLBACK_ATTRIBUTES

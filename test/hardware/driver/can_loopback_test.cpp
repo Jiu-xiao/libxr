@@ -390,23 +390,23 @@ void CanFdLoopbackTestSession::RecordFailure(
     uint32_t observed_id, uint8_t expected_length, uint8_t observed_length,
     size_t mismatch_offset)
 {
-  bool expected = false;
-  if (!failure_claimed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+  uint32_t expected = 0U;
+  if (!failure_claimed_.compare_exchange_strong(expected, 1U, std::memory_order_acq_rel,
                                                 std::memory_order_relaxed))
   {
     return;
   }
 
-  error_.store(static_cast<int8_t>(error), std::memory_order_relaxed);
+  error_.store(static_cast<int32_t>(error), std::memory_order_relaxed);
   failed_frame_index_.store(frame_index, std::memory_order_relaxed);
-  expected_type_.store(static_cast<uint8_t>(expected_type), std::memory_order_relaxed);
-  observed_type_.store(static_cast<uint8_t>(observed_type), std::memory_order_relaxed);
+  expected_type_.store(static_cast<uint32_t>(expected_type), std::memory_order_relaxed);
+  observed_type_.store(static_cast<uint32_t>(observed_type), std::memory_order_relaxed);
   expected_id_.store(expected_id, std::memory_order_relaxed);
   observed_id_.store(observed_id, std::memory_order_relaxed);
   expected_length_.store(expected_length, std::memory_order_relaxed);
   observed_length_.store(observed_length, std::memory_order_relaxed);
   mismatch_offset_.store(mismatch_offset, std::memory_order_relaxed);
-  failure_.store(failure, std::memory_order_release);
+  failure_.store(static_cast<uint32_t>(failure), std::memory_order_release);
 }
 
 bool CanFdLoopbackTestSession::WaitForCallbacks(
@@ -416,7 +416,7 @@ bool CanFdLoopbackTestSession::WaitForCallbacks(
   const uint32_t start_ms = static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
   while (callback_count.load(std::memory_order_acquire) < expected_count)
   {
-    if (failure_.load(std::memory_order_acquire) != CanFdLoopbackFailure::NONE)
+    if (failure_.load(std::memory_order_acquire) != 0U)
     {
       return false;
     }
@@ -428,7 +428,7 @@ bool CanFdLoopbackTestSession::WaitForCallbacks(
     }
     LibXR::Thread::Sleep(1U);
   }
-  return failure_.load(std::memory_order_acquire) == CanFdLoopbackFailure::NONE;
+  return failure_.load(std::memory_order_acquire) == 0U;
 }
 
 bool CanFdLoopbackTestSession::WaitForCallbackDrain(uint32_t timeout_ms)
@@ -453,7 +453,7 @@ bool CanFdLoopbackTestSession::ObserveQuietPeriod(uint32_t expected_classic,
   const uint32_t start_ms = static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
   while (!TimedOut(start_ms, quiet_time_ms))
   {
-    if (failure_.load(std::memory_order_acquire) != CanFdLoopbackFailure::NONE)
+    if (failure_.load(std::memory_order_acquire) != 0U)
     {
       return false;
     }
@@ -468,14 +468,14 @@ bool CanFdLoopbackTestSession::ObserveQuietPeriod(uint32_t expected_classic,
     }
     LibXR::Thread::Sleep(1U);
   }
-  return failure_.load(std::memory_order_acquire) == CanFdLoopbackFailure::NONE;
+  return failure_.load(std::memory_order_acquire) == 0U;
 }
 
 void CanFdLoopbackTestSession::Reset(const CanFdLoopbackTestCase& test_case)
 {
   admission_.store(static_cast<uint32_t>(Phase::IDLE), std::memory_order_release);
-  failure_.store(CanFdLoopbackFailure::NONE, std::memory_order_relaxed);
-  error_.store(static_cast<int8_t>(LibXR::ErrorCode::OK), std::memory_order_relaxed);
+  failure_.store(0U, std::memory_order_relaxed);
+  error_.store(static_cast<int32_t>(LibXR::ErrorCode::OK), std::memory_order_relaxed);
   classic_callbacks_.store(0U, std::memory_order_relaxed);
   classic_callbacks_completed_.store(0U, std::memory_order_relaxed);
   fd_callbacks_.store(0U, std::memory_order_relaxed);
@@ -485,9 +485,9 @@ void CanFdLoopbackTestSession::Reset(const CanFdLoopbackTestCase& test_case)
   error_frame_callbacks_.store(0U, std::memory_order_relaxed);
   error_frame_id_.store(UINT32_MAX, std::memory_order_relaxed);
   failed_frame_index_.store(UINT32_MAX, std::memory_order_relaxed);
-  expected_type_.store(static_cast<uint8_t>(LibXR::CAN::Type::TYPE_NUM),
+  expected_type_.store(static_cast<uint32_t>(LibXR::CAN::Type::TYPE_NUM),
                        std::memory_order_relaxed);
-  observed_type_.store(static_cast<uint8_t>(LibXR::CAN::Type::TYPE_NUM),
+  observed_type_.store(static_cast<uint32_t>(LibXR::CAN::Type::TYPE_NUM),
                        std::memory_order_relaxed);
   expected_id_.store(UINT32_MAX, std::memory_order_relaxed);
   observed_id_.store(UINT32_MAX, std::memory_order_relaxed);
@@ -499,7 +499,7 @@ void CanFdLoopbackTestSession::Reset(const CanFdLoopbackTestCase& test_case)
   phase_timeout_ms_ = test_case.phase_timeout_ms;
   pattern_seed_ = test_case.pattern_seed;
   callback_context_ = test_case.callback_context;
-  failure_claimed_.store(false, std::memory_order_release);
+  failure_claimed_.store(0U, std::memory_order_release);
 }
 
 CanFdLoopbackTestResult CanFdLoopbackTestSession::Finish(CanFdLoopbackTestResult result,
@@ -507,7 +507,8 @@ CanFdLoopbackTestResult CanFdLoopbackTestSession::Finish(CanFdLoopbackTestResult
 {
   CloseCallbacks();
   (void)WaitForCallbackDrain(phase_timeout_ms_ == 0U ? 1U : phase_timeout_ms_);
-  result.failure = failure_.load(std::memory_order_acquire);
+  result.failure =
+      static_cast<CanFdLoopbackFailure>(failure_.load(std::memory_order_acquire));
   result.error = static_cast<LibXR::ErrorCode>(error_.load(std::memory_order_relaxed));
   result.classic_callbacks = classic_callbacks_.load(std::memory_order_relaxed);
   result.classic_callbacks_completed =
@@ -525,8 +526,10 @@ CanFdLoopbackTestResult CanFdLoopbackTestSession::Finish(CanFdLoopbackTestResult
       static_cast<LibXR::CAN::Type>(observed_type_.load(std::memory_order_relaxed));
   result.expected_id = expected_id_.load(std::memory_order_relaxed);
   result.observed_id = observed_id_.load(std::memory_order_relaxed);
-  result.expected_length = expected_length_.load(std::memory_order_relaxed);
-  result.observed_length = observed_length_.load(std::memory_order_relaxed);
+  result.expected_length =
+      static_cast<uint8_t>(expected_length_.load(std::memory_order_relaxed));
+  result.observed_length =
+      static_cast<uint8_t>(observed_length_.load(std::memory_order_relaxed));
   result.mismatch_offset = mismatch_offset_.load(std::memory_order_relaxed);
   result.elapsed_us = ElapsedMicroseconds(start_us);
   return result;
@@ -538,7 +541,7 @@ CanFdLoopbackTestResult CanFdLoopbackTestSession::Run(
   CanFdLoopbackTestResult result;
   const uint64_t start_us = static_cast<uint64_t>(LibXR::Timebase::GetMicroseconds());
 
-  if (started_.exchange(true, std::memory_order_acq_rel))
+  if (started_.exchange(1U, std::memory_order_acq_rel) != 0U)
   {
     result.failure = CanFdLoopbackFailure::SESSION_ALREADY_USED;
     result.error = LibXR::ErrorCode::BUSY;
@@ -598,7 +601,7 @@ CanFdLoopbackTestResult CanFdLoopbackTestSession::Run(
 
   if (!TransitionPhase(Phase::PREPARING, Phase::CLASSIC) ||
       !WaitForCallbackDrain(test_case.phase_timeout_ms) ||
-      failure_.load(std::memory_order_acquire) != CanFdLoopbackFailure::NONE)
+      failure_.load(std::memory_order_acquire) != 0U)
   {
     return Finish(result, start_us);
   }
@@ -613,7 +616,7 @@ CanFdLoopbackTestResult CanFdLoopbackTestSession::Run(
       return Finish(result, start_us);
     }
     result.classic_submitted++;
-    if (failure_.load(std::memory_order_acquire) != CanFdLoopbackFailure::NONE)
+    if (failure_.load(std::memory_order_acquire) != 0U)
     {
       return Finish(result, start_us);
     }
@@ -627,7 +630,7 @@ CanFdLoopbackTestResult CanFdLoopbackTestSession::Run(
 
   if (!TransitionPhase(Phase::CLASSIC, Phase::FD) ||
       !WaitForCallbackDrain(test_case.phase_timeout_ms) ||
-      failure_.load(std::memory_order_acquire) != CanFdLoopbackFailure::NONE)
+      failure_.load(std::memory_order_acquire) != 0U)
   {
     return Finish(result, start_us);
   }
@@ -642,7 +645,7 @@ CanFdLoopbackTestResult CanFdLoopbackTestSession::Run(
       return Finish(result, start_us);
     }
     result.fd_submitted++;
-    if (failure_.load(std::memory_order_acquire) != CanFdLoopbackFailure::NONE)
+    if (failure_.load(std::memory_order_acquire) != 0U)
     {
       return Finish(result, start_us);
     }

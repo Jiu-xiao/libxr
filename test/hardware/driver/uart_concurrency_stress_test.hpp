@@ -207,7 +207,7 @@ class UartConcurrentConfigStressTest
   std::atomic<uint32_t> state_{0U};
   // The packed failure/error value gives readers one coherent terminal snapshot.
   std::atomic<uint32_t> failure_info_{0U};
-  std::atomic<bool> coordinator_started_{false};
+  std::atomic<uint32_t> coordinator_started_{0U};
   AtomicCounters counters_{};
 };
 

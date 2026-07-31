@@ -26,7 +26,7 @@ static inline void libxr_atomic_fallback_exit(
 static inline void libxr_atomic_fallback_fence(void) { __DMB(); }
 
 #define LIBXR_ATOMIC_FALLBACK_ATTRIBUTES __attribute__((used, noinline))
-#define LIBXR_ATOMIC_FALLBACK_ALL_OPERATIONS
+#define LIBXR_ATOMIC_FALLBACK_32BIT_OPERATIONS
 #include "driver/atomic/atomic_fallback.inc"
 
 #endif

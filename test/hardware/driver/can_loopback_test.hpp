@@ -169,11 +169,11 @@ class CanFdLoopbackTestSession
   CanFdLoopbackTestResult Finish(CanFdLoopbackTestResult result, uint64_t start_us);
 
   LibXR::FDCAN& fdcan_;
-  std::atomic<bool> started_{false};
+  std::atomic<uint32_t> started_{0U};
   std::atomic<uint32_t> admission_{static_cast<uint32_t>(Phase::IDLE)};
-  std::atomic<bool> failure_claimed_{false};
-  std::atomic<CanFdLoopbackFailure> failure_{CanFdLoopbackFailure::NONE};
-  std::atomic<int8_t> error_{static_cast<int8_t>(LibXR::ErrorCode::OK)};
+  std::atomic<uint32_t> failure_claimed_{0U};
+  std::atomic<uint32_t> failure_{static_cast<uint32_t>(CanFdLoopbackFailure::NONE)};
+  std::atomic<int32_t> error_{static_cast<int32_t>(LibXR::ErrorCode::OK)};
   std::atomic<uint32_t> classic_callbacks_{0U};
   std::atomic<uint32_t> classic_callbacks_completed_{0U};
   std::atomic<uint32_t> fd_callbacks_{0U};
@@ -183,12 +183,12 @@ class CanFdLoopbackTestSession
   std::atomic<uint32_t> error_frame_callbacks_{0U};
   std::atomic<uint32_t> error_frame_id_{UINT32_MAX};
   std::atomic<uint32_t> failed_frame_index_{UINT32_MAX};
-  std::atomic<uint8_t> expected_type_{static_cast<uint8_t>(LibXR::CAN::Type::TYPE_NUM)};
-  std::atomic<uint8_t> observed_type_{static_cast<uint8_t>(LibXR::CAN::Type::TYPE_NUM)};
+  std::atomic<uint32_t> expected_type_{static_cast<uint32_t>(LibXR::CAN::Type::TYPE_NUM)};
+  std::atomic<uint32_t> observed_type_{static_cast<uint32_t>(LibXR::CAN::Type::TYPE_NUM)};
   std::atomic<uint32_t> expected_id_{UINT32_MAX};
   std::atomic<uint32_t> observed_id_{UINT32_MAX};
-  std::atomic<uint8_t> expected_length_{UINT8_MAX};
-  std::atomic<uint8_t> observed_length_{UINT8_MAX};
+  std::atomic<uint32_t> expected_length_{UINT8_MAX};
+  std::atomic<uint32_t> observed_length_{UINT8_MAX};
   std::atomic<size_t> mismatch_offset_{SIZE_MAX};
 
   uint32_t classic_frame_count_ = 0U;
