@@ -18,6 +18,12 @@ namespace LibXR
  * that cannot preempt SysTick; exact timestamps are not guaranteed from interrupts that
  * can preempt it. Consecutive interrupt masking must remain shorter than 1 ms, and the
  * timebase must not be called from its handler, NMI, or fault handlers.
+ *
+ * @note 在裸机系统中，构造函数会将 SysTick 设置为最高抢占优先级。在非裸机系统中，
+ * LibXR 不修改调度时钟优先级，并在使用该后端时产生编译警告。
+ * In bare-metal systems, the constructor sets SysTick to the highest preemption priority.
+ * In non-bare-metal systems, LibXR leaves the scheduler clock priority unchanged and
+ * emits a compile-time warning when this backend is used.
  */
 class STM32Timebase : public Timebase
 {
@@ -28,9 +34,11 @@ class STM32Timebase : public Timebase
    * 选择 SysTick 作为当前时间基后端，并配置对应的回绕范围。
    * Selects SysTick as the active backend and configures the matching wrap range.
    */
+#if !defined(LIBXR_SYSTEM_none)
   [[deprecated(
-      "STM32 SysTick timebase cannot guarantee exact timestamps in interrupts that "
-      "preempt SysTick; use STM32TimerTimebase when ISR timestamps are required")]]
+      "STM32 SysTick timebase cannot guarantee ISR timestamps in non-bare-metal builds; "
+      "use STM32TimerTimebase for ISR timestamps")]]
+#endif
   STM32Timebase();
 };
 

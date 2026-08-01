@@ -65,6 +65,9 @@ MicrosecondTimestamp GetTimerMicroseconds(TIM_HandleTypeDef* htim)
 
 STM32Timebase::STM32Timebase()
 {
+#if defined(LIBXR_SYSTEM_none)
+  NVIC_SetPriority(SysTick_IRQn, 0U);
+#endif
   ConfigureWrapRange(static_cast<uint64_t>(UINT32_MAX) * 1000ULL + 999ULL, UINT32_MAX);
   g_backend = STM32TimebaseBackend::SYSTICK;
   SetReady();
