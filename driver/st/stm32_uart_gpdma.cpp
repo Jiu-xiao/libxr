@@ -19,6 +19,9 @@ IRQn_Type GetGpdmaIrq(DMA_Channel_TypeDef* instance)
     return DMA##_Channel##CHANNEL##_IRQn;  \
   }
 
+// CMSIS device headers expose GPDMA channels in contiguous 0-7, 8-11, and
+// 12-15 blocks. Each block's first channel is its availability sentinel because
+// IRQn names are enum constants and cannot be tested with defined().
 #if defined(GPDMA1_Channel0)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 0)
   LIBXR_GPDMA_IRQ_CASE(GPDMA1, 1)
