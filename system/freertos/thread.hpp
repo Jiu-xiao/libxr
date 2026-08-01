@@ -1,5 +1,6 @@
 #pragma once
 
+#include "libxr_assert.hpp"
 #include "libxr_system.hpp"
 #include "thread_timestamp.hpp"
 
