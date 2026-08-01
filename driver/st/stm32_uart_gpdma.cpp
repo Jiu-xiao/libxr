@@ -4,6 +4,7 @@
 
 #include "libxr_assert.hpp"
 #include "stm32_dcache.hpp"
+#include "stm32_uart.hpp"
 
 namespace LibXR
 {
@@ -402,6 +403,32 @@ void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size,
   state_.rx_total_size_ = total_size;
   state_.rx_node_size_ = node_size;
   state_.rx_queue_built_ = true;
+}
+
+bool STM32UART::AllDmaStopsComplete() const { return gpdma_adapter_.AllStopsComplete(); }
+
+void STM32UART::CloseTxTerminalSource() { gpdma_adapter_.CloseTxTerminalSource(); }
+
+void STM32UART::LaunchDmaStop(DMA_HandleTypeDef* dma_handle, bool in_isr,
+                              bool classify_tx)
+{
+  ASSERT(dma_handle != nullptr);
+  ASSERT(dma_handle->Parent == uart_handle_);
+  UNUSED(classify_tx);
+  const bool accepted = gpdma_adapter_.LaunchStop(dma_handle, DmaAbortCallback, in_isr);
+  REQUIRE_FROM_CALLBACK(accepted, in_isr);
+}
+
+void STM32UART::CaptureStoppedTx()
+{
+  ASSERT(uart_handle_->hdmatx != nullptr);
+  gpdma_adapter_.CaptureStoppedTx(uart_handle_->hdmatx, tx_evidence_captured_,
+                                  tx_payload_complete_, tx_dma_error_);
+}
+
+void STM32UART::FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr)
+{
+  STM32GpdmaUartAdapter::FinalizeStopped(dma_handle, in_isr);
 }
 
 }  // namespace LibXR
