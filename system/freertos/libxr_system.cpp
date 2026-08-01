@@ -1,8 +1,6 @@
 #include "libxr.hpp"
 #include "timer.hpp"
 
-static_assert(configTICK_RATE_HZ == 1000, "configTICK_RATE_HZ must be 1000");
-
 #if defined(configUSE_TIMERS) && (configUSE_TIMERS + 0)
 #warning \
     "It is recommended to set configUSE_TIMERS to 0 to reduce resource usage unless software timers are strictly required."
@@ -18,23 +16,10 @@ extern "C" __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t
   ASSERT(false);
 }
 
-uint32_t LibXR::libxr_freertos_timebase_tick_offset = 0;
-
 void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 {
-  if (!Timebase::IsReady())
-  {
-    /* You should initialize Timebase first */
-    ASSERT(false);
-  }
-
   LibXR::Timer::priority_ = static_cast<LibXR::Thread::Priority>(timer_pri);
   LibXR::Timer::stack_depth_ = timer_stack_depth;
-
-  uint32_t rtos_tick = static_cast<uint32_t>(xTaskGetTickCount());
-  uint32_t timebase_tick = static_cast<uint32_t>(Timebase::GetMilliseconds());
-
-  libxr_freertos_timebase_tick_offset = rtos_tick - timebase_tick;
 }
 
 #ifndef ESP_PLATFORM

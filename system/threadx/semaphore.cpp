@@ -18,17 +18,9 @@ void Semaphore::Post() { tx_semaphore_put(&semaphore_handle_); }
 
 ErrorCode Semaphore::Wait(uint32_t timeout)
 {
-  ULONG tx_timeout;
-
-  if (timeout == 0)
-  {
-    tx_timeout = TX_NO_WAIT;
-  }
-  else
-  {
-    tx_timeout = timeout * TX_TIMER_TICKS_PER_SECOND / 1000;
-    if (tx_timeout == 0) tx_timeout = 1;
-  }
+  const ULONG tx_timeout = timeout == UINT32_MAX
+                               ? TX_WAIT_FOREVER
+                               : Detail::MillisecondsToThreadXTicks(timeout);
 
   UINT status = tx_semaphore_get(&semaphore_handle_, tx_timeout);
 

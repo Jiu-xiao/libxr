@@ -10,6 +10,27 @@ typedef TX_MUTEX libxr_mutex_handle;
 typedef TX_SEMAPHORE libxr_semaphore_handle;
 typedef TX_THREAD* libxr_thread_handle;
 
+namespace Detail
+{
+
+[[nodiscard]] inline ULONG MillisecondsToThreadXTicks(uint32_t milliseconds)
+{
+  if (milliseconds == 0U)
+  {
+    return TX_NO_WAIT;
+  }
+
+  const uint64_t ticks =
+      (static_cast<uint64_t>(milliseconds) * TX_TIMER_TICKS_PER_SECOND + 999U) / 1000U;
+  if (ticks >= static_cast<uint64_t>(TX_WAIT_FOREVER))
+  {
+    return TX_WAIT_FOREVER - 1U;
+  }
+  return static_cast<ULONG>(ticks);
+}
+
+}  // namespace Detail
+
 /**
  * @brief  平台初始化函数
  *         Platform initialization function

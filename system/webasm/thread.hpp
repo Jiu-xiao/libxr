@@ -2,7 +2,7 @@
 
 #include "libxr_def.hpp"
 #include "libxr_system.hpp"
-#include "libxr_time.hpp"
+#include "thread_timestamp.hpp"
 
 namespace LibXR
 {
@@ -85,11 +85,16 @@ class Thread
   static Thread Current(void);
 
   /**
-   * @brief  获取当前系统时间（毫秒）
-   *         Gets the current system time in milliseconds
-   * @return 当前时间（毫秒） Current time in milliseconds
+   * @brief 获取当前调度器时间 / Get the current scheduler time
+   * @return 调度器时钟域的当前时间戳 / Current scheduler-domain timestamp
    */
-  static uint32_t GetTime();
+  static ThreadTimestamp GetTime();
+
+  /**
+   * @brief 在中断中读取调度器时间 / Read scheduler time from an interrupt
+   * @return 调度器时钟域的当前时间戳 / Current scheduler-domain timestamp
+   */
+  static ThreadTimestamp GetTimeFromISR();
 
   /**
    * @brief  让线程进入休眠状态
@@ -99,12 +104,13 @@ class Thread
   static void Sleep(uint32_t milliseconds);
 
   /**
-   * @brief  让线程休眠直到指定时间点
-   *         Puts the thread to sleep until a specified time
-   * @param  last_waskup_time 上次唤醒时间 Last wake-up time
-   * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
+   * @brief 按固定周期休眠 / Sleep on a fixed scheduler period
+   * @param  last_wakeup_time 上次唤醒游标，由 `GetTime()` 初始化 / Previous wake cursor,
+   * initialized by `GetTime()`
+   * @param  time_to_sleep 休眠时长（毫秒），必须小于 2^31 / Sleep duration in
+   * milliseconds; must be less than 2^31
    */
-  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(ThreadTimestamp& last_wakeup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程

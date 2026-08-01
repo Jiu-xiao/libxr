@@ -1,8 +1,7 @@
 #pragma once
 
 #include "libxr_system.hpp"
-#include "libxr_time.hpp"
-#include "timebase.hpp"
+#include "thread_timestamp.hpp"
 
 #define LIBXR_PRIORITY_STEP ((configMAX_PRIORITIES - 1) / 5)
 
@@ -107,46 +106,38 @@ class Thread
   static Thread Current(void);
 
   /**
-   * @brief  获取当前系统时间（毫秒）
-   *         Gets the current system time in milliseconds
-   * @return 当前时间（毫秒） Current time in milliseconds
+   * @brief 获取当前调度器时间 / Get the current scheduler time
+   * @return 调度器时钟域的当前时间戳 / Current scheduler-domain timestamp
+   * @note 返回值使用 FreeRTOS 原生 tick，只能作为调度游标；耗时测量应使用 Timebase。
+   * The value uses native FreeRTOS ticks and is only a scheduling cursor; use Timebase
+   * for elapsed-time measurements. Call `GetTimeFromISR()` from interrupt context.
    */
-  static uint32_t GetTime() { return static_cast<uint32_t>(Timebase::GetMilliseconds()); }
+  static ThreadTimestamp GetTime();
+
+  /**
+   * @brief 在中断中读取调度器时间 / Read scheduler time from an interrupt
+   * @return 调度器时钟域的当前时间 / Current scheduler-domain timestamp
+   * @note 调用方中断必须满足 FreeRTOS 对 `FromISR` API 的优先级约束。
+   * The calling interrupt must satisfy the FreeRTOS priority contract for `FromISR`
+   * APIs.
+   */
+  static ThreadTimestamp GetTimeFromISR();
 
   /**
    * @brief  让线程进入休眠状态
    *         Puts the thread to sleep
    * @param  milliseconds 休眠时间（毫秒） Sleep duration in milliseconds
    */
-  static void Sleep(uint32_t milliseconds)
-  {
-    vTaskDelay(static_cast<TickType_t>(milliseconds));
-  }
+  static void Sleep(uint32_t milliseconds);
 
   /**
-   * @brief  让线程休眠直到指定时间点
-   *         Puts the thread to sleep until a specified time
-   * @param  last_waskup_time 上次唤醒时间 Last wake-up time
-   * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
+   * @brief 按固定周期休眠 / Sleep on a fixed scheduler period
+   * @param  last_wakeup_time 上次唤醒游标，由 `GetTime()` 初始化 / Previous wake cursor,
+   * initialized by `GetTime()`
+   * @param  time_to_sleep 休眠时长（毫秒），换算后必须位于调度 tick 的未来半环 / Sleep
+   * duration in milliseconds; after conversion it must fit in the future half-ring
    */
-  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep)
-  {
-    ASSERT(time_to_sleep > 0U);
-
-    uint32_t current_tick = static_cast<uint32_t>(xTaskGetTickCount());
-    uint32_t previous_wake_time =
-        static_cast<uint32_t>(last_waskup_time) + libxr_freertos_timebase_tick_offset;
-
-    if ((previous_wake_time - current_tick) < (UINT32_MAX / 2U))
-    {
-      previous_wake_time = current_tick;
-    }
-
-    TickType_t wake_time = static_cast<TickType_t>(previous_wake_time);
-    vTaskDelayUntil(&wake_time, static_cast<TickType_t>(time_to_sleep));
-    last_waskup_time = MillisecondTimestamp(static_cast<uint32_t>(wake_time) -
-                                            libxr_freertos_timebase_tick_offset);
-  }
+  static void SleepUntil(ThreadTimestamp& last_wakeup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程

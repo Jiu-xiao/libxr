@@ -4,7 +4,6 @@
 
 #include "libxr_def.hpp"
 #include "monotonic_time.hpp"
-#include "timebase.hpp"
 
 using namespace LibXR;
 
@@ -20,19 +19,38 @@ void Thread::Sleep(uint32_t milliseconds)
   }
 }
 
-void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep)
+void Thread::SleepUntil(ThreadTimestamp& last_wakeup_time, uint32_t time_to_sleep)
 {
-  last_waskup_time = last_waskup_time + time_to_sleep;
+  constexpr uint32_t HALF_RANGE = UINT32_C(1) << 31U;
+  ASSERT(time_to_sleep > 0U && time_to_sleep < HALF_RANGE);
+
+  last_wakeup_time = ThreadTimestamp(last_wakeup_time.RawTicks() + time_to_sleep);
+
+  const uint64_t elapsed_ms =
+      MonotonicTime::SharedToXrMicroseconds(MonotonicTime::NowMicroseconds()) / 1000U;
+  const uint32_t remaining = Detail::SchedulerTicksUntil(
+      static_cast<uint32_t>(elapsed_ms), last_wakeup_time.RawTicks());
+  if (remaining == 0U)
+  {
+    return;
+  }
 
   const timespec ts =
-      MonotonicTime::AddMilliseconds(libxr_linux_start_time_spec, last_waskup_time);
+      MonotonicTime::AddMilliseconds(libxr_linux_start_time_spec, elapsed_ms + remaining);
 
   while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr) == EINTR)
   {
   }
 }
 
-uint32_t Thread::GetTime() { return Timebase::GetMilliseconds(); }
+ThreadTimestamp Thread::GetTime()
+{
+  const uint64_t elapsed_us =
+      MonotonicTime::SharedToXrMicroseconds(MonotonicTime::NowMicroseconds());
+  return ThreadTimestamp(static_cast<uint32_t>(elapsed_us / 1000U));
+}
+
+ThreadTimestamp Thread::GetTimeFromISR() { return GetTime(); }
 
 void Thread::Yield() { sched_yield(); }
 

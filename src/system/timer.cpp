@@ -1,6 +1,7 @@
 #include "timer.hpp"
 
 #include "lockfree_list.hpp"
+#include "timebase.hpp"
 
 using namespace LibXR;
 
@@ -16,17 +17,28 @@ void Timer::SetCycle(TimerHandle handle, uint32_t cycle)
 
 void Timer::RefreshThreadFunction(void*)
 {
-  MillisecondTimestamp time = Thread::GetTime();
+  ThreadTimestamp time = Thread::GetTime();
+  MillisecondTimestamp last_refresh_time = Timebase::GetMilliseconds();
+  Timer::Refresh();
+
   while (true)
   {
-    Timer::Refresh();
     Thread::SleepUntil(time, 1);
+
+    const MillisecondTimestamp current_time = Timebase::GetMilliseconds();
+    const uint32_t elapsed = (current_time - last_refresh_time).ToMillisecond();
+    for (uint32_t i = 0; i < elapsed; ++i)
+    {
+      Timer::Refresh();
+    }
+    last_refresh_time = current_time;
   }
 }
 
 void Timer::Add(TimerHandle handle)
 {
   ASSERT(!handle->next_);
+  REQUIRE(Timebase::IsReady());
 
   if (!LibXR::Timer::list_)
   {

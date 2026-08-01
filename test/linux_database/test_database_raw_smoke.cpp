@@ -11,6 +11,11 @@ namespace
 
 using namespace LinuxDatabaseTestCommon;
 
+uint32_t CurrentMilliseconds()
+{
+  return static_cast<uint32_t>(Timebase::GetMilliseconds());
+}
+
 /**
  * @brief 测试项函数 `TestLinuxDatabaseRawSmoke`。 Test-item function
  * `TestLinuxDatabaseRawSmoke`.
@@ -58,24 +63,24 @@ void TestLinuxDatabaseRawSmoke()
 
   for (size_t i = 0; i < 1000; i++)
   {
-    for (uint32_t j = 0; j < Thread::GetTime() % 100; j++)
+    for (uint32_t j = 0; j < CurrentMilliseconds() % 100; j++)
     {
-      data_k1[0] = Thread::GetTime() + j;
+      data_k1[0] = CurrentMilliseconds() + j;
       k1_2 = data_k1;
     }
-    for (uint32_t j = 0; j < Thread::GetTime() % 100; j++)
+    for (uint32_t j = 0; j < CurrentMilliseconds() % 100; j++)
     {
-      data_k2[0] = Thread::GetTime() + j;
+      data_k2[0] = CurrentMilliseconds() + j;
       k2_2 = data_k2;
     }
-    for (uint32_t j = 0; j < Thread::GetTime() % 100; j++)
+    for (uint32_t j = 0; j < CurrentMilliseconds() % 100; j++)
     {
-      data_k3[0] = Thread::GetTime() + j;
+      data_k3[0] = CurrentMilliseconds() + j;
       k3_2 = data_k3;
     }
-    for (uint32_t j = 0; j < Thread::GetTime() % 100; j++)
+    for (uint32_t j = 0; j < CurrentMilliseconds() % 100; j++)
     {
-      data_k4[0] = Thread::GetTime() + j;
+      data_k4[0] = CurrentMilliseconds() + j;
       k4_2 = data_k4;
     }
 

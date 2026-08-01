@@ -47,18 +47,18 @@ void test_thread()
   ASSERT(sem.Wait(200) == LibXR::ErrorCode::OK);
   ASSERT(thread.Join() == LibXR::ErrorCode::OK);
 
-  const uint32_t sleep_start_ms = LibXR::Thread::GetTime();
+  const auto sleep_start = LibXR::Timebase::GetMilliseconds();
   LibXR::Thread::Sleep(20);
-  const uint32_t sleep_elapsed_ms = LibXR::Thread::GetTime() - sleep_start_ms;
-  ASSERT(sleep_elapsed_ms >= 15);
+  const auto sleep_elapsed = LibXR::Timebase::GetMilliseconds() - sleep_start;
+  ASSERT(sleep_elapsed.ToMillisecond() >= 15);
 
-  LibXR::MillisecondTimestamp wakeup = LibXR::Thread::GetTime();
-  const uint32_t periodic_start_ms = wakeup;
+  LibXR::ThreadTimestamp wakeup = LibXR::Thread::GetTime();
+  const auto periodic_start = LibXR::Timebase::GetMilliseconds();
   LibXR::Thread::SleepUntil(wakeup, 10);
-  const uint32_t first_wakeup_ms = LibXR::Thread::GetTime();
+  const auto first_wakeup = LibXR::Timebase::GetMilliseconds();
   LibXR::Thread::SleepUntil(wakeup, 10);
-  const uint32_t second_wakeup_ms = LibXR::Thread::GetTime();
-  ASSERT(first_wakeup_ms - periodic_start_ms >= 8);
-  ASSERT(second_wakeup_ms - periodic_start_ms >= 18);
-  ASSERT(second_wakeup_ms >= first_wakeup_ms);
+  const auto second_wakeup = LibXR::Timebase::GetMilliseconds();
+  ASSERT((first_wakeup - periodic_start).ToMillisecond() >= 8);
+  ASSERT((second_wakeup - periodic_start).ToMillisecond() >= 18);
+  ASSERT((second_wakeup - first_wakeup).ToMillisecond() < 1000);
 }

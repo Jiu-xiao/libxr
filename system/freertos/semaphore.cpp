@@ -17,14 +17,25 @@ void Semaphore::Post() { xSemaphoreGive(semaphore_handle_); }
 
 ErrorCode Semaphore::Wait(uint32_t timeout)
 {
-  if (xSemaphoreTake(semaphore_handle_, timeout) == pdTRUE)
+  if (timeout == UINT32_MAX)
   {
-    return ErrorCode::OK;
+    return xSemaphoreTake(semaphore_handle_, portMAX_DELAY) == pdTRUE
+               ? ErrorCode::OK
+               : ErrorCode::TIMEOUT;
   }
-  else
+
+  uint64_t remaining = Detail::MillisecondsToFreeRTOSTicks(timeout);
+  do
   {
-    return ErrorCode::TIMEOUT;
-  }
+    const TickType_t delay = Detail::FreeRTOSDelayChunk(remaining);
+    if (xSemaphoreTake(semaphore_handle_, delay) == pdTRUE)
+    {
+      return ErrorCode::OK;
+    }
+    remaining -= delay;
+  } while (remaining != 0U);
+
+  return ErrorCode::TIMEOUT;
 }
 
 void Semaphore::PostFromCallback(bool in_isr)

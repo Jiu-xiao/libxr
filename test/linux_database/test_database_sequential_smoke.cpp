@@ -16,6 +16,11 @@ namespace
 
 using namespace LinuxDatabaseTestCommon;
 
+uint32_t CurrentMilliseconds()
+{
+  return static_cast<uint32_t>(Timebase::GetMilliseconds());
+}
+
 void TestLinuxDatabaseSequentialSmoke()
 {
   // 测试内容：验证 linux database sequential 在长时间多 key 读写流量下保持持久化一致性。
@@ -53,23 +58,23 @@ void TestLinuxDatabaseSequentialSmoke()
     ASSERT(std::memcmp(data_k3.data(), k3.data_.data(), sizeof(data_k3)) == 0);
     ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
 
-    for (int j = 0; j < Thread::GetTime() % 100; j++)
+    for (int j = 0; j < static_cast<int>(CurrentMilliseconds() % 100U); j++)
     {
-      data_k4[1] = Thread::GetTime() + j;
+      data_k4[1] = CurrentMilliseconds() + static_cast<uint32_t>(j);
       k4 = data_k4;
       k4.Load();
       ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
     }
 
-    for (int j = 0; j < Thread::GetTime() % 100; j++)
+    for (int j = 0; j < static_cast<int>(CurrentMilliseconds() % 100U); j++)
     {
-      data_k1[0] = Thread::GetTime() + j;
+      data_k1[0] = CurrentMilliseconds() + static_cast<uint32_t>(j);
       k1 = data_k1;
       k1.Load();
       ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
     }
 
-    for (int j = 0; j < Thread::GetTime() % 100; ++j)
+    for (int j = 0; j < static_cast<int>(CurrentMilliseconds() % 100U); ++j)
     {
       k1.Load();
       k2.Load();
@@ -81,7 +86,7 @@ void TestLinuxDatabaseSequentialSmoke()
       ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
     }
 
-    for (int j = 0; j < Thread::GetTime() % 100; j++)
+    for (int j = 0; j < static_cast<int>(CurrentMilliseconds() % 100U); j++)
     {
       data_k2[0] = LibXR::Timebase::GetMicroseconds();
       data_k2[1] = LibXR::Timebase::GetMilliseconds();

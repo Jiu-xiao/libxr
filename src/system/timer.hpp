@@ -20,6 +20,12 @@ namespace LibXR
  * such as invoking callback functions at regular intervals.
  * It provides task creation, start, stop, delete, and cycle adjustment functionalities,
  * utilizing `Thread::SleepUntil` for precise scheduling.
+ *
+ * @note 注册第一个任务前必须初始化 Timebase。管理线程延迟运行时会按 Timebase
+ * 实际经过的毫秒补齐推进，因此可能连续执行已经到期的回调。 / Timebase must be
+ * initialized before the first task is added. If the management thread runs late, it
+ * catches up by the elapsed Timebase milliseconds and may invoke overdue callbacks
+ * consecutively.
  */
 class Timer
 {

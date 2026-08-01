@@ -51,20 +51,30 @@ void Thread::Sleep(uint32_t milliseconds)
   }
 }
 
-void Thread::SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep)
+void Thread::SleepUntil(ThreadTimestamp& last_wakeup_time, uint32_t time_to_sleep)
 {
-  last_waskup_time = last_waskup_time + time_to_sleep;
+  constexpr uint32_t HALF_RANGE = UINT32_C(1) << 31U;
+  ASSERT(time_to_sleep > 0U && time_to_sleep < HALF_RANGE);
 
-  while (MonotonicTime::NowMilliseconds() < last_waskup_time)
+  last_wakeup_time = ThreadTimestamp(last_wakeup_time.RawTicks() + time_to_sleep);
+
+  while (true)
   {
-    ConditionVarWait(MonotonicTime::WaitSliceMilliseconds(
-        MonotonicTime::RemainingMilliseconds(last_waskup_time)));
+    const uint32_t remaining =
+        Detail::SchedulerTicksUntil(GetTime().RawTicks(), last_wakeup_time.RawTicks());
+    if (remaining == 0U)
+    {
+      return;
+    }
+    ConditionVarWait(MonotonicTime::WaitSliceMilliseconds(remaining));
   }
 }
 
-uint32_t Thread::GetTime()
+ThreadTimestamp Thread::GetTime()
 {
-  return static_cast<uint32_t>(MonotonicTime::NowMilliseconds());
+  return ThreadTimestamp(static_cast<uint32_t>(MonotonicTime::NowMilliseconds()));
 }
+
+ThreadTimestamp Thread::GetTimeFromISR() { return GetTime(); }
 
 void Thread::Yield() { sched_yield(); }

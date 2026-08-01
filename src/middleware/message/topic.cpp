@@ -5,6 +5,7 @@
 #include "crc.hpp"
 #include "libxr_def.hpp"
 #include "mutex.hpp"
+#include "timebase.hpp"
 
 using namespace LibXR;
 
@@ -189,7 +190,7 @@ Topic::TopicHandle Topic::Find(const char* name, Domain* domain)
 
 Topic::TopicHandle Topic::WaitTopic(const char* name, uint32_t timeout, Domain* domain)
 {
-  const uint32_t start_time = Thread::GetTime();
+  const MillisecondTimestamp start_time = Timebase::GetMilliseconds();
   TopicHandle topic = nullptr;
   do
   {
@@ -197,7 +198,7 @@ Topic::TopicHandle Topic::WaitTopic(const char* name, uint32_t timeout, Domain* 
     if (topic == nullptr)
     {
       if (timeout != UINT32_MAX &&
-          static_cast<uint32_t>(Thread::GetTime() - start_time) >= timeout)
+          (Timebase::GetMilliseconds() - start_time).ToMillisecond() >= timeout)
       {
         return nullptr;
       }

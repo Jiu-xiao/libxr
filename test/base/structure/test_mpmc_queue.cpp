@@ -246,10 +246,10 @@ void test_mpmc_queue()
           ConsumerTask, "mpmc_cons2", 1024, LibXR::Thread::Priority::REALTIME);
     }
 
-    const uint32_t start_ms = LibXR::Thread::GetTime();
+    const auto start = LibXR::Timebase::GetMilliseconds();
     while ((produced_done_count.load(std::memory_order_acquire) != PRODUCER_COUNT ||
             consumed_done_count.load(std::memory_order_acquire) != CONSUMER_COUNT) &&
-           (LibXR::Thread::GetTime() - start_ms) < 5000U)
+           (LibXR::Timebase::GetMilliseconds() - start).ToMillisecond() < 5000U)
     {
       LibXR::Thread::Sleep(1);
     }
@@ -313,10 +313,10 @@ void test_mpmc_queue()
           ConsumerTask, "mpmc_cons", 1024, LibXR::Thread::Priority::REALTIME);
     }
 
-    const uint32_t start_ms = LibXR::Thread::GetTime();
+    const auto start = LibXR::Timebase::GetMilliseconds();
     while ((produced_done_count.load(std::memory_order_acquire) != PRODUCER_COUNT ||
             consumed_done_count.load(std::memory_order_acquire) != CONSUMER_COUNT) &&
-           (LibXR::Thread::GetTime() - start_ms) < 5000U)
+           (LibXR::Timebase::GetMilliseconds() - start).ToMillisecond() < 5000U)
     {
       LibXR::Thread::Sleep(1);
     }
