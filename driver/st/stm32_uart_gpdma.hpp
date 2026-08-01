@@ -22,7 +22,8 @@
 #endif
 
 #if defined(STM32H503xx) || defined(STM32H523xx) || defined(STM32H533xx) || \
-    defined(STM32H562xx) || defined(STM32H563xx) || defined(STM32H573xx)
+    defined(STM32H543xx) || defined(STM32H553xx) || defined(STM32H562xx) || \
+    defined(STM32H563xx) || defined(STM32H573xx)
 #define LIBXR_STM32_UART_REQUIRES_DMA_REQUEST_WA 1
 #elif defined(STM32U575xx) || defined(STM32U585xx)
 #define LIBXR_STM32_UART_REQUIRES_DMA_REQUEST_WA 1

@@ -8,7 +8,15 @@ namespace
 {
 [[nodiscard]] uint32_t GetUartKernelClock(UART_HandleTypeDef* uart_handle)
 {
-#if defined(UART_GETCLOCKSOURCE)
+#if defined(STM32WB0x_HAL_H) || defined(STM32WL3x_HAL_H)
+#if defined(RCC_PERIPHCLK_LPUART1)
+  if (UART_INSTANCE_LOWPOWER(uart_handle))
+  {
+    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_LPUART1);
+  }
+#endif
+  return UART_PERIPHCLK;
+#elif defined(UART_GETCLOCKSOURCE)
 #if defined(STM32U0xx_HAL_H) || defined(STM32H5) || defined(STM32U5) || \
     defined(STM32U3) || defined(STM32N6)
   // These HALs return an RCC_PERIPHCLK_* selector, not a UART clock-source enum.
@@ -49,7 +57,7 @@ namespace
     default:
       return 0U;
   }
-#elif defined(RCC_D2CFGR_D2PPRE1)
+#elif defined(RCC_D2CFGR_D2PPRE1) || defined(RCC_CDCFGR2_CDPPRE1)
   switch (clock_source)
   {
     case UART_CLOCKSOURCE_D2PCLK1:
@@ -175,7 +183,7 @@ namespace
   }
 #endif
 
-#if defined(UART_GETCLOCKSOURCE)
+#if defined(UART_GETCLOCKSOURCE) || defined(STM32WB0x_HAL_H) || defined(STM32WL3x_HAL_H)
   uint32_t divisor = 0U;
   if (uart_handle->Init.OverSampling == UART_OVERSAMPLING_8)
   {

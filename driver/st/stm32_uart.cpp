@@ -12,9 +12,19 @@ constexpr bool ShouldPublishStopDoneOnTxComplete(bool stop_active,
   return stop_active && waiting_for_uart_tc;
 }
 
+constexpr bool CanRetireTraditionalTxPayload(bool dma_payload_complete, bool fifo_enabled,
+                                             bool uart_tc)
+{
+  return dma_payload_complete && (!fifo_enabled || uart_tc);
+}
+
 static_assert(ShouldPublishStopDoneOnTxComplete(true, true));
 static_assert(!ShouldPublishStopDoneOnTxComplete(true, false));
 static_assert(!ShouldPublishStopDoneOnTxComplete(false, true));
+static_assert(CanRetireTraditionalTxPayload(true, false, false));
+static_assert(CanRetireTraditionalTxPayload(true, true, true));
+static_assert(!CanRetireTraditionalTxPayload(true, true, false));
+static_assert(!CanRetireTraditionalTxPayload(false, false, true));
 
 constexpr UartOldTxTerminal PreserveRequiredReplay(bool replay_required,
                                                    UartOldTxTerminal terminal)
@@ -108,6 +118,11 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
   if ((uart_handle_->Init.Mode & UART_MODE_TX) == UART_MODE_TX)
   {
     REQUIRE(uart_handle_->hdmatx != nullptr);
+#if !defined(LIBXR_STM32_UART_GPDMA)
+    ASSERT(uart_handle_->hdmatx->Init.Mode == DMA_NORMAL);
+#else
+    ASSERT(uart_handle_->hdmatx->Mode == DMA_NORMAL);
+#endif
     REQUIRE(dma_buff_tx.addr_ != nullptr);
     REQUIRE((reinterpret_cast<uintptr_t>(dma_buff_tx.addr_) % alignof(size_t)) == 0U);
     REQUIRE((dma_buff_tx.size_ % (2U * alignof(size_t))) == 0U);
@@ -258,14 +273,26 @@ UartDmaControlResult STM32UART::StopDataPath(bool active_tx, bool wait_for_uart_
 
   if (active_tx && (uart_handle_->hdmatx != nullptr))
   {
+    bool payload_complete = tx_payload_complete_;
+#if !defined(LIBXR_STM32_UART_GPDMA)
+    bool fifo_enabled = false;
+#if defined(UART_FIFOMODE_ENABLE)
+    fifo_enabled = uart_handle_->FifoMode == UART_FIFOMODE_ENABLE;
+#endif
+    const bool uart_tc =
+        !fifo_enabled || (__HAL_UART_GET_FLAG(uart_handle_, UART_FLAG_TC) != RESET);
+    payload_complete =
+        CanRetireTraditionalTxPayload(tx_payload_complete_, fifo_enabled, uart_tc);
+#endif
     if (tx_dma_error_)
     {
       old_tx_terminal = UartOldTxTerminal::ERROR;
     }
-    else if (tx_payload_complete_)
+    else if (payload_complete)
     {
       // CONFIG reaches this classification only after TC. Runtime ERROR recovery does
-      // not wait, so DMA completion alone retires the old generation there.
+      // not wait; a FIFO-enabled USART therefore also needs TC because HAL abort flushes
+      // any bytes still queued after DMA reaches NDTR == 0.
       old_tx_terminal = UartOldTxTerminal::COMPLETE;
     }
   }

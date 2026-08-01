@@ -132,15 +132,22 @@ HAL_StatusTypeDef STM32GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
                                                               size_t descriptor_count,
                                                               bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(state_.uart_handle_->hdmarx != nullptr, in_isr);
+  DMA_HandleTypeDef* const dma_handle = state_.uart_handle_->hdmarx;
+  REQUIRE_FROM_CALLBACK(dma_handle != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(buffer != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(descriptor_count == RX_NODE_COUNT, in_isr);
   REQUIRE_FROM_CALLBACK(total_size >= RX_NODE_COUNT, in_isr);
   REQUIRE_FROM_CALLBACK((total_size % RX_NODE_COUNT) == 0U, in_isr);
   REQUIRE_FROM_CALLBACK((total_size / RX_NODE_COUNT) <= UINT16_MAX, in_isr);
   REQUIRE_FROM_CALLBACK(IS_DMA_BLOCK_SIZE(total_size / RX_NODE_COUNT) != 0U, in_isr);
-  REQUIRE_FROM_CALLBACK(state_.uart_handle_->hdmarx->Mode == DMA_LINKEDLIST_CIRCULAR,
-                        in_isr);
+  ASSERT_FROM_CALLBACK(dma_handle->Parent == state_.uart_handle_ &&
+                           IS_GPDMA_INSTANCE(dma_handle->Instance) != 0U,
+                       in_isr);
+  ASSERT_FROM_CALLBACK(
+      dma_handle->InitLinkedList.LinkStepMode == DMA_LSM_FULL_EXECUTION &&
+          dma_handle->InitLinkedList.LinkedListMode == DMA_LINKEDLIST_CIRCULAR &&
+          dma_handle->Mode == DMA_LINKEDLIST_CIRCULAR,
+      in_isr);
 
   if (!state_.rx_queue_built_)
   {
@@ -150,12 +157,11 @@ HAL_StatusTypeDef STM32GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
   {
     REQUIRE_FROM_CALLBACK(buffer == state_.rx_buffer_, in_isr);
     REQUIRE_FROM_CALLBACK(total_size == state_.rx_total_size_, in_isr);
-    REQUIRE_FROM_CALLBACK(
-        state_.uart_handle_->hdmarx->LinkedListQueue == &state_.rx_queue_, in_isr);
+    REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue == &state_.rx_queue_, in_isr);
   }
 
-  REQUIRE_FROM_CALLBACK(StopComplete(state_.uart_handle_->hdmarx), in_isr);
-  FinalizeStopped(state_.uart_handle_->hdmarx, in_isr);
+  REQUIRE_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
+  FinalizeStopped(dma_handle, in_isr);
   // GPDMA fetches the private nodes directly; cacheable targets must publish all
   // CPU-built descriptor and queue fields before the HAL starts the channel.
   STM32_CleanDCacheByAddr(&state_, sizeof(state_));
@@ -372,9 +378,25 @@ void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size,
                             &node_config, dma_handle->LinkedListQueue->Head) == HAL_OK,
                         in_isr);
 
-  // UART RX nodes are contiguous one-dimensional blocks. Do not inherit a
-  // CubeMX seed node's unused 2D repeat-address fields.
+  // The seed supplies only BSP-owned request, port, priority, and security
+  // attributes. LibXR owns every field that defines the private byte RX ring.
   node_config.NodeType = DMA_GPDMA_LINEAR_NODE;
+  node_config.Init.BlkHWRequest = DMA_BREQ_SINGLE_BURST;
+  node_config.Init.Direction = DMA_PERIPH_TO_MEMORY;
+  node_config.Init.SrcInc = DMA_SINC_FIXED;
+  node_config.Init.DestInc = DMA_DINC_INCREMENTED;
+  node_config.Init.SrcDataWidth = DMA_SRC_DATAWIDTH_BYTE;
+  node_config.Init.DestDataWidth = DMA_DEST_DATAWIDTH_BYTE;
+  node_config.Init.SrcBurstLength = 1U;
+  node_config.Init.DestBurstLength = 1U;
+  node_config.Init.TransferEventMode = DMA_TCEM_BLOCK_TRANSFER;
+  node_config.Init.Mode = DMA_NORMAL;
+  node_config.DataHandlingConfig.DataExchange = DMA_EXCHANGE_NONE;
+  node_config.DataHandlingConfig.DataAlignment = DMA_DATA_RIGHTALIGN_ZEROPADDED;
+  node_config.TriggerConfig.TriggerMode = DMA_TRIGM_BLOCK_TRANSFER;
+  node_config.TriggerConfig.TriggerPolarity = DMA_TRIG_POLARITY_MASKED;
+  node_config.TriggerConfig.TriggerSelection = 0U;
+  node_config.RepeatBlockConfig = {};
 
   const size_t node_size = total_size / descriptor_count;
   node_config.SrcAddress = static_cast<uint32_t>(
