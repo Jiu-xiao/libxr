@@ -19,6 +19,13 @@ namespace LibXR
  * starts circular DMA, reports the remaining count, and performs cache maintenance.
  * Bytes that do not fit the software queue are dropped while the position advances.
  *
+ * 模型只保留模缓冲区位置，因此两次成功采样之间产生的字节数必须严格小于 DMA 缓冲区
+ * 容量。恰好一整圈或多整圈与“没有移动”不可区分；HT/TC 只能作为采样唤醒，不能作为
+ * generation 计数，且事件可能合并。 / The model retains only a position modulo the
+ * buffer capacity, so fewer than one buffer capacity of bytes may be produced between two
+ * successful samples. One or more complete unseen wraps alias no movement. HT/TC events
+ * are sampling wakeups, not generation counters, and may coalesce.
+ *
  * 同一实例的调用不得重叠。相关 UART 和 RX DMA IRQ 必须具有相同抢占优先级和目标核；
  * CONFIG 必须通过后端 RX/config gate 排除 `OnDataAvailable()` 周围的硬件片段。 / Calls
  * for one instance must not overlap. Related UART and RX DMA IRQs must share preemption
@@ -67,6 +74,9 @@ class UartCircularDmaRxModel
    * @param backend 后端实例 / Backend instance
    * @param port 接收字节的读取端口 / Read port receiving produced bytes
    * @return DMA 位置前进时为 true / True when the DMA position advanced
+   *
+   * @pre 距上次成功采样后产生的字节数必须严格小于 `BufferSize()` / Bytes produced
+   * since the previous successful sample must be strictly less than `BufferSize()`
    *
    * 调用者在释放 RX/config 硬件 gate 后完成挂起读取。本方法只读 DMA 状态、复制字节并
    * 推进 SPSC producer。 / The caller completes pending reads after releasing its

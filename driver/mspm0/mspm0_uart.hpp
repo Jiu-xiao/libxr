@@ -8,6 +8,20 @@
 namespace LibXR
 {
 
+/**
+ * @brief MSPM0 UART interrupt backend / MSPM0 UART 中断后端
+ *
+ * @note 每个硬件 UART index 只能绑定一个 application-lifetime 实例；无效或重复绑定会
+ * 触发强运行时要求。 / Each hardware UART index may be bound to only one
+ * application-lifetime instance. Invalid or duplicate binding fails a strong runtime
+ * requirement.
+ * @warning `SetConfig()` 仅支持线程中的静止配置边界。调用者必须停止并屏蔽本 UART IRQ，
+ * 且保证没有已接纳或在途的读写、硬件 TX/RX 或并发端口调用。 / `SetConfig()` is supported
+ * only at a quiescent configuration boundary in thread context. The caller must stop and
+ * mask this UART IRQ and ensure there is no accepted or in-flight I/O, hardware TX/RX, or
+ * concurrent port call. Violating these preconditions fails a strong runtime requirement;
+ * queued software RX bytes may remain and are not discarded by configuration.
+ */
 class MSPM0UART : public UART
 {
  public:
@@ -29,6 +43,12 @@ class MSPM0UART : public UART
             uint32_t tx_buffer_size = 128,
             UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
+  /**
+   * @brief Apply a UART configuration at a caller-provided quiescent boundary
+   * @return `OK` after synchronous hardware configuration; argument errors otherwise
+   * @warning Follow the class-level thread, IRQ-mask, and I/O-quiescence preconditions;
+   * violating them fails a strong runtime requirement.
+   */
   ErrorCode SetConfig(UART::Configuration config) override;
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);

@@ -222,10 +222,19 @@ using STM32RxDmaModel = UartCircularDmaRxModel;
  * BSP 必须为本 UART 的 UART、TX-DMA、RX-DMA IRQ 配置相同 NVIC 抢占优先级，使 vendor
  * HAL handler 不能互相嵌套；subpriority 可以不同。LibXR 仅从 HAL callback 边界开始
  * 串行化，无法修复相关 IRQ 嵌套已造成的 HAL-handle 竞争。 / The BSP must assign this
- * UART's UART, TX-DMA, and RX-DMA IRQs the same NVIC preemption priority so their vendor
- * HAL handlers cannot nest each other; their subpriorities may differ. LibXR starts
- * serialization only at the HAL callback boundary and cannot repair HAL-handle races
- * caused by nested related IRQs.
+ * UART's UART, TX-DMA, and RX-DMA IRQs the same NVIC preemption priority and target core
+ * so their vendor HAL handlers cannot nest or execute concurrently; their subpriorities
+ * may differ. LibXR starts serialization only at the HAL callback boundary and cannot
+ * repair HAL-handle races caused before that boundary.
+ *
+ * 传统 DMA 和 GPDMA RX 都只向模型报告环内 producer 位置；两次成功采样之间新增字节数
+ * 必须严格小于 RX ring 容量。对于使用 HT/TC 唤醒的传统 DMA，BSP 应使最坏 IRQ 触发到
+ * 有效采样延迟小于半环填充时间，并为中断屏蔽、高优先级工作、cache 和 control gate
+ * 留出余量。 / Traditional-DMA and GPDMA RX both report only a producer position within
+ * a ring, so fewer than one ring capacity of bytes may arrive between successful samples.
+ * For traditional DMA using HT/TC wakeups, keep worst-case IRQ-to-sample latency below
+ * half a ring-fill time, with margin for interrupt masking, higher-priority work, cache,
+ * and the control gate.
  *
  * 不得从本 UART 的 HAL callback，或能抢占其 UART、TX-DMA、RX-DMA IRQ 的 ISR 调用
  * `SetConfig()`。vendor handler 已触碰硬件状态后，仅 callback 边界无法使该调用安全。

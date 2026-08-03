@@ -88,11 +88,12 @@ class ESP32UartDma : public UART
                UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
   /**
-   * @brief 提交一次串行化帧格式和波特率配置 / Apply one serialized framing and baud
+   * @brief 提交一次串行化帧格式和波特率配置 / Submit one serialized framing and baud
    * configuration
    * @param config 新的帧格式和波特率 / New framing and baud rate
-   * @return 前一个配置仍未完成时返回 `BUSY` / `BUSY` while an earlier configuration
-   * request is outstanding
+   * @return 请求被接纳时返回 `OK`，前一个配置仍未完成时返回 `BUSY`；硬件应用可在返回后
+   * 完成 / `OK` when admitted; `BUSY` while an earlier configuration request is
+   * outstanding. Hardware application may complete after return.
    * @warning 在单核 DirectPolicy 目标上，不得从能在相关 UART/GDMA ISR 读取硬件状态后
    * 抢占它的高优先级 ISR，也不得从该尚未退出的 raw ISR 路径内部调用 / On single-core
    * DirectPolicy targets, do not call this method from a higher-priority ISR that can

@@ -34,15 +34,19 @@ MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_s
   _read_port = ReadFun;
   _write_port = WriteFun;
 
-  ASSERT(res_.index < MAX_UART_INSTANCES);
-  ASSERT(instance_map_[res_.index] == nullptr);
-  instance_map_[res_.index] = this;
+  REQUIRE(res_.index < MAX_UART_INSTANCES);
+  REQUIRE(res_.index == ResolveIndex(res_.irqn));
+  REQUIRE(instance_map_[res_.index] == nullptr);
 
+  NVIC_DisableIRQ(res_.irqn);
   NVIC_ClearPendingIRQ(res_.irqn);
-  NVIC_EnableIRQ(res_.irqn);
 
   const ErrorCode SET_CFG_ANS = SetConfig(config);
-  ASSERT(SET_CFG_ANS == ErrorCode::OK);
+  REQUIRE(SET_CFG_ANS == ErrorCode::OK);
+
+  instance_map_[res_.index] = this;
+  NVIC_ClearPendingIRQ(res_.irqn);
+  NVIC_EnableIRQ(res_.irqn);
 }
 
 UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
@@ -94,6 +98,23 @@ UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
 
 ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
 {
+  const bool IN_ISR = (__get_IPSR() != 0U);
+  REQUIRE_FROM_CALLBACK(!IN_ISR, IN_ISR);
+  REQUIRE(NVIC_GetEnableIRQ(res_.irqn) == 0U);
+
+  const ReadPort::BusyState READ_STATE =
+      read_port_->busy_.load(std::memory_order_acquire);
+  REQUIRE(READ_STATE == ReadPort::BusyState::IDLE ||
+          READ_STATE == ReadPort::BusyState::EVENT);
+  REQUIRE(write_port_->busy_.load(std::memory_order_acquire) ==
+          WritePort::BusyState::IDLE);
+  REQUIRE(write_port_->queue_info_->Size() == 0U);
+  REQUIRE(write_port_->queue_data_->Size() == 0U);
+  REQUIRE(!tx_active_valid_);
+  REQUIRE(!DL_UART_isBusy(res_.instance));
+  REQUIRE(DL_UART_isTXFIFOEmpty(res_.instance));
+  REQUIRE(DL_UART_isRXFIFOEmpty(res_.instance));
+
   if (config.baudrate == 0)
   {
     return ErrorCode::ARG_ERR;
@@ -165,11 +186,8 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   DL_UART_disableInterrupt(res_.instance,
                            DL_UART_INTERRUPT_TX | GetTimeoutInterruptMask());
 
-  tx_active_valid_ = false;
-  tx_active_remaining_ = 0;
-  tx_active_total_ = 0;
-
   DL_UART_enable(res_.instance);
+  NVIC_ClearPendingIRQ(res_.irqn);
 
   return ErrorCode::OK;
 }

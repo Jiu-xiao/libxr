@@ -81,13 +81,12 @@ class UART
    * This is a pure virtual function. Subclasses must implement the specific UART
    * configuration logic.
    *
-   * @warning 每个 UART 实例最多接受一个尚未完成的配置。调用可以来自线程或 ISR；并发
-   * 或重入请求返回 `ErrorCode::BUSY`，且不会覆盖已接受的 payload。`ErrorCode::OK`
-   * 只确认请求已接纳，硬件静止、应用配置和重启可以稍后完成。 / One UART instance
-   * accepts at most one outstanding configuration. Calls may originate in thread or ISR
-   * context; a concurrent or reentrant request returns `ErrorCode::BUSY` without
-   * replacing the accepted payload. `ErrorCode::OK` acknowledges admission, while
-   * quiescence, apply, and restart may finish later.
+   * @warning 调用上下文、并发与重入规则、和在途收发的协调方式，以及 `ErrorCode::OK`
+   * 表示同步完成还是异步接纳，均由具体后端定义。基类不保证可从 ISR 调用；必须遵守所用
+   * 后端的契约。 / Caller context, concurrency and reentry rules, coordination with
+   * in-flight I/O, and whether `ErrorCode::OK` means synchronous completion or
+   * asynchronous admission are backend-specific. The base interface does not guarantee
+   * ISR availability; follow the concrete backend contract.
    */
   virtual ErrorCode SetConfig(Configuration config) = 0;
 
@@ -98,6 +97,12 @@ class UART
    * @param data 待发送数据 / Data to transmit
    * @param op 完成方式和回调信息 / Completion mode and callback information
    * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @warning BLOCK operations are forbidden when `in_isr` is true.
+   * @warning 完成回调不得提交其完成依赖同一 UART、端口 consumer、service owner 或
+   * backpressure carrier 的 BLOCK 操作；应改用 CALLBACK/POLLING，或投递到独立任务。 /
+   * A completion callback must not submit a BLOCK operation whose completion depends on
+   * the same UART, port consumer, service owner, or backpressure carrier. Use
+   * CALLBACK/POLLING or defer the operation to an independent task.
    * @return 写端口的提交结果 / Write-port submission result
    */
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
@@ -114,6 +119,12 @@ class UART
    * must remain valid until completion
    * @param op 完成方式和回调信息 / Completion mode and callback information
    * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
+   * @warning BLOCK operations are forbidden when `in_isr` is true.
+   * @warning 完成回调不得提交其完成依赖同一 UART、端口 consumer、service owner 或
+   * backpressure carrier 的 BLOCK 操作；应改用 CALLBACK/POLLING，或投递到独立任务。 /
+   * A completion callback must not submit a BLOCK operation whose completion depends on
+   * the same UART, port consumer, service owner, or backpressure carrier. Use
+   * CALLBACK/POLLING or defer the operation to an independent task.
    * @return 读端口的提交结果 / Read-port submission result
    */
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<

@@ -84,6 +84,11 @@ class WritePort
      */
     Stream(LibXR::WritePort* port, LibXR::WriteOperation op);
 
+    Stream(const Stream&) = delete;
+    Stream& operator=(const Stream&) = delete;
+    Stream(Stream&&) = delete;
+    Stream& operator=(Stream&&) = delete;
+
     /**
      * @brief 析构时自动提交已累积的数据并释放锁。
      * @brief Destructor: automatically commits any accumulated data and releases the
@@ -161,7 +166,7 @@ class WritePort
      */
     [[nodiscard]] size_t EmptySize() const
     {
-      return owns_port_ ? (batch_capacity_ - buffered_size_) : 0;
+      return owns_port_ ? port_->queue_data_->EmptySize() : 0;
     }
 
    private:
@@ -184,14 +189,13 @@ class WritePort
 
     LibXR::WritePort* port_;    ///< 写端口指针 Pointer to the WritePort
     LibXR::WriteOperation op_;  ///< 写操作对象 Write operation object
-    size_t batch_capacity_ =
-        0;  ///< 当前批次可用的总容量 Total capacity reserved for the current batch
     size_t buffered_size_ =
         0;  ///< 当前批次已追加到共享 data queue、但尚未发布对应元数据的字节数 Bytes
             ///< already appended into the shared data queue for the current batch, but
             ///< whose metadata has not yet been published
-    bool owns_port_ = false;  ///< 当前 Stream 是否持有该批次的端口所有权 Whether this
-                              ///< Stream currently owns the batch
+    bool owns_port_ = false;   ///< 当前 Stream 是否持有该批次的端口所有权 Whether this
+                               ///< Stream currently owns the batch
+    bool submitting_ = false;  ///< True while CommitWrite may invoke a callback.
   };
 
   /**
@@ -303,6 +307,8 @@ class WritePort
    * mechanism.
    * @param in_isr 指示是否在中断上下文中执行。
    *               Indicates whether the operation is executed in an interrupt context.
+   * @warning BLOCK operations are forbidden in ISR context and fail a strong runtime
+   *          requirement before any request state is published.
    * @return 返回操作的 ErrorCode，指示操作结果。
    *         Returns an ErrorCode indicating the result of the operation.
    */

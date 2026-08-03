@@ -87,6 +87,9 @@ void WritePort::MarkAsRunning(WriteOperation& op) { op.MarkAsRunning(); }
 
 ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_isr)
 {
+  REQUIRE_FROM_CALLBACK(op.type != WriteOperation::OperationType::BLOCK || !in_isr,
+                        in_isr);
+
   if (Writable())
   {
     if (data.size_ == 0)

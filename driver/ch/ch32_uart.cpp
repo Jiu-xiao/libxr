@@ -140,6 +140,12 @@ UartOldTxTerminal Ch32StopAndClassifyTxDmaChannel(DMA_Channel_TypeDef* channel,
   return complete ? UartOldTxTerminal::COMPLETE : UartOldTxTerminal::NONE;
 }
 
+ch32_uart_id_t CheckedUartId(ch32_uart_id_t id)
+{
+  REQUIRE(static_cast<size_t>(id) < static_cast<size_t>(CH32_UART_NUMBER));
+  return id;
+}
+
 }  // namespace
 
 CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
@@ -162,16 +168,17 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
                    GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
                    uint32_t tx_queue_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
-      id_(id),
+      id_(CheckedUartId(id)),
       _read_port(dma_rx.size_),
       _write_port(tx_queue_size, dma_tx.size_ / 2),
       rx_dma_model_(dma_rx),
       dma_model_(*this, execution_policy_, _write_port, dma_tx),
-      instance_(ch32_uart_get_instance_id(id)),
-      dma_rx_channel_(CH32_UART_RX_DMA_CHANNEL_MAP[id]),
-      dma_tx_channel_(CH32_UART_TX_DMA_CHANNEL_MAP[id])
+      instance_(ch32_uart_get_instance_id(id_)),
+      dma_rx_channel_(CH32_UART_RX_DMA_CHANNEL_MAP[id_]),
+      dma_tx_channel_(CH32_UART_TX_DMA_CHANNEL_MAP[id_])
 {
-  map_[id] = this;
+  REQUIRE(map_[id_] == nullptr);
+  map_[id_] = this;
 
   bool tx_enable = dma_tx.size_ > 1;
   bool rx_enable = dma_rx.size_ > 0;
@@ -187,17 +194,17 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   if (tx_enable)
   {
     ASSERT(dma_tx_channel_ != nullptr);
-    ASSERT(CH32_UART_TX_DMA_IT_MAP[id] != 0);
-    ASSERT(Ch32DmaTransferErrorStatus(CH32_UART_TX_DMA_IT_MAP[id]) != 0U);
-    ASSERT(Ch32DmaGlobalStatus(CH32_UART_TX_DMA_IT_MAP[id]) != 0U);
+    ASSERT(CH32_UART_TX_DMA_IT_MAP[id_] != 0);
+    ASSERT(Ch32DmaTransferErrorStatus(CH32_UART_TX_DMA_IT_MAP[id_]) != 0U);
+    ASSERT(Ch32DmaGlobalStatus(CH32_UART_TX_DMA_IT_MAP[id_]) != 0U);
   }
   if (rx_enable)
   {
     ASSERT(dma_rx_channel_ != nullptr);
-    ASSERT(CH32_UART_RX_DMA_IT_TC_MAP[id] != 0);
-    ASSERT(CH32_UART_RX_DMA_IT_HT_MAP[id] != 0);
-    ASSERT(Ch32DmaTransferErrorStatus(CH32_UART_RX_DMA_IT_TC_MAP[id]) != 0U);
-    ASSERT(Ch32DmaGlobalStatus(CH32_UART_RX_DMA_IT_TC_MAP[id]) != 0U);
+    ASSERT(CH32_UART_RX_DMA_IT_TC_MAP[id_] != 0);
+    ASSERT(CH32_UART_RX_DMA_IT_HT_MAP[id_] != 0);
+    ASSERT(Ch32DmaTransferErrorStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) != 0U);
+    ASSERT(Ch32DmaGlobalStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) != 0U);
   }
 
   GPIO_InitTypeDef gpio_init = {};
@@ -227,19 +234,19 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     GPIO_PinRemapConfig(pin_remap, ENABLE);
   }
 
-  if (CH32_UART_APB_MAP[id] == 1)
+  if (CH32_UART_APB_MAP[id_] == 1)
   {
-    RCC_APB1PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id], ENABLE);
+    RCC_APB1PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id_], ENABLE);
   }
-  else if (CH32_UART_APB_MAP[id] == 2)
+  else if (CH32_UART_APB_MAP[id_] == 2)
   {
-    RCC_APB2PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id], ENABLE);
+    RCC_APB2PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id_], ENABLE);
   }
   else
   {
     ASSERT(false);
   }
-  RCC_AHBPeriphClockCmd(CH32_UART_RCC_PERIPH_MAP_DMA[id], ENABLE);
+  RCC_AHBPeriphClockCmd(CH32_UART_RCC_PERIPH_MAP_DMA[id_], ENABLE);
 
   uart_mode_ = (tx_enable ? USART_Mode_Tx : 0) | (rx_enable ? USART_Mode_Rx : 0);
   USART_InitTypeDef usart_cfg = {};
@@ -259,7 +266,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     ch32_dma_callback_t rx_cb_fun = [](void* arg)
     { reinterpret_cast<CH32UART*>(arg)->RxDmaIRQHandler(); };
 
-    ch32_dma_register_callback(ch32_dma_get_id(CH32_UART_RX_DMA_CHANNEL_MAP[id]),
+    ch32_dma_register_callback(ch32_dma_get_id(CH32_UART_RX_DMA_CHANNEL_MAP[id_]),
                                rx_cb_fun, this);
 
     DMA_DeInit(dma_rx_channel_);
@@ -279,7 +286,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     ch32_dma_callback_t tx_cb_fun = [](void* arg)
     { reinterpret_cast<CH32UART*>(arg)->TxDmaIRQHandler(); };
 
-    ch32_dma_register_callback(ch32_dma_get_id(CH32_UART_TX_DMA_CHANNEL_MAP[id]),
+    ch32_dma_register_callback(ch32_dma_get_id(CH32_UART_TX_DMA_CHANNEL_MAP[id_]),
                                tx_cb_fun, this);
     DMA_DeInit(dma_tx_channel_);
     dma_init.DMA_PeripheralBaseAddr = reinterpret_cast<uint32_t>(&instance_->DATAR);
@@ -307,7 +314,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     NVIC_EnableIRQ(CH32_DMA_IRQ_MAP[ch32_dma_get_id(dma_tx_channel_)]);
   }
 
-  NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id]);
+  NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id_]);
 }
 
 ErrorCode CH32UART::SetConfig(UART::Configuration config)

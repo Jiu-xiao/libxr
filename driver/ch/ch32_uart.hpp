@@ -35,6 +35,13 @@ namespace LibXR
  * the peripheral, using the USART TC IRQ as its service carrier. The BSP must keep the
  * related UART, TX-DMA, and RX-DMA IRQs on one owner core at the same preemption
  * priority.
+ *
+ * RX DMA 只向模型报告环内位置；两次成功采样之间新增字节数必须严格小于 RX ring 容量。
+ * 对正常 HT/TC 唤醒，BSP 应使最坏 IRQ 触发到有效采样延迟小于半环填充时间，并为中断
+ * 屏蔽和高优先级工作留出余量。 / RX DMA reports only a position within the ring, so
+ * fewer than one ring capacity of bytes may arrive between successful samples. For normal
+ * HT/TC wakeups, keep worst-case IRQ-to-sample latency below half a ring-fill time, with
+ * margin for interrupt masking and higher-priority work.
  */
 class CH32UART : public UART
 {
@@ -55,6 +62,9 @@ class CH32UART : public UART
    * disables remapping
    * @param tx_queue_size 待发送记录队列深度 / Pending TX record queue depth
    * @param config 初始 UART 帧格式和波特率 / Initial UART framing and baud rate
+   * @warning The id must name a real hardware UART, and each id may be bound to only one
+   *          process-lifetime CH32UART instance. Invalid or duplicate construction fails
+   *          a strong runtime requirement.
    */
   CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx, GPIO_TypeDef* tx_gpio_port,
            uint16_t tx_gpio_pin, GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin,

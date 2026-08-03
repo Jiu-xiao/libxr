@@ -24,14 +24,14 @@ class ReadPort
 
   // Read BLOCK states:
   // PENDING = waiting for queue-fed completion after read_fun_ was notified
-  // CLEARING = ClearQueuedData() owns software dequeue progress
+  // CLEARING = one caller owns read arming, queue inspection, or software dequeue
   // BLOCK_CLAIMED = wakeup now belongs to the waiter
   // BLOCK_DETACHED = timeout detached the waiter
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 读 BLOCK 状态：
   // PENDING = 已通知 read_fun_，等待队列侧完成
-  // CLEARING = ClearQueuedData() 占有软件出队进度
+  // CLEARING = 一个调用方占有读启动、队列检查或软件出队进度
   // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
   // BLOCK_DETACHED = timeout 已把 waiter 分离
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
@@ -40,8 +40,8 @@ class ReadPort
     IDLE = 0,      ///< No active waiter and no pending completion. 无等待者、无挂起完成。
     PENDING = 1,   ///< Driver accepted the request; completion still owns progress.
                    ///< 请求已交给底层推进。
-    CLEARING = 2,  ///< ClearQueuedData() owns software dequeue progress.
-                   ///< ClearQueuedData() 占有软件出队进度。
+    CLEARING = 2,  ///< One caller owns read arming, queue inspection, or dequeue.
+                   ///< 一个调用方占有读启动、队列检查或出队进度。
     BLOCK_CLAIMED = 3,   ///< BLOCK wakeup already belongs to the current waiter. 当前
                          ///< BLOCK 唤醒已被本次等待者认领。
     BLOCK_DETACHED = 4,  ///< Timeout detached the waiter; completion must stay silent.
@@ -176,6 +176,8 @@ class ReadPort
    * mechanism.
    * @param in_isr 指示是否在中断上下文中执行。
    *               Indicates whether the operation is executed in an interrupt context.
+   * @warning BLOCK operations are forbidden in ISR context and fail a strong runtime
+   *          requirement before any request state is published.
    * @return 返回操作的 ErrorCode，指示操作结果。
    *         Returns an ErrorCode indicating the result of the operation.
    */

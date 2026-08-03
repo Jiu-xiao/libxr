@@ -82,6 +82,9 @@ class UartLinkedListDmaRxModel
    * first byte and one-past-end address are valid positions, with one-past-end normalized
    * to zero. One or more complete wraps remain indistinguishable from no movement.
    *
+   * @pre 距上次成功采样后产生的字节数必须严格小于 `BufferSize()` / Bytes produced
+   * since the previous successful sample must be strictly less than `BufferSize()`
+   *
    * 调用者在释放 RX/config 硬件 gate 后完成挂起读取。本方法只采样 DMA 状态、复制字节
    * 并推进 SPSC producer。 / The caller completes pending reads after releasing its
    * RX/config hardware gate. This method only samples DMA state, copies bytes, and

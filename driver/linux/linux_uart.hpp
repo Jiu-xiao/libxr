@@ -32,6 +32,14 @@ namespace LibXR
  * 通道。
  * Supports UART creation by device path or USB VID/PID(/control interface
  * name[/serial]) auto discovery.
+ *
+ * @warning 当前实现没有在内部 RX、TX 和重连路径之间串行化 fd 与连接状态。运行期重配置
+ * 不受支持；公开 `SetConfig()` 固定返回 `NOT_SUPPORT`。 / The current implementation does
+ * not serialize its fd and connection state across the internal RX, TX, and reconnect
+ * paths. Runtime reconfiguration is unsupported; public `SetConfig()` always returns
+ * `NOT_SUPPORT`.
+ * @note 内部线程不会停止且持有 `this`；实例必须存活到进程结束。 / The internal threads
+ * do not stop and retain `this`; the instance must remain alive until process exit.
  */
 class LinuxUART : public UART
 {
@@ -77,7 +85,7 @@ class LinuxUART : public UART
     config_.data_bits = data_bits;
     config_.stop_bits = stop_bits;
 
-    SetConfig(config_);
+    REQUIRE(ApplyConfig(fd_, config_) == ErrorCode::OK);
 
     _read_port = ReadFun;
     _write_port = WriteFun;
@@ -183,7 +191,7 @@ class LinuxUART : public UART
     config_.data_bits = data_bits;
     config_.stop_bits = stop_bits;
 
-    SetConfig(config_);
+    REQUIRE(ApplyConfig(fd_, config_) == ErrorCode::OK);
 
     _read_port = ReadFun;
     _write_port = WriteFun;
@@ -195,6 +203,16 @@ class LinuxUART : public UART
     tx_thread_.Create<LinuxUART*>(
         this, [](LinuxUART* self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
         Thread::Priority::REALTIME);
+  }
+
+  /**
+   * @brief Runtime reconfiguration is not supported by this backend
+   * @return Always `ErrorCode::NOT_SUPPORT`
+   */
+  ErrorCode SetConfig(UART::Configuration config) override
+  {
+    (void)config;
+    return ErrorCode::NOT_SUPPORT;
   }
 
   std::string GetByPathForTTY(const std::string& tty_name)
@@ -327,23 +345,27 @@ class LinuxUART : public UART
     return true;
   }
 
+ private:
   void SetLowLatency(int fd)
   {
-    struct serial_struct serinfo;
-    ioctl(fd, TIOCGSERIAL, &serinfo);
+    struct serial_struct serinfo{};
+    if (ioctl(fd, TIOCGSERIAL, &serinfo) != 0)
+    {
+      return;
+    }
     serinfo.flags |= ASYNC_LOW_LATENCY;
-    ioctl(fd, TIOCSSERIAL, &serinfo);
+    (void)ioctl(fd, TIOCSSERIAL, &serinfo);
   }
 
-  ErrorCode SetConfig(UART::Configuration config) override
+  ErrorCode ApplyConfig(int fd, const UART::Configuration& config)
   {
-    if (&config != &config_)
+    if (config.baudrate == 0 || (config.stop_bits != 1 && config.stop_bits != 2))
     {
-      config_ = config;
+      return ErrorCode::ARG_ERR;
     }
 
     struct termios2 tio{};
-    if (ioctl(fd_, TCGETS2, &tio) != 0)
+    if (ioctl(fd, TCGETS2, &tio) != 0)
     {
       return ErrorCode::INIT_ERR;
     }
@@ -421,6 +443,8 @@ class LinuxUART : public UART
         tio.c_cflag |= PARENB;
         tio.c_cflag |= PARODD;
         break;
+      default:
+        return ErrorCode::ARG_ERR;
     }
 
     // 禁用硬件流控
@@ -434,14 +458,14 @@ class LinuxUART : public UART
     tio.c_cc[VTIME] = 0;
     tio.c_cc[VMIN] = 1;
 
-    if (ioctl(fd_, TCSETS2, &tio) != 0)
+    if (ioctl(fd, TCSETS2, &tio) != 0)
     {
       return ErrorCode::INIT_ERR;
     }
 
-    SetLowLatency(fd_);
+    SetLowLatency(fd);
 
-    tcflush(fd_, TCIOFLUSH);
+    tcflush(fd, TCIOFLUSH);
 
     return ErrorCode::OK;
   }
@@ -455,7 +479,6 @@ class LinuxUART : public UART
     return ErrorCode::PENDING;
   }
 
- private:
   void RxLoop()
   {
     while (true)
@@ -469,18 +492,34 @@ class LinuxUART : public UART
         {
           XR_LOG_WARN("Cannot open UART device: %s", device_path_.c_str());
           Thread::Sleep(1000);
+          continue;
         }
-        else
+
+        if (ApplyConfig(fd_, config_) != ErrorCode::OK)
         {
-          SetConfig(config_);
-          XR_LOG_PASS("Reopen UART device: %s", device_path_.c_str());
-          connected_ = true;
+          XR_LOG_WARN("Cannot configure UART device: %s", device_path_.c_str());
+          close(fd_);
+          fd_ = -1;
+          Thread::Sleep(1000);
+          continue;
         }
+
+        XR_LOG_PASS("Reopen UART device: %s", device_path_.c_str());
+        connected_ = true;
       }
-      auto n = read(fd_, rx_buff_, buff_size_);
+
+      const size_t READ_SIZE = std::min(buff_size_, read_port_->EmptySize());
+      if (READ_SIZE == 0U)
+      {
+        Thread::Sleep(1);
+        continue;
+      }
+
+      auto n = read(fd_, rx_buff_, READ_SIZE);
       if (n > 0)
       {
-        read_port_->queue_data_->PushBatch(rx_buff_, n);
+        const ErrorCode PUSH_ANS = read_port_->queue_data_->PushBatch(rx_buff_, n);
+        REQUIRE(PUSH_ANS == ErrorCode::OK);
         read_port_->ProcessPendingReads(false);
       }
       else

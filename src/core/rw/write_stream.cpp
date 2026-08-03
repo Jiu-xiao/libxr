@@ -25,6 +25,11 @@ WritePort::Stream::~Stream()
 
 ErrorCode WritePort::Stream::Acquire()
 {
+  if (submitting_)
+  {
+    return ErrorCode::BUSY;
+  }
+
   if (owns_port_)
   {
     return ErrorCode::OK;
@@ -58,7 +63,6 @@ ErrorCode WritePort::Stream::Acquire()
   }
 
   owns_port_ = true;
-  batch_capacity_ = port_->queue_data_->EmptySize();
   return ErrorCode::OK;
 }
 
@@ -106,7 +110,9 @@ ErrorCode WritePort::Stream::SubmitBuffered()
       WriteInfoBlock{ConstRawData{nullptr, buffered_size_}, op_});
   ASSERT(ans == ErrorCode::OK);
 
+  submitting_ = true;
   ans = port_->CommitWrite({nullptr, buffered_size_}, op_, true);
+  submitting_ = false;
   buffered_size_ = 0;
 
   if (op_.type == WriteOperation::OperationType::BLOCK)
@@ -146,6 +152,11 @@ WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
 
 ErrorCode WritePort::Stream::Commit()
 {
+  if (submitting_)
+  {
+    return ErrorCode::BUSY;
+  }
+
   auto ans = ErrorCode::OK;
 
   if (owns_port_ && buffered_size_ > 0)

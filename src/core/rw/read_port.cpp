@@ -205,6 +205,9 @@ void ReadPort::MarkAsRunning(ReadInfoBlock& info) { info.op.MarkAsRunning(); }
 
 ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 {
+  REQUIRE_FROM_CALLBACK(op.type != ReadOperation::OperationType::BLOCK || !in_isr,
+                        in_isr);
+
   if (!Readable())
   {
     return ErrorCode::NOT_SUPPORT;
@@ -251,47 +254,28 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
     info_ = ReadInfoBlock{data, op};
     op.MarkAsRunning();
-    (void)PublishPending(busy_, BusyState::CLEARING);
 
     const auto ans = read_fun_(*this, in_isr);
     if (static_cast<int8_t>(ans) >= 0)
     {
-      // A producer may have pushed while CLEARING suppressed its notification.
-      // Re-check now that the request is visible as PENDING.
-      ProcessPendingReads(in_isr);
-      break;
-    }
-
-    expected = BusyState::PENDING;
-    if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire))
-    {
-      if (op.type != ReadOperation::OperationType::BLOCK)
+      // A producer may have pushed while CLEARING suppressed its notification. Publish
+      // the accepted request first, then re-check only when such an event was recorded.
+      const bool had_event = PublishPending(busy_, BusyState::CLEARING);
+      if (had_event)
       {
-        op.UpdateStatus(in_isr, ans);
-      }
-      return ans;
-    }
-
-    if (expected == BusyState::BLOCK_DETACHED ||
-        expected == BusyState::BLOCK_DETACHED_EVENT)
-    {
-      return ErrorCode::TIMEOUT;
-    }
-    if (expected == BusyState::IDLE || expected == BusyState::EVENT ||
-        expected == BusyState::PROCESSING || expected == BusyState::PROCESSING_EVENT)
-    {
-      if (op.type != ReadOperation::OperationType::BLOCK)
-      {
-        return ErrorCode::OK;
+        ProcessPendingReads(in_isr);
       }
       break;
     }
 
-    ASSERT(expected == BusyState::BLOCK_CLAIMED ||
-           expected == BusyState::BLOCK_CLAIMED_EVENT);
-    break;
+    // Keep CLEARING ownership until ReadFun resolves the arm attempt. Publishing IDLE
+    // from that tagged owner cannot clear a request submitted by a reentrant callback.
+    PublishAfterConsumer(busy_, BusyState::CLEARING);
+    if (op.type != ReadOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ans);
+    }
+    return ans;
   }
 
   if (op.type != ReadOperation::OperationType::BLOCK)
@@ -483,6 +467,12 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
         return;
       }
       state = expected;
+      if (state == BusyState::CLEARING || state == BusyState::CLEARING_EVENT ||
+          state == BusyState::PROCESSING || state == BusyState::PROCESSING_EVENT)
+      {
+        DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+        return;
+      }
     }
     else
     {
