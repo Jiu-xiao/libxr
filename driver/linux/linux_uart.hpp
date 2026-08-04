@@ -6,12 +6,17 @@
 #include <fcntl.h>
 #include <libudev.h>
 #include <linux/serial.h>
+#include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
-#include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -22,9 +27,35 @@
 #include "libxr_rw.hpp"
 #include "semaphore.hpp"
 #include "uart.hpp"
+#include "uart/uart_rx_config_gate.hpp"
 
 namespace LibXR
 {
+class LinuxUART;
+
+namespace Detail
+{
+class LinuxUARTReadPort : public ReadPort
+{
+ public:
+  explicit LinuxUARTReadPort(size_t size, LinuxUART& owner)
+      : ReadPort(size), owner_(owner)
+  {
+  }
+
+  void OnRxDequeue(bool in_isr) override;
+
+  LinuxUARTReadPort& operator=(ReadFun fun)
+  {
+    ReadPort::operator=(fun);
+    return *this;
+  }
+
+ private:
+  LinuxUART& owner_;
+};
+}  // namespace Detail
+
 /**
  * @brief Linux UART 串口驱动实现 / Linux UART driver implementation
  *
@@ -33,16 +64,18 @@ namespace LibXR
  * Supports UART creation by device path or USB VID/PID(/control interface
  * name[/serial]) auto discovery.
  *
- * @warning 当前实现没有在内部 RX、TX 和重连路径之间串行化 fd 与连接状态。运行期重配置
- * 不受支持；公开 `SetConfig()` 固定返回 `NOT_SUPPORT`。 / The current implementation does
- * not serialize its fd and connection state across the internal RX, TX, and reconnect
- * paths. Runtime reconfiguration is unsupported; public `SetConfig()` always returns
- * `NOT_SUPPORT`.
- * @note 内部线程不会停止且持有 `this`；实例必须存活到进程结束。 / The internal threads
- * do not stop and retain `this`; the instance must remain alive until process exit.
+ * RX、TX、运行期配置、close 与重连全部由单一 I/O owner 线程串行化。`SetConfig()`
+ * 只接纳一个异步配置事务，在该事务应用完成前返回 `BUSY`。 / RX, TX, runtime
+ * configuration, close, and reconnect are serialized by one I/O owner thread.
+ * `SetConfig()` admits one asynchronous configuration transaction and returns `BUSY`
+ * until that transaction is applied.
+ * @note 内部线程不会停止且持有 `this`；实例必须存活到进程结束。 / The internal thread
+ * does not stop and retains `this`; the instance must remain alive until process exit.
  */
 class LinuxUART : public UART
 {
+  friend class Detail::LinuxUARTReadPort;
+
  public:
   /**
    * @brief 通过设备路径构造 UART / Construct UART by device path
@@ -55,7 +88,8 @@ class LinuxUART : public UART
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
         buff_size_(buffer_size),
-        _read_port(buffer_size),
+        initial_config_{baudrate, parity, data_bits, stop_bits},
+        _read_port(buffer_size, *this),
         _write_port(tx_queue_size, buffer_size)
   {
     ASSERT(buff_size_ > 0);
@@ -67,36 +101,7 @@ class LinuxUART : public UART
     }
 
     device_path_ = GetByPathForTTY(dev_path);
-
-    fd_ = open(device_path_.c_str(), O_RDWR | O_NOCTTY);
-    if (fd_ < 0)
-    {
-      XR_LOG_ERROR("Cannot open UART device: %s", device_path_.c_str());
-      ASSERT(false);
-    }
-    else
-    {
-      XR_LOG_PASS("Open UART device: %s", device_path_.c_str());
-    }
-
-    config_ = {};
-    config_.baudrate = baudrate;
-    config_.parity = parity;
-    config_.data_bits = data_bits;
-    config_.stop_bits = stop_bits;
-
-    REQUIRE(ApplyConfig(fd_, config_) == ErrorCode::OK);
-
-    _read_port = ReadFun;
-    _write_port = WriteFun;
-
-    rx_thread_.Create<LinuxUART*>(
-        this, [](LinuxUART* self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
-        Thread::Priority::REALTIME);
-
-    tx_thread_.Create<LinuxUART*>(
-        this, [](LinuxUART* self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
-        Thread::Priority::REALTIME);
+    StartIoOwner(thread_stack_size);
   }
 
   /**
@@ -150,9 +155,12 @@ class LinuxUART : public UART
         rx_buff_(new uint8_t[buffer_size]),
         tx_buff_(new uint8_t[buffer_size]),
         buff_size_(buffer_size),
-        _read_port(buffer_size),
+        initial_config_{baudrate, parity, data_bits, stop_bits},
+        _read_port(buffer_size, *this),
         _write_port(tx_queue_size, buffer_size)
   {
+    ASSERT(buff_size_ > 0);
+
     while (!FindUSBTTYByVidPid(vid, pid, control_interface_name, serial, device_path_))
     {
       XR_LOG_WARN(
@@ -173,46 +181,33 @@ class LinuxUART : public UART
     }
 
     device_path_ = GetByPathForTTY(device_path_);
-
-    fd_ = open(device_path_.c_str(), O_RDWR | O_NOCTTY);
-    if (fd_ < 0)
-    {
-      XR_LOG_ERROR("Cannot open UART device: %s", device_path_.c_str());
-      ASSERT(false);
-    }
-    else
-    {
-      XR_LOG_PASS("Open UART device: %s", device_path_.c_str());
-    }
-
-    config_ = {};
-    config_.baudrate = baudrate;
-    config_.parity = parity;
-    config_.data_bits = data_bits;
-    config_.stop_bits = stop_bits;
-
-    REQUIRE(ApplyConfig(fd_, config_) == ErrorCode::OK);
-
-    _read_port = ReadFun;
-    _write_port = WriteFun;
-
-    rx_thread_.Create<LinuxUART*>(
-        this, [](LinuxUART* self) { self->RxLoop(); }, "rx_uart", thread_stack_size,
-        Thread::Priority::REALTIME);
-
-    tx_thread_.Create<LinuxUART*>(
-        this, [](LinuxUART* self) { self->TxLoop(); }, "tx_uart", thread_stack_size,
-        Thread::Priority::REALTIME);
+    StartIoOwner(thread_stack_size);
   }
 
   /**
-   * @brief Runtime reconfiguration is not supported by this backend
-   * @return Always `ErrorCode::NOT_SUPPORT`
+   * @brief Submit one serialized runtime configuration transaction
+   * @return `OK` on admission, `BUSY` while another configuration is outstanding
+   * @note The owner waits for the active record, observes `TIOCOUTQ == 0`, and then
+   *       applies the termios change. This is the nonblocking drain boundary exposed by
+   *       the Linux tty driver; it is not an independent observation of every USB-UART
+   *       bridge FIFO or of the external physical line.
    */
   ErrorCode SetConfig(UART::Configuration config) override
   {
-    (void)config;
-    return ErrorCode::NOT_SUPPORT;
+    const ErrorCode validation = ValidateConfig(config);
+    if (validation != ErrorCode::OK)
+    {
+      return validation;
+    }
+
+    if (!config_gate_.TryReserveConfig())
+    {
+      return ErrorCode::BUSY;
+    }
+    requested_config_ = config;
+    config_gate_.PublishConfig();
+    NotifyIoOwner();
+    return ErrorCode::OK;
   }
 
   std::string GetByPathForTTY(const std::string& tty_name)
@@ -346,6 +341,90 @@ class LinuxUART : public UART
   }
 
  private:
+  static constexpr int RECONNECT_DELAY_MS = 1000;
+  static constexpr int CONFIG_DRAIN_POLL_MS = 10;
+
+  static ErrorCode ValidateConfig(const UART::Configuration& config)
+  {
+    if (config.baudrate == 0 || (config.stop_bits != 1 && config.stop_bits != 2) ||
+        config.data_bits < 5 || config.data_bits > 8)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    switch (config.parity)
+    {
+      case UART::Parity::NO_PARITY:
+      case UART::Parity::EVEN:
+      case UART::Parity::ODD:
+        return ErrorCode::OK;
+      default:
+        return ErrorCode::ARG_ERR;
+    }
+  }
+
+  void StartIoOwner(size_t thread_stack_size)
+  {
+    REQUIRE(ValidateConfig(initial_config_) == ErrorCode::OK);
+
+    wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    REQUIRE(wake_fd_ >= 0);
+
+    _read_port = ReadFun;
+    _write_port = WriteFun;
+
+    io_thread_.Create<LinuxUART*>(
+        this, [](LinuxUART* self) { self->IoLoop(); }, "io_uart", thread_stack_size,
+        Thread::Priority::REALTIME);
+
+    REQUIRE(startup_sem_.Wait() == ErrorCode::OK);
+    REQUIRE(startup_result_ == ErrorCode::OK);
+  }
+
+  void NotifyIoOwner()
+  {
+    const uint64_t value = 1U;
+    while (true)
+    {
+      const ssize_t written = write(wake_fd_, &value, sizeof(value));
+      if (written == static_cast<ssize_t>(sizeof(value)))
+      {
+        return;
+      }
+      if (written < 0 && errno == EINTR)
+      {
+        continue;
+      }
+      if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+      {
+        return;
+      }
+      REQUIRE(false);
+    }
+  }
+
+  void DrainWakeFd()
+  {
+    uint64_t value = 0U;
+    while (true)
+    {
+      const ssize_t bytes = read(wake_fd_, &value, sizeof(value));
+      if (bytes == static_cast<ssize_t>(sizeof(value)))
+      {
+        return;
+      }
+      if (bytes < 0 && errno == EINTR)
+      {
+        continue;
+      }
+      if (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+      {
+        return;
+      }
+      REQUIRE(false);
+    }
+  }
+
   void SetLowLatency(int fd)
   {
     struct serial_struct serinfo{};
@@ -357,11 +436,12 @@ class LinuxUART : public UART
     (void)ioctl(fd, TIOCSSERIAL, &serinfo);
   }
 
-  ErrorCode ApplyConfig(int fd, const UART::Configuration& config)
+  ErrorCode ApplyConfig(int fd, const UART::Configuration& config, bool flush)
   {
-    if (config.baudrate == 0 || (config.stop_bits != 1 && config.stop_bits != 2))
+    const ErrorCode validation = ValidateConfig(config);
+    if (validation != ErrorCode::OK)
     {
-      return ErrorCode::ARG_ERR;
+      return validation;
     }
 
     struct termios2 tio{};
@@ -465,7 +545,10 @@ class LinuxUART : public UART
 
     SetLowLatency(fd);
 
-    tcflush(fd, TCIOFLUSH);
+    if (flush && tcflush(fd, TCIOFLUSH) != 0)
+    {
+      return ErrorCode::INIT_ERR;
+    }
 
     return ErrorCode::OK;
   }
@@ -475,116 +558,374 @@ class LinuxUART : public UART
   static ErrorCode WriteFun(WritePort& port, bool)
   {
     auto* uart = LibXR::ContainerOf(&port, &LinuxUART::_write_port);
-    uart->write_sem_.Post();
+    uart->NotifyIoOwner();
     return ErrorCode::PENDING;
   }
 
-  void RxLoop()
+  int OpenDevice(const UART::Configuration& config, bool reconnect, ErrorCode& result)
   {
-    while (true)
+    const int fd = open(device_path_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
     {
-      if (!connected_)
+      result = ErrorCode::INIT_ERR;
+      XR_LOG_WARN("Cannot open UART device: %s", device_path_.c_str());
+      return -1;
+    }
+
+    result = ApplyConfig(fd, config, true);
+    if (result != ErrorCode::OK)
+    {
+      XR_LOG_WARN("Cannot configure UART device: %s", device_path_.c_str());
+      (void)close(fd);
+      return -1;
+    }
+
+    XR_LOG_PASS("%s UART device: %s", reconnect ? "Reopen" : "Open",
+                device_path_.c_str());
+    return fd;
+  }
+
+  void CompleteActiveTx(ErrorCode result)
+  {
+    REQUIRE(tx_active_);
+    WriteInfoBlock info = tx_active_info_;
+    tx_active_ = false;
+    tx_active_size_ = 0U;
+    tx_active_offset_ = 0U;
+    write_port_->Finish(false, result, info);
+  }
+
+  void Disconnect(int& fd, bool fail_active)
+  {
+    if (fd >= 0)
+    {
+      (void)close(fd);
+      fd = -1;
+    }
+    if (fail_active && tx_active_)
+    {
+      CompleteActiveTx(ErrorCode::FAILED);
+    }
+  }
+
+  bool LoadActiveTx()
+  {
+    if (tx_active_)
+    {
+      return false;
+    }
+
+    WriteInfoBlock info{};
+    if (write_port_->queue_info_->Peek(info) != ErrorCode::OK ||
+        !config_gate_.TryEnterTx())
+    {
+      return false;
+    }
+
+    REQUIRE(info.data.size_ <= buff_size_);
+    const ErrorCode data_result =
+        write_port_->queue_data_->PopBatch(tx_buff_, info.data.size_);
+    REQUIRE(data_result == ErrorCode::OK);
+    const ErrorCode info_result = write_port_->queue_info_->Pop(tx_active_info_);
+    REQUIRE(info_result == ErrorCode::OK);
+
+    tx_active_size_ = info.data.size_;
+    tx_active_offset_ = 0U;
+    tx_active_ = true;
+    config_gate_.LeaveTx();
+    return true;
+  }
+
+  bool PumpTx(int& fd)
+  {
+    while (tx_active_)
+    {
+      const size_t remaining = tx_active_size_ - tx_active_offset_;
+      const ssize_t written = write(fd, tx_buff_ + tx_active_offset_, remaining);
+      if (written > 0)
       {
-        close(fd_);
-        fd_ = open(device_path_.c_str(), O_RDWR | O_NOCTTY);
-
-        if (fd_ < 0)
+        tx_active_offset_ += static_cast<size_t>(written);
+        if (tx_active_offset_ == tx_active_size_)
         {
-          XR_LOG_WARN("Cannot open UART device: %s", device_path_.c_str());
-          Thread::Sleep(1000);
-          continue;
+          CompleteActiveTx(ErrorCode::OK);
         }
-
-        if (ApplyConfig(fd_, config_) != ErrorCode::OK)
-        {
-          XR_LOG_WARN("Cannot configure UART device: %s", device_path_.c_str());
-          close(fd_);
-          fd_ = -1;
-          Thread::Sleep(1000);
-          continue;
-        }
-
-        XR_LOG_PASS("Reopen UART device: %s", device_path_.c_str());
-        connected_ = true;
+        continue;
+      }
+      if (written < 0 && errno == EINTR)
+      {
+        continue;
+      }
+      if (written == 0 || (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)))
+      {
+        return true;
       }
 
-      const size_t READ_SIZE = std::min(buff_size_, read_port_->EmptySize());
-      if (READ_SIZE == 0U)
+      XR_LOG_WARN("Cannot write UART device: %s", device_path_.c_str());
+      Disconnect(fd, true);
+      return false;
+    }
+    return true;
+  }
+
+  bool DrainRx(int& fd, bool terminal = false)
+  {
+    size_t budget = terminal ? static_cast<size_t>(-1) : buff_size_;
+    while (budget > 0U)
+    {
+      const size_t read_size = std::min(budget, read_port_->EmptySize());
+      if (read_size == 0U)
       {
-        Thread::Sleep(1);
+        return true;
+      }
+
+      const ssize_t bytes = read(fd, rx_buff_, read_size);
+      if (bytes > 0)
+      {
+        budget -= static_cast<size_t>(bytes);
+        const ErrorCode push_result =
+            read_port_->queue_data_->PushBatch(rx_buff_, static_cast<size_t>(bytes));
+        REQUIRE(push_result == ErrorCode::OK);
+        read_port_->ProcessPendingReads(false);
+        if (!terminal && config_gate_.ConfigRequested())
+        {
+          return true;
+        }
+        continue;
+      }
+      if (bytes < 0 && errno == EINTR)
+      {
+        continue;
+      }
+      if (bytes == 0 || (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)))
+      {
+        return true;
+      }
+
+      XR_LOG_WARN("Cannot read UART device: %s", device_path_.c_str());
+      Disconnect(fd, true);
+      return false;
+    }
+    return true;
+  }
+
+  bool ServiceConfig(int& fd, UART::Configuration& current_config)
+  {
+    if (tx_active_ || !config_gate_.TryEnterConfig())
+    {
+      return false;
+    }
+
+    int queued_bytes = 0;
+    if (ioctl(fd, TIOCOUTQ, &queued_bytes) != 0)
+    {
+      XR_LOG_WARN("Cannot inspect UART output queue: %s", device_path_.c_str());
+      Disconnect(fd, false);
+      return true;
+    }
+    if (queued_bytes > 0)
+    {
+      return true;
+    }
+
+    const UART::Configuration requested = requested_config_;
+    const ErrorCode result = ApplyConfig(fd, requested, false);
+    if (result != ErrorCode::OK)
+    {
+      XR_LOG_WARN("Cannot apply UART configuration: %s", device_path_.c_str());
+      Disconnect(fd, false);
+      return true;
+    }
+
+    current_config = requested;
+    config_gate_.LeaveConfig();
+    return true;
+  }
+
+  void WaitForReconnectWake()
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(RECONNECT_DELAY_MS);
+    pollfd wake_poll{};
+    wake_poll.fd = wake_fd_;
+    wake_poll.events = POLLIN;
+
+    while (true)
+    {
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= deadline)
+      {
+        return;
+      }
+
+      const auto remaining =
+          std::chrono::ceil<std::chrono::milliseconds>(deadline - now).count();
+      wake_poll.revents = 0;
+      const int result = poll(&wake_poll, 1U, static_cast<int>(remaining));
+      if (result < 0 && errno == EINTR)
+      {
         continue;
       }
 
-      auto n = read(fd_, rx_buff_, READ_SIZE);
-      if (n > 0)
+      REQUIRE(result >= 0);
+      if (result == 0)
       {
-        const ErrorCode PUSH_ANS = read_port_->queue_data_->PushBatch(rx_buff_, n);
-        REQUIRE(PUSH_ANS == ErrorCode::OK);
-        read_port_->ProcessPendingReads(false);
+        return;
       }
-      else
+      REQUIRE((wake_poll.revents & (POLLERR | POLLHUP | POLLNVAL)) == 0);
+      if ((wake_poll.revents & POLLIN) != 0)
       {
-        XR_LOG_WARN("Cannot read UART device: %s", device_path_.c_str());
-        connected_ = false;
+        DrainWakeFd();
       }
     }
   }
 
-  void TxLoop()
+  void IoLoop()
   {
-    WriteInfoBlock info;
+    UART::Configuration current_config = initial_config_;
+    ErrorCode open_result = ErrorCode::INIT_ERR;
+    int fd = OpenDevice(current_config, false, open_result);
+
+    startup_result_ = open_result;
+    startup_sem_.Post();
+
     while (true)
     {
-      if (!connected_)
+      if (fd < 0)
       {
-        Thread::Sleep(1);
-        continue;
-      }
-
-      if (write_sem_.Wait() != ErrorCode::OK)
-      {
-        continue;
-      }
-
-      if (write_port_->queue_info_->Pop(info) == ErrorCode::OK)
-      {
-        if (write_port_->queue_data_->PopBatch(tx_buff_, info.data.size_) ==
-            ErrorCode::OK)
+        const bool config_active = config_gate_.TryEnterConfig();
+        const UART::Configuration target_config =
+            config_active ? requested_config_ : current_config;
+        fd = OpenDevice(target_config, true, open_result);
+        if (fd >= 0)
         {
-          auto written = write(fd_, tx_buff_, info.data.size_);
-          if (written < 0)
+          current_config = target_config;
+          if (config_active)
           {
-            XR_LOG_WARN("Cannot write UART device: %s", device_path_.c_str());
-            connected_ = false;
+            config_gate_.LeaveConfig();
           }
-          write_port_->Finish(false,
-                              (written == static_cast<int>(info.data.size_))
-                                  ? ErrorCode::OK
-                                  : ErrorCode::FAILED,
-                              info);
+          continue;
+        }
+        WaitForReconnectWake();
+        continue;
+      }
+
+      const bool config_progress = ServiceConfig(fd, current_config);
+      if (fd < 0)
+      {
+        continue;
+      }
+      if (!config_gate_.ConfigRequested() && !tx_active_)
+      {
+        (void)LoadActiveTx();
+      }
+
+      std::array<pollfd, 2> poll_fds{};
+      poll_fds[0].fd = fd;
+      bool rx_space_armed = false;
+      if (read_port_->EmptySize() == 0U)
+      {
+        // Arm before re-checking so a dequeue cannot be lost before poll starts.
+        rx_space_waiting_.exchange(true, std::memory_order_acq_rel);
+        if (read_port_->EmptySize() == 0U)
+        {
+          rx_space_armed = true;
         }
         else
         {
-          info.op.UpdateStatus(false, ErrorCode::FAILED);
+          rx_space_waiting_.exchange(false, std::memory_order_acq_rel);
+          poll_fds[0].events |= POLLIN;
         }
+      }
+      else
+      {
+        poll_fds[0].events |= POLLIN;
+      }
+      if (tx_active_)
+      {
+        poll_fds[0].events |= POLLOUT;
+      }
+      poll_fds[1].fd = wake_fd_;
+      poll_fds[1].events = POLLIN;
+
+      const int timeout = config_progress && config_gate_.ConfigRequested() && !tx_active_
+                              ? CONFIG_DRAIN_POLL_MS
+                              : -1;
+      int poll_result = 0;
+      do
+      {
+        poll_result = poll(poll_fds.data(), poll_fds.size(), timeout);
+      } while (poll_result < 0 && errno == EINTR);
+
+      if (rx_space_armed)
+      {
+        rx_space_waiting_.exchange(false, std::memory_order_acq_rel);
+      }
+      if (poll_result < 0)
+      {
+        XR_LOG_WARN("Cannot poll UART device: %s", device_path_.c_str());
+        Disconnect(fd, true);
+        continue;
+      }
+      if (poll_result == 0)
+      {
+        continue;
+      }
+
+      REQUIRE((poll_fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) == 0);
+      if ((poll_fds[1].revents & POLLIN) != 0)
+      {
+        DrainWakeFd();
+      }
+
+      const bool hung_up = (poll_fds[0].revents & POLLHUP) != 0;
+      if (((poll_fds[0].revents & POLLIN) != 0 || hung_up) && !DrainRx(fd, hung_up))
+      {
+        continue;
+      }
+      if (fd < 0)
+      {
+        continue;
+      }
+      if ((poll_fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+      {
+        XR_LOG_WARN("UART device disconnected: %s", device_path_.c_str());
+        Disconnect(fd, true);
+        continue;
+      }
+      if (fd >= 0 && (poll_fds[0].revents & POLLOUT) != 0 && tx_active_)
+      {
+        (void)PumpTx(fd);
       }
     }
   }
 
-  int fd_ = -1;
-  bool connected_ = true;
-  Configuration config_;
   std::string device_path_;
-  Thread rx_thread_;
-  Thread tx_thread_;
+  Thread io_thread_;
   uint8_t* rx_buff_ = nullptr;
   uint8_t* tx_buff_ = nullptr;
   size_t buff_size_ = 0;
-  Semaphore write_sem_;
-  Mutex read_mutex_;
+  Configuration initial_config_{};
+  Configuration requested_config_{};
+  UartRxConfigGate config_gate_;
+  int wake_fd_ = -1;
+  Semaphore startup_sem_;
+  ErrorCode startup_result_ = ErrorCode::INIT_ERR;
+  WriteInfoBlock tx_active_info_{};
+  size_t tx_active_size_ = 0U;
+  size_t tx_active_offset_ = 0U;
+  bool tx_active_ = false;
+  std::atomic<bool> rx_space_waiting_{false};
 
-  ReadPort _read_port;    // NOLINT
-  WritePort _write_port;  // NOLINT
+  Detail::LinuxUARTReadPort _read_port;  // NOLINT
+  WritePort _write_port;                 // NOLINT
 };
+
+inline void Detail::LinuxUARTReadPort::OnRxDequeue(bool)
+{
+  if (owner_.rx_space_waiting_.exchange(false, std::memory_order_acq_rel))
+  {
+    owner_.NotifyIoOwner();
+  }
+}
 
 }  // namespace LibXR
