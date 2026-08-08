@@ -99,10 +99,10 @@ ErrorCode MSPM0Flash::Erase(std::size_t offset, std::size_t size)
   const std::size_t erase_begin = AlignDown(offset, MIN_ERASE_SIZE_BYTES);
   const std::size_t erase_end = AlignUp(offset + size, MIN_ERASE_SIZE_BYTES);
 
-  IrqGuard guard;
   for (std::size_t sector_offset = erase_begin; sector_offset < erase_end;
        sector_offset += MIN_ERASE_SIZE_BYTES)
   {
+    IrqGuard guard;
     const std::uint32_t address =
         base_address_ + static_cast<std::uint32_t>(sector_offset);
     DL_FlashCTL_executeClearStatus(FLASHCTL);
@@ -133,7 +133,6 @@ ErrorCode MSPM0Flash::Write(std::size_t offset, ConstRawData data)
   }
 
   const auto* source = static_cast<const std::uint8_t*>(data.addr_);
-  IrqGuard guard;
   std::size_t written = 0U;
   while (written < data.size_)
   {
@@ -151,11 +150,16 @@ ErrorCode MSPM0Flash::Write(std::size_t offset, ConstRawData data)
       continue;
     }
 
-    DL_FlashCTL_executeClearStatus(FLASHCTL);
-    DL_FlashCTL_unprotectSector(FLASHCTL, address, DL_FLASHCTL_REGION_SELECT_MAIN);
-    const auto status =
-        DL_FlashCTL_programMemoryFromRAM64WithECCGenerated(FLASHCTL, address, words);
-    DL_FlashCTL_protectMainMemory(FLASHCTL);
+    DL_FLASHCTL_COMMAND_STATUS status;
+    {
+      IrqGuard guard;
+      DL_FlashCTL_executeClearStatus(FLASHCTL);
+      DL_FlashCTL_disableOverrideHardwareGeneratedECC(FLASHCTL);
+      DL_FlashCTL_unprotectSector(FLASHCTL, address, DL_FLASHCTL_REGION_SELECT_MAIN);
+      status =
+          DL_FlashCTL_programMemoryFromRAM64WithECCGenerated(FLASHCTL, address, words);
+      DL_FlashCTL_protectMainMemory(FLASHCTL);
+    }
     if (!FlashCommandPassed(status))
     {
       return ErrorCode::FAILED;
