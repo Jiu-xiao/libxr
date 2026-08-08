@@ -7,7 +7,7 @@
  *          2. 提供 `ReadPort` / `WritePort` 队列完成、失败清理与阻塞唤醒验证 helper。
  *          3. 提供带计数的 `TrackingReadPort`，用于核对 `OnRxDequeue` 的调用次数。
  *          Test items:
- *          1. Provide pending/failure stubs and blocking-call thread wrappers.
+ *          1. Provide write pending/failure stubs and blocking-call thread wrappers.
  *          2. Provide helpers for completion, fail-clear, and waiter wake-up scenarios.
  *          3. Provide a counting `TrackingReadPort` for verifying `OnRxDequeue` calls.
  */
@@ -21,11 +21,6 @@
 namespace
 {
 LibXR::ErrorCode PendingWriteFun(LibXR::WritePort&, bool)
-{
-  return LibXR::ErrorCode::PENDING;
-}
-
-LibXR::ErrorCode PendingReadFun(LibXR::ReadPort&, bool)
 {
   return LibXR::ErrorCode::PENDING;
 }
@@ -45,14 +40,9 @@ LibXR::ErrorCode FailWriteFun(LibXR::WritePort& port, bool)
   return LibXR::ErrorCode::INIT_ERR;
 }
 
-LibXR::ErrorCode FailReadFun(LibXR::ReadPort&, bool)
-{
-  return LibXR::ErrorCode::INIT_ERR;
-}
 struct TrackingReadPort : LibXR::ReadPort
 {
   using LibXR::ReadPort::ReadPort;
-  using LibXR::ReadPort::operator=;
 
   void OnRxDequeue(bool) override { dequeue_count++; }
 
@@ -72,11 +62,10 @@ void VerifyPendingReadMode(TestMode mode)
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   std::vector<uint8_t> tx = {0x42, 0x73, 0x8A, 0xC1};
   std::vector<uint8_t> rx(4, 0x7A);
-  ReadHarness read(mode);
+  ReadHarness read(mode, BLOCK_OPERATION_TIMEOUT_MS);
 
   if (mode == TestMode::BLOCK)
   {
@@ -87,7 +76,7 @@ void VerifyPendingReadMode(TestMode mode)
     auto block_result = r(RawData{rx.data(), rx.size()}, read.op);
     ASSERT(block_result == ErrorCode::OK);
 
-    ExpectWaitOk(done);
+    ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
     JoinThreadIfNeeded(finisher);
     ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
     ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
@@ -169,7 +158,6 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   uint8_t rx[4] = {0x7A, 0x7B, 0x7C, 0x7D};
   static const uint8_t STALE_EXPECT[] = {0x7A, 0x7B, 0x7C, 0x7D};

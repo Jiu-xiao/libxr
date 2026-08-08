@@ -160,11 +160,11 @@ using STM32RxDmaModel = UartCircularDmaRxModel;
  * HAL IRQ handler 拥有 HAL flag 和 handle 状态；其 callback 将 TX 完成或错误事实发布给
  * `UartDmaModel`，并通过选定的循环或 linked-list RX 模型提交 RX 数据。CONFIG 和 runtime
  * recovery 通过 DMA abort 完成 callback 停止两个 DMA 方向，再向同一 serialized service
- * 发布 `STOP_DONE`。 / HAL IRQ handlers own HAL flags and handle state. Their callbacks
- * publish TX completion/error facts to `UartDmaModel` and push RX data through the
- * selected circular or linked-list RX model. CONFIG and runtime recovery stop both DMA
- * directions through DMA abort completion callbacks, which publish `STOP_DONE` into the
- * same serialized service.
+ * 发布 `CONTROL_READY`。 / HAL IRQ handlers own HAL flags and handle state. Their
+ * callbacks publish TX completion/error facts to `UartDmaModel` and push RX data through
+ * the selected circular or linked-list RX model. CONFIG and runtime recovery stop both
+ * DMA directions through DMA abort completion callbacks, which publish `CONTROL_READY`
+ * into the same serialized service.
  *
  * Stream-DMA abort admission 仅短暂屏蔽该 stream 的 NVIC vector，以串行化 HAL 从
  * `BUSY` 到 `ABORT` 的转换；它不修改 active Stream control register、不轮询完成，也不
@@ -262,15 +262,6 @@ class STM32UART : public UART
    * @return 提交结果 / Submission result
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
-
-  /**
-   * @brief ReadPort 读取入口 / ReadPort read entry
-   * @param port 发起读取的读端口 / Read port issuing the read
-   * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 始终为 `PENDING`；RX producer 后续完成读取 / Always `PENDING`; the RX
-   * producer completes the read later
-   */
-  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
   /**
    * @brief 构造并接管 STM32 UART/DMA data path / Construct and take ownership of an

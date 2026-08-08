@@ -9,45 +9,83 @@ namespace
 using BusyState = ReadPort::BusyState;
 constexpr uint32_t EVENT_MASK = static_cast<uint32_t>(BusyState::EVENT);
 
+BusyState BaseState(BusyState state)
+{
+  return static_cast<BusyState>(static_cast<uint32_t>(state) & ~EVENT_MASK);
+}
+
+bool HasEvent(BusyState state)
+{
+  return (static_cast<uint32_t>(state) & EVENT_MASK) != 0U;
+}
+
 BusyState EventState(BusyState state)
 {
-  if ((static_cast<uint32_t>(state) & ~EVENT_MASK) ==
-      static_cast<uint32_t>(BusyState::PENDING))
+  if (BaseState(state) == BusyState::PENDING || HasEvent(state))
   {
     return state;
   }
-
   return static_cast<BusyState>(static_cast<uint32_t>(state) | EVENT_MASK);
 }
 
-void RecordEvent(std::atomic<BusyState>& state)
+// A producer that cannot claim PENDING must leave a carrier in the same atomic
+// modification order as the claimed path's release. Otherwise the consumer may legally
+// observe an old queue tail and return with queued data stranded.
+enum class EventRecordResult : uint8_t
+{
+  RECORDED,
+  PENDING,
+};
+
+EventRecordResult RecordEvent(std::atomic<BusyState>& state)
 {
   while (true)
   {
     BusyState observed = state.load(std::memory_order_acquire);
-    const BusyState marked = EventState(observed);
-
-    if (marked == observed)
+    if (BaseState(observed) == BusyState::PENDING)
     {
-      return;
+      return EventRecordResult::PENDING;
     }
-
+    const BusyState marked = EventState(observed);
+    // A successful same-value CAS is still an RMW. Do not coalesce this away:
+    // each producer commit needs a fresh modification-order carrier for its queue writes.
     if (state.compare_exchange_weak(observed, marked, std::memory_order_acq_rel,
                                     std::memory_order_acquire))
     {
-      return;
+      return EventRecordResult::RECORDED;
     }
   }
 }
 
-void PublishAfterConsumer(std::atomic<BusyState>& state, BusyState owner,
-                          bool preserve_event = false)
+// Publish a queue-fed request from the idle endpoint state. The acquire side of this
+// RMW consumes any producer event recorded before the request became PENDING.
+bool PublishRequest(std::atomic<BusyState>& state, bool& had_event)
 {
   while (true)
   {
     BusyState observed = state.load(std::memory_order_acquire);
-    BusyState target = preserve_event ? BusyState::EVENT : BusyState::IDLE;
+    if (BaseState(observed) != BusyState::IDLE)
+    {
+      return false;
+    }
 
+    had_event = HasEvent(observed);
+    if (state.compare_exchange_weak(observed, BusyState::PENDING,
+                                    std::memory_order_acq_rel, std::memory_order_acquire))
+    {
+      return true;
+    }
+  }
+}
+
+// Release a CLAIMED path while preserving an event recorded by a producer that raced
+// with the consumer.
+void PublishAfterConsumer(std::atomic<BusyState>& state, BusyState owner)
+{
+  while (true)
+  {
+    BusyState observed = state.load(std::memory_order_acquire);
+    BusyState target = BusyState::IDLE;
     if (observed == EventState(owner))
     {
       target = BusyState::EVENT;
@@ -66,43 +104,51 @@ void PublishAfterConsumer(std::atomic<BusyState>& state, BusyState owner,
   }
 }
 
-bool PublishPending(std::atomic<BusyState>& state, BusyState owner)
+void PublishPending(std::atomic<BusyState>& state, BusyState claimed, bool& had_event)
 {
   while (true)
   {
     BusyState observed = state.load(std::memory_order_acquire);
-    const bool had_event = observed == EventState(owner);
-    if (observed == owner || had_event)
+    if (observed == claimed || observed == EventState(claimed))
     {
+      had_event = had_event || HasEvent(observed);
       if (state.compare_exchange_weak(observed, BusyState::PENDING,
                                       std::memory_order_acq_rel,
                                       std::memory_order_acquire))
       {
-        return had_event;
+        return;
       }
       continue;
     }
-
     ASSERT(false);
-    return false;
+    return;
   }
 }
 
+// Claim a BLOCK completion while preserving an event recorded during the short claim
+// window. Once CLAIMED has been acquired, completion wins over timeout.
 void PublishBlockClaim(std::atomic<BusyState>& state)
 {
-  BusyState expected = BusyState::PROCESSING;
-  if (state.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
-                                    std::memory_order_acq_rel, std::memory_order_acquire))
+  while (true)
   {
-    return;
-  }
+    BusyState observed = state.load(std::memory_order_acquire);
+    BusyState target = BusyState::BLOCK_CLAIMED;
+    if (observed == EventState(BusyState::CLAIMED))
+    {
+      target = static_cast<BusyState>(static_cast<uint32_t>(target) | EVENT_MASK);
+    }
+    else if (observed != BusyState::CLAIMED)
+    {
+      ASSERT(false);
+      return;
+    }
 
-  ASSERT(expected == BusyState::PROCESSING_EVENT);
-  expected = BusyState::PROCESSING_EVENT;
-  const bool claimed =
-      state.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED_EVENT,
-                                    std::memory_order_acq_rel, std::memory_order_acquire);
-  ASSERT(claimed);
+    if (state.compare_exchange_weak(observed, target, std::memory_order_acq_rel,
+                                    std::memory_order_acquire))
+    {
+      return;
+    }
+  }
 }
 
 void ReleaseBlockClaim(std::atomic<BusyState>& state)
@@ -111,7 +157,8 @@ void ReleaseBlockClaim(std::atomic<BusyState>& state)
   {
     BusyState observed = state.load(std::memory_order_acquire);
     BusyState target = BusyState::IDLE;
-    if (observed == BusyState::BLOCK_CLAIMED_EVENT)
+    if (observed == static_cast<BusyState>(
+                        static_cast<uint32_t>(BusyState::BLOCK_CLAIMED) | EVENT_MASK))
     {
       target = BusyState::EVENT;
     }
@@ -129,34 +176,23 @@ void ReleaseBlockClaim(std::atomic<BusyState>& state)
   }
 }
 
-void ReleaseDetached(std::atomic<BusyState>& state)
-{
-  while (true)
-  {
-    BusyState observed = state.load(std::memory_order_acquire);
-    BusyState target = BusyState::IDLE;
-    if (observed == BusyState::BLOCK_DETACHED_EVENT)
-    {
-      target = BusyState::EVENT;
-    }
-    else if (observed != BusyState::BLOCK_DETACHED)
-    {
-      if (observed == BusyState::EVENT)
-      {
-        return;
-      }
-      ASSERT(false);
-      return;
-    }
+}  // namespace
 
-    if (state.compare_exchange_weak(observed, target, std::memory_order_acq_rel,
-                                    std::memory_order_acquire))
-    {
-      return;
-    }
+#if defined(LIBXR_TEST_BUILD)
+void ReadPort::SetTestHook(ReadPortTestHook hook, void* context)
+{
+  test_hook_ = hook;
+  test_context_ = context;
+}
+
+void ReadPort::RunTestHook(ReadPortTestCheckpoint checkpoint)
+{
+  if (test_hook_ != nullptr)
+  {
+    test_hook_(*this, checkpoint, test_context_);
   }
 }
-}  // namespace
+#endif
 
 ReadPort::ReadPort(size_t buffer_size)
     : queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
@@ -177,27 +213,21 @@ size_t ReadPort::Size()
   return queue_data_->Size();
 }
 
-bool ReadPort::Readable() { return read_fun_ != nullptr; }
-
-ReadPort& ReadPort::operator=(ReadFun fun)
-{
-  read_fun_ = fun;
-  return *this;
-}
+bool ReadPort::Readable() { return queue_data_ != nullptr; }
 
 void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
 {
   if (info.op.type == ReadOperation::OperationType::BLOCK)
   {
     const auto state = busy_.load(std::memory_order_acquire);
-    ASSERT(state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_CLAIMED_EVENT);
+    ASSERT(BaseState(state) == BusyState::BLOCK_CLAIMED);
     block_result_ = ans;
     info.op.data.sem_info.sem->PostFromCallback(in_isr);
     return;
   }
 
   auto operation = info.op;
-  PublishAfterConsumer(busy_, BusyState::PROCESSING);
+  PublishAfterConsumer(busy_, BusyState::CLAIMED);
   operation.UpdateStatus(in_isr, ans);
 }
 
@@ -213,71 +243,31 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
     return ErrorCode::NOT_SUPPORT;
   }
 
-  while (true)
+  const BusyState observed = busy_.load(std::memory_order_acquire);
+  if (BaseState(observed) != BusyState::IDLE)
   {
-    const BusyState state = busy_.load(std::memory_order_acquire);
-    if (state != BusyState::IDLE && state != BusyState::EVENT)
-    {
-      return ErrorCode::BUSY;
-    }
-
-    BusyState expected = state;
-    if (!busy_.compare_exchange_weak(expected, BusyState::CLEARING,
-                                     std::memory_order_acq_rel,
-                                     std::memory_order_acquire))
-    {
-      continue;
-    }
-
-    const size_t readable_size = queue_data_->Size();
-    if (readable_size >= data.size_ && readable_size != 0)
-    {
-      if (data.size_ > 0)
-      {
-        const auto ans =
-            queue_data_->PopBatch(reinterpret_cast<uint8_t*>(data.addr_), data.size_);
-        ASSERT(ans == ErrorCode::OK);
-        PublishAfterConsumer(busy_, BusyState::CLEARING);
-        OnRxDequeue(in_isr);
-      }
-      else
-      {
-        PublishAfterConsumer(busy_, BusyState::CLEARING);
-      }
-
-      if (op.type != ReadOperation::OperationType::BLOCK)
-      {
-        op.UpdateStatus(in_isr, ErrorCode::OK);
-      }
-      return ErrorCode::OK;
-    }
-
-    info_ = ReadInfoBlock{data, op};
-    op.MarkAsRunning();
-
-    const auto ans = read_fun_(*this, in_isr);
-    if (static_cast<int8_t>(ans) >= 0)
-    {
-      // A producer may have pushed while CLEARING suppressed its notification. Publish
-      // the accepted request first, then re-check only when such an event was recorded.
-      const bool had_event = PublishPending(busy_, BusyState::CLEARING);
-      if (had_event)
-      {
-        ProcessPendingReads(in_isr);
-      }
-      break;
-    }
-
-    // Keep CLEARING ownership until ReadFun resolves the arm attempt. Publishing IDLE
-    // from that tagged owner cannot clear a request submitted by a reentrant callback.
-    PublishAfterConsumer(busy_, BusyState::CLEARING);
-    if (op.type != ReadOperation::OperationType::BLOCK)
-    {
-      op.UpdateStatus(in_isr, ans);
-    }
-    return ans;
+    return ErrorCode::BUSY;
   }
 
+  info_ = ReadInfoBlock{data, op};
+  op.MarkAsRunning();
+
+#if defined(LIBXR_TEST_BUILD)
+  RunTestHook(ReadPortTestCheckpoint::READ_BEFORE_PENDING_PUBLISH);
+#endif
+  bool had_event = false;
+  if (!PublishRequest(busy_, had_event))
+  {
+    // Ordinary Read/Clear calls are one caller-serialized SPSC consumer. Under that
+    // contract only an EVENT transition can race this publication.
+    return ErrorCode::BUSY;
+  }
+
+  const size_t queued_size = queue_data_->Size();
+  if (had_event || (queued_size != 0U && queued_size >= data.size_))
+  {
+    ProcessPendingReads(in_isr);
+  }
   if (op.type != ReadOperation::OperationType::BLOCK)
   {
     return ErrorCode::OK;
@@ -289,43 +279,65 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   {
 #ifdef LIBXR_DEBUG_BUILD
     const auto state = busy_.load(std::memory_order_acquire);
-    ASSERT(state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_CLAIMED_EVENT);
+    ASSERT(BaseState(state) == BusyState::BLOCK_CLAIMED);
 #endif
+    const ErrorCode result = block_result_;
     ReleaseBlockClaim(busy_);
-    return block_result_;
+#if defined(LIBXR_TEST_BUILD)
+    RunTestHook(ReadPortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
+#endif
+    return result;
   }
 
+#if defined(LIBXR_TEST_BUILD)
+  RunTestHook(ReadPortTestCheckpoint::BLOCK_TIMEOUT_BEFORE_CLAIM);
+#endif
   while (true)
   {
     BusyState expected = BusyState::PENDING;
-    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
+    if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
                                       std::memory_order_acq_rel,
                                       std::memory_order_acquire))
     {
-      ReleaseDetached(busy_);
       return ErrorCode::TIMEOUT;
     }
 
-    if (expected == BusyState::BLOCK_DETACHED ||
-        expected == BusyState::BLOCK_DETACHED_EVENT)
-    {
-      ReleaseDetached(busy_);
-      return ErrorCode::TIMEOUT;
-    }
-
-    if (expected == BusyState::BLOCK_CLAIMED ||
-        expected == BusyState::BLOCK_CLAIMED_EVENT)
+    if (BaseState(expected) == BusyState::BLOCK_CLAIMED)
     {
       const auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-      UNUSED(finish_wait_ans);
-      ASSERT(finish_wait_ans == ErrorCode::OK);
+      REQUIRE(finish_wait_ans == ErrorCode::OK);
+      const ErrorCode result = block_result_;
       ReleaseBlockClaim(busy_);
-      return block_result_;
+#if defined(LIBXR_TEST_BUILD)
+      RunTestHook(ReadPortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
+#endif
+      return result;
     }
 
-    // PROCESSING is a short queue-claim window. Retry the cancellation CAS;
-    // the completion path either returns to PENDING or posts the semaphore.
-    ASSERT(expected == BusyState::PROCESSING || expected == BusyState::PROCESSING_EVENT);
+    if (BaseState(expected) == BusyState::CLAIMED)
+    {
+      // Preserve the historical completion-wins boundary without spinning at a
+      // higher priority than the claimed path. A successful wait is its completion
+      // post; a short timeout means it may have returned to PENDING.
+      const auto claim_wait_ans = op.data.sem_info.sem->Wait(1U);
+      if (claim_wait_ans == ErrorCode::OK)
+      {
+        REQUIRE(BaseState(busy_.load(std::memory_order_acquire)) ==
+                BusyState::BLOCK_CLAIMED);
+        const ErrorCode result = block_result_;
+        ReleaseBlockClaim(busy_);
+#if defined(LIBXR_TEST_BUILD)
+        RunTestHook(ReadPortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
+#endif
+        return result;
+      }
+      REQUIRE(claim_wait_ans == ErrorCode::TIMEOUT);
+      continue;
+    }
+
+    // Timeout returns only when it wins PENDING -> IDLE. Once completion owns the
+    // request, wait for its result instead of changing the operation outcome.
+    REQUIRE(false);
   }
 }
 
@@ -335,66 +347,69 @@ void ReadPort::ProcessPendingReads(bool in_isr)
 
   while (true)
   {
-    const BusyState state = busy_.load(std::memory_order_acquire);
-
-    if (state == BusyState::PENDING)
+    BusyState expected = BusyState::PENDING;
+    if (!busy_.compare_exchange_strong(expected, BusyState::CLAIMED,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
     {
-      BusyState expected = BusyState::PENDING;
-      if (!busy_.compare_exchange_strong(expected, BusyState::PROCESSING,
-                                         std::memory_order_acq_rel,
-                                         std::memory_order_acquire))
+      const BusyState base = BaseState(expected);
+      if (base == BusyState::IDLE && queue_data_->Size() == 0U)
+      {
+        return;
+      }
+      if (RecordEvent(busy_) == EventRecordResult::PENDING)
       {
         continue;
       }
-
-      const size_t size = queue_data_->Size();
-      if (size == 0 || size < info_.data.size_)
+#if defined(LIBXR_TEST_BUILD)
+      if (base == BusyState::CLAIMED)
       {
-        const bool had_event =
-            busy_.load(std::memory_order_acquire) == BusyState::PROCESSING_EVENT;
-        const bool published_event = PublishPending(busy_, BusyState::PROCESSING);
-        if (had_event || published_event)
-        {
-          continue;
-        }
-        return;
+        RunTestHook(ReadPortTestCheckpoint::PRODUCER_OBSERVED_CLAIMED);
       }
+#endif
+      return;
+    }
 
-      if (info_.op.type == ReadOperation::OperationType::BLOCK)
+#if defined(LIBXR_TEST_BUILD)
+    RunTestHook(ReadPortTestCheckpoint::PROCESS_CLAIM_ACQUIRED);
+#endif
+    ReadInfoBlock local_info = info_;
+    const size_t required_size = local_info.data.size_;
+    const size_t size = queue_data_->Size();
+    if (size == 0U || size < required_size)
+    {
+      // A producer that ran before this release observed CLAIMED and returned. Re-read
+      // readiness after publishing PENDING; a later producer observes PENDING and claims
+      // completion itself.
+#if defined(LIBXR_TEST_BUILD)
+      RunTestHook(ReadPortTestCheckpoint::CLAIMED_BEFORE_PENDING_RELEASE);
+#endif
+      bool had_event = false;
+      PublishPending(busy_, BusyState::CLAIMED, had_event);
+      const size_t queued_size = queue_data_->Size();
+      if (had_event || (queued_size != 0U && queued_size >= required_size))
       {
-        PublishBlockClaim(busy_);
-      }
-
-      if (info_.data.size_ > 0)
-      {
-        const auto ans = queue_data_->PopBatch(
-            reinterpret_cast<uint8_t*>(info_.data.addr_), info_.data.size_);
-        ASSERT(ans == ErrorCode::OK);
-        Finish(in_isr, ErrorCode::OK, info_);
-        OnRxDequeue(in_isr);
-      }
-      else
-      {
-        Finish(in_isr, ErrorCode::OK, info_);
+        continue;
       }
       return;
     }
 
-    if (state == BusyState::IDLE)
+    if (local_info.op.type == ReadOperation::OperationType::BLOCK)
     {
-      if (queue_data_->Size() == 0)
-      {
-        return;
-      }
-
-      RecordEvent(busy_);
-      return;
+      PublishBlockClaim(busy_);
     }
 
-    if (state == BusyState::CLEARING || state == BusyState::PROCESSING ||
-        state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_DETACHED)
+    if (local_info.data.size_ > 0)
     {
-      RecordEvent(busy_);
+      const auto ans = queue_data_->PopBatch(
+          reinterpret_cast<uint8_t*>(local_info.data.addr_), local_info.data.size_);
+      ASSERT(ans == ErrorCode::OK);
+      Finish(in_isr, ErrorCode::OK, local_info);
+      OnRxDequeue(in_isr);
+    }
+    else
+    {
+      Finish(in_isr, ErrorCode::OK, local_info);
     }
     return;
   }
@@ -406,38 +421,31 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
 
   while (true)
   {
-    const BusyState state = busy_.load(std::memory_order_acquire);
-    if (state != BusyState::IDLE && state != BusyState::EVENT)
+    BusyState observed = busy_.load(std::memory_order_acquire);
+    if (BaseState(observed) != BusyState::IDLE)
     {
       return ErrorCode::BUSY;
     }
-
-    BusyState expected = state;
-    if (!busy_.compare_exchange_weak(expected, BusyState::CLEARING,
-                                     std::memory_order_acq_rel,
-                                     std::memory_order_acquire))
+    if (busy_.compare_exchange_weak(observed, BusyState::CLAIMED,
+                                    std::memory_order_acq_rel, std::memory_order_acquire))
     {
-      if (expected != BusyState::IDLE && expected != BusyState::EVENT)
-      {
-        return ErrorCode::BUSY;
-      }
-      continue;
+      break;
     }
-
-    const size_t queued_size = queue_data_->Size();
-    if (queued_size > 0)
-    {
-      const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
-      ASSERT(pop_ans == ErrorCode::OK);
-      PublishAfterConsumer(busy_, BusyState::CLEARING, queue_data_->Size() > 0);
-      OnRxDequeue(in_isr);
-    }
-    else
-    {
-      PublishAfterConsumer(busy_, BusyState::CLEARING);
-    }
-    return ErrorCode::OK;
   }
+
+  const size_t queued_size = queue_data_->Size();
+  if (queued_size > 0)
+  {
+    const ErrorCode pop_ans = queue_data_->PopBatch(nullptr, queued_size);
+    ASSERT(pop_ans == ErrorCode::OK);
+    PublishAfterConsumer(busy_, BusyState::CLAIMED);
+    OnRxDequeue(in_isr);
+  }
+  else
+  {
+    PublishAfterConsumer(busy_, BusyState::CLAIMED);
+  }
+  return ErrorCode::OK;
 }
 
 void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
@@ -445,8 +453,8 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
   ASSERT(queue_data_ != nullptr);
 
   auto state = busy_.load(std::memory_order_acquire);
-  if (state == BusyState::CLEARING || state == BusyState::CLEARING_EVENT ||
-      state == BusyState::PROCESSING || state == BusyState::PROCESSING_EVENT)
+  auto base = BaseState(state);
+  if (base == BusyState::CLAIMED)
   {
     DEV_ASSERT_FROM_CALLBACK(false, in_isr);
     return;
@@ -454,7 +462,7 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
 
   queue_data_->Reset();
 
-  if (state == BusyState::PENDING)
+  if (base == BusyState::PENDING)
   {
     if (info_.op.type == ReadOperation::OperationType::BLOCK)
     {
@@ -467,8 +475,8 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
         return;
       }
       state = expected;
-      if (state == BusyState::CLEARING || state == BusyState::CLEARING_EVENT ||
-          state == BusyState::PROCESSING || state == BusyState::PROCESSING_EVENT)
+      base = BaseState(state);
+      if (base == BusyState::CLAIMED)
       {
         DEV_ASSERT_FROM_CALLBACK(false, in_isr);
         return;
@@ -489,8 +497,7 @@ void ReadPort::FailAndClearAll(ErrorCode reason, bool in_isr)
     }
   }
 
-  if (state == BusyState::BLOCK_CLAIMED || state == BusyState::BLOCK_CLAIMED_EVENT ||
-      state == BusyState::BLOCK_DETACHED || state == BusyState::BLOCK_DETACHED_EVENT)
+  if (BaseState(state) == BusyState::BLOCK_CLAIMED)
   {
     return;
   }

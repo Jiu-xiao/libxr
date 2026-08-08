@@ -73,8 +73,8 @@ class UartLinkedListDmaRxModel
    * providing producer sampling and cache-maintenance hooks
    * @param backend 后端实例 / Backend instance
    * @param port 接收字节的读取端口 / Read port receiving produced bytes
-   * @return 逻辑 producer 位置前进时为 true / True when the logical producer position
-   * advanced
+   * @return 至少一个字节成功进入 RX 队列时为 true / True when at least one byte was
+   * successfully enqueued
    *
    * 后端必须在 `GetLinkedListDmaRxProducer()` 中恰好采样一次实时 producer 指针。首字节
    * 和尾后地址都是合法环位置，尾后地址归一化为零；两次观察间跨过一个或多个完整环仍
@@ -125,28 +125,36 @@ class UartLinkedListDmaRxModel
       return false;
     }
 
+    bool pushed_any = false;
     if (current_position > last_position_)
     {
       backend.PrepareLinkedListDmaRxForCpu(&buffer[last_position_],
                                            current_position - last_position_);
-      (void)port.queue_data_->PushBatch(&buffer[last_position_],
-                                        current_position - last_position_);
+      pushed_any =
+          port.queue_data_->PushBatch(&buffer[last_position_],
+                                      current_position - last_position_) == ErrorCode::OK;
     }
     else
     {
       backend.PrepareLinkedListDmaRxForCpu(&buffer[last_position_],
                                            capacity - last_position_);
-      (void)port.queue_data_->PushBatch(&buffer[last_position_],
-                                        capacity - last_position_);
+      if (port.queue_data_->PushBatch(&buffer[last_position_],
+                                      capacity - last_position_) == ErrorCode::OK)
+      {
+        pushed_any = true;
+      }
       if (current_position != 0U)
       {
         backend.PrepareLinkedListDmaRxForCpu(buffer, current_position);
-        (void)port.queue_data_->PushBatch(buffer, current_position);
+        if (port.queue_data_->PushBatch(buffer, current_position) == ErrorCode::OK)
+        {
+          pushed_any = true;
+        }
       }
     }
 
     last_position_ = current_position;
-    return true;
+    return pushed_any;
   }
 
   /** @brief 将软件游标重置到逻辑环起点 / Reset the software cursor. */

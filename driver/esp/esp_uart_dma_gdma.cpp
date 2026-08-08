@@ -230,7 +230,7 @@ uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaUartStatus(bool in_isr)
       uart_hal_is_tx_idle(&uart_hal_))
   {
     DisarmConfigTxIdleInterrupt();
-    events |= Model::EventMask(UartDmaEvent::STOP_DONE);
+    events |= Model::EventMask(UartDmaEvent::CONTROL_READY);
   }
   return events;
 }

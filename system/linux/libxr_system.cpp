@@ -1,11 +1,11 @@
 #include "libxr_system.hpp"
 
-#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstddef>
 
 #include "libxr_def.hpp"
@@ -20,7 +20,9 @@ struct timespec libxr_linux_start_time_spec;  // NOLINT
 
 static LibXR::LinuxTimebase libxr_linux_timebase;
 
-static LibXR::Semaphore stdo_sem;
+// The permanent STDIO write worker needs its wake semaphore for the whole process
+// lifetime.
+static LibXR::Semaphore* const stdo_sem = new LibXR::Semaphore;
 static constexpr size_t host_stdio_queue_bytes = 4096;
 
 void StdiThread(LibXR::ReadPort* read_port)
@@ -42,21 +44,28 @@ void StdiThread(LibXR::ReadPort* read_port)
     FD_ZERO(&rfds);
     FD_SET(STDIN_FILENO, &rfds);
 
-    int ret = select(STDIN_FILENO + 1, &rfds, NULL, NULL, NULL);
+    const int ret = select(STDIN_FILENO + 1, &rfds, NULL, NULL, NULL);
 
     if (ret > 0 && FD_ISSET(STDIN_FILENO, &rfds))
     {
-      int ready = 0;
-      if (ioctl(STDIN_FILENO, FIONREAD, &ready) != -1 && ready > 0)
+      const ssize_t size = read(STDIN_FILENO, read_buff, sizeof(read_buff));
+      if (size > 0)
       {
-        auto size = fread(read_buff, sizeof(char), ready, stdin);
-        if (size < 1)
+        const auto push_ans =
+            read_port->queue_data_->PushBatch(read_buff, static_cast<size_t>(size));
+        if (push_ans == LibXR::ErrorCode::OK)
         {
-          continue;
+          read_port->ProcessPendingReads(false);
         }
-        read_port->queue_data_->PushBatch(read_buff, size);
-        read_port->ProcessPendingReads(false);
+        continue;
       }
+
+      if (size < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+      {
+        continue;
+      }
+
+      return;
     }
   }
 }
@@ -68,7 +77,7 @@ void StdoThread(LibXR::WritePort* write_port)
 
   while (true)
   {
-    if (stdo_sem.Wait() == LibXR::ErrorCode::OK)
+    if (stdo_sem->Wait() == LibXR::ErrorCode::OK)
     {
       auto ans = write_port->queue_info_->Pop(info);
       if (ans != LibXR::ErrorCode::OK)
@@ -103,7 +112,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
   auto write_fun = [](WritePort& port, bool)
   {
     UNUSED(port);
-    stdo_sem.Post();
+    stdo_sem->Post();
     return LibXR::ErrorCode::PENDING;
   };
 
@@ -111,15 +120,7 @@ void LibXR::PlatformInit(uint32_t timer_pri, uint32_t timer_stack_depth)
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort& port, bool)
-  {
-    UNUSED(port);
-    return LibXR::ErrorCode::PENDING;
-  };
-
   LibXR::STDIO::read_ = new LibXR::ReadPort(host_stdio_queue_bytes);
-
-  *LibXR::STDIO::read_ = read_fun;
 
   struct termios tty;
   tcgetattr(STDIN_FILENO, &tty);           // 获取当前终端属性

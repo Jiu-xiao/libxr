@@ -90,15 +90,6 @@ class CH32UART : public UART
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 
-  /**
-   * @brief ReadPort 读取入口 / ReadPort read entry
-   * @param port 发起读取的读端口 / Read port issuing the read
-   * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 始终为 `PENDING`；RX producer 后续完成读取 / Always `PENDING`; the RX
-   * producer completes the read later
-   */
-  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
-
   /** @brief 处理本实例的 TX DMA IRQ / Handle this instance's TX DMA IRQ. */
   void TxDmaIRQHandler();
 

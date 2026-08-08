@@ -73,7 +73,8 @@ class UartCircularDmaRxModel
    * providing position and cache-maintenance hooks
    * @param backend 后端实例 / Backend instance
    * @param port 接收字节的读取端口 / Read port receiving produced bytes
-   * @return DMA 位置前进时为 true / True when the DMA position advanced
+   * @return 至少一个字节成功进入 RX 队列时为 true / True when at least one byte was
+   * successfully enqueued
    *
    * @pre 距上次成功采样后产生的字节数必须严格小于 `BufferSize()` / Bytes produced
    * since the previous successful sample must be strictly less than `BufferSize()`
@@ -102,28 +103,36 @@ class UartCircularDmaRxModel
       return false;
     }
 
+    bool pushed_any = false;
     if (current_position > last_position_)
     {
       backend.PrepareCircularDmaRxForCpu(&buffer[last_position_],
                                          current_position - last_position_);
-      (void)port.queue_data_->PushBatch(&buffer[last_position_],
-                                        current_position - last_position_);
+      pushed_any =
+          port.queue_data_->PushBatch(&buffer[last_position_],
+                                      current_position - last_position_) == ErrorCode::OK;
     }
     else
     {
       backend.PrepareCircularDmaRxForCpu(&buffer[last_position_],
                                          capacity - last_position_);
-      (void)port.queue_data_->PushBatch(&buffer[last_position_],
-                                        capacity - last_position_);
+      if (port.queue_data_->PushBatch(&buffer[last_position_],
+                                      capacity - last_position_) == ErrorCode::OK)
+      {
+        pushed_any = true;
+      }
       if (current_position != 0U)
       {
         backend.PrepareCircularDmaRxForCpu(buffer, current_position);
-        (void)port.queue_data_->PushBatch(buffer, current_position);
+        if (port.queue_data_->PushBatch(buffer, current_position) == ErrorCode::OK)
+        {
+          pushed_any = true;
+        }
       }
     }
 
     last_position_ = current_position;
-    return true;
+    return pushed_any;
   }
 
   /** @brief 将软件游标重置到 DMA 缓冲区起点 / Reset the software cursor. */

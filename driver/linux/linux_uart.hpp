@@ -45,12 +45,6 @@ class LinuxUARTReadPort : public ReadPort
 
   void OnRxDequeue(bool in_isr) override;
 
-  LinuxUARTReadPort& operator=(ReadFun fun)
-  {
-    ReadPort::operator=(fun);
-    return *this;
-  }
-
  private:
   LinuxUART& owner_;
 };
@@ -370,7 +364,6 @@ class LinuxUART : public UART
     wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     REQUIRE(wake_fd_ >= 0);
 
-    _read_port = ReadFun;
     _write_port = WriteFun;
 
     io_thread_.Create<LinuxUART*>(
@@ -552,8 +545,6 @@ class LinuxUART : public UART
 
     return ErrorCode::OK;
   }
-
-  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
   static ErrorCode WriteFun(WritePort& port, bool)
   {

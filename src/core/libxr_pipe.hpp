@@ -34,9 +34,8 @@ class Pipe
    */
   Pipe(size_t buffer_size) : read_port_(0), write_port_(1, buffer_size)
   {
-    // 绑定回调并共享同一数据队列。
-    // Bind callbacks and share the same data queue.
-    read_port_.read_fun_ = ReadFun;
+    // 绑定写回调并共享同一数据队列。
+    // Bind the write callback and share the same data queue.
     write_port_.write_fun_ = WriteFun;
     read_port_.queue_data_ = write_port_.queue_data_;
   }
@@ -74,20 +73,6 @@ class Pipe
   WritePort& GetWritePort() { return write_port_; }
 
  private:
-  /**
-   * @brief 读端回调（占位，无具体操作）。
-   * @brief Read-side callback (no-op placeholder).
-   *
-   * 仅用于匹配 `ReadPort` 通知签名；实际读取完成始终在 `ProcessPendingReads()` 中进行。
-   * Provided to match the `ReadPort` notification signature; read completion is always
-   * advanced in `ProcessPendingReads()`.
-   *
-   * @param port ReadPort 引用（未使用）。 ReadPort reference (unused).
-   * @param in_isr 是否在中断上下文中运行。 Whether running in ISR context.
-   * @return 返回 `ErrorCode::PENDING`。 Returns `ErrorCode::PENDING`.
-   */
-  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
-
   /**
    * @brief 写端回调：弹出一次写操作并推动读侧处理。
    * @brief Write-side callback: pop a write op and advance the reader.

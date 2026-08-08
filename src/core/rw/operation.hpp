@@ -455,18 +455,6 @@ typedef Operation<ErrorCode> WriteOperation;
 /// 且不得把该 op 留在队列中。
 typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
 
-/// @brief Function pointer type for read notifications.
-/// @brief 读取通知函数指针类型。
-///
-/// A successful return arms or notifies the backend only. It must not complete the read
-/// directly; producers complete reads by pushing bytes into queue_data_ and calling
-/// ProcessPendingReads(). Any non-negative return means accepted/armed; negative values
-/// mean failure.
-/// 成功返回只表示已通知或挂起底层接收，不得直接完成本次读；producer 必须先把字节写入
-/// queue_data_，再调用 ProcessPendingReads()
-/// 完成读取。返回值非负表示已接受/已挂起，负值表示失败。
-typedef ErrorCode (*ReadFun)(ReadPort& port, bool in_isr);
-
 /**
  * @brief Read information block structure.
  * @brief 读取信息块结构。

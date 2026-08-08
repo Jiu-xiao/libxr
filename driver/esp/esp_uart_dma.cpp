@@ -146,7 +146,6 @@ ESP32UartDma::ESP32UartDma(uart_port_t uart_num, int tx_pin, int rx_pin, int rts
     REQUIRE(Detail::IsCurrentTaskPinnedToOneCore());
   }
 
-  _read_port = ReadFun;
   _write_port = WriteFun;
 
   REQUIRE(InitUartHardware() == ErrorCode::OK);
@@ -294,8 +293,6 @@ ErrorCode IRAM_ATTR ESP32UartDma::WriteFun(WritePort& port, bool in_isr)
   auto* uart = LibXR::ContainerOf(&port, &ESP32UartDma::_write_port);
   return uart->dma_model_.Submit(in_isr);
 }
-
-ErrorCode ESP32UartDma::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
 ErrorCode ESP32UartDma::InitUartHardware()
 {

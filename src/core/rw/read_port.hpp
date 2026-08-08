@@ -10,6 +10,23 @@
 namespace LibXR
 {
 
+#if defined(LIBXR_TEST_BUILD)
+class ReadPort;
+
+enum class ReadPortTestCheckpoint : uint32_t
+{
+  READ_BEFORE_PENDING_PUBLISH,
+  CLAIMED_BEFORE_PENDING_RELEASE,
+  PRODUCER_OBSERVED_CLAIMED,
+  PROCESS_CLAIM_ACQUIRED,
+  BLOCK_TIMEOUT_BEFORE_CLAIM,
+  BLOCK_AFTER_IDLE_RELEASE,
+};
+
+using ReadPortTestHook = void (*)(ReadPort& port, ReadPortTestCheckpoint checkpoint,
+                                  void* context);
+#endif
+
 /**
  * @brief ReadPort class for handling read operations.
  * @brief 处理读取操作的ReadPort类。
@@ -22,41 +39,38 @@ class ReadPort
   // 读路径核心的低层状态与辅助类型。部分成员保持 public，
   // 是因为 libxr 的底层测试与驱动胶水层会直接检查它们。
 
-  // Read BLOCK states:
-  // PENDING = waiting for queue-fed completion after read_fun_ was notified
-  // CLEARING = one caller owns read arming, queue inspection, or software dequeue
+  // Read states:
+  // PENDING = one published request is waiting for queue-fed completion
+  // CLAIMED = one completion or clear path owns queue inspection/dequeue progress
   // BLOCK_CLAIMED = wakeup now belongs to the waiter
-  // BLOCK_DETACHED = timeout detached the waiter
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 读 BLOCK 状态：
-  // PENDING = 已通知 read_fun_，等待队列侧完成
-  // CLEARING = 一个调用方占有读启动、队列检查或软件出队进度
+  // PENDING = 一个已发布请求正在等待队列侧完成
+  // CLAIMED = 一个完成或清队列路径占有队列检查/出队进度
   // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
-  // BLOCK_DETACHED = timeout 已把 waiter 分离
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
   enum class BusyState : uint32_t
   {
-    IDLE = 0,      ///< No active waiter and no pending completion. 无等待者、无挂起完成。
-    PENDING = 1,   ///< Driver accepted the request; completion still owns progress.
-                   ///< 请求已交给底层推进。
-    CLEARING = 2,  ///< One caller owns read arming, queue inspection, or dequeue.
-                   ///< 一个调用方占有读启动、队列检查或出队进度。
-    BLOCK_CLAIMED = 3,   ///< BLOCK wakeup already belongs to the current waiter. 当前
-                         ///< BLOCK 唤醒已被本次等待者认领。
-    BLOCK_DETACHED = 4,  ///< Timeout detached the waiter; completion must stay silent.
-                         ///< 超时已分离等待者，完成侧不得再唤醒。
-    PROCESSING = 5,      ///< One completion path owns the queue pop.
-    EVENT = 1U << 31U,   ///< Data arrived before a waiter was armed; next caller must
-                         ///< re-check queue. 数据先到，后续调用者要重查队列。
-    CLEARING_EVENT = (1U << 31U) | 2U,        ///< CLEARING with a follow-up event.
-    PROCESSING_EVENT = (1U << 31U) | 5U,      ///< PROCESSING with a follow-up event.
-    BLOCK_CLAIMED_EVENT = (1U << 31U) | 3U,   ///< Claimed BLOCK plus event.
-    BLOCK_DETACHED_EVENT = (1U << 31U) | 4U,  ///< Detached BLOCK plus event.
+    IDLE = 0,     ///< No active waiter and no pending completion. 无等待者、无挂起完成。
+    PENDING = 1,  ///< One request is published and awaits queue-side completion.
+                  ///< 一个请求已发布，正在等待队列侧完成。
+    CLAIMED = 2,  ///< One completion or clear path owns queue progress.
+                  ///< 一个完成或清队列路径占有队列进度。
+    BLOCK_CLAIMED = 3,  ///< BLOCK wakeup already belongs to the current waiter. 当前
+                        ///< BLOCK 唤醒已被本次等待者认领。
+    // EVENT is a carrier bit, not another logical owner. It records a producer
+    // event in the same atomic modification order when the producer observes a
+    // non-PENDING state and therefore cannot claim the pending read directly.
+    // EVENT 是事件载体位，不是另一种逻辑 owner 状态。producer 看到非 PENDING 状态、
+    // 无法直接接管挂起读时，在同一个原子修改序列中记录该事件。
+    EVENT = 1U << 31U,
   };
 
-  ReadFun read_fun_ =
-      nullptr;  ///< Driver/backend read notification entry. 底层驱动或后端读取通知入口。
+#if defined(LIBXR_TEST_BUILD)
+  void SetTestHook(ReadPortTestHook hook, void* context);
+#endif
+
   SPSCQueue<uint8_t>* queue_data_ = nullptr;  ///< RX payload queue. 接收数据字节队列。
   ReadInfoBlock info_{};  ///< In-flight read request metadata. 当前在途读取请求的元数据。
   std::atomic<BusyState> busy_{
@@ -69,6 +83,10 @@ class ReadPort
    * @param buffer_size Size of the RX byte queue.
    *                    接收字节队列的容量。
    *
+   * @note `buffer_size == 0` disables RX: `Readable()` returns false and read requests
+   *       return `ErrorCode::NOT_SUPPORT`.
+   * @note `buffer_size == 0` 表示禁用 RX：`Readable()` 返回 false，读请求返回
+   *       `ErrorCode::NOT_SUPPORT`。
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
    */
@@ -111,24 +129,15 @@ class ReadPort
    */
   size_t Size();
 
-  /// @brief Checks if read operations are supported.
-  /// @brief 检查是否支持读取操作。
-  bool Readable();
-
   /**
-   * @brief 赋值运算符重载，用于设置读取函数。
-   *        Overloaded assignment operator to set the read function.
+   * @brief Checks whether this endpoint has a queue-backed read path.
+   * @brief 检查该端点是否具有队列驱动的读取路径。
    *
-   * 该函数允许使用 ReadFun 类型的函数对象赋值给 ReadPort，从而设置 read_fun_。
-   * This function allows assigning a ReadFun function object to ReadPort, setting
-   * read_fun_.
-   *
-   * @param fun 要分配的读取函数。
-   *            The read function to be assigned.
-   * @return 返回自身的引用，以支持链式调用。
-   *         Returns a reference to itself for chaining.
+   * This is a queue capability query only. It does not arm a backend and does not
+   * imply support for a synchronous pull implementation.
+   * 本函数只查询队列能力，不会启动后端，也不表示支持同步 pull 实现。
    */
-  ReadPort& operator=(ReadFun fun);
+  bool Readable();
 
   /**
    * @brief 完成已由队列路径认领的读取操作。
@@ -159,9 +168,9 @@ class ReadPort
    * @brief 读取操作符重载，用于执行读取操作。
    *        Overloaded function call operator to perform a read operation.
    *
-   * 该函数检查端口是否可读，并根据 data.size_ 和 op 的类型执行不同的操作。
-   * This function checks if the port is readable and performs different actions based on
-   * data.size_ and the type of op.
+   * 请求发布后仅由软件 RX 队列完成；producer 必须先入队，再调用
+   * ProcessPendingReads()。Requests are completed only from the software RX queue;
+   * producers must enqueue data before calling ProcessPendingReads().
    *
    * @param data 包含要读取的数据。
    *             Contains the data to be read.
@@ -178,6 +187,11 @@ class ReadPort
    *               Indicates whether the operation is executed in an interrupt context.
    * @warning BLOCK operations are forbidden in ISR context and fail a strong runtime
    *          requirement before any request state is published.
+   * @warning Calls to this operator and ClearQueuedData() are one logical SPSC consumer
+   *          and must be caller-serialized. A previously published request still returns
+   *          BUSY; overlapping request publication is outside the contract.
+   * @warning 本操作与 ClearQueuedData() 同属一个 SPSC consumer，必须由调用方串行化。
+   *          已发布请求仍会返回 BUSY；请求发布过程彼此重叠不在契约内。
    * @return 返回操作的 ErrorCode，指示操作结果。
    *         Returns an ErrorCode indicating the result of the operation.
    */
@@ -202,17 +216,17 @@ class ReadPort
    * participate in backend teardown and does not fail-complete an in-flight read.
    * Returns BUSY when a read request is currently in progress.
    *
-   * @note After this call claims CLEARING, it owns the current software-queue snapshot
+   * @note After this call claims CLAIMED, it owns the current software-queue snapshot
    *       until return. Bytes that arrive after the snapshot may remain queued for a
    *       later reader/clear call.
-   * @note 本次调用 claim `CLEARING` 后，在返回前独占当前软件队列快照；快照之后新到达
+   * @note 本次调用 claim `CLAIMED` 后，在返回前独占当前软件队列快照；快照之后新到达
    *       的字节可以留给后续读取或下次清队列。
    * @warning Ordinary reads and `ClearQueuedData()` are operations of the same logical
-   *          SPSC consumer and must not overlap. `CLEARING` coordinates this consumer
-   *          with the ISR producer's `ProcessPendingReads()` path; it does not turn
+   *          SPSC consumer and must not overlap. `CLAIMED` coordinates this consumer
+   *          with the producer's `ProcessPendingReads()` path; it does not turn
    *          ordinary read/clear calls into multiple concurrent consumers.
    * @warning 普通读取与 `ClearQueuedData()` 同属一个 SPSC consumer，调用不得重叠。
-   *          `CLEARING` 只协调该 consumer 与 ISR producer 的
+   *          `CLAIMED` 只协调该 consumer 与 producer 的
    *          `ProcessPendingReads()` 路径，并不会让普通读取和清队列变成可并发的多个
    *          consumer。
    *
@@ -227,6 +241,11 @@ class ReadPort
    * @brief Processes pending reads.
    * @brief 处理挂起的读取请求。
    *
+   * @note Producers must publish queue data before this call. The queue entry and the
+   *       progress-state RMW together carry data visibility to the completion path.
+   * @note producer 必须先发布队列数据再调用本函数；队列条目与进度状态 RMW 共同把
+   *       数据可见性传递给完成路径。
+   *
    * @param in_isr 指示是否在中断上下文中执行。
    *               Indicates whether the operation is executed in an interrupt context.
    */
@@ -238,16 +257,28 @@ class ReadPort
    *
    * @note Driver-only: call this only after the backend is known to be unavailable.
    * @note 仅供驱动层在后端已明确不可用后调用。
-   * @note The surrounding driver must already guarantee that no front-end
-   *       submission or back-end completion/data event is executing, and that none
-   *       can begin for this port until this call returns.
-   * @note 外围驱动还必须先保证：当前没有前端提交或后端完成/数据事件正在执行，且本调用
-   *       返回前不能开始新的相关操作。
+   * @note The surrounding driver must first close new front-end admission, stop
+   *       back-end completion/data/IRQ sources, and wait for every already-admitted
+   *       caller or owner that can mutate this port or queue to exit. A BLOCK caller
+   *       may remain asleep in Wait(); this function resolves and wakes that waiter.
+   *       No other port or queue mutator may begin until this call returns.
+   * @note 外围驱动必须先关闭新的前端请求入口，停止后端完成、数据与 IRQ 来源，并等待所有
+   *       已接纳且可能修改本端口或队列的调用方与 owner 退出。已经阻塞在 Wait() 中的
+   *       BLOCK 调用可以继续等待；本函数负责完成并唤醒它。本调用返回前不得开始其他会
+   *       修改端口或队列的操作。
    *
    * @param reason 最终失败原因 / Final failure reason
    * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
    */
   void FailAndClearAll(ErrorCode reason, bool in_isr);
+
+#if defined(LIBXR_TEST_BUILD)
+ private:
+  void RunTestHook(ReadPortTestCheckpoint checkpoint);
+
+  ReadPortTestHook test_hook_ = nullptr;
+  void* test_context_ = nullptr;
+#endif
 };
 
 }  // namespace LibXR

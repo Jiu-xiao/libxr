@@ -14,6 +14,8 @@
  */
 #pragma once
 
+#include <chrono>
+
 #include "rw_mode_test_common.hpp"
 
 namespace
@@ -21,10 +23,29 @@ namespace
 using LibXRTest::ALL_MODES;
 using LibXRTest::ASYNC_MODES;
 using LibXRTest::ASYNC_TIMEOUT_MS;
+using LibXRTest::BLOCK_OPERATION_TIMEOUT_MS;
 using LibXRTest::ReadHarness;
 using LibXRTest::SHORT_WAIT_MS;
 using LibXRTest::TestMode;
+using LibXRTest::THREAD_STATE_TIMEOUT_MS;
 using LibXRTest::WriteHarness;
+
+template <typename Port>
+bool WaitForBusyState(Port& port, typename Port::BusyState expected,
+                      uint32_t timeout_ms = THREAD_STATE_TIMEOUT_MS)
+{
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (port.busy_.load(std::memory_order_acquire) != expected)
+  {
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      return false;
+    }
+    LibXR::Thread::Yield();
+  }
+  return true;
+}
 
 /**
  * @brief 辅助函数 `JoinThreadIfNeeded`。 Helper function `JoinThreadIfNeeded`.
@@ -38,7 +59,7 @@ inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
-  ASSERT(thread.Join() == LibXR::ErrorCode::OK);
+  REQUIRE(thread.Join() == LibXR::ErrorCode::OK);
 }
 
 /**
@@ -52,7 +73,7 @@ inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT
 {
   // 辅助内容：验证当前失败或退出预期。
   // Helper coverage: validate the current expected failure or exit condition.
-  ASSERT(sem.Wait(timeout) == LibXR::ErrorCode::OK);
+  REQUIRE(sem.Wait(timeout) == LibXR::ErrorCode::OK);
 }
 
 struct ReadQueueCompletionContext
@@ -74,11 +95,7 @@ struct ReadQueueCompletionContext
  */
 void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
-  while (ctx.port->busy_.load(std::memory_order_acquire) !=
-         LibXR::ReadPort::BusyState::PENDING)
-  {
-    LibXR::Thread::Yield();
-  }
+  REQUIRE(WaitForBusyState(*ctx.port, LibXR::ReadPort::BusyState::PENDING));
 
   auto ans = ctx.port->queue_data_->PushBatch(ctx.data, ctx.size);
   UNUSED(ans);
@@ -105,9 +122,12 @@ struct WriteFinishContext
 void FinishPendingWrite(WriteFinishContext ctx)
 {
   LibXR::WriteInfoBlock completed{};
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(THREAD_STATE_TIMEOUT_MS);
 
   while (ctx.port->queue_info_->Pop(completed) != LibXR::ErrorCode::OK)
   {
+    REQUIRE(std::chrono::steady_clock::now() < deadline);
     LibXR::Thread::Yield();
   }
 

@@ -83,10 +83,9 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
   for (auto mode : ALL_MODES)
   {
     TrackingReadPort r(16);
-    r = PendingReadFun;
 
     uint8_t dummy = 0xA0;
-    ReadHarness read(mode);
+    ReadHarness read(mode, BLOCK_OPERATION_TIMEOUT_MS);
     Semaphore done;
     Thread finisher;
 
@@ -95,7 +94,7 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
 
     auto ec = r(RawData{&dummy, 0}, read.op);
     ASSERT(ec == ErrorCode::OK);
-    ExpectWaitOk(done, SHORT_WAIT_MS);
+    ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
     JoinThreadIfNeeded(finisher);
 
     if (mode != TestMode::NONE && mode != TestMode::BLOCK)
@@ -174,19 +173,18 @@ void test_rw_read_port_block_queue_completion_copies_data()
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   static const uint8_t TX[] = {0x5A};
   uint8_t rx[sizeof(TX)] = {0};
   Semaphore sem;
-  ReadOperation op(sem, 100);
+  ReadOperation op(sem, BLOCK_OPERATION_TIMEOUT_MS);
   Semaphore done;
   Thread finisher;
   StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_queue_block");
 
   auto ec = r(RawData{rx, sizeof(rx)}, op);
   ASSERT(ec == ErrorCode::OK);
-  ExpectWaitOk(done, SHORT_WAIT_MS);
+  ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(finisher);
   ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
   ASSERT(sem.Value() == 0);

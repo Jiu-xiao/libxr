@@ -19,11 +19,14 @@ extern "C"
   // JS 会调用它，传字符串进来
   void receive_input(const char* js_input)
   {
-    if (LibXR::STDIO::read_ && LibXR::STDIO::read_->Readable())
+    if (LibXR::STDIO::read_ != nullptr && LibXR::STDIO::read_->Readable())
     {
-      LibXR::STDIO::read_->queue_data_->PushBatch(
+      const auto push_ans = LibXR::STDIO::read_->queue_data_->PushBatch(
           reinterpret_cast<const uint8_t*>(js_input), strlen(js_input));
-      LibXR::STDIO::read_->ProcessPendingReads(false);
+      if (push_ans == LibXR::ErrorCode::OK)
+      {
+        LibXR::STDIO::read_->ProcessPendingReads(false);
+      }
     }
   }
 }
@@ -67,11 +70,7 @@ void LibXR::PlatformInit()
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort&, bool) { return LibXR::ErrorCode::PENDING; };
-
   LibXR::STDIO::read_ = new LibXR::ReadPort(webasm_stdio_queue_bytes);
-
-  *LibXR::STDIO::read_ = read_fun;
 }
 
 void LibXR::Timer::RefreshTimerInIdle()

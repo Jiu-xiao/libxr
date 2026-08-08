@@ -11,6 +11,20 @@
 namespace LibXR
 {
 
+#if defined(LIBXR_TEST_BUILD)
+class WritePort;
+
+enum class WritePortTestCheckpoint : uint32_t
+{
+  BLOCK_TIMEOUT_BEFORE_CLAIM,
+  BLOCK_AFTER_COMPLETION_POST,
+  BLOCK_AFTER_IDLE_RELEASE,
+};
+
+using WritePortTestHook = void (*)(WritePort& port, WritePortTestCheckpoint checkpoint,
+                                   void* context);
+#endif
+
 /**
  * @brief WritePort class for handling write operations.
  * @brief 处理写入操作的WritePort类。
@@ -18,6 +32,10 @@ namespace LibXR
 class WritePort
 {
  public:
+#if defined(LIBXR_TEST_BUILD)
+  void SetTestHook(WritePortTestHook hook, void* context);
+#endif
+
   // Exposed low-level state and helpers for the write-path core. Some members stay public
   // because low-level libxr tests and backend glue inspect them directly. Keep the
   // boundary explicit instead of introducing a fake private wall that tests cannot use.
@@ -26,38 +44,30 @@ class WritePort
   // 这里保持显式边界即可，不做测试本身也用不上的“伪私有化”。
 
   // Write BLOCK states:
-  // LOCKED = submit path owns queue mutation
-  // BLOCK_PUBLISHING = BLOCK submit path is publishing queue metadata
+  // OWNER = submit or fail-and-clear path owns queue mutation
   // BLOCK_WAITING = waiter armed, completion not claimed yet
   // BLOCK_CLAIMED = final wakeup belongs to the waiter
   // BLOCK_DETACHED = timeout detached the waiter
-  // RESETTING = fail-and-clear path owns queue mutation
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 写 BLOCK 状态：
-  // LOCKED = 提交路径占有队列修改权
-  // BLOCK_PUBLISHING = BLOCK 提交路径正在发布队列元数据
+  // OWNER = 提交或 fail-and-clear 路径占有队列修改权
   // BLOCK_WAITING = waiter 已挂起，完成尚未 claim
   // BLOCK_CLAIMED = 最终唤醒已经归 waiter 所有
   // BLOCK_DETACHED = timeout 已把 waiter 分离
-  // RESETTING = fail-and-clear 路径占有队列修改权
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
   enum class BusyState : uint32_t
   {
-    LOCKED =
-        0,  ///< Submission path owns queue mutation. 提交路径占有写队列/元数据修改权。
-    BLOCK_PUBLISHING = 1,  ///< BLOCK submitter is publishing queue metadata.
-                           ///< BLOCK 提交者正在发布队列元数据。
+    IDLE = 0,           ///< No active submitter and no armed BLOCK waiter.
+                        ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
+    OWNER = 1,          ///< Submission or fail-and-clear owns queue mutation.
+                        ///< 提交或 fail-and-clear 路径占有写队列/元数据修改权。
     BLOCK_WAITING = 2,  ///< One BLOCK waiter is armed and waiting for final completion.
                         ///< 一个 BLOCK 等待者已经挂起，等待最终完成。
     BLOCK_CLAIMED =
         3,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
     BLOCK_DETACHED = 4,  ///< Waiter already timed out/detached; completion must not post.
                          ///< 等待者已超时/被分离，完成侧不能再 Post。
-    RESETTING = 5,       ///< Fail-and-clear owns queue mutation.
-                         ///< Fail-and-clear 路径占有写队列/元数据修改权。
-    IDLE = UINT32_MAX    ///< No active submitter and no armed BLOCK waiter.
-                         ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
   };
 
   WriteFun write_fun_ =
@@ -73,9 +83,28 @@ class WritePort
 
   // Stream batch facade.
   // Stream 负责一次批次的累积写入与提交。
+  // One caller owns a Stream between commits. The atomic state rejects callback or
+  // asynchronous reentry while a submission is being finalized; it does not make one
+  // Stream instance safe for general concurrent use by multiple callers.
+  // 两次提交之间由一个调用方独占 Stream。原子状态只负责拒绝提交收尾期间的回调或
+  // 异步重入，并不保证多个普通调用方可以并发操作同一个 Stream 实例。
   class Stream
   {
    public:
+#if defined(LIBXR_TEST_BUILD)
+    enum class TestCheckpoint : uint32_t
+    {
+      AFTER_METADATA_PUBLISH,
+      AFTER_COMMIT_WRITE,
+      AFTER_BUFFER_RESET,
+      AFTER_PORT_RELEASE,
+    };
+
+    using TestHook = void (*)(Stream& stream, TestCheckpoint checkpoint, void* context);
+
+    void SetTestHook(TestHook hook, void* context);
+#endif
+
     /**
      * @brief 构造流写入对象，并尝试锁定端口。
      * @brief Constructs a Stream object and tries to acquire WritePort lock.
@@ -164,12 +193,13 @@ class WritePort
      * The return value is meaningful only after Acquire succeeds; it returns zero while
      * this stream does not currently own the batch.
      */
-    [[nodiscard]] size_t EmptySize() const
-    {
-      return owns_port_ ? port_->queue_data_->EmptySize() : 0;
-    }
+    [[nodiscard]] size_t EmptySize() const;
 
    private:
+#if defined(LIBXR_TEST_BUILD)
+    void RunTestHook(TestCheckpoint checkpoint);
+#endif
+
     /**
      * @brief 将当前已缓存批次提交给 WritePort。
      * @brief Submits the currently buffered batch to WritePort.
@@ -181,21 +211,24 @@ class WritePort
      */
     [[nodiscard]] ErrorCode SubmitBuffered();
 
-    /**
-     * @brief 将当前批次的端口所有权归还给 WritePort。
-     * @brief Releases the current batch ownership back to WritePort.
-     */
-    void Release();
-
     LibXR::WritePort* port_;    ///< 写端口指针 Pointer to the WritePort
     LibXR::WriteOperation op_;  ///< 写操作对象 Write operation object
     size_t buffered_size_ =
         0;  ///< 当前批次已追加到共享 data queue、但尚未发布对应元数据的字节数 Bytes
             ///< already appended into the shared data queue for the current batch, but
             ///< whose metadata has not yet been published
-    bool owns_port_ = false;   ///< 当前 Stream 是否持有该批次的端口所有权 Whether this
-                               ///< Stream currently owns the batch
-    bool submitting_ = false;  ///< True while CommitWrite may invoke a callback.
+    enum class StreamState : uint32_t
+    {
+      RELEASED,
+      OWNED,
+      SUBMITTING,
+    };
+
+    std::atomic<StreamState> state_{StreamState::RELEASED};
+#if defined(LIBXR_TEST_BUILD)
+    TestHook test_hook_ = nullptr;
+    void* test_context_ = nullptr;
+#endif
   };
 
   /**
@@ -320,14 +353,20 @@ class WritePort
    *
    * @note Driver-only: call this only after the backend is known to be unavailable.
    * @note 仅供驱动层在后端已明确不可用后调用。
-   * @note The surrounding driver must already guarantee that no new front-end
-   *       submissions or back-end completion/data events can still arrive for
-   *       this port.
-   * @note 外围驱动还必须先保证：这条端口后续不会再收到新的前端提交，也不会再收到
-   *       新的后端完成或数据事件。
-   * @note Seeing LOCKED / BLOCK_PUBLISHING / RESETTING here means the caller
-   *       violated that driver-side precondition.
-   * @note 若此时仍看到 LOCKED / BLOCK_PUBLISHING / RESETTING，说明调用方违反了
+   * @note The surrounding driver must first close new front-end admission, stop
+   *       back-end completion/IRQ/queue owners, and wait for every already-admitted
+   *       submitter or owner that can mutate this port or its queues to exit.
+   * @note 外围驱动必须先关闭新的前端请求入口，停止后端完成、IRQ 与队列 owner，并等待所有
+   *       已接纳且可能修改本端口或队列的提交方与 owner 退出。
+   * @note A record already popped by a backend must be completed with `Finish()` or
+   *       returned to the queue before this call. Only a BLOCK caller still asleep in
+   *       `Wait()` whose record remains queued may be resolved and woken here. No other
+   *       port or queue mutator may begin until this call returns.
+   * @note 后端已经弹出的 active record 必须先通过 `Finish()` 完成或退回队列。只有仍阻塞在
+   *       `Wait()` 且 record 仍在队列中的 BLOCK 调用可以由本函数完成并唤醒；本调用返回前
+   *       不得开始其他会修改端口或队列的操作。
+   * @note Seeing OWNER here means the caller violated that driver-side precondition.
+   * @note 若此时仍看到 OWNER，说明调用方违反了
    *       上述驱动层前提。
    * @note Dev builds fire DEV_ASSERT, while release builds still back off.
    * @note 开发期会触发 DEV_ASSERT，发布构建仍保持直接退回。
@@ -353,6 +392,14 @@ class WritePort
    */
   ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool pushed = false,
                         bool in_isr = false);
+
+#if defined(LIBXR_TEST_BUILD)
+ private:
+  void RunTestHook(WritePortTestCheckpoint checkpoint);
+
+  WritePortTestHook test_hook_ = nullptr;
+  void* test_context_ = nullptr;
+#endif
 };
 
 }  // namespace LibXR

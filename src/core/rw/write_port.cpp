@@ -7,6 +7,22 @@ using namespace LibXR;
 template class LibXR::SPSCQueue<WriteInfoBlock>;
 template class LibXR::SPSCQueue<uint8_t>;
 
+#if defined(LIBXR_TEST_BUILD)
+void WritePort::SetTestHook(WritePortTestHook hook, void* context)
+{
+  test_hook_ = hook;
+  test_context_ = context;
+}
+
+void WritePort::RunTestHook(WritePortTestCheckpoint checkpoint)
+{
+  if (test_hook_ != nullptr)
+  {
+    test_hook_(*this, checkpoint, test_context_);
+  }
+}
+#endif
+
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
     : queue_info_(new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
                       SPSCQueue<WriteInfoBlock>(queue_size)),
@@ -40,43 +56,36 @@ void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
 {
   if (info.op.type == WriteOperation::OperationType::BLOCK)
   {
-    block_result_ = ans;
-
     // Write completion claims the active BLOCK waiter and hands the wakeup to it.
     // 写完成 claim 当前 BLOCK waiter，并把唤醒交给它。
-    BusyState expected = BusyState::BLOCK_WAITING;
-    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
+    BusyState state = busy_.load(std::memory_order_acquire);
+    while (state == BusyState::OWNER || state == BusyState::BLOCK_WAITING)
+    {
+      if (busy_.compare_exchange_weak(state, BusyState::BLOCK_CLAIMED,
                                       std::memory_order_acq_rel,
                                       std::memory_order_acquire))
-    {
-      info.op.data.sem_info.sem->PostFromCallback(in_isr);
-      return;
+      {
+        block_result_ = ans;
+        info.op.data.sem_info.sem->PostFromCallback(in_isr);
+#if defined(LIBXR_TEST_BUILD)
+        RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_COMPLETION_POST);
+#endif
+        return;
+      }
     }
 
     // The waiter may have timed out and detached before this late completion is
     // reported.
     // waiter 可能已经先超时分离，随后迟到完成才上报。
-    if (expected == BusyState::BLOCK_PUBLISHING)
+    ASSERT_FROM_CALLBACK(state == BusyState::BLOCK_DETACHED, in_isr);
+    if (state != BusyState::BLOCK_DETACHED)
     {
-      expected = BusyState::BLOCK_PUBLISHING;
-      if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
-      {
-        info.op.data.sem_info.sem->PostFromCallback(in_isr);
-        return;
-      }
+      return;
     }
 
-    ASSERT(expected == BusyState::BLOCK_DETACHED || expected == BusyState::IDLE ||
-           expected == BusyState::LOCKED || expected == BusyState::RESETTING);
-    if (expected == BusyState::BLOCK_DETACHED)
-    {
-      expected = BusyState::BLOCK_DETACHED;
-      (void)busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                          std::memory_order_acq_rel,
-                                          std::memory_order_acquire);
-    }
+    const bool detached = busy_.compare_exchange_strong(
+        state, BusyState::IDLE, std::memory_order_acq_rel, std::memory_order_acquire);
+    ASSERT_FROM_CALLBACK(detached, in_isr);
     return;
   }
 
@@ -102,7 +111,7 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_i
     }
 
     BusyState expected = BusyState::IDLE;
-    if (!busy_.compare_exchange_strong(expected, BusyState::LOCKED,
+    if (!busy_.compare_exchange_strong(expected, BusyState::OWNER,
                                        std::memory_order_acq_rel,
                                        std::memory_order_acquire))
     {
@@ -145,11 +154,6 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     // operation 状态属于已发布队列记录的一部分；在 metadata 对并发 backend/config owner
     // 可见前先挂起。
     op.MarkAsRunning();
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
-    }
-
     WriteInfoBlock info{data, op};
     ans = queue_info_->Push(info);
 
@@ -158,12 +162,12 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    BusyState expected = BusyState::BLOCK_PUBLISHING;
+    BusyState expected = BusyState::OWNER;
     if (!busy_.compare_exchange_strong(expected, BusyState::BLOCK_WAITING,
                                        std::memory_order_acq_rel,
                                        std::memory_order_acquire))
     {
-      ASSERT(expected == BusyState::BLOCK_CLAIMED);
+      REQUIRE(expected == BusyState::BLOCK_CLAIMED);
     }
   }
 
@@ -173,29 +177,21 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
   {
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      auto state = busy_.load(std::memory_order_acquire);
-      while (state == BusyState::RESETTING)
-      {
-        state = busy_.load(std::memory_order_acquire);
-      }
+      const auto state = busy_.load(std::memory_order_acquire);
 
       if (state == BusyState::BLOCK_CLAIMED)
       {
         auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-        UNUSED(finish_wait_ans);
-        ASSERT(finish_wait_ans == ErrorCode::OK);
+        REQUIRE(finish_wait_ans == ErrorCode::OK);
+        const ErrorCode result = block_result_;
         busy_.store(BusyState::IDLE, std::memory_order_release);
-        return block_result_;
+#if defined(LIBXR_TEST_BUILD)
+        RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
+#endif
+        return result;
       }
 
-      if (state == BusyState::BLOCK_DETACHED)
-      {
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-        return ErrorCode::TIMEOUT;
-      }
-
-      ASSERT(state == BusyState::BLOCK_WAITING || state == BusyState::IDLE ||
-             state == BusyState::LOCKED);
+      REQUIRE(state == BusyState::BLOCK_WAITING);
       busy_.store(BusyState::IDLE, std::memory_order_release);
       return ans;
     }
@@ -224,10 +220,17 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
       auto state = busy_.load(std::memory_order_acquire);
       ASSERT(state == BusyState::BLOCK_CLAIMED);
 #endif
+      const ErrorCode result = block_result_;
       busy_.store(BusyState::IDLE, std::memory_order_release);
-      return block_result_;
+#if defined(LIBXR_TEST_BUILD)
+      RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
+#endif
+      return result;
     }
 
+#if defined(LIBXR_TEST_BUILD)
+    RunTestHook(WritePortTestCheckpoint::BLOCK_TIMEOUT_BEFORE_CLAIM);
+#endif
     // Timeout won before completion claimed the waiter.
     // 超时先赢，完成侧还没 claim 当前 waiter。
     BusyState expected = BusyState::BLOCK_WAITING;
@@ -238,34 +241,19 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
       return ErrorCode::TIMEOUT;
     }
 
-    if (expected != BusyState::BLOCK_CLAIMED)
-    {
-      while (expected == BusyState::RESETTING)
-      {
-        expected = busy_.load(std::memory_order_acquire);
-      }
-
-      // A detached late completion may already have cleared BLOCK_DETACHED
-      // back to IDLE before this waiter wakes from timeout.
-      // 分离后的迟到完成可能会在当前 waiter 超时醒来前，先把
-      // BLOCK_DETACHED 清回 IDLE。
-      ASSERT(expected == BusyState::BLOCK_DETACHED || expected == BusyState::IDLE ||
-             expected == BusyState::LOCKED);
-      if (expected == BusyState::BLOCK_DETACHED)
-      {
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-      }
-      return ErrorCode::TIMEOUT;
-    }
+    REQUIRE(expected == BusyState::BLOCK_CLAIMED);
 
     // Timeout lost after completion had already claimed the waiter.
     // 超时发生得太晚，完成侧已经 claim 了当前 waiter。
     auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-    UNUSED(finish_wait_ans);
-    ASSERT(finish_wait_ans == ErrorCode::OK);
+    REQUIRE(finish_wait_ans == ErrorCode::OK);
+    const ErrorCode result = block_result_;
     busy_.store(BusyState::IDLE, std::memory_order_release);
+#if defined(LIBXR_TEST_BUILD)
+    RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
+#endif
 
-    return block_result_;
+    return result;
   }
 
   if (!meta_pushed)
@@ -280,24 +268,34 @@ void WritePort::FailAndClearAll(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
   WriteInfoBlock info{};
+  WriteInfoBlock block_info{};
+  bool has_block_info = false;
+
+  const auto drain_queued_records = [&]()
+  {
+    queue_data_->Reset();
+    while (queue_info_->Pop(info) == ErrorCode::OK)
+    {
+      if (info.op.type == WriteOperation::OperationType::BLOCK)
+      {
+        DEV_ASSERT_FROM_CALLBACK(!has_block_info, in_isr);
+        if (!has_block_info)
+        {
+          block_info = info;
+          has_block_info = true;
+        }
+        continue;
+      }
+
+      Finish(in_isr, reason, info);
+    }
+  };
 
   while (true)
   {
     auto state = busy_.load(std::memory_order_acquire);
 
-    if (state == BusyState::LOCKED)
-    {
-      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-      return;
-    }
-
-    if (state == BusyState::BLOCK_PUBLISHING)
-    {
-      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-      return;
-    }
-
-    if (state == BusyState::RESETTING)
+    if (state == BusyState::OWNER)
     {
       DEV_ASSERT_FROM_CALLBACK(false, in_isr);
       return;
@@ -306,18 +304,15 @@ void WritePort::FailAndClearAll(ErrorCode reason, bool in_isr)
     if (state == BusyState::IDLE)
     {
       BusyState expected = BusyState::IDLE;
-      if (!busy_.compare_exchange_strong(expected, BusyState::RESETTING,
+      if (!busy_.compare_exchange_strong(expected, BusyState::OWNER,
                                          std::memory_order_acq_rel,
                                          std::memory_order_acquire))
       {
         continue;
       }
 
-      queue_data_->Reset();
-      while (queue_info_->Pop(info) == ErrorCode::OK)
-      {
-        Finish(in_isr, reason, info);
-      }
+      drain_queued_records();
+      DEV_ASSERT_FROM_CALLBACK(!has_block_info, in_isr);
       block_result_ = ErrorCode::OK;
       busy_.store(BusyState::IDLE, std::memory_order_release);
       return;
@@ -326,14 +321,17 @@ void WritePort::FailAndClearAll(ErrorCode reason, bool in_isr)
     if (state == BusyState::BLOCK_WAITING)
     {
       // Keep BLOCK_WAITING visible until Finish() hands the terminal wakeup to
-      // the blocked caller. Switching to RESETTING here would break that
+      // the blocked caller. Switching to OWNER here would break that
       // existing waiter handoff.
       // 这里必须保留 BLOCK_WAITING，直到 Finish() 把最终唤醒交给当前
-      // BLOCK waiter；若先切成 RESETTING，会破坏既有 waiter 交接。
-      queue_data_->Reset();
-      while (queue_info_->Pop(info) == ErrorCode::OK)
+      // BLOCK waiter；若先切成 OWNER，会破坏既有 waiter 交接。
+      drain_queued_records();
+      DEV_ASSERT_FROM_CALLBACK(has_block_info, in_isr);
+      if (has_block_info)
       {
-        Finish(in_isr, reason, info);
+        // Finish publishes the waiter result and may let that caller submit again.
+        // Nothing in this drain may touch port state or queues after that release.
+        Finish(in_isr, reason, block_info);
       }
       return;
     }
@@ -343,16 +341,20 @@ void WritePort::FailAndClearAll(ErrorCode reason, bool in_isr)
       // The waiter is already gone, but BLOCK_DETACHED still blocks reentrant
       // submissions while old queue entries are drained.
       // waiter 已经离开，但 BLOCK_DETACHED 仍能在清理旧队列期间挡住重入提交。
-      queue_data_->Reset();
-      while (queue_info_->Pop(info) == ErrorCode::OK)
+      drain_queued_records();
+      if (has_block_info)
       {
-        // The waiter has already detached. Finish() will clear the local state
-        // without re-posting that waiter.
-        // waiter 已经分离。Finish() 会清理本地状态，但不会重新唤醒该 waiter。
-        Finish(in_isr, reason, info);
+        // Finish releases BLOCK_DETACHED. It must be the final drain action because a
+        // new submission may acquire the port immediately afterward.
+        Finish(in_isr, reason, block_info);
+        return;
       }
-      block_result_ = ErrorCode::OK;
-      busy_.store(BusyState::IDLE, std::memory_order_release);
+
+      BusyState expected = BusyState::BLOCK_DETACHED;
+      const bool released = busy_.compare_exchange_strong(expected, BusyState::IDLE,
+                                                          std::memory_order_acq_rel,
+                                                          std::memory_order_acquire);
+      ASSERT_FROM_CALLBACK(released, in_isr);
       return;
     }
 

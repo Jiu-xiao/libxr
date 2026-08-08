@@ -45,12 +45,6 @@ class ESP32CDCJtagReadPort : public ReadPort
    */
   void OnRxDequeue(bool in_isr) override;
 
-  ESP32CDCJtagReadPort& operator=(ReadFun fun)
-  {
-    ReadPort::operator=(fun);
-    return *this;
-  }
-
  private:
   ESP32CDCJtag& owner_;  ///< 所属 CDC/JTAG 后端 / Owning CDC/JTAG backend
 };
@@ -98,12 +92,6 @@ class ESP32CDCJtag : public UART
    * @brief 用于 TX 启动的 WritePort 跳板函数 / WritePort trampoline for TX startup
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
-
-  /**
-   * @brief USB Serial/JTAG RX 路径的 ReadPort 入口 / ReadPort entry point for the USB
-   * Serial/JTAG RX path
-   */
-  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
 
  private:
   /**

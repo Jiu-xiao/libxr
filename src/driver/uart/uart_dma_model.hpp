@@ -49,7 +49,7 @@ enum class UartOldTxTerminal : uint8_t
  * @brief 后端推进 CONFIG 或 runtime recovery 的结果 / Result of advancing CONFIG or
  * runtime recovery
  *
- * `PENDING` 不携带 terminal 分类，并必须安排未来的 STOP_DONE、COMPLETE、CONTROL_READY
+ * `PENDING` 不携带 terminal 分类，并必须安排未来的 CONTROL_READY、COMPLETE
  * 或等价 service carrier。`COMPLETED` 是硬件静止的线性化点：分类已确定、破坏性清理已
  * 完成，且以后不会发布旧 terminal callback。模型在下一次硬件静止快照消费 COMPLETE；
  * NONE 和 ERROR 保留 active payload 以便重启。 / `PENDING` carries no terminal
@@ -97,8 +97,7 @@ enum class UartDmaEvent : uint32_t
   COMPLETE = 1U << 1U,
   ERROR = 1U << 2U,
   CONFIG = 1U << 3U,
-  STOP_DONE = 1U << 4U,
-  CONTROL_READY = 1U << 5U,
+  CONTROL_READY = 1U << 4U,
 };
 
 /**
@@ -331,7 +330,7 @@ class UartDmaModel
    * stop-completion carrier
    * @param in_isr 是否从 ISR 上下文发布 / Whether published from ISR context
    */
-  void OnStopDone(bool in_isr) { Invoke(UartDmaEvent::STOP_DONE, in_isr); }
+  void OnStopDone(bool in_isr) { Invoke(UartDmaEvent::CONTROL_READY, in_isr); }
 
   /**
    * @brief 在首次访问受保护状态前 admit 自有 raw IRQ / Admit an owned raw IRQ before
@@ -396,13 +395,6 @@ class UartDmaModel
     CONFIG = 1U,
   };
 
-  enum class StageResult : uint32_t
-  {
-    EMPTY = 0U,
-    BLOCKED = 1U,
-    STAGED = 2U,
-  };
-
   enum class StartPendingResult : uint32_t
   {
     BLOCKED = 0U,
@@ -420,7 +412,7 @@ class UartDmaModel
   static constexpr uint32_t ALL_EVENTS =
       EventMask(UartDmaEvent::WRITE) | EventMask(UartDmaEvent::COMPLETE) |
       EventMask(UartDmaEvent::ERROR) | EventMask(UartDmaEvent::CONFIG) |
-      EventMask(UartDmaEvent::STOP_DONE) | EventMask(UartDmaEvent::CONTROL_READY);
+      EventMask(UartDmaEvent::CONTROL_READY);
 
   static constexpr bool HasEvent(uint32_t events, UartDmaEvent event)
   {
@@ -429,8 +421,7 @@ class UartDmaModel
 
   static constexpr bool IsControlCarrier(uint32_t events)
   {
-    return HasEvent(events, UartDmaEvent::STOP_DONE) ||
-           HasEvent(events, UartDmaEvent::CONTROL_READY) ||
+    return HasEvent(events, UartDmaEvent::CONTROL_READY) ||
            HasEvent(events, UartDmaEvent::COMPLETE) ||
            HasEvent(events, UartDmaEvent::ERROR);
   }
@@ -624,8 +615,7 @@ class UartDmaModel
     {
       if (!pending_valid_)
       {
-        const StageResult stage = StageNextPending(in_isr);
-        if (stage == StageResult::EMPTY || stage == StageResult::BLOCKED)
+        if (!StageNextPending(in_isr))
         {
           return 0U;
         }
@@ -651,29 +641,29 @@ class UartDmaModel
     return 0U;
   }
 
-  StageResult StageNextPending(bool in_isr)
+  bool StageNextPending(bool in_isr)
   {
     if (pending_valid_)
     {
-      return StageResult::STAGED;
+      return true;
     }
     if (!rx_config_gate_.TryEnterTx())
     {
-      return StageResult::BLOCKED;
+      return false;
     }
 
     WriteInfoBlock info{};
     if (port_.queue_info_->Peek(info) != ErrorCode::OK)
     {
       rx_config_gate_.LeaveTx();
-      return StageResult::EMPTY;
+      return false;
     }
 
     ASSERT(port_.queue_data_ != nullptr);
     if (port_.queue_data_ == nullptr)
     {
       rx_config_gate_.LeaveTx();
-      return StageResult::EMPTY;
+      return false;
     }
 
     REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
@@ -683,13 +673,13 @@ class UartDmaModel
     if (result != ErrorCode::OK)
     {
       rx_config_gate_.LeaveTx();
-      return StageResult::EMPTY;
+      return false;
     }
 
     // Payload and metadata length are complete before pending becomes visible.
     pending_valid_ = true;
     rx_config_gate_.LeaveTx();
-    return StageResult::STAGED;
+    return true;
   }
 
   StartPendingResult TryStartPending(bool in_isr, SubmitContext* submit)

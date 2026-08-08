@@ -17,6 +17,7 @@ void test_rw()
 {
   RunBaseRwReadQueueTests();
   RunBaseRwPendingTests();
+  RunBaseRwImmediateErrorTests();
   RunBaseRwFailAndClearTests();
 }
 

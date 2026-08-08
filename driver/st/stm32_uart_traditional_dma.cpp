@@ -227,7 +227,7 @@ class TraditionalDmaAdapter
       if (NVIC_GetEnableIRQ(irq_) == 0U)
       {
         // HAL_DMA_Abort_IT() completes Stream aborts only through this vector.
-        // An originally disabled vector therefore has no legal STOP_DONE carrier.
+        // An originally disabled vector therefore has no legal CONTROL_READY carrier.
         valid_ = false;
         return;
       }

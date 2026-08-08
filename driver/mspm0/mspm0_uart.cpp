@@ -11,18 +11,19 @@ static constexpr uint32_t MSPM0_UART_RX_ERROR_INTERRUPT_MASK =
     DL_UART_INTERRUPT_PARITY_ERROR | DL_UART_INTERRUPT_FRAMING_ERROR |
     DL_UART_INTERRUPT_NOISE_ERROR;
 
+static constexpr uint32_t MSPM0_UART_RX_INTERRUPT_MASK =
+    DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_ADDRESS_MATCH;
+
 static constexpr uint32_t MSPM0_UART_BASE_INTERRUPT_MASK =
-    // RX/TX + 地址匹配 + 错误中断；超时中断按需在 Read() 时动态开关 / RX, TX,
-    // address-match and error IRQs; timeout IRQ is enabled on demand in Read().
-    DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_TX | DL_UART_INTERRUPT_ADDRESS_MATCH |
-    MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
+    MSPM0_UART_RX_INTERRUPT_MASK | MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
 
 MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_size,
                      uint32_t tx_buffer_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
       _read_port(rx_stage_buffer.size_),
       _write_port(tx_queue_size, tx_buffer_size),
-      res_(res)
+      res_(res),
+      requested_config_(config)
 {
   ASSERT(res_.instance != nullptr);
   ASSERT(res_.clock_freq > 0);
@@ -31,7 +32,6 @@ MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_s
   ASSERT(tx_queue_size > 0);
   ASSERT(tx_buffer_size > 0);
 
-  _read_port = ReadFun;
   _write_port = WriteFun;
 
   REQUIRE(res_.index < MAX_UART_INSTANCES);
@@ -41,8 +41,9 @@ MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_s
   NVIC_DisableIRQ(res_.irqn);
   NVIC_ClearPendingIRQ(res_.irqn);
 
-  const ErrorCode SET_CFG_ANS = SetConfig(config);
-  REQUIRE(SET_CFG_ANS == ErrorCode::OK);
+  REQUIRE(ValidateConfig(config) == ErrorCode::OK);
+  rx_timeout_mode_ = ResolveRxTimeoutMode();
+  ApplyInitialConfig(config);
 
   instance_map_[res_.index] = this;
   NVIC_ClearPendingIRQ(res_.irqn);
@@ -98,55 +99,108 @@ UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
 
 ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
 {
-  const bool IN_ISR = (__get_IPSR() != 0U);
-  REQUIRE_FROM_CALLBACK(!IN_ISR, IN_ISR);
-  REQUIRE(NVIC_GetEnableIRQ(res_.irqn) == 0U);
+  const ErrorCode validation = ValidateConfig(config);
+  if (validation != ErrorCode::OK)
+  {
+    return validation;
+  }
+  if (!TryReserveConfig())
+  {
+    return ErrorCode::BUSY;
+  }
 
-  const ReadPort::BusyState READ_STATE =
-      read_port_->busy_.load(std::memory_order_acquire);
-  REQUIRE(READ_STATE == ReadPort::BusyState::IDLE ||
-          READ_STATE == ReadPort::BusyState::EVENT);
-  REQUIRE(write_port_->busy_.load(std::memory_order_acquire) ==
-          WritePort::BusyState::IDLE);
-  REQUIRE(write_port_->queue_info_->Size() == 0U);
-  REQUIRE(write_port_->queue_data_->Size() == 0U);
-  REQUIRE(!tx_active_valid_);
-  REQUIRE(!DL_UART_isBusy(res_.instance));
-  REQUIRE(DL_UART_isTXFIFOEmpty(res_.instance));
-  REQUIRE(DL_UART_isRXFIFOEmpty(res_.instance));
+  requested_config_ = config;
+  PublishConfig();
+  Notify(Event::CONFIG);
+  return ErrorCode::OK;
+}
 
-  if (config.baudrate == 0)
+ErrorCode MSPM0UART::ValidateConfig(UART::Configuration config) const
+{
+  if (config.baudrate == 0U || config.data_bits < 5U || config.data_bits > 8U ||
+      (config.stop_bits != 1U && config.stop_bits != 2U))
   {
     return ErrorCode::ARG_ERR;
   }
 
-  if (config.data_bits < 5 || config.data_bits > 8)
+  switch (config.parity)
   {
-    return ErrorCode::ARG_ERR;
+    case UART::Parity::NO_PARITY:
+    case UART::Parity::EVEN:
+    case UART::Parity::ODD:
+      return ErrorCode::OK;
+    default:
+      return ErrorCode::ARG_ERR;
   }
+}
 
-  if (config.stop_bits != 1 && config.stop_bits != 2)
-  {
-    return ErrorCode::ARG_ERR;
-  }
+bool MSPM0UART::TryReserveConfig()
+{
+  // Acquire pairs with the previous owner's final IDLE release before this caller
+  // overwrites the two-word snapshot.
+  uint32_t expected = static_cast<uint32_t>(ConfigAdmission::IDLE);
+  return config_admission_.compare_exchange_strong(
+      expected, static_cast<uint32_t>(ConfigAdmission::RESERVED),
+      std::memory_order_acquire, std::memory_order_relaxed);
+}
 
+void MSPM0UART::PublishConfig()
+{
+  const uint32_t reserved = static_cast<uint32_t>(ConfigAdmission::RESERVED);
+  ASSERT(config_admission_.load(std::memory_order_relaxed) == reserved);
+  // The owner may read requested_config_ only after acquiring PENDING.
+  config_admission_.store(static_cast<uint32_t>(ConfigAdmission::PENDING),
+                          std::memory_order_release);
+}
+
+bool MSPM0UART::ConfigPublished() const
+{
+  return config_admission_.load(std::memory_order_acquire) ==
+         static_cast<uint32_t>(ConfigAdmission::PENDING);
+}
+
+bool MSPM0UART::ConfigRequested() const
+{
+  return config_admission_.load(std::memory_order_acquire) !=
+         static_cast<uint32_t>(ConfigAdmission::IDLE);
+}
+
+void MSPM0UART::CompleteConfig()
+{
+  ASSERT(config_admission_.load(std::memory_order_relaxed) ==
+         static_cast<uint32_t>(ConfigAdmission::PENDING));
+  config_admission_.store(static_cast<uint32_t>(ConfigAdmission::IDLE),
+                          std::memory_order_release);
+}
+
+void MSPM0UART::ApplyInitialConfig(UART::Configuration config)
+{
+  // Construction is the only synchronous quiescent boundary. Runtime CONFIG never
+  // calls the SDK helper because it busy-waits after disabling the UART.
+  DL_UART_changeConfig(res_.instance);
+  ApplyDisabledConfig(config);
+}
+
+void MSPM0UART::ApplyDisabledConfig(UART::Configuration config)
+{
   DL_UART_WORD_LENGTH word_length = DL_UART_WORD_LENGTH_8_BITS;
   switch (config.data_bits)
   {
-    case 5:
+    case 5U:
       word_length = DL_UART_WORD_LENGTH_5_BITS;
       break;
-    case 6:
+    case 6U:
       word_length = DL_UART_WORD_LENGTH_6_BITS;
       break;
-    case 7:
+    case 7U:
       word_length = DL_UART_WORD_LENGTH_7_BITS;
       break;
-    case 8:
+    case 8U:
       word_length = DL_UART_WORD_LENGTH_8_BITS;
       break;
     default:
-      return ErrorCode::ARG_ERR;
+      ASSERT(false);
+      break;
   }
 
   DL_UART_PARITY parity = DL_UART_PARITY_NONE;
@@ -162,17 +216,16 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
       parity = DL_UART_PARITY_ODD;
       break;
     default:
-      return ErrorCode::ARG_ERR;
+      ASSERT(false);
+      break;
   }
 
-  const DL_UART_STOP_BITS STOP_BITS =
-      (config.stop_bits == 2) ? DL_UART_STOP_BITS_TWO : DL_UART_STOP_BITS_ONE;
-
-  DL_UART_changeConfig(res_.instance);
+  const DL_UART_STOP_BITS stop_bits =
+      config.stop_bits == 2U ? DL_UART_STOP_BITS_TWO : DL_UART_STOP_BITS_ONE;
 
   DL_UART_setWordLength(res_.instance, word_length);
   DL_UART_setParityMode(res_.instance, parity);
-  DL_UART_setStopBits(res_.instance, STOP_BITS);
+  DL_UART_setStopBits(res_.instance, stop_bits);
 
   DL_UART_enableFIFOs(res_.instance);
   DL_UART_setTXFIFOThreshold(res_.instance, DL_UART_TX_FIFO_LEVEL_ONE_ENTRY);
@@ -182,43 +235,20 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   ApplyRxTimeoutMode();
 
   DL_UART_clearInterruptStatus(res_.instance, 0xFFFFFFFF);
-  DL_UART_enableInterrupt(res_.instance, MSPM0_UART_BASE_INTERRUPT_MASK);
-  DL_UART_disableInterrupt(res_.instance,
-                           DL_UART_INTERRUPT_TX | GetTimeoutInterruptMask());
+  DL_UART_disableInterrupt(res_.instance, 0xFFFFFFFF);
+  rx_timeout_interrupt_armed_ = false;
+  rx_interrupt_path_enabled_ = false;
+  ConfigureRxInterruptPath();
+  tx_interrupt_armed_ = false;
+  config_eot_interrupt_armed_ = false;
 
   DL_UART_enable(res_.instance);
-  NVIC_ClearPendingIRQ(res_.irqn);
-
-  return ErrorCode::OK;
 }
 
 ErrorCode MSPM0UART::WriteFun(WritePort& port, bool)
 {
   auto* uart = LibXR::ContainerOf(&port, &MSPM0UART::_write_port);
-  DL_UART_enableInterrupt(uart->res_.instance, DL_UART_INTERRUPT_TX);
-  uart->res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
-  return ErrorCode::PENDING;
-}
-
-ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
-{
-  auto* uart = LibXR::ContainerOf(&port, &MSPM0UART::_read_port);
-  const uint32_t TIMEOUT_MASK = uart->GetTimeoutInterruptMask();
-  if (TIMEOUT_MASK != 0U)
-  {
-    // 仅在有挂起读请求时启用超时中断，避免空闲无效触发 / Enable timeout IRQ
-    // only when a read request is pending to avoid idle false triggers.
-    if (uart->rx_timeout_mode_ == RxTimeoutMode::LIN_COMPARE)
-    {
-      // 以本次 Read 请求开始作为超时计时起点 / Start timeout timing from this
-      // Read request boundary.
-      uart->ResetLinCounter();
-    }
-
-    DL_UART_clearInterruptStatus(uart->res_.instance, TIMEOUT_MASK);
-    DL_UART_enableInterrupt(uart->res_.instance, TIMEOUT_MASK);
-  }
-
+  uart->Notify(Event::WRITE);
   return ErrorCode::PENDING;
 }
 
@@ -318,8 +348,6 @@ void MSPM0UART::ResetLinCounter()
 
 void MSPM0UART::ApplyRxTimeoutMode()
 {
-  rx_timeout_mode_ = ResolveRxTimeoutMode();
-
   // 基础 UART 配置对 LIN/BYTE 两条路径一致，先统一配置后再处理模式差异 /
   // Apply shared UART settings first, then patch mode-specific differences.
   DL_UART_setCommunicationMode(res_.instance, DL_UART_MODE_NORMAL);
@@ -372,97 +400,254 @@ void MSPM0UART::OnInterrupt(uint8_t index)
   uart->HandleInterrupt();
 }
 
-void MSPM0UART::HandleInterrupt()
+void MSPM0UART::Notify(Event event) noexcept
 {
-  const uint32_t TIMEOUT_MASK = GetTimeoutInterruptMask();
-  const uint32_t IRQ_MASK = MSPM0_UART_BASE_INTERRUPT_MASK | TIMEOUT_MASK;
+  pending_events_.fetch_or(EventMask(event), std::memory_order_release);
+  __DMB();
+  NVIC_SetPendingIRQ(res_.irqn);
+}
 
-  uint32_t pending = DL_UART_getEnabledInterruptStatus(res_.instance, IRQ_MASK);
-  if (TIMEOUT_MASK != 0U)
+uint32_t MSPM0UART::CaptureIrqEvents() noexcept
+{
+  const uint32_t timeout_mask = GetTimeoutInterruptMask();
+  const uint32_t owned_mask = MSPM0_UART_BASE_INTERRUPT_MASK | DL_UART_INTERRUPT_TX |
+                              DL_UART_INTERRUPT_EOT_DONE | timeout_mask;
+  uint32_t pending = DL_UART_getEnabledInterruptStatus(res_.instance, owned_mask);
+
+  if (timeout_mask != 0U &&
+      DL_UART_getEnabledInterrupts(res_.instance, timeout_mask) != 0U)
   {
-    // LIN compare 在部分路径需读取 RAW 位，避免漏掉超时事件 / For LIN
-    // compare, raw status is required on some paths to avoid missing timeout events.
-    pending |= DL_UART_getRawInterruptStatus(res_.instance, TIMEOUT_MASK);
+    pending |= DL_UART_getRawInterruptStatus(res_.instance, timeout_mask);
   }
 
-  const uint32_t PENDING = pending;
-  if (PENDING == 0U)
+  uint32_t events = 0U;
+  if ((pending & MSPM0_UART_RX_INTERRUPT_MASK) != 0U)
+  {
+    SetRxInterruptPathEnabled(false);
+    DL_UART_clearInterruptStatus(res_.instance, pending & MSPM0_UART_RX_INTERRUPT_MASK);
+    events |= EventMask(Event::RX_DATA);
+  }
+  if (timeout_mask != 0U && (pending & timeout_mask) != 0U)
+  {
+    DL_UART_disableInterrupt(res_.instance, timeout_mask);
+    DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
+    rx_timeout_interrupt_armed_ = false;
+    events |= EventMask(Event::RX_TIMEOUT);
+  }
+  if ((pending & MSPM0_UART_RX_ERROR_INTERRUPT_MASK) != 0U)
+  {
+    DL_UART_clearInterruptStatus(res_.instance,
+                                 pending & MSPM0_UART_RX_ERROR_INTERRUPT_MASK);
+    events |= EventMask(Event::ERROR);
+  }
+  if ((pending & DL_UART_INTERRUPT_TX) != 0U)
+  {
+    DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
+    DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_TX);
+    tx_interrupt_armed_ = false;
+    events |= EventMask(Event::TX_SPACE);
+  }
+  if ((pending & DL_UART_INTERRUPT_EOT_DONE) != 0U)
+  {
+    DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
+    DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
+    config_eot_interrupt_armed_ = false;
+    events |= EventMask(Event::TX_EOT);
+  }
+  return events;
+}
+
+uint32_t MSPM0UART::ServiceEvents(uint32_t events, bool& pushed_any) noexcept
+{
+  if ((events & EventMask(Event::RX_TIMEOUT)) != 0U)
+  {
+    rx_timeout_count_.fetch_add(1U, std::memory_order_relaxed);
+  }
+
+  if ((events & EventMask(Event::CONFIG)) != 0U ||
+      (config_state_ == ConfigState::NORMAL && ConfigRequested()))
+  {
+    BeginConfiguration();
+  }
+
+  constexpr uint32_t RX_EVENTS =
+      EventMask(Event::RX_DATA) | EventMask(Event::RX_TIMEOUT) | EventMask(Event::ERROR);
+  if (config_state_ == ConfigState::NORMAL && (events & RX_EVENTS) != 0U)
+  {
+    events |= ServiceRx(events, pushed_any);
+  }
+
+  if (config_state_ == ConfigState::NORMAL && (events & EventMask(Event::CONFIG)) != 0U)
+  {
+    BeginConfiguration();
+  }
+
+  if (config_state_ != ConfigState::NORMAL)
+  {
+    return ContinueConfiguration(events);
+  }
+  if ((events & (EventMask(Event::WRITE) | EventMask(Event::TX_SPACE))) != 0U)
+  {
+    ProgressTx();
+  }
+  return 0U;
+}
+
+void MSPM0UART::HandleInterrupt()
+{
+  bool pushed_any = false;
+  uint32_t events =
+      pending_events_.exchange(0U, std::memory_order_acquire) | CaptureIrqEvents();
+  while (events != 0U)
+  {
+    events = ServiceEvents(events, pushed_any);
+    events |= pending_events_.exchange(0U, std::memory_order_acquire);
+  }
+
+  if (pushed_any)
+  {
+    // Hardware progression is complete before user callbacks run. A callback may submit
+    // another operation, but cannot reenter this owner's current MMIO pass.
+    read_port_->ProcessPendingReads(true);
+  }
+}
+
+void MSPM0UART::BeginConfiguration()
+{
+  if (config_state_ != ConfigState::NORMAL || !ConfigPublished())
   {
     return;
   }
 
-  constexpr uint32_t RX_PENDING_MASK =
-      DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_ADDRESS_MATCH;
-  if ((PENDING & RX_PENDING_MASK) != 0U)
-  {
-    HandleRxInterrupt(TIMEOUT_MASK);
-    if ((PENDING & DL_UART_INTERRUPT_ADDRESS_MATCH) != 0U)
-    {
-      DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_ADDRESS_MATCH);
-    }
-  }
+  SetRxInterruptPathEnabled(false);
+  PauseRxTimeout();
 
-  if (TIMEOUT_MASK != 0U)
+  config_state_ = ConfigState::TX_DRAIN;
+  if (!HasActiveRecord())
   {
-    HandleRxTimeoutInterrupt(PENDING, TIMEOUT_MASK);
-  }
-
-  if ((PENDING & DL_UART_INTERRUPT_OVERRUN_ERROR) != 0U)
-  {
-    HandleErrorInterrupt(DL_UART_IIDX_OVERRUN_ERROR);
-  }
-  if ((PENDING & DL_UART_INTERRUPT_BREAK_ERROR) != 0U)
-  {
-    HandleErrorInterrupt(DL_UART_IIDX_BREAK_ERROR);
-  }
-  if ((PENDING & DL_UART_INTERRUPT_PARITY_ERROR) != 0U)
-  {
-    HandleErrorInterrupt(DL_UART_IIDX_PARITY_ERROR);
-  }
-  if ((PENDING & DL_UART_INTERRUPT_FRAMING_ERROR) != 0U)
-  {
-    HandleErrorInterrupt(DL_UART_IIDX_FRAMING_ERROR);
-  }
-  if ((PENDING & DL_UART_INTERRUPT_NOISE_ERROR) != 0U)
-  {
-    HandleErrorInterrupt(DL_UART_IIDX_NOISE_ERROR);
-  }
-
-  if ((PENDING & DL_UART_INTERRUPT_TX) != 0U)
-  {
-    HandleTxInterrupt(true);
+    DisarmTxSpaceInterrupt();
   }
 }
 
-void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
+uint32_t MSPM0UART::ContinueConfiguration(uint32_t events)
 {
-  bool pushed = false;
-  bool received = false;
+  if (config_state_ == ConfigState::TX_DRAIN)
+  {
+    if (HasActiveRecord() && !FillCurrentRecord())
+    {
+      return 0U;
+    }
+    DisarmTxSpaceInterrupt();
+    if (tx_line_active_)
+    {
+      if ((events & EventMask(Event::TX_EOT)) == 0U)
+      {
+        ArmConfigEotInterrupt();
+        if ((DL_UART_getRawInterruptStatus(res_.instance, DL_UART_INTERRUPT_EOT_DONE) &
+             DL_UART_INTERRUPT_EOT_DONE) == 0U)
+        {
+          return 0U;
+        }
+      }
+      DisarmConfigEotInterrupt();
+      tx_line_active_ = false;
+    }
 
+    DL_UART_disable(res_.instance);
+    config_state_ = ConfigState::WAITING_DISABLED_IDLE;
+  }
+
+  if (config_state_ != ConfigState::WAITING_DISABLED_IDLE)
+  {
+    return 0U;
+  }
+
+  // Once disabled, no new character may start. Drain old FIFO bytes, arm RX as the
+  // completion carrier for a character already in the shift register, then recheck BUSY.
+  DiscardRxFIFO();
+  DL_UART_clearInterruptStatus(res_.instance, MSPM0_UART_RX_INTERRUPT_MASK);
+  SetRxInterruptPathEnabled(true);
+  if (DL_UART_isBusy(res_.instance))
+  {
+    return 0U;
+  }
+
+  SetRxInterruptPathEnabled(false);
+  DiscardRxFIFO();
+  DL_UART_disableFIFOs(res_.instance);
+  ApplyDisabledConfig(requested_config_);
+
+  config_state_ = ConfigState::NORMAL;
+  // Reopen CONFIG admission last. After this release, a higher-priority ISR may
+  // immediately reserve and overwrite requested_config_.
+  CompleteConfig();
+  return EventMask(Event::WRITE);
+}
+
+void MSPM0UART::PauseRxTimeout()
+{
+  const uint32_t timeout_mask = GetTimeoutInterruptMask();
+  if (timeout_mask == 0U || !rx_timeout_interrupt_armed_)
+  {
+    rx_timeout_interrupt_armed_ = false;
+    return;
+  }
+
+  // The IRQ owner may observe CONFIG after its one hardware-status capture. Mask first,
+  // then preserve a timeout that became raw before this configuration pause.
+  DL_UART_disableInterrupt(res_.instance, timeout_mask);
+  const bool expired =
+      (DL_UART_getRawInterruptStatus(res_.instance, timeout_mask) & timeout_mask) != 0U;
+  DL_UART_clearInterruptStatus(res_.instance, timeout_mask);
+  rx_timeout_interrupt_armed_ = false;
+  if (expired)
+  {
+    rx_timeout_count_.fetch_add(1U, std::memory_order_relaxed);
+  }
+}
+
+void MSPM0UART::ArmRxTimeout()
+{
+  const uint32_t timeout_mask = GetTimeoutInterruptMask();
+  if (timeout_mask == 0U)
+  {
+    rx_timeout_interrupt_armed_ = false;
+    return;
+  }
+
+  ResetLinCounter();
+  DL_UART_clearInterruptStatus(res_.instance, timeout_mask);
+  DL_UART_enableInterrupt(res_.instance, timeout_mask);
+  rx_timeout_interrupt_armed_ = true;
+}
+
+uint32_t MSPM0UART::ServiceRx(uint32_t events, bool& pushed_any)
+{
+  bool received = false;
+  bool pushed = false;
   DrainRxFIFO(received, pushed);
+  pushed_any = pushed_any || pushed;
 
   if (received && rx_timeout_mode_ == RxTimeoutMode::LIN_COMPARE)
   {
-    // [LIN路径 / LIN path] 连续接收时重置 LIN 计数器，避免帧内误超时 /
-    // Reset LIN counter on data reception to avoid in-frame timeout.
-    ResetLinCounter();
+    if (rx_timeout_interrupt_armed_)
+    {
+      ResetLinCounter();
+    }
+    else
+    {
+      // The physical timeout describes a gap after received data, not a ReadPort
+      // generation. The UART IRQ owner is the only path that arms or resets it.
+      ArmRxTimeout();
+    }
   }
 
-  if (pushed)
+  if (!ConfigRequested() && config_state_ == ConfigState::NORMAL)
   {
-    read_port_->ProcessPendingReads(true);
+    SetRxInterruptPathEnabled(true);
   }
 
-  if (timeout_mask != 0U &&
-      read_port_->busy_.load(std::memory_order_relaxed) != ReadPort::BusyState::PENDING)
-  {
-    // 无挂起读请求时关闭超时中断，减少无意义 IRQ / Disable timeout IRQ when no
-    // pending read remains.
-    DL_UART_disableInterrupt(res_.instance, timeout_mask);
-    DL_UART_clearInterruptStatus(res_.instance, timeout_mask);
-  }
-
-  DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_RX);
+  return ConfigRequested() ? EventMask(Event::CONFIG) : 0U;
 }
 
 void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
@@ -478,144 +663,213 @@ void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
     }
     else
     {
-      rx_drop_count_++;
+      rx_drop_count_.fetch_add(1U, std::memory_order_relaxed);
     }
   }
 }
 
-void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask)
+void MSPM0UART::DiscardRxFIFO()
 {
-  // [BYTE路径 / BYTE path] timeout_mask=0，直接返回；本函数实际只在 LIN 路径生效。
-  // In BYTE path timeout_mask is 0, so this function is effectively LIN-only.
-  if ((timeout_mask == 0U) || ((pending & timeout_mask) == 0U))
+  while (!DL_UART_isRXFIFOEmpty(res_.instance))
   {
-    return;
+    (void)DL_UART_receiveData(res_.instance);
+    rx_drop_count_.fetch_add(1U, std::memory_order_relaxed);
   }
-
-  rx_timeout_count_++;
-  DL_UART_clearInterruptStatus(res_.instance, pending & timeout_mask);
-
-  // FULL 阈值模式下短帧可能滞留在 HW FIFO，直到超时中断到来 / In
-  // FULL-threshold modes, short frames may remain in HW FIFO until timeout IRQ.
-  // 先拉取 FIFO，让已有数据先走正常队列完成路径 / Drain FIFO first so already
-  // received bytes take the normal queue-completion path.
-  bool pushed = false;
-  bool received = false;
-
-  DrainRxFIFO(received, pushed);
-
-  if (pushed)
-  {
-    read_port_->ProcessPendingReads(true);
-  }
-
-  if (rx_timeout_mode_ == RxTimeoutMode::LIN_COMPARE)
-  {
-    ResetLinCounter();
-  }
-
-  // Timeout is a frame/readiness boundary, not a read error. Read(size=0) waiters
-  // complete through ProcessPendingReads() once bytes are queued; exact-size reads keep
-  // waiting until enough bytes arrive or their own BLOCK timeout fires.
-  DL_UART_disableInterrupt(res_.instance, timeout_mask);
 }
 
-void MSPM0UART::HandleTxInterrupt(bool in_isr)
+void MSPM0UART::ProgressTx()
 {
-  // 发送状态机：取写请求并尽量填满 TX FIFO，直到该请求完成 / TX state machine:
-  // fetch one write request and keep filling TX FIFO until it completes.
-  while (true)
+  while (config_state_ == ConfigState::NORMAL)
   {
-    if (!tx_active_valid_)
+    if (!HasCurrentRecord() && !ClaimNextRecord())
     {
-      if (write_port_->queue_info_->Pop(tx_active_info_) != ErrorCode::OK)
-      {
-        DisableTxInterrupt();
-
-        if (write_port_->queue_info_->Size() > 0)
-        {
-          DL_UART_enableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
-          res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
-        }
-
-        return;
-      }
-
-      tx_active_total_ = tx_active_info_.data.size_;
-      tx_active_remaining_ = tx_active_total_;
-      tx_active_valid_ = true;
+      DisarmTxSpaceInterrupt();
+      return;
     }
-
-    while (tx_active_remaining_ > 0 && !DL_UART_isTXFIFOFull(res_.instance))
+    if (!TryCommitCurrentRecord())
     {
-      uint8_t tx_byte = 0;
-      if (write_port_->queue_data_->Pop(tx_byte) != ErrorCode::OK)
-      {
-        write_port_->Finish(in_isr, ErrorCode::FAILED, tx_active_info_);
-        tx_active_valid_ = false;
-        tx_active_remaining_ = 0;
-        tx_active_total_ = 0;
-        DisableTxInterrupt();
-        return;
-      }
-
-      DL_UART_transmitData(res_.instance, tx_byte);
-      tx_active_remaining_--;
+      DisarmTxSpaceInterrupt();
+      return;
     }
-
-    if (tx_active_remaining_ > 0)
+    if (!FillCurrentRecord())
     {
       return;
     }
-
-    write_port_->Finish(in_isr, ErrorCode::OK, tx_active_info_);
-    tx_active_valid_ = false;
-    tx_active_remaining_ = 0;
-    tx_active_total_ = 0;
   }
 }
 
-void MSPM0UART::HandleErrorInterrupt(DL_UART_IIDX iidx)
+bool MSPM0UART::ClaimNextRecord()
 {
-  uint32_t clear_mask = 0;
-
-  switch (iidx)
+  ASSERT(!HasCurrentRecord());
+  if (ConfigRequested())
   {
-    case DL_UART_IIDX_OVERRUN_ERROR:
-      clear_mask = DL_UART_INTERRUPT_OVERRUN_ERROR;
-      break;
-
-    case DL_UART_IIDX_BREAK_ERROR:
-      clear_mask = DL_UART_INTERRUPT_BREAK_ERROR;
-      break;
-
-    case DL_UART_IIDX_PARITY_ERROR:
-      clear_mask = DL_UART_INTERRUPT_PARITY_ERROR;
-      break;
-
-    case DL_UART_IIDX_FRAMING_ERROR:
-      clear_mask = DL_UART_INTERRUPT_FRAMING_ERROR;
-      break;
-
-    case DL_UART_IIDX_NOISE_ERROR:
-      clear_mask = DL_UART_INTERRUPT_NOISE_ERROR;
-      break;
-
-    default:
-      break;
+    return false;
   }
 
-  if (clear_mask != 0)
+  WriteInfoBlock info{};
+  if (write_port_->queue_info_->Pop(info) != ErrorCode::OK)
   {
-    DL_UART_clearInterruptStatus(res_.instance, clear_mask);
+    return false;
+  }
+
+  REQUIRE_FROM_CALLBACK(info.data.size_ > 0U, true);
+  REQUIRE_FROM_CALLBACK(write_port_->queue_data_ != nullptr, true);
+  REQUIRE_FROM_CALLBACK(info.data.size_ <= write_port_->queue_data_->Size(), true);
+  tx_record_info_ = info;
+  tx_record_remaining_ = info.data.size_;
+  tx_record_state_ = TxRecordState::HELD;
+  return true;
+}
+
+bool MSPM0UART::TryCommitCurrentRecord()
+{
+  if (HasActiveRecord())
+  {
+    return true;
+  }
+
+  ASSERT(tx_record_state_ == TxRecordState::HELD);
+  // This post-Pop acquire load is the old/new framing boundary. CONFIG admitted after
+  // it waits behind this record; CONFIG already reserved keeps the record HELD.
+  if (ConfigRequested())
+  {
+    return false;
+  }
+  tx_record_state_ = TxRecordState::ACTIVE;
+  return true;
+}
+
+bool MSPM0UART::FillCurrentRecord()
+{
+  ASSERT(HasActiveRecord());
+  bool wrote_any = false;
+  while (tx_record_remaining_ > 0U && !DL_UART_isTXFIFOFull(res_.instance))
+  {
+    uint8_t tx_byte = 0U;
+    if (write_port_->queue_data_->Pop(tx_byte) != ErrorCode::OK)
+    {
+      CompleteCurrentRecord(ErrorCode::FAILED);
+      DisarmTxSpaceInterrupt();
+      return true;
+    }
+
+    DL_UART_transmitData(res_.instance, tx_byte);
+    if (!wrote_any)
+    {
+      // Publish the first new byte before clearing EOT so an older serializer cannot
+      // reassert its completion between the clear and this refill.
+      DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
+      tx_line_active_ = true;
+    }
+    tx_record_remaining_--;
+    wrote_any = true;
+  }
+
+  if (tx_record_remaining_ != 0U)
+  {
+    ArmTxSpaceInterrupt();
+    return false;
+  }
+
+  DisarmTxSpaceInterrupt();
+  CompleteCurrentRecord(ErrorCode::OK);
+  return true;
+}
+
+bool MSPM0UART::HasCurrentRecord() const
+{
+  return tx_record_state_ != TxRecordState::EMPTY;
+}
+
+bool MSPM0UART::HasActiveRecord() const
+{
+  return tx_record_state_ == TxRecordState::ACTIVE;
+}
+
+void MSPM0UART::CompleteCurrentRecord(ErrorCode result)
+{
+  ASSERT(HasActiveRecord());
+  WriteInfoBlock completed = tx_record_info_;
+  ClearCurrentRecord();
+  write_port_->Finish(true, result, completed);
+}
+
+void MSPM0UART::ClearCurrentRecord()
+{
+  tx_record_info_ = {};
+  tx_record_remaining_ = 0U;
+  tx_record_state_ = TxRecordState::EMPTY;
+}
+
+void MSPM0UART::ConfigureRxInterruptPath()
+{
+  DL_UART_clearInterruptStatus(res_.instance, MSPM0_UART_BASE_INTERRUPT_MASK);
+  DL_UART_enableInterrupt(res_.instance, MSPM0_UART_RX_ERROR_INTERRUPT_MASK);
+  rx_interrupt_path_enabled_ = false;
+  SetRxInterruptPathEnabled(true);
+}
+
+void MSPM0UART::SetRxInterruptPathEnabled(bool enabled)
+{
+  if (rx_interrupt_path_enabled_ == enabled)
+  {
+    return;
+  }
+  if (enabled)
+  {
+    DL_UART_enableInterrupt(res_.instance, MSPM0_UART_RX_INTERRUPT_MASK);
+  }
+  else
+  {
+    DL_UART_disableInterrupt(res_.instance, MSPM0_UART_RX_INTERRUPT_MASK);
+  }
+  rx_interrupt_path_enabled_ = enabled;
+}
+
+void MSPM0UART::ArmTxSpaceInterrupt()
+{
+  if (tx_interrupt_armed_)
+  {
+    return;
+  }
+  DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_TX);
+  tx_interrupt_armed_ = true;
+  DL_UART_enableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
+  if (!DL_UART_isTXFIFOFull(res_.instance))
+  {
+    res_.instance->CPU_INT.ISET = DL_UART_INTERRUPT_TX;
   }
 }
 
-void MSPM0UART::DisableTxInterrupt()
+void MSPM0UART::DisarmTxSpaceInterrupt()
 {
+  if (!tx_interrupt_armed_)
+  {
+    return;
+  }
   DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_TX);
   DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_TX);
-  NVIC_ClearPendingIRQ(res_.irqn);
+  tx_interrupt_armed_ = false;
+}
+
+void MSPM0UART::ArmConfigEotInterrupt()
+{
+  if (config_eot_interrupt_armed_)
+  {
+    return;
+  }
+  config_eot_interrupt_armed_ = true;
+  DL_UART_enableInterrupt(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
+}
+
+void MSPM0UART::DisarmConfigEotInterrupt()
+{
+  if (config_eot_interrupt_armed_)
+  {
+    DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
+  }
+  DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
+  config_eot_interrupt_armed_ = false;
 }
 
 #if defined(UART0_BASE)

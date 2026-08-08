@@ -31,23 +31,19 @@ void test_rw_read_port_fail_and_clear_all_fails_block_waiter()
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   uint8_t stale_rx[1] = {0xA5};
   Semaphore done;
-  BlockingReadCallContext ctx{&r, RawData{stale_rx, sizeof(stale_rx)}, 20,
-                              ErrorCode::FAILED, &done};
+  BlockingReadCallContext ctx{&r, RawData{stale_rx, sizeof(stale_rx)},
+                              BLOCK_OPERATION_TIMEOUT_MS, ErrorCode::FAILED, &done};
   Thread reader;
   StartBlockingReadCaller(reader, ctx, "rd_reset");
 
-  while (r.busy_.load(std::memory_order_acquire) != ReadPort::BusyState::PENDING)
-  {
-    Thread::Yield();
-  }
+  REQUIRE(WaitForBusyState(r, ReadPort::BusyState::PENDING));
 
   r.FailAndClearAll(ErrorCode::INIT_ERR, false);
 
-  ExpectWaitOk(done, SHORT_WAIT_MS);
+  ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(reader);
   ASSERT(ctx.result == ErrorCode::INIT_ERR);
   ASSERT(stale_rx[0] == 0xA5);
@@ -84,19 +80,16 @@ void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
   static const uint8_t TX2[] = {0x44, 0x55, 0x66};
 
   Semaphore done;
-  BlockingWriteCallContext ctx{&w, ConstRawData{TX1, sizeof(TX1)}, 20, ErrorCode::FAILED,
-                               &done};
+  BlockingWriteCallContext ctx{&w, ConstRawData{TX1, sizeof(TX1)},
+                               BLOCK_OPERATION_TIMEOUT_MS, ErrorCode::FAILED, &done};
   Thread writer;
   StartBlockingWriteCaller(writer, ctx, "wr_reset");
 
-  while (w.busy_.load(std::memory_order_acquire) != WritePort::BusyState::BLOCK_WAITING)
-  {
-    Thread::Yield();
-  }
+  REQUIRE(WaitForBusyState(w, WritePort::BusyState::BLOCK_WAITING));
 
   w.FailAndClearAll(ErrorCode::INIT_ERR, false);
 
-  ExpectWaitOk(done, SHORT_WAIT_MS);
+  ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(writer);
   ASSERT(ctx.result == ErrorCode::INIT_ERR);
   ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
@@ -108,9 +101,9 @@ void test_rw_write_port_fail_and_clear_all_fails_block_waiter()
   StartWriteFinisher(finisher, w, finish_done, ErrorCode::OK, "wr_reset_finish");
 
   Semaphore sem;
-  WriteOperation op(sem, 100);
+  WriteOperation op(sem, BLOCK_OPERATION_TIMEOUT_MS);
   ASSERT(w(ConstRawData{TX2, sizeof(TX2)}, op) == ErrorCode::OK);
-  ExpectWaitOk(finish_done, SHORT_WAIT_MS);
+  ExpectWaitOk(finish_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(finisher);
 }
 

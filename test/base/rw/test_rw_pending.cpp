@@ -3,70 +3,130 @@
  * @brief base `rw` pending mode 与边界场景子测试。 Split test unit for base `rw`
  * pending-mode and edge scenarios.
  */
+#include <signal.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <chrono>
+#include <semaphore>
+#include <thread>
+
 #include "rw_test_common.hpp"
+
+extern char** environ;
+
+extern const char kRwIsrReadBlockScenario[] = "--rw-isr-read-block";
+extern const char kRwIsrWriteBlockScenario[] = "--rw-isr-write-block";
 
 namespace
 {
 
-bool arm_failure_data_pushed = false;
+constexpr int FATAL_EXIT_CODE = 86;
 
-template <typename Function>
-void ExpectFatalTermination(Function function)
+void RegisterFatalExitCallback()
 {
-  const pid_t child = fork();
-  ASSERT(child >= 0);
-  if (child == 0)
-  {
-    function();
-    _exit(0);
-  }
+  auto fatal_callback = LibXR::Assert::FatalCallback::Create(
+      [](bool, void*, const char*, uint32_t) { _exit(FATAL_EXIT_CODE); },
+      static_cast<void*>(nullptr));
+  LibXR::Assert::RegisterFatalErrorCallback(fatal_callback);
+}
+
+}  // namespace
+
+int RunRwIsrReadBlockScenario()
+{
+  using namespace LibXR;
+
+  RegisterFatalExitCallback();
+  uint8_t read_data = 0;
+  Semaphore read_sem;
+  ReadOperation read_op(read_sem, 1);
+  ReadPort unreadable(1);
+  UNUSED(unreadable(RawData{&read_data, 1}, read_op, true));
+  return 0;
+}
+
+int RunRwIsrWriteBlockScenario()
+{
+  using namespace LibXR;
+
+  RegisterFatalExitCallback();
+  static const uint8_t WRITE_DATA = 0xA5;
+  Semaphore write_sem;
+  WriteOperation write_op(write_sem, 1);
+  WritePort unwritable(1, 1);
+  UNUSED(unwritable(ConstRawData{&WRITE_DATA, 1}, write_op, true));
+  return 0;
+}
+
+namespace
+{
+
+constexpr auto READ_HOOK_TIMEOUT = std::chrono::seconds(10);
+
+struct ReadPublishRace
+{
+  explicit ReadPublishRace(LibXR::ReadPort& expected) : expected_port(&expected) {}
+
+  LibXR::ReadPort* expected_port;
+  std::binary_semaphore metadata_published{0};
+  std::binary_semaphore producer_done{0};
+};
+
+void ExpectFatalTermination(const char* scenario)
+{
+  char executable[] = "/proc/self/exe";
+  char* child_argv[] = {executable, const_cast<char*>(scenario), nullptr};
+  pid_t child = -1;
+  ASSERT(posix_spawn(&child, executable, nullptr, nullptr, child_argv, environ) == 0);
 
   int status = 0;
-  ASSERT(waitpid(child, &status, 0) == child);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (true)
+  {
+    const pid_t wait_result = waitpid(child, &status, WNOHANG);
+    if (wait_result == child)
+    {
+      break;
+    }
+    if (wait_result < 0 && errno == EINTR)
+    {
+      continue;
+    }
+    ASSERT(wait_result == 0);
+
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      const int kill_result = kill(child, SIGKILL);
+      ASSERT(kill_result == 0 || errno == ESRCH);
+      pid_t reap_result = -1;
+      do
+      {
+        reap_result = waitpid(child, &status, 0);
+      } while (reap_result < 0 && errno == EINTR);
+      ASSERT(reap_result == child);
+      ASSERT(false);
+    }
+    LibXR::Thread::Sleep(1U);
+  }
+
   ASSERT(WIFSIGNALED(status) || (WIFEXITED(status) && WEXITSTATUS(status) != 0));
 }
 
-LibXR::ErrorCode PushThenFailFirstReadArm(LibXR::ReadPort& port, bool in_isr)
+void CoordinateReadPublish(LibXR::ReadPort& port,
+                           LibXR::ReadPortTestCheckpoint checkpoint, void* raw)
 {
-  if (arm_failure_data_pushed)
+  auto& race = *static_cast<ReadPublishRace*>(raw);
+  ASSERT(&port == race.expected_port);
+  if (checkpoint != LibXR::ReadPortTestCheckpoint::READ_BEFORE_PENDING_PUBLISH)
   {
-    return LibXR::ErrorCode::PENDING;
+    return;
   }
 
-  arm_failure_data_pushed = true;
-  static const uint8_t DATA = 0x5A;
-  ASSERT(port.queue_data_->PushBatch(&DATA, 1) == LibXR::ErrorCode::OK);
-  port.ProcessPendingReads(in_isr);
-  return LibXR::ErrorCode::INIT_ERR;
-}
-
-struct ArmFailureContext
-{
-  LibXR::ReadPort* port = nullptr;
-  LibXR::ReadOperation* nested_op = nullptr;
-  uint8_t* nested_data = nullptr;
-  LibXR::ErrorCode nested_submit = LibXR::ErrorCode::FAILED;
-  LibXR::ErrorCode outer_status = LibXR::ErrorCode::FAILED;
-  LibXR::ErrorCode nested_status = LibXR::ErrorCode::FAILED;
-  uint32_t outer_callbacks = 0;
-  uint32_t nested_callbacks = 0;
-};
-
-void OnNestedRead(bool, ArmFailureContext* context, LibXR::ErrorCode status)
-{
-  context->nested_status = status;
-  ++context->nested_callbacks;
-}
-
-void OnOuterArmFailure(bool, ArmFailureContext* context, LibXR::ErrorCode status)
-{
-  context->outer_status = status;
-  ++context->outer_callbacks;
-  context->nested_submit = (*context->port)(LibXR::RawData{context->nested_data, 1},
-                                            *context->nested_op, false);
+  race.metadata_published.release();
+  ASSERT(race.producer_done.try_acquire_for(READ_HOOK_TIMEOUT));
 }
 
 }  // namespace
@@ -124,53 +184,57 @@ void test_rw_edge_cases()
   w.Finish(false, ErrorCode::OK, completed);
 }
 
-void test_rw_read_arm_failure_cannot_clear_reentrant_read()
+void test_rw_read_publish_rechecks_external_producer_event()
 {
   using namespace LibXR;
 
-  ReadPort r(4);
-  r = PushThenFailFirstReadArm;
-  arm_failure_data_pushed = false;
+  ReadPort port(4);
+  uint8_t received = 0;
+  OperationPollingStatus status;
+  ReadOperation operation(status);
+  ReadPublishRace race(port);
+  ErrorCode submit_result = ErrorCode::FAILED;
 
-  uint8_t outer_data = 0;
-  uint8_t nested_data = 0;
-  ArmFailureContext context{};
-  auto nested_callback = Callback<ErrorCode>::Create(OnNestedRead, &context);
-  ReadOperation nested_op(nested_callback);
-  context.port = &r;
-  context.nested_op = &nested_op;
-  context.nested_data = &nested_data;
+  port.SetTestHook(CoordinateReadPublish, &race);
+  std::thread submitter(
+      [&]() { submit_result = port(RawData{&received, 1}, operation, false); });
 
-  auto outer_callback = Callback<ErrorCode>::Create(OnOuterArmFailure, &context);
-  ReadOperation outer_op(outer_callback);
-  ASSERT(r(RawData{&outer_data, 1}, outer_op) == ErrorCode::INIT_ERR);
+  ASSERT(race.metadata_published.try_acquire_for(READ_HOOK_TIMEOUT));
+  static const uint8_t DATA = 0x5A;
+  ASSERT(port.queue_data_->Push(DATA) == ErrorCode::OK);
+  port.ProcessPendingReads(false);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::EVENT);
+  race.producer_done.release();
 
-  ASSERT(context.outer_callbacks == 1);
-  ASSERT(context.outer_status == ErrorCode::INIT_ERR);
-  ASSERT(context.nested_submit == ErrorCode::OK);
-  ASSERT(context.nested_callbacks == 1);
-  ASSERT(context.nested_status == ErrorCode::OK);
-  ASSERT(nested_data == 0x5A);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+  submitter.join();
+  port.SetTestHook(nullptr, nullptr);
+
+  ASSERT(submit_result == ErrorCode::OK);
+  ASSERT(status.Load() == OperationPollingStatus::DONE);
+  ASSERT(received == DATA);
+  ASSERT(port.Size() == 0U);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+}
+
+void test_rw_zero_capacity_read_port_is_not_supported()
+{
+  using namespace LibXR;
+
+  ReadPort port(0);
+  uint8_t received = 0;
+  OperationPollingStatus status;
+  ReadOperation operation(status);
+
+  ASSERT(!port.Readable());
+  ASSERT(port(RawData{&received, 1}, operation) == ErrorCode::NOT_SUPPORT);
+  ASSERT(status.Load() == OperationPollingStatus::READY);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 void test_rw_isr_block_fails_before_capability_checks()
 {
-  using namespace LibXR;
-
-  uint8_t read_data = 0;
-  Semaphore read_sem;
-  ReadOperation read_op(read_sem, 1);
-  ReadPort unreadable(1);
-  ExpectFatalTermination([&]()
-                         { UNUSED(unreadable(RawData{&read_data, 1}, read_op, true)); });
-
-  static const uint8_t WRITE_DATA = 0xA5;
-  Semaphore write_sem;
-  WriteOperation write_op(write_sem, 1);
-  WritePort unwritable(1, 1);
-  ExpectFatalTermination(
-      [&]() { UNUSED(unwritable(ConstRawData{&WRITE_DATA, 1}, write_op, true)); });
+  ExpectFatalTermination(kRwIsrReadBlockScenario);
+  ExpectFatalTermination(kRwIsrWriteBlockScenario);
 }
 
 /**
@@ -185,6 +249,7 @@ void RunBaseRwPendingTests()
 {
   test_rw_pending_mode_matrix();
   test_rw_edge_cases();
-  test_rw_read_arm_failure_cannot_clear_reentrant_read();
+  test_rw_read_publish_rechecks_external_producer_event();
+  test_rw_zero_capacity_read_port_is_not_supported();
   test_rw_isr_block_fails_before_capability_checks();
 }

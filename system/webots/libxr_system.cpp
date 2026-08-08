@@ -118,8 +118,11 @@ void StdiThread(LibXR::ReadPort* read_port)
         {
           continue;
         }
-        read_port->queue_data_->PushBatch(read_buff, size);
-        read_port->ProcessPendingReads(false);
+        const auto push_ans = read_port->queue_data_->PushBatch(read_buff, size);
+        if (push_ans == LibXR::ErrorCode::OK)
+        {
+          read_port->ProcessPendingReads(false);
+        }
       }
     }
   }
@@ -215,15 +218,7 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort& port, bool)
-  {
-    UNUSED(port);
-    return LibXR::ErrorCode::PENDING;
-  };
-
   LibXR::STDIO::read_ = new LibXR::ReadPort(host_stdio_queue_bytes);
-
-  *LibXR::STDIO::read_ = read_fun;
 
   struct termios tty;
   tcgetattr(STDIN_FILENO, &tty);           // 获取当前终端属性

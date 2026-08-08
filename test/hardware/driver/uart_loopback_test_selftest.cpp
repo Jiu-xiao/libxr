@@ -37,7 +37,6 @@ class MemoryLoopbackUart : public LibXR::UART
         read_port_(read_buffer_size),
         write_port_(*this, 8U, write_buffer_size)
   {
-    read_port_ = ReadFun;
     write_port_ = WriteFun;
   }
 
@@ -57,11 +56,6 @@ class MemoryLoopbackUart : public LibXR::UART
   LibXR::ErrorCode InjectRxByte(uint8_t byte)
   {
     return read_port_.queue_data_->Push(byte);
-  }
-
-  static LibXR::ErrorCode ReadFun(LibXR::ReadPort&, bool)
-  {
-    return LibXR::ErrorCode::PENDING;
   }
 
   static LibXR::ErrorCode WriteFun(LibXR::WritePort& port, bool in_isr)

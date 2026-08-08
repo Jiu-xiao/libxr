@@ -225,7 +225,6 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     gpio_init.GPIO_Pin = rx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(rx_gpio_port, &gpio_init);
-    (*read_port_) = ReadFun;
   }
 
   if (pin_remap != 0)
@@ -501,8 +500,6 @@ UartDmaTxStartResult CH32UART::StartDmaTx(uint8_t* data, size_t size, int, bool 
   return UartDmaTxStartResult::STARTED;
 }
 
-ErrorCode CH32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
-
 extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 {
   auto uart = CH32UART::map_[id];
@@ -549,10 +546,10 @@ uint32_t CH32UART::ScanNormalIrqStatus(bool in_isr, bool& pushed_any)
   if (USART_GetITStatus(instance_, USART_IT_TC) != RESET)
   {
     // The latched TC flag remains authoritative until AdvanceConfig() resets USART.
-    // Disable only its source; STOP_DONE is retained by the serialized service.
+    // Disable only its source; the control continuation is retained by the service.
     USART_ITConfig(instance_, USART_IT_TC, DISABLE);
     Ch32UartIoFence();
-    return Model::EventMask(UartDmaEvent::STOP_DONE);
+    return Model::EventMask(UartDmaEvent::CONTROL_READY);
   }
 
   const bool rx_enabled = (uart_mode_ & USART_Mode_Rx) != 0U;

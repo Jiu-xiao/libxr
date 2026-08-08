@@ -46,18 +46,6 @@ class ESP32UartFifoReadPort : public ReadPort
    */
   void OnRxDequeue(bool in_isr) override;
 
-  /**
-   * @brief 安装 ReadPort callback 并保留派生端口类型 / Install a ReadPort callback
-   * while preserving the derived port type
-   * @param fun 新的 ReadPort callback / New ReadPort callback
-   * @return 当前派生端口 / This derived port
-   */
-  ESP32UartFifoReadPort& operator=(ReadFun fun)
-  {
-    ReadPort::operator=(fun);
-    return *this;
-  }
-
  private:
   ESP32UartFifo& owner_;
 };
@@ -145,15 +133,6 @@ class ESP32UartFifo : public UART
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 
-  /**
-   * @brief ReadPort 读取入口 / ReadPort read entry
-   * @param port 发起读取的读端口 / Read port issuing the read
-   * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 始终为 `PENDING`；RX producer 后续完成读取 / Always `PENDING`; the RX
-   * producer completes the read later
-   */
-  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
-
  private:
   using ExecutionPolicy = Detail::ESP32UartExecutionPolicy<ESP32UartFifo>;
 
@@ -165,17 +144,13 @@ class ESP32UartFifo : public UART
     CONFIG = 1U << 3U,
     RX_DATA = 1U << 4U,
     RX_SPACE = 1U << 5U,
-    RX_PARITY_ERROR = 1U << 6U,
-    RX_FRAME_ERROR = 1U << 7U,
-    RX_OVERFLOW = 1U << 8U,
-    CONTROL_READY = 1U << 9U,
+    RX_ERROR = 1U << 6U,
   };
 
   enum class ConfigState : uint8_t
   {
     NORMAL = 0,
-    DRAINING_RECORD,
-    WAITING_LINE_IDLE,
+    CONFIGURING,
   };
 
   struct SubmitContext

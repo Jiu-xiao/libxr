@@ -99,7 +99,6 @@ ESP32UartFifo::ESP32UartFifo(uart_port_t uart_num, int tx_pin, int rx_pin, int r
     REQUIRE(Detail::IsCurrentTaskPinnedToOneCore());
   }
 
-  _read_port = ReadFun;
   _write_port = WriteFun;
 
   REQUIRE(InitUartHardware(tx_pin, rx_pin, rts_pin, cts_pin) == ErrorCode::OK);
@@ -192,8 +191,6 @@ ErrorCode IRAM_ATTR ESP32UartFifo::WriteFun(WritePort& port, bool in_isr)
   return uart->SubmitWrite(in_isr);
 }
 
-ErrorCode ESP32UartFifo::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
-
 ErrorCode IRAM_ATTR ESP32UartFifo::SubmitWrite(bool in_isr)
 {
   SubmitContext submit{};
@@ -257,17 +254,9 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceIrqSource(bool) noexcept
     {
       events |= EventMask(Event::RX_DATA);
     }
-    if ((rx_status & UART_INTR_PARITY_ERR) != 0U)
+    if ((rx_status & RX_ERROR_INTR_MASK) != 0U)
     {
-      events |= EventMask(Event::RX_PARITY_ERROR);
-    }
-    if ((rx_status & UART_INTR_FRAM_ERR) != 0U)
-    {
-      events |= EventMask(Event::RX_FRAME_ERROR);
-    }
-    if ((rx_status & UART_INTR_RXFIFO_OVF) != 0U)
-    {
-      events |= EventMask(Event::RX_OVERFLOW);
+      events |= EventMask(Event::RX_ERROR);
     }
   }
 
@@ -317,35 +306,19 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceEvents(uint32_t events, bool in_isr,
   {
     BeginConfiguration();
   }
-  if (((events & EventMask(Event::CONTROL_READY)) != 0U) &&
-      (config_state_ == ConfigState::NORMAL) && rx_config_gate_.ConfigRequested())
-  {
-    BeginConfiguration();
-  }
-
   constexpr uint32_t RX_EVENT_MASK =
-      EventMask(Event::RX_DATA) | EventMask(Event::RX_SPACE) |
-      EventMask(Event::RX_PARITY_ERROR) | EventMask(Event::RX_FRAME_ERROR) |
-      EventMask(Event::RX_OVERFLOW);
+      EventMask(Event::RX_DATA) | EventMask(Event::RX_SPACE) | EventMask(Event::RX_ERROR);
   if ((events & RX_EVENT_MASK) != 0U)
   {
     continuation |= ServiceRx(events, in_isr, pushed_any);
   }
 
-  if (config_state_ == ConfigState::DRAINING_RECORD)
+  if (config_state_ == ConfigState::CONFIGURING)
   {
     if (HasCurrentRecord())
     {
       (void)FillCurrentRecord(in_isr, false, nullptr);
     }
-    if (!HasCurrentRecord())
-    {
-      config_state_ = ConfigState::WAITING_LINE_IDLE;
-    }
-    continuation |= ContinueConfiguration(in_isr);
-  }
-  else if (config_state_ == ConfigState::WAITING_LINE_IDLE)
-  {
     continuation |= ContinueConfiguration(in_isr);
   }
   else if ((events & (EventMask(Event::WRITE) | EventMask(Event::TX_SPACE))) != 0U)
@@ -371,32 +344,24 @@ void ESP32UartFifo::BeginConfiguration()
   uart_hal_rxfifo_rst(&uart_hal_);
   uart_hal_clr_intsts_mask(&uart_hal_, RX_INTR_MASK);
 
-  if (HasCurrentRecord())
-  {
-    config_state_ = ConfigState::DRAINING_RECORD;
-  }
-  else
+  config_state_ = ConfigState::CONFIGURING;
+  if (!HasCurrentRecord())
   {
     DisarmTxSpaceInterrupt();
-    config_state_ = ConfigState::WAITING_LINE_IDLE;
   }
 }
 
 uint32_t ESP32UartFifo::ContinueConfiguration(bool in_isr)
 {
-  if (config_state_ == ConfigState::DRAINING_RECORD)
-  {
-    if (HasCurrentRecord())
-    {
-      return 0U;
-    }
-    DisarmTxSpaceInterrupt();
-    config_state_ = ConfigState::WAITING_LINE_IDLE;
-  }
-  if (config_state_ != ConfigState::WAITING_LINE_IDLE)
+  if (config_state_ != ConfigState::CONFIGURING)
   {
     return 0U;
   }
+  if (HasCurrentRecord())
+  {
+    return 0U;
+  }
+  DisarmTxSpaceInterrupt();
 
   if (!uart_hal_is_tx_idle(&uart_hal_))
   {
@@ -436,17 +401,9 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceRx(uint32_t events, bool in_isr,
       {
         events |= EventMask(Event::RX_DATA);
       }
-      if ((raw_status & UART_INTR_PARITY_ERR) != 0U)
+      if ((raw_status & RX_ERROR_INTR_MASK) != 0U)
       {
-        events |= EventMask(Event::RX_PARITY_ERROR);
-      }
-      if ((raw_status & UART_INTR_FRAM_ERR) != 0U)
-      {
-        events |= EventMask(Event::RX_FRAME_ERROR);
-      }
-      if ((raw_status & UART_INTR_RXFIFO_OVF) != 0U)
-      {
-        events |= EventMask(Event::RX_OVERFLOW);
+        events |= EventMask(Event::RX_ERROR);
       }
     }
   }
@@ -457,10 +414,7 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceRx(uint32_t events, bool in_isr,
     return 0U;
   }
 
-  constexpr uint32_t RX_ERROR_EVENT_MASK = EventMask(Event::RX_PARITY_ERROR) |
-                                           EventMask(Event::RX_FRAME_ERROR) |
-                                           EventMask(Event::RX_OVERFLOW);
-  if ((events & RX_ERROR_EVENT_MASK) != 0U)
+  if ((events & EventMask(Event::RX_ERROR)) != 0U)
   {
     // ESP UART error status does not identify a trustworthy byte boundary. Drop the
     // hardware FIFO and resume RX locally; independent TX progress is untouched.
@@ -470,7 +424,7 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceRx(uint32_t events, bool in_isr,
   pushed_any = DrainRxFifo(in_isr) || pushed_any;
   const bool control_ready = rx_config_gate_.LeaveRx();
 
-  uint32_t continuation = control_ready ? EventMask(Event::CONTROL_READY) : 0U;
+  uint32_t continuation = control_ready ? EventMask(Event::CONFIG) : 0U;
   if (_read_port.queue_data_->EmptySize() == 0U)
   {
     SetRxInterruptPathEnabled(false);

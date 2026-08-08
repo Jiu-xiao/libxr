@@ -41,7 +41,6 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
 
   tx_double_buffer_.Init({tx_slot_storage_, tx_buffer_size * 2U});
 
-  _read_port = ReadFun;
   _write_port = WriteFun;
 
   if (SetConfig(config_) != ErrorCode::OK)
@@ -110,9 +109,6 @@ ErrorCode IRAM_ATTR ESP32CDCJtag::WriteFun(WritePort& port, bool in_isr)
   auto* cdc = LibXR::ContainerOf(&port, &ESP32CDCJtag::_write_port);
   return cdc->TryStartTx(in_isr);
 }
-
-// RX 走中断驱动 / RX is interrupt-driven.
-ErrorCode ESP32CDCJtag::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
 // 清除 active TX 状态 / Clear active TX state.
 void IRAM_ATTR ESP32CDCJtag::ClearActiveTx() { tx_double_buffer_.ClearActive(); }

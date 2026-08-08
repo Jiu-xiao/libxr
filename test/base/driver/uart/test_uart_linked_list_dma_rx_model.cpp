@@ -172,7 +172,7 @@ void test_uart_linked_list_dma_rx_model()
     ReadPort port(4U);
 
     backend.producer = &storage[6U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    ASSERT(!model.OnDataAvailable(backend, port));
     ASSERT(model.LastPosition() == 6U);
     ASSERT(port.queue_data_->Size() == 0U);
 

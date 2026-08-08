@@ -93,8 +93,6 @@ ErrorCode STM32UART::WriteFun(WritePort& port, bool in_isr)
   return uart->dma_model_.Submit(in_isr);
 }
 
-ErrorCode STM32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
-
 STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
                      RawData dma_buff_tx, uint32_t tx_queue_size)
     : UART(&_read_port, &_write_port),
@@ -137,7 +135,6 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
     REQUIRE((reinterpret_cast<uintptr_t>(dma_buff_rx.addr_) % HW_CACHE_LINE_SIZE) == 0U);
     REQUIRE((dma_buff_rx.size_ % HW_CACHE_LINE_SIZE) == 0U);
 #endif
-    _read_port = ReadFun;
   }
   SetRxDMA();
 }
@@ -261,7 +258,7 @@ UartDmaControlResult STM32UART::StopDataPath(bool active_tx, bool wait_for_uart_
       // DMA has stopped, but the UART shifter has not drained. Publish the wait state
       // before enabling TCIE so immediate preemption is safe. The TC callback below
       // publishes COMPLETE only for a complete/error-free active payload; otherwise it
-      // publishes STOP_DONE.
+      // publishes CONTROL_READY.
       waiting_for_uart_tc_ = true;
       ATOMIC_SET_BIT(uart_handle_->Instance->CR1, USART_CR1_TCIE);
       const volatile uint32_t cr1 = uart_handle_->Instance->CR1;

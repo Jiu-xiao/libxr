@@ -244,12 +244,6 @@ class CDCUartReadPort : public ReadPort
    */
   void OnRxDequeue(bool in_isr) override;
 
-  CDCUartReadPort& operator=(ReadFun fun)
-  {
-    ReadPort::operator=(fun);
-    return *this;
-  }
-
   CDCUart& owner_;  ///< 所属 CDCUart / Owning CDCUart
 
   bool recv_pause_ =
@@ -295,7 +289,6 @@ class CDCUart : public CDCBase, public LibXR::UART
         write_port_cdc_(tx_queue_size, tx_buffer_size),
         tx_deq_(write_port_cdc_)
   {
-    read_port_cdc_ = ReadFun;    // NOLINT
     write_port_cdc_ = WriteFun;  // NOLINT
   }
 
@@ -617,8 +610,6 @@ class CDCUart : public CDCBase, public LibXR::UART
       // The next iteration checks whether sending can continue immediately.
     }
   }
-
-  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
   /**
    * @brief OUT 完成回调（RX）

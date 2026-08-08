@@ -11,7 +11,7 @@
  * not corrupt the stale buffer.
  *          2. A blocking write timeout detaches the waiter and later submissions start a
  * fresh wait cycle.
- *          3. Immediate read/write failures propagate the error directly and reset the
+ *          3. An immediate write failure propagates the error directly and resets the
  * state machine in every mode.
  */
 #include "rw_test_common.hpp"
@@ -106,34 +106,18 @@ void test_rw_block_write_timeout_detaches_waiter()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_immediate_error_propagates`。 Test entry function
- * `test_rw_immediate_error_propagates`.
+ * @brief 测试入口函数 `test_rw_immediate_write_error_propagates`。 Test entry function
+ * `test_rw_immediate_write_error_propagates`.
  * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
  * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
  * Validate the module contract through the scenarios assembled in this file.
  */
-void test_rw_immediate_error_propagates()
+void test_rw_immediate_write_error_propagates()
 {
   // 测试内容：立即失败路径应在每种模式下直接返回错误，且端口状态恢复为空闲。
-  // Test coverage: immediate failure paths should return errors directly in every mode
-  // and restore idle port state.
+  // Test coverage: an immediate write failure should return the error directly in every
+  // mode and restore idle port state.
   using namespace LibXR;
-
-  for (auto mode : LibXRTest::ALL_MODES)
-  {
-    ReadPort r(16);
-    r = FailReadFun;
-
-    uint8_t rx[1] = {0};
-    LibXRTest::ReadHarness read(mode, 0);
-    auto ec = r(RawData{rx, sizeof(rx)}, read.op);
-    ASSERT(ec == ErrorCode::INIT_ERR);
-    if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
-    {
-      read.ExpectFinal(ErrorCode::INIT_ERR);
-    }
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-  }
 
   static const uint8_t TX[] = {0x55};
   for (auto mode : LibXRTest::ALL_MODES)
@@ -156,6 +140,8 @@ void test_rw_immediate_error_propagates()
 
 }  // namespace
 
+void RunBaseRwImmediateErrorTests() { test_rw_immediate_write_error_propagates(); }
+
 /**
  * @brief 测试项函数 `RunBaseRwBlockTimeoutTests`。 Test-item function
  * `RunBaseRwBlockTimeoutTests`.
@@ -168,5 +154,5 @@ void RunBaseRwBlockTimeoutTests()
 {
   test_rw_block_read_timeout_detaches_pending();
   test_rw_block_write_timeout_detaches_waiter();
-  test_rw_immediate_error_propagates();
+  RunBaseRwImmediateErrorTests();
 }

@@ -3,6 +3,9 @@
  * @brief base `Pipe` stream 语义场景子测试。 Split test unit for base `Pipe` stream
  * semantics.
  */
+#include <atomic>
+#include <chrono>
+#include <thread>
 #include <type_traits>
 
 #include "rw_test_common.hpp"
@@ -17,6 +20,166 @@ LibXR::ErrorCode callback_stream_commit = LibXR::ErrorCode::FAILED;
 uint8_t callback_payload[8] = {};
 size_t callback_payload_size = 0;
 bool callback_try_reentry = false;
+
+struct StreamCheckpointReentry
+{
+  LibXR::WritePort::Stream* expected_stream;
+  LibXR::WritePort::Stream::TestCheckpoint target;
+  LibXR::ErrorCode nested_write = LibXR::ErrorCode::FAILED;
+  LibXR::ErrorCode nested_commit = LibXR::ErrorCode::FAILED;
+  LibXR::ErrorCode zero_write = LibXR::ErrorCode::FAILED;
+  bool attempted = false;
+};
+
+struct EarlyBlockCompletion
+{
+  LibXR::WritePort::Stream* expected_stream = nullptr;
+  LibXR::WritePort* port = nullptr;
+  LibXR::ErrorCode result = LibXR::ErrorCode::FAILED;
+  bool completed = false;
+};
+
+struct ResultGenerationWritePort : LibXR::WritePort
+{
+  enum class Mode : uint8_t
+  {
+    PENDING,
+    COMPLETE_SYNCHRONOUSLY,
+  };
+
+  ResultGenerationWritePort() : WritePort(4, 32) { WritePort::operator=(HandleWrite); }
+
+  void CompleteQueued(LibXR::ErrorCode result, bool in_isr = false)
+  {
+    LibXR::WriteInfoBlock completed{};
+    ASSERT(queue_info_->Pop(completed) == LibXR::ErrorCode::OK);
+    ASSERT(queue_data_->PopBatch(nullptr, completed.data.size_) == LibXR::ErrorCode::OK);
+    Finish(in_isr, result, completed);
+  }
+
+  static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool in_isr)
+  {
+    auto& port = static_cast<ResultGenerationWritePort&>(base);
+    if (port.mode == Mode::PENDING)
+    {
+      return LibXR::ErrorCode::PENDING;
+    }
+
+    const LibXR::ErrorCode result = port.synchronous_result;
+    port.CompleteQueued(result, in_isr);
+    return result;
+  }
+
+  Mode mode = Mode::PENDING;
+  LibXR::ErrorCode synchronous_result = LibXR::ErrorCode::OK;
+};
+
+struct WriteBlockResultGeneration
+{
+  ResultGenerationWritePort* expected_port;
+  bool complete_first_at_timeout = false;
+  std::atomic<bool> in_second_generation = false;
+  std::atomic<bool> timeout_completion_seen = false;
+  std::atomic<bool> after_idle_seen = false;
+  LibXR::ErrorCode second_result = LibXR::ErrorCode::PENDING;
+};
+
+constexpr auto WRITE_HOOK_TIMEOUT = std::chrono::seconds(10);
+constexpr uint32_t WRITE_BLOCK_TIMEOUT_MS = 10000;
+
+bool WaitForWriteState(LibXR::WritePort& port, LibXR::WritePort::BusyState expected)
+{
+  const auto deadline = std::chrono::steady_clock::now() + WRITE_HOOK_TIMEOUT;
+  while (port.busy_.load(std::memory_order_acquire) != expected)
+  {
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      return false;
+    }
+    std::this_thread::yield();
+  }
+  return true;
+}
+
+void ExerciseWriteBlockResultGeneration(LibXR::WritePort& base,
+                                        LibXR::WritePortTestCheckpoint checkpoint,
+                                        void* raw)
+{
+  using namespace LibXR;
+
+  auto& context = *static_cast<WriteBlockResultGeneration*>(raw);
+  ASSERT(&base == context.expected_port);
+  if (context.in_second_generation.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  if (checkpoint == WritePortTestCheckpoint::BLOCK_TIMEOUT_BEFORE_CLAIM &&
+      context.complete_first_at_timeout)
+  {
+    ASSERT(!context.timeout_completion_seen.load(std::memory_order_acquire));
+    context.expected_port->CompleteQueued(ErrorCode::FAILED);
+    context.timeout_completion_seen.store(true, std::memory_order_release);
+    return;
+  }
+
+  if (checkpoint != WritePortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE)
+  {
+    return;
+  }
+
+  bool expected = false;
+  ASSERT(context.after_idle_seen.compare_exchange_strong(
+      expected, true, std::memory_order_acq_rel, std::memory_order_acquire));
+  context.in_second_generation.store(true, std::memory_order_release);
+  context.expected_port->mode = ResultGenerationWritePort::Mode::COMPLETE_SYNCHRONOUSLY;
+  context.expected_port->synchronous_result = ErrorCode::OK;
+
+  static const uint8_t SECOND_DATA = 0x82;
+  Semaphore sem;
+  WriteOperation operation(sem, WRITE_BLOCK_TIMEOUT_MS);
+  context.second_result =
+      (*context.expected_port)(ConstRawData{&SECOND_DATA, 1}, operation, false);
+  ASSERT(sem.Value() == 0);
+  context.in_second_generation.store(false, std::memory_order_release);
+}
+
+void TryStreamCheckpointReentry(LibXR::WritePort::Stream& stream,
+                                LibXR::WritePort::Stream::TestCheckpoint checkpoint,
+                                void* raw)
+{
+  auto& context = *static_cast<StreamCheckpointReentry*>(raw);
+  ASSERT(&stream == context.expected_stream);
+  if (context.attempted || checkpoint != context.target)
+  {
+    return;
+  }
+
+  context.attempted = true;
+  static const uint8_t NESTED = 0xA5;
+  context.nested_write = stream.Write(LibXR::ConstRawData{&NESTED, 1});
+  context.nested_commit = stream.Commit();
+  context.zero_write = stream.Write(LibXR::ConstRawData{nullptr, 0});
+}
+
+void CompleteBlockAtMetadataPublish(LibXR::WritePort::Stream& stream,
+                                    LibXR::WritePort::Stream::TestCheckpoint checkpoint,
+                                    void* raw)
+{
+  if (checkpoint != LibXR::WritePort::Stream::TestCheckpoint::AFTER_METADATA_PUBLISH)
+  {
+    return;
+  }
+
+  auto& context = *static_cast<EarlyBlockCompletion*>(raw);
+  ASSERT(&stream == context.expected_stream);
+  LibXR::WriteInfoBlock completed{};
+  ASSERT(context.port->queue_info_->Pop(completed) == LibXR::ErrorCode::OK);
+  ASSERT(context.port->queue_data_->PopBatch(nullptr, completed.data.size_) ==
+         LibXR::ErrorCode::OK);
+  context.port->Finish(false, context.result, completed);
+  context.completed = true;
+}
 
 LibXR::ErrorCode ConsumeWriteAndTryReentry(LibXR::WritePort& port, bool)
 {
@@ -45,6 +208,112 @@ static_assert(!std::is_copy_constructible_v<LibXR::WritePort::Stream>);
 static_assert(!std::is_copy_assignable_v<LibXR::WritePort::Stream>);
 static_assert(!std::is_move_constructible_v<LibXR::WritePort::Stream>);
 static_assert(!std::is_move_assignable_v<LibXR::WritePort::Stream>);
+
+void VerifyStreamCommitCheckpoint(LibXR::WritePort::Stream::TestCheckpoint checkpoint)
+{
+  using namespace LibXR;
+
+  WritePort port(2, 16);
+  port = PendingWriteFun;
+  WriteOperation operation;
+  WritePort::Stream stream(&port, operation);
+  static const uint8_t OUTER[] = {0x31, 0x32, 0x33};
+  ASSERT(stream.Write(ConstRawData{OUTER, sizeof(OUTER)}) == ErrorCode::OK);
+
+  StreamCheckpointReentry context{&stream, checkpoint};
+  stream.SetTestHook(TryStreamCheckpointReentry, &context);
+  ASSERT(stream.Commit() == ErrorCode::OK);
+  stream.SetTestHook(nullptr, nullptr);
+
+  ASSERT(context.attempted);
+  ASSERT(context.nested_write == ErrorCode::BUSY);
+  ASSERT(context.nested_commit == ErrorCode::BUSY);
+  ASSERT(context.zero_write == ErrorCode::OK);
+
+  WriteInfoBlock completed{};
+  ASSERT(port.queue_info_->Pop(completed) == ErrorCode::OK);
+  ASSERT(completed.data.size_ == sizeof(OUTER));
+  uint8_t payload[sizeof(OUTER)] = {};
+  ASSERT(port.queue_data_->PopBatch(payload, sizeof(payload)) == ErrorCode::OK);
+  ASSERT(std::memcmp(payload, OUTER, sizeof(OUTER)) == 0);
+  port.Finish(false, ErrorCode::OK, completed);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+}
+
+void test_write_block_synchronous_early_claim_preserves_generation_result()
+{
+  using namespace LibXR;
+
+  ResultGenerationWritePort port;
+  port.mode = ResultGenerationWritePort::Mode::COMPLETE_SYNCHRONOUSLY;
+  port.synchronous_result = ErrorCode::FAILED;
+  WriteBlockResultGeneration context{&port};
+  static const uint8_t FIRST_DATA = 0x71;
+  Semaphore sem;
+  WriteOperation operation(sem, WRITE_BLOCK_TIMEOUT_MS);
+
+  port.SetTestHook(ExerciseWriteBlockResultGeneration, &context);
+  const ErrorCode first_result = port(ConstRawData{&FIRST_DATA, 1}, operation, false);
+  port.SetTestHook(nullptr, nullptr);
+
+  ASSERT(first_result == ErrorCode::FAILED);
+  ASSERT(context.after_idle_seen.load(std::memory_order_acquire));
+  ASSERT(context.second_result == ErrorCode::OK);
+  ASSERT(sem.Value() == 0);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+}
+
+void test_write_block_normal_wait_preserves_generation_result()
+{
+  using namespace LibXR;
+
+  ResultGenerationWritePort port;
+  WriteBlockResultGeneration context{&port};
+  static const uint8_t FIRST_DATA = 0x72;
+  ErrorCode first_result = ErrorCode::PENDING;
+
+  port.SetTestHook(ExerciseWriteBlockResultGeneration, &context);
+  std::thread waiter(
+      [&]()
+      {
+        Semaphore sem;
+        WriteOperation operation(sem, WRITE_BLOCK_TIMEOUT_MS);
+        first_result = port(ConstRawData{&FIRST_DATA, 1}, operation, false);
+        ASSERT(sem.Value() == 0);
+      });
+
+  ASSERT(WaitForWriteState(port, WritePort::BusyState::BLOCK_WAITING));
+  port.CompleteQueued(ErrorCode::FAILED);
+  waiter.join();
+  port.SetTestHook(nullptr, nullptr);
+
+  ASSERT(first_result == ErrorCode::FAILED);
+  ASSERT(context.after_idle_seen.load(std::memory_order_acquire));
+  ASSERT(context.second_result == ErrorCode::OK);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+}
+
+void test_write_block_timeout_lost_preserves_generation_result()
+{
+  using namespace LibXR;
+
+  ResultGenerationWritePort port;
+  WriteBlockResultGeneration context{&port, true};
+  static const uint8_t FIRST_DATA = 0x73;
+  Semaphore sem;
+  WriteOperation operation(sem, 0);
+
+  port.SetTestHook(ExerciseWriteBlockResultGeneration, &context);
+  const ErrorCode first_result = port(ConstRawData{&FIRST_DATA, 1}, operation, false);
+  port.SetTestHook(nullptr, nullptr);
+
+  ASSERT(first_result == ErrorCode::FAILED);
+  ASSERT(context.timeout_completion_seen.load(std::memory_order_acquire));
+  ASSERT(context.after_idle_seen.load(std::memory_order_acquire));
+  ASSERT(context.second_result == ErrorCode::OK);
+  ASSERT(sem.Value() == 0);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+}
 
 }  // namespace
 
@@ -202,6 +471,28 @@ void test_pipe_stream_rejects_same_object_callback_reentry()
   callback_stream = nullptr;
 }
 
+void test_pipe_stream_block_completion_claims_unpublished_waiter()
+{
+  using namespace LibXR;
+
+  WritePort port(2, 16);
+  port = PendingWriteFun;
+  Semaphore sem;
+  WriteOperation operation(sem, 100);
+  WritePort::Stream stream(&port, operation);
+  static const uint8_t OUTER[] = {0x51, 0x52, 0x53};
+  ASSERT(stream.Write(ConstRawData{OUTER, sizeof(OUTER)}) == ErrorCode::OK);
+
+  EarlyBlockCompletion context{&stream, &port, ErrorCode::FAILED};
+  stream.SetTestHook(CompleteBlockAtMetadataPublish, &context);
+  ASSERT(stream.Commit() == ErrorCode::FAILED);
+  stream.SetTestHook(nullptr, nullptr);
+
+  ASSERT(context.completed);
+  ASSERT(sem.Value() == 0);
+  ASSERT(port.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
+}
+
 void test_pipe_stream_reports_live_capacity_after_consumer_progress()
 {
   using namespace LibXR;
@@ -251,9 +542,21 @@ void test_pipe_stream_reports_live_capacity_after_consumer_progress()
  */
 void RunBasePipeStreamTests()
 {
+  test_write_block_synchronous_early_claim_preserves_generation_result();
+  test_write_block_normal_wait_preserves_generation_result();
+  test_write_block_timeout_lost_preserves_generation_result();
+  VerifyStreamCommitCheckpoint(
+      LibXR::WritePort::Stream::TestCheckpoint::AFTER_METADATA_PUBLISH);
+  VerifyStreamCommitCheckpoint(
+      LibXR::WritePort::Stream::TestCheckpoint::AFTER_COMMIT_WRITE);
+  VerifyStreamCommitCheckpoint(
+      LibXR::WritePort::Stream::TestCheckpoint::AFTER_BUFFER_RESET);
+  VerifyStreamCommitCheckpoint(
+      LibXR::WritePort::Stream::TestCheckpoint::AFTER_PORT_RELEASE);
   test_pipe_stream_block_immediate_path();
   test_pipe_stream_commit_releases_lock_for_next_stream();
   test_pipe_stream_commit_allows_persistent_and_external_streams();
   test_pipe_stream_rejects_same_object_callback_reentry();
+  test_pipe_stream_block_completion_claims_unpublished_waiter();
   test_pipe_stream_reports_live_capacity_after_consumer_progress();
 }
