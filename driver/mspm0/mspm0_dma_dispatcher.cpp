@@ -1,0 +1,431 @@
+#include "mspm0_dma_dispatcher.hpp"
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+
+namespace LibXR::MSPM0DmaDispatcher
+{
+namespace
+{
+
+constexpr EventMask ALL_EVENTS = COMPLETE | EARLY | ERROR;
+constexpr uint32_t ALL_RAW_CAUSES = 0x03FFFFFFU;
+constexpr size_t MAX_DRAIN_PASSES = 4U;
+
+static_assert(DMA_SYS_N_DMA_CHANNEL <= 16U,
+              "MSPM0 DMA dispatcher raw completion mask supports channels 0-15");
+
+struct Slot
+{
+  Callback callback = nullptr;
+  void* context = nullptr;
+  EventMask subscribed_events = 0U;
+  EventMask enabled_events = 0U;
+  uint32_t generation = 0U;
+};
+
+struct Invocation
+{
+  Callback callback = nullptr;
+  void* context = nullptr;
+  EventMask events = 0U;
+};
+
+class InterruptGuard
+{
+ public:
+  InterruptGuard() : primask_(__get_PRIMASK())
+  {
+    __disable_irq();
+    __DMB();
+  }
+
+  ~InterruptGuard()
+  {
+    __DSB();
+    __set_PRIMASK(primask_);
+    __ISB();
+  }
+
+  InterruptGuard(const InterruptGuard&) = delete;
+  InterruptGuard& operator=(const InterruptGuard&) = delete;
+
+ private:
+  uint32_t primask_;
+};
+
+std::array<Slot, DMA_SYS_N_DMA_CHANNEL> slots{};
+std::atomic<uint32_t> enabled_raw_mask{0U};
+std::atomic<uint32_t> last_unclaimed_mask{0U};
+std::atomic<uint32_t> unclaimed_count{0U};
+std::atomic<uint32_t> drain_limit_count{0U};
+uint32_t next_generation = 1U;
+#if !defined(LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER)
+bool irq_enabled_by_broker = false;
+#endif
+
+[[nodiscard]] constexpr bool EventsAreValid(EventMask events)
+{
+  return events != 0U && (events & ~ALL_EVENTS) == 0U;
+}
+
+[[nodiscard]] bool TokenMatches(uint8_t channel, uint32_t generation)
+{
+  if (generation == 0U || channel >= slots.size())
+  {
+    return false;
+  }
+
+  const Slot& slot = slots[channel];
+  return slot.callback != nullptr && slot.generation == generation;
+}
+
+[[nodiscard]] uint32_t AllocateGeneration()
+{
+  uint32_t generation = next_generation++;
+  if (generation == 0U)
+  {
+    generation = next_generation++;
+  }
+  if (next_generation == 0U)
+  {
+    next_generation = 1U;
+  }
+  return generation;
+}
+
+[[nodiscard]] bool AnyErrorSubscriberEnabled()
+{
+  for (const Slot& slot : slots)
+  {
+    if ((slot.enabled_events & ERROR) != 0U)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] bool AnySlotRegistered()
+{
+  for (const Slot& slot : slots)
+  {
+    if (slot.callback != nullptr)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] uint32_t RecomputeEnabledRawMask()
+{
+  uint32_t raw_mask = 0U;
+  for (uint8_t channel = 0U; channel < slots.size(); ++channel)
+  {
+    const EventMask events = slots[channel].enabled_events;
+    if ((events & COMPLETE) != 0U)
+    {
+      raw_mask |= CompleteMask(channel);
+    }
+    if ((events & EARLY) != 0U)
+    {
+      raw_mask |= EarlyMask(channel);
+    }
+    if ((events & ERROR) != 0U)
+    {
+      raw_mask |= ErrorMask();
+    }
+  }
+  return raw_mask;
+}
+
+[[nodiscard]] uint32_t ChannelRawMask(uint8_t channel, EventMask events)
+{
+  uint32_t raw_mask = 0U;
+  if ((events & COMPLETE) != 0U)
+  {
+    raw_mask |= CompleteMask(channel);
+  }
+  if ((events & EARLY) != 0U)
+  {
+    raw_mask |= EarlyMask(channel);
+  }
+  return raw_mask;
+}
+
+void PublishEnabledRawMask()
+{
+  enabled_raw_mask.store(RecomputeEnabledRawMask(), std::memory_order_release);
+}
+
+}  // namespace
+
+ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* context,
+                   Registration& out)
+{
+  if (!EventsAreValid(events) || callback == nullptr)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (channel >= slots.size())
+  {
+    return ErrorCode::OUT_OF_RANGE;
+  }
+  if ((events & EARLY) != 0U && !EarlyInterruptSupported(channel))
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  bool first_registration = false;
+  {
+    InterruptGuard guard;
+    if (out.IsValid())
+    {
+      return ErrorCode::STATE_ERR;
+    }
+    if (slots[channel].callback != nullptr)
+    {
+      return ErrorCode::BUSY;
+    }
+
+    first_registration = !AnySlotRegistered();
+    Slot& slot = slots[channel];
+    const uint32_t generation = AllocateGeneration();
+    slot.context = context;
+    slot.subscribed_events = events;
+    slot.enabled_events = 0U;
+    slot.generation = generation;
+    slot.callback = callback;
+    out.channel_ = channel;
+    out.generation_ = generation;
+  }
+#if !defined(LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER)
+  if (first_registration)
+  {
+    InterruptGuard guard;
+    if (NVIC_GetEnableIRQ(DMA_INT_IRQn) == 0U)
+    {
+      NVIC_EnableIRQ(DMA_INT_IRQn);
+      irq_enabled_by_broker = true;
+    }
+  }
+#else
+  static_cast<void>(first_registration);
+#endif
+  return ErrorCode::OK;
+}
+
+ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled)
+{
+  if (!EventsAreValid(events))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  InterruptGuard guard;
+  if (!TokenMatches(registration.channel_, registration.generation_))
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
+  Slot& slot = slots[registration.channel_];
+  if ((events & ~slot.subscribed_events) != 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  const EventMask changed_events =
+      enabled ? (events & ~slot.enabled_events) : (events & slot.enabled_events);
+  if (changed_events == 0U)
+  {
+    return ErrorCode::OK;
+  }
+
+  const bool had_error_subscriber = AnyErrorSubscriberEnabled();
+  const uint32_t channel_raw_mask = ChannelRawMask(registration.channel_, changed_events);
+
+  if (enabled)
+  {
+    slot.enabled_events |= changed_events;
+    if (channel_raw_mask != 0U)
+    {
+      DL_DMA_clearInterruptStatus(DMA, channel_raw_mask);
+      DL_DMA_enableInterrupt(DMA, channel_raw_mask);
+    }
+    if ((changed_events & ERROR) != 0U && !had_error_subscriber)
+    {
+      DL_DMA_clearInterruptStatus(DMA, ErrorMask());
+      DL_DMA_enableInterrupt(DMA, ErrorMask());
+    }
+  }
+  else
+  {
+    if (channel_raw_mask != 0U)
+    {
+      DL_DMA_disableInterrupt(DMA, channel_raw_mask);
+      DL_DMA_clearInterruptStatus(DMA, channel_raw_mask);
+    }
+    slot.enabled_events &= ~changed_events;
+    if ((changed_events & ERROR) != 0U && !AnyErrorSubscriberEnabled())
+    {
+      DL_DMA_disableInterrupt(DMA, ErrorMask());
+      DL_DMA_clearInterruptStatus(DMA, ErrorMask());
+    }
+  }
+
+  PublishEnabledRawMask();
+  return ErrorCode::OK;
+}
+
+ErrorCode Unregister(Registration& registration)
+{
+  InterruptGuard guard;
+  if (!TokenMatches(registration.channel_, registration.generation_))
+  {
+    registration.channel_ = 0xFFU;
+    registration.generation_ = 0U;
+    return ErrorCode::STATE_ERR;
+  }
+
+  Slot& slot = slots[registration.channel_];
+  const uint32_t channel_raw_mask =
+      ChannelRawMask(registration.channel_, slot.subscribed_events);
+  if (channel_raw_mask != 0U)
+  {
+    DL_DMA_disableInterrupt(DMA, channel_raw_mask);
+    DL_DMA_clearInterruptStatus(DMA, channel_raw_mask);
+  }
+
+  const bool removed_enabled_error = (slot.enabled_events & ERROR) != 0U;
+  slot.callback = nullptr;
+  slot.context = nullptr;
+  slot.subscribed_events = 0U;
+  slot.enabled_events = 0U;
+  slot.generation = 0U;
+  registration.channel_ = 0xFFU;
+  registration.generation_ = 0U;
+
+  if (removed_enabled_error && !AnyErrorSubscriberEnabled())
+  {
+    DL_DMA_disableInterrupt(DMA, ErrorMask());
+    DL_DMA_clearInterruptStatus(DMA, ErrorMask());
+  }
+  PublishEnabledRawMask();
+#if !defined(LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER)
+  if (!AnySlotRegistered() && irq_enabled_by_broker)
+  {
+    NVIC_DisableIRQ(DMA_INT_IRQn);
+    irq_enabled_by_broker = false;
+  }
+#endif
+  return ErrorCode::OK;
+}
+
+void Dispatch()
+{
+  uint32_t observed_unclaimed = 0U;
+  bool exhausted = true;
+
+  for (size_t pass = 0U; pass < MAX_DRAIN_PASSES; ++pass)
+  {
+    std::array<Invocation, DMA_SYS_N_DMA_CHANNEL> invocations{};
+    size_t invocation_count = 0U;
+    uint32_t snapshot = 0U;
+
+    {
+      InterruptGuard guard;
+      const uint32_t owned_raw_mask = enabled_raw_mask.load(std::memory_order_acquire);
+      const uint32_t all_mis = DL_DMA_getEnabledInterruptStatus(DMA, ALL_RAW_CAUSES);
+      observed_unclaimed |= all_mis & ~owned_raw_mask;
+      snapshot = all_mis & owned_raw_mask;
+      if (snapshot != 0U)
+      {
+        DL_DMA_clearInterruptStatus(DMA, snapshot);
+        __DMB();
+
+        for (uint8_t channel = 0U; channel < slots.size(); ++channel)
+        {
+          const Slot& slot = slots[channel];
+          EventMask logical_events = 0U;
+          if ((slot.enabled_events & COMPLETE) != 0U &&
+              (snapshot & CompleteMask(channel)) != 0U)
+          {
+            logical_events |= COMPLETE;
+          }
+          if ((slot.enabled_events & EARLY) != 0U &&
+              (snapshot & EarlyMask(channel)) != 0U)
+          {
+            logical_events |= EARLY;
+          }
+          if ((slot.enabled_events & ERROR) != 0U && (snapshot & ErrorMask()) != 0U)
+          {
+            logical_events |= ERROR;
+          }
+          if (logical_events != 0U && slot.callback != nullptr)
+          {
+            invocations[invocation_count++] =
+                Invocation{slot.callback, slot.context, logical_events};
+          }
+        }
+
+        for (size_t i = 0U; i < invocation_count; ++i)
+        {
+          invocations[i].callback(invocations[i].context, invocations[i].events);
+        }
+      }
+    }
+
+    if (snapshot == 0U)
+    {
+      exhausted = false;
+      break;
+    }
+  }
+
+  {
+    InterruptGuard guard;
+    const uint32_t owned_raw_mask = enabled_raw_mask.load(std::memory_order_acquire);
+    const uint32_t remaining = DL_DMA_getEnabledInterruptStatus(DMA, ALL_RAW_CAUSES);
+    observed_unclaimed |= remaining & ~owned_raw_mask;
+    if (exhausted && (remaining & owned_raw_mask) != 0U)
+    {
+      drain_limit_count.fetch_add(1U, std::memory_order_relaxed);
+    }
+  }
+
+  last_unclaimed_mask.store(observed_unclaimed, std::memory_order_relaxed);
+  if (observed_unclaimed != 0U)
+  {
+    unclaimed_count.fetch_add(1U, std::memory_order_relaxed);
+  }
+  __DSB();
+}
+
+uint32_t GetLastUnclaimedMask()
+{
+  return last_unclaimed_mask.load(std::memory_order_relaxed);
+}
+
+uint32_t GetUnclaimedCount() { return unclaimed_count.load(std::memory_order_relaxed); }
+
+uint32_t GetDrainLimitCount()
+{
+  return drain_limit_count.load(std::memory_order_relaxed);
+}
+
+void ResetDiagnostics()
+{
+  InterruptGuard guard;
+  last_unclaimed_mask.store(0U, std::memory_order_relaxed);
+  unclaimed_count.store(0U, std::memory_order_relaxed);
+  drain_limit_count.store(0U, std::memory_order_relaxed);
+}
+
+}  // namespace LibXR::MSPM0DmaDispatcher
+
+#if !defined(LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER)
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void DMA_IRQHandler(void) { LibXR::MSPM0DmaDispatcher::Dispatch(); }
+#endif
