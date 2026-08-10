@@ -10,7 +10,9 @@ namespace
 {
 
 constexpr EventMask ALL_EVENTS = COMPLETE | EARLY | ERROR;
+// DMA MIS uses bits 0-15 for completion, 16-23 for Pre-IRQ, and 24-25 for errors.
 constexpr uint32_t ALL_RAW_CAUSES = 0x03FFFFFFU;
+// Bound ISR residency when a callback or peripheral immediately asserts another cause.
 constexpr size_t MAX_DRAIN_PASSES = 4U;
 
 static_assert(DMA_SYS_N_DMA_CHANNEL <= 16U,
@@ -18,20 +20,22 @@ static_assert(DMA_SYS_N_DMA_CHANNEL <= 16U,
 
 struct Slot
 {
-  Callback callback = nullptr;
-  void* context = nullptr;
-  EventMask subscribed_events = 0U;
-  EventMask enabled_events = 0U;
-  uint32_t generation = 0U;
+  Callback callback_ = nullptr;
+  void* context_ = nullptr;
+  EventMask subscribed_events_ = 0U;
+  EventMask enabled_events_ = 0U;
+  uint32_t generation_ = 0U;
 };
 
 struct Invocation
 {
-  Callback callback = nullptr;
-  void* context = nullptr;
-  EventMask events = 0U;
+  Callback callback_ = nullptr;
+  void* context_ = nullptr;
+  EventMask events_ = 0U;
 };
 
+// Serializes task and maskable-exception access on one core; it does not cover NMI or
+// SMP.
 class InterruptGuard
 {
  public:
@@ -78,7 +82,7 @@ bool irq_enabled_by_broker = false;
   }
 
   const Slot& slot = slots[channel];
-  return slot.callback != nullptr && slot.generation == generation;
+  return slot.callback_ != nullptr && slot.generation_ == generation;
 }
 
 [[nodiscard]] uint32_t AllocateGeneration()
@@ -99,7 +103,7 @@ bool irq_enabled_by_broker = false;
 {
   for (const Slot& slot : slots)
   {
-    if ((slot.enabled_events & ERROR) != 0U)
+    if ((slot.enabled_events_ & ERROR) != 0U)
     {
       return true;
     }
@@ -111,7 +115,7 @@ bool irq_enabled_by_broker = false;
 {
   for (const Slot& slot : slots)
   {
-    if (slot.callback != nullptr)
+    if (slot.callback_ != nullptr)
     {
       return true;
     }
@@ -124,7 +128,7 @@ bool irq_enabled_by_broker = false;
   uint32_t raw_mask = 0U;
   for (uint8_t channel = 0U; channel < slots.size(); ++channel)
   {
-    const EventMask events = slots[channel].enabled_events;
+    const EventMask events = slots[channel].enabled_events_;
     if ((events & COMPLETE) != 0U)
     {
       raw_mask |= CompleteMask(channel);
@@ -185,7 +189,7 @@ ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* c
     {
       return ErrorCode::STATE_ERR;
     }
-    if (slots[channel].callback != nullptr)
+    if (slots[channel].callback_ != nullptr)
     {
       return ErrorCode::BUSY;
     }
@@ -193,11 +197,11 @@ ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* c
     first_registration = !AnySlotRegistered();
     Slot& slot = slots[channel];
     const uint32_t generation = AllocateGeneration();
-    slot.context = context;
-    slot.subscribed_events = events;
-    slot.enabled_events = 0U;
-    slot.generation = generation;
-    slot.callback = callback;
+    slot.context_ = context;
+    slot.subscribed_events_ = events;
+    slot.enabled_events_ = 0U;
+    slot.generation_ = generation;
+    slot.callback_ = callback;
     out.channel_ = channel;
     out.generation_ = generation;
   }
@@ -231,13 +235,13 @@ ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled)
   }
 
   Slot& slot = slots[registration.channel_];
-  if ((events & ~slot.subscribed_events) != 0U)
+  if ((events & ~slot.subscribed_events_) != 0U)
   {
     return ErrorCode::ARG_ERR;
   }
 
   const EventMask changed_events =
-      enabled ? (events & ~slot.enabled_events) : (events & slot.enabled_events);
+      enabled ? (events & ~slot.enabled_events_) : (events & slot.enabled_events_);
   if (changed_events == 0U)
   {
     return ErrorCode::OK;
@@ -248,7 +252,7 @@ ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled)
 
   if (enabled)
   {
-    slot.enabled_events |= changed_events;
+    slot.enabled_events_ |= changed_events;
     if (channel_raw_mask != 0U)
     {
       DL_DMA_clearInterruptStatus(DMA, channel_raw_mask);
@@ -267,7 +271,7 @@ ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled)
       DL_DMA_disableInterrupt(DMA, channel_raw_mask);
       DL_DMA_clearInterruptStatus(DMA, channel_raw_mask);
     }
-    slot.enabled_events &= ~changed_events;
+    slot.enabled_events_ &= ~changed_events;
     if ((changed_events & ERROR) != 0U && !AnyErrorSubscriberEnabled())
     {
       DL_DMA_disableInterrupt(DMA, ErrorMask());
@@ -291,19 +295,19 @@ ErrorCode Unregister(Registration& registration)
 
   Slot& slot = slots[registration.channel_];
   const uint32_t channel_raw_mask =
-      ChannelRawMask(registration.channel_, slot.subscribed_events);
+      ChannelRawMask(registration.channel_, slot.subscribed_events_);
   if (channel_raw_mask != 0U)
   {
     DL_DMA_disableInterrupt(DMA, channel_raw_mask);
     DL_DMA_clearInterruptStatus(DMA, channel_raw_mask);
   }
 
-  const bool removed_enabled_error = (slot.enabled_events & ERROR) != 0U;
-  slot.callback = nullptr;
-  slot.context = nullptr;
-  slot.subscribed_events = 0U;
-  slot.enabled_events = 0U;
-  slot.generation = 0U;
+  const bool removed_enabled_error = (slot.enabled_events_ & ERROR) != 0U;
+  slot.callback_ = nullptr;
+  slot.context_ = nullptr;
+  slot.subscribed_events_ = 0U;
+  slot.enabled_events_ = 0U;
+  slot.generation_ = 0U;
   registration.channel_ = 0xFFU;
   registration.generation_ = 0U;
 
@@ -342,6 +346,8 @@ void Dispatch()
       snapshot = all_mis & owned_raw_mask;
       if (snapshot != 0U)
       {
+        // Clear captured bits before callbacks so callback-time reassertions remain
+        // pending.
         DL_DMA_clearInterruptStatus(DMA, snapshot);
         __DMB();
 
@@ -349,30 +355,32 @@ void Dispatch()
         {
           const Slot& slot = slots[channel];
           EventMask logical_events = 0U;
-          if ((slot.enabled_events & COMPLETE) != 0U &&
+          if ((slot.enabled_events_ & COMPLETE) != 0U &&
               (snapshot & CompleteMask(channel)) != 0U)
           {
             logical_events |= COMPLETE;
           }
-          if ((slot.enabled_events & EARLY) != 0U &&
+          if ((slot.enabled_events_ & EARLY) != 0U &&
               (snapshot & EarlyMask(channel)) != 0U)
           {
             logical_events |= EARLY;
           }
-          if ((slot.enabled_events & ERROR) != 0U && (snapshot & ErrorMask()) != 0U)
+          if ((slot.enabled_events_ & ERROR) != 0U && (snapshot & ErrorMask()) != 0U)
           {
             logical_events |= ERROR;
           }
-          if (logical_events != 0U && slot.callback != nullptr)
+          if (logical_events != 0U && slot.callback_ != nullptr)
           {
             invocations[invocation_count++] =
-                Invocation{slot.callback, slot.context, logical_events};
+                Invocation{slot.callback_, slot.context_, logical_events};
           }
         }
 
+        // Keep the slot snapshot and callbacks in one critical section so registration
+        // state cannot change between capture and invocation.
         for (size_t i = 0U; i < invocation_count; ++i)
         {
-          invocations[i].callback(invocations[i].context, invocations[i].events);
+          invocations[i].callback_(invocations[i].context_, invocations[i].events_);
         }
       }
     }
@@ -400,6 +408,8 @@ void Dispatch()
   {
     unclaimed_count.fetch_add(1U, std::memory_order_relaxed);
   }
+  // Complete peripheral W1C writes before exception return so the NVIC resamples the
+  // line.
   __DSB();
 }
 

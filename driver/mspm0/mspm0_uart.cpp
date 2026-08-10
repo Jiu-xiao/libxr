@@ -96,6 +96,8 @@ constexpr uint64_t CalculateMSPM0UartGapCompare(uint32_t clock_freq,
     return 0U;
   }
 
+  // LINC0 resets on RXD falling edges. Cover the worst trailing-high run plus one frame;
+  // this is a data-dependent conservative flush threshold, not a UART IDLE detector.
   const uint64_t parity_bits = config.parity == UART::Parity::NO_PARITY ? 0U : 1U;
   const uint64_t max_high_bits = config.data_bits + parity_bits + config.stop_bits;
   const uint64_t gap_bits = max_high_bits + (1U + max_high_bits);
@@ -552,6 +554,7 @@ void MSPM0UART::HandleInterrupt()
   __DMB();
   if (rx_pushed_in_owner_)
   {
+    // InvokeIrq has released the service owner; read callbacks may reenter public APIs.
     _read_port.ProcessPendingReads(true);
   }
 }
@@ -590,7 +593,7 @@ uint32_t MSPM0UART::CaptureIrqEvents()
   }
   if (dma_error)
   {
-    counters_.dma_error.fetch_add(1U, std::memory_order_relaxed);
+    counters_.dma_error_.fetch_add(1U, std::memory_order_relaxed);
     if (res_.rx_mode == RxMode::EXTEND_DMA)
     {
       InvalidateRxEpoch();
@@ -635,7 +638,7 @@ uint32_t MSPM0UART::CaptureIrqEvents()
     const uint32_t discarded = rx_dma_facts_.exchange(0U, std::memory_order_acquire);
     if (discarded != 0U)
     {
-      counters_.rx_stale_event.fetch_add(1U, std::memory_order_relaxed);
+      counters_.rx_stale_event_.fetch_add(1U, std::memory_order_relaxed);
     }
     rx_partial_flush_pending_ = false;
   }
@@ -675,7 +678,7 @@ void MSPM0UART::CaptureExtendRx(uint32_t& events)
     const uint32_t current_epoch = rx_epoch_.load(std::memory_order_acquire);
     if (event_epoch != current_epoch || rx_epoch_invalid_)
     {
-      counters_.rx_stale_event.fetch_add(1U, std::memory_order_relaxed);
+      counters_.rx_stale_event_.fetch_add(1U, std::memory_order_relaxed);
       rx_partial_flush_pending_ = false;
       return;
     }
@@ -694,7 +697,7 @@ void MSPM0UART::CaptureExtendRx(uint32_t& events)
                                       });
   if (!admitted)
   {
-    counters_.rx_stale_event.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_stale_event_.fetch_add(1U, std::memory_order_relaxed);
     rx_partial_flush_pending_ = false;
   }
   else if (invalid)
@@ -766,11 +769,11 @@ void MSPM0UART::DrainMainRx()
 
   if (dropped != 0U)
   {
-    counters_.rx_drop.fetch_add(dropped, std::memory_order_relaxed);
+    counters_.rx_drop_.fetch_add(dropped, std::memory_order_relaxed);
   }
   if (loss)
   {
-    counters_.rx_loss_generation.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_loss_generation_.fetch_add(1U, std::memory_order_relaxed);
   }
 }
 
@@ -779,6 +782,8 @@ bool MSPM0UART::ConsumeRxDmaFacts(uint32_t facts)
   const bool half_phase = rx_dma_phase_ == RxDmaPhase::HALF;
   const uint32_t expected =
       half_phase ? FactMask(RxDmaFact::HALF) : FactMask(RxDmaFact::FULL);
+  // DMASZ, raw boundary state, and newly queued broker facts must all agree before a
+  // repeated-DMA half-ring is treated as stable and copied.
   const uint16_t remaining = DL_DMA_getTransferSize(DMA, res_.dma_rx_channel);
   __DMB();
   const uint32_t raw_boundaries =
@@ -795,7 +800,7 @@ bool MSPM0UART::ConsumeRxDmaFacts(uint32_t facts)
   if (facts != expected || !stable_phase || raw_boundaries != 0U ||
       queued_boundaries != 0U)
   {
-    counters_.rx_deadline_violation.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_deadline_violation_.fetch_add(1U, std::memory_order_relaxed);
     InvalidateRxEpoch();
     return true;
   }
@@ -868,7 +873,7 @@ bool MSPM0UART::FlushPartialRx()
   }
   if (!valid)
   {
-    counters_.rx_deadline_violation.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_deadline_violation_.fetch_add(1U, std::memory_order_relaxed);
     InvalidateRxEpoch();
     return true;
   }
@@ -905,9 +910,9 @@ void MSPM0UART::PublishRxRange(size_t begin, size_t end)
   const size_t dropped = size - pushed;
   if (dropped != 0U)
   {
-    counters_.rx_drop.fetch_add(static_cast<uint32_t>(dropped),
-                                std::memory_order_relaxed);
-    counters_.rx_loss_generation.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_drop_.fetch_add(static_cast<uint32_t>(dropped),
+                                 std::memory_order_relaxed);
+    counters_.rx_loss_generation_.fetch_add(1U, std::memory_order_relaxed);
   }
 }
 
@@ -942,11 +947,11 @@ void MSPM0UART::DiscardRxFifo()
   }
   if (dropped != 0U)
   {
-    counters_.rx_drop.fetch_add(dropped, std::memory_order_relaxed);
+    counters_.rx_drop_.fetch_add(dropped, std::memory_order_relaxed);
   }
   if (loss)
   {
-    counters_.rx_loss_generation.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_loss_generation_.fetch_add(1U, std::memory_order_relaxed);
   }
 }
 
@@ -954,23 +959,23 @@ void MSPM0UART::CountUartInterruptErrors(uint32_t pending)
 {
   if ((pending & DL_UART_INTERRUPT_OVERRUN_ERROR) != 0U)
   {
-    counters_.rx_overrun.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_overrun_.fetch_add(1U, std::memory_order_relaxed);
   }
   if ((pending & DL_UART_INTERRUPT_FRAMING_ERROR) != 0U)
   {
-    counters_.rx_framing.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_framing_.fetch_add(1U, std::memory_order_relaxed);
   }
   if ((pending & DL_UART_INTERRUPT_PARITY_ERROR) != 0U)
   {
-    counters_.rx_parity.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_parity_.fetch_add(1U, std::memory_order_relaxed);
   }
   if ((pending & DL_UART_INTERRUPT_BREAK_ERROR) != 0U)
   {
-    counters_.rx_break.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_break_.fetch_add(1U, std::memory_order_relaxed);
   }
   if ((pending & DL_UART_INTERRUPT_NOISE_ERROR) != 0U)
   {
-    counters_.rx_noise.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_noise_.fetch_add(1U, std::memory_order_relaxed);
   }
 }
 
@@ -1005,14 +1010,14 @@ void MSPM0UART::InvalidateRxEpoch()
   if (!rx_epoch_invalid_)
   {
     rx_epoch_invalid_ = true;
-    counters_.rx_loss_generation.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_loss_generation_.fetch_add(1U, std::memory_order_relaxed);
   }
   const uint32_t next = NextEpoch(rx_epoch_.load(std::memory_order_relaxed));
   rx_epoch_.store(next, std::memory_order_release);
   const uint32_t discarded = rx_dma_facts_.exchange(0U, std::memory_order_acq_rel);
   if (discarded != 0U)
   {
-    counters_.rx_stale_event.fetch_add(1U, std::memory_order_relaxed);
+    counters_.rx_stale_event_.fetch_add(1U, std::memory_order_relaxed);
   }
   rx_partial_flush_pending_ = false;
 }
@@ -1089,6 +1094,8 @@ void MSPM0UART::BeginControlStop(bool active_tx, bool error_stop)
     InvalidateRxEpoch();
   }
 
+  // Sample completion on both sides of DMA disable so a terminal transition in that
+  // interval is retained for the common TX model.
   tx_complete_observed_ =
       (DL_UART_getRawInterruptStatus(res_.instance, DL_UART_INTERRUPT_DMA_DONE_TX) &
        DL_UART_INTERRUPT_DMA_DONE_TX) != 0U;
@@ -1106,7 +1113,7 @@ void MSPM0UART::BeginControlStop(bool active_tx, bool error_stop)
   DL_DMA_clearInterruptStatus(DMA, MSPM0DmaDispatcher::CompleteMask(res_.dma_tx_channel));
   if (error_stop)
   {
-    counters_.recovery.fetch_add(1U, std::memory_order_relaxed);
+    counters_.recovery_.fetch_add(1U, std::memory_order_relaxed);
   }
 
   if (tx_line_active_ && !DL_UART_isTXFIFOEmpty(res_.instance))
@@ -1242,6 +1249,8 @@ void MSPM0UART::PublishRxDmaFacts(uint32_t facts)
     if (observed_epoch == epoch)
     {
       desired = observed | facts;
+      // A repeated boundary fact in one epoch means the owner missed an indistinguishable
+      // same-phase wrap; retain CONFLICT so it cannot publish ambiguous data.
       if ((observed & facts & boundary_facts) != 0U)
       {
         desired |= FactMask(RxDmaFact::CONFLICT);
@@ -1264,111 +1273,95 @@ uint32_t MSPM0UART::NextEpoch(uint32_t epoch)
 
 uint32_t MSPM0UART::GetRxDropCount() const
 {
-  return counters_.rx_drop.load(std::memory_order_relaxed);
+  return counters_.rx_drop_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxLossGeneration() const
 {
-  return counters_.rx_loss_generation.load(std::memory_order_relaxed);
+  return counters_.rx_loss_generation_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxDeadlineViolationCount() const
 {
-  return counters_.rx_deadline_violation.load(std::memory_order_relaxed);
+  return counters_.rx_deadline_violation_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxStaleEventCount() const
 {
-  return counters_.rx_stale_event.load(std::memory_order_relaxed);
+  return counters_.rx_stale_event_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxOverrunCount() const
 {
-  return counters_.rx_overrun.load(std::memory_order_relaxed);
+  return counters_.rx_overrun_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxFramingErrorCount() const
 {
-  return counters_.rx_framing.load(std::memory_order_relaxed);
+  return counters_.rx_framing_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxParityErrorCount() const
 {
-  return counters_.rx_parity.load(std::memory_order_relaxed);
+  return counters_.rx_parity_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxBreakErrorCount() const
 {
-  return counters_.rx_break.load(std::memory_order_relaxed);
+  return counters_.rx_break_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRxNoiseErrorCount() const
 {
-  return counters_.rx_noise.load(std::memory_order_relaxed);
+  return counters_.rx_noise_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetDmaErrorCount() const
 {
-  return counters_.dma_error.load(std::memory_order_relaxed);
+  return counters_.dma_error_.load(std::memory_order_relaxed);
 }
 
 uint32_t MSPM0UART::GetRecoveryCount() const
 {
-  return counters_.recovery.load(std::memory_order_relaxed);
+  return counters_.recovery_.load(std::memory_order_relaxed);
 }
 
 #if defined(UART0_BASE)
-extern "C" void UART0_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(0U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART0_IRQHandler(void) { MSPM0UART::OnInterrupt(0U); }
 #endif
 
 #if defined(UART1_BASE)
-extern "C" void UART1_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(1U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART1_IRQHandler(void) { MSPM0UART::OnInterrupt(1U); }
 #endif
 
 #if defined(UART2_BASE)
-extern "C" void UART2_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(2U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART2_IRQHandler(void) { MSPM0UART::OnInterrupt(2U); }
 #endif
 
 #if defined(UART3_BASE)
-extern "C" void UART3_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(3U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART3_IRQHandler(void) { MSPM0UART::OnInterrupt(3U); }
 #endif
 
 #if defined(UART4_BASE)
-extern "C" void UART4_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(4U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART4_IRQHandler(void) { MSPM0UART::OnInterrupt(4U); }
 #endif
 
 #if defined(UART5_BASE)
-extern "C" void UART5_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(5U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART5_IRQHandler(void) { MSPM0UART::OnInterrupt(5U); }
 #endif
 
 #if defined(UART6_BASE)
-extern "C" void UART6_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(6U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART6_IRQHandler(void) { MSPM0UART::OnInterrupt(6U); }
 #endif
 
 #if defined(UART7_BASE)
-extern "C" void UART7_IRQHandler(void)  // NOLINT
-{
-  MSPM0UART::OnInterrupt(7U);
-}
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void UART7_IRQHandler(void) { MSPM0UART::OnInterrupt(7U); }
 #endif

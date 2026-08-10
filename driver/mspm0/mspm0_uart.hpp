@@ -21,17 +21,35 @@ namespace LibXR
 {
 
 /**
- * @brief UART-IRQ-only execution policy for the MSPM0 UART backend.
+ * @brief 仅由 UART IRQ 推进的 MSPM0 UART 执行策略 / UART-IRQ-only MSPM0 UART execution
+ * policy
  *
- * Ordinary publishers only store durable facts and pend the UART IRQ. The supplied
- * stack-local handler is neither called nor retained. The UART ISR claims the service
- * before its first protected hardware access.
+ * 普通 publisher 只保存持久事件并挂起 UART IRQ，不调用也不保留传入的栈上 handler。UART
+ * ISR 在首次访问受保护硬件前取得 service 所有权。 / Ordinary publishers only store
+ * durable events and pend the UART IRQ; they neither call nor retain the supplied
+ * stack-local handler. The UART ISR claims the service before its first protected
+ * hardware access.
  */
 class MSPM0UartIrqPolicy
 {
  public:
+  /**
+   * @brief 绑定作为唯一 service carrier 的 UART IRQ / Bind the UART IRQ used as the sole
+   * service carrier
+   * @param irqn UART 中断编号 / UART interrupt number
+   */
   explicit MSPM0UartIrqPolicy(IRQn_Type irqn) : irqn_(irqn) {}
 
+  /**
+   * @brief 发布事件并挂起 UART IRQ / Publish events and pend the UART IRQ
+   * @tparam Handler 栈上 handler 类型；本路径不会调用或保留 / Stack-local handler type;
+   *                 this path neither calls nor retains it
+   * @param events 要合并的事件位 / Event bits to merge
+   * @param handler 仅满足通用 policy 接口的栈上 handler / Stack-local handler supplied by
+   *                the common policy interface
+   * @return 始终返回 `false`，表示 publisher 未同步取得 owner / Always `false` because
+   * the publisher never acquires the owner synchronously
+   */
   template <typename Handler>
   bool Invoke(uint32_t events, Handler&& handler) noexcept
   {
@@ -42,6 +60,18 @@ class MSPM0UartIrqPolicy
     return false;
   }
 
+  /**
+   * @brief 在 UART IRQ 中取得 service 并处理 IRQ 快照 / Claim the service and process an
+   * IRQ snapshot in the UART ISR
+   * @tparam Source IRQ source 函数类型 / IRQ-source function type
+   * @tparam Handler owner 处理器类型 / Owner-handler type
+   * @param source 读取并确认 UART IRQ 快照的函数 / Function that reads and acknowledges
+   *               the UART IRQ snapshot
+   * @param handler 处理快照并返回 continuation 事件的函数 / Function that processes the
+   *                snapshot and returns continuation events
+   * @return 本次调用取得并推进 owner 时返回 `true` / `true` when this call acquires and
+   *         advances the owner
+   */
   template <typename Source, typename Handler>
   bool InvokeIrq(Source&& source, Handler&& handler) noexcept
   {
@@ -62,13 +92,18 @@ class MSPM0UartIrqPolicy
 };
 
 /**
- * @brief Aligned contiguous storage for the common UART TX double buffer.
+ * @brief 通用 UART TX 双缓冲使用的对齐连续存储 / Aligned contiguous storage for the
+ * common UART TX double buffer
  *
- * The total extent is split into two equal DMA blocks. Keeping the alignment in the
- * storage type prevents a plain byte array from passing the public construction helper
- * and then failing `DoubleBufferStorage` validation at runtime.
+ * 总容量被拆分为两个相等的 DMA block。由存储类型直接保证对齐，可防止普通字节数组通过公共
+ * 构造 helper 后才在运行时触发 `DoubleBufferStorage` 校验失败。 / The total extent is
+ * split into two equal DMA blocks. Keeping the alignment in the storage type prevents a
+ * plain byte array from passing the public construction helper and then failing
+ * `DoubleBufferStorage` validation at runtime.
  *
- * @tparam TotalSize Total storage extent in bytes
+ * @tparam TotalSize 总存储字节数；必须为非零偶数、满足双缓冲对齐，且每个半块不超过
+ *                   65535 字节 / Total storage extent in bytes; it must be nonzero,
+ *                   even, double-buffer aligned, and at most 65535 bytes per half
  */
 template <size_t TotalSize>
 class alignas(size_t) MSPM0UARTTxBuffer
@@ -81,8 +116,23 @@ class alignas(size_t) MSPM0UARTTxBuffer
   static_assert((TotalSize / 2U) <= 0xFFFFU, "MSPM0 UART TX block exceeds DMA size");
 
  public:
+  /**
+   * @brief 取得 DMA 可写存储起始地址 / Get the DMA-writable storage address
+   * @return 指向连续 `TotalSize` 字节的指针 / Pointer to `TotalSize` contiguous bytes
+   */
   [[nodiscard]] uint8_t* Data() { return storage_.data(); }
+
+  /**
+   * @brief 取得只读存储起始地址 / Get the read-only storage address
+   * @return 指向连续 `TotalSize` 只读字节的指针 / Pointer to `TotalSize` contiguous
+   *         read-only bytes
+   */
   [[nodiscard]] const uint8_t* Data() const { return storage_.data(); }
+
+  /**
+   * @brief 取得总存储字节数 / Get the total storage extent in bytes
+   * @return 模板参数 `TotalSize` / Template argument `TotalSize`
+   */
   [[nodiscard]] static constexpr size_t Size() { return TotalSize; }
 
  private:
@@ -90,109 +140,276 @@ class alignas(size_t) MSPM0UARTTxBuffer
 };
 
 /**
- * @brief MSPM0 UART backend with common TX DMA ownership and explicit RX capability.
+ * @brief 共用 TX DMA owner 且显式区分 RX 能力的 MSPM0 UART 后端 / MSPM0 UART backend
+ * with common TX DMA ownership and explicit RX capability
  *
- * All TX and control semantics come from `UartDmaModel`. Main RX uses threshold-one
- * byte interrupts. Every Extend RX uses one full-channel repeated `2N` DMA ring. FULL
- * completion is mandatory; DMA HALF Pre-IRQ is enabled only when the binding selects it
- * on a channel that provides it.
+ * TX 与 control 语义全部来自 `UartDmaModel`。Main RX 使用阈值为一的逐字节中断；每个
+ * Extend RX 使用一个 full-channel repeated `2N` DMA ring。FULL 完成事件是必需条件；只有
+ * binding 选中支持 Pre-IRQ 的通道时才启用 DMA HALF。 / All TX and control semantics come
+ * from `UartDmaModel`. Main RX uses threshold-one byte interrupts. Every Extend RX uses
+ * one full-channel repeated `2N` DMA ring. FULL completion is mandatory; DMA HALF
+ * Pre-IRQ is enabled only when the binding selects a channel that provides it.
  *
- * Extend RX is conditional on the BSP proving
- * `T_broker + T_uart_irq + T_copy < N * frame_bits / baud` with hardware margin when
- * HALF is available. A FULL-only binding has a tighter wrap-service bound and must treat
- * any observed overwrite as loss. The driver derives LIN compare from the current clock
- * and UART framing; a match only flushes a stable partial tail into the byte stream. It
- * is not UART IDLE and does not publish a frame boundary. G3507 fixed UART TX DMA also
- * requires the BSP clock contract `MCLK == ULPCLK` because of `DMA_ERR_01`. The driver
- * always enables both TX and RX; this also keeps RXE set while G3507 waits for EOT as
- * required by `UART_ERR_02`.
+ * 使用 HALF 时，BSP 必须留出硬件余量并证明
+ * `T_broker + T_uart_irq + T_copy < N * frame_bits / baud`：`T_broker` 是共享 DMA IRQ
+ * 到 broker callback 的延迟，`T_uart_irq` 是 callback 挂起 UART IRQ 后到 UART owner 运行
+ * 的延迟，`T_copy` 是校验并复制一个半 ring 的时间，`N` 是半 ring 字节数，`frame_bits`
+ * 是每个 UART 字符的 start、data、parity 和 stop bit 总数。只有 FULL 的 binding 具有更紧
+ * 的 wrap service deadline，任何已观察到的覆盖都必须视为数据丢失。 / With HALF
+ * available, the BSP must prove
+ * `T_broker + T_uart_irq + T_copy < N * frame_bits / baud` with hardware margin:
+ * `T_broker` is the latency from the shared DMA IRQ to the broker callback, `T_uart_irq`
+ * is the latency from that callback pending the UART IRQ until the UART owner runs,
+ * `T_copy` is the time to validate and copy one half-ring, `N` is the half-ring size in
+ * bytes, and `frame_bits` is the start, data, parity, and stop-bit count per UART
+ * character. A FULL-only binding has a tighter wrap-service deadline and must treat any
+ * observed overwrite as loss.
+ *
+ * 驱动根据当前时钟和 UART 帧格式计算 LIN compare；match 只把稳定的 partial tail 刷入
+ * 字节流，不等价于 UART IDLE，也不发布帧边界。G3507 的固定 UART TX DMA 还因
+ * `DMA_ERR_01` 要求 BSP 满足 `MCLK == ULPCLK`；驱动始终同时使能 TX 和 RX，以按
+ * `UART_ERR_02` 要求在等待 EOT 时保持 RXE。 / The driver derives LIN compare from the
+ * current clock and UART framing; a match only flushes a stable partial tail into the
+ * byte stream. It is not UART IDLE and does not publish a frame boundary. G3507 fixed
+ * UART TX DMA also requires the BSP clock contract `MCLK == ULPCLK` because of
+ * `DMA_ERR_01`. The driver always enables both TX and RX, keeping RXE set while G3507
+ * waits for EOT as required by `UART_ERR_02`.
  */
 class MSPM0UART : public UART
 {
   friend class UartDmaModel<MSPM0UART, MSPM0UartIrqPolicy>;
 
  public:
+  /** @brief MSPM0 UART 接收数据路径 / MSPM0 UART receive data path */
   enum class RxMode : uint8_t
   {
-    MAIN_BYTE_IRQ,
-    EXTEND_DMA,
+    MAIN_BYTE_IRQ,  ///< Main UART 逐字节 IRQ / Main UART byte IRQ
+    EXTEND_DMA,     ///< Extend UART 重复 DMA ring / Extend UART repeated DMA ring
   };
 
-  /** @brief Low-level descriptor populated by the public SysConfig macros. */
+  /**
+   * @brief 由公共 INIT 宏填充的底层 SysConfig 描述 / Low-level SysConfig descriptor
+   * populated by the public INIT macros
+   *
+   * 普通调用方应使用 `MSPM0_UART_MAIN_INIT` 或 `MSPM0_UART_EXTEND_INIT`，不应逐字段填写。
+   * / Ordinary callers use `MSPM0_UART_MAIN_INIT` or `MSPM0_UART_EXTEND_INIT` rather than
+   * populating fields individually.
+   */
   struct Resources
   {
-    UART_Regs* instance;
-    IRQn_Type irqn;
-    uint32_t clock_freq;
-    uint8_t index;
-    RxMode rx_mode;
-    bool rx_half_interrupt;
-    uint8_t dma_tx_channel;
-    uint8_t dma_tx_trigger;
-    uint8_t dma_rx_channel;
-    uint8_t dma_rx_trigger;
+    UART_Regs* instance;     ///< UART 寄存器实例 / UART register instance
+    IRQn_Type irqn;          ///< UART 中断编号 / UART interrupt number
+    uint32_t clock_freq;     ///< UART 功能时钟频率，单位 Hz / UART clock frequency in Hz
+    uint8_t index;           ///< UART instance map 索引 / UART instance-map index
+    RxMode rx_mode;          ///< 接收数据路径 / Receive data path
+    bool rx_half_interrupt;  ///< 是否使用 RX DMA HALF Pre-IRQ / Whether RX uses HALF
+    uint8_t dma_tx_channel;  ///< TX DMA 通道编号 / TX DMA channel number
+    uint8_t dma_tx_trigger;  ///< TX DMA trigger / TX DMA trigger
+    uint8_t dma_rx_channel;  ///< RX DMA 通道编号 / RX DMA channel number
+    uint8_t dma_rx_trigger;  ///< RX DMA trigger / RX DMA trigger
   };
 
+  /** @brief Main RX 不使用 RX DMA 时的无效通道值 / Invalid RX DMA channel for Main RX */
   static constexpr uint8_t INVALID_DMA_CHANNEL = 0xFFU;
 
   /**
-   * @brief Construct and take ownership of one UART and its named DMA resources.
-   * @param res Low-level resources produced by a construction macro
-   * @param tx_dma_storage Writable contiguous `2N` common TX storage
-   * @param rx_dma_storage Empty for Main RX; writable contiguous `2N` ring for Extend RX
-   * @param tx_queue_size Pending TX record queue depth
-   * @param rx_queue_capacity Software byte queue capacity
-   * @param config Initial framing and baud rate
-   * @pre SysConfig initialization has powered and clocked the UART and DMA register
-   *      blocks. Do not construct this object during global initialization before
-   *      `SYSCFG_DL_init()`.
-   * @pre DMA storage remains writable, DMA-accessible, and alive until destruction.
+   * @brief 构造并接管一个 UART 及其命名 DMA 资源 / Construct and take ownership of one
+   * UART and its named DMA resources
+   * @param res 构造宏产生的底层资源 / Low-level resources produced by a construction
+   * macro
+   * @param tx_dma_storage 可写连续 `2N` 通用 TX 存储 / Writable contiguous `2N` common TX
+   *                       storage
+   * @param rx_dma_storage Main RX 传空存储；Extend RX 传可写连续 `2N` ring / Empty for
+   * Main RX; writable contiguous `2N` ring for Extend RX
+   * @param tx_queue_size 待发送记录队列深度 / Pending TX record queue depth
+   * @param rx_queue_capacity 软件接收字节队列容量 / Software RX byte queue capacity
+   * @param config 初始帧格式和波特率 / Initial framing and baud rate
+   * @pre SysConfig 必须已为 UART 和 DMA 寄存器块供电并提供时钟；不得在
+   *      `SYSCFG_DL_init()` 之前的全局初始化阶段构造 / SysConfig initialization must
+   *      already have powered and clocked the UART and DMA register blocks; do not
+   *      construct during global initialization before `SYSCFG_DL_init()`
+   * @pre DMA 存储必须保持可写、DMA 可访问，并存活到析构完成 / DMA storage must remain
+   *      writable, DMA-accessible, and alive until destruction
    */
   MSPM0UART(Resources res, RawData tx_dma_storage, RawData rx_dma_storage,
             uint32_t tx_queue_size, uint32_t rx_queue_capacity,
             UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
   /**
-   * @brief Release a quiescent application-lifetime UART instance.
-   * @pre No operation, callback, DMA transfer, IRQ, or incoming character overlaps.
+   * @brief 释放已静止的应用生命周期 UART 实例 / Release a quiescent application-lifetime
+   * UART instance
+   * @pre 不得与操作、回调、DMA 传输、IRQ 或新到字符重叠 / No operation, callback, DMA
+   *      transfer, IRQ, or incoming character may overlap destruction
    */
   ~MSPM0UART();
 
   /**
    * @brief 异步接纳完整 UART 配置 / Asynchronously admit a complete UART configuration
-   * @param config Requested baud rate and framing
-   * @return `OK` once admitted, `BUSY` while another CONFIG is outstanding, or a
-   *         validation error; `OK` does not mean the hardware change is already complete
-   * @note May be called from task context or an ordinary maskable ISR. The call only
-   *       publishes work; UART IRQ remains the hardware owner.
-   * @pre Single-core execution outside NMI and HardFault. SMP callers require a separate
-   *      platform contract.
+   * @param config 请求的波特率和帧格式 / Requested baud rate and framing
+   * @return 接纳后返回 `OK`，已有未完成 CONFIG 时返回 `BUSY`，否则返回校验错误；`OK` 不
+   *         表示硬件修改已经完成 / `OK` once admitted, `BUSY` while another CONFIG is
+   *         outstanding, or a validation error; `OK` does not mean the hardware change
+   *         is already complete
+   * @note 可从 task 或普通可屏蔽 ISR 调用；本调用只发布工作，UART IRQ 仍是硬件 owner /
+   *       May be called from task context or an ordinary maskable ISR; the call only
+   *       publishes work and UART IRQ remains the hardware owner
+   * @pre 仅支持 NMI 和 HardFault 之外的单核执行；SMP 调用方需要独立平台契约 /
+   *      Single-core execution outside NMI and HardFault; SMP callers require a separate
+   *      platform contract
    */
   ErrorCode SetConfig(UART::Configuration config) override;
 
+  /**
+   * @brief WritePort 提交入口 / WritePort submission entry
+   * @param port 发起提交的写端口 / Write port issuing the submission
+   * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
+   * @return 始终返回 `PENDING`；记录已发布给 UART IRQ owner 异步处理 / Always `PENDING`
+   *         after publishing the record for asynchronous UART-IRQ processing
+   */
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
+
+  /**
+   * @brief 分发指定 MSPM0 UART 实例的中断 / Dispatch one MSPM0 UART instance interrupt
+   * @param index `ResolveIndex()` 产生的 UART instance map 索引 / UART instance-map index
+   *              produced by `ResolveIndex()`
+   * @note 越界或尚未绑定的索引会被忽略 / Out-of-range or unbound indices are ignored
+   */
   static void OnInterrupt(uint8_t index);
+
+  /**
+   * @brief 检查当前执行是否位于 exception 上下文 / Check for exception context
+   * @return `IPSR` 非零时返回 `true`，包括普通 IRQ、NMI、HardFault 及其他 exception /
+   *         `true` when `IPSR` is nonzero, including ordinary IRQs, NMI, HardFault, and
+   *         other exceptions
+   */
   static bool InIsr();
+
+  /**
+   * @brief 从 SysConfig 初始化后的寄存器构造 UART 配置 / Build a UART configuration from
+   * initialized SysConfig registers
+   * @param instance UART 寄存器实例 / UART register instance
+   * @param baudrate SysConfig 生成的初始波特率 / Initial baud rate generated by SysConfig
+   * @return 当前字长、校验、停止位和指定波特率组成的配置 / Configuration containing the
+   *         current word length, parity, stop bits, and supplied baud rate
+   * @pre `instance` 非空且 `baudrate` 非零 / `instance` is non-null and `baudrate` is
+   *      nonzero
+   */
   static UART::Configuration BuildConfigFromSysCfg(UART_Regs* instance,
                                                    uint32_t baudrate);
 
+  /**
+   * @brief 取得当前 RX 数据路径 / Get the current RX data path
+   * @return 构造时固定的 RX 模式 / RX mode fixed at construction
+   */
   [[nodiscard]] RxMode GetRxMode() const { return res_.rx_mode; }
+
+  /**
+   * @brief 检查 Extend RX 是否启用 HALF Pre-IRQ / Check whether RX HALF is enabled
+   * @return binding 启用 HALF Pre-IRQ 时返回 `true` / `true` when the binding enables
+   *         HALF Pre-IRQ
+   */
   [[nodiscard]] bool RxHalfInterruptEnabled() const { return res_.rx_half_interrupt; }
+
+  /**
+   * @name 接收与恢复诊断 / RX and recovery diagnostics
+   *
+   * getter 分别执行 relaxed load，不构成跨字段一致快照。计数器不提供 reset，为不饱和
+   * `uint32_t` 并会自然回绕。 / Each getter performs an independent relaxed load, not a
+   * consistent multi-field snapshot. Counters have no reset operation, are non-saturating
+   * `uint32_t` values, and wrap naturally.
+   * @{
+   */
+
+  /**
+   * @brief 取得软件确认丢弃的 RX 字节数 / Get software-confirmed dropped RX bytes
+   * @return 未入队、错误拒收或控制期清除的累计字节；不估算 overrun 丢失量或不可见的完整
+   *         DMA ring 覆盖 / Cumulative bytes rejected, not enqueued, or discarded during
+   *         control; excludes estimated overrun loss and invisible whole-ring overwrites
+   */
   [[nodiscard]] uint32_t GetRxDropCount() const;
+
+  /**
+   * @brief 取得 RX 数据损失 generation / Get the RX loss generation
+   * @return 软件标记的 loss window 或 DMA epoch 失效次数，不是丢失字节数 / Number of
+   *         software-marked loss windows or DMA epoch invalidations, not bytes lost
+   */
   [[nodiscard]] uint32_t GetRxLossGeneration() const;
+
+  /**
+   * @brief 取得 RX ring service deadline 违规次数 / Get RX ring deadline violations
+   * @return Extend RX 无法把 DMA fact、位置和边界状态判定为一致时的累计次数 / Number of
+   *         Extend RX samples whose DMA fact, position, and boundary state were
+   * inconsistent
+   */
   [[nodiscard]] uint32_t GetRxDeadlineViolationCount() const;
+
+  /**
+   * @brief 取得丢弃的陈旧 RX DMA 工作批次数 / Get discarded stale RX DMA work batches
+   * @return 被丢弃的陈旧 RX DMA 工作批次，包括合并 DMA fact 或被 RX admission gate
+   *         拒绝的 deferred partial flush；不保证逐硬件事件计数 / Discarded stale RX DMA
+   *         work batches, including coalesced DMA facts or a deferred partial flush
+   *         rejected by the RX admission gate; not one count per hardware event
+   */
   [[nodiscard]] uint32_t GetRxStaleEventCount() const;
+
+  /**
+   * @brief 取得观察到的 UART RX overrun 指示数 / Get observed UART RX overrun indications
+   * @return 观察次数，不是估算丢失字节数 / Observation count, not estimated bytes lost
+   */
   [[nodiscard]] uint32_t GetRxOverrunCount() const;
+
+  /**
+   * @brief 取得观察到的 UART RX framing 错误指示数 / Get observed RX framing indications
+   * @return framing 错误类别的观察次数 / Framing-error category observation count
+   */
   [[nodiscard]] uint32_t GetRxFramingErrorCount() const;
+
+  /**
+   * @brief 取得观察到的 UART RX parity 错误指示数 / Get observed RX parity indications
+   * @return parity 错误类别的观察次数 / Parity-error category observation count
+   */
   [[nodiscard]] uint32_t GetRxParityErrorCount() const;
+
+  /**
+   * @brief 取得观察到的 UART RX break 错误指示数 / Get observed RX break indications
+   * @return break 错误类别的观察次数 / Break-error category observation count
+   */
   [[nodiscard]] uint32_t GetRxBreakErrorCount() const;
+
+  /**
+   * @brief 取得观察到的 UART RX noise 错误指示数 / Get observed RX noise indications
+   * @return noise 错误类别的观察次数 / Noise-error category observation count
+   */
   [[nodiscard]] uint32_t GetRxNoiseErrorCount() const;
+
+  /**
+   * @brief 取得 UART owner 消费的共享 DMA 错误通知数 / Get consumed shared DMA errors
+   * @return owner 消费的合并通知次数，不是 DMA 控制器原始错误数 / Number of coalesced
+   *         notifications consumed by the owner, not raw DMA controller errors
+   */
   [[nodiscard]] uint32_t GetDmaErrorCount() const;
+
+  /**
+   * @brief 取得启动 runtime recovery 的累计次数 / Get started runtime recoveries
+   * @return 因错误进入 control-stop recovery 的次数 / Number of error-driven control-stop
+   *         recoveries started
+   */
   [[nodiscard]] uint32_t GetRecoveryCount() const;
 
-  ReadPort _read_port;    // NOLINT
-  WritePort _write_port;  // NOLINT
+  /** @} */
 
+  /** @brief UART 接收端口 / UART receive port */
+  ReadPort _read_port;  // NOLINT(readability-identifier-naming)
+
+  /** @brief UART 发送端口 / UART transmit port */
+  WritePort _write_port;  // NOLINT(readability-identifier-naming)
+
+  /**
+   * @brief 将 UART IRQ 编号转换为 instance map 索引 / Map a UART IRQ number to an
+   * instance-map index
+   * @param irqn UART 中断编号 / UART interrupt number
+   * @return 匹配的索引；不支持时返回 `0xFF` / Matching index, or `0xFF` when unsupported
+   */
   static constexpr uint8_t ResolveIndex(IRQn_Type irqn)
   {
     switch (irqn)
@@ -272,17 +489,17 @@ class MSPM0UART : public UART
 
   struct Counters
   {
-    std::atomic<uint32_t> rx_drop{0U};
-    std::atomic<uint32_t> rx_loss_generation{0U};
-    std::atomic<uint32_t> rx_deadline_violation{0U};
-    std::atomic<uint32_t> rx_stale_event{0U};
-    std::atomic<uint32_t> rx_overrun{0U};
-    std::atomic<uint32_t> rx_framing{0U};
-    std::atomic<uint32_t> rx_parity{0U};
-    std::atomic<uint32_t> rx_break{0U};
-    std::atomic<uint32_t> rx_noise{0U};
-    std::atomic<uint32_t> dma_error{0U};
-    std::atomic<uint32_t> recovery{0U};
+    std::atomic<uint32_t> rx_drop_{0U};
+    std::atomic<uint32_t> rx_loss_generation_{0U};
+    std::atomic<uint32_t> rx_deadline_violation_{0U};
+    std::atomic<uint32_t> rx_stale_event_{0U};
+    std::atomic<uint32_t> rx_overrun_{0U};
+    std::atomic<uint32_t> rx_framing_{0U};
+    std::atomic<uint32_t> rx_parity_{0U};
+    std::atomic<uint32_t> rx_break_{0U};
+    std::atomic<uint32_t> rx_noise_{0U};
+    std::atomic<uint32_t> dma_error_{0U};
+    std::atomic<uint32_t> recovery_{0U};
   };
 
   static constexpr uint32_t FactMask(RxDmaFact fact)
@@ -467,19 +684,28 @@ MSPM0UART::Resources MakeMSPM0ExtendUartResources(UART_Regs* instance,
 }  // namespace Detail
 
 /**
- * @brief BSP binding markers consumed by the MSPM0 UART construction macros.
+ * @name MSPM0 UART BSP binding 辅助宏 / helper macros
  *
- * Keep the ownership markers in a BSP-owned binding header rather than editing the
- * regenerated `ti_msp_dl_config.h`. SysConfig remains authoritative for
- * `<dma>_CHAN_ID`; the binding header adds `<dma>_LIBXR_UART_IRQN`, exactly one of
- * `<dma>_LIBXR_UART_TX` or `<dma>_LIBXR_UART_RX`, and the whole-BSP acknowledgement
+ * ownership 标记应放在 BSP 自有 binding header 中，不得编辑会重新生成的
+ * `ti_msp_dl_config.h`。SysConfig 继续负责 `<dma>_CHAN_ID`；binding header 额外提供
+ * `<dma>_LIBXR_UART_IRQN`、`<dma>_LIBXR_UART_TX` 与 `<dma>_LIBXR_UART_RX` 中恰好一个，
+ * 以及全 BSP 确认值 `LIBXR_MSPM0_DMA_DISPATCHER_AVAILABLE`。Extend RX binding 还要定义
+ * `<dma>_LIBXR_FULL_CHANNEL`、`<dma>_LIBXR_HALF_INTERRUPT` 和
+ * `<uart>_LIBXR_EXTEND_CAPABLE`。 / Keep ownership markers in a BSP-owned binding header
+ * rather than editing the regenerated `ti_msp_dl_config.h`. SysConfig remains
+ * authoritative for `<dma>_CHAN_ID`; the binding header adds
+ * `<dma>_LIBXR_UART_IRQN`, exactly one of `<dma>_LIBXR_UART_TX` or
+ * `<dma>_LIBXR_UART_RX`, and the whole-BSP acknowledgement
  * `LIBXR_MSPM0_DMA_DISPATCHER_AVAILABLE`. An Extend RX binding additionally defines
  * `<dma>_LIBXR_FULL_CHANNEL`, `<dma>_LIBXR_HALF_INTERRUPT`, and
  * `<uart>_LIBXR_EXTEND_CAPABLE`.
  *
- * These markers assert whole-BSP ownership and direction. The construction macros
- * derive the physical trigger from the expanded UART instance token, so ordinary
- * callers never provide a numeric channel, IRQ, trigger, or capability flag.
+ * 这些标记声明完整 BSP 的资源 ownership 和方向。构造宏从展开后的 UART instance token
+ * 推导物理 trigger，普通调用方不提供数值 channel、IRQ、trigger 或 capability flag。 /
+ * These markers assert whole-BSP resource ownership and direction. Construction macros
+ * derive the physical trigger from the expanded UART instance token, so ordinary callers
+ * never provide a numeric channel, IRQ, trigger, or capability flag.
+ * @{
  */
 #define LIBXR_MSPM0_UART_CAT_IMPL(left, right) left##right
 #define LIBXR_MSPM0_UART_CAT(left, right) LIBXR_MSPM0_UART_CAT_IMPL(left, right)
@@ -492,9 +718,21 @@ MSPM0UART::Resources MakeMSPM0ExtendUartResources(UART_Regs* instance,
 #define LIBXR_MSPM0_UART_DMA_TRIGGER(instance, direction) \
   LIBXR_MSPM0_UART_DMA_TRIGGER_IMPL(instance, direction)
 
+/** @} */
+
 /**
- * @brief Construct Main RX resources from SysConfig UART and named TX DMA tokens.
- * @pre Call only after `SYSCFG_DL_init()` has initialized the selected UART and DMA.
+ * @brief 展开为 Main RX MSPM0UART 构造参数 / Expand to Main RX MSPM0UART constructor
+ * arguments
+ * @param name SysConfig UART 资源名，例如 `UART_0` / SysConfig UART resource name, such
+ *             as `UART_0`
+ * @param tx_dma BSP binding 中命名的 TX DMA 资源 / Named TX DMA resource in the BSP
+ *               binding
+ * @param tx_storage `MSPM0UARTTxBuffer<2N>` TX 存储对象 / `MSPM0UARTTxBuffer<2N>` TX
+ *                   storage object
+ * @param tx_queue_size 待发送记录队列深度 / Pending TX record queue depth
+ * @param rx_queue_capacity 软件接收字节队列容量 / Software RX byte queue capacity
+ * @pre 只能在 `SYSCFG_DL_init()` 初始化所选 UART 和 DMA 后构造 / Construct only after
+ *      `SYSCFG_DL_init()` initializes the selected UART and DMA
  */
 #define MSPM0_UART_MAIN_INIT(name, tx_dma, tx_storage, tx_queue_size, rx_queue_capacity) \
   ::LibXR::Detail::MakeMSPM0MainUartResources<                                           \
@@ -511,18 +749,31 @@ MSPM0UART::Resources MakeMSPM0ExtendUartResources(UART_Regs* instance,
                                                 static_cast<uint32_t>(name##_BAUD_RATE))
 
 /**
- * @brief Construct Extend RX resources using repeated full-channel DMA.
+ * @brief 展开为 repeated full-channel DMA 的 Extend RX MSPM0UART 构造参数 / Expand to
+ * Extend RX MSPM0UART constructor arguments using repeated full-channel DMA
  *
- * The BSP/generated binding must define `<uart>_LIBXR_EXTEND_CAPABLE` to one for an
- * audited Extend instance. The named RX DMA channel is compile-time checked as full;
- * HALF Pre-IRQ is an explicit binding choice and is checked against channel capability.
- * Repeat DMA does not pause at a boundary. The UART IRQ must publish a boundary before
- * DMA overwrites any still-unpublished byte. On a FULL-only channel this can be the first
- * byte after FULL when no partial range was flushed; one completely unseen wrap also
- * aliases the prior position and sticky COMPLETE state and therefore cannot be detected.
- * LIN compare is derived from the current functional clock and UART framing, so the
- * SysConfig UART token does not need a counter-compare macro.
- * @pre Call only after `SYSCFG_DL_init()` has initialized the selected UART and DMA.
+ * binding 会在编译期检查 UART 的 Extend 能力、RX full-channel 能力、可选 HALF Pre-IRQ
+ * 能力和 TX/RX ownership。RX ring 的 service deadline、不可见整圈覆盖与 LIN partial
+ * flush 语义见 `MSPM0UART`。 / The binding compile-time checks the UART Extend
+ * capability, RX full-channel capability, optional HALF Pre-IRQ support, and TX/RX
+ * ownership. See `MSPM0UART` for the RX-ring service deadline, invisible whole-wrap
+ * boundary, and LIN partial-flush semantics.
+ * @param name SysConfig UART 资源名，例如 `UART_0` / SysConfig UART resource name, such
+ *             as `UART_0`
+ * @param tx_dma BSP binding 中命名的 TX DMA 资源 / Named TX DMA resource in the BSP
+ *               binding
+ * @param rx_dma BSP binding 中命名的 full-channel RX DMA 资源 / Named full-channel RX
+ *               DMA resource in the BSP binding
+ * @param tx_storage `MSPM0UARTTxBuffer<2N>` TX 存储对象 / `MSPM0UARTTxBuffer<2N>` TX
+ *                   storage object
+ * @param tx_queue_size 待发送记录队列深度 / Pending TX record queue depth
+ * @param rx_dma_storage 可写的一维 byte C array 或
+ * `std::array`；必须非零、偶数字节且不超过 65535 字节 / Writable one-dimensional byte C
+ * array or `std::array`; it must be nonzero, even-sized, and at most 65535 bytes
+ * @param rx_queue_capacity 软件接收字节队列容量 / Software RX byte queue capacity
+ * @pre 只能在 `SYSCFG_DL_init()` 初始化所选 UART 和 DMA 后构造 / Construct only after
+ *      `SYSCFG_DL_init()` initializes the selected UART and DMA
+ * @see MSPM0UART
  */
 #define MSPM0_UART_EXTEND_INIT(name, tx_dma, rx_dma, tx_storage, tx_queue_size,          \
                                rx_dma_storage, rx_queue_capacity)                        \
