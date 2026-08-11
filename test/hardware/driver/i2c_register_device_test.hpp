@@ -90,8 +90,8 @@ struct I2cRegisterDeviceTestResult
  * caller-selected payload, reads it back, and restores and verifies the saved bytes.
  * It then repeatedly reads the continuous register range and accumulates an FNV-1a
  * checksum without requiring live register values to remain constant. The write payload
- * and continuous read size must each be at least four bytes; with the STM32 I2C default
- * DMA threshold this exercises DMA while the identity access exercises polling.
+ * and continuous read size must each be at least four bytes so backends with a size
+ * threshold can exercise distinct short and long transaction paths.
  *
  * Every MemRead and MemWrite receives a dedicated BLOCK Operation with the finite
  * `operation_timeout_ms`. Calls are sequential and reuse `operation_semaphore` only

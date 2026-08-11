@@ -6,7 +6,7 @@ back through the adapter TX pin without parsing or framing the payload. The seri
 port cannot also be used for logs while this helper is running.
 
 Requires pyserial. Example:
-  python uart_echo.py --port COM4 --baudrate 115200 --duration-s 120
+  python uart_echo.py --port /dev/ttyUSB0 --baudrate 115200 --duration-s 120
 """
 
 from __future__ import annotations

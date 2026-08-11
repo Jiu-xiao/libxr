@@ -1,7 +1,5 @@
 function(xr_hardware_test_apply_warnings target)
-  if(MSVC)
-    target_compile_options(${target} PRIVATE /WX)
-  elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(
       ${target} PRIVATE -Werror -Wno-error=missing-field-initializers
     )
