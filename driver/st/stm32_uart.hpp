@@ -271,6 +271,9 @@ class STM32UART : public UART
    * @param dma_buff_rx DMA 可写的 RX 存储区 / DMA-writable RX storage
    * @param dma_buff_tx TX DMA 双缓冲存储区 / TX DMA double-buffer storage
    * @param tx_queue_size 待发送记录队列深度 / Pending TX record queue depth
+   * @pre 支持 UART FIFO mode 的系列必须由 CubeMX/HAL 保持 FIFO disabled；本后端不支持
+   *      FIFO mode / On families with UART FIFO mode, CubeMX/HAL must leave the FIFO
+   *      disabled; this backend does not support FIFO mode
    */
   STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx, RawData dma_buff_tx,
             uint32_t tx_queue_size = 5);
