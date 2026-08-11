@@ -7,6 +7,26 @@
 namespace LibXR
 {
 
+namespace Detail
+{
+
+struct TimerAdvanceResult
+{
+  uint32_t count;
+  bool due;
+};
+
+/** @pre cycle is nonzero. */
+[[nodiscard]] constexpr TimerAdvanceResult AdvanceTimerCount(uint32_t count,
+                                                             uint32_t cycle,
+                                                             uint32_t elapsed)
+{
+  const uint64_t total = static_cast<uint64_t>(count) + elapsed;
+  return {static_cast<uint32_t>(total % cycle), total >= cycle};
+}
+
+}  // namespace Detail
+
 /**
  * @brief  定时器类，实现周期性任务调度
  *         Timer class for scheduling periodic tasks
@@ -22,10 +42,10 @@ namespace LibXR
  * utilizing `Thread::SleepUntil` for precise scheduling.
  *
  * @note 注册第一个任务前必须初始化 Timebase。管理线程延迟运行时会按 Timebase
- * 实际经过的毫秒补齐推进，因此可能连续执行已经到期的回调。 / Timebase must be
- * initialized before the first task is added. If the management thread runs late, it
- * catches up by the elapsed Timebase milliseconds and may invoke overdue callbacks
- * consecutively.
+ * 实际经过的毫秒推进计数，但同一次唤醒中每个任务最多回调一次。 / Timebase must be
+ * initialized before the first task is added. If the management thread runs late, timer
+ * counts advance by the elapsed Timebase duration, but each task is invoked at most once
+ * per wake.
  */
 class Timer
 {
@@ -173,6 +193,9 @@ class Timer
   static inline LibXR::Thread::Priority priority_ =
       LibXR::Thread::Priority::MEDIUM;        ///< 线程优先级 Thread priority
   static inline uint32_t stack_depth_ = 512;  ///< 线程栈深度 Thread stack depth
+
+ private:
+  static void Advance(uint32_t elapsed);
 };
 
 }  // namespace LibXR

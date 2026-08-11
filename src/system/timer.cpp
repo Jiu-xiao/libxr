@@ -19,7 +19,6 @@ void Timer::RefreshThreadFunction(void*)
 {
   ThreadTimestamp time = Thread::GetTime();
   MillisecondTimestamp last_refresh_time = Timebase::GetMilliseconds();
-  Timer::Refresh();
 
   while (true)
   {
@@ -27,11 +26,13 @@ void Timer::RefreshThreadFunction(void*)
 
     const MillisecondTimestamp current_time = Timebase::GetMilliseconds();
     const uint32_t elapsed = (current_time - last_refresh_time).ToMillisecond();
-    for (uint32_t i = 0; i < elapsed; ++i)
+    if (elapsed != 0U)
     {
-      Timer::Refresh();
+      last_refresh_time = current_time;
+      Timer::Advance(elapsed);
     }
-    last_refresh_time = current_time;
+
+    time = Thread::GetTime();
   }
 }
 
@@ -52,8 +53,13 @@ void Timer::Add(TimerHandle handle)
   list_->Add(*handle);
 }
 
-void Timer::Refresh()
+void Timer::Advance(uint32_t elapsed)
 {
+  if (elapsed == 0U)
+  {
+    return;
+  }
+
   if (!LibXR::Timer::list_)
   {
     LibXR::Timer::list_ = new LibXR::LockFreeList();
@@ -66,18 +72,17 @@ void Timer::Refresh()
 #endif
   }
 
-  auto fun = [](ControlBlock& block)
+  auto fun = [elapsed](ControlBlock& block)
   {
     if (!block.enable_)
     {
       return ErrorCode::OK;
     }
 
-    block.count_++;
-
-    if (block.count_ >= block.cycle_)
+    const auto advance = Detail::AdvanceTimerCount(block.count_, block.cycle_, elapsed);
+    block.count_ = advance.count;
+    if (advance.due)
     {
-      block.count_ = 0;
       block.Run();
     }
 
@@ -86,3 +91,5 @@ void Timer::Refresh()
 
   list_->Foreach<ControlBlock>(fun);
 }
+
+void Timer::Refresh() { Advance(1U); }
