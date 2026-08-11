@@ -10,23 +10,6 @@
 namespace LibXR
 {
 
-#if defined(LIBXR_TEST_BUILD)
-class ReadPort;
-
-enum class ReadPortTestCheckpoint : uint32_t
-{
-  READ_BEFORE_PENDING_PUBLISH,
-  CLAIMED_BEFORE_PENDING_RELEASE,
-  PRODUCER_OBSERVED_CLAIMED,
-  PROCESS_CLAIM_ACQUIRED,
-  BLOCK_TIMEOUT_BEFORE_CLAIM,
-  BLOCK_AFTER_IDLE_RELEASE,
-};
-
-using ReadPortTestHook = void (*)(ReadPort& port, ReadPortTestCheckpoint checkpoint,
-                                  void* context);
-#endif
-
 /**
  * @brief ReadPort class for handling read operations.
  * @brief 处理读取操作的ReadPort类。
@@ -34,11 +17,10 @@ using ReadPortTestHook = void (*)(ReadPort& port, ReadPortTestCheckpoint checkpo
 class ReadPort
 {
  public:
-  // Exposed low-level state and helpers for the read-path core. Some members stay public
-  // because low-level libxr tests and driver glue inspect them directly.
-  // 读路径核心的低层状态与辅助类型。部分成员保持 public，
-  // 是因为 libxr 的底层测试与驱动胶水层会直接检查它们。
+  SPSCQueue<uint8_t>* queue_data_ = nullptr;  ///< Backend-facing RX payload queue.
+                                              ///< 面向后端的接收数据字节队列。
 
+ private:
   // Read states:
   // PENDING = one published request is waiting for queue-fed completion
   // CLAIMED = one completion or clear path owns queue inspection/dequeue progress
@@ -67,16 +49,14 @@ class ReadPort
     EVENT = 1U << 31U,
   };
 
-#if defined(LIBXR_TEST_BUILD)
-  void SetTestHook(ReadPortTestHook hook, void* context);
-#endif
+  struct StateMachine;
 
-  SPSCQueue<uint8_t>* queue_data_ = nullptr;  ///< RX payload queue. 接收数据字节队列。
   ReadInfoBlock info_{};  ///< In-flight read request metadata. 当前在途读取请求的元数据。
   std::atomic<BusyState> busy_{
       BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
 
+ public:
   /**
    * @brief Constructs a ReadPort with queue sizes.
    * @brief 以指定队列大小构造ReadPort。
@@ -271,14 +251,6 @@ class ReadPort
    * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
    */
   void FailAndClearAll(ErrorCode reason, bool in_isr);
-
-#if defined(LIBXR_TEST_BUILD)
- private:
-  void RunTestHook(ReadPortTestCheckpoint checkpoint);
-
-  ReadPortTestHook test_hook_ = nullptr;
-  void* test_context_ = nullptr;
-#endif
 };
 
 }  // namespace LibXR

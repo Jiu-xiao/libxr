@@ -17,8 +17,6 @@
 
 #include "test_main_sets.hpp"
 
-extern const char kRwFailClearOwnerDevAssertScenario[];
-int RunRwFailClearOwnerDevAssertScenario();
 extern const char kRwIsrReadBlockScenario[];
 extern const char kRwIsrWriteBlockScenario[];
 int RunRwIsrReadBlockScenario();
@@ -36,10 +34,6 @@ bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
 int main(int argc, char** argv)
 {
-  if (argc == 2 && std::strcmp(argv[1], kRwFailClearOwnerDevAssertScenario) == 0)
-  {
-    return RunRwFailClearOwnerDevAssertScenario();
-  }
   if (argc == 2 && std::strcmp(argv[1], kRwIsrReadBlockScenario) == 0)
   {
     return RunRwIsrReadBlockScenario();

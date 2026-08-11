@@ -7,22 +7,6 @@ using namespace LibXR;
 template class LibXR::SPSCQueue<WriteInfoBlock>;
 template class LibXR::SPSCQueue<uint8_t>;
 
-#if defined(LIBXR_TEST_BUILD)
-void WritePort::SetTestHook(WritePortTestHook hook, void* context)
-{
-  test_hook_ = hook;
-  test_context_ = context;
-}
-
-void WritePort::RunTestHook(WritePortTestCheckpoint checkpoint)
-{
-  if (test_hook_ != nullptr)
-  {
-    test_hook_(*this, checkpoint, test_context_);
-  }
-}
-#endif
-
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
     : queue_info_(new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
                       SPSCQueue<WriteInfoBlock>(queue_size)),
@@ -67,9 +51,6 @@ void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
       {
         block_result_ = ans;
         info.op.data.sem_info.sem->PostFromCallback(in_isr);
-#if defined(LIBXR_TEST_BUILD)
-        RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_COMPLETION_POST);
-#endif
         return;
       }
     }
@@ -185,9 +166,6 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
         REQUIRE(finish_wait_ans == ErrorCode::OK);
         const ErrorCode result = block_result_;
         busy_.store(BusyState::IDLE, std::memory_order_release);
-#if defined(LIBXR_TEST_BUILD)
-        RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
-#endif
         return result;
       }
 
@@ -222,15 +200,9 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 #endif
       const ErrorCode result = block_result_;
       busy_.store(BusyState::IDLE, std::memory_order_release);
-#if defined(LIBXR_TEST_BUILD)
-      RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
-#endif
       return result;
     }
 
-#if defined(LIBXR_TEST_BUILD)
-    RunTestHook(WritePortTestCheckpoint::BLOCK_TIMEOUT_BEFORE_CLAIM);
-#endif
     // Timeout won before completion claimed the waiter.
     // 超时先赢，完成侧还没 claim 当前 waiter。
     BusyState expected = BusyState::BLOCK_WAITING;
@@ -249,10 +221,6 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
     REQUIRE(finish_wait_ans == ErrorCode::OK);
     const ErrorCode result = block_result_;
     busy_.store(BusyState::IDLE, std::memory_order_release);
-#if defined(LIBXR_TEST_BUILD)
-    RunTestHook(WritePortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE);
-#endif
-
     return result;
   }
 

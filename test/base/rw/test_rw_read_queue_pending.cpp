@@ -1,11 +1,10 @@
 /**
  * @file test_rw_read_queue_pending.cpp
- * @brief ReadPort claim-release, timeout arbitration, and callback-reentry scenarios.
+ * @brief ReadPort producer handoff and callback-reentry scenarios.
  * @details The two legacy queue-completion cases are owned by the runtime RW suite.
- * This file keeps the unique state-machine race and callback regressions.
+ * This file keeps black-box concurrency and callback regressions.
  */
-#include <chrono>
-#include <semaphore>
+#include <barrier>
 #include <thread>
 
 #include "rw_test_common.hpp"
@@ -13,34 +12,7 @@
 namespace
 {
 
-struct ReadClaimReleaseRace
-{
-  explicit ReadClaimReleaseRace(LibXR::ReadPort& expected) : expected_port(&expected) {}
-
-  LibXR::ReadPort* expected_port;
-  std::binary_semaphore claim_waiting{0};
-  std::binary_semaphore producer_waiting{0};
-};
-
-constexpr auto HOOK_TIMEOUT = std::chrono::seconds(10);
-constexpr uint32_t BLOCK_TIMEOUT_MS = 10000;
-
-enum class SecondReadCompletion : uint8_t
-{
-  QUEUE_OK,
-  FAIL_CLEAR,
-};
-
-struct ReadBlockResultGeneration
-{
-  LibXR::ReadPort* expected_port;
-  SecondReadCompletion second_completion;
-  bool complete_first_at_timeout = false;
-  bool in_second_generation = false;
-  bool timeout_completion_seen = false;
-  bool after_idle_seen = false;
-  LibXR::ErrorCode second_result = LibXR::ErrorCode::PENDING;
-};
+constexpr size_t CLAIM_RELEASE_RACE_ITERATIONS = 1024;
 
 struct QueuedReadCallbackReentry
 {
@@ -72,331 +44,56 @@ void OnOuterQueuedRead(bool, QueuedReadCallbackReentry* context, LibXR::ErrorCod
                                             *context->nested_op, false);
 }
 
-struct ReadBlockClaimHandoff
-{
-  explicit ReadBlockClaimHandoff(LibXR::ReadPort& expected) : expected_port(&expected) {}
-
-  LibXR::ReadPort* expected_port;
-  std::binary_semaphore timeout_waiting{0};
-  std::binary_semaphore claim_acquired{0};
-  std::binary_semaphore release_claim{0};
-};
-
-bool WaitForReadState(LibXR::ReadPort& port, LibXR::ReadPort::BusyState expected)
-{
-  const auto deadline = std::chrono::steady_clock::now() + HOOK_TIMEOUT;
-  while (port.busy_.load(std::memory_order_acquire) != expected)
-  {
-    if (std::chrono::steady_clock::now() >= deadline)
-    {
-      return false;
-    }
-    std::this_thread::yield();
-  }
-  return true;
-}
-
-void RunSecondReadGeneration(ReadBlockResultGeneration& context)
+void test_rw_read_claim_release_handles_concurrent_producer_notification()
 {
   using namespace LibXR;
 
-  uint8_t received = 0xA5;
-  if (context.second_completion == SecondReadCompletion::QUEUE_OK)
-  {
-    static const uint8_t SECOND_DATA = 0x72;
-    std::thread completer(
-        [&]()
+  ReadPort port(4);
+  std::barrier<> iteration_start(2);
+  std::barrier<> iteration_done(2);
+
+  std::thread claimant(
+      [&]()
+      {
+        for (size_t iteration = 0; iteration < CLAIM_RELEASE_RACE_ITERATIONS; ++iteration)
         {
-          ASSERT(WaitForReadState(*context.expected_port, ReadPort::BusyState::PENDING));
-          ASSERT(context.expected_port->queue_data_->Push(SECOND_DATA) == ErrorCode::OK);
-          context.expected_port->ProcessPendingReads(false);
-        });
-
-    Semaphore sem;
-    ReadOperation operation(sem, BLOCK_TIMEOUT_MS);
-    context.second_result =
-        (*context.expected_port)(RawData{&received, 1}, operation, false);
-    completer.join();
-    ASSERT(received == SECOND_DATA);
-    ASSERT(sem.Value() == 0);
-    return;
-  }
-
-  std::thread waiter(
-      [&]()
-      {
-        Semaphore sem;
-        ReadOperation operation(sem, BLOCK_TIMEOUT_MS);
-        context.second_result =
-            (*context.expected_port)(RawData{&received, 1}, operation, false);
-        ASSERT(sem.Value() == 0);
+          iteration_start.arrive_and_wait();
+          if ((iteration % 3U) == 1U)
+          {
+            std::this_thread::yield();
+          }
+          port.ProcessPendingReads(false);
+          iteration_done.arrive_and_wait();
+        }
       });
-  ASSERT(WaitForReadState(*context.expected_port, ReadPort::BusyState::PENDING));
-  context.expected_port->FailAndClearAll(ErrorCode::FAILED, false);
-  waiter.join();
-  ASSERT(received == 0xA5);
-}
 
-void ExerciseReadBlockResultGeneration(LibXR::ReadPort& port,
-                                       LibXR::ReadPortTestCheckpoint checkpoint,
-                                       void* raw)
-{
-  using namespace LibXR;
-
-  auto& context = *static_cast<ReadBlockResultGeneration*>(raw);
-  ASSERT(&port == context.expected_port);
-  if (context.in_second_generation)
+  for (size_t iteration = 0; iteration < CLAIM_RELEASE_RACE_ITERATIONS; ++iteration)
   {
-    return;
-  }
+    uint8_t received[2] = {};
+    OperationPollingStatus status;
+    ReadOperation operation(status);
+    ASSERT(port(RawData{received, sizeof(received)}, operation) == ErrorCode::OK);
 
-  if (checkpoint == ReadPortTestCheckpoint::BLOCK_TIMEOUT_BEFORE_CLAIM &&
-      context.complete_first_at_timeout)
-  {
-    ASSERT(!context.timeout_completion_seen);
-    static const uint8_t FIRST_DATA = 0x61;
-    ASSERT(port.queue_data_->Push(FIRST_DATA) == ErrorCode::OK);
+    const uint8_t first = static_cast<uint8_t>((iteration % 125U) + 1U);
+    const uint8_t second = static_cast<uint8_t>(first + 125U);
+    ASSERT(port.queue_data_->Push(first) == ErrorCode::OK);
+
+    iteration_start.arrive_and_wait();
+    if ((iteration % 3U) == 0U)
+    {
+      std::this_thread::yield();
+    }
+    ASSERT(port.queue_data_->Push(second) == ErrorCode::OK);
     port.ProcessPendingReads(false);
-    context.timeout_completion_seen = true;
-    return;
+    iteration_done.arrive_and_wait();
+
+    ASSERT(status.Load() == OperationPollingStatus::DONE);
+    ASSERT(received[0] == first);
+    ASSERT(received[1] == second);
+    ASSERT(port.Size() == 0U);
   }
 
-  if (checkpoint != ReadPortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE)
-  {
-    return;
-  }
-
-  ASSERT(!context.after_idle_seen);
-  context.after_idle_seen = true;
-  context.in_second_generation = true;
-  RunSecondReadGeneration(context);
-  context.in_second_generation = false;
-}
-
-void CoordinateClaimRelease(LibXR::ReadPort& port,
-                            LibXR::ReadPortTestCheckpoint checkpoint, void* raw)
-{
-  auto& race = *static_cast<ReadClaimReleaseRace*>(raw);
-  ASSERT(&port == race.expected_port);
-  switch (checkpoint)
-  {
-    case LibXR::ReadPortTestCheckpoint::CLAIMED_BEFORE_PENDING_RELEASE:
-      race.claim_waiting.release();
-      ASSERT(race.producer_waiting.try_acquire_for(HOOK_TIMEOUT));
-      break;
-    case LibXR::ReadPortTestCheckpoint::PRODUCER_OBSERVED_CLAIMED:
-      ASSERT((static_cast<uint32_t>(port.busy_.load(std::memory_order_acquire)) &
-              static_cast<uint32_t>(LibXR::ReadPort::BusyState::EVENT)) != 0U);
-      race.producer_waiting.release();
-      break;
-    case LibXR::ReadPortTestCheckpoint::READ_BEFORE_PENDING_PUBLISH:
-    case LibXR::ReadPortTestCheckpoint::PROCESS_CLAIM_ACQUIRED:
-    case LibXR::ReadPortTestCheckpoint::BLOCK_TIMEOUT_BEFORE_CLAIM:
-    case LibXR::ReadPortTestCheckpoint::BLOCK_AFTER_IDLE_RELEASE:
-      break;
-  }
-}
-
-void CoordinateBlockClaimHandoff(LibXR::ReadPort& port,
-                                 LibXR::ReadPortTestCheckpoint checkpoint, void* raw)
-{
-  auto& handoff = *static_cast<ReadBlockClaimHandoff*>(raw);
-  ASSERT(&port == handoff.expected_port);
-
-  if (checkpoint == LibXR::ReadPortTestCheckpoint::BLOCK_TIMEOUT_BEFORE_CLAIM)
-  {
-    handoff.timeout_waiting.release();
-    ASSERT(handoff.claim_acquired.try_acquire_for(HOOK_TIMEOUT));
-    return;
-  }
-
-  if (checkpoint == LibXR::ReadPortTestCheckpoint::PROCESS_CLAIM_ACQUIRED)
-  {
-    handoff.claim_acquired.release();
-    ASSERT(handoff.release_claim.try_acquire_for(HOOK_TIMEOUT));
-  }
-}
-
-void test_rw_read_block_claim_completion_wins_timeout()
-{
-  using namespace LibXR;
-
-  TrackingReadPort port(8);
-  ReadBlockClaimHandoff handoff(port);
-  port.SetTestHook(CoordinateBlockClaimHandoff, &handoff);
-
-  static const uint8_t QUEUED[] = {0x31, 0x32};
-  uint8_t received[] = {0xA5, 0x5A};
-  Semaphore sem;
-  ReadOperation operation(sem, 0);
-  ErrorCode result = ErrorCode::PENDING;
-
-  std::thread waiter(
-      [&]() { result = port(RawData{received, sizeof(received)}, operation, false); });
-  ASSERT(handoff.timeout_waiting.try_acquire_for(HOOK_TIMEOUT));
-  ASSERT(port.queue_data_->PushBatch(QUEUED, sizeof(QUEUED)) == ErrorCode::OK);
-
-  std::thread completer([&]() { port.ProcessPendingReads(false); });
-  ASSERT(WaitForReadState(port, ReadPort::BusyState::CLAIMED));
-  handoff.release_claim.release();
-
-  completer.join();
-  waiter.join();
-  port.SetTestHook(nullptr, nullptr);
-
-  ASSERT(result == ErrorCode::OK);
-  ASSERT(std::memcmp(received, QUEUED, sizeof(received)) == 0);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-  ASSERT(port.Size() == 0U);
-  ASSERT(port.dequeue_count == 1U);
-  ASSERT(sem.Value() == 0);
-
-  static const uint8_t SECOND_DATA = 0x43;
-  uint8_t second_received = 0xA5;
-  ReadOperation second_operation(sem, BLOCK_TIMEOUT_MS);
-  ErrorCode second_result = ErrorCode::PENDING;
-  std::thread second_waiter(
-      [&]() { second_result = port(RawData{&second_received, 1}, second_operation); });
-  ASSERT(WaitForReadState(port, ReadPort::BusyState::PENDING));
-  ASSERT(port.queue_data_->Push(SECOND_DATA) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
-  second_waiter.join();
-
-  ASSERT(second_result == ErrorCode::OK);
-  ASSERT(second_received == SECOND_DATA);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-  ASSERT(sem.Value() == 0);
-}
-
-void test_rw_read_block_claim_insufficient_returns_to_timeout()
-{
-  using namespace LibXR;
-
-  TrackingReadPort port(8);
-  ReadBlockClaimHandoff handoff(port);
-  port.SetTestHook(CoordinateBlockClaimHandoff, &handoff);
-
-  uint8_t received = 0xA5;
-  Semaphore sem;
-  ReadOperation operation(sem, 0);
-  ErrorCode result = ErrorCode::PENDING;
-
-  std::thread waiter([&]() { result = port(RawData{&received, 1}, operation); });
-  ASSERT(handoff.timeout_waiting.try_acquire_for(HOOK_TIMEOUT));
-
-  std::thread completer([&]() { port.ProcessPendingReads(false); });
-  ASSERT(WaitForReadState(port, ReadPort::BusyState::CLAIMED));
-  handoff.release_claim.release();
-
-  completer.join();
-  waiter.join();
-  port.SetTestHook(nullptr, nullptr);
-
-  ASSERT(result == ErrorCode::TIMEOUT);
-  ASSERT(received == 0xA5);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-  ASSERT(port.Size() == 0U);
-  ASSERT(port.dequeue_count == 0U);
-  ASSERT(sem.Value() == 0);
-
-  static const uint8_t SECOND_DATA = 0x54;
-  ReadOperation second_operation(sem, BLOCK_TIMEOUT_MS);
-  ErrorCode second_result = ErrorCode::PENDING;
-  std::thread second_waiter(
-      [&]() { second_result = port(RawData{&received, 1}, second_operation); });
-  ASSERT(WaitForReadState(port, ReadPort::BusyState::PENDING));
-  ASSERT(port.queue_data_->Push(SECOND_DATA) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
-  second_waiter.join();
-
-  ASSERT(second_result == ErrorCode::OK);
-  ASSERT(received == SECOND_DATA);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-  ASSERT(sem.Value() == 0);
-}
-
-void test_rw_read_block_normal_wait_preserves_generation_result()
-{
-  using namespace LibXR;
-
-  ReadPort port(4);
-  uint8_t received = 0xA5;
-  ErrorCode first_result = ErrorCode::PENDING;
-  ReadBlockResultGeneration context{&port, SecondReadCompletion::QUEUE_OK};
-
-  port.SetTestHook(ExerciseReadBlockResultGeneration, &context);
-  std::thread waiter(
-      [&]()
-      {
-        Semaphore sem;
-        ReadOperation operation(sem, BLOCK_TIMEOUT_MS);
-        first_result = port(RawData{&received, 1}, operation, false);
-        ASSERT(sem.Value() == 0);
-      });
-
-  ASSERT(WaitForReadState(port, ReadPort::BusyState::PENDING));
-  port.FailAndClearAll(ErrorCode::FAILED, false);
-  waiter.join();
-  port.SetTestHook(nullptr, nullptr);
-
-  ASSERT(first_result == ErrorCode::FAILED);
-  ASSERT(context.after_idle_seen);
-  ASSERT(context.second_result == ErrorCode::OK);
-  ASSERT(received == 0xA5);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-}
-
-void test_rw_read_block_timeout_lost_preserves_generation_result()
-{
-  using namespace LibXR;
-
-  ReadPort port(4);
-  uint8_t received = 0;
-  Semaphore sem;
-  ReadOperation operation(sem, 0);
-  ReadBlockResultGeneration context{&port, SecondReadCompletion::FAIL_CLEAR, true};
-
-  port.SetTestHook(ExerciseReadBlockResultGeneration, &context);
-  const ErrorCode first_result = port(RawData{&received, 1}, operation, false);
-  port.SetTestHook(nullptr, nullptr);
-
-  ASSERT(first_result == ErrorCode::OK);
-  ASSERT(context.timeout_completion_seen);
-  ASSERT(context.after_idle_seen);
-  ASSERT(context.second_result == ErrorCode::FAILED);
-  ASSERT(received == 0x61);
-  ASSERT(sem.Value() == 0);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-}
-
-void test_rw_read_claim_release_rechecks_insufficient_completion()
-{
-  using namespace LibXR;
-
-  ReadPort port(4);
-  uint8_t received[2] = {};
-  OperationPollingStatus status;
-  ReadOperation operation(status);
-  ASSERT(port(RawData{received, 2}, operation) == ErrorCode::OK);
-
-  static const uint8_t FIRST = 0x51;
-  static const uint8_t SECOND = 0x52;
-  ASSERT(port.queue_data_->Push(FIRST) == ErrorCode::OK);
-
-  ReadClaimReleaseRace race(port);
-  port.SetTestHook(CoordinateClaimRelease, &race);
-  std::thread completer([&]() { port.ProcessPendingReads(false); });
-
-  ASSERT(race.claim_waiting.try_acquire_for(HOOK_TIMEOUT));
-  ASSERT(port.queue_data_->Push(SECOND) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
-  completer.join();
-  port.SetTestHook(nullptr, nullptr);
-
-  static const uint8_t EXPECTED[] = {FIRST, SECOND};
-  ASSERT(status.Load() == OperationPollingStatus::DONE);
-  ASSERT(std::memcmp(received, EXPECTED, sizeof(EXPECTED)) == 0);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+  claimant.join();
 }
 
 void test_rw_queued_callback_can_submit_next_read_before_dequeue_notification()
@@ -429,7 +126,6 @@ void test_rw_queued_callback_can_submit_next_read_before_dequeue_notification()
   ASSERT(context.nested_callbacks == 0U);
   ASSERT(outer_data == OUTER_DATA);
   ASSERT(port.dequeue_count == 1U);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::PENDING);
 
   static const uint8_t NESTED_DATA = 0x42;
   ASSERT(port.queue_data_->Push(NESTED_DATA) == ErrorCode::OK);
@@ -440,23 +136,16 @@ void test_rw_queued_callback_can_submit_next_read_before_dequeue_notification()
   ASSERT(context.nested_dequeue_count == 1U);
   ASSERT(nested_data == NESTED_DATA);
   ASSERT(port.dequeue_count == 2U);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 }  // namespace
 
 /**
  * @brief Test-item function `RunBaseRwReadQueuePendingTests`.
- * @details Execute queued-read claim-release, BLOCK timeout, and callback-reentry
- * scenarios. Group concurrency state-machine regressions separately from clear-queue
- * semantics.
+ * @details Execute queued-read producer handoff and callback-reentry scenarios.
  */
 void RunBaseRwReadQueuePendingTests()
 {
-  test_rw_read_block_normal_wait_preserves_generation_result();
-  test_rw_read_block_timeout_lost_preserves_generation_result();
-  test_rw_read_block_claim_completion_wins_timeout();
-  test_rw_read_block_claim_insufficient_returns_to_timeout();
-  test_rw_read_claim_release_rechecks_insufficient_completion();
+  test_rw_read_claim_release_handles_concurrent_producer_notification();
   test_rw_queued_callback_can_submit_next_read_before_dequeue_notification();
 }

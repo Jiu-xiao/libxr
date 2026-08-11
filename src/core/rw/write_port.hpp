@@ -11,20 +11,6 @@
 namespace LibXR
 {
 
-#if defined(LIBXR_TEST_BUILD)
-class WritePort;
-
-enum class WritePortTestCheckpoint : uint32_t
-{
-  BLOCK_TIMEOUT_BEFORE_CLAIM,
-  BLOCK_AFTER_COMPLETION_POST,
-  BLOCK_AFTER_IDLE_RELEASE,
-};
-
-using WritePortTestHook = void (*)(WritePort& port, WritePortTestCheckpoint checkpoint,
-                                   void* context);
-#endif
-
 /**
  * @brief WritePort class for handling write operations.
  * @brief 处理写入操作的WritePort类。
@@ -32,17 +18,14 @@ using WritePortTestHook = void (*)(WritePort& port, WritePortTestCheckpoint chec
 class WritePort
 {
  public:
-#if defined(LIBXR_TEST_BUILD)
-  void SetTestHook(WritePortTestHook hook, void* context);
-#endif
+  WriteFun write_fun_ =
+      nullptr;  ///< Driver/backend write entry. 底层驱动或后端写入入口。
+  SPSCQueue<WriteInfoBlock>* queue_info_ =
+      nullptr;  ///< Metadata queue for pending write batches. 挂起写批次的元数据队列。
+  SPSCQueue<uint8_t>* queue_data_ =
+      nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
 
-  // Exposed low-level state and helpers for the write-path core. Some members stay public
-  // because low-level libxr tests and backend glue inspect them directly. Keep the
-  // boundary explicit instead of introducing a fake private wall that tests cannot use.
-  // 写路径核心的低层状态与辅助类型。部分成员保持 public，
-  // 是因为 libxr 的底层测试与后端胶水层会直接检查它们。
-  // 这里保持显式边界即可，不做测试本身也用不上的“伪私有化”。
-
+ private:
   // Write BLOCK states:
   // OWNER = submit or fail-and-clear path owns queue mutation
   // BLOCK_WAITING = waiter armed, completion not claimed yet
@@ -70,17 +53,12 @@ class WritePort
                          ///< 等待者已超时/被分离，完成侧不能再 Post。
   };
 
-  WriteFun write_fun_ =
-      nullptr;  ///< Driver/backend write entry. 底层驱动或后端写入入口。
-  SPSCQueue<WriteInfoBlock>* queue_info_ =
-      nullptr;  ///< Metadata queue for pending write batches. 挂起写批次的元数据队列。
-  SPSCQueue<uint8_t>* queue_data_ =
-      nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
   std::atomic<BusyState> busy_{
       BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
                                             ///< 当前 BLOCK 写入的最终结果。
 
+ public:
   // Stream batch facade.
   // Stream 负责一次批次的累积写入与提交。
   // One caller owns a Stream between commits. The atomic state rejects callback or
@@ -91,20 +69,6 @@ class WritePort
   class Stream
   {
    public:
-#if defined(LIBXR_TEST_BUILD)
-    enum class TestCheckpoint : uint32_t
-    {
-      AFTER_METADATA_PUBLISH,
-      AFTER_COMMIT_WRITE,
-      AFTER_BUFFER_RESET,
-      AFTER_PORT_RELEASE,
-    };
-
-    using TestHook = void (*)(Stream& stream, TestCheckpoint checkpoint, void* context);
-
-    void SetTestHook(TestHook hook, void* context);
-#endif
-
     /**
      * @brief 构造流写入对象，并尝试锁定端口。
      * @brief Constructs a Stream object and tries to acquire WritePort lock.
@@ -196,10 +160,6 @@ class WritePort
     [[nodiscard]] size_t EmptySize() const;
 
    private:
-#if defined(LIBXR_TEST_BUILD)
-    void RunTestHook(TestCheckpoint checkpoint);
-#endif
-
     /**
      * @brief 将当前已缓存批次提交给 WritePort。
      * @brief Submits the currently buffered batch to WritePort.
@@ -225,10 +185,6 @@ class WritePort
     };
 
     std::atomic<StreamState> state_{StreamState::RELEASED};
-#if defined(LIBXR_TEST_BUILD)
-    TestHook test_hook_ = nullptr;
-    void* test_context_ = nullptr;
-#endif
   };
 
   /**
@@ -392,14 +348,6 @@ class WritePort
    */
   ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool pushed = false,
                         bool in_isr = false);
-
-#if defined(LIBXR_TEST_BUILD)
- private:
-  void RunTestHook(WritePortTestCheckpoint checkpoint);
-
-  WritePortTestHook test_hook_ = nullptr;
-  void* test_context_ = nullptr;
-#endif
 };
 
 }  // namespace LibXR

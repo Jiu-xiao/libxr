@@ -16,6 +16,27 @@
 namespace
 {
 
+void test_rw_stream_block_handles_completion_before_backend_return()
+{
+  using namespace LibXR;
+
+  ImmediateFinishWritePort port;
+  port.finish_result = ErrorCode::FAILED;
+
+  Semaphore semaphore;
+  WriteOperation operation(semaphore, UINT32_MAX);
+  WritePort::Stream stream(&port, operation);
+  static const uint8_t TX[] = {0x31, 0x32, 0x33};
+
+  ASSERT(stream.Write(ConstRawData{TX, sizeof(TX)}) == ErrorCode::OK);
+  ASSERT(stream.Commit() == ErrorCode::FAILED);
+  ASSERT(semaphore.Value() == 0);
+  ASSERT(port.payload_size == sizeof(TX));
+  ASSERT(std::memcmp(port.payload, TX, sizeof(TX)) == 0);
+  ASSERT(port.queue_info_->Size() == 0);
+  ASSERT(port.queue_data_->Size() == 0);
+}
+
 /**
  * @brief 测试入口函数 `test_rw_stream_block_pending_result_propagates`。 Test entry
  * function `test_rw_stream_block_pending_result_propagates`.
@@ -75,6 +96,7 @@ void test_rw_stream_block_destructor_autocommit()
  */
 void RunRuntimeRwBlockStreamTests()
 {
+  test_rw_stream_block_handles_completion_before_backend_return();
   test_rw_stream_block_pending_result_propagates();
   test_rw_stream_block_timeout_detaches_waiter();
   test_rw_stream_block_destructor_autocommit();

@@ -283,7 +283,6 @@ if(XROBOT_MODULES_DIR)
 endif()
 
 if(LIBXR_TEST_BUILD)
-  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_TEST_BUILD)
   add_subdirectory(test)
 endif()
 

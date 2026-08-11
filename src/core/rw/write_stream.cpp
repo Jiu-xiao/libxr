@@ -2,22 +2,6 @@
 
 using namespace LibXR;
 
-#if defined(LIBXR_TEST_BUILD)
-void WritePort::Stream::SetTestHook(TestHook hook, void* context)
-{
-  test_hook_ = hook;
-  test_context_ = context;
-}
-
-void WritePort::Stream::RunTestHook(TestCheckpoint checkpoint)
-{
-  if (test_hook_ != nullptr)
-  {
-    test_hook_(*this, checkpoint, test_context_);
-  }
-}
-#endif
-
 WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
     : port_(port), op_(op)
 {
@@ -131,25 +115,12 @@ ErrorCode WritePort::Stream::SubmitBuffered()
       WriteInfoBlock{ConstRawData{nullptr, submitted_size}, op_});
   ASSERT(ans == ErrorCode::OK);
 
-#if defined(LIBXR_TEST_BUILD)
-  RunTestHook(TestCheckpoint::AFTER_METADATA_PUBLISH);
-#endif
-
   ans = port_->CommitWrite({nullptr, submitted_size}, op_, true);
-#if defined(LIBXR_TEST_BUILD)
-  RunTestHook(TestCheckpoint::AFTER_COMMIT_WRITE);
-#endif
   buffered_size_ = 0;
-#if defined(LIBXR_TEST_BUILD)
-  RunTestHook(TestCheckpoint::AFTER_BUFFER_RESET);
-#endif
 
   if (op_.type != WriteOperation::OperationType::BLOCK)
   {
     port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-#if defined(LIBXR_TEST_BUILD)
-    RunTestHook(TestCheckpoint::AFTER_PORT_RELEASE);
-#endif
   }
 
   // Reopen Stream admission only after both local metadata and Port ownership are final.

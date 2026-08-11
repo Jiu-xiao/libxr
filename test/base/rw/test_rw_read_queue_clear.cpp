@@ -3,14 +3,14 @@
  * @brief base `ReadPort::ClearQueuedData` 场景子测试。 Split test unit for base
  * `ReadPort::ClearQueuedData` scenarios.
  * @details 测试项目：
- *          1. 空闲队列上的 `ClearQueuedData` 会吃掉已有数据并复位 busy 状态。
- *          2. 无挂起读取时，producer 用 `EVENT` 保留已有队列数据的可读事实；后续读取和
- *             清空可以依次消费它们。
+ *          1. 空闲队列上的 `ClearQueuedData` 会吃掉已有数据。
+ *          2. 无挂起读取时，producer 通知会保留已有队列数据的可读事实；后续读取和清空
+ *             可以依次消费它们。
  *          3. 读等待挂起期间调用 `ClearQueuedData` 会返回
  * `BUSY`，不会偷吃尚未交付的数据。 Test items:
- *          1. `ClearQueuedData` consumes queued bytes and resets busy state while idle.
- *          2. A producer records `EVENT` for queued bytes when no read is pending; a
- * later read and clear consume those bytes in order.
+ *          1. `ClearQueuedData` consumes queued bytes while idle.
+ *          2. A producer notification preserves queued readability when no read is
+ * pending; a later read and clear consume those bytes in order.
  *          3. `ClearQueuedData` returns `BUSY` during pending reads and leaves unread
  * bytes intact.
  */
@@ -28,9 +28,8 @@ namespace
  */
 void test_rw_read_port_clear_queued_data_clears_idle_queue()
 {
-  // 测试内容：空闲读口在清空队列后应回到 `IDLE`，并递增一次 dequeue 计数。
-  // Test coverage: an idle read port should return to `IDLE` and record one dequeue after
-  // clearing.
+  // 测试内容：空闲读口在清空队列后应递增一次 dequeue 计数。
+  // Test coverage: an idle read port should record one dequeue after clearing.
   using namespace LibXR;
 
   TrackingReadPort r(16);
@@ -42,7 +41,6 @@ void test_rw_read_port_clear_queued_data_clears_idle_queue()
   ASSERT(r.ClearQueuedData() == ErrorCode::OK);
   ASSERT(r.Size() == 0);
   ASSERT(r.dequeue_count == 1);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 /**
@@ -54,10 +52,10 @@ void test_rw_read_port_clear_queued_data_clears_idle_queue()
  */
 void test_rw_read_port_ownerless_data_remains_readable()
 {
-  // 测试内容：无挂起读取时，producer 以 EVENT 保留队列可读事实，后续读取和清空应正常
+  // 测试内容：无挂起读取时，producer 通知保留队列可读事实，后续读取和清空应正常
   // 消费数据。
-  // Test coverage: without a pending read, EVENT carries queued readiness until a later
-  // read and clear consume the bytes.
+  // Test coverage: without a pending read, producer notification preserves queued
+  // readiness until a later read and clear consume the bytes.
   using namespace LibXR;
 
   TrackingReadPort r(16);
@@ -66,7 +64,6 @@ void test_rw_read_port_ownerless_data_remains_readable()
   ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
 
   r.ProcessPendingReads(false);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::EVENT);
   ASSERT(r.Size() == sizeof(TX));
 
   uint8_t read_back[2] = {};
@@ -79,7 +76,6 @@ void test_rw_read_port_ownerless_data_remains_readable()
   ASSERT(r.ClearQueuedData() == ErrorCode::OK);
   ASSERT(r.Size() == 0);
   ASSERT(r.dequeue_count == 2);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 /**

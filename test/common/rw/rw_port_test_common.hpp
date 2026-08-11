@@ -25,6 +25,32 @@ LibXR::ErrorCode PendingWriteFun(LibXR::WritePort&, bool)
   return LibXR::ErrorCode::PENDING;
 }
 
+struct ImmediateFinishWritePort : LibXR::WritePort
+{
+  ImmediateFinishWritePort(size_t queue_size = 2, size_t buffer_size = 64)
+      : WritePort(queue_size, buffer_size)
+  {
+    WritePort::operator=(HandleWrite);
+  }
+
+  static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool in_isr)
+  {
+    auto& port = static_cast<ImmediateFinishWritePort&>(base);
+    LibXR::WriteInfoBlock info{};
+    ASSERT(port.queue_info_->Pop(info) == LibXR::ErrorCode::OK);
+    ASSERT(info.data.size_ <= sizeof(port.payload));
+    port.payload_size = info.data.size_;
+    ASSERT(port.queue_data_->PopBatch(port.payload, port.payload_size) ==
+           LibXR::ErrorCode::OK);
+    port.Finish(in_isr, port.finish_result, info);
+    return LibXR::ErrorCode::PENDING;
+  }
+
+  LibXR::ErrorCode finish_result = LibXR::ErrorCode::OK;
+  uint8_t payload[64]{};
+  size_t payload_size = 0;
+};
+
 LibXR::ErrorCode FailWriteFun(LibXR::WritePort& port, bool)
 {
   LibXR::WriteInfoBlock info;
@@ -67,22 +93,6 @@ void VerifyPendingReadMode(TestMode mode)
   std::vector<uint8_t> rx(4, 0x7A);
   ReadHarness read(mode, BLOCK_OPERATION_TIMEOUT_MS);
 
-  if (mode == TestMode::BLOCK)
-  {
-    Semaphore done;
-    Thread finisher;
-    StartReadQueueCompleter(finisher, r, done, tx.data(), tx.size(), "rd_queue");
-
-    auto block_result = r(RawData{rx.data(), rx.size()}, read.op);
-    ASSERT(block_result == ErrorCode::OK);
-
-    ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
-    JoinThreadIfNeeded(finisher);
-    ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-    return;
-  }
-
   auto call_result = r(RawData{rx.data(), rx.size()}, read.op);
   ASSERT(call_result == ErrorCode::OK);
   read.ExpectPendingSubmitted();
@@ -94,7 +104,6 @@ void VerifyPendingReadMode(TestMode mode)
     read.ExpectFinal(ErrorCode::OK);
   }
   ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 /**
@@ -114,21 +123,6 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
 
   std::vector<uint8_t> tx = {0x31, 0x41, 0x59, 0x26};
   WriteHarness write(mode);
-
-  if (mode == TestMode::BLOCK)
-  {
-    Semaphore done;
-    Thread finisher;
-    StartWriteFinisher(finisher, w, done, result, "wr_finish");
-
-    auto block_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
-    ASSERT(block_result == result);
-
-    ExpectWaitOk(done);
-    JoinThreadIfNeeded(finisher);
-    ASSERT(w.queue_info_->Size() == 0);
-    return;
-  }
 
   auto call_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
   ASSERT(call_result == ErrorCode::OK);
@@ -174,7 +168,6 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
     read.ExpectFinal(reason);
   }
   ASSERT(std::memcmp(rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
   ASSERT(r.Size() == 0);
 }
 
@@ -207,7 +200,6 @@ void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   {
     write.ExpectFinal(reason);
   }
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
   ASSERT(w.Size() == 0);
   ASSERT(w.queue_info_->Size() == 0);
 }

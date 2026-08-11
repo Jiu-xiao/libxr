@@ -14,7 +14,16 @@
  */
 #pragma once
 
+#include <linux/futex.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <string>
 
 #include "rw_mode_test_common.hpp"
 
@@ -30,13 +39,29 @@ using LibXRTest::TestMode;
 using LibXRTest::THREAD_STATE_TIMEOUT_MS;
 using LibXRTest::WriteHarness;
 
-template <typename Port>
-bool WaitForBusyState(Port& port, typename Port::BusyState expected,
-                      uint32_t timeout_ms = THREAD_STATE_TIMEOUT_MS)
+// Observe the real Linux wait point so a producer or fail-clear cannot run before the
+// request has been published and its caller has entered Semaphore::Wait().
+pid_t CurrentLinuxThreadId() { return static_cast<pid_t>(syscall(SYS_gettid)); }
+
+bool IsThreadBlockedInFutexWait(pid_t thread_id)
+{
+  std::ifstream syscall_state("/proc/self/task/" + std::to_string(thread_id) +
+                              "/syscall");
+  long syscall_number = -1;
+  uintptr_t futex_address = 0;
+  uintptr_t futex_operation = 0;
+  syscall_state >> std::dec >> syscall_number >> std::hex >> futex_address >>
+      futex_operation;
+
+  return !syscall_state.fail() && syscall_number == SYS_futex &&
+         (futex_operation & FUTEX_CMD_MASK) == FUTEX_WAIT;
+}
+
+bool WaitForLinuxFutexWait(pid_t thread_id, uint32_t timeout_ms = THREAD_STATE_TIMEOUT_MS)
 {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (port.busy_.load(std::memory_order_acquire) != expected)
+  while (!IsThreadBlockedInFutexWait(thread_id))
   {
     if (std::chrono::steady_clock::now() >= deadline)
     {
@@ -45,6 +70,26 @@ bool WaitForBusyState(Port& port, typename Port::BusyState expected,
     LibXR::Thread::Yield();
   }
   return true;
+}
+
+bool WaitForLinuxFutexWait(const std::atomic<pid_t>& thread_id,
+                           uint32_t timeout_ms = THREAD_STATE_TIMEOUT_MS)
+{
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (true)
+  {
+    const pid_t observed = thread_id.load(std::memory_order_acquire);
+    if (observed > 0 && IsThreadBlockedInFutexWait(observed))
+    {
+      return true;
+    }
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      return false;
+    }
+    LibXR::Thread::Yield();
+  }
 }
 
 /**
@@ -82,6 +127,8 @@ struct ReadQueueCompletionContext
   LibXR::Semaphore* done;
   const uint8_t* data;
   size_t size;
+  pid_t target_thread_id;
+  std::atomic<bool>* target_armed;
 };
 
 /**
@@ -95,7 +142,14 @@ struct ReadQueueCompletionContext
  */
 void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
-  REQUIRE(WaitForBusyState(*ctx.port, LibXR::ReadPort::BusyState::PENDING));
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(THREAD_STATE_TIMEOUT_MS);
+  while (!ctx.target_armed->load(std::memory_order_acquire))
+  {
+    REQUIRE(std::chrono::steady_clock::now() < deadline);
+    LibXR::Thread::Yield();
+  }
+  REQUIRE(WaitForLinuxFutexWait(ctx.target_thread_id));
 
   auto ans = ctx.port->queue_data_->PushBatch(ctx.data, ctx.size);
   UNUSED(ans);
@@ -142,6 +196,8 @@ struct BlockingReadCallContext
   uint32_t timeout_ms;
   LibXR::ErrorCode result;
   LibXR::Semaphore* done;
+  std::atomic<pid_t> thread_id{0};
+  LibXR::Semaphore* semaphore = nullptr;
 };
 
 /**
@@ -154,8 +210,11 @@ struct BlockingReadCallContext
  */
 void BlockingReadCall(BlockingReadCallContext* ctx)
 {
-  LibXR::Semaphore sem(0);
-  LibXR::ReadOperation op(sem, ctx->timeout_ms);
+  LibXR::Semaphore local_semaphore(0);
+  LibXR::Semaphore& semaphore =
+      ctx->semaphore == nullptr ? local_semaphore : *ctx->semaphore;
+  LibXR::ReadOperation op(semaphore, ctx->timeout_ms);
+  ctx->thread_id.store(CurrentLinuxThreadId(), std::memory_order_release);
   ctx->result = (*ctx->port)(ctx->data, op);
   ctx->done->Post();
 }
@@ -167,6 +226,7 @@ struct BlockingWriteCallContext
   uint32_t timeout_ms;
   LibXR::ErrorCode result;
   LibXR::Semaphore* done;
+  std::atomic<pid_t> thread_id{0};
 };
 
 /**
@@ -181,15 +241,17 @@ void BlockingWriteCall(BlockingWriteCallContext* ctx)
 {
   LibXR::Semaphore sem(0);
   LibXR::WriteOperation op(sem, ctx->timeout_ms);
+  ctx->thread_id.store(CurrentLinuxThreadId(), std::memory_order_release);
   ctx->result = (*ctx->port)(ctx->data, op);
   ctx->done->Post();
 }
 
 void StartReadQueueCompleter(LibXR::Thread& thread, LibXR::ReadPort& port,
-                             LibXR::Semaphore& done, const uint8_t* data, size_t size,
-                             const char* name)
+                             LibXR::Semaphore& done, std::atomic<bool>& target_armed,
+                             const uint8_t* data, size_t size, const char* name)
 {
-  thread.Create(ReadQueueCompletionContext{&port, &done, data, size},
+  thread.Create(ReadQueueCompletionContext{&port, &done, data, size,
+                                           CurrentLinuxThreadId(), &target_armed},
                 CompletePendingReadFromQueue, name, 1024,
                 LibXR::Thread::Priority::MEDIUM);
 }

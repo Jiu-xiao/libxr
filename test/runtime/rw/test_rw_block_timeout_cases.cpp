@@ -22,6 +22,57 @@
 namespace
 {
 
+void test_rw_block_read_insufficient_data_times_out_and_recovers()
+{
+  using namespace LibXR;
+
+  ReadPort port(4);
+  Semaphore operation_semaphore;
+
+  uint8_t stale[2] = {0xA1, 0xA2};
+  Semaphore first_done;
+  BlockingReadCallContext first{&port, RawData{stale, sizeof(stale)}, 1000,
+                                ErrorCode::FAILED, &first_done};
+  first.semaphore = &operation_semaphore;
+  Thread first_reader;
+  StartBlockingReadCaller(first_reader, first, "rd_partial_timeout");
+
+  REQUIRE(WaitForLinuxFutexWait(first.thread_id));
+  static const uint8_t FIRST_BYTE = 0x51;
+  ASSERT(port.queue_data_->Push(FIRST_BYTE) == ErrorCode::OK);
+  port.ProcessPendingReads(false);
+  REQUIRE(WaitForLinuxFutexWait(first.thread_id));
+
+  ExpectWaitOk(first_done, THREAD_STATE_TIMEOUT_MS);
+  JoinThreadIfNeeded(first_reader);
+  ASSERT(first.result == ErrorCode::TIMEOUT);
+  static const uint8_t STALE_EXPECTED[] = {0xA1, 0xA2};
+  ASSERT(std::memcmp(stale, STALE_EXPECTED, sizeof(STALE_EXPECTED)) == 0);
+  ASSERT(port.Size() == 1U);
+  ASSERT(operation_semaphore.Value() == 0U);
+  ASSERT(port.ClearQueuedData(false) == ErrorCode::OK);
+
+  uint8_t recovered = 0;
+  Semaphore second_done;
+  BlockingReadCallContext second{&port, RawData{&recovered, 1}, UINT32_MAX,
+                                 ErrorCode::FAILED, &second_done};
+  second.semaphore = &operation_semaphore;
+  Thread second_reader;
+  StartBlockingReadCaller(second_reader, second, "rd_partial_recover");
+
+  REQUIRE(WaitForLinuxFutexWait(second.thread_id));
+  static const uint8_t SECOND_BYTE = 0x62;
+  ASSERT(port.queue_data_->Push(SECOND_BYTE) == ErrorCode::OK);
+  port.ProcessPendingReads(false);
+
+  ExpectWaitOk(second_done, THREAD_STATE_TIMEOUT_MS);
+  JoinThreadIfNeeded(second_reader);
+  ASSERT(second.result == ErrorCode::OK);
+  ASSERT(recovered == SECOND_BYTE);
+  ASSERT(port.Size() == 0U);
+  ASSERT(operation_semaphore.Value() == 0U);
+}
+
 /**
  * @brief 测试入口函数 `test_rw_block_read_timeout_detaches_pending`。 Test entry function
  * `test_rw_block_read_timeout_detaches_pending`.
@@ -87,11 +138,14 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
     uint8_t dummy = 0xA0;
     ReadHarness read(mode, BLOCK_OPERATION_TIMEOUT_MS);
     Semaphore done;
+    std::atomic<bool> read_armed{false};
     Thread finisher;
 
     static const uint8_t TX[] = {0x31, 0x32};
-    StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_zero_ready");
+    StartReadQueueCompleter(finisher, r, done, read_armed, TX, sizeof(TX),
+                            "rd_zero_ready");
 
+    read_armed.store(true, std::memory_order_release);
     auto ec = r(RawData{&dummy, 0}, read.op);
     ASSERT(ec == ErrorCode::OK);
     ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
@@ -104,7 +158,6 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
 
     ASSERT(dummy == 0xA0);
     ASSERT(r.dequeue_count == 0);
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
     ASSERT(r.Size() == sizeof(TX));
 
     uint8_t follow_up[sizeof(TX)] = {};
@@ -179,9 +232,12 @@ void test_rw_read_port_block_queue_completion_copies_data()
   Semaphore sem;
   ReadOperation op(sem, BLOCK_OPERATION_TIMEOUT_MS);
   Semaphore done;
+  std::atomic<bool> read_armed{false};
   Thread finisher;
-  StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_queue_block");
+  StartReadQueueCompleter(finisher, r, done, read_armed, TX, sizeof(TX),
+                          "rd_queue_block");
 
+  read_armed.store(true, std::memory_order_release);
   auto ec = r(RawData{rx, sizeof(rx)}, op);
   ASSERT(ec == ErrorCode::OK);
   ExpectWaitOk(done, THREAD_STATE_TIMEOUT_MS);
@@ -202,6 +258,7 @@ void test_rw_read_port_block_queue_completion_copies_data()
  */
 void RunRuntimeRwBlockTimeoutTests()
 {
+  test_rw_block_read_insufficient_data_times_out_and_recovers();
   test_rw_block_read_timeout_detaches_pending();
   test_rw_zero_read_pending_notifies_without_dequeue();
   test_rw_block_write_timeout_detaches_waiter();

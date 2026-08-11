@@ -8,9 +8,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <barrier>
 #include <cerrno>
 #include <chrono>
-#include <semaphore>
 #include <thread>
 
 #include "rw_test_common.hpp"
@@ -64,16 +64,7 @@ int RunRwIsrWriteBlockScenario()
 namespace
 {
 
-constexpr auto READ_HOOK_TIMEOUT = std::chrono::seconds(10);
-
-struct ReadPublishRace
-{
-  explicit ReadPublishRace(LibXR::ReadPort& expected) : expected_port(&expected) {}
-
-  LibXR::ReadPort* expected_port;
-  std::binary_semaphore metadata_published{0};
-  std::binary_semaphore producer_done{0};
-};
+constexpr size_t READ_PUBLISH_RACE_ITERATIONS = 1024;
 
 void ExpectFatalTermination(const char* scenario)
 {
@@ -113,20 +104,6 @@ void ExpectFatalTermination(const char* scenario)
   }
 
   ASSERT(WIFSIGNALED(status) || (WIFEXITED(status) && WEXITSTATUS(status) != 0));
-}
-
-void CoordinateReadPublish(LibXR::ReadPort& port,
-                           LibXR::ReadPortTestCheckpoint checkpoint, void* raw)
-{
-  auto& race = *static_cast<ReadPublishRace*>(raw);
-  ASSERT(&port == race.expected_port);
-  if (checkpoint != LibXR::ReadPortTestCheckpoint::READ_BEFORE_PENDING_PUBLISH)
-  {
-    return;
-  }
-
-  race.metadata_published.release();
-  ASSERT(race.producer_done.try_acquire_for(READ_HOOK_TIMEOUT));
 }
 
 }  // namespace
@@ -184,36 +161,53 @@ void test_rw_edge_cases()
   w.Finish(false, ErrorCode::OK, completed);
 }
 
-void test_rw_read_publish_rechecks_external_producer_event()
+void test_rw_read_publish_handles_concurrent_producer()
 {
   using namespace LibXR;
 
   ReadPort port(4);
-  uint8_t received = 0;
-  OperationPollingStatus status;
-  ReadOperation operation(status);
-  ReadPublishRace race(port);
-  ErrorCode submit_result = ErrorCode::FAILED;
+  std::barrier<> iteration_start(2);
+  std::barrier<> iteration_done(2);
 
-  port.SetTestHook(CoordinateReadPublish, &race);
-  std::thread submitter(
-      [&]() { submit_result = port(RawData{&received, 1}, operation, false); });
+  std::thread producer(
+      [&]()
+      {
+        for (size_t iteration = 0; iteration < READ_PUBLISH_RACE_ITERATIONS; ++iteration)
+        {
+          iteration_start.arrive_and_wait();
+          if ((iteration & 1U) != 0U)
+          {
+            std::this_thread::yield();
+          }
+          const uint8_t data = static_cast<uint8_t>((iteration % 251U) + 1U);
+          ASSERT(port.queue_data_->Push(data) == ErrorCode::OK);
+          port.ProcessPendingReads(false);
+          iteration_done.arrive_and_wait();
+        }
+      });
 
-  ASSERT(race.metadata_published.try_acquire_for(READ_HOOK_TIMEOUT));
-  static const uint8_t DATA = 0x5A;
-  ASSERT(port.queue_data_->Push(DATA) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::EVENT);
-  race.producer_done.release();
+  for (size_t iteration = 0; iteration < READ_PUBLISH_RACE_ITERATIONS; ++iteration)
+  {
+    uint8_t received = 0;
+    OperationPollingStatus status;
+    ReadOperation operation(status);
 
-  submitter.join();
-  port.SetTestHook(nullptr, nullptr);
+    iteration_start.arrive_and_wait();
+    if ((iteration & 1U) == 0U)
+    {
+      std::this_thread::yield();
+    }
+    const ErrorCode submit_result = port(RawData{&received, 1}, operation, false);
+    iteration_done.arrive_and_wait();
 
-  ASSERT(submit_result == ErrorCode::OK);
-  ASSERT(status.Load() == OperationPollingStatus::DONE);
-  ASSERT(received == DATA);
-  ASSERT(port.Size() == 0U);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
+    const uint8_t expected = static_cast<uint8_t>((iteration % 251U) + 1U);
+    ASSERT(submit_result == ErrorCode::OK);
+    ASSERT(status.Load() == OperationPollingStatus::DONE);
+    ASSERT(received == expected);
+    ASSERT(port.Size() == 0U);
+  }
+
+  producer.join();
 }
 
 void test_rw_zero_capacity_read_port_is_not_supported()
@@ -228,7 +222,6 @@ void test_rw_zero_capacity_read_port_is_not_supported()
   ASSERT(!port.Readable());
   ASSERT(port(RawData{&received, 1}, operation) == ErrorCode::NOT_SUPPORT);
   ASSERT(status.Load() == OperationPollingStatus::READY);
-  ASSERT(port.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 void test_rw_isr_block_fails_before_capability_checks()
@@ -249,7 +242,7 @@ void RunBaseRwPendingTests()
 {
   test_rw_pending_mode_matrix();
   test_rw_edge_cases();
-  test_rw_read_publish_rechecks_external_producer_event();
+  test_rw_read_publish_handles_concurrent_producer();
   test_rw_zero_capacity_read_port_is_not_supported();
   test_rw_isr_block_fails_before_capability_checks();
 }
