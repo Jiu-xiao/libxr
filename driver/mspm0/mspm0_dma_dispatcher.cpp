@@ -24,7 +24,6 @@ struct Slot
   void* context_ = nullptr;
   EventMask subscribed_events_ = 0U;
   EventMask enabled_events_ = 0U;
-  uint32_t generation_ = 0U;
 };
 
 struct Invocation
@@ -64,39 +63,20 @@ std::atomic<uint32_t> enabled_raw_mask{0U};
 std::atomic<uint32_t> last_unclaimed_mask{0U};
 std::atomic<uint32_t> unclaimed_count{0U};
 std::atomic<uint32_t> drain_limit_count{0U};
-uint32_t next_generation = 1U;
-#if !defined(LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER)
-bool irq_enabled_by_broker = false;
-#endif
 
 [[nodiscard]] constexpr bool EventsAreValid(EventMask events)
 {
   return events != 0U && (events & ~ALL_EVENTS) == 0U;
 }
 
-[[nodiscard]] bool TokenMatches(uint8_t channel, uint32_t generation)
+[[nodiscard]] bool TokenMatches(uint8_t channel)
 {
-  if (generation == 0U || channel >= slots.size())
+  if (channel >= slots.size())
   {
     return false;
   }
 
-  const Slot& slot = slots[channel];
-  return slot.callback_ != nullptr && slot.generation_ == generation;
-}
-
-[[nodiscard]] uint32_t AllocateGeneration()
-{
-  uint32_t generation = next_generation++;
-  if (generation == 0U)
-  {
-    generation = next_generation++;
-  }
-  if (next_generation == 0U)
-  {
-    next_generation = 1U;
-  }
-  return generation;
+  return slots[channel].callback_ != nullptr;
 }
 
 [[nodiscard]] bool AnyErrorSubscriberEnabled()
@@ -185,7 +165,7 @@ ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* c
   bool first_registration = false;
   {
     InterruptGuard guard;
-    if (out.IsValid())
+    if (out.channel_ != 0xFFU)
     {
       return ErrorCode::STATE_ERR;
     }
@@ -196,14 +176,11 @@ ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* c
 
     first_registration = !AnySlotRegistered();
     Slot& slot = slots[channel];
-    const uint32_t generation = AllocateGeneration();
     slot.context_ = context;
     slot.subscribed_events_ = events;
     slot.enabled_events_ = 0U;
-    slot.generation_ = generation;
     slot.callback_ = callback;
     out.channel_ = channel;
-    out.generation_ = generation;
   }
 #if !defined(LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER)
   if (first_registration)
@@ -212,7 +189,6 @@ ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* c
     if (NVIC_GetEnableIRQ(DMA_INT_IRQn) == 0U)
     {
       NVIC_EnableIRQ(DMA_INT_IRQn);
-      irq_enabled_by_broker = true;
     }
   }
 #else
@@ -221,7 +197,7 @@ ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* c
   return ErrorCode::OK;
 }
 
-ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled)
+ErrorCode SetEnabled(const Registration& registration, EventMask events, bool enabled)
 {
   if (!EventsAreValid(events))
   {
@@ -229,7 +205,7 @@ ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled)
   }
 
   InterruptGuard guard;
-  if (!TokenMatches(registration.channel_, registration.generation_))
+  if (!TokenMatches(registration.channel_))
   {
     return ErrorCode::STATE_ERR;
   }
@@ -280,50 +256,6 @@ ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled)
   }
 
   PublishEnabledRawMask();
-  return ErrorCode::OK;
-}
-
-ErrorCode Unregister(Registration& registration)
-{
-  InterruptGuard guard;
-  if (!TokenMatches(registration.channel_, registration.generation_))
-  {
-    registration.channel_ = 0xFFU;
-    registration.generation_ = 0U;
-    return ErrorCode::STATE_ERR;
-  }
-
-  Slot& slot = slots[registration.channel_];
-  const uint32_t channel_raw_mask =
-      ChannelRawMask(registration.channel_, slot.subscribed_events_);
-  if (channel_raw_mask != 0U)
-  {
-    DL_DMA_disableInterrupt(DMA, channel_raw_mask);
-    DL_DMA_clearInterruptStatus(DMA, channel_raw_mask);
-  }
-
-  const bool removed_enabled_error = (slot.enabled_events_ & ERROR) != 0U;
-  slot.callback_ = nullptr;
-  slot.context_ = nullptr;
-  slot.subscribed_events_ = 0U;
-  slot.enabled_events_ = 0U;
-  slot.generation_ = 0U;
-  registration.channel_ = 0xFFU;
-  registration.generation_ = 0U;
-
-  if (removed_enabled_error && !AnyErrorSubscriberEnabled())
-  {
-    DL_DMA_disableInterrupt(DMA, ErrorMask());
-    DL_DMA_clearInterruptStatus(DMA, ErrorMask());
-  }
-  PublishEnabledRawMask();
-#if !defined(LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER)
-  if (!AnySlotRegistered() && irq_enabled_by_broker)
-  {
-    NVIC_DisableIRQ(DMA_INT_IRQn);
-    irq_enabled_by_broker = false;
-  }
-#endif
   return ErrorCode::OK;
 }
 
@@ -423,14 +355,6 @@ uint32_t GetUnclaimedCount() { return unclaimed_count.load(std::memory_order_rel
 uint32_t GetDrainLimitCount()
 {
   return drain_limit_count.load(std::memory_order_relaxed);
-}
-
-void ResetDiagnostics()
-{
-  InterruptGuard guard;
-  last_unclaimed_mask.store(0U, std::memory_order_relaxed);
-  unclaimed_count.store(0U, std::memory_order_relaxed);
-  drain_limit_count.store(0U, std::memory_order_relaxed);
 }
 
 }  // namespace LibXR::MSPM0DmaDispatcher

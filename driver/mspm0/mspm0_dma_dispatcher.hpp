@@ -11,11 +11,10 @@
  * @brief MSPM0 共享 DMA 中断向量集成契约 / MSPM0 shared DMA-vector integration contract
  *
  * 默认模式提供唯一的 `DMA_IRQHandler`。首个 registration 出现时，仅在共享 IRQ 尚未使能
- * 时使能 NVIC；最后一个 registration 释放后，也只撤销本模块执行的使能。完整 BSP 中每个
- * 已使能的 DMA 原因都必须注册；未认领原因不会被清除，并会保持 pending。 / In default
- * mode, this module provides the sole `DMA_IRQHandler`. It enables the shared NVIC line
- * after the first registration only when the line was previously disabled, and disables
- * it after the last registration only if this module performed the enable. Every enabled
+ * 时使能 NVIC，之后不再由本模块关闭。完整 BSP 中每个已使能的 DMA 原因都必须注册；未认领
+ * 原因不会被清除，并会保持 pending。 / In default mode, this module provides the sole
+ * `DMA_IRQHandler`. It enables the shared NVIC line after the first registration only
+ * when the line was previously disabled and never disables it afterward. Every enabled
  * DMA cause in the complete BSP must be registered; an unclaimed cause is left pending.
  *
  * 定义 `LIBXR_MSPM0_DMA_EXTERNAL_IRQ_HANDLER` 的 BSP 必须在本分发器编译单元中使用相同
@@ -93,7 +92,9 @@ class Registration;
  * @param callback 在屏蔽可屏蔽中断时执行的有界 ISR 回调；不得修改或递归调用本分发器 /
  *                 Bounded ISR callback invoked with maskable interrupts disabled; it
  *                 must not mutate or recursively dispatch this dispatcher
- * @param context 传给回调的不透明上下文 / Opaque callback context
+ * @param context 传给回调的不透明上下文；非空时其目标必须与通道 owner 具有相同的程序
+ *                生命周期 / Opaque callback context; when non-null, its target must
+ *                share the program lifetime of the channel owner
  * @param out 成功时写入的空 registration token / Empty registration token populated on
  *            success
  * @return 成功时返回 `OK`；事件或回调无效时返回 `ARG_ERR`；通道越界时返回
@@ -102,9 +103,9 @@ class Registration;
  *         invalid events or callback; `OUT_OF_RANGE` for an invalid channel;
  *         `NOT_SUPPORT` when EARLY is unavailable; `STATE_ERR` when `out` is already
  *         valid; `BUSY` when the channel already has an owner
- * @note token 析构不会自动注销；成功后调用方必须保留 token 并显式调用 `Unregister()` /
- *       Token destruction does not unregister the channel; after success, the caller
- *       must retain the token and explicitly call `Unregister()`
+ * @note registration 在程序生命周期内永久占有通道；调用方必须保留 token 以控制事件使能 /
+ *       The registration owns the channel for the program lifetime; the caller must
+ *       retain the token to control event enables
  */
 ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* context,
                    Registration& out);
@@ -116,27 +117,14 @@ ErrorCode Register(uint8_t channel, EventMask events, Callback callback, void* c
  * @param events 非零且必须是 registration 已订阅事件的子集 / Nonzero subset of events
  *               subscribed by the registration
  * @param enabled `true` 表示使能，`false` 表示禁用 / `true` to enable, `false` to disable
- * @return 成功或目标状态已满足时返回 `OK`；事件无效或未订阅时返回 `ARG_ERR`；token 已
- *         失效时返回 `STATE_ERR` / `OK` on success or when the requested state already
- *         holds; `ARG_ERR` for invalid or unsubscribed events; `STATE_ERR` for a stale
+ * @return 成功或目标状态已满足时返回 `OK`；事件无效或未订阅时返回 `ARG_ERR`；token
+ *         无效时返回 `STATE_ERR` / `OK` on success or when the requested state already
+ *         holds; `ARG_ERR` for invalid or unsubscribed events; `STATE_ERR` for an invalid
  *         token
  * @note 禁用事件前，调用方必须先静止对应 DMA producer / The caller must quiesce the
  *       corresponding DMA producer before disabling events
  */
-ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled);
-
-/**
- * @brief 释放已静止的 registration 并使 token 失效 / Release a quiescent registration and
- * invalidate its token
- * @param registration 要释放的有效通道 registration token / Live channel registration
- *                     token to release
- * @return 成功时返回 `OK`；token 已失效时返回 `STATE_ERR`。两种结果都会使传入 token
- *         失效 / `OK` on success; `STATE_ERR` for a stale token. The supplied token is
- *         invalidated in either case
- * @pre 不得有 DMA 传输、回调或并发分发器操作继续使用该 token / No DMA transfer,
- *      callback, or concurrent dispatcher operation may still use this token
- */
-ErrorCode Unregister(Registration& registration);
+ErrorCode SetEnabled(const Registration& registration, EventMask events, bool enabled);
 
 /**
  * @brief 分发当前已使能且归本分发器所有的 DMA 原因 / Dispatch enabled dispatcher-owned
@@ -186,19 +174,18 @@ void Dispatch();
 /**
  * @name 分发器诊断 / Dispatcher diagnostics
  *
- * getter 分别返回 relaxed 单项快照，不构成跨字段一致快照；计数器为不饱和
+ * getter 分别返回 relaxed 单项快照，不构成跨字段一致快照；计数器不提供 reset，为不饱和
  * `uint32_t`，会自然回绕。 / Each getter returns an independent relaxed snapshot, not a
- * consistent multi-field snapshot. Counters are non-saturating `uint32_t` values and wrap
- * naturally.
+ * consistent multi-field snapshot. Counters have no reset operation, are non-saturating
+ * `uint32_t` values, and wrap naturally.
  * @{
  */
 
 /**
  * @brief 取得最近一次分发观察到的未认领已使能原因 / Get the latest unclaimed enabled
  * causes
- * @return 最近一次 `Dispatch()` 观察到的原始原因掩码；尚未观察或调用
- *         `ResetDiagnostics()` 后为零 / Raw cause mask observed by the latest
- *         `Dispatch()`; zero before observation or after `ResetDiagnostics()`
+ * @return 最近一次 `Dispatch()` 观察到的原始原因掩码；尚未观察时为零 / Raw cause mask
+ *         observed by the latest `Dispatch()`; zero before the first observation
  */
 [[nodiscard]] uint32_t GetLastUnclaimedMask();
 
@@ -216,25 +203,15 @@ void Dispatch();
  */
 [[nodiscard]] uint32_t GetDrainLimitCount();
 
-/**
- * @brief 在单核 PRIMASK 临界区清零分发器诊断 / Reset diagnostics in a single-core
- * PRIMASK critical section
- * @note 只清零诊断值，不修改 registration 或硬件使能；不提供 NMI、HardFault 或 SMP
- *       观察者所需的多字段原子快照 / This resets diagnostics only, without changing
- *       registrations or hardware enables; it does not provide a multi-field atomic
- *       snapshot to NMI, HardFault, or SMP observers
- */
-void ResetDiagnostics();
-
 /** @} */
 
 /**
  * @brief 单个通道 registration 的不可复制能力 token / Non-copyable channel token
  *
- * 默认构造的 token 无效；`Register()` 成功后变为有效。调用方必须保留它并显式传给
- * `Unregister()`，析构不会自动注销。 / A default-constructed token is invalid;
- * `Register()` makes it valid. The caller must retain it and explicitly pass it to
- * `Unregister()`; destruction does not unregister the channel.
+ * 默认构造的 token 无效；`Register()` 成功后永久绑定通道。调用方必须让 token 与通道
+ * owner 具有相同的程序生命周期。 / A default-constructed token is invalid;
+ * `Register()` permanently binds it to a channel. The token must share the program
+ * lifetime of the channel owner.
  */
 class Registration
 {
@@ -245,21 +222,13 @@ class Registration
   Registration(Registration&&) = delete;
   Registration& operator=(Registration&&) = delete;
 
-  /**
-   * @brief 检查 token 是否持有有效 registration / Check whether the token is valid
-   * @return 成功注册且尚未注销时返回 `true` / `true` after successful registration and
-   *         before unregistration
-   */
-  [[nodiscard]] bool IsValid() const { return generation_ != 0U; }
-
  private:
   uint8_t channel_ = 0xFFU;
-  uint32_t generation_ = 0U;
 
   friend ErrorCode Register(uint8_t channel, EventMask events, Callback callback,
                             void* context, Registration& out);
-  friend ErrorCode SetEnabled(Registration& registration, EventMask events, bool enabled);
-  friend ErrorCode Unregister(Registration& registration);
+  friend ErrorCode SetEnabled(const Registration& registration, EventMask events,
+                              bool enabled);
 };
 
 }  // namespace LibXR::MSPM0DmaDispatcher

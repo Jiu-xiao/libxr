@@ -228,20 +228,16 @@ class MSPM0UART : public UART
    *      `SYSCFG_DL_init()` 之前的全局初始化阶段构造 / SysConfig initialization must
    *      already have powered and clocked the UART and DMA register blocks; do not
    *      construct during global initialization before `SYSCFG_DL_init()`
-   * @pre DMA 存储必须保持可写、DMA 可访问，并存活到析构完成 / DMA storage must remain
-   *      writable, DMA-accessible, and alive until destruction
+   * @pre DMA 存储必须保持可写、DMA 可访问，并与 UART 实例具有相同的应用生命周期 /
+   *      DMA storage must remain writable, DMA-accessible, and alive for the same
+   *      application lifetime as the UART instance
+   * @note 构造成功后实例会永久占有 UART 与 DMA 资源；不支持析构后重新绑定 / After
+   *       construction, the instance owns its UART and DMA resources permanently;
+   *       teardown and rebinding are not supported
    */
   MSPM0UART(Resources res, RawData tx_dma_storage, RawData rx_dma_storage,
             uint32_t tx_queue_size, uint32_t rx_queue_capacity,
             UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
-
-  /**
-   * @brief 释放已静止的应用生命周期 UART 实例 / Release a quiescent application-lifetime
-   * UART instance
-   * @pre 不得与操作、回调、DMA 传输、IRQ 或新到字符重叠 / No operation, callback, DMA
-   *      transfer, IRQ, or incoming character may overlap destruction
-   */
-  ~MSPM0UART();
 
   /**
    * @brief 异步接纳完整 UART 配置 / Asynchronously admit a complete UART configuration
@@ -574,9 +570,6 @@ class MSPM0UART : public UART
   bool control_active_tx_ = false;
   bool control_error_stop_ = false;
   bool tx_complete_observed_ = false;
-  bool registered_tx_dma_ = false;
-  bool registered_rx_dma_ = false;
-
   static MSPM0UART* instance_map_[MAX_UART_INSTANCES];
 };
 

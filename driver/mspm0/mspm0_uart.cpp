@@ -166,14 +166,12 @@ MSPM0UART::MSPM0UART(Resources res, RawData tx_dma_storage, RawData rx_dma_stora
   REQUIRE(MSPM0DmaDispatcher::Register(res_.dma_tx_channel, dma_error_event,
                                        TxDmaCallback, this,
                                        tx_dma_registration_) == ErrorCode::OK);
-  registered_tx_dma_ = true;
 
   if (res_.rx_mode == RxMode::EXTEND_DMA)
   {
     const uint32_t rx_events = RxDmaEventMask();
     REQUIRE(MSPM0DmaDispatcher::Register(res_.dma_rx_channel, rx_events, RxDmaCallback,
                                          this, rx_dma_registration_) == ErrorCode::OK);
-    registered_rx_dma_ = true;
   }
 
   ApplyInitialConfig(config);
@@ -182,46 +180,6 @@ MSPM0UART::MSPM0UART(Resources res, RawData tx_dma_storage, RawData rx_dma_stora
   StartDataPath();
 
   NVIC_EnableIRQ(res_.irqn);
-}
-
-MSPM0UART::~MSPM0UART()
-{
-  if (res_.index >= MAX_UART_INSTANCES || instance_map_[res_.index] != this)
-  {
-    return;
-  }
-
-  NVIC_DisableIRQ(res_.irqn);
-  NVIC_ClearPendingIRQ(res_.irqn);
-  DL_UART_disableInterrupt(res_.instance, 0xFFFFFFFFU);
-  DL_UART_disableDMAReceiveEvent(res_.instance, DL_UART_DMA_INTERRUPT_RX);
-  DL_UART_disableDMATransmitEvent(res_.instance);
-  DL_DMA_disableChannel(DMA, res_.dma_tx_channel);
-
-  if (registered_rx_dma_)
-  {
-    const uint32_t rx_events = RxDmaEventMask();
-    MSPM0DmaDispatcher::SetEnabled(rx_dma_registration_, rx_events, false);
-    DL_DMA_disableChannel(DMA, res_.dma_rx_channel);
-    (void)MSPM0DmaDispatcher::Unregister(rx_dma_registration_);
-    registered_rx_dma_ = false;
-  }
-
-  if (registered_tx_dma_)
-  {
-    MSPM0DmaDispatcher::SetEnabled(
-        tx_dma_registration_, DispatcherEvent(MSPM0DmaDispatcher::Event::ERROR), false);
-    (void)MSPM0DmaDispatcher::Unregister(tx_dma_registration_);
-    registered_tx_dma_ = false;
-  }
-
-  DL_DMA_clearInterruptStatus(DMA, MSPM0DmaDispatcher::CompleteMask(res_.dma_tx_channel));
-  DL_UART_clearDMATransmitEventStatus(res_.instance);
-  DL_UART_clearDMAReceiveEventStatus(res_.instance, DL_UART_DMA_INTERRUPT_RX);
-  DL_UART_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
-  DL_UART_disable(res_.instance);
-  __DMB();
-  instance_map_[res_.index] = nullptr;
 }
 
 ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
@@ -509,7 +467,7 @@ void MSPM0UART::StopDataPathInterrupts()
   DL_UART_disableDMATransmitEvent(res_.instance);
   MSPM0DmaDispatcher::SetEnabled(
       tx_dma_registration_, DispatcherEvent(MSPM0DmaDispatcher::Event::ERROR), false);
-  if (registered_rx_dma_)
+  if (res_.rx_mode == RxMode::EXTEND_DMA)
   {
     const uint32_t rx_events = RxDmaEventMask();
     MSPM0DmaDispatcher::SetEnabled(rx_dma_registration_, rx_events, false);
