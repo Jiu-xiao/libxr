@@ -11,7 +11,7 @@
 
 #if defined(DMA_IT_SUSP) && defined(DMA_FLAG_SUSP) && !defined(LIBXR_STM32_UART_GPDMA)
 #error \
-    "LibXR STM32UART does not support suspend/linked-list STM32 DMA; no STM32 linked-list RX backend is currently provided"
+    "LibXR STM32UART detected a suspend-capable DMA HAL, but no validated UART RX DMA backend is selected for this STM32 family"
 #endif
 
 #ifdef UART
