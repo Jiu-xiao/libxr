@@ -106,8 +106,12 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   ASSERT(r.Size() == 1);
   ASSERT(r.dequeue_count == 0);
 
-  r.FailAndClearAll(ErrorCode::INIT_ERR, false);
-  read.ExpectFinal(ErrorCode::INIT_ERR);
+  uint8_t tail = 0x6B;
+  ASSERT(r.queue_data_->PushBatch(&tail, 1) == ErrorCode::OK);
+  r.ProcessPendingReads(false);
+  read.ExpectFinal(ErrorCode::OK);
+  ASSERT(rx[0] == queued);
+  ASSERT(rx[1] == tail);
   ASSERT(r.Size() == 0);
 }
 

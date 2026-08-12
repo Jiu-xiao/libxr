@@ -1,8 +1,10 @@
 #pragma once
 
+#include <atomic>
+
 #include "cdc_base.hpp"
+#include "driver/common/serialized_service.hpp"
 #include "ep.hpp"
-#include "flag.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
 
@@ -15,82 +17,91 @@ namespace LibXR
 class CDCUartTxOpDequeueHelper final
 {
  public:
-  /**
-   * @brief 构造函数
-   *        Constructor
-   *
-   * @param port 写端口引用 / Write port reference
-   */
   explicit CDCUartTxOpDequeueHelper(WritePort& port) : port_(port) {}
 
-  /**
-   * @brief 重置内部状态（head 缓存与偏移）
-   *        Reset internal state (cached head and offset)
-   */
-  void Reset()
-  {
-    head_valid_ = false;
-    offset_ = 0;
-  }
-
-  /**
-   * @brief 是否存在可处理的 op
-   *        Whether any op exists
-   *
-   * @return true 存在缓存 head 或 info 队列非空 / Cached head exists or info queue
-   * non-empty
-   * @return false 否则 / Otherwise
-   */
+  /** @return 是否存在尚未完全接受的写操作 / Whether an unaccepted write remains. */
   bool HasOp() { return head_valid_ || (port_.queue_info_->Size() > 0); }
 
+  /** @return 是否有仅存在于当前 endpoint buffer 的待提交数据 / Whether a stage is
+   * prepared. */
+  bool HasPrepared() const { return prepared_len_ != 0U; }
+
   /**
-   * @brief 从 data 队列搬运数据到目标 buffer，并推进 offset（不 pop info）
-   *        Dequeue bytes from data queue into destination buffer and advance offset (no
-   * info pop)
-   *
-   * @param dst     目标 buffer / Destination buffer
-   * @param cap     目标 buffer 容量（字节）/ Destination capacity (bytes)
-   * @param out_len 实际搬运长度（字节）/ Bytes moved
-   * @return ErrorCode::PENDING / ErrorCode::OK / 其它错误码 / Other error codes
+   * @brief 将下一段复制到 endpoint buffer，但不消费 WritePort 数据
+   *        Copy the next chunk into the endpoint buffer without consuming WritePort data
+   * @param dst endpoint buffer / Endpoint buffer
+   * @param cap endpoint buffer capacity / Endpoint buffer capacity
+   * @param out_len prepared byte count / Prepared byte count
+   * @return `OK` 表示该段可结束当前操作，`PENDING` 表示后续仍有数据 /
+   *         `OK` when this chunk can finish the operation, otherwise `PENDING`
    */
-  ErrorCode Take(uint8_t* dst, std::size_t cap, std::size_t& out_len)
+  ErrorCode Prepare(uint8_t* dst, std::size_t cap, std::size_t& out_len)
   {
-    auto ec = EnsureHead();
-    if (ec != ErrorCode::OK)
+    if (prepared_len_ != 0U)
     {
-      out_len = 0;
-      return ec;  // EMPTY / FAILED
+      out_len = prepared_len_;
+      return PreparedCompletesHead() ? ErrorCode::OK : ErrorCode::PENDING;
     }
 
-    const std::size_t REMAINING = Remaining();
-    if (REMAINING == 0)
+    const ErrorCode head_result = EnsureHead();
+    if (head_result != ErrorCode::OK)
     {
-      out_len = 0;
+      out_len = 0U;
+      return head_result;
+    }
+
+    const std::size_t remaining = Remaining();
+    if (remaining == 0U || cap == 0U)
+    {
+      out_len = 0U;
       return ErrorCode::FAILED;
     }
 
-    const std::size_t TAKE = (REMAINING < cap) ? REMAINING : cap;
-
-    if (port_.queue_data_->PopBatch(dst, TAKE) != ErrorCode::OK)
+    const std::size_t prepare_len = (remaining < cap) ? remaining : cap;
+    if (port_.queue_data_->PeekBatch(dst, prepare_len) != ErrorCode::OK)
     {
-      out_len = 0;
+      out_len = 0U;
       return ErrorCode::FAILED;
     }
 
-    offset_ += TAKE;
-    out_len = TAKE;
-
-    return (offset_ == head_.data.size_) ? ErrorCode::OK : ErrorCode::PENDING;
+    prepared_len_ = prepare_len;
+    out_len = prepare_len;
+    return PreparedCompletesHead() ? ErrorCode::OK : ErrorCode::PENDING;
   }
 
   /**
-   * @brief head op 是否已全部出队
-   *        Whether the cached head op is fully dequeued
-   *
-   * @return true 已完成 / Completed
-   * @return false 未完成 / Not completed
+   * @brief 在 endpoint 接受 Transfer 后提交已准备的数据
+   *        Commit prepared data after the endpoint accepts Transfer
    */
-  bool HeadCompleted() const { return head_valid_ && (offset_ == head_.data.size_); }
+  ErrorCode CommitPrepared()
+  {
+    if (!head_valid_ || prepared_len_ == 0U)
+    {
+      return ErrorCode::FAILED;
+    }
+
+    const std::size_t committed_len = prepared_len_;
+    if (port_.queue_data_->PopBatch(nullptr, committed_len) != ErrorCode::OK)
+    {
+      return ErrorCode::FAILED;
+    }
+
+    accepted_ += committed_len;
+    prepared_len_ = 0U;
+    return HeadCompleted() ? ErrorCode::OK : ErrorCode::PENDING;
+  }
+
+  /**
+   * @brief 丢弃仅存在于旧 endpoint buffer 中的 staging 状态
+   *        Discard staging state that exists only in the old endpoint buffer
+   */
+  void CancelPrepared() { prepared_len_ = 0U; }
+
+  /** @return 当前操作是否已被 endpoint 全部接受 / Whether the head is fully accepted. */
+  bool HeadCompleted() const
+  {
+    return head_valid_ && prepared_len_ == 0U && accepted_ == head_.data.size_;
+  }
 
   /**
    * @brief 在 head 完成后 pop info 并重置状态
@@ -110,61 +121,28 @@ class CDCUartTxOpDequeueHelper final
     WriteInfoBlock popped{};
     auto ans = port_.queue_info_->Pop(popped);
     ASSERT(ans == ErrorCode::OK);
+    if (ans != ErrorCode::OK)
+    {
+      return ans;
+    }
 
     if (completed_info)
     {
       *completed_info = popped;
     }
 
-    Reset();
-    return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 丢弃当前 head op 的剩余数据并 pop info
-   *        Drop the current head op's remaining bytes and pop its info.
-   *
-   * @param dropped_info 可选输出：被 pop 的 info / Optional output: popped info
-   * @return ErrorCode::OK 成功 / Success
-   * @return ErrorCode::EMPTY info 队列为空 / Info queue empty
-   * @return 其它错误码表示 data 队列丢弃失败 / Other errors indicate data drop failure
-   */
-  ErrorCode DropHead(WriteInfoBlock* dropped_info = nullptr)
-  {
-    auto ec = EnsureHead();
-    if (ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-
-    const std::size_t REMAINING = Remaining();
-    if (REMAINING > 0)
-    {
-      auto drop_ans = port_.queue_data_->PopBatch(nullptr, REMAINING);
-      if (drop_ans != ErrorCode::OK)
-      {
-        return drop_ans;
-      }
-    }
-
-    WriteInfoBlock popped{};
-    auto pop_ans = port_.queue_info_->Pop(popped);
-    ASSERT(pop_ans == ErrorCode::OK);
-    if (pop_ans != ErrorCode::OK)
-    {
-      return pop_ans;
-    }
-
-    if (dropped_info)
-    {
-      *dropped_info = popped;
-    }
-
-    Reset();
+    ResetHead();
     return ErrorCode::OK;
   }
 
  private:
+  void ResetHead()
+  {
+    head_valid_ = false;
+    accepted_ = 0U;
+    prepared_len_ = 0U;
+  }
+
   /**
    * @brief 确保 head 缓存可用（必要时 Peek info）
    *        Ensure cached head is valid (Peek info if needed)
@@ -187,8 +165,15 @@ class CDCUartTxOpDequeueHelper final
 
     head_ = info;
     head_valid_ = true;
-    offset_ = 0;
+    accepted_ = 0U;
     return ErrorCode::OK;
+  }
+
+  bool PreparedCompletesHead() const
+  {
+    ASSERT(head_valid_);
+    ASSERT(head_.data.size_ >= accepted_);
+    return prepared_len_ == (head_.data.size_ - accepted_);
   }
 
   /**
@@ -200,15 +185,16 @@ class CDCUartTxOpDequeueHelper final
   std::size_t Remaining() const
   {
     ASSERT(head_valid_);
-    ASSERT(head_.data.size_ >= offset_);
-    return head_.data.size_ - offset_;
+    ASSERT(head_.data.size_ >= accepted_);
+    return head_.data.size_ - accepted_;
   }
 
  private:
-  WritePort& port_;          ///< 写端口引用 / Write port reference
-  bool head_valid_ = false;  ///< head 缓存有效标志 / Cached head valid flag
-  WriteInfoBlock head_{};    ///< 缓存的 head info / Cached head info
-  std::size_t offset_ = 0;   ///< 当前 op 已出队偏移 / Dequeued offset within current op
+  WritePort& port_;                ///< 写端口引用 / Write port reference
+  bool head_valid_ = false;        ///< head 缓存有效标志 / Cached head valid flag
+  WriteInfoBlock head_{};          ///< 缓存的 head info / Cached head info
+  std::size_t accepted_ = 0U;      ///< 已被 endpoint 接受的字节数 / Accepted bytes
+  std::size_t prepared_len_ = 0U;  ///< 尚未提交的 staging 长度 / Uncommitted stage
 };
 
 }  // namespace LibXR
@@ -219,8 +205,8 @@ namespace LibXR::USB
 class CDCUart;
 
 /**
- * @brief CDC UART 读端口（背压 + pending 缓存）
- *        CDC UART read port (backpressure + pending cache)
+ * @brief CDC UART 读端口（完整 OUT packet 预留背压）
+ *        CDC UART read port with whole-OUT-packet reservation backpressure
  */
 class CDCUartReadPort : public ReadPort
 {
@@ -246,11 +232,9 @@ class CDCUartReadPort : public ReadPort
 
   CDCUart& owner_;  ///< 所属 CDCUart / Owning CDCUart
 
-  bool recv_pause_ =
-      false;  ///< 背压标志：true 表示 OUT 未 rearm / Backpressure flag: OUT not rearmed
-  ConstRawData pending_data_{
-      nullptr,
-      0};  ///< pending 数据（指向底层 USB buffer）/ Pending data pointing to USB buffer
+  std::atomic<bool> rx_space_waiting_{
+      false};  ///< 是否等待软件 RX 队列释放一个完整 OUT packet 的空间 /
+               ///< Whether OUT waits for one whole packet of software RX queue space
 };
 
 /**
@@ -283,7 +267,7 @@ class CDCUart : public CDCBase, public LibXR::UART
       const char* control_interface_string = CDCBase::DEFAULT_CONTROL_INTERFACE_STRING,
       const char* data_interface_string = CDCBase::DEFAULT_DATA_INTERFACE_STRING)
       : CDCBase(data_in_ep_num, data_out_ep_num, comm_ep_num, control_interface_string,
-                data_interface_string),
+                data_interface_string, false),
         LibXR::UART(&read_port_cdc_, &write_port_cdc_),
         read_port_cdc_(rx_buffer_size, *this),
         write_port_cdc_(tx_queue_size, tx_buffer_size),
@@ -353,80 +337,48 @@ class CDCUart : public CDCBase, public LibXR::UART
    *        Try to rearm OUT endpoint (backpressure recovery / continuous RX)
    *
    * @param in_isr 是否在 ISR 上下文 / In ISR context
-   * @return true 成功 rearm / Rearmed successfully
-   * @return false 未 rearm（忙/空间不足/端点不可用）/ Not rearmed (busy / insufficient
-   * space / endpoint unavailable)
+   * @return true OUT 已经 armed 或本次成功 rearm / OUT is already armed or was rearmed
+   * @return false 未 rearm（空间不足或端点不可用）/ Not rearmed (insufficient space or
+   * endpoint unavailable)
    */
   bool TryRearmOut(bool in_isr)
   {
-    auto ep_data_out = GetDataOutEndpoint();
-    if (ep_data_out == nullptr)
-    {
-      return false;
-    }
-
-    const std::size_t MPS = ep_data_out->MaxPacketSize();
-    if (MPS == 0 || read_port_cdc_.queue_data_ == nullptr)
-    {
-      return false;
-    }
-
-    if (read_port_cdc_.recv_pause_)
-    {
-      if (read_port_cdc_.queue_data_->EmptySize() >= read_port_cdc_.pending_data_.size_)
-      {
-        auto push_ans = read_port_cdc_.queue_data_->PushBatch(
-            reinterpret_cast<const uint8_t*>(read_port_cdc_.pending_data_.addr_),
-            read_port_cdc_.pending_data_.size_);
-        if (push_ans == ErrorCode::OK)
-        {
-          read_port_cdc_.ProcessPendingReads(in_isr);
-        }
-        else
-        {
-          return false;
-        }
-      }
-      else
-      {
-        return false;
-      }
-    }
-
-    if (ep_data_out->GetState() == Endpoint::State::BUSY)
-    {
-      return false;
-    }
-
-    auto ans = ep_data_out->Transfer(MPS);
-    if (ans == ErrorCode::OK)
-    {
-      read_port_cdc_.recv_pause_ = false;
-      return true;
-    }
-
-    return false;
+    bool rearmed = false;
+    (void)rx_service_.Invoke(RX_KICK,
+                             [this, in_isr, &rearmed](uint32_t events) noexcept
+                             {
+                               UNUSED(events);
+                               rearmed = ServiceRxRearm(in_isr);
+                             });
+    return rearmed;
   }
 
  protected:
   /**
-   * @brief 解绑端点（清理队列、状态与背压标志）
-   *        Unbind endpoints (cleanup queues, states, and backpressure flags)
+   * @brief 绑定 endpoint 并恢复解绑期间保留的发送操作
+   *        Bind endpoints and resume writes retained while unbound
+   */
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                     bool in_isr) override
+  {
+    CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
+    (void)TryRearmOut(in_isr);
+    RunTxService(in_isr);
+  }
+
+  /**
+   * @brief 解绑 endpoint，并保留尚未被 endpoint 接受的读写操作
+   *        Unbind endpoints while retaining operations not yet accepted by endpoints
    *
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param in_isr        是否在 ISR 上下文 / In ISR context
    */
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
-    CDCBase::UnbindEndpoints(endpoint_pool, in_isr);
-    tx_deq_.Reset();
-    write_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
-    read_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
-
+    tx_deq_.CancelPrepared();
     need_write_zlp_ = false;
-
-    read_port_cdc_.recv_pause_ = false;
-    read_port_cdc_.pending_data_ = {nullptr, 0};
+    CDCBase::UnbindEndpoints(endpoint_pool, in_isr);
+    read_port_cdc_.rx_space_waiting_.store(false, std::memory_order_release);
   }
 
   /**
@@ -439,8 +391,8 @@ class CDCUart : public CDCBase, public LibXR::UART
    * each prefill)
    * - 仅当启动该 op 最后一段 Transfer 后返回非 PENDING
    *   Return non-PENDING only after the last segment Transfer of the op is kicked
-   * - 预写仅执行 Take + SetActiveLength，不调用 Finish
-   *   Prefill performs Take + SetActiveLength only; Finish is not called here
+   * - staging 只复制数据；Transfer 接受后才提交对应队列前缀
+   *   Staging only copies data; the queue prefix is committed after Transfer accepts it
    *
    * @param port  写端口 / Write port
    * @param in_isr 是否在 ISR 上下文 / In ISR context
@@ -448,167 +400,9 @@ class CDCUart : public CDCBase, public LibXR::UART
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr)
   {
-    UNUSED(in_isr);
-
     auto* cdc = LibXR::ContainerOf(&port, &CDCUart::write_port_cdc_);
-
-    /**
-     * @note
-     * 不在 IN ISR；否则由 IN ISR 处理。
-     * Not in IN ISR; otherwise handled by IN ISR.
-     */
-    if (cdc->in_write_isr_.IsSet())
-    {
-      return ErrorCode::PENDING;
-    }
-
-    auto ep = cdc->GetDataInEndpoint();
-    if (ep == nullptr)
-    {
-      auto drop_ans = cdc->tx_deq_.DropHead(nullptr);
-      if (drop_ans != ErrorCode::OK)
-      {
-        return drop_ans;
-      }
-      return ErrorCode::FAILED;
-    }
-
-    if (!cdc->Inited())
-    {
-      auto drop_ans = cdc->tx_deq_.DropHead(nullptr);
-      if (drop_ans != ErrorCode::OK)
-      {
-        return drop_ans;
-      }
-
-      return ErrorCode::INIT_ERR;  // 非 PENDING -> 同步上报失败 / Non-PENDING reports
-                                   // synchronous failure upstream
-    }
-
-    /**
-     * @note
-     * 入口条件：ActiveLength==0 。
-     * Entry condition: ActiveLength==0.
-     */
-    if (ep->GetActiveLength() != 0)
-    {
-      return ErrorCode::PENDING;
-    }
-
-    /**
-     * @note
-     * 若出现新数据，则取消 ZLP。
-     * Cancel pending ZLP if new data becomes available.
-     */
-    if (cdc->tx_deq_.HasOp())
-    {
-      cdc->need_write_zlp_ = false;
-    }
-
-    /**
-     * @brief 当前 ActiveLength 槽对应数据段的完成态
-     *        Completion state associated with the current ActiveLength slot
-     */
-    ErrorCode slot_ec = ErrorCode::PENDING;
-
-    // 预写第一段 / Prefill first segment
-    {
-      auto buffer = ep->GetBuffer();
-      std::size_t len = 0;
-
-      slot_ec =
-          cdc->tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len);
-      if (slot_ec == ErrorCode::EMPTY || len == 0)
-      {
-        return ErrorCode::PENDING;
-      }
-      if (slot_ec != ErrorCode::OK && slot_ec != ErrorCode::PENDING)
-      {
-        return slot_ec;
-      }
-
-      ep->SetActiveLength(len);
-    }
-
-    std::atomic_signal_fence(std::memory_order_seq_cst);
-
-    // 循环：可立即发送则发送；发送后预写下一段并继续检查 / Loop: send if possible; then
-    // prefill next segment
-    while (true)
-    {
-      const std::size_t TO_SEND = ep->GetActiveLength();
-
-      /**
-       * @note
-       * 不可发送条件 / Not-sendable conditions:
-       * - 端点非 IDLE / Endpoint not IDLE
-       * - ActiveLength==0（槽已被清零或未发布）/ ActiveLength==0 (slot cleared or not
-       * published)
-       * - 当前时刻无可处理 op（避免预写段在并发路径被消费后继续推进）/ No op available at
-       * this moment
-       */
-      if (ep->GetState() != Endpoint::State::IDLE || TO_SEND == 0 ||
-          !cdc->tx_deq_.HasOp())
-      {
-        return ErrorCode::PENDING;
-      }
-
-      std::atomic_signal_fence(std::memory_order_seq_cst);
-
-      // 启动一次 Transfer / Kick one Transfer
-      ep->SetActiveLength(0);
-      auto ans = ep->Transfer(TO_SEND);
-      ASSERT(ans == ErrorCode::OK);
-
-      /**
-       * @note
-       * 若本次启动的是该 op 最后一段：启动后 pop，并返回 OK 触发 finish。
-       * If this kicked segment is the last of the op: pop after kick and return OK to
-       * trigger finish.
-       */
-      if (slot_ec == ErrorCode::OK && cdc->tx_deq_.HeadCompleted())
-      {
-        auto pop_ok = cdc->tx_deq_.PopCompleted(nullptr);
-        ASSERT(pop_ok == ErrorCode::OK);
-
-        // ZLP 判定。
-        // ZLP decision.
-        const std::size_t MPS = ep->MaxPacketSize();
-        if (MPS > 0 && (TO_SEND % MPS) == 0 && ep->GetActiveLength() == 0 &&
-            !cdc->tx_deq_.HasOp())
-        {
-          cdc->need_write_zlp_ = true;
-        }
-
-        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one
-                               // upstream finish
-      }
-
-      // 预写下一段。
-      // Prefill the next segment.
-      if (!cdc->tx_deq_.HasOp())
-      {
-        return ErrorCode::PENDING;
-      }
-
-      auto buffer = ep->GetBuffer();
-      std::size_t len2 = 0;
-
-      slot_ec =
-          cdc->tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len2);
-      if (slot_ec == ErrorCode::EMPTY || len2 == 0)
-      {
-        return ErrorCode::PENDING;
-      }
-      if (slot_ec != ErrorCode::OK && slot_ec != ErrorCode::PENDING)
-      {
-        return slot_ec;
-      }
-
-      ep->SetActiveLength(len2);
-      // 下一轮继续检查是否可立即发送。
-      // The next iteration checks whether sending can continue immediately.
-    }
+    cdc->RunTxService(in_isr);
+    return ErrorCode::PENDING;
   }
 
   /**
@@ -622,7 +416,7 @@ class CDCUart : public CDCBase, public LibXR::UART
   {
     if (data.size_ > 0)
     {
-      auto push_ans = read_port_cdc_.queue_data_->PushBatch(
+      const ErrorCode push_ans = read_port_cdc_.queue_data_->PushBatch(
           reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
       if (push_ans == ErrorCode::OK)
       {
@@ -630,8 +424,8 @@ class CDCUart : public CDCBase, public LibXR::UART
       }
       else
       {
-        read_port_cdc_.recv_pause_ = true;
-        read_port_cdc_.pending_data_ = data;
+        REQUIRE_FROM_CALLBACK(push_ans == ErrorCode::OK, in_isr);
+        read_port_cdc_.rx_space_waiting_.store(true, std::memory_order_release);
         return;
       }
     }
@@ -649,128 +443,212 @@ class CDCUart : public CDCBase, public LibXR::UART
   void OnDataInComplete(bool in_isr, ConstRawData& data) override
   {
     UNUSED(data);
-
-    Flag::ScopedRestore isr_flag(in_write_isr_);
-
-    auto ep = GetDataInEndpoint();
-    if (ep == nullptr)
-    {
-      return;
-    }
-
-    if (!Inited())
-    {
-      tx_deq_.Reset();
-      write_port_cdc_.FailAndClearAll(ErrorCode::INIT_ERR, in_isr);
-      return;
-    }
-
-    // ZLP：仅在此刻跨-op 无数据时发送。
-    // Send the ZLP only when there is no data left across ops at this moment.
-    if (need_write_zlp_)
-    {
-      if (ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
-      {
-        auto z = ep->TransferZLP();
-        ASSERT(z == ErrorCode::OK);
-        need_write_zlp_ = false;
-        return;
-      }
-      need_write_zlp_ = false;
-    }
-
-    // ActiveLength==0 时不读取队列。
-    // Do not read queues when ActiveLength==0.
-    const std::size_t PENDING_LEN = ep->GetActiveLength();
-    if (PENDING_LEN == 0)
-    {
-      return;
-    }
-
-    // 1) 续发：本 ISR 仅启动一次 Transfer。
-    // 1) Continue: kick only one Transfer in this ISR.
-    ep->SetActiveLength(0);
-    auto ans = ep->Transfer(PENDING_LEN);
-    ASSERT(ans == ErrorCode::OK);
-
-    // 2) 若为 head op 最后一段：启动后 pop + Finish 一次。
-    // 2) If this is the last segment of the head op, pop + Finish once after kick-off.
-    if (tx_deq_.HeadCompleted())
-    {
-      WriteInfoBlock completed{};
-      auto pop_ok = tx_deq_.PopCompleted(&completed);
-      ASSERT(pop_ok == ErrorCode::OK);
-      write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
-    }
-
-    // 3) 预写：仅在已启动 Transfer 后允许读取队列。
-    // 3) Prefill: queue reads are allowed only after a Transfer has been kicked.
-    bool primed = false;
-    if (tx_deq_.HasOp())
-    {
-      auto buffer = ep->GetBuffer();
-      std::size_t len2 = 0;
-
-      auto ec2 =
-          tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len2);
-      if ((ec2 == ErrorCode::OK || ec2 == ErrorCode::PENDING) && len2 > 0)
-      {
-        ep->SetActiveLength(len2);
-        primed = true;
-      }
-    }
-
-    // 4) ZLP 判定 / ZLP decision
-    const std::size_t MPS = ep->MaxPacketSize();
-    if (!primed && PENDING_LEN > 0 && MPS > 0 && (PENDING_LEN % MPS) == 0 &&
-        ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
-    {
-      need_write_zlp_ = true;
-    }
+    RunTxService(in_isr);
   }
 
  private:
+  static constexpr uint32_t TX_KICK = 1U;
+  static constexpr uint32_t RX_KICK = 1U;
+
+  bool ServiceRxRearm(bool in_isr)
+  {
+    auto* ep_data_out = GetDataOutEndpoint();
+    if (ep_data_out == nullptr)
+    {
+      return false;
+    }
+
+    const std::size_t max_packet_size = ep_data_out->MaxPacketSize();
+    const bool valid_storage = max_packet_size > 0U &&
+                               read_port_cdc_.queue_data_ != nullptr &&
+                               read_port_cdc_.queue_data_->MaxSize() >= max_packet_size;
+    if (!valid_storage)
+    {
+      read_port_cdc_.rx_space_waiting_.store(true, std::memory_order_release);
+      REQUIRE_FROM_CALLBACK(valid_storage, in_isr);
+      return false;
+    }
+
+    // Publish the wait before inspecting space. A dequeue before publication is observed
+    // by the following queue check; a dequeue after publication publishes RX_KICK.
+    // 先发布 waiting 再检查空间：先发生的 dequeue 由下面的复查承接，
+    // 后发生的 dequeue 则会发布 RX_KICK。
+    read_port_cdc_.rx_space_waiting_.exchange(true, std::memory_order_acq_rel);
+    if (read_port_cdc_.queue_data_->EmptySize() < max_packet_size)
+    {
+      return false;
+    }
+
+    if (ep_data_out->GetState() == Endpoint::State::BUSY)
+    {
+      read_port_cdc_.rx_space_waiting_.store(false, std::memory_order_release);
+      return true;
+    }
+
+    const bool idle = ep_data_out->GetState() == Endpoint::State::IDLE;
+    if (!idle)
+    {
+      REQUIRE_FROM_CALLBACK(idle, in_isr);
+      return false;
+    }
+
+    // Publish the optimistic state before Transfer(). A synchronous OUT completion only
+    // queues another RX_KICK; the serialized owner applies its final backpressure state
+    // after Transfer() returns.
+    // Transfer() 前先发布乐观状态。同步 OUT completion 只会追加 RX_KICK；Transfer()
+    // 返回后 仍由同一个串行 owner 决定最终背压状态。
+    read_port_cdc_.rx_space_waiting_.store(false, std::memory_order_release);
+    const ErrorCode result = ep_data_out->Transfer(max_packet_size);
+    if (result != ErrorCode::OK)
+    {
+      read_port_cdc_.rx_space_waiting_.store(true, std::memory_order_release);
+      REQUIRE_FROM_CALLBACK(result == ErrorCode::OK, in_isr);
+      return false;
+    }
+    return true;
+  }
+
+  void RunTxService(bool in_isr)
+  {
+    (void)tx_service_.Invoke(TX_KICK,
+                             [this, in_isr](uint32_t events) noexcept
+                             {
+                               UNUSED(events);
+                               ServiceTx(in_isr);
+                             });
+  }
+
+  void ServiceTx(bool in_isr)
+  {
+    WriteInfoBlock completed{};
+    if (PumpTx(in_isr, completed))
+    {
+      write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
+    }
+  }
+
+  bool PrepareTxStage(Endpoint& ep, bool in_isr)
+  {
+    if (ep.GetActiveLength() != 0U)
+    {
+      REQUIRE_FROM_CALLBACK(tx_deq_.HasPrepared(), in_isr);
+      return true;
+    }
+    REQUIRE_FROM_CALLBACK(!tx_deq_.HasPrepared(), in_isr);
+    if (!tx_deq_.HasOp())
+    {
+      return false;
+    }
+
+    RawData buffer = ep.GetBuffer();
+    const std::size_t capacity = (buffer.size_ < static_cast<std::size_t>(UINT16_MAX))
+                                     ? buffer.size_
+                                     : static_cast<std::size_t>(UINT16_MAX);
+    std::size_t prepared_len = 0U;
+    const ErrorCode prepare_result =
+        tx_deq_.Prepare(reinterpret_cast<uint8_t*>(buffer.addr_), capacity, prepared_len);
+    if (prepare_result == ErrorCode::EMPTY)
+    {
+      return false;
+    }
+    REQUIRE_FROM_CALLBACK(
+        (prepare_result == ErrorCode::OK || prepare_result == ErrorCode::PENDING) &&
+            prepared_len > 0U,
+        in_isr);
+
+    ep.SetActiveLength(static_cast<uint16_t>(prepared_len));
+    return true;
+  }
+
+  /**
+   * @brief 尝试启动一个 TX chunk，并在成功后提交对应队列前缀
+   *        Try to start one TX chunk and commit its queue prefix only after success
+   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
+   * @param completed final chunk 接受后返回的操作元数据 / Operation metadata returned
+   *                  after a final chunk is accepted
+   * @return 是否完成了一个写操作 / Whether one write operation completed
+   */
+  bool PumpTx(bool in_isr, WriteInfoBlock& completed)
+  {
+    auto* ep = GetDataInEndpoint();
+    if (ep == nullptr || !Inited())
+    {
+      return false;
+    }
+
+    if (tx_deq_.HasOp())
+    {
+      need_write_zlp_ = false;
+    }
+    else if (need_write_zlp_)
+    {
+      if (ep->GetActiveLength() == 0U && ep->GetState() == Endpoint::State::IDLE &&
+          ep->TransferZLP() == ErrorCode::OK)
+      {
+        need_write_zlp_ = false;
+      }
+      return false;
+    }
+
+    if (!PrepareTxStage(*ep, in_isr) || ep->GetState() != Endpoint::State::IDLE)
+    {
+      return false;
+    }
+
+    const std::size_t transfer_len = ep->GetActiveLength();
+    if (transfer_len == 0U)
+    {
+      return false;
+    }
+
+    ep->SetActiveLength(0U);
+    if (ep->Transfer(transfer_len) != ErrorCode::OK)
+    {
+      // Some endpoint implementations may rotate buffers before reporting failure.
+      tx_deq_.CancelPrepared();
+      return false;
+    }
+
+    const ErrorCode commit_result = tx_deq_.CommitPrepared();
+    REQUIRE_FROM_CALLBACK(
+        commit_result == ErrorCode::OK || commit_result == ErrorCode::PENDING, in_isr);
+
+    const bool operation_completed = commit_result == ErrorCode::OK;
+    if (operation_completed)
+    {
+      const ErrorCode pop_result = tx_deq_.PopCompleted(&completed);
+      REQUIRE_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
+    }
+
+    const bool next_stage_prepared = PrepareTxStage(*ep, in_isr);
+    const std::size_t max_packet_size = ep->MaxPacketSize();
+    if (operation_completed && !next_stage_prepared && max_packet_size > 0U &&
+        (transfer_len % max_packet_size) == 0U)
+    {
+      need_write_zlp_ = true;
+    }
+
+    return operation_completed;
+  }
+
   CDCUartReadPort read_port_cdc_;    ///< CDC RX 读端口 / CDC RX read port
   LibXR::WritePort write_port_cdc_;  ///< CDC TX 写端口 / CDC TX write port
 
   LibXR::CDCUartTxOpDequeueHelper tx_deq_;  ///< TX 出队辅助器 / TX dequeue helper
 
-  Flag::Plain in_write_isr_;  ///< 写 ISR 保护标志 / Write ISR guard flag
+  SerializedService rx_service_{};  ///< RX rearm 的唯一 owner / RX rearm owner
+  SerializedService tx_service_{};  ///< TX endpoint/helper 的唯一 owner / TX owner
 
   bool need_write_zlp_{false};  ///< ZLP 需求标志 / ZLP required flag
 };
 
 inline void CDCUartReadPort::OnRxDequeue(bool in_isr)
 {
-  if (!recv_pause_)
+  if (!rx_space_waiting_.exchange(false, std::memory_order_acq_rel))
   {
     return;
   }
 
-  // pending_data_ 回填 / Push pending_data_ back into queue
-  if (pending_data_.size_ > 0)
-  {
-    if (queue_data_->EmptySize() >= pending_data_.size_)
-    {
-      auto ans = queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t*>(pending_data_.addr_), pending_data_.size_);
-      if (ans == ErrorCode::OK)
-      {
-        pending_data_ = {nullptr, 0};
-        ProcessPendingReads(in_isr);
-      }
-      else
-      {
-        return;
-      }
-    }
-    else
-    {
-      return;
-    }
-  }
-
-  // 尝试恢复 rearm / Try to rearm OUT
   (void)owner_.TryRearmOut(in_isr);
 }
 

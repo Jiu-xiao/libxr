@@ -25,6 +25,58 @@ namespace
 
 constexpr int FATAL_EXIT_CODE = 86;
 
+struct ReentrantWriteContext
+{
+  ImmediateFinishWritePort* port;
+  LibXR::ErrorCode nested_result = LibXR::ErrorCode::FAILED;
+  size_t completion_count = 0U;
+};
+
+void CompleteAndWriteAgain(bool, ReentrantWriteContext* context, LibXR::ErrorCode result)
+{
+  ASSERT(result == LibXR::ErrorCode::OK);
+  ++context->completion_count;
+  if (context->completion_count != 1U)
+  {
+    return;
+  }
+
+  static const uint8_t NESTED[] = {0xA1, 0xA2};
+  LibXR::WriteOperation nested_operation;
+  context->nested_result = (*context->port)(LibXR::ConstRawData{NESTED, sizeof(NESTED)},
+                                            nested_operation, false);
+}
+
+struct DelayedCompletionPort : LibXR::WritePort
+{
+  DelayedCompletionPort() : WritePort(3, 16) { WritePort::operator=(HandleWrite); }
+
+  static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool)
+  {
+    auto& port = static_cast<DelayedCompletionPort&>(base);
+    LibXR::WriteInfoBlock info{};
+    ASSERT(port.queue_info_->Pop(info) == LibXR::ErrorCode::OK);
+    ASSERT(port.queue_data_->PopBatch(nullptr, info.data.size_) == LibXR::ErrorCode::OK);
+    if (!port.has_delayed)
+    {
+      port.delayed = info;
+      port.has_delayed = true;
+      return LibXR::ErrorCode::PENDING;
+    }
+
+    ASSERT(!port.has_current);
+    port.current = info;
+    port.has_current = true;
+    port.Finish(false, LibXR::ErrorCode::OK, port.delayed);
+    return LibXR::ErrorCode::PENDING;
+  }
+
+  LibXR::WriteInfoBlock delayed{};
+  LibXR::WriteInfoBlock current{};
+  bool has_delayed = false;
+  bool has_current = false;
+};
+
 void RegisterFatalExitCallback()
 {
   auto fatal_callback = LibXR::Assert::FatalCallback::Create(
@@ -161,6 +213,48 @@ void test_rw_edge_cases()
   w.Finish(false, ErrorCode::OK, completed);
 }
 
+void test_rw_sync_finish_callback_can_submit_next_write()
+{
+  using namespace LibXR;
+
+  ImmediateFinishWritePort port;
+  ReentrantWriteContext context{&port};
+  auto callback = Callback<ErrorCode>::Create(CompleteAndWriteAgain, &context);
+  WriteOperation operation(callback);
+  static const uint8_t OUTER[] = {0x31, 0x32, 0x33};
+
+  ASSERT(port(ConstRawData{OUTER, sizeof(OUTER)}, operation) == ErrorCode::OK);
+  ASSERT(context.nested_result == ErrorCode::OK);
+  ASSERT(context.completion_count == 1U);
+  ASSERT(port.handle_count == 2U);
+  static const uint8_t NESTED[] = {0xA1, 0xA2};
+  ASSERT(port.payload_size == sizeof(NESTED));
+  ASSERT(std::memcmp(port.payload, NESTED, sizeof(NESTED)) == 0);
+}
+
+void test_rw_old_finish_does_not_overwrite_new_submission()
+{
+  using namespace LibXR;
+
+  DelayedCompletionPort port;
+  OperationPollingStatus first_status;
+  OperationPollingStatus second_status;
+  WriteOperation first_operation(first_status);
+  WriteOperation second_operation(second_status);
+  static const uint8_t FIRST[] = {0x41};
+  static const uint8_t SECOND[] = {0x42};
+
+  ASSERT(port(ConstRawData{FIRST, sizeof(FIRST)}, first_operation) == ErrorCode::OK);
+  ASSERT(first_status.Load() == OperationPollingStatus::RUNNING);
+  ASSERT(port(ConstRawData{SECOND, sizeof(SECOND)}, second_operation) == ErrorCode::OK);
+
+  ASSERT(first_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(second_status.Load() == OperationPollingStatus::RUNNING);
+  ASSERT(port.has_current);
+  port.Finish(false, ErrorCode::OK, port.current);
+  ASSERT(second_status.Load() == OperationPollingStatus::DONE);
+}
+
 void test_rw_read_publish_handles_concurrent_producer()
 {
   using namespace LibXR;
@@ -242,6 +336,8 @@ void RunBaseRwPendingTests()
 {
   test_rw_pending_mode_matrix();
   test_rw_edge_cases();
+  test_rw_sync_finish_callback_can_submit_next_write();
+  test_rw_old_finish_does_not_overwrite_new_submission();
   test_rw_read_publish_handles_concurrent_producer();
   test_rw_zero_capacity_read_port_is_not_supported();
   test_rw_isr_block_fails_before_capability_checks();

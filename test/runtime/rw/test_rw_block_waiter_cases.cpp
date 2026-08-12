@@ -15,6 +15,28 @@
 namespace
 {
 
+struct ImmediateBlockFinishPort : LibXR::WritePort
+{
+  explicit ImmediateBlockFinishPort(LibXR::ErrorCode backend_result)
+      : WritePort(2, 16), backend_result(backend_result)
+  {
+    WritePort::operator=(HandleWrite);
+  }
+
+  static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool in_isr)
+  {
+    auto& port = static_cast<ImmediateBlockFinishPort&>(base);
+    LibXR::WriteInfoBlock info{};
+    ASSERT(port.queue_info_->Pop(info) == LibXR::ErrorCode::OK);
+    ASSERT(port.queue_data_->PopBatch(nullptr, info.data.size_) == LibXR::ErrorCode::OK);
+    port.Finish(in_isr, port.finish_result, info);
+    return port.backend_result;
+  }
+
+  LibXR::ErrorCode backend_result;
+  LibXR::ErrorCode finish_result = LibXR::ErrorCode::FAILED;
+};
+
 /**
  * @brief 测试入口函数 `test_rw_write_port_block_pending_result_propagates`。 Test entry
  * function `test_rw_write_port_block_pending_result_propagates`.
@@ -87,6 +109,59 @@ void test_rw_write_port_block_reused_waiter_discards_stale_signal()
   ASSERT(sem.Value() == 0);
 }
 
+void test_rw_write_port_block_handles_synchronous_finish()
+{
+  using namespace LibXR;
+
+  static const uint8_t TX[] = {0x51, 0x52};
+  for (const ErrorCode backend_result : {ErrorCode::PENDING, ErrorCode::FAILED})
+  {
+    ImmediateBlockFinishPort port(backend_result);
+    Semaphore semaphore;
+    WriteOperation operation(semaphore, UINT32_MAX);
+
+    ASSERT(port(ConstRawData{TX, sizeof(TX)}, operation) == ErrorCode::FAILED);
+    ASSERT(semaphore.Value() == 0U);
+    ASSERT(port.queue_info_->Size() == 0U);
+    ASSERT(port.queue_data_->Size() == 0U);
+  }
+}
+
+void test_rw_write_port_block_timeout_late_finish_does_not_leak_signal()
+{
+  using namespace LibXR;
+
+  WritePort port(2, 16);
+  port = PendingWriteFun;
+  static const uint8_t FIRST[] = {0x61};
+  static const uint8_t SECOND[] = {0x62};
+  Semaphore semaphore;
+  WriteOperation timed_out_operation(semaphore, 0U);
+
+  ASSERT(port(ConstRawData{FIRST, sizeof(FIRST)}, timed_out_operation) ==
+         ErrorCode::TIMEOUT);
+  WriteInfoBlock late{};
+  ASSERT(port.queue_info_->Pop(late) == ErrorCode::OK);
+  ASSERT(port.queue_data_->PopBatch(nullptr, late.data.size_) == ErrorCode::OK);
+
+  WriteOperation blocked_operation(semaphore, 0U);
+  ASSERT(port(ConstRawData{SECOND, sizeof(SECOND)}, blocked_operation) ==
+         ErrorCode::BUSY);
+  port.Finish(false, ErrorCode::OK, late);
+  ASSERT(semaphore.Value() == 0U);
+
+  WriteOperation reused_operation(semaphore, 0U);
+  ASSERT(port(ConstRawData{SECOND, sizeof(SECOND)}, reused_operation) ==
+         ErrorCode::TIMEOUT);
+  ASSERT(semaphore.Value() == 0U);
+
+  WriteInfoBlock reused{};
+  ASSERT(port.queue_info_->Pop(reused) == ErrorCode::OK);
+  ASSERT(port.queue_data_->PopBatch(nullptr, reused.data.size_) == ErrorCode::OK);
+  port.Finish(false, ErrorCode::OK, reused);
+  ASSERT(semaphore.Value() == 0U);
+}
+
 }  // namespace
 
 /**
@@ -102,4 +177,6 @@ void RunRuntimeRwBlockWaiterTests()
 {
   test_rw_write_port_block_pending_result_propagates();
   test_rw_write_port_block_reused_waiter_discards_stale_signal();
+  test_rw_write_port_block_handles_synchronous_finish();
+  test_rw_write_port_block_timeout_late_finish_does_not_leak_signal();
 }

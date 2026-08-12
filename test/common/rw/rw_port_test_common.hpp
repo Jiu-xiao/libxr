@@ -4,11 +4,11 @@
  * `ReadPort` / `WritePort` tests.
  * @details 测试项目：
  *          1. 提供 `PENDING` / 失败回调桩和阻塞调用线程封装。
- *          2. 提供 `ReadPort` / `WritePort` 队列完成、失败清理与阻塞唤醒验证 helper。
+ *          2. 提供 `ReadPort` / `WritePort` 队列完成与阻塞唤醒验证 helper。
  *          3. 提供带计数的 `TrackingReadPort`，用于核对 `OnRxDequeue` 的调用次数。
  *          Test items:
  *          1. Provide write pending/failure stubs and blocking-call thread wrappers.
- *          2. Provide helpers for completion, fail-clear, and waiter wake-up scenarios.
+ *          2. Provide helpers for completion and waiter wake-up scenarios.
  *          3. Provide a counting `TrackingReadPort` for verifying `OnRxDequeue` calls.
  */
 #pragma once
@@ -36,6 +36,9 @@ struct ImmediateFinishWritePort : LibXR::WritePort
   static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool in_isr)
   {
     auto& port = static_cast<ImmediateFinishWritePort&>(base);
+    ASSERT(!port.handler_active);
+    port.handler_active = true;
+    ++port.handle_count;
     LibXR::WriteInfoBlock info{};
     ASSERT(port.queue_info_->Pop(info) == LibXR::ErrorCode::OK);
     ASSERT(info.data.size_ <= sizeof(port.payload));
@@ -43,10 +46,13 @@ struct ImmediateFinishWritePort : LibXR::WritePort
     ASSERT(port.queue_data_->PopBatch(port.payload, port.payload_size) ==
            LibXR::ErrorCode::OK);
     port.Finish(in_isr, port.finish_result, info);
+    port.handler_active = false;
     return LibXR::ErrorCode::PENDING;
   }
 
   LibXR::ErrorCode finish_result = LibXR::ErrorCode::OK;
+  bool handler_active = false;
+  size_t handle_count = 0;
   uint8_t payload[64]{};
   size_t payload_size = 0;
 };
@@ -135,72 +141,6 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
   {
     write.ExpectFinal(result);
   }
-  ASSERT(w.queue_info_->Size() == 0);
-}
-
-/**
- * @brief 辅助函数 `VerifyPendingReadFailAndClearMode`。 Helper function
- * `VerifyPendingReadFailAndClearMode`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
- */
-void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
-{
-  using namespace LibXR;
-
-  ReadPort r(16);
-
-  uint8_t rx[4] = {0x7A, 0x7B, 0x7C, 0x7D};
-  static const uint8_t STALE_EXPECT[] = {0x7A, 0x7B, 0x7C, 0x7D};
-  ReadHarness read(mode);
-
-  auto call_result = r(RawData{rx, sizeof(rx)}, read.op);
-  ASSERT(call_result == ErrorCode::OK);
-  read.ExpectPendingSubmitted();
-
-  r.FailAndClearAll(reason, false);
-
-  if (mode != TestMode::NONE)
-  {
-    read.ExpectFinal(reason);
-  }
-  ASSERT(std::memcmp(rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
-  ASSERT(r.Size() == 0);
-}
-
-/**
- * @brief 辅助函数 `VerifyPendingWriteFailAndClearMode`。 Helper function
- * `VerifyPendingWriteFailAndClearMode`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
- */
-void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
-{
-  using namespace LibXR;
-
-  WritePort w(2, 16);
-  w = PendingWriteFun;
-
-  static const uint8_t TX[] = {0x31, 0x41, 0x59, 0x26};
-  WriteHarness write(mode);
-
-  auto call_result = w(ConstRawData{TX, sizeof(TX)}, write.op);
-  ASSERT(call_result == ErrorCode::OK);
-  write.ExpectPendingSubmitted();
-
-  w.FailAndClearAll(reason, false);
-
-  if (mode != TestMode::NONE)
-  {
-    write.ExpectFinal(reason);
-  }
-  ASSERT(w.Size() == 0);
   ASSERT(w.queue_info_->Size() == 0);
 }
 

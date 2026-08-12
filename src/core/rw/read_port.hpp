@@ -230,27 +230,6 @@ class ReadPort
    *               Indicates whether the operation is executed in an interrupt context.
    */
   void ProcessPendingReads(bool in_isr);
-
-  /**
-   * @brief 失败完成并清空当前所有挂起读操作。
-   * @brief Fail-complete and clear all currently pending read operations.
-   *
-   * @note Driver-only: call this only after the backend is known to be unavailable.
-   * @note 仅供驱动层在后端已明确不可用后调用。
-   * @note The surrounding driver must first close new front-end admission, stop
-   *       back-end completion/data/IRQ sources, and wait for every already-admitted
-   *       caller or owner that can mutate this port or queue to exit. A BLOCK caller
-   *       may remain asleep in Wait(); this function resolves and wakes that waiter.
-   *       No other port or queue mutator may begin until this call returns.
-   * @note 外围驱动必须先关闭新的前端请求入口，停止后端完成、数据与 IRQ 来源，并等待所有
-   *       已接纳且可能修改本端口或队列的调用方与 owner 退出。已经阻塞在 Wait() 中的
-   *       BLOCK 调用可以继续等待；本函数负责完成并唤醒它。本调用返回前不得开始其他会
-   *       修改端口或队列的操作。
-   *
-   * @param reason 最终失败原因 / Final failure reason
-   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
-   */
-  void FailAndClearAll(ErrorCode reason, bool in_isr);
 };
 
 }  // namespace LibXR

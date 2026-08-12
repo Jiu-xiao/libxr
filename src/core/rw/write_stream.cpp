@@ -48,10 +48,7 @@ ErrorCode WritePort::Stream::Acquire()
     return ErrorCode::NOT_SUPPORT;
   }
 
-  BusyState expected = BusyState::IDLE;
-  if (!port_->busy_.compare_exchange_strong(expected, BusyState::OWNER,
-                                            std::memory_order_acq_rel,
-                                            std::memory_order_acquire))
+  if (!port_->TryAcquireOwner())
   {
     state_.store(StreamState::RELEASED, std::memory_order_release);
     return ErrorCode::BUSY;
@@ -59,7 +56,7 @@ ErrorCode WritePort::Stream::Acquire()
 
   if (port_->queue_info_->EmptySize() < 1)
   {
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    port_->ReleaseOwner();
     state_.store(StreamState::RELEASED, std::memory_order_release);
     return ErrorCode::FULL;
   }
@@ -111,20 +108,19 @@ ErrorCode WritePort::Stream::SubmitBuffered()
   op_.MarkAsRunning();
 
   const size_t submitted_size = buffered_size_;
+  const uint32_t submission_id = port_->BeginSubmission(op_.type);
   auto ans = port_->queue_info_->Push(
-      WriteInfoBlock{ConstRawData{nullptr, submitted_size}, op_});
+      WriteInfoBlock{ConstRawData{nullptr, submitted_size}, op_, submission_id});
   ASSERT(ans == ErrorCode::OK);
 
-  ans = port_->CommitWrite({nullptr, submitted_size}, op_, true);
+  // From here, the port's SUBMITTING state protects the published record. Releasing the
+  // Stream facade before the backend call lets a synchronous completion callback reuse
+  // this Stream after WritePort has atomically released its own admission.
+  // 从这里开始，已发布记录由端口的 SUBMITTING 状态保护。在后端调用前释放 Stream facade，
+  // 可让同步完成回调在 WritePort 原子释放自身 admission 后立即复用同一个 Stream。
   buffered_size_ = 0;
-
-  if (op_.type != WriteOperation::OperationType::BLOCK)
-  {
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-  }
-
-  // Reopen Stream admission only after both local metadata and Port ownership are final.
   state_.store(StreamState::RELEASED, std::memory_order_release);
+  ans = port_->CommitWrite({nullptr, submitted_size}, op_, true, false, submission_id);
   return ans;
 }
 
@@ -176,7 +172,7 @@ ErrorCode WritePort::Stream::Commit()
   {
     return ErrorCode::BUSY;
   }
-  port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+  port_->ReleaseOwner();
   state_.store(StreamState::RELEASED, std::memory_order_release);
   return ErrorCode::OK;
 }

@@ -133,16 +133,20 @@ class CDCBase : public DeviceClass
    * @param data_in_ep_num 数据输入端点号 / Data IN endpoint number
    * @param data_out_ep_num 数据输出端点号 / Data OUT endpoint number
    * @param comm_ep_num 通信端点号 / Communication endpoint number
+   * @param arm_data_out_on_bind 绑定后是否立即启动默认 OUT 传输 / Whether to arm the
+   *        default OUT transfer immediately after binding
    */
   CDCBase(Endpoint::EPNumber data_in_ep_num, Endpoint::EPNumber data_out_ep_num,
           Endpoint::EPNumber comm_ep_num,
           const char* control_interface_string = DEFAULT_CONTROL_INTERFACE_STRING,
-          const char* data_interface_string = DEFAULT_DATA_INTERFACE_STRING)
+          const char* data_interface_string = DEFAULT_DATA_INTERFACE_STRING,
+          bool arm_data_out_on_bind = true)
       : data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
         comm_ep_num_(comm_ep_num),
         control_interface_string_(control_interface_string),
-        data_interface_string_(data_interface_string)
+        data_interface_string_(data_interface_string),
+        arm_data_out_on_bind_(arm_data_out_on_bind)
   {
   }
 
@@ -248,6 +252,10 @@ class CDCBase : public DeviceClass
    *
    * 配置端点、填充描述符并初始化数据传输机制
    * Configures endpoints, populates descriptors and initializes data transfer mechanisms
+   *
+   * @note 默认启动 Data OUT；显式关闭该构造策略的派生类负责自己的接收与背压 rearm。
+   *       Data OUT is armed by default. A derived class that disables the constructor
+   *       policy owns its receive and backpressure rearm strategy.
    *
    * @param endpoint_pool 端点资源池 / Endpoint resource pool
    * @param start_itf_num 起始接口号 / Starting interface number
@@ -380,8 +388,10 @@ class CDCBase : public DeviceClass
 
     inited_ = true;
 
-    // 启动OUT端点传输
-    ep_data_out_->Transfer(ep_data_out_->MaxPacketSize());
+    if (arm_data_out_on_bind_)
+    {
+      (void)ep_data_out_->Transfer(ep_data_out_->MaxPacketSize());
+    }
   }
 
   /**
@@ -707,6 +717,7 @@ class CDCBase : public DeviceClass
   // 状态标志。
   // State flags.
   bool inited_ = false;                     ///< 初始化标志 / Initialization flag
+  bool arm_data_out_on_bind_ = true;        ///< 绑定后自动启动 OUT / Auto-arm OUT on bind
   bool has_control_line_state_cb_ = false;  ///< Control-line callback registered
   bool has_line_coding_cb_ = false;         ///< Line-coding callback registered
 
