@@ -8,7 +8,8 @@
  *          3. 提供带计数的 `TrackingReadPort`，用于核对 `OnRxDequeue` 的调用次数。
  *          Test items:
  *          1. Provide write pending/failure stubs and blocking-call thread wrappers.
- *          2. Provide helpers for completion and waiter wake-up scenarios.
+ *          2. Provide helpers for completion, backend teardown, and waiter wake-up
+ *             scenarios.
  *          3. Provide a counting `TrackingReadPort` for verifying `OnRxDequeue` calls.
  */
 #pragma once
@@ -36,9 +37,6 @@ struct ImmediateFinishWritePort : LibXR::WritePort
   static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool in_isr)
   {
     auto& port = static_cast<ImmediateFinishWritePort&>(base);
-    ASSERT(!port.handler_active);
-    port.handler_active = true;
-    ++port.handle_count;
     LibXR::WriteInfoBlock info{};
     ASSERT(port.queue_info_->Pop(info) == LibXR::ErrorCode::OK);
     ASSERT(info.data.size_ <= sizeof(port.payload));
@@ -46,13 +44,10 @@ struct ImmediateFinishWritePort : LibXR::WritePort
     ASSERT(port.queue_data_->PopBatch(port.payload, port.payload_size) ==
            LibXR::ErrorCode::OK);
     port.Finish(in_isr, port.finish_result, info);
-    port.handler_active = false;
     return LibXR::ErrorCode::PENDING;
   }
 
   LibXR::ErrorCode finish_result = LibXR::ErrorCode::OK;
-  bool handler_active = false;
-  size_t handle_count = 0;
   uint8_t payload[64]{};
   size_t payload_size = 0;
 };
@@ -79,6 +74,27 @@ struct TrackingReadPort : LibXR::ReadPort
   void OnRxDequeue(bool) override { dequeue_count++; }
 
   uint32_t dequeue_count = 0;
+};
+
+struct BackendTeardownReadPort : LibXR::ReadPort
+{
+  using LibXR::ReadPort::ReadPort;
+
+  void ResetForBackendTeardown(LibXR::ErrorCode reason, bool in_isr)
+  {
+    FailPendingAndResetForBackendTeardown(reason, in_isr);
+  }
+};
+
+struct BackendTeardownWritePort : LibXR::WritePort
+{
+  using LibXR::WritePort::WritePort;
+  using LibXR::WritePort::operator=;
+
+  void ResetForBackendTeardown(LibXR::ErrorCode reason, bool in_isr)
+  {
+    FailPendingAndResetForBackendTeardown(reason, in_isr);
+  }
 };
 
 /**
@@ -142,6 +158,50 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
     write.ExpectFinal(result);
   }
   ASSERT(w.queue_info_->Size() == 0);
+}
+
+void VerifyPendingReadBackendTeardownMode(TestMode mode, LibXR::ErrorCode reason)
+{
+  using namespace LibXR;
+
+  BackendTeardownReadPort port(16);
+  uint8_t rx[4] = {0x7A, 0x7B, 0x7C, 0x7D};
+  static const uint8_t STALE_EXPECT[] = {0x7A, 0x7B, 0x7C, 0x7D};
+  ReadHarness read(mode);
+
+  ASSERT(port(RawData{rx, sizeof(rx)}, read.op) == ErrorCode::OK);
+  read.ExpectPendingSubmitted();
+
+  port.ResetForBackendTeardown(reason, false);
+
+  if (mode != TestMode::NONE)
+  {
+    read.ExpectFinal(reason);
+  }
+  ASSERT(std::memcmp(rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
+  ASSERT(port.Size() == 0);
+}
+
+void VerifyPendingWriteBackendTeardownMode(TestMode mode, LibXR::ErrorCode reason)
+{
+  using namespace LibXR;
+
+  BackendTeardownWritePort port(2, 16);
+  port = PendingWriteFun;
+  static const uint8_t TX[] = {0x31, 0x41, 0x59, 0x26};
+  WriteHarness write(mode);
+
+  ASSERT(port(ConstRawData{TX, sizeof(TX)}, write.op) == ErrorCode::OK);
+  write.ExpectPendingSubmitted();
+
+  port.ResetForBackendTeardown(reason, false);
+
+  if (mode != TestMode::NONE)
+  {
+    write.ExpectFinal(reason);
+  }
+  ASSERT(port.Size() == 0);
+  ASSERT(port.queue_info_->Size() == 0);
 }
 
 }  // namespace

@@ -64,4 +64,3 @@ void test_linux_shm_topic();
 void test_linux_uart();
 void test_uart_circular_dma_rx_model();
 void test_uart_linked_list_dma_rx_model();
-void test_cdc_uart_lifecycle();

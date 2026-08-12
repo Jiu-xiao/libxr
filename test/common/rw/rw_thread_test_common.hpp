@@ -39,7 +39,7 @@ using LibXRTest::TestMode;
 using LibXRTest::THREAD_STATE_TIMEOUT_MS;
 using LibXRTest::WriteHarness;
 
-// Observe the real Linux wait point so a producer or fail-clear cannot run before the
+// Observe the real Linux wait point so a producer or completion cannot run before the
 // request has been published and its caller has entered Semaphore::Wait().
 pid_t CurrentLinuxThreadId() { return static_cast<pid_t>(syscall(SYS_gettid)); }
 

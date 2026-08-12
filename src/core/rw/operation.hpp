@@ -257,9 +257,9 @@ class Operation
         data.callback->Run(in_isr, std::forward<Status>(status));
         break;
       case OperationType::BLOCK:
-        // BLOCK waits are signaled by semaphore; the owning operation records its
-        // result before posting.
-        // BLOCK 通过信号量唤醒；操作所有者会在 post 前保存结果。
+        // BLOCK waits are signaled by semaphore only; the owning port keeps the
+        // final ErrorCode in its block_result_ handoff state.
+        // BLOCK 只通过信号量唤醒；最终 ErrorCode 由端口侧 block_result_ 交接。
         data.sem_info.sem->PostFromCallback(in_isr);
         break;
       case OperationType::POLLING:
@@ -469,8 +469,6 @@ typedef struct
 {
   ConstRawData data;  ///< Data buffer. 数据缓冲区。
   WriteOperation op;  ///< Write operation instance. 写入操作实例。
-  uint32_t submission_id =
-      UINT32_MAX;  ///< Stable WritePort submission identity. WritePort 提交稳定标识。
 } WriteInfoBlock;
 
 }  // namespace LibXR

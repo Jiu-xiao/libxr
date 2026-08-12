@@ -26,72 +26,37 @@ class WritePort
       nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
 
  private:
-  // One atomic word binds every published record generation to its phase or result.
-  // The low nine bits hold a phase/result and the upper 23 bits hold the generation.
-  // Completion/progress for one port must be exactly-once, and no unretired record may
-  // lag the newest published generation by 2^23 submissions. Those backend constraints
-  // prevent generation-wrap ABA while retaining the 32-bit embedded atomic boundary.
-  enum class StatePhase : uint32_t
+  // Write BLOCK states:
+  // OWNER = submit or backend teardown path owns queue mutation
+  // BLOCK_WAITING = waiter armed, completion not claimed yet
+  // BLOCK_CLAIMED = final wakeup belongs to the waiter
+  // BLOCK_DETACHED = timeout detached the waiter
+  // The same semaphore may be reused only after the previous BLOCK call
+  // returns and the port goes back to IDLE.
+  // 写 BLOCK 状态：
+  // OWNER = 提交或后端 teardown 路径占有队列修改权
+  // BLOCK_WAITING = waiter 已挂起，完成尚未 claim
+  // BLOCK_CLAIMED = 最终唤醒已经归 waiter 所有
+  // BLOCK_DETACHED = timeout 已把 waiter 分离
+  // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
+  enum class BusyState : uint32_t
   {
-    IDLE = 0,
-    OWNER = 1,
-    SUBMITTING = 2,
-    BLOCK_WAITING = 3,
-    BLOCK_DETACHED = 4,
+    IDLE = 0,           ///< No active submitter and no armed BLOCK waiter.
+                        ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
+    OWNER = 1,          ///< Submission or backend teardown owns queue mutation.
+                        ///< 提交或后端 teardown 路径占有队列修改权。
+    BLOCK_WAITING = 2,  ///< One BLOCK waiter is armed and waiting for final completion.
+                        ///< 一个 BLOCK 等待者已经挂起，等待最终完成。
+    BLOCK_CLAIMED =
+        3,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
+    BLOCK_DETACHED = 4,  ///< Waiter already timed out/detached; completion must not post.
+                         ///< 等待者已超时/被分离，完成侧不能再 Post。
   };
 
-  using StateWord = uint32_t;
-  static constexpr uint32_t STATE_BITS = 9U;
-  static constexpr StateWord STATE_MASK = (1U << STATE_BITS) - 1U;
-  static constexpr StateWord GENERATION_MASK = UINT32_MAX >> STATE_BITS;
-  static constexpr StateWord SUBMISSION_COMPLETION_TAG = 0x100U;
-
-  static constexpr StateWord PhaseState(uint32_t generation, StatePhase phase)
-  {
-    return ((generation & GENERATION_MASK) << STATE_BITS) | static_cast<StateWord>(phase);
-  }
-
-  static constexpr StateWord SubmissionCompletionState(uint32_t generation,
-                                                       ErrorCode result)
-  {
-    return ((generation & GENERATION_MASK) << STATE_BITS) | SUBMISSION_COMPLETION_TAG |
-           static_cast<uint8_t>(static_cast<int8_t>(result));
-  }
-
-  static constexpr uint32_t SubmissionGeneration(StateWord state)
-  {
-    return state >> STATE_BITS;
-  }
-
-  static constexpr StatePhase SubmissionPhase(StateWord state)
-  {
-    return static_cast<StatePhase>(state & STATE_MASK);
-  }
-
-  static constexpr bool IsSubmissionCompletion(StateWord state)
-  {
-    return (state & SUBMISSION_COMPLETION_TAG) != 0U;
-  }
-
-  static constexpr ErrorCode SubmissionCompletionResult(StateWord state)
-  {
-    return static_cast<ErrorCode>(static_cast<int8_t>(state & UINT8_MAX));
-  }
-
-  static constexpr uint32_t NextSubmissionGeneration(uint32_t generation)
-  {
-    return generation == GENERATION_MASK ? 0U : generation + 1U;
-  }
-
-  std::atomic<StateWord> busy_{PhaseState(0U, StatePhase::IDLE)};
-
-  bool TryAcquireOwner();
-  void ReleaseOwner();
-  uint32_t BeginSubmission(WriteOperation::OperationType type);
-  ErrorCode ResolveSubmission(uint32_t submission_id, ErrorCode backend_result);
-  ErrorCode ConsumeBlockCompletion(uint32_t submission_id);
-  bool TryCaptureSubmissionCompletion(bool in_isr, uint32_t submission_id,
-                                      ErrorCode result);
+  std::atomic<BusyState> busy_{
+      BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
+  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
+                                            ///< 当前 BLOCK 写入的最终结果。
 
  public:
   // Stream batch facade.
@@ -349,15 +314,42 @@ class WritePort
    * buffer
    * @param in_isr 指示是否在中断上下文中执行。
    *               Indicates whether the operation is executed in an interrupt context.
-   * @param submission_id 已由调用路径发布的提交标识；普通调用保留默认哨兵值，由本函数
-   *                      生成。Submission identity already published by the caller;
-   *                      ordinary calls keep the default sentinel and let this function
-   *                      generate it.
    * @return 返回操作的 ErrorCode，指示操作结果。
    *         Returns an ErrorCode indicating the result of the operation.
    */
   ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool pushed = false,
-                        bool in_isr = false, uint32_t submission_id = UINT32_MAX);
+                        bool in_isr = false);
+
+ protected:
+  /**
+   * @brief Fail pending work and reset queue state during a quiesced backend teardown.
+   * @brief 在后端已静止的 teardown 期间失败挂起操作并重置队列状态。
+   *
+   * @note This is not a public queue-management API. Call it only after the backend is
+   *       known to be unavailable.
+   * @note 这不是公开的队列管理接口。仅在后端已明确不可用后调用。
+   * @note The surrounding backend must first close new front-end admission, stop
+   *       completion and IRQ sources, and wait for every already-admitted submitter or
+   *       owner that can mutate this port or its queues to exit.
+   * @note 外围后端必须先关闭新的前端请求入口，停止完成与 IRQ 来源，并等待所有已接纳
+   *       且可能修改本端口或其队列的 submitter 与 owner 退出。
+   * @note A record already popped by a backend must be completed with Finish() or
+   *       returned to the queue before this call. Only a BLOCK caller still asleep in
+   *       Wait() whose record remains queued may be resolved and woken here. No other
+   *       port or queue mutator may begin until this call returns.
+   * @note 后端已经弹出的 active record 必须先通过 Finish() 完成或退回队列。只有仍阻塞在
+   *       Wait() 且 record 仍在队列中的 BLOCK 调用可以由本函数完成并唤醒；本调用
+   *       返回前不得开始其他会修改端口或队列的操作。
+   * @note Seeing OWNER here means the caller violated the backend precondition. Debug
+   *       builds assert; release builds still return without mutating the queues.
+   * @note 若此时仍看到 OWNER，说明调用方违反了后端前提。调试构建会触发断言，发布构建仍会
+   *       在不修改队列的情况下返回。
+   *
+   * @param reason Final failure reported to pending operations. 挂起操作的最终失败原因。
+   * @param in_isr Whether the backend teardown runs in ISR context. 后端 teardown
+   *               是否运行于 ISR 上下文。
+   */
+  void FailPendingAndResetForBackendTeardown(ErrorCode reason, bool in_isr);
 };
 
 }  // namespace LibXR

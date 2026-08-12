@@ -230,6 +230,30 @@ class ReadPort
    *               Indicates whether the operation is executed in an interrupt context.
    */
   void ProcessPendingReads(bool in_isr);
+
+ protected:
+  /**
+   * @brief Fail pending work and reset queue state during a quiesced backend teardown.
+   * @brief 在后端已静止的 teardown 期间失败挂起操作并重置队列状态。
+   *
+   * @note This is not a public queue-management API. Call it only after the backend is
+   *       known to be unavailable.
+   * @note 这不是公开的队列管理接口。仅在后端已明确不可用后调用。
+   * @note The surrounding backend must first close new front-end admission, stop
+   *       completion, data, and IRQ sources, and wait for every already-admitted caller
+   *       or owner that can mutate this port or queue to exit. A BLOCK caller may remain
+   *       asleep in Wait(); this function resolves and wakes that waiter. No other port
+   *       or queue mutator may begin until this call returns.
+   * @note 外围后端必须先关闭新的前端请求入口，停止完成、数据与 IRQ 来源，并等待所有
+   *       已接纳且可能修改本端口或队列的调用方与 owner 退出。已经阻塞在 Wait() 中的
+   *       BLOCK 调用可以继续等待；本函数负责完成并唤醒它。本调用返回前不得开始其他
+   *       会修改端口或队列的操作。
+   *
+   * @param reason Final failure reported to a pending operation. 挂起操作的最终失败原因。
+   * @param in_isr Whether the backend teardown runs in ISR context. 后端 teardown
+   *               是否运行于 ISR 上下文。
+   */
+  void FailPendingAndResetForBackendTeardown(ErrorCode reason, bool in_isr);
 };
 
 }  // namespace LibXR

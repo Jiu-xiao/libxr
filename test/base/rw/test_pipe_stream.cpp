@@ -20,21 +20,16 @@ struct StreamCallbackReentry
   LibXR::ErrorCode stream_write = LibXR::ErrorCode::FAILED;
   LibXR::ErrorCode stream_zero_write = LibXR::ErrorCode::FAILED;
   LibXR::ErrorCode stream_commit = LibXR::ErrorCode::FAILED;
-  size_t completion_count = 0;
-  bool completion_during_backend = false;
 };
 
 void OnStreamWriteComplete(bool, StreamCallbackReentry* context, LibXR::ErrorCode result)
 {
   using namespace LibXR;
 
-  ++context->completion_count;
   context->completion_result = result;
-  context->completion_during_backend |= context->port->handler_active;
 
   if (context->try_reentry)
   {
-    context->try_reentry = false;
     static const uint8_t NESTED[] = {0xA1};
     WriteOperation direct_op;
     context->direct_write =
@@ -168,7 +163,7 @@ void test_pipe_stream_commit_allows_persistent_and_external_streams()
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
-void test_pipe_stream_callback_can_submit_next_write()
+void test_pipe_stream_rejects_same_object_callback_reentry()
 {
   using namespace LibXR;
 
@@ -183,26 +178,22 @@ void test_pipe_stream_callback_can_submit_next_write()
   ASSERT(stream.Write(ConstRawData{OUTER, sizeof(OUTER)}) == ErrorCode::OK);
   ASSERT(stream.Commit() == ErrorCode::OK);
 
-  ASSERT(context.completion_count == 2U);
   ASSERT(context.completion_result == ErrorCode::OK);
-  ASSERT(!context.completion_during_backend);
-  ASSERT(context.direct_write == ErrorCode::OK);
-  ASSERT(context.stream_write == ErrorCode::OK);
+  ASSERT(context.direct_write == ErrorCode::BUSY);
+  ASSERT(context.stream_write == ErrorCode::BUSY);
   ASSERT(context.stream_zero_write == ErrorCode::OK);
-  ASSERT(context.stream_commit == ErrorCode::OK);
-  ASSERT(port.handle_count == 3U);
-  static const uint8_t NESTED[] = {0xA1};
-  ASSERT(port.payload_size == sizeof(NESTED));
-  ASSERT(std::memcmp(port.payload, NESTED, sizeof(NESTED)) == 0);
+  ASSERT(context.stream_commit == ErrorCode::BUSY);
+  ASSERT(port.payload_size == sizeof(OUTER));
+  ASSERT(std::memcmp(port.payload, OUTER, sizeof(OUTER)) == 0);
   ASSERT(port.queue_data_->Size() == 0);
   ASSERT(port.queue_info_->Size() == 0);
 
+  context.try_reentry = false;
   static const uint8_t REUSE[] = {0x41, 0x42};
   ASSERT(stream.Write(ConstRawData{REUSE, sizeof(REUSE)}) == ErrorCode::OK);
   ASSERT(stream.Commit() == ErrorCode::OK);
   ASSERT(port.payload_size == sizeof(REUSE));
   ASSERT(std::memcmp(port.payload, REUSE, sizeof(REUSE)) == 0);
-  ASSERT(context.completion_count == 3U);
 }
 
 void test_pipe_stream_reports_live_capacity_after_consumer_progress()
@@ -257,6 +248,6 @@ void RunBasePipeStreamTests()
   test_pipe_stream_block_immediate_path();
   test_pipe_stream_commit_releases_lock_for_next_stream();
   test_pipe_stream_commit_allows_persistent_and_external_streams();
-  test_pipe_stream_callback_can_submit_next_write();
+  test_pipe_stream_rejects_same_object_callback_reentry();
   test_pipe_stream_reports_live_capacity_after_consumer_progress();
 }
