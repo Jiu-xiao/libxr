@@ -26,37 +26,101 @@ class WritePort
       nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
 
  private:
-  // Write BLOCK states:
-  // OWNER = submit or backend teardown path owns queue mutation
-  // BLOCK_WAITING = waiter armed, completion not claimed yet
-  // BLOCK_CLAIMED = final wakeup belongs to the waiter
-  // BLOCK_DETACHED = timeout detached the waiter
-  // The same semaphore may be reused only after the previous BLOCK call
-  // returns and the port goes back to IDLE.
-  // 写 BLOCK 状态：
-  // OWNER = 提交或后端 teardown 路径占有队列修改权
-  // BLOCK_WAITING = waiter 已挂起，完成尚未 claim
-  // BLOCK_CLAIMED = 最终唤醒已经归 waiter 所有
-  // BLOCK_DETACHED = timeout 已把 waiter 分离
-  // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
-  enum class BusyState : uint32_t
+  // Phase serializes the producer and the one deferred direct BLOCK request. ActiveState
+  // independently tracks a BLOCK record already published to the backend. HANDOFF keeps
+  // admission closed until a deferred waiter consumes its terminal result.
+  // Phase 串行化 producer 与唯一一笔 deferred direct BLOCK 请求；ActiveState 独立跟踪
+  // 已发布给后端的 BLOCK 记录；HANDOFF 在 deferred waiter 取走最终结果前保持入口关闭。
+  enum class Phase : uint32_t
   {
-    IDLE = 0,           ///< No active submitter and no armed BLOCK waiter.
-                        ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
-    OWNER = 1,          ///< Submission or backend teardown owns queue mutation.
-                        ///< 提交或后端 teardown 路径占有队列修改权。
-    BLOCK_WAITING = 2,  ///< One BLOCK waiter is armed and waiting for final completion.
-                        ///< 一个 BLOCK 等待者已经挂起，等待最终完成。
-    BLOCK_CLAIMED =
-        3,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
-    BLOCK_DETACHED = 4,  ///< Waiter already timed out/detached; completion must not post.
-                         ///< 等待者已超时/被分离，完成侧不能再 Post。
+    FREE = 0,
+    OWNER = 1,
+    WAITING = 2,
+    PUBLISHING = 3,
   };
 
-  std::atomic<BusyState> busy_{
-      BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
-  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
-                                            ///< 当前 BLOCK 写入的最终结果。
+  enum class ActiveState : uint32_t
+  {
+    NONE = 0,
+    WAITING = 1,
+    CLAIMED = 2,
+    DETACHED = 3,
+  };
+
+  static constexpr uint32_t PHASE_MASK = 0x7U;
+  static constexpr uint32_t ACTIVE_SHIFT = 3U;
+  static constexpr uint32_t ACTIVE_MASK = 0x3U << ACTIVE_SHIFT;
+  static constexpr uint32_t KICK = 1U << 5U;
+  static constexpr uint32_t PUBLISH_TIMEOUT = 1U << 6U;
+  static constexpr uint32_t HANDOFF = 1U << 7U;
+  static constexpr uint32_t RESULT_SHIFT = 8U;
+  static constexpr uint32_t RESULT_MASK = 0xFFU << RESULT_SHIFT;
+
+  static constexpr uint32_t State(Phase phase, ActiveState active)
+  {
+    return static_cast<uint32_t>(phase) | (static_cast<uint32_t>(active) << ACTIVE_SHIFT);
+  }
+
+  static constexpr Phase CurrentPhase(uint32_t state)
+  {
+    return static_cast<Phase>(state & PHASE_MASK);
+  }
+
+  static constexpr ActiveState Active(uint32_t state)
+  {
+    return static_cast<ActiveState>((state & ACTIVE_MASK) >> ACTIVE_SHIFT);
+  }
+
+  static constexpr uint32_t WithPhase(uint32_t state, Phase phase)
+  {
+    return (state & ~PHASE_MASK) | static_cast<uint32_t>(phase);
+  }
+
+  static constexpr uint32_t WithActive(uint32_t state, ActiveState active)
+  {
+    return (state & ~ACTIVE_MASK) | (static_cast<uint32_t>(active) << ACTIVE_SHIFT);
+  }
+
+  static constexpr uint32_t WithoutPublicationFlags(uint32_t state)
+  {
+    return state & ~(KICK | PUBLISH_TIMEOUT);
+  }
+
+  static constexpr bool HasKick(uint32_t state) { return (state & KICK) != 0U; }
+
+  static constexpr bool HasPublishTimeout(uint32_t state)
+  {
+    return (state & PUBLISH_TIMEOUT) != 0U;
+  }
+
+  static constexpr bool HasHandoff(uint32_t state) { return (state & HANDOFF) != 0U; }
+
+  static constexpr uint32_t WithResult(uint32_t state, ErrorCode result)
+  {
+    const auto encoded = static_cast<uint32_t>(static_cast<int32_t>(result) + 128);
+    return (state & ~RESULT_MASK) | (encoded << RESULT_SHIFT);
+  }
+
+  static constexpr ErrorCode Result(uint32_t state)
+  {
+    const auto encoded = static_cast<int32_t>((state & RESULT_MASK) >> RESULT_SHIFT);
+    return static_cast<ErrorCode>(encoded - 128);
+  }
+
+  std::atomic<uint32_t> state_{
+      WithResult(State(Phase::FREE, ActiveState::NONE), ErrorCode::OK)};
+  WriteInfoBlock deferred_info_{};  ///< One direct BLOCK request awaiting admission.
+                                    ///< 一笔等待接纳的直接 BLOCK 写请求。
+
+  bool TryAcquireOwner();
+  bool TryReserveDeferredOwner();
+  void ReleaseOwner(bool in_isr);
+  ErrorCode DeferBlock(ConstRawData data, WriteOperation& op, bool owns_port);
+  ErrorCode WaitForBlock(WriteOperation& op, bool deferred);
+  ErrorCode PublishOwned(ConstRawData data, WriteOperation& op, bool data_pushed,
+                         bool in_isr, bool deferred);
+  void ReleaseBlockClaim();
+  void FinishDeferredPublication(WriteOperation& op, ErrorCode ans, bool in_isr);
 
  public:
   // Stream batch facade.
@@ -270,6 +334,20 @@ class WritePort
   void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info);
 
   /**
+   * @brief 尝试接纳并发布一笔等待中的 BLOCK 写请求。
+   * @brief Tries to admit and publish one deferred BLOCK write request.
+   *
+   * 后端恢复或消费进度释放了写队列空间后可调用本接口。若空间仍不足、另一个端口路径
+   * 正持有提交权，或没有等待请求，本调用直接返回且不会唤醒写入者。
+   * Backends may call this after recovery or after consumer progress releases write-queue
+   * capacity. The call returns without waking the writer when capacity is still
+   * insufficient, another port path owns submission, or no deferred request exists.
+   *
+   * @param in_isr 当前调用是否位于 ISR。 Whether the call runs in ISR context.
+   */
+  void ProcessPendingWrites(bool in_isr);
+
+  /**
    * @brief 标记写入操作为运行中。
    *        Marks the write operation as running.
    *
@@ -310,14 +388,14 @@ class WritePort
    * @param data 写入的原始数据 / Raw data to be written
    * @param op 写入操作对象，包含操作类型和同步机制。
    *           Write operation object containing the operation type and synchronization
-   * @param pushed 数据是否已经推送到缓冲区 / Whether the data has been pushed to the
-   * buffer
+   * @param data_pushed 数据是否已经推送到缓冲区 / Whether the data has been pushed to
+   * the buffer
    * @param in_isr 指示是否在中断上下文中执行。
    *               Indicates whether the operation is executed in an interrupt context.
    * @return 返回操作的 ErrorCode，指示操作结果。
    *         Returns an ErrorCode indicating the result of the operation.
    */
-  ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool pushed = false,
+  ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool data_pushed = false,
                         bool in_isr = false);
 
  protected:

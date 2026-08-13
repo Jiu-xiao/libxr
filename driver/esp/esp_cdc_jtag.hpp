@@ -122,6 +122,22 @@ class ESP32CDCJtag : public UART
   ErrorCode TryStartTx(bool in_isr);
 
   /**
+   * @brief TX 完成保护域退出后继续服务已接纳的队列记录 / Continue servicing admitted
+   * queue records after the TX completion guard
+   *
+   * payload 与 metadata 完整发布后，队首记录即可由后端接管；completion 可能先于该记录
+   * 对应的 `WriteFun` kick 到达。WritePort 会延迟 BLOCK 的同步完成交接；需要在完成回调中
+   * 连续发起写入的 CALLBACK 状态机应使用 `Callback::CreateGuarded()`。
+   * Once payload and metadata are fully published, the backend may claim the queue head;
+   * completion can precede that record's `WriteFun` kick. WritePort defers synchronous
+   * BLOCK handoff, while CALLBACK state machines that submit the next write from
+   * completion should use `Callback::CreateGuarded()`.
+   *
+   * @param in_isr 当前调用是否位于 ISR / Whether the call runs in ISR context
+   */
+  void ServiceQueuedTxAfterCompletion(bool in_isr);
+
+  /**
    * @brief 从队列装载一个 active TX 请求 / Load one active TX request from the queue
    */
   bool LoadActiveTxFromQueue(bool in_isr);

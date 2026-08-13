@@ -48,10 +48,7 @@ ErrorCode WritePort::Stream::Acquire()
     return ErrorCode::NOT_SUPPORT;
   }
 
-  BusyState expected = BusyState::IDLE;
-  if (!port_->busy_.compare_exchange_strong(expected, BusyState::OWNER,
-                                            std::memory_order_acq_rel,
-                                            std::memory_order_acquire))
+  if (!port_->TryAcquireOwner())
   {
     state_.store(StreamState::RELEASED, std::memory_order_release);
     return ErrorCode::BUSY;
@@ -59,7 +56,7 @@ ErrorCode WritePort::Stream::Acquire()
 
   if (port_->queue_info_->EmptySize() < 1)
   {
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    port_->ReleaseOwner(false);
     state_.store(StreamState::RELEASED, std::memory_order_release);
     return ErrorCode::FULL;
   }
@@ -106,22 +103,9 @@ ErrorCode WritePort::Stream::SubmitBuffered()
   }
   ASSERT(buffered_size_ > 0);
 
-  // Publish the operation state before queued metadata can be consumed.
-  // metadata 被消费前先发布 operation 状态。
-  op_.MarkAsRunning();
-
   const size_t submitted_size = buffered_size_;
-  auto ans = port_->queue_info_->Push(
-      WriteInfoBlock{ConstRawData{nullptr, submitted_size}, op_});
-  ASSERT(ans == ErrorCode::OK);
-
-  ans = port_->CommitWrite({nullptr, submitted_size}, op_, true);
+  const auto ans = port_->CommitWrite({nullptr, submitted_size}, op_, true);
   buffered_size_ = 0;
-
-  if (op_.type != WriteOperation::OperationType::BLOCK)
-  {
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-  }
 
   // Reopen Stream admission only after both local metadata and Port ownership are final.
   state_.store(StreamState::RELEASED, std::memory_order_release);
@@ -176,7 +160,7 @@ ErrorCode WritePort::Stream::Commit()
   {
     return ErrorCode::BUSY;
   }
-  port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+  port_->ReleaseOwner(false);
   state_.store(StreamState::RELEASED, std::memory_order_release);
   return ErrorCode::OK;
 }

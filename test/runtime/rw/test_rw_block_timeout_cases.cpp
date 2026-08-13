@@ -195,20 +195,26 @@ void test_rw_block_write_timeout_detaches_waiter()
   ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem1.Value() == 0);
 
-  Semaphore sem2;
-  WriteOperation op2(sem2, 0);
-  ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::BUSY);
-  ASSERT(sem2.Value() == 0);
+  Semaphore second_done;
+  Semaphore second_semaphore;
+  BlockingWriteCallContext second{&w, ConstRawData{TX2, sizeof(TX2)}, UINT32_MAX,
+                                  ErrorCode::FAILED, &second_done};
+  second.semaphore = &second_semaphore;
+  Thread second_writer;
+  StartBlockingWriteCaller(second_writer, second, "wr_detached_next");
+  REQUIRE(WaitForLinuxFutexWait(second.thread_id));
 
   WriteInfoBlock completed{};
   ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
   w.Finish(false, ErrorCode::OK, completed);
   ASSERT(sem1.Value() == 0);
 
-  ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::TIMEOUT);
-  ASSERT(sem2.Value() == 0);
+  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
+  w.Finish(false, ErrorCode::OK, completed);
+  ExpectWaitOk(second_done, THREAD_STATE_TIMEOUT_MS);
+  JoinThreadIfNeeded(second_writer);
+  ASSERT(second.result == ErrorCode::OK);
+  ASSERT(second_semaphore.Value() == 0U);
 }
 
 /**

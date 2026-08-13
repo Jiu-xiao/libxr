@@ -17,6 +17,7 @@ void RunRuntimeRwBlockStreamTests();
 void RunRuntimeRwBlockTimeoutTests();
 void RunRuntimeRwBlockBackendTeardownTests();
 void RunRuntimeRwBlockWaiterTests();
+void RunRuntimeRwBlockDeferredTests();
 
 /**
  * @brief 测试项函数 `RunRuntimeRwBlockTests`。 Test-item function
@@ -33,4 +34,5 @@ void RunRuntimeRwBlockTests()
   RunRuntimeRwBlockTimeoutTests();
   RunRuntimeRwBlockBackendTeardownTests();
   RunRuntimeRwBlockWaiterTests();
+  RunRuntimeRwBlockDeferredTests();
 }

@@ -7,6 +7,14 @@ using namespace LibXR;
 template class LibXR::SPSCQueue<WriteInfoBlock>;
 template class LibXR::SPSCQueue<uint8_t>;
 
+namespace
+{
+ErrorCode NormalizeSynchronousResult(ErrorCode result)
+{
+  return static_cast<int8_t>(result) < 0 ? result : ErrorCode::OK;
+}
+}  // namespace
+
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
     : queue_info_(new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
                       SPSCQueue<WriteInfoBlock>(queue_size)),
@@ -36,41 +44,126 @@ WritePort& WritePort::operator=(WriteFun fun)
   return *this;
 }
 
-void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
+bool WritePort::TryAcquireOwner()
 {
-  if (info.op.type == WriteOperation::OperationType::BLOCK)
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (CurrentPhase(observed) == Phase::FREE && Active(observed) == ActiveState::NONE &&
+         !HasHandoff(observed))
   {
-    // Write completion claims the active BLOCK waiter and hands the wakeup to it.
-    // 写完成 claim 当前 BLOCK waiter，并把唤醒交给它。
-    BusyState state = busy_.load(std::memory_order_acquire);
-    while (state == BusyState::OWNER || state == BusyState::BLOCK_WAITING)
+    uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::OWNER));
+    desired = WithResult(desired, ErrorCode::OK);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
     {
-      if (busy_.compare_exchange_weak(state, BusyState::BLOCK_CLAIMED,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire))
-      {
-        block_result_ = ans;
-        info.op.data.sem_info.sem->PostFromCallback(in_isr);
-        return;
-      }
+      return true;
+    }
+  }
+  return false;
+}
+
+bool WritePort::TryReserveDeferredOwner()
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (true)
+  {
+    const ActiveState active = Active(observed);
+    if (CurrentPhase(observed) != Phase::FREE ||
+        (active != ActiveState::NONE && active != ActiveState::DETACHED) ||
+        HasHandoff(observed))
+    {
+      return false;
     }
 
-    // The waiter may have timed out and detached before this late completion is
-    // reported.
-    // waiter 可能已经先超时分离，随后迟到完成才上报。
-    ASSERT_FROM_CALLBACK(state == BusyState::BLOCK_DETACHED, in_isr);
-    if (state != BusyState::BLOCK_DETACHED)
+    const uint32_t desired = WithPhase(observed & ~PUBLISH_TIMEOUT, Phase::OWNER);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      return true;
+    }
+  }
+}
+
+void WritePort::ReleaseOwner(bool in_isr)
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (CurrentPhase(observed) == Phase::OWNER && Active(observed) == ActiveState::NONE)
+  {
+    uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+    desired = WithResult(desired, ErrorCode::OK);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
     {
       return;
     }
+  }
+  ASSERT_FROM_CALLBACK(false, in_isr);
+}
 
-    const bool detached = busy_.compare_exchange_strong(
-        state, BusyState::IDLE, std::memory_order_acq_rel, std::memory_order_acquire);
-    ASSERT_FROM_CALLBACK(detached, in_isr);
+void WritePort::ReleaseBlockClaim()
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (CurrentPhase(observed) == Phase::FREE &&
+         Active(observed) == ActiveState::CLAIMED)
+  {
+    uint32_t desired = WithoutPublicationFlags(WithActive(observed, ActiveState::NONE));
+    desired = WithResult(desired, ErrorCode::OK);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      return;
+    }
+  }
+  ASSERT(false);
+}
+
+void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
+{
+  if (info.op.type != WriteOperation::OperationType::BLOCK)
+  {
+    info.op.UpdateStatus(in_isr, ans);
+    ProcessPendingWrites(in_isr);
     return;
   }
 
-  info.op.UpdateStatus(in_isr, ans);
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (true)
+  {
+    const ActiveState active = Active(observed);
+    if (active == ActiveState::WAITING)
+    {
+      const uint32_t desired =
+          WithResult(WithActive(observed, ActiveState::CLAIMED), ans);
+      if (!state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
+      {
+        continue;
+      }
+
+      // A synchronous Finish only records the result. The publisher releases its phase
+      // before it performs the unique wakeup.
+      if (CurrentPhase(desired) == Phase::FREE)
+      {
+        info.op.data.sem_info.sem->PostFromCallback(in_isr);
+        ProcessPendingWrites(in_isr);
+      }
+      return;
+    }
+
+    if (active == ActiveState::DETACHED)
+    {
+      const uint32_t desired = WithActive(observed, ActiveState::NONE);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        ProcessPendingWrites(in_isr);
+        return;
+      }
+      continue;
+    }
+
+    ASSERT_FROM_CALLBACK(false, in_isr);
+    return;
+  }
 }
 
 void WritePort::MarkAsRunning(WriteOperation& op) { op.MarkAsRunning(); }
@@ -80,255 +173,549 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_i
   REQUIRE_FROM_CALLBACK(op.type != WriteOperation::OperationType::BLOCK || !in_isr,
                         in_isr);
 
-  if (Writable())
-  {
-    if (data.size_ == 0)
-    {
-      if (op.type != WriteOperation::OperationType::BLOCK)
-      {
-        op.UpdateStatus(in_isr, ErrorCode::OK);
-      }
-      return ErrorCode::OK;
-    }
-
-    BusyState expected = BusyState::IDLE;
-    if (!busy_.compare_exchange_strong(expected, BusyState::OWNER,
-                                       std::memory_order_acq_rel,
-                                       std::memory_order_acquire))
-    {
-      return ErrorCode::BUSY;
-    }
-
-    return CommitWrite(data, op, false, in_isr);
-  }
-  else
+  if (!Writable())
   {
     return ErrorCode::NOT_SUPPORT;
   }
-}
 
-ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool meta_pushed,
-                                 bool in_isr)
-{
-  if (!meta_pushed && queue_info_->EmptySize() < 1)
+  if (data.size_ == 0U)
   {
-    busy_.store(BusyState::IDLE, std::memory_order_release);
-    return ErrorCode::FULL;
+    if (op.type != WriteOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::OK);
+    }
+    return ErrorCode::OK;
   }
 
-  ErrorCode ans = ErrorCode::OK;
-  if (!meta_pushed)
+  if (data.addr_ == nullptr)
   {
-    if (queue_data_->EmptySize() < data.size_)
-    {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return ErrorCode::FULL;
-    }
+    return ErrorCode::PTR_NULL;
+  }
 
-    ans =
-        queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
-    UNUSED(ans);
-    ASSERT(ans == ErrorCode::OK);
+  ASSERT(queue_data_ != nullptr);
+  if (data.size_ > queue_data_->MaxSize())
+  {
+    return ErrorCode::SIZE_ERR;
+  }
 
-    // Operation state is part of the published queue record. Arm it before metadata
-    // becomes visible to a concurrent backend/configuration owner.
-    // operation 状态属于已发布队列记录的一部分；在 metadata 对并发 backend/config owner
-    // 可见前先挂起。
-    op.MarkAsRunning();
-    WriteInfoBlock info{data, op};
-    ans = queue_info_->Push(info);
-
-    ASSERT(ans == ErrorCode::OK);
+  if (TryAcquireOwner())
+  {
+    return CommitWrite(data, op, false, in_isr);
   }
 
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
-    BusyState expected = BusyState::OWNER;
-    if (!busy_.compare_exchange_strong(expected, BusyState::BLOCK_WAITING,
-                                       std::memory_order_acq_rel,
-                                       std::memory_order_acquire))
-    {
-      REQUIRE(expected == BusyState::BLOCK_CLAIMED);
-    }
+    return DeferBlock(data, op, false);
   }
 
-  ans = write_fun_(*this, in_isr);
+  return ErrorCode::BUSY;
+}
 
-  if (ans != ErrorCode::PENDING)
+ErrorCode WritePort::DeferBlock(ConstRawData data, WriteOperation& op, bool owns_port)
+{
+  if (!owns_port && !TryReserveDeferredOwner())
+  {
+    return ErrorCode::BUSY;
+  }
+
+  deferred_info_ = WriteInfoBlock{data, op};
+
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (CurrentPhase(observed) == Phase::OWNER)
+  {
+    const ActiveState active = Active(observed);
+    ASSERT(active == ActiveState::NONE || active == ActiveState::DETACHED);
+    const uint32_t waiting = WithPhase(observed, Phase::WAITING);
+    if (state_.compare_exchange_weak(observed, waiting, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      break;
+    }
+  }
+  ASSERT(CurrentPhase(observed) == Phase::OWNER);
+
+  // Close progress that occurred while deferred_info_ was not yet readable.
+  ProcessPendingWrites(false);
+  return WaitForBlock(op, true);
+}
+
+ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool data_pushed,
+                                 bool in_isr)
+{
+  ASSERT(queue_info_ != nullptr);
+  ASSERT(queue_data_ != nullptr);
+
+  if (!data_pushed &&
+      (queue_info_->EmptySize() < 1U || queue_data_->EmptySize() < data.size_))
   {
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      const auto state = busy_.load(std::memory_order_acquire);
+      return DeferBlock(data, op, true);
+    }
 
-      if (state == BusyState::BLOCK_CLAIMED)
+    ReleaseOwner(in_isr);
+    return ErrorCode::FULL;
+  }
+
+  ASSERT(queue_info_->EmptySize() >= 1U);
+  return PublishOwned(data, op, data_pushed, in_isr, false);
+}
+
+ErrorCode WritePort::PublishOwned(ConstRawData data, WriteOperation& op, bool data_pushed,
+                                  bool in_isr, bool deferred)
+{
+  const bool block = op.type == WriteOperation::OperationType::BLOCK;
+  if (block)
+  {
+    const Phase expected_phase = deferred ? Phase::PUBLISHING : Phase::OWNER;
+    uint32_t observed = state_.load(std::memory_order_acquire);
+    while (CurrentPhase(observed) == expected_phase &&
+           Active(observed) == ActiveState::NONE)
+    {
+      const uint32_t desired = WithActive(observed, ActiveState::WAITING);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
       {
-        auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-        REQUIRE(finish_wait_ans == ErrorCode::OK);
-        const ErrorCode result = block_result_;
-        busy_.store(BusyState::IDLE, std::memory_order_release);
+        break;
+      }
+    }
+    ASSERT(CurrentPhase(observed) == expected_phase &&
+           Active(observed) == ActiveState::NONE);
+  }
+
+  if (!data_pushed)
+  {
+    const ErrorCode data_result =
+        queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
+    UNUSED(data_result);
+    ASSERT(data_result == ErrorCode::OK);
+  }
+
+  op.MarkAsRunning();
+  const ConstRawData published_data =
+      data_pushed ? ConstRawData{nullptr, data.size_} : data;
+  const ErrorCode info_result = queue_info_->Push(WriteInfoBlock{published_data, op});
+  UNUSED(info_result);
+  ASSERT(info_result == ErrorCode::OK);
+
+  const ErrorCode ans = write_fun_(*this, in_isr);
+
+  if (!block)
+  {
+    // Release port admission before a synchronous terminal callback. A Stream keeps its
+    // own SUBMITTING state until its local batch is finalized.
+    ReleaseOwner(in_isr);
+    if (ans != ErrorCode::PENDING)
+    {
+      op.UpdateStatus(in_isr, ans);
+      return NormalizeSynchronousResult(ans);
+    }
+    return ErrorCode::OK;
+  }
+
+  if (deferred)
+  {
+    FinishDeferredPublication(op, ans, in_isr);
+    return NormalizeSynchronousResult(ans);
+  }
+
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (true)
+  {
+    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::OWNER, in_isr);
+    const ActiveState active = Active(observed);
+
+    if (active == ActiveState::CLAIMED)
+    {
+      const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        op.data.sem_info.sem->PostFromCallback(in_isr);
+        return WaitForBlock(op, false);
+      }
+      continue;
+    }
+
+    ASSERT_FROM_CALLBACK(active == ActiveState::WAITING, in_isr);
+    if (ans == ErrorCode::PENDING)
+    {
+      const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        return WaitForBlock(op, false);
+      }
+      continue;
+    }
+
+    uint32_t desired = WithoutPublicationFlags(
+        WithActive(WithPhase(observed, Phase::FREE), ActiveState::NONE));
+    desired = WithResult(desired, ErrorCode::OK);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      return NormalizeSynchronousResult(ans);
+    }
+  }
+}
+
+void WritePort::FinishDeferredPublication(WriteOperation& op, ErrorCode ans, bool in_isr)
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (true)
+  {
+    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::PUBLISHING, in_isr);
+    const ActiveState active = Active(observed);
+
+    if (active == ActiveState::CLAIMED)
+    {
+      const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        op.data.sem_info.sem->PostFromCallback(in_isr);
+        return;
+      }
+      continue;
+    }
+
+    ASSERT_FROM_CALLBACK(active == ActiveState::WAITING, in_isr);
+    if (ans != ErrorCode::PENDING)
+    {
+      uint32_t desired = WithoutPublicationFlags(
+          WithActive(WithPhase(observed, Phase::FREE), ActiveState::CLAIMED));
+      desired = WithResult(desired, NormalizeSynchronousResult(ans));
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        op.data.sem_info.sem->PostFromCallback(in_isr);
+        return;
+      }
+      continue;
+    }
+
+    const bool timed_out = HasPublishTimeout(observed);
+    uint32_t desired = WithoutPublicationFlags(
+        WithActive(WithPhase(observed, Phase::FREE),
+                   timed_out ? ActiveState::DETACHED : ActiveState::WAITING));
+    if (timed_out)
+    {
+      desired = WithResult(desired | HANDOFF, ErrorCode::TIMEOUT);
+    }
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      if (timed_out)
+      {
+        // This wakeup ends the caller-buffer handoff only. The late backend Finish sees
+        // DETACHED and must not post this semaphore again.
+        op.data.sem_info.sem->PostFromCallback(in_isr);
+      }
+      return;
+    }
+  }
+}
+
+ErrorCode WritePort::WaitForBlock(WriteOperation& op, bool deferred_wait)
+{
+  ErrorCode wait_result = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+
+  while (true)
+  {
+    uint32_t observed = state_.load(std::memory_order_acquire);
+    const Phase phase = CurrentPhase(observed);
+    const ActiveState active = Active(observed);
+
+    if (wait_result == ErrorCode::OK)
+    {
+      if (phase == Phase::FREE && active == ActiveState::CLAIMED)
+      {
+        const ErrorCode result = Result(observed);
+        ReleaseBlockClaim();
         return result;
       }
 
-      REQUIRE(state == BusyState::BLOCK_WAITING);
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return ans;
+      if (deferred_wait && HasHandoff(observed))
+      {
+        const ErrorCode result = Result(observed);
+        uint32_t desired = WithResult(observed & ~HANDOFF, ErrorCode::OK);
+        if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                         std::memory_order_acquire))
+        {
+          return result;
+        }
+        continue;
+      }
+
+      ASSERT(false);
+      return ErrorCode::STATE_ERR;
     }
 
-    if (!meta_pushed)
+    if (deferred_wait && HasHandoff(observed))
     {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
+      // The terminal publisher owns one semaphore post. Consume it before returning so
+      // the caller may safely reuse its semaphore for a later operation.
+      wait_result = op.data.sem_info.sem->Wait(UINT32_MAX);
+      REQUIRE(wait_result == ErrorCode::OK);
+      continue;
     }
 
-    if (op.type != WriteOperation::OperationType::BLOCK)
+    if (deferred_wait && phase == Phase::WAITING)
     {
-      op.UpdateStatus(in_isr, ans);
+      uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      desired = WithResult(desired, ErrorCode::TIMEOUT);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        return ErrorCode::TIMEOUT;
+      }
+      continue;
     }
-    return (static_cast<int8_t>(ans) < 0) ? ans : ErrorCode::OK;
+
+    if (deferred_wait && phase == Phase::PUBLISHING)
+    {
+      const uint32_t desired = observed | PUBLISH_TIMEOUT;
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        wait_result = op.data.sem_info.sem->Wait(UINT32_MAX);
+        REQUIRE(wait_result == ErrorCode::OK);
+      }
+      continue;
+    }
+
+    if (phase == Phase::FREE && active == ActiveState::WAITING)
+    {
+      const uint32_t desired = WithActive(observed, ActiveState::DETACHED);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        return ErrorCode::TIMEOUT;
+      }
+      continue;
+    }
+
+    if (phase == Phase::OWNER && active == ActiveState::WAITING)
+    {
+      // A quiesced teardown owns the queues. It will either publish the final result or
+      // observe DETACHED before deciding whether this waiter still owns a wakeup.
+      const uint32_t desired = WithActive(observed, ActiveState::DETACHED);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        return ErrorCode::TIMEOUT;
+      }
+      continue;
+    }
+
+    if (active == ActiveState::CLAIMED || (deferred_wait && phase == Phase::OWNER))
+    {
+      wait_result = op.data.sem_info.sem->Wait(UINT32_MAX);
+      REQUIRE(wait_result == ErrorCode::OK);
+      continue;
+    }
+
+    ASSERT(false);
+    return ErrorCode::STATE_ERR;
+  }
+}
+
+void WritePort::ProcessPendingWrites(bool in_isr)
+{
+  ASSERT(queue_info_ != nullptr);
+  ASSERT(queue_data_ != nullptr);
+
+  // Every progress source contributes a fresh RMW, even when KICK is already set. This
+  // carries the latest queue-head release into the promoter's acquire sequence.
+  state_.fetch_or(KICK, std::memory_order_acq_rel);
+
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (true)
+  {
+    if (CurrentPhase(observed) != Phase::WAITING ||
+        Active(observed) != ActiveState::NONE || HasHandoff(observed))
+    {
+      return;
+    }
+
+    const uint32_t publishing = WithPhase(observed, Phase::PUBLISHING);
+    if (state_.compare_exchange_weak(observed, publishing, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      break;
+    }
   }
 
-  if (op.type == WriteOperation::OperationType::BLOCK)
+  // PUBLISHING owns the deferred slot and the caller-buffer lifetime. The timeout path
+  // can no longer cancel or reuse either one after this claim succeeds.
+  WriteInfoBlock info = deferred_info_;
+  observed = state_.load(std::memory_order_acquire);
+  while (true)
   {
-    ASSERT(!in_isr);
-    auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    if (wait_ans == ErrorCode::OK)
+    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::PUBLISHING, in_isr);
+    ASSERT_FROM_CALLBACK(Active(observed) == ActiveState::NONE, in_isr);
+
+    const bool has_capacity =
+        queue_info_->EmptySize() >= 1U && queue_data_->EmptySize() >= info.data.size_;
+    if (has_capacity)
     {
-      // BLOCK_CLAIMED is always released by the waiter itself.
-      // BLOCK_CLAIMED 始终由 waiter 自己释放。
-#ifdef LIBXR_DEBUG_BUILD
-      auto state = busy_.load(std::memory_order_acquire);
-      ASSERT(state == BusyState::BLOCK_CLAIMED);
-#endif
-      const ErrorCode result = block_result_;
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return result;
+      UNUSED(PublishOwned(info.data, info.op, false, in_isr, true));
+      return;
     }
 
-    // Timeout won before completion claimed the waiter.
-    // 超时先赢，完成侧还没 claim 当前 waiter。
-    BusyState expected = BusyState::BLOCK_WAITING;
-    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
-                                      std::memory_order_acq_rel,
+    if (HasPublishTimeout(observed))
+    {
+      uint32_t cancelled = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      cancelled = WithResult(cancelled | HANDOFF, ErrorCode::TIMEOUT);
+      if (state_.compare_exchange_weak(observed, cancelled, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        info.op.data.sem_info.sem->PostFromCallback(in_isr);
+        return;
+      }
+      continue;
+    }
+
+    if (HasKick(observed))
+    {
+      // Consume this progress carrier without releasing the deferred slot, then sample
+      // capacity again. A concurrent carrier makes this CAS fail instead of being lost.
+      const uint32_t retry = observed & ~KICK;
+      if (state_.compare_exchange_weak(observed, retry, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        observed = state_.load(std::memory_order_acquire);
+      }
+      continue;
+    }
+
+    const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::WAITING));
+    if (!state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                       std::memory_order_acquire))
     {
-      return ErrorCode::TIMEOUT;
+      continue;
     }
 
-    REQUIRE(expected == BusyState::BLOCK_CLAIMED);
-
-    // Timeout lost after completion had already claimed the waiter.
-    // 超时发生得太晚，完成侧已经 claim 了当前 waiter。
-    auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-    REQUIRE(finish_wait_ans == ErrorCode::OK);
-    const ErrorCode result = block_result_;
-    busy_.store(BusyState::IDLE, std::memory_order_release);
-    return result;
+    return;
   }
-
-  if (!meta_pushed)
-  {
-    busy_.store(BusyState::IDLE, std::memory_order_release);
-  }
-
-  return ErrorCode::OK;
 }
 
 void WritePort::FailPendingAndResetForBackendTeardown(ErrorCode reason, bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
-  WriteInfoBlock info{};
-  WriteInfoBlock block_info{};
-  bool has_block_info = false;
 
-  const auto drain_queued_records = [&]()
-  {
-    queue_data_->Reset();
-    while (queue_info_->Pop(info) == ErrorCode::OK)
-    {
-      if (info.op.type == WriteOperation::OperationType::BLOCK)
-      {
-        DEV_ASSERT_FROM_CALLBACK(!has_block_info, in_isr);
-        if (!has_block_info)
-        {
-          block_info = info;
-          has_block_info = true;
-        }
-        continue;
-      }
-
-      Finish(in_isr, reason, info);
-    }
-  };
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  bool has_deferred = false;
+  WriteOperation deferred_operation;
 
   while (true)
   {
-    auto state = busy_.load(std::memory_order_acquire);
-
-    if (state == BusyState::OWNER)
+    const Phase phase = CurrentPhase(observed);
+    if (phase == Phase::OWNER || phase == Phase::PUBLISHING)
     {
       DEV_ASSERT_FROM_CALLBACK(false, in_isr);
       return;
     }
 
-    if (state == BusyState::IDLE)
+    if (Active(observed) == ActiveState::CLAIMED)
     {
-      BusyState expected = BusyState::IDLE;
-      if (!busy_.compare_exchange_strong(expected, BusyState::OWNER,
-                                         std::memory_order_acq_rel,
-                                         std::memory_order_acquire))
-      {
-        continue;
-      }
+      return;
+    }
 
-      drain_queued_records();
+    ASSERT_FROM_CALLBACK(phase == Phase::FREE || phase == Phase::WAITING, in_isr);
+    const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::OWNER));
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      has_deferred = phase == Phase::WAITING;
+      if (has_deferred)
+      {
+        deferred_operation = deferred_info_.op;
+      }
+      break;
+    }
+  }
+
+  WriteInfoBlock info{};
+  WriteInfoBlock block_info{};
+  bool has_block_info = false;
+
+  queue_data_->Reset();
+  while (queue_info_->Pop(info) == ErrorCode::OK)
+  {
+    if (info.op.type == WriteOperation::OperationType::BLOCK)
+    {
       DEV_ASSERT_FROM_CALLBACK(!has_block_info, in_isr);
-      block_result_ = ErrorCode::OK;
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return;
-    }
-
-    if (state == BusyState::BLOCK_WAITING)
-    {
-      // Keep BLOCK_WAITING visible until Finish() hands the terminal wakeup to
-      // the blocked caller. Switching to OWNER here would break that
-      // existing waiter handoff.
-      // 这里必须保留 BLOCK_WAITING，直到 Finish() 把最终唤醒交给当前
-      // BLOCK waiter；若先切成 OWNER，会破坏既有 waiter 交接。
-      drain_queued_records();
-      DEV_ASSERT_FROM_CALLBACK(has_block_info, in_isr);
-      if (has_block_info)
+      if (!has_block_info)
       {
-        // Finish publishes the waiter result and may let that caller submit again.
-        // Nothing in this drain may touch port state or queues after that release.
-        Finish(in_isr, reason, block_info);
+        block_info = info;
+        has_block_info = true;
       }
-      return;
+      continue;
     }
 
-    if (state == BusyState::BLOCK_DETACHED)
+    info.op.UpdateStatus(in_isr, reason);
+  }
+
+  observed = state_.load(std::memory_order_acquire);
+  while (true)
+  {
+    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::OWNER, in_isr);
+    const ActiveState active = Active(observed);
+    uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+    bool post_block = false;
+
+    if (active == ActiveState::WAITING)
     {
-      // The waiter is already gone, but BLOCK_DETACHED still blocks reentrant
-      // submissions while old queue entries are drained.
-      // waiter 已经离开，但 BLOCK_DETACHED 仍能在清理旧队列期间挡住重入提交。
-      drain_queued_records();
-      if (has_block_info)
+      DEV_ASSERT_FROM_CALLBACK(!HasHandoff(observed), in_isr);
+      DEV_ASSERT_FROM_CALLBACK(has_block_info && !has_deferred, in_isr);
+      if (!has_block_info || has_deferred)
       {
-        // Finish releases BLOCK_DETACHED. It must be the final drain action because a
-        // new submission may acquire the port immediately afterward.
-        Finish(in_isr, reason, block_info);
         return;
       }
-
-      BusyState expected = BusyState::BLOCK_DETACHED;
-      const bool released = busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                                          std::memory_order_acq_rel,
-                                                          std::memory_order_acquire);
-      ASSERT_FROM_CALLBACK(released, in_isr);
-      return;
+      desired = WithResult(WithActive(desired, ActiveState::CLAIMED), reason);
+      post_block = true;
     }
-
-    if (state == BusyState::BLOCK_CLAIMED)
+    else if (active == ActiveState::DETACHED)
     {
+      DEV_ASSERT_FROM_CALLBACK(has_block_info, in_isr);
+      desired = WithActive(desired, ActiveState::NONE);
+    }
+    else if (active == ActiveState::NONE)
+    {
+      DEV_ASSERT_FROM_CALLBACK(!has_block_info, in_isr);
+      desired = WithActive(desired, ActiveState::NONE);
+    }
+    else
+    {
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
       return;
     }
+
+    desired = WithResult(desired,
+                         (has_deferred || post_block)
+                             ? reason
+                             : (HasHandoff(observed) ? Result(observed) : ErrorCode::OK));
+    if (has_deferred)
+    {
+      DEV_ASSERT_FROM_CALLBACK(!HasHandoff(observed), in_isr);
+      desired |= HANDOFF;
+    }
+    if (!state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+    {
+      continue;
+    }
+
+    if (post_block)
+    {
+      block_info.op.data.sem_info.sem->PostFromCallback(in_isr);
+    }
+    else if (has_deferred)
+    {
+      deferred_operation.data.sem_info.sem->PostFromCallback(in_isr);
+    }
+    return;
   }
 }

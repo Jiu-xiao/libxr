@@ -172,6 +172,9 @@ bool IRAM_ATTR ESP32CDCJtag::LoadActiveTxFromQueue(bool in_isr)
   }
 
   tx_double_buffer_.LoadActive(active_size, active_info);
+  // 本地槽接管出队记录后再发布队列空间进展 / Publish queue-space progress only
+  // after the local slot owns the dequeued record.
+  write_port_->ProcessPendingWrites(in_isr);
   return true;
 }
 
@@ -192,6 +195,9 @@ bool IRAM_ATTR ESP32CDCJtag::LoadPendingTxFromQueue(bool in_isr)
   }
 
   tx_double_buffer_.LoadPending(pending_size, pending_info);
+  // 本地槽接管出队记录后再发布队列空间进展 / Publish queue-space progress only
+  // after the local slot owns the dequeued record.
+  write_port_->ProcessPendingWrites(in_isr);
   return true;
 }
 
@@ -329,8 +335,9 @@ bool IRAM_ATTR ESP32CDCJtag::StartAndReportActive(bool in_isr)
 {
   if (!StartActiveTransfer(in_isr))
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_double_buffer_.ActiveInfo());
+    WriteInfoBlock failed_info = tx_double_buffer_.ActiveInfo();
     ClearActiveTx();
+    write_port_->Finish(in_isr, ErrorCode::FAILED, failed_info);
     return false;
   }
 
@@ -353,39 +360,58 @@ void IRAM_ATTR ESP32CDCJtag::StopTxTransfer()
 // 先收尾 active，再处理 pending / Finish active first, then handle pending.
 void IRAM_ATTR ESP32CDCJtag::OnTxTransferDone(bool in_isr, ErrorCode result)
 {
+  {
+    Flag::ScopedRestore tx_flag(in_tx_isr_);
+    tx_busy_.Clear();
+    ClearActiveTx();
+
+    if ((result != ErrorCode::OK) && tx_double_buffer_.HasPending())
+    {
+      WriteInfoBlock failed_info = tx_double_buffer_.PendingInfo();
+      ClearPendingTx();
+      write_port_->Finish(in_isr, ErrorCode::FAILED, failed_info);
+    }
+
+    if (result != ErrorCode::OK)
+    {
+      StopTxTransfer();
+    }
+  }
+
+  // Finish() 可能同步发布更多工作；释放保护后再继续服务。 / Finish() may publish
+  // more work synchronously; continue servicing it only after releasing the guard.
+  ServiceQueuedTxAfterCompletion(in_isr);
+}
+
+void IRAM_ATTR ESP32CDCJtag::ServiceQueuedTxAfterCompletion(bool in_isr)
+{
+  if (in_tx_isr_.IsSet())
+  {
+    return;
+  }
+
   Flag::ScopedRestore tx_flag(in_tx_isr_);
-  tx_busy_.Clear();
-
-  ClearActiveTx();
-
-  if ((result != ErrorCode::OK) && tx_double_buffer_.HasPending())
+  while (!tx_busy_.IsSet() && !tx_double_buffer_.HasActive())
   {
-    write_port_->Finish(in_isr, ErrorCode::FAILED, tx_double_buffer_.PendingInfo());
-    ClearPendingTx();
-  }
+    if (tx_double_buffer_.HasPending())
+    {
+      (void)StartPendingTxIfIdle(in_isr);
+    }
+    else
+    {
+      if (!LoadActiveTxFromQueue(in_isr))
+      {
+        StopTxTransfer();
+        return;
+      }
+      (void)StartAndReportActive(in_isr);
+    }
 
-  if (result != ErrorCode::OK)
-  {
-    StopTxTransfer();
-    return;
-  }
-
-  if (!tx_double_buffer_.HasPending())
-  {
-    StopTxTransfer();
-    return;
-  }
-
-  if (StartPendingTxIfIdle(in_isr))
-  {
-    if (!tx_double_buffer_.HasPending())
+    if (tx_busy_.IsSet() && !tx_double_buffer_.HasPending())
     {
       (void)LoadPendingTxFromQueue(in_isr);
     }
-    return;
   }
-
-  StopTxTransfer();
 }
 
 // TX 发起路径只做两件事：空闲时启动新的 active，或忙时补一个 pending。
@@ -448,10 +474,15 @@ void IRAM_ATTR ESP32CDCJtag::HandleInterrupt()
 
   usb_serial_jtag_ll_clr_intsts_mask(tx_status);
 
-  Flag::ScopedRestore tx_flag(in_tx_isr_);
-  const bool was_busy = tx_busy_.IsSet();
-  (void)PumpTx(true);
-  if (was_busy && !tx_busy_.IsSet())
+  bool transfer_done = false;
+  {
+    Flag::ScopedRestore tx_flag(in_tx_isr_);
+    const bool was_busy = tx_busy_.IsSet();
+    (void)PumpTx(true);
+    transfer_done = was_busy && !tx_busy_.IsSet();
+  }
+
+  if (transfer_done)
   {
     OnTxTransferDone(true, ErrorCode::OK);
   }

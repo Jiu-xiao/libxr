@@ -24,6 +24,19 @@ namespace LibXR
  */
 class Pipe
 {
+ private:
+  class PipeReadPort : public ReadPort
+  {
+   public:
+    explicit PipeReadPort(WritePort& write_port) : ReadPort(0), write_port_(write_port) {}
+
+   protected:
+    void OnRxDequeue(bool in_isr) override { write_port_.ProcessPendingWrites(in_isr); }
+
+   private:
+    WritePort& write_port_;
+  };
+
  public:
   /**
    * @brief 使用指定数据队列容量构造 Pipe。
@@ -32,7 +45,7 @@ class Pipe
    * @param buffer_size 共享数据队列的容量（字节）。 Capacity (in bytes) of the shared
    * data queue.
    */
-  Pipe(size_t buffer_size) : read_port_(0), write_port_(1, buffer_size)
+  Pipe(size_t buffer_size) : write_port_(1, buffer_size), read_port_(write_port_)
   {
     // 绑定写回调并共享同一数据队列。
     // Bind the write callback and share the same data queue.
@@ -106,9 +119,9 @@ class Pipe
     return ErrorCode::OK;
   }
 
-  ReadPort read_port_;    ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
-                          ///< data queue.
-  WritePort write_port_;  ///< 持有共享数据队列（容量为构造参数）的写端。 Write endpoint
-                          ///< owning the shared queue.
+  WritePort write_port_;    ///< 持有共享数据队列（容量为构造参数）的写端。 Write endpoint
+                            ///< owning the shared queue.
+  PipeReadPort read_port_;  ///< 共享写端数据队列的读端。 Read endpoint sharing the
+                            ///< writer's data queue.
 };
 }  // namespace LibXR
