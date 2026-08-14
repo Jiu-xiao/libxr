@@ -52,7 +52,7 @@ class CDCToUart : public CDCUart
   {
     // CDC->UART：CDC RX 缓冲必须能写入 UART 的 data 队列。
     // CDC->UART: the UART TX data queue must accept at least rx_buffer_size bytes.
-    ASSERT(uart_.write_port_->queue_data_->MaxSize() >= rx_buffer_size);
+    ASSERT(uart_.write_port_->QueueData()->MaxSize() >= rx_buffer_size);
 
     // 1) CDC 读完成回调：从 CDC 读一段数据并写入 UART。
     // 1) CDC read callback: read one chunk from CDC and write it into UART.

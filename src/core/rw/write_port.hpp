@@ -4,12 +4,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <utility>
 
 #include "operation.hpp"
 #include "queue.hpp"
 
 namespace LibXR
 {
+
+class Pipe;
 
 /**
  * @brief WritePort class for handling write operations.
@@ -20,12 +23,98 @@ class WritePort
  public:
   WriteFun write_fun_ =
       nullptr;  ///< Driver/backend write entry. 底层驱动或后端写入入口。
-  SPSCQueue<WriteInfoBlock>* queue_info_ =
-      nullptr;  ///< Metadata queue for pending write batches. 挂起写批次的元数据队列。
-  SPSCQueue<uint8_t>* queue_data_ =
-      nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
+
+  /** @brief Read-only pending metadata queue view. / 挂起元数据队列的只读视图。 */
+  const SPSCQueue<WriteInfoBlock>* QueueInfo() const noexcept { return queue_info_; }
+
+  /** @brief Read-only pending payload queue view. / 挂起负载队列的只读视图。 */
+  const SPSCQueue<uint8_t>* QueueData() const noexcept { return queue_data_; }
+
+  /**
+   * @brief Scoped backend dequeue transaction. / 后端出队事务作用域。
+   *
+   * Successful dequeues release queue capacity, but deferred publication is postponed
+   * until this scope is destroyed. The backend must publish any local active/pending
+   * state before leaving the scope so synchronous write notification cannot observe a
+   * half-owned record. / 成功出队会释放队列容量，但 deferred 发布延迟到本作用域析构；
+   * 后端必须在离开作用域前发布本地 active/pending 状态，避免同步写通知看到只接管一半的
+   * 记录。
+   */
+  class DequeueScope
+  {
+   public:
+    DequeueScope(const DequeueScope&) = delete;
+    DequeueScope& operator=(const DequeueScope&) = delete;
+    DequeueScope(DequeueScope&&) = delete;
+    DequeueScope& operator=(DequeueScope&&) = delete;
+
+    /** @brief Publish accumulated queue-space progress. / 发布累计的队列空间进展。 */
+    ~DequeueScope() noexcept;
+
+    /**
+     * @brief Dequeue one write metadata record. / 出队一条写元数据记录。
+     * @param info Receives the dequeued record. / 接收出队记录。
+     * @return Queue result. / 队列操作结果。
+     */
+    ErrorCode PopInfo(WriteInfoBlock& info);
+
+    /**
+     * @brief Dequeue write payload bytes. / 出队写负载字节。
+     * @param data Destination buffer; null discards the bytes. / 目标缓冲；为空时丢弃。
+     * @param size Number of bytes to dequeue. / 出队字节数。
+     * @return Queue result. / 队列操作结果。
+     */
+    ErrorCode PopData(uint8_t* data, size_t size);
+
+    /**
+     * @brief Discard write payload bytes. / 丢弃写负载字节。
+     * @param size Number of bytes to discard. / 丢弃字节数。
+     * @return Queue result. / 队列操作结果。
+     */
+    ErrorCode DiscardData(size_t size) { return PopData(nullptr, size); }
+
+    /**
+     * @brief Dequeue payload through a reader callback. / 通过读取回调出队负载。
+     * @tparam Reader Reader callback type. / 读取回调类型。
+     * @param size Number of bytes to dequeue. / 出队字节数。
+     * @param reader Callback receiving contiguous queue spans. / 接收连续队列片段的回调。
+     * @return Queue or callback result. / 队列或回调结果。
+     */
+    template <typename Reader>
+    ErrorCode PopDataWithReader(size_t size, Reader&& reader)
+    {
+      ASSERT(port_.queue_data_ != nullptr);
+      const ErrorCode result =
+          port_.MutableDataQueue().PopWithReader(size, std::forward<Reader>(reader));
+      RecordProgress(result, size);
+      return result;
+    }
+
+   private:
+    friend class WritePort;
+
+    explicit DequeueScope(WritePort& port, bool in_isr) : port_(port), in_isr_(in_isr) {}
+
+    void RecordProgress(ErrorCode result, size_t released)
+    {
+      progressed_ = progressed_ || (result == ErrorCode::OK && released != 0U);
+    }
+
+    void RecordSharedDataDequeue() { progressed_ = true; }
+
+    WritePort& port_;
+    bool in_isr_;
+    bool progressed_ = false;
+  };
 
  private:
+  friend class Pipe;
+
+  SPSCQueue<WriteInfoBlock>* const queue_info_ =
+      nullptr;  ///< Metadata queue for pending write batches. 挂起写批次的元数据队列。
+  SPSCQueue<uint8_t>* const queue_data_ =
+      nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
+
   // Phase serializes the producer and the one deferred direct BLOCK request. ActiveState
   // independently tracks a BLOCK record already published to the backend. HANDOFF keeps
   // admission closed until a deferred waiter consumes its terminal result.
@@ -51,7 +140,7 @@ class WritePort
   static constexpr uint32_t ACTIVE_SHIFT = 3U;
   static constexpr uint32_t ACTIVE_MASK = 0x3U << ACTIVE_SHIFT;
   static constexpr uint32_t KICK = 1U << 5U;
-  static constexpr uint32_t PUBLISH_TIMEOUT = 1U << 6U;
+  static constexpr uint32_t PUBLISH_WAIT_ERROR = 1U << 6U;
   static constexpr uint32_t HANDOFF = 1U << 7U;
   static constexpr uint32_t RESULT_SHIFT = 8U;
   static constexpr uint32_t RESULT_MASK = 0xFFU << RESULT_SHIFT;
@@ -83,14 +172,14 @@ class WritePort
 
   static constexpr uint32_t WithoutPublicationFlags(uint32_t state)
   {
-    return state & ~(KICK | PUBLISH_TIMEOUT);
+    return state & ~(KICK | PUBLISH_WAIT_ERROR);
   }
 
   static constexpr bool HasKick(uint32_t state) { return (state & KICK) != 0U; }
 
-  static constexpr bool HasPublishTimeout(uint32_t state)
+  static constexpr bool HasPublishWaitError(uint32_t state)
   {
-    return (state & PUBLISH_TIMEOUT) != 0U;
+    return (state & PUBLISH_WAIT_ERROR) != 0U;
   }
 
   static constexpr bool HasHandoff(uint32_t state) { return (state & HANDOFF) != 0U; }
@@ -114,6 +203,8 @@ class WritePort
 
   bool TryAcquireOwner();
   bool TryReserveDeferredOwner();
+  SPSCQueue<WriteInfoBlock>& MutableInfoQueue() { return *queue_info_; }
+  SPSCQueue<uint8_t>& MutableDataQueue() { return *queue_data_; }
   void ReleaseOwner(bool in_isr);
   ErrorCode DeferBlock(ConstRawData data, WriteOperation& op, bool owns_port);
   ErrorCode WaitForBlock(WriteOperation& op, bool deferred);
@@ -121,6 +212,8 @@ class WritePort
                          bool in_isr, bool deferred);
   void ReleaseBlockClaim();
   void FinishDeferredPublication(WriteOperation& op, ErrorCode ans, bool in_isr);
+  void ProcessPendingWrites(bool in_isr);
+  void RecordSharedDataDequeue(bool in_isr);
 
  public:
   // Stream batch facade.
@@ -334,30 +427,14 @@ class WritePort
   void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info);
 
   /**
-   * @brief 尝试接纳并发布一笔等待中的 BLOCK 写请求。
-   * @brief Tries to admit and publish one deferred BLOCK write request.
-   *
-   * 后端恢复或消费进度释放了写队列空间后可调用本接口。若空间仍不足、另一个端口路径
-   * 正持有提交权，或没有等待请求，本调用直接返回且不会唤醒写入者。
-   * Backends may call this after recovery or after consumer progress releases write-queue
-   * capacity. The call returns without waking the writer when capacity is still
-   * insufficient, another port path owns submission, or no deferred request exists.
-   *
-   * @param in_isr 当前调用是否位于 ISR。 Whether the call runs in ISR context.
+   * @brief Begin one backend dequeue transaction. / 开始一次后端出队事务。
+   * @param in_isr Whether the transaction runs in ISR context. / 是否在 ISR 上下文。
+   * @return Scoped dequeue transaction. / 出队事务作用域。
    */
-  void ProcessPendingWrites(bool in_isr);
-
-  /**
-   * @brief 标记写入操作为运行中。
-   *        Marks the write operation as running.
-   *
-   * 该函数用于将 op 标记为运行状态，以指示当前正在进行写入操作。
-   * This function marks op as running to indicate an ongoing write operation.
-   *
-   * @param op 需要更新状态的 WriteOperation 引用。
-   *           Reference to the WriteOperation whose status needs to be updated.
-   */
-  void MarkAsRunning(WriteOperation& op);
+  [[nodiscard]] DequeueScope BeginDequeue(bool in_isr)
+  {
+    return DequeueScope(*this, in_isr);
+  }
 
   /**
    * @brief 执行写入操作。
@@ -397,37 +474,6 @@ class WritePort
    */
   ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool data_pushed = false,
                         bool in_isr = false);
-
- protected:
-  /**
-   * @brief Fail pending work and reset queue state during a quiesced backend teardown.
-   * @brief 在后端已静止的 teardown 期间失败挂起操作并重置队列状态。
-   *
-   * @note This is not a public queue-management API. Call it only after the backend is
-   *       known to be unavailable.
-   * @note 这不是公开的队列管理接口。仅在后端已明确不可用后调用。
-   * @note The surrounding backend must first close new front-end admission, stop
-   *       completion and IRQ sources, and wait for every already-admitted submitter or
-   *       owner that can mutate this port or its queues to exit.
-   * @note 外围后端必须先关闭新的前端请求入口，停止完成与 IRQ 来源，并等待所有已接纳
-   *       且可能修改本端口或其队列的 submitter 与 owner 退出。
-   * @note A record already popped by a backend must be completed with Finish() or
-   *       returned to the queue before this call. Only a BLOCK caller still asleep in
-   *       Wait() whose record remains queued may be resolved and woken here. No other
-   *       port or queue mutator may begin until this call returns.
-   * @note 后端已经弹出的 active record 必须先通过 Finish() 完成或退回队列。只有仍阻塞在
-   *       Wait() 且 record 仍在队列中的 BLOCK 调用可以由本函数完成并唤醒；本调用
-   *       返回前不得开始其他会修改端口或队列的操作。
-   * @note Seeing OWNER here means the caller violated the backend precondition. Debug
-   *       builds assert; release builds still return without mutating the queues.
-   * @note 若此时仍看到 OWNER，说明调用方违反了后端前提。调试构建会触发断言，发布构建仍会
-   *       在不修改队列的情况下返回。
-   *
-   * @param reason Final failure reported to pending operations. 挂起操作的最终失败原因。
-   * @param in_isr Whether the backend teardown runs in ISR context. 后端 teardown
-   *               是否运行于 ISR 上下文。
-   */
-  void FailPendingAndResetForBackendTeardown(ErrorCode reason, bool in_isr);
 };
 
 }  // namespace LibXR

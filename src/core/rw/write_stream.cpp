@@ -83,8 +83,8 @@ ErrorCode WritePort::Stream::Write(ConstRawData data)
     return lock_result;
   }
 
-  auto ans = port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                           data.size_);
+  auto ans = port_->MutableDataQueue().PushBatch(
+      reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
   if (ans == ErrorCode::OK)
   {
     buffered_size_ += data.size_;

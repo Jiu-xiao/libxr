@@ -23,29 +23,34 @@ class ReadPort
  private:
   // Read states:
   // PENDING = one published request is waiting for queue-fed completion
-  // CLAIMED = one completion or clear path owns queue inspection/dequeue progress
-  // BLOCK_CLAIMED = wakeup now belongs to the waiter
+  // CLAIMED = request publication or one completion/clear path owns queue progress
+  // CLAIMED_WITH_WAITER = completion owns progress and a failed BLOCK wait is registered
+  // BLOCK_CLAIMED = terminal BLOCK wakeup belongs to the waiter
   // The same semaphore may be reused only after the previous BLOCK call
   // returns and the port goes back to IDLE.
   // 读 BLOCK 状态：
   // PENDING = 一个已发布请求正在等待队列侧完成
-  // CLAIMED = 一个完成或清队列路径占有队列检查/出队进度
-  // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
+  // CLAIMED = 请求发布或一个完成/清队列路径占有队列进度
+  // CLAIMED_WITH_WAITER = completion 占有进度，且 BLOCK 等待错误已登记等待交接
+  // BLOCK_CLAIMED = BLOCK 最终唤醒已经归当前 waiter 所有
   // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
   enum class BusyState : uint32_t
   {
     IDLE = 0,     ///< No active waiter and no pending completion. 无等待者、无挂起完成。
     PENDING = 1,  ///< One request is published and awaits queue-side completion.
                   ///< 一个请求已发布，正在等待队列侧完成。
-    CLAIMED = 2,  ///< One completion or clear path owns queue progress.
-                  ///< 一个完成或清队列路径占有队列进度。
-    BLOCK_CLAIMED = 3,  ///< BLOCK wakeup already belongs to the current waiter. 当前
-                        ///< BLOCK 唤醒已被本次等待者认领。
-    // EVENT is a carrier bit, not another logical owner. It records a producer
-    // event in the same atomic modification order when the producer observes a
-    // non-PENDING state and therefore cannot claim the pending read directly.
-    // EVENT 是事件载体位，不是另一种逻辑 owner 状态。producer 看到非 PENDING 状态、
-    // 无法直接接管挂起读时，在同一个原子修改序列中记录该事件。
+    CLAIMED = 2,  ///< Request publication or queue progress is currently owned.
+                  ///< 请求发布或队列进度当前已被占有。
+    CLAIMED_WITH_WAITER = 3,  ///< A failed BLOCK wait awaits the current owner handoff.
+                              ///< BLOCK 等待错误正在等待当前 owner 交接。
+    BLOCK_CLAIMED = 4,        ///< The terminal BLOCK wakeup belongs to the waiter.
+                              ///< BLOCK 最终唤醒已归等待者所有。
+    // EVENT is a producer-progress carrier bit, not another logical owner. A producer
+    // sets it after publishing data when it cannot directly claim an exact PENDING state;
+    // the same RMW also carries queue visibility through idle/publication races.
+    // EVENT 是 producer 进度载体位，不是另一种逻辑 owner。producer 发布数据后，若无法
+    // 直接 claim 精确的 PENDING 状态就设置该位；同一 RMW 也为 idle/publication 竞争携带
+    // 队列可见性。
     EVENT = 1U << 31U,
   };
 
@@ -55,6 +60,8 @@ class ReadPort
   std::atomic<BusyState> busy_{
       BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
   ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
+
+  bool TryCompleteClaimedRead(bool in_isr, bool signal_block_completion);
 
  public:
   /**
@@ -118,31 +125,6 @@ class ReadPort
    * 本函数只查询队列能力，不会启动后端，也不表示支持同步 pull 实现。
    */
   bool Readable();
-
-  /**
-   * @brief 完成已由队列路径认领的读取操作。
-   *        Completes a read operation already claimed by the queue path.
-   *
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
-   * @param ans 错误码，用于指示操作的结果。
-   *            Error code indicating the result of the operation.
-   * @param info 需要更新状态的 ReadInfoBlock 引用。
-   *             Reference to the ReadInfoBlock whose status needs to be updated.
-   */
-  void Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info);
-
-  /**
-   * @brief 标记读取操作为运行中。
-   *        Marks the read operation as running.
-   *
-   * 该函数用于将 info.op_ 标记为运行状态，以指示当前正在进行读取操作。
-   * This function marks info.op_ as running to indicate an ongoing read operation.
-   *
-   * @param info 需要更新状态的 ReadInfoBlock 引用。
-   *             Reference to the ReadInfoBlock whose status needs to be updated.
-   */
-  void MarkAsRunning(ReadInfoBlock& info);
 
   /**
    * @brief 读取操作符重载，用于执行读取操作。
@@ -230,30 +212,6 @@ class ReadPort
    *               Indicates whether the operation is executed in an interrupt context.
    */
   void ProcessPendingReads(bool in_isr);
-
- protected:
-  /**
-   * @brief Fail pending work and reset queue state during a quiesced backend teardown.
-   * @brief 在后端已静止的 teardown 期间失败挂起操作并重置队列状态。
-   *
-   * @note This is not a public queue-management API. Call it only after the backend is
-   *       known to be unavailable.
-   * @note 这不是公开的队列管理接口。仅在后端已明确不可用后调用。
-   * @note The surrounding backend must first close new front-end admission, stop
-   *       completion, data, and IRQ sources, and wait for every already-admitted caller
-   *       or owner that can mutate this port or queue to exit. A BLOCK caller may remain
-   *       asleep in Wait(); this function resolves and wakes that waiter. No other port
-   *       or queue mutator may begin until this call returns.
-   * @note 外围后端必须先关闭新的前端请求入口，停止完成、数据与 IRQ 来源，并等待所有
-   *       已接纳且可能修改本端口或队列的调用方与 owner 退出。已经阻塞在 Wait() 中的
-   *       BLOCK 调用可以继续等待；本函数负责完成并唤醒它。本调用返回前不得开始其他
-   *       会修改端口或队列的操作。
-   *
-   * @param reason Final failure reported to a pending operation. 挂起操作的最终失败原因。
-   * @param in_isr Whether the backend teardown runs in ISR context. 后端 teardown
-   *               是否运行于 ISR 上下文。
-   */
-  void FailPendingAndResetForBackendTeardown(ErrorCode reason, bool in_isr);
 };
 
 }  // namespace LibXR

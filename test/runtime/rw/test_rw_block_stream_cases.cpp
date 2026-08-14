@@ -33,8 +33,8 @@ void test_rw_stream_block_handles_completion_before_backend_return()
   ASSERT(semaphore.Value() == 0);
   ASSERT(port.payload_size == sizeof(TX));
   ASSERT(std::memcmp(port.payload, TX, sizeof(TX)) == 0);
-  ASSERT(port.queue_info_->Size() == 0);
-  ASSERT(port.queue_data_->Size() == 0);
+  ASSERT(port.QueueInfo()->Size() == 0);
+  ASSERT(port.QueueData()->Size() == 0);
 }
 
 /**

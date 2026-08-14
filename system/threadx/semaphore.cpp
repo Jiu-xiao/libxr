@@ -28,8 +28,7 @@ ErrorCode Semaphore::Wait(uint32_t timeout)
   {
     return ErrorCode::OK;
   }
-  else if (status == TX_NO_INSTANCE || status == TX_NOT_AVAILABLE ||
-           status == TX_WAIT_ABORTED)
+  else if (status == TX_NO_INSTANCE || status == TX_NOT_AVAILABLE)
   {
     return ErrorCode::TIMEOUT;
   }

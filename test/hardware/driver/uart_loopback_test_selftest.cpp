@@ -63,22 +63,36 @@ class MemoryLoopbackUart : public LibXR::UART
     auto& memory_port = static_cast<MemoryWritePort&>(port);
     auto& owner = memory_port.owner_;
     LibXR::WriteInfoBlock info{};
-    auto ans = port.queue_info_->Pop(info);
-    if (ans != LibXR::ErrorCode::OK)
+    if (port.QueueInfo()->Peek(info) != LibXR::ErrorCode::OK)
     {
       return LibXR::ErrorCode::PENDING;
+    }
+
+    {
+      auto dequeue = port.BeginDequeue(in_isr);
+      auto ans = dequeue.PopInfo(info);
+      if (ans != LibXR::ErrorCode::OK)
+      {
+        return LibXR::ErrorCode::PENDING;
+      }
+
+      if (info.data.size_ > owner.transfer_.size())
+      {
+        ans = dequeue.DiscardData(info.data.size_);
+      }
+      else
+      {
+        ans = dequeue.PopData(owner.transfer_.data(), info.data.size_);
+      }
+      if (ans != LibXR::ErrorCode::OK)
+      {
+        return ans;
+      }
     }
 
     if (info.data.size_ > owner.transfer_.size())
     {
       port.Finish(in_isr, LibXR::ErrorCode::SIZE_ERR, info);
-      return LibXR::ErrorCode::PENDING;
-    }
-
-    ans = port.queue_data_->PopBatch(owner.transfer_.data(), info.data.size_);
-    if (ans != LibXR::ErrorCode::OK)
-    {
-      port.Finish(in_isr, ans, info);
       return LibXR::ErrorCode::PENDING;
     }
 
@@ -94,7 +108,7 @@ class MemoryLoopbackUart : public LibXR::UART
       owner.transfer_[0] ^= 0x80U;
     }
 
-    ans =
+    auto ans =
         owner.read_port_.queue_data_->PushBatch(owner.transfer_.data(), info.data.size_);
     if (ans == LibXR::ErrorCode::OK && owner.append_extra_next_write_)
     {

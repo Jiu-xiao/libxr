@@ -24,7 +24,7 @@ void test_rw_immediate_write_error_propagates()
       write.ExpectFinal(ErrorCode::INIT_ERR);
     }
     ASSERT(port.Size() == 0);
-    ASSERT(port.queue_info_->Size() == 0);
+    ASSERT(port.QueueInfo()->Size() == 0);
   }
 }
 

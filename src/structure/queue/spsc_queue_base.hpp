@@ -155,7 +155,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
    *         the queue is empty; returns `ErrorCode::PTR_NULL` when `value` is null
    */
-  ErrorCode PeekBytes(void* value)
+  ErrorCode PeekBytes(void* value) const
   {
     if (value == nullptr)
     {
@@ -381,7 +381,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
    *         there are not enough payloads available
    */
-  ErrorCode PeekBatchBytes(void* data, size_t count)
+  ErrorCode PeekBatchBytes(void* data, size_t count) const
   {
     if (count == 0U)
     {

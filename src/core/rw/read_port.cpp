@@ -21,10 +21,6 @@ struct ReadPort::StateMachine
 
   static BusyState EventState(BusyState state)
   {
-    if (BaseState(state) == BusyState::PENDING || HasEvent(state))
-    {
-      return state;
-    }
     return static_cast<BusyState>(static_cast<uint32_t>(state) | EVENT_MASK);
   }
 
@@ -42,7 +38,7 @@ struct ReadPort::StateMachine
     while (true)
     {
       BusyState observed = state.load(std::memory_order_acquire);
-      if (BaseState(observed) == BusyState::PENDING)
+      if (observed == BusyState::PENDING)
       {
         return EventRecordResult::PENDING;
       }
@@ -58,9 +54,8 @@ struct ReadPort::StateMachine
     }
   }
 
-  // Publish a queue-fed request from the idle endpoint state. The acquire side of this
-  // RMW consumes any producer event recorded before the request became PENDING.
-  static bool PublishRequest(std::atomic<BusyState>& state, bool& had_event)
+  // Claim request publication before info_ or its operation is modified.
+  static bool ClaimIdle(std::atomic<BusyState>& state)
   {
     while (true)
     {
@@ -70,8 +65,7 @@ struct ReadPort::StateMachine
         return false;
       }
 
-      had_event = HasEvent(observed);
-      if (state.compare_exchange_weak(observed, BusyState::PENDING,
+      if (state.compare_exchange_weak(observed, BusyState::CLAIMED,
                                       std::memory_order_acq_rel,
                                       std::memory_order_acquire))
       {
@@ -106,44 +100,22 @@ struct ReadPort::StateMachine
     }
   }
 
-  static void PublishPending(std::atomic<BusyState>& state, BusyState claimed,
-                             bool& had_event)
-  {
-    while (true)
-    {
-      BusyState observed = state.load(std::memory_order_acquire);
-      if (observed == claimed || observed == EventState(claimed))
-      {
-        had_event = had_event || HasEvent(observed);
-        if (state.compare_exchange_weak(observed, BusyState::PENDING,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
-        {
-          return;
-        }
-        continue;
-      }
-      ASSERT(false);
-      return;
-    }
-  }
-
-  // Claim a BLOCK completion while preserving an event recorded during the short claim
-  // window. Once CLAIMED has been acquired, completion wins over timeout.
+  // Publish terminal BLOCK ownership while preserving producer progress.
   static void PublishBlockClaim(std::atomic<BusyState>& state)
   {
     while (true)
     {
       BusyState observed = state.load(std::memory_order_acquire);
-      BusyState target = BusyState::BLOCK_CLAIMED;
-      if (observed == EventState(BusyState::CLAIMED))
-      {
-        target = static_cast<BusyState>(static_cast<uint32_t>(target) | EVENT_MASK);
-      }
-      else if (observed != BusyState::CLAIMED)
+      const BusyState base = BaseState(observed);
+      if (base != BusyState::CLAIMED && base != BusyState::CLAIMED_WITH_WAITER)
       {
         ASSERT(false);
         return;
+      }
+      BusyState target = BusyState::BLOCK_CLAIMED;
+      if (HasEvent(observed))
+      {
+        target = EventState(target);
       }
 
       if (state.compare_exchange_weak(observed, target, std::memory_order_acq_rel,
@@ -201,23 +173,87 @@ size_t ReadPort::Size()
 
 bool ReadPort::Readable() { return queue_data_ != nullptr; }
 
-void ReadPort::Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info)
+bool ReadPort::TryCompleteClaimedRead(bool in_isr, bool signal_block_completion)
 {
-  if (info.op.type == ReadOperation::OperationType::BLOCK)
+  const ReadInfoBlock local_info = info_;
+  const size_t required_size = local_info.data.size_;
+
+  while (true)
   {
-    const auto state = busy_.load(std::memory_order_acquire);
-    ASSERT(StateMachine::BaseState(state) == BusyState::BLOCK_CLAIMED);
-    block_result_ = ans;
-    info.op.data.sem_info.sem->PostFromCallback(in_isr);
-    return;
+    const size_t queued_size = queue_data_->Size();
+    if (queued_size != 0U && queued_size >= required_size)
+    {
+      const bool block = local_info.op.type == ReadOperation::OperationType::BLOCK;
+      if (required_size > 0U)
+      {
+        const auto ans = queue_data_->PopBatch(
+            reinterpret_cast<uint8_t*>(local_info.data.addr_), required_size);
+        ASSERT(ans == ErrorCode::OK);
+      }
+
+      if (block)
+      {
+        if (!signal_block_completion)
+        {
+          StateMachine::PublishAfterConsumer(busy_, BusyState::CLAIMED);
+        }
+        else
+        {
+          block_result_ = ErrorCode::OK;
+          StateMachine::PublishBlockClaim(busy_);
+        }
+      }
+      else
+      {
+        StateMachine::PublishAfterConsumer(busy_, BusyState::CLAIMED);
+      }
+
+      if (required_size > 0U)
+      {
+        OnRxDequeue(in_isr);
+      }
+
+      if (!block)
+      {
+        auto operation = local_info.op;
+        operation.UpdateStatus(in_isr, ErrorCode::OK);
+      }
+      else if (signal_block_completion)
+      {
+        local_info.op.data.sem_info.sem->PostFromCallback(in_isr);
+      }
+      return true;
+    }
+
+    BusyState observed = busy_.load(std::memory_order_acquire);
+    const BusyState base = StateMachine::BaseState(observed);
+    ASSERT(base == BusyState::CLAIMED || base == BusyState::CLAIMED_WITH_WAITER);
+
+    if (StateMachine::HasEvent(observed))
+    {
+      if (busy_.compare_exchange_weak(observed, base, std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+      {
+        continue;
+      }
+      continue;
+    }
+
+    const BusyState desired =
+        base == BusyState::CLAIMED ? BusyState::PENDING : BusyState::IDLE;
+    if (!busy_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      continue;
+    }
+
+    if (base == BusyState::CLAIMED_WITH_WAITER)
+    {
+      local_info.op.data.sem_info.sem->PostFromCallback(in_isr);
+    }
+    return false;
   }
-
-  auto operation = info.op;
-  StateMachine::PublishAfterConsumer(busy_, BusyState::CLAIMED);
-  operation.UpdateStatus(in_isr, ans);
 }
-
-void ReadPort::MarkAsRunning(ReadInfoBlock& info) { info.op.MarkAsRunning(); }
 
 ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 {
@@ -229,8 +265,17 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
     return ErrorCode::NOT_SUPPORT;
   }
 
-  const BusyState observed = busy_.load(std::memory_order_acquire);
-  if (StateMachine::BaseState(observed) != BusyState::IDLE)
+  if (data.size_ > queue_data_->MaxSize())
+  {
+    return ErrorCode::SIZE_ERR;
+  }
+
+  if (data.size_ > 0U && data.addr_ == nullptr)
+  {
+    return ErrorCode::PTR_NULL;
+  }
+
+  if (!StateMachine::ClaimIdle(busy_))
   {
     return ErrorCode::BUSY;
   }
@@ -238,18 +283,9 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   info_ = ReadInfoBlock{data, op};
   op.MarkAsRunning();
 
-  bool had_event = false;
-  if (!StateMachine::PublishRequest(busy_, had_event))
+  if (TryCompleteClaimedRead(in_isr, false))
   {
-    // Ordinary Read/Clear calls are one caller-serialized SPSC consumer. Under that
-    // contract only an EVENT transition can race this publication.
-    return ErrorCode::BUSY;
-  }
-
-  const size_t queued_size = queue_data_->Size();
-  if (had_event || (queued_size != 0U && queued_size >= data.size_))
-  {
-    ProcessPendingReads(in_isr);
+    return ErrorCode::OK;
   }
   if (op.type != ReadOperation::OperationType::BLOCK)
   {
@@ -257,8 +293,8 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   }
 
   ASSERT(!in_isr);
-  const auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-  if (wait_ans == ErrorCode::OK)
+  const ErrorCode wait_error = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+  if (wait_error == ErrorCode::OK)
   {
 #ifdef LIBXR_DEBUG_BUILD
     const auto state = busy_.load(std::memory_order_acquire);
@@ -271,44 +307,60 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
   while (true)
   {
-    BusyState expected = BusyState::PENDING;
-    if (busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire))
+    BusyState observed = busy_.load(std::memory_order_acquire);
+    const BusyState base = StateMachine::BaseState(observed);
+
+    if (observed == BusyState::PENDING &&
+        busy_.compare_exchange_weak(observed, BusyState::IDLE, std::memory_order_acq_rel,
+                                    std::memory_order_acquire))
     {
-      return ErrorCode::TIMEOUT;
+      return wait_error;
     }
 
-    if (StateMachine::BaseState(expected) == BusyState::BLOCK_CLAIMED)
+    if (base == BusyState::CLAIMED)
     {
-      const auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-      REQUIRE(finish_wait_ans == ErrorCode::OK);
+      BusyState desired = BusyState::CLAIMED_WITH_WAITER;
+      if (StateMachine::HasEvent(observed))
+      {
+        desired = StateMachine::EventState(desired);
+      }
+      if (!busy_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        continue;
+      }
+
+      while (op.data.sem_info.sem->Wait(UINT32_MAX) != ErrorCode::OK)
+      {
+      }
+
+      observed = busy_.load(std::memory_order_acquire);
+      const BusyState handoff_base = StateMachine::BaseState(observed);
+      if (handoff_base == BusyState::BLOCK_CLAIMED)
+      {
+        const ErrorCode result = block_result_;
+        StateMachine::ReleaseBlockClaim(busy_);
+        return result;
+      }
+
+      if (handoff_base == BusyState::IDLE)
+      {
+        return wait_error;
+      }
+      REQUIRE(false);
+    }
+
+    if (base == BusyState::BLOCK_CLAIMED)
+    {
+      while (op.data.sem_info.sem->Wait(UINT32_MAX) != ErrorCode::OK)
+      {
+      }
       const ErrorCode result = block_result_;
       StateMachine::ReleaseBlockClaim(busy_);
       return result;
     }
 
-    if (StateMachine::BaseState(expected) == BusyState::CLAIMED)
-    {
-      // Preserve the historical completion-wins boundary without spinning at a
-      // higher priority than the claimed path. A successful wait is its completion
-      // post; a short timeout means it may have returned to PENDING.
-      const auto claim_wait_ans = op.data.sem_info.sem->Wait(1U);
-      if (claim_wait_ans == ErrorCode::OK)
-      {
-        REQUIRE(StateMachine::BaseState(busy_.load(std::memory_order_acquire)) ==
-                BusyState::BLOCK_CLAIMED);
-        const ErrorCode result = block_result_;
-        StateMachine::ReleaseBlockClaim(busy_);
-        return result;
-      }
-      REQUIRE(claim_wait_ans == ErrorCode::TIMEOUT);
-      continue;
-    }
-
-    // Timeout returns only when it wins PENDING -> IDLE. Once completion owns the
-    // request, wait for its result instead of changing the operation outcome.
-    REQUIRE(false);
+    REQUIRE(base == BusyState::PENDING);
   }
 }
 
@@ -335,41 +387,7 @@ void ReadPort::ProcessPendingReads(bool in_isr)
       return;
     }
 
-    ReadInfoBlock local_info = info_;
-    const size_t required_size = local_info.data.size_;
-    const size_t size = queue_data_->Size();
-    if (size == 0U || size < required_size)
-    {
-      // A producer that ran before this release observed CLAIMED and returned. Re-read
-      // readiness after publishing PENDING; a later producer observes PENDING and claims
-      // completion itself.
-      bool had_event = false;
-      StateMachine::PublishPending(busy_, BusyState::CLAIMED, had_event);
-      const size_t queued_size = queue_data_->Size();
-      if (had_event || (queued_size != 0U && queued_size >= required_size))
-      {
-        continue;
-      }
-      return;
-    }
-
-    if (local_info.op.type == ReadOperation::OperationType::BLOCK)
-    {
-      StateMachine::PublishBlockClaim(busy_);
-    }
-
-    if (local_info.data.size_ > 0)
-    {
-      const auto ans = queue_data_->PopBatch(
-          reinterpret_cast<uint8_t*>(local_info.data.addr_), local_info.data.size_);
-      ASSERT(ans == ErrorCode::OK);
-      Finish(in_isr, ErrorCode::OK, local_info);
-      OnRxDequeue(in_isr);
-    }
-    else
-    {
-      Finish(in_isr, ErrorCode::OK, local_info);
-    }
+    (void)TryCompleteClaimedRead(in_isr, true);
     return;
   }
 }
@@ -378,18 +396,9 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
 
-  while (true)
+  if (!StateMachine::ClaimIdle(busy_))
   {
-    BusyState observed = busy_.load(std::memory_order_acquire);
-    if (StateMachine::BaseState(observed) != BusyState::IDLE)
-    {
-      return ErrorCode::BUSY;
-    }
-    if (busy_.compare_exchange_weak(observed, BusyState::CLAIMED,
-                                    std::memory_order_acq_rel, std::memory_order_acquire))
-    {
-      break;
-    }
+    return ErrorCode::BUSY;
   }
 
   const size_t queued_size = queue_data_->Size();
@@ -405,62 +414,4 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
     StateMachine::PublishAfterConsumer(busy_, BusyState::CLAIMED);
   }
   return ErrorCode::OK;
-}
-
-void ReadPort::FailPendingAndResetForBackendTeardown(ErrorCode reason, bool in_isr)
-{
-  ASSERT(queue_data_ != nullptr);
-
-  auto state = busy_.load(std::memory_order_acquire);
-  auto base = StateMachine::BaseState(state);
-  if (base == BusyState::CLAIMED)
-  {
-    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-    return;
-  }
-
-  queue_data_->Reset();
-
-  if (base == BusyState::PENDING)
-  {
-    if (info_.op.type == ReadOperation::OperationType::BLOCK)
-    {
-      BusyState expected = BusyState::PENDING;
-      if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
-      {
-        Finish(in_isr, reason, info_);
-        return;
-      }
-      state = expected;
-      base = StateMachine::BaseState(state);
-      if (base == BusyState::CLAIMED)
-      {
-        DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-        return;
-      }
-    }
-    else
-    {
-      auto operation = info_.op;
-      BusyState expected = BusyState::PENDING;
-      if (!busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                         std::memory_order_acq_rel,
-                                         std::memory_order_acquire))
-      {
-        return;
-      }
-      operation.UpdateStatus(in_isr, reason);
-      return;
-    }
-  }
-
-  if (StateMachine::BaseState(state) == BusyState::BLOCK_CLAIMED)
-  {
-    return;
-  }
-
-  block_result_ = ErrorCode::OK;
-  busy_.store(BusyState::IDLE, std::memory_order_release);
 }

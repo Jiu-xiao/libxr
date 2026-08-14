@@ -2,6 +2,7 @@
 
 #include <semaphore.h>
 
+#include <cerrno>
 #include <cstddef>
 
 #include "libxr_def.hpp"
@@ -25,9 +26,21 @@ void Semaphore::Post() { sem_post(semaphore_handle_); }
 
 ErrorCode Semaphore::Wait(uint32_t timeout)
 {
-  if (!sem_trywait(this->semaphore_handle_))
+  while (true)
   {
-    return ErrorCode::OK;
+    if (sem_trywait(semaphore_handle_) == 0)
+    {
+      return ErrorCode::OK;
+    }
+    if (errno == EINTR)
+    {
+      continue;
+    }
+    if (errno != EAGAIN)
+    {
+      return ErrorCode::FAILED;
+    }
+    break;
   }
 
   if (!timeout)
@@ -49,6 +62,10 @@ ErrorCode Semaphore::Wait(uint32_t timeout)
     if (!wait_ans)
     {
       return ErrorCode::OK;
+    }
+    if (errno != EINTR && errno != ETIMEDOUT)
+    {
+      return ErrorCode::FAILED;
     }
   }
 

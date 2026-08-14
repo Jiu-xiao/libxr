@@ -81,7 +81,11 @@ void VerifyStreamBlockTimeout()
   ASSERT(sem.Value() == 0);
 
   WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
+  {
+    auto dequeue = w.BeginDequeue(false);
+    ASSERT(dequeue.PopInfo(completed) == ErrorCode::OK);
+    ASSERT(dequeue.DiscardData(completed.data.size_) == ErrorCode::OK);
+  }
   w.Finish(false, ErrorCode::OK, completed);
 
   ASSERT(sem.Value() == 0);

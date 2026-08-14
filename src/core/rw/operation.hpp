@@ -314,9 +314,9 @@ class Operation
  * @brief 同步驱动操作共享的 BLOCK waiter 交接状态 / Shared BLOCK-waiter handoff for
  * synchronous driver operations
  *
- * timeout 会分离等待调用者。迟到的 completion 仍可清理 in-flight 状态，但不再属于已
- * timeout 的调用者。 / Timeout detaches the waiting caller. A late completion may
- * still clear in-flight state, but no longer belongs to that caller.
+ * 非 `OK` 的等待结果会尝试分离调用者。迟到的 completion 仍可清理 in-flight 状态，但不再
+ * 属于已分离的调用者。 / A non-`OK` wait result attempts to detach the caller. A late
+ * completion may still clear in-flight state, but no longer belongs to that caller.
  */
 class AsyncBlockWait
 {
@@ -348,14 +348,30 @@ class AsyncBlockWait
   void Cancel() { state_.store(State::IDLE, std::memory_order_release); }
 
   /**
-   * @brief 等待 completion 或 timeout / Wait for completion or timeout
+   * @brief 等待 completion 或等待错误 / Wait for completion or a wait error
    * @param timeout 最大等待毫秒数 / Maximum wait in milliseconds
-   * @return completion 结果，或调用者成功分离后的 `TIMEOUT` / Completion result, or
-   * `TIMEOUT` after the caller detaches
+   * @return completion 结果，或调用者成功分离后的原始等待错误 / Completion result,
+   * or the original wait error after the caller detaches
    */
   ErrorCode Wait(uint32_t timeout)
   {
+    bool caller_detached = false;
+    return Wait(timeout, caller_detached);
+  }
+
+  /**
+   * @brief 等待 completion，并报告调用者是否分离 / Wait for completion and report
+   * whether the caller detached
+   * @param timeout 最大等待毫秒数 / Maximum wait in milliseconds
+   * @param caller_detached 仅当本调用者成功分离 pending wait 时置 true / Set to true
+   * only when this caller successfully detaches the pending wait
+   * @return completion 结果，或调用者成功分离后的原始等待错误 / Completion result,
+   * or the original wait error after the caller detaches
+   */
+  ErrorCode Wait(uint32_t timeout, bool& caller_detached)
+  {
     ASSERT(sem_ != nullptr);
+    caller_detached = false;
     auto wait_ans = sem_->Wait(timeout);
     if (wait_ans == ErrorCode::OK)
     {
@@ -371,7 +387,8 @@ class AsyncBlockWait
                                        std::memory_order_acq_rel,
                                        std::memory_order_acquire))
     {
-      return ErrorCode::TIMEOUT;
+      caller_detached = true;
+      return wait_ans;
     }
 
     ASSERT(expected == State::CLAIMED || expected == State::DETACHED ||
@@ -379,16 +396,16 @@ class AsyncBlockWait
     if (expected == State::DETACHED)
     {
       state_.store(State::IDLE, std::memory_order_release);
-      return ErrorCode::TIMEOUT;
+      return wait_ans;
     }
     if (expected == State::IDLE)
     {
-      return ErrorCode::TIMEOUT;
+      return wait_ans;
     }
 
-    auto finish_wait_ans = sem_->Wait(UINT32_MAX);
-    UNUSED(finish_wait_ans);
-    ASSERT(finish_wait_ans == ErrorCode::OK);
+    while (sem_->Wait(UINT32_MAX) != ErrorCode::OK)
+    {
+    }
     state_.store(State::IDLE, std::memory_order_release);
     return result_;
   }

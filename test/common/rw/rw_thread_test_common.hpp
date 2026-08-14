@@ -219,10 +219,16 @@ void FinishPendingWrite(WriteFinishContext ctx)
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(THREAD_STATE_TIMEOUT_MS);
 
-  while (ctx.port->queue_info_->Pop(completed) != LibXR::ErrorCode::OK)
+  while (ctx.port->QueueInfo()->Peek(completed) != LibXR::ErrorCode::OK)
   {
     REQUIRE(std::chrono::steady_clock::now() < deadline);
     LibXR::Thread::Yield();
+  }
+
+  {
+    auto dequeue = ctx.port->BeginDequeue(false);
+    REQUIRE(dequeue.PopInfo(completed) == LibXR::ErrorCode::OK);
+    REQUIRE(dequeue.DiscardData(completed.data.size_) == LibXR::ErrorCode::OK);
   }
 
   ctx.port->Finish(false, ctx.result, completed);

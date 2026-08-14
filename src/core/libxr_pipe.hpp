@@ -31,7 +31,10 @@ class Pipe
     explicit PipeReadPort(WritePort& write_port) : ReadPort(0), write_port_(write_port) {}
 
    protected:
-    void OnRxDequeue(bool in_isr) override { write_port_.ProcessPendingWrites(in_isr); }
+    void OnRxDequeue(bool in_isr) override
+    {
+      Pipe::RecordSharedDataDequeue(write_port_, in_isr);
+    }
 
    private:
     WritePort& write_port_;
@@ -50,7 +53,7 @@ class Pipe
     // 绑定写回调并共享同一数据队列。
     // Bind the write callback and share the same data queue.
     write_port_.write_fun_ = WriteFun;
-    read_port_.queue_data_ = write_port_.queue_data_;
+    read_port_.queue_data_ = &write_port_.MutableDataQueue();
   }
 
   /**
@@ -86,6 +89,11 @@ class Pipe
   WritePort& GetWritePort() { return write_port_; }
 
  private:
+  static void RecordSharedDataDequeue(WritePort& port, bool in_isr)
+  {
+    port.RecordSharedDataDequeue(in_isr);
+  }
+
   /**
    * @brief 写端回调：弹出一次写操作并推动读侧处理。
    * @brief Write-side callback: pop a write op and advance the reader.
@@ -106,10 +114,13 @@ class Pipe
   {
     auto* pipe = LibXR::ContainerOf(&port, &Pipe::write_port_);
     WriteInfoBlock info;
-    if (port.queue_info_->Pop(info) != ErrorCode::OK)
     {
-      ASSERT(false);
-      return ErrorCode::EMPTY;
+      auto dequeue = port.BeginDequeue(in_isr);
+      if (dequeue.PopInfo(info) != ErrorCode::OK)
+      {
+        ASSERT(false);
+        return ErrorCode::EMPTY;
+      }
     }
 
     // 推动读端从共享队列中取数。

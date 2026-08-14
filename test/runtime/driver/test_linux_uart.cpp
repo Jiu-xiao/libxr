@@ -663,10 +663,9 @@ void ConfigReconnectScenario()
 
   ASSERT(close(first.master) == 0);
   first.master = -1;
-  ASSERT(WaitUntil(
-      [&]() { return active_status.Load() == LibXR::OperationPollingStatus::ERROR; },
-      2000U));
   ASSERT(WaitUntil([&]() { return !ProcessHasOpenTarget(first.slave); }, 2000U));
+  LibXR::Thread::Sleep(50U);
+  ASSERT(active_status.Load() == LibXR::OperationPollingStatus::RUNNING);
 
   const auto queued = MakePayload(2049U, 0x62626262U);
   LibXR::OperationPollingStatus queued_status;
@@ -681,6 +680,9 @@ void ConfigReconnectScenario()
   RebindStableLink(stable_link, second.slave);
 
   ASSERT(WaitUntil([&]() { return BaudIs(observer, reconnect_config.baudrate); }, 4000U));
+  ASSERT(WaitUntil(
+      [&]() { return active_status.Load() == LibXR::OperationPollingStatus::ERROR; },
+      1000U));
   std::vector<uint8_t> queued_rx(queued.size());
   ASSERT(ReadExact(second.master, queued_rx.data(), queued_rx.size(), 4000U));
   ASSERT(queued_rx == queued);
@@ -703,42 +705,71 @@ void ConfigReconnectScenario()
   (void)rmdir(directory.c_str());
 }
 
-struct CallbackState
-{
-  std::atomic<uint32_t> count{0U};
-  std::atomic<int32_t> result{static_cast<int32_t>(LibXR::ErrorCode::PENDING)};
-};
-
-void RecordCompletion(bool, CallbackState* state, LibXR::ErrorCode result)
-{
-  state->result.store(static_cast<int32_t>(result), std::memory_order_relaxed);
-  state->count.fetch_add(1U, std::memory_order_release);
-}
-
 void HupScenario()
 {
-  Pty pty = OpenPty();
+  Pty first = OpenPty();
+  std::string directory;
+  const std::string stable_link = MakeStableLink(first.slave, directory);
   auto* uart = new LibXR::LinuxUART(
-      pty.slave.c_str(), 115200, LibXR::UART::Parity::NO_PARITY, 8, 1, 2, 256U * 1024U);
+      stable_link.c_str(), 115200, LibXR::UART::Parity::NO_PARITY, 8, 1, 2, 256U * 1024U);
   const auto payload = MakePayload(256U * 1024U, 0x44444444U);
-  CallbackState state;
-  auto callback = LibXR::Callback<LibXR::ErrorCode>::Create(RecordCompletion, &state);
+  const auto nested = MakePayload(4093U, 0x45454545U);
+  LibXR::OperationPollingStatus nested_status;
+  LibXR::WriteOperation nested_operation(nested_status);
+  CallbackWriteConfigState state;
+  state.uart = uart;
+  state.payload = &nested;
+  state.operation = &nested_operation;
+  state.first_config = {57600U, LibXR::UART::Parity::NO_PARITY, 8U, 1U};
+  state.second_config = {38400U, LibXR::UART::Parity::NO_PARITY, 8U, 1U};
+  auto callback = LibXR::Callback<LibXR::ErrorCode>::Create(QueueWriteAndConfig, &state);
   LibXR::WriteOperation operation(callback);
   ASSERT(uart->Write({payload.data(), payload.size()}, operation) ==
          LibXR::ErrorCode::OK);
 
   int available = 0;
   ASSERT(WaitUntil(
-      [&]() { return ioctl(pty.master, FIONREAD, &available) == 0 && available > 0; },
+      [&]() { return ioctl(first.master, FIONREAD, &available) == 0 && available > 0; },
       2000U));
-  ASSERT(close(pty.master) == 0);
-  pty.master = -1;
+  ASSERT(static_cast<size_t>(available) < payload.size());
+  ASSERT(state.count.load(std::memory_order_acquire) == 0U);
+  ASSERT(close(first.master) == 0);
+  first.master = -1;
+  ASSERT(WaitUntil([&]() { return !ProcessHasOpenTarget(first.slave); }, 2000U));
+  LibXR::Thread::Sleep(50U);
+  ASSERT(state.count.load(std::memory_order_acquire) == 0U);
+
+  Pty second = OpenPty();
+  const int observer =
+      open(second.slave.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+  ASSERT(observer >= 0);
+  RebindStableLink(stable_link, second.slave);
+
   ASSERT(WaitUntil([&]() { return state.count.load(std::memory_order_acquire) == 1U; },
-                   2000U));
-  ASSERT(static_cast<LibXR::ErrorCode>(state.result.load(std::memory_order_relaxed)) ==
-         LibXR::ErrorCode::FAILED);
+                   4000U));
+  ASSERT(static_cast<LibXR::ErrorCode>(state.completion_result.load(
+             std::memory_order_relaxed)) == LibXR::ErrorCode::FAILED);
+  ASSERT(static_cast<LibXR::ErrorCode>(
+             state.write_result.load(std::memory_order_relaxed)) == LibXR::ErrorCode::OK);
+  ASSERT(static_cast<LibXR::ErrorCode>(state.first_config_result.load(
+             std::memory_order_relaxed)) == LibXR::ErrorCode::OK);
+  ASSERT(static_cast<LibXR::ErrorCode>(state.second_config_result.load(
+             std::memory_order_relaxed)) == LibXR::ErrorCode::BUSY);
+  ASSERT(
+      WaitUntil([&]() { return BaudIs(observer, state.first_config.baudrate); }, 2000U));
+
+  std::vector<uint8_t> nested_rx(nested.size());
+  ASSERT(ReadExact(second.master, nested_rx.data(), nested_rx.size(), 4000U));
+  ASSERT(nested_rx == nested);
+  ASSERT(WaitUntil(
+      [&]() { return nested_status.Load() == LibXR::OperationPollingStatus::DONE; },
+      1000U));
   LibXR::Thread::Sleep(50U);
   ASSERT(state.count.load(std::memory_order_acquire) == 1U);
+
+  ASSERT(close(observer) == 0);
+  ASSERT(unlink(stable_link.c_str()) == 0);
+  ASSERT(rmdir(directory.c_str()) == 0);
 }
 
 void RunScenario(const char* name)

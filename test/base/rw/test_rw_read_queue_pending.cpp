@@ -52,16 +52,20 @@ void test_rw_read_claim_release_handles_concurrent_producer_notification()
   std::barrier<> iteration_start(2);
   std::barrier<> iteration_done(2);
 
-  std::thread claimant(
+  std::thread producer(
       [&]()
       {
         for (size_t iteration = 0; iteration < CLAIM_RELEASE_RACE_ITERATIONS; ++iteration)
         {
           iteration_start.arrive_and_wait();
+          const uint8_t first = static_cast<uint8_t>((iteration % 125U) + 1U);
+          const uint8_t second = static_cast<uint8_t>(first + 125U);
+          ASSERT(port.queue_data_->Push(first) == ErrorCode::OK);
           if ((iteration % 3U) == 1U)
           {
             std::this_thread::yield();
           }
+          ASSERT(port.queue_data_->Push(second) == ErrorCode::OK);
           port.ProcessPendingReads(false);
           iteration_done.arrive_and_wait();
         }
@@ -72,19 +76,15 @@ void test_rw_read_claim_release_handles_concurrent_producer_notification()
     uint8_t received[2] = {};
     OperationPollingStatus status;
     ReadOperation operation(status);
-    ASSERT(port(RawData{received, sizeof(received)}, operation) == ErrorCode::OK);
-
     const uint8_t first = static_cast<uint8_t>((iteration % 125U) + 1U);
     const uint8_t second = static_cast<uint8_t>(first + 125U);
-    ASSERT(port.queue_data_->Push(first) == ErrorCode::OK);
 
     iteration_start.arrive_and_wait();
     if ((iteration % 3U) == 0U)
     {
       std::this_thread::yield();
     }
-    ASSERT(port.queue_data_->Push(second) == ErrorCode::OK);
-    port.ProcessPendingReads(false);
+    ASSERT(port(RawData{received, sizeof(received)}, operation) == ErrorCode::OK);
     iteration_done.arrive_and_wait();
 
     ASSERT(status.Load() == OperationPollingStatus::DONE);
@@ -93,10 +93,41 @@ void test_rw_read_claim_release_handles_concurrent_producer_notification()
     ASSERT(port.Size() == 0U);
   }
 
-  claimant.join();
+  producer.join();
 }
 
-void test_rw_queued_callback_can_submit_next_read_before_dequeue_notification()
+void test_rw_invalid_read_does_not_claim_or_consume_queue()
+{
+  using namespace LibXR;
+
+  ReadPort port(2);
+  static constexpr uint8_t QUEUED = 0x6BU;
+  ASSERT(port.queue_data_->Push(QUEUED) == ErrorCode::OK);
+
+  OperationPollingStatus null_status;
+  ReadOperation null_operation(null_status);
+  ASSERT(port(RawData{nullptr, 1U}, null_operation) == ErrorCode::PTR_NULL);
+  ASSERT(null_status.Load() == OperationPollingStatus::READY);
+  ASSERT(port.Size() == 1U);
+
+  uint8_t oversized[3] = {};
+  OperationPollingStatus oversized_status;
+  ReadOperation oversized_operation(oversized_status);
+  ASSERT(port(RawData{oversized, sizeof(oversized)}, oversized_operation) ==
+         ErrorCode::SIZE_ERR);
+  ASSERT(oversized_status.Load() == OperationPollingStatus::READY);
+  ASSERT(port.Size() == 1U);
+
+  uint8_t received = 0U;
+  OperationPollingStatus valid_status;
+  ReadOperation valid_operation(valid_status);
+  ASSERT(port(RawData{&received, 1U}, valid_operation) == ErrorCode::OK);
+  ASSERT(valid_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(received == QUEUED);
+  ASSERT(port.Size() == 0U);
+}
+
+void test_rw_queued_callback_can_submit_next_read_after_dequeue_notification()
 {
   using namespace LibXR;
 
@@ -121,7 +152,7 @@ void test_rw_queued_callback_can_submit_next_read_before_dequeue_notification()
 
   ASSERT(context.outer_callbacks == 1U);
   ASSERT(context.outer_status == ErrorCode::OK);
-  ASSERT(context.outer_dequeue_count == 0U);
+  ASSERT(context.outer_dequeue_count == 1U);
   ASSERT(context.nested_submit == ErrorCode::OK);
   ASSERT(context.nested_callbacks == 0U);
   ASSERT(outer_data == OUTER_DATA);
@@ -133,9 +164,36 @@ void test_rw_queued_callback_can_submit_next_read_before_dequeue_notification()
 
   ASSERT(context.nested_callbacks == 1U);
   ASSERT(context.nested_status == ErrorCode::OK);
-  ASSERT(context.nested_dequeue_count == 1U);
+  ASSERT(context.nested_dequeue_count == 2U);
   ASSERT(nested_data == NESTED_DATA);
   ASSERT(port.dequeue_count == 2U);
+}
+
+void test_rw_busy_read_does_not_modify_rejected_operation_or_pending_request()
+{
+  using namespace LibXR;
+
+  ReadPort port(2);
+  uint8_t first_data = 0;
+  OperationPollingStatus first_status;
+  ReadOperation first_operation(first_status);
+  ASSERT(port(RawData{&first_data, 1}, first_operation) == ErrorCode::OK);
+  ASSERT(first_status.Load() == OperationPollingStatus::RUNNING);
+
+  uint8_t rejected_data = 0xA5;
+  OperationPollingStatus rejected_status;
+  ReadOperation rejected_operation(rejected_status);
+  ASSERT(port(RawData{&rejected_data, 1}, rejected_operation) == ErrorCode::BUSY);
+  ASSERT(rejected_status.Load() == OperationPollingStatus::READY);
+
+  static const uint8_t RECEIVED = 0x5A;
+  ASSERT(port.queue_data_->Push(RECEIVED) == ErrorCode::OK);
+  port.ProcessPendingReads(false);
+
+  ASSERT(first_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(first_data == RECEIVED);
+  ASSERT(rejected_status.Load() == OperationPollingStatus::READY);
+  ASSERT(rejected_data == 0xA5);
 }
 
 }  // namespace
@@ -147,5 +205,7 @@ void test_rw_queued_callback_can_submit_next_read_before_dequeue_notification()
 void RunBaseRwReadQueuePendingTests()
 {
   test_rw_read_claim_release_handles_concurrent_producer_notification();
-  test_rw_queued_callback_can_submit_next_read_before_dequeue_notification();
+  test_rw_invalid_read_does_not_claim_or_consume_queue();
+  test_rw_queued_callback_can_submit_next_read_after_dequeue_notification();
+  test_rw_busy_read_does_not_modify_rejected_operation_or_pending_request();
 }

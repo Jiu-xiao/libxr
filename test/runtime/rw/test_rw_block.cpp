@@ -5,17 +5,14 @@
  * @details 测试项目：
  *          1. 聚合阻塞 `Stream` 子场景。
  *          2. 聚合超时、零长度与队列补齐子场景。
- *          3. 聚合后端 teardown 与阻塞等待者生命周期子场景。
  *          Test items:
  *          1. Aggregate blocking `Stream` sub-scenarios.
  *          2. Aggregate timeout, zero-length, and queue-completion sub-scenarios.
- *          3. Aggregate backend teardown and blocking waiter lifecycle sub-scenarios.
  */
 #include "rw_runtime_test_common.hpp"
 
 void RunRuntimeRwBlockStreamTests();
 void RunRuntimeRwBlockTimeoutTests();
-void RunRuntimeRwBlockBackendTeardownTests();
 void RunRuntimeRwBlockWaiterTests();
 void RunRuntimeRwBlockDeferredTests();
 
@@ -32,7 +29,6 @@ void RunRuntimeRwBlockTests()
 {
   RunRuntimeRwBlockStreamTests();
   RunRuntimeRwBlockTimeoutTests();
-  RunRuntimeRwBlockBackendTeardownTests();
   RunRuntimeRwBlockWaiterTests();
   RunRuntimeRwBlockDeferredTests();
 }

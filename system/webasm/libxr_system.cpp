@@ -21,8 +21,13 @@ extern "C"
   {
     if (LibXR::STDIO::read_ != nullptr && LibXR::STDIO::read_->Readable())
     {
+      const size_t input_size = strlen(js_input);
+      if (input_size == 0U)
+      {
+        return;
+      }
       const auto push_ans = LibXR::STDIO::read_->queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t*>(js_input), strlen(js_input));
+          reinterpret_cast<const uint8_t*>(js_input), input_size);
       if (push_ans == LibXR::ErrorCode::OK)
       {
         LibXR::STDIO::read_->ProcessPendingReads(false);
@@ -37,16 +42,17 @@ void LibXR::PlatformInit()
 {
   static LibXR::WebAsmTimebase libxr_webasm_timebase;
 
-  auto write_fun = [](WritePort& port, bool)
+  auto write_fun = [](WritePort& port, bool in_isr)
   {
     static uint8_t write_buff[webasm_stdio_queue_bytes];
     WriteInfoBlock info;
-    if (port.queue_info_->Pop(info) != LibXR::ErrorCode::OK)
+    auto dequeue = port.BeginDequeue(in_isr);
+    if (dequeue.PopInfo(info) != LibXR::ErrorCode::OK)
     {
       return LibXR::ErrorCode::EMPTY;
     }
 
-    auto pop_ans = port.queue_data_->PopBatch(write_buff, info.data.size_);
+    auto pop_ans = dequeue.PopData(write_buff, info.data.size_);
     if (pop_ans != LibXR::ErrorCode::OK)
     {
       return pop_ans;

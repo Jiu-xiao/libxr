@@ -501,19 +501,20 @@ bool IRAM_ATTR ESP32UartFifo::ClaimNextRecord(bool in_isr, SubmitContext* submit
   }
 
   WriteInfoBlock info{};
-  if (_write_port.queue_info_->Peek(info) != ErrorCode::OK)
+  if (_write_port.QueueInfo()->Peek(info) != ErrorCode::OK)
   {
     rx_config_gate_.LeaveTx();
     return false;
   }
 
-  REQUIRE_FROM_CALLBACK(_write_port.queue_data_ != nullptr, in_isr);
+  REQUIRE_FROM_CALLBACK(_write_port.QueueData() != nullptr, in_isr);
   REQUIRE_FROM_CALLBACK(info.data.size_ > 0U, in_isr);
-  REQUIRE_FROM_CALLBACK(info.data.size_ <= _write_port.queue_data_->Size(), in_isr);
+  REQUIRE_FROM_CALLBACK(info.data.size_ <= _write_port.QueueData()->Size(), in_isr);
   synchronous_submission = submit != nullptr && submit->synchronous_completion_allowed_ &&
-                           !submit->resolved_ && _write_port.queue_info_->Size() == 1U;
+                           !submit->resolved_ && _write_port.QueueInfo()->Size() == 1U;
 
-  const ErrorCode pop_result = _write_port.queue_info_->Pop(info);
+  auto dequeue = _write_port.BeginDequeue(in_isr);
+  const ErrorCode pop_result = dequeue.PopInfo(info);
   REQUIRE_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
 
   current_record_ = info;
@@ -544,16 +545,21 @@ bool IRAM_ATTR ESP32UartFifo::FillCurrentRecord(bool in_isr, bool synchronous_su
   // while filling one unfinished record can defer retained RX events until its FIFO
   // overflows on a fast single-core target.
   const size_t write_size = std::min(record_size - current_record_offset_, fifo_space);
-  const ErrorCode result = _write_port.queue_data_->PopWithReader(
-      write_size,
-      [this](const uint8_t* buffer, size_t size) -> ErrorCode
-      {
-        uint32_t written = 0U;
-        uart_hal_write_txfifo(&uart_hal_, buffer, static_cast<uint32_t>(size), &written);
-        return written == static_cast<uint32_t>(size) ? ErrorCode::OK : ErrorCode::EMPTY;
-      });
-  REQUIRE_FROM_CALLBACK(result == ErrorCode::OK, in_isr);
-  current_record_offset_ += write_size;
+  {
+    auto dequeue = _write_port.BeginDequeue(in_isr);
+    const ErrorCode result = dequeue.PopDataWithReader(
+        write_size,
+        [this](const uint8_t* buffer, size_t size) -> ErrorCode
+        {
+          uint32_t written = 0U;
+          uart_hal_write_txfifo(&uart_hal_, buffer, static_cast<uint32_t>(size),
+                                &written);
+          return written == static_cast<uint32_t>(size) ? ErrorCode::OK
+                                                        : ErrorCode::EMPTY;
+        });
+    REQUIRE_FROM_CALLBACK(result == ErrorCode::OK, in_isr);
+    current_record_offset_ += write_size;
+  }
   if (current_record_offset_ < record_size)
   {
     ArmTxSpaceInterrupt();

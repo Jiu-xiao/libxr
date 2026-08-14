@@ -185,8 +185,8 @@ void test_pipe_stream_rejects_same_object_callback_reentry()
   ASSERT(context.stream_commit == ErrorCode::BUSY);
   ASSERT(port.payload_size == sizeof(OUTER));
   ASSERT(std::memcmp(port.payload, OUTER, sizeof(OUTER)) == 0);
-  ASSERT(port.queue_data_->Size() == 0);
-  ASSERT(port.queue_info_->Size() == 0);
+  ASSERT(port.QueueData()->Size() == 0);
+  ASSERT(port.QueueInfo()->Size() == 0);
 
   context.try_reentry = false;
   static const uint8_t REUSE[] = {0x41, 0x42};
@@ -214,8 +214,11 @@ void test_pipe_stream_reports_live_capacity_after_consumer_progress()
   ASSERT(stream.EmptySize() == 0);
 
   WriteInfoBlock old_info{};
-  ASSERT(w.queue_info_->Pop(old_info) == ErrorCode::OK);
-  ASSERT(w.queue_data_->PopBatch(nullptr, old_info.data.size_) == ErrorCode::OK);
+  {
+    auto dequeue = w.BeginDequeue(false);
+    ASSERT(dequeue.PopInfo(old_info) == ErrorCode::OK);
+    ASSERT(dequeue.DiscardData(old_info.data.size_) == ErrorCode::OK);
+  }
   w.Finish(false, ErrorCode::OK, old_info);
 
   ASSERT(stream.EmptySize() == sizeof(OLD));
@@ -225,10 +228,13 @@ void test_pipe_stream_reports_live_capacity_after_consumer_progress()
   ASSERT(stream.Commit() == ErrorCode::OK);
 
   WriteInfoBlock combined_info{};
-  ASSERT(w.queue_info_->Pop(combined_info) == ErrorCode::OK);
-  ASSERT(combined_info.data.size_ == sizeof(FIRST) + sizeof(SECOND));
   uint8_t combined[sizeof(FIRST) + sizeof(SECOND)] = {};
-  ASSERT(w.queue_data_->PopBatch(combined, sizeof(combined)) == ErrorCode::OK);
+  {
+    auto dequeue = w.BeginDequeue(false);
+    ASSERT(dequeue.PopInfo(combined_info) == ErrorCode::OK);
+    ASSERT(combined_info.data.size_ == sizeof(FIRST) + sizeof(SECOND));
+    ASSERT(dequeue.PopData(combined, sizeof(combined)) == ErrorCode::OK);
+  }
   static const uint8_t EXPECTED[] = {0x20, 0x21, 0x22, 0x23, 0x30, 0x31, 0x32, 0x33};
   ASSERT(std::memcmp(combined, EXPECTED, sizeof(EXPECTED)) == 0);
   w.Finish(false, ErrorCode::OK, combined_info);

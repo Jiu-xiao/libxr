@@ -79,16 +79,19 @@ void StdoThread(LibXR::WritePort* write_port)
   {
     if (stdo_sem->Wait() == LibXR::ErrorCode::OK)
     {
-      auto ans = write_port->queue_info_->Pop(info);
-      if (ans != LibXR::ErrorCode::OK)
       {
-        continue;
-      }
+        auto dequeue = write_port->BeginDequeue(false);
+        auto ans = dequeue.PopInfo(info);
+        if (ans != LibXR::ErrorCode::OK)
+        {
+          continue;
+        }
 
-      ans = write_port->queue_data_->PopBatch(write_buff, info.data.size_);
-      if (ans != LibXR::ErrorCode::OK)
-      {
-        continue;
+        ans = dequeue.PopData(write_buff, info.data.size_);
+        if (ans != LibXR::ErrorCode::OK)
+        {
+          continue;
+        }
       }
 
       auto write_size = fwrite(write_buff, sizeof(char), info.data.size_, stdout);

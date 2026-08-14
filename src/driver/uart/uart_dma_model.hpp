@@ -180,14 +180,14 @@ class UartDmaModel
   UartDmaModel(Backend& backend, Policy& policy, WritePort& port, RawData storage)
       : backend_(backend), policy_(policy), port_(port), buffers_(storage)
   {
-    REQUIRE(port_.queue_info_ != nullptr);
-    if (port_.queue_data_ == nullptr)
+    REQUIRE(port_.QueueInfo() != nullptr);
+    if (port_.QueueData() == nullptr)
     {
       REQUIRE(buffers_.Size() == 0U);
     }
     else
     {
-      REQUIRE(port_.queue_data_->MaxSize() <= buffers_.Size());
+      REQUIRE(port_.QueueData()->MaxSize() <= buffers_.Size());
     }
 
     // The first staged payload uses block 0, then promotion flips it to active.
@@ -653,22 +653,22 @@ class UartDmaModel
     }
 
     WriteInfoBlock info{};
-    if (port_.queue_info_->Peek(info) != ErrorCode::OK)
+    if (port_.QueueInfo()->Peek(info) != ErrorCode::OK)
     {
       rx_config_gate_.LeaveTx();
       return false;
     }
 
-    ASSERT(port_.queue_data_ != nullptr);
-    if (port_.queue_data_ == nullptr)
+    ASSERT(port_.QueueData() != nullptr);
+    if (port_.QueueData() == nullptr)
     {
       rx_config_gate_.LeaveTx();
       return false;
     }
 
     REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
-    const ErrorCode result =
-        port_.queue_data_->PopBatch(buffers_.PendingBuffer(), info.data.size_);
+    auto dequeue = port_.BeginDequeue(in_isr);
+    const ErrorCode result = dequeue.PopData(buffers_.PendingBuffer(), info.data.size_);
     ASSERT(result == ErrorCode::OK);
     if (result != ErrorCode::OK)
     {
@@ -692,7 +692,7 @@ class UartDmaModel
     }
 
     WriteInfoBlock info{};
-    if (port_.queue_info_->Peek(info) != ErrorCode::OK)
+    if (port_.QueueInfo()->Peek(info) != ErrorCode::OK)
     {
       ASSERT(false);
       rx_config_gate_.LeaveTx();
@@ -701,7 +701,7 @@ class UartDmaModel
 
     const bool synchronous_submission =
         (submit != nullptr) && submit->synchronous_completion_allowed_ &&
-        !submit->resolved_ && (port_.queue_info_->Size() == 1U);
+        !submit->resolved_ && (port_.QueueInfo()->Size() == 1U);
 
     // Publish the complete active state before the backend can synchronously callback.
     buffers_.FlipActiveBlock();
@@ -711,24 +711,32 @@ class UartDmaModel
     const UartDmaTxStartResult result = backend_.StartDmaTx(
         buffers_.ActiveBuffer(), active_length_, buffers_.ActiveBlock(), in_isr);
 
-    if (!PopInfo(info))
     {
-      ASSERT(false);
-      ClearActive();
+      auto dequeue = port_.BeginDequeue(in_isr);
+      const ErrorCode pop_result = dequeue.PopInfo(info);
+      ASSERT(pop_result == ErrorCode::OK);
+      if (pop_result != ErrorCode::OK)
+      {
+        ASSERT(false);
+        ClearActive();
+        rx_config_gate_.LeaveTx();
+        return StartPendingResult::FAILED;
+      }
+
+      if (result == UartDmaTxStartResult::FAILED)
+      {
+        ClearActive();
+        buffers_.FlipActiveBlock();
+      }
       rx_config_gate_.LeaveTx();
-      return StartPendingResult::FAILED;
     }
 
     if (result == UartDmaTxStartResult::FAILED)
     {
-      ClearActive();
-      buffers_.FlipActiveBlock();
-      rx_config_gate_.LeaveTx();
       CompleteRecord(in_isr, ErrorCode::FAILED, info, synchronous_submission, submit);
       return StartPendingResult::FAILED;
     }
 
-    rx_config_gate_.LeaveTx();
     CompleteRecord(in_isr, ErrorCode::OK, info, synchronous_submission, submit);
     return StartPendingResult::STARTED;
   }
@@ -751,13 +759,6 @@ class UartDmaModel
     {
       submit->synchronous_completion_allowed_ = false;
     }
-  }
-
-  bool PopInfo(WriteInfoBlock& info)
-  {
-    const ErrorCode result = port_.queue_info_->Pop(info);
-    ASSERT(result == ErrorCode::OK);
-    return result == ErrorCode::OK;
   }
 
   bool ReleaseActive()

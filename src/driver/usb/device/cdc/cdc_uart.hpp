@@ -41,19 +41,21 @@ class CDCUartTxOpDequeueHelper final
    * non-empty
    * @return false 否则 / Otherwise
    */
-  bool HasOp() { return head_valid_ || (port_.queue_info_->Size() > 0); }
+  bool HasOp() { return head_valid_ || (port_.QueueInfo()->Size() > 0); }
 
   /**
    * @brief 从 data 队列搬运数据到目标 buffer，并推进 offset（不 pop info）
    *        Dequeue bytes from data queue into destination buffer and advance offset (no
    * info pop)
    *
+   * @param dequeue 写端口出队事务 / Write-port dequeue transaction
    * @param dst     目标 buffer / Destination buffer
    * @param cap     目标 buffer 容量（字节）/ Destination capacity (bytes)
    * @param out_len 实际搬运长度（字节）/ Bytes moved
    * @return ErrorCode::PENDING / ErrorCode::OK / 其它错误码 / Other error codes
    */
-  ErrorCode Take(uint8_t* dst, std::size_t cap, std::size_t& out_len)
+  ErrorCode Take(WritePort::DequeueScope& dequeue, uint8_t* dst, std::size_t cap,
+                 std::size_t& out_len)
   {
     auto ec = EnsureHead();
     if (ec != ErrorCode::OK)
@@ -71,7 +73,7 @@ class CDCUartTxOpDequeueHelper final
 
     const std::size_t TAKE = (REMAINING < cap) ? REMAINING : cap;
 
-    if (port_.queue_data_->PopBatch(dst, TAKE) != ErrorCode::OK)
+    if (dequeue.PopData(dst, TAKE) != ErrorCode::OK)
     {
       out_len = 0;
       return ErrorCode::FAILED;
@@ -96,11 +98,13 @@ class CDCUartTxOpDequeueHelper final
    * @brief 在 head 完成后 pop info 并重置状态
    *        Pop info after head completes and reset state
    *
+   * @param dequeue 写端口出队事务 / Write-port dequeue transaction
    * @param completed_info 可选输出：被 pop 的 info / Optional output: popped info
    * @return ErrorCode::OK 成功 / Success
    * @return ErrorCode::FAILED head 未完成 / Head not completed
    */
-  ErrorCode PopCompleted(WriteInfoBlock* completed_info = nullptr)
+  ErrorCode PopCompleted(WritePort::DequeueScope& dequeue,
+                         WriteInfoBlock* completed_info = nullptr)
   {
     if (!HeadCompleted())
     {
@@ -108,56 +112,12 @@ class CDCUartTxOpDequeueHelper final
     }
 
     WriteInfoBlock popped{};
-    auto ans = port_.queue_info_->Pop(popped);
+    auto ans = dequeue.PopInfo(popped);
     ASSERT(ans == ErrorCode::OK);
 
     if (completed_info)
     {
       *completed_info = popped;
-    }
-
-    Reset();
-    return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 丢弃当前 head op 的剩余数据并 pop info
-   *        Drop the current head op's remaining bytes and pop its info.
-   *
-   * @param dropped_info 可选输出：被 pop 的 info / Optional output: popped info
-   * @return ErrorCode::OK 成功 / Success
-   * @return ErrorCode::EMPTY info 队列为空 / Info queue empty
-   * @return 其它错误码表示 data 队列丢弃失败 / Other errors indicate data drop failure
-   */
-  ErrorCode DropHead(WriteInfoBlock* dropped_info = nullptr)
-  {
-    auto ec = EnsureHead();
-    if (ec != ErrorCode::OK)
-    {
-      return ec;
-    }
-
-    const std::size_t REMAINING = Remaining();
-    if (REMAINING > 0)
-    {
-      auto drop_ans = port_.queue_data_->PopBatch(nullptr, REMAINING);
-      if (drop_ans != ErrorCode::OK)
-      {
-        return drop_ans;
-      }
-    }
-
-    WriteInfoBlock popped{};
-    auto pop_ans = port_.queue_info_->Pop(popped);
-    ASSERT(pop_ans == ErrorCode::OK);
-    if (pop_ans != ErrorCode::OK)
-    {
-      return pop_ans;
-    }
-
-    if (dropped_info)
-    {
-      *dropped_info = popped;
     }
 
     Reset();
@@ -180,7 +140,7 @@ class CDCUartTxOpDequeueHelper final
     }
 
     WriteInfoBlock info{};
-    if (port_.queue_info_->Peek(info) != ErrorCode::OK)
+    if (port_.QueueInfo()->Peek(info) != ErrorCode::OK)
     {
       return ErrorCode::EMPTY;
     }
@@ -251,14 +211,6 @@ class CDCUartReadPort : public ReadPort
   ConstRawData pending_data_{
       nullptr,
       0};  ///< pending 数据（指向底层 USB buffer）/ Pending data pointing to USB buffer
-
- private:
-  friend class CDCUart;
-
-  void ResetForBackendTeardown(ErrorCode reason, bool in_isr)
-  {
-    FailPendingAndResetForBackendTeardown(reason, in_isr);
-  }
 };
 
 /**
@@ -267,19 +219,6 @@ class CDCUartReadPort : public ReadPort
  */
 class CDCUart : public CDCBase, public LibXR::UART
 {
- private:
-  class BackendWritePort final : public WritePort
-  {
-   public:
-    using WritePort::WritePort;
-    using WritePort::operator=;
-
-    void ResetForBackendTeardown(ErrorCode reason, bool in_isr)
-    {
-      FailPendingAndResetForBackendTeardown(reason, in_isr);
-    }
-  };
-
  public:
   using LibXR::UART::Read;
   using LibXR::UART::read_port_;
@@ -431,8 +370,8 @@ class CDCUart : public CDCBase, public LibXR::UART
 
  protected:
   /**
-   * @brief 解绑端点（清理队列、状态与背压标志）
-   *        Unbind endpoints (cleanup queues, states, and backpressure flags)
+   * @brief 解绑端点并重置 endpoint-local ZLP 与背压状态
+   *        Unbind endpoints and reset endpoint-local ZLP and backpressure state
    *
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param in_isr        是否在 ISR 上下文 / In ISR context
@@ -440,10 +379,6 @@ class CDCUart : public CDCBase, public LibXR::UART
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
     CDCBase::UnbindEndpoints(endpoint_pool, in_isr);
-    tx_deq_.Reset();
-    write_port_cdc_.ResetForBackendTeardown(ErrorCode::INIT_ERR, in_isr);
-    read_port_cdc_.ResetForBackendTeardown(ErrorCode::INIT_ERR, in_isr);
-
     need_write_zlp_ = false;
 
     read_port_cdc_.recv_pause_ = false;
@@ -469,10 +404,9 @@ class CDCUart : public CDCBase, public LibXR::UART
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr)
   {
-    UNUSED(in_isr);
-
-    auto& cdc_port = static_cast<BackendWritePort&>(port);
+    auto& cdc_port = static_cast<WritePort&>(port);
     auto* cdc = LibXR::ContainerOf(&cdc_port, &CDCUart::write_port_cdc_);
+    auto dequeue = port.BeginDequeue(in_isr);
 
     /**
      * @note
@@ -487,24 +421,12 @@ class CDCUart : public CDCBase, public LibXR::UART
     auto ep = cdc->GetDataInEndpoint();
     if (ep == nullptr)
     {
-      auto drop_ans = cdc->tx_deq_.DropHead(nullptr);
-      if (drop_ans != ErrorCode::OK)
-      {
-        return drop_ans;
-      }
-      return ErrorCode::FAILED;
+      return ErrorCode::PENDING;
     }
 
     if (!cdc->Inited())
     {
-      auto drop_ans = cdc->tx_deq_.DropHead(nullptr);
-      if (drop_ans != ErrorCode::OK)
-      {
-        return drop_ans;
-      }
-
-      return ErrorCode::INIT_ERR;  // 非 PENDING -> 同步上报失败 / Non-PENDING reports
-                                   // synchronous failure upstream
+      return ErrorCode::PENDING;
     }
 
     /**
@@ -538,8 +460,8 @@ class CDCUart : public CDCBase, public LibXR::UART
       auto buffer = ep->GetBuffer();
       std::size_t len = 0;
 
-      slot_ec =
-          cdc->tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len);
+      slot_ec = cdc->tx_deq_.Take(dequeue, reinterpret_cast<uint8_t*>(buffer.addr_),
+                                  buffer.size_, len);
       if (slot_ec == ErrorCode::EMPTY || len == 0)
       {
         return ErrorCode::PENDING;
@@ -590,7 +512,7 @@ class CDCUart : public CDCBase, public LibXR::UART
        */
       if (slot_ec == ErrorCode::OK && cdc->tx_deq_.HeadCompleted())
       {
-        auto pop_ok = cdc->tx_deq_.PopCompleted(nullptr);
+        auto pop_ok = cdc->tx_deq_.PopCompleted(dequeue, nullptr);
         ASSERT(pop_ok == ErrorCode::OK);
 
         // ZLP 判定。
@@ -616,8 +538,8 @@ class CDCUart : public CDCBase, public LibXR::UART
       auto buffer = ep->GetBuffer();
       std::size_t len2 = 0;
 
-      slot_ec =
-          cdc->tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len2);
+      slot_ec = cdc->tx_deq_.Take(dequeue, reinterpret_cast<uint8_t*>(buffer.addr_),
+                                  buffer.size_, len2);
       if (slot_ec == ErrorCode::EMPTY || len2 == 0)
       {
         return ErrorCode::PENDING;
@@ -671,7 +593,6 @@ class CDCUart : public CDCBase, public LibXR::UART
   void OnDataInComplete(bool in_isr, ConstRawData& data) override
   {
     UNUSED(data);
-
     Flag::ScopedRestore isr_flag(in_write_isr_);
 
     auto ep = GetDataInEndpoint();
@@ -682,8 +603,6 @@ class CDCUart : public CDCBase, public LibXR::UART
 
     if (!Inited())
     {
-      tx_deq_.Reset();
-      write_port_cdc_.ResetForBackendTeardown(ErrorCode::INIT_ERR, in_isr);
       return;
     }
 
@@ -720,8 +639,11 @@ class CDCUart : public CDCBase, public LibXR::UART
     if (tx_deq_.HeadCompleted())
     {
       WriteInfoBlock completed{};
-      auto pop_ok = tx_deq_.PopCompleted(&completed);
-      ASSERT(pop_ok == ErrorCode::OK);
+      {
+        auto dequeue = write_port_cdc_.BeginDequeue(in_isr);
+        auto pop_ok = tx_deq_.PopCompleted(dequeue, &completed);
+        ASSERT(pop_ok == ErrorCode::OK);
+      }
       write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
     }
 
@@ -732,13 +654,15 @@ class CDCUart : public CDCBase, public LibXR::UART
     {
       auto buffer = ep->GetBuffer();
       std::size_t len2 = 0;
-
-      auto ec2 =
-          tx_deq_.Take(reinterpret_cast<uint8_t*>(buffer.addr_), buffer.size_, len2);
-      if ((ec2 == ErrorCode::OK || ec2 == ErrorCode::PENDING) && len2 > 0)
       {
-        ep->SetActiveLength(len2);
-        primed = true;
+        auto dequeue = write_port_cdc_.BeginDequeue(in_isr);
+        auto ec2 = tx_deq_.Take(dequeue, reinterpret_cast<uint8_t*>(buffer.addr_),
+                                buffer.size_, len2);
+        if ((ec2 == ErrorCode::OK || ec2 == ErrorCode::PENDING) && len2 > 0)
+        {
+          ep->SetActiveLength(len2);
+          primed = true;
+        }
       }
     }
 
@@ -752,8 +676,8 @@ class CDCUart : public CDCBase, public LibXR::UART
   }
 
  private:
-  CDCUartReadPort read_port_cdc_;    ///< CDC RX 读端口 / CDC RX read port
-  BackendWritePort write_port_cdc_;  ///< CDC TX 写端口 / CDC TX write port
+  CDCUartReadPort read_port_cdc_;  ///< CDC RX 读端口 / CDC RX read port
+  WritePort write_port_cdc_;       ///< CDC TX 写端口 / CDC TX write port
 
   LibXR::CDCUartTxOpDequeueHelper tx_deq_;  ///< TX 出队辅助器 / TX dequeue helper
 

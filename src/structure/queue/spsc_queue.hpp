@@ -62,7 +62,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
    *         the queue is empty
    */
-  ErrorCode Peek(Data& item) { return SPSCQueueBase::PeekBytes(&item); }
+  ErrorCode Peek(Data& item) const { return SPSCQueueBase::PeekBytes(&item); }
 
   /**
    * @brief 批量推入多个 payload。
@@ -214,7 +214,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
    *         the queue does not contain enough payloads
    */
-  ErrorCode PeekBatch(Data* data, size_t size)
+  ErrorCode PeekBatch(Data* data, size_t size) const
   {
     return SPSCQueueBase::PeekBatchBytes(data, size);
   }
