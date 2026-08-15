@@ -26,10 +26,10 @@ void ESP32CDCJtagReadPort::OnRxDequeue(bool in_isr) { owner_.ResumeRx(in_isr); }
 ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
                            uint32_t tx_queue_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
-      config_(config),
       execution_policy_(*this),
       _read_port(rx_buffer_size, *this),
-      _write_port(tx_queue_size, tx_buffer_size)
+      _write_port(tx_queue_size, tx_buffer_size),
+      tx_model_(_write_port)
 {
   REQUIRE(rx_buffer_size > 0U);
   REQUIRE(tx_buffer_size > 0U);
@@ -40,7 +40,7 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
   }
 
   _write_port = WriteFun;
-  REQUIRE(SetConfig(config_) == ErrorCode::OK);
+  REQUIRE(SetConfig(config) == ErrorCode::OK);
   REQUIRE(InitHardware() == ErrorCode::OK);
 }
 
@@ -51,7 +51,6 @@ ErrorCode ESP32CDCJtag::SetConfig(UART::Configuration config)
   {
     return ErrorCode::ARG_ERR;
   }
-  config_ = config;
   return ErrorCode::OK;
 }
 
@@ -157,17 +156,15 @@ ErrorCode ESP32CDCJtag::WriteFun(WritePort& port, bool in_isr)
 
 ErrorCode ESP32CDCJtag::SubmitWrite(bool in_isr)
 {
-  SubmitContext submit{};
   bool pushed_any = false;
-  (void)execution_policy_.Invoke(
-      EventMask(Event::WRITE),
-      [this, in_isr, &submit, &pushed_any](uint32_t events) noexcept
-      { return ServiceEvents(events, in_isr, &submit, pushed_any); });
+  (void)execution_policy_.Invoke(EventMask(Event::WRITE),
+                                 [this, in_isr, &pushed_any](uint32_t events) noexcept
+                                 { return ServiceEvents(events, in_isr, pushed_any); });
   if (pushed_any)
   {
     _read_port.ProcessPendingReads(in_isr);
   }
-  return submit.result_;
+  return ErrorCode::PENDING;
 }
 
 uint32_t ESP32CDCJtag::ServiceIrqSource(bool) noexcept
@@ -192,7 +189,7 @@ uint32_t ESP32CDCJtag::ServiceIrqSource(bool) noexcept
   return events;
 }
 
-uint32_t ESP32CDCJtag::ServiceEvents(uint32_t events, bool in_isr, SubmitContext* submit,
+uint32_t ESP32CDCJtag::ServiceEvents(uint32_t events, bool in_isr,
                                      bool& pushed_any) noexcept
 {
   uint32_t continuation = 0U;
@@ -210,174 +207,98 @@ uint32_t ESP32CDCJtag::ServiceEvents(uint32_t events, bool in_isr, SubmitContext
 
   if ((events & (EventMask(Event::WRITE) | EventMask(Event::TX_EMPTY))) != 0U)
   {
-    ProgressTx(in_isr, submit);
+    ProgressTx(in_isr);
   }
   return continuation;
 }
 
-void ESP32CDCJtag::ProgressTx(bool in_isr, SubmitContext* submit)
+void ESP32CDCJtag::ProgressTx(bool in_isr)
 {
-  if (!usb_serial_jtag_ll_txfifo_writable())
+  while (true)
   {
-    ArmTxEmptyInterrupt();
-    return;
-  }
-
-  bool wrote_any = false;
-  while (usb_serial_jtag_ll_txfifo_writable())
-  {
-    if (!HasCurrentRecord())
+    if (tx_model_.HasPendingCompletion())
     {
-      bool synchronous_submission = false;
-      if (!ClaimNextRecord(in_isr, submit, synchronous_submission))
+      if (!tx_model_.PublishPendingCompletion(in_isr, TxCompletionPublication::ALLOW))
       {
-        if (wrote_any)
-        {
-          usb_serial_jtag_ll_txfifo_flush();
-          need_zlp_ = false;
-        }
-        else if (need_zlp_)
-        {
-          usb_serial_jtag_ll_txfifo_flush();
-          need_zlp_ = false;
-        }
-        DisarmTxEmptyInterrupt();
-
-        // A completion callback or deferred publisher may have queued work while the
-        // previous record was finalized. Recheck after disarming the one-shot source.
-        if (_write_port.QueueInfo()->Size() != 0U)
-        {
-          ArmTxEmptyInterrupt();
-        }
         return;
       }
-
-      if (!FillCurrentRecord(in_isr, synchronous_submission, submit, wrote_any))
-      {
-        if (!usb_serial_jtag_ll_txfifo_writable() && wrote_any)
-        {
-          need_zlp_ = true;
-        }
-        ArmTxEmptyInterrupt();
-        return;
-      }
-    }
-    else if (!FillCurrentRecord(in_isr, false, nullptr, wrote_any))
-    {
-      if (!usb_serial_jtag_ll_txfifo_writable() && wrote_any)
-      {
-        need_zlp_ = true;
-      }
-      ArmTxEmptyInterrupt();
-      return;
+      continue;
     }
 
     if (!usb_serial_jtag_ll_txfifo_writable())
     {
-      // A full endpoint auto-flushes. The next writable turn either continues the byte
-      // stream or sends its terminating ZLP if no later record has arrived.
-      need_zlp_ = true;
       ArmTxEmptyInterrupt();
+      return;
+    }
+
+    if (!tx_model_.HasActiveRecord())
+    {
+      if (!tx_model_.TryClaim(in_isr))
+      {
+        DisarmTxEmptyInterrupt();
+
+        if (!tx_flush_pending_)
+        {
+          return;
+        }
+
+        // Avoid closing a packet while metadata publication is already in progress.
+        if (!_write_port.TryPublishBackendCompletion())
+        {
+          return;
+        }
+        if (_write_port.QueueInfo()->Size() != 0U)
+        {
+          continue;
+        }
+        usb_serial_jtag_ll_txfifo_flush();
+        tx_flush_pending_ = false;
+        return;
+      }
+    }
+
+    if (!FillTxFifo(in_isr))
+    {
+      if (tx_model_.HasActiveRecord())
+      {
+        ArmTxEmptyInterrupt();
+      }
       return;
     }
   }
 }
 
-bool ESP32CDCJtag::ClaimNextRecord(bool in_isr, SubmitContext* submit,
-                                   bool& synchronous_submission)
+bool ESP32CDCJtag::FillTxFifo(bool in_isr)
 {
-  ASSERT(!HasCurrentRecord());
-
-  WriteInfoBlock info{};
-  if (_write_port.QueueInfo()->Peek(info) != ErrorCode::OK)
-  {
-    return false;
-  }
-
-  REQUIRE_FROM_CALLBACK(_write_port.QueueData() != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(info.data.size_ > 0U, in_isr);
-  REQUIRE_FROM_CALLBACK(info.data.size_ <= _write_port.QueueData()->Size(), in_isr);
-  synchronous_submission =
-      submit != nullptr && !submit->resolved_ && _write_port.QueueInfo()->Size() == 1U;
-
-  auto dequeue = _write_port.BeginDequeue(in_isr);
-  const ErrorCode result = dequeue.PopInfo(info);
-  REQUIRE_FROM_CALLBACK(result == ErrorCode::OK, in_isr);
-  current_record_ = info;
-  current_record_offset_ = 0U;
-  return true;
-}
-
-bool ESP32CDCJtag::FillCurrentRecord(bool in_isr, bool synchronous_submission,
-                                     SubmitContext* submit, bool& wrote_any)
-{
-  ASSERT(HasCurrentRecord());
-  const size_t remaining = current_record_.data.size_ - current_record_offset_;
-  const size_t offered = std::min(remaining, ENDPOINT_SIZE);
+  ASSERT(tx_model_.HasActiveRecord());
   uint8_t chunk[ENDPOINT_SIZE] = {};
-  const ErrorCode peek_result = _write_port.QueueData()->PeekBatch(chunk, offered);
-  REQUIRE_FROM_CALLBACK(peek_result == ErrorCode::OK, in_isr);
+  return tx_model_.FillWithScratch(
+      in_isr, ENDPOINT_SIZE, RawData{chunk, sizeof(chunk)},
+      TxCompletionPublication::ALLOW,
+      [this, in_isr](const uint8_t* buffer, size_t size) -> size_t
+      {
+        const int written =
+            usb_serial_jtag_ll_write_txfifo(buffer, static_cast<uint32_t>(size));
+        REQUIRE_FROM_CALLBACK(written >= 0, in_isr);
+        REQUIRE_FROM_CALLBACK(static_cast<size_t>(written) <= size, in_isr);
+        if (written <= 0)
+        {
+          return 0U;
+        }
 
-  const int written =
-      usb_serial_jtag_ll_write_txfifo(chunk, static_cast<uint32_t>(offered));
-  REQUIRE_FROM_CALLBACK(written >= 0, in_isr);
-  REQUIRE_FROM_CALLBACK(static_cast<size_t>(written) <= offered, in_isr);
-  if (written <= 0)
-  {
-    return false;
-  }
-
-  const size_t accepted = static_cast<size_t>(written);
-  {
-    auto dequeue = _write_port.BeginDequeue(in_isr);
-    const ErrorCode pop_result = dequeue.DiscardData(accepted);
-    REQUIRE_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
-    current_record_offset_ += accepted;
-    wrote_any = true;
-    need_zlp_ = false;
-  }
-
-  if (current_record_offset_ < current_record_.data.size_)
-  {
-    return false;
-  }
-
-  CompleteCurrentRecord(in_isr, synchronous_submission, submit);
-  return true;
-}
-
-void ESP32CDCJtag::CompleteCurrentRecord(bool in_isr, bool synchronous_submission,
-                                         SubmitContext* submit)
-{
-  ASSERT(HasCurrentRecord());
-  ASSERT(current_record_offset_ == current_record_.data.size_);
-  WriteInfoBlock completed = current_record_;
-  ClearCurrentRecord();
-
-  if (synchronous_submission)
-  {
-    ASSERT(submit != nullptr);
-    submit->result_ = ErrorCode::OK;
-    submit->resolved_ = true;
-    return;
-  }
-  _write_port.Finish(in_isr, ErrorCode::OK, completed);
-}
-
-bool ESP32CDCJtag::HasCurrentRecord() const { return current_record_.data.size_ != 0U; }
-
-void ESP32CDCJtag::ClearCurrentRecord()
-{
-  current_record_ = {};
-  current_record_offset_ = 0U;
+        // Preserve packet work until the model and metadata queue are truly quiescent.
+        // One flush sends a short packet or terminates an exact 64-byte packet with ZLP.
+        tx_flush_pending_ = true;
+        return static_cast<size_t>(written);
+      });
 }
 
 void ESP32CDCJtag::ResumeRx(bool in_isr)
 {
   bool pushed_any = false;
-  (void)execution_policy_.Invoke(
-      EventMask(Event::RX_SPACE), [this, in_isr, &pushed_any](uint32_t events) noexcept
-      { return ServiceEvents(events, in_isr, nullptr, pushed_any); });
+  (void)execution_policy_.Invoke(EventMask(Event::RX_SPACE),
+                                 [this, in_isr, &pushed_any](uint32_t events) noexcept
+                                 { return ServiceEvents(events, in_isr, pushed_any); });
   if (pushed_any)
   {
     _read_port.ProcessPendingReads(in_isr);
@@ -442,10 +363,9 @@ bool ESP32CDCJtag::DrainRxToQueue(bool in_isr)
 void ESP32CDCJtag::HandleInterrupt()
 {
   bool pushed_any = false;
-  (void)execution_policy_.InvokeIrq(
-      [this]() noexcept { return ServiceIrqSource(true); },
-      [this, &pushed_any](uint32_t events) noexcept
-      { return ServiceEvents(events, true, nullptr, pushed_any); });
+  (void)execution_policy_.InvokeIrq([this]() noexcept { return ServiceIrqSource(true); },
+                                    [this, &pushed_any](uint32_t events) noexcept
+                                    { return ServiceEvents(events, true, pushed_any); });
   if (pushed_any)
   {
     _read_port.ProcessPendingReads(true);

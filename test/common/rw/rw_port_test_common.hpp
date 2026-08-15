@@ -25,9 +25,9 @@ LibXR::ErrorCode PendingWriteFun(LibXR::WritePort&, bool)
   return LibXR::ErrorCode::PENDING;
 }
 
-struct ImmediateFinishWritePort : LibXR::WritePort
+struct SynchronousWritePort : LibXR::WritePort
 {
-  ImmediateFinishWritePort(size_t queue_size = 2, size_t buffer_size = 64)
+  SynchronousWritePort(size_t queue_size = 2, size_t buffer_size = 64)
       : WritePort(queue_size, buffer_size)
   {
     WritePort::operator=(HandleWrite);
@@ -35,7 +35,7 @@ struct ImmediateFinishWritePort : LibXR::WritePort
 
   static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool in_isr)
   {
-    auto& port = static_cast<ImmediateFinishWritePort&>(base);
+    auto& port = static_cast<SynchronousWritePort&>(base);
     LibXR::WriteInfoBlock info{};
     {
       auto dequeue = port.BeginDequeue(in_isr);
@@ -44,11 +44,10 @@ struct ImmediateFinishWritePort : LibXR::WritePort
       port.payload_size = info.data.size_;
       ASSERT(dequeue.PopData(port.payload, port.payload_size) == LibXR::ErrorCode::OK);
     }
-    port.Finish(in_isr, port.finish_result, info);
-    return LibXR::ErrorCode::PENDING;
+    return port.result;
   }
 
-  LibXR::ErrorCode finish_result = LibXR::ErrorCode::OK;
+  LibXR::ErrorCode result = LibXR::ErrorCode::OK;
   uint8_t payload[64]{};
   size_t payload_size = 0;
 };

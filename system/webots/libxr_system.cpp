@@ -8,6 +8,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -31,7 +32,18 @@ static uint64_t step_interval_ns = 1000000ULL;
 LibXR::condition_var_handle* _libxr_webots_time_notify = nullptr;
 
 static LibXR::Semaphore stdo_sem;
+// A PUBLISHING window can consume several record wakes while WritePort coalesces their
+// retry into one bit. Keep one wake carrier and drain the queue per turn.
+static std::atomic<bool> stdo_wake_pending{false};
 static constexpr size_t host_stdio_queue_bytes = 4096;
+
+void NotifyStdoWorker()
+{
+  if (!stdo_wake_pending.exchange(true, std::memory_order_release))
+  {
+    stdo_sem.Post();
+  }
+}
 
 struct LibXR::WebotsRealtimeThreadRegistration
 {
@@ -137,31 +149,34 @@ void StdoThread(LibXR::WritePort* write_port)
   {
     if (stdo_sem.Wait() == LibXR::ErrorCode::OK)
     {
+      (void)stdo_wake_pending.exchange(false, std::memory_order_acquire);
+      while (write_port->QueueInfo()->Peek(info) == LibXR::ErrorCode::OK)
       {
-        auto dequeue = write_port->BeginDequeue(false);
-        auto ans = dequeue.PopInfo(info);
-        if (ans != LibXR::ErrorCode::OK)
+        if (!write_port->TryPublishBackendCompletion())
         {
-          continue;
+          break;
         }
 
-        ans = dequeue.PopData(write_buff, info.data.size_);
-        if (ans != LibXR::ErrorCode::OK)
         {
-          continue;
+          auto dequeue = write_port->BeginDequeue(false);
+          auto ans = dequeue.PopInfo(info);
+          REQUIRE(ans == LibXR::ErrorCode::OK);
+
+          ans = dequeue.PopData(write_buff, info.data.size_);
+          REQUIRE(ans == LibXR::ErrorCode::OK);
         }
+
+        auto write_size = fwrite(write_buff, sizeof(char), info.data.size_, stdout);
+        auto fflush_ans = fflush(stdout);
+
+        UNUSED(write_size);
+        UNUSED(fflush_ans);
+
+        write_port->Finish(false,
+                           write_size == info.data.size_ ? LibXR::ErrorCode::OK
+                                                         : LibXR::ErrorCode::FAILED,
+                           info);
       }
-
-      auto write_size = fwrite(write_buff, sizeof(char), info.data.size_, stdout);
-      auto fflush_ans = fflush(stdout);
-
-      UNUSED(write_size);
-      UNUSED(fflush_ans);
-
-      write_port->Finish(
-          false,
-          write_size == info.data.size_ ? LibXR::ErrorCode::OK : LibXR::ErrorCode::FAILED,
-          info);
     }
   }
 }
@@ -213,10 +228,9 @@ void LibXR::PlatformInit(webots::Robot* robot, uint32_t timer_pri,
   auto write_fun = [](WritePort& port, bool)
   {
     UNUSED(port);
-    stdo_sem.Post();
+    NotifyStdoWorker();
     return LibXR::ErrorCode::PENDING;
   };
-
   LibXR::STDIO::write_ = new LibXR::WritePort(32, host_stdio_queue_bytes);
 
   *LibXR::STDIO::write_ = write_fun;

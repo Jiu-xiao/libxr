@@ -31,6 +31,40 @@ class WritePort
   const SPSCQueue<uint8_t>* QueueData() const noexcept { return queue_data_; }
 
   /**
+   * @brief Try to publish an asynchronous backend completion.
+   *
+   * A consumer may claim and transfer data while the producer is publishing metadata.
+   * Before asynchronous `Finish()`, or another terminal action based on the same
+   * empty-queue observation such as packet flush/ZLP, call this method. `PUBLISHING`
+   * records one coalesced retry and returns false; the backend retains the terminal and
+   * retries after the admission releaser re-invokes `WriteFun`. `WAITING` and `OWNER`
+   * have not made the current record visible, so a terminal observed there belongs to an
+   * older record and is allowed.
+   * Synchronous completion returned through the current WriteFun stack does not call this
+   * method. Backends without a terminal slot, such as the common UART DMA model, call it
+   * immediately before the hardware action that defines operation completion. A true
+   * result is a point-in-time publication permission, not a lease across the later
+   * `Finish()` and callback; the caller must already have fixed which terminal it owns. /
+   * consumer
+   * 可在 producer 发布 metadata 期间接管和搬运数据。异步调用 `Finish()`，或执行基于同一次
+   * 空队列观察的其他 terminal 动作（例如 packet flush/ZLP）前，必须调用本方法；
+   * `PUBLISHING` 会合并一次 retry 并返回 false，后端保留 terminal，等待 admission
+   * releaser 重新调用 `WriteFun` 后重试。`WAITING` 和 `OWNER` 尚未让当前记录可见，因此
+   * 此时观察到的 terminal 属于更早记录，可以直接完成。当前 WriteFun
+   * 栈返回的同步完成不调用 本方法。没有 terminal 槽的后端（例如公共 UART DMA
+   * model）在定义 operation completion 的硬件动作 前调用。返回 true
+   * 只是当前时刻的发布许可，不会跨后续 `Finish()` 和 callback 持有
+   * admission；调用方在调用前必须已经确定自己持有的 terminal。
+   *
+   * @return True when completion may be published now. / 当前可以发布 completion 时为
+   * true。
+   * @pre A backend that returns false must retain its terminal and return `PENDING` when
+   *      `WriteFun` is re-invoked. / 返回 false 的后端必须保留 terminal，并在 `WriteFun`
+   *      被重新调用时返回 `PENDING`。
+   */
+  [[nodiscard]] bool TryPublishBackendCompletion() noexcept;
+
+  /**
    * @brief Scoped backend dequeue transaction. / 后端出队事务作用域。
    *
    * Successful dequeues release queue capacity, but deferred publication is postponed
@@ -140,10 +174,11 @@ class WritePort
   static constexpr uint32_t ACTIVE_SHIFT = 3U;
   static constexpr uint32_t ACTIVE_MASK = 0x3U << ACTIVE_SHIFT;
   static constexpr uint32_t KICK = 1U << 5U;
-  static constexpr uint32_t PUBLISH_WAIT_ERROR = 1U << 6U;
+  static constexpr uint32_t DEFERRED_WAIT_ERROR = 1U << 6U;
   static constexpr uint32_t HANDOFF = 1U << 7U;
   static constexpr uint32_t RESULT_SHIFT = 8U;
   static constexpr uint32_t RESULT_MASK = 0xFFU << RESULT_SHIFT;
+  static constexpr uint32_t BACKEND_RETRY = 1U << 16U;
 
   static constexpr uint32_t State(Phase phase, ActiveState active)
   {
@@ -170,19 +205,24 @@ class WritePort
     return (state & ~ACTIVE_MASK) | (static_cast<uint32_t>(active) << ACTIVE_SHIFT);
   }
 
-  static constexpr uint32_t WithoutPublicationFlags(uint32_t state)
+  static constexpr uint32_t WithoutTransientFlags(uint32_t state)
   {
-    return state & ~(KICK | PUBLISH_WAIT_ERROR);
+    return state & ~(KICK | DEFERRED_WAIT_ERROR | BACKEND_RETRY);
   }
 
   static constexpr bool HasKick(uint32_t state) { return (state & KICK) != 0U; }
 
-  static constexpr bool HasPublishWaitError(uint32_t state)
+  static constexpr bool HasDeferredWaitError(uint32_t state)
   {
-    return (state & PUBLISH_WAIT_ERROR) != 0U;
+    return (state & DEFERRED_WAIT_ERROR) != 0U;
   }
 
   static constexpr bool HasHandoff(uint32_t state) { return (state & HANDOFF) != 0U; }
+
+  static constexpr bool HasBackendRetry(uint32_t state)
+  {
+    return (state & BACKEND_RETRY) != 0U;
+  }
 
   static constexpr uint32_t WithResult(uint32_t state, ErrorCode result)
   {
@@ -205,7 +245,9 @@ class WritePort
   bool TryReserveDeferredOwner();
   SPSCQueue<WriteInfoBlock>& MutableInfoQueue() { return *queue_info_; }
   SPSCQueue<uint8_t>& MutableDataQueue() { return *queue_data_; }
-  void ReleaseOwner(bool in_isr);
+  bool ReleaseOwner(bool in_isr);
+  void BeginPublication(bool in_isr);
+  void NotifyBackendRetry(bool retry_requested, bool in_isr);
   ErrorCode DeferBlock(ConstRawData data, WriteOperation& op, bool owns_port);
   ErrorCode WaitForBlock(WriteOperation& op, bool deferred);
   ErrorCode PublishOwned(ConstRawData data, WriteOperation& op, bool data_pushed,

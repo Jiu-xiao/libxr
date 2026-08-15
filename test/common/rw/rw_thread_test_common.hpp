@@ -14,17 +14,11 @@
  */
 #pragma once
 
-#include <linux/futex.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <fstream>
-#include <iomanip>
-#include <string>
 
+#include "../system/linux_futex_wait_test_common.hpp"
 #include "rw_mode_test_common.hpp"
 
 namespace
@@ -33,104 +27,15 @@ using LibXRTest::ALL_MODES;
 using LibXRTest::ASYNC_MODES;
 using LibXRTest::ASYNC_TIMEOUT_MS;
 using LibXRTest::BLOCK_OPERATION_TIMEOUT_MS;
+using LibXRTest::CurrentLinuxThreadId;
+using LibXRTest::LinuxFutexWaitMode;
 using LibXRTest::ReadHarness;
 using LibXRTest::SHORT_WAIT_MS;
 using LibXRTest::TestMode;
 using LibXRTest::THREAD_STATE_TIMEOUT_MS;
+using LibXRTest::WaitForLinuxFutexWait;
+using LibXRTest::WaitForLinuxFutexWaitMode;
 using LibXRTest::WriteHarness;
-
-// Observe the real Linux wait point so a producer or completion cannot run before the
-// request has been published and its caller has entered Semaphore::Wait().
-pid_t CurrentLinuxThreadId() { return static_cast<pid_t>(syscall(SYS_gettid)); }
-
-enum class LinuxFutexWaitMode : uint8_t
-{
-  NONE,
-  TIMED,
-  UNTIMED,
-};
-
-LinuxFutexWaitMode GetLinuxFutexWaitMode(pid_t thread_id)
-{
-  std::ifstream syscall_state("/proc/self/task/" + std::to_string(thread_id) +
-                              "/syscall");
-  long syscall_number = -1;
-  uintptr_t futex_address = 0;
-  uintptr_t futex_operation = 0;
-  uintptr_t expected_value = 0;
-  uintptr_t timeout_address = 0;
-  syscall_state >> std::dec >> syscall_number >> std::hex >> futex_address >>
-      futex_operation >> expected_value >> timeout_address;
-
-  if (syscall_state.fail() || syscall_number != SYS_futex ||
-      (futex_operation & FUTEX_CMD_MASK) != FUTEX_WAIT)
-  {
-    return LinuxFutexWaitMode::NONE;
-  }
-
-  return timeout_address == 0U ? LinuxFutexWaitMode::UNTIMED : LinuxFutexWaitMode::TIMED;
-}
-
-bool IsThreadBlockedInFutexWait(pid_t thread_id)
-{
-  return GetLinuxFutexWaitMode(thread_id) != LinuxFutexWaitMode::NONE;
-}
-
-bool WaitForLinuxFutexWait(pid_t thread_id, uint32_t timeout_ms = THREAD_STATE_TIMEOUT_MS)
-{
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (!IsThreadBlockedInFutexWait(thread_id))
-  {
-    if (std::chrono::steady_clock::now() >= deadline)
-    {
-      return false;
-    }
-    LibXR::Thread::Yield();
-  }
-  return true;
-}
-
-bool WaitForLinuxFutexWait(const std::atomic<pid_t>& thread_id,
-                           uint32_t timeout_ms = THREAD_STATE_TIMEOUT_MS)
-{
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (true)
-  {
-    const pid_t observed = thread_id.load(std::memory_order_acquire);
-    if (observed > 0 && IsThreadBlockedInFutexWait(observed))
-    {
-      return true;
-    }
-    if (std::chrono::steady_clock::now() >= deadline)
-    {
-      return false;
-    }
-    LibXR::Thread::Yield();
-  }
-}
-
-bool WaitForLinuxFutexWaitMode(const std::atomic<pid_t>& thread_id,
-                               LinuxFutexWaitMode expected,
-                               uint32_t timeout_ms = THREAD_STATE_TIMEOUT_MS)
-{
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (true)
-  {
-    const pid_t observed = thread_id.load(std::memory_order_acquire);
-    if (observed > 0 && GetLinuxFutexWaitMode(observed) == expected)
-    {
-      return true;
-    }
-    if (std::chrono::steady_clock::now() >= deadline)
-    {
-      return false;
-    }
-    LibXR::Thread::Yield();
-  }
-}
 
 /**
  * @brief 辅助函数 `JoinThreadIfNeeded`。 Helper function `JoinThreadIfNeeded`.

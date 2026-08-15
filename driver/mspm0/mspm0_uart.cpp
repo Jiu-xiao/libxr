@@ -999,12 +999,8 @@ UartDmaControlResult MSPM0UART::AdvanceConfig(UART::Configuration config, bool a
   {
     return stop;
   }
-  if (!control_config_applied_)
-  {
-    DL_UART_disableFIFOs(res_.instance);
-    ApplyDisabledConfig(config);
-    control_config_applied_ = true;
-  }
+  DL_UART_disableFIFOs(res_.instance);
+  ApplyDisabledConfig(config);
   return UartDmaControlResult::Completed(stopped_tx_terminal_);
 }
 
@@ -1043,7 +1039,6 @@ UartDmaControlResult MSPM0UART::AdvanceControlStop(bool active_tx, bool error_st
 void MSPM0UART::BeginControlStop(bool active_tx, bool error_stop)
 {
   StopDataPathInterrupts();
-  control_config_applied_ = false;
   control_active_tx_ = active_tx;
   control_error_stop_ = error_stop;
   stopped_tx_terminal_ = UartOldTxTerminal::NONE;
@@ -1081,8 +1076,16 @@ void MSPM0UART::BeginControlStop(bool active_tx, bool error_stop)
   }
   else
   {
-    control_phase_ = ControlPhase::WAIT_UART_IDLE;
+    EnterWaitUartIdle();
   }
+}
+
+void MSPM0UART::EnterWaitUartIdle()
+{
+  control_phase_ = ControlPhase::WAIT_UART_IDLE;
+  DL_UART_disable(res_.instance);
+  DiscardRxFifo();
+  DL_UART_clearInterruptStatus(res_.instance, MSPM0_UART_RX_INTERRUPT_MASK);
 }
 
 bool MSPM0UART::AdvanceToQuiescence()
@@ -1100,18 +1103,11 @@ bool MSPM0UART::AdvanceToQuiescence()
     DL_UART_disableInterrupt(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
     DL_UART_clearInterruptStatus(res_.instance, DL_UART_INTERRUPT_EOT_DONE);
     tx_line_active_ = false;
-    control_phase_ = ControlPhase::WAIT_UART_IDLE;
+    EnterWaitUartIdle();
   }
 
   if (control_phase_ == ControlPhase::WAIT_UART_IDLE)
   {
-    if (!uart_disabled_for_control_)
-    {
-      DL_UART_disable(res_.instance);
-      DiscardRxFifo();
-      DL_UART_clearInterruptStatus(res_.instance, MSPM0_UART_RX_INTERRUPT_MASK);
-      uart_disabled_for_control_ = true;
-    }
     if (DL_UART_isBusy(res_.instance))
     {
       __DMB();
@@ -1151,8 +1147,6 @@ void MSPM0UART::FinishControl()
 {
   control_phase_ = ControlPhase::IDLE;
   stopped_tx_terminal_ = UartOldTxTerminal::NONE;
-  control_config_applied_ = false;
-  uart_disabled_for_control_ = false;
   control_active_tx_ = false;
   control_error_stop_ = false;
   tx_complete_observed_ = false;

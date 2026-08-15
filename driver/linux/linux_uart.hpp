@@ -452,35 +452,28 @@ class LinuxUART : public UART
 
     // 设置自定义波特率
     tio.c_cflag &= ~CBAUD;
+#ifdef CIBAUD
+    // A zero input selector makes RX follow the BOTHER output rate below.
+    tio.c_cflag &= ~CIBAUD;
+#endif
     tio.c_cflag |= BOTHER;
     tio.c_ispeed = config.baudrate;
     tio.c_ospeed = config.baudrate;
 
-    // 输入模式：关闭软件流控、特殊字符处理
-    tio.c_iflag &= ~(IXON | IXOFF | IXANY | ISTRIP | IGNCR | INLCR | ICRNL
+    // Raw byte input: discard line errors instead of synthesizing bytes or signals.
+    tio.c_iflag &=
+        ~(BRKINT | PARMRK | INPCK | ISTRIP | IGNCR | INLCR | ICRNL | IXON | IXOFF | IXANY
 #ifdef IUCLC
-                     | IUCLC
+          | IUCLC
 #endif
-    );
+        );
+    tio.c_iflag |= IGNBRK | IGNPAR;
 
-    // 输出模式：关闭所有加工
-    tio.c_oflag &= ~(OPOST
-#ifdef ONLCR
-                     | ONLCR
-#endif
-#ifdef OCRNL
-                     | OCRNL
-#endif
-#ifdef ONOCR
-                     | ONOCR
-#endif
-#ifdef ONLRET
-                     | ONLRET
-#endif
-    );
+    // OPOST gates every output transformation.
+    tio.c_oflag &= ~OPOST;
 
-    // 本地模式：禁用行缓冲、回显、信号中断
-    tio.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+    // Raw local mode: no line editing, echo, signals, or extended input processing.
+    tio.c_lflag &= ~(ICANON | ECHO | ECHOE | ECHONL | ISIG | IEXTEN);
 
     // 控制模式：设置数据位、校验、停止位、流控
     tio.c_cflag &= ~CSIZE;
@@ -509,19 +502,22 @@ class LinuxUART : public UART
       tio.c_cflag |= CSTOPB;
     }
 
-    // 奇偶校验
+    // Clear inherited mark/space and odd/even parity before applying LibXR parity.
+    tio.c_cflag &= ~(PARENB | PARODD);
+#ifdef CMSPAR
+    tio.c_cflag &= ~CMSPAR;
+#endif
     switch (config.parity)
     {
       case UART::Parity::NO_PARITY:
-        tio.c_cflag &= ~PARENB;
         break;
       case UART::Parity::EVEN:
         tio.c_cflag |= PARENB;
-        tio.c_cflag &= ~PARODD;
+        tio.c_iflag |= INPCK;
         break;
       case UART::Parity::ODD:
-        tio.c_cflag |= PARENB;
-        tio.c_cflag |= PARODD;
+        tio.c_cflag |= PARENB | PARODD;
+        tio.c_iflag |= INPCK;
         break;
       default:
         return ErrorCode::ARG_ERR;
@@ -583,19 +579,30 @@ class LinuxUART : public UART
     return fd;
   }
 
-  void CompleteActiveTx(ErrorCode result)
+  void CompleteActiveTx()
   {
     REQUIRE(tx_state_ == TxState::ACTIVE);
+    REQUIRE(tx_active_offset_ == tx_active_size_);
+    if (!write_port_->TryPublishBackendCompletion())
+    {
+      return;
+    }
+
     WriteInfoBlock info = tx_active_info_;
     tx_state_ = TxState::IDLE;
     tx_active_size_ = 0U;
     tx_active_offset_ = 0U;
-    write_port_->Finish(false, result, info);
+    write_port_->Finish(false, ErrorCode::OK, info);
   }
 
   void CompleteFailedTxAfterRecovery()
   {
     REQUIRE(tx_state_ == TxState::FAILURE_PENDING);
+    if (!write_port_->TryPublishBackendCompletion())
+    {
+      return;
+    }
+
     WriteInfoBlock info = tx_active_info_;
     tx_state_ = TxState::IDLE;
     tx_active_size_ = 0U;
@@ -610,15 +617,23 @@ class LinuxUART : public UART
       (void)close(fd);
       fd = -1;
     }
-    if (discard_active && tx_state_ == TxState::ACTIVE)
+    if (!discard_active || tx_state_ != TxState::ACTIVE)
     {
-      // The tty may already have accepted a prefix. Never replay the unknown suffix on a
-      // replacement device, and defer the terminal callback until reconnect restores a
-      // normal backend state.
-      tx_active_size_ = 0U;
-      tx_active_offset_ = 0U;
-      tx_state_ = TxState::FAILURE_PENDING;
+      return;
     }
+    if (tx_active_offset_ == tx_active_size_)
+    {
+      // The kernel accepted the complete record. Retain its successful terminal until a
+      // normal backend state can publish it; a later disconnect must not rewrite it.
+      return;
+    }
+
+    // The tty may already have accepted a prefix. Never replay the unknown suffix on a
+    // replacement device, and defer the terminal callback until reconnect restores a
+    // normal backend state.
+    tx_active_size_ = 0U;
+    tx_active_offset_ = 0U;
+    tx_state_ = TxState::FAILURE_PENDING;
   }
 
   bool LoadActiveTx()
@@ -629,8 +644,11 @@ class LinuxUART : public UART
     }
 
     WriteInfoBlock info{};
-    if (write_port_->QueueInfo()->Peek(info) != ErrorCode::OK ||
-        !config_gate_.TryEnterTx())
+    if (write_port_->QueueInfo()->Peek(info) != ErrorCode::OK)
+    {
+      return false;
+    }
+    if (!config_gate_.TryEnterTx())
     {
       return false;
     }
@@ -649,19 +667,21 @@ class LinuxUART : public UART
     return true;
   }
 
-  bool PumpTx(int& fd)
+  void PumpTx(int& fd)
   {
     while (tx_state_ == TxState::ACTIVE)
     {
+      if (tx_active_offset_ == tx_active_size_)
+      {
+        CompleteActiveTx();
+        return;
+      }
+
       const size_t remaining = tx_active_size_ - tx_active_offset_;
       const ssize_t written = write(fd, tx_buff_ + tx_active_offset_, remaining);
       if (written > 0)
       {
         tx_active_offset_ += static_cast<size_t>(written);
-        if (tx_active_offset_ == tx_active_size_)
-        {
-          CompleteActiveTx(ErrorCode::OK);
-        }
         continue;
       }
       if (written < 0 && errno == EINTR)
@@ -670,14 +690,13 @@ class LinuxUART : public UART
       }
       if (written == 0 || (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)))
       {
-        return true;
+        return;
       }
 
       XR_LOG_WARN("Cannot write UART device: %s", device_path_.c_str());
       Disconnect(fd, true);
-      return false;
+      return;
     }
-    return true;
   }
 
   bool DrainRx(int& fd, bool terminal = false)
@@ -827,6 +846,10 @@ class LinuxUART : public UART
       {
         continue;
       }
+      if (tx_state_ == TxState::ACTIVE && tx_active_offset_ == tx_active_size_)
+      {
+        CompleteActiveTx();
+      }
       if (tx_state_ == TxState::FAILURE_PENDING && !config_gate_.ConfigRequested())
       {
         CompleteFailedTxAfterRecovery();
@@ -857,7 +880,7 @@ class LinuxUART : public UART
       {
         poll_fds[0].events |= POLLIN;
       }
-      if (tx_state_ == TxState::ACTIVE)
+      if (tx_state_ == TxState::ACTIVE && tx_active_offset_ < tx_active_size_)
       {
         poll_fds[0].events |= POLLOUT;
       }
@@ -912,7 +935,7 @@ class LinuxUART : public UART
       }
       if (fd >= 0 && (poll_fds[0].revents & POLLOUT) != 0 && tx_state_ == TxState::ACTIVE)
       {
-        (void)PumpTx(fd);
+        PumpTx(fd);
       }
     }
   }

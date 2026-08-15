@@ -353,8 +353,114 @@ void RxSpaceWakeStressScenario()
 bool BaudIs(int fd, uint32_t baudrate)
 {
   struct termios2 config{};
-  return ioctl(fd, TCGETS2, &config) == 0 && config.c_ispeed == baudrate &&
-         config.c_ospeed == baudrate;
+  if (ioctl(fd, TCGETS2, &config) != 0 || config.c_ispeed != baudrate ||
+      config.c_ospeed != baudrate || (config.c_cflag & CBAUD) != BOTHER)
+  {
+    return false;
+  }
+#ifdef CIBAUD
+  return (config.c_cflag & CIBAUD) == 0U;
+#else
+  return true;
+#endif
+}
+
+void SeedNonRawTermios(int fd)
+{
+  struct termios2 config{};
+  ASSERT(ioctl(fd, TCGETS2, &config) == 0);
+
+  config.c_iflag |=
+      BRKINT | PARMRK | INPCK | ISTRIP | IGNCR | INLCR | ICRNL | IXON | IXOFF | IXANY;
+#ifdef IUCLC
+  config.c_iflag |= IUCLC;
+#endif
+  config.c_iflag &= ~(IGNBRK | IGNPAR);
+  config.c_oflag |= OPOST;
+  config.c_lflag |= ICANON | ECHO | ECHOE | ECHONL | ISIG | IEXTEN;
+  config.c_cflag |= PARENB | PARODD;
+#ifdef CMSPAR
+  config.c_cflag |= CMSPAR;
+#endif
+#if defined(CIBAUD) && defined(IBSHIFT)
+  config.c_cflag &= ~CIBAUD;
+  config.c_cflag |= B9600 << IBSHIFT;
+  config.c_ispeed = 9600U;
+#endif
+
+  ASSERT(ioctl(fd, TCSETS2, &config) == 0);
+
+#if defined(CIBAUD) && defined(IBSHIFT)
+  ASSERT(ioctl(fd, TCGETS2, &config) == 0);
+  ASSERT((config.c_cflag & CIBAUD) != 0U);
+  ASSERT(config.c_ispeed == 9600U);
+#endif
+}
+
+bool RawNoParityTermiosIs(int fd)
+{
+  struct termios2 config{};
+  if (ioctl(fd, TCGETS2, &config) != 0)
+  {
+    return false;
+  }
+
+  auto input_clear =
+      BRKINT | PARMRK | ISTRIP | IGNCR | INLCR | ICRNL | IXON | IXOFF | IXANY;
+#ifdef IUCLC
+  input_clear |= IUCLC;
+#endif
+  if ((config.c_iflag & input_clear) != 0U ||
+      (config.c_iflag & (IGNBRK | IGNPAR)) != (IGNBRK | IGNPAR) ||
+      (config.c_oflag & OPOST) != 0U ||
+      (config.c_lflag & (ICANON | ECHO | ECHOE | ECHONL | ISIG | IEXTEN)) != 0U)
+  {
+    return false;
+  }
+
+#ifdef CMSPAR
+  if ((config.c_cflag & CMSPAR) != 0U)
+  {
+    return false;
+  }
+#endif
+
+  return (config.c_cflag & (PARENB | PARODD)) == 0U && (config.c_iflag & INPCK) == 0U;
+}
+
+void RawTermiosScenario()
+{
+  Pty pty = OpenPty();
+  const int observer =
+      open(pty.slave.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+  ASSERT(observer >= 0);
+  SeedNonRawTermios(observer);
+  ASSERT(!RawNoParityTermiosIs(observer));
+
+  auto* uart = new LibXR::LinuxUART(pty.slave.c_str(), 115200,
+                                    LibXR::UART::Parity::NO_PARITY, 8, 1, 2, 64U);
+  ASSERT(RawNoParityTermiosIs(observer));
+  ASSERT(BaudIs(observer, 115200U));
+
+  const std::array<uint8_t, 10U> payload = {0x00U, 0x0AU, 0x0DU, 0x11U, 0x13U,
+                                            0x1BU, 0x7FU, 0x80U, 0xFEU, 0xFFU};
+  ASSERT(WriteAll(pty.master, payload.data(), payload.size(), 1000U));
+
+  std::array<uint8_t, 10U> rx{};
+  LibXR::Semaphore read_sem;
+  LibXR::ReadOperation read_operation(read_sem, 1000U);
+  ASSERT(uart->Read({rx.data(), rx.size()}, read_operation) == LibXR::ErrorCode::OK);
+  ASSERT(rx == payload);
+
+  LibXR::Semaphore write_sem;
+  LibXR::WriteOperation write_operation(write_sem, 1000U);
+  ASSERT(uart->Write({payload.data(), payload.size()}, write_operation) ==
+         LibXR::ErrorCode::OK);
+  std::array<uint8_t, 10U> tx{};
+  ASSERT(ReadExact(pty.master, tx.data(), tx.size(), 1000U));
+  ASSERT(tx == payload);
+
+  ASSERT(close(observer) == 0);
 }
 
 void ConfigSerializationScenario()
@@ -846,6 +952,10 @@ int RunLinuxUartScenario(const char* name)
   {
     ConfigSerializationScenario();
   }
+  else if (std::strcmp(name, "raw_termios") == 0)
+  {
+    RawTermiosScenario();
+  }
   else if (std::strcmp(name, "callback_write_config") == 0)
   {
     CallbackWriteConfigScenario();
@@ -880,6 +990,7 @@ void test_linux_uart()
   RunScenario("rx_nonfull_dequeue");
   RunScenario("rx_space_wake_stress");
   RunScenario("config_serialization");
+  RunScenario("raw_termios");
   RunScenario("callback_write_config");
   RunScenario("reconnect");
   RunScenario("reconnect_backoff");

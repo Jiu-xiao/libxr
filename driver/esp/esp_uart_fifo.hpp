@@ -8,6 +8,7 @@
 #if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
 #include "esp_pm.h"
 #endif
+#include "driver/common/fifo_tx_model.hpp"
 #include "esp_uart_execution_policy.hpp"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
@@ -135,6 +136,7 @@ class ESP32UartFifo : public UART
 
  private:
   using ExecutionPolicy = Detail::ESP32UartExecutionPolicy<ESP32UartFifo>;
+  using TxCompletionPublication = FifoTxModel::CompletionPublication;
 
   enum class Event : uint32_t
   {
@@ -151,13 +153,6 @@ class ESP32UartFifo : public UART
   {
     NORMAL = 0,
     CONFIGURING,
-  };
-
-  struct SubmitContext
-  {
-    ErrorCode result_ = ErrorCode::PENDING;
-    bool resolved_ = false;
-    bool synchronous_completion_allowed_ = true;
   };
 
   static constexpr uint32_t EventMask(Event event)
@@ -184,8 +179,7 @@ class ESP32UartFifo : public UART
 
   static void UartIsrEntry(void* arg);
   uint32_t ServiceIrqSource(bool in_isr) noexcept;
-  uint32_t ServiceEvents(uint32_t events, bool in_isr, SubmitContext* submit,
-                         bool& pushed_any) noexcept;
+  uint32_t ServiceEvents(uint32_t events, bool in_isr, bool& pushed_any) noexcept;
 
   ErrorCode SubmitWrite(bool in_isr);
   void ResumeRx(bool in_isr);
@@ -195,13 +189,9 @@ class ESP32UartFifo : public UART
   void BeginConfiguration();
   uint32_t ContinueConfiguration(bool in_isr);
 
-  void ProgressTx(bool in_isr, SubmitContext* submit);
-  bool ClaimNextRecord(bool in_isr, SubmitContext* submit, bool& synchronous_submission);
-  [[nodiscard]] bool HasCurrentRecord() const;
-  bool FillCurrentRecord(bool in_isr, bool synchronous_submission, SubmitContext* submit);
-  void CompleteCurrentRecord(bool in_isr, bool synchronous_submission,
-                             SubmitContext* submit);
-  void ClearCurrentRecord();
+  void ProgressTx(bool in_isr);
+  bool FillTxFifo(bool in_isr);
+  [[nodiscard]] TxCompletionPublication GetTxCompletionPublication() const noexcept;
 
   uart_port_t uart_num_;
 
@@ -218,9 +208,6 @@ class ESP32UartFifo : public UART
   bool config_tx_idle_interrupt_armed_ = false;
   bool rx_interrupt_path_enabled_ = false;
 
-  WriteInfoBlock current_record_{};
-  size_t current_record_offset_ = 0U;
-
   bool uart_hw_enabled_ = false;
   uart_hal_context_t uart_hal_ = {};
   intr_handle_t uart_intr_handle_ = nullptr;
@@ -231,6 +218,7 @@ class ESP32UartFifo : public UART
 
   Detail::ESP32UartFifoReadPort _read_port;
   WritePort _write_port;
+  FifoTxModel tx_model_;
 };
 
 }  // namespace LibXR

@@ -92,15 +92,13 @@ class MemoryLoopbackUart : public LibXR::UART
 
     if (info.data.size_ > owner.transfer_.size())
     {
-      port.Finish(in_isr, LibXR::ErrorCode::SIZE_ERR, info);
-      return LibXR::ErrorCode::PENDING;
+      return LibXR::ErrorCode::SIZE_ERR;
     }
 
     if (owner.fail_next_write_)
     {
       owner.fail_next_write_ = false;
-      port.Finish(in_isr, LibXR::ErrorCode::FAILED, info);
-      return LibXR::ErrorCode::PENDING;
+      return LibXR::ErrorCode::FAILED;
     }
     if (owner.corrupt_next_write_ && info.data.size_ > 0U)
     {
@@ -120,12 +118,11 @@ class MemoryLoopbackUart : public LibXR::UART
     {
       owner.read_port_.ProcessPendingReads(in_isr);
     }
-    port.Finish(in_isr, ans, info);
     if (ans == LibXR::ErrorCode::OK)
     {
       owner.completed_writes_.fetch_add(1U, std::memory_order_release);
     }
-    return LibXR::ErrorCode::PENDING;
+    return ans;
   }
 
   LibXR::ReadPort read_port_;

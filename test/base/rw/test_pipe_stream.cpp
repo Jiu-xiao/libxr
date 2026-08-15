@@ -12,7 +12,7 @@ namespace
 
 struct StreamCallbackReentry
 {
-  ImmediateFinishWritePort* port = nullptr;
+  SynchronousWritePort* port = nullptr;
   LibXR::WritePort::Stream* stream = nullptr;
   bool try_reentry = true;
   LibXR::ErrorCode completion_result = LibXR::ErrorCode::FAILED;
@@ -163,11 +163,11 @@ void test_pipe_stream_commit_allows_persistent_and_external_streams()
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
-void test_pipe_stream_rejects_same_object_callback_reentry()
+void test_pipe_stream_allows_direct_callback_reentry_but_rejects_same_stream()
 {
   using namespace LibXR;
 
-  ImmediateFinishWritePort port;
+  SynchronousWritePort port;
   StreamCallbackReentry context{&port};
   auto callback = Callback<ErrorCode>::Create(OnStreamWriteComplete, &context);
   WriteOperation operation(callback);
@@ -179,12 +179,13 @@ void test_pipe_stream_rejects_same_object_callback_reentry()
   ASSERT(stream.Commit() == ErrorCode::OK);
 
   ASSERT(context.completion_result == ErrorCode::OK);
-  ASSERT(context.direct_write == ErrorCode::BUSY);
+  ASSERT(context.direct_write == ErrorCode::OK);
   ASSERT(context.stream_write == ErrorCode::BUSY);
   ASSERT(context.stream_zero_write == ErrorCode::OK);
   ASSERT(context.stream_commit == ErrorCode::BUSY);
-  ASSERT(port.payload_size == sizeof(OUTER));
-  ASSERT(std::memcmp(port.payload, OUTER, sizeof(OUTER)) == 0);
+  static const uint8_t NESTED[] = {0xA1};
+  ASSERT(port.payload_size == sizeof(NESTED));
+  ASSERT(std::memcmp(port.payload, NESTED, sizeof(NESTED)) == 0);
   ASSERT(port.QueueData()->Size() == 0);
   ASSERT(port.QueueInfo()->Size() == 0);
 
@@ -254,6 +255,6 @@ void RunBasePipeStreamTests()
   test_pipe_stream_block_immediate_path();
   test_pipe_stream_commit_releases_lock_for_next_stream();
   test_pipe_stream_commit_allows_persistent_and_external_streams();
-  test_pipe_stream_rejects_same_object_callback_reentry();
+  test_pipe_stream_allows_direct_callback_reentry_but_rejects_same_stream();
   test_pipe_stream_reports_live_capacity_after_consumer_progress();
 }

@@ -259,8 +259,8 @@ class MSPM0UART : public UART
    * @brief WritePort 提交入口 / WritePort submission entry
    * @param port 发起提交的写端口 / Write port issuing the submission
    * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 始终返回 `PENDING`；记录已发布给 UART IRQ owner 异步处理 / Always `PENDING`
-   *         after publishing the record for asynchronous UART-IRQ processing
+   * @return 始终返回 `PENDING`；记录已发布给 UART IRQ owner 异步处理 / Always
+   *         `PENDING` after publishing the record for asynchronous UART-IRQ processing
    */
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 
@@ -536,6 +536,7 @@ class MSPM0UART : public UART
   UartDmaControlProgress CompleteRecovery(bool in_isr);
   UartDmaControlResult AdvanceControlStop(bool active_tx, bool error_stop, bool in_isr);
   void BeginControlStop(bool active_tx, bool error_stop);
+  void EnterWaitUartIdle();
   bool AdvanceToQuiescence();
   void FinishControl();
   UartDmaTxStartResult StartDmaTx(uint8_t* data, size_t size, int block, bool in_isr);
@@ -564,8 +565,6 @@ class MSPM0UART : public UART
   bool rx_pushed_in_owner_ = false;
   bool rx_epoch_invalid_ = false;
   bool rx_partial_flush_pending_ = false;
-  bool control_config_applied_ = false;
-  bool uart_disabled_for_control_ = false;
   bool tx_line_active_ = false;
   bool control_active_tx_ = false;
   bool control_error_stop_ = false;

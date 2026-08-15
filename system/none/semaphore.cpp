@@ -45,6 +45,15 @@ ErrorCode Semaphore::Wait(uint32_t timeout)
     return ErrorCode::TIMEOUT;
   }
 
+  if (timeout == UINT32_MAX)
+  {
+    while (!TryTake(&semaphore_handle_))
+    {
+      Timer::RefreshTimerInIdle();
+    }
+    return ErrorCode::OK;
+  }
+
   uint32_t now = Timebase::GetMilliseconds();
 
   while (uint32_t(Timebase::GetMilliseconds()) - now < timeout)

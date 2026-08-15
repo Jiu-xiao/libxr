@@ -74,13 +74,32 @@ WritePort& WritePort::operator=(WriteFun fun)
   return *this;
 }
 
+bool WritePort::TryPublishBackendCompletion() noexcept
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (CurrentPhase(observed) == Phase::PUBLISHING)
+  {
+    if (HasBackendRetry(observed))
+    {
+      return false;
+    }
+    if (state_.compare_exchange_weak(observed, observed | BACKEND_RETRY,
+                                     std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool WritePort::TryAcquireOwner()
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
   while (CurrentPhase(observed) == Phase::FREE && Active(observed) == ActiveState::NONE &&
          !HasHandoff(observed))
   {
-    uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::OWNER));
+    uint32_t desired = WithoutTransientFlags(WithPhase(observed, Phase::OWNER));
     desired = WithResult(desired, ErrorCode::OK);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -104,7 +123,7 @@ bool WritePort::TryReserveDeferredOwner()
       return false;
     }
 
-    const uint32_t desired = WithPhase(observed & ~PUBLISH_WAIT_ERROR, Phase::OWNER);
+    const uint32_t desired = WithPhase(observed & ~DEFERRED_WAIT_ERROR, Phase::OWNER);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
     {
@@ -113,13 +132,34 @@ bool WritePort::TryReserveDeferredOwner()
   }
 }
 
-void WritePort::ReleaseOwner(bool in_isr)
+bool WritePort::ReleaseOwner(bool in_isr)
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
-  while (CurrentPhase(observed) == Phase::OWNER && Active(observed) == ActiveState::NONE)
+  while ((CurrentPhase(observed) == Phase::OWNER ||
+          CurrentPhase(observed) == Phase::PUBLISHING) &&
+         Active(observed) == ActiveState::NONE)
   {
-    uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+    uint32_t desired = WithoutTransientFlags(WithPhase(observed, Phase::FREE));
     desired = WithResult(desired, ErrorCode::OK);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      return HasBackendRetry(observed);
+    }
+  }
+  ASSERT_FROM_CALLBACK(false, in_isr);
+  return false;
+}
+
+void WritePort::BeginPublication(bool in_isr)
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  while (CurrentPhase(observed) == Phase::OWNER)
+  {
+    const ActiveState active = Active(observed);
+    ASSERT_FROM_CALLBACK(active == ActiveState::NONE || active == ActiveState::WAITING,
+                         in_isr);
+    const uint32_t desired = WithPhase(observed, Phase::PUBLISHING);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
     {
@@ -129,13 +169,22 @@ void WritePort::ReleaseOwner(bool in_isr)
   ASSERT_FROM_CALLBACK(false, in_isr);
 }
 
+void WritePort::NotifyBackendRetry(bool retry_requested, bool in_isr)
+{
+  if (retry_requested)
+  {
+    const ErrorCode result = write_fun_(*this, in_isr);
+    REQUIRE_FROM_CALLBACK(result == ErrorCode::PENDING, in_isr);
+  }
+}
+
 void WritePort::ReleaseBlockClaim()
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
   while (CurrentPhase(observed) == Phase::FREE &&
          Active(observed) == ActiveState::CLAIMED)
   {
-    uint32_t desired = WithoutPublicationFlags(WithActive(observed, ActiveState::NONE));
+    uint32_t desired = WithoutTransientFlags(WithActive(observed, ActiveState::NONE));
     desired = WithResult(desired, ErrorCode::OK);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -168,8 +217,8 @@ void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
         continue;
       }
 
-      // A synchronous Finish only records the result. The publisher releases its phase
-      // before it performs the unique wakeup.
+      // An asynchronous completion may claim the BLOCK waiter before WriteFun returns.
+      // The publisher releases its phase before it performs the unique wakeup.
       if (CurrentPhase(desired) == Phase::FREE)
       {
         info.op.data.sem_info.sem->PostFromCallback(in_isr);
@@ -279,7 +328,7 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool dat
       return DeferBlock(data, op, true);
     }
 
-    ReleaseOwner(in_isr);
+    (void)ReleaseOwner(in_isr);
     return ErrorCode::FULL;
   }
 
@@ -293,9 +342,8 @@ ErrorCode WritePort::PublishOwned(ConstRawData data, WriteOperation& op, bool da
   const bool block = op.type == WriteOperation::OperationType::BLOCK;
   if (block)
   {
-    const Phase expected_phase = deferred ? Phase::PUBLISHING : Phase::OWNER;
     uint32_t observed = state_.load(std::memory_order_acquire);
-    while (CurrentPhase(observed) == expected_phase &&
+    while (CurrentPhase(observed) == Phase::OWNER &&
            Active(observed) == ActiveState::NONE)
     {
       const uint32_t desired = WithActive(observed, ActiveState::WAITING);
@@ -305,7 +353,7 @@ ErrorCode WritePort::PublishOwned(ConstRawData data, WriteOperation& op, bool da
         break;
       }
     }
-    ASSERT(CurrentPhase(observed) == expected_phase &&
+    ASSERT(CurrentPhase(observed) == Phase::OWNER &&
            Active(observed) == ActiveState::NONE);
   }
 
@@ -318,6 +366,7 @@ ErrorCode WritePort::PublishOwned(ConstRawData data, WriteOperation& op, bool da
   }
 
   op.MarkAsRunning();
+  BeginPublication(in_isr);
   const ConstRawData published_data =
       data_pushed ? ConstRawData{nullptr, data.size_} : data;
   const ErrorCode info_result =
@@ -331,7 +380,8 @@ ErrorCode WritePort::PublishOwned(ConstRawData data, WriteOperation& op, bool da
   {
     // Release port admission before a synchronous terminal callback. A Stream keeps its
     // own SUBMITTING state until its local batch is finalized.
-    ReleaseOwner(in_isr);
+    const bool backend_retry = ReleaseOwner(in_isr);
+    NotifyBackendRetry(backend_retry, in_isr);
     if (ans != ErrorCode::PENDING)
     {
       op.UpdateStatus(in_isr, ans);
@@ -349,15 +399,16 @@ ErrorCode WritePort::PublishOwned(ConstRawData data, WriteOperation& op, bool da
   uint32_t observed = state_.load(std::memory_order_acquire);
   while (true)
   {
-    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::OWNER, in_isr);
+    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::PUBLISHING, in_isr);
     const ActiveState active = Active(observed);
 
     if (active == ActiveState::CLAIMED)
     {
-      const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      const uint32_t desired = WithoutTransientFlags(WithPhase(observed, Phase::FREE));
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
       {
+        NotifyBackendRetry(HasBackendRetry(observed), in_isr);
         op.data.sem_info.sem->PostFromCallback(in_isr);
         return WaitForBlock(op, false);
       }
@@ -367,21 +418,23 @@ ErrorCode WritePort::PublishOwned(ConstRawData data, WriteOperation& op, bool da
     ASSERT_FROM_CALLBACK(active == ActiveState::WAITING, in_isr);
     if (ans == ErrorCode::PENDING)
     {
-      const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      const uint32_t desired = WithoutTransientFlags(WithPhase(observed, Phase::FREE));
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
       {
+        NotifyBackendRetry(HasBackendRetry(observed), in_isr);
         return WaitForBlock(op, false);
       }
       continue;
     }
 
-    uint32_t desired = WithoutPublicationFlags(
+    uint32_t desired = WithoutTransientFlags(
         WithActive(WithPhase(observed, Phase::FREE), ActiveState::NONE));
     desired = WithResult(desired, ErrorCode::OK);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
     {
+      NotifyBackendRetry(HasBackendRetry(observed), in_isr);
       return NormalizeSynchronousResult(ans);
     }
   }
@@ -397,10 +450,11 @@ void WritePort::FinishDeferredPublication(WriteOperation& op, ErrorCode ans, boo
 
     if (active == ActiveState::CLAIMED)
     {
-      const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      const uint32_t desired = WithoutTransientFlags(WithPhase(observed, Phase::FREE));
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
       {
+        NotifyBackendRetry(HasBackendRetry(observed), in_isr);
         op.data.sem_info.sem->PostFromCallback(in_isr);
         return;
       }
@@ -410,20 +464,21 @@ void WritePort::FinishDeferredPublication(WriteOperation& op, ErrorCode ans, boo
     ASSERT_FROM_CALLBACK(active == ActiveState::WAITING, in_isr);
     if (ans != ErrorCode::PENDING)
     {
-      uint32_t desired = WithoutPublicationFlags(
+      uint32_t desired = WithoutTransientFlags(
           WithActive(WithPhase(observed, Phase::FREE), ActiveState::CLAIMED));
       desired = WithResult(desired, NormalizeSynchronousResult(ans));
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
       {
+        NotifyBackendRetry(HasBackendRetry(observed), in_isr);
         op.data.sem_info.sem->PostFromCallback(in_isr);
         return;
       }
       continue;
     }
 
-    const bool wait_failed = HasPublishWaitError(observed);
-    uint32_t desired = WithoutPublicationFlags(
+    const bool wait_failed = HasDeferredWaitError(observed);
+    uint32_t desired = WithoutTransientFlags(
         WithActive(WithPhase(observed, Phase::FREE),
                    wait_failed ? ActiveState::DETACHED : ActiveState::WAITING));
     if (wait_failed)
@@ -433,6 +488,7 @@ void WritePort::FinishDeferredPublication(WriteOperation& op, ErrorCode ans, boo
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
     {
+      NotifyBackendRetry(HasBackendRetry(observed), in_isr);
       if (wait_failed)
       {
         // This wakeup ends the caller-buffer handoff only. The late backend Finish sees
@@ -492,7 +548,7 @@ ErrorCode WritePort::WaitForBlock(WriteOperation& op, bool deferred_wait)
 
     if (deferred_wait && phase == Phase::WAITING)
     {
-      uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      uint32_t desired = WithoutTransientFlags(WithPhase(observed, Phase::FREE));
       desired = WithResult(desired, wait_result);
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
@@ -511,9 +567,9 @@ ErrorCode WritePort::WaitForBlock(WriteOperation& op, bool deferred_wait)
       continue;
     }
 
-    if (deferred_wait && phase == Phase::PUBLISHING)
+    if (deferred_wait && (phase == Phase::OWNER || phase == Phase::PUBLISHING))
     {
-      const uint32_t desired = WithResult(observed | PUBLISH_WAIT_ERROR, wait_result);
+      const uint32_t desired = WithResult(observed | DEFERRED_WAIT_ERROR, wait_result);
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
       {
@@ -559,21 +615,22 @@ void WritePort::ProcessPendingWrites(bool in_isr)
       return;
     }
 
-    const uint32_t publishing = WithPhase(observed, Phase::PUBLISHING);
-    if (state_.compare_exchange_weak(observed, publishing, std::memory_order_acq_rel,
+    const uint32_t owner = WithPhase(observed, Phase::OWNER);
+    if (state_.compare_exchange_weak(observed, owner, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
     {
       break;
     }
   }
 
-  // PUBLISHING owns the deferred slot and the caller-buffer lifetime. A failed wait can
-  // no longer cancel or reuse either one after this claim succeeds.
+  // OWNER owns the deferred slot and the caller-buffer lifetime. A failed wait can no
+  // longer cancel or reuse either one after this claim succeeds. PUBLISHING begins only
+  // after the complete payload copy, immediately before metadata becomes visible.
   WriteInfoBlock info = deferred_info_;
   observed = state_.load(std::memory_order_acquire);
   while (true)
   {
-    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::PUBLISHING, in_isr);
+    ASSERT_FROM_CALLBACK(CurrentPhase(observed) == Phase::OWNER, in_isr);
     ASSERT_FROM_CALLBACK(Active(observed) == ActiveState::NONE, in_isr);
 
     const bool has_capacity =
@@ -584,9 +641,9 @@ void WritePort::ProcessPendingWrites(bool in_isr)
       return;
     }
 
-    if (HasPublishWaitError(observed))
+    if (HasDeferredWaitError(observed))
     {
-      uint32_t cancelled = WithoutPublicationFlags(WithPhase(observed, Phase::FREE));
+      uint32_t cancelled = WithoutTransientFlags(WithPhase(observed, Phase::FREE));
       cancelled = WithResult(cancelled | HANDOFF, Result(observed));
       if (state_.compare_exchange_weak(observed, cancelled, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
@@ -599,8 +656,9 @@ void WritePort::ProcessPendingWrites(bool in_isr)
 
     if (HasKick(observed))
     {
-      // Consume this progress carrier without releasing the deferred slot, then sample
-      // capacity again. A concurrent carrier makes this CAS fail instead of being lost.
+      // Consume this carrier without releasing the deferred slot. An earlier same-value
+      // RMW is acquired before capacity is sampled again; a later RMW restores KICK and
+      // prevents the following WAITING transition from losing that progress.
       const uint32_t retry = observed & ~KICK;
       if (state_.compare_exchange_weak(observed, retry, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
@@ -610,7 +668,7 @@ void WritePort::ProcessPendingWrites(bool in_isr)
       continue;
     }
 
-    const uint32_t desired = WithoutPublicationFlags(WithPhase(observed, Phase::WAITING));
+    const uint32_t desired = WithoutTransientFlags(WithPhase(observed, Phase::WAITING));
     if (!state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                       std::memory_order_acquire))
     {

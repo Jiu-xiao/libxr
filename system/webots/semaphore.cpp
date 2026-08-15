@@ -48,6 +48,18 @@ ErrorCode Semaphore::Wait(uint32_t timeout)
     return ErrorCode::TIMEOUT;
   }
 
+  if (timeout == UINT32_MAX)
+  {
+    WebotsMarkCurrentRealtimeThreadParked(false);
+    int wait_ans = 0;
+    do
+    {
+      wait_ans = sem_wait(semaphore_handle_);
+    } while (wait_ans != 0 && errno == EINTR);
+    WebotsMarkCurrentRealtimeThreadRunning();
+    return wait_ans == 0 ? ErrorCode::OK : ErrorCode::FAILED;
+  }
+
   const uint64_t deadline_ms = MonotonicTime::NowMilliseconds() + timeout;
 
   while (MonotonicTime::RemainingMilliseconds(deadline_ms) > 0)

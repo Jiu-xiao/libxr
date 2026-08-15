@@ -117,103 +117,6 @@ class ScopedThreadSignalPark
   size_t parked_count_ = 0U;
 };
 
-constexpr uint32_t LITMUS_PHASE_MASK = 0x3U;
-constexpr uint32_t LITMUS_RESERVED = 0x1U;
-constexpr uint32_t LITMUS_WAITING = 0x2U;
-constexpr uint32_t LITMUS_PUBLISHING = 0x3U;
-constexpr uint32_t LITMUS_CARRIER = 0x4U;
-
-uint32_t LitmusWithPhase(uint32_t state, uint32_t phase)
-{
-  return (state & ~LITMUS_PHASE_MASK) | phase;
-}
-
-struct CapacityCarrierLitmusContext
-{
-  std::atomic<uint32_t> state{LITMUS_PUBLISHING};
-  std::atomic<bool> capacity{false};
-  std::atomic<bool> published{false};
-  Semaphore capacity_sampled;
-  Semaphore allow_waiting_cas;
-  Semaphore done;
-};
-
-void RunCapacityCarrierLitmus(CapacityCarrierLitmusContext* context)
-{
-  uint32_t observed = context->state.load(std::memory_order_acquire);
-  bool first_capacity_sample = true;
-  while (true)
-  {
-    ASSERT((observed & LITMUS_PHASE_MASK) == LITMUS_PUBLISHING);
-    if (context->capacity.load(std::memory_order_acquire))
-    {
-      context->published.store(true, std::memory_order_release);
-      context->done.Post();
-      return;
-    }
-
-    if (first_capacity_sample)
-    {
-      first_capacity_sample = false;
-      context->capacity_sampled.Post();
-      REQUIRE(context->allow_waiting_cas.Wait(UINT32_MAX) == ErrorCode::OK);
-    }
-
-    if ((observed & LITMUS_CARRIER) != 0U)
-    {
-      const uint32_t retry = observed & ~LITMUS_CARRIER;
-      if (context->state.compare_exchange_weak(observed, retry, std::memory_order_acq_rel,
-                                               std::memory_order_acquire))
-      {
-        observed = context->state.load(std::memory_order_acquire);
-      }
-      continue;
-    }
-
-    const uint32_t waiting = LitmusWithPhase(observed, LITMUS_WAITING);
-    if (context->state.compare_exchange_weak(observed, waiting, std::memory_order_acq_rel,
-                                             std::memory_order_acquire))
-    {
-      context->done.Post();
-      return;
-    }
-  }
-}
-
-struct RegistrationCarrierLitmusContext
-{
-  std::atomic<uint32_t> state{LITMUS_RESERVED};
-  std::atomic<bool> info_ready{false};
-  std::atomic<bool> published{false};
-  Semaphore reservation_visible;
-  Semaphore progress_recorded;
-  Semaphore done;
-};
-
-void RunRegistrationCarrierLitmus(RegistrationCarrierLitmusContext* context)
-{
-  context->reservation_visible.Post();
-  REQUIRE(context->progress_recorded.Wait(UINT32_MAX) == ErrorCode::OK);
-
-  context->info_ready.store(true, std::memory_order_release);
-  uint32_t observed = context->state.load(std::memory_order_acquire);
-  ASSERT((observed & LITMUS_PHASE_MASK) == LITMUS_RESERVED);
-  const uint32_t waiting = LitmusWithPhase(observed, LITMUS_WAITING);
-  ASSERT(context->state.compare_exchange_strong(
-      observed, waiting, std::memory_order_acq_rel, std::memory_order_acquire));
-  ASSERT((context->state.load(std::memory_order_acquire) & LITMUS_CARRIER) != 0U);
-
-  context->state.fetch_or(LITMUS_CARRIER, std::memory_order_acq_rel);
-  observed = context->state.load(std::memory_order_acquire);
-  ASSERT((observed & LITMUS_PHASE_MASK) == LITMUS_WAITING);
-  const uint32_t publishing = LitmusWithPhase(observed, LITMUS_PUBLISHING);
-  ASSERT(context->state.compare_exchange_strong(
-      observed, publishing, std::memory_order_acq_rel, std::memory_order_acquire));
-  ASSERT(context->info_ready.load(std::memory_order_acquire));
-  context->published.store(true, std::memory_order_release);
-  context->done.Post();
-}
-
 struct DeferredAdmissionRaceContext
 {
   WritePort* port;
@@ -285,10 +188,8 @@ struct ControlledWritePort : WritePort
   enum class Mode : uint8_t
   {
     PENDING,
-    FINISH,
     RETURN,
     STAGED_PENDING,
-    STAGED_FINISH,
   };
 
   ControlledWritePort(size_t queue_size, size_t buffer_size)
@@ -322,19 +223,6 @@ struct ControlledWritePort : WritePort
       ASSERT(dequeue.PopData(port.payload, port.payload_size) == ErrorCode::OK);
     }
 
-    if (port.mode == Mode::FINISH)
-    {
-      port.Finish(in_isr, port.result, info);
-      return ErrorCode::PENDING;
-    }
-
-    if (port.mode == Mode::STAGED_FINISH)
-    {
-      port.Finish(in_isr, port.result, info);
-      port.entered.PostFromCallback(in_isr);
-      REQUIRE(port.release.Wait(UINT32_MAX) == ErrorCode::OK);
-      return ErrorCode::PENDING;
-    }
     return port.result;
   }
 
@@ -415,7 +303,7 @@ struct GuardedRewritePump
     context->depth--;
   }
 
-  ImmediateFinishWritePort port{4, 32};
+  SynchronousWritePort port{4, 32};
   Callback<ErrorCode> callback;
   WriteOperation operation;
   const std::array<std::array<uint8_t, 2>, 3> payloads = {
@@ -481,44 +369,6 @@ WriteInfoBlock PopRecord(WritePort& port, uint8_t* data)
     ASSERT(dequeue.PopData(data, info.data.size_) == ErrorCode::OK);
   }
   return info;
-}
-
-void test_capacity_progress_carrier_survives_return_to_waiting_cas()
-{
-  CapacityCarrierLitmusContext context;
-  Thread publisher;
-  publisher.Create<CapacityCarrierLitmusContext*>(&context, RunCapacityCarrierLitmus,
-                                                  "wr_kick_litmus", 1024,
-                                                  Thread::Priority::MEDIUM);
-
-  ExpectWaitOk(context.capacity_sampled, THREAD_STATE_TIMEOUT_MS);
-  context.capacity.store(true, std::memory_order_release);
-  context.state.fetch_or(LITMUS_CARRIER, std::memory_order_acq_rel);
-  context.allow_waiting_cas.Post();
-
-  ExpectWaitOk(context.done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(publisher);
-  ASSERT(context.published.load(std::memory_order_acquire));
-  ASSERT((context.state.load(std::memory_order_acquire) & LITMUS_PHASE_MASK) ==
-         LITMUS_PUBLISHING);
-}
-
-void test_progress_during_deferred_slot_registration_is_closed_after_publication()
-{
-  RegistrationCarrierLitmusContext context;
-  Thread writer;
-  writer.Create<RegistrationCarrierLitmusContext*>(&context, RunRegistrationCarrierLitmus,
-                                                   "wr_register_litmus", 1024,
-                                                   Thread::Priority::MEDIUM);
-
-  ExpectWaitOk(context.reservation_visible, THREAD_STATE_TIMEOUT_MS);
-  context.state.fetch_or(LITMUS_CARRIER, std::memory_order_acq_rel);
-  context.progress_recorded.Post();
-
-  ExpectWaitOk(context.done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(writer);
-  ASSERT(context.info_ready.load(std::memory_order_acquire));
-  ASSERT(context.published.load(std::memory_order_acquire));
 }
 
 void test_progress_racing_deferred_admission_is_not_lost()
@@ -781,92 +631,43 @@ void test_old_detached_record_coexists_with_new_deferred_request()
   ASSERT(second_semaphore.Value() == 0U);
 }
 
-void test_deferred_publish_handles_synchronous_finish_and_return()
+void test_deferred_publish_propagates_synchronous_terminal_return()
 {
-  for (const auto mode :
-       {ControlledWritePort::Mode::FINISH, ControlledWritePort::Mode::RETURN})
+  for (const auto result : {ErrorCode::OK, ErrorCode::INIT_ERR})
   {
-    for (const auto result : {ErrorCode::OK, ErrorCode::INIT_ERR})
-    {
-      ControlledWritePort port(3, 4);
-      static const uint8_t A[] = {0xA1, 0xA2, 0xA3, 0xA4};
-      static const uint8_t B[] = {0xB1, 0xB2};
-      WriteOperation first_operation;
-      ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
+    ControlledWritePort port(3, 4);
+    static const uint8_t A[] = {0xA1, 0xA2, 0xA3, 0xA4};
+    static const uint8_t B[] = {0xB1, 0xB2};
+    WriteOperation first_operation;
+    ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
 
-      Semaphore writer_done;
-      Semaphore writer_semaphore;
-      BlockingWriteCallContext context{&port, ConstRawData{B, sizeof(B)}, UINT32_MAX,
-                                       ErrorCode::FAILED, &writer_done};
-      context.semaphore = &writer_semaphore;
-      Thread writer;
-      StartBlockingWriteCaller(writer, context, "wr_defer_sync");
-      REQUIRE(WaitForLinuxFutexWait(context.thread_id));
+    Semaphore writer_done;
+    Semaphore writer_semaphore;
+    BlockingWriteCallContext context{&port, ConstRawData{B, sizeof(B)}, UINT32_MAX,
+                                     ErrorCode::FAILED, &writer_done};
+    context.semaphore = &writer_semaphore;
+    Thread writer;
+    StartBlockingWriteCaller(writer, context, "wr_defer_sync");
+    REQUIRE(WaitForLinuxFutexWait(context.thread_id));
 
-      port.mode = mode;
-      port.result = result;
-      uint8_t first_data[sizeof(A)]{};
-      WriteInfoBlock first_info = PopRecord(port, first_data);
-      port.Finish(false, ErrorCode::OK, first_info);
+    port.mode = ControlledWritePort::Mode::RETURN;
+    port.result = result;
+    uint8_t first_data[sizeof(A)]{};
+    WriteInfoBlock first_info = PopRecord(port, first_data);
+    port.Finish(false, ErrorCode::OK, first_info);
 
-      ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
-      JoinThreadIfNeeded(writer);
-      ASSERT(context.result == result);
-      ASSERT(port.payload_size == sizeof(B));
-      ASSERT(std::memcmp(port.payload, B, sizeof(B)) == 0);
-      ASSERT(writer_semaphore.Value() == 0U);
-      ASSERT(port.QueueInfo()->Size() == 0U);
-      ASSERT(port.Size() == 0U);
-    }
+    ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
+    JoinThreadIfNeeded(writer);
+    ASSERT(context.result == result);
+    ASSERT(port.payload_size == sizeof(B));
+    ASSERT(std::memcmp(port.payload, B, sizeof(B)) == 0);
+    ASSERT(writer_semaphore.Value() == 0U);
+    ASSERT(port.QueueInfo()->Size() == 0U);
+    ASSERT(port.Size() == 0U);
   }
 }
 
-void test_synchronous_finish_does_not_release_waiter_before_write_fun_returns()
-{
-  ControlledWritePort port(3, 4);
-  static const uint8_t A[] = {0xB1, 0xB2, 0xB3, 0xB4};
-  static const uint8_t B[] = {0xC1, 0xC2};
-  WriteOperation first_operation;
-  ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
-
-  Semaphore writer_done;
-  Semaphore writer_semaphore;
-  BlockingWriteCallContext context{&port, ConstRawData{B, sizeof(B)}, UINT32_MAX,
-                                   ErrorCode::FAILED, &writer_done};
-  context.semaphore = &writer_semaphore;
-  Thread writer;
-  StartBlockingWriteCaller(writer, context, "wr_finish_staged");
-  REQUIRE(WaitForLinuxFutexWait(context.thread_id));
-
-  port.mode = ControlledWritePort::Mode::STAGED_FINISH;
-  port.result = ErrorCode::INIT_ERR;
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info{};
-  Semaphore publisher_done;
-  Thread publisher;
-  StartDequeueRecord(publisher, port, first_info, first_data, sizeof(first_data),
-                     publisher_done, "wr_finish_owner");
-  ExpectWaitOk(port.entered, THREAD_STATE_TIMEOUT_MS);
-  ASSERT(std::memcmp(first_data, A, sizeof(A)) == 0);
-
-  ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
-  ASSERT(publisher_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
-  port.release.Post();
-
-  ExpectWaitOk(publisher_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(publisher);
-  port.Finish(false, ErrorCode::OK, first_info);
-  ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(writer);
-  ASSERT(context.result == ErrorCode::INIT_ERR);
-  ASSERT(writer_semaphore.Value() == 0U);
-  ASSERT(port.payload_size == sizeof(B));
-  ASSERT(std::memcmp(port.payload, B, sizeof(B)) == 0);
-  ASSERT(port.QueueInfo()->Size() == 0U);
-  ASSERT(port.Size() == 0U);
-}
-
-void test_completion_claimed_before_wait_error_preserves_backend_result()
+void test_finish_before_publisher_release_defers_wakeup_and_beats_timeout()
 {
   ControlledWritePort port(3, 4);
   static const uint8_t A[] = {0xB4, 0xB5, 0xB6, 0xB7};
@@ -883,8 +684,7 @@ void test_completion_claimed_before_wait_error_preserves_backend_result()
   StartBlockingWriteCaller(writer, context, "wr_claimed_timeout");
   REQUIRE(WaitForLinuxFutexWaitMode(context.thread_id, LinuxFutexWaitMode::TIMED));
 
-  port.mode = ControlledWritePort::Mode::STAGED_FINISH;
-  port.result = ErrorCode::INIT_ERR;
+  port.mode = ControlledWritePort::Mode::STAGED_PENDING;
   uint8_t first_data[sizeof(A)]{};
   WriteInfoBlock first_info{};
   Semaphore publisher_done;
@@ -894,8 +694,16 @@ void test_completion_claimed_before_wait_error_preserves_backend_result()
   ExpectWaitOk(port.entered, THREAD_STATE_TIMEOUT_MS);
   ASSERT(std::memcmp(first_data, A, sizeof(A)) == 0);
 
+  Semaphore finisher_done;
+  Thread finisher;
+  StartWriteFinisher(finisher, port, finisher_done, ErrorCode::INIT_ERR,
+                     "wr_claimed_finish");
+  ExpectWaitOk(finisher_done, THREAD_STATE_TIMEOUT_MS);
+  JoinThreadIfNeeded(finisher);
+
   REQUIRE(WaitForLinuxFutexWaitMode(context.thread_id, LinuxFutexWaitMode::UNTIMED));
   ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
+  ASSERT(publisher_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
   port.release.Post();
 
   ExpectWaitOk(publisher_done, THREAD_STATE_TIMEOUT_MS);
@@ -1182,17 +990,14 @@ void test_pipe_clear_promotes_deferred_block()
 
 void RunRuntimeRwBlockDeferredTests()
 {
-  test_capacity_progress_carrier_survives_return_to_waiting_cas();
-  test_progress_during_deferred_slot_registration_is_closed_after_publication();
   test_progress_racing_deferred_admission_is_not_lost();
   test_deferred_write_remains_pending_until_enough_space_is_released();
   test_timeout_before_publish_claim_cancels_without_copy();
   test_publish_claim_before_timeout_preserves_buffer_until_handoff();
   test_timeout_after_metadata_only_dequeue_cancels_waiting_request_without_copy();
   test_old_detached_record_coexists_with_new_deferred_request();
-  test_deferred_publish_handles_synchronous_finish_and_return();
-  test_synchronous_finish_does_not_release_waiter_before_write_fun_returns();
-  test_completion_claimed_before_wait_error_preserves_backend_result();
+  test_deferred_publish_propagates_synchronous_terminal_return();
+  test_finish_before_publisher_release_defers_wakeup_and_beats_timeout();
   test_terminal_return_releases_owner_before_callback_reentry();
   test_guarded_completion_replay_submits_after_owner_release();
   test_terminal_handoff_holds_admission_until_waiter_consumes_result();

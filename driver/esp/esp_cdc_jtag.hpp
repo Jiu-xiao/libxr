@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "driver/common/fifo_tx_model.hpp"
 #include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "esp_uart_execution_policy.hpp"
@@ -89,7 +90,7 @@ class ESP32CDCJtag : public UART
                                                       1});
 
   /**
-   * @brief 校验并保存固定 8N1 配置 / Validate and store the fixed 8N1 configuration
+   * @brief 校验固定 8N1 配置 / Validate the fixed 8N1 configuration
    */
   ErrorCode SetConfig(UART::Configuration config) override;
 
@@ -98,6 +99,7 @@ class ESP32CDCJtag : public UART
 
  private:
   using ExecutionPolicy = Detail::ESP32UartExecutionPolicy<ESP32CDCJtag>;
+  using TxCompletionPublication = FifoTxModel::CompletionPublication;
 
   enum class Event : uint32_t
   {
@@ -105,12 +107,6 @@ class ESP32CDCJtag : public UART
     TX_EMPTY = 1U << 1U,
     RX_DATA = 1U << 2U,
     RX_SPACE = 1U << 3U,
-  };
-
-  struct SubmitContext
-  {
-    ErrorCode result_ = ErrorCode::PENDING;
-    bool resolved_ = false;
   };
 
   static constexpr uint32_t EventMask(Event event)
@@ -128,8 +124,7 @@ class ESP32CDCJtag : public UART
   void DisarmTxEmptyInterrupt();
 
   uint32_t ServiceIrqSource(bool in_isr) noexcept;
-  uint32_t ServiceEvents(uint32_t events, bool in_isr, SubmitContext* submit,
-                         bool& pushed_any) noexcept;
+  uint32_t ServiceEvents(uint32_t events, bool in_isr, bool& pushed_any) noexcept;
   void HandleInterrupt();
 
   void ResumeRx(bool in_isr);
@@ -138,16 +133,8 @@ class ESP32CDCJtag : public UART
   bool PushRxBytes(const uint8_t* data, size_t size, bool in_isr);
 
   ErrorCode SubmitWrite(bool in_isr);
-  void ProgressTx(bool in_isr, SubmitContext* submit);
-  bool ClaimNextRecord(bool in_isr, SubmitContext* submit, bool& synchronous_submission);
-  bool FillCurrentRecord(bool in_isr, bool synchronous_submission, SubmitContext* submit,
-                         bool& wrote_any);
-  void CompleteCurrentRecord(bool in_isr, bool synchronous_submission,
-                             SubmitContext* submit);
-  [[nodiscard]] bool HasCurrentRecord() const;
-  void ClearCurrentRecord();
-
-  UART::Configuration config_;
+  void ProgressTx(bool in_isr);
+  bool FillTxFifo(bool in_isr);
 
   portMUX_TYPE irq_domain_lock_ = portMUX_INITIALIZER_UNLOCKED;
   bool irq_domain_masked_ = true;
@@ -156,13 +143,11 @@ class ESP32CDCJtag : public UART
   intr_handle_t intr_handle_ = nullptr;
   bool hw_inited_ = false;
   bool tx_empty_interrupt_armed_ = false;
-  bool need_zlp_ = false;
-
-  WriteInfoBlock current_record_{};
-  size_t current_record_offset_ = 0U;
+  bool tx_flush_pending_ = false;
 
   ESP32CDCJtagReadPort _read_port;
   WritePort _write_port;
+  FifoTxModel tx_model_;
 };
 
 }  // namespace LibXR

@@ -86,7 +86,8 @@ ESP32UartFifo::ESP32UartFifo(uart_port_t uart_num, int tx_pin, int rx_pin, int r
       requested_config_(config),
       execution_policy_(*this),
       _read_port(rx_buffer_size, *this),
-      _write_port(tx_queue_size, tx_buffer_size)
+      _write_port(tx_queue_size, tx_buffer_size),
+      tx_model_(_write_port)
 {
   REQUIRE(!Detail::IsEspConsoleUartInUse(uart_num_));
   REQUIRE(uart_num_ < UART_NUM_MAX);
@@ -120,7 +121,7 @@ void IRAM_ATTR ESP32UartFifo::UartIsrEntry(void* arg)
   (void)self->execution_policy_.InvokeIrq(
       [self]() noexcept { return self->ServiceIrqSource(true); },
       [self, &pushed_any](uint32_t events) noexcept
-      { return self->ServiceEvents(events, true, nullptr, pushed_any); });
+      { return self->ServiceEvents(events, true, pushed_any); });
   if (pushed_any)
   {
     self->_read_port.ProcessPendingReads(true);
@@ -163,11 +164,8 @@ ErrorCode ESP32UartFifo::SetConfig(UART::Configuration config)
 
   bool pushed_any = false;
   (void)execution_policy_.Invoke(
-      EventMask(Event::CONFIG),
-      [this, &pushed_any](uint32_t events) noexcept
-      {
-        return ServiceEvents(events, xPortInIsrContext() != pdFALSE, nullptr, pushed_any);
-      });
+      EventMask(Event::CONFIG), [this, &pushed_any](uint32_t events) noexcept
+      { return ServiceEvents(events, xPortInIsrContext() != pdFALSE, pushed_any); });
   if (pushed_any)
   {
     _read_port.ProcessPendingReads(xPortInIsrContext() != pdFALSE);
@@ -193,25 +191,23 @@ ErrorCode IRAM_ATTR ESP32UartFifo::WriteFun(WritePort& port, bool in_isr)
 
 ErrorCode IRAM_ATTR ESP32UartFifo::SubmitWrite(bool in_isr)
 {
-  SubmitContext submit{};
   bool pushed_any = false;
-  (void)execution_policy_.Invoke(
-      EventMask(Event::WRITE),
-      [this, in_isr, &submit, &pushed_any](uint32_t events) noexcept
-      { return ServiceEvents(events, in_isr, &submit, pushed_any); });
+  (void)execution_policy_.Invoke(EventMask(Event::WRITE),
+                                 [this, in_isr, &pushed_any](uint32_t events) noexcept
+                                 { return ServiceEvents(events, in_isr, pushed_any); });
   if (pushed_any)
   {
     _read_port.ProcessPendingReads(in_isr);
   }
-  return submit.result_;
+  return ErrorCode::PENDING;
 }
 
 void IRAM_ATTR ESP32UartFifo::ResumeRx(bool in_isr)
 {
   bool pushed_any = false;
-  (void)execution_policy_.Invoke(
-      EventMask(Event::RX_SPACE), [this, in_isr, &pushed_any](uint32_t events) noexcept
-      { return ServiceEvents(events, in_isr, nullptr, pushed_any); });
+  (void)execution_policy_.Invoke(EventMask(Event::RX_SPACE),
+                                 [this, in_isr, &pushed_any](uint32_t events) noexcept
+                                 { return ServiceEvents(events, in_isr, pushed_any); });
   if (pushed_any)
   {
     _read_port.ProcessPendingReads(in_isr);
@@ -278,18 +274,9 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceIrqSource(bool) noexcept
 }
 
 uint32_t IRAM_ATTR ESP32UartFifo::ServiceEvents(uint32_t events, bool in_isr,
-                                                SubmitContext* submit,
                                                 bool& pushed_any) noexcept
 {
   uint32_t continuation = 0U;
-
-  if ((submit != nullptr) &&
-      ((config_state_ != ConfigState::NORMAL) || rx_config_gate_.ConfigRequested()))
-  {
-    // This Write is only carrying an already accepted CONFIG forward. Its stack-local
-    // shortcut must not complete a queued record whose durable operation outlives it.
-    submit->synchronous_completion_allowed_ = false;
-  }
 
   // ServiceIrqSource() physically masks condition-triggered carriers but deliberately
   // leaves these logical flags intact until the retained event reaches its owner.
@@ -315,15 +302,15 @@ uint32_t IRAM_ATTR ESP32UartFifo::ServiceEvents(uint32_t events, bool in_isr,
 
   if (config_state_ == ConfigState::CONFIGURING)
   {
-    if (HasCurrentRecord())
+    if (tx_model_.HasActiveRecord())
     {
-      (void)FillCurrentRecord(in_isr, false, nullptr);
+      (void)FillTxFifo(in_isr);
     }
     continuation |= ContinueConfiguration(in_isr);
   }
   else if ((events & (EventMask(Event::WRITE) | EventMask(Event::TX_SPACE))) != 0U)
   {
-    ProgressTx(in_isr, submit);
+    ProgressTx(in_isr);
   }
 
   return continuation;
@@ -345,7 +332,7 @@ void ESP32UartFifo::BeginConfiguration()
   uart_hal_clr_intsts_mask(&uart_hal_, RX_INTR_MASK);
 
   config_state_ = ConfigState::CONFIGURING;
-  if (!HasCurrentRecord())
+  if (!tx_model_.HasActiveRecord())
   {
     DisarmTxSpaceInterrupt();
   }
@@ -357,7 +344,7 @@ uint32_t ESP32UartFifo::ContinueConfiguration(bool in_isr)
   {
     return 0U;
   }
-  if (HasCurrentRecord())
+  if (tx_model_.HasActiveRecord())
   {
     return 0U;
   }
@@ -466,74 +453,54 @@ bool IRAM_ATTR ESP32UartFifo::DrainRxFifo(bool in_isr)
   return pushed_any;
 }
 
-void IRAM_ATTR ESP32UartFifo::ProgressTx(bool in_isr, SubmitContext* submit)
+void IRAM_ATTR ESP32UartFifo::ProgressTx(bool in_isr)
 {
   while (config_state_ == ConfigState::NORMAL)
   {
-    if (HasCurrentRecord())
+    if (tx_model_.HasPendingCompletion())
     {
-      if (!FillCurrentRecord(in_isr, false, nullptr))
+      if (!tx_model_.PublishPendingCompletion(in_isr, GetTxCompletionPublication()))
+      {
+        return;
+      }
+      continue;
+    }
+
+    if (tx_model_.HasActiveRecord())
+    {
+      if (!FillTxFifo(in_isr))
       {
         return;
       }
     }
 
-    bool synchronous_submission = false;
-    if (!ClaimNextRecord(in_isr, submit, synchronous_submission))
+    if (!rx_config_gate_.TryEnterTx())
     {
+      return;
+    }
+
+    if (!tx_model_.TryClaim(in_isr))
+    {
+      rx_config_gate_.LeaveTx();
       DisarmTxSpaceInterrupt();
       return;
     }
-    if (!FillCurrentRecord(in_isr, synchronous_submission, submit))
+
+    // This starts a new TX_DONE generation. CONFIG never clears a TX_DONE raised after
+    // this point until the line-idle predicate also becomes true.
+    uart_hal_clr_intsts_mask(&uart_hal_, TX_IDLE_INTR_MASK);
+    rx_config_gate_.LeaveTx();
+
+    if (!FillTxFifo(in_isr))
     {
       return;
     }
   }
 }
 
-bool IRAM_ATTR ESP32UartFifo::ClaimNextRecord(bool in_isr, SubmitContext* submit,
-                                              bool& synchronous_submission)
+bool IRAM_ATTR ESP32UartFifo::FillTxFifo(bool in_isr)
 {
-  ASSERT(!HasCurrentRecord());
-  if (!rx_config_gate_.TryEnterTx())
-  {
-    return false;
-  }
-
-  WriteInfoBlock info{};
-  if (_write_port.QueueInfo()->Peek(info) != ErrorCode::OK)
-  {
-    rx_config_gate_.LeaveTx();
-    return false;
-  }
-
-  REQUIRE_FROM_CALLBACK(_write_port.QueueData() != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(info.data.size_ > 0U, in_isr);
-  REQUIRE_FROM_CALLBACK(info.data.size_ <= _write_port.QueueData()->Size(), in_isr);
-  synchronous_submission = submit != nullptr && submit->synchronous_completion_allowed_ &&
-                           !submit->resolved_ && _write_port.QueueInfo()->Size() == 1U;
-
-  auto dequeue = _write_port.BeginDequeue(in_isr);
-  const ErrorCode pop_result = dequeue.PopInfo(info);
-  REQUIRE_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
-
-  current_record_ = info;
-  current_record_offset_ = 0U;
-
-  // This starts a new TX_DONE generation. CONFIG never clears a TX_DONE raised after
-  // this point until the line-idle predicate also becomes true.
-  uart_hal_clr_intsts_mask(&uart_hal_, TX_IDLE_INTR_MASK);
-  rx_config_gate_.LeaveTx();
-  return true;
-}
-
-bool ESP32UartFifo::HasCurrentRecord() const { return current_record_.data.size_ != 0U; }
-
-bool IRAM_ATTR ESP32UartFifo::FillCurrentRecord(bool in_isr, bool synchronous_submission,
-                                                SubmitContext* submit)
-{
-  ASSERT(HasCurrentRecord());
-  const size_t record_size = current_record_.data.size_;
+  ASSERT(tx_model_.HasActiveRecord());
   const size_t fifo_space = uart_hal_get_txfifo_len(&uart_hal_);
   if (fifo_space == 0U)
   {
@@ -544,56 +511,34 @@ bool IRAM_ATTR ESP32UartFifo::FillCurrentRecord(bool in_isr, bool synchronous_su
   // Consume one FIFO-space snapshot per fill turn. Chasing slots that hardware frees
   // while filling one unfinished record can defer retained RX events until its FIFO
   // overflows on a fast single-core target.
-  const size_t write_size = std::min(record_size - current_record_offset_, fifo_space);
+  // Completion may invoke user code. Close the level-like source before entering the
+  // model, then re-arm it only if this record still needs FIFO space.
+  DisarmTxSpaceInterrupt();
+  auto writer = [this, in_isr](const uint8_t* buffer, size_t size)
   {
-    auto dequeue = _write_port.BeginDequeue(in_isr);
-    const ErrorCode result = dequeue.PopDataWithReader(
-        write_size,
-        [this](const uint8_t* buffer, size_t size) -> ErrorCode
-        {
-          uint32_t written = 0U;
-          uart_hal_write_txfifo(&uart_hal_, buffer, static_cast<uint32_t>(size),
-                                &written);
-          return written == static_cast<uint32_t>(size) ? ErrorCode::OK
-                                                        : ErrorCode::EMPTY;
-        });
-    REQUIRE_FROM_CALLBACK(result == ErrorCode::OK, in_isr);
-    current_record_offset_ += write_size;
-  }
-  if (current_record_offset_ < record_size)
+    uint32_t written = 0U;
+    uart_hal_write_txfifo(&uart_hal_, buffer, static_cast<uint32_t>(size), &written);
+    REQUIRE_FROM_CALLBACK(written == static_cast<uint32_t>(size), in_isr);
+  };
+  const bool record_released =
+      tx_model_.FillExact(in_isr, fifo_space, GetTxCompletionPublication(), writer);
+  if (!record_released)
   {
-    ArmTxSpaceInterrupt();
+    if (tx_model_.HasActiveRecord())
+    {
+      ArmTxSpaceInterrupt();
+    }
     return false;
   }
 
-  DisarmTxSpaceInterrupt();
-  CompleteCurrentRecord(in_isr, synchronous_submission, submit);
   return true;
 }
 
-void IRAM_ATTR ESP32UartFifo::CompleteCurrentRecord(bool in_isr,
-                                                    bool synchronous_submission,
-                                                    SubmitContext* submit)
+FifoTxModel::CompletionPublication ESP32UartFifo::GetTxCompletionPublication()
+    const noexcept
 {
-  ASSERT(HasCurrentRecord());
-  ASSERT(current_record_offset_ == current_record_.data.size_);
-  WriteInfoBlock completed = current_record_;
-  ClearCurrentRecord();
-
-  if (synchronous_submission)
-  {
-    ASSERT(submit != nullptr);
-    submit->result_ = ErrorCode::OK;
-    submit->resolved_ = true;
-    return;
-  }
-  _write_port.Finish(in_isr, ErrorCode::OK, completed);
-}
-
-void ESP32UartFifo::ClearCurrentRecord()
-{
-  current_record_ = {};
-  current_record_offset_ = 0U;
+  return config_state_ == ConfigState::NORMAL ? TxCompletionPublication::ALLOW
+                                              : TxCompletionPublication::DEFER;
 }
 
 void ESP32UartFifo::SetRxInterruptPathEnabled(bool enabled)

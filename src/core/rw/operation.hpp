@@ -463,13 +463,23 @@ typedef Operation<ErrorCode> WriteOperation;
 /// @brief Function pointer type for write operations.
 /// @brief 写入操作的函数指针类型。
 ///
-/// The current write has already been queued before this function is called. PENDING
-/// means the backend owns later completion through Finish(); non-PENDING means the
-/// current queued op was consumed/completed synchronously. Negative non-PENDING values
-/// report a synchronous start failure and must not leave that op in the queue.
-/// 调用该函数前，当前写入已经进入队列。PENDING 表示后端之后通过 Finish() 完成；
-/// 非 PENDING 表示当前 queued op 已被同步消费/完成。负数非 PENDING 表示同步启动失败，
-/// 且不得把该 op 留在队列中。
+/// This entry has two call reasons. On a normal submission, the current write has already
+/// been queued. PENDING hands terminal publication to the backend through a later
+/// Finish(), even if hardware accepted the record on this call stack. On a publication
+/// retry, WritePort invokes the same entry after releasing admission; the retained
+/// terminal may already have been dequeued, and the retry must return PENDING. Backends
+/// participating in this retry path gate terminal publication with
+/// WritePort::TryPublishBackendCompletion(). On a normal submission, non-PENDING means
+/// the current queued op completed synchronously and must not later be passed to
+/// Finish(). Negative non-PENDING values report a synchronous start failure and must not
+/// leave that op in the queue.
+/// 本入口有两种调用原因。普通提交时，当前写入已经进入队列；PENDING 表示后端之后通过
+/// Finish() 发布 terminal，即使硬件已在本调用栈接受记录也可以如此。publication retry
+/// 时，WritePort 会在释放 admission 后重调同一入口；保留的 terminal 可能已经出队，且本次
+/// 重调必须返回 PENDING。参与该 retry 路径的后端须在发布 terminal 前调用
+/// WritePort::TryPublishBackendCompletion()。普通提交返回非 PENDING 表示当前 queued op
+/// 已同步完成，之后不得再传给 Finish()；负数非 PENDING 表示同步启动失败，且不得把该 op
+/// 留在队列中。
 typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
 
 /**

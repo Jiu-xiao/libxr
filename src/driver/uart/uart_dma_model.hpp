@@ -120,11 +120,13 @@ enum class UartDmaEvent : uint32_t
  *
  * pending payload 从公共字节队列复制，metadata 仍留在队首；提升时先发布 active 状态，
  * 再调用 `StartDmaTx()`。该调用返回前发生的 terminal callback 只合并事件，并在 owner
- * 提交 STARTED/FAILED 后处理。owner 观察到 CONFIG 时放弃栈上同步完成捷径，保留记录
- * 通过其持久 Operation 完成。 / Pending data is copied while metadata remains queued.
+ * 提交 STARTED/FAILED 后处理。CONFIG/control 先于排队 TX 推进；所有 operation terminal
+ * 都通过其持久 Operation 异步发布。 /
+ * Pending data is copied while metadata remains queued.
  * Promotion publishes active state before `StartDmaTx()`, so an early terminal callback
- * is deferred until STARTED/FAILED is committed. CONFIG abandons stack-local synchronous
- * completion; preserved records complete through their durable Operation.
+ * is deferred until STARTED/FAILED is committed. CONFIG/control completes before queued
+ * TX progression, and every operation terminal is published through its durable
+ * Operation.
  *
  * `StartDmaTx() == FAILED` 只影响当前记录，不请求 CONFIG。runtime ERROR 和 CONFIG
  * 都在硬件静止后保留 active、pending 与公共队列记录；存在 active 时从 byte 0 重启，
@@ -195,19 +197,16 @@ class UartDmaModel
   }
 
   /**
-   * @brief 发布 WRITE，并在可判定时返回本调用的同步结果 / Publish WRITE and return
-   * this call's synchronous result when identifiable
+   * @brief 异步发布 WRITE / Publish WRITE for asynchronous terminal delivery
    * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
-   * @return 当前记录的同步提交结果；异步接管时为 `PENDING` / Synchronous submission
-   * result for this record, or `PENDING` after asynchronous handoff
+   * @return 始终为 `PENDING`；producer admission 释放后通过队列中的 operation 发布终态 /
+   * Always `PENDING`; terminal publication uses the queued operation after producer
+   * admission is released
    */
   ErrorCode Submit(bool in_isr)
   {
-    SubmitContext context{};
-    (void)policy_.Invoke(EventMask(UartDmaEvent::WRITE),
-                         [this, in_isr, &context](uint32_t events) noexcept
-                         { return ServiceEvents(events, in_isr, &context); });
-    return context.result_;
+    Invoke(UartDmaEvent::WRITE, in_isr);
+    return ErrorCode::PENDING;
   }
 
   /**
@@ -353,7 +352,7 @@ class UartDmaModel
   {
     return policy_.InvokeIrq(std::forward<Source>(source),
                              [this, in_isr](uint32_t events) noexcept
-                             { return ServiceEvents(events, in_isr, nullptr); });
+                             { return ServiceEvents(events, in_isr); });
   }
 
   /**
@@ -402,13 +401,6 @@ class UartDmaModel
     STARTED = 2U,
   };
 
-  struct SubmitContext
-  {
-    ErrorCode result_ = ErrorCode::PENDING;
-    bool resolved_ = false;
-    bool synchronous_completion_allowed_ = true;
-  };
-
   static constexpr uint32_t ALL_EVENTS =
       EventMask(UartDmaEvent::WRITE) | EventMask(UartDmaEvent::COMPLETE) |
       EventMask(UartDmaEvent::ERROR) | EventMask(UartDmaEvent::CONFIG) |
@@ -448,10 +440,10 @@ class UartDmaModel
     ASSERT((events & ~ALL_EVENTS) == 0U);
 
     (void)policy_.Invoke(events, [this, in_isr](uint32_t snapshot) noexcept
-                         { return ServiceEvents(snapshot, in_isr, nullptr); });
+                         { return ServiceEvents(snapshot, in_isr); });
   }
 
-  uint32_t ServiceEvents(uint32_t events, bool in_isr, SubmitContext* submit) noexcept
+  uint32_t ServiceEvents(uint32_t events, bool in_isr) noexcept
   {
     ASSERT((events & ~ALL_EVENTS) == 0U);
 
@@ -466,7 +458,6 @@ class UartDmaModel
     {
       if (config_seen)
       {
-        DisableSynchronousCompletion(submit);
         control_intent_ = ControlIntent::CONFIG;
       }
       if (config_seen || IsControlCarrier(events))
@@ -480,7 +471,6 @@ class UartDmaModel
     {
       if (config_seen && control_intent_ == ControlIntent::RECOVERY)
       {
-        DisableSynchronousCompletion(submit);
         control_intent_ = ControlIntent::CONFIG;
         control_stop_origin_ = ControlStopOrigin::CONFIG;
         control_state_ = ControlState::CONTROL_STOPPING;
@@ -491,16 +481,12 @@ class UartDmaModel
 
     if (control_state_ == ControlState::CONTROL_COMPLETING)
     {
-      if (config_seen)
-      {
-        DisableSynchronousCompletion(submit);
-      }
       return IsControlCarrier(events) ? CompleteControl(in_isr) : 0U;
     }
 
     if (config_seen)
     {
-      return BeginConfig(in_isr, submit);
+      return BeginConfig(in_isr);
     }
 
     if (HasEvent(events, UartDmaEvent::ERROR))
@@ -514,12 +500,11 @@ class UartDmaModel
       progress = true;
     }
 
-    return progress ? Progress(in_isr, submit) : 0U;
+    return progress ? Progress(in_isr) : 0U;
   }
 
-  uint32_t BeginConfig(bool in_isr, SubmitContext* submit)
+  uint32_t BeginConfig(bool in_isr)
   {
-    DisableSynchronousCompletion(submit);
     control_state_ = ControlState::CONTROL_STOPPING;
     control_intent_ = ControlIntent::CONFIG;
     control_stop_origin_ = ControlStopOrigin::CONFIG;
@@ -609,7 +594,7 @@ class UartDmaModel
     return EventMask(UartDmaEvent::WRITE);
   }
 
-  uint32_t Progress(bool in_isr, SubmitContext* submit)
+  uint32_t Progress(bool in_isr)
   {
     if (active_length_ == 0U)
     {
@@ -621,7 +606,7 @@ class UartDmaModel
         }
       }
 
-      const StartPendingResult start = TryStartPending(in_isr, submit);
+      const StartPendingResult start = TryStartPending(in_isr);
       if (start == StartPendingResult::BLOCKED)
       {
         return 0U;
@@ -659,22 +644,12 @@ class UartDmaModel
       return false;
     }
 
-    ASSERT(port_.QueueData() != nullptr);
-    if (port_.QueueData() == nullptr)
-    {
-      rx_config_gate_.LeaveTx();
-      return false;
-    }
+    REQUIRE_FROM_CALLBACK(port_.QueueData() != nullptr, in_isr);
 
     REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
     auto dequeue = port_.BeginDequeue(in_isr);
     const ErrorCode result = dequeue.PopData(buffers_.PendingBuffer(), info.data.size_);
-    ASSERT(result == ErrorCode::OK);
-    if (result != ErrorCode::OK)
-    {
-      rx_config_gate_.LeaveTx();
-      return false;
-    }
+    REQUIRE_FROM_CALLBACK(result == ErrorCode::OK, in_isr);
 
     // Payload and metadata length are complete before pending becomes visible.
     pending_valid_ = true;
@@ -682,7 +657,7 @@ class UartDmaModel
     return true;
   }
 
-  StartPendingResult TryStartPending(bool in_isr, SubmitContext* submit)
+  StartPendingResult TryStartPending(bool in_isr)
   {
     ASSERT(pending_valid_);
     ASSERT(active_length_ == 0U);
@@ -692,16 +667,14 @@ class UartDmaModel
     }
 
     WriteInfoBlock info{};
-    if (port_.QueueInfo()->Peek(info) != ErrorCode::OK)
-    {
-      ASSERT(false);
-      rx_config_gate_.LeaveTx();
-      return StartPendingResult::FAILED;
-    }
+    const ErrorCode peek_result = port_.QueueInfo()->Peek(info);
+    REQUIRE_FROM_CALLBACK(peek_result == ErrorCode::OK, in_isr);
 
-    const bool synchronous_submission =
-        (submit != nullptr) && submit->synchronous_completion_allowed_ &&
-        !submit->resolved_ && (port_.QueueInfo()->Size() == 1U);
+    if (!port_.TryPublishBackendCompletion())
+    {
+      rx_config_gate_.LeaveTx();
+      return StartPendingResult::BLOCKED;
+    }
 
     // Publish the complete active state before the backend can synchronously callback.
     buffers_.FlipActiveBlock();
@@ -714,14 +687,7 @@ class UartDmaModel
     {
       auto dequeue = port_.BeginDequeue(in_isr);
       const ErrorCode pop_result = dequeue.PopInfo(info);
-      ASSERT(pop_result == ErrorCode::OK);
-      if (pop_result != ErrorCode::OK)
-      {
-        ASSERT(false);
-        ClearActive();
-        rx_config_gate_.LeaveTx();
-        return StartPendingResult::FAILED;
-      }
+      REQUIRE_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
 
       if (result == UartDmaTxStartResult::FAILED)
       {
@@ -733,32 +699,17 @@ class UartDmaModel
 
     if (result == UartDmaTxStartResult::FAILED)
     {
-      CompleteRecord(in_isr, ErrorCode::FAILED, info, synchronous_submission, submit);
+      CompleteRecord(in_isr, ErrorCode::FAILED, info);
       return StartPendingResult::FAILED;
     }
 
-    CompleteRecord(in_isr, ErrorCode::OK, info, synchronous_submission, submit);
+    CompleteRecord(in_isr, ErrorCode::OK, info);
     return StartPendingResult::STARTED;
   }
 
-  void CompleteRecord(bool in_isr, ErrorCode result, WriteInfoBlock& info,
-                      bool synchronous_submission, SubmitContext* submit)
+  void CompleteRecord(bool in_isr, ErrorCode result, WriteInfoBlock& info)
   {
-    if (synchronous_submission)
-    {
-      submit->result_ = result;
-      submit->resolved_ = true;
-      return;
-    }
     port_.Finish(in_isr, result, info);
-  }
-
-  static void DisableSynchronousCompletion(SubmitContext* submit)
-  {
-    if (submit != nullptr)
-    {
-      submit->synchronous_completion_allowed_ = false;
-    }
   }
 
   bool ReleaseActive()
