@@ -77,8 +77,9 @@ class ESP32UartDma : public UART
    * @param cts_pin CTS GPIO，或 `PIN_NO_CHANGE` / CTS GPIO or `PIN_NO_CHANGE`
    * @param rx_buffer_size RX descriptor ring 的 payload 容量 / RX descriptor-ring
    * payload capacity
-   * @param tx_buffer_size 每个 TX 双缓冲 block 的容量 / Capacity of each TX
-   * double-buffer block
+   * @param tx_buffer_size 每个 TX 双缓冲 block 的容量，最大为单个 GDMA link item 可描述的
+   * 4095 字节 / Capacity of each TX double-buffer block, at most the 4095 bytes
+   * representable by one GDMA link item
    * @param tx_queue_size 待发送记录队列深度 / Pending TX record queue depth
    * @param config 初始 UART 帧格式和波特率 / Initial UART framing and baud rate
    */
@@ -117,11 +118,12 @@ class ESP32UartDma : public UART
    * @brief WritePort 提交入口 / WritePort submission entry
    * @param port 发起提交的写端口 / Write port issuing the submission
    * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 提交结果 / Submission result
    */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  static void WriteFun(WritePort& port, bool in_isr);
 
  private:
+  static constexpr size_t DMA_LINK_ITEM_MAX_SIZE = DMA_DESCRIPTOR_BUFFER_MAX_SIZE;
+
   struct TxStorage
   {
     uint8_t* data_ = nullptr;
@@ -160,12 +162,12 @@ class ESP32UartDma : public UART
       UART_INTR_PARITY_ERR | UART_INTR_FRAM_ERR | UART_INTR_RXFIFO_OVF;
 
   uint32_t ServiceDmaTxStatus(bool in_isr);
-  uint32_t ServiceDmaRxStatus(bool& pushed_any);
+  uint32_t ServiceDmaRxStatus(ReadPort::ReadQueue& queue);
   uint32_t ServiceDmaUartStatus(bool in_isr);
   UartOldTxTerminal StopAndResetDma(bool active_tx, bool in_isr);
-  bool DrainCompletedDmaRxDescriptors(bool& pushed_any);
+  bool DrainCompletedDmaRxDescriptors(ReadPort::ReadQueue& queue);
   bool ResetAndRestartRxDma();
-  bool PushRxBytes(const uint8_t* data, size_t size);
+  void PushRxBytes(ReadPort::ReadQueue& queue, const uint8_t* data, size_t size);
 
   uart_port_t uart_num_;
   int tx_pin_;

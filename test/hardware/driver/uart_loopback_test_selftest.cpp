@@ -4,11 +4,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <thread>
 
 #include "driver/uart_concurrency_stress_test.hpp"
 #include "driver/uart_loopback_test.hpp"
 #include "libxr.hpp"
+#include "serialized_service.hpp"
 
 namespace
 {
@@ -55,74 +57,104 @@ class MemoryLoopbackUart : public LibXR::UART
 
   LibXR::ErrorCode InjectRxByte(uint8_t byte)
   {
-    return read_port_.queue_data_->Push(byte);
+    auto queue = read_port_.GetReadQueue();
+    const LibXR::ErrorCode result = queue.Push(byte);
+    if (result == LibXR::ErrorCode::OK)
+    {
+      queue.Publish();
+    }
+    return result;
   }
 
-  static LibXR::ErrorCode WriteFun(LibXR::WritePort& port, bool in_isr)
+  static void WriteFun(LibXR::WritePort& port, bool in_isr)
   {
     auto& memory_port = static_cast<MemoryWritePort&>(port);
     auto& owner = memory_port.owner_;
-    LibXR::WriteInfoBlock info{};
-    if (port.QueueInfo()->Peek(info) != LibXR::ErrorCode::OK)
-    {
-      return LibXR::ErrorCode::PENDING;
-    }
+    (void)owner.tx_service_.Invoke(
+        1U, [&owner, in_isr](uint32_t) noexcept { owner.ProgressTx(in_isr); });
+  }
 
+  void ProgressTx(bool in_isr)
+  {
+    while (true)
     {
-      auto dequeue = port.BeginDequeue(in_isr);
-      auto ans = dequeue.PopInfo(info);
-      if (ans != LibXR::ErrorCode::OK)
+      size_t accepted = 0U;
+      size_t expected = 0U;
+      size_t completed = 0U;
+      bool append_extra = false;
       {
-        return LibXR::ErrorCode::PENDING;
+        auto queue = write_port_.GetWriteQueue(in_isr);
+        if (queue.front_size == 0U)
+        {
+          return;
+        }
+
+        if (queue.front_size > transfer_.size())
+        {
+          REQUIRE(queue.FailFront(LibXR::ErrorCode::SIZE_ERR));
+          continue;
+        }
+
+        if (fail_next_write_)
+        {
+          fail_next_write_ = false;
+          REQUIRE(queue.FailFront(LibXR::ErrorCode::FAILED));
+          continue;
+        }
+
+        append_extra = append_extra_next_write_;
+        expected = queue.front_size;
+        const size_t offered = queue.front_size + queue.next_size;
+        if (!corrupt_next_write_ && !append_extra && queue.next_size != 0U &&
+            offered <= transfer_.size() && read_port_.EmptySize() >= offered)
+        {
+          expected = offered;
+        }
+
+        const size_t rx_size = expected + (append_extra ? 1U : 0U);
+        if (read_port_.EmptySize() < rx_size)
+        {
+          REQUIRE(queue.FailFront(LibXR::ErrorCode::FULL));
+          continue;
+        }
+
+        accepted = queue.PopWithWriter(
+            expected,
+            [this, expected](const uint8_t* first, size_t first_size,
+                             const uint8_t* second, size_t second_size)
+            {
+              std::memcpy(transfer_.data(), first, first_size);
+              if (second_size != 0U)
+              {
+                std::memcpy(transfer_.data() + first_size, second, second_size);
+              }
+              REQUIRE(first_size + second_size == expected);
+              return expected;
+            });
+        REQUIRE(accepted == expected);
+        completed = expected == offered && queue.next_size != 0U ? 2U : 1U;
       }
 
-      if (info.data.size_ > owner.transfer_.size())
+      if (corrupt_next_write_ && expected != 0U)
       {
-        ans = dequeue.DiscardData(info.data.size_);
+        corrupt_next_write_ = false;
+        transfer_[0] ^= 0x80U;
       }
-      else
+
       {
-        ans = dequeue.PopData(owner.transfer_.data(), info.data.size_);
+        auto queue = read_port_.GetReadQueue(in_isr);
+        REQUIRE(queue.PushBatch(transfer_.data(), accepted) == LibXR::ErrorCode::OK);
+        if (append_extra)
+        {
+          append_extra_next_write_ = false;
+          constexpr uint8_t kUnexpectedByte = 0xA5U;
+          REQUIRE(queue.Push(kUnexpectedByte) == LibXR::ErrorCode::OK);
+        }
+        queue.Publish();
       }
-      if (ans != LibXR::ErrorCode::OK)
-      {
-        return ans;
-      }
+      completed_writes_.fetch_add(static_cast<uint32_t>(completed),
+                                  std::memory_order_release);
     }
-
-    if (info.data.size_ > owner.transfer_.size())
-    {
-      return LibXR::ErrorCode::SIZE_ERR;
-    }
-
-    if (owner.fail_next_write_)
-    {
-      owner.fail_next_write_ = false;
-      return LibXR::ErrorCode::FAILED;
-    }
-    if (owner.corrupt_next_write_ && info.data.size_ > 0U)
-    {
-      owner.corrupt_next_write_ = false;
-      owner.transfer_[0] ^= 0x80U;
-    }
-
-    auto ans =
-        owner.read_port_.queue_data_->PushBatch(owner.transfer_.data(), info.data.size_);
-    if (ans == LibXR::ErrorCode::OK && owner.append_extra_next_write_)
-    {
-      owner.append_extra_next_write_ = false;
-      constexpr uint8_t kUnexpectedByte = 0xA5U;
-      ans = owner.read_port_.queue_data_->Push(kUnexpectedByte);
-    }
-    if (ans == LibXR::ErrorCode::OK)
-    {
-      owner.read_port_.ProcessPendingReads(in_isr);
-    }
-    if (ans == LibXR::ErrorCode::OK)
-    {
-      owner.completed_writes_.fetch_add(1U, std::memory_order_release);
-    }
-    return ans;
   }
 
   LibXR::ReadPort read_port_;
@@ -134,6 +166,7 @@ class MemoryLoopbackUart : public LibXR::UART
   bool corrupt_next_write_ = false;
   bool append_extra_next_write_ = false;
   std::atomic<uint32_t> completed_writes_{0U};
+  LibXR::SerializedService tx_service_;
 };
 
 bool Check(bool condition, const char* expression, int line)

@@ -86,9 +86,8 @@ class CH32UART : public UART
    * @brief WritePort 提交入口 / WritePort submission entry
    * @param port 发起提交的写端口 / Write port issuing the submission
    * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 提交结果 / Submission result
    */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  static void WriteFun(WritePort& port, bool in_isr);
 
   /** @brief 处理本实例的 TX DMA IRQ / Handle this instance's TX DMA IRQ. */
   void TxDmaIRQHandler();
@@ -125,7 +124,7 @@ class CH32UART : public UART
 
   void HandleNormalIrq();
 
-  uint32_t ScanNormalIrqStatus(bool in_isr, bool& pushed_any);
+  uint32_t ScanNormalIrqStatus(bool in_isr, ReadPort::ReadQueue& queue);
 
   UartDmaControlResult AdvanceRecovery(bool active_tx, bool in_isr);
   UartDmaControlProgress CompleteRecovery(bool in_isr);

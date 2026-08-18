@@ -119,16 +119,17 @@ struct TerminalFixture
    */
   std::string DrainOutput()
   {
-    const size_t output_size = output.GetReadPort().Size();
-    if (output_size == 0)
+    std::string text;
+    while (output.GetReadPort().Size() != 0U)
     {
-      return {};
+      const size_t chunk_size = output.GetReadPort().Size();
+      const size_t offset = text.size();
+      text.resize(offset + chunk_size);
+      LibXR::ReadOperation read_op;
+      ASSERT(output.GetReadPort()(LibXR::RawData{text.data() + offset, chunk_size},
+                                  read_op) == LibXR::ErrorCode::OK);
     }
-
-    std::string text(output_size, '\0');
-    LibXR::ReadOperation read_op;
-    ASSERT(output.GetReadPort()(LibXR::RawData{text.data(), output_size}, read_op) ==
-           LibXR::ErrorCode::OK);
+    ASSERT(output.GetWritePort().Size() == 0U);
     return text;
   }
 

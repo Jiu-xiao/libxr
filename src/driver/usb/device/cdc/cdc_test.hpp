@@ -31,12 +31,6 @@ class CDCWriteTest : public CDCBase
   {
   }
 
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
-                     bool in_isr) override
-  {
-    CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
-  }
-
   /**
    * @brief OUT 端点完成回调（写测试无实际消费）
    *        Data OUT complete callback (no-op for write test)
@@ -81,11 +75,11 @@ class CDCWriteTest : public CDCBase
  *        USB CDC ACM read test class
  *
  * 用于测试主机向设备的数据接收通道。
- * - 初始化时即预装 OUT 端点接收；
+ * - 绑定后由 device owner 预装 OUT 端点接收；
  * - 每次接收完成后立即重新启动，以实现持续读入。
  *
  * Used for testing the host-to-device (RX) path.
- * - Arms OUT endpoint at initialization.
+ * - Arms the OUT endpoint from the device owner after binding.
  * - On each OUT completion, re-arms immediately for continuous receiving.
  */
 class CDCReadTest : public CDCBase
@@ -99,21 +93,6 @@ class CDCReadTest : public CDCBase
       : CDCBase(data_in_ep_num, data_out_ep_num, comm_ep_num, control_interface_string,
                 data_interface_string)
   {
-  }
-
-  /**
-   * @brief 初始化 CDC 读测试类：预装 OUT 端点接收
-   *        Initialize CDC read test: pre-arm OUT endpoint
-   *
-   * 在初始化时即调用一次 Transfer()，保证主机数据可以立刻被接收。
-   * Arms the OUT endpoint immediately so host data can be received right away.
-   */
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
-                     bool in_isr) override
-  {
-    CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
-    auto ep_data_out = GetDataOutEndpoint();
-    ep_data_out->Transfer(ep_data_out->MaxTransferSize());
   }
 
   /**

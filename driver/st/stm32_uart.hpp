@@ -259,9 +259,8 @@ class STM32UART : public UART
    * @brief WritePort 提交入口 / WritePort submission entry
    * @param port 发起提交的写端口 / Write port issuing the submission
    * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 提交结果 / Submission result
    */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  static void WriteFun(WritePort& port, bool in_isr);
 
   /**
    * @brief 构造并接管 STM32 UART/DMA data path / Construct and take ownership of an
@@ -408,7 +407,6 @@ class STM32UART : public UART
   bool tx_payload_complete_ = false;
   bool tx_dma_error_ = false;
   bool waiting_for_uart_tc_ = false;
-  bool tx_replay_required_ = false;
   RxArmResult rx_arm_result_ = RxArmResult::STARTED;
 };
 

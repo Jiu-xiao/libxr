@@ -9,6 +9,7 @@
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
+#include <sys/uio.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -73,8 +74,7 @@ class LinuxUART : public UART
   enum class TxState : uint8_t
   {
     IDLE,
-    ACTIVE,
-    FAILURE_PENDING,
+    PARTIAL,
   };
 
  public:
@@ -87,7 +87,6 @@ class LinuxUART : public UART
             size_t thread_stack_size = 65536)
       : UART(&_read_port, &_write_port),
         rx_buff_(new uint8_t[buffer_size]),
-        tx_buff_(new uint8_t[buffer_size]),
         buff_size_(buffer_size),
         initial_config_{baudrate, parity, data_bits, stop_bits},
         _read_port(buffer_size, *this),
@@ -154,7 +153,6 @@ class LinuxUART : public UART
             size_t buffer_size = 512, size_t thread_stack_size = 65536)
       : UART(&_read_port, &_write_port),
         rx_buff_(new uint8_t[buffer_size]),
-        tx_buff_(new uint8_t[buffer_size]),
         buff_size_(buffer_size),
         initial_config_{baudrate, parity, data_bits, stop_bits},
         _read_port(buffer_size, *this),
@@ -549,11 +547,10 @@ class LinuxUART : public UART
     return ErrorCode::OK;
   }
 
-  static ErrorCode WriteFun(WritePort& port, bool)
+  static void WriteFun(WritePort& port, bool)
   {
     auto* uart = LibXR::ContainerOf(&port, &LinuxUART::_write_port);
     uart->NotifyIoOwner();
-    return ErrorCode::PENDING;
   }
 
   int OpenDevice(const UART::Configuration& config, bool reconnect, ErrorCode& result)
@@ -579,124 +576,121 @@ class LinuxUART : public UART
     return fd;
   }
 
-  void CompleteActiveTx()
-  {
-    REQUIRE(tx_state_ == TxState::ACTIVE);
-    REQUIRE(tx_active_offset_ == tx_active_size_);
-    if (!write_port_->TryPublishBackendCompletion())
-    {
-      return;
-    }
-
-    WriteInfoBlock info = tx_active_info_;
-    tx_state_ = TxState::IDLE;
-    tx_active_size_ = 0U;
-    tx_active_offset_ = 0U;
-    write_port_->Finish(false, ErrorCode::OK, info);
-  }
-
-  void CompleteFailedTxAfterRecovery()
-  {
-    REQUIRE(tx_state_ == TxState::FAILURE_PENDING);
-    if (!write_port_->TryPublishBackendCompletion())
-    {
-      return;
-    }
-
-    WriteInfoBlock info = tx_active_info_;
-    tx_state_ = TxState::IDLE;
-    tx_active_size_ = 0U;
-    tx_active_offset_ = 0U;
-    write_port_->Finish(false, ErrorCode::FAILED, info);
-  }
-
-  void Disconnect(int& fd, bool discard_active)
+  void Disconnect(int& fd)
   {
     if (fd >= 0)
     {
       (void)close(fd);
       fd = -1;
     }
-    if (!discard_active || tx_state_ != TxState::ACTIVE)
+    if (tx_state_ == TxState::PARTIAL)
     {
-      return;
+      // The old tty owns an unknown prefix. Fail its unaccepted suffix now so no byte
+      // from this request is replayed on a later fd generation.
+      tx_state_ = TxState::IDLE;
+      auto queue = _write_port.GetWriteQueue();
+      REQUIRE(queue.FailFront(ErrorCode::FAILED));
     }
-    if (tx_active_offset_ == tx_active_size_)
-    {
-      // The kernel accepted the complete record. Retain its successful terminal until a
-      // normal backend state can publish it; a later disconnect must not rewrite it.
-      return;
-    }
-
-    // The tty may already have accepted a prefix. Never replay the unknown suffix on a
-    // replacement device, and defer the terminal callback until reconnect restores a
-    // normal backend state.
-    tx_active_size_ = 0U;
-    tx_active_offset_ = 0U;
-    tx_state_ = TxState::FAILURE_PENDING;
   }
 
-  bool LoadActiveTx()
+  bool PumpTx(int& fd)
   {
-    if (tx_state_ != TxState::IDLE)
+    const bool starting_front = tx_state_ == TxState::IDLE;
+    if (starting_front && !config_gate_.TryEnterTx())
     {
       return false;
     }
 
-    WriteInfoBlock info{};
-    if (write_port_->QueueInfo()->Peek(info) != ErrorCode::OK)
+    bool fatal_error = false;
+    bool queue_empty = false;
+    size_t offered = 0U;
+    size_t accepted = 0U;
+    {
+      auto queue = _write_port.GetWriteQueue();
+      queue_empty = queue.front_size == 0U;
+      REQUIRE(!queue_empty || tx_state_ == TxState::IDLE);
+      if (!queue_empty)
+      {
+        offered = queue.front_size;
+        accepted = queue.PopWithWriter(
+            offered,
+            [&fd, &fatal_error](const uint8_t* first, size_t first_size,
+                                const uint8_t* second, size_t second_size) -> size_t
+            {
+              std::array<iovec, 2> spans{};
+              spans[0] = iovec{const_cast<uint8_t*>(first), first_size};
+              spans[1] = iovec{const_cast<uint8_t*>(second), second_size};
+              const int span_count = second_size == 0U ? 1 : 2;
+
+              while (true)
+              {
+                const ssize_t written = writev(fd, spans.data(), span_count);
+                if (written > 0)
+                {
+                  const size_t accepted_bytes = static_cast<size_t>(written);
+                  REQUIRE(accepted_bytes <= first_size + second_size);
+                  return accepted_bytes;
+                }
+                if (written == 0)
+                {
+                  fatal_error = true;
+                  return 0U;
+                }
+                if (errno == EINTR)
+                {
+                  continue;
+                }
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                {
+                  return 0U;
+                }
+                fatal_error = true;
+                return 0U;
+              }
+            });
+
+        if (accepted != 0U)
+        {
+          tx_state_ = accepted < offered ? TxState::PARTIAL : TxState::IDLE;
+        }
+      }
+    }
+
+    if (starting_front)
+    {
+      config_gate_.LeaveTx();
+    }
+
+    if (queue_empty)
     {
       return false;
     }
-    if (!config_gate_.TryEnterTx())
+
+    if (fatal_error)
     {
-      return false;
-    }
-
-    REQUIRE(info.data.size_ <= buff_size_);
-    auto dequeue = write_port_->BeginDequeue(false);
-    const ErrorCode data_result = dequeue.PopData(tx_buff_, info.data.size_);
-    REQUIRE(data_result == ErrorCode::OK);
-    const ErrorCode info_result = dequeue.PopInfo(tx_active_info_);
-    REQUIRE(info_result == ErrorCode::OK);
-
-    tx_active_size_ = info.data.size_;
-    tx_active_offset_ = 0U;
-    tx_state_ = TxState::ACTIVE;
-    config_gate_.LeaveTx();
-    return true;
-  }
-
-  void PumpTx(int& fd)
-  {
-    while (tx_state_ == TxState::ACTIVE)
-    {
-      if (tx_active_offset_ == tx_active_size_)
-      {
-        CompleteActiveTx();
-        return;
-      }
-
-      const size_t remaining = tx_active_size_ - tx_active_offset_;
-      const ssize_t written = write(fd, tx_buff_ + tx_active_offset_, remaining);
-      if (written > 0)
-      {
-        tx_active_offset_ += static_cast<size_t>(written);
-        continue;
-      }
-      if (written < 0 && errno == EINTR)
-      {
-        continue;
-      }
-      if (written == 0 || (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)))
-      {
-        return;
-      }
-
       XR_LOG_WARN("Cannot write UART device: %s", device_path_.c_str());
-      Disconnect(fd, true);
-      return;
+      Disconnect(fd);
+      return false;
     }
+
+    if (accepted == 0U)
+    {
+      return tx_state_ == TxState::PARTIAL || !config_gate_.ConfigRequested();
+    }
+
+    if (accepted < offered)
+    {
+      return true;
+    }
+
+    if (config_gate_.ConfigRequested())
+    {
+      return false;
+    }
+
+    // Preserve one-Operation-per-turn fairness so CONFIG can claim the next boundary.
+    auto queue = _write_port.GetWriteQueue();
+    return queue.front_size != 0U;
   }
 
   bool DrainRx(int& fd, bool terminal = false)
@@ -704,7 +698,8 @@ class LinuxUART : public UART
     size_t budget = terminal ? static_cast<size_t>(-1) : buff_size_;
     while (budget > 0U)
     {
-      const size_t read_size = std::min(budget, read_port_->EmptySize());
+      auto queue = read_port_->GetReadQueue();
+      const size_t read_size = std::min(budget, queue.EmptySize());
       if (read_size == 0U)
       {
         return true;
@@ -715,9 +710,9 @@ class LinuxUART : public UART
       {
         budget -= static_cast<size_t>(bytes);
         const ErrorCode push_result =
-            read_port_->queue_data_->PushBatch(rx_buff_, static_cast<size_t>(bytes));
+            queue.PushBatch(rx_buff_, static_cast<size_t>(bytes));
         REQUIRE(push_result == ErrorCode::OK);
-        read_port_->ProcessPendingReads(false);
+        queue.Publish();
         if (!terminal && config_gate_.ConfigRequested())
         {
           return true;
@@ -734,29 +729,29 @@ class LinuxUART : public UART
       }
 
       XR_LOG_WARN("Cannot read UART device: %s", device_path_.c_str());
-      Disconnect(fd, true);
+      Disconnect(fd);
       return false;
     }
     return true;
   }
 
-  bool ServiceConfig(int& fd, UART::Configuration& current_config)
+  void ServiceConfig(int& fd, UART::Configuration& current_config)
   {
-    if (tx_state_ == TxState::ACTIVE || !config_gate_.TryEnterConfig())
+    if (tx_state_ == TxState::PARTIAL || !config_gate_.TryEnterConfig())
     {
-      return false;
+      return;
     }
 
     int queued_bytes = 0;
     if (ioctl(fd, TIOCOUTQ, &queued_bytes) != 0)
     {
       XR_LOG_WARN("Cannot inspect UART output queue: %s", device_path_.c_str());
-      Disconnect(fd, false);
-      return true;
+      Disconnect(fd);
+      return;
     }
     if (queued_bytes > 0)
     {
-      return true;
+      return;
     }
 
     const UART::Configuration requested = requested_config_;
@@ -764,13 +759,12 @@ class LinuxUART : public UART
     if (result != ErrorCode::OK)
     {
       XR_LOG_WARN("Cannot apply UART configuration: %s", device_path_.c_str());
-      Disconnect(fd, false);
-      return true;
+      Disconnect(fd);
+      return;
     }
 
     current_config = requested;
     config_gate_.LeaveConfig();
-    return true;
   }
 
   void WaitForReconnectWake()
@@ -841,22 +835,28 @@ class LinuxUART : public UART
         continue;
       }
 
-      const bool config_progress = ServiceConfig(fd, current_config);
+      bool tx_space_waiting = false;
+      if (tx_state_ == TxState::PARTIAL)
+      {
+        tx_space_waiting = PumpTx(fd);
+        if (fd < 0)
+        {
+          continue;
+        }
+      }
+
+      ServiceConfig(fd, current_config);
       if (fd < 0)
       {
         continue;
       }
-      if (tx_state_ == TxState::ACTIVE && tx_active_offset_ == tx_active_size_)
+      if (!config_gate_.ConfigRequested() && !tx_space_waiting)
       {
-        CompleteActiveTx();
-      }
-      if (tx_state_ == TxState::FAILURE_PENDING && !config_gate_.ConfigRequested())
-      {
-        CompleteFailedTxAfterRecovery();
-      }
-      if (!config_gate_.ConfigRequested() && tx_state_ == TxState::IDLE)
-      {
-        (void)LoadActiveTx();
+        tx_space_waiting = PumpTx(fd);
+        if (fd < 0)
+        {
+          continue;
+        }
       }
 
       std::array<pollfd, 2> poll_fds{};
@@ -880,15 +880,14 @@ class LinuxUART : public UART
       {
         poll_fds[0].events |= POLLIN;
       }
-      if (tx_state_ == TxState::ACTIVE && tx_active_offset_ < tx_active_size_)
+      if (tx_space_waiting)
       {
         poll_fds[0].events |= POLLOUT;
       }
       poll_fds[1].fd = wake_fd_;
       poll_fds[1].events = POLLIN;
 
-      const int timeout = config_progress && config_gate_.ConfigRequested() &&
-                                  tx_state_ != TxState::ACTIVE
+      const int timeout = config_gate_.ConfigRequested() && tx_state_ != TxState::PARTIAL
                               ? CONFIG_DRAIN_POLL_MS
                               : -1;
       int poll_result = 0;
@@ -904,7 +903,7 @@ class LinuxUART : public UART
       if (poll_result < 0)
       {
         XR_LOG_WARN("Cannot poll UART device: %s", device_path_.c_str());
-        Disconnect(fd, true);
+        Disconnect(fd);
         continue;
       }
       if (poll_result == 0)
@@ -930,12 +929,12 @@ class LinuxUART : public UART
       if ((poll_fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
       {
         XR_LOG_WARN("UART device disconnected: %s", device_path_.c_str());
-        Disconnect(fd, true);
+        Disconnect(fd);
         continue;
       }
-      if (fd >= 0 && (poll_fds[0].revents & POLLOUT) != 0 && tx_state_ == TxState::ACTIVE)
+      if (fd >= 0 && (poll_fds[0].revents & POLLOUT) != 0)
       {
-        PumpTx(fd);
+        (void)PumpTx(fd);
       }
     }
   }
@@ -943,7 +942,6 @@ class LinuxUART : public UART
   std::string device_path_;
   Thread io_thread_;
   uint8_t* rx_buff_ = nullptr;
-  uint8_t* tx_buff_ = nullptr;
   size_t buff_size_ = 0;
   Configuration initial_config_{};
   Configuration requested_config_{};
@@ -951,9 +949,6 @@ class LinuxUART : public UART
   int wake_fd_ = -1;
   Semaphore startup_sem_;
   ErrorCode startup_result_ = ErrorCode::INIT_ERR;
-  WriteInfoBlock tx_active_info_{};
-  size_t tx_active_size_ = 0U;
-  size_t tx_active_offset_ = 0U;
   TxState tx_state_ = TxState::IDLE;
   std::atomic<bool> rx_space_waiting_{false};
 

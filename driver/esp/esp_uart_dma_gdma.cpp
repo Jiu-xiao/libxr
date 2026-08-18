@@ -35,10 +35,6 @@ namespace
 // 软件侧维护消费索引。
 constexpr uint32_t RX_DMA_DESCRIPTOR_COUNT = 4U;
 
-// Current ESP GDMA link items cannot describe more than 4095 bytes in one node.
-// 当前 ESP GDMA link item 单节点最多只能描述 4095 字节。
-constexpr size_t DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM = DMA_DESCRIPTOR_BUFFER_MAX_SIZE;
-
 // UHCI0 is chip-wide and retained for the process lifetime. A later DMA-UART
 // instance must fail before accessing any UHCI register.
 std::atomic<uint32_t> uhci0_lifetime_claimed{0U};
@@ -132,15 +128,11 @@ void IRAM_ATTR ESP32UartDma::DmaTxIsrEntry(void* arg)
     return;
   }
 #if defined(GDMA_LL_AHB_TX_RX_SHARE_INTERRUPT) && GDMA_LL_AHB_TX_RX_SHARE_INTERRUPT
-  bool pushed_any = false;
+  auto queue = uart->read_port_->GetReadQueue(true);
   (void)uart->dma_model_.InvokeIrq(
-      [uart, &pushed_any]() noexcept
-      { return uart->ServiceDmaTxStatus(true) | uart->ServiceDmaRxStatus(pushed_any); },
-      true);
-  if (pushed_any)
-  {
-    uart->read_port_->ProcessPendingReads(true);
-  }
+      [uart, &queue]() noexcept
+      { return uart->ServiceDmaTxStatus(true) | uart->ServiceDmaRxStatus(queue); }, true);
+  queue.Publish();
 #else
   (void)uart->dma_model_.InvokeIrq(
       [uart]() noexcept { return uart->ServiceDmaTxStatus(true); }, true);
@@ -154,14 +146,10 @@ void IRAM_ATTR ESP32UartDma::DmaRxIsrEntry(void* arg)
   {
     return;
   }
-  bool pushed_any = false;
-  (void)uart->dma_model_.InvokeIrq([uart, &pushed_any]() noexcept
-                                   { return uart->ServiceDmaRxStatus(pushed_any); },
-                                   true);
-  if (pushed_any)
-  {
-    uart->read_port_->ProcessPendingReads(true);
-  }
+  auto queue = uart->read_port_->GetReadQueue(true);
+  (void)uart->dma_model_.InvokeIrq(
+      [uart, &queue]() noexcept { return uart->ServiceDmaRxStatus(queue); }, true);
+  queue.Publish();
 }
 
 uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaTxStatus(bool in_isr)
@@ -185,7 +173,7 @@ uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaTxStatus(bool in_isr)
   return events;
 }
 
-uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaRxStatus(bool& pushed_any)
+uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaRxStatus(ReadPort::ReadQueue& queue)
 {
   const uint32_t status = gdma_hal_read_intr_status(&rx_gdma_hal_, rx_gdma_channel_id_,
                                                     GDMA_CHANNEL_DIRECTION_RX, true);
@@ -198,8 +186,8 @@ uint32_t IRAM_ATTR ESP32UartDma::ServiceDmaRxStatus(bool& pushed_any)
   if (!error && ((status & GDMA_LL_EVENT_RX_DONE) != 0U))
   {
     (void)dma_model_.ProcessRxInIrqSource(
-        events, [this, &pushed_any, &error]()
-        { error = !DrainCompletedDmaRxDescriptors(pushed_any); });
+        events,
+        [this, &queue, &error]() { error = !DrainCompletedDmaRxDescriptors(queue); });
   }
   if (error)
   {
@@ -437,8 +425,7 @@ ErrorCode ESP32UartDma::InitDmaBackend()
   // Keep one ring window reasonably large to lower ISR pressure at high baud.
   // 保持单个环窗口适度偏大，以降低高波特率下的 ISR 压力。
   const size_t rx_chunk_target = std::min<size_t>(
-      std::max<size_t>(32, read_port_->queue_data_->MaxSize() / RX_DMA_DESCRIPTOR_COUNT),
-      512);
+      std::max<size_t>(32, read_port_->Capacity() / RX_DMA_DESCRIPTOR_COUNT), 512);
   const size_t rx_storage_alignment =
       std::max<size_t>(4, std::max(rx_dma_buffer_alignment_, rx_cache_line_size_));
   rx_dma_chunk_size_ =
@@ -530,8 +517,7 @@ bool IRAM_ATTR ESP32UartDma::ResetAndRestartRxDma()
 {
   if ((rx_dma_channel_ == nullptr) || (rx_dma_descriptors_ == nullptr) ||
       (rx_dma_head_addr_ == 0U) || (rx_dma_storage_ == nullptr) ||
-      (rx_dma_chunk_size_ == 0U) ||
-      (rx_dma_chunk_size_ > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM))
+      (rx_dma_chunk_size_ == 0U) || (rx_dma_chunk_size_ > DMA_LINK_ITEM_MAX_SIZE))
   {
     return false;
   }
@@ -567,7 +553,7 @@ UartDmaTxStartResult IRAM_ATTR ESP32UartDma::StartDmaTx(uint8_t* data, size_t si
                                                         int block, bool)
 {
   if ((tx_dma_channel_ == nullptr) || (data == nullptr) || (size == 0U) ||
-      (size > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM) || ((block != 0) && (block != 1)) ||
+      (size > DMA_LINK_ITEM_MAX_SIZE) || ((block != 0) && (block != 1)) ||
       (tx_dma_head_addr_[block] == 0U))
   {
     return UartDmaTxStartResult::FAILED;
@@ -610,7 +596,7 @@ UartDmaTxStartResult IRAM_ATTR ESP32UartDma::StartDmaTx(uint8_t* data, size_t si
 // coalesce into one status bit while the IRQ is masked, so drain consecutive CPU-owned
 // descriptors and return each one to DMA after copying its payload. One pass is bounded
 // to a full ring; a descriptor completed again during this pass raises another IRQ.
-bool IRAM_ATTR ESP32UartDma::DrainCompletedDmaRxDescriptors(bool& pushed_any)
+bool IRAM_ATTR ESP32UartDma::DrainCompletedDmaRxDescriptors(ReadPort::ReadQueue& queue)
 {
   if ((rx_dma_descriptors_ == nullptr) || (rx_dma_chunk_size_ == 0U))
   {
@@ -645,7 +631,7 @@ bool IRAM_ATTR ESP32UartDma::DrainCompletedDmaRxDescriptors(bool& pushed_any)
 
     if (length > 0U)
     {
-      pushed_any = PushRxBytes(buffer, length) || pushed_any;
+      PushRxBytes(queue, buffer, length);
     }
 
     descriptor.dw0.length = static_cast<uint32_t>(rx_dma_chunk_size_);
@@ -710,7 +696,8 @@ UartOldTxTerminal IRAM_ATTR ESP32UartDma::StopAndResetDma(bool active_tx, bool i
 
   // gdma_stop() issues the stop command but does not prove that the descriptor FSM has
   // parked before the final status sample. NONE therefore means completion was not
-  // proven. The common model retains active and may replay it from byte zero.
+  // proven. The common model discards that active payload instead of replaying an
+  // unknown prefix from byte zero; an unstarted READY payload remains retained.
   gdma_hal_clear_intr(&tx_gdma_hal_, tx_gdma_channel_id_, GDMA_CHANNEL_DIRECTION_TX,
                       UINT32_MAX);
   (void)gdma_hal_read_intr_status(&tx_gdma_hal_, tx_gdma_channel_id_,

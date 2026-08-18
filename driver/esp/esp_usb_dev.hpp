@@ -41,8 +41,10 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
       InOnly = 1,   ///< 仅生成 IN endpoint / Create only the IN endpoint
     };
 
-    RawData buffer;  ///< 该 endpoint 共享的 payload buffer / Shared payload buffer for
-                     ///< this endpoint entry
+    RawData in_buffer;   ///< IN endpoint 的长生命期 payload storage / Persistent
+                         ///< payload storage for the IN endpoint
+    RawData out_buffer;  ///< OUT endpoint 的长生命期 payload storage / Persistent
+                         ///< payload storage for the OUT endpoint
     DirectionHint direction_hint =
         DirectionHint::BothDirections;  ///< 该配置项的方向生成提示 / Direction-population
                                         ///< hint for this entry
@@ -50,17 +52,24 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
     EPConfig() = delete;
 
     /**
-     * @brief 使用同一块 buffer 同时生成 IN/OUT endpoint / Create both IN and OUT
-     * endpoints from one shared buffer
+     * @brief 使用独立 storage 生成 IN/OUT endpoint / Create IN and OUT endpoints
+     * from independent storage
+     *
+     * 两个 storage 都必须在 device 整个生命期内保持有效且不得重叠。 / Both
+     * storage regions must remain valid for the device lifetime and must not overlap.
      */
-    explicit EPConfig(RawData buffer) : buffer(buffer) {}
+    EPConfig(RawData in_buffer, RawData out_buffer)
+        : in_buffer(in_buffer), out_buffer(out_buffer)
+    {
+    }
 
     /**
-     * @brief 使用同一块 buffer 生成单方向 endpoint / Create a single-direction endpoint
-     * from one shared buffer
+     * @brief 使用一块 storage 生成单方向 endpoint / Create a single-direction
+     * endpoint from one storage region
      */
     EPConfig(RawData buffer, bool is_in)
-        : buffer(buffer),
+        : in_buffer(is_in ? buffer : RawData{}),
+          out_buffer(is_in ? RawData{} : buffer),
           direction_hint(is_in ? DirectionHint::InOnly : DirectionHint::OutOnly)
     {
     }
@@ -176,6 +185,10 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
     bool phy_ready = false;  ///< PHY 是否已准备完成 / Whether the PHY has been prepared
     bool irq_ready =
         false;  ///< 中断是否已准备完成 / Whether the interrupt has been prepared
+    bool irq_desired_enabled =
+        false;  ///< 当前生命周期是否要求 IRQ 启用 / Current lifecycle IRQ intent
+    bool irq_admission_masked =
+        false;  ///< device owner 是否暂时屏蔽 IRQ / Whether owner admission masks IRQ
     bool started = false;  ///< 控制器是否处于启动态 / Whether the controller is started
     bool rom_usb_cleaned = false;  ///< ROM USB 默认状态是否已清理 / Whether the ROM USB
                                    ///< default state has been cleaned
@@ -184,7 +197,25 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   /**
    * @brief USB 中断跳板函数 / USB interrupt trampoline
    */
-  static void IRAM_ATTR IsrEntry(void* arg);
+  static void IsrEntry(void* arg);
+
+  /** @brief 取得 device IRQ admission 锁 / Acquire the device IRQ admission lock. */
+  static void LockInterruptDomain(void* context) noexcept;
+
+  /** @brief 释放 device IRQ admission 锁 / Release the device IRQ admission lock. */
+  static void UnlockInterruptDomain(void* context) noexcept;
+
+  /** @brief 暂时屏蔽完整 device IRQ 域 / Temporarily mask the full device IRQ domain. */
+  static uintptr_t MaskInterruptDomain(void* context) noexcept;
+
+  /** @brief 按当前 lifecycle intent 恢复 IRQ 域 / Restore IRQs using current intent. */
+  static void RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept;
+
+  /** @brief 更新当前 lifecycle 的 IRQ intent / Update the lifecycle IRQ intent. */
+  void SetIrqDesiredEnabled(bool enabled) noexcept;
+
+  /** @brief 在 admission 锁内应用 IRQ 状态 / Apply IRQ state under admission lock. */
+  void ApplyIrqDomainStateLocked() noexcept;
 
   /**
    * @brief 确保内部 PHY 已就绪 / Ensure the internal PHY is ready
@@ -246,6 +277,24 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
    */
   void HandleBusReset(bool in_isr);
 
+  /** @brief 清除一个 endpoint 的旧完成 latch / Clear one endpoint's stale latch. */
+  void ClearEndpointInterruptLatch(uint8_t ep_num, bool in_dir) noexcept;
+
+  /** @brief 清除全部 endpoint 的旧完成 latch / Clear all stale endpoint latches. */
+  void ClearAllEndpointInterruptLatches() noexcept;
+
+  /**
+   * @brief 使 endpoint 硬件代际失效 / Invalidate the endpoint hardware generation.
+   *
+   * This epoch only orders one captured IRQ batch. It does not identify a late
+   * silicon completion that arrives in a later batch after endpoint rebind.
+   */
+  void InvalidateEndpointEpoch() noexcept { ++endpoint_epoch_; }
+
+  /** @brief 读取当前 endpoint 硬件代际 / Read the current endpoint hardware generation.
+   */
+  [[nodiscard]] uint32_t EndpointEpoch() const noexcept { return endpoint_epoch_; }
+
   /**
    * @brief 处理一批 endpoint 中断 / Handle one batch of endpoint interrupts
    */
@@ -294,6 +343,9 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
       {};  ///< FIFO 尺寸与分配账本 / FIFO sizing and allocation bookkeeping
   RuntimeState runtime_ =
       {};  ///< 运行时资源与全局状态 / Runtime resource ownership and global flags
+  uint32_t endpoint_epoch_ = 0U;  ///< endpoint 硬件代际 / Endpoint hardware generation
+  portMUX_TYPE irq_domain_lock_ =
+      portMUX_INITIALIZER_UNLOCKED;  ///< device IRQ admission 的短临界区锁 / Short lock
   alignas(SETUP_DMA_BUFFER_BYTES) uint8_t setup_packet_[SETUP_DMA_BUFFER_BYTES] =
       {};  ///< DMA 可见的共享 setup 包缓冲区 / Shared DMA-visible setup-packet buffer
   ControlState control_ = {};  ///< 需跨 status completion 保留的 EP0 setup 状态 / EP0

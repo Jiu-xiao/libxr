@@ -159,6 +159,55 @@ ReadPort::ReadPort(size_t buffer_size)
 {
 }
 
+ReadPort::ReadQueue::~ReadQueue() { ASSERT_FROM_CALLBACK(!dirty_, in_isr_); }
+
+ErrorCode ReadPort::ReadQueue::PushBatch(const uint8_t* data, size_t size)
+{
+  if (!CanPush())
+  {
+    return ErrorCode::STATE_ERR;
+  }
+
+  const ErrorCode result = port_->queue_data_->PushBatch(data, size);
+  RecordPushResult(size, result);
+  return result;
+}
+
+size_t ReadPort::ReadQueue::EmptySize() const
+{
+  DEV_ASSERT_FROM_CALLBACK(!finished_, in_isr_);
+  return finished_ ? 0U : port_->queue_data_->EmptySize();
+}
+
+size_t ReadPort::ReadQueue::Capacity() const
+{
+  DEV_ASSERT_FROM_CALLBACK(!finished_, in_isr_);
+  return finished_ ? 0U : port_->queue_data_->MaxSize();
+}
+
+void ReadPort::ReadQueue::Publish()
+{
+  DEV_ASSERT_FROM_CALLBACK(!finished_, in_isr_);
+  if (finished_)
+  {
+    return;
+  }
+
+  finished_ = true;
+  const bool publish = dirty_;
+  dirty_ = false;
+  if (publish)
+  {
+    port_->PublishProduced(in_isr_);
+  }
+}
+
+ReadPort::ReadQueue ReadPort::GetReadQueue(bool in_isr)
+{
+  ASSERT_FROM_CALLBACK(queue_data_ != nullptr, in_isr);
+  return ReadQueue(*this, in_isr);
+}
+
 size_t ReadPort::EmptySize()
 {
   ASSERT(queue_data_ != nullptr);
@@ -171,11 +220,16 @@ size_t ReadPort::Size()
   return queue_data_->Size();
 }
 
+size_t ReadPort::Capacity() const
+{
+  return queue_data_ == nullptr ? 0U : queue_data_->MaxSize();
+}
+
 bool ReadPort::Readable() { return queue_data_ != nullptr; }
 
 bool ReadPort::TryCompleteClaimedRead(bool in_isr, bool signal_block_completion)
 {
-  const ReadInfoBlock local_info = info_;
+  const Request local_info = info_;
   const size_t required_size = local_info.data.size_;
 
   while (true)
@@ -280,7 +334,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
     return ErrorCode::BUSY;
   }
 
-  info_ = ReadInfoBlock{data, op};
+  info_ = Request{data, op};
   op.MarkAsRunning();
 
   if (TryCompleteClaimedRead(in_isr, false))
@@ -364,7 +418,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   }
 }
 
-void ReadPort::ProcessPendingReads(bool in_isr)
+void ReadPort::PublishProduced(bool in_isr)
 {
   ASSERT(queue_data_ != nullptr);
 

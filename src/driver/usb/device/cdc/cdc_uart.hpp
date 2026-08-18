@@ -1,177 +1,12 @@
 #pragma once
 
+#include <algorithm>
+#include <atomic>
+
 #include "cdc_base.hpp"
 #include "ep.hpp"
-#include "flag.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
-
-namespace LibXR
-{
-/**
- * @brief WritePort（info 队列 + data 队列）的“单 op 不跨界”出队辅助器
- *        Dequeue helper for WritePort (info + data) without crossing op boundary
- */
-class CDCUartTxOpDequeueHelper final
-{
- public:
-  /**
-   * @brief 构造函数
-   *        Constructor
-   *
-   * @param port 写端口引用 / Write port reference
-   */
-  explicit CDCUartTxOpDequeueHelper(WritePort& port) : port_(port) {}
-
-  /**
-   * @brief 重置内部状态（head 缓存与偏移）
-   *        Reset internal state (cached head and offset)
-   */
-  void Reset()
-  {
-    head_valid_ = false;
-    offset_ = 0;
-  }
-
-  /**
-   * @brief 是否存在可处理的 op
-   *        Whether any op exists
-   *
-   * @return true 存在缓存 head 或 info 队列非空 / Cached head exists or info queue
-   * non-empty
-   * @return false 否则 / Otherwise
-   */
-  bool HasOp() { return head_valid_ || (port_.QueueInfo()->Size() > 0); }
-
-  /**
-   * @brief 从 data 队列搬运数据到目标 buffer，并推进 offset（不 pop info）
-   *        Dequeue bytes from data queue into destination buffer and advance offset (no
-   * info pop)
-   *
-   * @param dequeue 写端口出队事务 / Write-port dequeue transaction
-   * @param dst     目标 buffer / Destination buffer
-   * @param cap     目标 buffer 容量（字节）/ Destination capacity (bytes)
-   * @param out_len 实际搬运长度（字节）/ Bytes moved
-   * @return ErrorCode::PENDING / ErrorCode::OK / 其它错误码 / Other error codes
-   */
-  ErrorCode Take(WritePort::DequeueScope& dequeue, uint8_t* dst, std::size_t cap,
-                 std::size_t& out_len)
-  {
-    auto ec = EnsureHead();
-    if (ec != ErrorCode::OK)
-    {
-      out_len = 0;
-      return ec;  // EMPTY / FAILED
-    }
-
-    const std::size_t REMAINING = Remaining();
-    if (REMAINING == 0)
-    {
-      out_len = 0;
-      return ErrorCode::FAILED;
-    }
-
-    const std::size_t TAKE = (REMAINING < cap) ? REMAINING : cap;
-
-    if (dequeue.PopData(dst, TAKE) != ErrorCode::OK)
-    {
-      out_len = 0;
-      return ErrorCode::FAILED;
-    }
-
-    offset_ += TAKE;
-    out_len = TAKE;
-
-    return (offset_ == head_.data.size_) ? ErrorCode::OK : ErrorCode::PENDING;
-  }
-
-  /**
-   * @brief head op 是否已全部出队
-   *        Whether the cached head op is fully dequeued
-   *
-   * @return true 已完成 / Completed
-   * @return false 未完成 / Not completed
-   */
-  bool HeadCompleted() const { return head_valid_ && (offset_ == head_.data.size_); }
-
-  /**
-   * @brief 在 head 完成后 pop info 并重置状态
-   *        Pop info after head completes and reset state
-   *
-   * @param dequeue 写端口出队事务 / Write-port dequeue transaction
-   * @param completed_info 可选输出：被 pop 的 info / Optional output: popped info
-   * @return ErrorCode::OK 成功 / Success
-   * @return ErrorCode::FAILED head 未完成 / Head not completed
-   */
-  ErrorCode PopCompleted(WritePort::DequeueScope& dequeue,
-                         WriteInfoBlock* completed_info = nullptr)
-  {
-    if (!HeadCompleted())
-    {
-      return ErrorCode::FAILED;
-    }
-
-    WriteInfoBlock popped{};
-    auto ans = dequeue.PopInfo(popped);
-    ASSERT(ans == ErrorCode::OK);
-
-    if (completed_info)
-    {
-      *completed_info = popped;
-    }
-
-    Reset();
-    return ErrorCode::OK;
-  }
-
- private:
-  /**
-   * @brief 确保 head 缓存可用（必要时 Peek info）
-   *        Ensure cached head is valid (Peek info if needed)
-   *
-   * @return ErrorCode::OK 成功 / Success
-   * @return ErrorCode::EMPTY info 队列为空 / Info queue empty
-   */
-  ErrorCode EnsureHead()
-  {
-    if (head_valid_)
-    {
-      return ErrorCode::OK;
-    }
-
-    WriteInfoBlock info{};
-    if (port_.QueueInfo()->Peek(info) != ErrorCode::OK)
-    {
-      return ErrorCode::EMPTY;
-    }
-
-    head_ = info;
-    head_valid_ = true;
-    offset_ = 0;
-    return ErrorCode::OK;
-  }
-
-  /**
-   * @brief 当前 op 剩余未出队字节数
-   *        Remaining bytes of current op
-   *
-   * @return 剩余字节数 / Remaining bytes
-   */
-  std::size_t Remaining() const
-  {
-    ASSERT(head_valid_);
-    ASSERT(head_.data.size_ >= offset_);
-    return head_.data.size_ - offset_;
-  }
-
- private:
-  WritePort& port_;          ///< 写端口引用 / Write port reference
-  bool head_valid_ = false;  ///< head 缓存有效标志 / Cached head valid flag
-  WriteInfoBlock head_{};    ///< 缓存的 head info / Cached head info
-  std::size_t offset_ = 0;   ///< 当前 op 已出队偏移 / Dequeued offset within current op
-};
-
-}  // namespace LibXR
 
 namespace LibXR::USB
 {
@@ -216,6 +51,15 @@ class CDCUartReadPort : public ReadPort
 /**
  * @brief USB CDC-ACM UART 适配器
  *        USB CDC-ACM UART adapter
+ *
+ * @note 所属 USB device 的唯一 execution policy 串行化运行期 raw IRQ、endpoint
+ *       生命周期、Write doorbell、IN completion 与 OUT rearm。启动前或停止后的
+ *       Init/Deinit 必须处于 IRQ 已禁用的 quiescent context。Endpoint::Close() 是旧完成
+ *       源的 quiescence 点。 / The owning USB device's sole execution policy serializes
+ *       runtime raw IRQs, endpoint lifecycle, Write doorbells, IN completions, and OUT
+ *       rearm. Pre-start or post-stop Init/Deinit must run in a quiescent context with
+ *       IRQs disabled. Endpoint::Close() is the quiescence point for old completion
+ *       sources.
  */
 class CDCUart : public CDCBase, public LibXR::UART
 {
@@ -246,8 +90,7 @@ class CDCUart : public CDCBase, public LibXR::UART
                 data_interface_string),
         LibXR::UART(&read_port_cdc_, &write_port_cdc_),
         read_port_cdc_(rx_buffer_size, *this),
-        write_port_cdc_(tx_queue_size, tx_buffer_size),
-        tx_deq_(write_port_cdc_)
+        write_port_cdc_(tx_queue_size, tx_buffer_size)
   {
     write_port_cdc_ = WriteFun;  // NOLINT
   }
@@ -261,15 +104,10 @@ class CDCUart : public CDCBase, public LibXR::UART
    */
   ErrorCode SetConfig(UART::Configuration cfg) override
   {
-    auto& line_coding = GetLineCoding();
-
     switch (cfg.stop_bits)
     {
       case 1:
-        line_coding.bCharFormat = 0;
-        break;
       case 2:
-        line_coding.bCharFormat = 2;
         break;
       default:
         return ErrorCode::ARG_ERR;
@@ -278,13 +116,8 @@ class CDCUart : public CDCBase, public LibXR::UART
     switch (cfg.parity)
     {
       case UART::Parity::NO_PARITY:
-        line_coding.bParityType = 0;
-        break;
       case UART::Parity::ODD:
-        line_coding.bParityType = 1;
-        break;
       case UART::Parity::EVEN:
-        line_coding.bParityType = 2;
         break;
       default:
         return ErrorCode::ARG_ERR;
@@ -297,64 +130,83 @@ class CDCUart : public CDCBase, public LibXR::UART
       case 7:
       case 8:
       case 16:
-        line_coding.bDataBits = static_cast<uint8_t>(cfg.data_bits);
         break;
       default:
         return ErrorCode::ARG_ERR;
     }
 
-    line_coding.dwDTERate = cfg.baudrate;
-    SendSerialState();
+    uint32_t expected = 0U;
+    if (!config_pending_.compare_exchange_strong(expected, 1U, std::memory_order_acq_rel,
+                                                 std::memory_order_relaxed))
+    {
+      return ErrorCode::BUSY;
+    }
+
+    pending_config_ = cfg;
+    PublishWork(CDC_EVENT_CONFIG, false);
     return ErrorCode::OK;
   }
 
+ private:
   /**
    * @brief 尝试 rearm OUT（背压恢复/持续接收）
    *        Try to rearm OUT endpoint (backpressure recovery / continuous RX)
    *
    * @param in_isr 是否在 ISR 上下文 / In ISR context
    * @return true 成功 rearm / Rearmed successfully
-   * @return false 未 rearm（忙/空间不足/端点不可用）/ Not rearmed (busy / insufficient
-   * space / endpoint unavailable)
+   * @return false 未 rearm，必要时已封死当前 generation / Not rearmed; the current
+   * generation is fail-stopped when the start path itself is invalid or fails.
    */
   bool TryRearmOut(bool in_isr)
   {
-    auto ep_data_out = GetDataOutEndpoint();
-    if (ep_data_out == nullptr)
+    if (!CanUseCdcEndpoints())
     {
       return false;
     }
 
-    const std::size_t MPS = ep_data_out->MaxPacketSize();
-    if (MPS == 0 || read_port_cdc_.queue_data_ == nullptr)
+    auto ep_data_out = GetDataOutEndpoint();
+    if (ep_data_out == nullptr)
     {
+      FailStopRxGeneration();
+      return false;
+    }
+
+    const std::size_t MPS = ep_data_out->MaxPacketSize();
+    if (MPS == 0U || read_port_cdc_.Capacity() == 0U)
+    {
+      FailStopRxGeneration();
       return false;
     }
 
     if (read_port_cdc_.recv_pause_)
     {
-      if (read_port_cdc_.queue_data_->EmptySize() >= read_port_cdc_.pending_data_.size_)
+      auto queue = read_port_cdc_.GetReadQueue(in_isr);
+      auto push_ans = queue.PushBatch(
+          reinterpret_cast<const uint8_t*>(read_port_cdc_.pending_data_.addr_),
+          read_port_cdc_.pending_data_.size_);
+      if (push_ans == ErrorCode::OK)
       {
-        auto push_ans = read_port_cdc_.queue_data_->PushBatch(
-            reinterpret_cast<const uint8_t*>(read_port_cdc_.pending_data_.addr_),
-            read_port_cdc_.pending_data_.size_);
-        if (push_ans == ErrorCode::OK)
-        {
-          read_port_cdc_.ProcessPendingReads(in_isr);
-        }
-        else
-        {
-          return false;
-        }
+        read_port_cdc_.pending_data_ = {nullptr, 0};
+        queue.Publish();
       }
       else
       {
+        if (push_ans != ErrorCode::FULL)
+        {
+          FailStopRxGeneration();
+        }
         return false;
       }
     }
 
-    if (ep_data_out->GetState() == Endpoint::State::BUSY)
+    const Endpoint::State state = ep_data_out->GetState();
+    if (state == Endpoint::State::BUSY || state == Endpoint::State::STALLED)
     {
+      return false;
+    }
+    if (state != Endpoint::State::IDLE)
+    {
+      FailStopRxGeneration();
       return false;
     }
 
@@ -365,194 +217,42 @@ class CDCUart : public CDCBase, public LibXR::UART
       return true;
     }
 
+    // No OUT completion exists after an unsuccessful start, so there is no carrier that
+    // could safely retry this arm. A configuration transition establishes the next owner.
+    FailStopRxGeneration();
     return false;
   }
 
  protected:
-  /**
-   * @brief 解绑端点并重置 endpoint-local ZLP 与背压状态
-   *        Unbind endpoints and reset endpoint-local ZLP and backpressure state
-   *
-   * @param endpoint_pool 端点池 / Endpoint pool
-   * @param in_isr        是否在 ISR 上下文 / In ISR context
-   */
-  void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
+  /** @brief 在 deferred OUT arm 前验证一个完整 endpoint packet 可入队 / Validate
+   * one complete endpoint packet before the deferred OUT arm. */
+  void OnEndpointsBound(bool in_isr) override
   {
-    CDCBase::UnbindEndpoints(endpoint_pool, in_isr);
-    need_write_zlp_ = false;
-
-    read_port_cdc_.recv_pause_ = false;
-    read_port_cdc_.pending_data_ = {nullptr, 0};
+    const Endpoint* ep_data_out = GetDataOutEndpoint();
+    REQUIRE_FROM_CALLBACK(ep_data_out != nullptr, in_isr);
+    REQUIRE_FROM_CALLBACK(ep_data_out->MaxPacketSize() > 0U, in_isr);
+    REQUIRE_FROM_CALLBACK(read_port_cdc_.Capacity() >= ep_data_out->MaxPacketSize(),
+                          in_isr);
+    (void)TryRearmOut(in_isr);
   }
 
   /**
    * @brief 写端口回调（TX）
    *        Write port callback (TX)
    *
-   * @details
-   * - 允许在一次调用内对同一个 op 触发多次 Transfer（每次预写后检查是否可立即发送）
-   *   Allows multiple Transfer kicks for the same op within one call (check-send after
-   * each prefill)
-   * - 仅当启动该 op 最后一段 Transfer 后返回非 PENDING
-   *   Return non-PENDING only after the last segment Transfer of the op is kicked
-   * - 预写仅执行 Take + SetActiveLength，不调用 Finish
-   *   Prefill performs Take + SetActiveLength only; Finish is not called here
+   * 这里只发布 level event。唯一 TX owner 构造有界 WriteQueue、填充 ACTIVE/READY、
+   * 启动 endpoint 并处理 ZLP；递归 completion/write doorbell 只会合并事件。 / This
+   * entry only publishes a level event. The sole TX owner constructs a bounded
+   * WriteQueue, fills ACTIVE/READY, starts the endpoint, and handles ZLP. Recursive
+   * completion/write doorbells only coalesce events.
    *
    * @param port  写端口 / Write port
    * @param in_isr 是否在 ISR 上下文 / In ISR context
-   * @return 错误码 / Error code
    */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr)
+  static void WriteFun(WritePort& port, bool in_isr)
   {
-    auto& cdc_port = static_cast<WritePort&>(port);
-    auto* cdc = LibXR::ContainerOf(&cdc_port, &CDCUart::write_port_cdc_);
-    auto dequeue = port.BeginDequeue(in_isr);
-
-    /**
-     * @note
-     * 不在 IN ISR；否则由 IN ISR 处理。
-     * Not in IN ISR; otherwise handled by IN ISR.
-     */
-    if (cdc->in_write_isr_.IsSet())
-    {
-      return ErrorCode::PENDING;
-    }
-
-    auto ep = cdc->GetDataInEndpoint();
-    if (ep == nullptr)
-    {
-      return ErrorCode::PENDING;
-    }
-
-    if (!cdc->Inited())
-    {
-      return ErrorCode::PENDING;
-    }
-
-    /**
-     * @note
-     * 入口条件：ActiveLength==0 。
-     * Entry condition: ActiveLength==0.
-     */
-    if (ep->GetActiveLength() != 0)
-    {
-      return ErrorCode::PENDING;
-    }
-
-    /**
-     * @note
-     * 若出现新数据，则取消 ZLP。
-     * Cancel pending ZLP if new data becomes available.
-     */
-    if (cdc->tx_deq_.HasOp())
-    {
-      cdc->need_write_zlp_ = false;
-    }
-
-    /**
-     * @brief 当前 ActiveLength 槽对应数据段的完成态
-     *        Completion state associated with the current ActiveLength slot
-     */
-    ErrorCode slot_ec = ErrorCode::PENDING;
-
-    // 预写第一段 / Prefill first segment
-    {
-      auto buffer = ep->GetBuffer();
-      std::size_t len = 0;
-
-      slot_ec = cdc->tx_deq_.Take(dequeue, reinterpret_cast<uint8_t*>(buffer.addr_),
-                                  buffer.size_, len);
-      if (slot_ec == ErrorCode::EMPTY || len == 0)
-      {
-        return ErrorCode::PENDING;
-      }
-      if (slot_ec != ErrorCode::OK && slot_ec != ErrorCode::PENDING)
-      {
-        return slot_ec;
-      }
-
-      ep->SetActiveLength(len);
-    }
-
-    std::atomic_signal_fence(std::memory_order_seq_cst);
-
-    // 循环：可立即发送则发送；发送后预写下一段并继续检查 / Loop: send if possible; then
-    // prefill next segment
-    while (true)
-    {
-      const std::size_t TO_SEND = ep->GetActiveLength();
-
-      /**
-       * @note
-       * 不可发送条件 / Not-sendable conditions:
-       * - 端点非 IDLE / Endpoint not IDLE
-       * - ActiveLength==0（槽已被清零或未发布）/ ActiveLength==0 (slot cleared or not
-       * published)
-       * - 当前时刻无可处理 op（避免预写段在并发路径被消费后继续推进）/ No op available at
-       * this moment
-       */
-      if (ep->GetState() != Endpoint::State::IDLE || TO_SEND == 0 ||
-          !cdc->tx_deq_.HasOp())
-      {
-        return ErrorCode::PENDING;
-      }
-
-      std::atomic_signal_fence(std::memory_order_seq_cst);
-
-      // 启动一次 Transfer / Kick one Transfer
-      ep->SetActiveLength(0);
-      auto ans = ep->Transfer(TO_SEND);
-      ASSERT(ans == ErrorCode::OK);
-
-      /**
-       * @note
-       * 若本次启动的是该 op 最后一段：启动后 pop，并返回 OK 触发 finish。
-       * If this kicked segment is the last of the op: pop after kick and return OK to
-       * trigger finish.
-       */
-      if (slot_ec == ErrorCode::OK && cdc->tx_deq_.HeadCompleted())
-      {
-        auto pop_ok = cdc->tx_deq_.PopCompleted(dequeue, nullptr);
-        ASSERT(pop_ok == ErrorCode::OK);
-
-        // ZLP 判定。
-        // ZLP decision.
-        const std::size_t MPS = ep->MaxPacketSize();
-        if (MPS > 0 && (TO_SEND % MPS) == 0 && ep->GetActiveLength() == 0 &&
-            !cdc->tx_deq_.HasOp())
-        {
-          cdc->need_write_zlp_ = true;
-        }
-
-        return ErrorCode::OK;  // 非 PENDING -> 上层完成一次 / Non-PENDING triggers one
-                               // upstream finish
-      }
-
-      // 预写下一段。
-      // Prefill the next segment.
-      if (!cdc->tx_deq_.HasOp())
-      {
-        return ErrorCode::PENDING;
-      }
-
-      auto buffer = ep->GetBuffer();
-      std::size_t len2 = 0;
-
-      slot_ec = cdc->tx_deq_.Take(dequeue, reinterpret_cast<uint8_t*>(buffer.addr_),
-                                  buffer.size_, len2);
-      if (slot_ec == ErrorCode::EMPTY || len2 == 0)
-      {
-        return ErrorCode::PENDING;
-      }
-      if (slot_ec != ErrorCode::OK && slot_ec != ErrorCode::PENDING)
-      {
-        return slot_ec;
-      }
-
-      ep->SetActiveLength(len2);
-      // 下一轮继续检查是否可立即发送。
-      // The next iteration checks whether sending can continue immediately.
-    }
+    auto* cdc = LibXR::ContainerOf(&port, &CDCUart::write_port_cdc_);
+    cdc->PublishWork(CDC_EVENT_WRITE, in_isr);
   }
 
   /**
@@ -564,18 +264,29 @@ class CDCUart : public CDCBase, public LibXR::UART
    */
   void OnDataOutComplete(bool in_isr, ConstRawData& data) override
   {
+    if (!CanUseCdcEndpoints())
+    {
+      return;
+    }
+
     if (data.size_ > 0)
     {
-      auto push_ans = read_port_cdc_.queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
+      auto queue = read_port_cdc_.GetReadQueue(in_isr);
+      auto push_ans =
+          queue.PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
       if (push_ans == ErrorCode::OK)
       {
-        read_port_cdc_.ProcessPendingReads(in_isr);
+        queue.Publish();
       }
-      else
+      else if (push_ans == ErrorCode::FULL)
       {
         read_port_cdc_.recv_pause_ = true;
         read_port_cdc_.pending_data_ = data;
+        return;
+      }
+      else
+      {
+        FailStopRxGeneration();
         return;
       }
     }
@@ -593,131 +304,354 @@ class CDCUart : public CDCBase, public LibXR::UART
   void OnDataInComplete(bool in_isr, ConstRawData& data) override
   {
     UNUSED(data);
-    Flag::ScopedRestore isr_flag(in_write_isr_);
+    PublishWork(CDC_EVENT_DATA_IN_COMPLETE, in_isr);
+  }
 
-    auto ep = GetDataInEndpoint();
+  /**
+   * @brief 在所属 USB device owner 下推进 CDC 本地事件 / Advance local CDC events
+   * under the owning USB device owner
+   */
+  void ProcessPendingWork(bool in_isr) noexcept override
+  {
+    const uint32_t events = pending_events_.exchange(0U, std::memory_order_acquire);
+    const uint32_t base_events = TakeBaseWorkSnapshot();
+    const bool lifecycle_changed = (base_events & BASE_EVENT_LIFECYCLE) != 0U;
+    if (lifecycle_changed)
+    {
+      read_port_cdc_.recv_pause_ = false;
+      read_port_cdc_.pending_data_ = {nullptr, 0};
+    }
+    if ((events & CDC_EVENT_CONFIG) != 0U)
+    {
+      ApplyPendingConfig(in_isr);
+    }
+
+    const bool tx_carrier = events != 0U || base_events != 0U;
+    ServiceTx(events, lifecycle_changed, tx_carrier, in_isr);
+    ProcessBaseWork(base_events, in_isr);
+
+    if (!lifecycle_changed && (events & CDC_EVENT_RX_REARM) != 0U)
+    {
+      (void)TryRearmOut(in_isr);
+    }
+  }
+
+ private:
+  friend class CDCUartReadPort;
+
+  enum class TxPhase : uint8_t
+  {
+    IDLE,
+    DATA,
+    ZLP,
+  };
+
+  static constexpr uint32_t CDC_EVENT_WRITE = 1U << 0U;
+  static constexpr uint32_t CDC_EVENT_DATA_IN_COMPLETE = 1U << 1U;
+  static constexpr uint32_t CDC_EVENT_RX_REARM = 1U << 2U;
+  static constexpr uint32_t CDC_EVENT_CONFIG = 1U << 3U;
+
+  /**
+   * @brief 合并本地事件并唤醒所属 device owner / Coalesce a local event and wake the
+   * owning device owner
+   */
+  void PublishWork(uint32_t events, bool in_isr) noexcept
+  {
+    pending_events_.fetch_or(events, std::memory_order_release);
+    RequestPendingWork(in_isr);
+  }
+
+  /** @brief 在 device owner 下应用一笔已接纳的 CDC 配置 / Apply one admitted CDC
+   * configuration under the device owner. */
+  void ApplyPendingConfig(bool in_isr)
+  {
+    ASSERT(config_pending_.load(std::memory_order_acquire) != 0U);
+    const UART::Configuration cfg = pending_config_;
+    auto& line_coding = GetLineCoding();
+    line_coding.dwDTERate = cfg.baudrate;
+    line_coding.bCharFormat = cfg.stop_bits == 2U ? 2U : 0U;
+    switch (cfg.parity)
+    {
+      case UART::Parity::ODD:
+        line_coding.bParityType = 1U;
+        break;
+      case UART::Parity::EVEN:
+        line_coding.bParityType = 2U;
+        break;
+      default:
+        line_coding.bParityType = 0U;
+        break;
+    }
+    line_coding.bDataBits = static_cast<uint8_t>(cfg.data_bits);
+    config_pending_.store(0U, std::memory_order_release);
+    PublishBaseWork(BASE_EVENT_SERIAL_STATE, in_isr);
+  }
+
+  /** @brief 丢弃 endpoint 已接纳槽并封死当前 generation / Discard accepted endpoint
+   * slots and fail-stop the current generation. */
+  void FailStopTxGeneration()
+  {
+    tx_phase_ = TxPhase::IDLE;
+    tx_active_length_ = 0U;
+    tx_ready_length_ = 0U;
+    need_write_zlp_ = false;
+    FailStopCurrentGeneration();
+  }
+
+  /** @brief 封死无法重新 arm OUT 的 generation / Fail-stop a generation whose OUT
+   * start path cannot make progress. */
+  void FailStopRxGeneration()
+  {
+    read_port_cdc_.recv_pause_ = false;
+    read_port_cdc_.pending_data_ = {nullptr, 0};
+    FailStopCurrentGeneration();
+  }
+
+  /** @brief 在 lifecycle 边界丢弃 ACTIVE/READY / Discard ACTIVE/READY at a lifecycle
+   * boundary. */
+  void ResetTxForLifecycle()
+  {
+    tx_generation_ = DeviceGeneration();
+    tx_phase_ = TxPhase::IDLE;
+    tx_active_length_ = 0U;
+    tx_ready_length_ = 0U;
+    need_write_zlp_ = false;
+  }
+
+  /**
+   * @brief 将一个请求片段复制到当前 endpoint buffer / Copy one request fragment into
+   * the current endpoint buffer
+   */
+  std::size_t CopyFrontToEndpoint(Endpoint& ep, WritePort::WriteQueue& queue,
+                                  std::size_t request_limit)
+  {
+    const RawData buffer = ep.GetBuffer();
+    const std::size_t capacity = std::min(buffer.size_, ep.MaxTransferSize());
+    const std::size_t limit = std::min(request_limit, capacity);
+    if (limit == 0U || buffer.addr_ == nullptr)
+    {
+      return 0U;
+    }
+
+    return queue.PopWithWriter(
+        limit,
+        [buffer](const uint8_t* first, std::size_t first_size, const uint8_t* second,
+                 std::size_t second_size) -> std::size_t
+        {
+          auto* destination = reinterpret_cast<uint8_t*>(buffer.addr_);
+          if (first_size != 0U)
+          {
+            Memory::FastCopy(destination, first, first_size);
+          }
+          if (second_size != 0U)
+          {
+            Memory::FastCopy(destination + first_size, second, second_size);
+          }
+          return first_size + second_size;
+        });
+  }
+
+  /** @brief 启动已接纳 DATA；失败时 fail-stop / Start accepted DATA, fail-stopping on
+   * failure. */
+  bool StartAcceptedData(Endpoint& ep, std::size_t length)
+  {
+    ASSERT(length != 0U);
+    tx_phase_ = TxPhase::DATA;
+    tx_active_length_ = length;
+    need_write_zlp_ = false;
+    if (ep.Transfer(length) == ErrorCode::OK)
+    {
+      return true;
+    }
+
+    FailStopTxGeneration();
+    return false;
+  }
+
+  /**
+   * @brief 填充空闲 ACTIVE 和可选 READY / Fill an idle ACTIVE and optional READY
+   */
+  void FillDataSlots(Endpoint& ep, bool in_isr)
+  {
+    if (tx_phase_ == TxPhase::IDLE)
+    {
+      if (ep.GetState() != Endpoint::State::IDLE)
+      {
+        return;
+      }
+
+      auto queue = write_port_cdc_.GetWriteQueue(in_isr);
+      if (queue.front_size == 0U)
+      {
+        return;
+      }
+
+      const std::size_t accepted = CopyFrontToEndpoint(ep, queue, queue.front_size);
+      if (accepted == 0U || !StartAcceptedData(ep, accepted))
+      {
+        return;
+      }
+
+      if (!ep.UseDoubleBuffer())
+      {
+        return;
+      }
+
+      const std::size_t ready_limit =
+          accepted < queue.front_size ? queue.front_size - accepted : queue.next_size;
+      if (ready_limit != 0U)
+      {
+        tx_ready_length_ = CopyFrontToEndpoint(ep, queue, ready_limit);
+      }
+      return;
+    }
+
+    if (ep.UseDoubleBuffer() && tx_phase_ == TxPhase::DATA && tx_ready_length_ == 0U)
+    {
+      const Endpoint::State state = ep.GetState();
+      if (state != Endpoint::State::BUSY && state != Endpoint::State::IDLE)
+      {
+        return;
+      }
+
+      auto queue = write_port_cdc_.GetWriteQueue(in_isr);
+      if (queue.front_size != 0U)
+      {
+        tx_ready_length_ = CopyFrontToEndpoint(ep, queue, queue.front_size);
+      }
+    }
+  }
+
+  /** @brief 退休完成的 DATA/ZLP，并优先启动 READY / Retire completed DATA/ZLP and
+   * start READY first. */
+  void RetireActiveTx(Endpoint& ep)
+  {
+    if (tx_phase_ == TxPhase::ZLP)
+    {
+      tx_phase_ = TxPhase::IDLE;
+      need_write_zlp_ = false;
+      return;
+    }
+    if (tx_phase_ != TxPhase::DATA)
+    {
+      return;
+    }
+
+    const std::size_t max_packet_size = ep.MaxPacketSize();
+    need_write_zlp_ = max_packet_size > 0U && tx_active_length_ > 0U &&
+                      (tx_active_length_ % max_packet_size) == 0U;
+    tx_active_length_ = 0U;
+    tx_phase_ = TxPhase::IDLE;
+
+    if (tx_ready_length_ == 0U)
+    {
+      return;
+    }
+    if (ep.GetState() != Endpoint::State::IDLE)
+    {
+      FailStopTxGeneration();
+      return;
+    }
+
+    const std::size_t ready_length = tx_ready_length_;
+    tx_ready_length_ = 0U;
+    (void)StartAcceptedData(ep, ready_length);
+  }
+
+  /**
+   * @brief 在 producer admission 下稳定确认空队列并启动一个 ZLP
+   *        Start one ZLP after stable queue-idle admission
+   */
+  void TryStartZlp(Endpoint& ep, bool in_isr)
+  {
+    (void)write_port_cdc_.TryRunWhenWriteQueueIdle(
+        [this, &ep]
+        {
+          tx_phase_ = TxPhase::ZLP;
+          if (ep.TransferZLP() != ErrorCode::OK)
+          {
+            FailStopTxGeneration();
+            return;
+          }
+          need_write_zlp_ = false;
+        },
+        in_isr);
+  }
+
+  /**
+   * @brief 消费一个合并事件快照并推进 CDC TX 状态机
+   *        Consume one coalesced event snapshot and advance the CDC TX state machine
+   */
+  void ServiceTx(uint32_t events, bool lifecycle_changed, bool tx_carrier, bool in_isr)
+  {
+    if (!tx_carrier)
+    {
+      return;
+    }
+
+    const bool generation_changed = tx_generation_ != DeviceGeneration();
+    if (lifecycle_changed || generation_changed)
+    {
+      ResetTxForLifecycle();
+    }
+
+    if (!Inited() || !DeviceConfigured() || DeviceGenerationFatal())
+    {
+      return;
+    }
+
+    Endpoint* ep = GetDataInEndpoint();
     if (ep == nullptr)
     {
       return;
     }
 
-    if (!Inited())
+    if (!lifecycle_changed && !generation_changed &&
+        (events & CDC_EVENT_DATA_IN_COMPLETE) != 0U)
+    {
+      RetireActiveTx(*ep);
+    }
+    if (DeviceGenerationFatal())
     {
       return;
     }
 
-    // ZLP：仅在此刻跨-op 无数据时发送。
-    // Send the ZLP only when there is no data left across ops at this moment.
-    if (need_write_zlp_)
+    if (tx_phase_ == TxPhase::DATA && ep->GetState() == Endpoint::State::ERROR)
     {
-      if (ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
-      {
-        auto z = ep->TransferZLP();
-        ASSERT(z == ErrorCode::OK);
-        need_write_zlp_ = false;
-        return;
-      }
-      need_write_zlp_ = false;
+      FailStopTxGeneration();
+      return;
     }
 
-    // ActiveLength==0 时不读取队列。
-    // Do not read queues when ActiveLength==0.
-    const std::size_t PENDING_LEN = ep->GetActiveLength();
-    if (PENDING_LEN == 0)
+    FillDataSlots(*ep, in_isr);
+    if (DeviceGenerationFatal())
     {
       return;
     }
 
-    // 1) 续发：本 ISR 仅启动一次 Transfer。
-    // 1) Continue: kick only one Transfer in this ISR.
-    ep->SetActiveLength(0);
-    auto ans = ep->Transfer(PENDING_LEN);
-    ASSERT(ans == ErrorCode::OK);
-
-    // 2) 若为 head op 最后一段：启动后 pop + Finish 一次。
-    // 2) If this is the last segment of the head op, pop + Finish once after kick-off.
-    if (tx_deq_.HeadCompleted())
+    if (tx_phase_ == TxPhase::IDLE && need_write_zlp_ &&
+        ep->GetState() == Endpoint::State::IDLE)
     {
-      WriteInfoBlock completed{};
-      {
-        auto dequeue = write_port_cdc_.BeginDequeue(in_isr);
-        auto pop_ok = tx_deq_.PopCompleted(dequeue, &completed);
-        ASSERT(pop_ok == ErrorCode::OK);
-      }
-      write_port_cdc_.Finish(in_isr, ErrorCode::OK, completed);
-    }
-
-    // 3) 预写：仅在已启动 Transfer 后允许读取队列。
-    // 3) Prefill: queue reads are allowed only after a Transfer has been kicked.
-    bool primed = false;
-    if (tx_deq_.HasOp())
-    {
-      auto buffer = ep->GetBuffer();
-      std::size_t len2 = 0;
-      {
-        auto dequeue = write_port_cdc_.BeginDequeue(in_isr);
-        auto ec2 = tx_deq_.Take(dequeue, reinterpret_cast<uint8_t*>(buffer.addr_),
-                                buffer.size_, len2);
-        if ((ec2 == ErrorCode::OK || ec2 == ErrorCode::PENDING) && len2 > 0)
-        {
-          ep->SetActiveLength(len2);
-          primed = true;
-        }
-      }
-    }
-
-    // 4) ZLP 判定 / ZLP decision
-    const std::size_t MPS = ep->MaxPacketSize();
-    if (!primed && PENDING_LEN > 0 && MPS > 0 && (PENDING_LEN % MPS) == 0 &&
-        ep->GetActiveLength() == 0 && !tx_deq_.HasOp())
-    {
-      need_write_zlp_ = true;
+      TryStartZlp(*ep, in_isr);
     }
   }
 
- private:
   CDCUartReadPort read_port_cdc_;  ///< CDC RX 读端口 / CDC RX read port
   WritePort write_port_cdc_;       ///< CDC TX 写端口 / CDC TX write port
 
-  LibXR::CDCUartTxOpDequeueHelper tx_deq_;  ///< TX 出队辅助器 / TX dequeue helper
-
-  Flag::Plain in_write_isr_;  ///< 写 ISR 保护标志 / Write ISR guard flag
-
-  bool need_write_zlp_{false};  ///< ZLP 需求标志 / ZLP required flag
+  std::atomic<uint32_t> pending_events_{0U};  ///< 本地 level events / Local level events
+  std::atomic<uint32_t> config_pending_{
+      0U};                                ///< 配置 mailbox admission / Config admission
+  UART::Configuration pending_config_{};  ///< owner 消费的配置快照 / Owner snapshot
+  TxPhase tx_phase_ = TxPhase::IDLE;
+  uint32_t tx_generation_ = 0U;
+  std::size_t tx_active_length_ = 0U;
+  std::size_t tx_ready_length_ = 0U;
+  bool need_write_zlp_ = false;
 };
 
 inline void CDCUartReadPort::OnRxDequeue(bool in_isr)
 {
-  if (!recv_pause_)
-  {
-    return;
-  }
-
-  // pending_data_ 回填 / Push pending_data_ back into queue
-  if (pending_data_.size_ > 0)
-  {
-    if (queue_data_->EmptySize() >= pending_data_.size_)
-    {
-      auto ans = queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t*>(pending_data_.addr_), pending_data_.size_);
-      if (ans == ErrorCode::OK)
-      {
-        pending_data_ = {nullptr, 0};
-        ProcessPendingReads(in_isr);
-      }
-      else
-      {
-        return;
-      }
-    }
-    else
-    {
-      return;
-    }
-  }
-
-  // 尝试恢复 rearm / Try to rearm OUT
-  (void)owner_.TryRearmOut(in_isr);
+  owner_.PublishWork(CDCUart::CDC_EVENT_RX_REARM, in_isr);
 }
 
 }  // namespace LibXR::USB

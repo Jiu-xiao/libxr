@@ -39,7 +39,7 @@ ErrorCode WritePort::Stream::Acquire()
     return ErrorCode::PTR_NULL;
   }
 
-  DEV_ASSERT(port_->queue_info_ != nullptr);
+  DEV_ASSERT(port_->queue_requests_ != nullptr);
   DEV_ASSERT(port_->queue_data_ != nullptr);
 
   if (!port_->Writable())
@@ -48,16 +48,17 @@ ErrorCode WritePort::Stream::Acquire()
     return ErrorCode::NOT_SUPPORT;
   }
 
-  if (!port_->TryAcquireOwner())
+  if (!port_->TryAcquireOwner(op_.type != WriteOperation::OperationType::BLOCK))
   {
     state_.store(StreamState::RELEASED, std::memory_order_release);
     return ErrorCode::BUSY;
   }
 
-  if (port_->queue_info_->EmptySize() < 1)
+  if (port_->queue_requests_->EmptySize() < 1U)
   {
-    port_->ReleaseOwner(false);
     state_.store(StreamState::RELEASED, std::memory_order_release);
+    port_->ReleaseOwner(false);
+    port_->NotifyBackend(false);
     return ErrorCode::FULL;
   }
 
@@ -104,12 +105,14 @@ ErrorCode WritePort::Stream::SubmitBuffered()
   ASSERT(buffered_size_ > 0);
 
   const size_t submitted_size = buffered_size_;
-  const auto ans = port_->CommitWrite({nullptr, submitted_size}, op_, true);
   buffered_size_ = 0;
 
-  // Reopen Stream admission only after both local metadata and Port ownership are final.
-  state_.store(StreamState::RELEASED, std::memory_order_release);
-  return ans;
+  // PublishOwned keeps this Stream in SUBMITTING through the Port owner transition and
+  // request-count publication, then releases it before the backend doorbell. An older
+  // completion therefore cannot cross the publication boundary and reacquire this Stream.
+  port_->PublishOwned(submitted_size, op_, false, this);
+  return op_.type == WriteOperation::OperationType::BLOCK ? port_->WaitForBlock(op_)
+                                                          : ErrorCode::OK;
 }
 
 size_t WritePort::Stream::EmptySize() const
@@ -160,7 +163,11 @@ ErrorCode WritePort::Stream::Commit()
   {
     return ErrorCode::BUSY;
   }
-  port_->ReleaseOwner(false);
+
+  // Stream and Port are the two admission guards. Release the Stream first so a
+  // completion can never observe both guards open before this handoff is complete.
   state_.store(StreamState::RELEASED, std::memory_order_release);
+  port_->ReleaseOwner(false);
+  port_->NotifyBackend(false);
   return ErrorCode::OK;
 }

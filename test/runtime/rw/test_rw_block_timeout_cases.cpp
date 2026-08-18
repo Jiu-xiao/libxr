@@ -45,8 +45,11 @@ void test_rw_block_read_insufficient_data_times_out_and_recovers()
 
   REQUIRE(WaitForLinuxFutexWait(first.thread_id));
   static const uint8_t FIRST_BYTE = 0x51;
-  ASSERT(port.queue_data_->Push(FIRST_BYTE) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(FIRST_BYTE) == ErrorCode::OK);
+    queue.Publish();
+  }
   REQUIRE(WaitForLinuxFutexWait(first.thread_id));
 
   ExpectWaitOk(first_done, THREAD_STATE_TIMEOUT_MS);
@@ -68,8 +71,11 @@ void test_rw_block_read_insufficient_data_times_out_and_recovers()
 
   REQUIRE(WaitForLinuxFutexWait(second.thread_id));
   static const uint8_t SECOND_BYTE = 0x62;
-  ASSERT(port.queue_data_->Push(SECOND_BYTE) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(SECOND_BYTE) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   ExpectWaitOk(second_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(second_reader);
@@ -208,21 +214,10 @@ void test_rw_block_write_timeout_detaches_waiter()
   StartBlockingWriteCaller(second_writer, second, "wr_detached_next");
   REQUIRE(WaitForLinuxFutexWait(second.thread_id));
 
-  WriteInfoBlock completed{};
-  {
-    auto dequeue = w.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(completed) == ErrorCode::OK);
-    ASSERT(dequeue.DiscardData(completed.data.size_) == ErrorCode::OK);
-  }
-  w.Finish(false, ErrorCode::OK, completed);
+  ASSERT(CompleteFrontWrite(w, ErrorCode::OK));
   ASSERT(sem1.Value() == 0);
 
-  {
-    auto dequeue = w.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(completed) == ErrorCode::OK);
-    ASSERT(dequeue.DiscardData(completed.data.size_) == ErrorCode::OK);
-  }
-  w.Finish(false, ErrorCode::OK, completed);
+  ASSERT(CompleteFrontWrite(w, ErrorCode::OK));
   ExpectWaitOk(second_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(second_writer);
   ASSERT(second.result == ErrorCode::OK);
@@ -271,7 +266,11 @@ void test_rw_read_port_block_queued_fast_path_leaves_semaphore_reusable()
   ReadPort port(4);
   Semaphore operation_semaphore;
   static const uint8_t QUEUED = 0x31;
-  ASSERT(port.queue_data_->Push(QUEUED) == ErrorCode::OK);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(QUEUED) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   uint8_t immediate = 0;
   ReadOperation immediate_operation(operation_semaphore, 0);
@@ -289,8 +288,11 @@ void test_rw_read_port_block_queued_fast_path_leaves_semaphore_reusable()
   REQUIRE(WaitForLinuxFutexWait(context.thread_id));
 
   static const uint8_t LATER = 0x42;
-  ASSERT(port.queue_data_->Push(LATER) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(LATER) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   ExpectWaitOk(reader_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(reader);

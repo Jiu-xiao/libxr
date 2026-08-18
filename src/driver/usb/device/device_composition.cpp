@@ -343,12 +343,13 @@ using LibXR::ConstRawData;
 using LibXR::RawData;
 
 DeviceComposition::DeviceComposition(
-    EndpointPool& endpoint_pool,
+    EndpointPool& endpoint_pool, USBExecutionPolicy& execution_policy,
     const std::initializer_list<const DescriptorStrings::LanguagePack*>& lang_list,
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs,
     ConstRawData uid, uint8_t bmAttributes, uint8_t bMaxPower)
     : endpoint_pool_(endpoint_pool),
+      execution_policy_(execution_policy),
       bm_attributes_(bmAttributes),
       composite_(is_composite_device(configs)),
       config_num_(configs.size()),
@@ -387,6 +388,13 @@ DeviceComposition::DeviceComposition(
     ++config_index;
   }
 
+  for (size_t i = 0; i < class_count_; ++i)
+  {
+    classes_[i]->SetExecutionPolicy(execution_policy_);
+    classes_[i]->SetRuntimeState(runtime_state_);
+  }
+  execution_policy_.SetWorkHandler(this, ProcessPendingWorkStatic);
+
   // 初始化阶段一次性算出接口字符串容量和最大描述符空间。
   // Pre-compute interface-string storage once during initialization.
   const auto interface_string_layout =
@@ -402,6 +410,26 @@ DeviceComposition::DeviceComposition(
   RegisterInterfaceStrings();
 }
 
+void DeviceComposition::ProcessPendingWorkStatic(void* context, bool in_isr) noexcept
+{
+  static_cast<DeviceComposition*>(context)->ProcessPendingWork(in_isr);
+}
+
+void DeviceComposition::ProcessPendingWork(bool in_isr) noexcept
+{
+  for (size_t i = 0; i < class_count_; ++i)
+  {
+    classes_[i]->ProcessPendingWork(in_isr);
+  }
+}
+
+void DeviceComposition::BeginGeneration(bool configured) noexcept
+{
+  ++runtime_state_.generation;
+  runtime_state_.configured = configured;
+  runtime_state_.fatal = false;
+}
+
 const DeviceComposition::ConfigItems& DeviceComposition::CurrentConfigItems() const
 {
   ASSERT(config_num_ > 0);
@@ -413,15 +441,15 @@ void DeviceComposition::Init(bool in_isr)
 {
   // Init 先绑定端点，再按当前激活配置重建 BOS 视图。
   // Init binds endpoints first, then rebuilds the BOS view for the active configuration.
-  configured_ = false;
+  BeginGeneration(false);
   BindEndpoints(in_isr);
   RebuildBosCache();
 }
 
 void DeviceComposition::Deinit(bool in_isr)
 {
+  BeginGeneration(false);
   UnbindEndpoints(in_isr);
-  configured_ = false;
   current_cfg_ = 0;
 }
 
@@ -434,8 +462,8 @@ LibXR::ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
 
   if (index == 0)
   {
+    BeginGeneration(false);
     UnbindEndpoints(in_isr);
-    configured_ = false;
     current_cfg_ = 0;
     RebuildBosCache();
     return LibXR::ErrorCode::OK;
@@ -443,9 +471,9 @@ LibXR::ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
 
   // USB configuration value 从 1 开始，而 current_cfg_ 内部保存的是从 0 开始的槽位。
   // USB configuration values are 1-based, while current_cfg_ stores a 0-based slot index.
+  BeginGeneration(true);
   UnbindEndpoints(in_isr);
   current_cfg_ = static_cast<uint8_t>(index - 1);
-  configured_ = true;
   BindEndpoints(in_isr);
   RebuildBosCache();
   return LibXR::ErrorCode::OK;
@@ -529,7 +557,7 @@ size_t DeviceComposition::GetConfigNum() const { return config_num_; }
 
 size_t DeviceComposition::GetCurrentConfig() const
 {
-  return configured_ ? static_cast<size_t>(current_cfg_ + 1u) : 0u;
+  return runtime_state_.configured ? static_cast<size_t>(current_cfg_ + 1u) : 0u;
 }
 
 uint16_t DeviceComposition::GetDeviceStatus() const
@@ -540,7 +568,7 @@ uint16_t DeviceComposition::GetDeviceStatus() const
 
 DeviceClass* DeviceComposition::FindClassByInterfaceNumber(size_t index) const
 {
-  if (!configured_)
+  if (!runtime_state_.configured)
   {
     return nullptr;
   }
@@ -572,7 +600,7 @@ DeviceClass* DeviceComposition::FindClassByInterfaceNumber(size_t index) const
 
 DeviceClass* DeviceComposition::FindClassByEndpointAddress(uint8_t addr) const
 {
-  if (!configured_)
+  if (!runtime_state_.configured)
   {
     return nullptr;
   }

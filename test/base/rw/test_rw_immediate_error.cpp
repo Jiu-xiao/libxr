@@ -18,13 +18,14 @@ void test_rw_immediate_write_error_propagates()
     port = FailWriteFun;
 
     LibXRTest::WriteHarness write(mode, 0);
-    ASSERT(port(ConstRawData{TX, sizeof(TX)}, write.op) == ErrorCode::INIT_ERR);
+    const ErrorCode call_result = port(ConstRawData{TX, sizeof(TX)}, write.op);
+    ASSERT(call_result ==
+           (mode == LibXRTest::TestMode::BLOCK ? ErrorCode::INIT_ERR : ErrorCode::OK));
     if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
     {
       write.ExpectFinal(ErrorCode::INIT_ERR);
     }
     ASSERT(port.Size() == 0);
-    ASSERT(port.QueueInfo()->Size() == 0);
   }
 }
 

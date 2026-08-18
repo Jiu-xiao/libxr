@@ -373,6 +373,61 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   }
 
   /**
+   * @brief 通过一次读取器调用消费队头前缀 / Consume a front prefix through one reader
+   *        call
+   * @tparam Reader 读取器类型 / Reader callback type
+   * @param limit 本次最多提供的 payload 数 / Maximum payload count offered this time
+   * @param reader 读取器，签名为
+   *        `size_t(const void* first, size_t first_count, const void* second,
+   *        size_t second_count)` / Reader with the signature shown above
+   * @return 读取器实际接受并出队的 payload 数 / Payload count accepted by the reader
+   *         and dequeued
+   * @note 队列为空或 `limit == 0` 时不调用读取器。读取器在每次 API 调用中最多
+   *       调用一次；两段按 first 后 second 组成队头 FIFO 前缀，仅在该次读取器
+   *       调用期间有效。读取器不得保留指针或重入此队列的 consumer 修改接口。 /
+   *       The reader is not called when the queue is empty or `limit == 0`, and is
+   *       called at most once per API call. The first and second spans form the FIFO
+   *       front prefix in that order and remain valid only during the reader call. The
+   *       reader must not retain either pointer or reenter a consumer-mutating queue API.
+   * @pre 读取器返回值不得超过两个 span 的元素总数；违反时所有构建均触发 fatal。 /
+   *      The reader result must not exceed the total element count in the two spans;
+   *      violating this requirement triggers the fatal handler in every build.
+   */
+  template <typename Reader>
+  size_t ConsumeBytesWithReader(size_t limit, Reader&& reader)
+  {
+    const auto current_head = head_.load(std::memory_order_relaxed);
+    const auto current_tail = tail_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+    const size_t offered = std::min(limit, available);
+
+    if (offered == 0U)
+    {
+      return 0U;
+    }
+
+    const size_t first_count =
+        std::min(offered, capacity - static_cast<size_t>(current_head));
+    const size_t second_count = offered - first_count;
+    const void* second = second_count == 0U ? nullptr : PayloadPtr(0);
+    Reader& reader_ref = reader;
+    const size_t accepted =
+        reader_ref(PayloadPtr(current_head), first_count, second, second_count);
+
+    REQUIRE(accepted <= offered);
+    if (accepted == 0U)
+    {
+      return 0U;
+    }
+
+    head_.store((current_head + accepted) % capacity, std::memory_order_release);
+    return accepted;
+  }
+
+  /**
    * @brief 按字节批量查看多个 payload 但不出队
    *        / Peek multiple payloads by bytes without dequeuing them
    * @param data 用于接收 payload 的字节缓冲区 / Byte buffer receiving payloads

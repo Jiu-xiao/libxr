@@ -90,7 +90,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"data_structure_tests", {"type", &RunVoidEntry<test_type>, false}},
     {"data_structure_tests", {"string", &RunVoidEntry<test_string>, false}},
 
-    {"driver_model_tests", {"fifo_tx", &RunVoidEntry<test_fifo_tx_model>, false}},
+    {"driver_model_tests", {"cdc_uart_tx", &RunVoidEntry<test_cdc_uart_tx>, false}},
     {"driver_model_tests", {"uart_dma_tx", &RunVoidEntry<test_uart_dma_tx_model>, false}},
     {"driver_model_tests",
      {"uart_circular_dma_rx", &RunVoidEntry<test_uart_circular_dma_rx_model>, false}},

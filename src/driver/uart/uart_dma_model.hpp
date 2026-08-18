@@ -6,6 +6,7 @@
 
 #include "double_buffer_storage.hpp"
 #include "libxr_assert.hpp"
+#include "libxr_mem.hpp"
 #include "libxr_rw.hpp"
 #include "uart.hpp"
 #include "uart_rx_config_gate.hpp"
@@ -17,9 +18,10 @@ namespace LibXR
  * @brief 后端单次 DMA start 的结果 / Result of one backend DMA-start attempt
  *
  * `STARTED` 将 active buffer 所有权交给硬件。`FAILED` 保证没有活跃硬件传输，且本次
- * 尝试以后不会发布 terminal callback，模型可立即复用该 block。 / `STARTED`
- * transfers the active buffer to hardware. `FAILED` guarantees no live transfer and no
- * later terminal callback from this attempt, so the block may be reused immediately.
+ * 尝试以后不会发布 terminal callback；模型丢弃该已接纳 slot，并停止当前 generation
+ * 进入 recovery。 / `STARTED` transfers the active buffer to hardware. `FAILED`
+ * guarantees no live transfer and no later terminal callback from this attempt; the
+ * model discards that accepted slot and stops the current generation for recovery.
  */
 enum class UartDmaTxStartResult : uint32_t
 {
@@ -52,11 +54,13 @@ enum class UartOldTxTerminal : uint8_t
  * `PENDING` 不携带 terminal 分类，并必须安排未来的 CONTROL_READY、COMPLETE
  * 或等价 service carrier。`COMPLETED` 是硬件静止的线性化点：分类已确定、破坏性清理已
  * 完成，且以后不会发布旧 terminal callback。模型在下一次硬件静止快照消费 COMPLETE；
- * NONE 和 ERROR 保留 active payload 以便重启。 / `PENDING` carries no terminal
+ * NONE 和 ERROR 丢弃已经启动但无法证明完整发送的 active payload，未启动的 READY
+ * payload 始终保留。 / `PENDING` carries no terminal
  * classification and must arrange a future service carrier. `COMPLETED` is the hardware
  * quiescence linearization point: classification and cleanup are final, and no old
- * terminal callback may appear. COMPLETE is consumed next; NONE and ERROR retain active
- * payload for restart.
+ * terminal callback may appear. COMPLETE is consumed next; NONE and ERROR discard an
+ * already-started active payload whose complete delivery is unproven. Unstarted READY
+ * payload remains retained.
  */
 struct UartDmaControlResult
 {
@@ -118,21 +122,25 @@ enum class UartDmaEvent : uint32_t
  * access; a combined scanner publishes control wakeup with terminal facts from the same
  * snapshot. Rejected fragments may be dropped, while admitted fragments finish first.
  *
- * pending payload 从公共字节队列复制，metadata 仍留在队首；提升时先发布 active 状态，
- * 再调用 `StartDmaTx()`。该调用返回前发生的 terminal callback 只合并事件，并在 owner
- * 提交 STARTED/FAILED 后处理。CONFIG/control 先于排队 TX 推进；所有 operation terminal
- * 都通过其持久 Operation 异步发布。 /
- * Pending data is copied while metadata remains queued.
- * Promotion publishes active state before `StartDmaTx()`, so an early terminal callback
- * is deferred until STARTED/FAILED is committed. CONFIG/control completes before queued
- * TX progression, and every operation terminal is published through its durable
- * Operation.
+ * 每个 owner scope 构造一个 `WritePort::WriteQueue`，最多把 front 和 next 完整复制进
+ * ACTIVE + optional READY block；该 ownership transfer 是唯一 operation completion
+ * 点。提升时先发布 active 状态，再调用 `StartDmaTx()`。该调用返回前发生的 terminal
+ * callback 只合并事件，并在 owner 提交 STARTED/FAILED 后处理。CONFIG/control 先于排队
+ * TX 推进。 / Each owner scope creates one `WritePort::WriteQueue` and copies at most
+ * front plus next into ACTIVE plus an optional READY block. That ownership transfer is
+ * the sole operation-completion point. Promotion publishes active state before
+ * `StartDmaTx()`, so an early terminal callback is deferred until STARTED/FAILED is
+ * committed. CONFIG/control completes before queued TX progression.
  *
- * `StartDmaTx() == FAILED` 只影响当前记录，不请求 CONFIG。runtime ERROR 和 CONFIG
- * 都在硬件静止后保留 active、pending 与公共队列记录；存在 active 时从 byte 0 重启，
- * 然后恢复队列推进。 / A start failure is record-local. Runtime ERROR and CONFIG retain
- * active, pending, and queued records across quiescence, restart active from byte zero
- * when present, and resume queued work.
+ * `StartDmaTx() == FAILED` 不撤销已经完成的 operation，而是丢弃该 slot、停止当前 backend
+ * generation 并进入 recovery；不得 retry/replay。predictable unavailable 状态必须在
+ * 接纳前由 TX/config gate 拦住。runtime ERROR 和 CONFIG 在硬件静止后同样丢弃无法证明完整
+ * 发送的 active；未启动 READY 与公共队列数据继续保留。 / A start failure does not
+ * revoke the completed operation. It discards that slot, stops the current backend
+ * generation, and enters recovery without retry or replay. Predictable unavailability
+ * must be rejected by the TX/config gate before acceptance. Runtime ERROR and CONFIG
+ * likewise discard an active payload whose complete delivery is unproven, while an
+ * unstarted READY slot and public queued data remain retained.
  *
  * `ValidateConfig()` 在 CONFIG reservation 和 owner acquisition 前运行，必须无副作用、
  * 支持 task/ISR 并发调用，且不得访问需要 owner 的 UART/DMA 状态。每条 PENDING 路径必须
@@ -149,11 +157,13 @@ enum class UartDmaEvent : uint32_t
  * hook, so the backend must not rediscover execution context.
  *
  * Advance hook 返回 COMPLETED 后，模型发布 CONTROL_READY，并在下一硬件静止快照退休旧
- * generation。Complete hook 重启 RX 和保留的 active TX，之后才释放 RX/config gate；
+ * generation。Complete hook 重启 RX；未启动的 READY TX 在 gate 释放后继续推进，旧
+ * active 只在已证明 COMPLETE 时退休，不会从头重放未知前缀；
  * 该 continuation 不依赖后续 Write、IRQ 或外部 scheduler。 / COMPLETED schedules a
  * hardware-quiescent snapshot to retire the old generation. The Complete hook restarts
- * RX and retained active TX before reopening the gate, without relying on an external
- * carrier.
+ * RX; unstarted READY TX progresses after the gate reopens, while an old active payload
+ * is retired only when COMPLETE was proven and never replayed from an unknown prefix.
+ * This continuation does not rely on an external carrier.
  *
  * recovery 的 Advance 尚 pending 时，CONFIG 可将其升级并复用同一次 stop；若
  * `CompleteRecovery()` 已开始，restart 已跨过线性化点，CONFIG 保留为下一事务。 /
@@ -182,32 +192,17 @@ class UartDmaModel
   UartDmaModel(Backend& backend, Policy& policy, WritePort& port, RawData storage)
       : backend_(backend), policy_(policy), port_(port), buffers_(storage)
   {
-    REQUIRE(port_.QueueInfo() != nullptr);
-    if (port_.QueueData() == nullptr)
-    {
-      REQUIRE(buffers_.Size() == 0U);
-    }
-    else
-    {
-      REQUIRE(port_.QueueData()->MaxSize() <= buffers_.Size());
-    }
+    REQUIRE(port_.Capacity() <= buffers_.Size());
 
     // The first staged payload uses block 0, then promotion flips it to active.
     buffers_.SetActiveBlock(true);
   }
 
   /**
-   * @brief 异步发布 WRITE / Publish WRITE for asynchronous terminal delivery
+   * @brief 发布 WRITE doorbell / Publish a WRITE doorbell
    * @param in_isr 是否从 ISR 上下文调用 / Whether called from ISR context
-   * @return 始终为 `PENDING`；producer admission 释放后通过队列中的 operation 发布终态 /
-   * Always `PENDING`; terminal publication uses the queued operation after producer
-   * admission is released
    */
-  ErrorCode Submit(bool in_isr)
-  {
-    Invoke(UartDmaEvent::WRITE, in_isr);
-    return ErrorCode::PENDING;
-  }
+  void Submit(bool in_isr) { Invoke(UartDmaEvent::WRITE, in_isr); }
 
   /**
    * @brief 校验、保留、存储并发布一个完整 CONFIG transaction / Validate, reserve,
@@ -396,9 +391,8 @@ class UartDmaModel
 
   enum class StartPendingResult : uint32_t
   {
-    BLOCKED = 0U,
-    FAILED = 1U,
-    STARTED = 2U,
+    FAILED = 0U,
+    STARTED = 1U,
   };
 
   static constexpr uint32_t ALL_EVENTS =
@@ -447,10 +441,12 @@ class UartDmaModel
   {
     ASSERT((events & ~ALL_EVENTS) == 0U);
 
+    const bool write_seen = HasEvent(events, UartDmaEvent::WRITE);
+
     const bool complete_seen = HasEvent(events, UartDmaEvent::COMPLETE);
     if (complete_seen)
     {
-      (void)ReleaseActive();
+      ClearActive();
     }
 
     const bool config_seen = HasEvent(events, UartDmaEvent::CONFIG);
@@ -494,7 +490,7 @@ class UartDmaModel
       return BeginRecovery(in_isr);
     }
 
-    bool progress = HasEvent(events, UartDmaEvent::WRITE);
+    bool progress = write_seen;
     if (complete_seen)
     {
       progress = true;
@@ -538,6 +534,11 @@ class UartDmaModel
       return 0U;
     }
 
+    if ((active_length_ != 0U) && (result.old_tx_terminal != UartOldTxTerminal::COMPLETE))
+    {
+      ClearActive();
+    }
+
     if (control_intent_ == ControlIntent::CONFIG &&
         control_stop_origin_ == ControlStopOrigin::RECOVERY)
     {
@@ -563,30 +564,33 @@ class UartDmaModel
                  : 0U;
     }
     return backend_.CompleteRecovery(in_isr) == UartDmaControlProgress::COMPLETED
-               ? FinishRecovery(in_isr)
+               ? FinishRecovery()
                : 0U;
   }
 
-  uint32_t FinishRecovery(bool in_isr)
+  uint32_t FinishRecovery()
   {
-    RestartActiveAfterRecovery(in_isr);
     control_state_ = ControlState::NORMAL;
     control_intent_ = ControlIntent::RECOVERY;
     control_stop_origin_ = ControlStopOrigin::RECOVERY;
     rx_config_gate_.LeaveRecovery();
-    uint32_t events = EventMask(UartDmaEvent::WRITE);
     if (rx_config_gate_.ConfigRequested())
     {
       // CONFIG may have been consumed while CompleteRecovery() was pending. It becomes
-      // a separate transaction only after the current recovery has fully completed.
-      events |= EventMask(UartDmaEvent::CONFIG);
+      // a separate transaction only after the current recovery has fully completed. Its
+      // normal FinishConfig() WRITE also resumes every retained READY block.
+      return EventMask(UartDmaEvent::CONFIG);
     }
-    return events;
+
+    // Recovery opens a fresh hardware generation. Always grant one bounded progress turn:
+    // a discarded start-failure slot has no active/pending state and cannot replay, while
+    // an already-published queue suffix may no longer have a WRITE carrier.
+    return EventMask(UartDmaEvent::WRITE);
   }
 
   uint32_t FinishConfig(bool in_isr)
   {
-    RestartActiveDuringConfig(in_isr);
+    (void)in_isr;
     control_state_ = ControlState::NORMAL;
     control_intent_ = ControlIntent::RECOVERY;
     control_stop_origin_ = ControlStopOrigin::RECOVERY;
@@ -596,165 +600,99 @@ class UartDmaModel
 
   uint32_t Progress(bool in_isr)
   {
-    if (active_length_ == 0U)
+    if ((active_length_ != 0U) && (pending_length_ != 0U))
     {
-      if (!pending_valid_)
-      {
-        if (!StageNextPending(in_isr))
-        {
-          return 0U;
-        }
-      }
-
-      const StartPendingResult start = TryStartPending(in_isr);
-      if (start == StartPendingResult::BLOCKED)
-      {
-        return 0U;
-      }
-      if (start == StartPendingResult::FAILED)
-      {
-        // Re-enter through the service snapshot boundary so CONFIG/ERROR published by
-        // the failed record's callback keep their priority over the next queued start.
-        return EventMask(UartDmaEvent::WRITE);
-      }
-    }
-
-    if ((active_length_ != 0U) && !pending_valid_)
-    {
-      (void)StageNextPending(in_isr);
-    }
-    return 0U;
-  }
-
-  bool StageNextPending(bool in_isr)
-  {
-    if (pending_valid_)
-    {
-      return true;
+      return 0U;
     }
     if (!rx_config_gate_.TryEnterTx())
     {
-      return false;
+      return 0U;
     }
 
-    WriteInfoBlock info{};
-    if (port_.QueueInfo()->Peek(info) != ErrorCode::OK)
+    bool start_failed = false;
     {
-      rx_config_gate_.LeaveTx();
-      return false;
+      auto queue = port_.GetWriteQueue(in_isr);
+      bool staged_front = false;
+
+      if (active_length_ == 0U)
+      {
+        if ((pending_length_ == 0U) && (queue.front_size != 0U))
+        {
+          StageNextPending(queue, queue.front_size, in_isr);
+          staged_front = true;
+        }
+
+        if (pending_length_ != 0U)
+        {
+          start_failed = TryStartPending(in_isr) == StartPendingResult::FAILED;
+        }
+      }
+
+      if (!start_failed && (active_length_ != 0U) && (pending_length_ == 0U))
+      {
+        const size_t ready_size = staged_front ? queue.next_size : queue.front_size;
+        if (ready_size != 0U)
+        {
+          StageNextPending(queue, ready_size, in_isr);
+        }
+      }
     }
 
-    REQUIRE_FROM_CALLBACK(port_.QueueData() != nullptr, in_isr);
-
-    REQUIRE_FROM_CALLBACK(info.data.size_ <= buffers_.Size(), in_isr);
-    auto dequeue = port_.BeginDequeue(in_isr);
-    const ErrorCode result = dequeue.PopData(buffers_.PendingBuffer(), info.data.size_);
-    REQUIRE_FROM_CALLBACK(result == ErrorCode::OK, in_isr);
-
-    // Payload and metadata length are complete before pending becomes visible.
-    pending_valid_ = true;
     rx_config_gate_.LeaveTx();
-    return true;
+    return start_failed ? BeginRecovery(in_isr) : 0U;
+  }
+
+  void StageNextPending(WritePort::WriteQueue& queue, size_t expected, bool in_isr)
+  {
+    ASSERT(pending_length_ == 0U);
+    REQUIRE_FROM_CALLBACK(expected != 0U && expected <= buffers_.Size(), in_isr);
+    const size_t accepted = queue.PopWithWriter(
+        expected,
+        [this, expected, in_isr](const uint8_t* first, size_t first_size,
+                                 const uint8_t* second, size_t second_size) -> size_t
+        {
+          REQUIRE_FROM_CALLBACK(first_size + second_size == expected, in_isr);
+          uint8_t* destination = buffers_.PendingBuffer();
+          if (first_size != 0U)
+          {
+            Memory::FastCopy(destination, first, first_size);
+          }
+          if (second_size != 0U)
+          {
+            Memory::FastCopy(destination + first_size, second, second_size);
+          }
+          return expected;
+        });
+    REQUIRE_FROM_CALLBACK(accepted == expected, in_isr);
+
+    // Complete READY state before this WriteQueue scope publishes operation callbacks.
+    pending_length_ = expected;
   }
 
   StartPendingResult TryStartPending(bool in_isr)
   {
-    ASSERT(pending_valid_);
+    ASSERT(pending_length_ != 0U);
     ASSERT(active_length_ == 0U);
-    if (!rx_config_gate_.TryEnterTx())
-    {
-      return StartPendingResult::BLOCKED;
-    }
-
-    WriteInfoBlock info{};
-    const ErrorCode peek_result = port_.QueueInfo()->Peek(info);
-    REQUIRE_FROM_CALLBACK(peek_result == ErrorCode::OK, in_isr);
-
-    if (!port_.TryPublishBackendCompletion())
-    {
-      rx_config_gate_.LeaveTx();
-      return StartPendingResult::BLOCKED;
-    }
 
     // Publish the complete active state before the backend can synchronously callback.
+    const size_t length = pending_length_;
     buffers_.FlipActiveBlock();
-    pending_valid_ = false;
-    active_length_ = info.data.size_;
+    pending_length_ = 0U;
+    active_length_ = length;
 
     const UartDmaTxStartResult result = backend_.StartDmaTx(
         buffers_.ActiveBuffer(), active_length_, buffers_.ActiveBlock(), in_isr);
-
-    {
-      auto dequeue = port_.BeginDequeue(in_isr);
-      const ErrorCode pop_result = dequeue.PopInfo(info);
-      REQUIRE_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
-
-      if (result == UartDmaTxStartResult::FAILED)
-      {
-        ClearActive();
-        buffers_.FlipActiveBlock();
-      }
-      rx_config_gate_.LeaveTx();
-    }
 
     if (result == UartDmaTxStartResult::FAILED)
     {
-      CompleteRecord(in_isr, ErrorCode::FAILED, info);
+      ClearActive();
       return StartPendingResult::FAILED;
     }
 
-    CompleteRecord(in_isr, ErrorCode::OK, info);
     return StartPendingResult::STARTED;
   }
 
-  void CompleteRecord(bool in_isr, ErrorCode result, WriteInfoBlock& info)
-  {
-    port_.Finish(in_isr, result, info);
-  }
-
-  bool ReleaseActive()
-  {
-    if (active_length_ == 0U)
-    {
-      return false;
-    }
-    ClearActive();
-    return true;
-  }
-
   void ClearActive() { active_length_ = 0U; }
-
-  void RestartActiveDuringConfig(bool in_isr)
-  {
-    if (active_length_ == 0U)
-    {
-      return;
-    }
-
-    const UartDmaTxStartResult result = backend_.StartDmaTx(
-        buffers_.ActiveBuffer(), active_length_, buffers_.ActiveBlock(), in_isr);
-    REQUIRE_FROM_CALLBACK(result == UartDmaTxStartResult::STARTED, in_isr);
-  }
-
-  void RestartActiveAfterRecovery(bool in_isr)
-  {
-    if (active_length_ == 0U)
-    {
-      return;
-    }
-    if (!rx_config_gate_.TryEnterTx())
-    {
-      // A concurrently reserved CONFIG won the TX admission boundary. Its publication
-      // is the guaranteed carrier; the retained active payload stays stopped for it.
-      ASSERT(rx_config_gate_.ConfigRequested());
-      return;
-    }
-
-    const UartDmaTxStartResult result = backend_.StartDmaTx(
-        buffers_.ActiveBuffer(), active_length_, buffers_.ActiveBlock(), in_isr);
-    rx_config_gate_.LeaveTx();
-    REQUIRE_FROM_CALLBACK(result == UartDmaTxStartResult::STARTED, in_isr);
-  }
 
   Backend& backend_;
   Policy& policy_;
@@ -766,7 +704,7 @@ class UartDmaModel
   ControlIntent control_intent_ = ControlIntent::RECOVERY;
   ControlStopOrigin control_stop_origin_ = ControlStopOrigin::RECOVERY;
   size_t active_length_ = 0U;
-  bool pending_valid_ = false;
+  size_t pending_length_ = 0U;
 };
 
 }  // namespace LibXR

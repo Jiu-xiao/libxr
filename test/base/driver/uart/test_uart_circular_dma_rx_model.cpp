@@ -23,7 +23,9 @@ class CircularRxBackend
 void test_uart_circular_dma_rx_model()
 {
   using LibXR::ErrorCode;
+  using LibXR::OperationPollingStatus;
   using LibXR::RawData;
+  using LibXR::ReadOperation;
   using LibXR::ReadPort;
   using LibXR::UartCircularDmaRxModel;
 
@@ -38,17 +40,30 @@ void test_uart_circular_dma_rx_model()
   ReadPort port(2U);
 
   backend.remaining = 5U;
-  ASSERT(!model.OnDataAvailable(backend, port));
+  {
+    auto queue = port.GetReadQueue();
+    model.OnDataAvailable(backend, queue);
+    queue.Publish();
+  }
   ASSERT(model.LastPosition() == 3U);
-  ASSERT(port.queue_data_->Size() == 0U);
-
-  backend.remaining = 3U;
-  ASSERT(model.OnDataAvailable(backend, port));
-  ASSERT(model.LastPosition() == 5U);
-  ASSERT(port.queue_data_->Size() == 2U);
+  ASSERT(port.Size() == 0U);
 
   std::array<uint8_t, 2U> received{};
-  ASSERT(port.queue_data_->PopBatch(received.data(), received.size()) == ErrorCode::OK);
+  OperationPollingStatus status;
+  ReadOperation operation(status);
+  ASSERT(port(RawData{received.data(), received.size()}, operation) == ErrorCode::OK);
+  ASSERT(status.Load() == OperationPollingStatus::RUNNING);
+
+  backend.remaining = 3U;
+  auto queue = port.GetReadQueue();
+  model.OnDataAvailable(backend, queue);
+  ASSERT(model.LastPosition() == 5U);
+  ASSERT(port.Size() == 2U);
+  ASSERT(status.Load() == OperationPollingStatus::RUNNING);
+
+  queue.Publish();
+  ASSERT(status.Load() == OperationPollingStatus::DONE);
   ASSERT(received[0U] == 3U);
   ASSERT(received[1U] == 4U);
+  ASSERT(port.Size() == 0U);
 }

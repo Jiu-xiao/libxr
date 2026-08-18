@@ -3,12 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <utility>
 
 #include "device_class.hpp"
 #include "device_composition.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/core.hpp"
 #include "usb/core/ep_pool.hpp"
+#include "usb_execution_policy.hpp"
 
 namespace LibXR::USB
 {
@@ -65,12 +67,22 @@ class DeviceCore
   /**
    * @brief 初始化 / Initialize
    *
+   * 运行期调用必须已位于本设备的 `RunIrq()` owner 内；启动前调用则要求后端 IRQ 域尚未
+   * 启用。不得与 raw IRQ 或 class work 并发。 / A runtime call must already be inside
+   * this device's `RunIrq()` owner. A pre-start call instead requires the backend IRQ
+   * domain to remain disabled. This function must not race a raw IRQ or class work.
+   *
    * @param in_isr 是否在 ISR / Whether in ISR context
    */
   virtual void Init(bool in_isr);
 
   /**
    * @brief 反初始化 / Deinitialize
+   *
+   * 运行期调用必须已位于本设备的 `RunIrq()` owner 内；停止后调用则要求后端 IRQ 域已经
+   * 禁用。不得与 raw IRQ 或 class work 并发。 / A runtime call must already be inside
+   * this device's `RunIrq()` owner. A post-stop call instead requires the backend IRQ
+   * domain to be disabled. This function must not race a raw IRQ or class work.
    *
    * @param in_isr 是否在 ISR / Whether in ISR context
    */
@@ -105,7 +117,31 @@ class DeviceCore
    */
   [[nodiscard]] bool IsInited() const { return state_.inited; }
 
+  /**
+   * @brief 在首次读取 USB 状态前取得本设备唯一 owner / Acquire this device's sole
+   * owner before the first USB status read
+   * @tparam Source 无参数 raw IRQ handler / Nullary raw IRQ handler
+   * @param source 完整读取、确认并分发当前 IRQ 批次的 handler / Handler that reads,
+   * acknowledges, and dispatches the current IRQ batch
+   * @return 本调用执行了 source 时为 true / True when this call executed source
+   */
+  template <typename Source>
+  bool RunIrq(Source&& source, bool in_isr = true) noexcept
+  {
+    return execution_policy_.RunIrq(std::forward<Source>(source), in_isr);
+  }
+
  protected:
+  /**
+   * @brief 绑定后端完整 IRQ 域 / Bind the backend's complete IRQ domain
+   * @param domain 后端 mask/restore 与可选短锁原语 / Backend mask/restore and optional
+   * short-lock primitives
+   */
+  void SetInterruptDomain(USBExecutionPolicy::InterruptDomain domain) noexcept
+  {
+    execution_policy_.SetInterruptDomain(domain);
+  }
+
   /**
    * @brief 设置设备地址（由子类实现）
    *        Set device address (implemented by derived class).
@@ -163,7 +199,7 @@ class DeviceCore
                                    RequestDirection direction, Recipient recipient);
 
   ErrorCode RespondWithStatus(const SetupPacket* setup, Recipient recipient);
-  ErrorCode ClearFeature(const SetupPacket* setup, Recipient recipient);
+  ErrorCode ClearFeature(bool in_isr, const SetupPacket* setup, Recipient recipient);
   ErrorCode ApplyFeature(const SetupPacket* setup, Recipient recipient);
   ErrorCode SendDescriptor(bool in_isr, const SetupPacket* setup, Recipient recipient);
   ErrorCode PrepareAddressChange(uint16_t address);
@@ -181,8 +217,9 @@ class DeviceCore
                                  RequestDirection direction, Recipient recipient);
 
  private:
-  DeviceComposition composition_;  ///< USB 组合管理器 / USB composition manager
-  DeviceDescriptor device_desc_;   ///< 设备描述符 / Device descriptor
+  USBExecutionPolicy execution_policy_{};  ///< 每设备唯一执行 owner / Sole device owner
+  DeviceComposition composition_;          ///< USB 组合管理器 / USB composition manager
+  DeviceDescriptor device_desc_;           ///< 设备描述符 / Device descriptor
 
   struct
   {

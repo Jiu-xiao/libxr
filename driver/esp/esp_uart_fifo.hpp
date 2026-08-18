@@ -8,7 +8,6 @@
 #if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
 #include "esp_pm.h"
 #endif
-#include "driver/common/fifo_tx_model.hpp"
 #include "esp_uart_execution_policy.hpp"
 #include "hal/uart_hal.h"
 #include "hal/uart_types.h"
@@ -57,12 +56,14 @@ class ESP32UartFifoReadPort : public ReadPort
  * @brief 将排队记录直接送入硬件 FIFO 的 ESP UART 后端 / ESP UART backend that streams
  * queued records directly into the hardware FIFO
  *
- * 应用必须显式选择本类型。它不分配 DMA 存储区、不 stage payload，也不预装第二条记录。
- * 一条记录的全部字节进入硬件 FIFO 后，write 即完成；只有 CONFIG 需要 framing boundary
- * 时才另外等待物理线路空闲。 / This class is selected explicitly by the application.
- * It does not allocate DMA storage, stage payloads, or preload a second record. A write
- * completes after all bytes of that record have entered the hardware FIFO; physical
- * line idle is observed separately only when CONFIG needs a framing boundary.
+ * 应用必须显式选择本类型。它不分配 DMA 存储区，也不保留持久 READY block；每个 owner
+ * scope 最多把 front 和 next 直接送入 FIFO。一条记录的全部字节进入硬件 FIFO 后，write
+ * 即完成；只有 CONFIG 需要 framing boundary 时才另外等待物理线路空闲。 / This class is
+ * selected explicitly by the application. It allocates no DMA storage and retains no
+ * persistent READY block; each owner scope feeds at most front plus next directly into
+ * the FIFO. A write completes after all bytes of that record have entered the hardware
+ * FIFO; physical line idle is observed separately only when CONFIG needs a framing
+ * boundary.
  *
  * @note 每个 UART 外设最多构造一个 process-lifetime 后端对象 / Construct at most one
  * process-lifetime backend object for each UART peripheral
@@ -127,16 +128,14 @@ class ESP32UartFifo : public UART
   ErrorCode SetLoopback(bool enable);
 
   /**
-   * @brief WritePort 提交入口 / WritePort submission entry
-   * @param port 发起提交的写端口 / Write port issuing the submission
+   * @brief WritePort TX 推进 doorbell / WritePort TX progress doorbell
+   * @param port 请求推进的写端口 / Write port requesting progress
    * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 提交结果 / Submission result
    */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  static void WriteFun(WritePort& port, bool in_isr);
 
  private:
   using ExecutionPolicy = Detail::ESP32UartExecutionPolicy<ESP32UartFifo>;
-  using TxCompletionPublication = FifoTxModel::CompletionPublication;
 
   enum class Event : uint32_t
   {
@@ -179,19 +178,18 @@ class ESP32UartFifo : public UART
 
   static void UartIsrEntry(void* arg);
   uint32_t ServiceIrqSource(bool in_isr) noexcept;
-  uint32_t ServiceEvents(uint32_t events, bool in_isr, bool& pushed_any) noexcept;
+  uint32_t ServiceEvents(uint32_t events, bool in_isr,
+                         ReadPort::ReadQueue& queue) noexcept;
 
-  ErrorCode SubmitWrite(bool in_isr);
   void ResumeRx(bool in_isr);
-  uint32_t ServiceRx(uint32_t events, bool in_isr, bool& pushed_any);
-  bool DrainRxFifo(bool in_isr);
+  uint32_t ServiceRx(uint32_t events, bool in_isr, ReadPort::ReadQueue& queue);
+  void DrainRxFifo(ReadPort::ReadQueue& queue, bool in_isr);
 
   void BeginConfiguration();
   uint32_t ContinueConfiguration(bool in_isr);
 
   void ProgressTx(bool in_isr);
-  bool FillTxFifo(bool in_isr);
-  [[nodiscard]] TxCompletionPublication GetTxCompletionPublication() const noexcept;
+  size_t FillTxFifo(WritePort::WriteQueue& queue, size_t limit, bool in_isr);
 
   uart_port_t uart_num_;
 
@@ -204,6 +202,7 @@ class ESP32UartFifo : public UART
   UartRxConfigGate rx_config_gate_{};
 
   ConfigState config_state_ = ConfigState::NORMAL;
+  bool tx_front_partial_ = false;
   bool tx_space_interrupt_armed_ = false;
   bool config_tx_idle_interrupt_armed_ = false;
   bool rx_interrupt_path_enabled_ = false;
@@ -218,7 +217,6 @@ class ESP32UartFifo : public UART
 
   Detail::ESP32UartFifoReadPort _read_port;
   WritePort _write_port;
-  FifoTxModel tx_model_;
 };
 
 }  // namespace LibXR

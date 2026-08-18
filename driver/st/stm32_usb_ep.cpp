@@ -42,7 +42,7 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
 }
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
 STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
                              PCD_HandleTypeDef* hpcd, Direction dir,
                              size_t hw_buffer_offset, size_t hw_buffer_size,
@@ -135,7 +135,7 @@ void STM32Endpoint::Configure(const Config& cfg)
   }
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   if (packet_size_limit > hw_buffer_size_)
   {
     packet_size_limit = hw_buffer_size_;
@@ -176,7 +176,50 @@ void STM32Endpoint::Configure(const Config& cfg)
 void STM32Endpoint::Close()
 {
   uint8_t addr = EPNumberToAddr(GetNumber(), GetDirection());
-  HAL_PCD_EP_Close(hpcd_, addr);
+  (void)HAL_PCD_EP_Close(hpcd_, addr);
+
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  bool is_otg = false;
+#if defined(USB_OTG_FS)
+  is_otg = is_otg || id_ == STM32_USB_OTG_FS;
+#endif
+#if defined(USB_OTG_HS)
+  is_otg = is_otg || id_ == STM32_USB_OTG_HS;
+#endif
+  if (is_otg)
+  {
+    const uintptr_t base = reinterpret_cast<uintptr_t>(hpcd_->Instance);
+    const uintptr_t ep_offset = EPNumberToInt8(GetNumber()) * USB_OTG_EP_REG_SIZE;
+    if (GetDirection() == Direction::IN)
+    {
+      auto* ep = reinterpret_cast<USB_OTG_INEndpointTypeDef*>(
+          base + USB_OTG_IN_ENDPOINT_BASE + ep_offset);
+      ep->DIEPINT = USB_OTG_DIEPINT_XFRC;
+    }
+    else
+    {
+      auto* ep = reinterpret_cast<USB_OTG_OUTEndpointTypeDef*>(
+          base + USB_OTG_OUT_ENDPOINT_BASE + ep_offset);
+      ep->DOEPINT = USB_OTG_DOEPINT_XFRC;
+    }
+  }
+#endif
+
+#if defined(USB_BASE) || defined(USB_DRD_FS)
+  if (id_ == STM32_USB_FS_DEV)
+  {
+    if (GetDirection() == Direction::IN)
+    {
+      PCD_CLEAR_TX_EP_CTR(hpcd_->Instance, EPNumberToInt8(GetNumber()));
+    }
+    else
+    {
+      PCD_CLEAR_RX_EP_CTR(hpcd_->Instance, EPNumberToInt8(GetNumber()));
+    }
+  }
+#endif
+
+  last_transfer_size_ = 0U;
   SetState(State::DISABLED);
 }
 
@@ -225,7 +268,7 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   }
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   if (is_in)
   {
     ep->xfer_fill_db = 0U;
@@ -334,7 +377,7 @@ static STM32Endpoint* GetEndpoint(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool i
     return STM32Endpoint::map_otg_fs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
   }
 #endif
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   if (id == STM32_USB_FS_DEV)
   {
     return STM32Endpoint::map_fs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
@@ -348,6 +391,13 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
   auto id = STM32USBDeviceGetID(hpcd);
 
   if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
+
+  auto* usb = STM32USBDevice::map_[id];
+  ASSERT(usb->IsHalIrqActive());
+  if (!usb->AcceptTransferCallback())
   {
     return;
   }
@@ -367,6 +417,13 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
   auto id = STM32USBDeviceGetID(hpcd);
 
   if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
+
+  auto* usb = STM32USBDevice::map_[id];
+  ASSERT(usb->IsHalIrqActive());
+  if (!usb->AcceptTransferCallback())
   {
     return;
   }
@@ -399,6 +456,13 @@ extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t
     return;
   }
 
+  auto* usb = STM32USBDevice::map_[id];
+  ASSERT(usb->IsHalIrqActive());
+  if (!usb->AcceptTransferCallback())
+  {
+    return;
+  }
+
   auto ep = GetEndpoint(hpcd, epnum, true);
 
   if (!ep || ep->hpcd_ != hpcd)
@@ -414,6 +478,13 @@ extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_
   auto id = STM32USBDeviceGetID(hpcd);
 
   if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
+  {
+    return;
+  }
+
+  auto* usb = STM32USBDevice::map_[id];
+  ASSERT(usb->IsHalIrqActive());
+  if (!usb->AcceptTransferCallback())
   {
     return;
   }

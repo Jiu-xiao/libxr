@@ -55,16 +55,28 @@ class LinkedListRxBackend
   size_t prepared_count = 0U;
 };
 
+template <size_t DescriptorCount>
+void SampleAndPublish(LibXR::UartLinkedListDmaRxModel<DescriptorCount>& model,
+                      LinkedListRxBackend& backend, LibXR::ReadPort& port)
+{
+  auto queue = port.GetReadQueue();
+  model.OnDataAvailable(backend, queue);
+  queue.Publish();
+}
+
 void ExpectQueue(LibXR::ReadPort& port, const uint8_t* expected, size_t size)
 {
   std::array<uint8_t, 32U> received{};
   ASSERT(size <= received.size());
-  ASSERT(port.queue_data_->PopBatch(received.data(), size) == LibXR::ErrorCode::OK);
+  LibXR::OperationPollingStatus status;
+  LibXR::ReadOperation operation(status);
+  ASSERT(port(LibXR::RawData{received.data(), size}, operation) == LibXR::ErrorCode::OK);
+  ASSERT(status.Load() == LibXR::OperationPollingStatus::DONE);
   for (size_t i = 0U; i < size; ++i)
   {
     ASSERT(received[i] == expected[i]);
   }
-  ASSERT(port.queue_data_->Size() == 0U);
+  ASSERT(port.Size() == 0U);
 }
 
 }  // namespace
@@ -87,7 +99,7 @@ void test_uart_linked_list_dma_rx_model()
     ReadPort port(32U);
 
     backend.producer = &storage[6U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ASSERT(model.LastPosition() == 6U);
     uint8_t expected[6U] = {0U, 1U, 2U, 3U, 4U, 5U};
     ExpectQueue(port, expected, sizeof(expected));
@@ -107,7 +119,7 @@ void test_uart_linked_list_dma_rx_model()
     ReadPort port(32U);
 
     backend.producer = &storage[4U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ASSERT(backend.producer_reads == 1U);
     ASSERT(backend.prepared_count == 1U);
     ASSERT(backend.prepared[0U].address == storage.data());
@@ -115,7 +127,7 @@ void test_uart_linked_list_dma_rx_model()
 
     backend.ResetObservations();
     backend.producer = &storage[8U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ASSERT(backend.producer_reads == 1U);
     ASSERT(backend.prepared_count == 1U);
     ASSERT(backend.prepared[0U].address == &storage[4U]);
@@ -124,12 +136,12 @@ void test_uart_linked_list_dma_rx_model()
 
     backend.ResetObservations();
     backend.producer = &storage[14U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ExpectQueue(port, &storage[8U], 6U);
 
     backend.ResetObservations();
     backend.producer = &storage[3U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ASSERT(backend.producer_reads == 1U);
     ASSERT(backend.prepared_count == 2U);
     ASSERT(backend.prepared[0U].address == &storage[14U]);
@@ -146,12 +158,12 @@ void test_uart_linked_list_dma_rx_model()
     ReadPort port(32U);
 
     backend.producer = &storage[12U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ExpectQueue(port, storage.data(), 12U);
 
     backend.ResetObservations();
     backend.producer = storage.data() + storage.size();
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ASSERT(backend.producer_reads == 1U);
     ASSERT(backend.prepared_count == 1U);
     ASSERT(backend.prepared[0U].address == &storage[12U]);
@@ -161,7 +173,7 @@ void test_uart_linked_list_dma_rx_model()
 
     backend.ResetObservations();
     backend.producer = storage.data();
-    ASSERT(!model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ASSERT(backend.producer_reads == 1U);
     ASSERT(backend.prepared_count == 0U);
   }
@@ -172,12 +184,12 @@ void test_uart_linked_list_dma_rx_model()
     ReadPort port(4U);
 
     backend.producer = &storage[6U];
-    ASSERT(!model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     ASSERT(model.LastPosition() == 6U);
-    ASSERT(port.queue_data_->Size() == 0U);
+    ASSERT(port.Size() == 0U);
 
     backend.producer = &storage[8U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    SampleAndPublish(model, backend, port);
     const uint8_t retained[2U] = {6U, 7U};
     ExpectQueue(port, retained, sizeof(retained));
   }
@@ -198,9 +210,11 @@ void test_uart_linked_list_dma_rx_model()
 
     ASSERT(gate.TryEnterRx());
     backend.producer = &storage[4U];
-    ASSERT(model.OnDataAvailable(backend, port));
+    auto queue = port.GetReadQueue();
+    model.OnDataAvailable(backend, queue);
     ASSERT(backend.producer_reads == 1U);
     ASSERT(!gate.LeaveRx());
+    queue.Publish();
   }
 
   {
@@ -219,7 +233,8 @@ void test_uart_linked_list_dma_rx_model()
     UartLinkedListDmaRxModel<> disabled(RawData{nullptr, 0U});
     LinkedListRxBackend backend;
     ReadPort port(1U);
-    ASSERT(!disabled.OnDataAvailable(backend, port));
+    SampleAndPublish(disabled, backend, port);
     ASSERT(backend.producer_reads == 0U);
+    ASSERT(port.Size() == 0U);
   }
 }

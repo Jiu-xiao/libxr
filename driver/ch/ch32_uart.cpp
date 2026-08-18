@@ -465,10 +465,10 @@ void CH32UART::StartDataPath()
   Ch32UartIoFence();
 }
 
-ErrorCode CH32UART::WriteFun(WritePort& port, bool in_isr)
+void CH32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &CH32UART::_write_port);
-  return uart->dma_model_.Submit(in_isr);
+  uart->dma_model_.Submit(in_isr);
 }
 
 void CH32UART::StartCircularDmaRx(uint8_t* data, size_t size)
@@ -518,14 +518,11 @@ void CH32UART::UartIRQHandler() { HandleNormalIrq(); }
 
 void CH32UART::HandleNormalIrq()
 {
-  bool pushed_any = false;
+  auto queue = _read_port.GetReadQueue(true);
   (void)dma_model_.InvokeIrq(
-      [this, &pushed_any]() { return ScanNormalIrqStatus(true, pushed_any); }, true);
+      [this, &queue]() { return ScanNormalIrqStatus(true, queue); }, true);
   Ch32UartIoFence();
-  if (pushed_any)
-  {
-    _read_port.ProcessPendingReads(true);
-  }
+  queue.Publish();
 }
 
 UartDmaControlResult CH32UART::AdvanceRecovery(bool active_tx, bool in_isr)
@@ -539,7 +536,7 @@ UartDmaControlProgress CH32UART::CompleteRecovery(bool)
   return UartDmaControlProgress::COMPLETED;
 }
 
-uint32_t CH32UART::ScanNormalIrqStatus(bool in_isr, bool& pushed_any)
+uint32_t CH32UART::ScanNormalIrqStatus(bool in_isr, ReadPort::ReadQueue& queue)
 {
   using Model = UartDmaModel<CH32UART, UartDirectPolicy>;
 
@@ -633,8 +630,7 @@ uint32_t CH32UART::ScanNormalIrqStatus(bool in_isr, bool& pushed_any)
   if (rx_data_available)
   {
     (void)dma_model_.ProcessRxInIrqSource(
-        events, [this, &pushed_any]()
-        { pushed_any = rx_dma_model_.OnDataAvailable(*this, _read_port); });
+        events, [this, &queue]() { rx_dma_model_.OnDataAvailable(*this, queue); });
   }
 
   if (tx_complete)

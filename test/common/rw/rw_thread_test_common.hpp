@@ -96,10 +96,9 @@ void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
   }
   REQUIRE(WaitForLinuxFutexWait(ctx.target_thread_id));
 
-  auto ans = ctx.port->queue_data_->PushBatch(ctx.data, ctx.size);
-  UNUSED(ans);
-  ASSERT(ans == LibXR::ErrorCode::OK);
-  ctx.port->ProcessPendingReads(false);
+  auto queue = ctx.port->GetReadQueue();
+  ASSERT(queue.PushBatch(ctx.data, ctx.size) == LibXR::ErrorCode::OK);
+  queue.Publish();
   ctx.done->Post();
 }
 
@@ -109,6 +108,24 @@ struct WriteFinishContext
   LibXR::Semaphore* done;
   LibXR::ErrorCode result;
 };
+
+bool CompleteFrontWrite(LibXR::WritePort& port, LibXR::ErrorCode result,
+                        bool in_isr = false)
+{
+  auto queue = port.GetWriteQueue(in_isr);
+  if (queue.front_size == 0U)
+  {
+    return false;
+  }
+
+  if (static_cast<int8_t>(result) < 0)
+  {
+    return queue.FailFront(result);
+  }
+
+  REQUIRE(result == LibXR::ErrorCode::OK);
+  return queue.PopBatch(nullptr, queue.front_size) == queue.front_size;
+}
 
 /**
  * @brief 辅助函数 `FinishPendingWrite`。 Helper function `FinishPendingWrite`.
@@ -120,23 +137,14 @@ struct WriteFinishContext
  */
 void FinishPendingWrite(WriteFinishContext ctx)
 {
-  LibXR::WriteInfoBlock completed{};
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(THREAD_STATE_TIMEOUT_MS);
 
-  while (ctx.port->QueueInfo()->Peek(completed) != LibXR::ErrorCode::OK)
+  while (!CompleteFrontWrite(*ctx.port, ctx.result))
   {
     REQUIRE(std::chrono::steady_clock::now() < deadline);
     LibXR::Thread::Yield();
   }
-
-  {
-    auto dequeue = ctx.port->BeginDequeue(false);
-    REQUIRE(dequeue.PopInfo(completed) == LibXR::ErrorCode::OK);
-    REQUIRE(dequeue.DiscardData(completed.data.size_) == LibXR::ErrorCode::OK);
-  }
-
-  ctx.port->Finish(false, ctx.result, completed);
   ctx.done->Post();
 }
 

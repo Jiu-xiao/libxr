@@ -31,6 +31,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR LIBXR_TEST_BUILD)
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEBUG_BUILD)
 endif()
 
+if(LIBXR_TEST_BUILD)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_TEST_BUILD)
+endif()
+
 if(LIBXR_DEV_ASSERT_BUILD)
   target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_DEV_ASSERT_BUILD)
 endif()

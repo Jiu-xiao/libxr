@@ -5,6 +5,7 @@
 
 #include "libxr_type.hpp"
 #include "usb/core/desc_cfg.hpp"
+#include "usb_execution_policy.hpp"
 
 namespace LibXR::USB
 {
@@ -55,6 +56,75 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
  protected:
+  /** @return 主机是否选择了非零 configuration / Whether the host selected a nonzero
+   * configuration. */
+  [[nodiscard]] bool DeviceConfigured() const noexcept
+  {
+    ASSERT(runtime_state_ != nullptr);
+    return runtime_state_->configured;
+  }
+
+  /** @return 当前 device lifecycle generation / Current device lifecycle generation. */
+  [[nodiscard]] uint32_t DeviceGeneration() const noexcept
+  {
+    ASSERT(runtime_state_ != nullptr);
+    return runtime_state_->generation;
+  }
+
+  /** @return 当前 generation 是否已 fail-stop / Whether the current generation is
+   * fail-stopped. */
+  [[nodiscard]] bool DeviceGenerationFatal() const noexcept
+  {
+    ASSERT(runtime_state_ != nullptr);
+    return runtime_state_->fatal;
+  }
+
+  /** @brief 将当前 generation 标记为 fail-stop / Fail-stop the current generation. */
+  void MarkDeviceGenerationFatal() noexcept
+  {
+    ASSERT(runtime_state_ != nullptr);
+    ASSERT(runtime_state_->configured);
+    runtime_state_->fatal = true;
+  }
+
+  /**
+   * @brief 发布本 class 的合并 work / Publish coalesced work for this class
+   */
+  void RequestPendingWork(bool in_isr) noexcept
+  {
+    ASSERT(execution_policy_ != nullptr);
+    execution_policy_->NotifyWork(in_isr);
+  }
+
+  /**
+   * @brief 由所属 device owner 推进本 class 的本地事件 / Advance this class's local
+   * events under the owning device owner
+   */
+  virtual void ProcessPendingWork(bool in_isr) noexcept { UNUSED(in_isr); }
+
+  /**
+   * @brief ENDPOINT_HALT 成功清除后通知端点所属 class
+   *        Notify the owning class after ENDPOINT_HALT is cleared successfully.
+   *
+   * @param in_isr  是否在 ISR 上下文 / Whether in ISR context
+   * @param ep_addr 已解除 HALT 的端点地址 / Endpoint address whose halt was cleared
+   */
+  virtual void OnEndpointHaltCleared(bool in_isr, uint8_t ep_addr)
+  {
+    UNUSED(in_isr);
+    UNUSED(ep_addr);
+  }
+
+  /**
+   * @brief 绑定所属 device 的唯一执行策略 / Bind the owning device's sole execution
+   * policy
+   */
+  void SetExecutionPolicy(USBExecutionPolicy& policy) noexcept
+  {
+    ASSERT(execution_policy_ == nullptr || execution_policy_ == &policy);
+    execution_policy_ = &policy;
+  }
+
   /**
    * @brief 返回已分配的接口字符串索引
    *        Return the assigned USB string index for a local interface.
@@ -198,16 +268,33 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
  private:
+  struct RuntimeState
+  {
+    uint32_t generation = 0U;
+    bool configured = false;
+    bool fatal = false;
+  };
+
   // These helpers are driven by DeviceComposition during initialization-time string
   // registration and are not part of the public class contract.
   // 这些辅助函数只在初始化期由 DeviceComposition 调用，不属于对外类接口。
   void SetInterfaceStringBaseIndex(uint8_t string_index);
+
+  void SetRuntimeState(RuntimeState& state) noexcept
+  {
+    ASSERT(runtime_state_ == nullptr || runtime_state_ == &state);
+    runtime_state_ = &state;
+  }
 
   friend class DeviceComposition;
   friend class DeviceCore;
 
   uint8_t interface_string_base_index_ =
       0u;  ///< 首个接口字符串索引 / First interface string index
+  USBExecutionPolicy* execution_policy_ =
+      nullptr;  ///< 所属 device owner / Owning device execution policy
+  RuntimeState* runtime_state_ =
+      nullptr;  ///< 所属 device 运行态 / Owning device runtime state
 };
 
 }  // namespace LibXR::USB

@@ -72,20 +72,18 @@ class UartCircularDmaRxModel
    * @tparam Backend 提供位置读取和缓存维护 hook 的平台后端 / Platform backend
    * providing position and cache-maintenance hooks
    * @param backend 后端实例 / Backend instance
-   * @param port 接收字节的读取端口 / Read port receiving produced bytes
-   * @return 至少一个字节成功进入 RX 队列时为 true / True when at least one byte was
-   * successfully enqueued
+   * @param queue 调用者持有的 RX producer scope / Caller-owned RX producer scope
    *
    * @pre 距上次成功采样后产生的字节数必须严格小于 `BufferSize()` / Bytes produced
    * since the previous successful sample must be strictly less than `BufferSize()`
    *
-   * 调用者在释放 RX/config 硬件 gate 后完成挂起读取。本方法只读 DMA 状态、复制字节并
-   * 推进 SPSC producer。 / The caller completes pending reads after releasing its
-   * RX/config hardware gate. This method only reads DMA state, copies bytes, and
-   * advances the SPSC producer.
+   * 调用者在释放 RX/config 硬件 gate 后调用 `queue.Publish()`。本方法只读 DMA 状态、
+   * 复制字节并推进 SPSC producer。 / The caller invokes `queue.Publish()` after
+   * releasing its RX/config hardware gate. This method only reads DMA state, copies
+   * bytes, and advances the SPSC producer.
    */
   template <typename Backend>
-  [[nodiscard]] bool OnDataAvailable(Backend& backend, ReadPort& port)
+  void OnDataAvailable(Backend& backend, ReadPort::ReadQueue& queue)
   {
     uint8_t* const buffer = Buffer();
     const size_t capacity = BufferSize();
@@ -93,46 +91,35 @@ class UartCircularDmaRxModel
     if (remaining > capacity)
     {
       ASSERT(false);
-      return false;
+      return;
     }
 
     const size_t current_position = capacity - remaining;
 
     if (current_position == last_position_)
     {
-      return false;
+      return;
     }
 
-    bool pushed_any = false;
     if (current_position > last_position_)
     {
       backend.PrepareCircularDmaRxForCpu(&buffer[last_position_],
                                          current_position - last_position_);
-      pushed_any =
-          port.queue_data_->PushBatch(&buffer[last_position_],
-                                      current_position - last_position_) == ErrorCode::OK;
+      (void)queue.PushBatch(&buffer[last_position_], current_position - last_position_);
     }
     else
     {
       backend.PrepareCircularDmaRxForCpu(&buffer[last_position_],
                                          capacity - last_position_);
-      if (port.queue_data_->PushBatch(&buffer[last_position_],
-                                      capacity - last_position_) == ErrorCode::OK)
-      {
-        pushed_any = true;
-      }
+      (void)queue.PushBatch(&buffer[last_position_], capacity - last_position_);
       if (current_position != 0U)
       {
         backend.PrepareCircularDmaRxForCpu(buffer, current_position);
-        if (port.queue_data_->PushBatch(buffer, current_position) == ErrorCode::OK)
-        {
-          pushed_any = true;
-        }
+        (void)queue.PushBatch(buffer, current_position);
       }
     }
 
     last_position_ = current_position;
-    return pushed_any;
   }
 
   /** @brief 将软件游标重置到 DMA 缓冲区起点 / Reset the software cursor. */

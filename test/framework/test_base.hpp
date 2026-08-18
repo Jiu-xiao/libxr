@@ -62,7 +62,7 @@ void test_cb();
 void test_memory();
 void test_linux_shm_topic();
 void test_linux_uart();
-void test_fifo_tx_model();
+void test_cdc_uart_tx();
 void test_uart_dma_tx_model();
 void test_uart_circular_dma_rx_model();
 void test_uart_linked_list_dma_rx_model();

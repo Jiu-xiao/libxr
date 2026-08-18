@@ -187,10 +187,10 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   return dma_model_.SetConfig(config, InIsr());
 }
 
-ErrorCode MSPM0UART::WriteFun(WritePort& port, bool in_isr)
+void MSPM0UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &MSPM0UART::_write_port);
-  return uart->dma_model_.Submit(in_isr);
+  uart->dma_model_.Submit(in_isr);
 }
 
 bool MSPM0UART::InIsr() { return __get_IPSR() != 0U; }
@@ -507,17 +507,14 @@ void MSPM0UART::OnInterrupt(uint8_t index)
 
 void MSPM0UART::HandleInterrupt()
 {
-  rx_pushed_in_owner_ = false;
-  (void)dma_model_.InvokeIrq([this]() { return CaptureIrqEvents(); }, true);
+  auto queue = _read_port.GetReadQueue(true);
+  (void)dma_model_.InvokeIrq([this, &queue]() { return CaptureIrqEvents(queue); }, true);
   __DMB();
-  if (rx_pushed_in_owner_)
-  {
-    // InvokeIrq has released the service owner; read callbacks may reenter public APIs.
-    _read_port.ProcessPendingReads(true);
-  }
+  // InvokeIrq has released the service owner; read callbacks may reenter public APIs.
+  queue.Publish();
 }
 
-uint32_t MSPM0UART::CaptureIrqEvents()
+uint32_t MSPM0UART::CaptureIrqEvents(ReadPort::ReadQueue& queue)
 {
   using Model = UartDmaModel<MSPM0UART, MSPM0UartIrqPolicy>;
   uint32_t events = 0U;
@@ -584,12 +581,12 @@ uint32_t MSPM0UART::CaptureIrqEvents()
            (pending &
             (MSPM0_UART_RX_INTERRUPT_MASK | MSPM0_UART_RX_ERROR_INTERRUPT_MASK)) != 0U)
   {
-    CaptureMainRx(pending, events);
+    CaptureMainRx(pending, events, queue);
   }
 
   if (!dma_error && !uart_error && res_.rx_mode == RxMode::EXTEND_DMA)
   {
-    CaptureExtendRx(events);
+    CaptureExtendRx(events, queue);
   }
   else if (res_.rx_mode == RxMode::EXTEND_DMA)
   {
@@ -604,14 +601,15 @@ uint32_t MSPM0UART::CaptureIrqEvents()
   return events;
 }
 
-void MSPM0UART::CaptureMainRx(uint32_t pending, uint32_t& events)
+void MSPM0UART::CaptureMainRx(uint32_t pending, uint32_t& events,
+                              ReadPort::ReadQueue& queue)
 {
   static_cast<void>(pending);
   DL_UART_disableInterrupt(
       res_.instance, MSPM0_UART_RX_INTERRUPT_MASK | MSPM0_UART_RX_ERROR_INTERRUPT_MASK);
 
   const bool admitted =
-      dma_model_.ProcessRxInIrqSource(events, [this]() { DrainMainRx(); });
+      dma_model_.ProcessRxInIrqSource(events, [this, &queue]() { DrainMainRx(queue); });
   if (admitted && control_phase_ == ControlPhase::IDLE)
   {
     DL_UART_enableInterrupt(
@@ -619,7 +617,7 @@ void MSPM0UART::CaptureMainRx(uint32_t pending, uint32_t& events)
   }
 }
 
-void MSPM0UART::CaptureExtendRx(uint32_t& events)
+void MSPM0UART::CaptureExtendRx(uint32_t& events, ReadPort::ReadQueue& queue)
 {
   using Model = UartDmaModel<MSPM0UART, MSPM0UartIrqPolicy>;
   const uint32_t tagged = rx_dma_facts_.exchange(0U, std::memory_order_acquire);
@@ -643,16 +641,16 @@ void MSPM0UART::CaptureExtendRx(uint32_t& events)
   }
 
   bool invalid = false;
-  const bool admitted =
-      dma_model_.ProcessRxInIrqSource(events,
-                                      [this, facts, &invalid]()
-                                      {
-                                        invalid = facts != 0U && ConsumeRxDmaFacts(facts);
-                                        if (!invalid && rx_partial_flush_pending_)
-                                        {
-                                          invalid = FlushPartialRx();
-                                        }
-                                      });
+  const bool admitted = dma_model_.ProcessRxInIrqSource(
+      events,
+      [this, facts, &invalid, &queue]()
+      {
+        invalid = facts != 0U && ConsumeRxDmaFacts(facts, queue);
+        if (!invalid && rx_partial_flush_pending_)
+        {
+          invalid = FlushPartialRx(queue);
+        }
+      });
   if (!admitted)
   {
     counters_.rx_stale_event_.fetch_add(1U, std::memory_order_relaxed);
@@ -664,7 +662,7 @@ void MSPM0UART::CaptureExtendRx(uint32_t& events)
   }
 }
 
-void MSPM0UART::DrainMainRx()
+void MSPM0UART::DrainMainRx(ReadPort::ReadQueue& queue)
 {
   uint32_t dropped = 0U;
   bool loss = false;
@@ -694,11 +692,7 @@ void MSPM0UART::DrainMainRx()
       }
 
       const uint8_t byte = static_cast<uint8_t>(word & UART_RXDATA_DATA_MASK);
-      if (_read_port.queue_data_->Push(byte) == ErrorCode::OK)
-      {
-        rx_pushed_in_owner_ = true;
-      }
-      else
+      if (queue.Push(byte) != ErrorCode::OK)
       {
         ++dropped;
         loss = true;
@@ -735,7 +729,7 @@ void MSPM0UART::DrainMainRx()
   }
 }
 
-bool MSPM0UART::ConsumeRxDmaFacts(uint32_t facts)
+bool MSPM0UART::ConsumeRxDmaFacts(uint32_t facts, ReadPort::ReadQueue& queue)
 {
   const bool half_phase = rx_dma_phase_ == RxDmaPhase::HALF;
   const uint32_t expected =
@@ -766,13 +760,13 @@ bool MSPM0UART::ConsumeRxDmaFacts(uint32_t facts)
   __DMB();
   if (half_phase)
   {
-    PublishRxRange(rx_dma_cursor_, rx_dma_half_size_);
+    PublishRxRange(queue, rx_dma_cursor_, rx_dma_half_size_);
     rx_dma_cursor_ = rx_dma_half_size_;
     rx_dma_phase_ = RxDmaPhase::FULL;
   }
   else
   {
-    PublishRxRange(rx_dma_cursor_, rx_dma_storage_.size_);
+    PublishRxRange(queue, rx_dma_cursor_, rx_dma_storage_.size_);
     rx_dma_cursor_ = 0U;
     rx_dma_phase_ = res_.rx_half_interrupt ? RxDmaPhase::HALF : RxDmaPhase::FULL;
   }
@@ -808,7 +802,7 @@ MSPM0UART::RxDmaSample MSPM0UART::SampleRxDmaPosition(size_t& position)
   return RxDmaSample::STABLE;
 }
 
-bool MSPM0UART::FlushPartialRx()
+bool MSPM0UART::FlushPartialRx(ReadPort::ReadQueue& queue)
 {
   size_t position = 0U;
   const RxDmaSample sample = SampleRxDmaPosition(position);
@@ -837,13 +831,13 @@ bool MSPM0UART::FlushPartialRx()
   }
 
   __DMB();
-  PublishRxRange(rx_dma_cursor_, position);
+  PublishRxRange(queue, rx_dma_cursor_, position);
   rx_dma_cursor_ = position;
   rx_partial_flush_pending_ = false;
   return false;
 }
 
-void MSPM0UART::PublishRxRange(size_t begin, size_t end)
+void MSPM0UART::PublishRxRange(ReadPort::ReadQueue& queue, size_t begin, size_t end)
 {
   ASSERT(begin <= end);
   ASSERT(end <= rx_dma_storage_.size_);
@@ -853,15 +847,14 @@ void MSPM0UART::PublishRxRange(size_t begin, size_t end)
     return;
   }
 
-  const size_t accepted = std::min(size, _read_port.queue_data_->EmptySize());
+  const size_t accepted = std::min(size, queue.EmptySize());
   size_t pushed = 0U;
   if (accepted != 0U)
   {
     auto* data = static_cast<uint8_t*>(rx_dma_storage_.addr_) + begin;
-    if (_read_port.queue_data_->PushBatch(data, accepted) == ErrorCode::OK)
+    if (queue.PushBatch(data, accepted) == ErrorCode::OK)
     {
       pushed = accepted;
-      rx_pushed_in_owner_ = true;
     }
   }
 

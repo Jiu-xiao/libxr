@@ -60,13 +60,16 @@ void test_rw_read_claim_release_handles_concurrent_producer_notification()
           iteration_start.arrive_and_wait();
           const uint8_t first = static_cast<uint8_t>((iteration % 125U) + 1U);
           const uint8_t second = static_cast<uint8_t>(first + 125U);
-          ASSERT(port.queue_data_->Push(first) == ErrorCode::OK);
-          if ((iteration % 3U) == 1U)
           {
-            std::this_thread::yield();
+            auto queue = port.GetReadQueue();
+            ASSERT(queue.Push(first) == ErrorCode::OK);
+            if ((iteration % 3U) == 1U)
+            {
+              std::this_thread::yield();
+            }
+            ASSERT(queue.Push(second) == ErrorCode::OK);
+            queue.Publish();
           }
-          ASSERT(port.queue_data_->Push(second) == ErrorCode::OK);
-          port.ProcessPendingReads(false);
           iteration_done.arrive_and_wait();
         }
       });
@@ -102,7 +105,11 @@ void test_rw_invalid_read_does_not_claim_or_consume_queue()
 
   ReadPort port(2);
   static constexpr uint8_t QUEUED = 0x6BU;
-  ASSERT(port.queue_data_->Push(QUEUED) == ErrorCode::OK);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(QUEUED) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   OperationPollingStatus null_status;
   ReadOperation null_operation(null_status);
@@ -147,8 +154,11 @@ void test_rw_queued_callback_can_submit_next_read_after_dequeue_notification()
   ASSERT(port(RawData{&outer_data, 1}, outer_op, false) == ErrorCode::OK);
 
   static const uint8_t OUTER_DATA = 0x31;
-  ASSERT(port.queue_data_->Push(OUTER_DATA) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(OUTER_DATA) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   ASSERT(context.outer_callbacks == 1U);
   ASSERT(context.outer_status == ErrorCode::OK);
@@ -159,8 +169,11 @@ void test_rw_queued_callback_can_submit_next_read_after_dequeue_notification()
   ASSERT(port.dequeue_count == 1U);
 
   static const uint8_t NESTED_DATA = 0x42;
-  ASSERT(port.queue_data_->Push(NESTED_DATA) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(NESTED_DATA) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   ASSERT(context.nested_callbacks == 1U);
   ASSERT(context.nested_status == ErrorCode::OK);
@@ -187,8 +200,11 @@ void test_rw_busy_read_does_not_modify_rejected_operation_or_pending_request()
   ASSERT(rejected_status.Load() == OperationPollingStatus::READY);
 
   static const uint8_t RECEIVED = 0x5A;
-  ASSERT(port.queue_data_->Push(RECEIVED) == ErrorCode::OK);
-  port.ProcessPendingReads(false);
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(RECEIVED) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   ASSERT(first_status.Load() == OperationPollingStatus::DONE);
   ASSERT(first_data == RECEIVED);

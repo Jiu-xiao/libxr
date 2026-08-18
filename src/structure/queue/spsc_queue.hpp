@@ -192,6 +192,55 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
+   * @brief 通过一次读取器调用消费队头前缀 / Consume a front prefix through one reader
+   *        call
+   * @tparam Reader 读取器类型 / Reader callback type
+   * @param limit 本次最多提供的 payload 数 / Maximum payload count offered this time
+   * @param reader 读取器，签名为
+   *        `size_t(const Data* first, size_t first_count, const Data* second,
+   *        size_t second_count)` / Reader with the signature shown above
+   * @return 读取器实际接受并出队的 payload 数 / Payload count accepted by the reader
+   *         and dequeued
+   * @note 队列为空或 `limit == 0` 时不调用读取器。读取器在每次 API 调用中最多
+   *       调用一次；两段按 first 后 second 组成队头 FIFO 前缀，仅在该次读取器
+   *       调用期间有效。读取器不得保留指针或重入此队列的 consumer 修改接口。 /
+   *       The reader is not called when the queue is empty or `limit == 0`, and is
+   *       called at most once per API call. The first and second spans form the FIFO
+   *       front prefix in that order and remain valid only during the reader call. The
+   *       reader must not retain either pointer or reenter a consumer-mutating queue API.
+   * @pre 读取器返回值不得超过两个 span 的元素总数；违反时所有构建均触发 fatal。 /
+   *      The reader result must not exceed the total element count in the two spans;
+   *      violating this requirement triggers the fatal handler in every build.
+   */
+  template <typename Reader>
+  size_t ConsumeWithReader(size_t limit, Reader&& reader)
+  {
+    static_assert(std::is_trivially_copyable_v<Data>,
+                  "SPSCQueue::ConsumeWithReader requires trivially copyable payloads");
+    static_assert(
+        std::is_trivially_destructible_v<Data>,
+        "SPSCQueue::ConsumeWithReader requires trivially destructible payloads");
+    static_assert(std::is_invocable_v<Reader&, const Data*, size_t, const Data*, size_t>,
+                  "ConsumeWithReader reader must be callable as "
+                  "size_t(const Data* first, size_t first_count, const Data* second, "
+                  "size_t second_count)");
+    using ReaderRet =
+        std::invoke_result_t<Reader&, const Data*, size_t, const Data*, size_t>;
+    static_assert(std::is_convertible_v<ReaderRet, size_t>,
+                  "ConsumeWithReader reader return type must be convertible to size_t");
+
+    Reader& reader_ref = reader;
+    return SPSCQueueBase::ConsumeBytesWithReader(
+        limit,
+        [&](const void* first, size_t first_count, const void* second,
+            size_t second_count) -> size_t
+        {
+          return reader_ref(static_cast<const Data*>(first), first_count,
+                            static_cast<const Data*>(second), second_count);
+        });
+  }
+
+  /**
    * @brief 批量弹出多个 payload。
    * @brief Pop multiple payloads from the queue.
    * @param data 用于接收 payload 的数组。 Array receiving dequeued payloads.

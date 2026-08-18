@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "driver/common/fifo_tx_model.hpp"
 #include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "esp_uart_execution_policy.hpp"
@@ -58,11 +57,11 @@ static_assert(false,
 /**
  * @brief ESP32 USB Serial/JTAG 后端实现 / ESP32 USB Serial/JTAG backend implementation
  *
- * TX payload 仅存放在 `WritePort` 字节队列中。唯一 service owner 将已排队字节直接送入
- * 64 字节硬件 FIFO；一条记录的最后一个字节被硬件接受后，该 write 即完成。
- * TX payload remains only in the `WritePort` byte queue. A single service owner streams
- * queued bytes directly into the 64-byte hardware FIFO; a write completes when the
- * hardware accepts the final byte of that record.
+ * TX payload 仅存放在 `WritePort` 字节队列中。每个 service owner scope 最多把 front 和
+ * next 直接送入 64 字节硬件 FIFO；一条记录的最后一个字节被硬件接受后，该 write 即完成。
+ * TX payload remains only in the `WritePort` byte queue. Each service-owner scope feeds
+ * at most front plus next directly into the 64-byte hardware FIFO; a write completes
+ * when the hardware accepts the final byte of that record.
  *
  * @note 每个 USB Serial/JTAG 外设最多构造一个 process-lifetime 后端对象 / Construct at
  * most one process-lifetime backend object for each USB Serial/JTAG peripheral
@@ -94,12 +93,11 @@ class ESP32CDCJtag : public UART
    */
   ErrorCode SetConfig(UART::Configuration config) override;
 
-  /** @brief WritePort 提交入口 / WritePort submission entry */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  /** @brief WritePort TX 推进 doorbell / WritePort TX progress doorbell */
+  static void WriteFun(WritePort& port, bool in_isr);
 
  private:
   using ExecutionPolicy = Detail::ESP32UartExecutionPolicy<ESP32CDCJtag>;
-  using TxCompletionPublication = FifoTxModel::CompletionPublication;
 
   enum class Event : uint32_t
   {
@@ -124,17 +122,18 @@ class ESP32CDCJtag : public UART
   void DisarmTxEmptyInterrupt();
 
   uint32_t ServiceIrqSource(bool in_isr) noexcept;
-  uint32_t ServiceEvents(uint32_t events, bool in_isr, bool& pushed_any) noexcept;
+  uint32_t ServiceEvents(uint32_t events, bool in_isr,
+                         ReadPort::ReadQueue& queue) noexcept;
   void HandleInterrupt();
 
   void ResumeRx(bool in_isr);
-  uint32_t ServiceRx(bool in_isr, bool& pushed_any);
-  bool DrainRxToQueue(bool in_isr);
-  bool PushRxBytes(const uint8_t* data, size_t size, bool in_isr);
+  uint32_t ServiceRx(bool in_isr, ReadPort::ReadQueue& queue);
+  void DrainRxToQueue(ReadPort::ReadQueue& queue, bool in_isr);
+  void PushRxBytes(ReadPort::ReadQueue& queue, const uint8_t* data, size_t size,
+                   bool in_isr);
 
-  ErrorCode SubmitWrite(bool in_isr);
   void ProgressTx(bool in_isr);
-  bool FillTxFifo(bool in_isr);
+  size_t FillTxFifo(WritePort::WriteQueue& queue, bool in_isr);
 
   portMUX_TYPE irq_domain_lock_ = portMUX_INITIALIZER_UNLOCKED;
   bool irq_domain_masked_ = true;
@@ -147,7 +146,6 @@ class ESP32CDCJtag : public UART
 
   ESP32CDCJtagReadPort _read_port;
   WritePort _write_port;
-  FifoTxModel tx_model_;
 };
 
 }  // namespace LibXR

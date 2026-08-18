@@ -120,13 +120,22 @@ void test_terminal()
                                                  'o',  'w', 'n', '\n'};
   write_raw(non_printable_unknown, sizeof(non_printable_unknown));
 
-  const size_t output_size = output.GetReadPort().Size();
-  ASSERT(output_size > 0);
+  std::vector<char> terminal_output;
+  while (output.GetReadPort().Size() != 0U)
+  {
+    const size_t chunk_size = output.GetReadPort().Size();
+    const size_t offset = terminal_output.size();
+    terminal_output.resize(offset + chunk_size);
+    LibXR::ReadOperation read_op;
+    ASSERT(output.GetReadPort()(
+               LibXR::RawData{terminal_output.data() + offset, chunk_size}, read_op) ==
+           LibXR::ErrorCode::OK);
+  }
+  ASSERT(!terminal_output.empty());
+  ASSERT(output.GetWritePort().Size() == 0U);
 
-  std::vector<char> terminal_output(output_size + 1, '\0');
-  LibXR::ReadOperation read_op;
-  ASSERT(output.GetReadPort()(LibXR::RawData{terminal_output.data(), output_size},
-                              read_op) == LibXR::ErrorCode::OK);
+  const size_t output_size = terminal_output.size();
+  terminal_output.push_back('\0');
   ASSERT(std::strstr(terminal_output.data(), "Not an executable file.") != nullptr);
   ASSERT(std::strstr(terminal_output.data(), "Command not found.") != nullptr);
   ASSERT(std::memchr(terminal_output.data(), static_cast<unsigned char>(0xFF),

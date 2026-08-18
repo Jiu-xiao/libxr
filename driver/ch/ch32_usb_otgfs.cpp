@@ -1,5 +1,6 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 // ch32_usb_otgfs.cpp  (OTG FS)
+#include "ch32_interrupt_guard.h"
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
 #include "ch32_usb_rcc.hpp"
@@ -41,6 +42,45 @@ static void ClearPendingOtgFsInterrupts()
 
 }  // namespace
 
+void CH32USBOtgFS::LockInterruptDomain(void* context) noexcept
+{
+  auto* self = static_cast<CH32USBOtgFS*>(context);
+  ASSERT(self != nullptr);
+  self->irq_lock_state_ = libxr_ch32_interrupt_save_and_disable();
+}
+
+void CH32USBOtgFS::UnlockInterruptDomain(void* context) noexcept
+{
+  auto* self = static_cast<CH32USBOtgFS*>(context);
+  ASSERT(self != nullptr);
+  libxr_ch32_interrupt_restore(self->irq_lock_state_);
+}
+
+uintptr_t CH32USBOtgFS::MaskInterruptDomain(void* context) noexcept
+{
+  auto* self = static_cast<CH32USBOtgFS*>(context);
+  ASSERT(self != nullptr);
+  ASSERT(!self->irq_domain_masked_);
+  self->irq_desired_mask_ = USBFSD->INT_EN;
+  self->irq_domain_masked_ = true;
+  USBFSD->INT_EN = 0U;
+  const volatile uint8_t readback = USBFSD->INT_EN;
+  UNUSED(readback);
+  return self->irq_desired_mask_;
+}
+
+void CH32USBOtgFS::RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept
+{
+  auto* self = static_cast<CH32USBOtgFS*>(context);
+  ASSERT(self != nullptr);
+  ASSERT(self->irq_domain_masked_);
+  UNUSED(saved_state);
+  USBFSD->INT_EN = self->irq_desired_mask_;
+  const volatile uint8_t readback = USBFSD->INT_EN;
+  UNUSED(readback);
+  self->irq_domain_masked_ = false;
+}
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandler(void)
 {
@@ -51,136 +91,134 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     return;
   }
 
-  auto& map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
-
-  constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
-  constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
-  auto* out0 = map[0][OUT_IDX];
-  auto* in0 = map[0][IN_IDX];
-  ASSERT(out0 != nullptr);
-  ASSERT(in0 != nullptr);
-
-  // Handle order matches the control-transfer lifecycle:
-  // 1) bus-level recovery
-  // 2) token completion / setup dispatch
-  // 处理顺序与控制传输生命周期保持一致：
-  // 1) 总线级恢复
-  // 2) token 完成与 setup 分发
-  while (true)
-  {
-    const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
-        reinterpret_cast<uintptr_t>(&USBFSD->INT_FG));
-
-    const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
-    const uint8_t INTST = static_cast<uint8_t>((INTFGST >> 8) & 0x00FFu);
-
-    const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & OTG_FS_CLEARABLE_MASK);
-    if (PENDING == 0)
-    {
-      break;
-    }
-
-    uint8_t clear_mask = 0;
-
-    // Reset rebuilds EP0 state and returns the device to "waiting for setup".
-    // reset 会重建 EP0 状态，并把设备恢复到“等待 setup”的初始形态。
-    if (PENDING & USBFS_UIF_BUS_RST)
-    {
-      USBFSD->DEV_ADDR = 0;
-
-      usb->Deinit(true);
-      usb->Init(true);
-
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      out0->tog_ = true;
-      in0->tog_ = true;
-
-      USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
-      USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
-
-      clear_mask |= USBFS_UIF_BUS_RST;
-    }
-
-    // Suspend follows the same EP0 recovery path; resume is observed later by the host.
-    // suspend 走与 reset 相同的 EP0 恢复路径；resume 由后续主机时序体现。
-    if (PENDING & USBFS_UIF_SUSPEND)
-    {
-      usb->Deinit(true);
-      usb->Init(true);
-
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      out0->tog_ = true;
-      in0->tog_ = true;
-
-      USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
-      USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
-
-      clear_mask |= USBFS_UIF_SUSPEND;
-    }
-
-    if (PENDING & USBFS_UIF_TRANSFER)
-    {
-      const uint8_t TOKEN = INTST & USBFS_UIS_TOKEN_MASK;
-      const uint8_t EPNUM = INTST & USBFS_UIS_ENDP_MASK;
-
-      auto& ep = map[EPNUM];
-
-      switch (TOKEN)
+  (void)usb->RunIrq(
+      [usb]() noexcept
       {
-        case USBFS_UIS_TOKEN_SETUP:
+        auto& map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
+
+        constexpr uint8_t OUT_IDX =
+            static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
+        constexpr uint8_t IN_IDX =
+            static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
+        auto* out0 = map[0][OUT_IDX];
+        auto* in0 = map[0][IN_IDX];
+        ASSERT(out0 != nullptr);
+        ASSERT(in0 != nullptr);
+
+        // Handle order matches the control-transfer lifecycle:
+        // 1) bus-level recovery
+        // 2) token completion / setup dispatch
+        // 处理顺序与控制传输生命周期保持一致：
+        // 1) 总线级恢复
+        // 2) token 完成与 setup 分发
+        while (true)
         {
-          // A fresh setup cancels the previous EP0 transaction, so both directions are
-          // reset to IDLE/TOG0 before handing the setup packet to DeviceCore.
-          // 新的 setup 会中断前一笔 EP0 事务，因此这里在把 setup 包交给 DeviceCore
-          // 之前，先把 EP0 的双向状态恢复到 IDLE/TOG0。
-          USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
-          USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
+          const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
+              reinterpret_cast<uintptr_t>(&USBFSD->INT_FG));
 
-          out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-          in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-          out0->tog_ = true;
-          in0->tog_ = true;
+          const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
+          const uint8_t INTST = static_cast<uint8_t>((INTFGST >> 8) & 0x00FFu);
 
-          usb->OnSetupPacket(
-              true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
-          break;
-        }
-
-        case USBFS_UIS_TOKEN_OUT:
-        {
-          // OTGFS hardware already reports the completed RX length for this token.
-          // OTGFS 硬件已经给出了本次 token 的完成 RX 长度。
-          const uint16_t LEN = USBFSD->RX_LEN;
-          if (ep[OUT_IDX])
+          const uint8_t PENDING = static_cast<uint8_t>(INTFLAG & OTG_FS_CLEARABLE_MASK);
+          if (PENDING == 0)
           {
-            ep[OUT_IDX]->TransferComplete(LEN);
+            break;
           }
-          break;
-        }
 
-        case USBFS_UIS_TOKEN_IN:
-        {
-          // IN token completion has no payload length; completion itself is enough.
-          // IN token 完成不需要额外 payload 长度，事件本身就足够了。
-          if (ep[IN_IDX])
+          uint8_t clear_mask = 0;
+          bool discard_transfer = false;
+
+          // Reset rebuilds EP0 state and returns the device to "waiting for setup".
+          // reset 会重建 EP0 状态，并把设备恢复到“等待 setup”的初始形态。
+          if (PENDING & USBFS_UIF_BUS_RST)
           {
-            ep[IN_IDX]->TransferComplete(0);
+            USBFSD->DEV_ADDR = 0;
+
+            usb->Deinit(true);
+            usb->Init(true);
+
+            out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+            in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+            out0->tog_ = true;
+            in0->tog_ = true;
+
+            USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
+            USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
+
+            clear_mask |= USBFS_UIF_BUS_RST;
+            discard_transfer = true;
           }
-          break;
+
+          // Suspend/resume 保留当前 configuration、端点状态和在途传输。
+          // Suspend/resume preserves the current configuration, endpoint state, and
+          // in-flight transfers.
+          if (PENDING & USBFS_UIF_SUSPEND)
+          {
+            clear_mask |= USBFS_UIF_SUSPEND;
+          }
+
+          if ((PENDING & USBFS_UIF_TRANSFER) && !discard_transfer)
+          {
+            const uint8_t TOKEN = INTST & USBFS_UIS_TOKEN_MASK;
+            const uint8_t EPNUM = INTST & USBFS_UIS_ENDP_MASK;
+
+            auto& ep = map[EPNUM];
+
+            switch (TOKEN)
+            {
+              case USBFS_UIS_TOKEN_SETUP:
+              {
+                // A fresh setup cancels the previous EP0 transaction, so both directions
+                // are reset to IDLE/TOG0 before handing the setup packet to DeviceCore.
+                // 新的 setup 会中断前一笔 EP0 事务，因此这里在把 setup 包交给 DeviceCore
+                // 之前，先把 EP0 的双向状态恢复到 IDLE/TOG0。
+                USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
+                USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
+
+                out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+                in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+                out0->tog_ = true;
+                in0->tog_ = true;
+
+                usb->OnSetupPacket(
+                    true, reinterpret_cast<const SetupPacket*>(out0->GetBuffer().addr_));
+                break;
+              }
+
+              case USBFS_UIS_TOKEN_OUT:
+              {
+                // OTGFS hardware already reports the completed RX length for this token.
+                // OTGFS 硬件已经给出了本次 token 的完成 RX 长度。
+                const uint16_t LEN = USBFSD->RX_LEN;
+                if (ep[OUT_IDX])
+                {
+                  ep[OUT_IDX]->TransferComplete(LEN);
+                }
+                break;
+              }
+
+              case USBFS_UIS_TOKEN_IN:
+              {
+                // IN token completion has no payload length; completion itself is enough.
+                // IN token 完成不需要额外 payload 长度，事件本身就足够了。
+                if (ep[IN_IDX])
+                {
+                  ep[IN_IDX]->TransferComplete(0);
+                }
+                break;
+              }
+
+              default:
+                break;
+            }
+
+            clear_mask |= USBFS_UIF_TRANSFER;
+          }
+
+          clear_mask |= static_cast<uint8_t>(PENDING & ~clear_mask);
+          USBFSD->INT_FG = clear_mask;
         }
-
-        default:
-          break;
-      }
-
-      clear_mask |= USBFS_UIF_TRANSFER;
-    }
-
-    clear_mask |= static_cast<uint8_t>(PENDING & ~clear_mask);
-    USBFSD->INT_FG = clear_mask;
-  }
+      });
 }
 
 CH32USBOtgFS::CH32USBOtgFS(
@@ -195,6 +233,8 @@ CH32USBOtgFS::CH32USBOtgFS(
       USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
                       pid, bcd, LANG_LIST, CONFIGS, uid)
 {
+  SetInterruptDomain({this, LockInterruptDomain, UnlockInterruptDomain,
+                      MaskInterruptDomain, RestoreInterruptDomain});
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgFs::EP_OTG_FS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -261,7 +301,8 @@ void CH32USBOtgFS::Start(bool)
 #endif
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
   USBFSH->BASE_CTRL = 0x00;
-  USBFSD->INT_EN = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;
+  irq_desired_mask_ = USBFS_UIE_SUSPEND | USBFS_UIE_BUS_RST | USBFS_UIE_TRANSFER;
+  USBFSD->INT_EN = irq_domain_masked_ ? 0U : irq_desired_mask_;
   USBFSD->BASE_CTRL = USBFS_UC_DEV_PU_EN | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
   USBFSD->UDEV_CTRL = USBFS_UD_PD_DIS | USBFS_UD_PORT_EN;
   NVIC_EnableIRQ(USBFS_IRQn);
@@ -270,6 +311,8 @@ void CH32USBOtgFS::Start(bool)
 
 void CH32USBOtgFS::Stop(bool)
 {
+  irq_desired_mask_ = 0U;
+  USBFSD->INT_EN = 0U;
   USBFSH->BASE_CTRL = USBFS_UC_RESET_SIE | USBFS_UC_CLR_ALL;
   USBFSD->BASE_CTRL = 0x00;
   NVIC_DisableIRQ(USBFS_IRQn);

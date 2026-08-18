@@ -449,7 +449,6 @@ class AsyncBlockWait
   ErrorCode result_ = ErrorCode::OK;
 };
 
-class ReadPort;
 class WritePort;
 
 /// @brief Read operation type.
@@ -463,39 +462,15 @@ typedef Operation<ErrorCode> WriteOperation;
 /// @brief Function pointer type for write operations.
 /// @brief 写入操作的函数指针类型。
 ///
-/// This entry has two call reasons. On a normal submission, the current write has already
-/// been queued. PENDING hands terminal publication to the backend through a later
-/// Finish(), even if hardware accepted the record on this call stack. On a publication
-/// retry, WritePort invokes the same entry after releasing admission; the retained
-/// terminal may already have been dequeued, and the retry must return PENDING. Backends
-/// participating in this retry path gate terminal publication with
-/// WritePort::TryPublishBackendCompletion(). On a normal submission, non-PENDING means
-/// the current queued op completed synchronously and must not later be passed to
-/// Finish(). Negative non-PENDING values report a synchronous start failure and must not
-/// leave that op in the queue.
-/// 本入口有两种调用原因。普通提交时，当前写入已经进入队列；PENDING 表示后端之后通过
-/// Finish() 发布 terminal，即使硬件已在本调用栈接受记录也可以如此。publication retry
-/// 时，WritePort 会在释放 admission 后重调同一入口；保留的 terminal 可能已经出队，且本次
-/// 重调必须返回 PENDING。参与该 retry 路径的后端须在发布 terminal 前调用
-/// WritePort::TryPublishBackendCompletion()。普通提交返回非 PENDING 表示当前 queued op
-/// 已同步完成，之后不得再传给 Finish()；负数非 PENDING 表示同步启动失败，且不得把该 op
-/// 留在队列中。
-typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
-
-/**
- * @brief Read information block structure.
- * @brief 读取信息块结构。
- */
-typedef struct
-{
-  RawData data;      ///< Data buffer. 数据缓冲区。
-  ReadOperation op;  ///< Read operation instance. 读取操作实例。
-} ReadInfoBlock;
-
-typedef struct
-{
-  ConstRawData data;  ///< Data buffer. 数据缓冲区。
-  WriteOperation op;  ///< Write operation instance. 写入操作实例。
-} WriteInfoBlock;
+/// The entry is a persistent backend doorbell. A call only means that released write
+/// requests or a producer-barrier transition may now allow progress. The backend creates
+/// a short-lived `WritePort::WriteQueue` and consumes bytes through its bounded pop
+/// methods; request boundaries and operation completion stay private to `WritePort`. The
+/// callback must not retain queue span pointers after a pop writer returns.
+/// 本入口是持久的后端 doorbell。每次调用只表示已释放的写入字节或 producer
+/// barrier 变化可能允许继续推进。后端构造短命 `WritePort::WriteQueue`，通过其有界
+/// pop 接口接管字节；request 边界和 operation completion 始终由 `WritePort` 私有。
+/// pop writer 返回后，回调不得保留队列 span 指针。
+typedef void (*WriteFun)(WritePort& port, bool in_isr);
 
 }  // namespace LibXR

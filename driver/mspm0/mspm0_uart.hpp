@@ -11,8 +11,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "driver/common/serialized_service.hpp"
 #include "mspm0_dma_dispatcher.hpp"
+#include "serialized_service.hpp"
 #include "ti_msp_dl_config.h"
 #include "uart.hpp"
 #include "uart/uart_dma_model.hpp"
@@ -259,10 +259,8 @@ class MSPM0UART : public UART
    * @brief WritePort 提交入口 / WritePort submission entry
    * @param port 发起提交的写端口 / Write port issuing the submission
    * @param in_isr 当前调用是否位于 ISR / Whether the call is in an ISR
-   * @return 始终返回 `PENDING`；记录已发布给 UART IRQ owner 异步处理 / Always
-   *         `PENDING` after publishing the record for asynchronous UART-IRQ processing
    */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr);
+  static void WriteFun(WritePort& port, bool in_isr);
 
   /**
    * @brief 分发指定 MSPM0 UART 实例的中断 / Dispatch one MSPM0 UART instance interrupt
@@ -504,14 +502,14 @@ class MSPM0UART : public UART
   }
 
   void HandleInterrupt();
-  uint32_t CaptureIrqEvents();
-  void CaptureMainRx(uint32_t pending, uint32_t& events);
-  void CaptureExtendRx(uint32_t& events);
-  void DrainMainRx();
-  bool ConsumeRxDmaFacts(uint32_t facts);
-  bool FlushPartialRx();
+  uint32_t CaptureIrqEvents(ReadPort::ReadQueue& queue);
+  void CaptureMainRx(uint32_t pending, uint32_t& events, ReadPort::ReadQueue& queue);
+  void CaptureExtendRx(uint32_t& events, ReadPort::ReadQueue& queue);
+  void DrainMainRx(ReadPort::ReadQueue& queue);
+  bool ConsumeRxDmaFacts(uint32_t facts, ReadPort::ReadQueue& queue);
+  bool FlushPartialRx(ReadPort::ReadQueue& queue);
   RxDmaSample SampleRxDmaPosition(size_t& position);
-  void PublishRxRange(size_t begin, size_t end);
+  void PublishRxRange(ReadPort::ReadQueue& queue, size_t begin, size_t end);
   void DiscardRxFifo();
   void CountUartInterruptErrors(uint32_t pending);
   static uint32_t RxWordInterruptErrors(uint32_t word);
@@ -562,7 +560,6 @@ class MSPM0UART : public UART
   UartOldTxTerminal stopped_tx_terminal_ = UartOldTxTerminal::NONE;
   RxDmaPhase rx_dma_phase_ = RxDmaPhase::HALF;
   size_t rx_dma_cursor_ = 0U;
-  bool rx_pushed_in_owner_ = false;
   bool rx_epoch_invalid_ = false;
   bool rx_partial_flush_pending_ = false;
   bool tx_line_active_ = false;

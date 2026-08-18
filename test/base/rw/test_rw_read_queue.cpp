@@ -10,10 +10,9 @@
  *          2. Aggregate pending-completion, owner-release race, and zero-length read
  * sub-scenarios.
  */
-#include "rw_test_common.hpp"
-
 void RunBaseRwReadQueueClearTests();
 void RunBaseRwReadQueuePendingTests();
+void RunBaseRwReadQueueProducerTests();
 
 /**
  * @brief 测试项函数 `RunBaseRwReadQueueTests`。 Test-item function
@@ -27,4 +26,5 @@ void RunBaseRwReadQueueTests()
 {
   RunBaseRwReadQueueClearTests();
   RunBaseRwReadQueuePendingTests();
+  RunBaseRwReadQueueProducerTests();
 }

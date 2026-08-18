@@ -15,6 +15,7 @@ struct StreamCallbackReentry
   SynchronousWritePort* port = nullptr;
   LibXR::WritePort::Stream* stream = nullptr;
   bool try_reentry = true;
+  size_t callback_count = 0U;
   LibXR::ErrorCode completion_result = LibXR::ErrorCode::FAILED;
   LibXR::ErrorCode direct_write = LibXR::ErrorCode::FAILED;
   LibXR::ErrorCode stream_write = LibXR::ErrorCode::FAILED;
@@ -22,14 +23,53 @@ struct StreamCallbackReentry
   LibXR::ErrorCode stream_commit = LibXR::ErrorCode::FAILED;
 };
 
+struct PipeSettlementReentry
+{
+  LibXR::ReadPort* read = nullptr;
+  LibXR::Callback<LibXR::ErrorCode>* read_callback = nullptr;
+  uint8_t first_byte = 0U;
+  uint8_t second_byte = 0U;
+  size_t read_callback_count = 0U;
+  bool write_saw_first_read = false;
+  LibXR::ErrorCode second_read_submit = LibXR::ErrorCode::FAILED;
+  LibXR::ErrorCode second_push = LibXR::ErrorCode::FAILED;
+};
+
+void OnPipeSettlementRead(bool, PipeSettlementReentry* context, LibXR::ErrorCode result)
+{
+  ASSERT(result == LibXR::ErrorCode::OK);
+  ++context->read_callback_count;
+  if (context->read_callback_count == 1U)
+  {
+    LibXR::ReadOperation second_operation(*context->read_callback);
+    context->second_read_submit =
+        (*context->read)(LibXR::RawData{&context->second_byte, 1U}, second_operation);
+  }
+}
+
+void OnPipeSettlementWrite(bool, PipeSettlementReentry* context, LibXR::ErrorCode result)
+{
+  ASSERT(result == LibXR::ErrorCode::OK);
+  context->write_saw_first_read = context->read_callback_count == 1U;
+  static const uint8_t SECOND = 0xB2U;
+  auto queue = context->read->GetReadQueue();
+  context->second_push = queue.Push(SECOND);
+  if (context->second_push == LibXR::ErrorCode::OK)
+  {
+    queue.Publish();
+  }
+}
+
 void OnStreamWriteComplete(bool, StreamCallbackReentry* context, LibXR::ErrorCode result)
 {
   using namespace LibXR;
 
+  ++context->callback_count;
   context->completion_result = result;
 
   if (context->try_reentry)
   {
+    context->try_reentry = false;
     static const uint8_t NESTED[] = {0xA1};
     WriteOperation direct_op;
     context->direct_write =
@@ -163,7 +203,73 @@ void test_pipe_stream_commit_allows_persistent_and_external_streams()
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
-void test_pipe_stream_allows_direct_callback_reentry_but_rejects_same_stream()
+void test_pipe_stream_payload_is_invisible_before_commit()
+{
+  using namespace LibXR;
+
+  Pipe pipe(8U);
+  ReadPort& read = pipe.GetReadPort();
+  WritePort& write = pipe.GetWritePort();
+
+  OperationPollingStatus write_status;
+  WriteOperation write_operation(write_status);
+  WritePort::Stream stream(&write, write_operation);
+  static const uint8_t PAYLOAD[] = {0x31U, 0x32U, 0x33U};
+  ASSERT(stream.Write(ConstRawData{PAYLOAD, sizeof(PAYLOAD)}) == ErrorCode::OK);
+  ASSERT(write_status.Load() == OperationPollingStatus::READY);
+  ASSERT(write.Size() == sizeof(PAYLOAD));
+  ASSERT(read.Size() == 0U);
+
+  uint8_t received[sizeof(PAYLOAD)] = {0xA5U, 0xA5U, 0xA5U};
+  OperationPollingStatus read_status;
+  ReadOperation read_operation(read_status);
+  ASSERT(read(RawData{received, sizeof(received)}, read_operation) == ErrorCode::OK);
+  ASSERT(read_status.Load() == OperationPollingStatus::RUNNING);
+  ASSERT(received[0] == 0xA5U && received[1] == 0xA5U && received[2] == 0xA5U);
+
+  ASSERT(stream.Commit() == ErrorCode::OK);
+  ASSERT(write_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(read_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(std::memcmp(received, PAYLOAD, sizeof(PAYLOAD)) == 0);
+  ASSERT(write.Size() == 0U);
+  ASSERT(read.Size() == 0U);
+}
+
+void test_pipe_write_completion_preserves_committed_payload_until_read_completes()
+{
+  using namespace LibXR;
+
+  Pipe pipe(8U);
+  ReadPort& read = pipe.GetReadPort();
+  WritePort& write = pipe.GetWritePort();
+
+  uint8_t received[5] = {};
+  OperationPollingStatus read_status;
+  ReadOperation read_operation(read_status);
+  ASSERT(read(RawData{received, sizeof(received)}, read_operation) == ErrorCode::OK);
+  ASSERT(read_status.Load() == OperationPollingStatus::RUNNING);
+
+  static const uint8_t FIRST[] = {0x11U, 0x12U};
+  OperationPollingStatus first_status;
+  WriteOperation first_operation(first_status);
+  ASSERT(write(ConstRawData{FIRST, sizeof(FIRST)}, first_operation) == ErrorCode::OK);
+  ASSERT(first_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(read_status.Load() == OperationPollingStatus::RUNNING);
+  ASSERT(read.Size() == sizeof(FIRST));
+
+  static const uint8_t SECOND[] = {0x21U, 0x22U, 0x23U};
+  OperationPollingStatus second_status;
+  WriteOperation second_operation(second_status);
+  ASSERT(write(ConstRawData{SECOND, sizeof(SECOND)}, second_operation) == ErrorCode::OK);
+  ASSERT(second_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(read_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(read.Size() == 0U);
+
+  static const uint8_t EXPECTED[] = {0x11U, 0x12U, 0x21U, 0x22U, 0x23U};
+  ASSERT(std::memcmp(received, EXPECTED, sizeof(EXPECTED)) == 0);
+}
+
+void test_pipe_stream_callback_can_reuse_same_stream()
 {
   using namespace LibXR;
 
@@ -179,22 +285,49 @@ void test_pipe_stream_allows_direct_callback_reentry_but_rejects_same_stream()
   ASSERT(stream.Commit() == ErrorCode::OK);
 
   ASSERT(context.completion_result == ErrorCode::OK);
+  ASSERT(context.callback_count == 2U);
   ASSERT(context.direct_write == ErrorCode::OK);
-  ASSERT(context.stream_write == ErrorCode::BUSY);
+  ASSERT(context.stream_write == ErrorCode::OK);
   ASSERT(context.stream_zero_write == ErrorCode::OK);
-  ASSERT(context.stream_commit == ErrorCode::BUSY);
-  static const uint8_t NESTED[] = {0xA1};
-  ASSERT(port.payload_size == sizeof(NESTED));
-  ASSERT(std::memcmp(port.payload, NESTED, sizeof(NESTED)) == 0);
-  ASSERT(port.QueueData()->Size() == 0);
-  ASSERT(port.QueueInfo()->Size() == 0);
+  ASSERT(context.stream_commit == ErrorCode::OK);
+  static const uint8_t NESTED_BATCH[] = {0xA1, 0xA1};
+  ASSERT(port.payload_size == sizeof(NESTED_BATCH));
+  ASSERT(std::memcmp(port.payload, NESTED_BATCH, sizeof(NESTED_BATCH)) == 0);
+  ASSERT(port.Size() == 0U);
 
-  context.try_reentry = false;
   static const uint8_t REUSE[] = {0x41, 0x42};
   ASSERT(stream.Write(ConstRawData{REUSE, sizeof(REUSE)}) == ErrorCode::OK);
   ASSERT(stream.Commit() == ErrorCode::OK);
   ASSERT(port.payload_size == sizeof(REUSE));
   ASSERT(std::memcmp(port.payload, REUSE, sizeof(REUSE)) == 0);
+}
+
+void test_pipe_publishes_read_scope_before_write_settlement_callback()
+{
+  using namespace LibXR;
+
+  Pipe pipe(8U);
+  ReadPort& read = pipe.GetReadPort();
+  WritePort& write = pipe.GetWritePort();
+  PipeSettlementReentry context{.read = &read};
+
+  auto read_callback = Callback<ErrorCode>::Create(OnPipeSettlementRead, &context);
+  context.read_callback = &read_callback;
+  ReadOperation read_operation(read_callback);
+  ASSERT(read(RawData{&context.first_byte, 1U}, read_operation) == ErrorCode::OK);
+
+  auto write_callback = Callback<ErrorCode>::Create(OnPipeSettlementWrite, &context);
+  WriteOperation write_operation(write_callback);
+  static const uint8_t FIRST = 0xA1U;
+  ASSERT(write(ConstRawData{&FIRST, 1U}, write_operation) == ErrorCode::OK);
+
+  ASSERT(context.write_saw_first_read);
+  ASSERT(context.second_push == ErrorCode::OK);
+  ASSERT(context.second_read_submit == ErrorCode::OK);
+  ASSERT(context.read_callback_count == 2U);
+  ASSERT(context.first_byte == FIRST);
+  ASSERT(context.second_byte == 0xB2U);
+  ASSERT(read.Size() == 0U);
 }
 
 void test_pipe_stream_reports_live_capacity_after_consumer_progress()
@@ -214,13 +347,7 @@ void test_pipe_stream_reports_live_capacity_after_consumer_progress()
   ASSERT(stream.Write(ConstRawData{FIRST, sizeof(FIRST)}) == ErrorCode::OK);
   ASSERT(stream.EmptySize() == 0);
 
-  WriteInfoBlock old_info{};
-  {
-    auto dequeue = w.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(old_info) == ErrorCode::OK);
-    ASSERT(dequeue.DiscardData(old_info.data.size_) == ErrorCode::OK);
-  }
-  w.Finish(false, ErrorCode::OK, old_info);
+  ASSERT(CompleteFrontWrite(w, ErrorCode::OK));
 
   ASSERT(stream.EmptySize() == sizeof(OLD));
   static const uint8_t SECOND[] = {0x30, 0x31, 0x32, 0x33};
@@ -228,17 +355,29 @@ void test_pipe_stream_reports_live_capacity_after_consumer_progress()
   ASSERT(stream.EmptySize() == 0);
   ASSERT(stream.Commit() == ErrorCode::OK);
 
-  WriteInfoBlock combined_info{};
   uint8_t combined[sizeof(FIRST) + sizeof(SECOND)] = {};
+  size_t offset = 0U;
   {
-    auto dequeue = w.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(combined_info) == ErrorCode::OK);
-    ASSERT(combined_info.data.size_ == sizeof(FIRST) + sizeof(SECOND));
-    ASSERT(dequeue.PopData(combined, sizeof(combined)) == ErrorCode::OK);
+    auto queue = w.GetWriteQueue();
+    ASSERT(queue.front_size == sizeof(combined));
+    ASSERT(queue.next_size == 0U);
+    ASSERT(queue.PopWithWriter(sizeof(combined),
+                               [&](const uint8_t* first, size_t first_size,
+                                   const uint8_t* second, size_t second_size)
+                               {
+                                 std::memcpy(combined + offset, first, first_size);
+                                 offset += first_size;
+                                 if (second_size != 0U)
+                                 {
+                                   std::memcpy(combined + offset, second, second_size);
+                                   offset += second_size;
+                                 }
+                                 return first_size + second_size;
+                               }) == sizeof(combined));
   }
   static const uint8_t EXPECTED[] = {0x20, 0x21, 0x22, 0x23, 0x30, 0x31, 0x32, 0x33};
   ASSERT(std::memcmp(combined, EXPECTED, sizeof(EXPECTED)) == 0);
-  w.Finish(false, ErrorCode::OK, combined_info);
+  ASSERT(w.Size() == 0U);
 }
 
 /**
@@ -255,6 +394,9 @@ void RunBasePipeStreamTests()
   test_pipe_stream_block_immediate_path();
   test_pipe_stream_commit_releases_lock_for_next_stream();
   test_pipe_stream_commit_allows_persistent_and_external_streams();
-  test_pipe_stream_allows_direct_callback_reentry_but_rejects_same_stream();
+  test_pipe_stream_payload_is_invisible_before_commit();
+  test_pipe_write_completion_preserves_committed_payload_until_read_completes();
+  test_pipe_stream_callback_can_reuse_same_stream();
+  test_pipe_publishes_read_scope_before_write_settlement_callback();
   test_pipe_stream_reports_live_capacity_after_consumer_progress();
 }

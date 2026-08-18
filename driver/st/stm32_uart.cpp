@@ -16,20 +16,6 @@ static_assert(ShouldPublishStopDoneOnTxComplete(true, true));
 static_assert(!ShouldPublishStopDoneOnTxComplete(true, false));
 static_assert(!ShouldPublishStopDoneOnTxComplete(false, true));
 
-constexpr UartOldTxTerminal PreserveRequiredReplay(bool replay_required,
-                                                   UartOldTxTerminal terminal)
-{
-  return replay_required && (terminal == UartOldTxTerminal::COMPLETE)
-             ? UartOldTxTerminal::NONE
-             : terminal;
-}
-
-static_assert(PreserveRequiredReplay(true, UartOldTxTerminal::COMPLETE) ==
-              UartOldTxTerminal::NONE);
-static_assert(PreserveRequiredReplay(true, UartOldTxTerminal::ERROR) ==
-              UartOldTxTerminal::ERROR);
-static_assert(PreserveRequiredReplay(false, UartOldTxTerminal::COMPLETE) ==
-              UartOldTxTerminal::COMPLETE);
 }  // namespace
 
 bool STM32UART::DmaTransferSizeSupported(size_t size)
@@ -77,10 +63,10 @@ bool STM32UART::IsPendingRxLineError(uint32_t error_code)
   return true;
 }
 
-ErrorCode STM32UART::WriteFun(WritePort& port, bool in_isr)
+void STM32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &STM32UART::_write_port);
-  return uart->dma_model_.Submit(in_isr);
+  uart->dma_model_.Submit(in_isr);
 }
 
 STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
@@ -140,22 +126,11 @@ ErrorCode STM32UART::SetConfig(UART::Configuration config)
 UartDmaControlResult STM32UART::AdvanceConfig(UART::Configuration config, bool active_tx,
                                               bool in_isr)
 {
-  if (!active_tx)
-  {
-    tx_replay_required_ = false;
-  }
-
   UartDmaControlResult stop_result = StopDataPath(active_tx, true, in_isr);
   if (!stop_result.IsCompleted())
   {
     return stop_result;
   }
-
-  // Recovery may have stopped an error-bearing active generation before CONFIG won
-  // admission. HAL cleanup preserves NDTR but not the DMA error flag, so a later CONFIG
-  // must not reinterpret NDTR == 0 as a successful completion of that same generation.
-  stop_result.old_tx_terminal =
-      PreserveRequiredReplay(tx_replay_required_, stop_result.old_tx_terminal);
 
   const bool configured = ApplyConfigPayload(config, in_isr);
   REQUIRE_FROM_CALLBACK(configured, in_isr);
@@ -174,18 +149,7 @@ UartDmaControlProgress STM32UART::CompleteConfig(bool in_isr)
 
 UartDmaControlResult STM32UART::AdvanceRecovery(bool active_tx, bool in_isr)
 {
-  if (!active_tx)
-  {
-    tx_replay_required_ = false;
-  }
-
-  const UartDmaControlResult stop_result = StopDataPath(active_tx, false, in_isr);
-  if (stop_result.IsCompleted())
-  {
-    tx_replay_required_ =
-        active_tx && (stop_result.old_tx_terminal != UartOldTxTerminal::COMPLETE);
-  }
-  return stop_result;
+  return StopDataPath(active_tx, false, in_isr);
 }
 
 UartDmaControlProgress STM32UART::CompleteRecovery(bool in_isr)
@@ -418,18 +382,10 @@ UartDmaControlProgress STM32UART::SetRxDMA(bool in_isr)
 
 void STM32UART::OnRxDataAvailable(bool in_isr)
 {
-  bool data_available = false;
-  const bool admitted = dma_model_.ProcessRx(
-      in_isr, [this, &data_available]()
-      { data_available = rx_dma_model_.OnDataAvailable(*this, _read_port); });
-  if (!admitted)
-  {
-    return;
-  }
-  if (data_available)
-  {
-    _read_port.ProcessPendingReads(in_isr);
-  }
+  auto queue = _read_port.GetReadQueue(in_isr);
+  (void)dma_model_.ProcessRx(
+      in_isr, [this, &queue]() { rx_dma_model_.OnDataAvailable(*this, queue); });
+  queue.Publish();
 }
 
 void STM32UART::OnTxComplete(bool in_isr)
@@ -450,7 +406,6 @@ UartDmaTxStartResult STM32UART::StartDmaTx(uint8_t* data, size_t size, int, bool
   {
     return UartDmaTxStartResult::FAILED;
   }
-  tx_replay_required_ = false;
   return UartDmaTxStartResult::STARTED;
 }
 

@@ -156,13 +156,7 @@ void test_rw_edge_cases()
   auto second_result = w(ConstRawData{tx2, sizeof(tx2)}, op2);
   ASSERT(second_result == ErrorCode::FULL);
 
-  WriteInfoBlock completed{};
-  {
-    auto dequeue = w.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(completed) == ErrorCode::OK);
-    ASSERT(dequeue.DiscardData(completed.data.size_) == ErrorCode::OK);
-  }
-  w.Finish(false, ErrorCode::OK, completed);
+  ASSERT(CompleteFrontWrite(w, ErrorCode::OK));
 }
 
 void test_rw_read_publish_handles_concurrent_producer()
@@ -184,8 +178,11 @@ void test_rw_read_publish_handles_concurrent_producer()
             std::this_thread::yield();
           }
           const uint8_t data = static_cast<uint8_t>((iteration % 251U) + 1U);
-          ASSERT(port.queue_data_->Push(data) == ErrorCode::OK);
-          port.ProcessPendingReads(false);
+          {
+            auto queue = port.GetReadQueue();
+            ASSERT(queue.Push(data) == ErrorCode::OK);
+            queue.Publish();
+          }
           iteration_done.arrive_and_wait();
         }
       });

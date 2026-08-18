@@ -17,13 +17,11 @@
 #include <vector>
 
 #include "rw_thread_test_common.hpp"
+#include "serialized_service.hpp"
 
 namespace
 {
-LibXR::ErrorCode PendingWriteFun(LibXR::WritePort&, bool)
-{
-  return LibXR::ErrorCode::PENDING;
-}
+void PendingWriteFun(LibXR::WritePort&, bool) {}
 
 struct SynchronousWritePort : LibXR::WritePort
 {
@@ -33,41 +31,49 @@ struct SynchronousWritePort : LibXR::WritePort
     WritePort::operator=(HandleWrite);
   }
 
-  static LibXR::ErrorCode HandleWrite(LibXR::WritePort& base, bool in_isr)
+  static void HandleWrite(LibXR::WritePort& base, bool in_isr)
   {
     auto& port = static_cast<SynchronousWritePort&>(base);
-    LibXR::WriteInfoBlock info{};
-    {
-      auto dequeue = port.BeginDequeue(in_isr);
-      ASSERT(dequeue.PopInfo(info) == LibXR::ErrorCode::OK);
-      ASSERT(info.data.size_ <= sizeof(port.payload));
-      port.payload_size = info.data.size_;
-      ASSERT(dequeue.PopData(port.payload, port.payload_size) == LibXR::ErrorCode::OK);
-    }
-    return port.result;
+    (void)port.service.Invoke(
+        1U,
+        [&port, in_isr](uint32_t) noexcept
+        {
+          while (true)
+          {
+            auto queue = port.GetWriteQueue(in_isr);
+            const size_t offered = queue.front_size + queue.next_size;
+            if (offered == 0U)
+            {
+              return;
+            }
+
+            if (static_cast<int8_t>(port.result) < 0)
+            {
+              REQUIRE(queue.FailFront(port.result));
+              continue;
+            }
+
+            REQUIRE(port.result == LibXR::ErrorCode::OK);
+            REQUIRE(offered <= sizeof(port.payload));
+            port.payload_size = queue.PopBatch(port.payload, offered);
+            REQUIRE(port.payload_size == offered);
+          }
+        });
   }
 
+  LibXR::SerializedService service;
   LibXR::ErrorCode result = LibXR::ErrorCode::OK;
   uint8_t payload[64]{};
   size_t payload_size = 0;
 };
 
-LibXR::ErrorCode FailWriteFun(LibXR::WritePort& port, bool)
+void FailWriteFun(LibXR::WritePort& port, bool in_isr)
 {
-  LibXR::WriteInfoBlock info;
+  auto queue = port.GetWriteQueue(in_isr);
+  if (queue.front_size != 0U)
   {
-    auto dequeue = port.BeginDequeue(false);
-    auto pop_ans = dequeue.PopInfo(info);
-    if (pop_ans != LibXR::ErrorCode::OK)
-    {
-      return pop_ans;
-    }
-
-    auto drop_ans = dequeue.DiscardData(info.data.size_);
-    UNUSED(drop_ans);
-    ASSERT(drop_ans == LibXR::ErrorCode::OK);
+    REQUIRE(queue.FailFront(LibXR::ErrorCode::INIT_ERR));
   }
-  return LibXR::ErrorCode::INIT_ERR;
 }
 
 struct TrackingReadPort : LibXR::ReadPort
@@ -101,8 +107,9 @@ void VerifyPendingReadMode(TestMode mode)
   ASSERT(call_result == ErrorCode::OK);
   read.ExpectPendingSubmitted();
 
-  ASSERT(r.queue_data_->PushBatch(tx.data(), tx.size()) == ErrorCode::OK);
-  r.ProcessPendingReads(false);
+  auto queue = r.GetReadQueue();
+  ASSERT(queue.PushBatch(tx.data(), tx.size()) == ErrorCode::OK);
+  queue.Publish();
   if (mode != TestMode::NONE)
   {
     read.ExpectFinal(ErrorCode::OK);
@@ -131,18 +138,12 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
   auto call_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
   ASSERT(call_result == ErrorCode::OK);
 
-  WriteInfoBlock info{};
-  {
-    auto dequeue = w.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(info) == ErrorCode::OK);
-    ASSERT(dequeue.DiscardData(info.data.size_) == ErrorCode::OK);
-  }
-  w.Finish(false, result, info);
+  ASSERT(CompleteFrontWrite(w, result));
   if (mode != TestMode::NONE)
   {
     write.ExpectFinal(result);
   }
-  ASSERT(w.QueueInfo()->Size() == 0);
+  ASSERT(w.Size() == 0U);
 }
 
 }  // namespace

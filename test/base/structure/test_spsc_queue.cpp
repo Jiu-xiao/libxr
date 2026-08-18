@@ -267,6 +267,122 @@ void test_spsc_queue()
     ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
+  // Partial consumption exposes at most two spans through one callback invocation.
+  {
+    LibXR::SPSCQueue<uint8_t> byte_queue(6);
+    const uint8_t initial[4] = {1, 2, 3, 4};
+    size_t calls = 0;
+
+    ASSERT(byte_queue.PushBatch(initial, 4) == LibXR::ErrorCode::OK);
+    ASSERT(byte_queue.ConsumeWithReader(3,
+                                        [&](const uint8_t* first, size_t first_count,
+                                            const uint8_t* second, size_t second_count)
+                                        {
+                                          ++calls;
+                                          ASSERT(first_count == 3);
+                                          ASSERT(second == nullptr);
+                                          ASSERT(second_count == 0);
+                                          ASSERT(first[0] == 1);
+                                          return 0U;
+                                        }) == 0);
+    ASSERT(calls == 1);
+    ASSERT(byte_queue.Size() == 4);
+
+    ASSERT(byte_queue.ConsumeWithReader(3,
+                                        [&](const uint8_t* first, size_t first_count,
+                                            const uint8_t* second, size_t second_count)
+                                        {
+                                          ++calls;
+                                          ASSERT(first_count == 3);
+                                          ASSERT(second == nullptr);
+                                          ASSERT(second_count == 0);
+                                          ASSERT(first[0] == 1);
+                                          ASSERT(first[1] == 2);
+                                          ASSERT(first[2] == 3);
+                                          return 2U;
+                                        }) == 2);
+    ASSERT(calls == 2);
+    ASSERT(byte_queue.Size() == 2);
+
+    uint8_t readback[2] = {};
+    ASSERT(byte_queue.PopBatch(readback, 2) == LibXR::ErrorCode::OK);
+    ASSERT(readback[0] == 3);
+    ASSERT(readback[1] == 4);
+  }
+
+  // A wrapped prefix is still presented once, and only the accepted prefix advances.
+  {
+    LibXR::SPSCQueue<uint8_t> byte_queue(6);
+    const uint8_t initial[6] = {1, 2, 3, 4, 5, 6};
+    const uint8_t wrap[4] = {7, 8, 9, 10};
+    uint8_t value = 0;
+    size_t calls = 0;
+
+    ASSERT(byte_queue.PushBatch(initial, 6) == LibXR::ErrorCode::OK);
+    for (uint8_t expected = 1; expected <= 5; ++expected)
+    {
+      ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::OK);
+      ASSERT(value == expected);
+    }
+    ASSERT(byte_queue.PushBatch(wrap, 4) == LibXR::ErrorCode::OK);
+
+    ASSERT(byte_queue.ConsumeWithReader(5,
+                                        [&](const uint8_t* first, size_t first_count,
+                                            const uint8_t* second, size_t second_count)
+                                        {
+                                          ++calls;
+                                          ASSERT(first_count == 2);
+                                          ASSERT(second_count == 3);
+                                          ASSERT(first[0] == 6);
+                                          ASSERT(first[1] == 7);
+                                          ASSERT(second[0] == 8);
+                                          ASSERT(second[1] == 9);
+                                          ASSERT(second[2] == 10);
+                                          return 4U;
+                                        }) == 4);
+    ASSERT(calls == 1);
+    ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 10);
+    ASSERT(byte_queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+  }
+
+  // Zero offers skip the callback, and a large limit is clamped to available data.
+  {
+    Queue queue(3);
+    size_t calls = 0;
+
+    ASSERT(queue.ConsumeWithReader(1,
+                                   [&](const uint32_t*, size_t, const uint32_t*, size_t)
+                                   {
+                                     ++calls;
+                                     return 0U;
+                                   }) == 0);
+    ASSERT(queue.Push(11) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Push(22) == LibXR::ErrorCode::OK);
+    ASSERT(queue.ConsumeWithReader(0,
+                                   [&](const uint32_t*, size_t, const uint32_t*, size_t)
+                                   {
+                                     ++calls;
+                                     return 0U;
+                                   }) == 0);
+    ASSERT(calls == 0);
+
+    ASSERT(queue.ConsumeWithReader(100,
+                                   [&](const uint32_t* first, size_t first_count,
+                                       const uint32_t* second, size_t second_count)
+                                   {
+                                     ++calls;
+                                     ASSERT(first_count == 2);
+                                     ASSERT(first[0] == 11);
+                                     ASSERT(first[1] == 22);
+                                     ASSERT(second == nullptr);
+                                     ASSERT(second_count == 0);
+                                     return first_count + second_count;
+                                   }) == 2);
+    ASSERT(calls == 1);
+    ASSERT(queue.Size() == 0);
+  }
+
   // End-to-end producer/consumer handoff under sustained contention.
   {
     constexpr uint32_t TOTAL_ITEMS = 50000;

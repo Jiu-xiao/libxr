@@ -72,9 +72,7 @@ class UartLinkedListDmaRxModel
    * @tparam Backend 提供 producer 采样和缓存维护 hook 的平台后端 / Platform backend
    * providing producer sampling and cache-maintenance hooks
    * @param backend 后端实例 / Backend instance
-   * @param port 接收字节的读取端口 / Read port receiving produced bytes
-   * @return 至少一个字节成功进入 RX 队列时为 true / True when at least one byte was
-   * successfully enqueued
+   * @param queue 调用者持有的 RX producer scope / Caller-owned RX producer scope
    *
    * 后端必须在 `GetLinkedListDmaRxProducer()` 中恰好采样一次实时 producer 指针。首字节
    * 和尾后地址都是合法环位置，尾后地址归一化为零；两次观察间跨过一个或多个完整环仍
@@ -85,19 +83,19 @@ class UartLinkedListDmaRxModel
    * @pre 距上次成功采样后产生的字节数必须严格小于 `BufferSize()` / Bytes produced
    * since the previous successful sample must be strictly less than `BufferSize()`
    *
-   * 调用者在释放 RX/config 硬件 gate 后完成挂起读取。本方法只采样 DMA 状态、复制字节
-   * 并推进 SPSC producer。 / The caller completes pending reads after releasing its
-   * RX/config hardware gate. This method only samples DMA state, copies bytes, and
-   * advances the SPSC producer.
+   * 调用者在释放 RX/config 硬件 gate 后调用 `queue.Publish()`。本方法只采样 DMA 状态、
+   * 复制字节并推进 SPSC producer。 / The caller invokes `queue.Publish()` after
+   * releasing its RX/config hardware gate. This method only samples DMA state, copies
+   * bytes, and advances the SPSC producer.
    */
   template <typename Backend>
-  [[nodiscard]] bool OnDataAvailable(Backend& backend, ReadPort& port)
+  void OnDataAvailable(Backend& backend, ReadPort::ReadQueue& queue)
   {
     uint8_t* const buffer = Buffer();
     const size_t capacity = BufferSize();
     if (capacity == 0U)
     {
-      return false;
+      return;
     }
 
     uint8_t* const producer = backend.GetLinkedListDmaRxProducer();
@@ -106,14 +104,14 @@ class UartLinkedListDmaRxModel
     if (producer_address < buffer_address)
     {
       ASSERT(false);
-      return false;
+      return;
     }
 
     size_t current_position = producer_address - buffer_address;
     if (current_position > capacity)
     {
       ASSERT(false);
-      return false;
+      return;
     }
     if (current_position == capacity)
     {
@@ -122,39 +120,28 @@ class UartLinkedListDmaRxModel
 
     if (current_position == last_position_)
     {
-      return false;
+      return;
     }
 
-    bool pushed_any = false;
     if (current_position > last_position_)
     {
       backend.PrepareLinkedListDmaRxForCpu(&buffer[last_position_],
                                            current_position - last_position_);
-      pushed_any =
-          port.queue_data_->PushBatch(&buffer[last_position_],
-                                      current_position - last_position_) == ErrorCode::OK;
+      (void)queue.PushBatch(&buffer[last_position_], current_position - last_position_);
     }
     else
     {
       backend.PrepareLinkedListDmaRxForCpu(&buffer[last_position_],
                                            capacity - last_position_);
-      if (port.queue_data_->PushBatch(&buffer[last_position_],
-                                      capacity - last_position_) == ErrorCode::OK)
-      {
-        pushed_any = true;
-      }
+      (void)queue.PushBatch(&buffer[last_position_], capacity - last_position_);
       if (current_position != 0U)
       {
         backend.PrepareLinkedListDmaRxForCpu(buffer, current_position);
-        if (port.queue_data_->PushBatch(buffer, current_position) == ErrorCode::OK)
-        {
-          pushed_any = true;
-        }
+        (void)queue.PushBatch(buffer, current_position);
       }
     }
 
     last_position_ = current_position;
-    return pushed_any;
   }
 
   /** @brief 将软件游标重置到逻辑环起点 / Reset the software cursor. */

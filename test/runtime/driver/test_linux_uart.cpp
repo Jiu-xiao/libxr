@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -16,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -101,6 +104,52 @@ bool WaitForFd(int fd, short events, const Clock::time_point& deadline)
   }
 }
 
+long StdoWorkerSyscall()
+{
+  for (const auto& entry : std::filesystem::directory_iterator("/proc/self/task"))
+  {
+    std::ifstream comm(entry.path() / "comm");
+    std::string name;
+    if (!std::getline(comm, name) || name != "STDIO.write_")
+    {
+      continue;
+    }
+
+    std::ifstream syscall(entry.path() / "syscall");
+    long syscall_number = -1;
+    return syscall >> syscall_number ? syscall_number : -1;
+  }
+  return -1;
+}
+
+bool StdoWorkerInPoll()
+{
+  const long syscall_number = StdoWorkerSyscall();
+  if (syscall_number == SYS_poll)
+  {
+    return true;
+  }
+#ifdef SYS_ppoll
+  return syscall_number == SYS_ppoll;
+#else
+  return false;
+#endif
+}
+
+bool StdoWorkerWaitingOnSemaphore()
+{
+  const long syscall_number = StdoWorkerSyscall();
+  if (syscall_number == SYS_futex)
+  {
+    return true;
+  }
+#ifdef SYS_futex_waitv
+  return syscall_number == SYS_futex_waitv;
+#else
+  return false;
+#endif
+}
+
 bool WriteAll(int fd, const uint8_t* data, size_t size, uint32_t timeout_ms)
 {
   const auto deadline = Clock::now() + std::chrono::milliseconds(timeout_ms);
@@ -169,6 +218,67 @@ std::vector<uint8_t> MakePayload(size_t size, uint32_t seed)
     byte = static_cast<uint8_t>(state >> 24U);
   }
   return payload;
+}
+
+void StdioPollFailureRecoveryScenario()
+{
+  ASSERT(signal(SIGPIPE, SIG_IGN) != SIG_ERR);
+  ASSERT(WaitUntil([]() { return LibXR::STDIO::write_->Size() == 0U; }, 2000U));
+
+  std::array<int, 2> blocked{};
+  ASSERT(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
+                    blocked.data()) == 0);
+
+  std::array<uint8_t, 4096U> filler{};
+  while (true)
+  {
+    const ssize_t written = write(blocked[0], filler.data(), filler.size());
+    if (written > 0)
+    {
+      continue;
+    }
+    if (written < 0 && errno == EINTR)
+    {
+      continue;
+    }
+    ASSERT(written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
+    break;
+  }
+
+  ASSERT(dup2(blocked[0], STDOUT_FILENO) == STDOUT_FILENO);
+  const std::array<uint8_t, 5U> retained = {0x11U, 0x22U, 0x33U, 0x44U, 0x55U};
+  LibXR::OperationPollingStatus retained_status;
+  LibXR::WriteOperation retained_operation(retained_status);
+  ASSERT((*LibXR::STDIO::write_)({retained.data(), retained.size()},
+                                 retained_operation) == LibXR::ErrorCode::OK);
+  ASSERT(WaitUntil(StdoWorkerInPoll, 1000U));
+
+  ASSERT(close(blocked[1]) == 0);
+  ASSERT(WaitUntil(StdoWorkerWaitingOnSemaphore, 1000U));
+
+  std::array<int, 2> capture{};
+  ASSERT(pipe2(capture.data(), O_CLOEXEC) == 0);
+  ASSERT(dup2(capture[1], STDOUT_FILENO) == STDOUT_FILENO);
+  ASSERT(close(capture[1]) == 0);
+  ASSERT(close(blocked[0]) == 0);
+
+  const std::array<uint8_t, 4U> wake = {0xA1U, 0xB2U, 0xC3U, 0xD4U};
+  LibXR::OperationPollingStatus wake_status;
+  LibXR::WriteOperation wake_operation(wake_status);
+  ASSERT((*LibXR::STDIO::write_)({wake.data(), wake.size()}, wake_operation) ==
+         LibXR::ErrorCode::OK);
+
+  std::array<uint8_t, 4U> received{};
+  ASSERT(ReadExact(capture[0], received.data(), received.size(), 1000U));
+  ASSERT(std::memcmp(received.data(), wake.data(), wake.size()) == 0);
+  ASSERT(WaitUntil(
+      [&]()
+      {
+        return retained_status.Load() == LibXR::OperationPollingStatus::ERROR &&
+               wake_status.Load() == LibXR::OperationPollingStatus::DONE;
+      },
+      1000U));
+  ASSERT(close(capture[0]) == 0);
 }
 
 std::string MakeStableLink(const std::string& target, std::string& directory)
@@ -470,7 +580,7 @@ void ConfigSerializationScenario()
       open(pty.slave.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
   ASSERT(observer >= 0);
   auto* uart = new LibXR::LinuxUART(
-      pty.slave.c_str(), 115200, LibXR::UART::Parity::NO_PARITY, 8, 1, 4, 256U * 1024U);
+      pty.slave.c_str(), 115200, LibXR::UART::Parity::NO_PARITY, 8, 1, 4, 512U * 1024U);
 
   const auto payload = MakePayload(256U * 1024U, 0xA5A5A5A5U);
   LibXR::OperationPollingStatus status;
@@ -747,7 +857,7 @@ void ConfigReconnectScenario()
   std::string directory;
   const std::string stable_link = MakeStableLink(first.slave, directory);
   auto* uart = new LibXR::LinuxUART(
-      stable_link.c_str(), 115200, LibXR::UART::Parity::NO_PARITY, 8, 1, 4, 256U * 1024U);
+      stable_link.c_str(), 115200, LibXR::UART::Parity::NO_PARITY, 8, 1, 4, 512U * 1024U);
 
   const auto active = MakePayload(256U * 1024U, 0x61616161U);
   LibXR::OperationPollingStatus active_status;
@@ -770,8 +880,9 @@ void ConfigReconnectScenario()
   ASSERT(close(first.master) == 0);
   first.master = -1;
   ASSERT(WaitUntil([&]() { return !ProcessHasOpenTarget(first.slave); }, 2000U));
-  LibXR::Thread::Sleep(50U);
-  ASSERT(active_status.Load() == LibXR::OperationPollingStatus::RUNNING);
+  ASSERT(WaitUntil(
+      [&]() { return active_status.Load() == LibXR::OperationPollingStatus::ERROR; },
+      1000U));
 
   const auto queued = MakePayload(2049U, 0x62626262U);
   LibXR::OperationPollingStatus queued_status;
@@ -786,9 +897,6 @@ void ConfigReconnectScenario()
   RebindStableLink(stable_link, second.slave);
 
   ASSERT(WaitUntil([&]() { return BaudIs(observer, reconnect_config.baudrate); }, 4000U));
-  ASSERT(WaitUntil(
-      [&]() { return active_status.Load() == LibXR::OperationPollingStatus::ERROR; },
-      1000U));
   std::vector<uint8_t> queued_rx(queued.size());
   ASSERT(ReadExact(second.master, queued_rx.data(), queued_rx.size(), 4000U));
   ASSERT(queued_rx == queued);
@@ -842,17 +950,8 @@ void HupScenario()
   ASSERT(close(first.master) == 0);
   first.master = -1;
   ASSERT(WaitUntil([&]() { return !ProcessHasOpenTarget(first.slave); }, 2000U));
-  LibXR::Thread::Sleep(50U);
-  ASSERT(state.count.load(std::memory_order_acquire) == 0U);
-
-  Pty second = OpenPty();
-  const int observer =
-      open(second.slave.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
-  ASSERT(observer >= 0);
-  RebindStableLink(stable_link, second.slave);
-
   ASSERT(WaitUntil([&]() { return state.count.load(std::memory_order_acquire) == 1U; },
-                   4000U));
+                   1000U));
   ASSERT(static_cast<LibXR::ErrorCode>(state.completion_result.load(
              std::memory_order_relaxed)) == LibXR::ErrorCode::FAILED);
   ASSERT(static_cast<LibXR::ErrorCode>(
@@ -861,6 +960,13 @@ void HupScenario()
              std::memory_order_relaxed)) == LibXR::ErrorCode::OK);
   ASSERT(static_cast<LibXR::ErrorCode>(state.second_config_result.load(
              std::memory_order_relaxed)) == LibXR::ErrorCode::BUSY);
+
+  Pty second = OpenPty();
+  const int observer =
+      open(second.slave.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+  ASSERT(observer >= 0);
+  RebindStableLink(stable_link, second.slave);
+
   ASSERT(
       WaitUntil([&]() { return BaudIs(observer, state.first_config.baudrate); }, 2000U));
 
@@ -932,7 +1038,11 @@ void RunScenario(const char* name)
 
 int RunLinuxUartScenario(const char* name)
 {
-  if (std::strcmp(name, "tx_wake_partial") == 0)
+  if (std::strcmp(name, "stdio_poll_failure_recovery") == 0)
+  {
+    StdioPollFailureRecoveryScenario();
+  }
+  else if (std::strcmp(name, "tx_wake_partial") == 0)
   {
     TxWakeAndPartialWriteScenario();
   }
@@ -985,6 +1095,7 @@ int RunLinuxUartScenario(const char* name)
 
 void test_linux_uart()
 {
+  RunScenario("stdio_poll_failure_recovery");
   RunScenario("tx_wake_partial");
   RunScenario("rx_backpressure");
   RunScenario("rx_nonfull_dequeue");

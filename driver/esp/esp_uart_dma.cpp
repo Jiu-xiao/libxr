@@ -79,11 +79,8 @@ void IRAM_ATTR ESP32UartDma::SetIrqDomainEnabledLocked(bool enabled) noexcept
 
 ESP32UartDma::TxStorage ESP32UartDma::AllocateTxStorage(size_t block_size)
 {
+  REQUIRE(block_size > 0U && block_size <= DMA_LINK_ITEM_MAX_SIZE);
   TxStorage storage{};
-  if (block_size == 0U)
-  {
-    return storage;
-  }
 
   size_t cache_line_size = 1U;
   if (esp_cache_get_alignment(MALLOC_CAP_INTERNAL, &cache_line_size) != ESP_OK)
@@ -140,7 +137,7 @@ ESP32UartDma::ESP32UartDma(uart_port_t uart_num, int tx_pin, int rx_pin, int rts
   REQUIRE(uart_num_ < UART_NUM_MAX);
   REQUIRE(uart_num_ < SOC_UART_HP_NUM);
   REQUIRE(rx_buffer_size > 0U);
-  REQUIRE(tx_buffer_size > 0U);
+  REQUIRE(tx_queue_size > 0U);
   if constexpr (Detail::ESP_UART_USES_IRQ_SERIALIZATION)
   {
     REQUIRE(Detail::IsCurrentTaskPinnedToOneCore());
@@ -288,10 +285,10 @@ ErrorCode ESP32UartDma::SetLoopback(bool enable)
   return ErrorCode::OK;
 }
 
-ErrorCode IRAM_ATTR ESP32UartDma::WriteFun(WritePort& port, bool in_isr)
+void IRAM_ATTR ESP32UartDma::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &ESP32UartDma::_write_port);
-  return uart->dma_model_.Submit(in_isr);
+  uart->dma_model_.Submit(in_isr);
 }
 
 ErrorCode ESP32UartDma::InitUartHardware()
@@ -323,25 +320,25 @@ ErrorCode ESP32UartDma::InitUartHardware()
   return ErrorCode::OK;
 }
 
-bool IRAM_ATTR ESP32UartDma::PushRxBytes(const uint8_t* data, size_t size)
+void IRAM_ATTR ESP32UartDma::PushRxBytes(ReadPort::ReadQueue& queue, const uint8_t* data,
+                                         size_t size)
 {
   size_t offset = 0U;
   while (offset < size)
   {
-    const size_t free_space = read_port_->queue_data_->EmptySize();
+    const size_t free_space = queue.EmptySize();
     if (free_space == 0U)
     {
       break;
     }
 
     const size_t chunk = std::min(free_space, size - offset);
-    if (read_port_->queue_data_->PushBatch(data + offset, chunk) != ErrorCode::OK)
+    if (queue.PushBatch(data + offset, chunk) != ErrorCode::OK)
     {
       break;
     }
     offset += chunk;
   }
-  return offset != 0U;
 }
 
 }  // namespace LibXR

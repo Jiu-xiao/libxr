@@ -61,6 +61,22 @@ int main(int argc, char** argv)
 
   LibXR::Assert::RegisterFatalErrorCallback(err_cb);
 
+  if (argc == 2 && std::strcmp(argv[1], "--rw-only") == 0)
+  {
+    test_rw();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--cdc-only") == 0)
+  {
+    test_cdc_uart_tx();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--uart-dma-only") == 0)
+  {
+    test_uart_dma_tx_model();
+    return 0;
+  }
+
   const int status = RunMainTestBinary();
   exit(status);
   return status;

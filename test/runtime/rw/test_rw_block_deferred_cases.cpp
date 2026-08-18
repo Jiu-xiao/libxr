@@ -5,8 +5,11 @@
 #include <poll.h>
 #include <signal.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
+#include <cstring>
 
 #include "rw_runtime_test_common.hpp"
 
@@ -70,11 +73,7 @@ class ScopedThreadSignalPark
 
   bool Park(pid_t thread_id)
   {
-    if (syscall(SYS_tgkill, getpid(), thread_id, SIGUSR2) != 0)
-    {
-      return false;
-    }
-    if (!WaitForNotification())
+    if (syscall(SYS_tgkill, getpid(), thread_id, SIGUSR2) != 0 || !WaitForNotification())
     {
       return false;
     }
@@ -117,6 +116,67 @@ class ScopedThreadSignalPark
   size_t parked_count_ = 0U;
 };
 
+size_t ConsumeQueue(WritePort::WriteQueue& queue, uint8_t* destination, size_t limit)
+{
+  const size_t offered = std::min(limit, queue.front_size + queue.next_size);
+  if (offered == 0U)
+  {
+    return 0U;
+  }
+
+  size_t offset = 0U;
+  const size_t accepted = queue.PopWithWriter(
+      offered,
+      [destination, &offset](const uint8_t* first, size_t first_size,
+                             const uint8_t* second, size_t second_size)
+      {
+        std::memcpy(destination + offset, first, first_size);
+        offset += first_size;
+        if (second_size != 0U)
+        {
+          std::memcpy(destination + offset, second, second_size);
+          offset += second_size;
+        }
+        return first_size + second_size;
+      });
+  REQUIRE(accepted == offered);
+  REQUIRE(offset == accepted);
+  return accepted;
+}
+
+size_t ConsumePrefix(WritePort& port, uint8_t* destination, size_t limit,
+                     bool in_isr = false)
+{
+  auto queue = port.GetWriteQueue(in_isr);
+  return ConsumeQueue(queue, destination, limit);
+}
+
+size_t ConsumeFront(WritePort& port, uint8_t* destination, size_t capacity,
+                    bool in_isr = false)
+{
+  auto queue = port.GetWriteQueue(in_isr);
+  if (queue.front_size == 0U)
+  {
+    return 0U;
+  }
+  REQUIRE(queue.front_size <= capacity);
+  return ConsumeQueue(queue, destination, queue.front_size);
+}
+
+struct OrderedCompletionMarker
+{
+  std::array<uint8_t, 2U>* order;
+  size_t* count;
+  uint8_t marker;
+};
+
+void RecordOrderedCompletion(bool, OrderedCompletionMarker* context, ErrorCode result)
+{
+  ASSERT(result == ErrorCode::OK);
+  ASSERT(*context->count < context->order->size());
+  (*context->order)[(*context->count)++] = context->marker;
+}
+
 struct DeferredAdmissionRaceContext
 {
   WritePort* port;
@@ -155,112 +215,24 @@ void RunAdmissionProgress(AdmissionProgressContext context)
   }
 
   std::array<uint8_t, 8> data{};
-  WriteInfoBlock first{};
-  {
-    auto dequeue = context.port->BeginDequeue(false);
-    REQUIRE(dequeue.PopInfo(first) == ErrorCode::OK);
-    REQUIRE(first.data.size_ == context.first_data.size_);
-    REQUIRE(dequeue.PopData(data.data(), first.data.size_) == ErrorCode::OK);
-  }
-  REQUIRE(std::memcmp(data.data(), context.first_data.addr_, first.data.size_) == 0);
-  context.port->Finish(false, ErrorCode::OK, first);
-
-  WriteInfoBlock deferred{};
-  while (context.port->QueueInfo()->Peek(deferred) != ErrorCode::OK)
+  while (ConsumeFront(*context.port, data.data(), data.size()) == 0U)
   {
     REQUIRE(std::chrono::steady_clock::now() < deadline);
     Thread::Yield();
   }
-  {
-    auto dequeue = context.port->BeginDequeue(false);
-    REQUIRE(dequeue.PopInfo(deferred) == ErrorCode::OK);
-    REQUIRE(deferred.data.size_ == context.deferred_data.size_);
-    REQUIRE(dequeue.PopData(data.data(), deferred.data.size_) == ErrorCode::OK);
-  }
-  REQUIRE(std::memcmp(data.data(), context.deferred_data.addr_, deferred.data.size_) ==
+  REQUIRE(std::memcmp(data.data(), context.first_data.addr_, context.first_data.size_) ==
           0);
-  context.port->Finish(false, ErrorCode::OK, deferred);
+
+  data.fill(0U);
+  while (ConsumeFront(*context.port, data.data(), data.size()) == 0U)
+  {
+    REQUIRE(std::chrono::steady_clock::now() < deadline);
+    Thread::Yield();
+  }
+  REQUIRE(std::memcmp(data.data(), context.deferred_data.addr_,
+                      context.deferred_data.size_) == 0);
   context.done->Post();
 }
-
-struct ControlledWritePort : WritePort
-{
-  enum class Mode : uint8_t
-  {
-    PENDING,
-    RETURN,
-    STAGED_PENDING,
-  };
-
-  ControlledWritePort(size_t queue_size, size_t buffer_size)
-      : WritePort(queue_size, buffer_size)
-  {
-    WritePort::operator=(HandleWrite);
-  }
-
-  static ErrorCode HandleWrite(WritePort& base, bool in_isr)
-  {
-    auto& port = static_cast<ControlledWritePort&>(base);
-    const uint32_t call = port.call_count.fetch_add(1, std::memory_order_acq_rel) + 1U;
-    if (call == 1U || port.mode == Mode::PENDING)
-    {
-      return ErrorCode::PENDING;
-    }
-
-    if (port.mode == Mode::STAGED_PENDING)
-    {
-      port.entered.PostFromCallback(in_isr);
-      REQUIRE(port.release.Wait(UINT32_MAX) == ErrorCode::OK);
-      return ErrorCode::PENDING;
-    }
-
-    WriteInfoBlock info{};
-    {
-      auto dequeue = port.BeginDequeue(in_isr);
-      ASSERT(dequeue.PopInfo(info) == ErrorCode::OK);
-      ASSERT(info.data.size_ <= sizeof(port.payload));
-      port.payload_size = info.data.size_;
-      ASSERT(dequeue.PopData(port.payload, port.payload_size) == ErrorCode::OK);
-    }
-
-    return port.result;
-  }
-
-  std::atomic<uint32_t> call_count{0};
-  Mode mode = Mode::PENDING;
-  ErrorCode result = ErrorCode::OK;
-  Semaphore entered;
-  Semaphore release;
-  uint8_t payload[32]{};
-  size_t payload_size = 0;
-};
-
-struct TerminalReturnWritePort : WritePort
-{
-  TerminalReturnWritePort() : WritePort(2, 8) { WritePort::operator=(HandleWrite); }
-
-  static ErrorCode HandleWrite(WritePort& base, bool)
-  {
-    auto& port = static_cast<TerminalReturnWritePort&>(base);
-    WriteInfoBlock info{};
-    {
-      auto dequeue = port.BeginDequeue(false);
-      ASSERT(dequeue.PopInfo(info) == ErrorCode::OK);
-      ASSERT(dequeue.DiscardData(info.data.size_) == ErrorCode::OK);
-    }
-    port.call_count++;
-    return ErrorCode::OK;
-  }
-
-  uint32_t call_count = 0U;
-};
-
-struct TerminalReturnReentry
-{
-  TerminalReturnWritePort* port;
-  ErrorCode completion_result = ErrorCode::FAILED;
-  ErrorCode nested_result = ErrorCode::FAILED;
-};
 
 struct GuardedRewritePump
 {
@@ -273,10 +245,7 @@ struct GuardedRewritePump
   {
     ASSERT(!context->submit_call_active);
     context->depth++;
-    if (context->depth > context->max_depth)
-    {
-      context->max_depth = context->depth;
-    }
+    context->max_depth = std::max(context->max_depth, context->depth);
 
     const bool initial_kick = context->callback_count == 0U;
     context->callback_count++;
@@ -324,52 +293,24 @@ struct GuardedRewritePump
   bool submit_call_active = false;
 };
 
-void OnTerminalReturnComplete(bool, TerminalReturnReentry* context, ErrorCode result)
+class BarrierProbePort : public WritePort
 {
-  context->completion_result = result;
-  static const uint8_t NESTED[] = {0x5A};
-  WriteOperation nested_operation;
-  context->nested_result =
-      (*context->port)(ConstRawData{NESTED, sizeof(NESTED)}, nested_operation);
-}
+ public:
+  BarrierProbePort() : WritePort(2U, 8U) { WritePort::operator=(HandleWrite); }
 
-struct DequeueRecordContext
-{
-  WritePort* port;
-  WriteInfoBlock* info;
-  uint8_t* data;
-  size_t size;
-  Semaphore* done;
+  static void HandleWrite(WritePort& base, bool in_isr)
+  {
+    auto& port = static_cast<BarrierProbePort&>(base);
+    port.doorbell_count_++;
+    auto queue = port.GetWriteQueue(in_isr);
+    port.last_front_size_ = queue.front_size;
+    port.last_next_size_ = queue.next_size;
+  }
+
+  uint32_t doorbell_count_ = 0U;
+  size_t last_front_size_ = 0U;
+  size_t last_next_size_ = 0U;
 };
-
-void RunDequeueRecord(DequeueRecordContext context)
-{
-  {
-    auto dequeue = context.port->BeginDequeue(false);
-    REQUIRE(dequeue.PopInfo(*context.info) == ErrorCode::OK);
-    REQUIRE(context.info->data.size_ == context.size);
-    REQUIRE(dequeue.PopData(context.data, context.size) == ErrorCode::OK);
-  }
-  context.done->Post();
-}
-
-void StartDequeueRecord(Thread& thread, WritePort& port, WriteInfoBlock& info,
-                        uint8_t* data, size_t size, Semaphore& done, const char* name)
-{
-  thread.Create(DequeueRecordContext{&port, &info, data, size, &done}, RunDequeueRecord,
-                name, 1024, Thread::Priority::MEDIUM);
-}
-
-WriteInfoBlock PopRecord(WritePort& port, uint8_t* data)
-{
-  WriteInfoBlock info{};
-  {
-    auto dequeue = port.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(info) == ErrorCode::OK);
-    ASSERT(dequeue.PopData(data, info.data.size_) == ErrorCode::OK);
-  }
-  return info;
-}
 
 void test_progress_racing_deferred_admission_is_not_lost()
 {
@@ -407,12 +348,11 @@ void test_progress_racing_deferred_admission_is_not_lost()
     JoinThreadIfNeeded(writer);
     ASSERT(writer_context.result == ErrorCode::OK);
     ASSERT(operation_semaphore.Value() == 0U);
-    ASSERT(port.QueueInfo()->Size() == 0U);
     ASSERT(port.Size() == 0U);
   }
 }
 
-void test_deferred_write_remains_pending_until_enough_space_is_released()
+void test_deferred_write_waits_for_full_capacity_and_completion()
 {
   WritePort port(3, 8);
   port = PendingWriteFun;
@@ -429,34 +369,25 @@ void test_deferred_write_remains_pending_until_enough_space_is_released()
   Thread writer;
   StartBlockingWriteCaller(writer, context, "wr_defer_space");
   REQUIRE(WaitForLinuxFutexWait(context.thread_id));
-  ASSERT(port.QueueInfo()->Size() == 1U);
   ASSERT(port.Size() == sizeof(A));
 
-  WriteInfoBlock first_info{};
-  uint8_t first_prefix[1]{};
+  uint8_t first[sizeof(A)]{};
   {
-    auto dequeue = port.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(first_info) == ErrorCode::OK);
-    ASSERT(dequeue.PopData(first_prefix, sizeof(first_prefix)) == ErrorCode::OK);
+    auto queue = port.GetWriteQueue();
+    ASSERT(queue.PopBatch(first, 2U) == 2U);
+    ASSERT(port.Size() == sizeof(A) - 2U);
     ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
   }
+  ASSERT(port.Size() == sizeof(A) - 2U + sizeof(B));
+
+  ASSERT(ConsumePrefix(port, first + 2U, sizeof(A) - 2U) == sizeof(A) - 2U);
+  ASSERT(std::memcmp(first, A, sizeof(A)) == 0);
   ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
-  ASSERT(port.QueueInfo()->Size() == 0U);
-  ASSERT(port.Size() == sizeof(A) - sizeof(first_prefix));
+  ASSERT(port.Size() == sizeof(B));
 
-  uint8_t first_tail[sizeof(A) - sizeof(first_prefix)]{};
-  {
-    auto dequeue = port.BeginDequeue(false);
-    ASSERT(dequeue.PopData(first_tail, sizeof(first_tail)) == ErrorCode::OK);
-    ASSERT(port.QueueInfo()->Size() == 0U);
-  }
-  port.Finish(false, ErrorCode::OK, first_info);
-  REQUIRE(port.QueueInfo()->Size() == 1U);
-
-  uint8_t second_data[sizeof(B)]{};
-  WriteInfoBlock second_info = PopRecord(port, second_data);
-  ASSERT(std::memcmp(second_data, B, sizeof(B)) == 0);
-  port.Finish(false, ErrorCode::OK, second_info);
+  uint8_t second[sizeof(B)]{};
+  ASSERT(ConsumeFront(port, second, sizeof(second)) == sizeof(second));
+  ASSERT(std::memcmp(second, B, sizeof(B)) == 0);
 
   ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(writer);
@@ -482,10 +413,9 @@ void test_timeout_before_publish_claim_cancels_without_copy()
   deferred[0] = 0xEE;
   deferred[1] = 0xEF;
 
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info = PopRecord(port, first_data);
-  port.Finish(false, ErrorCode::OK, first_info);
-  ASSERT(port.QueueInfo()->Size() == 0U);
+  uint8_t first[sizeof(A)]{};
+  ASSERT(ConsumeFront(port, first, sizeof(first)) == sizeof(first));
+  ASSERT(std::memcmp(first, A, sizeof(A)) == 0);
   ASSERT(port.Size() == 0U);
 
   static const uint8_t C[] = {0x51};
@@ -499,107 +429,48 @@ void test_timeout_before_publish_claim_cancels_without_copy()
   ASSERT(semaphore.Value() == 0U);
 }
 
-void test_publish_claim_before_timeout_preserves_buffer_until_handoff()
+void test_timeout_after_publication_uses_the_copied_payload()
 {
-  ControlledWritePort port(3, 4);
+  WritePort port(3, 4);
+  port = PendingWriteFun;
   static const uint8_t A[] = {0x61, 0x62, 0x63, 0x64};
   uint8_t deferred[] = {0x71, 0x72, 0x73};
+  static const uint8_t EXPECTED[] = {0x71, 0x72, 0x73};
   WriteOperation first_operation;
   ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
 
   Semaphore writer_done;
   Semaphore writer_semaphore;
-  BlockingWriteCallContext context{&port, ConstRawData{deferred, sizeof(deferred)}, 1000,
+  BlockingWriteCallContext context{&port, ConstRawData{deferred, sizeof(deferred)}, 100U,
                                    ErrorCode::FAILED, &writer_done};
   context.semaphore = &writer_semaphore;
   Thread writer;
   StartBlockingWriteCaller(writer, context, "wr_publish_timeout");
   REQUIRE(WaitForLinuxFutexWaitMode(context.thread_id, LinuxFutexWaitMode::TIMED));
 
-  port.mode = ControlledWritePort::Mode::STAGED_PENDING;
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info{};
-  Semaphore publisher_done;
-  Thread publisher;
-  StartDequeueRecord(publisher, port, first_info, first_data, sizeof(first_data),
-                     publisher_done, "wr_publish_stage");
-  ExpectWaitOk(port.entered, THREAD_STATE_TIMEOUT_MS);
+  uint8_t first[sizeof(A)]{};
+  ASSERT(ConsumeFront(port, first, sizeof(first)) == sizeof(first));
+  ASSERT(std::memcmp(first, A, sizeof(A)) == 0);
+  ASSERT(port.Size() == sizeof(deferred));
 
-  REQUIRE(WaitForLinuxFutexWaitMode(context.thread_id, LinuxFutexWaitMode::UNTIMED));
-  ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
-  static const uint8_t EXPECTED[] = {0x71, 0x72, 0x73};
-  ASSERT(std::memcmp(deferred, EXPECTED, sizeof(EXPECTED)) == 0);
-  port.release.Post();
-
-  ExpectWaitOk(publisher_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(publisher);
   ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(writer);
   ASSERT(context.result == ErrorCode::TIMEOUT);
   ASSERT(writer_semaphore.Value() == 0U);
 
   deferred[0] = 0xEE;
-  uint8_t queued[sizeof(deferred)]{};
-  WriteInfoBlock deferred_info = PopRecord(port, queued);
-  ASSERT(std::memcmp(queued, EXPECTED, sizeof(EXPECTED)) == 0);
-  port.Finish(false, ErrorCode::OK, deferred_info);
-  port.Finish(false, ErrorCode::OK, first_info);
-  ASSERT(writer_semaphore.Value() == 0U);
-}
-
-void test_timeout_after_metadata_only_dequeue_cancels_waiting_request_without_copy()
-{
-  WritePort port(2, 4);
-  port = PendingWriteFun;
-  static const uint8_t A[] = {0x75, 0x76, 0x77, 0x78};
-  uint8_t deferred[] = {0x85, 0x86};
-  WriteOperation first_operation;
-  ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
-
-  Semaphore writer_done;
-  Semaphore writer_semaphore;
-  BlockingWriteCallContext writer_context{&port, ConstRawData{deferred, sizeof(deferred)},
-                                          1000, ErrorCode::FAILED, &writer_done};
-  writer_context.semaphore = &writer_semaphore;
-  Thread writer;
-  StartBlockingWriteCaller(writer, writer_context, "wr_cancel_publish");
-  REQUIRE(WaitForLinuxFutexWaitMode(writer_context.thread_id, LinuxFutexWaitMode::TIMED));
-
-  WriteInfoBlock first_info{};
-  {
-    auto dequeue = port.BeginDequeue(false);
-    ASSERT(dequeue.PopInfo(first_info) == ErrorCode::OK);
-    ASSERT(first_info.data.size_ == sizeof(A));
-    ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
-  }
-
-  ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(writer);
-  ASSERT(writer_context.result == ErrorCode::TIMEOUT);
-  ASSERT(writer_semaphore.Value() == 0U);
-  deferred[0] = 0xEE;
   deferred[1] = 0xEF;
+  uint8_t queued[sizeof(deferred)]{};
+  ASSERT(ConsumeFront(port, queued, sizeof(queued)) == sizeof(queued));
+  ASSERT(std::memcmp(queued, EXPECTED, sizeof(EXPECTED)) == 0);
   ASSERT(writer_semaphore.Value() == 0U);
-  ASSERT(port.QueueInfo()->Size() == 0U);
-  ASSERT(port.Size() == sizeof(A));
-
-  uint8_t first_data[sizeof(A)]{};
-  {
-    auto dequeue = port.BeginDequeue(false);
-    ASSERT(dequeue.PopData(first_data, sizeof(first_data)) == ErrorCode::OK);
-  }
-  ASSERT(std::memcmp(first_data, A, sizeof(A)) == 0);
-  port.Finish(false, ErrorCode::OK, first_info);
-  ASSERT(writer_semaphore.Value() == 0U);
-  ASSERT(port.QueueInfo()->Size() == 0U);
-  ASSERT(port.Size() == 0U);
 }
 
 void test_old_detached_record_coexists_with_new_deferred_request()
 {
-  WritePort port(3, 8);
+  WritePort port(3, 4);
   port = PendingWriteFun;
-  static const uint8_t A[] = {0x81, 0x82};
+  static const uint8_t A[] = {0x81, 0x82, 0x83, 0x84};
   static const uint8_t B[] = {0x91, 0x92, 0x93};
   Semaphore first_semaphore;
   WriteOperation first_operation(first_semaphore, 0);
@@ -613,17 +484,16 @@ void test_old_detached_record_coexists_with_new_deferred_request()
   Thread writer;
   StartBlockingWriteCaller(writer, second, "wr_after_detach");
   REQUIRE(WaitForLinuxFutexWait(second.thread_id));
-  ASSERT(port.QueueInfo()->Size() == 1U);
+  ASSERT(port.Size() == sizeof(A));
 
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info = PopRecord(port, first_data);
-  port.Finish(false, ErrorCode::OK, first_info);
-  REQUIRE(port.QueueInfo()->Size() == 1U);
+  uint8_t first[sizeof(A)]{};
+  ASSERT(ConsumeFront(port, first, sizeof(first)) == sizeof(first));
+  ASSERT(std::memcmp(first, A, sizeof(A)) == 0);
+  ASSERT(port.Size() == sizeof(B));
 
-  uint8_t second_data[sizeof(B)]{};
-  WriteInfoBlock second_info = PopRecord(port, second_data);
-  ASSERT(std::memcmp(second_data, B, sizeof(B)) == 0);
-  port.Finish(false, ErrorCode::OK, second_info);
+  uint8_t deferred[sizeof(B)]{};
+  ASSERT(ConsumeFront(port, deferred, sizeof(deferred)) == sizeof(deferred));
+  ASSERT(std::memcmp(deferred, B, sizeof(B)) == 0);
   ExpectWaitOk(second_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(writer);
   ASSERT(second.result == ErrorCode::OK);
@@ -631,105 +501,109 @@ void test_old_detached_record_coexists_with_new_deferred_request()
   ASSERT(second_semaphore.Value() == 0U);
 }
 
-void test_deferred_publish_propagates_synchronous_terminal_return()
+void test_non_block_writes_publish_behind_detached_front()
 {
-  for (const auto result : {ErrorCode::OK, ErrorCode::INIT_ERR})
+  WritePort port(6, 16);
+  port = PendingWriteFun;
+  static const uint8_t A[] = {0x11, 0x12};
+  static const uint8_t B[] = {0x21, 0x22};
+  static const uint8_t C[] = {0x31, 0x32};
+  static const uint8_t D[] = {0x41, 0x42};
+  static const uint8_t E[] = {0x51, 0x52};
+
+  Semaphore first_semaphore;
+  WriteOperation first_operation(first_semaphore, 0U);
+  ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::TIMEOUT);
+
+  WriteOperation none_operation;
+  ASSERT(port(ConstRawData{B, sizeof(B)}, none_operation) == ErrorCode::OK);
+
+  OperationPollingStatus polling_status;
+  WriteOperation polling_operation(polling_status);
+  ASSERT(port(ConstRawData{C, sizeof(C)}, polling_operation) == ErrorCode::OK);
+
+  std::array<uint8_t, 2U> completion_order{};
+  size_t completion_count = 0U;
+  OrderedCompletionMarker direct_marker{&completion_order, &completion_count, 1U};
+  auto direct_callback =
+      Callback<ErrorCode>::Create(RecordOrderedCompletion, &direct_marker);
+  WriteOperation callback_operation(direct_callback);
+  ASSERT(port(ConstRawData{D, sizeof(D)}, callback_operation) == ErrorCode::OK);
+
+  OrderedCompletionMarker stream_marker{&completion_order, &completion_count, 2U};
+  auto stream_callback =
+      Callback<ErrorCode>::Create(RecordOrderedCompletion, &stream_marker);
+  WriteOperation stream_operation(stream_callback);
+  WritePort::Stream stream(&port, stream_operation);
+  ASSERT(stream.Write(ConstRawData{E, sizeof(E)}) == ErrorCode::OK);
+  ASSERT(stream.Commit() == ErrorCode::OK);
+
+  ASSERT(first_semaphore.Value() == 0U);
+  ASSERT(polling_status == OperationPollingStatus::RUNNING);
+  ASSERT(completion_count == 0U);
+
+  static const std::array<uint8_t, 10U> EXPECTED = {A[0], A[1], B[0], B[1], C[0],
+                                                    C[1], D[0], D[1], E[0], E[1]};
+  std::array<uint8_t, EXPECTED.size()> accepted{};
+  size_t offset = 0U;
+  while (offset != EXPECTED.size())
   {
-    ControlledWritePort port(3, 4);
-    static const uint8_t A[] = {0xA1, 0xA2, 0xA3, 0xA4};
-    static const uint8_t B[] = {0xB1, 0xB2};
-    WriteOperation first_operation;
-    ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
-
-    Semaphore writer_done;
-    Semaphore writer_semaphore;
-    BlockingWriteCallContext context{&port, ConstRawData{B, sizeof(B)}, UINT32_MAX,
-                                     ErrorCode::FAILED, &writer_done};
-    context.semaphore = &writer_semaphore;
-    Thread writer;
-    StartBlockingWriteCaller(writer, context, "wr_defer_sync");
-    REQUIRE(WaitForLinuxFutexWait(context.thread_id));
-
-    port.mode = ControlledWritePort::Mode::RETURN;
-    port.result = result;
-    uint8_t first_data[sizeof(A)]{};
-    WriteInfoBlock first_info = PopRecord(port, first_data);
-    port.Finish(false, ErrorCode::OK, first_info);
-
-    ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
-    JoinThreadIfNeeded(writer);
-    ASSERT(context.result == result);
-    ASSERT(port.payload_size == sizeof(B));
-    ASSERT(std::memcmp(port.payload, B, sizeof(B)) == 0);
-    ASSERT(writer_semaphore.Value() == 0U);
-    ASSERT(port.QueueInfo()->Size() == 0U);
-    ASSERT(port.Size() == 0U);
+    auto queue = port.GetWriteQueue();
+    ASSERT(queue.front_size != 0U);
+    const size_t accepted_now = queue.PopWithWriter(
+        EXPECTED.size() - offset,
+        [&accepted, &offset](const uint8_t* first, size_t first_size,
+                             const uint8_t* second, size_t second_size)
+        {
+          std::memcpy(accepted.data() + offset, first, first_size);
+          offset += first_size;
+          if (second_size != 0U)
+          {
+            std::memcpy(accepted.data() + offset, second, second_size);
+            offset += second_size;
+          }
+          return first_size + second_size;
+        });
+    ASSERT(accepted_now != 0U);
   }
+
+  ASSERT(accepted == EXPECTED);
+  ASSERT(polling_status == OperationPollingStatus::DONE);
+  ASSERT(completion_count == completion_order.size());
+  ASSERT(completion_order == (std::array<uint8_t, 2U>{1U, 2U}));
+  ASSERT(first_semaphore.Value() == 0U);
+  ASSERT(port.Size() == 0U);
 }
 
-void test_finish_before_publisher_release_defers_wakeup_and_beats_timeout()
+void test_failed_promoted_front_returns_exact_block_result()
 {
-  ControlledWritePort port(3, 4);
-  static const uint8_t A[] = {0xB4, 0xB5, 0xB6, 0xB7};
-  static const uint8_t B[] = {0xC4, 0xC5};
+  WritePort port(3, 4);
+  port = PendingWriteFun;
+  static const uint8_t A[] = {0xA1, 0xA2, 0xA3, 0xA4};
+  static const uint8_t B[] = {0xB1, 0xB2};
   WriteOperation first_operation;
   ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
 
   Semaphore writer_done;
   Semaphore writer_semaphore;
-  BlockingWriteCallContext context{&port, ConstRawData{B, sizeof(B)}, 100U,
+  BlockingWriteCallContext context{&port, ConstRawData{B, sizeof(B)}, UINT32_MAX,
                                    ErrorCode::FAILED, &writer_done};
   context.semaphore = &writer_semaphore;
   Thread writer;
-  StartBlockingWriteCaller(writer, context, "wr_claimed_timeout");
-  REQUIRE(WaitForLinuxFutexWaitMode(context.thread_id, LinuxFutexWaitMode::TIMED));
+  StartBlockingWriteCaller(writer, context, "wr_defer_fail");
+  REQUIRE(WaitForLinuxFutexWait(context.thread_id));
 
-  port.mode = ControlledWritePort::Mode::STAGED_PENDING;
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info{};
-  Semaphore publisher_done;
-  Thread publisher;
-  StartDequeueRecord(publisher, port, first_info, first_data, sizeof(first_data),
-                     publisher_done, "wr_claimed_owner");
-  ExpectWaitOk(port.entered, THREAD_STATE_TIMEOUT_MS);
-  ASSERT(std::memcmp(first_data, A, sizeof(A)) == 0);
+  uint8_t first[sizeof(A)]{};
+  ASSERT(ConsumeFront(port, first, sizeof(first)) == sizeof(first));
+  {
+    auto queue = port.GetWriteQueue();
+    ASSERT(queue.FailFront(ErrorCode::INIT_ERR));
+  }
 
-  Semaphore finisher_done;
-  Thread finisher;
-  StartWriteFinisher(finisher, port, finisher_done, ErrorCode::INIT_ERR,
-                     "wr_claimed_finish");
-  ExpectWaitOk(finisher_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(finisher);
-
-  REQUIRE(WaitForLinuxFutexWaitMode(context.thread_id, LinuxFutexWaitMode::UNTIMED));
-  ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
-  ASSERT(publisher_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
-  port.release.Post();
-
-  ExpectWaitOk(publisher_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(publisher);
-  port.Finish(false, ErrorCode::OK, first_info);
   ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(writer);
   ASSERT(context.result == ErrorCode::INIT_ERR);
   ASSERT(writer_semaphore.Value() == 0U);
-  ASSERT(port.QueueInfo()->Size() == 0U);
-  ASSERT(port.Size() == 0U);
-}
-
-void test_terminal_return_releases_owner_before_callback_reentry()
-{
-  TerminalReturnWritePort port;
-  TerminalReturnReentry context{&port};
-  auto callback = Callback<ErrorCode>::Create(OnTerminalReturnComplete, &context);
-  WriteOperation operation(callback);
-  static const uint8_t OUTER[] = {0x41, 0x42};
-
-  ASSERT(port(ConstRawData{OUTER, sizeof(OUTER)}, operation) == ErrorCode::OK);
-  ASSERT(context.completion_result == ErrorCode::OK);
-  ASSERT(context.nested_result == ErrorCode::OK);
-  ASSERT(port.call_count == 2U);
-  ASSERT(port.QueueInfo()->Size() == 0U);
   ASSERT(port.Size() == 0U);
 }
 
@@ -749,81 +623,49 @@ void test_guarded_completion_replay_submits_after_owner_release()
   {
     ASSERT(result == ErrorCode::OK);
   }
-  ASSERT(context.port.QueueInfo()->Size() == 0U);
   ASSERT(context.port.Size() == 0U);
 }
 
-void test_terminal_handoff_holds_admission_until_waiter_consumes_result()
+void test_claimed_block_holds_admission_until_waiter_returns()
 {
-  ControlledWritePort port(3, 4);
-  static const uint8_t A[] = {0xD1, 0xD2, 0xD3, 0xD4};
-  static const uint8_t B[] = {0xE1, 0xE2};
-  static const uint8_t C[] = {0xF1};
-  WriteOperation first_operation;
-  ASSERT(port(ConstRawData{A, sizeof(A)}, first_operation) == ErrorCode::OK);
+  WritePort port(2, 8);
+  port = PendingWriteFun;
+  static const uint8_t A[] = {0xD1, 0xD2};
+  static const uint8_t B[] = {0xE1};
 
   Semaphore writer_done;
-  Semaphore reused_semaphore;
-  BlockingWriteCallContext timed_out{&port, ConstRawData{B, sizeof(B)}, 1000,
-                                     ErrorCode::FAILED, &writer_done};
-  timed_out.semaphore = &reused_semaphore;
+  Semaphore writer_semaphore;
+  BlockingWriteCallContext context{&port, ConstRawData{A, sizeof(A)}, UINT32_MAX,
+                                   ErrorCode::FAILED, &writer_done};
+  context.semaphore = &writer_semaphore;
   Thread writer;
-  StartBlockingWriteCaller(writer, timed_out, "wr_handoff_detach");
-  REQUIRE(WaitForLinuxFutexWaitMode(timed_out.thread_id, LinuxFutexWaitMode::TIMED));
-
-  port.mode = ControlledWritePort::Mode::STAGED_PENDING;
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info{};
-  Semaphore publisher_done;
-  Thread publisher;
-  StartDequeueRecord(publisher, port, first_info, first_data, sizeof(first_data),
-                     publisher_done, "wr_handoff_publish");
-  ExpectWaitOk(port.entered, THREAD_STATE_TIMEOUT_MS);
-  ASSERT(std::memcmp(first_data, A, sizeof(A)) == 0);
-  REQUIRE(WaitForLinuxFutexWaitMode(timed_out.thread_id, LinuxFutexWaitMode::UNTIMED));
+  StartBlockingWriteCaller(writer, context, "wr_claimed_handoff");
+  REQUIRE(WaitForLinuxFutexWait(context.thread_id));
 
   ScopedThreadSignalPark parked_writer;
-  REQUIRE(parked_writer.Park(timed_out.thread_id.load(std::memory_order_acquire)));
-  port.release.Post();
-  ExpectWaitOk(publisher_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(publisher);
-  port.Finish(false, ErrorCode::OK, first_info);
+  REQUIRE(parked_writer.Park(context.thread_id.load(std::memory_order_acquire)));
+  uint8_t accepted[sizeof(A)]{};
+  ASSERT(ConsumeFront(port, accepted, sizeof(accepted)) == sizeof(accepted));
+  ASSERT(std::memcmp(accepted, A, sizeof(A)) == 0);
 
+  WriteOperation non_blocking;
+  ASSERT(port(ConstRawData{B, sizeof(B)}, non_blocking) == ErrorCode::BUSY);
   Semaphore blocked_semaphore;
-  WriteOperation blocked_operation(blocked_semaphore, 0);
-  ASSERT(port(ConstRawData{C, sizeof(C)}, blocked_operation) == ErrorCode::BUSY);
+  WriteOperation blocked(blocked_semaphore, 0U);
+  ASSERT(port(ConstRawData{B, sizeof(B)}, blocked) == ErrorCode::BUSY);
   ASSERT(blocked_semaphore.Value() == 0U);
   ASSERT(writer_done.Wait(SHORT_WAIT_MS) == ErrorCode::TIMEOUT);
 
   parked_writer.Release();
   ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(writer);
-  ASSERT(timed_out.result == ErrorCode::TIMEOUT);
-  ASSERT(reused_semaphore.Value() == 0U);
+  ASSERT(context.result == ErrorCode::OK);
+  ASSERT(writer_semaphore.Value() == 0U);
 
-  Semaphore recovered_done;
-  BlockingWriteCallContext recovered{&port, ConstRawData{C, sizeof(C)}, UINT32_MAX,
-                                     ErrorCode::FAILED, &recovered_done};
-  recovered.semaphore = &reused_semaphore;
-  Thread recovered_writer;
-  StartBlockingWriteCaller(recovered_writer, recovered, "wr_handoff_reuse");
-  REQUIRE(WaitForLinuxFutexWait(recovered.thread_id));
-
-  port.mode = ControlledWritePort::Mode::PENDING;
-  uint8_t timed_out_data[sizeof(B)]{};
-  WriteInfoBlock timed_out_info = PopRecord(port, timed_out_data);
-  ASSERT(std::memcmp(timed_out_data, B, sizeof(B)) == 0);
-  port.Finish(false, ErrorCode::OK, timed_out_info);
-
-  uint8_t recovered_data[sizeof(C)]{};
-  WriteInfoBlock recovered_info = PopRecord(port, recovered_data);
-  ASSERT(std::memcmp(recovered_data, C, sizeof(C)) == 0);
-  port.Finish(false, ErrorCode::INIT_ERR, recovered_info);
-
-  ExpectWaitOk(recovered_done, THREAD_STATE_TIMEOUT_MS);
-  JoinThreadIfNeeded(recovered_writer);
-  ASSERT(recovered.result == ErrorCode::INIT_ERR);
-  ASSERT(reused_semaphore.Value() == 0U);
+  ASSERT(port(ConstRawData{B, sizeof(B)}, non_blocking) == ErrorCode::OK);
+  uint8_t recovered[sizeof(B)]{};
+  ASSERT(ConsumeFront(port, recovered, sizeof(recovered)) == sizeof(recovered));
+  ASSERT(recovered[0] == B[0]);
 }
 
 void test_deferred_slot_rejects_other_producers_and_validates_input()
@@ -866,16 +708,28 @@ void test_deferred_slot_rejects_other_producers_and_validates_input()
   ASSERT(port(ConstRawData{B, sizeof(B)}, other_block) == ErrorCode::BUSY);
   ASSERT(other_semaphore.Value() == 0U);
 
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info = PopRecord(port, first_data);
-  port.Finish(false, ErrorCode::OK, first_info);
-  uint8_t second_data[sizeof(B)]{};
-  WriteInfoBlock second_info = PopRecord(port, second_data);
-  port.Finish(false, ErrorCode::OK, second_info);
+  uint8_t first[sizeof(A)]{};
+  ASSERT(ConsumeFront(port, first, sizeof(first)) == sizeof(first));
+  uint8_t deferred[sizeof(B)]{};
+  ASSERT(ConsumeFront(port, deferred, sizeof(deferred)) == sizeof(deferred));
+  ASSERT(std::memcmp(deferred, B, sizeof(B)) == 0);
   ExpectWaitOk(writer_done, THREAD_STATE_TIMEOUT_MS);
   JoinThreadIfNeeded(writer);
   ASSERT(context.result == ErrorCode::OK);
   ASSERT(writer_semaphore.Value() == 0U);
+}
+
+void test_empty_stream_release_rings_the_backend_doorbell()
+{
+  BarrierProbePort port;
+  WriteOperation operation;
+  WritePort::Stream stream(&port, operation);
+
+  ASSERT(port.doorbell_count_ == 0U);
+  ASSERT(stream.Commit() == ErrorCode::OK);
+  ASSERT(port.doorbell_count_ == 1U);
+  ASSERT(port.last_front_size_ == 0U);
+  ASSERT(port.last_next_size_ == 0U);
 }
 
 void test_stream_space_failure_never_defers_caller_data()
@@ -894,14 +748,12 @@ void test_stream_space_failure_never_defers_caller_data()
   stream_data[0] = 0x00;
   ASSERT(stream.Commit() == ErrorCode::OK);
   ASSERT(stream_semaphore.Value() == 0U);
-  ASSERT(port.QueueInfo()->Size() == 1U);
   ASSERT(port.Size() == sizeof(A));
 
-  uint8_t first_data[sizeof(A)]{};
-  WriteInfoBlock first_info = PopRecord(port, first_data);
-  port.Finish(false, ErrorCode::OK, first_info);
+  uint8_t first[sizeof(A)]{};
+  ASSERT(ConsumeFront(port, first, sizeof(first)) == sizeof(first));
+  ASSERT(std::memcmp(first, A, sizeof(A)) == 0);
   ASSERT(stream_semaphore.Value() == 0U);
-  ASSERT(port.QueueInfo()->Size() == 0U);
   ASSERT(port.Size() == 0U);
 
   static const uint8_t FRESH[] = {0xA1, 0xA2};
@@ -910,11 +762,9 @@ void test_stream_space_failure_never_defers_caller_data()
   ASSERT(fresh.Write(ConstRawData{FRESH, sizeof(FRESH)}) == ErrorCode::OK);
   ASSERT(fresh.Commit() == ErrorCode::OK);
   uint8_t fresh_data[sizeof(FRESH)]{};
-  WriteInfoBlock fresh_info = PopRecord(port, fresh_data);
+  ASSERT(ConsumeFront(port, fresh_data, sizeof(fresh_data)) == sizeof(fresh_data));
   ASSERT(std::memcmp(fresh_data, FRESH, sizeof(FRESH)) == 0);
-  port.Finish(false, ErrorCode::OK, fresh_info);
   ASSERT(stream_semaphore.Value() == 0U);
-  ASSERT(port.QueueInfo()->Size() == 0U);
   ASSERT(port.Size() == 0U);
 }
 
@@ -991,17 +841,16 @@ void test_pipe_clear_promotes_deferred_block()
 void RunRuntimeRwBlockDeferredTests()
 {
   test_progress_racing_deferred_admission_is_not_lost();
-  test_deferred_write_remains_pending_until_enough_space_is_released();
+  test_deferred_write_waits_for_full_capacity_and_completion();
   test_timeout_before_publish_claim_cancels_without_copy();
-  test_publish_claim_before_timeout_preserves_buffer_until_handoff();
-  test_timeout_after_metadata_only_dequeue_cancels_waiting_request_without_copy();
+  test_timeout_after_publication_uses_the_copied_payload();
   test_old_detached_record_coexists_with_new_deferred_request();
-  test_deferred_publish_propagates_synchronous_terminal_return();
-  test_finish_before_publisher_release_defers_wakeup_and_beats_timeout();
-  test_terminal_return_releases_owner_before_callback_reentry();
+  test_non_block_writes_publish_behind_detached_front();
+  test_failed_promoted_front_returns_exact_block_result();
   test_guarded_completion_replay_submits_after_owner_release();
-  test_terminal_handoff_holds_admission_until_waiter_consumes_result();
+  test_claimed_block_holds_admission_until_waiter_returns();
   test_deferred_slot_rejects_other_producers_and_validates_input();
+  test_empty_stream_release_rings_the_backend_doorbell();
   test_stream_space_failure_never_defers_caller_data();
   test_pipe_consumer_progress_promotes_deferred_block();
   test_pipe_clear_promotes_deferred_block();

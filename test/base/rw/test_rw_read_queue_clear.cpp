@@ -35,7 +35,11 @@ void test_rw_read_port_clear_queued_data_clears_idle_queue()
   TrackingReadPort r(16);
 
   static const uint8_t TX[] = {0x21, 0x43, 0x65, 0x87};
-  ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+  {
+    auto queue = r.GetReadQueue();
+    ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+    queue.Publish();
+  }
   ASSERT(r.Size() == sizeof(TX));
 
   ASSERT(r.ClearQueuedData() == ErrorCode::OK);
@@ -61,9 +65,11 @@ void test_rw_read_port_ownerless_data_remains_readable()
   TrackingReadPort r(16);
 
   static const uint8_t TX[] = {0x12, 0x34, 0x56};
-  ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
-
-  r.ProcessPendingReads(false);
+  {
+    auto queue = r.GetReadQueue();
+    ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+    queue.Publish();
+  }
   ASSERT(r.Size() == sizeof(TX));
 
   uint8_t read_back[2] = {};
@@ -95,7 +101,11 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   TrackingReadPort r(16);
 
   uint8_t queued = 0x5A;
-  ASSERT(r.queue_data_->PushBatch(&queued, 1) == ErrorCode::OK);
+  {
+    auto queue = r.GetReadQueue();
+    ASSERT(queue.PushBatch(&queued, 1) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   uint8_t rx[2] = {0xA1, 0xA2};
   ReadHarness read(TestMode::POLLING);
@@ -107,8 +117,11 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   ASSERT(r.dequeue_count == 0);
 
   uint8_t tail = 0x6B;
-  ASSERT(r.queue_data_->PushBatch(&tail, 1) == ErrorCode::OK);
-  r.ProcessPendingReads(false);
+  {
+    auto queue = r.GetReadQueue();
+    ASSERT(queue.PushBatch(&tail, 1) == ErrorCode::OK);
+    queue.Publish();
+  }
   read.ExpectFinal(ErrorCode::OK);
   ASSERT(rx[0] == queued);
   ASSERT(rx[1] == tail);
