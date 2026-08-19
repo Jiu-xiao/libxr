@@ -100,9 +100,11 @@ class CDCUart : public CDCBase, public LibXR::UART
    *        Set UART configuration (CDC Line Coding)
    *
    * @param cfg UART 配置 / UART configuration
+   * @param in_isr 是否从 ISR 上下文调用；普通任务上下文可省略，默认值为 false / Whether
+   * called from ISR context; ordinary task context may omit it and defaults to false
    * @return 错误码 / Error code
    */
-  ErrorCode SetConfig(UART::Configuration cfg) override
+  ErrorCode SetConfig(UART::Configuration cfg, bool in_isr = false) override
   {
     switch (cfg.stop_bits)
     {
@@ -143,7 +145,7 @@ class CDCUart : public CDCBase, public LibXR::UART
     }
 
     pending_config_ = cfg;
-    PublishWork(CDC_EVENT_CONFIG, false);
+    PublishWork(CDC_EVENT_CONFIG, in_isr);
     return ErrorCode::OK;
   }
 

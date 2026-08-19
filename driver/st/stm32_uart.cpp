@@ -118,9 +118,9 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
   SetRxDMA();
 }
 
-ErrorCode STM32UART::SetConfig(UART::Configuration config)
+ErrorCode STM32UART::SetConfig(UART::Configuration config, bool in_isr)
 {
-  return dma_model_.SetConfig(config, InIsr());
+  return dma_model_.SetConfig(config, in_isr);
 }
 
 UartDmaControlResult STM32UART::AdvanceConfig(UART::Configuration config, bool active_tx,

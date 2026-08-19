@@ -74,6 +74,8 @@ class UART
   /**
    * @brief 设置 UART 配置 / Sets the UART configuration
    * @param config UART 配置信息 / UART configuration settings
+   * @param in_isr 是否从 ISR 上下文调用；普通任务上下文可省略，默认值为 false / Whether
+   * called from ISR context; ordinary task context may omit it and defaults to false
    * @return 返回操作状态，成功时返回 `ErrorCode::OK`，否则返回相应错误码 / Returns the
    * operation status, `ErrorCode::OK` if successful, otherwise an error code
    *
@@ -88,7 +90,7 @@ class UART
    * asynchronous admission are backend-specific. The base interface does not guarantee
    * ISR availability; follow the concrete backend contract.
    */
-  virtual ErrorCode SetConfig(Configuration config) = 0;
+  virtual ErrorCode SetConfig(Configuration config, bool in_isr = false) = 0;
 
   /**
    * @brief 提交一条 UART 写操作 / Submit one UART write operation

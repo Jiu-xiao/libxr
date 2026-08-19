@@ -42,7 +42,7 @@ class MemoryLoopbackUart : public LibXR::UART
     write_port_ = WriteFun;
   }
 
-  LibXR::ErrorCode SetConfig(Configuration config) override
+  LibXR::ErrorCode SetConfig(Configuration config, bool = false) override
   {
     if (config_busy_responses_ > 0U)
     {

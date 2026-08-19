@@ -90,8 +90,11 @@ class ESP32CDCJtag : public UART
 
   /**
    * @brief 校验固定 8N1 配置 / Validate the fixed 8N1 configuration
+   * @param config 待校验的 UART 配置 / UART configuration to validate
+   * @param in_isr 当前调用是否位于 ISR；普通任务上下文可省略，默认值为 false / Whether
+   * called from ISR context; ordinary task context may omit it and defaults to false
    */
-  ErrorCode SetConfig(UART::Configuration config) override;
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
   /** @brief WritePort TX 推进 doorbell / WritePort TX progress doorbell */
   static void WriteFun(WritePort& port, bool in_isr);

@@ -242,6 +242,8 @@ class MSPM0UART : public UART
   /**
    * @brief 异步接纳完整 UART 配置 / Asynchronously admit a complete UART configuration
    * @param config 请求的波特率和帧格式 / Requested baud rate and framing
+   * @param in_isr 是否从 ISR 上下文调用；普通任务上下文可省略，默认值为 false / Whether
+   * called from ISR context; ordinary task context may omit it and defaults to false
    * @return 接纳后返回 `OK`，已有未完成 CONFIG 时返回 `BUSY`，否则返回校验错误；`OK` 不
    *         表示硬件修改已经完成 / `OK` once admitted, `BUSY` while another CONFIG is
    *         outstanding, or a validation error; `OK` does not mean the hardware change
@@ -253,7 +255,7 @@ class MSPM0UART : public UART
    *      Single-core execution outside NMI and HardFault; SMP callers require a separate
    *      platform contract
    */
-  ErrorCode SetConfig(UART::Configuration config) override;
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
   /**
    * @brief WritePort 提交入口 / WritePort submission entry
@@ -269,14 +271,6 @@ class MSPM0UART : public UART
    * @note 越界或尚未绑定的索引会被忽略 / Out-of-range or unbound indices are ignored
    */
   static void OnInterrupt(uint8_t index);
-
-  /**
-   * @brief 检查当前执行是否位于 exception 上下文 / Check for exception context
-   * @return `IPSR` 非零时返回 `true`，包括普通 IRQ、NMI、HardFault 及其他 exception /
-   *         `true` when `IPSR` is nonzero, including ordinary IRQs, NMI, HardFault, and
-   *         other exceptions
-   */
-  static bool InIsr();
 
   /**
    * @brief 从 SysConfig 初始化后的寄存器构造 UART 配置 / Build a UART configuration from

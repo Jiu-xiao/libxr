@@ -185,14 +185,18 @@ class LinuxUART : public UART
 
   /**
    * @brief Submit one serialized runtime configuration transaction
+   * @param config Requested UART framing and baud rate
+   * @param in_isr Calling context. Linux has no ISR entry and therefore accepts only
+   * task-context use; the parameter preserves the common UART source interface.
    * @return `OK` on admission, `BUSY` while another configuration is outstanding
    * @note The owner waits for the active record, observes `TIOCOUTQ == 0`, and then
    *       applies the termios change. This is the nonblocking drain boundary exposed by
    *       the Linux tty driver; it is not an independent observation of every USB-UART
    *       bridge FIFO or of the external physical line.
    */
-  ErrorCode SetConfig(UART::Configuration config) override
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override
   {
+    static_cast<void>(in_isr);
     const ErrorCode validation = ValidateConfig(config);
     if (validation != ErrorCode::OK)
     {

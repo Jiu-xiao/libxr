@@ -43,8 +43,9 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
   REQUIRE(InitHardware() == ErrorCode::OK);
 }
 
-ErrorCode ESP32CDCJtag::SetConfig(UART::Configuration config)
+ErrorCode ESP32CDCJtag::SetConfig(UART::Configuration config, bool in_isr)
 {
+  static_cast<void>(in_isr);
   if ((config.data_bits != 8) || (config.stop_bits != 1) ||
       (config.parity != UART::Parity::NO_PARITY))
   {

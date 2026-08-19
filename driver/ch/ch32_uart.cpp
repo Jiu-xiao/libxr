@@ -150,19 +150,6 @@ ch32_uart_id_t CheckedUartId(ch32_uart_id_t id)
 
 CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
 
-bool CH32UART::InIsr()
-{
-  constexpr size_t ACTIVE_WORD_COUNT = sizeof(PFIC->IACTR) / sizeof(PFIC->IACTR[0]);
-  for (size_t index = 0U; index < ACTIVE_WORD_COUNT; ++index)
-  {
-    if (PFIC->IACTR[index] != 0U)
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
 CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
                    GPIO_TypeDef* tx_gpio_port, uint16_t tx_gpio_pin,
                    GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
@@ -316,9 +303,9 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id_]);
 }
 
-ErrorCode CH32UART::SetConfig(UART::Configuration config)
+ErrorCode CH32UART::SetConfig(UART::Configuration config, bool in_isr)
 {
-  return dma_model_.SetConfig(config, InIsr());
+  return dma_model_.SetConfig(config, in_isr);
 }
 
 ErrorCode CH32UART::ValidateConfig(UART::Configuration config) const

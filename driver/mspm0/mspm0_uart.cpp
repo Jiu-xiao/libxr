@@ -182,9 +182,9 @@ MSPM0UART::MSPM0UART(Resources res, RawData tx_dma_storage, RawData rx_dma_stora
   NVIC_EnableIRQ(res_.irqn);
 }
 
-ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
+ErrorCode MSPM0UART::SetConfig(UART::Configuration config, bool in_isr)
 {
-  return dma_model_.SetConfig(config, InIsr());
+  return dma_model_.SetConfig(config, in_isr);
 }
 
 void MSPM0UART::WriteFun(WritePort& port, bool in_isr)
@@ -192,8 +192,6 @@ void MSPM0UART::WriteFun(WritePort& port, bool in_isr)
   auto* uart = LibXR::ContainerOf(&port, &MSPM0UART::_write_port);
   uart->dma_model_.Submit(in_isr);
 }
-
-bool MSPM0UART::InIsr() { return __get_IPSR() != 0U; }
 
 UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
                                                      uint32_t baudrate)

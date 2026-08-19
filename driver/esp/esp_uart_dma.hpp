@@ -92,6 +92,8 @@ class ESP32UartDma : public UART
    * @brief 提交一次串行化帧格式和波特率配置 / Submit one serialized framing and baud
    * configuration
    * @param config 新的帧格式和波特率 / New framing and baud rate
+   * @param in_isr 是否从 ISR 上下文调用；普通任务上下文可省略，默认值为 false / Whether
+   * called from ISR context; ordinary task context may omit it and defaults to false
    * @return 请求被接纳时返回 `OK`，前一个配置仍未完成时返回 `BUSY`；硬件应用可在返回后
    * 完成 / `OK` when admitted; `BUSY` while an earlier configuration request is
    * outstanding. Hardware application may complete after return.
@@ -101,7 +103,7 @@ class ESP32UartDma : public UART
    * preempt a related UART/GDMA ISR after its hardware-status read, or from inside that
    * unfinished raw ISR path
    */
-  ErrorCode SetConfig(UART::Configuration config) override;
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
   /**
    * @brief 切换 UART 外设内部 loopback 位 / Toggle the UART peripheral's internal

@@ -92,6 +92,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
 
     {"driver_model_tests", {"cdc_uart_tx", &RunVoidEntry<test_cdc_uart_tx>, false}},
     {"driver_model_tests", {"uart_dma_tx", &RunVoidEntry<test_uart_dma_tx_model>, false}},
+    {"driver_model_tests", {"uart_context", &RunVoidEntry<test_uart_context>, false}},
     {"driver_model_tests",
      {"uart_circular_dma_rx", &RunVoidEntry<test_uart_circular_dma_rx_model>, false}},
     {"driver_model_tests",

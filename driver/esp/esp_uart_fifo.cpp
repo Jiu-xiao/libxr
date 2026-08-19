@@ -143,7 +143,7 @@ ErrorCode ESP32UartFifo::InstallUartIsr()
   return ErrorCode::OK;
 }
 
-ErrorCode ESP32UartFifo::SetConfig(UART::Configuration config)
+ErrorCode ESP32UartFifo::SetConfig(UART::Configuration config, bool in_isr)
 {
   const ErrorCode validation = ValidateConfig(config);
   if (validation != ErrorCode::OK)
@@ -158,7 +158,6 @@ ErrorCode ESP32UartFifo::SetConfig(UART::Configuration config)
   requested_config_ = config;
   rx_config_gate_.PublishConfig();
 
-  const bool in_isr = xPortInIsrContext() != pdFALSE;
   auto queue = _read_port.GetReadQueue(in_isr);
   (void)execution_policy_.Invoke(EventMask(Event::CONFIG),
                                  [this, in_isr, &queue](uint32_t events) noexcept

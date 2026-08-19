@@ -218,9 +218,9 @@ void ESP32UartDma::DisarmConfigTxIdleInterrupt()
   config_tx_idle_interrupt_armed_ = false;
 }
 
-ErrorCode ESP32UartDma::SetConfig(UART::Configuration config)
+ErrorCode ESP32UartDma::SetConfig(UART::Configuration config, bool in_isr)
 {
-  return dma_model_.SetConfig(config, xPortInIsrContext() != pdFALSE);
+  return dma_model_.SetConfig(config, in_isr);
 }
 
 ErrorCode ESP32UartDma::ValidateConfig(UART::Configuration config) const

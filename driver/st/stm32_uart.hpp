@@ -280,13 +280,15 @@ class STM32UART : public UART
   /**
    * @brief 提交一次串行化 UART 配置 / Submit one serialized UART configuration
    * @param config 新的帧格式和波特率 / New framing and baud rate
+   * @param in_isr 是否从 ISR 上下文调用；普通任务上下文可省略，默认值为 false / Whether
+   * called from ISR context; ordinary task context may omit it and defaults to false
    * @return 前一个配置仍未完成时返回 `BUSY` / `BUSY` while an earlier configuration
    * request is outstanding
    * @warning 不得从本 UART 的 HAL callback，或能抢占其 UART/TX-DMA/RX-DMA IRQ 域的
    * ISR 调用 / Do not call from this UART's HAL callbacks or from an ISR that can preempt
    * its UART/TX-DMA/RX-DMA IRQ domain
    */
-  ErrorCode SetConfig(UART::Configuration config);
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
   /**
    * @brief 在 runtime CONFIG 状态机外重新启动既有 RX DMA / Re-arm the configured RX DMA

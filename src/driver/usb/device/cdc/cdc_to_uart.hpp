@@ -128,8 +128,8 @@ class CDCToUart : public CDCUart
     // 5) LineCoding 回调：USB CDC 侧配置变化同步到 UART。
     // 5) LineCoding callback: forward CDC line-coding changes to UART configuration.
     set_line_coding_cb_ = LibXR::Callback<LibXR::UART::Configuration>::Create(
-        [](bool, CDCToUart* self, LibXR::UART::Configuration cfg)
-        { self->uart_.SetConfig(cfg); }, this);
+        [](bool in_isr, CDCToUart* self, LibXR::UART::Configuration cfg)
+        { self->uart_.SetConfig(cfg, in_isr); }, this);
 
     SetOnSetLineCodingCallback(set_line_coding_cb_);
 
