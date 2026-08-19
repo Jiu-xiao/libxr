@@ -296,8 +296,10 @@ class STM32UART : public UART
    * Compatibility hook. The caller must keep UART/RX-DMA callbacks, CONFIG/recovery,
    * and the RX producer quiescent for the entire call. Use `SetConfig()` for ordinary
    * runtime reconfiguration.
+   * @param in_isr 当前调用是否位于 ISR；普通任务上下文可省略，默认值为 false / Whether
+   * the call is in an ISR; ordinary task context may omit it and defaults to false
    */
-  void SetRxDMA();
+  void SetRxDMA(bool in_isr = false);
 
   /**
    * @brief 从 HAL RX callback 提交新产生的 DMA 数据 / Submit newly produced DMA data
@@ -344,7 +346,7 @@ class STM32UART : public UART
   UartDmaControlResult StopDataPath(bool active_tx, bool wait_for_uart_tc, bool in_isr);
   bool ApplyConfigPayload(UART::Configuration config, bool in_isr);
   void FinishControl();
-  UartDmaControlProgress SetRxDMA(bool in_isr);
+  UartDmaControlProgress SetRxDMAForControl(bool in_isr);
   void OnTxComplete(bool in_isr);
 
   [[nodiscard]] bool AllDmaStopsComplete() const;
@@ -356,13 +358,13 @@ class STM32UART : public UART
   void FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr);
 
 #if defined(LIBXR_STM32_UART_GPDMA)
-  RxArmResult StartLinkedListDmaRx(uint8_t* data, size_t size, size_t descriptor_count);
+  RxArmResult StartLinkedListDmaRx(uint8_t* data, size_t size, size_t descriptor_count,
+                                   bool in_isr);
   [[nodiscard]] uint8_t* GetLinkedListDmaRxProducer() const;
   void PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size);
 #else
-  RxArmResult StartCircularDmaRx(uint8_t* data, size_t size)
+  RxArmResult StartCircularDmaRx(uint8_t* data, size_t size, bool in_isr)
   {
-    const bool in_isr = InIsr();
     REQUIRE_FROM_CALLBACK(DmaTransferSizeSupported(size), in_isr);
     STM32_CleanDCacheByAddr(data, size);
     STM32_InvalidateDCacheByAddr(data, size);

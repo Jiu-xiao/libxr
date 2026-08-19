@@ -58,12 +58,14 @@ class UartLinkedListDmaRxModel
    * @tparam Backend 提供 linked-list RX hook 的平台后端 / Platform backend providing
    * linked-list RX hooks
    * @param backend 后端实例 / Backend instance
+   * @param in_isr 当前启动是否位于 ISR；普通初始化可省略，默认值为 false / Whether the
+   * start runs in an ISR; ordinary initialization may omit it and defaults to false
    */
   template <typename Backend>
-  void Start(Backend& backend)
+  void Start(Backend& backend, bool in_isr = false)
   {
     ResetPosition();
-    backend.StartLinkedListDmaRx(Buffer(), BufferSize(), DescriptorCount);
+    backend.StartLinkedListDmaRx(Buffer(), BufferSize(), DescriptorCount, in_isr);
   }
 
   /**

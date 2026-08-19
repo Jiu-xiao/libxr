@@ -11,11 +11,23 @@ namespace
 class CircularRxBackend
 {
  public:
+  void StartCircularDmaRx(uint8_t* buffer, size_t size, bool in_isr)
+  {
+    start_buffer = buffer;
+    start_size = size;
+    start_in_isr = in_isr;
+    ++start_calls;
+  }
+
   [[nodiscard]] size_t GetCircularDmaRxRemaining() const { return remaining; }
 
   void PrepareCircularDmaRxForCpu(uint8_t*, size_t) {}
 
   size_t remaining = 0U;
+  uint8_t* start_buffer = nullptr;
+  size_t start_size = 0U;
+  bool start_in_isr = false;
+  size_t start_calls = 0U;
 };
 
 }  // namespace
@@ -38,6 +50,16 @@ void test_uart_circular_dma_rx_model()
   UartCircularDmaRxModel model(RawData{storage.data(), storage.size()});
   CircularRxBackend backend;
   ReadPort port(2U);
+
+  model.Start(backend);
+  ASSERT(backend.start_calls == 1U);
+  ASSERT(backend.start_buffer == storage.data());
+  ASSERT(backend.start_size == storage.size());
+  ASSERT(!backend.start_in_isr);
+
+  model.Start(backend, true);
+  ASSERT(backend.start_calls == 2U);
+  ASSERT(backend.start_in_isr);
 
   backend.remaining = 5U;
   {

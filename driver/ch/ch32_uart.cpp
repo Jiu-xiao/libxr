@@ -387,8 +387,7 @@ UartDmaControlResult CH32UART::AdvanceConfig(UART::Configuration config, bool ac
 
 UartDmaControlProgress CH32UART::CompleteConfig(bool in_isr)
 {
-  StartDataPath();
-  (void)in_isr;
+  StartDataPath(in_isr);
   return UartDmaControlProgress::COMPLETED;
 }
 
@@ -449,11 +448,11 @@ UartOldTxTerminal CH32UART::StopDataPath(bool active_tx, bool in_isr)
   return terminal;
 }
 
-void CH32UART::StartDataPath()
+void CH32UART::StartDataPath(bool in_isr)
 {
   if ((uart_mode_ & USART_Mode_Rx) != 0U)
   {
-    rx_dma_model_.Start(*this);
+    rx_dma_model_.Start(*this, in_isr);
     USART_DMACmd(instance_, USART_DMAReq_Rx, ENABLE);
   }
   if ((uart_mode_ & USART_Mode_Tx) != 0U)
@@ -471,9 +470,8 @@ void CH32UART::WriteFun(WritePort& port, bool in_isr)
   uart->dma_model_.Submit(in_isr);
 }
 
-void CH32UART::StartCircularDmaRx(uint8_t* data, size_t size)
+void CH32UART::StartCircularDmaRx(uint8_t* data, size_t size, bool in_isr)
 {
-  const bool in_isr = InIsr();
   REQUIRE_FROM_CALLBACK((size > 0U) && (size <= CH32_DMA_MAX_TRANSFER_SIZE), in_isr);
   dma_rx_channel_->MADDR = reinterpret_cast<uint32_t>(data);
   dma_rx_channel_->CNTR = size;
@@ -530,9 +528,9 @@ UartDmaControlResult CH32UART::AdvanceRecovery(bool active_tx, bool in_isr)
   return UartDmaControlResult::Completed(StopDataPath(active_tx, in_isr));
 }
 
-UartDmaControlProgress CH32UART::CompleteRecovery(bool)
+UartDmaControlProgress CH32UART::CompleteRecovery(bool in_isr)
 {
-  StartDataPath();
+  StartDataPath(in_isr);
   return UartDmaControlProgress::COMPLETED;
 }
 

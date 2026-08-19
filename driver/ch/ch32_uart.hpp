@@ -133,7 +133,7 @@ class CH32UART : public UART
 
   UartOldTxTerminal StopDataPath(bool active_tx, bool in_isr);
 
-  void StartDataPath();
+  void StartDataPath(bool in_isr);
 
   void ApplyConfigPayload(UART::Configuration config, bool in_isr);
 
@@ -145,8 +145,9 @@ class CH32UART : public UART
    * circular RX DMA channel
    * @param data DMA 可写的接收缓冲区 / DMA-writable receive buffer
    * @param size 接收缓冲区字节数 / Receive buffer capacity in bytes
+   * @param in_isr 当前启动是否位于 ISR / Whether the start runs in an ISR
    */
-  void StartCircularDmaRx(uint8_t* data, size_t size);
+  void StartCircularDmaRx(uint8_t* data, size_t size, bool in_isr);
 
   /**
    * @brief 获取 CH32 RX DMA 剩余传输计数 / Get the CH32 RX DMA remaining count

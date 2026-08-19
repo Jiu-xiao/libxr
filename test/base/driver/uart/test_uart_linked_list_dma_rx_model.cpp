@@ -18,11 +18,13 @@ struct PreparedSpan
 class LinkedListRxBackend
 {
  public:
-  void StartLinkedListDmaRx(uint8_t* buffer, size_t size, size_t descriptor_count)
+  void StartLinkedListDmaRx(uint8_t* buffer, size_t size, size_t descriptor_count,
+                            bool in_isr)
   {
     start_buffer = buffer;
     start_size = size;
     start_descriptor_count = descriptor_count;
+    start_in_isr = in_isr;
     ++start_calls;
   }
 
@@ -49,6 +51,7 @@ class LinkedListRxBackend
   uint8_t* start_buffer = nullptr;
   size_t start_size = 0U;
   size_t start_descriptor_count = 0U;
+  bool start_in_isr = false;
   size_t start_calls = 0U;
   size_t producer_reads = 0U;
   std::array<PreparedSpan, 2U> prepared{};
@@ -111,6 +114,11 @@ void test_uart_linked_list_dma_rx_model()
     ASSERT(backend.start_buffer == storage.data());
     ASSERT(backend.start_size == storage.size());
     ASSERT(backend.start_descriptor_count == 4U);
+    ASSERT(!backend.start_in_isr);
+
+    model.Start(backend, true);
+    ASSERT(backend.start_calls == 2U);
+    ASSERT(backend.start_in_isr);
   }
 
   {

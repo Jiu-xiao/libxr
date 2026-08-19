@@ -139,7 +139,7 @@ UartDmaControlResult STM32UART::AdvanceConfig(UART::Configuration config, bool a
 
 UartDmaControlProgress STM32UART::CompleteConfig(bool in_isr)
 {
-  if (SetRxDMA(in_isr) == UartDmaControlProgress::PENDING)
+  if (SetRxDMAForControl(in_isr) == UartDmaControlProgress::PENDING)
   {
     return UartDmaControlProgress::PENDING;
   }
@@ -154,7 +154,7 @@ UartDmaControlResult STM32UART::AdvanceRecovery(bool active_tx, bool in_isr)
 
 UartDmaControlProgress STM32UART::CompleteRecovery(bool in_isr)
 {
-  if (SetRxDMA(in_isr) == UartDmaControlProgress::PENDING)
+  if (SetRxDMAForControl(in_isr) == UartDmaControlProgress::PENDING)
   {
     return UartDmaControlProgress::PENDING;
   }
@@ -322,9 +322,9 @@ bool STM32UART::ApplyConfigPayload(UART::Configuration config, bool in_isr)
 
 #if defined(LIBXR_STM32_UART_GPDMA)
 STM32UART::RxArmResult STM32UART::StartLinkedListDmaRx(uint8_t* data, size_t size,
-                                                       size_t descriptor_count)
+                                                       size_t descriptor_count,
+                                                       bool in_isr)
 {
-  const bool in_isr = InIsr();
   const HAL_StatusTypeDef status =
       gpdma_adapter_.StartLinkedListDmaRx(data, size, descriptor_count, in_isr);
   if (status == HAL_OK)
@@ -355,22 +355,21 @@ void STM32UART::PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size)
 }
 #endif
 
-void STM32UART::SetRxDMA()
+void STM32UART::SetRxDMA(bool in_isr)
 {
-  const bool in_isr = InIsr();
-  const UartDmaControlProgress result = SetRxDMA(in_isr);
+  const UartDmaControlProgress result = SetRxDMAForControl(in_isr);
   // A pending line error already owns its HAL error/abort completion carrier.
   REQUIRE_FROM_CALLBACK((result == UartDmaControlProgress::COMPLETED) ||
                             (rx_arm_result_ == RxArmResult::PENDING_LINE_ERROR),
                         in_isr);
 }
 
-UartDmaControlProgress STM32UART::SetRxDMA(bool in_isr)
+UartDmaControlProgress STM32UART::SetRxDMAForControl(bool in_isr)
 {
   if ((uart_handle_->Init.Mode & UART_MODE_RX) == UART_MODE_RX)
   {
     ASSERT(uart_handle_->hdmarx != nullptr);
-    rx_dma_model_.Start(*this);
+    rx_dma_model_.Start(*this, in_isr);
     REQUIRE_FROM_CALLBACK(rx_arm_result_ != RxArmResult::FAILED, in_isr);
     if (rx_arm_result_ == RxArmResult::PENDING_LINE_ERROR)
     {
