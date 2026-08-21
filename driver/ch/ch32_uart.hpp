@@ -124,7 +124,9 @@ class CH32UART : public UART
 
   void HandleNormalIrq();
 
-  uint32_t ScanNormalIrqStatus(bool in_isr, ReadPort::ReadQueue& queue);
+  void InvokeNormalIrq(ReadPort::ReadQueue* rx_queue);
+
+  uint32_t ScanNormalIrqStatus(bool in_isr, ReadPort::ReadQueue* rx_queue);
 
   UartDmaControlResult AdvanceRecovery(bool active_tx, bool in_isr);
   UartDmaControlProgress CompleteRecovery(bool in_isr);

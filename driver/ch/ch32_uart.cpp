@@ -503,11 +503,29 @@ void CH32UART::UartIRQHandler() { HandleNormalIrq(); }
 
 void CH32UART::HandleNormalIrq()
 {
-  auto queue = _read_port.GetReadQueue(true);
+  const bool rx_enabled = (uart_mode_ & USART_Mode_Rx) != 0U;
+  if (rx_enabled)
+  {
+    auto queue = _read_port.GetReadQueue(true);
+    InvokeNormalIrq(&queue);
+    queue.Publish();
+  }
+  else
+  {
+    // A TX-only UART has no ReadPort queue. Keep the same combined hardware scan, but
+    // do not create an RX producer scope that could assert on the absent queue.
+    InvokeNormalIrq(nullptr);
+  }
+}
+
+void CH32UART::InvokeNormalIrq(ReadPort::ReadQueue* rx_queue)
+{
+  // Keep one InvokeIrq instantiation for both RX-capable and TX-only paths.
+  // The IRQ source lambda runs synchronously. An RX caller publishes its stack
+  // scope after this returns.
   (void)dma_model_.InvokeIrq(
-      [this, &queue]() { return ScanNormalIrqStatus(true, queue); }, true);
+      [this, rx_queue]() { return ScanNormalIrqStatus(true, rx_queue); }, true);
   Ch32UartIoFence();
-  queue.Publish();
 }
 
 UartDmaControlResult CH32UART::AdvanceRecovery(bool active_tx, bool in_isr)
@@ -521,7 +539,7 @@ UartDmaControlProgress CH32UART::CompleteRecovery(bool in_isr)
   return UartDmaControlProgress::COMPLETED;
 }
 
-uint32_t CH32UART::ScanNormalIrqStatus(bool in_isr, ReadPort::ReadQueue& queue)
+uint32_t CH32UART::ScanNormalIrqStatus(bool in_isr, ReadPort::ReadQueue* rx_queue)
 {
   using Model = UartDmaModel<CH32UART, UartDirectPolicy>;
 
@@ -614,8 +632,13 @@ uint32_t CH32UART::ScanNormalIrqStatus(bool in_isr, ReadPort::ReadQueue& queue)
   uint32_t events = 0U;
   if (rx_data_available)
   {
-    (void)dma_model_.ProcessRxInIrqSource(
-        events, [this, &queue]() { rx_dma_model_.OnDataAvailable(*this, queue); });
+    ASSERT_FROM_CALLBACK(rx_queue != nullptr, in_isr);
+    if (rx_queue != nullptr)
+    {
+      (void)dma_model_.ProcessRxInIrqSource(
+          events,
+          [this, rx_queue]() { rx_dma_model_.OnDataAvailable(*this, *rx_queue); });
+    }
   }
 
   if (tx_complete)
