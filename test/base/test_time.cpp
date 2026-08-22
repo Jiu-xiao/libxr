@@ -16,7 +16,9 @@
  * in-test so the wraparound branch is exercised deterministically instead of depending on
  * platform timebase limits.
  */
+#include <concepts>
 #include <cstdint>
+#include <type_traits>
 
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -24,6 +26,32 @@
 
 namespace
 {
+
+template <typename Left, typename Right>
+concept EqualityComparable = requires(Left left, Right right) { left == right; };
+
+template <typename Left, typename Right>
+concept Subtractable = requires(Left left, Right right) { left - right; };
+
+static_assert(sizeof(LibXR::ThreadTimestamp) == sizeof(uint32_t));
+static_assert(std::is_trivially_copyable_v<LibXR::ThreadTimestamp>);
+static_assert(!std::is_constructible_v<LibXR::ThreadTimestamp, uint32_t>);
+static_assert(!std::is_convertible_v<LibXR::ThreadTimestamp, uint32_t>);
+static_assert(
+    !std::is_constructible_v<LibXR::ThreadTimestamp, LibXR::MillisecondTimestamp>);
+static_assert(
+    !std::is_constructible_v<LibXR::MillisecondTimestamp, LibXR::ThreadTimestamp>);
+static_assert(
+    !std::is_convertible_v<LibXR::ThreadTimestamp, LibXR::MillisecondTimestamp>);
+static_assert(
+    !std::is_convertible_v<LibXR::MillisecondTimestamp, LibXR::ThreadTimestamp>);
+static_assert(!EqualityComparable<LibXR::ThreadTimestamp, LibXR::MillisecondTimestamp>);
+static_assert(!Subtractable<LibXR::ThreadTimestamp, LibXR::MillisecondTimestamp>);
+static_assert(std::same_as<decltype(LibXR::ThreadTimestamp().RawTicks()), uint32_t>);
+static_assert(LibXR::Detail::SchedulerTicksUntil(UINT32_MAX - 2U, 1U) == 4U);
+static_assert(LibXR::Detail::SchedulerTicksUntil(100U, 110U) == 10U);
+static_assert(LibXR::Detail::SchedulerTicksUntil(110U, 100U) == 0U);
+static_assert(LibXR::Detail::SchedulerTicksUntil(100U, 100U) == 0U);
 
 struct TimebaseWrapGuard
 {

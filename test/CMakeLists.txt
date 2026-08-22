@@ -50,9 +50,41 @@ add_dependencies(test xr)
 
 target_link_libraries(test PUBLIC xr)
 
+add_executable(
+  linux_uart_test
+  standalone/linux_uart_main.cpp
+  runtime/driver/test_linux_uart.cpp
+)
+add_dependencies(linux_uart_test xr)
+target_link_libraries(linux_uart_test PUBLIC xr)
+add_dependencies(test linux_uart_test)
+
+add_executable(
+  linux_stdio_backend_test
+  standalone/linux_stdio_backend_main.cpp
+  linux_stdio/test_stdio_backend.cpp
+)
+add_dependencies(linux_stdio_backend_test xr)
+target_link_libraries(linux_stdio_backend_test PUBLIC xr)
+add_dependencies(test linux_stdio_backend_test)
+
 target_include_directories(
   test
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/framework"
+  PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
+)
+
+target_include_directories(
+  linux_uart_test
+  PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
+)
+
+target_include_directories(
+  linux_stdio_backend_test
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/framework"
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/linux_stdio"
   PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib/Eigen
 )

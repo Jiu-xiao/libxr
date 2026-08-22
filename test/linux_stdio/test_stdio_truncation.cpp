@@ -51,7 +51,6 @@ void TestStdioTruncation()
       Fail("stdio pipe-capacity truncation length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx.data(), payload.data(), expected_retained) != 0)
     {
       Fail("stdio pipe-capacity truncation payload mismatch");
@@ -95,7 +94,6 @@ void TestStdioTruncation()
       Fail("stdio bound-stream truncation length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx.data(), payload.data(), expected_retained) != 0)
     {
       Fail("stdio bound-stream truncation payload mismatch");
@@ -138,7 +136,6 @@ void TestStdioTruncation()
       Fail("stdio bound-stream small-capacity truncation length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx.data(), payload.data(), expected_retained) != 0)
     {
       Fail("stdio bound-stream small-capacity truncation payload mismatch");

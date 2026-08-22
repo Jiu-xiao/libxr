@@ -53,9 +53,9 @@ void test_async()
     async->AssignJob(async_cb);
 
     ASSERT(async->GetStatus() == LibXR::ASync::Status::BUSY);
-    const uint32_t wait_start = LibXR::Thread::GetTime();
+    const auto wait_start = LibXR::Timebase::GetMilliseconds();
     while (async->status_.load(std::memory_order_acquire) != LibXR::ASync::Status::DONE &&
-           LibXR::Thread::GetTime() - wait_start < 1000U)
+           (LibXR::Timebase::GetMilliseconds() - wait_start).ToMillisecond() < 1000U)
     {
       LibXR::Thread::Yield();
     }

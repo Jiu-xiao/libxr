@@ -10,7 +10,9 @@ static struct
 void ch32_dma_register_callback(ch32_dma_channel_t id, ch32_dma_callback_t callback,
                                 void* arg)
 {
-  ASSERT(id < CH32_DMA_CHANNEL_NUMBER);
+  REQUIRE(id < CH32_DMA_CHANNEL_NUMBER);
+  REQUIRE(callback != nullptr);
+  REQUIRE(ch32_dma_callback_map[id].fun == nullptr);
   ch32_dma_callback_map[id] = {callback, arg};
 }
 

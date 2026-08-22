@@ -18,8 +18,8 @@
 
 void RunBaseRwReadQueueTests();
 void RunBaseRwPendingTests();
-void RunBaseRwBlockTests();
-void RunBaseRwFailAndClearTests();
+void RunBaseRwImmediateErrorTests();
+void RunBaseRwPublicationTests();
 void RunBasePipeBasicTests();
 void RunBasePipeStreamTests();
 void RunBasePipeStressTests();

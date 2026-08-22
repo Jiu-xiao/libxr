@@ -30,7 +30,10 @@ bool WaitForPredicate(Semaphore& semaphore, uint32_t timeout_ms, Predicate&& pre
   {
     while (!predicate())
     {
-      (void)semaphore.Wait(UINT32_MAX);
+      if (semaphore.Wait(UINT32_MAX) != ErrorCode::OK)
+      {
+        continue;
+      }
     }
     return true;
   }

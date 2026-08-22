@@ -19,4 +19,5 @@ void test_linux_stdio_print()
   // Check normal write paths first, then truncation return values and retained payload.
   LibXRLinuxStdioPrintTest::TestStdioPrintWrappers();
   LibXRLinuxStdioPrintTest::TestStdioTruncation();
+  LibXRLinuxStdioPrintTest::TestStdioBackendTurns();
 }

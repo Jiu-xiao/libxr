@@ -1,304 +1,278 @@
 #include "stm32_uart.hpp"
 
-#include "stm32_dcache.hpp"
 #ifdef HAL_UART_MODULE_ENABLED
 
 using namespace LibXR;
 
-STM32UART* STM32UART::map[STM32_UART_NUMBER] = {nullptr};
-
-stm32_uart_id_t stm32_uart_get_id(USART_TypeDef* addr)
+namespace
 {
-  if (addr == nullptr)
-  {  // NOLINT
-    return stm32_uart_id_t::STM32_UART_ID_ERROR;
-  }
-#ifdef USART1
-  else if (addr == USART1)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART1;
-  }
-#endif
-#ifdef USART2
-  else if (addr == USART2)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART2;
-  }
-#endif
-#ifdef USART3
-  else if (addr == USART3)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART3;
-  }
-#endif
-#ifdef USART4
-  else if (addr == USART4)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART4;
-  }
-#endif
-#ifdef USART5
-  else if (addr == USART5)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART5;
-  }
-#endif
-#ifdef USART6
-  else if (addr == USART6)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART6;
-  }
-#endif
-#ifdef USART7
-  else if (addr == USART7)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART7;
-  }
-#endif
-#ifdef USART8
-  else if (addr == USART8)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART8;
-  }
-#endif
-#ifdef USART9
-  else if (addr == USART9)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART9;
-  }
-#endif
-#ifdef USART10
-  else if (addr == USART10)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART10;
-  }
-#endif
-#ifdef USART11
-  else if (addr == USART11)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART11;
-  }
-#endif
-#ifdef USART12
-  else if (addr == USART12)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART12;
-  }
-#endif
-#ifdef USART13
-  else if (addr == USART13)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_USART13;
-  }
-#endif
-#ifdef UART1
-  else if (addr == UART1)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART1;
-  }
-#endif
-#ifdef UART2
-  else if (addr == UART2)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART2;
-  }
-#endif
-#ifdef UART3
-  else if (addr == UART3)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART3;
-  }
-#endif
-#ifdef UART4
-  else if (addr == UART4)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART4;
-  }
-#endif
-#ifdef UART5
-  else if (addr == UART5)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART5;
-  }
-#endif
-#ifdef UART6
-  else if (addr == UART6)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART6;
-  }
-#endif
-#ifdef UART7
-  else if (addr == UART7)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART7;
-  }
-#endif
-#ifdef UART8
-  else if (addr == UART8)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART8;
-  }
-#endif
-#ifdef UART9
-  else if (addr == UART9)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART9;
-  }
-#endif
-#ifdef UART10
-  else if (addr == UART10)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART10;
-  }
-#endif
-#ifdef UART11
-  else if (addr == UART11)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART11;
-  }
-#endif
-#ifdef UART12
-  else if (addr == UART12)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART12;
-  }
-#endif
-#ifdef UART13
-  else if (addr == UART13)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_UART13;
-  }
-#endif
-#ifdef LPUART1
-  else if (addr == LPUART1)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_LPUART1;
-  }
-#endif
-#ifdef LPUART2
-  else if (addr == LPUART2)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_LPUART2;
-  }
-#endif
-#ifdef LPUART3
-  else if (addr == LPUART3)  // NOLINT
-  {
-    return stm32_uart_id_t::STM32_LPUART3;
-  }
-#endif
-  else
-  {
-    return stm32_uart_id_t::STM32_UART_ID_ERROR;
-  }
+constexpr bool ShouldPublishStopDoneOnTxComplete(bool stop_active,
+                                                 bool waiting_for_uart_tc)
+{
+  return stop_active && waiting_for_uart_tc;
 }
 
-ErrorCode STM32UART::WriteFun(WritePort& port, bool)
+static_assert(ShouldPublishStopDoneOnTxComplete(true, true));
+static_assert(!ShouldPublishStopDoneOnTxComplete(true, false));
+static_assert(!ShouldPublishStopDoneOnTxComplete(false, true));
+
+}  // namespace
+
+bool STM32UART::DmaTransferSizeSupported(size_t size)
+{
+  if ((size == 0U) || (size > UINT16_MAX))
+  {
+    return false;
+  }
+#if defined(IS_DMA_BUFFER_SIZE)
+  return IS_DMA_BUFFER_SIZE(static_cast<uint32_t>(size));
+#else
+  return true;
+#endif
+}
+
+bool STM32UART::IsPendingRxLineError(uint32_t error_code)
+{
+  uint32_t line_error_mask = 0U;
+#ifdef HAL_UART_ERROR_PE
+  line_error_mask |= HAL_UART_ERROR_PE;
+#endif
+#ifdef HAL_UART_ERROR_NE
+  line_error_mask |= HAL_UART_ERROR_NE;
+#endif
+#ifdef HAL_UART_ERROR_FE
+  line_error_mask |= HAL_UART_ERROR_FE;
+#endif
+#ifdef HAL_UART_ERROR_ORE
+  line_error_mask |= HAL_UART_ERROR_ORE;
+#endif
+#ifdef HAL_UART_ERROR_RTO
+  line_error_mask |= HAL_UART_ERROR_RTO;
+#endif
+
+  if ((error_code & line_error_mask) == 0U)
+  {
+    return false;
+  }
+#ifdef HAL_UART_ERROR_DMA
+  if ((error_code & HAL_UART_ERROR_DMA) != 0U)
+  {
+    return false;
+  }
+#endif
+  return true;
+}
+
+void STM32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &STM32UART::_write_port);
-
-  if (uart->in_tx_isr.IsSet())
-  {
-    return ErrorCode::PENDING;
-  }
-
-  if (!uart->dma_buff_tx_.HasPending())
-  {
-    WriteInfoBlock info;
-    if (port.queue_info_->Peek(info) != ErrorCode::OK)
-    {
-      return ErrorCode::PENDING;
-    }
-
-    uint8_t* buffer = nullptr;
-    bool use_pending = false;
-
-    if (uart->uart_handle_->gState == HAL_UART_STATE_READY)
-    {
-      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
-    }
-    else
-    {
-      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer());
-      use_pending = true;
-    }
-
-    if (port.queue_data_->PopBatch(reinterpret_cast<uint8_t*>(buffer), info.data.size_) !=
-        ErrorCode::OK)
-    {
-      ASSERT(false);
-      return ErrorCode::EMPTY;
-    }
-
-    if (use_pending)
-    {
-      uart->dma_buff_tx_.SetPendingLength(info.data.size_);
-      uart->dma_buff_tx_.EnablePending();
-      if (uart->uart_handle_->gState == HAL_UART_STATE_READY &&
-          uart->dma_buff_tx_.HasPending())
-      {
-        uart->dma_buff_tx_.Switch();
-      }
-      else
-      {
-        return ErrorCode::PENDING;
-      }
-    }
-
-    port.queue_info_->Pop(uart->write_info_active_);
-
-    STM32_CleanDCacheByAddr(uart->dma_buff_tx_.ActiveBuffer(), info.data.size_);
-
-    uart->dma_buff_tx_.SetActiveLength(info.data.size_);
-    uart->tx_busy_.Set();
-    auto ans = HAL_UART_Transmit_DMA(
-        uart->uart_handle_, static_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer()),
-        info.data.size_);
-
-    if (ans != HAL_OK)
-    {
-      uart->tx_busy_.Clear();
-      return ErrorCode::FAILED;
-    }
-    else
-    {
-      return ErrorCode::OK;
-    }
-  }
-
-  return ErrorCode::PENDING;
+  uart->dma_model_.Submit(in_isr);
 }
-
-ErrorCode STM32UART::ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
 
 STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
                      RawData dma_buff_tx, uint32_t tx_queue_size)
     : UART(&_read_port, &_write_port),
       _read_port(dma_buff_rx.size_),
-      _write_port(tx_queue_size, dma_buff_tx.size_ / 2),
-      dma_buff_rx_(dma_buff_rx),
-      dma_buff_tx_(dma_buff_tx),
+      _write_port(tx_queue_size, dma_buff_tx.size_ / 2U),
+      rx_dma_model_(dma_buff_rx),
+#if defined(LIBXR_STM32_UART_GPDMA)
+      gpdma_adapter_(uart_handle),
+#endif
+      dma_model_(*this, execution_policy_, _write_port, dma_buff_tx),
       uart_handle_(uart_handle),
-      id_(stm32_uart_get_id(uart_handle_->Instance))
+      id_(stm32_uart_get_id((uart_handle == nullptr) ? nullptr : uart_handle->Instance))
 {
-  ASSERT(id_ != STM32_UART_ID_ERROR);
-
+  REQUIRE(uart_handle_ != nullptr);
+  REQUIRE(id_ != STM32_UART_ID_ERROR);
+  REQUIRE(map[id_] == nullptr);
+  REQUIRE((uart_handle_->hdmatx == nullptr) || (uart_handle_->hdmarx == nullptr) ||
+          (uart_handle_->hdmatx != uart_handle_->hdmarx));
+#if defined(UART_FIFOMODE_ENABLE)
+  REQUIRE(uart_handle_->FifoMode == UART_FIFOMODE_DISABLE);
+#endif
   map[id_] = this;
 
-  if ((uart_handle->Init.Mode & UART_MODE_TX) == UART_MODE_TX)
+  if ((uart_handle_->Init.Mode & UART_MODE_TX) == UART_MODE_TX)
   {
-    ASSERT(uart_handle_->hdmatx != NULL);
+    REQUIRE(uart_handle_->hdmatx != nullptr);
+#if !defined(LIBXR_STM32_UART_GPDMA)
+    ASSERT(uart_handle_->hdmatx->Init.Mode == DMA_NORMAL);
+#else
+    ASSERT(uart_handle_->hdmatx->Mode == DMA_NORMAL);
+#endif
+    REQUIRE(dma_buff_tx.addr_ != nullptr);
+    REQUIRE((reinterpret_cast<uintptr_t>(dma_buff_tx.addr_) % alignof(size_t)) == 0U);
+    REQUIRE((dma_buff_tx.size_ % (2U * alignof(size_t))) == 0U);
+    REQUIRE(DmaTransferSizeSupported(dma_buff_tx.size_ / 2U));
     _write_port = WriteFun;
   }
-
+  if ((uart_handle_->Init.Mode & UART_MODE_RX) == UART_MODE_RX)
+  {
+    REQUIRE(uart_handle_->hdmarx != nullptr);
+    REQUIRE(DmaTransferSizeSupported(dma_buff_rx.size_));
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+    REQUIRE((reinterpret_cast<uintptr_t>(dma_buff_rx.addr_) % HW_CACHE_LINE_SIZE) == 0U);
+    REQUIRE((dma_buff_rx.size_ % HW_CACHE_LINE_SIZE) == 0U);
+#endif
+  }
   SetRxDMA();
 }
 
-ErrorCode STM32UART::SetConfig(UART::Configuration config)
+ErrorCode STM32UART::SetConfig(UART::Configuration config, bool in_isr)
 {
-  HAL_UART_DeInit(uart_handle_);
-  uart_handle_->Init.BaudRate = config.baudrate;
+  return dma_model_.SetConfig(config, in_isr);
+}
 
+UartDmaControlResult STM32UART::AdvanceConfig(UART::Configuration config, bool active_tx,
+                                              bool in_isr)
+{
+  UartDmaControlResult stop_result = StopDataPath(active_tx, true, in_isr);
+  if (!stop_result.IsCompleted())
+  {
+    return stop_result;
+  }
+
+  const bool configured = ApplyConfigPayload(config, in_isr);
+  REQUIRE_FROM_CALLBACK(configured, in_isr);
+  return stop_result;
+}
+
+UartDmaControlProgress STM32UART::CompleteConfig(bool in_isr)
+{
+  if (SetRxDMAForControl(in_isr) == UartDmaControlProgress::PENDING)
+  {
+    return UartDmaControlProgress::PENDING;
+  }
+  FinishControl();
+  return UartDmaControlProgress::COMPLETED;
+}
+
+UartDmaControlResult STM32UART::AdvanceRecovery(bool active_tx, bool in_isr)
+{
+  return StopDataPath(active_tx, false, in_isr);
+}
+
+UartDmaControlProgress STM32UART::CompleteRecovery(bool in_isr)
+{
+  if (SetRxDMAForControl(in_isr) == UartDmaControlProgress::PENDING)
+  {
+    return UartDmaControlProgress::PENDING;
+  }
+  FinishControl();
+  return UartDmaControlProgress::COMPLETED;
+}
+
+UartDmaControlResult STM32UART::StopDataPath(bool active_tx, bool wait_for_uart_tc,
+                                             bool in_isr)
+{
+  if (!stop_active_)
+  {
+    stop_active_ = true;
+    tx_evidence_captured_ = false;
+    tx_payload_complete_ = false;
+    tx_dma_error_ = false;
+    waiting_for_uart_tc_ = false;
+    CloseTxTerminalSource();
+    if (uart_handle_->hdmatx != nullptr)
+    {
+      LaunchDmaStop(uart_handle_->hdmatx, in_isr, active_tx);
+    }
+    if (uart_handle_->hdmarx != nullptr)
+    {
+      LaunchDmaStop(uart_handle_->hdmarx, in_isr, false);
+    }
+  }
+
+  if (!AllDmaStopsComplete())
+  {
+    return UartDmaControlResult::Pending();
+  }
+
+  UartOldTxTerminal old_tx_terminal = UartOldTxTerminal::NONE;
+  if (active_tx && (uart_handle_->hdmatx != nullptr))
+  {
+    CaptureStoppedTx();
+  }
+
+  // A recovery stop may complete before a reserved CONFIG takes over. Its captured
+  // active evidence still represents the old line generation even if common already
+  // consumed a COMPLETE carrier and cleared active_length_.
+  const bool stopped_active_tx = active_tx || tx_evidence_captured_;
+  if (wait_for_uart_tc && stopped_active_tx &&
+      ((uart_handle_->Init.Mode & UART_MODE_TX) == UART_MODE_TX))
+  {
+    if (waiting_for_uart_tc_)
+    {
+      // UART_EndTransmit_IT() disables TCIE before publishing the HAL callback.
+      // While TCIE remains enabled, that callback has not retired this generation.
+      if (__HAL_UART_GET_IT_SOURCE(uart_handle_, UART_IT_TC) != RESET)
+      {
+        return UartDmaControlResult::Pending();
+      }
+    }
+    else if (__HAL_UART_GET_FLAG(uart_handle_, UART_FLAG_TC) == RESET)
+    {
+      // DMA has stopped, but the UART shifter has not drained. Publish the wait state
+      // before enabling TCIE so immediate preemption is safe. The TC callback below
+      // publishes COMPLETE only for a complete/error-free active payload; otherwise it
+      // publishes CONTROL_READY.
+      waiting_for_uart_tc_ = true;
+      ATOMIC_SET_BIT(uart_handle_->Instance->CR1, USART_CR1_TCIE);
+      const volatile uint32_t cr1 = uart_handle_->Instance->CR1;
+      UNUSED(cr1);
+      __DSB();
+      return UartDmaControlResult::Pending();
+    }
+  }
+
+  if (active_tx && (uart_handle_->hdmatx != nullptr))
+  {
+    if (tx_dma_error_)
+    {
+      old_tx_terminal = UartOldTxTerminal::ERROR;
+    }
+    else if (tx_payload_complete_)
+    {
+      old_tx_terminal = UartOldTxTerminal::COMPLETE;
+    }
+  }
+
+  // With both DMA handles already READY, HAL's blocking abort can only take the
+  // immediate NO_XFER path; it still performs the UART-side cleanup and state reset.
+  const bool aborted = HAL_UART_Abort(uart_handle_) == HAL_OK;
+  REQUIRE_FROM_CALLBACK(aborted, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(uart_handle_->gState == HAL_UART_STATE_READY, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(uart_handle_->RxState == HAL_UART_STATE_READY, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(uart_handle_->ErrorCode == HAL_UART_ERROR_NONE, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(uart_handle_->Lock == HAL_UNLOCKED, in_isr);
+  if (uart_handle_->hdmatx != nullptr)
+  {
+    FinalizeStopped(uart_handle_->hdmatx, in_isr);
+  }
+  if (uart_handle_->hdmarx != nullptr)
+  {
+    FinalizeStopped(uart_handle_->hdmarx, in_isr);
+  }
+
+#if !defined(UART_CLEAR_OREF) && defined(__HAL_UART_CLEAR_PEFLAG)
+  __HAL_UART_CLEAR_PEFLAG(uart_handle_);
+#endif
+  return UartDmaControlResult::Completed(old_tx_terminal);
+}
+
+void STM32UART::FinishControl()
+{
+  ASSERT(stop_active_);
+  stop_active_ = false;
+  tx_evidence_captured_ = false;
+  tx_payload_complete_ = false;
+  tx_dma_error_ = false;
+  waiting_for_uart_tc_ = false;
+}
+
+bool STM32UART::ApplyConfigPayload(UART::Configuration config, bool in_isr)
+{
+  uart_handle_->Init.BaudRate = config.baudrate;
   switch (config.parity)
   {
     case UART::Parity::NO_PARITY:
@@ -314,171 +288,124 @@ ErrorCode STM32UART::SetConfig(UART::Configuration config)
       uart_handle_->Init.WordLength = UART_WORDLENGTH_9B;
       break;
     default:
-      ASSERT(false);
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
+      return false;
   }
+  uart_handle_->Init.StopBits =
+      (config.stop_bits == 2U) ? UART_STOPBITS_2 : UART_STOPBITS_1;
 
-  switch (config.stop_bits)
+  __HAL_UART_DISABLE(uart_handle_);
+#if defined(USART_ISR_TEACK) || defined(USART_ISR_REACK)
+  bool configured = UART_SetConfig(uart_handle_) == HAL_OK;
+#if defined(USART_CR2_LINEN) && defined(USART_CR2_CLKEN)
+  CLEAR_BIT(uart_handle_->Instance->CR2, USART_CR2_LINEN | USART_CR2_CLKEN);
+#endif
+#if defined(USART_CR3_SCEN) && defined(USART_CR3_HDSEL) && defined(USART_CR3_IREN)
+  CLEAR_BIT(uart_handle_->Instance->CR3,
+            USART_CR3_SCEN | USART_CR3_HDSEL | USART_CR3_IREN);
+#endif
+  if (configured)
   {
-    case 1:
-      uart_handle_->Init.StopBits = UART_STOPBITS_1;
-      break;
-    case 2:
-      uart_handle_->Init.StopBits = UART_STOPBITS_2;
-      break;
-    default:
-      ASSERT(false);
+    __HAL_UART_ENABLE(uart_handle_);
   }
-
-  if (HAL_UART_Init(uart_handle_) != HAL_OK)
+#else
+  bool configured = HAL_UART_Init(uart_handle_) == HAL_OK;
+#endif
+  REQUIRE_FROM_CALLBACK(configured, in_isr);
+  if (!configured)
   {
-    return ErrorCode::INIT_ERR;
+    return false;
   }
 
-  last_rx_pos_ = 0;
-
-  SetRxDMA();
-
-  if (tx_busy_.IsSet())
-  {
-    HAL_UART_Transmit_DMA(uart_handle_, dma_buff_tx_.ActiveBuffer(),
-                          dma_buff_tx_.GetActiveLength());
-  }
-
-  return ErrorCode::OK;
+  return true;
 }
 
-void STM32UART::SetRxDMA()
+#if defined(LIBXR_STM32_UART_GPDMA)
+STM32UART::RxArmResult STM32UART::StartLinkedListDmaRx(uint8_t* data, size_t size,
+                                                       size_t descriptor_count,
+                                                       bool in_isr)
+{
+  const HAL_StatusTypeDef status =
+      gpdma_adapter_.StartLinkedListDmaRx(data, size, descriptor_count, in_isr);
+  if (status == HAL_OK)
+  {
+    rx_arm_result_ = RxArmResult::STARTED;
+    return rx_arm_result_;
+  }
+
+  if ((status == HAL_ERROR) && IsPendingRxLineError(uart_handle_->ErrorCode))
+  {
+    rx_arm_result_ = RxArmResult::PENDING_LINE_ERROR;
+    return rx_arm_result_;
+  }
+
+  rx_arm_result_ = RxArmResult::FAILED;
+  REQUIRE_FROM_CALLBACK(false, in_isr);
+  return rx_arm_result_;
+}
+
+uint8_t* STM32UART::GetLinkedListDmaRxProducer() const
+{
+  return gpdma_adapter_.GetLinkedListDmaRxProducer();
+}
+
+void STM32UART::PrepareLinkedListDmaRxForCpu(uint8_t* data, size_t size)
+{
+  STM32GpdmaUartAdapter::PrepareLinkedListDmaRxForCpu(data, size);
+}
+#endif
+
+void STM32UART::SetRxDMA(bool in_isr)
+{
+  const UartDmaControlProgress result = SetRxDMAForControl(in_isr);
+  // A pending line error already owns its HAL error/abort completion carrier.
+  REQUIRE_FROM_CALLBACK((result == UartDmaControlProgress::COMPLETED) ||
+                            (rx_arm_result_ == RxArmResult::PENDING_LINE_ERROR),
+                        in_isr);
+}
+
+UartDmaControlProgress STM32UART::SetRxDMAForControl(bool in_isr)
 {
   if ((uart_handle_->Init.Mode & UART_MODE_RX) == UART_MODE_RX)
   {
-    ASSERT(uart_handle_->hdmarx != NULL);
-
-    uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
-    HAL_DMA_Init(uart_handle_->hdmarx);
-
-    HAL_UARTEx_ReceiveToIdle_DMA(
-        uart_handle_, reinterpret_cast<uint8_t*>(dma_buff_rx_.addr_), dma_buff_rx_.size_);
-    _read_port = ReadFun;
-  }
-}
-
-// NOLINTNEXTLINE
-static inline void STM32_UART_RX_ISR_Handler(UART_HandleTypeDef* uart_handle)
-{
-  auto uart = STM32UART::map[stm32_uart_get_id(uart_handle->Instance)];
-  auto rx_buf = static_cast<uint8_t*>(uart->dma_buff_rx_.addr_);
-  size_t dma_size = uart->dma_buff_rx_.size_;
-
-  size_t curr_pos =
-      dma_size - __HAL_DMA_GET_COUNTER(uart_handle->hdmarx);  // 当前 DMA 写入位置
-  size_t last_pos = uart->last_rx_pos_;
-
-  STM32_InvalidateDCacheByAddr(rx_buf, dma_size);
-
-  if (curr_pos != last_pos)
-  {
-    if (curr_pos > last_pos)
+    ASSERT(uart_handle_->hdmarx != nullptr);
+    rx_dma_model_.Start(*this, in_isr);
+    REQUIRE_FROM_CALLBACK(rx_arm_result_ != RxArmResult::FAILED, in_isr);
+    if (rx_arm_result_ == RxArmResult::PENDING_LINE_ERROR)
     {
-      // 线性接收区
-      uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], curr_pos - last_pos);
+      return UartDmaControlProgress::PENDING;
     }
-    else
-    {
-      // 回卷区：last→end，再从0→curr
-      uart->read_port_->queue_data_->PushBatch(&rx_buf[last_pos], dma_size - last_pos);
-      uart->read_port_->queue_data_->PushBatch(&rx_buf[0], curr_pos);
-    }
-
-    uart->last_rx_pos_ = curr_pos;
-    uart->read_port_->ProcessPendingReads(true);
   }
+  return UartDmaControlProgress::COMPLETED;
 }
 
-// NOLINTNEXTLINE
-void STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_id_t id)
+void STM32UART::OnRxDataAvailable(bool in_isr)
 {
-  auto uart = STM32UART::map[id];
+  auto queue = _read_port.GetReadQueue(in_isr);
+  (void)dma_model_.ProcessRx(
+      in_isr, [this, &queue]() { rx_dma_model_.OnDataAvailable(*this, queue); });
+  queue.Publish();
+}
 
-  uart->tx_busy_.Clear();
-
-  Flag::ScopedRestore tx_flag(uart->in_tx_isr);
-
-  size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
-
-  if (pending_len == 0)
+void STM32UART::OnTxComplete(bool in_isr)
+{
+  if (ShouldPublishStopDoneOnTxComplete(stop_active_, waiting_for_uart_tc_))
   {
+    dma_model_.OnStopDone(in_isr);
     return;
   }
-
-  uart->dma_buff_tx_.Switch();
-
-  STM32_CleanDCacheByAddr(uart->dma_buff_tx_.ActiveBuffer(), pending_len);
-
-  uart->dma_buff_tx_.SetActiveLength(pending_len);
-  uart->tx_busy_.Set();
-
-  auto ans = HAL_UART_Transmit_DMA(
-      uart->uart_handle_, static_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer()),
-      pending_len);
-
-  ASSERT(ans == HAL_OK);
-
-  WriteInfoBlock& current_info = uart->write_info_active_;
-
-  if (uart->write_port_->queue_info_->Pop(current_info) != ErrorCode::OK)
-  {
-    ASSERT(false);
-    return;
-  }
-
-  uart->write_port_->Finish(true, ans == HAL_OK ? ErrorCode::OK : ErrorCode::BUSY,
-                            current_info);
-
-  WriteInfoBlock next_info;
-
-  if (uart->write_port_->queue_info_->Peek(next_info) != ErrorCode::OK)
-  {
-    return;
-  }
-
-  if (uart->write_port_->queue_data_->PopBatch(
-          reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer()),
-          next_info.data.size_) != ErrorCode::OK)
-  {
-    ASSERT(false);
-    return;
-  }
-
-  uart->dma_buff_tx_.SetPendingLength(next_info.data.size_);
-
-  uart->dma_buff_tx_.EnablePending();
+  dma_model_.OnTransferDone(in_isr);
 }
 
-extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t)
+UartDmaTxStartResult STM32UART::StartDmaTx(uint8_t* data, size_t size, int, bool in_isr)
 {
-  STM32_UART_RX_ISR_Handler(huart);
-}
-
-extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart)
-{
-  STM32_UART_ISR_Handler_TX_CPLT(stm32_uart_get_id(huart->Instance));
-}
-
-extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
-{
-  HAL_UART_Abort_IT(huart);
-}
-
-extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef* huart)
-{
-  auto uart = STM32UART::map[stm32_uart_get_id(huart->Instance)];
-  uart->last_rx_pos_ = 0;
-  HAL_UARTEx_ReceiveToIdle_DMA(huart, huart->pRxBuffPtr, uart->dma_buff_rx_.size_);
-  if (uart->tx_busy_.IsSet())
+  REQUIRE_FROM_CALLBACK(DmaTransferSizeSupported(size), in_isr);
+  STM32_CleanDCacheByAddr(data, size);
+  if (HAL_UART_Transmit_DMA(uart_handle_, data, static_cast<uint16_t>(size)) != HAL_OK)
   {
-    HAL_UART_Transmit_DMA(huart, uart->dma_buff_tx_.ActiveBuffer(),
-                          uart->dma_buff_tx_.GetActiveLength());
+    return UartDmaTxStartResult::FAILED;
   }
+  return UartDmaTxStartResult::STARTED;
 }
 
 #endif

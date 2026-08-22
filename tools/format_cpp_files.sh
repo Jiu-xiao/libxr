@@ -79,7 +79,8 @@ fi
 list_source_files() {
   find driver src system test -type f \( \
     -name '*.h' -o -name '*.hpp' -o \
-    -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
+    -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o \
+    -name '*.inc' \
   \) -print0
 }
 

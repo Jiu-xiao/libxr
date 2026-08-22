@@ -4,14 +4,15 @@
  * queue scenarios.
  * @details 测试项目：
  *          1. 聚合 `ClearQueuedData` 子场景。
- *          2. 挂起完成与零长度读子场景由 runtime `rw` 入口覆盖。
+ *          2. 聚合挂起完成、owner 释放竞态与零长度读子场景。
  *          Test items:
  *          1. Aggregate `ClearQueuedData` sub-scenarios.
- *          2. Runtime `rw` covers pending-completion and zero-length read sub-scenarios.
+ *          2. Aggregate pending-completion, owner-release race, and zero-length read
+ * sub-scenarios.
  */
-#include "rw_test_common.hpp"
-
 void RunBaseRwReadQueueClearTests();
+void RunBaseRwReadQueuePendingTests();
+void RunBaseRwReadQueueProducerTests();
 
 /**
  * @brief 测试项函数 `RunBaseRwReadQueueTests`。 Test-item function
@@ -21,4 +22,9 @@ void RunBaseRwReadQueueClearTests();
  *          测试原理：保留原有分组入口，同时把具体场景拆到更细的主题文件。 Preserve the
  * original group entrypoint while moving concrete scenarios into smaller themed files.
  */
-void RunBaseRwReadQueueTests() { RunBaseRwReadQueueClearTests(); }
+void RunBaseRwReadQueueTests()
+{
+  RunBaseRwReadQueueClearTests();
+  RunBaseRwReadQueuePendingTests();
+  RunBaseRwReadQueueProducerTests();
+}

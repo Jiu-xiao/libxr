@@ -60,4 +60,5 @@ inline int Fail(const char* message)
 
 void TestStdioPrintWrappers();
 void TestStdioTruncation();
+void TestStdioBackendTurns();
 }  // namespace LibXRLinuxStdioPrintTest

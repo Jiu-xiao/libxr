@@ -138,6 +138,9 @@ DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id);
 
 /**
  * @brief 注册 DMA 回调 / Register DMA callback
+ * @warning Each DMA channel accepts one process-lifetime callback registration.
+ *          The callback must be non-null; invalid or duplicate registration fails a
+ *          strong runtime requirement.
  */
 void ch32_dma_register_callback(ch32_dma_channel_t id, ch32_dma_callback_t callback,
                                 void* arg);

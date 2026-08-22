@@ -1,9 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
+#include <utility>
 
 #include "operation.hpp"
 #include "queue.hpp"
@@ -11,337 +14,366 @@
 namespace LibXR
 {
 
+#ifdef LIBXR_TEST_BUILD
+class WritePortTestAccess
+{
+ public:
+  static void SetStreamPublicationHook(void (*hook)());
+};
+#endif
+
 /**
- * @brief WritePort class for handling write operations.
- * @brief 处理写入操作的WritePort类。
+ * @brief 拥有写队列、请求边界和完成状态的写端口 / Write endpoint owning
+ * queued bytes, request boundaries, and completion state
+ *
+ * producer 只向队尾发布完整请求。唯一的 backend consumer 为每次 owner turn 构造
+ * 一个短命 `WriteQueue`，最多接管当前请求和下一请求。`PopWithWriter()` 返回前，
+ * writer 必须已经复制字节、写入 FIFO/fd，或发布一个持久 READY 缓冲；不得保留
+ * ring span 指针。 / Producers publish complete requests at the queue tail. The sole
+ * backend consumer creates one short-lived `WriteQueue` per owner turn and may accept at
+ * most the current request plus the next request. Before `PopWithWriter()` returns, its
+ * writer must have copied the bytes, written them to a FIFO/fd, or published a persistent
+ * READY buffer; ring-span pointers must not escape the call.
  */
 class WritePort
 {
  public:
-  // Exposed low-level state and helpers for the write-path core. Some members stay public
-  // because low-level libxr tests and backend glue inspect them directly. Keep the
-  // boundary explicit instead of introducing a fake private wall that tests cannot use.
-  // 写路径核心的低层状态与辅助类型。部分成员保持 public，
-  // 是因为 libxr 的底层测试与后端胶水层会直接检查它们。
-  // 这里保持显式边界即可，不做测试本身也用不上的“伪私有化”。
-
-  // Write BLOCK states:
-  // LOCKED = submit path owns queue mutation
-  // BLOCK_PUBLISHING = BLOCK submit path is publishing queue metadata
-  // BLOCK_WAITING = waiter armed, completion not claimed yet
-  // BLOCK_CLAIMED = final wakeup belongs to the waiter
-  // BLOCK_DETACHED = timeout detached the waiter
-  // RESETTING = fail-and-clear path owns queue mutation
-  // The same semaphore may be reused only after the previous BLOCK call
-  // returns and the port goes back to IDLE.
-  // 写 BLOCK 状态：
-  // LOCKED = 提交路径占有队列修改权
-  // BLOCK_PUBLISHING = BLOCK 提交路径正在发布队列元数据
-  // BLOCK_WAITING = waiter 已挂起，完成尚未 claim
-  // BLOCK_CLAIMED = 最终唤醒已经归 waiter 所有
-  // BLOCK_DETACHED = timeout 已把 waiter 分离
-  // RESETTING = fail-and-clear 路径占有队列修改权
-  // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
-  enum class BusyState : uint32_t
+  /**
+   * @brief 一次 backend owner turn 的有界写队列 / Bounded write queue for one
+   * backend owner turn
+   *
+   * Port 在构造时提供一致的 `front_size` 和 `next_size`。本对象最多接管这两个
+   * 请求，析构时一次性推进私有 metadata/count，再按 FIFO 发布完成。 /
+   * The Port supplies a consistent `front_size` and `next_size` at construction. This
+   * object can accept at most those two requests. Its destructor advances private
+   * metadata/count once and then publishes completions in FIFO order.
+   */
+  class WriteQueue
   {
-    LOCKED =
-        0,  ///< Submission path owns queue mutation. 提交路径占有写队列/元数据修改权。
-    BLOCK_PUBLISHING = 1,  ///< BLOCK submitter is publishing queue metadata.
-                           ///< BLOCK 提交者正在发布队列元数据。
-    BLOCK_WAITING = 2,  ///< One BLOCK waiter is armed and waiting for final completion.
-                        ///< 一个 BLOCK 等待者已经挂起，等待最终完成。
-    BLOCK_CLAIMED =
-        3,  ///< Final wakeup belongs to the current waiter. 最终唤醒已归当前等待者所有。
-    BLOCK_DETACHED = 4,  ///< Waiter already timed out/detached; completion must not post.
-                         ///< 等待者已超时/被分离，完成侧不能再 Post。
-    RESETTING = 5,       ///< Fail-and-clear owns queue mutation.
-                         ///< Fail-and-clear 路径占有写队列/元数据修改权。
-    IDLE = UINT32_MAX    ///< No active submitter and no armed BLOCK waiter.
-                         ///< 没有活动提交者，也没有挂起中的 BLOCK 等待者。
+   public:
+    const size_t front_size;  ///< 当前请求未接管字节 / Unaccepted front remainder.
+    const size_t next_size;   ///< 下一完整请求字节；无则为 0 / Full next request or 0.
+
+    WriteQueue(const WriteQueue&) = delete;
+    WriteQueue& operator=(const WriteQueue&) = delete;
+    WriteQueue(WriteQueue&&) = delete;
+    WriteQueue& operator=(WriteQueue&&) = delete;
+    ~WriteQueue() noexcept;
+
+    /**
+     * @brief 通过一次双 span writer 接管前缀 / Accept a prefix through one
+     * two-span writer call
+     * @tparam Writer 签名为 `size_t(const uint8_t*, size_t, const uint8_t*, size_t)`
+     * @param limit 本次最多提供给 writer 的字节 / Maximum bytes offered this call
+     * @param writer 返回已持久接管的前缀大小 / Returns the durably accepted prefix
+     * @return writer 实际接管并出队的字节数 / Bytes accepted and dequeued
+     * @note 多次调用的总量仍不会超过 `front_size + next_size`。writer 或 completion
+     * 引起的递归 doorbell 必须由 backend execution policy 合并。 / The sum across
+     * calls never exceeds `front_size + next_size`. A recursive doorbell caused by the
+     * writer or completion must be coalesced by the backend execution policy.
+     */
+    template <typename Writer>
+    size_t PopWithWriter(size_t limit, Writer&& writer)
+    {
+      if (limit == 0U || failed_front_)
+      {
+        return 0U;
+      }
+
+      const size_t offered = std::min(limit, front_size + next_size - popped_size_);
+      if (offered == 0U)
+      {
+        return 0U;
+      }
+
+      const size_t accepted = port_.MutableDataQueue().ConsumeWithReader(
+          offered, std::forward<Writer>(writer));
+      popped_size_ += accepted;
+      return accepted;
+    }
+
+    /**
+     * @brief 复制并接管一个有界前缀 / Copy and accept one bounded prefix
+     * @param data 接收缓冲区；为 nullptr 时丢弃字节 / Destination; null discards bytes
+     * @param limit 最多复制的字节数 / Maximum bytes to copy
+     * @return 实际复制并出队的字节数 / Bytes copied and dequeued
+     */
+    size_t PopBatch(uint8_t* data, size_t limit)
+    {
+      size_t offset = 0U;
+      return PopWithWriter(limit,
+                           [data, &offset](const uint8_t* first, size_t first_size,
+                                           const uint8_t* second, size_t second_size)
+                           {
+                             if (data != nullptr)
+                             {
+                               std::memcpy(data + offset, first, first_size);
+                               offset += first_size;
+                               if (second_size != 0U)
+                               {
+                                 std::memcpy(data + offset, second, second_size);
+                                 offset += second_size;
+                               }
+                             }
+                             return first_size + second_size;
+                           });
+    }
+
+    /**
+     * @brief 失败并丢弃当前请求的未接管部分 / Fail and discard the current
+     * request's unaccepted remainder
+     * @param error 发布给当前 Operation 的失败结果 / Failure for the current Operation
+     * @return 成功记录失败时为 true；本 scope 已接管字节或无 front 时为 false /
+     * True when failure was recorded; false after this scope accepted bytes or with no
+     * front request
+     * @note fresh scope 可以失败先前 partial front 的剩余部分。 / A fresh scope may
+     * fail the remainder of a previously partial front.
+     */
+    bool FailFront(ErrorCode error);
+
+   private:
+    friend class WritePort;
+
+    WriteQueue(WritePort& port, bool in_isr, size_t front, size_t next)
+        : front_size(front), next_size(next), port_(port), in_isr_(in_isr)
+    {
+    }
+
+    WritePort& port_;
+    const bool in_isr_;
+    size_t popped_size_ = 0U;
+    ErrorCode front_result_ = ErrorCode::OK;
+    bool failed_front_ = false;
   };
 
   WriteFun write_fun_ =
-      nullptr;  ///< Driver/backend write entry. 底层驱动或后端写入入口。
-  SPSCQueue<WriteInfoBlock>* queue_info_ =
-      nullptr;  ///< Metadata queue for pending write batches. 挂起写批次的元数据队列。
-  SPSCQueue<uint8_t>* queue_data_ =
-      nullptr;  ///< Payload queue for pending write bytes. 挂起写入字节的数据队列。
-  std::atomic<BusyState> busy_{
-      BusyState::IDLE};  ///< Shared submit/wait handoff state. 共享的提交/等待交接状态。
-  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK write.
-                                            ///< 当前 BLOCK 写入的最终结果。
-
-  // Stream batch facade.
-  // Stream 负责一次批次的累积写入与提交。
-  class Stream
-  {
-   public:
-    /**
-     * @brief 构造流写入对象，并尝试锁定端口。
-     * @brief Constructs a Stream object and tries to acquire WritePort lock.
-     * @param port 指向 WritePort 的指针 Pointer to WritePort.
-     * @param op 写操作对象（可重用）Write operation object (can be reused).
-     */
-    Stream(LibXR::WritePort* port, LibXR::WriteOperation op);
-
-    /**
-     * @brief 析构时自动提交已累积的数据并释放锁。
-     * @brief Destructor: automatically commits any accumulated data and releases the
-     * lock.
-     */
-    ~Stream();
-
-    /**
-     * @brief 追加一个原始数据片段到当前流批次。
-     * @brief Appends one raw-data chunk to the current stream batch.
-     *
-     * 该接口是 Stream 的底层语义写入入口。它负责拿到当前批次的写入所有权，并尝试将
-     * 整个片段原子地追加到当前批次对应的共享 data queue 尾部；Commit() 负责随后发布
-     * 这批字节对应的元数据。若空间不足则返回 FULL，并保持该片段完全未写入。
-     * This is the low-level semantic write entrypoint of Stream. It acquires the current
-     * batch ownership and then attempts to append the whole chunk atomically into the
-     * shared data-queue tail; Commit() later publishes the metadata that describes this
-     * batch. If space is insufficient it returns FULL and leaves that chunk entirely
-     * unwritten.
-     *
-     * @param data 要写入的数据片段 Raw-data chunk to append.
-     * @return 返回操作结果。Returns the write result.
-     */
-    [[nodiscard]] ErrorCode Write(ConstRawData data);
-
-    /**
-     * @brief 追加一个文本片段到当前流批次。
-     * @brief Appends one text chunk to the current stream batch.
-     * @param text 要写入的文本片段 Text chunk to append.
-     * @return 返回操作结果。Returns the write result.
-     */
-    [[nodiscard]] ErrorCode Write(std::string_view text)
-    {
-      return Write(ConstRawData{text.data(), text.size()});
-    }
-
-    /**
-     * @brief 追加写入数据的语法糖，忽略返回状态并支持链式调用。
-     * @brief Syntax sugar for appending data; ignores the status and supports chaining.
-     * @param data 要写入的数据 Data to write.
-     * @return 返回自身引用 Enables chainable call.
-     */
-    Stream& operator<<(const ConstRawData& data);
-
-    /**
-     * @brief 手动提交已写入的数据到队列，并释放当前锁。
-     * @brief Manually commit accumulated data to the queue, then release the current
-     * lock.
-     *
-     * 调用后会发布当前批次对应的元数据、使这批已追加到共享 data queue 的字节正式成为
-     * 一个可消费的写操作，并将 size 计数归零。适合周期性手动 flush。
-     * After calling, the metadata that describes the current batch is published so the
-     * bytes already appended into the shared data queue become one consumable write
-     * operation, and the size counter is reset. Suitable for periodic manual flush.
-     *
-     * @return 返回操作的 ErrorCode，指示操作结果。
-     *         Returns an ErrorCode indicating the result of the operation.
-     */
-    ErrorCode Commit();
-
-    /**
-     * @brief 为当前流批次获取一次可写入的端口所有权。
-     * @brief Acquires append ownership for the current stream batch.
-     * @return 返回获取结果。Returns the acquisition result.
-     */
-    [[nodiscard]] ErrorCode Acquire();
-
-    /**
-     * @brief 获取当前批次还可追加的剩余字节数。
-     * @brief Returns the remaining appendable bytes in the current batch.
-     *
-     * 返回值只在 Acquire 成功后有意义；若当前尚未持有流批次所有权，则返回 0。
-     * The return value is meaningful only after Acquire succeeds; it returns zero while
-     * this stream does not currently own the batch.
-     */
-    [[nodiscard]] size_t EmptySize() const
-    {
-      return owns_port_ ? (batch_capacity_ - buffered_size_) : 0;
-    }
-
-   private:
-    /**
-     * @brief 将当前已缓存批次提交给 WritePort。
-     * @brief Submits the currently buffered batch to WritePort.
-     *
-     * 非 BLOCK 路径下，提交后当前 Stream 仍负责释放端口所有权；BLOCK 路径下，
-     * 所有权会交给 WritePort 的等待状态机继续管理。
-     * On non-BLOCK paths, this Stream still releases the port ownership after submission;
-     * on BLOCK paths, ownership is handed off to WritePort's wait-state machine.
-     */
-    [[nodiscard]] ErrorCode SubmitBuffered();
-
-    /**
-     * @brief 将当前批次的端口所有权归还给 WritePort。
-     * @brief Releases the current batch ownership back to WritePort.
-     */
-    void Release();
-
-    LibXR::WritePort* port_;    ///< 写端口指针 Pointer to the WritePort
-    LibXR::WriteOperation op_;  ///< 写操作对象 Write operation object
-    size_t batch_capacity_ =
-        0;  ///< 当前批次可用的总容量 Total capacity reserved for the current batch
-    size_t buffered_size_ =
-        0;  ///< 当前批次已追加到共享 data queue、但尚未发布对应元数据的字节数 Bytes
-            ///< already appended into the shared data queue for the current batch, but
-            ///< whose metadata has not yet been published
-    bool owns_port_ = false;  ///< 当前 Stream 是否持有该批次的端口所有权 Whether this
-                              ///< Stream currently owns the batch
-  };
+      nullptr;  ///< Driver/backend progress doorbell. 底层驱动或后端推进 doorbell。
 
   /**
-   * @brief 构造一个新的 WritePort 对象。
-   *        Constructs a new WritePort object.
-   *
-   * 该构造函数初始化无锁操作队列 queue_info_ 和数据块队列 queue_data_。
-   * This constructor initializes the lock-free operation queue queue_info_ and the data
-   * block queue queue_data_.
-   *
-   * @param queue_size 队列的大小，默认为 3。
-   *                   The size of the queue, default is 3.
-   * @param buffer_size 缓存数据字节队列的容量，默认为 128。
-   *                    Capacity of the cached-byte queue, default is 128.
-   *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * @brief 构造写端口 / Construct a write port
+   * @param queue_size 最多排队请求数 / Maximum queued requests
+   * @param buffer_size payload 字节容量 / Payload byte capacity
+   * @note 包含动态内存分配 / Contains dynamic allocation.
    */
-  WritePort(size_t queue_size = 3, size_t buffer_size = 128);
+  WritePort(size_t queue_size = 3U, size_t buffer_size = 128U);
 
-  /**
-   * @brief 获取数据队列的剩余可用空间。
-   *        Gets the remaining available space in the data queue.
-   *
-   * @return 返回数据队列的空闲大小。
-   *         Returns the empty size of the data queue.
-   */
+  /** @return payload 队列当前空闲字节 / Current free payload bytes. */
   size_t EmptySize();
 
-  /**
-   * @brief 获取当前数据队列的已使用大小。
-   *        Gets the used size of the current data queue.
-   *
-   * @return 返回数据队列的已使用大小。
-   *         Returns the size of the data queue.
-   */
+  /** @return payload 队列当前已用字节 / Current queued payload bytes. */
   size_t Size();
 
-  /**
-   * @brief 判断端口是否可写。
-   *        Checks whether the port is writable.
-   *
-   * @return 如果 write_fun_ 不为空，则返回 true，否则返回 false。
-   *         Returns true if write_fun_ is not null, otherwise returns false.
+  /** @return payload 队列总容量 / Total payload capacity. */
+  size_t Capacity() const;
+
+  /** @return 已绑定 backend doorbell 时为 true / True when a backend doorbell is bound.
    */
   bool Writable();
 
   /**
-   * @brief 赋值运算符重载，用于设置写入函数。
-   *        Overloaded assignment operator to set the write function.
-   *
-   * 该函数允许使用 WriteFun 类型的函数对象赋值给 WritePort，从而设置 write_fun_。
-   * This function allows assigning a WriteFun function object to WritePort, setting
-   * write_fun_.
-   *
-   * @param fun 要分配的写入函数。
-   *            The write function to be assigned.
-   * @return 返回自身的引用，以支持链式调用。
-   *         Returns a reference to itself for chaining.
+   * @brief 绑定 backend doorbell / Bind the backend doorbell
+   * @param fun 持久写推进入口 / Persistent write-progress entry
+   * @return 当前端口 / This port
    */
   WritePort& operator=(WriteFun fun);
 
   /**
-   * @brief 更新写入操作的状态。
-   *        Updates the status of the write operation.
-   *
-   * 该函数在写入操作完成时更新对应 info 的状态，并调用 UpdateStatus 更新 op。
-   * This function updates the status stored in info and calls UpdateStatus on op when a
-   * write operation completes.
-   *
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
-   * @param ans 错误码，用于指示操作的结果。
-   *            Error code indicating the result of the operation.
-   * @param op 需要更新状态的 WriteOperation 引用。
-   *           Reference to the WriteOperation whose status needs to be updated.
+   * @brief 构造一次 backend owner turn 的写队列 / Construct the write queue for one
+   * backend owner turn
+   * @param in_isr completion 是否在 ISR 上下文发布 / Whether completions run in ISR
+   * context
+   * @return 最多包含 front + next 的短命队列 / Short-lived front-plus-next queue
+   * @pre 由唯一、已串行化的 backend consumer 调用；必须在 owner/gate 释放前析构。 /
+   * Called by the sole serialized backend consumer and destroyed before releasing its
+   * owner/gate.
    */
-  void Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info);
+  WriteQueue GetWriteQueue(bool in_isr = false);
 
   /**
-   * @brief 标记写入操作为运行中。
-   *        Marks the write operation as running.
-   *
-   * 该函数用于将 op 标记为运行状态，以指示当前正在进行写入操作。
-   * This function marks op as running to indicate an ongoing write operation.
-   *
-   * @param op 需要更新状态的 WriteOperation 引用。
-   *           Reference to the WriteOperation whose status needs to be updated.
+   * @brief 在 producer admission 内二次确认队列稳定为空并执行短动作 /
+   * Recheck stable queue idle under producer admission and run a short action
+   * @tparam Action 无参数短动作 / Nullary short action
+   * @param action 例如 FIFO flush 或 USB ZLP / For example a FIFO flush or USB ZLP
+   * @param in_isr 是否在 ISR 上下文 / Whether called in ISR context
+   * @return 成功获得 admission 且私有 request 队列仍为空时为 true / True when
+   * admission was acquired and the private request queue remained empty
+   * @pre backend 已持有唯一 consumer owner，且已确认私有硬件槽为空 / The
+   * backend already owns the sole consumer and has checked its private hardware slots.
    */
-  void MarkAsRunning(WriteOperation& op);
+  template <typename Action>
+  bool TryRunWhenWriteQueueIdle(Action&& action, bool in_isr = false)
+  {
+    if (!TryAcquireOwner(false))
+    {
+      return false;
+    }
+
+    const bool idle = queue_requests_->Size() == 0U;
+    if (idle)
+    {
+      Action& action_ref = action;
+      action_ref();
+    }
+    ReleaseOwner(in_isr);
+    return idle;
+  }
 
   /**
-   * @brief 执行写入操作。
-   *        Performs a write operation.
-   *
-   * 该函数检查端口是否可写，并根据 data.size_ 和 op 的类型执行不同的操作。
-   * This function checks if the port is writable and performs different actions based on
-   * data.size_ and the type of op.
-   *
-   * @param data 需要写入的原始数据。
-   *             Raw data to be written.
-   * @param op 写入操作对象，包含操作类型和同步机制。
-   *           Write operation object containing the operation type and synchronization
-   * mechanism.
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
-   * @return 返回操作的 ErrorCode，指示操作结果。
-   *         Returns an ErrorCode indicating the result of the operation.
+   * @brief 提交一次写入 / Submit one write
+   * @param data 输入字节 / Input bytes
+   * @param op 完成方式 / Completion operation
+   * @param in_isr 是否从 ISR 提交 / Whether submitted from ISR context
+   * @return 提交结果；成功入队返回 `OK` / Admission result; `OK` after successful
+   * publication
+   * @warning BLOCK 不得从 ISR 调用 / BLOCK is forbidden in ISR context.
+   * @warning A completion callback running in the sole backend progress domain must not
+   *          submit a BLOCK operation in that same domain; defer it to another execution
+   *          context. / 运行于唯一 backend 推进域的 completion callback 不得在同一推进域
+   *          提交 BLOCK 操作；必须转交其他执行上下文。
    */
   ErrorCode operator()(ConstRawData data, WriteOperation& op, bool in_isr = false);
 
-  /**
-   * @brief 失败完成并清空当前所有挂起写操作。
-   * @brief Fail-complete and clear all currently pending write operations.
-   *
-   * @note Driver-only: call this only after the backend is known to be unavailable.
-   * @note 仅供驱动层在后端已明确不可用后调用。
-   * @note The surrounding driver must already guarantee that no new front-end
-   *       submissions or back-end completion/data events can still arrive for
-   *       this port.
-   * @note 外围驱动还必须先保证：这条端口后续不会再收到新的前端提交，也不会再收到
-   *       新的后端完成或数据事件。
-   * @note Seeing LOCKED / BLOCK_PUBLISHING / RESETTING here means the caller
-   *       violated that driver-side precondition.
-   * @note 若此时仍看到 LOCKED / BLOCK_PUBLISHING / RESETTING，说明调用方违反了
-   *       上述驱动层前提。
-   * @note Dev builds fire DEV_ASSERT, while release builds still back off.
-   * @note 开发期会触发 DEV_ASSERT，发布构建仍保持直接退回。
-   *
-   * @param reason 最终失败原因 / Final failure reason
-   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
-   */
-  void FailAndClearAll(ErrorCode reason, bool in_isr);
+  // One logical caller owns a Stream between commits, including a completion-callback
+  // handoff after RELEASED. SUBMITTING rejects an older completion that races the
+  // buffered-size and Port-publication boundary. This is not a general multi-caller
+  // serialization primitive. 两次 Commit 之间由一个逻辑调用方独占 Stream；RELEASED
+  // 后可交接给 completion callback。SUBMITTING 拒绝与 buffered-size/Port 发布边界
+  // 竞争的旧 completion；本状态不负责串行化一般的多调用方并发。
+  // A Stream carrying a BLOCK operation follows the same progress-domain restriction as
+  // WritePort::operator(). 使用 BLOCK operation 的 Stream 同样受上述推进域限制。
+  class Stream
+  {
+   public:
+    Stream(LibXR::WritePort* port, LibXR::WriteOperation op);
+    Stream(const Stream&) = delete;
+    Stream& operator=(const Stream&) = delete;
+    Stream(Stream&&) = delete;
+    Stream& operator=(Stream&&) = delete;
+    ~Stream();
 
-  /**
-   * @brief 提交写入操作。
-   *        Commits a write operation.
-   *
-   * @param data 写入的原始数据 / Raw data to be written
-   * @param op 写入操作对象，包含操作类型和同步机制。
-   *           Write operation object containing the operation type and synchronization
-   * @param pushed 数据是否已经推送到缓冲区 / Whether the data has been pushed to the
-   * buffer
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
-   * @return 返回操作的 ErrorCode，指示操作结果。
-   *         Returns an ErrorCode indicating the result of the operation.
-   */
-  ErrorCode CommitWrite(ConstRawData data, WriteOperation& op, bool pushed = false,
-                        bool in_isr = false);
+    [[nodiscard]] ErrorCode Write(ConstRawData data);
+    [[nodiscard]] ErrorCode Write(std::string_view text)
+    {
+      return Write(ConstRawData{text.data(), text.size()});
+    }
+    Stream& operator<<(const ConstRawData& data);
+    ErrorCode Commit();
+    [[nodiscard]] ErrorCode Acquire();
+    [[nodiscard]] size_t EmptySize() const;
+
+   private:
+    friend class WritePort;
+
+    [[nodiscard]] ErrorCode SubmitBuffered();
+
+    LibXR::WritePort* port_;
+    LibXR::WriteOperation op_;
+    size_t buffered_size_ = 0U;
+
+    enum class StreamState : uint32_t
+    {
+      RELEASED,
+      OWNED,
+      SUBMITTING,
+    };
+
+    std::atomic<StreamState> state_{StreamState::RELEASED};
+  };
+
+ private:
+  struct Request
+  {
+    size_t size;
+    WriteOperation op;
+  };
+
+  struct DeferredRequest
+  {
+    ConstRawData data;
+    WriteOperation op;
+  };
+
+  // Phase owns producer/deferred publication. ActiveState tracks the one synchronous
+  // BLOCK caller's wait and buffer-lifetime handoff across deferred copy and published
+  // completion. Their Cartesian product avoids a second request identity. Phase 负责
+  // producer/deferred 发布；ActiveState 跟踪唯一同步 BLOCK caller 的等待 与 buffer
+  // 生命周期交接，覆盖 deferred copy 与已发布 completion。二者的组合 不需要第二个 request
+  // identity。
+  enum class Phase : uint32_t
+  {
+    FREE = 0U,
+    OWNER = 1U,
+    WAITING = 2U,
+  };
+
+  enum class ActiveState : uint32_t
+  {
+    NONE = 0U,
+    WAITING = 1U,
+    CLAIMED = 2U,
+    DETACHED = 3U,
+  };
+
+  static constexpr uint32_t PHASE_MASK = 0x3U;
+  static constexpr uint32_t ACTIVE_SHIFT = 2U;
+  static constexpr uint32_t ACTIVE_MASK = 0x3U << ACTIVE_SHIFT;
+  static constexpr uint32_t KICK = 1U << 4U;
+
+  static constexpr uint32_t State(Phase phase, ActiveState active)
+  {
+    return static_cast<uint32_t>(phase) | (static_cast<uint32_t>(active) << ACTIVE_SHIFT);
+  }
+
+  static constexpr Phase CurrentPhase(uint32_t state)
+  {
+    return static_cast<Phase>(state & PHASE_MASK);
+  }
+
+  static constexpr ActiveState Active(uint32_t state)
+  {
+    return static_cast<ActiveState>((state & ACTIVE_MASK) >> ACTIVE_SHIFT);
+  }
+
+  static constexpr uint32_t WithPhase(uint32_t state, Phase phase)
+  {
+    return (state & ~PHASE_MASK) | static_cast<uint32_t>(phase);
+  }
+
+  static constexpr uint32_t WithActive(uint32_t state, ActiveState active)
+  {
+    return (state & ~ACTIVE_MASK) | (static_cast<uint32_t>(active) << ACTIVE_SHIFT);
+  }
+
+  static constexpr bool HasKick(uint32_t state) { return (state & KICK) != 0U; }
+
+  SPSCQueue<Request>* const queue_requests_;
+  SPSCQueue<uint8_t>* const queue_data_;
+
+#ifdef LIBXR_TEST_BUILD
+  friend class WritePortTestAccess;
+  static std::atomic<void (*)()> stream_publication_hook_;
+#endif
+
+  std::atomic<uint32_t> state_{State(Phase::FREE, ActiveState::NONE)};
+  std::atomic<size_t> published_request_count_{0U};
+
+  DeferredRequest deferred_request_{};
+  ErrorCode block_result_ = ErrorCode::OK;
+  size_t front_remaining_ = 0U;  ///< Sole-consumer state. / 唯一 consumer 状态。
+
+  SPSCQueue<uint8_t>& MutableDataQueue() { return *queue_data_; }
+  bool TryAcquireOwner(bool allow_detached);
+  void ReleaseOwner(bool in_isr);
+  void NotifyBackend(bool in_isr);
+  ErrorCode DeferBlock(ConstRawData data, WriteOperation& op, bool owns_port);
+  ErrorCode WaitForBlock(WriteOperation& op);
+  void CopyAndPublishOwned(ConstRawData data, WriteOperation& op, bool in_isr);
+  void PublishOwned(size_t size, WriteOperation& op, bool in_isr,
+                    Stream* releasing_stream = nullptr);
+  void ReleaseBlockClaim();
+  void SettleWriteQueue(WriteQueue& queue) noexcept;
+  void CompleteRequest(Request& request, ErrorCode result, bool in_isr);
+  void ProcessPendingWrites(bool in_isr);
 };
 
 }  // namespace LibXR

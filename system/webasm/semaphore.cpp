@@ -24,6 +24,16 @@ ErrorCode Semaphore::Wait(uint32_t timeout)
     return ErrorCode::TIMEOUT;
   }
 
+  if (timeout == UINT32_MAX)
+  {
+    while (semaphore_handle_ == 0U)
+    {
+      Timer::RefreshTimerInIdle();
+    }
+    semaphore_handle_--;
+    return ErrorCode::OK;
+  }
+
   uint32_t now = Timebase::GetMilliseconds();
 
   while (uint32_t(Timebase::GetMilliseconds()) - now < timeout)

@@ -59,6 +59,8 @@ void TestInputCrLfAndHistory()
   fixture.SendText("\n");
   ASSERT(two_count == 2);
 
+  // Executing the recalled "two" command appends a second "two" history entry.
+  fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
   fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
   auto older_history = fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
   ASSERT(older_history.find("one") != std::string::npos);

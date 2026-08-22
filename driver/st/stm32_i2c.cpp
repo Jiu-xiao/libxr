@@ -113,7 +113,7 @@ static inline ErrorCode MapHalStartFailure(const I2C_HandleTypeDef* hi2c,
   return (st == HAL_BUSY) ? ErrorCode::BUSY : ErrorCode::FAILED;
 }
 
-static void RecoverAfterBlockTimeout(STM32I2C* i2c)
+static void RecoverAfterBlockWaitDetach(STM32I2C* i2c)
 {
   ASSERT(i2c != nullptr);
 
@@ -128,8 +128,8 @@ static void RecoverAfterBlockTimeout(STM32I2C* i2c)
     (void)HAL_DMA_Abort(hi2c->hdmatx);
   }
 
-  // Re-open the HAL handle after a detached BLOCK timeout without touching
-  // the larger software-side callback/semaphore semantics.
+  // A detached wait may leave an RX destination pointer naming caller storage.
+  // Suppress late callbacks and stop the transfer before clearing retained state.
   (void)HAL_I2C_DeInit(hi2c);
   (void)HAL_I2C_Init(hi2c);
 
@@ -140,13 +140,14 @@ static void RecoverAfterBlockTimeout(STM32I2C* i2c)
   i2c->recovering_ = false;
 }
 
-static inline ErrorCode WaitBlockResultAndRecoverTimeout(STM32I2C* i2c, uint32_t timeout)
+static inline ErrorCode WaitBlockResultAndRecoverDetach(STM32I2C* i2c, uint32_t timeout)
 {
   ASSERT(i2c != nullptr);
-  const ErrorCode ans = i2c->block_wait_.Wait(timeout);
-  if (ans == ErrorCode::TIMEOUT)
+  bool caller_detached = false;
+  const ErrorCode ans = i2c->block_wait_.Wait(timeout, caller_detached);
+  if (caller_detached)
   {
-    RecoverAfterBlockTimeout(i2c);
+    RecoverAfterBlockWaitDetach(i2c);
   }
   return ans;
 }
@@ -200,7 +201,7 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverDetach(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -259,7 +260,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverDetach(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -318,7 +319,7 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
-      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverDetach(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }
@@ -384,7 +385,7 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
-      return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
+      return WaitBlockResultAndRecoverDetach(this, op.data.sem_info.timeout);
     }
     return ErrorCode::OK;
   }

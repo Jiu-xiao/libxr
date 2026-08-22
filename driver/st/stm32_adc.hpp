@@ -13,12 +13,16 @@
 #include "adc.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
+#include "stm32_adc_gpdma.hpp"
 
 namespace LibXR
 {
 
 /**
  * @brief STM32 ADC 驱动实现 / STM32 ADC driver implementation
+ *
+ * @note 对象在启动期构造并随外设常驻，不提供运行时析构语义。 / Construct at
+ * startup and retain for the peripheral lifetime; runtime teardown is not supported.
  */
 class STM32ADC
 {
@@ -101,13 +105,26 @@ class STM32ADC
   };
 
   template <typename T, typename = void>
-  struct HasDMACircularMode : std::false_type
+  struct HasClassicDMAMode : std::false_type
   {
   };
 
   template <typename T>
-  struct HasDMACircularMode<
+  struct HasClassicDMAMode<
       T, std::void_t<decltype(std::declval<T>()->DMA_Handle->Init.Mode)>> : std::true_type
+  {
+  };
+
+  template <typename T, typename = void>
+  struct HasLinkedListDMAMode : std::false_type
+  {
+  };
+
+  template <typename T>
+  struct HasLinkedListDMAMode<
+      T,
+      std::void_t<decltype(std::declval<T>()->DMA_Handle->InitLinkedList.LinkedListMode),
+                  decltype(std::declval<T>()->DMA_Handle->Mode)>> : std::true_type
   {
   };
 
@@ -192,16 +209,24 @@ class STM32ADC
   }
 
   template <typename T>
-  static typename std::enable_if<HasDMACircularMode<T>::value>::type AssertDMACircular(
-      T hadc)
+  static void AssertDMACircular(T hadc)
   {
     ASSERT(hadc->DMA_Handle != nullptr);
-    ASSERT(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
-  }
-
-  template <typename T>
-  static typename std::enable_if<!HasDMACircularMode<T>::value>::type AssertDMACircular(T)
-  {
+#if defined(LIBXR_STM32_ADC_GPDMA)
+    if constexpr (HasLinkedListDMAMode<T>::value)
+    {
+      ASSERT(hadc->DMA_Handle->InitLinkedList.LinkedListMode == DMA_LINKEDLIST_CIRCULAR &&
+             hadc->DMA_Handle->Mode == DMA_LINKEDLIST_CIRCULAR);
+      return;
+    }
+#elif defined(DMA_CIRCULAR)
+    if constexpr (HasClassicDMAMode<T>::value)
+    {
+      ASSERT(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
+      return;
+    }
+#endif
+    ASSERT(false);
   }
 
  public:
@@ -248,11 +273,6 @@ class STM32ADC
            std::initializer_list<uint32_t> channels, float vref);
 
   /**
-   * @brief 析构函数 / Destructor
-   */
-  ~STM32ADC();
-
-  /**
    * @brief 获取 ADC 通道对象 / Get ADC channel object
    *
    * @param index 通道索引 / Channel index
@@ -278,6 +298,9 @@ class STM32ADC
   float resolution_;
   Channel** channels_;
   float vref_;
+#if defined(LIBXR_STM32_ADC_GPDMA)
+  STM32GpdmaAdcAdapter gpdma_adapter_{};
+#endif
 
   float ConvertToVoltage(float adc_value);
 };

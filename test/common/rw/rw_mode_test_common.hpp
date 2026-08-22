@@ -27,6 +27,8 @@ namespace LibXRTest
 
 inline constexpr uint32_t ASYNC_TIMEOUT_MS = 200;
 inline constexpr uint32_t SHORT_WAIT_MS = 100;
+inline constexpr uint32_t THREAD_STATE_TIMEOUT_MS = 10000;
+inline constexpr uint32_t BLOCK_OPERATION_TIMEOUT_MS = 20000;
 
 enum class TestMode : uint8_t
 {

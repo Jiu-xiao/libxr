@@ -52,7 +52,7 @@ class CDCToUart : public CDCUart
   {
     // CDC->UART：CDC RX 缓冲必须能写入 UART 的 data 队列。
     // CDC->UART: the UART TX data queue must accept at least rx_buffer_size bytes.
-    ASSERT(uart_.write_port_->queue_data_->MaxSize() >= rx_buffer_size);
+    ASSERT(uart_.write_port_->Capacity() >= rx_buffer_size);
 
     // 1) CDC 读完成回调：从 CDC 读一段数据并写入 UART。
     // 1) CDC read callback: read one chunk from CDC and write it into UART.
@@ -128,8 +128,8 @@ class CDCToUart : public CDCUart
     // 5) LineCoding 回调：USB CDC 侧配置变化同步到 UART。
     // 5) LineCoding callback: forward CDC line-coding changes to UART configuration.
     set_line_coding_cb_ = LibXR::Callback<LibXR::UART::Configuration>::Create(
-        [](bool, CDCToUart* self, LibXR::UART::Configuration cfg)
-        { self->uart_.SetConfig(cfg); }, this);
+        [](bool in_isr, CDCToUart* self, LibXR::UART::Configuration cfg)
+        { self->uart_.SetConfig(cfg, in_isr); }, this);
 
     SetOnSetLineCodingCallback(set_line_coding_cb_);
 

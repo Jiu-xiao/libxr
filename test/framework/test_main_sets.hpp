@@ -59,6 +59,7 @@ struct GroupedTestCase
 };
 
 inline constexpr GroupedTestCase kMainTestCases[] = {
+    {"linux_host_tests", {"linux_uart", &RunVoidEntry<test_linux_uart>, false}},
     {"core_tests", {"assert", &RunVoidEntry<test_assert>, false}},
     {"core_tests", {"def", &RunVoidEntry<test_def>, false}},
     {"core_tests", {"callback", &RunVoidEntry<test_cb>, false}},
@@ -88,6 +89,14 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"data_structure_tests", {"double_buffer", &RunVoidEntry<test_double_buffer>, false}},
     {"data_structure_tests", {"type", &RunVoidEntry<test_type>, false}},
     {"data_structure_tests", {"string", &RunVoidEntry<test_string>, false}},
+
+    {"driver_model_tests", {"uart_dma_tx", &RunVoidEntry<test_uart_dma_tx_model>, false}},
+    {"driver_model_tests", {"uart_context", &RunVoidEntry<test_uart_context>, false}},
+    {"driver_model_tests",
+     {"uart_circular_dma_rx", &RunVoidEntry<test_uart_circular_dma_rx_model>, false}},
+    {"driver_model_tests",
+     {"uart_linked_list_dma_rx", &RunVoidEntry<test_uart_linked_list_dma_rx_model>,
+      false}},
 
     {"threading_tests", {"thread", &RunVoidEntry<test_thread>, false}},
     {"threading_tests", {"timebase", &RunVoidEntry<test_timebase>, false}},

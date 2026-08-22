@@ -1,8 +1,11 @@
 #pragma once
 
+extern "C"
+{
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
+}
 
 namespace LibXR
 {
@@ -10,10 +13,25 @@ typedef SemaphoreHandle_t libxr_mutex_handle;
 typedef SemaphoreHandle_t libxr_semaphore_handle;
 typedef TaskHandle_t libxr_thread_handle;
 
-static_assert(sizeof(TickType_t) >= sizeof(uint32_t),
-              "FreeRTOS TickType_t must hold LibXR millisecond timestamps");
+static_assert(sizeof(TickType_t) <= sizeof(uint32_t),
+              "FreeRTOS TickType_t must fit in ThreadTimestamp");
 
-extern uint32_t libxr_freertos_timebase_tick_offset;
+namespace Detail
+{
+
+[[nodiscard]] inline uint64_t MillisecondsToFreeRTOSTicks(uint32_t milliseconds)
+{
+  return (static_cast<uint64_t>(milliseconds) * configTICK_RATE_HZ + 999U) / 1000U;
+}
+
+[[nodiscard]] inline TickType_t FreeRTOSDelayChunk(uint64_t ticks)
+{
+  constexpr TickType_t MAX_FINITE_DELAY = portMAX_DELAY - 1U;
+  return ticks > static_cast<uint64_t>(MAX_FINITE_DELAY) ? MAX_FINITE_DELAY
+                                                         : static_cast<TickType_t>(ticks);
+}
+
+}  // namespace Detail
 
 /**
  * @brief  平台初始化函数

@@ -61,13 +61,10 @@ void test_color()
   ASSERT(std::string_view(LibXR::LIBXR_TERMINAL_CONTROL_STR[static_cast<size_t>(
              LibXR::TerminalControl::ERASE_LINE)]) == "\033[K");
 
-  ASSERT(
-      std::string_view(
-          LibXR::LIBXR_FOREGROUND_STR[static_cast<size_t>(LibXR::Foreground::GREEN)]) ==
-      "\033[32m");
-  ASSERT(std::string_view(
-             LibXR::LIBXR_BACKGROUND_STR[static_cast<size_t>(LibXR::Background::BLUE)]) ==
-         "\033[44m");
+  ASSERT(std::string_view(LibXR::LIBXR_FOREGROUND_STR[static_cast<size_t>(
+             LibXR::Foreground::BLUE_COLOR)]) == "\033[34m");
+  ASSERT(std::string_view(LibXR::LIBXR_BACKGROUND_STR[static_cast<size_t>(
+             LibXR::Background::BLUE_COLOR)]) == "\033[44m");
 
   ASSERT(std::string_view(
              LibXR::LIBXR_PRESET_STR[static_cast<size_t>(LibXR::Preset::YELLOW_BOLD)]) ==

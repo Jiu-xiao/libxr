@@ -14,6 +14,9 @@
  * Use the real timer progression path and repeated restart attempts so the test checks
  * runtime scheduling rather than a simulated callback loop.
  */
+#include <atomic>
+#include <limits>
+
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
@@ -27,29 +30,55 @@
  */
 void test_timer()
 {
+  const auto zero = LibXR::Detail::AdvanceTimerCount(3U, 10U, 0U);
+  ASSERT(!zero.due && zero.count == 3U);
+
+  const auto before_due = LibXR::Detail::AdvanceTimerCount(3U, 10U, 6U);
+  ASSERT(!before_due.due && before_due.count == 9U);
+
+  const auto exactly_due = LibXR::Detail::AdvanceTimerCount(9U, 10U, 1U);
+  ASSERT(exactly_due.due && exactly_due.count == 0U);
+
+  const auto missed_periods = LibXR::Detail::AdvanceTimerCount(8U, 10U, 25U);
+  ASSERT(missed_periods.due && missed_periods.count == 3U);
+
+  constexpr uint32_t MAX = std::numeric_limits<uint32_t>::max();
+  const auto wide_total = LibXR::Detail::AdvanceTimerCount(MAX - 2U, MAX, MAX);
+  ASSERT(wide_total.due && wide_total.count == MAX - 2U);
+
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
   // Test coverage: execute the test items listed in this file header in sequence.
-  int timer_arg = 0;
+  static std::atomic<uint32_t> timer_count{0U};
 
-  auto handle =
-      LibXR::Timer::CreateTask<int*>([](int* arg) { *arg = *arg + 1; }, &timer_arg, 10);
+  static auto handle = LibXR::Timer::CreateTask<std::atomic<uint32_t>*>(
+      [](std::atomic<uint32_t>* count)
+      { count->fetch_add(1U, std::memory_order_relaxed); }, &timer_count, 10U);
+  static bool added = false;
 
-  LibXR::Timer::Add(handle);
-  LibXR::Timer::Start(handle);
-
-  LibXR::Thread::Sleep(205);
-  LibXR::Timer::Stop(handle);
-  for (int i = 0; i < 10; i++)
+  if (!added)
   {
-    timer_arg = 0;
-    LibXR::Timer::Start(handle);
-    LibXR::Thread::Sleep(205);
-    LibXR::Timer::Stop(handle);
-    if (timer_arg == 20)
-    {
-      break;
-    }
+    LibXR::Timer::Add(handle);
+    added = true;
   }
 
-  ASSERT(timer_arg == 20);
+  timer_count.store(0U, std::memory_order_relaxed);
+  LibXR::Timer::Start(handle);
+  for (size_t i = 0U; i < 100U && timer_count.load(std::memory_order_relaxed) == 0U; ++i)
+  {
+    LibXR::Thread::Sleep(10U);
+  }
+  LibXR::Timer::Stop(handle);
+  const uint32_t first_run = timer_count.load(std::memory_order_relaxed);
+  ASSERT(first_run > 0U);
+
+  const uint32_t restart_baseline = timer_count.load(std::memory_order_relaxed);
+  LibXR::Timer::Start(handle);
+  for (size_t i = 0U;
+       i < 100U && timer_count.load(std::memory_order_relaxed) == restart_baseline; ++i)
+  {
+    LibXR::Thread::Sleep(10U);
+  }
+  LibXR::Timer::Stop(handle);
+  const uint32_t second_run = timer_count.load(std::memory_order_relaxed);
+  ASSERT(second_run > restart_baseline);
 }

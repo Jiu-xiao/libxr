@@ -3,7 +3,110 @@
  * @brief base `rw` pending mode 与边界场景子测试。 Split test unit for base `rw`
  * pending-mode and edge scenarios.
  */
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <barrier>
+#include <cerrno>
+#include <chrono>
+#include <thread>
+
 #include "rw_test_common.hpp"
+
+extern char** environ;
+
+extern const char kRwIsrReadBlockScenario[] = "--rw-isr-read-block";
+extern const char kRwIsrWriteBlockScenario[] = "--rw-isr-write-block";
+
+namespace
+{
+
+constexpr int FATAL_EXIT_CODE = 86;
+
+void RegisterFatalExitCallback()
+{
+  auto fatal_callback = LibXR::Assert::FatalCallback::Create(
+      [](bool, void*, const char*, uint32_t) { _exit(FATAL_EXIT_CODE); },
+      static_cast<void*>(nullptr));
+  LibXR::Assert::RegisterFatalErrorCallback(fatal_callback);
+}
+
+}  // namespace
+
+int RunRwIsrReadBlockScenario()
+{
+  using namespace LibXR;
+
+  RegisterFatalExitCallback();
+  uint8_t read_data = 0;
+  Semaphore read_sem;
+  ReadOperation read_op(read_sem, 1);
+  ReadPort unreadable(1);
+  UNUSED(unreadable(RawData{&read_data, 1}, read_op, true));
+  return 0;
+}
+
+int RunRwIsrWriteBlockScenario()
+{
+  using namespace LibXR;
+
+  RegisterFatalExitCallback();
+  static const uint8_t WRITE_DATA = 0xA5;
+  Semaphore write_sem;
+  WriteOperation write_op(write_sem, 1);
+  WritePort unwritable(1, 1);
+  UNUSED(unwritable(ConstRawData{&WRITE_DATA, 1}, write_op, true));
+  return 0;
+}
+
+namespace
+{
+
+constexpr size_t READ_PUBLISH_RACE_ITERATIONS = 1024;
+
+void ExpectFatalTermination(const char* scenario)
+{
+  char executable[] = "/proc/self/exe";
+  char* child_argv[] = {executable, const_cast<char*>(scenario), nullptr};
+  pid_t child = -1;
+  ASSERT(posix_spawn(&child, executable, nullptr, nullptr, child_argv, environ) == 0);
+
+  int status = 0;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (true)
+  {
+    const pid_t wait_result = waitpid(child, &status, WNOHANG);
+    if (wait_result == child)
+    {
+      break;
+    }
+    if (wait_result < 0 && errno == EINTR)
+    {
+      continue;
+    }
+    ASSERT(wait_result == 0);
+
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      const int kill_result = kill(child, SIGKILL);
+      ASSERT(kill_result == 0 || errno == ESRCH);
+      pid_t reap_result = -1;
+      do
+      {
+        reap_result = waitpid(child, &status, 0);
+      } while (reap_result < 0 && errno == EINTR);
+      ASSERT(reap_result == child);
+      ASSERT(false);
+    }
+    LibXR::Thread::Sleep(1U);
+  }
+
+  ASSERT(WIFSIGNALED(status) || (WIFEXITED(status) && WEXITSTATUS(status) != 0));
+}
+
+}  // namespace
 
 /**
  * @brief 测试入口函数 `test_rw_pending_mode_matrix`。 Test entry function
@@ -53,9 +156,79 @@ void test_rw_edge_cases()
   auto second_result = w(ConstRawData{tx2, sizeof(tx2)}, op2);
   ASSERT(second_result == ErrorCode::FULL);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  ASSERT(CompleteFrontWrite(w, ErrorCode::OK));
+}
+
+void test_rw_read_publish_handles_concurrent_producer()
+{
+  using namespace LibXR;
+
+  ReadPort port(4);
+  std::barrier<> iteration_start(2);
+  std::barrier<> iteration_done(2);
+
+  std::thread producer(
+      [&]()
+      {
+        for (size_t iteration = 0; iteration < READ_PUBLISH_RACE_ITERATIONS; ++iteration)
+        {
+          iteration_start.arrive_and_wait();
+          if ((iteration & 1U) != 0U)
+          {
+            std::this_thread::yield();
+          }
+          const uint8_t data = static_cast<uint8_t>((iteration % 251U) + 1U);
+          {
+            auto queue = port.GetReadQueue();
+            ASSERT(queue.Push(data) == ErrorCode::OK);
+            queue.Publish();
+          }
+          iteration_done.arrive_and_wait();
+        }
+      });
+
+  for (size_t iteration = 0; iteration < READ_PUBLISH_RACE_ITERATIONS; ++iteration)
+  {
+    uint8_t received = 0;
+    OperationPollingStatus status;
+    ReadOperation operation(status);
+
+    iteration_start.arrive_and_wait();
+    if ((iteration & 1U) == 0U)
+    {
+      std::this_thread::yield();
+    }
+    const ErrorCode submit_result = port(RawData{&received, 1}, operation, false);
+    iteration_done.arrive_and_wait();
+
+    const uint8_t expected = static_cast<uint8_t>((iteration % 251U) + 1U);
+    ASSERT(submit_result == ErrorCode::OK);
+    ASSERT(status.Load() == OperationPollingStatus::DONE);
+    ASSERT(received == expected);
+    ASSERT(port.Size() == 0U);
+  }
+
+  producer.join();
+}
+
+void test_rw_zero_capacity_read_port_is_not_supported()
+{
+  using namespace LibXR;
+
+  ReadPort port(0);
+  uint8_t received = 0;
+  OperationPollingStatus status;
+  ReadOperation operation(status);
+
+  ASSERT(!port.Readable());
+  ASSERT(port(RawData{&received, 1}, operation) == ErrorCode::NOT_SUPPORT);
+  ASSERT(status.Load() == OperationPollingStatus::READY);
+}
+
+void test_rw_isr_block_fails_before_capability_checks()
+{
+  ExpectFatalTermination(kRwIsrReadBlockScenario);
+  ExpectFatalTermination(kRwIsrWriteBlockScenario);
 }
 
 /**
@@ -70,4 +243,7 @@ void RunBaseRwPendingTests()
 {
   test_rw_pending_mode_matrix();
   test_rw_edge_cases();
+  test_rw_read_publish_handles_concurrent_producer();
+  test_rw_zero_capacity_read_port_is_not_supported();
+  test_rw_isr_block_fails_before_capability_checks();
 }

@@ -10,55 +10,59 @@ WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
 
 // Stream batch helpers.
 // Stream 批次辅助逻辑。
-WritePort::Stream::~Stream()
-{
-  if (owns_port_ && buffered_size_ > 0)
-  {
-    UNUSED(SubmitBuffered());
-  }
-
-  if (owns_port_)
-  {
-    Release();
-  }
-}
+WritePort::Stream::~Stream() { UNUSED(Commit()); }
 
 ErrorCode WritePort::Stream::Acquire()
 {
-  if (owns_port_)
-  {
-    return ErrorCode::OK;
-  }
-
-  if (port_ == nullptr)
-  {
-    return ErrorCode::PTR_NULL;
-  }
-
-  DEV_ASSERT(port_->queue_info_ != nullptr);
-  DEV_ASSERT(port_->queue_data_ != nullptr);
-
-  if (!port_->Writable())
-  {
-    return ErrorCode::NOT_SUPPORT;
-  }
-
-  BusyState expected = BusyState::IDLE;
-  if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
-                                            std::memory_order_acq_rel,
-                                            std::memory_order_acquire))
+  auto state = state_.load(std::memory_order_acquire);
+  if (state == StreamState::SUBMITTING)
   {
     return ErrorCode::BUSY;
   }
 
-  if (port_->queue_info_->EmptySize() < 1)
+  if (state == StreamState::OWNED)
   {
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    return ErrorCode::OK;
+  }
+
+  StreamState expected_state = StreamState::RELEASED;
+  if (!state_.compare_exchange_strong(expected_state, StreamState::SUBMITTING,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+  {
+    return expected_state == StreamState::OWNED ? ErrorCode::OK : ErrorCode::BUSY;
+  }
+
+  if (port_ == nullptr)
+  {
+    state_.store(StreamState::RELEASED, std::memory_order_release);
+    return ErrorCode::PTR_NULL;
+  }
+
+  DEV_ASSERT(port_->queue_requests_ != nullptr);
+  DEV_ASSERT(port_->queue_data_ != nullptr);
+
+  if (!port_->Writable())
+  {
+    state_.store(StreamState::RELEASED, std::memory_order_release);
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  if (!port_->TryAcquireOwner(op_.type != WriteOperation::OperationType::BLOCK))
+  {
+    state_.store(StreamState::RELEASED, std::memory_order_release);
+    return ErrorCode::BUSY;
+  }
+
+  if (port_->queue_requests_->EmptySize() < 1U)
+  {
+    state_.store(StreamState::RELEASED, std::memory_order_release);
+    port_->ReleaseOwner(false);
+    port_->NotifyBackend(false);
     return ErrorCode::FULL;
   }
 
-  owns_port_ = true;
-  batch_capacity_ = port_->queue_data_->EmptySize();
+  state_.store(StreamState::OWNED, std::memory_order_release);
   return ErrorCode::OK;
 }
 
@@ -80,8 +84,8 @@ ErrorCode WritePort::Stream::Write(ConstRawData data)
     return lock_result;
   }
 
-  auto ans = port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                           data.size_);
+  auto ans = port_->MutableDataQueue().PushBatch(
+      reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
   if (ans == ErrorCode::OK)
   {
     buffered_size_ += data.size_;
@@ -91,41 +95,31 @@ ErrorCode WritePort::Stream::Write(ConstRawData data)
 
 ErrorCode WritePort::Stream::SubmitBuffered()
 {
-  ASSERT(owns_port_);
+  StreamState expected = StreamState::OWNED;
+  if (!state_.compare_exchange_strong(expected, StreamState::SUBMITTING,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+  {
+    return ErrorCode::BUSY;
+  }
   ASSERT(buffered_size_ > 0);
 
-  if (op_.type == WriteOperation::OperationType::BLOCK)
-  {
-    // Publish the wait state before the queued metadata can be consumed.
-    // 元数据可能被消费前，先发布等待状态。
-    op_.MarkAsRunning();
-    port_->busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
-  }
-
-  auto ans = port_->queue_info_->Push(
-      WriteInfoBlock{ConstRawData{nullptr, buffered_size_}, op_});
-  ASSERT(ans == ErrorCode::OK);
-
-  ans = port_->CommitWrite({nullptr, buffered_size_}, op_, true);
+  const size_t submitted_size = buffered_size_;
   buffered_size_ = 0;
 
-  if (op_.type == WriteOperation::OperationType::BLOCK)
-  {
-    // WritePort now owns the BLOCK wait/finish state machine.
-    // BLOCK 等待/完成状态机此后由 WritePort 接管。
-    owns_port_ = false;
-  }
-
-  return ans;
+  // PublishOwned keeps this Stream in SUBMITTING through the Port owner transition and
+  // request-count publication, then releases it before the backend doorbell. An older
+  // completion therefore cannot cross the publication boundary and reacquire this Stream.
+  port_->PublishOwned(submitted_size, op_, false, this);
+  return op_.type == WriteOperation::OperationType::BLOCK ? port_->WaitForBlock(op_)
+                                                          : ErrorCode::OK;
 }
 
-void WritePort::Stream::Release()
+size_t WritePort::Stream::EmptySize() const
 {
-  if (owns_port_)
-  {
-    owns_port_ = false;
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
-  }
+  return state_.load(std::memory_order_acquire) == StreamState::OWNED
+             ? port_->queue_data_->EmptySize()
+             : 0U;
 }
 
 WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
@@ -146,21 +140,34 @@ WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
 
 ErrorCode WritePort::Stream::Commit()
 {
-  auto ans = ErrorCode::OK;
-
-  if (owns_port_ && buffered_size_ > 0)
+  const auto state = state_.load(std::memory_order_acquire);
+  if (state == StreamState::SUBMITTING)
   {
-    ans = SubmitBuffered();
-    if (op_.type == WriteOperation::OperationType::BLOCK)
-    {
-      return ans;
-    }
+    return ErrorCode::BUSY;
   }
 
-  if (owns_port_)
+  if (state == StreamState::RELEASED)
   {
-    Release();
+    return ErrorCode::OK;
   }
 
-  return ans;
+  if (buffered_size_ > 0)
+  {
+    return SubmitBuffered();
+  }
+
+  StreamState expected = StreamState::OWNED;
+  if (!state_.compare_exchange_strong(expected, StreamState::SUBMITTING,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire))
+  {
+    return ErrorCode::BUSY;
+  }
+
+  // Stream and Port are the two admission guards. Release the Stream first so a
+  // completion can never observe both guards open before this handoff is complete.
+  state_.store(StreamState::RELEASED, std::memory_order_release);
+  port_->ReleaseOwner(false);
+  port_->NotifyBackend(false);
+  return ErrorCode::OK;
 }

@@ -73,17 +73,24 @@ class Semaphore
   /**
    * @brief  等待（减少）信号量
    *         Waits (decrements) the semaphore
-   * @param  timeout 超时时间（默认无限等待） Timeout period (default is infinite wait)
-   * @return 操作结果 ErrorCode indicating success or timeout
+   * @param  timeout 最大等待时长；`UINT32_MAX` 表示调用方不设置有限超时
+   *                 Maximum wait duration; `UINT32_MAX` means the caller sets no finite
+   *                 timeout
+   * @return 操作结果；调用方必须检查每次返回值
+   *         Operation result; callers must inspect every return value
    *
    * @details
    * 该方法尝试减少信号量的值，表示线程正在占用一个资源。
-   * 如果信号量的值为 0，调用线程将进入阻塞状态，直到信号量可用或超时。
+   * 如果信号量的值为 0，调用线程将进入阻塞状态，直到信号量可用、超时或底层等待返回
+   * 其他错误。`UINT32_MAX` 不保证单次底层等待一定成功；不可撤销的 ownership 交接必须由
+   * 调用方检查返回值并继续等待到 `OK`。
    *
    * This method attempts to decrement the semaphore count, indicating that
    * a resource is being used by the calling thread.
-   * If the semaphore count is 0, the calling thread is blocked until the
-   * semaphore becomes available or the timeout expires.
+   * If the semaphore count is 0, the calling thread blocks until the semaphore becomes
+   * available, the timeout expires, or the underlying wait reports another error.
+   * `UINT32_MAX` does not guarantee that one underlying wait returns `OK`; callers in an
+   * irreversible ownership handoff must inspect the result and keep waiting until `OK`.
    */
   ErrorCode Wait(uint32_t timeout = UINT32_MAX);
 

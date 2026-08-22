@@ -1,117 +1,227 @@
 /**
  * @file test_rw_read_queue_pending.cpp
- * @brief base `ReadPort` 队列完成与零长度读场景子测试。 Split test unit for base
- * `ReadPort` queue-completion and zero-length read scenarios.
- * @details 测试项目：
- *          1. 零长度挂起读在完成时只发通知，不会偷读队列字节。
- *          2. 阻塞读在后台补齐队列数据后会把目标字节拷贝到用户缓冲区。
- *          Test items:
- *          1. A pending zero-length read only triggers completion and does not consume
- * queued bytes.
- *          2. A blocking read copies bytes into the user buffer after queued data arrives
- * asynchronously.
+ * @brief ReadPort producer handoff and callback-reentry scenarios.
+ * @details The two legacy queue-completion cases are owned by the runtime RW suite.
+ * This file keeps black-box concurrency and callback regressions.
  */
+#include <barrier>
+#include <thread>
+
 #include "rw_test_common.hpp"
 
 namespace
 {
 
-/**
- * @brief 测试入口函数 `test_rw_zero_read_pending_notifies_without_dequeue`。 Test entry
- * function `test_rw_zero_read_pending_notifies_without_dequeue`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
- */
-void test_rw_zero_read_pending_notifies_without_dequeue()
+constexpr size_t CLAIM_RELEASE_RACE_ITERATIONS = 1024;
+
+struct QueuedReadCallbackReentry
 {
-  // 测试内容：零长度挂起请求完成后，队列字节仍应保留给后续真实读取。
-  // Test coverage: queued bytes should remain available for a later real read after a
-  // zero-length pending completion.
-  using namespace LibXR;
+  TrackingReadPort* port = nullptr;
+  LibXR::ReadOperation* nested_op = nullptr;
+  uint8_t* nested_data = nullptr;
+  LibXR::ErrorCode outer_status = LibXR::ErrorCode::FAILED;
+  LibXR::ErrorCode nested_status = LibXR::ErrorCode::FAILED;
+  LibXR::ErrorCode nested_submit = LibXR::ErrorCode::FAILED;
+  uint32_t outer_callbacks = 0;
+  uint32_t nested_callbacks = 0;
+  uint32_t outer_dequeue_count = UINT32_MAX;
+  uint32_t nested_dequeue_count = UINT32_MAX;
+};
 
-  for (auto mode : LibXRTest::ALL_MODES)
-  {
-    TrackingReadPort r(16);
-    r = PendingReadFun;
-
-    uint8_t dummy = 0xA0;
-    ReadHarness read(mode);
-    Semaphore done;
-    Thread finisher;
-
-    static const uint8_t TX[] = {0x31, 0x32};
-    StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_zero_ready");
-
-    auto ec = r(RawData{&dummy, 0}, read.op);
-    ASSERT(ec == ErrorCode::OK);
-    ExpectWaitOk(done, SHORT_WAIT_MS);
-    JoinThreadIfNeeded(finisher);
-
-    if (mode != TestMode::NONE && mode != TestMode::BLOCK)
-    {
-      read.ExpectFinal(ErrorCode::OK);
-    }
-
-    ASSERT(dummy == 0xA0);
-    ASSERT(r.dequeue_count == 0);
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-    ASSERT(r.Size() == sizeof(TX));
-
-    uint8_t follow_up[sizeof(TX)] = {};
-    ReadOperation follow_op;
-    ec = r(RawData{follow_up, sizeof(follow_up)}, follow_op);
-    ASSERT(ec == ErrorCode::OK);
-    ASSERT(std::memcmp(follow_up, TX, sizeof(TX)) == 0);
-    ASSERT(r.dequeue_count == 1);
-  }
+void OnNestedQueuedRead(bool, QueuedReadCallbackReentry* context, LibXR::ErrorCode status)
+{
+  context->nested_status = status;
+  context->nested_dequeue_count = context->port->dequeue_count;
+  ++context->nested_callbacks;
 }
 
-/**
- * @brief 测试入口函数 `test_rw_read_port_block_queue_completion_copies_data`。 Test entry
- * function `test_rw_read_port_block_queue_completion_copies_data`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
- */
-void test_rw_read_port_block_queue_completion_copies_data()
+void OnOuterQueuedRead(bool, QueuedReadCallbackReentry* context, LibXR::ErrorCode status)
 {
-  // 测试内容：阻塞读在异步补齐后应写回数据且不残留旧信号量状态。
-  // Test coverage: a blocking read should copy asynchronously supplied bytes and leave no
-  // stale semaphore state.
+  context->outer_status = status;
+  context->outer_dequeue_count = context->port->dequeue_count;
+  ++context->outer_callbacks;
+  context->nested_submit = (*context->port)(LibXR::RawData{context->nested_data, 1},
+                                            *context->nested_op, false);
+}
+
+void test_rw_read_claim_release_handles_concurrent_producer_notification()
+{
   using namespace LibXR;
 
-  ReadPort r(16);
-  r = PendingReadFun;
+  ReadPort port(4);
+  std::barrier<> iteration_start(2);
+  std::barrier<> iteration_done(2);
 
-  static const uint8_t TX[] = {0x5A};
-  uint8_t rx[sizeof(TX)] = {0};
-  Semaphore sem;
-  ReadOperation op(sem, 100);
-  Semaphore done;
-  Thread finisher;
-  StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_queue_block");
+  std::thread producer(
+      [&]()
+      {
+        for (size_t iteration = 0; iteration < CLAIM_RELEASE_RACE_ITERATIONS; ++iteration)
+        {
+          iteration_start.arrive_and_wait();
+          const uint8_t first = static_cast<uint8_t>((iteration % 125U) + 1U);
+          const uint8_t second = static_cast<uint8_t>(first + 125U);
+          {
+            auto queue = port.GetReadQueue();
+            ASSERT(queue.Push(first) == ErrorCode::OK);
+            if ((iteration % 3U) == 1U)
+            {
+              std::this_thread::yield();
+            }
+            ASSERT(queue.Push(second) == ErrorCode::OK);
+            queue.Publish();
+          }
+          iteration_done.arrive_and_wait();
+        }
+      });
 
-  auto ec = r(RawData{rx, sizeof(rx)}, op);
-  ASSERT(ec == ErrorCode::OK);
-  ExpectWaitOk(done, SHORT_WAIT_MS);
-  JoinThreadIfNeeded(finisher);
-  ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
-  ASSERT(sem.Value() == 0);
+  for (size_t iteration = 0; iteration < CLAIM_RELEASE_RACE_ITERATIONS; ++iteration)
+  {
+    uint8_t received[2] = {};
+    OperationPollingStatus status;
+    ReadOperation operation(status);
+    const uint8_t first = static_cast<uint8_t>((iteration % 125U) + 1U);
+    const uint8_t second = static_cast<uint8_t>(first + 125U);
+
+    iteration_start.arrive_and_wait();
+    if ((iteration % 3U) == 0U)
+    {
+      std::this_thread::yield();
+    }
+    ASSERT(port(RawData{received, sizeof(received)}, operation) == ErrorCode::OK);
+    iteration_done.arrive_and_wait();
+
+    ASSERT(status.Load() == OperationPollingStatus::DONE);
+    ASSERT(received[0] == first);
+    ASSERT(received[1] == second);
+    ASSERT(port.Size() == 0U);
+  }
+
+  producer.join();
+}
+
+void test_rw_invalid_read_does_not_claim_or_consume_queue()
+{
+  using namespace LibXR;
+
+  ReadPort port(2);
+  static constexpr uint8_t QUEUED = 0x6BU;
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(QUEUED) == ErrorCode::OK);
+    queue.Publish();
+  }
+
+  OperationPollingStatus null_status;
+  ReadOperation null_operation(null_status);
+  ASSERT(port(RawData{nullptr, 1U}, null_operation) == ErrorCode::PTR_NULL);
+  ASSERT(null_status.Load() == OperationPollingStatus::READY);
+  ASSERT(port.Size() == 1U);
+
+  uint8_t oversized[3] = {};
+  OperationPollingStatus oversized_status;
+  ReadOperation oversized_operation(oversized_status);
+  ASSERT(port(RawData{oversized, sizeof(oversized)}, oversized_operation) ==
+         ErrorCode::SIZE_ERR);
+  ASSERT(oversized_status.Load() == OperationPollingStatus::READY);
+  ASSERT(port.Size() == 1U);
+
+  uint8_t received = 0U;
+  OperationPollingStatus valid_status;
+  ReadOperation valid_operation(valid_status);
+  ASSERT(port(RawData{&received, 1U}, valid_operation) == ErrorCode::OK);
+  ASSERT(valid_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(received == QUEUED);
+  ASSERT(port.Size() == 0U);
+}
+
+void test_rw_queued_callback_can_submit_next_read_after_dequeue_notification()
+{
+  using namespace LibXR;
+
+  TrackingReadPort port(4);
+  uint8_t outer_data = 0xA5;
+  uint8_t nested_data = 0x5A;
+  QueuedReadCallbackReentry context{};
+
+  auto nested_callback = Callback<ErrorCode>::Create(OnNestedQueuedRead, &context);
+  ReadOperation nested_op(nested_callback);
+  context.port = &port;
+  context.nested_op = &nested_op;
+  context.nested_data = &nested_data;
+
+  auto outer_callback = Callback<ErrorCode>::Create(OnOuterQueuedRead, &context);
+  ReadOperation outer_op(outer_callback);
+  ASSERT(port(RawData{&outer_data, 1}, outer_op, false) == ErrorCode::OK);
+
+  static const uint8_t OUTER_DATA = 0x31;
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(OUTER_DATA) == ErrorCode::OK);
+    queue.Publish();
+  }
+
+  ASSERT(context.outer_callbacks == 1U);
+  ASSERT(context.outer_status == ErrorCode::OK);
+  ASSERT(context.outer_dequeue_count == 1U);
+  ASSERT(context.nested_submit == ErrorCode::OK);
+  ASSERT(context.nested_callbacks == 0U);
+  ASSERT(outer_data == OUTER_DATA);
+  ASSERT(port.dequeue_count == 1U);
+
+  static const uint8_t NESTED_DATA = 0x42;
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(NESTED_DATA) == ErrorCode::OK);
+    queue.Publish();
+  }
+
+  ASSERT(context.nested_callbacks == 1U);
+  ASSERT(context.nested_status == ErrorCode::OK);
+  ASSERT(context.nested_dequeue_count == 2U);
+  ASSERT(nested_data == NESTED_DATA);
+  ASSERT(port.dequeue_count == 2U);
+}
+
+void test_rw_busy_read_does_not_modify_rejected_operation_or_pending_request()
+{
+  using namespace LibXR;
+
+  ReadPort port(2);
+  uint8_t first_data = 0;
+  OperationPollingStatus first_status;
+  ReadOperation first_operation(first_status);
+  ASSERT(port(RawData{&first_data, 1}, first_operation) == ErrorCode::OK);
+  ASSERT(first_status.Load() == OperationPollingStatus::RUNNING);
+
+  uint8_t rejected_data = 0xA5;
+  OperationPollingStatus rejected_status;
+  ReadOperation rejected_operation(rejected_status);
+  ASSERT(port(RawData{&rejected_data, 1}, rejected_operation) == ErrorCode::BUSY);
+  ASSERT(rejected_status.Load() == OperationPollingStatus::READY);
+
+  static const uint8_t RECEIVED = 0x5A;
+  {
+    auto queue = port.GetReadQueue();
+    ASSERT(queue.Push(RECEIVED) == ErrorCode::OK);
+    queue.Publish();
+  }
+
+  ASSERT(first_status.Load() == OperationPollingStatus::DONE);
+  ASSERT(first_data == RECEIVED);
+  ASSERT(rejected_status.Load() == OperationPollingStatus::READY);
+  ASSERT(rejected_data == 0xA5);
 }
 
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunBaseRwReadQueuePendingTests`。 Test-item function
- * `RunBaseRwReadQueuePendingTests`.
- * @details 测试内容：执行读队列完成与零长度请求子场景。 Execute queued-read completion
- * and zero-length request sub-scenarios.
- *          测试原理：把“挂起后完成”的路径单独聚合，减少和清队列语义的耦合。 Group
- * pending-completion paths separately from clear-queue semantics.
+ * @brief Test-item function `RunBaseRwReadQueuePendingTests`.
+ * @details Execute queued-read producer handoff and callback-reentry scenarios.
  */
 void RunBaseRwReadQueuePendingTests()
 {
-  test_rw_zero_read_pending_notifies_without_dequeue();
-  test_rw_read_port_block_queue_completion_copies_data();
+  test_rw_read_claim_release_handles_concurrent_producer_notification();
+  test_rw_invalid_read_does_not_claim_or_consume_queue();
+  test_rw_queued_callback_can_submit_next_read_after_dequeue_notification();
+  test_rw_busy_read_does_not_modify_rejected_operation_or_pending_request();
 }

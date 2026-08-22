@@ -12,8 +12,15 @@
  */
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #include "test_main_sets.hpp"
+
+extern const char kRwIsrReadBlockScenario[];
+extern const char kRwIsrWriteBlockScenario[];
+int RunRwIsrReadBlockScenario();
+int RunRwIsrWriteBlockScenario();
 
 /**
  * @brief 辅助函数 `main`。 Helper function `main`.
@@ -25,8 +32,17 @@
  */
 bool equal(double a, double b) { return std::abs(a - b) < 1e-6; }
 
-int main()
+int main(int argc, char** argv)
 {
+  if (argc == 2 && std::strcmp(argv[1], kRwIsrReadBlockScenario) == 0)
+  {
+    return RunRwIsrReadBlockScenario();
+  }
+  if (argc == 2 && std::strcmp(argv[1], kRwIsrWriteBlockScenario) == 0)
+  {
+    return RunRwIsrWriteBlockScenario();
+  }
+
   LibXR::PlatformInit();
 
   auto err_cb = LibXR::Assert::FatalCallback::Create(
@@ -39,13 +55,22 @@ int main()
 
         std::fprintf(stderr, "Error: Union test failed at step [%s].\r\n", test_name);
         std::fflush(stderr);
-        // NOLINTNEXTLINE
-        *(volatile long long*)(nullptr) = 0;
-        exit(-1);
+        std::abort();
       },
       reinterpret_cast<void*>(0));
 
   LibXR::Assert::RegisterFatalErrorCallback(err_cb);
+
+  if (argc == 2 && std::strcmp(argv[1], "--rw-only") == 0)
+  {
+    test_rw();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--uart-dma-only") == 0)
+  {
+    test_uart_dma_tx_model();
+    return 0;
+  }
 
   const int status = RunMainTestBinary();
   exit(status);

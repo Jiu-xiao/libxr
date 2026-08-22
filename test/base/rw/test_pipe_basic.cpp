@@ -33,7 +33,6 @@ void test_pipe_basic()
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
   ASSERT(ec == ErrorCode::OK);
 
-  r.ProcessPendingReads(false);
   ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
@@ -66,7 +65,6 @@ void test_pipe_write_then_read()
   ec = r(RawData{rx, sizeof(rx)}, rop);
   ASSERT(ec == ErrorCode::OK);
 
-  r.ProcessPendingReads(false);
   ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
@@ -103,8 +101,6 @@ void test_pipe_chunked_rw()
   ec = w(ConstRawData{TX2, sizeof(TX2)}, w2);
   ASSERT(ec == ErrorCode::OK);
 
-  r.ProcessPendingReads(false);
-
   static const uint8_t EXPECT[] = {'H', 'e', 'l', 'l', 'o', ' ', 'X', 'R'};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
@@ -139,8 +135,6 @@ void test_pipe_stream_api()
   ws << ConstRawData{A, sizeof(A)} << ConstRawData{B, sizeof(B)};
   ec = ws.Commit();
   ASSERT(ec == ErrorCode::OK);
-
-  r.ProcessPendingReads(false);
 
   static const uint8_t EXPECT[] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33, 0x44, 0x55};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);

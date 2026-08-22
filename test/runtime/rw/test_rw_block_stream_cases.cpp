@@ -3,11 +3,11 @@
  * @brief runtime `rw` 阻塞 `Stream` 场景子测试。 Split test unit for runtime blocking
  * `Stream` scenarios.
  * @details 测试项目：
- *          1. `Stream::Commit` 在挂起完成后会回传最终失败码。
+ *          1. `Stream::Commit` 会回传 inline consumer 发布的最终失败码。
  *          2. `Stream` 超时后会解除等待者，后续完成信号不会残留。
  *          3. `Stream` 析构自动提交会沿用同一阻塞完成路径。
  *          Test items:
- *          1. `Stream::Commit` propagates the final error after pending completion.
+ *          1. `Stream::Commit` propagates an inline consumer failure.
  *          2. Timeout detaches the waiter and leaves no stale completion signal behind.
  *          3. Destructor auto-commit reuses the same blocking completion path.
  */
@@ -15,6 +15,26 @@
 
 namespace
 {
+
+void test_rw_stream_block_propagates_inline_consumer_result()
+{
+  using namespace LibXR;
+
+  SynchronousWritePort port;
+  port.result = ErrorCode::FAILED;
+
+  Semaphore semaphore;
+  WriteOperation operation(semaphore, UINT32_MAX);
+  WritePort::Stream stream(&port, operation);
+  static const uint8_t TX[] = {0x31, 0x32, 0x33};
+
+  ASSERT(stream.Write(ConstRawData{TX, sizeof(TX)}) == ErrorCode::OK);
+  ASSERT(stream.Commit() == ErrorCode::FAILED);
+  ASSERT(semaphore.Value() == 0);
+  ASSERT(port.payload_size == 0U);
+  ASSERT(port.Size() == 0U);
+  ASSERT(port.EmptySize() == port.Capacity());
+}
 
 /**
  * @brief 测试入口函数 `test_rw_stream_block_pending_result_propagates`。 Test entry
@@ -75,6 +95,7 @@ void test_rw_stream_block_destructor_autocommit()
  */
 void RunRuntimeRwBlockStreamTests()
 {
+  test_rw_stream_block_propagates_inline_consumer_result();
   test_rw_stream_block_pending_result_propagates();
   test_rw_stream_block_timeout_detaches_waiter();
   test_rw_stream_block_destructor_autocommit();

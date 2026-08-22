@@ -213,7 +213,11 @@ ErrorCode ESP32I2C::ApplyConfig()
     return ErrorCode::ARG_ERR;
   }
 
-  i2c_ll_set_source_clk(hal_.dev, I2C_CLK_SRC_DEFAULT);
+  PERIPH_RCC_ATOMIC()
+  {
+    (void)__DECLARE_RCC_ATOMIC_ENV;
+    i2c_ll_set_source_clk(hal_.dev, I2C_CLK_SRC_DEFAULT);
+  }
   if (ResolveClockSource(source_clock_hz_) != ErrorCode::OK)
   {
     return ErrorCode::INIT_ERR;
