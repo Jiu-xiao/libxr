@@ -76,16 +76,6 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
   void Stop(bool in_isr) override;
 
   static inline CH32USBDeviceFS* self_ = nullptr;
-
- private:
-  static void LockInterruptDomain(void* context) noexcept;
-  static void UnlockInterruptDomain(void* context) noexcept;
-  static uintptr_t MaskInterruptDomain(void* context) noexcept;
-  static void RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept;
-
-  uint32_t irq_lock_state_ = 0U;
-  uint16_t irq_desired_mask_ = 0U;
-  bool irq_domain_masked_ = false;
 };
 
 #endif  // defined(RCC_APB1Periph_USB)
@@ -128,16 +118,6 @@ class CH32USBOtgFS : public USB::EndpointPool, public USB::DeviceCore
   void Stop(bool in_isr) override;
 
   static inline CH32USBOtgFS* self_ = nullptr;
-
- private:
-  static void LockInterruptDomain(void* context) noexcept;
-  static void UnlockInterruptDomain(void* context) noexcept;
-  static uintptr_t MaskInterruptDomain(void* context) noexcept;
-  static void RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept;
-
-  uint32_t irq_lock_state_ = 0U;
-  uint8_t irq_desired_mask_ = 0U;
-  bool irq_domain_masked_ = false;
 };
 
 #endif  // defined(USBFSD)
@@ -193,16 +173,6 @@ class CH32USBOtgHS : public USB::EndpointPool, public USB::DeviceCore
   void Stop(bool in_isr) override;
 
   static inline CH32USBOtgHS* self_ = nullptr;
-
- private:
-  static void LockInterruptDomain(void* context) noexcept;
-  static void UnlockInterruptDomain(void* context) noexcept;
-  static uintptr_t MaskInterruptDomain(void* context) noexcept;
-  static void RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept;
-
-  uint32_t irq_lock_state_ = 0U;
-  uint8_t irq_desired_mask_ = 0U;
-  bool irq_domain_masked_ = false;
 };
 
 #endif  // defined(USBHSD)

@@ -1,6 +1,5 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 // ch32_usb_devfs.cpp  (classic FSDEV / PMA)
-#include "ch32_interrupt_guard.h"
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
 #include "ch32_usb_rcc.hpp"
@@ -131,52 +130,6 @@ static inline volatile uint16_t* usbdev_ep_reg(uint8_t ep)
 #ifndef USB_CNTR_WKUPM
 #define USB_CNTR_WKUPM 0x1000u
 #endif
-
-static constexpr uint16_t USBDEV_INTERRUPT_MASK =
-    USB_CNTR_CTRM | USB_CNTR_RESETM | USB_CNTR_SUSPM | USB_CNTR_WKUPM;
-
-void CH32USBDeviceFS::LockInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<CH32USBDeviceFS*>(context);
-  ASSERT(self != nullptr);
-  self->irq_lock_state_ = libxr_ch32_interrupt_save_and_disable();
-}
-
-void CH32USBDeviceFS::UnlockInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<CH32USBDeviceFS*>(context);
-  ASSERT(self != nullptr);
-  libxr_ch32_interrupt_restore(self->irq_lock_state_);
-}
-
-uintptr_t CH32USBDeviceFS::MaskInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<CH32USBDeviceFS*>(context);
-  ASSERT(self != nullptr);
-  ASSERT(!self->irq_domain_masked_);
-  const uint16_t current = *usbdev_cntr();
-  self->irq_desired_mask_ = static_cast<uint16_t>(current & USBDEV_INTERRUPT_MASK);
-  self->irq_domain_masked_ = true;
-  *usbdev_cntr() = static_cast<uint16_t>(current & ~USBDEV_INTERRUPT_MASK);
-  const volatile uint16_t readback = *usbdev_cntr();
-  UNUSED(readback);
-  return self->irq_desired_mask_;
-}
-
-void CH32USBDeviceFS::RestoreInterruptDomain(void* context,
-                                             uintptr_t saved_state) noexcept
-{
-  auto* self = static_cast<CH32USBDeviceFS*>(context);
-  ASSERT(self != nullptr);
-  ASSERT(self->irq_domain_masked_);
-  UNUSED(saved_state);
-  const uint16_t current = *usbdev_cntr();
-  *usbdev_cntr() =
-      static_cast<uint16_t>((current & ~USBDEV_INTERRUPT_MASK) | self->irq_desired_mask_);
-  const volatile uint16_t readback = *usbdev_cntr();
-  UNUSED(readback);
-  self->irq_domain_masked_ = false;
-}
 
 #ifndef USB_DADDR_EF
 #define USB_DADDR_EF 0x0080u
@@ -317,144 +270,146 @@ static void usbdev_fs_irqhandler()
     return;
   }
 
-  (void)usb->RunIrq(
-      [usb]() noexcept
+  auto& map = LibXR::CH32EndpointDevFs::map_dev_fs_;
+
+  constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
+  constexpr uint8_t IN_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
+  auto* out0 = map[0][OUT_IDX];
+  auto* in0 = map[0][IN_IDX];
+  ASSERT(out0 != nullptr);
+  ASSERT(in0 != nullptr);
+
+  while (true)
+  {
+    const uint16_t ISTR = *usbdev_istr();
+
+    // 总线 reset 需要先重建 PMA 分配器和 EP0 默认状态，
+    // 之后才继续处理新的 CTR 事件。
+    // Bus reset rebuilds the PMA allocator and EP0 default state before
+    // processing new CTR events again.
+    if (ISTR & USB_ISTR_RESET)
+    {
+      usbdev_clear_istr(USB_ISTR_RESET);
+
+      *usbdev_daddr() = USB_DADDR_EF;
+      *usbdev_btable() = 0;
+
+      LibXR::CH32EndpointDevFs::ResetPMAAllocator();
+
+      usb->Deinit(true);
+      usb->Init(true);
+
+      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+      LibXR::CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
+      LibXR::CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
+      continue;
+    }
+
+    // suspend 也走同一条控制端点恢复路径，
+    // 但会先把 EP0 RX 保持在 NAK，等协议栈重新挂起下一笔传输。
+    // Suspend follows the same control-endpoint recovery path, but keeps EP0 RX
+    // in NAK until the stack re-arms the next transfer.
+    if (ISTR & USB_ISTR_SUSP)
+    {
+      usbdev_clear_istr(USB_ISTR_SUSP);
+
+      usb->Deinit(true);
+      usb->Init(true);
+
+      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+
+      LibXR::CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
+      LibXR::CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_NAK);
+      continue;
+    }
+
+    if (ISTR & USB_ISTR_WKUP)
+    {
+      usbdev_clear_istr(USB_ISTR_WKUP);
+      continue;
+    }
+
+    if ((ISTR & USB_ISTR_CTR) == 0)
+    {
+      break;
+    }
+
+    // 经典 FSDEV 通过 CTR 标志一次只上报一个端点。
+    // Classic FSDEV reports one endpoint at a time through CTR flags.
+    const uint8_t EP_ID = static_cast<uint8_t>(ISTR & USB_ISTR_EP_ID);
+
+    uint16_t epr = *usbdev_ep_reg(EP_ID);
+
+    if (epr & USB_EP_CTR_RX)
+    {
+      if (EP_ID == 0)
       {
-        auto& map = LibXR::CH32EndpointDevFs::map_dev_fs_;
-
-        constexpr uint8_t OUT_IDX =
-            static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
-        constexpr uint8_t IN_IDX =
-            static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::IN);
-        auto* out0 = map[0][OUT_IDX];
-        auto* in0 = map[0][IN_IDX];
-        ASSERT(out0 != nullptr);
-        ASSERT(in0 != nullptr);
-
-        while (true)
+        if (epr & USB_EP_SETUP)
         {
-          const uint16_t ISTR = *usbdev_istr();
-
-          // 总线 reset 需要先重建 PMA 分配器和 EP0 默认状态，
-          // 之后才继续处理新的 CTR 事件。
-          // Bus reset rebuilds the PMA allocator and EP0 default state before
-          // processing new CTR events again.
-          if (ISTR & USB_ISTR_RESET)
-          {
-            usbdev_clear_istr(USB_ISTR_RESET);
-
-            *usbdev_daddr() = USB_DADDR_EF;
-            *usbdev_btable() = 0;
-
-            LibXR::CH32EndpointDevFs::ResetPMAAllocator();
-
-            usb->Deinit(true);
-            usb->Init(true);
-
-            out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-            in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-
-            LibXR::CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
-            LibXR::CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
-            continue;
-          }
-
-          // Suspend/resume 不改变 configuration，也不重置端点或在途传输。
-          // Suspend/resume preserves the configuration, endpoints, and in-flight
-          // transfers.
-          if (ISTR & USB_ISTR_SUSP)
-          {
-            usbdev_clear_istr(USB_ISTR_SUSP);
-            continue;
-          }
-
-          if (ISTR & USB_ISTR_WKUP)
-          {
-            usbdev_clear_istr(USB_ISTR_WKUP);
-            continue;
-          }
-
-          if ((ISTR & USB_ISTR_CTR) == 0)
-          {
-            break;
-          }
-
-          // 经典 FSDEV 通过 CTR 标志一次只上报一个端点。
-          // Classic FSDEV reports one endpoint at a time through CTR flags.
-          const uint8_t EP_ID = static_cast<uint8_t>(ISTR & USB_ISTR_EP_ID);
-
-          uint16_t epr = *usbdev_ep_reg(EP_ID);
-
-          if (epr & USB_EP_CTR_RX)
-          {
-            if (EP_ID == 0)
-            {
-              if (epr & USB_EP_SETUP)
-              {
-                // 新的 SETUP 会开始一笔全新的控制传输；
-                // 这里只清理挂起的 CTR 标志，EP0 RX/TX 由控制传输处理器重新挂起。
-                // A new SETUP starts a fresh control transfer; only clear pending CTR
-                // flags here, and let the control-transfer handlers re-arm EP0 RX/TX.
-                if (epr & USB_EP_CTR_TX)
-                {
-                  LibXR::CH32EndpointDevFs::ClearEpCtrTx(0);
-                }
-                LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
-
-                out0->CopyRxDataToBuffer(sizeof(LibXR::USB::SetupPacket));
-                usb->OnSetupPacket(true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
-                                             out0->GetBuffer().addr_));
-
-                continue;
-              }
-              else
-              {
-                // 普通 EP0 OUT 数据/状态阶段完成。
-                // Ordinary EP0 OUT data/status completion.
-                LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
-                const uint16_t LEN = LibXR::CH32EndpointDevFs::GetRxCount(0);
-                out0->TransferComplete(LEN);
-              }
-            }
-            else
-            {
-              // non-EP0 OUT 完成直接使用硬件锁存的该端点 RX 长度。
-              // Non-EP0 OUT completion uses the per-endpoint RX length latched by
-              // hardware.
-              LibXR::CH32EndpointDevFs::ClearEpCtrRx(EP_ID);
-              const uint16_t LEN = LibXR::CH32EndpointDevFs::GetRxCount(EP_ID);
-              if (map[EP_ID][OUT_IDX])
-              {
-                map[EP_ID][OUT_IDX]->TransferComplete(LEN);
-              }
-            }
-          }
-
-          epr = *usbdev_ep_reg(EP_ID);
-
+          // 新的 SETUP 会开始一笔全新的控制传输；
+          // 这里只清理挂起的 CTR 标志，EP0 RX/TX 由控制传输处理器重新挂起。
+          // A new SETUP starts a fresh control transfer; only clear pending CTR
+          // flags here, and let the control-transfer handlers re-arm EP0 RX/TX.
           if (epr & USB_EP_CTR_TX)
           {
-            if (EP_ID == 0)
-            {
-              // EP0 IN 完成事件本身就足够，不需要额外长度信息。
-              // EP0 IN completion is self-sufficient; no extra length bookkeeping is
-              // needed.
-              LibXR::CH32EndpointDevFs::ClearEpCtrTx(0);
-              in0->TransferComplete(0);
-            }
-            else
-            {
-              // FSDEV 上的 non-EP0 IN 完成与 EP0 IN 一样，不额外携带长度信息。
-              // Non-EP0 IN completion follows the same rule as EP0 IN on FSDEV.
-              LibXR::CH32EndpointDevFs::ClearEpCtrTx(EP_ID);
-              if (map[EP_ID][IN_IDX])
-              {
-                map[EP_ID][IN_IDX]->TransferComplete(0);
-              }
-            }
+            LibXR::CH32EndpointDevFs::ClearEpCtrTx(0);
           }
+          LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
+
+          out0->CopyRxDataToBuffer(sizeof(LibXR::USB::SetupPacket));
+          usb->OnSetupPacket(true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
+                                       out0->GetBuffer().addr_));
+
+          continue;
         }
-      });
+        else
+        {
+          // 普通 EP0 OUT 数据/状态阶段完成。
+          // Ordinary EP0 OUT data/status completion.
+          LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
+          const uint16_t LEN = LibXR::CH32EndpointDevFs::GetRxCount(0);
+          out0->TransferComplete(LEN);
+        }
+      }
+      else
+      {
+        // non-EP0 OUT 完成直接使用硬件锁存的该端点 RX 长度。
+        // Non-EP0 OUT completion uses the per-endpoint RX length latched by hardware.
+        LibXR::CH32EndpointDevFs::ClearEpCtrRx(EP_ID);
+        const uint16_t LEN = LibXR::CH32EndpointDevFs::GetRxCount(EP_ID);
+        if (map[EP_ID][OUT_IDX])
+        {
+          map[EP_ID][OUT_IDX]->TransferComplete(LEN);
+        }
+      }
+    }
+
+    epr = *usbdev_ep_reg(EP_ID);
+
+    if (epr & USB_EP_CTR_TX)
+    {
+      if (EP_ID == 0)
+      {
+        // EP0 IN 完成事件本身就足够，不需要额外长度信息。
+        // EP0 IN completion is self-sufficient; no extra length bookkeeping is needed.
+        LibXR::CH32EndpointDevFs::ClearEpCtrTx(0);
+        in0->TransferComplete(0);
+      }
+      else
+      {
+        // FSDEV 上的 non-EP0 IN 完成与 EP0 IN 一样，不额外携带长度信息。
+        // Non-EP0 IN completion follows the same rule as EP0 IN on FSDEV.
+        LibXR::CH32EndpointDevFs::ClearEpCtrTx(EP_ID);
+        if (map[EP_ID][IN_IDX])
+        {
+          map[EP_ID][IN_IDX]->TransferComplete(0);
+        }
+      }
+    }
+  }
 }
 
 static void usb_irq_thunk() { usbdev_fs_irqhandler(); }
@@ -480,8 +435,6 @@ CH32USBDeviceFS::CH32USBDeviceFS(
       USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
                       pid, bcd, LANG_LIST, CONFIGS, uid)
 {
-  SetInterruptDomain({this, LockInterruptDomain, UnlockInterruptDomain,
-                      MaskInterruptDomain, RestoreInterruptDomain});
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -578,9 +531,8 @@ void CH32USBDeviceFS::Start(bool)
   usbdev_clear_istr(0xFFFFu);
   *usbdev_btable() = 0;
 
-  irq_desired_mask_ = static_cast<uint16_t>(USB_CNTR_RESETM | USB_CNTR_SUSPM |
-                                            USB_CNTR_WKUPM | USB_CNTR_CTRM);
-  *usbdev_cntr() = irq_domain_masked_ ? 0U : irq_desired_mask_;
+  *usbdev_cntr() = static_cast<uint16_t>(USB_CNTR_RESETM | USB_CNTR_SUSPM |
+                                         USB_CNTR_WKUPM | USB_CNTR_CTRM);
 
 #if defined(EXTEN_USBD_LS)
   EXTEN->EXTEN_CTR &= ~EXTEN_USBD_LS;
@@ -627,7 +579,6 @@ void CH32USBDeviceFS::Start(bool)
 
 void CH32USBDeviceFS::Stop(bool)
 {
-  irq_desired_mask_ = 0U;
   LibXR::CH32UsbCanShared::register_usb_irq(nullptr);
   LibXR::CH32UsbCanShared::usb_inited.store(false, std::memory_order_release);
   self_ = nullptr;

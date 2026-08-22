@@ -66,11 +66,6 @@ int main(int argc, char** argv)
     test_rw();
     return 0;
   }
-  if (argc == 2 && std::strcmp(argv[1], "--cdc-only") == 0)
-  {
-    test_cdc_uart_tx();
-    return 0;
-  }
   if (argc == 2 && std::strcmp(argv[1], "--uart-dma-only") == 0)
   {
     test_uart_dma_tx_model();

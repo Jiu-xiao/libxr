@@ -514,28 +514,6 @@ void CH32EndpointOtgHs::Close()
   *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
   *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
 
-  const uint16_t interrupt_snapshot =
-      *reinterpret_cast<volatile uint16_t*>(reinterpret_cast<uintptr_t>(&USBHSD->INT_FG));
-  const uint8_t interrupt_flags = static_cast<uint8_t>(interrupt_snapshot);
-  const uint8_t interrupt_status = static_cast<uint8_t>(interrupt_snapshot >> 8U);
-  const uint8_t endpoint_number = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
-  if ((interrupt_status & USBHS_UIS_ENDP_MASK) == endpoint_number)
-  {
-    const uint8_t token = interrupt_status & USBHS_UIS_TOKEN_MASK;
-    const bool direction_matches =
-        (GetDirection() == Direction::IN && token == USBHS_UIS_TOKEN_IN) ||
-        (GetDirection() == Direction::OUT && token == USBHS_UIS_TOKEN_OUT);
-    if (direction_matches && (interrupt_flags & USBHS_UIF_TRANSFER) != 0U)
-    {
-      USBHSD->INT_FG = USBHS_UIF_TRANSFER;
-    }
-  }
-  if (GetDirection() == Direction::OUT && endpoint_number == 0U &&
-      (interrupt_flags & USBHS_UIF_SETUP_ACT) != 0U)
-  {
-    USBHSD->INT_FG = USBHS_UIF_SETUP_ACT;
-  }
-
   SetState(State::DISABLED);
 }
 

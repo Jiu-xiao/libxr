@@ -22,7 +22,6 @@ ESP32USBEndpoint::ESP32USBEndpoint(ESP32USBDevice& device, EPNumber number,
 void ESP32USBEndpoint::Configure(const Config& cfg)
 {
   ASSERT(cfg.direction == Direction::IN || cfg.direction == Direction::OUT);
-  device_.InvalidateEndpointEpoch();
 
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
@@ -74,7 +73,6 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
 
 void ESP32USBEndpoint::Close()
 {
-  device_.InvalidateEndpointEpoch();
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
@@ -89,14 +87,13 @@ void ESP32USBEndpoint::Close()
     }
     else
     {
+      dev->diepempmsk_reg.val &= ~(1UL << ep_num);
       if (dev->in_eps[ep_num - 1U].diepctl_reg.epena)
       {
         ESPUSBDetail::DisableInEndpointAndWait(dev, ep_num);
       }
     }
-    dev->diepempmsk_reg.val &= ~(1UL << ep_num);
     dev->daintmsk_reg.val &= ~(1UL << ep_num);
-    device_.ClearEndpointInterruptLatch(ep_num, true);
   }
   else
   {
@@ -109,7 +106,6 @@ void ESP32USBEndpoint::Close()
       ESPUSBDetail::DisableOutEndpointAndWait(dev->out_eps[ep_num - 1U].doepctl_reg);
     }
     dev->daintmsk_reg.val &= ~(1UL << (16U + ep_num));
-    device_.ClearEndpointInterruptLatch(ep_num, false);
   }
 
   ResetTransferState();
@@ -156,15 +152,10 @@ ErrorCode ESP32USBEndpoint::Stall()
 
 ErrorCode ESP32USBEndpoint::ClearStall()
 {
-  // CLEAR_FEATURE can synchronously rearm a class endpoint while the current DWC
-  // snapshot still contains its old completion bit. Make that old bit a different
-  // endpoint generation before the owner can arm the replacement transfer.
-  device_.InvalidateEndpointEpoch();
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
-  const bool in_dir = GetDirection() == Direction::IN;
 
-  if (in_dir)
+  if (GetDirection() == Direction::IN)
   {
     if (ep_num == 0U)
     {
@@ -191,7 +182,6 @@ ErrorCode ESP32USBEndpoint::ClearStall()
     }
   }
 
-  device_.ClearEndpointInterruptLatch(ep_num, in_dir);
   SetState(State::IDLE);
   return ErrorCode::OK;
 }
@@ -247,7 +237,6 @@ size_t ESP32USBEndpoint::MaxTransferSize() const
 
 void ESP32USBEndpoint::ResetHardwareState()
 {
-  device_.InvalidateEndpointEpoch();
   fifo_allocated_ = false;
   fifo_words_ = 0U;
   ResetTransferState();

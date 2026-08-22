@@ -39,63 +39,29 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
         hpcd_(hpcd),
         id_(id)
   {
-    SetInterruptDomain({this, LockInterruptDomain, UnlockInterruptDomain,
-                        MaskInterruptDomain, RestoreInterruptDomain});
   }
 
   void Init(bool in_isr) override { LibXR::USB::DeviceCore::Init(in_isr); }
 
   void Deinit(bool in_isr) override { LibXR::USB::DeviceCore::Deinit(in_isr); }
 
-  void Start(bool in_isr) override;
-  void Stop(bool in_isr) override;
-
-  /**
-   * @brief 在设备 owner 内分发一次 HAL PCD IRQ / Dispatch one HAL PCD IRQ under the
-   * device owner
-   *
-   * C++ ISR 可直接调用本入口；CubeMX 生成的 C ISR 调用
-   * `STM32USBDeviceIrqHandler()`。两者都不能直接调用 HAL_PCD_IRQHandler。 / A C++
-   * ISR may call this entry directly; a CubeMX-generated C ISR calls
-   * `STM32USBDeviceIrqHandler()`. Neither may call HAL_PCD_IRQHandler directly.
-   */
-  void HandleIrq();
+  void Start(bool) override
+  {
+    map_[id_] = this;
+    HAL_PCD_Start(hpcd_);
+  }
+  void Stop(bool) override
+  {
+    HAL_PCD_Stop(hpcd_);
+    if (map_[id_] == this)
+    {
+      map_[id_] = nullptr;
+    }
+  }
 
   PCD_HandleTypeDef* hpcd_;
   stm32_usb_dev_id_t id_;
   static inline STM32USBDevice* map_[STM32_USB_DEV_ID_NUM] = {};
-
- private:
-  static void LockInterruptDomain(void* context) noexcept;
-  static void UnlockInterruptDomain(void* context) noexcept;
-  static uintptr_t MaskInterruptDomain(void* context) noexcept;
-  static void RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept;
-
-  [[nodiscard]] bool IsOtgDevice() const noexcept;
-  [[nodiscard]] uintptr_t ReadInterruptEnableState() const noexcept;
-  void WriteInterruptEnableState(uintptr_t state) noexcept;
-  [[nodiscard]] bool HasPendingTransferBarrierInterrupt() const noexcept;
-  [[nodiscard]] bool IsHalIrqActive() const noexcept { return hal_irq_active_; }
-  [[nodiscard]] bool AcceptTransferCallback() const noexcept
-  {
-    return hal_irq_active_ && !transfer_callback_barrier_;
-  }
-  void MarkTransferCallbackBarrier() noexcept { transfer_callback_barrier_ = true; }
-
-  uint32_t admission_primask_ = 0U;
-  uintptr_t desired_interrupt_state_ = 0U;
-  bool irq_domain_masked_ = false;
-  bool hal_irq_active_ = false;
-  bool transfer_callback_barrier_ = false;
-
-  friend void ::HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd);
-  friend void ::HAL_PCD_ResetCallback(PCD_HandleTypeDef* hpcd);
-  friend void ::HAL_PCD_SuspendCallback(PCD_HandleTypeDef* hpcd);
-  friend void ::HAL_PCD_ResumeCallback(PCD_HandleTypeDef* hpcd);
-  friend void ::HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum);
-  friend void ::HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum);
-  friend void ::HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum);
-  friend void ::HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum);
 };
 
 #if defined(USB_OTG_FS)

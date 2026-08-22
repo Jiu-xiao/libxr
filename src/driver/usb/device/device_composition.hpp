@@ -10,7 +10,6 @@
 #include "usb/core/desc_cfg.hpp"
 #include "usb/core/desc_str.hpp"
 #include "usb/core/ep_pool.hpp"
-#include "usb_execution_policy.hpp"
 
 namespace LibXR::USB
 {
@@ -39,7 +38,7 @@ class DeviceComposition
    * This flattens class/config/string/BOS metadata into the shape consumed by DeviceCore.
    */
   DeviceComposition(
-      EndpointPool& endpoint_pool, USBExecutionPolicy& execution_policy,
+      EndpointPool& endpoint_pool,
       const std::initializer_list<const DescriptorStrings::LanguagePack*>& lang_list,
       const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
           configs,
@@ -136,12 +135,6 @@ class DeviceComposition
    */
   [[nodiscard]] DeviceClass* FindClassByEndpointAddress(uint8_t addr) const;
 
-  /**
-   * @brief 在 device owner 下推进全部 class 的本地事件 / Advance every class's local
-   * events under the device owner
-   */
-  void ProcessPendingWork(bool in_isr) noexcept;
-
  private:
   /**
    * @brief 获取当前激活 configuration 的扁平 item 表
@@ -171,26 +164,19 @@ class DeviceComposition
    */
   void RegisterInterfaceStrings();
 
-  static void ProcessPendingWorkStatic(void* context, bool in_isr) noexcept;
-
-  /** @brief 建立新的 lifecycle generation / Establish a new lifecycle generation. */
-  void BeginGeneration(bool configured) noexcept;
-
   /**
    * @brief 运行时生成 interface string 描述符
    *        Generate one interface-string descriptor at runtime.
    */
   ErrorCode GenerateInterfaceString(uint8_t string_index, ConstRawData& data);
 
-  DeviceClass::RuntimeState
-      runtime_state_{};  ///< 每设备配置/代际/fatal 权威状态 / Per-device configuration,
-                         ///< generation, and fatal authority
+  bool configured_ =
+      false;  ///< 是否已进入非 0 配置态 / Whether a non-zero config is active
   bool ep_assigned_ = false;  ///< 端点是否已绑定 / Whether endpoints are assigned
 
-  EndpointPool& endpoint_pool_;           ///< 端点池引用 / Endpoint pool reference
-  USBExecutionPolicy& execution_policy_;  ///< 每设备唯一 owner / Per-device sole owner
-  uint8_t current_cfg_ = 0;               ///< 当前配置索引 / Current configuration index
-  uint8_t i_configuration_ = 0;           ///< 配置字符串索引 / Configuration string index
+  EndpointPool& endpoint_pool_;  ///< 端点池引用 / Endpoint pool reference
+  uint8_t current_cfg_ = 0;      ///< 当前配置索引 / Current configuration index
+  uint8_t i_configuration_ = 0;  ///< 配置字符串索引 / Configuration string index
   uint8_t bm_attributes_ = CFG_BUS_POWERED;  ///< 配置属性 / bmAttributes
 
   const bool composite_ = false;     ///< 是否为复合设备 / Whether composite device

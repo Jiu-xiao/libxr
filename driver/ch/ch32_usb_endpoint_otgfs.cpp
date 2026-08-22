@@ -296,25 +296,6 @@ void CH32EndpointOtgFs::Close()
   *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
   *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
 
-  const uint16_t interrupt_snapshot =
-      *reinterpret_cast<volatile uint16_t*>(reinterpret_cast<uintptr_t>(&USBFSD->INT_FG));
-  const uint8_t interrupt_flags = static_cast<uint8_t>(interrupt_snapshot);
-  const uint8_t interrupt_status = static_cast<uint8_t>(interrupt_snapshot >> 8U);
-  const uint8_t endpoint_number = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
-  if ((interrupt_flags & USBFS_UIF_TRANSFER) != 0U &&
-      (interrupt_status & USBFS_UIS_ENDP_MASK) == endpoint_number)
-  {
-    const uint8_t token = interrupt_status & USBFS_UIS_TOKEN_MASK;
-    const bool direction_matches =
-        (GetDirection() == Direction::IN && token == USBFS_UIS_TOKEN_IN) ||
-        (GetDirection() == Direction::OUT &&
-         (token == USBFS_UIS_TOKEN_OUT || token == USBFS_UIS_TOKEN_SETUP));
-    if (direction_matches)
-    {
-      USBFSD->INT_FG = USBFS_UIF_TRANSFER;
-    }
-  }
-
   SetState(State::DISABLED);
 }
 

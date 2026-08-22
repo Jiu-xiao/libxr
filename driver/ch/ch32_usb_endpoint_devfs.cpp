@@ -410,14 +410,11 @@ void CH32EndpointDevFs::Close()
   if (GetDirection() == Direction::IN)
   {
     set_tx_status(EP_I, USB_EP_TX_DIS);
-    clear_ctr_tx(EP_I);
   }
   else
   {
     set_rx_status(EP_I, USB_EP_RX_DIS);
-    clear_ctr_rx(EP_I);
   }
-  SetState(State::DISABLED);
 }
 
 ErrorCode CH32EndpointDevFs::Transfer(size_t size)

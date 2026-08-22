@@ -1,5 +1,4 @@
 #pragma once
-#include <atomic>
 #include <cstring>
 
 #include "dev_core.hpp"
@@ -167,11 +166,7 @@ class CDCBase : public DeviceClass
    * @return true DTR已设置
    * @return false DTR未设置
    */
-  bool IsDtrSet() const
-  {
-    return (control_line_state_.load(std::memory_order_acquire) & CDC_CONTROL_LINE_DTR) !=
-           0;
-  }
+  bool IsDtrSet() const { return (control_line_state_ & CDC_CONTROL_LINE_DTR) != 0; }
 
   /**
    * @brief 检查RTS状态
@@ -180,24 +175,49 @@ class CDCBase : public DeviceClass
    * @return true RTS已设置
    * @return false RTS未设置
    */
-  bool IsRtsSet() const
-  {
-    return (control_line_state_.load(std::memory_order_acquire) & CDC_CONTROL_LINE_RTS) !=
-           0;
-  }
+  bool IsRtsSet() const { return (control_line_state_ & CDC_CONTROL_LINE_RTS) != 0; }
 
   /**
    * @brief 发送串行状态通知
    *        Send serial state notification
    *
-   * 请求由所属 device owner 通过中断端点报告当前状态。重复请求会合并，通信端点忙时
-   * 保留到完成事件后重试。 / Ask the owning device owner to report current state through
-   * the interrupt endpoint. Repeated requests coalesce, and a busy endpoint is retried
-   * after its completion event.
+   * 通过中断端点向主机报告当前串行端口状态
+   * Reports current serial port state to host via interrupt endpoint
    */
   ErrorCode SendSerialState()
   {
-    PublishBaseWork(BASE_EVENT_SERIAL_STATE, false);
+    if (ep_comm_in_->GetState() == Endpoint::State::BUSY)
+    {
+      return ErrorCode::BUSY;
+    }
+    auto buffer = ep_comm_in_->GetBuffer();
+    ASSERT(buffer.size_ >= sizeof(SerialStateNotification));
+    SerialStateNotification* notification =
+        reinterpret_cast<SerialStateNotification*>(buffer.addr_);
+    notification->wIndex = itf_comm_in_num_;
+
+    // 设置串行状态位。
+    // Fill the serial-state bitmap.
+    if (IsDtrSet())
+    {
+      // DTR 有效时报告载波检测（DCD）和数据集就绪（DSR）。
+      // When DTR is asserted, report DCD and DSR as active.
+      notification->serialState = 0x03;  // DCD / DSR
+    }
+    else
+    {
+      notification->serialState = 0x00;  // 无状态
+    }
+
+    // 填充固定字段。
+    // Fill the fixed notification header fields.
+    notification->bmRequestType = 0xA1;  // 设备到主机，类，接口
+    notification->bNotification = static_cast<uint8_t>(CDCNotification::SERIAL_STATE);
+    notification->wValue = 0;
+    notification->wLength = 2;
+
+    ep_comm_in_->Transfer(sizeof(SerialStateNotification));
+
     return ErrorCode::OK;
   }
 
@@ -222,77 +242,6 @@ class CDCBase : public DeviceClass
   }
 
  protected:
-  static constexpr uint32_t BASE_EVENT_SERIAL_STATE = 1U << 0U;
-  static constexpr uint32_t BASE_EVENT_LIFECYCLE = 1U << 1U;
-
-  /** @brief 在 device owner 下推进 CDC 公共通知状态 / Advance common CDC
-   * notification state under the device owner. */
-  void ProcessPendingWork(bool in_isr) noexcept override
-  {
-    ProcessBaseWork(TakeBaseWorkSnapshot(), in_isr);
-  }
-
-  /** @brief 冻结本轮 CDC 公共事件 / Freeze common CDC events for this owner turn. */
-  uint32_t TakeBaseWorkSnapshot() noexcept
-  {
-    return base_pending_events_.exchange(0U, std::memory_order_acquire);
-  }
-
-  /** @brief 消费已冻结的 CDC 公共事件 / Consume a frozen common CDC event snapshot. */
-  void ProcessBaseWork(uint32_t events, bool in_isr) noexcept
-  {
-    if ((events & BASE_EVENT_LIFECYCLE) != 0U)
-    {
-      serial_state_dirty_ = false;
-      // A lifecycle event is the generation boundary. Any serial-state bit coalesced
-      // with it belongs to the previous binding and must not be replayed on the new one.
-      if (CanUseCdcEndpoints())
-      {
-        OnEndpointsBound(in_isr);
-      }
-      return;
-    }
-
-    if (!CanUseCdcEndpoints())
-    {
-      serial_state_dirty_ = false;
-      return;
-    }
-
-    if ((events & BASE_EVENT_SERIAL_STATE) != 0U)
-    {
-      serial_state_dirty_ = true;
-    }
-
-    if (!serial_state_dirty_)
-    {
-      return;
-    }
-
-    serial_state_dirty_ = false;
-    const ErrorCode ans = TrySendSerialState();
-    if (ans == ErrorCode::BUSY)
-    {
-      // A successful earlier transfer owns the completion carrier, which will wake the
-      // owner and retry this level-triggered notification.
-      serial_state_dirty_ = true;
-    }
-    else if (ans != ErrorCode::OK)
-    {
-      // A failed start has no completion carrier. Fail-stop instead of retaining dirty
-      // state that could otherwise be retried only by an unrelated future event.
-      FailStopCurrentGeneration();
-    }
-  }
-
-  /** @brief 合并 CDC 公共 work 并唤醒 device owner / Coalesce common CDC work and
-   * wake the device owner. */
-  void PublishBaseWork(uint32_t events, bool in_isr) noexcept
-  {
-    base_pending_events_.fetch_or(events, std::memory_order_release);
-    RequestPendingWork(in_isr);
-  }
-
   /**
    * @brief 初始化CDC设备
    *        Initialize CDC device
@@ -305,7 +254,7 @@ class CDCBase : public DeviceClass
    * @param in_isr        是否在中断上下文 / Whether in ISR context
    */
   virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
-                             bool in_isr) override
+                             bool) override
   {
     control_line_state_ = 0;
     // 获取并配置数据IN端点
@@ -428,11 +377,11 @@ class CDCBase : public DeviceClass
     // Install endpoint transfer-complete callbacks.
     ep_data_out_->SetOnTransferCompleteCallback(on_data_out_complete_cb_);
     ep_data_in_->SetOnTransferCompleteCallback(on_data_in_complete_cb_);
-    ep_comm_in_->SetOnTransferCompleteCallback(on_comm_in_complete_cb_);
 
     inited_ = true;
 
-    PublishBaseWork(BASE_EVENT_LIFECYCLE, in_isr);
+    // 启动OUT端点传输
+    ep_data_out_->Transfer(ep_data_out_->MaxPacketSize());
   }
 
   /**
@@ -442,13 +391,10 @@ class CDCBase : public DeviceClass
    * 释放所有占用的资源
    * Releases all allocated resources
    */
-  virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
+  virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
     control_line_state_ = 0;
-    ep_data_in_->SetOnTransferCompleteCallback({});
-    ep_data_out_->SetOnTransferCompleteCallback({});
-    ep_comm_in_->SetOnTransferCompleteCallback({});
     ep_data_in_->Close();
     ep_data_out_->Close();
     ep_comm_in_->Close();
@@ -461,7 +407,6 @@ class CDCBase : public DeviceClass
     ep_data_in_ = nullptr;
     ep_data_out_ = nullptr;
     ep_comm_in_ = nullptr;
-    PublishBaseWork(BASE_EVENT_LIFECYCLE, in_isr);
   }
 
   /**
@@ -470,7 +415,7 @@ class CDCBase : public DeviceClass
    */
   static void OnDataOutCompleteStatic(bool in_isr, CDCBase* self, ConstRawData& data)
   {
-    if (!self->CanUseCdcEndpoints())
+    if (!self->inited_)
     {
       return;
     }
@@ -483,57 +428,11 @@ class CDCBase : public DeviceClass
    */
   static void OnDataInCompleteStatic(bool in_isr, CDCBase* self, ConstRawData& data)
   {
-    if (!self->CanUseCdcEndpoints())
+    if (!self->inited_)
     {
       return;
     }
     self->OnDataInComplete(in_isr, data);
-  }
-
-  /** @brief 通信 IN 完成后请求 owner 重试挂起通知 / Request an owner turn to
-   * retry a pending notification after communication-IN completion. */
-  static void OnCommInCompleteStatic(bool in_isr, CDCBase* self, ConstRawData& data)
-  {
-    UNUSED(data);
-    if (!self->CanUseCdcEndpoints())
-    {
-      return;
-    }
-    self->RequestPendingWork(in_isr);
-  }
-
-  /** @brief data OUT 解除 HALT 后复用现有 OUT arm 路径 / Reuse the existing OUT-arm
-   * path after the data OUT endpoint halt is cleared. */
-  void OnEndpointHaltCleared(bool in_isr, uint8_t ep_addr) override
-  {
-    if (CanUseCdcEndpoints() && ep_data_out_ != nullptr &&
-        ep_data_out_->GetAddress() == ep_addr)
-    {
-      OnEndpointsBound(in_isr);
-    }
-  }
-
-  /**
-   * @brief 在 raw IRQ snapshot 退出后执行默认 OUT arm / Perform the default OUT arm
-   * after the raw IRQ snapshot
-   *
-   * CDCUart 用自己的背压感知 rearm 覆盖该动作；其他 CDC class 在 base lifecycle work
-   * 中执行默认 arm。 / CDCUart replaces this action with its backpressure-aware rearm;
-   * other CDC classes perform the default arm from base lifecycle work.
-   */
-  virtual void OnEndpointsBound(bool in_isr)
-  {
-    UNUSED(in_isr);
-    if (!CanUseCdcEndpoints() || ep_data_out_ == nullptr ||
-        ep_data_out_->GetState() != Endpoint::State::IDLE)
-    {
-      return;
-    }
-
-    if (ep_data_out_->Transfer(ep_data_out_->MaxPacketSize()) != ErrorCode::OK)
-    {
-      FailStopCurrentGeneration();
-    }
   }
 
   /**
@@ -601,6 +500,7 @@ class CDCBase : public DeviceClass
                            uint16_t wLength, uint16_t wIndex,
                            DeviceClass::ControlTransferResult& result) override
   {
+    UNUSED(in_isr);
     UNUSED(wIndex);
 
     switch (static_cast<ClassRequest>(bRequest))
@@ -630,9 +530,9 @@ class CDCBase : public DeviceClass
       case ClassRequest::SET_CONTROL_LINE_STATE:
         // 设置 DTR / RTS 状态。
         // Update the DTR / RTS control-line state.
-        control_line_state_.store(wValue, std::memory_order_release);
+        control_line_state_ = wValue;
         result.write_zlp = true;
-        PublishBaseWork(BASE_EVENT_SERIAL_STATE, in_isr);
+        SendSerialState();
         if (has_control_line_state_cb_)
         {
           on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
@@ -761,52 +661,9 @@ class CDCBase : public DeviceClass
   LIBXR_PACKED_END
 
  protected:
-  /** @brief 仅由 device owner 启动一次串行状态通知 / Start one serial-state
-   * notification from the device owner only. */
-  ErrorCode TrySendSerialState()
-  {
-    if (!CanUseCdcEndpoints() || ep_comm_in_ == nullptr ||
-        ep_comm_in_->GetState() == Endpoint::State::DISABLED)
-    {
-      return ErrorCode::STATE_ERR;
-    }
-    if (ep_comm_in_->GetState() == Endpoint::State::BUSY)
-    {
-      return ErrorCode::BUSY;
-    }
-
-    const RawData buffer = ep_comm_in_->GetBuffer();
-    if (buffer.addr_ == nullptr || buffer.size_ < sizeof(SerialStateNotification))
-    {
-      return ErrorCode::NO_BUFF;
-    }
-
-    auto* notification = reinterpret_cast<SerialStateNotification*>(buffer.addr_);
-    notification->bmRequestType = 0xA1;
-    notification->bNotification = static_cast<uint8_t>(CDCNotification::SERIAL_STATE);
-    notification->wValue = 0;
-    notification->wIndex = itf_comm_in_num_;
-    notification->wLength = 2;
-    notification->serialState = IsDtrSet() ? 0x03 : 0x00;
-    return ep_comm_in_->Transfer(sizeof(SerialStateNotification));
-  }
-
   CDCLineCoding& GetLineCoding() { return line_coding_; }
 
-  [[nodiscard]] bool CanUseCdcEndpoints() const noexcept
-  {
-    return inited_ && DeviceConfigured() && !DeviceGenerationFatal();
-  }
-
-  void FailStopCurrentGeneration() noexcept
-  {
-    if (DeviceConfigured() && !DeviceGenerationFatal())
-    {
-      MarkDeviceGenerationFatal();
-    }
-  }
-
-  bool Inited() const { return inited_; }
+  bool Inited() { return inited_; }
 
   Endpoint* GetDataInEndpoint() { return ep_data_in_; }
 
@@ -839,9 +696,6 @@ class CDCBase : public DeviceClass
   LibXR::Callback<LibXR::ConstRawData&> on_data_in_complete_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
 
-  LibXR::Callback<LibXR::ConstRawData&> on_comm_in_complete_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnCommInCompleteStatic, this);
-
   // 用户回调。
   // User callbacks.
   LibXR::Callback<bool, bool>
@@ -863,9 +717,7 @@ class CDCBase : public DeviceClass
   // CDC 参数。
   // CDC parameters.
   CDCLineCoding line_coding_ = {115200, 0, 0, 8};  ///< 当前线路编码 / Current line coding
-  std::atomic<uint16_t> control_line_state_{0};    ///< 控制线路状态 / Control line state
-  std::atomic<uint32_t> base_pending_events_{0U};  ///< 公共 level events / Common events
-  bool serial_state_dirty_ = false;  ///< owner 内待发通知 / Pending under owner
+  uint16_t control_line_state_ = 0;                ///< 控制线路状态 / Control line state
 };
 
 }  // namespace LibXR::USB

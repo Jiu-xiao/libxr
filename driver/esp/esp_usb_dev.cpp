@@ -9,6 +9,7 @@
 #include "esp32s3/rom/usb/cdc_acm.h"
 #include "esp32s3/rom/usb/usb_dc.h"
 #include "esp32s3/rom/usb/usb_device.h"
+#include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_private/usb_phy.h"
 #include "esp_usb.hpp"
@@ -17,33 +18,6 @@
 
 namespace LibXR
 {
-
-namespace
-{
-
-bool BuffersAreNonemptyAndDisjoint(RawData first, RawData second) noexcept
-{
-  if (first.addr_ == nullptr || second.addr_ == nullptr || first.size_ == 0U ||
-      second.size_ == 0U)
-  {
-    return false;
-  }
-
-  const auto first_addr = reinterpret_cast<uintptr_t>(first.addr_);
-  const auto second_addr = reinterpret_cast<uintptr_t>(second.addr_);
-  if (first_addr <= second_addr)
-  {
-    return first.size_ <= second_addr - first_addr;
-  }
-  return second.size_ <= first_addr - second_addr;
-}
-
-bool BufferIsNonempty(RawData buffer) noexcept
-{
-  return buffer.addr_ != nullptr && buffer.size_ > 0U;
-}
-
-}  // namespace
 
 // 构造时先建立 endpoint 对象映射，再交给上层 USB core 统一驱动 / Build the
 // endpoint-object map first, then hand it to the shared USB core.
@@ -59,19 +33,14 @@ ESP32USBDevice::ESP32USBDevice(
       USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
                       pid, bcd, lang_list, configs, uid)
 {
-  SetInterruptDomain({this, LockInterruptDomain, UnlockInterruptDomain,
-                      MaskInterruptDomain, RestoreInterruptDomain});
   ASSERT(ep_cfgs.size() > 0U && ep_cfgs.size() <= ENDPOINT_COUNT);
 
   auto cfg_it = ep_cfgs.begin();
 
-  ASSERT(cfg_it->direction_hint == EPConfig::DirectionHint::BothDirections);
-  ASSERT(BuffersAreNonemptyAndDisjoint(cfg_it->in_buffer, cfg_it->out_buffer));
-
   auto* ep0_out = new ESP32USBEndpoint(*this, USB::Endpoint::EPNumber::EP0,
-                                       USB::Endpoint::Direction::OUT, cfg_it->out_buffer);
+                                       USB::Endpoint::Direction::OUT, cfg_it->buffer);
   auto* ep0_in = new ESP32USBEndpoint(*this, USB::Endpoint::EPNumber::EP0,
-                                      USB::Endpoint::Direction::IN, cfg_it->in_buffer);
+                                      USB::Endpoint::Direction::IN, cfg_it->buffer);
 
   SetEndpoint0(ep0_in, ep0_out);
   endpoint_map_.in[0] = ep0_in;
@@ -85,11 +54,10 @@ ESP32USBDevice::ESP32USBDevice(
 
     if (cfg_it->direction_hint == EPConfig::DirectionHint::BothDirections)
     {
-      ASSERT(BuffersAreNonemptyAndDisjoint(cfg_it->in_buffer, cfg_it->out_buffer));
       auto* ep_out = new ESP32USBEndpoint(*this, ep_num, USB::Endpoint::Direction::OUT,
-                                          cfg_it->out_buffer);
+                                          cfg_it->buffer);
       auto* ep_in = new ESP32USBEndpoint(*this, ep_num, USB::Endpoint::Direction::IN,
-                                         cfg_it->in_buffer);
+                                         cfg_it->buffer);
       endpoint_map_.out[USB::Endpoint::EPNumberToInt8(ep_num)] = ep_out;
       endpoint_map_.in[USB::Endpoint::EPNumberToInt8(ep_num)] = ep_in;
       Put(ep_out);
@@ -100,10 +68,7 @@ ESP32USBDevice::ESP32USBDevice(
       const auto direction = (cfg_it->direction_hint == EPConfig::DirectionHint::InOnly)
                                  ? USB::Endpoint::Direction::IN
                                  : USB::Endpoint::Direction::OUT;
-      const auto buffer = direction == USB::Endpoint::Direction::IN ? cfg_it->in_buffer
-                                                                    : cfg_it->out_buffer;
-      ASSERT(BufferIsNonempty(buffer));
-      auto* ep = new ESP32USBEndpoint(*this, ep_num, direction, buffer);
+      auto* ep = new ESP32USBEndpoint(*this, ep_num, direction, cfg_it->buffer);
       if (direction == USB::Endpoint::Direction::IN)
       {
         endpoint_map_.in[USB::Endpoint::EPNumberToInt8(ep_num)] = ep;
@@ -139,61 +104,6 @@ ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context c
   return ErrorCode::OK;
 }
 
-void ESP32USBDevice::LockInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<ESP32USBDevice*>(context);
-  portENTER_CRITICAL_SAFE(&self->irq_domain_lock_);
-}
-
-void ESP32USBDevice::UnlockInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<ESP32USBDevice*>(context);
-  portEXIT_CRITICAL_SAFE(&self->irq_domain_lock_);
-}
-
-uintptr_t ESP32USBDevice::MaskInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<ESP32USBDevice*>(context);
-
-  if (self->runtime_.phy_ready)
-  {
-    auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
-    self->runtime_.irq_desired_enabled = dev->gahbcfg_reg.glbllntrmsk != 0U;
-  }
-
-  self->runtime_.irq_admission_masked = true;
-  self->ApplyIrqDomainStateLocked();
-  return self->runtime_.irq_desired_enabled ? 1U : 0U;
-}
-
-void ESP32USBDevice::RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept
-{
-  auto* self = static_cast<ESP32USBDevice*>(context);
-  UNUSED(saved_state);
-  self->runtime_.irq_admission_masked = false;
-  self->ApplyIrqDomainStateLocked();
-}
-
-void ESP32USBDevice::SetIrqDesiredEnabled(bool enabled) noexcept
-{
-  portENTER_CRITICAL_SAFE(&irq_domain_lock_);
-  runtime_.irq_desired_enabled = enabled;
-  ApplyIrqDomainStateLocked();
-  portEXIT_CRITICAL_SAFE(&irq_domain_lock_);
-}
-
-void ESP32USBDevice::ApplyIrqDomainStateLocked() noexcept
-{
-  const bool effective_enabled =
-      runtime_.irq_desired_enabled && !runtime_.irq_admission_masked;
-
-  if (runtime_.phy_ready)
-  {
-    auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
-    dev->gahbcfg_reg.glbllntrmsk = effective_enabled ? 1U : 0U;
-  }
-}
-
 void ESP32USBDevice::Start(bool)
 {
   // Start 是幂等的；PHY/IRQ/ROM 清理只做一次，core 寄存器则按当前状态重建 / Start is
@@ -217,27 +127,35 @@ void ESP32USBDevice::Start(bool)
 
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->dctl_reg.sftdiscon = 0;
+  dev->gahbcfg_reg.glbllntrmsk = 1;
+  if (runtime_.intr_handle != nullptr)
+  {
+    esp_intr_enable(runtime_.intr_handle);
+  }
   runtime_.started = true;
-  SetIrqDesiredEnabled(true);
 }
 
 void ESP32USBDevice::Stop(bool)
 {
   // Stop 只关中断和软断开，不回收一次性 runtime 资源 / Stop only masks interrupts and
   // soft-disconnects; it does not release one-time runtime resources.
-  SetIrqDesiredEnabled(false);
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  dev->gahbcfg_reg.glbllntrmsk = 0;
   dev->gintmsk_reg.val = 0;
+  if (runtime_.intr_handle != nullptr)
+  {
+    esp_intr_disable(runtime_.intr_handle);
+  }
   dev->dctl_reg.sftdiscon = 1;
   runtime_.started = false;
 }
 
-void ESP32USBDevice::IsrEntry(void* arg)
+void IRAM_ATTR ESP32USBDevice::IsrEntry(void* arg)
 {
   auto* self = static_cast<ESP32USBDevice*>(arg);
   if (self != nullptr)
   {
-    (void)self->RunIrq([self]() noexcept { self->HandleInterrupt(); });
+    self->HandleInterrupt();
   }
 }
 
@@ -279,14 +197,8 @@ bool ESP32USBDevice::EnsureInterruptReady()
     return true;
   }
 
-  // device owner 会进入 flash 中的通用 CDC/device-core；注册为非 IRAM 中断，让 IDF 在
-  // flash cache 不可用时屏蔽 CPU IRQ。DWC2 未确认状态保持有效，并在 cache 恢复后重触发。
-  // / The owner reaches shared CDC/device-core code in flash, so register a non-IRAM IRQ.
-  // IDF masks it while flash cache is unavailable; unacknowledged DWC2 status retriggers.
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
-  dev->gahbcfg_reg.glbllntrmsk = 0U;
-  if (esp_intr_alloc(ETS_USB_INTR_SOURCE, 0, IsrEntry, this, &runtime_.intr_handle) !=
-      ESP_OK)
+  if (esp_intr_alloc(ETS_USB_INTR_SOURCE, ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_INTRDISABLED,
+                     IsrEntry, this, &runtime_.intr_handle) != ESP_OK)
   {
     runtime_.intr_handle = nullptr;
     return false;
@@ -487,7 +399,7 @@ void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
   control_.setup_direction_out = (setup != nullptr) && ((setup[0] & 0x80U) == 0U);
 }
 
-void ESP32USBDevice::HandleInterrupt()
+void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 {
   // 统一从 gintsts & gintmsk 取当前批次待处理中断，并在有限 guard 内排空 / Pull one
   // interrupt batch from gintsts & gintmsk and drain it under a bounded guard.
@@ -502,28 +414,10 @@ void ESP32USBDevice::HandleInterrupt()
       break;
     }
 
-    bool endpoint_barrier = false;
-    const uint32_t endpoint_epoch = EndpointEpoch();
-
     if (pending.usbrst)
     {
       dev->gintsts_reg.usbrst = 1;
       HandleBusReset(true);
-      endpoint_barrier = true;
-    }
-
-    if (pending.usbsusp)
-    {
-      // DWC2 suspend preserves the configured endpoints and their ACTIVE transfers.
-      // Therefore a real endpoint completion captured in this same status batch remains
-      // valid; only reset tears endpoints down and raises the completion barrier.
-      dev->gintsts_reg.usbsusp = 1;
-    }
-
-    if (pending.wkupint)
-    {
-      // Resume continues the preserved endpoint lifecycle; no rebind is required.
-      dev->gintsts_reg.wkupint = 1;
     }
 
     if (pending.enumdone)
@@ -537,7 +431,17 @@ void ESP32USBDevice::HandleInterrupt()
       }
     }
 
-    if (!endpoint_barrier && !DmaEnabled() && pending.rxflvl)
+    if (pending.usbsusp)
+    {
+      dev->gintsts_reg.usbsusp = 1;
+    }
+
+    if (pending.wkupint)
+    {
+      dev->gintsts_reg.wkupint = 1;
+    }
+
+    if (!DmaEnabled() && pending.rxflvl)
     {
       dev->gintmsk_reg.rxflvlmsk = 0;
       while (dev->gintsts_reg.rxflvl)
@@ -547,13 +451,12 @@ void ESP32USBDevice::HandleInterrupt()
       dev->gintmsk_reg.rxflvlmsk = 1;
     }
 
-    if (!endpoint_barrier && pending.oepint)
+    if (pending.oepint)
     {
       HandleEndpointInterrupt(true, false);
-      endpoint_barrier = EndpointEpoch() != endpoint_epoch;
     }
 
-    if (!endpoint_barrier && pending.iepint && EndpointEpoch() == endpoint_epoch)
+    if (pending.iepint)
     {
       HandleEndpointInterrupt(true, true);
     }
@@ -563,47 +466,6 @@ void ESP32USBDevice::HandleInterrupt()
       const uint32_t otg_status = dev->gotgint_reg.val;
       dev->gotgint_reg.val = otg_status;
     }
-  }
-}
-
-void ESP32USBDevice::ClearEndpointInterruptLatch(uint8_t ep_num, bool in_dir) noexcept
-{
-  ASSERT(ep_num < ENDPOINT_COUNT);
-  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
-
-  if (in_dir)
-  {
-    if (ep_num == 0U)
-    {
-      const uint32_t pending = dev->diepint0_reg.val;
-      dev->diepint0_reg.val = pending;
-    }
-    else
-    {
-      const uint32_t pending = dev->in_eps[ep_num - 1U].diepint_reg.val;
-      dev->in_eps[ep_num - 1U].diepint_reg.val = pending;
-    }
-    return;
-  }
-
-  if (ep_num == 0U)
-  {
-    const uint32_t pending = dev->doepint0_reg.val;
-    dev->doepint0_reg.val = pending;
-  }
-  else
-  {
-    const uint32_t pending = dev->out_eps[ep_num - 1U].doepint_reg.val;
-    dev->out_eps[ep_num - 1U].doepint_reg.val = pending;
-  }
-}
-
-void ESP32USBDevice::ClearAllEndpointInterruptLatches() noexcept
-{
-  for (uint8_t ep_num = 0U; ep_num < ENDPOINT_COUNT; ++ep_num)
-  {
-    ClearEndpointInterruptLatch(ep_num, true);
-    ClearEndpointInterruptLatch(ep_num, false);
   }
 }
 
@@ -632,12 +494,14 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
     {
       if (dev->diepctl0_reg.epena)
       {
-        ESPUSBDetail::DisableInEndpointAndWait(dev);
+        dev->diepctl0_reg.snak = 1;
+        dev->diepctl0_reg.epdis = 1;
       }
     }
     else if (dev->in_eps[i - 1U].diepctl_reg.epena)
     {
-      ESPUSBDetail::DisableInEndpointAndWait(dev, i);
+      dev->in_eps[i - 1U].diepctl_reg.snak = 1;
+      dev->in_eps[i - 1U].diepctl_reg.epdis = 1;
     }
   }
 
@@ -658,8 +522,6 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
   dev->doepmsk_reg.nyetmsk = 1;
   dev->diepmsk_reg.xfercomplmsk = 1;
   dev->diepmsk_reg.timeoutmsk = 1;
-
-  ClearAllEndpointInterruptLatches();
 
   FlushFifos();
   ResetDeviceState();
@@ -684,15 +546,9 @@ void ESP32USBDevice::HandleEndpointInterrupt(bool in_isr, bool in_dir)
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint32_t daint = dev->daint_reg.val & dev->daintmsk_reg.val;
   const uint32_t bits = in_dir ? (daint & 0xFFFFU) : ((daint >> 16U) & 0xFFFFU);
-  const uint32_t endpoint_epoch = EndpointEpoch();
 
   for (uint8_t ep_num = 0; ep_num < ENDPOINT_COUNT; ++ep_num)
   {
-    if (EndpointEpoch() != endpoint_epoch)
-    {
-      break;
-    }
-
     if ((bits & (1UL << ep_num)) == 0U)
     {
       continue;

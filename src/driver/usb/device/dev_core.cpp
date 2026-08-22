@@ -16,7 +16,7 @@ DeviceCore::DeviceCore(
     const std::initializer_list<const std::initializer_list<ConfigDescriptorItem*>>&
         configs,
     ConstRawData uid)
-    : composition_(ep_pool, execution_policy_, lang_list, configs, uid),
+    : composition_(ep_pool, lang_list, configs, uid),
       device_desc_(spec, packet_size, vid, pid, bcd, composition_.GetConfigNum()),
       endpoint_({ep_pool, nullptr, nullptr, {}, {}}),
       state_({false,
@@ -466,7 +466,7 @@ LibXR::ErrorCode DeviceCore::ProcessStandardRequest(bool in_isr,
     case StandardRequest::CLEAR_FEATURE:
       // 解除某个特性（如端点 HALT）。
       // Clear a feature (e.g., endpoint HALT).
-      ans = ClearFeature(in_isr, setup, recipient);
+      ans = ClearFeature(setup, recipient);
       break;
 
     case StandardRequest::SET_FEATURE:
@@ -620,8 +620,7 @@ LibXR::ErrorCode DeviceCore::RespondWithStatus(const SetupPacket* setup,
   return LibXR::ErrorCode::OK;
 }
 
-LibXR::ErrorCode DeviceCore::ClearFeature(bool in_isr, const SetupPacket* setup,
-                                          Recipient recipient)
+LibXR::ErrorCode DeviceCore::ClearFeature(const SetupPacket* setup, Recipient recipient)
 {
   switch (recipient)
   {
@@ -641,11 +640,6 @@ LibXR::ErrorCode DeviceCore::ClearFeature(bool in_isr, const SetupPacket* setup,
           if (ans != LibXR::ErrorCode::OK)
           {
             return ans;
-          }
-          DeviceClass* owner = composition_.FindClassByEndpointAddress(ep_addr);
-          if (owner != nullptr)
-          {
-            owner->OnEndpointHaltCleared(in_isr, ep_addr);
           }
           WriteZLP();  // 状态阶段：回复 ZLP / Status stage: send ZLP
         }

@@ -1,6 +1,5 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 // ch32_usb_otghs.cpp  (OTG HS)
-#include "ch32_interrupt_guard.h"
 #include "ch32_usb_dev.hpp"
 #include "ch32_usb_endpoint.hpp"
 #include "ch32_usb_rcc.hpp"
@@ -34,8 +33,8 @@ static void ResetEp0State(OtgHsEndpointMap& map)
   in0->tog0_ = true;
   in0->tog1_ = false;
 
-  // After reset recovery, EP0 must be ready for the next setup packet.
-  // reset 恢复后，EP0 必须回到等待下一包 setup 的状态。
+  // After reset/suspend recovery, EP0 must be ready for the next setup packet.
+  // reset/suspend 恢复后，EP0 必须回到等待下一包 setup 的状态。
   USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;
   USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_ACK;
 }
@@ -209,45 +208,6 @@ static void ClearPendingOtgHsInterrupts()
 
 }  // namespace
 
-void CH32USBOtgHS::LockInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<CH32USBOtgHS*>(context);
-  ASSERT(self != nullptr);
-  self->irq_lock_state_ = libxr_ch32_interrupt_save_and_disable();
-}
-
-void CH32USBOtgHS::UnlockInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<CH32USBOtgHS*>(context);
-  ASSERT(self != nullptr);
-  libxr_ch32_interrupt_restore(self->irq_lock_state_);
-}
-
-uintptr_t CH32USBOtgHS::MaskInterruptDomain(void* context) noexcept
-{
-  auto* self = static_cast<CH32USBOtgHS*>(context);
-  ASSERT(self != nullptr);
-  ASSERT(!self->irq_domain_masked_);
-  self->irq_desired_mask_ = USBHSD->INT_EN;
-  self->irq_domain_masked_ = true;
-  USBHSD->INT_EN = 0U;
-  const volatile uint8_t readback = USBHSD->INT_EN;
-  UNUSED(readback);
-  return self->irq_desired_mask_;
-}
-
-void CH32USBOtgHS::RestoreInterruptDomain(void* context, uintptr_t saved_state) noexcept
-{
-  auto* self = static_cast<CH32USBOtgHS*>(context);
-  ASSERT(self != nullptr);
-  ASSERT(self->irq_domain_masked_);
-  UNUSED(saved_state);
-  USBHSD->INT_EN = self->irq_desired_mask_;
-  const volatile uint8_t readback = USBHSD->INT_EN;
-  UNUSED(readback);
-  self->irq_domain_masked_ = false;
-}
-
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandler(void)
 {
@@ -258,85 +218,78 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
     return;
   }
 
-  (void)usb->RunIrq(
-      [usb]() noexcept
-      {
-        auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
+  auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 
-        // Handle order matters: recover bus-level events first, then settle EP0 setup
-        // arbitration, and finally dispatch ordinary token completions.
-        // 处理顺序很重要：先恢复总线级事件，再收束 EP0 setup 仲裁，
-        // 最后分发普通 token 完成事件。
-        while (true)
-        {
-          const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
-              reinterpret_cast<uintptr_t>(&USBHSD->INT_FG));
+  // Handle order matters: recover bus-level events first, then settle EP0 setup
+  // arbitration, and finally dispatch ordinary token completions.
+  // 处理顺序很重要：先恢复总线级事件，再收束 EP0 setup 仲裁，
+  // 最后分发普通 token 完成事件。
+  while (true)
+  {
+    const uint16_t INTFGST = *reinterpret_cast<volatile uint16_t*>(
+        reinterpret_cast<uintptr_t>(&USBHSD->INT_FG));
 
-          const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
-          const uint8_t INTST = static_cast<uint8_t>((INTFGST >> 8) & 0x00FFu);
+    const uint8_t INTFLAG = static_cast<uint8_t>(INTFGST & 0x00FFu);
+    const uint8_t INTST = static_cast<uint8_t>((INTFGST >> 8) & 0x00FFu);
 
-          if (INTFLAG == 0)
-          {
-            break;
-          }
+    if (INTFLAG == 0)
+    {
+      break;
+    }
 
-          uint8_t clear_mask = 0;
-          bool discard_transfer = false;
+    uint8_t clear_mask = 0;
 
-          // 1) Bus-level recovery: reset must rebuild EP0 first.
-          // 1) 总线级恢复：reset 必须优先重建 EP0。
-          if (INTFLAG & USBHS_UIF_BUS_RST)
-          {
-            USBHSD->DEV_AD = 0;
-            usb->Deinit(true);
-            usb->Init(true);
-            ResetEp0State(map);
-            clear_mask |= USBHS_UIF_BUS_RST;
-            discard_transfer = true;
-          }
+    // 1) Bus-level recovery: reset/suspend must rebuild EP0 first.
+    // 1) 总线级恢复：reset/suspend 必须优先重建 EP0。
+    if (INTFLAG & USBHS_UIF_BUS_RST)
+    {
+      USBHSD->DEV_AD = 0;
+      usb->Deinit(true);
+      usb->Init(true);
+      ResetEp0State(map);
+      clear_mask |= USBHS_UIF_BUS_RST;
+    }
 
-          if (INTFLAG & USBHS_UIF_SUSPEND)
-          {
-            // Suspend/resume 保留 configuration、端点状态和在途传输。
-            // Suspend/resume preserves the configuration, endpoint state, and
-            // in-flight transfers.
-            clear_mask |= USBHS_UIF_SUSPEND;
-          }
+    if (INTFLAG & USBHS_UIF_SUSPEND)
+    {
+      usb->Deinit(true);
+      usb->Init(true);
+      ResetEp0State(map);
+      clear_mask |= USBHS_UIF_SUSPEND;
+    }
 
-          // 2) Setup arbitration: consume the previous EP0 IN completion before the
-          // new setup resets the control-transfer state.
-          // 2) Setup 仲裁：在新 setup 重置控制传输状态之前，
-          // 先消费上一笔 EP0 IN 完成。
-          if (!discard_transfer && CompleteEp0InBeforeSetup(map, INTFLAG, INTST))
-          {
-            clear_mask |= USBHS_UIF_TRANSFER;
-          }
+    // 2) Setup arbitration: consume the previous EP0 IN completion before the
+    // new setup resets the control-transfer state.
+    // 2) Setup 仲裁：在新 setup 重置控制传输状态之前，
+    // 先消费上一笔 EP0 IN 完成。
+    if (CompleteEp0InBeforeSetup(map, INTFLAG, INTST))
+    {
+      clear_mask |= USBHS_UIF_TRANSFER;
+    }
 
-          if ((INTFLAG & USBHS_UIF_SETUP_ACT) && !discard_transfer)
-          {
-            PrepareEp0ForSetup(map);
+    if (INTFLAG & USBHS_UIF_SETUP_ACT)
+    {
+      PrepareEp0ForSetup(map);
 
-            auto* out0 = map[0][OUT_IDX];
-            ASSERT(out0 != nullptr);
-            const auto* setup =
-                reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_);
-            usb->OnSetupPacket(true, setup);
-            clear_mask |= USBHS_UIF_SETUP_ACT;
-          }
+      auto* out0 = map[0][OUT_IDX];
+      ASSERT(out0 != nullptr);
+      const auto* setup =
+          reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_);
+      usb->OnSetupPacket(true, setup);
+      clear_mask |= USBHS_UIF_SETUP_ACT;
+    }
 
-          // 3) Ordinary token completion: non-setup transfers arrive here.
-          // 3) 普通 token 完成：非 setup 传输统一在这里分发。
-          if (!discard_transfer && (INTFLAG & USBHS_UIF_TRANSFER) &&
-              ((clear_mask & USBHS_UIF_TRANSFER) == 0u))
-          {
-            HandleTransferToken(map, INTST);
-            clear_mask |= USBHS_UIF_TRANSFER;
-          }
+    // 3) Ordinary token completion: non-setup transfers arrive here.
+    // 3) 普通 token 完成：非 setup 传输统一在这里分发。
+    if ((INTFLAG & USBHS_UIF_TRANSFER) && ((clear_mask & USBHS_UIF_TRANSFER) == 0u))
+    {
+      HandleTransferToken(map, INTST);
+      clear_mask |= USBHS_UIF_TRANSFER;
+    }
 
-          clear_mask |= static_cast<uint8_t>(INTFLAG & ~(clear_mask));
-          USBHSD->INT_FG = clear_mask;
-        }
-      });
+    clear_mask |= static_cast<uint8_t>(INTFLAG & ~(clear_mask));
+    USBHSD->INT_FG = clear_mask;
+  }
 }
 
 CH32USBOtgHS::CH32USBOtgHS(
@@ -351,8 +304,6 @@ CH32USBOtgHS::CH32USBOtgHS(
                       USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd,
                       LANG_LIST, CONFIGS, uid)
 {
-  SetInterruptDomain({this, LockInterruptDomain, UnlockInterruptDomain,
-                      MaskInterruptDomain, RestoreInterruptDomain});
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -417,9 +368,8 @@ void CH32USBOtgHS::Start(bool)
   USBHSD->CONTROL &= ~USBHS_UC_RESET_SIE;
   USBHSD->HOST_CTRL = USBHS_UH_PHY_SUSPENDM;
   USBHSD->CONTROL = USBHS_UC_DMA_EN | USBHS_UC_INT_BUSY | USBHS_UC_SPEED_HIGH;
-  irq_desired_mask_ =
+  USBHSD->INT_EN =
       USBHS_UIE_SETUP_ACT | USBHS_UIE_TRANSFER | USBHS_UIE_DETECT | USBHS_UIE_SUSPEND;
-  USBHSD->INT_EN = irq_domain_masked_ ? 0U : irq_desired_mask_;
   USBHSD->CONTROL |= USBHS_UC_DEV_PU_EN;
   NVIC_EnableIRQ(USBHS_IRQn);
   self_ = this;
@@ -427,8 +377,6 @@ void CH32USBOtgHS::Start(bool)
 
 void CH32USBOtgHS::Stop(bool)
 {
-  irq_desired_mask_ = 0U;
-  USBHSD->INT_EN = 0U;
   USBHSD->CONTROL = USBHS_UC_CLR_ALL | USBHS_UC_RESET_SIE;
   USBHSD->CONTROL = 0;
   NVIC_DisableIRQ(USBHS_IRQn);
