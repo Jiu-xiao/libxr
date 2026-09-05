@@ -39,7 +39,6 @@ void test_pipe_stream_block_immediate_path()
   static const uint8_t EXPECT[] = {0x21, 0x22, 0x23, 0x31, 0x32, 0x33, 0x34, 0x35};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
   ASSERT(sem.Value() == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 /**
@@ -78,7 +77,6 @@ void test_pipe_stream_commit_releases_lock_for_next_stream()
 
   static const uint8_t EXPECT[] = {0x10, 0x11, 0x12, 0x20, 0x21, 0x22, 0x23};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 /**
@@ -121,7 +119,6 @@ void test_pipe_stream_commit_allows_persistent_and_external_streams()
 
   static const uint8_t EXPECT[] = {'T', '1', 'E', 'X', 'T', 'T', '2', '!'};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 /**

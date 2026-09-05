@@ -73,7 +73,8 @@ class Semaphore
   /**
    * @brief  等待（减少）信号量
    *         Waits (decrements) the semaphore
-   * @param  timeout 超时时间（默认无限等待） Timeout period (default is infinite wait)
+   * @param  timeout 最大等待区间（默认 `UINT32_MAX`） Maximum wait interval (default
+   * `UINT32_MAX`)
    * @return 操作结果 ErrorCode indicating success or timeout
    *
    * @details
@@ -84,6 +85,14 @@ class Semaphore
    * a resource is being used by the calling thread.
    * If the semaphore count is 0, the calling thread is blocked until the
    * semaphore becomes available or the timeout expires.
+   *
+   * @note `UINT32_MAX` requests the backend's maximum wait interval. It is not a
+   *       portable guarantee that one call can never return `TIMEOUT`; callers that
+   *       own a state-proven eventual token must inspect the result and retry only
+   *       `TIMEOUT`.
+   * @note `UINT32_MAX` 请求 backend 支持的最大等待区间，不保证单次调用绝不会返回
+   *       `TIMEOUT`。若调用方的状态机已经证明 token 最终必达，应检查结果并只对
+   *       `TIMEOUT` 重试。
    */
   ErrorCode Wait(uint32_t timeout = UINT32_MAX);
 

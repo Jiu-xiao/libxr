@@ -86,7 +86,8 @@ static void TaskFun(Terminal* term)
 
   while (true)
   {
-    switch (term->read_status_)
+    const auto status = term->read_status_.load(std::memory_order_acquire);
+    switch (status)
     {
       case ReadOperation::OperationPollingStatus::READY:
       {

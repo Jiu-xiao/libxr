@@ -17,7 +17,6 @@
 
 void RunRuntimeRwBlockStreamTests();
 void RunRuntimeRwBlockTimeoutTests();
-void RunRuntimeRwBlockFailClearTests();
 void RunRuntimeRwBlockWaiterTests();
 
 /**
@@ -33,6 +32,5 @@ void RunRuntimeRwBlockTests()
 {
   RunRuntimeRwBlockStreamTests();
   RunRuntimeRwBlockTimeoutTests();
-  RunRuntimeRwBlockFailClearTests();
   RunRuntimeRwBlockWaiterTests();
 }

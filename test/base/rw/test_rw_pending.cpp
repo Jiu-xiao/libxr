@@ -53,9 +53,12 @@ void test_rw_edge_cases()
   auto second_result = w(ConstRawData{tx2, sizeof(tx2)}, op2);
   ASSERT(second_result == ErrorCode::FULL);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    static uint8_t sink[4];
+    queue.PopAll(sink);
+  }
 }
 
 /**

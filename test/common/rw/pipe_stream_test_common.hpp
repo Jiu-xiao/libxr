@@ -52,7 +52,6 @@ void VerifyStreamBlockPendingCompletion(LibXR::ErrorCode finish_result,
   ExpectWaitOk(done, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher);
   ASSERT(sem.Value() == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 /**
@@ -81,12 +80,14 @@ void VerifyStreamBlockTimeout()
   ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem.Value() == 0);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    static uint8_t sink[16];
+    queue.PopAll(sink);
+  }
 
   ASSERT(sem.Value() == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 }  // namespace

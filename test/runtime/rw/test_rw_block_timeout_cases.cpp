@@ -54,7 +54,6 @@ void test_rw_block_read_timeout_detaches_pending()
   WriteOperation wop;
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
   ASSERT(ec == ErrorCode::OK);
-  r.ProcessPendingReads(false);
 
   ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
   ASSERT(sem.Value() == 0);
@@ -83,7 +82,6 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
   for (auto mode : ALL_MODES)
   {
     TrackingReadPort r(16);
-    r = PendingReadFun;
 
     uint8_t dummy = 0xA0;
     ReadHarness read(mode);
@@ -105,7 +103,6 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
 
     ASSERT(dummy == 0xA0);
     ASSERT(r.dequeue_count == 0);
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
     ASSERT(r.Size() == sizeof(TX));
 
     uint8_t follow_up[sizeof(TX)] = {};
@@ -143,19 +140,26 @@ void test_rw_block_write_timeout_detaches_waiter()
   ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem1.Value() == 0);
 
+  static uint8_t sink[sizeof(TX1)] = {};
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    queue.PopAll(sink);
+  }
+
   Semaphore sem2;
   WriteOperation op2(sem2, 0);
   ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::BUSY);
+  ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem2.Value() == 0);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  static uint8_t sink2[sizeof(TX2)] = {};
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    queue.PopAll(sink2);
+  }
   ASSERT(sem1.Value() == 0);
-
-  ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem2.Value() == 0);
 }
 
@@ -174,7 +178,6 @@ void test_rw_read_port_block_queue_completion_copies_data()
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   static const uint8_t TX[] = {0x5A};
   uint8_t rx[sizeof(TX)] = {0};

@@ -43,7 +43,6 @@ void TestStreamBackedPrintFailureKeepsPrefix()
     Fail("stream-backed print failure commit mismatch");
   }
 
-  read.ProcessPendingReads(false);
   if (std::memcmp(rx, expected, sizeof(rx)) != 0)
   {
     Fail("stream-backed print failure prefix mismatch");
