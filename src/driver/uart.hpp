@@ -71,6 +71,7 @@ class UART
   /**
    * @brief 设置 UART 配置 / Sets the UART configuration
    * @param config UART 配置信息 / UART configuration settings
+   * @param in_isr Whether the request is issued from callback/ISR context
    * @return 返回操作状态，成功时返回 `ErrorCode::OK`，否则返回相应错误码 / Returns the
    * operation status, `ErrorCode::OK` if successful, otherwise an error code
    *
@@ -78,7 +79,7 @@ class UART
    * This is a pure virtual function. Subclasses must implement the specific UART
    * configuration logic.
    */
-  virtual ErrorCode SetConfig(Configuration config) = 0;
+  virtual ErrorCode SetConfig(Configuration config, bool in_isr = false) = 0;
 
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
                                         WriteOperation, std::decay_t<OperationType>>>>
