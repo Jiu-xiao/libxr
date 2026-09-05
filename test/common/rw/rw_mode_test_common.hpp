@@ -1,16 +1,6 @@
 /**
  * @file rw_mode_test_common.hpp
- * @brief `rw` / `pipe` 模式与等待器测试 helper。 Shared mode and waiter helpers for `rw`
- * / `pipe` tests.
- * @details 测试项目：
- *          1. 统一封装 `NONE` / `POLLING` / `CALLBACK` / `BLOCK` 四类操作模式。
- *          2. 统一维护异步回调计数、最终错误码和等待信号量。
- *          3. 统一提供等待断言，避免各测试文件重复展开样板代码。
- *          Test items:
- *          1. Provide one shared wrapper for `NONE` / `POLLING` / `CALLBACK` / `BLOCK`
- * modes.
- *          2. Keep callback counts, final status, and semaphores in one reusable probe.
- *          3. Centralize wait assertions so scenario files stay focused.
+ * @brief RW 完成通知模式与结果检查 / RW completion modes and result checks.
  */
 #pragma once
 
@@ -50,12 +40,7 @@ struct CompletionProbe
   CompletionProbe() : sem(0) {}
 
   /**
-   * @brief 辅助函数 `Reset`。 Helper function `Reset`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
-   * measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
-   * repeated helper logic locally so the main test body stays focused on the test item
-   * itself.
+   * @brief 重置测试记录的状态 / Reset recorded test state.
    */
   void Reset()
   {
@@ -81,34 +66,23 @@ struct ModeHarness
   ModeHarness& operator=(const ModeHarness&) = delete;
 
   /**
-   * @brief 辅助函数 `Reset`。 Helper function `Reset`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
-   * measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
-   * repeated helper logic locally so the main test body stays focused on the test item
-   * itself.
+   * @brief 重置测试记录的状态 / Reset recorded test state.
    */
   void Reset()
   {
-    polling_status = PollingStatus::READY;
+    polling_status.store(PollingStatus::READY, std::memory_order_release);
     probe.Reset();
   }
 
   /**
-   * @brief 断言辅助函数 `ExpectPendingSubmitted`。 Assertion helper function
-   * `ExpectPendingSubmitted`.
-   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check
-   * to the current result.
-   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate
-   * repeated validation logic so test items do not drift to inconsistent checks.
+   * @brief 检查轮询仍在运行或回调尚未触发
+   *        / Check running polling status or an uncalled callback.
    */
   void ExpectPendingSubmitted() const
   {
-    // 辅助内容：验证当前失败或退出预期。
-    // Helper coverage: validate the current expected failure or exit condition.
     if (mode == TestMode::POLLING)
     {
-      ASSERT(polling_status == PollingStatus::RUNNING);
+      ASSERT(polling_status.load(std::memory_order_acquire) == PollingStatus::RUNNING);
     }
     else if (mode == TestMode::CALLBACK)
     {
@@ -117,24 +91,18 @@ struct ModeHarness
   }
 
   /**
-   * @brief 断言辅助函数 `ExpectFinal`。 Assertion helper function `ExpectFinal`.
-   * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check
-   * to the current result.
-   *          测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。 Concentrate
-   * repeated validation logic so test items do not drift to inconsistent checks.
+   * @brief 检查完成状态及回调次数 / Check completion status and callback count.
    */
   void ExpectFinal(LibXR::ErrorCode expected)
   {
-    // 辅助内容：验证当前失败或退出预期。
-    // Helper coverage: validate the current expected failure or exit condition.
     switch (mode)
     {
       case TestMode::NONE:
         return;
       case TestMode::POLLING:
-        ASSERT(polling_status == ((expected == LibXR::ErrorCode::OK)
-                                      ? PollingStatus::DONE
-                                      : PollingStatus::ERROR));
+        ASSERT(polling_status.load(std::memory_order_acquire) ==
+               ((expected == LibXR::ErrorCode::OK) ? PollingStatus::DONE
+                                                   : PollingStatus::ERROR));
         return;
       case TestMode::CALLBACK:
         ASSERT(probe.sem.Wait(ASYNC_TIMEOUT_MS) == LibXR::ErrorCode::OK);
@@ -148,12 +116,8 @@ struct ModeHarness
   }
 
   /**
-   * @brief 辅助函数 `OnCallback`。 Helper function `OnCallback`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
-   * measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
-   * repeated helper logic locally so the main test body stays focused on the test item
-   * itself.
+   * @brief 记录回调结果与次数并通知测试线程
+   *        / Record callback result and count, then notify the test thread.
    */
   static void OnCallback(bool in_isr, ModeHarness* self, LibXR::ErrorCode status)
   {
@@ -163,12 +127,8 @@ struct ModeHarness
   }
 
   /**
-   * @brief 辅助函数 `Bind`。 Helper function `Bind`.
-   * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
-   * measure, or validate shared state for later test steps.
-   *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
-   * repeated helper logic locally so the main test body stays focused on the test item
-   * itself.
+   * @brief 按测试模式设置操作的通知对象
+   *        / Bind operation targets for the selected test mode.
    */
   void Bind(uint32_t timeout)
   {
@@ -190,7 +150,7 @@ struct ModeHarness
   }
 
   TestMode mode;
-  PollingStatus polling_status = PollingStatus::READY;
+  std::atomic<PollingStatus> polling_status{PollingStatus::READY};
   CompletionProbe probe;
   CallbackType callback;
   LibXR::Semaphore sem;

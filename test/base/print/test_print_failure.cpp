@@ -1,23 +1,21 @@
 /**
  * @file test_print_failure.cpp
- * @brief `print` stream-backed writer 的失败路径测试。 Failure-path tests for the
- * `print` stream-backed writer.
- * @details 格式对象在写出前缀后失败时，已经进入 stream 的前缀仍可提交；这和纯
- *          bounded-buffer 的失败清理语义不同。
+ * @brief 流式格式化输出失败后的前缀保留测试
+ *        / Prefix retention after stream formatting failures.
  */
 #include "print_test_common.hpp"
 
 namespace LibXRPrintTest
 {
 /**
- * @brief 确认 stream-backed print 失败后保留已写前缀。 Confirm that stream-backed print
- * keeps the prefix written before a later failure.
+ * @brief 验证格式化失败后仍可提交已写前缀
+ *        / Verify an emitted prefix survives a later formatting failure.
  */
 void TestStreamBackedPrintFailureKeepsPrefix()
 {
   static constexpr char expected[] = "hello ";
 
-  // Pipe 读端先挂起，写端 stream 只需要提交成功写出的前缀。
+  // Pipe 读端先挂起，写入流提交格式化失败前已经写出的前缀。
   // Arm the pipe read first; the write stream only has to commit the emitted prefix.
   LibXR::Pipe pipe(64);
   LibXR::ReadPort& read = pipe.GetReadPort();
@@ -43,7 +41,6 @@ void TestStreamBackedPrintFailureKeepsPrefix()
     Fail("stream-backed print failure commit mismatch");
   }
 
-  read.ProcessPendingReads(false);
   if (std::memcmp(rx, expected, sizeof(rx)) != 0)
   {
     Fail("stream-backed print failure prefix mismatch");

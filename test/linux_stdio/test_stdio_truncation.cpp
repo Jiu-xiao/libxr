@@ -1,23 +1,18 @@
 /**
  * @file test_stdio_truncation.cpp
- * @brief Linux STDIO `print` 容量截断语义测试。 Capacity-truncation tests for Linux
- * STDIO `print`.
- * @details
- * 1. 截断时返回实际保留字节数。
- * 2. pipe 中只出现被保留的前缀内容。
- * 3. 覆盖 direct writer、stream-backed writer 和很小 stream 容量。
+ * @brief STDIO 输出截断与保留内容测试 / STDIO truncation and retained output tests.
  */
 #include "linux_stdio_print_test_common.hpp"
 
 namespace LibXRLinuxStdioPrintTest
 {
 /**
- * @brief 覆盖 direct 和 stream-backed STDIO 写入的截断返回值和保留内容。 Cover truncation
- * return values and retained payload for direct and stream-backed STDIO writes.
+ * @brief 验证直接输出与流输出的截断结果
+ *        / Verify truncation for direct and stream output.
  */
 void TestStdioTruncation()
 {
-  // Direct writer 容量不足：只保留 pipe 空余容量对应的前缀。
+  // 直接输出容量不足时，只保留 Pipe 空闲空间可容纳的前缀。
   // Direct writer with insufficient capacity: retain only the prefix that fits the pipe.
   {
     constexpr size_t pipe_capacity = 64;
@@ -51,14 +46,13 @@ void TestStdioTruncation()
       Fail("stdio pipe-capacity truncation length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx.data(), payload.data(), expected_retained) != 0)
     {
       Fail("stdio pipe-capacity truncation payload mismatch");
     }
   }
 
-  // Stream-backed 容量不足：同样按底层写端可用空间截断。
+  // 通过 Stream 输出时，按写端空闲空间截断。
   // Stream-backed insufficient capacity: truncation still follows the underlying writer
   // space.
   {
@@ -95,14 +89,13 @@ void TestStdioTruncation()
       Fail("stdio bound-stream truncation length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx.data(), payload.data(), expected_retained) != 0)
     {
       Fail("stdio bound-stream truncation payload mismatch");
     }
   }
 
-  // 很小 stream 容量：覆盖短缓冲区下的返回值和前缀保留。
+  // 使用小容量 Stream 检查截断返回值和保留的前缀。
   // Very small stream capacity: cover return value and prefix retention for tiny buffers.
   {
     constexpr size_t stream_capacity = 4;
@@ -138,7 +131,6 @@ void TestStdioTruncation()
       Fail("stdio bound-stream small-capacity truncation length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx.data(), payload.data(), expected_retained) != 0)
     {
       Fail("stdio bound-stream small-capacity truncation payload mismatch");

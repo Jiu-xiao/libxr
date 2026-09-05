@@ -1,13 +1,6 @@
 /**
  * @file pipe_stream_test_common.hpp
- * @brief `Pipe::Stream` 阻塞提交语义测试 helper。 Shared blocking-stream helpers for
- * `Pipe::Stream` tests.
- * @details 测试项目：
- *          1. 提供阻塞 `Stream` 提交结果传播 helper。
- *          2. 提供析构自动提交与超时回收 helper。
- *          Test items:
- *          1. Provide helpers for blocking `Stream` result propagation.
- *          2. Provide helpers for destructor auto-commit and timeout cleanup.
+ * @brief 阻塞写入流测试辅助函数 / Helpers for blocking write stream tests.
  */
 #pragma once
 
@@ -52,17 +45,11 @@ void VerifyStreamBlockPendingCompletion(LibXR::ErrorCode finish_result,
   ExpectWaitOk(done, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher);
   ASSERT(sem.Value() == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 /**
- * @brief 辅助函数 `VerifyStreamBlockTimeout`。 Helper function
- * `VerifyStreamBlockTimeout`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
+ * @brief 验证流提交超时后出队不再发送旧通知
+ *        / Verify consumption after stream timeout posts no stale token.
  */
 void VerifyStreamBlockTimeout()
 {
@@ -81,12 +68,14 @@ void VerifyStreamBlockTimeout()
   ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem.Value() == 0);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    static uint8_t sink[16];
+    queue.PopAll(sink);
+  }
 
   ASSERT(sem.Value() == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 }  // namespace

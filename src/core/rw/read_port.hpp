@@ -10,229 +10,325 @@
 namespace LibXR
 {
 
+class Pipe;
+
 /**
- * @brief ReadPort class for handling read operations.
- * @brief 处理读取操作的ReadPort类。
+ * @brief 基于 SPSC 字节队列的读端口 / Read endpoint backed by an SPSC byte queue.
+ *
+ * 后端持续向队列写入数据并通知端口；端口最多保存一个尚未满足的读请求。
+ * The backend feeds the queue and notifies the port, which retains at most one
+ * pending read request.
+ *
+ * @pre 后端负责串行化接收生产者。同一端口的 BLOCK 与非 BLOCK 操作不得重叠或嵌套。
+ *      The backend serializes RX production. BLOCK and non-BLOCK operations on the
+ *      same port must not overlap or nest.
+ * @note 端口、所属后端和通知对象须在所有可能访问它们的调用与回调返回前保持有效。
+ *       The port, its backend, and notification targets must outlive all calls and
+ *       callbacks that may access them.
  */
 class ReadPort
 {
- public:
-  // Exposed low-level state and helpers for the read-path core. Some members stay public
-  // because low-level libxr tests and driver glue inspect them directly.
-  // 读路径核心的低层状态与辅助类型。部分成员保持 public，
-  // 是因为 libxr 的底层测试与驱动胶水层会直接检查它们。
-
-  // Read BLOCK states:
-  // PENDING = waiting for queue-fed completion after read_fun_ was notified
-  // CLEARING = ClearQueuedData() owns software dequeue progress
-  // BLOCK_CLAIMED = wakeup now belongs to the waiter
-  // BLOCK_DETACHED = timeout detached the waiter
-  // The same semaphore may be reused only after the previous BLOCK call
-  // returns and the port goes back to IDLE.
-  // 读 BLOCK 状态：
-  // PENDING = 已通知 read_fun_，等待队列侧完成
-  // CLEARING = ClearQueuedData() 占有软件出队进度
-  // BLOCK_CLAIMED = 唤醒已经归当前 waiter 所有
-  // BLOCK_DETACHED = timeout 已把 waiter 分离
-  // 同一个信号量只能在上一次 BLOCK 调用返回、端口回到 IDLE 后复用。
-  enum class BusyState : uint32_t
+ private:
+  /// 请求处理阶段 / Request processing phase.
+  enum class Phase : uint32_t
   {
-    IDLE = 0,      ///< No active waiter and no pending completion. 无等待者、无挂起完成。
-    PENDING = 1,   ///< Driver accepted the request; completion still owns progress.
-                   ///< 请求已交给底层推进。
-    CLEARING = 2,  ///< ClearQueuedData() owns software dequeue progress.
-                   ///< ClearQueuedData() 占有软件出队进度。
-    BLOCK_CLAIMED = 3,   ///< BLOCK wakeup already belongs to the current waiter. 当前
-                         ///< BLOCK 唤醒已被本次等待者认领。
-    BLOCK_DETACHED = 4,  ///< Timeout detached the waiter; completion must stay silent.
-                         ///< 超时已分离等待者，完成侧不得再唤醒。
-    EVENT = UINT32_MAX   ///< Data arrived before a waiter was armed; next caller must
-                         ///< re-check queue. 数据先到，后续调用者要重查队列。
+    IDLE = 0U,     ///< 可接纳请求 / Available for a request.
+    CLAIMED = 1U,  ///< 独占请求处理或出队 / Exclusive request or dequeue access.
+    PENDING = 2U,  ///< 请求等待数据 / Published request waiting for data.
+    CLAIMED_WITH_WAITER = 3U,  ///< 超时方等待安全交接 / Timeout awaits a safe handoff.
+    BLOCK_CLAIMED = 4U,        ///< BLOCK 完成已认领 / BLOCK completion has been claimed.
   };
 
-  ReadFun read_fun_ =
-      nullptr;  ///< Driver/backend read notification entry. 底层驱动或后端读取通知入口。
-  SPSCQueue<uint8_t>* queue_data_ = nullptr;  ///< RX payload queue. 接收数据字节队列。
-  ReadInfoBlock info_{};  ///< In-flight read request metadata. 当前在途读取请求的元数据。
-  std::atomic<BusyState> busy_{
-      BusyState::IDLE};  ///< Shared read-progress handoff state. 共享的读进度交接状态。
-  ErrorCode block_result_ = ErrorCode::OK;  ///< Final status for the current BLOCK read.
+  /// 数据发布通知，可与任一阶段共存；不计数字节 / Publication hint, not a byte count.
+  static constexpr uint32_t EVENT_BIT = 1U << 31U;
+  /// 请求阶段所占的位 / Bits containing the request phase.
+  static constexpr uint32_t PHASE_MASK = EVENT_BIT - 1U;
 
+  /// 挂起读请求 / Pending read request.
+  struct Request
+  {
+    RawData data;      ///< 借用的接收缓冲区 / Borrowed destination buffer.
+    ReadOperation op;  ///< 完成通知方式 / Completion notification.
+  };
+
+  /// 提取请求阶段 / Extract the request phase.
+  static Phase GetPhase(uint32_t state) { return static_cast<Phase>(state & PHASE_MASK); }
+
+  /// 替换阶段并保留数据通知 / Replace the phase while preserving the publication hint.
+  static uint32_t WithPhase(uint32_t state, Phase phase)
+  {
+    return (state & EVENT_BIT) | static_cast<uint32_t>(phase);
+  }
+
+  /// 检查是否有待处理的数据通知 / Check for a publication hint.
+  static bool HasEvent(uint32_t state) { return (state & EVENT_BIT) != 0U; }
+
+  /// 尝试独占空闲端口并清除已观察到的通知 / Claim IDLE and clear the observed hint.
+  [[nodiscard]] bool TryClaimIdle();
+  /// 判断数据是否足够；零长度请求等待非空 / Test availability, or nonempty for zero size.
+  [[nodiscard]] bool HasEnough(size_t available, size_t requested) const;
+  /// 释放 CLAIMED 并保留数据通知 / Release CLAIMED while preserving publication hints.
+  void ReleaseClaimed(bool in_isr);
+  /// 在写入 BLOCK 接收缓冲区前认领完成 / Claim BLOCK completion before copying data.
+  [[nodiscard]] bool ClaimBlockCompletion();
+  /// 等待方取走结果后释放端口 / Release the port after the waiter takes its result.
+  void ReleaseBlockCompletion(bool in_isr);
+  /// 发布接收入队通知并处理挂起读 / Signal RX production and process a pending read.
+  void PublishProduced(bool in_isr);
+  /// 处理 Pipe 共享队列的数据通知 / Handle data notification from the shared Pipe queue.
+  void NotifyDataAvailable(bool in_isr);
+  /// 认领挂起请求，数据足够时完成 / Claim a pending request and complete it if possible.
+  void ProcessPendingReads(bool in_isr);
+  /// 复制数据，释放处理权，再通知非 BLOCK 操作 / Copy, release, then notify non-BLOCK.
+  void CompleteClaimedRead(bool in_isr);
+  /// 复制数据并唤醒 BLOCK 等待者，由等待者释放端口 / Copy and wake; the waiter releases.
+  void CompleteClaimedBlock(bool in_isr);
+  /// 等待完成，超时时与处理方安全交接 / Wait for completion or a safe timeout handoff.
+  [[nodiscard]] ErrorCode WaitForBlock(ReadOperation& op);
+  /// 在 Pipe 构造时绑定借用队列 / Bind the borrowed queue during Pipe construction.
+  void BindQueue(SPSCQueue<uint8_t>* queue);
+
+  friend class Pipe;
+
+ public:
   /**
-   * @brief Constructs a ReadPort with queue sizes.
-   * @brief 以指定队列大小构造ReadPort。
-   * @param buffer_size Size of the RX byte queue.
-   *                    接收字节队列的容量。
+   * @brief 接收队列的短期写入接口 / Short-lived producer interface for the RX queue.
    *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * 一次使用可多次调用同一种入队方法，最后显式调用一次 Publish，包括未写入数据的情况。
+   * 不可复制或移动；析构不会自动发布通知。
+   * Use one production method repeatedly, then call Publish exactly once, even if no
+   * bytes were written. This object is noncopyable and nonmovable. Destruction does
+   * not publish notifications.
+   *
+   * @note 入队即通过 SPSC 发布字节；Publish 推进挂起读，可能同步执行完成回调。
+   *       Enqueueing makes bytes visible through the SPSC; Publish drives pending reads
+   *       and may invoke completion callbacks inline.
    */
-  ReadPort(size_t buffer_size = 128);
+  class ReadQueue
+  {
+   public:
+    ReadQueue(const ReadQueue&) = delete;
+    ReadQueue& operator=(const ReadQueue&) = delete;
+    ReadQueue(ReadQueue&&) = delete;
+    ReadQueue& operator=(ReadQueue&&) = delete;
+    /// 开发期检查是否已 Publish / Check for Publish in development builds.
+    ~ReadQueue();
+
+    /**
+     * @brief 批量复制字节到接收队列 / Copy a batch of bytes into the RX queue.
+     * @param data 数据源；正长度时不可为空 / Source, non-null for a positive size.
+     * @param size 字节数 / Number of bytes.
+     * @return 全部入队返回 OK；空间不足返回 FULL，不部分写入。零长度返回 OK。
+     *         OK if all bytes are queued; FULL without partial writes if space is
+     *         insufficient. A zero size returns OK.
+     * @pre 尚未调用 Publish / Publish has not been called.
+     */
+    [[nodiscard]] ErrorCode PushBatch(const uint8_t* data, size_t size);
+
+    /**
+     * @brief 通过回调直接写入接收队列 / Fill the RX queue through a writer callback.
+     * @tparam Writer 写入器类型 / Writer callback type.
+     * @param limit 最多提供的字节数 / Maximum number of bytes to offer.
+     * @param writer 签名为 size_t(uint8_t*, size_t, uint8_t*, size_t)，接收按 FIFO
+     *        顺序排列的最多两段空间，返回已写入的连续前缀长度。
+     *        Callable as size_t(uint8_t*, size_t, uint8_t*, size_t); receives up to two
+     *        FIFO-ordered spans and returns the length of the written prefix.
+     * @return 实际入队字节数 / Number of bytes actually queued.
+     * @pre 尚未 Publish；回调不可重入同一队列的生产操作，返回值不得超过提供的空间。
+     *      Before Publish; the callback must not reenter production on this queue or
+     *      return more bytes than offered.
+     * @note 提供长度不超过 limit 和空闲空间。非空时只调用一次回调，指针仅在回调内有效。
+     *       The offer is limited by limit and free space. The callback runs once for a
+     *       nonempty offer; its pointers are valid only during that call.
+     */
+    template <typename Writer>
+    [[nodiscard]] size_t PushWithWriter(size_t limit, Writer&& writer)
+    {
+      DEV_ASSERT_FROM_CALLBACK(!finished_, in_isr_);
+
+      const size_t produced = port_.queue_data_->ProduceWithWriter(
+          limit,
+          [&](void* first, size_t first_size, void* second, size_t second_size) -> size_t
+          {
+            const size_t produced = writer(static_cast<uint8_t*>(first), first_size,
+                                           static_cast<uint8_t*>(second), second_size);
+            REQUIRE_FROM_CALLBACK(produced <= first_size + second_size, in_isr_);
+            return produced;
+          });
+      dirty_ = dirty_ || (produced != 0U);
+      return produced;
+    }
+
+    /**
+     * @brief 获取接收队列当前空闲空间 / Get current RX queue free space.
+     * @return 空闲字节数；查询不预留空间 / Free bytes; the query reserves no space.
+     */
+    [[nodiscard]] size_t EmptySize() const;
+
+    /**
+     * @brief 获取接收队列容量 / Get the RX queue capacity.
+     * @return 队列总容量，单位为字节 / Total queue capacity in bytes.
+     */
+    [[nodiscard]] size_t Capacity() const;
+
+    /**
+     * @brief 结束本次写入并通知挂起读 / End production and notify a pending read.
+     * @pre 每个 ReadQueue 仅调用一次，之后不再使用该写入接口。
+     *      Call once per ReadQueue and do not use the producer interface afterward.
+     * @note 未写入字节时只结束本次使用；有数据时使用获取接口时的 in_isr 上下文
+     *       推进读请求，可能同步复制数据并调用完成回调。
+     *       With no produced bytes, only ends this use. Otherwise drives reads using
+     *       the captured in_isr context and may copy data and invoke callbacks inline.
+     */
+    void Publish();
+
+   private:
+    friend class ReadPort;
+
+    ReadQueue(ReadPort& port, bool in_isr) : port_(port), in_isr_(in_isr) {}
+
+    ReadPort& port_;         ///< 所属读端口 / Associated read port.
+    const bool in_isr_;      ///< 本次生产的调用上下文 / Context of this production call.
+    bool dirty_ = false;     ///< 是否成功写入过字节 / Whether any bytes were queued.
+    bool finished_ = false;  ///< 是否已调用 Publish / Whether Publish was called.
+  };
 
   /**
-   * @brief 虚析构函数，保证通过基类指针析构派生读端口的安全性。
-   *        Virtual destructor for safe destruction of derived read ports through a base
-   *        pointer.
-   *
-   * @note 仅补齐虚析构以消除“有虚函数却非虚析构”的编译告警；不改变析构行为，
-   *       裸指针成员的所有权语义与此前保持一致。
-   *       Only adds the virtual destructor to silence the non-virtual-dtor warning; the
-   *       destruction behavior is unchanged and raw-pointer member ownership stays as
-   *       before.
+   * @brief 构造读端口并分配接收队列 / Construct a read port and allocate its RX queue.
+   * @param buffer_size 队列容量，单位为字节；为零时不分配，端口保持未绑定。
+   *        Queue capacity in bytes; zero leaves the port unbound without allocating.
+   * @note Pipe 在构造时将未绑定的读端口绑定到共享队列。
+   *       Pipe binds its initially unbound read port to the shared queue at construction.
+   */
+  explicit ReadPort(size_t buffer_size = 128U);
+
+  /**
+   * @brief 析构读端口 / Destroy the read port.
+   * @pre 相关请求、调用和回调已结束 / All related requests, calls, and callbacks ended.
+   * @note 不取消请求，也不释放队列存储 / Does not cancel requests or free queue storage.
    */
   virtual ~ReadPort() = default;
 
   /**
-   * @brief 获取队列的剩余可用空间。
-   *        Gets the remaining available space in the queue.
-   *
-   * 该函数返回 queue_data_ 中当前可用的空闲空间大小。
-   * This function returns the size of the available empty space in queue_data_.
-   *
-   * @return 返回队列的空闲大小（单位：字节）。
-   *         Returns the empty size of the queue (in bytes).
+   * @brief 获取后端接收入队接口 / Obtain the backend RX producer interface.
+   * @param in_isr 是否在中断中调用；该值用于本次 Publish 引起的通知。
+   *        Whether called in an ISR; used for notifications caused by this Publish.
+   * @return 本次接收入队接口 / Producer interface for this RX operation.
+   * @pre 队列已绑定，由唯一接收生产者调用；Pipe 的借用读端口不可使用此接口。
+   *      A bound queue and the sole RX producer are required; not for a Pipe's borrowed
+   *      read endpoint.
    */
-  size_t EmptySize();
+  [[nodiscard]] ReadQueue GetReadQueue(bool in_isr = false);
 
   /**
-   * @brief 获取当前队列的已使用大小。
-   *        Gets the currently used size of the queue.
-   *
-   * 该函数返回 queue_data_ 当前已占用的空间大小。
-   * This function returns the size of the space currently used in queue_data_.
-   *
-   * @return 返回队列的已使用大小（单位：字节）。
-   *         Returns the used size of the queue (in bytes).
+   * @brief 获取当前空闲空间 / Get current free space.
+   * @return 空闲字节数，未绑定时为零；并发消费或生产可使结果变化。
+   *         Free bytes, or zero when unbound; concurrent progress may change the value.
    */
-  size_t Size();
-
-  /// @brief Checks if read operations are supported.
-  /// @brief 检查是否支持读取操作。
-  bool Readable();
+  [[nodiscard]] size_t EmptySize() const;
 
   /**
-   * @brief 赋值运算符重载，用于设置读取函数。
-   *        Overloaded assignment operator to set the read function.
-   *
-   * 该函数允许使用 ReadFun 类型的函数对象赋值给 ReadPort，从而设置 read_fun_。
-   * This function allows assigning a ReadFun function object to ReadPort, setting
-   * read_fun_.
-   *
-   * @param fun 要分配的读取函数。
-   *            The read function to be assigned.
-   * @return 返回自身的引用，以支持链式调用。
-   *         Returns a reference to itself for chaining.
+   * @brief 获取当前排队的数据量 / Get the current queued data size.
+   * @return 已排队字节数，未绑定时为零；查询不预留数据，并发进展可使结果变化。
+   *         Queued bytes, or zero when unbound; the query reserves no data and concurrent
+   *         progress may change the value.
    */
-  ReadPort& operator=(ReadFun fun);
+  [[nodiscard]] size_t Size() const;
 
   /**
-   * @brief 完成已由队列路径认领的读取操作。
-   *        Completes a read operation already claimed by the queue path.
-   *
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
-   * @param ans 错误码，用于指示操作的结果。
-   *            Error code indicating the result of the operation.
-   * @param info 需要更新状态的 ReadInfoBlock 引用。
-   *             Reference to the ReadInfoBlock whose status needs to be updated.
+   * @brief 获取接收队列容量 / Get the RX queue capacity.
+   * @return 队列总字节数，未绑定时为零 / Total capacity in bytes, or zero when unbound.
    */
-  void Finish(bool in_isr, ErrorCode ans, ReadInfoBlock& info);
+  [[nodiscard]] size_t Capacity() const;
 
   /**
-   * @brief 标记读取操作为运行中。
-   *        Marks the read operation as running.
-   *
-   * 该函数用于将 info.op_ 标记为运行状态，以指示当前正在进行读取操作。
-   * This function marks info.op_ as running to indicate an ongoing read operation.
-   *
-   * @param info 需要更新状态的 ReadInfoBlock 引用。
-   *             Reference to the ReadInfoBlock whose status needs to be updated.
+   * @brief 检查端口是否支持读取 / Check whether the port supports reads.
+   * @return 已绑定队列时为 true，不表示队列非空或端口空闲。
+   *         True when a queue is bound; does not indicate available data or an idle port.
    */
-  void MarkAsRunning(ReadInfoBlock& info);
+  [[nodiscard]] bool Readable() const;
 
   /**
-   * @brief 读取操作符重载，用于执行读取操作。
-   *        Overloaded function call operator to perform a read operation.
-   *
-   * 该函数检查端口是否可读，并根据 data.size_ 和 op 的类型执行不同的操作。
-   * This function checks if the port is readable and performs different actions based on
-   * data.size_ and the type of op.
-   *
-   * @param data 包含要读取的数据。
-   *             Contains the data to be read.
-   *
-   * @note data.size_ == 0 is a readiness read: it completes when the RX queue is
-   *       non-empty, does not consume bytes, and does not call OnRxDequeue().
-   * @note data.size_ == 0 表示可读通知：RX 队列非空即完成，不消费字节，也不调用
-   *       OnRxDequeue()。
-   *
-   * @param op 读取操作对象，包含操作类型和同步机制。
-   *           Read operation object containing the operation type and synchronization
-   * mechanism.
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
-   * @return 返回操作的 ErrorCode，指示操作结果。
-   *         Returns an ErrorCode indicating the result of the operation.
+   * @brief 提交读请求 / Submit a read request.
+   * @param data 接收地址和字节数。正长度请求须有有效地址，数据足够时才一次性复制；
+   *        零长度请求等待队列非空，不消费字节，地址可为空。
+   *        Destination and byte count. Positive reads require a valid address and copy
+   *        only when the full request is available. Zero size waits for a nonempty queue
+   *        without consuming bytes and permits a null address.
+   * @param op 完成通知方式；其回调、轮询状态或信号量在操作结束前须保持有效。
+   *        Completion descriptor; its callback, polling state, or semaphore must remain
+   *        valid until the operation ends.
+   * @param in_isr 当前调用是否位于中断 / Whether this call is in an ISR.
+   * @return 非 BLOCK 的 OK 表示请求已接纳，可能同步完成，也可能等待后续数据；
+   *         BLOCK 的 OK 表示读取完成，超时取消返回 TIMEOUT。未绑定返回 NOT_SUPPORT，
+   *         请求处理状态被占用返回 BUSY，正长度超过队列容量返回 SIZE_ERR。
+   *         Non-BLOCK OK means admitted, with inline or deferred completion. BLOCK OK
+   *         means completed; timeout cancellation returns TIMEOUT. NOT_SUPPORT when
+   *         unbound, BUSY when request processing is occupied, SIZE_ERR above capacity.
+   * @pre BLOCK 只能在线程中调用；返回前不可在同一端口再 Read 或 ClearQueuedData，
+   *      也不可与尚未结束的非 BLOCK 操作重叠。每个信号量只服务一个活动 BLOCK 调用。
+   *      BLOCK is task-only; no same-port Read or ClearQueuedData before it returns,
+   *      and no overlap with a live non-BLOCK operation. Use a dedicated semaphore.
+   * @note 接收缓冲区须保持有效直到完成或取消；BLOCK 缓冲区须保持到调用返回。
+   *       超时与处理方竞争时，须等处理方停止访问缓冲区后才返回，可能超过指定时间；
+   *       若完成方赢得交接则返回完成结果。
+   *       Keep the destination valid until completion or cancellation, and through return
+   *       for BLOCK. A timeout racing progress waits until buffer access ends, possibly
+   *       exceeding the requested duration; completion wins if already claimed.
+   * @note 非 BLOCK 回调可提交后续非 BLOCK 读；跨线程回调顺序不保证。立即满足的
+   *       BLOCK 直接返回，不释放信号量；拒绝接纳的请求不发送完成通知。
+   *       Non-BLOCK callbacks may submit another non-BLOCK read; cross-thread callback
+   *       order is not guaranteed. Immediate BLOCK completion does not post a semaphore;
+   *       rejected requests emit no completion notification.
+   * @note 回调在实际完成读取的上下文执行，可能位于本次调用或后端 Publish 内；
+   *       轮询状态应以 acquire 读取。不可阻塞等待依赖当前调用返回才能推进的操作。
+   *       Callbacks run in the context completing the read, possibly inside this call or
+   *       backend Publish. Load polling status with acquire ordering. Do not block on
+   *       progress that requires the current call to return.
    */
   ErrorCode operator()(RawData data, ReadOperation& op, bool in_isr = false);
 
+ protected:
   /**
-   * @brief RX 数据从软件队列成功出队后的通知。
-   *        Notification after bytes are popped from RX data queue.
+   * @brief 接收队列空间可用通知 / RX queue space-available notification.
    *
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
+   * 正长度出队后、完成通知前调用；ClearQueuedData 成功时也调用，包括空队列。
+   * bool 参数表示本次调用是否在中断中；默认实现为空。
+   * Called after positive dequeue and before completion notification, or after a
+   * successful ClearQueuedData even for an empty queue. The bool argument indicates
+   * ISR context; the default implementation does nothing.
+   *
+   * @note 派生实现负责恢复接收，或保留通知供当前生产者再次处理；需与其他接收入口串行化。
+   *       Overrides resume RX or retain a hint for the producer to recheck,
+   *       serialized with other RX entry points.
    */
-  virtual void OnRxDequeue(bool) {}
+  virtual void OnReadQueueSpaceAvailable(bool) {}
 
+ public:
   /**
-   * @brief 清空当前已排队的 RX 字节。
-   * @brief Discards the RX bytes currently queued in software.
-   *
-   * 该接口只丢弃当前 queue_data_ 中已经排队的字节，不参与 backend teardown，也不会
-   * 失败完成挂起读请求。若存在正在推进的读请求，则返回 BUSY。
-   * This API only discards the bytes already queued in queue_data_. It does not
-   * participate in backend teardown and does not fail-complete an in-flight read.
-   * Returns BUSY when a read request is currently in progress.
-   *
-   * @note After this call claims CLEARING, ordinary reads can no longer consume the
-   *       current software-queue snapshot. Bytes that arrive after the snapshot may
-   *       remain queued for a later reader/clear call.
-   * @note 本次调用 claim `CLEARING` 之后，普通读不会再消费当前软件队列快照；在快照
-   *       之后新到达的字节，可以留给后续读取或下次清队列。
-   *
-   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
-   * @return `OK` 表示本次清队列成功完成；`BUSY` 表示当前有读请求占有该端口。
-   *         `OK` means the clear operation completed; `BUSY` means an active read still
-   *         owns this port.
+   * @brief 丢弃当前已排队的接收字节 / Discard currently queued RX bytes.
+   * @param in_isr 当前调用是否位于中断 / Whether this call is in an ISR.
+   * @return 成功返回 OK，未绑定返回 NOT_SUPPORT，存在活动请求或出队处理时返回 BUSY。
+   *         OK on success, NOT_SUPPORT when unbound, BUSY during an active request or
+   *         dequeue operation.
+   * @pre 同一端口的 BLOCK 调用已返回 / Any same-port BLOCK call has returned.
+   * @note 只推进消费者位置，可与唯一生产者并发。并发到达的数据可能保留或被丢弃。
+   *       不取消挂起请求；成功后释放处理权并通知队列空间可用。
+   *       Advances only the consumer index and may overlap the sole producer. Racing
+   *       data may survive or be discarded. Does not cancel pending reads; releases
+   *       request processing and notifies available space on success.
    */
   [[nodiscard]] ErrorCode ClearQueuedData(bool in_isr = false);
 
-  /**
-   * @brief Processes pending reads.
-   * @brief 处理挂起的读取请求。
-   *
-   * @param in_isr 指示是否在中断上下文中执行。
-   *               Indicates whether the operation is executed in an interrupt context.
-   */
-  void ProcessPendingReads(bool in_isr);
-
-  /**
-   * @brief 失败完成并清空当前所有挂起读操作。
-   * @brief Fail-complete and clear all currently pending read operations.
-   *
-   * @note Driver-only: call this only after the backend is known to be unavailable.
-   * @note 仅供驱动层在后端已明确不可用后调用。
-   * @note The surrounding driver must already guarantee that no new front-end
-   *       submissions or back-end completion/data events can still arrive for
-   *       this port.
-   * @note 外围驱动还必须先保证：这条端口后续不会再收到新的前端提交，也不会再收到
-   *       新的后端完成或数据事件。
-   *
-   * @param reason 最终失败原因 / Final failure reason
-   * @param in_isr 是否在 ISR 上下文 / Whether running in ISR context
-   */
-  void FailAndClearAll(ErrorCode reason, bool in_isr);
+ private:
+  /// 普通端口分配、Pipe 端口借用的字节队列 / Allocated RX queue, or borrowed Pipe queue.
+  SPSCQueue<uint8_t>* queue_data_ = nullptr;
+  /// 请求阶段与可合并的数据通知 / Request phase and coalescible publication hint.
+  std::atomic<uint32_t> state_{static_cast<uint32_t>(Phase::IDLE)};
+  /// 通过请求阶段保护的唯一挂起请求 / Single pending request protected by the phase.
+  Request info_{};
+  /// Post 前写入，Wait 成功后读取 / Written before Post, read after a successful Wait.
+  ErrorCode block_result_ = ErrorCode::OK;
 };
 
 }  // namespace LibXR

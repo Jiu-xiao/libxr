@@ -1,21 +1,15 @@
 /**
  * @file test_rw_pending.cpp
- * @brief base `rw` pending mode 与边界场景子测试。 Split test unit for base `rw`
- * pending-mode and edge scenarios.
+ * @brief 异步 RW 完成与容量边界测试 / Asynchronous RW completion and capacity tests.
  */
 #include "rw_test_common.hpp"
 
 /**
- * @brief 测试入口函数 `test_rw_pending_mode_matrix`。 Test entry function
- * `test_rw_pending_mode_matrix`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证异步读完成与写错误通知
+ *        / Verify asynchronous read completion and write errors.
  */
 void test_rw_pending_mode_matrix()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   for (auto mode : ASYNC_MODES)
   {
     VerifyPendingReadMode(mode);
@@ -24,15 +18,11 @@ void test_rw_pending_mode_matrix()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_edge_cases`。 Test entry function `test_rw_edge_cases`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证零长度操作与满队列拒绝写入
+ *        / Verify zero-size operations and full-queue rejection.
  */
 void test_rw_edge_cases()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   for (auto mode : ASYNC_MODES)
@@ -53,18 +43,16 @@ void test_rw_edge_cases()
   auto second_result = w(ConstRawData{tx2, sizeof(tx2)}, op2);
   ASSERT(second_result == ErrorCode::FULL);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    static uint8_t sink[4];
+    queue.PopAll(sink);
+  }
 }
 
 /**
- * @brief 测试项函数 `RunBaseRwPendingTests`。 Test-item function `RunBaseRwPendingTests`.
- * @details 测试内容：执行当前分组里的 `rw`/`pipe` 子场景。 Execute the grouped
- * `rw`/`pipe` sub-scenarios for this split file.
- *          测试原理：把同类状态机场景收在一组，降低单文件体积并保留聚合入口。 Group
- * related state-machine scenarios together to shrink file size while preserving
- * aggregated entrypoints.
+ * @brief 运行异步完成与边界测试 / Run asynchronous completion and boundary tests.
  */
 void RunBaseRwPendingTests()
 {

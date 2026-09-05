@@ -1,18 +1,7 @@
 /**
  * @file test_rw_block_timeout.cpp
- * @brief base `rw` 超时与立即错误场景子测试。 Split test unit for base `rw` timeout and
- * immediate-error scenarios.
- * @details 测试项目：
- *          1. 阻塞读超时后会解除挂起关系，后续补进的数据不会污染旧缓冲区。
- *          2. 阻塞写超时后会解除等待者，后续再次提交仍按新的等待周期工作。
- *          3. 立即失败的读写回调会在各模式下直接透传错误并复位状态机。
- *          Test items:
- *          1. A blocking read timeout detaches the pending relation and later bytes do
- * not corrupt the stale buffer.
- *          2. A blocking write timeout detaches the waiter and later submissions start a
- * fresh wait cycle.
- *          3. Immediate read/write failures propagate the error directly and reset the
- * state machine in every mode.
+ * @brief RW 超时、未配置端口与容量错误测试
+ *        / RW timeout, unconfigured-port, and capacity tests.
  */
 #include "rw_test_common.hpp"
 
@@ -20,17 +9,11 @@ namespace
 {
 
 /**
- * @brief 测试入口函数 `test_rw_block_read_timeout_detaches_pending`。 Test entry function
- * `test_rw_block_read_timeout_detaches_pending`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证超时读不再访问旧缓冲区和信号量
+ *        / Verify late RX leaves timed-out read targets unchanged.
  */
 void test_rw_block_read_timeout_detaches_pending()
 {
-  // 测试内容：阻塞读超时后，旧缓冲区和信号量状态都不应被后续补数据污染。
-  // Test coverage: later queued bytes must not corrupt the stale buffer or semaphore
-  // state after a blocking read timeout.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -51,8 +34,6 @@ void test_rw_block_read_timeout_detaches_pending()
   WriteOperation wop;
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
   ASSERT(ec == ErrorCode::OK);
-  r.ProcessPendingReads(false);
-
   ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
   ASSERT(sem.Value() == 0);
 
@@ -64,17 +45,11 @@ void test_rw_block_read_timeout_detaches_pending()
 }
 
 /**
- * @brief 测试入口函数 `test_rw_block_write_timeout_detaches_waiter`。 Test entry function
- * `test_rw_block_write_timeout_detaches_waiter`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证超时写清退后可再次提交且不残留通知
+ *        / Verify reuse after timed-out writes retire without posts.
  */
 void test_rw_block_write_timeout_detaches_waiter()
 {
-  // 测试内容：阻塞写超时后，旧等待者不应阻止下一个等待周期重新建立。
-  // Test coverage: a timed-out blocking write waiter should not prevent the next wait
-  // cycle from being established.
   using namespace LibXR;
 
   WritePort w(2, 64);
@@ -89,84 +64,66 @@ void test_rw_block_write_timeout_detaches_waiter()
   ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem1.Value() == 0);
 
+  static uint8_t sink[sizeof(TX1)] = {};
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    queue.PopAll(sink);
+  }
+
   Semaphore sem2;
   WriteOperation op2(sem2, 0);
   ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::BUSY);
+  ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem2.Value() == 0);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  static uint8_t sink2[sizeof(TX2)] = {};
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    queue.PopAll(sink2);
+  }
   ASSERT(sem1.Value() == 0);
-
-  ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem2.Value() == 0);
 }
 
 /**
- * @brief 测试入口函数 `test_rw_immediate_error_propagates`。 Test entry function
- * `test_rw_immediate_error_propagates`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证未配置端口与容量不足的返回值
+ *        / Verify unconfigured-port and capacity errors.
  */
-void test_rw_immediate_error_propagates()
+void test_rw_admission_and_capacity_errors()
 {
-  // 测试内容：立即失败路径应在每种模式下直接返回错误，且端口状态恢复为空闲。
-  // Test coverage: immediate failure paths should return errors directly in every mode
-  // and restore idle port state.
   using namespace LibXR;
 
-  for (auto mode : LibXRTest::ALL_MODES)
-  {
-    ReadPort r(16);
-    r = FailReadFun;
+  ReadPort unbound(0);
+  ReadOperation read_op;
+  uint8_t byte = 0;
+  ASSERT(unbound(RawData{&byte, 1}, read_op) == ErrorCode::NOT_SUPPORT);
+  ASSERT(unbound(RawData{nullptr, 0}, read_op) == ErrorCode::NOT_SUPPORT);
 
-    uint8_t rx[1] = {0};
-    LibXRTest::ReadHarness read(mode, 0);
-    auto ec = r(RawData{rx, sizeof(rx)}, read.op);
-    ASSERT(ec == ErrorCode::INIT_ERR);
-    if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
-    {
-      read.ExpectFinal(ErrorCode::INIT_ERR);
-    }
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-  }
+  ReadPort read(1);
+  ASSERT(read(RawData{&byte, 2}, read_op) == ErrorCode::SIZE_ERR);
+  ASSERT(read.Size() == 0);
 
-  static const uint8_t TX[] = {0x55};
-  for (auto mode : LibXRTest::ALL_MODES)
-  {
-    WritePort w(2, 16);
-    w = FailWriteFun;
+  WritePort unconfigured(2, 1);
+  WriteOperation write_op;
+  ASSERT(unconfigured(ConstRawData{&byte, 1}, write_op) == ErrorCode::NOT_SUPPORT);
 
-    LibXRTest::WriteHarness write(mode, 0);
-    auto ec = w(ConstRawData{TX, sizeof(TX)}, write.op);
-    ASSERT(ec == ErrorCode::INIT_ERR);
-    if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
-    {
-      write.ExpectFinal(ErrorCode::INIT_ERR);
-    }
-    ASSERT(w.Size() == 0);
-    ASSERT(w.queue_info_->Size() == 0);
-    ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
-  }
+  WritePort full(2, 1);
+  full = PendingWriteFun;
+  const uint8_t pair[2] = {0x55, 0x66};
+  ASSERT(full(ConstRawData{pair, sizeof(pair)}, write_op) == ErrorCode::FULL);
+  ASSERT(full.Size() == 0);
 }
 
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunBaseRwBlockTimeoutTests`。 Test-item function
- * `RunBaseRwBlockTimeoutTests`.
- * @details 测试内容：执行 base `rw` 超时与立即错误子场景。 Execute base `rw` timeout and
- * immediate-error sub-scenarios.
- *          测试原理：把超时/立即失败路径单独成组，聚焦等待者解绑和错误透传契约。 Group
- * timeout/immediate-failure paths around waiter-detach and error-propagation contracts.
+ * @brief 运行 RW 超时与接纳错误测试 / Run RW timeout and admission-error tests.
  */
 void RunBaseRwBlockTimeoutTests()
 {
   test_rw_block_read_timeout_detaches_pending();
   test_rw_block_write_timeout_detaches_waiter();
-  test_rw_immediate_error_propagates();
+  test_rw_admission_and_capacity_errors();
 }

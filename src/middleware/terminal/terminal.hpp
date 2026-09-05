@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -17,13 +18,11 @@ namespace LibXR
 {
 
 /**
- * @class Terminal
- * @brief  终端类，实现一个基于 RamFS 的基本命令行接口
- *         Terminal class implementing a basic command-line interface based on RamFS
- * @tparam READ_BUFF_SIZE 读取缓冲区大小 Read buffer size
- * @tparam MAX_LINE_SIZE 最大输入行长度 Maximum input line size
- * @tparam MAX_ARG_NUMBER 最大参数数量 Maximum number of arguments
- * @tparam MAX_HISTORY_NUMBER 最大历史记录数量 Maximum number of command history records
+ * @brief 基于 RamFS 的命令行终端 / Command-line terminal backed by RamFS.
+ * @tparam READ_BUFF_SIZE 读取缓冲区大小 / Read buffer size.
+ * @tparam MAX_LINE_SIZE 最大输入行长度 / Maximum input line length.
+ * @tparam MAX_ARG_NUMBER 最大参数数量 / Maximum argument count.
+ * @tparam MAX_HISTORY_NUMBER 最大历史记录数量 / Maximum history entry count.
  */
 template <size_t READ_BUFF_SIZE = 32, size_t MAX_LINE_SIZE = READ_BUFF_SIZE,
           size_t MAX_ARG_NUMBER = 5, size_t MAX_HISTORY_NUMBER = 5>
@@ -31,39 +30,36 @@ class Terminal
 {
  private:
   /**
-   * @brief  一条历史命令的固定存储单元
-   *         Fixed storage slot for one history command line
+   * @brief 单条历史命令存储 / Storage for one command history entry.
    */
   using HistoryLine = std::array<char, MAX_LINE_SIZE + 1>;
 
   /**
-   * @brief  终端控制序列常量
-   *         Terminal control-sequence constants
+   * @brief 终端控制序列 / Terminal control sequences.
    *
-   * These literals are emitted directly into the write stream to implement
-   * clear-screen, clear-line, cursor-save/restore, and simple cursor motion.
-   * 这些字面量会被直接写进终端输出流，用来实现清屏、清行、保存/恢复光标和基础光标移动。
+   * 直接写入输出流，用于清屏、清行、保存和恢复光标位置以及移动光标。
+   * Written to the output stream to clear the screen or line, save and restore the
+   * cursor, or move it.
    */
   static constexpr char CLEAR_ALL[] =
-      "\033[2J\033[1H";  ///< 清屏命令 Clear screen command
+      "\033[2J\033[1H";  ///< 清屏命令 / Clear screen command
   static constexpr char CLEAR_LINE[] =
-      "\033[2K\r";  ///< 清除当前行命令 Clear current line command
+      "\033[2K\r";  ///< 清除当前行命令 / Clear current line command
   static constexpr char CLEAR_BEHIND[] =
-      "\033[K";  ///< 清除光标后内容命令 Clear content after cursor command
-  static constexpr char KEY_RIGHT[] = "\033[C";  ///< 右箭头键 Right arrow key
-  static constexpr char KEY_LEFT[] = "\033[D";   ///< 左箭头键 Left arrow key
-  static constexpr char KEY_SAVE[] = "\033[s";   ///< 保存光标位置 Save cursor position
-  static constexpr char KEY_LOAD[] = "\033[u";   ///< 恢复光标位置 Restore cursor position
+      "\033[K";  ///< 清除光标后内容命令 / Clear content after cursor command
+  static constexpr char KEY_RIGHT[] = "\033[C";  ///< 右箭头键 / Right arrow key
+  static constexpr char KEY_LEFT[] = "\033[D";   ///< 左箭头键 / Left arrow key
+  static constexpr char KEY_SAVE[] = "\033[s";   ///< 保存光标位置 / Save cursor position
+  static constexpr char KEY_LOAD[] =
+      "\033[u";  ///< 恢复光标位置 / Restore cursor position
   static constexpr char DELETE_CHAR[] =
-      "\b \b";  ///< 退格删除字符 Backspace delete character
+      "\b \b";  ///< 退格删除字符 / Backspace delete character
 
   /**
-   * @brief  反向查找字符串中的特定字符
-   *         Finds a specific character in a string from the end
-   * @param  str 输入字符串 Input string
-   * @param  c 要查找的字符 Character to find
-   * @return char* 指向找到的字符的指针，如果未找到返回 nullptr
-   *         Pointer to the found character, nullptr if not found
+   * @brief 反向查找字符 / Find a character from the end of a string.
+   * @param str 输入字符串 / Input string.
+   * @param c 待查找字符 / Character to find.
+   * @return 最后一次出现的位置，未找到为 nullptr / Last occurrence, or nullptr if absent.
    */
   char* StrchrRev(char* str, char c)
   {
@@ -80,29 +76,24 @@ class Terminal
 
  public:
   /**
-   * @enum Mode
-   * @brief  终端换行模式
-   *         Line feed modes for the terminal
+   * @brief 终端换行模式 / Terminal line ending mode.
    */
   enum class Mode : uint8_t
   {
-    CRLF = 0,  ///< 回车换行 Carriage Return + Line Feed (\r\n)
-    LF = 1,    ///< 仅换行 Line Feed (\n)
-    CR = 2     ///< 仅回车 Carriage Return (\r)
+    CRLF = 0,  ///< 回车换行 / Carriage Return + Line Feed (\r\n)
+    LF = 1,    ///< 仅换行 / Line Feed (\n)
+    CR = 2     ///< 仅回车 / Carriage Return (\r)
   };
 
   /**
-   * @brief  终端构造函数，初始化文件系统、I/O 端口和当前目录
-   *         Constructor to initialize the terminal with file system, I/O ports, and
-   * current directory
-   * @param  ramfs 关联的 RamFS 文件系统 Associated RamFS file system
-   * @param  current_dir 当前目录（默认为根目录）Current directory (default: root)
-   * @param  read_port 读取端口（默认使用标准输入）Read port (default: standard input)
-   * @param  write_port 写入端口（默认使用标准输出）Write port (default: standard output)
-   * @param  MODE 终端换行模式（默认 CRLF）Terminal line feed mode (default: CRLF)
-   *
-   * @note 包含动态内存分配。
-   *       Contains dynamic memory allocation.
+   * @brief 初始化终端的文件系统和读写端口
+   *        / Initialize the terminal filesystem and ports.
+   * @param ramfs 关联的文件系统 / Associated filesystem.
+   * @param current_dir 当前目录，默认根目录 / Current directory; defaults to the root.
+   * @param read_port 读端口，默认标准输入 / Read port; defaults to standard input.
+   * @param write_port 写端口，默认标准输出 / Write port; defaults to standard output.
+   * @param MODE 换行模式，默认 CRLF / Line ending mode; defaults to CRLF.
+   * @note 构造时分配存储 / Allocates storage during construction.
    */
   Terminal(LibXR::RamFS& ramfs, RamFS::Dir* current_dir = nullptr,
            ReadPort* read_port = STDIO::read_, WritePort* write_port = STDIO::write_,
@@ -140,56 +131,53 @@ class Terminal
     }
   }
 
-  ReadOperation::OperationPollingStatus read_status_;
-  WriteOperation::OperationPollingStatus
-      write_status_;  ///< 当前读/写轮询状态 / Current polling status of the read / write
-                      ///< side.
+  /// 读完成方发布、轮询入口读取的状态 / Read completion status used by the polling entry.
+  std::atomic<ReadOperation::OperationPollingStatus> read_status_;
+  /// 写完成方发布的轮询状态 / Polling status published by write completion.
+  std::atomic<WriteOperation::OperationPollingStatus> write_status_;
 
-  const Mode MODE;                  ///< 终端换行模式 Terminal line feed mode
-  WriteOperation write_op_;         ///< 终端写操作 Terminal write operation
-  ReadPort* read_port_;             ///< 读取端口 Read port
-  WritePort* write_port_;           ///< 写入端口 Write port
-  WritePort::Stream write_stream_;  ///< 写入流 Write stream
+  const Mode MODE;                  ///< 终端换行模式 / Terminal line feed mode
+  WriteOperation write_op_;         ///< 终端写操作 / Terminal write operation
+  ReadPort* read_port_;             ///< 读取端口 / Read port
+  WritePort* write_port_;           ///< 写入端口 / Write port
+  WritePort::Stream write_stream_;  ///< 写入流 / Write stream
 
-  LibXR::Mutex* write_mutex_ = nullptr;  ///< 写入端口互斥锁 Write port mutex
+  LibXR::Mutex* write_mutex_ = nullptr;  ///< 写入端口互斥锁 / Write port mutex
 
-  RamFS& ramfs_;                    ///< 关联的文件系统 Associated file system
-  char read_buff_[READ_BUFF_SIZE];  ///< 读取缓冲区 Read buffer
+  RamFS& ramfs_;                    ///< 关联的文件系统 / Associated file system
+  char read_buff_[READ_BUFF_SIZE];  ///< 读取缓冲区 / Read buffer
 
   size_t request_read_size_ =
       0;  ///< 本轮计划读取的字节数 / Byte count requested for the current read attempt.
-  RamFS::Dir* current_dir_;        ///< 当前目录 Current directory
+  RamFS::Dir* current_dir_;        ///< 当前目录 / Current directory
   uint8_t flag_ansi_ = 0;          ///< ANSI 控制字符状态 ANSI control character state
-  int offset_ = 0;                 ///< 光标偏移 Cursor offset
-  Stack<char> input_line_;         ///< 输入行缓冲区 Input line buffer
-  char* arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 Command argument list
-  size_t arg_number_ = 0;          ///< 参数数量 Number of arguments
-  Queue<HistoryLine> history_;     ///< 历史命令 History of commands
-  int history_index_ = -1;         ///< 当前历史索引 Current history index
+  int offset_ = 0;                 ///< 光标偏移 / Cursor offset
+  Stack<char> input_line_;         ///< 输入行缓冲区 / Input line buffer
+  char* arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 / Command argument list
+  size_t arg_number_ = 0;          ///< 参数数量 / Number of arguments
+  Queue<HistoryLine> history_;     ///< 历史命令 / History of commands
+  int history_index_ = -1;         ///< 当前历史索引 / Current history index
   bool linefeed_flag_ = false;     ///< CRLF 抑制标志 CRLF suppression flag
-  char linefeed_char_ = '\0';      ///< 上一个换行字符 Previous line feed character
+  char linefeed_char_ = '\0';      ///< 上一个换行字符 / Previous line feed character
 
   /**
-   * @brief  行编辑、显示与历史记录片段
-   *         Line-editing, display, and history-management fragment
+   * @brief 行编辑、显示与历史记录实现 / Line editing, display, and command history.
    */
 #include "display.hpp"
 
   /**
-   * @brief  路径解析、命令执行与自动补全片段
-   *         Path-resolution, command-execution, and auto-completion fragment
+   * @brief 路径解析、命令执行与补全实现
+   *        / Path parsing, command execution, and completion.
    */
 #include "command.hpp"
 
   /**
-   * @brief  输入字节解析与 ANSI / 控制字符分发片段
-   *         Input-byte parsing plus ANSI / control-character dispatch fragment
+   * @brief 输入与控制字符解析实现 / Input and control-character parsing.
    */
 #include "input.hpp"
 
   /**
-   * @brief  线程 / 轮询驱动入口片段
-   *         Threaded / polling driver-entry fragment
+   * @brief 线程与轮询入口实现 / Thread and polling entry point implementations.
    */
 #include "driver.hpp"
 };
