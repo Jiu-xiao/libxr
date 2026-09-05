@@ -121,7 +121,7 @@ bool IRAM_ATTR ESP32UART::DmaTxEofCallback(gdma_channel_handle_t, gdma_event_dat
   auto* uart = static_cast<ESP32UART*>(user_data);
   if (uart != nullptr)
   {
-    uart->tx_dma_model_.OnTransferDone(true);
+    uart->OnTxTransferDone(true, ErrorCode::OK);
   }
   return false;
 }
@@ -146,13 +146,9 @@ bool IRAM_ATTR ESP32UART::DmaRxDoneCallback(gdma_channel_handle_t,
                                             void* user_data)
 {
   auto* uart = static_cast<ESP32UART*>(user_data);
-  if ((uart != nullptr) && uart->rx_config_gate_.TryEnterRx())
+  if (uart != nullptr)
   {
     uart->HandleDmaRxDone(event_data);
-    if (uart->rx_config_gate_.LeaveRx())
-    {
-      uart->tx_dma_model_.RequestConfig(true);
-    }
   }
   return false;
 }
@@ -163,13 +159,9 @@ bool IRAM_ATTR ESP32UART::DmaRxDescrErrCallback(gdma_channel_handle_t, gdma_even
                                                 void* user_data)
 {
   auto* uart = static_cast<ESP32UART*>(user_data);
-  if ((uart != nullptr) && uart->rx_config_gate_.TryEnterRx())
+  if (uart != nullptr)
   {
     uart->HandleDmaRxError();
-    if (uart->rx_config_gate_.LeaveRx())
-    {
-      uart->tx_dma_model_.RequestConfig(true);
-    }
   }
   return false;
 }
@@ -260,7 +252,7 @@ ErrorCode ESP32UART::InitDmaBackend()
     }
 
     gdma_buffer_mount_config_t tx_mount = {
-        .buffer = tx_dma_model_.Buffer(i),
+        .buffer = tx_dma_buffer_.Buffer(i),
         .buffer_alignment = tx_dma_alignment,
         .length = 1,
         .flags =
@@ -400,24 +392,43 @@ ErrorCode ESP32UART::InitDmaBackend()
 // TX DMA start only patches the dynamic fields of the pre-mounted descriptor
 // list, so the hot path avoids rebuilding descriptors for every request.
 // TX DMA 启动时只修改预挂载描述符链的动态字段，避免每次请求都重建描述符。
-bool IRAM_ATTR ESP32UART::StartDmaTx(uint8_t* data, size_t size, int block)
+bool IRAM_ATTR ESP32UART::StartDmaTx()
 {
-  if ((tx_dma_channel_ == nullptr) || (data == nullptr) || (size == 0U) ||
-      (size > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM) || ((block != 0) && (block != 1)) ||
-      (tx_dma_head_addr_[block] == 0U))
+  if ((tx_dma_channel_ == nullptr) || !tx_active_valid_)
   {
     return false;
   }
 
-  auto* desc = LinkItemFromHeadAddr(tx_dma_head_addr_[block]);
+  uint8_t* const active_buffer = tx_dma_buffer_.ActiveBuffer();
+  const size_t active_len = tx_active_length_;
+  if ((active_buffer == nullptr) || (active_len == 0) ||
+      (active_len > DMA_MAX_BUFFER_SIZE_PER_LINK_ITEM))
+  {
+    return false;
+  }
+
+  const int link_index = tx_dma_buffer_.ActiveBlock();
+  if ((link_index != 0) && (link_index != 1))
+  {
+    return false;
+  }
+
+  if (tx_dma_head_addr_[link_index] == 0U)
+  {
+    return false;
+  }
+
+  auto* desc = LinkItemFromHeadAddr(tx_dma_head_addr_[link_index]);
   if (desc == nullptr)
   {
     return false;
   }
 
-  desc->buffer = data;
-  desc->dw0.size = static_cast<uint32_t>(size);
-  desc->dw0.length = static_cast<uint32_t>(size);
+  // Keep descriptor list pre-mounted and only patch the dynamic transfer length in-place.
+  // 描述符链保持预挂载，只就地更新本次传输长度。
+  desc->buffer = active_buffer;
+  desc->dw0.size = static_cast<uint32_t>(active_len);
+  desc->dw0.length = static_cast<uint32_t>(active_len);
   desc->dw0.err_eof = 0U;
   desc->dw0.suc_eof = 1U;
   desc->dw0.owner = GDMA_OWNER_DMA;
@@ -425,13 +436,13 @@ bool IRAM_ATTR ESP32UART::StartDmaTx(uint8_t* data, size_t size, int block)
   std::atomic_thread_fence(std::memory_order_release);
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
-  if (!CacheSyncDmaBuffer(data, size, true))
+  if (!CacheSyncDmaBuffer(active_buffer, active_len, true))
   {
     return false;
   }
 #endif
 
-  return gdma_start(tx_dma_channel_, tx_dma_head_addr_[block]) == ESP_OK;
+  return gdma_start(tx_dma_channel_, tx_dma_head_addr_[link_index]) == ESP_OK;
 }
 
 // RX DMA completion can span multiple ring nodes, so consume at most one full
@@ -511,9 +522,9 @@ void IRAM_ATTR ESP32UART::HandleDmaRxError()
   (void)gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_));
 }
 
-// TX DMA recovery aborts the current hardware transfer before the common terminal
-// path advances a ready pending request.
-// TX DMA 恢复先中止当前硬件传输，再由公共终止路径推进 ready pending 请求。
+// TX DMA recovery aborts the current hardware transfer and lets the common TX
+// completion path clean up the software state.
+// TX DMA 恢复会中止当前硬件传输，再交给公共 TX 完成路径清理软件状态。
 void IRAM_ATTR ESP32UART::HandleDmaTxError()
 {
   if (tx_dma_channel_ != nullptr)
@@ -521,7 +532,7 @@ void IRAM_ATTR ESP32UART::HandleDmaTxError()
     gdma_stop(tx_dma_channel_);
     gdma_reset(tx_dma_channel_);
   }
-  tx_dma_model_.OnTransferError(true);
+  OnTxTransferDone(true, ErrorCode::FAILED);
 }
 
 }  // namespace LibXR
