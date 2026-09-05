@@ -135,6 +135,27 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
+   * @brief 通过一次双 span 回调生产有界元素前缀 / Produce a bounded element prefix.
+   * @param limit 最多提供的元素数 / Maximum offered element count.
+   * @param writer 返回已写入的前缀元素数 / Returns the written prefix element count.
+   * @note 遵循 SPSCQueueBase 的回调生命周期和唯一 producer 约束 /
+   *       Follows SPSCQueueBase callback lifetime and sole-producer requirements.
+   */
+  template <typename Writer>
+  size_t ProduceWithWriter(size_t limit, Writer&& writer)
+  {
+    static_assert(std::is_trivially_copyable_v<Data>);
+    static_assert(std::is_trivially_destructible_v<Data>);
+    return SPSCQueueBase::ProduceWithWriter(
+        limit,
+        [&](void* first, size_t first_size, void* second, size_t second_size) -> size_t
+        {
+          return writer(static_cast<Data*>(first), first_size, static_cast<Data*>(second),
+                        second_size);
+        });
+  }
+
+  /**
    * @brief 通过读取器回调弹出一个 payload。
    * @brief Pop one payload via a reader callback.
    * @tparam Reader 读取器类型。 Reader callback type.
@@ -189,6 +210,28 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
     return SPSCQueueBase::PopBytesWithReader(
         size, [&](const void* buffer, size_t count) -> ErrorCode
         { return reader_ref(static_cast<const Data*>(buffer), count); });
+  }
+
+  /**
+   * @brief 通过一次双 span 回调消费有界元素前缀 / Consume a bounded element prefix.
+   * @param limit 最多提供的元素数 / Maximum offered element count.
+   * @param reader 返回已接受的前缀元素数 / Returns the accepted prefix element count.
+   * @note 遵循 SPSCQueueBase 的回调生命周期和唯一 consumer 约束 /
+   *       Follows SPSCQueueBase callback lifetime and sole-consumer requirements.
+   */
+  template <typename Reader>
+  size_t ConsumeWithReader(size_t limit, Reader&& reader)
+  {
+    static_assert(std::is_trivially_copyable_v<Data>);
+    static_assert(std::is_trivially_destructible_v<Data>);
+    return SPSCQueueBase::ConsumeWithReader(
+        limit,
+        [&](const void* first, size_t first_size, const void* second,
+            size_t second_size) -> size_t
+        {
+          return reader(static_cast<const Data*>(first), first_size,
+                        static_cast<const Data*>(second), second_size);
+        });
   }
 
   /**

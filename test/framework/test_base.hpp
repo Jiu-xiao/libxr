@@ -29,6 +29,8 @@ void test_message_packet();
 void test_message_topic();
 void test_queue();
 void test_spsc_queue();
+void test_spsc_prefix();
+void test_serialized_service();
 void test_rbt();
 void test_ramfs();
 void test_semaphore();
