@@ -60,6 +60,7 @@ void TestInputCrLfAndHistory()
   ASSERT(two_count == 2);
 
   fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
+  fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
   auto older_history = fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
   ASSERT(older_history.find("one") != std::string::npos);
   auto move_forward_history = fixture.SendRaw(KEY_DOWN, sizeof(KEY_DOWN) - 1);
