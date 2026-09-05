@@ -20,41 +20,11 @@
 
 namespace
 {
-LibXR::ErrorCode PendingWriteFun(LibXR::WritePort&, bool)
-{
-  return LibXR::ErrorCode::PENDING;
-}
-
-LibXR::ErrorCode PendingReadFun(LibXR::ReadPort&, bool)
-{
-  return LibXR::ErrorCode::PENDING;
-}
-
-LibXR::ErrorCode FailWriteFun(LibXR::WritePort& port, bool)
-{
-  LibXR::WriteInfoBlock info;
-  auto pop_ans = port.queue_info_->Pop(info);
-  if (pop_ans != LibXR::ErrorCode::OK)
-  {
-    return pop_ans;
-  }
-
-  auto drop_ans = port.queue_data_->PopBatch(nullptr, info.data.size_);
-  UNUSED(drop_ans);
-  ASSERT(drop_ans == LibXR::ErrorCode::OK);
-  return LibXR::ErrorCode::INIT_ERR;
-}
-
-LibXR::ErrorCode FailReadFun(LibXR::ReadPort&, bool)
-{
-  return LibXR::ErrorCode::INIT_ERR;
-}
+void PendingWriteFun(LibXR::WritePort&, bool) {}
 struct TrackingReadPort : LibXR::ReadPort
 {
   using LibXR::ReadPort::ReadPort;
-  using LibXR::ReadPort::operator=;
-
-  void OnRxDequeue(bool) override { dequeue_count++; }
+  void OnReadQueueSpaceAvailable(bool) override { dequeue_count++; }
 
   uint32_t dequeue_count = 0;
 };
@@ -72,7 +42,6 @@ void VerifyPendingReadMode(TestMode mode)
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   std::vector<uint8_t> tx = {0x42, 0x73, 0x8A, 0xC1};
   std::vector<uint8_t> rx(4, 0x7A);
@@ -90,7 +59,6 @@ void VerifyPendingReadMode(TestMode mode)
     ExpectWaitOk(done);
     JoinThreadIfNeeded(finisher);
     ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
     return;
   }
 
@@ -98,14 +66,16 @@ void VerifyPendingReadMode(TestMode mode)
   ASSERT(call_result == ErrorCode::OK);
   read.ExpectPendingSubmitted();
 
-  ASSERT(r.queue_data_->PushBatch(tx.data(), tx.size()) == ErrorCode::OK);
-  r.ProcessPendingReads(false);
+  {
+    auto queue = r.GetReadQueue(false);
+    ASSERT(queue.PushBatch(tx.data(), tx.size()) == ErrorCode::OK);
+    queue.Publish();
+  }
   if (mode != TestMode::NONE)
   {
     read.ExpectFinal(ErrorCode::OK);
   }
   ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 /**
@@ -137,22 +107,32 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
 
     ExpectWaitOk(done);
     JoinThreadIfNeeded(finisher);
-    ASSERT(w.queue_info_->Size() == 0);
+    ASSERT(w.Size() == 0);
     return;
   }
 
   auto call_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
   ASSERT(call_result == ErrorCode::OK);
 
-  WriteInfoBlock info{};
-  ASSERT(w.queue_info_->Pop(info) == ErrorCode::OK);
-  ASSERT(w.queue_data_->PopBatch(nullptr, info.data.size_) == ErrorCode::OK);
-  w.Finish(false, result, info);
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    if (result == ErrorCode::OK)
+    {
+      static uint8_t sink[16];
+      ASSERT(queue.AvailableSize() <= sizeof(sink));
+      queue.PopAll(sink);
+    }
+    else
+    {
+      queue.FailFront(result);
+    }
+  }
   if (mode != TestMode::NONE)
   {
     write.ExpectFinal(result);
   }
-  ASSERT(w.queue_info_->Size() == 0);
+  ASSERT(w.Size() == 0);
 }
 
 /**
@@ -169,7 +149,6 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   uint8_t rx[4] = {0x7A, 0x7B, 0x7C, 0x7D};
   static const uint8_t STALE_EXPECT[] = {0x7A, 0x7B, 0x7C, 0x7D};
@@ -179,14 +158,13 @@ void VerifyPendingReadFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   ASSERT(call_result == ErrorCode::OK);
   read.ExpectPendingSubmitted();
 
-  r.FailAndClearAll(reason, false);
+  ASSERT(r.ClearQueuedData(false) == ErrorCode::OK);
 
   if (mode != TestMode::NONE)
   {
     read.ExpectFinal(reason);
   }
   ASSERT(std::memcmp(rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
   ASSERT(r.Size() == 0);
 }
 
@@ -213,15 +191,17 @@ void VerifyPendingWriteFailAndClearMode(TestMode mode, LibXR::ErrorCode reason)
   ASSERT(call_result == ErrorCode::OK);
   write.ExpectPendingSubmitted();
 
-  w.FailAndClearAll(reason, false);
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    queue.FailFront(reason);
+  }
 
   if (mode != TestMode::NONE)
   {
     write.ExpectFinal(reason);
   }
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
   ASSERT(w.Size() == 0);
-  ASSERT(w.queue_info_->Size() == 0);
 }
 
 }  // namespace

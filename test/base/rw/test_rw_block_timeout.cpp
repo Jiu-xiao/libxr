@@ -51,8 +51,6 @@ void test_rw_block_read_timeout_detaches_pending()
   WriteOperation wop;
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
   ASSERT(ec == ErrorCode::OK);
-  r.ProcessPendingReads(false);
-
   ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
   ASSERT(sem.Value() == 0);
 
@@ -89,19 +87,26 @@ void test_rw_block_write_timeout_detaches_waiter()
   ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem1.Value() == 0);
 
+  static uint8_t sink[sizeof(TX1)] = {};
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    queue.PopAll(sink);
+  }
+
   Semaphore sem2;
   WriteOperation op2(sem2, 0);
   ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::BUSY);
+  ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem2.Value() == 0);
 
-  WriteInfoBlock completed{};
-  ASSERT(w.queue_info_->Pop(completed) == ErrorCode::OK);
-  w.Finish(false, ErrorCode::OK, completed);
+  static uint8_t sink2[sizeof(TX2)] = {};
+  {
+    auto queue = w.GetWriteQueue(false);
+    ASSERT(!queue.Empty());
+    queue.PopAll(sink2);
+  }
   ASSERT(sem1.Value() == 0);
-
-  ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::TIMEOUT);
   ASSERT(sem2.Value() == 0);
 }
 
@@ -112,46 +117,29 @@ void test_rw_block_write_timeout_detaches_waiter()
  * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
  * Validate the module contract through the scenarios assembled in this file.
  */
-void test_rw_immediate_error_propagates()
+void test_rw_admission_and_capacity_errors()
 {
-  // 测试内容：立即失败路径应在每种模式下直接返回错误，且端口状态恢复为空闲。
-  // Test coverage: immediate failure paths should return errors directly in every mode
-  // and restore idle port state.
   using namespace LibXR;
 
-  for (auto mode : LibXRTest::ALL_MODES)
-  {
-    ReadPort r(16);
-    r = FailReadFun;
+  ReadPort unbound(0);
+  ReadOperation read_op;
+  uint8_t byte = 0;
+  ASSERT(unbound(RawData{&byte, 1}, read_op) == ErrorCode::NOT_SUPPORT);
+  ASSERT(unbound(RawData{nullptr, 0}, read_op) == ErrorCode::NOT_SUPPORT);
 
-    uint8_t rx[1] = {0};
-    LibXRTest::ReadHarness read(mode, 0);
-    auto ec = r(RawData{rx, sizeof(rx)}, read.op);
-    ASSERT(ec == ErrorCode::INIT_ERR);
-    if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
-    {
-      read.ExpectFinal(ErrorCode::INIT_ERR);
-    }
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
-  }
+  ReadPort read(1);
+  ASSERT(read(RawData{&byte, 2}, read_op) == ErrorCode::SIZE_ERR);
+  ASSERT(read.Size() == 0);
 
-  static const uint8_t TX[] = {0x55};
-  for (auto mode : LibXRTest::ALL_MODES)
-  {
-    WritePort w(2, 16);
-    w = FailWriteFun;
+  WritePort unconfigured(2, 1);
+  WriteOperation write_op;
+  ASSERT(unconfigured(ConstRawData{&byte, 1}, write_op) == ErrorCode::NOT_SUPPORT);
 
-    LibXRTest::WriteHarness write(mode, 0);
-    auto ec = w(ConstRawData{TX, sizeof(TX)}, write.op);
-    ASSERT(ec == ErrorCode::INIT_ERR);
-    if (mode != LibXRTest::TestMode::NONE && mode != LibXRTest::TestMode::BLOCK)
-    {
-      write.ExpectFinal(ErrorCode::INIT_ERR);
-    }
-    ASSERT(w.Size() == 0);
-    ASSERT(w.queue_info_->Size() == 0);
-    ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
-  }
+  WritePort full(2, 1);
+  full = PendingWriteFun;
+  const uint8_t pair[2] = {0x55, 0x66};
+  ASSERT(full(ConstRawData{pair, sizeof(pair)}, write_op) == ErrorCode::FULL);
+  ASSERT(full.Size() == 0);
 }
 
 }  // namespace
@@ -168,5 +156,5 @@ void RunBaseRwBlockTimeoutTests()
 {
   test_rw_block_read_timeout_detaches_pending();
   test_rw_block_write_timeout_detaches_waiter();
-  test_rw_immediate_error_propagates();
+  test_rw_admission_and_capacity_errors();
 }

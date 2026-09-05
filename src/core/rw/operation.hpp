@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
 #include "libxr_cb.hpp"
@@ -13,11 +14,11 @@ namespace LibXR
 {
 
 /**
- * @brief Defines an operation with different execution modes.
- * @brief 定义了一种具有不同执行模式的操作。
+ * @brief Completion notification descriptor for an operation.
+ * @brief 操作的完成通知描述符。
  *
- * @tparam Args The parameter types for callback operations.
- * @tparam Args 用于回调操作的参数类型。
+ * @tparam Args The callback argument type.
+ * @tparam Args 回调参数类型。
  */
 template <typename Args>
 class Operation
@@ -80,88 +81,33 @@ class Operation
    * @brief 构造轮询操作。
    * @param status Reference to polling status.
    */
-  Operation(OperationPollingStatus& status)
+  Operation(std::atomic<OperationPollingStatus>& status)
       : data{.status = &status}, type(OperationType::POLLING)
   {
   }
 
-  Operation(const Operation& op) : data{nullptr}, type(OperationType::NONE)
-  {
-    *this = op;
-  }
-
-  Operation(Operation&& op) noexcept : data{nullptr}, type(OperationType::NONE)
-  {
-    *this = std::move(op);
-  }
+  Operation(const Operation&) = default;
+  Operation(Operation&&) noexcept = default;
 
   /**
    * @brief Copy assignment operator.
    * @brief 复制赋值运算符。
-   * @param op Another Operation instance.
    * @return Reference to this operation.
    */
-  Operation& operator=(const Operation& op)
-  {
-    if (this != &op)
-    {
-      type = op.type;
-      switch (type)
-      {
-        case OperationType::CALLBACK:
-          data.callback = op.data.callback;
-          break;
-        case OperationType::BLOCK:
-          data.sem_info.sem = op.data.sem_info.sem;
-          data.sem_info.timeout = op.data.sem_info.timeout;
-          break;
-        case OperationType::POLLING:
-          data.status = op.data.status;
-          break;
-        case OperationType::NONE:
-          data.callback = nullptr;
-          break;
-      }
-    }
-    return *this;
-  }
+  Operation& operator=(const Operation&) = default;
 
   /**
    * @brief Move assignment operator.
    * @brief 移动赋值运算符。
-   * @param op Another Operation instance.
    * @return Reference to this operation.
    */
-  Operation& operator=(Operation&& op) noexcept
-  {
-    if (this != &op)
-    {
-      type = op.type;
-      switch (type)
-      {
-        case OperationType::CALLBACK:
-          data.callback = op.data.callback;
-          break;
-        case OperationType::BLOCK:
-          data.sem_info.sem = op.data.sem_info.sem;
-          data.sem_info.timeout = op.data.sem_info.timeout;
-          break;
-        case OperationType::POLLING:
-          data.status = op.data.status;
-          break;
-        case OperationType::NONE:
-          data.callback = nullptr;
-          break;
-      }
-    }
-    return *this;
-  }
+  Operation& operator=(Operation&&) noexcept = default;
 
   /**
    * @brief Updates operation status based on type.
    * @brief 根据类型更新操作状态。
    * @param in_isr Indicates if executed within an interrupt.
-   * @param args Parameters passed to the callback.
+   * @param status Completion status reported by the operation.
    */
   template <typename Status>
   void UpdateStatus(bool in_isr, Status&& status)
@@ -178,8 +124,9 @@ class Operation
         data.sem_info.sem->PostFromCallback(in_isr);
         break;
       case OperationType::POLLING:
-        *data.status = (status == ErrorCode::OK) ? OperationPollingStatus::DONE
-                                                 : OperationPollingStatus::ERROR;
+        data.status->store((status == ErrorCode::OK) ? OperationPollingStatus::DONE
+                                                     : OperationPollingStatus::ERROR,
+                           std::memory_order_release);
         break;
       case OperationType::NONE:
         break;
@@ -203,7 +150,7 @@ class Operation
   {
     if (type == OperationType::POLLING)
     {
-      *data.status = OperationPollingStatus::RUNNING;
+      data.status->store(OperationPollingStatus::RUNNING, std::memory_order_release);
     }
   }
 
@@ -217,7 +164,7 @@ class Operation
       Semaphore* sem;
       uint32_t timeout;
     } sem_info;
-    OperationPollingStatus* status;
+    std::atomic<OperationPollingStatus>* status;
   } data;
 
   /// Operation type.
@@ -337,44 +284,22 @@ typedef Operation<ErrorCode> ReadOperation;
 /// @brief 写入操作类型。
 typedef Operation<ErrorCode> WriteOperation;
 
-/// @brief Function pointer type for write operations.
-/// @brief 写入操作的函数指针类型。
+// RW metadata is stored in the byte-backed SPSC ring, so its pointer/enum
+// operation descriptor must remain safe for representation copying.
+// RW 元数据存放在字节型 SPSC 环中，因此其指针/枚举操作描述必须保持可平凡复制。
+static_assert(std::is_trivially_copyable_v<ReadOperation>);
+static_assert(std::is_trivially_copyable_v<WriteOperation>);
+static_assert(std::is_trivially_destructible_v<ReadOperation>);
+static_assert(std::is_trivially_destructible_v<WriteOperation>);
+
+/// @brief Function pointer type for write progress notifications.
+/// @brief 写入进度通知函数指针类型。
 ///
-/// The current write has already been queued before this function is called. PENDING
-/// means the backend owns later completion through Finish(); non-PENDING means the
-/// current queued op was consumed/completed synchronously. Negative non-PENDING values
-/// report a synchronous start failure and must not leave that op in the queue.
-/// 调用该函数前，当前写入已经进入队列。PENDING 表示后端之后通过 Finish() 完成；
-/// 非 PENDING 表示当前 queued op 已被同步消费/完成。负数非 PENDING 表示同步启动失败，
-/// 且不得把该 op 留在队列中。
-typedef ErrorCode (*WriteFun)(WritePort& port, bool in_isr);
-
-/// @brief Function pointer type for read notifications.
-/// @brief 读取通知函数指针类型。
-///
-/// A successful return arms or notifies the backend only. It must not complete the read
-/// directly; producers complete reads by pushing bytes into queue_data_ and calling
-/// ProcessPendingReads(). Any non-negative return means accepted/armed; negative values
-/// mean failure.
-/// 成功返回只表示已通知或挂起底层接收，不得直接完成本次读；producer 必须先把字节写入
-/// queue_data_，再调用 ProcessPendingReads()
-/// 完成读取。返回值非负表示已接受/已挂起，负值表示失败。
-typedef ErrorCode (*ReadFun)(ReadPort& port, bool in_isr);
-
-/**
- * @brief Read information block structure.
- * @brief 读取信息块结构。
- */
-typedef struct
-{
-  RawData data;      ///< Data buffer. 数据缓冲区。
-  ReadOperation op;  ///< Read operation instance. 读取操作实例。
-} ReadInfoBlock;
-
-typedef struct
-{
-  ConstRawData data;  ///< Data buffer. 数据缓冲区。
-  WriteOperation op;  ///< Write operation instance. 写入操作实例。
-} WriteInfoBlock;
+/// The request has already reached the WritePort software queue before this callback
+/// runs. The backend consumes it through WriteQueue and completes it through scope
+/// settlement; the callback has no synchronous result channel.
+/// 调用本通知前，请求已经进入 WritePort 软件队列。后端通过 WriteQueue 消费，并由
+/// scope 结算完成；本回调不提供同步结果通道。
+typedef void (*WriteFun)(WritePort& port, bool in_isr);
 
 }  // namespace LibXR

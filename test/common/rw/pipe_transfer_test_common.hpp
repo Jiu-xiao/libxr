@@ -133,7 +133,6 @@ void VerifyPendingReadThenWrite(TestMode read_mode, TestMode write_mode, size_t 
   }
 
   ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 void VerifyWriteThenRead(TestMode write_mode, TestMode read_mode, size_t size,

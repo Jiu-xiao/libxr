@@ -74,16 +74,10 @@ struct ReadQueueCompletionContext
  */
 void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
-  while (ctx.port->busy_.load(std::memory_order_acquire) !=
-         LibXR::ReadPort::BusyState::PENDING)
-  {
-    LibXR::Thread::Yield();
-  }
-
-  auto ans = ctx.port->queue_data_->PushBatch(ctx.data, ctx.size);
-  UNUSED(ans);
+  auto queue = ctx.port->GetReadQueue(false);
+  auto ans = queue.PushBatch(ctx.data, ctx.size);
   ASSERT(ans == LibXR::ErrorCode::OK);
-  ctx.port->ProcessPendingReads(false);
+  queue.Publish();
   ctx.done->Post();
 }
 
@@ -104,14 +98,27 @@ struct WriteFinishContext
  */
 void FinishPendingWrite(WriteFinishContext ctx)
 {
-  LibXR::WriteInfoBlock completed{};
-
-  while (ctx.port->queue_info_->Pop(completed) != LibXR::ErrorCode::OK)
+  static uint8_t sink[4096];
+  for (;;)
   {
-    LibXR::Thread::Yield();
-  }
+    auto queue = ctx.port->GetWriteQueue(false);
+    if (queue.Empty())
+    {
+      LibXR::Thread::Yield();
+      continue;
+    }
 
-  ctx.port->Finish(false, ctx.result, completed);
+    if (ctx.result == LibXR::ErrorCode::OK)
+    {
+      ASSERT(queue.AvailableSize() <= sizeof(sink));
+      queue.PopAll(sink);
+    }
+    else
+    {
+      queue.FailFront(ctx.result);
+    }
+    break;
+  }
   ctx.done->Post();
 }
 

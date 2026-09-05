@@ -2,6 +2,9 @@
 
 #include <emscripten.h>
 
+#include <algorithm>
+#include <cstring>
+
 #include "libxr_assert.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
@@ -9,10 +12,19 @@
 #include "list.hpp"
 #include "queue.hpp"
 #include "semaphore.hpp"
+#include "serialized_service.hpp"
 #include "thread.hpp"
 #include "timebase.hpp"
 #include "timer.hpp"
 #include "webasm_timebase.hpp"
+
+static constexpr size_t webasm_stdio_queue_bytes = 4096;
+
+namespace
+{
+constexpr uint32_t EVENT_WRITE = 1U;
+LibXR::SerializedService webasm_write_service;
+}  // namespace
 
 extern "C"
 {
@@ -21,57 +33,75 @@ extern "C"
   {
     if (LibXR::STDIO::read_ && LibXR::STDIO::read_->Readable())
     {
-      LibXR::STDIO::read_->queue_data_->PushBatch(
-          reinterpret_cast<const uint8_t*>(js_input), strlen(js_input));
-      LibXR::STDIO::read_->ProcessPendingReads(false);
+      auto queue = LibXR::STDIO::read_->GetReadQueue(false);
+      const size_t size = strlen(js_input);
+      const size_t accepted = std::min(size, queue.EmptySize());
+      if (accepted != 0U)
+      {
+        REQUIRE(queue.PushBatch(reinterpret_cast<const uint8_t*>(js_input), accepted) ==
+                LibXR::ErrorCode::OK);
+      }
+      queue.Publish();
     }
   }
 }
-
-static constexpr size_t webasm_stdio_queue_bytes = 4096;
 
 void LibXR::PlatformInit()
 {
   static LibXR::WebAsmTimebase libxr_webasm_timebase;
 
-  auto write_fun = [](WritePort& port, bool)
+  auto write_fun = [](WritePort& port, bool in_isr)
   {
-    static uint8_t write_buff[webasm_stdio_queue_bytes];
-    WriteInfoBlock info;
-    if (port.queue_info_->Pop(info) != LibXR::ErrorCode::OK)
-    {
-      return LibXR::ErrorCode::EMPTY;
-    }
-
-    auto pop_ans = port.queue_data_->PopBatch(write_buff, info.data.size_);
-    if (pop_ans != LibXR::ErrorCode::OK)
-    {
-      return pop_ans;
-    }
-
-    EM_ASM(
+    webasm_write_service.Invoke(
+        EVENT_WRITE, in_isr,
+        [&port](uint32_t, bool owner_in_isr)
         {
-          var ptr = $0;
-          var len = $1;
-          for (var i = 0; i < len; i++)
+          for (;;)
           {
-            Module.put_char(String.fromCharCode(HEAPU8[ptr + i]));
-          }
-        },
-        reinterpret_cast<uintptr_t>(write_buff), info.data.size_);
+            auto queue = port.GetWriteQueue(owner_in_isr);
+            if (queue.Empty())
+            {
+              return;
+            }
 
-    return LibXR::ErrorCode::OK;
+            const size_t offered = queue.AvailableSize();
+            const size_t accepted = queue.PopWithWriter(
+                offered,
+                [](const uint8_t* first, size_t first_size, const uint8_t* second,
+                   size_t second_size) -> size_t
+                {
+                  auto emit = [](const uint8_t* data, size_t size)
+                  {
+                    if (size == 0U)
+                    {
+                      return;
+                    }
+                    EM_ASM(
+                        {
+                          var ptr = $0;
+                          var len = $1;
+                          for (var i = 0; i < len; i++)
+                          {
+                            Module.put_char(String.fromCharCode(HEAPU8[ptr + i]));
+                          }
+                        },
+                        reinterpret_cast<uintptr_t>(data), size);
+                  };
+
+                  emit(first, first_size);
+                  emit(second, second_size);
+                  return first_size + second_size;
+                });
+            REQUIRE(accepted == offered);
+          }
+        });
   };
 
   LibXR::STDIO::write_ = new LibXR::WritePort(32, webasm_stdio_queue_bytes);
 
   *LibXR::STDIO::write_ = write_fun;
 
-  auto read_fun = [](ReadPort&, bool) { return LibXR::ErrorCode::PENDING; };
-
   LibXR::STDIO::read_ = new LibXR::ReadPort(webasm_stdio_queue_bytes);
-
-  *LibXR::STDIO::read_ = read_fun;
 }
 
 void LibXR::Timer::RefreshTimerInIdle()

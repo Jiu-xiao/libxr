@@ -1,34 +1,40 @@
 #include "write_port.hpp"
 
+#include <cstring>
 #include <new>
 
 using namespace LibXR;
 
-template class LibXR::SPSCQueue<WriteInfoBlock>;
-template class LibXR::SPSCQueue<uint8_t>;
-
 WritePort::WritePort(size_t queue_size, size_t buffer_size)
-    : queue_info_(new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
-                      SPSCQueue<WriteInfoBlock>(queue_size)),
-      queue_data_(buffer_size > 0 ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
-                                        SPSCQueue<uint8_t>(buffer_size)
-                                  : nullptr)
+    : queue_requests_(queue_size != 0U
+                          ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
+                                SPSCQueue<Request>(ValidateQueueSize(queue_size))
+                          : nullptr),
+      queue_data_(buffer_size != 0U ? new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
+                                          SPSCQueue<uint8_t>(buffer_size)
+                                    : nullptr)
 {
 }
 
-size_t WritePort::EmptySize()
+size_t WritePort::EmptySize() const
 {
-  ASSERT(queue_data_ != nullptr);
-  return queue_data_->EmptySize();
+  return queue_data_ == nullptr ? 0U : queue_data_->EmptySize();
 }
 
-size_t WritePort::Size()
+size_t WritePort::Size() const
 {
-  ASSERT(queue_data_ != nullptr);
-  return queue_data_->Size();
+  return queue_data_ == nullptr ? 0U : queue_data_->Size();
 }
 
-bool WritePort::Writable() { return write_fun_ != nullptr; }
+size_t WritePort::Capacity() const
+{
+  return queue_data_ == nullptr ? 0U : queue_data_->MaxSize();
+}
+
+bool WritePort::Writable() const
+{
+  return queue_data_ != nullptr && write_fun_ != nullptr;
+}
 
 WritePort& WritePort::operator=(WriteFun fun)
 {
@@ -36,349 +42,456 @@ WritePort& WritePort::operator=(WriteFun fun)
   return *this;
 }
 
-void WritePort::Finish(bool in_isr, ErrorCode ans, WriteInfoBlock& info)
+bool WritePort::TryClaimProducer()
 {
-  if (info.op.type == WriteOperation::OperationType::BLOCK)
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  for (;;)
   {
-    block_result_ = ans;
-
-    // Write completion claims the active BLOCK waiter and hands the wakeup to it.
-    // 写完成 claim 当前 BLOCK waiter，并把唤醒交给它。
-    BusyState expected = BusyState::BLOCK_WAITING;
-    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire))
+    if (GetPhase(observed) != Phase::IDLE)
     {
-      info.op.data.sem_info.sem->PostFromCallback(in_isr);
-      return;
+      return false;
     }
 
-    // The waiter may have timed out and detached before this late completion is
-    // reported.
-    // waiter 可能已经先超时分离，随后迟到完成才上报。
-    if (expected == BusyState::BLOCK_PUBLISHING)
+    const uint32_t desired = WithPhase(observed, Phase::LOCKED);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
     {
-      expected = BusyState::BLOCK_PUBLISHING;
-      if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_CLAIMED,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire))
-      {
-        info.op.data.sem_info.sem->PostFromCallback(in_isr);
-        return;
-      }
+      return true;
     }
-
-    ASSERT(expected == BusyState::BLOCK_DETACHED || expected == BusyState::IDLE ||
-           expected == BusyState::LOCKED || expected == BusyState::RESETTING);
-    if (expected == BusyState::BLOCK_DETACHED)
-    {
-      expected = BusyState::BLOCK_DETACHED;
-      (void)busy_.compare_exchange_strong(expected, BusyState::IDLE,
-                                          std::memory_order_acq_rel,
-                                          std::memory_order_acquire);
-    }
-    return;
   }
-
-  info.op.UpdateStatus(in_isr, ans);
 }
 
-void WritePort::MarkAsRunning(WriteOperation& op) { op.MarkAsRunning(); }
-
-ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_isr)
+void WritePort::ReleaseProducer(Phase next, bool in_isr)
 {
-  if (Writable())
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  for (;;)
   {
-    if (data.size_ == 0)
+    REQUIRE_FROM_CALLBACK(GetPhase(observed) == Phase::LOCKED, in_isr);
+    const uint32_t desired = WithPhase(observed, next);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
     {
-      if (op.type != WriteOperation::OperationType::BLOCK)
-      {
-        op.UpdateStatus(in_isr, ErrorCode::OK);
-      }
-      return ErrorCode::OK;
+      return;
     }
+  }
+}
 
-    BusyState expected = BusyState::IDLE;
-    if (!busy_.compare_exchange_strong(expected, BusyState::LOCKED,
-                                       std::memory_order_acq_rel,
-                                       std::memory_order_acquire))
+void WritePort::PublishQueuedRequest(Phase next, bool in_isr)
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  for (;;)
+  {
+    REQUIRE_FROM_CALLBACK(GetPhase(observed) == Phase::LOCKED, in_isr);
+    const uint32_t released = GetReleasedCount(observed);
+    REQUIRE_FROM_CALLBACK(released < MAX_RELEASED_REQUESTS, in_isr);
+    const uint32_t desired = MakeState(next, released + 1U);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
     {
-      return ErrorCode::BUSY;
+      return;
     }
+  }
+}
 
-    return CommitWrite(data, op, false, in_isr);
+void WritePort::DecrementReleasedRequest(bool in_isr)
+{
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  for (;;)
+  {
+    REQUIRE_FROM_CALLBACK(GetReleasedCount(observed) != 0U, in_isr);
+    const uint32_t desired = observed - RELEASED_INCREMENT;
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      return;
+    }
+  }
+}
+
+void WritePort::NotifyBackend(bool in_isr)
+{
+  if (write_fun_ != nullptr)
+  {
+    write_fun_(*this, in_isr);
+  }
+}
+
+WritePort::WriteQueue WritePort::GetWriteQueue(bool in_isr)
+{
+  REQUIRE_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
+
+  if (GetReleasedCount(state_.load(std::memory_order_acquire)) == 0U)
+  {
+    REQUIRE_FROM_CALLBACK(front_remaining_ == 0U, in_isr);
+    return WriteQueue(*this, in_isr, 0U);
+  }
+
+  Request request{};
+  REQUIRE_FROM_CALLBACK(queue_requests_->Peek(request) == ErrorCode::OK, in_isr);
+  if (front_remaining_ == 0U)
+  {
+    REQUIRE_FROM_CALLBACK(request.size != 0U, in_isr);
+    front_remaining_ = request.size;
   }
   else
   {
-    return ErrorCode::NOT_SUPPORT;
+    REQUIRE_FROM_CALLBACK(front_remaining_ <= request.size, in_isr);
   }
+
+  return WriteQueue(*this, in_isr, front_remaining_);
 }
 
-ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool meta_pushed,
-                                 bool in_isr)
+void WritePort::WriteQueue::PopAll(uint8_t* destination)
 {
-  if (!meta_pushed && queue_info_->EmptySize() < 1)
-  {
-    busy_.store(BusyState::IDLE, std::memory_order_release);
-    return ErrorCode::FULL;
-  }
+  BeginAction();
+  const size_t remaining = AvailableSize();
+  REQUIRE_FROM_CALLBACK(remaining != 0U, in_isr_);
+  REQUIRE_FROM_CALLBACK(destination != nullptr, in_isr_);
 
-  ErrorCode ans = ErrorCode::OK;
-  if (!meta_pushed)
-  {
-    if (queue_data_->EmptySize() < data.size_)
-    {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return ErrorCode::FULL;
-    }
-
-    ans =
-        queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
-    UNUSED(ans);
-    ASSERT(ans == ErrorCode::OK);
-
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      // The BLOCK waiter must be armed before queue_info_ becomes visible to a
-      // backend/completion thread.
-      // queue_info_ 对后端/完成线程可见前，必须先挂起 BLOCK waiter。
-      op.MarkAsRunning();
-      busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
-    }
-
-    WriteInfoBlock info{data, op};
-    ans = queue_info_->Push(info);
-
-    ASSERT(ans == ErrorCode::OK);
-  }
-
-  // Non-BLOCK ops are armed here. BLOCK ops submitted through Stream::SubmitBuffered()
-  // were already armed (MarkAsRunning + BLOCK_PUBLISHING) before the metadata was
-  // published, so the meta_pushed re-arm below is an idempotent no-op kept only to cover
-  // the direct-submit (meta_pushed == false) BLOCK path, which arms via BLOCK_PUBLISHING
-  // above. MarkAsRunning only affects POLLING ops, so re-marking a BLOCK op is harmless.
-  // 非 BLOCK op 在此挂起。经 Stream::SubmitBuffered() 提交的 BLOCK op 在发布元数据前
-  // 已经挂起（MarkAsRunning + BLOCK_PUBLISHING），因此下面 meta_pushed 分支的重复挂起
-  // 是幂等空操作，仅为覆盖直接提交（meta_pushed == false）的 BLOCK 路径而保留。
-  // MarkAsRunning 只对 POLLING op 生效，重复标记 BLOCK op 无副作用。
-  if (op.type != WriteOperation::OperationType::BLOCK)
-  {
-    op.MarkAsRunning();
-  }
-  else if (meta_pushed)
-  {
-    op.MarkAsRunning();
-  }
-
-  if (op.type == WriteOperation::OperationType::BLOCK)
-  {
-    BusyState expected = BusyState::BLOCK_PUBLISHING;
-    if (!busy_.compare_exchange_strong(expected, BusyState::BLOCK_WAITING,
-                                       std::memory_order_acq_rel,
-                                       std::memory_order_acquire))
-    {
-      ASSERT(expected == BusyState::BLOCK_CLAIMED);
-    }
-  }
-
-  ans = write_fun_(*this, in_isr);
-
-  if (ans != ErrorCode::PENDING)
-  {
-    if (op.type == WriteOperation::OperationType::BLOCK)
-    {
-      auto state = busy_.load(std::memory_order_acquire);
-      while (state == BusyState::RESETTING)
+  size_t offset = 0U;
+  const size_t accepted = port_.queue_data_->ConsumeWithReader(
+      remaining,
+      [destination, &offset](const uint8_t* first, size_t first_size,
+                             const uint8_t* second, size_t second_size) -> size_t
       {
-        state = busy_.load(std::memory_order_acquire);
-      }
-
-      if (state == BusyState::BLOCK_CLAIMED)
-      {
-        ErrorCode finish_wait_ans;
-        do
+        if (first_size != 0U)
         {
-          finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-        } while (finish_wait_ans == ErrorCode::TIMEOUT);
-        REQUIRE(finish_wait_ans == ErrorCode::OK);
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-        return block_result_;
-      }
-
-      if (state == BusyState::BLOCK_DETACHED)
-      {
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-        return ErrorCode::TIMEOUT;
-      }
-
-      ASSERT(state == BusyState::BLOCK_WAITING || state == BusyState::IDLE ||
-             state == BusyState::LOCKED);
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return ans;
-    }
-
-    if (!meta_pushed)
-    {
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-    }
-
-    if (op.type != WriteOperation::OperationType::BLOCK)
-    {
-      op.UpdateStatus(in_isr, ans);
-    }
-    return (static_cast<int8_t>(ans) < 0) ? ans : ErrorCode::OK;
-  }
-
-  if (op.type == WriteOperation::OperationType::BLOCK)
-  {
-    ASSERT(!in_isr);
-    auto wait_ans = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    if (wait_ans == ErrorCode::OK)
-    {
-      // BLOCK_CLAIMED is always released by the waiter itself.
-      // BLOCK_CLAIMED 始终由 waiter 自己释放。
-#ifdef LIBXR_DEBUG_BUILD
-      auto state = busy_.load(std::memory_order_acquire);
-      ASSERT(state == BusyState::BLOCK_CLAIMED);
-#endif
-      busy_.store(BusyState::IDLE, std::memory_order_release);
-      return block_result_;
-    }
-
-    // Timeout won before completion claimed the waiter.
-    // 超时先赢，完成侧还没 claim 当前 waiter。
-    BusyState expected = BusyState::BLOCK_WAITING;
-    if (busy_.compare_exchange_strong(expected, BusyState::BLOCK_DETACHED,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire))
-    {
-      return ErrorCode::TIMEOUT;
-    }
-
-    if (expected != BusyState::BLOCK_CLAIMED)
-    {
-      while (expected == BusyState::RESETTING)
-      {
-        expected = busy_.load(std::memory_order_acquire);
-      }
-
-      // A detached late completion may already have cleared BLOCK_DETACHED
-      // back to IDLE before this waiter wakes from timeout.
-      // 分离后的迟到完成可能会在当前 waiter 超时醒来前，先把
-      // BLOCK_DETACHED 清回 IDLE。
-      ASSERT(expected == BusyState::BLOCK_DETACHED || expected == BusyState::IDLE ||
-             expected == BusyState::LOCKED);
-      if (expected == BusyState::BLOCK_DETACHED)
-      {
-        busy_.store(BusyState::IDLE, std::memory_order_release);
-      }
-      return ErrorCode::TIMEOUT;
-    }
-
-    // Timeout lost after completion had already claimed the waiter.
-    // 超时发生得太晚，完成侧已经 claim 了当前 waiter。
-    ErrorCode finish_wait_ans;
-    do
-    {
-      finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-    } while (finish_wait_ans == ErrorCode::TIMEOUT);
-    REQUIRE(finish_wait_ans == ErrorCode::OK);
-    busy_.store(BusyState::IDLE, std::memory_order_release);
-
-    return block_result_;
-  }
-
-  if (!meta_pushed)
-  {
-    busy_.store(BusyState::IDLE, std::memory_order_release);
-  }
-
-  return ErrorCode::OK;
+          std::memcpy(destination + offset, first, first_size);
+          offset += first_size;
+        }
+        if (second_size != 0U)
+        {
+          std::memcpy(destination + offset, second, second_size);
+          offset += second_size;
+        }
+        return first_size + second_size;
+      });
+  REQUIRE_FROM_CALLBACK(accepted == remaining, in_isr_);
+  popped_size_ += accepted;
 }
 
-void WritePort::FailAndClearAll(ErrorCode reason, bool in_isr)
+void WritePort::WriteQueue::FailFront(ErrorCode reason)
 {
-  ASSERT(queue_data_ != nullptr);
-  WriteInfoBlock info{};
+  BeginAction();
+  REQUIRE_FROM_CALLBACK(reason != ErrorCode::OK, in_isr_);
+  REQUIRE_FROM_CALLBACK(front_size_ != 0U, in_isr_);
 
-  while (true)
+  const size_t remaining = AvailableSize();
+  REQUIRE_FROM_CALLBACK(remaining != 0U, in_isr_);
+  if (remaining != 0U)
   {
-    auto state = busy_.load(std::memory_order_acquire);
+    const size_t accepted = port_.queue_data_->ConsumeWithReader(
+        remaining,
+        [](const uint8_t* first, size_t first_size, const uint8_t* second,
+           size_t second_size) -> size_t
+        {
+          UNUSED(first);
+          UNUSED(second);
+          return first_size + second_size;
+        });
+    REQUIRE_FROM_CALLBACK(accepted == remaining, in_isr_);
+    popped_size_ += accepted;
+  }
+  settlement_result_ = reason;
+}
 
-    if (state == BusyState::LOCKED)
-    {
-      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-      return;
-    }
+WritePort::WriteQueue::~WriteQueue() noexcept
+{
+  port_.SettleWriteQueue(popped_size_, settlement_result_, in_isr_);
+}
 
-    if (state == BusyState::BLOCK_PUBLISHING)
-    {
-      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-      return;
-    }
+void WritePort::SettleWriteQueue(size_t accepted, ErrorCode result, bool in_isr) noexcept
+{
+  if (accepted == 0U)
+  {
+    return;
+  }
 
-    if (state == BusyState::RESETTING)
-    {
-      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
-      return;
-    }
+  REQUIRE_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
+  REQUIRE_FROM_CALLBACK(accepted <= front_remaining_, in_isr);
+  front_remaining_ -= accepted;
+  if (front_remaining_ != 0U)
+  {
+    return;
+  }
 
-    if (state == BusyState::IDLE)
+  Request completed{};
+  REQUIRE_FROM_CALLBACK(queue_requests_->Pop(completed) == ErrorCode::OK, in_isr);
+  DecrementReleasedRequest(in_isr);
+  CompleteRequest(completed, result, in_isr);
+}
+
+void WritePort::CompleteRequest(Request& request, ErrorCode result, bool in_isr)
+{
+  if (request.op.type != WriteOperation::OperationType::BLOCK)
+  {
+    request.op.UpdateStatus(in_isr, result);
+    return;
+  }
+
+  for (;;)
+  {
+    uint32_t observed = state_.load(std::memory_order_acquire);
+    const Phase phase = GetPhase(observed);
+    if (phase == Phase::BLOCK_WAITING)
     {
-      BusyState expected = BusyState::IDLE;
-      if (!busy_.compare_exchange_strong(expected, BusyState::RESETTING,
-                                         std::memory_order_acq_rel,
-                                         std::memory_order_acquire))
+      const uint32_t desired = WithPhase(observed, Phase::BLOCK_CLAIMED);
+      if (!state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
       {
         continue;
       }
 
-      queue_data_->Reset();
-      while (queue_info_->Pop(info) == ErrorCode::OK)
-      {
-        Finish(in_isr, reason, info);
-      }
-      block_result_ = ErrorCode::OK;
-      busy_.store(BusyState::IDLE, std::memory_order_release);
+      block_result_ = result;
+      request.op.data.sem_info.sem->PostFromCallback(in_isr);
       return;
     }
 
-    if (state == BusyState::BLOCK_WAITING)
+    if (phase == Phase::BLOCK_DETACHED)
     {
-      // Keep BLOCK_WAITING visible until Finish() hands the terminal wakeup to
-      // the blocked caller. Switching to RESETTING here would break that
-      // existing waiter handoff.
-      // 这里必须保留 BLOCK_WAITING，直到 Finish() 把最终唤醒交给当前
-      // BLOCK waiter；若先切成 RESETTING，会破坏既有 waiter 交接。
-      queue_data_->Reset();
-      while (queue_info_->Pop(info) == ErrorCode::OK)
+      const uint32_t desired = WithPhase(observed, Phase::IDLE);
+      if (!state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
       {
-        Finish(in_isr, reason, info);
+        continue;
       }
       return;
     }
 
-    if (state == BusyState::BLOCK_DETACHED)
+    if (phase == Phase::BLOCK_RETIRE_WAITING)
     {
-      // The waiter is already gone, but BLOCK_DETACHED still blocks reentrant
-      // submissions while old queue entries are drained.
-      // waiter 已经离开，但 BLOCK_DETACHED 仍能在清理旧队列期间挡住重入提交。
-      queue_data_->Reset();
-      while (queue_info_->Pop(info) == ErrorCode::OK)
+      const uint32_t desired = WithPhase(observed, Phase::LOCKED);
+      if (!state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
       {
-        // The waiter has already detached. Finish() will clear the local state
-        // without re-posting that waiter.
-        // waiter 已经分离。Finish() 会清理本地状态，但不会重新唤醒该 waiter。
-        Finish(in_isr, reason, info);
+        continue;
       }
-      block_result_ = ErrorCode::OK;
-      busy_.store(BusyState::IDLE, std::memory_order_release);
+
+      Semaphore* waiter = admission_waiter_;
+      admission_waiter_ = nullptr;
+      REQUIRE_FROM_CALLBACK(waiter != nullptr, in_isr);
+      waiter->PostFromCallback(in_isr);
       return;
     }
 
-    if (state == BusyState::BLOCK_CLAIMED)
+    REQUIRE_FROM_CALLBACK(false, in_isr);
+    return;
+  }
+}
+
+ErrorCode WritePort::CommitQueued(size_t size, WriteOperation& op, bool in_isr)
+{
+  REQUIRE_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
+  REQUIRE_FROM_CALLBACK(queue_data_ != nullptr, in_isr);
+  REQUIRE_FROM_CALLBACK(size != 0U, in_isr);
+
+  Request request{size, op};
+  REQUIRE_FROM_CALLBACK(queue_requests_->Push(request) == ErrorCode::OK, in_isr);
+  request.op.MarkAsRunning();
+
+  PublishQueuedRequest(op.type == WriteOperation::OperationType::BLOCK
+                           ? Phase::BLOCK_WAITING
+                           : Phase::IDLE,
+                       in_isr);
+  NotifyBackend(in_isr);
+
+  return op.type == WriteOperation::OperationType::BLOCK ? WaitForBlock(op)
+                                                         : ErrorCode::OK;
+}
+
+ErrorCode WritePort::CommitAdmission(size_t size, WriteOperation& op, bool in_isr)
+{
+  REQUIRE_FROM_CALLBACK(IsAdmissionMode(), in_isr);
+  REQUIRE_FROM_CALLBACK(size != 0U, in_isr);
+
+  WriteOperation completed = op;
+  completed.MarkAsRunning();
+  NotifyBackend(in_isr);
+  ReleaseProducer(Phase::IDLE, in_isr);
+
+  if (completed.type != WriteOperation::OperationType::BLOCK)
+  {
+    completed.UpdateStatus(in_isr, ErrorCode::OK);
+  }
+  return ErrorCode::OK;
+}
+
+bool WritePort::TryRegisterRetirementWait(WriteOperation& op)
+{
+  REQUIRE(op.type == WriteOperation::OperationType::BLOCK);
+  admission_waiter_ = op.data.sem_info.sem;
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  for (;;)
+  {
+    if (GetPhase(observed) != Phase::BLOCK_DETACHED)
     {
-      return;
+      admission_waiter_ = nullptr;
+      return false;
+    }
+
+    const uint32_t desired = WithPhase(observed, Phase::BLOCK_RETIRE_WAITING);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      return true;
     }
   }
+}
+
+ErrorCode WritePort::WaitForRetirement(WriteOperation& op)
+{
+  if (!TryRegisterRetirementWait(op))
+  {
+    if (LoadPhase() == Phase::IDLE && TryClaimProducer())
+    {
+      return ErrorCode::OK;
+    }
+    return ErrorCode::BUSY;
+  }
+
+  ErrorCode wait_result = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+  if (wait_result == ErrorCode::OK)
+  {
+    REQUIRE(LoadPhase() == Phase::LOCKED);
+    return ErrorCode::OK;
+  }
+
+  for (;;)
+  {
+    uint32_t observed = state_.load(std::memory_order_acquire);
+    const Phase phase = GetPhase(observed);
+    if (phase == Phase::BLOCK_RETIRE_WAITING)
+    {
+      const uint32_t desired = WithPhase(observed, Phase::BLOCK_DETACHED);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        admission_waiter_ = nullptr;
+        return ErrorCode::TIMEOUT;
+      }
+      continue;
+    }
+
+    REQUIRE(phase == Phase::LOCKED);
+    break;
+  }
+
+  do
+  {
+    wait_result = op.data.sem_info.sem->Wait(UINT32_MAX);
+  } while (wait_result == ErrorCode::TIMEOUT);
+  REQUIRE(wait_result == ErrorCode::OK);
+  ReleaseProducer(Phase::IDLE, false);
+  return ErrorCode::TIMEOUT;
+}
+
+ErrorCode WritePort::WaitForBlock(WriteOperation& op)
+{
+  ErrorCode wait_result = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
+  if (wait_result == ErrorCode::OK)
+  {
+    REQUIRE(LoadPhase() == Phase::BLOCK_CLAIMED);
+    const ErrorCode result = block_result_;
+    uint32_t observed = state_.load(std::memory_order_acquire);
+    for (;;)
+    {
+      REQUIRE(GetPhase(observed) == Phase::BLOCK_CLAIMED);
+      const uint32_t desired = WithPhase(observed, Phase::IDLE);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        break;
+      }
+    }
+    return result;
+  }
+
+  for (;;)
+  {
+    uint32_t observed = state_.load(std::memory_order_acquire);
+    const Phase phase = GetPhase(observed);
+    if (phase == Phase::BLOCK_WAITING)
+    {
+      const uint32_t desired = WithPhase(observed, Phase::BLOCK_DETACHED);
+      if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                       std::memory_order_acquire))
+      {
+        return ErrorCode::TIMEOUT;
+      }
+      continue;
+    }
+
+    REQUIRE(phase == Phase::BLOCK_CLAIMED);
+    break;
+  }
+
+  do
+  {
+    wait_result = op.data.sem_info.sem->Wait(UINT32_MAX);
+  } while (wait_result == ErrorCode::TIMEOUT);
+  REQUIRE(wait_result == ErrorCode::OK);
+  const ErrorCode result = block_result_;
+  uint32_t observed = state_.load(std::memory_order_acquire);
+  for (;;)
+  {
+    REQUIRE(GetPhase(observed) == Phase::BLOCK_CLAIMED);
+    const uint32_t desired = WithPhase(observed, Phase::IDLE);
+    if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    {
+      break;
+    }
+  }
+  return result;
+}
+
+ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_isr)
+{
+  if (!Writable())
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  if (data.size_ == 0U)
+  {
+    if (op.type != WriteOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::OK);
+    }
+    return ErrorCode::OK;
+  }
+
+  if (!TryClaimProducer())
+  {
+    if (op.type == WriteOperation::OperationType::BLOCK &&
+        LoadPhase() == Phase::BLOCK_DETACHED && data.size_ <= Capacity())
+    {
+      const ErrorCode retirement = WaitForRetirement(op);
+      if (retirement != ErrorCode::OK)
+      {
+        return retirement;
+      }
+    }
+    else
+    {
+      return ErrorCode::BUSY;
+    }
+  }
+
+  REQUIRE_FROM_CALLBACK(data.addr_ != nullptr, in_isr);
+
+  if (queue_data_->EmptySize() < data.size_ ||
+      (!IsAdmissionMode() && queue_requests_->EmptySize() < 1U))
+  {
+    ReleaseProducer(Phase::IDLE, in_isr);
+    return ErrorCode::FULL;
+  }
+
+  REQUIRE_FROM_CALLBACK(
+      queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_) ==
+          ErrorCode::OK,
+      in_isr);
+
+  return IsAdmissionMode() ? CommitAdmission(data.size_, op, in_isr)
+                           : CommitQueued(data.size_, op, in_isr);
 }

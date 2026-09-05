@@ -33,7 +33,6 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
   for (auto mode : LibXRTest::ALL_MODES)
   {
     TrackingReadPort r(16);
-    r = PendingReadFun;
 
     uint8_t dummy = 0xA0;
     ReadHarness read(mode);
@@ -55,7 +54,6 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
 
     ASSERT(dummy == 0xA0);
     ASSERT(r.dequeue_count == 0);
-    ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
     ASSERT(r.Size() == sizeof(TX));
 
     uint8_t follow_up[sizeof(TX)] = {};
@@ -82,7 +80,6 @@ void test_rw_read_port_block_queue_completion_copies_data()
   using namespace LibXR;
 
   ReadPort r(16);
-  r = PendingReadFun;
 
   static const uint8_t TX[] = {0x5A};
   uint8_t rx[sizeof(TX)] = {0};

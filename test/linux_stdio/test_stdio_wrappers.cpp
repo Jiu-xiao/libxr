@@ -41,7 +41,6 @@ void TestStdioPrintWrappers()
       Fail("format frontend stdio length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx, expected, sizeof(rx)) != 0)
     {
       Fail("format frontend stdio output mismatch");
@@ -75,7 +74,6 @@ void TestStdioPrintWrappers()
       Fail("format frontend stdio stream length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx, expected, sizeof(rx)) != 0)
     {
       Fail("format frontend stdio stream output mismatch");
@@ -106,7 +104,6 @@ void TestStdioPrintWrappers()
       Fail("printf frontend stdio length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx, expected, sizeof(rx)) != 0)
     {
       Fail("printf frontend stdio output mismatch");
@@ -139,7 +136,6 @@ void TestStdioPrintWrappers()
       Fail("printf frontend stdio stream length mismatch");
     }
 
-    read.ProcessPendingReads(false);
     if (std::memcmp(rx, expected, sizeof(rx)) != 0)
     {
       Fail("printf frontend stdio stream output mismatch");
