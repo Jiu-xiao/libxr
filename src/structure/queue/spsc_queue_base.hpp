@@ -268,6 +268,54 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   }
 
   /**
+   * @brief 通过一次双 span 回调生产 payload 前缀 / Produce a payload prefix through one
+   *        two-span writer callback.
+   * @tparam Writer 写入器类型 / Writer callback type.
+   * @param limit 最多提供的 payload 个数 / Maximum number of offered payloads.
+   * @param writer 接收两段存储和元素数，返回已写入的前缀个数 /
+   *        Receives two storage pointers and element counts; returns the written prefix
+   *        count.
+   * @return 实际发布到队列的 payload 个数 / Number of payloads published to the queue.
+   * @pre 队列只有一个 producer；回调期间不得重入同侧操作或 Reset /
+   *      The queue has one producer; no same-side operation or Reset during the callback.
+   * @note 可提供数量为零时不调用回调；第二段为空时指针为 `nullptr`，所有指针只在回调期间
+   *       有效 / The callback is skipped when the offered count is zero; an empty second
+   *       span is `nullptr`, and all pointers are valid only during the callback.
+   */
+  template <typename Writer>
+  size_t ProduceWithWriter(size_t limit, Writer&& writer)
+  {
+    if (limit == 0U)
+    {
+      return 0U;
+    }
+
+    const auto current_tail = tail_.load(std::memory_order_relaxed);
+    const auto current_head = head_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t free_space = (current_tail >= current_head)
+                                  ? (capacity - (current_tail - current_head) - 1U)
+                                  : (current_head - current_tail - 1U);
+    const size_t offered = std::min(limit, free_space);
+    if (offered == 0U)
+    {
+      return 0U;
+    }
+
+    const size_t first_count = std::min(offered, capacity - current_tail);
+    const size_t second_count = offered - first_count;
+    void* const second = second_count == 0U ? nullptr : PayloadPtr(0U);
+    const size_t produced =
+        writer(PayloadPtr(current_tail), first_count, second, second_count);
+    REQUIRE(produced <= offered);
+    if (produced != 0U)
+    {
+      tail_.store((current_tail + produced) % capacity, std::memory_order_release);
+    }
+    return produced;
+  }
+
+  /**
    * @brief 按字节批量出队多个 payload / Dequeue multiple payloads by bytes
    * @param data 用于接收 payload 的字节缓冲区；传 `nullptr` 时仅丢弃
    *        / Byte buffer receiving payloads; pass `nullptr` to discard only
@@ -365,6 +413,54 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
 
     head_.store((current_head + count) % capacity, std::memory_order_release);
     return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 通过一次双 span 回调消费 payload 前缀 / Consume a payload prefix through one
+   *        two-span reader callback.
+   * @tparam Reader 读取器类型 / Reader callback type.
+   * @param limit 最多提供的 payload 个数 / Maximum number of offered payloads.
+   * @param reader 接收两段数据和元素数，返回已接受的前缀个数 /
+   *        Receives two data pointers and element counts; returns the accepted prefix
+   * count.
+   * @return 实际从队列移除的 payload 个数 / Number of payloads removed from the queue.
+   * @pre 队列只有一个 consumer；回调期间不得重入同侧操作或 Reset /
+   *      The queue has one consumer; no same-side operation or Reset during the callback.
+   * @note 可提供数量为零时不调用回调；返回值不得超过可提供数量；所有指针只在回调期间有效
+   * / The callback is skipped when the offered count is zero and must return no more than
+   * the offered count; all pointers are valid only during the callback.
+   */
+  template <typename Reader>
+  size_t ConsumeWithReader(size_t limit, Reader&& reader)
+  {
+    if (limit == 0U)
+    {
+      return 0U;
+    }
+
+    const auto current_head = head_.load(std::memory_order_relaxed);
+    const auto current_tail = tail_.load(std::memory_order_acquire);
+    const size_t capacity = RingCapacity();
+    const size_t available = (current_tail >= current_head)
+                                 ? (current_tail - current_head)
+                                 : (capacity - current_head + current_tail);
+    const size_t offered = std::min(limit, available);
+    if (offered == 0U)
+    {
+      return 0U;
+    }
+
+    const size_t first_count = std::min(offered, capacity - current_head);
+    const size_t second_count = offered - first_count;
+    const void* const second = second_count == 0U ? nullptr : PayloadPtr(0U);
+    const size_t accepted =
+        reader(PayloadPtr(current_head), first_count, second, second_count);
+    REQUIRE(accepted <= offered);
+    if (accepted != 0U)
+    {
+      head_.store((current_head + accepted) % capacity, std::memory_order_release);
+    }
+    return accepted;
   }
 
   /**

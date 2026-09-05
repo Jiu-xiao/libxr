@@ -135,6 +135,35 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
+   * @brief 通过一次双 span 回调生产 payload 前缀 / Produce a payload prefix through one
+   *        two-span writer callback.
+   * @tparam Writer 写入器类型 / Writer callback type.
+   * @param limit 最多提供的 payload 个数 / Maximum number of offered payloads.
+   * @param writer 签名为 `size_t(Data*, size_t, Data*, size_t)`，返回已写入的前缀个数 /
+   *        Callback with signature `size_t(Data*, size_t, Data*, size_t)`; returns the
+   *        written prefix count.
+   * @return 实际发布到队列的 payload 个数 / Number of payloads published to the queue.
+   * @pre 队列只有一个 producer；回调期间不得重入同侧操作或 Reset /
+   *      The queue has one producer; no same-side operation or Reset during the callback.
+   * @note 没有可用空间或 `limit == 0` 时不调用回调；回调指针只在调用期间有效 /
+   *       The callback is skipped when no space is available or `limit == 0`; pointers
+   *       are valid only during the callback.
+   */
+  template <typename Writer>
+  size_t ProduceWithWriter(size_t limit, Writer&& writer)
+  {
+    static_assert(std::is_trivially_copyable_v<Data>);
+    static_assert(std::is_trivially_destructible_v<Data>);
+    return SPSCQueueBase::ProduceWithWriter(
+        limit,
+        [&](void* first, size_t first_size, void* second, size_t second_size) -> size_t
+        {
+          return writer(static_cast<Data*>(first), first_size, static_cast<Data*>(second),
+                        second_size);
+        });
+  }
+
+  /**
    * @brief 通过读取器回调弹出一个 payload。
    * @brief Pop one payload via a reader callback.
    * @tparam Reader 读取器类型。 Reader callback type.
@@ -189,6 +218,36 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
     return SPSCQueueBase::PopBytesWithReader(
         size, [&](const void* buffer, size_t count) -> ErrorCode
         { return reader_ref(static_cast<const Data*>(buffer), count); });
+  }
+
+  /**
+   * @brief 通过一次双 span 回调消费 payload 前缀 / Consume a payload prefix through one
+   *        two-span reader callback.
+   * @tparam Reader 读取器类型 / Reader callback type.
+   * @param limit 最多提供的 payload 个数 / Maximum number of offered payloads.
+   * @param reader 签名为 `size_t(const Data*, size_t, const Data*, size_t)`，返回已接受的
+   *        前缀个数 / Callback with signature `size_t(const Data*, size_t, const Data*,
+   *        size_t)`; returns the accepted prefix count.
+   * @return 实际从队列移除的 payload 个数 / Number of payloads removed from the queue.
+   * @pre 队列只有一个 consumer；回调期间不得重入同侧操作或 Reset /
+   *      The queue has one consumer; no same-side operation or Reset during the callback.
+   * @note 没有可用数据或 `limit == 0` 时不调用回调；回调指针只在调用期间有效 /
+   *       The callback is skipped when no data is available or `limit == 0`; pointers are
+   *       valid only during the callback.
+   */
+  template <typename Reader>
+  size_t ConsumeWithReader(size_t limit, Reader&& reader)
+  {
+    static_assert(std::is_trivially_copyable_v<Data>);
+    static_assert(std::is_trivially_destructible_v<Data>);
+    return SPSCQueueBase::ConsumeWithReader(
+        limit,
+        [&](const void* first, size_t first_size, const void* second,
+            size_t second_size) -> size_t
+        {
+          return reader(static_cast<const Data*>(first), first_size,
+                        static_cast<const Data*>(second), second_size);
+        });
   }
 
   /**

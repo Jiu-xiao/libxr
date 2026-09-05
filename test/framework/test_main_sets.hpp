@@ -71,6 +71,8 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"synchronization_tests", {"semaphore", &RunVoidEntry<test_semaphore>, false}},
     {"synchronization_tests", {"mutex", &RunVoidEntry<test_mutex>, false}},
     {"synchronization_tests", {"async", &RunVoidEntry<test_async>, false}},
+    {"synchronization_tests",
+     {"serialized_service", &RunVoidEntry<test_serialized_service>, false}},
 
     {"utility_tests", {"crc", &RunVoidEntry<test_crc>, false}},
     {"utility_tests", {"encoder", &RunVoidEntry<test_float_encoder>, false}},
@@ -81,6 +83,7 @@ inline constexpr GroupedTestCase kMainTestCases[] = {
     {"data_structure_tests", {"rbt", &RunVoidEntry<test_rbt>, false}},
     {"data_structure_tests", {"queue", &RunVoidEntry<test_queue>, false}},
     {"data_structure_tests", {"spsc_queue", &RunVoidEntry<test_spsc_queue>, false}},
+    {"data_structure_tests", {"spsc_prefix", &RunVoidEntry<test_spsc_prefix>, false}},
     {"data_structure_tests", {"mpmc_queue", &RunVoidEntry<test_mpmc_queue>, false}},
     {"data_structure_tests", {"object_pool", &RunVoidEntry<test_object_pool>, false}},
     {"data_structure_tests", {"stack", &RunVoidEntry<test_stack>, false}},
