@@ -18,6 +18,8 @@ class MSPM0I2C : public I2C
     uint32_t clock_freq;
     uint32_t default_bus_speed_hz;
     uint8_t index;
+    uint8_t dma_tx_channel;
+    uint8_t dma_rx_channel;
   };
 
   MSPM0I2C(Resources res, RawData stage_buffer, uint32_t dma_enable_min_size = 8,
@@ -68,6 +70,7 @@ class MSPM0I2C : public I2C
 
  private:
   static constexpr uint8_t MAX_I2C_INSTANCES = 4;
+  static constexpr uint8_t MAX_DMA_CHANNELS = 16;
   static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
 
   ErrorCode WaitControllerIdle() const;
@@ -94,11 +97,15 @@ class MSPM0I2C : public I2C
   bool dma_enabled_ = false;
 };
 
-#define MSPM0_I2C_INIT(name, stage_addr, stage_size, dma_min_size)                     \
-  ::LibXR::MSPM0I2C::Resources{name##_INST, name##_INST_INT_IRQN,                      \
-                               static_cast<uint32_t>(CPUCLK_FREQ),                     \
-                               static_cast<uint32_t>(name##_BUS_SPEED_HZ),             \
-                               ::LibXR::MSPM0I2C::ResolveIndex(name##_INST_INT_IRQN)}, \
+#define MSPM0_I2C_INIT(name, dma_tx_name, dma_rx_name, stage_addr, stage_size,        \
+                       dma_min_size)                                                  \
+  ::LibXR::MSPM0I2C::Resources{name##_INST,                                           \
+                               name##_INST_INT_IRQN,                                  \
+                               static_cast<uint32_t>(CPUCLK_FREQ),                    \
+                               static_cast<uint32_t>(name##_BUS_SPEED_HZ),            \
+                               ::LibXR::MSPM0I2C::ResolveIndex(name##_INST_INT_IRQN), \
+                               static_cast<uint8_t>(dma_tx_name##_CHAN_ID),           \
+                               static_cast<uint8_t>(dma_rx_name##_CHAN_ID)},          \
       ::LibXR::RawData{(stage_addr), (stage_size)}, (dma_min_size)
 
 }  // namespace LibXR

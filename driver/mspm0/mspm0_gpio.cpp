@@ -112,6 +112,7 @@ void MSPM0GPIO::Write(bool value)
 
 ErrorCode MSPM0GPIO::EnableInterrupt()
 {
+  DL_GPIO_clearInterruptStatus(port_, pin_mask_);
   DL_GPIO_enableInterrupt(port_, pin_mask_);
   return ErrorCode::OK;
 }
@@ -239,7 +240,6 @@ ErrorCode MSPM0GPIO::SetConfig(Configuration config)
       }
 
       DL_GPIO_clearInterruptStatus(port_, pin_mask_);
-      DL_GPIO_enableInterrupt(port_, pin_mask_);
     }
     break;
 

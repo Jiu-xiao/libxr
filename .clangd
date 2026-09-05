@@ -67,7 +67,8 @@ Diagnostics:
       readability-identifier-naming.EnumCase: CamelCase
       readability-identifier-naming.EnumConstantCase: UPPER_CASE
       readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
-      readability-identifier-naming.ConstantCase: UPPER_CASE
+      readability-identifier-naming.ConstantCase: lower_case
+      readability-identifier-naming.ConstexprVariableCase: UPPER_CASE
       readability-identifier-naming.ClassCase: CamelCase
       readability-identifier-naming.StructCase  : CamelCase
       readability-identifier-naming.FunctionCase: lower_case
