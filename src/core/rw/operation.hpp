@@ -286,9 +286,12 @@ class AsyncBlockWait
       return ErrorCode::TIMEOUT;
     }
 
-    auto finish_wait_ans = sem_->Wait(UINT32_MAX);
-    UNUSED(finish_wait_ans);
-    ASSERT(finish_wait_ans == ErrorCode::OK);
+    ErrorCode finish_wait_ans;
+    do
+    {
+      finish_wait_ans = sem_->Wait(UINT32_MAX);
+    } while (finish_wait_ans == ErrorCode::TIMEOUT);
+    REQUIRE(finish_wait_ans == ErrorCode::OK);
     state_.store(State::IDLE, std::memory_order_release);
     return result_;
   }

@@ -195,9 +195,12 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 
       if (state == BusyState::BLOCK_CLAIMED)
       {
-        auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-        UNUSED(finish_wait_ans);
-        ASSERT(finish_wait_ans == ErrorCode::OK);
+        ErrorCode finish_wait_ans;
+        do
+        {
+          finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
+        } while (finish_wait_ans == ErrorCode::TIMEOUT);
+        REQUIRE(finish_wait_ans == ErrorCode::OK);
         busy_.store(BusyState::IDLE, std::memory_order_release);
         return block_result_;
       }
@@ -274,9 +277,12 @@ ErrorCode WritePort::CommitWrite(ConstRawData data, WriteOperation& op, bool met
 
     // Timeout lost after completion had already claimed the waiter.
     // 超时发生得太晚，完成侧已经 claim 了当前 waiter。
-    auto finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
-    UNUSED(finish_wait_ans);
-    ASSERT(finish_wait_ans == ErrorCode::OK);
+    ErrorCode finish_wait_ans;
+    do
+    {
+      finish_wait_ans = op.data.sem_info.sem->Wait(UINT32_MAX);
+    } while (finish_wait_ans == ErrorCode::TIMEOUT);
+    REQUIRE(finish_wait_ans == ErrorCode::OK);
     busy_.store(BusyState::IDLE, std::memory_order_release);
 
     return block_result_;
