@@ -279,8 +279,8 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 重置队列状态。
-   * @brief Reset the queue state.
+   * @brief 从 consumer 侧丢弃当前可见的全部 payload / Discard currently available
+   *        payloads from the consumer side
    */
   void Reset() { SPSCQueueBase::Reset(); }
 };

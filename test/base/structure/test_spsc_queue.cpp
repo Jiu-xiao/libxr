@@ -25,6 +25,13 @@ struct ProducerArg
   std::atomic<bool>* producer_done;
 };
 
+struct ResetProducerArg
+{
+  Queue* queue;
+  std::atomic<bool>* ready;
+  std::atomic<bool>* resume;
+};
+
 void ProducerTask(ProducerArg arg)
 {
   for (uint32_t value = 0; value < arg.total_items; ++value)
@@ -35,6 +42,25 @@ void ProducerTask(ProducerArg arg)
     }
   }
   arg.producer_done->store(true, std::memory_order_release);
+}
+
+void ResetProducerTask(ResetProducerArg arg)
+{
+  const size_t produced = arg.queue->ProduceWithWriter(
+      1U,
+      [&](uint32_t* first, size_t first_size, uint32_t*, size_t second_size)
+      {
+        ASSERT(first_size == 1U);
+        ASSERT(second_size == 0U);
+        first[0] = 99U;
+        arg.ready->store(true, std::memory_order_release);
+        while (!arg.resume->load(std::memory_order_acquire))
+        {
+          LibXR::Thread::Yield();
+        }
+        return 1U;
+      });
+  ASSERT(produced == 1U);
 }
 }  // namespace
 
@@ -154,6 +180,37 @@ void test_spsc_queue()
     ASSERT(queue.Push(pushed) == LibXR::ErrorCode::OK);
     ASSERT(queue.Pop(popped) == LibXR::ErrorCode::OK);
     ASSERT(popped.value == 88);
+  }
+
+  // Hold a producer after it writes an uncommitted slot, then reset from the consumer.
+  {
+    Queue queue(4);
+    ASSERT(queue.Push(10U) == LibXR::ErrorCode::OK);
+    ASSERT(queue.Push(11U) == LibXR::ErrorCode::OK);
+
+    uint32_t value = 0U;
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 10U);
+
+    std::atomic<bool> producer_ready = false;
+    std::atomic<bool> resume_producer = false;
+    LibXR::Thread producer;
+    producer.Create<ResetProducerArg>(
+        ResetProducerArg{&queue, &producer_ready, &resume_producer}, ResetProducerTask,
+        "spsc_reset", 1024, LibXR::Thread::Priority::REALTIME);
+
+    while (!producer_ready.load(std::memory_order_acquire))
+    {
+      LibXR::Thread::Yield();
+    }
+    queue.Reset();
+    resume_producer.store(true, std::memory_order_release);
+
+    ASSERT(producer.Join() == LibXR::ErrorCode::OK);
+    ASSERT(queue.Size() == 1U);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    ASSERT(value == 99U);
+    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
   // Callback failures must not commit partially produced or consumed elements.

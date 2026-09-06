@@ -506,12 +506,21 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
   }
 
   /**
-   * @brief 重置队列状态 / Reset the queue state
+   * @brief 从 consumer 侧丢弃当前可见的全部 payload / Discard all currently available
+   *        payloads from the consumer side
+   *
+   * 本方法读取 producer 已发布的 tail 快照，并将 consumer head 推进到该位置；不会
+   * 写入 tail，因此单个 producer 可以继续运行。与该快照并发发布的 payload 可能被
+   * 丢弃，也可能保留。
+   *
+   * This method snapshots the producer-published tail and advances the consumer
+   * head to it. It never writes tail, so the single producer may continue.
+   * Payloads published concurrently with the snapshot may be discarded or retained.
    */
   void Reset()
   {
-    head_.store(0, std::memory_order_relaxed);
-    tail_.store(0, std::memory_order_relaxed);
+    const auto current_tail = tail_.load(std::memory_order_acquire);
+    head_.store(current_tail, std::memory_order_release);
   }
 
   /**
