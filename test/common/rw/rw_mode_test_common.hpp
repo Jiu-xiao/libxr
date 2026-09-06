@@ -90,7 +90,7 @@ struct ModeHarness
    */
   void Reset()
   {
-    polling_status = PollingStatus::READY;
+    polling_status.store(PollingStatus::READY, std::memory_order_release);
     probe.Reset();
   }
 
@@ -108,7 +108,7 @@ struct ModeHarness
     // Helper coverage: validate the current expected failure or exit condition.
     if (mode == TestMode::POLLING)
     {
-      ASSERT(polling_status == PollingStatus::RUNNING);
+      ASSERT(polling_status.load(std::memory_order_acquire) == PollingStatus::RUNNING);
     }
     else if (mode == TestMode::CALLBACK)
     {
@@ -132,9 +132,9 @@ struct ModeHarness
       case TestMode::NONE:
         return;
       case TestMode::POLLING:
-        ASSERT(polling_status == ((expected == LibXR::ErrorCode::OK)
-                                      ? PollingStatus::DONE
-                                      : PollingStatus::ERROR));
+        ASSERT(polling_status.load(std::memory_order_acquire) ==
+               ((expected == LibXR::ErrorCode::OK) ? PollingStatus::DONE
+                                                   : PollingStatus::ERROR));
         return;
       case TestMode::CALLBACK:
         ASSERT(probe.sem.Wait(ASYNC_TIMEOUT_MS) == LibXR::ErrorCode::OK);
@@ -190,7 +190,7 @@ struct ModeHarness
   }
 
   TestMode mode;
-  PollingStatus polling_status = PollingStatus::READY;
+  std::atomic<PollingStatus> polling_status{PollingStatus::READY};
   CompletionProbe probe;
   CallbackType callback;
   LibXR::Semaphore sem;

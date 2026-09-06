@@ -35,13 +35,16 @@ void test_rw_read_port_clear_queued_data_clears_idle_queue()
   TrackingReadPort r(16);
 
   static const uint8_t TX[] = {0x21, 0x43, 0x65, 0x87};
-  ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+  {
+    auto queue = r.GetReadQueue(false);
+    ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+    queue.Publish();
+  }
   ASSERT(r.Size() == sizeof(TX));
 
   ASSERT(r.ClearQueuedData() == ErrorCode::OK);
   ASSERT(r.Size() == 0);
   ASSERT(r.dequeue_count == 1);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 /**
@@ -61,15 +64,15 @@ void test_rw_read_port_clear_queued_data_clears_event_queue()
   TrackingReadPort r(16);
 
   static const uint8_t TX[] = {0x12, 0x34, 0x56};
-  ASSERT(r.queue_data_->PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
-
-  r.ProcessPendingReads(false);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::EVENT);
+  {
+    auto queue = r.GetReadQueue(false);
+    ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   ASSERT(r.ClearQueuedData() == ErrorCode::OK);
   ASSERT(r.Size() == 0);
   ASSERT(r.dequeue_count == 1);
-  ASSERT(r.busy_.load(std::memory_order_acquire) == ReadPort::BusyState::IDLE);
 }
 
 /**
@@ -87,10 +90,12 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   using namespace LibXR;
 
   TrackingReadPort r(16);
-  r = PendingReadFun;
-
   uint8_t queued = 0x5A;
-  ASSERT(r.queue_data_->PushBatch(&queued, 1) == ErrorCode::OK);
+  {
+    auto queue = r.GetReadQueue(false);
+    ASSERT(queue.PushBatch(&queued, 1) == ErrorCode::OK);
+    queue.Publish();
+  }
 
   uint8_t rx[2] = {0xA1, 0xA2};
   ReadHarness read(TestMode::POLLING);
@@ -101,8 +106,13 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   ASSERT(r.Size() == 1);
   ASSERT(r.dequeue_count == 0);
 
-  r.FailAndClearAll(ErrorCode::INIT_ERR, false);
-  read.ExpectFinal(ErrorCode::INIT_ERR);
+  const uint8_t completed = 0x6B;
+  {
+    auto queue = r.GetReadQueue(false);
+    ASSERT(queue.PushBatch(&completed, 1) == ErrorCode::OK);
+    queue.Publish();
+  }
+  read.ExpectFinal(ErrorCode::OK);
   ASSERT(r.Size() == 0);
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -140,8 +141,8 @@ class Terminal
     }
   }
 
-  ReadOperation::OperationPollingStatus read_status_;
-  WriteOperation::OperationPollingStatus
+  std::atomic<ReadOperation::OperationPollingStatus> read_status_;
+  std::atomic<WriteOperation::OperationPollingStatus>
       write_status_;  ///< 当前读/写轮询状态 / Current polling status of the read / write
                       ///< side.
 

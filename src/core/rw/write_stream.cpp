@@ -2,25 +2,26 @@
 
 using namespace LibXR;
 
-WritePort::Stream::Stream(LibXR::WritePort* port, LibXR::WriteOperation op)
-    : port_(port), op_(op)
+WritePort::Stream::Stream(WritePort* port, WriteOperation op) : port_(port), op_(op)
 {
   UNUSED(Acquire());
 }
 
-// Stream batch helpers.
-// Stream 批次辅助逻辑。
 WritePort::Stream::~Stream()
 {
-  if (owns_port_ && buffered_size_ > 0)
+  if (!owns_port_)
   {
-    UNUSED(SubmitBuffered());
+    return;
   }
 
-  if (owns_port_)
+  if (buffered_size_ != 0U)
   {
-    Release();
+    UNUSED(SubmitBuffered());
+    return;
   }
+
+  Release();
+  CompleteEmpty();
 }
 
 ErrorCode WritePort::Stream::Acquire()
@@ -29,138 +30,113 @@ ErrorCode WritePort::Stream::Acquire()
   {
     return ErrorCode::OK;
   }
-
   if (port_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
   }
-
-  DEV_ASSERT(port_->queue_info_ != nullptr);
-  DEV_ASSERT(port_->queue_data_ != nullptr);
-
   if (!port_->Writable())
   {
     return ErrorCode::NOT_SUPPORT;
   }
-
-  BusyState expected = BusyState::IDLE;
-  if (!port_->busy_.compare_exchange_strong(expected, BusyState::LOCKED,
-                                            std::memory_order_acq_rel,
-                                            std::memory_order_acquire))
+  if (!port_->TryClaimProducer())
   {
     return ErrorCode::BUSY;
   }
 
-  if (port_->queue_info_->EmptySize() < 1)
+  if (!port_->IsAdmissionMode() && port_->queue_requests_->EmptySize() < 1U)
   {
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    port_->ReleaseProducer(WritePort::Phase::IDLE, false);
     return ErrorCode::FULL;
   }
 
   owns_port_ = true;
-  batch_capacity_ = port_->queue_data_->EmptySize();
   return ErrorCode::OK;
 }
 
 ErrorCode WritePort::Stream::Write(ConstRawData data)
 {
-  if (data.size_ == 0)
+  if (port_ == nullptr || !port_->Writable())
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+
+  if (data.size_ == 0U)
   {
     return ErrorCode::OK;
   }
 
-  if (data.addr_ == nullptr)
+  const ErrorCode acquire_result = Acquire();
+  if (acquire_result != ErrorCode::OK)
   {
-    return ErrorCode::PTR_NULL;
+    return acquire_result;
   }
 
-  auto lock_result = Acquire();
-  if (lock_result != ErrorCode::OK)
+  REQUIRE(data.addr_ != nullptr);
+
+  if (port_->queue_data_ == nullptr || port_->queue_data_->EmptySize() < data.size_)
   {
-    return lock_result;
+    return ErrorCode::FULL;
   }
 
-  auto ans = port_->queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_),
-                                           data.size_);
-  if (ans == ErrorCode::OK)
-  {
-    buffered_size_ += data.size_;
-  }
-  return ans;
+  const ErrorCode result = port_->queue_data_->PushBatch(
+      reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
+  REQUIRE(result == ErrorCode::OK);
+  buffered_size_ += data.size_;
+  return ErrorCode::OK;
 }
 
 ErrorCode WritePort::Stream::SubmitBuffered()
 {
-  ASSERT(owns_port_);
-  ASSERT(buffered_size_ > 0);
+  REQUIRE(owns_port_);
+  REQUIRE(buffered_size_ != 0U);
 
-  if (op_.type == WriteOperation::OperationType::BLOCK)
-  {
-    // Publish the wait state before the queued metadata can be consumed.
-    // 元数据可能被消费前，先发布等待状态。
-    op_.MarkAsRunning();
-    port_->busy_.store(BusyState::BLOCK_PUBLISHING, std::memory_order_release);
-  }
-
-  auto ans = port_->queue_info_->Push(
-      WriteInfoBlock{ConstRawData{nullptr, buffered_size_}, op_});
-  ASSERT(ans == ErrorCode::OK);
-
-  ans = port_->CommitWrite({nullptr, buffered_size_}, op_, true);
-  buffered_size_ = 0;
-
-  if (op_.type == WriteOperation::OperationType::BLOCK)
-  {
-    // WritePort now owns the BLOCK wait/finish state machine.
-    // BLOCK 等待/完成状态机此后由 WritePort 接管。
-    owns_port_ = false;
-  }
-
-  return ans;
+  const size_t size = buffered_size_;
+  buffered_size_ = 0U;
+  owns_port_ = false;
+  return port_->IsAdmissionMode() ? port_->CommitAdmission(size, op_, false)
+                                  : port_->CommitQueued(size, op_, false);
 }
 
 void WritePort::Stream::Release()
 {
-  if (owns_port_)
+  if (!owns_port_)
   {
-    owns_port_ = false;
-    port_->busy_.store(BusyState::IDLE, std::memory_order_release);
+    return;
+  }
+  REQUIRE(buffered_size_ == 0U);
+  owns_port_ = false;
+  port_->ReleaseProducer(WritePort::Phase::IDLE, false);
+}
+
+void WritePort::Stream::CompleteEmpty()
+{
+  if (op_.type != WriteOperation::OperationType::BLOCK)
+  {
+    op_.UpdateStatus(false, ErrorCode::OK);
   }
 }
 
 WritePort::Stream& WritePort::Stream::operator<<(const ConstRawData& data)
 {
-  if (Acquire() != ErrorCode::OK)
+  if (Acquire() == ErrorCode::OK && EmptySize() >= data.size_)
   {
-    return *this;
+    UNUSED(Write(data));
   }
-
-  if (EmptySize() < data.size_)
-  {
-    return *this;
-  }
-
-  UNUSED(Write(data));
   return *this;
 }
 
 ErrorCode WritePort::Stream::Commit()
 {
-  auto ans = ErrorCode::OK;
-
-  if (owns_port_ && buffered_size_ > 0)
+  if (!owns_port_)
   {
-    ans = SubmitBuffered();
-    if (op_.type == WriteOperation::OperationType::BLOCK)
-    {
-      return ans;
-    }
+    return ErrorCode::OK;
+  }
+  if (buffered_size_ != 0U)
+  {
+    return SubmitBuffered();
   }
 
-  if (owns_port_)
-  {
-    Release();
-  }
-
-  return ans;
+  Release();
+  CompleteEmpty();
+  return ErrorCode::OK;
 }

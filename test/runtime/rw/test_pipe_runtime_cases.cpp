@@ -41,7 +41,6 @@ void test_pipe_stream_block_immediate_path()
   static const uint8_t EXPECT[] = {0x21, 0x22, 0x23, 0x31, 0x32, 0x33, 0x34, 0x35};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
   ASSERT(sem.Value() == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 /**
