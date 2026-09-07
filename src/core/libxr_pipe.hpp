@@ -1,14 +1,8 @@
 #pragma once
+
 /**
  * @file
- * @brief Pipe：基于共享字节队列将 WritePort → ReadPort 连接起来的单向管道。
- * @brief Pipe: single-direction pipe that bridges WritePort → ReadPort over a shared byte
- * queue.
- *
- * 本类让 WritePort 与 ReadPort 共享同一条无锁字节队列，使写端写入的数据可被读端直接读取，
- * 无需端口间中间拷贝。 This class wires a WritePort and a ReadPort to the same underlying
- * lock-free byte queue so that data written by the writer becomes readable by the reader
- * without intermediate copies.
+ * @brief 共享字节队列的单向管道 / Unidirectional pipe with a shared byte queue.
  */
 
 #include "libxr_def.hpp"
@@ -16,114 +10,78 @@
 
 namespace LibXR
 {
+
 /**
- * @class Pipe
- * @brief 基于共享队列，由 ReadPort + WritePort 组成的单向管道。
- * @brief Single-direction pipe built from ReadPort + WritePort on a shared queue.
+ * @brief 由读写端口组成的单向管道
+ *        / Unidirectional pipe connecting read and write ports.
  *
+ * 写端分配一条 SPSC 字节队列，读端借用该队列，两端之间无需再次复制数据。
+ * 写操作在数据入队并通知读端后完成，无需等待读端消费全部数据。
+ * The writer allocates one SPSC byte queue shared with the reader, without another
+ * copy between endpoints. Writes complete after admission and reader notification,
+ * without waiting for all bytes to be read.
+ *
+ * @note Stream 追加的字节在 Commit 前即可被读端读取，Commit 负责通知挂起读。
+ *       Stream appends are readable before Commit, which notifies pending reads.
+ * @pre 两端遵守 ReadPort 和 WritePort 的调用约定。读端只负责消费共享队列。
+ *      Both endpoints follow their port contracts; the reader only consumes the queue.
  */
 class Pipe
 {
  public:
   /**
-   * @brief 使用指定数据队列容量构造 Pipe。
-   * @brief Construct a Pipe with the given shared data-queue capacity.
-   *
-   * @param buffer_size 共享数据队列的容量（字节）。 Capacity (in bytes) of the shared
-   * data queue.
+   * @brief 构造管道并绑定共享队列 / Construct a pipe and bind its shared queue.
+   * @param buffer_size 共享队列容量，单位为字节，必须大于零。
+   *        Shared queue capacity in bytes, which must be positive.
+   * @note 仅分配字节队列 / Allocates only the byte queue.
    */
-  Pipe(size_t buffer_size) : read_port_(0), write_port_(1, buffer_size)
+  explicit Pipe(size_t buffer_size) : read_port_(0), write_port_(0, buffer_size)
   {
-    // 绑定回调并共享同一数据队列。
-    // Bind callbacks and share the same data queue.
-    read_port_.read_fun_ = ReadFun;
-    write_port_.write_fun_ = WriteFun;
-    read_port_.queue_data_ = write_port_.queue_data_;
+    REQUIRE(write_port_.queue_data_ != nullptr);
+    read_port_.BindQueue(write_port_.queue_data_);
+    write_port_ = &WriteFun;
   }
 
   /**
-   * @brief 析构函数。
-   * @brief Destructor.
+   * @brief 析构管道 / Destroy the pipe.
+   * @pre 相关请求、调用、回调及持有写入权的 Stream 已结束。
+   *      Related requests, calls, callbacks, and owning Streams have ended.
+   * @note 不取消请求，也不释放队列存储 / Does not cancel requests or free queue storage.
    */
-  ~Pipe() {}
+  ~Pipe() = default;
 
-  /**
-   * @brief 禁止拷贝以避免重复绑定状态。
-   * @brief Non-copyable to avoid double-binding internal state.
-   */
+  /// 端口状态与共享队列不可复制 / Endpoint state and the shared queue cannot be copied.
   Pipe(const Pipe&) = delete;
-
-  /**
-   * @brief 禁止拷贝赋值以避免重复绑定状态。
-   * @brief Non-copy-assignable to avoid double-binding internal state.
-   */
   Pipe& operator=(const Pipe&) = delete;
 
   /**
-   * @brief 获取读取端口。
-   * @brief Get the read endpoint.
-   * @return 返回内部 ReadPort 的引用。 Reference to the internal ReadPort.
+   * @brief 获取读端口 / Get the read endpoint.
+   * @return 管道内部读端口的引用 / Reference to the pipe's read port.
    */
   ReadPort& GetReadPort() { return read_port_; }
 
   /**
-   * @brief 获取写入端口。
-   * @brief Get the write endpoint.
-   * @return 返回内部 WritePort 的引用。 Reference to the internal WritePort.
+   * @brief 获取写端口 / Get the write endpoint.
+   * @return 管道内部写端口的引用 / Reference to the pipe's write port.
    */
   WritePort& GetWritePort() { return write_port_; }
 
  private:
   /**
-   * @brief 读端回调（占位，无具体操作）。
-   * @brief Read-side callback (no-op placeholder).
-   *
-   * 仅用于匹配 `ReadPort` 通知签名；实际读取完成始终在 `ProcessPendingReads()` 中进行。
-   * Provided to match the `ReadPort` notification signature; read completion is always
-   * advanced in `ProcessPendingReads()`.
-   *
-   * @param port ReadPort 引用（未使用）。 ReadPort reference (unused).
-   * @param in_isr 是否在中断上下文中运行。 Whether running in ISR context.
-   * @return 返回 `ErrorCode::PENDING`。 Returns `ErrorCode::PENDING`.
+   * @brief 通知读端检查共享队列 / Notify the reader to check the shared queue.
+   * @param port 本管道的写端口 / This pipe's write port.
+   * @param in_isr 当前是否在中断中 / Whether the current call is in an ISR.
+   * @note 此时写端仍持有写入权；可能同步完成挂起读并执行读回调。
+   *       Holds producer access; may complete a read and run its callback inline.
    */
-  static ErrorCode ReadFun(ReadPort&, bool) { return ErrorCode::PENDING; }
-
-  /**
-   * @brief 写端回调：弹出一次写操作并推动读侧处理。
-   * @brief Write-side callback: pop a write op and advance the reader.
-   *
-   * 从写端操作队列中弹出一个 `WriteInfoBlock`，并调用 `ReadPort::ProcessPendingReads()`，
-   * 使挂起的读请求可从共享数据队列中取出字节。
-   * Pops a `WriteInfoBlock` from the write op-queue and calls
-   * `ReadPort::ProcessPendingReads()` so pending reads can pull bytes from the shared
-   * data queue.
-   *
-   * @param port 触发本回调的 WritePort。 The WritePort invoking this callback.
-   * @param in_isr 是否在中断上下文中运行。 Whether running in ISR context.
-   * @return 若已推进返回 `ErrorCode::OK`；若无可处理操作返回 `ErrorCode::EMPTY`。
-   *         Returns `ErrorCode::OK` if progressed; `ErrorCode::EMPTY` if no op was
-   * available.
-   */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr)
+  static void WriteFun(WritePort& port, bool in_isr)
   {
     auto* pipe = LibXR::ContainerOf(&port, &Pipe::write_port_);
-    WriteInfoBlock info;
-    if (port.queue_info_->Pop(info) != ErrorCode::OK)
-    {
-      ASSERT(false);
-      return ErrorCode::EMPTY;
-    }
-
-    // 推动读端从共享队列中取数。
-    // Drive the reader to consume from the shared queue.
-    pipe->read_port_.ProcessPendingReads(in_isr);
-
-    return ErrorCode::OK;
+    pipe->read_port_.NotifyDataAvailable(in_isr);
   }
 
-  ReadPort read_port_;    ///< 共享写端数据队列的读端。 Read endpoint sharing the writer's
-                          ///< data queue.
-  WritePort write_port_;  ///< 持有共享数据队列（容量为构造参数）的写端。 Write endpoint
-                          ///< owning the shared queue.
+  ReadPort read_port_;    ///< 共享队列的消费者 / Shared queue consumer.
+  WritePort write_port_;  ///< 分配队列的生产者 / Producer allocating the queue.
 };
+
 }  // namespace LibXR

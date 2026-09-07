@@ -1,20 +1,14 @@
 /**
  * @file test_pipe_basic.cpp
- * @brief base `Pipe` 基础传输场景子测试。 Split test unit for base `Pipe` basic transport
- * scenarios.
+ * @brief Pipe 读写顺序与分批传输测试 / Pipe ordering and chunked transfer tests.
  */
 #include "rw_test_common.hpp"
 
 /**
- * @brief 测试入口函数 `test_pipe_basic`。 Test entry function `test_pipe_basic`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证后续写入完成挂起读 / Verify that a later write completes a pending read.
  */
 void test_pipe_basic()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -33,21 +27,15 @@ void test_pipe_basic()
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
   ASSERT(ec == ErrorCode::OK);
 
-  r.ProcessPendingReads(false);
   ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
 /**
- * @brief 测试入口函数 `test_pipe_write_then_read`。 Test entry function
- * `test_pipe_write_then_read`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证先写后读的数据一致性
+ *        / Verify payload integrity when writing before reading.
  */
 void test_pipe_write_then_read()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -66,21 +54,15 @@ void test_pipe_write_then_read()
   ec = r(RawData{rx, sizeof(rx)}, rop);
   ASSERT(ec == ErrorCode::OK);
 
-  r.ProcessPendingReads(false);
   ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
 /**
- * @brief 测试入口函数 `test_pipe_chunked_rw`。 Test entry function
- * `test_pipe_chunked_rw`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证两次写入按顺序满足一次读取
+ *        / Verify that two writes satisfy one read in order.
  */
 void test_pipe_chunked_rw()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -103,23 +85,16 @@ void test_pipe_chunked_rw()
   ec = w(ConstRawData{TX2, sizeof(TX2)}, w2);
   ASSERT(ec == ErrorCode::OK);
 
-  r.ProcessPendingReads(false);
-
   static const uint8_t EXPECT[] = {'H', 'e', 'l', 'l', 'o', ' ', 'X', 'R'};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
 /**
- * @brief 测试入口函数 `test_pipe_stream_api`。 Test entry function
- * `test_pipe_stream_api`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证多次追加由一次提交完成读取
+ *        / Verify that one stream commit completes a read.
  */
 void test_pipe_stream_api()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -140,19 +115,12 @@ void test_pipe_stream_api()
   ec = ws.Commit();
   ASSERT(ec == ErrorCode::OK);
 
-  r.ProcessPendingReads(false);
-
   static const uint8_t EXPECT[] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33, 0x44, 0x55};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
 /**
- * @brief 测试项函数 `RunBasePipeBasicTests`。 Test-item function `RunBasePipeBasicTests`.
- * @details 测试内容：执行当前分组里的 `rw`/`pipe` 子场景。 Execute the grouped
- * `rw`/`pipe` sub-scenarios for this split file.
- *          测试原理：把同类状态机场景收在一组，降低单文件体积并保留聚合入口。 Group
- * related state-machine scenarios together to shrink file size while preserving
- * aggregated entrypoints.
+ * @brief 运行 Pipe 基础传输测试 / Run basic Pipe transfer tests.
  */
 void RunBasePipeBasicTests()
 {

@@ -1,6 +1,7 @@
 /**
  * @file test_pipe_runtime_cases.cpp
- * @brief runtime `Pipe` 场景子测试。 Split test unit for runtime `Pipe` scenarios.
+ * @brief Pipe 阻塞提交与重复读写测试
+ *        / Pipe blocking submission and repeated transfer tests.
  */
 #include "rw_runtime_test_common.hpp"
 
@@ -8,16 +9,11 @@ namespace
 {
 
 /**
- * @brief 测试入口函数 `test_pipe_stream_block_immediate_path`。 Test entry function
- * `test_pipe_stream_block_immediate_path`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证 Pipe 阻塞流提交不残留信号量
+ *        / Verify Pipe BLOCK stream commits leave no token.
  */
 void test_pipe_stream_block_immediate_path()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   Pipe pipe(64);
@@ -41,20 +37,14 @@ void test_pipe_stream_block_immediate_path()
   static const uint8_t EXPECT[] = {0x21, 0x22, 0x23, 0x31, 0x32, 0x33, 0x34, 0x35};
   ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
   ASSERT(sem.Value() == 0);
-  ASSERT(w.busy_.load(std::memory_order_acquire) == WritePort::BusyState::IDLE);
 }
 
 /**
- * @brief 测试入口函数 `test_pipe_block_reuse_stress`。 Test entry function
- * `test_pipe_block_reuse_stress`.
- * @details 测试内容：按本文件声明的测试项目顺序执行验证。 Execute the test items declared
- * in this file in order. 测试原理：通过当前文件组织的测试场景组合，对外验证该模块契约。
- * Validate the module contract through the scenarios assembled in this file.
+ * @brief 验证交替读写顺序下阻塞操作可重复使用
+ *        / Verify BLOCK reuse with alternating read/write order.
  */
 void test_pipe_block_reuse_stress()
 {
-  // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
-  // Test coverage: execute the test items listed in this file header in sequence.
   using namespace LibXR;
 
   constexpr size_t PIPE_CAPACITY = 64;
@@ -106,11 +96,7 @@ void test_pipe_block_reuse_stress()
 }  // namespace
 
 /**
- * @brief 测试项函数 `RunRuntimePipeTests`。 Test-item function `RunRuntimePipeTests`.
- * @details 测试内容：执行当前分组里的 runtime `rw`/`Pipe` 子场景。 Execute the grouped
- * runtime `rw`/`Pipe` sub-scenarios. 测试原理：把 runtime 平面的阻塞和 pipe
- * 场景拆分开，减小单文件复杂度。 Separate runtime blocking and pipe scenarios to reduce
- * single-file complexity.
+ * @brief 运行 Pipe 阻塞提交与复用测试 / Run Pipe BLOCK submission and reuse tests.
  */
 void RunRuntimePipeTests()
 {

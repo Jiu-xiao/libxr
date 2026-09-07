@@ -1,16 +1,6 @@
 /**
  * @file rw_thread_test_common.hpp
- * @brief `rw` / `pipe` 线程与等待同步测试 helper。 Shared thread and waiter helpers for
- * `rw` / `pipe` tests.
- * @details 测试项目：
- *          1. 提供线程收尾与等待断言 helper。
- *          2. 提供挂起读写完成、阻塞读写调用的上下文与线程启动封装。
- *          3. 提供把后台补数据/补完成的动作统一包装成可复用 helper。
- *          Test items:
- *          1. Provide thread-settle and wait assertion helpers.
- *          2. Provide contexts and starters for pending completion and blocking
- * read/write calls.
- *          3. Wrap background completion actions into reusable helpers.
+ * @brief RW 测试线程与等待辅助函数 / Thread and wait helpers for RW tests.
  */
 #pragma once
 
@@ -27,31 +17,18 @@ using LibXRTest::TestMode;
 using LibXRTest::WriteHarness;
 
 /**
- * @brief 辅助函数 `JoinThreadIfNeeded`。 Helper function `JoinThreadIfNeeded`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
+ * @brief 等待测试线程结束并检查结果 / Join a test thread and check success.
  */
 inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
-  // 辅助内容：为后续测试准备或校验共享状态。
-  // Helper coverage: prepare or validate shared state for later tests.
   ASSERT(thread.Join() == LibXR::ErrorCode::OK);
 }
 
 /**
- * @brief 断言辅助函数 `ExpectWaitOk`。 Assertion helper function `ExpectWaitOk`.
- * @details 测试内容：对当前结果施加统一的期望检查。 Apply one unified expectation check
- * to the current result. 测试原理：把重复判定逻辑收口，避免各测试项使用不一致的检查标准。
- * Concentrate repeated validation logic so test items do not drift to inconsistent
- * checks.
+ * @brief 检查信号量在指定时间内唤醒 / Check semaphore wakeup within the timeout.
  */
 inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT_MS)
 {
-  // 辅助内容：验证当前失败或退出预期。
-  // Helper coverage: validate the current expected failure or exit condition.
   ASSERT(sem.Wait(timeout) == LibXR::ErrorCode::OK);
 }
 
@@ -64,26 +41,14 @@ struct ReadQueueCompletionContext
 };
 
 /**
- * @brief 辅助函数 `CompletePendingReadFromQueue`。 Helper function
- * `CompletePendingReadFromQueue`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
+ * @brief 接收入队并发布数据通知 / Queue RX bytes and publish a data notification.
  */
 void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
-  while (ctx.port->busy_.load(std::memory_order_acquire) !=
-         LibXR::ReadPort::BusyState::PENDING)
-  {
-    LibXR::Thread::Yield();
-  }
-
-  auto ans = ctx.port->queue_data_->PushBatch(ctx.data, ctx.size);
-  UNUSED(ans);
+  auto queue = ctx.port->GetReadQueue(false);
+  auto ans = queue.PushBatch(ctx.data, ctx.size);
   ASSERT(ans == LibXR::ErrorCode::OK);
-  ctx.port->ProcessPendingReads(false);
+  queue.Publish();
   ctx.done->Post();
 }
 
@@ -95,23 +60,32 @@ struct WriteFinishContext
 };
 
 /**
- * @brief 辅助函数 `FinishPendingWrite`。 Helper function `FinishPendingWrite`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
+ * @brief 等待队头请求并模拟后端完成
+ *        / Wait for a front request and simulate backend completion.
  */
 void FinishPendingWrite(WriteFinishContext ctx)
 {
-  LibXR::WriteInfoBlock completed{};
-
-  while (ctx.port->queue_info_->Pop(completed) != LibXR::ErrorCode::OK)
+  static uint8_t sink[4096];
+  for (;;)
   {
-    LibXR::Thread::Yield();
-  }
+    auto queue = ctx.port->GetWriteQueue(false);
+    if (queue.Empty())
+    {
+      LibXR::Thread::Yield();
+      continue;
+    }
 
-  ctx.port->Finish(false, ctx.result, completed);
+    if (ctx.result == LibXR::ErrorCode::OK)
+    {
+      ASSERT(queue.AvailableSize() <= sizeof(sink));
+      queue.PopAll(sink);
+    }
+    else
+    {
+      queue.FailFront(ctx.result);
+    }
+    break;
+  }
   ctx.done->Post();
 }
 
@@ -125,12 +99,7 @@ struct BlockingReadCallContext
 };
 
 /**
- * @brief 辅助函数 `BlockingReadCall`。 Helper function `BlockingReadCall`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
+ * @brief 执行阻塞读并记录返回值 / Execute a blocking read and record its result.
  */
 void BlockingReadCall(BlockingReadCallContext* ctx)
 {
@@ -150,12 +119,7 @@ struct BlockingWriteCallContext
 };
 
 /**
- * @brief 辅助函数 `BlockingWriteCall`。 Helper function `BlockingWriteCall`.
- * @details 测试内容：为后续测试准备、转换、统计或校验共享状态。 Prepare, transform,
- * measure, or validate shared state for later test steps.
- *          测试原理：把重复辅助逻辑局部封装，保持测试主体聚焦在测试项本身。 Encapsulate
- * repeated helper logic locally so the main test body stays focused on the test item
- * itself.
+ * @brief 执行阻塞写并记录返回值 / Execute a blocking write and record its result.
  */
 void BlockingWriteCall(BlockingWriteCallContext* ctx)
 {

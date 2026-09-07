@@ -1,34 +1,15 @@
 /**
- * @brief  `Terminal` 的驱动入口片段
- *         Driver-entry fragment of `Terminal`
- *
- * @note 这一组函数只决定“什么时候读、什么时候解析、什么时候提交输出”，不负责
- *       行编辑、命令语义或显示细节。
- *       This group decides only when to read, when to parse, and when to
- *       commit output; it does not own line editing, command semantics, or
- *       display details.
+ * @file
+ * @brief 终端线程与轮询入口 / Thread and polling entry points for Terminal.
  */
 
 /**
- * @brief  终端线程函数，以独立线程方式持续驱动终端
- *         Terminal thread function, continuously drives the terminal as an independent
- * thread
- *
- * @details
- * 该函数用于以独立线程的方式驱动终端，持续从输入流读取数据并解析，适用于高实时性应用。
- * 它会在循环中不断检查输入流的大小，并在数据可用时进行解析。
- *
- * This function runs as a separate thread to continuously drive the terminal,
- * reading and parsing input data in a loop. It is suitable for high real-time
- * applications. It continuously checks the input stream size and processes data when
- * available.
- *
- * @param  term 指向 Terminal 实例的指针 Pointer to the Terminal instance
- * @note 每次真正拿到一批输入后，解析和输出提交都在 `write_mutex_` 保护下完成，
- *       以免和外部写口共享同一个输出流时交错。
- *       Once one input batch is actually obtained, parsing and output commit
- *       are both completed under `write_mutex_` so they do not interleave
- *       with other writers sharing the same output stream.
+ * @brief 在线程中读取输入并驱动终端 / Read input and drive the terminal in a thread.
+ * @param term 终端实例 / Terminal instance.
+ * @note 无数据时通过零长度 BLOCK 读等待队列非空；取得输入后，在 write_mutex_ 保护下
+ *       解析并提交输出。
+ *       With no data, a zero-length BLOCK read waits for a nonempty queue. Received
+ *       input is parsed and output committed under write_mutex_.
  */
 static void ThreadFun(Terminal* term)
 {
@@ -53,24 +34,13 @@ static void ThreadFun(Terminal* term)
 }
 
 /**
- * @brief  终端任务函数，以定时器任务方式驱动终端
- *         Terminal task function, drives the terminal using a scheduled task
- *
- * @details
- * 该函数用于以定时任务（或轮询方式）驱动终端，适用于资源受限的系统。
- * 它不会持续运行，而是在定时器触发或系统任务调度时运行，执行一次数据读取和解析后返回。
- *
- * This function drives the terminal using a scheduled task (or polling mode),
- * making it suitable for resource-constrained systems.
- * Unlike the thread-based approach, it only runs when scheduled
- * (e.g., triggered by a timer) and processes available input data before returning.
- *
- * @param  term 指向 Terminal 实例的指针 Pointer to the Terminal instance
- * @note `TaskFun()` 每次只推进有限一步状态机：发起读取、等待完成、消费完成结果，
- *       然后立即返回给调度方。
- *       `TaskFun()` advances the state machine by only a bounded step each
- *       time: start one read, wait for completion, consume one completed
- *       result, then return to the scheduler immediately.
+ * @brief 检查读取结果并推进终端输入 / Check read completion and advance terminal input.
+ * @param term 终端实例 / Terminal instance.
+ * @note 首次调用发起读取；RUNNING 时返回，DONE 时解析并提交输出，再发起下次读取。
+ *       ERROR 时重新读取。解析和输出提交受 write_mutex_ 保护。
+ *       Starts a read on first use; returns for RUNNING. On DONE, parses and commits
+ *       output, then starts the next read. On ERROR, restarts reading. Parsing and
+ *       output submission hold write_mutex_.
  */
 static void TaskFun(Terminal* term)
 {
@@ -86,7 +56,8 @@ static void TaskFun(Terminal* term)
 
   while (true)
   {
-    switch (term->read_status_)
+    const auto status = term->read_status_.load(std::memory_order_acquire);
+    switch (status)
     {
       case ReadOperation::OperationPollingStatus::READY:
       {
