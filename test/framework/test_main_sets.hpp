@@ -20,6 +20,14 @@ void test_linux_stdio_print();
 void test_linux_database_raw();
 void test_linux_database_sequential();
 void test_linux_shm_topic();
+void test_linux_uart_rx_backpressure();
+void test_linux_uart_tx_backpressure();
+void test_linux_uart_block_timeout();
+void test_linux_uart_callback_write();
+void test_linux_uart_stream_config();
+void test_linux_uart_reconnect();
+void test_linux_uart_partial_disconnect();
+void test_linux_uart_initial_open_recovery();
 
 inline int RunLinuxStdioAndDatabaseSet()
 {
@@ -59,6 +67,24 @@ struct GroupedTestCase
 };
 
 inline constexpr GroupedTestCase kMainTestCases[] = {
+    {"linux_uart_tests",
+     {"uart_rx_space", &RunVoidEntry<test_linux_uart_rx_backpressure>, true}},
+    {"linux_uart_tests",
+     {"uart_tx_partial", &RunVoidEntry<test_linux_uart_tx_backpressure>, true}},
+    {"linux_uart_tests",
+     {"uart_block_timeout", &RunVoidEntry<test_linux_uart_block_timeout>, true}},
+    {"linux_uart_tests",
+     {"uart_callback_write", &RunVoidEntry<test_linux_uart_callback_write>, true}},
+    {"linux_uart_tests",
+     {"uart_stream_config", &RunVoidEntry<test_linux_uart_stream_config>, true}},
+    {"linux_uart_tests",
+     {"uart_reconnect", &RunVoidEntry<test_linux_uart_reconnect>, true}},
+    {"linux_uart_tests",
+     {"uart_partial_disconnect", &RunVoidEntry<test_linux_uart_partial_disconnect>,
+      true}},
+    {"linux_uart_tests",
+     {"uart_initial_recovery", &RunVoidEntry<test_linux_uart_initial_open_recovery>,
+      true}},
     {"core_tests", {"assert", &RunVoidEntry<test_assert>, false}},
     {"core_tests", {"def", &RunVoidEntry<test_def>, false}},
     {"core_tests", {"callback", &RunVoidEntry<test_cb>, false}},
