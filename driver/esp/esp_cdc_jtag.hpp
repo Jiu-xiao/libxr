@@ -5,8 +5,8 @@
 
 #include "esp_def.hpp"
 #include "esp_intr_alloc.h"
-#include "esp_tx_double_buffer.hpp"
-#include "flag.hpp"
+#include "esp_private/critical_section.h"
+#include "serialized_service.hpp"
 #include "soc/soc_caps.h"
 #include "uart.hpp"
 
@@ -20,39 +20,24 @@ namespace LibXR
 class ESP32CDCJtag;
 
 /**
- * @brief ESP32 USB Serial/JTAG 读端口 / ESP32 USB Serial/JTAG read port
- *
- * 该读端口在软件队列出队后，回调所属 CDC/JTAG 后端继续尝试排空硬件 RX FIFO。
- * This read port calls back into the owning CDC/JTAG backend after software
- * dequeues so the hardware RX FIFO can be drained again.
+ * @brief 通知 CDC-JTAG 恢复接收的读端口 / Read port that resumes CDC-JTAG RX.
  */
 class ESP32CDCJtagReadPort : public ReadPort
 {
  public:
-  /**
-   * @brief 构造读端口 / Construct the read port
-   *
-   * @param size RX 队列容量（字节） / RX queue capacity in bytes
-   * @param owner 所属 CDC/JTAG 后端 / Owning CDC/JTAG backend
-   */
+  /// 构造接收端口并关联后端 / Construct the RX port associated with its backend.
   explicit ESP32CDCJtagReadPort(size_t size, ESP32CDCJtag& owner)
       : ReadPort(size), owner_(owner)
   {
   }
 
-  /**
-   * @brief 软件队列出队后的回调 / Callback after software RX dequeue
-   */
-  void OnRxDequeue(bool in_isr) override;
-
-  ESP32CDCJtagReadPort& operator=(ReadFun fun)
-  {
-    ReadPort::operator=(fun);
-    return *this;
-  }
+ protected:
+  /// 发布接收空间通知 / Publish RX space availability.
+  void OnReadQueueSpaceAvailable(bool in_isr) override;
 
  private:
-  ESP32CDCJtag& owner_;  ///< 所属 CDC/JTAG 后端 / Owning CDC/JTAG backend
+  /// 所属后端 / Associated backend.
+  ESP32CDCJtag& owner_;
 };
 
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG) && CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
@@ -62,12 +47,14 @@ static_assert(false,
 #endif
 
 /**
- * @brief ESP32 USB Serial/JTAG 后端实现 / ESP32 USB Serial/JTAG backend implementation
+ * @brief 直接使用硬件 FIFO 的 ESP USB Serial/JTAG 后端
+ *        / ESP USB Serial/JTAG backend using the hardware FIFO directly.
  *
- * 该类持有 USB Serial/JTAG 中断源、TX 双缓冲辅助器，以及 UART 基类使用的
- * 队列驱动读写桥。
- * This class owns the USB Serial/JTAG interrupt source, the TX double-buffer
- * helper, and the queue-driven read/write bridge used by the UART base class.
+ * 发送字节进入硬件 FIFO 后从 WriteQueue 消费，接收通过 ReadQueue 发布。
+ * 中断、写入和接收空间通知使用同一个串行处理器；Flash 缓存关闭期间中断会延后。
+ * TX consumes WriteQueue bytes after FIFO acceptance; RX publishes via ReadQueue.
+ * One service handles IRQ, write, and RX-space notifications. Interrupts are deferred
+ * while flash cache is disabled.
  */
 class ESP32CDCJtag : public UART
 {
@@ -75,14 +62,14 @@ class ESP32CDCJtag : public UART
 
  public:
   /**
-   * @brief 构造并初始化 USB Serial/JTAG 后端状态 / Construct and initialize the USB
-   * Serial/JTAG backend state
-   *
-   * @param rx_buffer_size RX 队列容量（字节） / RX queue capacity in bytes
-   * @param tx_buffer_size TX payload 半缓冲大小（字节） / TX payload half-buffer size in
-   * bytes
-   * @param tx_queue_size TX 请求队列深度 / Number of queued TX requests
-   * @param config 初始 UART 帧格式配置 / Initial UART framing configuration
+   * @brief 构造并初始化 USB Serial/JTAG 后端 / Construct the USB Serial/JTAG backend.
+   * @param rx_buffer_size 接收队列容量，须大于零 / Positive RX queue capacity.
+   * @param tx_buffer_size 发送队列容量，须大于零 / Positive TX queue capacity.
+   * @param tx_queue_size 写请求队列容量，须大于零 / Positive request capacity.
+   * @param config 初始配置，仅支持 8 位数据、无校验、1 位停止位 / Initial framing, 8N1
+   * only.
+   * @note 初始化前到达的 FIFO 数据不保留 / Does not preserve pre-initialization FIFO
+   * data.
    */
   explicit ESP32CDCJtag(size_t rx_buffer_size = 1024, size_t tx_buffer_size = 512,
                         uint32_t tx_queue_size = 5,
@@ -90,129 +77,82 @@ class ESP32CDCJtag : public UART
                                                       1});
 
   /**
-   * @brief 应用 UART 帧格式配置 / Apply a UART framing configuration to the backend
+   * @brief 检查虚拟串口帧格式 / Check virtual UART framing.
+   * @param config 目标帧格式 / Requested framing.
+   * @param in_isr 调用上下文，本实现无需使用 / Caller context, unused by this
+   * implementation.
+   * @return 支持 8N1 时返回 OK，否则 ARG_ERR / OK for 8N1, ARG_ERR otherwise.
+   * @note 波特率不改变 USB 传输速度 / Baud rate does not alter USB transfer speed.
    */
   ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
-  /**
-   * @brief 用于 TX 启动的 WritePort 跳板函数 / WritePort trampoline for TX startup
-   */
-  static ErrorCode WriteFun(WritePort& port, bool in_isr);
-
-  /**
-   * @brief USB Serial/JTAG RX 路径的 ReadPort 入口 / ReadPort entry point for the USB
-   * Serial/JTAG RX path
-   */
-  static ErrorCode ReadFun(ReadPort& port, bool in_isr);
+  /// 通知处理已提交写入 / Notify released writes.
+  static void WriteFun(WritePort& port, bool in_isr);
 
  private:
-  /**
-   * @brief USB Serial/JTAG 中断跳板函数 / USB Serial/JTAG ISR trampoline
-   */
-  static void IsrEntry(void* arg);
+  static constexpr uint32_t EVENT_WRITE = 1U << 0U;
+  static constexpr uint32_t EVENT_TX_EMPTY = 1U << 1U;
+  static constexpr uint32_t EVENT_RX_DATA = 1U << 2U;
+  static constexpr uint32_t EVENT_RX_SPACE = 1U << 3U;
 
-  /**
-   * @brief 初始化 USB Serial/JTAG 中断和硬件状态 / Initialize the USB Serial/JTAG
-   * interrupt and hardware state
-   */
+  /// 将中断转发到实例 / Forward an interrupt to its instance.
+  static void IsrEntry(void* arg);
+  /// 分配普通中断并初始化硬件 / Allocate a normal interrupt and initialize hardware.
   ErrorCode InitHardware();
 
-  /**
-   * @brief 分发一批 USB Serial/JTAG 中断 / Dispatch one USB Serial/JTAG interrupt batch
-   */
+  /// 处理已记录的收发进展 / Process recorded I/O progress.
+  void ServiceEvents(uint32_t events, bool in_isr);
+  /// 通知接收空间已释放 / Notify freed RX space.
+  void ResumeRx(bool in_isr);
+  /// 接收数据并按空闲空间重新启用中断 / Receive and rearm according to free space.
+  void ServiceRx(ReadPort::ReadQueue& queue, bool in_isr);
+  /// 只读取软件队列可容纳的数据 / Read only bytes that fit the software queue.
+  void DrainRxToQueue(ReadPort::ReadQueue& queue, bool in_isr);
+  /// 复制本次接收到的字节 / Copy received bytes.
+  void PushRxBytes(ReadPort::ReadQueue& queue, const uint8_t* data, size_t size,
+                   bool in_isr);
+
+  /// 推进 FIFO 写入及满包结束通知 / Progress FIFO writes and full-packet termination.
+  void ProgressTx(bool in_isr);
+  /// 写入队头前缀，返回实际接收量 / Write a front prefix and return accepted bytes.
+  size_t FillTxFifo(WritePort::WriteQueue& queue, bool in_isr);
+  /// 启用发送空间通知 / Enable TX-space interrupts.
+  void ArmTxEmptyInterrupt();
+  /// 停用并清除发送空间通知 / Disable and clear TX-space interrupts.
+  void DisarmTxEmptyInterrupt();
+  /// 提交待发送短包或结束零长度包 / Flush a pending short packet or terminating ZLP.
+  void FlushTxFifo();
+  /// 先确认中断快照，再运行处理器 / Acknowledge the IRQ snapshot before service.
   void HandleInterrupt();
 
-  /**
-   * @brief 尝试将硬件 RX FIFO 数据推进软件队列 / Try draining hardware RX FIFO into the
-   * software queue
-   */
-  void DrainRxToQueue(bool in_isr);
+  /// 启用指定中断源 / Enable selected interrupt sources.
+  void EnableInterrupt(uint32_t mask);
+  /// 屏蔽指定中断源 / Mask selected interrupt sources.
+  void DisableInterrupt(uint32_t mask);
+  /// 清除指定中断状态 / Clear selected interrupt status.
+  void ClearInterrupt(uint32_t mask);
+  /// 屏蔽并清除指定中断 / Mask and clear selected interrupts.
+  void DisableAndClearInterrupt(uint32_t mask);
+  /// 读取并确认受保护的中断快照 / Capture and acknowledge protected IRQ status.
+  uint32_t CaptureInterrupt(uint32_t mask);
 
-  /**
-   * @brief 从队列化的 TX 状态启动发送工作 / Start transmit work from the queued TX state
-   */
-  ErrorCode TryStartTx(bool in_isr);
+  /// 中断句柄 / Interrupt handle.
+  intr_handle_t intr_handle_ = nullptr;
+  /// 硬件是否初始化 / Hardware initialized.
+  bool hw_inited_ = false;
+  /// 发送空间中断是否启用 / TX-space interrupt armed.
+  bool tx_empty_interrupt_armed_ = false;
+  /// 是否还需提交数据包或结束 ZLP / Pending packet flush or terminating ZLP.
+  bool tx_flush_pending_ = false;
 
-  /**
-   * @brief 从队列装载一个 active TX 请求 / Load one active TX request from the queue
-   */
-  bool LoadActiveTxFromQueue(bool in_isr);
-
-  /**
-   * @brief 从队列装载一个 pending TX 请求 / Load one pending TX request from the queue
-   */
-  bool LoadPendingTxFromQueue(bool in_isr);
-
-  /**
-   * @brief 硬件空闲时把 pending TX 提升为 active 状态 / Promote pending TX into active
-   * state if hardware is idle
-   */
-  bool StartPendingTxIfIdle(bool in_isr);
-
-  /**
-   * @brief 将一条排队的 TX payload 拷入选定 slot / Copy one queued TX payload into the
-   * selected slot
-   */
-  bool DequeueTxToSlot(uint8_t* slot, size_t& size, WriteInfoBlock& info, bool in_isr);
-
-  /**
-   * @brief 启动当前 active TX 请求 / Start the current active TX request
-   */
-  bool StartActiveTransfer(bool in_isr);
-
-  /**
-   * @brief 启动 active TX 并上报队列所有权交接 / Start active TX and report queue
-   * ownership transfer
-   */
-  bool StartAndReportActive(bool in_isr);
-
-  /**
-   * @brief 停止 USB Serial/JTAG TX 传输引擎 / Stop the USB Serial/JTAG TX transfer engine
-   */
-  void StopTxTransfer();
-
-  /**
-   * @brief 收尾一次 TX 传输结果 / Finalize one TX transfer result
-   */
-  void OnTxTransferDone(bool in_isr, ErrorCode result);
-
-  /**
-   * @brief 向硬件 TX FIFO 补料 / Pump bytes into the hardware TX FIFO
-   */
-  bool PumpTx(bool in_isr);
-
-  /**
-   * @brief 将收到的字节推入软件读队列 / Push received bytes into the software read queue
-   */
-  void PushRxBytes(const uint8_t* data, size_t size, bool in_isr);
-
-  /**
-   * @brief 清除 active TX 请求状态 / Clear the active TX request state
-   */
-  void ClearActiveTx();
-
-  /**
-   * @brief 清除 pending TX 请求状态 / Clear the pending TX request state
-   */
-  void ClearPendingTx();
-
-  /**
-   * @brief 重置两个 TX slot 和忙标志 / Reset both TX slots and the busy flag
-   */
-  void ResetTxState(bool in_isr);
-
-  UART::Configuration config_;           ///< Current UART framing configuration.
-  uint8_t* tx_slot_storage_ = nullptr;   ///< Backing storage for the TX helper.
-  ESPTxDoubleBuffer tx_double_buffer_;   ///< TX helper for active/pending payloads.
-  intr_handle_t intr_handle_ = nullptr;  ///< Registered interrupt handle.
-  bool intr_installed_ = false;          ///< Whether the interrupt was installed.
-  bool hw_inited_ = false;               ///< Whether hardware initialization completed.
-  Flag::Atomic tx_busy_{};               ///< Hardware TX engine busy flag.
-  Flag::Atomic rx_draining_{};           ///< RX FIFO draining gate.
-  Flag::Plain in_tx_isr_;                ///< Reentry guard while servicing TX IRQs.
-
-  ESP32CDCJtagReadPort _read_port;  ///< Read-side queue bridge exposed to `UART`.
-  WritePort _write_port;            ///< Write-side queue bridge exposed to `UART`.
+  /// 仅保护中断寄存器访问 / Protects interrupt-register access only.
+  DECLARE_CRIT_SECTION_LOCK_IN_STRUCT(irq_lock_)
+  /// 收发进展处理器 / I/O progress service.
+  SerializedService service_{};
+  /// 接收端口 / Read port.
+  ESP32CDCJtagReadPort _read_port;
+  /// 发送端口 / Write port.
+  WritePort _write_port;
 };
 
 }  // namespace LibXR
