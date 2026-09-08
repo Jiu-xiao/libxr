@@ -72,13 +72,13 @@ class ESP32ADC
   void ConfigureAnalogPad(adc_channel_t channel) const;
   bool InitCalibration();
   bool InitOneshot();
+  ContinuousInitResult InitContinuous(uint32_t freq, size_t dma_buf_size);
   float RawToVoltage(uint8_t idx, uint16_t raw) const;
 
 #if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
   static bool IsDigiUnitSupported(adc_unit_t unit);
   static adc_digi_output_format_t ResolveContinuousFormat();
   void DrainContinuousFrames(uint32_t timeout_ms);
-  ContinuousInitResult InitContinuous(uint32_t freq, size_t dma_buf_size);
 #endif
 
   Channel* channels_ = nullptr;
