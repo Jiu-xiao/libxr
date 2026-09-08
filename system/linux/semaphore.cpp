@@ -42,11 +42,8 @@ Semaphore::~Semaphore() { delete semaphore_handle_; }
 
 void Semaphore::Post()
 {
-  const uint32_t prev = semaphore_handle_->count.fetch_add(1, std::memory_order_release);
-  if (prev == 0)
-  {
-    (void)FutexWake(&semaphore_handle_->count, 1);
-  }
+  (void)semaphore_handle_->count.fetch_add(1, std::memory_order_release);
+  (void)FutexWake(&semaphore_handle_->count, 1);
 }
 
 ErrorCode Semaphore::Wait(uint32_t timeout)
