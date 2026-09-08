@@ -18,26 +18,22 @@ static inline void atomic_exit(uint32_t primask_state)
 #define UNUSED(x) (void)(x)
 
 /**
- * @brief  模拟实现 __atomic_compare_exchange_4 函数 / Simulate the
- * __atomic_compare_exchange_4 function
- * @param  ptr 指向原子变量的指针 / Pointer to the atomic variable
- * @param  expected 预期值的指针，如果比较失败会更新为实际值 / Pointer to the expected
- * value, updated with actual value if comparison fails
- * @param  desired 需要交换的新值 / The new value to be stored if the comparison succeeds
- * @param  weak 忽略参数，保留以兼容 / Ignored parameter, kept for compatibility
- * @param  success_memorder 成功时的内存顺序标志（忽略） / Memory order on success
- * (ignored)
- * @param  failure_memorder 失败时的内存顺序标志（忽略） / Memory order on failure
- * (ignored)
- * @retval 返回 1 表示成功，0 表示失败 / Returns 1 on success, 0 on failure
+ * @brief 提供单核 32 位强比较交换 / Provide single-core 32-bit strong compare-exchange.
+ * @param ptr 目标字地址 / Target word address.
+ * @param expected 预期值地址，失败时写回实际值 / Expected value, updated on failure.
+ * @param desired 成功时写入的新值 / New value on success.
+ * @param success_memorder 成功时内存顺序 / Success memory order.
+ * @param failure_memorder 失败时内存顺序 / Failure memory order.
+ * @return 比较相等时返回 true / True when the comparison matches.
+ * @note GCC 定长运行时 ABI 为五个参数，没有 weak 参数；沿用单核中断保护。
+ *       The sized GCC runtime ABI has five arguments, without weak; uses the IRQ guard.
  */
 __attribute__((weak)) _Bool __atomic_compare_exchange_4(volatile void* ptr,
                                                         void* expected,
                                                         unsigned int desired,  // NOLINT
-                                                        _Bool weak, int success_memorder,
+                                                        int success_memorder,
                                                         int failure_memorder)
 {
-  UNUSED(weak);
   UNUSED(success_memorder);
   UNUSED(failure_memorder);
 
@@ -61,6 +57,26 @@ __attribute__((weak)) _Bool __atomic_compare_exchange_4(volatile void* ptr,
 
   atomic_exit(primask);  // 恢复状态
   return result;
+}
+
+/**
+ * @brief 原子置位并返回原值 / Atomically set bits and return the previous value.
+ * @param ptr 目标字地址 / Target word address.
+ * @param val 待置位的掩码 / Bits to set.
+ * @param memorder 内存顺序，本实现使用现有单核临界区 / Ordering; uses the single-core
+ * guard.
+ * @return 更新前的值 / Value before the update.
+ */
+__attribute__((weak)) unsigned int __atomic_fetch_or_4(volatile void* ptr,
+                                                       unsigned int val, int memorder)
+{
+  UNUSED(memorder);
+  volatile unsigned int* addr = (volatile unsigned int*)ptr;
+  const uint32_t primask = atomic_enter();
+  const unsigned int previous = *addr;
+  *addr = previous | val;
+  atomic_exit(primask);
+  return previous;
 }
 
 /**
