@@ -93,7 +93,7 @@ class ESP32UART : public UART
    * @brief Apply a new UART framing and baud configuration.
    * @brief 应用新的 UART 帧格式和波特率配置。
    */
-  ErrorCode SetConfig(UART::Configuration config) override;
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
   /**
    * @brief Toggle UART peripheral internal loopback mode.

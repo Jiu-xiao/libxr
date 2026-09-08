@@ -92,7 +92,7 @@ UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
   return config;
 }
 
-ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
+ErrorCode MSPM0UART::SetConfig(UART::Configuration config, bool)
 {
   if (config.baudrate == 0)
   {

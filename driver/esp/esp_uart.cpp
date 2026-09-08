@@ -182,7 +182,7 @@ void ESP32UART::ConfigureRxInterruptPath()
 // a synthetic BUSY state.
 // 原地重配帧格式，同时保持软件队列模型不变。若 TX 已在进行，则恢复后端，
 // 而不是人为抛出 BUSY 状态。
-ErrorCode ESP32UART::SetConfig(UART::Configuration config)
+ErrorCode ESP32UART::SetConfig(UART::Configuration config, bool)
 {
   if (!uart_hw_enabled_)
   {

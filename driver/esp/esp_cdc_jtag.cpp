@@ -57,7 +57,7 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
 }
 
 // USB Serial/JTAG 只支持固定 8N1 / USB Serial/JTAG only supports fixed 8N1.
-ErrorCode ESP32CDCJtag::SetConfig(UART::Configuration config)
+ErrorCode ESP32CDCJtag::SetConfig(UART::Configuration config, bool)
 {
   if ((config.data_bits != 8) || (config.stop_bits != 1) ||
       (config.parity != UART::Parity::NO_PARITY))

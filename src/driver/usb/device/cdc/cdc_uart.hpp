@@ -306,7 +306,7 @@ class CDCUart : public CDCBase, public LibXR::UART
    * @param cfg UART 配置 / UART configuration
    * @return 错误码 / Error code
    */
-  ErrorCode SetConfig(UART::Configuration cfg) override
+  ErrorCode SetConfig(UART::Configuration cfg, bool = false) override
   {
     auto& line_coding = GetLineCoding();
 

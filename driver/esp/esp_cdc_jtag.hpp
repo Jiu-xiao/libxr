@@ -92,7 +92,7 @@ class ESP32CDCJtag : public UART
   /**
    * @brief 应用 UART 帧格式配置 / Apply a UART framing configuration to the backend
    */
-  ErrorCode SetConfig(UART::Configuration config) override;
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
   /**
    * @brief 用于 TX 启动的 WritePort 跳板函数 / WritePort trampoline for TX startup
