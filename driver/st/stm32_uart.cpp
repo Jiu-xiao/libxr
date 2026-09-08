@@ -242,13 +242,40 @@ void STM32UART::HandleTxService(uint32_t events, bool in_isr)
 
   if (abort_pending_)
   {
+#if defined(LIBXR_STM32_UART_GPDMA)
+    // HAL 自有的 RX 中止通过错误回调通知，因此按硬件状态判断是否全部停止。
+    // HAL-owned RX aborts notify through the error callback; check actual stop state.
+    if (!gpdma_adapter_.AllStopsComplete())
+    {
+      return;
+    }
+    events |= TX_EVENT_ABORT;
+    REQUIRE_FROM_CALLBACK(HAL_UART_Abort(uart_handle_) == HAL_OK, in_isr);
+    if (uart_handle_->hdmatx != nullptr)
+    {
+      STM32GpdmaUartAdapter::FinalizeStopped(uart_handle_->hdmatx, in_isr);
+    }
+    if (uart_handle_->hdmarx != nullptr)
+    {
+      STM32GpdmaUartAdapter::FinalizeStopped(uart_handle_->hdmarx, in_isr);
+    }
+    HandleTxDone(in_isr);
+    if (config_state_.load(std::memory_order_acquire) == ConfigState::PUBLISHED)
+    {
+      ApplyConfig(pending_config_, in_isr);
+      config_state_.store(ConfigState::EMPTY, std::memory_order_release);
+    }
+#else
     if ((events & TX_EVENT_ABORT) == 0U)
     {
       return;
     }
+#endif
     last_rx_pos_ = 0U;
     SetRxDMA(in_isr);
+#if !defined(LIBXR_STM32_UART_GPDMA)
     HandleTxDone(in_isr);
+#endif
     abort_pending_ = false;
   }
   else if ((events & TX_EVENT_ERROR) != 0U)
@@ -256,7 +283,7 @@ void STM32UART::HandleTxService(uint32_t events, bool in_isr)
     // 中止可能同步完成，调用 HAL 前先记录等待状态。
     // Record the wait before calling HAL, which may complete the abort synchronously.
     abort_pending_ = true;
-    REQUIRE_FROM_CALLBACK(HAL_UART_Abort_IT(uart_handle_) == HAL_OK, in_isr);
+    BeginAbort(in_isr);
     return;
   }
   else if ((events & TX_EVENT_DONE) != 0U)
@@ -264,6 +291,12 @@ void STM32UART::HandleTxService(uint32_t events, bool in_isr)
     HandleTxDone(in_isr);
   }
 
+#if defined(LIBXR_STM32_UART_GPDMA)
+  if ((events & TX_EVENT_START_RX) != 0U)
+  {
+    SetRxDMA(in_isr);
+  }
+#endif
   if ((events & TX_EVENT_RX_WORK) != 0U)
   {
     HandleRxData(in_isr);
@@ -370,6 +403,10 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
       dma_buff_tx_(dma_buff_tx),
       uart_handle_(uart_handle),
       id_(stm32_uart_get_id(uart_handle_->Instance))
+#if defined(LIBXR_STM32_UART_GPDMA)
+      ,
+      gpdma_adapter_(uart_handle)
+#endif
 {
   ASSERT(id_ != STM32_UART_ID_ERROR);
 
@@ -379,10 +416,18 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
   {
     REQUIRE(tx_queue_size > 0U);
     ASSERT(uart_handle_->hdmatx != NULL);
+#if defined(LIBXR_STM32_UART_GPDMA)
+    ASSERT(uart_handle_->hdmatx->Mode == DMA_NORMAL);
+#endif
     _write_port = WriteFun;
   }
 
+#if defined(LIBXR_STM32_UART_GPDMA)
+  tx_service_.Invoke(TX_EVENT_START_RX, false, [this](uint32_t events, bool in_isr)
+                     { HandleTxService(events, in_isr); });
+#else
   SetRxDMA(false);
+#endif
 }
 
 ErrorCode STM32UART::SetConfig(UART::Configuration config, bool in_isr)
@@ -464,7 +509,18 @@ void STM32UART::ApplyConfig(UART::Configuration config, bool in_isr)
       return;
   }
 
+#if defined(LIBXR_STM32_UART_GPDMA)
+  // 通道已停止，直接配置寄存器，避免在中断中等待 HAL tick。
+  // Channels are stopped; configure registers without waiting for HAL ticks in an ISR.
+  __HAL_UART_DISABLE(uart_handle_);
+  REQUIRE_FROM_CALLBACK(UART_SetConfig(uart_handle_) == HAL_OK, in_isr);
+  CLEAR_BIT(uart_handle_->Instance->CR2, USART_CR2_LINEN | USART_CR2_CLKEN);
+  CLEAR_BIT(uart_handle_->Instance->CR3,
+            USART_CR3_SCEN | USART_CR3_HDSEL | USART_CR3_IREN);
+  __HAL_UART_ENABLE(uart_handle_);
+#else
   REQUIRE_FROM_CALLBACK(HAL_UART_Init(uart_handle_) == HAL_OK, in_isr);
+#endif
 }
 
 void STM32UART::TryApplyConfig(bool in_isr)
@@ -479,10 +535,15 @@ void STM32UART::TryApplyConfig(bool in_isr)
     return;
   }
 
+#if defined(LIBXR_STM32_UART_GPDMA)
+  abort_pending_ = true;
+  BeginAbort(in_isr);
+#else
   ApplyConfig(pending_config_, in_isr);
   last_rx_pos_ = 0U;
   SetRxDMA(in_isr);
   config_state_.store(ConfigState::EMPTY, std::memory_order_release);
+#endif
 }
 
 void STM32UART::SetRxDMA(bool in_isr)
@@ -491,6 +552,12 @@ void STM32UART::SetRxDMA(bool in_isr)
   {
     ASSERT(uart_handle_->hdmarx != NULL);
 
+#if defined(LIBXR_STM32_UART_GPDMA)
+    REQUIRE_FROM_CALLBACK(
+        gpdma_adapter_.StartLinkedListDmaRx(static_cast<uint8_t*>(dma_buff_rx_.addr_),
+                                            dma_buff_rx_.size_, in_isr) == HAL_OK,
+        in_isr);
+#else
     uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
     REQUIRE_FROM_CALLBACK(HAL_DMA_Init(uart_handle_->hdmarx) == HAL_OK, in_isr);
 
@@ -499,6 +566,7 @@ void STM32UART::SetRxDMA(bool in_isr)
                                      reinterpret_cast<uint8_t*>(dma_buff_rx_.addr_),
                                      dma_buff_rx_.size_) == HAL_OK,
         in_isr);
+#endif
   }
 }
 
@@ -513,9 +581,17 @@ void STM32UART::HandleRxData(bool in_isr)
   auto* const rx_buf = static_cast<uint8_t*>(dma_buff_rx_.addr_);
   REQUIRE_FROM_CALLBACK(rx_buf != nullptr, in_isr);
 
+#if defined(LIBXR_STM32_UART_GPDMA)
+  const uintptr_t destination =
+      reinterpret_cast<uintptr_t>(gpdma_adapter_.GetLinkedListDmaRxProducer());
+  const uintptr_t begin = reinterpret_cast<uintptr_t>(rx_buf);
+  REQUIRE_FROM_CALLBACK(destination >= begin && destination - begin <= dma_size, in_isr);
+  const size_t curr_pos = destination - begin;
+#else
   const size_t remaining = __HAL_DMA_GET_COUNTER(uart_handle_->hdmarx);
   REQUIRE_FROM_CALLBACK(remaining <= dma_size, in_isr);
   const size_t curr_pos = remaining == 0U ? dma_size : dma_size - remaining;
+#endif
   const size_t last_pos = last_rx_pos_;
   REQUIRE_FROM_CALLBACK(last_pos < dma_size, in_isr);
 
@@ -620,6 +696,43 @@ extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef* huart)
     uart->AbortCompleteIRQHandler();
   }
 }
+
+void STM32UART::BeginAbort(bool in_isr)
+{
+#if defined(LIBXR_STM32_UART_GPDMA)
+  gpdma_adapter_.CloseTxTerminalSource();
+  if (uart_handle_->hdmatx != nullptr)
+  {
+    REQUIRE_FROM_CALLBACK(
+        gpdma_adapter_.LaunchStop(uart_handle_->hdmatx, DmaAbortCallback, in_isr),
+        in_isr);
+  }
+  if (uart_handle_->hdmarx != nullptr)
+  {
+    REQUIRE_FROM_CALLBACK(
+        gpdma_adapter_.LaunchStop(uart_handle_->hdmarx, DmaAbortCallback, in_isr),
+        in_isr);
+  }
+  if (gpdma_adapter_.AllStopsComplete())
+  {
+    tx_service_.Publish(TX_EVENT_ABORT);
+  }
+#else
+  REQUIRE_FROM_CALLBACK(HAL_UART_Abort_IT(uart_handle_) == HAL_OK, in_isr);
+#endif
+}
+
+#if defined(LIBXR_STM32_UART_GPDMA)
+void STM32UART::DmaAbortCallback(DMA_HandleTypeDef* dma_handle)
+{
+  auto* handle = static_cast<UART_HandleTypeDef*>(dma_handle->Parent);
+  const auto id = stm32_uart_get_id(handle->Instance);
+  if (id != STM32_UART_ID_ERROR && map[id] != nullptr)
+  {
+    map[id]->AbortCompleteIRQHandler();
+  }
+}
+#endif
 
 void STM32UART::StartTxDma(bool in_isr)
 {

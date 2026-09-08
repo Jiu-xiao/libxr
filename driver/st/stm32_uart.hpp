@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "main.h"
+#include "stm32_uart_gpdma.hpp"
 
 #ifdef HAL_UART_MODULE_ENABLED
 
@@ -127,6 +128,11 @@ namespace LibXR
  * @pre 调用遵守 ReadPort/WritePort 约定；DMA 缓冲区满足平台访问和对齐要求，运行期间有效。
  *      Follow the port contracts. DMA buffers must meet platform access/alignment
  *      requirements and remain valid throughout operation.
+ * @pre H5 的 RX 句柄已挂接静止的循环链表，缓冲区长度是 4 的倍数，每段不超过
+ *      65535 字节；TX 使用普通单次 DMA。相关 UART/DMA 中断具有相同抢占优先级。
+ *      On H5, RX starts with a stopped circular seed list. The buffer size is a multiple
+ *      of four, with at most 65535 bytes per node; TX uses normal one-shot DMA.
+ *      Related UART/DMA IRQs share a preemption priority.
  */
 class STM32UART : public UART
 {
@@ -208,6 +214,14 @@ class STM32UART : public UART
   static constexpr uint32_t TX_EVENT_RX_WORK = 1U << 3U;
   static constexpr uint32_t TX_EVENT_ABORT = 1U << 4U;
   static constexpr uint32_t TX_EVENT_ERROR = 1U << 5U;
+#if defined(LIBXR_STM32_UART_GPDMA)
+  static constexpr uint32_t TX_EVENT_START_RX = 1U << 6U;
+  static void DmaAbortCallback(DMA_HandleTypeDef* dma_handle);
+#endif
+
+  /// 启动或接续硬件中止，由串行处理器调用 / Start or join a hardware abort from the
+  /// service.
+  void BeginAbort(bool in_isr);
 
   /// 串行处理收发和配置通知 / Serialize RX, TX, and configuration progress.
   void HandleTxService(uint32_t events, bool in_isr);
@@ -235,6 +249,9 @@ class STM32UART : public UART
   /// 由调用者发布、后端应用的配置 / Caller-published configuration for backend
   /// application.
   UART::Configuration pending_config_{};
+#if defined(LIBXR_STM32_UART_GPDMA)
+  STM32GpdmaUartAdapter gpdma_adapter_;
+#endif
 };
 
 }  // namespace LibXR
