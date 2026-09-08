@@ -4,6 +4,23 @@
 
 using namespace LibXR;
 
+#if defined(STM32H5)
+namespace
+{
+uint32_t GetH5TimerClock(uint32_t peripheral_clock, uint32_t apb_prescaler)
+{
+  const bool timpre = (RCC->CFGR1 & RCC_CFGR1_TIMPRE) != 0U;
+  // APB 编码 0..3 为不分频，4 为二分频，5 为四分频。
+  // APB encodings 0..3 mean divide by one, 4 by two, and 5 by four.
+  if (apb_prescaler <= (timpre ? 5U : 4U))
+  {
+    return HAL_RCC_GetHCLKFreq();
+  }
+  return peripheral_clock * (timpre ? 4U : 2U);
+}
+}  // namespace
+#endif
+
 STM32PWM::STM32PWM(TIM_HandleTypeDef* htim, uint32_t channel, bool complementary)
     : htim_(htim), channel_(channel), complementary_(complementary)
 {
@@ -72,7 +89,10 @@ ErrorCode STM32PWM::SetConfig(Configuration config)
       false)
   {
     clock_freq = HAL_RCC_GetPCLK2Freq();
-#ifdef RCC_CFGR_PPRE2
+#if defined(STM32H5)
+    clock_freq = GetH5TimerClock(clock_freq,
+                                 (RCC->CFGR2 & RCC_CFGR2_PPRE2) >> RCC_CFGR2_PPRE2_Pos);
+#elif defined(RCC_CFGR_PPRE2)
     if ((RCC->CFGR & RCC_CFGR_PPRE2) != RCC_CFGR_PPRE2_DIV1)
     {
       clock_freq *= 2;
@@ -110,7 +130,10 @@ ErrorCode STM32PWM::SetConfig(Configuration config)
       false)
   {
     clock_freq = HAL_RCC_GetPCLK1Freq();
-#ifdef RCC_CFGR_PPRE1
+#if defined(STM32H5)
+    clock_freq = GetH5TimerClock(clock_freq,
+                                 (RCC->CFGR2 & RCC_CFGR2_PPRE1) >> RCC_CFGR2_PPRE1_Pos);
+#elif defined(RCC_CFGR_PPRE1)
     if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1)
     {
       clock_freq *= 2;
