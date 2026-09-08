@@ -403,7 +403,7 @@ class LinuxUART : public UART
    *       kernel output before applying. Pending configuration survives disconnect or
    *       application failure and is used on reopen.
    */
-  ErrorCode SetConfig(UART::Configuration config) override
+  ErrorCode SetConfig(UART::Configuration config, bool = false) override
   {
     if (ValidateConfig(config) != ErrorCode::OK)
     {

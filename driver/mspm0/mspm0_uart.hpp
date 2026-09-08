@@ -29,7 +29,7 @@ class MSPM0UART : public UART
             uint32_t tx_buffer_size = 128,
             UART::Configuration config = {115200, UART::Parity::NO_PARITY, 8, 1});
 
-  ErrorCode SetConfig(UART::Configuration config) override;
+  ErrorCode SetConfig(UART::Configuration config, bool in_isr = false) override;
 
   static ErrorCode WriteFun(WritePort& port, bool in_isr);
 

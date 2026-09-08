@@ -1,17 +1,37 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
-// ch32_uart.cpp
 
 #include "ch32_uart.hpp"
+
+#include <algorithm>
 
 #include "ch32_dma.hpp"
 #include "ch32_gpio.hpp"
 
 using namespace LibXR;
 
-// Static instance map.
+namespace
+{
+
+bool Ch32DataBitsSupported(const UART::Configuration& config)
+{
+  if (config.parity == UART::Parity::NO_PARITY)
+  {
+    return config.data_bits == 8U;
+  }
+
+  return (config.parity == UART::Parity::EVEN || config.parity == UART::Parity::ODD) &&
+         (config.data_bits == 7U || config.data_bits == 8U);
+}
+
+bool Ch32StopBitsSupported(const UART::Configuration& config)
+{
+  return config.stop_bits == 1U || config.stop_bits == 2U;
+}
+
+}  // namespace
+
 CH32UART* CH32UART::map_[ch32_uart_id_t::CH32_UART_NUMBER] = {nullptr};
 
-// Constructor: USART, DMA, and GPIO initialization.
 CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
                    GPIO_TypeDef* tx_gpio_port, uint16_t tx_gpio_pin,
                    GPIO_TypeDef* rx_gpio_port, uint16_t rx_gpio_pin, uint32_t pin_remap,
@@ -34,6 +54,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   ASSERT(tx_enable || rx_enable);
   if (tx_enable)
   {
+    REQUIRE(tx_queue_size > 0U);
     ASSERT(dma_tx_channel_ != nullptr);
     ASSERT(CH32_UART_TX_DMA_IT_MAP[id] != 0);
   }
@@ -44,7 +65,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     ASSERT(CH32_UART_RX_DMA_IT_HT_MAP[id] != 0);
   }
 
-  /* GPIO配置（TX: 推挽输出，RX: 悬空输入） */
+  // TX 使用复用推挽，RX 使用浮空输入 / TX alternate push-pull; RX floating input.
   GPIO_InitTypeDef gpio_init = {};
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
 
@@ -63,17 +84,16 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     gpio_init.GPIO_Pin = rx_gpio_pin;
     gpio_init.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(rx_gpio_port, &gpio_init);
-    (*read_port_) = ReadFun;
   }
 
-  /* 可选：引脚重映射 */
+  // 可选引脚重映射 / Optional pin remapping.
   if (pin_remap != 0)
   {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
     GPIO_PinRemapConfig(pin_remap, ENABLE);
   }
 
-  /* 串口外设时钟使能 */
+  // 开启串口外设时钟 / Enable the UART peripheral clock.
   if (CH32_UART_APB_MAP[id] == 1)
   {
     RCC_APB1PeriphClockCmd(CH32_UART_RCC_PERIPH_MAP[id], ENABLE);
@@ -88,7 +108,10 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   }
   RCC_AHBPeriphClockCmd(CH32_UART_RCC_PERIPH_MAP_DMA[id], ENABLE);
 
-  // 3. USART 配置
+  // 设置初始串口参数 / Apply initial UART settings.
+  REQUIRE(config.baudrate > 0U);
+  REQUIRE(Ch32DataBitsSupported(config));
+  REQUIRE(Ch32StopBitsSupported(config));
   USART_InitTypeDef usart_cfg = {};
   usart_cfg.USART_BaudRate = config.baudrate;
   usart_cfg.USART_StopBits =
@@ -101,11 +124,13 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
       break;
     case UART::Parity::EVEN:
       usart_cfg.USART_Parity = USART_Parity_Even;
-      usart_cfg.USART_WordLength = USART_WordLength_9b;
+      usart_cfg.USART_WordLength =
+          config.data_bits == 7U ? USART_WordLength_8b : USART_WordLength_9b;
       break;
     case UART::Parity::ODD:
       usart_cfg.USART_Parity = USART_Parity_Odd;
-      usart_cfg.USART_WordLength = USART_WordLength_9b;
+      usart_cfg.USART_WordLength =
+          config.data_bits == 7U ? USART_WordLength_8b : USART_WordLength_9b;
       break;
     default:
       ASSERT(false);
@@ -117,7 +142,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   uart_mode_ = usart_cfg.USART_Mode;
   USART_Init(instance_, &usart_cfg);
 
-  /* DMA 配置 */
+  // 配置收发 DMA / Configure RX and TX DMA.
   DMA_InitTypeDef dma_init = {};
   dma_init.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   dma_init.DMA_MemoryInc = DMA_MemoryInc_Enable;
@@ -165,7 +190,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
     USART_DMACmd(instance_, USART_DMAReq_Tx, ENABLE);
   }
 
-  // 6. USART和相关中断
+  // 开启串口及对应中断 / Enable the UART and its interrupts.
   USART_Cmd(instance_, ENABLE);
 
   if (rx_enable)
@@ -182,9 +207,51 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   NVIC_EnableIRQ(CH32_UART_IRQ_MAP[id]);
 }
 
-// Runtime USART configuration.
-ErrorCode CH32UART::SetConfig(UART::Configuration config)
+ErrorCode CH32UART::SetConfig(UART::Configuration config, bool in_isr)
 {
+  if (config.baudrate == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  switch (config.parity)
+  {
+    case UART::Parity::NO_PARITY:
+    case UART::Parity::EVEN:
+    case UART::Parity::ODD:
+      break;
+    default:
+      return ErrorCode::NOT_SUPPORT;
+  }
+
+  if (!Ch32DataBitsSupported(config))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  if (!Ch32StopBitsSupported(config))
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  ConfigState expected = ConfigState::EMPTY;
+  if (!config_state_.compare_exchange_strong(expected, ConfigState::RESERVED,
+                                             std::memory_order_acq_rel,
+                                             std::memory_order_acquire))
+  {
+    return ErrorCode::BUSY;
+  }
+
+  pending_config_ = config;
+  tx_service_.Invoke(TX_EVENT_CONFIG, in_isr, [this](uint32_t events, bool owner_in_isr)
+                     { HandleTxService(events, owner_in_isr); });
+  return ErrorCode::OK;
+}
+
+void CH32UART::ApplyConfig(UART::Configuration config)
+{
+  USART_ITConfig(instance_, USART_IT_TC, DISABLE);
+
   USART_InitTypeDef usart_cfg = {};
   usart_cfg.USART_BaudRate = config.baudrate;
   usart_cfg.USART_StopBits =
@@ -198,19 +265,21 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
       break;
     case UART::Parity::EVEN:
       usart_cfg.USART_Parity = USART_Parity_Even;
-      usart_cfg.USART_WordLength = USART_WordLength_9b;
+      usart_cfg.USART_WordLength =
+          config.data_bits == 7U ? USART_WordLength_8b : USART_WordLength_9b;
       break;
     case UART::Parity::ODD:
       usart_cfg.USART_Parity = USART_Parity_Odd;
-      usart_cfg.USART_WordLength = USART_WordLength_9b;
+      usart_cfg.USART_WordLength =
+          config.data_bits == 7U ? USART_WordLength_8b : USART_WordLength_9b;
       break;
     default:
-      return ErrorCode::NOT_SUPPORT;
+      REQUIRE(false);
+      return;
   }
 
   usart_cfg.USART_Mode = uart_mode_;
   usart_cfg.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
-  USART_DeInit(instance_);
   USART_Init(instance_, &usart_cfg);
 
   if (uart_mode_ & USART_Mode_Rx)
@@ -225,196 +294,265 @@ ErrorCode CH32UART::SetConfig(UART::Configuration config)
   }
 
   USART_Cmd(instance_, ENABLE);
-
-  if (tx_busy_.IsSet())
-  {
-    dma_tx_channel_->CNTR = dma_buff_tx_.GetActiveLength();
-    dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(dma_buff_tx_.ActiveBuffer());
-    DMA_Cmd(dma_tx_channel_, ENABLE);
-  }
-
-  return ErrorCode::OK;
 }
 
-// Write callback (DMA-based transfer).
-ErrorCode CH32UART::WriteFun(WritePort& port, bool)
+void CH32UART::WriteFun(WritePort& port, bool in_isr)
 {
   auto* uart = LibXR::ContainerOf(&port, &CH32UART::_write_port);
 
-  if (uart->in_tx_isr.IsSet())
+  uart->tx_service_.Invoke(TX_EVENT_WRITE, in_isr,
+                           [uart](uint32_t events, bool owner_in_isr)
+                           { uart->HandleTxService(events, owner_in_isr); });
+}
+
+void CH32UART::HandleTxService(uint32_t events, bool in_isr)
+{
+  if ((events & TX_EVENT_CONFIG) != 0U)
   {
-    return ErrorCode::PENDING;
-  }
-
-  if (!uart->dma_buff_tx_.HasPending())
-  {
-    WriteInfoBlock info;
-    if (port.queue_info_->Peek(info) != ErrorCode::OK)
+    ConfigState state = config_state_.load(std::memory_order_acquire);
+    if (state == ConfigState::RESERVED)
     {
-      return ErrorCode::PENDING;
-    }
-
-    uint8_t* buffer = nullptr;
-    bool use_pending = false;
-
-    // DMA空闲判断
-    bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
-    if (dma_ready)
-    {
-      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
+      config_state_.store(ConfigState::PUBLISHED, std::memory_order_release);
     }
     else
     {
-      buffer = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer());
-      use_pending = true;
+      REQUIRE_FROM_CALLBACK(state == ConfigState::PUBLISHED, in_isr);
     }
-
-    if (port.queue_data_->PopBatch(buffer, info.data.size_) != ErrorCode::OK)
-    {
-      ASSERT(false);
-      return ErrorCode::EMPTY;
-    }
-
-    if (use_pending)
-    {
-      uart->dma_buff_tx_.SetPendingLength(info.data.size_);
-      uart->dma_buff_tx_.EnablePending();
-      // 检查当前DMA是否可切换
-      bool dma_ready = uart->dma_tx_channel_->CNTR == 0;
-      if (dma_ready && uart->dma_buff_tx_.HasPending())
-      {
-        uart->dma_buff_tx_.Switch();
-      }
-      else
-      {
-        return ErrorCode::PENDING;
-      }
-    }
-
-    port.queue_info_->Pop(uart->write_info_active_);
-
-    DMA_Cmd(uart->dma_tx_channel_, DISABLE);
-    uart->dma_tx_channel_->MADDR =
-        reinterpret_cast<uint32_t>(uart->dma_buff_tx_.ActiveBuffer());
-    uart->dma_tx_channel_->CNTR = info.data.size_;
-    uart->dma_buff_tx_.SetActiveLength(info.data.size_);
-    uart->tx_busy_.Set();
-    DMA_Cmd(uart->dma_tx_channel_, ENABLE);
-
-    return ErrorCode::OK;
   }
-  return ErrorCode::PENDING;
+
+  if ((events & TX_EVENT_DMA_DONE) != 0U)
+  {
+    HandleTxDone(in_isr);
+  }
+
+  if ((events & TX_EVENT_RX_WORK) != 0U)
+  {
+    HandleRxData(in_isr);
+  }
+
+  if ((events & (TX_EVENT_CONFIG | TX_EVENT_DMA_DONE | TX_EVENT_TC)) != 0U)
+  {
+    TryApplyConfig(in_isr);
+  }
+
+  if ((uart_mode_ & USART_Mode_Tx) != 0U &&
+      (events & (TX_EVENT_WRITE | TX_EVENT_DMA_DONE | TX_EVENT_CONFIG | TX_EVENT_TC)) !=
+          0U &&
+      config_state_.load(std::memory_order_acquire) == ConfigState::EMPTY)
+  {
+    FillTx(in_isr);
+  }
 }
 
-// Read callback (interrupt-driven).
-ErrorCode CH32UART::ReadFun(ReadPort&, bool)
+void CH32UART::FillTx(bool in_isr)
 {
-  // 接收由 IDLE 中断驱动，读取在 ISR 中完成
-  return ErrorCode::PENDING;
+  if (!tx_busy_.IsSet())
+  {
+    if (dma_buff_tx_.HasPending())
+    {
+      if (config_state_.load(std::memory_order_acquire) != ConfigState::EMPTY)
+      {
+        return;
+      }
+      const size_t size = dma_buff_tx_.GetPendingLength();
+      dma_buff_tx_.Switch();
+      dma_buff_tx_.SetActiveLength(size);
+      StartTxDma(in_isr);
+    }
+    else if (dma_buff_tx_.GetActiveLength() != 0U)
+    {
+      if (config_state_.load(std::memory_order_acquire) != ConfigState::EMPTY)
+      {
+        return;
+      }
+      StartTxDma(in_isr);
+    }
+    else
+    {
+      if (config_state_.load(std::memory_order_acquire) != ConfigState::EMPTY)
+      {
+        return;
+      }
+      size_t size = 0U;
+      {
+        auto queue = _write_port.GetWriteQueue(in_isr);
+        if (queue.Empty())
+        {
+          return;
+        }
+        size = queue.AvailableSize();
+        REQUIRE_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
+        queue.PopAll(dma_buff_tx_.ActiveBuffer());
+        dma_buff_tx_.SetActiveLength(size);
+      }
+
+      if (config_state_.load(std::memory_order_acquire) != ConfigState::EMPTY)
+      {
+        return;
+      }
+      StartTxDma(in_isr);
+    }
+  }
+
+  if (tx_busy_.IsSet() && !dma_buff_tx_.HasPending() &&
+      config_state_.load(std::memory_order_acquire) == ConfigState::EMPTY)
+  {
+    auto queue = _write_port.GetWriteQueue(in_isr);
+    if (!queue.Empty())
+    {
+      const size_t size = queue.AvailableSize();
+      REQUIRE_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
+      queue.PopAll(dma_buff_tx_.PendingBuffer());
+      dma_buff_tx_.SetPendingLength(size);
+      dma_buff_tx_.EnablePending();
+    }
+  }
 }
 
-void ch32_uart_rx_isr_handler(LibXR::CH32UART* uart)
+void CH32UART::HandleTxDone(bool in_isr)
 {
-  auto rx_buf = static_cast<uint8_t*>(uart->dma_buff_rx_.addr_);
-  size_t dma_size = uart->dma_buff_rx_.size_;
-  size_t curr_pos = dma_size - uart->dma_rx_channel_->CNTR;
-  size_t last_pos = uart->last_rx_pos_;
+  UNUSED(in_isr);
+  if (!tx_busy_.IsSet())
+  {
+    return;
+  }
+
+  tx_busy_.Clear();
+  dma_buff_tx_.SetActiveLength(0U);
+}
+
+void CH32UART::TryApplyConfig(bool in_isr)
+{
+  if (config_state_.load(std::memory_order_acquire) != ConfigState::PUBLISHED)
+  {
+    return;
+  }
+
+  if (tx_busy_.IsSet())
+  {
+    return;
+  }
+
+  if ((uart_mode_ & USART_Mode_Tx) != 0U &&
+      USART_GetFlagStatus(instance_, USART_FLAG_TC) == RESET)
+  {
+    USART_ITConfig(instance_, USART_IT_TC, ENABLE);
+    return;
+  }
+
+  const UART::Configuration config = pending_config_;
+  ApplyConfig(config);
+
+  if ((uart_mode_ & USART_Mode_Rx) != 0U && dma_buff_rx_.size_ != 0U)
+  {
+    const size_t remaining = dma_rx_channel_->CNTR;
+    REQUIRE_FROM_CALLBACK(remaining <= dma_buff_rx_.size_, in_isr);
+    const size_t position =
+        remaining == 0U ? dma_buff_rx_.size_ : dma_buff_rx_.size_ - remaining;
+    last_rx_pos_ = position == dma_buff_rx_.size_ ? 0U : position;
+  }
+
+  config_state_.store(ConfigState::EMPTY, std::memory_order_release);
+  UNUSED(in_isr);
+}
+
+void CH32UART::StartTxDma(bool in_isr)
+{
+  const size_t size = dma_buff_tx_.GetActiveLength();
+  REQUIRE_FROM_CALLBACK(size != 0U && size <= dma_buff_tx_.Size(), in_isr);
+
+  DMA_Cmd(dma_tx_channel_, DISABLE);
+  dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(dma_buff_tx_.ActiveBuffer());
+  dma_tx_channel_->CNTR = size;
+  tx_busy_.Set();
+  DMA_Cmd(dma_tx_channel_, ENABLE);
+}
+
+void CH32UART::HandleRxData(bool in_isr)
+{
+  const size_t dma_size = dma_buff_rx_.size_;
+  if (dma_size == 0U)
+  {
+    return;
+  }
+
+  const size_t remaining = dma_rx_channel_->CNTR;
+  REQUIRE_FROM_CALLBACK(remaining <= dma_size, in_isr);
+  const size_t curr_pos = remaining == 0U ? dma_size : dma_size - remaining;
+  const size_t last_pos = last_rx_pos_;
+  REQUIRE_FROM_CALLBACK(last_pos < dma_size, in_isr);
 
   if (curr_pos != last_pos)
   {
-    if (curr_pos > last_pos)
+    const size_t first_size =
+        curr_pos > last_pos ? curr_pos - last_pos : dma_size - last_pos;
+    const size_t second_size = curr_pos > last_pos ? 0U : curr_pos;
+    auto queue = _read_port.GetReadQueue(in_isr);
+    size_t accepted = std::min(first_size + second_size, queue.EmptySize());
+
+    if (accepted != 0U)
     {
-      // 普通区间
-      uart->_read_port.queue_data_->PushBatch(&rx_buf[last_pos], curr_pos - last_pos);
+      const size_t first_accepted = std::min(first_size, accepted);
+      if (first_accepted != 0U)
+      {
+        REQUIRE_FROM_CALLBACK(
+            queue.PushBatch(static_cast<const uint8_t*>(dma_buff_rx_.addr_) + last_pos,
+                            first_accepted) == ErrorCode::OK,
+            in_isr);
+        accepted -= first_accepted;
+      }
+      if (accepted != 0U)
+      {
+        REQUIRE_FROM_CALLBACK(
+            queue.PushBatch(static_cast<const uint8_t*>(dma_buff_rx_.addr_), accepted) ==
+                ErrorCode::OK,
+            in_isr);
+      }
+    }
+
+    last_rx_pos_ = curr_pos == dma_size ? 0U : curr_pos;
+    queue.Publish();
+  }
+}
+
+void CH32UART::UartIRQHandler()
+{
+  const bool idle = USART_GetITStatus(instance_, USART_IT_IDLE) != RESET;
+  const bool tc = USART_GetITStatus(instance_, USART_IT_TC) != RESET;
+
+  if (idle)
+  {
+    USART_ReceiveData(instance_);
+    tx_service_.Invoke(TX_EVENT_RX_WORK, true, [this](uint32_t events, bool in_isr)
+                       { HandleTxService(events, in_isr); });
+  }
+
+  if (tc)
+  {
+    if (config_state_.load(std::memory_order_acquire) != ConfigState::EMPTY)
+    {
+      USART_ITConfig(instance_, USART_IT_TC, DISABLE);
+      tx_service_.Invoke(TX_EVENT_TC, true, [this](uint32_t events, bool in_isr)
+                         { HandleTxService(events, in_isr); });
     }
     else
     {
-      // 回卷区
-      uart->_read_port.queue_data_->PushBatch(&rx_buf[last_pos], dma_size - last_pos);
-      uart->_read_port.queue_data_->PushBatch(&rx_buf[0], curr_pos);
+      USART_ITConfig(instance_, USART_IT_TC, DISABLE);
     }
-    uart->last_rx_pos_ = curr_pos;
-    uart->_read_port.ProcessPendingReads(true);
   }
 }
 
-// USART IDLE interrupt handler.
 extern "C" void ch32_uart_isr_handler_idle(ch32_uart_id_t id)
 {
   auto uart = CH32UART::map_[id];
-  if (!uart)
+  if (uart)
   {
-    return;
+    uart->UartIRQHandler();
   }
-
-  // 检查和清除IDLE标志
-  if (!USART_GetITStatus(uart->instance_, USART_IT_IDLE))
-  {
-    return;
-  }
-
-  USART_ReceiveData(uart->instance_);
-
-  ch32_uart_rx_isr_handler(uart);
 }
 
-// DMA TX completion interrupt handler.
-extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart)
-{
-  DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[uart->id_]);
+extern "C" void ch32_uart_isr_handler_tx_cplt(CH32UART* uart) { uart->TxDmaIRQHandler(); }
 
-  uart->tx_busy_.Clear();
-
-  Flag::ScopedRestore tx_flag(uart->in_tx_isr);
-
-  size_t pending_len = uart->dma_buff_tx_.GetPendingLength();
-
-  if (pending_len == 0)
-  {
-    return;
-  }
-
-  uart->dma_buff_tx_.Switch();
-
-  auto* buf = reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.ActiveBuffer());
-  DMA_Cmd(uart->dma_tx_channel_, DISABLE);
-  uart->dma_tx_channel_->MADDR = (uint32_t)buf;
-  uart->dma_tx_channel_->CNTR = pending_len;
-  uart->dma_buff_tx_.SetActiveLength(pending_len);
-  DMA_Cmd(uart->dma_tx_channel_, ENABLE);
-
-  WriteInfoBlock& current_info = uart->write_info_active_;
-
-  // 有pending包，继续取下一包
-  if (uart->_write_port.queue_info_->Pop(current_info) != ErrorCode::OK)
-  {
-    ASSERT(false);
-    return;
-  }
-
-  uart->write_port_->Finish(true, ErrorCode::OK, current_info);
-
-  // 预装pending区
-  WriteInfoBlock next_info;
-  if (uart->write_port_->queue_info_->Peek(next_info) != ErrorCode::OK)
-  {
-    return;
-  }
-
-  if (uart->write_port_->queue_data_->PopBatch(
-          reinterpret_cast<uint8_t*>(uart->dma_buff_tx_.PendingBuffer()),
-          next_info.data.size_) != ErrorCode::OK)
-  {
-    ASSERT(false);
-    return;
-  }
-
-  uart->dma_buff_tx_.SetPendingLength(next_info.data.size_);
-
-  uart->dma_buff_tx_.EnablePending();
-}
-
-// DMA channel IRQ callbacks.
 void CH32UART::TxDmaIRQHandler()
 {
   if (DMA_GetITStatus(CH32_UART_TX_DMA_IT_MAP[id_]) == RESET)
@@ -424,34 +562,33 @@ void CH32UART::TxDmaIRQHandler()
 
   if (dma_tx_channel_->CNTR == 0)
   {
-    ch32_uart_isr_handler_tx_cplt(this);
+    DMA_ClearITPendingBit(CH32_UART_TX_DMA_IT_MAP[id_]);
+    tx_service_.Invoke(TX_EVENT_DMA_DONE, true, [this](uint32_t events, bool in_isr)
+                       { HandleTxService(events, in_isr); });
   }
 }
 
 /**
- * @brief  DMA中断处理函数
- *
- * 如果DMA中断触发，且中断状态为半满或传输完成，清除中断标志，
- * 并调用对应的中断处理函数
- *
- * @param[in] id  UART的ID
+ * @brief 清除接收 DMA 中断标志并通知后端 / Clear RX DMA flags and notify the backend.
+ * @param id 串口编号 / UART identifier.
  */
 void CH32UART::RxDmaIRQHandler()
 {
   if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_HT_MAP[id_]) == SET)
   {
     DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_HT_MAP[id_]);
-    ch32_uart_rx_isr_handler(this);
+    tx_service_.Invoke(TX_EVENT_RX_WORK, true, [this](uint32_t events, bool in_isr)
+                       { HandleTxService(events, in_isr); });
   }
 
   if (DMA_GetITStatus(CH32_UART_RX_DMA_IT_TC_MAP[id_]) == SET)
   {
     DMA_ClearITPendingBit(CH32_UART_RX_DMA_IT_TC_MAP[id_]);
-    ch32_uart_rx_isr_handler(this);
+    tx_service_.Invoke(TX_EVENT_RX_WORK, true, [this](uint32_t events, bool in_isr)
+                       { HandleTxService(events, in_isr); });
   }
 }
 
-// USART IRQ entry adapters.
 #if defined(USART1)
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void USART1_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
